@@ -33,30 +33,35 @@ data-load + startup are sub-1% of wall-clock).
 
 ## Representative result (Apple Silicon, 2026-07-10)
 
-Median of 3 clean runs after CPR Tier-2 worker routing plus the mutable-combinator
-recognizer migration. Every run reached the same final accuracy.
+Median of 3 clean runs after CPR Tier-2 worker routing, the mutable-combinator recognizer
+migration, and the fused Double matvec kernels (`mutmatrix_row_dot` /
+`mutmatrix_row_sub_scaled_inplace`). Every run reached the same final accuracy.
 
 | Implementation | Wall (s) |
 |---|---|
-| Haskell (unsafe) | 0.09 |
-| Go | 0.10 |
-| Java | 0.11 |
+| Haskell (unsafe) | 0.10 |
+| Go | 0.11 |
+| Java | 0.12 |
 | Scala (imperative) | 0.20 |
-| Scala (idiomatic) | 0.68 |
-| Haskell (pure) | 0.99 |
-| Python (plain) | 1.68 |
-| Sprout (clang -O2) | 1.49 |
+| Scala (idiomatic) | 0.72 |
+| Sprout (clang -O2) | 0.76 |
+| Haskell (pure) | 1.02 |
+| Python (plain) | 1.69 |
 
-Before CPR, this same benchmark measured Sprout at about 23.05s on this host. The
-current 1.49s median is a ~15.5× speedup, with identical accuracy. CPR first removed
-the boxed `Maybe`/`Result` return from matched and do-bound mutable reads; the
-mutable-combinator migration then moved the row dot products and row updates to
-closed library loops that read via `vector_get_direct`.
+Before CPR, this same benchmark measured Sprout at about 23.05s on this host. The current
+0.76s median is a ~30× speedup, with identical accuracy. CPR first removed the boxed
+`Maybe`/`Result` return from matched and do-bound mutable reads; the mutable-combinator
+migration moved the row dot products and updates to closed library loops reading via
+`vector_get_direct`; the fused Double kernels then inlined the multiply-accumulate, removing
+the per-callback closure entirely (about **1.13M → 0.21M closure allocations**, a ~2× cut of
+this stage on its own).
 
-Sprout is still ~15× Go and slightly faster than plain CPython here. The remaining gap is mostly the
-same numeric representation problem: dense `Double` code still pays boxed-value and GC
-costs that the mature native ports avoid. The next large lever is unboxed float arrays
-and fused dot/matvec kernels — see the ML-perf notes in `BACKLOG.md`.
+Sprout is now ~7× Go, sits between idiomatic Scala and pure Haskell, and is ~2.2× faster
+than plain CPython here. The remaining gap is mostly the same numeric representation problem:
+dense `Double` code still pays boxed-value and GC costs that the mature native ports avoid —
+`sprout_obj` (Double-box) allocations were untouched by the kernels. The next large lever is
+unboxed float arrays; see the ML-perf notes in `BACKLOG.md` and
+`docs/digit-recognizer-performance-plan-2026-07-10.md`.
 
 ### The purity tax, isolated twice
 
@@ -64,10 +69,10 @@ Both Scala and Haskell ship a **pure** and a **mutating** port that run the byte
 algorithm and reach the same 89.33%, so the gap between each pair is purely representation:
 
 - **Scala:** imperative (mutable `Array`, `while`) ties Go; idiomatic (immutable `Vector`,
-  `foldLeft`, a fresh case-class `Net` per SGD step) is **~3.4× slower**.
+  `foldLeft`, a fresh case-class `Net` per SGD step) is **~3.6× slower**.
 - **Haskell:** unsafe (flat unboxed `IOUArray`, `unsafeRead`/`unsafeWrite`, in-place) lands
   near Go; the pure port (immutable `[Double]` lists, `foldl'`, a fresh `Net` per step) is
-  **~11× slower** — and trails idiomatic Scala because linked lists box every `Double` and
+  **~10× slower** — and trails idiomatic Scala because linked lists box every `Double` and
   chase a pointer per element, where `Vector` is a cache-friendlier trie.
 
 The lesson repeats across two independent runtimes: on mature JIT/GC/native-code runtimes,
@@ -77,7 +82,8 @@ Scala-imperative ≈ Go). Pure representations still cost a constant factor, mod
 
 Sprout used to pay the *same class* of overhead — boxed `Double`, plus a `Maybe` allocated
 per array access — at **~100×**, because its codegen + GC are young. CPR removed the
-per-access `Maybe` allocation from this path, and mutable row combinators removed another
-layer of generic indexed-access overhead. The remaining boxed-`Double` cost is still the
-distance the unboxed-float-array + fused-kernel work is meant to close; see the ML-perf
-notes in `BACKLOG.md`.
+per-access `Maybe` allocation from this path; mutable row combinators removed a layer of
+generic indexed-access overhead; and the fused Double kernels removed the per-callback
+closure. What remains is the boxed-`Double` cost itself — the flat-unboxed-array step that
+closed the gap to Go for Haskell and Scala above, and the one lever Sprout has not yet pulled.
+See the ML-perf notes in `BACKLOG.md`.

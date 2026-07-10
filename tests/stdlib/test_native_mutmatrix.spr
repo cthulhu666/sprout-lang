@@ -1,5 +1,5 @@
 import stdlib.test (TestState, new_state, assert_eq, assert_true, summary)
-import stdlib.mutable (MutVec, MutMatrix, mutvec_new, mutvec_get, mutvec_set, mutmatrix_new, mutmatrix_get, mutmatrix_set, mutmatrix_rows, mutmatrix_cols, mutmatrix_fold, mutmatrix_fill, mutmatrix_row_zip_fold, mutmatrix_row_zip_update)
+import stdlib.mutable (MutVec, MutMatrix, mutvec_new, mutvec_get, mutvec_set, mutmatrix_new, mutmatrix_get, mutmatrix_set, mutmatrix_rows, mutmatrix_cols, mutmatrix_fold, mutmatrix_fill, mutmatrix_row_zip_fold, mutmatrix_row_zip_update, mutmatrix_row_dot, mutmatrix_row_sub_scaled_inplace)
 
 fn main() -> Unit !{IO} =
   do
@@ -82,6 +82,56 @@ fn main() -> Unit !{IO} =
     assert_eq(state, "mutmatrix_fill negative dimensions is no-op", fill_count, 0)
     invalid_row <- mutmatrix_row_zip_fold(\ (acc, cell, x) -> acc + cell * x, 43, invalid, 0, v)
     assert_eq(state, "mutmatrix_row_zip_fold negative dimensions returns init", invalid_row, 43)
+    # mutmatrix_row_dot: fused Double matvec kernel (seed + sum of m[r][i]*v[i], ascending i).
+    # Values are exactly representable, so Double equality is deterministic. assert_true + ==
+    # is used deliberately: assert_eq's ToString/Eq dispatch is a silent no-op on Double.
+    dm <- mutmatrix_new(2, 3, 0.0)
+    mutmatrix_set(dm, 0, 0, 1.0)
+    mutmatrix_set(dm, 0, 1, 2.0)
+    mutmatrix_set(dm, 0, 2, 3.0)
+    mutmatrix_set(dm, 1, 0, 10.0)
+    mutmatrix_set(dm, 1, 1, 20.0)
+    mutmatrix_set(dm, 1, 2, 30.0)
+    dv <- mutvec_new(3, 0.0)
+    mutvec_set(dv, 0, 4.0)
+    mutvec_set(dv, 1, 5.0)
+    mutvec_set(dv, 2, 6.0)
+    dot0 <- mutmatrix_row_dot(dm, 0, dv, 0.5)
+    assert_true(state, "mutmatrix_row_dot row 0 seeded", dot0 == 32.5)
+    dot1 <- mutmatrix_row_dot(dm, 1, dv, 0.0)
+    assert_true(state, "mutmatrix_row_dot row 1 unseeded", dot1 == 320.0)
+    bad_dot <- mutmatrix_row_dot(dm, 5, dv, 7.0)
+    assert_true(state, "mutmatrix_row_dot invalid row returns seed", bad_dot == 7.0)
+    short <- mutvec_new(2, 0.0)
+    mutvec_set(short, 0, 4.0)
+    mutvec_set(short, 1, 5.0)
+    dot_short <- mutmatrix_row_dot(dm, 0, short, 0.0)
+    assert_true(state, "mutmatrix_row_dot stops at shorter vector", dot_short == 14.0)
+
+    # mutmatrix_row_sub_scaled_inplace: m[r][i] -= scale * v[i] (ascending i, in place).
+    # dm row 0 is [1,2,3]; subtracting scale=2.0 * dv[0..2]=[4,5,6] -> [1-8, 2-10, 3-12].
+    _ <- mutmatrix_row_sub_scaled_inplace(dm, 0, dv, 2.0)
+    s00 <- mutmatrix_get(dm, 0, 0)
+    s01 <- mutmatrix_get(dm, 0, 1)
+    s02 <- mutmatrix_get(dm, 0, 2)
+    assert_true(state, "row_sub_scaled cell (0,0)", s00 == 0.0 - 7.0)
+    assert_true(state, "row_sub_scaled cell (0,1)", s01 == 0.0 - 8.0)
+    assert_true(state, "row_sub_scaled cell (0,2)", s02 == 0.0 - 9.0)
+    # row 1 untouched (still [10,20,30]).
+    s10 <- mutmatrix_get(dm, 1, 0)
+    assert_true(state, "row_sub_scaled leaves other rows", s10 == 10.0)
+    # invalid row is a no-op.
+    _ <- mutmatrix_row_sub_scaled_inplace(dm, 9, dv, 2.0)
+    again10 <- mutmatrix_get(dm, 1, 0)
+    assert_true(state, "row_sub_scaled invalid row no-op", again10 == 10.0)
+    # stops at shorter vector: only cols 0,1 of row 1 updated by 'short'=[4,5].
+    _ <- mutmatrix_row_sub_scaled_inplace(dm, 1, short, 1.0)
+    t10 <- mutmatrix_get(dm, 1, 0)
+    t11 <- mutmatrix_get(dm, 1, 1)
+    t12 <- mutmatrix_get(dm, 1, 2)
+    assert_true(state, "row_sub_scaled shorter updates col 0", t10 == 6.0)
+    assert_true(state, "row_sub_scaled shorter updates col 1", t11 == 15.0)
+    assert_true(state, "row_sub_scaled shorter leaves col 2", t12 == 30.0)
 
     summary(state)
 

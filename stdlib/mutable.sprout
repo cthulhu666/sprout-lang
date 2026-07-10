@@ -184,3 +184,47 @@ export fn mutmatrix_row_zip_update(f: a -> c -> a !{IO}, m: MutMatrix a, r: Int,
   | MutMatrix rows cols data ->
       if r < 0 || r >= rows then ()
       else mutmatrix_row_zip_update_go(f, mutvec_raw(data), mutvec_raw(v), r * cols, 0, min_int(cols, mutvec_len(v)))
+
+# ---------------------------------------------------------------------------
+# Double numeric kernels
+# ---------------------------------------------------------------------------
+# Monomorphic Double fused kernels for hot matvec loops. Unlike the generic
+# row_zip combinators, these inline the multiply-accumulate, so they allocate no
+# callback closure and make no indirect per-element call — the closure/callback
+# traffic that dominates dense numeric training loops. Reads still go through the
+# bounds-checked vector_get_direct (no new builtins, memory-safe).
+
+fn mutmatrix_row_dot_go(acc: Double, raw_m: Vector Double, raw_v: Vector Double, row_start: Int, i: Int, total: Int) -> Double !{IO} =
+  if i >= total then acc
+  else
+    do
+      cell <- vector_get_direct(raw_m, row_start + i)
+      val <- vector_get_direct(raw_v, i)
+      mutmatrix_row_dot_go(acc + cell * val, raw_m, raw_v, row_start, i + 1, total)
+
+# O(min(cols, len v)). Fused dot of row r with v: seed + Σ m[r][i]*v[i], ascending i.
+# Accumulation order is bit-identical to a row_zip_fold seeded with `seed`. Invalid
+# row returns `seed`.
+export fn mutmatrix_row_dot(m: MutMatrix Double, r: Int, v: MutVec Double, seed: Double) -> Double !{IO} =
+  match m with
+  | MutMatrix rows cols data ->
+      if r < 0 || r >= rows then seed
+      else mutmatrix_row_dot_go(seed, mutvec_raw(data), mutvec_raw(v), r * cols, 0, min_int(cols, mutvec_len(v)))
+
+fn mutmatrix_row_sub_scaled_go(raw_m: Vector Double, raw_v: Vector Double, scale: Double, row_start: Int, i: Int, total: Int) -> Unit !{IO} =
+  if i >= total then ()
+  else
+    do
+      cell <- vector_get_direct(raw_m, row_start + i)
+      val <- vector_get_direct(raw_v, i)
+      _ <- vector_mutset(raw_m, row_start + i, cell - scale * val)
+      mutmatrix_row_sub_scaled_go(raw_m, raw_v, scale, row_start, i + 1, total)
+
+# O(min(cols, len v)). In place: m[r][i] := m[r][i] - scale * v[i], ascending i — the
+# SGD descent step (w -= lr*grad). Bit-identical to a row_zip_update of `cur - scale*x`.
+# Invalid row is a no-op.
+export fn mutmatrix_row_sub_scaled_inplace(m: MutMatrix Double, r: Int, v: MutVec Double, scale: Double) -> Unit !{IO} =
+  match m with
+  | MutMatrix rows cols data ->
+      if r < 0 || r >= rows then ()
+      else mutmatrix_row_sub_scaled_go(mutvec_raw(data), mutvec_raw(v), scale, r * cols, 0, min_int(cols, mutvec_len(v)))
