@@ -1,5 +1,5 @@
 module examples.digit_recognizer.recognizer
-import stdlib.mutable (MutVec, mutvec_new, mutvec_get, mutvec_set, MutMatrix, mutmatrix_new, mutmatrix_get, mutmatrix_set, mutmatrix_cols)
+import stdlib.mutable (MutVec, mutvec_new, mutvec_get, mutvec_set, mutvec_map_inplace, MutMatrix, mutmatrix_new, mutmatrix_get, mutmatrix_set, mutmatrix_cols, mutmatrix_row_zip_fold, mutmatrix_row_zip_update)
 
 # Handwritten-digit recognition trained on real public data.
 #
@@ -49,6 +49,12 @@ fn softsign_deriv_from_out(s: Double) -> Double =
 
 # One-hot target component: 1.0 for the true class, else 0.0.
 fn target_of(o: Int, label: Int) -> Double = if o == label then 1.0 else 0.0
+
+fn dot_step(acc: Double, weight: Double, input: Double) -> Double =
+  acc + weight * input
+
+fn scale_update(scale: Double, current: Double, input: Double) -> Double =
+  current - scale * input
 
 # ---------------------------------------------------------------------------
 # Deterministic LCG weight initialisation
@@ -145,20 +151,12 @@ fn forward(net: Net, x: MutVec Double, hidden: MutVec Double, out: MutVec Double
   | Net w1 b1 w2 b2 ->
       do
         let hidden_unit = \h -> do
-              let dot = \ (acc, i) -> do
-                    wi <- mutmatrix_get(w1, h, i)
-                    xi <- mutvec_get(x, i)
-                    acc + wi * xi
               b <- mutvec_get(b1, h)
-              z <- range_fold(dot, b, range(0, n_in - 1))
+              z <- mutmatrix_row_zip_fold(dot_step, b, w1, h, x)
               mutvec_set(hidden, h, softsign(z))
         let output_unit = \o -> do
-              let dot = \ (acc, h) -> do
-                    wh <- mutmatrix_get(w2, o, h)
-                    hh <- mutvec_get(hidden, h)
-                    acc + wh * hh
               b <- mutvec_get(b2, o)
-              z <- range_fold(dot, b, range(0, n_hid - 1))
+              z <- mutmatrix_row_zip_fold(dot_step, b, w2, o, hidden)
               mutvec_set(out, o, z)
         range_each(hidden_unit, range(0, n_hid - 1))
         range_each(output_unit, range(0, n_out - 1))
@@ -195,11 +193,7 @@ fn backprop(net: Net, x: MutVec Double, label: Int, hidden: MutVec Double, out: 
         let update_output = \o -> do
               oo <- mutvec_get(out, o)
               let dout_o = 2.0 * (oo - target_of(o, label))
-              let step = \h -> do
-                    hh <- mutvec_get(hidden, h)
-                    cur <- mutmatrix_get(w2, o, h)
-                    mutmatrix_set(w2, o, h, cur - lr * dout_o * hh)
-              range_each(step, range(0, n_hid - 1))
+              _ <- mutmatrix_row_zip_update(\ (cur, hh) -> scale_update(lr * dout_o, cur, hh), w2, o, hidden)
               bo <- mutvec_get(b2, o)
               mutvec_set(b2, o, bo - lr * dout_o)
         # Update W1[h][i] and B1[h] toward the gradient for hidden unit h.
@@ -207,14 +201,10 @@ fn backprop(net: Net, x: MutVec Double, label: Int, hidden: MutVec Double, out: 
               hh <- mutvec_get(hidden, h)
               dh <- mutvec_get(dhidden, h)
               let dz = dh * softsign_deriv_from_out(hh)
-              let step = \i -> do
-                    xi <- mutvec_get(x, i)
-                    cur <- mutmatrix_get(w1, h, i)
-                    mutmatrix_set(w1, h, i, cur - lr * dz * xi)
-              range_each(step, range(0, n_in - 1))
+              _ <- mutmatrix_row_zip_update(\ (cur, xi) -> scale_update(lr * dz, cur, xi), w1, h, x)
               bh <- mutvec_get(b1, h)
               mutvec_set(b1, h, bh - lr * dz)
-        range_each(\h -> mutvec_set(dhidden, h, 0.0), range(0, n_hid - 1))
+        mutvec_map_inplace(\_ -> 0.0, dhidden)
         range_each(accum_dhidden, range(0, n_out - 1))
         range_each(update_output, range(0, n_out - 1))
         range_each(update_hidden, range(0, n_hid - 1))

@@ -1,9 +1,13 @@
 module stdlib.mutable
 
 # Mutable indexed containers. Split out of the implicit prelude so mutation is an
-# explicit, opt-in dependency. The raw `Vector` backing store and its `vector_*`
-# builtins stay in the prelude (shared with the immutable `Vec`), available here
-# implicitly.
+# explicit, opt-in dependency. Prefer the element-level combinators (`mutvec_fold`,
+# `mutmatrix_row_zip_fold`, etc.) when iterating: the library generates in-bounds
+# indices internally and reads with `vector_get_direct`, so callers avoid the
+# user-visible `Maybe` traffic of indexed `get` while staying bounds-safe.
+#
+# The raw `Vector` backing store and its `vector_*` builtins stay in the prelude
+# (shared with the immutable `Vec`), available here implicitly.
 
 # ---------------------------------------------------------------------------
 # MutVec — a 1-D mutable array (opaque; use the mutvec_* functions only)
@@ -18,6 +22,10 @@ export fn mutvec_new(n: Int, val: a) -> MutVec a !{IO} =
     raw <- vec_make_filled(n, val)
     MutVec(raw)
 
+# O(1). The fixed length of the mutable vector.
+export fn mutvec_len(v: MutVec a) -> Int =
+  vector_length(mutvec_raw(v))
+
 # O(1). Total: Nothing when i is out of range (routes through the bounds-checked
 # vector_get).
 export fn mutvec_get(v: MutVec a, i: Int) -> Maybe a !{IO} =
@@ -25,6 +33,59 @@ export fn mutvec_get(v: MutVec a, i: Int) -> Maybe a !{IO} =
 
 export fn mutvec_set(v: MutVec a, i: Int, val: a) -> Unit !{IO} =
   vector_mutset(mutvec_raw(v), i, val)
+
+fn mutvec_each_go(f: a -> Unit !{IO}, raw: Vector a, i: Int, total: Int) -> Unit !{IO} =
+  if i >= total then ()
+  else
+    do
+      val <- vector_get_direct(raw, i)
+      _ <- f(val)
+      mutvec_each_go(f, raw, i + 1, total)
+
+# O(n). Visit each element in index order.
+export fn mutvec_each(f: a -> Unit !{IO}, v: MutVec a) -> Unit !{IO} =
+  mutvec_each_go(f, mutvec_raw(v), 0, mutvec_len(v))
+
+fn mutvec_fold_go(step: b -> a -> b !{IO}, acc: b, raw: Vector a, i: Int, total: Int) -> b !{IO} =
+  if i >= total then acc
+  else
+    do
+      val <- vector_get_direct(raw, i)
+      next <- step(acc, val)
+      mutvec_fold_go(step, next, raw, i + 1, total)
+
+# O(n). Left fold over elements in index order.
+export fn mutvec_fold(step: b -> a -> b !{IO}, init: b, v: MutVec a) -> b !{IO} =
+  mutvec_fold_go(step, init, mutvec_raw(v), 0, mutvec_len(v))
+
+fn min_int(a: Int, b: Int) -> Int =
+  if a < b then a else b
+
+fn mutvec_zip_fold_go(step: b -> a -> c -> b !{IO}, acc: b, raw_a: Vector a, raw_c: Vector c, i: Int, total: Int) -> b !{IO} =
+  if i >= total then acc
+  else
+    do
+      left <- vector_get_direct(raw_a, i)
+      right <- vector_get_direct(raw_c, i)
+      next <- step(acc, left, right)
+      mutvec_zip_fold_go(step, next, raw_a, raw_c, i + 1, total)
+
+# O(min(len a, len c)). Fold over corresponding element pairs.
+export fn mutvec_zip_fold(step: b -> a -> c -> b !{IO}, init: b, va: MutVec a, vc: MutVec c) -> b !{IO} =
+  mutvec_zip_fold_go(step, init, mutvec_raw(va), mutvec_raw(vc), 0, min_int(mutvec_len(va), mutvec_len(vc)))
+
+fn mutvec_map_inplace_go(f: a -> a !{IO}, raw: Vector a, i: Int, total: Int) -> Unit !{IO} =
+  if i >= total then ()
+  else
+    do
+      val <- vector_get_direct(raw, i)
+      next <- f(val)
+      _ <- vector_mutset(raw, i, next)
+      mutvec_map_inplace_go(f, raw, i + 1, total)
+
+# O(n). Replace each element in place with f applied to it.
+export fn mutvec_map_inplace(f: a -> a !{IO}, v: MutVec a) -> Unit !{IO} =
+  mutvec_map_inplace_go(f, mutvec_raw(v), 0, mutvec_len(v))
 
 # ---------------------------------------------------------------------------
 # MutMatrix — a 2-D row-major mutable array backed by one MutVec
@@ -58,3 +119,68 @@ export fn mutmatrix_set(m: MutMatrix a, r: Int, c: Int, val: a) -> Unit !{IO} =
   | MutMatrix rows cols data ->
       if r < 0 || r >= rows || c < 0 || c >= cols then ()
       else mutvec_set(data, r * cols + c, val)
+
+fn mutmatrix_fold_go(step: b -> a -> b !{IO}, acc: b, raw: Vector a, i: Int, total: Int) -> b !{IO} =
+  if i >= total then acc
+  else
+    do
+      val <- vector_get_direct(raw, i)
+      next <- step(acc, val)
+      mutmatrix_fold_go(step, next, raw, i + 1, total)
+
+# O(rows*cols). Fold over every cell in row-major order.
+export fn mutmatrix_fold(step: b -> a -> b !{IO}, init: b, m: MutMatrix a) -> b !{IO} =
+  match m with
+  | MutMatrix rows cols data ->
+      if rows <= 0 || cols <= 0 then init
+      else mutmatrix_fold_go(step, init, mutvec_raw(data), 0, rows * cols)
+
+fn mutmatrix_fill_go(f: Int -> Int -> a !{IO}, raw: Vector a, cols: Int, i: Int, total: Int) -> Unit !{IO} =
+  if i >= total then ()
+  else
+    do
+      let r = i / cols
+      let c = i - r * cols
+      val <- f(r, c)
+      _ <- vector_mutset(raw, i, val)
+      mutmatrix_fill_go(f, raw, cols, i + 1, total)
+
+# O(rows*cols). Set every cell (r, c) to f(r, c).
+export fn mutmatrix_fill(f: Int -> Int -> a !{IO}, m: MutMatrix a) -> Unit !{IO} =
+  match m with
+  | MutMatrix rows cols data ->
+      if rows <= 0 || cols <= 0 then ()
+      else mutmatrix_fill_go(f, mutvec_raw(data), cols, 0, rows * cols)
+
+fn mutmatrix_row_zip_fold_go(step: b -> a -> c -> b !{IO}, acc: b, raw_m: Vector a, raw_v: Vector c, row_start: Int, i: Int, total: Int) -> b !{IO} =
+  if i >= total then acc
+  else
+    do
+      cell <- vector_get_direct(raw_m, row_start + i)
+      val <- vector_get_direct(raw_v, i)
+      next <- step(acc, cell, val)
+      mutmatrix_row_zip_fold_go(step, next, raw_m, raw_v, row_start, i + 1, total)
+
+# O(min(cols, len v)). Fold over row r zipped with vector v.
+export fn mutmatrix_row_zip_fold(step: b -> a -> c -> b !{IO}, init: b, m: MutMatrix a, r: Int, v: MutVec c) -> b !{IO} =
+  match m with
+  | MutMatrix rows cols data ->
+      if r < 0 || r >= rows then init
+      else mutmatrix_row_zip_fold_go(step, init, mutvec_raw(data), mutvec_raw(v), r * cols, 0, min_int(cols, mutvec_len(v)))
+
+fn mutmatrix_row_zip_update_go(f: a -> c -> a !{IO}, raw_m: Vector a, raw_v: Vector c, row_start: Int, i: Int, total: Int) -> Unit !{IO} =
+  if i >= total then ()
+  else
+    do
+      cell <- vector_get_direct(raw_m, row_start + i)
+      val <- vector_get_direct(raw_v, i)
+      next <- f(cell, val)
+      _ <- vector_mutset(raw_m, row_start + i, next)
+      mutmatrix_row_zip_update_go(f, raw_m, raw_v, row_start, i + 1, total)
+
+# O(min(cols, len v)). Update each cell of row r in place from (cell, v-element).
+export fn mutmatrix_row_zip_update(f: a -> c -> a !{IO}, m: MutMatrix a, r: Int, v: MutVec c) -> Unit !{IO} =
+  match m with
+  | MutMatrix rows cols data ->
+      if r < 0 || r >= rows then ()
+      else mutmatrix_row_zip_update_go(f, mutvec_raw(data), mutvec_raw(v), r * cols, 0, min_int(cols, mutvec_len(v)))

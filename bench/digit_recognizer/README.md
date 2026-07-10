@@ -33,26 +33,27 @@ data-load + startup are sub-1% of wall-clock).
 
 ## Representative result (Apple Silicon, 2026-07-10)
 
-Median of 3 clean runs after CPR Tier-2 worker routing for matched/do-bound
-`Maybe`/`Result` calls. Every run reached the same final accuracy.
+Median of 3 clean runs after CPR Tier-2 worker routing plus the mutable-combinator
+recognizer migration. Every run reached the same final accuracy.
 
 | Implementation | Wall (s) |
 |---|---|
 | Haskell (unsafe) | 0.09 |
 | Go | 0.10 |
-| Java | 0.10 |
-| Scala (imperative) | 0.19 |
-| Scala (idiomatic) | 0.70 |
-| Haskell (pure) | 0.97 |
+| Java | 0.11 |
+| Scala (imperative) | 0.20 |
+| Scala (idiomatic) | 0.68 |
+| Haskell (pure) | 0.99 |
 | Python (plain) | 1.68 |
-| Sprout (clang -O2) | 2.91 |
+| Sprout (clang -O2) | 1.49 |
 
 Before CPR, this same benchmark measured Sprout at about 23.05s on this host. The
-current 2.91s median is a ~7.9× speedup, with identical accuracy, because matched and
-do-bound `Maybe`/`Result` returns now route through unboxed workers instead of allocating
-a fresh `Maybe` for each mutable matrix/vector access in the training loop.
+current 1.49s median is a ~15.5× speedup, with identical accuracy. CPR first removed
+the boxed `Maybe`/`Result` return from matched and do-bound mutable reads; the
+mutable-combinator migration then moved the row dot products and row updates to
+closed library loops that read via `vector_get_direct`.
 
-Sprout is still ~29× Go and ~1.7× plain CPython here. The remaining gap is mostly the
+Sprout is still ~15× Go and slightly faster than plain CPython here. The remaining gap is mostly the
 same numeric representation problem: dense `Double` code still pays boxed-value and GC
 costs that the mature native ports avoid. The next large lever is unboxed float arrays
 and fused dot/matvec kernels — see the ML-perf notes in `BACKLOG.md`.
@@ -63,10 +64,10 @@ Both Scala and Haskell ship a **pure** and a **mutating** port that run the byte
 algorithm and reach the same 89.33%, so the gap between each pair is purely representation:
 
 - **Scala:** imperative (mutable `Array`, `while`) ties Go; idiomatic (immutable `Vector`,
-  `foldLeft`, a fresh case-class `Net` per SGD step) is **~3.7× slower**.
+  `foldLeft`, a fresh case-class `Net` per SGD step) is **~3.4× slower**.
 - **Haskell:** unsafe (flat unboxed `IOUArray`, `unsafeRead`/`unsafeWrite`, in-place) lands
   near Go; the pure port (immutable `[Double]` lists, `foldl'`, a fresh `Net` per step) is
-  **~10.8× slower** — and trails idiomatic Scala because linked lists box every `Double` and
+  **~11× slower** — and trails idiomatic Scala because linked lists box every `Double` and
   chase a pointer per element, where `Vector` is a cache-friendlier trie.
 
 The lesson repeats across two independent runtimes: on mature JIT/GC/native-code runtimes,
@@ -76,6 +77,7 @@ Scala-imperative ≈ Go). Pure representations still cost a constant factor, mod
 
 Sprout used to pay the *same class* of overhead — boxed `Double`, plus a `Maybe` allocated
 per array access — at **~100×**, because its codegen + GC are young. CPR removed the
-per-access `Maybe` allocation from this path and cut the benchmark by about 8×. The
-remaining boxed-`Double` cost is still the distance the unboxed-float-array + fused-kernel
-work is meant to close; see the ML-perf notes in `BACKLOG.md`.
+per-access `Maybe` allocation from this path, and mutable row combinators removed another
+layer of generic indexed-access overhead. The remaining boxed-`Double` cost is still the
+distance the unboxed-float-array + fused-kernel work is meant to close; see the ML-perf
+notes in `BACKLOG.md`.

@@ -1,5 +1,5 @@
 import stdlib.test (TestState, new_state, assert_eq, assert_true, summary)
-import stdlib.mutable (mutvec_new, mutvec_get, mutvec_set)
+import stdlib.mutable (MutVec, mutvec_new, mutvec_get, mutvec_set, mutvec_len, mutvec_each, mutvec_fold, mutvec_zip_fold, mutvec_map_inplace)
 
 fn main() -> Unit !{IO} =
   do
@@ -45,4 +45,47 @@ fn main() -> Unit !{IO} =
     assert_eq(state, "mutvec_set large mid slot", bigmid, 1)
     assert_eq(state, "mutvec_set large adjacent untouched", bigadj, 9999999)
 
+    assert_eq(state, "mutvec_len reports fixed length", mutvec_len(v), 5)
+
+    seen <- mutvec_new(1, 0)
+    _ <- mutvec_each(\x -> add_into(seen, x), v)
+    seen_total <- mutvec_get(seen, 0)
+    assert_eq(state, "mutvec_each visits each element in order", seen_total, 42 + 42 + 7 + 42 + 42)
+
+    folded <- mutvec_fold(\ (acc, x) -> acc * 10 + x, 0, v)
+    assert_eq(state, "mutvec_fold preserves order", folded, 463162)
+
+    left <- mutvec_new(4, 0)
+    right <- mutvec_new(2, 0)
+    mutvec_set(left, 0, 2)
+    mutvec_set(left, 1, 3)
+    mutvec_set(left, 2, 5)
+    mutvec_set(left, 3, 7)
+    mutvec_set(right, 0, 11)
+    mutvec_set(right, 1, 13)
+    zipped <- mutvec_zip_fold(\ (acc, x, y) -> acc + x * y, 0, left, right)
+    assert_eq(state, "mutvec_zip_fold stops at shorter input", zipped, 61)
+
+    _ <- mutvec_map_inplace(\x -> x * 2, right)
+    r0 <- mutvec_get(right, 0)
+    r1 <- mutvec_get(right, 1)
+    assert_eq(state, "mutvec_map_inplace updates slot 0", r0, 22)
+    assert_eq(state, "mutvec_map_inplace updates slot 1", r1, 26)
+
+    empty <- mutvec_new(0, 123)
+    assert_eq(state, "mutvec_len empty", mutvec_len(empty), 0)
+    empty_fold <- mutvec_fold(\ (acc, x) -> acc + x, 17, empty)
+    assert_eq(state, "mutvec_fold empty returns init", empty_fold, 17)
+    empty_zip <- mutvec_zip_fold(\ (acc, x, y) -> acc + x * y, 23, empty, right)
+    assert_eq(state, "mutvec_zip_fold empty returns init", empty_zip, 23)
+    _ <- mutvec_each(\x -> add_into(seen, x), empty)
+    after_empty_each <- mutvec_get(seen, 0)
+    assert_eq(state, "mutvec_each empty is no-op", after_empty_each, seen_total)
+    _ <- mutvec_map_inplace(\x -> x * 2, empty)
+
     summary(state)
+
+fn add_into(cell: MutVec Int, x: Int) -> Unit !{IO} =
+  do
+    cur <- mutvec_get(cell, 0)
+    mutvec_set(cell, 0, cur + x)
