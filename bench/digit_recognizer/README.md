@@ -31,23 +31,31 @@ data-load + startup are sub-1% of wall-clock).
 | `recognizer_plain.py` | Python, no ML libraries — lists |
 | `recognizer_sklearn.py` | Python + scikit-learn (reference only; different solver/activation, not timed) |
 
-## Representative result (Apple Silicon, 2026-07)
+## Representative result (Apple Silicon, 2026-07-10)
+
+Median of 3 clean runs after CPR Tier-2 worker routing for matched/do-bound
+`Maybe`/`Result` calls. Every run reached the same final accuracy.
 
 | Implementation | Wall (s) |
 |---|---|
-| Java | 0.15 |
-| Go | 0.22 |
-| Scala (imperative) | 0.20 |
-| Haskell (unsafe) | 0.30 |
-| Scala (idiomatic) | 0.68 |
-| Haskell (pure) | 1.14 |
+| Haskell (unsafe) | 0.09 |
+| Go | 0.10 |
+| Java | 0.10 |
+| Scala (imperative) | 0.19 |
+| Scala (idiomatic) | 0.70 |
+| Haskell (pure) | 0.97 |
 | Python (plain) | 1.68 |
-| Sprout (clang -O2) | 23.05 |
+| Sprout (clang -O2) | 2.91 |
 
-Sprout is ~130× Go and ~14× plain CPython here: the current numeric codegen boxes every
-`Double` and allocates a `Maybe` per array access, so the dense inner loops pay allocation +
-GC + indirection the others avoid. The lever is unboxed float arrays + fused dot/matvec
-kernels — see the ML-perf notes in `BACKLOG.md`.
+Before CPR, this same benchmark measured Sprout at about 23.05s on this host. The
+current 2.91s median is a ~7.9× speedup, with identical accuracy, because matched and
+do-bound `Maybe`/`Result` returns now route through unboxed workers instead of allocating
+a fresh `Maybe` for each mutable matrix/vector access in the training loop.
+
+Sprout is still ~29× Go and ~1.7× plain CPython here. The remaining gap is mostly the
+same numeric representation problem: dense `Double` code still pays boxed-value and GC
+costs that the mature native ports avoid. The next large lever is unboxed float arrays
+and fused dot/matvec kernels — see the ML-perf notes in `BACKLOG.md`.
 
 ### The purity tax, isolated twice
 
@@ -55,17 +63,19 @@ Both Scala and Haskell ship a **pure** and a **mutating** port that run the byte
 algorithm and reach the same 89.33%, so the gap between each pair is purely representation:
 
 - **Scala:** imperative (mutable `Array`, `while`) ties Go; idiomatic (immutable `Vector`,
-  `foldLeft`, a fresh case-class `Net` per SGD step) is **~3.4× slower**.
+  `foldLeft`, a fresh case-class `Net` per SGD step) is **~3.7× slower**.
 - **Haskell:** unsafe (flat unboxed `IOUArray`, `unsafeRead`/`unsafeWrite`, in-place) lands
   near Go; the pure port (immutable `[Double]` lists, `foldl'`, a fresh `Net` per step) is
-  **~3.8× slower** — and trails idiomatic Scala because linked lists box every `Double` and
+  **~10.8× slower** — and trails idiomatic Scala because linked lists box every `Double` and
   chase a pointer per element, where `Vector` is a cache-friendlier trie.
 
-The lesson repeats across two independent runtimes: on a mature JIT/GC, the cost of FP purity
-+ per-step allocation is a small **constant factor (~3–4×)**, and dropping to flat unboxed
-arrays closes it entirely (Haskell-unsafe ≈ Scala-imperative ≈ Go).
+The lesson repeats across two independent runtimes: on mature JIT/GC/native-code runtimes,
+dropping to flat unboxed arrays closes the gap to Go entirely (Haskell-unsafe ≈
+Scala-imperative ≈ Go). Pure representations still cost a constant factor, modest for Scala
+`Vector` here and larger for Haskell lists because they box every `Double`.
 
-Sprout pays the *same class* of overhead — boxed `Double`, a `Maybe` allocated per array
-access — but at **~100×**, because its codegen + GC are young. That ~100× vs the ~3–4× a
-mature runtime charges for the same idiom is exactly the distance the unboxed-float-array +
-fused-kernel work is meant to close; see the ML-perf notes in `BACKLOG.md`.
+Sprout used to pay the *same class* of overhead — boxed `Double`, plus a `Maybe` allocated
+per array access — at **~100×**, because its codegen + GC are young. CPR removed the
+per-access `Maybe` allocation from this path and cut the benchmark by about 8×. The
+remaining boxed-`Double` cost is still the distance the unboxed-float-array + fused-kernel
+work is meant to close; see the ML-perf notes in `BACKLOG.md`.
