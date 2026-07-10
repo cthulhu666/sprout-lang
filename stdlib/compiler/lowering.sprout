@@ -675,7 +675,7 @@ fn constraint_key_args_rest(args: List ast.TypeExpr) -> String =
 # infer @inst — keep the RAW dotted name so all three compare equal; sanitizing a
 # key would desync it from the others. Two same-short-named types thus get distinct
 # symbols and distinct keys. The prelude's canonical head is unqualified (no-op).
-fn qualified_head(name: String) -> String = string.replace_all(".", "_", name)
+fn qualified_head(name: String) -> String = types.type_id_symbol(types.type_id(name))
 
 # Returns the outermost constructor/variable name from a type expression.
 # For TupleType, include the arity so 2-tuple and 3-tuple instances don't collide.
@@ -1448,7 +1448,10 @@ fn eta_from_instance(method: String, key: String, t: types.Type, pos: source.Sou
 # is_type_var_name: true if a TypeName refers to a type variable (lowercase first char).
 # In Sprout, type variable names start with a lowercase letter; concrete types with uppercase.
 fn is_type_var_name(name: String) -> Bool =
-  match str_char_at(name, 0) with
+  # A module-qualified name (dotted) is never a type variable — guard as
+  # infer.is_lowercase_name does (code-review finding 2, 2026-07-10).
+  if str_find(name, ".") != -1 then false
+  else match str_char_at(name, 0) with
   | Nothing -> false
   | Just c ->
       c == 'a' || c == 'b' || c == 'c' || c == 'd' || c == 'e' || c == 'f' ||

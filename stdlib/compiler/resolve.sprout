@@ -629,20 +629,16 @@ fn record_field_exprs(fields: List typed_ast.TypedRecordField) -> List typed_ast
 # type variables (a, b), wildcards (`_`), and fresh metavars do not.  Uses
 # type_expr_head_name so module-qualified concrete names (stdlib.x.Bar) still
 # read as concrete after their prefix is stripped.
+# Concreteness is a property of the type NAME, not its module path: a canonical
+# dotted head (e.g. "main.Maybe") is concrete iff its last segment starts uppercase.
 fn head_is_concrete(te: ast.TypeExpr) -> Bool =
-  # Module-qualified type identity (T7): concreteness is a property of the type NAME,
-  # not the module path. type_expr_head_name now returns the canonical dotted name
-  # (e.g. "main.Maybe"), so test the last segment's case — a qualified concrete type
-  # starts with a lowercase module component and would otherwise read as a type var.
-  starts_upper(string.substring_after_last(type_expr_head_name(te), "."))
-
-fn starts_upper(s: String) -> Bool =
-  match str_char_at(s, 0) with
-  | Nothing -> false
-  | Just c -> c >= 'A' && c <= 'Z'
+  types.type_id_is_concrete(types.type_id(type_expr_head_name(te)))
 
 fn is_type_var_name(name: String) -> Bool =
-  match str_char_at(name, 0) with
+  # A module-qualified name (dotted) is never a type variable — guard as
+  # infer.is_lowercase_name does (code-review finding 2, 2026-07-10).
+  if str_find(name, ".") != -1 then false
+  else match str_char_at(name, 0) with
   | Nothing -> false
   | Just c ->
       c == 'a' || c == 'b' || c == 'c' || c == 'd' || c == 'e' || c == 'f' ||

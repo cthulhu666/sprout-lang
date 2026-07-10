@@ -983,7 +983,10 @@ fn str_list_contains(xs: List String, target: String) -> Bool =
 # Only TConst, TApp, and TTuple are meaningful here; anything else falls back to "_".
 fn type_to_typeexpr(t: types.Type) -> ast.TypeExpr =
   match t with
-  | types.TConst name -> ast.TypeName(types.type_id_display(name))
+  # Dispatch TDict head — keep the full canonical name (matches
+  # type_to_typeexpr_with_prog_vars), so the head can't desync from full-name @inst /
+  # ctx_inst keys for a module-qualified type. (code-review finding 1, 2026-07-10)
+  | types.TConst name -> ast.TypeName(types.type_id_name(name))
   | types.TApp base arg -> ast.TypeApply(type_to_typeexpr(base), type_to_typeexpr(arg))
   | types.TTuple items -> ast.TupleType(list_map(\item -> type_to_typeexpr(item), items))
   | _ -> ast.TypeName("_")
@@ -992,7 +995,7 @@ fn type_to_typeexpr(t: types.Type) -> ast.TypeExpr =
 # TTuple is always concrete (its head is a known arity, never a variable).
 fn concrete_typeexpr(t: types.Type) -> Maybe ast.TypeExpr =
   match t with
-  | types.TConst name -> Just(ast.TypeName(types.type_id_display(name)))
+  | types.TConst name -> Just(ast.TypeName(types.type_id_name(name)))
   | types.TApp base _ ->
       match concrete_typeexpr(base) with
       | Nothing -> Nothing

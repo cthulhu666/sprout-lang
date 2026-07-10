@@ -68,7 +68,7 @@ export fn type_id_display(id: TypeId) -> String =
 # the LAST segment, since a qualified concrete type starts with a lowercase module
 # component (e.g. "main.Maybe" — the '.m' is not the type name).
 export fn type_id_is_concrete(id: TypeId) -> Bool =
-  type_id_starts_upper(string.after_last_dot(type_id_name(id)))
+  type_id_starts_upper(type_id_display(id))
 
 fn type_id_starts_upper(s: String) -> Bool =
   match str_char_at(s, 0) with
