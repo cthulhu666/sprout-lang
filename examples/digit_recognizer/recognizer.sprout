@@ -17,11 +17,14 @@ import stdlib.mutable (MutVec, mutvec_new, mutvec_get, mutvec_set, mutvec_map_in
 #
 # Weights are held in a `Net` record of two weight matrices and two bias vectors
 # (`stdlib.mutable`): W1 (n_hid x n_in), B1 (n_hid), W2 (n_out x n_hid), B2 (n_out).
-# `MutMatrix` replaces the earlier single flat MutVec + hand-rolled index math.
-# Iteration uses the prelude's effect-polymorphic combinators (`range_each`/
-# `range_fold`/`list_each`/`list_fold`); IntRange is inclusive, so a half-open
-# [0, n) loop is `range(0, n - 1)`.  Each loop body is a local `let`-closure that
-# captures the enclosing net / buffers, so no state is threaded through parameters.
+# `MutMatrix` replaces the earlier single flat MutVec + hand-rolled index math.  The
+# net plus the three reusable scratch buffers (hidden/out/dhidden) travel together in
+# a `Ctx` record, so forward/backprop/train take one `ctx` instead of four buffers;
+# each opens it with `match ctx with | Ctx (Net ...) hidden out dhidden`.  `lr` stays
+# an explicit argument.  Iteration uses the prelude's effect-polymorphic combinators
+# (`range_each`/`range_fold`/`list_each`/`list_fold`); IntRange is inclusive, so a
+# half-open [0, n) loop is `range(0, n - 1)`.  Each loop body is a local `let`-closure
+# that captures the enclosing ctx buffers.
 #
 # Run from the repository root:
 #   ./build/compile_driver_bin_stage1 --emit-ir "$PWD/stdlib" \
@@ -35,6 +38,14 @@ let n_out = 10
 
 # W1: n_hid x n_in, B1: n_hid, W2: n_out x n_hid, B2: n_out.
 type Net = Net(MutMatrix Double) (MutVec Double) (MutMatrix Double) (MutVec Double)
+
+# Training context: the model plus the three reusable scratch buffers, bundled so
+# forward/backprop/train pass one `ctx` instead of threading four buffers each.
+# Each consumer already opened the net with a `match`, so widening that pattern to
+# `Ctx (Net w1 b1 w2 b2) hidden out dhidden` absorbs the buffers at no extra lines.
+# `lr` stays an explicit parameter — it is a hyperparameter, not part of the buffers.
+type Ctx = Ctx Net (MutVec Double) (MutVec Double) (MutVec Double)
+#              net  hidden          out             dhidden
 
 # ---------------------------------------------------------------------------
 # Activation
@@ -136,13 +147,13 @@ fn dataset_size(xs: List (MutVec Double, Int)) -> Int =
   list_fold(\ (acc, _) -> acc + 1, 0, xs)
 
 # ---------------------------------------------------------------------------
-# Forward pass (writes into caller-provided hidden/out buffers)
+# Forward pass (writes into the ctx hidden/out buffers)
 # ---------------------------------------------------------------------------
 # Each unit closure captures the weights + buffers; the weighted sum is a fused
 # `mutmatrix_row_dot` kernel seeded with the bias (no per-element callback closure).
-fn forward(net: Net, x: MutVec Double, hidden: MutVec Double, out: MutVec Double) -> Unit !{IO} =
-  match net with
-  | Net w1 b1 w2 b2 ->
+fn forward(ctx: Ctx, x: MutVec Double) -> Unit !{IO} =
+  match ctx with
+  | Ctx (Net w1 b1 w2 b2) hidden out _ ->
       do
         let hidden_unit = \h -> do
               b <- mutvec_get(b1, h)
@@ -168,11 +179,11 @@ fn predict(out: MutVec Double) -> Int !{IO} =
 # ---------------------------------------------------------------------------
 # Backpropagation with inline SGD weight updates
 # ---------------------------------------------------------------------------
-# Three phase-closures, each capturing the net + buffers + learning rate.  Order
+# Three phase-closures, each capturing the ctx buffers + learning rate.  Order
 # matters: dhidden is accumulated from the OLD W2 before W2/B2 are updated.
-fn backprop(net: Net, x: MutVec Double, label: Int, hidden: MutVec Double, out: MutVec Double, dhidden: MutVec Double, lr: Double) -> Unit !{IO} =
-  match net with
-  | Net w1 b1 w2 b2 ->
+fn backprop(ctx: Ctx, x: MutVec Double, label: Int, lr: Double) -> Unit !{IO} =
+  match ctx with
+  | Ctx (Net w1 b1 w2 b2) hidden out dhidden ->
       do
         # dhidden[h] += dout_o * W2[o][h], summed over outputs (uses OLD W2).
         let accum_dhidden = \o -> do
@@ -204,38 +215,40 @@ fn backprop(net: Net, x: MutVec Double, label: Int, hidden: MutVec Double, out: 
 # ---------------------------------------------------------------------------
 # Training and evaluation
 # ---------------------------------------------------------------------------
-fn train_epoch(net: Net, samples: List (MutVec Double, Int), hidden: MutVec Double, out: MutVec Double, dhidden: MutVec Double, lr: Double) -> Unit !{IO} =
+fn train_epoch(ctx: Ctx, samples: List (MutVec Double, Int), lr: Double) -> Unit !{IO} =
   do
     let train_sample = \sample -> match sample with
           | (x, label) -> do
-              forward(net, x, hidden, out)
-              backprop(net, x, label, hidden, out, dhidden, lr)
+              forward(ctx, x)
+              backprop(ctx, x, label, lr)
     list_each(train_sample, samples)
 
-fn count_correct(net: Net, samples: List (MutVec Double, Int), hidden: MutVec Double, out: MutVec Double) -> Int !{IO} =
-  do
-    let step = \ (acc, sample) -> match sample with
-          | (x, label) -> do
-              forward(net, x, hidden, out)
-              pred <- predict(out)
-              if pred == label then acc + 1 else acc
-    list_fold(step, 0, samples)
+fn count_correct(ctx: Ctx, samples: List (MutVec Double, Int)) -> Int !{IO} =
+  match ctx with
+  | Ctx _ _ out _ ->
+      do
+        let step = \ (acc, sample) -> match sample with
+              | (x, label) -> do
+                  forward(ctx, x)
+                  pred <- predict(out)
+                  if pred == label then acc + 1 else acc
+        list_fold(step, 0, samples)
 
 fn accuracy_pct(correct: Int, total: Int) -> Double =
   to_double(correct) * 100.0 / to_double(total)
 
-fn report(net: Net, test_set: List (MutVec Double, Int), hidden: MutVec Double, out: MutVec Double, epoch: Int, n_test: Int) -> Unit !{IO} =
+fn report(ctx: Ctx, test_set: List (MutVec Double, Int), epoch: Int, n_test: Int) -> Unit !{IO} =
   if mod_int(epoch, 5) == 0 then
     do
-      c <- count_correct(net, test_set, hidden, out)
+      c <- count_correct(ctx, test_set)
       print(`epoch ${epoch}  test accuracy ${accuracy_pct(c, n_test)}%`)
   else ()
 
-fn train(net: Net, train_set: List (MutVec Double, Int), test_set: List (MutVec Double, Int), hidden: MutVec Double, out: MutVec Double, dhidden: MutVec Double, lr: Double, total_epochs: Int, n_test: Int) -> Unit !{IO} =
+fn train(ctx: Ctx, train_set: List (MutVec Double, Int), test_set: List (MutVec Double, Int), lr: Double, total_epochs: Int, n_test: Int) -> Unit !{IO} =
   do
     let epoch_step = \epoch -> do
-          report(net, test_set, hidden, out, epoch, n_test)
-          train_epoch(net, train_set, hidden, out, dhidden, lr)
+          report(ctx, test_set, epoch, n_test)
+          train_epoch(ctx, train_set, lr)
     range_each(epoch_step, range(0, total_epochs))
 
 fn main() -> Unit !{IO} =
@@ -256,8 +269,9 @@ fn main() -> Unit !{IO} =
     hidden <- mutvec_new(n_hid, 0.0)
     out <- mutvec_new(n_out, 0.0)
     dhidden <- mutvec_new(n_hid, 0.0)
+    let ctx = Ctx(net, hidden, out, dhidden)
 
-    _ <- train(net, train_set, test_set, hidden, out, dhidden, 0.05, 25, n_test)
+    _ <- train(ctx, train_set, test_set, 0.05, 25, n_test)
 
-    c <- count_correct(net, test_set, hidden, out)
+    c <- count_correct(ctx, test_set)
     print(`final test accuracy: ${accuracy_pct(c, n_test)}% (${c}/${n_test})`)
