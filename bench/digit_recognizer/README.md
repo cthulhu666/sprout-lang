@@ -33,30 +33,32 @@ data-load + startup are sub-1% of wall-clock).
 | `recognizer_plain.py` | Python, no ML libraries — lists |
 | `recognizer_sklearn.py` | Python + scikit-learn (reference only; different solver/activation, not timed) |
 
-## Representative result (Apple Silicon, 2026-07-10)
+## Representative result (Apple Silicon, 2026-07-11)
 
-Median of 3 clean runs (64→256→10, kernels path for Sprout). Every run reached the same
+Median of 3 clean runs (64→256→10, fully-kerneled path for Sprout). Every run reached the same
 final accuracy, **92.67% (139/150)**, across all eight implementations.
 
 | Implementation | Wall (s) |
 |---|---|
 | Java | 0.24 |
-| Scala (imperative) | 0.34 |
-| Haskell (unsafe) | 0.49 |
-| Go | 0.53 |
-| Scala (idiomatic) | 4.47 |
-| Sprout (kernels, clang -O2) | 4.76 |
-| Haskell (pure) | 11.07 |
-| Python (plain) | 17.18 |
+| Scala (imperative) | 0.36 |
+| Haskell (unsafe) | 0.47 |
+| Go | 0.54 |
+| Sprout (kernels, clang -O2) | 3.31 |
+| Scala (idiomatic) | 4.59 |
+| Haskell (pure) | 12.39 |
+| Python (plain) | 17.95 |
 
-At this larger size the ordering among the fast ports shifts: **Java (JIT) now leads and Go
-drops to ~0.53s** — the dense `double[][]` matmul is where HotSpot's autovectorization pays
+At this larger size the ordering among the fast ports shifts: **Java (JIT) leads and Go
+drops to ~0.54s** — the dense `double[][]` matmul is where HotSpot's autovectorization pays
 off and Go's un-SIMD'd, bounds-checked slice access does not. Sprout (kernels) lands at
-**4.76s**: ~9× Go, roughly tied with idiomatic Scala, ~2.3× faster than pure Haskell and
-~3.6× faster than plain CPython.
+**3.31s**: ~6× Go, now ~1.4× faster than idiomatic Scala, ~3.7× faster than pure Haskell and
+~5.4× faster than plain CPython.
 
-Note the gap to the native ports **widened** with size (it was ~7× Go on the 24-node net).
-That is the signal of where Sprout's remaining cost lives — see below.
+The Sprout number improved from `4.76s` (~9× Go) after fusing the last un-kerneled hot loop —
+`backprop`'s `dhidden` accumulate — into `mutmatrix_row_add_scaled_into` (2026-07-11), which
+removed ~125K per-output closures and cut GC cycles 177→78. The residual ~6× gap to the native
+ports is where Sprout's remaining cost lives — see below.
 
 ### Reading the Sprout row — it is the *tuned* idiom, not the naive one
 
@@ -69,30 +71,33 @@ write, and it should not be read as "idiomatic Sprout." The distinction:
 - **Sprout** cannot express that inline loop in user code today. An unboxed *and* bounds-checked
   array read (`vector_get_direct`) is private to `stdlib.mutable`, and the generic iteration
   combinators allocate a closure per element. So the fast path is only reachable through the
-  hand-written stdlib kernels `mutmatrix_row_dot` / `mutmatrix_row_sub_scaled_inplace`. **The
-  `4.76s` above is Sprout's *tuned* number** — comparable to the other *tuned* ports (Haskell-
-  unsafe, Scala-imperative), not to a naive baseline.
+  hand-written stdlib kernels `mutmatrix_row_dot` / `mutmatrix_row_sub_scaled_inplace` /
+  `mutmatrix_row_add_scaled_into`. **The `3.31s` above is Sprout's *tuned* number** — comparable
+  to the other *tuned* ports (Haskell-unsafe, Scala-imperative), not to a naive baseline.
 
 This is not the kernel skipping work: it performs the same bounds-checked, unboxed
 multiply-accumulate as Go's inline loop (and is *safer* than Haskell-unsafe's unchecked
 `unsafeRead`), with bit-identical results. What it hides is expressibility — **idiomatic Sprout,
 using the generic `mutmatrix_row_zip_fold` / `row_zip_update` combinators, runs at about
-`13s`** at this size (a closure allocated per element: **7.4M** of them, vs 0.21M for the
-kernels). That combinators→kernels spread (`13s → 4.76s`, ~2.7×) is Sprout's own version of
+`13s`** at this size (a closure allocated per element: **7.4M** of them, vs **82K** for the
+kernels). That combinators→kernels spread (`13s → 3.31s`, ~3.9×) is Sprout's own version of
 the naive→tuned gap this benchmark isolates for Scala (`Vector → Array`) and Haskell (lists →
 `IOUArray`); the single row above simply reports the tuned end.
 
-**Where the tuned cost actually is (a correction over the 24-node writeup).** The kernel hot
-loop is *allocation-free*: at 256 hidden its allocation profile is byte-for-byte the same as at
-24 (`0.21M` closures, `0.34M` `sprout_obj`, 177 GC cycles — all independent of the layer size,
-because the matmul threads its `Double` accumulator unboxed and never boxes a per-element
-value). So the 10× compute increase added *zero* allocation, and the ~9× gap to Go is **scalar
-`Double` throughput**, not boxing or GC: every access pays a uniform-i64↔`double` ABI bitcast
-and a per-element bounds-check branch, and the tail-recursive kernel is not vectorized. The
-lever that closes this is contiguous unboxed `f64` storage (SIMD-friendly, no per-access
-bitcast/bounds-check) plus loop-shaped codegen — the numeric-representation work tracked in
-`BACKLOG.md` and `docs/digit-recognizer-performance-plan-2026-07-10.md`. (Making that inline
-fast loop expressible in ordinary Sprout, so no bespoke kernel is needed, is the same lever.)
+**Where the tuned cost actually is.** The kernel hot loops are *allocation-free* — each threads
+its `Double` accumulator unboxed and boxes no per-element value — so the whole run's allocation
+(**82K** closures, `0.21M` `sprout_obj`, **78** GC cycles) is dominated by data loading and
+outer-loop bookkeeping, not the matmul, and Phase C confirmed it is independent of layer width.
+So the ~6× gap to Go is **scalar `Double` throughput**, not boxing or GC. Disassembly of the dot
+kernel (Phase D prep) shows the inner loop is 22 machine instructions per element of which only
+**2 are arithmetic**: every access pays two un-inlined `vector_get_direct` calls (bounds-check
+hidden inside), a per-element GC-root push/pop, and `fmov` GPR↔FP shuffles from the uniform-i64
+ABI, and the tail-recursive kernel is not vectorized. The levers that close this — inlinable
+monomorphic element access, leaf-loop GC-root elision, then (secondarily) unboxed `f64` storage
+and loop-shaped codegen — are the Phase D work designed in
+`docs/phase-d-numeric-fastpath-design-2026-07-11.md` (evidence in
+`docs/digit-recognizer-performance-plan-2026-07-10.md`). (Making that inline fast loop
+expressible in ordinary Sprout, so no bespoke kernel is needed, is the same lever.)
 
 ### The purity tax, isolated twice — and it scales super-linearly
 
@@ -106,7 +111,7 @@ grows with the parameter count:
   ~3.6×).
 - **Haskell:** unsafe (flat unboxed `IOUArray`, `unsafeRead`/`unsafeWrite`, in-place) lands
   near Go; the pure port (immutable `[Double]` lists, `foldl'`, a fresh `Net` per step) is now
-  **~22× slower** (was ~10×) — linked lists box every `Double` and chase a pointer per element,
+  **~26× slower** (was ~10×) — linked lists box every `Double` and chase a pointer per element,
   and both costs scale with the wider layer.
 
 The lesson repeats across two independent runtimes: dropping to flat unboxed arrays keeps the
