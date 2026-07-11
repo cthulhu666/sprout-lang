@@ -1,5 +1,5 @@
 module examples.digit_recognizer.recognizer
-import stdlib.mutable (MutVec, mutvec_new, mutvec_get, mutvec_set, mutvec_map_inplace, MutMatrix, mutmatrix_new, mutmatrix_set, mutmatrix_cols, mutmatrix_row_dot, mutmatrix_row_sub_scaled_inplace, mutmatrix_row_add_scaled_into)
+import stdlib.mutable (MutVec, mutvec_new, mutvec_get, mutvec_set, mutvec_map_inplace, MutMatrix, mutmatrix_new, mutmatrix_set, mutmatrix_cols, mutmatrix_rows, mutmatrix_row_dot, mutmatrix_row_sub_scaled_inplace, mutmatrix_row_add_scaled_into)
 
 # Handwritten-digit recognition trained on real public data.
 #
@@ -22,9 +22,9 @@ import stdlib.mutable (MutVec, mutvec_new, mutvec_get, mutvec_set, mutvec_map_in
 # a `Ctx` record, so forward/backprop/train take one `ctx` instead of four buffers;
 # each opens it with `match ctx with | Ctx (Net ...) hidden out dhidden`.  `lr` stays
 # an explicit argument.  Iteration uses the prelude's effect-polymorphic combinators
-# (`range_each`/`range_fold`/`list_each`/`list_fold`); IntRange is inclusive, so a
-# half-open [0, n) loop is `range(0, n - 1)`.  Each loop body is a local `let`-closure
-# that captures the enclosing ctx buffers.
+# (`range_each`/`range_fold`/`list_each`/`list_fold`) over `upto(n)`, the [0, n) bound
+# (IntRange is inclusive, so upto wraps the `range(0, n - 1)`).  Each loop body is a
+# local `let`-closure that captures the enclosing ctx buffers.
 #
 # Run from the repository root:
 #   ./build/compile_driver_bin_stage1 --emit-ir "$PWD/stdlib" \
@@ -35,6 +35,11 @@ import stdlib.mutable (MutVec, mutvec_new, mutvec_get, mutvec_set, mutvec_map_in
 let n_in = 64
 let n_hid = 256
 let n_out = 10
+
+# Half-open loop bound: upto(n) spans [0, n) as n iterations. IntRange is inclusive,
+# so a raw [0, n) loop would read `range(0, n - 1)`; upto keeps that off the call sites
+# (and upto(0) is the empty range, the correct n = 0 case).
+fn upto(n: Int) -> IntRange = range(0, n - 1)
 
 # W1: n_hid x n_in, B1: n_hid, W2: n_out x n_hid, B2: n_out.
 type Net = Net(MutMatrix Double) (MutVec Double) (MutMatrix Double) (MutVec Double)
@@ -72,32 +77,34 @@ fn lcg_next(state: Int) -> Int = mod_int(1664525 * state + 1013904223, 214748364
 fn lcg_to_weight(state: Int) -> Double =
   to_double(mod_int(state, 2000) - 1000) / 10000.0
 
+# Fill every cell of m in row-major order, threading the LCG state s0 through and
+# returning the advanced state. Step k writes cell (k/cols, k%cols).
+fn fill_matrix_lcg(m: MutMatrix Double, s0: Int) -> Int !{IO} =
+  do
+    let cols = mutmatrix_cols(m)
+    let step = \ (s, k) -> do
+          mutmatrix_set(m, k / cols, k - (k / cols) * cols, lcg_to_weight(s))
+          lcg_next(s)
+    range_fold(step, s0, upto(mutmatrix_rows(m) * cols))
+
+# Fill v[0..n) from the LCG, threading and returning the advanced state.
+fn fill_vec_lcg(v: MutVec Double, n: Int, s0: Int) -> Int !{IO} =
+  do
+    let step = \ (s, k) -> do
+          mutvec_set(v, k, lcg_to_weight(s))
+          lcg_next(s)
+    range_fold(step, s0, upto(n))
+
 # Thread one LCG sequence through W1 (row-major), then B1, then W2, then B2 — the
-# same element order the old flat weight vector used, so results are stable.  Each
-# fill closure captures its target matrix/vector; a step reads state s, writes cell
-# k (row-major: k -> (k/cols, k%cols)), and returns the advanced state.
+# same element order the old flat weight vector used, so results are stable.
 fn init_net(net: Net) -> Unit !{IO} =
   match net with
   | Net w1 b1 w2 b2 ->
       do
-        let fill_w1 = \ (s, k) -> do
-              let cols = mutmatrix_cols(w1)
-              mutmatrix_set(w1, k / cols, k - (k / cols) * cols, lcg_to_weight(s))
-              lcg_next(s)
-        let fill_b1 = \ (s, k) -> do
-              mutvec_set(b1, k, lcg_to_weight(s))
-              lcg_next(s)
-        let fill_w2 = \ (s, k) -> do
-              let cols = mutmatrix_cols(w2)
-              mutmatrix_set(w2, k / cols, k - (k / cols) * cols, lcg_to_weight(s))
-              lcg_next(s)
-        let fill_b2 = \ (s, k) -> do
-              mutvec_set(b2, k, lcg_to_weight(s))
-              lcg_next(s)
-        s1 <- range_fold(fill_w1, 12345, range(0, n_hid * n_in - 1))
-        s2 <- range_fold(fill_b1, s1, range(0, n_hid - 1))
-        s3 <- range_fold(fill_w2, s2, range(0, n_out * n_hid - 1))
-        _ <- range_fold(fill_b2, s3, range(0, n_out - 1))
+        s1 <- fill_matrix_lcg(w1, 12345)
+        s2 <- fill_vec_lcg(b1, n_hid, s1)
+        s3 <- fill_matrix_lcg(w2, s2)
+        _ <- fill_vec_lcg(b2, n_out, s3)
         ()
 
 # ---------------------------------------------------------------------------
@@ -163,8 +170,8 @@ fn forward(ctx: Ctx, x: MutVec Double) -> Unit !{IO} =
               b <- mutvec_get(b2, o)
               z <- mutmatrix_row_dot(w2, o, hidden, b)
               mutvec_set(out, o, z)
-        range_each(hidden_unit, range(0, n_hid - 1))
-        range_each(output_unit, range(0, n_out - 1))
+        range_each(hidden_unit, upto(n_hid))
+        range_each(output_unit, upto(n_out))
 
 # argmax over the output layer, as a fold threading (best_index, best_value).
 fn predict(out: MutVec Double) -> Int !{IO} =
@@ -173,29 +180,25 @@ fn predict(out: MutVec Double) -> Int !{IO} =
           v <- mutvec_get(out, o)
           match acc with
           | (best_i, best_v) -> if v > best_v then (o, v) else (best_i, best_v)
-    result <- range_fold(step, (0, -1000000.0), range(0, n_out - 1))
+    result <- range_fold(step, (0, -1000000.0), upto(n_out))
     match result with | (best_i, _) -> best_i
 
 # ---------------------------------------------------------------------------
 # Backpropagation with inline SGD weight updates
 # ---------------------------------------------------------------------------
-# Three phase-closures, each capturing the ctx buffers + learning rate.  Order
-# matters: dhidden is accumulated from the OLD W2 before W2/B2 are updated.
+# Two phase-closures, each capturing the ctx buffers + learning rate. Per output o,
+# dhidden accumulates from row o of the OLD W2 *before* that same row is overwritten —
+# each o owns a distinct W2 row, so read-before-write keeps every read on the old value.
 fn backprop(ctx: Ctx, x: MutVec Double, label: Int, lr: Double) -> Unit !{IO} =
   match ctx with
   | Ctx (Net w1 b1 w2 b2) hidden out dhidden ->
       do
-        # dhidden[h] += dout_o * W2[o][h], summed over outputs (uses OLD W2).
-        let accum_dhidden = \o -> do
-              oo <- mutvec_get(out, o)
-              let dout_o = 2.0 * (oo - target_of(o, label))
-              # dhidden[h] += dout_o * W2[o][h], ascending h — fused kernel (no per-element
-              # mutvec_get/set closure). Bit-identical to the old `cur + dout_o * wh` loop.
-              mutmatrix_row_add_scaled_into(dhidden, w2, o, dout_o)
-        # Update W2[o][h] and B2[o] toward the gradient for output o.
+        # Output o: fold row o into dhidden (uses OLD W2[o]), then update W2[o] and B2[o].
         let update_output = \o -> do
               oo <- mutvec_get(out, o)
               let dout_o = 2.0 * (oo - target_of(o, label))
+              # dhidden[h] += dout_o * W2[o][h], ascending h — fused kernel, reads old row.
+              mutmatrix_row_add_scaled_into(dhidden, w2, o, dout_o)
               _ <- mutmatrix_row_sub_scaled_inplace(w2, o, hidden, lr * dout_o)
               bo <- mutvec_get(b2, o)
               mutvec_set(b2, o, bo - lr * dout_o)
@@ -208,9 +211,8 @@ fn backprop(ctx: Ctx, x: MutVec Double, label: Int, lr: Double) -> Unit !{IO} =
               bh <- mutvec_get(b1, h)
               mutvec_set(b1, h, bh - lr * dz)
         mutvec_map_inplace(\_ -> 0.0, dhidden)
-        range_each(accum_dhidden, range(0, n_out - 1))
-        range_each(update_output, range(0, n_out - 1))
-        range_each(update_hidden, range(0, n_hid - 1))
+        range_each(update_output, upto(n_out))
+        range_each(update_hidden, upto(n_hid))
 
 # ---------------------------------------------------------------------------
 # Training and evaluation
