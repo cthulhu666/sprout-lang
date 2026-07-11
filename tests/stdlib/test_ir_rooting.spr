@@ -471,6 +471,57 @@ fn test19_program() -> sprout_ir.IRProgram =
       Nil)),
     Nil), Nil, Nil, Nil)
 
+# ---------------------------------------------------------------------------
+# B2 reach extension: op_triggers_gc also peeks the callee name for
+# IRCallUnboxed2 (the CPR-unboxed reads the Tier-1 peephole emits for
+# matched/do-bound Maybe-returning externs).  Non-allocating unboxed variants
+# become non-triggers; the two that allocate their payload stay triggers.
+#
+# Test 20: a heap value (%p) live across `vector_get_unboxed` (IRCallUnboxed2) is
+# NOT rooted.  vector_get_unboxed returns { tag, v->data[index] } by value — no
+# allocation (runtime/sprout_runtime.c:4410).  Pre-fix (blanket IRCallUnboxed2 ->
+# trigger): %p IS rooted.  Post-fix: 0 pushes.  RED on current code.
+fn test20_program() -> sprout_ir.IRProgram =
+  sprout_ir.IRProgram(Cons(
+    sprout_ir.IRFunction("vget_unboxed_nontrigger",
+      Cons(("p", sprout_ir.IRTHeap), Cons(("v", sprout_ir.IRTHeap), Nil)), "i64", Cons(
+      sprout_ir.IRBlock("entry",
+        Cons(sprout_ir.IRConst("%i", 0),
+        Cons(sprout_ir.IRCallUnboxed2("%tag", "%vo", sprout_ir.IRTScalar,
+                                      "vector_get_unboxed", Cons("%v", Cons("%i", Nil))),
+        Cons(sprout_ir.IRRet("%p"), Nil)))),
+      Nil)),
+    Nil), Nil, Nil, Nil)
+
+# Test 21 (negative lock): `regex_find_range_unboxed` — an unboxed variant that
+# DOES allocate its payload (@sprout_alloc_range_val, runtime:4404) — STAYS a
+# trigger.  Guards against whitelisting every `_unboxed` name blindly.
+fn test21_program() -> sprout_ir.IRProgram =
+  sprout_ir.IRProgram(Cons(
+    sprout_ir.IRFunction("regex_unboxed_trigger",
+      Cons(("p", sprout_ir.IRTHeap), Cons(("pat", sprout_ir.IRTHeap),
+      Cons(("txt", sprout_ir.IRTHeap), Nil))), "i64", Cons(
+      sprout_ir.IRBlock("entry",
+        Cons(sprout_ir.IRCallUnboxed2("%tag", "%ro", sprout_ir.IRTHeap,
+                                      "regex_find_range_unboxed", Cons("%pat", Cons("%txt", Nil))),
+        Cons(sprout_ir.IRRet("%p"), Nil))),
+      Nil)),
+    Nil), Nil, Nil, Nil)
+
+# Test 22: `env_get_unboxed` is a NON-trigger — it returns getenv()'s pointer
+# (runtime:4342), no allocation.  Locks the corrected fact that env_get does NOT
+# allocate (the handoff wrongly listed it among the allocators).  RED pre-fix.
+fn test22_program() -> sprout_ir.IRProgram =
+  sprout_ir.IRProgram(Cons(
+    sprout_ir.IRFunction("env_get_unboxed_nontrigger",
+      Cons(("p", sprout_ir.IRTHeap), Cons(("name", sprout_ir.IRTHeap), Nil)), "i64", Cons(
+      sprout_ir.IRBlock("entry",
+        Cons(sprout_ir.IRCallUnboxed2("%tag", "%eo", sprout_ir.IRTHeap,
+                                      "env_get_unboxed", Cons("%name", Nil)),
+        Cons(sprout_ir.IRRet("%p"), Nil))),
+      Nil)),
+    Nil), Nil, Nil, Nil)
+
 fn main() -> Unit !{IO} =
   do
     state <- new_state()
@@ -600,5 +651,17 @@ fn main() -> Unit !{IO} =
     # --- Test 19 (B2): vector_mutset is a NON-trigger — plain store, no alloc.
     assert_false(state, "T19: no push_i64_root across vector_mutset (non-allocating store)",
                  contains(lower(test19_program()), "call i64 @sprout_gc_push_i64_root"))
+
+    # --- Test 20 (B2 reach): vector_get_unboxed (IRCallUnboxed2) is a NON-trigger.
+    assert_false(state, "T20: no push_i64_root across vector_get_unboxed (non-allocating unboxed read)",
+                 contains(lower(test20_program()), "call i64 @sprout_gc_push_i64_root"))
+
+    # --- Test 21 (negative lock): regex_find_range_unboxed STAYS a trigger (allocates payload).
+    assert_true(state, "T21: regex_find_range_unboxed (allocating unboxed) still roots the live heap value",
+                contains(lower(test21_program()), "call i64 @sprout_gc_push_i64_root"))
+
+    # --- Test 22 (B2 reach): env_get_unboxed is a NON-trigger (returns getenv ptr, no alloc).
+    assert_false(state, "T22: no push_i64_root across env_get_unboxed (non-allocating unboxed read)",
+                 contains(lower(test22_program()), "call i64 @sprout_gc_push_i64_root"))
 
     summary(state)

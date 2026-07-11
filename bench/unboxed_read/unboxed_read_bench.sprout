@@ -1,0 +1,45 @@
+module main
+
+# Microbenchmark witness for Phase D "B2 reach extension" (non-allocating
+# IRCallUnboxed2 root elision).  A tight sum over a MutVec Int: each iteration
+# does a do-bound `mutvec_get` (CPR-unboxes to `vector_get_unboxed`) with the
+# heap vector live across the read and no other trigger in the body — the
+# pattern that is root-bound on the unboxed read.  Isolates the win that heavier
+# loops (A*) dilute.  Prints a checksum and the wall time in microseconds.
+
+import stdlib.mutable (MutVec, mutvec_new, mutvec_get, mutvec_set)
+
+# v[i] = i, so the per-pass sum is 0 + 1 + … + (n-1).
+fn fill(v: MutVec Int, i: Int, n: Int) -> Unit !{IO} =
+  if i >= n then ()
+  else
+    do
+      _ <- mutvec_set(v, i, i)
+      fill(v, i + 1, n)
+
+fn sum_go(v: MutVec Int, i: Int, n: Int, acc: Int) -> Int !{IO} =
+  if i >= n then acc
+  else
+    do
+      x <- mutvec_get(v, i)
+      sum_go(v, i + 1, n, acc + x)
+
+fn repeat_sum(v: MutVec Int, n: Int, reps: Int, acc: Int) -> Int !{IO} =
+  if reps <= 0 then acc
+  else
+    do
+      s <- sum_go(v, 0, n, 0)
+      repeat_sum(v, n, reps - 1, acc + s)
+
+fn main() -> Unit !{IO} =
+  do
+    v <- mutvec_new(1000, 0)
+    _ <- fill(v, 0, 1000)
+    t0 <- time_now_micros()
+    total <- repeat_sum(v, 1000, 100000, 0)
+    t1 <- time_now_micros()
+    print("checksum=")
+    print(total)
+    print(" time_us=")
+    print(t1 - t0)
+    print("\n")

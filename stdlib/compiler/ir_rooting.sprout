@@ -47,6 +47,30 @@ fn is_nonallocating_read(fname: String) -> Bool =
   || fname == "vector_mutset"
   || fname == "vector_length"
 
+# B2 reach extension.  The Tier-1 CPR peephole rewrites a matched/do-bound
+# Maybe-returning read into an `_unboxed` { i64, i64 } extern (IRCallUnboxed2),
+# which returns { tag, value } BY VALUE.  The reads below build no Sprout heap
+# object (all verified in runtime/sprout_runtime.c — only add a name after
+# reading its body):
+#   vector_get_unboxed (4410), map_get_unboxed (4417), map_nth_key_unboxed (4425),
+#   map_nth_value_unboxed (4431), bytes_get_unboxed (4437) — return data[i] /
+#     node->key / node->value directly.
+#   str_char_at_unboxed (4372) — returns the decoded codepoint (immediate i64).
+#   argv_get_unboxed (4349), env_get_unboxed (4342) — return an existing
+#     argv / getenv() pointer (no Sprout allocation).
+# EXCLUDED (they DO allocate their payload → MUST stay triggers):
+#   regex_find_range_unboxed (4404, @sprout_alloc_range_val),
+#   term_read_line_unboxed (4368, register_cstr).
+fn is_nonallocating_unboxed_read(fname: String) -> Bool =
+  fname == "vector_get_unboxed"
+  || fname == "map_get_unboxed"
+  || fname == "map_nth_key_unboxed"
+  || fname == "map_nth_value_unboxed"
+  || fname == "bytes_get_unboxed"
+  || fname == "str_char_at_unboxed"
+  || fname == "argv_get_unboxed"
+  || fname == "env_get_unboxed"
+
 fn op_triggers_gc(op: sprout_ir.IROp) -> Bool =
   match op with
   | sprout_ir.IRStrSlice _ _ _ _ -> true
@@ -64,10 +88,12 @@ fn op_triggers_gc(op: sprout_ir.IROp) -> Bool =
   # callee not on the list (correctness > optimization).
   | sprout_ir.IRCall _ _ fname _ -> if is_nonallocating_read(fname) then false else true
   # IRCallUnboxed2 calls a C `_unboxed` extern.  Most (vector_get, map_get, …)
-  # do not allocate, but regex_find_range_unboxed / term_read_line_unboxed still
-  # allocate their payload before returning — so, like IRCall, conservatively a
-  # trigger.  Purely additive (over-roots the non-allocating variants).
-  | sprout_ir.IRCallUnboxed2 _ _ _ _ _ -> true
+  # return { tag, value } by value and do NOT allocate; regex_find_range_unboxed
+  # and term_read_line_unboxed still allocate their payload.  Peek the callee name
+  # (B2 reach extension): non-trigger for the verified non-allocating variants,
+  # trigger otherwise.
+  | sprout_ir.IRCallUnboxed2 _ _ _ fname _ ->
+      if is_nonallocating_unboxed_read(fname) then false else true
   # IRRetUnboxed2 is a terminator: two insertvalues + ret, pure — no allocation.
   | sprout_ir.IRRetUnboxed2 _ _ _ -> false
   # IRMakeCtor lowers to @sprout_makeN which always allocates; trigger.
@@ -657,8 +683,10 @@ fn op_exposes_operands(op: sprout_ir.IROp) -> Bool =
   # consulted for ops op_triggers_gc already classified as triggers (process_op),
   # so an allow-listed read short-circuits upstream and never reaches this arm.
   | sprout_ir.IRCall _ _ _ _ -> true
-  # Like IRCall, an unboxed extern may collect before consuming its operands;
-  # root the heap operands across it (additive — only adds roots).
+  # Like IRCall, an allocating unboxed extern may collect before consuming its
+  # operands; root the heap operands across it (additive — only adds roots).  The
+  # non-allocating allow-list is enforced upstream in op_triggers_gc, so an
+  # allow-listed unboxed read short-circuits and never reaches this arm.
   | sprout_ir.IRCallUnboxed2 _ _ _ _ _ -> true
   # IRRetUnboxed2 is a terminator: insertvalue+ret, no allocation, no exposure.
   | sprout_ir.IRRetUnboxed2 _ _ _ -> false

@@ -181,11 +181,22 @@ reconverges to a new fixed point (3 refresh-seed iterations).
 (~1.8×)** at unchanged accuracy `139/150` — the 3 GC-root calls/element were the dominant cost, as
 the profile predicted. A* (~305 µs) and nqueens N=12 (~500 ms) flat = **no regression**. A* got no *win* not because its
 wrapper allocates — CPR unboxing already sees through `mutvec_get` and emits the non-allocating
-`vector_get_unboxed` (verified: `astar.sprout --emit-ir` has 4) — but because this commit
-reclassifies only plain `IRCall`, not the `IRCallUnboxed2` op unboxing produces. Extending the
-allow-list to non-allocating `IRCallUnboxed2` variants is the follow-up that reaches idiomatic
-MutVec/Map reads (per-name runtime verification; exclude `regex_find_range`/`term_read_line`/`env_get`
-_unboxed, which allocate). nqueens' cost is persistent `vec_set` copies, outside B2 entirely.
+`vector_get_unboxed` (verified: `astar.sprout --emit-ir` has 4) — but because the B2 commit
+reclassifies only plain `IRCall`, not the `IRCallUnboxed2` op unboxing produces. nqueens' cost is
+persistent `vec_set` copies, outside B2 entirely.
+
+**B2 reach extension — LANDED 2026-07-11** (`IRCallUnboxed2` allow-list). `op_triggers_gc` also peeks
+the `IRCallUnboxed2` callee (`is_nonallocating_unboxed_read`): non-trigger for the 8 verified
+non-allocating unboxed reads (`vector_get_unboxed`, `map_get_unboxed`, `map_nth_key/value_unboxed`,
+`bytes_get_unboxed`, `str_char_at_unboxed`, `argv_get_unboxed`, `env_get_unboxed`), trigger for the 2
+that allocate (`regex_find_range_unboxed` → `@sprout_alloc_range_val`; `term_read_line_unboxed` →
+`register_cstr`). **Correction to the note above:** `env_get_unboxed` does **not** allocate (returns
+`getenv()`'s pointer, runtime:4342) — the landmine set is only those 2. **Result** (bench
+`results-2026-07-11-unboxed-reach.md`): a tight `MutVec Int` sum loop (root-bound on the unboxed read)
+runs **~1.3× faster** (~8.3→6.3 ns/read); A*/nqueens/recognizer flat = no regression (not root-bound
+on unboxed reads). The win removes the **worker-internal** root around `vector_get_unboxed`; the
+larger per-read root — around the `mutvec_get_worker` *call* itself (a Sprout `IRCall`) — remains, and
+needs interprocedural non-allocation inference (the Koka-style analysis in BACKLOG).
 
 Note that once B1 makes access inline (no call), the *only* calls left in the loop are the GC-root
 ops themselves, so eliding them can make the body call-free — the precondition for vectorization.
