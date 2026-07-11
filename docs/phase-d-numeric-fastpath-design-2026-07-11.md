@@ -34,13 +34,18 @@ decisive backing.) Both are compiler/IR concerns. This is what Phase D must atta
 
 ## 2. Goals and non-goals
 
-**Goals.** For tight loops over monomorphic `Vector Double` (hence `MutVec Double` /
-`MutMatrix Double`):
+**Framing.** The digit recognizer is a *proxy* for Sprout's general performance, not the target. So
+the primary lever (B1) is scoped to the **primitive `Vector` layer**, keyed on the **element type**,
+not to `MutVec`/`MutMatrix` as containers. `MutVec`/`MutMatrix`/`Vec` are all thin wrappers over
+`Vector`; a fix at the `Vector` layer lights up every container built on it. The recognizer's
+Double kernels are the validation case, not the scope.
+
+**Goals.** For any statically-monomorphic `Vector T` element access:
 1. Element read/write is **not an opaque runtime call** — it lowers to inline IR
    (`getelementptr` + `load`/`store`) whose bounds check LLVM's `prove`/`indvars` passes can hoist
-   or eliminate.
+   or eliminate. Read generalizes to every `T`; write is scalar-`T` first (see §4 B1).
 2. Pointers that are only **read** inside an **allocation-free leaf loop** are **not rooted
-   per-iteration**.
+   per-iteration** (element-type-agnostic; the broadest lever — helps any allocation-free loop).
 3. The two **independent-write** kernels (`row_sub_scaled_inplace`, `row_add_scaled_into`) become
    **autovectorizable** — subject to the loop-shape checkpoint in §4 B3 (removing the calls is
    necessary but may not be sufficient; the TCO loop shape may still block the vectorizer).
@@ -49,7 +54,10 @@ decisive backing.) Both are compiler/IR concerns. This is what Phase D must atta
 
 **Non-goals.**
 - A user-facing SIMD intrinsic surface, or a general linear-algebra library.
-- Changing the uniform-i64 ABI *globally* (only a Double fast path is in scope).
+- Inlining access for **polymorphic** `Vector a` (element type erased to a type variable) — those
+  keep the runtime call. Scope is *monomorphic* sites only.
+- Inlining **pointer-element writes** in the first slice (kept at the `vector_mutset` chokepoint for
+  the Phase 2 GC write barrier — see §4 B1).
 - Any GC algorithm change (non-moving generational per the GC end-state decision stands).
 - `Float`/f32, string→float parse, `to_int`/`fptosi` — tracked elsewhere.
 - Auto-vectorizing the **dot reduction** by default — see §5, this reorders FP adds.
@@ -80,21 +88,50 @@ fast numeric runtime already does and Sprout does not.
 
 Ordered by evidence-weighted value (biggest lever first). **B before A.**
 
-### B1 — inlinable monomorphic `Vector Double` element access
-The compiler already lowers a Double `fmul`/`fadd` inline; only the *access* is a call. Replace the
-`call @vector_get_direct(vec, i)` / `call @vector_mutset(vec, i, x)` emitted inside a
-statically-monomorphic `Vector Double` context with **inline IR**: load the data pointer + length
-from the Vector header, emit an inline bounds `icmp`+branch (identical trap behavior), then
-`getelementptr double` + `load`/`store`. Because the check is now *in the IR*, LLVM can prove-and-
-hoist or eliminate it and (for independent writes) vectorize.
-- **Prerequisite:** a documented `Vector` layout ABI contract (header word(s), length, data ptr)
-  shared between `runtime/sprout_runtime.c` and codegen — today the layout is private to the
-  runtime. This is the one runtime-coupling item and needs its own review against the GC header
-  plans (Phase 2 header rewrite).
-- **Rejected alternative (measured):** compiling the runtime with `-flto` so clang inlines
-  `vector_get_direct`. **Proven ineffective** — the kernel loop was byte-for-byte unchanged and
-  wall did not move (evidence in the perf plan). The inliner declines, and the GC-root calls are
-  optimization barriers regardless. Inlining must happen at *our* IR layer.
+### B1 — inlinable monomorphic `Vector T` element access (generalized, not Double-only)
+Replace the `call @vector_get_direct(vec, i)` / `call @vector_mutset(vec, i, x)` emitted at a
+**statically-monomorphic `Vector T`** site with **inline IR**: load the data pointer + length from
+the Vector header, emit an inline bounds `icmp`+branch (identical trap behavior), then
+`getelementptr` + `load`/`store` at index `i`. Because the check is now *in the IR*, LLVM can
+prove-and-hoist or eliminate it and (for independent writes) vectorize.
+
+**Why this is not Double-specific.** Every `Vector T` stores uniform 64-bit slots
+(`v->data[index]`), so the *read* is the same slot load for every `T`; the value returns exactly as
+`vector_get_direct` yields it today. Double is not load-bearing for the read. The real axis is
+**scalar vs pointer element**, and it splits read from write:
+
+- **Read — generalizes to every monomorphic `T`, one slice.** The result's rooting is preserved by
+  the existing rooting pass, which is **value-kind-driven, not call-site-driven**: `ir_rooting`
+  seeds its root scope from whatever op produces a heap-typed value, keyed by kind (`IRTScalar` →
+  never rooted; `IRTHeap`/unknown → rooted across later triggers), and *already* classifies
+  `vector_get_direct`'s result by element-type kind (a `Vector String` read is rooted today; a
+  `Vector Double` read is not). So the new inlined-read op must be added to that **exhaustive** (no
+  `_` catch-all → fail-loud) classifier, reporting its result kind by element type: scalar → no root
+  (a win), pointer → rooted exactly as before. No rooting-model rewrite needed.
+- **Write — inline for scalar `T` now; keep pointer-element writes as `vector_mutset`.** Today
+  `vector_mutset` has no write barrier, so a scalar store inlines to a plain `store` safely. Pointer
+  stores stay at the `vector_mutset` call: the Phase 2 generational GC will add a write barrier
+  there, and one chokepoint is where that work should land. Revisit inlining pointer writes when the
+  Phase 2 barrier exists.
+
+**Two prerequisites to verify at implementation time (assumed, not confirmed):**
+1. The concrete element-type kind reaches the active typed-lowering site (`ast_to_ir`→`sprout_ir`→
+   `ir_lowering`) so a `vector_get_direct`/`vector_mutset` call can be classified scalar/pointer
+   (via the `field_kinds` IR-type machinery). If the type is erased by then, un-erasing it is a
+   prerequisite task, not a detail.
+2. A **pointer-element** read held live across an allocation is validated under
+   `SPROUT_GC_STRESS=1` (`just test-stress`), the rooting-bug oracle — a dropped root is a
+   false-green under default tests. Probe: `Vector String` (or `Vector` of an ADT) read, held across
+   an allocating call, under stress.
+
+**Prerequisite (shared):** a documented `Vector` layout ABI contract (header word(s), length, data
+ptr) shared between `runtime/sprout_runtime.c` and codegen — today the layout is private to the
+runtime. Review against the GC header plans (Phase 2 header rewrite).
+
+**Rejected alternative (measured):** compiling the runtime with `-flto` so clang inlines
+`vector_get_direct`. **Proven ineffective** — the kernel loop was byte-for-byte unchanged and wall
+did not move (evidence in the perf plan). The inliner declines, and the GC-root calls are
+optimization barriers regardless. Inlining must happen at *our* IR layer.
 
 ### B2 — leaf-loop GC-root elision
 In a loop body with **no allocation and no call that can trigger GC** between a pointer's root and
@@ -144,9 +181,11 @@ which changes the result and would move the golden `139/150`. Therefore:
   must **not** enable fast-math reassociation.
 
 ## 6. Type-system impact
-Minimal. The fast path is guarded on the element type being statically `Double`; polymorphic
-`Vector a` access is unchanged. No new surface types (A adds an internal specialized store, not a
-user-visible type).
+Minimal. The read fast path is guarded on the element type being statically **known** (any
+monomorphic `T`), classified scalar/pointer via the existing `field_kinds` IR-type machinery; the
+write fast path additionally requires scalar `T` (first slice). Polymorphic `Vector a` (erased
+element type) is unchanged — it keeps the runtime call. No new surface types (A adds an internal
+specialized store, not a user-visible type).
 
 ## 7. Error-message impact
 None by default: the inlined bounds check preserves the exact same OOB trap/`Nothing` behavior as
@@ -160,13 +199,19 @@ and must be refreshed per the seed gate — unlike the Phase B follow-up, which 
 untouched.
 
 ## 9. Tests added / updated
-- **IR-shape test:** the Double kernel IR contains `getelementptr double` + inline bounds `icmp`,
-  and **no** `call @vector_get_direct`.
+- **IR-shape test:** a monomorphic `Vector Double` read lowers to `getelementptr` + inline bounds
+  `icmp` + `load`, and **no** `call @vector_get_direct`. Add a scalar non-Double case
+  (`Vector Int`) to prove the generalization.
+- **Pointer-element rooting (the generalization's real risk):** a `Vector String` (or `Vector` of
+  an ADT) read held live across an allocating call, validated under `just test-stress`
+  (`SPROUT_GC_STRESS=1`) — the rooting-bug oracle; a dropped root is a false-green under default
+  tests. This gates whether pointer-element reads ship in the first slice.
 - **Vectorization asm check:** `row_sub_scaled`/`row_add_scaled_into` emit vector (`.2d`) ops.
 - **Bit-identical accuracy gate:** recognizer stays `139/150` (discriminating `assert_true`+`==`,
   never `assert_eq` on Double).
-- **GC correctness:** the root-elision (B2) validated under `just test-stress`
-  (`SPROUT_GC_STRESS=1`), the rooting-bug oracle — default greens are insufficient.
+- **GC correctness (B2):** root-elision validated under `SPROUT_GC_STRESS=1` too.
+- **Polymorphic fallback:** a `Vector a` access at a polymorphic site still emits the runtime call
+  (no mis-inlining of an erased element type).
 - Existing `tests/stdlib/test_native_mutmatrix.spr` kernel semantics tests must stay green.
 
 ## 10. Spec / docs status
@@ -180,8 +225,18 @@ Phase D results when it lands.
 ## Recommendation
 
 Approve **B1 + B2** as the Phase D first slice (biggest measured lever, safety-preserving,
-bit-identical), scoped to the monomorphic `Double` kernels, with the `Vector` layout ABI contract
-reviewed against the Phase 2 GC header rewrite. Then hit the **B3 checkpoint** (measure whether the
-row-update kernels actually vectorize; if not, add loop-shaped codegen). Hold **A** (Double no-scan
-store — GC-precision rationale, materiality-gated) and any **SIMD dot reduction** (changes FP order)
-as separately-gated follow-ons. Every slice keeps the `139/150` accuracy gate.
+bit-identical), scoped to **any monomorphic `Vector T`** — not just Double — because the recognizer
+is a proxy and the fix lives at the primitive `Vector` layer, benefiting `Vec`/`MutVec`/`MutMatrix`
+and every future `Vector`-backed container:
+- **B1 read:** all monomorphic `T` in one slice (rooting is value-kind-driven; add the inlined-read
+  op to the exhaustive classifier). **B1 write:** scalar `T` now; pointer-element writes stay at the
+  `vector_mutset` chokepoint for the Phase 2 GC barrier.
+- **B2:** element-type-agnostic — helps any allocation-free loop.
+- Two implementation-time prechecks decide whether pointer-element *reads* also ship in slice 1:
+  (1) the element-type kind reaches the typed-lowering site; (2) the `Vector String`-across-alloc
+  case is green under `SPROUT_GC_STRESS=1`. If either fails, pointer-element reads become slice 2.
+
+Then hit the **B3 checkpoint** (measure whether the row-update kernels vectorize; if not, add
+loop-shaped codegen). Hold **A** (Double no-scan store — GC-precision rationale, materiality-gated)
+and any **SIMD dot reduction** (changes FP order) as separately-gated follow-ons. The Double kernels
+are the validation case; the `139/150` accuracy gate holds on every slice.
