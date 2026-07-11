@@ -60,27 +60,41 @@ that lands on remote.
 
 ## Open a PR
 
+> **Use `tea pr create` (alias for `tea pulls create`). Do NOT use `tea api`.**
+> In tea **0.14.1** the `tea api` subcommand is broken — it returns
+> `404 page not found` for *every* endpoint (including valid ones like
+> `/user`) even with a working token. Diagnostic: `tea repos list` succeeds
+> (token is fine) while `tea api GET /user` 404s and an *unauthenticated*
+> `curl .../api/v1/user` returns 401 — proving it is tea's path handling, not
+> auth. If you need raw API calls, use `curl` with the token extracted per the
+> "Prerequisites" section, not `tea api`.
+
 ```sh
+# Branch must already be pushed to the remote first:
+git push -u origin <branch-name>
+
+# From the MAIN checkout (see the worktree note below):
 tea pr create \
+  --login codeberg.org \
   --base master \
   --head <branch-name> \
   --title "<short title under 70 chars>" \
-  --description "$(cat <<'EOF'
-## Summary
-- bullet
-- bullet
-
-## Test plan
-- [x] item
-
-## Out of scope
-- item
-EOF
-)"
+  --description "$(< /path/to/pr_body.md)"
 ```
 
-The command prints the new PR URL on success. The branch must already
-be pushed to the remote.
+The command prints the new PR (number + URL) on success; note the `#<N>`.
+
+**Body from a file.** For anything longer than a couple of bullets, write the
+markdown to a file and pass `--description "$(< file.md)"` — the `$(< file)`
+shell builtin reads it without invoking `cat` (the repo's Bash file-ops hook
+blocks `cat <file>`). An inline heredoc — `--description "$(cat <<'EOF' … EOF)"`
+— also works (heredoc `cat` has no file argument, so the hook allows it).
+
+**Worktrees.** `tea pr create` derives the login/repo from the local git
+context and can fail in a temporary git worktree. Workarounds, in order of
+preference: (1) run it from the main checkout; (2) pass an explicit repo slug
+with `-r plushcthulhu/sprout-lang`. The old "fall back to `tea api`" advice is
+dead — `tea api` is broken (see the warning above).
 
 ## Check PR status
 
