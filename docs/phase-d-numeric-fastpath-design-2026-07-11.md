@@ -179,8 +179,13 @@ reconverges to a new fixed point (3 refresh-seed iterations).
 
 **Results (M1-class, warm; see `bench/results-2026-07-11-b2.md`):** recognizer **3.03s → 1.67s
 (~1.8×)** at unchanged accuracy `139/150` — the 3 GC-root calls/element were the dominant cost, as
-the profile predicted. A* (~305 µs) and nqueens N=12 (~500 ms) flat = **no regression** (their reads
-route through the allocating `vector_get` wrapper / persistent `vec_set`, outside B2's reach).
+the profile predicted. A* (~305 µs) and nqueens N=12 (~500 ms) flat = **no regression**. A* got no *win* not because its
+wrapper allocates — CPR unboxing already sees through `mutvec_get` and emits the non-allocating
+`vector_get_unboxed` (verified: `astar.sprout --emit-ir` has 4) — but because this commit
+reclassifies only plain `IRCall`, not the `IRCallUnboxed2` op unboxing produces. Extending the
+allow-list to non-allocating `IRCallUnboxed2` variants is the follow-up that reaches idiomatic
+MutVec/Map reads (per-name runtime verification; exclude `regex_find_range`/`term_read_line`/`env_get`
+_unboxed, which allocate). nqueens' cost is persistent `vec_set` copies, outside B2 entirely.
 
 Note that once B1 makes access inline (no call), the *only* calls left in the loop are the GC-root
 ops themselves, so eliding them can make the body call-free — the precondition for vectorization.
