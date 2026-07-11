@@ -587,6 +587,59 @@ fn test25_program() -> sprout_ir.IRProgram =
       Nil)),
     Nil)), Nil, Nil, Nil)
 
+# Test 26: TRANSITIVE non-allocation over a 3-deep chain f26 -> a26 -> b26, where
+# b26 is non-allocating (arithmetic).  The least fixpoint must propagate
+# may=false up two hops, so f26's call to a26 is a non-trigger and the heap %p
+# held live across it is NOT rooted.  Exercises multi-round convergence (T23-T25
+# are single-hop / self-recursive).  0 pushes.
+fn test26_program() -> sprout_ir.IRProgram =
+  sprout_ir.IRProgram(Cons(
+    sprout_ir.IRFunction("f26",
+      Cons(("p", sprout_ir.IRTHeap), Cons(("x", sprout_ir.IRTScalar), Nil)), "i64", Cons(
+      sprout_ir.IRBlock("entry",
+        Cons(sprout_ir.IRCall("%r0", sprout_ir.IRTScalar, "a26", Cons("%x", Nil)),
+        Cons(sprout_ir.IRRet("%p"), Nil))),
+      Nil)),
+    Cons(
+    sprout_ir.IRFunction("a26", Cons(("x", sprout_ir.IRTScalar), Nil), "i64", Cons(
+      sprout_ir.IRBlock("entry",
+        Cons(sprout_ir.IRCall("%r", sprout_ir.IRTScalar, "b26", Cons("%x", Nil)),
+        Cons(sprout_ir.IRRet("%r"), Nil))),
+      Nil)),
+    Cons(
+    sprout_ir.IRFunction("b26", Cons(("x", sprout_ir.IRTScalar), Nil), "i64", Cons(
+      sprout_ir.IRBlock("entry",
+        Cons(sprout_ir.IRIAdd("%r", "%x", "%x"),
+        Cons(sprout_ir.IRRet("%r"), Nil))),
+      Nil)),
+    Nil))), Nil, Nil, Nil)
+
+# Test 27: TRANSITIVE allocation must propagate up the same 3-deep chain — b27
+# allocates (IRMakeCtor), so may=true flows b27 -> a27 -> f27's call site, and
+# %p held live across the a27 call IS rooted.  Locks that the fixpoint does not
+# lose a transitively-allocating callee.  >= 1 push.
+fn test27_program() -> sprout_ir.IRProgram =
+  sprout_ir.IRProgram(Cons(
+    sprout_ir.IRFunction("f27",
+      Cons(("p", sprout_ir.IRTHeap), Cons(("x", sprout_ir.IRTScalar), Nil)), "i64", Cons(
+      sprout_ir.IRBlock("entry",
+        Cons(sprout_ir.IRCall("%r0", sprout_ir.IRTScalar, "a27", Cons("%x", Nil)),
+        Cons(sprout_ir.IRRet("%p"), Nil))),
+      Nil)),
+    Cons(
+    sprout_ir.IRFunction("a27", Cons(("x", sprout_ir.IRTScalar), Nil), "i64", Cons(
+      sprout_ir.IRBlock("entry",
+        Cons(sprout_ir.IRCall("%r", sprout_ir.IRTScalar, "b27", Cons("%x", Nil)),
+        Cons(sprout_ir.IRRet("%r"), Nil))),
+      Nil)),
+    Cons(
+    sprout_ir.IRFunction("b27", Cons(("x", sprout_ir.IRTScalar), Nil), "i64", Cons(
+      sprout_ir.IRBlock("entry",
+        Cons(sprout_ir.IRMakeCtor("%c", "Box", 1, Cons("%x", Nil)),
+        Cons(sprout_ir.IRRet("%c"), Nil))),
+      Nil)),
+    Nil))), Nil, Nil, Nil)
+
 fn main() -> Unit !{IO} =
   do
     state <- new_state()
@@ -740,5 +793,13 @@ fn main() -> Unit !{IO} =
     # --- Test 25 (fixpoint recursion): self-recursive non-allocating fn stays non-trigger.
     assert_false(state, "T25: no push_i64_root across call to self-recursive non-allocating grec25",
                  contains(lower(test25_program()), "call i64 @sprout_gc_push_i64_root"))
+
+    # --- Test 26 (fixpoint transitive non-alloc): 3-deep non-allocating chain → elided.
+    assert_false(state, "T26: no push_i64_root across transitively non-allocating chain (f26->a26->b26)",
+                 contains(lower(test26_program()), "call i64 @sprout_gc_push_i64_root"))
+
+    # --- Test 27 (fixpoint transitive alloc): deepest fn allocates → propagates up → rooted.
+    assert_true(state, "T27: push_i64_root present across transitively allocating chain (f27->a27->b27)",
+                contains(lower(test27_program()), "call i64 @sprout_gc_push_i64_root"))
 
     summary(state)

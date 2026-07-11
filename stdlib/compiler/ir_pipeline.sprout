@@ -282,7 +282,7 @@ fn alloc_summary_or_empty(decls: List typed_ast.TypedDecl,
     | Ok s -> s
     | Err msg ->
         do
-          _ <- eprint("warning: alloc-summary pre-pass failed (" ++ msg ++ "); using conservative rooting\n")
+          _ <- eprint("warning: alloc-summary pre-pass failed (" ++ msg ++ "); using conservative rooting")
           dict_empty()
 
 # ---------------------------------------------------------------------------

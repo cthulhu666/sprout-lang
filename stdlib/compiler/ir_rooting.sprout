@@ -1082,17 +1082,6 @@ fn raw_names_loop(raw: List (String, (Bool, Set)), acc: Set) -> Set =
   | Nil -> acc
   | Cons (name, _) rest -> raw_names_loop(rest, set_insert(name, acc))
 
-# Collect the set of all program function names (used to classify callees).
-fn fn_names_set_loop(fns: List sprout_ir.IRFunction, acc: Set) -> Set =
-  match fns with
-  | Nil -> acc
-  | Cons f rest ->
-      match f with
-      | sprout_ir.IRFunction name _ _ _ -> fn_names_set_loop(rest, set_insert(name, acc))
-
-fn fn_names_set(fns: List sprout_ir.IRFunction) -> Set =
-  fn_names_set_loop(fns, set_empty())
-
 fn extract_raw_summaries(fns: List sprout_ir.IRFunction,
                          acc: List (String, (Bool, Set))) -> List (String, (Bool, Set)) =
   match fns with
@@ -1114,42 +1103,34 @@ fn any_callee_may(callees: List String, cur: Dict Bool) -> Bool =
   | Cons g rest -> if lookup_may(g, cur) then true else any_callee_may(rest, cur)
 
 # One fixpoint round: recompute may[F] = local_trigger[F] OR any callee may.
+# Returns (new map, its true-count) so convergence is a single Int compare — no
+# separate O(N) walk per round.
 fn fixpoint_round(entries: List (String, (Bool, List String)), cur: Dict Bool,
-                  acc: Dict Bool) -> Dict Bool =
+                  acc: Dict Bool, tcount: Int) -> (Dict Bool, Int) =
   match entries with
-  | Nil -> acc
+  | Nil -> (acc, tcount)
   | Cons (name, (lt, callees)) rest ->
-      fixpoint_round(rest, cur,
-        dict_set(name, lt || any_callee_may(callees, cur), acc))
+      match lt || any_callee_may(callees, cur) with
+      | v -> fixpoint_round(rest, cur, dict_set(name, v, acc),
+                            if v then tcount + 1 else tcount)
 
-fn count_true_loop(names: List String, d: Dict Bool, n: Int) -> Int =
-  match names with
-  | Nil -> n
-  | Cons name rest -> count_true_loop(rest, d, if lookup_may(name, d) then n + 1 else n)
-
-fn count_true(names: List String, d: Dict Bool) -> Int =
-  count_true_loop(names, d, 0)
-
-# Iterate rounds until the true-count is stable (monotone least fixpoint).
-fn fixpoint_iterate(entries: List (String, (Bool, List String)), names: List String,
-                    cur: Dict Bool) -> Dict Bool =
-  match fixpoint_round(entries, cur, dict_empty()) with
-  | next ->
-      if count_true(names, next) == count_true(names, cur)
+# Iterate rounds until the true-count is stable — a monotone least fixpoint (`true`
+# is absorbing, start all-false), so a round that flips nothing new is the exact
+# fixed point.  prev_count is the true-count of `cur` (0 for the empty seed).
+fn fixpoint_iterate(entries: List (String, (Bool, List String)),
+                    prev_count: Int, cur: Dict Bool) -> Dict Bool =
+  match fixpoint_round(entries, cur, dict_empty(), 0) with
+  | (next, next_count) ->
+      if next_count == prev_count
       then next
-      else fixpoint_iterate(entries, names, next)
-
-fn entry_names(entries: List (String, (Bool, List String)), acc: List String) -> List String =
-  match entries with
-  | Nil -> list_reverse(acc)
-  | Cons (name, _) rest -> entry_names(rest, Cons(name, acc))
+      else fixpoint_iterate(entries, next_count, next)
 
 # Public (streaming path): build the summary from raw per-function entries the
 # pre-pass collected one function at a time.  Names for callee resolution are the
 # raw entries' own names.
 export fn summary_from_raw(raw: List (String, (Bool, Set))) -> Dict Bool =
   match resolve_all(raw, raw_names_loop(raw, set_empty()), Nil) with
-  | resolved -> fixpoint_iterate(resolved, entry_names(resolved, Nil), dict_empty())
+  | resolved -> fixpoint_iterate(resolved, 0, dict_empty())
 
 # Public (batch path): build the summary directly from the whole function list.
 export fn compute_alloc_summary(fns: List sprout_ir.IRFunction) -> Dict Bool =
@@ -1188,10 +1169,6 @@ export fn rewrite_one_fn_with_summary(f: sprout_ir.IRFunction, idx_map: Dict Int
       match dict_get(name, idx_map) with
       | Just i -> rewrite_fn(f, i, prefix_for_fn(name), summary)
       | Nothing -> rewrite_fn(f, 0, prefix_for_fn(name), summary)
-
-# Back-compat shim: rooting a single function with no interprocedural summary.
-export fn rewrite_one_fn(f: sprout_ir.IRFunction, idx_map: Dict Int) -> sprout_ir.IRFunction =
-  rewrite_one_fn_with_summary(f, idx_map, dict_empty())
 
 # SSA fresh-name prefix for root-slot temps the rooting pass generates: always
 # "%t$".  Must match ast_to_ir.fresh_name (which hardcodes "%t$" for every body
