@@ -156,15 +156,34 @@ runtime. Review against the GC header plans (Phase 2 header rewrite).
 did not move (evidence in the perf plan). The inliner declines, and the GC-root calls are
 optimization barriers regardless. Inlining must happen at *our* IR layer.
 
-### B2 — leaf-loop GC-root elision
+### B2 — leaf-loop GC-root elision — **LANDED 2026-07-11**
 In a loop body with **no allocation and no call that can trigger GC** between a pointer's root and
 its last use, a read-only pointer (`raw_m`, `raw_v`, `raw_dst`) does not need a per-iteration
-`push_i64_root`/`pop_roots`. The rooting pass must identify allocation-free regions and skip roots
-for values not live across a GC-trigger. This is delicate — it touches the type-aware rooting rules
-in `docs/compiler-internals.md` and must be validated against the `SPROUT_GC_STRESS=1` oracle, not
-just default-green tests. Note that once B1 makes access inline (no call), the *only* calls left in
-the loop are the GC-root ops themselves, so eliding them can make the body call-free — the
-precondition for vectorization.
+`push_i64_root`/`pop_roots`.
+
+**Mechanism as implemented (simpler than the "allocation-free region analysis" originally
+sketched):** the rooting pass (`stdlib/compiler/ir_rooting.sprout`, `op_triggers_gc`) conservatively
+treated *every* `IRCall` as a GC trigger. B2 peeks the callee name (`is_nonallocating_read`) and
+returns `false` for a **verified allow-list of non-allocating read/store externs** —
+`vector_get_direct`, `vector_mutset`, `vector_length` (each read against `runtime/sprout_runtime.c`;
+the allocating `vector_get`, which boxes a `Just`/`Nothing`, deliberately stays a trigger). A
+non-trigger short-circuits in `process_op` before any rooting, so no second edit is needed.
+**Correctness:** a non-allocating call cannot collect at that point, so no live pointer needs rooting
+across it; a pointer live across a *real* trigger elsewhere is still rooted there by root-once
+coalescing (PR #108). Validated under `SPROUT_GC_STRESS=1` (`just test-stress`), the rooting-bug
+oracle, in addition to the full suite; IR-shape regression tests T17–T19 in `tests/stdlib/test_ir_rooting.spr`.
+
+**Not byte-identity-preserving** (unlike B1-Double): `op_triggers_gc` is global, so the compiler's
+own `vector_length`/`vector_get_direct`/`vector_mutset` calls also shed roots — the bootstrap seed
+reconverges to a new fixed point (3 refresh-seed iterations).
+
+**Results (M1-class, warm; see `bench/results-2026-07-11-b2.md`):** recognizer **3.03s → 1.67s
+(~1.8×)** at unchanged accuracy `139/150` — the 3 GC-root calls/element were the dominant cost, as
+the profile predicted. A* (~305 µs) and nqueens N=12 (~500 ms) flat = **no regression** (their reads
+route through the allocating `vector_get` wrapper / persistent `vec_set`, outside B2's reach).
+
+Note that once B1 makes access inline (no call), the *only* calls left in the loop are the GC-root
+ops themselves, so eliding them can make the body call-free — the precondition for vectorization.
 
 ### B3 — loop-shaped codegen (contingency, gated on the B1+B2 empirical checkpoint)
 "B1+B2 → LLVM vectorizes" is an **assumption, not a consequence**, and is the first thing to

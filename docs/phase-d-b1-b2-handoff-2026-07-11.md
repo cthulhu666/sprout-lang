@@ -1,5 +1,18 @@
 # Phase D handoff — B1, B2, inlining, monomorphization (2026-07-11)
 
+> **STATUS UPDATE — B2 LANDED (2026-07-11).** Implemented exactly as §2 describes: `op_triggers_gc`
+> peeks the callee name (`is_nonallocating_read`) and treats an allow-list —
+> `vector_get_direct`/`vector_mutset`/`vector_length` — as non-triggers (allocating `vector_get`
+> stays a trigger). Recognizer **3.03s → 1.67s (~1.8×)**, accuracy `139/150`; A*/nqueens flat
+> (no regression). Seed reconverged (not byte-identical — global change). Tests T17–T19 in
+> `tests/stdlib/test_ir_rooting.spr`; validated under `just test-stress`. See
+> `docs/phase-d-numeric-fastpath-design-2026-07-11.md §B2` and `bench/results-2026-07-11-b2.md`.
+> **Deferred to a follow-up:** the `IRCallUnboxed2` allow-list (A*'s CPR-unboxed `vector_get_unboxed`
+> path) — needs per-name runtime verification of all 10 `_unboxed` externs, incl. the
+> `regex_find_range_unboxed`/`term_read_line_unboxed`/`env_get_unboxed` allocator landmines. **Next
+> per the original plan:** B3 checkpoint (disassemble a row-update kernel — do the calls+roots being
+> gone let LLVM vectorize?).
+
 Handoff for a fresh session. Captures the through-line, the strategic decisions, the verified
 facts, and — most importantly — **where B2 was left mid-investigation** and what to do next.
 

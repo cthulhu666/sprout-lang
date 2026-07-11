@@ -422,6 +422,55 @@ fn test16_program() -> sprout_ir.IRProgram =
       Nil)),
     Nil), Nil, Nil, Nil)
 
+# ---------------------------------------------------------------------------
+# B2 (leaf-loop GC-root elision): op_triggers_gc peeks the callee name and
+# treats a verified allow-list of non-allocating read externs as NON-triggers.
+#
+# Test 17: a heap value (%p) live across a `vector_get_direct` call is NOT
+# rooted.  vector_get_direct is `v->data[index]` + bounds check — it cannot
+# allocate (runtime/sprout_runtime.c), so it cannot collect and no live pointer
+# needs rooting across it.  Pre-B2 (blanket IRCall -> trigger): %p IS rooted → a
+# push is emitted.  Post-B2: 0 pushes.  RED on current code (assert_false fails).
+fn test17_program() -> sprout_ir.IRProgram =
+  sprout_ir.IRProgram(Cons(
+    sprout_ir.IRFunction("vgetd_nontrigger",
+      Cons(("p", sprout_ir.IRTHeap), Cons(("v", sprout_ir.IRTHeap), Nil)), "i64", Cons(
+      sprout_ir.IRBlock("entry",
+        Cons(sprout_ir.IRConst("%i", 0),
+        Cons(sprout_ir.IRCall("%x", sprout_ir.IRTScalar, "vector_get_direct", Cons("%v", Cons("%i", Nil))),
+        Cons(sprout_ir.IRRet("%p"), Nil)))),
+      Nil)),
+    Nil), Nil, Nil, Nil)
+
+# Test 18 (negative lock): `vector_get` — the ALLOCATING variant that boxes a
+# Just/Nothing Maybe — STAYS a trigger.  Same shape as T17 but fname=vector_get.
+# %p must be rooted across it both before AND after B2.  Guards against the
+# allow-list being over-broadened to the allocating read.
+fn test18_program() -> sprout_ir.IRProgram =
+  sprout_ir.IRProgram(Cons(
+    sprout_ir.IRFunction("vget_trigger",
+      Cons(("p", sprout_ir.IRTHeap), Cons(("v", sprout_ir.IRTHeap), Nil)), "i64", Cons(
+      sprout_ir.IRBlock("entry",
+        Cons(sprout_ir.IRConst("%i", 0),
+        Cons(sprout_ir.IRCall("%x", sprout_ir.IRTHeap, "vector_get", Cons("%v", Cons("%i", Nil))),
+        Cons(sprout_ir.IRRet("%p"), Nil)))),
+      Nil)),
+    Nil), Nil, Nil, Nil)
+
+# Test 19: `vector_mutset` — a plain `v->data[index] = value` store, no
+# allocation — is NOT a trigger.  %p live across it gets no root.  RED pre-B2.
+fn test19_program() -> sprout_ir.IRProgram =
+  sprout_ir.IRProgram(Cons(
+    sprout_ir.IRFunction("vmutset_nontrigger",
+      Cons(("p", sprout_ir.IRTHeap), Cons(("v", sprout_ir.IRTHeap), Nil)), "i64", Cons(
+      sprout_ir.IRBlock("entry",
+        Cons(sprout_ir.IRConst("%i", 0),
+        Cons(sprout_ir.IRConst("%val", 7),
+        Cons(sprout_ir.IRCall("%x", sprout_ir.IRTScalar, "vector_mutset", Cons("%v", Cons("%i", Cons("%val", Nil)))),
+        Cons(sprout_ir.IRRet("%p"), Nil))))),
+      Nil)),
+    Nil), Nil, Nil, Nil)
+
 fn main() -> Unit !{IO} =
   do
     state <- new_state()
@@ -537,5 +586,19 @@ fn main() -> Unit !{IO} =
               count(lower(test16_program()), "call i64 @sprout_gc_push_i64_root"), 2)
     assert_eq(state, "T16: one pop_roots(i64 2) (over-retained %a popped with %b)",
               count(lower(test16_program()), "@sprout_gc_pop_roots(i64 2)"), 1)
+
+    # --- Test 17 (B2): vector_get_direct is a NON-trigger — no root around it.
+    assert_false(state, "T17: no push_i64_root across vector_get_direct (non-allocating read)",
+                 contains(lower(test17_program()), "call i64 @sprout_gc_push_i64_root"))
+    assert_false(state, "T17: no pop_roots across vector_get_direct",
+                 contains(lower(test17_program()), "call i64 @sprout_gc_pop_roots"))
+
+    # --- Test 18 (B2 negative lock): vector_get STAYS a trigger (it boxes a Maybe).
+    assert_true(state, "T18: vector_get (allocating) still roots the live heap value",
+                contains(lower(test18_program()), "call i64 @sprout_gc_push_i64_root"))
+
+    # --- Test 19 (B2): vector_mutset is a NON-trigger — plain store, no alloc.
+    assert_false(state, "T19: no push_i64_root across vector_mutset (non-allocating store)",
+                 contains(lower(test19_program()), "call i64 @sprout_gc_push_i64_root"))
 
     summary(state)

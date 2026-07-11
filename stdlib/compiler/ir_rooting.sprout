@@ -27,6 +27,26 @@ import stdlib.compiler.sprout_ir as sprout_ir
 # ---------------------------------------------------------------------------
 # Trigger / heap predicates
 
+# B2 (leaf-loop GC-root elision).  A verified allow-list of runtime read/store
+# externs that CANNOT allocate — they neither call any sprout_make*/
+# sprout_alloc_* nor sprout_gc_maybe_collect_threshold, so GC cannot fire at the
+# call.  Live pointers therefore need no rooting across them; a value live across
+# a REAL trigger elsewhere is still rooted there (root-once, PR #108), so eliding
+# here is safe and precise.  Each name is verified non-allocating in
+# runtime/sprout_runtime.c — only add a name after reading its body:
+#   vector_get_direct — v->data[index] + bounds check (NOT vector_get, which
+#                       boxes a Just/Nothing Maybe — that MUST stay a trigger).
+#   vector_mutset     — v->data[index] = value (plain store; Phase 2 GC's write
+#                       barrier will make this a trigger again — revisit then).
+#   vector_length     — returns v->len (pure read).
+# Keyed by exact runtime symbol: user functions never reuse a builtin name, and
+# polymorphic wrappers (mutvec_get, mutmatrix_get) route through vector_get and
+# are absent here, so they correctly stay triggers.
+fn is_nonallocating_read(fname: String) -> Bool =
+  fname == "vector_get_direct"
+  || fname == "vector_mutset"
+  || fname == "vector_length"
+
 fn op_triggers_gc(op: sprout_ir.IROp) -> Bool =
   match op with
   | sprout_ir.IRStrSlice _ _ _ _ -> true
@@ -39,9 +59,10 @@ fn op_triggers_gc(op: sprout_ir.IROp) -> Bool =
   # IRPrintStr calls @print_str / @eprint_str — write-only I/O; does NOT allocate. NOT a GC trigger.
   | sprout_ir.IRPrintStr _ _ _ -> false
   | sprout_ir.IRStrConst _ _ _ -> false
-  # Conservative: every user call may transitively allocate.  Over-roots
-  # non-allocating callees; correctness > optimization at M2.
-  | sprout_ir.IRCall _ _ _ _ -> true
+  # Every user call may transitively allocate — EXCEPT a verified allow-list of
+  # non-allocating read/store externs (B2).  Peek the callee name; over-roots any
+  # callee not on the list (correctness > optimization).
+  | sprout_ir.IRCall _ _ fname _ -> if is_nonallocating_read(fname) then false else true
   # IRCallUnboxed2 calls a C `_unboxed` extern.  Most (vector_get, map_get, …)
   # do not allocate, but regex_find_range_unboxed / term_read_line_unboxed still
   # allocate their payload before returning — so, like IRCall, conservatively a
@@ -631,7 +652,10 @@ fn op_exposes_operands(op: sprout_ir.IROp) -> Bool =
   # operands — same store-after-alloc exposure as @sprout_makeN.
   | sprout_ir.IRMakeTuple _ _ -> true
   # A call may collect before consuming its operands (e.g. @ref_new); root the
-  # heap operands across the call.  See the function-level comment above.
+  # heap operands across the call.  See the function-level comment above.  The B2
+  # non-allocating allow-list is NOT re-checked here: op_exposes_operands is only
+  # consulted for ops op_triggers_gc already classified as triggers (process_op),
+  # so an allow-listed read short-circuits upstream and never reaches this arm.
   | sprout_ir.IRCall _ _ _ _ -> true
   # Like IRCall, an unboxed extern may collect before consuming its operands;
   # root the heap operands across it (additive — only adds roots).
