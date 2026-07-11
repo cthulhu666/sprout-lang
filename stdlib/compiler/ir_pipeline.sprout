@@ -4,6 +4,7 @@ import stdlib.compiler.ir_rooting as ir_rooting
 import stdlib.compiler.ir_lowering as ir_lowering
 import stdlib.compiler.sprout_ir as sprout_ir
 import stdlib.compiler.typed_ast as typed_ast
+import stdlib.compiler.source as source
 
 # ---------------------------------------------------------------------------
 # Streaming IR-codegen pipeline (T2).
@@ -33,11 +34,12 @@ import stdlib.compiler.typed_ast as typed_ast
 # ---------------------------------------------------------------------------
 
 # State carried through the streaming loop.
-# Fields: next_str_idx, str_globals_acc, bodies_acc, defined_names, has_user_main.
+# Fields: next_str_idx, str_globals_acc, bodies_acc, defined_names, has_user_main,
+# alloc_summary (may-trigger-GC map; constant, set once at init from the pre-pass).
 # All accumulator lists are in reverse emission order; reversed at assembly.
 # O(1) prepend per fn; single list_reverse + string_concat_many at the end.
 type StreamState (..) =
-  StreamState Int (Ref (List String)) (Ref (List String)) Set Bool
+  StreamState Int (Ref (List String)) (Ref (List String)) Set Bool (Dict Bool)
 
 # Emit one IRFunction: root it, collect string constants, lower to text.
 # Prepends one chunk to each accumulator; threads next_str_idx.
@@ -45,15 +47,15 @@ type StreamState (..) =
 fn emit_one_fn(f: sprout_ir.IRFunction, idx_map: Dict Int,
                state: StreamState) -> Result String StreamState !{IO} =
   match state with
-  | StreamState next_idx str_acc bodies_acc defined has_user_main ->
-      emit_one_fn_rooted(ir_rooting.rewrite_one_fn(f, idx_map),
-                         next_idx, str_acc, bodies_acc, defined, has_user_main)
+  | StreamState next_idx str_acc bodies_acc defined has_user_main summary ->
+      emit_one_fn_rooted(ir_rooting.rewrite_one_fn_with_summary(f, idx_map, summary),
+                         next_idx, str_acc, bodies_acc, defined, has_user_main, summary)
 
 # Helper: emit a pre-rooted IRFunction.  Separated so we name the rooted fn
 # once and pass it to both walk_blocks_for_strs and lower_fn_with_table.
 fn emit_one_fn_rooted(rooted: sprout_ir.IRFunction, next_idx: Int,
                       str_acc: Ref (List String), bodies_acc: Ref (List String),
-                      defined: Set, has_user_main: Bool) ->
+                      defined: Set, has_user_main: Bool, summary: Dict Bool) ->
     Result String StreamState !{IO} =
   match rooted with
   | sprout_ir.IRFunction fname _ _ rblocks ->
@@ -69,7 +71,7 @@ fn emit_one_fn_rooted(rooted: sprout_ir.IRFunction, next_idx: Int,
             ref_write(bodies_acc, Cons(body_text, bodies_old))
             let new_defined = set_insert(fname, defined)
             let new_has_user_main = has_user_main || (fname == "__sprout_user_main")
-            Ok(StreamState(next_idx2, str_acc, bodies_acc, new_defined, new_has_user_main))
+            Ok(StreamState(next_idx2, str_acc, bodies_acc, new_defined, new_has_user_main, summary))
 
 # Emit all lifted lambdas (in list order) then the main fn for one decl.
 # lifted list is [lambda0, lambda1, ..., lambdaN]; emit in that order then f.
@@ -155,6 +157,135 @@ fn stream_workers(names: List String, worker_set: Set, decls: List typed_ast.Typ
                                            adt_index, lambda_ctr_ref, lifted_idx_ref, s2)
 
 # ---------------------------------------------------------------------------
+# Alloc-summary pre-pass (Option A).
+#
+# The streaming emit processes one function at a time and never materialises the
+# whole IRProgram, but the interprocedural may-trigger-GC summary needs every
+# function's call set.  So this pre-pass re-runs the SAME translation orchestration
+# (decls → lifted → workers → init) with FRESH Refs — deterministic, so it produces
+# identical function names — extracts each fn's compact raw summary via
+# ir_rooting.fn_raw_summary, and DISCARDS the IR (one fn live at a time, keeping the
+# streaming memory discipline).  ir_rooting.summary_from_raw then resolves + fixpoints.
+#
+# Correctness is independent of completeness: a function the pre-pass misses is simply
+# absent from the summary, so callers conservatively treat calls to it as GC triggers.
+
+fn summarize_one_fn(f: sprout_ir.IRFunction,
+                    acc: List (String, (Bool, Set))) -> List (String, (Bool, Set)) =
+  match f with
+  | sprout_ir.IRFunction name _ _ _ -> Cons((name, ir_rooting.fn_raw_summary(f)), acc)
+
+fn summarize_lifted_then_fn(lifted: List sprout_ir.IRFunction, f: sprout_ir.IRFunction,
+                            acc: List (String, (Bool, Set))) -> List (String, (Bool, Set)) =
+  match lifted with
+  | Nil -> summarize_one_fn(f, acc)
+  | Cons lf rest -> summarize_lifted_then_fn(rest, f, summarize_one_fn(lf, acc))
+
+fn summarize_decls(decls: List typed_ast.TypedDecl,
+                   ctors: Dict (Int, Int, Int, String),
+                   top_level: Set, let_names: Set, fn_arities: Dict Int,
+                   lambda_ctr_ref: Ref Int, lifted_idx_ref: Ref (Dict Int),
+                   acc: List (String, (Bool, Set))) ->
+    Result String (List (String, (Bool, Set))) !{IO} =
+  match decls with
+  | Nil -> Ok(acc)
+  | Cons d rest ->
+      match ast_to_ir.translate_decl_with_idx(d, ctors, top_level, let_names, fn_arities,
+                                              lambda_ctr_ref, lifted_idx_ref) with
+      | Err msg -> Err(msg)
+      | Ok maybe_f ->
+          match maybe_f with
+          | Nothing ->
+              summarize_decls(rest, ctors, top_level, let_names, fn_arities,
+                              lambda_ctr_ref, lifted_idx_ref, acc)
+          | Just triple ->
+              match triple with
+              | (f, _idx, lifted) ->
+                  summarize_decls(rest, ctors, top_level, let_names, fn_arities,
+                                  lambda_ctr_ref, lifted_idx_ref,
+                                  summarize_lifted_then_fn(lifted, f, acc))
+
+fn summarize_workers(names: List String, worker_set: Set, decls: List typed_ast.TypedDecl,
+                     ctors: Dict (Int, Int, Int, String), top_level: Set, let_names: Set,
+                     fn_arities: Dict Int, adt_index: Dict (List (Int, Int)),
+                     lambda_ctr_ref: Ref Int, lifted_idx_ref: Ref (Dict Int),
+                     acc: List (String, (Bool, Set))) ->
+    Result String (List (String, (Bool, Set))) !{IO} =
+  match names with
+  | Nil -> Ok(acc)
+  | Cons name rest ->
+      match ast_to_ir.emit_worker_for(name, decls, ctors, top_level, let_names, fn_arities,
+                                      adt_index, worker_set, lambda_ctr_ref, lifted_idx_ref) with
+      | Err msg -> Err(msg)
+      | Ok maybe_w ->
+          match maybe_w with
+          | Nothing ->
+              summarize_workers(rest, worker_set, decls, ctors, top_level, let_names, fn_arities,
+                                adt_index, lambda_ctr_ref, lifted_idx_ref, acc)
+          | Just wtriple ->
+              match wtriple with
+              | (wfn, _wnext, wlifted) ->
+                  summarize_workers(rest, worker_set, decls, ctors, top_level, let_names, fn_arities,
+                                    adt_index, lambda_ctr_ref, lifted_idx_ref,
+                                    summarize_lifted_then_fn(wlifted, wfn, acc))
+
+# Build the may-trigger-GC summary via the pre-pass.  Uses its own fresh Refs so it
+# does not perturb the emit pass's lambda/index state.
+fn build_alloc_summary(decls: List typed_ast.TypedDecl,
+                       ctors: Dict (Int, Int, Int, String),
+                       top_level: Set, let_names: Set, fn_arities: Dict Int,
+                       runtime_lets: List (source.GlobalName, typed_ast.TypedExpr)) ->
+    Result String (Dict Bool) !{IO} =
+  do
+    pp_lambda_ref <- ref_new(0)
+    pp_lifted_ref <- ref_new(dict_empty())
+    match summarize_decls(decls, ctors, top_level, let_names, fn_arities,
+                          pp_lambda_ref, pp_lifted_ref, Nil) with
+    | Err msg -> Err(msg)
+    | Ok after_decls ->
+        match ast_to_ir.collect_worker_callees(decls, top_level, ctors) with
+        | wset ->
+            match summarize_workers(set_to_list(wset), wset, decls, ctors, top_level, let_names,
+                                    fn_arities, ast_to_ir.build_adt_ctor_index(decls, ctors),
+                                    pp_lambda_ref, pp_lifted_ref, after_decls) with
+            | Err msg -> Err(msg)
+            | Ok after_workers ->
+                # Init fn (if any) is emitted by the real pass but is a cold path; a
+                # missing entry is conservative (its callers keep rooting).  Include it
+                # for completeness when there are runtime lets.
+                match runtime_lets with
+                | Nil -> Ok(ir_rooting.summary_from_raw(after_workers))
+                | _ ->
+                    match ast_to_ir.synthesize_init_globals_fn(
+                            runtime_lets, ctors, top_level, let_names, fn_arities,
+                            pp_lambda_ref, pp_lifted_ref) with
+                    | Err msg -> Err(msg)
+                    | Ok init_pair ->
+                        match init_pair with
+                        | (init_fn, init_lifted, _init_idx) ->
+                            Ok(ir_rooting.summary_from_raw(
+                                 summarize_lifted_then_fn(init_lifted, init_fn, after_workers)))
+
+# Never-failing wrapper: the summary is an OPTIONAL optimization, so a pre-pass
+# failure must NOT take down an otherwise-valid compile.  On error, fall back to
+# the empty summary (every Sprout-fn call then conservatively roots — identical to
+# the pre-fixpoint behaviour) and warn on stderr.  Any genuine program error is
+# still reported by the real stream_decls pass that runs afterward, so this
+# swallows no real diagnostics.
+fn alloc_summary_or_empty(decls: List typed_ast.TypedDecl,
+                          ctors: Dict (Int, Int, Int, String),
+                          top_level: Set, let_names: Set, fn_arities: Dict Int,
+                          runtime_lets: List (source.GlobalName, typed_ast.TypedExpr)) ->
+    Dict Bool !{IO} =
+  do
+    match build_alloc_summary(decls, ctors, top_level, let_names, fn_arities, runtime_lets) with
+    | Ok s -> s
+    | Err msg ->
+        do
+          _ <- eprint("warning: alloc-summary pre-pass failed (" ++ msg ++ "); using conservative rooting\n")
+          dict_empty()
+
+# ---------------------------------------------------------------------------
 # Entry point: compile_program_streaming
 #
 # Mirrors translate_program's setup exactly, then streams each decl through
@@ -181,9 +312,14 @@ export fn compile_program_streaming(prog: typed_ast.TypedProgram) ->
                 match classified with
                 | (let_globals, runtime_lets) ->
                     do
+                      # Pre-pass: compute the interprocedural may-trigger-GC summary
+                      # (fresh Refs, IR discarded).  Never fails the compile — a
+                      # pre-pass error falls back to conservative (empty) rooting.
+                      alloc_summary <- alloc_summary_or_empty(decls, ctors, top_level_set,
+                                                              let_names, fn_arities, runtime_lets)
                       str_acc_ref <- ref_new(Nil)
                       bodies_acc_ref <- ref_new(Nil)
-                      let init_state = StreamState(0, str_acc_ref, bodies_acc_ref, set_empty(), false)
+                      let init_state = StreamState(0, str_acc_ref, bodies_acc_ref, set_empty(), false, alloc_summary)
                       match stream_decls(decls, ctors, top_level_set, let_names, fn_arities,
                                          lambda_ctr_ref, lifted_idx_ref, init_state) with
                       | Err msg -> Err(msg)
@@ -198,7 +334,7 @@ export fn compile_program_streaming(prog: typed_ast.TypedProgram) ->
                         | Err msg -> Err(msg)
                         | Ok after_workers ->
                           match after_workers with
-                          | StreamState next_idx2 str_acc bodies_acc defined has_user_main ->
+                          | StreamState next_idx2 str_acc bodies_acc defined has_user_main summary2 ->
                               # Emit init fn last if there are runtime lets.
                               match runtime_lets with
                               | Nil ->
@@ -222,11 +358,11 @@ export fn compile_program_streaming(prog: typed_ast.TypedProgram) ->
                                         let init_idx_map = dict_set("__sprout_init_globals", init_idx, lifted_idx)
                                         match emit_lifted_then_fn(init_lifted, init_fn, init_idx_map,
                                                           StreamState(next_idx2, str_acc, bodies_acc,
-                                                                      defined, has_user_main)) with
+                                                                      defined, has_user_main, summary2)) with
                                         | Err msg -> Err(msg)
                                         | Ok final_state ->
                                             match final_state with
-                                            | StreamState _ str_acc2 bodies_acc2 defined2 has_user_main2 ->
+                                            | StreamState _ str_acc2 bodies_acc2 defined2 has_user_main2 _ ->
                                                 assemble_result(str_acc2, bodies_acc2, defined2, has_user_main2,
                                                                 let_globals, ctor_regs, externs)
 

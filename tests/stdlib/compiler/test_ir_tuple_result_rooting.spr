@@ -24,6 +24,12 @@ import stdlib.compiler.typed_ast as typed_ast
 # must root the live tuple across the trigger, so it emits strictly MORE root
 # pushes than the scalar twin.  Pre-fix both are equal (tuple not classified
 # heap); post-fix tuple > scalar.
+#
+# NB: the intervening `sink` MUST genuinely allocate (its body builds a tuple).
+# The alloc fixpoint (per-function may-trigger-GC summary) correctly treats a
+# call to a provably non-allocating callee as a NON-trigger, so an identity
+# `sink(n) = n` would (correctly) leave the tuple un-rooted and the differential
+# would vanish — a wrong callee here masks the regression, not a rooting bug.
 
 fn count_substrs(haystack: String, needle: String, acc: Int) -> Int =
   if pos == -1 then acc
@@ -69,7 +75,7 @@ fn main() -> Unit !{IO} =
       "fn use_tup(t: (Int, Int)) -> Int =\n" ++
       "  match t with\n" ++
       "  | (a, b) -> a + b\n" ++
-      "fn sink(n: Int) -> Int !{IO} = n\n" ++
+      "fn sink(n: Int) -> (Int, Int) !{IO} = (n, n)\n" ++
       "fn driver(n: Int) -> Int !{IO} =\n" ++
       "  do\n" ++
       "    let t = (n, n)\n" ++
@@ -80,7 +86,7 @@ fn main() -> Unit !{IO} =
 
     let scalar_src =
       "fn use_int(t: Int) -> Int = t + t\n" ++
-      "fn sink(n: Int) -> Int !{IO} = n\n" ++
+      "fn sink(n: Int) -> (Int, Int) !{IO} = (n, n)\n" ++
       "fn driver(n: Int) -> Int !{IO} =\n" ++
       "  do\n" ++
       "    let t = n\n" ++
@@ -93,4 +99,41 @@ fn main() -> Unit !{IO} =
     # Differential isolates the IRMakeTuple rooting from ambient rooting.
     assert_true(state, "tuple result rooted across later call (more than scalar twin)",
                 heap_pushes > scalar_pushes)
+
+    # Alloc fixpoint (streaming path): a tuple held live across a call to a
+    # provably NON-allocating Sprout fn (identity `sink_n`) is NOT rooted, whereas
+    # across an allocating one (`sink_a`, builds a tuple) it IS.  Differential over
+    # otherwise-identical programs → strictly FEWER pushes with the non-allocating
+    # callee.  Exercises the interprocedural may-trigger-GC summary end-to-end
+    # through compile_program_streaming (the pre-pass + summary_from_raw), which the
+    # batch-path T23–T25 in test_ir_rooting do not cover.  Note sink_n is `!{IO}`
+    # yet non-allocating — the fixpoint keys on allocation, not effects.
+    let alloc_sink_src =
+      "fn use_tup(t: (Int, Int)) -> Int =\n" ++
+      "  match t with\n" ++
+      "  | (a, b) -> a + b\n" ++
+      "fn sink_a(n: Int) -> (Int, Int) !{IO} = (n, n)\n" ++
+      "fn driver(n: Int) -> Int !{IO} =\n" ++
+      "  do\n" ++
+      "    let t = (n, n)\n" ++
+      "    c <- sink_a(n)\n" ++
+      "    use_tup(t)\n"
+    alloc_sink_ir <- get_ir_or_msg(alloc_sink_src)
+    let alloc_sink_pushes = count(alloc_sink_ir, "sprout_gc_push_i64_root")
+
+    let noalloc_sink_src =
+      "fn use_tup(t: (Int, Int)) -> Int =\n" ++
+      "  match t with\n" ++
+      "  | (a, b) -> a + b\n" ++
+      "fn sink_n(n: Int) -> Int !{IO} = n\n" ++
+      "fn driver(n: Int) -> Int !{IO} =\n" ++
+      "  do\n" ++
+      "    let t = (n, n)\n" ++
+      "    c <- sink_n(n)\n" ++
+      "    use_tup(t)\n"
+    noalloc_sink_ir <- get_ir_or_msg(noalloc_sink_src)
+    let noalloc_sink_pushes = count(noalloc_sink_ir, "sprout_gc_push_i64_root")
+
+    assert_true(state, "tuple NOT rooted across a proven non-allocating callee (fewer than allocating twin)",
+                noalloc_sink_pushes < alloc_sink_pushes)
     summary(state)

@@ -522,6 +522,71 @@ fn test22_program() -> sprout_ir.IRProgram =
       Nil)),
     Nil), Nil, Nil, Nil)
 
+# ---------------------------------------------------------------------------
+# Alloc fixpoint: a per-function may-trigger-GC summary (call-graph fixpoint over
+# op_triggers_gc) lets the rooting pass treat a call to a provably-non-allocating
+# Sprout function as a non-trigger.  These programs have TWO functions (a callee
+# and its caller) so insert_roots can compute and consume the summary.
+#
+# Test 23: caller `f23` holds a heap value (%p) live across a call to `g23`, a
+# provably-non-triggering Sprout fn (body is `%x + %x`, no allocation).  Pre-fix
+# (blanket IRCall -> trigger): %p is rooted → 1 push.  Post-fix (summary says g23
+# cannot trigger): 0 pushes.  RED on current code.
+fn test23_program() -> sprout_ir.IRProgram =
+  sprout_ir.IRProgram(Cons(
+    sprout_ir.IRFunction("f23",
+      Cons(("p", sprout_ir.IRTHeap), Cons(("x", sprout_ir.IRTScalar), Nil)), "i64", Cons(
+      sprout_ir.IRBlock("entry",
+        Cons(sprout_ir.IRCall("%r0", sprout_ir.IRTScalar, "g23", Cons("%x", Nil)),
+        Cons(sprout_ir.IRRet("%p"), Nil))),
+      Nil)),
+    Cons(
+    sprout_ir.IRFunction("g23", Cons(("x", sprout_ir.IRTScalar), Nil), "i64", Cons(
+      sprout_ir.IRBlock("entry",
+        Cons(sprout_ir.IRIAdd("%r", "%x", "%x"),
+        Cons(sprout_ir.IRRet("%r"), Nil))),
+      Nil)),
+    Nil)), Nil, Nil, Nil)
+
+# Test 24 (negative lock): `h24` allocates (its body is an IRMakeCtor), so the
+# summary marks it may-trigger.  Caller `f24` MUST still root %p across the call.
+# Green before AND after — guards against the fixpoint over-approximating "safe".
+fn test24_program() -> sprout_ir.IRProgram =
+  sprout_ir.IRProgram(Cons(
+    sprout_ir.IRFunction("f24",
+      Cons(("p", sprout_ir.IRTHeap), Cons(("x", sprout_ir.IRTScalar), Nil)), "i64", Cons(
+      sprout_ir.IRBlock("entry",
+        Cons(sprout_ir.IRCall("%r0", sprout_ir.IRTScalar, "h24", Cons("%x", Nil)),
+        Cons(sprout_ir.IRRet("%p"), Nil))),
+      Nil)),
+    Cons(
+    sprout_ir.IRFunction("h24", Cons(("x", sprout_ir.IRTScalar), Nil), "i64", Cons(
+      sprout_ir.IRBlock("entry",
+        Cons(sprout_ir.IRMakeCtor("%c", "Box", 1, Cons("%x", Nil)),
+        Cons(sprout_ir.IRRet("%c"), Nil))),
+      Nil)),
+    Nil)), Nil, Nil, Nil)
+
+# Test 25: recursion convergence.  `grec25` calls only itself and never allocates,
+# so the least fixpoint (start false, `true` absorbing) leaves it non-triggering.
+# Caller `f25` holding %p live across the call is root-free post-fix.  Locks that
+# a self-recursive non-allocating fn does not spuriously become may-trigger.
+fn test25_program() -> sprout_ir.IRProgram =
+  sprout_ir.IRProgram(Cons(
+    sprout_ir.IRFunction("f25",
+      Cons(("p", sprout_ir.IRTHeap), Cons(("x", sprout_ir.IRTScalar), Nil)), "i64", Cons(
+      sprout_ir.IRBlock("entry",
+        Cons(sprout_ir.IRCall("%r0", sprout_ir.IRTScalar, "grec25", Cons("%x", Nil)),
+        Cons(sprout_ir.IRRet("%p"), Nil))),
+      Nil)),
+    Cons(
+    sprout_ir.IRFunction("grec25", Cons(("x", sprout_ir.IRTScalar), Nil), "i64", Cons(
+      sprout_ir.IRBlock("entry",
+        Cons(sprout_ir.IRCall("%r", sprout_ir.IRTScalar, "grec25", Cons("%x", Nil)),
+        Cons(sprout_ir.IRRet("%r"), Nil))),
+      Nil)),
+    Nil)), Nil, Nil, Nil)
+
 fn main() -> Unit !{IO} =
   do
     state <- new_state()
@@ -663,5 +728,17 @@ fn main() -> Unit !{IO} =
     # --- Test 22 (B2 reach): env_get_unboxed is a NON-trigger (returns getenv ptr, no alloc).
     assert_false(state, "T22: no push_i64_root across env_get_unboxed (non-allocating unboxed read)",
                  contains(lower(test22_program()), "call i64 @sprout_gc_push_i64_root"))
+
+    # --- Test 23 (alloc fixpoint): call to a provably-non-triggering Sprout fn is a non-trigger.
+    assert_false(state, "T23: no push_i64_root across call to non-allocating Sprout fn g23",
+                 contains(lower(test23_program()), "call i64 @sprout_gc_push_i64_root"))
+
+    # --- Test 24 (fixpoint negative lock): call to an allocating Sprout fn STILL roots.
+    assert_true(state, "T24: allocating Sprout fn h24 still roots the live heap value",
+                contains(lower(test24_program()), "call i64 @sprout_gc_push_i64_root"))
+
+    # --- Test 25 (fixpoint recursion): self-recursive non-allocating fn stays non-trigger.
+    assert_false(state, "T25: no push_i64_root across call to self-recursive non-allocating grec25",
+                 contains(lower(test25_program()), "call i64 @sprout_gc_push_i64_root"))
 
     summary(state)

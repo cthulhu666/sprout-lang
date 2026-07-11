@@ -45,6 +45,14 @@ export fn raw_name_str(r: RawName) -> String =
 export fn qualified_name_str(q: QualifiedName) -> String =
   match q with | QualifiedName s -> s
 
+# GlobalName is the name of a top-level `let` global (an IR store target, @name).
+# Distinguishes it from function names, ctor names, and arbitrary strings so a
+# swap is a compile error rather than a silent wrong-slot store.
+export wrap GlobalName = String
+
+export fn global_name_str(g: GlobalName) -> String =
+  match g with | GlobalName s -> s
+
 export fn cursor_from_string(raw: String) -> SourceCursor =
   SourceCursor(raw, bytes_from_utf8(raw), 0, SourcePos(0, 1, 1))
 

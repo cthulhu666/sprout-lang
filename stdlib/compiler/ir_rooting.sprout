@@ -846,9 +846,9 @@ fn push_pop_trigger(op: sprout_ir.IROp, need: List String, live_after_op: Set,
 # Per-op: a trigger pushes its need-delta, emits the op, then pops dead top values;
 # a non-trigger is emitted unchanged with the stack untouched.
 fn process_op(op: sprout_ir.IROp, live_after_op: Set, in_scope_ord: List String,
-              rooted: List String, idx: Int, prefix: String,
+              rooted: List String, idx: Int, prefix: String, summary: Dict Bool,
               acc: List sprout_ir.IROp) -> (List sprout_ir.IROp, List String, Int) =
-  if op_triggers_gc(op)
+  if op_triggers_gc_summary(op, summary)
   then push_pop_trigger(op, roots_across(in_scope_ord, live_after_op, op),
                         live_after_op, rooted, idx, prefix, acc)
   else (Cons(op, acc), rooted, idx)
@@ -895,6 +895,7 @@ fn rewrite_ops(ops: List sprout_ir.IROp,
                rooted: List String,
                idx: Int,
                prefix: String,
+               summary: Dict Bool,
                acc: List sprout_ir.IROp) -> (List sprout_ir.IROp, Int) =
   match ops with
   | Nil -> (list_reverse(acc), idx)
@@ -905,11 +906,11 @@ fn rewrite_ops(ops: List sprout_ir.IROp,
           match rest with
           | Nil -> finish_block(op, rooted, idx, prefix, acc)
           | _ ->
-              match process_op(op, live_after_op, in_scope_ord, rooted, idx, prefix, acc) with
+              match process_op(op, live_after_op, in_scope_ord, rooted, idx, prefix, summary, acc) with
               | (acc1, rooted1, idx1) ->
                   rewrite_ops(rest, la_rest, heap_origin,
                               update_scope(op, heap_origin, in_scope_ord),
-                              rooted1, idx1, prefix, acc1)
+                              rooted1, idx1, prefix, summary, acc1)
 
 fn seed_in_scope_loop(names: List String, ord: List String) -> List String =
   match names with
@@ -930,7 +931,8 @@ fn rewrite_block_full(b: sprout_ir.IRBlock,
                       heap_origin: Set,
                       all_blocks: List sprout_ir.IRBlock,
                       idx: Int,
-                      prefix: String) -> (sprout_ir.IRBlock, Int) =
+                      prefix: String,
+                      summary: Dict Bool) -> (sprout_ir.IRBlock, Int) =
   match b with
   | sprout_ir.IRBlock lbl ops ->
       match rewrite_ops(ops,
@@ -938,7 +940,7 @@ fn rewrite_block_full(b: sprout_ir.IRBlock,
                         heap_origin,
                         seed_in_scope(intersect_to_list(lookup_live(lbl, live_in_map), heap_origin)),
                         Nil,
-                        idx, prefix, Nil) with
+                        idx, prefix, summary, Nil) with
       | (new_ops, idx_out) -> (sprout_ir.IRBlock(lbl, new_ops), idx_out)
 
 fn rewrite_fn_blocks(blocks: List sprout_ir.IRBlock,
@@ -947,21 +949,22 @@ fn rewrite_fn_blocks(blocks: List sprout_ir.IRBlock,
                      all_blocks: List sprout_ir.IRBlock,
                      idx: Int,
                      prefix: String,
+                     summary: Dict Bool,
                      acc: List sprout_ir.IRBlock) -> List sprout_ir.IRBlock =
   match blocks with
   | Nil -> list_reverse(acc)
   | Cons b rest ->
-      match rewrite_block_full(b, live_in_map, heap_origin, all_blocks, idx, prefix) with
+      match rewrite_block_full(b, live_in_map, heap_origin, all_blocks, idx, prefix, summary) with
       | (b1, idx1) ->
-          rewrite_fn_blocks(rest, live_in_map, heap_origin, all_blocks, idx1, prefix, Cons(b1, acc))
+          rewrite_fn_blocks(rest, live_in_map, heap_origin, all_blocks, idx1, prefix, summary, Cons(b1, acc))
 
-fn rewrite_fn(f: sprout_ir.IRFunction, start_idx: Int, prefix: String) -> sprout_ir.IRFunction =
+fn rewrite_fn(f: sprout_ir.IRFunction, start_idx: Int, prefix: String, summary: Dict Bool) -> sprout_ir.IRFunction =
   match f with
   | sprout_ir.IRFunction name params ret_ty blocks ->
       sprout_ir.IRFunction(name, params, ret_ty,
         rewrite_fn_blocks(blocks, compute_liveness(blocks),
                           set_union(params_heap_origin(params), compute_heap_origin(blocks)),
-                          blocks, start_idx, prefix, Nil))
+                          blocks, start_idx, prefix, summary, Nil))
 
 # ---------------------------------------------------------------------------
 # Seed heap_origin from function parameters.
@@ -984,9 +987,195 @@ fn params_heap_origin(params: List (String, sprout_ir.IRType)) -> Set =
   params_heap_origin_loop(params, set_empty())
 
 # ---------------------------------------------------------------------------
+# Alloc fixpoint — per-function may-trigger-GC summary.
+#
+# Lifts op_triggers_gc from per-op to per-function: a call to a Sprout function
+# proven never to trigger GC needs no rooting across it.  `summary` maps each
+# program function name to whether it MAY trigger GC.  A least fixpoint over the
+# call graph (start all-false; `true` is absorbing → converges): a function may
+# trigger iff it has a LOCAL trigger (a self-triggering op, a call to an unknown
+# / non-allow-listed extern, or an indirect closure call) OR any Sprout callee
+# may trigger.
+#
+# SAFETY (memory-critical, inherits op_triggers_gc's scars):
+#   - Conservative default: anything not PROVEN non-triggering stays a trigger.
+#     A call whose callee is absent from `summary` (unknown / external) → true.
+#     IRApplyClosure and every self-triggering op → true (via op_triggers_gc).
+#   - `summary[F] == false` is therefore a PROOF F cannot trigger GC, so eliding
+#     roots across a call to F is sound.
+#   - Validated under SPROUT_GC_STRESS=1 like every rooting change.
+
+# --- Phase 1: raw per-function extraction (fn_names-INDEPENDENT, so the streaming
+# pre-pass can build it one function at a time and discard the IR). ---
+
+# The callee name of a call op, EXCLUDING allow-listed non-allocating externs.
+# Just(fname) for any other IRCall/IRCallUnboxed2 (Sprout fn OR unknown extern —
+# distinguished later, at resolution); Nothing for non-calls and allow-listed reads.
+fn op_raw_callee(op: sprout_ir.IROp) -> Maybe String =
+  match op with
+  | sprout_ir.IRCall _ _ fname _ ->
+      if is_nonallocating_read(fname) then Nothing else Just(fname)
+  | sprout_ir.IRCallUnboxed2 _ _ _ fname _ ->
+      if is_nonallocating_unboxed_read(fname) then Nothing else Just(fname)
+  | _ -> Nothing
+
+# Trigger contribution from NON-call ops only (calls are deferred to callee
+# resolution).  IRMakeCtor/IRMakeTuple/string ops → true; IRApplyClosure (indirect)
+# → true via op_triggers_gc; arithmetic/loads/control flow → false.
+fn op_noncall_trigger(op: sprout_ir.IROp) -> Bool =
+  match op with
+  | sprout_ir.IRCall _ _ _ _ -> false
+  | sprout_ir.IRCallUnboxed2 _ _ _ _ _ -> false
+  | _ -> op_triggers_gc(op)
+
+fn scan_op_raw(op: sprout_ir.IROp, acc: (Bool, Set)) -> (Bool, Set) =
+  match acc with
+  | (nc, targets) ->
+      match op_raw_callee(op) with
+      | Just g -> (nc || op_noncall_trigger(op), set_insert(g, targets))
+      | Nothing -> (nc || op_noncall_trigger(op), targets)
+
+fn scan_ops_raw(ops: List sprout_ir.IROp, acc: (Bool, Set)) -> (Bool, Set) =
+  match ops with
+  | Nil -> acc
+  | Cons op rest -> scan_ops_raw(rest, scan_op_raw(op, acc))
+
+fn scan_blocks_raw(blocks: List sprout_ir.IRBlock, acc: (Bool, Set)) -> (Bool, Set) =
+  match blocks with
+  | Nil -> acc
+  | Cons b rest -> scan_blocks_raw(rest, scan_ops_raw(block_ops(b), acc))
+
+# Per-function raw summary: (has-non-call-trigger, non-allow-listed call targets).
+# fn_names-independent — the streaming pre-pass calls this per translated fn.
+export fn fn_raw_summary(f: sprout_ir.IRFunction) -> (Bool, Set) =
+  match f with
+  | sprout_ir.IRFunction _ _ _ blocks -> scan_blocks_raw(blocks, (false, set_empty()))
+
+# --- Phase 2: resolve raw entries against the full name set, then fixpoint. ---
+
+# Split raw targets into (any-unknown-extern?, Sprout-callee-list).  A target not
+# in `names` is an unknown/external callee → conservatively a local trigger.
+fn resolve_targets(targets: List String, names: Set,
+                   acc_callees: List String) -> (Bool, List String) =
+  match targets with
+  | Nil -> (false, acc_callees)
+  | Cons t rest ->
+      if set_member(t, names)
+      then resolve_targets(rest, names, Cons(t, acc_callees))
+      else match resolve_targets(rest, names, acc_callees) with
+           | (_, cs) -> (true, cs)
+
+# Resolve one raw entry to (name, (local_trigger, sprout_callees)).
+fn resolve_entry(name: String, nc: Bool, targets: Set, names: Set) -> (String, (Bool, List String)) =
+  match resolve_targets(set_to_list(targets), names, Nil) with
+  | (has_unknown, callees) -> (name, (nc || has_unknown, callees))
+
+fn resolve_all(raw: List (String, (Bool, Set)), names: Set,
+               acc: List (String, (Bool, List String))) -> List (String, (Bool, List String)) =
+  match raw with
+  | Nil -> list_reverse(acc)
+  | Cons (name, (nc, targets)) rest ->
+      resolve_all(rest, names, Cons(resolve_entry(name, nc, targets, names), acc))
+
+fn raw_names_loop(raw: List (String, (Bool, Set)), acc: Set) -> Set =
+  match raw with
+  | Nil -> acc
+  | Cons (name, _) rest -> raw_names_loop(rest, set_insert(name, acc))
+
+# Collect the set of all program function names (used to classify callees).
+fn fn_names_set_loop(fns: List sprout_ir.IRFunction, acc: Set) -> Set =
+  match fns with
+  | Nil -> acc
+  | Cons f rest ->
+      match f with
+      | sprout_ir.IRFunction name _ _ _ -> fn_names_set_loop(rest, set_insert(name, acc))
+
+fn fn_names_set(fns: List sprout_ir.IRFunction) -> Set =
+  fn_names_set_loop(fns, set_empty())
+
+fn extract_raw_summaries(fns: List sprout_ir.IRFunction,
+                         acc: List (String, (Bool, Set))) -> List (String, (Bool, Set)) =
+  match fns with
+  | Nil -> list_reverse(acc)
+  | Cons f rest ->
+      match f with
+      | sprout_ir.IRFunction name _ _ _ ->
+          extract_raw_summaries(rest, Cons((name, fn_raw_summary(f)), acc))
+
+fn lookup_may(name: String, cur: Dict Bool) -> Bool =
+  match dict_get(name, cur) with
+  | Just b -> b
+  | Nothing -> false
+
+# True if any callee currently may-trigger.
+fn any_callee_may(callees: List String, cur: Dict Bool) -> Bool =
+  match callees with
+  | Nil -> false
+  | Cons g rest -> if lookup_may(g, cur) then true else any_callee_may(rest, cur)
+
+# One fixpoint round: recompute may[F] = local_trigger[F] OR any callee may.
+fn fixpoint_round(entries: List (String, (Bool, List String)), cur: Dict Bool,
+                  acc: Dict Bool) -> Dict Bool =
+  match entries with
+  | Nil -> acc
+  | Cons (name, (lt, callees)) rest ->
+      fixpoint_round(rest, cur,
+        dict_set(name, lt || any_callee_may(callees, cur), acc))
+
+fn count_true_loop(names: List String, d: Dict Bool, n: Int) -> Int =
+  match names with
+  | Nil -> n
+  | Cons name rest -> count_true_loop(rest, d, if lookup_may(name, d) then n + 1 else n)
+
+fn count_true(names: List String, d: Dict Bool) -> Int =
+  count_true_loop(names, d, 0)
+
+# Iterate rounds until the true-count is stable (monotone least fixpoint).
+fn fixpoint_iterate(entries: List (String, (Bool, List String)), names: List String,
+                    cur: Dict Bool) -> Dict Bool =
+  match fixpoint_round(entries, cur, dict_empty()) with
+  | next ->
+      if count_true(names, next) == count_true(names, cur)
+      then next
+      else fixpoint_iterate(entries, names, next)
+
+fn entry_names(entries: List (String, (Bool, List String)), acc: List String) -> List String =
+  match entries with
+  | Nil -> list_reverse(acc)
+  | Cons (name, _) rest -> entry_names(rest, Cons(name, acc))
+
+# Public (streaming path): build the summary from raw per-function entries the
+# pre-pass collected one function at a time.  Names for callee resolution are the
+# raw entries' own names.
+export fn summary_from_raw(raw: List (String, (Bool, Set))) -> Dict Bool =
+  match resolve_all(raw, raw_names_loop(raw, set_empty()), Nil) with
+  | resolved -> fixpoint_iterate(resolved, entry_names(resolved, Nil), dict_empty())
+
+# Public (batch path): build the summary directly from the whole function list.
+export fn compute_alloc_summary(fns: List sprout_ir.IRFunction) -> Dict Bool =
+  summary_from_raw(extract_raw_summaries(fns, Nil))
+
+# Summary-aware trigger test: a call to a Sprout function proven non-triggering
+# (summary lookup false) is a non-trigger; an unknown callee (absent from the
+# summary) is conservatively a trigger.  Non-call ops delegate to op_triggers_gc.
+fn op_triggers_gc_summary(op: sprout_ir.IROp, summary: Dict Bool) -> Bool =
+  match op with
+  | sprout_ir.IRCall _ _ fname _ ->
+      if is_nonallocating_read(fname) then false
+      else match dict_get(fname, summary) with | Just b -> b | Nothing -> true
+  | sprout_ir.IRCallUnboxed2 _ _ _ fname _ ->
+      if is_nonallocating_unboxed_read(fname) then false
+      else match dict_get(fname, summary) with | Just b -> b | Nothing -> true
+  | _ -> op_triggers_gc(op)
+
+# ---------------------------------------------------------------------------
 # Per-program driver.
 
-export fn rewrite_one_fn(f: sprout_ir.IRFunction, idx_map: Dict Int) -> sprout_ir.IRFunction =
+# `summary` is the may-trigger-GC map (compute_alloc_summary).  Pass dict_empty()
+# to disable the interprocedural elision (every Sprout-fn call then defaults to a
+# trigger — the pre-fixpoint behaviour, conservative and safe).
+export fn rewrite_one_fn_with_summary(f: sprout_ir.IRFunction, idx_map: Dict Int,
+                                      summary: Dict Bool) -> sprout_ir.IRFunction =
   match f with
   | sprout_ir.IRFunction name _ _ _ ->
       # All functions use "%t$" as the fresh-name prefix (see prefix_for_fn),
@@ -997,8 +1186,12 @@ export fn rewrite_one_fn(f: sprout_ir.IRFunction, idx_map: Dict Int) -> sprout_i
       # consumed by the translator; lifted lambdas in idx_map carry body_next_idx
       # which starts after the n_caps IRLoadEnvSlot names.
       match dict_get(name, idx_map) with
-      | Just i -> rewrite_fn(f, i, prefix_for_fn(name))
-      | Nothing -> rewrite_fn(f, 0, prefix_for_fn(name))
+      | Just i -> rewrite_fn(f, i, prefix_for_fn(name), summary)
+      | Nothing -> rewrite_fn(f, 0, prefix_for_fn(name), summary)
+
+# Back-compat shim: rooting a single function with no interprocedural summary.
+export fn rewrite_one_fn(f: sprout_ir.IRFunction, idx_map: Dict Int) -> sprout_ir.IRFunction =
+  rewrite_one_fn_with_summary(f, idx_map, dict_empty())
 
 # SSA fresh-name prefix for root-slot temps the rooting pass generates: always
 # "%t$".  Must match ast_to_ir.fresh_name (which hardcodes "%t$" for every body
@@ -1009,14 +1202,18 @@ export fn rewrite_one_fn(f: sprout_ir.IRFunction, idx_map: Dict Int) -> sprout_i
 fn prefix_for_fn(name: String) -> String =
   "%t$"
 
-fn rewrite_fns(fns: List sprout_ir.IRFunction, idx_map: Dict Int,
+fn rewrite_fns(fns: List sprout_ir.IRFunction, idx_map: Dict Int, summary: Dict Bool,
                acc: List sprout_ir.IRFunction) -> List sprout_ir.IRFunction =
   match fns with
   | Nil -> list_reverse(acc)
-  | Cons f rest -> rewrite_fns(rest, idx_map, Cons(rewrite_one_fn(f, idx_map), acc))
+  | Cons f rest -> rewrite_fns(rest, idx_map, summary, Cons(rewrite_one_fn_with_summary(f, idx_map, summary), acc))
 
 # Entry point.  idx_map maps fn-name → next-free temp index produced by
-# ast_to_ir.translate_program.  Unmapped functions default to 0.
+# ast_to_ir.translate_program.  Unmapped functions default to 0.  The batch path
+# has the whole function list, so it computes the alloc summary directly; the
+# streaming path (ir_pipeline) computes it in a pre-pass and calls
+# rewrite_one_fn_with_summary per function.
 export fn insert_roots(prog: sprout_ir.IRProgram, idx_map: Dict Int) -> sprout_ir.IRProgram =
   match prog with
-  | sprout_ir.IRProgram fns globals ctors externs -> sprout_ir.IRProgram(rewrite_fns(fns, idx_map, Nil), globals, ctors, externs)
+  | sprout_ir.IRProgram fns globals ctors externs ->
+      sprout_ir.IRProgram(rewrite_fns(fns, idx_map, compute_alloc_summary(fns), Nil), globals, ctors, externs)

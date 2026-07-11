@@ -5254,13 +5254,13 @@ export fn build_top_level_let_names(decls: List typed_ast.TypedDecl) -> Set =
       | _ -> build_top_level_let_names(rest)
 
 export fn classify_let_decls_ir(decls: List typed_ast.TypedDecl) ->
-    (List sprout_ir.IRGlobalDecl, List (String, typed_ast.TypedExpr)) =
+    (List sprout_ir.IRGlobalDecl, List(source.GlobalName, typed_ast.TypedExpr)) =
   classify_let_decls_ir_acc(decls, Nil, Nil)
 
 fn classify_let_decls_ir_acc(decls: List typed_ast.TypedDecl,
                               globals_acc: List sprout_ir.IRGlobalDecl,
-                              runtime_acc: List (String, typed_ast.TypedExpr)) ->
-    (List sprout_ir.IRGlobalDecl, List (String, typed_ast.TypedExpr)) =
+                              runtime_acc: List (source.GlobalName, typed_ast.TypedExpr)) ->
+    (List sprout_ir.IRGlobalDecl, List(source.GlobalName, typed_ast.TypedExpr)) =
   match decls with
   | Nil -> (list_reverse(globals_acc), list_reverse(runtime_acc))
   | Cons d rest ->
@@ -5274,7 +5274,7 @@ fn classify_let_decls_ir_acc(decls: List typed_ast.TypedDecl,
           | Nothing ->
               classify_let_decls_ir_acc(rest,
                 Cons(sprout_ir.IRGlobalDecl(name, "i64", sprout_ir.GlobalZeroInit), globals_acc),
-                Cons((name, body), runtime_acc))
+                Cons((source.GlobalName(name), body), runtime_acc))
       | _ -> classify_let_decls_ir_acc(rest, globals_acc, runtime_acc)
 
 # Synthesize @__sprout_init_globals: evaluate each runtime-let body in
@@ -5285,7 +5285,7 @@ fn classify_let_decls_ir_acc(decls: List typed_ast.TypedDecl,
 # lifted lambdas).  Callers MUST emit `lifted` alongside init_fn — a top-level
 # `let` bound to a partial application (e.g. `let f = repeat("x")`) builds a
 # @__sprout_partial_N wrapper here; dropping it leaves an undefined reference.
-export fn synthesize_init_globals_fn(runtime_lets: List (String, typed_ast.TypedExpr),
+export fn synthesize_init_globals_fn(runtime_lets: List (source.GlobalName, typed_ast.TypedExpr),
                                      ctors: Dict (Int, Int, Int, String),
                                      top_level: Set, let_names: Set,
                                      fn_arities: Dict Int,
@@ -5314,7 +5314,7 @@ export fn synthesize_init_globals_fn(runtime_lets: List (String, typed_ast.Typed
                                          Nil))),
                    list_reverse(lifted), next_idx))
 
-fn synthesize_init_body_loop(runtime_lets: List (String, typed_ast.TypedExpr),
+fn synthesize_init_body_loop(runtime_lets: List (source.GlobalName, typed_ast.TypedExpr),
                               ctors: Dict (Int, Int, Int, String),
                               cur_label: String,
                               cur_ops: List sprout_ir.IROp,
@@ -5330,7 +5330,7 @@ fn synthesize_init_body_loop(runtime_lets: List (String, typed_ast.TypedExpr),
   | Nil -> Ok((blocks, cur_label, cur_ops, idx))
   | Cons head rest ->
       match head with
-      | (name, body) ->
+      | (gname, body) ->
           match translate_expr(body, Nil, ctors, idx, cur_label, cur_ops,
                                 dict_empty(), lifted_ref, top_level, let_names, fn_arities,
                                 lambda_ctr_ref, lifted_idx_ref, "%t") with
@@ -5340,10 +5340,11 @@ fn synthesize_init_body_loop(runtime_lets: List (String, typed_ast.TypedExpr),
               | (body_blocks, body_lbl, body_ops, body_result, next_idx) ->
                   # Store the initializer, then register the global's slot as a
                   # permanent GC root (rationale on IRRegisterGlobalRoot itself).
+                  # IRStoreGlobal/IRRegisterGlobalRoot take the raw @name string.
                   synthesize_init_body_loop(rest, ctors, body_lbl,
                     list_append(body_ops,
-                      Cons(sprout_ir.IRStoreGlobal(name, body_result),
-                        Cons(sprout_ir.IRRegisterGlobalRoot(name), Nil))),
+                      Cons(sprout_ir.IRStoreGlobal(source.global_name_str(gname), body_result),
+                        Cons(sprout_ir.IRRegisterGlobalRoot(source.global_name_str(gname)), Nil))),
                     list_append(blocks, body_blocks), next_idx,
                     lifted_ref, top_level, let_names, fn_arities,
                     lambda_ctr_ref, lifted_idx_ref)
@@ -5385,7 +5386,7 @@ export fn translate_program(prog: typed_ast.TypedProgram) ->
 fn translate_program_after_classify(decls: List typed_ast.TypedDecl,
                                     ctors: Dict (Int, Int, Int, String),
                                     ctor_regs: List sprout_ir.CtorReg,
-                                    classified: (List sprout_ir.IRGlobalDecl, List (String, typed_ast.TypedExpr)),
+                                    classified: (List sprout_ir.IRGlobalDecl, List(source.GlobalName, typed_ast.TypedExpr)),
                                     top_level_set: Set, let_names: Set,
                                     fn_arities: Dict Int,
                                     lambda_ctr_ref: Ref Int,
