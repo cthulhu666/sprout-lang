@@ -36,9 +36,14 @@ decisive backing.) Both are compiler/IR concerns. This is what Phase D must atta
 
 **Framing.** The digit recognizer is a *proxy* for Sprout's general performance, not the target. So
 the primary lever (B1) is scoped to the **primitive `Vector` layer**, keyed on the **element type**,
-not to `MutVec`/`MutMatrix` as containers. `MutVec`/`MutMatrix`/`Vec` are all thin wrappers over
-`Vector`; a fix at the `Vector` layer lights up every container built on it. The recognizer's
-Double kernels are the validation case, not the scope.
+not to `MutVec`/`MutMatrix` as containers. **Important reach limit (verified 2026-07-11):** Sprout
+has **no monomorphization/inliner**, so B1 fires only where the element type is concrete *at the
+source call site*. `MutVec`/`MutMatrix`/`Vec` accessors (`mutvec_get`, `vec_get_or`, …) are
+*polymorphic wrappers* (`Vector a`, erased) — B1 does **not** reach reads made through them. It
+reaches hand-written concretely-typed sites (the Double kernels). Lighting up idiomatic
+container access needs an inliner/monomorphizer first (§4 "Reachability", §Recommendation). The
+recognizer kernels are the near-term validation case *and*, for now, close to the whole reachable
+scope.
 
 **Goals.** For any statically-monomorphic `Vector T` element access:
 1. Element read/write is **not an opaque runtime call** — it lowers to inline IR
@@ -114,17 +119,23 @@ prove-and-hoist or eliminate it and (for independent writes) vectorize.
   there, and one chokepoint is where that work should land. Revisit inlining pointer writes when the
   Phase 2 barrier exists.
 
-**Access-path coverage — cover the indexed `Maybe` path, not just `vector_get_direct`.** The
-recognizer kernels call `vector_get_direct` (unwrapped read), but ordinary user code reaches
-elements through the *indexed* API — `mutvec_get`/`vec_get_or`, which lower to `vector_get`
-(bounds-checked, **`Maybe`-returning**, then CPR/do-bind-unboxed). B1 must inline that path too, or
-the win misses real programs: `examples/astar.sprout`'s hot loop is entirely `mutvec_get`/
-`mutvec_set` over `MutVec Int` (integer, zero floats) and would see *nothing* from a
-`vector_get_direct`-only B1. Two routes, decide at implementation time: (a) inline `vector_get`
-directly (load + inline bounds check, returning the CPR-unboxed value); or (b) accept that such code
-first needs the direct-access-idiom rewrite the recognizer took (a separate, non-Phase-D
-stdlib/example change). (a) is preferred — it makes the fast path reachable from idiomatic code
-without a rewrite, the eventual goal.
+**Reachability — "monomorphic" means CONCRETE-IN-SOURCE, and that sharply limits reach (verified
+2026-07-11).** Sprout compiles once with a uniform-i64 ABI and has **no monomorphization/inliner
+pass** (verified: no such pass in `stdlib/compiler/`; only `is_monomorphic_*` type *predicates*).
+So B1 can fire only where the element type is `Vector Double` **at the source call site** — i.e.
+the hand-written kernels (`mutmatrix_row_dot_go(raw_m: Vector Double, …)` etc.). It does **not**
+reach reads that go through a **polymorphic wrapper**: `mutvec_get(v: MutVec a, …)` /
+`vec_get_or` call `vector_get` on `Vector a` — *erased* — so the concrete `Double`/`Int` never
+reaches that site. Consequences:
+- The recognizer's Double kernels are reachable (concrete in source) — the valid slice-1 witness.
+- `examples/astar.sprout` is **NOT** reachable: its hot loop is `mutvec_get`/`mutvec_set` over the
+  polymorphic `MutVec a` wrapper. The blocker is **type erasure in the wrapper**, not
+  `vector_get` vs `vector_get_direct` — inlining `vector_get` would not help, because the element
+  type is already gone by the time control reaches it. A* becomes a *motivating case for a future
+  inliner/monomorphizer*, not a B1 witness.
+- Reaching idiomatic / generic-wrapper-mediated code (the "general Sprout performance" goal) needs
+  an **inliner or monomorphization pass** — separate, larger work, and arguably the higher-leverage
+  prerequisite if broad reach is the priority (see the strategic note in §Recommendation).
 
 **Two prerequisites to verify at implementation time (assumed, not confirmed):**
 1. The concrete element-type kind reaches the active typed-lowering site (`ast_to_ir`→`sprout_ir`→
@@ -224,11 +235,13 @@ untouched.
 - **GC correctness (B2):** root-elision validated under `SPROUT_GC_STRESS=1` too.
 - **Polymorphic fallback:** a `Vector a` access at a polymorphic site still emits the runtime call
   (no mis-inlining of an erased element type).
-- **Non-numeric perf witness (A\*):** `examples/astar.sprout` (integer-only, `MutVec Int` hot loop
-  via the `mutvec_get`/`Maybe` path) is the benchmark that proves generalized B1 helps beyond
-  numerics. Baseline in `bench/results-2026-07-11.md` (~305 µs/run); expect a speedup from B1 once
-  the indexed-`Maybe` path is covered, and at minimum **no regression**. N-Queens
-  (`Vec Bool`, copy-dominated) is a no-regression check, not a win target.
+- **Recognizer kernels are the slice-1 witness** (concrete `Vector Double` in source): expect the
+  per-element `vector_get_direct` calls gone from the kernel IR and a modest wall drop (~22→~14
+  insns/element; the GC-root calls remain until B2, no SIMD until B3), accuracy still `139/150`.
+- **A\* / N-Queens are NO-REGRESSION checks only, NOT win targets** (corrected): both go through
+  polymorphic wrappers (`mutvec_get` on `MutVec a`; `Vec Bool`) that B1 cannot reach without an
+  inliner. Baselines in `bench/results-2026-07-11.md`. They must not regress; a win there is not
+  expected until the inliner/monomorphizer prerequisite exists.
 - Existing `tests/stdlib/test_native_mutmatrix.spr` kernel semantics tests must stay green.
 
 ## 10. Spec / docs status
@@ -241,19 +254,28 @@ Phase D results when it lands.
 
 ## Recommendation
 
-Approve **B1 + B2** as the Phase D first slice (biggest measured lever, safety-preserving,
-bit-identical), scoped to **any monomorphic `Vector T`** — not just Double — because the recognizer
-is a proxy and the fix lives at the primitive `Vector` layer, benefiting `Vec`/`MutVec`/`MutMatrix`
-and every future `Vector`-backed container:
-- **B1 read:** all monomorphic `T` in one slice (rooting is value-kind-driven; add the inlined-read
-  op to the exhaustive classifier). **B1 write:** scalar `T` now; pointer-element writes stay at the
-  `vector_mutset` chokepoint for the Phase 2 GC barrier.
-- **B2:** element-type-agnostic — helps any allocation-free loop.
-- Two implementation-time prechecks decide whether pointer-element *reads* also ship in slice 1:
-  (1) the element-type kind reaches the typed-lowering site; (2) the `Vector String`-across-alloc
-  case is green under `SPROUT_GC_STRESS=1`. If either fails, pointer-element reads become slice 2.
+**Strategic reframing (verified 2026-07-11, corrects earlier turns).** B1's mechanism is sound, but
+its *reach* is gated by the absence of an inliner/monomorphizer: B1 only fires on source-level
+concrete `Vector Double`, i.e. the hand-written kernels. It does **not** reach idiomatic
+wrapper-mediated access (`mutvec_get`, `vec_get_or`, A\*), because the element type is erased inside
+the polymorphic wrapper. So there is a fork:
 
-Then hit the **B3 checkpoint** (measure whether the row-update kernels vectorize; if not, add
-loop-shaped codegen). Hold **A** (Double no-scan store — GC-precision rationale, materiality-gated)
-and any **SIMD dot reduction** (changes FP order) as separately-gated follow-ons. The Double kernels
-are the validation case; the `139/150` accuracy gate holds on every slice.
+- **(1) Narrow B1-Double now** — inline `vector_get_direct` at concrete `Vector Double` sites. Scope
+  it to **Double only** so the self-hosted compiler's own `Vector Int`/`Vector Token` reads are
+  untouched → its emitted IR is byte-identical → `verify-bootstrap-fixed-point` holds trivially, and
+  the only changed binaries are the recognizer + Double examples. This *proves the inline-load
+  mechanism* and gives a modest recognizer win (calls gone; GC-roots remain until B2; no SIMD until
+  B3). Low risk, narrow value.
+- **(2) Inliner / monomorphizer first** — the higher-leverage prerequisite if the goal is *general*
+  Sprout performance. It's what makes B1 (and much else) reach idiomatic code. Larger, separate
+  design.
+
+**Recommended:** do (1) as a small, mechanism-proving, fixed-point-safe first commit, *then* weigh
+(2) as its own design — because generalizing B1 to `Vector Int`/etc. only pays off once wrapper
+inlining exists, and (1) de-risks the codegen/rooting machinery (2) would also rely on.
+
+B1 mechanism details (unchanged): read lowers to inline `load` (rooting is value-kind-driven — add
+the new op to the exhaustive classifier, result kind by element type); scalar writes inline, pointer
+writes stay at the `vector_mutset` chokepoint. Then the **B3 checkpoint** (do the row-update kernels
+vectorize?); hold **A** (Double no-scan store, materiality-gated) and any **SIMD dot reduction**
+(changes FP order). The `139/150` accuracy gate holds on every slice.
