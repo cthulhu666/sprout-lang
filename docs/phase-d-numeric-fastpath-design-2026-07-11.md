@@ -114,6 +114,18 @@ prove-and-hoist or eliminate it and (for independent writes) vectorize.
   there, and one chokepoint is where that work should land. Revisit inlining pointer writes when the
   Phase 2 barrier exists.
 
+**Access-path coverage — cover the indexed `Maybe` path, not just `vector_get_direct`.** The
+recognizer kernels call `vector_get_direct` (unwrapped read), but ordinary user code reaches
+elements through the *indexed* API — `mutvec_get`/`vec_get_or`, which lower to `vector_get`
+(bounds-checked, **`Maybe`-returning**, then CPR/do-bind-unboxed). B1 must inline that path too, or
+the win misses real programs: `examples/astar.sprout`'s hot loop is entirely `mutvec_get`/
+`mutvec_set` over `MutVec Int` (integer, zero floats) and would see *nothing* from a
+`vector_get_direct`-only B1. Two routes, decide at implementation time: (a) inline `vector_get`
+directly (load + inline bounds check, returning the CPR-unboxed value); or (b) accept that such code
+first needs the direct-access-idiom rewrite the recognizer took (a separate, non-Phase-D
+stdlib/example change). (a) is preferred — it makes the fast path reachable from idiomatic code
+without a rewrite, the eventual goal.
+
 **Two prerequisites to verify at implementation time (assumed, not confirmed):**
 1. The concrete element-type kind reaches the active typed-lowering site (`ast_to_ir`→`sprout_ir`→
    `ir_lowering`) so a `vector_get_direct`/`vector_mutset` call can be classified scalar/pointer
@@ -212,6 +224,11 @@ untouched.
 - **GC correctness (B2):** root-elision validated under `SPROUT_GC_STRESS=1` too.
 - **Polymorphic fallback:** a `Vector a` access at a polymorphic site still emits the runtime call
   (no mis-inlining of an erased element type).
+- **Non-numeric perf witness (A\*):** `examples/astar.sprout` (integer-only, `MutVec Int` hot loop
+  via the `mutvec_get`/`Maybe` path) is the benchmark that proves generalized B1 helps beyond
+  numerics. Baseline in `bench/results-2026-07-11.md` (~305 µs/run); expect a speedup from B1 once
+  the indexed-`Maybe` path is covered, and at minimum **no regression**. N-Queens
+  (`Vec Bool`, copy-dominated) is a no-regression check, not a win target.
 - Existing `tests/stdlib/test_native_mutmatrix.spr` kernel semantics tests must stay green.
 
 ## 10. Spec / docs status
