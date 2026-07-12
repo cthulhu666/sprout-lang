@@ -234,6 +234,13 @@ debug-run file: bootstrap-from-seed
 [group('test')]
 test: test-stdlib-stage1 test-type-errors
 
+# B1-Double regression gate: assert the inline Vector-Double optimization fires on
+# genuine `Vector Double`, does NOT fire on a shadowed heap `Double` (UAF guard),
+# still allows partial application, and traps on out-of-bounds. See scripts/b1_gate.sh.
+[group('test')]
+b1-gate: bootstrap-from-seed
+  bash scripts/b1_gate.sh
+
 [private]
 _test-stdlib stage:
   #!/usr/bin/env bash

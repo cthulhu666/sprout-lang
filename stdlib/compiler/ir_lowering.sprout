@@ -115,6 +115,16 @@ fn lower_float_binop(r: String, inst: String, a: String, b: String) -> String =
   "  " ++ r ++ "$fr = " ++ inst ++ " double " ++ r ++ "$la, " ++ r ++ "$lb\n" ++
   "  " ++ r ++ " = bitcast double " ++ r ++ "$fr to i64"
 
+# B1: the SINGLE source of the VectorVal element-address computation. Emits the
+# preamble producing %<r>$ep = &(((VectorVal*)v)->data[i]). Layout
+# VectorVal { i64 len@0, i64 cap@8, i64* data@16 } — data is at i64-index 2; if the
+# layout changes (e.g. a GC header word), fix the `i64 2` here and nowhere else.
+fn vec_elem_addr_ir(r: String, v: String, i: String) -> String =
+  "  " ++ r ++ "$vp = inttoptr i64 " ++ v ++ " to ptr\n" ++
+  "  " ++ r ++ "$dp = getelementptr i64, ptr " ++ r ++ "$vp, i64 2\n" ++
+  "  " ++ r ++ "$data = load ptr, ptr " ++ r ++ "$dp\n" ++
+  "  " ++ r ++ "$ep = getelementptr i64, ptr " ++ r ++ "$data, i64 " ++ i
+
 fn lower_op(op: sprout_ir.IROp, ret_ty: String, str_table: Dict (String, Int)) -> String =
   match op with
   | sprout_ir.IRConst name n -> "  " ++ name ++ " = add i64 0, " ++ int_to_string(n)
@@ -268,6 +278,19 @@ fn lower_op(op: sprout_ir.IROp, ret_ty: String, str_table: Dict (String, Int)) -
       "  " ++ r ++ " = call i64 @sprout_tag(i64 " ++ s ++ ")"
   | sprout_ir.IRGetField r s i _kind ->
       "  " ++ r ++ " = call i64 @sprout_field(i64 " ++ s ++ ", i64 " ++ int_to_string(i) ++ ")"
+  # B1 Vector-Double inline access. VectorVal { i64 len@0, i64 cap@8, i64* data@16 };
+  # data lives at i64-index 2. Unchecked: ast_to_ir has already emitted the null +
+  # bounds guard blocks that dominate these. Temps derive from the unique result SSA.
+  | sprout_ir.IRVecLenD r v ->
+      "  " ++ r ++ "$vp = inttoptr i64 " ++ v ++ " to ptr\n" ++
+      "  " ++ r ++ " = load i64, ptr " ++ r ++ "$vp"
+  | sprout_ir.IRVecGetD r v i ->
+      vec_elem_addr_ir(r, v, i) ++ "\n" ++
+      "  " ++ r ++ " = load i64, ptr " ++ r ++ "$ep"
+  | sprout_ir.IRVecSetD r v i x ->
+      vec_elem_addr_ir(r, v, i) ++ "\n" ++
+      "  store i64 " ++ x ++ ", ptr " ++ r ++ "$ep\n" ++
+      "  " ++ r ++ " = add i64 0, 0"
   | sprout_ir.IRAbortMatch ->
       "  call void @sprout_abort_match()\n  unreachable"
   # W7/F-DIV: reuses the existing `panic` builtin. The call result is unused

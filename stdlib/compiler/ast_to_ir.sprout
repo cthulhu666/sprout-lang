@@ -4339,6 +4339,15 @@ fn translate_direct_call(fname: String, args: List typed_ast.TypedExpr,
       | Ok r ->
           match r with
           | (arg_blocks, arg_cur_lbl, arg_cur_ops, arg_names, idx1) ->
+              # B1: inline Vector Double element access (Double-gated). Only intercept
+              # the FULLY-APPLIED call — an under-applied vector_get_direct/vector_mutset
+              # is in fn_arities (build_fn_arities includes TExternFnDecl) and must still
+              # reach translate_partial_application below to build its closure.
+              if fname == "vector_get_direct" && list_length(arg_names) == 2 && arg0_elem_is_double(args)
+              then finish_vec_get_d(arg_blocks, arg_cur_lbl, arg_cur_ops, arg_names, idx1, name_prefix)
+              else if fname == "vector_mutset" && list_length(arg_names) == 3 && arg0_elem_is_double(args)
+              then finish_vec_set_d(arg_blocks, arg_cur_lbl, arg_cur_ops, arg_names, idx1, name_prefix)
+              else
               match dict_get(fname, fn_arities) with
               | Just arity ->
                   if arity > list_length(arg_names)
@@ -4437,6 +4446,96 @@ fn finish_direct_call(fname: String, call_ty: types.Type,
   where result = fresh_name(name_prefix, idx)
         call_op = sprout_ir.IRCall(result, ret_irtype(call_ty),
                                    fname, arg_names)
+
+# B1 Vector-Double gate. True when the first argument's static type is a
+# `Vector Double` where Double is the PRIMITIVE. Matches on EXACT canonical
+# `type_id_name` (mirroring is_maybe_type / is_list_type at ~600/616), NOT the
+# last-segment `type_id_display`: a user `type Double = <heap ADT>` has canonical
+# name `main.Double` (dotted) and must NOT fire this scalar fast-path, or
+# IRVecGetD would load a heap pointer that ir_rooting classifies scalar and never
+# roots — a use-after-free under GC. The primitive Double / Vector have bare
+# canonical names, so exact match fires on them and only them. A false negative
+# merely forgoes the optimization; a false positive on a heap element is unsafe.
+fn type_is_vector_double(t: types.Type) -> Bool =
+  match t with
+  | types.TApp (types.TConst vname)(types.TConst ename) ->
+      types.type_id_name(vname) == "Vector" && types.type_id_name(ename) == "Double"
+  | _ -> false
+
+fn arg0_elem_is_double(args: List typed_ast.TypedExpr) -> Bool =
+  match args with
+  | Cons head _ -> type_is_vector_double(typed_ast.typed_expr_type(head))
+  | Nil -> false
+
+# Shared null + bounds guard for B1 Vector-Double access. Emits the three blocks
+# (cond / len+bounds / panic) that dominate a fresh continuation block <ok2>, and
+# returns (guard_blocks, ok2_label). The check MUST be built at the IRBlock layer,
+# not the ir_lowering text layer (mirrors finish_checked_div): a checked op that
+# split blocks via text would leave downstream phi predecessors naming the wrong
+# block. Reserves fresh-name slots idx..idx+4; the caller uses idx+5 for its
+# result and advances idx by 6. Bounds uses one UNSIGNED compare (idx>=len also
+# catches idx<0), matching vector_get_direct/vector_mutset's semantics.
+fn vec_double_guard(cur_lbl: String, cur_ops: List sprout_ir.IROp, vec: String, i: String,
+                    msg_text: String, idx: Int, name_prefix: String)
+    -> (List sprout_ir.IRBlock, String) =
+  (Cons(cond_block, Cons(ok1_block, Cons(panic_block, Nil))), ok2_lbl)
+  where isnull = fresh_name(name_prefix, idx)
+        len = fresh_name(name_prefix, idx + 1)
+        oob = fresh_name(name_prefix, idx + 2)
+        msg_raw = fresh_name(name_prefix, idx + 3)
+        msg = fresh_name(name_prefix, idx + 4)
+        ok1_lbl = "vok1_" ++ int_to_string(idx)
+        panic_lbl = "vpanic_" ++ int_to_string(idx)
+        ok2_lbl = "vok2_" ++ int_to_string(idx)
+        cond_block = sprout_ir.IRBlock(cur_lbl,
+                       list_append(cur_ops,
+                         Cons(sprout_ir.IRICmp(isnull, "eq", vec, "0"),
+                         Cons(sprout_ir.IRCondBr(isnull, panic_lbl, ok1_lbl), Nil))))
+        ok1_block = sprout_ir.IRBlock(ok1_lbl,
+                      Cons(sprout_ir.IRVecLenD(len, vec),
+                      Cons(sprout_ir.IRICmp(oob, "uge", i, len),
+                      Cons(sprout_ir.IRCondBr(oob, panic_lbl, ok2_lbl), Nil))))
+        panic_block = sprout_ir.IRBlock(panic_lbl,
+                        Cons(sprout_ir.IRStrConst(msg, msg_raw, msg_text),
+                        Cons(sprout_ir.IRPanic(msg), Nil)))
+
+# B1: guard + inline op for a Vector-Double access. Shared by the get/set finish
+# wrappers below; they build `tail_op` with result = fresh_name(idx+5) (which this
+# function also returns — fresh_name is deterministic, so the op's def and the
+# returned result SSA agree). The tail op runs in the guard's ok2 continuation.
+fn emit_vec_access(arg_blocks: List sprout_ir.IRBlock, cur_lbl: String,
+                   cur_ops: List sprout_ir.IROp, vec: String, i: String,
+                   tail_op: sprout_ir.IROp, msg_text: String,
+                   idx: Int, name_prefix: String) ->
+    Result String (List sprout_ir.IRBlock, String, List sprout_ir.IROp, String, Int) =
+  match vec_double_guard(cur_lbl, cur_ops, vec, i, msg_text, idx, name_prefix) with
+  | (guard_blocks, ok2_lbl) ->
+      Ok((list_append(arg_blocks, guard_blocks), ok2_lbl,
+          Cons(tail_op, Nil), fresh_name(name_prefix, idx + 5), idx + 6))
+
+# B1: `vector_get_direct(vec, i)` on a Vector Double -> guard + inline IRVecGetD.
+fn finish_vec_get_d(arg_blocks: List sprout_ir.IRBlock, cur_lbl: String,
+                    cur_ops: List sprout_ir.IROp, arg_names: List String,
+                    idx: Int, name_prefix: String) ->
+    Result String (List sprout_ir.IRBlock, String, List sprout_ir.IROp, String, Int) =
+  match arg_names with
+  | [vec, i] ->
+      emit_vec_access(arg_blocks, cur_lbl, cur_ops, vec, i,
+                      sprout_ir.IRVecGetD(fresh_name(name_prefix, idx + 5), vec, i),
+                      "vector_get_direct: null vector or index out of bounds", idx, name_prefix)
+  | _ -> Err("ast_to_ir: vector_get_direct expects 2 arguments")
+
+# B1: `vector_mutset(vec, i, val)` on a Vector Double -> guard + inline IRVecSetD.
+fn finish_vec_set_d(arg_blocks: List sprout_ir.IRBlock, cur_lbl: String,
+                    cur_ops: List sprout_ir.IROp, arg_names: List String,
+                    idx: Int, name_prefix: String) ->
+    Result String (List sprout_ir.IRBlock, String, List sprout_ir.IROp, String, Int) =
+  match arg_names with
+  | [vec, i, val] ->
+      emit_vec_access(arg_blocks, cur_lbl, cur_ops, vec, i,
+                      sprout_ir.IRVecSetD(fresh_name(name_prefix, idx + 5), vec, i, val),
+                      "vector_mutset: null vector or index out of bounds", idx, name_prefix)
+  | _ -> Err("ast_to_ir: vector_mutset expects 3 arguments")
 
 # Thread a list of argument expressions through translate_expr, accumulating
 # completed blocks, current-block ops, and the result-name of each arg.

@@ -1,0 +1,12 @@
+module main
+
+# B1-Double gate regression (finding ①, the UAF): a user type named `Double`
+# that is a HEAP ADT must NOT trigger the scalar B1 fast-path. Its canonical name
+# is `main.Double` (dotted), distinct from the primitive `Double`. The IR-shape
+# gate (just b1-ir-gate) asserts this read stays a `call @vector_get_direct`
+# (0 `vec_get_d` ops) — with the pre-fix display-name gate it wrongly emits
+# `vec_get_d`, loading the heap box as an unrooted scalar (use-after-free).
+type Double = MkD Int
+
+fn read_first(v: Vector Double) -> Double !{IO} =
+  vector_get_direct(v, 0)

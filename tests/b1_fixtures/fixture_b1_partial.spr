@@ -1,0 +1,9 @@
+module main
+
+# B1 gate regression (finding ②): an UNDER-APPLIED vector_get_direct on a
+# `Vector Double` must still reach translate_partial_application and build a
+# closure — the B1 gate only intercepts the fully-applied call. Pre-fix the gate
+# fired on arg0 alone and hard-Err'd here ("expects 2 arguments"). This fixture
+# must COMPILE.
+fn get_at(v: Vector Double) -> (Int -> Double !{IO}) =
+  vector_get_direct(v)

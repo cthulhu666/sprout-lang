@@ -1,0 +1,12 @@
+module main
+
+# B1 trap coverage (finding ④b): a raw out-of-bounds read on a real `Vector Double`
+# must hit the INLINE bounds-check guard (vec_double_guard: `idx uge len` -> IRPanic)
+# and abort. The b1-gate runs this and asserts a non-zero exit + the trap message.
+# The public kernels never drive this path (their loops are min_int-bounded), so
+# this is the only coverage of the inlined trap.
+fn main() -> Unit !{IO} =
+  do
+    v <- vec_make_filled(3, 1.0)
+    x <- vector_get_direct(v, 99)
+    print(x)

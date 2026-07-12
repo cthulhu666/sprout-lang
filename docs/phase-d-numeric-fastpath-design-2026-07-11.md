@@ -94,6 +94,38 @@ fast numeric runtime already does and Sprout does not.
 Ordered by evidence-weighted value (biggest lever first). **B before A.**
 
 ### B1 — inlinable monomorphic `Vector T` element access (generalized, not Double-only)
+
+> **B1-Double LANDED — 2026-07-12** (branch `worktree-phase-d-b1-double`). Scoped to `Vector Double`
+> sites (commit-1). Three new IR ops in `sprout_ir.sprout`: `IRVecLenD` (load `len@0`), `IRVecGetD`
+> (load `data[i]`), `IRVecSetD` (store `data[i]`) — pure straight-line **unchecked** loads/stores.
+> The null + bounds guard is emitted as **IRBlocks** in `ast_to_ir.sprout` (`vec_double_guard`,
+> mirroring `finish_checked_div` — a checked op must split blocks at the IRBlock layer, not the text
+> layer, or downstream phi predecessors name the wrong block). The recognizer (`translate_direct_call`)
+> Double-gates on `arg0_elem_is_double`, which matches the **exact canonical** `type_id_name`
+> (`Vector`/`Double`), NOT the last-segment display — a user `type Double = <heap ADT>` is
+> canonically `main.Double` and must stay on the call path, or IRVecGetD would load an unrooted heap
+> pointer (use-after-free; caught in code review). The gate fires **only when fully applied** (arity 2
+> for get / 3 for set) so an under-applied `vector_get_direct` still reaches partial application.
+> Every other element type / arity falls through to the plain `IRCall`. Rooting (`ir_rooting.sprout`):
+> all three ops are non-triggers and produce **scalar** results (a Double bit-pattern is never rooted
+> as a pointer) — validated under `SPROUT_GC_STRESS=1`. Bounds uses one **unsigned** compare
+> (`idx uge len` also catches `idx<0`). Regression guard: `just b1-gate` (asserts B1 fires on real
+> `Vector Double`, does NOT fire on a shadowed heap `Double`, allows partial application, and traps
+> out-of-bounds — none observable from numeric-result tests alone).
+>
+> **Results (M1-class, same-machine A/B, `-O2`, best of 4):** recognizer **1.33s → 0.51s (~2.6×)** at
+> unchanged accuracy **139/150** — substantially larger than the "modest win" originally predicted:
+> the two `vector_get_direct` calls per element were pipeline barriers in the innermost training
+> loop, not just extra instructions. The three `Vector Double` kernels (`row_dot_go`,
+> `row_sub_scaled_go`, `row_add_scaled_into_go`) are now **call-free**; the `fmov` ABI shuffles are
+> gone (the inline `load i64` folds to `ldr d`). **NOT byte-identity-preserving** (global op set):
+> the seed reconverges to a new fixed point (iteration 2). The compiler makes **0** vector-accessor
+> calls, so B1 never fires on compiler code — no miscompile risk, `just test` + all examples green.
+> **B3 re-checkpoint (post-B1):** still **0 `.2d`** in the Double kernels; `-Rpass-analysis` now
+> reports **"Incorrect number of successors from early exiting block"** (the bounds-check panic
+> branch) rather than "call instruction" — so B3 must hoist/eliminate the bounds check **and** fix
+> the tco/stackrestore loop shape. B1 is the precondition it needed; B3 remains distinct work.
+
 Replace the `call @vector_get_direct(vec, i)` / `call @vector_mutset(vec, i, x)` emitted at a
 **statically-monomorphic `Vector T`** site with **inline IR**: load the data pointer + length from
 the Vector header, emit an inline bounds `icmp`+branch (identical trap behavior), then

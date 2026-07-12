@@ -113,6 +113,10 @@ fn op_triggers_gc(op: sprout_ir.IROp) -> Bool =
   # See docs/pr-2.5-pattern-matching-plan.md "Rooting" section.
   | sprout_ir.IRGetTag _ _ -> false
   | sprout_ir.IRGetField _ _ _ _ -> false
+  # B1: raw i64 loads/store into a Vector's backing data; no allocation.
+  | sprout_ir.IRVecLenD _ _ -> false
+  | sprout_ir.IRVecGetD _ _ _ -> false
+  | sprout_ir.IRVecSetD _ _ _ _ -> false
   | sprout_ir.IRAbortMatch -> false
   # IRPanic calls @panic then `unreachable`; panic exits, so no GC.
   | sprout_ir.IRPanic _ -> false
@@ -211,6 +215,12 @@ fn op_produces_simple_heap(op: sprout_ir.IROp) -> Maybe String =
       match kind with
       | sprout_ir.IRTScalar -> Nothing
       | _ -> Just(r)
+  # B1: a Double element / len / mutset-0 are all scalars — NEVER heap pointers,
+  # so they are never rooted (a Double bit-pattern must not be mistaken for a
+  # heap handle). This is the GC-correctness crux of the Double gate.
+  | sprout_ir.IRVecLenD _ _ -> Nothing
+  | sprout_ir.IRVecGetD _ _ _ -> Nothing
+  | sprout_ir.IRVecSetD _ _ _ _ -> Nothing
   | sprout_ir.IRGetTag _ _ -> Nothing
   # A tuple blob (@sprout_alloc_tuple_blob) is heap; a value held live across a
   # later trigger must be rooted.
@@ -390,6 +400,11 @@ fn op_uses(op: sprout_ir.IROp) -> List String =
   # across nested allocations inside branch bodies (silent GC bug).
   | sprout_ir.IRGetTag _ s -> Cons(s, Nil)
   | sprout_ir.IRGetField _ s _ _ -> Cons(s, Nil)
+  # B1: the vec handle MUST appear here (same reason as IRGetField's scrutinee)
+  # so liveness keeps the Vector live across the load/store; idx/val are read too.
+  | sprout_ir.IRVecLenD _ v -> Cons(v, Nil)
+  | sprout_ir.IRVecGetD _ v i -> Cons(v, Cons(i, Nil))
+  | sprout_ir.IRVecSetD _ v i x -> Cons(v, Cons(i, Cons(x, Nil)))
   | sprout_ir.IRAbortMatch -> Nil
   # IRPanic reads its message operand (keep it live for the @panic call).
   | sprout_ir.IRPanic msg -> Cons(msg, Nil)
@@ -448,6 +463,11 @@ fn op_def(op: sprout_ir.IROp) -> Maybe String =
   # noreturn — /code-review fix #15) and falls through to the catch-all.
   | sprout_ir.IRGetTag r _ -> Just(r)
   | sprout_ir.IRGetField r _ _ _ -> Just(r)
+  # B1: each defines its result (explicit — do not lean on the `_` catch-all, or
+  # liveness never kills the result at its def).
+  | sprout_ir.IRVecLenD r _ -> Just(r)
+  | sprout_ir.IRVecGetD r _ _ -> Just(r)
+  | sprout_ir.IRVecSetD r _ _ _ -> Just(r)
   # IRAbortMatch no longer defines anything (/code-review fix #15).
   | sprout_ir.IRZextI1ToI64 r _ -> Just(r)
   | sprout_ir.IRTruncI64ToI1 r _ -> Just(r)
@@ -733,6 +753,11 @@ fn op_exposes_operands(op: sprout_ir.IROp) -> Bool =
   | sprout_ir.IRUnroot _ _ -> false
   | sprout_ir.IRGetTag _ _ -> false
   | sprout_ir.IRGetField _ _ _ _ -> false
+  # B1: non-allocating raw loads/store — expose nothing (also never reached, as
+  # op_triggers_gc classifies them non-triggers and process_op short-circuits).
+  | sprout_ir.IRVecLenD _ _ -> false
+  | sprout_ir.IRVecGetD _ _ _ -> false
+  | sprout_ir.IRVecSetD _ _ _ _ -> false
   | sprout_ir.IRAbortMatch -> false
   # IRPanic does not trigger GC (panic exits), so it exposes no operands.
   | sprout_ir.IRPanic _ -> false
