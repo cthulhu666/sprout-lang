@@ -109,9 +109,10 @@ fires after green, by which point any required checks are satisfied too.
 
 ### Step 3 — Wait for a terminal state via Monitor
 
-**Do not poll in a foreground bash loop** — the Bash tool's per-call
-cap (10 min) is far shorter than a typical CI run (40-50 min) and shell
-state does not persist across invocations. Use the `Monitor` tool with
+**Do not poll in a foreground bash loop** — a foreground call blocks the
+whole turn, shell state does not persist across invocations, and even a
+normal ~5-10 min run (Kuba-confirmed 2026-07-10) can reach or exceed the
+Bash tool's 10-min per-call cap. Use the `Monitor` tool with
 `persistent: true` and let each state change arrive as a conversation
 event you react to in normal turn cycles.
 
@@ -237,7 +238,9 @@ rm -f /tmp/cm_pr_*.json /tmp/cm_queue_*.out /tmp/cm_mon_*.json
   the rebase (and only via `git checkout --theirs`).
 - Never `cd` away from the repo root; all paths are relative to it.
 - Never poll CI state in a foreground Bash loop — use Monitor
-  (rationale: Bash tool's 10-min cap vs ~40-50min CI wall time).
+  (rationale: foreground bash blocks the turn + no state persistence across
+  calls; the 10-min per-call cap can't reliably outlast even a normal
+  ~5-10 min CI run).
 - Wrap `just refresh-seed` with `scripts/memwatch.sh 4096 1 --` to cap
   RSS at 4 GB (project memory `feedback_memory_watchdog`).
 - Skip draft / WIP-titled PRs (project memory
