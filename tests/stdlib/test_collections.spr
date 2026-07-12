@@ -52,4 +52,11 @@ fn main() -> Unit !{IO} =
     # dict_from_list: build from key/value pairs
     assert_eq(state, "dict_from_list", dict_from_list([("x", 1), ("y", 2)]), {x: 1, y: 2})
 
+    # Semigroup ++ dispatches through the resolved instance (regression: used to
+    # miscompile to null for every concrete type outside String/List).
+    # dict ++ : right-biased merge (right's value wins on a key collision).
+    assert_eq(state, "dict ++ right-biased", {alpha: 1, beta: 2} ++ {beta: 99, gamma: 3}, {alpha: 1, beta: 99, gamma: 3})
+    # vec ++ : concatenation via the Vec Semigroup instance.
+    assert_eq(state, "vec ++ sum", vec_sum_by(\x -> x, foldable_to_vec([1, 2]) ++ foldable_to_vec([3, 4])), 10)
+
     summary(state)

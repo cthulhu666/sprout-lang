@@ -4220,17 +4220,26 @@ fn translate_append_call(args: List typed_ast.TypedExpr, call_ty: types.Type,
                          name_prefix: String) ->
     Result String (List sprout_ir.IRBlock, String, List sprout_ir.IROp, String, Int) !{IO} =
   match args with
-  | [typed_ast.TDict _ _ _ _, left, right | _] ->
-      translate_append_operands(left, right, call_ty, params, ctors, idx,
+  | [typed_ast.TDict _ _ _ _, left, right | ws] ->
+      translate_append_operands(left, right, append_witness(ws), call_ty, params, ctors, idx,
                                 cur_label, cur_ops, captures, lifted_ref, top_level, let_names,
                                 fn_arities, lambda_ctr_ref, lifted_idx_ref, name_prefix)
-  | [left, right | _] ->
-      translate_append_operands(left, right, call_ty, params, ctors, idx,
+  | [left, right | ws] ->
+      translate_append_operands(left, right, append_witness(ws), call_ty, params, ctors, idx,
                                 cur_label, cur_ops, captures, lifted_ref, top_level, let_names,
                                 fn_arities, lambda_ctr_ref, lifted_idx_ref, name_prefix)
-  | _ -> Err("ast_to_ir: append expects 2 or 3 arguments")
+  | _ -> Err("ast_to_ir: append expects at least 2 arguments")
+
+# The Semigroup dictionary witness lowering appends after the two value operands
+# (user args first, then dict witnesses).  Semigroup has one method (`append`), so
+# at most one witness trails; take it if present.
+fn append_witness(ws: List typed_ast.TypedExpr) -> Maybe typed_ast.TypedExpr =
+  match ws with
+  | Nil -> Nothing
+  | Cons w _ -> Just(w)
 
 fn translate_append_operands(left: typed_ast.TypedExpr, right: typed_ast.TypedExpr,
+                              witness: Maybe typed_ast.TypedExpr,
                               call_ty: types.Type,
                               params: List String,
                               ctors: Dict (Int, Int, Int, String), idx: Int,
@@ -4282,12 +4291,20 @@ fn translate_append_operands(left: typed_ast.TypedExpr, right: typed_ast.TypedEx
                      fresh_name(name_prefix, idx1), idx1 + 1))
             | _ -> Err("ast_to_ir: append (list): expected exactly 2 translated args")
   else
-    # Polymorphic append site (e.g. the `a` in `mconcat`'s body) — type is a
-    # TVar or other non-concrete form.  Emit i64 0 as a placeholder, matching
-    # direct codegen's zero_val(type_to_ll(ty)) for the same case.
-    Ok((Nil, cur_label,
-         list_append(cur_ops, Cons(sprout_ir.IRConst(fresh_name(name_prefix, idx), 0), Nil)),
-         fresh_name(name_prefix, idx), idx + 1))
+    # Every other type dispatches through the resolved Semigroup instance.  The
+    # checker attaches the dictionary and lowering leaves it as the trailing
+    # `witness` — a `TVar` naming the instance method for a concrete type
+    # (`__tc_Semigroup_<T>_append`, a direct call) or the enclosing function's
+    # dict parameter for a polymorphic site (a closure apply).  translate_call
+    # picks the right calling convention for either.  `Vec`/`Dict`/user instances
+    # all reach here; String/List are handled above only as a peephole.
+    match witness with
+    | Just w ->
+        translate_call(w, Cons(left, Cons(right, Nil)), call_ty, params, ctors, idx,
+                       cur_label, cur_ops, captures, lifted_ref, top_level, let_names,
+                       fn_arities, lambda_ctr_ref, lifted_idx_ref, name_prefix)
+    | Nothing ->
+        Err("ast_to_ir: `++`/append on a non-String/List type with no resolved Semigroup witness")
 
 fn translate_direct_call(fname: String, args: List typed_ast.TypedExpr,
                          call_ty: types.Type, params: List String,
