@@ -12,6 +12,7 @@ import stdlib.compiler.resolve as resolve
 import stdlib.compiler.lowering as lowering
 import stdlib.compiler.dce as dce
 import stdlib.compiler.codegen as codegen
+import stdlib.compiler.ir_pipeline as ir_pipeline
 import stdlib.compiler.source as source
 
 # ---------------------------------------------------------------------------
@@ -401,20 +402,16 @@ export fn compile_full_ir_lines(path: source.FilePath, stdlib_root: source.Stdli
 
 # compile_full_ir_with_cache: like compile_full_ir but uses a caller-provided module cache.
 # Avoids recreating the cache on every eval when called from the analysis service daemon.
+# Emits via the typed IR pipeline (ir_pipeline), the sole codegen backend.
 export fn compile_full_ir_with_cache(path: source.FilePath, stdlib_root: source.StdlibRoot, cache) -> IrFullResult !{IO} =
   do
     recheck_result <- compile_phase_recheck_with_cache(path, stdlib_root, cache)
     match recheck_result with
     | typed_ast.TypedErr pos msg -> IrFullFail(Cons (DiagError(pos, msg), Nil))
-    | typed_ast.TypedOk typed_lowered env ->
-        do
-          ir_result <- codegen.compile_to_ir_lines(typed_lowered, env, false, source.filepath_str(path))
-          match ir_result with
-          | codegen.IrLinesOk header_lines str_lines def_lines dbg_lines warns ->
-              do
-                print_codegen_warns(warns)
-                IrFullOk(join_line_sections(header_lines, str_lines, def_lines, dbg_lines))
-          | codegen.IrLinesErr msg -> IrFullFail(Cons (DiagError(no_pos(), "codegen: " ++ msg), Nil))
+    | typed_ast.TypedOk typed_lowered _ ->
+        match ir_pipeline.compile_program_streaming(typed_lowered) with
+        | Err msg -> IrFullFail(Cons (DiagError(no_pos(), "codegen: " ++ msg), Nil))
+        | Ok ir_text -> IrFullOk(ir_text)
 
 fn compile_phase_check_with_cache(path: source.FilePath, stdlib_root: source.StdlibRoot, cache) -> typed_ast.TypedResult !{IO} =
   do

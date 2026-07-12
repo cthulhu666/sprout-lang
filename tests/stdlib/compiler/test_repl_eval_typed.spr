@@ -1,0 +1,74 @@
+module main
+import stdlib.test (TestState, new_state, assert_true, summary)
+import stdlib.compiler.compiler as compiler
+import stdlib.compiler.module_loader as module_loader
+import stdlib.compiler.source as source
+
+# Coverage + forward-regression guard for `compile_full_ir_with_cache`, the
+# entry point the REPL / analysis-service daemon uses to compile an eval
+# expression (analysis_service_driver.compile_and_run_eval).
+#
+# Before this test, compile_full_ir_with_cache was exercised by ZERO tests.
+# It now emits through the typed IR pipeline (ir_pipeline) rather than the
+# retired direct backend.  Because the typed corpus is already compiled+run by
+# `just test` via --emit-ir, this guard only needs to prove that the
+# cache-threaded eval entry produces linkable IR and maps failures to the
+# IrFullResult shape link_and_run_eval depends on:
+#   1. IrFullOk with a real `define ` block for a trivial valid source.
+#   2. IrFullFail for an unresolved-name source.
+#   3. IrFullFail with a "check: "-prefixed diagnostic for a type error, so the
+#      daemon's error_response surfaces the checker message.
+
+fn is_ir_ok(r: compiler.IrFullResult) -> Bool =
+  match r with
+  | compiler.IrFullOk _ -> true
+  | compiler.IrFullFail _ -> false
+
+fn ir_has_define(r: compiler.IrFullResult) -> Bool =
+  match r with
+  | compiler.IrFullFail _ -> false
+  | compiler.IrFullOk ir -> str_find(ir, "define ") != -1
+
+fn is_ir_fail(r: compiler.IrFullResult) -> Bool =
+  match r with
+  | compiler.IrFullFail _ -> true
+  | compiler.IrFullOk _ -> false
+
+fn first_diag_msg(r: compiler.IrFullResult) -> String =
+  match r with
+  | compiler.IrFullOk _ -> ""
+  | compiler.IrFullFail diags ->
+      match diags with
+      | Nil -> ""
+      | Cons d _ ->
+          match d with
+          | compiler.DiagError _ msg -> msg
+          | compiler.DiagWarning _ msg -> msg
+
+fn main() -> Unit !{IO} =
+  do
+    state <- new_state()
+    match env_get("SPROUT_STDLIB_ROOT") with
+    | Nothing -> ()
+    | Just stdlib_root ->
+        do
+          cache <- module_loader.new_cache()
+
+          let ok_path = "/tmp/sprout_test_repl_eval_typed_ok.sprout"
+          _ <- write_file(ok_path, "fn answer() -> Int = 42\n")
+          r <- compiler.compile_full_ir_with_cache(source.FilePath(ok_path), source.StdlibRoot(stdlib_root), cache)
+          assert_true(state, "compile_full_ir_with_cache returns Ok for trivial input", is_ir_ok(r))
+          assert_true(state, "typed eval path emits a `define ` block", ir_has_define(r))
+
+          let bad_path = "/tmp/sprout_test_repl_eval_typed_bad.sprout"
+          _ <- write_file(bad_path, "fn broken() -> Int = undefined_name_xyz_99887766\n")
+          r_bad <- compiler.compile_full_ir_with_cache(source.FilePath(bad_path), source.StdlibRoot(stdlib_root), cache)
+          assert_true(state, "compile_full_ir_with_cache returns Fail for unresolved name", is_ir_fail(r_bad))
+
+          let type_err_path = "/tmp/sprout_test_repl_eval_typed_type_err.sprout"
+          _ <- write_file(type_err_path, "fn bad_type() -> String = 42\n")
+          r_type_err <- compiler.compile_full_ir_with_cache(source.FilePath(type_err_path), source.StdlibRoot(stdlib_root), cache)
+          assert_true(state, "compile_full_ir_with_cache returns Fail for type error", is_ir_fail(r_type_err))
+          assert_true(state, "type-error diagnostic starts with 'check: '",
+            str_starts_with(first_diag_msg(r_type_err), "check: "))
+    summary(state)
