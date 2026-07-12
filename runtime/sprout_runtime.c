@@ -6161,6 +6161,31 @@ long long vector_append(long long vec, long long value) {
   return (long long)(uintptr_t)out;
 }
 
+/* Concatenate two vectors into one fresh n+m backing array (two memcpy, no
+ * intermediate cons cells). Backs Semigroup (Vec a).append. */
+long long vector_concat(long long a, long long b) {
+  long long rooted_a = a;
+  long long rooted_b = b;
+  SPROUT_GC_PUSH_I64_LOCAL(rooted_a);
+  SPROUT_GC_PUSH_I64_LOCAL(rooted_b);
+  VectorVal* va = (VectorVal*)(uintptr_t)rooted_a;
+  VectorVal* vb = (VectorVal*)(uintptr_t)rooted_b;
+  if (va == NULL || vb == NULL) tcp_fail("vector_concat: null vector");
+  long long na = va->len;
+  long long nb = vb->len;
+  VectorVal* out = sprout_alloc_vector_val("vector_concat: out of memory");
+  out->len = na + nb;
+  out->cap = out->len;
+  out->data = sprout_alloc_vector_data((size_t)out->cap, "vector_concat: out of memory");
+  /* Re-fetch: the two allocations above may have run the collector. */
+  va = (VectorVal*)(uintptr_t)rooted_a;
+  vb = (VectorVal*)(uintptr_t)rooted_b;
+  if (na > 0) memcpy(out->data, va->data, (size_t)na * sizeof(long long));
+  if (nb > 0) memcpy(out->data + na, vb->data, (size_t)nb * sizeof(long long));
+  SPROUT_GC_POP_LOCALS(2);
+  return (long long)(uintptr_t)out;
+}
+
 long long vec_make_filled(long long n, long long val) {
   long long rooted_val = val;
   SPROUT_GC_PUSH_I64_LOCAL(rooted_val);
@@ -6218,92 +6243,6 @@ long long vector_from_list(long long list_handle) {
   }
   SPROUT_GC_POP_LOCALS(1);
   return (long long)(uintptr_t)v;
-}
-
-typedef struct {
-  long long key;
-  long long index;
-  long long value;
-} SortItem;
-
-static int sort_item_cmp(const void* left, const void* right) {
-  const SortItem* a = (const SortItem*)left;
-  const SortItem* b = (const SortItem*)right;
-  if (a->key < b->key) return -1;
-  if (a->key > b->key) return 1;
-  if (a->index < b->index) return -1;
-  if (a->index > b->index) return 1;
-  return 0;
-}
-
-long long vector_sort_by_int(long long decorated_list) {
-  long long rooted_list = decorated_list;
-  SPROUT_GC_PUSH_I64_LOCAL(rooted_list);
-
-  size_t len = 0;
-  size_t cap = 0;
-  SortItem* items = NULL;
-  long long cursor = decorated_list;
-  while (1) {
-    if (sprout_heap_kind_at((void*)(uintptr_t)cursor) != SPROUT_HEAP_OBJ) {
-      free(items);
-      SPROUT_GC_POP_LOCALS(1);
-      tcp_fail("vector_sort_by_int: expected List");
-    }
-    long long node_tag = sprout_tag(cursor);
-    CtorMeta* meta = find_ctor(node_tag);
-    if (meta == NULL) {
-      free(items);
-      SPROUT_GC_POP_LOCALS(1);
-      tcp_fail("vector_sort_by_int: missing list constructor metadata");
-    }
-    if (strcmp(meta->name, "Nil") == 0) {
-      break;
-    }
-    if (strcmp(meta->name, "Cons") != 0) {
-      free(items);
-      SPROUT_GC_POP_LOCALS(1);
-      tcp_fail("vector_sort_by_int: expected List");
-    }
-    /* Cons fields: [0]=head (the decorated tuple handle), [1]=tail (next cursor). */
-    long long* list_fields = (long long*)(uintptr_t)cursor;
-    long long tuple_h = list_fields[0];
-    void* tuple_hdr = sprout_heap_lookup((void*)(uintptr_t)tuple_h);
-    uint64_t th = sprout_hdr_of((void*)(uintptr_t)tuple_h);
-    if (tuple_hdr == NULL || sprout_hdr_kind(th) != SPROUT_HEAP_TUPLE || (th >> 14) != 3) {
-      free(items);
-      SPROUT_GC_POP_LOCALS(1);
-      tcp_fail("vector_sort_by_int: expected decorated (Int, Int, a) tuples");
-    }
-    if (len == cap) {
-      size_t new_cap = cap == 0 ? 16 : cap * 2;
-      SortItem* new_items = (SortItem*)realloc(items, new_cap * sizeof(SortItem));
-      if (new_items == NULL) {
-        free(items);
-        SPROUT_GC_POP_LOCALS(1);
-        tcp_fail("vector_sort_by_int: out of memory");
-      }
-      items = new_items;
-      cap = new_cap;
-    }
-    items[len].key = sprout_heap_child_value_payload((void*)(uintptr_t)tuple_h, 0);
-    items[len].index = sprout_heap_child_value_payload((void*)(uintptr_t)tuple_h, 1);
-    items[len].value = sprout_heap_child_value_payload((void*)(uintptr_t)tuple_h, 2);
-    len++;
-    cursor = list_fields[1];  /* advance to tail */
-  }
-
-  qsort(items, len, sizeof(SortItem), sort_item_cmp);
-  VectorVal* out = sprout_alloc_vector_val("vector_sort_by_int: out of memory");
-  out->len = (long long)len;
-  out->cap = (long long)len;
-  out->data = len == 0 ? NULL : sprout_alloc_vector_data(len, "vector_sort_by_int: out of memory");
-  for (size_t i = 0; i < len; i++) {
-    out->data[i] = items[i].value;
-  }
-  free(items);
-  SPROUT_GC_POP_LOCALS(1);
-  return (long long)(uintptr_t)out;
 }
 
 /* ─── Persistent AVL BST map ────────────────────────────────────────────────

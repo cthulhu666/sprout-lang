@@ -56,7 +56,12 @@ fn main() -> Unit !{IO} =
     # miscompile to null for every concrete type outside String/List).
     # dict ++ : right-biased merge (right's value wins on a key collision).
     assert_eq(state, "dict ++ right-biased", {alpha: 1, beta: 2} ++ {beta: 99, gamma: 3}, {alpha: 1, beta: 99, gamma: 3})
-    # vec ++ : concatenation via the Vec Semigroup instance.
+    # vec ++ : concatenation via the Vec Semigroup instance. Element-level, not
+    # just the sum — a wrong element order or a dropped/duplicated element still
+    # sums to 10, so it would slip past a sum-only check.
+    assert_eq(state, "vec ++ concat order", foldable_to_vec([1, 2, 3]) ++ foldable_to_vec([4, 5]), foldable_to_vec([1, 2, 3, 4, 5]))
+    assert_eq(state, "vec ++ empty left identity", foldable_to_vec([]) ++ foldable_to_vec([1, 2, 3]), foldable_to_vec([1, 2, 3]))
+    assert_eq(state, "vec ++ empty right identity", foldable_to_vec([1, 2, 3]) ++ foldable_to_vec([]), foldable_to_vec([1, 2, 3]))
     assert_eq(state, "vec ++ sum", vec_sum_by(\x -> x, foldable_to_vec([1, 2]) ++ foldable_to_vec([3, 4])), 10)
 
     summary(state)

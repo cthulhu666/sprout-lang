@@ -907,9 +907,14 @@ instance Foldable Vec {
 fn vec_append_flip(acc: Vec a, item: a) -> Vec a =
   vec_append(item, acc)
 
+# O(n+m): one fresh backing array, both element blocks copied in a single pass
+# via the vector_concat builtin (no intermediate cons cells).
 instance Semigroup (Vec a) {
   fn append(left: Vec a, right: Vec a) -> Vec a =
-    vec_from_list(list_append(vec_to_list(left), vec_to_list(right)))
+    match left with
+    | Vec lraw ->
+        match right with
+        | Vec rraw -> Vec(vector_concat(lraw, rraw))
 }
 
 # O(m · log(n + m)): each of the m right-hand entries is read via an O(log m) map_nth
@@ -1217,6 +1222,7 @@ extern fn vector_length(v: Vector a) -> Int
 extern fn vector_get(v: Vector a, i: Int) -> Maybe a
 extern fn vector_set(v: Vector a, i: Int, val: a) -> Vector a
 extern fn vector_append(v: Vector a, val: a) -> Vector a
+extern fn vector_concat(a: Vector x, b: Vector x) -> Vector x
 extern fn vector_from_list(xs: List a) -> Vector a
 extern fn vec_make_filled(n: Int, val: a) -> Vector a !{IO}
 extern fn vector_mutset(v: Vector a, i: Int, val: a) -> Unit !{IO}

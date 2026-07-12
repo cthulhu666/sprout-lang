@@ -141,6 +141,7 @@ Pure value transforms and runtime-backed persistent data helpers:
 - `vector_get(v: Vector a, index: Int) -> Maybe a`
 - `vector_set(v: Vector a, index: Int, value: a) -> Vector a`
 - `vector_append(v: Vector a, value: a) -> Vector a`
+- `vector_concat(a: Vector x, b: Vector x) -> Vector x`
 - `map_nth_key(m: Map a, index: Int) -> Maybe String`
 - `map_nth_value(m: Map a, index: Int) -> Maybe a`
 
@@ -616,7 +617,7 @@ Quick reference for the main collection types in the prelude and `stdlib`, with 
 |------|-----------------|------------|-------|
 | `String` | `++` (lowers to `str_concat`) | O(\|left\| + \|right\|) | Allocates a fresh buffer and copies both inputs. Best avoided in hot loops; prefer `string_concat_many(List String)` (one allocation regardless of part count) or a `bytes.Builder` for chunked assembly. |
 | `List a` | `++` (lowers to `list_append`) | O(\|left\|) | Right side is shared structurally; only the left spine is copied. Best for prepend-heavy work via `Cons`. Avoid right-folded concatenation (O(n²)); accumulate with `Cons` and reverse once instead. |
-| `Vec a` | `++` (Semigroup instance) | O(\|left\| + \|right\|) | Currently implemented as a list round-trip (`vec_to_list` + `list_append` + `vec_from_list`); better suited for indexed access than for repeated concatenation. |
+| `Vec a` | `++` (Semigroup instance) | O(\|left\| + \|right\|) | Lowers to the `vector_concat` builtin: one fresh `n+m` backing array, both element blocks copied in a single pass (no intermediate cons cells). |
 | `Bytes` | `bytes.append` (`bytes_append`) | O(\|left\| + \|right\|) | Allocates a fresh contiguous buffer and copies both inputs. |
 | `bytes.Builder` | `bytes.builder_append` | O(chunks\_left + chunks\_right) | Concatenates chunk tables without flattening the bytes themselves; the final `bytes.builder_build` is O(total\_bytes). The right tool for protocol packet assembly and other "many small fragments, one final blob" patterns. |
 | `Dict v` | `++` (Semigroup instance) | O(m · log(n + m)) | Persistent: each of `right`'s m entries is folded into `left` via `dict_set`, which is O(log n) copy-on-write on the balanced AVL map (path copy, not a full-array copy). For very large merges, folding into a freshly built dict avoids re-walking the growing left. |

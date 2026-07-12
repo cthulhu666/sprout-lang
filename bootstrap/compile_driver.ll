@@ -85,6 +85,7 @@ declare i64 @vector_length(i64)
 declare i64 @vector_get(i64, i64)
 declare i64 @vector_set(i64, i64, i64)
 declare i64 @vector_append(i64, i64)
+declare i64 @vector_concat(i64, i64)
 declare i64 @vector_from_list(i64)
 declare i64 @vec_make_filled(i64, i64)
 declare i64 @vector_mutset(i64, i64, i64)
@@ -235858,29 +235859,48 @@ entry:
 
 define i64 @__tc_Semigroup_Vec_a_append(i64 %left, i64 %right) {
 entry:
-  %t$4 = alloca i64
-  store i64 %right, ptr %t$4
-  %t$5 = call i64 @sprout_gc_push_i64_root(ptr %t$4)
-  %t$6 = alloca i64
-  store i64 %left, ptr %t$6
-  %t$7 = call i64 @sprout_gc_push_i64_root(ptr %t$6)
-  %t$0 = call i64 @vec_to_list(i64 %left)
-  %t$8 = call i64 @sprout_gc_pop_roots(i64 1)
-  %t$9 = alloca i64
-  store i64 %t$0, ptr %t$9
-  %t$10 = call i64 @sprout_gc_push_i64_root(ptr %t$9)
-  %t$1 = call i64 @vec_to_list(i64 %right)
-  %t$11 = alloca i64
-  store i64 %t$1, ptr %t$11
-  %t$12 = call i64 @sprout_gc_push_i64_root(ptr %t$11)
-  %t$2 = call i64 @list_append(i64 %t$0, i64 %t$1)
-  %t$13 = call i64 @sprout_gc_pop_roots(i64 3)
+  %t$0 = call i64 @sprout_tag(i64 %left)
+  br label %arm_0_1
+arm_0_1:
+  %t$3 = add i64 0, 10
+  %t$4 = icmp eq i64 %t$0, %t$3
+  br i1 %t$4, label %body_0_1, label %arm_1_1
+body_0_1:
+  %t$5 = call i64 @sprout_field(i64 %left, i64 0)
+  %t$6 = call i64 @sprout_tag(i64 %right)
+  br label %arm_0_7
+arm_0_7:
+  %t$9 = add i64 0, 10
+  %t$10 = icmp eq i64 %t$6, %t$9
+  br i1 %t$10, label %body_0_7, label %arm_1_7
+body_0_7:
+  %t$11 = call i64 @sprout_field(i64 %right, i64 0)
   %t$14 = alloca i64
-  store i64 %t$2, ptr %t$14
+  store i64 %t$5, ptr %t$14
   %t$15 = call i64 @sprout_gc_push_i64_root(ptr %t$14)
-  %t$3 = call i64 @vec_from_list(i64 %t$2)
-  %t$16 = call i64 @sprout_gc_pop_roots(i64 1)
-  ret i64 %t$3
+  %t$16 = alloca i64
+  store i64 %t$11, ptr %t$16
+  %t$17 = call i64 @sprout_gc_push_i64_root(ptr %t$16)
+  %t$12 = call i64 @vector_concat(i64 %t$5, i64 %t$11)
+  %t$18 = call i64 @sprout_gc_pop_roots(i64 2)
+  %t$19 = alloca i64
+  store i64 %t$12, ptr %t$19
+  %t$20 = call i64 @sprout_gc_push_i64_root(ptr %t$19)
+  %t$13 = call i64 @sprout_make1(i64 10, i64 %t$12)
+  %t$21 = call i64 @sprout_gc_pop_roots(i64 1)
+  br label %join_7
+arm_1_7:
+  call void @sprout_abort_match()
+  unreachable
+join_7:
+  %t$8 = phi i64 [%t$13, %body_0_7]
+  br label %join_1
+arm_1_1:
+  call void @sprout_abort_match()
+  unreachable
+join_1:
+  %t$2 = phi i64 [%t$8, %join_7]
+  ret i64 %t$2
 }
 
 define i64 @__tc_Semigroup_Dict_v_append(i64 %left, i64 %right) {

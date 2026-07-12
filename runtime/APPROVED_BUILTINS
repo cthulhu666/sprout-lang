@@ -176,6 +176,7 @@ term_write
 time_now_micros  # syscall wrapper — gettimeofday cannot be called from Sprout stdlib; needed for wall-clock benchmarking
 vec_make_filled  # O(n) fill-init of a raw VectorVal; avoids O(n²) repeated vec_append from Sprout; needed for MutVec allocation
 vector_append
+vector_concat  # O(n+m) two-array concat into one fresh backing array (single alloc + two memcpy); backs Semigroup (Vec a).append. Not efficient in pure Sprout: vector_append is O(n) persistent-copy per element (O(n²) in a loop), and the list round-trip allocates ~2·(n+m) throwaway cons cells + 3 traversals — measured ~40× slower than this builtin
 vector_empty
 vector_from_list
 vector_get
@@ -183,5 +184,4 @@ vector_get_direct  # O(1) read directly from VectorVal pointer; bypasses Vec ADT
 vector_length
 vector_mutset  # O(1) in-place write to VectorVal slot; required for MutVec mutation; not expressible as a pure Sprout fn
 vector_set
-vector_sort_by_int
 write_file
