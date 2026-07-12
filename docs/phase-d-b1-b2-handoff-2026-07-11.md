@@ -9,9 +9,19 @@
 > `docs/phase-d-numeric-fastpath-design-2026-07-11.md §B2` and `bench/results-2026-07-11-b2.md`.
 > **Deferred to a follow-up:** the `IRCallUnboxed2` allow-list (A*'s CPR-unboxed `vector_get_unboxed`
 > path) — needs per-name runtime verification of all 10 `_unboxed` externs, incl. the
-> `regex_find_range_unboxed`/`term_read_line_unboxed`/`env_get_unboxed` allocator landmines. **Next
-> per the original plan:** B3 checkpoint (disassemble a row-update kernel — do the calls+roots being
-> gone let LLVM vectorize?).
+> `regex_find_range_unboxed`/`term_read_line_unboxed`/`env_get_unboxed` allocator landmines.
+>
+> **B3 CHECKPOINT RAN — 2026-07-12 (see design doc §B3).** Disassembled all three row kernels at
+> `-O2`/`-O3`: **zero `.2d` ops**, but the blocker is **B1, not B3** — the calls are still present
+> (B1 not landed), LLVM bails at the first `bl` (`-Rpass-analysis`: "call instruction cannot be
+> vectorized"), and the `tco_loop`/`stacksave` shape did **not** stop LLVM forming a clean counted
+> loop (SROA promoted the state to registers; `add`/`cmp`/`b.ne` back-edge). A definitive B3 verdict
+> is unobtainable until B1 removes the calls.
+>
+> **DONE — B1-Double landed 2026-07-12** (merged, master `c7a8c59`; ~2.6× recognizer, 139/150). The
+> post-B1 re-checkpoint confirmed the prediction: Double kernels now call-free but still **0 `.2d`**;
+> `-Rpass-analysis` blocker shifted to the bounds-check early-exit. B3 (hoist the check + counted-loop
+> codegen) remains the distinct next lever. See design doc §B1 / §B3.
 
 Handoff for a fresh session. Captures the through-line, the strategic decisions, the verified
 facts, and — most importantly — **where B2 was left mid-investigation** and what to do next.

@@ -243,6 +243,39 @@ kernels as a real counted loop (canonical induction variable, no `stacksave`/`st
 state in SSA/phis) so LLVM's loop vectorizer engages. B3 is a distinct codegen sub-lever; do not
 assume it comes for free.
 
+**CHECKPOINT RAN — 2026-07-12 (B2-only; B1 not yet landed).** Disassembled all three row kernels
+from `examples/digit_recognizer/recognizer.sprout` at `clang -O2` **and** `-O3`. Result: **zero
+vector-lane ops** (`.2d`/`.4s`/…) in any kernel or anywhere in the linked binary. **But the negative
+is not yet attributable to loop shape — it is gated entirely on B1.** The precondition this checkpoint
+assumes ("after the calls and roots are gone") is **not met**: B1 has not landed, so the emitted IR
+still contains the un-inlined `vector_get_direct`×2 + `vector_mutset` calls
+(`recognizer.ll` `@stdlib.mutable.mutmatrix_row_sub_scaled_go`). LLVM's vectorizer bails at the first
+opaque call and never evaluates the loop shape — confirmed from the compiler's own mouth via
+`clang -O3 -Rpass-analysis=loop-vectorize`, whose sole reason for these loops is **"call instruction
+cannot be vectorized"** (500× across the module; verified on the isolated kernel too).
+
+**Evidence that B3's premise is currently *unsupported*:** the O2 disassembly shows LLVM promoted the
+`alloca`'d TCO loop state to registers (SROA) and formed a **clean counted loop** anyway —
+`add x20,#1` / `cmp x19,x20` / `b.ne` back-edge, with the only shape residue being a per-iteration
+`mov sp, x25` (the `stackrestore`). So the worry that "the `tco_loop`/`stacksave` shape stops LLVM
+recognizing a countable loop" is **not borne out** by current evidence; the induction variable and
+trip count were identified. **Conclusion:** the checkpoint's blocker today is **B1, not B3.** A
+*definitive* B3 verdict is unobtainable until B1 removes the calls. **Caveat (do not overstate):**
+B1 does **not** leave the `stackrestore` as the *sole* barrier — inlining the reads replaces each
+`call` with a null/**bounds-check early exit** (a `noreturn` `tcp_fail` branch inside the loop), and
+the remarks already list "Cannot vectorize early exit loop" as a distinct refusal. So **post-B1 the
+row loop still has two barriers: (a) the bounds-check early exit and (b) the `stackrestore` loop
+shape.** B3 must handle **both** — hoisting/eliminating the bounds check *and* emitting a canonical
+counted loop — it is larger than "just the tco/stacksave shape."
+
+**UPDATE — B1-Double landed 2026-07-12** (§B1 note above). The post-B1 re-checkpoint was run and
+**confirmed the two-barrier prediction**: the Double kernels are now call-free yet still emit **zero
+`.2d`**, and `-Rpass-analysis` reports the blocker has **shifted from "call instruction" to
+"Incorrect number of successors from early exiting block"** — the bounds-check panic branch. So B3
+remains distinct work: it must hoist/eliminate the bounds check *and* emit a canonical counted loop.
+The IR-surgery pre-simulation (inline the reads/writes as typed `load`/`store double`, delete the
+`stacksave`/`stackrestore`) was not needed — the real B1 provided the measurement.
+
 ### A — Double-specialized non-scanned backing store (follow-on, materiality-gated)
 **Corrected rationale.** A does *not* remove the `fmov` shuffles — B1 already does, because a typed
 `load double` lands the value directly in an FP register with no GPR round-trip. A's only surviving
