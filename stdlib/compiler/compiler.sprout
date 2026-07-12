@@ -11,7 +11,6 @@ import stdlib.compiler.typed_ast as typed_ast
 import stdlib.compiler.resolve as resolve
 import stdlib.compiler.lowering as lowering
 import stdlib.compiler.dce as dce
-import stdlib.compiler.codegen as codegen
 import stdlib.compiler.ir_pipeline as ir_pipeline
 import stdlib.compiler.source as source
 
@@ -181,20 +180,15 @@ export fn compile_full(path: source.FilePath, stdlib_root: source.StdlibRoot) ->
 # Full IR pipeline: bundle → typecheck → lower → codegen
 # ---------------------------------------------------------------------------
 #
-# compile_full_ir is the M6 entry point.  It extends compile_full by:
-#   4. codegen.compile_to_ir — emit LLVM IR text (M6)
+# compile_full_ir emits LLVM IR text via the typed IR pipeline (ir_pipeline),
+# the sole codegen backend.
 #
-# Lowering now preserves types (lower_program returns TypedProgram), so a
-# second typecheck is no longer needed.
+# Lowering preserves types (lower_program returns TypedProgram), so a second
+# typecheck is not needed.
 
 export type IrFullResult (..) =
   | IrFullOk String
   | IrFullFail (List Diagnostic)
-
-export type IrFullLinesResult (..) =
-  | IrFullLinesOk (List String) (List String) (List String) (List String)
-  # header_lines, str_lines, def_lines, dbg_lines
-  | IrFullLinesFail (List Diagnostic)
 
 # ---------------------------------------------------------------------------
 # Phase-isolated pipeline functions
@@ -248,157 +242,14 @@ export fn compile_phase_recheck(path: source.FilePath, stdlib_root: source.Stdli
 
 export fn compile_full_ir(path: source.FilePath, stdlib_root: source.StdlibRoot) -> IrFullResult !{IO} =
   do
-    lines_result <- compile_full_ir_lines(path, stdlib_root, false)
-    match lines_result with
-    | IrFullLinesFail diags -> IrFullFail(diags)
-    | IrFullLinesOk header_lines str_lines def_lines dbg_lines -> IrFullOk(join_line_sections(header_lines, str_lines, def_lines, dbg_lines))
-
-fn join_line_sections(header_lines: List String, str_lines: List String, def_lines: List String, dbg_lines: List String) -> String =
-  string_join_newlines(header_lines) ++ string_join_newlines(str_lines) ++ string_join_newlines(def_lines) ++ string_join_newlines(dbg_lines)
-
-fn print_codegen_warns(warns: List String) -> Unit !{IO} =
-  match warns with
-  | Nil -> ()
-  | Cons w rest ->
-      do
-        eprint("WARNING: " ++ w)
-        print_codegen_warns(rest)
-
-# Gate: SPROUT_TIME_PHASES env var.  When set to anything other than "" or "0",
-# compile_full_ir_lines emits a single per-phase timing line to stderr:
-#
-#   [phase] bundle=Ams prelude=Bms check=Cms lower=Dms codegen=Ems total=Tms path=<P>
-#
-# Stdout (IR text) is unaffected, so the bootstrap fixed-point invariant holds.
-fn timing_enabled() -> Bool !{IO} =
-  match env_get("SPROUT_TIME_PHASES") with
-  | Nothing -> false
-  | Just s -> if s == "" then false else if s == "0" then false else true
-
-fn micros_to_ms_str(us: Int) -> String = int_to_string(us / 1000)
-
-# ---------------------------------------------------------------------------
-# PhaseTimes: per-phase microsecond timestamps captured in compile_phase_recheck_timed.
-#
-# Fields: t0 (pipeline start), t_bundle, t_prelude, t_check, t_lower.
-# Unreached phases store the last reached timestamp so their delta is 0 ms.
-# This is the single source of truth for pipeline phase boundaries; any
-# change to phase order must update compile_phase_recheck_timed only.
-
-type PhaseTimes = PhaseTimes Int Int Int Int Int
-
-fn phase_times_zero() -> PhaseTimes = PhaseTimes(0, 0, 0, 0, 0)
-
-# format_phase_failed: pure helper that builds the FAILED [phase] line for the
-# error path.  The err_msg prefix ("bundle: " / "check: " / "lower: ") selects
-# which fields to emit, matching the original per-phase format exactly.
-fn format_phase_failed(err_msg: String, ts: PhaseTimes, path: String) -> String =
-  match ts with
-  | PhaseTimes t0 t_bundle t_prelude t_check t_lower ->
-      if str_starts_with(err_msg, "bundle: ") then
-        "[phase] bundle=" ++ micros_to_ms_str(t_bundle - t0) ++ "ms total=" ++ micros_to_ms_str(t_bundle - t0) ++ "ms FAILED-at-bundle path=" ++ path
-      else if str_starts_with(err_msg, "check: ") then
-        "[phase] bundle=" ++ micros_to_ms_str(t_bundle - t0) ++ "ms prelude=" ++ micros_to_ms_str(t_prelude - t_bundle) ++ "ms check=" ++ micros_to_ms_str(t_check - t_prelude) ++ "ms total=" ++ micros_to_ms_str(t_check - t0) ++ "ms FAILED-at-check path=" ++ path
-      else
-        # lower: failure (default: all phases through lower are available)
-        "[phase] bundle=" ++ micros_to_ms_str(t_bundle - t0) ++ "ms prelude=" ++ micros_to_ms_str(t_prelude - t_bundle) ++ "ms check=" ++ micros_to_ms_str(t_check - t_prelude) ++ "ms lower=" ++ micros_to_ms_str(t_lower - t_check) ++ "ms total=" ++ micros_to_ms_str(t_lower - t0) ++ "ms FAILED-at-lower path=" ++ path
-
-# format_phase_success: pure helper that builds the full [phase] line on success.
-# codegen_us is the codegen wall-clock time in microseconds.
-fn format_phase_success(ts: PhaseTimes, codegen_us: Int, path: String) -> String =
-  match ts with
-  | PhaseTimes t0 t_bundle t_prelude t_check t_lower ->
-      "[phase] bundle=" ++ micros_to_ms_str(t_bundle - t0) ++ "ms prelude=" ++ micros_to_ms_str(t_prelude - t_bundle) ++ "ms check=" ++ micros_to_ms_str(t_check - t_prelude) ++ "ms lower=" ++ micros_to_ms_str(t_lower - t_check) ++ "ms codegen=" ++ micros_to_ms_str(codegen_us) ++ "ms total=" ++ micros_to_ms_str(t_lower - t0 + codegen_us) ++ "ms path=" ++ path
-
-# compile_phase_recheck_timed: SINGLE SOURCE OF TRUTH for the full pipeline
-# (bundle → load_prelude → typecheck → lower).  Records per-phase timestamps
-# into t_ref before returning.
-#
-# Phase-isolation guarantee: intermediate ASTs (bundle prog, typed_prog) are
-# freed when this function returns; only (typed_lowered, env) survive into the
-# caller's scope.  This preserves the P0 OOM fix — at codegen time only 2
-# roots are live.
-#
-# Both the fast path (timing_on=false) and the traced path (timing_on=true)
-# call this function, so any future change to pipeline order touches one place.
-fn compile_phase_recheck_timed(path: source.FilePath, stdlib_root: source.StdlibRoot, t_ref: Ref PhaseTimes) -> typed_ast.TypedResult !{IO} =
-  do
-    t0 <- time_now_micros()
-    bundle_result <- bundler.bundle_file(path, stdlib_root)
-    t1 <- time_now_micros()
-    match bundle_result with
-    | bundler.BundleErr msg ->
-        do
-          ref_write(t_ref, PhaseTimes(t0, t1, t1, t1, t1))
-          typed_ast.TypedErr(no_pos(), "bundle: " ++ msg)
-    | bundler.BundleOk prog ->
-        do
-          cache <- module_loader.new_cache()
-          prelude_pairs <- module_loader.load_prelude_pairs(source.stdlib_root_str(stdlib_root), cache)
-          t2 <- time_now_micros()
-          check_result <- checker.typecheck_typed(prog, prelude_pairs)
-          t3 <- time_now_micros()
-          match check_result with
-          | typed_ast.TypedErr pos msg ->
-              do
-                ref_write(t_ref, PhaseTimes(t0, t1, t2, t3, t3))
-                typed_ast.TypedErr(pos, "check: " ++ msg)
-          | typed_ast.TypedOk typed_prog env ->
-              # Post-M3b, lowering consumes resolve's Evidence — run resolve first
-              # (mirrors compile_phase_check).  resolve_tdict no longer self-resolves.
-              match resolve.resolve_program(typed_prog, env) with
-              | resolve.ResolveErr pos msg ->
-                  do
-                    ref_write(t_ref, PhaseTimes(t0, t1, t2, t3, t3))
-                    typed_ast.TypedErr(pos, "check: " ++ msg)
-              | resolve.ResolveOk resolved ->
-                  match lowering.lower_program(resolved, env) with
-                  | lowering.LowerErr msg ->
-                      do
-                        t4 <- time_now_micros()
-                        ref_write(t_ref, PhaseTimes(t0, t1, t2, t3, t4))
-                        typed_ast.TypedErr(no_pos(), "lower: " ++ msg)
-                  | lowering.LowerOk typed_lowered ->
-                      do
-                        t4 <- time_now_micros()
-                        ref_write(t_ref, PhaseTimes(t0, t1, t2, t3, t4))
-                        typed_ast.TypedOk(typed_lowered, env)
-
-# compile_full_ir_lines: single pipeline entry point.  Calls
-# compile_phase_recheck_timed (the canonical pipeline body) then runs codegen.
-# When SPROUT_TIME_PHASES is set, emits one [phase] timing line to stderr.
-# debug_mode_: when true, emits DWARF metadata in the 4th IR section (--debug flag).
-export fn compile_full_ir_lines(path: source.FilePath, stdlib_root: source.StdlibRoot, debug_mode_: Bool) -> IrFullLinesResult !{IO} =
-  do
-    timing_on <- timing_enabled()
-    t_ref <- ref_new(phase_times_zero())
-    recheck_result <- compile_phase_recheck_timed(path, stdlib_root, t_ref)
-    let path_str = source.filepath_str(path)
+    recheck_result <- compile_phase_recheck(path, stdlib_root)
     match recheck_result with
-    | typed_ast.TypedErr pos msg ->
-        do
-          if timing_on then
-            do
-              ts <- ref_read(t_ref)
-              eprint(format_phase_failed(msg, ts, path_str))
-          else ()
-          IrFullLinesFail(Cons (DiagError(pos, msg), Nil))
-    | typed_ast.TypedOk typed_lowered env ->
-        do
-          cg_t0 <- time_now_micros()
-          ir_result <- codegen.compile_to_ir_lines(typed_lowered, env, debug_mode_, path_str)
-          cg_t1 <- time_now_micros()
-          if timing_on then
-            do
-              ts <- ref_read(t_ref)
-              eprint(format_phase_success(ts, cg_t1 - cg_t0, path_str))
-          else ()
-          match ir_result with
-          | codegen.IrLinesOk header_lines str_lines def_lines dbg_lines warns ->
-              do
-                print_codegen_warns(warns)
-                IrFullLinesOk(header_lines, str_lines, def_lines, dbg_lines)
-          | codegen.IrLinesErr msg -> IrFullLinesFail(Cons (DiagError(no_pos(), "codegen: " ++ msg), Nil))
+    | typed_ast.TypedErr pos msg -> IrFullFail(Cons (DiagError(pos, msg), Nil))
+    | typed_ast.TypedOk typed_lowered _ ->
+        match ir_pipeline.compile_program_streaming(typed_lowered) with
+        | Err msg -> IrFullFail(Cons (DiagError(no_pos(), "codegen: " ++ msg), Nil))
+        | Ok ir_text -> IrFullOk(ir_text)
+
 
 # compile_full_ir_with_cache: like compile_full_ir but uses a caller-provided module cache.
 # Avoids recreating the cache on every eval when called from the analysis service daemon.
@@ -441,20 +292,3 @@ fn compile_phase_lower_with_cache(path: source.FilePath, stdlib_root: source.Std
 
 fn compile_phase_recheck_with_cache(path: source.FilePath, stdlib_root: source.StdlibRoot, cache) -> typed_ast.TypedResult !{IO} =
   compile_phase_lower_with_cache(path, stdlib_root, cache)
-
-# compile_one_fn_ir_lines: like compile_full_ir_lines but only emits codegen for
-# the function(s) whose qualified name contains fn_name as a substring.
-export fn compile_one_fn_ir_lines(fn_name: String, path: source.FilePath, stdlib_root: source.StdlibRoot) -> IrFullLinesResult !{IO} =
-  do
-    recheck_result <- compile_phase_recheck(path, stdlib_root)
-    match recheck_result with
-    | typed_ast.TypedErr pos msg -> IrFullLinesFail(Cons (DiagError(pos, msg), Nil))
-    | typed_ast.TypedOk typed_lowered env ->
-        do
-          ir_result <- codegen.compile_to_ir_lines_one_fn(fn_name, typed_lowered, env)
-          match ir_result with
-          | codegen.IrLinesOk header_lines str_lines def_lines dbg_lines warns ->
-              do
-                print_codegen_warns(warns)
-                IrFullLinesOk(header_lines, str_lines, def_lines, dbg_lines)
-          | codegen.IrLinesErr msg -> IrFullLinesFail(Cons (DiagError(no_pos(), "codegen: " ++ msg), Nil))

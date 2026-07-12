@@ -3,17 +3,13 @@ import stdlib.test (TestState, new_state, assert_true, assert_false, summary)
 import stdlib.compiler.compiler as compiler
 import stdlib.compiler.source as source
 
-# IR-level tests for 'wrap' zero-cost guarantee.
+# IR-level tests for the 'wrap' zero-cost guarantee, checked against the typed
+# IR pipeline (the sole codegen backend since the direct backend was retired).
 #
-# A wrap type must NOT emit a call to sprout_rebox on construction or
-# sprout_field on destruction.  Both must be identity at the LLVM IR level.
-#
-# Contrast with a regular single-constructor ADT which:
-#   - construction: emits  call i64 @sprout_rebox2(...)
+# A wrap type must NOT emit a construction or extraction call at the LLVM IR
+# level — both are identity.  Contrast a regular single-constructor ADT which:
+#   - construction: emits  call i64 @sprout_make1(...)
 #   - extraction:   emits  call i64 @sprout_field(...)
-#
-# The wrap assertions currently fail because 'wrap' is not yet a keyword
-# and the compiler rejects wrap_src — that is the intended TDD state.
 
 fn contains(haystack: String, needle: String) -> Bool =
   str_find(haystack, needle) != -1
@@ -43,11 +39,10 @@ fn ir_text(r: compiler.IrFullResult) -> String =
   | compiler.IrFullOk ir -> ir
   | compiler.IrFullFail _ -> ""
 
-# Check for a CALL to sprout_rebox (not the always-present declare).
-# The declare line looks like: declare i64 @sprout_rebox2(...)
-# The call line looks like:    call i64 @sprout_rebox2(...)
-fn has_rebox_call(ir: String) -> Bool =
-  contains(ir, "call i64 @sprout_rebox")
+# Check for a CALL to sprout_make (a boxed constructor heap-allocates), not the
+# always-present declare.  Call line: call i64 @sprout_makeN(...)
+fn has_make_call(ir: String) -> Bool =
+  contains(ir, "call i64 @sprout_make")
 
 # Check for a CALL to sprout_field (extraction reads a field from the heap).
 fn has_field_call(ir: String) -> Bool =
@@ -78,8 +73,8 @@ fn main() -> Unit !{IO} =
           let wrap_ir = ir_text(r_wrap)
 
           # Baseline: regular ADT boxes values and reads via heap field access
-          assert_true(state, "regular ADT emits call to @sprout_rebox (baseline)",
-            has_rebox_call(adt_ir))
+          assert_true(state, "regular ADT emits call to @sprout_make (baseline)",
+            has_make_call(adt_ir))
           assert_true(state, "regular ADT emits call to @sprout_field (baseline)",
             has_field_call(adt_ir))
 
@@ -90,8 +85,8 @@ fn main() -> Unit !{IO} =
             contains(wrap_ir, "define i64 @make"))
 
           # Zero-cost guarantee: wrap emits neither
-          assert_false(state, "wrap construction emits no call to @sprout_rebox",
-            has_rebox_call(wrap_ir))
+          assert_false(state, "wrap construction emits no call to @sprout_make",
+            has_make_call(wrap_ir))
           assert_false(state, "wrap extraction emits no call to @sprout_field",
             has_field_call(wrap_ir))
 

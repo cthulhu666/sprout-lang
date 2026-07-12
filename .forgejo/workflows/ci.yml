@@ -133,9 +133,3 @@ jobs:
         # on every allocation). Default-threshold greens hide use-after-free
         # rooting bugs; this fails loudly. See justfile `test-stress`.
         run: just test-stress
-
-      - name: CPR differential check (--use-direct-codegen vs --use-ir-codegen)
-        # Compares external function signatures emitted by the direct and typed
-        # codegen paths on the shared-OK corpus. Intersection-side divergence =
-        # candidate CPR/ABI parity bug. Allowlist: tests/CPR_DIFF_ALLOWLIST.
-        run: just cpr-differential-check
