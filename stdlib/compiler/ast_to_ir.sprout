@@ -178,7 +178,7 @@ fn compute_free_vars_record_fields(fields: List typed_ast.TypedRecordField,
 # Build the top-level name Set from decl list + ctor dict.
 # Includes user fn names, extern fn names, and ctor names.
 # O(n * log(n)).
-export fn build_top_level_set(decls: List typed_ast.TypedDecl, ctors: Dict (Int, Int, Int, String)) -> Set =
+export fn build_top_level_set(decls: List typed_ast.TypedDecl, ctors: Dict sprout_ir.CtorInfo) -> Set =
   set_union(build_top_level_fn_set(decls),
             set_from_list(vec_to_list(dict_keys(ctors))))
 
@@ -456,12 +456,12 @@ fn build_load_env_ops_go(frees: List String, kinds: List sprout_ir.IRType, base_
 # and the flat CtorReg list (with field_kinds) used by ir_lowering for
 # @sprout_register_ctor emission.  Every ctor is registered — both boxed and
 # CPR-eligible — so the runtime's find_ctor(tag) never returns NULL.
-export fn build_ctor_table(decls: List typed_ast.TypedDecl) -> (Dict (Int, Int, Int, String), List sprout_ir.CtorReg) =
+export fn build_ctor_table(decls: List typed_ast.TypedDecl) -> (Dict sprout_ir.CtorInfo, List sprout_ir.CtorReg) =
   build_ctor_table_acc(decls, 0, dict_empty(), Nil)
 
 fn build_ctor_table_acc(decls: List typed_ast.TypedDecl, next_tag: Int,
-                        acc: Dict (Int, Int, Int, String),
-                        regs: List sprout_ir.CtorReg) -> (Dict (Int, Int, Int, String), List sprout_ir.CtorReg) =
+                        acc: Dict sprout_ir.CtorInfo,
+                        regs: List sprout_ir.CtorReg) -> (Dict sprout_ir.CtorInfo, List sprout_ir.CtorReg) =
   match decls with
   | Nil -> (acc, list_reverse(regs))
   | Cons decl rest ->
@@ -474,7 +474,7 @@ fn build_ctor_table_acc(decls: List typed_ast.TypedDecl, next_tag: Int,
       # next_tag is not incremented: wrap consumes no numeric tag slot.
       | typed_ast.TPassThrough (ast.WrapDecl type_name inner _) ->
           build_ctor_table_acc(rest, next_tag,
-            dict_set(type_name, (-1, 1, 1, fk.ctor_field_kinds_string(Cons(inner, Nil))), acc),
+            dict_set(type_name, sprout_ir.CtorInfo(-1, 1, 1, fk.ctor_field_kinds_string(Cons(inner, Nil))), acc),
             regs)
       | _ -> build_ctor_table_acc(rest, next_tag, acc, regs)
 
@@ -488,8 +488,8 @@ fn max_arity_of(ctors: List ast.TypeConstructor, m: Int) -> Int =
           | n -> max_arity_of(rest, if n > m then n else m)
 
 fn register_ctor_entries(ctors: List ast.TypeConstructor, next_tag: Int,
-                         max_ar: Int, acc: Dict (Int, Int, Int, String),
-                         regs: List sprout_ir.CtorReg) -> (Dict (Int, Int, Int, String), Int, List sprout_ir.CtorReg) =
+                         max_ar: Int, acc: Dict sprout_ir.CtorInfo,
+                         regs: List sprout_ir.CtorReg) -> (Dict sprout_ir.CtorInfo, Int, List sprout_ir.CtorReg) =
   match ctors with
   | Nil -> (acc, next_tag, regs)
   | Cons tc rest ->
@@ -506,11 +506,11 @@ fn register_ctor_entries(ctors: List ast.TypeConstructor, next_tag: Int,
 # binding is visible to the call body.
 fn register_ctor_one(ctor_name: String, ctor_args: List ast.TypeExpr,
                      rest: List ast.TypeConstructor, next_tag: Int, max_ar: Int,
-                     acc: Dict (Int, Int, Int, String),
+                     acc: Dict sprout_ir.CtorInfo,
                      regs: List sprout_ir.CtorReg) ->
-    (Dict (Int, Int, Int, String), Int, List sprout_ir.CtorReg) =
+    (Dict sprout_ir.CtorInfo, Int, List sprout_ir.CtorReg) =
   register_ctor_entries(rest, next_tag + 1, max_ar,
-                        dict_set(ctor_name, (next_tag, arity, max_ar, fks), acc),
+                        dict_set(ctor_name, sprout_ir.CtorInfo(next_tag, arity, max_ar, fks), acc),
                         Cons(sprout_ir.CtorReg(ctor_name, next_tag, arity, fks), regs))
   where arity = list_length(ctor_args)
         fks = fk.ctor_field_kinds_string(ctor_args)
@@ -703,7 +703,7 @@ fn ret_irtype(t: types.Type) -> sprout_ir.IRType =
 #   top_level  — Set String — top-level fn names + ctor names; used by
 #                compute_free_vars to exclude globally addressable names.
 fn translate_expr(expr: typed_ast.TypedExpr, params: List String,
-                  ctors: Dict (Int, Int, Int, String), idx: Int,
+                  ctors: Dict sprout_ir.CtorInfo, idx: Int,
                   cur_label: String, cur_ops: List sprout_ir.IROp,
                   captures: Dict String,
                   lifted_ref: Ref (List sprout_ir.IRFunction),
@@ -738,7 +738,7 @@ fn translate_expr(expr: typed_ast.TypedExpr, params: List String,
             match dict_get(name, ctors) with
             | Just entry ->
                 match entry with
-                | (tag, actual_ar, _max_ar, _fks) ->
+                | sprout_ir.CtorInfo tag actual_ar _max_ar _fks ->
                     # M3 PR 2: CPR-eligible ctors route through the same boxed
                     # allocation path as non-CPR ctors (@sprout_makeN).
                     # The unboxing sret optimization lands in PR 2b.
@@ -943,7 +943,7 @@ fn translate_zero_arity_ctor(name: String, tag: Int, idx: Int,
 #
 # O(n * k) where n = step count, k = per-step translate_expr cost.
 fn translate_do(steps: List typed_ast.TypedDoStep,
-                params: List String, ctors: Dict (Int, Int, Int, String),
+                params: List String, ctors: Dict sprout_ir.CtorInfo,
                 idx: Int, cur_label: String, cur_ops: List sprout_ir.IROp,
                 captures: Dict String,
                 lifted_ref: Ref (List sprout_ir.IRFunction),
@@ -1120,16 +1120,16 @@ fn do_bind_tuple_items(items: List ast.Pattern, scrut_name: String,
 # prelude is imported unqualified) and the prelude-qualified form.  Defensive
 # fallback (0) matches direct codegen; a do-block bind on Maybe whose ctor
 # table is missing the names shouldn't typecheck in the first place.
-fn find_nothing_tag_ir(ctors: Dict (Int, Int, Int, String)) -> Int =
+fn find_nothing_tag_ir(ctors: Dict sprout_ir.CtorInfo) -> Int =
   match dict_get("Nothing", ctors) with
   | Just entry ->
       match entry with
-      | (tag, _, _, _) -> tag
+      | sprout_ir.CtorInfo tag _ _ _ -> tag
   | Nothing ->
       match dict_get("stdlib.prelude.Nothing", ctors) with
       | Just entry ->
           match entry with
-          | (tag, _, _, _) -> tag
+          | sprout_ir.CtorInfo tag _ _ _ -> tag
       | Nothing -> 0
 
 # Ctor-tag lookup for the Result do-bind short-circuit.  Like
@@ -1137,16 +1137,16 @@ fn find_nothing_tag_ir(ctors: Dict (Int, Int, Int, String)) -> Int =
 # form.  The Result branch tests for Err (short-circuit on failure); Ok is the
 # continue case.  Defensive fallback matches direct codegen; a Result do-bind
 # whose ctor table lacks the names would not have typechecked.
-fn find_err_tag_ir(ctors: Dict (Int, Int, Int, String)) -> Int =
+fn find_err_tag_ir(ctors: Dict sprout_ir.CtorInfo) -> Int =
   match dict_get("Err", ctors) with
   | Just entry ->
       match entry with
-      | (tag, _, _, _) -> tag
+      | sprout_ir.CtorInfo tag _ _ _ -> tag
   | Nothing ->
       match dict_get("stdlib.prelude.Err", ctors) with
       | Just entry ->
           match entry with
-          | (tag, _, _, _) -> tag
+          | sprout_ir.CtorInfo tag _ _ _ -> tag
       | Nothing -> 0
 
 # M3 PR 13: lower `x <- f()` where f returns `Maybe a !{IO}`.
@@ -1180,7 +1180,7 @@ fn find_err_tag_ir(ctors: Dict (Int, Int, Int, String)) -> Int =
 # Local, like translate_match's router — the worker is guaranteed to exist because
 # collect_worker_callees scans do-binds (collect_wc_do_bind_callee).
 fn do_bind_unbox_target(e: typed_ast.TypedExpr, params: List String, captures: Dict String,
-                        let_names: Set, top_level: Set, ctors: Dict (Int, Int, Int, String)) ->
+                        let_names: Set, top_level: Set, ctors: Dict sprout_ir.CtorInfo) ->
     Maybe String =
   match e with
   | typed_ast.TCall callee _ _ _ ->
@@ -1196,7 +1196,7 @@ fn do_bind_unbox_target(e: typed_ast.TypedExpr, params: List String, captures: D
 
 fn translate_do_bind_maybe(pat: ast.Pattern, e: typed_ast.TypedExpr,
                             rest: List typed_ast.TypedDoStep,
-                            params: List String, ctors: Dict (Int, Int, Int, String),
+                            params: List String, ctors: Dict sprout_ir.CtorInfo,
                             idx: Int, cur_label: String, cur_ops: List sprout_ir.IROp,
                             captures: Dict String,
                             lifted_ref: Ref (List sprout_ir.IRFunction),
@@ -1230,7 +1230,7 @@ fn translate_do_bind_maybe(pat: ast.Pattern, e: typed_ast.TypedExpr,
 # using tag directly (no IRGetTag), bind `pat` to val directly (no IRGetField).
 fn translate_do_bind_maybe_unboxed(pat: ast.Pattern, target: String,
                                    eargs: List typed_ast.TypedExpr, rest: List typed_ast.TypedDoStep,
-                                   params: List String, ctors: Dict (Int, Int, Int, String),
+                                   params: List String, ctors: Dict sprout_ir.CtorInfo,
                                    idx: Int, cur_label: String, cur_ops: List sprout_ir.IROp,
                                    captures: Dict String,
                                    lifted_ref: Ref (List sprout_ir.IRFunction),
@@ -1257,7 +1257,7 @@ fn translate_do_bind_maybe_finish(pat: ast.Pattern, rest: List typed_ast.TypedDo
                                    elbl: String, eops: List sprout_ir.IROp,
                                    ename: String, eidx: Int,
                                    params: List String,
-                                   ctors: Dict (Int, Int, Int, String),
+                                   ctors: Dict sprout_ir.CtorInfo,
                                    captures: Dict String,
                                    lifted_ref: Ref (List sprout_ir.IRFunction),
                                    top_level: Set, let_names: Set, fn_arities: Dict Int,
@@ -1322,7 +1322,7 @@ fn translate_do_bind_maybe_finish_unboxed(pat: ast.Pattern, rest: List typed_ast
                                           eblocks: List sprout_ir.IRBlock, elbl: String,
                                           eops: List sprout_ir.IROp, tag_ssa: String, val_ssa: String,
                                           eidx: Int, params: List String,
-                                          ctors: Dict (Int, Int, Int, String), captures: Dict String,
+                                          ctors: Dict sprout_ir.CtorInfo, captures: Dict String,
                                           lifted_ref: Ref (List sprout_ir.IRFunction),
                                           top_level: Set, let_names: Set, fn_arities: Dict Int,
                                           lambda_ctr_ref: Ref Int, lifted_idx_ref: Ref (Dict Int),
@@ -1395,7 +1395,7 @@ fn translate_do_bind_maybe_finish_unboxed(pat: ast.Pattern, rest: List typed_ast
 #     %result = phi i64 [%e, %do_short_K], [%rest_name, <rest_final>]
 fn translate_do_bind_result(pat: ast.Pattern, e: typed_ast.TypedExpr,
                             rest: List typed_ast.TypedDoStep,
-                            params: List String, ctors: Dict (Int, Int, Int, String),
+                            params: List String, ctors: Dict sprout_ir.CtorInfo,
                             idx: Int, cur_label: String, cur_ops: List sprout_ir.IROp,
                             captures: Dict String,
                             lifted_ref: Ref (List sprout_ir.IRFunction),
@@ -1441,7 +1441,7 @@ fn translate_do_bind_result_finish_unboxed(pat: ast.Pattern, rest: List typed_as
                                            eblocks: List sprout_ir.IRBlock, elbl: String,
                                            eops: List sprout_ir.IROp, tag_ssa: String, val_ssa: String,
                                            eidx: Int, params: List String,
-                                           ctors: Dict (Int, Int, Int, String), captures: Dict String,
+                                           ctors: Dict sprout_ir.CtorInfo, captures: Dict String,
                                            lifted_ref: Ref (List sprout_ir.IRFunction),
                                            top_level: Set, let_names: Set, fn_arities: Dict Int,
                                            lambda_ctr_ref: Ref Int, lifted_idx_ref: Ref (Dict Int),
@@ -1496,7 +1496,7 @@ fn translate_do_bind_result_finish(pat: ast.Pattern, rest: List typed_ast.TypedD
                                    elbl: String, eops: List sprout_ir.IROp,
                                    ename: String, eidx: Int,
                                    params: List String,
-                                   ctors: Dict (Int, Int, Int, String),
+                                   ctors: Dict sprout_ir.CtorInfo,
                                    captures: Dict String,
                                    lifted_ref: Ref (List sprout_ir.IRFunction),
                                    top_level: Set, let_names: Set, fn_arities: Dict Int,
@@ -1707,7 +1707,7 @@ fn find_bool_capture(capturable: List String, body: typed_ast.TypedExpr) -> Mayb
 # O(n * log(n)) where n = lambda body size.
 fn translate_lambda(lparams: List ast.Param, body: typed_ast.TypedExpr,
                     lam_ty: types.Type,
-                    params: List String, ctors: Dict (Int, Int, Int, String),
+                    params: List String, ctors: Dict sprout_ir.CtorInfo,
                     idx: Int, cur_label: String, cur_ops: List sprout_ir.IROp,
                     captures: Dict String,
                     lifted_ref: Ref (List sprout_ir.IRFunction),
@@ -1732,7 +1732,7 @@ fn translate_lambda(lparams: List ast.Param, body: typed_ast.TypedExpr,
 # Splitting avoids `else let` inside a do block (not valid Sprout).
 fn translate_lambda_after_ret_check(lparams: List ast.Param, body: typed_ast.TypedExpr,
                                     lam_ty: types.Type,
-                                    params: List String, ctors: Dict (Int, Int, Int, String),
+                                    params: List String, ctors: Dict sprout_ir.CtorInfo,
                                     idx: Int, cur_label: String, cur_ops: List sprout_ir.IROp,
                                     captures: Dict String,
                                     lifted_ref: Ref (List sprout_ir.IRFunction),
@@ -1769,7 +1769,7 @@ fn translate_lambda_after_ret_check(lparams: List ast.Param, body: typed_ast.Typ
 # the outer do block" restriction.
 fn translate_lambda_emit(lparams: List ast.Param, body: typed_ast.TypedExpr,
                          capturable: List String, lam_param_names: List String,
-                         params: List String, ctors: Dict (Int, Int, Int, String),
+                         params: List String, ctors: Dict sprout_ir.CtorInfo,
                          idx: Int, cur_label: String, cur_ops: List sprout_ir.IROp,
                          captures: Dict String,
                          lifted_ref: Ref (List sprout_ir.IRFunction),
@@ -1804,7 +1804,7 @@ fn translate_lambda_emit(lparams: List ast.Param, body: typed_ast.TypedExpr,
 fn translate_lambda_lifted(lparams: List ast.Param, body: typed_ast.TypedExpr,
                            capturable: List String, lam_param_names: List String,
                            cap_ssas: List String, lam_fn_name: String,
-                           params: List String, ctors: Dict (Int, Int, Int, String),
+                           params: List String, ctors: Dict sprout_ir.CtorInfo,
                            idx: Int, cur_label: String, cur_ops: List sprout_ir.IROp,
                            captures: Dict String,
                            lifted_ref: Ref (List sprout_ir.IRFunction),
@@ -1864,7 +1864,7 @@ fn translate_lambda_lifted(lparams: List ast.Param, body: typed_ast.TypedExpr,
 # +, -, *, ==, !=, <, <=, >, >=.  Both operands must be Int-typed
 # (Char comparison is intentionally rejected at this milestone).
 fn translate_binary(op: String, left: typed_ast.TypedExpr, right: typed_ast.TypedExpr,
-                    params: List String, ctors: Dict (Int, Int, Int, String), idx: Int,
+                    params: List String, ctors: Dict sprout_ir.CtorInfo, idx: Int,
                     cur_label: String, cur_ops: List sprout_ir.IROp,
                     captures: Dict String,
                     lifted_ref: Ref (List sprout_ir.IRFunction),
@@ -2179,7 +2179,7 @@ fn arith_op(op: String, result: String, lhs: String, rhs: String) -> Maybe sprou
 #
 # K is allocated by consuming one fresh-name slot for each of then/else/join.
 fn translate_if(cond: typed_ast.TypedExpr, t: typed_ast.TypedExpr, e: typed_ast.TypedExpr,
-                if_ty: types.Type, params: List String, ctors: Dict (Int, Int, Int, String),
+                if_ty: types.Type, params: List String, ctors: Dict sprout_ir.CtorInfo,
                 idx: Int,
                 cur_label: String, cur_ops: List sprout_ir.IROp,
                 captures: Dict String,
@@ -2205,7 +2205,7 @@ fn translate_if(cond: typed_ast.TypedExpr, t: typed_ast.TypedExpr, e: typed_ast.
 
 fn translate_if_after_cond(t: typed_ast.TypedExpr, e: typed_ast.TypedExpr,
                            if_ty: types.Type, params: List String,
-                           ctors: Dict (Int, Int, Int, String),
+                           ctors: Dict sprout_ir.CtorInfo,
                            cblocks: List sprout_ir.IRBlock,
                            ccur_lbl: String, ccur_ops: List sprout_ir.IROp,
                            c_name: String, idx: Int,
@@ -2339,7 +2339,7 @@ fn has_ctor_pattern_arm(arms: List typed_ast.TypedMatchBranch) -> Bool =
 # discriminator is strictly tag == -1 (a normal single-field ADT is boxed and
 # genuinely needs the tag).
 fn is_wrap_match(arms: List typed_ast.TypedMatchBranch,
-                 ctors: Dict (Int, Int, Int, String)) -> Bool =
+                 ctors: Dict sprout_ir.CtorInfo) -> Bool =
   match arms with
   | Nil -> false
   | Cons arm rest ->
@@ -2350,7 +2350,7 @@ fn is_wrap_match(arms: List typed_ast.TypedMatchBranch,
               match dict_get(name, ctors) with
               | Just entry ->
                   match entry with
-                  | (tag, _, _, _) -> tag == -1
+                  | sprout_ir.CtorInfo tag _ _ _ -> tag == -1
               | Nothing -> is_wrap_match(rest, ctors)
           | _ -> is_wrap_match(rest, ctors)
 
@@ -2386,7 +2386,7 @@ fn bind_ctor_field_args(args: List ast.Pattern, scrut_name: String,
                         name_prefix: String, cur_ops: List sprout_ir.IROp,
                         acc_captures: Dict String,
                         cur_lbl: String, miss_lbl: String,
-                        ctors: Dict (Int, Int, Int, String),
+                        ctors: Dict sprout_ir.CtorInfo,
                         acc_extra: List sprout_ir.IRBlock) ->
     Result String (List sprout_ir.IRBlock, String, List sprout_ir.IROp, Dict String, Int) =
   match args with
@@ -2420,7 +2420,7 @@ fn bind_ctor_field_args(args: List ast.Pattern, scrut_name: String,
             | Nothing -> Err("ast_to_ir: unknown constructor '" ++ nested_ctor ++ "' in nested pattern")
             | Just nested_entry ->
                 match nested_entry with
-                | (nested_tag, _na, _nm, nested_fks) ->
+                | sprout_ir.CtorInfo nested_tag _na _nm nested_fks ->
                     match fresh_name(name_prefix, idx) with
                     | field_ssa ->
                         match fresh_name(name_prefix, idx + 1) with
@@ -2600,7 +2600,7 @@ fn bind_tuple_items(items: List ast.Pattern, scrut_name: String,
                     name_prefix: String, cur_ops: List sprout_ir.IROp,
                     acc_captures: Dict String,
                     cur_lbl: String, miss_lbl: String,
-                    ctors: Dict (Int, Int, Int, String),
+                    ctors: Dict sprout_ir.CtorInfo,
                     acc_extra: List sprout_ir.IRBlock) ->
     Result String (List sprout_ir.IRBlock, String, List sprout_ir.IROp, Dict String, Int) =
   match items with
@@ -2641,7 +2641,7 @@ fn bind_tuple_items(items: List ast.Pattern, scrut_name: String,
           | Nothing -> Err("ast_to_ir: unknown constructor '" ++ nested_ctor ++ "' in nested tuple pattern")
           | Just nested_entry ->
               match nested_entry with
-              | (nested_tag, _na, _nm, nested_fks) ->
+              | sprout_ir.CtorInfo nested_tag _na _nm nested_fks ->
                   match fresh_name(name_prefix, idx) with
                   | field_ssa ->
                       match fresh_name(name_prefix, idx + 1) with
@@ -2786,7 +2786,7 @@ fn translate_match_arm_body_always_with_ops(body: typed_ast.TypedExpr,
                                             preamble_ops: List sprout_ir.IROp,
                                             extra_blocks: List sprout_ir.IRBlock,
                                             params: List String,
-                                            ctors: Dict (Int, Int, Int, String), idx: Int,
+                                            ctors: Dict sprout_ir.CtorInfo, idx: Int,
                                             acc_blocks: List sprout_ir.IRBlock,
                                             acc_phi: List (String, String),
                                             captures: Dict String,
@@ -2831,7 +2831,7 @@ fn translate_match_arm_tuple(tuple_items: List ast.Pattern,
                               branch_idx: Int, base_idx: Int,
                               dispatch_lbl: String, join_lbl: String,
                               match_ty: types.Type, s_name: String, tag_name: String,
-                              params: List String, ctors: Dict (Int, Int, Int, String),
+                              params: List String, ctors: Dict sprout_ir.CtorInfo,
                               idx: Int,
                               acc_blocks: List sprout_ir.IRBlock,
                               acc_phi: List (String, String),
@@ -2918,7 +2918,7 @@ fn all_arms_simple_maybe(arms: List typed_ast.TypedMatchBranch) -> Bool =
 # shape as is_simple_maybe_arm but keyed on the ctor table's max_ar (field 3) so
 # it covers Maybe/Result AND custom `type Box a = Empty | Full a`.  A top-level
 # VarPattern (binds the whole value) is excluded — it needs the boxed handle.
-fn is_simple_width2_arm(pat: ast.Pattern, ctors: Dict (Int, Int, Int, String)) -> Bool =
+fn is_simple_width2_arm(pat: ast.Pattern, ctors: Dict sprout_ir.CtorInfo) -> Bool =
   match pat with
   | ast.WildcardPattern _ -> true
   | ast.ConstructorPattern name args _ ->
@@ -2926,7 +2926,7 @@ fn is_simple_width2_arm(pat: ast.Pattern, ctors: Dict (Int, Int, Int, String)) -
       | Nothing -> false
       | Just entry ->
           match entry with
-          | (tag, _ar, max_ar, _fks) ->
+          | sprout_ir.CtorInfo tag _ar max_ar _fks ->
               # tag == -1 is the `wrap` sentinel: wrap values are UNBOXED (the raw
               # inner value, no heap ctor/tag), so the { tag, val } worker machinery
               # (IRGetTag/IRMakeCtor) does not apply — exclude them like Bool is.
@@ -2939,7 +2939,7 @@ fn is_simple_width2_arm(pat: ast.Pattern, ctors: Dict (Int, Int, Int, String)) -
   | _ -> false
 
 fn all_arms_simple_width2(arms: List typed_ast.TypedMatchBranch,
-                          ctors: Dict (Int, Int, Int, String)) -> Bool =
+                          ctors: Dict sprout_ir.CtorInfo) -> Bool =
   match arms with
   | Nil -> true
   | Cons (typed_ast.TypedMatchBranch pat _) rest ->
@@ -2956,7 +2956,7 @@ fn arms_have_ctor_anchor(arms: List typed_ast.TypedMatchBranch) -> Bool =
        | _ -> false)
       || arms_have_ctor_anchor(rest)
 
-fn ctors_has(ctors: Dict (Int, Int, Int, String), name: String) -> Bool =
+fn ctors_has(ctors: Dict sprout_ir.CtorInfo, name: String) -> Bool =
   match dict_get(name, ctors) with
   | Just _ -> true
   | Nothing -> false
@@ -2969,7 +2969,7 @@ fn ctors_has(ctors: Dict (Int, Int, Int, String), name: String) -> Bool =
 # direct call); a param named e.g. `env_get` would otherwise be miscompiled into
 # a direct `@env_get_unboxed` call to the C runtime.
 fn callee_name_shadowed(name: String, params: List String, captures: Dict String,
-                        let_names: Set, ctors: Dict (Int, Int, Int, String)) -> Bool =
+                        let_names: Set, ctors: Dict sprout_ir.CtorInfo) -> Bool =
   (match dict_get(name, captures) with | Just _ -> true | Nothing -> false)
   || param_known(name, params)
   || set_member(name, let_names)
@@ -2982,7 +2982,7 @@ fn callee_name_shadowed(name: String, params: List String, captures: Dict String
 # and the emission scan (collect_worker_callees, which stays shadow-free — a
 # superset, so it can never fail to emit a worker the router routes to).
 fn tier2_worker_shape(name: String, arms: List typed_ast.TypedMatchBranch,
-                      ctors: Dict (Int, Int, Int, String)) -> Bool =
+                      ctors: Dict sprout_ir.CtorInfo) -> Bool =
   (match unboxed_maybe_extern_name(name) with | Just _ -> false | Nothing -> true)
   && all_arms_simple_width2(arms, ctors)
   && arms_have_ctor_anchor(arms)
@@ -2991,7 +2991,7 @@ fn unboxed_maybe_match_target(scrut: typed_ast.TypedExpr,
                               arms: List typed_ast.TypedMatchBranch,
                               params: List String, captures: Dict String,
                               let_names: Set, top_level: Set,
-                              ctors: Dict (Int, Int, Int, String)) ->
+                              ctors: Dict sprout_ir.CtorInfo) ->
     Maybe(String, List typed_ast.TypedExpr) =
   match scrut with
   | typed_ast.TCall callee args call_ty _ ->
@@ -3044,7 +3044,7 @@ fn emit_unboxed_arm_body(body: typed_ast.TypedExpr,
                          test_block: Maybe sprout_ir.IRBlock, body_lbl: String,
                          join_lbl: String, match_ty: types.Type,
                          val_ssa: String, tag_ssa: String,
-                         params: List String, ctors: Dict (Int, Int, Int, String),
+                         params: List String, ctors: Dict sprout_ir.CtorInfo,
                          idx: Int,
                          acc_blocks: List sprout_ir.IRBlock,
                          acc_phi: List (String, String),
@@ -3078,7 +3078,7 @@ fn translate_unboxed_maybe_one_arm(pat: ast.Pattern, body: typed_ast.TypedExpr,
                                    branch_idx: Int, base_idx: Int,
                                    dispatch_lbl: String, join_lbl: String,
                                    match_ty: types.Type, val_ssa: String, tag_ssa: String,
-                                   params: List String, ctors: Dict (Int, Int, Int, String),
+                                   params: List String, ctors: Dict sprout_ir.CtorInfo,
                                    idx: Int,
                                    acc_blocks: List sprout_ir.IRBlock,
                                    acc_phi: List (String, String),
@@ -3099,7 +3099,7 @@ fn translate_unboxed_maybe_one_arm(pat: ast.Pattern, body: typed_ast.TypedExpr,
       | Nothing -> Err("ast_to_ir: unknown constructor '" ++ ctor_name ++ "' in unboxed match pattern")
       | Just entry ->
           match entry with
-          | (ctor_tag, _a, _m, _f) ->
+          | sprout_ir.CtorInfo ctor_tag _a _m _f ->
               do
                 let miss_lbl = fresh_arm_label(branch_idx + 1, base_idx)
                 let body_lbl = fresh_body_label(branch_idx, base_idx)
@@ -3120,7 +3120,7 @@ fn translate_unboxed_maybe_one_arm(pat: ast.Pattern, body: typed_ast.TypedExpr,
 fn translate_unboxed_maybe_arms(arms: List typed_ast.TypedMatchBranch,
                                 branch_idx: Int, base_idx: Int, join_lbl: String,
                                 match_ty: types.Type, val_ssa: String, tag_ssa: String,
-                                params: List String, ctors: Dict (Int, Int, Int, String),
+                                params: List String, ctors: Dict sprout_ir.CtorInfo,
                                 idx: Int,
                                 acc_blocks: List sprout_ir.IRBlock,
                                 acc_phi: List (String, String),
@@ -3151,7 +3151,7 @@ fn translate_unboxed_maybe_arms(arms: List typed_ast.TypedMatchBranch,
 fn translate_unboxed_maybe_match(ufn: String, call_args: List typed_ast.TypedExpr,
                                  arms: List typed_ast.TypedMatchBranch,
                                  match_ty: types.Type, params: List String,
-                                 ctors: Dict (Int, Int, Int, String), idx: Int,
+                                 ctors: Dict sprout_ir.CtorInfo, idx: Int,
                                  cur_label: String, cur_ops: List sprout_ir.IROp,
                                  captures: Dict String,
                                  lifted_ref: Ref (List sprout_ir.IRFunction),
@@ -3189,7 +3189,7 @@ fn translate_unboxed_maybe_match(ufn: String, call_args: List typed_ast.TypedExp
 # Entry point: translate a TMatch expression.
 fn translate_match(scrut: typed_ast.TypedExpr, arms: List typed_ast.TypedMatchBranch,
                    match_ty: types.Type, params: List String,
-                   ctors: Dict (Int, Int, Int, String), idx: Int,
+                   ctors: Dict sprout_ir.CtorInfo, idx: Int,
                    cur_label: String, cur_ops: List sprout_ir.IROp,
                    captures: Dict String,
                    lifted_ref: Ref (List sprout_ir.IRFunction),
@@ -3225,7 +3225,7 @@ fn translate_match(scrut: typed_ast.TypedExpr, arms: List typed_ast.TypedMatchBr
 # Emits IRGetTag if needed, seals the scrutinee block, then dispatches arms.
 fn translate_match_after_scrut(arms: List typed_ast.TypedMatchBranch,
                                 match_ty: types.Type, params: List String,
-                                ctors: Dict (Int, Int, Int, String),
+                                ctors: Dict sprout_ir.CtorInfo,
                                 s_blocks: List sprout_ir.IRBlock,
                                 s_cur_lbl: String, s_ops: List sprout_ir.IROp,
                                 s_name: String, idx: Int,
@@ -3266,7 +3266,7 @@ fn translate_match_after_scrut(arms: List typed_ast.TypedMatchBranch,
 # base_idx = idx here = basis for join/phi/arm/body label naming.
 fn translate_match_dispatch(arms: List typed_ast.TypedMatchBranch,
                              match_ty: types.Type, params: List String,
-                             ctors: Dict (Int, Int, Int, String),
+                             ctors: Dict sprout_ir.CtorInfo,
                              s_blocks: List sprout_ir.IRBlock,
                              s_cur_lbl: String, s_ops: List sprout_ir.IROp,
                              s_name: String, tag_name: String, idx: Int,
@@ -3306,7 +3306,7 @@ fn translate_match_arms(arms: List typed_ast.TypedMatchBranch,
                          branch_idx: Int, base_idx: Int,
                          join_lbl: String, match_ty: types.Type,
                          s_name: String, tag_name: String,
-                         params: List String, ctors: Dict (Int, Int, Int, String),
+                         params: List String, ctors: Dict sprout_ir.CtorInfo,
                          idx: Int,
                          acc_blocks: List sprout_ir.IRBlock,
                          acc_phi: List (String, String),
@@ -3348,7 +3348,7 @@ fn translate_match_one_arm(pat: ast.Pattern, body: typed_ast.TypedExpr,
                             branch_idx: Int, base_idx: Int,
                             dispatch_lbl: String, join_lbl: String,
                             match_ty: types.Type, s_name: String, tag_name: String,
-                            params: List String, ctors: Dict (Int, Int, Int, String),
+                            params: List String, ctors: Dict sprout_ir.CtorInfo,
                             idx: Int,
                             acc_blocks: List sprout_ir.IRBlock,
                             acc_phi: List (String, String),
@@ -3446,7 +3446,7 @@ fn translate_match_arm_body_always(body: typed_ast.TypedExpr,
                                     match_ty: types.Type,
                                     s_name: String, tag_name: String,
                                     params: List String,
-                                    ctors: Dict (Int, Int, Int, String), idx: Int,
+                                    ctors: Dict sprout_ir.CtorInfo, idx: Int,
                                     acc_blocks: List sprout_ir.IRBlock,
                                     acc_phi: List (String, String),
                                     captures: Dict String,
@@ -3491,7 +3491,7 @@ fn translate_match_arm_int(n: Int, body: typed_ast.TypedExpr,
                             branch_idx: Int, base_idx: Int,
                             dispatch_lbl: String, join_lbl: String,
                             match_ty: types.Type, s_name: String, tag_name: String,
-                            params: List String, ctors: Dict (Int, Int, Int, String),
+                            params: List String, ctors: Dict sprout_ir.CtorInfo,
                             idx: Int,
                             acc_blocks: List sprout_ir.IRBlock,
                             acc_phi: List (String, String),
@@ -3529,7 +3529,7 @@ fn translate_match_arm_bool(b: Bool, body: typed_ast.TypedExpr,
                              branch_idx: Int, base_idx: Int,
                              dispatch_lbl: String, join_lbl: String,
                              match_ty: types.Type, s_name: String, tag_name: String,
-                             params: List String, ctors: Dict (Int, Int, Int, String),
+                             params: List String, ctors: Dict sprout_ir.CtorInfo,
                              idx: Int,
                              acc_blocks: List sprout_ir.IRBlock,
                              acc_phi: List (String, String),
@@ -3579,7 +3579,7 @@ fn translate_match_arm_string(s: String, body: typed_ast.TypedExpr,
                                branch_idx: Int, base_idx: Int,
                                dispatch_lbl: String, join_lbl: String,
                                match_ty: types.Type, s_name: String, tag_name: String,
-                               params: List String, ctors: Dict (Int, Int, Int, String),
+                               params: List String, ctors: Dict sprout_ir.CtorInfo,
                                idx: Int,
                                acc_blocks: List sprout_ir.IRBlock,
                                acc_phi: List (String, String),
@@ -3625,7 +3625,7 @@ fn translate_match_arm_char(ch: Int, body: typed_ast.TypedExpr,
                              branch_idx: Int, base_idx: Int,
                              dispatch_lbl: String, join_lbl: String,
                              match_ty: types.Type, s_name: String, tag_name: String,
-                             params: List String, ctors: Dict (Int, Int, Int, String),
+                             params: List String, ctors: Dict sprout_ir.CtorInfo,
                              idx: Int,
                              acc_blocks: List sprout_ir.IRBlock,
                              acc_phi: List (String, String),
@@ -3663,7 +3663,7 @@ fn translate_match_arm_ctor(ctor_name: String, ctor_args: List ast.Pattern,
                              branch_idx: Int, base_idx: Int,
                              dispatch_lbl: String, join_lbl: String,
                              match_ty: types.Type, s_name: String, tag_name: String,
-                             params: List String, ctors: Dict (Int, Int, Int, String),
+                             params: List String, ctors: Dict sprout_ir.CtorInfo,
                              idx: Int,
                              acc_blocks: List sprout_ir.IRBlock,
                              acc_phi: List (String, String),
@@ -3680,7 +3680,7 @@ fn translate_match_arm_ctor(ctor_name: String, ctor_args: List ast.Pattern,
   | Nothing -> Err("ast_to_ir: unknown constructor '" ++ ctor_name ++ "' in match pattern")
   | Just entry ->
       match entry with
-      | (ctor_tag, _arity, _max_ar, fks) ->
+      | sprout_ir.CtorInfo ctor_tag _arity _max_ar fks ->
           if ctor_tag == -1
           then
             # Wrap match: the scrutinee IS the inner value — no tag test, no IRGetField.
@@ -3759,7 +3759,7 @@ fn translate_match_arm_body_with_test(body: typed_ast.TypedExpr,
                                        match_ty: types.Type, s_name: String,
                                        tag_name: String,
                                        params: List String,
-                                       ctors: Dict (Int, Int, Int, String),
+                                       ctors: Dict sprout_ir.CtorInfo,
                                        idx: Int,
                                        acc_blocks: List sprout_ir.IRBlock,
                                        acc_phi: List (String, String),
@@ -3798,7 +3798,7 @@ fn translate_match_arm_body_with_test_and_ops(body: typed_ast.TypedExpr,
                                                match_ty: types.Type, s_name: String,
                                                tag_name: String,
                                                params: List String,
-                                               ctors: Dict (Int, Int, Int, String),
+                                               ctors: Dict sprout_ir.CtorInfo,
                                                idx: Int,
                                                acc_blocks: List sprout_ir.IRBlock,
                                                acc_phi: List (String, String),
@@ -3895,7 +3895,7 @@ fn finish_match(match_ty: types.Type, s_blocks: List sprout_ir.IRBlock,
 #   print(Int/Bool)  -> IRCall @print_value(i64)  (value already i64-uniform)
 # There is no @print symbol in the runtime; a generic call would fail to link.
 fn translate_print_call(fname: String, args: List typed_ast.TypedExpr,
-                        params: List String, ctors: Dict (Int, Int, Int, String), idx: Int,
+                        params: List String, ctors: Dict sprout_ir.CtorInfo, idx: Int,
                         cur_label: String, cur_ops: List sprout_ir.IROp,
                         captures: Dict String,
                         lifted_ref: Ref (List sprout_ir.IRFunction),
@@ -3943,7 +3943,7 @@ fn translate_print_call(fname: String, args: List typed_ast.TypedExpr,
 # Int arg, then emit IRSIToF (sitofp) to convert it to the equal Double value.
 # Mirrors the print interception: recognized by name in translate_call.
 fn translate_to_double_call(args: List typed_ast.TypedExpr,
-                            params: List String, ctors: Dict (Int, Int, Int, String), idx: Int,
+                            params: List String, ctors: Dict sprout_ir.CtorInfo, idx: Int,
                             cur_label: String, cur_ops: List sprout_ir.IROp,
                             captures: Dict String,
                             lifted_ref: Ref (List sprout_ir.IRFunction),
@@ -3968,7 +3968,7 @@ fn translate_to_double_call(args: List typed_ast.TypedExpr,
 
 fn translate_call(callee: typed_ast.TypedExpr, args: List typed_ast.TypedExpr,
                   call_ty: types.Type, params: List String,
-                  ctors: Dict (Int, Int, Int, String), idx: Int,
+                  ctors: Dict sprout_ir.CtorInfo, idx: Int,
                   cur_label: String, cur_ops: List sprout_ir.IROp,
                   captures: Dict String,
                   lifted_ref: Ref (List sprout_ir.IRFunction),
@@ -4035,7 +4035,7 @@ fn translate_call(callee: typed_ast.TypedExpr, args: List typed_ast.TypedExpr,
             match dict_get(fname, ctors) with
             | Just entry ->
                 match entry with
-                | (tag, actual_ar, _max_ar, _fks) ->
+                | sprout_ir.CtorInfo tag actual_ar _max_ar _fks ->
                     translate_boxed_ctor_call(fname, tag, actual_ar, args, params,
                                               ctors, idx, cur_label, cur_ops,
                                               captures, lifted_ref, top_level, let_names, fn_arities,
@@ -4103,7 +4103,7 @@ fn translate_call(callee: typed_ast.TypedExpr, args: List typed_ast.TypedExpr,
 # Currently accepts any arg count; callee type is not checked here.
 # O(n) in number of args.
 fn translate_closure_call(callee_ssa: String, args: List typed_ast.TypedExpr,
-                          params: List String, ctors: Dict (Int, Int, Int, String),
+                          params: List String, ctors: Dict sprout_ir.CtorInfo,
                           idx: Int, cur_label: String, cur_ops: List sprout_ir.IROp,
                           captures: Dict String,
                           lifted_ref: Ref (List sprout_ir.IRFunction),
@@ -4136,7 +4136,7 @@ fn translate_closure_call(callee_ssa: String, args: List typed_ast.TypedExpr,
 # that the call-site provides exactly that many arguments before emitting IR.
 fn translate_boxed_ctor_call(name: String, tag: Int, actual_ar: Int,
                              args: List typed_ast.TypedExpr,
-                             params: List String, ctors: Dict (Int, Int, Int, String),
+                             params: List String, ctors: Dict sprout_ir.CtorInfo,
                              idx: Int, cur_label: String,
                              cur_ops: List sprout_ir.IROp,
                              captures: Dict String,
@@ -4208,7 +4208,7 @@ fn recognize_string_builtin(fname: String) -> Maybe StringBuiltin =
 # Mirrors codegen.sprout emit_append_call / emit_append_operands (~2591).
 fn translate_append_call(args: List typed_ast.TypedExpr, call_ty: types.Type,
                          params: List String,
-                         ctors: Dict (Int, Int, Int, String), idx: Int,
+                         ctors: Dict sprout_ir.CtorInfo, idx: Int,
                          cur_label: String, cur_ops: List sprout_ir.IROp,
                          captures: Dict String,
                          lifted_ref: Ref (List sprout_ir.IRFunction),
@@ -4242,7 +4242,7 @@ fn translate_append_operands(left: typed_ast.TypedExpr, right: typed_ast.TypedEx
                               witness: Maybe typed_ast.TypedExpr,
                               call_ty: types.Type,
                               params: List String,
-                              ctors: Dict (Int, Int, Int, String), idx: Int,
+                              ctors: Dict sprout_ir.CtorInfo, idx: Int,
                               cur_label: String, cur_ops: List sprout_ir.IROp,
                               captures: Dict String,
                               lifted_ref: Ref (List sprout_ir.IRFunction),
@@ -4308,7 +4308,7 @@ fn translate_append_operands(left: typed_ast.TypedExpr, right: typed_ast.TypedEx
 
 fn translate_direct_call(fname: String, args: List typed_ast.TypedExpr,
                          call_ty: types.Type, params: List String,
-                         ctors: Dict (Int, Int, Int, String), idx: Int,
+                         ctors: Dict sprout_ir.CtorInfo, idx: Int,
                          cur_label: String, cur_ops: List sprout_ir.IROp,
                          captures: Dict String,
                          lifted_ref: Ref (List sprout_ir.IRFunction),
@@ -4384,7 +4384,7 @@ fn translate_partial_application(fname: String, arity: Int,
 
 fn translate_string_builtin(kind: StringBuiltin, fname: String,
                             args: List typed_ast.TypedExpr,
-                            params: List String, ctors: Dict (Int, Int, Int, String),
+                            params: List String, ctors: Dict sprout_ir.CtorInfo,
                             idx: Int,
                             cur_label: String, cur_ops: List sprout_ir.IROp,
                             captures: Dict String,
@@ -4557,7 +4557,7 @@ fn finish_vec_set_d(arg_blocks: List sprout_ir.IRBlock, cur_lbl: String,
 # blocks from intra-element control flow merge into acc_blocks.  Tuple
 # fields are i64-uniform, so no per-element type filtering needed.
 fn translate_tuple_items(items: List typed_ast.TypedExpr, params: List String,
-                          ctors: Dict (Int, Int, Int, String),
+                          ctors: Dict sprout_ir.CtorInfo,
                           idx: Int, cur_label: String, cur_ops: List sprout_ir.IROp,
                           acc_blocks: List sprout_ir.IRBlock,
                           acc_names: List String,
@@ -4589,7 +4589,7 @@ fn translate_tuple_items(items: List typed_ast.TypedExpr, params: List String,
                                      lambda_ctr_ref, lifted_idx_ref, name_prefix)
 
 fn translate_args_scalar(args: List typed_ast.TypedExpr, params: List String,
-                         ctors: Dict (Int, Int, Int, String),
+                         ctors: Dict sprout_ir.CtorInfo,
                          idx: Int, cur_label: String, cur_ops: List sprout_ir.IROp,
                          acc_blocks: List sprout_ir.IRBlock, acc_names: List String,
                          captures: Dict String,
@@ -4606,7 +4606,7 @@ fn translate_args_scalar(args: List typed_ast.TypedExpr, params: List String,
                       name_prefix)
 
 fn translate_args_ctor(args: List typed_ast.TypedExpr, params: List String,
-                       ctors: Dict (Int, Int, Int, String),
+                       ctors: Dict sprout_ir.CtorInfo,
                        idx: Int, cur_label: String, cur_ops: List sprout_ir.IROp,
                        acc_blocks: List sprout_ir.IRBlock, acc_names: List String,
                        captures: Dict String,
@@ -4623,7 +4623,7 @@ fn translate_args_ctor(args: List typed_ast.TypedExpr, params: List String,
                       name_prefix)
 
 fn translate_args_core(args: List typed_ast.TypedExpr, params: List String,
-                       ctors: Dict (Int, Int, Int, String),
+                       ctors: Dict sprout_ir.CtorInfo,
                        idx: Int, cur_label: String, cur_ops: List sprout_ir.IROp,
                        acc_blocks: List sprout_ir.IRBlock, acc_names: List String,
                        scalar_only: Bool,
@@ -4662,7 +4662,7 @@ fn translate_args_core(args: List typed_ast.TypedExpr, params: List String,
 # which hardcodes "%t$" for every synthetic temp (see fresh_name). The arg is
 # vestigial; all fresh SSA names are "%t$N" regardless of what is passed.
 fn translate_body(body: typed_ast.TypedExpr, params: List String,
-                  ctors: Dict (Int, Int, Int, String), idx: Int,
+                  ctors: Dict sprout_ir.CtorInfo, idx: Int,
                   captures: Dict String,
                   lifted_ref: Ref (List sprout_ir.IRFunction),
                   top_level: Set,
@@ -5087,7 +5087,7 @@ fn maybe_tco(name: String, f: sprout_ir.IRFunction, next_idx: Int) -> (sprout_ir
 # lambda_ctr_ref is shared across all user fns (lives at translate_program scope)
 # so that lifted lambda names are unique program-wide (__sprout_ir_lambda_0, __sprout_ir_lambda_1, …).
 fn translate_user_fn(name: String, params: List ast.Param, body: typed_ast.TypedExpr,
-                     ctors: Dict (Int, Int, Int, String), top_level: Set,
+                     ctors: Dict sprout_ir.CtorInfo, top_level: Set,
                      let_names: Set,
                 fn_arities: Dict Int,
                      lambda_ctr_ref: Ref Int,
@@ -5163,7 +5163,7 @@ export fn validate_reserved_namespace(decls: List typed_ast.TypedDecl) -> Result
           | Ok _ -> validate_reserved_namespace(rest)
       | _ -> validate_reserved_namespace(rest)
 
-export fn translate_decl_with_idx(d: typed_ast.TypedDecl, ctors: Dict (Int, Int, Int, String),
+export fn translate_decl_with_idx(d: typed_ast.TypedDecl, ctors: Dict sprout_ir.CtorInfo,
                                   top_level: Set,
                          let_names: Set,
                          fn_arities: Dict Int, lambda_ctr_ref: Ref Int,
@@ -5193,7 +5193,7 @@ export fn translate_decl_with_idx(d: typed_ast.TypedDecl, ctors: Dict (Int, Int,
   | typed_ast.TInstanceDecl _ _ _ -> Ok(Nothing)
   | typed_ast.TPassThrough _ -> Ok(Nothing)
 
-fn translate_decls(decls: List typed_ast.TypedDecl, ctors: Dict (Int, Int, Int, String),
+fn translate_decls(decls: List typed_ast.TypedDecl, ctors: Dict sprout_ir.CtorInfo,
                    acc_fns: List sprout_ir.IRFunction,
                    acc_idx: Dict Int, top_level: Set, let_names: Set, fn_arities: Dict Int, lambda_ctr_ref: Ref Int,
                    lifted_idx_ref: Ref (Dict Int)) ->
@@ -5402,7 +5402,7 @@ fn classify_let_decls_ir_acc(decls: List typed_ast.TypedDecl,
 # `let` bound to a partial application (e.g. `let f = repeat("x")`) builds a
 # @__sprout_partial_N wrapper here; dropping it leaves an undefined reference.
 export fn synthesize_init_globals_fn(runtime_lets: List (source.GlobalName, typed_ast.TypedExpr),
-                                     ctors: Dict (Int, Int, Int, String),
+                                     ctors: Dict sprout_ir.CtorInfo,
                                      top_level: Set, let_names: Set,
                                      fn_arities: Dict Int,
                                      lambda_ctr_ref: Ref Int,
@@ -5431,7 +5431,7 @@ export fn synthesize_init_globals_fn(runtime_lets: List (source.GlobalName, type
                    list_reverse(lifted), next_idx))
 
 fn synthesize_init_body_loop(runtime_lets: List (source.GlobalName, typed_ast.TypedExpr),
-                              ctors: Dict (Int, Int, Int, String),
+                              ctors: Dict sprout_ir.CtorInfo,
                               cur_label: String,
                               cur_ops: List sprout_ir.IROp,
                               blocks: List sprout_ir.IRBlock,
@@ -5500,7 +5500,7 @@ export fn translate_program(prog: typed_ast.TypedProgram) ->
 # Helper for translate_program's post-classify pipeline.  Extracted so the
 # match nesting stays linear and avoids deep do-block indentation.
 fn translate_program_after_classify(decls: List typed_ast.TypedDecl,
-                                    ctors: Dict (Int, Int, Int, String),
+                                    ctors: Dict sprout_ir.CtorInfo,
                                     ctor_regs: List sprout_ir.CtorReg,
                                     classified: (List sprout_ir.IRGlobalDecl, List(source.GlobalName, typed_ast.TypedExpr)),
                                     top_level_set: Set, let_names: Set,
@@ -5584,11 +5584,11 @@ fn typeexpr_head_name(te: ast.TypeExpr) -> Maybe String =
 # adt_name -> [(tag, arity)] over its ctors, from the program's TypeDecls.  The
 # repack fallback consults this to know which tags carry a payload.
 export fn build_adt_ctor_index(decls: List typed_ast.TypedDecl,
-                               ctors: Dict (Int, Int, Int, String)) -> Dict (List (Int, Int)) =
+                               ctors: Dict sprout_ir.CtorInfo) -> Dict (List (Int, Int)) =
   build_adt_ctor_index_go(decls, ctors, dict_empty())
 
 fn build_adt_ctor_index_go(decls: List typed_ast.TypedDecl,
-                           ctors: Dict (Int, Int, Int, String),
+                           ctors: Dict sprout_ir.CtorInfo,
                            acc: Dict (List (Int, Int))) -> Dict (List (Int, Int)) =
   match decls with
   | Nil -> acc
@@ -5621,7 +5621,7 @@ fn last_dot_index(name: String, i: Int, n: Int, last: Int) -> Int =
        | Nothing -> last
 
 fn adt_ctor_entries(cs: List ast.TypeConstructor,
-                    ctors: Dict (Int, Int, Int, String)) -> List (Int, Int) =
+                    ctors: Dict sprout_ir.CtorInfo) -> List (Int, Int) =
   match cs with
   | Nil -> Nil
   | Cons c rest ->
@@ -5630,7 +5630,7 @@ fn adt_ctor_entries(cs: List ast.TypeConstructor,
           match dict_get(cname, ctors) with
           | Just entry ->
               match entry with
-              | (tag, _ar, _m, _f) -> Cons((tag, list_length(args)), adt_ctor_entries(rest, ctors))
+              | sprout_ir.CtorInfo tag _ar _m _f -> Cons((tag, list_length(args)), adt_ctor_entries(rest, ctors))
           | Nothing -> adt_ctor_entries(rest, ctors)
 
 fn adt_ctors_of_type(t: types.Type, adt_index: Dict (List (Int, Int))) -> List (Int, Int) =
@@ -5652,18 +5652,18 @@ fn adt_ctors_of_typeexpr(mte: Maybe ast.TypeExpr,
 # Emission scan: the shadow-free superset of what the router routes.
 
 export fn collect_worker_callees(decls: List typed_ast.TypedDecl, top_level: Set,
-                                 ctors: Dict (Int, Int, Int, String)) -> Set =
+                                 ctors: Dict sprout_ir.CtorInfo) -> Set =
   collect_wc_decls(decls, top_level, ctors, set_empty())
 
 fn collect_wc_decls(decls: List typed_ast.TypedDecl, top_level: Set,
-                    ctors: Dict (Int, Int, Int, String), acc: Set) -> Set =
+                    ctors: Dict sprout_ir.CtorInfo, acc: Set) -> Set =
   match decls with
   | Nil -> acc
   | Cons d rest ->
       collect_wc_decls(rest, top_level, ctors, collect_wc_decl(d, top_level, ctors, acc))
 
 fn collect_wc_decl(d: typed_ast.TypedDecl, top_level: Set,
-                   ctors: Dict (Int, Int, Int, String), acc: Set) -> Set =
+                   ctors: Dict sprout_ir.CtorInfo, acc: Set) -> Set =
   match d with
   | typed_ast.TFnDecl _ _ _ _ _ body -> collect_wc_expr(body, top_level, ctors, acc)
   | typed_ast.TLetDecl _ body -> collect_wc_expr(body, top_level, ctors, acc)
@@ -5671,7 +5671,7 @@ fn collect_wc_decl(d: typed_ast.TypedDecl, top_level: Set,
   | _ -> acc
 
 fn collect_wc_methods(methods: List typed_ast.TypedInstanceMethod, top_level: Set,
-                      ctors: Dict (Int, Int, Int, String), acc: Set) -> Set =
+                      ctors: Dict sprout_ir.CtorInfo, acc: Set) -> Set =
   match methods with
   | Nil -> acc
   | Cons m rest ->
@@ -5680,7 +5680,7 @@ fn collect_wc_methods(methods: List typed_ast.TypedInstanceMethod, top_level: Se
           collect_wc_methods(rest, top_level, ctors, collect_wc_expr(body, top_level, ctors, acc))
 
 fn collect_wc_expr(e: typed_ast.TypedExpr, top_level: Set,
-                   ctors: Dict (Int, Int, Int, String), acc: Set) -> Set =
+                   ctors: Dict sprout_ir.CtorInfo, acc: Set) -> Set =
   match e with
   | typed_ast.TMatch scrut arms _ _ ->
       collect_wc_branches(arms, top_level, ctors,
@@ -5705,7 +5705,7 @@ fn collect_wc_expr(e: typed_ast.TypedExpr, top_level: Set,
   | _ -> acc
 
 fn collect_wc_scrutinee(scrut: typed_ast.TypedExpr, arms: List typed_ast.TypedMatchBranch,
-                        top_level: Set, ctors: Dict (Int, Int, Int, String), acc: Set) -> Set =
+                        top_level: Set, ctors: Dict sprout_ir.CtorInfo, acc: Set) -> Set =
   match scrut with
   | typed_ast.TCall callee _ _ _ ->
       match callee with
@@ -5717,7 +5717,7 @@ fn collect_wc_scrutinee(scrut: typed_ast.TypedExpr, arms: List typed_ast.TypedMa
   | _ -> acc
 
 fn collect_wc_branches(arms: List typed_ast.TypedMatchBranch, top_level: Set,
-                       ctors: Dict (Int, Int, Int, String), acc: Set) -> Set =
+                       ctors: Dict sprout_ir.CtorInfo, acc: Set) -> Set =
   match arms with
   | Nil -> acc
   | Cons b rest ->
@@ -5726,13 +5726,13 @@ fn collect_wc_branches(arms: List typed_ast.TypedMatchBranch, top_level: Set,
           collect_wc_branches(rest, top_level, ctors, collect_wc_expr(body, top_level, ctors, acc))
 
 fn collect_wc_exprs(es: List typed_ast.TypedExpr, top_level: Set,
-                    ctors: Dict (Int, Int, Int, String), acc: Set) -> Set =
+                    ctors: Dict sprout_ir.CtorInfo, acc: Set) -> Set =
   match es with
   | Nil -> acc
   | Cons e rest -> collect_wc_exprs(rest, top_level, ctors, collect_wc_expr(e, top_level, ctors, acc))
 
 fn collect_wc_dosteps(steps: List typed_ast.TypedDoStep, top_level: Set,
-                      ctors: Dict (Int, Int, Int, String), acc: Set) -> Set =
+                      ctors: Dict sprout_ir.CtorInfo, acc: Set) -> Set =
   match steps with
   | Nil -> acc
   | Cons step rest ->
@@ -5766,7 +5766,7 @@ fn collect_wc_do_bind_callee(e: typed_ast.TypedExpr, top_level: Set, acc: Set) -
   | Nothing -> acc
 
 fn collect_wc_fields(fields: List typed_ast.TypedRecordField, top_level: Set,
-                     ctors: Dict (Int, Int, Int, String), acc: Set) -> Set =
+                     ctors: Dict sprout_ir.CtorInfo, acc: Set) -> Set =
   match fields with
   | Nil -> acc
   | Cons f rest ->
@@ -5783,17 +5783,17 @@ fn name_is_local(name: String, params: List String, captures: Dict String) -> Bo
   param_known(name, params) || (match dict_get(name, captures) with | Just _ -> true | Nothing -> false)
 
 fn nullary_ctor_tag_if(name: String, params: List String, captures: Dict String,
-                       ctors: Dict (Int, Int, Int, String)) -> Maybe Int =
+                       ctors: Dict sprout_ir.CtorInfo) -> Maybe Int =
   if name_is_local(name, params, captures) then Nothing
   else match dict_get(name, ctors) with
-       | Just entry -> (match entry with | (tag, arity, _m, _f) -> if arity == 0 then Just(tag) else Nothing)
+       | Just entry -> (match entry with | sprout_ir.CtorInfo tag arity _m _f -> if arity == 0 then Just(tag) else Nothing)
        | Nothing -> Nothing
 
 fn unary_ctor_tag_if(name: String, params: List String, captures: Dict String,
-                     ctors: Dict (Int, Int, Int, String)) -> Maybe Int =
+                     ctors: Dict sprout_ir.CtorInfo) -> Maybe Int =
   if name_is_local(name, params, captures) then Nothing
   else match dict_get(name, ctors) with
-       | Just entry -> (match entry with | (tag, arity, _m, _f) -> if arity == 1 then Just(tag) else Nothing)
+       | Just entry -> (match entry with | sprout_ir.CtorInfo tag arity _m _f -> if arity == 1 then Just(tag) else Nothing)
        | Nothing -> Nothing
 
 # Translate `body` so every tail position returns the { i64, i64 } worker struct.
@@ -5801,7 +5801,7 @@ fn unary_ctor_tag_if(name: String, params: List String, captures: Dict String,
 # `self_name` = the fn being emitted (self-recursive tail-calls stay boxed via the
 # catch-all to keep TCO, rather than chaining un-TCO'd into @self_worker).
 fn translate_tail_unboxed(body: typed_ast.TypedExpr, params: List String,
-                          ctors: Dict (Int, Int, Int, String), idx: Int,
+                          ctors: Dict sprout_ir.CtorInfo, idx: Int,
                           cur_label: String, cur_ops: List sprout_ir.IROp,
                           captures: Dict String,
                           lifted_ref: Ref (List sprout_ir.IRFunction),
@@ -5876,7 +5876,7 @@ fn translate_tail_unboxed(body: typed_ast.TypedExpr, params: List String,
 # the boxed catch-all (still correct, just not fully unboxed).
 fn translate_tail_match(scrut: typed_ast.TypedExpr, arms: List typed_ast.TypedMatchBranch,
                         whole: typed_ast.TypedExpr, params: List String,
-                        ctors: Dict (Int, Int, Int, String), idx: Int,
+                        ctors: Dict sprout_ir.CtorInfo, idx: Int,
                         cur_label: String, cur_ops: List sprout_ir.IROp, captures: Dict String,
                         lifted_ref: Ref (List sprout_ir.IRFunction),
                         top_level: Set, let_names: Set, fn_arities: Dict Int,
@@ -5935,7 +5935,7 @@ fn bind_ctor_fields(pats: List ast.Pattern, box_ssa: String, field_i: Int, idx: 
 
 # tail `Ctor arg`: evaluate the single payload, return { tag, payload }.
 fn translate_tail_unary_ctor(tag: Int, args: List typed_ast.TypedExpr, params: List String,
-                             ctors: Dict (Int, Int, Int, String), idx: Int,
+                             ctors: Dict sprout_ir.CtorInfo, idx: Int,
                              cur_label: String, cur_ops: List sprout_ir.IROp,
                              captures: Dict String,
                              lifted_ref: Ref (List sprout_ir.IRFunction),
@@ -5959,7 +5959,7 @@ fn translate_tail_unary_ctor(tag: Int, args: List typed_ast.TypedExpr, params: L
 
 # tail chained call to a { i64, i64 }-returning target (a Maybe-extern _unboxed).
 fn translate_tail_chain(target_fn: String, args: List typed_ast.TypedExpr, params: List String,
-                        ctors: Dict (Int, Int, Int, String), idx: Int,
+                        ctors: Dict sprout_ir.CtorInfo, idx: Int,
                         cur_label: String, cur_ops: List sprout_ir.IROp,
                         captures: Dict String,
                         lifted_ref: Ref (List sprout_ir.IRFunction),
@@ -5985,7 +5985,7 @@ fn translate_tail_chain(target_fn: String, args: List typed_ast.TypedExpr, param
 
 # tail `if`: both arms return, so no join/phi — each branch recurses tail-unboxed.
 fn translate_tail_if(cond: typed_ast.TypedExpr, t: typed_ast.TypedExpr, e: typed_ast.TypedExpr,
-                     params: List String, ctors: Dict (Int, Int, Int, String), idx: Int,
+                     params: List String, ctors: Dict sprout_ir.CtorInfo, idx: Int,
                      cur_label: String, cur_ops: List sprout_ir.IROp, captures: Dict String,
                      lifted_ref: Ref (List sprout_ir.IRFunction),
                      top_level: Set, let_names: Set, fn_arities: Dict Int,
@@ -6018,7 +6018,7 @@ fn translate_tail_if(cond: typed_ast.TypedExpr, t: typed_ast.TypedExpr, e: typed
                             branch_blocks)), idx2))
 
 fn translate_tail_if_branches(t: typed_ast.TypedExpr, e: typed_ast.TypedExpr, params: List String,
-                              ctors: Dict (Int, Int, Int, String), idx: Int, captures: Dict String,
+                              ctors: Dict sprout_ir.CtorInfo, idx: Int, captures: Dict String,
                               lifted_ref: Ref (List sprout_ir.IRFunction),
                               top_level: Set, let_names: Set, fn_arities: Dict Int,
                               result_adt_ctors: List (Int, Int),
@@ -6045,7 +6045,7 @@ fn translate_tail_if_branches(t: typed_ast.TypedExpr, e: typed_ast.TypedExpr, pa
 # Reads the payload field only inside a payload-ctor arm, so a nullary ctor's
 # missing field is never touched; the tag-less arm returns val=0.
 fn translate_tail_catchall(body: typed_ast.TypedExpr, params: List String,
-                           ctors: Dict (Int, Int, Int, String), idx: Int,
+                           ctors: Dict sprout_ir.CtorInfo, idx: Int,
                            cur_label: String, cur_ops: List sprout_ir.IROp,
                            captures: Dict String,
                            lifted_ref: Ref (List sprout_ir.IRFunction),
@@ -6122,7 +6122,7 @@ fn emit_repack_one(box_ssa: String, tag_ssa: String, ctor_tag: Int, arity: Int,
 # extern, a synthesized self-call that the catch-all repacks).
 fn emit_worker_fn(worker_name: String, self_name: String, params: List ast.Param,
                   body: typed_ast.TypedExpr, result_adt_ctors: List (Int, Int),
-                  ctors: Dict (Int, Int, Int, String), top_level: Set, let_names: Set,
+                  ctors: Dict sprout_ir.CtorInfo, top_level: Set, let_names: Set,
                   fn_arities: Dict Int, worker_set: Set,
                   lambda_ctr_ref: Ref Int, lifted_idx_ref: Ref (Dict Int)) ->
     Result String (sprout_ir.IRFunction, Int, List sprout_ir.IRFunction) !{IO} =
@@ -6183,7 +6183,7 @@ fn synth_param_vars(params: List ast.Param) -> List typed_ast.TypedExpr =
 # the shadow-free scan).  Exported: the active streaming pipeline (ir_pipeline)
 # calls this per-name so each worker is rooted+lowered like any other fn.
 export fn emit_worker_for(name: String, decls: List typed_ast.TypedDecl,
-                          ctors: Dict (Int, Int, Int, String), top_level: Set, let_names: Set,
+                          ctors: Dict sprout_ir.CtorInfo, top_level: Set, let_names: Set,
                           fn_arities: Dict Int, adt_index: Dict (List (Int, Int)), worker_set: Set,
                           lambda_ctr_ref: Ref Int, lifted_idx_ref: Ref (Dict Int)) ->
     Result String (Maybe(sprout_ir.IRFunction, Int, List sprout_ir.IRFunction)) !{IO} =
@@ -6206,7 +6206,7 @@ export fn emit_worker_for(name: String, decls: List typed_ast.TypedDecl,
 
 # Batch worker emission for translate_program (the non-streaming path used by the
 # IR-shape tests): append every worker to `fns0`, merge next-idx into `idx_map0`.
-fn tier2_augment_fns(decls: List typed_ast.TypedDecl, ctors: Dict (Int, Int, Int, String),
+fn tier2_augment_fns(decls: List typed_ast.TypedDecl, ctors: Dict sprout_ir.CtorInfo,
                      top_level: Set, let_names: Set, fn_arities: Dict Int,
                      lambda_ctr_ref: Ref Int, lifted_idx_ref: Ref (Dict Int),
                      fns0: List sprout_ir.IRFunction, idx_map0: Dict Int) ->
@@ -6219,7 +6219,7 @@ fn tier2_augment_fns(decls: List typed_ast.TypedDecl, ctors: Dict (Int, Int, Int
                        lambda_ctr_ref, lifted_idx_ref, fns0, idx_map0)
 
 fn emit_all_workers(names: List String, worker_set: Set, decls: List typed_ast.TypedDecl,
-                    ctors: Dict (Int, Int, Int, String), top_level: Set, let_names: Set,
+                    ctors: Dict sprout_ir.CtorInfo, top_level: Set, let_names: Set,
                     fn_arities: Dict Int, adt_index: Dict (List (Int, Int)),
                     lambda_ctr_ref: Ref Int, lifted_idx_ref: Ref (Dict Int),
                     acc_fns: List sprout_ir.IRFunction, acc_idx: Dict Int) ->

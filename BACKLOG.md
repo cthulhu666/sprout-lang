@@ -398,13 +398,17 @@ dot-guard `infer.is_lowercase_name` has (a dotted name is never a type variable)
      (sugar wins for 2+ heads; single-head `Cons(x, …)` constructions and
      `| Cons x rest ->` arms stay long-form).
    PR 2.5 (first /code-review pass) follow-ups:
-   - Refactor the ctors-dict tuple `(tag, arity, max_arity, field_kinds_string)` in
-     `ast_to_ir.sprout` to a named `CtorMeta` record (currently a positional 4-tuple,
-     widened twice now). Trigger the refactor when a 5th field is forced (e.g. source
-     location for diagnostics) so the refactor pays for itself rather than being a
-     gratuitous reshape. Touch: ~3 destructure sites in ast_to_ir.sprout plus the
-     dict-value type signature in ~15 function signatures. Risk: introducing the same
-     class of bug the refactor is meant to prevent — defer until forced.
+   - [x] Refactor the ctors-dict tuple `(tag, arity, max_arity, field_kinds_string)` in
+     `ast_to_ir.sprout` to a named record — DONE (named `sprout_ir.CtorInfo`, not the
+     provisional `CtorMeta`). Done ahead of a 5th-field trigger at user request. Actual
+     scope was larger than estimated: 15 destructure sites (2 inline) + 2 construction
+     sites + 107 dict-value signatures across `ast_to_ir.sprout` + `ir_pipeline.sprout`.
+     The "risk of reintroducing the same bug class" was closed by (a) a clean full-driver
+     `--phase check` proving every site converted, and (b) byte-identical emitted IR across
+     all smoke shapes + 5 canary examples (CtorInfo is compile-time-only, never emitted).
+     Field-order regression pinned by `tests/stdlib/test_ir_ctor_info.spr`. Note: the
+     trivial-accessor codegen bug (`project_trivial_accessor_codegen_bug`, item below) did
+     NOT recur — it was `codegen.sprout`-specific and that backend is retired.
    - Split the field-kinds encoding's `'s'` byte into distinct `'s'` (String, heap)
      and `'c'` (Char, scalar) codes in `stdlib/compiler/field_kinds.sprout` so Char
      fields stop being conservatively over-rooted (small per-ctor-field perf win).

@@ -295,8 +295,8 @@ export type IROp (..) =
   | IRGetTag String String
   # IRGetField <result> <scrut-handle> <field-idx> <field-kind>
   # field-kind: IRType (mirrors IRLoadEnvSlot's kind arg).
-  # Encoding source: ctors-dict value tuple
-  #   Dict String (Int, Int, Int, String)  # (tag, arity, max_arity, field_kinds_string)
+  # Encoding source: ctors-dict value record
+  #   Dict String CtorInfo  # CtorInfo tag arity max_arity field_kinds_string
   # `field_kinds_string` is computed by build_ctor_table and passed to
   # CtorReg; the same value is threaded into the dict. translate_match
   # decodes per-byte via stdlib.compiler.field_kinds.field_kind_char_to_irtype:
@@ -417,6 +417,18 @@ export type IRFunction (..) = IRFunction String (List (String, IRType)) String (
 # Every constructor (boxed and CPR-eligible) is registered so the runtime's
 # find_ctor(tag) never returns NULL during GC tracing.
 export type CtorReg (..) = CtorReg String Int Int String
+
+# CtorInfo is the name-keyed constructor-table value (built by build_ctor_table,
+# consumed all over ast_to_ir).  Replaces the former anonymous 4-tuple
+# `(Int, Int, Int, String)` so the fields are self-documenting at every site.
+# Fields: tag, arity, max_arity, field_kinds.
+#   tag        — runtime constructor tag; -1 is the wrap sentinel (no allocation).
+#   arity      — number of fields this constructor carries.
+#   max_arity  — largest arity across the enclosing ADT (uniform-layout sizing).
+#   field_kinds — per-field boxing encoding, same alphabet as CtorReg above.
+# Distinct from CtorReg: CtorReg is the runtime-registration output list and has
+# no max_arity; this is the compile-time lookup table.  Kept separate on purpose.
+export type CtorInfo (..) = CtorInfo Int Int Int String
 
 # IR-level top-level let global declaration (M3 PR 5).
 #

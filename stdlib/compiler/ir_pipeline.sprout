@@ -91,7 +91,7 @@ fn emit_lifted_then_fn(lifted: List sprout_ir.IRFunction,
 
 # Main streaming loop over all decls.
 fn stream_decls(decls: List typed_ast.TypedDecl,
-                ctors: Dict (Int, Int, Int, String),
+                ctors: Dict sprout_ir.CtorInfo,
                 top_level: Set, let_names: Set, fn_arities: Dict Int,
                 lambda_ctr_ref: Ref Int, lifted_idx_ref: Ref (Dict Int),
                 state: StreamState) ->
@@ -127,7 +127,7 @@ fn stream_decls(decls: List typed_ast.TypedDecl,
 # AFTER all boxed decls (so an escaping use resolves to the boxed original).
 # Each worker is rooted + lowered through emit_one_fn like any other fn.
 fn stream_workers(names: List String, worker_set: Set, decls: List typed_ast.TypedDecl,
-                  ctors: Dict (Int, Int, Int, String), top_level: Set, let_names: Set,
+                  ctors: Dict sprout_ir.CtorInfo, top_level: Set, let_names: Set,
                   fn_arities: Dict Int, adt_index: Dict (List (Int, Int)),
                   lambda_ctr_ref: Ref Int, lifted_idx_ref: Ref (Dict Int),
                   state: StreamState) -> Result String StreamState !{IO} =
@@ -182,7 +182,7 @@ fn summarize_lifted_then_fn(lifted: List sprout_ir.IRFunction, f: sprout_ir.IRFu
   | Cons lf rest -> summarize_lifted_then_fn(rest, f, summarize_one_fn(lf, acc))
 
 fn summarize_decls(decls: List typed_ast.TypedDecl,
-                   ctors: Dict (Int, Int, Int, String),
+                   ctors: Dict sprout_ir.CtorInfo,
                    top_level: Set, let_names: Set, fn_arities: Dict Int,
                    lambda_ctr_ref: Ref Int, lifted_idx_ref: Ref (Dict Int),
                    acc: List (String, (Bool, Set))) ->
@@ -206,7 +206,7 @@ fn summarize_decls(decls: List typed_ast.TypedDecl,
                                   summarize_lifted_then_fn(lifted, f, acc))
 
 fn summarize_workers(names: List String, worker_set: Set, decls: List typed_ast.TypedDecl,
-                     ctors: Dict (Int, Int, Int, String), top_level: Set, let_names: Set,
+                     ctors: Dict sprout_ir.CtorInfo, top_level: Set, let_names: Set,
                      fn_arities: Dict Int, adt_index: Dict (List (Int, Int)),
                      lambda_ctr_ref: Ref Int, lifted_idx_ref: Ref (Dict Int),
                      acc: List (String, (Bool, Set))) ->
@@ -232,7 +232,7 @@ fn summarize_workers(names: List String, worker_set: Set, decls: List typed_ast.
 # Build the may-trigger-GC summary via the pre-pass.  Uses its own fresh Refs so it
 # does not perturb the emit pass's lambda/index state.
 fn build_alloc_summary(decls: List typed_ast.TypedDecl,
-                       ctors: Dict (Int, Int, Int, String),
+                       ctors: Dict sprout_ir.CtorInfo,
                        top_level: Set, let_names: Set, fn_arities: Dict Int,
                        runtime_lets: List (source.GlobalName, typed_ast.TypedExpr)) ->
     Result String (Dict Bool) !{IO} =
@@ -273,7 +273,7 @@ fn build_alloc_summary(decls: List typed_ast.TypedDecl,
 # still reported by the real stream_decls pass that runs afterward, so this
 # swallows no real diagnostics.
 fn alloc_summary_or_empty(decls: List typed_ast.TypedDecl,
-                          ctors: Dict (Int, Int, Int, String),
+                          ctors: Dict sprout_ir.CtorInfo,
                           top_level: Set, let_names: Set, fn_arities: Dict Int,
                           runtime_lets: List (source.GlobalName, typed_ast.TypedExpr)) ->
     Dict Bool !{IO} =
