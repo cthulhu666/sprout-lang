@@ -1,5 +1,5 @@
 import stdlib.test (TestState, new_state, assert_eq, assert_true, assert_false, summary)
-import stdlib.collections (Vec, Dict, foldable_to_vec, vec_get_or, vec_reverse, vec_slice, vec_sum_by, dict_keys, dict_values, dict_remove)
+import stdlib.collections (Vec, Dict, foldable_to_vec, vec_get_or, vec_reverse, vec_slice, vec_sum_by, dict_keys, dict_values, dict_remove, dict_get, dict_set, dict_from_list)
 
 fn main() -> Unit !{IO} =
   do
@@ -41,5 +41,15 @@ fn main() -> Unit !{IO} =
     let vals2 = dict_values(d2)
     assert_eq(state, "dict_remove reduces count", vec_sum_by(\_ -> 1, vals2), 2)
     assert_eq(state, "dict_remove reduces sum", vec_sum_by(\x -> x, vals2), 4)
+
+    # dict_get: hit returns Just, miss returns Nothing
+    assert_eq(state, "dict_get hit", dict_get("alpha", d), Just(1))
+    assert_eq(state, "dict_get miss", dict_get("zzz", d), Nothing)
+
+    # dict_set: overwrite an existing key replaces the value, keeps the count
+    assert_eq(state, "dict_set overwrite", dict_set("alpha", 100, d), {alpha: 100, beta: 2, gamma: 3})
+
+    # dict_from_list: build from key/value pairs
+    assert_eq(state, "dict_from_list", dict_from_list([("x", 1), ("y", 2)]), {x: 1, y: 2})
 
     summary(state)

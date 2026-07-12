@@ -491,17 +491,17 @@ export fn vec_sort(vec: Vec a) -> Vec a where Ord a =
 export fn dict_empty() -> Dict v =
   Dict(map_empty())
 
-# O(n): the native map is a linear key/value array, so lookup scans keys.
+# O(log n): the native map is a balanced AVL tree; lookup is a strcmp descent.
 export fn dict_get(key: String, dict: Dict v) -> Maybe v =
   match dict with
   | Dict raw -> map_get(raw, key)
 
-# O(n): persistent update copies entries, with an O(n) key search first.
+# O(log n): AVL insert; path-copies only the nodes on the root-to-key path.
 export fn dict_set(key: String, value: v, dict: Dict v) -> Dict v =
   match dict with
   | Dict raw -> Dict(map_set(raw, key, value))
 
-# O(n): remove scans for the key and copies the surviving entries.
+# O(log n): AVL delete; path-copies the search path and rebalances.
 export fn dict_remove(key: String, dict: Dict v) -> Dict v =
   match dict with
   | Dict raw -> Dict(map_remove(raw, key))
@@ -513,7 +513,7 @@ fn dict_keys_from(raw: Map v, index: Int, total: Int, acc: List String) -> List 
     | Nothing -> acc
     | Just key -> dict_keys_from(raw, index + 1, total, Cons(key, acc))
 
-# O(n): accumulates keys into a reversed list then converts in one allocation.
+# O(n log n): n indexed map_nth_key lookups, each an O(log n) order-statistic descent.
 export fn dict_keys(dict: Dict v) -> Vec String =
   match dict with
   | Dict raw -> vec_from_list(list_reverse_go(dict_keys_from(raw, 0, map_size(raw), Nil), Nil))
@@ -525,7 +525,7 @@ fn dict_values_from(raw: Map v, index: Int, total: Int, acc: List v) -> List v =
     | Nothing -> acc
     | Just value -> dict_values_from(raw, index + 1, total, Cons(value, acc))
 
-# O(n): accumulates values into a reversed list then converts in one allocation.
+# O(n log n): n indexed map_nth_value lookups, each an O(log n) order-statistic descent.
 export fn dict_values(dict: Dict v) -> Vec v =
   match dict with
   | Dict raw -> vec_from_list(list_reverse_go(dict_values_from(raw, 0, map_size(raw), Nil), Nil))
@@ -540,7 +540,7 @@ fn dict_entries_from(raw: Map v, index: Int, total: Int, acc: List (String, v)) 
         | Nothing -> acc
         | Just value -> dict_entries_from(raw, index + 1, total, Cons((key, value), acc))
 
-# O(n): accumulates entries into a reversed list then converts in one allocation.
+# O(n log n): n indexed map_nth key+value lookups, each an O(log n) order-statistic descent.
 export fn dict_entries(dict: Dict v) -> Vec (String, v) =
   match dict with
   | Dict raw -> vec_from_list(list_reverse_go(dict_entries_from(raw, 0, map_size(raw), Nil), Nil))
@@ -912,8 +912,8 @@ instance Semigroup (Vec a) {
     vec_from_list(list_append(vec_to_list(left), vec_to_list(right)))
 }
 
-# O(n²): dict_set is O(n) (linear key scan on the growing acc); inserting all m right-hand
-# entries into an n-entry left dict costs O(m*n). No bulk-build map primitive exists in the runtime.
+# O(m · log(n + m)): each of the m right-hand entries is read via an O(log m) map_nth
+# and inserted via an O(log) dict_set on the growing (n..n+m) left. No bulk-build map primitive exists.
 fn dict_append_entries(acc: Dict v, raw: Map v, index: Int, total: Int) -> Dict v =
   if index >= total then acc
   else
