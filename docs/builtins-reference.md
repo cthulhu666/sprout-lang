@@ -619,7 +619,7 @@ Quick reference for the main collection types in the prelude and `stdlib`, with 
 | `Vec a` | `++` (Semigroup instance) | O(\|left\| + \|right\|) | Currently implemented as a list round-trip (`vec_to_list` + `list_append` + `vec_from_list`); better suited for indexed access than for repeated concatenation. |
 | `Bytes` | `bytes.append` (`bytes_append`) | O(\|left\| + \|right\|) | Allocates a fresh contiguous buffer and copies both inputs. |
 | `bytes.Builder` | `bytes.builder_append` | O(chunks\_left + chunks\_right) | Concatenates chunk tables without flattening the bytes themselves; the final `bytes.builder_build` is O(total\_bytes). The right tool for protocol packet assembly and other "many small fragments, one final blob" patterns. |
-| `Dict v` | `++` (Semigroup instance) | O((n + m) · n) | Persistent: each entry of `right` is folded into `left` via `dict_set`, which is O(n) copy-on-write per insert. Practical only for small dicts; for large merges, fold into a freshly built dict instead. |
+| `Dict v` | `++` (Semigroup instance) | O(m · log(n + m)) | Persistent: each of `right`'s m entries is folded into `left` via `dict_set`, which is O(log n) copy-on-write on the balanced AVL map (path copy, not a full-array copy). For very large merges, folding into a freshly built dict avoids re-walking the growing left. |
 
 If you find yourself repeatedly appending small fragments to a `String`, reach for `bytes.Builder` (collect fragments as `Bytes`, finalize once) or the `string_concat_many` builtin (one allocation for an arbitrary list of `String`s). String interpolation with `` `pre${x}post` `` desugars to `string_concat_many` automatically.
 
