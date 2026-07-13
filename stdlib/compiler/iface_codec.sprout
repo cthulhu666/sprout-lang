@@ -40,63 +40,45 @@ import stdlib.compiler.source as source
 export fn encode_scheme(s: types.Scheme) -> String =
   match s with
   | types.Scheme tvars evars body effect ->
-      string_concat_many(Cons("(Scheme ",
-        Cons(encode_str_list(tvars),
-          Cons(" ",
-            Cons(encode_str_list(evars),
-              Cons(" ",
-                Cons(encode_type(body),
-                  Cons(" ",
-                    Cons(encode_effect(effect),
-                      Cons(")", Nil))))))))))
+      string_concat_many(["(Scheme ", encode_str_list(tvars), " ", encode_str_list(evars), " ", encode_type(body), " ", encode_effect(effect), ")"])
 
 export fn encode_type(t: types.Type) -> String =
   match t with
-  | types.TVar n -> string_concat_many(Cons("(TVar ", Cons(n, Cons(")", Nil))))
-  | types.TConst n -> string_concat_many(Cons("(TConst ", Cons(types.type_id_name(n), Cons(")", Nil))))
+  | types.TVar n -> string_concat_many(["(TVar ", n, ")"])
+  | types.TConst n -> string_concat_many(["(TConst ", types.type_id_name(n), ")"])
   | types.TApp a b ->
-      string_concat_many(Cons("(TApp ",
-        Cons(encode_type(a),
-          Cons(" ",
-            Cons(encode_type(b),
-              Cons(")", Nil))))))
+      string_concat_many(["(TApp ", encode_type(a), " ", encode_type(b), ")"])
   | types.TFunc a b e ->
-      string_concat_many(Cons("(TFunc ",
-        Cons(encode_type(a),
-          Cons(" ",
-            Cons(encode_type(b),
-              Cons(" ",
-                Cons(encode_effect(e),
-                  Cons(")", Nil))))))))
+      string_concat_many(["(TFunc ", encode_type(a), " ", encode_type(b), " ", encode_effect(e), ")"])
   | types.TTuple ts ->
-      string_concat_many(Cons("(TTuple ", Cons(encode_type_list(ts), Cons(")", Nil))))
+      string_concat_many(["(TTuple ", encode_type_list(ts), ")"])
 
 export fn encode_effect(e: types.Effect) -> String =
   match e with
   | types.EffectPure -> "(EffectPure)"
   | types.EffectIO -> "(EffectIO)"
   | types.EffectRow xs ->
-      string_concat_many(Cons("(EffectRow ", Cons(encode_str_list(xs), Cons(")", Nil))))
-  | types.EffectVar n -> string_concat_many(Cons("(EffectVar ", Cons(n, Cons(")", Nil))))
+      string_concat_many(["(EffectRow ", encode_str_list(xs), ")"])
+  | types.EffectVar n -> string_concat_many(["(EffectVar ", n, ")"])
 
 fn encode_str_list(xs: List String) -> String =
-  string_concat_many(Cons("(", Cons(join_strs(xs), Cons(")", Nil))))
+  string_concat_many(["(", join_strs(xs), ")"])
 
 # Join with single-space separator. O(n).
 fn join_strs(xs: List String) -> String =
   match xs with
   | Nil -> ""
   | Cons x Nil -> x
-  | Cons x rest -> string_concat_many(Cons(x, Cons(" ", Cons(join_strs(rest), Nil))))
+  | Cons x rest -> string_concat_many([x, " ", join_strs(rest)])
 
 fn encode_type_list(ts: List types.Type) -> String =
-  string_concat_many(Cons("(", Cons(join_types(ts), Cons(")", Nil))))
+  string_concat_many(["(", join_types(ts), ")"])
 
 fn join_types(ts: List types.Type) -> String =
   match ts with
   | Nil -> ""
   | Cons t Nil -> encode_type(t)
-  | Cons t rest -> string_concat_many(Cons(encode_type(t), Cons(" ", Cons(join_types(rest), Nil))))
+  | Cons t rest -> string_concat_many([encode_type(t), " ", join_types(rest)])
 
 # ----------------------------------------------------------------------------
 # Decoder — String -> Maybe Scheme
@@ -1000,7 +982,7 @@ fn decode_instance_info_body(s: String, bytes: Bytes, i: Int, total: Int) -> May
 
 # O(n) where n = chars in value; emits '"' ... '"' with backslash escaping.
 fn encode_quoted_str(v: String) -> String =
-  string_concat_many(Cons("\"", Cons(escape_str_content(v, bytes, 0, str_byte_len(v), Nil), Cons("\"", Nil))))
+  string_concat_many(["\"", escape_str_content(v, bytes, 0, str_byte_len(v), Nil), "\""])
   where bytes = bytes_from_utf8(v)
 
 fn escape_str_content(s: String, bytes: Bytes, i: Int, total: Int, acc: List String) -> String =

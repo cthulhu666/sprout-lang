@@ -740,13 +740,13 @@ fn bt_mono(t: types.Type) -> types.Scheme =
   types.Scheme(Nil, Nil, t, types.EffectPure)
 
 fn bt_pair(a: types.Type, b: types.Type) -> types.Type =
-  types.TTuple(Cons(a, Cons(b, Nil)))
+  types.TTuple([a, b])
 
 fn bt_triple(a: types.Type, b: types.Type, c: types.Type) -> types.Type =
-  types.TTuple(Cons(a, Cons(b, Cons(c, Nil))))
+  types.TTuple([a, b, c])
 
 fn bt_quad(a: types.Type, b: types.Type, c: types.Type, d: types.Type) -> types.Type =
-  types.TTuple(Cons(a, Cons(b, Cons(c, Cons(d, Nil)))))
+  types.TTuple([a, b, c, d])
 
 
 # Analysis bridge builtins — C functions provided by sprout_runtime.c analysis bridge.

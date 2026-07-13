@@ -706,7 +706,7 @@ fn parse_term_rest(tokens: Vec token.Token, i: Int, left: ast.Expr) -> Result Pa
   else if tok_is_symbol(tok_at(tokens, i), "++") then
     do
       (right, i2) <- parse_factor(tokens, i + 1)
-      parse_term_rest(tokens, i2, ast.CallExpr(ast.VarExpr("append", cur_pos(tokens, i)), Cons(left, Cons(right, Nil)), cur_pos(tokens, i)))
+      parse_term_rest(tokens, i2, ast.CallExpr(ast.VarExpr("append", cur_pos(tokens, i)), [left, right], cur_pos(tokens, i)))
   else
     Ok((left, i))
 
@@ -739,7 +739,7 @@ fn parse_composition_cont(tokens: Vec token.Token, i: Int, left: ast.Expr) -> Re
 fn desugar_compose(op: String, left: ast.Expr, right: ast.Expr, pos: source.SourcePos) -> ast.Expr =
   ast.CallExpr(
     ast.VarExpr(if op == ">>" then "rcompose" else "lcompose", pos),
-    Cons(left, Cons(right, Nil)),
+    [left, right],
     pos)
 
 fn parse_unary(tokens: Vec token.Token, i: Int) -> Result ParseError (ast.Expr, Int) =
@@ -903,7 +903,7 @@ fn desugar_dict_entries(entries: List (String, ast.Expr), acc: ast.Expr, pos: so
             rest,
             ast.CallExpr(
               ast.VarExpr("dict_set", pos),
-              Cons(ast.StringExpr(key, pos), Cons(value, Cons(acc, Nil))),
+              [ast.StringExpr(key, pos), value, acc],
               pos
             ),
             pos

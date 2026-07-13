@@ -57,16 +57,16 @@ fn q_list(items: List String) -> List String =
 fn dump_type_arrow(left: ast.TypeExpr, right: ast.TypeExpr, maybe_effs: Maybe (List String)) -> String =
   match maybe_effs with
   | Nothing ->
-      sexp("type-arrow", Cons(dump_type(left), Cons(dump_type(right), Nil)))
+      sexp("type-arrow", [dump_type(left), dump_type(right)])
   | Just effs ->
-      sexp("type-arrow", Cons(dump_type(left), Cons(dump_type(right), Cons(dump_effects_list(effs), Nil))))
+      sexp("type-arrow", [dump_type(left), dump_type(right), dump_effects_list(effs)])
 
 fn dump_type(t: ast.TypeExpr) -> String =
   match t with
   | ast.TypeName name ->
       sexp("type-name", Cons(q(name), Nil))
   | ast.TypeApply base arg ->
-      sexp("type-apply", Cons(dump_type(base), Cons(dump_type(arg), Nil)))
+      sexp("type-apply", [dump_type(base), dump_type(arg)])
   | ast.TypeArrow left right maybe_effs ->
       dump_type_arrow(left, right, maybe_effs)
   | ast.TypeEffect base effs ->
@@ -115,7 +115,7 @@ fn dump_param(p: ast.Param) -> String =
   | ast.Param name maybe_type ->
       match maybe_type with
       | Nothing -> sexp("param", Cons(q(name), Nil))
-      | Just t -> sexp("param", Cons(q(name), Cons(dump_type(t), Nil)))
+      | Just t -> sexp("param", [q(name), dump_type(t)])
 
 fn dump_params(params: List ast.Param) -> String =
   sexp("params", dump_param_list(params))
@@ -150,25 +150,25 @@ fn dump_expr(e: ast.Expr) -> String =
   | ast.UnitExpr _ -> "(unit)"
   | ast.TupleExpr items _ -> sexp("tuple", dump_exprs(items))
   | ast.IfExpr cond then_ else_ _ ->
-      sexp("if", Cons(dump_expr(cond), Cons(dump_expr(then_), Cons(dump_expr(else_), Nil))))
+      sexp("if", [dump_expr(cond), dump_expr(then_), dump_expr(else_)])
   | ast.MatchExpr scrutinee branches _ ->
       sexp("match", Cons(dump_expr(scrutinee), dump_branches(branches)))
   | ast.CallExpr callee args _ ->
       sexp("call", Cons(dump_expr(callee), dump_exprs(args)))
   | ast.LambdaExpr params body _ ->
-      sexp("lambda", Cons(dump_params(params), Cons(dump_expr(body), Nil)))
+      sexp("lambda", [dump_params(params), dump_expr(body)])
   | ast.BinaryExpr op left right _ ->
-      sexp("binary", Cons(q(op), Cons(dump_expr(left), Cons(dump_expr(right), Nil))))
+      sexp("binary", [q(op), dump_expr(left), dump_expr(right)])
   | ast.UnaryExpr op expr _ ->
-      sexp("unary", Cons(q(op), Cons(dump_expr(expr), Nil)))
+      sexp("unary", [q(op), dump_expr(expr)])
   | ast.IntRangeExpr from_ to_ _ ->
-      sexp("range", Cons(dump_expr(from_), Cons(dump_expr(to_), Nil)))
+      sexp("range", [dump_expr(from_), dump_expr(to_)])
   | ast.DoExpr steps _ ->
       sexp("do", dump_steps(steps))
   | ast.RecordExpr type_name fields _ ->
       sexp("record", Cons(q(type_name), dump_record_fields(fields)))
   | ast.GetFieldExpr record field_name _ ->
-      sexp("get-field", Cons(dump_expr(record), Cons(q(field_name), Nil)))
+      sexp("get-field", [dump_expr(record), q(field_name)])
 
 fn dump_exprs(items: List ast.Expr) -> List String =
   match items with
@@ -181,7 +181,7 @@ fn dump_branches(items: List ast.MatchBranch) -> List String =
   | Cons b rest ->
       match b with
       | ast.MatchBranch pat body ->
-          Cons(sexp("branch", Cons(dump_pat(pat), Cons(dump_expr(body), Nil))), dump_branches(rest))
+          Cons(sexp("branch", [dump_pat(pat), dump_expr(body)]), dump_branches(rest))
 
 fn dump_steps(items: List ast.DoStep) -> List String =
   match items with
@@ -191,9 +191,9 @@ fn dump_steps(items: List ast.DoStep) -> List String =
 fn dump_step(s: ast.DoStep) -> String =
   match s with
   | ast.DoBindStep pat value ->
-      sexp("bind", Cons(dump_pat(pat), Cons(dump_expr(value), Nil)))
+      sexp("bind", [dump_pat(pat), dump_expr(value)])
   | ast.DoLetStep name value ->
-      sexp("do-let", Cons(q(name), Cons(dump_expr(value), Nil)))
+      sexp("do-let", [q(name), dump_expr(value)])
   | ast.DoExprStep value ->
       sexp("do-expr", Cons(dump_expr(value), Nil))
 
@@ -203,7 +203,7 @@ fn dump_record_fields(items: List ast.RecordField) -> List String =
   | Cons f rest ->
       match f with
       | ast.RecordField name value ->
-          Cons(sexp("field", Cons(q(name), Cons(dump_expr(value), Nil))), dump_record_fields(rest))
+          Cons(sexp("field", [q(name), dump_expr(value)]), dump_record_fields(rest))
 
 # ---------------------------------------------------------------------------
 # Declarations
@@ -220,7 +220,7 @@ fn dump_constraints(cs: List ast.TypeConstraint) -> List String =
 fn dump_method_sig(m: ast.ClassMethodSig) -> String =
   match m with
   | ast.ClassMethodSig name params ret effs ->
-      sexp("method-sig", Cons(q(name), Cons(dump_params(params), Cons(dump_type(ret), Cons(dump_maybe_effects(effs), Nil)))))
+      sexp("method-sig", [q(name), dump_params(params), dump_type(ret), dump_maybe_effects(effs)])
 
 fn dump_method_sigs(items: List ast.ClassMethodSig) -> List String =
   match items with
@@ -235,7 +235,7 @@ fn dump_maybe_ret(t: Maybe ast.TypeExpr) -> String =
 fn dump_method_impl(m: ast.InstanceMethodImpl) -> String =
   match m with
   | ast.InstanceMethodImpl name params maybe_ret effs body ->
-      sexp("method-impl", Cons(q(name), Cons(dump_params(params), Cons(dump_maybe_ret(maybe_ret), Cons(dump_maybe_effects(effs), Cons(dump_expr(body), Nil))))))
+      sexp("method-impl", [q(name), dump_params(params), dump_maybe_ret(maybe_ret), dump_maybe_effects(effs), dump_expr(body)])
 
 fn dump_method_impls(items: List ast.InstanceMethodImpl) -> List String =
   match items with
@@ -254,7 +254,7 @@ fn dump_ctors(items: List ast.TypeConstructor) -> List String =
 fn dump_field_decl(f: ast.RecordFieldDecl) -> String =
   match f with
   | ast.RecordFieldDecl name t ->
-      sexp("field-decl", Cons(q(name), Cons(dump_type(t), Nil)))
+      sexp("field-decl", [q(name), dump_type(t)])
 
 fn dump_field_decls(items: List ast.RecordFieldDecl) -> List String =
   match items with
@@ -264,19 +264,19 @@ fn dump_field_decls(items: List ast.RecordFieldDecl) -> List String =
 fn dump_decl(d: ast.Decl) -> String =
   match d with
   | ast.FnDecl name params maybe_ret maybe_effs constraints body _ ->
-      sexp("fn", Cons(q(name), Cons(dump_params(params), Cons(dump_maybe_ret(maybe_ret), Cons(dump_maybe_effects(maybe_effs), Cons(sexp("constraints", dump_constraints(constraints)), Cons(dump_expr(body), Nil)))))))
+      sexp("fn", [q(name), dump_params(params), dump_maybe_ret(maybe_ret), dump_maybe_effects(maybe_effs), sexp("constraints", dump_constraints(constraints)), dump_expr(body)])
   | ast.TypeDecl name type_params ctors _ _ ->
       sexp("type", Cons(q(name), Cons(sexp("type-params", q_list(type_params)), dump_ctors(ctors))))
   | ast.RecordDecl name type_params fields _ ->
       sexp("record", Cons(q(name), Cons(sexp("type-params", q_list(type_params)), dump_field_decls(fields))))
   | ast.LetDecl name body _ ->
-      sexp("let", Cons(q(name), Cons(dump_expr(body), Nil)))
+      sexp("let", [q(name), dump_expr(body)])
   | ast.ClassDecl name type_params methods _ _ ->
       sexp("class", Cons(q(name), Cons(sexp("type-params", q_list(type_params)), dump_method_sigs(methods))))
   | ast.InstanceDecl constraint _ methods _ ->
       sexp("instance", Cons(dump_constraint(constraint), dump_method_impls(methods)))
   | ast.AliasDecl name type_params _ _ ->
-      sexp("alias", Cons(q(name), Cons(sexp("type-params", q_list(type_params)), Nil)))
+      sexp("alias", [q(name), sexp("type-params", q_list(type_params))])
   | ast.WrapDecl name _ _ ->
       sexp("wrap", Cons(q(name), Nil))
   | ast.ExternFnDecl name _ _ _ _ ->

@@ -290,7 +290,7 @@ fn op_produces_simple_heap(op: sprout_ir.IROp) -> Maybe String =
 fn op_successors(op: sprout_ir.IROp) -> List String =
   match op with
   | sprout_ir.IRBr lbl -> Cons(lbl, Nil)
-  | sprout_ir.IRCondBr _ t e -> Cons(t, Cons(e, Nil))
+  | sprout_ir.IRCondBr _ t e -> [t, e]
   # PR 2.5: pattern-matching ops are not control-flow terminators.
   # (IRAbortMatch emits `unreachable` at lowering time but is not a
   # successor-bearing branch op — the block simply ends.)
@@ -351,16 +351,16 @@ fn op_uses(op: sprout_ir.IROp) -> List String =
   | sprout_ir.IRConst _ _ -> Nil
   | sprout_ir.IRRet name -> Cons(name, Nil)
   | sprout_ir.IRRetVoid -> Nil
-  | sprout_ir.IRIAdd _ a b -> Cons(a, Cons(b, Nil))
-  | sprout_ir.IRISub _ a b -> Cons(a, Cons(b, Nil))
-  | sprout_ir.IRIMul _ a b -> Cons(a, Cons(b, Nil))
-  | sprout_ir.IRIDiv _ a b -> Cons(a, Cons(b, Nil))
+  | sprout_ir.IRIAdd _ a b -> [a, b]
+  | sprout_ir.IRISub _ a b -> [a, b]
+  | sprout_ir.IRIMul _ a b -> [a, b]
+  | sprout_ir.IRIDiv _ a b -> [a, b]
   | sprout_ir.IRFloatConst _ _ -> Nil
-  | sprout_ir.IRFAdd _ a b -> Cons(a, Cons(b, Nil))
-  | sprout_ir.IRFSub _ a b -> Cons(a, Cons(b, Nil))
-  | sprout_ir.IRFMul _ a b -> Cons(a, Cons(b, Nil))
-  | sprout_ir.IRFDiv _ a b -> Cons(a, Cons(b, Nil))
-  | sprout_ir.IRFCmp _ _ a b -> Cons(a, Cons(b, Nil))
+  | sprout_ir.IRFAdd _ a b -> [a, b]
+  | sprout_ir.IRFSub _ a b -> [a, b]
+  | sprout_ir.IRFMul _ a b -> [a, b]
+  | sprout_ir.IRFDiv _ a b -> [a, b]
+  | sprout_ir.IRFCmp _ _ a b -> [a, b]
   | sprout_ir.IRFNeg _ a -> Cons(a, Nil)
   | sprout_ir.IRSIToF _ a -> Cons(a, Nil)
   | sprout_ir.IRBoolNot _ a -> Cons(a, Nil)
@@ -371,7 +371,7 @@ fn op_uses(op: sprout_ir.IROp) -> List String =
   | sprout_ir.IRRegisterGlobalRoot _ -> Nil
   | sprout_ir.IRMakeTuple _ args -> args
   | sprout_ir.IRGetTupleField _ t _ _ -> Cons(t, Nil)
-  | sprout_ir.IRICmp _ _ a b -> Cons(a, Cons(b, Nil))
+  | sprout_ir.IRICmp _ _ a b -> [a, b]
   | sprout_ir.IRBr _ -> Nil
   | sprout_ir.IRCondBr cond _ _ -> Cons(cond, Nil)
   # Phi's "uses" are per-predecessor and contribute to the predecessor's
@@ -381,12 +381,12 @@ fn op_uses(op: sprout_ir.IROp) -> List String =
   # Unboxed call reads its args (the two defs <tag>/<val> are results, not uses).
   | sprout_ir.IRCallUnboxed2 _ _ _ _ args -> args
   # Both the packed tag and payload are live into the ret (base is a fresh def).
-  | sprout_ir.IRRetUnboxed2 _ tag val -> Cons(tag, Cons(val, Nil))
+  | sprout_ir.IRRetUnboxed2 _ tag val -> [tag, val]
   | sprout_ir.IRStrConst _ _ _ -> Nil
-  | sprout_ir.IRStrSlice _ s start len -> Cons(s, Cons(start, Cons(len, Nil)))
-  | sprout_ir.IRStrConcat _ a b -> Cons(a, Cons(b, Nil))
-  | sprout_ir.IRStrEq _ a b -> Cons(a, Cons(b, Nil))
-  | sprout_ir.IRStrCompare _ _ a b -> Cons(a, Cons(b, Nil))
+  | sprout_ir.IRStrSlice _ s start len -> [s, start, len]
+  | sprout_ir.IRStrConcat _ a b -> [a, b]
+  | sprout_ir.IRStrEq _ a b -> [a, b]
+  | sprout_ir.IRStrCompare _ _ a b -> [a, b]
   | sprout_ir.IRPrintStr _ _ arg -> Cons(arg, Nil)
   | sprout_ir.IRStrFromInt _ n -> Cons(n, Nil)
   | sprout_ir.IRMakeCtor _ _ _ args -> args
@@ -403,8 +403,8 @@ fn op_uses(op: sprout_ir.IROp) -> List String =
   # B1: the vec handle MUST appear here (same reason as IRGetField's scrutinee)
   # so liveness keeps the Vector live across the load/store; idx/val are read too.
   | sprout_ir.IRVecLenD _ v -> Cons(v, Nil)
-  | sprout_ir.IRVecGetD _ v i -> Cons(v, Cons(i, Nil))
-  | sprout_ir.IRVecSetD _ v i x -> Cons(v, Cons(i, Cons(x, Nil)))
+  | sprout_ir.IRVecGetD _ v i -> [v, i]
+  | sprout_ir.IRVecSetD _ v i x -> [v, i, x]
   | sprout_ir.IRAbortMatch -> Nil
   # IRPanic reads its message operand (keep it live for the @panic call).
   | sprout_ir.IRPanic msg -> Cons(msg, Nil)

@@ -102,4 +102,15 @@ fn main() -> Unit !{IO} =
     r20 <- run_check("type Wrapper = | Wrap Int")
     assert_true(state, "builtin Int as constructor field compiles", is_check_ok(r20))
 
+    # bt_pair/bt_triple/bt_quad build the TTuple schemes for tuple-returning
+    # analysis intrinsics; exercise all three arities directly.
+    r21 <- run_check("fn f(s: String, q: String) -> Result String (String, Vec String) !{IO} = analysis_instances_in_source(s, q)")
+    assert_true(state, "bt_pair-typed builtin (analysis_instances_in_source) typechecks", is_check_ok(r21))
+
+    r22 <- run_check("fn f(s: String) -> Result String (Vec String, Vec String, Vec String) !{IO} = analysis_symbol_inventory_in_source(s)")
+    assert_true(state, "bt_triple-typed builtin (analysis_symbol_inventory_in_source) typechecks", is_check_ok(r22))
+
+    r23 <- run_check("fn f(s: String) -> Result String (Vec (String, String, Int, Int)) !{IO} = analysis_symbol_locations_in_source(s)")
+    assert_true(state, "bt_quad-typed builtin (analysis_symbol_locations_in_source) typechecks", is_check_ok(r23))
+
     summary(state)

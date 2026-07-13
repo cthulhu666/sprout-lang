@@ -896,7 +896,7 @@ fn translate_expr(expr: typed_ast.TypedExpr, params: List String,
                       Ok((list_append(sblocks, eblocks), ecur_lbl,
                            list_append(ecur_ops,
                              Cons(sprout_ir.IRCall(fresh_name(name_prefix, idx2), sprout_ir.IRTHeap,
-                                                   "int_range", Cons(s_name, Cons(e_name, Nil))), Nil)),
+                                                   "int_range", [s_name, e_name]), Nil)),
                            fresh_name(name_prefix, idx2), idx2 + 1))
   | typed_ast.TDo steps _ _ ->
       translate_do(steps, params, ctors, idx, cur_label, cur_ops,
@@ -1480,16 +1480,16 @@ fn translate_do_bind_result_finish_unboxed(pat: ast.Pattern, rest: List typed_as
         done_lbl = "do_done_" ++ int_to_string(eidx)
         test_block = sprout_ir.IRBlock(elbl,
                        list_append(eops,
-                         Cons(sprout_ir.IRConst(const_name, err_tag),
-                         Cons(sprout_ir.IRICmp(cmp_name, "eq", tag_ssa, const_name),
-                         Cons(sprout_ir.IRCondBr(cmp_name, short_lbl, cont_lbl), Nil)))))
+                         [sprout_ir.IRConst(const_name, err_tag),
+                          sprout_ir.IRICmp(cmp_name, "eq", tag_ssa, const_name),
+                          sprout_ir.IRCondBr(cmp_name, short_lbl, cont_lbl)]))
         err_const_name = fresh_name(name_prefix, eidx + 2)
         err_val_name = fresh_name(name_prefix, eidx + 3)
         short_block = sprout_ir.IRBlock(short_lbl,
-                        Cons(sprout_ir.IRConst(err_const_name, err_tag),
-                        Cons(sprout_ir.IRCall(err_val_name, sprout_ir.IRTHeap, "sprout_make1",
-                                              Cons(err_const_name, Cons(val_ssa, Nil))),
-                        Cons(sprout_ir.IRBr(done_lbl), Nil))))
+                        [sprout_ir.IRConst(err_const_name, err_tag),
+                         sprout_ir.IRCall(err_val_name, sprout_ir.IRTHeap, "sprout_make1",
+                                          [err_const_name, val_ssa]),
+                         sprout_ir.IRBr(done_lbl)])
 
 fn translate_do_bind_result_finish(pat: ast.Pattern, rest: List typed_ast.TypedDoStep,
                                    eblocks: List sprout_ir.IRBlock,
@@ -1566,9 +1566,9 @@ fn find_capture_type(expr: typed_ast.TypedExpr, name: String) -> Maybe types.Typ
   | typed_ast.TTuple items _ _ ->
       find_capture_type_list(items, name)
   | typed_ast.TIf cond thn els _ _ ->
-      find_capture_type_first(Cons(cond, Cons(thn, Cons(els, Nil))), name)
+      find_capture_type_first([cond, thn, els], name)
   | typed_ast.TBinary _ l r _ _ ->
-      find_capture_type_first(Cons(l, Cons(r, Nil)), name)
+      find_capture_type_first([l, r], name)
   | typed_ast.TUnary _ operand _ _ ->
       find_capture_type(operand, name)
   | typed_ast.TCall callee args _ _ ->
@@ -1580,7 +1580,7 @@ fn find_capture_type(expr: typed_ast.TypedExpr, name: String) -> Maybe types.Typ
       then Nothing
       else find_capture_type(body, name)
   | typed_ast.TRange s e _ _ ->
-      find_capture_type_first(Cons(s, Cons(e, Nil)), name)
+      find_capture_type_first([s, e], name)
   | typed_ast.TDo steps _ _ ->
       # FIX R4#6: mirror compute_free_vars_do_steps; walk steps threading shadow info.
       find_capture_type_do_steps(steps, name)
@@ -2136,16 +2136,16 @@ fn finish_checked_div(lblocks: List sprout_ir.IRBlock, rblocks: List sprout_ir.I
         # which IRCondBr consumes directly (no trunc needed).
         cond_block = sprout_ir.IRBlock(cur_lbl,
                        list_append(cur_ops,
-                         Cons(sprout_ir.IRICmp(z_name, "eq", r_name, "0"),
-                         Cons(sprout_ir.IRCondBr(z_name, panic_lbl, ok_lbl), Nil))))
+                         [sprout_ir.IRICmp(z_name, "eq", r_name, "0"),
+                          sprout_ir.IRCondBr(z_name, panic_lbl, ok_lbl)]))
         # Panic block: materialize the message String, then panic + unreachable.
         panic_block = sprout_ir.IRBlock(panic_lbl,
-                        Cons(sprout_ir.IRStrConst(msg_result, msg_raw, "division by zero"),
-                        Cons(sprout_ir.IRPanic(msg_result), Nil)))
+                        [sprout_ir.IRStrConst(msg_result, msg_raw, "division by zero"),
+                         sprout_ir.IRPanic(msg_result)])
         # Continuation block: the sdiv runs here; it is the new current block.
         div_op = sprout_ir.IRIDiv(div_result, l_name, r_name)
         all_blocks = list_append(list_append(lblocks, rblocks),
-                       Cons(cond_block, Cons(panic_block, Nil)))
+                       [cond_block, panic_block])
 
 # Map a TBinary op String to the matching arithmetic IR constructor.
 # Returns Nothing for non-arith ops; the caller falls back to cmp_predicate.
@@ -3926,8 +3926,8 @@ fn translate_print_call(fname: String, args: List typed_ast.TypedExpr,
               then  # A Char is an i64 codepoint; encode to a String before printing.
                    Ok((ablocks, acur_lbl,
                         list_append(acur_ops,
-                          Cons(sprout_ir.IRCall(fresh_name(name_prefix, idx1), sprout_ir.IRTHeap, "char_to_string", Cons(a_name, Nil)),
-                          Cons(sprout_ir.IRPrintStr(fresh_name(name_prefix, idx1 + 1), "print_str", fresh_name(name_prefix, idx1)), Nil))),
+                          [sprout_ir.IRCall(fresh_name(name_prefix, idx1), sprout_ir.IRTHeap, "char_to_string", Cons(a_name, Nil)),
+                           sprout_ir.IRPrintStr(fresh_name(name_prefix, idx1 + 1), "print_str", fresh_name(name_prefix, idx1))]),
                         fresh_name(name_prefix, idx1 + 1), idx1 + 2))
               else if is_string_type(typed_ast.typed_expr_type(arg))
               then Ok((ablocks, acur_lbl,
@@ -4276,7 +4276,7 @@ fn translate_append_operands(left: typed_ast.TypedExpr, right: typed_ast.TypedEx
                          fresh_name(name_prefix, idx2), idx2 + 1))
   else if is_list_type(typed_ast.typed_expr_type(left)) || is_list_type(call_ty) then
     # List ++ List → call @list_append.  Mirrors codegen.sprout (~2611).
-    match translate_args_scalar(Cons(left, Cons(right, Nil)), params, ctors, idx, cur_label, cur_ops, Nil, Nil,
+    match translate_args_scalar([left, right], params, ctors, idx, cur_label, cur_ops, Nil, Nil,
                                 captures, lifted_ref, top_level, let_names, fn_arities,
                                 lambda_ctr_ref, lifted_idx_ref, name_prefix) with
     | Err msg -> Err(msg)
@@ -4287,7 +4287,7 @@ fn translate_append_operands(left: typed_ast.TypedExpr, right: typed_ast.TypedEx
             | [l_name, r_name] ->
                 Ok((arg_blocks, arg_cur_lbl,
                      list_append(arg_cur_ops,
-                       Cons(sprout_ir.IRCall(fresh_name(name_prefix, idx1), sprout_ir.IRTHeap, "list_append", Cons(l_name, Cons(r_name, Nil))), Nil)),
+                       Cons(sprout_ir.IRCall(fresh_name(name_prefix, idx1), sprout_ir.IRTHeap, "list_append", [l_name, r_name]), Nil)),
                      fresh_name(name_prefix, idx1), idx1 + 1))
             | _ -> Err("ast_to_ir: append (list): expected exactly 2 translated args")
   else
@@ -4300,7 +4300,7 @@ fn translate_append_operands(left: typed_ast.TypedExpr, right: typed_ast.TypedEx
     # all reach here; String/List are handled above only as a peephole.
     match witness with
     | Just w ->
-        translate_call(w, Cons(left, Cons(right, Nil)), call_ty, params, ctors, idx,
+        translate_call(w, [left, right], call_ty, params, ctors, idx,
                        cur_label, cur_ops, captures, lifted_ref, top_level, let_names,
                        fn_arities, lambda_ctr_ref, lifted_idx_ref, name_prefix)
     | Nothing ->
@@ -4554,7 +4554,7 @@ fn try_vector_intrinsic(fname: String, args: List typed_ast.TypedExpr,
 fn vec_double_guard(cur_lbl: String, cur_ops: List sprout_ir.IROp, vec: String, i: String,
                     msg_text: String, idx: Int, name_prefix: String)
     -> (List sprout_ir.IRBlock, String) =
-  (Cons(cond_block, Cons(ok1_block, Cons(panic_block, Nil))), ok2_lbl)
+  ([cond_block, ok1_block, panic_block], ok2_lbl)
   where isnull = fresh_name(name_prefix, idx)
         len = fresh_name(name_prefix, idx + 1)
         oob = fresh_name(name_prefix, idx + 2)
@@ -6171,7 +6171,7 @@ fn emit_repack_one(box_ssa: String, tag_ssa: String, ctor_tag: Int, arity: Int,
                    acc_blocks: List sprout_ir.IRBlock, prefix: String) ->
     Result String (List sprout_ir.IRBlock, Int) =
   emit_repack_arms(box_ssa, tag_ssa, rest, next_idx, next_lbl, Nil,
-                   list_append(acc_blocks, Cons(test_block, Cons(hit_block, Nil))), prefix)
+                   list_append(acc_blocks, [test_block, hit_block]), prefix)
   where k_ssa = fresh_name(prefix, idx)
         cmp_ssa = fresh_name(prefix, idx + 1)
         hit_lbl = "wrepack_hit_" ++ int_to_string(idx)

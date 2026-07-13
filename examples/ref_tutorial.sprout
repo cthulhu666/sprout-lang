@@ -67,7 +67,7 @@ fn part2() -> Unit !{IO} =
   do
     print("--- part 2: shared cell across recursion ---")
     total <- ref_new(0)
-    sum_ref(Cons(10, Cons(20, Cons(30, Nil))), total)
+    sum_ref([10, 20, 30], total)
     result <- ref_read(total)
     print(result)  # 60
 
@@ -95,7 +95,7 @@ fn part3() -> Unit !{IO} =
     print("--- part 3: two cells, one traversal ---")
     total <- ref_new(0)
     maximum <- ref_new(0)
-    track_list(Cons(3, Cons(7, Cons(2, Cons(9, Cons(4, Nil))))), total, maximum)
+    track_list([3, 7, 2, 9, 4], total, maximum)
     t <- ref_read(total)
     m <- ref_read(maximum)
     print(t)  # 25

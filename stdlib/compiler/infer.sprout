@@ -298,7 +298,7 @@ fn register_type_decl_raw(decl: ast.Decl, env: Dict types.Scheme) -> Dict types.
   # may itself be polymorphic, but Foo always has the same representation).
   | ast.WrapDecl name inner _ ->
       register_ctors_for_type(name, Nil, dict_empty(),
-        Cons(ast.TypeConstructor(name, Cons(inner, Nil)), Nil), env)
+        [ast.TypeConstructor(name, [inner])], env)
   | _ -> env
 
 fn build_local_params(params: List String, acc: Dict types.Type) -> Dict types.Type =
@@ -685,7 +685,7 @@ fn infer_print_call(
         | InferOk targ s_peek _ _ ->
             if is_tuple_type(unifier.apply_subst(s_peek, typed_ast.typed_expr_type(targ))) then
               infer_call_var(state, env, subst, eff_subst, callee, "print", cpos,
-                Cons(ast.CallExpr(ast.VarExpr("to_string", cpos), Cons(single, Nil), pos), Nil), pos)
+                [ast.CallExpr(ast.VarExpr("to_string", cpos), [single], pos)], pos)
             else
               infer_call_var(state, env, subst, eff_subst, callee, "print", cpos, args, pos)
   | _ ->
@@ -1935,7 +1935,7 @@ fn eq_via_class_method(
               call_result <- check_call_constraint(
                 ast.VarExpr("eq", pos),
                 typed_callee,
-                Cons(typed_left, Cons(typed_right, Nil)),
+                [typed_left, typed_right],
                 subst, env, ret_t, s3, es3, call_eff, pos,
                 dict_empty())
               if op == "!=" then
@@ -3163,11 +3163,10 @@ fn builtin_type_names() -> List String =
   append(primitive_type_names(), c_runtime_type_names())
 
 fn primitive_type_names() -> List String =
-  Cons("Int", Cons("Double", Cons("Bool", Cons("String", Cons("Char",
-    Cons("Unit", Cons("Bytes", Cons("IntRange", Nil))))))))
+  ["Int", "Double", "Bool", "String", "Char", "Unit", "Bytes", "IntRange"]
 
 fn c_runtime_type_names() -> List String =
-  Cons("Vector", Cons("Map", Cons("NativeSet", Cons("Ref", Nil))))
+  ["Vector", "Map", "NativeSet", "Ref"]
 
 # O(n decls): collect short names (prefix-stripped) of all declared types.
 fn collect_declared_type_names(decls: List ast.Decl, acc: List String) -> List String =
