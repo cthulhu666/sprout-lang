@@ -121,6 +121,7 @@ jobs:
           just stack-overflow-smoke
           just tco-runtime-smoke
           just trace-dispatch-smoke
+          just verify-dispatch-smoke
 
       - name: GC safety check
         run: just gc-safety-check --strict

@@ -826,6 +826,33 @@ trace-dispatch-smoke: bootstrap-from-seed
   fi
   echo "==> trace-dispatch-smoke ✓"
 
+# Dict-passing verifier guard.  The dispatch verifier (retro item 1, phase 1) is
+# default-fatal: it must ACCEPT legitimate code (no false positive) AND be ACTIVE
+# (verified>=1 on a real constrained call — a silent no-op is a regression). The
+# projection sort exercises `vec_sort_by ... where Ord k`. Regression for the
+# BACKLOG "Dispatch Soundness & Diagnostics" item 1. See docs/debugging.md.
+[group('smoke')]
+verify-dispatch-smoke: bootstrap-from-seed
+  #!/usr/bin/env bash
+  set -euo pipefail
+  TMPD=$(mktemp -d /tmp/sprout_vds_XXXXXX)
+  trap 'rm -rf "$TMPD"' EXIT
+  FIXTURE=tests/trace_dispatch/projection_sort.spr
+  # 1. Default-fatal verifier must accept legit code (no false positive).
+  if ! "{{build_dir}}/compile_driver_bin_stage1" --emit-ir "{{stdlib_root}}" "$FIXTURE" > "$TMPD/out.ll" 2>"$TMPD/err"; then
+    echo "verify-dispatch-smoke: verifier REJECTED a legitimate projection sort (false positive):" >&2
+    grep -i verify "$TMPD/err" >&2 || cat "$TMPD/err" >&2
+    exit 1
+  fi
+  # 2. Verifier must be ACTIVE: verified>=1 (else it is a silent no-op).
+  stats=$(SPROUT_VERIFY_DISPATCH_STATS=1 "{{build_dir}}/compile_driver_bin_stage1" --emit-ir "{{stdlib_root}}" "$FIXTURE" 2>&1 >/dev/null | grep 'stats:' | head -1)
+  verified=$(printf '%s' "$stats" | sed -n 's/.*verified=\([0-9][0-9]*\).*/\1/p')
+  if [ -z "$verified" ] || [ "$verified" -lt 1 ]; then
+    echo "verify-dispatch-smoke: verifier did not fire (expected verified>=1); got: '$stats'" >&2
+    exit 1
+  fi
+  echo "==> verify-dispatch-smoke ✓ ($stats)"
+
 # Typed-codegen argv gate.  The typed `main` shim (ir_lowering.main_shim) must
 # call @sprout_set_argv(argc, argv) so a typed-built binary's argv_all() sees
 # its command-line arguments — the typed-codegen flip self-compiles the

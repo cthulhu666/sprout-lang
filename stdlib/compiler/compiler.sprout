@@ -9,6 +9,7 @@ import stdlib.compiler.module_loader as module_loader
 import stdlib.compiler.bundler as bundler
 import stdlib.compiler.typed_ast as typed_ast
 import stdlib.compiler.resolve as resolve
+import stdlib.compiler.verify_dispatch as verify_dispatch
 import stdlib.compiler.lowering as lowering
 import stdlib.compiler.dce as dce
 import stdlib.compiler.ir_pipeline as ir_pipeline
@@ -207,6 +208,18 @@ export type IrFullResult (..) =
 # Lowering now preserves types (lower_program threads the scheme env and returns
 # TypedProgram), so compile_phase_recheck is a plain alias.
 
+# Coverage line for the dict-passing verifier, gated on SPROUT_VERIFY_DISPATCH_STATS.
+# `verified > 0` on real programs is the evidence that the verifier fires on actual
+# calls rather than skipping everything (a clean run vs. a silent no-op).
+fn report_verify_stats(prog: typed_ast.TypedProgram) -> Unit !{IO} =
+  match env_get("SPROUT_VERIFY_DISPATCH_STATS") with
+  | Nothing -> ()
+  | Just _ ->
+      match verify_dispatch.verify_stats(prog) with
+      | (ok, sk, mm) ->
+          eprint("[verify-dispatch] stats: verified=" ++ int_to_string(ok)
+                 ++ " skipped=" ++ int_to_string(sk) ++ " mismatched=" ++ int_to_string(mm))
+
 export fn compile_phase_bundle(path: source.FilePath, stdlib_root: source.StdlibRoot) -> bundler.BundleResult !{IO} =
   bundler.bundle_file(path, stdlib_root)
 
@@ -225,7 +238,24 @@ export fn compile_phase_check(path: source.FilePath, stdlib_root: source.StdlibR
           | typed_ast.TypedOk typed_prog env ->
               match resolve.resolve_program(typed_prog, env) with
               | resolve.ResolveErr pos msg -> typed_ast.TypedErr(pos, "check: " ++ msg)
-              | resolve.ResolveOk resolved -> typed_ast.TypedOk(resolved, env)
+              | resolve.ResolveOk resolved ->
+                  # Dictionary-passing verifier (retro item 1, phase 1). A finding is a
+                  # soundness bug (a dict resolved to the wrong instance) — fatal by
+                  # default, verified clean across the corpus + compiler source before
+                  # this flip. SPROUT_VERIFY_DISPATCH_OFF downgrades it to a warning
+                  # (escape hatch for an uncovered false positive in the wild);
+                  # SPROUT_VERIFY_DISPATCH_STATS logs coverage (verified/skipped/mismatched).
+                  do
+                    _ <- report_verify_stats(resolved)
+                    match verify_dispatch.verify_program(resolved) with
+                    | Nothing -> typed_ast.TypedOk(resolved, env)
+                    | Just (vpos, vmsg) ->
+                        match env_get("SPROUT_VERIFY_DISPATCH_OFF") with
+                        | Just _ ->
+                            do
+                              _ <- eprint("[verify-dispatch] (suppressed) " ++ vmsg)
+                              typed_ast.TypedOk(resolved, env)
+                        | Nothing -> typed_ast.TypedErr(vpos, "check: dispatch-verify: " ++ vmsg)
 
 export fn compile_phase_lower(path: source.FilePath, stdlib_root: source.StdlibRoot) -> typed_ast.TypedResult !{IO} =
   do
@@ -278,7 +308,24 @@ fn compile_phase_check_with_cache(path: source.FilePath, stdlib_root: source.Std
           | typed_ast.TypedOk typed_prog env ->
               match resolve.resolve_program(typed_prog, env) with
               | resolve.ResolveErr pos msg -> typed_ast.TypedErr(pos, "check: " ++ msg)
-              | resolve.ResolveOk resolved -> typed_ast.TypedOk(resolved, env)
+              | resolve.ResolveOk resolved ->
+                  # Dictionary-passing verifier (retro item 1, phase 1). A finding is a
+                  # soundness bug (a dict resolved to the wrong instance) — fatal by
+                  # default, verified clean across the corpus + compiler source before
+                  # this flip. SPROUT_VERIFY_DISPATCH_OFF downgrades it to a warning
+                  # (escape hatch for an uncovered false positive in the wild);
+                  # SPROUT_VERIFY_DISPATCH_STATS logs coverage (verified/skipped/mismatched).
+                  do
+                    _ <- report_verify_stats(resolved)
+                    match verify_dispatch.verify_program(resolved) with
+                    | Nothing -> typed_ast.TypedOk(resolved, env)
+                    | Just (vpos, vmsg) ->
+                        match env_get("SPROUT_VERIFY_DISPATCH_OFF") with
+                        | Just _ ->
+                            do
+                              _ <- eprint("[verify-dispatch] (suppressed) " ++ vmsg)
+                              typed_ast.TypedOk(resolved, env)
+                        | Nothing -> typed_ast.TypedErr(vpos, "check: dispatch-verify: " ++ vmsg)
 
 fn compile_phase_lower_with_cache(path: source.FilePath, stdlib_root: source.StdlibRoot, cache) -> typed_ast.TypedResult !{IO} =
   do

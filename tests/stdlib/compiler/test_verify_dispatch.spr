@@ -1,0 +1,125 @@
+import stdlib.test (TestState, new_state, assert_true, summary)
+import stdlib.compiler.verify_dispatch as vd
+import stdlib.compiler.ast as ast
+import stdlib.compiler.types as types
+import stdlib.compiler.source as source
+import stdlib.compiler.typed_ast as typed_ast
+
+# Retro item 1, phase 1: the dict-passing verifier re-derives each constraint
+# var's type from the callee's SOURCE signature matched against concrete arg
+# types, then checks the injected dict head against it. The motivating case is
+# the vec_sort_by projection sort (PR #176): `vec_sort_by(f: a -> k, v: Vec a)
+# where Ord k`, called with a projection whose key type k != element type a. A
+# mis-resolved dict (Ord a instead of Ord k) must be caught.
+
+fn dpos() -> source.SourcePos = source.SourcePos(0, 1, 1)
+
+fn t_int() -> types.Type = types.TConst(types.type_id("Int"))
+fn t_pair_ii() -> types.Type = types.TTuple([t_int(), t_int()])
+# (Int,Int) -> Int  — the concrete type of the projection arg `fst`
+fn t_fst_fn() -> types.Type = types.TFunc(t_pair_ii(), t_int(), types.EffectPure)
+# Vec (Int,Int) — the concrete type of the vec arg
+fn t_vec_pair() -> types.Type = types.TApp(types.TConst(types.type_id("Vec")), t_pair_ii())
+
+# Declared params of vec_sort_by: `(a -> k)` and `Vec a`, in source names.
+fn te_proj() -> ast.TypeExpr = ast.TypeArrow(ast.TypeName("a"), ast.TypeName("k"), Nothing)
+fn te_vec_a() -> ast.TypeExpr = ast.TypeApply(ast.TypeName("Vec"), ast.TypeName("a"))
+
+fn ord_k() -> ast.TypeConstraint = ast.TypeConstraint("Ord", [ast.TypeName("k")])
+
+fn is_mismatch(o: vd.VerifyOutcome) -> Bool =
+  match o with | vd.VerifyMismatch _ _ -> true | _ -> false
+
+fn is_ok(o: vd.VerifyOutcome) -> Bool =
+  match o with | vd.VerifyOk _ -> true | _ -> false
+
+fn is_skip(o: vd.VerifyOutcome) -> Bool =
+  match o with | vd.VerifySkip _ -> true | _ -> false
+
+fn first_or_skip(os: List vd.VerifyOutcome) -> vd.VerifyOutcome =
+  match os with | Cons o _ -> o | Nil -> vd.VerifySkip("empty")
+
+fn main() -> Unit !{IO} =
+  do
+    state <- new_state()
+
+    # --- structural matcher: (a -> k) <- ((Int,Int) -> Int) binds a, k ---
+    let theta = vd.match_te(te_proj(), t_fst_fn(), dict_empty())
+    assert_true(state, "match_te binds arrow params",
+      match theta with
+      | Just th ->
+          (match dict_get("k", th) with | Just kt -> (match vd.type_head_str(kt) with | Just h -> h == "Int" | Nothing -> false) | Nothing -> false)
+          && (match dict_get("a", th) with | Just at -> (match vd.type_head_str(at) with | Just h -> h == "Tuple2" | Nothing -> false) | Nothing -> false)
+      | Nothing -> false)
+
+    # --- #176: dict resolved to Ord Tuple2 (element) but k = Int (key) -> MISMATCH ---
+    let bad = vd.verify_call([te_proj(), te_vec_a()], [ord_k()],
+      [t_fst_fn(), t_vec_pair()], [("Ord", Just("Tuple2"))], dpos())
+    assert_true(state, "wrong-headed dict (Ord Tuple2 vs k=Int) is rejected", is_mismatch(first_or_skip(bad)))
+
+    # --- correct: dict is Ord Int, matches k = Int -> OK ---
+    let good = vd.verify_call([te_proj(), te_vec_a()], [ord_k()],
+      [t_fst_fn(), t_vec_pair()], [("Ord", Just("Int"))], dpos())
+    assert_true(state, "correct dict (Ord Int) passes", is_ok(first_or_skip(good)))
+
+    # --- forwarded/polymorphic dict (Nothing) -> SKIP, never a false alarm ---
+    let poly = vd.verify_call([te_proj(), te_vec_a()], [ord_k()],
+      [t_fst_fn(), t_vec_pair()], [("Ord", Nothing)], dpos())
+    assert_true(state, "forwarded dict is skipped, not flagged", is_skip(first_or_skip(poly)))
+
+    # --- underdetermined: no source param pins k -> SKIP (not a false alarm) ---
+    let under = vd.verify_call([te_vec_a()], [ord_k()],
+      [t_vec_pair()], [("Ord", Just("Tuple2"))], dpos())
+    assert_true(state, "underdetermined constraint is skipped", is_skip(first_or_skip(under)))
+
+    # --- walker (verify_program): a hand-built program where a caller invokes
+    # a constrained callee with an injected dict. This exercises arg-splitting,
+    # dict-head extraction, and the signature table end to end. ---
+    let callee_decl = typed_ast.TFnDecl("vec_sort_by",
+      [ast.Param("f", Just(te_proj())), ast.Param("v", Just(te_vec_a()))],
+      Nothing, Nothing, [ord_k()],
+      typed_ast.TUnit(t_int(), dpos()))
+    # value args, typed concretely: f : (Int,Int)->Int, v : Vec (Int,Int)
+    let arg_f = typed_ast.TVar("f", t_fst_fn(), dpos())
+    let arg_v = typed_ast.TVar("v", t_vec_pair(), dpos())
+    # WRONG injected dict: Ord Tuple2 (element) where k = Int (key)
+    let bad_dict = typed_ast.TDict(ast.TypeConstraint("Ord", [ast.TypeName("Tuple2")]),
+      types.TConst(types.type_id("Ord")), dpos(), typed_ast.EvUnresolved)
+    let bad_call = typed_ast.TCall(typed_ast.TVar("vec_sort_by", t_vec_pair(), dpos()),
+      [arg_f, arg_v, bad_dict], t_vec_pair(), dpos())
+    let bad_caller = typed_ast.TFnDecl("caller", [], Nothing, Nothing, [], bad_call)
+    let bad_prog = typed_ast.TypedProgram([callee_decl, bad_caller])
+    assert_true(state, "verify_program flags a wrong-headed injected dict",
+      match vd.verify_program(bad_prog) with | Just _ -> true | Nothing -> false)
+
+    # CORRECT injected dict: Ord Int -> program verifies clean
+    let good_dict = typed_ast.TDict(ast.TypeConstraint("Ord", [ast.TypeName("Int")]),
+      types.TConst(types.type_id("Ord")), dpos(), typed_ast.EvUnresolved)
+    let good_call = typed_ast.TCall(typed_ast.TVar("vec_sort_by", t_vec_pair(), dpos()),
+      [arg_f, arg_v, good_dict], t_vec_pair(), dpos())
+    let good_caller = typed_ast.TFnDecl("caller", [], Nothing, Nothing, [], good_call)
+    let good_prog = typed_ast.TypedProgram([callee_decl, good_caller])
+    assert_true(state, "verify_program passes a correct injected dict",
+      match vd.verify_program(good_prog) with | Just _ -> false | Nothing -> true)
+
+    # --- SCOPE BOUNDARY: a return-type-dispatch constraint var (`a` appears ONLY
+    # in the return type, never in a param) cannot be pinned by the value args, so
+    # phase 1 SKIPS it — even with a mismatched dict head — rather than flagging.
+    # This documents that return-type dispatch is out of phase-1 scope, and guards
+    # against the verifier ever wrongly "catching" (false-positiving) such a call. ---
+    let read_decl = typed_ast.TFnDecl("read_as",
+      [ast.Param("s", Just(ast.TypeName("String")))],
+      Just(ast.TypeApply(ast.TypeName("Maybe"), ast.TypeName("a"))),
+      Nothing, [ast.TypeConstraint("Read", [ast.TypeName("a")])],
+      typed_ast.TUnit(t_int(), dpos()))
+    let read_dict = typed_ast.TDict(ast.TypeConstraint("Read", [ast.TypeName("Int")]),
+      types.TConst(types.type_id("Read")), dpos(), typed_ast.EvUnresolved)
+    let read_call = typed_ast.TCall(typed_ast.TVar("read_as", types.type_string(), dpos()),
+      [typed_ast.TString("x", types.type_string(), dpos()), read_dict],
+      types.type_maybe(t_int()), dpos())
+    let read_caller = typed_ast.TFnDecl("read_caller", [], Nothing, Nothing, [], read_call)
+    let read_prog = typed_ast.TypedProgram([read_decl, read_caller])
+    assert_true(state, "return-position constraint var is skipped (out of phase-1 scope), not flagged",
+      match vd.verify_program(read_prog) with | Just _ -> false | Nothing -> true)
+
+    summary(state)

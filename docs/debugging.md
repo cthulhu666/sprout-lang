@@ -43,6 +43,36 @@ Path tags ending in `(guess)` mark the order-dependent heuristics
 constraint that should have resolved precisely is the soundness-hole signature.
 The trace covers the parametric (`C k`) constraint arm of `inject_constrained_fn_dicts`.
 
+**Automated guard.** The dict-passing verifier (`verify_dispatch.sprout`, run in
+the check phase, `compiler.sprout`) turns this class of bug into a **compile
+error**: it re-derives each constraint var's type from the callee's SOURCE
+signature (its written params + `where`-clause, matched against the concrete arg
+types — independent of the resolver) and rejects a call whose injected dictionary
+head disagrees. Default-fatal; **escape hatches:**
+
+- `SPROUT_VERIFY_DISPATCH_OFF=1` — downgrade a finding to a warning (for an
+  uncovered false positive in the wild; please file it).
+- `SPROUT_VERIFY_DISPATCH_STATS=1` — print `verified=N skipped=M mismatched=K`
+  per compile. `verified` counts checked calls; `skipped` are the legitimately
+  unverifiable ones (polymorphic/forwarded dict, no source signature, callee not
+  a plain name). A resolver bug shows up as `mismatched>0` with a located error.
+
+**Phase-1 scope** — it catches mis-resolution **where the call's value arguments
+fix the constraint variable to a concrete type** (e.g. #176's projected key
+`k = Int`). It deliberately does NOT flag (skips, never a false alarm):
+
+- forwarded/polymorphic dicts inside a generic function (the #141 shape — the
+  constraint's truth is still a type variable);
+- a constraint var that lives only in the **return** position (return-type
+  dispatch) — `verify_call` matches params against args, so a return-only var is
+  never bound → underdetermined → skip;
+- a *lowering*-discard bug (the historical `++`/`mconcat` null-fill), where the
+  resolved dict is correct but dropped during IR emission — a lowering fault a
+  post-resolve pass structurally cannot see.
+
+The last two motivate the pending IR-level **phase 2** (BACKLOG "Dispatch
+Soundness & Diagnostics" item 1).
+
 ## `just llvm-where <ll_file> <line>` — map an error line to its Sprout function
 
 When `opt --passes=verify` (or clang) reports a malformed-IR error at line N of a large `.ll` file, this tool walks the file up from line N to the nearest enclosing `define` and prints the Sprout qualified name.

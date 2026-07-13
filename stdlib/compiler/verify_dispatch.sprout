@@ -1,0 +1,409 @@
+module stdlib.compiler.verify_dispatch
+
+import stdlib.compiler.ast as ast
+import stdlib.compiler.source as source
+import stdlib.compiler.typed_ast as typed_ast
+import stdlib.compiler.types as types
+import stdlib.string as string
+
+# ---------------------------------------------------------------------------
+# Dictionary-passing verifier (Core-lint style) — retro item 1, phase 1
+# ---------------------------------------------------------------------------
+#
+# A defence-in-depth cross-check on typeclass dictionary selection. Motivated by
+# the vec_sort_by projection-sort crash (PR #176) and its siblings (#141,
+# return-type dispatch): a constraint `Ord k` resolved to the WRONG instance
+# (the element type instead of the projected key), a silent runtime SIGSEGV
+# because dispatch is unenforced (docs/retro-dict-dispatch-soundness-2026-07-13.md).
+#
+# The check is deliberately INDEPENDENT of the resolver. Truth is re-derived from
+# the callee's SOURCE-level signature (its written param types + `where`-clause,
+# in source names) matched against the call's concrete argument types — never from
+# the generalized env scheme / prog_to_fresh / @constrained markers the resolver
+# uses. Two different computations cross-checked is the whole value of a Core-lint
+# pass; it also means the check self-guards a canonicalize_constrained_markers
+# regression (its truth does not depend on canonicalize having run).
+#
+# A `where`-constraint exists IFF an explicit signature exists (you cannot write
+# `where Ord k` without annotating), so "constraint present" yields the source
+# info by construction. Everything the source signature cannot pin down —
+# inferred constraints on un-annotated fns, indirect/higher-order callees,
+# still-polymorphic call sites — is skip-and-log, never a false alarm.
+
+# Outcome for one (constraint, injected-dict) pair at a call site.
+export type VerifyOutcome (..) =
+  | VerifyOk String  # class: verified concrete head matches derived truth
+  | VerifyMismatch source.SourcePos String  # a concrete dict head disagrees with the derived truth
+  | VerifySkip String  # cannot verify (polymorphic / underdetermined) — reason
+
+# ---------------------------------------------------------------------------
+# Structural match: source TypeExpr pattern <- concrete Type
+# ---------------------------------------------------------------------------
+#
+# One-directional: instantiate the declared pattern's source var names from a
+# concrete type, accumulating name -> concrete-type bindings in theta. A source
+# var is a lowercase TypeName; an uppercase TypeName is a type constructor that
+# must match the concrete head. Returns Nothing on a structural mismatch (the
+# call would not have type-checked, but we stay total and just skip).
+
+# The dispatch-relevant identity of a type/constructor name is its LAST dotted
+# segment: post-bundling the same type can appear qualified (`main.Foo`) in one
+# place and short (`Foo`) in another, and `types.type_id_display` already
+# normalises to the short form. Compare everything short, or legitimate calls
+# false-positive on a qualified-vs-short head mismatch.
+fn short(s: String) -> String = string.after_last_dot(s)
+
+# Concreteness on the SHORT name: a source type variable is lowercase (`a`, `k`);
+# a constructor is uppercase (`Foo`) — even when qualified (`main.Foo` -> `Foo`).
+fn starts_lower(s: String) -> Bool =
+  match str_char_at(short(s), 0) with
+  | Nothing -> false
+  | Just c -> c >= 'a' && c <= 'z'
+
+fn bind_var(name: String, concrete: types.Type, theta: Dict types.Type) -> Maybe (Dict types.Type) =
+  match dict_get(name, theta) with
+  | Nothing -> Just(dict_set(name, concrete, theta))
+  | Just prev ->
+      # Already bound — consistent binding required (same source var, same type).
+      if type_head_str_eq(prev, concrete) then Just(theta) else Nothing
+
+export fn match_te(pattern: ast.TypeExpr, concrete: types.Type, theta: Dict types.Type) -> Maybe (Dict types.Type) =
+  match pattern with
+  | ast.TypeName n ->
+      if starts_lower(n) then bind_var(n, concrete, theta)
+      else
+        # Constructor: heads must agree (short display name), e.g. TypeName "Int" ~ TConst Int.
+        match concrete with
+        | types.TConst id -> if types.type_id_display(id) == short(n) then Just(theta) else Nothing
+        | types.TApp base _ -> match_te(pattern, base, theta)
+        | _ -> Nothing
+  | ast.TypeApply pb pa ->
+      match concrete with
+      | types.TApp cb ca ->
+          match match_te(pb, cb, theta) with
+          | Nothing -> Nothing
+          | Just theta1 -> match_te(pa, ca, theta1)
+      | _ -> Nothing
+  | ast.TypeArrow pp pr _ ->
+      match concrete with
+      | types.TFunc cp cr _ ->
+          match match_te(pp, cp, theta) with
+          | Nothing -> Nothing
+          | Just theta1 -> match_te(pr, cr, theta1)
+      | _ -> Nothing
+  | ast.TypeEffect te _ -> match_te(te, concrete, theta)
+  | ast.TupleType items ->
+      match concrete with
+      | types.TTuple citems -> match_te_list(items, citems, theta)
+      | _ -> Nothing
+
+fn match_te_list(patterns: List ast.TypeExpr, concretes: List types.Type, theta: Dict types.Type) -> Maybe (Dict types.Type) =
+  match patterns with
+  | Nil -> Just(theta)
+  | Cons p prest ->
+      match concretes with
+      | Nil -> Nothing
+      | Cons c crest ->
+          match match_te(p, c, theta) with
+          | Nothing -> Nothing
+          | Just theta1 -> match_te_list(prest, crest, theta1)
+
+# ---------------------------------------------------------------------------
+# Type head rendering (mirrors ast_to_ir/infer's concrete_type_str)
+# ---------------------------------------------------------------------------
+#
+# The dispatch-relevant head of a type: the constructor name a dictionary keys on.
+# Returns Nothing for a still-polymorphic type (TVar) or a function type — neither
+# is a concrete dictionary head we can check.
+export fn type_head_str(t: types.Type) -> Maybe String =
+  match t with
+  | types.TConst id -> Just(types.type_id_display(id))
+  | types.TApp base _ -> type_head_str(base)
+  | types.TTuple items -> Just("Tuple" ++ int_to_string(list_length(items)))
+  | types.TVar _ -> Nothing
+  | types.TFunc _ _ _ -> Nothing
+
+fn type_head_str_eq(a: types.Type, b: types.Type) -> Bool =
+  match type_head_str(a) with
+  | Nothing -> false
+  | Just ha ->
+      match type_head_str(b) with
+      | Nothing -> false
+      | Just hb -> ha == hb
+
+# ---------------------------------------------------------------------------
+# Per-call verification
+# ---------------------------------------------------------------------------
+#
+# Inputs (all in source terms except arg_types / dict heads):
+#   decl_param_tes  — the callee's declared param type annotations, in order
+#   constraints     — the callee's `where` clause, source names, in order
+#   arg_types       — concrete (zonked) types of the call's VALUE arguments, in order
+#   dict_heads      — (class, Just concrete-head | Nothing if polymorphic) for each
+#                     injected dict, in `where`-clause order (the caller correlates
+#                     injected TDicts positionally; binary-op dicts prepend, calls
+#                     append — the caller normalises to constraint order before here)
+#
+# Builds theta by matching declared params to concrete args, then checks each
+# constraint's var against its injected dict head.
+export fn verify_call(
+  decl_param_tes: List ast.TypeExpr,
+  constraints: List ast.TypeConstraint,
+  arg_types: List types.Type,
+  dict_heads: List (String, Maybe String),
+  pos: source.SourcePos
+) -> List VerifyOutcome =
+  check_constraints(constraints, dict_heads, build_theta(decl_param_tes, arg_types, dict_empty()), pos)
+
+# Fold declared params over concrete args, accumulating source-var bindings. A
+# per-param match failure is swallowed (the binding for that param is simply
+# absent -> its constraints become underdetermined -> skip), keeping the pass total.
+fn build_theta(param_tes: List ast.TypeExpr, arg_types: List types.Type, theta: Dict types.Type) -> Dict types.Type =
+  match param_tes with
+  | Nil -> theta
+  | Cons pt prest ->
+      match arg_types with
+      | Nil -> theta
+      | Cons at arest ->
+          match match_te(pt, at, theta) with
+          | Just theta1 -> build_theta(prest, arest, theta1)
+          | Nothing -> build_theta(prest, arest, theta)
+
+# The head source-var name of a constraint (`Ord k` -> Just "k"). A multi-param or
+# non-var-headed constraint head yields Nothing -> that constraint is skipped.
+fn constraint_var(c: ast.TypeConstraint) -> Maybe String =
+  match c with
+  | ast.TypeConstraint _ args ->
+      match args with
+      | Cons (ast.TypeName v) _ -> if starts_lower(v) then Just(v) else Nothing
+      | _ -> Nothing
+
+fn constraint_class(c: ast.TypeConstraint) -> String =
+  match c with | ast.TypeConstraint cls _ -> cls
+
+fn check_constraints(constraints: List ast.TypeConstraint, dict_heads: List (String, Maybe String), theta: Dict types.Type, pos: source.SourcePos) -> List VerifyOutcome =
+  match constraints with
+  | Nil -> Nil
+  | Cons c crest ->
+      match dict_heads with
+      | Nil -> Nil  # fewer dicts than constraints — the caller under-supplied; stop.
+      | Cons dh drest ->
+          Cons(check_one(c, dh, theta, pos), check_constraints(crest, drest, theta, pos))
+
+fn check_one(c: ast.TypeConstraint, dict_head: (String, Maybe String), theta: Dict types.Type, pos: source.SourcePos) -> VerifyOutcome =
+  match dict_head with
+  | (dict_class, mhead) ->
+      match mhead with
+      | Nothing -> VerifySkip(constraint_class(c) ++ ": forwarded/polymorphic dict")
+      | Just head ->
+          match constraint_var(c) with
+          | Nothing -> VerifySkip(constraint_class(c) ++ ": non-var constraint head")
+          | Just v ->
+              match dict_get(v, theta) with
+              | Nothing -> VerifySkip(constraint_class(c) ++ " " ++ v ++ ": underdetermined by source signature")
+              | Just truth_ty ->
+                  match type_head_str(truth_ty) with
+                  | Nothing -> VerifySkip(constraint_class(c) ++ " " ++ v ++ ": truth still polymorphic")
+                  | Just truth_head ->
+                      if truth_head == head then VerifyOk(constraint_class(c))
+                      else VerifyMismatch(pos,
+                        "dictionary for `" ++ constraint_class(c) ++ " " ++ v
+                        ++ "` resolved to `" ++ constraint_class(c) ++ " " ++ head
+                        ++ "` but the call fixes " ++ v ++ " = " ++ truth_head
+                        ++ " (expected `" ++ constraint_class(c) ++ " " ++ truth_head ++ "`)")
+
+# ---------------------------------------------------------------------------
+# Program walker: run verify_call at every constrained call site
+# ---------------------------------------------------------------------------
+#
+# Two passes: build a signature table from every TFnDecl that has BOTH a
+# `where`-clause and fully-annotated params (the only calls we can derive truth
+# for — everything else is skip-by-construction), then walk all expression trees
+# and check each TCall whose callee is a known constrained function. Returns the
+# first mismatch's (pos, message), or Nothing if every checkable call verified.
+
+# Signature entry: the callee's param type annotations (in order) + its where-clause.
+# verify_program surfaces the first mismatch (the gate's failure); verify_stats
+# tallies (verified, skipped, mismatched) so a clean run is distinguishable from a
+# silent no-op (the verifier firing on real calls vs. skipping everything).
+export fn verify_program(prog: typed_ast.TypedProgram) -> Maybe(source.SourcePos, String) =
+  first_mismatch(collect_program(prog))
+
+export fn verify_stats(prog: typed_ast.TypedProgram) -> (Int, Int, Int) =
+  tally(collect_program(prog), 0, 0, 0)
+
+fn collect_program(prog: typed_ast.TypedProgram) -> List VerifyOutcome =
+  match prog with
+  | typed_ast.TypedProgram decls ->
+      collect_decls(decls, build_sig_table(decls, dict_empty()))
+
+fn tally(os: List VerifyOutcome, ok: Int, sk: Int, mm: Int) -> (Int, Int, Int) =
+  match os with
+  | Nil -> (ok, sk, mm)
+  | Cons o rest ->
+      match o with
+      | VerifyOk _ -> tally(rest, ok + 1, sk, mm)
+      | VerifySkip _ -> tally(rest, ok, sk + 1, mm)
+      | VerifyMismatch _ _ -> tally(rest, ok, sk, mm + 1)
+
+fn build_sig_table(decls: List typed_ast.TypedDecl, acc: Dict (List ast.TypeExpr, List ast.TypeConstraint)) -> Dict (List ast.TypeExpr, List ast.TypeConstraint) =
+  match decls with
+  | Nil -> acc
+  | Cons d rest ->
+      match d with
+      | typed_ast.TFnDecl name params _ _ constraints _ ->
+          match fn_sig(params, constraints) with
+          | Just sig -> build_sig_table(rest, dict_set(name, sig, acc))
+          | Nothing -> build_sig_table(rest, acc)
+      | _ -> build_sig_table(rest, acc)
+
+# A verifiable signature: has a where-clause AND every param is annotated (which a
+# where-clause guarantees in source, but stay defensive against synthesized decls).
+fn fn_sig(params: List ast.Param, constraints: List ast.TypeConstraint) -> Maybe (List ast.TypeExpr, List ast.TypeConstraint) =
+  match constraints with
+  | Nil -> Nothing
+  | _ ->
+      match all_annotated(params) with
+      | Nothing -> Nothing
+      | Just tes -> Just((tes, constraints))
+
+fn all_annotated(params: List ast.Param) -> Maybe (List ast.TypeExpr) =
+  match params with
+  | Nil -> Just(Nil)
+  | Cons p rest ->
+      match p with
+      | ast.Param _ (Just te) ->
+          match all_annotated(rest) with
+          | Just tes -> Just(Cons(te, tes))
+          | Nothing -> Nothing
+      | ast.Param _ Nothing -> Nothing
+
+fn collect_decls(decls: List typed_ast.TypedDecl, sigs: Dict (List ast.TypeExpr, List ast.TypeConstraint)) -> List VerifyOutcome =
+  match decls with
+  | Nil -> Nil
+  | Cons d rest -> list_append(collect_decl(d, sigs), collect_decls(rest, sigs))
+
+fn collect_decl(d: typed_ast.TypedDecl, sigs: Dict (List ast.TypeExpr, List ast.TypeConstraint)) -> List VerifyOutcome =
+  match d with
+  | typed_ast.TFnDecl _ _ _ _ _ body -> collect_expr(body, sigs)
+  | typed_ast.TInstanceDecl _ _ methods -> collect_methods(methods, sigs)
+  | _ -> Nil
+
+fn collect_methods(methods: List typed_ast.TypedInstanceMethod, sigs: Dict (List ast.TypeExpr, List ast.TypeConstraint)) -> List VerifyOutcome =
+  match methods with
+  | Nil -> Nil
+  | Cons m rest ->
+      match m with
+      | typed_ast.TypedInstanceMethod _ _ _ _ body ->
+          list_append(collect_expr(body, sigs), collect_methods(rest, sigs))
+
+# Walk an expression, checking every TCall and recursing into all subexpressions.
+fn collect_expr(e: typed_ast.TypedExpr, sigs: Dict (List ast.TypeExpr, List ast.TypeConstraint)) -> List VerifyOutcome =
+  match e with
+  | typed_ast.TCall callee args _ pos ->
+      list_append(check_call(callee, args, pos, sigs), collect_exprs(Cons(callee, args), sigs))
+  | typed_ast.TIf c th el _ _ -> collect_exprs([c, th, el], sigs)
+  | typed_ast.TMatch scrut branches _ _ ->
+      list_append(collect_expr(scrut, sigs), collect_branches(branches, sigs))
+  | typed_ast.TLambda _ body _ _ -> collect_expr(body, sigs)
+  | typed_ast.TBinary _ l r _ _ -> collect_exprs([l, r], sigs)
+  | typed_ast.TUnary _ x _ _ -> collect_expr(x, sigs)
+  | typed_ast.TRange lo hi _ _ -> collect_exprs([lo, hi], sigs)
+  | typed_ast.TTuple items _ _ -> collect_exprs(items, sigs)
+  | typed_ast.TDo steps _ _ -> collect_do_steps(steps, sigs)
+  | typed_ast.TRecord _ fields _ _ -> collect_record_fields(fields, sigs)
+  | typed_ast.TGetField x _ _ _ -> collect_expr(x, sigs)
+  | _ -> Nil
+
+fn collect_exprs(es: List typed_ast.TypedExpr, sigs: Dict (List ast.TypeExpr, List ast.TypeConstraint)) -> List VerifyOutcome =
+  match es with
+  | Nil -> Nil
+  | Cons h t -> list_append(collect_expr(h, sigs), collect_exprs(t, sigs))
+
+fn collect_branches(branches: List typed_ast.TypedMatchBranch, sigs: Dict (List ast.TypeExpr, List ast.TypeConstraint)) -> List VerifyOutcome =
+  match branches with
+  | Nil -> Nil
+  | Cons b rest ->
+      match b with
+      | typed_ast.TypedMatchBranch _ body ->
+          list_append(collect_expr(body, sigs), collect_branches(rest, sigs))
+
+fn collect_do_steps(steps: List typed_ast.TypedDoStep, sigs: Dict (List ast.TypeExpr, List ast.TypeConstraint)) -> List VerifyOutcome =
+  match steps with
+  | Nil -> Nil
+  | Cons s rest -> list_append(collect_step(s, sigs), collect_do_steps(rest, sigs))
+
+fn collect_step(s: typed_ast.TypedDoStep, sigs: Dict (List ast.TypeExpr, List ast.TypeConstraint)) -> List VerifyOutcome =
+  match s with
+  | typed_ast.TDoBindStep _ expr -> collect_expr(expr, sigs)
+  | typed_ast.TDoLetStep _ expr -> collect_expr(expr, sigs)
+  | typed_ast.TDoExprStep expr -> collect_expr(expr, sigs)
+
+fn collect_record_fields(fields: List typed_ast.TypedRecordField, sigs: Dict (List ast.TypeExpr, List ast.TypeConstraint)) -> List VerifyOutcome =
+  match fields with
+  | Nil -> Nil
+  | Cons f rest ->
+      match f with
+      | typed_ast.TypedRecordField _ expr ->
+          list_append(collect_expr(expr, sigs), collect_record_fields(rest, sigs))
+
+# Check one call: look up the callee's signature, split args into value-args and
+# injected dicts (by variant — prepend and append both yield dicts in order), and
+# verify. Returns every (constraint, dict) outcome for the call — Nil for a
+# non-constrained or unknown callee.
+fn check_call(callee: typed_ast.TypedExpr, args: List typed_ast.TypedExpr, pos: source.SourcePos, sigs: Dict (List ast.TypeExpr, List ast.TypeConstraint)) -> List VerifyOutcome =
+  match callee_name(callee) with
+  | Nothing -> Nil
+  | Just name ->
+      match dict_get(name, sigs) with
+      | Nothing -> Nil
+      | Just sig ->
+          match sig with
+          | (param_tes, constraints) ->
+              verify_call(param_tes, constraints, value_arg_types(args), dict_heads_of(args), pos)
+
+fn callee_name(e: typed_ast.TypedExpr) -> Maybe String =
+  match e with
+  | typed_ast.TVar name _ _ -> Just(name)
+  | _ -> Nothing
+
+# Value-arg types: the concrete (zonked) type of each non-TDict argument, in order.
+fn value_arg_types(args: List typed_ast.TypedExpr) -> List types.Type =
+  match args with
+  | Nil -> Nil
+  | Cons a rest ->
+      match a with
+      | typed_ast.TDict _ _ _ _ -> value_arg_types(rest)
+      | _ -> Cons(typed_ast.typed_expr_type(a), value_arg_types(rest))
+
+# Injected dict heads: (class, Just concrete-head | Nothing polymorphic), in order.
+fn dict_heads_of(args: List typed_ast.TypedExpr) -> List (String, Maybe String) =
+  match args with
+  | Nil -> Nil
+  | Cons a rest ->
+      match a with
+      | typed_ast.TDict (ast.TypeConstraint cls head_args) _ _ _ ->
+          Cons((cls, dict_head_from_args(head_args)), dict_heads_of(rest))
+      | _ -> dict_heads_of(rest)
+
+fn dict_head_from_args(head_args: List ast.TypeExpr) -> Maybe String =
+  match head_args with
+  | Cons te _ -> dict_head_te(te)
+  | Nil -> Nothing
+
+# The concrete head name of a resolved dict's constraint TypeExpr, or Nothing if
+# the head is a type variable (a forwarded/polymorphic dict — legitimately skipped).
+fn dict_head_te(te: ast.TypeExpr) -> Maybe String =
+  match te with
+  | ast.TypeName n -> if starts_lower(n) then Nothing else Just(short(n))
+  | ast.TypeApply base _ -> dict_head_te(base)
+  | ast.TupleType items -> Just("Tuple" ++ int_to_string(list_length(items)))
+  | _ -> Nothing
+
+fn first_mismatch(outcomes: List VerifyOutcome) -> Maybe(source.SourcePos, String) =
+  match outcomes with
+  | Nil -> Nothing
+  | Cons o rest ->
+      match o with
+      | VerifyMismatch pos msg -> Just((pos, msg))
+      | _ -> first_mismatch(rest)
