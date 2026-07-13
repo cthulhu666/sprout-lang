@@ -1,0 +1,10 @@
+import stdlib.collections (Vec, vec_sum_by)
+
+fn take_ints(v: Vec Int) -> Int =
+  vec_sum_by(\x -> x, v)
+
+# A String-element list literal in a Vec Int slot: the literal is lowered to
+# vec_from_list(["a","b"]) : Vec String, which mismatches the Vec Int parameter
+# at the element type.  The lowering does not paper over a genuine type error.
+fn use_it() -> Int =
+  take_ints(["a", "b"])

@@ -1,0 +1,10 @@
+import stdlib.collections (Vec, vec_sum_by)
+
+fn take_ints(v: Vec Int) -> Int =
+  vec_sum_by(\x -> x, v)
+
+# A non-literal List value (a variable) in a Vec Int slot is NOT coerced — only
+# syntactic list literals are.  This must remain a List-vs-Vec type error; it is
+# the boundary the literal-only lowering deliberately draws.
+fn use_it(xs: List Int) -> Int =
+  take_ints(xs)

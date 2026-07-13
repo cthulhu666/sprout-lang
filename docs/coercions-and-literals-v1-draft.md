@@ -260,13 +260,17 @@ the missing base instance.
 
 ## 7. Error-message impact
 
-**A.** Because the rewrite is unconditional on a literal in `Vec` position, an
-element-type mismatch surfaces as the ordinary `vec_from_list` application error:
-`[1,2]` in a `Vec String` slot becomes `vec_from_list([1,2])`, which fails
-unifying `List Int` against the `List String` parameter — an element-level
-message, not a bare "`List` vs `Vec`". Non-literal `List` values in `Vec`
-position are untouched and still produce the pre-existing `List` vs `Vec`
-mismatch (correct: those genuinely are not coercible here).
+**A.** (Verified against the compiler, not predicted.) The rewrite makes the two
+error modes diverge in a useful way:
+- A **literal** with the wrong element type surfaces an *element-level* error.
+  `["a","b"]` in a `Vec Int` slot is lowered to `vec_from_list(["a","b"])`, and
+  the checker reports `Call type mismatch: Type mismatch: Int vs String` — the
+  element mismatch, not a bare `List`/`Vec` one. (Fixture:
+  `tests/conformance/type_error/vec_literal_element_mismatch`.)
+- A **non-literal** `List` value in `Vec` position is *not* coerced and reports
+  `Call type mismatch: Type mismatch: Vec vs List` — the pre-existing
+  constructor mismatch (correct: it genuinely is not coercible here). (Fixture:
+  `tests/conformance/type_error/vec_nonliteral_list_not_coerced`.)
 
 **B.** `wrap Age = Int deriving (Num)` where `Num Int` is not in scope ⇒
 "cannot derive `Num` for `Age`: no instance `Num Int` to lift from". Deriving an
@@ -295,10 +299,14 @@ executable, all passing on stage-2.)
 - Negative guard: a real `Vec` value (`foldable_to_vec([...])`) passed to a `Vec`
   param passes through **unwrapped** — proves no double-wrap into
   `vec_from_list(vec)` (which would be a type error).
-- *Deferred (not built):* `List`-typed *variable* into a `Vec` param — still a
-  type error, as intended (§4.A "Deferred").
-- *Follow-up fixture:* element mismatch (`Vec String` vs `[1,2]`) → element
-  diagnostic via the `vec_from_list` application (§7.A).
+- Negative fixture (`tests/conformance/type_error/vec_literal_element_mismatch`):
+  a wrong-element literal (`["a","b"]` in `Vec Int`) is rejected with the
+  element-level `Int vs String` diagnostic (§7.A) — the lowering does not mask a
+  real error.
+- Negative fixture (`tests/conformance/type_error/vec_nonliteral_list_not_coerced`):
+  a `List`-typed *variable* in a `Vec` slot is *not* coerced and stays a
+  `Vec vs List` type error — verifies the literal-only boundary (§4.A "Deferred",
+  spec §5.5.1).
 
 **B.**
 - `wrap Age = Int deriving (Num, Ord, ToString)`: `age1 + age2 : Age`,
