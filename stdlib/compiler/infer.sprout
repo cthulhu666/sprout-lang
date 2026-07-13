@@ -4073,8 +4073,66 @@ fn check_fn_body(
                 | Just bad ->
                     (typed_ast.BodyErr(fn_pos, "Signature too general for its body in " ++ name ++ ": type variable " ++ bad), dict_empty())
                 | Nothing ->
-                    (typed_ast.BodyOk(resolve_dispatch_typed_expr(self_env, s2, typed_body), unifier.apply_subst(s2, inst_type)), fwd_markers)
+                    (typed_ast.BodyOk(resolve_dispatch_typed_expr(self_env, s2, typed_body), unifier.apply_subst(s2, inst_type)),
+                     canonicalize_constrained_markers(name, constraints, prog_to_fresh, s2, fwd_markers))
   | _ -> (typed_ast.BodyOk(dummy_unit(), types.TConst(types.type_id("Unit"))), dict_empty())
+
+# After body inference the @constrained_N:name markers registered at pre-scan
+# still key each constraint var by its SOURCE name (e.g. "k"). But the scheme
+# folded into the global env at generalization uses the fresh instantiation
+# names, renamed once more by the body's unification (s2). At an external call
+# site the resolver instantiates that generalized scheme, so prog_to_fresh is
+# keyed by the post-s2 names; a source-name marker misses the precise
+# dict_get(prog_var, prog_to_fresh) lookup in resolve_obligation and resolution
+# falls to the order-dependent scan_prog_to_fresh_for_instance heuristic — which
+# for a projection sort `vec_sort_by(f: a -> k, vec)` (k != a) grabs the ELEMENT
+# type a instead of the key type k, threading `Ord a` where `Ord k` was needed
+# (a dispatch soundness hole → SIGSEGV, since keys of type k are then compared
+# through the wrong representation). Rewrite each marker's var to its canonical
+# post-s2 name: `apply_subst(s2, prog_to_fresh[source_var])` is, by construction,
+# the generalized scheme's ftv for that constraint (the same expression that
+# builds inferred_fn_type = apply_subst(s2, inst_type)), so the call-site
+# dict_get hits the precise Just branch. These entries ride the fwd_markers dict
+# folded into the global env, overwriting the source-name markers. A constraint
+# whose var was pinned to a concrete type in the body is monomorphic and left
+# untouched (its source-name marker never needed forwarding).
+fn canonicalize_constrained_markers(
+  name: String,
+  constraints: List ast.TypeConstraint,
+  prog_to_fresh: Dict types.Type,
+  s2: Dict types.Type,
+  markers: Dict types.Scheme
+) -> Dict types.Scheme =
+  canonicalize_constrained_markers_acc(name, constraints, 0, prog_to_fresh, s2, markers)
+
+# idx advances once per constraint — matching register_constrained_fn_markers_acc
+# — so a skipped (pinned/absent) constraint still consumes its numbered slot and
+# later constraints overwrite the correct @constrained_N:name key.
+fn canonicalize_constrained_markers_acc(
+  name: String,
+  constraints: List ast.TypeConstraint,
+  idx: Int,
+  prog_to_fresh: Dict types.Type,
+  s2: Dict types.Type,
+  markers: Dict types.Scheme
+) -> Dict types.Scheme =
+  match constraints with
+  | Nil -> markers
+  | Cons c rest ->
+      match c with
+      | ast.TypeConstraint class_name type_args ->
+          match type_args with
+          | Cons (ast.TypeName prog_var) _ ->
+              match dict_get(prog_var, prog_to_fresh) with
+              | Just fresh_t ->
+                  match unifier.apply_subst(s2, fresh_t) with
+                  | types.TVar canon ->
+                      canonicalize_constrained_markers_acc(name, rest, idx + 1, prog_to_fresh, s2,
+                        dict_set("@constrained_" ++ int_to_string(idx) ++ ":" ++ name,
+                                 types.mono(types.TApp(types.TConst(types.type_id(class_name)), types.TConst(types.type_id(canon)))), markers))
+                  | _ -> canonicalize_constrained_markers_acc(name, rest, idx + 1, prog_to_fresh, s2, markers)
+              | Nothing -> canonicalize_constrained_markers_acc(name, rest, idx + 1, prog_to_fresh, s2, markers)
+          | _ -> canonicalize_constrained_markers_acc(name, rest, idx + 1, prog_to_fresh, s2, markers)
 
 fn fn_body_env(name: String, params: List ast.Param, inst_type: types.Type, env: Dict types.Scheme) -> Dict types.Scheme =
   extend_env_with_params(

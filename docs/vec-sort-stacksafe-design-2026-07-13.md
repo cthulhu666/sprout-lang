@@ -147,14 +147,14 @@ Add before implementing; the first must fail (crash) on today’s code
    with root-pool exhaustion on the old code; passes after. **Landed.**
 2. **Small cases** — empty, singleton, already-sorted, reverse-sorted, all-equal.
    **Landed.**
-3. **Stability** — DEFERRED. A stability test needs `(key, tag)` pairs sorted by
-   `key`, i.e. `vec_sort_by` with **key type ≠ element type**. That path hits a
-   *pre-existing* `Ord`-dict dispatch bug (crashes on both the old and new sort;
-   discovered 2026-07-13, tracked P1 in BACKLOG.md — the uncovered sibling of the
-   #141 `scan_fwd_markers` fix). Stability itself is preserved by construction
-   (`decorated_key_lt`’s (key, index) total order is byte-for-byte unchanged); the
-   stability test lands with the dispatch fix, when the projection path can run at
-   all.
+3. **Stability** — LANDED 2026-07-13 with the dispatch fix. A stability test needs
+   `(key, tag)` pairs sorted by `key`, i.e. `vec_sort_by` with **key type ≠ element
+   type**. That path hit a *pre-existing* `Ord`-dict dispatch bug (crashed on both
+   the old and new sort; the uncovered sibling of the #141 `scan_fwd_markers` fix),
+   now fixed via `canonicalize_constrained_markers` in `infer.sprout` (see
+   BACKLOG.md). Stability is preserved by construction (`decorated_key_lt`’s
+   (key, index) total order is byte-for-byte unchanged); the coverage now lives in
+   `tests/stdlib/test_vec_sort_projection.spr` (element ordering + stability).
 
 Run under `SPROUT_GC_STRESS=1` as well, since the change alters allocation/rooting
 shape in a hot recursive path.
