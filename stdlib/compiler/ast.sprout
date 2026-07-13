@@ -129,3 +129,9 @@ export type Decl (..) =
 
 export type Program (..) =
   | Program (List Decl) source.SourcePos
+
+# --- Synthesized identifier names ---
+# Source-level names of the List constructors, used when the parser/checker
+# build List AST nodes (VarExpr/CallExpr/ConstructorPattern) during desugaring.
+export let list_ctor_nil = "Nil"
+export let list_ctor_cons = "Cons"

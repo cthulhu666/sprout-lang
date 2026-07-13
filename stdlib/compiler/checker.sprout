@@ -291,15 +291,15 @@ fn collect_effective_parts_i(parts: List ast.TemplateExprPart, pos: source.Sourc
 # Indexed StringTemplate ADT lowering — used when expected type is StringTemplate.
 fn desugar_template_as_string_template_i(parts: List ast.TemplateExprPart, pos: source.SourcePos, fn_idx: Dict (List (Maybe String))) -> ast.Expr =
   if list_length(parts) == 0 then
-    wrap_string_template(ast.VarExpr("Nil", pos), pos)
+    wrap_string_template(ast.VarExpr(ast.list_ctor_nil, pos), pos)
   else if all_lit_parts(parts) then
     wrap_string_template(
       ast.CallExpr(
-        ast.VarExpr("Cons", pos),
-        Cons(
-          ast.CallExpr(ast.VarExpr("TemplateLit", pos), Cons(ast.StringExpr(merge_lit_parts(parts, ""), pos), Nil), pos),
-          Cons(ast.VarExpr("Nil", pos), Nil)
-        ),
+        ast.VarExpr(ast.list_ctor_cons, pos),
+        [
+          ast.CallExpr(ast.VarExpr("TemplateLit", pos), [ast.StringExpr(merge_lit_parts(parts, ""), pos)], pos),
+          ast.VarExpr(ast.list_ctor_nil, pos)
+        ],
         pos
       ),
       pos
@@ -525,11 +525,11 @@ fn collect_effective_parts(parts: List ast.TemplateExprPart, pos: source.SourceP
 
 fn build_cons_list(exprs: List ast.Expr, pos: source.SourcePos) -> ast.Expr =
   match exprs with
-  | Nil -> ast.VarExpr("Nil", pos)
+  | Nil -> ast.VarExpr(ast.list_ctor_nil, pos)
   | Cons e rest ->
       ast.CallExpr(
-        ast.VarExpr("Cons", pos),
-        Cons(e, Cons(build_cons_list(rest, pos), Nil)),
+        ast.VarExpr(ast.list_ctor_cons, pos),
+        [e, build_cons_list(rest, pos)],
         pos
       )
 
@@ -563,15 +563,15 @@ fn wrap_string_template(parts_list: ast.Expr, pos: source.SourcePos) -> ast.Expr
 
 fn desugar_template_as_string_template(parts: List ast.TemplateExprPart, pos: source.SourcePos) -> ast.Expr =
   if list_length(parts) == 0 then
-    wrap_string_template(ast.VarExpr("Nil", pos), pos)
+    wrap_string_template(ast.VarExpr(ast.list_ctor_nil, pos), pos)
   else if all_lit_parts(parts) then
     wrap_string_template(
       ast.CallExpr(
-        ast.VarExpr("Cons", pos),
-        Cons(
-          ast.CallExpr(ast.VarExpr("TemplateLit", pos), Cons(ast.StringExpr(merge_lit_parts(parts, ""), pos), Nil), pos),
-          Cons(ast.VarExpr("Nil", pos), Nil)
-        ),
+        ast.VarExpr(ast.list_ctor_cons, pos),
+        [
+          ast.CallExpr(ast.VarExpr("TemplateLit", pos), [ast.StringExpr(merge_lit_parts(parts, ""), pos)], pos),
+          ast.VarExpr(ast.list_ctor_nil, pos)
+        ],
         pos
       ),
       pos

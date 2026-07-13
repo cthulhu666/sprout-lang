@@ -369,7 +369,7 @@ fn parse_ident_pattern_atom(tokens: Vec token.Token, i: Int, name: String, pos: 
   else Ok((ast.VarPattern(name, pos), i + 1))
 
 fn nil_pattern(pos: source.SourcePos) -> ast.Pattern =
-  ast.ConstructorPattern("Nil", Nil, pos)
+  ast.ConstructorPattern(ast.list_ctor_nil, Nil, pos)
 
 fn parse_list_pattern(tokens: Vec token.Token, i: Int, pos: source.SourcePos) -> Result ParseError (ast.Pattern, Int) =
   match match_symbol(tokens, i, "]") with
@@ -397,7 +397,7 @@ fn parse_list_pattern_items(tokens: Vec token.Token, i: Int, acc: List ast.Patte
 fn build_cons_pattern(items: List ast.Pattern, tail: ast.Pattern, pos: source.SourcePos) -> ast.Pattern =
   match items with
   | Nil -> tail
-  | Cons h rest -> ast.ConstructorPattern("Cons", Cons(h, Cons(build_cons_pattern(rest, tail, pos), Nil)), pos)
+  | Cons h rest -> ast.ConstructorPattern(ast.list_ctor_cons, [h, build_cons_pattern(rest, tail, pos)], pos)
 
 # ---------------------------------------------------------------------------
 # Do expression helpers
@@ -855,7 +855,7 @@ fn parse_list_literal(tokens: Vec token.Token, i: Int) -> Result ParseError (ast
   do
     (_, i2) <- expected_symbol("[", tokens, i)
     match match_symbol(tokens, i2, "]") with
-    | Just (_, i3) -> Ok((ast.VarExpr("Nil", cur_pos(tokens, i)), i3))
+    | Just (_, i3) -> Ok((ast.VarExpr(ast.list_ctor_nil, cur_pos(tokens, i)), i3))
     | Nothing ->
         do
           (items, i3) <- collect_expr_list(tokens, i2, Nil)
@@ -864,9 +864,9 @@ fn parse_list_literal(tokens: Vec token.Token, i: Int) -> Result ParseError (ast
 
 fn desugar_list_literal(items: List ast.Expr, pos: source.SourcePos) -> ast.Expr =
   match items with
-  | Nil -> ast.VarExpr("Nil", pos)
+  | Nil -> ast.VarExpr(ast.list_ctor_nil, pos)
   | Cons head tail ->
-      ast.CallExpr(ast.VarExpr("Cons", pos), Cons(head, Cons(desugar_list_literal(tail, pos), Nil)), pos)
+      ast.CallExpr(ast.VarExpr(ast.list_ctor_cons, pos), [head, desugar_list_literal(tail, pos)], pos)
 
 fn parse_dict_literal(tokens: Vec token.Token, i: Int) -> Result ParseError (ast.Expr, Int) =
   do
