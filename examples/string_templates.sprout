@@ -5,7 +5,8 @@ module examples.string_templates
 # - a template in a StringTemplate context, keeping parts structured for a sink
 #
 # Run:
-#   python3 -m sprout.cli run examples/string_templates.sprout Ada 3
+#   mise exec -- just compile-native examples/string_templates.sprout /tmp/string_templates
+#   /tmp/string_templates Ada 3
 
 fn arg_or(index: Int, fallback: String) -> String !{IO} =
   match argv_get(index) with

@@ -16,7 +16,7 @@ module examples.ref_tutorial
 #   ref_write: Ref a, a  -> Unit   !{IO}   overwrite the value
 #
 # Run:
-#   python3 -m sprout.cli run examples/ref_tutorial.sprout
+#   mise exec -- just run examples/ref_tutorial.sprout
 
 # ---------------------------------------------------------------------------
 # Part 1: the basics

@@ -94,13 +94,10 @@ Typed TCP client builtins are also available and now use `Bytes` payloads for ra
 Application code should prefer the typed `stdlib.net` wrapper API over bare `Int` socket handles.
 Raw `bytes_*` primitives are internal to `stdlib.*`; application code should use `stdlib.bytes`.
 `to_string` rejects invalid UTF-8 and decoded NUL bytes; `read_c_string` is the intended helper for null-terminated protocol strings.
-`http_request` is available in interpreter and native modes for plain `http://` requests. Native mode also supports `https://` on macOS via the system TLS stack.
+`http_request` is available in native mode for plain `http://` requests, and also supports `https://` on macOS via the system TLS stack.
 Set `SPROUT_HTTP_TLS_DEBUG=1` when running a native binary to emit TLS handshake/read/write debug lines to stderr.
 
-Interpreter runtime has a swappable server model selected by `SPROUT_NET_MODEL`:
-
-- `reactor` (default): event loop / readiness-based echo server
-- `blocking`: simple blocking accept/read/write loop
+The native server (`stdlib.http_server` / `stdlib.net`) uses a single sequential blocking accept/read/write loop — one connection handled to completion at a time.
 
 ## Modules (experimental)
 

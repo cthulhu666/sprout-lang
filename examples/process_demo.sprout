@@ -4,8 +4,7 @@ import stdlib.process (ProcResult, proc_run, proc_run_stdin, proc_ok, proc_stdou
 # Demonstrates stdlib.process: running subprocesses and capturing their output.
 #
 # Run:
-#   python3 -m sprout.cli run examples/process_demo.sprout
-#   just run examples/process_demo.sprout
+#   mise exec -- just run examples/process_demo.sprout
 
 fn status_line(ok: Bool) -> String =
   if ok then "OK" else "FAILED"

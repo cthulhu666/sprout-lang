@@ -11,7 +11,7 @@ module examples.ref_union_find
 # The self-hosted typechecker planned for stdlib.compiler will use this pattern.
 #
 # Run:
-#   python3 -m sprout.cli run examples/ref_union_find.sprout
+#   mise exec -- just run examples/ref_union_find.sprout
 
 # Build a Vec of n Ref Int cells, each initialised to its own index (= root).
 fn make_parents(n: Int, i: Int, acc: Vec (Ref Int)) -> Vec (Ref Int) !{IO} =

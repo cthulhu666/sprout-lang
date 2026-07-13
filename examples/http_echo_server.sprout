@@ -4,7 +4,7 @@ import stdlib.http_server (HttpRequest, HttpServerResponse, ok, request_body, re
 # Multi-connection HTTP echo server (experimental helper surface).
 #
 # Run:
-#   SPROUT_NET_MODEL=reactor python3 -m sprout.cli run examples/http_echo_server.sprout
+#   mise exec -- just run examples/http_echo_server.sprout
 #
 # Then:
 #   curl -i http://127.0.0.1:8081/hello

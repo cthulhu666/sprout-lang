@@ -4,11 +4,8 @@ import stdlib.http_client (http_get)
 
 # Simple HTTP GET CLI client.
 #
-# Run:
-#   python3 -m sprout.cli run examples/http_get_cli.sprout http://127.0.0.1:8080/
-#
-# Or compile natively and pass the URL directly to the binary:
-#   python3 -m sprout.cli compile examples/http_get_cli.sprout --native -o /tmp/http_get_cli
+# Run (compile natively, then pass the URL to the binary):
+#   mise exec -- just compile-native examples/http_get_cli.sprout /tmp/http_get_cli
 #   /tmp/http_get_cli http://127.0.0.1:8080/
 
 fn http_error_message(err: HttpError) -> String =

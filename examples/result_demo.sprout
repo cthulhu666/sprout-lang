@@ -4,8 +4,9 @@ module examples.result_demo
 # sequencing.
 #
 # Run:
-#   python3 -m sprout.cli run examples/result_demo.sprout 21
-#   python3 -m sprout.cli run examples/result_demo.sprout 3
+#   mise exec -- just compile-native examples/result_demo.sprout /tmp/result_demo
+#   /tmp/result_demo 21
+#   /tmp/result_demo 3
 
 fn require_large(x: Int) -> Result String Int =
   if x > 10 then Ok(x) else Err("too-small")

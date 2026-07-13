@@ -4,7 +4,8 @@ import stdlib.string as string
 # Unicode-aware text summary demo.
 #
 # Run:
-#   python3 -m sprout.cli run examples/text_demo.sprout "zażółć gęślą jaźń"
+#   mise exec -- just compile-native examples/text_demo.sprout /tmp/text_demo
+#   /tmp/text_demo "zażółć gęślą jaźń"
 
 fn is_word_separator(ch: Char) -> Bool =
   ch == ' ' || ch == '\t' || ch == '\n' || ch == '\r'

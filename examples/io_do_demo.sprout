@@ -6,8 +6,8 @@ import stdlib.string
 # sequencing, including a pure local `let` step inside the effectful block.
 #
 # Run:
-#   python3 -m sprout.cli run examples/io_do_demo.sprout
-#   SPROUT_NAME="  Ada  " python3 -m sprout.cli run examples/io_do_demo.sprout
+#   mise exec -- just run examples/io_do_demo.sprout
+#   SPROUT_NAME="  Ada  " mise exec -- just run examples/io_do_demo.sprout
 
 fn configured_name() -> Maybe String !{IO} =
   do

@@ -3,7 +3,7 @@ module examples.do_notation_demo
 # Demonstrates the preferred narrow do notation for Maybe and Result sequencing.
 #
 # Run:
-#   python3 -m sprout.cli run examples/do_notation_demo.sprout
+#   mise exec -- just run examples/do_notation_demo.sprout
 
 fn half_if_even(x: Int) -> Maybe Int =
   if (x / 2) * 2 == x then Just(x / 2) else Nothing

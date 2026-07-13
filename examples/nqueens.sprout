@@ -11,7 +11,7 @@ module examples.nqueens
 # still holds the unmodified arrays after the recursive call returns.
 #
 # Run:
-#   python3 -m sprout.cli run examples/nqueens.sprout
+#   mise exec -- just run examples/nqueens.sprout
 # Expected output (N= label, count, wall-clock time):
 #   N=1: 1  (0.0 ms)
 #   ...

@@ -5,7 +5,8 @@ import stdlib.string as string
 # Regex ergonomics demo.
 #
 # Run:
-#   python3 -m sprout.cli run examples/regex_demo.sprout "ticket=AB-42 owner=ada"
+#   mise exec -- just compile-native examples/regex_demo.sprout /tmp/regex_demo
+#   /tmp/regex_demo "ticket=AB-42 owner=ada"
 
 fn render_match(raw: String, start: Int, end: Int, replaced: String, escaped: String) -> String =
   "matched="

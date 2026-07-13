@@ -2,12 +2,9 @@ module examples.tcp_echo_server
 import stdlib.net (tcp_echo_serve)
 
 # Multi-connection TCP echo server using stdlib.net.
-# Runtime model is selected by SPROUT_NET_MODEL:
-# - reactor (default)
-# - blocking
 #
-# Example:
-#   SPROUT_NET_MODEL=reactor python3 -m sprout.cli run examples/tcp_echo_server.sprout
+# Run:
+#   mise exec -- just run examples/tcp_echo_server.sprout
 
 fn main() -> Unit !{IO} =
   tcp_echo_serve(8081, 1000000)

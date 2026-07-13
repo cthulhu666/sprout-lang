@@ -8,7 +8,7 @@ import stdlib.string
 # sequencing, including a pure local `let` step inside the effectful block.
 #
 # Run:
-#   python3 -m sprout.cli run examples/io_result_do_demo.sprout
+#   mise exec -- just run examples/io_result_do_demo.sprout
 
 fn random_payload_size() -> Result crypto.CryptoError Int !{IO} =
   do

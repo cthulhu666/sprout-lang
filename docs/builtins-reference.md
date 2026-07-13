@@ -376,7 +376,7 @@ Current experimental scope:
 - `Content-Length` request bodies
 - `Connection: close` responses only
 - sequential request handling per accepted connection
-- no keep-alive, chunked transfer encoding for server responses, TLS server support, or multi-reactor native server runtime yet
+- no keep-alive, chunked transfer encoding for server responses, TLS server support, or concurrent connection handling yet
 
 JSON stdlib helpers (in `stdlib/json.sprout`):
 
