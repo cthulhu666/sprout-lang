@@ -543,16 +543,21 @@ GC untouched throughout. Effects untouched throughout.
 
 ## 8. Open questions (to resolve before an approved design)
 
-1. **Task representation:** stackful green threads (simple, but stack memory per task
-   and a GC-rooting story for suspended stacks) vs. CPS/continuation transform in the
-   compiler (no native stacks, but a compiler pass and interacts with TCO). Which fits
-   Sprout's current codegen + GC rooting best?
+1. **Task representation — RESOLVED (spike, §8.5):** **stackful green threads**
+   (`ucontext`-style). Validated against the real runtime. Hard constraint the spike
+   pins: task stacks must be **non-moving** (root slots are addresses into the parked
+   stack, read by the collector while suspended) — this rules out copying/segmented/
+   growable green stacks unless the rooting scheme changes. CPS/continuation transform
+   not needed (would only be revisited if stackful proved intractable — it didn't).
 2. **do-notation × cancellation:** when `<-` short-circuits on `Err` inside a scope,
    the desugaring must trigger sibling cancellation *and* run cleanup before
    `with_scope` returns. Pin down exactly how the existing effect/Result-polymorphic
    `do` composes with structured cancellation.
-3. **GC rooting of suspended tasks:** a parked task's live locals must remain rooted
-   across the pause. With stackful tasks this is a new root source for the collector.
+3. **GC rooting of suspended tasks — RESOLVED (spike, §8.5):** per-task temp-root
+   stacks, selected by a current-task pointer swapped at every context switch, with
+   `sprout_gc_mark_roots` scanning ALL tasks' stacks. ~40 lines, **runtime-only, three
+   functions, no codegen change** (generated push/pop already routes through these). The
+   persistent-root list (`g_root_nodes`) stays global, untouched.
 4. **Backpressure / bounded channels:** default channel semantics (unbounded vs.
    bounded-with-parking) and how they interact with connection pooling to Postgres.
 5. **Connection pooling** (Postgres/Redis): pool as an actor? as a channel of
@@ -570,6 +575,46 @@ GC untouched throughout. Effects untouched throughout.
    shipping* a cross-task mutable-share API. Confirm nothing in the existing `ref`/MutVec
    surface already lets a closure captured by `scope_spawn` alias a parent's mutable cell
    — if it does, that is a forward-compat leak to close now.
+
+---
+
+## 8.5 Spike validation (2026-07-13) — the two hardest unknowns retired
+
+Two throwaway C spikes (ucontext tasks + the *real* runtime/collector, under
+`SPROUT_GC_STRESS=1` so every allocation collects) settled the load-bearing risks.
+
+**Spike 1 — GC rooting of suspended tasks.** A scripted non-nested push/yield/pop
+interleave (the pattern a single global root-LIFO cannot represent). Controlled, 3 runs:
+
+| Rooting model | Result | Verdict |
+|---|---|---|
+| Single shared global root stack (baseline) | suspended task's live object collected | **RED** (bug real) |
+| Per-task root stacks + mark-all-tasks | object survived | **GREEN** (fix works) |
+| Per-task, but victim's ctx hidden from mark (negative control) | object collected again | **RED** (fix is load-bearing, not luck) |
+
+Oracle: forced slot-reuse + value check (the region allocator is opaque to ASan, which
+ran as a secondary net). Conclusion: **rooting works; ~40-line, runtime-only, no
+collector rewrite** (see §8 Q1/Q3). Confirmed the key structural fact — because
+*cooperative* tasks never switch mid-alloc/mid-collect, the temp-root LIFO is the **only**
+shared runtime state a switch can corrupt; everything else needed zero change.
+
+**Spike 2 — scheduler + `kqueue` netpoller + real I/O park.** A cooperative scheduler
+(ready queue + park/wake) where a task doing blocking-style `read()` hits `EAGAIN`,
+registers the fd, and parks; the scheduler blocks in `kevent` and wakes it on readiness.
+A GC root held in an outer frame, across a **real park two frames deep**, survived a
+200-allocation GC storm driven by a *second* task while the holder was suspended. The
+scheduler owns the per-task root switch (one structural call site).
+
+**Bonus finding (reasoned, verify in the real build):** because `mark_roots` scans *all*
+tasks' contexts, value-liveness is *decoupled* from per-switch correctness — a mistimed
+switch degrades to a **loud pop-accounting/underflow assert**, not a silent
+use-after-free. That downgrades the switch-point-alignment risk from "silent corruption"
+to "debuggable assert."
+
+**Scope:** these retire the *rooting* and *netpoller-integration* unknowns only. Not
+proven: many-task fairness, nested scopes, the `stdlib.task` API, integration with
+*generated* Sprout code (spikes drove push/pop from C), and anything multi-core. Those
+are the real implementation. Spikes are throwaway (kept in a scratchpad, not the tree).
 
 ---
 
@@ -621,6 +666,13 @@ delivers end-user ergonomics at the framework layer (§0.6) rather than distorti
 primitives, and leaves channels, actors, and a future parallel game backend fully open
 as additive work. Performance (single-core for now) is deliberately deferred per
 principle 5.
+
+**Status update (2026-07-13):** the two hardest technical unknowns behind this
+recommendation — GC rooting of suspended tasks, and scheduler/netpoller integration —
+are now **empirically retired by spikes (§8.5)**. The green-threaded, cooperative,
+single-thread substrate is validated as viable on the *current* runtime and GC, with a
+small (~40-line, runtime-only) rooting change and no collector or codegen rewrite. The
+exploration phase is complete; what remains is the real, test-first implementation.
 
 **Decision needed from Kuba:** confirm (a) the layered substrate-plus-models
 architecture, and (b) structured concurrency as the first model — or redirect. Once
