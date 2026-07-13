@@ -14,6 +14,35 @@ Tools and protocols to reach for **when something is broken** in the Sprout comp
 1. Run `--phase scan-info` to confirm `scan_source_info` returns a valid non-empty module name.
 2. If the name looks correct, run `--phase dump-qualify` to find which module has `ctx: EMPTY`.
 
+## Typeclass dictionary dispatch (`SPROUT_TRACE_DISPATCH`)
+
+**Reach for this when a program SIGSEGVs or corrupts inside typeclass-generic
+code** (a `where Ord k` / `Eq a` function, `to_string`, `++`/`mconcat`) — the
+symptom of a *mis-resolved dictionary*: the wrong instance is threaded for a
+constraint, so a value is dereferenced through the wrong type's dict. Dispatch is
+unenforced, so this is a runtime crash, not a type error (see
+[retro-dict-dispatch-soundness-2026-07-13.md](retro-dict-dispatch-soundness-2026-07-13.md)).
+
+Set the env var and recompile; the compiler prints one line per constrained call
+site to **stderr** (compile-time, not the program's output). Zero cost when unset.
+
+```
+SPROUT_TRACE_DISPATCH=1 ./build/compile_driver_bin_stage1 --emit-ir stdlib prog.spr >/dev/null
+```
+
+```
+[dispatch] callee=vec_sort_by class=Ord var=$t680 $t677->Tuple2 $t680->Int path=precise-just -> Ord Int
+```
+
+Read it as: constraint `Ord` on var `$t680` (which resolved to `Int`) picked the
+`Ord Int` dict via the `precise-just` branch. The `<var>-><resolved>` map shows
+each constraint var's concrete type — an element-vs-key mismatch (e.g. the dict
+head is `Ord Tuple2` while the key var resolved to `Int`) is the smoking gun.
+Path tags ending in `(guess)` mark the order-dependent heuristics
+(`scan_prog_to_fresh_for_instance`, `first_concrete_arg`) — a `(guess)` on a
+constraint that should have resolved precisely is the soundness-hole signature.
+The trace covers the parametric (`C k`) constraint arm of `inject_constrained_fn_dicts`.
+
 ## `just llvm-where <ll_file> <line>` — map an error line to its Sprout function
 
 When `opt --passes=verify` (or clang) reports a malformed-IR error at line N of a large `.ll` file, this tool walks the file up from line N to the nearest enclosing `define` and prints the Sprout qualified name.

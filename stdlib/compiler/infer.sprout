@@ -1520,6 +1520,71 @@ fn scan_fwd_markers_for_prog_var(
             | _ -> scan_fwd_markers_for_prog_var(class_name, prog_var, rest, pos)
           else scan_fwd_markers_for_prog_var(class_name, prog_var, rest, pos)
 
+# --- SPROUT_TRACE_DISPATCH diagnostic ---------------------------------------
+#
+# resolve_obligation returns, alongside the chosen dict, a *path tag* naming which
+# cascade branch resolved it. When the SPROUT_TRACE_DISPATCH env var is set,
+# inject_constrained_fn_dicts (the single caller, already !{IO}) emits one line per
+# constrained call site so a dispatch mis-resolution (the vec_sort_by projection
+# crash, #141, the `++`/mconcat null-fill) can be diagnosed in one compile instead
+# of two stage-2 rebuilds with hand-rolled panics. The trace lives at the IO
+# boundary, NOT inside the pure resolver, keeping IO out of the inference core
+# (observability guard-rail #3). The two `(guess)` tags mark the order-dependent
+# heuristics that grab a plausible-but-wrong dict — motivation for backlog item 3.
+
+# Head name of a TypeExpr, mirroring concrete_type_str's head extraction for Types.
+fn dispatch_head_str(te: ast.TypeExpr) -> String =
+  match te with
+  | ast.TypeName n -> n
+  | ast.TypeApply base _ -> dispatch_head_str(base)
+  | ast.TupleType items -> "Tuple" ++ int_to_string(list_length(items))
+  | _ -> "?"
+
+# The resolved dict's head type, read out of the TDict's constraint TypeExpr
+# (evidence is still EvUnresolved at this stage, so the TypeConstraint is the source).
+fn tdict_head_str(td: typed_ast.TypedExpr) -> String =
+  match td with
+  | typed_ast.TDict (ast.TypeConstraint _ (Cons head_te _)) _ _ _ -> dispatch_head_str(head_te)
+  | _ -> "?"
+
+fn resolved_head_str(class_name: String, resolved: Maybe typed_ast.TypedExpr) -> String =
+  match resolved with
+  | Nothing -> "UNRESOLVED"
+  | Just td -> class_name ++ " " ++ tdict_head_str(td)
+
+# Render each prog_var->resolved-head pair (via s3), so `k->Int a->(Int,Int)` next to
+# `-> Ord (Int,Int)` makes an element-vs-key mismatch self-evident.
+fn render_ptf_entry(k: String, t: types.Type, s3: Dict types.Type) -> String =
+  match concrete_type_str(unifier.apply_subst(s3, t)) with
+  | Just h -> k ++ "->" ++ h
+  | Nothing -> k ++ "->?"
+
+fn render_ptf_go(entries: List (String, types.Type), s3: Dict types.Type) -> String =
+  match entries with
+  | Nil -> ""
+  | Cons e rest ->
+      match e with
+      | (k, t) ->
+          match rest with
+          | Nil -> render_ptf_entry(k, t, s3)
+          | _ -> render_ptf_entry(k, t, s3) ++ " " ++ render_ptf_go(rest, s3)
+
+fn render_ptf_resolved(prog_to_fresh: Dict types.Type, s3: Dict types.Type) -> String =
+  render_ptf_go(vec_to_list(dict_entries(prog_to_fresh)), s3)
+
+# Emit one dispatch line when SPROUT_TRACE_DISPATCH is set. The env read happens per
+# constrained call site (cheap getenv); the string-building — which walks prog_to_fresh
+# — is fully inside the Just branch, so it is zero-cost when the flag is off.
+fn trace_dispatch(callee: String, class_name: String, prog_var: String,
+                  prog_to_fresh: Dict types.Type, s3: Dict types.Type,
+                  resolved: Maybe typed_ast.TypedExpr, path: String) -> Unit !{IO} =
+  match env_get("SPROUT_TRACE_DISPATCH") with
+  | Nothing -> ()
+  | Just _ ->
+      eprint("[dispatch] callee=" ++ callee ++ " class=" ++ class_name
+             ++ " var=" ++ prog_var ++ " " ++ render_ptf_resolved(prog_to_fresh, s3)
+             ++ " path=" ++ path ++ " -> " ++ resolved_head_str(class_name, resolved))
+
 # resolve_obligation: the principled path for constrained regular-function dict injection.
 # Uses prog_to_fresh (the instantiation mapping from programmer vars to fresh TVars) to
 # find the concrete type for the constraint variable, then looks up the instance.
@@ -1531,6 +1596,10 @@ fn scan_fwd_markers_for_prog_var(
 # correct @fwd marker is found by prog_var rather than by first-TVar-arg heuristic.
 # This matters when multiple constraints share a class (e.g. Eq a, Eq b): scanning by
 # prog_var finds the right marker for each obligation independently.
+#
+# Returns (chosen dict, path tag). The path tag names the resolving branch for the
+# SPROUT_TRACE_DISPATCH trace; the two `(guess)` tags mark the order-dependent
+# heuristics (scan_prog_to_fresh_for_instance / first-concrete-arg).
 fn resolve_obligation(
   class_name: String,
   prog_var: ProgVarName,
@@ -1540,19 +1609,19 @@ fn resolve_obligation(
   env: Dict types.Scheme,
   pos: source.SourcePos,
   excluded: List String
-) -> Maybe typed_ast.TypedExpr =
+) -> (Maybe typed_ast.TypedExpr, String) =
   # Unwrap once at the entry — internal helpers (scan_ptf_for_prog_var,
   # resolve_via_fwd_for_prog_var) operate on raw String, both as dict keys
   # and as content compared against stored prog_var entries.
   match dict_get(prog_var_str(prog_var), prog_to_fresh) with
   | Nothing ->
       match scan_ptf_for_prog_var(class_name, prog_var_str(prog_var), prog_to_fresh, s3, env, pos, excluded) with
-      | Just tdict -> Just(tdict)
+      | Just tdict -> (Just(tdict), "scan_ptf")
       | Nothing ->
           match resolve_via_fwd_for_prog_var(class_name, prog_var_str(prog_var), env, pos) with
           | Nothing ->
               match scan_prog_to_fresh_for_instance(class_name, prog_to_fresh, s3, env, pos, excluded) with
-              | Just tdict2 -> Just(tdict2)
+              | Just tdict2 -> (Just(tdict2), "scan_prog_to_fresh_for_instance(guess)")
               | Nothing ->
                   # The constraint variable resolved to a type variable, not a
                   # concrete head (scan_prog_to_fresh_for_instance found no @inst).
@@ -1564,9 +1633,9 @@ fn resolve_obligation(
                   # is keyed by the caller's fresh var, not the callee's constraint
                   # var name, so scan for the class's forward marker directly.
                   match scan_fwd_markers(class_name, env, pos) with
-                  | Just fwd_tdict -> Just(fwd_tdict)
-                  | Nothing -> resolve_one_constraint_tdict(class_name, user_args, s3, env, pos, excluded)
-          | fwd -> fwd
+                  | Just fwd_tdict -> (Just(fwd_tdict), "scan_fwd_markers")
+                  | Nothing -> (resolve_one_constraint_tdict(class_name, user_args, s3, env, pos, excluded), "first_concrete_arg(guess)")
+          | fwd -> (fwd, "fwd_for_prog_var")
   | Just fresh_t ->
       match concrete_type_str(unifier.apply_subst(s3, fresh_t)) with
       | Just head_str ->
@@ -1575,13 +1644,13 @@ fn resolve_obligation(
           # concrete type; they need the same dict, not a different one).
           match dict_get("@inst:" ++ class_name ++ ":" ++ head_str, env) with
           | Just _ ->
-              Just(typed_ast.TDict(
+              (Just(typed_ast.TDict(
                 ast.TypeConstraint(class_name, Cons(type_to_typeexpr_with_prog_vars(unifier.apply_subst(s3, fresh_t), class_name, env), Nil)),
-                types.TConst(types.type_id(class_name)), pos, typed_ast.EvUnresolved))
+                types.TConst(types.type_id(class_name)), pos, typed_ast.EvUnresolved)), "precise-just")
           | Nothing ->
-              resolve_via_fwd_or_scan(class_name, user_args, s3, env, pos)
+              (resolve_via_fwd_or_scan(class_name, user_args, s3, env, pos), "precise_no_inst->fwd_or_scan")
       | Nothing ->
-          resolve_via_fwd_or_scan(class_name, user_args, s3, env, pos)
+          (resolve_via_fwd_or_scan(class_name, user_args, s3, env, pos), "precise_tyvar->fwd_or_scan")
 
 fn inject_constrained_fn_dicts(
   name: String,
@@ -1607,10 +1676,14 @@ fn inject_constrained_fn_dicts(
           # type variable name (from the constraint head), not a compiler-generated
           # fresh TVar name. Confusing these would silently break cascade resolution.
           match resolve_obligation(types.type_id_name(class_name), ProgVarName(types.type_id_name(prog_var)), prog_to_fresh, s3, user_typed_args(typed_args), env, pos, collect_injected_heads_for_class(types.type_id_name(class_name), typed_args)) with
-          | Nothing ->
-              inject_constrained_fn_dicts(name, idx + 1, prog_to_fresh, env, typed_callee, typed_args, subst, ret_t, s3, es3, call_eff, pos)
-          | Just tdict ->
-              inject_constrained_fn_dicts(name, idx + 1, prog_to_fresh, env, typed_callee, list_append(typed_args, Cons(tdict, Nil)), subst, ret_t, s3, es3, call_eff, pos)
+          | (resolved, path) ->
+              do
+                _ <- trace_dispatch(name, types.type_id_name(class_name), types.type_id_name(prog_var), prog_to_fresh, s3, resolved, path)
+                match resolved with
+                | Nothing ->
+                    inject_constrained_fn_dicts(name, idx + 1, prog_to_fresh, env, typed_callee, typed_args, subst, ret_t, s3, es3, call_eff, pos)
+                | Just tdict ->
+                    inject_constrained_fn_dicts(name, idx + 1, prog_to_fresh, env, typed_callee, list_append(typed_args, Cons(tdict, Nil)), subst, ret_t, s3, es3, call_eff, pos)
       | types.Scheme _ _ (types.TConst class_name) _ ->
           match resolve_one_constraint_tdict(types.type_id_name(class_name), user_typed_args(typed_args), subst, env, pos, collect_injected_heads_for_class(types.type_id_name(class_name), typed_args)) with
           | Nothing ->

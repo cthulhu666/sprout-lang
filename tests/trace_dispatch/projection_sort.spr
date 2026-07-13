@@ -1,0 +1,18 @@
+import stdlib.test (TestState, new_state, summary)
+
+# Fixture for `just trace-dispatch-smoke`. Compiling this exercises a projection
+# sort (`vec_sort_by(f, v)` with key type != element type), whose `Ord k`
+# obligation resolves through resolve_obligation. With SPROUT_TRACE_DISPATCH=1
+# the compiler must emit a `[dispatch] ... path=precise-just -> Ord Int` line for
+# that call site (the precise path since the df36c0d canonicalize-markers fix).
+# It only needs to COMPILE; the trace fires at inference time.
+
+fn fst(p: (Int, Int)) -> Int =
+  match p with
+  | (k, _) -> k
+
+fn main() -> Unit !{IO} =
+  do
+    let v = foldable_to_vec([(3, 100), (1, 200), (2, 50)])
+    let sorted = vec_sort_by(fst, v)
+    print(int_to_string(vec_length(sorted)))

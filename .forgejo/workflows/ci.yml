@@ -107,17 +107,20 @@ jobs:
         # fizzbuzz) compiles AND runs to completion without crash.
         run: just run-example-canary
 
-      - name: Regression smokes (argv / div-by-zero / stack-overflow / typed-codegen TCO)
+      - name: Regression smokes (argv / div-by-zero / stack-overflow / typed-codegen TCO / dispatch-trace)
         # Permanent codegen+runtime regression guards, green since the typed-codegen
         # flip landed. argv-smoke: typed main shim wires @sprout_set_argv. div-by-zero
         # + stack-overflow: clean panic, not LLVM UB / silent SIGSEGV. tco-runtime:
         # deep tail recursion completes under typed codegen (no per-iteration frame or
-        # root-pool leak). See the justfile `smoke` group.
+        # root-pool leak). trace-dispatch: SPROUT_TRACE_DISPATCH emits a per-call-site
+        # dict-resolution trace and a projection sort resolves through the precise
+        # branch. See the justfile `smoke` group.
         run: |
           just argv-smoke
           just div-by-zero-smoke
           just stack-overflow-smoke
           just tco-runtime-smoke
+          just trace-dispatch-smoke
 
       - name: GC safety check
         run: just gc-safety-check --strict

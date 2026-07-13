@@ -483,8 +483,15 @@ trivial; the payoff is the first time anyone has to debug the pass without
 rebuilding the seed.
 
 **Examples.** `SPROUT_TIME_PHASES` is the existing template (`compile_driver.sprout`);
-extend the same pattern per new pass — e.g. `SPROUT_TRACE_DICT_INJECTION`
-in `resolve_obligation`, `SPROUT_TRACE_ETA` in `try_eta_in_class`.
+extend the same pattern per new pass — e.g. `SPROUT_TRACE_ETA` in `try_eta_in_class`.
+The dict-injection trace landed 2026-07-13 as **`SPROUT_TRACE_DISPATCH`** (this
+rule's first uptake). Note the deviation from "in `resolve_obligation`": the
+emit lives at the `inject_constrained_fn_dicts` IO boundary (its single caller),
+not inside `resolve_obligation`, which stays a pure function returning a `(dict,
+path-tag)` pair. This keeps IO out of the inference core (observability
+guard-rail #3, "effectful capabilities passed explicitly, not captured
+globally") — the tracing hook the rule asks for, without threading `!{IO}`
+through the pure resolver.
 
 **Priority.** High.
 

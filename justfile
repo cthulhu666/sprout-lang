@@ -795,6 +795,37 @@ loud-fail-smoke: bootstrap-from-seed
   fi
   echo "==> loud-fail-smoke ✓"
 
+# Dispatch-trace guard.  SPROUT_TRACE_DISPATCH=1 must emit a `[dispatch] ...` line
+# per constrained call site, and a projection sort (`vec_sort_by` with key type !=
+# element type) must resolve through the PRECISE branch (`path=precise-just -> Ord
+# Int`) — the invariant the df36c0d canonicalize-markers fix established. Also
+# asserts the flag is zero-output when unset (gating works). Regression for the
+# dict-dispatch soundness diagnostic (BACKLOG "Dispatch Soundness & Diagnostics"
+# item 2). See docs/retro-dict-dispatch-soundness-2026-07-13.md.
+[group('smoke')]
+trace-dispatch-smoke: bootstrap-from-seed
+  #!/usr/bin/env bash
+  set -euo pipefail
+  TMPD=$(mktemp -d /tmp/sprout_tds_XXXXXX)
+  trap 'rm -rf "$TMPD"' EXIT
+  FIXTURE=tests/trace_dispatch/projection_sort.spr
+  # With the flag set: compile must succeed and the projection sort must trace the precise path.
+  if ! SPROUT_TRACE_DISPATCH=1 "{{build_dir}}/compile_driver_bin_stage1" --emit-ir "{{stdlib_root}}" "$FIXTURE" > "$TMPD/out.ll" 2>"$TMPD/err"; then
+    echo "trace-dispatch-smoke: fixture failed to compile:" >&2; cat "$TMPD/err" >&2; exit 1
+  fi
+  if ! grep -q '\[dispatch\].*path=precise-just -> Ord Int' "$TMPD/err"; then
+    echo "trace-dispatch-smoke: expected a '[dispatch] ... path=precise-just -> Ord Int' line for the projection sort; got:" >&2
+    grep '\[dispatch\]' "$TMPD/err" >&2 || echo "  (no [dispatch] lines at all)" >&2
+    exit 1
+  fi
+  # With the flag unset: zero [dispatch] output (gating / zero-cost-when-off).
+  "{{build_dir}}/compile_driver_bin_stage1" --emit-ir "{{stdlib_root}}" "$FIXTURE" > /dev/null 2>"$TMPD/err_off"
+  if grep -q '\[dispatch\]' "$TMPD/err_off"; then
+    echo "trace-dispatch-smoke: emitted [dispatch] lines without SPROUT_TRACE_DISPATCH set:" >&2
+    cat "$TMPD/err_off" >&2; exit 1
+  fi
+  echo "==> trace-dispatch-smoke ✓"
+
 # Typed-codegen argv gate.  The typed `main` shim (ir_lowering.main_shim) must
 # call @sprout_set_argv(argc, argv) so a typed-built binary's argv_all() sees
 # its command-line arguments — the typed-codegen flip self-compiles the
