@@ -110,8 +110,9 @@ Dot-products must index-zip manually via `vec_get`. There is also no 2D
   must live in `do` blocks; effectful *list* iteration has limitations. Mutable
   weight updates in a training loop must be structured as recursion + `MutVec`,
   not a `map` over an effectful body.
-- **No `let … in` inside pure functions**, and **no `!`/`not` boolean
-  negation** (README "Not Yet Supported"). Minor readability impact. Unary minus
+- **No `let … in` inside pure functions** (README "Not Yet Supported"); the
+  word `not` is not an operator — use the `!` prefix, which works. Minor
+  readability impact. Unary minus
   `-x` works on both `Int` (`IRINeg` → `sub i64 0, x`) and `Double` (`IRFNeg` →
   `fneg double`); the two dispatch on operand type in `ast_to_ir`, because a
   naive `sub i64 0` on a double's i64 bit-pattern silently corrupts it (`-3.0`

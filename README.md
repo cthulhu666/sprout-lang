@@ -101,13 +101,15 @@ lives in functions, with `main` as the entrypoint.
 
 ## Not Yet Supported (Common Gotchas)
 
-The following are planned features not yet implemented. Each has a standard workaround.
+A few naming and syntax gotchas, each with the idiomatic form to use instead.
 
-**Boolean negation (`!expr`)**
-`!` is used only for effect annotations (`!{IO}`). Negate by restructuring:
+**Boolean negation is `!expr`, not `not`**
+Use the prefix `!` operator to negate a `Bool`; prefix `-` negates a number.
+The *word* `not` is not an operator and is a parse error.
 ```sprout
-# instead of: !is_valid(x)
-if is_valid(x) then false else true
+if !is_valid(x) then handle_error() else proceed()   # ! negates a Bool
+let below = -temperature                              # - negates a number
+# `not is_valid(x)` does NOT parse — use `!is_valid(x)`
 ```
 
 ## Iteration Combinators

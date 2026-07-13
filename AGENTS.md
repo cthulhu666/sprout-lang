@@ -145,4 +145,4 @@ For any non-trivial language change, include:
 
 ## Known Limitations
 
-See [README.md §Not Yet Supported](./README.md#not-yet-supported-common-gotchas) for language features that are planned but not yet implemented (`!expr` negation, `let..in` in pure functions, effectful list iteration), along with the standard workaround for each.
+See [README.md §Not Yet Supported](./README.md#not-yet-supported-common-gotchas) for current syntax and naming gotchas (e.g. the word `not` is not an operator — use the `!` prefix), along with the idiomatic form for each. (Prefix `!` and `-` negation and effectful list iteration via `list_each`/`list_fold` all work now; `let..in` inside pure functions remains a gap.)
