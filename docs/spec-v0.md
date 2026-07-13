@@ -404,6 +404,23 @@ template literal; there is no raw pass-through. A backslash followed by any othe
 character (e.g. `\r`, `\0`, `\z`) is a lexical error, mirroring how string and
 char literals reject unsupported escapes.
 
+### 5.5.1 List-literal lowering in a `Vec`-expected context
+
+A list literal `[e1, …, en]` normally denotes a `List a`. When a list literal
+appears in a position whose expected type is `Vec a` — a function argument for a
+`Vec`-typed parameter, or a function/method body whose return type is `Vec a` —
+the elaborator lowers it to `vec_from_list([e1, …, en])`, so it denotes a `Vec a`
+without an explicit `vec_from_list` call. This is a **literal-only** lowering,
+directed by the expected type name: only syntactic list literals are affected. A
+`List`-typed variable or other `List`-valued expression in a `Vec`-expected
+position is *not* coerced and remains a type error (a pre-existing `List` vs
+`Vec` mismatch), because a syntactic literal is the only expression form
+statically known to be a `List` prior to type inference. Empty `[]` in a
+`Vec`-expected context denotes an empty `Vec`. Plain `List`-expected and
+inference-driven contexts are unaffected. This parallels the `StringTemplate`
+lowering above (both are context-directed literal lowerings). Rationale and
+prior art: `docs/coercions-and-literals-v1-draft.md` (Case A).
+
 ## 6. Evaluation Semantics (Strict)
 
 1. Function application: evaluate callee, then args left-to-right.

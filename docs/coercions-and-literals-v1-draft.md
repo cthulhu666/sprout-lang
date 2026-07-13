@@ -117,27 +117,63 @@ consensus, not the C++/Scala-2 one.
 
 ## 4. High-level implementation overview (for approval before editing)
 
-### A. `List a → Vec a` elaborator coercion
+### A. `List a → Vec a` list-literal lowering — IMPLEMENTED
 
-Mirror the `StringTemplate → String` path. When the elaborator has an expected
-type `Vec τ` at a position whose inferred type is `List τ`, insert a call to
-`vec_from_list` around the expression. Concretely:
+> **Status: implemented** on `feat/vec-literal-coercion` (checker.sprout). This
+> section was corrected after implementation to describe the real mechanism; the
+> pre-implementation draft mis-described it as a unifier-level coercion firing on
+> any `List` value — see "Mechanism correction" below.
 
-1. Identify the coercion insertion point in the checker (the same site that
-   handles the `StringTemplate` case — expected-type-vs-actual-type
-   reconciliation).
-2. Add rule: expected `Vec a`, actual `List a` (same element unifier) ⇒ wrap in
-   `vec_from_list`. No new AST node; the inserted call is an ordinary
-   `CallExpr(VarExpr("vec_from_list"), [expr])`.
-3. Because `[1,2,3]` is already `Cons`-cells by the time the checker runs, this
-   fires uniformly on literals *and* on any `List`-typed expression in `Vec`
-   context — `vec_fn(some_list_var)` also works. That generality is a feature.
+Mirror the `StringTemplate → String` path — which is **not** a unifier-level
+coercion but a **syntactic, pre-typecheck desugar pass** (`checker.sprout`
+`desugar_program`). The pass threads an *expected type name* (a bare `String`,
+never a full inferred type) down the AST: `desugar_decl_i` uses the fn's return
+type name, `desugar_args_with_types` uses each param's type name from a fn-name
+index. Lowering keys off the **AST node shape** plus that expected name. It never
+sees inferred types. Concretely, as built:
+
+1. `type_texpr_to_maybe_name` now returns the **head constructor** of an applied
+   type (`Vec Int` → `"Vec"`, `Dict k v` → `"Dict"`), so a *parameterized*
+   expected type can activate a context. (Previously it returned `Nothing` for
+   any applied type — fine for the nullary `StringTemplate`, but the reason a
+   naive coercion branch alone did nothing for `Vec a`.)
+2. `desugar_expr_i`, when the expected name is `"Vec"` and the expression is a
+   **syntactic list literal** — a `Cons`-headed `CallExpr` or a bare
+   `VarExpr("Nil")` (the residue of parse-time list desugaring,
+   `parser.sprout:865`) — wraps the (recursively desugared) expression in
+   `CallExpr(VarExpr("vec_from_list"), [expr])`. `if`/`match` arms thread the
+   context so a literal in either arm is lowered (`ctx_is_active` gates both the
+   `"Vec"` and `"StringTemplate"` contexts through the shared arm-threading).
+
+**Mechanism correction (why literal-only, and why that is correct — not a
+compromise):** the pass cannot distinguish a `List`-typed variable from a
+`Vec`-typed one without inferred types, and `vec_from_list : List a → Vec a` is
+only well-typed on a `List`. Wrapping *unconditionally* in a `Vec` slot would
+turn the common case — passing a real `Vec` to a `Vec` parameter
+(`f(vec_empty())`) — into `vec_from_list(vec)`, a hard type error. A syntactic
+`Cons`/`Nil` head is the **one shape provably a `List`** without type info, so it
+is the *sound boundary*, not a limitation. This also matches the prior art
+exactly: Haskell `OverloadedLists` and Swift `ExpressibleByArrayLiteral` affect
+*literal syntax only*, never arbitrary values (§3.A). The pre-implementation
+draft's claim that it "fires on any `List`-typed expression / that generality is
+a feature" was wrong on both feasibility and prior-art grounds.
+
+Detection is a **head-check**, not a recursive full-literal validation: any
+`Cons`-headed application is a `List` by construction (its tail must typecheck as
+`List a` regardless), so wrapping it is always sound even when the tail is a
+variable — head-check is simpler *and* strictly more general at zero correctness
+cost.
 
 **Cost:** the literal still builds cons cells, then `vec_from_list` walks them
-once (O(n) + one intermediate list). This is *exactly* the cost users pay today
-when they write `vec_from_list([...])` by hand — so the coercion adds
-convenience at zero additional runtime cost. (Haskell's `OverloadedLists` pays
-the same cost; see §3.A.) A future zero-intermediate literal is deferred — §5.A.
+once (O(n) + one intermediate list) — *exactly* the cost of a hand-written
+`vec_from_list([...])`, so the sugar adds convenience at zero additional runtime
+cost. (Haskell's `OverloadedLists` pays the same cost; §3.A.) A future
+zero-intermediate literal is deferred — §5.A.
+
+**Deferred (not built):** coercing a `List`-typed *variable* (`f(some_list_var)`)
+into a `Vec` slot. That was never the stated pain and is infeasible in a
+pre-typecheck pass; it would need a post-typecheck rewrite over the typed AST
+(à la `resolve_dispatch_typed_expr`). Left as a follow-up.
 
 ### B. `wrap` instance lifting (NOT a coercion)
 
@@ -183,12 +219,14 @@ expressions.
 
 ## 5. Syntax and semantics impact
 
-**A.** No new surface syntax. `[…]` is unchanged; only its *typing in a
-`Vec`-expected context* gains a coercion. Evaluation semantics: the inserted
-`vec_from_list` is an ordinary strict call, evaluated after the list is built
-(consistent with §6 of the spec). List-expected and inferred-List contexts are
-untouched — no ambiguity, because the coercion only fires when the expected type
-is concretely `Vec`.
+**A.** No new surface syntax. `[…]` is unchanged; only a *syntactic list literal
+appearing in a `Vec`-expected position* is rewritten (to `vec_from_list([…])`)
+by the desugar pass. Evaluation semantics: the inserted `vec_from_list` is an
+ordinary strict call, evaluated after the list is built (consistent with §6 of
+the spec). `List`-typed variables/calls in `Vec` position are **not** rewritten
+(they still error, as before); only literal `Cons`/`Nil` syntax is. No ambiguity:
+the rewrite fires only when the expected type name is `"Vec"` and the node is a
+list-literal head.
 
 > §5.A generalization note (deferred): a future `IsList`-style class
 > (`from_list`/`from_list_n`) would let the same literal target `Set`/`Dict`
@@ -205,11 +243,14 @@ so lifted methods compile to the base type's code with the wrap as a no-op cast.
 
 ## 6. Type-system impact
 
-**A.** One new coercion rule in the expected-vs-actual reconciliation: `Vec a`
-expected + `List a` actual ⇒ insert `vec_from_list`, unifying element types.
-Must fire *only* on `Vec`-concrete expected types (never on a bare type
-variable), to avoid it masking genuine List/Vec mismatches or interfering with
-inference. No change to unification of `List` itself.
+**A.** No change to unification or the type system proper — the rewrite happens
+in the pre-typecheck desugar pass, so by the time inference runs it simply sees
+`vec_from_list([…]) : Vec a` and checks normally. The element type is checked by
+the ordinary `vec_from_list : List a → Vec a` application (a `Vec String`
+context around `[1,2]` fails at that application with a `List Int` vs `List
+String` element mismatch — see §7.A). Because the rewrite is gated on a
+concrete `"Vec"` expected *name* and a literal node shape, it never masks a
+genuine `List`/`Vec` mismatch on a non-literal expression.
 
 **B.** `wrap` gains typeclass membership via lifting. Coherence: a lifted
 `instance C W` must not overlap a hand-written one — reuse the existing
@@ -219,12 +260,13 @@ the missing base instance.
 
 ## 7. Error-message impact
 
-**A.** When a `List` is used where `Vec` is expected but element types differ,
-the message must point at the *element* mismatch, not report a bare
-"`List a` vs `Vec b`" after a failed coercion. The coercion should be attempted
-only after element unification succeeds. New diagnostic case worth a fixture:
-`Vec String` expected, `[1, 2]` given ⇒ "expected `Vec String`, this list has
-element type `Int`".
+**A.** Because the rewrite is unconditional on a literal in `Vec` position, an
+element-type mismatch surfaces as the ordinary `vec_from_list` application error:
+`[1,2]` in a `Vec String` slot becomes `vec_from_list([1,2])`, which fails
+unifying `List Int` against the `List String` parameter — an element-level
+message, not a bare "`List` vs `Vec`". Non-literal `List` values in `Vec`
+position are untouched and still produce the pre-existing `List` vs `Vec`
+mismatch (correct: those genuinely are not coercible here).
 
 **B.** `wrap Age = Int deriving (Num)` where `Num Int` is not in scope ⇒
 "cannot derive `Num` for `Age`: no instance `Num Int` to lift from". Deriving an
@@ -234,9 +276,9 @@ unliftable/undefined class should name both the wrap and the base.
 
 **A.** Purely additive. Existing `vec_from_list([...])` sites keep working; they
 can be simplified opportunistically but need not be. No behavior change to any
-`List`-typed program. The one risk is a previously-rejected program now type-
-checking (a `List` flowing into a `Vec` slot) — that is the intended new
-behavior, not a break.
+`List`-typed program. The one behavior change is that a previously-rejected
+program now type-checks when a `List`-*literal* sits in a `Vec` slot — the
+intended new behavior, not a break. (Non-literal `List` values are unaffected.)
 
 **B.** Additive relaxation of `spec-v0.md:343-344`. Existing hand-written
 `instance C Age` decls remain valid and take precedence (overlap check guards
@@ -245,14 +287,18 @@ lift and remove/qualify the blanket "cannot derive typeclasses" sentence.
 
 ## 9. Tests added/updated
 
-**A.**
-- `Vec`-expected literal: `fn f(v: Vec Int) -> …; f([1,2,3])` type-checks and
-  runs, `vec_get`/`vec_length` behave (executable, `tests/stdlib/`).
-- `List`-typed variable into `Vec` param coerces.
-- Negative: element mismatch (`Vec String` vs `[1,2]`) fails with the element
-  diagnostic (`tests/conformance/type_error/`).
-- Negative: `[1,2,3]` in a `List`-expected/`List`-inferred context stays a
-  `List` (no accidental coercion).
+**A.** (Implemented in `tests/stdlib/test_vec_literal_coercion.spr` — all
+executable, all passing on stage-2.)
+- Call-arg literal: `fn sum3(v: Vec Int) -> …; sum3([1,2,3])` type-checks, runs.
+- Return-position literal: `fn make_vec() -> Vec Int = [10,20,30]`.
+- Empty literal: `fn empty_vec() -> Vec Int = []` (exercises the `Nil` head).
+- Negative guard: a real `Vec` value (`foldable_to_vec([...])`) passed to a `Vec`
+  param passes through **unwrapped** — proves no double-wrap into
+  `vec_from_list(vec)` (which would be a type error).
+- *Deferred (not built):* `List`-typed *variable* into a `Vec` param — still a
+  type error, as intended (§4.A "Deferred").
+- *Follow-up fixture:* element mismatch (`Vec String` vs `[1,2]`) → element
+  diagnostic via the `vec_from_list` application (§7.A).
 
 **B.**
 - `wrap Age = Int deriving (Num, Ord, ToString)`: `age1 + age2 : Age`,
@@ -271,13 +317,14 @@ lift and remove/qualify the blanket "cannot derive typeclasses" sentence.
 
 ## 10. Spec/docs status
 
-Both features are EXPERIMENTAL until accepted. On acceptance:
-- **A.** Add a coercion clause near `spec-v0.md:395-400` (generalize the
-  "implicit coercion at expected type" paragraph to list `StringTemplate→String`
-  and `List→Vec`), and note the `IsList`-generalization as future work.
-- **B.** Revise `spec-v0.md` §5.6.1 to permit `deriving` on `wrap` for instance
-  lifting, spell out that lifting preserves distinctness, and cross-reference
-  `docs/deriving-v1-draft.md`.
+- **A. Implemented + spec updated.** `spec-v0.md` §5.5 (string interpolation)
+  gains a short clause documenting the parallel `List`-literal → `Vec` lowering:
+  a syntactic list literal in a `Vec`-expected position is lowered to
+  `vec_from_list([…])`, literal-only (non-literal `List` values are not
+  coerced). The `IsList`-generalization (§5.A) is noted as future work.
+- **B. Experimental (not built).** On acceptance, revise `spec-v0.md` §5.6.1 to
+  permit `deriving` on `wrap` for instance lifting, spell out that lifting
+  preserves distinctness, and cross-reference `docs/deriving-v1-draft.md`.
 
-Normative vs experimental status must be stated explicitly in the spec edits;
-until then this doc is the design record only.
+Normative vs experimental status is stated explicitly in the spec edits; this
+doc is the design record.

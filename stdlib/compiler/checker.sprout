@@ -158,15 +158,19 @@ fn desugar_instance_method_i(m: ast.InstanceMethodImpl, fn_idx: Dict (List (Mayb
   | ast.InstanceMethodImpl name params ret effs body ->
       ast.InstanceMethodImpl(name, params, ret, effs, desugar_expr_i(body, type_expr_bare_name(ret), fn_idx))
 
-# Context-aware indexed desugar.
+# Context-aware indexed desugar.  Two expected-type-name contexts are "active"
+# and lower literals by AST shape: "StringTemplate" (template ADT vs String) and
+# "Vec" (bare list literal -> vec_from_list).  Both thread the context through
+# if/match arms so a literal in either arm is lowered.  The pass is purely
+# syntactic — it never sees inferred types — so "Vec" only fires on a syntactic
+# list literal (the one shape provably a List without type info); a real Vec
+# argument falls through unwrapped.
 fn desugar_expr_i(expr: ast.Expr, expected: Maybe String, fn_idx: Dict (List (Maybe String))) -> ast.Expr =
   match expected with
   | Nothing -> desugar_expr_no_ctx_i(expr, fn_idx)
   | Just exp_name ->
-      if exp_name == "StringTemplate" then
+      if ctx_is_active(exp_name) then
         match expr with
-        | ast.StringTemplateExpr parts pos ->
-            desugar_template_as_string_template_i(parts, pos, fn_idx)
         | ast.IfExpr cond then_ else_ pos ->
             ast.IfExpr(
               desugar_expr_no_ctx_i(cond, fn_idx),
@@ -176,9 +180,37 @@ fn desugar_expr_i(expr: ast.Expr, expected: Maybe String, fn_idx: Dict (List (Ma
             )
         | ast.MatchExpr scrut branches pos ->
             ast.MatchExpr(desugar_expr_no_ctx_i(scrut, fn_idx), desugar_branches_i(branches, expected, fn_idx), pos)
-        | _ -> desugar_expr_no_ctx_i(expr, fn_idx)
+        | _ -> desugar_ctx_leaf_i(expr, exp_name, fn_idx)
       else
         desugar_expr_no_ctx_i(expr, fn_idx)
+
+# Expected-type names that trigger context-aware literal lowering.
+fn ctx_is_active(exp_name: String) -> Bool =
+  (exp_name == "StringTemplate") || (exp_name == "Vec")
+
+# Leaf lowering for an active context on a non-if/match expression.
+fn desugar_ctx_leaf_i(expr: ast.Expr, exp_name: String, fn_idx: Dict (List (Maybe String))) -> ast.Expr =
+  if exp_name == "Vec" then
+    match expr with
+    | ast.VarExpr name pos ->
+        if name == "Nil" then wrap_vec_from_list(desugar_expr_no_ctx_i(expr, fn_idx), pos)
+        else desugar_expr_no_ctx_i(expr, fn_idx)
+    | ast.CallExpr callee _ pos ->
+        match callee_var_name(callee) with
+        | Just cname ->
+            if cname == "Cons" then wrap_vec_from_list(desugar_expr_no_ctx_i(expr, fn_idx), pos)
+            else desugar_expr_no_ctx_i(expr, fn_idx)
+        | Nothing -> desugar_expr_no_ctx_i(expr, fn_idx)
+    | _ -> desugar_expr_no_ctx_i(expr, fn_idx)
+  else
+    match expr with
+    | ast.StringTemplateExpr parts pos ->
+        desugar_template_as_string_template_i(parts, pos, fn_idx)
+    | _ -> desugar_expr_no_ctx_i(expr, fn_idx)
+
+# Wrap an already-desugared list literal in vec_from_list so it denotes a Vec.
+fn wrap_vec_from_list(inner: ast.Expr, pos: source.SourcePos) -> ast.Expr =
+  ast.CallExpr(ast.VarExpr("vec_from_list", pos), Cons(inner, Nil), pos)
 
 fn desugar_branches_i(branches: List ast.MatchBranch, expected: Maybe String, fn_idx: Dict (List (Maybe String))) -> List ast.MatchBranch =
   match branches with
@@ -363,6 +395,11 @@ fn type_texpr_to_maybe_name(texpr: ast.TypeExpr) -> Maybe String =
   match texpr with
   | ast.TypeName tname ->
       Just(string.after_last_dot(tname))
+  | ast.TypeApply head _ ->
+      # Head constructor of an applied type: `Vec Int` -> "Vec", `Dict k v` ->
+      # "Dict".  Needed so a parameterized expected type activates a context
+      # (only "Vec"/"StringTemplate" act; other heads are inert names).
+      type_texpr_to_maybe_name(head)
   | _ ->
       Nothing
 
