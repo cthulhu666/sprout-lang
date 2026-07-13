@@ -297,7 +297,7 @@ fn desugar_template_as_string_template_i(parts: List ast.TemplateExprPart, pos: 
       ast.CallExpr(
         ast.VarExpr(ast.list_ctor_cons, pos),
         [
-          ast.CallExpr(ast.VarExpr("TemplateLit", pos), [ast.StringExpr(merge_lit_parts(parts, ""), pos)], pos),
+          ast.CallExpr(ast.VarExpr(ast.template_ctor_lit, pos), [ast.StringExpr(merge_lit_parts(parts, ""), pos)], pos),
           ast.VarExpr(ast.list_ctor_nil, pos)
         ],
         pos
@@ -319,17 +319,14 @@ fn collect_template_part_nodes_i(parts: List ast.TemplateExprPart, pos: source.S
           if str_len(text) == 0 then collect_template_part_nodes_i(rest, pos, fn_idx)
           else
             Cons(
-              ast.CallExpr(ast.VarExpr("TemplateLit", pos), Cons(ast.StringExpr(text, pos), Nil), pos),
+              ast.CallExpr(ast.VarExpr(ast.template_ctor_lit, pos), [ast.StringExpr(text, pos)], pos),
               collect_template_part_nodes_i(rest, pos, fn_idx)
             )
       | ast.InterpPart inner_expr ->
           Cons(
             ast.CallExpr(
-              ast.VarExpr("TemplateInterp", pos),
-              Cons(
-                ast.CallExpr(ast.VarExpr("to_string", pos), Cons(desugar_expr_no_ctx_i(inner_expr, fn_idx), Nil), pos),
-                Nil
-              ),
+              ast.VarExpr(ast.template_ctor_interp, pos),
+              [ast.CallExpr(ast.VarExpr("to_string", pos), [desugar_expr_no_ctx_i(inner_expr, fn_idx)], pos)],
               pos
             ),
             collect_template_part_nodes_i(rest, pos, fn_idx)
@@ -569,7 +566,7 @@ fn desugar_template_as_string_template(parts: List ast.TemplateExprPart, pos: so
       ast.CallExpr(
         ast.VarExpr(ast.list_ctor_cons, pos),
         [
-          ast.CallExpr(ast.VarExpr("TemplateLit", pos), [ast.StringExpr(merge_lit_parts(parts, ""), pos)], pos),
+          ast.CallExpr(ast.VarExpr(ast.template_ctor_lit, pos), [ast.StringExpr(merge_lit_parts(parts, ""), pos)], pos),
           ast.VarExpr(ast.list_ctor_nil, pos)
         ],
         pos
@@ -592,17 +589,14 @@ fn collect_template_part_nodes(parts: List ast.TemplateExprPart, pos: source.Sou
           if str_len(text) == 0 then collect_template_part_nodes(rest, pos)
           else
             Cons(
-              ast.CallExpr(ast.VarExpr("TemplateLit", pos), Cons(ast.StringExpr(text, pos), Nil), pos),
+              ast.CallExpr(ast.VarExpr(ast.template_ctor_lit, pos), [ast.StringExpr(text, pos)], pos),
               collect_template_part_nodes(rest, pos)
             )
       | ast.InterpPart inner_expr ->
           Cons(
             ast.CallExpr(
-              ast.VarExpr("TemplateInterp", pos),
-              Cons(
-                ast.CallExpr(ast.VarExpr("to_string", pos), Cons(desugar_expr(inner_expr), Nil), pos),
-                Nil
-              ),
+              ast.VarExpr(ast.template_ctor_interp, pos),
+              [ast.CallExpr(ast.VarExpr("to_string", pos), [desugar_expr(inner_expr)], pos)],
               pos
             ),
             collect_template_part_nodes(rest, pos)

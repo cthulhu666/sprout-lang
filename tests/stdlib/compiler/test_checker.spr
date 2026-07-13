@@ -4,6 +4,9 @@ import stdlib.compiler.parser as parser
 import stdlib.compiler.checker as checker
 import stdlib.compiler.source as source
 
+# run_check exercises checker.check_program, whose desugar_program path reads
+# ast.list_ctor_nil / ast.list_ctor_cons / ast.template_ctor_lit /
+# ast.template_ctor_interp when synthesizing List/TemplatePart AST nodes.
 fn run_check(src: String) -> checker.CheckResult !{IO} =
   match lexer.tokenize(src) with
   | Err _ -> checker.CheckErr(source.SourcePos(0, 0, 0), "lex error")

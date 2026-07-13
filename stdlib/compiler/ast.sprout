@@ -135,3 +135,8 @@ export type Program (..) =
 # build List AST nodes (VarExpr/CallExpr/ConstructorPattern) during desugaring.
 export let list_ctor_nil = "Nil"
 export let list_ctor_cons = "Cons"
+
+# Source-level names of the TemplatePart constructors, used by checker.sprout
+# when lowering a StringTemplateExpr into the StringTemplate ADT.
+export let template_ctor_lit = "TemplateLit"
+export let template_ctor_interp = "TemplateInterp"
