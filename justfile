@@ -4,6 +4,10 @@ stdlib_root := justfile_directory() / "stdlib"
 driver      := stdlib_root / "compiler" / "compile_driver.sprout"
 clang_extra := if os() == "macos" { "-framework Security -framework CoreFoundation" } else { "" }
 build_dir   := justfile_directory() / "build"
+# Single source of truth for the runtime C sources. A glob so splitting
+# sprout_runtime.c into more files (scheduler, GC, net, …) needs zero build edits.
+# Used UNQUOTED in recipes so bash expands it; every runtime .c is compiled+linked.
+runtime_src := "runtime/*.c"
 
 default:
   @just --list
@@ -100,7 +104,7 @@ build-fmt-from-seed: bootstrap-from-seed
   "$STAGE1" --emit-ir "{{stdlib_root}}" "$FMT_DRIVER" > "$TMP_LL"
   echo "==> Linking with clang..."
   mkdir -p "{{build_dir}}"
-  clang "$TMP_LL" runtime/sprout_runtime.c -O2 {{clang_extra}} -o "$OUT"
+  clang "$TMP_LL" {{runtime_src}} -O2 {{clang_extra}} -o "$OUT"
   echo "==> Built $OUT"
 
 # ── Iface (precompiled module interfaces) ────────────────────────────────────
@@ -169,7 +173,7 @@ run file: bootstrap-from-seed
   TMP_BIN="/tmp/sprout_run_$$"
   trap 'rm -f "$TMP_LL" "$TMP_BIN"' EXIT
   "{{build_dir}}/compile_driver_bin_stage1" --emit-ir "{{stdlib_root}}" {{quote(file)}} > "$TMP_LL"
-  clang "$TMP_LL" runtime/sprout_runtime.c -O2 {{clang_extra}} -o "$TMP_BIN"
+  clang "$TMP_LL" {{runtime_src}} -O2 {{clang_extra}} -o "$TMP_BIN"
   "$TMP_BIN"
 
 # Build {{file}} with GC profiling compiled in (-DSPROUT_GC_PROFILE) and run it
@@ -185,7 +189,7 @@ gc-profile file: bootstrap-from-seed
   TMP_BIN="/tmp/sprout_gcprof_$$"
   trap 'rm -f "$TMP_LL" "$TMP_BIN"' EXIT
   "{{build_dir}}/compile_driver_bin_stage1" --emit-ir "{{stdlib_root}}" {{quote(file)}} > "$TMP_LL"
-  clang "$TMP_LL" runtime/sprout_runtime.c -O2 -DSPROUT_GC_PROFILE {{clang_extra}} -o "$TMP_BIN"
+  clang "$TMP_LL" {{runtime_src}} -O2 -DSPROUT_GC_PROFILE {{clang_extra}} -o "$TMP_BIN"
   SPROUT_GC_PROFILE=1 "$TMP_BIN"
 
 # Emit LLVM IR for {{file}} to {{out}} using stage-1.
@@ -203,7 +207,7 @@ compile-native file out: bootstrap-from-seed
   TMP_LL="/tmp/sprout_compile_$$.ll"
   trap 'rm -f "$TMP_LL"' EXIT
   "{{build_dir}}/compile_driver_bin_stage1" --emit-ir "{{stdlib_root}}" {{quote(file)}} > "$TMP_LL"
-  clang "$TMP_LL" runtime/sprout_runtime.c -O2 {{clang_extra}} -o {{quote(out)}}
+  clang "$TMP_LL" {{runtime_src}} -O2 {{clang_extra}} -o {{quote(out)}}
 
 # Compile {{file}} to a debug binary at {{out}} using stage-1 (DWARF, no optimisation).
 # Use: just build-debug path/to/prog.spr ./prog_dbg && lldb ./prog_dbg
@@ -214,7 +218,7 @@ build-debug file out: bootstrap-from-seed
   TMP_LL="/tmp/sprout_debug_$$.ll"
   trap 'rm -f "$TMP_LL"' EXIT
   "{{build_dir}}/compile_driver_bin_stage1" --emit-ir --debug "{{stdlib_root}}" {{quote(file)}} > "$TMP_LL"
-  clang "$TMP_LL" runtime/sprout_runtime.c -g -O0 {{clang_extra}} -o {{quote(out)}}
+  clang "$TMP_LL" {{runtime_src}} -g -O0 {{clang_extra}} -o {{quote(out)}}
 
 # Compile {{file}} with debug info and launch it under lldb.
 [group('dev')]
@@ -225,7 +229,7 @@ debug-run file: bootstrap-from-seed
   TMP_BIN="/tmp/sprout_debug_$$"
   trap 'rm -f "$TMP_LL" "$TMP_BIN"' EXIT
   "{{build_dir}}/compile_driver_bin_stage1" --emit-ir --debug "{{stdlib_root}}" {{quote(file)}} > "$TMP_LL"
-  clang "$TMP_LL" runtime/sprout_runtime.c -g -O0 {{clang_extra}} -o "$TMP_BIN"
+  clang "$TMP_LL" {{runtime_src}} -g -O0 {{clang_extra}} -o "$TMP_BIN"
   lldb "$TMP_BIN"
 
 # ── Testing ───────────────────────────────────────────────────────────────────
@@ -253,9 +257,12 @@ _test-stdlib stage:
   JOBS=$(( NCPU > 8 ? 8 : NCPU ))
   TMPD=$(mktemp -d /tmp/sprout_tests_XXXXXX)
   trap 'rm -rf "$TMPD"' EXIT
-  # Pre-compile the runtime once; each test links the resulting .o.
-  clang -c runtime/sprout_runtime.c -O2 {{clang_extra}} -o "$TMPD/rt.o" 2>"$TMPD/rt.err" \
-    || { echo "ERROR: runtime compile failed"; cat "$TMPD/rt.err"; exit 1; }
+  # Pre-compile the runtime once (each source -> its own .o); tests link the set.
+  mkdir -p "$TMPD/rtobj"
+  for rtsrc in {{runtime_src}}; do
+    clang -c "$rtsrc" -O2 {{clang_extra}} -o "$TMPD/rtobj/$(basename "$rtsrc" .c).o" 2>"$TMPD/rt.err" \
+      || { echo "ERROR: runtime compile failed ($rtsrc)"; cat "$TMPD/rt.err"; exit 1; }
+  done
   declare -a files=()
   declare -a outs=()
   declare -a stats=()
@@ -282,7 +289,7 @@ _test-stdlib stage:
       elif ! opt --passes=verify "$TMPD/$idx.ll" -o /dev/null 2>"$TMPD/$idx.err"; then
         { echo "  IR INVALID (opt --passes=verify):"; cat "$TMPD/$idx.err"; } >> "$TMPD/$idx.out"; ok=0
       else
-        clang "$TMPD/$idx.ll" "$TMPD/rt.o" {{clang_extra}} -o "$TMPD/$idx.bin" 2>"$TMPD/$idx.err"
+        clang "$TMPD/$idx.ll" "$TMPD/rtobj"/*.o {{clang_extra}} -o "$TMPD/$idx.bin" 2>"$TMPD/$idx.err"
         if [[ $? -ne 0 ]]; then
           { echo "  LINK FAILED:"; cat "$TMPD/$idx.err"; } >> "$TMPD/$idx.out"; ok=0
         fi
@@ -354,12 +361,12 @@ _test-file stage file:
   TMP_ERR="/tmp/sprout_testerr_$$.txt"
   TMP_RT="/tmp/sprout_runtime_$$.o"
   trap 'rm -f "$TMP_LL" "$TMP_BIN" "$TMP_ERR" "$TMP_RT"' EXIT
-  clang -c runtime/sprout_runtime.c -O2 {{clang_extra}} -o "$TMP_RT" 2>"$TMP_ERR" || { echo "ERROR: runtime compile failed"; cat "$TMP_ERR"; exit 1; }
+  # Single binary: link the runtime sources directly (no object cache needed).
   echo "==> {{file}}"
   if ! "./$STAGE" --emit-ir "{{stdlib_root}}" "{{file}}" > "$TMP_LL" 2>"$TMP_ERR"; then
     echo "  COMPILE FAILED:"; cat "$TMP_ERR"; exit 1
   fi
-  if ! clang "$TMP_LL" "$TMP_RT" {{clang_extra}} -o "$TMP_BIN" 2>"$TMP_ERR"; then
+  if ! clang "$TMP_LL" {{runtime_src}} {{clang_extra}} -o "$TMP_BIN" 2>"$TMP_ERR"; then
     echo "  LINK FAILED:"; cat "$TMP_ERR"; exit 1
   fi
   if out=$("$TMP_BIN" 2>&1); then
@@ -400,7 +407,7 @@ _build-stage in_bin out_bin:
   opt --passes=verify "$TMP_LL" -o /dev/null
   echo "==> Linking with clang..."
   mkdir -p "{{build_dir}}"
-  clang "$TMP_LL" runtime/sprout_runtime.c -O2 {{clang_extra}} -o "{{out_bin}}"
+  clang "$TMP_LL" {{runtime_src}} -O2 {{clang_extra}} -o "{{out_bin}}"
   echo "==> Built {{out_bin}}"
 
 # Build compile_driver_bin_stage2 from stage-1.
@@ -422,7 +429,7 @@ build-stage2-asan: bootstrap-from-seed
   "{{build_dir}}/compile_driver_bin_stage1" --emit-ir "{{stdlib_root}}" "{{driver}}" > "$TMP_LL"
   echo "==> Linking with clang + ASan/UBSan..."
   mkdir -p "{{build_dir}}"
-  clang "$TMP_LL" runtime/sprout_runtime.c -O1 -fsanitize=address,undefined {{clang_extra}} -o "{{build_dir}}/compile_driver_bin_stage2_asan"
+  clang "$TMP_LL" {{runtime_src}} -O1 -fsanitize=address,undefined {{clang_extra}} -o "{{build_dir}}/compile_driver_bin_stage2_asan"
   echo "==> Built {{build_dir}}/compile_driver_bin_stage2_asan (asan)"
 
 # ── Examples ──────────────────────────────────────────────────────────────────
@@ -449,8 +456,11 @@ _compile-examples stage xfail="":
   TMPD="/tmp/sprout_ex_$$"
   mkdir -p "$TMPD"
   trap 'rm -rf "$TMPD"' EXIT
-  clang -c runtime/sprout_runtime.c -O2 {{clang_extra}} -o "$TMPD/rt.o" 2>"$TMPD/rt.err" \
-    || { echo "ERROR: runtime compile failed"; cat "$TMPD/rt.err"; exit 1; }
+  mkdir -p "$TMPD/rtobj"
+  for rtsrc in {{runtime_src}}; do
+    clang -c "$rtsrc" -O2 {{clang_extra}} -o "$TMPD/rtobj/$(basename "$rtsrc" .c).o" 2>"$TMPD/rt.err" \
+      || { echo "ERROR: runtime compile failed ($rtsrc)"; cat "$TMPD/rt.err"; exit 1; }
+  done
   declare -a pids=()
   declare -a outs=()
   declare -a stats=()
@@ -472,7 +482,7 @@ _compile-examples stage xfail="":
       elif ! opt --passes=verify "$TMPD/$idx.ll" -o /dev/null 2>"$TMPD/$idx.err"; then
         { printf '  IR INVALID (opt --passes=verify):\n'; cat "$TMPD/$idx.err"; } >> "$TMPD/$idx.out"; ok=0
       else
-        clang "$TMPD/$idx.ll" "$TMPD/rt.o" {{clang_extra}} -o "$TMPD/$idx.bin" 2>"$TMPD/$idx.err"
+        clang "$TMPD/$idx.ll" "$TMPD/rtobj"/*.o {{clang_extra}} -o "$TMPD/$idx.bin" 2>"$TMPD/$idx.err"
         if [[ $? -ne 0 ]]; then
           { printf '  LINK FAILED:\n'; cat "$TMPD/$idx.err"; } >> "$TMPD/$idx.out"; ok=0
         fi
@@ -592,7 +602,6 @@ bootstrap-from-seed:
   #!/usr/bin/env bash
   set -euo pipefail
   SEED="bootstrap/compile_driver.ll"
-  RUNTIME="runtime/sprout_runtime.c"
   OUT="{{build_dir}}/compile_driver_bin_stage1"
   if [[ ! -f "$SEED" ]]; then
     echo "ERROR: $SEED not found." >&2
@@ -602,7 +611,9 @@ bootstrap-from-seed:
   # skip the rebuild. CI steps each invoke `just bootstrap-from-seed` as a
   # `just` dependency in a fresh process, so just's dedupe doesn't apply —
   # without this guard the bootstrap runs 5+ times per CI run.
-  if [[ -x "$OUT" && "$OUT" -nt "$SEED" && "$OUT" -nt "$RUNTIME" ]]; then
+  rt_stale=0
+  for rtsrc in {{runtime_src}}; do [[ "$OUT" -nt "$rtsrc" ]] || rt_stale=1; done
+  if [[ -x "$OUT" && "$OUT" -nt "$SEED" && $rt_stale -eq 0 ]]; then
     echo "==> Stage-1 binary is up-to-date with seed + runtime; skipping bootstrap."
     exit 0
   fi
@@ -610,7 +621,7 @@ bootstrap-from-seed:
   opt --passes=verify "$SEED" -o /dev/null
   echo "==> Linking with clang..."
   mkdir -p "{{build_dir}}"
-  clang "$SEED" "$RUNTIME" -O2 {{clang_extra}} -o "$OUT"
+  clang "$SEED" {{runtime_src}} -O2 {{clang_extra}} -o "$OUT"
   echo "==> Built $OUT from IR seed."
 
 # Refresh bootstrap/compile_driver.ll from the current compile_driver.sprout source.
@@ -644,7 +655,7 @@ refresh-seed: bootstrap-from-seed
       break
     fi
     echo "    Diverges from previous; rebuilding stage from new IR..."
-    clang "$NEXT" runtime/sprout_runtime.c -O2 {{clang_extra}} -o "{{build_dir}}/compile_driver_bin_stage1"
+    clang "$NEXT" {{runtime_src}} -O2 {{clang_extra}} -o "{{build_dir}}/compile_driver_bin_stage1"
     PREV="$NEXT"
   done
 
@@ -868,7 +879,7 @@ argv-smoke: bootstrap-from-seed
   if ! "{{build_dir}}/compile_driver_bin_stage1" --use-ir-codegen "{{stdlib_root}}" "$FIXTURE" > "$TMPD/out.ll" 2>"$TMPD/err"; then
     echo "argv-smoke: typed emit failed" >&2; cat "$TMPD/err" >&2; exit 1
   fi
-  if ! clang "$TMPD/out.ll" runtime/sprout_runtime.c -O2 {{clang_extra}} -o "$TMPD/bin" 2>"$TMPD/link.err"; then
+  if ! clang "$TMPD/out.ll" {{runtime_src}} -O2 {{clang_extra}} -o "$TMPD/bin" 2>"$TMPD/link.err"; then
     echo "argv-smoke: link failed" >&2; cat "$TMPD/link.err" >&2; exit 1
   fi
   got=$("$TMPD/bin" ping hello)
@@ -880,24 +891,24 @@ argv-smoke: bootstrap-from-seed
   echo "==> argv-smoke ✓"
 
 # DoD #9 — APPROVED_BUILTINS guard.  Every non-static `long long <name>(` in
-# runtime/sprout_runtime.c must be listed in runtime/APPROVED_BUILTINS.
+# any runtime source (runtime/*.c) must be listed in runtime/APPROVED_BUILTINS.
 # Per AGENTS.md "Builtin vs Stdlib" rules 4–6.
 [group('smoke')]
 check-approved-builtins:
   #!/usr/bin/env bash
   set -euo pipefail
   APPROVED=runtime/APPROVED_BUILTINS
-  SOURCE=runtime/sprout_runtime.c
-  if [[ ! -f "$APPROVED" ]] || [[ ! -f "$SOURCE" ]]; then
-    echo "check-approved-builtins: missing $APPROVED or $SOURCE" >&2; exit 1
+  if [[ ! -f "$APPROVED" ]]; then
+    echo "check-approved-builtins: missing $APPROVED" >&2; exit 1
   fi
-  # Names declared in runtime.c (excluding `static long long`).
-  declared=$(grep -E '^long long [a-z_][a-zA-Z0-9_]*\(' "$SOURCE" | sed -E 's/^long long ([a-z_][a-zA-Z0-9_]*)\(.*/\1/' | sort -u)
+  # Names declared across ALL runtime sources (excluding `static long long`).
+  # grep -h suppresses the file: prefix so the ^long long anchor still matches.
+  declared=$(grep -hE '^long long [a-z_][a-zA-Z0-9_]*\(' {{runtime_src}} | sed -E 's/^long long ([a-z_][a-zA-Z0-9_]*)\(.*/\1/' | sort -u)
   # Names listed in APPROVED_BUILTINS (strip comments and whitespace).
   approved=$(sed -E 's/#.*$//; s/^[[:space:]]+|[[:space:]]+$//g' "$APPROVED" | grep -v '^$' | sort -u)
   missing=$(comm -23 <(echo "$declared") <(echo "$approved") || true)
   if [[ -n "$missing" ]]; then
-    echo "check-approved-builtins: builtins in $SOURCE missing from $APPROVED:" >&2
+    echo "check-approved-builtins: builtins in runtime/*.c missing from $APPROVED:" >&2
     printf '  %s\n' $missing >&2
     echo >&2
     echo "  Per AGENTS.md 'Builtin vs Stdlib' rules 4-6: add each name to" >&2
@@ -916,8 +927,11 @@ run-example-canary: bootstrap-from-seed
   set -euo pipefail
   TMPD=$(mktemp -d /tmp/sprout_canary_XXXXXX)
   trap 'rm -rf "$TMPD"' EXIT
-  clang -c runtime/sprout_runtime.c -O2 {{clang_extra}} -o "$TMPD/rt.o" 2>"$TMPD/rt.err" \
-    || { echo "run-example-canary: runtime compile failed" >&2; cat "$TMPD/rt.err" >&2; exit 1; }
+  mkdir -p "$TMPD/rtobj"
+  for rtsrc in {{runtime_src}}; do
+    clang -c "$rtsrc" -O2 {{clang_extra}} -o "$TMPD/rtobj/$(basename "$rtsrc" .c).o" 2>"$TMPD/rt.err" \
+      || { echo "run-example-canary: runtime compile failed ($rtsrc)" >&2; cat "$TMPD/rt.err" >&2; exit 1; }
+  done
   failed=0
   for f in examples/tuples.sprout examples/factorial.sprout examples/maybe_map.sprout examples/typeclass_collections_demo.sprout examples/fizzbuzz.sprout; do
     [ -f "$f" ] || { echo "run-example-canary: missing $f" >&2; failed=$((failed + 1)); continue; }
@@ -928,7 +942,7 @@ run-example-canary: bootstrap-from-seed
       echo "run-example-canary: emit-IR failed for $f" >&2; cat "$TMPD/err" >&2
       failed=$((failed + 1)); continue
     fi
-    if ! clang "$ll" "$TMPD/rt.o" {{clang_extra}} -o "$bin" 2>"$TMPD/err"; then
+    if ! clang "$ll" "$TMPD/rtobj"/*.o {{clang_extra}} -o "$bin" 2>"$TMPD/err"; then
       echo "run-example-canary: link failed for $f" >&2; cat "$TMPD/err" >&2
       failed=$((failed + 1)); continue
     fi
@@ -958,7 +972,7 @@ stack-overflow-smoke: bootstrap-from-seed
   if ! "{{build_dir}}/compile_driver_bin_stage1" --emit-ir "{{stdlib_root}}" "$FIXTURE" > "$TMPD/out.ll" 2>"$TMPD/emit.err"; then
     echo "stack-overflow-smoke: emit-IR failed" >&2; cat "$TMPD/emit.err" >&2; exit 1
   fi
-  if ! clang "$TMPD/out.ll" runtime/sprout_runtime.c -O2 $RDYN {{clang_extra}} -o "$TMPD/bin" 2>"$TMPD/link.err"; then
+  if ! clang "$TMPD/out.ll" {{runtime_src}} -O2 $RDYN {{clang_extra}} -o "$TMPD/bin" 2>"$TMPD/link.err"; then
     echo "stack-overflow-smoke: link failed" >&2; cat "$TMPD/link.err" >&2; exit 1
   fi
   set +e
@@ -992,7 +1006,7 @@ div-by-zero-smoke: bootstrap-from-seed
   if ! "{{build_dir}}/compile_driver_bin_stage1" --emit-ir "{{stdlib_root}}" "$FIXTURE" > "$TMPD/out.ll" 2>"$TMPD/emit.err"; then
     echo "div-by-zero-smoke: emit-IR failed" >&2; cat "$TMPD/emit.err" >&2; exit 1
   fi
-  if ! clang "$TMPD/out.ll" runtime/sprout_runtime.c -O2 {{clang_extra}} -o "$TMPD/bin" 2>"$TMPD/link.err"; then
+  if ! clang "$TMPD/out.ll" {{runtime_src}} -O2 {{clang_extra}} -o "$TMPD/bin" 2>"$TMPD/link.err"; then
     echo "div-by-zero-smoke: link failed" >&2; cat "$TMPD/link.err" >&2; exit 1
   fi
   set +e
@@ -1026,7 +1040,7 @@ tco-runtime-smoke: bootstrap-from-seed
   if ! "{{build_dir}}/compile_driver_bin_stage1" --use-ir-codegen "{{stdlib_root}}" "$FIXTURE" > "$TMPD/out.ll" 2>"$TMPD/emit.err"; then
     echo "tco-runtime-smoke: typed emit failed" >&2; cat "$TMPD/emit.err" >&2; exit 1
   fi
-  if ! clang "$TMPD/out.ll" runtime/sprout_runtime.c -O2 {{clang_extra}} -o "$TMPD/bin" 2>"$TMPD/link.err"; then
+  if ! clang "$TMPD/out.ll" {{runtime_src}} -O2 {{clang_extra}} -o "$TMPD/bin" 2>"$TMPD/link.err"; then
     echo "tco-runtime-smoke: link failed" >&2; cat "$TMPD/link.err" >&2; exit 1
   fi
   set +e
@@ -1052,8 +1066,11 @@ test-stress: bootstrap-from-seed
   set -euo pipefail
   TMPD=$(mktemp -d /tmp/sprout_stress_XXXXXX)
   trap 'rm -rf "$TMPD"' EXIT
-  clang -c runtime/sprout_runtime.c -O2 {{clang_extra}} -o "$TMPD/rt.o" 2>"$TMPD/rt.err" \
-    || { echo "test-stress: runtime compile failed" >&2; cat "$TMPD/rt.err" >&2; exit 1; }
+  mkdir -p "$TMPD/rtobj"
+  for rtsrc in {{runtime_src}}; do
+    clang -c "$rtsrc" -O2 {{clang_extra}} -o "$TMPD/rtobj/$(basename "$rtsrc" .c).o" 2>"$TMPD/rt.err" \
+      || { echo "test-stress: runtime compile failed ($rtsrc)" >&2; cat "$TMPD/rt.err" >&2; exit 1; }
+  done
   # Gated (must pass under stress).  ctors/match/closures promoted here once the
   # PR 11 item 4 GC-UAF was fixed (ir_rooting: IRCall now roots its heap operands
   # across the call; @ref_new and other builtins may collect before consuming an
@@ -1070,7 +1087,7 @@ test-stress: bootstrap-from-seed
     local f="$1" name ll bin out
     name=$(basename "$f" .spr); ll="$TMPD/$name.ll"; bin="$TMPD/$name.bin"
     "{{build_dir}}/compile_driver_bin_stage1" --use-ir-codegen "{{stdlib_root}}" "$f" > "$ll" 2>"$TMPD/err" || { echo fail; return; }
-    clang "$ll" "$TMPD/rt.o" {{clang_extra}} -o "$bin" 2>"$TMPD/err" || { echo fail; return; }
+    clang "$ll" "$TMPD/rtobj"/*.o {{clang_extra}} -o "$bin" 2>"$TMPD/err" || { echo fail; return; }
     if out=$(SPROUT_GC_STRESS=1 "$bin" 2>&1); then
       echo "$out" | grep -q "SUITE FAILED" && echo fail || echo ok
     else
@@ -1112,7 +1129,7 @@ gc-trace file watch_fn: bootstrap-from-seed
   TMPD=$(mktemp -d /tmp/sprout_gctrace_XXXXXX); trap 'rm -rf "$TMPD"' EXIT
   "{{build_dir}}/compile_driver_bin_stage1" --use-ir-codegen "{{stdlib_root}}" "{{file}}" > "$TMPD/t.ll" 2>"$TMPD/err" \
     || { echo "gc-trace: typed emit failed for {{file}}" >&2; cat "$TMPD/err" >&2; exit 1; }
-  clang -g "$TMPD/t.ll" runtime/sprout_runtime.c -O0 {{clang_extra}} -o "$TMPD/t.bin" -Wno-override-module 2>"$TMPD/err" \
+  clang -g "$TMPD/t.ll" {{runtime_src}} -O0 {{clang_extra}} -o "$TMPD/t.bin" -Wno-override-module 2>"$TMPD/err" \
     || { echo "gc-trace: link failed for {{file}}" >&2; cat "$TMPD/err" >&2; exit 1; }
   lldb -b \
     -o "settings set target.env-vars SPROUT_GC_STRESS=1" \
@@ -1135,7 +1152,7 @@ build-sproutd: bootstrap-from-seed
   opt --passes=verify "$TMP_LL" -o /dev/null
   echo "==> Linking with clang..."
   mkdir -p "{{build_dir}}"
-  clang "$TMP_LL" runtime/sprout_runtime.c -O2 {{clang_extra}} -o "{{build_dir}}/sproutd"
+  clang "$TMP_LL" {{runtime_src}} -O2 {{clang_extra}} -o "{{build_dir}}/sproutd"
   echo "==> Built {{build_dir}}/sproutd"
 
 # The standalone analysis-service binary is retired: sproutd subsumes it.

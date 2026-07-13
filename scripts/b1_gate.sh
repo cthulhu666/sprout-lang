@@ -55,7 +55,7 @@ fi
 
 # ④b — out-of-bounds Vector Double read traps at the inline guard.
 if emit "$FIX/fixture_b1_oob.spr" > "$TMP/oob.ll" 2>/dev/null \
-   && clang "$TMP/oob.ll" runtime/sprout_runtime.c -O2 \
+   && clang "$TMP/oob.ll" runtime/*.c -O2 \
         -framework Security -framework CoreFoundation -o "$TMP/oob" 2>/dev/null; then
   if "$TMP/oob" > "$TMP/oob.out" 2>&1; then
     echo "  FAIL: out-of-bounds Vector Double read did NOT trap"; fail=1
