@@ -57,21 +57,25 @@ head disagrees. Default-fatal; **escape hatches:**
   unverifiable ones (polymorphic/forwarded dict, no source signature, callee not
   a plain name). A resolver bug shows up as `mismatched>0` with a located error.
 
-**Phase-1 scope** — it catches mis-resolution **where the call's value arguments
-fix the constraint variable to a concrete type** (e.g. #176's projected key
-`k = Int`). It deliberately does NOT flag (skips, never a false alarm):
+**Scope (phase 1 + phase 2a)** — it catches mis-resolution where a constraint
+variable is fixed to a concrete type by either **the call's value arguments**
+(phase 1 — e.g. #176's projected key `k = Int`) **or the call-site return type**
+(phase 2a — `verify_call`/`build_theta_ret` match the callee's declared return
+`TypeExpr` against the concrete `TCall` type, so return-type dispatch is now in
+scope). It deliberately does NOT flag (skips, never a false alarm):
 
 - forwarded/polymorphic dicts inside a generic function (the #141 shape — the
   constraint's truth is still a type variable);
-- a constraint var that lives only in the **return** position (return-type
-  dispatch) — `verify_call` matches params against args, so a return-only var is
-  never bound → underdetermined → skip;
+- a constraint var pinned by neither the params nor the return (genuinely
+  underdetermined → skip);
+- class-method return dispatch via `TMethodRef` — the sig table is `TFnDecl`-based
+  and the walker keys `TVar` callees, so method-ref return dispatch is uncovered;
 - a *lowering*-discard bug (the historical `++`/`mconcat` null-fill), where the
   resolved dict is correct but dropped during IR emission — a lowering fault a
   post-resolve pass structurally cannot see.
 
-The last two motivate the pending IR-level **phase 2** (BACKLOG "Dispatch
-Soundness & Diagnostics" item 1).
+The last (lowering-discard) motivates the pending IR-level **phase 2b** (BACKLOG
+"Dispatch Soundness & Diagnostics" item 1).
 
 ## `just llvm-where <ll_file> <line>` — map an error line to its Sprout function
 

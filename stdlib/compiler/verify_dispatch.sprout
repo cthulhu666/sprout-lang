@@ -135,25 +135,42 @@ fn type_head_str_eq(a: types.Type, b: types.Type) -> Bool =
 # Per-call verification
 # ---------------------------------------------------------------------------
 #
-# Inputs (all in source terms except arg_types / dict heads):
+# Inputs (all in source terms except arg_types / ret_ty / dict heads):
 #   decl_param_tes  — the callee's declared param type annotations, in order
+#   decl_ret_te     — the callee's declared return type annotation (Nothing if none)
 #   constraints     — the callee's `where` clause, source names, in order
 #   arg_types       — concrete (zonked) types of the call's VALUE arguments, in order
+#   ret_ty          — concrete (zonked) return type at the call site (the TCall type)
 #   dict_heads      — (class, Just concrete-head | Nothing if polymorphic) for each
 #                     injected dict, in `where`-clause order (the caller correlates
 #                     injected TDicts positionally; binary-op dicts prepend, calls
 #                     append — the caller normalises to constraint order before here)
 #
-# Builds theta by matching declared params to concrete args, then checks each
-# constraint's var against its injected dict head.
+# Builds theta by matching declared params to concrete args AND the declared return
+# to the concrete call-site return (phase 2a — pins a return-position constraint
+# var), then checks each constraint's var against its injected dict head.
 export fn verify_call(
   decl_param_tes: List ast.TypeExpr,
+  decl_ret_te: Maybe ast.TypeExpr,
   constraints: List ast.TypeConstraint,
   arg_types: List types.Type,
+  ret_ty: types.Type,
   dict_heads: List (String, Maybe String),
   pos: source.SourcePos
 ) -> List VerifyOutcome =
-  check_constraints(constraints, dict_heads, build_theta(decl_param_tes, arg_types, dict_empty()), pos)
+  check_constraints(constraints, dict_heads,
+    build_theta_ret(decl_ret_te, ret_ty, build_theta(decl_param_tes, arg_types, dict_empty())), pos)
+
+# Extend theta with return-position bindings: match the declared return TypeExpr
+# against the concrete call-site return type. A structural mismatch is swallowed
+# (theta unchanged) exactly as build_theta swallows a per-param failure, so the pass
+# stays total and degrades to skip rather than a false alarm. A still-polymorphic
+# concrete return (TVar) binds the source ret-var to a TVar -> type_head_str Nothing
+# -> the constraint skips, never fires.
+fn build_theta_ret(ret_te: Maybe ast.TypeExpr, ret_ty: types.Type, theta: Dict types.Type) -> Dict types.Type =
+  let Just te = ret_te else theta
+      Just theta1 = match_te(te, ret_ty, theta) else theta
+  in theta1
 
 # Fold declared params over concrete args, accumulating source-var bindings. A
 # per-param match failure is swallowed (the binding for that param is simply
@@ -221,6 +238,11 @@ fn check_one(c: ast.TypeConstraint, dict_head: (String, Maybe String), theta: Di
 # for — everything else is skip-by-construction), then walk all expression trees
 # and check each TCall whose callee is a known constrained function. Returns the
 # first mismatch's (pos, message), or Nothing if every checkable call verified.
+#
+# Residual gap (phase 2a): class-method return-type dispatch via TMethodRef is NOT
+# covered — the sig table is TFnDecl-based and check_call keys the callee by TVar
+# name, so a method-ref callee is never looked up. Phase 2a covers return-type
+# dispatch only on regular constrained `fn`s. Method-ref dispatch is future work.
 
 # Signature entry: the callee's param type annotations (in order) + its where-clause.
 # verify_program surfaces the first mismatch (the gate's failure); verify_stats
@@ -246,26 +268,30 @@ fn tally(os: List VerifyOutcome, ok: Int, sk: Int, mm: Int) -> (Int, Int, Int) =
       | VerifySkip _ -> tally(rest, ok, sk + 1, mm)
       | VerifyMismatch _ _ -> tally(rest, ok, sk, mm + 1)
 
-fn build_sig_table(decls: List typed_ast.TypedDecl, acc: Dict (List ast.TypeExpr, List ast.TypeConstraint)) -> Dict (List ast.TypeExpr, List ast.TypeConstraint) =
+fn build_sig_table(decls: List typed_ast.TypedDecl, acc: Dict (List ast.TypeExpr, Maybe ast.TypeExpr, List ast.TypeConstraint)) -> Dict (List ast.TypeExpr, Maybe ast.TypeExpr, List ast.TypeConstraint) =
   match decls with
   | Nil -> acc
   | Cons d rest ->
       match d with
-      | typed_ast.TFnDecl name params _ _ constraints _ ->
-          match fn_sig(params, constraints) with
+      | typed_ast.TFnDecl name params ret _ constraints _ ->
+          match fn_sig(params, ret, constraints) with
           | Just sig -> build_sig_table(rest, dict_set(name, sig, acc))
           | Nothing -> build_sig_table(rest, acc)
       | _ -> build_sig_table(rest, acc)
 
 # A verifiable signature: has a where-clause AND every param is annotated (which a
 # where-clause guarantees in source, but stay defensive against synthesized decls).
-fn fn_sig(params: List ast.Param, constraints: List ast.TypeConstraint) -> Maybe (List ast.TypeExpr, List ast.TypeConstraint) =
+# The declared return type (`Maybe ast.TypeExpr`) is threaded so return-type dispatch
+# — a constraint var appearing only in the return — can be pinned (phase 2a). A
+# return-position var is bound by matching this declared return against the call's
+# concrete return type; params alone leave it underdetermined -> skip.
+fn fn_sig(params: List ast.Param, ret: Maybe ast.TypeExpr, constraints: List ast.TypeConstraint) -> Maybe (List ast.TypeExpr, Maybe ast.TypeExpr, List ast.TypeConstraint) =
   match constraints with
   | Nil -> Nothing
   | _ ->
       match all_annotated(params) with
       | Nothing -> Nothing
-      | Just tes -> Just((tes, constraints))
+      | Just tes -> Just((tes, ret, constraints))
 
 fn all_annotated(params: List ast.Param) -> Maybe (List ast.TypeExpr) =
   match params with
@@ -278,18 +304,18 @@ fn all_annotated(params: List ast.Param) -> Maybe (List ast.TypeExpr) =
           | Nothing -> Nothing
       | ast.Param _ Nothing -> Nothing
 
-fn collect_decls(decls: List typed_ast.TypedDecl, sigs: Dict (List ast.TypeExpr, List ast.TypeConstraint)) -> List VerifyOutcome =
+fn collect_decls(decls: List typed_ast.TypedDecl, sigs: Dict (List ast.TypeExpr, Maybe ast.TypeExpr, List ast.TypeConstraint)) -> List VerifyOutcome =
   match decls with
   | Nil -> Nil
   | Cons d rest -> list_append(collect_decl(d, sigs), collect_decls(rest, sigs))
 
-fn collect_decl(d: typed_ast.TypedDecl, sigs: Dict (List ast.TypeExpr, List ast.TypeConstraint)) -> List VerifyOutcome =
+fn collect_decl(d: typed_ast.TypedDecl, sigs: Dict (List ast.TypeExpr, Maybe ast.TypeExpr, List ast.TypeConstraint)) -> List VerifyOutcome =
   match d with
   | typed_ast.TFnDecl _ _ _ _ _ body -> collect_expr(body, sigs)
   | typed_ast.TInstanceDecl _ _ methods -> collect_methods(methods, sigs)
   | _ -> Nil
 
-fn collect_methods(methods: List typed_ast.TypedInstanceMethod, sigs: Dict (List ast.TypeExpr, List ast.TypeConstraint)) -> List VerifyOutcome =
+fn collect_methods(methods: List typed_ast.TypedInstanceMethod, sigs: Dict (List ast.TypeExpr, Maybe ast.TypeExpr, List ast.TypeConstraint)) -> List VerifyOutcome =
   match methods with
   | Nil -> Nil
   | Cons m rest ->
@@ -298,10 +324,10 @@ fn collect_methods(methods: List typed_ast.TypedInstanceMethod, sigs: Dict (List
           list_append(collect_expr(body, sigs), collect_methods(rest, sigs))
 
 # Walk an expression, checking every TCall and recursing into all subexpressions.
-fn collect_expr(e: typed_ast.TypedExpr, sigs: Dict (List ast.TypeExpr, List ast.TypeConstraint)) -> List VerifyOutcome =
+fn collect_expr(e: typed_ast.TypedExpr, sigs: Dict (List ast.TypeExpr, Maybe ast.TypeExpr, List ast.TypeConstraint)) -> List VerifyOutcome =
   match e with
-  | typed_ast.TCall callee args _ pos ->
-      list_append(check_call(callee, args, pos, sigs), collect_exprs(Cons(callee, args), sigs))
+  | typed_ast.TCall callee args ret_ty pos ->
+      list_append(check_call(callee, args, ret_ty, pos, sigs), collect_exprs(Cons(callee, args), sigs))
   | typed_ast.TIf c th el _ _ -> collect_exprs([c, th, el], sigs)
   | typed_ast.TMatch scrut branches _ _ ->
       list_append(collect_expr(scrut, sigs), collect_branches(branches, sigs))
@@ -315,12 +341,12 @@ fn collect_expr(e: typed_ast.TypedExpr, sigs: Dict (List ast.TypeExpr, List ast.
   | typed_ast.TGetField x _ _ _ -> collect_expr(x, sigs)
   | _ -> Nil
 
-fn collect_exprs(es: List typed_ast.TypedExpr, sigs: Dict (List ast.TypeExpr, List ast.TypeConstraint)) -> List VerifyOutcome =
+fn collect_exprs(es: List typed_ast.TypedExpr, sigs: Dict (List ast.TypeExpr, Maybe ast.TypeExpr, List ast.TypeConstraint)) -> List VerifyOutcome =
   match es with
   | Nil -> Nil
   | Cons h t -> list_append(collect_expr(h, sigs), collect_exprs(t, sigs))
 
-fn collect_branches(branches: List typed_ast.TypedMatchBranch, sigs: Dict (List ast.TypeExpr, List ast.TypeConstraint)) -> List VerifyOutcome =
+fn collect_branches(branches: List typed_ast.TypedMatchBranch, sigs: Dict (List ast.TypeExpr, Maybe ast.TypeExpr, List ast.TypeConstraint)) -> List VerifyOutcome =
   match branches with
   | Nil -> Nil
   | Cons b rest ->
@@ -328,18 +354,18 @@ fn collect_branches(branches: List typed_ast.TypedMatchBranch, sigs: Dict (List 
       | typed_ast.TypedMatchBranch _ body ->
           list_append(collect_expr(body, sigs), collect_branches(rest, sigs))
 
-fn collect_do_steps(steps: List typed_ast.TypedDoStep, sigs: Dict (List ast.TypeExpr, List ast.TypeConstraint)) -> List VerifyOutcome =
+fn collect_do_steps(steps: List typed_ast.TypedDoStep, sigs: Dict (List ast.TypeExpr, Maybe ast.TypeExpr, List ast.TypeConstraint)) -> List VerifyOutcome =
   match steps with
   | Nil -> Nil
   | Cons s rest -> list_append(collect_step(s, sigs), collect_do_steps(rest, sigs))
 
-fn collect_step(s: typed_ast.TypedDoStep, sigs: Dict (List ast.TypeExpr, List ast.TypeConstraint)) -> List VerifyOutcome =
+fn collect_step(s: typed_ast.TypedDoStep, sigs: Dict (List ast.TypeExpr, Maybe ast.TypeExpr, List ast.TypeConstraint)) -> List VerifyOutcome =
   match s with
   | typed_ast.TDoBindStep _ expr -> collect_expr(expr, sigs)
   | typed_ast.TDoLetStep _ expr -> collect_expr(expr, sigs)
   | typed_ast.TDoExprStep expr -> collect_expr(expr, sigs)
 
-fn collect_record_fields(fields: List typed_ast.TypedRecordField, sigs: Dict (List ast.TypeExpr, List ast.TypeConstraint)) -> List VerifyOutcome =
+fn collect_record_fields(fields: List typed_ast.TypedRecordField, sigs: Dict (List ast.TypeExpr, Maybe ast.TypeExpr, List ast.TypeConstraint)) -> List VerifyOutcome =
   match fields with
   | Nil -> Nil
   | Cons f rest ->
@@ -351,7 +377,7 @@ fn collect_record_fields(fields: List typed_ast.TypedRecordField, sigs: Dict (Li
 # injected dicts (by variant — prepend and append both yield dicts in order), and
 # verify. Returns every (constraint, dict) outcome for the call — Nil for a
 # non-constrained or unknown callee.
-fn check_call(callee: typed_ast.TypedExpr, args: List typed_ast.TypedExpr, pos: source.SourcePos, sigs: Dict (List ast.TypeExpr, List ast.TypeConstraint)) -> List VerifyOutcome =
+fn check_call(callee: typed_ast.TypedExpr, args: List typed_ast.TypedExpr, ret_ty: types.Type, pos: source.SourcePos, sigs: Dict (List ast.TypeExpr, Maybe ast.TypeExpr, List ast.TypeConstraint)) -> List VerifyOutcome =
   match callee_name(callee) with
   | Nothing -> Nil
   | Just name ->
@@ -359,8 +385,8 @@ fn check_call(callee: typed_ast.TypedExpr, args: List typed_ast.TypedExpr, pos: 
       | Nothing -> Nil
       | Just sig ->
           match sig with
-          | (param_tes, constraints) ->
-              verify_call(param_tes, constraints, value_arg_types(args), dict_heads_of(args), pos)
+          | (param_tes, ret_te, constraints) ->
+              verify_call(param_tes, ret_te, constraints, value_arg_types(args), ret_ty, dict_heads_of(args), pos)
 
 fn callee_name(e: typed_ast.TypedExpr) -> Maybe String =
   match e with

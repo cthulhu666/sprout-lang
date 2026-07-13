@@ -14,7 +14,8 @@ items. Two landed on master via **PR #178** (merged 2026-07-13):
 |------|-------|--------|
 | **2** — `SPROUT_TRACE_DISPATCH` trace | **DONE** | `3db6187` |
 | **1 phase 1** — dict-passing verifier (typed/Evidence) | **DONE** | `3d923da` |
-| **1 phase 2** — return-type + IR-level checks | **NEXT** (design below) | — |
+| **1 phase 2a** — return-type dispatch (typed level) | **DONE** 2026-07-13 (branch `verify-dispatch-phase2`) | — |
+| **1 phase 2b** — IR-level `++`/dict-null guard | **NEXT** (design in Part 2b below) | — |
 | **3** — loud dict-resolution fallback | scoped, deferred behind item 1 | — |
 | **4** — canonical type-variable identity | not started (large, separate project) | — |
 
@@ -75,7 +76,21 @@ return-position wrong dict is `VerifySkip`, not `VerifyMismatch`.
 
 Gaps (2) and (3) above are two DIFFERENT layers. Do them as separate changes.
 
-### Part 2a — return-type dispatch (recommended first; typed-level, cheap)
+### Part 2a — return-type dispatch — **DONE 2026-07-13**
+
+Landed on branch `verify-dispatch-phase2`. `verify_call` now takes the callee's
+declared return `TypeExpr` and the concrete call-site return type; `build_theta_ret`
+matches them (swallowing a structural mismatch, so the pass stays total) to bind a
+return-position constraint var, after which it is checked like any param-position
+one. Sig table widened to `(param_tes, ret_te, constraints)`. Safety gate satisfied
+via a stage-1-vs-stage-2 `SPROUT_VERIFY_DISPATCH_STATS` diff:
+`test_constrained_fn_return_type_nested_tapp.spr` went `verified` 0→1 with
+`mismatched=0`, and the fatal verifier accepted the whole compiler source
+(`refresh-seed` fixed point at iteration 2). Residual gap: `TMethodRef`
+class-method return dispatch is still uncovered (documented in `verify_dispatch.sprout`).
+The original design notes for this part are preserved below for reference.
+
+### Part 2a — original design notes (recommended first; typed-level, cheap)
 
 The resolver already places the class var using the whole scheme *including the
 return* (`infer.sprout:find_class_var_in_type`, called with `ret_t` at

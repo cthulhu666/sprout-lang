@@ -53,23 +53,24 @@ fn main() -> Unit !{IO} =
       | Nothing -> false)
 
     # --- #176: dict resolved to Ord Tuple2 (element) but k = Int (key) -> MISMATCH ---
-    let bad = vd.verify_call([te_proj(), te_vec_a()], [ord_k()],
-      [t_fst_fn(), t_vec_pair()], [("Ord", Just("Tuple2"))], dpos())
+    # (param-dispatch: k is pinned by the projection param; no return constraint.)
+    let bad = vd.verify_call([te_proj(), te_vec_a()], Nothing, [ord_k()],
+      [t_fst_fn(), t_vec_pair()], t_int(), [("Ord", Just("Tuple2"))], dpos())
     assert_true(state, "wrong-headed dict (Ord Tuple2 vs k=Int) is rejected", is_mismatch(first_or_skip(bad)))
 
     # --- correct: dict is Ord Int, matches k = Int -> OK ---
-    let good = vd.verify_call([te_proj(), te_vec_a()], [ord_k()],
-      [t_fst_fn(), t_vec_pair()], [("Ord", Just("Int"))], dpos())
+    let good = vd.verify_call([te_proj(), te_vec_a()], Nothing, [ord_k()],
+      [t_fst_fn(), t_vec_pair()], t_int(), [("Ord", Just("Int"))], dpos())
     assert_true(state, "correct dict (Ord Int) passes", is_ok(first_or_skip(good)))
 
     # --- forwarded/polymorphic dict (Nothing) -> SKIP, never a false alarm ---
-    let poly = vd.verify_call([te_proj(), te_vec_a()], [ord_k()],
-      [t_fst_fn(), t_vec_pair()], [("Ord", Nothing)], dpos())
+    let poly = vd.verify_call([te_proj(), te_vec_a()], Nothing, [ord_k()],
+      [t_fst_fn(), t_vec_pair()], t_int(), [("Ord", Nothing)], dpos())
     assert_true(state, "forwarded dict is skipped, not flagged", is_skip(first_or_skip(poly)))
 
-    # --- underdetermined: no source param pins k -> SKIP (not a false alarm) ---
-    let under = vd.verify_call([te_vec_a()], [ord_k()],
-      [t_vec_pair()], [("Ord", Just("Tuple2"))], dpos())
+    # --- underdetermined: neither param NOR return pins k -> SKIP (not a false alarm) ---
+    let under = vd.verify_call([te_vec_a()], Nothing, [ord_k()],
+      [t_vec_pair()], t_int(), [("Ord", Just("Tuple2"))], dpos())
     assert_true(state, "underdetermined constraint is skipped", is_skip(first_or_skip(under)))
 
     # --- walker (verify_program): a hand-built program where a caller invokes
@@ -102,11 +103,10 @@ fn main() -> Unit !{IO} =
     assert_true(state, "verify_program passes a correct injected dict",
       match vd.verify_program(good_prog) with | Just _ -> false | Nothing -> true)
 
-    # --- SCOPE BOUNDARY: a return-type-dispatch constraint var (`a` appears ONLY
-    # in the return type, never in a param) cannot be pinned by the value args, so
-    # phase 1 SKIPS it — even with a mismatched dict head — rather than flagging.
-    # This documents that return-type dispatch is out of phase-1 scope, and guards
-    # against the verifier ever wrongly "catching" (false-positiving) such a call. ---
+    # --- PHASE 2A POSITIVE: return-type dispatch is now IN scope. `read_as` binds its
+    # constraint var `a` ONLY in the return (`Maybe a`); at a call whose concrete
+    # return is `Maybe Int` the truth is a = Int, and a CORRECT injected `Read Int`
+    # dict matches -> verifies clean (Nothing). Phase 1 skipped this; phase 2a pins it. ---
     let read_decl = typed_ast.TFnDecl("read_as",
       [ast.Param("s", Just(ast.TypeName("String")))],
       Just(ast.TypeApply(ast.TypeName("Maybe"), ast.TypeName("a"))),
@@ -119,7 +119,21 @@ fn main() -> Unit !{IO} =
       types.type_maybe(t_int()), dpos())
     let read_caller = typed_ast.TFnDecl("read_caller", [], Nothing, Nothing, [], read_call)
     let read_prog = typed_ast.TypedProgram([read_decl, read_caller])
-    assert_true(state, "return-position constraint var is skipped (out of phase-1 scope), not flagged",
+    assert_true(state, "PHASE 2A: correct return-dispatch dict (Read Int, ret Maybe Int) verifies clean",
       match vd.verify_program(read_prog) with | Just _ -> false | Nothing -> true)
+
+    # --- PHASE 2A: a WRONG return-dispatch dict head MUST be caught. `read_as` binds
+    # its constraint var `a` ONLY in its return (`Maybe a`); at a call whose concrete
+    # return is `Maybe Int` the truth is a = Int, so an injected `Read Bool` dict
+    # disagrees and must be flagged. This is the RED case that phase-1 skipped. ---
+    let read_wrong_dict = typed_ast.TDict(ast.TypeConstraint("Read", [ast.TypeName("Bool")]),
+      types.TConst(types.type_id("Read")), dpos(), typed_ast.EvUnresolved)
+    let read_wrong_call = typed_ast.TCall(typed_ast.TVar("read_as", types.type_string(), dpos()),
+      [typed_ast.TString("x", types.type_string(), dpos()), read_wrong_dict],
+      types.type_maybe(t_int()), dpos())
+    let read_wrong_caller = typed_ast.TFnDecl("rw_caller", [], Nothing, Nothing, [], read_wrong_call)
+    let read_wrong_prog = typed_ast.TypedProgram([read_decl, read_wrong_caller])
+    assert_true(state, "PHASE 2A: wrong return-dispatch dict (Read Bool vs ret Maybe Int) is flagged",
+      match vd.verify_program(read_wrong_prog) with | Just _ -> true | Nothing -> false)
 
     summary(state)
