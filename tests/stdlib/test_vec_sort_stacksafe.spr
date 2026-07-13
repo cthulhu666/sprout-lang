@@ -1,0 +1,47 @@
+import stdlib.test (TestState, new_state, assert_eq, assert_true, summary)
+
+# Regression: vec_sort must not have a recursion-depth ceiling. Before the
+# bottom-up rewrite, decorated_merge_sorted / decorated_values_to_list / list_take
+# recursed O(n) deep and exhausted the fixed 131072-slot GC root pool, so any sort
+# above ~50-60k aborted with `sprout_gc_push_root: GC root pool exhausted` (exit 1)
+# BEFORE reaching any assertion. This file drives a 100k sort plus stability/edges.
+
+# Build [n-1, n-2, ..., 1, 0] as a List in O(n) (tail-recursive), avoiding the
+# O(n^2) range_to_vec path; then one O(n) vec_from_list.
+fn desc_list(v: Int, acc: List Int) -> List Int =
+  if v < 0 then acc
+  else desc_list(v - 1, Cons(v, acc))
+
+# Tail-recursive non-decreasing check over a Vec Int (no O(n) stack growth).
+fn is_sorted_go(v: Vec Int, i: Int, n: Int) -> Bool =
+  if i + 1 >= n then true
+  else if vec_get_or(i, 0, v) <= vec_get_or(i + 1, 0, v) then is_sorted_go(v, i + 1, n)
+  else false
+
+fn main() -> Unit !{IO} =
+  do
+    state <- new_state()
+
+    # --- large sort: the stack-safety gate (crashes on the old code) ---
+    let big = vec_sort(vec_from_list(list_reverse(desc_list(99999, Nil))))
+    assert_eq(state, "100k length preserved", vec_length(big), 100000)
+    assert_eq(state, "100k first element", vec_get_or(0, -1, big), 0)
+    assert_eq(state, "100k last element", vec_get_or(99999, -1, big), 99999)
+    assert_true(state, "100k fully non-decreasing", is_sorted_go(big, 0, 100000))
+
+    # NOTE: a stability-by-projection test (vec_sort_by with key != element type)
+    # is deliberately omitted here: vec_sort_by crashes on a pre-existing Ord-dict
+    # dispatch bug whenever the key type differs from the element type. That is
+    # independent of this stack-safety rewrite (the old top-down sort crashed the
+    # same way) and is tracked separately in BACKLOG.md. Stability itself is
+    # preserved by construction: decorated_key_lt's (key, index) total order is
+    # unchanged. Stability coverage lands with the dispatch fix.
+
+    # --- edge cases ---
+    assert_eq(state, "empty sorts to empty", vec_sort(vec_empty()), vec_empty())
+    assert_eq(state, "singleton", vec_sort(foldable_to_vec([42])), foldable_to_vec([42]))
+    assert_eq(state, "all equal", vec_sort(foldable_to_vec([7, 7, 7, 7])), foldable_to_vec([7, 7, 7, 7]))
+    assert_eq(state, "already sorted", vec_sort(foldable_to_vec([1, 2, 3, 4, 5])), foldable_to_vec([1, 2, 3, 4, 5]))
+    assert_eq(state, "reverse sorted", vec_sort(foldable_to_vec([5, 4, 3, 2, 1])), foldable_to_vec([1, 2, 3, 4, 5]))
+
+    summary(state)
