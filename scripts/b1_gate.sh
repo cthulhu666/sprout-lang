@@ -39,6 +39,13 @@ else
   echo "  FAIL: B1 fired on a shadowed heap 'Double' — unrooted heap load (UAF)"; fail=1
 fi
 
+# ①' — an ordinary non-Double PRIMITIVE (Vector Int) stays a call (RepUnsupported).
+if [ "$(emit "$FIX/fixture_b1_nondouble.spr" | grep -cEe 'vec_get_d|[$]ep = getelementptr')" -eq 0 ]; then
+  echo "  ok: non-Double primitive (Vector Int) stays a call"
+else
+  echo "  FAIL: B1 fired on a Vector Int — only scalar-Double is inlinable today"; fail=1
+fi
+
 # ② — under-applied vector_get_direct on Vector Double still compiles.
 if emit "$FIX/fixture_b1_partial.spr" >/dev/null 2>&1; then
   echo "  ok: partial application compiles"

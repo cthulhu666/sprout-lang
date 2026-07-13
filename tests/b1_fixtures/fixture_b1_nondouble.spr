@@ -1,0 +1,10 @@
+module main
+
+# B1 gate coverage-gap (RepUnsupported, non-Double PRIMITIVE): a fully-applied
+# `vector_get_direct` on a `Vector Int` must stay a `call @vector_get_direct`
+# (0 `vec_get_d` ops). This is distinct from the shadowed-heap-`Double` fixture:
+# here `Int` is a genuine primitive element, not a user type masquerading as
+# `Double` — it simply is not the scalar-Double representation B1 inlines, so
+# `classify_vec_elem` returns RepUnsupported and the runtime call is kept.
+fn read_first(v: Vector Int) -> Int !{IO} =
+  vector_get_direct(v, 0)

@@ -4339,26 +4339,17 @@ fn translate_direct_call(fname: String, args: List typed_ast.TypedExpr,
       | Ok r ->
           match r with
           | (arg_blocks, arg_cur_lbl, arg_cur_ops, arg_names, idx1) ->
-              # B1: inline Vector Double element access (Double-gated). Only intercept
-              # the FULLY-APPLIED call — an under-applied vector_get_direct/vector_mutset
-              # is in fn_arities (build_fn_arities includes TExternFnDecl) and must still
-              # reach translate_partial_application below to build its closure.
-              if fname == "vector_get_direct" && list_length(arg_names) == 2 && arg0_elem_is_double(args)
-              then finish_vec_get_d(arg_blocks, arg_cur_lbl, arg_cur_ops, arg_names, idx1, name_prefix)
-              else if fname == "vector_mutset" && list_length(arg_names) == 3 && arg0_elem_is_double(args)
-              then finish_vec_set_d(arg_blocks, arg_cur_lbl, arg_cur_ops, arg_names, idx1, name_prefix)
-              else
-              match dict_get(fname, fn_arities) with
-              | Just arity ->
-                  if arity > list_length(arg_names)
-                  then translate_partial_application(fname, arity, arg_blocks, arg_cur_lbl,
-                                                     arg_cur_ops, arg_names, idx1,
-                                                     lifted_ref, lambda_ctr_ref, name_prefix)
-                  else finish_direct_call(fname, call_ty, arg_blocks, arg_cur_lbl,
-                                          arg_cur_ops, arg_names, idx1, name_prefix)
+              # B1: inline Vector element access. try_vector_intrinsic recognizes the
+              # op (by name), gates on full application (an under-applied call must
+              # still reach translate_partial_application below to build its closure)
+              # and on the element representation; Nothing = use the general path.
+              match try_vector_intrinsic(fname, args, arg_blocks, arg_cur_lbl,
+                                         arg_cur_ops, arg_names, idx1, fn_arities, name_prefix) with
+              | Just r -> r
               | Nothing ->
-                  finish_direct_call(fname, call_ty, arg_blocks, arg_cur_lbl,
-                                     arg_cur_ops, arg_names, idx1, name_prefix)
+                  translate_general_call(fname, call_ty, arg_blocks, arg_cur_lbl,
+                                         arg_cur_ops, arg_names, idx1, fn_arities,
+                                         lifted_ref, lambda_ctr_ref, name_prefix)
 
 # Partial application of a direct fn (arg count < arity): synthesize a
 # @__sprout_partial_N wrapper capturing the supplied args, then emit IRMkClosure.
@@ -4447,6 +4438,29 @@ fn finish_direct_call(fname: String, call_ty: types.Type,
         call_op = sprout_ir.IRCall(result, ret_irtype(call_ty),
                                    fname, arg_names)
 
+# The general (non-intrinsic) call path: under-applied → partial-application
+# closure; fully applied (or unknown arity) → direct call. Reached when
+# try_vector_intrinsic declines. Extracted so the dispatch site's outer match
+# has a single-expression arm (avoids same-column nested-match layout ambiguity).
+fn translate_general_call(fname: String, call_ty: types.Type,
+                          arg_blocks: List sprout_ir.IRBlock, cur_lbl: String,
+                          cur_ops: List sprout_ir.IROp, arg_names: List String,
+                          idx: Int, fn_arities: Dict Int,
+                          lifted_ref: Ref (List sprout_ir.IRFunction),
+                          lambda_ctr_ref: Ref Int, name_prefix: String) ->
+    Result String (List sprout_ir.IRBlock, String, List sprout_ir.IROp, String, Int) =
+  match dict_get(fname, fn_arities) with
+  | Just arity ->
+      if arity > list_length(arg_names)
+      then translate_partial_application(fname, arity, arg_blocks, cur_lbl,
+                                         cur_ops, arg_names, idx,
+                                         lifted_ref, lambda_ctr_ref, name_prefix)
+      else finish_direct_call(fname, call_ty, arg_blocks, cur_lbl,
+                              cur_ops, arg_names, idx, name_prefix)
+  | Nothing ->
+      finish_direct_call(fname, call_ty, arg_blocks, cur_lbl,
+                         cur_ops, arg_names, idx, name_prefix)
+
 # B1 Vector-Double gate. True when the first argument's static type is a
 # `Vector Double` where Double is the PRIMITIVE. Matches on EXACT canonical
 # `type_id_name` (mirroring is_maybe_type / is_list_type at ~600/616), NOT the
@@ -4462,10 +4476,72 @@ fn type_is_vector_double(t: types.Type) -> Bool =
       types.type_id_name(vname) == "Vector" && types.type_id_name(ename) == "Double"
   | _ -> false
 
-fn arg0_elem_is_double(args: List typed_ast.TypedExpr) -> Bool =
+# B1 inline vector element access, decomposed into two independent axes so the
+# mechanism grows cleanly as B1 generalizes past Double (docs/phase-d-numeric-
+# fastpath-design §B1). VecOp = which OPERATION (from the runtime symbol);
+# VecRep = which element REPRESENTATION is safe to inline (from arg0's type).
+# The name determines the op; the type determines the rep — the same symbol
+# (vector_get_direct) maps to different inline forms as representations multiply,
+# so the two must not be conflated into one name→op enum.
+type VecOp (..) =
+  | VecGet
+  | VecSet
+
+type VecRep (..) =
+  | RepScalarDouble
+  | RepUnsupported
+
+# Name → vector element-access operation. The runtime symbols live ONLY here
+# (mirrors recognize_string_builtin); Nothing for any non-vector-access name.
+fn recognize_vector_op(fname: String) -> Maybe VecOp =
+  if fname == "vector_get_direct" then Just(VecGet)
+  else if fname == "vector_mutset" then Just(VecSet)
+  else Nothing
+
+# Representation of arg0's element type — decides which inline form is SAFE.
+# RepScalarDouble: primitive `Vector Double` (unboxed f64 slot) → inline op.
+# RepUnsupported : anything else (a user `type Double` heap ADT, a Vector of a
+#   non-Double primitive, a Vector of pointers) → keep the runtime call. Reuses
+#   the exact-canonical-name guard `type_is_vector_double` unchanged; a false
+#   positive would inline a heap load ir_rooting never roots (use-after-free).
+fn classify_vec_elem(args: List typed_ast.TypedExpr) -> VecRep =
   match args with
-  | Cons head _ -> type_is_vector_double(typed_ast.typed_expr_type(head))
-  | Nil -> false
+  | Cons head _ ->
+      if type_is_vector_double(typed_ast.typed_expr_type(head))
+      then RepScalarDouble
+      else RepUnsupported
+  | Nil -> RepUnsupported
+
+# True iff every declared parameter is supplied — the arity comes from the
+# DECLARATION (externs are in fn_arities), NOT a hardcoded literal. An
+# under-applied call returns false so it reaches translate_partial_application
+# to build its closure (the fully-applied-only invariant at the dispatch site).
+fn is_fully_applied(fname: String, arg_names: List String, fn_arities: Dict Int) -> Bool =
+  match dict_get(fname, fn_arities) with
+  | Just arity -> list_length(arg_names) == arity
+  | Nothing -> false
+
+# Recognize + lower an inline vector element access. Nothing = "not an inline
+# vector access here" → the caller uses the general call path. The three gates
+# (operation, full application, element representation) are each a named
+# predicate, so no magic string or arity literal survives in control flow.
+# Adding a VecRep variant forces every match below to handle it (exhaustiveness),
+# so a new representation cannot ship without a conscious lowering + guard.
+fn try_vector_intrinsic(fname: String, args: List typed_ast.TypedExpr,
+                        arg_blocks: List sprout_ir.IRBlock, cur_lbl: String,
+                        cur_ops: List sprout_ir.IROp, arg_names: List String,
+                        idx: Int, fn_arities: Dict Int, name_prefix: String) ->
+    Maybe(Result String (List sprout_ir.IRBlock, String, List sprout_ir.IROp, String, Int)) =
+  match recognize_vector_op(fname) with
+  | Nothing -> Nothing
+  | Just op ->
+      if is_fully_applied(fname, arg_names, fn_arities) == false then Nothing
+      else match classify_vec_elem(args) with
+           | RepUnsupported -> Nothing
+           | RepScalarDouble ->
+               match op with
+               | VecGet -> Just(finish_vec_get_d(arg_blocks, cur_lbl, cur_ops, arg_names, idx, name_prefix))
+               | VecSet -> Just(finish_vec_set_d(arg_blocks, cur_lbl, cur_ops, arg_names, idx, name_prefix))
 
 # Shared null + bounds guard for B1 Vector-Double access. Emits the three blocks
 # (cond / len+bounds / panic) that dominate a fresh continuation block <ok2>, and
