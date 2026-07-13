@@ -1,0 +1,65 @@
+module examples.vec_basics
+
+# `Vec a` is Sprout's indexed sequence type: a packed array with O(1) random
+# access, in contrast to the singly-linked `List a`. This example tours the core
+# Vec operations — construction, access, map/filter/fold, sorting, slicing, and
+# concatenation.
+#
+# The headline convenience on show: a list literal `[..]` written where a `Vec`
+# is expected *is* a `Vec`. The compiler inserts the `List -> Vec` conversion at
+# the expected type, so `vec_from_list` never appears at a call site. Every
+# literal below flows straight into a `Vec` parameter or a `Vec`-typed return.
+
+# The class's exam scores. The body is a bare list literal; because the return
+# type is `Vec Int`, it denotes a `Vec` directly — no `vec_from_list` wrapper.
+fn scores() -> Vec Int =
+  [88, 72, 95, 61, 88, 45, 79]
+
+# A flat +5 curve on every score, capped at 100.
+fn curve(score: Int) -> Int =
+  if score + 5 > 100 then 100 else score + 5
+
+# A score of 60 or more is a pass.
+fn passed(score: Int) -> Bool =
+  score >= 60
+
+# Running maximum, shaped as `Vec`'s fold reducer (`b -> a -> b`).
+fn max_of(acc: Int, score: Int) -> Int =
+  if score > acc then score else acc
+
+# Two `Vec` parameters mean the literals passed below are coerced to `Vec` at the
+# call, so `a ++ b` here is `Vec`'s `Semigroup` append (one packed backing array),
+# not list concatenation.
+fn combine(a: Vec Int, b: Vec Int) -> Vec Int =
+  a ++ b
+
+fn main() -> Unit !{IO} =
+  do
+    let s = scores()
+
+    # --- Basic queries -------------------------------------------------------
+    print("scores:        " ++ to_string(s))
+    print("count:         " ++ to_string(vec_length(s)))
+    print("total:         " ++ to_string(vec_sum(s)))
+    print("first:         " ++ to_string(vec_get_or(0, 0, s)))
+    print("passing count: " ++ to_string(vec_count(passed, s)))
+
+    # --- Transform: map and filter ------------------------------------------
+    print("curved:        " ++ to_string(vec_map(curve, s)))
+    print("only passing:  " ++ to_string(vec_filter(passed, s)))
+
+    # --- Fold: reduce to a single value -------------------------------------
+    print("highest:       " ++ to_string(vec_fold(max_of, 0, s)))
+
+    # --- Sorting -------------------------------------------------------------
+    # `vec_sort` needs `Ord`; the literal argument is coerced to `Vec` first.
+    print("sorted asc:    " ++ to_string(vec_sort([88, 72, 95, 61, 88, 45, 79])))
+    # `vec_sort_by` sorts on a key — here the negated value, for descending order.
+    print("sorted desc:   " ++ to_string(vec_sort_by(\n -> -n, s)))
+
+    # --- Reverse and slice ---------------------------------------------------
+    print("reversed:      " ++ to_string(vec_reverse(s)))
+    print("middle 3:      " ++ to_string(vec_slice(2, 3, s)))
+
+    # --- Concatenation with ++ ----------------------------------------------
+    print("joined:        " ++ to_string(combine([1, 2, 3], [4, 5, 6])))
