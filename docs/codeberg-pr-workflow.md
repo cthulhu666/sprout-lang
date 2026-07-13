@@ -90,11 +90,25 @@ shell builtin reads it without invoking `cat` (the repo's Bash file-ops hook
 blocks `cat <file>`). An inline heredoc — `--description "$(cat <<'EOF' … EOF)"`
 — also works (heredoc `cat` has no file argument, so the hook allows it).
 
-**Worktrees.** `tea pr create` derives the login/repo from the local git
-context and can fail in a temporary git worktree. Workarounds, in order of
-preference: (1) run it from the main checkout; (2) pass an explicit repo slug
-with `-r plushcthulhu/sprout-lang`. The old "fall back to `tea api`" advice is
-dead — `tea api` is broken (see the warning above).
+**Worktrees.** `tea pr create` **always** fails from a linked git worktree with
+`Error: local repository required: execute from a repo dir, or specify a path
+with --repo` — the worktree's `.git` is a pointer file that tea's go-git can't
+open. **`-r <owner>/<repo>` does NOT fix this** (verified 2026-07-13): `pr
+create` still opens the local repo to read the head branch, so the slug override
+fails identically; only read-only commands like `tea pr ls --repo …` work
+without a local repo. If you cannot run from the main checkout, create the PR via
+a raw curl POST to the `/pulls` endpoint (raw curl works; only `tea api`'s path
+handling is broken):
+
+```bash
+git push -u origin <branch>
+# $TOKEN extracted per the "Prerequisites" section (from $TEA_CONFIG_PATH)
+jq -Rs --arg t "TITLE" --arg h "<branch>" --arg b master \
+  '{title:$t, body:., head:$h, base:$b}' pr_body.md > payload.json
+curl -sS -X POST "https://codeberg.org/api/v1/repos/$CODEBERG_OWNER/$CODEBERG_REPO/pulls" \
+  -H "Authorization: token $TOKEN" -H "Content-Type: application/json" \
+  -d @payload.json | jq '{number, html_url, state}'
+```
 
 ## Check PR status
 
