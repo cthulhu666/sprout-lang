@@ -166,6 +166,10 @@ tcp_read
 tcp_read_exact
 tcp_write
 tcp_write_all
+__scope_open  # L0.1 structured concurrency: allocate a scheduler scope. Green-thread scheduling needs OS stack/context switching (ucontext) that cannot be expressed in Sprout.
+__scope_join  # L0.1: block the current task until all tasks spawned into a scope finish. Requires driving the cooperative scheduler (context switching) — not expressible in Sprout.
+__scope_spawn  # L0.1: create a green task (own stack) running a Unit->Unit closure and enqueue it. Needs makecontext/stack allocation — not expressible in Sprout.
+task_yield  # L0.1: cooperative yield — suspend the current task and switch to the scheduler. Context switching only, not expressible in Sprout.
 term_clear
 term_hide_cursor
 term_move

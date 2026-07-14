@@ -679,3 +679,27 @@ architecture, and (b) structured concurrency as the first model — or redirect.
 confirmed, next step is a focused approved-design doc for Layer 0 + `stdlib.task`,
 resolving the §8 open questions (esp. task representation and GC rooting of suspended
 tasks) with the user before any code.
+
+**Implementation status — L0.1 LANDED (2026-07-14).** The first real increment of
+structured concurrency is implemented and green:
+
+- `stdlib/task.sprout` — surface: `Scope`, `with_scope` (open → run body → join),
+  `scope_spawn`, `task_yield`. Join-only; cancellation and error propagation deferred.
+- `runtime/sprout_sched.c` (new TU) — cooperative ucontext scheduler: per-task green
+  stack + own GC root context, FIFO ready queue (round-robin), single open scope at a
+  time. `__scope_join` drives the scheduler on the caller's stack until the scope's
+  live-task count reaches zero.
+- `runtime/sprout_runtime.c` — the temp-root LIFO is now **task-aware**: the former
+  three file-static globals became a per-task `SproutRoots` context selected by
+  `g_current_roots`; `mark_roots` walks a registry of all live contexts (over-rooting
+  suspended tasks). The scheduler switches `g_current_roots` at every context switch
+  (the §8.5 switch-point-alignment invariant, now realized by construction rather than
+  hand-placed). Cross-TU contract in `runtime/sprout_sched.h`.
+- Verified: `tests/stdlib/test_task_cooperative.spr` yields the cooperative
+  `A1B1A2B2` interleaving, green under `SPROUT_GC_STRESS=1`. Nested-scope-from-a-task
+  and `task_yield`-outside-a-task both fail loud (documented L0.2 boundary), not silent
+  corruption.
+
+**Next increments:** nested scopes (per-join return context, replacing the single
+`g_sched_ctx`); real I/O parking via the netpoller (spike #2, §8.5); cancellation and
+structured error propagation.

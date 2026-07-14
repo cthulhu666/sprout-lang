@@ -1,0 +1,29 @@
+import stdlib.test (TestState, new_state, assert_eq, summary)
+import stdlib.task (Scope, with_scope, scope_spawn, task_yield)
+import stdlib.string as string
+
+# L0.1 cooperative structured concurrency.
+# Two tasks each append a marker to a shared log, yield, then append a second
+# marker. Round-robin cooperative scheduling must interleave them as A1 B1 A2 B2:
+#   spawn A, spawn B -> run A to its yield (A1), run B to its yield (B1),
+#   resume A (A2), resume B (B2).
+# (Sharing a Ref across tasks is safe here precisely because L0.1 is single-thread
+# cooperative — no true parallelism yet.)
+fn worker(log: Ref String, first: String, second: String) -> Unit !{IO} =
+  do
+    ref_write(log, string.concat(ref_read(log), first))
+    task_yield()
+    ref_write(log, string.concat(ref_read(log), second))
+
+fn spawn_workers(s: Scope, log: Ref String) -> Unit !{IO} =
+  do
+    scope_spawn(s, \_ -> worker(log, "A1", "A2"))
+    scope_spawn(s, \_ -> worker(log, "B1", "B2"))
+
+fn main() -> Unit !{IO} =
+  do
+    state <- new_state()
+    log <- ref_new("")
+    with_scope(\s -> spawn_workers(s, log))
+    assert_eq(state, "cooperative round-robin interleaving", ref_read(log), "A1B1A2B2")
+    summary(state)

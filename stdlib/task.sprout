@@ -1,0 +1,34 @@
+module stdlib.task
+
+# L0.1 structured concurrency (EXPERIMENTAL): cooperative green tasks on a single
+# OS thread. `with_scope` opens a scope, runs the body, then joins — it cannot
+# return until every task spawned into the scope has finished. Join-only for now;
+# cancellation and error propagation are a later increment.
+#
+# See docs/concurrency-design-exploration-2026-07-13.md (§4.A, §8.5).
+
+export type Scope =
+  | Scope Int
+
+# Runtime primitives (green-thread scheduler; cannot be expressed in Sprout —
+# they require stack/context switching). See runtime/APPROVED_BUILTINS.
+extern fn __scope_open() -> Int !{IO}
+extern fn __scope_join(scope_id: Int) -> Unit !{IO}
+extern fn __scope_spawn(scope_id: Int, work: Unit -> Unit !{IO}) -> Unit !{IO}
+
+# Cooperative yield point: suspend the current task and let the scheduler run
+# another ready task. (Real I/O parking, which yields implicitly, lands in L0.2.)
+export extern fn task_yield() -> Unit !{IO}
+
+# Open a scope, run `body`, then block until all tasks spawned into it finish.
+export fn with_scope(body: Scope -> Unit !{IO}) -> Unit !{IO} =
+  do
+    id <- __scope_open()
+    body(Scope(id))
+    __scope_join(id)
+
+# Spawn `work` as a green task belonging to `scope`. The task becomes runnable but
+# does not start until the current task yields or the scope joins.
+export fn scope_spawn(scope: Scope, work: Unit -> Unit !{IO}) -> Unit !{IO} =
+  match scope with
+  | Scope id -> __scope_spawn(id, work)

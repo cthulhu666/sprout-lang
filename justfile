@@ -991,6 +991,42 @@ stack-overflow-smoke: bootstrap-from-seed
   fi
   echo "==> stack-overflow-smoke ✓ (clean panic, exit $ec)"
 
+# L0.1 cooperative-scheduler guard regression (CI gate). Each fixture exercises a
+# constructible-from-the-surface misuse the scheduler must reject LOUDLY rather
+# than corrupt its (single) return context: opening a scope from inside a task,
+# and task_yield outside any task. Each must exit non-zero with its message on
+# stderr. See runtime/sprout_sched.c and docs/concurrency-design-exploration-2026-07-13.md.
+[group('smoke')]
+task-guard-smoke: bootstrap-from-seed
+  #!/usr/bin/env bash
+  set -euo pipefail
+  TMPD=$(mktemp -d /tmp/sprout_taskguard_XXXXXX)
+  trap 'rm -rf "$TMPD"' EXIT
+  check() {
+    local fixture="$1" want="$2"
+    if ! "{{build_dir}}/compile_driver_bin_stage1" --emit-ir "{{stdlib_root}}" "$fixture" > "$TMPD/out.ll" 2>"$TMPD/emit.err"; then
+      echo "task-guard-smoke: emit-IR failed for $fixture" >&2; cat "$TMPD/emit.err" >&2; exit 1
+    fi
+    if ! clang "$TMPD/out.ll" {{runtime_src}} -O2 {{clang_extra}} -o "$TMPD/bin" 2>"$TMPD/link.err"; then
+      echo "task-guard-smoke: link failed for $fixture" >&2; cat "$TMPD/link.err" >&2; exit 1
+    fi
+    set +e
+    "$TMPD/bin" > "$TMPD/run.out" 2>"$TMPD/run.err"
+    local ec=$?
+    set -e
+    if [ "$ec" -eq 0 ]; then
+      echo "task-guard-smoke: $fixture exited 0 — guard did not fire (expected loud abort)" >&2
+      echo "--- stdout was ---" >&2; cat "$TMPD/run.out" >&2; exit 1
+    fi
+    if ! grep -q "$want" "$TMPD/run.err"; then
+      echo "task-guard-smoke: $fixture aborted (exit $ec) but stderr lacked '$want'" >&2
+      echo "--- stderr was ---" >&2; cat "$TMPD/run.err" >&2; exit 1
+    fi
+  }
+  check tests/task_guard_smoke/nested_scope.spr "nested scope from within a task"
+  check tests/task_guard_smoke/yield_outside.spr "called outside a task"
+  echo "==> task-guard-smoke ✓ (both guards fired cleanly)"
+
 # Division-by-zero guard regression (CI gate). The fixture divides by a RUNTIME
 # zero (`10 / list_length(argv)` with no args), which neither the compiler nor
 # clang can fold. A bare `sdiv i64 _, 0` is LLVM undefined behavior; the emitted
@@ -1076,7 +1112,12 @@ test-stress: bootstrap-from-seed
   # across the call; @ref_new and other builtins may collect before consuming an
   # operand).  All three were the same class — they presented differently (tag-
   # read abort vs EXC_BAD_ACCESS) only by how the swept address was reused.
-  STRESS_FILES="tests/stdlib/test_ir_rooting.spr tests/stdlib/test_ir_codegen_ctors.spr tests/stdlib/test_ir_codegen_match.spr tests/stdlib/test_ir_codegen_closures.spr tests/stdlib/test_ir_codegen_char_rooting.spr tests/stdlib/test_stress_global_roots.spr tests/stdlib/test_stress_unboxed_maybe_heap_payload.spr tests/stdlib/test_stress_cpr_tier2_worker.spr"
+  # test_task_cooperative: L0.1 green tasks — the canonical multi-task rooting
+  # exercise. Under stress a second task allocates while the first is suspended
+  # at a yield point; per-task root contexts (sprout_sched.c) must keep the
+  # suspended task's values live. A rooting regression there presents as a
+  # collected-while-live abort here.
+  STRESS_FILES="tests/stdlib/test_ir_rooting.spr tests/stdlib/test_ir_codegen_ctors.spr tests/stdlib/test_ir_codegen_match.spr tests/stdlib/test_ir_codegen_closures.spr tests/stdlib/test_ir_codegen_char_rooting.spr tests/stdlib/test_stress_global_roots.spr tests/stdlib/test_stress_unboxed_maybe_heap_payload.spr tests/stdlib/test_stress_cpr_tier2_worker.spr tests/stdlib/test_task_cooperative.spr"
   # Known-failing under stress — false-green at the default threshold, FOUND BY
   # THIS PASS (residual typed-codegen rooting UAF, GC-confirmed via
   # SPROUT_GC_DISABLE).  Tracked in BACKLOG.md; warn-only here.  Promote to
