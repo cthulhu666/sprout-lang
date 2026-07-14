@@ -1,0 +1,231 @@
+# Layer-0 I/O Parking + Top-Level Scheduler Pump — Design (EXPERIMENTAL)
+
+Status: **proposed** (design-for-approval, no code yet). Supersedes nothing normative;
+`stdlib.task` remains EXPERIMENTAL and out of `docs/spec-v0.md`. Builds on the landed
+L0.1 cooperative scheduler + L0.2 nested scopes (`runtime/sprout_sched.c`,
+`docs/concurrency-design-exploration-2026-07-13.md`).
+
+Author date: 2026-07-14.
+
+---
+
+## 1. Problem statement
+
+Green tasks today are purely compute-cooperative: they interleave only at explicit
+`task_yield` points. Any real I/O still uses the **blocking** `tcp_*` builtins, which
+block the single OS thread — so while one task waits on a socket read, *no* other task
+runs. This defeats the entire point of the concurrency substrate (the design doc's
+driver story: "the Postgres/Redis drivers call `tcp_read`/`tcp_write` and inherit
+parking for free", §6.1/§7).
+
+The unlock is **I/O parking**: when a task would block on a socket, it suspends and
+lets siblings run; the scheduler resumes it when the OS reports the fd is ready. This
+is exactly Go's netpoller model (§9 survey).
+
+There is a structural blocker in the current scheduler. `__scope_join` runs its drive
+loop **on the calling task's C stack**; nested joins stack up (L0.2). A netpoller has
+nowhere to live in that shape: when a task parks on I/O, *someone* must block in
+`kevent`/`epoll_wait` and be free to run **any** ready task — but an inner join loop
+cannot run outer-scope siblings suspended below it on the C stack. That is the deadlock
+already flagged in the L0.2 commit and the design doc. Resolving it requires moving from
+recursive-C-stack joins to a **single top-level scheduler pump**.
+
+## 2. Goals and non-goals
+
+**Goals**
+- `tcp_accept`/`tcp_read`/`tcp_write` park the current green task on `EAGAIN` instead of
+  blocking the OS thread; the scheduler runs other ready tasks meanwhile.
+- One top-level scheduler pump owns the ready queue **and** the readiness poller.
+  `__scope_join` becomes "park the joining task until the scope drains," not a nested
+  drive loop.
+- Cross-platform poller: **kqueue** (macOS, dev) + **epoll** (Linux, CI) behind one
+  internal C interface. Both must work — CI runs on Linux.
+- Preserve everything the spikes/increments established: non-moving green stacks,
+  per-task GC root contexts, the registry-based `mark_roots` (a task parked on I/O keeps
+  its roots — spike #2 proved root-across-real-park).
+- No change to the Sprout surface (`with_scope`/`scope_spawn`/`task_yield`) or its types.
+
+**Non-goals (this increment)**
+- Timers / `task_sleep` (needs a timeout-driven poller wait; deferred — noted in §9 of the
+  exploration doc). The poller blocks indefinitely when only I/O-parked tasks remain.
+- Cancellation and error propagation (separate increment).
+- Multi-core / work-stealing (Layer-1; share-nothing is the eventual route, §8).
+- Channels/actors (additive models on top).
+
+## 3. Prior-art survey (verified against primary sources, 2026-07-14)
+
+The two design questions are (Q-A) *what poller model* and (Q-B) *where the scheduler
+blocks*. Both have a clear cross-language consensus.
+
+**Q-A — readiness vs completion poller.** kqueue and epoll are **readiness** APIs: you
+register interest in an fd and are notified when it is readable/writable, then *you*
+perform the non-blocking `read`/`write`.
+- epoll (Linux) — man7: edge-triggered (`EPOLLET`) "delivers events only when changes
+  occur"; the documented pattern is "nonblocking file descriptors" + "waiting for an
+  event only after `read(2)` or `write(2)` return **EAGAIN**". Default is level-triggered
+  ("a faster `poll(2)`"). [epoll(7)](https://man7.org/linux/man-pages/man7/epoll.7.html)
+- kqueue (macOS/BSD) — man: `EVFILT_READ` fires "whenever there is data available to
+  read"; `EVFILT_WRITE` "whenever it is possible to write"; `EV_CLEAR` gives edge-triggered
+  "state transitions instead of the current state." [kqueue(2)](https://man.freebsd.org/cgi/man.cgi?kqueue)
+- This is the model our cooperative scheduler wants: on `EAGAIN`, register + park; on
+  readiness, retry the non-blocking op. (Completion APIs — io_uring/IOCP — are a different
+  shape, deferred.)
+
+**Q-B — where the scheduler blocks.** Go's runtime is the reference. Its scheduler drains
+the local/global/steal run queues; when **no goroutine is runnable**, it makes the poll
+**blocking** — the thread sleeps inside `epoll_wait`/`kevent` until an fd is ready (or a
+timer fires) — then marks the goroutines waiting on the ready fds runnable. Platform
+interface: `netpollinit` / `netpollopen(fd)` / `netpoll(delay)` (blocks when `delay<0`,
+returns the list of ready goroutines). We adopt exactly this: **the pump runs ready
+tasks; when the ready queue is empty and tasks are I/O-parked, it blocks in the poller.**
+(Go runtime `src/runtime/netpoll.go`; corroborated by multiple runtime write-ups.)
+
+Wider consensus (exploration doc §9, verified 2026-07-13): Go, Node/libuv, Rust-Tokio/mio,
+OCaml-Eio all center a single readiness poller + a park/wake scheduler; no-coloring green
+threads beat colored `async` for pervasive-I/O code. Our single-thread cooperative pump is
+the simplest point on that spectrum.
+
+## 4. High-level implementation overview (for approval)
+
+### 4.1 Top-level pump replaces recursive joins
+
+Introduce one scheduler context `g_pump` (a `ucontext_t` on a dedicated stack, entered via
+`makecontext(pump_loop)`). Every task (and task-0/`main`) **parks** by `swapcontext(&self,
+&g_pump)`; the pump resumes a task by `swapcontext(&g_pump, &task)`. Consequences:
+
+- `task->sched_return` collapses to the single `&g_pump` (the per-join `my_sched` contexts
+  from L0.2 go away — **the pump subsumes recursive-join nesting**: a nested `__scope_join`
+  simply parks its joiner and the pump keeps running everyone else, so nesting still works
+  with *less* machinery). L0.2's per-`Scope` queues and per-task root contexts are retained.
+- `g_current_task`/`g_current_roots` are still switched by the pump immediately before each
+  `swapcontext` into a task (unchanged switch-point-alignment invariant).
+
+`pump_loop` (single authority):
+```
+loop:
+  if ready queue non-empty:            run next ready task (swap in)
+  elif any task parked on I/O:         poll_wait(block=true) -> move ready tasks to run queue
+  elif tasks parked on joins only:     deadlock -> loud fail (well-structured code can't hit this)
+  else (no tasks at all):              return -> program end
+```
+
+Park reasons (all swap to `g_pump`, differing only in bookkeeping):
+- **yield** — push self to its scope's ready queue.
+- **join** — `__scope_join(s)`: if `s.live>0`, record self as `s`'s waiter and park; the
+  last child to finish (`s.live→0`) moves `s`'s waiter back to the ready queue, then frees `s`.
+- **I/O** — register `(fd, interest)` with the poller, tag the current task, park. On
+  readiness the pump moves it to the ready queue and it retries the non-blocking syscall.
+
+`main` stays on task-0's native stack + `g_task0_roots`; it parks like any task (first park
+is its first `join`/`yield`, which is also the first entry into `g_pump`).
+
+### 4.2 Poller abstraction (internal C, cross-platform)
+
+A small internal interface in a new TU `runtime/sprout_poll.c` (+ decl in `sprout_sched.h`),
+**not** Sprout-visible:
+```
+void poll_init(void);
+void poll_register(int fd, int interest /*READ|WRITE*/, Task* t);  /* one-shot */
+void poll_wait(void);   /* block in kevent/epoll_wait; wake tasks whose fds are ready */
+```
+`#ifdef __APPLE__` → kqueue (`EVFILT_READ`/`EVFILT_WRITE`, `EV_ONESHOT`); `#else` → epoll
+(`EPOLLIN`/`EPOLLOUT`, `EPOLLONESHOT`). First cut uses **one-shot / level-triggered**
+registration (register on park, fire once, re-register on the next `EAGAIN`) — simplest to
+reason about in a cooperative loop; edge-triggered (`EV_CLEAR`/`EPOLLET`) is a later
+optimization, not needed for correctness.
+
+### 4.3 Retrofit the `tcp_*` builtins
+
+The sockets become `O_NONBLOCK`. Inside the existing `tcp_read`/`tcp_accept`/`tcp_write`
+builtins (C), the blocking syscall is wrapped:
+```
+retry:  n = read(fd, ...);
+        if (n < 0 && errno == EAGAIN) { sched_park_on_fd(fd, READ); goto retry; }
+```
+`sched_park_on_fd` is an internal C function (poll_register + park-to-pump). **No new
+Sprout-visible builtin is required** for I/O parking — the new capability is internal
+runtime plumbing; the Sprout-visible change is only that the existing `tcp_*` builtins now
+*park* rather than *block*. (Builtin-vs-stdlib rule 6: this is a correctness/behavior change
+to existing effect-oriented builtins, not a new pure helper; the poller cannot be expressed
+in Sprout — it needs `kqueue`/`epoll` syscalls and context switching.) **This point is the
+one that most needs your explicit sign-off** even though it adds no `APPROVED_BUILTINS`
+line: it changes the semantics of shipped builtins.
+
+### 4.4 Rooting across a park — already validated
+
+A task parked on I/O keeps its green stack (non-moving) and its registered root context;
+`mark_roots` scans all registered contexts, so its live values survive a GC storm driven by
+another task. Spike #2 demonstrated exactly this (root held across a real 2-frames-deep park,
+200-alloc storm). No collector or rooting change.
+
+## 5. Syntax and semantics impact
+
+- **Syntax:** none.
+- **Semantics:** `with_scope`/`scope_spawn`/`task_yield` unchanged in meaning. New: `tcp_*`
+  operations are now *suspension points* (a task may interleave at any socket op, not only at
+  `task_yield`). This is observable — cooperative interleaving becomes finer-grained — but
+  stays deterministic given a fixed I/O readiness order (readiness itself is nondeterministic,
+  as with any real network). Structured-concurrency guarantee is preserved: `with_scope` still
+  cannot return until all its tasks finish (now including tasks blocked on I/O).
+
+## 6. Type-system impact
+
+None. No new types, classes, or effects. (I/O already carries `!{IO}`; parking is within `IO`.)
+
+## 7. Error-message impact
+
+- New loud failures: poller syscall errors (`kqueue`/`epoll_create` failure → `sprout_fail`);
+  the pump's `deadlock` branch (all tasks parked on joins, none on I/O and none ready) — a
+  structured-concurrency bug, reported loudly.
+- Retained: `task_yield` outside a task.
+- The existing `tcp_*` error returns (EPIPE, connection errors) are unchanged; only `EAGAIN`
+  is intercepted for parking.
+
+## 8. Compatibility / migration notes
+
+- Non-concurrent programs (no `with_scope`) are unaffected: with a single task, a `tcp_*`
+  park immediately finds nothing else ready and the pump blocks in the poller — behaviorally
+  identical to today's blocking call (one extra poller round-trip).
+- The L0.2 per-join return-context code is **replaced** by the pump; nested-scope behavior is
+  preserved (re-verified by the existing `test_task_nested_scope`). The pump is a net
+  simplification of the drive path.
+- Bootstrap/seed: runtime-only change (+ new `runtime/sprout_poll.c`, auto-globbed). No
+  compiler-source or seed impact.
+
+## 9. Tests added/updated
+
+1. **Concurrent I/O interleave (new, behavioral):** two tasks each drive a socket (e.g. a
+   loopback pair or a self-connected listener); assert that task B makes progress while task A
+   is parked on a read — i.e. interleaved order, not A-fully-then-B. Deterministic via a
+   controlled readiness sequence.
+2. **Park + GC-stress (rooting):** a task holds a heap value across an I/O park while a second
+   task allocates heavily; assert the value survives. Added to `test-stress` (the netpoller is
+   a new rooting surface).
+3. **Single-task I/O unchanged (regression):** a no-`with_scope` program using `tcp_*` still
+   works (park→poll→resume path with nothing else runnable).
+4. **Nested-scope behavior preserved** under the pump: `test_task_nested_scope` must stay green.
+5. **CI on Linux (epoll path):** all of the above must pass on the Linux CI runner, not just
+   macOS/kqueue — the epoll backend is exercised only there.
+6. Loud-failure smokes: poller-init failure and the pump deadlock branch (fixture that parks a
+   joiner with no runnable/I/O tasks) — via the `task-guard-smoke` family.
+
+TDD order: write test 1 red (against the current blocking `tcp_*`, it serializes → wrong
+interleaving) before the retrofit.
+
+## 10. Spec/docs updated
+
+- This doc is the approved-design artifact; **experimental**, not normative.
+- On landing: update `docs/concurrency-design-exploration-2026-07-13.md` status (netpoller
+  LANDED, pump replaces recursive joins), the L0 milestone note, and BACKLOG.md V1 roadmap.
+- `docs/spec-v0.md` is untouched (concurrency stays out of the stable core until promoted).
+
+---
+
+## Open questions for the approver
+
+1. **Scope of this increment:** just the pump + kqueue/epoll + `tcp_*` retrofit (recommended),
+   or also fold in a minimal `task_sleep` timer (adds timeout-driven `poll_wait`)?
+2. **Poller triggering:** start with one-shot/level-triggered (recommended, simplest) and defer
+   edge-triggered, or go edge-triggered from the start?
+3. **`tcp_*` semantics change** (§4.3): confirm you're OK making the *existing* blocking builtins
+   park — the only builtin-policy question here (no new `APPROVED_BUILTINS` entries).
