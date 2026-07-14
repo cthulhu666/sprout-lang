@@ -60,6 +60,18 @@ that lands on remote.
 
 ## Open a PR
 
+> **Fastest path — one command (works from a worktree):**
+> ```sh
+> scripts/codeberg/pr-create.sh "<short title under 70 chars>" /path/to/pr_body.md
+> ```
+> It reads `.codeberg.config` + the token via `scripts/codeberg/_lib.sh`, checks
+> whether an open PR already exists for the current branch (idempotent — prints
+> its URL and exits), pushes the branch, and POSTs to `/pulls` with the body via
+> `jq --rawfile` (correct markdown escaping). Base defaults to `master`. Prefer
+> this over the manual steps below — it encodes the worktree/curl/idempotency
+> traps. The manual `tea pr create` / raw-curl instructions remain as reference
+> and fallback.
+
 > **Use `tea pr create` (alias for `tea pulls create`). Do NOT use `tea api`.**
 > In tea **0.14.1** the `tea api` subcommand is broken — it returns
 > `404 page not found` for *every* endpoint (including valid ones like
