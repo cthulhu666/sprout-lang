@@ -1,0 +1,28 @@
+import stdlib.task (Scope, with_scope, scope_spawn, task_yield)
+import stdlib.string as string
+
+# L0.1 cooperative structured concurrency: two green tasks share one OS thread.
+# Each worker announces a step, then `task_yield`s to let the scheduler run its
+# sibling before continuing. With round-robin scheduling the steps interleave
+# deterministically — alice 1, bob 1, alice 2, bob 2, alice 3, bob 3.
+#
+# `with_scope` does not return until every task spawned into the scope has
+# finished (structured concurrency: no task outlives its scope).
+fn worker(name: String) -> Unit !{IO} =
+  do
+    print(string.concat(name, " step 1"))
+    task_yield()
+    print(string.concat(name, " step 2"))
+    task_yield()
+    print(string.concat(name, " step 3"))
+
+fn spawn_workers(s: Scope) -> Unit !{IO} =
+  do
+    scope_spawn(s, \_ -> worker("alice"))
+    scope_spawn(s, \_ -> worker("bob"))
+
+fn main() -> Unit !{IO} =
+  do
+    print("scope: opening")
+    with_scope(\s -> spawn_workers(s))
+    print("scope: all tasks joined")
