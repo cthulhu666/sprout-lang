@@ -1010,18 +1010,19 @@ task-io-smoke: bootstrap-from-seed
   set -euo pipefail
   TMPD=$(mktemp -d /tmp/sprout_taskio_XXXXXX)
   trap 'rm -rf "$TMPD"' EXIT
-  FIXTURE=tests/task_io_smoke/concurrent_read.spr
-  if ! "{{build_dir}}/compile_driver_bin_stage1" --emit-ir "{{stdlib_root}}" "$FIXTURE" > "$TMPD/out.ll" 2>"$TMPD/emit.err"; then
-    echo "task-io-smoke: emit-IR failed" >&2; cat "$TMPD/emit.err" >&2; exit 1
-  fi
-  if ! clang "$TMPD/out.ll" {{runtime_src}} -O2 {{clang_extra}} -o "$TMPD/bin" 2>"$TMPD/link.err"; then
-    echo "task-io-smoke: link failed" >&2; cat "$TMPD/link.err" >&2; exit 1
-  fi
-  run_once() {  # $1 = label, env passed by caller; asserts complete + interleaved
-    local label="$1"
+  build() {  # $1 = fixture -> $TMPD/bin
+    if ! "{{build_dir}}/compile_driver_bin_stage1" --emit-ir "{{stdlib_root}}" "$1" > "$TMPD/out.ll" 2>"$TMPD/emit.err"; then
+      echo "task-io-smoke: emit-IR failed for $1" >&2; cat "$TMPD/emit.err" >&2; exit 1
+    fi
+    if ! clang "$TMPD/out.ll" {{runtime_src}} -O2 {{clang_extra}} -o "$TMPD/bin" 2>"$TMPD/link.err"; then
+      echo "task-io-smoke: link failed for $1" >&2; cat "$TMPD/link.err" >&2; exit 1
+    fi
+  }
+  run_once() {  # $1 = label, $2 = required substring; env (e.g. SPROUT_GC_STRESS) from caller
+    local label="$1" want="$2"
     set +e
-    # perl alarm = portable timeout (macOS lacks `timeout`); SIGALRM -> non-zero exit on hang.
-    perl -e 'alarm 10; exec @ARGV' "$TMPD/bin" > "$TMPD/run.out" 2>"$TMPD/run.err"
+    # perl alarm = portable timeout (macOS lacks `timeout`); a HANG -> non-zero exit.
+    perl -e 'alarm 15; exec @ARGV' "$TMPD/bin" > "$TMPD/run.out" 2>"$TMPD/run.err"
     local ec=$?
     set -e
     if [ "$ec" -ne 0 ]; then
@@ -1029,19 +1030,25 @@ task-io-smoke: bootstrap-from-seed
       echo "--- stdout ---" >&2; cat "$TMPD/run.out" >&2; echo "--- stderr ---" >&2; cat "$TMPD/run.err" >&2
       exit 1
     fi
-    if ! grep -q "reader got ping" "$TMPD/run.out"; then
-      echo "task-io-smoke [$label]: reader did not receive the payload" >&2
-      cat "$TMPD/run.out" >&2; exit 1
-    fi
-    # writer must print BEFORE reader resumes (proves reader parked, not read-first).
-    if ! awk '/writer sent/{w=NR} /reader got ping/{if(w && NR>w) ok=1} END{exit !ok}' "$TMPD/run.out"; then
-      echo "task-io-smoke [$label]: wrong order (writer should precede the woken reader)" >&2
+    if ! grep -q "$want" "$TMPD/run.out"; then
+      echo "task-io-smoke [$label]: missing expected output '$want'" >&2
       cat "$TMPD/run.out" >&2; exit 1
     fi
   }
-  run_once "plain"
-  SPROUT_GC_STRESS=1 run_once "gc-stress"
-  echo "==> task-io-smoke ✓ (parked read woken by sibling write; interleaved; stress-clean)"
+  # (1) minimal read-park: reader parks, sibling write wakes it (assert interleaved order).
+  build tests/task_io_smoke/concurrent_read.spr
+  run_once "read-park" "reader got ping"
+  if ! awk '/writer sent/{w=NR} /reader got ping/{if(w && NR>w) ok=1} END{exit !ok}' "$TMPD/run.out"; then
+    echo "task-io-smoke: wrong order (writer should precede the woken reader)" >&2
+    cat "$TMPD/run.out" >&2; exit 1
+  fi
+  SPROUT_GC_STRESS=1 run_once "read-park/stress" "reader got ping"
+  # (2) accept-park + poller RE-ARM (park->wake->park again on one fd) + write side.
+  # Reaching "round2" proves the second read-park on the same fd was re-armed.
+  build tests/task_io_smoke/echo_roundtrip.spr
+  run_once "rearm" "client round2 ack2"
+  SPROUT_GC_STRESS=1 run_once "rearm/stress" "client round2 ack2"
+  echo "==> task-io-smoke ✓ (read-park, accept-park, re-arm, write; interleaved; stress-clean)"
 
 # Division-by-zero guard regression (CI gate). The fixture divides by a RUNTIME
 # zero (`10 / list_length(argv)` with no args), which neither the compiler nor

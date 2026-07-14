@@ -1,0 +1,59 @@
+import stdlib.task (Scope, with_scope, scope_spawn)
+import stdlib.net (TcpConnection, connect, write_all_utf8, read_exact_utf8, tcp_listen, tcp_accept, tcp_read, tcp_write)
+import stdlib.string as string
+
+# L0.3 I/O parking — exercises the poller paths a single read-park does NOT:
+#  * accept-parking: `server` is spawned before anyone connects, so tcp_accept
+#    parks on the listener fd.
+#  * re-arm (park -> wake -> park AGAIN on the same fd): `client` parks reading
+#    ack1, then parks again reading ack2 on the same connection — the epoll
+#    EPOLL_CTL_MOD re-arm / kqueue EV_ADD-after-EV_ONESHOT path.
+#  * the write side runs on both ends.
+# A two-round request/ack handshake keeps it deterministic; completion under a
+# timeout is the signal (a broken re-arm would hang on the second read).
+fn server(listener: Int) -> Unit !{IO} =
+  do
+    conn <- tcp_accept(listener)
+    m1 <- tcp_read(conn)
+    term_write(string.concat("server round1 ", m1))
+    term_write("\n")
+    tcp_write(conn, "ack1")
+    m2 <- tcp_read(conn)
+    term_write(string.concat("server round2 ", m2))
+    term_write("\n")
+    tcp_write(conn, "ack2")
+
+# Connect from within the task (after `server` has parked on accept), so the
+# accept genuinely parks rather than finding a pre-filled backlog.
+fn client(port: Int) -> Unit !{IO} =
+  match connect("127.0.0.1", port) with
+  | Ok conn ->
+      do
+        send_or_fail(conn, "ping1")
+        read_ack(conn, "client round1 ")
+        send_or_fail(conn, "ping2")
+        read_ack(conn, "client round2 ")
+  | Err e -> term_write("client connect failed\n")
+
+fn send_or_fail(conn: TcpConnection, msg: String) -> Unit !{IO} =
+  match write_all_utf8(conn, msg) with
+  | Ok _ -> term_write("")
+  | Err _ -> term_write("client write failed\n")
+
+fn read_ack(conn: TcpConnection, label: String) -> Unit !{IO} =
+  match read_exact_utf8(conn, 4) with
+  | Ok a ->
+      do
+        term_write(string.concat(label, a))
+        term_write("\n")
+  | Err _ -> term_write("client read failed\n")
+
+fn run(s: Scope, listener: Int, port: Int) -> Unit !{IO} =
+  do
+    scope_spawn(s, \_ -> server(listener))
+    scope_spawn(s, \_ -> client(port))
+
+fn main() -> Unit !{IO} =
+  do
+    listener <- tcp_listen(28998)
+    with_scope(\s -> run(s, listener, 28998))
