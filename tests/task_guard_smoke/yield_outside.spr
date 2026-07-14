@@ -1,9 +1,0 @@
-import stdlib.task (task_yield)
-
-# L0.1 boundary: task_yield with no task running (called from main) must fail
-# loud rather than switching to an invalid scheduler context. Expected to abort
-# with "called outside a task".
-fn main() -> Unit !{IO} =
-  do
-    task_yield()
-    term_write("reached main tail (should be unreachable)\n")

@@ -717,5 +717,13 @@ on I/O would trip the `live>0 && queue-empty` deadlock assert; the netpoller
 increment will likely need one top-level scheduler pump instead of recursive
 C-stack joins.
 
-**Next increments:** real I/O parking via the netpoller (spike #2, §8.5;
-top-level pump); cancellation and structured error propagation.
+**I/O parking via the netpoller — LANDED (2026-07-14).** `tcp_*` now park the current
+green task on `EAGAIN` (kqueue/epoll readiness poller, `runtime/sprout_poll.c`) instead of
+blocking the OS thread. The recursive-C-stack joins were replaced by a single **top-level
+scheduler pump** (the netpoller needs one place to block in `kevent`/`epoll_wait` that can
+run any ready task); per-`Scope` queues collapsed to one global queue, and main/task-0 is a
+materialized task on the native stack so bare `tcp_*` outside any scope still parks. Design +
+as-built deltas: `docs/concurrency-layer0-io-park-design.md`. Gate: `just task-io-smoke`.
+
+**Next increments:** cancellation and structured error propagation; then `task_sleep`
+(timeout-driven poll_wait) and channels. Multicore stays out of scope (share-nothing, §8).

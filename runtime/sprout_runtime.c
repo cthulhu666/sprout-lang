@@ -1099,6 +1099,8 @@ long long sprout_gc_pop_roots(long long count) {
  * without reaching into the struct. */
 SproutRoots* sprout_roots_current(void) { return g_current_roots; }
 
+SproutRoots* sprout_roots_main(void) { return &g_task0_roots; }
+
 void sprout_roots_switch(SproutRoots* r) { g_current_roots = r; }
 
 SproutRoots* sprout_roots_new(size_t pool_slots) {
@@ -7399,6 +7401,17 @@ long long crypto_random_bytes(long long count) {
   return result;
 }
 
+/* L0.3 I/O parking: sockets are made non-blocking so a would-block read/write/
+ * accept returns EAGAIN, at which point the tcp_* builtins park the current green
+ * task (sched_park_on_fd) and let siblings run instead of freezing the OS thread.
+ * A single-task program (no with_scope) parks into the always-ready pump, which
+ * blocks in the poller — behaviorally identical to a blocking call. */
+static void tcp_set_nonblocking(int fd) {
+  int flags = fcntl(fd, F_GETFL, 0);
+  if (flags < 0) tcp_fail("tcp: fcntl F_GETFL failed");
+  if (fcntl(fd, F_SETFL, flags | O_NONBLOCK) < 0) tcp_fail("tcp: fcntl F_SETFL failed");
+}
+
 long long tcp_listen(long long port) {
   if (port < 1 || port > 65535) tcp_fail("tcp_listen: port out of range");
   int fd = socket(AF_INET, SOCK_STREAM, 0);
@@ -7421,6 +7434,7 @@ long long tcp_listen(long long port) {
     close(fd);
     tcp_fail("tcp_listen: listen failed");
   }
+  tcp_set_nonblocking(fd);   /* so tcp_accept parks on EAGAIN rather than blocking */
   long long h = alloc_listener_handle();
   if (h < 0) {
     close(fd);
@@ -7482,6 +7496,9 @@ long long tcp_connect(const char* host, long long port) {
   for (struct addrinfo* it = resolved; it != NULL; it = it->ai_next) {
     fd = socket(it->ai_family, it->ai_socktype, it->ai_protocol);
     if (fd < 0) continue;
+    /* connect() stays BLOCKING (set O_NONBLOCK only after it succeeds): a
+     * non-blocking connect returns EINPROGRESS and would need a write-readiness
+     * park; loopback/typical connects complete promptly. */
     if (connect(fd, it->ai_addr, it->ai_addrlen) == 0) {
       error_msg = NULL;
       break;
@@ -7491,6 +7508,7 @@ long long tcp_connect(const char* host, long long port) {
     fd = -1;
   }
   freeaddrinfo(resolved);
+  if (fd >= 0) tcp_set_nonblocking(fd);   /* steady-state read/write parks on EAGAIN */
 
   if (fd < 0) {
     return tcp_net_err1("stdlib.net.TcpConnectFailed", (long long)(uintptr_t)error_msg);
@@ -7510,8 +7528,17 @@ long long tcp_accept(long long listener) {
   if (listener <= 0 || listener >= 2048 || !g_listener_used[listener]) {
     tcp_fail("tcp_accept: unknown listener handle");
   }
-  int fd = accept(g_listener_fd[listener], NULL, NULL);
-  if (fd < 0) tcp_fail("tcp_accept: accept failed");
+  int fd;
+  for (;;) {
+    fd = accept(g_listener_fd[listener], NULL, NULL);
+    if (fd >= 0) break;
+    if (errno == EAGAIN || errno == EWOULDBLOCK) {
+      sched_park_on_fd(g_listener_fd[listener], SPROUT_POLL_READ);
+      continue;
+    }
+    tcp_fail("tcp_accept: accept failed");
+  }
+  tcp_set_nonblocking(fd);   /* accepted conn parks on EAGAIN */
   long long h = alloc_conn_handle();
   if (h < 0) {
     close(fd);
@@ -7527,8 +7554,14 @@ long long tcp_read(long long conn) {
   sprout_gc_maybe_collect_threshold();
   char* buf = (char*)malloc(65537);
   if (buf == NULL) tcp_fail("tcp_read: out of memory");
-  ssize_t n = recv(g_conn_fd[conn], buf, 65536, 0);
-  if (n < 0) {
+  ssize_t n;
+  for (;;) {
+    n = recv(g_conn_fd[conn], buf, 65536, 0);
+    if (n >= 0) break;
+    if (errno == EAGAIN || errno == EWOULDBLOCK) {   /* no unrooted GC temp held */
+      sched_park_on_fd(g_conn_fd[conn], SPROUT_POLL_READ);
+      continue;
+    }
     free(buf);  /* plain malloc buffer, free is correct */
     tcp_fail("tcp_read: recv failed");
   }
@@ -7556,6 +7589,10 @@ long long tcp_read_exact(long long conn, long long count) {
       return tcp_net_err0("stdlib.net.TcpEndOfStream");
     }
     if (n < 0) {
+      if (errno == EAGAIN || errno == EWOULDBLOCK) {   /* out is rooted across the park */
+        sched_park_on_fd(g_conn_fd[conn], SPROUT_POLL_READ);
+        continue;
+      }
       SPROUT_GC_POP_LOCALS(1);
       return tcp_net_err1("stdlib.net.TcpReadFailed", (long long)(uintptr_t)strerror(errno));
     }
@@ -7573,7 +7610,14 @@ long long tcp_write(long long conn, const char* payload) {
   const char* p = payload;
   while (len > 0) {
     ssize_t n = send(g_conn_fd[conn], p, len, 0);
-    if (n <= 0) tcp_fail("tcp_write: send failed");
+    if (n < 0) {
+      if (errno == EAGAIN || errno == EWOULDBLOCK) {
+        sched_park_on_fd(g_conn_fd[conn], SPROUT_POLL_WRITE);
+        continue;
+      }
+      tcp_fail("tcp_write: send failed");
+    }
+    if (n == 0) tcp_fail("tcp_write: send failed");
     p += n;
     len -= (size_t)n;
   }
@@ -7588,7 +7632,14 @@ long long tcp_write_all(long long conn, long long payload_h) {
   const unsigned char* p = payload->data;
   while (len > 0) {
     ssize_t n = send(g_conn_fd[conn], p, len, 0);
-    if (n <= 0) {
+    if (n < 0) {
+      if (errno == EAGAIN || errno == EWOULDBLOCK) {   /* payload reachable via caller roots */
+        sched_park_on_fd(g_conn_fd[conn], SPROUT_POLL_WRITE);
+        continue;
+      }
+      return tcp_net_err1("stdlib.net.TcpWriteFailed", (long long)(uintptr_t)strerror(errno));
+    }
+    if (n == 0) {
       return tcp_net_err1("stdlib.net.TcpWriteFailed", (long long)(uintptr_t)strerror(errno));
     }
     p += n;

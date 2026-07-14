@@ -1,11 +1,20 @@
 # Layer-0 I/O Parking + Top-Level Scheduler Pump — Design (EXPERIMENTAL)
 
-Status: **proposed** (design-for-approval, no code yet). Supersedes nothing normative;
-`stdlib.task` remains EXPERIMENTAL and out of `docs/spec-v0.md`. Builds on the landed
-L0.1 cooperative scheduler + L0.2 nested scopes (`runtime/sprout_sched.c`,
-`docs/concurrency-design-exploration-2026-07-13.md`).
+Status: **LANDED 2026-07-14** (macOS/kqueue verified natively; Linux/epoll verified in a
+Linux aarch64 container — fixture completes with the interleaved output, plain and under
+`SPROUT_GC_STRESS=1`). `stdlib.task` remains EXPERIMENTAL and out of `docs/spec-v0.md`. Builds on the L0.1
+cooperative scheduler + L0.2 nested scopes; the top-level pump here **replaces** the L0.2
+recursive-C-stack joins. Implementation: `runtime/sprout_poll.c` (kqueue/epoll),
+`runtime/sprout_sched.c` (pump), `tcp_*` retrofit in `runtime/sprout_runtime.c`.
 
 Author date: 2026-07-14.
+
+**As-built deltas from this design (all covered above):** per-`Scope` queues became one
+global queue; nested interleaving changed (outer siblings interleave with inner scopes —
+`test_task_nested_scope` golden is now `P1Q1Q2XYQ3P2P3`); `task_yield` from main is a legal
+no-op (task-0 is a materialized task), so the old `task-guard-smoke` was retired; poller +
+pump initialize in a startup constructor. New gate: `just task-io-smoke` (timeout-wrapped,
+plain + `SPROUT_GC_STRESS=1`).
 
 ---
 

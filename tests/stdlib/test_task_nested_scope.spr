@@ -2,23 +2,27 @@ import stdlib.test (TestState, new_state, assert_eq, summary)
 import stdlib.task (Scope, with_scope, scope_spawn, task_yield)
 import stdlib.string as string
 
-# L0.2 nested structured concurrency. Outer scope runs tasks P and Q; P opens its
-# OWN inner scope (running leaves X and Y to completion) between two yields.
+# Nested structured concurrency under the top-level scheduler pump. Outer scope
+# runs tasks P and Q; P opens its OWN inner scope (leaves X and Y) between two
+# yields.
 #
-# The discriminating property: P's yield that comes AFTER the inner scope must
-# return to the OUTER join loop (letting Q resume), not the exited inner one. A
-# single global scheduler-return context would corrupt here; per-join return
-# contexts + per-scope ready queues make it correct.
+# Property under the pump: opening a nested scope does NOT freeze outer siblings
+# (Trio/Kotlin semantics — nesting governs lifetime, not scheduling exclusion).
+# While P is parked in its inner join, the single global ready queue keeps running
+# Q. Lifetime is still enforced: the inner scope (X, Y) fully drains before P
+# proceeds past its `with_scope`.
 #
-# Deterministic round-robin trace (outer queue [P,Q], inner queue [X,Y]):
-#   P1          P runs to its first yield
-#   Q1          Q runs to its first yield
-#   X Y         P resumes, opens inner scope, drains X then Y (no outer yield)
-#   P2          P resumes past inner scope, runs to its second yield
-#   Q2          Q resumes
-#   P3          P finishes
+# Deterministic round-robin trace (one global ready queue):
+#   P1          P -> first yield;      queue [Q, P]
+#   Q1          Q -> first yield;      queue [P, Q]
+#   (P opens inner scope, spawns X,Y -> queue [Q, X, Y], then parks in inner join)
+#   Q2          Q -> second yield;     queue [X, Y, Q]
+#   X           leaf X finishes
+#   Y           leaf Y finishes -> inner drained -> wakes P; queue [Q, P]
 #   Q3          Q finishes
-# => "P1Q1XYP2Q2P3Q3"
+#   P2          P resumes past inner scope -> third yield; queue [P]
+#   P3          P finishes
+# => "P1Q1Q2XYQ3P2P3"  (Q interleaves with the inner scope; X,Y still drain before P2)
 # NB: helper is `record`, not `append` — `append` is the Semigroup class method
 # that `++` desugars to; a top-level `fn append` shadows it and breaks `++`
 # resolution across the whole bundle.
@@ -57,5 +61,5 @@ fn main() -> Unit !{IO} =
     state <- new_state()
     log <- ref_new("")
     with_scope(\s -> spawn_pq(s, log))
-    assert_eq(state, "nested scope round-robin interleaving", ref_read(log), "P1Q1XYP2Q2P3Q3")
+    assert_eq(state, "nested scope interleaving under pump", ref_read(log), "P1Q1Q2XYQ3P2P3")
     summary(state)

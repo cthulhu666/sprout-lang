@@ -991,40 +991,57 @@ stack-overflow-smoke: bootstrap-from-seed
   fi
   echo "==> stack-overflow-smoke ✓ (clean panic, exit $ec)"
 
-# Cooperative-scheduler guard regression (CI gate). Exercises a constructible-
-# from-the-surface misuse the scheduler must reject LOUDLY: task_yield outside any
-# task. Must exit non-zero with its message on stderr. (Nested scopes USED to be a
-# guard here; they are now supported — see tests/stdlib/test_task_nested_scope.spr.)
-# See runtime/sprout_sched.c and docs/concurrency-design-exploration-2026-07-13.md.
+# (The former `task-guard-smoke` recipe was retired at L0.3: both guards it tested
+# became obsolete — nested scopes are now supported, and under the top-level pump
+# task-0 is a materialized task so `task_yield` from main is a legal no-op rather
+# than an error. See docs/concurrency-layer0-io-park-design.md.)
+
+# L0.3 I/O-parking smoke (CI gate). Two green tasks share a loopback pair: `reader`
+# calls tcp_read before data exists, `writer` then sends. With I/O parking the
+# reader suspends on EAGAIN, the scheduler runs the writer, and the read is woken —
+# the program COMPLETES printing the interleaved order. With a blocking baseline it
+# would DEADLOCK (reader freezes the thread), so the RED signal is a hang, caught by
+# a timeout. Also run under SPROUT_GC_STRESS=1: a value held across the park must
+# survive a collection driven by the sibling. Needs kqueue (macOS) / epoll (Linux)
+# — the epoll backend is only exercised on the Linux CI runner.
 [group('smoke')]
-task-guard-smoke: bootstrap-from-seed
+task-io-smoke: bootstrap-from-seed
   #!/usr/bin/env bash
   set -euo pipefail
-  TMPD=$(mktemp -d /tmp/sprout_taskguard_XXXXXX)
+  TMPD=$(mktemp -d /tmp/sprout_taskio_XXXXXX)
   trap 'rm -rf "$TMPD"' EXIT
-  check() {
-    local fixture="$1" want="$2"
-    if ! "{{build_dir}}/compile_driver_bin_stage1" --emit-ir "{{stdlib_root}}" "$fixture" > "$TMPD/out.ll" 2>"$TMPD/emit.err"; then
-      echo "task-guard-smoke: emit-IR failed for $fixture" >&2; cat "$TMPD/emit.err" >&2; exit 1
-    fi
-    if ! clang "$TMPD/out.ll" {{runtime_src}} -O2 {{clang_extra}} -o "$TMPD/bin" 2>"$TMPD/link.err"; then
-      echo "task-guard-smoke: link failed for $fixture" >&2; cat "$TMPD/link.err" >&2; exit 1
-    fi
+  FIXTURE=tests/task_io_smoke/concurrent_read.spr
+  if ! "{{build_dir}}/compile_driver_bin_stage1" --emit-ir "{{stdlib_root}}" "$FIXTURE" > "$TMPD/out.ll" 2>"$TMPD/emit.err"; then
+    echo "task-io-smoke: emit-IR failed" >&2; cat "$TMPD/emit.err" >&2; exit 1
+  fi
+  if ! clang "$TMPD/out.ll" {{runtime_src}} -O2 {{clang_extra}} -o "$TMPD/bin" 2>"$TMPD/link.err"; then
+    echo "task-io-smoke: link failed" >&2; cat "$TMPD/link.err" >&2; exit 1
+  fi
+  run_once() {  # $1 = label, env passed by caller; asserts complete + interleaved
+    local label="$1"
     set +e
-    "$TMPD/bin" > "$TMPD/run.out" 2>"$TMPD/run.err"
+    # perl alarm = portable timeout (macOS lacks `timeout`); SIGALRM -> non-zero exit on hang.
+    perl -e 'alarm 10; exec @ARGV' "$TMPD/bin" > "$TMPD/run.out" 2>"$TMPD/run.err"
     local ec=$?
     set -e
-    if [ "$ec" -eq 0 ]; then
-      echo "task-guard-smoke: $fixture exited 0 — guard did not fire (expected loud abort)" >&2
-      echo "--- stdout was ---" >&2; cat "$TMPD/run.out" >&2; exit 1
+    if [ "$ec" -ne 0 ]; then
+      echo "task-io-smoke [$label]: did not complete (exit $ec) — likely a HANG (parking broken)" >&2
+      echo "--- stdout ---" >&2; cat "$TMPD/run.out" >&2; echo "--- stderr ---" >&2; cat "$TMPD/run.err" >&2
+      exit 1
     fi
-    if ! grep -q "$want" "$TMPD/run.err"; then
-      echo "task-guard-smoke: $fixture aborted (exit $ec) but stderr lacked '$want'" >&2
-      echo "--- stderr was ---" >&2; cat "$TMPD/run.err" >&2; exit 1
+    if ! grep -q "reader got ping" "$TMPD/run.out"; then
+      echo "task-io-smoke [$label]: reader did not receive the payload" >&2
+      cat "$TMPD/run.out" >&2; exit 1
+    fi
+    # writer must print BEFORE reader resumes (proves reader parked, not read-first).
+    if ! awk '/writer sent/{w=NR} /reader got ping/{if(w && NR>w) ok=1} END{exit !ok}' "$TMPD/run.out"; then
+      echo "task-io-smoke [$label]: wrong order (writer should precede the woken reader)" >&2
+      cat "$TMPD/run.out" >&2; exit 1
     fi
   }
-  check tests/task_guard_smoke/yield_outside.spr "called outside a task"
-  echo "==> task-guard-smoke ✓ (guard fired cleanly)"
+  run_once "plain"
+  SPROUT_GC_STRESS=1 run_once "gc-stress"
+  echo "==> task-io-smoke ✓ (parked read woken by sibling write; interleaved; stress-clean)"
 
 # Division-by-zero guard regression (CI gate). The fixture divides by a RUNTIME
 # zero (`10 / list_length(argv)` with no args), which neither the compiler nor

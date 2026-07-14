@@ -41,4 +41,28 @@ void sprout_roots_push_ptr(SproutRoots* r, void* slot);
 /* Runtime panic path (backtrace + abort), reusable from the scheduler TU. */
 __attribute__((noreturn)) void sprout_fail(const char* msg);
 
+/* Task-0 (main) GC root context — the static 131072-slot pool. The scheduler
+ * materializes main as a task record pointing at this; main keeps the native
+ * stack + this pool (a green main would exhaust it and break the bootstrap). */
+SproutRoots* sprout_roots_main(void);
+
+/* ── I/O parking (L0.3) ───────────────────────────────────────────────────
+ * Readiness poller (kqueue/epoll) in sprout_poll.c, driven by the scheduler.
+ * The `tcp_*` builtins call sched_park_on_fd on EAGAIN to suspend the current
+ * green task until the fd is ready; siblings run meanwhile. */
+#define SPROUT_POLL_READ  1
+#define SPROUT_POLL_WRITE 2
+
+/* Poller — the poller stores an opaque per-fd token (the parked task) and hands
+ * it back on readiness; it has no knowledge of Task. One-shot registration. */
+void sprout_poll_init(void);
+void sprout_poll_add(int fd, int interest, void* token);
+/* Block until ≥1 registered fd is ready; fill `out_tokens` (up to `max`) with
+ * the ready fds' tokens and return the count. */
+int  sprout_poll_wait(void** out_tokens, int max);
+
+/* Suspend the current green task until `fd` is ready for `interest` (READ|WRITE),
+ * then resume it. Called from the retrofitted tcp_* builtins on EAGAIN. */
+void sched_park_on_fd(int fd, int interest);
+
 #endif /* SPROUT_SCHED_H */

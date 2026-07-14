@@ -1,0 +1,39 @@
+import stdlib.task (Scope, with_scope, scope_spawn)
+import stdlib.net (TcpConnection, connect, write_all_utf8, tcp_listen, tcp_accept, tcp_read)
+import stdlib.string as string
+
+# L0.3 I/O parking smoke. Two green tasks share one loopback connection pair:
+# `reader` calls tcp_read before any data exists, `writer` then sends. With I/O
+# parking, reader suspends on EAGAIN, the scheduler runs writer, the write wakes
+# reader, and the program completes printing:
+#   writer sent
+#   reader got ping
+# With the BLOCKING baseline, reader's tcp_read freezes the OS thread and writer
+# never runs -> the program HANGS (the RED signal, caught by a timeout wrapper).
+fn reader(server: Int) -> Unit !{IO} =
+  do
+    data <- tcp_read(server)
+    term_write(string.concat("reader got ", data))
+    term_write("\n")
+
+fn writer(client: TcpConnection) -> Unit !{IO} =
+  do
+    term_write("writer sent\n")
+    match write_all_utf8(client, "ping") with
+    | Ok _ -> term_write("")
+    | Err _ -> term_write("writer: write failed\n")
+
+fn run(s: Scope, server: Int, client: TcpConnection) -> Unit !{IO} =
+  do
+    scope_spawn(s, \_ -> reader(server))
+    scope_spawn(s, \_ -> writer(client))
+
+fn main() -> Unit !{IO} =
+  do
+    listener <- tcp_listen(28999)
+    match connect("127.0.0.1", 28999) with
+    | Ok conn ->
+        do
+          server <- tcp_accept(listener)
+          with_scope(\s -> run(s, server, conn))
+    | Err e -> term_write("connect failed\n")

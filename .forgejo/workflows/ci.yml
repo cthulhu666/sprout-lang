@@ -119,7 +119,7 @@ jobs:
           just argv-smoke
           just div-by-zero-smoke
           just stack-overflow-smoke
-          just task-guard-smoke
+          just task-io-smoke
           just tco-runtime-smoke
           just trace-dispatch-smoke
           just verify-dispatch-smoke

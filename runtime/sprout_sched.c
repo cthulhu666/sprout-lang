@@ -36,47 +36,63 @@
 #pragma clang diagnostic ignored "-Wdeprecated-declarations"
 #endif
 
-/* Fixed per-task sizing (L0.1). Stacks and root pools are non-moving mallocs —
- * required because a root slot is an address into the task's stack read while
- * the task is suspended (see sprout_sched.h). */
+/* Fixed per-task sizing. Stacks and root pools are non-moving mallocs — required
+ * because a root slot is an address into the task's stack read while the task is
+ * suspended (see sprout_sched.h). */
 #define SPROUT_TASK_STACK_BYTES (1u << 20)   /* 1 MiB per green stack */
 #define SPROUT_TASK_ROOT_SLOTS  16384        /* per-task GC temp-root LIFO depth */
+#define SPROUT_PUMP_STACK_BYTES (1u << 18)   /* 256 KiB for the scheduler pump */
 
+/* A scope tracks only its outstanding-task count and (at most) the one task
+ * blocked in `__scope_join` waiting for it to drain. Under the top-level pump a
+ * join is a wait-on-live-count, not a queue drain, so scopes need no ready queue
+ * of their own — all runnable tasks share one global queue. */
 typedef struct Scope {
-  long long     id;         /* == (intptr_t)this; informational (logging) */
-  long long     live;       /* tasks spawned into this scope, not yet finished */
-  struct Task*  rq_head;    /* per-scope FIFO ready queue (round-robin) */
-  struct Task*  rq_tail;
+  long long     live;      /* tasks spawned into this scope, not yet finished */
+  struct Task*  waiter;    /* the task parked in __scope_join(this), or NULL */
 } Scope;
 
 typedef struct Task {
   ucontext_t   ctx;
-  void*        stack;        /* malloc'd, non-moving; freed on completion */
-  SproutRoots* roots;        /* this task's GC temp-root context */
-  long long    work;         /* Unit->Unit closure handle (env ptr); rooted via &work */
-  int          done;         /* set by the trampoline when the body returns */
-  Scope*       scope;        /* the scope this task was spawned into */
-  ucontext_t*  sched_return; /* return context of the join loop currently driving us */
-  struct Task* next;         /* ready-queue link */
+  void*        stack;      /* malloc'd green stack; NULL for task-0 (native stack) */
+  SproutRoots* roots;      /* this task's GC temp-root context */
+  long long    work;       /* Unit->Unit closure handle (env ptr); rooted via &work */
+  int          done;       /* set by the trampoline when the body returns */
+  Scope*       scope;      /* the scope this task was spawned into (NULL for task-0) */
+  struct Task* next;       /* global ready-queue link */
 } Task;
 
-/* The task whose generated code is currently executing, or NULL when control is
- * in a join loop / main. Nested joins save and restore this around each switch
- * (a natural stack via join-loop locals), so it always names the running task —
- * including while an outer task P drives an inner scope on P's own green stack. */
-static Task* g_current_task = NULL;
+/* The single scheduler pump. Every task (and task-0/main) PARKS by swapping to
+ * g_pump; the pump resumes a task by swapping into it. One pump owns the whole
+ * schedule, so nesting and I/O parking fall out of the same mechanism. */
+static ucontext_t g_pump;
+static char       g_pump_stack[SPROUT_PUMP_STACK_BYTES];
 
-static void rq_push(Scope* s, Task* t) {
+/* task-0 (main): native stack + the 131072-slot compiler root pool. Materialized
+ * as a Task so the pump parks/resumes it uniformly (roots set at startup). */
+static Task  g_task0;
+static Task* g_current_task = &g_task0;
+
+/* One global FIFO ready queue (round-robin). */
+static Task* g_rq_head = NULL;
+static Task* g_rq_tail = NULL;
+
+/* Count of tasks currently parked on I/O (registered with the poller, not in the
+ * ready queue). When the ready queue is empty and this is >0, the pump blocks in
+ * the poller; when both are zero with tasks still parked, it is a deadlock. */
+static long long g_io_parked = 0;
+
+static void rq_push(Task* t) {
   t->next = NULL;
-  if (s->rq_tail == NULL) { s->rq_head = s->rq_tail = t; }
-  else { s->rq_tail->next = t; s->rq_tail = t; }
+  if (g_rq_tail == NULL) { g_rq_head = g_rq_tail = t; }
+  else { g_rq_tail->next = t; g_rq_tail = t; }
 }
 
-static Task* rq_pop(Scope* s) {
-  Task* t = s->rq_head;
+static Task* rq_pop(void) {
+  Task* t = g_rq_head;
   if (t == NULL) return NULL;
-  s->rq_head = t->next;
-  if (s->rq_head == NULL) s->rq_tail = NULL;
+  g_rq_head = t->next;
+  if (g_rq_head == NULL) g_rq_tail = NULL;
   t->next = NULL;
   return t;
 }
@@ -95,25 +111,82 @@ static void sprout_task_invoke(long long work) {
   (void)code(work, 0);
 }
 
-/* makecontext entry point. On entry the driving join loop has set g_current_task
- * to us and switched g_current_roots to our context. Runs the body to completion,
- * then swaps back to whichever loop is driving us (never returns). */
+/* Park the current task: hand control to the pump. The pump restores
+ * g_current_task + g_current_roots before it resumes us. */
+static void park_to_pump(void) {
+  swapcontext(&g_current_task->ctx, &g_pump);
+}
+
+/* The scheduler pump loop (runs on its own stack). Picks the next runnable task;
+ * when nothing is runnable but tasks are parked on I/O, blocks in the poller;
+ * when nothing can make progress, fails loudly. Never returns — it yields control
+ * only by swapping into a task, and regains it when that task parks/finishes. */
+static void pump_loop(void) {
+  for (;;) {
+    Task* t = rq_pop();
+    if (t == NULL) {
+      if (g_io_parked > 0) {
+        void* toks[64];
+        int n = sprout_poll_wait(toks, 64);   /* blocks in kqueue/epoll */
+        for (int i = 0; i < n; i++) { g_io_parked--; rq_push((Task*)toks[i]); }
+        continue;
+      }
+      sprout_fail("scheduler: deadlock — tasks parked with no way to make progress");
+    }
+    g_current_task = t;
+    sprout_roots_switch(t->roots);        /* switch-point: match roots to the task */
+    swapcontext(&g_pump, &t->ctx);        /* run t until it parks or finishes */
+    if (t != &g_task0 && t->done) {       /* finished: reclaim (task-0 never here) */
+      sprout_roots_free(t->roots);
+      free(t->stack);
+      free(t);
+    }
+  }
+}
+
+/* makecontext entry point for a green task. On entry the pump has set
+ * g_current_task to us and switched g_current_roots to our context. Runs the body,
+ * wakes the scope's joiner if we were the last, then parks forever. */
 static void task_trampoline(void) {
   Task* t = g_current_task;
   sprout_task_invoke(t->work);
   t->done = 1;
-  t->scope->live--;
-  swapcontext(&t->ctx, t->sched_return);   /* back to the driving loop; unreached after */
+  Scope* s = t->scope;
+  s->live--;
+  if (s->live == 0 && s->waiter != NULL) {   /* last child wakes the joiner */
+    rq_push(s->waiter);
+    s->waiter = NULL;
+  }
+  swapcontext(&t->ctx, &g_pump);   /* back to the pump; never resumed (done) */
+}
+
+/* Startup: initialize the poller and the pump context, and materialize task-0.
+ * Done in a constructor so bare tcp_* calls outside any with_scope can still park
+ * (the pump/poller are not a with_scope-only facility). */
+__attribute__((constructor))
+static void sprout_sched_init(void) {
+  sprout_poll_init();
+
+  g_task0.stack = NULL;                 /* native stack; never freed */
+  g_task0.roots = sprout_roots_main();  /* the 131072-slot compiler pool */
+  g_task0.done  = 0;
+  g_task0.scope = NULL;
+  g_task0.next  = NULL;
+  g_current_task = &g_task0;
+
+  if (getcontext(&g_pump) != 0) sprout_fail("sprout_sched_init: getcontext failed");
+  g_pump.uc_stack.ss_sp   = g_pump_stack;
+  g_pump.uc_stack.ss_size = SPROUT_PUMP_STACK_BYTES;
+  g_pump.uc_link          = NULL;       /* pump_loop never returns */
+  makecontext(&g_pump, pump_loop, 0);
 }
 
 long long __scope_open(void) {
   Scope* s = (Scope*)malloc(sizeof(Scope));
   if (s == NULL) sprout_fail("__scope_open: out of memory");
-  s->id = (long long)(intptr_t)s;
-  s->live = 0;
-  s->rq_head = NULL;
-  s->rq_tail = NULL;
-  return s->id;
+  s->live   = 0;
+  s->waiter = NULL;
+  return (long long)(intptr_t)s;
 }
 
 long long __scope_spawn(long long scope_handle, long long work) {
@@ -128,7 +201,6 @@ long long __scope_spawn(long long scope_handle, long long work) {
   t->work  = work;
   t->done  = 0;
   t->scope = s;
-  t->sched_return = NULL;   /* set by the join loop before each swap-in */
   t->next  = NULL;
 
   /* Keep the work-closure reachable from spawn until the task first runs: root
@@ -143,17 +215,18 @@ long long __scope_spawn(long long scope_handle, long long work) {
   t->ctx.uc_link          = NULL;   /* trampoline swaps out explicitly; never returns */
   makecontext(&t->ctx, task_trampoline, 0);
 
-  rq_push(s, t);
+  rq_push(t);       /* runnable, in the global queue */
   s->live++;
   return 0;
 }
 
+/* Cooperative yield: become runnable again and let the pump run another task.
+ * Legal from any task including task-0 (a no-op round-trip when nothing else is
+ * ready), so there is no "outside a task" case under the always-materialized
+ * task-0. */
 long long task_yield(void) {
-  Task* t = g_current_task;
-  if (t == NULL) sprout_fail("task_yield: called outside a task");
-  rq_push(t->scope, t);                    /* become runnable again in our own scope */
-  swapcontext(&t->ctx, t->sched_return);   /* back to the loop currently driving us */
-  /* resumed later: the driving loop restored g_current_task and our roots first */
+  rq_push(g_current_task);
+  park_to_pump();
   return 0;
 }
 
@@ -161,37 +234,28 @@ long long __scope_join(long long scope_handle) {
   Scope* s = scope_of(scope_handle);
   if (s == NULL) sprout_fail("__scope_join: null scope");
 
-  /* This loop runs on the caller's stack — main's, or an outer task's when a
-   * scope is nested. Save the caller's identity + root context so we restore
-   * them after every switch back from a child task; `my_sched` is THIS loop's
-   * own return context, so a child's yield returns here and not to an outer or
-   * exited join loop. */
-  Task*        caller       = g_current_task;
-  SproutRoots* caller_roots = sprout_roots_current();
-  ucontext_t   my_sched;
-
-  while (s->live > 0) {
-    Task* t = rq_pop(s);
-    if (t == NULL)
-      sprout_fail("__scope_join: scope still live but no runnable task (deadlock)");
-
-    g_current_task  = t;
-    t->sched_return = &my_sched;           /* our children return to us */
-    sprout_roots_switch(t->roots);         /* switch-point: match roots to the task */
-    swapcontext(&my_sched, &t->ctx);       /* run t until it yields or finishes */
-
-    g_current_task = caller;               /* running code is the caller's again */
-    sprout_roots_switch(caller_roots);
-
-    if (t->done) {                         /* finished: reclaim its resources */
-      sprout_roots_free(t->roots);
-      free(t->stack);
-      free(t);
-    }
+  /* Wait until every task spawned into `s` has finished. If any are still live,
+   * park the joiner (task-0 or an outer task) as the scope's waiter; the last
+   * child to finish re-enqueues us. Nesting works because the pump keeps running
+   * every other runnable task while we are parked. */
+  if (s->live > 0) {
+    s->waiter = g_current_task;
+    park_to_pump();
+    /* resumed with s->live == 0 (only the last child wakes the waiter) */
   }
-
   free(s);
   return 0;
+}
+
+/* Suspend the current task until `fd` is ready for `interest`; the pump runs (or
+ * poller-blocks for) other tasks meanwhile. Called from the tcp_* builtins on
+ * EAGAIN. No GC temp roots may be held unrooted across this call — the pump can
+ * drive tasks that trigger a collection while we are parked. */
+void sched_park_on_fd(int fd, int interest) {
+  sprout_poll_add(fd, interest, g_current_task);
+  g_io_parked++;
+  park_to_pump();
+  /* resumed by the pump after the poller reported readiness */
 }
 
 #ifdef __APPLE__
