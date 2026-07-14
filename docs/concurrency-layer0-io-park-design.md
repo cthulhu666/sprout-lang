@@ -96,28 +96,50 @@ Introduce one scheduler context `g_pump` (a `ucontext_t` on a dedicated stack, e
 - `task->sched_return` collapses to the single `&g_pump` (the per-join `my_sched` contexts
   from L0.2 go away — **the pump subsumes recursive-join nesting**: a nested `__scope_join`
   simply parks its joiner and the pump keeps running everyone else, so nesting still works
-  with *less* machinery). L0.2's per-`Scope` queues and per-task root contexts are retained.
+  with *less* machinery). Per-task root contexts are retained.
+- **The per-`Scope` ready queues from L0.2 collapse into ONE global ready queue.** Under the
+  pump a join is a *wait on the scope's live-count*, not a queue drain, so scopes no longer
+  need their own queues — a `Scope` shrinks to `{live, waiter}`. Structured semantics are
+  enforced by the join-wait, not by queue partitioning. **Consequence (semantics change vs
+  L0.2, §5):** an outer sibling task now interleaves with an inner scope's tasks (the L0.2
+  recursive-join froze outer siblings — a C-stack artifact, not intended semantics; Trio/
+  Kotlin also interleave across nesting). The `test_task_nested_scope` golden changes to a
+  new deterministic order; recompute it empirically.
 - `g_current_task`/`g_current_roots` are still switched by the pump immediately before each
   `swapcontext` into a task (unchanged switch-point-alignment invariant).
 
 `pump_loop` (single authority):
 ```
 loop:
-  if ready queue non-empty:            run next ready task (swap in)
+  if global ready queue non-empty:     run next ready task (swap in)
   elif any task parked on I/O:         poll_wait(block=true) -> move ready tasks to run queue
   elif tasks parked on joins only:     deadlock -> loud fail (well-structured code can't hit this)
   else (no tasks at all):              return -> program end
 ```
 
 Park reasons (all swap to `g_pump`, differing only in bookkeeping):
-- **yield** — push self to its scope's ready queue.
+- **yield** — push self to the global ready queue.
 - **join** — `__scope_join(s)`: if `s.live>0`, record self as `s`'s waiter and park; the
   last child to finish (`s.live→0`) moves `s`'s waiter back to the ready queue, then frees `s`.
 - **I/O** — register `(fd, interest)` with the poller, tag the current task, park. On
   readiness the pump moves it to the ready queue and it retries the non-blocking syscall.
 
-`main` stays on task-0's native stack + `g_task0_roots`; it parks like any task (first park
-is its first `join`/`yield`, which is also the first entry into `g_pump`).
+### 4.1.1 main / task-0 (load-bearing)
+
+**main must keep the native stack + the 131072-slot `g_task0_roots`.** The self-hosted
+compiler runs as Sprout `main` with deep recursion sized to that pool; a green 1 MiB /
+16384-slot main would exhaust roots and break the bootstrap. So main is NOT turned into a
+green task. But bare `tcp_*` calls **outside any `with_scope`** (and `tcp_echo_serve`) must
+still park — the pump/poller cannot be a `with_scope`-only facility.
+
+Resolution: **initialize the poller + `g_pump` context at startup** (a `__attribute__
+((constructor))`: create the poller fd, `makecontext(pump_loop)` on its own dedicated
+stack), keep main on the native stack, and **materialize a task-0 `Task` record** (`ctx`
+captured at first park, `roots = &g_task0_roots`, `stack` = the native stack, never freed).
+The pump then parks/resumes main uniformly. A bare `tcp_read` parks task-0 into the
+always-ready pump, which blocks in the poller and resumes task-0 on readiness. The
+`g_current_task == NULL ⇒ main` sentinel is replaced by the task-0 record; `task_yield` from
+task-0 with no scheduled work stays a guarded no-op (nothing else to run).
 
 ### 4.2 Poller abstraction (internal C, cross-platform)
 
@@ -142,7 +164,11 @@ builtins (C), the blocking syscall is wrapped:
 retry:  n = read(fd, ...);
         if (n < 0 && errno == EAGAIN) { sched_park_on_fd(fd, READ); goto retry; }
 ```
-`sched_park_on_fd` is an internal C function (poll_register + park-to-pump). **No new
+`sched_park_on_fd` is an internal C function (poll_register + park-to-pump). **Trap —
+`connect`:** setting `O_NONBLOCK` before `connect()` makes it return `EINPROGRESS`, which
+would need a write-readiness park. First cut keeps `tcp_connect`'s `connect()` **blocking**
+(loopback connect is immediate) and sets `O_NONBLOCK` *after* it succeeds — only the
+read/accept/write steady-state parks. (Non-blocking connect is a later refinement.) **No new
 Sprout-visible builtin is required** for I/O parking — the new capability is internal
 runtime plumbing; the Sprout-visible change is only that the existing `tcp_*` builtins now
 *park* rather than *block*. (Builtin-vs-stdlib rule 6: this is a correctness/behavior change
@@ -167,6 +193,13 @@ another task. Spike #2 demonstrated exactly this (root held across a real 2-fram
   stays deterministic given a fixed I/O readiness order (readiness itself is nondeterministic,
   as with any real network). Structured-concurrency guarantee is preserved: `with_scope` still
   cannot return until all its tasks finish (now including tasks blocked on I/O).
+- **Nesting interleaving changes (from L0.2).** With the single global ready queue (§4.1), an
+  outer sibling task interleaves with an inner scope's tasks rather than being frozen until the
+  inner scope drains. This matches Trio/Kotlin (nesting governs *lifetime/cancellation*, not
+  scheduling exclusion); the L0.2 freeze was a recursive-C-stack artifact. Lifetime is
+  unchanged — an inner scope still fully drains before its opener proceeds past `with_scope`,
+  and an outer scope before `main` proceeds. `test_task_nested_scope`'s asserted order is
+  updated accordingly (recomputed empirically, still deterministic).
 
 ## 6. Type-system impact
 
@@ -194,10 +227,14 @@ None. No new types, classes, or effects. (I/O already carries `!{IO}`; parking i
 
 ## 9. Tests added/updated
 
-1. **Concurrent I/O interleave (new, behavioral):** two tasks each drive a socket (e.g. a
-   loopback pair or a self-connected listener); assert that task B makes progress while task A
-   is parked on a read — i.e. interleaved order, not A-fully-then-B. Deterministic via a
-   controlled readiness sequence.
+1. **Concurrent I/O interleave (new) — a TIMEOUT SMOKE, not a `just test` assert.** With the
+   *blocking* baseline, a task that reads before its peer writes freezes the OS thread and the
+   program **deadlocks** (no sibling runs to produce the data) — so the RED signal is a hang,
+   caught by a timeout wrapper (like `stack-overflow-smoke`), and it must live outside
+   `just test` (which has no per-test timeout and would hang the whole suite). GREEN = the
+   parked version *completes within the timeout AND prints the interleaved order* (assert the
+   output, not just completion — completion alone passes on wrong ordering). Keep a scratch
+   negative control so a *setup* hang isn't mistaken for success.
 2. **Park + GC-stress (rooting):** a task holds a heap value across an I/O park while a second
    task allocates heavily; assert the value survives. Added to `test-stress` (the netpoller is
    a new rooting surface).
