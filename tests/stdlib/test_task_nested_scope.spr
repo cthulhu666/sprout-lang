@@ -1,0 +1,61 @@
+import stdlib.test (TestState, new_state, assert_eq, summary)
+import stdlib.task (Scope, with_scope, scope_spawn, task_yield)
+import stdlib.string as string
+
+# L0.2 nested structured concurrency. Outer scope runs tasks P and Q; P opens its
+# OWN inner scope (running leaves X and Y to completion) between two yields.
+#
+# The discriminating property: P's yield that comes AFTER the inner scope must
+# return to the OUTER join loop (letting Q resume), not the exited inner one. A
+# single global scheduler-return context would corrupt here; per-join return
+# contexts + per-scope ready queues make it correct.
+#
+# Deterministic round-robin trace (outer queue [P,Q], inner queue [X,Y]):
+#   P1          P runs to its first yield
+#   Q1          Q runs to its first yield
+#   X Y         P resumes, opens inner scope, drains X then Y (no outer yield)
+#   P2          P resumes past inner scope, runs to its second yield
+#   Q2          Q resumes
+#   P3          P finishes
+#   Q3          Q finishes
+# => "P1Q1XYP2Q2P3Q3"
+# NB: helper is `record`, not `append` — `append` is the Semigroup class method
+# that `++` desugars to; a top-level `fn append` shadows it and breaks `++`
+# resolution across the whole bundle.
+fn record(log: Ref String, s: String) -> Unit !{IO} =
+  ref_write(log, string.concat(ref_read(log), s))
+
+fn spawn_leaves(s: Scope, log: Ref String) -> Unit !{IO} =
+  do
+    scope_spawn(s, \_ -> record(log, "X"))
+    scope_spawn(s, \_ -> record(log, "Y"))
+
+fn p_worker(log: Ref String) -> Unit !{IO} =
+  do
+    record(log, "P1")
+    task_yield()
+    with_scope(\inner -> spawn_leaves(inner, log))
+    record(log, "P2")
+    task_yield()
+    record(log, "P3")
+
+fn q_worker(log: Ref String) -> Unit !{IO} =
+  do
+    record(log, "Q1")
+    task_yield()
+    record(log, "Q2")
+    task_yield()
+    record(log, "Q3")
+
+fn spawn_pq(s: Scope, log: Ref String) -> Unit !{IO} =
+  do
+    scope_spawn(s, \_ -> p_worker(log))
+    scope_spawn(s, \_ -> q_worker(log))
+
+fn main() -> Unit !{IO} =
+  do
+    state <- new_state()
+    log <- ref_new("")
+    with_scope(\s -> spawn_pq(s, log))
+    assert_eq(state, "nested scope round-robin interleaving", ref_read(log), "P1Q1XYP2Q2P3Q3")
+    summary(state)

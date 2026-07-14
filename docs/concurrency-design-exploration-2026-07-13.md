@@ -700,6 +700,22 @@ structured concurrency is implemented and green:
   and `task_yield`-outside-a-task both fail loud (documented L0.2 boundary), not silent
   corruption.
 
-**Next increments:** nested scopes (per-join return context, replacing the single
-`g_sched_ctx`); real I/O parking via the netpoller (spike #2, §8.5); cancellation and
-structured error propagation.
+**Nested scopes — LANDED (2026-07-14).** A task may now open its own inner scope.
+The single global `g_sched_ctx`/`g_current_task`/scope-counter were replaced by:
+per-`Scope` ready queues (`Scope` is a non-moving malloc; its pointer is the `Int`
+handle the Sprout `Scope` value wraps); a per-`__scope_join`-invocation return
+context (`ucontext_t my_sched` local, so a child's yield returns to *its* driving
+loop, not an outer/exited one); and save/restore of `g_current_task` +
+`g_current_roots` around every switch (a task P drives its inner scope on P's own
+green stack, and is restored as the running task afterward). The old
+nested-scope-rejection guard is gone; `tests/stdlib/test_task_nested_scope.spr`
+asserts the `P1Q1XYP2Q2P3Q3` interleaving (green under GC stress), and a throwaway
+single-global negative control was confirmed to crash — the test discriminates.
+*Known future constraint:* nested joins sit on the C stack (outer join suspended
+below inner). When the kqueue netpoller lands, an inner scope whose tasks all park
+on I/O would trip the `live>0 && queue-empty` deadlock assert; the netpoller
+increment will likely need one top-level scheduler pump instead of recursive
+C-stack joins.
+
+**Next increments:** real I/O parking via the netpoller (spike #2, §8.5;
+top-level pump); cancellation and structured error propagation.

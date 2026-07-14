@@ -991,11 +991,11 @@ stack-overflow-smoke: bootstrap-from-seed
   fi
   echo "==> stack-overflow-smoke ✓ (clean panic, exit $ec)"
 
-# L0.1 cooperative-scheduler guard regression (CI gate). Each fixture exercises a
-# constructible-from-the-surface misuse the scheduler must reject LOUDLY rather
-# than corrupt its (single) return context: opening a scope from inside a task,
-# and task_yield outside any task. Each must exit non-zero with its message on
-# stderr. See runtime/sprout_sched.c and docs/concurrency-design-exploration-2026-07-13.md.
+# Cooperative-scheduler guard regression (CI gate). Exercises a constructible-
+# from-the-surface misuse the scheduler must reject LOUDLY: task_yield outside any
+# task. Must exit non-zero with its message on stderr. (Nested scopes USED to be a
+# guard here; they are now supported — see tests/stdlib/test_task_nested_scope.spr.)
+# See runtime/sprout_sched.c and docs/concurrency-design-exploration-2026-07-13.md.
 [group('smoke')]
 task-guard-smoke: bootstrap-from-seed
   #!/usr/bin/env bash
@@ -1023,9 +1023,8 @@ task-guard-smoke: bootstrap-from-seed
       echo "--- stderr was ---" >&2; cat "$TMPD/run.err" >&2; exit 1
     fi
   }
-  check tests/task_guard_smoke/nested_scope.spr "nested scope from within a task"
   check tests/task_guard_smoke/yield_outside.spr "called outside a task"
-  echo "==> task-guard-smoke ✓ (both guards fired cleanly)"
+  echo "==> task-guard-smoke ✓ (guard fired cleanly)"
 
 # Division-by-zero guard regression (CI gate). The fixture divides by a RUNTIME
 # zero (`10 / list_length(argv)` with no args), which neither the compiler nor
@@ -1117,7 +1116,10 @@ test-stress: bootstrap-from-seed
   # at a yield point; per-task root contexts (sprout_sched.c) must keep the
   # suspended task's values live. A rooting regression there presents as a
   # collected-while-live abort here.
-  STRESS_FILES="tests/stdlib/test_ir_rooting.spr tests/stdlib/test_ir_codegen_ctors.spr tests/stdlib/test_ir_codegen_match.spr tests/stdlib/test_ir_codegen_closures.spr tests/stdlib/test_ir_codegen_char_rooting.spr tests/stdlib/test_stress_global_roots.spr tests/stdlib/test_stress_unboxed_maybe_heap_payload.spr tests/stdlib/test_stress_cpr_tier2_worker.spr tests/stdlib/test_task_cooperative.spr"
+  # test_task_nested_scope: nested scopes — the join loop's caller_roots save/
+  # restore is the new rooting surface; a leaf allocating while an outer task is
+  # suspended inside its nested join must keep the outer task's values live.
+  STRESS_FILES="tests/stdlib/test_ir_rooting.spr tests/stdlib/test_ir_codegen_ctors.spr tests/stdlib/test_ir_codegen_match.spr tests/stdlib/test_ir_codegen_closures.spr tests/stdlib/test_ir_codegen_char_rooting.spr tests/stdlib/test_stress_global_roots.spr tests/stdlib/test_stress_unboxed_maybe_heap_payload.spr tests/stdlib/test_stress_cpr_tier2_worker.spr tests/stdlib/test_task_cooperative.spr tests/stdlib/test_task_nested_scope.spr"
   # Known-failing under stress — false-green at the default threshold, FOUND BY
   # THIS PASS (residual typed-codegen rooting UAF, GC-confirmed via
   # SPROUT_GC_DISABLE).  Tracked in BACKLOG.md; warn-only here.  Promote to
