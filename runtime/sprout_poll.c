@@ -21,6 +21,7 @@
 #ifdef __APPLE__
 #include <sys/event.h>
 #include <sys/time.h>
+#include <errno.h>
 
 static int g_kq = -1;
 
@@ -36,6 +37,16 @@ void sprout_poll_add(int fd, int interest, void* token) {
   EV_SET(&ev, fd, filter, EV_ADD | EV_ONESHOT, 0, 0, token);
   if (kevent(g_kq, &ev, 1, NULL, 0, NULL) < 0)
     sprout_fail("sprout_poll_add: kevent register failed");
+}
+
+void sprout_poll_remove(int fd, int interest) {
+  struct kevent ev;
+  int16_t filter = (interest == SPROUT_POLL_WRITE) ? EVFILT_WRITE : EVFILT_READ;
+  EV_SET(&ev, fd, filter, EV_DELETE, 0, 0, NULL);
+  /* ENOENT means the knote is already gone (fired one-shot, or never added) — the
+   * force-drop's goal (this fd will not report readiness) already holds, so ignore. */
+  if (kevent(g_kq, &ev, 1, NULL, 0, NULL) < 0 && errno != ENOENT)
+    sprout_fail("sprout_poll_remove: kevent EV_DELETE failed");
 }
 
 int sprout_poll_wait(void** out_tokens, int max) {
@@ -76,6 +87,15 @@ void sprout_poll_add(int fd, int interest, void* token) {
       sprout_fail("sprout_poll_add: epoll_ctl MOD failed");
     }
   }
+}
+
+void sprout_poll_remove(int fd, int interest) {
+  (void)interest;   /* epoll keys purely by fd (no per-filter knote as in kqueue) */
+  /* We do NOT close the fd here (§10.3: cleanup-on-drop is accept-and-document), so
+   * we must explicitly EPOLL_CTL_DEL — an EPOLLONESHOT-disarmed fd is still in the
+   * set. ENOENT means it was never added (or already removed); ignore. */
+  if (epoll_ctl(g_ep, EPOLL_CTL_DEL, fd, NULL) < 0 && errno != ENOENT)
+    sprout_fail("sprout_poll_remove: epoll_ctl DEL failed");
 }
 
 int sprout_poll_wait(void** out_tokens, int max) {

@@ -12,8 +12,8 @@ import stdlib.string as string
 # poller forever: the perl `alarm` timeout fires and this fixture "does not complete".
 fn accept_forever(listener: Int) -> Int !{IO} =
   do
-    conn <- tcp_accept(listener)   # parks here forever — no client ever connects
-    _ <- tcp_read(conn)            # unreachable
+    conn <- tcp_accept(listener)  # parks here forever — no client ever connects
+    _ <- tcp_read(conn)  # unreachable
     99
 
 fn accept_forever_unit(listener: Int) -> Unit !{IO} =
@@ -23,15 +23,15 @@ fn accept_forever_unit(listener: Int) -> Unit !{IO} =
 
 fn body(s: Scope, la: Int, lb: Int) -> Unit !{IO} =
   do
-    _fork <- task_fork(s, \_ -> accept_forever(la))    # awaitable, parks on la
-    task_spawn(s, \_ -> accept_forever_unit(lb))        # fire-and-forget, parks on lb
-    task_yield()                                        # let both reach accept and park
-    scope_cancel(s)                                     # force-drop both parked tasks
-    term_write("cancelled\n")                           # owner continues; awaits neither
+    _fork <- task_fork(s, \_ -> accept_forever(la))  # awaitable, parks on la
+    task_spawn(s, \_ -> accept_forever_unit(lb))  # fire-and-forget, parks on lb
+    task_yield()  # let both reach accept and park
+    scope_cancel(s)  # force-drop both parked tasks
+    term_write("cancelled\n")  # owner continues; awaits neither
 
 fn main() -> Unit !{IO} =
   do
     la <- tcp_listen(28996)
     lb <- tcp_listen(28997)
     with_scope(\s -> body(s, la, lb))
-    term_write("done\n")   # reached only if both parked tasks were dropped by cancel
+    term_write("done\n")  # reached only if both parked tasks were dropped by cancel

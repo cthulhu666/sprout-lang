@@ -1,10 +1,11 @@
 # Cancellation & structured error propagation — design proposal (2026-07-15)
 
-**Status: APPROVED (2026-07-15).** All open questions resolved with Kuba (§9, §10). Ready
-to implement once PR #182 (L0.4) lands on master, so the increment branches off a clean
-base. Per the Design Change Process in `AGENTS.md`. Prior-art rows are verified against
-primary sources (§3). Builds on L0.1–L0.4 (green-thread scheduler, nested scopes, I/O
-netpoller, result-carrying `task_fork`/`task_await`).
+**Status: IMPLEMENTED (2026-07-15).** Step 1 (cooperative core — `scope_cancel` +
+`task_cancelled`) landed in 4532ce0; step 2 (I/O-drop of poller-parked tasks via
+`sprout_poll_remove` + the global `g_io_head` enumeration, §7) landed on this branch. All
+open questions resolved with Kuba (§9, §10). Per the Design Change Process in `AGENTS.md`.
+Prior-art rows are verified against primary sources (§3). Builds on L0.1–L0.4 (green-thread
+scheduler, nested scopes, I/O netpoller, result-carrying `task_fork`/`task_await`).
 
 **Decisions locked:** cooperative delivery + scheduler-drop (no exceptions to inject);
 explicit owner-only `scope_cancel` + binary `task_cancelled` (rich `task_status` deferred
@@ -207,12 +208,21 @@ Making `with_scope` return `Result Cancelled a` universally would put cancellati
 - `with_scope` semantics are unchanged except that a cancelled scope drains faster
   (dropped tasks stop counting toward live).
 
-## 7. Runtime implementation sketch (`sprout_scheduler.c`)
+## 7. Runtime implementation (`sprout_scheduler.c`) — IMPLEMENTED (L0.5 step 2, 2026-07-15)
 
 - `Scope` gains a `cancelled` flag and an `owner` task pointer (set at `__scope_open` to
-  `g_current_task`), and already owns its task list (the L0.4 `forks` list; fire-and-forget
-  tasks need to be enumerable too — extend the scope's task tracking to all its tasks, or
-  keep two lists).
+  `g_current_task`) — both landed in step 1.
+- **Enumeration of droppable tasks is via the global `g_io_head` list, not a per-scope
+  task list.** Only *I/O-parked* tasks are ever force-dropped, and every such task —
+  `task_fork` and `task_spawn` alike — passes through `scheduler_park_on_fd`, which links
+  it onto one global doubly-linked list of currently-poller-parked tasks (`g_io_head`; the
+  pump unlinks on wake, cancel unlinks on drop). `scope_cancel` walks that list and drops
+  the entries whose `->scope` matches. This is the single source of truth for "who is
+  parked on I/O" (it also replaced the old `g_io_parked` counter), so it needs **neither**
+  the earlier sketch's "extend the scope's task tracking to all its tasks" **nor** a second
+  per-scope list — fire-and-forget tasks are enumerable for free, and done tasks never
+  appear on it. Each `Task` records the `park_fd`/`park_interest` it is asleep on so the
+  drop can call `sprout_poll_remove`.
 - `scope_cancel(scope)`: **loud-fail if `g_current_task != scope->owner`** (owner-only,
   §10.2); otherwise set `cancelled`. The drop is **selective**, not force-drop-all —
   force-dropping a task suspended in a *nested join* would orphan its inner scope (the
@@ -228,8 +238,13 @@ Making `with_scope` return `Result Cancelled a` universally would put cancellati
     roots + stack + record; awaitable → free roots + stack, `roots = NULL`, keep the record
     in `forks`, and **guard scope-close** with `if (f->roots) sprout_roots_free(f->roots)`
     against double-free. Keeping the roots while freeing the stack is a **use-after-free**
-    (`mark_roots` would scan freed stack) — the negative control must reproduce it under
-    `SPROUT_GC_STRESS=1`.
+    (`mark_roots` would scan freed stack). **The negative control must be run under ASan,
+    not just `SPROUT_GC_STRESS=1`:** a freshly-freed green stack usually still holds valid
+    root addresses, so `mark_roots` reads them without crashing and the buggy version can
+    print "done" and exit 0 — a false pass. Verified 2026-07-15: the correct version is
+    ASan-clean under GC stress; the buggy variant (roots kept, stack freed) is a
+    deterministic ASan heap-use-after-free (`READ` in `sprout_gc_mark_root_list`, memory
+    freed in `__scope_cancel`), which stress alone caught only at exit-finalize.
   - **Awaiter guard:** owner-only cancel stops the *owner* from awaiting a dropped task,
     but a *forked* task F can `task_await` a sibling A (F sits in `A->awaiter`). Dropping A
     would strand F (nothing wakes it → `live` never hits 0 → the owner's join deadlocks).
@@ -251,8 +266,9 @@ Making `with_scope` return `Result Cancelled a` universally would put cancellati
     reuses the existing path.
 - `task_cancelled()`: read `g_current_task->scope->cancelled` — the mechanism by which a
   ready/yield-parked task cooperatively stops (only I/O-parked tasks are dropped for them).
-- Poller: add one-shot **deregistration** (`sprout_poll_remove(fd)`), the piece the
-  L0.4 review flagged as the sole net-new poller capability.
+- Poller: add **deregistration** `sprout_poll_remove(fd, interest)` (kqueue `EV_DELETE`
+  by fd+filter; epoll `EPOLL_CTL_DEL` by fd, `interest` unused; both ignore `ENOENT`) —
+  the piece the L0.4 review flagged as the sole net-new poller capability.
 - GC-rooting: a dropped task is **not** reclaimed like a never-awaited L0.4 fork (those
   keep roots until scope-close because they *completed*). A dropped task is suspended with
   stack-pointing roots, so its roots are freed **immediately** with its stack (see the

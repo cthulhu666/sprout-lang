@@ -57,6 +57,10 @@ SproutRoots* sprout_roots_main(void);
  * it back on readiness; it has no knowledge of Task. One-shot registration. */
 void sprout_poll_init(void);
 void sprout_poll_add(int fd, int interest, void* token);
+/* Deregister `fd` (registered for `interest`) so it will not report readiness. Used
+ * by scope_cancel to force-drop a task suspended in the poller (L0.5). Idempotent:
+ * a not-registered fd (already fired one-shot, or never added) is silently ignored. */
+void sprout_poll_remove(int fd, int interest);
 /* Block until ≥1 registered fd is ready; fill `out_tokens` (up to `max`) with
  * the ready fds' tokens and return the count. */
 int  sprout_poll_wait(void** out_tokens, int max);

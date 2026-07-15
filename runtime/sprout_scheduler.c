@@ -70,6 +70,10 @@ typedef struct Task {
   Scope*       scope;      /* the scope this task was spawned into (NULL for task-0) */
   struct Task* next;       /* global ready-queue link */
   struct Task* scope_next; /* scope->forks list link (awaitable tasks only) */
+  int          park_fd;    /* fd this task is suspended-in-the-poller on, or -1 (L0.5) */
+  int          park_interest; /* SPROUT_POLL_READ|WRITE it parked with (for poll_remove) */
+  struct Task* io_next;    /* g_io_head list link (only while I/O-parked) */
+  struct Task* io_prev;
 } Task;
 
 /* The single scheduler pump. Every task (and task-0/main) PARKS by swapping to
@@ -87,10 +91,27 @@ static Task* g_current_task = &g_task0;
 static Task* g_rq_head = NULL;
 static Task* g_rq_tail = NULL;
 
-/* Count of tasks currently parked on I/O (registered with the poller, not in the
- * ready queue). When the ready queue is empty and this is >0, the pump blocks in
- * the poller; when both are zero with tasks still parked, it is a deadlock. */
-static long long g_io_parked = 0;
+/* Every task currently suspended in the poller (registered, not in the ready queue),
+ * on ONE global doubly-linked list — the single source of truth for "who is parked on
+ * I/O." The pump blocks in the poller iff this is non-empty and the ready queue is
+ * empty; scope_cancel walks it to force-drop a cancelled scope's parked tasks (L0.5).
+ * Doubly-linked so the pump can O(1)-unlink a woken task and cancel can O(1)-unlink a
+ * dropped one from the middle. Design doc §7 calls this list g_io_head. */
+static Task* g_io_head = NULL;
+
+static void io_list_push(Task* t) {
+  t->io_prev = NULL;
+  t->io_next = g_io_head;
+  if (g_io_head != NULL) g_io_head->io_prev = t;
+  g_io_head = t;
+}
+
+static void io_list_remove(Task* t) {
+  if (t->io_prev != NULL) t->io_prev->io_next = t->io_next;
+  else                    g_io_head = t->io_next;
+  if (t->io_next != NULL) t->io_next->io_prev = t->io_prev;
+  t->io_prev = t->io_next = NULL;
+}
 
 static void rq_push(Task* t) {
   t->next = NULL;
@@ -140,10 +161,15 @@ static void pump_loop(void) {
   for (;;) {
     Task* t = rq_pop();
     if (t == NULL) {
-      if (g_io_parked > 0) {
+      if (g_io_head != NULL) {
         void* toks[64];
         int n = sprout_poll_wait(toks, 64);   /* blocks in kqueue/epoll */
-        for (int i = 0; i < n; i++) { g_io_parked--; rq_push((Task*)toks[i]); }
+        for (int i = 0; i < n; i++) {         /* each ready fd wakes its parked task */
+          Task* w = (Task*)toks[i];
+          io_list_remove(w);                  /* no longer poller-parked */
+          w->park_fd = -1;
+          rq_push(w);
+        }
         continue;
       }
       sprout_fail("scheduler: deadlock — tasks parked with no way to make progress");
@@ -206,6 +232,9 @@ static void sprout_scheduler_init(void) {
   g_task0.done  = 0;
   g_task0.scope = NULL;
   g_task0.next  = NULL;
+  g_task0.park_fd = -1;                  /* task-0 parks on I/O like any task */
+  g_task0.io_next = NULL;
+  g_task0.io_prev = NULL;
   g_current_task = &g_task0;
 
   if (getcontext(&g_pump) != 0) sprout_fail("sprout_scheduler_init: getcontext failed");
@@ -244,6 +273,10 @@ static Task* task_create(Scope* s, long long work, int awaitable) {
   t->scope      = s;
   t->next       = NULL;
   t->scope_next = NULL;
+  t->park_fd    = -1;      /* not I/O-parked until scheduler_park_on_fd runs */
+  t->park_interest = 0;
+  t->io_next    = NULL;
+  t->io_prev    = NULL;
 
   /* Keep the work-closure reachable from spawn until the task first runs: root
    * &work in the task's own context (scanned by the collector via the registry).
@@ -309,6 +342,48 @@ long long __scope_cancel(long long scope_handle) {
   if (g_current_task != s->owner)
     sprout_fail("__scope_cancel: only the scope's owning task may cancel it");
   s->cancelled = 1;
+
+  /* Force-drop this scope's tasks that are suspended in the poller: they cannot
+   * observe the flag while asleep in kqueue/epoll, so we deregister the fd and reclaim
+   * them without it ever becoming ready. Ready/yield-parked tasks are NOT dropped —
+   * they stay in the ready queue and cooperatively return via task_cancelled (design
+   * §7); join-parked tasks are left for their inner scope to drain (local propagation).
+   *
+   * No-race (single-thread): the pump drains every poll_wait token — unlinking it from
+   * g_io_head and clearing park_fd — before it can resume the owner. So any task still
+   * on g_io_head here has NOT fired; poll_remove then reclaim is safe, and the owner is
+   * running so s->waiter == NULL (no join-wake races the drop). */
+  for (Task* t = g_io_head; t != NULL; ) {
+    Task* next = t->io_next;              /* save before we unlink/free t */
+    if (t->scope == s && t != g_current_task) {
+      /* A forked sibling awaiting a dropped task would be stranded (nothing wakes it,
+       * live never hits 0, the owner's join deadlocks). Owner-only cancel makes this
+       * rare, but guard it loudly rather than hang. Full awaiter-cascade is deferred. */
+      if (t->awaiter != NULL)
+        sprout_fail("__scope_cancel: cannot drop a task awaited by a sibling — "
+                    "await only from the scope owner");
+      sprout_poll_remove(t->park_fd, t->park_interest);
+      io_list_remove(t);
+      /* Reclaim (design §7): a dropped task is suspended with live values rooted INTO
+       * its green stack (L0.3 park contract), so roots and stack must be released
+       * together — freeing the stack while keeping the roots is a use-after-free
+       * (mark_roots would scan freed memory). Free roots first (unregisters the context
+       * so no later collection scans it), then the stack; no allocation between. */
+      sprout_roots_free(t->roots);
+      free(t->stack);
+      if (t->awaitable) {
+        /* Record stays reachable via s->forks; scope-close frees it. Null the freed
+         * pointers so that close's guard skips them (no double-free). Never awaited. */
+        t->roots = NULL;
+        t->stack = NULL;
+      } else {
+        /* Fire-and-forget: not in s->forks, so free the record here and now. */
+        free(t);
+      }
+      s->live--;
+    }
+    t = next;
+  }
   return 0;
 }
 
@@ -351,7 +426,9 @@ long long __scope_join(long long scope_handle) {
    * on done and are not in this list. */
   for (Task* f = s->forks; f != NULL; ) {
     Task* next = f->scope_next;
-    sprout_roots_free(f->roots);
+    /* A fork force-dropped by scope_cancel already had its roots freed (roots=NULL);
+     * only its record survives in this list. Guard against a double-free (design §7). */
+    if (f->roots != NULL) sprout_roots_free(f->roots);
     free(f);
     f = next;
   }
@@ -364,8 +441,13 @@ long long __scope_join(long long scope_handle) {
  * EAGAIN. No GC temp roots may be held unrooted across this call — the pump can
  * drive tasks that trigger a collection while we are parked. */
 void scheduler_park_on_fd(int fd, int interest) {
+  /* Record what we parked on so scope_cancel can deregister this fd and drop us while
+   * we are asleep in the poller (we cannot check task_cancelled from here). The pump
+   * clears park_fd and unlinks us on wake; scope_cancel does so on force-drop. */
+  g_current_task->park_fd       = fd;
+  g_current_task->park_interest = interest;
+  io_list_push(g_current_task);
   sprout_poll_add(fd, interest, g_current_task);
-  g_io_parked++;
   park_to_pump();
   /* resumed by the pump after the poller reported readiness */
 }
