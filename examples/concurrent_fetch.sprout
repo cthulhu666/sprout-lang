@@ -1,0 +1,35 @@
+import stdlib.task (Scope, with_scope, task_fork, task_await, task_sleep)
+import stdlib.string as string
+
+# Concurrency the way real programs use it: overlap latency. Three independent "requests"
+# run at once and the batch finishes in about as long as the SLOWEST one — not the sum of
+# all three. Each request simply does its work and waits (task_sleep stands in for a
+# network round-trip); it yields the OS thread implicitly while waiting, so there is NO
+# task_yield anywhere. task_fork returns a handle, task_await collects the result, and
+# with_scope guarantees every request has finished before we read the results.
+#
+# Because the three overlap, the output shows all three starting before any finishes, and
+# they complete in LATENCY order (inventory 20ms, users 30ms, prefs 50ms) — not the order
+# they were spawned. Run sequentially this would take 100ms; concurrently it takes ~50ms.
+
+fn fetch(name: String, latency_ms: Int) -> String !{IO} =
+  do
+    print(string.concat(name, " ...requesting"))
+    task_sleep(latency_ms)  # stand-in for a network round-trip
+    print(string.concat(name, " ...done"))
+    string.concat(name, ": ok")
+
+fn load_dashboard(s: Scope) -> String !{IO} =
+  do
+    users <- task_fork(s, \_ -> fetch("users", 30))
+    prefs <- task_fork(s, \_ -> fetch("prefs", 50))
+    inventory <- task_fork(s, \_ -> fetch("inventory", 20))
+    let ru = task_await(users)
+    let rp = task_await(prefs)
+    let ri = task_await(inventory)
+    string.concat(ru, string.concat(" | ", string.concat(rp, string.concat(" | ", ri))))
+
+fn main() -> Unit !{IO} =
+  do
+    summary <- with_scope(\s -> load_dashboard(s))
+    print(string.concat("dashboard loaded: ", summary))
