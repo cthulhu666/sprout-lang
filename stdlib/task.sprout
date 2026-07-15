@@ -35,6 +35,7 @@ extern fn __scope_join(scope_id: Int) -> Unit !{IO}
 extern fn __scope_spawn(scope_id: Int, work: Unit -> Unit !{IO}) -> Unit !{IO}
 extern fn __task_fork(scope_id: Int, work: Unit -> a !{IO}) -> Int !{IO}
 extern fn __task_await(task_id: Int) -> a !{IO}
+extern fn __scope_cancel(scope_id: Int) -> Unit !{IO}
 
 # Cooperative yield point: suspend the current task and let the scheduler run
 # another ready task. (Real I/O parking, in the tcp_* builtins, yields implicitly.)
@@ -70,3 +71,17 @@ export fn task_fork(scope: Scope, work: Unit -> a !{IO}) -> Task a !{IO} =
 export fn task_await(task: Task a) -> a !{IO} =
   match task with
   | Task id -> __task_await(id)
+
+# Request cancellation of every still-running task in `scope` (L0.5, EXPERIMENTAL).
+# Owner-only: may be called only by the task that opened `scope` (the `with_scope`
+# body); the runtime loud-fails otherwise. Cancellation is cooperative — a
+# ready/yield-parked task stops by observing `task_cancelled`; a task blocked on I/O
+# is dropped by the scheduler. No siblings are auto-cancelled on failure yet; the body
+# drives fail-fast (match a result, then `scope_cancel`). See the cancellation design.
+export fn scope_cancel(scope: Scope) -> Unit !{IO} =
+  match scope with
+  | Scope id -> __scope_cancel(id)
+
+# True if the current task's scope has been cancelled. A cancellable task checks this
+# at its own loop/yield points and returns when it sees `true` (Go's `ctx.Done()`).
+export extern fn task_cancelled() -> Bool !{IO}

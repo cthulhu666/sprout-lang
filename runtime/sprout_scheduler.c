@@ -53,6 +53,8 @@ typedef struct Scope {
   struct Task*  forks;     /* awaitable (task_fork) tasks, linked via scope_next;
                               reclaimed at scope close (fire-and-forget tasks are
                               reclaimed on done and never appear here) */
+  long long     cancelled; /* set by __scope_cancel; read cooperatively by task_cancelled */
+  struct Task*  owner;     /* the task that opened this scope (only it may cancel it) */
 } Scope;
 
 typedef struct Task {
@@ -216,9 +218,11 @@ static void sprout_scheduler_init(void) {
 long long __scope_open(void) {
   Scope* s = (Scope*)malloc(sizeof(Scope));
   if (s == NULL) sprout_fail("__scope_open: out of memory");
-  s->live   = 0;
-  s->waiter = NULL;
-  s->forks  = NULL;
+  s->live      = 0;
+  s->waiter    = NULL;
+  s->forks     = NULL;
+  s->cancelled = 0;
+  s->owner     = g_current_task;   /* only this task may __scope_cancel it */
   return (long long)(intptr_t)s;
 }
 
@@ -291,6 +295,30 @@ long long __task_await(long long task_handle) {
     /* resumed by the trampoline once t finished */
   }
   return t->result;
+}
+
+/* Request cancellation of `scope` (L0.5). Owner-only: only the task that opened the
+ * scope may cancel it — this guarantees no task is parked awaiting a sibling that a
+ * concurrent canceller would drop (the "no cancelled task is ever awaited" invariant;
+ * see the cancellation design doc §10.2). Sets the cooperative flag; ready/yield-parked
+ * tasks observe it via task_cancelled and return on their own. (Force-drop of I/O-parked
+ * tasks — which cannot check a flag while suspended in the poller — is a later step.) */
+long long __scope_cancel(long long scope_handle) {
+  Scope* s = scope_of(scope_handle);
+  if (s == NULL) sprout_fail("__scope_cancel: null scope");
+  if (g_current_task != s->owner)
+    sprout_fail("__scope_cancel: only the scope's owning task may cancel it");
+  s->cancelled = 1;
+  return 0;
+}
+
+/* Cooperative cancellation check: true if the current task's scope was cancelled. A
+ * ready/yield-parked task calls this at its own checkpoints and returns when it sees
+ * true. task-0 and any task with no scope are never cancelled. */
+long long task_cancelled(void) {
+  Task* t = g_current_task;
+  if (t == NULL || t->scope == NULL) return 0;
+  return t->scope->cancelled;
 }
 
 /* Cooperative yield: become runnable again and let the pump run another task.

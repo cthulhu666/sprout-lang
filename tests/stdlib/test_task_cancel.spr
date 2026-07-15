@@ -13,9 +13,9 @@ import stdlib.string as string
 # the wrong marker string ("xxxxxxxxxx#") instead of looping forever.
 fn coop_worker(log: Ref String, budget: Int) -> Unit !{IO} =
   if budget <= 0 then
-    ref_write(log, string.concat(ref_read(log), "#"))     # ran to budget — NOT cancelled
+    ref_write(log, string.concat(ref_read(log), "#"))  # ran to budget — NOT cancelled
   else if task_cancelled() then
-    ref_write(log, string.concat(ref_read(log), "!"))     # observed cancellation — stop
+    ref_write(log, string.concat(ref_read(log), "!"))  # observed cancellation — stop
   else
     do
       ref_write(log, string.concat(ref_read(log), "x"))
@@ -25,9 +25,15 @@ fn coop_worker(log: Ref String, budget: Int) -> Unit !{IO} =
 fn coop_body(s: Scope, log: Ref String) -> Unit !{IO} =
   do
     task_spawn(s, \_ -> coop_worker(log, 10))
-    task_yield()          # worker: not cancelled -> "x", parks at its yield
-    task_yield()          # worker: not cancelled -> "x", parks   (log = "xx")
-    scope_cancel(s)       # set the flag; worker resumes during join and observes it
+    task_yield()  # worker: not cancelled -> "x", parks at its yield
+    task_yield()  # worker: not cancelled -> "x", parks   (log = "xx")
+    scope_cancel(s)  # set the flag; worker resumes during join and observes it
+
+# Control: a scope that is NEVER cancelled runs the worker to its full budget and ends
+# with "#". This proves cancellation — not the loop bound — is what stops the worker in
+# the test above (so "xx!" is not spurious).
+fn run_body(s: Scope, log: Ref String) -> Unit !{IO} =
+  task_spawn(s, \_ -> coop_worker(log, 3))
 
 fn main() -> Unit !{IO} =
   do
@@ -37,4 +43,7 @@ fn main() -> Unit !{IO} =
     # Two "x" (two yields), then the worker observes cancellation on its next resume
     # (inside __scope_join) and stops with "!".
     assert_eq(state, "yield-parked task cooperatively stops on scope_cancel", ref_read(log), "xx!")
+    ctl <- ref_new("")
+    with_scope(\s -> run_body(s, ctl))
+    assert_eq(state, "uncancelled scope runs worker to budget (control)", ref_read(ctl), "xxx#")
     summary(state)
