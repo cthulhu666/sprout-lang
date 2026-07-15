@@ -1137,7 +1137,7 @@ test-stress: bootstrap-from-seed
   # read abort vs EXC_BAD_ACCESS) only by how the swept address was reused.
   # test_task_cooperative: L0.1 green tasks — the canonical multi-task rooting
   # exercise. Under stress a second task allocates while the first is suspended
-  # at a yield point; per-task root contexts (sprout_sched.c) must keep the
+  # at a yield point; per-task root contexts (sprout_scheduler.c) must keep the
   # suspended task's values live. A rooting regression there presents as a
   # collected-while-live abort here.
   # test_task_nested_scope: nested scopes — the join loop's caller_roots save/

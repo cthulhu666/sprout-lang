@@ -1,7 +1,7 @@
 /* Readiness poller for Sprout L0.3 I/O parking (EXPERIMENTAL).
  *
  * A thin, internal (not Sprout-visible) layer over kqueue (macOS/BSD) and epoll
- * (Linux). The scheduler (sprout_sched.c) owns the task<->fd association; this
+ * (Linux). The scheduler (sprout_scheduler.c) owns the task<->fd association; this
  * layer only stores an opaque per-registration token and hands it back when the
  * fd becomes ready. Both backends are readiness APIs (register interest -> notified
  * when readable/writable -> the caller does the non-blocking read/write itself);
@@ -16,7 +16,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
-#include "sprout_sched.h"
+#include "sprout_scheduler.h"
 
 #ifdef __APPLE__
 #include <sys/event.h>

@@ -22,7 +22,7 @@
 #include <execinfo.h>
 #include <pthread.h>
 #include <sys/resource.h>
-#include "sprout_sched.h"
+#include "sprout_scheduler.h"
 #ifdef __APPLE__
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wdeprecated-declarations"
@@ -64,7 +64,7 @@ typedef struct RootNode {
   struct RootNode* next;
 } RootNode;
 
-/* Per-task GC temp-root context (opaque `SproutRoots` in sprout_sched.h).
+/* Per-task GC temp-root context (opaque `SproutRoots` in sprout_scheduler.h).
  * Bundles what used to be three file-static globals (temp-root head, pool,
  * pool top) so each green task carries its own LIFO. `g_current_roots` selects
  * the active one; the collector walks the whole registry via `reg_next`. */
@@ -1093,8 +1093,8 @@ long long sprout_gc_pop_roots(long long count) {
   return 0;
 }
 
-/* ── Per-task root-context API (declared in sprout_sched.h) ────────────────
- * The cooperative scheduler (sprout_sched.c) owns task creation and switching;
+/* ── Per-task root-context API (declared in sprout_scheduler.h) ────────────────
+ * The cooperative scheduler (sprout_scheduler.c) owns task creation and switching;
  * these entry points let it allocate, select, and free a task's root context
  * without reaching into the struct. */
 SproutRoots* sprout_roots_current(void) { return g_current_roots; }
@@ -4037,7 +4037,7 @@ __attribute__((noreturn)) static void tcp_fail(const char* msg) {
   exit(1);
 }
 
-/* Non-static panic path for the scheduler TU (sprout_sched.h). */
+/* Non-static panic path for the scheduler TU (sprout_scheduler.h). */
 __attribute__((noreturn)) void sprout_fail(const char* msg) { tcp_fail(msg); }
 
 long long str_concat(long long left_i, long long right_i) {
@@ -7403,7 +7403,7 @@ long long crypto_random_bytes(long long count) {
 
 /* L0.3 I/O parking: sockets are made non-blocking so a would-block read/write/
  * accept returns EAGAIN, at which point the tcp_* builtins park the current green
- * task (sched_park_on_fd) and let siblings run instead of freezing the OS thread.
+ * task (scheduler_park_on_fd) and let siblings run instead of freezing the OS thread.
  * A single-task program (no with_scope) parks into the always-ready pump, which
  * blocks in the poller — behaviorally identical to a blocking call. */
 static void tcp_set_nonblocking(int fd) {
@@ -7533,7 +7533,7 @@ long long tcp_accept(long long listener) {
     fd = accept(g_listener_fd[listener], NULL, NULL);
     if (fd >= 0) break;
     if (errno == EAGAIN || errno == EWOULDBLOCK) {
-      sched_park_on_fd(g_listener_fd[listener], SPROUT_POLL_READ);
+      scheduler_park_on_fd(g_listener_fd[listener], SPROUT_POLL_READ);
       continue;
     }
     tcp_fail("tcp_accept: accept failed");
@@ -7559,7 +7559,7 @@ long long tcp_read(long long conn) {
     n = recv(g_conn_fd[conn], buf, 65536, 0);
     if (n >= 0) break;
     if (errno == EAGAIN || errno == EWOULDBLOCK) {   /* no unrooted GC temp held */
-      sched_park_on_fd(g_conn_fd[conn], SPROUT_POLL_READ);
+      scheduler_park_on_fd(g_conn_fd[conn], SPROUT_POLL_READ);
       continue;
     }
     free(buf);  /* plain malloc buffer, free is correct */
@@ -7590,7 +7590,7 @@ long long tcp_read_exact(long long conn, long long count) {
     }
     if (n < 0) {
       if (errno == EAGAIN || errno == EWOULDBLOCK) {   /* out is rooted across the park */
-        sched_park_on_fd(g_conn_fd[conn], SPROUT_POLL_READ);
+        scheduler_park_on_fd(g_conn_fd[conn], SPROUT_POLL_READ);
         continue;
       }
       SPROUT_GC_POP_LOCALS(1);
@@ -7612,7 +7612,7 @@ long long tcp_write(long long conn, const char* payload) {
     ssize_t n = send(g_conn_fd[conn], p, len, 0);
     if (n < 0) {
       if (errno == EAGAIN || errno == EWOULDBLOCK) {
-        sched_park_on_fd(g_conn_fd[conn], SPROUT_POLL_WRITE);
+        scheduler_park_on_fd(g_conn_fd[conn], SPROUT_POLL_WRITE);
         continue;
       }
       tcp_fail("tcp_write: send failed");
@@ -7634,7 +7634,7 @@ long long tcp_write_all(long long conn, long long payload_h) {
     ssize_t n = send(g_conn_fd[conn], p, len, 0);
     if (n < 0) {
       if (errno == EAGAIN || errno == EWOULDBLOCK) {   /* payload reachable via caller roots */
-        sched_park_on_fd(g_conn_fd[conn], SPROUT_POLL_WRITE);
+        scheduler_park_on_fd(g_conn_fd[conn], SPROUT_POLL_WRITE);
         continue;
       }
       return tcp_net_err1("stdlib.net.TcpWriteFailed", (long long)(uintptr_t)strerror(errno));
@@ -7683,4 +7683,4 @@ long long tcp_echo_serve(long long port, long long max_connections) {
 }
 
 /* L0.1 structured-concurrency builtins (__scope_open/__scope_join/__scope_spawn
- * /task_yield) live in the cooperative-scheduler TU, runtime/sprout_sched.c. */
+ * /task_yield) live in the cooperative-scheduler TU, runtime/sprout_scheduler.c. */

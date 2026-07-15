@@ -1,5 +1,5 @@
 /* Shared interface between the C runtime (sprout_runtime.c) and the cooperative
- * green-thread scheduler (sprout_sched.c).
+ * green-thread scheduler (sprout_scheduler.c).
  *
  * Each green task runs with its OWN GC temp-root context (SproutRoots): a
  * non-moving pool plus a LIFO head. The collector's mark_roots scans EVERY
@@ -9,8 +9,8 @@
  * task's generated code lands in its own context (the switch-point-alignment
  * invariant). See docs/concurrency-design-exploration-2026-07-13.md (§8.5).
  */
-#ifndef SPROUT_SCHED_H
-#define SPROUT_SCHED_H
+#ifndef SPROUT_SCHEDULER_H
+#define SPROUT_SCHEDULER_H
 
 #include <stddef.h>
 
@@ -48,7 +48,7 @@ SproutRoots* sprout_roots_main(void);
 
 /* ── I/O parking (L0.3) ───────────────────────────────────────────────────
  * Readiness poller (kqueue/epoll) in sprout_poll.c, driven by the scheduler.
- * The `tcp_*` builtins call sched_park_on_fd on EAGAIN to suspend the current
+ * The `tcp_*` builtins call scheduler_park_on_fd on EAGAIN to suspend the current
  * green task until the fd is ready; siblings run meanwhile. */
 #define SPROUT_POLL_READ  1
 #define SPROUT_POLL_WRITE 2
@@ -63,6 +63,6 @@ int  sprout_poll_wait(void** out_tokens, int max);
 
 /* Suspend the current green task until `fd` is ready for `interest` (READ|WRITE),
  * then resume it. Called from the retrofitted tcp_* builtins on EAGAIN. */
-void sched_park_on_fd(int fd, int interest);
+void scheduler_park_on_fd(int fd, int interest);
 
-#endif /* SPROUT_SCHED_H */
+#endif /* SPROUT_SCHEDULER_H */

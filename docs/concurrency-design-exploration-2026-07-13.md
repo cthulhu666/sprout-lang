@@ -691,7 +691,7 @@ structured concurrency is implemented and green:
 
 - `stdlib/task.sprout` — surface: `Scope`, `with_scope` (open → run body → join),
   `scope_spawn`, `task_yield`. Join-only; cancellation and error propagation deferred.
-- `runtime/sprout_sched.c` (new TU) — cooperative ucontext scheduler: per-task green
+- `runtime/sprout_scheduler.c` (new TU) — cooperative ucontext scheduler: per-task green
   stack + own GC root context, FIFO ready queue (round-robin), single open scope at a
   time. `__scope_join` drives the scheduler on the caller's stack until the scope's
   live-task count reaches zero.
@@ -700,7 +700,7 @@ structured concurrency is implemented and green:
   `g_current_roots`; `mark_roots` walks a registry of all live contexts (over-rooting
   suspended tasks). The scheduler switches `g_current_roots` at every context switch
   (the §8.5 switch-point-alignment invariant, now realized by construction rather than
-  hand-placed). Cross-TU contract in `runtime/sprout_sched.h`.
+  hand-placed). Cross-TU contract in `runtime/sprout_scheduler.h`.
 - Verified: `tests/stdlib/test_task_cooperative.spr` yields the cooperative
   `A1B1A2B2` interleaving, green under `SPROUT_GC_STRESS=1`. Nested-scope-from-a-task
   and `task_yield`-outside-a-task both fail loud (documented L0.2 boundary), not silent

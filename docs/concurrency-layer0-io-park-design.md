@@ -5,7 +5,7 @@ Linux aarch64 container — fixture completes with the interleaved output, plain
 `SPROUT_GC_STRESS=1`). `stdlib.task` remains EXPERIMENTAL and out of `docs/spec-v0.md`. Builds on the L0.1
 cooperative scheduler + L0.2 nested scopes; the top-level pump here **replaces** the L0.2
 recursive-C-stack joins. Implementation: `runtime/sprout_poll.c` (kqueue/epoll),
-`runtime/sprout_sched.c` (pump), `tcp_*` retrofit in `runtime/sprout_runtime.c`.
+`runtime/sprout_scheduler.c` (pump), `tcp_*` retrofit in `runtime/sprout_runtime.c`.
 
 Author date: 2026-07-14.
 
@@ -153,7 +153,7 @@ task-0 with no scheduled work stays a guarded no-op (nothing else to run).
 
 ### 4.2 Poller abstraction (internal C, cross-platform)
 
-A small internal interface in a new TU `runtime/sprout_poll.c` (+ decl in `sprout_sched.h`),
+A small internal interface in a new TU `runtime/sprout_poll.c` (+ decl in `sprout_scheduler.h`),
 **not** Sprout-visible:
 ```
 void poll_init(void);
@@ -172,9 +172,9 @@ The sockets become `O_NONBLOCK`. Inside the existing `tcp_read`/`tcp_accept`/`tc
 builtins (C), the blocking syscall is wrapped:
 ```
 retry:  n = read(fd, ...);
-        if (n < 0 && errno == EAGAIN) { sched_park_on_fd(fd, READ); goto retry; }
+        if (n < 0 && errno == EAGAIN) { scheduler_park_on_fd(fd, READ); goto retry; }
 ```
-`sched_park_on_fd` is an internal C function (poll_register + park-to-pump). **Trap —
+`scheduler_park_on_fd` is an internal C function (poll_register + park-to-pump). **Trap —
 `connect`:** setting `O_NONBLOCK` before `connect()` makes it return `EINPROGRESS`, which
 would need a write-readiness park. First cut keeps `tcp_connect`'s `connect()` **blocking**
 (loopback connect is immediate) and sets `O_NONBLOCK` *after* it succeeds — only the

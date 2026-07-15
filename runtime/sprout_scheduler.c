@@ -3,7 +3,7 @@
  * task_yield (or finish). Housed in its own translation unit so the deprecated-
  * on-macOS ucontext API and its feature-test macros stay out of the main
  * runtime. See docs/concurrency-design-exploration-2026-07-13.md (§4.A, §8.5)
- * and runtime/sprout_sched.h for the GC-root-context contract.
+ * and runtime/sprout_scheduler.h for the GC-root-context contract.
  *
  * Concurrency model (L0.1/L0.2): structured, join-only. `with_scope` opens a
  * scope, runs its body, then __scope_join drives the scheduler until every task
@@ -28,7 +28,7 @@
 #include <stdlib.h>
 #include <stdint.h>
 #include <ucontext.h>
-#include "sprout_sched.h"
+#include "sprout_scheduler.h"
 
 /* macOS marks makecontext/swapcontext deprecated; we knowingly use them. */
 #ifdef __APPLE__
@@ -38,7 +38,7 @@
 
 /* Fixed per-task sizing. Stacks and root pools are non-moving mallocs — required
  * because a root slot is an address into the task's stack read while the task is
- * suspended (see sprout_sched.h). */
+ * suspended (see sprout_scheduler.h). */
 #define SPROUT_TASK_STACK_BYTES (1u << 20)   /* 1 MiB per green stack */
 #define SPROUT_TASK_ROOT_SLOTS  16384        /* per-task GC temp-root LIFO depth */
 #define SPROUT_PUMP_STACK_BYTES (1u << 18)   /* 256 KiB for the scheduler pump */
@@ -196,7 +196,7 @@ static void task_trampoline(void) {
  * Done in a constructor so bare tcp_* calls outside any with_scope can still park
  * (the pump/poller are not a with_scope-only facility). */
 __attribute__((constructor))
-static void sprout_sched_init(void) {
+static void sprout_scheduler_init(void) {
   sprout_poll_init();
 
   g_task0.stack = NULL;                 /* native stack; never freed */
@@ -206,7 +206,7 @@ static void sprout_sched_init(void) {
   g_task0.next  = NULL;
   g_current_task = &g_task0;
 
-  if (getcontext(&g_pump) != 0) sprout_fail("sprout_sched_init: getcontext failed");
+  if (getcontext(&g_pump) != 0) sprout_fail("sprout_scheduler_init: getcontext failed");
   g_pump.uc_stack.ss_sp   = g_pump_stack;
   g_pump.uc_stack.ss_size = SPROUT_PUMP_STACK_BYTES;
   g_pump.uc_link          = NULL;       /* pump_loop never returns */
@@ -335,7 +335,7 @@ long long __scope_join(long long scope_handle) {
  * poller-blocks for) other tasks meanwhile. Called from the tcp_* builtins on
  * EAGAIN. No GC temp roots may be held unrooted across this call — the pump can
  * drive tasks that trigger a collection while we are parked. */
-void sched_park_on_fd(int fd, int interest) {
+void scheduler_park_on_fd(int fd, int interest) {
   sprout_poll_add(fd, interest, g_current_task);
   g_io_parked++;
   park_to_pump();
