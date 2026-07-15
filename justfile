@@ -1048,7 +1048,13 @@ task-io-smoke: bootstrap-from-seed
   build tests/task_io_smoke/echo_roundtrip.spr
   run_once "rearm" "client round2 ack2"
   SPROUT_GC_STRESS=1 run_once "rearm/stress" "client round2 ack2"
-  echo "==> task-io-smoke ✓ (read-park, accept-park, re-arm, write; interleaved; stress-clean)"
+  # (3) I/O-drop cancellation (L0.5): scope_cancel force-drops tasks parked in the
+  # poller (both task_fork and task_spawn) so __scope_join returns instead of blocking
+  # the pump forever. Reaching "done" proves the drop; a broken drop HANGS (alarm fires).
+  build tests/task_io_smoke/cancel_io_drop.spr
+  run_once "cancel-io-drop" "done"
+  SPROUT_GC_STRESS=1 run_once "cancel-io-drop/stress" "done"
+  echo "==> task-io-smoke ✓ (read-park, accept-park, re-arm, write, cancel-drop; interleaved; stress-clean)"
 
 # Division-by-zero guard regression (CI gate). The fixture divides by a RUNTIME
 # zero (`10 / list_length(argv)` with no args), which neither the compiler nor

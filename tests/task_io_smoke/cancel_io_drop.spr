@@ -1,0 +1,37 @@
+import stdlib.task (Scope, with_scope, task_fork, task_spawn, task_yield, scope_cancel)
+import stdlib.net (tcp_listen, tcp_accept, tcp_read)
+import stdlib.string as string
+
+# L0.5 I/O-drop cancellation (EXPERIMENTAL). A task suspended in the poller (here on
+# tcp_accept, with nobody ever connecting) cannot check task_cancelled — it is asleep
+# in kqueue/epoll. So scope_cancel must FORCE-DROP it: deregister its fd and reclaim
+# it, without the fd ever becoming ready. Both spawn kinds must be droppable:
+#   * task_fork (awaitable)      — reclaim keeps the record (roots freed, roots=NULL).
+#   * task_spawn (fire-and-forget) — reclaim frees the whole record.
+# Without the drop, live never reaches 0 and __scope_join blocks the pump in the
+# poller forever: the perl `alarm` timeout fires and this fixture "does not complete".
+fn accept_forever(listener: Int) -> Int !{IO} =
+  do
+    conn <- tcp_accept(listener)   # parks here forever — no client ever connects
+    _ <- tcp_read(conn)            # unreachable
+    99
+
+fn accept_forever_unit(listener: Int) -> Unit !{IO} =
+  do
+    _ <- accept_forever(listener)
+    term_write("")
+
+fn body(s: Scope, la: Int, lb: Int) -> Unit !{IO} =
+  do
+    _fork <- task_fork(s, \_ -> accept_forever(la))    # awaitable, parks on la
+    task_spawn(s, \_ -> accept_forever_unit(lb))        # fire-and-forget, parks on lb
+    task_yield()                                        # let both reach accept and park
+    scope_cancel(s)                                     # force-drop both parked tasks
+    term_write("cancelled\n")                           # owner continues; awaits neither
+
+fn main() -> Unit !{IO} =
+  do
+    la <- tcp_listen(28996)
+    lb <- tcp_listen(28997)
+    with_scope(\s -> body(s, la, lb))
+    term_write("done\n")   # reached only if both parked tasks were dropped by cancel
