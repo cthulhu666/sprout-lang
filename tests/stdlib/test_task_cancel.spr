@@ -1,0 +1,40 @@
+import stdlib.test (TestState, new_state, assert_eq, summary)
+import stdlib.task (Scope, with_scope, task_spawn, task_yield, scope_cancel, task_cancelled)
+import stdlib.string as string
+
+# L0.5 cancellation (EXPERIMENTAL). `scope_cancel(scope)` requests cancellation of a
+# scope's tasks (owner-only). A ready/yield-parked task cooperatively observes
+# `task_cancelled()` and returns; only I/O-parked tasks are force-dropped by the
+# scheduler (covered by a separate socket smoke test). No exceptions are injected —
+# stopping is cooperative, exactly like Go's `ctx.Done()`.
+
+# A worker marks "x" and yields each iteration, up to `budget`, but stops early with
+# "!" once its scope is cancelled. The bound means a broken implementation fails with
+# the wrong marker string ("xxxxxxxxxx#") instead of looping forever.
+fn coop_worker(log: Ref String, budget: Int) -> Unit !{IO} =
+  if budget <= 0 then
+    ref_write(log, string.concat(ref_read(log), "#"))     # ran to budget — NOT cancelled
+  else if task_cancelled() then
+    ref_write(log, string.concat(ref_read(log), "!"))     # observed cancellation — stop
+  else
+    do
+      ref_write(log, string.concat(ref_read(log), "x"))
+      task_yield()
+      coop_worker(log, budget - 1)
+
+fn coop_body(s: Scope, log: Ref String) -> Unit !{IO} =
+  do
+    task_spawn(s, \_ -> coop_worker(log, 10))
+    task_yield()          # worker: not cancelled -> "x", parks at its yield
+    task_yield()          # worker: not cancelled -> "x", parks   (log = "xx")
+    scope_cancel(s)       # set the flag; worker resumes during join and observes it
+
+fn main() -> Unit !{IO} =
+  do
+    state <- new_state()
+    log <- ref_new("")
+    with_scope(\s -> coop_body(s, log))
+    # Two "x" (two yields), then the worker observes cancellation on its next resume
+    # (inside __scope_join) and stops with "!".
+    assert_eq(state, "yield-parked task cooperatively stops on scope_cancel", ref_read(log), "xx!")
+    summary(state)
