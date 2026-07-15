@@ -322,6 +322,15 @@ long long __task_fork(long long scope_handle, long long work) {
 long long __task_await(long long task_handle) {
   Task* t = task_of(task_handle);
   if (t == NULL) sprout_fail("__task_await: null task");
+  /* A task force-dropped by scope_cancel has its roots freed (roots == NULL) and never
+   * ran to completion, so it has no result and nothing will ever wake an awaiter of it.
+   * The design's invariant is that a cancelled task is never awaited (owner cancels
+   * after it already has the result it needs — §4.2); a body that violates it would
+   * otherwise park here forever. Loud-fail instead of a silent hang. roots == NULL is
+   * unambiguous: a live or *done* awaitable always still holds its roots. */
+  if (t->roots == NULL)
+    sprout_fail("__task_await: awaiting a task dropped by scope_cancel "
+                "(a cancelled task produces no result)");
   if (!t->done) {
     t->awaiter = g_current_task;
     park_to_pump();

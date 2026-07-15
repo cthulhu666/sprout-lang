@@ -1054,7 +1054,27 @@ task-io-smoke: bootstrap-from-seed
   build tests/task_io_smoke/cancel_io_drop.spr
   run_once "cancel-io-drop" "done"
   SPROUT_GC_STRESS=1 run_once "cancel-io-drop/stress" "done"
-  echo "==> task-io-smoke ✓ (read-park, accept-park, re-arm, write, cancel-drop; interleaved; stress-clean)"
+  # (4) await-a-dropped-task guard (L0.5): awaiting a task that scope_cancel dropped must
+  # LOUD-FAIL, not hang. run_expect_fail asserts a non-zero exit AND the guard message
+  # (a HANG would trip the alarm -> also non-zero, so we additionally require the message).
+  run_expect_fail() {  # $1 = label, $2 = required stderr substring
+    local label="$1" want="$2"
+    set +e
+    perl -e 'alarm 15; exec @ARGV' "$TMPD/bin" > "$TMPD/run.out" 2>"$TMPD/run.err"
+    local ec=$?
+    set -e
+    if [ "$ec" -eq 0 ]; then
+      echo "task-io-smoke [$label]: expected a loud-fail abort, but exited 0" >&2
+      cat "$TMPD/run.out" >&2; exit 1
+    fi
+    if ! grep -q "$want" "$TMPD/run.err"; then
+      echo "task-io-smoke [$label]: exited $ec but stderr lacked '$want' (a HANG, not the guard?)" >&2
+      echo "--- stderr ---" >&2; cat "$TMPD/run.err" >&2; exit 1
+    fi
+  }
+  build tests/task_io_smoke/await_dropped_fails.spr
+  run_expect_fail "await-dropped" "dropped by scope_cancel"
+  echo "==> task-io-smoke ✓ (read-park, accept-park, re-arm, write, cancel-drop, await-dropped-guard; interleaved; stress-clean)"
 
 # Division-by-zero guard regression (CI gate). The fixture divides by a RUNTIME
 # zero (`10 / list_length(argv)` with no args), which neither the compiler nor

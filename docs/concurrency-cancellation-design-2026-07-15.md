@@ -205,6 +205,12 @@ Making `with_scope` return `Result Cancelled a` universally would put cancellati
   propagate cancellation down the tree; we may follow, but it interacts with the
   single-pump/live-count model and deserves its own decision.
 - `task_cancelled()` reflects the current task's own scope's flag.
+- **Awaiting a dropped task is illegal and loud-fails.** The invariant is "a cancelled
+  task is never awaited" (§4.2): the owner cancels *after* it has the result it needs and
+  drops the rest without awaiting them. A body that violates this — `scope_cancel(s)` then
+  `task_await(t)` on a fork `t` that was I/O-parked and hence dropped — aborts with a clear
+  message rather than parking the owner forever (nothing would ever wake it). Enforced in
+  `__task_await` via the dropped record's freed roots (`roots == NULL`).
 - `with_scope` semantics are unchanged except that a cancelled scope drains faster
   (dropped tasks stop counting toward live).
 
@@ -280,7 +286,11 @@ Making `with_scope` return `Result Cancelled a` universally would put cancellati
 - **Type system:** none for the MVP (§5.1). The optional `_try` layer (§5.3) adds
   `Result`-typed combinators later, still no new type machinery.
 - **Effects:** none — both primitives are ordinary `!{IO}`.
-- **Error messages:** none new for the MVP.
+- **Error messages:** two runtime loud-fails on the drop path (not type errors): (a)
+  `scope_cancel` by a non-owner; (b) `task_await` on a task that `scope_cancel` dropped
+  (`roots == NULL`) — a body that violates "a cancelled task is never awaited" (§4.2) gets
+  a clear abort instead of a silent hang. Both uphold the codebase's loud-fail-over-silent
+  ethos; neither fires for a correct program.
 - **Compat/migration:** fully additive. L0.4 code is unchanged; a program that never
   calls `scope_cancel` behaves exactly as today.
 - **Builtins:** `scope_cancel`/`task_cancelled` are thin Sprout wrappers over new

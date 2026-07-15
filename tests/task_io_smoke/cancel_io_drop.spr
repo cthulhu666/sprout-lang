@@ -10,10 +10,16 @@ import stdlib.string as string
 #   * task_spawn (fire-and-forget) — reclaim frees the whole record.
 # Without the drop, live never reaches 0 and __scope_join blocks the pump in the
 # poller forever: the perl `alarm` timeout fires and this fixture "does not complete".
+# The task binds a HEAP string `held` BEFORE parking and uses it AFTER, so the dropped
+# task is suspended with a GC root pointing INTO its green stack (not just &work in the
+# record) — the case where reclaim must free roots and stack together. Exercises the full
+# reclaim path, not the degenerate roots-only-into-record one.
 fn accept_forever(listener: Int) -> Int !{IO} =
   do
+    let held = string.concat("live-", "root")
     conn <- tcp_accept(listener)  # parks here forever — no client ever connects
-    _ <- tcp_read(conn)  # unreachable
+    term_write(held)  # unreachable; forces `held` rooted across the park
+    _ <- tcp_read(conn)
     99
 
 fn accept_forever_unit(listener: Int) -> Unit !{IO} =

@@ -1,0 +1,30 @@
+import stdlib.task (Scope, Task, with_scope, task_fork, task_await, task_yield, scope_cancel)
+import stdlib.net (tcp_listen, tcp_accept, tcp_read)
+import stdlib.string as string
+
+# L0.5 guard (EXPERIMENTAL). The design invariant is that a task force-dropped by
+# scope_cancel is NEVER awaited (the owner cancels only after it has the result it
+# needs — §4.2). A body that violates it — cancels a scope, then awaits a fork that
+# was parked on I/O and hence dropped — would otherwise park the owner forever with no
+# diagnostic. __task_await now LOUD-FAILS on a dropped task (roots freed) instead.
+# This fixture deliberately commits that violation and must ABORT (non-zero exit) with
+# the "dropped by scope_cancel" message — NOT hang, NOT print "unreachable".
+fn accept_forever(listener: Int) -> Int !{IO} =
+  do
+    conn <- tcp_accept(listener)  # parks here forever — no client ever connects
+    _ <- tcp_read(conn)  # unreachable
+    99
+
+fn body(s: Scope, listener: Int) -> Unit !{IO} =
+  do
+    t <- task_fork(s, \_ -> accept_forever(listener))  # awaitable, parks on accept
+    task_yield()  # let it reach accept and park
+    scope_cancel(s)  # force-drops the parked fork
+    let v = task_await(t)  # ILLEGAL: awaiting a dropped task -> abort
+    term_write(string.concat("unreachable ", int_to_string(v)))
+
+fn main() -> Unit !{IO} =
+  do
+    listener <- tcp_listen(28995)
+    with_scope(\s -> body(s, listener))
+    term_write("unreachable done\n")
