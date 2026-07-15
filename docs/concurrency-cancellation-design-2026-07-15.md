@@ -218,9 +218,29 @@ Making `with_scope` return `Result Cancelled a` universally would put cancellati
   force-dropping a task suspended in a *nested join* would orphan its inner scope (the
   inner tasks' joiner vanishes → lost wake / UAF) under local propagation. So:
   - **I/O-parked tasks** → force-dropped: they *cannot* check a flag while suspended in
-    the poller, so `scope_cancel` **deregisters the fd** (`sprout_poll_remove` — new),
-    reclaims per the L0.4 awaitable/fire-and-forget lifecycle, and `live--`. This is the
-    anchor use case (a sibling blocked on a socket).
+    the poller, so `scope_cancel` **deregisters the fd** (`sprout_poll_remove` — new) and
+    reclaims, `live--`. This is the anchor use case (a sibling blocked on a socket).
+    **Reclaim lifecycle (do NOT copy L0.4's *done* reclaim):** a task dropped mid-`tcp_*`
+    is suspended with **live values rooted into its green stack** (L0.3's park contract),
+    so its roots context must be **freed together with the stack for BOTH kinds** — unlike
+    a *done* awaitable task (empty LIFO + result rooted in the record). A dropped task
+    never completed, has no result, and is never awaited, so: fire-and-forget → free
+    roots + stack + record; awaitable → free roots + stack, `roots = NULL`, keep the record
+    in `forks`, and **guard scope-close** with `if (f->roots) sprout_roots_free(f->roots)`
+    against double-free. Keeping the roots while freeing the stack is a **use-after-free**
+    (`mark_roots` would scan freed stack) — the negative control must reproduce it under
+    `SPROUT_GC_STRESS=1`.
+  - **Awaiter guard:** owner-only cancel stops the *owner* from awaiting a dropped task,
+    but a *forked* task F can `task_await` a sibling A (F sits in `A->awaiter`). Dropping A
+    would strand F (nothing wakes it → `live` never hits 0 → the owner's join deadlocks).
+    So dropping a task with `awaiter != NULL` must **`sprout_fail`** with a clear message
+    ("cancelling a task awaited by a sibling; await only from the scope owner"). Full
+    awaiter-cascade stays deferred (§10.2).
+  - **Single-thread no-race (comment it at the drop site):** the pump drains every
+    `poll_wait` token out of `g_io_head` before running the owner, so a task still in
+    `g_io_head` at `scope_cancel` time has not fired — `poll_remove` then reclaim is safe;
+    `EV_DELETE`/`EPOLL_CTL_DEL` → `ENOENT` is ignored. During cancel the owner is running so
+    `s->waiter == NULL` (no wake mid-cancel).
   - **ready / yield-parked tasks** → left in place; they resume normally and are expected
     to **check `task_cancelled()` and return**. A task that never checks never stops —
     the cooperative contract, exactly as Go's `ctx.Done()`.
@@ -233,8 +253,10 @@ Making `with_scope` return `Result Cancelled a` universally would put cancellati
   ready/yield-parked task cooperatively stops (only I/O-parked tasks are dropped for them).
 - Poller: add one-shot **deregistration** (`sprout_poll_remove(fd)`), the piece the
   L0.4 review flagged as the sole net-new poller capability.
-- No GC-rooting change: dropped tasks are reclaimed exactly as never-awaited forks are
-  in L0.4; no result is kept for a dropped task.
+- GC-rooting: a dropped task is **not** reclaimed like a never-awaited L0.4 fork (those
+  keep roots until scope-close because they *completed*). A dropped task is suspended with
+  stack-pointing roots, so its roots are freed **immediately** with its stack (see the
+  reclaim-lifecycle note above). No result is kept for a dropped task.
 
 ## 8. Impact — Design Change Process checklist
 
