@@ -16,6 +16,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+#include <stdint.h>
 #include "sprout_scheduler.h"
 
 #ifdef __APPLE__
@@ -49,6 +50,29 @@ void sprout_poll_remove(int fd, int interest) {
     sprout_fail("sprout_poll_remove: kevent EV_DELETE failed");
 }
 
+long long sprout_poll_add_timer(long long ms, void* token) {
+  /* ident = the parked Task* — a task sleeps on at most one timer, so it is unique, and
+   * EVFILT_TIMER's ident namespace is disjoint from the EVFILT_READ/WRITE fd filters. */
+  uintptr_t ident = (uintptr_t)token;
+  struct kevent ev;
+  /* fflags = 0: the default EVFILT_TIMER unit is milliseconds (per sys/event.h; this SDK
+   * has no NOTE_MSECONDS). EV_ONESHOT fires once then removes the knote. */
+  EV_SET(&ev, ident, EVFILT_TIMER, EV_ADD | EV_ONESHOT, 0, ms, token);
+  if (kevent(g_kq, &ev, 1, NULL, 0, NULL) < 0)
+    sprout_fail("sprout_poll_add_timer: kevent EVFILT_TIMER add failed");
+  return (long long)ident;
+}
+
+void sprout_poll_remove_timer(long long timer_id) {
+  struct kevent ev;
+  /* EV_DELETE removes the knote AND discards a triggered-but-unretrieved timer event, so
+   * a dropped sleeper cannot be resumed by a stale token (design §5.1). ENOENT = the
+   * one-shot already fired and was drained; ignore. */
+  EV_SET(&ev, (uintptr_t)timer_id, EVFILT_TIMER, EV_DELETE, 0, 0, NULL);
+  if (kevent(g_kq, &ev, 1, NULL, 0, NULL) < 0 && errno != ENOENT)
+    sprout_fail("sprout_poll_remove_timer: kevent EV_DELETE failed");
+}
+
 int sprout_poll_wait(void** out_tokens, int max) {
   struct kevent evs[64];
   int want = (max < 64) ? max : 64;
@@ -60,6 +84,8 @@ int sprout_poll_wait(void** out_tokens, int max) {
 
 #else  /* Linux */
 #include <sys/epoll.h>
+#include <sys/timerfd.h>
+#include <time.h>
 #include <errno.h>
 
 static int g_ep = -1;
@@ -96,6 +122,38 @@ void sprout_poll_remove(int fd, int interest) {
    * set. ENOENT means it was never added (or already removed); ignore. */
   if (epoll_ctl(g_ep, EPOLL_CTL_DEL, fd, NULL) < 0 && errno != ENOENT)
     sprout_fail("sprout_poll_remove: epoll_ctl DEL failed");
+}
+
+long long sprout_poll_add_timer(long long ms, void* token) {
+  /* One timerfd per sleeper (the epoll cost the design notes as the scaling boundary). */
+  int tfd = timerfd_create(CLOCK_MONOTONIC, TFD_CLOEXEC);
+  if (tfd < 0) sprout_fail("sprout_poll_add_timer: timerfd_create failed");
+  struct itimerspec its;
+  memset(&its, 0, sizeof(its));                 /* it_interval = 0 -> one-shot */
+  its.it_value.tv_sec  = (time_t)(ms / 1000);
+  its.it_value.tv_nsec = (long)((ms % 1000) * 1000000L);
+  if (timerfd_settime(tfd, 0, &its, NULL) < 0) {
+    close(tfd);
+    sprout_fail("sprout_poll_add_timer: timerfd_settime failed");
+  }
+  struct epoll_event ev;
+  memset(&ev, 0, sizeof(ev));
+  ev.events = EPOLLIN | EPOLLONESHOT;
+  ev.data.ptr = token;
+  if (epoll_ctl(g_ep, EPOLL_CTL_ADD, tfd, &ev) < 0) {
+    close(tfd);
+    sprout_fail("sprout_poll_add_timer: epoll_ctl ADD failed");
+  }
+  return (long long)tfd;
+}
+
+void sprout_poll_remove_timer(long long timer_id) {
+  int tfd = (int)timer_id;
+  /* DEL then close. close() alone removes the fd from the epoll set, and — crucially —
+   * discards any fired-but-unretrieved event, so a dropped sleeper cannot be resumed by a
+   * stale token (design §5.1). DEL first is belt-and-suspenders; ignore its errors. */
+  epoll_ctl(g_ep, EPOLL_CTL_DEL, tfd, NULL);
+  close(tfd);
 }
 
 int sprout_poll_wait(void** out_tokens, int max) {

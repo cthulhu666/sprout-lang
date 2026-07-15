@@ -70,11 +70,17 @@ typedef struct Task {
   Scope*       scope;      /* the scope this task was spawned into (NULL for task-0) */
   struct Task* next;       /* global ready-queue link */
   struct Task* scope_next; /* scope->forks list link (awaitable tasks only) */
+  int          park_kind;  /* PARK_* — what this task is suspended on (routes cancel-drop) */
   int          park_fd;    /* fd this task is suspended-in-the-poller on, or -1 (L0.5) */
   int          park_interest; /* SPROUT_POLL_READ|WRITE it parked with (for poll_remove) */
-  struct Task* io_next;    /* g_io_head list link (only while I/O-parked) */
+  long long    park_timer_id; /* opaque timer handle when park_kind == PARK_TIMER (L0.6) */
+  struct Task* io_next;    /* g_io_head list link (only while parked on I/O or a timer) */
   struct Task* io_prev;
 } Task;
+
+/* How a task sitting on g_io_head is suspended, so scope_cancel tears down the right
+ * poller registration when it force-drops the task. */
+enum { PARK_NONE = 0, PARK_FD = 1, PARK_TIMER = 2 };
 
 /* The single scheduler pump. Every task (and task-0/main) PARKS by swapping to
  * g_pump; the pump resumes a task by swapping into it. One pump owns the whole
@@ -164,9 +170,10 @@ static void pump_loop(void) {
       if (g_io_head != NULL) {
         void* toks[64];
         int n = sprout_poll_wait(toks, 64);   /* blocks in kqueue/epoll */
-        for (int i = 0; i < n; i++) {         /* each ready fd wakes its parked task */
+        for (int i = 0; i < n; i++) {         /* each ready fd / fired timer wakes its task */
           Task* w = (Task*)toks[i];
           io_list_remove(w);                  /* no longer poller-parked */
+          w->park_kind = PARK_NONE;
           w->park_fd = -1;
           rq_push(w);
         }
@@ -232,7 +239,9 @@ static void sprout_scheduler_init(void) {
   g_task0.done  = 0;
   g_task0.scope = NULL;
   g_task0.next  = NULL;
-  g_task0.park_fd = -1;                  /* task-0 parks on I/O like any task */
+  g_task0.park_kind = PARK_NONE;         /* task-0 parks on I/O / timers like any task */
+  g_task0.park_fd = -1;
+  g_task0.park_timer_id = 0;
   g_task0.io_next = NULL;
   g_task0.io_prev = NULL;
   g_current_task = &g_task0;
@@ -273,8 +282,10 @@ static Task* task_create(Scope* s, long long work, int awaitable) {
   t->scope      = s;
   t->next       = NULL;
   t->scope_next = NULL;
+  t->park_kind  = PARK_NONE;
   t->park_fd    = -1;      /* not I/O-parked until scheduler_park_on_fd runs */
   t->park_interest = 0;
+  t->park_timer_id = 0;
   t->io_next    = NULL;
   t->io_prev    = NULL;
 
@@ -371,7 +382,12 @@ long long __scope_cancel(long long scope_handle) {
       if (t->awaiter != NULL)
         sprout_fail("__scope_cancel: cannot drop a task awaited by a sibling — "
                     "await only from the scope owner");
-      sprout_poll_remove(t->park_fd, t->park_interest);
+      /* Deregister whatever it is suspended on. For a timer this must discard even an
+       * already-fired-but-undrained event (timers fire async to the pump, unlike fds
+       * which are always drained before the owner runs) — else a stale token would later
+       * resume a freed task. See the task_sleep design §5.1. */
+      if (t->park_kind == PARK_TIMER) sprout_poll_remove_timer(t->park_timer_id);
+      else                            sprout_poll_remove(t->park_fd, t->park_interest);
       io_list_remove(t);
       /* Reclaim (design §7): a dropped task is suspended with live values rooted INTO
        * its green stack (L0.3 park contract), so roots and stack must be released
@@ -453,12 +469,37 @@ void scheduler_park_on_fd(int fd, int interest) {
   /* Record what we parked on so scope_cancel can deregister this fd and drop us while
    * we are asleep in the poller (we cannot check task_cancelled from here). The pump
    * clears park_fd and unlinks us on wake; scope_cancel does so on force-drop. */
+  g_current_task->park_kind     = PARK_FD;
   g_current_task->park_fd       = fd;
   g_current_task->park_interest = interest;
   io_list_push(g_current_task);
   sprout_poll_add(fd, interest, g_current_task);
   park_to_pump();
   /* resumed by the pump after the poller reported readiness */
+}
+
+/* Suspend the current task on a one-shot timer for `ms` (> 0) milliseconds; the pump runs
+ * other tasks and poller-blocks meanwhile, and resumes us when the timer fires. Parks on
+ * g_io_head exactly like an fd wait, so scope_cancel force-drops a sleeping task too.
+ * Reached only with ms > 0 — the stdlib task_sleep wrapper routes ms <= 0 to task_yield
+ * (a zero-value timerfd disarms on Linux → would hang; design §5.2). */
+static void scheduler_park_on_timer(long long ms) {
+  long long tid = sprout_poll_add_timer(ms, g_current_task);
+  g_current_task->park_kind     = PARK_TIMER;
+  g_current_task->park_timer_id = tid;
+  io_list_push(g_current_task);
+  park_to_pump();
+  /* Resumed after the timer fired and the pump drained it. Tear the timer down (kqueue:
+   * ENOENT no-op, one-shot already gone; epoll: EPOLL_CTL_DEL + close the timerfd). The
+   * cancel-drop path is mutually exclusive with this one (a dropped task never resumes),
+   * so the timer is torn down exactly once. */
+  sprout_poll_remove_timer(tid);
+}
+
+/* task_sleep(ms) with ms > 0 (the wrapper handles ms <= 0). Returns Unit (0). */
+long long __task_sleep(long long ms) {
+  scheduler_park_on_timer(ms);
+  return 0;
 }
 
 #ifdef __APPLE__

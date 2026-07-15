@@ -1,0 +1,50 @@
+import stdlib.task (Scope, with_scope, task_fork, task_sleep, task_yield, scope_cancel)
+import stdlib.string as string
+
+# L0.6 fired-timer-drop safety (the task_sleep design §5.1 blocker). Timers fire on the
+# KERNEL's schedule, asynchronously to the pump — so a short sleep can fire while the owner
+# is still running, its event undrained. If scope_cancel then drops that sleeper and the
+# fired event survives deregistration, the NEXT poll_wait hands back a token pointing at
+# the freed task -> resume into freed memory. This fixture forces exactly that window:
+#   * child sleeps 2ms, then the owner busy-spins WELL past 2ms so the timer definitely
+#     fires kernel-side while undrained;
+#   * scope_cancel drops the child mid-fired-timer;
+#   * a `keeper` sleeping in the OUTER scope forces a later poll_wait — which must NOT
+#     return the dropped child's stale token.
+# Reaching "ok"/"done" (and, under ASan, no heap-use-after-free) proves poll_remove_timer
+# discards the fired event. Verified with a negative control: a no-op poll_remove_timer
+# corrupts here, so the window is genuinely exercised.
+
+# Tail-recursive busy loop (TCO'd). `seed` comes from a runtime ref_read so the optimizer
+# cannot constant-fold or dead-code-eliminate the loop — it burns real wall-clock.
+fn spin(n: Int, acc: Int) -> Int =
+  if n <= 0 then
+    acc
+  else
+    spin(n - 1, acc + n * 3 - 1)
+
+fn inner(s2: Scope, seed: Int) -> Unit !{IO} =
+  do
+    _child <- task_fork(s2, \_ -> task_sleep(2))  # 2ms sleeper
+    task_yield()  # let the child actually PARK on its timer
+    let burned = spin(40000000, seed)  # >> 2ms: its timer fires while undrained
+    print(string.concat("burned ", int_to_string(burned)))  # observably uses `burned`
+    scope_cancel(s2)  # drop the child whose timer already fired
+
+fn keeper() -> Unit !{IO} =
+  do
+    task_sleep(120)  # keeps the outer join in poll_wait
+    print("keeper woke")
+
+fn body(s1: Scope, seed: Int) -> Unit !{IO} =
+  do
+    _k <- task_fork(s1, \_ -> keeper())
+    with_scope(\s2 -> inner(s2, seed))  # nested drop of the fired-timer child
+    print("ok")
+
+fn main() -> Unit !{IO} =
+  do
+    seedref <- ref_new(7)
+    seed <- ref_read(seedref)  # runtime value: blocks constant-folding
+    with_scope(\s -> body(s, seed))
+    print("done")

@@ -36,6 +36,7 @@ extern fn __scope_spawn(scope_id: Int, work: Unit -> Unit !{IO}) -> Unit !{IO}
 extern fn __task_fork(scope_id: Int, work: Unit -> a !{IO}) -> Int !{IO}
 extern fn __task_await(task_id: Int) -> a !{IO}
 extern fn __scope_cancel(scope_id: Int) -> Unit !{IO}
+extern fn __task_sleep(ms: Int) -> Unit !{IO}
 
 # Cooperative yield point: suspend the current task and let the scheduler run
 # another ready task. (Real I/O parking, in the tcp_* builtins, yields implicitly.)
@@ -85,3 +86,15 @@ export fn scope_cancel(scope: Scope) -> Unit !{IO} =
 # True if the current task's scope has been cancelled. A cancellable task checks this
 # at its own loop/yield points and returns when it sees `true` (Go's `ctx.Done()`).
 export extern fn task_cancelled() -> Bool !{IO}
+
+# Suspend the current green task for ~`ms` milliseconds, running its siblings meanwhile —
+# a cooperative sleep that parks the TASK, not the OS thread (Go `time.Sleep` / Kotlin
+# `delay`). Timing is best-effort: at least `ms`, then whenever the scheduler next runs
+# this task. `ms <= 0` yields once to siblings without arming a timer (a zero-length timer
+# is a backend-divergent no-op/hang). A task sleeping in a cancelled scope is dropped by
+# the scheduler, exactly like one parked on I/O. See the task_sleep design doc.
+export fn task_sleep(ms: Int) -> Unit !{IO} =
+  if ms <= 0 then
+    task_yield()
+  else
+    __task_sleep(ms)

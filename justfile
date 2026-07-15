@@ -1074,7 +1074,14 @@ task-io-smoke: bootstrap-from-seed
   }
   build tests/task_io_smoke/await_dropped_fails.spr
   run_expect_fail "await-dropped" "dropped by scope_cancel"
-  echo "==> task-io-smoke ✓ (read-park, accept-park, re-arm, write, cancel-drop, await-dropped-guard; interleaved; stress-clean)"
+  # (5) task_sleep fired-timer drop (L0.6): a sleeper whose timer fired kernel-side while
+  # the owner ran must be safely force-dropped (poll_remove_timer discards the stale event)
+  # so a later poll_wait cannot resume a freed task. Reaching "done" proves it; a leaked
+  # stale token corrupts (verified by a no-op-remove_timer ASan negative control).
+  build tests/task_io_smoke/cancel_timer_drop.spr
+  run_once "timer-drop" "done"
+  SPROUT_GC_STRESS=1 run_once "timer-drop/stress" "done"
+  echo "==> task-io-smoke ✓ (read-park, accept-park, re-arm, write, cancel-drop, await-guard, timer-drop; interleaved; stress-clean)"
 
 # Division-by-zero guard regression (CI gate). The fixture divides by a RUNTIME
 # zero (`10 / list_length(argv)` with no args), which neither the compiler nor

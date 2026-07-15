@@ -1,0 +1,45 @@
+import stdlib.test (TestState, new_state, assert_eq, summary)
+import stdlib.task (Scope, with_scope, task_spawn, task_sleep)
+import stdlib.string as string
+
+# L0.6 task_sleep (EXPERIMENTAL). task_sleep(ms) suspends the current green task for ~ms
+# milliseconds and runs its siblings meanwhile — a cooperative sleep that parks the TASK,
+# not the OS thread (Go time.Sleep / Kotlin delay). The sleeper must yield the thread: an
+# eager sibling with no sleep runs to completion BEFORE the sleeper wakes.
+
+# Logs "A" only after a 20ms sleep. If task_sleep does not actually park (e.g. returns
+# immediately), "A" lands first and the assertion below fails with the wrong order.
+fn sleeper(log: Ref String) -> Unit !{IO} =
+  do
+    task_sleep(20)
+    ref_write(log, string.concat(ref_read(log), "A"))
+
+# Logs "B" immediately — no sleep, so it finishes while the sleeper is parked on its timer.
+fn eager(log: Ref String) -> Unit !{IO} =
+  ref_write(log, string.concat(ref_read(log), "B"))
+
+fn body(s: Scope, log: Ref String) -> Unit !{IO} =
+  do
+    task_spawn(s, \_ -> sleeper(log))
+    task_spawn(s, \_ -> eager(log))
+
+# task_sleep(0) must NOT hang (it yields once instead of arming a timer) and must run.
+fn napper_zero(log: Ref String) -> Unit !{IO} =
+  do
+    task_sleep(0)
+    ref_write(log, string.concat(ref_read(log), "Z"))
+
+fn zero_body(s: Scope, log: Ref String) -> Unit !{IO} =
+  task_spawn(s, \_ -> napper_zero(log))
+
+fn main() -> Unit !{IO} =
+  do
+    state <- new_state()
+    log <- ref_new("")
+    with_scope(\s -> body(s, log))
+    # eager finishes while sleeper is parked -> "B" precedes "A".
+    assert_eq(state, "sleeping task yields; eager sibling finishes first", ref_read(log), "BA")
+    zlog <- ref_new("")
+    with_scope(\s -> zero_body(s, zlog))
+    assert_eq(state, "task_sleep(0) yields without hanging and completes", ref_read(zlog), "Z")
+    summary(state)

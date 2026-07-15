@@ -61,6 +61,14 @@ void sprout_poll_add(int fd, int interest, void* token);
  * by scope_cancel to force-drop a task suspended in the poller (L0.5). Idempotent:
  * a not-registered fd (already fired one-shot, or never added) is silently ignored. */
 void sprout_poll_remove(int fd, int interest);
+/* Arm a one-shot timer for `ms` (> 0) milliseconds; the fired event carries `token` back
+ * from sprout_poll_wait like a ready fd (L0.6 task_sleep). Returns an opaque handle used
+ * to tear the timer down (kqueue: the EVFILT_TIMER ident; epoll: the timerfd). */
+long long sprout_poll_add_timer(long long ms, void* token);
+/* Tear down a timer created by sprout_poll_add_timer. MUST discard even an already-fired,
+ * not-yet-retrieved event (timers fire asynchronously to the pump) so a dropped sleeping
+ * task cannot be resumed by a stale token. Idempotent (ENOENT ignored). */
+void sprout_poll_remove_timer(long long timer_id);
 /* Block until ≥1 registered fd is ready; fill `out_tokens` (up to `max`) with
  * the ready fds' tokens and return the count. */
 int  sprout_poll_wait(void** out_tokens, int max);
