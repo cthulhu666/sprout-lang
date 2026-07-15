@@ -1,4 +1,4 @@
-import stdlib.task (Scope, with_scope, scope_spawn, task_yield)
+import stdlib.task (Scope, with_scope, task_spawn, task_yield)
 import stdlib.string as string
 
 # L0.1 cooperative structured concurrency: two green tasks share one OS thread.
@@ -18,8 +18,8 @@ fn worker(name: String) -> Unit !{IO} =
 
 fn spawn_workers(s: Scope) -> Unit !{IO} =
   do
-    scope_spawn(s, \_ -> worker("alice"))
-    scope_spawn(s, \_ -> worker("bob"))
+    task_spawn(s, \_ -> worker("alice"))
+    task_spawn(s, \_ -> worker("bob"))
 
 fn main() -> Unit !{IO} =
   do

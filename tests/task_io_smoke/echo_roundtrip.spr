@@ -1,4 +1,4 @@
-import stdlib.task (Scope, with_scope, scope_spawn)
+import stdlib.task (Scope, with_scope, task_spawn)
 import stdlib.net (TcpConnection, connect, write_all_utf8, read_exact_utf8, tcp_listen, tcp_accept, tcp_read, tcp_write)
 import stdlib.string as string
 
@@ -50,8 +50,8 @@ fn read_ack(conn: TcpConnection, label: String) -> Unit !{IO} =
 
 fn run(s: Scope, listener: Int, port: Int) -> Unit !{IO} =
   do
-    scope_spawn(s, \_ -> server(listener))
-    scope_spawn(s, \_ -> client(port))
+    task_spawn(s, \_ -> server(listener))
+    task_spawn(s, \_ -> client(port))
 
 fn main() -> Unit !{IO} =
   do

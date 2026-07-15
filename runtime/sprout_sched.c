@@ -50,16 +50,24 @@
 typedef struct Scope {
   long long     live;      /* tasks spawned into this scope, not yet finished */
   struct Task*  waiter;    /* the task parked in __scope_join(this), or NULL */
+  struct Task*  forks;     /* awaitable (task_fork) tasks, linked via scope_next;
+                              reclaimed at scope close (fire-and-forget tasks are
+                              reclaimed on done and never appear here) */
 } Scope;
 
 typedef struct Task {
   ucontext_t   ctx;
   void*        stack;      /* malloc'd green stack; NULL for task-0 (native stack) */
   SproutRoots* roots;      /* this task's GC temp-root context */
-  long long    work;       /* Unit->Unit closure handle (env ptr); rooted via &work */
+  long long    work;       /* Unit->a closure handle (env ptr); rooted via &work */
+  long long    result;     /* awaitable task's result; rooted via &result post-done */
+  struct Task* awaiter;    /* the ONE task parked in __task_await(this), or NULL;
+                              a Task is awaited by at most one task (single awaiter) */
+  int          awaitable;  /* 1 = task_fork (keep result until awaited); 0 = fire-and-forget */
   int          done;       /* set by the trampoline when the body returns */
   Scope*       scope;      /* the scope this task was spawned into (NULL for task-0) */
   struct Task* next;       /* global ready-queue link */
+  struct Task* scope_next; /* scope->forks list link (awaitable tasks only) */
 } Task;
 
 /* The single scheduler pump. Every task (and task-0/main) PARKS by swapping to
@@ -102,13 +110,18 @@ static Task* rq_pop(void) {
  * live from open until join frees it, so the handle stays valid throughout. */
 static Scope* scope_of(long long handle) { return (Scope*)(intptr_t)handle; }
 
-/* Task body ABI: a `Unit -> Unit !{IO}` closure handle points to its env; slot 0
+/* Task handle ABI: __task_fork returns the Task* encoded as the i64 the Sprout
+ * `Task a` value wraps; task_await decodes it. Valid until the owning scope
+ * closes (which frees the record). */
+static Task* task_of(long long handle) { return (Task*)(intptr_t)handle; }
+
+/* Task body ABI: a `Unit -> a !{IO}` closure handle points to its env; slot 0
  * is the code pointer; the call is code(env_handle, unit=0) with unit the i64 0
- * sentinel. */
-static void sprout_task_invoke(long long work) {
+ * sentinel. Returns the closure's i64 result (discarded for fire-and-forget). */
+static long long sprout_task_invoke(long long work) {
   void* env = (void*)(uintptr_t)work;
   long long (*code)(long long, long long) = *(long long (**)(long long, long long))env;
-  (void)code(work, 0);
+  return code(work, 0);
 }
 
 /* Park the current task: hand control to the pump. The pump restores
@@ -136,24 +149,43 @@ static void pump_loop(void) {
     g_current_task = t;
     sprout_roots_switch(t->roots);        /* switch-point: match roots to the task */
     swapcontext(&g_pump, &t->ctx);        /* run t until it parks or finishes */
-    if (t != &g_task0 && t->done) {       /* finished: reclaim (task-0 never here) */
-      sprout_roots_free(t->roots);
-      free(t->stack);
-      free(t);
+    if (t != &g_task0 && t->done) {       /* finished (task-0 never reclaimed here) */
+      if (t->awaitable) {
+        /* Keep the record + roots (they root the result) until task_await consumes
+         * it or the owning scope closes; only the green stack is done with here. */
+        free(t->stack);
+        t->stack = NULL;
+      } else {                            /* fire-and-forget: reclaim everything now */
+        sprout_roots_free(t->roots);
+        free(t->stack);
+        free(t);
+      }
     }
   }
 }
 
 /* makecontext entry point for a green task. On entry the pump has set
  * g_current_task to us and switched g_current_roots to our context. Runs the body,
- * wakes the scope's joiner if we were the last, then parks forever. */
+ * wakes any awaiter and the scope's joiner if we were the last, then parks forever. */
 static void task_trampoline(void) {
   Task* t = g_current_task;
-  sprout_task_invoke(t->work);
+  long long r = sprout_task_invoke(t->work);
+  if (t->awaitable) {
+    /* Keep the result reachable from completion until task_await consumes it (or
+     * the scope closes). Root &result in our own context — scanned via the
+     * registry while we stay registered. No allocation between the store and the
+     * push, so the result is never momentarily unrooted. */
+    t->result = r;
+    sprout_roots_push_ptr(t->roots, &t->result);
+  }
   t->done = 1;
+  if (t->awaiter != NULL) {                   /* a task_await is blocked on us */
+    rq_push(t->awaiter);
+    t->awaiter = NULL;
+  }
   Scope* s = t->scope;
   s->live--;
-  if (s->live == 0 && s->waiter != NULL) {   /* last child wakes the joiner */
+  if (s->live == 0 && s->waiter != NULL) {    /* last child wakes the joiner */
     rq_push(s->waiter);
     s->waiter = NULL;
   }
@@ -186,22 +218,28 @@ long long __scope_open(void) {
   if (s == NULL) sprout_fail("__scope_open: out of memory");
   s->live   = 0;
   s->waiter = NULL;
+  s->forks  = NULL;
   return (long long)(intptr_t)s;
 }
 
-long long __scope_spawn(long long scope_handle, long long work) {
-  Scope* s = scope_of(scope_handle);
-  if (s == NULL) sprout_fail("__scope_spawn: null scope");
-
+/* Shared task construction: allocate the record + green stack + GC root context,
+ * root the work-closure, prime the ucontext, and enqueue it runnable. `awaitable`
+ * selects the reclamation lifecycle (see the Task struct and pump_loop). Returns
+ * the new Task*. */
+static Task* task_create(Scope* s, long long work, int awaitable) {
   Task* t = (Task*)malloc(sizeof(Task));
-  if (t == NULL) sprout_fail("__scope_spawn: out of memory (task)");
+  if (t == NULL) sprout_fail("task scheduler: out of memory (task record)");
   t->stack = malloc(SPROUT_TASK_STACK_BYTES);
-  if (t->stack == NULL) sprout_fail("__scope_spawn: out of memory (stack)");
-  t->roots = sprout_roots_new(SPROUT_TASK_ROOT_SLOTS);
-  t->work  = work;
-  t->done  = 0;
-  t->scope = s;
-  t->next  = NULL;
+  if (t->stack == NULL) sprout_fail("task scheduler: out of memory (green stack)");
+  t->roots      = sprout_roots_new(SPROUT_TASK_ROOT_SLOTS);
+  t->work       = work;
+  t->result     = 0;
+  t->awaiter    = NULL;
+  t->awaitable  = awaitable;
+  t->done       = 0;
+  t->scope      = s;
+  t->next       = NULL;
+  t->scope_next = NULL;
 
   /* Keep the work-closure reachable from spawn until the task first runs: root
    * &work in the task's own context (scanned by the collector via the registry).
@@ -209,7 +247,7 @@ long long __scope_spawn(long long scope_handle, long long work) {
   sprout_roots_push_ptr(t->roots, &t->work);
 
   /* getcontext initializes the struct before makecontext reads its uc_* fields. */
-  if (getcontext(&t->ctx) != 0) sprout_fail("__scope_spawn: getcontext failed");
+  if (getcontext(&t->ctx) != 0) sprout_fail("task scheduler: getcontext failed");
   t->ctx.uc_stack.ss_sp   = t->stack;
   t->ctx.uc_stack.ss_size = SPROUT_TASK_STACK_BYTES;
   t->ctx.uc_link          = NULL;   /* trampoline swaps out explicitly; never returns */
@@ -217,7 +255,42 @@ long long __scope_spawn(long long scope_handle, long long work) {
 
   rq_push(t);       /* runnable, in the global queue */
   s->live++;
+  return t;
+}
+
+/* Fire-and-forget: spawn a Unit->Unit task. Reclaimed fully on done. */
+long long __scope_spawn(long long scope_handle, long long work) {
+  Scope* s = scope_of(scope_handle);
+  if (s == NULL) sprout_fail("__scope_spawn: null scope");
+  task_create(s, work, 0);
   return 0;
+}
+
+/* Awaitable: spawn a Unit->a task, link it into the scope's fork list (so a
+ * never-awaited fork is reclaimed at scope close), and return its handle. */
+long long __task_fork(long long scope_handle, long long work) {
+  Scope* s = scope_of(scope_handle);
+  if (s == NULL) sprout_fail("__task_fork: null scope");
+  Task* t = task_create(s, work, 1);
+  t->scope_next = s->forks;
+  s->forks = t;
+  return (long long)(intptr_t)t;
+}
+
+/* Block until the forked task finishes, then return its result. If it is already
+ * done, read the result immediately; otherwise park as its awaiter and let the
+ * pump run it (and everything else) to completion. The result stays rooted by the
+ * task's own context until the scope closes, so it survives any collection here
+ * and remains valid when handed back to the caller (who then roots it). */
+long long __task_await(long long task_handle) {
+  Task* t = task_of(task_handle);
+  if (t == NULL) sprout_fail("__task_await: null task");
+  if (!t->done) {
+    t->awaiter = g_current_task;
+    park_to_pump();
+    /* resumed by the trampoline once t finished */
+  }
+  return t->result;
 }
 
 /* Cooperative yield: become runnable again and let the pump run another task.
@@ -242,6 +315,17 @@ long long __scope_join(long long scope_handle) {
     s->waiter = g_current_task;
     park_to_pump();
     /* resumed with s->live == 0 (only the last child wakes the waiter) */
+  }
+  /* Every task has finished. Reclaim each awaitable fork's record + root context
+   * (their green stacks were already freed on done). An awaited result stays
+   * rooted by the caller's frame, so dropping the task's own root here is safe; a
+   * never-awaited result is simply released. Fire-and-forget tasks were reclaimed
+   * on done and are not in this list. */
+  for (Task* f = s->forks; f != NULL; ) {
+    Task* next = f->scope_next;
+    sprout_roots_free(f->roots);
+    free(f);
+    f = next;
   }
   free(s);
   return 0;

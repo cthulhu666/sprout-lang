@@ -1,4 +1,4 @@
-import stdlib.task (Scope, with_scope, scope_spawn)
+import stdlib.task (Scope, with_scope, task_spawn)
 import stdlib.net (TcpConnection, connect, write_all_utf8, tcp_listen, tcp_accept, tcp_read)
 import stdlib.string as string
 
@@ -25,8 +25,8 @@ fn writer(client: TcpConnection) -> Unit !{IO} =
 
 fn run(s: Scope, server: Int, client: TcpConnection) -> Unit !{IO} =
   do
-    scope_spawn(s, \_ -> reader(server))
-    scope_spawn(s, \_ -> writer(client))
+    task_spawn(s, \_ -> reader(server))
+    task_spawn(s, \_ -> writer(client))
 
 fn main() -> Unit !{IO} =
   do

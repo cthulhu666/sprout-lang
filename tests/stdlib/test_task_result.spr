@@ -1,0 +1,108 @@
+import stdlib.test (TestState, new_state, assert_eq, summary)
+import stdlib.task (Scope, Task, with_scope, task_fork, task_await, task_yield)
+import stdlib.string as string
+
+# L0.4 result-carrying tasks (EXPERIMENTAL). `task_fork` returns a `Task a`;
+# `task_await` blocks until that task finishes and hands back its value RAW —
+# a task producing `Result e b` yields `Result e b` to match on, with no
+# unwrapping by the runtime. `with_scope` now returns the body's result and
+# still joins unconditionally (join cannot be skipped by an Err short-circuit).
+
+# --- await-before-done: fork two tasks, then await. Neither has run yet, so the
+# first await parks the caller; the scheduler runs the task, which wakes us. ---
+fn combine_awaited(s: Scope) -> Int !{IO} =
+  do
+    t1 <- task_fork(s, \_ -> 10)
+    t2 <- task_fork(s, \_ -> 32)
+    a <- task_await(t1)
+    b <- task_await(t2)
+    a + b
+
+# --- await-after-done: fork, yield so the task runs to completion, THEN await a
+# task that has already finished (await reads the stored result immediately,
+# without parking). Exercises the other lifecycle branch of task_await. ---
+fn await_after_done(s: Scope) -> Int !{IO} =
+  do
+    t <- task_fork(s, \_ -> 7)
+    task_yield()
+    task_await(t)
+
+# --- heap result: a String survives from task completion until it is awaited.
+# This is the GC-rooting-critical path — the result pointer must stay rooted
+# while other tasks allocate (verified green under SPROUT_GC_STRESS=1). ---
+fn make_greeting(name: String) -> String !{IO} =
+  string.concat("hi ", name)
+
+fn await_heap(s: Scope) -> String !{IO} =
+  do
+    t <- task_fork(s, \_ -> make_greeting("ada"))
+    task_await(t)
+
+# --- raw-`a` Result: the task's value is a `Result String Int`; task_await hands
+# it back untouched so the caller matches the Err itself. This is L0.4's manual
+# error handling — no cancellation, no auto-unwrap. ---
+fn classify(n: Int) -> Result String Int !{IO} =
+  if n < 0 then Err("negative") else Ok(n)
+
+fn describe(r: Result String Int) -> String =
+  match r with
+  | Ok x -> string.concat("ok:", int_to_string(x))
+  | Err e -> string.concat("err:", e)
+
+fn await_result(s: Scope) -> String !{IO} =
+  do
+    good <- task_fork(s, \_ -> classify(5))
+    bad <- task_fork(s, \_ -> classify(-1))
+    # `let`, not `<-`: task_await returns the Result RAW. Binding with `<-` would
+    # monadically unwrap it (and short-circuit on Err); `let` keeps the whole
+    # value so the caller matches the Err itself — L0.4 manual error handling.
+    let gv = task_await(good)
+    let bv = task_await(bad)
+    string.concat(describe(gv), string.concat(" ", describe(bv)))
+
+# --- rooting oracle: a heap result must survive collections triggered by OTHER
+# allocation between the task's completion and its await. Fork a String task,
+# yield so it finishes (result now rooted), churn out garbage (each concat is a
+# GC trigger under SPROUT_GC_STRESS=1), THEN await. If the result were not rooted
+# post-completion it would be collected during the churn. `noise` is consumed so
+# it is not eliminated as dead. ---
+fn churn(n: Int, acc: String) -> String =
+  if n <= 0 then acc else churn(n - 1, string.concat(acc, "x"))
+
+fn await_after_churn(s: Scope) -> String !{IO} =
+  do
+    t <- task_fork(s, \_ -> make_greeting("bob"))
+    task_yield()
+    let noise = churn(200, "")
+    let greeting = task_await(t)
+    string.concat(greeting, int_to_string(string.length(noise)))
+
+# --- backstop: a fork that is NEVER awaited must still be reclaimed cleanly when
+# the scope closes (this exercises __scope_join's fork sweep, not a pattern to
+# emulate — task_spawn is the right tool for fire-and-forget). Fork a heap task,
+# discard the handle, churn under stress; the scope closing must free the task's
+# record + result without crash or leak. Under a future linear `Task` this dropped
+# handle is exactly what the type checker would reject. ---
+fn drop_unawaited(s: Scope) -> Int !{IO} =
+  do
+    task_fork(s, \_ -> make_greeting("ghost"))
+    task_yield()
+    let noise = churn(150, "")
+    string.length(noise)
+
+fn main() -> Unit !{IO} =
+  do
+    state <- new_state()
+    r1 <- with_scope(\s -> combine_awaited(s))
+    assert_eq(state, "task_await returns forked values (await before done)", r1, 42)
+    r2 <- with_scope(\s -> await_after_done(s))
+    assert_eq(state, "task_await on an already-finished task", r2, 7)
+    r3 <- with_scope(\s -> await_heap(s))
+    assert_eq(state, "task_await returns a heap (String) result", r3, "hi ada")
+    r4 <- with_scope(\s -> await_result(s))
+    assert_eq(state, "task_await hands back Result raw (manual error handling)", r4, "ok:5 err:negative")
+    r5 <- with_scope(\s -> await_after_churn(s))
+    assert_eq(state, "heap result survives churn before await (rooting oracle)", r5, "hi bob200")
+    r6 <- with_scope(\s -> drop_unawaited(s))
+    assert_eq(state, "never-awaited fork is reclaimed at scope close (backstop)", r6, 150)
+    summary(state)

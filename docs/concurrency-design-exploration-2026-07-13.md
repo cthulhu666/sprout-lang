@@ -233,36 +233,42 @@ type AppError = | DbErr PgError | CacheErr RedisError | NotFound
 ### 4.A Structured concurrency (scope / nursery) — RECOMMENDED default
 
 ```sprout
-# ---- proposed stdlib.task ----
+# ---- stdlib.task (task_fork/task_await landed L0.4; cancellation is the target
+#      semantics below, not yet landed — see the L0.4 status note in §10) ----
 type Scope                                         # opaque; wrap over runtime handle
-type Task a                                        # handle to a spawned computation
+type Task a                                        # handle to an awaitable computation
 
-# Runs `body`; BLOCKS until body returns AND every child task finishes. If any
-# child fails/raises, siblings are cancelled and the error propagates out. Nothing
-# leaks. (This is the Trio-nursery / Swift-task-group semantics — see §9.)
+# Runs `body`; BLOCKS until body returns AND every child task finishes. TARGET
+# semantics: if any child fails/raises, siblings are cancelled and the error
+# propagates out (Trio-nursery / Swift-task-group — see §9). LANDED (L0.4): the
+# join is unconditional (no leaks) but there is no cancellation yet — a failing
+# child does not cancel siblings; error handling is manual on the awaited value.
 fn with_scope(body: Scope -> a !{IO}) -> a !{IO}
-fn scope_spawn(scope: Scope, work: Unit -> a !{IO}) -> Task a !{IO}
-fn task_await(task: Task a) -> a !{IO}             # `a` is itself a Result here
+fn task_spawn(scope: Scope, work: Unit -> Unit !{IO}) -> Unit !{IO}   # fire-and-forget
+fn task_fork(scope: Scope, work: Unit -> a !{IO}) -> Task a !{IO}     # awaitable
+fn task_await(task: Task a) -> a !{IO}             # returns `a` RAW (here, a Result)
 
 fn handle_user(pg: PgConn, rd: RedisConn, id: Int)
     -> Result AppError HttpServerResponse !{IO} =
   with_scope(\scope ->
     do
-      user_t  <- scope_spawn(scope, \_ -> pg_query_user(pg, id))     # starts now
-      prefs_t <- scope_spawn(scope, \_ -> redis_get_prefs(rd, id))   # concurrent
+      user_t  <- task_fork(scope, \_ -> pg_query_user(pg, id))       # starts now
+      prefs_t <- task_fork(scope, \_ -> redis_get_prefs(rd, id))     # concurrent
       user    <- task_await(user_t)  |> map_error(DbErr)
       prefs   <- task_await(prefs_t) |> map_error(CacheErr)
       render_user(user, prefs)
   )
 
-# accept loop: one scope for the whole server lifetime
+# accept loop: one scope for the whole server lifetime. Connection handlers are
+# fire-and-forget (never awaited), so they use task_spawn — reclaimed on done,
+# not accumulated in the scope.
 fn serve(listener: Listener, pg: PgConn, rd: RedisConn) -> Unit !{IO} =
   with_scope(\scope -> accept_loop(scope, listener, pg, rd))
 
 fn accept_loop(scope: Scope, listener: Listener, pg: PgConn, rd: RedisConn) -> Unit !{IO} =
   do
     conn <- tcp_accept(listener)                    # parks until a connection arrives
-    scope_spawn(scope, \_ -> handle_connection(conn, pg, rd))
+    task_spawn(scope, \_ -> handle_connection(conn, pg, rd))
     accept_loop(scope, listener, pg, rd)
 ```
 
@@ -725,5 +731,26 @@ run any ready task); per-`Scope` queues collapsed to one global queue, and main/
 materialized task on the native stack so bare `tcp_*` outside any scope still parks. Design +
 as-built deltas: `docs/concurrency-layer0-io-park-design.md`. Gate: `just task-io-smoke`.
 
-**Next increments:** cancellation and structured error propagation; then `task_sleep`
-(timeout-driven poll_wait) and channels. Multicore stays out of scope (share-nothing, §8).
+**Result-carrying tasks — LANDED (2026-07-15, L0.4).** `stdlib.task` now offers two
+spawns over the same scheduler: `task_spawn(scope, Unit -> Unit)` (fire-and-forget,
+reclaimed on done — the former `scope_spawn`, renamed) and `task_fork(scope, Unit -> a)
+-> Task a` (awaitable; its result is GC-rooted from completion until `task_await(Task a)
+-> a` consumes it, or the scope closes and reclaims any never-awaited fork). `with_scope`
+now returns the body's result and joins **unconditionally** — the body's result is bound
+with `let` (not `<-`), so an `Err` cannot short-circuit past `__scope_join` and leak
+tasks. `task_await` returns the value **raw**: a task producing `Result e b` hands back
+`Result e b` to match — error handling is manual (no cancellation yet). Two distinct
+spawns are needed because their reclamation lifecycles differ (fire-and-forget frees on
+done; awaitable must keep the result until awaited) and there is no drop detection to
+unify them without linear types. *Forward-compat:* under roadmap **Model C M4** (user-facing
+linear types), `Task a` becomes linear — `task_await`/detach consume it once, `task_spawn`
+is recovered as fork-then-detach, and the two spawns collapse into one with no call-site
+churn. Tests: `tests/stdlib/test_task_result.spr` (both await orderings, heap-result
+rooting oracle, raw-`Result`, and the never-awaited-fork backstop) — green under
+`SPROUT_GC_STRESS=1`, negative-control-verified (removing the result root reproduces the
+use-after-free).
+
+**Next increments:** cancellation and structured error propagation (fail-fast: first `Err`
+cancels siblings — cooperative-poll or scheduler-drop, since there are no exceptions to
+inject); then `task_sleep` (timeout-driven poll_wait) and channels. Multicore stays out of
+scope (share-nothing, §8).

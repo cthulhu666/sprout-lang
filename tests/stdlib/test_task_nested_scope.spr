@@ -1,5 +1,5 @@
 import stdlib.test (TestState, new_state, assert_eq, summary)
-import stdlib.task (Scope, with_scope, scope_spawn, task_yield)
+import stdlib.task (Scope, with_scope, task_spawn, task_yield)
 import stdlib.string as string
 
 # Nested structured concurrency under the top-level scheduler pump. Outer scope
@@ -31,8 +31,8 @@ fn record(log: Ref String, s: String) -> Unit !{IO} =
 
 fn spawn_leaves(s: Scope, log: Ref String) -> Unit !{IO} =
   do
-    scope_spawn(s, \_ -> record(log, "X"))
-    scope_spawn(s, \_ -> record(log, "Y"))
+    task_spawn(s, \_ -> record(log, "X"))
+    task_spawn(s, \_ -> record(log, "Y"))
 
 fn p_worker(log: Ref String) -> Unit !{IO} =
   do
@@ -53,8 +53,8 @@ fn q_worker(log: Ref String) -> Unit !{IO} =
 
 fn spawn_pq(s: Scope, log: Ref String) -> Unit !{IO} =
   do
-    scope_spawn(s, \_ -> p_worker(log))
-    scope_spawn(s, \_ -> q_worker(log))
+    task_spawn(s, \_ -> p_worker(log))
+    task_spawn(s, \_ -> q_worker(log))
 
 fn main() -> Unit !{IO} =
   do

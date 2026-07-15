@@ -1,5 +1,5 @@
 import stdlib.test (TestState, new_state, assert_eq, summary)
-import stdlib.task (Scope, with_scope, scope_spawn, task_yield)
+import stdlib.task (Scope, with_scope, task_spawn, task_yield)
 import stdlib.string as string
 
 # L0.1 cooperative structured concurrency.
@@ -17,8 +17,8 @@ fn worker(log: Ref String, first: String, second: String) -> Unit !{IO} =
 
 fn spawn_workers(s: Scope, log: Ref String) -> Unit !{IO} =
   do
-    scope_spawn(s, \_ -> worker(log, "A1", "A2"))
-    scope_spawn(s, \_ -> worker(log, "B1", "B2"))
+    task_spawn(s, \_ -> worker(log, "A1", "A2"))
+    task_spawn(s, \_ -> worker(log, "B1", "B2"))
 
 fn main() -> Unit !{IO} =
   do

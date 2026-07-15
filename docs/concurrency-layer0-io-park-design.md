@@ -53,6 +53,7 @@ recursive-C-stack joins to a **single top-level scheduler pump**.
   per-task GC root contexts, the registry-based `mark_roots` (a task parked on I/O keeps
   its roots — spike #2 proved root-across-real-park).
 - No change to the Sprout surface (`with_scope`/`scope_spawn`/`task_yield`) or its types.
+  (`scope_spawn` was later renamed `task_spawn` and joined by `task_fork`/`task_await` in L0.4.)
 
 **Non-goals (this increment)**
 - Timers / `task_sleep` (needs a timeout-driven poller wait; deferred — noted in §9 of the
@@ -196,7 +197,7 @@ another task. Spike #2 demonstrated exactly this (root held across a real 2-fram
 ## 5. Syntax and semantics impact
 
 - **Syntax:** none.
-- **Semantics:** `with_scope`/`scope_spawn`/`task_yield` unchanged in meaning. New: `tcp_*`
+- **Semantics:** `with_scope`/`task_spawn` (né `scope_spawn`)/`task_yield` unchanged in meaning. New: `tcp_*`
   operations are now *suspension points* (a task may interleave at any socket op, not only at
   `task_yield`). This is observable — cooperative interleaving becomes finer-grained — but
   stays deterministic given a fixed I/O readiness order (readiness itself is nondeterministic,
