@@ -50,7 +50,7 @@ void sprout_poll_remove(int fd, int interest) {
     sprout_fail("sprout_poll_remove: kevent EV_DELETE failed");
 }
 
-long long sprout_poll_add_timer(long long ms, void* token) {
+void sprout_poll_add_timer(long long ms, void* token, long long* out_id) {
   /* ident = the parked Task* — a task sleeps on at most one timer, so it is unique, and
    * EVFILT_TIMER's ident namespace is disjoint from the EVFILT_READ/WRITE fd filters. */
   uintptr_t ident = (uintptr_t)token;
@@ -60,7 +60,7 @@ long long sprout_poll_add_timer(long long ms, void* token) {
   EV_SET(&ev, ident, EVFILT_TIMER, EV_ADD | EV_ONESHOT, 0, ms, token);
   if (kevent(g_kq, &ev, 1, NULL, 0, NULL) < 0)
     sprout_fail("sprout_poll_add_timer: kevent EVFILT_TIMER add failed");
-  return (long long)ident;
+  *out_id = (long long)ident;
 }
 
 void sprout_poll_remove_timer(long long timer_id) {
@@ -124,7 +124,7 @@ void sprout_poll_remove(int fd, int interest) {
     sprout_fail("sprout_poll_remove: epoll_ctl DEL failed");
 }
 
-long long sprout_poll_add_timer(long long ms, void* token) {
+void sprout_poll_add_timer(long long ms, void* token, long long* out_id) {
   /* One timerfd per sleeper (the epoll cost the design notes as the scaling boundary). */
   int tfd = timerfd_create(CLOCK_MONOTONIC, TFD_CLOEXEC);
   if (tfd < 0) sprout_fail("sprout_poll_add_timer: timerfd_create failed");
@@ -144,7 +144,7 @@ long long sprout_poll_add_timer(long long ms, void* token) {
     close(tfd);
     sprout_fail("sprout_poll_add_timer: epoll_ctl ADD failed");
   }
-  return (long long)tfd;
+  *out_id = (long long)tfd;
 }
 
 void sprout_poll_remove_timer(long long timer_id) {

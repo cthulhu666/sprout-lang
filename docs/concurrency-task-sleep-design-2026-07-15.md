@@ -152,6 +152,14 @@ timer** — no backend divergence, and a useful "give siblings a turn" semantics
    hang (reuses the L0.5 drop path).
 5. Green under `SPROUT_GC_STRESS=1`.
 
+**Gate boundary (be clear-eyed):** `cancel_timer_drop` runs in `just task-io-smoke` (a CI
+gate) under `-O2`, plain + GC-stress — but **not under ASan**. As the L0.5 work showed, a
+freed-memory UAF can false-pass without ASan. So the fired-timer-discard invariant is only
+*fully* gated by the manual ASan + no-op-`remove_timer` negative control, which CI does not
+re-run. If someone later breaks `poll_remove_timer`, CI may stay green. This matches the
+whole suite's stance (ASan is a manual oracle here), documented so it is a known boundary,
+not an assumed safety net.
+
 ## 7. Impact — Design Change Process checklist
 
 - **Syntax:** none — one new library function.

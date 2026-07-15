@@ -484,7 +484,8 @@ void scheduler_park_on_fd(int fd, int interest) {
  * Reached only with ms > 0 — the stdlib task_sleep wrapper routes ms <= 0 to task_yield
  * (a zero-value timerfd disarms on Linux → would hang; design §5.2). */
 static void scheduler_park_on_timer(long long ms) {
-  long long tid = sprout_poll_add_timer(ms, g_current_task);
+  long long tid;
+  sprout_poll_add_timer(ms, g_current_task, &tid);
   g_current_task->park_kind     = PARK_TIMER;
   g_current_task->park_timer_id = tid;
   io_list_push(g_current_task);
