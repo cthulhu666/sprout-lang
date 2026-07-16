@@ -1091,7 +1091,19 @@ task-io-smoke: bootstrap-from-seed
   # must LOUD-FAIL (the tree-cancel cascade is deferred), not hang or orphan the inner scope.
   build tests/task_io_smoke/timeout_nested_loudfail.spr
   run_expect_fail "timeout-nested-loudfail" "nested scope/await"
-  echo "==> task-io-smoke ✓ (read-park, accept-park, re-arm, write, cancel-drop, await-guard, timer-drop, timeout-drop, timeout-nested-guard; interleaved; stress-clean)"
+  # (8) channel-drop cancellation (L0.8): scope_cancel force-drops tasks parked in chan_recv on
+  # an empty channel (both task_fork and task_spawn), so __scope_join returns instead of the pump
+  # deadlock-panicking. Reaching "done" proves the drop; a broken drop panics/hangs (non-zero).
+  build tests/task_io_smoke/cancel_chan_drop.spr
+  run_once "cancel-chan-drop" "done"
+  SPROUT_GC_STRESS=1 run_once "cancel-chan-drop/stress" "done"
+  # (9) with_timeout over a channel recv (L0.8): a body parked in chan_recv must be force-dropped
+  # when the deadline fires (__await_deadline PARK_CHAN classification), so with_timeout returns
+  # Expired and the scope joins. Reaching "done" proves it; a broken drop panics/hangs.
+  build tests/task_io_smoke/timeout_chan_drop.spr
+  run_once "timeout-chan-drop" "done"
+  SPROUT_GC_STRESS=1 run_once "timeout-chan-drop/stress" "done"
+  echo "==> task-io-smoke ✓ (read-park, accept-park, re-arm, write, cancel-drop, await-guard, timer-drop, timeout-drop, timeout-nested-guard, chan-cancel-drop, chan-timeout-drop; interleaved; stress-clean)"
 
 # Division-by-zero guard regression (CI gate). The fixture divides by a RUNTIME
 # zero (`10 / list_length(argv)` with no args), which neither the compiler nor

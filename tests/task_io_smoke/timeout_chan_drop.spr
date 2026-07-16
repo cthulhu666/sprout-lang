@@ -1,0 +1,33 @@
+import stdlib.task (Scope, with_scope, with_timeout, TimeoutResult, Completed, Expired)
+import stdlib.chan (Chan, chan_new, chan_recv)
+import stdlib.string as string
+
+# L0.8 with_timeout over a channel recv (EXPERIMENTAL). A timed body that parks in
+# chan_recv on an empty channel nobody sends to must be FORCE-DROPPED when its deadline
+# fires — __await_deadline classifies the child as PARK_CHAN and drops it, so the inner
+# scope join returns and with_timeout yields Expired (not a loud-fail or a hang). The
+# channel is created in the OUTER scope (freed at its join); the body is a with_timeout
+# child that recv-parks on it. `held` is bound across the park so the drop reclaims a
+# stack-rooted heap value (the ASan-gated path).
+# NOTE: this fn is deliberately NOT named `body` — a top-level name that collides with
+# `with_timeout`'s `body` parameter miscompiles (the parameter reference resolves to the
+# user global). Pre-existing compiler name-resolution bug, tracked separately.
+fn timed_recv(ch: Chan Int) -> Int !{IO} =
+  do
+    let held = string.concat("live-", "root")
+    v <- chan_recv(ch)  # parks here forever — nobody ever sends
+    term_write(held)  # unreachable; forces `held` rooted across the park
+    v
+
+fn run(s: Scope) -> Unit !{IO} =
+  do
+    ch <- chan_new(s, 1)
+    let result = with_timeout(50, \_ -> timed_recv(ch))
+    match result with
+    | Completed v -> term_write("completed\n")
+    | Expired -> term_write("expired\n")
+
+fn main() -> Unit !{IO} =
+  do
+    with_scope(\s -> run(s))
+    term_write("done\n")  # reached only after the timed-out recv body was force-dropped

@@ -61,6 +61,15 @@ extern fn __task_stop_reason() -> Int !{IO}
 # another ready task. (Real I/O parking, in the tcp_* builtins, yields implicitly.)
 export extern fn task_yield() -> Unit !{IO}
 
+# Expose a scope's raw scheduler handle for sibling stdlib modules that must pass a scope
+# to a scheduler builtin without owning the opaque `Scope` constructor (e.g. stdlib.chan's
+# chan_new). This is a READ-ONLY accessor — the returned Int is an opaque runtime pointer,
+# and the `Scope` constructor stays module-private (no `(..)`), so a scope handle still
+# cannot be forged. Not intended for user code.
+export fn scope_handle(scope: Scope) -> Int =
+  match scope with
+  | Scope id -> id
+
 # Open a scope, run `body`, then block until all tasks spawned into it finish,
 # and return the body's result. `body`'s result is bound with `let` (not `<-`)
 # so an `Err` value cannot short-circuit past `__scope_join` — the join is

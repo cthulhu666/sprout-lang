@@ -61,6 +61,10 @@ typedef struct Scope {
 /* Scope stop-reasons (Scope.reason). task_cancelled = (reason != 0); task_status maps them. */
 enum { REASON_NONE = 0, REASON_CANCELLED = 1, REASON_TIMEDOUT = 2 };
 
+/* L0.8 channels: a bounded buffered queue between tasks. Defined below; forward-declared
+ * here because Task points back at the channel it is parked on. */
+typedef struct Chan Chan;
+
 typedef struct Task {
   ucontext_t   ctx;
   void*        stack;      /* malloc'd green stack; NULL for task-0 (native stack) */
@@ -85,11 +89,41 @@ typedef struct Task {
   int          in_rq;      /* 1 iff currently linked in the ready queue (runnable) — L0.7 §5.2 */
   struct Task* deadline_child; /* non-NULL iff this task is a with_timeout owner parked in
                               __await_deadline, pointing at the body task it is timing (L0.7) */
+  /* L0.8 channels. A task parked in chan_send/chan_recv sits on ONE channel wait-queue
+   * (never on g_io_head), linked via chan_prev/chan_next. `chan_pending` is a rooted
+   * delivery slot (pushed at task_create): the value a send-parked task is holding, or the
+   * value handed to a recv-parked task on wake. `chan_is_sender` selects which of the
+   * channel's two queues it is on (for force-drop unlink). */
+  long long    chan_pending;
+  Chan*        park_chan;      /* the channel this task is parked on when park_kind==PARK_CHAN */
+  struct Task* chan_prev;      /* channel wait-queue links (send_waiters or recv_waiters) */
+  struct Task* chan_next;
+  int          chan_is_sender; /* 1 = on the channel's send queue, 0 = on its recv queue */
 } Task;
 
-/* How a task sitting on g_io_head is suspended, so scope_cancel tears down the right
- * poller registration when it force-drops the task. */
-enum { PARK_NONE = 0, PARK_FD = 1, PARK_TIMER = 2 };
+/* How a task is suspended, so force-drop tears down the right registration (poller fd/timer,
+ * or a channel wait-queue) when it drops the task. */
+enum { PARK_NONE = 0, PARK_FD = 1, PARK_TIMER = 2, PARK_CHAN = 3 };
+
+/* L0.8 channel: a bounded buffered FIFO ring shared between tasks. Non-moving malloc; the
+ * pointer IS the Int the Sprout `Chan a` value wraps. Owns a SproutRoots context that roots
+ * every buffer slot (registered → the collector scans buffered heap values). Freed at the
+ * owning scope's __scope_join, when no task can still be parked on it. */
+struct Chan {
+  long long*   buffer;     /* ring of `cap` slots; each slot address rooted via `roots` */
+  long long    cap;
+  long long    count;      /* occupied slots */
+  long long    head;       /* dequeue index */
+  long long    tail;       /* enqueue index */
+  SproutRoots* roots;      /* roots buffer[0..cap) so buffered heap values survive collection */
+  Task*        send_head;  /* FIFO of send-parked tasks (buffer full), linked via chan_* */
+  Task*        send_tail;
+  Task*        recv_head;  /* FIFO of recv-parked tasks (buffer empty) */
+  Task*        recv_tail;
+  Scope*       scope;      /* the scope that created it (frees it at join) */
+  struct Chan* all_prev;   /* global g_all_chans list (for free-at-join + cancel-walk) */
+  struct Chan* all_next;
+};
 
 /* The single scheduler pump. Every task (and task-0/main) PARKS by swapping to
  * g_pump; the pump resumes a task by swapping into it. One pump owns the whole
@@ -113,6 +147,65 @@ static Task* g_rq_tail = NULL;
  * Doubly-linked so the pump can O(1)-unlink a woken task and cancel can O(1)-unlink a
  * dropped one from the middle. Design doc §7 calls this list g_io_head. */
 static Task* g_io_head = NULL;
+
+/* Every live channel, on one global doubly-linked list. Channels are NOT on g_io_head (a
+ * channel-parked task has no poller registration). This list lets __scope_join free a
+ * closing scope's channels and lets scope_cancel find channel-parked tasks of a cancelled
+ * scope (a task may be parked on an ancestor scope's channel, so cancel filters by the
+ * TASK's scope while walking every channel's wait-queues). */
+static Chan* g_all_chans = NULL;
+
+static void rq_push(Task* t);   /* defined below; chan_wake enqueues a woken task */
+
+static void all_chans_push(Chan* ch) {
+  ch->all_prev = NULL;
+  ch->all_next = g_all_chans;
+  if (g_all_chans != NULL) g_all_chans->all_prev = ch;
+  g_all_chans = ch;
+}
+
+static void all_chans_remove(Chan* ch) {
+  if (ch->all_prev != NULL) ch->all_prev->all_next = ch->all_next;
+  else                      g_all_chans = ch->all_next;
+  if (ch->all_next != NULL) ch->all_next->all_prev = ch->all_prev;
+  ch->all_prev = ch->all_next = NULL;
+}
+
+/* Channel wait-queue (FIFO, doubly-linked so force-drop can O(1)-unlink from the middle).
+ * `head`/`tail` are &ch->send_head/&ch->send_tail or the recv pair. */
+static void chan_q_push(Task** head, Task** tail, Task* t) {
+  t->chan_next = NULL;
+  t->chan_prev = *tail;
+  if (*tail != NULL) (*tail)->chan_next = t;
+  else               *head = t;
+  *tail = t;
+}
+
+static Task* chan_q_pop(Task** head, Task** tail) {
+  Task* t = *head;
+  if (t == NULL) return NULL;
+  *head = t->chan_next;
+  if (*head != NULL) (*head)->chan_prev = NULL;
+  else               *tail = NULL;
+  t->chan_next = t->chan_prev = NULL;
+  return t;
+}
+
+static void chan_q_remove(Task** head, Task** tail, Task* t) {
+  if (t->chan_prev != NULL) t->chan_prev->chan_next = t->chan_next;
+  else                      *head = t->chan_next;
+  if (t->chan_next != NULL) t->chan_next->chan_prev = t->chan_prev;
+  else                      *tail = t->chan_prev;
+  t->chan_next = t->chan_prev = NULL;
+}
+
+/* Wake a channel-parked task: clear its park state and make it runnable. The counterparty
+ * has already popped it off the wait-queue and set up any delivered value. */
+static void chan_wake(Task* t) {
+  t->park_kind = PARK_NONE;
+  t->park_chan = NULL;
+  rq_push(t);
+}
 
 static void io_list_push(Task* t) {
   t->io_prev = NULL;
@@ -156,6 +249,10 @@ static Scope* scope_of(long long handle) { return (Scope*)(intptr_t)handle; }
  * `Task a` value wraps; task_await decodes it. Valid until the owning scope
  * closes (which frees the record). */
 static Task* task_of(long long handle) { return (Task*)(intptr_t)handle; }
+
+/* Chan handle ABI: __chan_new returns the Chan* encoded as the i64 the Sprout `Chan a`
+ * value wraps; chan_send/chan_recv decode it. Valid until the owning scope closes. */
+static Chan* chan_of(long long handle) { return (Chan*)(intptr_t)handle; }
 
 /* Task body ABI: a `Unit -> a !{IO}` closure handle points to its env; slot 0
  * is the code pointer; the call is code(env_handle, unit=0) with unit the i64 0
@@ -279,6 +376,13 @@ static void sprout_scheduler_init(void) {
   g_task0.on_io_list = 0;
   g_task0.in_rq = 0;
   g_task0.deadline_child = NULL;
+  g_task0.chan_pending = 0;
+  g_task0.park_chan = NULL;
+  g_task0.chan_prev = NULL;
+  g_task0.chan_next = NULL;
+  g_task0.chan_is_sender = 0;
+  /* task-0 runs with_scope bodies that send/recv on channels; root its delivery slot. */
+  sprout_roots_push_ptr(g_task0.roots, &g_task0.chan_pending);
   g_current_task = &g_task0;
 
   if (getcontext(&g_pump) != 0) sprout_fail("sprout_scheduler_init: getcontext failed");
@@ -326,11 +430,19 @@ static Task* task_create(Scope* s, long long work, int awaitable) {
   t->on_io_list = 0;
   t->in_rq      = 0;       /* rq_push below sets it once the task is enqueued */
   t->deadline_child = NULL;
+  t->chan_pending = 0;
+  t->park_chan    = NULL;
+  t->chan_prev    = NULL;
+  t->chan_next    = NULL;
+  t->chan_is_sender = 0;
 
   /* Keep the work-closure reachable from spawn until the task first runs: root
    * &work in the task's own context (scanned by the collector via the registry).
-   * Stable because Task is a non-moving malloc. */
+   * Stable because Task is a non-moving malloc. Root &chan_pending too: it is the
+   * delivery slot for channel ops (a send-parked task's held value, or a value
+   * handed to a recv-parked task) — always rooted, holds 0 when idle. */
   sprout_roots_push_ptr(t->roots, &t->work);
+  sprout_roots_push_ptr(t->roots, &t->chan_pending);
 
   /* getcontext initializes the struct before makecontext reads its uc_* fields. */
   if (getcontext(&t->ctx) != 0) sprout_fail("task scheduler: getcontext failed");
@@ -409,13 +521,22 @@ static void force_drop_task(Task* t) {
     sprout_fail("with_timeout: cannot time out / cancel a body blocked inside with_timeout — "
                 "deadline/cancel nesting cascade is deferred");
   Scope* ts = t->scope;
-  /* Deregister whatever it is suspended on. For a timer this must discard even an already-
-   * fired-but-undrained event (timers fire async to the pump, unlike fds which are drained
-   * before the owner runs) — else a stale token would later resume a freed task (task_sleep
-   * design §5.1). */
-  if (t->park_kind == PARK_TIMER) sprout_poll_remove_timer(t->park_timer_id);
-  else                            sprout_poll_remove(t->park_fd, t->park_interest);
-  io_list_remove(t);
+  /* Deregister whatever it is suspended on. A channel-parked task is NOT on g_io_head — it
+   * sits on one of its channel's wait-queues; unlink it there (its chan_pending value dies
+   * with the task: never delivered, nobody else references it — correct). Otherwise it is
+   * poller-parked (on g_io_head): for a timer this must discard even an already-fired-but-
+   * undrained event (timers fire async to the pump, unlike fds which are drained before the
+   * owner runs) — else a stale token would later resume a freed task (task_sleep design §5.1). */
+  if (t->park_kind == PARK_CHAN) {
+    Chan* ch = t->park_chan;
+    if (t->chan_is_sender) chan_q_remove(&ch->send_head, &ch->send_tail, t);
+    else                   chan_q_remove(&ch->recv_head, &ch->recv_tail, t);
+    t->park_chan = NULL;
+  } else {
+    if (t->park_kind == PARK_TIMER) sprout_poll_remove_timer(t->park_timer_id);
+    else                            sprout_poll_remove(t->park_fd, t->park_interest);
+    io_list_remove(t);
+  }
   /* Free roots first (unregisters the context so no later collection scans it), then the
    * stack; no allocation between (design §7). */
   sprout_roots_free(t->roots);
@@ -452,6 +573,24 @@ long long __scope_cancel(long long scope_handle) {
     Task* next = t->io_next;              /* save before we unlink/free t */
     if (t->scope == s && t != g_current_task) force_drop_task(t);
     t = next;
+  }
+
+  /* Force-drop this scope's channel-parked tasks. They are not on g_io_head, so walk every
+   * live channel's send/recv wait-queues and drop tasks whose scope is s — a task of s may be
+   * parked on an ancestor scope's channel, so we filter by the TASK's scope, not the channel's.
+   * (Same single-thread no-race reasoning as the g_io_head walk: the owner is running, so no
+   * counterparty is concurrently waking these tasks.) */
+  for (Chan* ch = g_all_chans; ch != NULL; ch = ch->all_next) {
+    for (Task* t = ch->send_head; t != NULL; ) {
+      Task* next = t->chan_next;          /* save before force_drop unlinks t */
+      if (t->scope == s && t != g_current_task) force_drop_task(t);
+      t = next;
+    }
+    for (Task* t = ch->recv_head; t != NULL; ) {
+      Task* next = t->chan_next;
+      if (t->scope == s && t != g_current_task) force_drop_task(t);
+      t = next;
+    }
   }
   return 0;
 }
@@ -512,6 +651,14 @@ long long __await_deadline(long long scope_handle, long long task_handle, long l
     force_drop_task(child);
     return 0;
   }
+  if (child->park_kind == PARK_CHAN) {
+    /* Parked in chan_send/chan_recv — droppable, same MVP-supported class as direct I/O.
+     * Not on g_io_head, so this is a distinct case from the on_io_list branch above. */
+    s->reason = REASON_TIMEDOUT;
+    child->awaiter = NULL;
+    force_drop_task(child);
+    return 0;
+  }
   if (child->in_rq) {
     /* Its I/O went ready right at the boundary and it is now runnable. Dropping a queued task
      * is a UAF, and it is one tick from done — let it finish (Completed). The timer is spent,
@@ -565,6 +712,19 @@ long long __scope_join(long long scope_handle) {
     free(f);
     f = next;
   }
+  /* Free this scope's channels. Every task spawned into s has finished, and inner scopes have
+   * already joined (structured nesting), so no task is parked on any channel of s — safe to
+   * free its root context, buffer, and record, and unlink it from the global channel list. */
+  for (Chan* ch = g_all_chans; ch != NULL; ) {
+    Chan* next = ch->all_next;            /* save before all_chans_remove unlinks ch */
+    if (ch->scope == s) {
+      sprout_roots_free(ch->roots);
+      free(ch->buffer);
+      all_chans_remove(ch);
+      free(ch);
+    }
+    ch = next;
+  }
   free(s);
   return 0;
 }
@@ -609,6 +769,113 @@ static void scheduler_park_on_timer(long long ms) {
 long long __task_sleep(long long ms) {
   scheduler_park_on_timer(ms);
   return 0;
+}
+
+/* ── L0.8 channels ─────────────────────────────────────────────────────────
+ * Bounded buffered FIFO between tasks. chan_send parks when the buffer is full;
+ * chan_recv parks when empty. Delivery is a direct handoff by the counterparty (no
+ * condvar re-check): the waker moves the value and enqueues the parked task, which then
+ * just completes. Every task's chan_pending is rooted (task_create), so a value in flight
+ * across a park stays live. See docs/concurrency-channels-design-2026-07-16.md §5, §11.
+ *
+ * Invariants (both from cap >= 1, so send-parked and recv-parked never coexist on one chan):
+ *   send_waiters non-empty  =>  count == cap  (a sender parks only on a full buffer)
+ *   recv_waiters non-empty  =>  count == 0    (a receiver parks only on an empty buffer)
+ */
+
+/* Create a cap-slot buffered channel in `scope`. cap must be >= 1 (rendezvous deferred). */
+long long __chan_new(long long scope_handle, long long capacity) {
+  Scope* s = scope_of(scope_handle);
+  if (s == NULL) sprout_fail("__chan_new: null scope");
+  if (capacity < 1)
+    sprout_fail("__chan_new: capacity must be >= 1 (rendezvous channels are not yet supported)");
+  Chan* ch = (Chan*)malloc(sizeof(Chan));
+  if (ch == NULL) sprout_fail("__chan_new: out of memory (channel record)");
+  ch->buffer = (long long*)malloc((size_t)capacity * sizeof(long long));
+  if (ch->buffer == NULL) sprout_fail("__chan_new: out of memory (channel buffer)");
+  ch->cap   = capacity;
+  ch->count = 0;
+  ch->head  = 0;
+  ch->tail  = 0;
+  ch->send_head = ch->send_tail = NULL;
+  ch->recv_head = ch->recv_tail = NULL;
+  ch->scope = s;
+  /* Root every buffer slot once (addresses are stable — the buffer is a fixed malloc). Empty
+   * slots hold 0; the mark path is membership-guarded, so a scalar/0 slot is a safe no-op. */
+  ch->roots = sprout_roots_new((size_t)capacity);
+  for (long long i = 0; i < capacity; i++) {
+    ch->buffer[i] = 0;
+    sprout_roots_push_ptr(ch->roots, &ch->buffer[i]);
+  }
+  all_chans_push(ch);
+  return (long long)(intptr_t)ch;
+}
+
+/* Send `value` into `ch`. Hands directly to a waiting receiver, else buffers, else (full)
+ * parks the sender holding the value until a receiver frees a slot. */
+long long __chan_send(long long chan_handle, long long value) {
+  Chan* ch = chan_of(chan_handle);
+  if (ch == NULL) sprout_fail("__chan_send: null channel");
+
+  /* A waiting receiver (=> buffer empty): hand off directly, buffer stays empty. */
+  Task* r = chan_q_pop(&ch->recv_head, &ch->recv_tail);
+  if (r != NULL) {
+    r->chan_pending = value;            /* rooted via &r->chan_pending; no alloc before wake */
+    chan_wake(r);
+    return 0;
+  }
+  /* Space in the buffer: enqueue at the tail. */
+  if (ch->count < ch->cap) {
+    ch->buffer[ch->tail] = value;
+    ch->tail = (ch->tail + 1) % ch->cap;
+    ch->count++;
+    return 0;
+  }
+  /* Full: park holding the value until a receiver moves it into the freed slot. */
+  Task* self = g_current_task;
+  self->chan_pending    = value;
+  self->park_kind       = PARK_CHAN;
+  self->park_chan       = ch;
+  self->chan_is_sender  = 1;
+  chan_q_push(&ch->send_head, &ch->send_tail, self);
+  park_to_pump();
+  /* Resumed by a receiver that already moved chan_pending into the buffer and cleared it. */
+  return 0;
+}
+
+/* Receive the next value from `ch` (FIFO). Takes from the buffer (waking a parked sender to
+ * refill the freed slot), else parks until a sender hands over a value. */
+long long __chan_recv(long long chan_handle) {
+  Chan* ch = chan_of(chan_handle);
+  if (ch == NULL) sprout_fail("__chan_recv: null channel");
+
+  if (ch->count > 0) {
+    long long v = ch->buffer[ch->head];
+    ch->buffer[ch->head] = 0;           /* clear so a drained slot pins nothing */
+    ch->head = (ch->head + 1) % ch->cap;
+    ch->count--;
+    /* A parked sender (buffer was full): move its value into the slot we just freed, FIFO. */
+    Task* sdr = chan_q_pop(&ch->send_head, &ch->send_tail);
+    if (sdr != NULL) {
+      ch->buffer[ch->tail] = sdr->chan_pending;
+      sdr->chan_pending = 0;
+      ch->tail = (ch->tail + 1) % ch->cap;
+      ch->count++;
+      chan_wake(sdr);
+    }
+    return v;
+  }
+  /* Empty: park until a sender places a value in our chan_pending. */
+  Task* self = g_current_task;
+  self->park_kind      = PARK_CHAN;
+  self->park_chan      = ch;
+  self->chan_is_sender = 0;
+  chan_q_push(&ch->recv_head, &ch->recv_tail, self);
+  park_to_pump();
+  /* Resumed by a sender that set chan_pending. Read it out and release the pin. */
+  long long v = self->chan_pending;
+  self->chan_pending = 0;
+  return v;
 }
 
 #ifdef __APPLE__

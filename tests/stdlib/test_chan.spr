@@ -1,0 +1,91 @@
+import stdlib.test (TestState, new_state, assert_eq, summary)
+import stdlib.task (Scope, with_scope, task_spawn, task_yield)
+import stdlib.chan (Chan, chan_new, chan_send, chan_recv)
+import stdlib.string as string
+
+# L0.8 bounded buffered channels (EXPERIMENTAL). `chan_new(scope, cap)` creates a
+# cap-slot channel tied to `scope` (freed at scope close). `chan_send` parks the
+# task when the buffer is full; `chan_recv` parks it when empty. Values are FIFO.
+# Backed by the scheduler's park/wake mechanism, with the buffer GC-rooted.
+
+# --- round-trip within one task: cap-4 buffer, two sends (no park, space free)
+# then two recvs. The simplest happy path — no parking involved. ---
+fn roundtrip(s: Scope) -> Int !{IO} =
+  do
+    ch <- chan_new(s, 4)
+    chan_send(ch, 10)
+    chan_send(ch, 20)
+    a <- chan_recv(ch)
+    b <- chan_recv(ch)
+    a + b
+
+# --- backpressure: a cap-2 buffer with a producer that sends 4 values. The
+# producer send-parks when the buffer fills (after 2), and each recv on the
+# consumer side frees a slot that wakes it to deposit the next. Exercises BOTH
+# park directions (send-park + the recv that drains) and FIFO order. ---
+fn produce(ch: Chan Int, n: Int, i: Int) -> Unit !{IO} =
+  if i > n then
+    term_write("")
+  else
+    do
+      chan_send(ch, i)  # parks here once the buffer is full
+      produce(ch, n, i + 1)
+
+fn consume(ch: Chan Int, n: Int, acc: Int) -> Int !{IO} =
+  if n <= 0 then
+    acc
+  else
+    do
+      v <- chan_recv(ch)
+      consume(ch, n - 1, acc + v)
+
+fn backpressure(s: Scope) -> Int !{IO} =
+  do
+    ch <- chan_new(s, 2)
+    task_spawn(s, \_ -> produce(ch, 4, 1))  # sends 1,2,3,4; parks at the fill line
+    consume(ch, 4, 0)  # 1+2+3+4 = 10
+
+# --- fan-in: three producer tasks each send one value into a cap-1 channel; one
+# consumer recvs all three. Scheduling order varies but the sum is fixed. Each
+# producer that finds the buffer full (or a receiver already waiting) hands off
+# through the scheduler. ---
+fn fan_in(s: Scope) -> Int !{IO} =
+  do
+    ch <- chan_new(s, 1)
+    task_spawn(s, \_ -> chan_send(ch, 100))
+    task_spawn(s, \_ -> chan_send(ch, 20))
+    task_spawn(s, \_ -> chan_send(ch, 3))
+    a <- chan_recv(ch)
+    b <- chan_recv(ch)
+    c <- chan_recv(ch)
+    a + b + c
+
+# --- heap-value rooting oracle: two heap Strings sit BUFFERED in the channel
+# while a GC storm (churn under SPROUT_GC_STRESS=1) runs, THEN are received. If
+# the buffer slots were not rooted, the strings would be collected during the
+# churn and come back corrupted. `noise` is consumed so it is not eliminated. ---
+fn churn(n: Int, acc: String) -> String =
+  if n <= 0 then acc else churn(n - 1, string.concat(acc, "x"))
+
+fn heap_rooting(s: Scope) -> String !{IO} =
+  do
+    ch <- chan_new(s, 3)
+    chan_send(ch, string.concat("al", "pha"))
+    chan_send(ch, string.concat("be", "ta"))
+    let noise = churn(200, "")
+    x <- chan_recv(ch)
+    y <- chan_recv(ch)
+    string.concat(x, string.concat(y, int_to_string(string.length(noise))))
+
+fn main() -> Unit !{IO} =
+  do
+    state <- new_state()
+    r1 <- with_scope(\s -> roundtrip(s))
+    assert_eq(state, "chan round-trip within one task (no park)", r1, 30)
+    r2 <- with_scope(\s -> backpressure(s))
+    assert_eq(state, "chan backpressure: producer send-parks, consumer drains FIFO", r2, 10)
+    r3 <- with_scope(\s -> fan_in(s))
+    assert_eq(state, "chan fan-in: three producers into one consumer", r3, 123)
+    r4 <- with_scope(\s -> heap_rooting(s))
+    assert_eq(state, "chan buffered heap values survive a GC storm (rooting oracle)", r4, "alphabeta200")
+    summary(state)

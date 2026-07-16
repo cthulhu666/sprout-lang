@@ -1,0 +1,50 @@
+module stdlib.chan
+
+import stdlib.task (Scope, scope_handle)
+
+# Layer-0 channels (EXPERIMENTAL): bounded buffered FIFO queues for streaming values
+# between cooperative green tasks (see stdlib.task). A channel has a fixed capacity of
+# `>= 1` slots. `chan_send` parks the current task when the buffer is full; `chan_recv`
+# parks it when the buffer is empty; the scheduler runs the siblings that make progress.
+#
+# Channels are tied to a `Scope`: created with `chan_new(scope, capacity)` and freed when
+# that scope closes (Sprout has no finalizers, so a free-floating channel could not be
+# reclaimed). Consequences: there are no top-level channels, and a channel cannot outlive
+# the scope that created it.
+#
+# MVP boundary (L0.8): bounded buffered only. Rendezvous (capacity 0), `close` +
+# recv-on-closed, and `select` are later increments. Backpressure delivery is cooperative
+# and integrates with cancellation — a task parked in `chan_send`/`chan_recv` when its
+# scope is cancelled (or a `with_timeout` deadline fires) is force-dropped by the scheduler.
+# See docs/concurrency-channels-design-2026-07-16.md.
+
+export type Chan a =
+  | Chan Int
+
+# Runtime primitives (green-thread scheduler; cannot be expressed in Sprout — they park and
+# resume tasks via context switching). Internal: the public API below wraps them.
+# See runtime/APPROVED_BUILTINS.
+extern fn __chan_new(scope_id: Int, capacity: Int) -> Int !{IO}
+extern fn __chan_send(chan_id: Int, value: a) -> Unit !{IO}
+extern fn __chan_recv(chan_id: Int) -> a !{IO}
+
+# Create a `capacity`-slot buffered channel belonging to `scope`, freed when the scope
+# closes. `capacity` must be `>= 1`; the runtime loud-fails on a smaller value (rendezvous
+# is a later increment, so a zero-capacity request is rejected rather than silently treated
+# as unbuffered).
+# `scope_handle` (from stdlib.task) reads the scope's raw scheduler handle without exposing
+# the opaque `Scope` constructor to this module — `chan_new` never destructures a `Scope`.
+export fn chan_new(scope: Scope, capacity: Int) -> Chan a !{IO} =
+  Chan(__chan_new(scope_handle(scope), capacity))
+
+# Send `value` into `ch`. Returns once the value is buffered (or handed directly to a waiting
+# receiver). If the buffer is full, the current task parks until a receiver frees a slot.
+export fn chan_send(ch: Chan a, value: a) -> Unit !{IO} =
+  match ch with
+  | Chan cid -> __chan_send(cid, value)
+
+# Receive the next value from `ch` in FIFO order. If the buffer is empty, the current task
+# parks until a sender provides a value.
+export fn chan_recv(ch: Chan a) -> a !{IO} =
+  match ch with
+  | Chan cid -> __chan_recv(cid)

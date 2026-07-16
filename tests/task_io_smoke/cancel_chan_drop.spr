@@ -1,0 +1,41 @@
+import stdlib.task (Scope, with_scope, task_fork, task_spawn, task_yield, scope_cancel)
+import stdlib.chan (Chan, chan_new, chan_recv)
+import stdlib.string as string
+
+# L0.8 channel-drop cancellation (EXPERIMENTAL). A task suspended in chan_recv on an
+# empty channel that nobody ever sends to cannot check task_cancelled — it is parked on
+# the channel's recv wait-queue. So scope_cancel must FORCE-DROP it: unlink it from the
+# channel and reclaim it. Both spawn kinds must be droppable:
+#   * task_fork (awaitable)        — reclaim keeps the record (roots freed, roots=NULL).
+#   * task_spawn (fire-and-forget) — reclaim frees the whole record.
+# Channel-parked tasks are NOT on g_io_head, so a broken drop does not hang — it leaves
+# live > 0 with the ready queue AND poller empty, tripping the deadlock panic (loud, not
+# a 15s hang). Either way this fixture "does not complete" if the drop is broken.
+# The task binds a HEAP string `held` BEFORE parking and uses it AFTER, so the dropped
+# task is suspended with a GC root pointing INTO its green stack — reclaim must free roots
+# and stack together (the ASan-gated force-drop UAF path).
+fn recv_forever(ch: Chan Int) -> Int !{IO} =
+  do
+    let held = string.concat("live-", "root")
+    v <- chan_recv(ch)  # parks here forever — nobody ever sends
+    term_write(held)  # unreachable; forces `held` rooted across the park
+    v
+
+fn recv_forever_unit(ch: Chan Int) -> Unit !{IO} =
+  do
+    _ <- recv_forever(ch)
+    term_write("")
+
+fn body(s: Scope) -> Unit !{IO} =
+  do
+    ch <- chan_new(s, 1)
+    _fork <- task_fork(s, \_ -> recv_forever(ch))  # awaitable, recv-parks
+    task_spawn(s, \_ -> recv_forever_unit(ch))  # fire-and-forget, recv-parks
+    task_yield()  # let both reach chan_recv and park
+    scope_cancel(s)  # force-drop both channel-parked tasks
+    term_write("cancelled\n")  # owner continues; awaits neither
+
+fn main() -> Unit !{IO} =
+  do
+    with_scope(\s -> body(s))
+    term_write("done\n")  # reached only if both parked tasks were dropped by cancel

@@ -176,6 +176,9 @@ __task_stop_reason  # L0.7: read the current task's scope stop-reason (0 none / 
 __await_deadline  # L0.7 with_timeout: arm a deadline timer on the owner and drive the scheduler until a forked child finishes or the deadline fires (force-dropping the child). Requires kernel timer + context switching + per-task GC-rooted reclamation — not expressible in Sprout.
 task_yield  # L0.1: cooperative yield — suspend the current task and switch to the scheduler. Context switching only, not expressible in Sprout.
 __task_sleep  # L0.6: suspend the current task on a one-shot kqueue/epoll timer for ms milliseconds, running siblings meanwhile. Requires a kernel timer + driving the scheduler — not expressible in Sprout.
+__chan_new  # L0.8 channels: allocate a bounded buffered channel in a scope, with its own GC-root context rooting every buffer slot. Scheduler-internal (Scope list, non-moving buffer, root registration) — not expressible in Sprout.
+__chan_send  # L0.8: send a value into a channel; parks the current task (context switch) when the buffer is full, or hands off directly to a parked receiver. Requires driving the cooperative scheduler + GC-rooting the in-flight value across the park — not expressible in Sprout.
+__chan_recv  # L0.8: receive the next value from a channel; parks the current task (context switch) when empty, waking a parked sender to refill. Requires driving the cooperative scheduler — not expressible in Sprout.
 term_clear
 term_hide_cursor
 term_move
