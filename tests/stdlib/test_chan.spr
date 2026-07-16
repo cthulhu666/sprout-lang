@@ -1,5 +1,5 @@
 import stdlib.test (TestState, new_state, assert_eq, summary)
-import stdlib.task (Scope, with_scope, task_spawn, task_yield)
+import stdlib.task (Scope, with_scope, task_spawn, task_fork, task_await, task_yield)
 import stdlib.chan (Chan, chan_new, chan_send, chan_recv)
 import stdlib.string as string
 
@@ -77,6 +77,71 @@ fn heap_rooting(s: Scope) -> String !{IO} =
     y <- chan_recv(ch)
     string.concat(x, string.concat(y, int_to_string(string.length(noise))))
 
+# --- FIFO order: cap-3 buffer, send "a","b","c", recv three. Order-sensitive (unlike the
+# commutative sums above) so a head/tail ring regression is caught. ---
+fn fifo(s: Scope) -> String !{IO} =
+  do
+    ch <- chan_new(s, 3)
+    chan_send(ch, "a")
+    chan_send(ch, "b")
+    chan_send(ch, "c")
+    x <- chan_recv(ch)
+    y <- chan_recv(ch)
+    z <- chan_recv(ch)
+    string.concat(x, string.concat(y, z))
+
+# --- chan_pending rooting oracle, DIRECT-HANDOFF path: a forked receiver parks on an empty
+# channel; the owner sends a FRESH heap string (not bound in the owner's frame, so its ONLY
+# root is the receiver's `chan_pending`), then churns to force a GC BEFORE the receiver runs.
+# If &t->chan_pending were not rooted at task_create, the handed-off string is collected during
+# the churn and the receiver reads garbage. Exercises design §5 mechanism (b), which the
+# buffer-only heap_rooting test above does not (there nothing parks). ---
+fn recv_one(ch: Chan String) -> String !{IO} =
+  chan_recv(ch)
+
+fn parked_recv_heap_on(s: Scope, ch: Chan String) -> String !{IO} =
+  do
+    h <- task_fork(s, \_ -> recv_one(ch))
+    task_yield()  # let the receiver reach chan_recv and park
+    chan_send(ch, string.concat("hel", "lo"))  # direct handoff; the temp is not bound here
+    let noise = churn(300, "")  # GC storm before the receiver runs
+    got <- task_await(h)
+    string.concat(got, int_to_string(string.length(noise)))
+
+fn parked_recv_heap_driver(s: Scope) -> String !{IO} =
+  do
+    ch <- chan_new(s, 1)
+    parked_recv_heap_on(s, ch)
+
+# --- send-park with heap values (behavioral): a producer sends 3 heap strings into a cap-1
+# channel, so its 2nd/3rd sends PARK holding a heap value; the consumer churns (GC) between recvs
+# while a sender is parked. NOTE: this does NOT discriminate chan_pending rooting — a send-parked
+# task is still inside the chan_send call, so its value is also rooted by the caller's argument
+# slot across the park (chan_pending is redundant there; the recv-delivery test above is the
+# discriminating oracle). This still exercises the full send-park→drain flow under GC. ---
+fn produce_heap(ch: Chan String, tags: String, i: Int, n: Int) -> Unit !{IO} =
+  if i > n then
+    term_write("")
+  else
+    do
+      chan_send(ch, string.concat(tags, int_to_string(i)))  # 2nd+ send parks holding this value
+      produce_heap(ch, tags, i + 1, n)
+
+fn drain_heap(ch: Chan String, n: Int, acc: String) -> String !{IO} =
+  if n <= 0 then
+    acc
+  else
+    do
+      let noise = churn(120, "")  # GC while a sender is parked holding a value
+      v <- chan_recv(ch)
+      drain_heap(ch, n - 1, string.concat(acc, v))
+
+fn sendpark_heap(s: Scope) -> String !{IO} =
+  do
+    ch <- chan_new(s, 1)
+    task_spawn(s, \_ -> produce_heap(ch, "v", 1, 3))
+    drain_heap(ch, 3, "")
+
 fn main() -> Unit !{IO} =
   do
     state <- new_state()
@@ -88,4 +153,10 @@ fn main() -> Unit !{IO} =
     assert_eq(state, "chan fan-in: three producers into one consumer", r3, 123)
     r4 <- with_scope(\s -> heap_rooting(s))
     assert_eq(state, "chan buffered heap values survive a GC storm (rooting oracle)", r4, "alphabeta200")
+    r5 <- with_scope(\s -> fifo(s))
+    assert_eq(state, "chan preserves FIFO order", r5, "abc")
+    r6 <- with_scope(\s -> parked_recv_heap_driver(s))
+    assert_eq(state, "handed-off heap value survives GC via a parked receiver's chan_pending", r6, "hello300")
+    r7 <- with_scope(\s -> sendpark_heap(s))
+    assert_eq(state, "send-parked heap values drain in order under GC", r7, "v1v2v3")
     summary(state)

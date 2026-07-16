@@ -1103,7 +1103,11 @@ task-io-smoke: bootstrap-from-seed
   build tests/task_io_smoke/timeout_chan_drop.spr
   run_once "timeout-chan-drop" "done"
   SPROUT_GC_STRESS=1 run_once "timeout-chan-drop/stress" "done"
-  echo "==> task-io-smoke ✓ (read-park, accept-park, re-arm, write, cancel-drop, await-guard, timer-drop, timeout-drop, timeout-nested-guard, chan-cancel-drop, chan-timeout-drop; interleaved; stress-clean)"
+  # (10) channel capacity guard (L0.8): chan_new with capacity < 1 must LOUD-FAIL (cap-0/rendezvous
+  # is a later increment), not silently allocate a 0-slot ring.
+  build tests/task_io_smoke/chan_zero_cap_fails.spr
+  run_expect_fail "chan-zero-cap" "capacity must be >= 1"
+  echo "==> task-io-smoke ✓ (read-park, accept-park, re-arm, write, cancel-drop, await-guard, timer-drop, timeout-drop, timeout-nested-guard, chan-cancel-drop, chan-timeout-drop, chan-cap-guard; interleaved; stress-clean)"
 
 # Division-by-zero guard regression (CI gate). The fixture divides by a RUNTIME
 # zero (`10 / list_length(argv)` with no args), which neither the compiler nor
