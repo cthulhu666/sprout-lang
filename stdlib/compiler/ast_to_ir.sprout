@@ -13,11 +13,18 @@ import stdlib.compiler.type_kind as type_kind
 # typed_ast_utils module).
 #
 # compute_free_vars(expr, bound, top_level) -> Set String
-#   A name is FREE if it appears as TVar, is not in `bound` (lambda params /
-#   enclosing function params at this nesting level), and is not in
-#   `top_level` (top-level fn names + ctor names, addressable by @ in IR).
+#   A name is FREE if it appears as TVar and is not in `bound` (lambda params /
+#   enclosing function params at this nesting level).
 #   For TLambda sub-expressions the lambda's own params are added to `bound`
 #   before recursing into the body.
+#   `top_level` is retained for signature symmetry but NOT used to exclude names.
+#   Excluding top_level here was WRONG: an enclosing parameter that collides with
+#   a top-level fn name (e.g. `body` in `with_timeout(ms, body)` when the program
+#   also defines `fn body`) would be dropped from the free set, hence never
+#   captured, then re-resolved inside the lifted lambda to the top-level fn and
+#   eta-expanded — a silent miscompile. The sole caller filters the result through
+#   `filter_capturable` (params ∪ captures), which already drops genuine globals,
+#   so the top_level exclusion was redundant everywhere except at a collision.
 # O(n * log(n)) where n = number of TVar nodes.
 
 # O(n * log(n)).
@@ -28,7 +35,7 @@ fn set_from_list(xs: List String) -> Set =
 fn compute_free_vars(expr: typed_ast.TypedExpr, bound: Set, top_level: Set) -> Set =
   match expr with
   | typed_ast.TVar name _ _ ->
-      if set_member(name, bound) || set_member(name, top_level)
+      if set_member(name, bound)
       then set_empty()
       else set_insert(name, set_empty())
   | typed_ast.TInt _ _ _ -> set_empty()

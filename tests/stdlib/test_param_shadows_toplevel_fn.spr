@@ -1,0 +1,42 @@
+import stdlib.test (TestState, new_state, assert_eq, summary)
+
+# Regression: a function parameter whose name collides with a top-level fn name
+# must still be CAPTURED when referenced (in value position) inside a lambda the
+# enclosing function passes as a value. Before the fix, ast_to_ir's free-var
+# analysis (compute_free_vars) excluded any name present in top_level, so the
+# shadowing parameter was dropped from the lambda's capture set and, inside the
+# lifted lambda, re-resolved to the top-level fn -- eta-expanded and mis-called.
+# See BACKLOG section 1 "Silent miscompile". This is the pure, scheduler-free
+# shape of the with_timeout/body collision found while building channels (L0.8).
+
+# run_thunk forces its argument into value position, so the lambda below is
+# lifted (closure-converted) -- the precondition for the capture bug.
+fn run_thunk(t: (Int -> Int)) -> Int =
+  t(0)
+
+# handler is received in value position and invoked; k is added so the lambda
+# has a second, non-colliding capture (mirrors with_timeout capturing ms while
+# dropping body).
+fn use_handler(handler: (Int -> Int), k: Int) -> Int =
+  handler(0) + k
+
+# The parameter body collides with the top-level fn body below. It is passed in
+# value position inside a lambda that also captures k.
+fn caller(k: Int, body: (Int -> Int)) -> Int =
+  run_thunk(\z -> use_handler(body, k))
+
+# Top-level fn sharing the parameter name. With the bug, references to the body
+# PARAMETER inside caller's lambda resolve to THIS instead.
+fn body(x: Int) -> Int =
+  999
+
+fn main() -> Unit !{IO} =
+  do
+    state <- new_state()
+    # Correct: caller(5, \z -> 42) = run_thunk(\z -> use_handler(\z->42, 5))
+    #        = (\z->42)(0) + 5 = 47.
+    # Buggy:  the body param resolves to top-level body (eta-expanded), so
+    #        use_handler(\a0 -> body(a0), 5) = body(0) + 5 = 999 + 5 = 1004.
+    assert_eq(state, "param shadowing top-level fn is captured, not re-resolved",
+              caller(5, \z -> 42), 47)
+    summary(state)
