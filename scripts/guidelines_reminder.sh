@@ -19,6 +19,7 @@ case "$file" in
   4. Parse, don't validate         (transform raw input into structured types at boundaries)
   5. Errors carry a Span from inception
   6. Data-last argument order      (collection/receiver in the last parameter slot)
+For idiomatic shapes (let..else, combinators, pipes, wrap): docs/idiomatic-sprout.md
 EOF
     ;;
 esac

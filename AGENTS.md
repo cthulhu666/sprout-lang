@@ -8,6 +8,7 @@ Sprout is a statically typed, functional-first language aimed at strong safety w
 
 Primary design references:
 - `docs/spec-v0.md`
+- `docs/idiomatic-sprout.md` (**start here to write Sprout** — the idiomatic shapes: `let..else`, combinators, pipes, `wrap`)
 - `docs/style-guide-v0.md`
 - `docs/language-design-v0.md`
 - `docs/language-design-best-practices.md`

@@ -60,6 +60,7 @@ typeclasses, records (`type User = { name: String }`), integer ranges (`a..b`),
 ## Documentation
 
 - **[Language spec (v0, normative)](./docs/spec-v0.md)** — the stable core.
+- **[Idiomatic Sprout](./docs/idiomatic-sprout.md)** — how to write clean, flat, idiomatic code.
 - [Language design](./docs/language-design-v0.md) · [design best practices](./docs/language-design-best-practices.md)
 - [Style guide](./docs/style-guide-v0.md) · [stdlib/compiler guidelines](./docs/guidelines.md)
 - [HM typechecker guide](./docs/hm-typechecker.md)
