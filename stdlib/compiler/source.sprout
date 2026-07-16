@@ -162,6 +162,45 @@ export fn first_codepoint(s: String) -> Maybe Int =
   | Nothing -> Nothing
   | Just (cp, _) -> Just(cp)
 
+# ── Header stripping ─────────────────────────────────────────────────────────
+#
+# strip_headers removes the leading block of `module` / `import` / comment /
+# blank lines before the source is tokenized (the tokenizer + parser do not
+# accept module/import declarations). It REPLACES each stripped line with a
+# blank line so every retained line keeps its ORIGINAL line number — a plain
+# deletion shifted all reported diagnostic positions up by the stripped count.
+# Single authority shared by every compile entry point (bundler, LSP, analysis,
+# drivers) so their diagnostics agree.
+export fn strip_headers(s: String) -> String =
+  strip_headers_go(s, bytes_from_utf8(s), 0, 0)
+
+fn is_header_line_byte(s: String, pos: Int) -> Bool =
+  str_starts_with_at_byte(s, pos, "module ") ||
+  str_starts_with_at_byte(s, pos, "import ") ||
+  str_starts_with_at_byte(s, pos, "#") ||
+  str_starts_with_at_byte(s, pos, "\n")
+
+# Byte index just past the next '\n' from byte offset i (or end of input).
+fn next_line_byte(b: Bytes, i: Int) -> Int =
+  match decode_char_at(b, i) with
+  | Nothing -> i
+  | Just (ch, next) -> if ch == '\n' then next else next_line_byte(b, next)
+
+# Count codepoints in bytes [0, limit) — converts a byte offset to a str_slice
+# codepoint index.
+fn byte_to_cp(b: Bytes, i: Int, cp: Int, limit: Int) -> Int =
+  if i >= limit then cp
+  else
+    match decode_char_at(b, i) with
+    | Nothing -> cp
+    | Just (_, next) -> byte_to_cp(b, next, cp + 1, limit)
+
+fn strip_headers_go(s: String, bytes: Bytes, pos: Int, stripped: Int) -> String =
+  if pos >= str_byte_len(s) then string.repeat("\n", stripped)
+  else if is_header_line_byte(s, pos) then strip_headers_go(s, bytes, next_line_byte(bytes, pos), stripped + 1)
+  else str_concat(string.repeat("\n", stripped), str_slice(s, cp, str_len(s) - cp))
+  where cp = byte_to_cp(bytes, 0, 0, pos)
+
 # ── Cursor scanning ──────────────────────────────────────────────────────────
 
 # peek: the codepoint at the cursor, or Nothing at end. O(1).

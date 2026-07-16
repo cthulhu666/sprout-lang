@@ -148,10 +148,19 @@ fn expected_ident(label: String, tokens: Vec token.Token, i: Int) -> Result Pars
   match match_ident(tokens, i) with
   | Just r -> Ok(r)
   | Nothing ->
-      Err(ParseError(
-        string.concat("Expected ", string.concat(label, string.concat(" at ", pos_str(cur_pos(tokens, i))))),
-        cur_pos(tokens, i)
-      ))
+      Err(ParseError(expected_ident_msg(label, tok_at(tokens, i), cur_pos(tokens, i)), cur_pos(tokens, i)))
+
+# A reserved keyword in name position (e.g. `fn wrap` — `wrap` is the newtype
+# keyword) is a common cause of "expected a name"; name it so the diagnostic
+# points at the real cause instead of reading like malformed syntax.
+fn expected_ident_msg(label: String, tok: token.Token, pos: source.SourcePos) -> String =
+  match token.token_kind(tok) with
+  | token.TokenKeywordKind ->
+      string.concat("Expected ", string.concat(label,
+        string.concat(", but '", string.concat(token.token_text(tok),
+          string.concat("' is a reserved keyword at ", pos_str(pos))))))
+  | _ ->
+      string.concat("Expected ", string.concat(label, string.concat(" at ", pos_str(pos))))
 
 # Finds the start index of the last dot-separated component.
 # E.g., "ast.TypeEffect" → 4 (index of 'T'), "Foo" → 0.

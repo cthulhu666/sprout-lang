@@ -35,27 +35,9 @@ export type CompileResult (..) =
   | CompileOk (Dict types.Scheme)
   | CompileFail (List Diagnostic)
 
-# ---------------------------------------------------------------------------
-# Header stripping (private)
-# ---------------------------------------------------------------------------
-#
-# Skips leading module/import/blank lines so the bootstrap parser receives
-# only the declaration body — matching tools/dump_types.py's behaviour.
-
-fn is_header_line(s: String, pos: Int) -> Bool =
-  str_starts_with(str_slice(s, pos, str_len(s)), "module ") ||
-  str_starts_with(str_slice(s, pos, str_len(s)), "import ") ||
-  str_starts_with(str_slice(s, pos, str_len(s)), "\n")
-
-fn next_line(s: String, pos: Int) -> Int =
-  if nl == -1 then str_len(s)
-  else pos + nl + 1
-  where nl = str_find(str_slice(s, pos, str_len(s)), "\n")
-
-fn strip_headers(s: String, pos: Int) -> String =
-  if pos >= str_len(s) then ""
-  else if is_header_line(s, pos) then strip_headers(s, next_line(s, pos))
-  else str_slice(s, pos, str_len(s))
+# Header stripping is shared: source.strip_headers (line-preserving) is the
+# single authority — skips leading module/import/comment/blank lines while
+# preserving line numbers for diagnostics.
 
 # ---------------------------------------------------------------------------
 # Core pipeline
@@ -110,7 +92,7 @@ export fn compile_source_with_root(src: String, stdlib_root: source.StdlibRoot) 
     let sr = source.stdlib_root_str(stdlib_root)
     prelude_pairs <- module_loader.load_prelude_pairs(sr, cache)
     import_pairs <- module_loader.build_import_pairs(module_loader.collect_imports(src), sr, cache)
-    match lex_parse(strip_headers(src, 0)) with
+    match lex_parse(source.strip_headers(src)) with
     | LexParseFail diags -> CompileFail(diags)
     | LexParseOk prog ->
         do
@@ -127,7 +109,7 @@ export fn compile_source_with_cache(src: String, stdlib_root: source.StdlibRoot,
     let sr = source.stdlib_root_str(stdlib_root)
     prelude_pairs <- module_loader.load_prelude_pairs(sr, cache)
     import_pairs <- module_loader.build_import_pairs(module_loader.collect_imports(src), sr, cache)
-    match lex_parse(strip_headers(src, 0)) with
+    match lex_parse(source.strip_headers(src)) with
     | LexParseFail diags -> CompileFail(diags)
     | LexParseOk prog ->
         do
@@ -140,7 +122,7 @@ export fn compile_source_with_cache(src: String, stdlib_root: source.StdlibRoot,
 export fn compile_file(path: source.FilePath) -> CompileResult !{IO} =
   match read_file(source.filepath_str(path)) with
   | Err msg -> panic("read_file: " ++ source.filepath_str(path) ++ ": " ++ msg)
-  | Ok src -> compile_source(strip_headers(src, 0))
+  | Ok src -> compile_source(source.strip_headers(src))
 
 # ---------------------------------------------------------------------------
 # Full pipeline: bundle → typecheck → lower (M4)

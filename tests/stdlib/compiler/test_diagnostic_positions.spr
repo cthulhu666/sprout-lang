@@ -2,6 +2,7 @@ module main
 import stdlib.test (TestState, new_state, assert_true, summary)
 import stdlib.compiler.compiler as compiler
 import stdlib.compiler.source as source
+import stdlib.string as string
 
 # Regression tests for guideline #5 (errors carry source location).
 #
@@ -71,5 +72,33 @@ fn main() -> Unit !{IO} =
             match first_diag(r_line3) with
             | Nothing -> false
             | Just d -> diag_line(d) == 3)
+
+          # --- parse error line survives header stripping ---
+          # `wrap` is a reserved keyword, so `fn wrap` is a parse error. The
+          # leading `module main` line is stripped before tokenizing; a correct
+          # diagnostic still reports the offending line in ORIGINAL-file
+          # coordinates (line 3), not the stripped-buffer coordinate (line 2).
+          # Regression for header stripping shifting all reported line numbers up
+          # by the number of stripped leading lines.
+          let src_kw = "module main\nfn a() -> Int = 1\nfn wrap() -> Int = 2\n"
+          r_kw <- compiler.compile_source_with_root(src_kw, source.StdlibRoot(stdlib_root))
+          assert_true(state, "parse error line survives header stripping (line 3, not 2)",
+            match first_diag(r_kw) with
+            | Nothing -> false
+            | Just d -> diag_line(d) == 3)
+
+          # --- the message names the reserved keyword as the cause ---
+          # "Expected function name" alone is misleading when the name IS a
+          # reserved word; the diagnostic must say so.
+          assert_true(state, "keyword-name parse error message mentions 'keyword'",
+            match first_diag(r_kw) with
+            | Nothing -> false
+            | Just d -> string.contains(diag_msg(d), "keyword"))
+
+    # --- direct: strip_headers replaces each stripped header with a blank line ---
+    # (path-independent regression for the single shared authority). The module
+    # line becomes an empty line so `fn a` keeps its original line number.
+    assert_true(state, "strip_headers replaces a module header with a blank line",
+      source.strip_headers("module m\nfn a() -> Int = 1\n") == "\nfn a() -> Int = 1\n")
 
     summary(state)

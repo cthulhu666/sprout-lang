@@ -315,28 +315,7 @@ fn process_line(src: String, bytes: Bytes, i: Int, nl: Int, mod_name: String, ex
 # Header stripping (strips module + import lines before parsing)
 # ---------------------------------------------------------------------------
 
-fn is_header_line_b(s: String, pos: Int) -> Bool =
-  str_starts_with_at_byte(s, pos, "module ") ||
-  str_starts_with_at_byte(s, pos, "import ") ||
-  str_starts_with_at_byte(s, pos, "#") ||
-  str_starts_with_at_byte(s, pos, "\n")
-
-fn next_line_b(s: String, bytes: Bytes, pos: Int) -> Int =
-  find_newline(s, bytes, pos) + 1
-
-fn strip_headers_b(s: String, bytes: Bytes, pos: Int) -> String =
-  if pos >= str_byte_len(s) then ""
-  else if is_header_line_b(s, pos) then strip_headers_b(s, bytes, next_line_b(s, bytes, pos))
-  else str_slice(s, cp, str_len(s) - cp)
-  where cp = byte_pos_to_cp_acc(s, bytes, 0, 0, pos)
-
-# Count codepoints in s up to byte offset limit (for converting byte→codepoint index).
-fn byte_pos_to_cp_acc(s: String, bytes: Bytes, b: Int, cp: Int, limit: Int) -> Int =
-  if b >= limit then cp
-  else
-    match source.decode_char_at(bytes, b) with
-    | Nothing -> byte_pos_to_cp_acc(s, bytes, b + 1, cp + 1, limit)
-    | Just (_, next_b) -> byte_pos_to_cp_acc(s, bytes, next_b, cp + 1, limit)
+# Header stripping is source.strip_headers (line-preserving, shared authority).
 
 # ---------------------------------------------------------------------------
 # Topological DFS collection (iterative, using an explicit work stack)
@@ -466,7 +445,7 @@ fn process_wi_finalize(
   do
     match scan_source_info(src) with
     | (mod_name, exported_names, ctor_type_names) ->
-        match lexer.tokenize(strip_headers_b(src, bytes_from_utf8(src), 0)) with
+        match lexer.tokenize(source.strip_headers(src)) with
         | Err e ->
             match e with
             | token.TokenizeError msg _ -> Cons("Lex error in " ++ path ++ ": " ++ msg, Nil)
@@ -522,7 +501,7 @@ fn collect_modules(entry_path: String, stdlib_root: String) -> (Maybe String, Li
             | Ok prelude_src ->
                 match scan_source_info(prelude_src) with
                   | (_, prelude_exported, prelude_ctor_types) ->
-                      match lexer.tokenize(strip_headers_b(prelude_src, bytes_from_utf8(prelude_src), 0)) with
+                      match lexer.tokenize(source.strip_headers(prelude_src)) with
                       | Err e ->
                           match e with
                           | token.TokenizeError msg _ -> (Just(str_concat("Lex error in prelude: ", msg)), Nil)

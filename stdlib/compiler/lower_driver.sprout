@@ -7,6 +7,7 @@ import stdlib.compiler.checker as checker
 import stdlib.compiler.module_loader as module_loader
 import stdlib.compiler.typed_ast as typed_ast
 import stdlib.compiler.lowering as lowering
+import stdlib.compiler.source as source
 
 # ---------------------------------------------------------------------------
 # String helpers
@@ -19,23 +20,7 @@ fn parse_err_msg(e: parser.ParseError) -> String =
   match e with
   | parser.ParseError msg _ -> "ERROR: parse: " ++ msg
 
-# ---------------------------------------------------------------------------
-# Header stripping (same as type_driver / compile_driver)
-
-fn is_header_line(s: String, pos: Int) -> Bool =
-  str_starts_with(str_slice(s, pos, str_len(s)), "module ") ||
-  str_starts_with(str_slice(s, pos, str_len(s)), "import ") ||
-  str_starts_with(str_slice(s, pos, str_len(s)), "\n")
-
-fn next_line(s: String, pos: Int) -> Int =
-  if nl == -1 then str_len(s)
-  else pos + nl + 1
-  where nl = str_find(str_slice(s, pos, str_len(s)), "\n")
-
-fn strip_headers(s: String, pos: Int) -> String =
-  if pos >= str_len(s) then ""
-  else if is_header_line(s, pos) then strip_headers(s, next_line(s, pos))
-  else str_slice(s, pos, str_len(s))
+# Header stripping is source.strip_headers (line-preserving, shared authority).
 
 # ---------------------------------------------------------------------------
 # Print __tc_* function names from a lowered TypedProgram
@@ -62,7 +47,7 @@ fn run_file(path: String, stdlib_root: String) -> Unit !{IO} =
         cache <- module_loader.new_cache()
         prelude_pairs <- module_loader.load_prelude_pairs(stdlib_root, cache)
         import_pairs <- module_loader.build_import_pairs(module_loader.collect_imports(src), stdlib_root, cache)
-        match lexer.tokenize(strip_headers(src, 0)) with
+        match lexer.tokenize(source.strip_headers(src)) with
         | Err e -> print(lex_err_msg(e))
         | Ok tokens ->
             match parser.parse_program(tokens) with

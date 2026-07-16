@@ -12,27 +12,9 @@ import stdlib.string as string
 import stdlib.process as process
 
 # ---------------------------------------------------------------------------
-# Header stripping — mirrors compiler.sprout (strip_headers is not exported)
-
-fn is_header_line(s: String, pos: Int) -> Bool =
-  str_starts_with(str_slice(s, pos, str_len(s)), "module ") ||
-  str_starts_with(str_slice(s, pos, str_len(s)), "import ") ||
-  str_starts_with(str_slice(s, pos, str_len(s)), "\n")
-
-fn next_line(s: String, pos: Int) -> Int =
-  if nl == -1 then str_len(s)
-  else pos + nl + 1
-  where nl = str_find(str_slice(s, pos, str_len(s)), "\n")
-
-fn strip_headers(s: String, pos: Int) -> String =
-  if pos >= str_len(s) then ""
-  else if is_header_line(s, pos) then strip_headers(s, next_line(s, pos))
-  else str_slice(s, pos, str_len(s))
-
-fn count_header_lines(s: String, pos: Int, count: Int) -> Int =
-  if pos >= str_len(s) then count
-  else if is_header_line(s, pos) then count_header_lines(s, next_line(s, pos), count + 1)
-  else count
+# Header stripping is source.strip_headers (line-preserving): stripped lines
+# become blank lines, so parsed positions keep original line numbers and no
+# header-line offset needs adding back.
 
 # ---------------------------------------------------------------------------
 # SessionState — server-side per-session state (M2)
@@ -147,7 +129,7 @@ fn collect_decl_names(decls: List ast.Decl, acc: List String) -> List String =
           collect_decl_names(rest, acc)
 
 fn parse_decl_names(src: String) -> List String =
-  match lexer.tokenize(strip_headers(src, 0)) with
+  match lexer.tokenize(source.strip_headers(src)) with
   | Err _ -> Nil
   | Ok tokens ->
       match parser.parse_program(tokens) with
@@ -221,7 +203,7 @@ fn empty_locations_json() -> json.Json =
     json.JsonObjectNil))))))
 
 fn parse_symbol_locations(src: String) -> json.Json =
-  match lexer.tokenize(strip_headers(src, 0)) with
+  match lexer.tokenize(source.strip_headers(src)) with
   | Err _ -> empty_locations_json()
   | Ok tokens ->
       match parser.parse_program(tokens) with
@@ -229,7 +211,7 @@ fn parse_symbol_locations(src: String) -> json.Json =
       | Ok prog ->
           match prog with
           | ast.Program decls _ ->
-              match collect_decl_locations(decls, count_header_lines(src, 0, 0), Nil, Nil, Nil, Nil) with
+              match collect_decl_locations(decls, 0, Nil, Nil, Nil, Nil) with
               | (cats, loc_names, loc_lines, loc_cols) ->
                   ok_response(json.JsonObject(
                     json.JsonObjectCons("categories", string_list_to_json(cats),

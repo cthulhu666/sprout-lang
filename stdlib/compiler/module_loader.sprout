@@ -268,24 +268,7 @@ fn program_decls_loop(decls: List ast.Decl, acc: List String) -> List String =
   | Nil -> acc
   | Cons d rest -> program_decls_loop(rest, decl_value_names(d, acc))
 
-# ---------------------------------------------------------------------------
-# Header stripping (bootstrap parser can't parse module/import declarations)
-# ---------------------------------------------------------------------------
-
-fn is_header_line_ml(s: String, pos: Int) -> Bool =
-  str_starts_with(str_slice(s, pos, str_len(s)), "module ") ||
-  str_starts_with(str_slice(s, pos, str_len(s)), "import ") ||
-  str_starts_with(str_slice(s, pos, str_len(s)), "\n")
-
-fn next_line_ml(s: String, pos: Int) -> Int =
-  if nl == -1 then str_len(s)
-  else pos + nl + 1
-  where nl = str_find(str_slice(s, pos, str_len(s)), "\n")
-
-fn strip_headers_ml(s: String, pos: Int) -> String =
-  if pos >= str_len(s) then ""
-  else if is_header_line_ml(s, pos) then strip_headers_ml(s, next_line_ml(s, pos))
-  else str_slice(s, pos, str_len(s))
+# Header stripping is source.strip_headers (line-preserving, shared authority).
 
 # ---------------------------------------------------------------------------
 # Memoized recursive module loading
@@ -328,7 +311,7 @@ fn load_module(name: String, stdlib_root: String, cache: ModuleCache) -> List (S
                     import_pairs <- build_import_pairs(collect_imports(src), stdlib_root, cache)
                     prelude_pairs <- if name == "stdlib.prelude" then Nil else load_module("stdlib.prelude", stdlib_root, cache)
                     let base_pairs = prelude_pairs ++ import_pairs
-                    match lexer.tokenize(strip_headers_ml(src, 0)) with
+                    match lexer.tokenize(source.strip_headers(src)) with
                     | Err _ -> Nil
                     | Ok tokens ->
                         match parser.parse_program(tokens) with
