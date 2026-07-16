@@ -53,9 +53,13 @@ typedef struct Scope {
   struct Task*  forks;     /* awaitable (task_fork) tasks, linked via scope_next;
                               reclaimed at scope close (fire-and-forget tasks are
                               reclaimed on done and never appear here) */
-  long long     cancelled; /* set by __scope_cancel; read cooperatively by task_cancelled */
+  long long     reason;    /* stop-reason: 0 none / 1 cancelled (scope_cancel) / 2 timed-out
+                              (with_timeout). Read cooperatively by task_cancelled/task_status. */
   struct Task*  owner;     /* the task that opened this scope (only it may cancel it) */
 } Scope;
+
+/* Scope stop-reasons (Scope.reason). task_cancelled = (reason != 0); task_status maps them. */
+enum { REASON_NONE = 0, REASON_CANCELLED = 1, REASON_TIMEDOUT = 2 };
 
 typedef struct Task {
   ucontext_t   ctx;
@@ -76,6 +80,11 @@ typedef struct Task {
   long long    park_timer_id; /* opaque timer handle when park_kind == PARK_TIMER (L0.6) */
   struct Task* io_next;    /* g_io_head list link (only while parked on I/O or a timer) */
   struct Task* io_prev;
+  int          on_io_list; /* 1 iff currently linked on g_io_head (robust membership signal,
+                              immune to park_kind being reset by the pump on wake — L0.7 §5.3) */
+  int          in_rq;      /* 1 iff currently linked in the ready queue (runnable) — L0.7 §5.2 */
+  struct Task* deadline_child; /* non-NULL iff this task is a with_timeout owner parked in
+                              __await_deadline, pointing at the body task it is timing (L0.7) */
 } Task;
 
 /* How a task sitting on g_io_head is suspended, so scope_cancel tears down the right
@@ -110,6 +119,7 @@ static void io_list_push(Task* t) {
   t->io_next = g_io_head;
   if (g_io_head != NULL) g_io_head->io_prev = t;
   g_io_head = t;
+  t->on_io_list = 1;
 }
 
 static void io_list_remove(Task* t) {
@@ -117,12 +127,14 @@ static void io_list_remove(Task* t) {
   else                    g_io_head = t->io_next;
   if (t->io_next != NULL) t->io_next->io_prev = t->io_prev;
   t->io_prev = t->io_next = NULL;
+  t->on_io_list = 0;
 }
 
 static void rq_push(Task* t) {
   t->next = NULL;
   if (g_rq_tail == NULL) { g_rq_head = g_rq_tail = t; }
   else { g_rq_tail->next = t; g_rq_tail = t; }
+  t->in_rq = 1;
 }
 
 static Task* rq_pop(void) {
@@ -131,6 +143,7 @@ static Task* rq_pop(void) {
   g_rq_head = t->next;
   if (g_rq_head == NULL) g_rq_tail = NULL;
   t->next = NULL;
+  t->in_rq = 0;
   return t;
 }
 
@@ -214,9 +227,28 @@ static void task_trampoline(void) {
     sprout_roots_push_ptr(t->roots, &t->result);
   }
   t->done = 1;
-  if (t->awaiter != NULL) {                   /* a task_await is blocked on us */
-    rq_push(t->awaiter);
+  if (t->awaiter != NULL) {                   /* a task_await or a with_timeout owner is blocked on us */
+    Task* aw = t->awaiter;
     t->awaiter = NULL;
+    /* Enqueue the awaiter EXACTLY once (L0.7 §5.3). A with_timeout owner may be parked on BOTH
+     * us (awaiter) and its own deadline timer; a double rq_push would self-cycle the ready
+     * queue. park_kind cannot dedup this — the pump resets it to PARK_NONE on timer harvest —
+     * so we use on_io_list (live g_io_head membership) and deadline_child:
+     *  - aw->on_io_list: its deadline timer is still live (not harvested) -> tear it down and
+     *    unlink, then push (mirrors the pump's own wake path).
+     *  - aw->deadline_child == t but off the io list: the pump ALREADY harvested its timer and
+     *    enqueued it -> do NOT push again.
+     *  - ordinary task_await awaiter (deadline_child == NULL, never on the io list) -> push. */
+    if (aw->on_io_list) {
+      sprout_poll_remove_timer(aw->park_timer_id);
+      io_list_remove(aw);
+      aw->park_kind = PARK_NONE;
+      rq_push(aw);
+    } else if (aw->deadline_child == t) {
+      /* already runnable via the timer harvest; second push would corrupt the queue */
+    } else {
+      rq_push(aw);
+    }
   }
   Scope* s = t->scope;
   s->live--;
@@ -244,6 +276,9 @@ static void sprout_scheduler_init(void) {
   g_task0.park_timer_id = 0;
   g_task0.io_next = NULL;
   g_task0.io_prev = NULL;
+  g_task0.on_io_list = 0;
+  g_task0.in_rq = 0;
+  g_task0.deadline_child = NULL;
   g_current_task = &g_task0;
 
   if (getcontext(&g_pump) != 0) sprout_fail("sprout_scheduler_init: getcontext failed");
@@ -259,7 +294,7 @@ long long __scope_open(void) {
   s->live      = 0;
   s->waiter    = NULL;
   s->forks     = NULL;
-  s->cancelled = 0;
+  s->reason    = REASON_NONE;
   s->owner     = g_current_task;   /* only this task may __scope_cancel it */
   return (long long)(intptr_t)s;
 }
@@ -288,6 +323,9 @@ static Task* task_create(Scope* s, long long work, int awaitable) {
   t->park_timer_id = 0;
   t->io_next    = NULL;
   t->io_prev    = NULL;
+  t->on_io_list = 0;
+  t->in_rq      = 0;       /* rq_push below sets it once the task is enqueued */
+  t->deadline_child = NULL;
 
   /* Keep the work-closure reachable from spawn until the task first runs: root
    * &work in the task's own context (scanned by the collector via the registry).
@@ -350,75 +388,145 @@ long long __task_await(long long task_handle) {
   return t->result;
 }
 
-/* Request cancellation of `scope` (L0.5). Owner-only: only the task that opened the
- * scope may cancel it — this guarantees no task is parked awaiting a sibling that a
- * concurrent canceller would drop (the "no cancelled task is ever awaited" invariant;
- * see the cancellation design doc §10.2). Sets the cooperative flag; ready/yield-parked
- * tasks observe it via task_cancelled and return on their own. (Force-drop of I/O-parked
- * tasks — which cannot check a flag while suspended in the poller — is a later step.) */
+/* Force-drop a task that is suspended in the poller (still on g_io_head). Deregister its
+ * poller registration, unlink it, and reclaim roots+stack TOGETHER — a parked task holds live
+ * values rooted INTO its green stack (L0.3 park contract), so freeing the stack while keeping
+ * the roots is a use-after-free (mark_roots would scan freed memory). Decrements the owning
+ * scope's live count. Shared by scope_cancel (L0.5) and __await_deadline's timeout (L0.7).
+ * The caller must have already established the task is force-droppable (still on g_io_head). */
+static void force_drop_task(Task* t) {
+  /* A sibling awaiting this task would be stranded (nothing wakes it, live never hits 0, the
+   * owner's join deadlocks). Dropping a task the CURRENT task itself awaits is safe: the awaiter
+   * is running this drop and proceeds itself (the with_timeout owner-timeout path, §5.2). */
+  if (t->awaiter != NULL && t->awaiter != g_current_task)
+    sprout_fail("force_drop_task: cannot drop a task awaited by a sibling — "
+                "await only from the scope owner");
+  /* A deadline-owner (a task blocked inside with_timeout) cannot be dropped without orphaning
+   * its inner scope — the tree-cancel cascade is deferred (design §5.5). Loud-fail, don't
+   * corrupt. This fires both for scope_cancel reaching a nested with_timeout and for a
+   * with_timeout whose body is itself blocked in a nested with_timeout. */
+  if (t->deadline_child != NULL)
+    sprout_fail("with_timeout: cannot time out / cancel a body blocked inside with_timeout — "
+                "deadline/cancel nesting cascade is deferred");
+  Scope* ts = t->scope;
+  /* Deregister whatever it is suspended on. For a timer this must discard even an already-
+   * fired-but-undrained event (timers fire async to the pump, unlike fds which are drained
+   * before the owner runs) — else a stale token would later resume a freed task (task_sleep
+   * design §5.1). */
+  if (t->park_kind == PARK_TIMER) sprout_poll_remove_timer(t->park_timer_id);
+  else                            sprout_poll_remove(t->park_fd, t->park_interest);
+  io_list_remove(t);
+  /* Free roots first (unregisters the context so no later collection scans it), then the
+   * stack; no allocation between (design §7). */
+  sprout_roots_free(t->roots);
+  free(t->stack);
+  if (t->awaitable) {
+    /* Record stays reachable via scope->forks; scope-close frees it. Null the freed pointers
+     * so close's guard skips them (no double-free). Never awaited. */
+    t->roots = NULL;
+    t->stack = NULL;
+  } else {
+    /* Fire-and-forget: not in scope->forks, so free the record here and now. */
+    free(t);
+  }
+  ts->live--;
+}
+
+/* Request cancellation of `scope` (L0.5). Owner-only: only the task that opened the scope may
+ * cancel it — this guarantees no task is parked awaiting a sibling that a concurrent canceller
+ * would drop (the "no cancelled task is ever awaited" invariant; cancellation doc §10.2). Sets
+ * the cooperative reason; ready/yield-parked tasks observe it via task_cancelled and return on
+ * their own; join-parked tasks are left for their inner scope to drain (local propagation). */
 long long __scope_cancel(long long scope_handle) {
   Scope* s = scope_of(scope_handle);
   if (s == NULL) sprout_fail("__scope_cancel: null scope");
   if (g_current_task != s->owner)
     sprout_fail("__scope_cancel: only the scope's owning task may cancel it");
-  s->cancelled = 1;
+  s->reason = REASON_CANCELLED;
 
-  /* Force-drop this scope's tasks that are suspended in the poller: they cannot
-   * observe the flag while asleep in kqueue/epoll, so we deregister the fd and reclaim
-   * them without it ever becoming ready. Ready/yield-parked tasks are NOT dropped —
-   * they stay in the ready queue and cooperatively return via task_cancelled (design
-   * §7); join-parked tasks are left for their inner scope to drain (local propagation).
-   *
-   * No-race (single-thread): the pump drains every poll_wait token — unlinking it from
-   * g_io_head and clearing park_fd — before it can resume the owner. So any task still
-   * on g_io_head here has NOT fired; poll_remove then reclaim is safe, and the owner is
-   * running so s->waiter == NULL (no join-wake races the drop). */
+  /* Force-drop this scope's poller-parked tasks (they cannot observe the flag while asleep in
+   * kqueue/epoll). No-race (single-thread): the pump drains every poll_wait token — unlinking
+   * it from g_io_head — before it can resume the owner. So any task still on g_io_head here has
+   * NOT fired; and the owner is running so s->waiter == NULL (no join-wake races the drop). */
   for (Task* t = g_io_head; t != NULL; ) {
     Task* next = t->io_next;              /* save before we unlink/free t */
-    if (t->scope == s && t != g_current_task) {
-      /* A forked sibling awaiting a dropped task would be stranded (nothing wakes it,
-       * live never hits 0, the owner's join deadlocks). Owner-only cancel makes this
-       * rare, but guard it loudly rather than hang. Full awaiter-cascade is deferred. */
-      if (t->awaiter != NULL)
-        sprout_fail("__scope_cancel: cannot drop a task awaited by a sibling — "
-                    "await only from the scope owner");
-      /* Deregister whatever it is suspended on. For a timer this must discard even an
-       * already-fired-but-undrained event (timers fire async to the pump, unlike fds
-       * which are always drained before the owner runs) — else a stale token would later
-       * resume a freed task. See the task_sleep design §5.1. */
-      if (t->park_kind == PARK_TIMER) sprout_poll_remove_timer(t->park_timer_id);
-      else                            sprout_poll_remove(t->park_fd, t->park_interest);
-      io_list_remove(t);
-      /* Reclaim (design §7): a dropped task is suspended with live values rooted INTO
-       * its green stack (L0.3 park contract), so roots and stack must be released
-       * together — freeing the stack while keeping the roots is a use-after-free
-       * (mark_roots would scan freed memory). Free roots first (unregisters the context
-       * so no later collection scans it), then the stack; no allocation between. */
-      sprout_roots_free(t->roots);
-      free(t->stack);
-      if (t->awaitable) {
-        /* Record stays reachable via s->forks; scope-close frees it. Null the freed
-         * pointers so that close's guard skips them (no double-free). Never awaited. */
-        t->roots = NULL;
-        t->stack = NULL;
-      } else {
-        /* Fire-and-forget: not in s->forks, so free the record here and now. */
-        free(t);
-      }
-      s->live--;
-    }
+    if (t->scope == s && t != g_current_task) force_drop_task(t);
     t = next;
   }
   return 0;
 }
 
-/* Cooperative cancellation check: true if the current task's scope was cancelled. A
- * ready/yield-parked task calls this at its own checkpoints and returns when it sees
- * true. task-0 and any task with no scope are never cancelled. */
-long long task_cancelled(void) {
+/* The current task's scope stop-reason: 0 none / 1 cancelled / 2 timed-out. task-0 and any task
+ * with no scope are never stopping. The Sprout stdlib builds task_cancelled (reason != 0) and
+ * task_status on top of this — task_cancelled is no longer a builtin (L0.7). */
+long long __task_stop_reason(void) {
   Task* t = g_current_task;
-  if (t == NULL || t->scope == NULL) return 0;
-  return t->scope->cancelled;
+  if (t == NULL || t->scope == NULL) return REASON_NONE;
+  return t->scope->reason;
+}
+
+/* L0.7 with_timeout core. The caller (stdlib with_timeout) has already forked `body` as an
+ * AWAITABLE child in `scope` (runnable, live). Arm a one-shot deadline timer on the OWNER and
+ * register the owner as the child's awaiter, then park until EITHER the child finishes OR the
+ * timer fires. Returns 1 if the child completed within the deadline (the caller then task_awaits
+ * it for the result), 0 if it timed out (child force-dropped; caller returns Expired). Reached
+ * only with ms > 0 — the stdlib wrapper routes ms <= 0 to an immediate Expired without forking.
+ * See docs/concurrency-deadlines-design-2026-07-15.md §5.2/§5.3. */
+long long __await_deadline(long long scope_handle, long long task_handle, long long ms) {
+  Scope* s = scope_of(scope_handle);
+  if (s == NULL) sprout_fail("__await_deadline: null scope");
+  Task* child = task_of(task_handle);
+  if (child == NULL) sprout_fail("__await_deadline: null task");
+  Task* owner = g_current_task;
+
+  /* Arm the deadline on the owner + await the child. The owner is now parked on BOTH the timer
+   * (g_io_head) and as the child's awaiter; whichever fires first wakes it exactly once (the
+   * trampoline/harvest dedup, §5.3). */
+  long long tid;
+  sprout_poll_add_timer(ms, owner, &tid);
+  owner->park_kind      = PARK_TIMER;
+  owner->park_timer_id  = tid;
+  owner->deadline_child = child;
+  io_list_push(owner);
+  child->awaiter = owner;
+  park_to_pump();
+
+  owner->deadline_child = NULL;         /* no longer a deadline-owner */
+
+  if (child->done) {
+    /* Completed within the deadline. The child-first trampoline path already tore our timer
+     * down and unlinked us; if instead the timer harvested us and the child then finished, the
+     * timer is already consumed. If we are somehow still linked, tear it down. */
+    if (owner->on_io_list) { sprout_poll_remove_timer(owner->park_timer_id); io_list_remove(owner); }
+    child->awaiter = NULL;
+    return 1;
+  }
+
+  /* The timer fired (child not done): the pump harvested + unlinked our timer, so we are off
+   * g_io_head. Classify the child (§5.2): */
+  if (child->on_io_list) {
+    /* Parked directly on I/O / a task_sleep timer — the supported MVP case. Time it out. */
+    s->reason = REASON_TIMEDOUT;
+    child->awaiter = NULL;              /* clear so force_drop's sibling-awaiter guard is not
+                                          tripped by our own (owner) awaiter link */
+    force_drop_task(child);
+    return 0;
+  }
+  if (child->in_rq) {
+    /* Its I/O went ready right at the boundary and it is now runnable. Dropping a queued task
+     * is a UAF, and it is one tick from done — let it finish (Completed). The timer is spent,
+     * so this is now a plain await with a single wake source (the child's trampoline). */
+    child->awaiter = owner;
+    park_to_pump();
+    child->awaiter = NULL;
+    return 1;
+  }
+  /* Neither parked on I/O nor runnable -> blocked in a nested with_scope join or a task_await.
+   * Force-dropping it would orphan its inner scope; the tree-cancel cascade is deferred. This is
+   * the direct-I/O-only MVP boundary (design §5.2/§5.5). */
+  sprout_fail("with_timeout: cannot time out a body blocked in a nested scope/await — "
+              "deadline cascade deferred; time out a body that parks directly on I/O");
+  return 0;  /* unreachable */
 }
 
 /* Cooperative yield: become runnable again and let the pump run another task.

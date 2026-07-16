@@ -750,7 +750,8 @@ rooting oracle, raw-`Result`, and the never-awaited-fork backstop) — green und
 `SPROUT_GC_STRESS=1`, negative-control-verified (removing the result root reproduces the
 use-after-free).
 
-**Next increments:** cancellation and structured error propagation (fail-fast: first `Err`
-cancels siblings — cooperative-poll or scheduler-drop, since there are no exceptions to
-inject); then `task_sleep` (timeout-driven poll_wait) and channels. Multicore stays out of
-scope (share-nothing, §8).
+**Next increments:** ~~cancellation~~ (LANDED L0.5), ~~`task_sleep`~~ (LANDED L0.6),
+~~deadlines/`with_timeout` + `task_status`~~ (LANDED L0.7, `docs/concurrency-deadlines-design-2026-07-15.md`);
+then **channels**. Multicore stays out of scope (share-nothing, §8). Note: L0.7 fixed a latent
+bundler bug (generic type constructors weren't exported cross-module) — `Chan a` for channels is
+now unblocked.

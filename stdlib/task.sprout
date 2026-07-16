@@ -28,6 +28,19 @@ export type Scope =
 export type Task a =
   | Task Int
 
+# The outcome of a timed operation (L0.7). `Completed a` carries the body's result; `Expired`
+# means the deadline fired first and the body's task was cancelled. Value-based, not an
+# exception — Sprout has none (Go's ctx.Err()/Trio move_on_after family, not a throw).
+export type TimeoutResult a (..) =
+  | Completed a
+  | Expired
+
+# Why the current task's scope is stopping (Go's ctx.Err(): nil / Canceled / DeadlineExceeded).
+export type TaskStatus (..) =
+  | Running
+  | Cancelled
+  | TimedOut
+
 # Runtime primitives (green-thread scheduler; cannot be expressed in Sprout —
 # they require stack/context switching). See runtime/APPROVED_BUILTINS.
 extern fn __scope_open() -> Int !{IO}
@@ -37,6 +50,12 @@ extern fn __task_fork(scope_id: Int, work: Unit -> a !{IO}) -> Int !{IO}
 extern fn __task_await(task_id: Int) -> a !{IO}
 extern fn __scope_cancel(scope_id: Int) -> Unit !{IO}
 extern fn __task_sleep(ms: Int) -> Unit !{IO}
+# L0.7 deadlines. __await_deadline arms a deadline timer on the owner and parks until the forked
+# child (already forked by with_timeout) finishes (returns True) or the deadline fires (returns
+# False, child force-dropped). __task_stop_reason returns the current scope's stop-reason
+# (0 none / 1 cancelled / 2 timed-out) — task_cancelled and task_status are built on it in Sprout.
+extern fn __await_deadline(scope_id: Int, task_id: Int, ms: Int) -> Bool !{IO}
+extern fn __task_stop_reason() -> Int !{IO}
 
 # Cooperative yield point: suspend the current task and let the scheduler run
 # another ready task. (Real I/O parking, in the tcp_* builtins, yields implicitly.)
@@ -83,9 +102,23 @@ export fn scope_cancel(scope: Scope) -> Unit !{IO} =
   match scope with
   | Scope id -> __scope_cancel(id)
 
-# True if the current task's scope has been cancelled. A cancellable task checks this
-# at its own loop/yield points and returns when it sees `true` (Go's `ctx.Done()`).
-export extern fn task_cancelled() -> Bool !{IO}
+# True if the current task's scope is stopping — cancelled OR timed out (Go's `ctx.Done()`).
+# A cancellable task checks this at its own loop/yield points and returns when it sees `true`.
+# Built on the stop-reason so a with_timeout deadline also stops an L0.5-style cooperative body.
+export fn task_cancelled() -> Bool !{IO} =
+  __task_stop_reason() != 0
+
+# WHY the current task's scope is stopping (Go's `ctx.Err()`): `Running` normally, `Cancelled`
+# after `scope_cancel`, `TimedOut` after a `with_timeout` deadline fired on this task's scope.
+# NOTE (L0.7 MVP): `TimedOut` is set on the scope but is NOT yet observable by a timed body —
+# with_timeout force-drops the body DURING its park, before it re-checks status, and the scope
+# holds exactly one task. `TimedOut` is forward-compat scaffolding; only `Running`/`Cancelled`
+# are observable today (see test_task_status.spr).
+export fn task_status() -> TaskStatus !{IO} =
+  match __task_stop_reason() with
+  | 1 -> Cancelled
+  | 2 -> TimedOut
+  | _ -> Running
 
 # Suspend the current green task for ~`ms` milliseconds, running its siblings meanwhile —
 # a cooperative sleep that parks the TASK, not the OS thread (Go `time.Sleep` / Kotlin
@@ -98,3 +131,52 @@ export fn task_sleep(ms: Int) -> Unit !{IO} =
     task_yield()
   else
     __task_sleep(ms)
+
+# Run `body` as a child green task; if it does not finish within ~`ms` milliseconds, cancel it
+# and return `Expired`, otherwise `Completed(result)`. Timing is best-effort (>= ms). Delivery is
+# cooperative + scheduler-drop, like Go/Kotlin/Trio (Sprout has no exceptions to inject).
+#
+# MVP boundary (direct-I/O only): the body may park DIRECTLY on I/O or `task_sleep` — it is
+# force-dropped when the deadline fires. A body blocked in a NESTED `with_scope` join (i.e. one
+# that wraps structured concurrent work) loud-fails on timeout — the tree-cancel cascade is a
+# later increment. This includes a NESTED with_timeout: if the OUTER deadline fires while the
+# body is inside an inner with_timeout, it loud-fails (aborts) too. A body whose I/O goes ready
+# in the deadline's exact poll batch is allowed to finish (best-effort ≥ ms); if it then re-parks
+# on further I/O, the effective wait can exceed `ms`. `ms <= 0` returns `Expired` at once WITHOUT
+# running the body. See docs/concurrency-deadlines-design-2026-07-15.md.
+export fn with_timeout(ms: Int, body: Unit -> a !{IO}) -> TimeoutResult a !{IO} =
+  if ms <= 0 then
+    Expired
+  else
+    with_scope(\s -> run_with_deadline(s, body, ms))
+
+# The child is forked FIRST (so it exists before the deadline is armed), then awaited against the
+# deadline. do-binding sequences the two effects explicitly (not argument-evaluation order).
+fn run_with_deadline(scope: Scope, body: Unit -> a !{IO}, ms: Int) -> TimeoutResult a !{IO} =
+  match scope with
+  | Scope sid ->
+    do
+      handle <- task_fork(scope, body)
+      outcome <- await_and_finish(sid, handle, ms)
+      outcome
+
+fn await_and_finish(sid: Int, handle: Task a, ms: Int) -> TimeoutResult a !{IO} =
+  match handle with
+  | Task tid ->
+    do
+      completed <- __await_deadline(sid, tid, ms)
+      finish_timeout(handle, completed)
+
+# On `completed`, the child is already done, so `task_await` returns immediately with its result.
+# On the `Expired` path the child was force-dropped, so `task_await` is NOT called on it (which
+# would loud-fail on a dropped task).
+fn finish_timeout(handle: Task a, completed: Bool) -> TimeoutResult a !{IO} =
+  if completed then
+    complete_with(handle)
+  else
+    Expired
+
+fn complete_with(handle: Task a) -> TimeoutResult a !{IO} =
+  do
+    v <- task_await(handle)
+    Completed(v)

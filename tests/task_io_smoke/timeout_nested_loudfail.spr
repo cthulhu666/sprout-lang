@@ -1,0 +1,32 @@
+import stdlib.task as task
+import stdlib.net (tcp_listen, tcp_accept)
+
+# L0.7 MVP boundary (EXPERIMENTAL). with_timeout can force-drop a body parked DIRECTLY on I/O,
+# but NOT one blocked in a NESTED with_scope join — dropping it would orphan the inner scope, and
+# the tree-cancel cascade is deferred. So when the deadline fires while the body is join-blocked,
+# __await_deadline LOUD-FAILS (rather than hang or corrupt). This fixture pins that boundary:
+# run_expect_fail asserts a non-zero exit AND the "nested scope/await" message. `structured_body`
+# forks a worker (which parks on accept forever) into an inner scope, then blocks in that scope's
+# join — exactly the unsupported shape.
+fn worker(listener: Int) -> Unit !{IO} =
+  do
+    _ <- tcp_accept(listener)  # parks forever — no client connects
+    term_write("")
+
+fn fork_and_join(s: task.Scope, listener: Int) -> Int !{IO} =
+  do
+    task.task_spawn(s, \_ -> worker(listener))  # worker parks in this inner scope
+    0
+    # with_scope's __scope_join drives the pump: the worker runs, parks on accept, and this
+    # body then blocks in the join (live never reaches 0) — the join-blocked shape we test.
+
+fn structured_body(listener: Int) -> Int !{IO} =
+  task.with_scope(\s -> fork_and_join(s, listener))  # blocks in the inner join (worker never ends)
+
+fn main() -> Unit !{IO} =
+  do
+    la <- tcp_listen(28999)
+    match task.with_timeout(50, \_ -> structured_body(la)) with
+    | task.Completed (_) -> term_write("UNEXPECTED completed\n")
+    | task.Expired -> term_write("UNEXPECTED expired\n")
+    term_write("UNEXPECTED done\n")  # unreachable: the deadline must loud-fail on the join-blocked body

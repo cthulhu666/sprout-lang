@@ -1,0 +1,29 @@
+import stdlib.task as task
+import stdlib.net (tcp_listen, tcp_accept, tcp_read)
+import stdlib.string as string
+
+# L0.7 with_timeout I/O-drop (EXPERIMENTAL). A body parked in the poller on tcp_accept (nobody
+# ever connects) cannot check a flag — it is asleep in kqueue/epoll. So when the deadline fires,
+# __await_deadline must FORCE-DROP the child: deregister its fd and reclaim it (roots+stack
+# together), without the fd ever becoming ready. The body binds a HEAP string `held` BEFORE
+# parking and uses it AFTER, so the dropped task is suspended with a GC root pointing INTO its
+# green stack (not just &work in the record) — the full reclaim path. Reaching "expired"/"done"
+# proves the fd-park drop; a broken drop HANGS (live never hits 0, __scope_join blocks the pump
+# in the poller forever → the perl `alarm` fires). Complements test_task_timeout.spr, which drops
+# a TIMER-parked (task_sleep) body via poll_remove_timer; this drops an FD-parked body via
+# poll_remove(fd).
+fn accept_forever(listener: Int) -> Int !{IO} =
+  do
+    let held = string.concat("live-", "root")
+    conn <- tcp_accept(listener)  # parks here forever — no client ever connects
+    term_write(held)  # unreachable; forces `held` rooted across the park
+    _ <- tcp_read(conn)
+    99
+
+fn main() -> Unit !{IO} =
+  do
+    la <- tcp_listen(28998)
+    match task.with_timeout(50, \_ -> accept_forever(la)) with
+    | task.Completed (_) -> term_write("UNEXPECTED completed\n")
+    | task.Expired -> term_write("expired\n")  # deadline fired; child force-dropped
+    term_write("done\n")  # reached only if the fd-parked body was dropped on the deadline

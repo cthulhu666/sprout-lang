@@ -172,7 +172,8 @@ __scope_spawn  # L0.1: create a fire-and-forget green task (own stack) running a
 __task_fork  # L0.4: create an AWAITABLE green task running a Unit->a closure; returns a handle whose result is kept alive until awaited. Needs makecontext/stack allocation + per-task GC rooting of the result — not expressible in Sprout.
 __task_await  # L0.4: block the current task until a forked task finishes, then return its result. Requires driving the cooperative scheduler (context switching) — not expressible in Sprout.
 __scope_cancel  # L0.5: set a scope's cancelled flag (owner-only). Operates on scheduler-internal Scope state (owner check, cancelled flag) — not expressible in Sprout.
-task_cancelled  # L0.5: read the current task's scope cancelled flag (cooperative cancellation check). Reads scheduler-internal per-task/scope state — not expressible in Sprout.
+__task_stop_reason  # L0.7: read the current task's scope stop-reason (0 none / 1 cancelled / 2 timed-out). Reads scheduler-internal per-task/scope state — not expressible in Sprout. (task_cancelled + task_status are built on this in stdlib.task.)
+__await_deadline  # L0.7 with_timeout: arm a deadline timer on the owner and drive the scheduler until a forked child finishes or the deadline fires (force-dropping the child). Requires kernel timer + context switching + per-task GC-rooted reclamation — not expressible in Sprout.
 task_yield  # L0.1: cooperative yield — suspend the current task and switch to the scheduler. Context switching only, not expressible in Sprout.
 __task_sleep  # L0.6: suspend the current task on a one-shot kqueue/epoll timer for ms milliseconds, running siblings meanwhile. Requires a kernel timer + driving the scheduler — not expressible in Sprout.
 term_clear

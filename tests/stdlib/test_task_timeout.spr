@@ -1,0 +1,49 @@
+import stdlib.test (TestState, new_state, assert_true, assert_eq, summary)
+import stdlib.task as task
+import stdlib.string as string
+
+# L0.7 deadlines (EXPERIMENTAL). with_timeout(ms, body) runs `body` as a child green task and
+# returns Completed(result) if it finishes within ~ms, else Expired — the child is force-
+# dropped. Delivery is cooperative + scheduler-drop (no exceptions), like Go/Kotlin/Trio.
+# MVP boundary: the body must park DIRECTLY on I/O / task_sleep; a body blocked in a nested
+# with_scope join loud-fails (deadline cascade deferred). These cases stay within that MVP.
+
+# Completes instantly, well within a generous deadline -> Completed(42).
+fn fast() -> Int !{IO} = 42
+
+# Parks on a long sleep; the 20ms deadline must fire first and DROP it. Appends "!" to the log
+# ONLY if it runs to completion — so a broken drop (child not dropped) leaves "!" behind and
+# the assertion below fails with the wrong marker instead of the empty string.
+fn slow(log: Ref String) -> Int !{IO} =
+  do
+    task.task_sleep(2000)
+    ref_write(log, string.concat(ref_read(log), "!"))
+    99
+
+fn is_completed_42(r: task.TimeoutResult Int) -> Bool =
+  match r with
+  | task.Completed (v) -> v == 42
+  | task.Expired -> false
+
+fn is_expired(r: task.TimeoutResult Int) -> Bool =
+  match r with
+  | task.Completed (v) -> false
+  | task.Expired -> true
+
+fn main() -> Unit !{IO} =
+  do
+    state <- new_state()
+    # 1. fast body completes within the deadline -> Completed(42) (no ~10s wait: it finishes at once).
+    let r1 = task.with_timeout(10000, \_ -> fast())
+    assert_true(state, "fast body completes within deadline", is_completed_42(r1))
+    # 2. slow body overruns the 20ms deadline -> Expired; the dropped body's "!" is absent.
+    log <- ref_new("")
+    let r2 = task.with_timeout(20, \_ -> slow(log))
+    assert_true(state, "slow body times out", is_expired(r2))
+    assert_eq(state, "timed-out body dropped before its side effect", ref_read(log), "")
+    # 3. ms <= 0 -> immediate Expired; the body is never forked or run.
+    zlog <- ref_new("")
+    let r3 = task.with_timeout(0, \_ -> slow(zlog))
+    assert_true(state, "zero-ms deadline expires immediately", is_expired(r3))
+    assert_eq(state, "zero-ms body never ran", ref_read(zlog), "")
+    summary(state)

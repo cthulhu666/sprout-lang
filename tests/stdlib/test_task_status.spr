@@ -1,0 +1,49 @@
+import stdlib.test (TestState, new_state, assert_true, assert_eq, summary)
+import stdlib.task as task
+import stdlib.string as string
+
+# L0.7 task_status() (EXPERIMENTAL). Reports WHY the current task's scope is stopping (Go's
+# ctx.Err()): Running normally, Cancelled after scope_cancel. The TimedOut variant is set on a
+# with_timeout scope by the runtime, but the timed body is force-dropped DURING its park before
+# it can observe it (the scope holds exactly one task, which gets no scope handle to spawn a
+# sibling that could read it) — so TimedOut is not observable by the body in this MVP. It is
+# forward-compat scaffolding for a later increment; only Running/Cancelled are exercised here.
+# (task_sleep(0) is used as the yield point — it routes to task_yield internally.)
+
+fn is_running(s: task.TaskStatus) -> Bool =
+  match s with
+  | task.Running -> true
+  | task.Cancelled -> false
+  | task.TimedOut -> false
+
+# Records its observed status: "r" while Running (then yields), "C" once it sees Cancelled, "T"
+# on TimedOut, or "X" if the budget runs out first (a broken cancel would show "X", not "C").
+fn worker(log: Ref String, budget: Int) -> Unit !{IO} =
+  if budget <= 0 then
+    ref_write(log, string.concat(ref_read(log), "X"))
+  else
+    match task.task_status() with
+    | task.Cancelled -> ref_write(log, string.concat(ref_read(log), "C"))
+    | task.TimedOut -> ref_write(log, string.concat(ref_read(log), "T"))
+    | task.Running ->
+        do
+          ref_write(log, string.concat(ref_read(log), "r"))
+          task.task_sleep(0)  # yield; the owner runs and cancels between our checks
+          worker(log, budget - 1)
+
+fn drive(s: task.Scope, log: Ref String) -> Unit !{IO} =
+  do
+    task.task_spawn(s, \_ -> worker(log, 10))
+    task.task_sleep(0)  # let the worker record one Running "r" and park at its yield
+    task.scope_cancel(s)  # the worker's scope is now Cancelled; it observes it on resume
+
+fn main() -> Unit !{IO} =
+  do
+    state <- new_state()
+    # task-0 has no scope -> Running.
+    assert_true(state, "task-0 (no scope) status is Running", is_running(task.task_status()))
+    # A cooperative worker sees Running, then Cancelled after scope_cancel (never "X").
+    log <- ref_new("")
+    task.with_scope(\s -> drive(s, log))
+    assert_eq(state, "worker observes Running then Cancelled", ref_read(log), "rC")
+    summary(state)

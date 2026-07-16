@@ -1081,7 +1081,17 @@ task-io-smoke: bootstrap-from-seed
   build tests/task_io_smoke/cancel_timer_drop.spr
   run_once "timer-drop" "done"
   SPROUT_GC_STRESS=1 run_once "timer-drop/stress" "done"
-  echo "==> task-io-smoke ✓ (read-park, accept-park, re-arm, write, cancel-drop, await-guard, timer-drop; interleaved; stress-clean)"
+  # (6) with_timeout I/O-drop (L0.7): a body parked on tcp_accept must be FORCE-DROPPED when its
+  # deadline fires (poll_remove(fd) + reclaim roots+stack), so __scope_join returns instead of
+  # blocking the pump forever. Reaching "done" proves the fd-park drop; a broken drop HANGS.
+  build tests/task_io_smoke/timeout_io_drop.spr
+  run_once "timeout-io-drop" "done"
+  SPROUT_GC_STRESS=1 run_once "timeout-io-drop/stress" "done"
+  # (7) with_timeout MVP boundary (L0.7): timing out a body blocked in a NESTED with_scope join
+  # must LOUD-FAIL (the tree-cancel cascade is deferred), not hang or orphan the inner scope.
+  build tests/task_io_smoke/timeout_nested_loudfail.spr
+  run_expect_fail "timeout-nested-loudfail" "nested scope/await"
+  echo "==> task-io-smoke ✓ (read-park, accept-park, re-arm, write, cancel-drop, await-guard, timer-drop, timeout-drop, timeout-nested-guard; interleaved; stress-clean)"
 
 # Division-by-zero guard regression (CI gate). The fixture divides by a RUNTIME
 # zero (`10 / list_length(argv)` with no args), which neither the compiler nor

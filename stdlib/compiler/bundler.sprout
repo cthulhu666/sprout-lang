@@ -248,6 +248,16 @@ fn read_dotted_ident_at(s: String, bytes: Bytes, b: Int) -> (String, Int) =
 fn has_ctor_export(s: String, bytes: Bytes, b: Int) -> Bool =
   str_starts_with_at_byte(s, skip_spaces_in(s, bytes, b), "(..)")
 
+# Skip a run of space-separated type-parameter idents (e.g. the `a` in `type Foo a (..)`),
+# returning the first non-ident position. Without this, has_ctor_export looks for `(..)`
+# immediately after the type NAME and misses it on a GENERIC type, so a generic ADT's
+# constructors are never exported cross-module. read_ident_at skips leading spaces and returns
+# ("", pos) at the first non-ident char (the `(` of `(..)`, or `=`).
+fn skip_type_params(s: String, bytes: Bytes, b: Int) -> Int =
+  match read_ident_at(s, bytes, b) with
+  | ("", pos) -> pos
+  | (_, b2) -> skip_type_params(s, bytes, b2)
+
 # Returns (module_name, exported_names, ctor_export_type_names).
 # Scans all lines for `module`, `export fn`, `export type`, `export let`, `export class`.
 export fn scan_source_info(src: String) -> (String, List String, List String) =
@@ -274,7 +284,9 @@ fn process_line(src: String, bytes: Bytes, i: Int, nl: Int, mod_name: String, ex
     match read_ident_at(src, bytes, i + 12) with
     | ("", _) -> (mod_name, exported, ctor_types)
     | (name, i2) ->
-        if has_ctor_export(src, bytes, i2) then
+        # Skip any type parameters before looking for `(..)` so a GENERIC type
+        # (`export type Foo a (..)`) exports its constructors like a non-generic one does.
+        if has_ctor_export(src, bytes, skip_type_params(src, bytes, i2)) then
           (mod_name, Cons(name, exported), Cons(name, ctor_types))
         else
           (mod_name, Cons(name, exported), ctor_types)
