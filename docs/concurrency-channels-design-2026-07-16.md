@@ -221,9 +221,11 @@ qualification bundler bug does not apply.
 1. **§9.1 done** — bounded buffered, cap ≥ 1 (this increment).
 2. **§9.2 rendezvous (cap 0)** — the direct sender→receiver handoff, no buffer, both sides
    rendezvous. Go/Kotlin default; a clean separate increment (doubles the send path).
-3. **§9.3 `close` + recv-on-closed** — a producer signals "no more values"; recv on a closed +
-   drained channel returns a done-marker. Return-shape decision (`Maybe a` vs a dedicated
-   `Recv a = Got a | Closed`) to be made then. The most-likely-wanted follow-up for streaming.
+3. **§9.3 `close` + recv-on-closed — DONE (L0.9).** A producer signals "no more values"; recv
+   drains buffered values then returns a done-marker. Return shape chosen: **`Recv a = Got a |
+   Closed`** (dedicated type, extensible to a `Got | Closed | Empty` for a future non-blocking
+   try-recv, where `Maybe` cannot grow a third case). See
+   `docs/concurrency-channel-close-design-2026-07-16.md`.
 4. **§9.4 `select`** — wait on the first-ready of several channel ops.
 
 ## 10. Tests (TDD)

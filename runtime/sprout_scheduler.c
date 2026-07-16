@@ -99,6 +99,8 @@ typedef struct Task {
   struct Task* chan_prev;      /* channel wait-queue links (send_waiters or recv_waiters) */
   struct Task* chan_next;
   int          chan_is_sender; /* 1 = on the channel's send queue, 0 = on its recv queue */
+  int          chan_closed_wake; /* L0.9: 1 iff woken by __chan_close (not a value delivery) — a
+                                    recv-parked task then returns Closed, a send-parked one aborts */
 } Task;
 
 /* How a task is suspended, so force-drop tears down the right registration (poller fd/timer,
@@ -120,6 +122,7 @@ struct Chan {
   Task*        send_tail;
   Task*        recv_head;  /* FIFO of recv-parked tasks (buffer empty) */
   Task*        recv_tail;
+  int          closed;     /* L0.9: set once by __chan_close; recv returns Closed when drained */
   Scope*       scope;      /* the scope that created it (frees it at join) */
   struct Chan* all_prev;   /* global g_all_chans list (for free-at-join + cancel-walk) */
   struct Chan* all_next;
@@ -381,6 +384,7 @@ static void sprout_scheduler_init(void) {
   g_task0.chan_prev = NULL;
   g_task0.chan_next = NULL;
   g_task0.chan_is_sender = 0;
+  g_task0.chan_closed_wake = 0;
   /* task-0 runs with_scope bodies that send/recv on channels; root its delivery slot. */
   sprout_roots_push_ptr(g_task0.roots, &g_task0.chan_pending);
   g_current_task = &g_task0;
@@ -435,6 +439,7 @@ static Task* task_create(Scope* s, long long work, int awaitable) {
   t->chan_prev    = NULL;
   t->chan_next    = NULL;
   t->chan_is_sender = 0;
+  t->chan_closed_wake = 0;
 
   /* Keep the work-closure reachable from spawn until the task first runs: root
    * &work in the task's own context (scanned by the collector via the registry).
@@ -799,6 +804,7 @@ long long __chan_new(long long scope_handle, long long capacity) {
   ch->tail  = 0;
   ch->send_head = ch->send_tail = NULL;
   ch->recv_head = ch->recv_tail = NULL;
+  ch->closed = 0;
   ch->scope = s;
   /* Root every buffer slot once (addresses are stable — the buffer is a fixed malloc). Empty
    * slots hold 0; the mark path is membership-guarded, so a scalar/0 slot is a safe no-op. */
@@ -816,6 +822,9 @@ long long __chan_new(long long scope_handle, long long capacity) {
 long long __chan_send(long long chan_handle, long long value) {
   Chan* ch = chan_of(chan_handle);
   if (ch == NULL) sprout_fail("__chan_send: null channel");
+  /* Sending into a closed channel is a program bug (Go/Kotlin: send-after-close is an error).
+   * Sprout has no recovery, so abort rather than silently dropping the value. */
+  if (ch->closed) sprout_fail("__chan_send: send on closed channel");
 
   /* A waiting receiver (=> buffer empty): hand off directly, buffer stays empty. */
   Task* r = chan_q_pop(&ch->recv_head, &ch->recv_tail);
@@ -839,12 +848,16 @@ long long __chan_send(long long chan_handle, long long value) {
   self->chan_is_sender  = 1;
   chan_q_push(&ch->send_head, &ch->send_tail, self);
   park_to_pump();
-  /* Resumed by a receiver that already moved chan_pending into the buffer and cleared it. */
+  /* Resumed either by a receiver that moved chan_pending into the buffer (normal), or by
+   * chan_close, which wakes send-parked tasks to abort (the value is never delivered). */
+  if (self->chan_closed_wake) sprout_fail("__chan_send: send on closed channel");
   return 0;
 }
 
-/* Receive the next value from `ch` (FIFO). Takes from the buffer (waking a parked sender to
- * refill the freed slot), else parks until a sender hands over a value. */
+/* Receive the next value from `ch` (FIFO), as a `Recv a` (L0.9). Returns `Got v` while values
+ * remain — buffered values drain before any close is observed, waking a parked sender to refill
+ * the freed slot. On an empty channel: `Closed` if it was closed (never parks), else park until a
+ * sender hands over a value or chan_close wakes us with `Closed`. */
 long long __chan_recv(long long chan_handle) {
   Chan* ch = chan_of(chan_handle);
   if (ch == NULL) sprout_fail("__chan_recv: null channel");
@@ -854,7 +867,9 @@ long long __chan_recv(long long chan_handle) {
     ch->buffer[ch->head] = 0;           /* clear so a drained slot pins nothing */
     ch->head = (ch->head + 1) % ch->cap;
     ch->count--;
-    /* A parked sender (buffer was full): move its value into the slot we just freed, FIFO. */
+    /* A parked sender (buffer was full): move its value into the slot we just freed, FIFO.
+     * (After close there are no send-parked tasks — chan_close aborts them — so this is skipped
+     * on a closed channel.) */
     Task* sdr = chan_q_pop(&ch->send_head, &ch->send_tail);
     if (sdr != NULL) {
       ch->buffer[ch->tail] = sdr->chan_pending;
@@ -863,19 +878,48 @@ long long __chan_recv(long long chan_handle) {
       ch->count++;
       chan_wake(sdr);
     }
-    return v;
+    return sprout_chan_make_got(v);      /* boxes Got v; roots v across the allocation */
   }
-  /* Empty: park until a sender places a value in our chan_pending. */
+  /* Empty + closed: end of stream — never park. */
+  if (ch->closed) return sprout_chan_make_closed();
+  /* Empty + open: park until a sender places a value in our chan_pending, or chan_close wakes us. */
   Task* self = g_current_task;
   self->park_kind      = PARK_CHAN;
   self->park_chan      = ch;
   self->chan_is_sender = 0;
   chan_q_push(&ch->recv_head, &ch->recv_tail, self);
   park_to_pump();
-  /* Resumed by a sender that set chan_pending. Read it out and release the pin. */
+  /* Resumed by a sender (value in chan_pending) or by chan_close (no value → Closed). */
+  if (self->chan_closed_wake) {
+    self->chan_closed_wake = 0;
+    return sprout_chan_make_closed();
+  }
   long long v = self->chan_pending;
   self->chan_pending = 0;
-  return v;
+  return sprout_chan_make_got(v);
+}
+
+/* Close `ch`: signal end-of-stream. Sets the closed flag, then wakes every parked task — recv-
+ * parked tasks return `Closed` (buffer is empty by the recv_head-non-empty ⟹ count==0 invariant),
+ * send-parked tasks abort on resume (send on closed). Their held values are dropped (never
+ * delivered; nobody references them). Any task holding the channel may close it. A double close is
+ * a synchronization bug → loud-fail (Go panics on double-close). */
+long long __chan_close(long long chan_handle) {
+  Chan* ch = chan_of(chan_handle);
+  if (ch == NULL) sprout_fail("__chan_close: null channel");
+  if (ch->closed) sprout_fail("__chan_close: channel already closed");
+  ch->closed = 1;
+  for (Task* r = chan_q_pop(&ch->recv_head, &ch->recv_tail); r != NULL;
+       r = chan_q_pop(&ch->recv_head, &ch->recv_tail)) {
+    r->chan_closed_wake = 1;
+    chan_wake(r);
+  }
+  for (Task* sdr = chan_q_pop(&ch->send_head, &ch->send_tail); sdr != NULL;
+       sdr = chan_q_pop(&ch->send_head, &ch->send_tail)) {
+    sdr->chan_closed_wake = 1;
+    chan_wake(sdr);
+  }
+  return 0;
 }
 
 #ifdef __APPLE__

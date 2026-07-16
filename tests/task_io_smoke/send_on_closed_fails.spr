@@ -1,0 +1,17 @@
+import stdlib.task (Scope, with_scope)
+import stdlib.chan (Chan, chan_new, chan_send, chan_close)
+
+# L0.9 close guard: sending into a CLOSED channel must LOUD-FAIL (Go/Kotlin treat send-after-close
+# as an error; Sprout has no recovery, so it aborts rather than silently dropping the value). A
+# broken guard would buffer or hand off the value, letting the program reach the line after.
+fn producer(s: Scope) -> Unit !{IO} =
+  do
+    ch <- chan_new(s, 2)
+    chan_close(ch)
+    chan_send(ch, 1)  # rejected: send on closed channel
+    term_write("should-not-reach\n")
+
+fn main() -> Unit !{IO} =
+  do
+    with_scope(\s -> producer(s))
+    term_write("done\n")

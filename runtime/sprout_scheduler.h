@@ -41,6 +41,12 @@ void sprout_roots_push_ptr(SproutRoots* r, void* slot);
 /* Runtime panic path (backtrace + abort), reusable from the scheduler TU. */
 __attribute__((noreturn)) void sprout_fail(const char* msg);
 
+/* Build a `stdlib.chan.Recv a` (L0.9 channel close). Defined in sprout_runtime.c, where the
+ * static ctor-name lookup and the GC temp-root macros live; __chan_recv calls these to return
+ * `Got v` / `Closed`. sprout_chan_make_got roots `v` across the boxing allocation. */
+long long sprout_chan_make_got(long long v);
+long long sprout_chan_make_closed(void);
+
 /* Task-0 (main) GC root context — the static 131072-slot pool. The scheduler
  * materializes main as a task record pointing at this; main keeps the native
  * stack + this pool (a green main would exhaust it and break the bootstrap). */

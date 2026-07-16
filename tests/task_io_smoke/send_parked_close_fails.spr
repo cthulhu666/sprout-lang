@@ -1,0 +1,26 @@
+import stdlib.task (Scope, with_scope, task_spawn, task_yield)
+import stdlib.chan (Chan, chan_new, chan_send, chan_close)
+
+# L0.9 close guard, send-PARK path (distinct from send_on_closed_fails, which hits the send ENTRY
+# check). A task send-parked on a FULL channel must LOUD-FAIL when the channel is closed under it:
+# chan_close wakes the parked sender, which — on resume, after park_to_pump — sees chan_closed_wake
+# and aborts ("send on closed channel"). A broken post-park check would let the woken sender return
+# normally (reaching "should-not-reach") and the program continue to exit 0.
+fn producer(ch: Chan Int) -> Unit !{IO} =
+  do
+    chan_send(ch, 1)  # buffers into the cap-1 channel (no park)
+    chan_send(ch, 2)  # buffer full -> PARKS holding this value
+    term_write("should-not-reach\n")
+
+fn body(s: Scope) -> Unit !{IO} =
+  do
+    ch <- chan_new(s, 1)
+    task_spawn(s, \_ -> producer(ch))
+    task_yield()      # let the producer buffer 1 then park on the full channel at send 2
+    chan_close(ch)    # wakes the parked sender -> it aborts on resume
+    term_write("closed\n")
+
+fn main() -> Unit !{IO} =
+  do
+    with_scope(\s -> body(s))
+    term_write("done\n")

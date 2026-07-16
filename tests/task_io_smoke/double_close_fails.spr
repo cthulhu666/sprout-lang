@@ -1,0 +1,17 @@
+import stdlib.task (Scope, with_scope)
+import stdlib.chan (Chan, chan_new, chan_close)
+
+# L0.9 close guard: closing an ALREADY-CLOSED channel must LOUD-FAIL (Go panics on double-close —
+# a double close is a synchronization bug). A broken guard would silently no-op the second close,
+# masking the bug and letting the program reach the line after.
+fn producer(s: Scope) -> Unit !{IO} =
+  do
+    ch <- chan_new(s, 2)
+    chan_close(ch)
+    chan_close(ch)  # rejected: channel already closed
+    term_write("should-not-reach\n")
+
+fn main() -> Unit !{IO} =
+  do
+    with_scope(\s -> producer(s))
+    term_write("done\n")

@@ -1,12 +1,26 @@
 import stdlib.test (TestState, new_state, assert_eq, summary)
 import stdlib.task (Scope, with_scope, task_spawn, task_fork, task_await, task_yield)
-import stdlib.chan (Chan, chan_new, chan_send, chan_recv)
+import stdlib.chan (Chan, Recv, Got, Closed, chan_new, chan_send, chan_recv)
 import stdlib.string as string
 
 # L0.8 bounded buffered channels (EXPERIMENTAL). `chan_new(scope, cap)` creates a
 # cap-slot channel tied to `scope` (freed at scope close). `chan_send` parks the
 # task when the buffer is full; `chan_recv` parks it when empty. Values are FIFO.
 # Backed by the scheduler's park/wake mechanism, with the buffer GC-rooted.
+#
+# `chan_recv` returns `Recv a = Got a | Closed` (L0.9). None of these tests close the
+# channel, so `Closed` is unreachable here — the helpers unwrap `Got`; close behavior
+# is covered by test_chan_close.spr.
+
+fn recv_int(ch: Chan Int) -> Int !{IO} =
+  match chan_recv(ch) with
+  | Got v -> v
+  | Closed -> 0  # unreachable: channel is never closed in this file
+
+fn recv_str(ch: Chan String) -> String !{IO} =
+  match chan_recv(ch) with
+  | Got v -> v
+  | Closed -> ""
 
 # --- round-trip within one task: cap-4 buffer, two sends (no park, space free)
 # then two recvs. The simplest happy path — no parking involved. ---
@@ -15,8 +29,8 @@ fn roundtrip(s: Scope) -> Int !{IO} =
     ch <- chan_new(s, 4)
     chan_send(ch, 10)
     chan_send(ch, 20)
-    a <- chan_recv(ch)
-    b <- chan_recv(ch)
+    a <- recv_int(ch)
+    b <- recv_int(ch)
     a + b
 
 # --- backpressure: a cap-2 buffer with a producer that sends 4 values. The
@@ -36,7 +50,7 @@ fn consume(ch: Chan Int, n: Int, acc: Int) -> Int !{IO} =
     acc
   else
     do
-      v <- chan_recv(ch)
+      v <- recv_int(ch)
       consume(ch, n - 1, acc + v)
 
 fn backpressure(s: Scope) -> Int !{IO} =
@@ -55,9 +69,9 @@ fn fan_in(s: Scope) -> Int !{IO} =
     task_spawn(s, \_ -> chan_send(ch, 100))
     task_spawn(s, \_ -> chan_send(ch, 20))
     task_spawn(s, \_ -> chan_send(ch, 3))
-    a <- chan_recv(ch)
-    b <- chan_recv(ch)
-    c <- chan_recv(ch)
+    a <- recv_int(ch)
+    b <- recv_int(ch)
+    c <- recv_int(ch)
     a + b + c
 
 # --- heap-value rooting oracle: two heap Strings sit BUFFERED in the channel
@@ -65,17 +79,17 @@ fn fan_in(s: Scope) -> Int !{IO} =
 # the buffer slots were not rooted, the strings would be collected during the
 # churn and come back corrupted. `noise` is consumed so it is not eliminated. ---
 fn churn(n: Int, acc: String) -> String =
-  if n <= 0 then acc else churn(n - 1, string.concat(acc, "x"))
+  if n <= 0 then acc else churn(n - 1, acc ++ "x")
 
 fn heap_rooting(s: Scope) -> String !{IO} =
   do
     ch <- chan_new(s, 3)
-    chan_send(ch, string.concat("al", "pha"))
-    chan_send(ch, string.concat("be", "ta"))
+    chan_send(ch, "al" ++ "pha")
+    chan_send(ch, "be" ++ "ta")
     let noise = churn(200, "")
-    x <- chan_recv(ch)
-    y <- chan_recv(ch)
-    string.concat(x, string.concat(y, int_to_string(string.length(noise))))
+    x <- recv_str(ch)
+    y <- recv_str(ch)
+    `${x}${y}${string.length(noise)}`
 
 # --- FIFO order: cap-3 buffer, send "a","b","c", recv three. Order-sensitive (unlike the
 # commutative sums above) so a head/tail ring regression is caught. ---
@@ -85,10 +99,10 @@ fn fifo(s: Scope) -> String !{IO} =
     chan_send(ch, "a")
     chan_send(ch, "b")
     chan_send(ch, "c")
-    x <- chan_recv(ch)
-    y <- chan_recv(ch)
-    z <- chan_recv(ch)
-    string.concat(x, string.concat(y, z))
+    x <- recv_str(ch)
+    y <- recv_str(ch)
+    z <- recv_str(ch)
+    `${x}${y}${z}`
 
 # --- chan_pending rooting oracle, DIRECT-HANDOFF path: a forked receiver parks on an empty
 # channel; the owner sends a FRESH heap string (not bound in the owner's frame, so its ONLY
@@ -97,16 +111,16 @@ fn fifo(s: Scope) -> String !{IO} =
 # the churn and the receiver reads garbage. Exercises design §5 mechanism (b), which the
 # buffer-only heap_rooting test above does not (there nothing parks). ---
 fn recv_one(ch: Chan String) -> String !{IO} =
-  chan_recv(ch)
+  recv_str(ch)
 
 fn parked_recv_heap_on(s: Scope, ch: Chan String) -> String !{IO} =
   do
     h <- task_fork(s, \_ -> recv_one(ch))
     task_yield()  # let the receiver reach chan_recv and park
-    chan_send(ch, string.concat("hel", "lo"))  # direct handoff; the temp is not bound here
+    chan_send(ch, "hel" ++ "lo")  # direct handoff; the temp is not bound here
     let noise = churn(300, "")  # GC storm before the receiver runs
     got <- task_await(h)
-    string.concat(got, int_to_string(string.length(noise)))
+    `${got}${string.length(noise)}`
 
 fn parked_recv_heap_driver(s: Scope) -> String !{IO} =
   do
@@ -124,7 +138,7 @@ fn produce_heap(ch: Chan String, tags: String, i: Int, n: Int) -> Unit !{IO} =
     term_write("")
   else
     do
-      chan_send(ch, string.concat(tags, int_to_string(i)))  # 2nd+ send parks holding this value
+      chan_send(ch, `${tags}${i}`)  # 2nd+ send parks holding this value
       produce_heap(ch, tags, i + 1, n)
 
 fn drain_heap(ch: Chan String, n: Int, acc: String) -> String !{IO} =
@@ -133,8 +147,8 @@ fn drain_heap(ch: Chan String, n: Int, acc: String) -> String !{IO} =
   else
     do
       let noise = churn(120, "")  # GC while a sender is parked holding a value
-      v <- chan_recv(ch)
-      drain_heap(ch, n - 1, string.concat(acc, v))
+      v <- recv_str(ch)
+      drain_heap(ch, n - 1, acc ++ v)
 
 fn sendpark_heap(s: Scope) -> String !{IO} =
   do

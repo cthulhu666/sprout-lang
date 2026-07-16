@@ -3918,6 +3918,20 @@ long long sprout_make0(long long tag) {
 long long sprout_make1(long long tag, long long a0) {
   return sprout_make_registered_obj(1, tag, a0, 0, 0, "sprout_make1: out of memory");
 }
+/* L0.9 channels: build a `stdlib.chan.Recv a` value on the scheduler's behalf. The scheduler TU
+ * cannot see the static ctor-name lookup or the GC temp-root macros, so `__chan_recv` calls these.
+ * `Got v` roots `v` across the boxing allocation (which may trigger a collection). Qualified ctor
+ * names are collision-safe — a bare `Got`/`Closed` could be shadowed by another module's ctor. */
+long long sprout_chan_make_got(long long v) {
+  long long rooted = v;
+  SPROUT_GC_PUSH_I64_LOCAL(rooted);
+  long long obj = sprout_make1(find_ctor_tag_by_name("stdlib.chan.Got"), rooted);
+  SPROUT_GC_POP_LOCALS(1);
+  return obj;
+}
+long long sprout_chan_make_closed(void) {
+  return sprout_make0(find_ctor_tag_by_name("stdlib.chan.Closed"));
+}
 long long sprout_make2(long long tag, long long a0, long long a1) {
   return sprout_make_registered_obj(2, tag, a0, a1, 0, "sprout_make2: out of memory");
 }

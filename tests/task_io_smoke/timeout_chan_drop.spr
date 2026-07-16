@@ -1,6 +1,5 @@
 import stdlib.task (Scope, with_scope, with_timeout, TimeoutResult, Completed, Expired)
-import stdlib.chan (Chan, chan_new, chan_recv)
-import stdlib.string as string
+import stdlib.chan (Chan, Recv, Got, Closed, chan_new, chan_recv)
 
 # L0.8 with_timeout over a channel recv (EXPERIMENTAL). A timed body that parks in
 # chan_recv on an empty channel nobody sends to must be FORCE-DROPPED when its deadline
@@ -14,10 +13,12 @@ import stdlib.string as string
 # user global). Pre-existing compiler name-resolution bug, tracked separately.
 fn timed_recv(ch: Chan Int) -> Int !{IO} =
   do
-    let held = string.concat("live-", "root")
-    v <- chan_recv(ch)  # parks here forever — nobody ever sends
+    let held = "live-" ++ "root"
+    r <- chan_recv(ch)  # parks here forever — nobody ever sends
     term_write(held)  # unreachable; forces `held` rooted across the park
-    v
+    match r with
+    | Got v -> v
+    | Closed -> 0
 
 fn run(s: Scope) -> Unit !{IO} =
   do

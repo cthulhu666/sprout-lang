@@ -12,21 +12,30 @@ import stdlib.task (Scope, scope_handle)
 # reclaimed). Consequences: there are no top-level channels, and a channel cannot outlive
 # the scope that created it.
 #
-# MVP boundary (L0.8): bounded buffered only. Rendezvous (capacity 0), `close` +
-# recv-on-closed, and `select` are later increments. Backpressure delivery is cooperative
-# and integrates with cancellation — a task parked in `chan_send`/`chan_recv` when its
-# scope is cancelled (or a `with_timeout` deadline fires) is force-dropped by the scheduler.
-# See docs/concurrency-channels-design-2026-07-16.md.
+# MVP boundary: bounded buffered only. Rendezvous (capacity 0) and `select` are later
+# increments. `close` + recv-on-closed landed in L0.9 (below). Backpressure delivery is
+# cooperative and integrates with cancellation — a task parked in `chan_send`/`chan_recv` when
+# its scope is cancelled (or a `with_timeout` deadline fires) is force-dropped by the scheduler.
+# See docs/concurrency-channels-design-2026-07-16.md and
+# docs/concurrency-channel-close-design-2026-07-16.md.
 
 export type Chan a =
   | Chan Int
+
+# The outcome of `chan_recv` (L0.9). `Got v` carries the next value; `Closed` means the channel
+# was closed AND fully drained (no more values will ever arrive). Buffered values always drain as
+# `Got` before `Closed` is reported. `(..)` exports the constructors so consumers can match them.
+export type Recv a (..) =
+  | Got a
+  | Closed
 
 # Runtime primitives (green-thread scheduler; cannot be expressed in Sprout — they park and
 # resume tasks via context switching). Internal: the public API below wraps them.
 # See runtime/APPROVED_BUILTINS.
 extern fn __chan_new(scope_id: Int, capacity: Int) -> Int !{IO}
 extern fn __chan_send(chan_id: Int, value: a) -> Unit !{IO}
-extern fn __chan_recv(chan_id: Int) -> a !{IO}
+extern fn __chan_recv(chan_id: Int) -> Recv a !{IO}
+extern fn __chan_close(chan_id: Int) -> Unit !{IO}
 
 # Create a `capacity`-slot buffered channel belonging to `scope`, freed when the scope
 # closes. `capacity` must be `>= 1`; the runtime loud-fails on a smaller value (rendezvous
@@ -43,8 +52,18 @@ export fn chan_send(ch: Chan a, value: a) -> Unit !{IO} =
   match ch with
   | Chan cid -> __chan_send(cid, value)
 
-# Receive the next value from `ch` in FIFO order. If the buffer is empty, the current task
-# parks until a sender provides a value.
-export fn chan_recv(ch: Chan a) -> a !{IO} =
+# Receive the next value from `ch` in FIFO order, as a `Recv a`. Returns `Got v` while values
+# remain (buffered values drain first). If the buffer is empty and the channel is open, the
+# current task parks until a sender provides a value. Once the channel is closed AND drained,
+# returns `Closed` without parking (and a task already parked here is woken with `Closed`).
+export fn chan_recv(ch: Chan a) -> Recv a !{IO} =
   match ch with
   | Chan cid -> __chan_recv(cid)
+
+# Close `ch`: signal that no more values will be sent. Receivers drain any buffered values
+# (`Got`), then observe `Closed`; a receiver parked on an empty channel is woken with `Closed`.
+# Any task holding the channel may close it. LOUD-FAILS on a send into a closed channel or a
+# double close — both are program bugs Sprout cannot recover from (no exceptions).
+export fn chan_close(ch: Chan a) -> Unit !{IO} =
+  match ch with
+  | Chan cid -> __chan_close(cid)

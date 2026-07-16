@@ -1,6 +1,5 @@
 import stdlib.task (Scope, with_scope, task_fork, task_spawn, task_yield, scope_cancel)
-import stdlib.chan (Chan, chan_new, chan_recv)
-import stdlib.string as string
+import stdlib.chan (Chan, Recv, Got, Closed, chan_new, chan_recv)
 
 # L0.8 channel-drop cancellation (EXPERIMENTAL). A task suspended in chan_recv on an
 # empty channel that nobody ever sends to cannot check task_cancelled — it is parked on
@@ -16,10 +15,12 @@ import stdlib.string as string
 # and stack together (the ASan-gated force-drop UAF path).
 fn recv_forever(ch: Chan Int) -> Int !{IO} =
   do
-    let held = string.concat("live-", "root")
-    v <- chan_recv(ch)  # parks here forever — nobody ever sends
+    let held = "live-" ++ "root"
+    r <- chan_recv(ch)  # parks here forever — nobody ever sends
     term_write(held)  # unreachable; forces `held` rooted across the park
-    v
+    match r with
+    | Got v -> v
+    | Closed -> 0
 
 fn recv_forever_unit(ch: Chan Int) -> Unit !{IO} =
   do

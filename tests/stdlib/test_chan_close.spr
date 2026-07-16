@@ -1,0 +1,76 @@
+import stdlib.test (TestState, new_state, assert_eq, summary)
+import stdlib.task (Scope, with_scope, task_fork, task_await, task_yield)
+import stdlib.chan (Chan, Recv, Got, Closed, chan_new, chan_send, chan_recv, chan_close)
+import stdlib.string as string
+
+# L0.9 channel close + recv-on-closed (EXPERIMENTAL). `chan_close(ch)` signals end-of-stream;
+# `chan_recv` returns `Recv a = Got a | Closed` — `Got v` while values remain (buffered values
+# drain first, FIFO), `Closed` once the channel is closed AND drained. A receiver already parked
+# on an empty channel is woken and observes `Closed`. See docs/concurrency-channel-close-design.
+
+# recv one value as a tagged String: the payload, or "." for Closed. `Recv` is a user ADT (not
+# Maybe/Result), so the do-bind never strips it — we match directly.
+fn recv_str(ch: Chan String) -> String !{IO} =
+  match chan_recv(ch) with
+  | Got v -> v
+  | Closed -> "."
+
+# --- drain-then-Closed: two buffered values, then close. The two recvs drain the buffer as
+# `Got` (closing must NOT discard buffered values), and only the third — on the now-empty,
+# closed channel — returns `Closed`. Order-sensitive. ---
+fn drain_then_closed(s: Scope) -> String !{IO} =
+  do
+    ch <- chan_new(s, 4)
+    chan_send(ch, "a")
+    chan_send(ch, "b")
+    chan_close(ch)
+    r1 <- recv_str(ch)  # "a"  (buffered)
+    r2 <- recv_str(ch)  # "b"  (buffered)
+    r3 <- recv_str(ch)  # "."  (empty + closed)
+    `${r1}${r2}${r3}`
+
+# --- close wakes a parked receiver: a forked receiver parks on an empty channel; the owner
+# closes it; the receiver is woken and returns `Closed`. Without the close-wake the receiver
+# parks forever and the scope cannot join (a hang). ---
+fn recv_marker(ch: Chan String) -> String !{IO} =
+  match chan_recv(ch) with
+  | Got v -> `got${v}`
+  | Closed -> "closed"
+
+fn close_wakes_receiver(s: Scope) -> String !{IO} =
+  do
+    ch <- chan_new(s, 1)
+    h <- task_fork(s, \_ -> recv_marker(ch))
+    task_yield()  # let the receiver reach chan_recv and park on the empty buffer
+    chan_close(ch)  # wakes the parked receiver -> Closed
+    got <- task_await(h)  # "closed"
+    got
+
+# --- heap values + close under a GC storm: two heap Strings sit buffered while a churn forces a
+# collection AFTER close, then drain as `Got` and finally `Closed`. Guards the `Got`-payload
+# rooting across the runtime's Got allocation (sprout_make1). `noise` is consumed so it is live. ---
+fn churn(n: Int, acc: String) -> String =
+  if n <= 0 then acc else churn(n - 1, acc ++ "x")
+
+fn heap_close(s: Scope) -> String !{IO} =
+  do
+    ch <- chan_new(s, 3)
+    chan_send(ch, "al" ++ "pha")
+    chan_send(ch, "be" ++ "ta")
+    chan_close(ch)
+    let noise = churn(200, "")
+    r1 <- recv_str(ch)  # "alpha"
+    r2 <- recv_str(ch)  # "beta"
+    r3 <- recv_str(ch)  # "."
+    `${r1}${r2}${r3}${string.length(noise)}`
+
+fn main() -> Unit !{IO} =
+  do
+    state <- new_state()
+    r1 <- with_scope(\s -> drain_then_closed(s))
+    assert_eq(state, "chan close: buffered values drain (Got) before Closed", r1, "ab.")
+    r2 <- with_scope(\s -> close_wakes_receiver(s))
+    assert_eq(state, "chan close wakes a parked receiver with Closed", r2, "closed")
+    r3 <- with_scope(\s -> heap_close(s))
+    assert_eq(state, "chan close: buffered heap values survive GC, drain then Closed", r3, "alphabeta.200")
+    summary(state)
