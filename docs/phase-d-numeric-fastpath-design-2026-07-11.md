@@ -1,6 +1,8 @@
-# Phase D — numeric fast-path design (proposal, needs approval)
+# Phase D — numeric fast-path design
 
-Status: proposal / design-for-approval (do not implement before sign-off)
+Status: **B1-Double + B2 LANDED** (see §4 banners); B3 and A remain proposal / design-for-approval
+(do not implement those before sign-off). Supersedes the now-removed
+`phase-d-b1-b2-handoff-2026-07-11.md`, whose B2 mid-investigation state is fully consumed.
 Date: 2026-07-11
 Scope: `stdlib/compiler/` (codegen + rooting), `runtime/sprout_runtime.c` (Vector layout ABI),
 `stdlib.mutable` Double kernels. Depends on the profiling evidence in
