@@ -1,15 +1,19 @@
 module examples.http_web_server
-import stdlib.http_server (HttpRequest, HttpServerResponse, Route, dispatch, serve, ok, with_header, request_method, request_path, request_body)
+import stdlib.http_server (HttpRequest, HttpServerResponse, Route, dispatch, serve, ok, with_header, response, request_method, request_path, request_body)
+import stdlib.template (render_string)
+import stdlib.json (Json, JsonObject, JsonObjectCons, JsonObjectNil, string, int, bool, array_from_list)
 
 # A minimal but usable web server: a route table dispatched by method + path, with
 # each handler choosing its own content type. `serve` accepts connections forever,
-# each on its own green task, so a slow client never blocks the others.
+# each on its own green task, so a slow client never blocks the others. The /users
+# route renders a dynamic HTML page from a template (stdlib.template) + JSON data.
 #
 # Run:
 #   mise exec -- just run examples/http_web_server.sprout
 #
 # Then:
-#   curl -i http://127.0.0.1:8082/            # HTML
+#   curl -i http://127.0.0.1:8082/            # static HTML
+#   curl -i http://127.0.0.1:8082/users       # HTML rendered from a template + data
 #   curl -i http://127.0.0.1:8082/health      # JSON
 #   curl -i --data 'hi there' http://127.0.0.1:8082/echo   # echoes the POST body
 #   curl -i http://127.0.0.1:8082/missing     # 404 (dispatch fallback)
@@ -23,7 +27,7 @@ fn json(body: String) -> HttpServerResponse =
   with_header("content-type", "application/json", ok(body))
 
 fn home(req: HttpRequest) -> HttpServerResponse =
-  html("<!doctype html><h1>Hello from Sprout</h1><p>See <a href='/health'>/health</a>.</p>")
+  html("<!doctype html><h1>Hello from Sprout</h1><p>See <a href='/users'>/users</a> or <a href='/health'>/health</a>.</p>")
 
 fn health(req: HttpRequest) -> HttpServerResponse =
   json("{\"status\":\"ok\"}")
@@ -31,10 +35,41 @@ fn health(req: HttpRequest) -> HttpServerResponse =
 fn echo(req: HttpRequest) -> HttpServerResponse =
   ok(`${request_method(req)} ${request_path(req)}: ${request_body(req)}`)
 
+# The HTML template. `{{ }}` values are auto-escaped, so a name containing `&` or `<>`
+# renders as entities (no HTML injection). `{% for %}`/`{% if %}` drive the list.
+# Assembled from single-line literals joined with `\n` (a multi-line backtick would be
+# reformatted by `just fmt`, which treats a template's later lines as code).
+fn users_template() -> String =
+  "<!doctype html>\n"
+    ++ "<title>Users</title>\n"
+    ++ "<h1>Users ({{ count }})</h1>\n"
+    ++ "<ul>\n"
+    ++ "{% for user in users %}  <li>{{ user.name }}{% if user.admin %} <strong>(admin)</strong>{% endif %}</li>\n"
+    ++ "{% endfor %}</ul>"
+
+fn user_row(name: String, admin: Bool) -> Json =
+  JsonObject(JsonObjectCons("name", string(name), JsonObjectCons("admin", bool(admin), JsonObjectNil)))
+
+# The context is a json.Json object. `Tom & Jerry` and `Ada <Countess>` exercise the
+# auto-escaper in the rendered page.
+fn users_data() -> Json =
+  JsonObject(JsonObjectCons("count", int(3),
+    JsonObjectCons("users", array_from_list([
+      user_row("Ada Lovelace", true),
+      user_row("Tom & Jerry", false),
+      user_row("Ada <Countess>", false)
+    ]), JsonObjectNil)))
+
+fn users(req: HttpRequest) -> HttpServerResponse =
+  match render_string(users_template(), users_data()) with
+  | Ok body -> html(body)
+  | Err _ -> response(500, "template render error")
+
 # The route table. `dispatch` scans it in order and 404s when nothing matches.
 fn routes() -> Vec Route =
   vec_from_list([
     Route("GET", "/", home),
+    Route("GET", "/users", users),
     Route("GET", "/health", health),
     Route("POST", "/echo", echo)
   ])
