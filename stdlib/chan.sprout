@@ -2,21 +2,24 @@ module stdlib.chan
 
 import stdlib.task (Scope, scope_handle)
 
-# Layer-0 channels (EXPERIMENTAL): bounded buffered FIFO queues for streaming values
-# between cooperative green tasks (see stdlib.task). A channel has a fixed capacity of
-# `>= 1` slots. `chan_send` parks the current task when the buffer is full; `chan_recv`
-# parks it when the buffer is empty; the scheduler runs the siblings that make progress.
+# Layer-0 channels (EXPERIMENTAL): FIFO queues for streaming values between cooperative green
+# tasks (see stdlib.task). A channel has a fixed capacity of `>= 0` slots. With capacity `>= 1`
+# it is BOUNDED BUFFERED: `chan_send` parks the current task when the buffer is full, `chan_recv`
+# parks it when the buffer is empty. With capacity `0` it is a RENDEZVOUS (unbuffered) channel:
+# there is no buffer, so a send always parks until a receiver takes the value directly, and a
+# receive always parks until a sender provides one (Go/Kotlin default). Either way the scheduler
+# runs the siblings that make progress.
 #
 # Channels are tied to a `Scope`: created with `chan_new(scope, capacity)` and freed when
 # that scope closes (Sprout has no finalizers, so a free-floating channel could not be
 # reclaimed). Consequences: there are no top-level channels, and a channel cannot outlive
 # the scope that created it.
 #
-# MVP boundary: bounded buffered only. Rendezvous (capacity 0) and `select` are later
-# increments. `close` + recv-on-closed landed in L0.9 (below). Backpressure delivery is
-# cooperative and integrates with cancellation — a task parked in `chan_send`/`chan_recv` when
-# its scope is cancelled (or a `with_timeout` deadline fires) is force-dropped by the scheduler.
-# See docs/concurrency-channels-design-2026-07-16.md and
+# MVP boundary: bounded buffered (L0.8) + rendezvous (L0.10) + `close`/recv-on-closed (L0.9).
+# `select` (multiplexing) is a later increment. Delivery is cooperative and integrates with
+# cancellation — a task parked in `chan_send`/`chan_recv` when its scope is cancelled (or a
+# `with_timeout` deadline fires) is force-dropped by the scheduler. See
+# docs/concurrency-channels-design-2026-07-16.md and
 # docs/concurrency-channel-close-design-2026-07-16.md.
 
 export type Chan a =
@@ -37,25 +40,26 @@ extern fn __chan_send(chan_id: Int, value: a) -> Unit !{IO}
 extern fn __chan_recv(chan_id: Int) -> Recv a !{IO}
 extern fn __chan_close(chan_id: Int) -> Unit !{IO}
 
-# Create a `capacity`-slot buffered channel belonging to `scope`, freed when the scope
-# closes. `capacity` must be `>= 1`; the runtime loud-fails on a smaller value (rendezvous
-# is a later increment, so a zero-capacity request is rejected rather than silently treated
-# as unbuffered).
+# Create a `capacity`-slot channel belonging to `scope`, freed when the scope closes.
+# `capacity >= 1` is bounded buffered; `capacity == 0` is a rendezvous (unbuffered) channel
+# (direct sender→receiver hand-off). `capacity < 0` loud-fails.
 # `scope_handle` (from stdlib.task) reads the scope's raw scheduler handle without exposing
 # the opaque `Scope` constructor to this module — `chan_new` never destructures a `Scope`.
 export fn chan_new(scope: Scope, capacity: Int) -> Chan a !{IO} =
   Chan(__chan_new(scope_handle(scope), capacity))
 
 # Send `value` into `ch`. Returns once the value is buffered (or handed directly to a waiting
-# receiver). If the buffer is full, the current task parks until a receiver frees a slot.
+# receiver). If the buffer is full — or the channel is rendezvous (capacity 0, no buffer) with no
+# receiver ready — the current task parks until a receiver takes the value.
 export fn chan_send(ch: Chan a, value: a) -> Unit !{IO} =
   match ch with
   | Chan cid -> __chan_send(cid, value)
 
 # Receive the next value from `ch` in FIFO order, as a `Recv a`. Returns `Got v` while values
-# remain (buffered values drain first). If the buffer is empty and the channel is open, the
-# current task parks until a sender provides a value. Once the channel is closed AND drained,
-# returns `Closed` without parking (and a task already parked here is woken with `Closed`).
+# remain (buffered values drain first, or on a rendezvous channel takes a waiting sender's value
+# directly). If the buffer is empty (rendezvous: always) and the channel is open, the current task
+# parks until a sender provides a value. Once the channel is closed AND drained, returns `Closed`
+# without parking (and a task already parked here is woken with `Closed`).
 export fn chan_recv(ch: Chan a) -> Recv a !{IO} =
   match ch with
   | Chan cid -> __chan_recv(cid)

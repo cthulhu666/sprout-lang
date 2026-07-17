@@ -792,12 +792,10 @@ long long __task_sleep(long long ms) {
 long long __chan_new(long long scope_handle, long long capacity) {
   Scope* s = scope_of(scope_handle);
   if (s == NULL) sprout_fail("__chan_new: null scope");
-  if (capacity < 1)
-    sprout_fail("__chan_new: capacity must be >= 1 (rendezvous channels are not yet supported)");
+  if (capacity < 0)
+    sprout_fail("__chan_new: capacity must be >= 0 (0 = rendezvous / unbuffered)");
   Chan* ch = (Chan*)malloc(sizeof(Chan));
   if (ch == NULL) sprout_fail("__chan_new: out of memory (channel record)");
-  ch->buffer = (long long*)malloc((size_t)capacity * sizeof(long long));
-  if (ch->buffer == NULL) sprout_fail("__chan_new: out of memory (channel buffer)");
   ch->cap   = capacity;
   ch->count = 0;
   ch->head  = 0;
@@ -806,12 +804,24 @@ long long __chan_new(long long scope_handle, long long capacity) {
   ch->recv_head = ch->recv_tail = NULL;
   ch->closed = 0;
   ch->scope = s;
-  /* Root every buffer slot once (addresses are stable — the buffer is a fixed malloc). Empty
-   * slots hold 0; the mark path is membership-guarded, so a scalar/0 slot is a safe no-op. */
-  ch->roots = sprout_roots_new((size_t)capacity);
-  for (long long i = 0; i < capacity; i++) {
-    ch->buffer[i] = 0;
-    sprout_roots_push_ptr(ch->roots, &ch->buffer[i]);
+  if (capacity == 0) {
+    /* Rendezvous: no buffer — every value is handed directly from a sender to a receiver, so
+     * there is nothing to root. Keep an empty (registered) roots context so the free path at
+     * __scope_join stays uniform, and avoid malloc(0) (implementation-defined, may return NULL
+     * which the OOM checks would misread). The pending value lives in the parked task's own
+     * `chan_pending`, already rooted by that task's root context. */
+    ch->buffer = NULL;
+    ch->roots  = sprout_roots_new(1);
+  } else {
+    ch->buffer = (long long*)malloc((size_t)capacity * sizeof(long long));
+    if (ch->buffer == NULL) sprout_fail("__chan_new: out of memory (channel buffer)");
+    /* Root every buffer slot once (addresses are stable — the buffer is a fixed malloc). Empty
+     * slots hold 0; the mark path is membership-guarded, so a scalar/0 slot is a safe no-op. */
+    ch->roots = sprout_roots_new((size_t)capacity);
+    for (long long i = 0; i < capacity; i++) {
+      ch->buffer[i] = 0;
+      sprout_roots_push_ptr(ch->roots, &ch->buffer[i]);
+    }
   }
   all_chans_push(ch);
   return (long long)(intptr_t)ch;
@@ -879,6 +889,19 @@ long long __chan_recv(long long chan_handle) {
       chan_wake(sdr);
     }
     return sprout_chan_make_got(v);      /* boxes Got v; roots v across the allocation */
+  }
+  /* Rendezvous (cap 0): a sender is parked waiting to hand its value to us — take it directly and
+   * wake the sender, no buffer involved. UNREACHABLE for cap >= 1 (a sender parks only when the
+   * buffer is full, count == cap >= 1, so count == 0 implies no send-waiters); the buffered drain
+   * above handles a parked sender via its own refill. GC-safe by parity with that drain: the value
+   * comes from the sender's rooted `chan_pending`, chan_wake allocates nothing, make_got roots it
+   * across the box. */
+  Task* rv_sdr = chan_q_pop(&ch->send_head, &ch->send_tail);
+  if (rv_sdr != NULL) {
+    long long v = rv_sdr->chan_pending;
+    rv_sdr->chan_pending = 0;
+    chan_wake(rv_sdr);
+    return sprout_chan_make_got(v);
   }
   /* Empty + closed: end of stream — never park. */
   if (ch->closed) return sprout_chan_make_closed();

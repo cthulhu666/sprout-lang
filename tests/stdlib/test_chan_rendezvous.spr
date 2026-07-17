@@ -1,0 +1,109 @@
+import stdlib.test (TestState, new_state, assert_eq, summary)
+import stdlib.task (Scope, with_scope, task_spawn, task_fork, task_await, task_yield)
+import stdlib.chan (Chan, Recv, Got, Closed, chan_new, chan_send, chan_recv)
+import stdlib.mutable (MutVec, mutvec_new, mutvec_get, mutvec_set)
+import stdlib.string as string
+
+# Rendezvous (capacity-0) channels (EXPERIMENTAL). `chan_new(scope, 0)` creates an UNBUFFERED
+# channel: a send does not complete until a receiver takes the value, and a receive does not
+# complete until a sender provides one (Go/Kotlin default). The transfer is a direct hand-off
+# through the scheduler — no buffer slot ever holds the value.
+#
+# These tests are DISCRIMINATING: each would behave differently on a buffered channel. The
+# core new mechanism is the recv-side "a sender is already parked, take its value directly"
+# hand-off; without it, a rendezvous send and recv would both park, blind to each other, and
+# the pump would deadlock-panic (that is the RED the implementation was verified against).
+
+fn recv_int(ch: Chan Int) -> Int !{IO} =
+  match chan_recv(ch) with
+  | Got v -> v
+  | Closed -> -1  # unreachable: channel is never closed in this file
+
+fn recv_str(ch: Chan String) -> String !{IO} =
+  match chan_recv(ch) with
+  | Got v -> v
+  | Closed -> ""
+
+fn cell_get(c: MutVec Int) -> Int !{IO} =
+  match mutvec_get(c, 0) with
+  | Just n -> n
+  | Nothing -> -1  # unreachable: the cell always has index 0
+
+# --- send BLOCKS until received (the defining rendezvous property, as a VALUE) ---
+# A forked producer sends a value then flips a shared cell to 1. `task_yield` lets the producer
+# reach the send; on a cap-0 channel that send PARKS (no receiver yet) so the cell is STILL 0
+# when we read it. Only after we `chan_recv` (the direct hand-off) does the producer become
+# runnable and eventually set the cell. `done_before` therefore MUST be 0 for rendezvous — on a
+# buffered channel the send would return immediately and `done_before` would be 1. That single
+# value is what separates rendezvous from buffered here. ---
+fn send_then_flag(ch: Chan Int, done: MutVec Int) -> Unit !{IO} =
+  do
+    chan_send(ch, 42)  # parks here: no receiver is ready on a cap-0 channel
+    mutvec_set(done, 0, 1)
+
+fn send_blocks(s: Scope) -> Int !{IO} =
+  do
+    ch <- chan_new(s, 0)
+    done <- mutvec_new(1, 0)
+    h <- task_fork(s, \_ -> send_then_flag(ch, done))
+    task_yield()  # let the producer reach (and park on) the send
+    done_before <- cell_get(done)  # 0 for rendezvous (send has NOT completed), 1 if buffered
+    r <- recv_int(ch)  # direct hand-off: take the parked sender's value, wake it
+    _ <- task_await(h)  # producer runs its tail, sets the cell to 1
+    done_before * 100 + r  # 0*100 + 42 = 42  (buffered would be 100 + 42 = 142)
+
+# --- FIFO over rendezvous: producer sends 1,2,3; consumer recvs 3. With no buffer, EVERY send
+# rendezvous-blocks and each recv either hands off to (or is handed off by) the counterpart. The
+# consumer's recv that finds an already-parked sender exercises the new recv-side branch; without
+# it the second exchange deadlocks. Sum is order-independent, but reaching it at all is the test. ---
+fn produce(ch: Chan Int, i: Int, n: Int) -> Unit !{IO} =
+  if i > n then
+    term_write("")
+  else
+    do
+      chan_send(ch, i)  # blocks until the consumer takes it
+      produce(ch, i + 1, n)
+
+fn consume(ch: Chan Int, n: Int, acc: Int) -> Int !{IO} =
+  if n <= 0 then
+    acc
+  else
+    do
+      v <- recv_int(ch)
+      consume(ch, n - 1, acc + v)
+
+fn fifo(s: Scope) -> Int !{IO} =
+  do
+    ch <- chan_new(s, 0)
+    task_spawn(s, \_ -> produce(ch, 1, 3))
+    consume(ch, 3, 0)  # 1 + 2 + 3 = 6
+
+# --- heap-value hand-off across a GC storm: a producer sends a fresh heap String and PARKS
+# holding it (no receiver yet); a churn loop forces a GC while the value is in flight; the recv
+# then takes it via the new sender-hand-off branch. If the parked sender's value were not rooted
+# the receiver would read garbage. (A send-parked value is also pinned by the sender's own
+# argument slot, so this does not isolate `chan_pending` rooting — the parked-RECEIVER oracle in
+# test_chan.spr does that; here we cover the new branch reading a heap value under stress.) ---
+fn churn(n: Int, acc: String) -> String =
+  if n <= 0 then acc else churn(n - 1, acc ++ "x")
+
+fn heap_handoff(s: Scope) -> String !{IO} =
+  do
+    ch <- chan_new(s, 0)
+    h <- task_fork(s, \_ -> chan_send(ch, "wor" ++ "ld"))  # parks holding "world"
+    task_yield()  # let the producer park on the send
+    let noise = churn(300, "")  # GC storm while the value sits in the parked sender
+    r <- recv_str(ch)  # take it via the new sender-hand-off branch
+    _ <- task_await(h)
+    `${r}${string.length(noise)}`  # "world300"
+
+fn main() -> Unit !{IO} =
+  do
+    state <- new_state()
+    r1 <- with_scope(\s -> send_blocks(s))
+    assert_eq(state, "rendezvous send blocks until a receiver takes the value", r1, 42)
+    r2 <- with_scope(\s -> fifo(s))
+    assert_eq(state, "rendezvous FIFO: producer/consumer hand off three values", r2, 6)
+    r3 <- with_scope(\s -> heap_handoff(s))
+    assert_eq(state, "rendezvous heap hand-off survives a GC storm", r3, "world300")
+    summary(state)

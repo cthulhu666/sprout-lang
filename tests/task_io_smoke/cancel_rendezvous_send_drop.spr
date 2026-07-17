@@ -1,0 +1,30 @@
+import stdlib.task (Scope, with_scope, task_fork, task_spawn, task_yield, scope_cancel)
+import stdlib.chan (Chan, chan_new, chan_send)
+
+# Rendezvous send-park drop (L0.10, EXPERIMENTAL). On a cap-0 channel a sender with no ready
+# receiver parks on the channel's SEND wait-queue (unlike the buffered fixtures, which only ever
+# drop RECV-parked tasks — a buffered sender parks only when the ring is full). scope_cancel must
+# force-drop such a send-parked task: unlink it from send_waiters and reclaim it. A broken drop
+# leaves live > 0 with an empty ready queue AND poller (channel-parked tasks are off g_io_head),
+# tripping the deadlock panic — loud, not a 15s hang. Both spawn kinds are exercised.
+# The task binds a HEAP string `held` before the park and uses it after, so it is suspended with a
+# GC root pointing INTO its green stack — reclaim must free roots and stack together.
+fn send_forever(ch: Chan String) -> Unit !{IO} =
+  do
+    let held = "live-" ++ "root"
+    chan_send(ch, "pay" ++ "load")  # parks here forever — nobody ever receives
+    term_write(held)  # unreachable; forces `held` rooted across the park
+
+fn body(s: Scope) -> Unit !{IO} =
+  do
+    ch <- chan_new(s, 0)
+    _fork <- task_fork(s, \_ -> send_forever(ch))  # awaitable, send-parks
+    task_spawn(s, \_ -> send_forever(ch))  # fire-and-forget, send-parks
+    task_yield()  # let both reach chan_send and park
+    scope_cancel(s)  # force-drop both send-parked tasks
+    term_write("cancelled\n")  # owner continues; awaits neither
+
+fn main() -> Unit !{IO} =
+  do
+    with_scope(\s -> body(s))
+    term_write("done\n")  # reached only if both send-parked tasks were dropped by cancel

@@ -218,9 +218,20 @@ qualification bundler bug does not apply.
 
 ## 9. Deferred (fast-follows)
 
-1. **§9.1 done** — bounded buffered, cap ≥ 1 (this increment).
-2. **§9.2 rendezvous (cap 0)** — the direct sender→receiver handoff, no buffer, both sides
-   rendezvous. Go/Kotlin default; a clean separate increment (doubles the send path).
+1. **§9.1 done (L0.8)** — bounded buffered, cap ≥ 1.
+2. **§9.2 rendezvous (cap 0) — DONE (L0.10).** Direct sender→receiver hand-off, no buffer, both
+   sides rendezvous (Go/Kotlin default). Smaller than the "doubles the send path" this doc
+   anticipated: the send path was already correct for cap 0 — its `recv_waiters`-first check hands
+   off to a waiting receiver, and its `count < cap` buffer step is dead (`0 < 0`), so it parks. The
+   only new mechanism is the symmetric recv-side branch — on an empty channel with a parked sender,
+   take the sender's value directly and wake it — which is provably unreachable for cap ≥ 1 (a
+   sender parks only when `count == cap ≥ 1`, so `count == 0` ⇒ no send-waiters). `__chan_new` now
+   accepts 0 (no buffer: `buffer = NULL`, empty roots context; `< 0` still loud-fails). The
+   deadlock-panic (§6.3) stays correct: send checks `recv_waiters` and recv checks `send_waiters`
+   before either parks, so a cap-0 channel never holds both a parked sender and a parked receiver.
+   Tests: `tests/stdlib/test_chan_rendezvous.spr` (send-blocks-until-received value oracle, FIFO
+   hand-off, heap hand-off under GC stress) + `tests/task_io_smoke/cancel_rendezvous_send_drop.spr`
+   (force-drop of a send-parked task). RED→GREEN verified via the deadlock-panic negative control.
 3. **§9.3 `close` + recv-on-closed — DONE (L0.9).** A producer signals "no more values"; recv
    drains buffered values then returns a done-marker. Return shape chosen: **`Recv a = Got a |
    Closed`** (dedicated type, extensible to a `Got | Closed | Empty` for a future non-blocking

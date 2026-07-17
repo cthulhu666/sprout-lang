@@ -1,0 +1,18 @@
+import stdlib.task (Scope, with_scope)
+import stdlib.chan (Chan, chan_new)
+
+# Channel capacity guard: chan_new with a NEGATIVE capacity must LOUD-FAIL. Capacity 0 is now
+# valid (rendezvous / unbuffered, L0.10), so only a genuinely nonsensical (< 0) capacity is
+# rejected — a broken guard would allocate a bogus ring and later corrupt.
+fn make_neg(s: Scope) -> Chan Int !{IO} =
+  chan_new(s, -1)  # rejected: capacity must be >= 0
+
+fn body(s: Scope) -> Unit !{IO} =
+  do
+    ch <- make_neg(s)
+    term_write("should-not-reach\n")
+
+fn main() -> Unit !{IO} =
+  do
+    with_scope(\s -> body(s))
+    term_write("done\n")

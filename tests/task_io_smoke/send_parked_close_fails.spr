@@ -16,8 +16,8 @@ fn body(s: Scope) -> Unit !{IO} =
   do
     ch <- chan_new(s, 1)
     task_spawn(s, \_ -> producer(ch))
-    task_yield()      # let the producer buffer 1 then park on the full channel at send 2
-    chan_close(ch)    # wakes the parked sender -> it aborts on resume
+    task_yield()  # let the producer buffer 1 then park on the full channel at send 2
+    chan_close(ch)  # wakes the parked sender -> it aborts on resume
     term_write("closed\n")
 
 fn main() -> Unit !{IO} =

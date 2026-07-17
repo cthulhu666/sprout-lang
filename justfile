@@ -1103,10 +1103,16 @@ task-io-smoke: bootstrap-from-seed
   build tests/task_io_smoke/timeout_chan_drop.spr
   run_once "timeout-chan-drop" "done"
   SPROUT_GC_STRESS=1 run_once "timeout-chan-drop/stress" "done"
-  # (10) channel capacity guard (L0.8): chan_new with capacity < 1 must LOUD-FAIL (cap-0/rendezvous
-  # is a later increment), not silently allocate a 0-slot ring.
-  build tests/task_io_smoke/chan_zero_cap_fails.spr
-  run_expect_fail "chan-zero-cap" "capacity must be >= 1"
+  # (10) channel capacity guard (L0.10): chan_new with a NEGATIVE capacity must LOUD-FAIL. Cap 0 is
+  # now valid (rendezvous / unbuffered); only a nonsensical (< 0) capacity is rejected.
+  build tests/task_io_smoke/chan_negative_cap_fails.spr
+  run_expect_fail "chan-negative-cap" "capacity must be >= 0"
+  # (10b) rendezvous send-park drop (L0.10): scope_cancel force-drops a task parked in chan_send on
+  # a cap-0 channel nobody receives from (both fork + spawn). The buffered fixtures only drop RECV-
+  # parked tasks, so this covers the send_waiters force-drop path. "done" proves it; broken = panic.
+  build tests/task_io_smoke/cancel_rendezvous_send_drop.spr
+  run_once "rendezvous-send-drop" "done"
+  SPROUT_GC_STRESS=1 run_once "rendezvous-send-drop/stress" "done"
   # (11) channel close guard (L0.9): sending into a CLOSED channel must LOUD-FAIL (send-after-close
   # is a program bug; Sprout has no recovery, so it aborts rather than dropping the value silently).
   build tests/task_io_smoke/send_on_closed_fails.spr
@@ -1119,7 +1125,7 @@ task-io-smoke: bootstrap-from-seed
   # must abort on resume (the post-park check, distinct from #11's send-entry check), not return.
   build tests/task_io_smoke/send_parked_close_fails.spr
   run_expect_fail "send-parked-close" "send on closed channel"
-  echo "==> task-io-smoke ✓ (read-park, accept-park, re-arm, write, cancel-drop, await-guard, timer-drop, timeout-drop, timeout-nested-guard, chan-cancel-drop, chan-timeout-drop, chan-cap-guard, send-on-closed-guard, double-close-guard, send-parked-close-guard; interleaved; stress-clean)"
+  echo "==> task-io-smoke ✓ (read-park, accept-park, re-arm, write, cancel-drop, await-guard, timer-drop, timeout-drop, timeout-nested-guard, chan-cancel-drop, chan-timeout-drop, chan-negative-cap-guard, rendezvous-send-drop, send-on-closed-guard, double-close-guard, send-parked-close-guard; interleaved; stress-clean)"
 
 # Division-by-zero guard regression (CI gate). The fixture divides by a RUNTIME
 # zero (`10 / list_length(argv)` with no args), which neither the compiler nor
@@ -1217,7 +1223,9 @@ test-stress: bootstrap-from-seed
   # test_chan / test_chan_close: channel buffer slots, a parked task's chan_pending,
   # and (L0.9) the Got-payload boxed by chan_recv must stay rooted while another task
   # drives a GC — a rooting regression presents as a collected-while-live abort here.
-  STRESS_FILES="tests/stdlib/test_ir_rooting.spr tests/stdlib/test_ir_codegen_ctors.spr tests/stdlib/test_ir_codegen_match.spr tests/stdlib/test_ir_codegen_closures.spr tests/stdlib/test_ir_codegen_char_rooting.spr tests/stdlib/test_stress_global_roots.spr tests/stdlib/test_stress_unboxed_maybe_heap_payload.spr tests/stdlib/test_stress_cpr_tier2_worker.spr tests/stdlib/test_task_cooperative.spr tests/stdlib/test_task_nested_scope.spr tests/stdlib/test_chan.spr tests/stdlib/test_chan_close.spr"
+  # test_chan_rendezvous: (L0.10) the direct sender→receiver hand-off carries a heap value
+  # through the parked sender's chan_pending across a GC storm — same rooting oracle, cap-0 path.
+  STRESS_FILES="tests/stdlib/test_ir_rooting.spr tests/stdlib/test_ir_codegen_ctors.spr tests/stdlib/test_ir_codegen_match.spr tests/stdlib/test_ir_codegen_closures.spr tests/stdlib/test_ir_codegen_char_rooting.spr tests/stdlib/test_stress_global_roots.spr tests/stdlib/test_stress_unboxed_maybe_heap_payload.spr tests/stdlib/test_stress_cpr_tier2_worker.spr tests/stdlib/test_task_cooperative.spr tests/stdlib/test_task_nested_scope.spr tests/stdlib/test_chan.spr tests/stdlib/test_chan_close.spr tests/stdlib/test_chan_rendezvous.spr"
   # Known-failing under stress — false-green at the default threshold, FOUND BY
   # THIS PASS (residual typed-codegen rooting UAF, GC-confirmed via
   # SPROUT_GC_DISABLE).  Tracked in BACKLOG.md; warn-only here.  Promote to
