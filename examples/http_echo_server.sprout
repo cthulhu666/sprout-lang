@@ -1,17 +1,19 @@
 module examples.http_echo_server
-import stdlib.http_server (HttpRequest, HttpServerResponse, ok, request_body, request_path, serve_n, with_header)
+import stdlib.http_server (HttpRequest, HttpServerResponse, ok, request_body, request_path, serve, with_header)
 
-# Concurrent HTTP echo server (experimental helper surface): `serve_n` handles each
-# connection in its own green task, so one slow client never blocks the others.
+# Always-on concurrent HTTP echo server (experimental helper surface): `serve`
+# accepts requests forever, handling each connection in its own green task, so one
+# slow client never blocks the others. (Use `serve_n` for a bounded, terminating
+# run.)
 #
 # Run:
 #   mise exec -- just run examples/http_echo_server.sprout
 #
-# Then:
+# Then (repeat as many times as you like — the server keeps serving):
 #   curl -i http://127.0.0.1:8081/hello
 
 fn handle(req: HttpRequest) -> HttpServerResponse =
   with_header("X-Sprout-Path", request_path(req), ok(request_body(req)))
 
 fn main() -> Unit !{IO} =
-  serve_n(8081, 1000000, handle)
+  serve(8081, handle)

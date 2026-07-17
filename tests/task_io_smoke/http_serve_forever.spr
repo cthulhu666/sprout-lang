@@ -1,0 +1,65 @@
+import stdlib.task (Scope, with_scope, task_spawn, scope_cancel)
+import stdlib.chan (Chan, chan_new, chan_send, chan_recv)
+import stdlib.net (TcpConnection, connect, write_all_utf8, read_exact_utf8)
+import stdlib.http_server (HttpRequest, HttpServerResponse, ok, request_path, serve)
+
+# stdlib.http_server.serve is the UNBOUNDED accept loop: unlike serve_n it never
+# stops on a connection count, so it must keep accepting past any small bound.
+#
+# One `serve(port, handle)` is spawned as a fire-and-forget green task; a client
+# then opens THREE sequential connections, each a full request, and each must be
+# answered `HTTP/1.1 200`. A bounded mis-implementation (e.g. serve_n(port, 1))
+# would close the listener after the first connection, so `req2`/`req3` would fail
+# to connect — the assertion on `req3 ok` is what distinguishes unbounded serving
+# from a one-shot server.
+#
+# serve never returns on its own, so the owner (the with_scope body — the only task
+# allowed to call scope_cancel) parks on a `done` channel until the client has read
+# all three responses, then force-drops the serve task (parked in tcp_accept) with
+# scope_cancel. Reaching "shutdown"/"done" proves the drop released __scope_join; a
+# broken drop HANGS and the harness alarm fires (labelled RED, not a stuck job).
+
+fn handle(req: HttpRequest) -> HttpServerResponse =
+  ok(request_path(req))
+
+fn send_or_fail(conn: TcpConnection, msg: String) -> Unit !{IO} =
+  match write_all_utf8(conn, msg) with
+  | Ok _ -> term_write("")
+  | Err _ -> term_write("write failed\n")
+
+fn report(conn: TcpConnection, label: String) -> Unit !{IO} =
+  match read_exact_utf8(conn, 12) with
+  | Ok line ->
+      if line == "HTTP/1.1 200" then term_write(`${label} ok\n`)
+      else term_write(`${label} bad ${line}\n`)
+  | Err _ -> term_write(`${label} read failed\n`)
+
+fn one_request(port: Int, label: String, req: String) -> Unit !{IO} =
+  match connect("127.0.0.1", port) with
+  | Ok conn ->
+      do
+        send_or_fail(conn, req)
+        report(conn, label)
+  | Err _ -> term_write(`${label} connect failed\n`)
+
+# Three sequential connections; each is a fresh accept -> fresh handler for serve.
+fn client(port: Int, done: Chan Int) -> Unit !{IO} =
+  do
+    one_request(port, "req1", "GET /one HTTP/1.1\r\nHost: x\r\n\r\n")
+    one_request(port, "req2", "GET /two HTTP/1.1\r\nHost: x\r\n\r\n")
+    one_request(port, "req3", "GET /three HTTP/1.1\r\nHost: x\r\n\r\n")
+    chan_send(done, 1)
+
+fn body(s: Scope, port: Int) -> Unit !{IO} =
+  do
+    done <- chan_new(s, 1)
+    task_spawn(s, \_ -> serve(port, handle))
+    task_spawn(s, \_ -> client(port, done))
+    _ <- chan_recv(done)  # owner parks until all three responses are read
+    scope_cancel(s)  # force-drop the serve task still parked in tcp_accept
+    term_write("shutdown\n")
+
+fn main() -> Unit !{IO} =
+  do
+    with_scope(\s -> body(s, 28998))
+    term_write("done\n")  # reached only if the parked serve task was dropped

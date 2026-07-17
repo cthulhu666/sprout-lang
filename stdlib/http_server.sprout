@@ -313,3 +313,22 @@ fn serve_loop(scope: Scope, listener: Int, remaining: Int, handler: HttpRequest 
 # connection outlives the call (structured concurrency — no orphaned handlers).
 export fn serve_n(port: Int, max_connections: Int, handler: HttpRequest -> HttpServerResponse) -> Unit !{IO} =
   with_scope(\s -> serve_loop(s, tcp_listen(port), max_connections, handler))
+
+# Unbounded counterpart of `serve_loop`: the same accept-and-spawn body with no
+# terminating branch, so it keeps accepting connections forever. Each handler is
+# a fire-and-forget green task reclaimed on completion (see stdlib.task), so the
+# server does not accumulate finished handlers even though the enclosing scope
+# never joins. The listener is never closed — the loop owns it for the process's
+# lifetime.
+fn serve_forever_loop(scope: Scope, listener: Int, handler: HttpRequest -> HttpServerResponse) -> Unit !{IO} =
+  do
+    conn <- tcp_accept(listener)
+    task_spawn(scope, \_ -> handle_connection(conn, handler))
+    serve_forever_loop(scope, listener, handler)
+
+# Serve requests forever. Unlike `serve_n`, this never returns under normal
+# operation — the enclosing `with_scope` join is unreachable, which is exactly
+# what an always-on server wants. Reach for `serve_n` when a bounded, terminating
+# run is needed (e.g. tests/CI).
+export fn serve(port: Int, handler: HttpRequest -> HttpServerResponse) -> Unit !{IO} =
+  with_scope(\s -> serve_forever_loop(s, tcp_listen(port), handler))

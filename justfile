@@ -1061,6 +1061,19 @@ task-io-smoke: bootstrap-from-seed
     cat "$TMPD/run.out" >&2; exit 1
   fi
   SPROUT_GC_STRESS=1 run_once "http-serve/stress" "client1 served"
+  # (2c) http_server unbounded serve: `serve` (no connection count) keeps accepting past
+  # any small bound. One client opens THREE sequential connections; all must be answered
+  # (asserted on "req3 ok"). A bounded mis-impl (serve_n(port,1)) closes the listener after
+  # the first, so req2/req3 fail. serve never returns, so the owner force-drops it with
+  # scope_cancel once the client signals done; reaching "done" proves the drop released the
+  # join (a broken drop HANGS -> alarm fires).
+  build tests/task_io_smoke/http_serve_forever.spr
+  run_once "http-serve-forever" "req3 ok"
+  if ! grep -q "done" "$TMPD/run.out"; then
+    echo "task-io-smoke: unbounded serve did not shut down (scope_cancel drop of parked serve failed)" >&2
+    cat "$TMPD/run.out" >&2; exit 1
+  fi
+  SPROUT_GC_STRESS=1 run_once "http-serve-forever/stress" "req3 ok"
   # (3) I/O-drop cancellation (L0.5): scope_cancel force-drops tasks parked in the
   # poller (both task_fork and task_spawn) so __scope_join returns instead of blocking
   # the pump forever. Reaching "done" proves the drop; a broken drop HANGS (alarm fires).
