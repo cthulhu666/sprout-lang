@@ -356,26 +356,34 @@ fn op_type_of_in_source(src: String, expr: String, state: StartupState) -> json.
 #      - Other T !{IO}   → error (cannot auto-print effectful non-Unit expressions)
 #   3. Write the full augmented source to a fixed /tmp path.
 #   4. Compile to LLVM IR via the internal compiler pipeline (compile_full_ir).
-#   5. Link IR + sprout_runtime.c with clang.
+#   5. Link IR against every runtime object (whole runtime/*.c) with clang.
 #   6. Execute the binary, capture stdout, return as a JSON array of lines.
 #
 # Fixed /tmp paths work because the REPL is interactive: one expression at a time.
-# SPROUT_DARWIN_FRAMEWORKS=1 env var triggers the -framework flags needed on macOS.
+# On macOS the -framework flags are added automatically (platform detected via
+# `uname`); SPROUT_DARWIN_FRAMEWORKS=1 forces them on regardless of platform.
 
 fn eval_source_path() -> String = "/tmp/sprout_eval_repl.sprout"
 fn eval_ir_path() -> String = "/tmp/sprout_eval_repl.ll"
 fn eval_bin_path() -> String = "/tmp/sprout_eval_repl_bin"
 
-fn runtime_c_path(stdlib_root: String) -> String =
-  stdlib_root ++ "/../runtime/sprout_runtime.c"
+# Directory holding every runtime .c (sprout_runtime.c, sprout_scheduler.c,
+# sprout_poll.c, …).  The whole directory is compiled and linked as a unit:
+# object files link wholesale, so a source that references a symbol defined in
+# a sibling TU (tcp_* -> scheduler_park_on_fd) only resolves when ALL runtime
+# sources are compiled in.  Mirrors the justfile's `runtime/*.c` glob so a
+# future runtime split needs zero edits here.
+fn runtime_dir(stdlib_root: String) -> String =
+  stdlib_root ++ "/../runtime"
 
-fn runtime_obj_path() -> String = "/tmp/sprout_runtime_daemon.o"
+# Cache dir for the compiled runtime objects (one .o per runtime .c).
+fn runtime_objs_dir() -> String = "/tmp/sprout_runtime_daemon_objs"
 
 # ---------------------------------------------------------------------------
-# StartupState — pre-compiled runtime.o, stdlib_root, and persistent module cache
+# StartupState — pre-compiled runtime objects dir, stdlib_root, and persistent module cache
 
 type StartupState = StartupState String (Ref String) (Ref (Dict (List (String, types.Scheme)))) (Ref (Dict SessionState)) (Ref Int)
-  # stdlib_root, runtime_obj_ref ("" = not yet compiled), cache, sessions, next_session_id
+  # stdlib_root, runtime_objs_dir ("" = not yet compiled), cache, sessions, next_session_id
 
 fn state_stdlib_root(state: StartupState) -> String =
   match state with
@@ -409,37 +417,59 @@ fn build_startup_state(stdlib_root: String) -> StartupState !{IO} =
     next_id <- ref_new(1)
     StartupState(stdlib_root, runtime_obj_ref, cache, sessions, next_id)
 
-# Cache the compiled runtime object path on first successful compile so
-# subsequent evals skip the clang -c step.
-fn write_obj_and_ok(obj: String, obj_ref: Ref String) -> Result String String !{IO} =
-  do
-    ref_write(obj_ref, obj)
-    Ok(obj)
+# Shell command that compiles every runtime .c into fresh objects under
+# `objs_dir`.  proc_run is argv-based (no glob expansion), so the `*.c` glob is
+# expanded by `sh -c`.  `-c` with multiple sources and no `-o` writes one
+# `<base>.o` per source into the cwd, hence the `cd` into `objs_dir`.  `rt_dir`
+# is resolved to an absolute path first so the source glob still points at the
+# runtime dir after the `cd` (it may be relative to the caller's cwd).
+fn runtime_compile_cmd(rt_dir: String, objs_dir: String) -> String =
+  "RT=\"$(cd \"" ++ rt_dir ++ "\" && pwd)\" && mkdir -p \"" ++ objs_dir
+    ++ "\" && rm -f \"" ++ objs_dir ++ "\"/*.o && cd \"" ++ objs_dir
+    ++ "\" && clang -c \"$RT\"/*.c -O2"
 
-fn try_compile_runtime_obj(stdlib_root: String, obj_ref: Ref String) -> Result String String !{IO} =
+# Shell command that links the eval IR against every runtime object.
+fn eval_link_cmd(ir_path: String, objs_dir: String, bin_path: String, use_darwin: Bool) -> String =
+  "clang \"" ++ ir_path ++ "\" \"" ++ objs_dir ++ "\"/*.o -O2 "
+    ++ (if use_darwin then "-framework Security -framework CoreFoundation " else "")
+    ++ "-o \"" ++ bin_path ++ "\""
+
+# Cache the objects dir on first successful compile so subsequent evals skip
+# the clang -c step.
+fn write_objs_and_ok(objs_dir: String, objs_ref: Ref String) -> Result String String !{IO} =
   do
-    let obj = runtime_obj_path()
-    result <- process.proc_run(["clang", "-c", runtime_c_path(stdlib_root), "-O2", "-o", obj])
+    ref_write(objs_ref, objs_dir)
+    Ok(objs_dir)
+
+fn compile_runtime_objs(rt_dir: String, objs_ref: Ref String) -> Result String String !{IO} =
+  do
+    let objs_dir = runtime_objs_dir()
+    result <- process.proc_run(["sh", "-c", runtime_compile_cmd(rt_dir, objs_dir)])
     if process.proc_ok(result)
-    then write_obj_and_ok(obj, obj_ref)
-    else Err("eval: clang not available: " ++ process.proc_stderr(result))
+    then write_objs_and_ok(objs_dir, objs_ref)
+    else Err("runtime compile failed: " ++ process.proc_stderr(result))
 
-fn ensure_runtime_obj(state: StartupState) -> Result String String !{IO} =
+fn ensure_runtime_objs(rt_dir: String, objs_ref: Ref String) -> Result String String !{IO} =
   do
-    let obj_ref = state_runtime_obj_ref(state)
-    current <- ref_read(obj_ref)
-    if current == "" then try_compile_runtime_obj(state_stdlib_root(state), obj_ref)
+    current <- ref_read(objs_ref)
+    if current == "" then compile_runtime_objs(rt_dir, objs_ref)
     else Ok(current)
 
-fn clang_base_args(runtime_obj: String) -> List String =
-  ["clang", eval_ir_path(), runtime_obj, "-O2", "-o", eval_bin_path()]
-
-fn clang_darwin_extra() -> List String =
-  ["-framework", "Security", "-framework", "CoreFoundation"]
-
-fn clang_argv(runtime_obj: String, use_darwin: Bool) -> List String =
-  if use_darwin then list_append(clang_base_args(runtime_obj), clang_darwin_extra())
-  else clang_base_args(runtime_obj)
+# Compile the full runtime (cached in `objs_ref`, "" = not yet compiled) and
+# link `ir_path` against every runtime object into `bin_path`.  Exported so a
+# regression test can drive the real link path: linking only sprout_runtime.o
+# leaves scheduler_park_on_fd (defined in sprout_scheduler.c) undefined.
+export fn compile_runtime_and_link_eval(
+    rt_dir: String, ir_path: String, bin_path: String,
+    objs_ref: Ref String, use_darwin: Bool) -> Result String String !{IO} =
+  match ensure_runtime_objs(rt_dir, objs_ref) with
+  | Err msg -> Err(msg)
+  | Ok objs_dir ->
+      do
+        result <- process.proc_run(["sh", "-c", eval_link_cmd(ir_path, objs_dir, bin_path, use_darwin)])
+        if process.proc_ok(result)
+        then Ok(bin_path)
+        else Err("clang link failed: " ++ process.proc_stderr(result))
 
 fn make_eval_source(src: String, expr: String, type_str: String) -> Maybe String =
   if string.ends_with(type_str, " !{IO}") then
@@ -464,17 +494,30 @@ fn collect_eval_output(run_result: process.ProcResult) -> json.Json !{IO} =
   else
     ok_response(vec_strings_to_json_array(eval_output_lines(string.trim_right(process.proc_stdout(run_result)))))
 
-fn run_eval_binary(link_result: process.ProcResult) -> json.Json !{IO} =
-  if process.proc_ok(link_result) == false then
-    error_response("eval_expr_in_source: clang link failed: " ++ process.proc_stderr(link_result))
-  else do
+fn run_eval_binary() -> json.Json !{IO} =
+  do
     run_result <- process.proc_run([eval_bin_path()])
     collect_eval_output(run_result)
 
-fn darwin_frameworks_set() -> Bool !{IO} =
+fn env_forces_frameworks() -> Bool !{IO} =
   match env_get("SPROUT_DARWIN_FRAMEWORKS") with
   | Just _ -> true
   | Nothing -> false
+
+fn uname_is_darwin() -> Bool !{IO} =
+  do
+    r <- process.proc_run(["uname"])
+    string.trim(process.proc_stdout(r)) == "Darwin"
+
+# True when the eval binary must link the macOS Security/CoreFoundation
+# frameworks (the runtime's TLS/net code needs them).  Detect the platform at
+# runtime via `uname` so a fresh macOS checkout works with no env var, mirroring
+# the justfile's `os() == "macos"` gate; SPROUT_DARWIN_FRAMEWORKS forces it on.
+fn use_darwin_frameworks() -> Bool !{IO} =
+  do
+    forced <- env_forces_frameworks()
+    darwin <- uname_is_darwin()
+    if forced then true else darwin
 
 fn diag_msg(d: compiler.Diagnostic) -> String =
   match d with
@@ -491,13 +534,13 @@ fn link_and_run_eval(ir_result: compiler.IrFullResult, state: StartupState) -> j
       match write_file(eval_ir_path(), ir_text) with
       | Err msg -> panic("write_file: eval.ir: " ++ msg)
       | Ok _ ->
-          match ensure_runtime_obj(state) with
-          | Err msg -> error_response(msg)
-          | Ok runtime_obj ->
-              do
-                use_darwin <- darwin_frameworks_set()
-                link_result <- process.proc_run(clang_argv(runtime_obj, use_darwin))
-                run_eval_binary(link_result)
+          do
+            use_darwin <- use_darwin_frameworks()
+            match compile_runtime_and_link_eval(
+              runtime_dir(state_stdlib_root(state)), eval_ir_path(), eval_bin_path(),
+              state_runtime_obj_ref(state), use_darwin) with
+            | Err msg -> error_response("eval_expr_in_source: " ++ msg)
+            | Ok _ -> run_eval_binary()
 
 fn compile_and_run_eval(src: String, state: StartupState) -> json.Json !{IO} =
   match write_file(eval_source_path(), src) with

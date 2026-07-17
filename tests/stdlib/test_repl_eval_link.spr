@@ -1,0 +1,64 @@
+# Regression: the REPL / analysis-service eval path must link the WHOLE runtime,
+# not just runtime/sprout_runtime.c.  sprout_runtime.c's tcp_* functions call
+# scheduler_park_on_fd, which is defined in the sibling TU sprout_scheduler.c.
+# Object files link wholesale, so linking runtime/sprout_runtime.o alone leaves
+# scheduler_park_on_fd undefined and the eval link fails — which is exactly the
+# bug this guards.  Because the reference is IR-independent, a trivial
+# `define i64 @main` IR is enough to reproduce it: it links cleanly only when
+# every runtime .c is compiled in.
+#
+# This test LINKS (it does not string-match a command): unfixed driver -> Err
+# carrying "Undefined symbols" / scheduler_park_on_fd -> RED; fixed -> Ok -> GREEN.
+import stdlib.test (TestState, new_state, assert_true, summary)
+import stdlib.process as process
+import stdlib.string as string
+import stdlib.compiler.analysis_service_driver as service
+
+fn trivial_main_ir() -> String =
+  "define i64 @main() {\nentry:\n  ret i64 0\n}\n"
+
+fn clang_available() -> Bool !{IO} =
+  do
+    probe <- process.proc_run(["clang", "--version"])
+    process.proc_ok(probe)
+
+# Darwin needs -framework Security -framework CoreFoundation to resolve the
+# runtime's TLS/net symbols; detect it the same way the justfile does (uname).
+fn is_darwin() -> Bool !{IO} =
+  do
+    r <- process.proc_run(["uname"])
+    string.trim(process.proc_stdout(r)) == "Darwin"
+
+fn main() -> Unit !{IO} =
+  do
+    state <- new_state()
+    have_clang <- clang_available()
+    match have_clang with
+    | false ->
+        do
+          term_write("[test_repl_eval_link] clang not in PATH — assertion auto-passes\n")
+          assert_true(state, "runtime links as a whole (auto-skipped: no clang)", true)
+    | true ->
+        do
+          let ir_path = "/tmp/sprout_eval_link_test.ll"
+          let bin_path = "/tmp/sprout_eval_link_test_bin"
+          use_darwin <- is_darwin()
+          objs_ref <- ref_new("")
+          match write_file(ir_path, trivial_main_ir()) with
+          | Err msg -> assert_true(state, "write trivial IR", false)
+          | Ok _ ->
+              # CWD is the repo root under `just test`, so "runtime" resolves.
+              # Match the IO-Result action directly: a `<-` do-bind would strip
+              # the Result wrapper (do-block Result-unwrap quirk).
+              match service.compile_runtime_and_link_eval(
+                "runtime", ir_path, bin_path, objs_ref, use_darwin) with
+              | Ok _ ->
+                  assert_true(state, "eval path links the whole runtime (scheduler_park_on_fd resolves)", true)
+              | Err emsg ->
+                  do
+                    term_write("[test_repl_eval_link] link failed:\n")
+                    term_write(emsg)
+                    term_write("\n")
+                    assert_true(state, "eval path links the whole runtime (scheduler_park_on_fd resolves)", false)
+
+    summary(state)
