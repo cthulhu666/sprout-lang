@@ -44,7 +44,7 @@ export fn encode_scheme(s: types.Scheme) -> String =
 
 export fn encode_type(t: types.Type) -> String =
   match t with
-  | types.TVar n -> string_concat_many(["(TVar ", types.tyvar_name(n), ")"])
+  | types.TVar n -> string_concat_many(["(TVar ", types.tyvar_identity(n), ")"])
   | types.TConst n -> string_concat_many(["(TConst ", types.type_id_name(n), ")"])
   | types.TApp a b ->
       string_concat_many(["(TApp ", encode_type(a), " ", encode_type(b), ")"])

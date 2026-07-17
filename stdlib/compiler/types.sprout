@@ -98,8 +98,23 @@ export fn type_id_symbol(id: TypeId) -> String =
 export fn tyvar_id(name: String) -> TyVarId = TyVarId(name)
 
 # Display / raw name of a type variable. E0: the identity string; E1: print-only.
+# INVARIANT: a `tyvar_name` call site is display-only — the E1 audit may ignore it.
 export fn tyvar_name(v: TyVarId) -> String =
   match v with | TyVarId s -> s
+
+# Identity of a type variable — every site that correlates the var by identity
+# (subst/dict keys, occurs/unify comparisons, ftv sets, dispatch heads, marker
+# keys, serialization). E0: returns the name string (so byte-identical to
+# tyvar_name today); E1: returns the Int id. Sites that concatenate this into a
+# string or compare it against a String-threaded identity break loudly in E1 —
+# by design, that compile-error set IS Stage 3's worklist.
+export fn tyvar_identity(v: TyVarId) -> String =
+  match v with | TyVarId s -> s
+
+# Identity equality of two type variables (mirrors type_id_eq). E0: name-string
+# equality; E1: Int id equality.
+export fn tyvar_eq(a: TyVarId, b: TyVarId) -> Bool =
+  tyvar_identity(a) == tyvar_identity(b)
 
 # ---------------------------------------------------------------------------
 # Schemes  (∀ type_vars effect_vars. body_type !body_effects)
@@ -156,7 +171,7 @@ export fn scheme_effects(s: Scheme) -> Effect =
 
 fn ftv_acc(t: Type, acc: List String) -> List String =
   match t with
-  | TVar name -> Cons(tyvar_name(name), acc)
+  | TVar name -> Cons(tyvar_identity(name), acc)
   | TConst _ -> acc
   | TApp base arg -> ftv_acc(base, ftv_acc(arg, acc))
   | TFunc param ret _ -> ftv_acc(param, ftv_acc(ret, acc))
@@ -298,7 +313,7 @@ fn build_var_rename(vars: List String, n: Int, acc: Dict String) -> Dict String 
 fn apply_rename_type(rename: Dict String, t: Type) -> Type =
   match t with
   | TVar name ->
-      match dict_get(tyvar_name(name), rename) with
+      match dict_get(tyvar_identity(name), rename) with
       | Just new_name -> TVar(tyvar_id(new_name))
       | Nothing -> TVar(name)
   | TConst _ -> t
@@ -352,7 +367,7 @@ fn effect_eq(left: Effect, right: Effect) -> Bool =
 
 fn type_eq(left: Type, right: Type) -> Bool =
   match left with
-  | TVar s -> match right with | TVar t -> tyvar_name(s) == tyvar_name(t) | _ -> false
+  | TVar s -> match right with | TVar t -> tyvar_eq(s, t) | _ -> false
   | TConst s -> match right with | TConst t -> type_id_eq(s, t) | _ -> false
   | TApp f a -> match right with | TApp g b -> type_eq(f, g) && type_eq(a, b) | _ -> false
   | TFunc p r e -> match right with

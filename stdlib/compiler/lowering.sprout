@@ -805,7 +805,7 @@ fn type_is_unit(t: types.Type) -> Bool =
 
 fn match_type_vars(pattern: types.Type, actual: types.Type, acc: Dict types.Type) -> Dict types.Type =
   match pattern with
-  | types.TVar name -> dict_set(types.tyvar_name(name), actual, acc)
+  | types.TVar name -> dict_set(types.tyvar_identity(name), actual, acc)
   | types.TConst _ -> acc
   | types.TApp pbase parg ->
       match actual with
@@ -902,7 +902,7 @@ fn make_eta_lambda_n(impl_name: String, method_type: types.Type, n: Int, pos: so
 
 fn tvar_head_name(t: types.Type) -> Maybe String =
   match t with
-  | types.TVar name -> Just(types.tyvar_name(name))
+  | types.TVar name -> Just(types.tyvar_identity(name))
   | _ -> Nothing
 
 fn make_eta_lambda_with_dicts(impl_name: String, method_type: types.Type, dict_args: List typed_ast.TypedExpr, pos: source.SourcePos) -> typed_ast.TypedExpr =
@@ -948,7 +948,7 @@ fn collect_slots_from_method_map(methods: List String, method_map: Dict String, 
 fn type_to_eta_typeexpr(t: types.Type) -> ast.TypeExpr =
   match t with
   | types.TConst name -> ast.TypeName(types.type_id_name(name))
-  | types.TVar name -> ast.TypeName(types.tyvar_name(name))
+  | types.TVar name -> ast.TypeName(types.tyvar_identity(name))
   | types.TApp base arg -> ast.TypeApply(type_to_eta_typeexpr(base), type_to_eta_typeexpr(arg))
   | types.TFunc param ret _ ->
       ast.TypeArrow(type_to_eta_typeexpr(param), type_to_eta_typeexpr(ret), Nothing)

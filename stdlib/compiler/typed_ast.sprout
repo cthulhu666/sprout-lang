@@ -169,7 +169,7 @@ export type InstanceMethodsResult (..) =
 
 export fn type_to_type_expr(t: types.Type) -> ast.TypeExpr =
   match t with
-  | types.TVar name -> ast.TypeName(types.tyvar_name(name))
+  | types.TVar name -> ast.TypeName(types.tyvar_identity(name))
   | types.TConst name -> ast.TypeName(types.type_id_name(name))
   | types.TApp f x -> ast.TypeApply(type_to_type_expr(f), type_to_type_expr(x))
   | types.TFunc a b _ -> ast.TypeArrow(type_to_type_expr(a), type_to_type_expr(b), Nothing)

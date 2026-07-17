@@ -23,4 +23,12 @@ fn main() -> Unit !{IO} =
     # payload must render its name (pins the wrap roundtrip across the E0->E1 flip).
     assert_eq(state, "TVar renders its name via type_to_string",
               types.type_to_string(types.TVar(types.tyvar_id("z9"))), "z9")
+    # Pass-B accessor contract. In E0, tyvar_identity returns the name string (so
+    # every flipped site stays byte-identical); tyvar_eq is identity equality.
+    assert_eq(state, "tyvar_identity is the name in E0",
+              types.tyvar_identity(types.tyvar_id("q7")), "q7")
+    assert_true(state, "tyvar_eq: same identity",
+                types.tyvar_eq(types.tyvar_id("q7"), types.tyvar_id("q7")))
+    assert_true(state, "tyvar_eq: distinct identities",
+                ! types.tyvar_eq (types.tyvar_id("q7"), types.tyvar_id("q8")))
     summary(state)

@@ -1071,7 +1071,7 @@ fn type_to_typeexpr_with_prog_vars(t: types.Type, class_name: String, env: Dict 
       ast.TypeApply(type_to_typeexpr_with_prog_vars(base, class_name, env),
                     type_to_typeexpr_with_prog_vars(arg, class_name, env))
   | types.TVar name ->
-      match dict_get("@fwd:" ++ types.tyvar_name(name) ++ ":" ++ class_name, env) with
+      match dict_get("@fwd:" ++ types.tyvar_identity(name) ++ ":" ++ class_name, env) with
       | Just scheme ->
           match scheme with
           | types.Scheme _ _ (types.TConst prog_var) _ -> ast.TypeName(types.type_id_name(prog_var))
@@ -1101,7 +1101,7 @@ fn first_tvar_head_after_subst(typed_args: List typed_ast.TypedExpr, subst: Dict
 
 fn tvar_head_of_type(t: types.Type) -> Maybe String =
   match t with
-  | types.TVar name -> Just(types.tyvar_name(name))
+  | types.TVar name -> Just(types.tyvar_identity(name))
   | types.TApp base _ -> tvar_head_of_type(base)
   | _ -> Nothing
 
@@ -1109,7 +1109,7 @@ fn type_head_str(t: types.Type) -> String =
   match t with
   | types.TConst name -> types.type_id_name(name)
   | types.TApp base _ -> type_head_str(base)
-  | types.TVar name -> types.tyvar_name(name)
+  | types.TVar name -> types.tyvar_identity(name)
   | types.TTuple items -> "Tuple" ++ int_to_string(list_length(items))
   | _ -> types.type_to_string(t)
 
@@ -1136,7 +1136,7 @@ fn concrete_type_str(t: types.Type) -> Maybe String =
 fn find_class_var_in_type(orig: types.Type, inst: types.Type, class_var: String) -> Maybe types.Type =
   match orig with
   | types.TVar n ->
-      if types.tyvar_name(n) == class_var then Just(inst) else Nothing
+      if types.tyvar_identity(n) == class_var then Just(inst) else Nothing
   | types.TConst _ -> Nothing
   | types.TApp ob oa ->
       match inst with
@@ -1210,7 +1210,7 @@ fn contains_str(xs: List String, target: String) -> Bool =
 
 fn type_contains_var(t: types.Type, names: List String) -> Bool =
   match t with
-  | types.TVar n -> contains_str(names, types.tyvar_name(n))
+  | types.TVar n -> contains_str(names, types.tyvar_identity(n))
   | types.TConst _ -> false
   | types.TApp a b -> if type_contains_var(a, names) then true else type_contains_var(b, names)
   | types.TFunc p r _ -> if type_contains_var(p, names) then true else type_contains_var(r, names)
@@ -1328,7 +1328,7 @@ fn scan_ptf_entries(
 fn tvar_for_prog_var_in_type(t: types.Type, class_name: String, prog_var: String, env: Dict types.Scheme) -> Bool =
   match t with
   | types.TVar name ->
-      match dict_get("@fwd:" ++ types.tyvar_name(name) ++ ":" ++ class_name, env) with
+      match dict_get("@fwd:" ++ types.tyvar_identity(name) ++ ":" ++ class_name, env) with
       | Just scheme ->
           match scheme with
           | types.Scheme _ _ (types.TConst pv) _ -> types.type_id_name(pv) == prog_var
@@ -1728,7 +1728,7 @@ fn seed_one_constraint_marker(c: ast.TypeConstraint, prog_to_fresh: Dict types.T
                       # compiler-generated instantiation name (e.g. "a42").
                       # Store prog_var name in the scheme value for retrieval in check_instance_for_marker.
                       # Also seed @fwd markers for any superclasses registered under @super:class_name:*.
-                      seed_fwd_with_supers(class_name, FreshTVarName(types.tyvar_name(fresh_name)), ProgVarName(prog_var), env)
+                      seed_fwd_with_supers(class_name, FreshTVarName(types.tyvar_identity(fresh_name)), ProgVarName(prog_var), env)
                   | _ -> env
           | _ -> env
 
@@ -1792,8 +1792,8 @@ fn add_eta_for_constraint(c: ast.TypeConstraint, prog_to_fresh: Dict types.Type,
                       # Wrap at the extraction site (mirror of seed_one_constraint_marker):
                       # the @eta_fwd:* key is built from FreshTVarName, and the scheme
                       # value stores ProgVarName for lowering to retrieve.
-                      add_eta_with_supers(class_name, FreshTVarName(types.tyvar_name(fresh_name)), ProgVarName(prog_var), env,
-                        dict_set("@eta_fwd:" ++ types.tyvar_name(fresh_name) ++ ":" ++ class_name,
+                      add_eta_with_supers(class_name, FreshTVarName(types.tyvar_identity(fresh_name)), ProgVarName(prog_var), env,
+                        dict_set("@eta_fwd:" ++ types.tyvar_identity(fresh_name) ++ ":" ++ class_name,
                                  types.mono(types.TConst(types.type_id(prog_var))), markers))
                   | _ -> markers
           | _ -> markers
@@ -3434,7 +3434,7 @@ fn register_single_param_alias(
 ) -> Dict types.Type =
   match type_from_ast(rhs_te, dict_set(param, types.TVar(types.tyvar_id(sentinel)), dict_empty())) with
   | types.TApp inner_ty (types.TVar tname) ->
-      if types.tyvar_name(tname) == sentinel then dict_set(name, inner_ty, alias_env)
+      if types.tyvar_identity(tname) == sentinel then dict_set(name, inner_ty, alias_env)
       else alias_env
   | _ -> alias_env
   where sentinel = str_concat("__aliasparam__", param)
@@ -4254,7 +4254,7 @@ fn canonicalize_constrained_markers_acc(
                   | types.TVar canon ->
                       canonicalize_constrained_markers_acc(name, rest, idx + 1, prog_to_fresh, s2,
                         dict_set("@constrained_" ++ int_to_string(idx) ++ ":" ++ name,
-                                 types.mono(types.TApp(types.TConst(types.type_id(class_name)), types.TConst(types.type_id(types.tyvar_name(canon))))), markers))
+                                 types.mono(types.TApp(types.TConst(types.type_id(class_name)), types.TConst(types.type_id(types.tyvar_identity(canon))))), markers))
                   | _ -> canonicalize_constrained_markers_acc(name, rest, idx + 1, prog_to_fresh, s2, markers)
               | Nothing -> canonicalize_constrained_markers_acc(name, rest, idx + 1, prog_to_fresh, s2, markers)
           | _ -> canonicalize_constrained_markers_acc(name, rest, idx + 1, prog_to_fresh, s2, markers)
