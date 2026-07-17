@@ -1900,10 +1900,63 @@ fn infer_binary_op(
     check_eq(state, env, subst, eff_subst, op, typed_left, typed_right, eff, pos)
   else if op == "&&" || op == "||" then
     check_bool(subst, eff_subst, op, typed_left, typed_right, eff, pos)
+  else if op == "++" then
+    append_via_semigroup(env, typed_left, typed_right, subst, eff_subst, eff, pos)
   else
     InferOk(typed_ast.TBinary(op, typed_left, typed_right,
                               typed_ast.typed_expr_type(typed_left), pos),
             subst, eff_subst, eff)
+
+# `++` dispatches to the Semigroup class method by IDENTITY, never through the
+# value-namespace name `append` (which a user `fn append` shadows / evicts the
+# `@class:append` marker — BACKLOG item 5b). Operands must share one Semigroup type
+# `t`; the instance is selected by `t` directly (`@inst:Semigroup:{head}`), a key no
+# user binding can clobber. Emits the same `TCall(append, [TDict, l, r])` node the old
+# `a ++ b` -> `append(a, b)` desugar produced post-check, so codegen
+# (translate_append_call: String/List peephole + Semigroup witness) is unchanged.
+fn append_via_semigroup(
+  env: Dict types.Scheme,
+  typed_left: typed_ast.TypedExpr,
+  typed_right: typed_ast.TypedExpr,
+  subst: Dict types.Type,
+  eff_subst: Dict types.Effect,
+  eff: types.Effect,
+  pos: source.SourcePos
+) -> InferResult =
+  match unifier.unify_types(subst, typed_ast.typed_expr_type(typed_left), typed_ast.typed_expr_type(typed_right)) with
+  | Err e -> InferErr(pos, "`++` needs matching Semigroup operands: " ++ e)
+  | Ok s1 ->
+      append_via_semigroup_at(unifier.apply_subst(s1, typed_ast.typed_expr_type(typed_left)),
+                              env, typed_left, typed_right, s1, eff_subst, eff, pos)
+
+fn append_via_semigroup_at(
+  t: types.Type,
+  env: Dict types.Scheme,
+  typed_left: typed_ast.TypedExpr,
+  typed_right: typed_ast.TypedExpr,
+  s1: Dict types.Type,
+  eff_subst: Dict types.Effect,
+  eff: types.Effect,
+  pos: source.SourcePos
+) -> InferResult =
+  match concrete_type_str(t) with
+  | Just head_str ->
+      match dict_get("@inst:Semigroup:" ++ head_str, env) with
+      | Nothing -> InferErr(pos, "No Semigroup instance for " ++ head_str)
+      | Just _ ->
+          InferOk(
+            typed_ast.TCall(typed_ast.TVar("append", t, pos),
+              Cons(typed_ast.TDict(
+                     ast.TypeConstraint("Semigroup", Cons(type_to_typeexpr_with_prog_vars(t, "Semigroup", env), Nil)),
+                     types.TConst(types.type_id("Semigroup")), pos, typed_ast.EvUnresolved),
+                   [typed_left, typed_right]),
+              t, pos),
+            s1, eff_subst, eff)
+  | Nothing ->
+      # Polymorphic operand (inside a generic fn with `where Semigroup t`): forward
+      # the in-scope Semigroup witness, mirroring check_instance_for_marker's fwd path.
+      check_instance_fwd("Semigroup", typed_ast.TVar("append", t, pos),
+                         [typed_left, typed_right], env, t, s1, eff_subst, eff, pos)
 
 fn check_arith(
   subst: Dict types.Type,

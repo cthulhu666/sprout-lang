@@ -714,8 +714,11 @@ fn parse_term_rest(tokens: Vec token.Token, i: Int, left: ast.Expr) -> Result Pa
       parse_term_rest(tokens, i2, ast.BinaryExpr(token.token_text(tok_at(tokens, i)), left, right, cur_pos(tokens, i)))
   else if tok_is_symbol(tok_at(tokens, i), "++") then
     do
+      # `++` stays a BinaryExpr (symmetric with `+`/`-`), NOT a bare `append` call:
+      # the checker dispatches it to the Semigroup class method by identity so a
+      # user-defined `fn append` can never intercept it (BACKLOG item 5b).
       (right, i2) <- parse_factor(tokens, i + 1)
-      parse_term_rest(tokens, i2, ast.CallExpr(ast.VarExpr("append", cur_pos(tokens, i)), [left, right], cur_pos(tokens, i)))
+      parse_term_rest(tokens, i2, ast.BinaryExpr("++", left, right, cur_pos(tokens, i)))
   else
     Ok((left, i))
 

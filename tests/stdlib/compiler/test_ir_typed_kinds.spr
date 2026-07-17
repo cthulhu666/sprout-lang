@@ -68,8 +68,10 @@ fn main() -> Unit !{IO} =
   do
     state <- new_state()
 
-    # `++` desugars to `append`; declare extern in every source so the
-    # type-checker can resolve it.
+    # Rooting is exercised via a direct call to an allocating extern that takes
+    # String params. `append` (declared extern here) stands in for any such call;
+    # calling it directly keeps this test independent of `++`'s Semigroup desugar
+    # (which now dispatches by class identity and needs a real instance in scope).
     let prelude = "extern fn append(x: String, y: String) -> String\n"
 
     # Differential test: compare a fn with an Int param against a fn with a
@@ -81,8 +83,8 @@ fn main() -> Unit !{IO} =
     # With fix: the Int-param version produces FEWER pushes (n filtered out).
     #
     # This is robust to codegen detail changes that affect both equally.
-    ir_int_param <- get_ir_or_msg(prelude ++ "extern fn use1(s: String) -> Int\nfn f(n: Int, s: String) -> Int = use1(s ++ s) + n")
-    ir_str_param <- get_ir_or_msg(prelude ++ "extern fn use1(s: String) -> Int\nextern fn slen(x: String) -> Int\nfn f(n: String, s: String) -> Int = use1(s ++ s) + slen(n)")
+    ir_int_param <- get_ir_or_msg(prelude ++ "extern fn use1(s: String) -> Int\nfn f(n: Int, s: String) -> Int = use1(append(s, s)) + n")
+    ir_str_param <- get_ir_or_msg(prelude ++ "extern fn use1(s: String) -> Int\nextern fn slen(x: String) -> Int\nfn f(n: String, s: String) -> Int = use1(append(s, s)) + slen(n)")
     let int_pushes = count(ir_int_param, "call i64 @sprout_gc_push_i64_root")
     let str_pushes = count(ir_str_param, "call i64 @sprout_gc_push_i64_root")
     assert_true(state, "differential: Int-param fn has strictly FEWER root pushes than String-param fn",
@@ -96,7 +98,7 @@ fn main() -> Unit !{IO} =
 
     # Case 4: Two distinct String params — both must be rooted (no false
     # positive elision based on type alone).
-    ir4 <- get_ir_or_msg(prelude ++ "extern fn use2(a: String, b: String) -> Int\nfn k(a: String, b: String) -> Int = use2(a ++ b, b ++ a)")
+    ir4 <- get_ir_or_msg(prelude ++ "extern fn use2(a: String, b: String) -> Int\nfn k(a: String, b: String) -> Int = use2(append(a, b), append(b, a))")
     assert_true(state, "case4: two String params both rooted", count(ir4, "call i64 @sprout_gc_push_i64_root") >= 2)
 
     # Case 5: pure-scalar fn with no heap activity — should produce 0 pushes

@@ -1,0 +1,23 @@
+module test_operator_not_hijacked_by_user_fn
+
+import stdlib.test (TestState, new_state, assert_eq, summary)
+
+# Regression for BACKLOG Dispatch-Soundness item 5b (the `++`/Semigroup operator
+# name-dispatch hijack). The parser used to desugar `a ++ b` to a bare `append(a, b)`
+# call, so a top-level `fn append` in the value namespace intercepted every `++` in the
+# unit. `++` must dispatch to the Semigroup class method by IDENTITY, never to a
+# same-named user fn; a user `fn append` is an ordinary function that must not change `++`.
+#
+# The user append's first param is `Ref String` while the `++` operands are `String`, so
+# under the bug the hijacked call is a CHECK-PHASE type error ("Ref String vs String").
+# A module header qualifies the user fn's emitted symbol (`@<module>.append`) so it does
+# not collide with the Semigroup class-method dispatcher symbol (`@append`) — that
+# separate headerless-collision is BACKLOG item 5 codegen follow-up, not this test.
+fn append(log: Ref String, s: String) -> Unit !{IO} = ref_write(log, s)
+
+fn main() -> Unit !{IO} =
+  do
+    state <- new_state()
+    assert_eq(state, "++ concatenates (not hijacked)", "hel" ++ "lo", "hello")
+    assert_eq(state, "chained ++", "a" ++ "b" ++ "c", "abc")
+    summary(state)
