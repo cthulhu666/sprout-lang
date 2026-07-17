@@ -8,6 +8,8 @@ import stdlib.compiler.parser as parser
 import stdlib.compiler.ast as ast
 import stdlib.compiler.source as source
 import stdlib.compiler.types as types
+import stdlib.compiler.infer as infer
+import stdlib.compiler.unifier as unifier
 import stdlib.string as string
 import stdlib.process as process
 
@@ -270,6 +272,192 @@ fn diags_to_json(diags: List compiler.Diagnostic) -> json.Json =
         json.JsonObjectNil)))))
 
 # ---------------------------------------------------------------------------
+# instances_in_source — list the typeclass instances whose head type matches a
+# query type.  The instance universe is the *bundled* program (prelude +
+# transitive imports + session), so `:i String` surfaces the prelude's Eq/Ord/…
+# instances, not just session-local ones.
+#
+# Matching reuses the real type machinery — no bespoke subset:
+#   - the query and each instance head are elaborated to types via
+#     infer.type_from_ast (which expands aliases when given the alias env), and
+#   - a match is an *unification* success (unifier.unify_types), with the
+#     instance head's type variables made fresh so `Eq (List a)` matches a
+#     concrete `List Int` query.
+# An applied query (`Maybe a`) additionally tries its outermost constructor
+# (`Maybe`), so higher-kinded instances (`Functor Maybe`) also show up.
+
+# A TypeName is a type *variable* iff it is unqualified (no module dot) and
+# starts lowercase.  Bundled user constructors carry a dotted module prefix and
+# prelude constructors start uppercase, so both stay rigid.
+fn name_starts_lower(name: String) -> Bool =
+  match str_char_at(name, 0) with
+  | Nothing -> false
+  | Just c -> c >= 'a' && c <= 'z'
+
+fn is_tyvar_name(name: String) -> Bool =
+  str_find(name, ".") == -1 && name_starts_lower(name)
+
+fn te_var_names(te: ast.TypeExpr, acc: List String) -> List String =
+  match te with
+  | ast.TypeName name -> if is_tyvar_name(name) then Cons(name, acc) else acc
+  | ast.TypeApply base arg -> te_var_names(arg, te_var_names(base, acc))
+  | ast.TypeArrow l r _ -> te_var_names(r, te_var_names(l, acc))
+  | ast.TypeEffect inner _ -> te_var_names(inner, acc)
+  | ast.TupleType parts -> te_var_names_list(parts, acc)
+
+fn te_var_names_list(parts: List ast.TypeExpr, acc: List String) -> List String =
+  match parts with
+  | Nil -> acc
+  | Cons h t -> te_var_names_list(t, te_var_names(h, acc))
+
+# Bind each free type-var name to a fresh TVar over the alias env.  The name is
+# unique enough: each unify starts from an empty substitution, so cross-instance
+# names never collide.
+fn bind_fresh_vars(names: List String, env: Dict types.Type) -> Dict types.Type =
+  match names with
+  | Nil -> env
+  | Cons name rest ->
+      bind_fresh_vars(rest, dict_set(name, types.TVar(types.tyvar_id(name)), env))
+
+fn te_to_type(te: ast.TypeExpr, alias_env: Dict types.Type) -> types.Type =
+  infer.type_from_ast(te, bind_fresh_vars(te_var_names(te, Nil), alias_env))
+
+# Nullary type aliases → their expansion, mirroring infer.pre_scan_fn_decls so
+# `:i SomeAlias` resolves through the alias.  Parametric aliases are rare in REPL
+# queries and are left unexpanded.
+fn collect_alias_env(decls: List ast.Decl, acc: Dict types.Type) -> Dict types.Type =
+  match decls with
+  | Nil -> acc
+  | Cons d rest ->
+      match d with
+      | ast.AliasDecl name Nil rhs _ ->
+          collect_alias_env(rest, dict_set(name, infer.type_from_ast(rhs, dict_empty()), acc))
+      | _ -> collect_alias_env(rest, acc)
+
+# --- Type-expression rendering (mirrors the reference: compound args parenthesized) ---
+
+fn te_is_compound(te: ast.TypeExpr) -> Bool =
+  match te with
+  | ast.TypeApply _ _ -> true
+  | ast.TypeArrow _ _ _ -> true
+  | ast.TypeEffect _ _ -> true
+  | _ -> false
+
+fn effect_suffix(labels: List String) -> String =
+  match labels with
+  | Nil -> ""
+  | _ -> " !{" ++ string.join(", ", labels) ++ "}"
+
+fn arrow_effect_suffix(effs: Maybe (List String)) -> String =
+  match effs with
+  | Nothing -> ""
+  | Just labels -> effect_suffix(labels)
+
+# Display-only renderer: TypeNames print by their last dotted segment, so a
+# bundled instance head `app.session.Color` shows as `Color` (matching how the
+# user typed the query).  Never feeds matching — that runs on the raw types.
+fn te_to_string(te: ast.TypeExpr) -> String =
+  match te with
+  | ast.TypeName name -> string.after_last_dot(name)
+  | ast.TypeApply base arg -> te_to_string(base) ++ " " ++ te_arg_to_string(arg)
+  | ast.TypeArrow l r effs -> te_arrow_left(l) ++ " -> " ++ te_to_string(r) ++ arrow_effect_suffix(effs)
+  | ast.TypeEffect inner effs -> te_to_string(inner) ++ effect_suffix(effs)
+  | ast.TupleType parts -> "(" ++ string.join(", ", te_to_string_list(parts)) ++ ")"
+
+fn te_arg_to_string(te: ast.TypeExpr) -> String =
+  if te_is_compound(te) then "(" ++ te_to_string(te) ++ ")" else te_to_string(te)
+
+fn te_arrow_left(l: ast.TypeExpr) -> String =
+  match l with
+  | ast.TypeArrow _ _ _ -> "(" ++ te_to_string(l) ++ ")"
+  | _ -> te_to_string(l)
+
+fn te_to_string_list(parts: List ast.TypeExpr) -> List String =
+  match parts with
+  | Nil -> Nil
+  | Cons h t -> Cons(te_to_string(h), te_to_string_list(t))
+
+# --- Matching ---
+
+fn te_outermost_base(te: ast.TypeExpr) -> ast.TypeExpr =
+  match te with
+  | ast.TypeApply base _ -> te_outermost_base(base)
+  | _ -> te
+
+fn te_is_apply(te: ast.TypeExpr) -> Bool =
+  match te with
+  | ast.TypeApply _ _ -> true
+  | _ -> false
+
+fn unify_ok(a: types.Type, b: types.Type) -> Bool =
+  match unifier.unify_types(dict_empty(), a, b) with
+  | Ok _ -> true
+  | Err _ -> false
+
+fn te_matches_query(pattern: ast.TypeExpr, query_te: ast.TypeExpr, alias_env: Dict types.Type) -> Bool =
+  if unify_ok(te_to_type(pattern, alias_env), te_to_type(query_te, alias_env)) then true
+  else if te_is_apply(query_te)
+  then unify_ok(te_to_type(pattern, alias_env), te_to_type(te_outermost_base(query_te), alias_env))
+  else false
+
+fn render_match(class_name: String, arg: ast.TypeExpr) -> String =
+  class_name ++ " " ++ te_arg_to_string(arg)
+
+# Single-parameter instances only (mirrors the reference), matched head-vs-query.
+fn collect_matches(decls: List ast.Decl, query_te: ast.TypeExpr, alias_env: Dict types.Type, acc: List String) -> List String =
+  match decls with
+  | Nil -> acc
+  | Cons d rest ->
+      match d with
+      | ast.InstanceDecl constraint _ _ _ ->
+          match constraint with
+          | ast.TypeConstraint class_name args ->
+              match args with
+              | Cons arg Nil ->
+                  if te_matches_query(arg, query_te, alias_env)
+                  then collect_matches(rest, query_te, alias_env, Cons(render_match(class_name, arg), acc))
+                  else collect_matches(rest, query_te, alias_env, acc)
+              | _ -> collect_matches(rest, query_te, alias_env, acc)
+      | _ -> collect_matches(rest, query_te, alias_env, acc)
+
+fn insert_sorted(x: String, sorted: List String) -> List String =
+  match sorted with
+  | Nil -> Cons(x, Nil)
+  | Cons h t ->
+      if str_compare(x, h) <= 0 then Cons(x, Cons(h, t))
+      else Cons(h, insert_sorted(x, t))
+
+fn sort_strings(xs: List String) -> List String =
+  match xs with
+  | Nil -> Nil
+  | Cons h t -> insert_sorted(h, sort_strings(t))
+
+fn parse_query_type(query: String) -> Result String ast.TypeExpr =
+  match lexer.tokenize(query) with
+  | Err _ -> Err("could not parse type query: " ++ query)
+  | Ok tokens ->
+      match parser.parse_type_expr(tokens, 0) with
+      | Err _ -> Err("could not parse type query: " ++ query)
+      | Ok pair ->
+          match pair with
+          | (te, _) -> Ok(te)
+
+# Pure core: sorted "<Class> <head>" descriptions for every single-parameter
+# instance in `prog` whose head unifies with the (already name-resolved) query.
+export fn instance_match_names_for_type(prog: ast.Program, query_te: ast.TypeExpr) -> List String =
+  match prog with
+  | ast.Program decls _ ->
+      sort_strings(collect_matches(decls, query_te, collect_alias_env(decls, dict_empty()), Nil))
+
+# String-query convenience: parse the query directly (no session name-resolution)
+# and return the rendered query alongside the matches.  Used where the query
+# needs no module-qualified resolution (e.g. unit tests over synthetic programs).
+export fn instance_matches_in_program(prog: ast.Program, query: String) -> Result String (String, List String) =
+  match parse_query_type(query) with
+  | Err msg -> Err(msg)
+  | Ok query_te -> Ok((te_to_string(query_te), instance_match_names_for_type(prog, query_te)))
+
+# ---------------------------------------------------------------------------
 # Op handlers
 
 fn op_check_source(src: String, state: StartupState) -> json.Json !{IO} =
@@ -307,6 +495,85 @@ fn op_symbol_inventory_in_source(src: String) -> json.Json =
 
 fn op_symbol_locations_in_source(src: String) -> json.Json =
   parse_symbol_locations(src)
+
+# Bundle the session source (inlining prelude + transitive imports) so every
+# instance is in scope, then match against the query.  A fixed /tmp path is fine:
+# the REPL is interactive, one request at a time (same rationale as the eval path).
+fn instances_source_path() -> String = "/tmp/sprout_instances_repl.sprout"
+
+# The query is resolved in the *session's* naming context by appending a probe
+# signature `fn <probe>(__x: <query>) -> Int = 0` and reading back its parameter
+# type after bundling.  Bundling qualifies the probe's param type exactly as it
+# qualifies instance heads (e.g. a session type `Color` → `app.session.Color`),
+# so a session-local `:i Color` matches its own instances.  Mirrors the
+# pre-self-hosting analysis backend's probe-based resolution.
+fn probe_name() -> String = "__sprout_instances_probe"
+
+fn augment_probe_source(src: String, query: String) -> String =
+  src ++ "\n\nfn " ++ probe_name() ++ "(__x: " ++ query ++ ") -> Int = 0"
+
+fn first_param_type(params: List ast.Param) -> Maybe ast.TypeExpr =
+  match params with
+  | Nil -> Nothing
+  | Cons p _ -> match p with | ast.Param _ mty -> mty
+
+fn find_probe_query_type(decls: List ast.Decl) -> Maybe ast.TypeExpr =
+  match decls with
+  | Nil -> Nothing
+  | Cons d rest ->
+      match d with
+      | ast.FnDecl name params _ _ _ _ _ ->
+          if name == probe_name() || string.ends_with(name, "." ++ probe_name())
+          then first_param_type(params)
+          else find_probe_query_type(rest)
+      | _ -> find_probe_query_type(rest)
+
+# Own result ADT (not `Result`): a `Result`/`Maybe` return gets its wrapper
+# stripped when bound with `<-` in a caller's do-block, so the driver's IO seams
+# use custom ADTs (cf. CompileResult / BundleResult) that bind whole.
+export type InstancesResult (..) =
+  | InstancesOk String (List String)
+  | InstancesErr String
+
+fn resolve_instances_from_bundle(result: bundler.BundleResult, query_display: String) -> InstancesResult =
+  match result with
+  | bundler.BundleErr msg -> InstancesErr(msg)
+  | bundler.BundleOk prog ->
+      match prog with
+      | ast.Program decls _ ->
+          match find_probe_query_type(decls) with
+          | Nothing -> InstancesErr("instances_in_source: could not resolve query type")
+          | Just query_te -> InstancesOk(query_display, instance_match_names_for_type(prog, query_te))
+
+# Reusable end-to-end entry (StartupState-free, so tests and future clients — e.g.
+# an LSP hover — can call it directly): resolve the query in the session's naming
+# context via a probe signature, bundle, and return the rendered query plus the
+# sorted matches.  query_display is the user's original (unqualified) query, so
+# the REPL never surfaces the synthetic `app.session.` prefix.
+export fn resolve_instances(src: String, query: String, stdlib_root: source.StdlibRoot) -> InstancesResult !{IO} =
+  if str_find(src, probe_name()) != -1 then
+    InstancesErr("source contains reserved name '" ++ probe_name() ++ "'; cannot list instances")
+  else
+    match parse_query_type(query) with
+    | Err msg -> InstancesErr(msg)
+    | Ok query_display_te ->
+        match write_file(instances_source_path(), augment_probe_source(src, query)) with
+        | Err msg -> InstancesErr("instances_in_source: write_file: " ++ msg)
+        | Ok _ ->
+            do
+              result <- bundler.bundle_file(source.FilePath(instances_source_path()), stdlib_root)
+              resolve_instances_from_bundle(result, te_to_string(query_display_te))
+
+fn op_instances_in_source(src: String, query: String, state: StartupState) -> json.Json !{IO} =
+  do
+    result <- resolve_instances(src, query, source.StdlibRoot(state_stdlib_root(state)))
+    match result with
+    | InstancesErr msg -> error_response(msg)
+    | InstancesOk query_type matches ->
+        ok_response(json.JsonObject(
+          json.JsonObjectCons("query_type", json.JsonString(query_type),
+          json.JsonObjectCons("matches", string_list_to_json(matches),
+          json.JsonObjectNil))))
 
 # ---------------------------------------------------------------------------
 # type_of_in_source — infer the type of an expression in a source context
@@ -732,7 +999,15 @@ fn dispatch_op(op: String, req: json.Json, state: StartupState) -> json.Json !{I
         | Ok expr ->
             if state_stdlib_root(state) == "" then error_response("stdlib-root not configured for semantic ops")
             else op_type_of_in_source(src, expr, state)
-  else if op == "instances_in_source" then not_implemented(op)
+  else if op == "instances_in_source" then
+    match require_string_field(req, "module_source") with
+    | Err msg -> error_response(msg)
+    | Ok src ->
+        match require_string_field(req, "query") with
+        | Err msg -> error_response(msg)
+        | Ok query ->
+            if state_stdlib_root(state) == "" then error_response("stdlib-root not configured for semantic ops")
+            else op_instances_in_source(src, query, state)
   else if op == "eval_expr_in_source" then
     match require_string_field(req, "module_source") with
     | Err msg -> error_response(msg)

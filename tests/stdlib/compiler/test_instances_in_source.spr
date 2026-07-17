@@ -1,0 +1,122 @@
+module main
+import stdlib.test (TestState, new_state, assert_eq, assert_true, summary)
+import stdlib.compiler.analysis_service_driver as svc
+import stdlib.compiler.ast as ast
+import stdlib.compiler.source as source
+import stdlib.string as string
+
+# Synthetic-program builders — exercise the pure matcher without needing a real
+# stdlib_root/bundle, so the test is hermetic and fast.
+
+fn pos() -> source.SourcePos = source.SourcePos(0, 1, 1)
+
+fn tn(name: String) -> ast.TypeExpr = ast.TypeName(name)
+
+fn tapp(head: String, arg: String) -> ast.TypeExpr =
+  ast.TypeApply(ast.TypeName(head), ast.TypeName(arg))
+
+fn inst(cls: String, arg: ast.TypeExpr) -> ast.Decl =
+  ast.InstanceDecl(ast.TypeConstraint(cls, Cons(arg, Nil)), Nil, Nil, pos())
+
+# Eq String, Ord String, Semigroup String, Functor List, Eq (List a)
+fn sample_program() -> ast.Program =
+  ast.Program(
+    [inst("Eq", tn("String"))
+    , inst("Ord", tn("String"))
+    , inst("Semigroup", tn("String"))
+    , inst("Functor", tn("List"))
+    , inst("Eq", tapp("List", "a"))
+    ],
+    pos())
+
+fn query_type_of(result: Result String (String, List String)) -> String =
+  match result with
+  | Err message -> "ERR: " ++ message
+  | Ok payload ->
+      match payload with
+      | (qt, _) -> qt
+
+fn matches_joined(result: Result String (String, List String)) -> String =
+  match result with
+  | Err message -> "ERR: " ++ message
+  | Ok payload ->
+      match payload with
+      | (_, matches) -> string.join(",", matches)
+
+fn instances_result_joined(result: svc.InstancesResult) -> String =
+  match result with
+  | svc.InstancesErr message -> "ERR: " ++ message
+  | svc.InstancesOk _ names -> string.join(",", names)
+
+fn instances_result_is_err(result: svc.InstancesResult) -> Bool =
+  match result with
+  | svc.InstancesErr _ -> true
+  | svc.InstancesOk _ _ -> false
+
+fn main() -> Unit !{IO} =
+  do
+    state <- new_state()
+    let prog = sample_program()
+
+    # :i String — every instance whose head is exactly String, class+head rendered, sorted.
+    let r_string = svc.instance_matches_in_program(prog, "String")
+    assert_eq(state, "String: query_type echoes the query", query_type_of(r_string), "String")
+    assert_eq(state, "String: matches are class+head, sorted",
+      matches_joined(r_string), "Eq String,Ord String,Semigroup String")
+
+    # :i List — bare constructor matches only the nullary-applied instance (Functor List),
+    # NOT Eq (List a) (its head is an application, structurally distinct from bare List).
+    let r_list = svc.instance_matches_in_program(prog, "List")
+    assert_eq(state, "List: only Functor List", matches_joined(r_list), "Functor List")
+
+    # :i List a — the applied query unifies with Eq (List a); the base-type fallback
+    # additionally surfaces the higher-kinded Functor List.
+    let r_list_a = svc.instance_matches_in_program(prog, "List a")
+    assert_eq(state, "List a: applied match + base fallback",
+      matches_joined(r_list_a), "Eq (List a),Functor List")
+
+    # No instance for the queried type → empty match list (renders as "No instances for X").
+    let r_miss = svc.instance_matches_in_program(prog, "Bool")
+    assert_eq(state, "Bool: no matches", matches_joined(r_miss), "")
+    assert_eq(state, "Bool: query_type still echoed", query_type_of(r_miss), "Bool")
+
+    # Unparseable query → Err (must not silently render as "no instances").
+    let r_bad = svc.instance_matches_in_program(prog, "->")
+    assert_true(state, "malformed query is an error",
+      string.starts_with(query_type_of(r_bad), "ERR:"))
+
+    # Qualified head (as bundling produces for a session type) matches a qualified
+    # query type, and the module prefix is stripped for display.
+    let prog_q = ast.Program([inst("ToString", tn("app.session.Color"))], pos())
+    assert_eq(state, "qualified head matches qualified te; display stripped",
+      string.join(",", svc.instance_match_names_for_type(prog_q, tn("app.session.Color"))),
+      "ToString Color")
+    # A *bare* query misses the qualified head — this identity gap is exactly what
+    # resolve_instances' probe closes by resolving the query in session context.
+    assert_eq(state, "bare te misses qualified head (probe needed)",
+      string.join(",", svc.instance_match_names_for_type(prog_q, tn("Color"))), "")
+
+    # Integration: drive the real bundle+probe path when the suite provides the
+    # stdlib root (no-op under `just test-file`, which does not set it).
+    match env_get("SPROUT_STDLIB_ROOT") with
+    | Nothing -> ()
+    | Just stdlib_root ->
+        do
+          # `:i String` surfaces the prelude's String instances (bundling pulls the prelude in).
+          r_str <- svc.resolve_instances("module app.session", "String", source.StdlibRoot(stdlib_root))
+          assert_true(state, "resolve_instances String includes Eq String",
+            string.contains(instances_result_joined(r_str), "Eq String"))
+          assert_true(state, "resolve_instances String includes ToString String",
+            string.contains(instances_result_joined(r_str), "ToString String"))
+          # Session-defined type + instance: the probe resolves it in session
+          # context; the match renders with the module prefix stripped.
+          r_color <- svc.resolve_instances(
+            "module app.session\n\ntype Color = Red | Blue\n\ninstance ToString Color {\n  fn to_string(c: Color) -> String = \"c\"\n}",
+            "Color", source.StdlibRoot(stdlib_root))
+          assert_eq(state, "resolve_instances session type -> ToString Color",
+            instances_result_joined(r_color), "ToString Color")
+          # Malformed query is an error, not a silent empty result.
+          r_err <- svc.resolve_instances("module app.session", "->", source.StdlibRoot(stdlib_root))
+          assert_true(state, "resolve_instances malformed query errors", instances_result_is_err(r_err))
+
+    summary(state)
