@@ -1,0 +1,317 @@
+module stdlib.template
+
+# A minimal Jinja-flavored HTML template engine (v0, phase 1). See
+# docs/template-engine-v0.md for the design. The data context is a json.Json value;
+# templates are parsed once (`compile`) and rendered many times (`render`).
+#
+# Supported: `{{ path }}` (nested, HTML-auto-escaped), `{{ path | safe }}` (raw),
+# `{# comments #}`, `{% if path %}..{% else %}..{% endif %}`, `{% for x in path %}..
+# {% endfor %}`. No filters beyond `safe`, no expression operators — see the roadmap.
+
+import stdlib.string as string
+import stdlib.json (Json, JsonArray, JsonNull, JsonBool, JsonInt, JsonString, JsonObject, JsonObjectNil, JsonArrayNil, JsonArrayStep, json_get_field, json_array_next)
+
+export type Template =
+  | Template (Vec Node)
+
+export type TemplateError (..) =
+  | TemplateParseError String
+  | TemplateRenderError String
+
+# Parsed template node. Internal: users hold an opaque `Template`.
+type Node =
+  | NodeText String
+  | NodeInterp (Vec String) Bool  # path segments, is_safe
+  | NodeIf (Vec String) (Vec Node) (Vec Node)  # cond path, then-body, else-body
+  | NodeFor String (Vec String) (Vec Node)  # loop var, iterable path, body
+
+# The result of parsing one node sequence: the nodes, the terminator keyword that
+# stopped the parse ("" at end of input), and the position just past the terminator.
+type ParseSeq =
+  | ParseSeq (Vec Node) String Int
+
+# One parse step: a rendered node, a skipped span (comment), or a terminator tag.
+type Step =
+  | StepNode Node Int  # node, next position
+  | StepSkip Int  # next position
+  | StepTerm String Int  # terminator keyword, next position
+
+# --- HTML escaping ---------------------------------------------------------
+# Django's canonical five. `&` is replaced first so entities introduced by the
+# later replacements are not double-escaped.
+export fn escape_html(raw: String) -> String =
+  string.replace_all("'", "&#x27;",
+    string.replace_all("\"", "&quot;",
+      string.replace_all(">", "&gt;",
+        string.replace_all("<", "&lt;",
+          string.replace_all("&", "&amp;", raw)))))
+
+# --- Scanning helpers ------------------------------------------------------
+# Parsing is O(tags × n): each tag search does a `string.drop` per candidate opener.
+# Fine because templates are compiled once and rendered many times — do not reach for
+# this scanner in a hot loop.
+fn find_from(src: String, needle: String, start: Int) -> Maybe Int =
+  match string.find(string.drop(src, start), needle) with
+  | Nothing -> Nothing
+  | Just rel -> Just(start + rel)
+
+fn opt_cons(m: Maybe Int, kind: Int, tail: List (Int, Int)) -> List (Int, Int) =
+  match m with
+  | Nothing -> tail
+  | Just p -> Cons((p, kind), tail)
+
+fn earliest(cands: List (Int, Int), best: Maybe (Int, Int)) -> Maybe (Int, Int) =
+  match cands with
+  | Nil -> best
+  | Cons (p, k) rest ->
+      match best with
+      | Nothing -> earliest(rest, Just((p, k)))
+      | Just (bp, _) -> if p < bp then earliest(rest, Just((p, k))) else earliest(rest, best)
+
+# The next tag opener at/after `pos`: (index, kind) where kind is 0=`{{`, 1=`{%`,
+# 2=`{#`. A lone `{` not starting a two-char opener is ordinary text (never matched).
+fn next_tag(src: String, pos: Int) -> Maybe (Int, Int) =
+  earliest(
+    opt_cons(find_from(src, "{{", pos), 0,
+      opt_cons(find_from(src, "{%", pos), 1,
+        opt_cons(find_from(src, "{#", pos), 2, Nil))),
+    Nothing)
+
+# Split `s` on every occurrence of `sep`, preserving order.
+fn split_on_go(s: String, sep: String, acc: Vec String) -> Vec String =
+  match string.split_once(s, sep) with
+  | Nothing -> vec_append(s, acc)
+  | Just (head, rest) -> split_on_go(rest, sep, vec_append(head, acc))
+
+fn split_on(s: String, sep: String) -> Vec String =
+  split_on_go(s, sep, vec_empty())
+
+fn first_word(s: String) -> String =
+  match string.split_once(string.trim(s), " ") with
+  | Nothing -> string.trim(s)
+  | Just (w, _) -> w
+
+fn after_word(s: String) -> String =
+  match string.split_once(string.trim(s), " ") with
+  | Nothing -> ""
+  | Just (_, rest) -> string.trim(rest)
+
+fn push_text(acc: Vec Node, text: String) -> Vec Node =
+  if string.is_empty(text) then acc else vec_append(NodeText(text), acc)
+
+fn slice_between(src: String, start: Int, stop: Int) -> String =
+  string.slice(src, start, stop - start)
+
+# --- Parser ----------------------------------------------------------------
+fn parse_seq(src: String, pos: Int, total: Int, acc: Vec Node) -> Result TemplateError ParseSeq =
+  match next_tag(src, pos) with
+  | Nothing -> Ok(ParseSeq(push_text(acc, string.drop(src, pos)), "", total))
+  | Just (tagpos, kind) -> parse_after_text(src, pos, total, acc, tagpos, kind)
+
+fn parse_after_text(src: String, pos: Int, total: Int, acc: Vec Node, tagpos: Int, kind: Int) -> Result TemplateError ParseSeq =
+  do
+    step <- parse_tag(src, tagpos, kind, total)
+    dispatch_step(src, total, push_text(acc, slice_between(src, pos, tagpos)), step)
+
+fn dispatch_step(src: String, total: Int, acc: Vec Node, step: Step) -> Result TemplateError ParseSeq =
+  match step with
+  | StepSkip np -> parse_seq(src, np, total, acc)
+  | StepNode node np -> parse_seq(src, np, total, vec_append(node, acc))
+  | StepTerm kw np -> Ok(ParseSeq(acc, kw, np))
+
+fn parse_tag(src: String, tagpos: Int, kind: Int, total: Int) -> Result TemplateError Step =
+  if kind == 2 then parse_comment(src, tagpos)
+  else if kind == 0 then parse_interp_tag(src, tagpos)
+  else parse_stmt_tag(src, tagpos, total)
+
+fn parse_comment(src: String, tagpos: Int) -> Result TemplateError Step =
+  match find_from(src, "#}", tagpos + 2) with
+  | Nothing -> Err(TemplateParseError("unclosed comment {#"))
+  | Just e -> Ok(StepSkip(e + 2))
+
+fn parse_interp_tag(src: String, tagpos: Int) -> Result TemplateError Step =
+  match find_from(src, "}}", tagpos + 2) with
+  | Nothing -> Err(TemplateParseError("unclosed interpolation {{"))
+  | Just close ->
+      do
+        node <- parse_interp(slice_between(src, tagpos + 2, close))
+        Ok(StepNode(node, close + 2))
+
+fn parse_interp(inner: String) -> Result TemplateError Node =
+  match string.split_once(string.trim(inner), "|") with
+  | Nothing -> Ok(NodeInterp(split_on(string.trim(inner), "."), false))
+  | Just (lhs, rhs) ->
+      if string.trim(rhs) == "safe" then Ok(NodeInterp(split_on(string.trim(lhs), "."), true))
+      else Err(TemplateParseError(string.concat("unknown filter: ", string.trim(rhs))))
+
+fn parse_stmt_tag(src: String, tagpos: Int, total: Int) -> Result TemplateError Step =
+  match find_from(src, "%}", tagpos + 2) with
+  | Nothing -> Err(TemplateParseError("unclosed statement {%"))
+  | Just close -> parse_stmt(src, close + 2, total, string.trim(slice_between(src, tagpos + 2, close)))
+
+fn parse_stmt(src: String, body_pos: Int, total: Int, inner: String) -> Result TemplateError Step =
+  if kw == "endif" || kw == "endfor" || kw == "else" then Ok(StepTerm(kw, body_pos))
+  else if kw == "if" then parse_if(src, body_pos, total, after_word(inner))
+  else if kw == "for" then parse_for(src, body_pos, total, after_word(inner))
+  else Err(TemplateParseError(string.concat("unknown statement: ", kw)))
+where
+  kw = first_word(inner)
+
+fn parse_if(src: String, body_pos: Int, total: Int, condstr: String) -> Result TemplateError Step =
+  do
+    then_seq <- parse_seq(src, body_pos, total, vec_empty())
+    build_if(src, total, split_on(condstr, "."), then_seq)
+
+fn build_if(src: String, total: Int, cond: Vec String, then_seq: ParseSeq) -> Result TemplateError Step =
+  match then_seq with
+  | ParseSeq then_nodes stop p2 ->
+      if stop == "endif" then Ok(StepNode (NodeIf(cond, then_nodes, vec_empty()), p2))
+      else if stop == "else" then parse_else(src, total, cond, then_nodes, p2)
+      else Err(TemplateParseError("missing endif"))
+
+fn parse_else(src: String, total: Int, cond: Vec String, then_nodes: Vec Node, pos: Int) -> Result TemplateError Step =
+  do
+    else_seq <- parse_seq(src, pos, total, vec_empty())
+    build_if_else(cond, then_nodes, else_seq)
+
+fn build_if_else(cond: Vec String, then_nodes: Vec Node, else_seq: ParseSeq) -> Result TemplateError Step =
+  match else_seq with
+  | ParseSeq else_nodes stop2 p3 ->
+      if stop2 == "endif" then Ok(StepNode (NodeIf(cond, then_nodes, else_nodes), p3))
+      else Err(TemplateParseError("missing endif after else"))
+
+fn parse_for(src: String, body_pos: Int, total: Int, spec: String) -> Result TemplateError Step =
+  match string.split_once(spec, " in ") with
+  | Nothing -> Err(TemplateParseError("malformed for (expected: for <var> in <path>)"))
+  | Just (varname, pathstr) ->
+      parse_for_body(src, body_pos, total, string.trim(varname), split_on(string.trim(pathstr), "."))
+
+fn parse_for_body(src: String, body_pos: Int, total: Int, var: String, path: Vec String) -> Result TemplateError Step =
+  do
+    body_seq <- parse_seq(src, body_pos, total, vec_empty())
+    build_for(var, path, body_seq)
+
+fn build_for(var: String, path: Vec String, body_seq: ParseSeq) -> Result TemplateError Step =
+  match body_seq with
+  | ParseSeq body_nodes stop p2 ->
+      if stop == "endfor" then Ok(StepNode (NodeFor(var, path, body_nodes), p2))
+      else Err(TemplateParseError("missing endfor"))
+
+export fn compile(source: String) -> Result TemplateError Template =
+  do
+    seq <- parse_seq(source, 0, string.length(source), vec_empty())
+    finish_compile(seq)
+
+# A leftover terminator ("" means clean end of input) means a stray endif/else/endfor
+# with no opening block.
+fn finish_compile(seq: ParseSeq) -> Result TemplateError Template =
+  match seq with
+  | ParseSeq nodes stop _ ->
+      if string.is_empty(stop) then Ok(Template(nodes))
+      else Err(TemplateParseError(string.concat("unexpected {% ", string.concat(stop, " %}"))))
+
+# --- Renderer --------------------------------------------------------------
+export fn render(tmpl: Template, context: Json) -> Result TemplateError String =
+  match tmpl with
+  | Template nodes -> render_nodes(nodes, context, dict_empty())
+
+export fn render_string(source: String, context: Json) -> Result TemplateError String =
+  do
+    tmpl <- compile(source)
+    render(tmpl, context)
+
+fn render_nodes(nodes: Vec Node, root: Json, scope: Dict Json) -> Result TemplateError String =
+  render_nodes_from(nodes, 0, vec_length(nodes), root, scope, "")
+
+fn render_nodes_from(nodes: Vec Node, index: Int, total: Int, root: Json, scope: Dict Json, acc: String) -> Result TemplateError String =
+  if index >= total then Ok(acc)
+  else
+    match vec_get(index, nodes) with
+    | Nothing -> Ok(acc)
+    | Just node ->
+        do
+          out <- render_node(node, root, scope)
+          render_nodes_from(nodes, index + 1, total, root, scope, string.concat(acc, out))
+
+fn render_node(node: Node, root: Json, scope: Dict Json) -> Result TemplateError String =
+  match node with
+  | NodeText text -> Ok(text)
+  | NodeInterp path safe -> Ok(render_interp(path, safe, root, scope))
+  | NodeIf cond then_nodes else_nodes ->
+      if truthy(resolve(cond, root, scope)) then render_nodes(then_nodes, root, scope)
+      else render_nodes(else_nodes, root, scope)
+  | NodeFor var path body -> render_for(var, path, body, root, scope)
+
+fn render_interp(path: Vec String, safe: Bool, root: Json, scope: Dict Json) -> String =
+  if safe then raw else escape_html(raw)
+where
+  raw = scalar_to_string(resolve(path, root, scope))
+
+# Look up the first path segment in the loop-variable scope, falling back to the root
+# object; then walk the remaining segments through nested objects.
+fn resolve(path: Vec String, root: Json, scope: Dict Json) -> Maybe Json =
+  match vec_get(0, path) with
+  | Nothing -> Nothing
+  | Just head ->
+      match resolve_head(head, root, scope) with
+      | Nothing -> Nothing
+      | Just value -> resolve_rest(path, 1, vec_length(path), value)
+
+fn resolve_head(seg: String, root: Json, scope: Dict Json) -> Maybe Json =
+  match dict_get(seg, scope) with
+  | Just value -> Just(value)
+  | Nothing -> json_get_field(root, seg)
+
+fn resolve_rest(path: Vec String, index: Int, total: Int, current: Json) -> Maybe Json =
+  if index >= total then Just(current)
+  else
+    match vec_get(index, path) with
+    | Nothing -> Just(current)
+    | Just seg ->
+        match json_get_field(current, seg) with
+        | Nothing -> Nothing
+        | Just next -> resolve_rest(path, index + 1, total, next)
+
+# Python/Jinja truthiness: null, false, 0, "", empty array, and empty object are
+# falsy; everything else is truthy.
+fn truthy(value: Maybe Json) -> Bool =
+  match value with
+  | Nothing -> false
+  | Just v ->
+      match v with
+      | JsonNull -> false
+      | JsonBool b -> b
+      | JsonInt n -> ! (n == 0)
+      | JsonString s -> ! string.is_empty (s)
+      | JsonArray arr -> match arr with | JsonArrayNil -> false | _ -> true
+      | JsonObject obj -> match obj with | JsonObjectNil -> false | _ -> true
+
+fn scalar_to_string(value: Maybe Json) -> String =
+  match value with
+  | Nothing -> ""
+  | Just v ->
+      match v with
+      | JsonString s -> s
+      | JsonInt n -> int_to_string(n)
+      | JsonBool b -> if b then "true" else "false"
+      | JsonNull -> ""
+      | _ -> ""
+
+fn render_for(var: String, path: Vec String, body: Vec Node, root: Json, scope: Dict Json) -> Result TemplateError String =
+  match resolve(path, root, scope) with
+  | Nothing -> Ok("")
+  | Just v ->
+      match v with
+      | JsonNull -> Ok("")
+      | JsonArray arr -> render_for_arr(var, arr, body, root, scope, "")
+      | _ -> Err(TemplateRenderError("cannot iterate a non-array value"))
+
+fn render_for_arr(var: String, arr: JsonArray, body: Vec Node, root: Json, scope: Dict Json, acc: String) -> Result TemplateError String =
+  match json_array_next(arr) with
+  | Nothing -> Ok(acc)
+  | Just step ->
+      match step with
+      | JsonArrayStep head tail ->
+          do
+            out <- render_nodes(body, root, dict_set(var, head, scope))
+            render_for_arr(var, tail, body, root, scope, string.concat(acc, out))

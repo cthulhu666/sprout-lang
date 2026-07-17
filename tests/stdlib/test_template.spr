@@ -1,0 +1,124 @@
+import stdlib.test (TestState, new_state, assert_eq, summary)
+import stdlib.template (Template, render_string, compile, render)
+import stdlib.json (Json, JsonObject, JsonObjectCons, JsonObjectNil, string, int, bool, array_from_list, object_from_pairs)
+
+# Phase 1 of the template engine: interpolation with nested paths + HTML auto-escape
+# (+ `| safe` opt-out), `{# comments #}`, `{% if/else/endif %}`, `{% for x in xs %}`.
+# The context is a json.Json value; render_string parses + renders in one call.
+
+# Render, collapsing any error to a fixed sentinel so error cases assert cleanly.
+fn r(source: String, ctx: Json) -> String =
+  match render_string(source, ctx) with
+  | Ok out -> out
+  | Err _ -> "<<ERR>>"
+
+fn empty_ctx() -> Json =
+  JsonObject(JsonObjectNil)
+
+# { user: { name: "Kuba" } }
+fn nested_ctx() -> Json =
+  JsonObject(JsonObjectCons("user", object_from_pairs([("name", "Kuba")]), JsonObjectNil))
+
+# { items: ["a", "b", "c"] }
+fn items_ctx() -> Json =
+  JsonObject(JsonObjectCons("items", array_from_list([string("a"), string("b"), string("c")]), JsonObjectNil))
+
+# { users: [ {name:"A", admin:true}, {name:"B", admin:false} ] }
+fn users_ctx() -> Json =
+  JsonObject(JsonObjectCons("users", array_from_list([
+    JsonObject(JsonObjectCons("name", string("A"), JsonObjectCons("admin", bool(true), JsonObjectNil))),
+    JsonObject(JsonObjectCons("name", string("B"), JsonObjectCons("admin", bool(false), JsonObjectNil)))
+  ]), JsonObjectNil))
+
+fn render_or_err(tmpl: Template, ctx: Json) -> String =
+  match render(tmpl, ctx) with
+  | Ok out -> out
+  | Err _ -> "<<ERR>>"
+
+# Compile a template ONCE, then render the same Template value against two distinct
+# contexts — the server reuse path (parse at startup, render per request).
+fn compiled_reuse() -> String =
+  match compile("hi {{ who }}") with
+  | Err _ -> "<<ERR>>"
+  | Ok tmpl -> render_or_err(tmpl, object_from_pairs([("who", "A")])) ++ render_or_err(tmpl, object_from_pairs([("who", "B")]))
+
+fn main() -> Unit !{IO} =
+  do
+    state <- new_state()
+
+    # --- interpolation + escaping ---
+    assert_eq(state, "interp escapes all five html chars",
+      r("{{ x }}", object_from_pairs([("x", "&<>\"'")])), "&amp;&lt;&gt;&quot;&#x27;")
+    assert_eq(state, "| safe renders raw",
+      r("{{ x | safe }}", object_from_pairs([("x", "<b>hi</b>")])), "<b>hi</b>")
+    assert_eq(state, "text passes through around interp",
+      r("Hi {{ name }}!", object_from_pairs([("name", "Kuba")])), "Hi Kuba!")
+    assert_eq(state, "nested path resolves",
+      r("{{ user.name }}", nested_ctx()), "Kuba")
+    assert_eq(state, "int renders as digits",
+      r("{{ n }}", JsonObject (JsonObjectCons("n", int(42), JsonObjectNil))), "42")
+    assert_eq(state, "undefined variable renders empty",
+      r("[{{ missing }}]", empty_ctx()), "[]")
+
+    # --- comments ---
+    assert_eq(state, "comment is stripped",
+      r("a{# note #}b", empty_ctx()), "ab")
+
+    # --- if / else ---
+    assert_eq(state, "if true branch (non-empty string is truthy)",
+      r("{% if flag %}yes{% else %}no{% endif %}", object_from_pairs([("flag", "x")])), "yes")
+    assert_eq(state, "if false branch (empty string is falsy)",
+      r("{% if flag %}yes{% else %}no{% endif %}",
+        JsonObject(JsonObjectCons("flag", string(""), JsonObjectNil))), "no")
+    assert_eq(state, "if false branch (missing var is falsy)",
+      r("{% if flag %}yes{% else %}no{% endif %}", empty_ctx()), "no")
+
+    # --- for ---
+    assert_eq(state, "for iterates array elements",
+      r("{% for x in items %}[{{ x }}]{% endfor %}", items_ctx()), "[a][b][c]")
+    assert_eq(state, "for over missing var yields nothing",
+      r("{% for x in nope %}X{% endfor %}", empty_ctx()), "")
+
+    # --- nested for + if + interpolation (the list-of-items page) ---
+    assert_eq(state, "nested for + if + interp",
+      r("{% for u in users %}{{ u.name }}{% if u.admin %}*{% endif %};{% endfor %}", users_ctx()),
+      "A*;B;")
+
+    # --- numeric truthiness (0 is falsy, per Python/Jinja) ---
+    assert_eq(state, "if over 0 is falsy",
+      r("{% if n %}y{% else %}n{% endif %}", JsonObject (JsonObjectCons("n", int(0), JsonObjectNil))), "n")
+    assert_eq(state, "if over non-zero int is truthy",
+      r("{% if n %}y{% else %}n{% endif %}", JsonObject (JsonObjectCons("n", int(3), JsonObjectNil))), "y")
+
+    # --- multibyte source: find/slice must agree on units around a non-ASCII char ---
+    assert_eq(state, "non-ascii text around interpolation survives",
+      r("é{{ name }}ü", object_from_pairs([("name", "x")])), "éxü")
+
+    # --- compile once, render many (the server reuse path, tested directly) ---
+    assert_eq(state, "one compiled template renders against two contexts",
+      compiled_reuse(), "hi Ahi B")
+
+    # --- nested for-in-for (inner loop var + outer-var path both resolve) ---
+    assert_eq(state, "nested for over nested arrays",
+      r("{% for row in rows %}{% for c in row.cells %}{{ c }}{% endfor %}|{% endfor %}",
+        JsonObject(JsonObjectCons("rows", array_from_list([
+          JsonObject(JsonObjectCons("cells", array_from_list([string("a"), string("b")]), JsonObjectNil)),
+          JsonObject(JsonObjectCons("cells", array_from_list([string("c")]), JsonObjectNil))
+        ]), JsonObjectNil))),
+      "ab|c|")
+
+    # --- a lone brace in text is literal, not a tag opener ---
+    assert_eq(state, "lone brace passes through as text",
+      r("body { color: red } {{ name }}", object_from_pairs([("name", "x")])), "body { color: red } x")
+
+    # --- parse errors -> clean Err ---
+    assert_eq(state, "unclosed interpolation is an error",
+      r("{{ x", empty_ctx()), "<<ERR>>")
+    assert_eq(state, "missing endfor is an error",
+      r("{% for x in xs %}a", empty_ctx()), "<<ERR>>")
+    assert_eq(state, "missing endif is an error",
+      r("{% if x %}a", empty_ctx()), "<<ERR>>")
+    assert_eq(state, "unknown statement keyword is an error",
+      r("{% wat %}", empty_ctx()), "<<ERR>>")
+
+    summary(state)
