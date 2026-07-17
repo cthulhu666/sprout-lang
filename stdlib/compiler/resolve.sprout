@@ -424,7 +424,7 @@ fn type_is_unit(t: types.Type) -> Bool =
 
 fn match_type_vars(pattern: types.Type, actual: types.Type, acc: Dict types.Type) -> Dict types.Type =
   match pattern with
-  | types.TVar name -> dict_set(name, actual, acc)
+  | types.TVar name -> dict_set(types.tyvar_name(name), actual, acc)
   | types.TConst _ -> acc
   | types.TApp pbase parg ->
       match actual with

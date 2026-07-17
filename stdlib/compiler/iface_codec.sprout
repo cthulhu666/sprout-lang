@@ -44,7 +44,7 @@ export fn encode_scheme(s: types.Scheme) -> String =
 
 export fn encode_type(t: types.Type) -> String =
   match t with
-  | types.TVar n -> string_concat_many(["(TVar ", n, ")"])
+  | types.TVar n -> string_concat_many(["(TVar ", types.tyvar_name(n), ")"])
   | types.TConst n -> string_concat_many(["(TConst ", types.type_id_name(n), ")"])
   | types.TApp a b ->
       string_concat_many(["(TApp ", encode_type(a), " ", encode_type(b), ")"])
@@ -209,7 +209,7 @@ fn read_atom_then_close(s: String, bytes: Bytes, i: Int, total: Int) -> Maybe (S
 fn decode_tvar_at(s: String, bytes: Bytes, i: Int, total: Int) -> Maybe(types.Type, Int) =
   match read_atom_then_close(s, bytes, i, total) with
   | Nothing -> Nothing
-  | Just (name, end) -> Just((types.TVar(name), end))
+  | Just (name, end) -> Just((types.TVar(types.tyvar_id(name)), end))
 
 fn decode_tconst_at(s: String, bytes: Bytes, i: Int, total: Int) -> Maybe(types.Type, Int) =
   match read_atom_then_close(s, bytes, i, total) with
@@ -649,7 +649,7 @@ fn typeexpr_list_to_types(parts: List ast.TypeExpr, local_vars: Dict types.Type)
 fn make_local_vars(type_params: List String) -> Dict types.Type =
   match type_params with
   | Nil -> dict_empty()
-  | Cons p rest -> dict_set(p, types.TVar(p), make_local_vars(rest))
+  | Cons p rest -> dict_set(p, types.TVar(types.tyvar_id(p)), make_local_vars(rest))
 
 # Extract the outermost type-name from the first type-argument of a constraint.
 # Used to compute the canonical instance dispatch key.
@@ -691,7 +691,7 @@ fn params_to_func_type(params: List ast.Param, ret: types.Type, local_vars: Dict
 
 fn param_type_from_maybe(maybe_te: Maybe ast.TypeExpr, local_vars: Dict types.Type) -> types.Type =
   match maybe_te with
-  | Nothing -> types.TVar("_")
+  | Nothing -> types.TVar(types.tyvar_id("_"))
   | Just te -> typeexpr_to_type_with_vars(te, local_vars)
 
 # ---------------------------------------------------------------------------

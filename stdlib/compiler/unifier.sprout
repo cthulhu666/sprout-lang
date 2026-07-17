@@ -62,7 +62,7 @@ fn apply_subst_lookup(subst: Dict types.Type, t: types.Type, name: String) -> ty
 
 export fn apply_subst(subst: Dict types.Type, t: types.Type) -> types.Type =
   match t with
-  | types.TVar name -> apply_subst_lookup(subst, t, name)
+  | types.TVar name -> apply_subst_lookup(subst, t, types.tyvar_name(name))
   | types.TConst _ -> t
   | types.TApp base arg ->
       types.TApp(apply_subst(subst, base), apply_subst(subst, arg))
@@ -98,7 +98,7 @@ fn apply_full_subst_lookup(subst: Dict types.Type, eff_subst: Dict types.Effect,
 
 export fn apply_full_subst(subst: Dict types.Type, eff_subst: Dict types.Effect, t: types.Type) -> types.Type =
   match t with
-  | types.TVar name -> apply_full_subst_lookup(subst, eff_subst, t, name)
+  | types.TVar name -> apply_full_subst_lookup(subst, eff_subst, t, types.tyvar_name(name))
   | types.TConst _ -> t
   | types.TApp base arg ->
       types.TApp(apply_full_subst(subst, eff_subst, base), apply_full_subst(subst, eff_subst, arg))
@@ -122,7 +122,7 @@ fn apply_full_subst_list(subst: Dict types.Type, eff_subst: Dict types.Effect, i
 
 fn occurs(name: String, subst: Dict types.Type, t: types.Type) -> Bool =
   match apply_subst(subst, t) with
-  | types.TVar n -> n == name
+  | types.TVar n -> types.tyvar_name(n) == name
   | types.TConst _ -> false
   | types.TApp base arg -> occurs(name, subst, base) || occurs(name, subst, arg)
   | types.TFunc param ret _ -> occurs(name, subst, param) || occurs(name, subst, ret)
@@ -140,7 +140,7 @@ fn occurs_list(name: String, subst: Dict types.Type, items: List types.Type) -> 
 fn bind_var(name: String, t: types.Type, subst: Dict types.Type) -> Result String (Dict types.Type) =
   match t with
   | types.TVar n ->
-      if n == name then Ok(subst)
+      if types.tyvar_name(n) == name then Ok(subst)
       else Ok(dict_set(name, t, subst))
   | _ ->
       if occurs(name, subst, t)
@@ -183,9 +183,9 @@ fn unify_applied(
       # Bind right→left so the left (expected/older) TVar stays canonical.
       # This ensures @fwd markers (keyed by the instantiation TVar) remain
       # reachable after tuple pattern matching introduces fresh element vars.
-      if a == b then Ok(subst) else bind_var(b, l, subst)
-  | (types.TVar a, _) -> bind_var(a, r, subst)
-  | (_, types.TVar b) -> bind_var(b, l, subst)
+      if types.tyvar_name(a) == types.tyvar_name(b) then Ok(subst) else bind_var(types.tyvar_name(b), l, subst)
+  | (types.TVar a, _) -> bind_var(types.tyvar_name(a), r, subst)
+  | (_, types.TVar b) -> bind_var(types.tyvar_name(b), l, subst)
   | (types.TConst a, types.TConst b) ->
       # Module-qualified type identity (T7): exact match on the canonical name.
       # Bare-name comparison (after_last_dot both sides) silently unified two
@@ -274,7 +274,7 @@ fn build_type_repl(state: InferState, vars: List String, acc: Dict types.Type) -
   | Cons v rest ->
       do
         name <- fresh(state)
-        build_type_repl(state, rest, dict_set(v, types.TVar(name), acc))
+        build_type_repl(state, rest, dict_set(v, types.TVar(types.tyvar_id(name)), acc))
 
 fn build_effect_repl(state: InferState, vars: List String, acc: Dict types.Effect) -> Dict types.Effect !{IO} =
   match vars with

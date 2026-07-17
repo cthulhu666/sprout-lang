@@ -80,6 +80,21 @@ export fn type_id_symbol(id: TypeId) -> String =
   string.replace_all(".", "_", type_id_name(id))
 
 # ---------------------------------------------------------------------------
+# TyVarId — type-variable identity (E0 scaffolding, canonical-identity campaign).
+# Mirrors the TypeId block above. In E0 a TVar's identity IS its name string, so
+# these are pass-throughs; E1 will make `tyvar_id` mint an Int at binding and
+# `tyvar_identity` return it, while `tyvar_name` stays the print name. Routing
+# every TVar producer/consumer through these makes the E1 representation swap a
+# localized change instead of a 214-site rewrite.
+# ---------------------------------------------------------------------------
+
+# Mint a TVar payload from a canonical/fresh name. Single construction point.
+export fn tyvar_id(name: String) -> String = name
+
+# Display / raw name of a type variable. E0: the identity string; E1: print-only.
+export fn tyvar_name(v: String) -> String = v
+
+# ---------------------------------------------------------------------------
 # Schemes  (∀ type_vars effect_vars. body_type !body_effects)
 # ---------------------------------------------------------------------------
 #
@@ -134,7 +149,7 @@ export fn scheme_effects(s: Scheme) -> Effect =
 
 fn ftv_acc(t: Type, acc: List String) -> List String =
   match t with
-  | TVar name -> Cons(name, acc)
+  | TVar name -> Cons(tyvar_name(name), acc)
   | TConst _ -> acc
   | TApp base arg -> ftv_acc(base, ftv_acc(arg, acc))
   | TFunc param ret _ -> ftv_acc(param, ftv_acc(ret, acc))
@@ -224,7 +239,7 @@ fn wrap_parens(s: String) -> String =
 # requiring parentheses if it has lower precedence than application.
 fn type_to_string_aux(t: Type, as_arg: Bool) -> String =
   match t with
-  | TVar name -> name
+  | TVar name -> tyvar_name(name)
   | TConst name -> type_id_name(name)
   | TApp base arg ->
       type_to_string_aux(base, false) ++ " " ++ type_to_string_aux(arg, true)
@@ -276,8 +291,8 @@ fn build_var_rename(vars: List String, n: Int, acc: Dict String) -> Dict String 
 fn apply_rename_type(rename: Dict String, t: Type) -> Type =
   match t with
   | TVar name ->
-      match dict_get(name, rename) with
-      | Just new_name -> TVar(new_name)
+      match dict_get(tyvar_name(name), rename) with
+      | Just new_name -> TVar(tyvar_id(new_name))
       | Nothing -> TVar(name)
   | TConst _ -> t
   | TApp base arg -> TApp(apply_rename_type(rename, base), apply_rename_type(rename, arg))
@@ -330,7 +345,7 @@ fn effect_eq(left: Effect, right: Effect) -> Bool =
 
 fn type_eq(left: Type, right: Type) -> Bool =
   match left with
-  | TVar s -> match right with | TVar t -> s == t | _ -> false
+  | TVar s -> match right with | TVar t -> tyvar_name(s) == tyvar_name(t) | _ -> false
   | TConst s -> match right with | TConst t -> type_id_eq(s, t) | _ -> false
   | TApp f a -> match right with | TApp g b -> type_eq(f, g) && type_eq(a, b) | _ -> false
   | TFunc p r e -> match right with

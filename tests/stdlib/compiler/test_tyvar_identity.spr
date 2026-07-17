@@ -1,0 +1,22 @@
+import stdlib.test (TestState, new_state, assert_eq, assert_true, summary)
+import stdlib.compiler.types as types
+
+# Characterization of the TyVarId accessor contract (canonical-identity campaign,
+# Stage 2 / E0 scaffolding). These pin the observable behavior that every later
+# stage must preserve:
+#   * `tyvar_id` mints a payload from a name; `tyvar_name` recovers that name
+#     (mint→name roundtrip is the identity in E0, and stays the *print* name in E1).
+# In E0 both are String pass-throughs, so this is a green characterization test,
+# not a red-first TDD test — its job is to fail loudly if a future edit (the E1
+# representation swap, or a mis-routed site) breaks the roundtrip.
+
+fn main() -> Unit !{IO} =
+  do
+    state <- new_state()
+    assert_eq(state, "mint/name roundtrip: fresh var",
+              types.tyvar_name(types.tyvar_id("t5")), "t5")
+    assert_eq(state, "mint/name roundtrip: source var",
+              types.tyvar_name(types.tyvar_id("a")), "a")
+    assert_eq(state, "mint/name roundtrip: qualified-ish",
+              types.tyvar_name(types.tyvar_id("t42")), "t42")
+    summary(state)

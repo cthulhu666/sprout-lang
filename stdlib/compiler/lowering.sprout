@@ -133,7 +133,7 @@ fn param_names_from_list(ps: List ast.Param) -> List String =
 # sentinel TVar if the name is not found (generated names not yet in env).
 fn lookup_scheme_type(name: String, env: Dict types.Scheme) -> types.Type =
   match dict_get(name, env) with
-  | Nothing -> types.TVar("?gen")
+  | Nothing -> types.TVar(types.tyvar_id("?gen"))
   | Just s -> types.scheme_type(s)
 
 # tfunc_result_type: strip all leading TFunc layers to find the result type.
@@ -805,7 +805,7 @@ fn type_is_unit(t: types.Type) -> Bool =
 
 fn match_type_vars(pattern: types.Type, actual: types.Type, acc: Dict types.Type) -> Dict types.Type =
   match pattern with
-  | types.TVar name -> dict_set(name, actual, acc)
+  | types.TVar name -> dict_set(types.tyvar_name(name), actual, acc)
   | types.TConst _ -> acc
   | types.TApp pbase parg ->
       match actual with
@@ -902,7 +902,7 @@ fn make_eta_lambda_n(impl_name: String, method_type: types.Type, n: Int, pos: so
 
 fn tvar_head_name(t: types.Type) -> Maybe String =
   match t with
-  | types.TVar name -> Just(name)
+  | types.TVar name -> Just(types.tyvar_name(name))
   | _ -> Nothing
 
 fn make_eta_lambda_with_dicts(impl_name: String, method_type: types.Type, dict_args: List typed_ast.TypedExpr, pos: source.SourcePos) -> typed_ast.TypedExpr =
@@ -942,13 +942,13 @@ fn collect_slots_from_method_map(methods: List String, method_map: Dict String, 
       match dict_get(m, method_map) with
       | Nothing -> collect_slots_from_method_map(rest, method_map, pos)
       | Just slot ->
-          Cons(typed_ast.TVar(slot, types.TVar("?lambda"), pos),
+          Cons(typed_ast.TVar(slot, types.TVar(types.tyvar_id("?lambda")), pos),
                collect_slots_from_method_map(rest, method_map, pos))
 
 fn type_to_eta_typeexpr(t: types.Type) -> ast.TypeExpr =
   match t with
   | types.TConst name -> ast.TypeName(types.type_id_name(name))
-  | types.TVar name -> ast.TypeName(name)
+  | types.TVar name -> ast.TypeName(types.tyvar_name(name))
   | types.TApp base arg -> ast.TypeApply(type_to_eta_typeexpr(base), type_to_eta_typeexpr(arg))
   | types.TFunc param ret _ ->
       ast.TypeArrow(type_to_eta_typeexpr(param), type_to_eta_typeexpr(ret), Nothing)
@@ -1253,7 +1253,7 @@ fn resolve_method_with_lambda(
   pos: source.SourcePos
 ) -> typed_ast.TypedExpr =
   match dict_get(method_name, method_map) with
-  | Nothing -> typed_ast.TVar("__unresolved_" ++ key ++ "_" ++ method_name, types.TVar("?gen"), pos)
+  | Nothing -> typed_ast.TVar("__unresolved_" ++ key ++ "_" ++ method_name, types.TVar(types.tyvar_id("?gen")), pos)
   | Just fn_name ->
       build_lambda_with_inner_dicts(fn_name, get_method_arity(method_name, method_arities), inner_dicts, pos)
 
@@ -1271,7 +1271,7 @@ fn resolve_method_var(
 ) -> typed_ast.TypedExpr =
   match dict_get(method_name, method_map) with
   | Just fn_name -> typed_ast.TVar(fn_name, lookup_scheme_type(fn_name, scheme_env), pos)
-  | Nothing -> typed_ast.TVar("__unresolved_" ++ fallback_key ++ "_" ++ method_name, types.TVar("?gen"), pos)
+  | Nothing -> typed_ast.TVar("__unresolved_" ++ fallback_key ++ "_" ++ method_name, types.TVar(types.tyvar_id("?gen")), pos)
 
 # ---------------------------------------------------------------------------
 # Evidence consumption (M3b-3): mechanical Evidence → witness translation
@@ -1324,7 +1324,7 @@ fn unresolved_witnesses_for_classes(
         list_map(
           \_ -> typed_ast.TVar(
             "__unresolved_" ++ constraint_key_str(string.after_last_dot(eff_class), type_args),
-            types.TVar("?gen"), pos),
+            types.TVar(types.tyvar_id("?gen")), pos),
           class_methods_for(eff_class, ctx_class_order(ctx))),
         unresolved_witnesses_for_classes(rest, type_args, pos, ctx))
 
@@ -1368,7 +1368,7 @@ fn consume_block(ev: typed_ast.Evidence, pos: source.SourcePos, ctx: LowerCtx) -
           list_map(\m -> resolve_method_var(m, method_map, key, pos, ctx_scheme_env(ctx)),
                    class_methods_for(class_name, ctx_class_order(ctx)))
       | Nothing ->
-          list_map(\_ -> typed_ast.TVar("__unresolved_" ++ key, types.TVar("?gen"), pos),
+          list_map(\_ -> typed_ast.TVar("__unresolved_" ++ key, types.TVar(types.tyvar_id("?gen")), pos),
                    class_methods_for(class_name, ctx_class_order(ctx)))
   | typed_ast.EvInstance class_name key children ->
       match dict_get(key, ctx_inst(ctx)) with
@@ -1541,11 +1541,11 @@ fn build_lambda_helper(
   typed_ast.TLambda(
     list_map(\nm -> ast.Param(nm, Nothing), lp_names),
     typed_ast.TCall(
-      typed_ast.TVar(fn_name, types.TVar("?lambda"), pos),
-      list_append(list_map(\nm -> typed_ast.TVar(nm, types.TVar("?lambda"), pos), lp_names), inner_dicts),
-      types.TVar("?lambda"),
+      typed_ast.TVar(fn_name, types.TVar(types.tyvar_id("?lambda")), pos),
+      list_append(list_map(\nm -> typed_ast.TVar(nm, types.TVar(types.tyvar_id("?lambda")), pos), lp_names), inner_dicts),
+      types.TVar(types.tyvar_id("?lambda")),
       pos),
-    types.TVar("?lambda"),
+    types.TVar(types.tyvar_id("?lambda")),
     pos)
 
 fn make_lp_names(n: Int, i: Int) -> List String =
