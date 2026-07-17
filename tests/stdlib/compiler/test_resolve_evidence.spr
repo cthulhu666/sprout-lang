@@ -22,7 +22,7 @@ fn ec(class_name: String, args: List ast.TypeExpr) -> ast.TypeConstraint =
 
 fn mk_fn(name: String, c: ast.TypeConstraint) -> typed_ast.TypedDecl =
   typed_ast.TFnDecl(name, Nil, Nothing, Nothing, Nil,
-    typed_ast.TDict(c, types.TVar("dummy"), dpos(), typed_ast.EvUnresolved))
+    typed_ast.TDict(c, types.TVar(types.tyvar_id("dummy")), dpos(), typed_ast.EvUnresolved))
 
 fn mk_inst(c: ast.TypeConstraint, ctx: List ast.TypeConstraint) -> typed_ast.TypedDecl =
   typed_ast.TInstanceDecl(c, ctx, Nil)

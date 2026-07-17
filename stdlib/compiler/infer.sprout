@@ -1793,7 +1793,7 @@ fn add_eta_for_constraint(c: ast.TypeConstraint, prog_to_fresh: Dict types.Type,
                       # the @eta_fwd:* key is built from FreshTVarName, and the scheme
                       # value stores ProgVarName for lowering to retrieve.
                       add_eta_with_supers(class_name, FreshTVarName(types.tyvar_name(fresh_name)), ProgVarName(prog_var), env,
-                        dict_set("@eta_fwd:" ++ fresh_name ++ ":" ++ class_name,
+                        dict_set("@eta_fwd:" ++ types.tyvar_name(fresh_name) ++ ":" ++ class_name,
                                  types.mono(types.TConst(types.type_id(prog_var))), markers))
                   | _ -> markers
           | _ -> markers

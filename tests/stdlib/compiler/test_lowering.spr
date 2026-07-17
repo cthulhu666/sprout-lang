@@ -63,7 +63,7 @@ fn first_fn_body_in(decls: List typed_ast.TypedDecl) -> Maybe typed_ast.TypedExp
 
 fn is_sentinel_type(t: types.Type) -> Bool =
   match t with
-  | types.TVar name -> name == "?gen" || name == "?lambda"
+  | types.TVar name -> types.tyvar_name(name) == "?gen" || types.tyvar_name(name) == "?lambda"
   | _ -> false
 
 fn body_type_is_sentinel(r: lowering.LowerResult) -> Bool =

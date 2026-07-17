@@ -39,7 +39,7 @@ fn sample_poly_scheme() -> types.Scheme =
   # forall a. (List a) -> Int
   types.Scheme(
     Cons("a", Nil), Nil,
-    types.TFunc(types.TApp(types.TConst(types.type_id("List")), types.TVar("a")), types.TConst(types.type_id("Int")), types.EffectPure),
+    types.TFunc(types.TApp(types.TConst(types.type_id("List")), types.TVar(types.tyvar_id("a"))), types.TConst(types.type_id("Int")), types.EffectPure),
     types.EffectPure)
 
 fn sample_io_scheme() -> types.Scheme =
@@ -79,7 +79,7 @@ fn main() -> Unit !{IO} =
     # CtorInfo: simulates `type Maybe a = Just a | Nothing` registered metadata
     assert_true(state, "iface with ctors roundtrip",
       roundtrip_eq(iface_codec.IfaceFile(2, "stdlib.foo", Nil,
-        Cons(iface_codec.CtorInfo("Just", "Maybe", Cons(types.TVar("a"), Nil)),
+        Cons(iface_codec.CtorInfo("Just", "Maybe", Cons(types.TVar(types.tyvar_id("a")), Nil)),
           Cons(iface_codec.CtorInfo("Nothing", "Maybe", Nil), Nil)),
         Nil, Nil)))
     # ClassInfo: simulates `class Eq a where Ord a { fn eq(...) }`

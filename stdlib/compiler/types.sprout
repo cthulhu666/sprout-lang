@@ -40,8 +40,14 @@ export type Effect (..) =
 # re-migration. Declared before Type so TConst can reference it.
 export wrap TypeId = String
 
+# Type-variable identity (E0). Declared before Type so TVar can reference it.
+# Opaque wrapper over the name string today; E1 swaps the payload to an Int id
+# (identity) + retained name (display) without touching any consumer, since all
+# TVar producers/consumers route through the tyvar_* accessors below.
+export wrap TyVarId = String
+
 export type Type (..) =
-  | TVar String
+  | TVar TyVarId
   | TConst TypeId
   | TApp Type Type
   | TFunc Type Type Effect
@@ -89,10 +95,11 @@ export fn type_id_symbol(id: TypeId) -> String =
 # ---------------------------------------------------------------------------
 
 # Mint a TVar payload from a canonical/fresh name. Single construction point.
-export fn tyvar_id(name: String) -> String = name
+export fn tyvar_id(name: String) -> TyVarId = TyVarId(name)
 
 # Display / raw name of a type variable. E0: the identity string; E1: print-only.
-export fn tyvar_name(v: String) -> String = v
+export fn tyvar_name(v: TyVarId) -> String =
+  match v with | TyVarId s -> s
 
 # ---------------------------------------------------------------------------
 # Schemes  (∀ type_vars effect_vars. body_type !body_effects)

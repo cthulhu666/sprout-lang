@@ -19,4 +19,8 @@ fn main() -> Unit !{IO} =
               types.tyvar_name(types.tyvar_id("a")), "a")
     assert_eq(state, "mint/name roundtrip: qualified-ish",
               types.tyvar_name(types.tyvar_id("t42")), "t42")
+    # Exercise the payload through the Type ADT: a TVar built from a minted
+    # payload must render its name (pins the wrap roundtrip across the E0->E1 flip).
+    assert_eq(state, "TVar renders its name via type_to_string",
+              types.type_to_string(types.TVar(types.tyvar_id("z9"))), "z9")
     summary(state)
