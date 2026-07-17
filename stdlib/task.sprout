@@ -166,8 +166,7 @@ fn run_with_deadline(scope: Scope, body: Unit -> a !{IO}, ms: Int) -> TimeoutRes
   | Scope sid ->
     do
       handle <- task_fork(scope, body)
-      outcome <- await_and_finish(sid, handle, ms)
-      outcome
+      await_and_finish(sid, handle, ms)
 
 fn await_and_finish(sid: Int, handle: Task a, ms: Int) -> TimeoutResult a !{IO} =
   match handle with

@@ -96,6 +96,28 @@ match find(key) with
 | Nothing -> fallback()
 ```
 
+## Collapse a trivial `do` block
+
+A `do` block earns its keep only when it *sequences* — two or more effectful steps,
+or a bind whose value feeds a later expression. When the whole block is a single
+bind that is immediately returned, the block *is* the call:
+
+```sprout
+# Ceremony:
+fn body(ch: Chan Int) -> Int !{IO} =
+  do
+    v <- chan_recv(ch)
+    v
+
+# Idiomatic — the function is the call:
+fn body(ch: Chan Int) -> Int !{IO} = chan_recv(ch)
+```
+
+`chan_recv` returns a bare `Int !{IO}` — the `!{IO}` is an *effect*, not a value
+wrapper to peel off — so binding and returning it unchanged adds nothing. (This
+reduction is exact when the returned value is a bare effectful type; when it is a
+`Maybe`/`Result`, check the intended short-circuit before collapsing.)
+
 ## Build strings with `++` and backtick templates
 
 Append with `++`; interpolate with backtick templates, which evaluate real

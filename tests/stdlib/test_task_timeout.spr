@@ -30,12 +30,26 @@ fn is_expired(r: task.TimeoutResult Int) -> Bool =
   | task.Completed (v) -> false
   | task.Expired -> true
 
+# A completed child's COMPUTED result (not a literal 42) must round-trip through
+# fork/await unchanged. Regression guard for the run_with_deadline do-tail: the
+# final `outcome <- await_and_finish(...)` binding was collapsed to a bare
+# tail call, and this pins that the child's payload is still delivered intact.
+fn fast_compute() -> Int !{IO} = 100 + 23
+
+fn is_completed(r: task.TimeoutResult Int, expected: Int) -> Bool =
+  match r with
+  | task.Completed (v) -> v == expected
+  | task.Expired -> false
+
 fn main() -> Unit !{IO} =
   do
     state <- new_state()
     # 1. fast body completes within the deadline -> Completed(42) (no ~10s wait: it finishes at once).
     let r1 = task.with_timeout(10000, \_ -> fast())
     assert_true(state, "fast body completes within deadline", is_completed_42(r1))
+    # 1b. a completed child's computed result round-trips intact (guards the do-tail collapse).
+    let r1b = task.with_timeout(10000, \_ -> fast_compute())
+    assert_true(state, "completed child's computed result round-trips (123)", is_completed(r1b, 123))
     # 2. slow body overruns the 20ms deadline -> Expired; the dropped body's "!" is absent.
     log <- ref_new("")
     let r2 = task.with_timeout(20, \_ -> slow(log))
