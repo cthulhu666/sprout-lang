@@ -3932,6 +3932,16 @@ long long sprout_chan_make_got(long long v) {
 long long sprout_chan_make_closed(void) {
   return sprout_make0(find_ctor_tag_by_name("stdlib.chan.Closed"));
 }
+/* L0.11 select: build `stdlib.chan.Selected index recv` for __chan_select. `recv` is an already-
+ * boxed `Recv a` (from make_got/make_closed); root it across the make2 allocation (index is a
+ * scalar). Field order matches `Selected Int (Recv a)`: field 0 = index, field 1 = recv. */
+long long sprout_chan_make_selected(long long index, long long recv_boxed) {
+  long long rooted = recv_boxed;
+  SPROUT_GC_PUSH_I64_LOCAL(rooted);
+  long long obj = sprout_make2(find_ctor_tag_by_name("stdlib.chan.Selected"), index, rooted);
+  SPROUT_GC_POP_LOCALS(1);
+  return obj;
+}
 long long sprout_make2(long long tag, long long a0, long long a1) {
   return sprout_make_registered_obj(2, tag, a0, a1, 0, "sprout_make2: out of memory");
 }
@@ -4070,6 +4080,21 @@ long long str_concat(long long left_i, long long right_i) {
   memcpy(out, left_now, left_len);
   memcpy(out + left_len, right_now, right_len);
   out[total_len] = '\0';  return (long long)(uintptr_t)out;
+}
+
+/* L0.11 select: step a Sprout `List Int` for the scheduler's __chan_select. Returns 1 and fills the
+ * head/tail out-params on a Cons cell, 0 on Nil. The scheduler TU cannot see the static Nil/Cons tag
+ * lookup, so it calls this (mirrors string_concat_many's walk). Returns int, not long long, so the
+ * approved-builtins check does not mistake it for a Sprout builtin. */
+int sprout_list_next(long long cur, long long* out_head, long long* out_tail) {
+  long long nil_tag  = find_ctor_tag_by_name("Nil");
+  long long cons_tag = find_ctor_tag_by_name("Cons");
+  long long tag = sprout_tag(cur);
+  if (tag == nil_tag) return 0;
+  if (tag != cons_tag) tcp_fail("sprout_list_next: malformed list (not Cons or Nil)");
+  *out_head = sprout_field(cur, 0);
+  *out_tail = sprout_field(cur, 1);
+  return 1;
 }
 
 /* string_concat_many: concatenate a List String into a single String. */

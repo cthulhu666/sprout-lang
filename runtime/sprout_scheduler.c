@@ -65,6 +65,10 @@ enum { REASON_NONE = 0, REASON_CANCELLED = 1, REASON_TIMEDOUT = 2 };
  * here because Task points back at the channel it is parked on. */
 typedef struct Chan Chan;
 
+/* L0.11 select: one registration of a select-parked task on one channel. Forward-declared here
+ * because both Task (its list of registrations) and Chan (its queue of them) point at it. */
+typedef struct SelectWaiter SelectWaiter;
+
 typedef struct Task {
   ucontext_t   ctx;
   void*        stack;      /* malloc'd green stack; NULL for task-0 (native stack) */
@@ -101,11 +105,18 @@ typedef struct Task {
   int          chan_is_sender; /* 1 = on the channel's send queue, 0 = on its recv queue */
   int          chan_closed_wake; /* L0.9: 1 iff woken by __chan_close (not a value delivery) — a
                                     recv-parked task then returns Closed, a send-parked one aborts */
+  /* L0.11 select. A task parked in chan_select (park_kind==PARK_SELECT) registers on N channels at
+   * once, so it cannot use the single chan_prev/chan_next links. `sel_regs` is the head of its own
+   * list of SelectWaiter registrations (linked via sib_next), one per channel; it is force-drop's
+   * handle to unlink the task from ALL its channels. On wake, the sender/closer sets chan_pending /
+   * chan_closed_wake (reused) plus `sel_fired_index` = which channel fired. */
+  SelectWaiter* sel_regs;
+  long long     sel_fired_index;
 } Task;
 
-/* How a task is suspended, so force-drop tears down the right registration (poller fd/timer,
- * or a channel wait-queue) when it drops the task. */
-enum { PARK_NONE = 0, PARK_FD = 1, PARK_TIMER = 2, PARK_CHAN = 3 };
+/* How a task is suspended, so force-drop tears down the right registration (poller fd/timer, a
+ * channel wait-queue, or — for select — every channel it registered on) when it drops the task. */
+enum { PARK_NONE = 0, PARK_FD = 1, PARK_TIMER = 2, PARK_CHAN = 3, PARK_SELECT = 4 };
 
 /* L0.8 channel: a bounded buffered FIFO ring shared between tasks. Non-moving malloc; the
  * pointer IS the Int the Sprout `Chan a` value wraps. Owns a SproutRoots context that roots
@@ -122,10 +133,26 @@ struct Chan {
   Task*        send_tail;
   Task*        recv_head;  /* FIFO of recv-parked tasks (buffer empty) */
   Task*        recv_tail;
+  SelectWaiter* select_head; /* L0.11: FIFO of select-parked registrations on this channel's recv
+                              * side, consulted by chan_send/chan_close IN ADDITION to recv_head */
+  SelectWaiter* select_tail;
   int          closed;     /* L0.9: set once by __chan_close; recv returns Closed when drained */
   Scope*       scope;      /* the scope that created it (frees it at join) */
   struct Chan* all_prev;   /* global g_all_chans list (for free-at-join + cancel-walk) */
   struct Chan* all_next;
+};
+
+/* L0.11 select: a select-parked task's registration on ONE channel. The task holds a list of these
+ * (one per channel it is selecting on) via sib_next; each channel holds a FIFO of them via
+ * q_prev/q_next. Pure scheduler memory (task/chan are runtime pointers, sel_index a scalar) — no
+ * GC roots; the delivered value rides the task's already-rooted chan_pending. */
+struct SelectWaiter {
+  Task*         task;      /* the parked selector */
+  Chan*         chan;      /* the channel this registration is on */
+  long long     sel_index; /* index in the select list, returned to the selector on fire */
+  SelectWaiter* q_prev;    /* this channel's select-wait queue links */
+  SelectWaiter* q_next;
+  SelectWaiter* sib_next;  /* next of THIS task's registrations (for unlink-all-on-fire/drop) */
 };
 
 /* The single scheduler pump. Every task (and task-0/main) PARKS by swapping to
@@ -208,6 +235,80 @@ static void chan_wake(Task* t) {
   t->park_kind = PARK_NONE;
   t->park_chan = NULL;
   rq_push(t);
+}
+
+/* L0.11 select-wait queue (per channel, on the recv side). Doubly-linked so unlink is O(1). */
+static void sw_q_push(Chan* ch, SelectWaiter* w) {
+  w->q_next = NULL;
+  w->q_prev = ch->select_tail;
+  if (ch->select_tail != NULL) ch->select_tail->q_next = w;
+  else                         ch->select_head = w;
+  ch->select_tail = w;
+}
+
+static void sw_q_remove(SelectWaiter* w) {
+  Chan* ch = w->chan;
+  if (w->q_prev != NULL) w->q_prev->q_next = w->q_next;
+  else                   ch->select_head = w->q_next;
+  if (w->q_next != NULL) w->q_next->q_prev = w->q_prev;
+  else                   ch->select_tail = w->q_prev;
+  w->q_prev = w->q_next = NULL;
+}
+
+/* Unlink a select-parked task from EVERY channel it registered on and free its registration array
+ * (sel_regs points at the array base; siblings are consecutive, chained via sib_next). Must run
+ * before the task is woken or reclaimed, so no channel keeps a dangling waiter. */
+static void select_unlink_all(Task* t) {
+  for (SelectWaiter* w = t->sel_regs; w != NULL; w = w->sib_next) sw_q_remove(w);
+  free(t->sel_regs);
+  t->sel_regs = NULL;
+}
+
+/* Fire a select-parked task: the caller has already set chan_pending / chan_closed_wake. Record
+ * which channel won, unlink from all channels, make it runnable. Peek-then-fire (never pop the
+ * waiter first): select_unlink_all does the queue removal, so a pop would double-remove. */
+static void select_fire(Task* t, long long fired_index) {
+  t->sel_fired_index = fired_index;
+  select_unlink_all(t);
+  t->park_kind = PARK_NONE;
+  rq_push(t);
+}
+
+/* Try to take a ready value from `ch` WITHOUT parking. Returns 1 (and sets *out_v / *out_closed)
+ * when the channel is ready — a buffered element (draining a parked sender into the freed slot), a
+ * rendezvous sender parked with a value, or closed-and-empty — else 0 (empty + open: caller parks).
+ * Shared by __chan_recv and the __chan_select scan so "is this channel ready and what does it
+ * yield" lives in one place. */
+static int chan_poll_take(Chan* ch, long long* out_v, int* out_closed) {
+  if (ch->count > 0) {
+    long long v = ch->buffer[ch->head];
+    ch->buffer[ch->head] = 0;             /* clear so a drained slot pins nothing */
+    ch->head = (ch->head + 1) % ch->cap;
+    ch->count--;
+    /* A parked sender (buffer was full): move its value into the slot we just freed, FIFO. */
+    Task* sdr = chan_q_pop(&ch->send_head, &ch->send_tail);
+    if (sdr != NULL) {
+      ch->buffer[ch->tail] = sdr->chan_pending;
+      sdr->chan_pending = 0;
+      ch->tail = (ch->tail + 1) % ch->cap;
+      ch->count++;
+      chan_wake(sdr);
+    }
+    *out_v = v; *out_closed = 0;
+    return 1;
+  }
+  /* Rendezvous (cap 0): a sender is parked waiting to hand its value over — take it directly. */
+  Task* rv_sdr = chan_q_pop(&ch->send_head, &ch->send_tail);
+  if (rv_sdr != NULL) {
+    long long v = rv_sdr->chan_pending;
+    rv_sdr->chan_pending = 0;
+    chan_wake(rv_sdr);
+    *out_v = v; *out_closed = 0;
+    return 1;
+  }
+  /* Empty + closed: end of stream. */
+  if (ch->closed) { *out_closed = 1; return 1; }
+  return 0;                               /* empty + open: not ready */
 }
 
 static void io_list_push(Task* t) {
@@ -385,6 +486,8 @@ static void sprout_scheduler_init(void) {
   g_task0.chan_next = NULL;
   g_task0.chan_is_sender = 0;
   g_task0.chan_closed_wake = 0;
+  g_task0.sel_regs = NULL;
+  g_task0.sel_fired_index = 0;
   /* task-0 runs with_scope bodies that send/recv on channels; root its delivery slot. */
   sprout_roots_push_ptr(g_task0.roots, &g_task0.chan_pending);
   g_current_task = &g_task0;
@@ -440,6 +543,8 @@ static Task* task_create(Scope* s, long long work, int awaitable) {
   t->chan_next    = NULL;
   t->chan_is_sender = 0;
   t->chan_closed_wake = 0;
+  t->sel_regs     = NULL;
+  t->sel_fired_index = 0;
 
   /* Keep the work-closure reachable from spawn until the task first runs: root
    * &work in the task's own context (scanned by the collector via the registry).
@@ -532,7 +637,12 @@ static void force_drop_task(Task* t) {
    * poller-parked (on g_io_head): for a timer this must discard even an already-fired-but-
    * undrained event (timers fire async to the pump, unlike fds which are drained before the
    * owner runs) — else a stale token would later resume a freed task (task_sleep design §5.1). */
-  if (t->park_kind == PARK_CHAN) {
+  if (t->park_kind == PARK_SELECT) {
+    /* L0.11: a select-parked task sits on the select queue of EVERY channel it listed. Unlink it
+     * from all of them (and free its registration array). It appears at most once per channel, so
+     * a later cancel-walk of another channel no longer sees it — no double-drop. */
+    select_unlink_all(t);
+  } else if (t->park_kind == PARK_CHAN) {
     Chan* ch = t->park_chan;
     if (t->chan_is_sender) chan_q_remove(&ch->send_head, &ch->send_tail, t);
     else                   chan_q_remove(&ch->recv_head, &ch->recv_tail, t);
@@ -596,6 +706,18 @@ long long __scope_cancel(long long scope_handle) {
       if (t->scope == s && t != g_current_task) force_drop_task(t);
       t = next;
     }
+    /* L0.11: select-waiters. Dropping one unlinks its task from EVERY channel it listed, which can
+     * free a `next` we cached on this channel (a duplicate-channel select), so re-read the head
+     * after each drop rather than following a saved link. A dropped task's waiters are all gone, so
+     * the head advances past them — progress is guaranteed and no waiter is dropped twice. */
+    for (SelectWaiter* w = ch->select_head; w != NULL; ) {
+      if (w->task->scope == s && w->task != g_current_task) {
+        force_drop_task(w->task);
+        w = ch->select_head;
+      } else {
+        w = w->q_next;
+      }
+    }
   }
   return 0;
 }
@@ -656,9 +778,10 @@ long long __await_deadline(long long scope_handle, long long task_handle, long l
     force_drop_task(child);
     return 0;
   }
-  if (child->park_kind == PARK_CHAN) {
-    /* Parked in chan_send/chan_recv — droppable, same MVP-supported class as direct I/O.
-     * Not on g_io_head, so this is a distinct case from the on_io_list branch above. */
+  if (child->park_kind == PARK_CHAN || child->park_kind == PARK_SELECT) {
+    /* Parked in chan_send/chan_recv (PARK_CHAN) or chan_select (PARK_SELECT) — droppable, same
+     * MVP-supported class as direct I/O. Not on g_io_head, so this is distinct from the on_io_list
+     * branch above; force_drop tears down the channel/select registration(s). */
     s->reason = REASON_TIMEDOUT;
     child->awaiter = NULL;
     force_drop_task(child);
@@ -802,6 +925,7 @@ long long __chan_new(long long scope_handle, long long capacity) {
   ch->tail  = 0;
   ch->send_head = ch->send_tail = NULL;
   ch->recv_head = ch->recv_tail = NULL;
+  ch->select_head = ch->select_tail = NULL;
   ch->closed = 0;
   ch->scope = s;
   if (capacity == 0) {
@@ -836,11 +960,23 @@ long long __chan_send(long long chan_handle, long long value) {
    * Sprout has no recovery, so abort rather than silently dropping the value. */
   if (ch->closed) sprout_fail("__chan_send: send on closed channel");
 
-  /* A waiting receiver (=> buffer empty): hand off directly, buffer stays empty. */
+  /* A waiting receiver (=> buffer empty): hand off directly, buffer stays empty. A plain
+   * chan_recv parker takes priority over a select-waiter (documented; Go guarantees no
+   * cross-select fairness anyway). */
   Task* r = chan_q_pop(&ch->recv_head, &ch->recv_tail);
   if (r != NULL) {
     r->chan_pending = value;            /* rooted via &r->chan_pending; no alloc before wake */
     chan_wake(r);
+    return 0;
+  }
+  /* A waiting select-waiter (=> this channel was empty when it registered): hand off directly and
+   * unregister it from its other channels. Peek (don't pop) — select_fire does the queue removal. */
+  SelectWaiter* sw = ch->select_head;
+  if (sw != NULL) {
+    Task* st = sw->task;
+    st->chan_pending = value;           /* rooted via &st->chan_pending; no alloc before wake */
+    st->chan_closed_wake = 0;
+    select_fire(st, sw->sel_index);
     return 0;
   }
   /* Space in the buffer: enqueue at the tail. */
@@ -872,39 +1008,11 @@ long long __chan_recv(long long chan_handle) {
   Chan* ch = chan_of(chan_handle);
   if (ch == NULL) sprout_fail("__chan_recv: null channel");
 
-  if (ch->count > 0) {
-    long long v = ch->buffer[ch->head];
-    ch->buffer[ch->head] = 0;           /* clear so a drained slot pins nothing */
-    ch->head = (ch->head + 1) % ch->cap;
-    ch->count--;
-    /* A parked sender (buffer was full): move its value into the slot we just freed, FIFO.
-     * (After close there are no send-parked tasks — chan_close aborts them — so this is skipped
-     * on a closed channel.) */
-    Task* sdr = chan_q_pop(&ch->send_head, &ch->send_tail);
-    if (sdr != NULL) {
-      ch->buffer[ch->tail] = sdr->chan_pending;
-      sdr->chan_pending = 0;
-      ch->tail = (ch->tail + 1) % ch->cap;
-      ch->count++;
-      chan_wake(sdr);
-    }
-    return sprout_chan_make_got(v);      /* boxes Got v; roots v across the allocation */
-  }
-  /* Rendezvous (cap 0): a sender is parked waiting to hand its value to us — take it directly and
-   * wake the sender, no buffer involved. UNREACHABLE for cap >= 1 (a sender parks only when the
-   * buffer is full, count == cap >= 1, so count == 0 implies no send-waiters); the buffered drain
-   * above handles a parked sender via its own refill. GC-safe by parity with that drain: the value
-   * comes from the sender's rooted `chan_pending`, chan_wake allocates nothing, make_got roots it
-   * across the box. */
-  Task* rv_sdr = chan_q_pop(&ch->send_head, &ch->send_tail);
-  if (rv_sdr != NULL) {
-    long long v = rv_sdr->chan_pending;
-    rv_sdr->chan_pending = 0;
-    chan_wake(rv_sdr);
-    return sprout_chan_make_got(v);
-  }
-  /* Empty + closed: end of stream — never park. */
-  if (ch->closed) return sprout_chan_make_closed();
+  /* Ready (buffered value / parked rendezvous sender / closed-and-drained): take without parking.
+   * Buffered values drain as Got before Closed is observed — chan_poll_take checks count first. */
+  long long v; int closed;
+  if (chan_poll_take(ch, &v, &closed))
+    return closed ? sprout_chan_make_closed() : sprout_chan_make_got(v);
   /* Empty + open: park until a sender places a value in our chan_pending, or chan_close wakes us. */
   Task* self = g_current_task;
   self->park_kind      = PARK_CHAN;
@@ -917,7 +1025,7 @@ long long __chan_recv(long long chan_handle) {
     self->chan_closed_wake = 0;
     return sprout_chan_make_closed();
   }
-  long long v = self->chan_pending;
+  v = self->chan_pending;
   self->chan_pending = 0;
   return sprout_chan_make_got(v);
 }
@@ -942,7 +1050,74 @@ long long __chan_close(long long chan_handle) {
     sdr->chan_closed_wake = 1;
     chan_wake(sdr);
   }
+  /* L0.11: wake select-waiters on this channel with Closed. select_fire unlinks each from ALL its
+   * channels (advancing select_head), so re-peek the head each iteration until the queue drains. */
+  for (SelectWaiter* sw = ch->select_head; sw != NULL; sw = ch->select_head) {
+    Task* st = sw->task;
+    st->chan_closed_wake = 1;
+    select_fire(st, sw->sel_index);
+  }
   return 0;
+}
+
+/* L0.11 select. Wait on N channels of one element type; return the index of the channel that
+ * became ready first and its Recv outcome, as `Selected Int (Recv a)`. First a synchronous scan
+ * (lowest-index ready channel wins — the tie-break); if none is ready, register a SelectWaiter on
+ * every channel and park until a sender/closer delivers into chan_pending and fires us. */
+long long __chan_select(long long list_handle) {
+  /* Walk the List Int of channel handles into a C array (sprout_list_next hides the Nil/Cons tag
+   * lookup, which is static in the runtime TU). Two passes: count, then fill. */
+  long long n = 0, head, tail;
+  for (long long cur = list_handle; sprout_list_next(cur, &head, &tail); cur = tail) n++;
+  if (n == 0) sprout_fail("__chan_select: empty channel list (a select with no cases can never proceed)");
+  Chan** chans = (Chan**)malloc((size_t)n * sizeof(Chan*));
+  if (chans == NULL) sprout_fail("__chan_select: out of memory (channel array)");
+  {
+    long long i = 0;
+    for (long long cur = list_handle; sprout_list_next(cur, &head, &tail); cur = tail) {
+      Chan* ch = chan_of(head);
+      if (ch == NULL) { free(chans); sprout_fail("__chan_select: null channel in list"); }
+      chans[i++] = ch;
+    }
+  }
+  /* Synchronous scan: take from the lowest-index ready channel. */
+  for (long long i = 0; i < n; i++) {
+    long long v; int closed;
+    if (chan_poll_take(chans[i], &v, &closed)) {
+      long long sel = sprout_chan_make_selected(i, closed ? sprout_chan_make_closed()
+                                                          : sprout_chan_make_got(v));
+      free(chans);
+      return sel;
+    }
+  }
+  /* None ready: register one SelectWaiter per channel and park. The registration array is pure
+   * scheduler memory (no Sprout heap pointers → no GC roots); the delivered value rides the
+   * already-rooted chan_pending. */
+  Task* self = g_current_task;
+  SelectWaiter* regs = (SelectWaiter*)malloc((size_t)n * sizeof(SelectWaiter));
+  if (regs == NULL) { free(chans); sprout_fail("__chan_select: out of memory (waiters)"); }
+  for (long long i = 0; i < n; i++) {
+    regs[i].task      = self;
+    regs[i].chan      = chans[i];
+    regs[i].sel_index = i;
+    regs[i].q_prev = regs[i].q_next = NULL;
+    regs[i].sib_next  = (i + 1 < n) ? &regs[i + 1] : NULL;
+    sw_q_push(chans[i], &regs[i]);
+  }
+  free(chans);
+  self->sel_regs   = regs;
+  self->park_kind  = PARK_SELECT;
+  park_to_pump();
+  /* Resumed: a sender/closer set chan_pending / chan_closed_wake + sel_fired_index and unlinked us
+   * from every channel (sel_regs freed and NULLed by select_unlink_all). */
+  long long i = self->sel_fired_index;
+  if (self->chan_closed_wake) {
+    self->chan_closed_wake = 0;
+    return sprout_chan_make_selected(i, sprout_chan_make_closed());
+  }
+  long long v = self->chan_pending;
+  self->chan_pending = 0;
+  return sprout_chan_make_selected(i, sprout_chan_make_got(v));
 }
 
 #ifdef __APPLE__

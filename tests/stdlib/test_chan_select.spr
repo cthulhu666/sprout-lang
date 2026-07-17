@@ -1,0 +1,117 @@
+import stdlib.test (TestState, new_state, assert_eq, summary)
+import stdlib.task (Scope, with_scope, task_spawn, task_fork, task_await, task_yield)
+import stdlib.chan (Chan, Recv, Got, Closed, chan_new, chan_send, chan_recv, chan_close, chan_select)
+import stdlib.string as string
+
+# Channel select (L0.11, EXPERIMENTAL). `chan_select(chans)` waits on several same-typed channels
+# and returns `(index, outcome)` — the list index of the channel that became ready first and its
+# `Recv a` (`Got v` / `Closed`). A closed channel is always ready. Lowest index wins when several
+# are ready at entry. Backed by the scheduler: the selector registers on every channel without
+# consuming, and the first sender/closer to make one ready delivers exactly one value and
+# unregisters the rest.
+
+# Extract just the value of a single select (index ignored); two-level match keeps the pattern
+# simple (a tuple whose second element is a Recv).
+fn sel_int(cs: List (Chan Int)) -> Int !{IO} =
+  match chan_select(cs) with
+  | (_, r) ->
+    match r with
+    | Got v -> v
+    | Closed -> -1  # unreachable where used
+
+fn sel_str(cs: List (Chan String)) -> String !{IO} =
+  match chan_select(cs) with
+  | (_, r) ->
+    match r with
+    | Got v -> v
+    | Closed -> ""
+
+fn churn(n: Int, acc: String) -> String =
+  if n <= 0 then acc else churn(n - 1, acc ++ "x")
+
+# --- fan-in first-ready: three producers each send one value into their own channel; the consumer
+# selects three times over all three, draining whichever is ready. First select finds all empty and
+# PARKS registered on all three; the producers then run and each hand-off/buffer wakes or feeds the
+# consumer. Sum is order-independent, but completing at all exercises the park+fire path plus the
+# initial scan on the later selects. Channel `a` is cap-0 (RENDEZVOUS) so select delivery and the
+# scan's sender-hand-off are covered on an unbuffered channel too (the send-side select branch is
+# cap-agnostic; the scan reuses chan_poll_take's rendezvous path). ---
+fn produce_one(ch: Chan Int, v: Int) -> Unit !{IO} =
+  chan_send(ch, v)
+
+fn drain_select(cs: List (Chan Int), n: Int, acc: Int) -> Int !{IO} =
+  if n <= 0 then
+    acc
+  else
+    do
+      v <- sel_int(cs)
+      drain_select(cs, n - 1, acc + v)
+
+fn fan_in(s: Scope) -> Int !{IO} =
+  do
+    a <- chan_new(s, 0)  # rendezvous
+    b <- chan_new(s, 1)
+    c <- chan_new(s, 1)
+    task_spawn(s, \_ -> produce_one(a, 100))
+    task_spawn(s, \_ -> produce_one(b, 20))
+    task_spawn(s, \_ -> produce_one(c, 3))  # 100 + 20 + 3 = 123
+    drain_select([a, b, c], 3, 0)
+
+# --- lowest-index tie-break: pre-ready BOTH channels (buffer a value into each) BEFORE selecting,
+# so the initial scan sees two ready channels at once. Lowest index (0) must win, returning ch0's
+# value. On a highest-index or arbitrary rule this would differ — that is the whole discriminator. ---
+fn tie_break(s: Scope) -> Int !{IO} =
+  do
+    x <- chan_new(s, 1)
+    y <- chan_new(s, 1)
+    chan_send(x, 10)  # both buffered and ready at select entry
+    chan_send(y, 20)
+    match chan_select([x, y]) with
+    | (i, r) ->
+      match r with
+      | Got v -> i * 1000 + v  # expect 0*1000 + 10 = 10
+      | Closed -> -1
+
+# --- closed channel is always ready: ch0 is empty+open (NOT ready), ch1 is closed (ready). The
+# scan skips index 0 and returns index 1 with Closed, without ever parking. Proves the scan
+# continues past a not-ready channel and that a closed channel is selectable. ---
+fn closed_ready(s: Scope) -> Int !{IO} =
+  do
+    open_empty <- chan_new(s, 1)
+    shut <- chan_new(s, 1)
+    chan_close(shut)
+    match chan_select([open_empty, shut]) with
+    | (i, r) ->
+      match r with
+      | Closed -> i  # expect 1
+      | Got v -> -1
+
+# --- heap-value delivery via a parked selector, under a GC storm: the selector forks and parks on
+# [ch] (registers a select-waiter); the owner sends a FRESH heap String whose only root is the
+# selector's chan_pending, then churns to force a GC before the selector runs. If the select
+# delivery path did not root chan_pending the value would be collected mid-flight. ---
+fn select_one_str(ch: Chan String) -> String !{IO} =
+  sel_str([ch])
+
+fn heap_select(s: Scope) -> String !{IO} =
+  do
+    ch <- chan_new(s, 1)
+    h <- task_fork(s, \_ -> select_one_str(ch))
+    task_yield()  # let the selector reach chan_select and park
+    chan_send(ch, "wor" ++ "ld")  # delivers into the parked selector's chan_pending
+    let noise = churn(300, "")  # GC storm before the selector runs
+    got <- task_await(h)
+    `${got}${string.length(noise)}`  # "world300"
+
+fn main() -> Unit !{IO} =
+  do
+    state <- new_state()
+    r1 <- with_scope(\s -> fan_in(s))
+    assert_eq(state, "select fan-in: three producers, consumer selects each", r1, 123)
+    r2 <- with_scope(\s -> tie_break(s))
+    assert_eq(state, "select lowest-index wins when several ready at entry", r2, 10)
+    r3 <- with_scope(\s -> closed_ready(s))
+    assert_eq(state, "select treats a closed channel as ready (returns Closed, no park)", r3, 1)
+    r4 <- with_scope(\s -> heap_select(s))
+    assert_eq(state, "select heap value survives a GC storm via the parked selector", r4, "world300")
+    summary(state)

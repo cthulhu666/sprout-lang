@@ -1125,7 +1125,18 @@ task-io-smoke: bootstrap-from-seed
   # must abort on resume (the post-park check, distinct from #11's send-entry check), not return.
   build tests/task_io_smoke/send_parked_close_fails.spr
   run_expect_fail "send-parked-close" "send on closed channel"
-  echo "==> task-io-smoke ✓ (read-park, accept-park, re-arm, write, cancel-drop, await-guard, timer-drop, timeout-drop, timeout-nested-guard, chan-cancel-drop, chan-timeout-drop, chan-negative-cap-guard, rendezvous-send-drop, send-on-closed-guard, double-close-guard, send-parked-close-guard; interleaved; stress-clean)"
+  # (16) select cancel-drop (L0.11): scope_cancel force-drops a task parked in chan_select, unlinking
+  # it from EVERY channel it listed (both fork + spawn, each on two channels). "done" proves the
+  # multi-channel unlink; a broken single-channel unlink double-frees (ASan-verified negative control).
+  build tests/task_io_smoke/cancel_select_drop.spr
+  run_once "select-cancel-drop" "done"
+  SPROUT_GC_STRESS=1 run_once "select-cancel-drop/stress" "done"
+  # (17) with_timeout over chan_select (L0.11): a select-parked body is force-dropped when its deadline
+  # fires (__await_deadline PARK_SELECT classification), so with_timeout returns Expired and joins.
+  build tests/task_io_smoke/timeout_select_drop.spr
+  run_once "select-timeout-drop" "done"
+  SPROUT_GC_STRESS=1 run_once "select-timeout-drop/stress" "done"
+  echo "==> task-io-smoke ✓ (read-park, accept-park, re-arm, write, cancel-drop, await-guard, timer-drop, timeout-drop, timeout-nested-guard, chan-cancel-drop, chan-timeout-drop, chan-negative-cap-guard, rendezvous-send-drop, send-on-closed-guard, double-close-guard, send-parked-close-guard, select-cancel-drop, select-timeout-drop; interleaved; stress-clean)"
 
 # Division-by-zero guard regression (CI gate). The fixture divides by a RUNTIME
 # zero (`10 / list_length(argv)` with no args), which neither the compiler nor
@@ -1225,7 +1236,9 @@ test-stress: bootstrap-from-seed
   # drives a GC — a rooting regression presents as a collected-while-live abort here.
   # test_chan_rendezvous: (L0.10) the direct sender→receiver hand-off carries a heap value
   # through the parked sender's chan_pending across a GC storm — same rooting oracle, cap-0 path.
-  STRESS_FILES="tests/stdlib/test_ir_rooting.spr tests/stdlib/test_ir_codegen_ctors.spr tests/stdlib/test_ir_codegen_match.spr tests/stdlib/test_ir_codegen_closures.spr tests/stdlib/test_ir_codegen_char_rooting.spr tests/stdlib/test_stress_global_roots.spr tests/stdlib/test_stress_unboxed_maybe_heap_payload.spr tests/stdlib/test_stress_cpr_tier2_worker.spr tests/stdlib/test_task_cooperative.spr tests/stdlib/test_task_nested_scope.spr tests/stdlib/test_chan.spr tests/stdlib/test_chan_close.spr tests/stdlib/test_chan_rendezvous.spr"
+  # test_chan_select: (L0.11) a parked selector receives a heap value via the send-side select
+  # delivery into chan_pending under a GC storm — the select rooting oracle.
+  STRESS_FILES="tests/stdlib/test_ir_rooting.spr tests/stdlib/test_ir_codegen_ctors.spr tests/stdlib/test_ir_codegen_match.spr tests/stdlib/test_ir_codegen_closures.spr tests/stdlib/test_ir_codegen_char_rooting.spr tests/stdlib/test_stress_global_roots.spr tests/stdlib/test_stress_unboxed_maybe_heap_payload.spr tests/stdlib/test_stress_cpr_tier2_worker.spr tests/stdlib/test_task_cooperative.spr tests/stdlib/test_task_nested_scope.spr tests/stdlib/test_chan.spr tests/stdlib/test_chan_close.spr tests/stdlib/test_chan_rendezvous.spr tests/stdlib/test_chan_select.spr"
   # Known-failing under stress — false-green at the default threshold, FOUND BY
   # THIS PASS (residual typed-codegen rooting UAF, GC-confirmed via
   # SPROUT_GC_DISABLE).  Tracked in BACKLOG.md; warn-only here.  Promote to

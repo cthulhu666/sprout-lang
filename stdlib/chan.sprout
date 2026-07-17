@@ -15,12 +15,14 @@ import stdlib.task (Scope, scope_handle)
 # reclaimed). Consequences: there are no top-level channels, and a channel cannot outlive
 # the scope that created it.
 #
-# MVP boundary: bounded buffered (L0.8) + rendezvous (L0.10) + `close`/recv-on-closed (L0.9).
-# `select` (multiplexing) is a later increment. Delivery is cooperative and integrates with
-# cancellation — a task parked in `chan_send`/`chan_recv` when its scope is cancelled (or a
-# `with_timeout` deadline fires) is force-dropped by the scheduler. See
-# docs/concurrency-channels-design-2026-07-16.md and
-# docs/concurrency-channel-close-design-2026-07-16.md.
+# MVP boundary: bounded buffered (L0.8) + rendezvous (L0.10) + `close`/recv-on-closed (L0.9) +
+# `select` over same-typed channels, recv-only (L0.11). Send-cases in select, a non-blocking
+# `default`, and randomized fairness are later increments. Delivery is cooperative and integrates
+# with cancellation — a task parked in `chan_send`/`chan_recv`/`chan_select` when its scope is
+# cancelled (or a `with_timeout` deadline fires) is force-dropped by the scheduler. See
+# docs/concurrency-channels-design-2026-07-16.md,
+# docs/concurrency-channel-close-design-2026-07-16.md, and
+# docs/concurrency-select-design-2026-07-17.md.
 
 export type Chan a =
   | Chan Int
@@ -32,6 +34,12 @@ export type Recv a (..) =
   | Got a
   | Closed
 
+# Internal result of `__chan_select` (L0.11): which listed channel became ready (`Int` index) and
+# its `Recv` outcome. Built by the runtime; `chan_select` unwraps it to the public `(Int, Recv a)`.
+# Not exported — the public surface is the tuple.
+type Selected a =
+  | Selected Int (Recv a)
+
 # Runtime primitives (green-thread scheduler; cannot be expressed in Sprout — they park and
 # resume tasks via context switching). Internal: the public API below wraps them.
 # See runtime/APPROVED_BUILTINS.
@@ -39,6 +47,7 @@ extern fn __chan_new(scope_id: Int, capacity: Int) -> Int !{IO}
 extern fn __chan_send(chan_id: Int, value: a) -> Unit !{IO}
 extern fn __chan_recv(chan_id: Int) -> Recv a !{IO}
 extern fn __chan_close(chan_id: Int) -> Unit !{IO}
+extern fn __chan_select(chan_ids: List Int) -> Selected a !{IO}
 
 # Create a `capacity`-slot channel belonging to `scope`, freed when the scope closes.
 # `capacity >= 1` is bounded buffered; `capacity == 0` is a rendezvous (unbuffered) channel
@@ -71,3 +80,17 @@ export fn chan_recv(ch: Chan a) -> Recv a !{IO} =
 export fn chan_close(ch: Chan a) -> Unit !{IO} =
   match ch with
   | Chan cid -> __chan_close(cid)
+
+# The raw scheduler handle inside a `Chan` — used only to pass a channel list to `__chan_select`.
+fn chan_id(ch: Chan a) -> Int =
+  match ch with
+  | Chan cid -> cid
+
+# Wait on several same-typed channels at once; return the list index of the channel that became
+# ready FIRST and its `Recv` outcome (`Got v` / `Closed`). Blocks until at least one is ready. A
+# closed channel is always ready (yields `Closed`). When several are ready at entry, the LOWEST
+# index wins. An empty list loud-fails (a select with no cases can never proceed). Recv-only:
+# there are no send cases in this increment. See docs/concurrency-select-design-2026-07-17.md.
+export fn chan_select(chans: List (Chan a)) -> (Int, Recv a) !{IO} =
+  match __chan_select(list_map(chan_id, chans)) with
+  | Selected i r -> (i, r)

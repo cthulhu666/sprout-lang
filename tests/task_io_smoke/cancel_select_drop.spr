@@ -1,0 +1,46 @@
+import stdlib.task (Scope, with_scope, task_fork, task_spawn, task_yield, scope_cancel)
+import stdlib.chan (Chan, Recv, Got, Closed, chan_new, chan_select)
+
+# L0.11 select-drop cancellation (EXPERIMENTAL). A task parked in chan_select is registered on
+# EVERY channel it listed at once, so force-drop must unlink it from ALL of them (not just one) and
+# free its registration array. This is the #1 correctness hazard of select: unlinking only the
+# "current" channel would leave a dangling waiter on the others and double-free on the second walk.
+# Here two tasks (fork + spawn) select on the SAME two channels [a, b], which nobody ever sends to,
+# so both park; scope_cancel force-drops both, walking each channel's select queue. Select-parked
+# tasks are NOT on g_io_head, so a broken drop leaves live > 0 with an empty ready queue AND poller
+# → deadlock panic (loud), or corrupts — either way "done" is not reached.
+# `held` is bound before the park and used after, so the dropped task is suspended with a GC root
+# pointing INTO its green stack — reclaim must free roots and stack together (the ASan path).
+fn sel_val(a: Chan Int, b: Chan Int) -> Int !{IO} =
+  match chan_select([a, b]) with
+  | (_, r) ->
+    match r with
+    | Got v -> v
+    | Closed -> 0
+
+fn select_forever(a: Chan Int, b: Chan Int) -> Int !{IO} =
+  do
+    let held = "live-" ++ "root"
+    v <- sel_val(a, b)  # parks on BOTH a and b forever — nobody ever sends
+    term_write(held)  # unreachable; forces `held` rooted across the park
+    v
+
+fn select_forever_unit(a: Chan Int, b: Chan Int) -> Unit !{IO} =
+  do
+    _ <- select_forever(a, b)
+    term_write("")
+
+fn run(s: Scope) -> Unit !{IO} =
+  do
+    a <- chan_new(s, 1)
+    b <- chan_new(s, 1)
+    _fork <- task_fork(s, \_ -> select_forever(a, b))  # awaitable, select-parks on [a, b]
+    task_spawn(s, \_ -> select_forever_unit(a, b))  # fire-and-forget, select-parks on [a, b]
+    task_yield()  # let both reach chan_select and register on both channels
+    scope_cancel(s)  # force-drop both, unlinking each from BOTH a and b
+    term_write("cancelled\n")  # owner continues; awaits neither
+
+fn main() -> Unit !{IO} =
+  do
+    with_scope(\s -> run(s))
+    term_write("done\n")  # reached only if both select-parked tasks were dropped from all channels

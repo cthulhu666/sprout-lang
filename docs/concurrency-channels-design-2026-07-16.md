@@ -237,7 +237,12 @@ qualification bundler bug does not apply.
    Closed`** (dedicated type, extensible to a `Got | Closed | Empty` for a future non-blocking
    try-recv, where `Maybe` cannot grow a third case). See
    `docs/concurrency-channel-close-design-2026-07-16.md`.
-4. **§9.4 `select`** — wait on the first-ready of several channel ops.
+4. **§9.4 `select` — DONE (L0.11).** Wait on the first-ready of several channel ops.
+   `chan_select(List (Chan a)) -> (Int, Recv a)` — homogeneous (same element type), recv-only,
+   list-based; lowest-index tie-break; a closed channel is always ready. Implemented native (a
+   fork-race would break exactly-once delivery), bolt-on `select_waiters` alongside the shipped
+   `recv_waiters`. Send-cases, a non-blocking `default`, and randomized fairness stay deferred.
+   See `docs/concurrency-select-design-2026-07-17.md`.
 
 ## 10. Tests (TDD)
 

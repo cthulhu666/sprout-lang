@@ -47,6 +47,13 @@ __attribute__((noreturn)) void sprout_fail(const char* msg);
 long long sprout_chan_make_got(long long v);
 long long sprout_chan_make_closed(void);
 
+/* L0.11 select. sprout_chan_make_selected builds `stdlib.chan.Selected index recv` (recv is an
+ * already-boxed Recv a; rooted across the allocation). sprout_list_next steps a Sprout `List Int`
+ * in the scheduler: returns 1 and fills the head/tail out-params on a Cons, 0 on Nil (the Nil/Cons tag
+ * lookup is static in the runtime TU). Both defined in sprout_runtime.c. */
+long long sprout_chan_make_selected(long long index, long long recv_boxed);
+int sprout_list_next(long long cur, long long* out_head, long long* out_tail);
+
 /* Task-0 (main) GC root context — the static 131072-slot pool. The scheduler
  * materializes main as a task record pointing at this; main keeps the native
  * stack + this pool (a green main would exhaust it and break the bootstrap). */

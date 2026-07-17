@@ -140,6 +140,7 @@ sprout_rebox2  # CPR wrapper helper: boxes { tag, f0 } struct back to i64 heap p
 sprout_rebox3  # CPR wrapper helper: boxes { tag, f0, f1 } struct back to i64 heap pointer; same rationale as sprout_rebox2
 sprout_chan_make_got  # L0.9 channels: build a stdlib.chan.Recv `Got v` for __chan_recv. C-level helper (not Sprout-callable) — the scheduler TU cannot reach the static ctor-name lookup or the GC temp-root macros; also roots the payload across the boxing alloc. Same class as sprout_rebox2/3.
 sprout_chan_make_closed  # L0.9 channels: build a stdlib.chan.Recv `Closed` for __chan_recv; same rationale as sprout_chan_make_got.
+sprout_chan_make_selected  # L0.11 select: build a stdlib.chan.Selected `index (Recv a)` for __chan_select; C-level helper (not Sprout-callable), roots the boxed Recv across the make2 alloc. Same class as sprout_chan_make_got/closed.
 sprout_register_ctor
 sprout_set_argv
 sprout_set_current_fn
@@ -182,6 +183,7 @@ __chan_new  # L0.8 channels: allocate a bounded buffered channel in a scope, wit
 __chan_send  # L0.8: send a value into a channel; parks the current task (context switch) when the buffer is full, or hands off directly to a parked receiver. Requires driving the cooperative scheduler + GC-rooting the in-flight value across the park — not expressible in Sprout.
 __chan_recv  # L0.8/L0.9: receive from a channel as `Recv a` (Got v | Closed); parks the current task (context switch) when empty and open, waking a parked sender to refill. Requires driving the cooperative scheduler — not expressible in Sprout.
 __chan_close  # L0.9: close a channel (end-of-stream signal); wakes recv-parked tasks with Closed and aborts send-parked tasks. Manipulates scheduler wait-queues + parks/context switches — not expressible in Sprout.
+__chan_select  # L0.11: wait on several channels at once (recv), returning which became ready first and its Recv outcome. Registers the current task on every channel's select wait-queue and parks (context switch) until one fires; unregisters from the rest atomically. Drives the cooperative scheduler across N channels — not expressible in Sprout.
 term_clear
 term_hide_cursor
 term_move
