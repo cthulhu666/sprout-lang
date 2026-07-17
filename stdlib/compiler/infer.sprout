@@ -1665,6 +1665,23 @@ fn resolve_obligation(
 export fn dispatch_precise_miss_is_fatal(path: String) -> Bool =
   path == "scan_prog_to_fresh_for_instance(guess)"
 
+# Decode a positional constraint-var token ("#pos:<k>", written by
+# canonicalize_constrained_markers) back to the callee's live generalized-scheme
+# binder name, so resolve_obligation's precise prog_to_fresh lookup hits. The
+# callee scheme in env is the generalized one at an external call site; its
+# scheme_vars is exactly the binder list the position was computed against.
+# Legacy (non-positional) name tokens pass through unchanged.
+fn decode_constraint_var(token: String, callee: String, env: Dict types.Scheme) -> String =
+  if str_starts_with(token, "#pos:")
+  then
+    match parse_int(str_slice(token, 5, str_len(token))) with
+    | Just k ->
+        match dict_get(callee, env) with
+        | Just sch -> list_nth_or(types.scheme_vars(sch), k, token)
+        | Nothing -> token
+    | Nothing -> token
+  else token
+
 fn inject_constrained_fn_dicts(
   name: String,
   idx: Int,
@@ -1688,7 +1705,7 @@ fn inject_constrained_fn_dicts(
           # Wrap as ProgVarName at the extraction site: this is the programmer's
           # type variable name (from the constraint head), not a compiler-generated
           # fresh TVar name. Confusing these would silently break cascade resolution.
-          match resolve_obligation(types.type_id_name(class_name), ProgVarName(types.type_id_name(prog_var)), prog_to_fresh, s3, user_typed_args(typed_args), env, pos, collect_injected_heads_for_class(types.type_id_name(class_name), typed_args)) with
+          match resolve_obligation(types.type_id_name(class_name), ProgVarName(decode_constraint_var(types.type_id_name(prog_var), name, env)), prog_to_fresh, s3, user_typed_args(typed_args), env, pos, collect_injected_heads_for_class(types.type_id_name(class_name), typed_args)) with
           | (resolved, path) ->
               do
                 _ <- trace_dispatch(name, types.type_id_name(class_name), types.type_id_name(prog_var), prog_to_fresh, s3, resolved, path)
@@ -3551,7 +3568,7 @@ fn typecheck_decl(
         env_ftv)
   | ast.FnDecl name params ret_type_maybe effects_maybe constraints _ _ ->
       do
-        (r, fwd_markers) <- check_fn_body(state, decl, global_env_dict(env), subst, eff_subst, alias_env)
+        (r, fwd_markers) <- check_fn_body(state, decl, global_env_dict(env), subst, eff_subst, alias_env, env_ftv)
         # WHY: @eta_fwd markers added here have free type variables that must be
         # included in env_ftv so subsequent declarations don't incorrectly generalize
         # over them.  Computed once per declaration (not per env entry) → stays O(n).
@@ -4197,7 +4214,8 @@ fn check_fn_body(
   env: Dict types.Scheme,
   subst: Dict types.Type,
   eff_subst: Dict types.Effect,
-  alias_env: Dict types.Type
+  alias_env: Dict types.Type,
+  env_ftv: List String
 ) -> (typed_ast.BodyResult, Dict types.Scheme) !{IO} =
   match decl with
   | ast.FnDecl name params ret_type_maybe effects_maybe constraints body fn_pos ->
@@ -4224,36 +4242,60 @@ fn check_fn_body(
                     (typed_ast.BodyErr(fn_pos, "Signature too general for its body in " ++ name ++ ": type variable " ++ bad), dict_empty())
                 | Nothing ->
                     (typed_ast.BodyOk(resolve_dispatch_typed_expr(self_env, s2, typed_body), unifier.apply_subst(s2, inst_type)),
-                     canonicalize_constrained_markers(name, constraints, prog_to_fresh, s2, fwd_markers))
+                     canonicalize_constrained_markers(name, constraints, prog_to_fresh, s2, inst_type, env_ftv, fwd_markers))
   | _ -> (typed_ast.BodyOk(dummy_unit(), types.TConst(types.type_id("Unit"))), dict_empty())
+
+# --- Positional constraint-var identity helpers (canonical-identity Stage 3) ---
+#
+# Position of x's first occurrence in xs, or -1 if absent.
+fn list_index_of(x: String, xs: List String) -> Int =
+  list_index_of_acc(x, xs, 0)
+fn list_index_of_acc(x: String, xs: List String, i: Int) -> Int =
+  match xs with
+  | Nil -> -1
+  | Cons y rest -> if y == x then i else list_index_of_acc(x, rest, i + 1)
+
+# The n-th element of xs, or dflt when out of range.
+fn list_nth_or(xs: List String, n: Int, dflt: String) -> String =
+  match xs with
+  | Nil -> dflt
+  | Cons y rest -> if n <= 0 then y else list_nth_or(rest, n - 1, dflt)
+
+# Encode a constraint var as its POSITION in the fn's generalized scheme binder
+# list ("#pos:<k>") when present, else fall back to the canonical name (a
+# monomorphic / env-captured var that isn't generalized). Position is invariant
+# under the generalize/instantiate renaming that defeats name-keying, so the
+# call-site resolver decodes it back to the live binder name — the precise lookup
+# then cannot miss. Decoded by decode_constraint_var at the call site.
+fn constraint_var_token(canon_name: String, binders: List String) -> String =
+  constraint_var_token_at(canon_name, list_index_of(canon_name, binders))
+fn constraint_var_token_at(canon_name: String, pos: Int) -> String =
+  if pos < 0 then canon_name else "#pos:" ++ int_to_string(pos)
 
 # After body inference the @constrained_N:name markers registered at pre-scan
 # still key each constraint var by its SOURCE name (e.g. "k"). But the scheme
-# folded into the global env at generalization uses the fresh instantiation
-# names, renamed once more by the body's unification (s2). At an external call
-# site the resolver instantiates that generalized scheme, so prog_to_fresh is
-# keyed by the post-s2 names; a source-name marker misses the precise
-# dict_get(prog_var, prog_to_fresh) lookup in resolve_obligation and resolution
-# falls to the order-dependent scan_prog_to_fresh_for_instance heuristic — which
-# for a projection sort `vec_sort_by(f: a -> k, vec)` (k != a) grabs the ELEMENT
-# type a instead of the key type k, threading `Ord a` where `Ord k` was needed
-# (a dispatch soundness hole → SIGSEGV, since keys of type k are then compared
-# through the wrong representation). Rewrite each marker's var to its canonical
-# post-s2 name: `apply_subst(s2, prog_to_fresh[source_var])` is, by construction,
-# the generalized scheme's ftv for that constraint (the same expression that
-# builds inferred_fn_type = apply_subst(s2, inst_type)), so the call-site
-# dict_get hits the precise Just branch. These entries ride the fwd_markers dict
-# folded into the global env, overwriting the source-name markers. A constraint
-# whose var was pinned to a concrete type in the body is monomorphic and left
-# untouched (its source-name marker never needed forwarding).
+# folded into the global env at generalization quantifies the post-s2 binder
+# list, so a source-name marker misses the precise dict_get(prog_var,
+# prog_to_fresh) lookup at an external call site. Rewrite each marker to record
+# the constraint var's POSITION in that generalized binder list
+# (list_diff(ftv(apply_subst(s2, inst_type)), env_ftv) — the exact expression
+# typecheck_decl's generalize uses, so the position indexes scheme_vars(<callee
+# scheme>) at the call site). Position survives the renaming that names do not,
+# so resolve_obligation's precise Just branch always hits. These entries ride the
+# fwd_markers dict folded into the global env, overwriting the source-name
+# markers. A constraint whose var was pinned to a concrete type in the body is
+# monomorphic (not a TVar after s2) and left untouched.
 fn canonicalize_constrained_markers(
   name: String,
   constraints: List ast.TypeConstraint,
   prog_to_fresh: Dict types.Type,
   s2: Dict types.Type,
+  inst_type: types.Type,
+  env_ftv: List String,
   markers: Dict types.Scheme
 ) -> Dict types.Scheme =
-  canonicalize_constrained_markers_acc(name, constraints, 0, prog_to_fresh, s2, markers)
+  canonicalize_constrained_markers_acc(name, constraints, 0, prog_to_fresh, s2,
+    types.list_diff(types.ftv(unifier.apply_subst(s2, inst_type)), env_ftv), markers)
 
 # idx advances once per constraint — matching register_constrained_fn_markers_acc
 # — so a skipped (pinned/absent) constraint still consumes its numbered slot and
@@ -4264,6 +4306,7 @@ fn canonicalize_constrained_markers_acc(
   idx: Int,
   prog_to_fresh: Dict types.Type,
   s2: Dict types.Type,
+  binders: List String,
   markers: Dict types.Scheme
 ) -> Dict types.Scheme =
   match constraints with
@@ -4277,12 +4320,12 @@ fn canonicalize_constrained_markers_acc(
               | Just fresh_t ->
                   match unifier.apply_subst(s2, fresh_t) with
                   | types.TVar canon ->
-                      canonicalize_constrained_markers_acc(name, rest, idx + 1, prog_to_fresh, s2,
+                      canonicalize_constrained_markers_acc(name, rest, idx + 1, prog_to_fresh, s2, binders,
                         dict_set("@constrained_" ++ int_to_string(idx) ++ ":" ++ name,
-                                 types.mono(types.TApp(types.TConst(types.type_id(class_name)), types.TConst(types.type_id(types.tyvar_identity(canon))))), markers))
-                  | _ -> canonicalize_constrained_markers_acc(name, rest, idx + 1, prog_to_fresh, s2, markers)
-              | Nothing -> canonicalize_constrained_markers_acc(name, rest, idx + 1, prog_to_fresh, s2, markers)
-          | _ -> canonicalize_constrained_markers_acc(name, rest, idx + 1, prog_to_fresh, s2, markers)
+                                 types.mono(types.TApp(types.TConst(types.type_id(class_name)), types.TConst(types.type_id(constraint_var_token(types.tyvar_identity(canon), binders))))), markers))
+                  | _ -> canonicalize_constrained_markers_acc(name, rest, idx + 1, prog_to_fresh, s2, binders, markers)
+              | Nothing -> canonicalize_constrained_markers_acc(name, rest, idx + 1, prog_to_fresh, s2, binders, markers)
+          | _ -> canonicalize_constrained_markers_acc(name, rest, idx + 1, prog_to_fresh, s2, binders, markers)
 
 fn fn_body_env(name: String, params: List ast.Param, inst_type: types.Type, env: Dict types.Scheme) -> Dict types.Scheme =
   extend_env_with_params(

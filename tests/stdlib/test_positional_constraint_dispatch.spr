@@ -1,0 +1,43 @@
+import stdlib.test (TestState, new_state, assert_eq, summary)
+
+# Stage-3 (positional scheme identity) regression guard for the @constrained_N:fn
+# marker resolution path — the mechanism canonicalize_constrained_markers repairs
+# today and positional identity replaces.
+#
+# The sharp case is a constrained fn that FORWARDS its constraint to another
+# constrained fn through the @constrained marker (not the arg-head
+# find_fwd_tdict_in_args path). With two same-class constraints the resolver must
+# bind each forwarded obligation to the RIGHT caller var by position: `inner(x)`
+# must forward `a`'s dict and `inner(y)` must forward `b`'s. A position-blind /
+# name-mismatched resolver (the pre-fix source-name vs generalized-name divergence)
+# grabs whichever marker a linear scan hits first → the wrong instance.
+#
+# Distinct per-instance output ("I" / "B") makes a wrong dict observable as a wrong
+# STRING, not a crash — so the guard bites even if a wrong dict happens not to
+# SIGSEGV. Green on the fixed compiler; RED if resolution regresses (verified via
+# reverting canonicalize_constrained_markers).
+
+class Label a {
+  fn label(x: a) -> String
+}
+instance Label Int {fn label(x: Int) -> String = "I"}
+instance Label Bool {fn label(x: Bool) -> String = "B"}
+
+# One forwarding hop: inner carries `Label a`; outer forwards its own constraint
+# into inner via the @constrained marker.
+fn inner(x: a) -> String where Label a =
+  label(x)
+
+# Two same-class constraints, each forwarded through inner. Position-sensitive:
+# inner(x) must resolve to a's dict, inner(y) to b's.
+fn both(x: a, y: b) -> String where Label a, Label b =
+  inner(x) ++ "-" ++ inner(y)
+
+fn main() -> Unit !{IO} =
+  do
+    state <- new_state()
+    assert_eq(state, "single forward Int", inner(42), "I")
+    assert_eq(state, "single forward Bool", inner(true), "B")
+    assert_eq(state, "two-constraint forward a,b", both(7, false), "I-B")
+    assert_eq(state, "two-constraint forward reversed", both(true, 9), "B-I")
+    summary(state)
