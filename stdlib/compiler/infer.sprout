@@ -1282,48 +1282,6 @@ fn te_outermost_name(te: ast.TypeExpr) -> String =
   | ast.TypeApply base _ -> te_outermost_name(base)
   | _ -> ""
 
-# Iterate over prog_to_fresh VALUES (fresh TVars from instantiation), apply s3 to
-# each to get the caller's concrete type, then check for @inst:class:head.
-# This finds the right instance for constrained regular functions (e.g., Foldable t
-# in join(sep, xs) where xs resolves to Vec) without scanning user_args in order —
-# which would pick the wrong dict when non-constrained args have matching instances.
-fn scan_prog_to_fresh_for_instance(
-  class_name: String,
-  prog_to_fresh: Dict types.Type,
-  s3: Dict types.Type,
-  env: Dict types.Scheme,
-  pos: source.SourcePos,
-  excluded: List String
-) -> Maybe typed_ast.TypedExpr =
-  scan_ptf_entries(class_name, vec_to_list(dict_entries(prog_to_fresh)), s3, env, pos, excluded)
-
-fn scan_ptf_entries(
-  class_name: String,
-  entries: List (String, types.Type),
-  s3: Dict types.Type,
-  env: Dict types.Scheme,
-  pos: source.SourcePos,
-  excluded: List String
-) -> Maybe typed_ast.TypedExpr =
-  match entries with
-  | Nil -> Nothing
-  | Cons entry rest ->
-      match entry with
-      | (_, fresh_t) ->
-          match concrete_type_str(unifier.apply_subst(s3, fresh_t)) with
-          | Nothing -> scan_ptf_entries(class_name, rest, s3, env, pos, excluded)
-          | Just head_str ->
-              if str_list_contains(excluded, head_str) then
-                scan_ptf_entries(class_name, rest, s3, env, pos, excluded)
-              else
-                match dict_get("@inst:" ++ class_name ++ ":" ++ head_str, env) with
-                | Just _ ->
-                    Just(typed_ast.TDict(
-                      ast.TypeConstraint(class_name, Cons(type_to_typeexpr_with_prog_vars(unifier.apply_subst(s3, fresh_t), class_name, env), Nil)),
-                      types.TConst(types.type_id(class_name)), pos, typed_ast.EvUnresolved))
-                | Nothing ->
-                    scan_ptf_entries(class_name, rest, s3, env, pos, excluded)
-
 # Check if a TVar node in `t` has an @fwd marker whose stored prog_var equals `prog_var`.
 fn tvar_for_prog_var_in_type(t: types.Type, class_name: String, prog_var: String, env: Dict types.Scheme) -> Bool =
   match t with
@@ -1598,8 +1556,8 @@ fn trace_dispatch(callee: String, class_name: String, prog_var: String,
 # prog_var finds the right marker for each obligation independently.
 #
 # Returns (chosen dict, path tag). The path tag names the resolving branch for the
-# SPROUT_TRACE_DISPATCH trace; the two `(guess)` tags mark the order-dependent
-# heuristics (scan_prog_to_fresh_for_instance / first-concrete-arg).
+# SPROUT_TRACE_DISPATCH trace; `first_concrete_arg(guess)` marks the sole remaining
+# order-dependent heuristic (the legitimate concrete-constructor case).
 fn resolve_obligation(
   class_name: String,
   prog_var: ProgVarName,
@@ -1620,21 +1578,20 @@ fn resolve_obligation(
       | Nothing ->
           match resolve_via_fwd_for_prog_var(class_name, prog_var_str(prog_var), env, pos) with
           | Nothing ->
-              match scan_prog_to_fresh_for_instance(class_name, prog_to_fresh, s3, env, pos, excluded) with
-              | Just tdict2 -> (Just(tdict2), "scan_prog_to_fresh_for_instance(guess)")
-              | Nothing ->
-                  # The constraint variable resolved to a type variable, not a
-                  # concrete head (scan_prog_to_fresh_for_instance found no @inst).
-                  # A constraint on a forwardable type variable MUST forward the
-                  # in-scope dict, never fall to resolve_one_constraint_tdict's
-                  # first-concrete-arg heuristic — that grabs an unrelated argument's
-                  # instance (e.g. vec_sort's `Ord a` mis-resolving to `Ord (Vec a)`
-                  # off the `vec: Vec a` argument, a soundness hole). The @fwd marker
-                  # is keyed by the caller's fresh var, not the callee's constraint
-                  # var name, so scan for the class's forward marker directly.
-                  match scan_fwd_markers(class_name, env, pos) with
-                  | Just fwd_tdict -> (Just(fwd_tdict), "scan_fwd_markers")
-                  | Nothing -> (resolve_one_constraint_tdict(class_name, user_args, s3, env, pos, excluded), "first_concrete_arg(guess)")
+              # The constraint variable resolved to a type variable, not a concrete
+              # head. It MUST forward the in-scope dict, never fall to
+              # resolve_one_constraint_tdict's first-concrete-arg heuristic for a
+              # forwardable var — that grabs an unrelated argument's instance (e.g.
+              # vec_sort's `Ord a` mis-resolving to `Ord (Vec a)` off the `vec: Vec a`
+              # argument, a soundness hole). The @fwd marker is keyed by the caller's
+              # fresh var, not the callee's constraint var name, so scan the class's
+              # forward marker directly. (Stage 3 positional identity makes the precise
+              # Just-branch always hit for a well-formed @constrained marker, so the
+              # order-dependent scan_prog_to_fresh_for_instance guess that used to sit
+              # ahead of this scan was provably dead — 0 corpus events — and removed.)
+              match scan_fwd_markers(class_name, env, pos) with
+              | Just fwd_tdict -> (Just(fwd_tdict), "scan_fwd_markers")
+              | Nothing -> (resolve_one_constraint_tdict(class_name, user_args, s3, env, pos, excluded), "first_concrete_arg(guess)")
           | fwd -> (fwd, "fwd_for_prog_var")
   | Just fresh_t ->
       match concrete_type_str(unifier.apply_subst(s3, fresh_t)) with
@@ -1651,19 +1608,6 @@ fn resolve_obligation(
               (resolve_via_fwd_or_scan(class_name, user_args, s3, env, pos), "precise_no_inst->fwd_or_scan")
       | Nothing ->
           (resolve_via_fwd_or_scan(class_name, user_args, s3, env, pos), "precise_tyvar->fwd_or_scan")
-
-# Dispatch safety net (BACKLOG Dispatch-Soundness item 3). resolve_obligation has
-# two order-dependent "guess" branches. `scan_prog_to_fresh_for_instance(guess)` is
-# the soundness hole (PR #176 class): the precise prog_var lookup missed, so it
-# grabbed the first instance-bearing prog_to_fresh entry — a plausible-but-wrong
-# dict. Post canonicalize_constrained_markers this branch is corpus-dead
-# (SPROUT_TRACE_DISPATCH sweep: 0/20863 events), so a precise lookup should always
-# win; a hit is a dispatch-soundness gap, not a legitimate guess. The caller turns a
-# hit into a hard error (escape hatch: SPROUT_DISPATCH_STRICT_OFF). NOT fatal:
-# `first_concrete_arg(guess)`, whose guess is the legitimate concrete-constructor
-# case (Functor/Foldable on Vec/List — the constraint var already IS the ctor).
-export fn dispatch_precise_miss_is_fatal(path: String) -> Bool =
-  path == "scan_prog_to_fresh_for_instance(guess)"
 
 # Decode a positional constraint-var token ("#pos:<k>", written by
 # canonicalize_constrained_markers) back to the callee's live generalized-scheme
@@ -1713,19 +1657,7 @@ fn inject_constrained_fn_dicts(
                 | Nothing ->
                     inject_constrained_fn_dicts(name, idx + 1, prog_to_fresh, env, typed_callee, typed_args, subst, ret_t, s3, es3, call_eff, pos)
                 | Just tdict ->
-                    # Stage-0 loud net: a resolution that fell to the corpus-dead
-                    # scan_prog_to_fresh_for_instance guess is a dispatch-soundness
-                    # gap — reject it rather than injecting a plausible-but-wrong
-                    # dict. SPROUT_DISPATCH_STRICT_OFF reverts to the legacy guess.
-                    if dispatch_precise_miss_is_fatal(path)
-                    then
-                      match env_get("SPROUT_DISPATCH_STRICT_OFF") with
-                      | Just _ ->
-                          inject_constrained_fn_dicts(name, idx + 1, prog_to_fresh, env, typed_callee, list_append(typed_args, Cons(tdict, Nil)), subst, ret_t, s3, es3, call_eff, pos)
-                      | Nothing ->
-                          InferErr(pos, "ambiguous typeclass dispatch: the `" ++ types.type_id_name(class_name) ++ "` constraint on `" ++ name ++ "` did not resolve to a precise instance; refusing to guess a dictionary (dispatch-soundness gap — set SPROUT_DISPATCH_STRICT_OFF=1 to fall back to the legacy heuristic)")
-                    else
-                      inject_constrained_fn_dicts(name, idx + 1, prog_to_fresh, env, typed_callee, list_append(typed_args, Cons(tdict, Nil)), subst, ret_t, s3, es3, call_eff, pos)
+                    inject_constrained_fn_dicts(name, idx + 1, prog_to_fresh, env, typed_callee, list_append(typed_args, Cons(tdict, Nil)), subst, ret_t, s3, es3, call_eff, pos)
       | types.Scheme _ _ (types.TConst class_name) _ ->
           match resolve_one_constraint_tdict(types.type_id_name(class_name), user_typed_args(typed_args), subst, env, pos, collect_injected_heads_for_class(types.type_id_name(class_name), typed_args)) with
           | Nothing ->

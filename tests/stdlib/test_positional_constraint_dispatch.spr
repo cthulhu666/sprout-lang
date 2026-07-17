@@ -1,4 +1,5 @@
 import stdlib.test (TestState, new_state, assert_eq, summary)
+import stdlib.collections (Foldable, List, Vec, vec_length, foldable_to_vec)
 
 # Stage-3 (positional scheme identity) regression guard for the @constrained_N:fn
 # marker resolution path — the mechanism canonicalize_constrained_markers repairs
@@ -33,6 +34,17 @@ fn inner(x: a) -> String where Label a =
 fn both(x: a, y: b) -> String where Label a, Label b =
   inner(x) ++ "-" ++ inner(y)
 
+# Concrete-constructor dispatch (`Foldable List` / `Foldable Vec`, var pinned to a
+# ctor) resolves via the `first_concrete_arg` path — the legitimate guess that
+# STAYS after Stage 4 deletes the unsound `scan_prog_to_fresh_for_instance` guess
+# sitting ahead of it in resolve_obligation's cascade. Guards that removing the
+# unsound guess leaves this surviving path undisturbed.
+fn count_list(xs: List Int) -> Int where Foldable List =
+  vec_length(foldable_to_vec(xs))
+
+fn count_vec(xs: Vec Int) -> Int where Foldable Vec =
+  vec_length(foldable_to_vec(xs))
+
 fn main() -> Unit !{IO} =
   do
     state <- new_state()
@@ -40,4 +52,6 @@ fn main() -> Unit !{IO} =
     assert_eq(state, "single forward Bool", inner(true), "B")
     assert_eq(state, "two-constraint forward a,b", both(7, false), "I-B")
     assert_eq(state, "two-constraint forward reversed", both(true, 9), "B-I")
+    assert_eq(state, "concrete-ctor Foldable List", count_list([10, 20, 30]), 3)
+    assert_eq(state, "concrete-ctor Foldable Vec", count_vec(foldable_to_vec([1, 2])), 2)
     summary(state)
