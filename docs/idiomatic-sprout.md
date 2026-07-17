@@ -96,6 +96,29 @@ match find(key) with
 | Nothing -> fallback()
 ```
 
+## Match lists by shape with `[…]` patterns
+
+`List` is an ordinary ADT (`Nil` / `Cons head tail`), but match it with list
+literals rather than raw constructors — the literal shows the length at a glance.
+The parser desugars `[…]` to the same `Cons`/`Nil` chains, so the sugar is pure
+readability.
+
+```sprout
+match xs with
+| []         -> 0               # empty
+| [x]        -> x               # exactly one element
+| [a, b]     -> a * 10 + b      # exactly two
+| [a, b | _] -> a + b           # two or more; a tail after `|` matches the rest
+```
+
+The `|` separates fixed leading positions from the rest: everything to its left
+matches elements by position, and a *name* to its right binds the remainder of
+the list (which may be `Nil`). So `[a, b | rest]` matches any list of length ≥ 2,
+with `rest` bound to what follows the first two, and `[x | rest]` is the plain
+head-and-tail split — length ≥ 1, `rest` bound to everything after the first
+element. Without `|`, the pattern is exact-length: `[a, b]` matches two-element
+lists only.
+
 ## Collapse a trivial `do` block
 
 A `do` block earns its keep only when it *sequences* — two or more effectful steps,

@@ -226,13 +226,10 @@ Rules:
 - Order branches from most specific to fallback.
 - Prefer explicit constructor matches over `_` when the constructor name adds
   meaning.
-- Prefer list-pattern syntax (`[x]`, `[a, b]`, `[a, b | rest]`) over the
-  long-form `Cons x Nil` / `Cons a (Cons b Nil)` / `Cons a (Cons b rest)`
-  in both fixed-length matches (`[a, b]`) and open-tail matches with two or
-  more bound heads (`[a, b | rest]`).  Both forms desugar to the same
-  constructor patterns at parse time; the sugar wins on readability.  Leave
-  single-head arms of the form `| Cons x rest ->` unchanged — the sugar
-  `[x | rest]` adds no clarity for the one-bound-head case.
+- Prefer list-pattern sugar (`[]`, `[x]`, `[a, b]`, `[x | rest]`,
+  `[a, b | rest]`) over long-form `Cons`/`Nil` chains — see
+  [idiomatic-sprout.md § Match lists by shape](./idiomatic-sprout.md) for the
+  shapes and what each matches.
 
 ## 9. Effects
 
@@ -241,9 +238,9 @@ Effects should remain visually explicit.
 Rules:
 
 - Write explicit `!{IO}` annotations on effectful functions.
-- Keep pure helpers pure when practical; isolate effectful boundaries.
-- Prefer effectful entrypoints that delegate to pure transformation helpers.
 - Do not hide effectful work inside misleadingly named helpers.
+- For structuring the pure/effectful split, see
+  [idiomatic-sprout.md § Keep effects at the edges](./idiomatic-sprout.md).
 
 Preferred shape:
 
@@ -257,12 +254,14 @@ fn main() -> Unit !{IO} =
 
 ## 10. Function Calls and Pipelines
 
-Prefer whichever form makes data flow easiest to read.
+Prefer whichever form makes data flow easiest to read. For *when* to reach for
+`|>` and the combinator-chain shapes, see
+[idiomatic-sprout.md § Chain transforms with `|>`](./idiomatic-sprout.md); the
+layout and argument-order rules below are this guide's turf.
 
 Rules:
 
 - Use ordinary calls for simple local composition.
-- Use `|>` when it makes the left-to-right data flow clearer.
 - Do not build long, dense operator chains when intermediate names would make
   the logic clearer.
 - **Data-last argument order.** When a function takes a collection (or the value
