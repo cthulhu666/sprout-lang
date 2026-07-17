@@ -1,6 +1,6 @@
 module examples.http_web_server
 import stdlib.http_server (HttpRequest, HttpServerResponse, Route, dispatch, serve, ok, with_header, response, request_method, request_path, request_body)
-import stdlib.template (render_string)
+import stdlib.template (Template, compile, render)
 import stdlib.json (Json, JsonObject, JsonObjectCons, JsonObjectNil, string, int, bool, array_from_list)
 
 # A minimal but usable web server: a route table dispatched by method + path, with
@@ -60,19 +60,29 @@ fn users_data() -> Json =
       user_row("Ada <Countess>", false)
     ]), JsonObjectNil)))
 
-fn users(req: HttpRequest) -> HttpServerResponse =
-  match render_string(users_template(), users_data()) with
+# The template is compiled ONCE at startup (see `main`) and the resulting `Template`
+# is rendered against fresh data per request — parse the markup once, not per hit.
+fn render_users(tmpl: Template, req: HttpRequest) -> HttpServerResponse =
+  match render(tmpl, users_data()) with
   | Ok body -> html(body)
   | Err _ -> response(500, "template render error")
 
-# The route table. `dispatch` scans it in order and 404s when nothing matches.
-fn routes() -> Vec Route =
+# The route table, built once over the pre-compiled users template. `dispatch` scans
+# it in order and 404s when nothing matches.
+fn routes(users_tmpl: Template) -> Vec Route =
   vec_from_list([
     Route("GET", "/", home),
-    Route("GET", "/users", users),
+    Route("GET", "/users", \req -> render_users(users_tmpl, req)),
     Route("GET", "/health", health),
     Route("POST", "/echo", echo)
   ])
 
+fn serve_routes(rs: Vec Route) -> Unit !{IO} =
+  serve(8082, \req -> dispatch(rs, req))
+
+# Compile the template once up front; a malformed template is a startup error, not a
+# per-request failure.
 fn main() -> Unit !{IO} =
-  serve(8082, \req -> dispatch(routes(), req))
+  match compile(users_template()) with
+  | Ok tmpl -> serve_routes(routes(tmpl))
+  | Err _ -> print("failed to compile the users template")
