@@ -1,0 +1,33 @@
+import stdlib.test (TestState, new_state, assert_eq, summary)
+import stdlib.http_server (HttpRequest, HttpServerError, HttpInvalidRequest, HttpServerUnsupportedStatus, parse, request_method, request_path, request_body)
+
+# Regression: a header-less request (request line immediately followed by the blank
+# line) used to abort in str_slice — parse_request_prefix sliced a NEGATIVE header-
+# block length (headers_end == line_end). HTTP/1.0 permits no headers, so the parser
+# must accept it as an empty-header request, not crash. On the unfixed parser the
+# `header-less` case aborts the whole test binary (str_slice: length must be >= 0).
+
+fn describe(r: Result HttpServerError HttpRequest) -> String =
+  match r with
+  | Ok req -> `${request_method(req)} ${request_path(req)} body=${request_body(req)}`
+  | Err e -> describe_err(e)
+
+fn describe_err(e: HttpServerError) -> String =
+  match e with
+  | HttpInvalidRequest msg -> `Err ${msg}`
+  | HttpServerUnsupportedStatus code -> `Err status ${int_to_string(code)}`
+
+fn main() -> Unit !{IO} =
+  do
+    state <- new_state()
+    # The regression case: no headers at all.
+    assert_eq(state, "header-less request parses to empty-header request",
+      describe(parse("GET / HTTP/1.1\r\n\r\n")), "GET / body=")
+    # Contrast: the normal path with headers + a body still parses.
+    assert_eq(state, "request with headers + body",
+      describe(parse("POST /x HTTP/1.1\r\nHost: h\r\nContent-Length: 3\r\n\r\nabc")),
+      "POST /x body=abc")
+    # A structurally invalid request (no header terminator) is still a clean Err.
+    assert_eq(state, "missing terminator is a clean Err",
+      describe(parse("GET / HTTP/1.1\r\n")), "Err missing header terminator")
+    summary(state)

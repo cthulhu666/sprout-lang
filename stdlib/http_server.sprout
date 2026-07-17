@@ -103,6 +103,16 @@ fn request_body_start(raw: String) -> Maybe Int =
   | Nothing -> Nothing
   | Just pos -> Just(pos + 4)
 
+# The header block spans from just past the request line to the blank-line
+# terminator. A header-less request (HTTP/1.0-style) has the terminator right after
+# the request line, so `headers_end <= header_start` — return "" rather than slicing
+# a negative length (which aborts in str_slice).
+fn header_block(raw: String, line_end: Int, headers_end: Int) -> String =
+  if headers_end <= header_start then ""
+  else string.slice(raw, header_start, headers_end - header_start)
+where
+  header_start = line_end + 2
+
 fn parse_request_prefix(raw: String) -> ServerResult (RequestLine, Dict String, Int) =
   match find_headers_end(raw) with
   | Nothing -> Err(HttpInvalidRequest("missing header terminator"))
@@ -112,7 +122,7 @@ fn parse_request_prefix(raw: String) -> ServerResult (RequestLine, Dict String, 
       | Just line_end ->
           do
             req <- result_from_maybe(HttpInvalidRequest("invalid request line"), parse_request_line(string.take(raw, line_end)))
-            headers <- parse_headers(string.slice(raw, line_end + 2, headers_end - (line_end + 2)))
+            headers <- parse_headers(header_block(raw, line_end, headers_end))
             content_length <- parse_content_length(headers)
             Ok((req, headers, content_length))
 
