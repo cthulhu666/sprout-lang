@@ -1,0 +1,40 @@
+import stdlib.test (TestState, new_state, assert_true, assert_false, summary)
+import stdlib.compiler.infer as infer
+
+# Stage-0 dispatch safety net (BACKLOG Dispatch-Soundness item 3).
+#
+# `resolve_obligation`'s cascade has two order-dependent "guess" branches, tagged
+# in the SPROUT_TRACE_DISPATCH trace:
+#   * scan_prog_to_fresh_for_instance(guess) — the SOUNDNESS HOLE (PR #176 class):
+#     the precise `dict_get(prog_var, prog_to_fresh)` missed, so it grabs the first
+#     prog_to_fresh entry that has an instance — a plausible-but-wrong dict. The
+#     corpus sweep (SPROUT_TRACE_DISPATCH over 225 files / 20863 events) shows this
+#     branch fires ZERO times post-canonicalize_constrained_markers, so a precise
+#     lookup should always win. `inject_constrained_fn_dicts` now treats a hit as a
+#     hard error (escape hatch: SPROUT_DISPATCH_STRICT_OFF).
+#   * first_concrete_arg(guess) — SPARED: the legitimate concrete-constructor case
+#     (Functor/Foldable on Vec/List, 12 corpus events, var already the constructor).
+#
+# `dispatch_precise_miss_is_fatal` is that classification, factored pure so the
+# fatal-vs-spared decision is pinned by a test (the actual guess branch is corpus-
+# dead, so this unit tripwire — not a source repro — is what guards the invariant).
+
+fn main() -> Unit !{IO} =
+  do
+    state <- new_state()
+    # The soundness-hole guess IS fatal.
+    assert_true(state, "scan_prog_to_fresh_for_instance(guess) is fatal",
+                infer.dispatch_precise_miss_is_fatal("scan_prog_to_fresh_for_instance(guess)"))
+    # The concrete-constructor guess is SPARED (protects the 12 legit Functor/Foldable cases).
+    assert_false(state, "first_concrete_arg(guess) is spared",
+                 infer.dispatch_precise_miss_is_fatal("first_concrete_arg(guess)"))
+    # Every precise / forward path is never fatal.
+    assert_false(state, "precise-just is not fatal",
+                 infer.dispatch_precise_miss_is_fatal("precise-just"))
+    assert_false(state, "fwd_for_prog_var is not fatal",
+                 infer.dispatch_precise_miss_is_fatal("fwd_for_prog_var"))
+    assert_false(state, "scan_fwd_markers is not fatal",
+                 infer.dispatch_precise_miss_is_fatal("scan_fwd_markers"))
+    assert_false(state, "precise_tyvar->fwd_or_scan is not fatal",
+                 infer.dispatch_precise_miss_is_fatal("precise_tyvar->fwd_or_scan"))
+    summary(state)

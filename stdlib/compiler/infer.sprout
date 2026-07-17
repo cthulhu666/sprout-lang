@@ -1652,6 +1652,19 @@ fn resolve_obligation(
       | Nothing ->
           (resolve_via_fwd_or_scan(class_name, user_args, s3, env, pos), "precise_tyvar->fwd_or_scan")
 
+# Dispatch safety net (BACKLOG Dispatch-Soundness item 3). resolve_obligation has
+# two order-dependent "guess" branches. `scan_prog_to_fresh_for_instance(guess)` is
+# the soundness hole (PR #176 class): the precise prog_var lookup missed, so it
+# grabbed the first instance-bearing prog_to_fresh entry — a plausible-but-wrong
+# dict. Post canonicalize_constrained_markers this branch is corpus-dead
+# (SPROUT_TRACE_DISPATCH sweep: 0/20863 events), so a precise lookup should always
+# win; a hit is a dispatch-soundness gap, not a legitimate guess. The caller turns a
+# hit into a hard error (escape hatch: SPROUT_DISPATCH_STRICT_OFF). NOT fatal:
+# `first_concrete_arg(guess)`, whose guess is the legitimate concrete-constructor
+# case (Functor/Foldable on Vec/List — the constraint var already IS the ctor).
+export fn dispatch_precise_miss_is_fatal(path: String) -> Bool =
+  path == "scan_prog_to_fresh_for_instance(guess)"
+
 fn inject_constrained_fn_dicts(
   name: String,
   idx: Int,
@@ -1683,7 +1696,19 @@ fn inject_constrained_fn_dicts(
                 | Nothing ->
                     inject_constrained_fn_dicts(name, idx + 1, prog_to_fresh, env, typed_callee, typed_args, subst, ret_t, s3, es3, call_eff, pos)
                 | Just tdict ->
-                    inject_constrained_fn_dicts(name, idx + 1, prog_to_fresh, env, typed_callee, list_append(typed_args, Cons(tdict, Nil)), subst, ret_t, s3, es3, call_eff, pos)
+                    # Stage-0 loud net: a resolution that fell to the corpus-dead
+                    # scan_prog_to_fresh_for_instance guess is a dispatch-soundness
+                    # gap — reject it rather than injecting a plausible-but-wrong
+                    # dict. SPROUT_DISPATCH_STRICT_OFF reverts to the legacy guess.
+                    if dispatch_precise_miss_is_fatal(path)
+                    then
+                      match env_get("SPROUT_DISPATCH_STRICT_OFF") with
+                      | Just _ ->
+                          inject_constrained_fn_dicts(name, idx + 1, prog_to_fresh, env, typed_callee, list_append(typed_args, Cons(tdict, Nil)), subst, ret_t, s3, es3, call_eff, pos)
+                      | Nothing ->
+                          InferErr(pos, "ambiguous typeclass dispatch: the `" ++ types.type_id_name(class_name) ++ "` constraint on `" ++ name ++ "` did not resolve to a precise instance; refusing to guess a dictionary (dispatch-soundness gap — set SPROUT_DISPATCH_STRICT_OFF=1 to fall back to the legacy heuristic)")
+                    else
+                      inject_constrained_fn_dicts(name, idx + 1, prog_to_fresh, env, typed_callee, list_append(typed_args, Cons(tdict, Nil)), subst, ret_t, s3, es3, call_eff, pos)
       | types.Scheme _ _ (types.TConst class_name) _ ->
           match resolve_one_constraint_tdict(types.type_id_name(class_name), user_typed_args(typed_args), subst, env, pos, collect_injected_heads_for_class(types.type_id_name(class_name), typed_args)) with
           | Nothing ->

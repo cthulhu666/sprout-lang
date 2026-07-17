@@ -43,6 +43,17 @@ Path tags ending in `(guess)` mark the order-dependent heuristics
 constraint that should have resolved precisely is the soundness-hole signature.
 The trace covers the parametric (`C k`) constraint arm of `inject_constrained_fn_dicts`.
 
+**Loud precise-miss net.** The `scan_prog_to_fresh_for_instance(guess)` branch (the
+PR #176 soundness hole) is now a hard error rather than a silent guess: a resolution
+that falls to it reports `ambiguous typeclass dispatch: … refusing to guess a
+dictionary`. This branch is corpus-dead (a full `SPROUT_TRACE_DISPATCH` sweep shows
+0 hits), so the error should never fire on correct code — it exists to catch a
+future regression (e.g. a tyvar-identity change that reintroduces the name-mismatch)
+at compile time instead of miscompiling. `first_concrete_arg(guess)` is deliberately
+spared (its guess is the legitimate concrete-constructor case). Escape hatch: set
+`SPROUT_DISPATCH_STRICT_OFF=1` to revert to the legacy guess if you hit a false
+positive.
+
 **Automated guard.** The dict-passing verifier (`verify_dispatch.sprout`, run in
 the check phase, `compiler.sprout`) turns this class of bug into a **compile
 error**: it re-derives each constraint var's type from the callee's SOURCE
