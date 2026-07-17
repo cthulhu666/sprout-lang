@@ -1,6 +1,6 @@
 module stdlib.http_server
 
-import stdlib.http (HttpStatusError, RequestLine, RequestPathVersion, http_response, parse_request_line)
+import stdlib.http (HttpStatusError, RequestLine, RequestPathVersion, http_response, parse_request_line, status_line)
 import stdlib.net (tcp_listen, tcp_accept, tcp_read, tcp_write, tcp_close, tcp_close_listener)
 import stdlib.string as string
 import stdlib.task (Scope, with_scope, task_spawn)
@@ -211,16 +211,26 @@ fn render_extra_headers(headers: Dict String) -> String =
 where
   keys = dict_keys(headers)
 
-fn inject_headers(base: String, extra: String) -> String =
-  if string.is_empty(extra) then base
-  else
-    match string.find(base, "\r\n\r\n") with
-    | Nothing -> base
-    | Just pos ->
-        string.concat(
-          string.take(base, pos + 2),
-          string.concat(extra, string.drop(base, pos))
-        )
+# Set `name` to `value` only if the caller has not already provided it. Lets `render`
+# supply defaults (content-type, connection) that a handler's `with_header` overrides.
+fn with_default_header(name: String, value: String, headers: Dict String) -> Dict String =
+  match dict_get(name, headers) with
+  | Just _ -> headers
+  | Nothing -> dict_set(name, value, headers)
+
+# The final header set written to the wire: caller headers, plus defaulted
+# content-type/connection, plus an *always* byte-accurate content-length (framing is
+# the server's responsibility, so it overrides any caller-supplied value). Keys are
+# lowercase throughout, so each header appears exactly once — no duplicates.
+fn response_headers(headers: Dict String, body: String) -> Dict String =
+  dict_set(
+    "content-length",
+    int_to_string(string.byte_length(body)),
+    with_default_header("connection", "close", with_default_header("content-type", "text/plain", headers))
+  )
+
+fn assemble_response(line: String, headers: Dict String, body: String) -> String =
+  string.concat(line, string.concat("\r\n", string.concat(render_extra_headers(headers), string.concat("\r\n", body))))
 
 export fn response(status: Int, body: String) -> HttpServerResponse =
   HttpServerResponse(status, dict_empty(), body)
@@ -239,6 +249,44 @@ export fn with_header(name: String, value: String, resp: HttpServerResponse) -> 
   | HttpServerResponse status headers body -> HttpServerResponse(status, dict_set(header_name, value, headers), body)
 where
   header_name = lower_ascii(name)
+
+# --- Routing ---------------------------------------------------------------
+# A route pairs an HTTP method and an exact path with a handler. `dispatch` scans
+# the table in order and runs the first match, falling through to 404. Matching is
+# O(routes) per request; a linear scan is the right shape for the handful of routes a
+# small server declares — no Dict indirection.
+export type Route (..) =
+  | Route String String (HttpRequest -> HttpServerResponse)
+
+# `request_path` returns the raw target including any `?query`, so match on the path
+# up to the first `?` — otherwise `/search?q=foo` would never match a `/search` route.
+fn path_before_query(path: String) -> String =
+  match string.split_once(path, "?") with
+  | Nothing -> path
+  | Just parts -> match parts with | (base, _) -> base
+
+fn route_matches(route: Route, method: String, path: String) -> Bool =
+  match route with
+  | Route route_method route_path _ -> route_method == method && route_path == path
+
+fn run_route(route: Route, req: HttpRequest) -> HttpServerResponse =
+  match route with
+  | Route _ _ handler -> handler(req)
+
+fn dispatch_from(routes: Vec Route, index: Int, total: Int, method: String, path: String, req: HttpRequest) -> HttpServerResponse =
+  if index >= total then not_found("not found")
+  else
+    match vec_get(index, routes) with
+    | Nothing -> not_found("not found")
+    | Just route ->
+        if route_matches(route, method, path) then run_route(route, req)
+        else dispatch_from(routes, index + 1, total, method, path, req)
+
+# Dispatch a parsed request to its route's handler, or a 404 response when none
+# matches. Pure over an already-parsed request (no I/O), so it composes with `serve`
+# as `serve(port, \req -> dispatch(routes, req))` and is testable without sockets.
+export fn dispatch(routes: Vec Route, req: HttpRequest) -> HttpServerResponse =
+  dispatch_from(routes, 0, vec_length(routes), request_method(req), path_before_query(request_path(req)), req)
 
 export fn request_method(req: HttpRequest) -> String =
   match req with
@@ -266,15 +314,20 @@ export fn request_header(name: String, req: HttpRequest) -> Maybe String =
       match meta with
       | HttpRequestMeta _ headers _ -> dict_get(lower_ascii(name), headers)
 
+# Render a response to the wire. The header block is assembled from the response's
+# header dict (not http_response's fixed base), so the content type is caller-
+# controlled and appears once, and every response carries a byte-accurate
+# Content-Length. `http_response` remains the shared status-line/body path for other
+# callers (http_client, echo helpers).
 export fn render(resp: HttpServerResponse) -> ServerResult String =
   match resp with
   | HttpServerResponse status headers body ->
       do
-        raw <- http_response(status, body) |> result_map_error(\err ->
+        line <- status_line(status) |> result_map_error(\err ->
           match err with
           | HttpUnsupportedStatus code -> HttpServerUnsupportedStatus(code)
         )
-        Ok(inject_headers(raw, render_extra_headers(headers)))
+        Ok(assemble_response(line, response_headers(headers, body), body))
 
 fn write_and_close(conn: Int, payload: String) -> Unit !{IO} =
   do
@@ -287,6 +340,10 @@ fn handle_connection(conn: Int, handler: HttpRequest -> HttpServerResponse) -> U
   | Ok req ->
       write_and_close(conn, handler(req) |> render_response_or_fallback)
 
+# The 500 fallback (reachable only when a handler returns a status outside the
+# supported table) still uses http_response's fixed format — no Content-Length, its own
+# Content-Type — rather than the dict-assembled `render`. Acceptable for this rare
+# internal-error path; the normal response path goes through `render`.
 fn render_response_or_fallback(resp: HttpServerResponse) -> String =
   match render(resp) with
   | Ok raw -> raw

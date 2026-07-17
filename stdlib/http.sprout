@@ -76,6 +76,15 @@ fn http_status_line(info: HttpStatusInfo) -> String =
   | HttpStatusInfo code reason ->
       str_concat("HTTP/1.1 ", str_concat(code, str_concat(" ", reason)))
 
+# The status line alone ("HTTP/1.1 200 OK"), for callers that assemble their own
+# header block (e.g. stdlib.http_server.render, which builds headers from a dict so
+# it can control Content-Type/Content-Length). Reuses the shared status table so the
+# supported-status set stays defined in one place.
+export fn status_line(status: Int) -> Result HttpStatusError String =
+  match http_status_info(status) with
+  | Just info -> Ok(http_status_line(info))
+  | Nothing -> Err(HttpUnsupportedStatus(status))
+
 export fn http_response(status: Int, body: String) -> Result HttpStatusError String =
   match http_status_info(status) with
   | Just info ->

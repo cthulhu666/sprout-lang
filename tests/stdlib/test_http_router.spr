@@ -1,0 +1,51 @@
+import stdlib.test (TestState, new_state, assert_true, summary)
+import stdlib.http_server (HttpRequest, HttpServerResponse, Route, ok, render, dispatch, parse)
+import stdlib.string as string
+
+# New feature: a pure routing layer. `dispatch(routes, req)` scans a route table
+# (method + path) and returns the matching handler's response, or 404 when nothing
+# matches. It is pure over an already-parsed request, so it is testable end-to-end
+# with zero sockets: parse(raw) -> dispatch -> render -> inspect the wire bytes.
+#
+# The subtle correctness case is the query string: `request_path` returns the raw
+# target INCLUDING `?query`, so the router must match on the path prefix before `?`
+# or `/search?q=foo` would never route to `/search`.
+
+fn h_root(req: HttpRequest) -> HttpServerResponse = ok("root")
+fn h_search(req: HttpRequest) -> HttpServerResponse = ok("search")
+
+fn routes() -> Vec Route =
+  vec_append(Route("GET", "/", h_root), vec_append(Route("GET", "/search", h_search), vec_empty()))
+
+fn rendered(resp: HttpServerResponse) -> String =
+  match render(resp) with
+  | Ok raw -> raw
+  | Err _ -> "RENDER_ERR"
+
+fn served(raw: String) -> String =
+  match parse(raw) with
+  | Err _ -> "PARSE_ERR"
+  | Ok req -> rendered(dispatch(routes(), req))
+
+fn contains(hay: String, needle: String) -> Bool =
+  match string.find(hay, needle) with
+  | Nothing -> false
+  | Just _ -> true
+
+fn main() -> Unit !{IO} =
+  do
+    state <- new_state()
+    assert_true(state, "GET / routes to the root handler",
+      contains(served("GET / HTTP/1.1\r\n\r\n"), "root"))
+    assert_true(state, "GET /search routes to the search handler",
+      contains(served("GET /search HTTP/1.1\r\n\r\n"), "search"))
+    # Query string must not defeat the match.
+    assert_true(state, "GET /search?q=foo still routes to /search",
+      contains(served("GET /search?q=foo HTTP/1.1\r\n\r\n"), "search"))
+    # Method mismatch -> 404, not a false match on path alone.
+    assert_true(state, "POST / does not match the GET route (404)",
+      contains(served("POST / HTTP/1.1\r\n\r\n"), "404"))
+    # Unknown path -> 404 fallback.
+    assert_true(state, "unknown path falls through to 404",
+      contains(served("GET /nope HTTP/1.1\r\n\r\n"), "404"))
+    summary(state)

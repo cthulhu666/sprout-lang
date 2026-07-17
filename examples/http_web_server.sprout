@@ -1,0 +1,43 @@
+module examples.http_web_server
+import stdlib.http_server (HttpRequest, HttpServerResponse, Route, dispatch, serve, ok, with_header, request_method, request_path, request_body)
+
+# A minimal but usable web server: a route table dispatched by method + path, with
+# each handler choosing its own content type. `serve` accepts connections forever,
+# each on its own green task, so a slow client never blocks the others.
+#
+# Run:
+#   mise exec -- just run examples/http_web_server.sprout
+#
+# Then:
+#   curl -i http://127.0.0.1:8082/            # HTML
+#   curl -i http://127.0.0.1:8082/health      # JSON
+#   curl -i --data 'hi there' http://127.0.0.1:8082/echo   # echoes the POST body
+#   curl -i http://127.0.0.1:8082/missing     # 404 (dispatch fallback)
+
+# Content-type helpers: `ok` defaults to text/plain; `with_header` replaces it, and
+# `render` frames every response with a byte-accurate Content-Length automatically.
+fn html(body: String) -> HttpServerResponse =
+  with_header("content-type", "text/html; charset=utf-8", ok(body))
+
+fn json(body: String) -> HttpServerResponse =
+  with_header("content-type", "application/json", ok(body))
+
+fn home(req: HttpRequest) -> HttpServerResponse =
+  html("<!doctype html><h1>Hello from Sprout</h1><p>See <a href='/health'>/health</a>.</p>")
+
+fn health(req: HttpRequest) -> HttpServerResponse =
+  json("{\"status\":\"ok\"}")
+
+fn echo(req: HttpRequest) -> HttpServerResponse =
+  ok(`${request_method(req)} ${request_path(req)}: ${request_body(req)}`)
+
+# The route table. `dispatch` scans it in order and 404s when nothing matches.
+fn routes() -> Vec Route =
+  vec_from_list([
+    Route("GET", "/", home),
+    Route("GET", "/health", health),
+    Route("POST", "/echo", echo)
+  ])
+
+fn main() -> Unit !{IO} =
+  serve(8082, \req -> dispatch(routes(), req))

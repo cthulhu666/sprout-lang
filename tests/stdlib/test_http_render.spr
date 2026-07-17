@@ -1,0 +1,48 @@
+import stdlib.test (TestState, new_state, assert_true, assert_eq, summary)
+import stdlib.http_server (HttpServerResponse, ok, response, with_header, render)
+import stdlib.string as string
+
+# Regression: `render` used to lean on http.http_response, whose base line hardcodes
+# `Content-Type: text/plain` and carries NO Content-Length. `with_header` then injected
+# extra headers *before* that base terminator, so overriding the content type produced
+# TWO content-type headers (text/plain + the override) and the body was framed only by
+# `Connection: close`. A usable server must (1) emit a single, caller-controlled
+# Content-Type and (2) emit a byte-accurate Content-Length. These assertions fail on the
+# unfixed render (missing content-length; duplicate `text/` values on override).
+
+fn rendered(resp: HttpServerResponse) -> String =
+  match render(resp) with
+  | Ok raw -> raw
+  | Err _ -> "RENDER_ERR"
+
+fn contains(hay: String, needle: String) -> Bool =
+  match string.find(hay, needle) with
+  | Nothing -> false
+  | Just _ -> true
+
+fn count_from(hay: String, needle: String, acc: Int) -> Int =
+  match string.find(hay, needle) with
+  | Nothing -> acc
+  | Just pos -> count_from(string.drop(hay, pos + string.length(needle)), needle, acc + 1)
+
+fn main() -> Unit !{IO} =
+  do
+    state <- new_state()
+    # (1) A plain response carries a byte-accurate Content-Length ("hello" = 5 bytes).
+    assert_true(state, "content-length matches body length",
+      contains(rendered(ok("hello")), "content-length: 5"))
+    # Content-Length is byte-oriented: "héllo" is 5 codepoints but 6 UTF-8 bytes. This
+    # discriminates byte_length from the codepoint-counting length (which would emit 5).
+    assert_true(state, "content-length counts bytes, not codepoints",
+      contains(rendered(ok("héllo")), "content-length: 6"))
+    # (2) The default content type is still text/plain when the caller sets nothing.
+    assert_true(state, "default content-type is text/plain",
+      contains(rendered(ok("hi")), "text/plain"))
+    # (3) Overriding the content type REPLACES it — exactly one media type on the wire.
+    assert_true(state, "override sets text/html",
+      contains(rendered(with_header("content-type", "text/html", ok("<h1>hi</h1>"))), "text/html"))
+    assert_true(state, "override drops the default text/plain",
+      ! contains (rendered(with_header("content-type", "text/html", ok("<h1>hi</h1>"))), "text/plain"))
+    assert_eq(state, "exactly one media type on override",
+      count_from(rendered(with_header("content-type", "text/html", ok("<h1>hi</h1>"))), "text/", 0), 1)
+    summary(state)
