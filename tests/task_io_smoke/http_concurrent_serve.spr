@@ -1,0 +1,79 @@
+import stdlib.task (Scope, with_scope, task_spawn, task_sleep)
+import stdlib.chan (Chan, chan_new, chan_send, chan_recv)
+import stdlib.net (TcpConnection, connect, write_all_utf8, read_exact_utf8)
+import stdlib.http_server (HttpRequest, HttpServerResponse, ok, request_path, serve_n)
+
+# L0.3+ concurrency behaviour of stdlib.http_server.serve_n: a per-connection
+# handler is spawned as a green task, so a slow first connection must NOT block a
+# second connection from being accepted and served.
+#
+# Two clients hit one `serve_n(port, 2, handle)`:
+#   * client1 is accepted FIRST (a `ready` channel makes it connect first), sends a
+#     PARTIAL request (no header terminator), sleeps, then completes it. Its handler
+#     parks in read_until_headers the whole time.
+#   * client2 connects only after client1, sends a FULL request, and is served at once.
+#
+# CONCURRENT serve_loop (spawn-per-accept): client2 is served while client1's handler
+# is still parked -> output order [client2 served, client1 served].
+# SERIAL serve_loop (handle inline before next accept): client1 is handled to
+# completion before client2 is ever accepted -> order [client1 served, client2 served].
+# The assertion is the ORDER (client2 before client1); both variants TERMINATE, so a
+# wrong order is a labelled RED, distinct from a test-bug hang (caught by the alarm).
+# The `ready` channel only orders the two connects; it is not a dependency cycle.
+
+fn handle(req: HttpRequest) -> HttpServerResponse =
+  ok(request_path(req))
+
+fn send_or_fail(conn: TcpConnection, msg: String) -> Unit !{IO} =
+  match write_all_utf8(conn, msg) with
+  | Ok _ -> term_write("")
+  | Err _ -> term_write("write failed\n")
+
+fn report(conn: TcpConnection, label: String) -> Unit !{IO} =
+  match read_exact_utf8(conn, 12) with
+  | Ok line ->
+      if line == "HTTP/1.1 200" then term_write(`${label} served\n`)
+      else term_write(`${label} bad ${line}\n`)
+  | Err _ -> term_write(`${label} read failed\n`)
+
+# Accepted first; sends a partial request, signals `ready`, sleeps so client2 wins the
+# race to be served, then completes its request and reads its own response.
+fn slow_client(port: Int, ready: Chan Int) -> Unit !{IO} =
+  match connect("127.0.0.1", port) with
+  | Ok conn ->
+      do
+        send_or_fail(conn, "GET /one HTTP/1.1\r\nHost: x\r\n")
+        chan_send(ready, 1)
+        task_sleep(500)
+        send_or_fail(conn, "\r\n")
+        report(conn, "client1")
+  | Err _ -> term_write("client1 connect failed\n")
+
+# Connects only after client1 (waits on `ready`), so client1 is at the accept-queue
+# head. Sends a complete request and is served immediately.
+fn fast_client(port: Int, ready: Chan Int) -> Unit !{IO} =
+  do
+    _ <- chan_recv(ready)
+    connect_and_report(port)
+
+fn connect_and_report(port: Int) -> Unit !{IO} =
+  match connect("127.0.0.1", port) with
+  | Ok conn ->
+      do
+        send_or_fail(conn, "GET /two HTTP/1.1\r\nHost: x\r\n\r\n")
+        report(conn, "client2")
+  | Err _ -> term_write("client2 connect failed\n")
+
+fn run(s: Scope, port: Int, ready: Chan Int) -> Unit !{IO} =
+  do
+    task_spawn(s, \_ -> serve_n(port, 2, handle))
+    task_spawn(s, \_ -> slow_client(port, ready))
+    task_spawn(s, \_ -> fast_client(port, ready))
+
+fn body(s: Scope) -> Unit !{IO} =
+  do
+    ready <- chan_new(s, 1)
+    run(s, 28997, ready)
+
+fn main() -> Unit !{IO} =
+  with_scope(\s -> body(s))

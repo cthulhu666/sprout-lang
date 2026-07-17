@@ -1048,6 +1048,19 @@ task-io-smoke: bootstrap-from-seed
   build tests/task_io_smoke/echo_roundtrip.spr
   run_once "rearm" "client round2 ack2"
   SPROUT_GC_STRESS=1 run_once "rearm/stress" "client round2 ack2"
+  # (2b) http_server concurrency: serve_n spawns a per-connection green task, so a slow
+  # first connection must not block a second. client1 (accepted first, via a `ready`
+  # channel that orders the connects) sends a PARTIAL request then sleeps; client2 sends
+  # a FULL request and must be served FIRST. Concurrent -> [client2, client1]; the old
+  # serial handle-inline loop -> [client1, client2]. Both TERMINATE, so a wrong order
+  # (not a hang) is the RED, asserted with the awk order idiom.
+  build tests/task_io_smoke/http_concurrent_serve.spr
+  run_once "http-serve" "client1 served"
+  if ! awk '/client2 served/{w=NR} /client1 served/{if(w && NR>w) ok=1} END{exit !ok}' "$TMPD/run.out"; then
+    echo "task-io-smoke: http_server serialized (client2 should be served before the slow client1)" >&2
+    cat "$TMPD/run.out" >&2; exit 1
+  fi
+  SPROUT_GC_STRESS=1 run_once "http-serve/stress" "client1 served"
   # (3) I/O-drop cancellation (L0.5): scope_cancel force-drops tasks parked in the
   # poller (both task_fork and task_spawn) so __scope_join returns instead of blocking
   # the pump forever. Reaching "done" proves the drop; a broken drop HANGS (alarm fires).
@@ -1136,7 +1149,7 @@ task-io-smoke: bootstrap-from-seed
   build tests/task_io_smoke/timeout_select_drop.spr
   run_once "select-timeout-drop" "done"
   SPROUT_GC_STRESS=1 run_once "select-timeout-drop/stress" "done"
-  echo "==> task-io-smoke ✓ (read-park, accept-park, re-arm, write, cancel-drop, await-guard, timer-drop, timeout-drop, timeout-nested-guard, chan-cancel-drop, chan-timeout-drop, chan-negative-cap-guard, rendezvous-send-drop, send-on-closed-guard, double-close-guard, send-parked-close-guard, select-cancel-drop, select-timeout-drop; interleaved; stress-clean)"
+  echo "==> task-io-smoke ✓ (read-park, accept-park, re-arm, http-serve-concurrency, write, cancel-drop, await-guard, timer-drop, timeout-drop, timeout-nested-guard, chan-cancel-drop, chan-timeout-drop, chan-negative-cap-guard, rendezvous-send-drop, send-on-closed-guard, double-close-guard, send-parked-close-guard, select-cancel-drop, select-timeout-drop; interleaved; stress-clean)"
 
 # Division-by-zero guard regression (CI gate). The fixture divides by a RUNTIME
 # zero (`10 / list_length(argv)` with no args), which neither the compiler nor

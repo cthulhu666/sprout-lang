@@ -97,7 +97,7 @@ Raw `bytes_*` primitives are internal to `stdlib.*`; application code should use
 `http_request` is available in native mode for plain `http://` requests, and also supports `https://` on macOS via the system TLS stack.
 Set `SPROUT_HTTP_TLS_DEBUG=1` when running a native binary to emit TLS handshake/read/write debug lines to stderr.
 
-The native server (`stdlib.http_server` / `stdlib.net`) uses a single sequential blocking accept/read/write loop — one connection handled to completion at a time.
+The native server (`stdlib.http_server` / `stdlib.net`) spawns each accepted connection as a fire-and-forget green task (Layer-0 concurrency), so a slow connection does not block others — handlers interleave at their socket-I/O park points on a single OS thread. `serve_n`'s `max_connections` bounds the number of connections *accepted*; its enclosing `with_scope` joins all spawned handlers before returning.
 
 ## Modules (experimental)
 

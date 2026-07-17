@@ -368,7 +368,7 @@ Experimental HTTP server helpers (in `stdlib/http_server.sprout`):
 - `request_version(req) -> String`
 - `request_body(req) -> String`
 - `request_header(name, req) -> Maybe String`
-- `serve_n(port, max_connections, handler) -> Unit !{IO}`
+- `serve_n(port, max_connections, handler) -> Unit !{IO}` — accepts up to `max_connections` connections, handling each in its own green task (a slow connection does not block others); joins all handlers before returning
 
 Current experimental scope:
 

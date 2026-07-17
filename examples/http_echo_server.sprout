@@ -1,7 +1,8 @@
 module examples.http_echo_server
 import stdlib.http_server (HttpRequest, HttpServerResponse, ok, request_body, request_path, serve_n, with_header)
 
-# Multi-connection HTTP echo server (experimental helper surface).
+# Concurrent HTTP echo server (experimental helper surface): `serve_n` handles each
+# connection in its own green task, so one slow client never blocks the others.
 #
 # Run:
 #   mise exec -- just run examples/http_echo_server.sprout
