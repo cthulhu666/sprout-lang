@@ -77,6 +77,17 @@ Workflow:
 4. `docs/spec-v0.md` is the normative source of truth for the stable Sprout core; supporting design docs explain rationale and tradeoffs but do not override it.
 5. If a change alters syntax, semantics, typing rules, evaluation order, visibility/export rules, or diagnostics expectations, update the relevant spec/docs before considering the task complete.
 
+## Agent Memory Discipline
+
+Coding agents keep a private auto-memory outside the repo. It is a cache of **non-repo continuity**, not an archive — keep it small and evictable. The repo is the durable record; memory is not.
+
+1. **Write gate.** Before saving a memory, route repo-appropriate content to the repo instead:
+   - Design rationale, goals/non-goals, prior-art surveys, API/semantics decisions → a `docs/<feature>-v0.md` design doc.
+   - Deferred or newly-discovered follow-up work → `BACKLOG.md` (the single canonical backlog).
+   - Anything a PR reviewer would want to see, or that git history / a design doc / `BACKLOG.md` / code+comments already records → the repo. Write the repo artifact and stop; do not also mirror it into memory.
+2. **Lifecycle (the anti-bloat rule).** A `project`-type memory is transient in-flight scaffolding, valid only while its work is unlanded. **When the work lands (merged/committed) and its durable facts are in git + docs + `BACKLOG.md`, delete the memory or collapse it to a one-line pointer — as part of landing, not a later sweep.** "Landed" is the death trigger. This is what removes the need for periodic index cleanups.
+3. **What memory is legitimately for.** Working-style feedback, cross-repo/workflow lessons that touch no repo file, and session/branch continuity. These are stable and few — they are not the bloat. If unsure whether an item is memory- or repo-worthy, it goes in the repo.
+
 ## Design Change Process
 
 For any non-trivial language change, include:
