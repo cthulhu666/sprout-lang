@@ -70,3 +70,48 @@ Regression tests: `tests/stdlib/compiler/test_codegen.spr` — "Int args to call
 ### GC safety linter
 
 `just gc-safety-check` lints `runtime/sprout_runtime.c` for `const char*`/`char*` parameters live across `sprout_gc_maybe_collect_threshold()` calls. Run after editing any C builtin that allocates heap strings. Use `just gc-safety-check --strict` to fail on any finding; the default mode warns only.
+
+## CPR extern ABI: width=2 is direct, width=3 is sret
+
+**Intentional design — do not remove the sret branch.**
+
+The CPR (Constructed Product Return) path unboxes calls to C-runtime externs that
+return a small ADT (`Maybe`/`Result`/`List`/…) instead of allocating a boxed value,
+per `cpr_width_for_type_expr`. The two widths use **different LLVM calling
+conventions** on the C boundary, and they are not interchangeable:
+
+- **Width=2** (16-byte `SproutUnboxed2`, e.g. `Maybe X`): direct register return.
+  Both LLVM's `declare { i64, i64 } @X_unboxed(...)` and Clang's lowering of the
+  matching C struct return agree on this — arm64 Darwin returns in x0/x1, SysV in
+  rax/rdx. No special-casing needed.
+- **Width=3** (24-byte `SproutUnboxed3`, e.g. `List X`): Clang lowers a 24-byte
+  struct return to the **sret** convention — `void @X_unboxed(ptr sret(...), ...)`
+  — not direct multi-register return. A width-3 extern **must** be declared and
+  called with the sret first-argument form to match; `emit_extern_decl_keys` emits
+  the sret declare, and the call site allocates a `{i64,i64,i64}` slot, passes it
+  as the sret first arg, and loads the result back.
+
+**Why this matters:** the LLVM-to-LLVM path (a Sprout-defined width-3 worker
+calling another Sprout-defined width-3 worker) stays on the direct path — LLVM is
+internally consistent with itself, so no sret is needed there. Only the
+**LLVM-to-C boundary** (a Sprout caller calling a `runtime/sprout_runtime.c`
+extern) needs sret for width=3, because that boundary must match what Clang
+actually emits for the C struct-return ABI.
+
+**Consequences of getting this wrong:** the mismatch is silent — a width-3 extern
+declared/called the direct-return way does not fail to link or verify; it just
+returns garbage at runtime (LLVM's `{i64,i64,i64}` register-return convention and
+Clang's sret convention disagree on which registers/memory hold the result, so the
+values are simply wrong). This was found via `native_set_to_list`, which had been
+on the CPR allowlist but was never exercised by Sprout code — `set_to_list` on a
+non-empty set silently returned `Nil` until the sret branch was added.
+
+**How to apply:**
+
+- Adding a new width-3 extern to `is_cpr_extern_allowlisted` needs no extra work —
+  `emit_extern_decl_keys` and `emit_worker_cpr_call` detect width=3 automatically
+  and route it through the sret path.
+- Do not remove the sret branch in `emit_extern_decl_keys` — doing so silently
+  breaks every width=3 extern the same way `native_set_to_list` broke.
+- Do not add sret to the width=2 path — it works today via direct return; adding
+  sret there is unnecessary and risks regressing the working case.

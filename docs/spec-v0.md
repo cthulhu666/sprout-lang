@@ -523,7 +523,10 @@ Semantics:
 - This backend range limitation is a temporary implementation constraint in v0,
   not the intended long-term meaning of `Int`.
 - The presence of `pow` and `mod` in `stdlib.math` does not imply implicit
-  numeric coercions, fractional arithmetic, or floating-point support in v0.
+  numeric coercions or fractional arithmetic for `Int`. A separate `Double`
+  type with floating-point arithmetic has since landed as an experimental
+  extension; `Int` and `Double` never implicitly coerce — conversion is
+  explicit (`to_double`).
 
 ## 8.5 Standard Prelude Typeclass Instances (Experimental)
 
