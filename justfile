@@ -1074,6 +1074,15 @@ task-io-smoke: bootstrap-from-seed
     cat "$TMPD/run.out" >&2; exit 1
   fi
   SPROUT_GC_STRESS=1 run_once "http-serve-forever/stress" "req3 ok"
+  # (2d) http_server connection-error isolation (C1): a per-connection handler whose socket write
+  # FAILS (the client closed early, so the ~512 KiB response resets the peer) must drop only that
+  # connection, not exit(1) the whole process. The server uses the recoverable tcp_read_avail/
+  # tcp_write_string, so the crashing connection's write returns an Err the handler swallows; the
+  # good client is still served and the scope joins. Reaching "done" proves the process survived —
+  # the fatal tcp_read/tcp_write it replaced aborted here (RED = non-zero exit, no "done").
+  build tests/task_io_smoke/http_conn_error_survives.spr
+  run_once "http-conn-error" "done"
+  SPROUT_GC_STRESS=1 run_once "http-conn-error/stress" "done"
   # (3) I/O-drop cancellation (L0.5): scope_cancel force-drops tasks parked in the
   # poller (both task_fork and task_spawn) so __scope_join returns instead of blocking
   # the pump forever. Reaching "done" proves the drop; a broken drop HANGS (alarm fires).
@@ -1162,7 +1171,7 @@ task-io-smoke: bootstrap-from-seed
   build tests/task_io_smoke/timeout_select_drop.spr
   run_once "select-timeout-drop" "done"
   SPROUT_GC_STRESS=1 run_once "select-timeout-drop/stress" "done"
-  echo "==> task-io-smoke ✓ (read-park, accept-park, re-arm, http-serve-concurrency, write, cancel-drop, await-guard, timer-drop, timeout-drop, timeout-nested-guard, chan-cancel-drop, chan-timeout-drop, chan-negative-cap-guard, rendezvous-send-drop, send-on-closed-guard, double-close-guard, send-parked-close-guard, select-cancel-drop, select-timeout-drop; interleaved; stress-clean)"
+  echo "==> task-io-smoke ✓ (read-park, accept-park, re-arm, http-serve-concurrency, http-conn-error-isolation, write, cancel-drop, await-guard, timer-drop, timeout-drop, timeout-nested-guard, chan-cancel-drop, chan-timeout-drop, chan-negative-cap-guard, rendezvous-send-drop, send-on-closed-guard, double-close-guard, send-parked-close-guard, select-cancel-drop, select-timeout-drop; interleaved; stress-clean)"
 
 # Division-by-zero guard regression (CI gate). The fixture divides by a RUNTIME
 # zero (`10 / list_length(argv)` with no args), which neither the compiler nor

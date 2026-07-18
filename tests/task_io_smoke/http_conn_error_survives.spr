@@ -1,0 +1,84 @@
+import stdlib.task (Scope, with_scope, task_spawn)
+import stdlib.chan (Chan, chan_new, chan_send, chan_recv)
+import stdlib.net (TcpConnection, connect, write_all_utf8, read_exact_utf8, close)
+import stdlib.http_server (HttpRequest, HttpServerResponse, ok, request_path, serve_n)
+import stdlib.string as string
+
+# C1 regression: a single connection's transport failure must NOT abort the whole
+# server process. `crash_client` connects, sends a full request, then CLOSES without
+# reading; the /crash handler writes a ~512 KiB response into the dead peer, whose
+# reset makes the server's send() fail. On the UNFIXED server the fatal `tcp_write`
+# calls exit(1) and kills the process, so `with_scope` never joins and "done" is never
+# printed (harness sees a non-zero exit — RED). On the FIXED server the handler's write
+# fails RECOVERABLY, the connection is dropped, both handlers finish, `with_scope`
+# joins, and "done" prints (exit 0 — GREEN).
+#
+# `serve_n(port, 2)` accepts exactly the two connections. A `ready` channel orders them
+# so the crashing connection is accepted first; the good client (small /ok response it
+# fully reads) is served second and proves the server stayed alive.
+
+# ~512 KiB so the response needs several send() calls — a later one hits the peer's
+# reset (a single-send small body could complete before the RST and never fault).
+fn big_body() -> String =
+  grow("0123456789ABCDEF0123456789ABCDEF", 300000)
+
+fn grow(s: String, target: Int) -> String =
+  if string.byte_length(s) >= target then s
+  else grow(string.concat(s, s), target)
+
+fn handle(req: HttpRequest) -> HttpServerResponse =
+  if request_path(req) == "/crash" then ok(big_body())
+  else ok("ok")
+
+fn crash_client(port: Int, ready: Chan Int) -> Unit !{IO} =
+  match connect("127.0.0.1", port) with
+  | Ok conn -> crash_after_send(conn, ready)
+  | Err _ -> chan_send(ready, 1)
+
+# Send a full request, close immediately (no read), THEN release the good client — so
+# the crashing connection is first in the accept queue and its write faults first.
+fn crash_after_send(conn: TcpConnection, ready: Chan Int) -> Unit !{IO} =
+  do
+    _ <- write_all_utf8(conn, "GET /crash HTTP/1.1\r\nHost: x\r\n\r\n")
+    close(conn)
+    chan_send(ready, 1)
+
+fn good_client(port: Int, ready: Chan Int) -> Unit !{IO} =
+  do
+    _ <- chan_recv(ready)
+    good_connect(port)
+
+fn good_connect(port: Int) -> Unit !{IO} =
+  match connect("127.0.0.1", port) with
+  | Ok conn -> good_send_and_report(conn)
+  | Err _ -> term_write("good connect failed\n")
+
+fn good_send_and_report(conn: TcpConnection) -> Unit !{IO} =
+  do
+    _ <- write_all_utf8(conn, "GET /ok HTTP/1.1\r\nHost: x\r\n\r\n")
+    good_report(conn)
+
+fn good_report(conn: TcpConnection) -> Unit !{IO} =
+  match read_exact_utf8(conn, 12) with
+  | Ok line ->
+      if line == "HTTP/1.1 200" then term_write("good served\n")
+      else term_write(`good bad ${line}\n`)
+  | Err _ -> term_write("good read failed\n")
+
+fn run(s: Scope, port: Int, ready: Chan Int) -> Unit !{IO} =
+  do
+    task_spawn(s, \_ -> serve_n(port, 2, handle))
+    task_spawn(s, \_ -> crash_client(port, ready))
+    task_spawn(s, \_ -> good_client(port, ready))
+
+fn body(s: Scope) -> Unit !{IO} =
+  do
+    ready <- chan_new(s, 1)
+    run(s, 28998, ready)
+
+# "done" is reachable only if the process survived crash_client's write fault: the
+# with_scope join returns after both handlers finish.
+fn main() -> Unit !{IO} =
+  do
+    with_scope(\s -> body(s))
+    term_write("done\n")

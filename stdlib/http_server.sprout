@@ -1,7 +1,7 @@
 module stdlib.http_server
 
 import stdlib.http (HttpStatusError, RequestLine, RequestPathVersion, http_response, parse_request_line, status_line)
-import stdlib.net (tcp_listen, tcp_accept, tcp_read, tcp_write, tcp_close, tcp_close_listener)
+import stdlib.net (tcp_listen, tcp_accept, tcp_read_avail, tcp_write_string, tcp_close, tcp_close_listener)
 import stdlib.string as string
 import stdlib.task (Scope, with_scope, task_spawn)
 import stdlib.url (parse_query)
@@ -152,22 +152,27 @@ fn err_or_request(req: RequestLine, headers: Dict String, content_length: Int, r
       else
         Ok(build_request(req, headers, string.take(string.drop(raw, body_start), content_length)))
 
+# Reads use tcp_read_avail (recoverable): a socket failure becomes an Err in the
+# ServerResult, not an exit(1), so one client's connection reset drops just that
+# connection. `Ok("")` (peer closed cleanly) is still the unexpected-end-of-stream case.
 fn read_until_headers(conn: Int, acc: String) -> ServerResult String !{IO} =
   match find_headers_end(acc) with
   | Just _ -> Ok(acc)
   | Nothing ->
-      do
-        chunk <- tcp_read(conn)
-        if string.is_empty(chunk) then Err(HttpInvalidRequest("unexpected end of stream"))
-        else read_until_headers(conn, string.concat(acc, chunk))
+      match tcp_read_avail(conn) with
+      | Err _ -> Err(HttpInvalidRequest("connection error"))
+      | Ok chunk ->
+          if string.is_empty(chunk) then Err(HttpInvalidRequest("unexpected end of stream"))
+          else read_until_headers(conn, string.concat(acc, chunk))
 
 fn read_remaining_body(conn: Int, acc: String, remaining: Int) -> ServerResult String !{IO} =
   if remaining <= 0 then Ok(acc)
   else
-    do
-      chunk <- tcp_read(conn)
-      if string.is_empty(chunk) then Err(HttpInvalidRequest("unexpected end of stream"))
-      else read_remaining_body(conn, string.concat(acc, chunk), remaining - string.length(chunk))
+    match tcp_read_avail(conn) with
+    | Err _ -> Err(HttpInvalidRequest("connection error"))
+    | Ok chunk ->
+        if string.is_empty(chunk) then Err(HttpInvalidRequest("unexpected end of stream"))
+        else read_remaining_body(conn, string.concat(acc, chunk), remaining - string.length(chunk))
 
 fn read_request(conn: Int) -> ServerResult HttpRequest !{IO} =
   do
@@ -427,10 +432,13 @@ export fn render(resp: HttpServerResponse) -> ServerResult String =
         )
         Ok(assemble_response(line, response_headers(headers, body), body))
 
+# Recoverable write: a send to a peer that has vanished (reset/EPIPE) fails as an Err
+# rather than aborting the process. The connection is ALWAYS closed afterwards — on the
+# error path too — so a failed write never leaks the fd.
 fn write_and_close(conn: Int, payload: String) -> Unit !{IO} =
-  do
-    tcp_write(conn, payload)
-    tcp_close(conn)
+  match tcp_write_string(conn, payload) with
+  | Ok _ -> tcp_close(conn)
+  | Err _ -> tcp_close(conn)
 
 fn handle_connection(conn: Int, handler: HttpRequest -> HttpServerResponse !{IO}) -> Unit !{IO} =
   match read_request(conn) with

@@ -6,6 +6,11 @@ export extern fn tcp_listen(port: Int) -> Int !{IO}
 export extern fn tcp_accept(listener: Int) -> Int !{IO}
 export extern fn tcp_read(conn: Int) -> String !{IO}
 export extern fn tcp_write(conn: Int, data: String) -> Unit !{IO}
+# Recoverable read-available: like tcp_read, but returns Err on a socket failure instead of
+# aborting the process (Ok("") on peer EOF). The missing member of the Result-returning socket
+# family — tcp_read_exact blocks for an exact count, so it cannot read a header block of unknown
+# length. Lets a server drop one failing connection rather than exit(1).
+export extern fn tcp_read_avail(conn: Int) -> Result TcpError String !{IO}
 extern fn tcp_connect(host: String, port: Int) -> Result TcpError Int !{IO}
 extern fn tcp_read_exact(conn: Int, count: Int) -> Result TcpError Bytes !{IO}
 extern fn tcp_write_all(conn: Int, data: Bytes) -> Result TcpError Int !{IO}
@@ -57,6 +62,12 @@ export fn read_exact(conn: TcpConnection, count: Int) -> Result TcpError Bytes !
 # O(|payload|): writes the full payload, retrying partial sends as needed.
 export fn write_all(conn: TcpConnection, payload: Bytes) -> Result TcpError Int !{IO} =
   tcp_write_all(tcp_connection_handle(conn), payload)
+
+# Recoverable string write over a raw connection handle (for callers that hold an Int handle
+# rather than the opaque TcpConnection, e.g. stdlib.http_server). Returns Err on a socket
+# failure instead of aborting — the write counterpart to tcp_read_avail.
+export fn tcp_write_string(conn: Int, data: String) -> Result TcpError Int !{IO} =
+  tcp_write_all(conn, from_string(data))
 
 # O(count): reads bytes, then validates and copies the UTF-8 payload.
 export fn read_exact_utf8(conn: TcpConnection, count: Int) -> Result TcpError String !{IO} =

@@ -7608,6 +7608,37 @@ long long tcp_read(long long conn) {
   char* head = sprout_gc_adopt_cstr(buf, (size_t)n, "tcp_read: out of memory");  return (long long)(uintptr_t)head;
 }
 
+/* Recoverable sibling of tcp_read: read whatever is available (up to 64 KiB) and return it as
+ * Ok(String) — Ok("") on a peer EOF — or Err(TcpError) on a socket failure, NEVER exit(1). The
+ * recoverable socket family (tcp_connect / tcp_read_exact / tcp_write_all) had no
+ * read-WHATEVER'S-AVAILABLE member: tcp_read_exact blocks for an exact byte count, unusable for
+ * reading an HTTP header block whose length is unknown until "\r\n\r\n" is seen. A server needs
+ * this so one client's connection reset drops that connection, not the whole process. */
+long long tcp_read_avail(long long conn) {
+  if (conn <= 0 || conn >= 2048 || !g_conn_used[conn])
+    return tcp_net_err0("stdlib.net.TcpInvalidHandle");
+  sprout_gc_maybe_collect_threshold();
+  char* buf = (char*)malloc(65537);
+  if (buf == NULL) tcp_fail("tcp_read_avail: out of memory");
+  ssize_t n;
+  for (;;) {
+    n = recv(g_conn_fd[conn], buf, 65536, 0);
+    if (n >= 0) break;
+    if (errno == EAGAIN || errno == EWOULDBLOCK) {   /* no unrooted GC temp held */
+      scheduler_park_on_fd(g_conn_fd[conn], SPROUT_POLL_READ);
+      continue;
+    }
+    int saved_errno = errno;   /* capture before free(), which may clobber errno */
+    free(buf);                 /* plain malloc buffer, free is correct */
+    return tcp_net_err1("stdlib.net.TcpReadFailed", (long long)(uintptr_t)strerror(saved_errno));
+  }
+  buf[n] = '\0';
+  /* adopt then wrap: no allocation between the adopt and tcp_net_ok, which roots the payload
+   * across its own Ok-box allocation. */
+  char* head = sprout_gc_adopt_cstr(buf, (size_t)n, "tcp_read_avail: out of memory");
+  return tcp_net_ok((long long)(uintptr_t)head);
+}
+
 long long tcp_read_exact(long long conn, long long count) {
   if (conn <= 0 || conn >= 2048 || !g_conn_used[conn]) return tcp_net_err0("stdlib.net.TcpInvalidHandle");
   if (count < 0) {

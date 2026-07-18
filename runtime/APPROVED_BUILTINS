@@ -166,6 +166,7 @@ tcp_connect
 tcp_echo_serve
 tcp_listen
 tcp_read
+tcp_read_avail  # recoverable read-available: reads up to 64 KiB and returns Result TcpError String (Ok("") on EOF) instead of exit(1) on a socket error. Raw non-blocking recv + scheduler park on EAGAIN — the same OS-socket/scheduler interaction as tcp_read, which cannot be expressed in Sprout; tcp_read_exact (Result-returning) blocks for an exact count and so cannot read an unknown-length header block.
 tcp_read_exact
 tcp_write
 tcp_write_all
