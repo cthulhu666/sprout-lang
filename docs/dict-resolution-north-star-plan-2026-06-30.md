@@ -541,6 +541,22 @@ family:**
 does NOT match `"__eta_unresolved_"`. Unifying or renaming the prefixes silently changes
 which family the reroute predicate (1064) and the null-fill guard (`ast_to_ir:776`) catch.
 
+## Invariant — `@fwd:` vs `@eta_fwd:` are separate key namespaces
+
+Two forwarding-marker key prefixes exist and must **not** be conflated:
+
+- `@fwd:{fresh}:{class}` — **per-function**, internal to inference (`infer`). It lives
+  in a function-local table and is meaningful only within that function's scope.
+- `@eta_fwd:{fresh}:{class}` — **global-env**, visible to lowering. It is the form a
+  forwarded constraint takes once it must cross a function boundary.
+
+**Never fold `@fwd:` entries into the global env directly. Always rewrite to
+`@eta_fwd:` when crossing scope.** Merging the per-function `@fwd:` keys into the
+global environment lets a marker from one function match a same-`fresh` marker in
+another (the `fresh` counter is only unique within a function), silently resolving a
+constraint against the wrong dictionary — a dispatch-corruption class with no loud
+failure. The two prefixes keep the scopes disjoint by construction.
+
 ## 5. Impact
 
 - **Syntax/semantics:** none, except programs that currently segfault now fail to

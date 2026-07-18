@@ -97,6 +97,8 @@ Ordered by evidence-weighted value (biggest lever first). **B before A.**
 
 ### B1 — inlinable monomorphic `Vector T` element access (generalized, not Double-only)
 
+**Dispatch mechanism (design rationale).** B1 recognizes an inlinable vector access via a `VecOp`/`VecRep` enum recognizer (split: the *operation* — get/set/len — from the element *representation*), keyed on the exact canonical element type, **not** a hardcoded set of extern-name string checks, and deliberately **not unified** with `is_nonallocating_read` (that classifier answers a different question — "does this extern allocate" — and merging the two would entangle bounds-check inlining with alloc analysis). An alternative was considered and **rejected**: an *annotation on the extern declaration* carrying op/arity/type metadata that a generic driver would consume. It was rejected because the intrinsic set has a known, small ceiling (a handful of vector ops); an annotation-driven framework only pays for its indirection at *dozens* of intrinsics, so a hand-maintained recognizer is the cheaper, clearer choice at this scale.
+
 > **B1-Double LANDED — 2026-07-12** (branch `worktree-phase-d-b1-double`). Scoped to `Vector Double`
 > sites (commit-1). Three new IR ops in `sprout_ir.sprout`: `IRVecLenD` (load `len@0`), `IRVecGetD`
 > (load `data[i]`), `IRVecSetD` (store `data[i]`) — pure straight-line **unchecked** loads/stores.

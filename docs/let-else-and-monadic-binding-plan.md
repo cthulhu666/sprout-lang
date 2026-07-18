@@ -79,6 +79,12 @@ Tiers 1–2 deliver the whole flat-railway ergonomic **without touching the mona
 effect design**. Tier 3's generality is the only part gated on the effect-system
 pass; it may not be wanted in v0 at all (open question §7).
 
+**Tier-2 prerequisite (stdlib gap).** The structural propagate desugar for `Maybe`
+needs the residual-handling combinators, but `Maybe` currently exposes only `fmap` —
+it is missing `and_then`/`map`/`with_default`, which `Result` already has in full.
+Close this `Maybe` gap in `stdlib/prelude.sprout` before (or as part of) Tier 2;
+otherwise the two-known-types desugar has no uniform surface to lower onto.
+
 **Decided (so it isn't relitigated):** the `else` never *implicitly* binds the
 residual — you get the failure value only by writing the explicit binding-else
 (1b). Follows Rust/Swift.

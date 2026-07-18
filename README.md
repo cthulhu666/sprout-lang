@@ -113,6 +113,13 @@ let below = -temperature                              # - negates a number
 # `not is_valid(x)` does NOT parse — use `!is_valid(x)`
 ```
 
+**No multi-module user programs outside `stdlib/`**
+The module loader (`module_name_to_path`) resolves only `stdlib.<name>` imports and
+single-segment dotless names. Any *other* dotted import (e.g. `import myapp.util`)
+silently resolves to nothing — there is no error at import time; the symbols simply
+never bind, surfacing later as an `Unknown variable` at the use site. Keep a user
+program in a single file (or contribute the shared code under `stdlib/`).
+
 ## Iteration Combinators
 
 The prelude provides effect-polymorphic iteration combinators — use these instead

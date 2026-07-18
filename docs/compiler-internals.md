@@ -38,6 +38,8 @@ Per-region 1-bit slotmaps track live slot starts; `sprout_heap_lookup` does a bi
 
 Because objects never move, the address of a live heap object is **stable for the entire program lifetime**.
 
+**Load-bearing invariant — registration/adoption paths must never trigger GC.** Functions that register or adopt an already-allocated object into the managed set (e.g. `register_cstr` and its callers) run with earlier, not-yet-rooted objects held in registers: a string builder registers freshly-built strings back-to-back while still holding the previous ones unrooted. The contract "registration itself never collects" is therefore load-bearing — **never add a `sprout_gc_maybe_collect*` call (or any operation that can) to a registration/adoption path**, or those in-flight unrooted objects get swept mid-sequence. Allocation paths may collect; registration paths may not.
+
 Implications for codegen / IR design:
 
 - The "push the alloca holding an `i64` heap-address; never reload" pattern (used by `IRRoot` in `stdlib/compiler/ir_rooting.sprout`) is correct: the `i64` stored at the alloca remains a valid heap pointer for the entire function lifetime.

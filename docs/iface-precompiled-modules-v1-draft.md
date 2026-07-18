@@ -40,6 +40,36 @@ multi-file Sprout app build slow in proportion to its import graph size.
 - Replacing `bootstrap/compile_driver.ll` IR seed. The seed is the bootstrap
   trust anchor and stays committed; `.iface`/`.bc` are derived artifacts.
 
+## Design positioning
+
+Although the *motivation* above is build speed, `.iface` should be built as a
+**typed-AST canonical artifact** — Sprout's equivalent of Scala 3's TASTy and Idris
+2's TTC — **not** a perf-only metadata layer or a bitcode-only shortcut. Encode what
+downstream tooling (LSP, doc-gen, future incremental builds) will need to read, not
+merely what the bundler needs to skip. Prior art surveyed: GHC `.hi`, OCaml `.cmi`,
+Rust `rmeta`, Scala 3 TASTy, Swift `.swiftmodule`, Idris 2 TTC — and the C/C++
+textual-`#include` model as the anti-pattern (re-parse per translation unit) this
+avoids.
+
+## Versioning and freshness policy
+
+Three rules, each learned from another language's post-mortem:
+
+1. **Version int, fail loud on mismatch — never collapse to `Nothing`.** `.iface`
+   carries a format-version integer; a mismatch must produce an unambiguous, located
+   error, not a generic parse failure that reads as "no iface, recompile." (Scala
+   3.3.2 TASTy-version and Idris 2 #2033 both bled time to silent/ambiguous version
+   handling.) *Current gap:* `decode_iface_file` returns `Maybe IfaceFile`, so a
+   version mismatch collapses into `Nothing` — fix to a typed error before relying on
+   `.iface` for correctness.
+2. **Content hash, not mtime.** Freshness (including transitive freshness across the
+   import graph) is keyed on a hash of source content, not file modification time
+   (Rust's `svh`, GHC recompilation avoidance). mtime is unreliable under checkout,
+   caching, and generated files.
+3. **Forward-compat round-trip tests from day one.** Ship a golden `.iface` fixture
+   and a decode round-trip test per version bump, in CI, from the first version — so
+   an accidental format break is caught by a test, not by a corrupted build.
+
 ## Format — text-based `.iface`
 
 Decision (confirmed): text format, parsed by Sprout itself. Rationale:

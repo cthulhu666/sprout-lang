@@ -91,6 +91,14 @@ with `sprout.analysis` kept as a compatibility facade:
 This layer should be callable from tests, the CLI, REPL integrations, and the
 language server.
 
+**The LSP front-end calls the compiler in-process — it does not use the REPL's
+analysis daemon.** `sproutd --lsp` invokes `stdlib/compiler.*` directly, in the same
+process; it never talks to the forked analysis-service daemon that the interactive
+REPL uses for its transport. The consequence for where to invest: work on the
+daemon transport benefits the REPL only, whereas work on the shared *compiler core*
+(this Analysis Layer) compounds across REPL + daemon + LSP. Prioritize the shared
+core.
+
 ### 4.2 Workspace Layer
 
 Add a workspace/document manager, for example `sprout.workspace`, that:

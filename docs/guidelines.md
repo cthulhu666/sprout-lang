@@ -110,6 +110,8 @@ When two distinct semantic kinds share a primitive type (`String`, `Int`, `Dict 
 
 The middle bullet of "do not use" is doing the real work — it's a *cost-benefit* judgment, not a *necessity* test. The "preventative is encouraged" rule above means the burden is on "this is too expensive to wrap" rather than "this isn't proven dangerous enough to wrap."
 
+**Where to wrap — apply at extraction seams, not everywhere.** The placement heuristic that keeps the ceremony bounded: introduce a `wrap` type only at the *extraction seam* — the point where a raw `String` (or other primitive) first comes *out* of the AST / scanner / parse result and takes on a specific meaning. Keep internal helpers and dict/map storage as the raw `String`. Wrapping at the seam catches the swap where confusion actually happens (at the boundary), while leaving internals raw avoids flooding hundreds of interior call sites with wrap/unwrap ceremony for no additional safety.
+
 **Worked examples in this codebase:**
 
 - `wrap FilePath = String` / `wrap StdlibRoot = String` distinguish the two `String` parameters threaded through every compiler entry point. No retro evidence, but two semantically-different strings that are adjacent at every call site — applied preventatively.
