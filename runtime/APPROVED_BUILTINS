@@ -193,6 +193,7 @@ term_read_line
 term_show_cursor
 term_write
 time_now_micros  # syscall wrapper — gettimeofday cannot be called from Sprout stdlib; needed for wall-clock benchmarking
+wall_time_micros  # syscall wrapper — gettimeofday (CLOCK_REALTIME) cannot be called from Sprout; needed for wall-clock log timestamps. Correctness (not perf): the value is unobtainable in Sprout, and time_now_micros is monotonic (elapsed-only), so it cannot substitute. Calendar formatting stays pure Sprout (stdlib.log.format_iso8601)
 vec_make_filled  # O(n) fill-init of a raw VectorVal; avoids O(n²) repeated vec_append from Sprout; needed for MutVec allocation
 vector_append
 vector_concat  # O(n+m) two-array concat into one fresh backing array (single alloc + two memcpy); backs Semigroup (Vec a).append. Not efficient in pure Sprout: vector_append is O(n) persistent-copy per element (O(n²) in a loop), and the list round-trip allocates ~2·(n+m) throwaway cons cells + 3 traversals — measured ~40× slower than this builtin

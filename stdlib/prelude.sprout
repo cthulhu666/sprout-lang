@@ -1152,6 +1152,12 @@ extern fn env_get(name: String) -> Maybe String !{IO}
 # Use for elapsed-time measurement (benchmarks, timeouts); not for wall-clock timestamps.
 extern fn time_now_micros() -> Int !{IO}
 
+# Returns microseconds since the Unix epoch from the wall clock (CLOCK_REALTIME).
+# NOT monotonic — subject to NTP steps and manual clock changes, so it must not be
+# used for elapsed-time measurement (use time_now_micros for that). Use for civil-time
+# rendering such as log timestamps (see stdlib.log).
+extern fn wall_time_micros() -> Int !{IO}
+
 # Numeric / string conversions
 # W8/P1 (D5): total signed-decimal integer parse. Returns Nothing for anything
 # that is not `-?[0-9]+` (previously the C `strtoll` extern silently returned 0

@@ -1,0 +1,91 @@
+import stdlib.test (TestState, new_state, assert_eq, summary)
+import stdlib.log (Level, Logger, Debug, Info, Warn, Error, stderr_logger, logger_with_sink, with_field, base_fields, should_log, level_name, format_line, log, info_f, error)
+import stdlib.string as string
+
+# stdlib.log: leveled, structured logging. The sink and the record formatter are
+# decoupled, so the pure pieces (gate, level name, line format) are asserted
+# directly; the effectful `log` path is exercised through a Ref-backed capture
+# sink (no stderr, no wall clock in the asserted value).
+
+fn yn(b: Bool) -> String =
+  if b then "yes" else "no"
+
+fn has_substr(haystack: String, needle: String) -> String =
+  match string.find(haystack, needle) with
+  | Nothing -> "no"
+  | Just _ -> "yes"
+
+# A capture sink appends each formatted record (plus its own newline — the sink
+# owns line termination, per the design contract) to a shared buffer.
+fn append_line(buf: Ref String, line: String) -> Unit !{IO} =
+  do
+    cur <- ref_read(buf)
+    ref_write(buf, string.concat(cur, string.concat(line, "\n")))
+
+fn capture_logger(buf: Ref String) -> Logger =
+  logger_with_sink(Info, \line -> append_line(buf, line))
+
+fn two_fields() -> Vec (String, String) =
+  vec_from_list([("method", "GET"), ("status", "200")])
+
+fn main() -> Unit !{IO} =
+  do
+    state <- new_state()
+
+    # --- Pure: level gate --------------------------------------------------
+    assert_eq(state, "Debug is filtered out under an Info logger",
+      yn(should_log(stderr_logger(Info), Debug)), "no")
+    assert_eq(state, "Error passes an Info logger",
+      yn(should_log(stderr_logger(Info), Error)), "yes")
+    assert_eq(state, "Debug passes a Debug logger",
+      yn(should_log(stderr_logger(Debug), Debug)), "yes")
+    assert_eq(state, "Warn passes an Info logger",
+      yn(should_log(stderr_logger(Info), Warn)), "yes")
+
+    # --- Pure: level name --------------------------------------------------
+    assert_eq(state, "level_name Warn", level_name(Warn), "WARN")
+    assert_eq(state, "level_name Debug", level_name(Debug), "DEBUG")
+
+    # --- Pure: line formatting (fixed timestamp in) ------------------------
+    assert_eq(state, "formatted line: ts LEVEL msg then k=v fields in order",
+      format_line("2026-07-18T14:03:21Z", Info, "request", two_fields()),
+      "2026-07-18T14:03:21Z INFO request method=GET status=200")
+    assert_eq(state, "no fields: no trailing space",
+      format_line("2026-07-18T14:03:21Z", Error, "boom", vec_empty()),
+      "2026-07-18T14:03:21Z ERROR boom")
+
+    # --- Pure: with_field returns an independent, enriched logger ----------
+    assert_eq(state, "a fresh logger has no base fields",
+      int_to_string(vec_length(base_fields(stderr_logger(Info)))), "0")
+    assert_eq(state, "with_field adds exactly one base field",
+      int_to_string(vec_length(base_fields(with_field("svc", "api", stderr_logger(Info))))), "1")
+
+    # --- Effectful: the capture-sink path gates and emits ------------------
+    buf <- ref_new("")
+    log(capture_logger(buf), Debug, "hidden", vec_empty())
+    after_debug <- ref_read(buf)
+    assert_eq(state, "a gated-out record writes nothing to the sink",
+      after_debug, "")
+
+    log(capture_logger(buf), Error, "boom", vec_empty())
+    after_error <- ref_read(buf)
+    assert_eq(state, "an emitted record reaches the sink with level+message",
+      has_substr(after_error, "ERROR boom"), "yes")
+    assert_eq(state, "the emitted record is newline-terminated by the sink",
+      has_substr(after_error, "\n"), "yes")
+
+    # Base context fields and per-call fields both appear in the emitted line.
+    buf2 <- ref_new("")
+    error(with_field("svc", "api", capture_logger(buf2)), "kaboom")
+    after_ctx <- ref_read(buf2)
+    assert_eq(state, "base context field is emitted",
+      has_substr(after_ctx, "svc=api"), "yes")
+
+    buf3 <- ref_new("")
+    info_f(with_field("svc", "api", capture_logger(buf3)), "req",
+      vec_from_list([("code", "500")]))
+    after_merge <- ref_read(buf3)
+    assert_eq(state, "base fields precede per-call fields",
+      has_substr(after_merge, "svc=api code=500"), "yes")
+
+    summary(state)

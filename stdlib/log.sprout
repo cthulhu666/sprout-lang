@@ -1,0 +1,168 @@
+module stdlib.log
+
+import stdlib.string as string
+
+# Leveled, structured logging. A logger is an immutable capability value that is
+# threaded explicitly (never an ambient global) — matching docs/observability-
+# guard-rails.md #3. Enriching a logger (with_field) returns a NEW logger; the
+# sink and the record formatter are decoupled, so the pure pieces are testable
+# without a socket, a file, or the wall clock. Design: docs/logging-v0.md.
+
+export type Level (..) =
+  | Debug
+  | Info
+  | Warn
+  | Error
+
+# min level | output sink | base context fields (prepended to every record)
+export type Logger =
+  | Logger Level (String -> Unit !{IO}) (Vec (String, String))
+
+# --- Levels ----------------------------------------------------------------
+fn rank(lvl: Level) -> Int =
+  match lvl with
+  | Debug -> 0
+  | Info -> 1
+  | Warn -> 2
+  | Error -> 3
+
+export fn level_name(lvl: Level) -> String =
+  match lvl with
+  | Debug -> "DEBUG"
+  | Info -> "INFO"
+  | Warn -> "WARN"
+  | Error -> "ERROR"
+
+# --- Constructors and accessors -------------------------------------------
+export fn logger_with_sink(min: Level, sink: String -> Unit !{IO}) -> Logger =
+  Logger(min, sink, vec_empty())
+
+# The default sink is stderr (via eprint), which keeps stdout clean for a
+# program's actual output — the Unix convention for diagnostics.
+export fn stderr_logger(min: Level) -> Logger =
+  logger_with_sink(min, \line -> eprint(line))
+
+export fn min_level(lg: Logger) -> Level =
+  match lg with
+  | Logger min _ _ -> min
+
+export fn base_fields(lg: Logger) -> Vec (String, String) =
+  match lg with
+  | Logger _ _ fields -> fields
+
+# A new logger carrying one more base field; the source logger is unchanged.
+export fn with_field(k: String, v: String, lg: Logger) -> Logger =
+  match lg with
+  | Logger min sink fields -> Logger(min, sink, vec_append((k, v), fields))
+
+# --- Filtering -------------------------------------------------------------
+# True iff a record at `lvl` meets the logger's minimum threshold.
+export fn should_log(lg: Logger, lvl: Level) -> Bool =
+  rank(lvl) >= rank(min_level(lg))
+
+# --- Timestamp formatting (pure) ------------------------------------------
+# Zero-pad a non-negative integer to a fixed width.
+fn pad2(n: Int) -> String =
+  if n < 10 then string.concat("0", int_to_string(n))
+  else int_to_string(n)
+
+fn pad4(n: Int) -> String =
+  if n < 10 then string.concat("000", int_to_string(n))
+  else if n < 100 then string.concat("00", int_to_string(n))
+  else if n < 1000 then string.concat("0", int_to_string(n))
+  else int_to_string(n)
+
+# days since 1970-01-01 (>= 0) -> (year, month, day). Howard Hinnant's
+# civil_from_days, specialized to the non-negative domain (era >= 0), so the
+# whole conversion is total integer arithmetic — no builtin. O(1).
+fn civil_from_days(z0: Int) -> (Int, Int, Int) =
+  let z = z0 + 719468
+      era = z / 146097
+      doe = z - era * 146097
+      yoe = (doe - doe / 1460 + doe / 36524 - doe / 146096) / 365
+      yr = yoe + era * 400
+      doy = doe - (365 * yoe + yoe / 4 - yoe / 100)
+      mp = (5 * doy + 2) / 153
+      day = doy - (153 * mp + 2) / 5 + 1
+      mon = if mp < 10 then mp + 3 else mp - 9
+      year = if mon <= 2 then yr + 1 else yr
+  in (year, mon, day)
+
+fn date_time_string(y: Int, mo: Int, d: Int, hh: Int, mm: Int, ss: Int) -> String =
+  pad4(y) ++ "-" ++ pad2(mo) ++ "-" ++ pad2(d) ++ "T" ++ pad2(hh) ++ ":" ++ pad2(mm) ++ ":" ++ pad2(ss) ++ "Z"
+
+fn format_from_secs(secs: Int) -> String =
+  match civil_from_days(secs / 86400) with
+  | (y, mo, d) ->
+      let sod = secs - (secs / 86400) * 86400
+          hh = sod / 3600
+          mm = (sod - hh * 3600) / 60
+          ss = sod - (sod / 60) * 60
+      in date_time_string(y, mo, d, hh, mm, ss)
+
+# Render wall-clock microseconds-since-epoch as `YYYY-MM-DDThh:mm:ssZ` (UTC),
+# truncated to whole seconds. Domain: micros >= 0 (dates from 1970 onward).
+export fn format_iso8601(micros: Int) -> String =
+  format_from_secs(micros / 1000000)
+
+# --- Record formatting (pure) ---------------------------------------------
+# Append the call fields onto the base fields (base first), preserving order.
+# O(f²) in the total field count f (vec_append copies): deliberately fine — a log
+# record carries a handful of fields, so the constant dominates and a persistent
+# copy per field is cheaper than threading a mutable builder through the API.
+fn all_fields(base: Vec (String, String), call: Vec (String, String)) -> Vec (String, String) =
+  append_all(call, 0, vec_length(call), base)
+
+fn append_all(src: Vec (String, String), i: Int, n: Int, acc: Vec (String, String)) -> Vec (String, String) =
+  if i >= n then acc
+  else
+    match vec_get(i, src) with
+    | Nothing -> acc
+    | Just pair -> append_all(src, i + 1, n, vec_append(pair, acc))
+
+# ` k=v` for each field, in order (leading space only when there are fields).
+fn render_fields(fields: Vec (String, String)) -> String =
+  render_fields_from(fields, 0, vec_length(fields), "")
+
+fn render_fields_from(fields: Vec (String, String), i: Int, n: Int, acc: String) -> String =
+  if i >= n then acc
+  else
+    match vec_get(i, fields) with
+    | Nothing -> acc
+    | Just pair ->
+        match pair with
+        | (k, v) -> render_fields_from(fields, i + 1, n, acc ++ " " ++ k ++ "=" ++ v)
+
+# One log record as a line WITHOUT a trailing newline: `<ts> <LEVEL> <msg> k=v …`.
+# The sink owns line termination (the default stderr sink's eprint appends "\n").
+export fn format_line(ts: String, lvl: Level, msg: String, fields: Vec (String, String)) -> String =
+  ts ++ " " ++ level_name(lvl) ++ " " ++ msg ++ render_fields(fields)
+
+# --- Emission --------------------------------------------------------------
+fn run_sink(lg: Logger, line: String) -> Unit !{IO} =
+  match lg with
+  | Logger _ sink _ -> sink(line)
+
+# Read the wall clock, format, and hand the finished line to the sink.
+fn emit(lg: Logger, lvl: Level, msg: String, fields: Vec (String, String)) -> Unit !{IO} =
+  do
+    now <- wall_time_micros()
+    run_sink(lg, format_line(format_iso8601(now), lvl, msg, all_fields(base_fields(lg), fields)))
+
+# Emit a record iff its level passes the logger's threshold. When gated out,
+# nothing is formatted and the sink is never touched (a filtered Debug pays only
+# the level comparison).
+export fn log(lg: Logger, lvl: Level, msg: String, fields: Vec (String, String)) -> Unit !{IO} =
+  if should_log(lg, lvl) then emit(lg, lvl, msg, fields)
+  else ()
+
+# --- Convenience -----------------------------------------------------------
+export fn debug(lg: Logger, msg: String) -> Unit !{IO} = log(lg, Debug, msg, vec_empty())
+export fn info(lg: Logger, msg: String) -> Unit !{IO} = log(lg, Info, msg, vec_empty())
+export fn warn(lg: Logger, msg: String) -> Unit !{IO} = log(lg, Warn, msg, vec_empty())
+export fn error(lg: Logger, msg: String) -> Unit !{IO} = log(lg, Error, msg, vec_empty())
+
+export fn debug_f(lg: Logger, msg: String, fields: Vec (String, String)) -> Unit !{IO} = log(lg, Debug, msg, fields)
+export fn info_f(lg: Logger, msg: String, fields: Vec (String, String)) -> Unit !{IO} = log(lg, Info, msg, fields)
+export fn warn_f(lg: Logger, msg: String, fields: Vec (String, String)) -> Unit !{IO} = log(lg, Warn, msg, fields)
+export fn error_f(lg: Logger, msg: String, fields: Vec (String, String)) -> Unit !{IO} = log(lg, Error, msg, fields)

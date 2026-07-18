@@ -498,6 +498,15 @@ long long time_now_micros(void) {
   return (long long)ts.tv_sec * 1000000LL + (long long)ts.tv_nsec / 1000LL;
 }
 
+/* Wall-clock microseconds since the Unix epoch (gettimeofday / CLOCK_REALTIME).
+ * Intended use: log timestamps and other civil-time rendering.
+ * NOT monotonic — subject to NTP steps and manual clock changes, so it must not
+ * be used for elapsed-time measurement (use time_now_micros for that).
+ * Exposes the same value as the internal sprout_now_micros. */
+long long wall_time_micros(void) {
+  return sprout_now_micros();
+}
+
 static void sprout_gc_log_cycle(
   const char* reason,
   long long heap_before,
