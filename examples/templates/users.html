@@ -1,0 +1,6 @@
+<!doctype html>
+<title>Users</title>
+<h1>Users ({{ count }})</h1>
+<ul>
+{% for user in users %}  <li>{{ user.name }}{% if user.admin %} <strong>(admin)</strong>{% endif %}</li>
+{% endfor %}</ul>

@@ -35,17 +35,11 @@ fn health(req: HttpRequest) -> HttpServerResponse =
 fn echo(req: HttpRequest) -> HttpServerResponse =
   ok(`${request_method(req)} ${request_path(req)}: ${request_body(req)}`)
 
-# The HTML template. `{{ }}` values are auto-escaped, so a name containing `&` or `<>`
-# renders as entities (no HTML injection). `{% for %}`/`{% if %}` drive the list.
-# Assembled from single-line literals joined with `\n` (a multi-line backtick would be
-# reformatted by `just fmt`, which treats a template's later lines as code).
-fn users_template() -> String =
-  "<!doctype html>\n"
-    ++ "<title>Users</title>\n"
-    ++ "<h1>Users ({{ count }})</h1>\n"
-    ++ "<ul>\n"
-    ++ "{% for user in users %}  <li>{{ user.name }}{% if user.admin %} <strong>(admin)</strong>{% endif %}</li>\n"
-    ++ "{% endfor %}</ul>"
+# The HTML template lives on disk in examples/templates/users.html; it is loaded and
+# compiled once at startup (see `main`). `{{ }}` values are auto-escaped, so a name
+# containing `&` or `<>` renders as entities; `{% for %}`/`{% if %}` drive the list.
+fn template_path() -> String =
+  "examples/templates/users.html"
 
 fn user_row(name: String, admin: Bool) -> Json =
   JsonObject(JsonObjectCons("name", string(name), JsonObjectCons("admin", bool(admin), JsonObjectNil)))
@@ -80,9 +74,15 @@ fn routes(users_tmpl: Template) -> Vec Route =
 fn serve_routes(rs: Vec Route) -> Unit !{IO} =
   serve(8082, \req -> dispatch(rs, req))
 
-# Compile the template once up front; a malformed template is a startup error, not a
-# per-request failure.
+# Load and compile the template once up front; a missing file or malformed template is
+# a startup error, not a per-request failure. The path is relative to the working
+# directory (the repo root under `just run`).
 fn main() -> Unit !{IO} =
-  match compile(users_template()) with
+  match read_file(template_path()) with
+  | Err msg -> print(`failed to read ${template_path()}: ${msg}`)
+  | Ok source -> start_server(source)
+
+fn start_server(source: String) -> Unit !{IO} =
+  match compile(source) with
   | Ok tmpl -> serve_routes(routes(tmpl))
   | Err _ -> print("failed to compile the users template")
