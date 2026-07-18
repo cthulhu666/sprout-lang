@@ -55,6 +55,7 @@ fn http_status_info(status: Int) -> Maybe HttpStatusInfo =
   | 201 -> Just(HttpStatusInfo("201", "Created"))
   | 202 -> Just(HttpStatusInfo("202", "Accepted"))
   | 204 -> Just(HttpStatusInfo("204", "No Content"))
+  | 303 -> Just(HttpStatusInfo("303", "See Other"))
   | 400 -> Just(HttpStatusInfo("400", "Bad Request"))
   | 401 -> Just(HttpStatusInfo("401", "Unauthorized"))
   | 403 -> Just(HttpStatusInfo("403", "Forbidden"))

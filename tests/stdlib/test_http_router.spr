@@ -22,10 +22,16 @@ fn rendered(resp: HttpServerResponse) -> String =
   | Ok raw -> raw
   | Err _ -> "RENDER_ERR"
 
-fn served(raw: String) -> String =
+# `dispatch` now carries the handler's `!{IO}` effect (handlers may do I/O), so drive
+# it in a do-block even though these handlers are pure — a pure handler subsumes into
+# the effectful route slot unchanged.
+fn served(raw: String) -> String !{IO} =
   match parse(raw) with
   | Err _ -> "PARSE_ERR"
-  | Ok req -> rendered(dispatch(routes(), req))
+  | Ok req ->
+      do
+        resp <- dispatch(routes(), req)
+        rendered(resp)
 
 fn contains(hay: String, needle: String) -> Bool =
   match string.find(hay, needle) with

@@ -1,0 +1,49 @@
+import stdlib.test (TestState, new_state, assert_true, summary)
+import stdlib.http_server (HttpRequest, HttpServerResponse, Route, ok, render, dispatch, parse)
+import stdlib.string as string
+
+# Characterization/regression test for effectful route handlers. (Sprout's effect
+# system is currently erased at runtime, so the `!{IO}` flip on `Route`/`dispatch` is
+# not gated by the typechecker — this test guards the *behavior* it enables so a future
+# half-flip or effect-enforcement change can't silently break stateful dispatch.)
+#
+# Route handlers may perform IO. A handler closes over a shared
+# `Ref Int`, reads and increments it, and returns the new count. Because the state
+# lives in the Ref (not the request), the SAME route returns a different body on the
+# second hit — which is impossible with a pure handler. This is the enabling change
+# behind stateful servers (e.g. a CRUD store): `Route`/`dispatch`/`serve` now carry
+# the `!{IO}` effect through to the handler.
+
+fn hit(counter: Ref Int, req: HttpRequest) -> HttpServerResponse !{IO} =
+  do
+    n <- ref_read(counter)
+    ref_write(counter, n + 1)
+    ok(int_to_string(n + 1))
+
+fn routes(counter: Ref Int) -> Vec Route =
+  vec_append(Route("GET", "/hit", \req -> hit(counter, req)), vec_empty())
+
+fn served(counter: Ref Int, raw: String) -> String !{IO} =
+  match parse(raw) with
+  | Err _ -> "PARSE_ERR"
+  | Ok req ->
+      do
+        resp <- dispatch(routes(counter), req)
+        match render(resp) with
+        | Ok wire -> wire
+        | Err _ -> "RENDER_ERR"
+
+fn contains(hay: String, needle: String) -> Bool =
+  match string.find(hay, needle) with
+  | Nothing -> false
+  | Just _ -> true
+
+fn main() -> Unit !{IO} =
+  do
+    counter <- ref_new(0)
+    state <- new_state()
+    first <- served(counter, "GET /hit HTTP/1.1\r\n\r\n")
+    second <- served(counter, "GET /hit HTTP/1.1\r\n\r\n")
+    assert_true(state, "first hit reports count 1", contains(first, "1"))
+    assert_true(state, "second hit reports count 2 (state persisted in the Ref)", contains(second, "2"))
+    summary(state)

@@ -1,0 +1,29 @@
+import stdlib.test (TestState, new_state, assert_true, summary)
+import stdlib.http_server (HttpServerResponse, see_other, render)
+import stdlib.string as string
+
+# New feature: `see_other(location)` builds a 303 See Other response carrying a
+# `Location` header and an empty body — the Post/Redirect/Get pattern a form-driven
+# CRUD server uses so a browser refresh after a POST re-GETs the result page rather
+# than re-submitting the form. This exercises two additions: the `see_other` helper
+# and a `303 See Other` arm in the shared status table (without it, `render` fails
+# with an unsupported-status error).
+
+fn rendered(resp: HttpServerResponse) -> String =
+  match render(resp) with
+  | Ok raw -> raw
+  | Err _ -> "RENDER_ERR"
+
+fn contains(hay: String, needle: String) -> Bool =
+  match string.find(hay, needle) with
+  | Nothing -> false
+  | Just _ -> true
+
+fn main() -> Unit !{IO} =
+  do
+    state <- new_state()
+    assert_true(state, "see_other renders a 303 status line",
+      contains(rendered(see_other("/users")), "303 See Other"))
+    assert_true(state, "see_other sets the Location header",
+      contains(rendered(see_other("/users")), "location: /users"))
+    summary(state)

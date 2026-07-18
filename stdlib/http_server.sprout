@@ -245,6 +245,13 @@ export fn bad_request(body: String) -> HttpServerResponse =
 export fn not_found(body: String) -> HttpServerResponse =
   response(404, body)
 
+# A 303 See Other redirect to `location`, with an empty body. This is the Post/
+# Redirect/Get pattern: a form handler mutates state on POST, then returns this so the
+# browser re-GETs `location` — a refresh reloads the result page instead of re-POSTing
+# the form. `render` needs `303` in the shared status table (stdlib.http).
+export fn see_other(location: String) -> HttpServerResponse =
+  with_header("location", location, response(303, ""))
+
 export fn with_header(name: String, value: String, resp: HttpServerResponse) -> HttpServerResponse =
   match resp with
   | HttpServerResponse status headers body -> HttpServerResponse(status, dict_set(header_name, value, headers), body)
@@ -256,8 +263,13 @@ where
 # the table in order and runs the first match, falling through to 404. Matching is
 # O(routes) per request; a linear scan is the right shape for the handful of routes a
 # small server declares — no Dict indirection.
+#
+# Handlers carry the `!{IO}` effect, so a handler may read/write shared state (e.g. a
+# `Ref`-backed store) or touch the network/disk while building its response — the
+# effect propagates through `dispatch`/`serve`. A pure handler still fits: `!{IO}` is
+# additive, so `\req -> ok("hi")` subsumes into the effectful slot unchanged.
 export type Route (..) =
-  | Route String String (HttpRequest -> HttpServerResponse)
+  | Route String String (HttpRequest -> HttpServerResponse !{IO})
 
 # `request_path` returns the raw target including any `?query`, so match on the path
 # up to the first `?` — otherwise `/search?q=foo` would never match a `/search` route.
@@ -270,11 +282,11 @@ fn route_matches(route: Route, method: String, path: String) -> Bool =
   match route with
   | Route route_method route_path _ -> route_method == method && route_path == path
 
-fn run_route(route: Route, req: HttpRequest) -> HttpServerResponse =
+fn run_route(route: Route, req: HttpRequest) -> HttpServerResponse !{IO} =
   match route with
   | Route _ _ handler -> handler(req)
 
-fn dispatch_from(routes: Vec Route, index: Int, total: Int, method: String, path: String, req: HttpRequest) -> HttpServerResponse =
+fn dispatch_from(routes: Vec Route, index: Int, total: Int, method: String, path: String, req: HttpRequest) -> HttpServerResponse !{IO} =
   if index >= total then not_found("not found")
   else
     match vec_get(index, routes) with
@@ -284,9 +296,11 @@ fn dispatch_from(routes: Vec Route, index: Int, total: Int, method: String, path
         else dispatch_from(routes, index + 1, total, method, path, req)
 
 # Dispatch a parsed request to its route's handler, or a 404 response when none
-# matches. Pure over an already-parsed request (no I/O), so it composes with `serve`
-# as `serve(port, \req -> dispatch(routes, req))` and is testable without sockets.
-export fn dispatch(routes: Vec Route, req: HttpRequest) -> HttpServerResponse =
+# matches. Runs the matched handler, so it carries the handler's `!{IO}` effect — but
+# it does no socket I/O of its own, so it still composes with `serve` as
+# `serve(port, \req -> dispatch(routes, req))` and is testable without sockets (drive
+# it from an already-parsed request and inspect the response).
+export fn dispatch(routes: Vec Route, req: HttpRequest) -> HttpServerResponse !{IO} =
   dispatch_from(routes, 0, vec_length(routes), request_method(req), path_before_query(request_path(req)), req)
 
 export fn request_method(req: HttpRequest) -> String =
@@ -418,11 +432,13 @@ fn write_and_close(conn: Int, payload: String) -> Unit !{IO} =
     tcp_write(conn, payload)
     tcp_close(conn)
 
-fn handle_connection(conn: Int, handler: HttpRequest -> HttpServerResponse) -> Unit !{IO} =
+fn handle_connection(conn: Int, handler: HttpRequest -> HttpServerResponse !{IO}) -> Unit !{IO} =
   match read_request(conn) with
   | Err _ -> write_and_close(conn, bad_request("bad request") |> render_response_or_fallback)
   | Ok req ->
-      write_and_close(conn, handler(req) |> render_response_or_fallback)
+      do
+        resp <- handler(req)
+        write_and_close(conn, render_response_or_fallback(resp))
 
 # The 500 fallback (reachable only when a handler returns a status outside the
 # supported table) still uses http_response's fixed format — no Content-Length, its own
@@ -442,7 +458,7 @@ fn render_response_or_fallback(resp: HttpServerResponse) -> String =
 # ACCEPTED, not fully served — the enclosing scope join is what waits for the last
 # spawned handler to finish. Handlers therefore complete in I/O-ready order, not
 # accept order.
-fn serve_loop(scope: Scope, listener: Int, remaining: Int, handler: HttpRequest -> HttpServerResponse) -> Unit !{IO} =
+fn serve_loop(scope: Scope, listener: Int, remaining: Int, handler: HttpRequest -> HttpServerResponse !{IO}) -> Unit !{IO} =
   if remaining == 0 then tcp_close_listener(listener)
   else
     do
@@ -452,7 +468,7 @@ fn serve_loop(scope: Scope, listener: Int, remaining: Int, handler: HttpRequest 
 
 # `with_scope` does not return until every spawned handler has finished, so no
 # connection outlives the call (structured concurrency — no orphaned handlers).
-export fn serve_n(port: Int, max_connections: Int, handler: HttpRequest -> HttpServerResponse) -> Unit !{IO} =
+export fn serve_n(port: Int, max_connections: Int, handler: HttpRequest -> HttpServerResponse !{IO}) -> Unit !{IO} =
   with_scope(\s -> serve_loop(s, tcp_listen(port), max_connections, handler))
 
 # Unbounded counterpart of `serve_loop`: the same accept-and-spawn body with no
@@ -461,7 +477,7 @@ export fn serve_n(port: Int, max_connections: Int, handler: HttpRequest -> HttpS
 # server does not accumulate finished handlers even though the enclosing scope
 # never joins. The listener is never closed — the loop owns it for the process's
 # lifetime.
-fn serve_forever_loop(scope: Scope, listener: Int, handler: HttpRequest -> HttpServerResponse) -> Unit !{IO} =
+fn serve_forever_loop(scope: Scope, listener: Int, handler: HttpRequest -> HttpServerResponse !{IO}) -> Unit !{IO} =
   do
     conn <- tcp_accept(listener)
     task_spawn(scope, \_ -> handle_connection(conn, handler))
@@ -471,5 +487,5 @@ fn serve_forever_loop(scope: Scope, listener: Int, handler: HttpRequest -> HttpS
 # operation — the enclosing `with_scope` join is unreachable, which is exactly
 # what an always-on server wants. Reach for `serve_n` when a bounded, terminating
 # run is needed (e.g. tests/CI).
-export fn serve(port: Int, handler: HttpRequest -> HttpServerResponse) -> Unit !{IO} =
+export fn serve(port: Int, handler: HttpRequest -> HttpServerResponse !{IO}) -> Unit !{IO} =
   with_scope(\s -> serve_forever_loop(s, tcp_listen(port), handler))
