@@ -1,0 +1,11 @@
+import stdlib.net (TcpError, TcpInvalidHandle, tcp_read_avail)
+
+# Covers tcp_read_avail's error path deterministically (no socket timing needed): reading
+# from a handle that was never allocated must return Err(TcpInvalidHandle), NOT abort. This
+# is the recoverable counterpart to the fatal tcp_read, which exit(1)s on a bad handle — so
+# reaching "done" proves the recovery (a regression to the fatal form would exit non-zero).
+fn main() -> Unit !{IO} =
+  match tcp_read_avail(1999) with
+  | Err TcpInvalidHandle -> term_write("invalid-handle err\ndone\n")
+  | Err _ -> term_write("wrong-err\n")
+  | Ok _ -> term_write("unexpected-ok\n")

@@ -1083,6 +1083,11 @@ task-io-smoke: bootstrap-from-seed
   build tests/task_io_smoke/http_conn_error_survives.spr
   run_once "http-conn-error" "done"
   SPROUT_GC_STRESS=1 run_once "http-conn-error/stress" "done"
+  # (2e) tcp_read_avail error path: reading from an unallocated handle returns
+  # Err(TcpInvalidHandle) instead of exit(1) (the recoverable counterpart to fatal tcp_read).
+  # Deterministic — no socket timing. Reaching "done" proves the Err branch.
+  build tests/task_io_smoke/tcp_read_avail_bad_handle.spr
+  run_once "tcp-read-avail-bad-handle" "done"
   # (3) I/O-drop cancellation (L0.5): scope_cancel force-drops tasks parked in the
   # poller (both task_fork and task_spawn) so __scope_join returns instead of blocking
   # the pump forever. Reaching "done" proves the drop; a broken drop HANGS (alarm fires).
@@ -1171,7 +1176,7 @@ task-io-smoke: bootstrap-from-seed
   build tests/task_io_smoke/timeout_select_drop.spr
   run_once "select-timeout-drop" "done"
   SPROUT_GC_STRESS=1 run_once "select-timeout-drop/stress" "done"
-  echo "==> task-io-smoke ✓ (read-park, accept-park, re-arm, http-serve-concurrency, http-conn-error-isolation, write, cancel-drop, await-guard, timer-drop, timeout-drop, timeout-nested-guard, chan-cancel-drop, chan-timeout-drop, chan-negative-cap-guard, rendezvous-send-drop, send-on-closed-guard, double-close-guard, send-parked-close-guard, select-cancel-drop, select-timeout-drop; interleaved; stress-clean)"
+  echo "==> task-io-smoke ✓ (read-park, accept-park, re-arm, http-serve-concurrency, http-conn-error-isolation, tcp-read-avail-error, write, cancel-drop, await-guard, timer-drop, timeout-drop, timeout-nested-guard, chan-cancel-drop, chan-timeout-drop, chan-negative-cap-guard, rendezvous-send-drop, send-on-closed-guard, double-close-guard, send-parked-close-guard, select-cancel-drop, select-timeout-drop; interleaved; stress-clean)"
 
 # Division-by-zero guard regression (CI gate). The fixture divides by a RUNTIME
 # zero (`10 / list_length(argv)` with no args), which neither the compiler nor
