@@ -141,4 +141,19 @@ fn main() -> Unit !{IO} =
                 | Just _ -> true
                 | Nothing -> false)
 
+    # --- Malformed TFunc rejection (exercises each failure branch of
+    #     decode_tfunc_at individually — not just the whole-scheme case above) ---
+    assert_eq(state, "tfunc missing return type rejected",
+              iface_codec.decode_scheme("(Scheme () () (TFunc (TConst Int)) (EffectPure))"),
+              Nothing)
+    assert_eq(state, "tfunc missing effect rejected",
+              iface_codec.decode_scheme("(Scheme () () (TFunc (TConst Int) (TConst Int)) (EffectPure))"),
+              Nothing)
+    assert_eq(state, "tfunc missing closing paren rejected",
+              iface_codec.decode_scheme("(Scheme () () (TFunc (TConst Int) (TConst Int) (EffectPure)"),
+              Nothing)
+    assert_eq(state, "tfunc malformed effect rejected",
+              iface_codec.decode_scheme("(Scheme () () (TFunc (TConst Int) (TConst Int) (NotAnEffect)) (EffectPure))"),
+              Nothing)
+
     summary(state)

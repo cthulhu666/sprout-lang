@@ -133,18 +133,13 @@ fn decode3(b: Bytes, i: Int, b0: Int) -> Maybe (Int, Int) =
           else Nothing
 
 fn decode4(b: Bytes, i: Int, b0: Int) -> Maybe (Int, Int) =
-  match bytes_get(b, i + 1) with
-  | Nothing -> Nothing
-  | Just b1 ->
-      match bytes_get(b, i + 2) with
-      | Nothing -> Nothing
-      | Just b2 ->
-          match bytes_get(b, i + 3) with
-          | Nothing -> Nothing
-          | Just b3 ->
-              if is_cont(b1) && is_cont(b2) && is_cont(b3) then
-                Just(((b0 - 240) * 262144 + (b1 - 128) * 4096 + (b2 - 128) * 64 + (b3 - 128), i + 4))
-              else Nothing
+  let Just b1 = bytes_get(b, i + 1) else Nothing
+      Just b2 = bytes_get(b, i + 2) else Nothing
+      Just b3 = bytes_get(b, i + 3) else Nothing
+  in
+    if is_cont(b1) && is_cont(b2) && is_cont(b3) then
+      Just(((b0 - 240) * 262144 + (b1 - 128) * 4096 + (b2 - 128) * 64 + (b3 - 128), i + 4))
+    else Nothing
 
 # decode_char_at: total UTF-8 decode at a byte offset.  Returns the codepoint as
 # a Char plus the next byte offset.  Thin wrapper over decode_codepoint_at.
