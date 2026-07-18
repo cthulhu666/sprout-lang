@@ -1,0 +1,43 @@
+import stdlib.test (TestState, new_state, assert_eq, summary)
+
+# Regression guard for BACKLOG Dispatch-Soundness item 5b (canonical-identity
+# sub-campaign α): class-method dispatch must key on a mangled dispatch identity,
+# never the bare source name.
+#
+# Two manifestations this file pins, both rooted in the codegen/lowering side
+# still using the bare method name as the dispatcher symbol:
+#
+#   1. DISPATCH HIJACK — a user top-level `fn append` was hijacked by ast_to_ir's
+#      `fname == "append"` peephole (translate_append_call), producing
+#      `ast_to_ir: append expects at least 2 arguments` at emit for a 1-arg call,
+#      or a silent str_concat MISCOMPILE for a 2-string call.
+#
+#   2. SYMBOL COLLISION — the bare Semigroup wrapper `@append` define collided with
+#      the user's `@append` define → clang `invalid redefinition of 'append'` at
+#      link. Same for a user `fn to_string` vs the ToString wrapper `@to_string`.
+#
+# The fix mangles every class-method dispatcher (callee + wrapper define + all
+# references) to `__cm_<Class>_<method>`, so user names never collide. This test
+# is observable: a wrong dispatch shows up as a wrong VALUE (or a link/emit
+# failure), not just a crash.
+
+# A user top-level fn shadowing the Semigroup `append` method, distinct signature.
+fn append(x: Int) -> Int =
+  x + 1
+
+# A user top-level fn shadowing the ToString `to_string` method.
+fn to_string(n: Int) -> String =
+  "user-ts"
+
+fn main() -> Unit !{IO} =
+  do
+    state <- new_state()
+    # (1) user `append` resolves to the user fn, not the Semigroup peephole.
+    assert_eq(state, "user append not hijacked", append(5), 6)
+    # (2) user `to_string` resolves to the user fn, not the ToString wrapper.
+    assert_eq(state, "user to_string not hijacked", to_string(9), "user-ts")
+    # (3) genuine Semigroup `++` on String still dispatches correctly.
+    assert_eq(state, "genuine string append", "a" ++ "b", "ab")
+    # (4) genuine Semigroup `++` on List still dispatches correctly.
+    assert_eq(state, "genuine list append", list_length([1, 2] ++ [3]), 3)
+    summary(state)

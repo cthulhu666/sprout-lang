@@ -4326,7 +4326,12 @@ fn translate_direct_call(fname: String, args: List typed_ast.TypedExpr,
                          lifted_idx_ref: Ref (Dict Int),
                          name_prefix: String) ->
     Result String (List sprout_ir.IRBlock, String, List sprout_ir.IROp, String, Int) !{IO} =
-  if fname == "append" then
+  # The String/List `++` peephole (str_concat / list_append) keys on the mangled
+  # Semigroup dispatch identity, NOT the source name "append".  lowering rewrites
+  # every genuine Semigroup append callee to "__cm_Semigroup_append"
+  # (classmethod_dispatch_name); a user top-level `fn append` keeps its bare name
+  # and falls through to the normal call path below, never hijacked here.
+  if fname == "__cm_Semigroup_append" then
     translate_append_call(args, call_ty, params, ctors, idx, cur_label, cur_ops,
                           captures, lifted_ref, top_level, let_names, fn_arities,
                           lambda_ctr_ref, lifted_idx_ref, name_prefix)

@@ -460,7 +460,7 @@ fn generate_one_class_wrapper(
   match sig with
   | ast.ClassMethodSig method_name params ret_ty effects_maybe ->
       typed_ast.TFnDecl(
-        method_name,
+        classmethod_dispatch_name(class_name, method_name),
         list_append(params, hidden_params),
         Just(ret_ty),
         effects_maybe,
@@ -639,6 +639,17 @@ fn prepend_params(new_params: List ast.Param, acc: List ast.Param) -> List ast.P
 
 fn tc_slot_name(class_name: String, idx: Int, method_name: String) -> String =
   string_concat_many(["__tc_", class_name, "_", int_to_string(idx), "_", method_name])
+
+# Dispatch identity for a class method's wrapper.  Mangled so a user top-level
+# fn of the same name (`fn append`, `fn eq`, `fn to_string`) never collides with
+# the class-method dispatcher symbol at link time, and so codegen dispatches off
+# this identity rather than the shadowable source name.  Used at BOTH the wrapper
+# DEFINE site (generate_one_class_wrapper) and every dispatch CALL site
+# (lower_dispatch_callee) — they must agree, so both route through this helper.
+# ast_to_ir mirrors the scheme for the Semigroup `append` peephole (its
+# translate_direct_call keys on "__cm_Semigroup_append").
+fn classmethod_dispatch_name(class_name: String, method_name: String) -> String =
+  string_concat_many(["__cm_", string.after_last_dot(class_name), "_", string.after_last_dot(method_name)])
 
 fn class_methods_for(class_name: String, class_order: Dict (List String)) -> List String =
   match dict_get(class_name, class_order) with
@@ -1127,6 +1138,30 @@ fn lower_expr_callee(te: typed_ast.TypedExpr, ctx: LowerCtx) -> typed_ast.TypedE
   | typed_ast.TVar name t pos -> typed_ast.TVar(name, t, pos)
   | _ -> lower_expr(te, ctx)
 
+# lower_dispatch_callee: when a call is a class-method DISPATCH — a class-method
+# callee together with an infer-injected leading TDict witness — rewrite the
+# callee to the mangled dispatch identity, matching the wrapper define.  The
+# leading TDict is the reliable dispatch signal: infer prepends one for every
+# genuine class-method call (input-, return-, and forward-position), and strips
+# it into a trailing witness only later (expand_call_args).  A user top-level fn
+# shadowing the method name reaches here WITHOUT a leading TDict (infer resolved
+# it to the user binding), so it stays bare and calls the user's own function.
+fn lower_dispatch_callee(callee: typed_ast.TypedExpr, args: List typed_ast.TypedExpr, ctx: LowerCtx) -> typed_ast.TypedExpr =
+  match callee with
+  | typed_ast.TVar name t pos ->
+      if args_have_leading_tdict(args) then
+        match find_eta_class_of_method(name, ctx) with
+        | Just class_name -> typed_ast.TVar(classmethod_dispatch_name(class_name, name), t, pos)
+        | Nothing -> lower_expr_callee(callee, ctx)
+      else
+        lower_expr_callee(callee, ctx)
+  | _ -> lower_expr_callee(callee, ctx)
+
+fn args_have_leading_tdict(args: List typed_ast.TypedExpr) -> Bool =
+  match args with
+  | Cons (typed_ast.TDict _ _ _ _) _ -> true
+  | _ -> false
+
 # ---------------------------------------------------------------------------
 # Expression lowering
 # ---------------------------------------------------------------------------
@@ -1177,7 +1212,7 @@ fn lower_expr(te: typed_ast.TypedExpr, ctx: LowerCtx) -> typed_ast.TypedExpr =
   | typed_ast.TMatch scrut branches t pos ->
       typed_ast.TMatch(lower_expr(scrut, ctx), lower_branches(branches, ctx), t, pos)
   | typed_ast.TCall callee args t pos ->
-      typed_ast.TCall(lower_expr_callee(callee, ctx), expand_call_args(args, ctx), t, pos)
+      typed_ast.TCall(lower_dispatch_callee(callee, args, ctx), expand_call_args(args, ctx), t, pos)
   | typed_ast.TDict _ t pos _ ->
       # TDict should only appear as a prefix arg inside TCall — never standalone.
       # If seen standalone, emit as unit.  Note: `t` here is the constraint evidence
