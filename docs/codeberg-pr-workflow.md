@@ -16,12 +16,18 @@ orchestrator over the recipes below.
 The recipes in this doc reference three environment variables that
 identify forge coordinates and the tea config location. They live in
 `.codeberg.config` at the repo root, which is **gitignored**. Copy the
-example template and fill in your values:
+example template and fill in your values **once, in the main checkout**:
 
 ```sh
 cp .codeberg.config.example .codeberg.config
 # edit .codeberg.config
 ```
+
+`scripts/codeberg/_lib.sh` auto-resolves this file from the main working
+tree when the current directory lacks one, so **linked git worktrees need
+no copy of their own** — a single config in the main checkout serves every
+worktree. (Manual `source .codeberg.config` steps below still assume you
+are in a directory that has it; the `scripts/codeberg/*` helpers do not.)
 
 Before running any recipe below, source the file:
 

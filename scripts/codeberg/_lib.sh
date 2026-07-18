@@ -16,13 +16,27 @@
 # Set CODEBERG_LIB_NO_SETUP=1 to source only the pure helper functions below
 # (e.g. from unit tests) without requiring config/token/network.
 if [ -z "${CODEBERG_LIB_NO_SETUP:-}" ]; then
-  if [ ! -f .codeberg.config ]; then
-    echo "ESCALATION: setup — .codeberg.config missing — copy .codeberg.config.example and fill in your values" >&2
+  # Locate .codeberg.config. Prefer the CWD (repo root); fall back to the MAIN
+  # working tree. The config is gitignored, so a fresh git worktree does NOT carry
+  # it — but every worktree shares one main checkout where it lives. Without this
+  # fallback the PR scripts escalate "config missing" from any worktree, and callers
+  # then hand-roll `tea pr create`, which ITSELF cannot create a PR from a worktree
+  # (worktree .git is a pointer file tea's go-git cannot read) — the exact recurring
+  # failure these scripts exist to prevent.
+  CODEBERG_CONFIG=.codeberg.config
+  if [ ! -f "$CODEBERG_CONFIG" ]; then
+    _main_wt=$(cd "$(git rev-parse --git-common-dir 2>/dev/null)/.." 2>/dev/null && pwd -P)
+    if [ -n "${_main_wt:-}" ] && [ -f "$_main_wt/.codeberg.config" ]; then
+      CODEBERG_CONFIG="$_main_wt/.codeberg.config"
+    fi
+  fi
+  if [ ! -f "$CODEBERG_CONFIG" ]; then
+    echo "ESCALATION: setup — .codeberg.config missing (looked in the CWD and the main working tree) — copy .codeberg.config.example and fill in your values" >&2
     exit 1
   fi
 
   # shellcheck disable=SC1091
-  source .codeberg.config
+  source "$CODEBERG_CONFIG"
 
   TOKEN=$(grep -A2 'name: codeberg.org' "$TEA_CONFIG_PATH" 2>/dev/null \
     | grep token \
