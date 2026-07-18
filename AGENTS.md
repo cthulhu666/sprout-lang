@@ -54,6 +54,8 @@ Use commit messages that explain intent:
 
 **Seed gate** — `scripts/seed_gate.sh`, wired as a PreToolUse Bash hook. Intercepts `git commit` and blocks if `stdlib/compiler/*.sprout` or `stdlib/*.sprout` is staged without a refreshed `bootstrap/compile_driver.ll`. Bypass (when IR is genuinely unchanged): run `just verify-bootstrap-fixed-point` then `just seed-fp-ack`.
 
+> **Caveat — a new prelude `extern fn` is NOT an IR-unchanged edit.** `ir_lowering.lower_extern_decls` emits a `declare` for *every* bundled prelude extern, and `compile_driver` bundles the prelude, so adding one `extern fn` to `stdlib/prelude.sprout` adds one `declare` line to `bootstrap/compile_driver.ll`. `verify-bootstrap-fixed-point` will break; use a full `just refresh-seed` (delete the stale stage-1 binary first), **not** the `seed-fp-ack` bypass — even though `stdlib/compiler/` was untouched. No 2-step bootstrap is needed (no parser/compiler-source change; the seed diff is purely the additive declare line).
+
 Workflow:
 1. Do the work. Run all applicable DoD checks (tests, smoke-shapes, etc.).
 2. Commit with `git commit …`. The seed gate blocks if seed is stale.
