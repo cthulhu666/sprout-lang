@@ -152,6 +152,11 @@ For each event line you receive, decide:
     echo "PR#$PR: monitor said green but commit status != success — keep waiting"
     # relaunch the monitor; do NOT merge.
   else
+  # $SHA must be the FULL 40-char head SHA (pr-monitor emits it full via
+  # format_monitor_line). A truncated SHA is rejected HTTP 409 "head out of
+  # date" even when genuinely fast-forwardable — indistinguishable from the
+  # real master-moved race, so it triggers a needless rebase + seed regen
+  # (project_codeberg_ffmerge_needs_full_sha).
   HTTP=$(curl -s -o /tmp/cm_merge_$PR.out -w "%{http_code}" \
     -X POST "$API/pulls/$PR/merge" \
     -H "Authorization: token $TOKEN" -H "Content-Type: application/json" \

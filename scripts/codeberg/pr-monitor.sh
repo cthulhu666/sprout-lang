@@ -53,7 +53,9 @@ while :; do
     # (_lib.sh). This is a monitor HEURISTIC, not the merge gate: before merging,
     # re-verify ground truth with ci_is_green <sha> (combined status==success).
     ci=$(ci_from_tasks "$(codeberg_curl GET "/actions/tasks?limit=50")" "$sha")
-    cur="PR#$pr: state=$pr_state merged=$merged ci=$ci sha=${sha:0:7}"
+    # Emit the FULL head SHA: Step 3's ff-merge POST feeds sha= into
+    # head_commit_id, which 409s on a truncated SHA (project_codeberg_ffmerge_needs_full_sha).
+    cur=$(format_monitor_line "$pr" "$pr_state" "$merged" "$ci" "$sha")
     if [ "$cur" != "${prev[$pr]:-}" ]; then
       echo "$cur"
       prev[$pr]="$cur"

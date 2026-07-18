@@ -44,5 +44,18 @@ check "forgejo .tasks key fallback" \
   '{"tasks":[{"head_sha":"abc1234567","name":"test","status":"success"}]}' \
   success
 
+# Regression: the emitted sha= field must be the FULL 40-char head SHA, never
+# truncated. Step 3's ff-merge POST feeds it into head_commit_id, which 409s
+# "head out of date" on a short SHA even when fast-forwardable
+# (project_codeberg_ffmerge_needs_full_sha). Pre-fix the monitor emitted
+# sha=${sha:0:7} -> a guaranteed spurious 409.
+FULLSHA=88e04f261b9696f342b1d2eb4293303c5f2fdf13
+line=$(format_monitor_line 188 open false success "$FULLSHA")
+if [ "$line" = "PR#188: state=open merged=false ci=success sha=$FULLSHA" ]; then
+  echo "PASS  monitor line carries full 40-char sha"; pass=$((pass+1))
+else
+  echo "FAIL  monitor line sha mangled/truncated -> $line"; fail=$((fail+1))
+fi
+
 echo "== $pass passed, $fail failed =="
 [ "$fail" -eq 0 ]

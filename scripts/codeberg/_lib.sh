@@ -134,3 +134,13 @@ ci_is_green() {
   state=$(codeberg_curl GET "/commits/$sha/status" | jq -r '.state // "unknown"' 2>/dev/null)
   [ "$state" = "success" ]
 }
+
+# Build one pr-monitor event line. Args: <pr> <state> <merged> <ci> <sha>.
+# Emits the FULL <sha> unchanged: the caller feeds this line's sha= field into
+# the ff-merge POST's head_commit_id, which requires the full 40-char SHA — a
+# truncated SHA is rejected HTTP 409 "head out of date" even when genuinely
+# fast-forwardable (see project_codeberg_ffmerge_needs_full_sha). Kept pure so
+# the full-SHA contract is regression-testable offline — see pr-monitor-test.sh.
+format_monitor_line() {
+  printf 'PR#%s: state=%s merged=%s ci=%s sha=%s' "$1" "$2" "$3" "$4" "$5"
+}
