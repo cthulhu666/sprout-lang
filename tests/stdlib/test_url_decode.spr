@@ -1,0 +1,71 @@
+import stdlib.test (TestState, new_state, assert_true, assert_eq, summary)
+import stdlib.url (percent_decode, query_decode, parse_query)
+import stdlib.bytes (Utf8Error)
+import stdlib.string as string
+
+# Low-level URL layer: `percent_decode` resolves %XX escapes only; `query_decode`
+# additionally maps '+' to space (application/x-www-form-urlencoded semantics).
+# Both accumulate bytes and validate UTF-8 once, so `%C3%A9` -> `é` and a malformed
+# escape yields Err rather than corrupting the output. `parse_query` splits on '&',
+# each segment on the first '=', decodes both sides, preserves duplicate keys and
+# order, and drops segments whose key or value fails to decode.
+
+fn decoded(r: Result Utf8Error String) -> String =
+  match r with
+  | Ok s -> s
+  | Err _ -> "<ERR>"
+
+fn is_err(r: Result Utf8Error String) -> Bool =
+  match r with
+  | Ok _ -> false
+  | Err _ -> true
+
+# Render pairs canonically as "k=v,k=v" so we can assert on a plain String.
+fn show_pairs_from(ps: Vec (String, String), index: Int, total: Int, acc: String) -> String =
+  if index >= total then acc
+  else
+    match vec_get(index, ps) with
+    | Nothing -> acc
+    | Just pair ->
+        match pair with
+        | (k, v) ->
+            show_pairs_from(ps, index + 1, total,
+              if string.is_empty(acc) then string.concat(k, string.concat("=", v))
+              else string.concat(acc, string.concat(",", string.concat(k, string.concat("=", v)))))
+
+fn show_pairs(ps: Vec (String, String)) -> String =
+  show_pairs_from(ps, 0, vec_length(ps), "")
+
+fn main() -> Unit !{IO} =
+  do
+    state <- new_state()
+
+    # percent_decode: %XX only
+    assert_eq(state, "percent_decode passes plain text through", decoded(percent_decode("hello")), "hello")
+    assert_eq(state, "percent_decode resolves %20 to space", decoded(percent_decode("a%20b")), "a b")
+    assert_eq(state, "percent_decode leaves '+' untouched", decoded(percent_decode("a+b")), "a+b")
+    # Multi-byte: %C3%A9 is the UTF-8 encoding of é (two bytes).
+    assert_eq(state, "percent_decode joins multi-byte escapes", decoded(percent_decode("%C3%A9")), "é")
+    assert_eq(state, "decoded é is two UTF-8 bytes", string.byte_length(decoded(percent_decode("%C3%A9"))), 2)
+    assert_eq(state, "percent_decode handles lowercase hex", decoded(percent_decode("%c3%a9")), "é")
+
+    # query_decode: '+' -> space, plus %XX
+    assert_eq(state, "query_decode maps '+' to space", decoded(query_decode("a+b")), "a b")
+    assert_eq(state, "query_decode also resolves %20", decoded(query_decode("a%20b")), "a b")
+
+    # Malformed escapes fail loudly (not silently corrupt).
+    assert_true(state, "percent_decode rejects non-hex escape", is_err(percent_decode("%zz")))
+    assert_true(state, "percent_decode rejects truncated escape", is_err(percent_decode("%2")))
+    assert_true(state, "percent_decode rejects a trailing '%'", is_err(percent_decode("abc%")))
+
+    # parse_query
+    assert_eq(state, "parse_query splits key/value pairs", show_pairs(parse_query("a=1&b=2")), "a=1,b=2")
+    assert_eq(state, "parse_query preserves duplicate keys in order", show_pairs(parse_query("a=1&a=2")), "a=1,a=2")
+    assert_eq(state, "parse_query treats a bare key as empty value", show_pairs(parse_query("flag")), "flag=")
+    assert_eq(state, "parse_query keeps an explicit empty value", show_pairs(parse_query("a=")), "a=")
+    assert_eq(state, "parse_query on empty string is empty", show_pairs(parse_query("")), "")
+    assert_eq(state, "parse_query decodes each side", show_pairs(parse_query("q=a%20b")), "q=a b")
+    assert_eq(state, "parse_query skips empty segments", show_pairs(parse_query("a=1&&b=2")), "a=1,b=2")
+    assert_eq(state, "parse_query drops a pair with a malformed escape", show_pairs(parse_query("a=1&b=%zz")), "a=1")
+
+    summary(state)

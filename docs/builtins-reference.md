@@ -370,13 +370,31 @@ Experimental HTTP server helpers (in `stdlib/http_server.sprout`):
 - `request_header(name, req) -> Maybe String`
 - `serve_n(port, max_connections, handler) -> Unit !{IO}` — accepts up to `max_connections` connections, handling each in its own green task (a slow connection does not block others); joins all handlers before returning
 
+Request params (low-level, lossless — derived on demand from the parsed request, so pure and socket-free). Values are percent/`+`-decoded via `stdlib.url`. `_param` returns the FIRST value for a key (the Go `url.Values.Get` / Werkzeug `MultiDict.get` convention); `_param_all` returns every value; `_pairs` is the ordered, duplicate-preserving source of truth:
+
+- `query_string(req) -> String` — the raw target substring after the first `?`, `""` if none
+- `query_pairs(req) -> Vec (String, String)` — every decoded query param, in order
+- `query_param(name, req) -> Maybe String`
+- `query_param_all(name, req) -> Vec String`
+- `form_pairs(req) -> Vec (String, String)` — decoded body params, but only when `Content-Type` is `application/x-www-form-urlencoded` (a charset parameter is allowed); any other content type yields no params
+- `form_param(name, req) -> Maybe String`
+- `form_param_all(name, req) -> Vec String`
+
 Current experimental scope:
 
 - HTTP/1.1 request line parsing plus header parsing into a `Dict String`
 - `Content-Length` request bodies
+- query-string and `application/x-www-form-urlencoded` body param access (see above); a merged `param`/`params` bag over both is planned
 - `Connection: close` responses only
 - sequential request handling per accepted connection
 - no keep-alive, chunked transfer encoding for server responses, TLS server support, or concurrent connection handling yet
+- no path/route params (e.g. `/users/:id`) yet — routing matches exact paths
+
+URL helpers (in `stdlib/url.sprout`) — percent/query decoding, decoding at the byte level so multi-byte escapes (`%C3%A9` -> `é`) join correctly and validate as UTF-8 once:
+
+- `percent_decode(s) -> Result Utf8Error String` — resolve `%XX` escapes only (path-segment semantics; `+` left literal)
+- `query_decode(s) -> Result Utf8Error String` — resolve `%XX` and map `+` to space (`application/x-www-form-urlencoded`)
+- `parse_query(s) -> Vec (String, String)` — split on `&`, each segment on the first `=`, decode both sides; preserves duplicate keys and order; drops empty segments and any segment whose key or value fails to decode
 
 JSON stdlib helpers (in `stdlib/json.sprout`):
 

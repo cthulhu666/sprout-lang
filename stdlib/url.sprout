@@ -1,0 +1,113 @@
+module stdlib.url
+
+# URL percent-decoding and query-string parsing (low-level layer).
+#
+# Decoding operates on BYTES, not codepoints: each `%XX` escape names a single
+# byte, so the decoder accumulates raw bytes and validates the whole result as
+# UTF-8 exactly once at the end (bytes.to_string). This is the only correct level
+# for multi-byte sequences: `%C3%A9` is two bytes that together decode to `é`.
+# A malformed escape (`%zz`, a truncated or trailing `%`) yields Err rather than
+# silently corrupting the output.
+
+import stdlib.bytes (Utf8Error, Utf8DecodeError, builder_empty, builder_byte, builder_append, builder_build, from_string, to_string, get, length)
+import stdlib.string as string
+
+# ASCII hex digit (as a byte value) -> its 0..15 nibble, or Nothing if not hex.
+fn hex_nibble(b: Int) -> Maybe Int =
+  if b >= 48 && b <= 57 then Just(b - 48)  # '0'..'9'
+  else if b >= 65 && b <= 70 then Just(b - 55)  # 'A'..'F'
+  else if b >= 97 && b <= 102 then Just(b - 87)  # 'a'..'f'
+  else Nothing
+
+# The two hex digits after a '%' (at j, j+1) combined into one byte, or Nothing
+# when either is missing (truncated escape) or non-hex.
+fn hex_pair(input: Bytes, j: Int, total: Int) -> Maybe Int =
+  if j + 1 >= total then Nothing
+  else
+    do
+      hb <- get(input, j)
+      lb <- get(input, j + 1)
+      hi <- hex_nibble(hb)
+      lo <- hex_nibble(lb)
+      Just(hi * 16 + lo)
+
+# Walk the input bytes, emitting decoded bytes into `acc`. `%XX` -> one byte;
+# when `plus_space` is set, '+' -> space (0x20); any other byte is copied through.
+# O(n^2) in the builder chunk table for now — fine for query strings (tens of
+# bytes); revisit if a large-body decoder ever needs it.
+fn decode_bytes(input: Bytes, index: Int, total: Int, plus_space: Bool, acc: Builder) -> Result Utf8Error Builder =
+  if index >= total then Ok(acc)
+  else
+    match get(input, index) with
+    | Nothing -> Ok(acc)
+    | Just b ->
+        if b == 37 then decode_escape(input, index, total, plus_space, acc)  # '%'
+        else if plus_space && b == 43 then  # '+'
+          decode_bytes(input, index + 1, total, plus_space, builder_append(acc, builder_byte(32)))
+        else decode_bytes(input, index + 1, total, plus_space, builder_append(acc, builder_byte(b)))
+
+fn decode_escape(input: Bytes, index: Int, total: Int, plus_space: Bool, acc: Builder) -> Result Utf8Error Builder =
+  match hex_pair(input, index + 1, total) with
+  | Nothing -> Err(Utf8DecodeError("invalid percent-encoding"))
+  | Just byte -> decode_bytes(input, index + 3, total, plus_space, builder_append(acc, builder_byte(byte)))
+
+fn decode(s: String, plus_space: Bool) -> Result Utf8Error String =
+  do
+    built <- decode_bytes(input, 0, length(input), plus_space, builder_empty())
+    to_string(builder_build(built))
+where
+  input = from_string(s)
+
+# Resolve %XX escapes only. '+' is left as a literal '+' (path/segment semantics).
+export fn percent_decode(s: String) -> Result Utf8Error String =
+  decode(s, false)
+
+# Resolve %XX escapes AND map '+' to space (application/x-www-form-urlencoded).
+export fn query_decode(s: String) -> Result Utf8Error String =
+  decode(s, true)
+
+# Split a query/body string on '&' into its raw segments, in order.
+fn split_amp(s: String, acc: Vec String) -> Vec String =
+  match string.split_once(s, "&") with
+  | Nothing -> vec_append(s, acc)
+  | Just parts ->
+      match parts with
+      | (head, rest) -> split_amp(rest, vec_append(head, acc))
+
+fn decode_kv(raw_key: String, raw_value: String) -> Maybe (String, String) =
+  match query_decode(raw_key) with
+  | Err _ -> Nothing
+  | Ok key ->
+      match query_decode(raw_value) with
+      | Err _ -> Nothing
+      | Ok value -> Just((key, value))
+
+# One `key=value` segment -> a decoded pair. A segment with no '=' is a bare key
+# with an empty value. Returns Nothing when either side fails to decode.
+fn decode_segment(seg: String) -> Maybe (String, String) =
+  match string.split_once(seg, "=") with
+  | Nothing -> decode_kv(seg, "")
+  | Just parts ->
+      match parts with
+      | (raw_key, raw_value) -> decode_kv(raw_key, raw_value)
+
+fn parse_segments(segs: Vec String, index: Int, total: Int, acc: Vec (String, String)) -> Vec (String, String) =
+  if index >= total then acc
+  else
+    match vec_get(index, segs) with
+    | Nothing -> acc
+    | Just seg ->
+        if string.is_empty(seg) then parse_segments(segs, index + 1, total, acc)
+        else
+          match decode_segment(seg) with
+          | Nothing -> parse_segments(segs, index + 1, total, acc)
+          | Just pair -> parse_segments(segs, index + 1, total, vec_append(pair, acc))
+
+# Parse an `application/x-www-form-urlencoded` string (query or form body) into
+# decoded (key, value) pairs. Duplicate keys and their order are preserved; empty
+# segments (from `&&` or a leading/trailing `&`) and segments whose key or value
+# fails to decode are dropped.
+export fn parse_query(s: String) -> Vec (String, String) =
+  parse_segments(segs, 0, vec_length(segs), vec_empty())
+where
+  segs = split_amp(s, vec_empty())

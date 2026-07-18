@@ -1,5 +1,5 @@
 module examples.http_web_server
-import stdlib.http_server (HttpRequest, HttpServerResponse, Route, dispatch, serve, ok, with_header, response, request_method, request_path, request_body)
+import stdlib.http_server (HttpRequest, HttpServerResponse, Route, dispatch, serve, ok, bad_request, with_header, response, request_method, request_path, request_body, query_param)
 import stdlib.template (Template, compile, render)
 import stdlib.json (Json, JsonObject, JsonObjectCons, JsonObjectNil, string, int, bool, array_from_list)
 
@@ -15,6 +15,7 @@ import stdlib.json (Json, JsonObject, JsonObjectCons, JsonObjectNil, string, int
 #   curl -i http://127.0.0.1:8082/            # static HTML
 #   curl -i http://127.0.0.1:8082/users       # HTML rendered from a template + data
 #   curl -i http://127.0.0.1:8082/health      # JSON
+#   curl -i 'http://127.0.0.1:8082/search?q=hello+world'   # reads a query param
 #   curl -i --data 'hi there' http://127.0.0.1:8082/echo   # echoes the POST body
 #   curl -i http://127.0.0.1:8082/missing     # 404 (dispatch fallback)
 
@@ -34,6 +35,14 @@ fn health(req: HttpRequest) -> HttpServerResponse =
 
 fn echo(req: HttpRequest) -> HttpServerResponse =
   ok(`${request_method(req)} ${request_path(req)}: ${request_body(req)}`)
+
+# `/search?q=...` reads a query parameter. `query_param` returns the FIRST value
+# for the key, already percent- and `+`-decoded (so `q=hello+world` arrives as
+# `hello world`), or Nothing when the key is absent.
+fn search(req: HttpRequest) -> HttpServerResponse =
+  match query_param("q", req) with
+  | Just q -> ok(`You searched for: ${q}`)
+  | Nothing -> bad_request("missing 'q' query parameter")
 
 # The HTML template lives on disk in examples/templates/users.html; it is loaded and
 # compiled once at startup (see `main`). `{{ }}` values are auto-escaped, so a name
@@ -68,6 +77,7 @@ fn routes(users_tmpl: Template) -> Vec Route =
     Route("GET", "/", home),
     Route("GET", "/users", \req -> render_users(users_tmpl, req)),
     Route("GET", "/health", health),
+    Route("GET", "/search", search),
     Route("POST", "/echo", echo)
   ])
 

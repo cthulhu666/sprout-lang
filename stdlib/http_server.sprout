@@ -4,6 +4,7 @@ import stdlib.http (HttpStatusError, RequestLine, RequestPathVersion, http_respo
 import stdlib.net (tcp_listen, tcp_accept, tcp_read, tcp_write, tcp_close, tcp_close_listener)
 import stdlib.string as string
 import stdlib.task (Scope, with_scope, task_spawn)
+import stdlib.url (parse_query)
 
 export type HttpRequest =
   | HttpRequest String String HttpRequestMeta
@@ -313,6 +314,89 @@ export fn request_header(name: String, req: HttpRequest) -> Maybe String =
   | HttpRequest _ _ meta ->
       match meta with
       | HttpRequestMeta _ headers _ -> dict_get(lower_ascii(name), headers)
+
+# --- Request params (low-level, lossless) --------------------------------------
+# Params are derived on demand from the already-parsed request (mirroring
+# `request_header`), so every accessor is pure and testable without sockets. The
+# `_pairs` accessors are the source of truth — an ordered list preserving every
+# duplicate key. `_param` returns the FIRST value for a key (the cross-framework
+# convention: Go url.Values.Get, Werkzeug MultiDict.get); `_param_all` returns them
+# all (Werkzeug getlist). Values are percent/`+`-decoded (see stdlib.url).
+
+# First value for `name` in an ordered pair list, or Nothing.
+fn first_value(pairs: Vec (String, String), index: Int, total: Int, name: String) -> Maybe String =
+  if index >= total then Nothing
+  else
+    match vec_get(index, pairs) with
+    | Nothing -> Nothing
+    | Just pair ->
+        match pair with
+        | (key, value) -> if key == name then Just(value) else first_value(pairs, index + 1, total, name)
+
+# Every value for `name`, in order.
+fn all_values(pairs: Vec (String, String), index: Int, total: Int, name: String, acc: Vec String) -> Vec String =
+  if index >= total then acc
+  else
+    match vec_get(index, pairs) with
+    | Nothing -> acc
+    | Just pair ->
+        match pair with
+        | (key, value) ->
+            all_values(pairs, index + 1, total, name, if key == name then vec_append(value, acc) else acc)
+
+# The raw query substring after the first `?` in the target, "" if there is none.
+export fn query_string(req: HttpRequest) -> String =
+  match string.split_once(request_path(req), "?") with
+  | Nothing -> ""
+  | Just parts -> match parts with | (_, query) -> query
+
+# Every query param as an ordered, decoded (key, value) list — duplicates and
+# order preserved (the source of truth; `query_param`/`_all` derive from it).
+export fn query_pairs(req: HttpRequest) -> Vec (String, String) =
+  parse_query(query_string(req))
+
+# First value for `name` in the query string, or Nothing.
+export fn query_param(name: String, req: HttpRequest) -> Maybe String =
+  first_value(pairs, 0, vec_length(pairs), name)
+where
+  pairs = query_pairs(req)
+
+# Every query value for `name`, in order (empty if none).
+export fn query_param_all(name: String, req: HttpRequest) -> Vec String =
+  all_values(pairs, 0, vec_length(pairs), name, vec_empty())
+where
+  pairs = query_pairs(req)
+
+# The media type of a Content-Type header, lowercased, without any `;` parameters
+# (so "application/x-www-form-urlencoded; charset=utf-8" -> the bare media type).
+fn media_type(content_type: String) -> String =
+  match string.split_once(content_type, ";") with
+  | Nothing -> lower_ascii(string.trim(content_type))
+  | Just parts -> match parts with | (media, _) -> lower_ascii(string.trim(media))
+
+fn is_form_urlencoded(req: HttpRequest) -> Bool =
+  match request_header("content-type", req) with
+  | Nothing -> false
+  | Just content_type -> media_type(content_type) == "application/x-www-form-urlencoded"
+
+# Body params as an ordered, decoded (key, value) list — but ONLY when the request
+# is application/x-www-form-urlencoded; any other content type yields no params
+# rather than misparsing an arbitrary body.
+export fn form_pairs(req: HttpRequest) -> Vec (String, String) =
+  if is_form_urlencoded(req) then parse_query(request_body(req))
+  else vec_empty()
+
+# First value for `name` in the form body, or Nothing.
+export fn form_param(name: String, req: HttpRequest) -> Maybe String =
+  first_value(pairs, 0, vec_length(pairs), name)
+where
+  pairs = form_pairs(req)
+
+# Every form value for `name`, in order (empty if none).
+export fn form_param_all(name: String, req: HttpRequest) -> Vec String =
+  all_values(pairs, 0, vec_length(pairs), name, vec_empty())
+where
+  pairs = form_pairs(req)
 
 # Render a response to the wire. The header block is assembled from the response's
 # header dict (not http_response's fixed base), so the content type is caller-

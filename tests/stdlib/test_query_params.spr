@@ -1,0 +1,88 @@
+import stdlib.test (TestState, new_state, assert_eq, summary)
+import stdlib.http_server (HttpRequest, parse, query_string, query_pairs, query_param, query_param_all)
+import stdlib.string as string
+
+# Query-string params derived from an already-parsed request (no sockets):
+# parse(raw) -> query_* accessor -> inspect. `query_string` is the raw substring
+# after '?'; `query_pairs` is the ordered, decoded, duplicate-preserving truth;
+# `query_param` returns the FIRST value for a key; `query_param_all` returns all.
+
+fn maybe_str(m: Maybe String) -> String =
+  match m with
+  | Nothing -> "<none>"
+  | Just v -> v
+
+fn show_pairs_from(ps: Vec (String, String), index: Int, total: Int, acc: String) -> String =
+  if index >= total then acc
+  else
+    match vec_get(index, ps) with
+    | Nothing -> acc
+    | Just pair ->
+        match pair with
+        | (k, v) ->
+            show_pairs_from(ps, index + 1, total,
+              if string.is_empty(acc) then string.concat(k, string.concat("=", v))
+              else string.concat(acc, string.concat(",", string.concat(k, string.concat("=", v)))))
+
+fn show_pairs(ps: Vec (String, String)) -> String =
+  show_pairs_from(ps, 0, vec_length(ps), "")
+
+fn show_vec_from(vs: Vec String, index: Int, total: Int, acc: String) -> String =
+  if index >= total then acc
+  else
+    match vec_get(index, vs) with
+    | Nothing -> acc
+    | Just v ->
+        show_vec_from(vs, index + 1, total,
+          if string.is_empty(acc) then v else string.concat(acc, string.concat(",", v)))
+
+fn show_vec(vs: Vec String) -> String =
+  show_vec_from(vs, 0, vec_length(vs), "")
+
+fn with_req(raw: String, f: HttpRequest -> String) -> String =
+  match parse(raw) with
+  | Err _ -> "<PARSE_ERR>"
+  | Ok req -> f(req)
+
+fn qstring(raw: String) -> String =
+  with_req(raw, \r -> query_string(r))
+
+fn qparam(raw: String, name: String) -> String =
+  with_req(raw, \r -> maybe_str(query_param(name, r)))
+
+fn qall(raw: String, name: String) -> String =
+  with_req(raw, \r -> show_vec(query_param_all(name, r)))
+
+fn qpairs(raw: String) -> String =
+  with_req(raw, \r -> show_pairs(query_pairs(r)))
+
+fn main() -> Unit !{IO} =
+  do
+    state <- new_state()
+
+    assert_eq(state, "query_string is the raw substring after '?'",
+      qstring("GET /search?q=foo HTTP/1.1\r\n\r\n"), "q=foo")
+    assert_eq(state, "query_string is empty when there is no query",
+      qstring("GET /search HTTP/1.1\r\n\r\n"), "")
+
+    assert_eq(state, "query_param reads a single value",
+      qparam("GET /search?q=foo HTTP/1.1\r\n\r\n", "q"), "foo")
+    assert_eq(state, "query_param reads a later key",
+      qparam("GET /search?a=1&b=2 HTTP/1.1\r\n\r\n", "b"), "2")
+    assert_eq(state, "query_param on an absent key is Nothing",
+      qparam("GET /search?a=1 HTTP/1.1\r\n\r\n", "missing"), "<none>")
+
+    assert_eq(state, "query_param percent-decodes the value",
+      qparam("GET /search?q=hello%20world HTTP/1.1\r\n\r\n", "q"), "hello world")
+    assert_eq(state, "query_param maps '+' to space",
+      qparam("GET /search?q=a+b HTTP/1.1\r\n\r\n", "q"), "a b")
+
+    assert_eq(state, "query_param returns the FIRST of a repeated key",
+      qparam("GET /search?a=1&a=2 HTTP/1.1\r\n\r\n", "a"), "1")
+    assert_eq(state, "query_param_all returns every value of a repeated key",
+      qall("GET /search?a=1&a=2 HTTP/1.1\r\n\r\n", "a"), "1,2")
+
+    assert_eq(state, "query_pairs is the ordered decoded pair list",
+      qpairs("GET /search?a=1&b=2 HTTP/1.1\r\n\r\n"), "a=1,b=2")
+
+    summary(state)

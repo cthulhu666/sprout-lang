@@ -1,0 +1,81 @@
+import stdlib.test (TestState, new_state, assert_eq, summary)
+import stdlib.http_server (HttpRequest, parse, form_pairs, form_param, form_param_all)
+import stdlib.string as string
+
+# application/x-www-form-urlencoded body params. Same parser as the query string,
+# but gated on Content-Type: form_* accessors read the body ONLY when the media
+# type is application/x-www-form-urlencoded (charset parameter allowed); any other
+# content type yields no params rather than misparsing an arbitrary body.
+
+fn maybe_str(m: Maybe String) -> String =
+  match m with
+  | Nothing -> "<none>"
+  | Just v -> v
+
+fn show_pairs_from(ps: Vec (String, String), index: Int, total: Int, acc: String) -> String =
+  if index >= total then acc
+  else
+    match vec_get(index, ps) with
+    | Nothing -> acc
+    | Just pair ->
+        match pair with
+        | (k, v) ->
+            show_pairs_from(ps, index + 1, total,
+              if string.is_empty(acc) then string.concat(k, string.concat("=", v))
+              else string.concat(acc, string.concat(",", string.concat(k, string.concat("=", v)))))
+
+fn show_pairs(ps: Vec (String, String)) -> String =
+  show_pairs_from(ps, 0, vec_length(ps), "")
+
+fn with_req(raw: String, f: HttpRequest -> String) -> String =
+  match parse(raw) with
+  | Err _ -> "<PARSE_ERR>"
+  | Ok req -> f(req)
+
+fn fparam(raw: String, name: String) -> String =
+  with_req(raw, \r -> maybe_str(form_param(name, r)))
+
+fn fpairs(raw: String) -> String =
+  with_req(raw, \r -> show_pairs(form_pairs(r)))
+
+# A urlencoded POST with a 7-byte body "a=1&b=2".
+fn urlencoded_post() -> String =
+  "POST /submit HTTP/1.1\r\nContent-Type: application/x-www-form-urlencoded\r\nContent-Length: 7\r\n\r\na=1&b=2"
+
+# Same, with a '+'-encoded value; body "name=Ada+Lovelace" is 17 bytes.
+fn urlencoded_plus() -> String =
+  "POST /submit HTTP/1.1\r\nContent-Type: application/x-www-form-urlencoded\r\nContent-Length: 17\r\n\r\nname=Ada+Lovelace"
+
+# Content-Type carrying a charset parameter; body "a=1" is 3 bytes.
+fn urlencoded_charset() -> String =
+  "POST /submit HTTP/1.1\r\nContent-Type: application/x-www-form-urlencoded; charset=utf-8\r\nContent-Length: 3\r\n\r\na=1"
+
+# A JSON body must NOT be parsed as form params; body "a=1" is 3 bytes.
+fn json_post() -> String =
+  "POST /submit HTTP/1.1\r\nContent-Type: application/json\r\nContent-Length: 3\r\n\r\na=1"
+
+# No Content-Type at all; body "a=1" is 3 bytes.
+fn no_content_type() -> String =
+  "POST /submit HTTP/1.1\r\nContent-Length: 3\r\n\r\na=1"
+
+fn main() -> Unit !{IO} =
+  do
+    state <- new_state()
+
+    assert_eq(state, "form_param reads a urlencoded body value",
+      fparam(urlencoded_post(), "a"), "1")
+    assert_eq(state, "form_pairs is the ordered decoded body pair list",
+      fpairs(urlencoded_post()), "a=1,b=2")
+    assert_eq(state, "form_param maps '+' to space",
+      fparam(urlencoded_plus(), "name"), "Ada Lovelace")
+    assert_eq(state, "form params parse when Content-Type has a charset parameter",
+      fparam(urlencoded_charset(), "a"), "1")
+
+    assert_eq(state, "a non-form Content-Type yields no form params",
+      fpairs(json_post()), "")
+    assert_eq(state, "form_param on a JSON body is Nothing",
+      fparam(json_post(), "a"), "<none>")
+    assert_eq(state, "a missing Content-Type yields no form params",
+      fpairs(no_content_type()), "")
+
+    summary(state)
