@@ -1,6 +1,20 @@
 module main
 import stdlib.test (TestState, new_state, assert_eq, assert_true, assert_false, summary)
 import stdlib.compiler.lsp_driver as lsp
+import stdlib.json as json
+
+fn hover_params_json(uri: json.Json, position: json.Json) -> json.Json =
+  json.JsonObject(
+    json.JsonObjectCons("textDocument",
+      json.JsonObject(json.JsonObjectCons("uri", uri, json.JsonObjectNil)),
+    json.JsonObjectCons("position", position,
+    json.JsonObjectNil)))
+
+fn well_formed_position() -> json.Json =
+  json.JsonObject(
+    json.JsonObjectCons("line", json.JsonInt(3),
+    json.JsonObjectCons("character", json.JsonInt(7),
+    json.JsonObjectNil)))
 
 fn main() -> Unit !{IO} =
   do
@@ -47,5 +61,30 @@ fn main() -> Unit !{IO} =
     # extract_word — col past end of line
     assert_eq(state, "extract_word: col past end",
       lsp.extract_word("hi", 10), "")
+
+    # extract_hover_params — exercises every failure branch individually,
+    # plus the well-formed happy path.
+    assert_eq(state, "extract_hover_params: well-formed accepted",
+      lsp.extract_hover_params(hover_params_json(json.JsonString("file:///a.spr"), well_formed_position())),
+      Just(lsp.HoverParams("file:///a.spr", 3, 7)))
+    assert_eq(state, "extract_hover_params: missing textDocument rejected",
+      lsp.extract_hover_params(json.JsonObject(json.JsonObjectCons("position", well_formed_position(), json.JsonObjectNil))),
+      Nothing)
+    assert_eq(state, "extract_hover_params: missing uri rejected",
+      lsp.extract_hover_params(hover_params_json(json.JsonInt(1), well_formed_position())),
+      Nothing)
+    assert_eq(state, "extract_hover_params: missing position rejected",
+      lsp.extract_hover_params(json.JsonObject(json.JsonObjectCons("textDocument",
+        json.JsonObject(json.JsonObjectCons("uri", json.JsonString("file:///a.spr"), json.JsonObjectNil)),
+        json.JsonObjectNil))),
+      Nothing)
+    assert_eq(state, "extract_hover_params: missing line rejected",
+      lsp.extract_hover_params(hover_params_json(json.JsonString("file:///a.spr"),
+        json.JsonObject(json.JsonObjectCons("character", json.JsonInt(7), json.JsonObjectNil)))),
+      Nothing)
+    assert_eq(state, "extract_hover_params: missing character rejected",
+      lsp.extract_hover_params(hover_params_json(json.JsonString("file:///a.spr"),
+        json.JsonObject(json.JsonObjectCons("line", json.JsonInt(3), json.JsonObjectNil)))),
+      Nothing)
 
     summary(state)

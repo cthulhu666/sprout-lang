@@ -225,24 +225,15 @@ fn make_hover_result(id: json.Json, type_str: String) -> json.Json =
 fn do_hover(id: json.Json, src: String, word: String, state: LspState) -> Unit !{IO} =
   send_message(make_result(id, json.JsonNull))
 
-type HoverParams = HoverParams String Int Int
+export type HoverParams (..) deriving (Eq, ToString) = HoverParams String Int Int
 
-fn extract_hover_params(params: json.Json) -> Maybe HoverParams =
-  match json.json_get_field(params, "textDocument") with
-  | Nothing -> Nothing
-  | Just td ->
-      match json_get_str(td, "uri") with
-      | Nothing -> Nothing
-      | Just uri ->
-          match json.json_get_field(params, "position") with
-          | Nothing -> Nothing
-          | Just pos ->
-              match json_get_int_fld(pos, "line") with
-              | Nothing -> Nothing
-              | Just line_num ->
-                  match json_get_int_fld(pos, "character") with
-                  | Nothing -> Nothing
-                  | Just char_num -> Just(HoverParams(uri, line_num, char_num))
+export fn extract_hover_params(params: json.Json) -> Maybe HoverParams =
+  let Just td = json.json_get_field(params, "textDocument") else Nothing
+      Just uri = json_get_str(td, "uri") else Nothing
+      Just pos = json.json_get_field(params, "position") else Nothing
+      Just line_num = json_get_int_fld(pos, "line") else Nothing
+      Just char_num = json_get_int_fld(pos, "character") else Nothing
+  in Just(HoverParams(uri, line_num, char_num))
 
 # ---------------------------------------------------------------------------
 # Initialize capabilities
