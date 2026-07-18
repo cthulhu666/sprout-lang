@@ -1,0 +1,21 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Edit user #{{ user.id }}</title>
+  <style>
+    body { font-family: system-ui, sans-serif; max-width: 40rem; margin: 2rem auto; }
+    label { display: block; margin: .4rem 0; }
+  </style>
+</head>
+<body>
+  <h1>Edit user #{{ user.id }}</h1>
+  <form method="post" action="/users/update">
+    <input type="hidden" name="id" value="{{ user.id }}">
+    <label>Name <input name="name" value="{{ user.name }}" required></label>
+    <label>Email <input name="email" type="email" value="{{ user.email }}"></label>
+    <button type="submit">Save</button>
+  </form>
+  <p><a href="/users">&larr; back to the list</a></p>
+</body>
+</html>

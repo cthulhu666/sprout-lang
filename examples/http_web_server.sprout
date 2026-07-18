@@ -1,98 +1,238 @@
 module examples.http_web_server
-import stdlib.http_server (HttpRequest, HttpServerResponse, Route, dispatch, serve, ok, bad_request, with_header, response, request_method, request_path, request_body, query_param)
-import stdlib.template (Template, compile, render)
-import stdlib.json (Json, JsonObject, JsonObjectCons, JsonObjectNil, string, int, bool, array_from_list)
 
-# A minimal but usable web server: a route table dispatched by method + path, with
-# each handler choosing its own content type. `serve` accepts connections forever,
-# each on its own green task, so a slow client never blocks the others. The /users
-# route renders a dynamic HTML page from a template (stdlib.template) + JSON data.
+import stdlib.http_server (HttpRequest, HttpServerResponse, Route, dispatch, serve, ok, bad_request, not_found, response, with_header, see_other, request_method, request_path, request_body, query_param, form_param)
+import stdlib.template (Template, compile, render)
+import stdlib.json (Json, JsonObject, JsonObjectCons, JsonObjectNil, string, int, array_from_list)
+import stdlib.string as string
+
+# A small but complete CRUD web app: users are created, listed, edited, and deleted
+# through HTML forms (not just JSON endpoints). The user list lives in a shared,
+# in-memory `Ref` that every request handler closes over — so a POST that adds a user
+# is visible to the next GET. Handlers now carry `!{IO}` (see stdlib.http_server), which
+# is what lets them read and write that shared store.
+#
+# State lives in a `Ref Store`. Under Sprout's cooperative green-thread scheduler,
+# `ref_read` then `ref_write` run with no scheduler yield between them (yields happen
+# only at socket/channel/sleep parks), so each mutation is an atomic read-modify-write
+# even though many connections are served concurrently — no lost updates, no lock.
+#
+# Mutating routes reply with 303 See Other (Post/Redirect/Get), so a browser refresh
+# after submitting a form re-GETs the list instead of re-POSTing. The two HTML pages are
+# templates (stdlib.template) compiled once at startup; `{{ }}` auto-escapes, so a user
+# named `Tom & Jerry` or `Ada <Countess>` can never break out of its cell (XSS-safe by
+# construction — try adding one).
+#
+# There is no path-param routing yet, so record IDs travel in the query string
+# (`/users/edit?id=3`) or a form field (`delete`/`update`) — the request-param layer
+# from stdlib.http_server.
 #
 # Run:
 #   mise exec -- just run examples/http_web_server.sprout
 #
-# Then:
-#   curl -i http://127.0.0.1:8082/            # static HTML
-#   curl -i http://127.0.0.1:8082/users       # HTML rendered from a template + data
-#   curl -i http://127.0.0.1:8082/health      # JSON
-#   curl -i 'http://127.0.0.1:8082/search?q=hello+world'   # reads a query param
-#   curl -i --data 'hi there' http://127.0.0.1:8082/echo   # echoes the POST body
-#   curl -i http://127.0.0.1:8082/missing     # 404 (dispatch fallback)
+# Then, in a browser: http://127.0.0.1:8082/users  — or with curl:
+#   curl -i http://127.0.0.1:8082/users                                   # list (HTML)
+#   curl -i --data 'name=Grace+Hopper&email=grace@example.com' \
+#        http://127.0.0.1:8082/users                                      # create -> 303
+#   curl -i 'http://127.0.0.1:8082/users/edit?id=1'                       # edit form (HTML)
+#   curl -i --data 'id=1&name=Ada+L.&email=ada@x.com' \
+#        http://127.0.0.1:8082/users/update                               # update -> 303
+#   curl -i --data 'id=2' http://127.0.0.1:8082/users/delete              # delete -> 303
+#   curl -i http://127.0.0.1:8082/health                                  # JSON
+#   curl -i 'http://127.0.0.1:8082/search?q=hello+world'                  # query param
+#   curl -i --data 'hi there' http://127.0.0.1:8082/echo                  # echoes the body
 
-# Content-type helpers: `ok` defaults to text/plain; `with_header` replaces it, and
-# `render` frames every response with a byte-accurate Content-Length automatically.
+# --- The user store -----------------------------------------------------------
+# A user record and the whole store (all users + the next id to assign). The store is
+# an ordinary immutable value; the mutable part is the single `Ref Store` in `main`.
+type User =
+  | User Int String String  # id, name, email
+
+type Store =
+  | Store (Vec User) Int  # users, next id
+
+fn seed_store() -> Store =
+  Store(vec_from_list([
+    User(1, "Ada Lovelace", "ada@example.com"),
+    User(2, "Tom & Jerry", "tom@example.com"),
+    User(3, "Ada <Countess>", "countess@example.com")
+  ]), 4)
+
+fn user_has_id(id: Int, u: User) -> Bool =
+  match u with
+  | User uid _ _ -> uid == id
+
+# Append a new user under the store's next id, then bump that id.
+fn add_user(name: String, email: String, s: Store) -> Store =
+  match s with
+  | Store users next -> Store(vec_append(User(next, name, email), users), next + 1)
+
+# Replace the fields of the user with `id`, leaving the others (and the id) unchanged.
+fn update_user(id: Int, name: String, email: String, s: Store) -> Store =
+  match s with
+  | Store users next -> Store(vec_map(\u -> if user_has_id(id, u) then User(id, name, email) else u, users), next)
+
+fn delete_user(id: Int, s: Store) -> Store =
+  match s with
+  | Store users next -> Store(vec_filter(\u -> ! user_has_id (id, u), users), next)
+
+fn find_user(id: Int, s: Store) -> Maybe User =
+  match s with
+  | Store users _ -> vec_get(0, vec_filter(\u -> user_has_id(id, u), users))
+
+# --- JSON views (the template context) ----------------------------------------
+fn user_to_json(u: User) -> Json =
+  match u with
+  | User id name email ->
+      JsonObject(JsonObjectCons("id", int(id),
+        JsonObjectCons("name", string(name),
+          JsonObjectCons("email", string(email), JsonObjectNil))))
+
+# `{ count, users: [..] }` — the context the list template renders against.
+fn store_to_json(s: Store) -> Json =
+  match s with
+  | Store users _ ->
+      JsonObject(JsonObjectCons("count", int(vec_length(users)),
+        JsonObjectCons("users", array_from_list(vec_to_list(vec_map(user_to_json, users))), JsonObjectNil)))
+
+# `{ user: {..} }` — the context the edit form renders against.
+fn user_context(u: User) -> Json =
+  JsonObject(JsonObjectCons("user", user_to_json(u), JsonObjectNil))
+
+# --- Response helpers ---------------------------------------------------------
 fn html(body: String) -> HttpServerResponse =
   with_header("content-type", "text/html; charset=utf-8", ok(body))
 
 fn json(body: String) -> HttpServerResponse =
   with_header("content-type", "application/json", ok(body))
 
-fn home(req: HttpRequest) -> HttpServerResponse =
-  html("<!doctype html><h1>Hello from Sprout</h1><p>See <a href='/users'>/users</a> or <a href='/health'>/health</a>.</p>")
+# Render a compiled template against a context, or a 500 if rendering fails.
+fn render_page(tmpl: Template, context: Json) -> HttpServerResponse =
+  match render(tmpl, context) with
+  | Ok body -> html(body)
+  | Err _ -> response(500, "template render error")
 
+fn form_or(name: String, fallback: String, req: HttpRequest) -> String =
+  match form_param(name, req) with
+  | Nothing -> fallback
+  | Just value -> value
+
+fn parse_id(m: Maybe String) -> Maybe Int =
+  match m with
+  | Nothing -> Nothing
+  | Just raw -> parse_int(raw)
+
+# --- CRUD handlers (effectful: each reads and/or writes the shared store) ------
+# GET /users — the list page, rendered from the current store.
+fn handle_list(list_tmpl: Template, store: Ref Store, req: HttpRequest) -> HttpServerResponse !{IO} =
+  do
+    s <- ref_read(store)
+    render_page(list_tmpl, store_to_json(s))
+
+# GET /users/edit?id=N — the edit form, pre-filled from the matching user.
+fn handle_edit(form_tmpl: Template, store: Ref Store, req: HttpRequest) -> HttpServerResponse !{IO} =
+  match parse_id(query_param("id", req)) with
+  | Nothing -> bad_request("missing or invalid 'id'")
+  | Just id ->
+      do
+        s <- ref_read(store)
+        match find_user(id, s) with
+        | Nothing -> not_found("no user with that id")
+        | Just u -> render_page(form_tmpl, user_context(u))
+
+# POST /users — create from the form body, then redirect to the list.
+fn handle_create(store: Ref Store, req: HttpRequest) -> HttpServerResponse !{IO} =
+  if string.is_empty(name) then bad_request("name is required")
+  else
+    do
+      s <- ref_read(store)
+      ref_write(store, add_user(name, form_or("email", "", req), s))
+      see_other("/users")
+where
+  name = string.trim(form_or("name", "", req))
+
+# POST /users/update — overwrite an existing user's fields, then redirect.
+fn handle_update(store: Ref Store, req: HttpRequest) -> HttpServerResponse !{IO} =
+  match parse_id(form_param("id", req)) with
+  | Nothing -> bad_request("missing or invalid 'id'")
+  | Just id ->
+      if string.is_empty(name) then bad_request("name is required")
+      else
+        do
+          s <- ref_read(store)
+          ref_write(store, update_user(id, name, form_or("email", "", req), s))
+          see_other("/users")
+where
+  name = string.trim(form_or("name", "", req))
+
+# POST /users/delete — remove a user by id, then redirect.
+fn handle_delete(store: Ref Store, req: HttpRequest) -> HttpServerResponse !{IO} =
+  match parse_id(form_param("id", req)) with
+  | Nothing -> bad_request("missing or invalid 'id'")
+  | Just id ->
+      do
+        s <- ref_read(store)
+        ref_write(store, delete_user(id, s))
+        see_other("/users")
+
+# --- The other (stateless) routes, carried over ------------------------------
 fn health(req: HttpRequest) -> HttpServerResponse =
   json("{\"status\":\"ok\"}")
 
 fn echo(req: HttpRequest) -> HttpServerResponse =
   ok(`${request_method(req)} ${request_path(req)}: ${request_body(req)}`)
 
-# `/search?q=...` reads a query parameter. `query_param` returns the FIRST value
-# for the key, already percent- and `+`-decoded (so `q=hello+world` arrives as
-# `hello world`), or Nothing when the key is absent.
+# `/search?q=...` reads a query parameter, already percent/`+`-decoded.
 fn search(req: HttpRequest) -> HttpServerResponse =
   match query_param("q", req) with
   | Just q -> ok(`You searched for: ${q}`)
   | Nothing -> bad_request("missing 'q' query parameter")
 
-# The HTML template lives on disk in examples/templates/users.html; it is loaded and
-# compiled once at startup (see `main`). `{{ }}` values are auto-escaped, so a name
-# containing `&` or `<>` renders as entities; `{% for %}`/`{% if %}` drive the list.
-fn template_path() -> String =
-  "examples/templates/users.html"
-
-fn user_row(name: String, admin: Bool) -> Json =
-  JsonObject(JsonObjectCons("name", string(name), JsonObjectCons("admin", bool(admin), JsonObjectNil)))
-
-# The context is a json.Json object. `Tom & Jerry` and `Ada <Countess>` exercise the
-# auto-escaper in the rendered page.
-fn users_data() -> Json =
-  JsonObject(JsonObjectCons("count", int(3),
-    JsonObjectCons("users", array_from_list([
-      user_row("Ada Lovelace", true),
-      user_row("Tom & Jerry", false),
-      user_row("Ada <Countess>", false)
-    ]), JsonObjectNil)))
-
-# The template is compiled ONCE at startup (see `main`) and the resulting `Template`
-# is rendered against fresh data per request — parse the markup once, not per hit.
-fn render_users(tmpl: Template, req: HttpRequest) -> HttpServerResponse =
-  match render(tmpl, users_data()) with
-  | Ok body -> html(body)
-  | Err _ -> response(500, "template render error")
-
-# The route table, built once over the pre-compiled users template. `dispatch` scans
-# it in order and 404s when nothing matches.
-fn routes(users_tmpl: Template) -> Vec Route =
+# --- Routing ------------------------------------------------------------------
+# The table is built once (in `serve_crud`) over the compiled templates and the shared
+# store. Pure handlers (`health`/`search`/`echo`) sit next to effectful ones — a pure
+# handler subsumes into the effectful route slot unchanged.
+fn routes(list_tmpl: Template, form_tmpl: Template, store: Ref Store) -> Vec Route =
   vec_from_list([
-    Route("GET", "/", home),
-    Route("GET", "/users", \req -> render_users(users_tmpl, req)),
+    Route("GET", "/", \req -> see_other("/users")),
+    Route("GET", "/users", \req -> handle_list(list_tmpl, store, req)),
+    Route("GET", "/users/edit", \req -> handle_edit(form_tmpl, store, req)),
+    Route("POST", "/users", \req -> handle_create(store, req)),
+    Route("POST", "/users/update", \req -> handle_update(store, req)),
+    Route("POST", "/users/delete", \req -> handle_delete(store, req)),
     Route("GET", "/health", health),
     Route("GET", "/search", search),
     Route("POST", "/echo", echo)
   ])
 
-fn serve_routes(rs: Vec Route) -> Unit !{IO} =
+fn serve_crud(list_tmpl: Template, form_tmpl: Template, store: Ref Store) -> Unit !{IO} =
   serve(8082, \req -> dispatch(rs, req))
+where
+  rs = routes(list_tmpl, form_tmpl, store)
 
-# Load and compile the template once up front; a missing file or malformed template is
-# a startup error, not a per-request failure. The path is relative to the working
+# --- Startup ------------------------------------------------------------------
+# Templates are read and compiled ONCE up front; a missing file or malformed template is
+# a startup error, not a per-request failure. Paths are relative to the working
 # directory (the repo root under `just run`).
-fn main() -> Unit !{IO} =
-  match read_file(template_path()) with
-  | Err msg -> print(`failed to read ${template_path()}: ${msg}`)
-  | Ok source -> start_server(source)
+fn list_template_path() -> String = "examples/templates/users_list.html"
+fn form_template_path() -> String = "examples/templates/user_form.html"
 
-fn start_server(source: String) -> Unit !{IO} =
-  match compile(source) with
-  | Ok tmpl -> serve_routes(routes(tmpl))
-  | Err _ -> print("failed to compile the users template")
+fn main() -> Unit !{IO} =
+  match read_file(list_template_path()) with
+  | Err msg -> print(`failed to read ${list_template_path()}: ${msg}`)
+  | Ok list_src ->
+      match read_file(form_template_path()) with
+      | Err msg -> print(`failed to read ${form_template_path()}: ${msg}`)
+      | Ok form_src -> compile_and_serve(list_src, form_src)
+
+fn compile_and_serve(list_src: String, form_src: String) -> Unit !{IO} =
+  match compile(list_src) with
+  | Err _ -> print("failed to compile the users_list template")
+  | Ok list_tmpl ->
+      match compile(form_src) with
+      | Err _ -> print("failed to compile the user_form template")
+      | Ok form_tmpl -> boot(list_tmpl, form_tmpl)
+
+fn boot(list_tmpl: Template, form_tmpl: Template) -> Unit !{IO} =
+  do
+    store <- ref_new(seed_store())
+    serve_crud(list_tmpl, form_tmpl, store)
