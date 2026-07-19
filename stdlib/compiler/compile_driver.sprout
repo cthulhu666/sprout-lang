@@ -86,9 +86,9 @@ fn dump_ast_decl_names(decls: List ast.Decl) -> Unit !{IO} =
         | _ -> ()
         dump_ast_decl_names(rest)
 
-fn run_file_bundle(path: String, stdlib_root: String) -> Unit !{IO} =
+fn run_file_bundle(path: String, stdlib_root: String, extra_roots: List String) -> Unit !{IO} =
   do
-    result <- compiler.compile_phase_bundle(source.FilePath(path), source.StdlibRoot(stdlib_root))
+    result <- compiler.compile_phase_bundle_with_roots(source.FilePath(path), source.StdlibRoot(stdlib_root), extra_roots)
     match result with
     | bundler.BundleErr msg -> print("ERROR: bundle: " ++ msg)
     | bundler.BundleOk prog ->
@@ -100,9 +100,9 @@ fn run_file_bundle(path: String, stdlib_root: String) -> Unit !{IO} =
 # ---------------------------------------------------------------------------
 # Phase: check — bundle + HM typecheck, produces typed IR
 
-fn run_file_check(path: String, stdlib_root: String) -> Unit !{IO} =
+fn run_file_check(path: String, stdlib_root: String, extra_roots: List String) -> Unit !{IO} =
   do
-    result <- compiler.compile_phase_check(source.FilePath(path), source.StdlibRoot(stdlib_root))
+    result <- compiler.compile_phase_check_with_roots(source.FilePath(path), source.StdlibRoot(stdlib_root), extra_roots)
     match result with
     | typed_ast.TypedErr pos msg -> print(format_pos(pos) ++ "ERROR: " ++ msg)
     | typed_ast.TypedOk typed_prog env ->
@@ -113,9 +113,9 @@ fn run_file_check(path: String, stdlib_root: String) -> Unit !{IO} =
 # ---------------------------------------------------------------------------
 # Phase: lower — typeclass dictionary-passing lowering
 
-fn run_file_lower(path: String, stdlib_root: String) -> Unit !{IO} =
+fn run_file_lower(path: String, stdlib_root: String, extra_roots: List String) -> Unit !{IO} =
   do
-    result <- compiler.compile_phase_lower(source.FilePath(path), source.StdlibRoot(stdlib_root))
+    result <- compiler.compile_phase_lower_with_roots(source.FilePath(path), source.StdlibRoot(stdlib_root), extra_roots)
     match result with
     | typed_ast.TypedErr pos msg -> print(format_pos(pos) ++ "ERROR: " ++ msg)
     | typed_ast.TypedOk typed_prog env ->
@@ -126,9 +126,9 @@ fn run_file_lower(path: String, stdlib_root: String) -> Unit !{IO} =
 # ---------------------------------------------------------------------------
 # Phase: recheck — re-typecheck the lowered AST so typed nodes carry resolved types
 
-fn run_file_recheck(path: String, stdlib_root: String) -> Unit !{IO} =
+fn run_file_recheck(path: String, stdlib_root: String, extra_roots: List String) -> Unit !{IO} =
   do
-    result <- compiler.compile_phase_recheck(source.FilePath(path), source.StdlibRoot(stdlib_root))
+    result <- compiler.compile_phase_recheck_with_roots(source.FilePath(path), source.StdlibRoot(stdlib_root), extra_roots)
     match result with
     | typed_ast.TypedErr pos msg -> print(format_pos(pos) ++ "ERROR: " ++ msg)
     | typed_ast.TypedOk typed_prog env ->
@@ -207,9 +207,9 @@ fn print_lines(lines: List String) -> Unit !{IO} =
 # Reuses compile_phase_recheck to get the typed AST (no LLVM is produced by
 # that phase), then delegates to ast_to_ir + ir_lowering.
 
-fn run_file_use_ir_codegen(path: String, stdlib_root: String) -> Unit !{IO} =
+fn run_file_use_ir_codegen(path: String, stdlib_root: String, extra_roots: List String) -> Unit !{IO} =
   do
-    recheck_result <- compiler.compile_phase_recheck(source.FilePath(path), source.StdlibRoot(stdlib_root))
+    recheck_result <- compiler.compile_phase_recheck_with_roots(source.FilePath(path), source.StdlibRoot(stdlib_root), extra_roots)
     match recheck_result with
     | typed_ast.TypedErr pos msg -> print(format_pos(pos) ++ "ERROR: " ++ msg)
     | typed_ast.TypedOk typed_prog _ ->
@@ -256,43 +256,50 @@ fn run_file_dump_qualify(path: String, stdlib_root: String) -> Unit !{IO} =
 # phase: "" = default source check,
 #        "bundle"|"check"|"lower"|"recheck"|"ir-typed"|"scan-info"|"dump-qualify"
 
-fn run_batch(stdlib_root: String, idx: Int, phase: String) -> Unit !{IO} =
+fn run_batch(stdlib_root: String, idx: Int, phase: String, extra_roots: List String) -> Unit !{IO} =
   match argv_get(idx) with
   | Nothing -> ()
   | Just path ->
       do
         if phase == "ir-typed" then ()
         else print("=== " ++ path ++ " ===")
-        if phase == "bundle" then run_file_bundle(path, stdlib_root)
-        else if phase == "check" then run_file_check(path, stdlib_root)
-        else if phase == "lower" then run_file_lower(path, stdlib_root)
-        else if phase == "recheck" then run_file_recheck(path, stdlib_root)
-        else if phase == "ir-typed" then run_file_use_ir_codegen(path, stdlib_root)
+        if phase == "bundle" then run_file_bundle(path, stdlib_root, extra_roots)
+        else if phase == "check" then run_file_check(path, stdlib_root, extra_roots)
+        else if phase == "lower" then run_file_lower(path, stdlib_root, extra_roots)
+        else if phase == "recheck" then run_file_recheck(path, stdlib_root, extra_roots)
+        else if phase == "ir-typed" then run_file_use_ir_codegen(path, stdlib_root, extra_roots)
         else if phase == "scan-info" then run_file_scan_info(path, stdlib_root)
         else if phase == "dump-qualify" then run_file_dump_qualify(path, stdlib_root)
         else run_file(path, stdlib_root)
-        run_batch(stdlib_root, idx + 1, phase)
+        run_batch(stdlib_root, idx + 1, phase, extra_roots)
 
 fn main() -> Unit !{IO} =
   do
     args <- argv_all()
     match args with
     | ["--emit-ir", "--debug", stdlib_root | _] ->
-        run_batch(stdlib_root, 3, "ir-typed")
+        run_batch(stdlib_root, 3, "ir-typed", Nil)
     | ["--emit-ir", "--debug" | _] ->
         print("ERROR: usage: compile-driver --emit-ir --debug <stdlib-root> <file>...")
+    # One extra package root, fixed right after <stdlib-root>: dotted non-stdlib
+    # imports (e.g. postgres.*) resolve under <pkg-root> (docs/packaging-v0.md §10
+    # phase 2). Single root, fixed position — the walking-skeleton surface.
+    | ["--emit-ir", stdlib_root, "--package-root", dir | _] ->
+        run_batch(stdlib_root, 4, "ir-typed", Cons(dir, Nil))
     | ["--emit-ir", stdlib_root | _] ->
-        run_batch(stdlib_root, 2, "ir-typed")
+        run_batch(stdlib_root, 2, "ir-typed", Nil)
     | ["--emit-ir" | _] ->
-        print("ERROR: usage: compile-driver --emit-ir [--debug] <stdlib-root> <file>...")
+        print("ERROR: usage: compile-driver --emit-ir [--debug] <stdlib-root> [--package-root <dir>] <file>...")
+    | ["--phase", phase, stdlib_root, "--package-root", dir | _] ->
+        run_batch(stdlib_root, 5, phase, Cons(dir, Nil))
     | ["--phase", phase, stdlib_root | _] ->
-        run_batch(stdlib_root, 3, phase)
+        run_batch(stdlib_root, 3, phase, Nil)
     | ["--phase", _ | _] ->
-        print("ERROR: usage: compile-driver --phase <phase> <stdlib-root> <file>...")
+        print("ERROR: usage: compile-driver --phase <phase> <stdlib-root> [--package-root <dir>] <file>...")
     | ["--phase" | _] ->
         print("ERROR: --phase requires an argument: bundle|check|lower|recheck|scan-info|dump-qualify")
     | ["--use-ir-codegen", stdlib_root, path | _] ->
-        run_file_use_ir_codegen(path, stdlib_root)
+        run_file_use_ir_codegen(path, stdlib_root, Nil)
     | ["--use-ir-codegen" | _] ->
         print("ERROR: usage: compile-driver --use-ir-codegen <stdlib-root> <file>")
     | ["--emit-iface", stdlib_root, module_name, path | _] ->
@@ -304,6 +311,6 @@ fn main() -> Unit !{IO} =
     | ["--check-iface" | _] ->
         print("ERROR: usage: compile-driver --check-iface <iface-file>")
     | [stdlib_root | _] ->
-        run_batch(stdlib_root, 1, "")
+        run_batch(stdlib_root, 1, "", Nil)
     | _ ->
         print("ERROR: usage: compile-driver [--phase bundle|check|lower|recheck|scan-info|dump-qualify | --emit-ir [--debug] | --use-ir-codegen | --emit-iface <module-name> | --check-iface <iface-file>] <stdlib-root> <file>...")

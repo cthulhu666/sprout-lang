@@ -343,18 +343,18 @@ type WorkItem =
   | WILeave String
   | WIFinalize String String (List module_loader.ImportSpec)
 
-fn spec_to_path(spec: module_loader.ImportSpec, stdlib_root: String) -> Maybe String =
+fn spec_to_path(spec: module_loader.ImportSpec, stdlib_root: String, extra_roots: List String) -> Maybe String =
   match spec with
-  | module_loader.ImportAlias mod_name _ -> module_loader.module_name_to_path(source.ModuleName(mod_name), stdlib_root)
-  | module_loader.ImportSelective mod_name _ -> module_loader.module_name_to_path(source.ModuleName(mod_name), stdlib_root)
+  | module_loader.ImportAlias mod_name _ -> module_loader.resolve_module_path(source.ModuleName(mod_name), stdlib_root, extra_roots)
+  | module_loader.ImportSelective mod_name _ -> module_loader.resolve_module_path(source.ModuleName(mod_name), stdlib_root, extra_roots)
 
-fn specs_to_paths(specs: List module_loader.ImportSpec, stdlib_root: String) -> List String =
+fn specs_to_paths(specs: List module_loader.ImportSpec, stdlib_root: String, extra_roots: List String) -> List String =
   match specs with
   | Nil -> Nil
   | Cons spec rest ->
-      match spec_to_path(spec, stdlib_root) with
-      | Nothing -> specs_to_paths(rest, stdlib_root)
-      | Just path -> Cons(path, specs_to_paths(rest, stdlib_root))
+      match spec_to_path(spec, stdlib_root, extra_roots) with
+      | Nothing -> specs_to_paths(rest, stdlib_root, extra_roots)
+      | Just path -> Cons(path, specs_to_paths(rest, stdlib_root, extra_roots))
 
 # Push a WIVisit item for each path onto stack.
 # Called with list_reverse(dep_paths) so the first import ends up on top.
@@ -374,7 +374,8 @@ fn process_work(
   visiting: Ref (List String),
   seen: Ref (List String),
   ordered: Ref (List ParsedModule),
-  stdlib_root: String
+  stdlib_root: String,
+  extra_roots: List String
 ) -> List String !{IO} =
   do
     stack <- ref_read(work)
@@ -383,10 +384,10 @@ fn process_work(
     | Cons item rest ->
         do
           ref_write(work, rest)
-          errs <- process_item(item, work, visiting, seen, ordered, stdlib_root)
+          errs <- process_item(item, work, visiting, seen, ordered, stdlib_root, extra_roots)
           match errs with
           | Cons _ _ -> errs
-          | Nil -> process_work(work, visiting, seen, ordered, stdlib_root)
+          | Nil -> process_work(work, visiting, seen, ordered, stdlib_root, extra_roots)
 
 fn process_item(
   item: WorkItem,
@@ -394,10 +395,11 @@ fn process_item(
   visiting: Ref (List String),
   seen: Ref (List String),
   ordered: Ref (List ParsedModule),
-  stdlib_root: String
+  stdlib_root: String,
+  extra_roots: List String
 ) -> List String !{IO} =
   match item with
-  | WIVisit path -> process_wi_visit(path, work, visiting, seen, ordered, stdlib_root)
+  | WIVisit path -> process_wi_visit(path, work, visiting, seen, ordered, stdlib_root, extra_roots)
   | WILeave path -> process_wi_leave(path, visiting)
   | WIFinalize path src specs -> process_wi_finalize(path, src, specs, seen, ordered)
 
@@ -407,7 +409,8 @@ fn process_wi_visit(
   visiting: Ref (List String),
   seen: Ref (List String),
   ordered: Ref (List ParsedModule),
-  stdlib_root: String
+  stdlib_root: String,
+  extra_roots: List String
 ) -> List String !{IO} =
   do
     seen_list <- ref_read(seen)
@@ -423,7 +426,7 @@ fn process_wi_visit(
           | Ok src ->
               do
                 let specs = module_loader.collect_imports(src)
-                let dep_paths = specs_to_paths(specs, stdlib_root)
+                let dep_paths = specs_to_paths(specs, stdlib_root, extra_roots)
                 ref_write(visiting, Cons(path, visiting_list))
                 stack_now <- ref_read(work)
                 ref_write(work, push_visit_items(list_reverse(dep_paths), Cons (WIFinalize(path, src, specs), Cons (WILeave(path), stack_now))))
@@ -468,20 +471,21 @@ fn process_wi_finalize(
 fn visit_module_iter(
   entry_path: String,
   stdlib_root: String,
+  extra_roots: List String,
   seen: Ref (List String),
   ordered: Ref (List ParsedModule)
 ) -> List String !{IO} =
   do
     work <- ref_new(Cons (WIVisit(entry_path), Nil))
     visiting <- ref_new(Nil)
-    process_work(work, visiting, seen, ordered, stdlib_root)
+    process_work(work, visiting, seen, ordered, stdlib_root, extra_roots)
 
 # Collect all modules in topological order, optionally prepending the prelude.
-fn collect_modules(entry_path: String, stdlib_root: String) -> (Maybe String, List ParsedModule) !{IO} =
+fn collect_modules(entry_path: String, stdlib_root: String, extra_roots: List String) -> (Maybe String, List ParsedModule) !{IO} =
   do
     seen <- ref_new(Nil)
     ordered <- ref_new(Nil)
-    errs <- visit_module_iter(entry_path, stdlib_root, seen, ordered)
+    errs <- visit_module_iter(entry_path, stdlib_root, extra_roots, seen, ordered)
     match errs with
     | Cons e _ -> (Just(e), Nil)
     | Nil ->
@@ -638,13 +642,13 @@ fn add_ctors(mod_name: String, ctors: List ast.TypeConstructor, export_ctors: Bo
 # Resolution context from imports
 # ---------------------------------------------------------------------------
 
-fn build_resolve_ctx(mod: ParsedModule, all_symbols: Dict ModuleSymbols, stdlib_root: String) -> ResolveCtx =
+fn build_resolve_ctx(mod: ParsedModule, all_symbols: Dict ModuleSymbols, stdlib_root: String, extra_roots: List String) -> ResolveCtx =
   match mod with
   | ParsedModule _ path specs _ _ _ ->
       match dict_get(path, all_symbols) with
       | Nothing -> empty_resolve_ctx()
       | Just own_syms ->
-          apply_imports_to_ctx(specs, all_symbols, stdlib_root,
+          apply_imports_to_ctx(specs, all_symbols, stdlib_root, extra_roots,
             ResolveCtx(sym_value_locals(own_syms),
                        sym_type_locals(own_syms),
                        sym_class_locals(own_syms),
@@ -652,17 +656,17 @@ fn build_resolve_ctx(mod: ParsedModule, all_symbols: Dict ModuleSymbols, stdlib_
                        dict_empty(), dict_empty(), dict_empty(),
                        dict_empty(), dict_empty()))
 
-fn apply_imports_to_ctx(specs: List module_loader.ImportSpec, all_symbols: Dict ModuleSymbols, stdlib_root: String, ctx: ResolveCtx) -> ResolveCtx =
+fn apply_imports_to_ctx(specs: List module_loader.ImportSpec, all_symbols: Dict ModuleSymbols, stdlib_root: String, extra_roots: List String, ctx: ResolveCtx) -> ResolveCtx =
   match specs with
   | Nil -> ctx
   | Cons spec rest ->
-      apply_imports_to_ctx(rest, all_symbols, stdlib_root,
-        apply_one_import(spec, all_symbols, stdlib_root, ctx))
+      apply_imports_to_ctx(rest, all_symbols, stdlib_root, extra_roots,
+        apply_one_import(spec, all_symbols, stdlib_root, extra_roots, ctx))
 
-fn apply_one_import(spec: module_loader.ImportSpec, all_symbols: Dict ModuleSymbols, stdlib_root: String, ctx: ResolveCtx) -> ResolveCtx =
+fn apply_one_import(spec: module_loader.ImportSpec, all_symbols: Dict ModuleSymbols, stdlib_root: String, extra_roots: List String, ctx: ResolveCtx) -> ResolveCtx =
   match spec with
   | module_loader.ImportAlias mod_name alias ->
-      match module_loader.module_name_to_path(source.ModuleName(mod_name), stdlib_root) with
+      match module_loader.resolve_module_path(source.ModuleName(mod_name), stdlib_root, extra_roots) with
       | Nothing -> ctx
       | Just mod_path ->
           match dict_get(mod_path, all_symbols) with
@@ -674,7 +678,7 @@ fn apply_one_import(spec: module_loader.ImportSpec, all_symbols: Dict ModuleSymb
                   alias, merge_type_exports(symbols)),
                 sym_method_names(symbols))
   | module_loader.ImportSelective mod_name names ->
-      match module_loader.module_name_to_path(source.ModuleName(mod_name), stdlib_root) with
+      match module_loader.resolve_module_path(source.ModuleName(mod_name), stdlib_root, extra_roots) with
       | Nothing -> ctx
       | Just mod_path ->
           match dict_get(mod_path, all_symbols) with
@@ -1039,15 +1043,15 @@ fn qualify_decls(ctx: ResolveCtx, decls: List ast.Decl) -> List ast.Decl =
 # Main pipeline
 # ---------------------------------------------------------------------------
 
-fn qualify_all_modules(modules: List ParsedModule, all_symbols: Dict ModuleSymbols, stdlib_root: String) -> List ast.Decl =
+fn qualify_all_modules(modules: List ParsedModule, all_symbols: Dict ModuleSymbols, stdlib_root: String, extra_roots: List String) -> List ast.Decl =
   match modules with
   | Nil -> Nil
   | Cons mod rest ->
       match mod with
       | ParsedModule _ _ _ _ _ decls ->
           list_append(
-            qualify_decls(build_resolve_ctx(mod, all_symbols, stdlib_root), decls),
-            qualify_all_modules(rest, all_symbols, stdlib_root))
+            qualify_decls(build_resolve_ctx(mod, all_symbols, stdlib_root, extra_roots), decls),
+            qualify_all_modules(rest, all_symbols, stdlib_root, extra_roots))
 
 # ---------------------------------------------------------------------------
 # Post-qualification assertion: no qualified name may start with '.'
@@ -1082,21 +1086,27 @@ fn validate_qualified_decls(decls: List ast.Decl) -> Maybe String =
       | Just msg -> Just(msg)
       | Nothing -> validate_qualified_decls(rest)
 
-fn make_bundle_or_err(modules: List ParsedModule, stdlib_root: String) -> BundleResult =
+fn make_bundle_or_err(modules: List ParsedModule, stdlib_root: String, extra_roots: List String) -> BundleResult =
   match validate_qualified_decls(qualified) with
   | Just err_msg -> BundleErr("[assert] qualify_decl: " ++ err_msg)
   | Nothing ->
       match deriving.validate_deriving_decls(qualified) with
       | Just err_msg -> BundleErr("deriving: " ++ err_msg)
       | Nothing -> BundleOk(ast.Program(deriving.expand_deriving_decls(qualified), dummy_pos()))
-  where qualified = qualify_all_modules(modules, build_all_symbols(modules), stdlib_root)
+  where qualified = qualify_all_modules(modules, build_all_symbols(modules), stdlib_root, extra_roots)
 
 export fn bundle_file(path: source.FilePath, stdlib_root: source.StdlibRoot) -> BundleResult !{IO} =
+  bundle_file_with_roots(path, stdlib_root, Nil)
+
+# Like bundle_file, but resolves dotted non-stdlib imports against extra package
+# roots (docs/packaging-v0.md §10 phase 2). bundle_file delegates here with no
+# extra roots, so all existing callers are unaffected.
+export fn bundle_file_with_roots(path: source.FilePath, stdlib_root: source.StdlibRoot, extra_roots: List String) -> BundleResult !{IO} =
   do
-    (err, modules) <- collect_modules(source.filepath_str(path), source.stdlib_root_str(stdlib_root))
+    (err, modules) <- collect_modules(source.filepath_str(path), source.stdlib_root_str(stdlib_root), extra_roots)
     match err with
     | Just msg -> BundleErr(msg)
-    | Nothing -> make_bundle_or_err(modules, source.stdlib_root_str(stdlib_root))
+    | Nothing -> make_bundle_or_err(modules, source.stdlib_root_str(stdlib_root), extra_roots)
 
 # ---------------------------------------------------------------------------
 # Phase: dump-qualify — show original→qualified name mapping per module
@@ -1139,7 +1149,7 @@ fn dump_qualify_module(mod: ParsedModule, all_symbols: Dict ModuleSymbols, stdli
   | ParsedModule mod_name path _ _ _ decls ->
       Cons(module_header_line(mod_name),
       Cons(ctx_status_line(path, all_symbols),
-      qualify_debug_lines_acc(build_resolve_ctx(mod, all_symbols, stdlib_root), decls, Nil)))
+      qualify_debug_lines_acc(build_resolve_ctx(mod, all_symbols, stdlib_root, Nil), decls, Nil)))
 
 fn dump_qualify_modules_acc(modules: List ParsedModule, all_symbols: Dict ModuleSymbols, stdlib_root: String) -> List String =
   match modules with
@@ -1150,7 +1160,7 @@ fn dump_qualify_modules_acc(modules: List ParsedModule, all_symbols: Dict Module
 
 export fn dump_qualify_file(path: source.FilePath, stdlib_root: source.StdlibRoot) -> List String !{IO} =
   do
-    (err, modules) <- collect_modules(source.filepath_str(path), source.stdlib_root_str(stdlib_root))
+    (err, modules) <- collect_modules(source.filepath_str(path), source.stdlib_root_str(stdlib_root), Nil)
     match err with
     | Just msg -> Cons("ERROR: " ++ msg, Nil)
     | Nothing -> dump_qualify_modules_acc(modules, build_all_symbols(modules), source.stdlib_root_str(stdlib_root))

@@ -236,7 +236,14 @@ debug-run file: bootstrap-from-seed
 
 # Run all stdlib + compiler-stage tests (stage-1).
 [group('test')]
-test: test-stdlib-stage1 test-type-errors
+test: test-stdlib-stage1 test-type-errors test-package-resolution
+
+# Second-root (--package-root) module resolution gate: an app importing a module
+# from an extra package root resolves only when that root is registered
+# (docs/packaging-v0.md §10 phase 2). See scripts/package_resolution_gate.sh.
+[group('test')]
+test-package-resolution: bootstrap-from-seed
+  bash scripts/package_resolution_gate.sh
 
 # B1-Double regression gate: assert the inline Vector-Double optimization fires on
 # genuine `Vector Double`, does NOT fire on a shadowed heap `Double` (UAF guard),
@@ -1360,3 +1367,96 @@ build-sproutd: bootstrap-from-seed
 # The standalone analysis-service binary is retired: sproutd subsumes it.
 # `sproutd --analysis-service <stdlib_root>` runs the identical
 # analysis_service_driver.run_service entry (see stdlib/compiler/sproutd_driver.sprout).
+
+# ── Aggregate Gates ───────────────────────────────────────────────────────────
+#
+# One-shot verification batteries so the pre-commit ritual is a single command
+# instead of a hand-assembled `&&` chain.  Both are VERIFICATION-ONLY: they run
+# `fmt-check` (not `fmt`), so a failure means "run `just fmt` and re-stage", never
+# a silent reformat.
+#
+#   just gate-quick   fast edit->commit loop  (fmt-check, test, examples, 2 smokes)
+#   just gate         full CI parity          (mirrors .forgejo/workflows/ci.yml)
+#   just gate-audit   guard: fails if CI runs a `just` task `gate` does not cover
+#
+# `gate` is a superset of `gate-quick`; a green `gate` means CI will not surprise
+# you.  It is slow (~15-25 min: test-stress + task-io-smoke dominate) — use
+# gate-quick during iteration and gate before pushing.
+
+# Fast pre-commit battery: the tasks run together most often during iteration.
+[group('gate')]
+gate-quick: fmt-check test compile-examples-stage1 smoke-shapes bundle-smoke
+  @echo "==> gate-quick ✓ (fmt-check · test · compile-examples-stage1 · smoke-shapes · bundle-smoke)"
+
+# Full CI-parity battery.  Dependencies are ordered cheap->expensive so a failure
+# surfaces fast; `just` runs them sequentially and deduplicates the shared
+# bootstrap-from-seed.  gc-safety-check needs `--strict` to gate (bare it is
+# advisory), so it runs in the body rather than as an arg-less dependency.
+# Full CI-parity battery (slow, ~15-25m); a green run means CI will not surprise you.
+[group('gate')]
+gate: fmt-check smoke-shapes bundle-smoke loud-fail-smoke argv-smoke trace-dispatch-smoke verify-dispatch-smoke div-by-zero-smoke stack-overflow-smoke tco-runtime-smoke check-approved-builtins verify-bootstrap-fixed-point compile-examples-stage1 run-example-canary test task-io-smoke test-stress
+  #!/usr/bin/env bash
+  set -euo pipefail
+  echo "==> gate: gc-safety-check --strict..."
+  just gc-safety-check --strict
+  echo "==> gate ✓ — full CI-parity battery passed; CI will not surprise you."
+
+# Drift guard: assert every `just` task CI runs is covered by `gate`.  Computes
+# gate's coverage LIVE by recursively expanding its dependencies via `just --show`
+# (so `test` gaining a child needs no edit here), then diffs against the tasks
+# grepped out of the CI workflow.  Run this after touching ci.yml or the gate list.
+# Assert `just gate` covers every task CI runs (drift guard).
+[group('gate')]
+gate-audit:
+  #!/usr/bin/env bash
+  set -euo pipefail
+  CI_WORKFLOW=".forgejo/workflows/ci.yml"
+  # CI tasks gate intentionally omits: bootstrap/build deps (auto-run) and the
+  # mutate-then-check seed path (gate covers it via verify-bootstrap-fixed-point).
+  EXCLUDE="bootstrap-from-seed build-fmt-from-seed refresh-seed"
+  # Tasks gate runs from its BODY (not reachable via --show dependency expansion).
+  BODY="gc-safety-check"
+  expand() {  # print a recipe name and, recursively, its dependency recipe names
+    local r="$1" line deps d
+    echo "$r"
+    line=$(just --show "$r" 2>/dev/null | grep -E "^$r *:" | head -1) || return 0
+    deps=${line#*:}; deps=${deps%%#*}
+    for d in $deps; do [[ "$d" =~ ^[a-z][a-z0-9-]*$ ]] && expand "$d"; done
+  }
+  gate_set=$(printf '%s\n%s\n' "$(expand gate)" "$BODY" | sort -u)
+  ci_tasks=$(grep -oE 'just +[a-z][a-z0-9-]*' "$CI_WORKFLOW" | awk '{print $2}' | sort -u)
+  missing=""
+  for t in $ci_tasks; do
+    grep -qw "$t" <<<"$EXCLUDE" && continue
+    grep -qx "$t" <<<"$gate_set" || missing="$missing $t"
+  done
+  if [[ -n "$missing" ]]; then
+    echo "gate-audit ✗ — CI runs these tasks that 'just gate' does not cover:" >&2
+    printf '   %s\n' $missing >&2
+    echo "   Add each to the 'gate' recipe, or to EXCLUDE if it is intentionally CI-only." >&2
+    exit 1
+  fi
+  echo "==> gate-audit ✓ — gate covers every CI gate task."
+
+# Refresh the bootstrap seed from a GUARANTEED-clean stage-1, then verify the
+# fixed point.  Use after any compiler-source edit under stdlib/compiler/.
+#
+# Why a dedicated recipe: `just refresh-seed` alone can silently reuse a stale
+# stage-1 binary — bootstrap-from-seed's freshness guard skips the rebuild when
+# the committed seed is unchanged, which is exactly the case mid-edit.  Deleting
+# the binary first forces a clean rebuild from the committed seed before the
+# fixed-point iteration.  This recipe takes NO dependencies on purpose: recipe
+# deps run before the body, so a `bootstrap-from-seed` dep (pulled in transitively
+# by refresh-seed) would rebuild stage-1 BEFORE the rm, defeating the guard.
+# Refresh the bootstrap seed from a clean stage-1, then verify the fixed point.
+[group('bootstrap')]
+refresh-seed-clean:
+  #!/usr/bin/env bash
+  set -euo pipefail
+  echo "==> Removing stage-1 binary to force a clean bootstrap..."
+  rm -f "{{build_dir}}/compile_driver_bin_stage1"
+  echo "==> Refreshing seed (iterates to the new fixed point)..."
+  just refresh-seed
+  echo "==> Verifying the refreshed seed is a fixed point..."
+  just verify-bootstrap-fixed-point
+  echo "==> refresh-seed-clean ✓ — stage bootstrap/compile_driver.ll, then commit."

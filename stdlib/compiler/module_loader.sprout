@@ -153,6 +153,25 @@ export fn module_name_to_path(name: source.ModuleName, stdlib_root: String) -> M
   else Nothing
   where n = source.module_name_str(name)
 
+# resolve_module_path — module_name_to_path (stdlib.* / bare name, against
+# stdlib_root) plus a fallback: a dotted non-stdlib name (e.g. `postgres.wire`)
+# that module_name_to_path rejects is tried under an extra package root as
+# `<root>/<dotted-as-path>.sprout`. First increment of the multi-repo package
+# resolver (docs/packaging-v0.md §10 phase 2). Pure — no filesystem existence
+# check — so only the first extra root is consulted; multi-root disambiguation
+# needs IO and is deferred. The locked single-root module_name_to_path is left
+# untouched; this only wraps it.
+export fn resolve_module_path(name: source.ModuleName, stdlib_root: String, extra_roots: List String) -> Maybe String =
+  match module_name_to_path(name, stdlib_root) with
+  | Just path -> Just(path)
+  | Nothing -> try_extra_roots(name, extra_roots)
+
+fn try_extra_roots(name: source.ModuleName, extra_roots: List String) -> Maybe String =
+  match extra_roots with
+  | Nil -> Nothing
+  | Cons root _ ->
+      Just(str_concat(root, str_concat("/", str_concat(replace_dots_with_slash(source.module_name_str(name), 0, ""), ".sprout"))))
+
 # ---------------------------------------------------------------------------
 # Dict → pairs list (needed to extract env after checking)
 # ---------------------------------------------------------------------------

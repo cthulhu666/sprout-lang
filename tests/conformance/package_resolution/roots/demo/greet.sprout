@@ -1,0 +1,6 @@
+module demo.greet
+
+# Fixture module that lives OUTSIDE stdlib_root, under an extra package root.
+# Resolved only when the driver is given `--package-root <this-roots-dir>`.
+export fn greeting() -> String =
+  "hi from demo pkg"

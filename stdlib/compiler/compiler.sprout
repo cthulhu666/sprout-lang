@@ -203,11 +203,21 @@ fn report_verify_stats(prog: typed_ast.TypedProgram) -> Unit !{IO} =
                  ++ " skipped=" ++ int_to_string(sk) ++ " mismatched=" ++ int_to_string(mm))
 
 export fn compile_phase_bundle(path: source.FilePath, stdlib_root: source.StdlibRoot) -> bundler.BundleResult !{IO} =
-  bundler.bundle_file(path, stdlib_root)
+  compile_phase_bundle_with_roots(path, stdlib_root, Nil)
+
+# _with_roots variants (docs/packaging-v0.md §10 phase 2): thread extra package
+# roots to the bundler so dotted non-stdlib imports resolve across repos. The
+# original phase entry points delegate here with no extra roots, so every other
+# caller is unchanged.
+export fn compile_phase_bundle_with_roots(path: source.FilePath, stdlib_root: source.StdlibRoot, extra_roots: List String) -> bundler.BundleResult !{IO} =
+  bundler.bundle_file_with_roots(path, stdlib_root, extra_roots)
 
 export fn compile_phase_check(path: source.FilePath, stdlib_root: source.StdlibRoot) -> typed_ast.TypedResult !{IO} =
+  compile_phase_check_with_roots(path, stdlib_root, Nil)
+
+export fn compile_phase_check_with_roots(path: source.FilePath, stdlib_root: source.StdlibRoot, extra_roots: List String) -> typed_ast.TypedResult !{IO} =
   do
-    bundle_result <- bundler.bundle_file(path, stdlib_root)
+    bundle_result <- bundler.bundle_file_with_roots(path, stdlib_root, extra_roots)
     match bundle_result with
     | bundler.BundleErr msg -> typed_ast.TypedErr(no_pos(), "bundle: " ++ msg)
     | bundler.BundleOk prog ->
@@ -240,8 +250,11 @@ export fn compile_phase_check(path: source.FilePath, stdlib_root: source.StdlibR
                         | Nothing -> typed_ast.TypedErr(vpos, "check: dispatch-verify: " ++ vmsg)
 
 export fn compile_phase_lower(path: source.FilePath, stdlib_root: source.StdlibRoot) -> typed_ast.TypedResult !{IO} =
+  compile_phase_lower_with_roots(path, stdlib_root, Nil)
+
+export fn compile_phase_lower_with_roots(path: source.FilePath, stdlib_root: source.StdlibRoot, extra_roots: List String) -> typed_ast.TypedResult !{IO} =
   do
-    check_result <- compile_phase_check(path, stdlib_root)
+    check_result <- compile_phase_check_with_roots(path, stdlib_root, extra_roots)
     match check_result with
     | typed_ast.TypedErr pos msg -> typed_ast.TypedErr(pos, msg)
     | typed_ast.TypedOk typed_prog env ->
@@ -250,7 +263,10 @@ export fn compile_phase_lower(path: source.FilePath, stdlib_root: source.StdlibR
         | lowering.LowerOk lowered -> typed_ast.TypedOk(dce.elim_program(lowered), env)
 
 export fn compile_phase_recheck(path: source.FilePath, stdlib_root: source.StdlibRoot) -> typed_ast.TypedResult !{IO} =
-  compile_phase_lower(path, stdlib_root)
+  compile_phase_recheck_with_roots(path, stdlib_root, Nil)
+
+export fn compile_phase_recheck_with_roots(path: source.FilePath, stdlib_root: source.StdlibRoot, extra_roots: List String) -> typed_ast.TypedResult !{IO} =
+  compile_phase_lower_with_roots(path, stdlib_root, extra_roots)
 
 export fn compile_full_ir(path: source.FilePath, stdlib_root: source.StdlibRoot) -> IrFullResult !{IO} =
   do
