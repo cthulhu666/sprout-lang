@@ -88,10 +88,12 @@ logging at `Error`.
 
 ## 4. High-level implementation overview
 
-Three pieces: a new host builtin (minimal), a new `stdlib/log.sprout` module,
-and a one-accessor addition to `stdlib/http_server.sprout`. The middleware
-itself lives in the example, keeping `stdlib.http_server` free of a dependency
-on `stdlib.log`.
+Pieces: a new host builtin (minimal), a new `stdlib/log.sprout` module, a
+one-accessor addition to `stdlib/http_server.sprout`, and a thin
+`stdlib/http_middleware.sprout` (the access-log middleware). `stdlib.http_server`
+itself keeps zero dependency on `stdlib.log`; the middleware module is the opt-in
+layer that imports both. (The `stdlib/log` engine + builtin and the middleware +
+example wiring landed as two stacked changes.)
 
 ### 4.1 The one new builtin — `wall_time_micros`
 
@@ -208,11 +210,17 @@ export fn response_status(resp: HttpServerResponse) -> Int =
   match resp with | HttpServerResponse status _ _ -> status
 ```
 
-Then the access-log middleware, in `examples/http_web_server.sprout`:
+Then the access-log middleware. **As landed** (a refinement over this section's
+original "in the example" sketch): it lives in a small `stdlib/http_middleware`
+module rather than inline in the example, so its timing/emit logic is
+unit-testable (`tests/stdlib/test_http_middleware.spr` drives it over a
+`Ref`-backed capture logger). The module imports both `stdlib.http_server` and
+`stdlib.log`; `stdlib.http_server` itself stays free of any logging dependency.
 
 ```
-import stdlib.log as log
+# stdlib/http_middleware.sprout
 import stdlib.http_server (response_status, ...)
+import stdlib.log as log
 
 fn with_logging(lg: log.Logger, handler: HttpRequest -> HttpServerResponse !{IO})
               -> HttpRequest -> HttpServerResponse !{IO} =
@@ -227,20 +235,21 @@ fn with_logging(lg: log.Logger, handler: HttpRequest -> HttpServerResponse !{IO}
           ("dur_us", int_to_string(fin - start)) ])
       resp
 
-# wiring, in main:
-#   lg = log.stderr_logger(log.Info)
+# wiring, in examples/http_web_server.sprout main:
+#   lg = log.stderr_logger(log.Info)          # threaded through boot -> serve_crud
 #   serve(8082, with_logging(lg, \req -> dispatch(rs, req)))
 ```
 
 Two clocks, used correctly and deliberately: **monotonic** (`time_now_micros`)
 for the *duration* (immune to NTP steps mid-request), **wall-clock**
-(`wall_time_micros`, inside `log`) for the line *timestamp*. The example's
-existing startup `print(...)` calls move to `log.error`/`log.info` on stderr.
+(`wall_time_micros`, inside `log`) for the line *timestamp*. The example threads
+the logger as an explicit capability (like its `store` and templates) and its
+startup `print(...)` calls move to `log.error` on stderr.
 
-`with_logging` lives in the example, not `stdlib.http_server`, so the server
-module keeps zero dependency on `stdlib.log`: the server is the mechanism,
-logging is a policy the application chooses to compose in. If a second example
-wants it, it graduates to a thin `stdlib/http_middleware.sprout`.
+The server module keeps zero dependency on `stdlib.log`: the server is the
+mechanism, `stdlib.http_middleware` is the opt-in policy layer that depends on
+both. Verified live — the running example emits one line per request:
+`2026-…Z INFO request method=GET path=/users status=200 dur_us=28`.
 
 ## 5. Syntax and semantics impact
 
@@ -293,8 +302,11 @@ None. No new diagnostics. A miswired sink or a bad field is ordinary Sprout code
   instants (the epoch `0` → `1970-01-01T00:00:00Z`; a leap-year date; a
   post-2000 date; end-of-year rollover). This is the correctness-critical pure
   function and is tested independently of the clock.
-- `wall_time_micros` sanity: a test that two successive calls are `>= 0` and
-  non-decreasing within a run (kept loose — wall clock can step).
+- `tests/stdlib/test_http_middleware.spr` — `response_status` returns the
+  status; `with_logging` returns the handler's response unchanged and emits one
+  INFO record carrying `method`/`path`/`status`/`dur_us`, with the logged status
+  reflecting the handler's actual response (200 and 400 cases). Driven over a
+  `Ref`-backed capture logger and a parsed request — no sockets, no stderr.
 - **Follow-up noted, not blocking:** value-escaping for fields containing spaces
   or `=` (filed to `BACKLOG.md`); a JSON-lines formatter variant (the sink and
   format are already decoupled, so this is a new formatter, not an API change).

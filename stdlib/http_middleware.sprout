@@ -1,0 +1,34 @@
+module stdlib.http_middleware
+
+import stdlib.http_server (HttpRequest, HttpServerResponse, response_status, request_method, request_path)
+import stdlib.log as log
+
+# Opt-in middleware for the HTTP server. A middleware is just a handler
+# transformer — `Handler -> Handler` — so composing one is ordinary higher-order
+# function application, not framework machinery. This module is the policy layer
+# that depends on BOTH stdlib.http_server and stdlib.log; stdlib.http_server
+# itself stays free of any logging dependency (the server is the mechanism,
+# logging is a policy the app chooses to compose in). Design: docs/logging-v0.md.
+
+# Wrap a handler so every request emits one INFO access-log record — method,
+# path, status, and duration — to `lg`, returning the handler's response
+# unchanged. Duration is measured with the MONOTONIC clock (time_now_micros), so
+# it is immune to a wall-clock/NTP step mid-request; the log line's timestamp
+# (added by stdlib.log) uses the wall clock. A gated-out logger (level above
+# Info) still runs the handler and the timing — only the emit is skipped.
+export fn with_logging(lg: log.Logger, handler: HttpRequest -> HttpServerResponse !{IO}) -> HttpRequest -> HttpServerResponse !{IO} =
+  \req ->
+    do
+      start <- time_now_micros()
+      resp <- handler(req)
+      fin <- time_now_micros()
+      log.info_f(lg, "request", access_fields(req, resp, fin - start))
+      resp
+
+fn access_fields(req: HttpRequest, resp: HttpServerResponse, dur_us: Int) -> Vec (String, String) =
+  vec_from_list([
+    ("method", request_method(req)),
+    ("path", request_path(req)),
+    ("status", int_to_string(response_status(resp))),
+    ("dur_us", int_to_string(dur_us))
+  ])

@@ -241,6 +241,12 @@ fn assemble_response(line: String, headers: Dict String, body: String) -> String
 export fn response(status: Int, body: String) -> HttpServerResponse =
   HttpServerResponse(status, dict_empty(), body)
 
+# The numeric status of a response — the accessor a logging/metrics middleware
+# needs, since the HttpServerResponse constructor is not exported for matching.
+export fn response_status(resp: HttpServerResponse) -> Int =
+  match resp with
+  | HttpServerResponse status _ _ -> status
+
 export fn ok(body: String) -> HttpServerResponse =
   response(200, body)
 

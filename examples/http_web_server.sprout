@@ -1,6 +1,8 @@
 module examples.http_web_server
 
 import stdlib.http_server (HttpRequest, HttpServerResponse, Route, dispatch, serve, ok, bad_request, not_found, response, with_header, see_other, request_method, request_path, request_body, query_param, form_param)
+import stdlib.http_middleware (with_logging)
+import stdlib.log as log
 import stdlib.template (Template, compile, render)
 import stdlib.json (Json, JsonObject, JsonObjectCons, JsonObjectNil, string, int, array_from_list)
 import stdlib.string as string
@@ -204,8 +206,12 @@ fn routes(list_tmpl: Template, form_tmpl: Template, store: Ref Store) -> Vec Rou
     Route("POST", "/echo", echo)
   ])
 
-fn serve_crud(list_tmpl: Template, form_tmpl: Template, store: Ref Store) -> Unit !{IO} =
-  serve(8082, \req -> dispatch(rs, req))
+# The logger is threaded in as an explicit capability (like `store` and the
+# templates) — there is no ambient global logger. `with_logging` wraps the
+# dispatch handler so every request emits one INFO line to stderr; stdout stays
+# clean for the program's own output.
+fn serve_crud(lg: log.Logger, list_tmpl: Template, form_tmpl: Template, store: Ref Store) -> Unit !{IO} =
+  serve(8082, with_logging(lg, \req -> dispatch(rs, req)))
 where
   rs = routes(list_tmpl, form_tmpl, store)
 
@@ -216,23 +222,27 @@ where
 fn list_template_path() -> String = "examples/templates/users_list.html"
 fn form_template_path() -> String = "examples/templates/user_form.html"
 
+# Startup diagnostics go through the logger (stderr) at Error level, not `print`
+# (stdout) — the same logger the request middleware uses.
 fn main() -> Unit !{IO} =
   match read_file(list_template_path()) with
-  | Err msg -> print(`failed to read ${list_template_path()}: ${msg}`)
+  | Err msg -> log.error(lg, `failed to read ${list_template_path()}: ${msg}`)
   | Ok list_src ->
       match read_file(form_template_path()) with
-      | Err msg -> print(`failed to read ${form_template_path()}: ${msg}`)
-      | Ok form_src -> compile_and_serve(list_src, form_src)
+      | Err msg -> log.error(lg, `failed to read ${form_template_path()}: ${msg}`)
+      | Ok form_src -> compile_and_serve(lg, list_src, form_src)
+where
+  lg = log.stderr_logger(log.Info)
 
-fn compile_and_serve(list_src: String, form_src: String) -> Unit !{IO} =
+fn compile_and_serve(lg: log.Logger, list_src: String, form_src: String) -> Unit !{IO} =
   match compile(list_src) with
-  | Err _ -> print("failed to compile the users_list template")
+  | Err _ -> log.error(lg, "failed to compile the users_list template")
   | Ok list_tmpl ->
       match compile(form_src) with
-      | Err _ -> print("failed to compile the user_form template")
-      | Ok form_tmpl -> boot(list_tmpl, form_tmpl)
+      | Err _ -> log.error(lg, "failed to compile the user_form template")
+      | Ok form_tmpl -> boot(lg, list_tmpl, form_tmpl)
 
-fn boot(list_tmpl: Template, form_tmpl: Template) -> Unit !{IO} =
+fn boot(lg: log.Logger, list_tmpl: Template, form_tmpl: Template) -> Unit !{IO} =
   do
     store <- ref_new(seed_store())
-    serve_crud(list_tmpl, form_tmpl, store)
+    serve_crud(lg, list_tmpl, form_tmpl, store)

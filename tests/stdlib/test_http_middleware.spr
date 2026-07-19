@@ -1,0 +1,66 @@
+import stdlib.test (TestState, new_state, assert_eq, assert_true, summary)
+import stdlib.http_server (HttpRequest, HttpServerResponse, ok, bad_request, response_status, parse, request_path)
+import stdlib.http_middleware (with_logging)
+import stdlib.log (Logger, Info, logger_with_sink)
+import stdlib.string as string
+
+# stdlib.http_middleware.with_logging wraps a handler into an access-logging
+# handler: it times the handler (monotonic clock), runs it, and emits one INFO
+# record — method, path, status, dur_us — to the logger, returning the handler's
+# response UNCHANGED. Driven here over a Ref-backed capture logger and a parsed
+# request, so it is tested with no sockets and no stderr; the emitted line carries
+# a live wall-clock timestamp, so assertions match substrings, not the whole line.
+
+fn has(hay: String, needle: String) -> Bool =
+  match string.find(hay, needle) with
+  | Nothing -> false
+  | Just _ -> true
+
+fn append_line(buf: Ref String, line: String) -> Unit !{IO} =
+  do
+    cur <- ref_read(buf)
+    ref_write(buf, string.concat(cur, string.concat(line, "\n")))
+
+fn capture_logger(buf: Ref String) -> Logger =
+  logger_with_sink(Info, \line -> append_line(buf, line))
+
+fn ok_handler(req: HttpRequest) -> HttpServerResponse !{IO} = ok("hi")
+fn bad_handler(req: HttpRequest) -> HttpServerResponse !{IO} = bad_request("nope")
+
+# Apply the wrapped handler to a parsed request, returning its response.
+fn drive(buf: Ref String, handler: HttpRequest -> HttpServerResponse !{IO}, raw: String) -> HttpServerResponse !{IO} =
+  match parse(raw) with
+  | Err _ -> bad_request("PARSE_ERR")
+  | Ok req ->
+      let wrapped = with_logging(capture_logger(buf), handler)
+      in wrapped(req)
+
+fn main() -> Unit !{IO} =
+  do
+    state <- new_state()
+
+    # --- response_status accessor (http_server) --------------------------
+    assert_eq(state, "response_status of ok is 200", response_status(ok("hi")), 200)
+    assert_eq(state, "response_status of bad_request is 400", response_status(bad_request("x")), 400)
+
+    # --- with_logging passes the response through unchanged ---------------
+    buf <- ref_new("")
+    resp <- drive(buf, ok_handler, "GET /users HTTP/1.1\r\n\r\n")
+    assert_eq(state, "wrapped handler returns the response unchanged", response_status(resp), 200)
+
+    # --- with_logging emits one structured access-log record --------------
+    line <- ref_read(buf)
+    assert_true(state, "logs the level and event", has(line, "INFO request"))
+    assert_true(state, "logs the method", has(line, "method=GET"))
+    assert_true(state, "logs the path", has(line, "path=/users"))
+    assert_true(state, "logs the status", has(line, "status=200"))
+    assert_true(state, "logs a duration field", has(line, "dur_us="))
+
+    # --- the logged status reflects the handler's actual response ---------
+    buf2 <- ref_new("")
+    resp2 <- drive(buf2, bad_handler, "GET /oops HTTP/1.1\r\n\r\n")
+    assert_eq(state, "a 400 handler's status is preserved", response_status(resp2), 400)
+    line2 <- ref_read(buf2)
+    assert_true(state, "the 400 status is logged", has(line2, "status=400"))
+
+    summary(state)
