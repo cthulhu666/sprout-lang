@@ -1,0 +1,86 @@
+import stdlib.http_server (HttpRequest, HttpServerResponse, parse, ok, response_status)
+import stdlib.http_middleware (with_logging)
+import stdlib.log (Logger, Info, stderr_logger, logger_with_sink, format_iso8601)
+import stdlib.string as string
+
+# Per-request overhead of the stdlib.http_middleware access-log middleware,
+# measured in isolation (no sockets, no wrk). Each variant calls the handler in a
+# tight loop and self-times with the monotonic clock, reporting ns/op.
+#
+# The end-to-end wrk test cannot resolve this: the example server is
+# Connection: close, so TCP connect/accept/close dominates each request and
+# run-to-run noise (~25%) dwarfs the middleware's few microseconds. This isolates
+# the marginal cost.
+#
+# Run:  bench/http_log_middleware/bench.sh
+# (stderr is sent to /dev/null there, so the stderr-sink variant's writes are
+# discarded and only the printed ns/op reaches stdout.)
+
+fn handler(req: HttpRequest) -> HttpServerResponse !{IO} = ok("ok")
+
+# A sink that discards: exercises the full format path with no write syscall.
+fn noop_logger() -> Logger = logger_with_sink(Info, \_ -> ())
+
+fn run_loop(h: HttpRequest -> HttpServerResponse !{IO}, req: HttpRequest, n: Int, acc: Int) -> Int !{IO} =
+  if n <= 0 then acc
+  else
+    do
+      resp <- h(req)
+      run_loop(h, req, n - 1, acc + response_status(resp))
+
+fn report(label: String, us: Int, n: Int) -> Unit !{IO} =
+  print(`${label}  ${int_to_string(us * 1000 / n)} ns/op`)
+
+fn bench_handler(label: String, h: HttpRequest -> HttpServerResponse !{IO}, req: HttpRequest, n: Int) -> Unit !{IO} =
+  do
+    t0 <- time_now_micros()
+    checksum <- run_loop(h, req, n, 0)
+    t1 <- time_now_micros()
+    report(label, t1 - t0, n)
+
+# --- cost breakdown: the three clock reads and the ISO-8601 formatter ---------
+fn clock_loop(n: Int, acc: Int) -> Int !{IO} =
+  if n <= 0 then acc
+  else
+    do
+      t <- time_now_micros()
+      clock_loop(n - 1, acc + t)
+
+fn wall_loop(n: Int, acc: Int) -> Int !{IO} =
+  if n <= 0 then acc
+  else
+    do
+      t <- wall_time_micros()
+      wall_loop(n - 1, acc + t)
+
+fn fmt_loop(n: Int, acc: Int) -> Int !{IO} =
+  if n <= 0 then acc
+  else fmt_loop(n - 1, acc + string.length(format_iso8601(1752900000000000 + n)))
+
+fn bench_pure(label: String, kind: Int, n: Int) -> Unit !{IO} =
+  do
+    t0 <- time_now_micros()
+    c <- run_pure(kind, n)
+    t1 <- time_now_micros()
+    report(label, t1 - t0, n)
+
+fn run_pure(kind: Int, n: Int) -> Int !{IO} =
+  if kind == 0 then clock_loop(n, 0)
+  else if kind == 1 then wall_loop(n, 0)
+  else fmt_loop(n, 0)
+
+fn main() -> Unit !{IO} =
+  match parse("GET /health HTTP/1.1\r\n\r\n") with
+  | Err _ -> print("parse failed")
+  | Ok req ->
+      do
+        print("-- middleware overhead (per request) --")
+        bench_handler("plain (no middleware)   :", \r -> handler(r), req, n)
+        bench_handler("with_logging noop-sink  :", with_logging(noop_logger(), \r -> handler(r)), req, n)
+        bench_handler("with_logging stderr-sink:", with_logging(stderr_logger(Info), \r -> handler(r)), req, n)
+        print("-- cost breakdown (per op) --")
+        bench_pure("time_now_micros (monotonic):", 0, n)
+        bench_pure("wall_time_micros (realtime):", 1, n)
+        bench_pure("format_iso8601 (pure)      :", 2, n)
+where
+  n = 1000000
