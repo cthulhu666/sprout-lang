@@ -1,0 +1,35 @@
+import stdlib.test (TestState, new_state, assert_eq, summary)
+
+# Regression for the return-first / input-later constraint-ordering bug: a
+# RETURN-position constraint declared BEFORE an input-position one must still
+# receive its own hidden dict.
+#
+# `Default a`'s var is return-only, so it is UNRESOLVED at inference and injects
+# no dict — leaving `existing_dicts` holding only `Tag`'s dict. A POSITIONAL
+# post-pass mapped existing_dicts[0] (Tag's dict) onto Default's slot → wrong
+# dict → crash. The class-matched post-pass pairs each injected dict with the
+# constraint of the SAME class and fills Default's slot from the concrete return
+# type instead. Without the fix this file crashes at runtime.
+
+class Default a {
+  fn def() -> a
+}
+class Tag a {
+  fn tag(x: a) -> Int
+}
+
+instance Default Int {fn def() -> Int = 42}
+instance Tag Bool {fn tag(x: Bool) -> Int = if x then 1 else 0}
+
+# where-clause: return-position constraint (Default a) BEFORE the input-position
+# one (Tag b) — the ordering that triggered the mis-mapping.
+fn pick(x: b) -> a where Default a, Tag b =
+  if tag(x) > 0 then def() else def()
+
+fn main() -> Unit !{IO} =
+  do
+    state <- new_state()
+    # int_to_string forces pick's return `a` to Int → Default resolves to Default Int.
+    assert_eq(state, "return-first constraint gets its own dict (true)", int_to_string(pick(true)), "42")
+    assert_eq(state, "return-first constraint gets its own dict (false)", int_to_string(pick(false)), "42")
+    summary(state)
