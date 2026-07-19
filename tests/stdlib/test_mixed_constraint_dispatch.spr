@@ -1,0 +1,31 @@
+import stdlib.test (TestState, new_state, assert_eq, summary)
+import stdlib.collections (Foldable, List, Vec, vec_length, foldable_to_vec)
+
+# Mixed-constraint dispatch guard for the §13.3(B) S3 flip: an externally-called
+# constrained fn whose `where` clause mixes a TYVAR constraint (Label a, a
+# polymorphic scheme var) with a CONCRETE-CTOR constraint (Foldable List). Both
+# take hidden dict params and must be injected at the call site, in where-clause
+# order. This is the exact case the positional-only (Int, String) field could not
+# encode (concrete-ctor has no scheme-var position) and the head-token field can.
+#
+# Distinct per-instance Label output ("I"/"B") plus the Foldable count makes a
+# dropped, reordered, or mis-resolved dict observable as wrong output rather than
+# only a crash. Green on the marker path (pre-S3) and the field path (post-S3).
+
+class Label a {
+  fn label(x: a) -> String
+}
+instance Label Int {fn label(x: Int) -> String = "I"}
+instance Label Bool {fn label(x: Bool) -> String = "B"}
+
+# tyvar constraint at scheme-var position 0, concrete-ctor constraint on List.
+fn tagged_count(x: a, xs: List Int) -> String where Label a, Foldable List =
+  label(x) ++ ":" ++ int_to_string(vec_length(foldable_to_vec(xs)))
+
+fn main() -> Unit !{IO} =
+  do
+    state <- new_state()
+    assert_eq(state, "mixed dispatch: Bool tag + 3-elem count", tagged_count(true, [1, 2, 3]), "B:3")
+    assert_eq(state, "mixed dispatch: Int tag + 2-elem count", tagged_count(7, [10, 20]), "I:2")
+    assert_eq(state, "mixed dispatch: empty list", tagged_count(false, []), "B:0")
+    summary(state)

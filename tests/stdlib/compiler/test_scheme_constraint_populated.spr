@@ -1,0 +1,99 @@
+module main
+import stdlib.test (TestState, new_state, assert_eq, summary)
+import stdlib.compiler.lexer as lexer
+import stdlib.compiler.parser as parser
+import stdlib.compiler.checker as checker
+import stdlib.compiler.typed_ast as typed_ast
+import stdlib.compiler.types as types
+import stdlib.compiler.source as source
+
+# §13.3(B) consolidation, S2 (dual-write): after body inference the generalized
+# Scheme folded into the global env must carry its class constraints as
+# (scheme-var position, class name) pairs — the same positional identity the
+# @constrained_N markers use. Before S2 the field is Nil; this test pins the
+# populated value. Consumers still read the env markers (byte-identical), so the
+# only observable change is the Scheme field checked here.
+
+fn run_check(src: String) -> typed_ast.TypedResult !{IO} =
+  match lexer.tokenize(src) with
+  | Err _ -> typed_ast.TypedErr(source.SourcePos(0, 0, 0), "lex error")
+  | Ok toks ->
+      match parser.parse_program(toks) with
+      | Err _ -> typed_ast.TypedErr(source.SourcePos(0, 0, 0), "parse error")
+      | Ok prog -> checker.typecheck_typed(prog, Nil)
+
+# Render a constraint list to a stable string ("<head_token>:<class>;" per entry).
+# Stage-0 dispatch cannot resolve Eq for (String, String) inside a generic List,
+# so we compare rendered strings rather than assert_eq on the list directly.
+fn render_constraints(cs: List (String, String)) -> String =
+  match cs with
+  | Nil -> ""
+  | Cons pair rest ->
+      match pair with
+      | (head, cls) -> head ++ ":" ++ cls ++ ";" ++ render_constraints(rest)
+
+# The rendered constraints of the named fn's scheme in the checked env,
+# or a diagnostic marker when the program failed to check / the name is absent.
+fn constraints_str(r: typed_ast.TypedResult, name: String) -> String =
+  match r with
+  | typed_ast.TypedErr _ msg -> "<check-failed: " ++ msg ++ ">"
+  | typed_ast.TypedOk _ env ->
+      match dict_get(name, env) with
+      | Just s -> render_constraints(types.scheme_constraints(s))
+      | Nothing -> "<no-such-fn>"
+
+fn main() -> Unit !{IO} =
+  do
+    state <- new_state()
+
+    # Single constraint on the sole scheme var — head_token "#pos:0".
+    let src1 = "class MyShow a {\n  fn myshow(x: a) -> String\n}\n" ++
+               "fn show_via(x: a) -> String where MyShow a = myshow(x)\n"
+    r1 <- run_check(src1)
+    assert_eq(state, "single tyvar constraint at position 0",
+              constraints_str(r1, "show_via"), "#pos:0:MyShow;")
+
+    # Two constraints on distinct scheme vars — "#pos:0" and "#pos:1", clause order.
+    # Body keeps both constraints live without `++` (a bare module has no
+    # Semigroup String): force myname(y) via a let-binding, return myshow(x).
+    let src2 = "class MyShow a {\n  fn myshow(x: a) -> String\n}\n" ++
+               "class MyName b {\n  fn myname(y: b) -> String\n}\n" ++
+               "fn show2(x: a, y: b) -> String where MyShow a, MyName b =\n" ++
+               "  let ignored = myname(y)\n" ++
+               "  in myshow(x)\n"
+    r2 <- run_check(src2)
+    assert_eq(state, "two tyvar constraints at positions 0 and 1",
+              constraints_str(r2, "show2"), "#pos:0:MyShow;#pos:1:MyName;")
+
+    # An unconstrained polymorphic fn carries an empty constraint list.
+    let src3 = "fn ident(x: a) -> a = x\n"
+    r3 <- run_check(src3)
+    assert_eq(state, "unconstrained fn has empty constraints",
+              constraints_str(r3, "ident"), "")
+
+    # Concrete-constructor constraint (`where Fold Box`, Box a concrete ctor): the
+    # complete field captures it by stable name — NOT a "#pos:" token — even though
+    # canonicalize writes no positional marker for it. This is the completeness the
+    # (String, String) head-token model adds over the (Int, String) positional one.
+    let src4 = "class Fold f {\n  fn folen(x: f a) -> Int\n}\n" ++
+               "type Box a = | Box a\n" ++
+               "instance Fold Box {\n  fn folen(x: Box a) -> Int = 1\n}\n" ++
+               "fn use_box(xs: Box a) -> Int where Fold Box = folen(xs)\n"
+    r4 <- run_check(src4)
+    assert_eq(state, "concrete-ctor constraint captured by name",
+              constraints_str(r4, "use_box"), "Box:Fold;")
+
+    # Mixed: one tyvar constraint (#pos) and one concrete-ctor constraint (name),
+    # in where-clause order — the case the positional-only field could not encode.
+    let src5 = "class Show2 a {\n  fn sh(x: a) -> String\n}\n" ++
+               "class Fold2 f {\n  fn folen2(x: f a) -> Int\n}\n" ++
+               "type Bag a = | Bag a\n" ++
+               "instance Fold2 Bag {\n  fn folen2(x: Bag a) -> Int = 1\n}\n" ++
+               "fn mixed(x: a, ys: Bag b) -> String where Show2 a, Fold2 Bag =\n" ++
+               "  let ignored = folen2(ys)\n" ++
+               "  in sh(x)\n"
+    r5 <- run_check(src5)
+    assert_eq(state, "mixed tyvar + concrete-ctor constraints in order",
+              constraints_str(r5, "mixed"), "#pos:0:Show2;Bag:Fold2;")
+
+    summary(state)

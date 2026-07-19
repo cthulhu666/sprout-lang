@@ -125,8 +125,22 @@ export fn tyvar_eq(a: TyVarId, b: TyVarId) -> Bool =
 # instantiated at each use site.
 
 export type Scheme (..) =
-  | Scheme (List String) (List String) Type Effect
-  # Scheme type_vars effect_vars body effects
+  | Scheme (List String) (List String) Type Effect (List (String, String))
+  # Scheme type_vars effect_vars body effects constraints
+  #
+  # constraints: the scheme's class constraints as (head_token, class name)
+  # pairs, in where-clause order — the single source of truth that the
+  # @constrained/@fwd/@eta_fwd env marker families collapse into (§13.3(B)
+  # consolidation). One entry per constraint (complete + ordered), so a consumer
+  # can reconstruct the exact hidden-dict injection sequence. head_token is the
+  # SAME token the @constrained markers encode:
+  #   - "#pos:<k>" — the constraint var is generalized at type_vars position k
+  #     (stable across generalize/instantiate; decode via list_nth_or scheme_vars);
+  #   - "<Name>"   — a concrete constructor head (e.g. "List") or a non-generalized
+  #     var, resolved by its stable name;
+  #   - ""         — a headless constraint (class-only marker), resolved without a
+  #     head var.
+  # Empty for a monomorphic or unconstrained scheme.
 
 # ---------------------------------------------------------------------------
 # Commonly-used type constants
@@ -148,19 +162,32 @@ export fn effect_io() -> Effect = EffectIO
 # ---------------------------------------------------------------------------
 
 export fn mono(t: Type) -> Scheme =
-  Scheme(Nil, Nil, t, EffectPure)
+  Scheme(Nil, Nil, t, EffectPure, Nil)
 
 export fn scheme_vars(s: Scheme) -> List String =
-  match s with | Scheme vs _ _ _ -> vs
+  match s with | Scheme vs _ _ _ _ -> vs
 
 export fn scheme_effect_vars(s: Scheme) -> List String =
-  match s with | Scheme _ evs _ _ -> evs
+  match s with | Scheme _ evs _ _ _ -> evs
 
 export fn scheme_type(s: Scheme) -> Type =
-  match s with | Scheme _ _ t _ -> t
+  match s with | Scheme _ _ t _ _ -> t
 
 export fn scheme_effects(s: Scheme) -> Effect =
-  match s with | Scheme _ _ _ e -> e
+  match s with | Scheme _ _ _ e _ -> e
+
+# The scheme's class constraints as (head_token, class name) pairs, in
+# where-clause order. Empty for a monomorphic or unconstrained scheme. Single
+# source of truth for the @constrained/@fwd/@eta_fwd marker families (§13.3(B)
+# consolidation). See the Scheme type declaration for head_token's encoding.
+export fn scheme_constraints(s: Scheme) -> List (String, String) =
+  match s with | Scheme _ _ _ _ cs -> cs
+
+# Replace a scheme's constraint field, preserving the other four. Used at the
+# FnDecl generalize site to attach the (head_token, class) pairs computed during
+# body inference (§13.3(B) consolidation).
+export fn scheme_with_constraints(s: Scheme, cs: List (String, String)) -> Scheme =
+  match s with | Scheme tvs evs t e _ -> Scheme(tvs, evs, t, e, cs)
 
 # ---------------------------------------------------------------------------
 # Free type variables
@@ -400,14 +427,30 @@ instance ToString Type {
 
 fn scheme_eq(left: Scheme, right: Scheme) -> Bool =
   match left with
-  | Scheme tv1 ev1 t1 e1 -> match right with
-      | Scheme tv2 ev2 t2 e2 ->
+  | Scheme tv1 ev1 t1 e1 c1 -> match right with
+      | Scheme tv2 ev2 t2 e2 c2 ->
           if string_list_eq(tv1, tv2) then
             if string_list_eq(ev1, ev2) then
-              if type_eq(t1, t2) then effect_eq(e1, e2)
+              if type_eq(t1, t2) then
+                if effect_eq(e1, e2) then constraints_eq(c1, c2)
+                else false
               else false
             else false
           else false
+
+# Element-wise equality of (head_token, class-name) constraint lists.
+fn constraints_eq(a: List (String, String), b: List (String, String)) -> Bool =
+  match a with
+  | Nil -> match b with | Nil -> true | Cons _ _ -> false
+  | Cons pair1 ra -> match b with
+      | Nil -> false
+      | Cons pair2 rb ->
+          match pair1 with
+          | (p1, c1) -> match pair2 with
+              | (p2, c2) ->
+                  if p1 == p2 then
+                    if c1 == c2 then constraints_eq(ra, rb) else false
+                  else false
 
 instance Eq Scheme {
   fn eq(left: Scheme, right: Scheme) -> Bool = scheme_eq(left, right)

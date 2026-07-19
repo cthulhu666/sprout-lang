@@ -39,8 +39,24 @@ import stdlib.compiler.source as source
 # O(n) where n = total atoms in the scheme.
 export fn encode_scheme(s: types.Scheme) -> String =
   match s with
-  | types.Scheme tvars evars body effect ->
-      string_concat_many(["(Scheme ", encode_str_list(tvars), " ", encode_str_list(evars), " ", encode_type(body), " ", encode_effect(effect), ")"])
+  | types.Scheme tvars evars body effect constraints ->
+      string_concat_many(["(Scheme ", encode_str_list(tvars), " ", encode_str_list(evars), " ", encode_type(body), " ", encode_effect(effect), " ", encode_constraints(constraints), ")"])
+
+# Constraints wire form: `(<pair> <pair> ...)`, each pair `(<head_token> <class>)`.
+# Empty = `()`.  head_token is an atom ("#pos:<k>" | "<Name>" | "#none"); all are
+# atom-safe (no whitespace/parens). Mirrors encode_str_list / encode_type_list.
+fn encode_constraints(cs: List (String, String)) -> String =
+  string_concat_many(["(", join_constraints(cs), ")"])
+
+fn join_constraints(cs: List (String, String)) -> String =
+  match cs with
+  | Nil -> ""
+  | Cons c Nil -> encode_constraint(c)
+  | Cons c rest -> string_concat_many([encode_constraint(c), " ", join_constraints(rest)])
+
+fn encode_constraint(c: (String, String)) -> String =
+  match c with
+  | (head, cls) -> string_concat_many(["(", head, " ", cls, ")"])
 
 export fn encode_type(t: types.Type) -> String =
   match t with
@@ -166,8 +182,27 @@ fn decode_scheme_body(s: String, bytes: Bytes, i: Int, total: Int) -> Maybe(type
       Just(evars, k3) = decode_str_list_at(s, bytes, skip_ws(s, bytes, k2, total), total) else Nothing
       Just(body, k4) = decode_type_at(s, bytes, skip_ws(s, bytes, k3, total), total) else Nothing
       Just(effect, k5) = decode_effect_at(s, bytes, skip_ws(s, bytes, k4, total), total) else Nothing
-      Just end = expect_char(s, bytes, skip_ws(s, bytes, k5, total), total, ')') else Nothing
-  in Just((types.Scheme(tvars, evars, body, effect), end))
+      Just(constraints, k6) = decode_constraints_at(s, bytes, skip_ws(s, bytes, k5, total), total) else Nothing
+      Just end = expect_char(s, bytes, skip_ws(s, bytes, k6, total), total, ')') else Nothing
+  in Just((types.Scheme(tvars, evars, body, effect, constraints), end))
+
+# Parse `(<pair> <pair> ...)` where each pair is `(<head_token> <class>)`.
+fn decode_constraints_at(s: String, bytes: Bytes, i: Int, total: Int) -> Maybe (List (String, String), Int) =
+  let Just j = expect_char(s, bytes, i, total, '(') else Nothing
+  in decode_constraint_items(s, bytes, skip_ws(s, bytes, j, total), total, Nil)
+
+fn decode_constraint_items(s: String, bytes: Bytes, i: Int, total: Int, acc: List (String, String)) -> Maybe (List (String, String), Int) =
+  match expect_char(s, bytes, i, total, ')') with
+  | Just end -> Just((list_reverse(acc), end))
+  | Nothing ->
+      let Just(c, k) = decode_constraint_at(s, bytes, i, total) else Nothing
+      in decode_constraint_items(s, bytes, skip_ws(s, bytes, k, total), total, Cons(c, acc))
+
+fn decode_constraint_at(s: String, bytes: Bytes, i: Int, total: Int) -> Maybe((String, String), Int) =
+  let Just j = expect_char(s, bytes, i, total, '(') else Nothing
+      Just(head, k) = read_atom(s, bytes, skip_ws(s, bytes, j, total), total) else Nothing
+      Just(cls, end) = read_atom_then_close(s, bytes, k, total) else Nothing
+  in Just(((head, cls), end))
 
 fn decode_type_at(s: String, bytes: Bytes, i: Int, total: Int) -> Maybe(types.Type, Int) =
   let Just j = expect_char(s, bytes, i, total, '(') else Nothing
@@ -466,12 +501,14 @@ fn decode_iface_v2_tail(s: String, bytes: Bytes, i: Int, total: Int, version: In
       Just end = expect_char(s, bytes, skip_ws(s, bytes, n4, total), total, ')') else Nothing
   in Just((IfaceFile(version, mod_name, schemes, ctors, classes, instances), end))
 
-# v2: accept only "2" — future versions add to the if-chain. Using string
-# equality (rather than parse_int) avoids parse_int's partial behaviour on
-# non-digit input. v1 (schemes-only) was retired when metadata tables
-# (ctors/classes/instances) were added; no in-tree consumer relied on it.
+# Accept only the current version — future bumps add to the if-chain. Using
+# string equality (rather than parse_int) avoids parse_int's partial behaviour
+# on non-digit input. v1 (schemes-only) retired when metadata tables were added;
+# v2→v3 added the Scheme constraint field; v3→v4 changed the constraint pair wire
+# form from (position, class) to (head_token, class). Old ifaces are rejected
+# loudly (the Scheme wire format changed).
 fn decode_iface_version(s: String) -> Maybe Int =
-  if s == "2" then Just(2) else Nothing
+  if s == "4" then Just(4) else Nothing
 
 fn decode_named_scheme_list_at(s: String, bytes: Bytes, i: Int, total: Int) -> Maybe (List NamedScheme, Int) =
   match expect_char(s, bytes, i, total, '(') with
@@ -606,7 +643,7 @@ fn te_outermost_name(te: ast.TypeExpr) -> String =
 fn method_scheme(type_params: List String, params: List ast.Param, ret: ast.TypeExpr, effects: Maybe (List String)) -> types.Scheme =
   types.Scheme(type_params, Nil,
     params_to_func_type(params, typeexpr_to_type_with_vars(ret, make_local_vars(type_params)), make_local_vars(type_params)),
-    effect_from_maybe_labels(effects))
+    effect_from_maybe_labels(effects), Nil)
 
 fn effect_from_maybe_labels(labels: Maybe (List String)) -> types.Effect =
   match labels with

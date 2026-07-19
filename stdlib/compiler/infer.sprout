@@ -254,7 +254,8 @@ fn scheme_from_fn_parts_inner(
     type_params,
     Nil,
     build_fn_type(param_types_from_decl(params, local_vars), ret_from_maybe_with_vars(ret_type_maybe, local_vars)),
-    effect_from_maybe_labels(effects_maybe)
+    effect_from_maybe_labels(effects_maybe),
+    Nil
   )
   where local_vars = build_type_var_dict(type_params, alias_env)
 
@@ -340,7 +341,7 @@ fn register_one_ctor(
   | ast.TypeConstructor name fields ->
       dict_set(
         name,
-        types.Scheme(type_params, Nil, ctor_fn_type(fields, local_vars, result_type), types.EffectPure),
+        types.Scheme(type_params, Nil, ctor_fn_type(fields, local_vars, result_type), types.EffectPure, Nil),
         env
       )
 
@@ -514,7 +515,7 @@ fn value_var_node(name: String, t: types.Type, pos: source.SourcePos, env: Dict 
   | Nothing -> typed_ast.TVar(name, t, pos)
   | Just marker ->
       match marker with
-      | types.Scheme _ _ class_type _ ->
+      | types.Scheme _ _ class_type _ _ ->
           match class_type with
           | types.TConst class_name ->
               typed_ast.TMethodRef(name, types.type_id_name(class_name), t, pos, typed_ast.EvUnresolved)
@@ -779,10 +780,26 @@ fn check_call_constraint(
   | ast.VarExpr method_name _ ->
       match dict_get("@class:" ++ method_name, env) with
       | Nothing ->
-          inject_constrained_fn_dicts(method_name, 0, prog_to_fresh, env, typed_callee, typed_args, subst, ret_t, s3, es3, call_eff, pos)
+          # §13.3(B): the callee's Scheme carries the COMPLETE (head_token, class)
+          # constraint list — the single source of truth for its hidden dicts.
+          # S4 populates it for every constrained binding (generalized external
+          # calls, the recursion self-binding, and the pre-scan forward-ref entry),
+          # so an empty list means the callee is genuinely unconstrained → no dicts.
+          match constrained_fn_field(method_name, env) with
+          | Nil ->
+              InferOk(typed_ast.TCall(typed_callee, typed_args, ret_t, pos), s3, es3, call_eff)
+          | cs ->
+              inject_constrained_fn_dicts_via_field(method_name, cs, prog_to_fresh, env, typed_callee, typed_args, subst, ret_t, s3, es3, call_eff, pos)
       | Just class_marker ->
           check_instance_for_marker(class_marker, method_name, typed_callee, typed_args, subst, env, ret_t, s3, es3, call_eff, pos)
   | _ -> InferOk(typed_ast.TCall(typed_callee, typed_args, ret_t, pos), s3, es3, call_eff)
+
+# The callee's Scheme constraint list, or Nil when it has no scheme (unknown /
+# non-fn) — the §13.3(B) S3 discriminator between the field and marker paths.
+fn constrained_fn_field(name: String, env: Dict types.Scheme) -> List (String, String) =
+  match dict_get(name, env) with
+  | Just s -> types.scheme_constraints(s)
+  | Nothing -> Nil
 
 # Returns true if any class type var appears in any argument of method_type.
 # When false, dispatch is by return type — the first-concrete-arg heuristic
@@ -796,7 +813,7 @@ fn method_dispatch_is_input(method_name: String, class_vars: List String, env: D
       | Nothing -> true
       | Just method_scheme ->
           match method_scheme with
-          | types.Scheme _ _ method_type _ -> class_var_in_args(method_type, class_vars)
+          | types.Scheme _ _ method_type _ _ -> class_var_in_args(method_type, class_vars)
 
 fn check_instance_for_marker(
   class_marker: types.Scheme,
@@ -812,7 +829,7 @@ fn check_instance_for_marker(
   pos: source.SourcePos
 ) -> InferResult !{IO} =
   match class_marker with
-  | types.Scheme class_vars _ class_type _ ->
+  | types.Scheme class_vars _ class_type _ _ ->
       match class_type with
       | types.TConst class_name ->
           if method_dispatch_is_input(method_name, class_vars, env) then
@@ -942,7 +959,7 @@ fn class_var_arg_or_fallback(
   match dict_get(method_name, env) with
   | Just method_scheme ->
       match method_scheme with
-      | types.Scheme _ _ method_type _ -> class_var_arg(method_type, class_vars, typed_args, subst)
+      | types.Scheme _ _ method_type _ _ -> class_var_arg(method_type, class_vars, typed_args, subst)
   | Nothing -> first_concrete_typed_arg(typed_args, subst)
 
 # Like first_concrete_typed_arg_str, but returns the arg itself (used as the W4
@@ -1074,7 +1091,7 @@ fn type_to_typeexpr_with_prog_vars(t: types.Type, class_name: String, env: Dict 
       match dict_get("@fwd:" ++ types.tyvar_identity(name) ++ ":" ++ class_name, env) with
       | Just scheme ->
           match scheme with
-          | types.Scheme _ _ (types.TConst prog_var) _ -> ast.TypeName(types.type_id_name(prog_var))
+          | types.Scheme _ _ (types.TConst prog_var) _ _ -> ast.TypeName(types.type_id_name(prog_var))
           | _ -> ast.TypeName("_")
       | Nothing -> ast.TypeName("_")
   | types.TTuple items ->
@@ -1232,8 +1249,8 @@ fn class_var_in_args(method_type: types.Type, class_vars: List String) -> Bool =
 
 # --- Constrained-function TDict injection ---
 #
-# inject_constrained_fn_dicts: when calling a constrained regular function
-# (not a class method), look up "@constrained_N:fn_name" markers and inject
+# inject_constrained_fn_dicts_via_field: when calling a constrained regular
+# function (not a class method), iterate its Scheme constraint field and inject
 # TDict evidence for each constraint, so that lowering.sprout can forward the
 # appropriate dict args at the call site.
 #
@@ -1242,7 +1259,7 @@ fn class_var_in_args(method_type: types.Type, class_vars: List String) -> Bool =
 # the real user arguments when resolving each constraint.
 # Also strips TVar nodes whose names start with "__tc_" — these are materialized
 # hidden dict params inserted by the lowering pass (check2 path). Without this
-# filter the pre-scan @constrained_N markers cause double-injection in check2.
+# filter the constraint field causes double-injection in check2.
 
 fn user_typed_args(args: List typed_ast.TypedExpr) -> List typed_ast.TypedExpr =
   match args with
@@ -1289,7 +1306,7 @@ fn tvar_for_prog_var_in_type(t: types.Type, class_name: String, prog_var: String
       match dict_get("@fwd:" ++ types.tyvar_identity(name) ++ ":" ++ class_name, env) with
       | Just scheme ->
           match scheme with
-          | types.Scheme _ _ (types.TConst pv) _ -> types.type_id_name(pv) == prog_var
+          | types.Scheme _ _ (types.TConst pv) _ _ -> types.type_id_name(pv) == prog_var
           | _ -> false
       | Nothing -> false
   | types.TApp base arg ->
@@ -1408,7 +1425,7 @@ fn resolve_via_fwd_or_scan(
 # Convert a stored @fwd scheme value to a TDict evidence node.
 fn fwd_scheme_to_tdict(fwd_scheme: types.Scheme, class_name: String, pos: source.SourcePos) -> Maybe typed_ast.TypedExpr =
   match fwd_scheme with
-  | types.Scheme _ _ (types.TConst prog_var) _ ->
+  | types.Scheme _ _ (types.TConst prog_var) _ _ ->
       Just(typed_ast.TDict(
         ast.TypeConstraint(class_name, Cons(ast.TypeName(types.type_id_name(prog_var)), Nil)),
         types.TConst(types.type_id(class_name)), pos, typed_ast.EvUnresolved))
@@ -1469,7 +1486,7 @@ fn scan_fwd_markers_for_prog_var(
           if is_fwd_key_for_class(key, class_name)
           then
             match val with
-            | types.Scheme _ _ (types.TConst stored_prog_var) _ ->
+            | types.Scheme _ _ (types.TConst stored_prog_var) _ _ ->
                 if types.type_id_name(stored_prog_var) == prog_var
                 then Just(typed_ast.TDict(
                        ast.TypeConstraint(class_name, Cons(ast.TypeName(prog_var), Nil)),
@@ -1482,7 +1499,7 @@ fn scan_fwd_markers_for_prog_var(
 #
 # resolve_obligation returns, alongside the chosen dict, a *path tag* naming which
 # cascade branch resolved it. When the SPROUT_TRACE_DISPATCH env var is set,
-# inject_constrained_fn_dicts (the single caller, already !{IO}) emits one line per
+# inject_constrained_fn_dicts_via_field (already !{IO}) emits one line per
 # constrained call site so a dispatch mis-resolution (the vec_sort_by projection
 # crash, #141, the `++`/mconcat null-fill) can be diagnosed in one compile instead
 # of two stage-2 rebuilds with hand-rolled panics. The trace lives at the IO
@@ -1610,7 +1627,7 @@ fn resolve_obligation(
           (resolve_via_fwd_or_scan(class_name, user_args, s3, env, pos), "precise_tyvar->fwd_or_scan")
 
 # Decode a positional constraint-var token ("#pos:<k>", written by
-# canonicalize_constrained_markers) back to the callee's live generalized-scheme
+# canonicalize_constrained_constraints) back to the callee's live generalized-scheme
 # binder name, so resolve_obligation's precise prog_to_fresh lookup hits. The
 # callee scheme in env is the generalized one at an external call site; its
 # scheme_vars is exactly the binder list the position was computed against.
@@ -1626,9 +1643,17 @@ fn decode_constraint_var(token: String, callee: String, env: Dict types.Scheme) 
     | Nothing -> token
   else token
 
-fn inject_constrained_fn_dicts(
+# §13.3(B): inject a constrained fn's hidden dicts from its Scheme constraint
+# field — the single source of truth. Iterates the COMPLETE (head_token, class)
+# list in where-clause order, so it injects one dict per constraint in order with
+# no gap-truncation or positional-mapping-of-partial-dicts (the root of the mixed
+# tyvar+concrete miscompile, BACKLOG #148). Each head_token resolves as: "#none" →
+# a headless (class-only) obligation; any other token → resolve_obligation with
+# the decoded head var ("#pos:<k>" → the callee's scheme_vars binder; a plain name
+# → itself, routing to the @fwd forwarding path for a recursion/forward-ref var).
+fn inject_constrained_fn_dicts_via_field(
   name: String,
-  idx: Int,
+  constraints: List (String, String),
   prog_to_fresh: Dict types.Type,
   env: Dict types.Scheme,
   typed_callee: typed_ast.TypedExpr,
@@ -1640,32 +1665,60 @@ fn inject_constrained_fn_dicts(
   call_eff: types.Effect,
   pos: source.SourcePos
 ) -> InferResult !{IO} =
-  match dict_get("@constrained_" ++ int_to_string(idx) ++ ":" ++ name, env) with
-  | Nothing ->
+  match constraints with
+  | Nil ->
       InferOk(typed_ast.TCall(typed_callee, typed_args, ret_t, pos), s3, es3, call_eff)
-  | Just class_marker ->
-      match class_marker with
-      | types.Scheme _ _ (types.TApp(types.TConst class_name)(types.TConst prog_var)) _ ->
-          # Wrap as ProgVarName at the extraction site: this is the programmer's
-          # type variable name (from the constraint head), not a compiler-generated
-          # fresh TVar name. Confusing these would silently break cascade resolution.
-          match resolve_obligation(types.type_id_name(class_name), ProgVarName(decode_constraint_var(types.type_id_name(prog_var), name, env)), prog_to_fresh, s3, user_typed_args(typed_args), env, pos, collect_injected_heads_for_class(types.type_id_name(class_name), typed_args)) with
-          | (resolved, path) ->
-              do
-                _ <- trace_dispatch(name, types.type_id_name(class_name), types.type_id_name(prog_var), prog_to_fresh, s3, resolved, path)
-                match resolved with
-                | Nothing ->
-                    inject_constrained_fn_dicts(name, idx + 1, prog_to_fresh, env, typed_callee, typed_args, subst, ret_t, s3, es3, call_eff, pos)
-                | Just tdict ->
-                    inject_constrained_fn_dicts(name, idx + 1, prog_to_fresh, env, typed_callee, list_append(typed_args, Cons(tdict, Nil)), subst, ret_t, s3, es3, call_eff, pos)
-      | types.Scheme _ _ (types.TConst class_name) _ ->
-          match resolve_one_constraint_tdict(types.type_id_name(class_name), user_typed_args(typed_args), subst, env, pos, collect_injected_heads_for_class(types.type_id_name(class_name), typed_args)) with
-          | Nothing ->
-              inject_constrained_fn_dicts(name, idx + 1, prog_to_fresh, env, typed_callee, typed_args, subst, ret_t, s3, es3, call_eff, pos)
-          | Just tdict ->
-              inject_constrained_fn_dicts(name, idx + 1, prog_to_fresh, env, typed_callee, list_append(typed_args, Cons(tdict, Nil)), subst, ret_t, s3, es3, call_eff, pos)
-      | _ ->
-          inject_constrained_fn_dicts(name, idx + 1, prog_to_fresh, env, typed_callee, typed_args, subst, ret_t, s3, es3, call_eff, pos)
+  | Cons entry rest ->
+      match entry with
+      | (head_token, class_name) ->
+          if head_token == "#none" then
+            match resolve_one_constraint_tdict(class_name, user_typed_args(typed_args), subst, env, pos, collect_injected_heads_for_class(class_name, typed_args)) with
+            | Nothing ->
+                inject_constrained_fn_dicts_via_field(name, rest, prog_to_fresh, env, typed_callee, typed_args, subst, ret_t, s3, es3, call_eff, pos)
+            | Just tdict ->
+                inject_constrained_fn_dicts_via_field(name, rest, prog_to_fresh, env, typed_callee, list_append(typed_args, Cons(tdict, Nil)), subst, ret_t, s3, es3, call_eff, pos)
+          else
+            match resolve_field_constraint(class_name, head_token, name, prog_to_fresh, s3, typed_args, env, pos) with
+            | (resolved, path) ->
+                do
+                  _ <- trace_dispatch(name, class_name, head_token, prog_to_fresh, s3, resolved, path)
+                  match resolved with
+                  | Nothing ->
+                      inject_constrained_fn_dicts_via_field(name, rest, prog_to_fresh, env, typed_callee, typed_args, subst, ret_t, s3, es3, call_eff, pos)
+                  | Just tdict ->
+                      inject_constrained_fn_dicts_via_field(name, rest, prog_to_fresh, env, typed_callee, list_append(typed_args, Cons(tdict, Nil)), subst, ret_t, s3, es3, call_eff, pos)
+
+# Resolve one field constraint's dict from its head_token. A CONCRETE-ctor head
+# (a plain type name with an `@inst:{class}:{head}` instance) resolves DIRECTLY by
+# name — order-independent, fixing the first_concrete_arg misfire that dropped the
+# dict when a non-container arg preceded the container (BACKLOG #148). Any other
+# head (a "#pos:<k>" tyvar, or a name with no instance) decodes and falls to
+# resolve_obligation exactly as the marker path did.
+fn resolve_field_constraint(
+  class_name: String,
+  head_token: String,
+  name: String,
+  prog_to_fresh: Dict types.Type,
+  s3: Dict types.Type,
+  typed_args: List typed_ast.TypedExpr,
+  env: Dict types.Scheme,
+  pos: source.SourcePos
+) -> (Maybe typed_ast.TypedExpr, String) =
+  match resolve_concrete_head_tdict(class_name, head_token, env, pos) with
+  | Just tdict -> (Just(tdict), "concrete_head")
+  | Nothing ->
+      resolve_obligation(class_name, ProgVarName(decode_constraint_var(head_token, name, env)), prog_to_fresh, s3, user_typed_args(typed_args), env, pos, collect_injected_heads_for_class(class_name, typed_args))
+
+# A concrete-ctor constraint head resolves to its instance dict directly: the head
+# name IS the instance key, so no argument-type guessing is needed. Returns Nothing
+# when there is no such instance (the head is a tyvar or forwardable).
+fn resolve_concrete_head_tdict(class_name: String, head_name: String, env: Dict types.Scheme, pos: source.SourcePos) -> Maybe typed_ast.TypedExpr =
+  match dict_get("@inst:" ++ class_name ++ ":" ++ head_name, env) with
+  | Just _ ->
+      Just(typed_ast.TDict(
+        ast.TypeConstraint(class_name, Cons(ast.TypeName(head_name), Nil)),
+        types.TConst(types.type_id(class_name)), pos, typed_ast.EvUnresolved))
+  | Nothing -> Nothing
 
 # --- Forward marker helpers ---
 #
@@ -3014,7 +3067,7 @@ fn register_record_fields_loop(
 fn make_record_field_scheme(rec_name: String, type_params: List String, field_t: types.Type) -> types.Scheme =
   types.Scheme(
     list_map(\p -> str_concat(rec_name, str_concat(".", p)), type_params),
-    Nil, field_t, types.EffectPure)
+    Nil, field_t, types.EffectPure, Nil)
 
 fn infer_record_expr(
   state: unifier.InferState,
@@ -3152,7 +3205,7 @@ fn apply_type_args_to_field(
   type_args: List types.Type
 ) -> types.Type =
   match field_scheme with
-  | types.Scheme qvars _ _ _ ->
+  | types.Scheme qvars _ _ _ _ ->
       unifier.apply_subst(build_tvar_subst(qvars, type_args, dict_empty()), field_t)
 
 fn build_tvar_subst(vars: List String, args: List types.Type, acc: Dict types.Type) -> Dict types.Type =
@@ -3208,8 +3261,8 @@ export fn typecheck_decls(
   eff_subst: Dict types.Effect
 ) -> typed_ast.TypedResult !{IO} =
   do
-    # Pre-scan: register all FnDecl signatures and their @constrained_N markers
-    # in env before processing bodies.  This enables forward references and
+    # Pre-scan: register all FnDecl signatures (constraint field included) in env
+    # before processing bodies.  This enables forward references and
     # mutual recursion (e.g., decorated_sort_split calling decorated_sort which
     # is defined later in the same file).
     let scanned_env = pre_scan_fn_decls(decls, env, dict_empty())
@@ -3395,7 +3448,7 @@ fn check_overlapping_instances(decls: List ast.Decl, seen: Dict Bool) -> Maybe S
               | Nothing -> check_overlapping_instances(rest, dict_set(key, true, seen))
       | _ -> check_overlapping_instances(rest, seen)
 
-# Pre-scan pass: register FnDecl signatures, @constrained_N markers, and
+# Pre-scan pass: register FnDecl signatures (with their constraint field) and
 # TypeDecl constructors for all declarations without typechecking bodies.
 # Also tracks AliasDecl entries so that type aliases in signatures are resolved.
 # TypeDecl pre-scanning is required to allow forward references to type
@@ -3500,7 +3553,7 @@ fn typecheck_decl(
         env_ftv)
   | ast.FnDecl name params ret_type_maybe effects_maybe constraints _ _ ->
       do
-        (r, fwd_markers) <- check_fn_body(state, decl, global_env_dict(env), subst, eff_subst, alias_env, env_ftv)
+        (r, fwd_markers, decl_constraints) <- check_fn_body(state, decl, global_env_dict(env), subst, eff_subst, alias_env, env_ftv)
         # WHY: @eta_fwd markers added here have free type variables that must be
         # included in env_ftv so subsequent declarations don't incorrectly generalize
         # over them.  Computed once per declaration (not per env entry) → stays O(n).
@@ -3521,8 +3574,10 @@ fn typecheck_decl(
               # resolve_via_fwd_for_prog_var. Keys are globally unique (one InferState).
               fold_fwd_markers(fwd_markers,
                 GlobalEnv(dict_set(name,
-                  unifier.generalize(env_ftv, dict_empty(), dict_empty(),
-                    inferred_fn_type, effect_from_maybe_labels(effects_maybe)),
+                  types.scheme_with_constraints(
+                    unifier.generalize(env_ftv, dict_empty(), dict_empty(),
+                      inferred_fn_type, effect_from_maybe_labels(effects_maybe)),
+                    decl_constraints),
                   global_env_dict(env)))),
               new_env_ftv)
   | ast.ExternFnDecl name params ret_type_maybe effects_maybe _ ->
@@ -3687,7 +3742,7 @@ fn apply_subst_typed_expr(subst: Dict types.Type, e: typed_ast.TypedExpr) -> typ
 # Constrained-function calls (non-class-method calls to `fn f … where C a`)
 # are handled by maybe_rewrite_constrained_fn_call, which mirrors the same
 # post-pass pattern for the case where `a` appears only in the return type:
-# inject_constrained_fn_dicts runs before s2 (while `a` is still a free TVar),
+# inference-time field injection runs before s2 (while `a` is still a free TVar),
 # so it may fail to find the dict.  The post-pass re-resolves using the now-
 # concrete return type `t`.
 
@@ -3733,74 +3788,55 @@ fn maybe_rewrite_constrained_fn_call(
   t: types.Type,
   pos: source.SourcePos
 ) -> typed_ast.TypedExpr =
-  match dict_get("@constrained_0:" ++ fn_name, env) with
-  | Nothing -> typed_ast.TCall(fn_, args, t, pos)
-  | Just _ ->
+  # §13.3(B) S4: gate on the callee's Scheme constraint field (single source of
+  # truth), not the parallel @constrained_N markers. An empty field means the
+  # callee is unconstrained → no dicts to correct.
+  match constrained_fn_field(fn_name, env) with
+  | Nil -> typed_ast.TCall(fn_, args, t, pos)
+  | cs ->
       typed_ast.TCall(fn_,
         list_append(
           user_typed_args(args),
-          build_constrained_fn_dicts(fn_name, 0, env,
+          build_constrained_fn_dicts_via_field(cs, 0, env,
             unifier.apply_subst(subst, t),
             pos, collect_all_tdicts(args))),
         t, pos)
 
 # Build the corrected dict list for a constrained function call (post-pass).
-# Iterates @constrained_N markers in order.  For each marker:
-#
-#   - If the inference-time pass already injected a dict at this index
-#     (list_nth_maybe_tdict succeeds), keep it unchanged.  This covers both:
-#       • Input-position constraints correctly resolved at inference time.
-#       • Return-position constraints inside a constrained fn body where the
-#         @fwd marker dict was already correctly injected.
-#
-#   - If no dict was injected (index ≥ len(existing_dicts)):
-#     try to add one by scanning concrete_ret for a @inst:class_name:X match
-#     (find_inst_in_return_type).  If the return type is still polymorphic
-#     (no matching instance found), NO dict is emitted for this constraint —
-#     the call is still-polymorphic and the lowering @fwd path must handle it.
-#
-# WHY skip dispatch_type_walk: after typecheck_decl's generalize(), the scheme
-# in env uses fresh TVar names (e.g. "t42"), while the @constrained_N marker
-# stores the ORIGINAL prog-var name (e.g. "a").  dispatch_type_walk compares
-# against the original prog var but finds only the fresh name → returns Nothing.
-# Scanning concrete_ret directly bypasses this name-mismatch entirely.
-fn build_constrained_fn_dicts(
-  fn_name: String,
+# Iterates the callee's Scheme constraint list (the single source of truth) in
+# where-clause order. Per constraint at index idx:
+#   - keep the inference-time dict if one was injected at idx (list_nth), covering
+#     input-position constraints and @fwd-forwarded return-position ones;
+#   - otherwise a HEADED constraint (head_token != "#none") scans the concrete
+#     return type for a matching @inst; a HEADLESS one ("#none") emits nothing.
+# The list is complete and index-aligned with existing_dicts (where-clause order).
+fn build_constrained_fn_dicts_via_field(
+  constraints: List (String, String),
   idx: Int,
   env: Dict types.Scheme,
   concrete_ret: types.Type,
   pos: source.SourcePos,
   existing_dicts: List typed_ast.TypedExpr
 ) -> List typed_ast.TypedExpr =
-  match dict_get("@constrained_" ++ int_to_string(idx) ++ ":" ++ fn_name, env) with
-  | Nothing -> Nil
-  | Just class_marker ->
-      match class_marker with
-      | types.Scheme _ _ (types.TApp(types.TConst class_name)(types.TConst _)) _ ->
-          match list_nth_maybe_tdict(existing_dicts, idx) with
-          | Just existing_d ->
-              # Inference-time dict already present — keep it
-              Cons(existing_d,
-                   build_constrained_fn_dicts(fn_name, idx + 1, env, concrete_ret, pos, existing_dicts))
-          | Nothing ->
-              # No existing dict — try to add one from the concrete return type
-              match find_inst_in_return_type(types.type_id_name(class_name), concrete_ret, env, pos) with
-              | Just new_dict ->
-                  Cons(new_dict,
-                       build_constrained_fn_dicts(fn_name, idx + 1, env, concrete_ret, pos, existing_dicts))
-              | Nothing ->
-                  # Still polymorphic — no dict for this constraint
-                  build_constrained_fn_dicts(fn_name, idx + 1, env, concrete_ret, pos, existing_dicts)
-      | types.Scheme _ _ (types.TConst _) _ ->
-          # Marker without prog_var — keep existing dict or emit nothing
+  match constraints with
+  | Nil -> Nil
+  | Cons entry rest ->
+      match entry with
+      | (head_token, class_name) ->
           match list_nth_maybe_tdict(existing_dicts, idx) with
           | Just existing_d ->
               Cons(existing_d,
-                   build_constrained_fn_dicts(fn_name, idx + 1, env, concrete_ret, pos, existing_dicts))
+                   build_constrained_fn_dicts_via_field(rest, idx + 1, env, concrete_ret, pos, existing_dicts))
           | Nothing ->
-              build_constrained_fn_dicts(fn_name, idx + 1, env, concrete_ret, pos, existing_dicts)
-      | _ ->
-          build_constrained_fn_dicts(fn_name, idx + 1, env, concrete_ret, pos, existing_dicts)
+              if head_token == "#none"
+              then build_constrained_fn_dicts_via_field(rest, idx + 1, env, concrete_ret, pos, existing_dicts)
+              else
+                match find_inst_in_return_type(class_name, concrete_ret, env, pos) with
+                | Just new_dict ->
+                    Cons(new_dict,
+                         build_constrained_fn_dicts_via_field(rest, idx + 1, env, concrete_ret, pos, existing_dicts))
+                | Nothing ->
+                    build_constrained_fn_dicts_via_field(rest, idx + 1, env, concrete_ret, pos, existing_dicts)
 
 # Scan a concrete return type for an inner component that has an @inst marker
 # for the given class.  Tries the type itself first (handles `a` in return
@@ -3884,7 +3920,7 @@ fn maybe_rewrite_class_method_call(
       | Nothing -> maybe_rewrite_constrained_fn_call(env, subst, fn_, method_name, args, t, pos)
       | Just class_marker ->
           match class_marker with
-          | types.Scheme class_vars _ class_type _ ->
+          | types.Scheme class_vars _ class_type _ _ ->
               match class_type with
               | types.TConst class_name ->
                   match class_vars with
@@ -3894,7 +3930,7 @@ fn maybe_rewrite_class_method_call(
                       | Nothing -> typed_ast.TCall(fn_, args, t, pos)
                       | Just method_scheme ->
                           match method_scheme with
-                          | types.Scheme _ _ method_type _ ->
+                          | types.Scheme _ _ method_type _ _ ->
                               if class_var_in_args(method_type, class_vars) then typed_ast.TCall(fn_, args, t, pos)
                               else try_rewrite_for_return_dispatch(env, subst, fn_, args, t, pos, types.type_id_name(class_name), class_vars, method_type)
               | _ -> typed_ast.TCall(fn_, args, t, pos)
@@ -4148,7 +4184,7 @@ fn check_fn_body(
   eff_subst: Dict types.Effect,
   alias_env: Dict types.Type,
   env_ftv: List String
-) -> (typed_ast.BodyResult, Dict types.Scheme) !{IO} =
+) -> (typed_ast.BodyResult, Dict types.Scheme, List (String, String)) !{IO} =
   match decl with
   | ast.FnDecl name params ret_type_maybe effects_maybe constraints body fn_pos ->
       do
@@ -4158,24 +4194,23 @@ fn check_fn_body(
         # Compute @eta_fwd:* markers in parallel without walking fwd_env post-hoc.
         # Constraint-free decls return dict_empty() instantly.
         let fwd_markers = compute_eta_fwd_markers(constraints, prog_to_fresh, env)
-        # Seed @constrained_N:name markers into the body env so that recursive
-        # constrained calls (e.g., decorated_merge_sorted calling itself) can
-        # find the markers and have dict args injected by inject_constrained_fn_dicts.
-        let self_env = register_constrained_fn_markers(name, constraints, fwd_env)
-        br <- typecheck_expr(state, fn_body_env(name, params, inst_type, self_env), subst, eff_subst, body)
+        # §13.3(B) S4: the recursion self-binding carries the constraint field
+        # (fn_body_env), so recursive self-calls inject dicts from the Scheme —
+        # no @constrained_N self markers to seed. fwd_env holds only @fwd/@eta_fwd.
+        br <- typecheck_expr(state, fn_body_env(name, params, inst_type, constraint_source_tokens(constraints), fwd_env), subst, eff_subst, body)
         match br with
-        | InferErr pos msg -> (fn_body_err(name, pos, msg), dict_empty())
+        | InferErr pos msg -> (fn_body_err(name, pos, msg), dict_empty(), Nil)
         | InferOk typed_body s1 _ _ ->
             match unifier.unify_types(s1, typed_ast.typed_expr_type(typed_body), fn_return_type(inst_type, list_length(params))) with
-            | Err e -> (typed_ast.BodyErr(dummy_pos(), "Return type mismatch in " ++ name ++ ": " ++ e), dict_empty())
+            | Err e -> (typed_ast.BodyErr(dummy_pos(), "Return type mismatch in " ++ name ++ ": " ++ e), dict_empty(), Nil)
             | Ok s2 ->
                 match rigidity_violation(prog_to_fresh, s2, types.scheme_vars(decl_scheme)) with
                 | Just bad ->
-                    (typed_ast.BodyErr(fn_pos, "Signature too general for its body in " ++ name ++ ": type variable " ++ bad), dict_empty())
+                    (typed_ast.BodyErr(fn_pos, "Signature too general for its body in " ++ name ++ ": type variable " ++ bad), dict_empty(), Nil)
                 | Nothing ->
-                    (typed_ast.BodyOk(resolve_dispatch_typed_expr(self_env, s2, typed_body), unifier.apply_subst(s2, inst_type)),
-                     canonicalize_constrained_markers(name, constraints, prog_to_fresh, s2, inst_type, env_ftv, fwd_markers))
-  | _ -> (typed_ast.BodyOk(dummy_unit(), types.TConst(types.type_id("Unit"))), dict_empty())
+                    (typed_ast.BodyOk(resolve_dispatch_typed_expr(fwd_env, s2, typed_body), unifier.apply_subst(s2, inst_type)),
+                     fwd_markers, canonicalize_constrained_constraints(constraints, prog_to_fresh, s2, inst_type, env_ftv))
+  | _ -> (typed_ast.BodyOk(dummy_unit(), types.TConst(types.type_id("Unit"))), dict_empty(), Nil)
 
 # --- Positional constraint-var identity helpers (canonical-identity Stage 3) ---
 #
@@ -4204,45 +4239,41 @@ fn constraint_var_token(canon_name: String, binders: List String) -> String =
 fn constraint_var_token_at(canon_name: String, pos: Int) -> String =
   if pos < 0 then canon_name else "#pos:" ++ int_to_string(pos)
 
-# After body inference the @constrained_N:name markers registered at pre-scan
-# still key each constraint var by its SOURCE name (e.g. "k"). But the scheme
-# folded into the global env at generalization quantifies the post-s2 binder
-# list, so a source-name marker misses the precise dict_get(prog_var,
-# prog_to_fresh) lookup at an external call site. Rewrite each marker to record
-# the constraint var's POSITION in that generalized binder list
-# (list_diff(ftv(apply_subst(s2, inst_type)), env_ftv) — the exact expression
+# After body inference, computes the COMPLETE (head_token, class) constraint list
+# folded into the generalized callee Scheme as the single source of truth for its
+# hidden dicts (§13.3(B)) — one entry per constraint, in where-clause order,
+# including concrete-ctor and headless constraints (which take hidden dicts too),
+# not only generalized tyvars.
+#
+# A generalized tyvar's head_token records its POSITION in the generalized binder
+# list (list_diff(ftv(apply_subst(s2, inst_type)), env_ftv) — the exact expression
 # typecheck_decl's generalize uses, so the position indexes scheme_vars(<callee
-# scheme>) at the call site). Position survives the renaming that names do not,
-# so resolve_obligation's precise Just branch always hits. These entries ride the
-# fwd_markers dict folded into the global env, overwriting the source-name
-# markers. A constraint whose var was pinned to a concrete type in the body is
-# monomorphic (not a TVar after s2) and left untouched.
-fn canonicalize_constrained_markers(
-  name: String,
+# scheme>) at the call site). Position survives the renaming that source names do
+# not, so resolve_obligation's precise Just branch always hits. A constraint whose
+# var was pinned to a concrete type in the body is monomorphic (not a TVar after
+# s2) and recorded by source name. head_token is
+# "#pos:<k>" for a generalized var (decoded via scheme_vars), "<Name>" for a
+# concrete-ctor head or non-generalized var, or "#none" for a headless constraint.
+fn canonicalize_constrained_constraints(
   constraints: List ast.TypeConstraint,
   prog_to_fresh: Dict types.Type,
   s2: Dict types.Type,
   inst_type: types.Type,
-  env_ftv: List String,
-  markers: Dict types.Scheme
-) -> Dict types.Scheme =
-  canonicalize_constrained_markers_acc(name, constraints, 0, prog_to_fresh, s2,
-    types.list_diff(types.ftv(unifier.apply_subst(s2, inst_type)), env_ftv), markers)
+  env_ftv: List String
+) -> List (String, String) =
+  canonicalize_constrained_constraints_acc(constraints, prog_to_fresh, s2,
+    types.list_diff(types.ftv(unifier.apply_subst(s2, inst_type)), env_ftv))
 
-# idx advances once per constraint — matching register_constrained_fn_markers_acc
-# — so a skipped (pinned/absent) constraint still consumes its numbered slot and
-# later constraints overwrite the correct @constrained_N:name key.
-fn canonicalize_constrained_markers_acc(
-  name: String,
+# The list is built on the RETURN path (recurse-then-cons) so it stays in
+# where-clause order, and every constraint contributes exactly one entry.
+fn canonicalize_constrained_constraints_acc(
   constraints: List ast.TypeConstraint,
-  idx: Int,
   prog_to_fresh: Dict types.Type,
   s2: Dict types.Type,
-  binders: List String,
-  markers: Dict types.Scheme
-) -> Dict types.Scheme =
+  binders: List String
+) -> List (String, String) =
   match constraints with
-  | Nil -> markers
+  | Nil -> Nil
   | Cons c rest ->
       match c with
       | ast.TypeConstraint class_name type_args ->
@@ -4252,18 +4283,31 @@ fn canonicalize_constrained_markers_acc(
               | Just fresh_t ->
                   match unifier.apply_subst(s2, fresh_t) with
                   | types.TVar canon ->
-                      canonicalize_constrained_markers_acc(name, rest, idx + 1, prog_to_fresh, s2, binders,
-                        dict_set("@constrained_" ++ int_to_string(idx) ++ ":" ++ name,
-                                 types.mono(types.TApp(types.TConst(types.type_id(class_name)), types.TConst(types.type_id(constraint_var_token(types.tyvar_identity(canon), binders))))), markers))
-                  | _ -> canonicalize_constrained_markers_acc(name, rest, idx + 1, prog_to_fresh, s2, binders, markers)
-              | Nothing -> canonicalize_constrained_markers_acc(name, rest, idx + 1, prog_to_fresh, s2, binders, markers)
-          | _ -> canonicalize_constrained_markers_acc(name, rest, idx + 1, prog_to_fresh, s2, binders, markers)
+                      Cons((constraint_var_token(types.tyvar_identity(canon), binders), class_name),
+                           canonicalize_constrained_constraints_acc(rest, prog_to_fresh, s2, binders))
+                  | _ ->
+                      # Pinned to a concrete type (rigidity-rejected for a top-level
+                      # constrained fn — defensive): record by source name.
+                      Cons((prog_var, class_name),
+                           canonicalize_constrained_constraints_acc(rest, prog_to_fresh, s2, binders))
+              | Nothing ->
+                  # Concrete-ctor head (e.g. "List"): stable source name.
+                  Cons((prog_var, class_name),
+                       canonicalize_constrained_constraints_acc(rest, prog_to_fresh, s2, binders))
+          | _ ->
+              # Headless constraint (non-TypeName head): resolved without a head var.
+              Cons(("#none", class_name),
+                   canonicalize_constrained_constraints_acc(rest, prog_to_fresh, s2, binders))
 
-fn fn_body_env(name: String, params: List ast.Param, inst_type: types.Type, env: Dict types.Scheme) -> Dict types.Scheme =
+# §13.3(B) S4: the self-binding carries the fn's own constraints (source-name
+# tokens) so a recursive self-call injects its forwarded dicts from the Scheme
+# field, via the same resolve_field_constraint → @fwd path a generalized external
+# call uses — retiring the body-local @constrained_N self markers.
+fn fn_body_env(name: String, params: List ast.Param, inst_type: types.Type, constraints: List (String, String), env: Dict types.Scheme) -> Dict types.Scheme =
   extend_env_with_params(
     params,
     ctor_param_types(inst_type),
-    dict_set(name, types.mono(inst_type), env)
+    dict_set(name, types.scheme_with_constraints(types.mono(inst_type), constraints), env)
   )
 
 fn fn_body_err(name: String, pos: source.SourcePos, msg: String) -> typed_ast.BodyResult =
@@ -4310,7 +4354,7 @@ fn register_class_method_markers(class_name: String, type_params: List String, m
       | ast.ClassMethodSig name _ _ _ ->
           register_class_method_markers(class_name, type_params, rest,
             dict_set("@class:" ++ name,
-                     types.Scheme(type_params, Nil, types.TConst(types.type_id(class_name)), types.EffectPure),
+                     types.Scheme(type_params, Nil, types.TConst(types.type_id(class_name)), types.EffectPure, Nil),
                      env))
 
 # Register "@super:{class_name}:{super_name}" entries for each superclass in the
@@ -4330,14 +4374,28 @@ fn register_superclass_markers(class_name: String, superclasses: List ast.TypeCo
 # FnDecl: constrained-function markers
 # ---------------------------------------------------------------------------
 #
-# register_constrained_fn_markers seeds "@constrained_N:fn_name" entries so
-# that check_call_constraint can inject TDict evidence when calling regular
-# constrained functions (not class methods).  Each constraint gets its own
-# numbered key to support functions with multiple constraints.
+# §13.3(B) S4: the non-positional constraint tokens for a fn's PROVISIONAL
+# scheme — the pre-scan forward-ref entry and the recursion self-binding. Both
+# are ungeneralized (no scheme_vars), so a "#pos:k" token could not decode; the
+# head is instead the raw source var name, which decode_constraint_var passes
+# through unchanged and resolve_field_constraint routes to the @fwd forwarding
+# path — exactly as the retired @constrained_N marker did. A concrete-ctor head
+# keeps its name (resolves via @inst directly); a non-TypeName head is headless
+# ("#none").
+fn constraint_source_tokens(constraints: List ast.TypeConstraint) -> List (String, String) =
+  match constraints with
+  | Nil -> Nil
+  | Cons c rest ->
+      match c with
+      | ast.TypeConstraint class_name type_args ->
+          match type_args with
+          | Cons (ast.TypeName prog_var) _ -> Cons((prog_var, class_name), constraint_source_tokens(rest))
+          | _ -> Cons(("#none", class_name), constraint_source_tokens(rest))
 
-fn register_constrained_fn_markers(name: String, constraints: List ast.TypeConstraint, env: Dict types.Scheme) -> Dict types.Scheme =
-  register_constrained_fn_markers_acc(name, constraints, 0, env)
-
+# §13.3(B): pre-scan registration of a FnDecl's signature. A constrained fn's
+# scheme carries its constraint field directly (source-name tokens) — the single
+# source of truth a forward-ref caller reads — so there are no parallel
+# @constrained_N env markers to seed.
 fn register_fn_decl_scheme(
   name: String,
   params: List ast.Param,
@@ -4349,35 +4407,11 @@ fn register_fn_decl_scheme(
 ) -> Dict types.Scheme =
   match constraints with
   | Nil ->
-      remove_constrained_fn_markers(name, 0,
-        dict_remove("@class:" ++ name,
-          dict_set(name, scheme_from_fn_parts(params, ret_type_maybe, effects_maybe, alias_env), env)))
+      dict_remove("@class:" ++ name,
+        dict_set(name, scheme_from_fn_parts(params, ret_type_maybe, effects_maybe, alias_env), env))
   | _ ->
-      register_constrained_fn_markers(name, constraints,
-        dict_remove("@class:" ++ name,
-          dict_set(name, scheme_from_fn_parts(params, ret_type_maybe, effects_maybe, alias_env), env)))
-
-fn remove_constrained_fn_markers(name: String, idx: Int, env: Dict types.Scheme) -> Dict types.Scheme =
-  match dict_get(key, env) with
-  | Nothing -> env
-  | Just _ -> remove_constrained_fn_markers(name, idx + 1, dict_remove(key, env))
-  where key = "@constrained_" ++ int_to_string(idx) ++ ":" ++ name
-
-fn register_constrained_fn_markers_acc(name: String, constraints: List ast.TypeConstraint, idx: Int, env: Dict types.Scheme) -> Dict types.Scheme =
-  match constraints with
-  | Nil -> env
-  | Cons c rest ->
-      match c with
-      | ast.TypeConstraint class_name type_args ->
-          match type_args with
-          | Cons (ast.TypeName prog_var) _ ->
-              register_constrained_fn_markers_acc(name, rest, idx + 1,
-                dict_set("@constrained_" ++ int_to_string(idx) ++ ":" ++ name,
-                         types.mono(types.TApp(types.TConst(types.type_id(class_name)), types.TConst(types.type_id(prog_var)))), env))
-          | _ ->
-              register_constrained_fn_markers_acc(name, rest, idx + 1,
-                dict_set("@constrained_" ++ int_to_string(idx) ++ ":" ++ name,
-                         types.mono(types.TConst(types.type_id(class_name))), env))
+      dict_remove("@class:" ++ name,
+        dict_set(name, types.scheme_with_constraints(scheme_from_fn_parts(params, ret_type_maybe, effects_maybe, alias_env), constraint_source_tokens(constraints)), env))
 
 # ---------------------------------------------------------------------------
 # InstanceDecl: instance marker registration

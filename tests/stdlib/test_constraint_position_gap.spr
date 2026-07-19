@@ -1,0 +1,37 @@
+import stdlib.test (TestState, new_state, assert_eq, summary)
+
+# Non-contiguous constraint positions: a fn with three type vars but constraints
+# on only the FIRST and THIRD (scheme-var positions 0 and 2), the middle var
+# unconstrained (position 1). The external-checked dispatch path must decode each
+# constraint's position against the callee's scheme_vars precisely — an off-by-one
+# or position-blind resolver would forward the wrong var's dict for the position-2
+# constraint. Distinct per-instance output makes a wrong dict a wrong STRING.
+#
+# Complements test_positional_constraint_dispatch (adjacent positions 0/1) by
+# exercising a GAP in scheme-var space. Behavior-preserving guard for the
+# §13.3(B) S3 flip (Context-1 consumer reads scheme_constraints instead of the
+# @constrained_N markers): green before and after the flip.
+
+class Label a {
+  fn label(x: a) -> String
+}
+instance Label Int {fn label(x: Int) -> String = "I"}
+instance Label Bool {fn label(x: Bool) -> String = "B"}
+instance Label String {fn label(x: String) -> String = "S"}
+
+fn inner(x: a) -> String where Label a =
+  label(x)
+
+# Constraints on positions 0 (a) and 2 (c); the middle var b is unconstrained and
+# unused, so it stays polymorphic — scheme_vars is [a, b, c], constraints
+# [(0, Label), (2, Label)]. inner(x) forwards a's dict, inner(z) forwards c's.
+fn outer(x: a, y: b, z: c) -> String where Label a, Label c =
+  inner(x) ++ "-" ++ inner(z)
+
+fn main() -> Unit !{IO} =
+  do
+    state <- new_state()
+    assert_eq(state, "gap positions 0/2: Int _ String", outer(1, true, "hi"), "I-S")
+    assert_eq(state, "gap positions 0/2: Bool _ Int", outer(false, 0, 9), "B-I")
+    assert_eq(state, "gap positions 0/2: String _ Bool", outer("x", 5, true), "S-B")
+    summary(state)

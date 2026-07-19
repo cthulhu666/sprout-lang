@@ -1,0 +1,55 @@
+import stdlib.test (TestState, new_state, assert_eq, summary)
+import stdlib.collections (Foldable, List, Vec, vec_length, foldable_to_vec)
+
+# §13.3(B) S4 guard: constrained dispatch through the PROVISIONAL-scheme paths
+# that S3 left on the @constrained markers — the recursion self-binding
+# (mono(inst_type)) and the pre-scan forward-ref entry (scheme_from_fn_parts).
+# S4 populates those provisional schemes with source-name constraint tokens so
+# the self-call / forward-call inject dicts from the Scheme field via the @fwd
+# forwarding path, then deletes the @constrained family. This pins the observable
+# output of both paths so a dropped or mis-forwarded dict shows as wrong output.
+
+class Tag a {
+  fn tag(x: a) -> String
+}
+instance Tag Int {fn tag(x: Int) -> String = "I"}
+instance Tag Bool {fn tag(x: Bool) -> String = "B"}
+
+# (1) Self-recursion: the recursive self-call must forward the enclosing Tag
+# dict (var stays polymorphic in the body — @fwd path), not re-resolve it.
+fn tag_n(x: a, n: Int) -> String where Tag a =
+  if n <= 0 then "" else tag(x) ++ tag_n(x, n - 1)
+
+# (2) Forward reference: caller_first is typechecked before callee_later is
+# generalized, so it dispatches off callee_later's pre-scan provisional scheme.
+fn caller_first(x: a) -> String where Tag a =
+  callee_later(x) ++ "!"
+
+fn callee_later(x: a) -> String where Tag a =
+  "[" ++ tag(x) ++ "]"
+
+# (3) MIXED forward-ref — the #148 shape through the provisional (source-name)
+# field path: an unconstrained caller forward-references a later-defined fn that
+# mixes a TYVAR constraint (Tag a, resolved from the concrete call arg) with a
+# CONCRETE-CTOR constraint (Foldable List, resolved directly via @inst). A
+# non-container arg (x) precedes the container (xs), so a first-concrete-arg guess
+# for Foldable would misfire — resolve_concrete_head_tdict must resolve "List"
+# by name. This distinction is invisible in a self-call (both forward the same
+# global instance); a forward-ref is the sharp probe.
+fn count_before_def(flag: Bool) -> String =
+  if flag then mixed_later(true, [1, 2, 3]) else mixed_later(7, [10, 20])
+
+fn mixed_later(x: a, xs: List Int) -> String where Tag a, Foldable List =
+  tag(x) ++ ":" ++ int_to_string(vec_length(foldable_to_vec(xs)))
+
+fn main() -> Unit !{IO} =
+  do
+    state <- new_state()
+    assert_eq(state, "recursion: Int tag x3", tag_n(7, 3), "III")
+    assert_eq(state, "recursion: Bool tag x2", tag_n(true, 2), "BB")
+    assert_eq(state, "recursion: zero iterations", tag_n(9, 0), "")
+    assert_eq(state, "forward-ref: Int through both dicts", caller_first(4), "[I]!")
+    assert_eq(state, "forward-ref: Bool through both dicts", caller_first(false), "[B]!")
+    assert_eq(state, "fwd-ref mixed: Bool tag + 3-elem count", count_before_def(true), "B:3")
+    assert_eq(state, "fwd-ref mixed: Int tag + 2-elem count", count_before_def(false), "I:2")
+    summary(state)

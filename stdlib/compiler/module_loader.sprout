@@ -192,20 +192,15 @@ fn collect_marker_pairs(pairs: List (String, types.Scheme)) -> List (String, typ
       if is_marker_key(k) then Cons((k, v), collect_marker_pairs(rest))
       else collect_marker_pairs(rest)
 
-# @constrained_N:fn_name markers must have fn_name prefixed too, because the
-# lookup key is built from the exact call-site name (e.g. "string.join").
 # @class: and @instance: markers are intentionally NOT prefixed — they are
-# looked up by unqualified class/type name, not by the call-site expression.
-fn prefix_constrained_key(k: String, pfx: String) -> String =
-  str_concat(str_slice(k, 0, colon_i + 1), str_concat(pfx, str_concat(".", str_slice(k, colon_i + 1, str_len(k) - colon_i - 1))))
-  where colon_i = str_find(k, ":")
-
+# looked up by unqualified class/type name, not by the call-site expression. A
+# constrained fn's constraints ride its own (prefixed) scheme via the Scheme
+# constraint field (§13.3(B)), so no marker key needs the call-site name folded in.
 fn prefix_pairs(pairs: List (String, types.Scheme), pfx: String) -> List (String, types.Scheme) =
   match pairs with
   | Nil -> Nil
   | Cons (k, v) rest ->
-      if str_starts_with(k, "@constrained_") then Cons((prefix_constrained_key(k, pfx), v), prefix_pairs(rest, pfx))
-      else if is_marker_key(k) then Cons((k, v), prefix_pairs(rest, pfx))
+      if is_marker_key(k) then Cons((k, v), prefix_pairs(rest, pfx))
       else Cons((str_concat(pfx, str_concat(".", k)), v), prefix_pairs(rest, pfx))
 
 # Select explicitly-named pairs AND all marker pairs from the module so

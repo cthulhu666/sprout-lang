@@ -19,9 +19,9 @@ import stdlib.string as string
 # The check is deliberately INDEPENDENT of the resolver. Truth is re-derived from
 # the callee's SOURCE-level signature (its written param types + `where`-clause,
 # in source names) matched against the call's concrete argument types — never from
-# the generalized env scheme / prog_to_fresh / @constrained markers the resolver
+# the generalized env scheme / prog_to_fresh / Scheme constraint field the resolver
 # uses. Two different computations cross-checked is the whole value of a Core-lint
-# pass; it also means the check self-guards a canonicalize_constrained_markers
+# pass; it also means the check self-guards a canonicalize_constrained_constraints
 # regression (its truth does not depend on canonicalize having run).
 #
 # A `where`-constraint exists IFF an explicit signature exists (you cannot write

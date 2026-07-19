@@ -306,7 +306,8 @@ fn generalize_resolved(env_ftv: List String, resolved: types.Type, resolved_eff:
     types.list_diff(types.ftv(resolved), env_ftv),
     types.list_diff(types.ftv_effect(resolved_eff), env_ftv),
     resolved,
-    resolved_eff
+    resolved_eff,
+    Nil
   )
 
 # ---------------------------------------------------------------------------

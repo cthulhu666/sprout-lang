@@ -737,7 +737,7 @@ fn bt_io(a: types.Type, b: types.Type) -> types.Type =
   types.TFunc(a, b, types.EffectIO)
 
 fn bt_mono(t: types.Type) -> types.Scheme =
-  types.Scheme(Nil, Nil, t, types.EffectPure)
+  types.Scheme(Nil, Nil, t, types.EffectPure, Nil)
 
 fn bt_pair(a: types.Type, b: types.Type) -> types.Type =
   types.TTuple([a, b])
