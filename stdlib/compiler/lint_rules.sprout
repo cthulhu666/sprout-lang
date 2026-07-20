@@ -61,18 +61,108 @@ fn continues(pat: ast.Pattern, body: ast.Expr) -> Bool =
   is_binding_pattern(pat) && ! is_list_cons_pattern (pat) && is_two_branch_match(body)
 
 # classify: given a match's two branches, decide whether exactly one of them
-# continues the staircase. Returns (terminal_body, continuing_body) — the
-# other's body is guaranteed to itself be a 2-branch MatchExpr by `continues`.
-fn classify(b1: ast.MatchBranch, b2: ast.MatchBranch) -> Maybe(ast.Expr, ast.Expr) =
+# continues the staircase. Returns (terminal_pattern, terminal_body,
+# continuing_body) — the other's body is guaranteed to itself be a 2-branch
+# MatchExpr by `continues`. The terminal pattern is returned too so callers
+# can tell whether that branch's body depends on its own (failing) binding —
+# `let..else` can't express that (see terminal_needs_own_payload below).
+fn classify(b1: ast.MatchBranch, b2: ast.MatchBranch) -> Maybe(ast.Pattern, ast.Expr, ast.Expr) =
   match b1 with
   | ast.MatchBranch p1 body1 ->
       match b2 with
       | ast.MatchBranch p2 body2 ->
           let c1 = continues(p1, body1)
               c2 = continues(p2, body2)
-          in if c1 && ! c2 then Just((body2, body1))
-             else if c2 && ! c1 then Just((body1, body2))
+          in if c1 && ! c2 then Just((p2, body2, body1))
+             else if c2 && ! c1 then Just((p1, body1, body2))
              else Nothing
+
+# The variable names a pattern binds — used to check whether a terminal
+# branch's body depends on its own (failing) match, which `let <pat> = e
+# else fb` cannot express: `fb` is matched against a bare wildcard
+# (parser.sprout: build_let_binding_match), so it has no access to whatever
+# the failing pattern would have bound (e.g. the `msg` in `Err msg -> ...`).
+fn pattern_bound_names(pat: ast.Pattern) -> List String =
+  match pat with
+  | ast.VarPattern name _ -> Cons(name, Nil)
+  | ast.ConstructorPattern _ subpats _ -> pattern_list_bound_names(subpats)
+  | ast.TuplePattern subpats _ -> pattern_list_bound_names(subpats)
+  | _ -> Nil
+
+fn pattern_list_bound_names(pats: List ast.Pattern) -> List String =
+  match pats with
+  | Nil -> Nil
+  | Cons p rest -> list_append(pattern_bound_names(p), pattern_list_bound_names(rest))
+
+fn name_in_list(name: String, names: List String) -> Bool =
+  match names with
+  | Nil -> false
+  | Cons n rest -> n == name || name_in_list(name, rest)
+
+# True when `e` references any of `names` as a plain variable — a simple,
+# shadowing-unaware syntactic check (adequate here: this only ever picks
+# which lint message to show, never rewrites anything).
+fn expr_uses_any(names: List String, e: ast.Expr) -> Bool =
+  match e with
+  | ast.VarExpr name _ -> name_in_list(name, names)
+  | ast.MatchExpr scrut branches _ ->
+      expr_uses_any(names, scrut) || branches_use_any(names, branches)
+  | ast.IfExpr cond then_ else_ _ ->
+      expr_uses_any(names, cond) || expr_uses_any(names, then_) || expr_uses_any(names, else_)
+  | ast.CallExpr callee args _ ->
+      expr_uses_any(names, callee) || exprs_use_any(names, args)
+  | ast.TupleExpr elems _ -> exprs_use_any(names, elems)
+  | ast.BinaryExpr _ left right _ ->
+      expr_uses_any(names, left) || expr_uses_any(names, right)
+  | ast.UnaryExpr _ operand _ -> expr_uses_any(names, operand)
+  | ast.LambdaExpr _ body _ -> expr_uses_any(names, body)
+  | ast.DoExpr steps _ -> do_steps_use_any(names, steps)
+  | ast.RecordExpr _ fields _ -> record_fields_use_any(names, fields)
+  | ast.GetFieldExpr rec_expr _ _ -> expr_uses_any(names, rec_expr)
+  | ast.IntRangeExpr lo hi _ -> expr_uses_any(names, lo) || expr_uses_any(names, hi)
+  | ast.StringTemplateExpr parts _ -> template_parts_use_any(names, parts)
+  | _ -> false  # leaves: Int/Float/Bool/String/Char/Unit — no sub-expressions
+
+fn exprs_use_any(names: List String, exprs: List ast.Expr) -> Bool =
+  match exprs with
+  | Nil -> false
+  | Cons e rest -> expr_uses_any(names, e) || exprs_use_any(names, rest)
+
+fn branches_use_any(names: List String, branches: List ast.MatchBranch) -> Bool =
+  match branches with
+  | Nil -> false
+  | Cons b rest ->
+      match b with
+      | ast.MatchBranch _ body -> expr_uses_any(names, body) || branches_use_any(names, rest)
+
+fn do_steps_use_any(names: List String, steps: List ast.DoStep) -> Bool =
+  match steps with
+  | Nil -> false
+  | Cons s rest ->
+      (match s with
+       | ast.DoBindStep _ value -> expr_uses_any(names, value)
+       | ast.DoLetStep _ value -> expr_uses_any(names, value)
+       | ast.DoExprStep value -> expr_uses_any(names, value))
+      || do_steps_use_any(names, rest)
+
+fn record_fields_use_any(names: List String, fields: List ast.RecordField) -> Bool =
+  match fields with
+  | Nil -> false
+  | Cons f rest ->
+      match f with
+      | ast.RecordField _ value -> expr_uses_any(names, value) || record_fields_use_any(names, rest)
+
+fn template_parts_use_any(names: List String, parts: List ast.TemplateExprPart) -> Bool =
+  match parts with
+  | Nil -> false
+  | Cons p rest ->
+      (match p with
+       | ast.LitPart _ -> false
+       | ast.InterpPart e -> expr_uses_any(names, e))
+      || template_parts_use_any(names, rest)
+
+fn terminal_needs_own_payload(pat: ast.Pattern, body: ast.Expr) -> Bool =
+  expr_uses_any(pattern_bound_names(pat), body)
 
 # ---------------------------------------------------------------------------
 # Generic ast.Expr traversal — every variant, modeled on checker.sprout's
@@ -146,37 +236,55 @@ fn walk_branches(branches: List ast.MatchBranch) -> List LintFinding =
 let min_staircase_depth = 3
 
 # walk_chain: the chain starting at this 2-branch match. Returns (depth,
-# findings) — depth is 1 + however deep the continuing branch's own chain
-# goes; findings covers every non-chain subexpression along the way (the
-# scrutinee at each link, each link's terminal body) but never a finding for
-# THIS node — the caller decides that once it knows the total depth.
-fn walk_chain(branches: List ast.MatchBranch, scrut: ast.Expr) -> (Int, List LintFinding) =
+# blocked, findings) — depth is 1 + however deep the continuing branch's own
+# chain goes; blocked is true when ANY link's terminal branch needs its own
+# (failing-pattern) payload, meaning the chain can't be fully expressed with
+# let..else even though it has the staircase shape; findings covers every
+# non-chain subexpression along the way (the scrutinee at each link, each
+# link's terminal body) but never a finding for THIS node — the caller
+# decides that once it knows the total depth and blocked status.
+fn walk_chain(branches: List ast.MatchBranch, scrut: ast.Expr) -> (Int, Bool, List LintFinding) =
   match branches with
   | Cons b1 (Cons b2 Nil) ->
       (match classify(b1, b2) with
-       | Just (terminal_body, continuing_match) ->
+       | Just (terminal_pat, terminal_body, continuing_match) ->
            (match walk_chain_expr(continuing_match) with
-            | (inner_depth, inner_findings) ->
+            | (inner_depth, inner_blocked, inner_findings) ->
                 (1 + inner_depth,
+                  inner_blocked || terminal_needs_own_payload(terminal_pat, terminal_body),
                   list_append(walk_expr(scrut), list_append(walk_expr(terminal_body), inner_findings))))
        | Nothing ->
-           (1, list_append(walk_expr(scrut), list_append(walk_branch(b1), walk_branch(b2)))))
-  | _ -> (1, list_append(walk_expr(scrut), walk_branches(branches)))
+           # Neither branch continues, so this match is the chain's own
+           # trailing leaf, not a link that gets rewritten into an else-
+           # fallback. Its arms stay ordinary match arms either way, free to
+           # use their own bindings — hence `blocked = false` here even if
+           # b1/b2 reference their own payload.
+           (1, false, list_append(walk_expr(scrut), list_append(walk_branch(b1), walk_branch(b2)))))
+  | _ -> (1, false, list_append(walk_expr(scrut), walk_branches(branches)))
 
 # walk_chain_expr: like walk_chain, but for an expression that may or may not
 # itself be a match — a chain link's continuing body is always a MatchExpr
 # (guaranteed by `continues`), but this is also the fallback used when the
 # generic walker isn't already inside a chain.
-fn walk_chain_expr(e: ast.Expr) -> (Int, List LintFinding) =
+fn walk_chain_expr(e: ast.Expr) -> (Int, Bool, List LintFinding) =
   match e with
   | ast.MatchExpr scrut branches _ -> walk_chain(branches, scrut)
-  | _ -> (1, walk_expr(e))
+  | _ -> (1, false, walk_expr(e))
+
+# A chain we can positively recommend fixing names the fix (let..else, with
+# a doc pointer); a chain that's merely deep but has a link `let..else` can't
+# express gets a softer nudge instead — it's still worth a look, but there's
+# no simple rewrite to point at.
+fn staircase_message(blocked: Bool) -> String =
+  if blocked
+  then "nested match runs several layers deep — consider whether it can be restructured"
+  else "nested match can be flattened with let..else (docs/idiomatic-sprout.md)"
 
 fn walk_match(scrut: ast.Expr, branches: List ast.MatchBranch, pos: source.SourcePos) -> List LintFinding =
   match walk_chain(branches, scrut) with
-  | (depth, findings) ->
+  | (depth, blocked, findings) ->
       if depth >= min_staircase_depth
-      then Cons(mk_finding(pos, "staircase-of-doom", "nested match can be flattened with let..else (docs/idiomatic-sprout.md)"), findings)
+      then Cons(mk_finding(pos, "staircase-of-doom", staircase_message(blocked)), findings)
       else findings
 
 # ---------------------------------------------------------------------------

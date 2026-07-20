@@ -24,6 +24,18 @@ fn first_rule(findings: List lint_rules.LintFinding) -> String =
   | Nil -> ""
   | Cons f _ -> finding_rule(f)
 
+fn finding_message(f: lint_rules.LintFinding) -> String =
+  match f with
+  | lint_rules.LintFinding _ _ _ msg -> msg
+
+fn first_message(findings: List lint_rules.LintFinding) -> String =
+  match findings with
+  | Nil -> ""
+  | Cons f _ -> finding_message(f)
+
+fn mentions_let_else(msg: String) -> Bool =
+  str_find(msg, "let..else") != -1
+
 # --- fixtures -----------------------------------------------------------
 
 let docs_example =
@@ -123,6 +135,42 @@ let already_let_else =
   "    if is_cont(b1) && is_cont(b2) && is_cont(b3) then Just((b0, i))\n" ++
   "    else Nothing\n"
 
+let blocked_own_payload =
+  "fn op_session_update(req: Json, state: Int) -> Json =\n" ++
+  "  match require_int_field(req, \"session_id\") with\n" ++
+  "  | Err msg -> error_response(msg)\n" ++
+  "  | Ok session_id ->\n" ++
+  "      match require_string_field(req, \"kind\") with\n" ++
+  "      | Err msg -> error_response(msg)\n" ++
+  "      | Ok kind ->\n" ++
+  "          match require_string_field(req, \"line\") with\n" ++
+  "          | Err msg -> error_response(msg)\n" ++
+  "          | Ok line -> combine(session_id, kind, line)\n"
+
+let leaf_match_arm_uses_own_payload_is_clean =
+  "fn f(a: Maybe Int, b: Maybe Int) -> Int =\n" ++
+  "  match a with\n" ++
+  "  | Nothing -> 0\n" ++
+  "  | Just x ->\n" ++
+  "      match b with\n" ++
+  "      | Nothing -> 0\n" ++
+  "      | Just y ->\n" ++
+  "          match parse_positive_int(y) with\n" ++
+  "          | Err err -> err\n" ++
+  "          | Ok z -> x + z\n"
+
+let blocked_at_intermediate_link =
+  "fn f(a: Maybe Int, b: Maybe Int) -> Int =\n" ++
+  "  match a with\n" ++
+  "  | Nothing -> 0\n" ++
+  "  | Just x ->\n" ++
+  "      match parse_positive_int(x) with\n" ++
+  "      | Err e -> recover(e)\n" ++
+  "      | Ok y ->\n" ++
+  "          match b with\n" ++
+  "          | Nothing -> 0\n" ++
+  "          | Just z -> y + z\n"
+
 let nested_in_lambda =
   "fn run(xs: Maybe Int, ys: Maybe Int, zs: Maybe Int) -> Int !{IO} =\n" ++
   "  do\n" ++
@@ -164,5 +212,17 @@ fn main() -> Unit !{IO} =
     assert_eq(state, "list recursion wrapping an inner Maybe match: no finding", count_list(lint_rules.lint_ast(list_recursion_wrapping_maybe)), 0)
 
     assert_eq(state, "already let..else (desugars to the same MatchExpr shape): no finding", count_list(lint_rules.lint_ast(already_let_else)), 0)
+
+    assert_eq(state, "clean chain: message references let..else", mentions_let_else(first_message(lint_rules.lint_ast(three_deep_chain))), true)
+
+    assert_eq(state, "blocked chain (terminal uses own payload): still reported", count_list(lint_rules.lint_ast(blocked_own_payload)), 1)
+    assert_eq(state, "blocked chain: rule id unchanged", first_rule(lint_rules.lint_ast(blocked_own_payload)), "staircase-of-doom")
+    assert_eq(state, "blocked chain: message does not reference let..else", mentions_let_else(first_message(lint_rules.lint_ast(blocked_own_payload))), false)
+
+    assert_eq(state, "leaf match arm using its own payload stays clean (leaf never becomes an else-fallback)", count_list(lint_rules.lint_ast(leaf_match_arm_uses_own_payload_is_clean)), 1)
+    assert_eq(state, "leaf match arm using its own payload: message still references let..else", mentions_let_else(first_message(lint_rules.lint_ast(leaf_match_arm_uses_own_payload_is_clean))), true)
+
+    assert_eq(state, "blocked at intermediate link: still reported once", count_list(lint_rules.lint_ast(blocked_at_intermediate_link)), 1)
+    assert_eq(state, "blocked at intermediate link: softer message propagates to the root", mentions_let_else(first_message(lint_rules.lint_ast(blocked_at_intermediate_link))), false)
 
     summary(state)
