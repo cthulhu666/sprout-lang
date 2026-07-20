@@ -365,27 +365,11 @@ fn collect_template_part_nodes_i(parts: List ast.TemplateExprPart, pos: source.S
           )
 
 # ---------------------------------------------------------------------------
-# Legacy (non-indexed) desugar helpers — kept for reference; the program-level
-# desugar now goes through the indexed path above.
+# Shared helpers for the indexed desugar pass above.
 # ---------------------------------------------------------------------------
 
-fn desugar_decls(decls: List ast.Decl) -> List ast.Decl =
-  match decls with
-  | Nil -> Nil
-  | Cons d rest -> Cons(desugar_decl(d), desugar_decls(rest))
-
-fn desugar_decl(d: ast.Decl) -> ast.Decl =
-  match d with
-  | ast.FnDecl name params ret effs constraints body pos ->
-      ast.FnDecl(name, params, ret, effs, constraints, desugar_expr_with_expected(body, type_expr_bare_name(ret)), pos)
-  | ast.LetDecl name body pos ->
-      ast.LetDecl(name, desugar_expr(body), pos)
-  | ast.InstanceDecl constraint inst_constraints methods pos ->
-      ast.InstanceDecl(constraint, inst_constraints, desugar_instance_methods(methods), pos)
-  | _ -> d
-
 # Extract the bare constructor name from a Maybe TypeExpr, or Nothing if not
-# a simple TypeName.  Used to propagate "StringTemplate" context downward.
+# a simple TypeName.  Used to propagate "StringTemplate"/"Vec" context downward.
 fn type_expr_bare_name(te: Maybe ast.TypeExpr) -> Maybe String =
   match te with
   | Nothing -> Nothing
@@ -402,117 +386,6 @@ fn type_texpr_to_maybe_name(texpr: ast.TypeExpr) -> Maybe String =
       type_texpr_to_maybe_name(head)
   | _ ->
       Nothing
-
-fn desugar_instance_methods(methods: List ast.InstanceMethodImpl) -> List ast.InstanceMethodImpl =
-  match methods with
-  | Nil -> Nil
-  | Cons m rest -> Cons(desugar_instance_method(m), desugar_instance_methods(rest))
-
-fn desugar_instance_method(m: ast.InstanceMethodImpl) -> ast.InstanceMethodImpl =
-  match m with
-  | ast.InstanceMethodImpl name params ret effs body ->
-      ast.InstanceMethodImpl(name, params, ret, effs, desugar_expr_with_expected(body, type_expr_bare_name(ret)))
-
-# Context-aware desugar.  When expected is Just "StringTemplate" and the
-# expression is a StringTemplateExpr, lowers to the StringTemplate ADT.
-# In all other positions, behaves identically to desugar_expr.
-fn desugar_expr_with_expected(expr: ast.Expr, expected: Maybe String) -> ast.Expr =
-  match expected with
-  | Nothing -> desugar_expr(expr)
-  | Just exp_name ->
-      if exp_name == "StringTemplate" then
-        match expr with
-        | ast.StringTemplateExpr parts pos ->
-            desugar_template_as_string_template(parts, pos)
-        | ast.IfExpr cond then_ else_ pos ->
-            ast.IfExpr(
-              desugar_expr(cond),
-              desugar_expr_with_expected(then_, expected),
-              desugar_expr_with_expected(else_, expected),
-              pos
-            )
-        | ast.MatchExpr scrut branches pos ->
-            ast.MatchExpr(desugar_expr(scrut), desugar_branches_with_expected(branches, expected), pos)
-        | _ -> desugar_expr(expr)
-      else
-        desugar_expr(expr)
-
-fn desugar_branches_with_expected(branches: List ast.MatchBranch, expected: Maybe String) -> List ast.MatchBranch =
-  match branches with
-  | Nil -> Nil
-  | Cons b rest ->
-      match b with
-      | ast.MatchBranch pat body ->
-          Cons(ast.MatchBranch(pat, desugar_expr_with_expected(body, expected)), desugar_branches_with_expected(rest, expected))
-
-fn desugar_expr(expr: ast.Expr) -> ast.Expr =
-  match expr with
-  | ast.StringTemplateExpr parts pos ->
-      desugar_template(parts, pos)
-  | ast.IfExpr cond then_ else_ pos ->
-      ast.IfExpr(desugar_expr(cond), desugar_expr(then_), desugar_expr(else_), pos)
-  | ast.CallExpr callee args pos ->
-      ast.CallExpr(desugar_expr(callee), desugar_exprs(args), pos)
-  | ast.MatchExpr scrut branches pos ->
-      ast.MatchExpr(desugar_expr(scrut), desugar_branches(branches), pos)
-  | ast.TupleExpr elems pos ->
-      ast.TupleExpr(desugar_exprs(elems), pos)
-  | ast.BinaryExpr op left right pos ->
-      ast.BinaryExpr(op, desugar_expr(left), desugar_expr(right), pos)
-  | ast.UnaryExpr op operand pos ->
-      ast.UnaryExpr(op, desugar_expr(operand), pos)
-  | ast.LambdaExpr params body pos ->
-      ast.LambdaExpr(params, desugar_expr(body), pos)
-  | ast.DoExpr steps pos ->
-      ast.DoExpr(desugar_do_steps(steps), pos)
-  | ast.RecordExpr type_name fields pos ->
-      ast.RecordExpr(type_name, desugar_record_fields(fields), pos)
-  | ast.GetFieldExpr rec_expr field_name pos ->
-      ast.GetFieldExpr(desugar_expr(rec_expr), field_name, pos)
-  | ast.IntRangeExpr lo hi pos ->
-      ast.IntRangeExpr(desugar_expr(lo), desugar_expr(hi), pos)
-  | _ -> expr
-
-fn desugar_exprs(exprs: List ast.Expr) -> List ast.Expr =
-  match exprs with
-  | Nil -> Nil
-  | Cons e rest -> Cons(desugar_expr(e), desugar_exprs(rest))
-
-fn desugar_branches(branches: List ast.MatchBranch) -> List ast.MatchBranch =
-  match branches with
-  | Nil -> Nil
-  | Cons b rest ->
-      match b with
-      | ast.MatchBranch pat body ->
-          Cons(ast.MatchBranch(pat, desugar_expr(body)), desugar_branches(rest))
-
-fn desugar_do_steps(steps: List ast.DoStep) -> List ast.DoStep =
-  match steps with
-  | Nil -> Nil
-  | Cons s rest -> Cons(desugar_do_step(s), desugar_do_steps(rest))
-
-fn desugar_do_step(s: ast.DoStep) -> ast.DoStep =
-  match s with
-  | ast.DoBindStep pat value -> ast.DoBindStep(pat, desugar_expr(value))
-  | ast.DoLetStep name value -> ast.DoLetStep(name, desugar_expr(value))
-  | ast.DoExprStep value -> ast.DoExprStep(desugar_expr(value))
-
-fn desugar_record_fields(fields: List ast.RecordField) -> List ast.RecordField =
-  match fields with
-  | Nil -> Nil
-  | Cons f rest ->
-      match f with
-      | ast.RecordField name value ->
-          Cons(ast.RecordField(name, desugar_expr(value)), desugar_record_fields(rest))
-
-# Lowering for a single StringTemplateExpr.
-fn desugar_template(parts: List ast.TemplateExprPart, pos: source.SourcePos) -> ast.Expr =
-  if list_length(parts) == 0 then
-    ast.StringExpr("", pos)
-  else if all_lit_parts(parts) then
-    ast.StringExpr(merge_lit_parts(parts, ""), pos)
-  else
-    desugar_template_general(collect_effective_parts(parts, pos), pos)
 
 fn desugar_template_general(effective: List ast.Expr, pos: source.SourcePos) -> ast.Expr =
   if list_length(effective) == 1 then
@@ -542,21 +415,6 @@ fn merge_lit_parts(parts: List ast.TemplateExprPart, acc: String) -> String =
       | ast.LitPart text -> merge_lit_parts(rest, string.concat(acc, text))
       | ast.InterpPart _ -> merge_lit_parts(rest, acc)
 
-# Build the list of effective (non-empty) part expressions.
-fn collect_effective_parts(parts: List ast.TemplateExprPart, pos: source.SourcePos) -> List ast.Expr =
-  match parts with
-  | Nil -> Nil
-  | Cons p rest ->
-      match p with
-      | ast.LitPart text ->
-          if str_len(text) == 0 then collect_effective_parts(rest, pos)
-          else Cons(ast.StringExpr(text, pos), collect_effective_parts(rest, pos))
-      | ast.InterpPart inner_expr ->
-          Cons(
-            ast.CallExpr(ast.VarExpr("to_string", pos), Cons(desugar_expr(inner_expr), Nil), pos),
-            collect_effective_parts(rest, pos)
-          )
-
 fn build_cons_list(exprs: List ast.Expr, pos: source.SourcePos) -> ast.Expr =
   match exprs with
   | Nil -> ast.VarExpr(ast.list_ctor_nil, pos)
@@ -568,12 +426,11 @@ fn build_cons_list(exprs: List ast.Expr, pos: source.SourcePos) -> ast.Expr =
       )
 
 # ---------------------------------------------------------------------------
-# StringTemplate ADT lowering (Phase 4B)
+# StringTemplate ADT lowering (Phase 4B) — shared by the indexed pass above
 # ---------------------------------------------------------------------------
 #
-# desugar_template_as_string_template mirrors Python's
-# desugar_string_template_as_string_template.  It is called when the
-# immediate expected-type context is "StringTemplate".
+# wrap_string_template is used by desugar_template_as_string_template_i,
+# called when the immediate expected-type context is "StringTemplate".
 #
 # Produces:
 #   StringTemplate(Cons(TemplateLit("lit"), Cons(TemplateInterp(to_string(x)), Nil)))
@@ -594,50 +451,6 @@ fn wrap_string_template(parts_list: ast.Expr, pos: source.SourcePos) -> ast.Expr
     Cons(parts_list, Nil),
     pos
   )
-
-fn desugar_template_as_string_template(parts: List ast.TemplateExprPart, pos: source.SourcePos) -> ast.Expr =
-  if list_length(parts) == 0 then
-    wrap_string_template(ast.VarExpr(ast.list_ctor_nil, pos), pos)
-  else if all_lit_parts(parts) then
-    wrap_string_template(
-      ast.CallExpr(
-        ast.VarExpr(ast.list_ctor_cons, pos),
-        [
-          ast.CallExpr(ast.VarExpr(ast.template_ctor_lit, pos), [ast.StringExpr(merge_lit_parts(parts, ""), pos)], pos),
-          ast.VarExpr(ast.list_ctor_nil, pos)
-        ],
-        pos
-      ),
-      pos
-    )
-  else
-    wrap_string_template(
-      build_cons_list(collect_template_part_nodes(parts, pos), pos),
-      pos
-    )
-
-# Build the list of TemplateLit/TemplateInterp AST nodes for each effective part.
-fn collect_template_part_nodes(parts: List ast.TemplateExprPart, pos: source.SourcePos) -> List ast.Expr =
-  match parts with
-  | Nil -> Nil
-  | Cons p rest ->
-      match p with
-      | ast.LitPart text ->
-          if str_len(text) == 0 then collect_template_part_nodes(rest, pos)
-          else
-            Cons(
-              ast.CallExpr(ast.VarExpr(ast.template_ctor_lit, pos), [ast.StringExpr(text, pos)], pos),
-              collect_template_part_nodes(rest, pos)
-            )
-      | ast.InterpPart inner_expr ->
-          Cons(
-            ast.CallExpr(
-              ast.VarExpr(ast.template_ctor_interp, pos),
-              [ast.CallExpr(ast.VarExpr("to_string", pos), [desugar_expr(inner_expr)], pos)],
-              pos
-            ),
-            collect_template_part_nodes(rest, pos)
-          )
 
 # ---------------------------------------------------------------------------
 # dump_typed_names — parity-test output renderer

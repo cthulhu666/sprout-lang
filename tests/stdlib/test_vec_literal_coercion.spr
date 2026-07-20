@@ -18,6 +18,16 @@ fn make_vec() -> Vec Int =
 fn empty_vec() -> Vec Int =
   []
 
+# An explicit, hand-written vec_from_list(...) wrapping a bare list literal in
+# Vec context — the checker's own desugar pass leaves an already-present
+# vec_from_list call untouched (its callee name is "vec_from_list", not
+# "Cons"/"Nil", so desugar_ctx_leaf_i's match falls through to the no-op
+# no-context branch). This is the shape the redundant-vec_from_list lint rule
+# targets: the wrapper is behaviorally a no-op here, since the checker would
+# insert the same wrap on the bare literal anyway.
+fn explicit_wrap() -> Vec Int =
+  vec_from_list([10, 20, 30])
+
 fn main() -> Unit !{IO} =
   do
     state <- new_state()
@@ -36,5 +46,10 @@ fn main() -> Unit !{IO} =
     # into vec_from_list(vec), which would be a type error).
     let real = foldable_to_vec([7, 8, 9])
     assert_eq(state, "real vec passthrough", sum3(real), 24)
+
+    # An explicit vec_from_list(...) wrapper in Vec context behaves identically
+    # to the bare literal it wraps (see explicit_wrap's comment above).
+    assert_eq(state, "explicit vec_from_list wrap len", vlen(explicit_wrap()), 3)
+    assert_eq(state, "explicit vec_from_list wrap elem", vec_get_or(1, -1, explicit_wrap()), 20)
 
     summary(state)
