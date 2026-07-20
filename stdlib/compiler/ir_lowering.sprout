@@ -315,6 +315,13 @@ fn lower_op(op: sprout_ir.IROp, ret_ty: String, str_table: Dict (String, Int)) -
       lower_tco_back_stores(stores) ++
       "  call void @llvm.stackrestore(ptr " ++ sp ++ ")\n" ++
       "  br label %" ++ loop_lbl
+  # Mutual tail call: [restore the enclosing self-TCO loop's stack if any], then a
+  # guaranteed `musttail` jump immediately followed by `ret` of its value (musttail
+  # requires nothing between the call and the ret).
+  | sprout_ir.IRTailCall result callee args sp ->
+      (if sp == "" then "" else "  call void @llvm.stackrestore(ptr " ++ sp ++ ")\n") ++
+      "  " ++ result ++ " = musttail call i64 @" ++ callee ++ "(" ++ lower_call_args(args) ++ ")\n" ++
+      "  ret i64 " ++ result
 
 fn lower_ops(ops: List sprout_ir.IROp, ret_ty: String, str_table: Dict (String, Int)) -> String =
   match ops with

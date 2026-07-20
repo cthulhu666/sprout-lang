@@ -1,0 +1,138 @@
+module main
+import stdlib.test (TestState, new_state, assert_true, summary)
+import stdlib.compiler.ast_to_ir as ast_to_ir
+import stdlib.compiler.ir_lowering as ir_lowering
+import stdlib.compiler.sprout_ir as sprout_ir
+import stdlib.string as string
+
+# Unit tests for the mutual-TCO rewrite (musttail / IRTailCall).  Pure
+# IRFunction -> IRFunction; no seed churn (runs on the current stage-1).
+# See docs/mutual-tco-v0.md.
+
+# Pre-rooting IR for a same-prototype cycle member:
+#   a(x, y) = if x <= 0 then y else b(x, y)     -- b is a() 's cycle partner
+# The tail call `%r = call @main.b(%x, %y)` in `elseb` flows through join's phi
+# to the ret (the scram hi_loop shape).  With ("main.b", 2) eligible, the rewrite
+# must drop the call+br and emit `musttail call @main.b` + `ret`, and strip the
+# [%r, elseb] incoming from join's phi (leaving the single then-incoming).
+fn make_a() -> sprout_ir.IRFunction =
+  sprout_ir.IRFunction("main.a",
+    Cons(("x", sprout_ir.IRTScalar), Cons(("y", sprout_ir.IRTHeap), Nil)),
+    "i64",
+    Cons(sprout_ir.IRBlock("entry",
+      Cons(sprout_ir.IRConst("%t0", 0),
+      Cons(sprout_ir.IRICmp("%t1", "sle", "%x", "%t0"),
+      Cons(sprout_ir.IRCondBr("%t1", "thenb", "elseb"), Nil)))),
+    Cons(sprout_ir.IRBlock("thenb",
+      Cons(sprout_ir.IRBr("joinb"), Nil)),
+    Cons(sprout_ir.IRBlock("elseb",
+      Cons(sprout_ir.IRCall("%r", sprout_ir.IRTHeap, "main.b", Cons("%x", Cons("%y", Nil))),
+      Cons(sprout_ir.IRBr("joinb"), Nil))),
+    Cons(sprout_ir.IRBlock("joinb",
+      Cons(sprout_ir.IRPhi("%m", "i64", Cons(("%y", "thenb"), Cons(("%r", "elseb"), Nil))),
+      Cons(sprout_ir.IRRet("%m"), Nil))),
+    Nil)))))
+
+# A self-TCO'd function (carries an IRTcoEntry).  Phase A must SKIP it even
+# though it contains a mutual call to main.b.
+fn make_self_tco_fn() -> sprout_ir.IRFunction =
+  sprout_ir.IRFunction("main.c",
+    Cons(("x", sprout_ir.IRTScalar), Cons(("y", sprout_ir.IRTHeap), Nil)),
+    "i64",
+    Cons(sprout_ir.IRBlock("entry",
+      Cons(sprout_ir.IRTcoEntry(Cons(("%slot", "i64", "%x$in"), Nil), "%sp"),
+      Cons(sprout_ir.IRBr("tco_loop"), Nil))),
+    Cons(sprout_ir.IRBlock("tco_loop",
+      Cons(sprout_ir.IRCall("%r", sprout_ir.IRTHeap, "main.b", Cons("%x", Cons("%y", Nil))),
+      Cons(sprout_ir.IRRet("%r"), Nil))),
+    Nil)))
+
+# A non-i64-returning function (i1): must be skipped (musttail needs matching
+# return types).
+fn make_i1_fn() -> sprout_ir.IRFunction =
+  sprout_ir.IRFunction("main.p",
+    Cons(("x", sprout_ir.IRTScalar), Cons(("y", sprout_ir.IRTHeap), Nil)),
+    "i1",
+    Cons(sprout_ir.IRBlock("entry",
+      Cons(sprout_ir.IRCall("%r", sprout_ir.IRTScalar, "main.b", Cons("%x", Cons("%y", Nil))),
+      Cons(sprout_ir.IRRet("%r"), Nil))),
+    Nil))
+
+# --- structural helper: count the incomings of block `lbl`'s first IRPhi. ---
+fn fn_blocks(f: sprout_ir.IRFunction) -> List sprout_ir.IRBlock =
+  match f with | sprout_ir.IRFunction _ _ _ bs -> bs
+
+fn phi_incoming_count(blocks: List sprout_ir.IRBlock, lbl: String) -> Int =
+  match blocks with
+  | Nil -> -1
+  | Cons b rest ->
+      match b with
+      | sprout_ir.IRBlock l ops ->
+          if l == lbl then ops_phi_count(ops) else phi_incoming_count(rest, lbl)
+
+fn ops_phi_count(ops: List sprout_ir.IROp) -> Int =
+  match ops with
+  | Nil -> -1
+  | Cons op rest ->
+      match op with
+      | sprout_ir.IRPhi _ _ inc -> list_length(inc)
+      | _ -> ops_phi_count(rest)
+
+fn main() -> Unit !{IO} =
+  do
+    state <- new_state()
+    # 1. Same-prototype cycle edge → rewritten to musttail.
+    let rw = ast_to_ir.mutual_tco_rewrite_fn(make_a(), Cons(("main.b", 2), Nil))
+    let rir = ir_lowering.lower_fn_with_table(rw, dict_empty())
+    assert_true(state, "cycle edge: emits musttail to the partner",
+      string.contains(rir, "musttail call i64 @main.b"))
+    assert_true(state, "cycle edge: plain (non-tail) call to partner is gone",
+      string.contains(rir, "%r = call i64 @main.b") == false)
+    assert_true(state, "cycle edge: musttail is followed by ret",
+      string.contains(rir, "ret i64 %r"))
+    assert_true(state, "cycle edge: join phi lost the elseb incoming (no dangling phi)",
+      phi_incoming_count(fn_blocks(rw), "joinb") == 1)
+
+    # 2. Arity guard: eligible name but wrong arity → no rewrite.
+    let bad = ast_to_ir.mutual_tco_rewrite_fn(make_a(), Cons(("main.b", 3), Nil))
+    let bir = ir_lowering.lower_fn_with_table(bad, dict_empty())
+    assert_true(state, "arity mismatch: NOT rewritten (stays a plain call)",
+      string.contains(bir, "musttail") == false)
+    assert_true(state, "arity mismatch: plain call retained",
+      string.contains(bir, "call i64 @main.b"))
+
+    # 3. Self-TCO'd function → skipped in Phase A.
+    let stc = ast_to_ir.mutual_tco_rewrite_fn(make_self_tco_fn(), Cons(("main.b", 2), Nil))
+    let sir = ir_lowering.lower_fn_with_table(stc, dict_empty())
+    assert_true(state, "self-TCO'd fn: mutual edge skipped (no musttail)",
+      string.contains(sir, "musttail") == false)
+
+    # 4. Non-i64 return → skipped.
+    let i1f = ast_to_ir.mutual_tco_rewrite_fn(make_i1_fn(), Cons(("main.b", 2), Nil))
+    let i1ir = ir_lowering.lower_fn_with_table(i1f, dict_empty())
+    assert_true(state, "i1-returning fn: skipped (no musttail)",
+      string.contains(i1ir, "musttail") == false)
+
+    # 5. No eligible targets → unchanged.
+    let none = ast_to_ir.mutual_tco_rewrite_fn(make_a(), Nil)
+    let nir = ir_lowering.lower_fn_with_table(none, dict_empty())
+    assert_true(state, "no eligible targets: unchanged (plain call kept)",
+      string.contains(nir, "call i64 @main.b"))
+    assert_true(state, "no eligible targets: no musttail",
+      string.contains(nir, "musttail") == false)
+
+    # 6. Eligibility logic: a 2-cycle a<->b (arity 2, i64) yields both edges.
+    let raw = Cons(("a", (false, set_insert("b", set_empty()))),
+              Cons(("b", (false, set_insert("a", set_empty()))), Nil))
+    let arities = dict_set("a", 2, dict_set("b", 2, dict_empty()))
+    let rets = dict_set("a", true, dict_set("b", true, dict_empty()))
+    let elig = ast_to_ir.mutual_build_eligible(raw, arities, rets)
+    assert_true(state, "eligible: a<->b cycle gives a a target", list_length(ast_to_ir.mutual_eligible_for("a", elig)) == 1)
+    assert_true(state, "eligible: a<->b cycle gives b a target", list_length(ast_to_ir.mutual_eligible_for("b", elig)) == 1)
+
+    # 7. one-way a->b (b does not call a) is NOT a cycle → no edge.
+    let raw2 = Cons(("a", (false, set_insert("b", set_empty()))),
+               Cons(("b", (false, set_empty())), Nil))
+    let elig2 = ast_to_ir.mutual_build_eligible(raw2, arities, rets)
+    assert_true(state, "eligible: one-way a->b not a cycle", list_length(ast_to_ir.mutual_eligible_for("a", elig2)) == 0)
+    summary(state)

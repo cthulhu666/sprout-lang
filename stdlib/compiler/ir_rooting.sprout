@@ -127,6 +127,10 @@ fn op_triggers_gc(op: sprout_ir.IROp) -> Bool =
   | sprout_ir.IRTcoEntry _ _ -> false
   | sprout_ir.IRTcoLoad _ _ _ _ -> false
   | sprout_ir.IRTcoBack _ _ _ -> false
+  # IRTailCall lowers to musttail call + ret; the callee runs in this frame's
+  # place (no return here), so it is NOT a GC-safe point in the caller — like the
+  # tail back-edge, it must not push a root that would accumulate per frame.
+  | sprout_ir.IRTailCall _ _ _ _ -> false
   # Remaining ops are non-allocating (arithmetic, control flow, loads/stores,
   # and the root ops themselves).  EXHAUSTIVE on purpose — no `_` catch-all, so
   # a new IROp is a COMPILE ERROR here until its GC-trigger status is decided
@@ -248,6 +252,9 @@ fn op_produces_simple_heap(op: sprout_ir.IROp) -> Maybe String =
       | _ -> Just(loaded)
   | sprout_ir.IRTcoEntry _ _ -> Nothing
   | sprout_ir.IRTcoBack _ _ _ -> Nothing
+  # IRTailCall's result flows straight into the built-in ret (call;ret); nothing
+  # in this frame outlives it, so it produces no trackable heap value.
+  | sprout_ir.IRTailCall _ _ _ _ -> Nothing
   # Remaining ops produce no heap value (scalars, control flow, void, the root
   # ops; IRPhi heap-ness is resolved in compute_heap_origin/update_scope, so it
   # is Nothing here).  EXHAUSTIVE on purpose — no `_` catch-all, so a new
@@ -301,6 +308,9 @@ fn op_successors(op: sprout_ir.IROp) -> List String =
   | sprout_ir.IRTruncI64ToI1 _ _ -> Nil
   # TCO back-edge: terminator branching to the loop header.
   | sprout_ir.IRTcoBack _ _ loop_lbl -> Cons(loop_lbl, Nil)
+  # IRTailCall is a terminator that returns (musttail;ret) — control leaves the
+  # function, so no in-function successor.
+  | sprout_ir.IRTailCall _ _ _ _ -> Nil
   | _ -> Nil
 
 fn last_op(ops: List sprout_ir.IROp) -> Maybe sprout_ir.IROp =
@@ -416,6 +426,9 @@ fn op_uses(op: sprout_ir.IROp) -> List String =
   | sprout_ir.IRTcoEntry slots _ -> tco_entry_uses(slots)
   | sprout_ir.IRTcoLoad _ _ slot _ -> Cons(slot, Nil)
   | sprout_ir.IRTcoBack stores _ _ -> tco_back_uses(stores)
+  # IRTailCall uses its argument values (they must be live TO the call); the
+  # callee roots them on entry, so they need no root ACROSS the tail call.
+  | sprout_ir.IRTailCall _ _ args _ -> args
 
 fn op_def(op: sprout_ir.IROp) -> Maybe String =
   match op with
@@ -768,6 +781,9 @@ fn op_exposes_operands(op: sprout_ir.IROp) -> Bool =
   | sprout_ir.IRTcoEntry _ _ -> false
   | sprout_ir.IRTcoLoad _ _ _ _ -> false
   | sprout_ir.IRTcoBack _ _ _ -> false
+  # IRTailCall does not trigger GC (see op_triggers_gc), so it exposes nothing:
+  # its args are passed by value and rooted by the callee, never rooted here.
+  | sprout_ir.IRTailCall _ _ _ _ -> false
 
 # Set of an op's operand names.  O(uses).
 fn op_operand_set(op: sprout_ir.IROp) -> Set =

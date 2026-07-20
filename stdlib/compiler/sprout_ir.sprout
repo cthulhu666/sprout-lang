@@ -395,6 +395,20 @@ export type IROp (..) =
   # then `br label %<loop_label>`.  No explicit GC root pop — the per-trigger
   # bracketing in ir_rooting self-balances each iteration.
   | IRTcoBack (List (String, String, String)) String String
+  # IRTailCall <result> <callee_ll_name> <arg_values> <sp_save>  — a MUTUAL tail
+  # call (a terminator).  arg_values are i64 SSA names (uniform ABI).  Lowers to:
+  #   [ `call void @llvm.stackrestore(ptr <sp_save>)`  if sp_save != "" ]
+  #   `<result> = musttail call i64 @<callee_ll_name>(i64 <a>, ...)`
+  #   `ret i64 <result>`
+  # LLVM `musttail` guarantees no stack growth for a cyclic call; it requires the
+  # call to immediately precede a `ret` of its value and caller/callee prototypes
+  # to match (both i64 here).  Like IRTcoBack it is NOT a GC trigger and does NOT
+  # expose operands for rooting: args are passed by value and the callee roots its
+  # params on entry, so no root is emitted across it — this is what removes the
+  # per-frame accumulating root that exhausts the pool.  sp_save is "" unless the
+  # enclosing function is ALSO self-TCO'd, in which case the loop's per-iteration
+  # root allocas are freed (stackrestore) before the jump.
+  | IRTailCall String String (List String) String
 
 export type IRBlock (..) = IRBlock String (List IROp)
 
@@ -572,6 +586,8 @@ fn print_op(op: IROp) -> String =
       "    " ++ loaded ++ " = tco_load " ++ slot ++ " : " ++ ll ++ " [" ++ print_ir_type(k) ++ "]"
   | IRTcoBack _ sp loop_lbl ->
       "    tco_back; sp=" ++ sp ++ " -> " ++ loop_lbl
+  | IRTailCall result callee _args sp ->
+      "    " ++ result ++ " = musttail " ++ callee ++ "; sp=" ++ sp
 
 fn print_ops(ops: List IROp) -> String =
   match ops with

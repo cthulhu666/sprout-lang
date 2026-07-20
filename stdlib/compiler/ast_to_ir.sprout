@@ -5167,6 +5167,201 @@ fn tco_assemble(name: String, params: List (String, sprout_ir.IRType), ret_ty: S
 fn maybe_tco(name: String, f: sprout_ir.IRFunction, next_idx: Int) -> (sprout_ir.IRFunction, Int) =
   if is_entry_fn_name(name) then (f, next_idx) else tco_rewrite(f, next_idx)
 
+# ===========================================================================
+# MUTUAL TCO — cross-function tail calls in a same-prototype cycle become
+# `musttail` (IRTailCall), so PBKDF2-style mutual recursion runs in O(1) stack
+# and O(1) GC roots.  See docs/mutual-tco-v0.md.  This is self-TCO's ASSEMBLY
+# (reuse tco_tail_safe_hits / tco_fix_all_phis / tco_prune_dead_blocks) with
+# IRTailCall swapped for IRTcoBack and NO slot/entry/loop restructuring —
+# musttail is call+ret in place, so the function keeps its normal entry and the
+# original call_result is reused (no fresh-name threading).
+#
+# `targets` is the precomputed eligible set for this fn: (callee_name, arity) for
+# each same-prototype cycle partner (computed in ir_pipeline from the call graph).
+# Runs PRE-rooting (like self-TCO): once a tail call is an IRTailCall (not a GC
+# trigger that exposes its heap args), ir_rooting emits no accumulating root.
+# Phase A: SKIP functions that are ALSO self-TCO'd (blocks already restructured);
+# scram's hi_loop/hi_step are not self-recursive so they are covered.
+# ===========================================================================
+
+# True iff any block already carries an IRTcoEntry (i.e. self-TCO'd).
+fn mutual_has_tco_entry(blocks: List sprout_ir.IRBlock) -> Bool =
+  match blocks with
+  | Nil -> false
+  | Cons b rest ->
+      if mutual_ops_have_tco_entry(tco_block_ops(b)) then true
+      else mutual_has_tco_entry(rest)
+
+fn mutual_ops_have_tco_entry(ops: List sprout_ir.IROp) -> Bool =
+  match ops with
+  | Nil -> false
+  | Cons op rest ->
+      match op with
+      | sprout_ir.IRTcoEntry _ _ -> true
+      | _ -> mutual_ops_have_tco_entry(rest)
+
+# Collect tagged hits for every eligible target: reuse tco_collect (finds tail
+# calls to a NAME within blocks) + tco_tail_safe_hits (result not consumed after),
+# then the IR-site arity guard (args count == callee arity) so a mismatched edge
+# is a no-op, never an illegal musttail.  Each hit is tagged with its callee.
+fn mutual_collect_hits(targets: List (String, Int), blocks: List sprout_ir.IRBlock) ->
+    List(String, (String, List String, String, String)) =
+  match targets with
+  | Nil -> Nil
+  | Cons (g, g_arity) rest ->
+      list_append(
+        mutual_tag_hits(g, g_arity, tco_tail_safe_hits(tco_collect(g, blocks, blocks), blocks)),
+        mutual_collect_hits(rest, blocks))
+
+fn mutual_tag_hits(g: String, g_arity: Int,
+                   hits: List (String, List String, String, String)) ->
+    List(String, (String, List String, String, String)) =
+  match hits with
+  | Nil -> Nil
+  | Cons (pred, args, call_result, phi_block) rest ->
+      if list_length(args) == g_arity
+      then Cons((g, (pred, args, call_result, phi_block)), mutual_tag_hits(g, g_arity, rest))
+      else mutual_tag_hits(g, g_arity, rest)
+
+# Drop the tag → the hit shape tco_fix_all_phis expects.
+fn mutual_untag(tagged: List (String, (String, List String, String, String))) ->
+    List(String, List String, String, String) =
+  match tagged with
+  | Nil -> Nil
+  | Cons (_g, hit) rest -> Cons(hit, mutual_untag(rest))
+
+# Rewrite a hit-predecessor block: drop the IRCall + its terminator, append the
+# IRTailCall (musttail; ret).  sp_save is "" — Phase A skips self-TCO'd fns, so
+# there is never an enclosing loop stack to restore.
+fn mutual_rewrite_block(b: sprout_ir.IRBlock,
+                        tagged: List (String, (String, List String, String, String))) ->
+    sprout_ir.IRBlock =
+  match mutual_find_hit_for_pred(tco_block_label(b), tagged) with
+  | Nothing -> b
+  | Just (g, args, call_result) ->
+      sprout_ir.IRBlock(tco_block_label(b),
+        list_append(tco_filter_call_and_term(tco_block_ops(b), call_result),
+                    Cons(sprout_ir.IRTailCall(call_result, g, args, ""), Nil)))
+
+fn mutual_find_hit_for_pred(lbl: String,
+                            tagged: List (String, (String, List String, String, String))) ->
+    Maybe(String, List String, String) =
+  match tagged with
+  | Nil -> Nothing
+  | Cons (g, (pred, args, call_result, _phi)) rest ->
+      if pred == lbl then Just((g, args, call_result))
+      else mutual_find_hit_for_pred(lbl, rest)
+
+# Assemble: rewrite each hit-pred block, then fix the join phis that lost an
+# incoming and prune blocks that became unreachable — identical to self-TCO's
+# tco_assemble tail, minus the entry/loop restructuring.
+fn mutual_assemble(blocks: List sprout_ir.IRBlock,
+                   tagged: List (String, (String, List String, String, String))) ->
+    List sprout_ir.IRBlock =
+  tco_prune_dead_blocks(
+    tco_fix_all_phis(list_map(\b -> mutual_rewrite_block(b, tagged), blocks), mutual_untag(tagged)))
+
+# Rewrite f's eligible mutual tail calls to IRTailCall.  No-op unless ret is i64,
+# f is not self-TCO'd, and at least one eligible tail call survives the guards.
+export fn mutual_tco_rewrite_fn(f: sprout_ir.IRFunction, targets: List (String, Int)) ->
+    sprout_ir.IRFunction =
+  match f with
+  | sprout_ir.IRFunction name params ret_ty blocks ->
+      if ret_ty == "i64" && ! mutual_has_tco_entry (blocks)
+      then mutual_finish_rewrite(name, params, ret_ty, blocks, mutual_collect_hits(targets, blocks), f)
+      else f
+
+fn mutual_finish_rewrite(name: String, params: List (String, sprout_ir.IRType), ret_ty: String,
+                         blocks: List sprout_ir.IRBlock,
+                         hits: List (String, (String, List String, String, String)),
+                         f: sprout_ir.IRFunction) -> sprout_ir.IRFunction =
+  match hits with
+  | Nil -> f
+  | _ -> sprout_ir.IRFunction(name, params, ret_ty, mutual_assemble(blocks, hits))
+
+# --- Eligibility: which mutual tail edges close a same-prototype cycle. --------
+# Built once (in ir_pipeline) from the interprocedural call graph — the
+# alloc-summary callee sets, already IR-namespace — plus per-fn arity and return
+# kind.  An edge f->g is eligible iff g is a callee of f, both return i64,
+# arity(f)==arity(g) (⇒ identical prototype, since every value lowers to i64), and
+# g can reach f in the call graph (they share a cycle).  Over-approximation is
+# safe: the per-fn rewrite only touches ACTUAL tail calls and re-checks arity at
+# the IR site, and a wrong edge would be a prototype-mismatched musttail the LLVM
+# verifier rejects — loud, never a silent miscompile.  Result: fname -> [(callee,
+# arity)] consumed by mutual_tco_rewrite_fn.
+
+# Per-fn LLVM return kind (i64 vs not) from the typed decls.
+export fn build_ret_i64(decls: List typed_ast.TypedDecl) -> Dict Bool =
+  match decls with
+  | Nil -> dict_empty()
+  | Cons d rest ->
+      match d with
+      | typed_ast.TFnDecl name _ _ _ _ body ->
+          dict_set(name, llvm_ret_type(typed_ast.typed_expr_type(body)) == "i64", build_ret_i64(rest))
+      | _ -> build_ret_i64(rest)
+
+fn mutual_graph_of(raw: List (String, (Bool, Set))) -> Dict Set =
+  match raw with
+  | Nil -> dict_empty()
+  | Cons (name, (_gc, callees)) rest -> dict_set(name, callees, mutual_graph_of(rest))
+
+fn mutual_neighbors(n: String, graph: Dict Set) -> List String =
+  match dict_get(n, graph) with
+  | Just s -> set_to_list(s)
+  | Nothing -> Nil
+
+# Does `start` reach `target` over the call graph?  Visited-guarded DFS worklist.
+fn mutual_reaches(start: String, target: String, graph: Dict Set) -> Bool =
+  mutual_reaches_loop(Cons(start, Nil), target, graph, set_empty())
+
+fn mutual_reaches_loop(work: List String, target: String, graph: Dict Set, seen: Set) -> Bool =
+  match work with
+  | Nil -> false
+  | Cons n rest ->
+      if n == target then true
+      else if set_member(n, seen) then mutual_reaches_loop(rest, target, graph, seen)
+      else mutual_reaches_loop(list_append(mutual_neighbors(n, graph), rest), target, graph, set_insert(n, seen))
+
+fn mutual_arity_of(name: String, arities: Dict Int) -> Int =
+  match dict_get(name, arities) with | Just a -> a | Nothing -> -1
+
+fn mutual_ret_i64_of(name: String, ret_i64: Dict Bool) -> Bool =
+  match dict_get(name, ret_i64) with | Just b -> b | Nothing -> false
+
+export fn mutual_build_eligible(raw: List (String, (Bool, Set)), arities: Dict Int, ret_i64: Dict Bool) ->
+    Dict(List (String, Int)) =
+  mutual_eligible_loop(raw, mutual_graph_of(raw), arities, ret_i64, dict_empty())
+
+fn mutual_eligible_loop(raw: List (String, (Bool, Set)), graph: Dict Set, arities: Dict Int,
+                        ret_i64: Dict Bool, acc: Dict (List (String, Int))) -> Dict (List (String, Int)) =
+  match raw with
+  | Nil -> acc
+  | Cons (name, (_gc, callees)) rest ->
+      mutual_eligible_loop(rest, graph, arities, ret_i64,
+        dict_set(name, mutual_targets_for(name, set_to_list(callees), graph, arities, ret_i64), acc))
+
+fn mutual_targets_for(f: String, callees: List String, graph: Dict Set, arities: Dict Int,
+                      ret_i64: Dict Bool) -> List (String, Int) =
+  if mutual_ret_i64_of(f, ret_i64) && mutual_arity_of(f, arities) >= 0
+  then mutual_filter_targets(callees, f, mutual_arity_of(f, arities), graph, arities, ret_i64)
+  else Nil
+
+fn mutual_filter_targets(callees: List String, f: String, f_arity: Int, graph: Dict Set,
+                         arities: Dict Int, ret_i64: Dict Bool) -> List (String, Int) =
+  match callees with
+  | Nil -> Nil
+  | Cons g rest ->
+      if ! (g == f) && mutual_ret_i64_of(g, ret_i64) && mutual_arity_of(g, arities) == f_arity
+         && mutual_reaches(g, f, graph)
+      then Cons((g, f_arity), mutual_filter_targets(rest, f, f_arity, graph, arities, ret_i64))
+      else mutual_filter_targets(rest, f, f_arity, graph, arities, ret_i64)
+
+# Look up a fn's eligible targets (empty if absent, e.g. lifted lambdas/workers).
+export fn mutual_eligible_for(name: String, eligible: Dict (List (String, Int))) -> List (String, Int) =
+  match dict_get(name, eligible) with
+  | Just ts -> ts
+  | Nothing -> Nil
+
 # translate_user_fn: returns (IRFunction, next-free-temp-index, lifted-lambdas).
 # The next-free index is the smallest idx never used as %tN/then_N/else_N/join_N
 # during body translation; the rooting pass (M2 PR 2.2) consumes it to allocate

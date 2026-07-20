@@ -1,0 +1,45 @@
+import stdlib.test (TestState, new_state, assert_eq, summary)
+import stdlib.task (Scope, Task, with_scope, task_fork, task_await)
+import stdlib.scram as scram
+
+# Regression: SCRAM PBKDF2 (`scram.hi`, the `hi_loop`<->`hi_step` MUTUAL tail
+# recursion) must run in O(1) GC roots inside a green task. Un-optimized mutual
+# recursion accumulates the recursive call's heap args one set per frame; at the
+# SCRAM-default 4096 iterations that is ~9 roots x 4096 ~= 36864 simultaneous
+# roots, which exhausts a green task's 16384-slot root pool. `client_proof`
+# drives PBKDF2 via `salted_password`.
+#
+# On the pre-mutual-TCO compiler this ABORTS the process with
+# "GC root pool exhausted" (SUITE never reaches `summary`); with mutual TCO
+# (`musttail`) it completes and returns true. RFC 5802 test vector (user/pencil).
+# Doubles as the first native coverage of the SCRAM proof path.
+
+fn server_first_raw() -> String =
+  "r=fyko+d2lbbFgONRv9qkxdawL3rfcNHYJY1ZVvWVs7j,s=QSXCR+Q6sek8bf92,i=4096"
+
+fn client_bare() -> String =
+  scram.client_first_bare("user", "fyko+d2lbbFgONRv9qkxdawL")
+
+# Pure: runs the full PBKDF2 (4096 HMAC iterations) via client_proof. Returns
+# true iff a proof was produced (i.e. the loop completed without exhausting).
+fn compute_proof() -> Bool =
+  match scram.parse_server_first(server_first_raw()) with
+  | Err _ -> false
+  | Ok server ->
+      match scram.client_proof("pencil", client_bare(), server, scram.no_channel_binding()) with
+      | Err _ -> false
+      | Ok _ -> true
+
+# Drive PBKDF2 on a GREEN task (16384-slot pool), not the 131072-slot main task —
+# the smaller pool is what makes the leak fatal (main merely wastes roots).
+fn run_on_green(s: Scope) -> Bool !{IO} =
+  do
+    t <- task_fork(s, \_ -> compute_proof())
+    task_await(t)
+
+fn main() -> Unit !{IO} =
+  do
+    state <- new_state()
+    ok <- with_scope(\s -> run_on_green(s))
+    assert_eq(state, "SCRAM PBKDF2 (client_proof) completes in a green task without root-pool exhaustion", ok, true)
+    summary(state)

@@ -126,12 +126,18 @@ fn hi_loop(password: Bytes, previous: Bytes, remaining: Int, acc: Bytes) -> Scra
   if remaining <= 0 then Ok(acc)
   else hi_step(password, previous, remaining, acc)
 
+# PBKDF2 "Hi": hi_loop <-> hi_step is a mutual tail-recursion cycle (4096 iters).
+# `current` binds via a do-block `let`, NOT `where`: an expression-level `let`/`where`
+# desugars to a closure application, whose indirect call breaks the same-prototype
+# cycle so mutual-TCO (musttail) cannot fire. do-`let` compiles inline, keeping the
+# hi_step -> hi_loop tail call direct. Revert to `where` once TCall(TLambda) inlining
+# lands (docs/mutual-tco-v0.md, "arc (b)").
 fn hi_step(password: Bytes, previous: Bytes, remaining: Int, acc: Bytes) -> ScramResult Bytes =
-  match crypto.bytes_xor(acc, current) with
-  | Err err -> Err(ScramBytesError(bytes_error_message(err)))
-  | Ok combined -> hi_loop(password, current, remaining - 1, combined)
-where
-  current = crypto.hmac_sha256(password, previous)
+  do
+    let current = crypto.hmac_sha256(password, previous)
+    match crypto.bytes_xor(acc, current) with
+    | Err err -> Err(ScramBytesError(bytes_error_message(err)))
+    | Ok combined -> hi_loop(password, current, remaining - 1, combined)
 
 fn hi(password: Bytes, salt: Bytes, iterations: Int) -> ScramResult Bytes =
   if iterations <= 0 then Err(ScramInvalidIterationCount("SCRAM iteration count must be positive"))
