@@ -1,0 +1,397 @@
+module stdlib.compiler.desugar_ctx
+
+import stdlib.compiler.ast as ast
+import stdlib.compiler.source as source
+import stdlib.string as string
+
+# ---------------------------------------------------------------------------
+# String template desugar pass
+# ---------------------------------------------------------------------------
+#
+# Rewrites all StringTemplateExpr nodes in a Program before typechecking.
+# This mirrors Python's desugar_string_templates_in_program in elaborate.py.
+# Lowering rules (must match Python exactly for parity):
+#   empty              → StringExpr("")
+#   all-literal        → StringExpr(merged_text)
+#   single effective part → that part's expr directly (to_string or StringExpr)
+#   general            → string_concat_many(Cons(p0, Cons(p1, ... Nil)))
+# Each interp part is wrapped in to_string(expr).
+# Empty literal segments are skipped from the parts list.
+#
+# Purely syntactic — never sees inferred types — so context only fires on the
+# one AST shape provably correct without type info (a syntactic list/template
+# literal); a real Vec/StringTemplate value falls through unwrapped. This is
+# checker.sprout's own pre-typecheck desugar pass, extracted to a leaf module
+# (ast/source/string only) so lint_rules.sprout can reuse the same Vec-context
+# computation without depending on the typechecker.
+
+export fn desugar_program(prog: ast.Program) -> ast.Program =
+  match prog with
+  | ast.Program decls pos ->
+      ast.Program(desugar_decls_i(decls, build_fn_sig_index(decls)), pos)
+
+# ---------------------------------------------------------------------------
+# Phase 4B.5 — FnSig index: maps fn name → List (Maybe String) of param types
+# ---------------------------------------------------------------------------
+
+fn build_fn_sig_index(decls: List ast.Decl) -> Dict (List (Maybe String)) =
+  build_fn_sig_index_loop(decls, dict_empty())
+
+fn build_fn_sig_index_loop(decls: List ast.Decl, acc: Dict (List (Maybe String))) -> Dict (List (Maybe String)) =
+  match decls with
+  | Nil -> acc
+  | Cons d rest ->
+      match d with
+      | ast.FnDecl name params _ _ _ _ _ ->
+          build_fn_sig_index_loop(rest, dict_set(name, extract_param_type_names(params), acc))
+      | _ -> build_fn_sig_index_loop(rest, acc)
+
+fn extract_param_type_names(params: List ast.Param) -> List (Maybe String) =
+  match params with
+  | Nil -> Nil
+  | Cons p rest ->
+      match p with
+      | ast.Param _ mtype ->
+          Cons(type_expr_bare_name(mtype), extract_param_type_names(rest))
+
+# Dispatch desugar for a list of call args against the callee's param type list.
+# Both lists are walked in parallel — when param_types runs out, remaining args
+# are desugared with Nothing (no expected type).
+fn desugar_args_with_types(args: List ast.Expr, param_types: List (Maybe String), fn_idx: Dict (List (Maybe String))) -> List ast.Expr =
+  match args with
+  | Nil -> Nil
+  | Cons a rest_args ->
+      match param_types with
+      | Nil ->
+          Cons(desugar_expr_i(a, Nothing, fn_idx), desugar_args_with_types(rest_args, Nil, fn_idx))
+      | Cons pt rest_pts ->
+          Cons(desugar_expr_i(a, pt, fn_idx), desugar_args_with_types(rest_args, rest_pts, fn_idx))
+
+# Extract the var name from a callee expr (VarExpr only; others return Nothing).
+fn callee_var_name(callee: ast.Expr) -> Maybe String =
+  match callee with
+  | ast.VarExpr name _ -> Just(name)
+  | _ -> Nothing
+
+# ---------------------------------------------------------------------------
+# Indexed desugar walk — threads fn_idx through for call-site param lookup
+# ---------------------------------------------------------------------------
+
+fn desugar_decls_i(decls: List ast.Decl, fn_idx: Dict (List (Maybe String))) -> List ast.Decl =
+  match decls with
+  | Nil -> Nil
+  | Cons d rest -> Cons(desugar_decl_i(d, fn_idx), desugar_decls_i(rest, fn_idx))
+
+fn desugar_decl_i(d: ast.Decl, fn_idx: Dict (List (Maybe String))) -> ast.Decl =
+  match d with
+  | ast.FnDecl name params ret effs constraints body pos ->
+      ast.FnDecl(name, params, ret, effs, constraints, desugar_expr_i(body, type_expr_bare_name(ret), fn_idx), pos)
+  | ast.LetDecl name body pos ->
+      ast.LetDecl(name, desugar_expr_i(body, Nothing, fn_idx), pos)
+  | ast.InstanceDecl constraint inst_constraints methods pos ->
+      ast.InstanceDecl(constraint, inst_constraints, desugar_instance_methods_i(methods, fn_idx), pos)
+  | _ -> d
+
+fn desugar_instance_methods_i(methods: List ast.InstanceMethodImpl, fn_idx: Dict (List (Maybe String))) -> List ast.InstanceMethodImpl =
+  match methods with
+  | Nil -> Nil
+  | Cons m rest -> Cons(desugar_instance_method_i(m, fn_idx), desugar_instance_methods_i(rest, fn_idx))
+
+fn desugar_instance_method_i(m: ast.InstanceMethodImpl, fn_idx: Dict (List (Maybe String))) -> ast.InstanceMethodImpl =
+  match m with
+  | ast.InstanceMethodImpl name params ret effs body ->
+      ast.InstanceMethodImpl(name, params, ret, effs, desugar_expr_i(body, type_expr_bare_name(ret), fn_idx))
+
+# Context-aware indexed desugar.  Two expected-type-name contexts are "active"
+# and lower literals by AST shape: "StringTemplate" (template ADT vs String) and
+# "Vec" (bare list literal -> vec_from_list).  Both thread the context through
+# if/match arms so a literal in either arm is lowered.  The pass is purely
+# syntactic — it never sees inferred types — so "Vec" only fires on a syntactic
+# list literal (the one shape provably a List without type info); a real Vec
+# argument falls through unwrapped.
+fn desugar_expr_i(expr: ast.Expr, expected: Maybe String, fn_idx: Dict (List (Maybe String))) -> ast.Expr =
+  match expected with
+  | Nothing -> desugar_expr_no_ctx_i(expr, fn_idx)
+  | Just exp_name ->
+      if ctx_is_active(exp_name) then
+        match expr with
+        | ast.IfExpr cond then_ else_ pos ->
+            ast.IfExpr(
+              desugar_expr_no_ctx_i(cond, fn_idx),
+              desugar_expr_i(then_, expected, fn_idx),
+              desugar_expr_i(else_, expected, fn_idx),
+              pos
+            )
+        | ast.MatchExpr scrut branches pos ->
+            ast.MatchExpr(desugar_expr_no_ctx_i(scrut, fn_idx), desugar_branches_i(branches, expected, fn_idx), pos)
+        | _ -> desugar_ctx_leaf_i(expr, exp_name, fn_idx)
+      else
+        desugar_expr_no_ctx_i(expr, fn_idx)
+
+# Expected-type names that trigger context-aware literal lowering.
+fn ctx_is_active(exp_name: String) -> Bool =
+  (exp_name == "StringTemplate") || (exp_name == "Vec")
+
+# Leaf lowering for an active context on a non-if/match expression.
+fn desugar_ctx_leaf_i(expr: ast.Expr, exp_name: String, fn_idx: Dict (List (Maybe String))) -> ast.Expr =
+  if exp_name == "Vec" then
+    match expr with
+    | ast.VarExpr name pos ->
+        if name == "Nil" then wrap_vec_from_list(desugar_expr_no_ctx_i(expr, fn_idx), pos)
+        else desugar_expr_no_ctx_i(expr, fn_idx)
+    | ast.CallExpr callee _ pos ->
+        match callee_var_name(callee) with
+        | Just cname ->
+            if cname == "Cons" then wrap_vec_from_list(desugar_expr_no_ctx_i(expr, fn_idx), pos)
+            else desugar_expr_no_ctx_i(expr, fn_idx)
+        | Nothing -> desugar_expr_no_ctx_i(expr, fn_idx)
+    | _ -> desugar_expr_no_ctx_i(expr, fn_idx)
+  else
+    match expr with
+    | ast.StringTemplateExpr parts pos ->
+        desugar_template_as_string_template_i(parts, pos, fn_idx)
+    | _ -> desugar_expr_no_ctx_i(expr, fn_idx)
+
+# Wrap an already-desugared list literal in vec_from_list so it denotes a Vec.
+fn wrap_vec_from_list(inner: ast.Expr, pos: source.SourcePos) -> ast.Expr =
+  ast.CallExpr(ast.VarExpr("vec_from_list", pos), Cons(inner, Nil), pos)
+
+fn desugar_branches_i(branches: List ast.MatchBranch, expected: Maybe String, fn_idx: Dict (List (Maybe String))) -> List ast.MatchBranch =
+  match branches with
+  | Nil -> Nil
+  | Cons b rest ->
+      match b with
+      | ast.MatchBranch pat body ->
+          Cons(ast.MatchBranch(pat, desugar_expr_i(body, expected, fn_idx)), desugar_branches_i(rest, expected, fn_idx))
+
+# Desugar expression without a StringTemplate expected-type context, but
+# WITH the fn_idx for call-site lookup.
+fn desugar_expr_no_ctx_i(expr: ast.Expr, fn_idx: Dict (List (Maybe String))) -> ast.Expr =
+  match expr with
+  | ast.StringTemplateExpr parts pos ->
+      desugar_template_i(parts, pos, fn_idx)
+  | ast.IfExpr cond then_ else_ pos ->
+      ast.IfExpr(desugar_expr_no_ctx_i(cond, fn_idx), desugar_expr_no_ctx_i(then_, fn_idx), desugar_expr_no_ctx_i(else_, fn_idx), pos)
+  | ast.CallExpr callee args pos ->
+      desugar_call_expr_i(callee, args, pos, fn_idx)
+  | ast.MatchExpr scrut branches pos ->
+      ast.MatchExpr(desugar_expr_no_ctx_i(scrut, fn_idx), desugar_branches_no_ctx_i(branches, fn_idx), pos)
+  | ast.TupleExpr elems pos ->
+      ast.TupleExpr(desugar_exprs_no_ctx_i(elems, fn_idx), pos)
+  | ast.BinaryExpr op left right pos ->
+      ast.BinaryExpr(op, desugar_expr_no_ctx_i(left, fn_idx), desugar_expr_no_ctx_i(right, fn_idx), pos)
+  | ast.UnaryExpr op operand pos ->
+      ast.UnaryExpr(op, desugar_expr_no_ctx_i(operand, fn_idx), pos)
+  | ast.LambdaExpr params body pos ->
+      ast.LambdaExpr(params, desugar_expr_no_ctx_i(body, fn_idx), pos)
+  | ast.DoExpr steps pos ->
+      ast.DoExpr(desugar_do_steps_i(steps, fn_idx), pos)
+  | ast.RecordExpr type_name fields pos ->
+      ast.RecordExpr(type_name, desugar_record_fields_i(fields, fn_idx), pos)
+  | ast.GetFieldExpr rec_expr field_name pos ->
+      ast.GetFieldExpr(desugar_expr_no_ctx_i(rec_expr, fn_idx), field_name, pos)
+  | ast.IntRangeExpr lo hi pos ->
+      ast.IntRangeExpr(desugar_expr_no_ctx_i(lo, fn_idx), desugar_expr_no_ctx_i(hi, fn_idx), pos)
+  | _ -> expr
+
+fn desugar_call_expr_i(callee: ast.Expr, args: List ast.Expr, pos: source.SourcePos, fn_idx: Dict (List (Maybe String))) -> ast.Expr =
+  ast.CallExpr(
+    desugar_expr_no_ctx_i(callee, fn_idx),
+    desugar_args_with_callee(callee, args, fn_idx),
+    pos
+  )
+
+fn desugar_args_with_callee(callee: ast.Expr, args: List ast.Expr, fn_idx: Dict (List (Maybe String))) -> List ast.Expr =
+  match callee_var_name(callee) with
+  | Nothing -> desugar_exprs_no_ctx_i(args, fn_idx)
+  | Just name ->
+      match dict_get(name, fn_idx) with
+      | Nothing -> desugar_exprs_no_ctx_i(args, fn_idx)
+      | Just param_types -> desugar_args_with_types(args, param_types, fn_idx)
+
+fn desugar_exprs_no_ctx_i(exprs: List ast.Expr, fn_idx: Dict (List (Maybe String))) -> List ast.Expr =
+  match exprs with
+  | Nil -> Nil
+  | Cons e rest -> Cons(desugar_expr_no_ctx_i(e, fn_idx), desugar_exprs_no_ctx_i(rest, fn_idx))
+
+fn desugar_branches_no_ctx_i(branches: List ast.MatchBranch, fn_idx: Dict (List (Maybe String))) -> List ast.MatchBranch =
+  match branches with
+  | Nil -> Nil
+  | Cons b rest ->
+      match b with
+      | ast.MatchBranch pat body ->
+          Cons(ast.MatchBranch(pat, desugar_expr_no_ctx_i(body, fn_idx)), desugar_branches_no_ctx_i(rest, fn_idx))
+
+fn desugar_do_steps_i(steps: List ast.DoStep, fn_idx: Dict (List (Maybe String))) -> List ast.DoStep =
+  match steps with
+  | Nil -> Nil
+  | Cons s rest -> Cons(desugar_do_step_i(s, fn_idx), desugar_do_steps_i(rest, fn_idx))
+
+fn desugar_do_step_i(s: ast.DoStep, fn_idx: Dict (List (Maybe String))) -> ast.DoStep =
+  match s with
+  | ast.DoBindStep pat value -> ast.DoBindStep(pat, desugar_expr_no_ctx_i(value, fn_idx))
+  | ast.DoLetStep name value -> ast.DoLetStep(name, desugar_expr_no_ctx_i(value, fn_idx))
+  | ast.DoExprStep value -> ast.DoExprStep(desugar_expr_no_ctx_i(value, fn_idx))
+
+fn desugar_record_fields_i(fields: List ast.RecordField, fn_idx: Dict (List (Maybe String))) -> List ast.RecordField =
+  match fields with
+  | Nil -> Nil
+  | Cons f rest ->
+      match f with
+      | ast.RecordField name value ->
+          Cons(ast.RecordField(name, desugar_expr_no_ctx_i(value, fn_idx)), desugar_record_fields_i(rest, fn_idx))
+
+# Indexed StringTemplate lowering — passes fn_idx to collect_effective_parts_i.
+fn desugar_template_i(parts: List ast.TemplateExprPart, pos: source.SourcePos, fn_idx: Dict (List (Maybe String))) -> ast.Expr =
+  if list_length(parts) == 0 then
+    ast.StringExpr("", pos)
+  else if all_lit_parts(parts) then
+    ast.StringExpr(merge_lit_parts(parts, ""), pos)
+  else
+    desugar_template_general(collect_effective_parts_i(parts, pos, fn_idx), pos)
+
+fn collect_effective_parts_i(parts: List ast.TemplateExprPart, pos: source.SourcePos, fn_idx: Dict (List (Maybe String))) -> List ast.Expr =
+  match parts with
+  | Nil -> Nil
+  | Cons p rest ->
+      match p with
+      | ast.LitPart text ->
+          if str_len(text) == 0 then collect_effective_parts_i(rest, pos, fn_idx)
+          else Cons(ast.StringExpr(text, pos), collect_effective_parts_i(rest, pos, fn_idx))
+      | ast.InterpPart inner_expr ->
+          Cons(
+            ast.CallExpr(ast.VarExpr("to_string", pos), Cons(desugar_expr_no_ctx_i(inner_expr, fn_idx), Nil), pos),
+            collect_effective_parts_i(rest, pos, fn_idx)
+          )
+
+# Indexed StringTemplate ADT lowering — used when expected type is StringTemplate.
+fn desugar_template_as_string_template_i(parts: List ast.TemplateExprPart, pos: source.SourcePos, fn_idx: Dict (List (Maybe String))) -> ast.Expr =
+  if list_length(parts) == 0 then
+    wrap_string_template(ast.VarExpr(ast.list_ctor_nil, pos), pos)
+  else if all_lit_parts(parts) then
+    wrap_string_template(
+      ast.CallExpr(
+        ast.VarExpr(ast.list_ctor_cons, pos),
+        [
+          ast.CallExpr(ast.VarExpr(ast.template_ctor_lit, pos), [ast.StringExpr(merge_lit_parts(parts, ""), pos)], pos),
+          ast.VarExpr(ast.list_ctor_nil, pos)
+        ],
+        pos
+      ),
+      pos
+    )
+  else
+    wrap_string_template(
+      build_cons_list(collect_template_part_nodes_i(parts, pos, fn_idx), pos),
+      pos
+    )
+
+fn collect_template_part_nodes_i(parts: List ast.TemplateExprPart, pos: source.SourcePos, fn_idx: Dict (List (Maybe String))) -> List ast.Expr =
+  match parts with
+  | Nil -> Nil
+  | Cons p rest ->
+      match p with
+      | ast.LitPart text ->
+          if str_len(text) == 0 then collect_template_part_nodes_i(rest, pos, fn_idx)
+          else
+            Cons(
+              ast.CallExpr(ast.VarExpr(ast.template_ctor_lit, pos), [ast.StringExpr(text, pos)], pos),
+              collect_template_part_nodes_i(rest, pos, fn_idx)
+            )
+      | ast.InterpPart inner_expr ->
+          Cons(
+            ast.CallExpr(
+              ast.VarExpr(ast.template_ctor_interp, pos),
+              [ast.CallExpr(ast.VarExpr("to_string", pos), [desugar_expr_no_ctx_i(inner_expr, fn_idx)], pos)],
+              pos
+            ),
+            collect_template_part_nodes_i(rest, pos, fn_idx)
+          )
+
+# ---------------------------------------------------------------------------
+# Shared helpers for the indexed desugar pass above.
+# ---------------------------------------------------------------------------
+
+# Extract the bare constructor name from a Maybe TypeExpr, or Nothing if not
+# a simple TypeName.  Used to propagate "StringTemplate"/"Vec" context downward.
+fn type_expr_bare_name(te: Maybe ast.TypeExpr) -> Maybe String =
+  match te with
+  | Nothing -> Nothing
+  | Just texpr -> type_texpr_to_maybe_name(texpr)
+
+fn type_texpr_to_maybe_name(texpr: ast.TypeExpr) -> Maybe String =
+  match texpr with
+  | ast.TypeName tname ->
+      Just(string.after_last_dot(tname))
+  | ast.TypeApply head _ ->
+      # Head constructor of an applied type: `Vec Int` -> "Vec", `Dict k v` ->
+      # "Dict".  Needed so a parameterized expected type activates a context
+      # (only "Vec"/"StringTemplate" act; other heads are inert names).
+      type_texpr_to_maybe_name(head)
+  | _ ->
+      Nothing
+
+fn desugar_template_general(effective: List ast.Expr, pos: source.SourcePos) -> ast.Expr =
+  if list_length(effective) == 1 then
+    match effective with
+    | Cons single _ -> single
+    | Nil -> ast.StringExpr("", pos)
+  else
+    ast.CallExpr(
+      ast.VarExpr("string_concat_many", pos),
+      Cons(build_cons_list(effective, pos), Nil),
+      pos
+    )
+
+fn all_lit_parts(parts: List ast.TemplateExprPart) -> Bool =
+  match parts with
+  | Nil -> true
+  | Cons p rest ->
+      match p with
+      | ast.LitPart _ -> all_lit_parts(rest)
+      | ast.InterpPart _ -> false
+
+fn merge_lit_parts(parts: List ast.TemplateExprPart, acc: String) -> String =
+  match parts with
+  | Nil -> acc
+  | Cons p rest ->
+      match p with
+      | ast.LitPart text -> merge_lit_parts(rest, string.concat(acc, text))
+      | ast.InterpPart _ -> merge_lit_parts(rest, acc)
+
+fn build_cons_list(exprs: List ast.Expr, pos: source.SourcePos) -> ast.Expr =
+  match exprs with
+  | Nil -> ast.VarExpr(ast.list_ctor_nil, pos)
+  | Cons e rest ->
+      ast.CallExpr(
+        ast.VarExpr(ast.list_ctor_cons, pos),
+        [e, build_cons_list(rest, pos)],
+        pos
+      )
+
+# ---------------------------------------------------------------------------
+# StringTemplate ADT lowering (Phase 4B) — shared by the indexed pass above
+# ---------------------------------------------------------------------------
+#
+# wrap_string_template is used by desugar_template_as_string_template_i,
+# called when the immediate expected-type context is "StringTemplate".
+#
+# Produces:
+#   StringTemplate(Cons(TemplateLit("lit"), Cons(TemplateInterp(to_string(x)), Nil)))
+# Optimisations:
+#   empty        → StringTemplate(Nil)
+#   all-literal  → StringTemplate(Cons(TemplateLit("combined"), Nil))
+#   general      → StringTemplate(Cons(... parts ..., Nil))
+#
+# Note: coverage here is limited to the *immediate-annotation* rule:
+# fn/method return type = StringTemplate.  Call-site param-type lookup is
+# NOT implemented in this bootstrap path (declared reduced coverage, Phase 4C
+# note: add full callee param lookup once the Sprout-side compiler can query
+# its own function-signature table from a pre-desugar index).
+
+fn wrap_string_template(parts_list: ast.Expr, pos: source.SourcePos) -> ast.Expr =
+  ast.CallExpr(
+    ast.VarExpr("StringTemplate", pos),
+    Cons(parts_list, Nil),
+    pos
+  )

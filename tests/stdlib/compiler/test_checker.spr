@@ -113,4 +113,12 @@ fn main() -> Unit !{IO} =
     r23 <- run_check("fn f(s: String) -> Result String (Vec (String, String, Int, Int)) !{IO} = analysis_symbol_locations_in_source(s)")
     assert_true(state, "bt_quad-typed builtin (analysis_symbol_locations_in_source) typechecks", is_check_ok(r23))
 
+    # desugar_program's Vec-context coercion (checker.sprout -> desugar_ctx):
+    # a bare list literal at a Vec-typed call argument typechecks without the
+    # caller writing vec_from_list by hand. vec_from_list itself is declared
+    # extern here since run_check's minimal env carries only builtin_entries()
+    # (analysis_* intrinsics), not stdlib.collections.
+    r24 <- run_check("type List a = | Nil | Cons a (List a)\nextern fn vec_from_list(xs: List Int) -> Vec Int\nfn f(v: Vec Int) -> Int = 1\nfn g() -> Int = f([1, 2, 3])")
+    assert_true(state, "bare list literal at Vec-typed call arg typechecks (desugar_ctx coercion)", is_check_ok(r24))
+
     summary(state)
