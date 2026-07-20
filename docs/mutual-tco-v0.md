@@ -8,8 +8,10 @@
   heterogeneous-arity cycles — those fall to Phase B.
 - **Phase B — contification (designed separately, layered on A).** Heterogeneous-arity
   cycles via signature unification (merge an SCC into one dispatch-tag loop). Completes
-  "general mutual TCO" for any-arity cycles. Not yet detailed here; A ships and is verified
-  first, then B builds on it.
+  "general mutual TCO" for any-arity cycles. **Design: `docs/mutual-tco-phase-b-v0.md`**
+  (design pass done 2026-07-20; implementation DEFERRED — genuine targets exist in the
+  compiler, e.g. `unifier.apply_subst`↔`apply_subst_lookup`, but none is an active bug, so
+  it is latent hardening rather than a fix). A ships and is verified first, then B builds on it.
 
 **Decision (2026-07-20, Kuba):** "option 2" — build both, incrementally: A now (unblocks the
 Postgres demo early), B after. `musttail` chosen over a contification-only path for better
