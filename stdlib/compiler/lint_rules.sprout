@@ -5,6 +5,7 @@ import stdlib.compiler.parser as parser
 import stdlib.compiler.lexer as lexer
 import stdlib.compiler.source as source
 import stdlib.string as string
+import stdlib.compiler.desugar_ctx as desugar_ctx
 
 # AST-based lint findings — line, col, rule id, message. A sibling to
 # formatter.LintIssue's line-based Style checks; this is the "Lint" category,
@@ -288,6 +289,29 @@ fn walk_match(scrut: ast.Expr, branches: List ast.MatchBranch, pos: source.Sourc
       else findings
 
 # ---------------------------------------------------------------------------
+# Rule: redundant-vec-from-list
+#
+# Flags a hand-written `vec_from_list(<bare list literal>)` sitting in a
+# position the checker's own desugar pass already recognizes as Vec-typed
+# (stdlib/compiler/desugar_ctx.sprout) — the checker would wrap a bare
+# literal there on its own, so an explicit wrap around one is a no-op the
+# reader has to see past. Detection reuses desugar_ctx's exact Vec-context
+# computation (same fn_idx, same if/match threading) so this rule can never
+# disagree with what the checker actually does.
+
+fn redundant_vec_wrap_message() -> String =
+  "vec_from_list(...) here is redundant — this argument is already in Vec context and gets wrapped automatically"
+
+fn redundant_vec_wrap_findings(prog: ast.Program) -> List LintFinding =
+  positions_to_findings(desugar_ctx.find_redundant_vec_wraps(prog))
+
+fn positions_to_findings(positions: List source.SourcePos) -> List LintFinding =
+  match positions with
+  | Nil -> Nil
+  | Cons pos rest ->
+      Cons(mk_finding(pos, "redundant-vec-from-list", redundant_vec_wrap_message()), positions_to_findings(rest))
+
+# ---------------------------------------------------------------------------
 # Program-level entry points
 
 fn walk_instance_methods(methods: List ast.InstanceMethodImpl) -> List LintFinding =
@@ -311,7 +335,7 @@ fn walk_decls(decls: List ast.Decl) -> List LintFinding =
 
 fn lint_program(prog: ast.Program) -> List LintFinding =
   match prog with
-  | ast.Program decls _ -> walk_decls(decls)
+  | ast.Program decls _ -> list_append(walk_decls(decls), redundant_vec_wrap_findings(prog))
 
 # `let <pat> = e else fb` is pure sugar (parser.sprout: build_let_binding_match)
 # — it desugars to the SAME MatchExpr shape a hand-written nested match would,
@@ -319,7 +343,9 @@ fn lint_program(prog: ast.Program) -> List LintFinding =
 # way to tell them apart: a hand-written match's pos is the `match` keyword
 # itself; a let-else's pos is wherever that binding's pattern starts (there is
 # no `match` token in the source at all). Without this check, every already-
-# idiomatic let-else chain gets told to become the thing it already is.
+# idiomatic let-else chain gets told to become the thing it already is. Scoped
+# to staircase-of-doom findings only — other rules' positions never point at
+# a `match` keyword in the first place, so this check doesn't apply to them.
 fn nth_line(lines: List String, target: Int, cur: Int) -> String =
   match lines with
   | Nil -> ""
@@ -334,10 +360,10 @@ fn drop_desugared_matches(src: String, findings: List LintFinding) -> List LintF
   | Nil -> Nil
   | Cons f rest ->
       match f with
-      | LintFinding ln col _ _ ->
-          if is_written_as_match(src, ln, col)
-          then Cons(f, drop_desugared_matches(src, rest))
-          else drop_desugared_matches(src, rest)
+      | LintFinding ln col rule_id _ ->
+          if rule_id == "staircase-of-doom" && ! is_written_as_match (src, ln, col)
+          then drop_desugared_matches(src, rest)
+          else Cons(f, drop_desugared_matches(src, rest))
 
 # lint_ast: run every AST-based rule over a source file. Parse failures yield
 # no findings (formatter.lint_source's text-based checks already cover files

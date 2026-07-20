@@ -395,3 +395,188 @@ fn wrap_string_template(parts_list: ast.Expr, pos: source.SourcePos) -> ast.Expr
     Cons(parts_list, Nil),
     pos
   )
+
+# ---------------------------------------------------------------------------
+# find_redundant_vec_wraps — detection walk for the redundant-vec-from-list
+# lint rule (lint_rules.sprout)
+# ---------------------------------------------------------------------------
+#
+# A structural twin of the desugar_*_i walk above: it re-derives the exact
+# same Vec-context positions (same fn_idx, same ctx_is_active/if/match
+# threading), but instead of rewriting a bare list literal into
+# vec_from_list(literal), it flags an ALREADY-PRESENT vec_from_list(literal)
+# call sitting in that same Vec-context position — the checker's own pass is
+# a no-op on it (desugar_ctx_leaf_i's Vec case only rewrites Cons/Nil-headed
+# expressions; a callee named "vec_from_list" doesn't match either arm), so
+# the wrapper is redundant: dropping it changes nothing. A wrap around a
+# real, non-literal value (e.g. `vec_from_list(xs)`) is never flagged — that
+# is vec_from_list's actual job, converting a runtime List into a Vec.
+export fn find_redundant_vec_wraps(prog: ast.Program) -> List source.SourcePos =
+  match prog with
+  | ast.Program decls _ -> find_redundant_decls(decls, build_fn_sig_index(decls))
+
+fn find_redundant_decls(decls: List ast.Decl, fn_idx: Dict (List (Maybe String))) -> List source.SourcePos =
+  match decls with
+  | Nil -> Nil
+  | Cons d rest -> list_append(find_redundant_decl(d, fn_idx), find_redundant_decls(rest, fn_idx))
+
+fn find_redundant_decl(d: ast.Decl, fn_idx: Dict (List (Maybe String))) -> List source.SourcePos =
+  match d with
+  | ast.FnDecl _ _ ret _ _ body _ -> find_redundant_expr(body, type_expr_bare_name(ret), fn_idx)
+  | ast.LetDecl _ body _ -> find_redundant_expr(body, Nothing, fn_idx)
+  | ast.InstanceDecl _ _ methods _ -> find_redundant_instance_methods(methods, fn_idx)
+  | _ -> Nil
+
+fn find_redundant_instance_methods(methods: List ast.InstanceMethodImpl, fn_idx: Dict (List (Maybe String))) -> List source.SourcePos =
+  match methods with
+  | Nil -> Nil
+  | Cons m rest -> list_append(find_redundant_instance_method(m, fn_idx), find_redundant_instance_methods(rest, fn_idx))
+
+fn find_redundant_instance_method(m: ast.InstanceMethodImpl, fn_idx: Dict (List (Maybe String))) -> List source.SourcePos =
+  match m with
+  | ast.InstanceMethodImpl _ _ ret _ body -> find_redundant_expr(body, type_expr_bare_name(ret), fn_idx)
+
+fn find_redundant_expr(expr: ast.Expr, expected: Maybe String, fn_idx: Dict (List (Maybe String))) -> List source.SourcePos =
+  match expected with
+  | Nothing -> find_redundant_no_ctx(expr, fn_idx)
+  | Just exp_name ->
+      if ctx_is_active(exp_name) then
+        match expr with
+        | ast.IfExpr cond then_ else_ _ ->
+            list_append(
+              find_redundant_no_ctx(cond, fn_idx),
+              list_append(find_redundant_expr(then_, expected, fn_idx), find_redundant_expr(else_, expected, fn_idx))
+            )
+        | ast.MatchExpr scrut branches _ ->
+            list_append(find_redundant_no_ctx(scrut, fn_idx), find_redundant_branches(branches, expected, fn_idx))
+        | _ -> find_redundant_ctx_leaf(expr, exp_name, fn_idx)
+      else
+        find_redundant_no_ctx(expr, fn_idx)
+
+fn find_redundant_branches(branches: List ast.MatchBranch, expected: Maybe String, fn_idx: Dict (List (Maybe String))) -> List source.SourcePos =
+  match branches with
+  | Nil -> Nil
+  | Cons b rest ->
+      match b with
+      | ast.MatchBranch _ body ->
+          list_append(find_redundant_expr(body, expected, fn_idx), find_redundant_branches(rest, expected, fn_idx))
+
+# The Vec-context leaf: flags a hand-written vec_from_list(<bare list literal>)
+# here (redundant — the checker would wrap the literal the same way on its
+# own); a wrap around anything else, or the StringTemplate context (out of
+# scope for this rule), just recurses generically for nested opportunities.
+fn find_redundant_ctx_leaf(expr: ast.Expr, exp_name: String, fn_idx: Dict (List (Maybe String))) -> List source.SourcePos =
+  if exp_name == "Vec" then
+    match expr with
+    | ast.CallExpr callee args pos ->
+        match callee_var_name(callee) with
+        | Just cname ->
+            if cname == "vec_from_list" then find_redundant_vec_from_list_call(args, pos, fn_idx)
+            else find_redundant_no_ctx(expr, fn_idx)
+        | Nothing -> find_redundant_no_ctx(expr, fn_idx)
+    | _ -> find_redundant_no_ctx(expr, fn_idx)
+  else
+    find_redundant_no_ctx(expr, fn_idx)
+
+fn find_redundant_vec_from_list_call(args: List ast.Expr, pos: source.SourcePos, fn_idx: Dict (List (Maybe String))) -> List source.SourcePos =
+  match args with
+  | Cons inner Nil ->
+      if is_bare_list_literal(inner)
+      then Cons(pos, find_redundant_no_ctx(inner, fn_idx))
+      else find_redundant_no_ctx(inner, fn_idx)
+  | _ -> find_redundant_exprs_no_ctx(args, fn_idx)
+
+fn is_bare_list_literal(e: ast.Expr) -> Bool =
+  match e with
+  | ast.VarExpr name _ -> name == ast.list_ctor_nil
+  | ast.CallExpr callee _ _ ->
+      match callee_var_name(callee) with
+      | Just cname -> cname == ast.list_ctor_cons
+      | Nothing -> false
+  | _ -> false
+
+# Generic recursive walk with no active context — re-enters context only at
+# call-argument positions whose callee has a known local signature (fn_idx),
+# exactly like desugar_expr_no_ctx_i above.
+fn find_redundant_no_ctx(expr: ast.Expr, fn_idx: Dict (List (Maybe String))) -> List source.SourcePos =
+  match expr with
+  | ast.StringTemplateExpr parts _ -> find_redundant_template_parts(parts, fn_idx)
+  | ast.IfExpr cond then_ else_ _ ->
+      list_append(
+        find_redundant_no_ctx(cond, fn_idx),
+        list_append(find_redundant_no_ctx(then_, fn_idx), find_redundant_no_ctx(else_, fn_idx))
+      )
+  | ast.CallExpr callee args _ ->
+      list_append(find_redundant_no_ctx(callee, fn_idx), find_redundant_args_with_callee(callee, args, fn_idx))
+  | ast.MatchExpr scrut branches _ ->
+      list_append(find_redundant_no_ctx(scrut, fn_idx), find_redundant_branches_no_ctx(branches, fn_idx))
+  | ast.TupleExpr elems _ -> find_redundant_exprs_no_ctx(elems, fn_idx)
+  | ast.BinaryExpr _ left right _ ->
+      list_append(find_redundant_no_ctx(left, fn_idx), find_redundant_no_ctx(right, fn_idx))
+  | ast.UnaryExpr _ operand _ -> find_redundant_no_ctx(operand, fn_idx)
+  | ast.LambdaExpr _ body _ -> find_redundant_no_ctx(body, fn_idx)
+  | ast.DoExpr steps _ -> find_redundant_do_steps(steps, fn_idx)
+  | ast.RecordExpr _ fields _ -> find_redundant_record_fields(fields, fn_idx)
+  | ast.GetFieldExpr rec_expr _ _ -> find_redundant_no_ctx(rec_expr, fn_idx)
+  | ast.IntRangeExpr lo hi _ ->
+      list_append(find_redundant_no_ctx(lo, fn_idx), find_redundant_no_ctx(hi, fn_idx))
+  | _ -> Nil
+
+fn find_redundant_args_with_callee(callee: ast.Expr, args: List ast.Expr, fn_idx: Dict (List (Maybe String))) -> List source.SourcePos =
+  match callee_var_name(callee) with
+  | Nothing -> find_redundant_exprs_no_ctx(args, fn_idx)
+  | Just name ->
+      match dict_get(name, fn_idx) with
+      | Nothing -> find_redundant_exprs_no_ctx(args, fn_idx)
+      | Just param_types -> find_redundant_args_with_types(args, param_types, fn_idx)
+
+fn find_redundant_args_with_types(args: List ast.Expr, param_types: List (Maybe String), fn_idx: Dict (List (Maybe String))) -> List source.SourcePos =
+  match args with
+  | Nil -> Nil
+  | Cons a rest_args ->
+      match param_types with
+      | Nil ->
+          list_append(find_redundant_expr(a, Nothing, fn_idx), find_redundant_args_with_types(rest_args, Nil, fn_idx))
+      | Cons pt rest_pts ->
+          list_append(find_redundant_expr(a, pt, fn_idx), find_redundant_args_with_types(rest_args, rest_pts, fn_idx))
+
+fn find_redundant_exprs_no_ctx(exprs: List ast.Expr, fn_idx: Dict (List (Maybe String))) -> List source.SourcePos =
+  match exprs with
+  | Nil -> Nil
+  | Cons e rest -> list_append(find_redundant_no_ctx(e, fn_idx), find_redundant_exprs_no_ctx(rest, fn_idx))
+
+fn find_redundant_branches_no_ctx(branches: List ast.MatchBranch, fn_idx: Dict (List (Maybe String))) -> List source.SourcePos =
+  match branches with
+  | Nil -> Nil
+  | Cons b rest ->
+      match b with
+      | ast.MatchBranch _ body ->
+          list_append(find_redundant_no_ctx(body, fn_idx), find_redundant_branches_no_ctx(rest, fn_idx))
+
+fn find_redundant_do_steps(steps: List ast.DoStep, fn_idx: Dict (List (Maybe String))) -> List source.SourcePos =
+  match steps with
+  | Nil -> Nil
+  | Cons s rest -> list_append(find_redundant_do_step(s, fn_idx), find_redundant_do_steps(rest, fn_idx))
+
+fn find_redundant_do_step(s: ast.DoStep, fn_idx: Dict (List (Maybe String))) -> List source.SourcePos =
+  match s with
+  | ast.DoBindStep _ value -> find_redundant_no_ctx(value, fn_idx)
+  | ast.DoLetStep _ value -> find_redundant_no_ctx(value, fn_idx)
+  | ast.DoExprStep value -> find_redundant_no_ctx(value, fn_idx)
+
+fn find_redundant_record_fields(fields: List ast.RecordField, fn_idx: Dict (List (Maybe String))) -> List source.SourcePos =
+  match fields with
+  | Nil -> Nil
+  | Cons f rest ->
+      match f with
+      | ast.RecordField _ value ->
+          list_append(find_redundant_no_ctx(value, fn_idx), find_redundant_record_fields(rest, fn_idx))
+
+fn find_redundant_template_parts(parts: List ast.TemplateExprPart, fn_idx: Dict (List (Maybe String))) -> List source.SourcePos =
+  match parts with
+  | Nil -> Nil
+  | Cons p rest ->
+      match p with
+      | ast.LitPart _ -> find_redundant_template_parts(rest, fn_idx)
+      | ast.InterpPart inner_expr ->
+          list_append(find_redundant_no_ctx(inner_expr, fn_idx), find_redundant_template_parts(rest, fn_idx))

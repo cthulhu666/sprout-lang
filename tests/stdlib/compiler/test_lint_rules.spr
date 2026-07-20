@@ -186,6 +186,35 @@ let nested_in_lambda =
   "              | Just z -> x + y + z\n" ++
   "    print(\"go\")\n"
 
+# --- redundant-vec-from-list fixtures -----------------------------------
+
+let redundant_call_arg =
+  "fn f(v: Vec Int) -> Int = 1\n" ++
+  "fn g() -> Int = f(vec_from_list([1, 2, 3]))\n"
+
+let redundant_return_position =
+  "fn make() -> Vec Int =\n" ++
+  "  vec_from_list([1, 2, 3])\n"
+
+let redundant_in_if_branches =
+  "fn make(cond: Bool) -> Vec Int =\n" ++
+  "  if cond then vec_from_list([1, 2, 3]) else vec_from_list([4, 5])\n"
+
+let no_wrapper_bare_literal =
+  "fn f(v: Vec Int) -> Int = 1\n" ++
+  "fn g() -> Int = f([1, 2, 3])\n"
+
+let wrap_of_real_value_not_redundant =
+  "fn f(v: Vec Int) -> Int = 1\n" ++
+  "fn g(xs: List Int) -> Int = f(vec_from_list(xs))\n"
+
+let wrap_outside_vec_context =
+  "fn g() -> Int = external_call(vec_from_list([1, 2, 3]))\n"
+
+let wrap_in_let_binding_no_context =
+  "fn g() -> Int = 1\n" ++
+  "let v = vec_from_list([1, 2, 3])\n"
+
 fn main() -> Unit !{IO} =
   do
     state <- new_state()
@@ -224,5 +253,20 @@ fn main() -> Unit !{IO} =
 
     assert_eq(state, "blocked at intermediate link: still reported once", count_list(lint_rules.lint_ast(blocked_at_intermediate_link)), 1)
     assert_eq(state, "blocked at intermediate link: softer message propagates to the root", mentions_let_else(first_message(lint_rules.lint_ast(blocked_at_intermediate_link))), false)
+
+    assert_eq(state, "redundant wrap at Vec-typed call arg: reported", count_list(lint_rules.lint_ast(redundant_call_arg)), 1)
+    assert_eq(state, "redundant wrap at Vec-typed call arg: rule id", first_rule(lint_rules.lint_ast(redundant_call_arg)), "redundant-vec-from-list")
+
+    assert_eq(state, "redundant wrap at Vec-typed return position: reported", count_list(lint_rules.lint_ast(redundant_return_position)), 1)
+
+    assert_eq(state, "redundant wrap in both if branches: two findings", count_list(lint_rules.lint_ast(redundant_in_if_branches)), 2)
+
+    assert_eq(state, "bare list literal (no wrapper): no finding", count_list(lint_rules.lint_ast(no_wrapper_bare_literal)), 0)
+
+    assert_eq(state, "vec_from_list wrapping a real value (not a literal): no finding", count_list(lint_rules.lint_ast(wrap_of_real_value_not_redundant)), 0)
+
+    assert_eq(state, "wrap at a call to an unresolved callee (no Vec context): no finding", count_list(lint_rules.lint_ast(wrap_outside_vec_context)), 0)
+
+    assert_eq(state, "wrap in a top-level let binding (no Vec context): no finding", count_list(lint_rules.lint_ast(wrap_in_let_binding_no_context)), 0)
 
     summary(state)
