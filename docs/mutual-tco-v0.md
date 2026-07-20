@@ -22,6 +22,17 @@ per-fn `musttail` rewrite, wired into the streaming pipeline; unit-tested
 both `hi_loop↔hi_step` edges emit `musttail`; seed refreshed to a fixed point; full gates +
 `test-stress` green).
 
+**Arc (b) LANDED (2026-07-20).** Immediately-applied lambdas (`TCall(TLambda([p…], body), [a…])`
+at full arity — the desugaring of `where` / `let..in`) are now **beta-reduced inline** in
+`translate_call`'s `TLambda` arm instead of lifted to a heap closure + indirect apply. This
+retires the per-call closure allocation for *every* `where`/`let..in` and, in particular,
+lets mutual-TCO fire through a `where` — so `stdlib/scram.sprout`'s `hi_step` reverts from the
+Phase-A do-`let` workaround to idiomatic `where` and stays GREEN. Unit-tested
+(`test_iife_inline.spr`: no lifted fn, no `sprout_alloc_closure_env`, incl. a nested IIFE that
+references an outer IIFE-bound var); the scram-`where` RED→GREEN experiment isolates the inline
+as the cause (identical source, pre-arc-(b) compiler exhausts roots, arc-(b) compiler passes);
+seed re-refreshed to a fixed point.
+
 ### Key discovery during implementation — `where`/`let..in` allocate a closure
 
 There is no `TLet` expression node: `let x = e in body` and `where` desugar to
@@ -32,12 +43,14 @@ detector sees `eligible = 0`. A **do-block `let` (`TDoLetStep`) compiles inline*
 (closure-free), so Phase A ships with scram's `hi_step where` rewritten as a do-`let`, which
 makes the `hi_loop↔hi_step` cycle direct and lets the `musttail` rewrite fire.
 
-This exposes a broader footgun (tracked as the next arc, "arc (b)"): **every `let..in`/`where`
-allocates a closure per call** — a real perf cost that also defeats TCO wherever a recursive
-call sits under one. The fix is to route immediately-applied lambdas (`TCall(TLambda)`)
-through the existing do-`let` inline-bind path. Once it lands, scram's `hi_step` do-`let`
-workaround can revert to `where`. This is separate from (and higher-priority than) the
-heterogeneous-arity contification (Phase B).
+This exposed a broader footgun (tracked as "arc (b)", **now landed** — see the Status block
+above): **every `let..in`/`where` allocated a closure per call** — a real perf cost that also
+defeated TCO wherever a recursive call sat under one. The fix routes immediately-applied
+lambdas (`TCall(TLambda)`) through the do-`let` inline-bind path (bind param → arg SSA in
+`captures`, translate the body in place); it is value-preserving (the IIFE result IS the
+body's value) and, because an IIFE is applied exactly once, never duplicates the body. scram's
+`hi_step` do-`let` workaround has reverted to `where`. This was separate from (and
+higher-priority than) the heterogeneous-arity contification (Phase B).
 **Motivating bug:** SCRAM PBKDF2 (`stdlib/scram.sprout` `hi_loop`↔`hi_step`) exhausts a
 green task's GC-root pool on the first request of the Postgres-backed HTTP demo.
 **Related:** `docs/typed-tco-implementation-2026-06-27.md` (self-TCO, the v1 this generalizes).
@@ -236,10 +249,13 @@ v0 is silent (an optimization, not a checked contract). Two follow-ups are noted
   **2-step bootstrap** to reach a fixed point. The compiler contains its own mutual-tail
   cycles (e.g. the parser's expression/statement descent), which will newly optimize — the
   self-compiled seed must be verified byte-identical.
-- **No source migration.** No user or stdlib code must change. `stdlib/scram.sprout` is left
-  as idiomatic mutual recursion — it simply stops leaking. (We explicitly do **not** hand-
-  contify it, unlike the `bundler.sprout` workaround, which can now be simplified in a
-  separate cleanup once this lands.)
+- **No source migration.** No user or stdlib code must change. Post-arc-(b),
+  `stdlib/scram.sprout` is idiomatic mutual recursion with a `where` — it simply stops leaking
+  (no hand-contification). The `bundler.sprout` iterative-DFS workaround (`visit_by_name` /
+  `visit_module`, hand-rewritten because codegen couldn't TCO mutual recursion, ~line 325)
+  could be revisited now that mutual-TCO exists — but those functions differ in arity, so a
+  natural mutual-recursive rewrite would need **Phase B** (heterogeneous-arity contification),
+  not Phase A/arc (b). Left as-is for now.
 - **GC-safety linter (BACKLOG 5/6):** `IRTailCall` gets declared rooting semantics
   (non-trigger, non-exposing), so it is as analyzable as `IRTcoBack`.
 
@@ -259,6 +275,10 @@ v0 is silent (an optimization, not a checked contract). Two follow-ups are noted
   across many requests without exhaustion.
 - **GC stress:** `just test-stress` (mandatory — GC-rooting-adjacent codegen false-greens on
   the default suite).
+- **Arc (b) — IIFE inline (pure IR transform):** `tests/stdlib/compiler/test_iife_inline.spr`
+  — an immediately-applied lambda (incl. a nested IIFE referencing an outer IIFE-bound var)
+  translates with an empty `lifted` list and no `sprout_alloc_closure_env`. RED on the pre-arc
+  compiler (lifts a closure), GREEN after. Plus the scram-`where` RED→GREEN experiment above.
 
 ## 10. Spec / docs status
 

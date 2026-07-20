@@ -82,38 +82,48 @@ fn main() -> Unit !{IO} =
       "call i64 (i64")
     assert_true(state, "T2: closure-call body emits opaque-ptr indirect call annotation (IRApplyClosure)", t2)
 
-    # T3: Capturing IIFE — inner lambda captures outer fn's param `n`.
-    # `(\\x -> x + n)(7)` lifts the lambda, captures n, applies it.
+    # T3: Arc (b) — a directly-applied lambda (IIFE) is BETA-REDUCED INLINE, not
+    # lifted. `(\\x -> x + n)(7)` binds x -> 7's SSA and translates the body in place,
+    # so no synthetic @__sprout_ir_lambda_ function is emitted. (docs/mutual-tco-v0.md
+    # "arc (b)".) The genuine lambda-as-VALUE path (T1/T4/T6…) still lifts.
     t3 <- translated_ok_ir_contains(
       "fn outer(n: Int) -> Int = (\\x -> x + n)(7)",
       "@__sprout_ir_lambda_")
-    assert_true(state, "T3: capturing IIFE lifts to @__sprout_ir_lambda_", t3)
+    assert_false(state, "T3: capturing IIFE inlines (arc b) — no lifted lambda fn", t3)
 
-    # T4: Capturing lambda emits sprout_alloc_closure_env at the IRMkClosure
-    # site (call into the runtime to allocate the env+captures heap block).
-    t4 <- translated_ok_ir_contains(
+    # T3b: Arc (b) — the inlined IIFE also allocates NO closure env. Check the
+    # CALL site, not the bare symbol: `@sprout_alloc_closure_env` is always in the
+    # module `declare` preamble, so only `call i64 @sprout_alloc_closure_env`
+    # (an actual allocation) distinguishes lift from inline.
+    t3b <- translated_ok_ir_contains(
       "fn outer(n: Int) -> Int = (\\x -> x + n)(7)",
-      "@sprout_alloc_closure_env")
-    assert_true(state, "T4: capturing lambda calls sprout_alloc_closure_env", t4)
+      "call i64 @sprout_alloc_closure_env")
+    assert_false(state, "T3b: inlined IIFE allocates no closure env (arc b)", t3b)
 
-    # T5: Directly-applied lambda (IIFE): (\x -> x + 1)(5).
-    # translate_call's TLambda case lifts then immediately applies — output
-    # should still contain @__sprout_ir_lambda_ (the lifted body).
+    # T4: A capturing lambda in ARGUMENT position is a genuine value -> it still
+    # lifts and emits sprout_alloc_closure_env (the runtime env+captures heap block).
+    # Vehicle: outer IIFE `(\\g -> g(5))` inlines; inner `\\x -> x + n` captures `n`.
+    t4 <- translated_ok_ir_contains(
+      "fn outer(n: Int) -> Int = (\\g -> g(5))(\\x -> x + n)",
+      "@sprout_alloc_closure_env")
+    assert_true(state, "T4: capturing lambda VALUE calls sprout_alloc_closure_env", t4)
+
+    # T5: Arc (b) — a plain IIFE `(\\x -> x + 1)(5)` inlines (no lifted function).
     t5 <- translated_ok_ir_contains(
       "fn iife() -> Int = (\\x -> x + 1)(5)",
       "@__sprout_ir_lambda_")
-    assert_true(state, "T5: directly applied lambda lifts to @__sprout_ir_lambda_", t5)
+    assert_false(state, "T5: plain IIFE inlines (arc b) — no lifted lambda fn", t5)
 
-    # T6: Regression — capturing lambda must emit env-slot LOADs in the lifted
-    # body. Slot 0 is the code pointer; captured values live at slots 1..N.
-    # The lowered IR for IRLoadEnvSlot contains `getelementptr i64, ptr` for
-    # the slot-pointer computation. Bug fixed 2026-06-05: subagent's initial
-    # implementation treated outer fn's params as `bound`, excluding them
-    # from compute_free_vars and breaking capture.
+    # T6: Regression — a capturing lambda VALUE must emit env-slot LOADs in the
+    # lifted body. Slot 0 is the code pointer; captured values live at slots 1..N;
+    # the IRLoadEnvSlot lowers to `getelementptr i64, ptr`. Bug fixed 2026-06-05:
+    # an initial implementation treated outer fn's params as `bound`, excluding
+    # them from compute_free_vars and breaking capture. Same genuine-value vehicle
+    # as T4 (arc (b) inlines the plain-IIFE form this used to use).
     t6 <- translated_ok_ir_contains(
-      "fn outer(n: Int) -> Int = (\\x -> x + n)(7)",
+      "fn outer(n: Int) -> Int = (\\g -> g(5))(\\x -> x + n)",
       "getelementptr i64, ptr")
-    assert_true(state, "T6: capturing lambda emits env-slot GEP for the load", t6)
+    assert_true(state, "T6: capturing lambda VALUE emits env-slot GEP for the load", t6)
 
     # T7 (deferred): Finding #1 — idx_map collision regression test was supposed
     # to verify that a capturing lambda with a GC-trigger op in the body does NOT
@@ -151,14 +161,15 @@ fn main() -> Unit !{IO} =
       "define i64 @ir_lambda_0(")
     assert_true(state, "T10: user function named ir_lambda_0 still appears in LLVM (name-collision check — synthesized lambda must use a distinct name)", t10)
 
-    # T11: CRITICAL — env param collision. A lambda whose param is named `env`
+    # T11: CRITICAL — env param collision. A lambda VALUE whose param is named `env`
     # would produce two params both called `env` in the lifted IRFunction (the
     # implicit closure-env pointer and the user param). LLVM rejects duplicate
     # SSA names. The fix renames the implicit env-pointer param to `env$` (a
-    # name that source-Sprout cannot tokenize). After the fix the lowered LLVM
-    # must contain `%env$` for the implicit slot and `%env` for the user param.
+    # name that source-Sprout cannot tokenize). Vehicle: outer IIFE `(\\g -> g(5))`
+    # inlines (arc b); inner `\\env -> env + 1` is the lifted lambda that gets an
+    # implicit env pointer, so the lowered LLVM must contain `%env$`.
     t11 <- translated_ok_ir_contains(
-      "fn f() -> Int = (\\env -> env + 1)(5)",
+      "fn f() -> Int = (\\g -> g(5))(\\env -> env + 1)",
       "%env$")
     assert_true(state, "T11: lambda param named env does not collide with implicit env ptr (implicit slot renamed to %env$)", t11)
 
@@ -171,34 +182,37 @@ fn main() -> Unit !{IO} =
       "__sprout_")
     assert_true(state, "T12: extern fn with __sprout_ prefix rejected by translate_program (reserved namespace guard)", t12)
 
-    # T13: Bool-returning lambda now compiles. /code-review-v2 fix #6 lifted
-    # the previous rejection. With fix #2 (Bool flows as i64) + fix #3 (IRZext
-    # widens comparison results) + fix #6 (guard removed), Bool-returning
-    # closures emit consistent i64 IR.
+    # T13: Bool-returning lambda VALUE compiles + lifts. /code-review-v2 fix #6
+    # lifted the previous rejection. With fix #2 (Bool flows as i64) + fix #3
+    # (IRZext widens comparison results) + fix #6 (guard removed), Bool-returning
+    # closures emit consistent i64 IR. Vehicle: `\\x -> x == 0` in argument
+    # position lifts (the outer IIFE `(\\g -> g(5))` inlines).
     t13 <- translated_ok_ir_contains(
-      "fn f() -> Bool = (\\x -> x == 0)(5)",
+      "fn f() -> Bool = (\\g -> g(5))(\\x -> x == 0)",
       "@__sprout_ir_lambda_")
-    assert_true(state, "T13: Bool-returning lambda compiles (/code-review-v2 fix #6)", t13)
+    assert_true(state, "T13: Bool-returning lambda VALUE compiles + lifts (/code-review-v2 fix #6)", t13)
 
-    # T14: Bool-captured lambda now compiles. /code-review-v2 fix #7 lifted
-    # the previous rejection. IRLoadEnvSlot returns i64; the captured Bool is
-    # i64 in the env per fix #2. Internally consistent.
+    # T14: Bool-captured lambda VALUE compiles + lifts. /code-review-v2 fix #7
+    # lifted the previous rejection. IRLoadEnvSlot returns i64; the captured Bool
+    # is i64 in the env per fix #2. Vehicle: `\\x -> if b then x else 0` captures
+    # the Bool `b` and lifts (outer IIFE inlines).
     t14 <- translated_ok_ir_contains(
-      "fn outer(b: Bool) -> Int = (\\x -> if b then x else 0)(5)",
+      "fn outer(b: Bool) -> Int = (\\g -> g(5))(\\x -> if b then x else 0)",
       "@__sprout_ir_lambda_")
-    assert_true(state, "T14: Bool-capturing lambda compiles (/code-review-v2 fix #7)", t14)
+    assert_true(state, "T14: Bool-capturing lambda VALUE compiles + lifts (/code-review-v2 fix #7)", t14)
 
-    # T15: Lambda param named t0 no longer collides with body fresh names.
+    # T15: Lambda VALUE param named t0 no longer collides with body fresh names.
     # Previously the lifted body used %t0, %t1, ... as fresh SSA names, which
     # collided with a user param also named t0. The fix: lifted bodies use a
-    # distinct prefix (%t$N). Two sub-assertions: lift must succeed, and the
-    # emitted LLVM must contain the %t$ prefix (proving the fix is active).
+    # distinct prefix (%t$N). Vehicle: `\\t0 -> t0 + 1` in argument position lifts
+    # (the outer IIFE `(\\g -> g(5))` inlines). Two sub-assertions: lift must
+    # succeed, and the emitted LLVM must contain the %t$ prefix (fix is active).
     t15a <- translated_ok_ir_contains(
-      "fn f() -> Int = (\\t0 -> t0 + 1)(5)",
+      "fn f() -> Int = (\\g -> g(5))(\\t0 -> t0 + 1)",
       "@__sprout_ir_lambda_")
-    assert_true(state, "T15a: \\t0 -> ... lambda lifts successfully (no param/fresh-name collision)", t15a)
+    assert_true(state, "T15a: \\t0 -> ... lambda VALUE lifts successfully (no param/fresh-name collision)", t15a)
     t15b <- translated_ok_ir_contains(
-      "fn f() -> Int = (\\t0 -> t0 + 1)(5)",
+      "fn f() -> Int = (\\g -> g(5))(\\t0 -> t0 + 1)",
       "%t$")
     assert_true(state, "T15b: lifted body uses %t$ fresh-name prefix (not %t0)", t15b)
 
@@ -221,27 +235,27 @@ fn main() -> Unit !{IO} =
     # Sprout adds either multi-arg lambdas or a typechecker mode that permits
     # over-application past a closure boundary.
 
-    # T18: Round-4 Finding #1 — find_capture_type TLambda shadowing. Originally
-    # the test asserted that the outer Bool capture was REJECTED; post
-    # /code-review-v2 fix #7, Bool captures now compile cleanly. The
-    # find_capture_type TLambda-scope fix is still load-bearing for OTHER kinds
-    # of capture inference, but the Bool-capture observable is gone. The
-    # assertion now verifies the program compiles (both outer-b capture and
-    # inner shadowing-`b` are handled correctly).
+    # T18: Round-4 Finding #1 — find_capture_type TLambda shadowing. The outer
+    # lambda VALUE `\\y -> …` captures Bool `b` and lifts; the inner `(\\b -> b + 1)(5)`
+    # is an IIFE that inlines (arc b), its param `b` shadowing the captured `b`
+    # within that sub-scope. The find_capture_type TLambda-scope fix is still
+    # load-bearing for capture inference; this verifies both capture and shadow are
+    # handled. Vehicle: outer IIFE `(\\g -> g(7))` inlines; `\\y -> …` lifts.
     t18 <- translated_ok_ir_contains(
-      "fn outer(b: Bool) -> Int = (\\y -> if b then (\\b -> b + 1)(5) else 0)(7)",
+      "fn outer(b: Bool) -> Int = (\\g -> g(7))(\\y -> if b then (\\b -> b + 1)(5) else 0)",
       "@__sprout_ir_lambda_")
-    assert_true(state, "T18: outer-Bool-capture + inner-shadow lambda compiles (/code-review-v2 fix #7)", t18)
+    assert_true(state, "T18: outer-Bool-capture lambda VALUE + inner-shadow IIFE compiles (/code-review-v2 fix #7)", t18)
 
-    # T19: Round-4 Finding #2 — derived SSA name collision. The IRMkClosure
-    # result (now `%t$0`, since fresh_name hardcodes the "%t$" prefix) plus the
-    # `_raw`/`$raw` suffix builds a derived name in ir_lowering. The `$raw`
-    # separator ensures derived names cannot match any source identifier (a user
-    # param named `t0_raw` lowers to `%t0_raw`, never `%t$0$raw`).
-    # Assertion: the emitted LLVM contains `%t$0$raw`, proving the separator.
+    # T19: Round-4 Finding #2 — derived SSA name collision. An IRMkClosure result
+    # (a "%t$N" fresh name) plus a "$raw" suffix builds a derived name in
+    # ir_lowering. The `$raw` separator ensures derived names cannot match any
+    # source identifier (a user param named `t0_raw` lowers to `%t0_raw`, never a
+    # `%t$…$raw`). Vehicle: a lifted lambda VALUE `\\x -> x + 1` produces the
+    # IRMkClosure whose derived name carries `$raw` (outer IIFE `(\\g -> g(t0_raw))`
+    # inlines). Assertion: the emitted LLVM contains the `$raw` separator.
     t19 <- translated_ok_ir_contains(
-      "fn f(t0_raw: Int) -> Int = (\\x -> x + 1)(t0_raw)",
-      "%t$0$raw")
+      "fn f(t0_raw: Int) -> Int = (\\g -> g(t0_raw))(\\x -> x + 1)",
+      "$raw")
     assert_true(state, "T19: IRMkClosure-derived SSA name uses $raw separator (no collision with user param `t0_raw`)", t19)
 
     # T20 (deferred): Round-4 Finding #4 — top-level let binding visible to
@@ -261,11 +275,12 @@ fn main() -> Unit !{IO} =
     # investigation. Tracked in BACKLOG.md.
 
     # T22: Round-4 Finding #10 (T7b restoration) — rooting pass must NOT emit
-    # "%t0 = alloca" for any lifted lambda body. Uses a non-capturing source
-    # since T21's source is still blocked. If the idx_map fix regressed, the
-    # rooting pass would reuse %t0 for a root alloca, causing duplicate-SSA.
+    # "%t0 = alloca" for any lifted lambda body. If the idx_map fix regressed, the
+    # rooting pass would reuse %t0 for a root alloca, causing duplicate-SSA with
+    # IRLoadEnvSlot's %t0. Genuine lifted-lambda vehicle (outer IIFE inlines under
+    # arc (b), inner `\\x -> x + n` captures `n` and lifts).
     t22 <- translated_ok_ir_contains(
-      "fn outer(n: Int) -> Int = (\\x -> x + n)(7)",
+      "fn outer(n: Int) -> Int = (\\g -> g(5))(\\x -> x + n)",
       "%t0 = alloca")
     assert_false(state, "T22: idx_map fix — rooting pass must not emit %t0 alloca in lifted body (would collide with IRLoadEnvSlot)", t22)
 

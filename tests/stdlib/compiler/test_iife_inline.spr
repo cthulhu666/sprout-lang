@@ -1,0 +1,80 @@
+module main
+import stdlib.test (TestState, new_state, assert_true, summary)
+import stdlib.compiler.ast_to_ir as ast_to_ir
+import stdlib.compiler.ir_lowering as ir_lowering
+import stdlib.compiler.sprout_ir as sprout_ir
+import stdlib.compiler.typed_ast as typed_ast
+import stdlib.compiler.types as types
+import stdlib.compiler.ast as ast
+import stdlib.compiler.source as source
+import stdlib.string as string
+
+# Arc (b): an immediately-applied lambda literal — `TCall(TLambda([x], body), [arg])`,
+# the desugaring of `let x = arg in body` and `where x = arg` — must be BETA-REDUCED
+# inline (bind x -> arg's SSA in `captures`, translate body in place), NOT lifted to a
+# heap closure + indirect apply. Pre-fix this arm allocates a closure per call (a perf
+# cost that also defeats mutual-TCO). See docs/mutual-tco-v0.md "arc (b)".
+#
+# Signals (both RED on the pre-fix compiler, GREEN after):
+#   - translate_decl_with_idx returns an empty `lifted` list (no synthetic lambda fn).
+#   - the lowered fn body contains no `sprout_alloc_closure_env` call.
+# Pure IRFunction inspection; runs on the current stage-1 (no seed churn).
+
+fn no_pos() -> source.SourcePos = source.SourcePos(0, 0, 0)
+fn int_t() -> types.Type = types.TConst(types.type_id("Int"))
+fn tvar(name: String) -> typed_ast.TypedExpr = typed_ast.TVar(name, int_t(), no_pos())
+fn tint(n: Int) -> typed_ast.TypedExpr = typed_ast.TInt(n, int_t(), no_pos())
+fn plus(l: typed_ast.TypedExpr, r: typed_ast.TypedExpr) -> typed_ast.TypedExpr =
+  typed_ast.TBinary("+", l, r, int_t(), no_pos())
+fn lam1(p: String, body: typed_ast.TypedExpr) -> typed_ast.TypedExpr =
+  typed_ast.TLambda(Cons(ast.Param(p, Nothing), Nil), body,
+    types.TFunc(int_t(), int_t(), types.EffectPure), no_pos())
+fn app1(f: typed_ast.TypedExpr, arg: typed_ast.TypedExpr) -> typed_ast.TypedExpr =
+  typed_ast.TCall(f, Cons(arg, Nil), int_t(), no_pos())
+
+# fn f(n) = x + n  where x = n + 1
+# desugared: (\x -> x + n)(n + 1) — the IIFE body captures the OUTER param `n`.
+fn iife_capturing_outer() -> typed_ast.TypedDecl =
+  typed_ast.TFnDecl("f", Cons(ast.Param("n", Nothing), Nil), Nothing, Nothing, Nil,
+    app1(lam1("x", plus(tvar("x"), tvar("n"))), plus(tvar("n"), tint(1))))
+
+# fn g(n) = (\y -> y + x)(7)  where x = n + 1
+# desugared: (\x -> (\y -> y + x)(7))(n + 1) — a NESTED IIFE whose body references the
+# OUTER IIFE-bound `x`. Exercises the free-var-resolves-from-captures path arc (b) relies
+# on: after inlining the outer IIFE, `x` lives in `captures`, and the inner IIFE inlines
+# too, resolving `x` from there. Both must inline (no lift, no closure).
+fn nested_iife() -> typed_ast.TypedDecl =
+  typed_ast.TFnDecl("g", Cons(ast.Param("n", Nothing), Nil), Nothing, Nothing, Nil,
+    app1(lam1("x", app1(lam1("y", plus(tvar("y"), tvar("x"))), tint(7))),
+         plus(tvar("n"), tint(1))))
+
+fn lifted_count(triple: (sprout_ir.IRFunction, Int, List sprout_ir.IRFunction)) -> Int =
+  match triple with | (_f, _idx, lifted) -> list_length(lifted)
+
+fn triple_fn(triple: (sprout_ir.IRFunction, Int, List sprout_ir.IRFunction)) -> sprout_ir.IRFunction =
+  match triple with | (f, _idx, _lifted) -> f
+
+# Translate a decl and run the two inline assertions against it.
+fn check_inlined(state: TestState, label: String, d: typed_ast.TypedDecl) -> Unit !{IO} =
+  do
+    ctr <- ref_new(0)
+    lidx <- ref_new(dict_empty())
+    match ast_to_ir.translate_decl_with_idx(d, dict_empty(), set_empty(), set_empty(), dict_empty(), ctr, lidx) with
+    | Err msg -> assert_true(state, label ++ ": translate ok (got Err: " ++ msg ++ ")", false)
+    | Ok maybe ->
+        match maybe with
+        | Nothing -> assert_true(state, label ++ ": expected a translated fn", false)
+        | Just triple ->
+            do
+              assert_true(state, label ++ ": IIFE inlined — no lifted lambda fn",
+                lifted_count(triple) == 0)
+              let fir = ir_lowering.lower_fn_with_table(triple_fn(triple), dict_empty())
+              assert_true(state, label ++ ": IIFE inlined — no closure allocation",
+                string.contains(fir, "sprout_alloc_closure_env") == false)
+
+fn main() -> Unit !{IO} =
+  do
+    state <- new_state()
+    check_inlined(state, "capture-outer-param", iife_capturing_outer())
+    check_inlined(state, "nested-iife-refs-outer", nested_iife())
+    summary(state)

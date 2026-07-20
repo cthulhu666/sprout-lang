@@ -94,6 +94,20 @@ fn fv_param_names(params: List ast.Param) -> List String =
       match p with
       | ast.Param n _ -> Cons(n, fv_param_names(rest))
 
+# Bind lambda param names (in order) to their argument SSA values in `captures` —
+# the beta-reduction substitution for an inlined immediately-applied lambda (arc (b),
+# translate_call's TLambda arm). A TVar for `n` then resolves via `captures` to its SSA
+# with no IR emitted (see translate_expr's TVar arm), exactly like a do-block `let`.
+# Names and ssas are equal length (the caller's arity guard); a short list stops early.
+# O(n * log n).
+fn bind_params(names: List String, ssas: List String, captures: Dict String) -> Dict String =
+  match names with
+  | Nil -> captures
+  | Cons n nrest ->
+      match ssas with
+      | Nil -> captures
+      | Cons s srest -> bind_params(nrest, srest, dict_set(n, s, captures))
+
 # Collect all variable names bound by a pattern.
 # Explicit on every constructor so adding a new Pattern variant surfaces here
 # at compile time (no silent wildcard fallthrough).
@@ -4052,8 +4066,9 @@ fn translate_call(callee: typed_ast.TypedExpr, args: List typed_ast.TypedExpr,
                 translate_direct_call(fname, args, call_ty, params, ctors, idx,
                                       cur_label, cur_ops, captures, lifted_ref, top_level, let_names, fn_arities,
                                       lambda_ctr_ref, lifted_idx_ref, name_prefix)
-  | typed_ast.TLambda lparams lbody lam_ty _ ->
-      # Directly-applied lambda (IIFE): (\x -> body)(arg).
+  | typed_ast.TLambda lparams lbody _lam_ty _ ->
+      # Directly-applied lambda (IIFE): (\x -> body)(arg) — the desugaring of
+      # `let x = arg in body` and `where x = arg`.
       # FIX #6: check arity before emitting any IR; partial application is not
       # yet supported (each IRApplyClosure call is one application).
       if list_length(lparams) != list_length(args)
@@ -4061,24 +4076,33 @@ fn translate_call(callee: typed_ast.TypedExpr, args: List typed_ast.TypedExpr,
                int_to_string(list_length(lparams)) ++ " args, got " ++
                int_to_string(list_length(args)) ++ ") — partial application not yet supported")
       else
-      # Translate the lambda to get a closure value at the call site, then apply.
-      match translate_lambda(lparams, lbody, lam_ty, params, ctors, idx, cur_label, cur_ops,
-                             captures, lifted_ref, top_level, let_names, fn_arities, lambda_ctr_ref, lifted_idx_ref,
-                             name_prefix) with
+      # Arc (b): beta-reduce the IIFE INLINE instead of lifting a heap closure +
+      # indirect apply. Evaluate each arg once in the outer scope, bind param -> its
+      # arg SSA in `captures`, and translate the body in place (the do-`let` path).
+      # An IIFE is applied exactly once, so inlining never duplicates the body — no
+      # code bloat. Inlining is value-preserving (the IIFE result IS the body's value,
+      # never a first-class closure) and keeps any recursive tail call in the body a
+      # direct call, so mutual-TCO (musttail) can fire through a `where`/`let..in`.
+      # See docs/mutual-tco-v0.md "arc (b)".
+      match translate_args_scalar(args, params, ctors, idx, cur_label, cur_ops, Nil, Nil,
+                                  captures, lifted_ref, top_level, let_names, fn_arities,
+                                  lambda_ctr_ref, lifted_idx_ref, name_prefix) with
       | Err msg -> Err(msg)
-      | Ok lr ->
-          match lr with
-          | (lam_blocks, lam_cur_lbl, lam_cur_ops, closure_ssa, idx1) ->
-              match translate_closure_call(closure_ssa, args, params, ctors, idx1,
-                                           lam_cur_lbl, lam_cur_ops,
-                                           captures, lifted_ref, top_level, let_names, fn_arities, lambda_ctr_ref,
-                                           lifted_idx_ref, name_prefix) with
+      | Ok ar ->
+          match ar with
+          | (arg_blocks, arg_lbl, arg_ops, arg_names, idx1) ->
+              # Bind params AFTER evaluating args: args see the outer scope
+              # (call-by-value), the body sees params shadowing it (lexical scope).
+              match translate_expr(lbody, params, ctors, idx1, arg_lbl, arg_ops,
+                                   bind_params(fv_param_names(lparams), arg_names, captures),
+                                   lifted_ref, top_level, let_names, fn_arities,
+                                   lambda_ctr_ref, lifted_idx_ref, name_prefix) with
               | Err msg -> Err(msg)
-              | Ok cr ->
-                  match cr with
-                  | (call_blocks, call_lbl, call_ops, call_result, idx2) ->
-                      Ok((list_append(lam_blocks, call_blocks), call_lbl, call_ops,
-                           call_result, idx2))
+              | Ok br ->
+                  match br with
+                  | (body_blocks, body_lbl, body_ops, body_result, idx2) ->
+                      Ok((list_append(arg_blocks, body_blocks), body_lbl, body_ops,
+                           body_result, idx2))
   | typed_ast.TCall inner_callee inner_args inner_ty _ ->
       # Chained curried call: f(x)(y) where the inner TCall returns a closure.
       # Translate the inner call to get the closure SSA value, then apply it
