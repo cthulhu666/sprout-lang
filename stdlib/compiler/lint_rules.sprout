@@ -4,6 +4,7 @@ import stdlib.compiler.ast as ast
 import stdlib.compiler.parser as parser
 import stdlib.compiler.lexer as lexer
 import stdlib.compiler.source as source
+import stdlib.string as string
 
 # AST-based lint findings — line, col, rule id, message. A sibling to
 # formatter.LintIssue's line-based Style checks; this is the "Lint" category,
@@ -204,6 +205,32 @@ fn lint_program(prog: ast.Program) -> List LintFinding =
   match prog with
   | ast.Program decls _ -> walk_decls(decls)
 
+# `let <pat> = e else fb` is pure sugar (parser.sprout: build_let_binding_match)
+# — it desugars to the SAME MatchExpr shape a hand-written nested match would,
+# with no distinguishing AST node. So a MatchExpr's own position is the only
+# way to tell them apart: a hand-written match's pos is the `match` keyword
+# itself; a let-else's pos is wherever that binding's pattern starts (there is
+# no `match` token in the source at all). Without this check, every already-
+# idiomatic let-else chain gets told to become the thing it already is.
+fn nth_line(lines: List String, target: Int, cur: Int) -> String =
+  match lines with
+  | Nil -> ""
+  | Cons l rest -> if cur == target then l else nth_line(rest, target, cur + 1)
+
+fn is_written_as_match(src: String, line: Int, col: Int) -> Bool =
+  string.starts_with(str_slice(text, col - 1, str_len(text) - (col - 1)), "match")
+  where text = nth_line(str_split_lines(src), line, 1)
+
+fn drop_desugared_matches(src: String, findings: List LintFinding) -> List LintFinding =
+  match findings with
+  | Nil -> Nil
+  | Cons f rest ->
+      match f with
+      | LintFinding ln col _ _ ->
+          if is_written_as_match(src, ln, col)
+          then Cons(f, drop_desugared_matches(src, rest))
+          else drop_desugared_matches(src, rest)
+
 # lint_ast: run every AST-based rule over a source file. Parse failures yield
 # no findings (formatter.lint_source's text-based checks already cover files
 # that don't even parse; this rule set only has something to say once the
@@ -214,4 +241,4 @@ export fn lint_ast(src: String) -> List LintFinding =
   | Ok toks ->
       match parser.parse_program(toks) with
       | Err _ -> Nil
-      | Ok prog -> lint_program(prog)
+      | Ok prog -> drop_desugared_matches(src, lint_program(prog))

@@ -81,18 +81,13 @@ fn scram_int_result(m: Maybe Int) -> ScramResult Int =
   | Nothing -> Err(ScramInvalidIterationCount("SCRAM iteration count must be decimal digits"))
 
 export fn parse_server_first(raw: String) -> ScramResult ScramServerFirst =
-  match attr_value(raw, "r") with
-  | Nothing -> Err(ScramInvalidMessage("SCRAM server-first message missing nonce"))
-  | Just nonce ->
-      match attr_value(raw, "s") with
-      | Nothing -> Err(ScramInvalidMessage("SCRAM server-first message missing salt"))
-      | Just salt_b64 ->
-          match attr_value(raw, "i") with
-          | Nothing -> Err(ScramInvalidMessage("SCRAM server-first message missing iteration count"))
-          | Just iterations_raw ->
-              match parse_positive_int(iterations_raw) with
-              | Err err -> Err(err)
-              | Ok iterations -> Ok(ScramServerFirst(raw, nonce, salt_b64, iterations))
+  let Just nonce = attr_value(raw, "r") else Err(ScramInvalidMessage("SCRAM server-first message missing nonce"))
+      Just salt_b64 = attr_value(raw, "s") else Err(ScramInvalidMessage("SCRAM server-first message missing salt"))
+      Just iterations_raw = attr_value(raw, "i") else Err(ScramInvalidMessage("SCRAM server-first message missing iteration count"))
+  in
+    match parse_positive_int(iterations_raw) with
+    | Err err -> Err(err)
+    | Ok iterations -> Ok(ScramServerFirst(raw, nonce, salt_b64, iterations))
 
 fn server_nonce(server: ScramServerFirst) -> String =
   match server with

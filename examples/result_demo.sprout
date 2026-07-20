@@ -17,12 +17,9 @@ fn compute(x: Int) -> Result String Int =
     Ok((large * 2) + 1)
 
 fn main() -> Unit !{IO} =
-  match argv_get(0) with
-  | Nothing -> print("usage: sprout run examples/result_demo.sprout <int>")
-  | Just raw ->
-      match parse_int(raw) with
-      | Nothing -> print("not a number: " ++ raw)
-      | Just n ->
-          match compute(n) with
-          | Ok value -> print(value)
-          | Err err -> print(err)
+  let Just raw = argv_get(0) else print("usage: sprout run examples/result_demo.sprout <int>")
+      Just n = parse_int(raw) else print("not a number: " ++ raw)
+  in
+    match compute(n) with
+    | Ok value -> print(value)
+    | Err err -> print(err)

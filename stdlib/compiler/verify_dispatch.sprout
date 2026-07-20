@@ -210,24 +210,17 @@ fn check_constraints(constraints: List ast.TypeConstraint, dict_heads: List (Str
 fn check_one(c: ast.TypeConstraint, dict_head: (String, Maybe String), theta: Dict types.Type, pos: source.SourcePos) -> VerifyOutcome =
   match dict_head with
   | (dict_class, mhead) ->
-      match mhead with
-      | Nothing -> VerifySkip(constraint_class(c) ++ ": forwarded/polymorphic dict")
-      | Just head ->
-          match constraint_var(c) with
-          | Nothing -> VerifySkip(constraint_class(c) ++ ": non-var constraint head")
-          | Just v ->
-              match dict_get(v, theta) with
-              | Nothing -> VerifySkip(constraint_class(c) ++ " " ++ v ++ ": underdetermined by source signature")
-              | Just truth_ty ->
-                  match type_head_str(truth_ty) with
-                  | Nothing -> VerifySkip(constraint_class(c) ++ " " ++ v ++ ": truth still polymorphic")
-                  | Just truth_head ->
-                      if truth_head == head then VerifyOk(constraint_class(c))
-                      else VerifyMismatch(pos,
-                        "dictionary for `" ++ constraint_class(c) ++ " " ++ v
-                        ++ "` resolved to `" ++ constraint_class(c) ++ " " ++ head
-                        ++ "` but the call fixes " ++ v ++ " = " ++ truth_head
-                        ++ " (expected `" ++ constraint_class(c) ++ " " ++ truth_head ++ "`)")
+      let Just head = mhead else VerifySkip(constraint_class(c) ++ ": forwarded/polymorphic dict")
+          Just v = constraint_var(c) else VerifySkip(constraint_class(c) ++ ": non-var constraint head")
+          Just truth_ty = dict_get(v, theta) else VerifySkip(constraint_class(c) ++ " " ++ v ++ ": underdetermined by source signature")
+          Just truth_head = type_head_str(truth_ty) else VerifySkip(constraint_class(c) ++ " " ++ v ++ ": truth still polymorphic")
+      in
+        if truth_head == head then VerifyOk(constraint_class(c))
+        else VerifyMismatch(pos,
+          "dictionary for `" ++ constraint_class(c) ++ " " ++ v
+          ++ "` resolved to `" ++ constraint_class(c) ++ " " ++ head
+          ++ "` but the call fixes " ++ v ++ " = " ++ truth_head
+          ++ " (expected `" ++ constraint_class(c) ++ " " ++ truth_head ++ "`)")
 
 # ---------------------------------------------------------------------------
 # Program walker: run verify_call at every constrained call site

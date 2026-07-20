@@ -3014,31 +3014,28 @@ fn unboxed_maybe_match_target(scrut: typed_ast.TypedExpr,
                               let_names: Set, top_level: Set,
                               ctors: Dict sprout_ir.CtorInfo) ->
     Maybe(String, List typed_ast.TypedExpr) =
-  match scrut with
-  | typed_ast.TCall callee args call_ty _ ->
-      match callee with
-      | typed_ast.TVar name _ _ ->
-          # Test the O(1) extern-name allowlist first — the most selective check —
-          # so the common (non-extern) match skips the O(arms) arm walk below.
-          match unboxed_maybe_extern_name(name) with
-          | Just ufn ->
-              # Tier-1: direct Maybe-returning C extern with a runtime `_unboxed`.
-              if is_maybe_type(call_ty) && all_arms_simple_maybe(arms)
-                 && ctors_has(ctors, "Just") && ctors_has(ctors, "Nothing")
-                 && ! callee_name_shadowed (name, params, captures, let_names, ctors)
-              then Just((ufn, args))
-              else Nothing
-          | Nothing ->
-              # Tier-2: direct call to a top-level Sprout fn returning a width-2
-              # ADT — routes to the emitted `@<name>_worker` (guaranteed to exist
-              # because collect_worker_callees scans on the same shape core).
-              if set_member(name, top_level)
-                 && tier2_worker_shape(name, arms, ctors)
-                 && ! callee_name_shadowed (name, params, captures, let_names, ctors)
-              then Just((name ++ "_worker", args))
-              else Nothing
-      | _ -> Nothing
-  | _ -> Nothing
+  let typed_ast.TCall callee args call_ty _ = scrut else Nothing
+      typed_ast.TVar name _ _ = callee else Nothing
+  in
+    # Test the O(1) extern-name allowlist first — the most selective check —
+    # so the common (non-extern) match skips the O(arms) arm walk below.
+    match unboxed_maybe_extern_name(name) with
+    | Just ufn ->
+        # Tier-1: direct Maybe-returning C extern with a runtime `_unboxed`.
+        if is_maybe_type(call_ty) && all_arms_simple_maybe(arms)
+           && ctors_has(ctors, "Just") && ctors_has(ctors, "Nothing")
+           && ! callee_name_shadowed (name, params, captures, let_names, ctors)
+        then Just((ufn, args))
+        else Nothing
+    | Nothing ->
+        # Tier-2: direct call to a top-level Sprout fn returning a width-2
+        # ADT — routes to the emitted `@<name>_worker` (guaranteed to exist
+        # because collect_worker_callees scans on the same shape core).
+        if set_member(name, top_level)
+           && tier2_worker_shape(name, arms, ctors)
+           && ! callee_name_shadowed (name, params, captures, let_names, ctors)
+        then Just((name ++ "_worker", args))
+        else Nothing
 
 # Bind the `Just x` payload variable to the extracted val SSA (no IRGetField).
 # `Just _`, `Nothing`, and wildcard bind nothing.
@@ -5948,12 +5945,10 @@ fn adt_ctors_of_type(t: types.Type, adt_index: Dict (List (Int, Int))) -> List (
 
 fn adt_ctors_of_typeexpr(mte: Maybe ast.TypeExpr,
                          adt_index: Dict (List (Int, Int))) -> List (Int, Int) =
-  match mte with
-  | Nothing -> Nil
-  | Just te ->
-      match typeexpr_head_name(te) with
-      | Just name -> (match dict_get(name, adt_index) with | Just cs -> cs | Nothing -> Nil)
-      | Nothing -> Nil
+  let Just te = mte else Nil
+      Just name = typeexpr_head_name(te) else Nil
+      Just cs = dict_get(name, adt_index) else Nil
+  in cs
 
 # ---------------------------------------------------------------------------
 # Emission scan: the shadow-free superset of what the router routes.

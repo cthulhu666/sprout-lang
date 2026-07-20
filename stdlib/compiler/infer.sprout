@@ -839,25 +839,21 @@ fn check_instance_for_marker(
             # concrete arg of an unrelated type (e.g. a String `tag`) hijacks the
             # dict (fundamentals review W4 / probe sr_dispatch). head_str and the
             # TDict TypeExpr are both derived from that one arg so they agree.
-            match class_var_arg_or_fallback(method_name, class_vars, typed_args, subst, env) with
-            | Just cv_arg ->
-                match concrete_type_str(unifier.apply_subst(subst, typed_ast.typed_expr_type(cv_arg))) with
-                | Nothing ->
-                    check_instance_fwd(types.type_id_name(class_name), typed_callee, typed_args, env, ret_t, s3, es3, call_eff, pos)
-                | Just head_str ->
-                    match dict_get("@inst:" ++ types.type_id_name(class_name) ++ ":" ++ head_str, env) with
-                    | Nothing -> InferErr(pos, "No instance of " ++ types.type_id_name(class_name) ++ " for " ++ head_str)
-                    | Just _ ->
-                        InferOk(
-                          typed_ast.TCall(typed_callee,
-                            Cons(typed_ast.TDict(
-                              ast.TypeConstraint(types.type_id_name(class_name), Cons(type_to_typeexpr_with_prog_vars(unifier.apply_subst(subst, typed_ast.typed_expr_type(cv_arg)), types.type_id_name(class_name), env), Nil)),
-                              types.TConst(class_name), pos, typed_ast.EvUnresolved),
-                              typed_args),
-                            ret_t, pos),
-                          s3, es3, call_eff)
-            | Nothing ->
-                check_instance_fwd(types.type_id_name(class_name), typed_callee, typed_args, env, ret_t, s3, es3, call_eff, pos)
+            let Just cv_arg = class_var_arg_or_fallback(method_name, class_vars, typed_args, subst, env)
+                  else check_instance_fwd(types.type_id_name(class_name), typed_callee, typed_args, env, ret_t, s3, es3, call_eff, pos)
+                Just head_str = concrete_type_str(unifier.apply_subst(subst, typed_ast.typed_expr_type(cv_arg)))
+                  else check_instance_fwd(types.type_id_name(class_name), typed_callee, typed_args, env, ret_t, s3, es3, call_eff, pos)
+                Just _ = dict_get("@inst:" ++ types.type_id_name(class_name) ++ ":" ++ head_str, env)
+                  else InferErr(pos, "No instance of " ++ types.type_id_name(class_name) ++ " for " ++ head_str)
+            in
+              InferOk(
+                typed_ast.TCall(typed_callee,
+                  Cons(typed_ast.TDict(
+                    ast.TypeConstraint(types.type_id_name(class_name), Cons(type_to_typeexpr_with_prog_vars(unifier.apply_subst(subst, typed_ast.typed_expr_type(cv_arg)), types.type_id_name(class_name), env), Nil)),
+                    types.TConst(class_name), pos, typed_ast.EvUnresolved),
+                    typed_args),
+                  ret_t, pos),
+                s3, es3, call_eff)
           else
             # Return-position dispatch — first_concrete_typed_arg_str would pick
             # an irrelevant arg type (e.g. the String input of `deserialize`).
@@ -1743,21 +1739,16 @@ fn seed_one_constraint_marker(c: ast.TypeConstraint, prog_to_fresh: Dict types.T
       match type_args with
       | Nil -> env
       | Cons head_te _ ->
-          match head_te with
-          | ast.TypeName prog_var ->
-              match dict_get(prog_var, prog_to_fresh) with
-              | Nothing -> env
-              | Just fresh_t ->
-                  match fresh_t with
-                  | types.TVar fresh_name ->
-                      # Wrap at the extraction site: prog_var is the user's
-                      # constraint-head name (e.g. "a") while fresh_name is the
-                      # compiler-generated instantiation name (e.g. "a42").
-                      # Store prog_var name in the scheme value for retrieval in check_instance_for_marker.
-                      # Also seed @fwd markers for any superclasses registered under @super:class_name:*.
-                      seed_fwd_with_supers(class_name, FreshTVarName(types.tyvar_identity(fresh_name)), ProgVarName(prog_var), env)
-                  | _ -> env
-          | _ -> env
+          let ast.TypeName prog_var = head_te else env
+              Just fresh_t = dict_get(prog_var, prog_to_fresh) else env
+              types.TVar fresh_name = fresh_t else env
+          in
+            # Wrap at the extraction site: prog_var is the user's
+            # constraint-head name (e.g. "a") while fresh_name is the
+            # compiler-generated instantiation name (e.g. "a42").
+            # Store prog_var name in the scheme value for retrieval in check_instance_for_marker.
+            # Also seed @fwd markers for any superclasses registered under @super:class_name:*.
+            seed_fwd_with_supers(class_name, FreshTVarName(types.tyvar_identity(fresh_name)), ProgVarName(prog_var), env)
 
 # Seed the direct @fwd marker and then transitively seed all superclass markers.
 # fresh_name and prog_var are wrapped at the boundary: the @fwd:* key is built
@@ -1809,21 +1800,16 @@ fn add_eta_for_constraint(c: ast.TypeConstraint, prog_to_fresh: Dict types.Type,
       match type_args with
       | Nil -> markers
       | Cons head_te _ ->
-          match head_te with
-          | ast.TypeName prog_var ->
-              match dict_get(prog_var, prog_to_fresh) with
-              | Nothing -> markers
-              | Just fresh_t ->
-                  match fresh_t with
-                  | types.TVar fresh_name ->
-                      # Wrap at the extraction site (mirror of seed_one_constraint_marker):
-                      # the @eta_fwd:* key is built from FreshTVarName, and the scheme
-                      # value stores ProgVarName for lowering to retrieve.
-                      add_eta_with_supers(class_name, FreshTVarName(types.tyvar_identity(fresh_name)), ProgVarName(prog_var), env,
-                        dict_set("@eta_fwd:" ++ types.tyvar_identity(fresh_name) ++ ":" ++ class_name,
-                                 types.mono(types.TConst(types.type_id(prog_var))), markers))
-                  | _ -> markers
-          | _ -> markers
+          let ast.TypeName prog_var = head_te else markers
+              Just fresh_t = dict_get(prog_var, prog_to_fresh) else markers
+              types.TVar fresh_name = fresh_t else markers
+          in
+            # Wrap at the extraction site (mirror of seed_one_constraint_marker):
+            # the @eta_fwd:* key is built from FreshTVarName, and the scheme
+            # value stores ProgVarName for lowering to retrieve.
+            add_eta_with_supers(class_name, FreshTVarName(types.tyvar_identity(fresh_name)), ProgVarName(prog_var), env,
+              dict_set("@eta_fwd:" ++ types.tyvar_identity(fresh_name) ++ ":" ++ class_name,
+                       types.mono(types.TConst(types.type_id(prog_var))), markers))
 
 # Boundary protection mirrors seed_fwd_with_supers — fresh_name and prog_var
 # arrive wrapped, unwrap once for string concat used in the @eta_fwd:* key

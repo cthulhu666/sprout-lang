@@ -30,15 +30,12 @@ fn tok_count(raw: String) -> Int =
 # The token KIND is the real contract — text alone can't tell a float token
 # from an int token with a float-looking spelling.
 fn first_is_float_kind(raw: String) -> Bool =
-  match lexer.tokenize(raw) with
-  | Err _ -> false
-  | Ok toks ->
-      match vec_get(0, toks) with
-      | Nothing -> false
-      | Just t ->
-          match token.token_kind(t) with
-          | token.TokenFloatKind -> true
-          | _ -> false
+  let Ok toks = lexer.tokenize(raw) else false
+      Just t = vec_get(0, toks) else false
+  in
+    match token.token_kind(t) with
+    | token.TokenFloatKind -> true
+    | _ -> false
 
 fn main() -> Unit !{IO} =
   do

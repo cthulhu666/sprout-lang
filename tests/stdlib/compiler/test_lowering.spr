@@ -262,15 +262,12 @@ fn lowered_fn_do_last_step_has_lambda_first_arg(result: lowering.LowerResult, fn
   | lowering.LowerOk prog ->
       match prog with
       | typed_ast.TypedProgram decls ->
-          match first_fn_body_named(decls, fname) with
-          | Nothing -> false
-          | Just body ->
-              match body with
-              | typed_ast.TDo steps _ _ ->
-                  match last_do_expr_step_body(steps) with
-                  | Nothing -> false
-                  | Just expr -> body_first_arg_is_lambda(expr)
-              | _ -> false
+          let Just body = first_fn_body_named(decls, fname) else false
+              typed_ast.TDo steps _ _ = body else false
+          in
+            match last_do_expr_step_body(steps) with
+            | Nothing -> false
+            | Just expr -> body_first_arg_is_lambda(expr)
 
 fn main() -> Unit !{IO} =
   do

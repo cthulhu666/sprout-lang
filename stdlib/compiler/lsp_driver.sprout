@@ -271,45 +271,31 @@ fn handle_shutdown(id: json.Json, state: LspState) -> Unit !{IO} =
     send_message(make_result(id, json.JsonNull))
 
 fn handle_did_open(params: json.Json, state: LspState) -> Unit !{IO} =
-  match json.json_get_field(params, "textDocument") with
-  | Nothing -> ()
-  | Just td ->
-      match json_get_str(td, "uri") with
-      | Nothing -> ()
-      | Just uri ->
-          match json_get_str(td, "text") with
-          | Nothing -> ()
-          | Just src ->
-              do
-                docs <- ref_read(lsp_documents(state))
-                ref_write(lsp_documents(state), dict_set(uri, src, docs))
-                check_and_push_diagnostics(uri, src, state)
+  let Just td = json.json_get_field(params, "textDocument") else ()
+      Just uri = json_get_str(td, "uri") else ()
+      Just src = json_get_str(td, "text") else ()
+  in
+    do
+      docs <- ref_read(lsp_documents(state))
+      ref_write(lsp_documents(state), dict_set(uri, src, docs))
+      check_and_push_diagnostics(uri, src, state)
 
 fn handle_did_change(params: json.Json, state: LspState) -> Unit !{IO} =
-  match json.json_get_field(params, "textDocument") with
-  | Nothing -> ()
-  | Just td ->
-      match json_get_str(td, "uri") with
-      | Nothing -> ()
-      | Just uri ->
-          match json.json_get_field(params, "contentChanges") with
-          | Nothing -> ()
-          | Just changes_val ->
-              match json.json_get_array(changes_val) with
-              | Nothing -> ()
-              | Just arr ->
-                  match json.json_array_next(arr) with
-                  | Nothing -> ()
-                  | Just step ->
-                      match step with
-                      | json.JsonArrayStep head _ ->
-                          match json_get_str(head, "text") with
-                          | Nothing -> ()
-                          | Just src ->
-                              do
-                                docs <- ref_read(lsp_documents(state))
-                                ref_write(lsp_documents(state), dict_set(uri, src, docs))
-                                check_and_push_diagnostics(uri, src, state)
+  let Just td = json.json_get_field(params, "textDocument") else ()
+      Just uri = json_get_str(td, "uri") else ()
+      Just changes_val = json.json_get_field(params, "contentChanges") else ()
+      Just arr = json.json_get_array(changes_val) else ()
+      Just step = json.json_array_next(arr) else ()
+  in
+    match step with
+    | json.JsonArrayStep head _ ->
+        match json_get_str(head, "text") with
+        | Nothing -> ()
+        | Just src ->
+            do
+              docs <- ref_read(lsp_documents(state))
+              ref_write(lsp_documents(state), dict_set(uri, src, docs))
+              check_and_push_diagnostics(uri, src, state)
 
 fn handle_did_close(params: json.Json, state: LspState) -> Unit !{IO} =
   match json.json_get_field(params, "textDocument") with
@@ -378,18 +364,13 @@ fn handle_after_shutdown_check(method: String, req: json.Json, shutdown: Bool, s
 # Main loop
 
 fn lsp_loop(state: LspState) -> Unit !{IO} =
-  match read_lsp_message() with
-  | Nothing -> ()
-  | Just body ->
-      match json.parse(body) with
-      | Err _ -> lsp_loop(state)
-      | Ok req ->
-          match get_method(req) with
-          | Nothing -> lsp_loop(state)
-          | Just method ->
-              do
-                shutdown <- ref_read(lsp_shutdown_flag(state))
-                handle_after_shutdown_check(method, req, shutdown, state)
+  let Just body = read_lsp_message() else ()
+      Ok req = json.parse(body) else lsp_loop(state)
+      Just method = get_method(req) else lsp_loop(state)
+  in
+    do
+      shutdown <- ref_read(lsp_shutdown_flag(state))
+      handle_after_shutdown_check(method, req, shutdown, state)
 
 export fn run_lsp(stdlib_root: String) -> Unit !{IO} =
   do

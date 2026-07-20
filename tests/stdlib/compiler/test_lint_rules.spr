@@ -114,6 +114,15 @@ let list_recursion_wrapping_maybe =
   "      | Nothing -> keys_to_pairs(d, rest)\n" ++
   "      | Just v -> Cons((k, v), keys_to_pairs(d, rest))\n"
 
+let already_let_else =
+  "fn decode4(b: Bytes, i: Int, b0: Int) -> Maybe (Int, Int) =\n" ++
+  "  let Just b1 = bytes_get(b, i + 1) else Nothing\n" ++
+  "      Just b2 = bytes_get(b, i + 2) else Nothing\n" ++
+  "      Just b3 = bytes_get(b, i + 3) else Nothing\n" ++
+  "  in\n" ++
+  "    if is_cont(b1) && is_cont(b2) && is_cont(b3) then Just((b0, i))\n" ++
+  "    else Nothing\n"
+
 let nested_in_lambda =
   "fn run(xs: Maybe Int, ys: Maybe Int, zs: Maybe Int) -> Int !{IO} =\n" ++
   "  do\n" ++
@@ -153,5 +162,7 @@ fn main() -> Unit !{IO} =
 
     assert_eq(state, "list Cons/Nil recursion: no finding (not a Maybe/Result unwrap)", count_list(lint_rules.lint_ast(list_recursion)), 0)
     assert_eq(state, "list recursion wrapping an inner Maybe match: no finding", count_list(lint_rules.lint_ast(list_recursion_wrapping_maybe)), 0)
+
+    assert_eq(state, "already let..else (desugars to the same MatchExpr shape): no finding", count_list(lint_rules.lint_ast(already_let_else)), 0)
 
     summary(state)

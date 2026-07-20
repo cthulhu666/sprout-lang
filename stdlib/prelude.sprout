@@ -869,12 +869,12 @@ fn vec_compare_from(left: Vec a, right: Vec a, i: Int, ltot: Int, rtot: Int) -> 
   if i == ltot then (if i == rtot then 0 else 0 - 1)
   else if i == rtot then 1
   else
-    match vec_get(i, left) with
-    | Nothing -> 0
-    | Just lv ->
-        match vec_get(i, right) with
-        | Nothing -> 0
-        | Just rv -> match compare(lv, rv) with | 0 -> vec_compare_from(left, right, i + 1, ltot, rtot) | c -> c
+    let Just lv = vec_get(i, left) else 0
+        Just rv = vec_get(i, right) else 0
+    in
+      match compare(lv, rv) with
+      | 0 -> vec_compare_from(left, right, i + 1, ltot, rtot)
+      | c -> c
 
 instance Ord (Vec a) where Ord a {
   fn compare(left: Vec a, right: Vec a) -> Int =
