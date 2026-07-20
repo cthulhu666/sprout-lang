@@ -48,8 +48,43 @@ cyclic + both-`i64` + arity-mismatch) was run over the self-hosted compiler's cl
   bounded by AST/type-structure or substitution-chain length — the scram trigger (thousands of
   iterations in a 16384-slot green pool) does not currently occur for any of them.
 
-**Conclusion:** Phase B has genuine targets, but it is **latent hardening, not a bug fix**. The
-scram case that motivated the whole arc is already closed by Phase A (same-arity) + arc (b).
+**Conclusion:** Phase B has genuine targets. No *shipping* code path currently triggers it (the
+compiler's cycles run on the main task with bounded depth), but the failure mode itself is
+**confirmed real** — see §2a.
+
+## 2a. Risk confirmed (2026-07-20 reproduction)
+
+A synthetic heterogeneous-arity, fully-tail, mutual cycle — `ping/2` ↔ `pong/3`, neither
+self-recursive (self-TCO N/A), arities differ (Phase A `musttail` N/A) — driven inside a green
+task reproduces the exact scram failure:
+
+```sprout
+fn ping(n: Int, acc: List Int) -> Int =
+  if n <= 0 then list_length(acc)
+  else pong(n, acc, Cons(n, acc))       # tail -> pong/3
+fn pong(n: Int, acc: List Int, acc2: List Int) -> Int =
+  ping(n - 1, acc2)                       # tail -> ping/2
+# driven as: task_fork(s, \_ -> ping(N, Nil) >= 0)  inside with_scope
+```
+
+Measured (green task, 16384-slot pool):
+
+| N (iterations) | outcome |
+|---|---|
+| ≤ 5000 | completes |
+| ≥ 5500 | `GC root pool exhausted` (process aborts) |
+
+- **Threshold ≈ 5250 iterations** for this 2-`List` example (~3 roots/iteration) — the same order
+  as scram's 4096. Heavier per-frame heap state lowers it further.
+- **Not masked by `-O2`.** Exhausts identically under production-like optimization: LLVM cannot
+  eliminate the opaque `sprout_gc_push_root` calls, so it does not loop-convert the accumulation
+  away. The risk exists in both test (`-O0`) and production (`-O2`) builds.
+- **Main task tolerates ~8×** (131072-slot pool → ~43000 iterations) — why the compiler's own
+  heterogeneous cycles, all on the main task, don't hit it.
+
+**Takeaway:** any user-written mutually-recursive algorithm with heterogeneous arities (parsers,
+interpreters, tree walks — extremely common) run inside a green task past ~5000 deep crashes with
+a cryptic `GC root pool exhausted`. That is the concrete hazard Phase B removes.
 
 ## 3. Goals and non-goals
 
@@ -158,22 +193,27 @@ spec-affecting feature.)
   (e.g. `apply_subst`↔`apply_subst_lookup`) newly contify.
 - **Gates:** full suite + `test-stress` (GC-adjacent) + smoke-shapes + example canary.
 
-## 11. Recommendation — DEFER (the proceed/defer call is the user's)
+## 11. Recommendation — the proceed/defer call is the user's
 
-**Defer implementation.** Rationale:
-1. **No active bug.** The scram motivator is closed by Phase A + arc (b). Every heterogeneous
-   tail cycle found (§2) runs on the main task with bounded depth — none exhausts roots today.
+The risk is **confirmed real and reproducible** (§2a), not hypothetical. The remaining judgment
+is a product call: how likely is user code to hit it, weighed against the build cost.
+
+**For deferring:**
+1. **No shipping trigger today.** The scram motivator is closed by Phase A + arc (b). Every
+   heterogeneous tail cycle *found in-tree* (§2) runs on the main task with bounded depth — none
+   exhausts roots today.
 2. **Non-trivial machinery with bootstrap risk.** SCC merge + tag dispatch + trampolines + a new
    inter-member terminator + the streaming-pipeline whole-SCC seam — materially more than Phase
    A's per-fn `musttail` rewrite, all on the bootstrap-critical codegen path.
-3. **The design is captured here, ready.** When a trigger appears it can be built directly.
 
-**Build it when** either (a) a *measured* root-exhaustion from a heterogeneous tail cycle appears
-(most likely: a deep such cycle invoked inside a green task — the concurrency + green-thread
-surface is where constrained pools live), or (b) proactive hardening of the compiler's own
-recursive-descent tail cycles is explicitly prioritized (they are correctness-safe today but
-would be measurably tighter contified).
+**For building now:**
+3. **Confirmed footgun for user code.** A mutually-recursive algorithm with heterogeneous arities
+   (parsers, interpreters, tree walks) run in a green task past ~5000 deep crashes with a cryptic
+   `GC root pool exhausted` (§2a) — in both `-O0` and `-O2`. As the concurrency/green-thread
+   surface sees more use, the odds of a real user hitting this rise. Phase A already fixed the
+   same failure for the same-arity slice; leaving the heterogeneous slice is an asymmetry.
 
-**If building proactively despite no active bug:** start with the RED regression in §10 (a
-synthetic green-task heterogeneous cycle) to convert "latent" into a reproducible failing test
-first — do not build the transform against a hypothetical.
+**Reproduction available.** The §2a repro is the RED regression to land *first* if building — it
+converts the confirmed risk into a failing test the transform must flip to GREEN. It is NOT yet
+in the gating suite (it would stay RED until Phase B lands); hold it until the transform is built,
+or commit it to a known-broken/xfail set.
