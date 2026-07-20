@@ -171,17 +171,33 @@ The prototype proved the *back* half (Phase A `musttail`s same-prototype decls).
   `synthesize_eta_wrapper`), the pre-pass never sees them and no `musttail` fires. Injection point:
   `decls = phase_b_unify(decls)` at the top of `compile_program_streaming`.
 
-**v0 limitations / edge cases (verify against real code, not the toy):**
+**Status: BUILT + working (2026-07-20).** `phase_b_unify` runs at the top of
+`compile_program_streaming` (via `phase_b_program`), before `build_alloc_summary`. Confirmed
+end-to-end: the §2a green-task repro (`ping/2`↔`pong/3`) auto-generates `ping$u`/`pong$u`, Phase A
+`musttail`s both edges, and it completes at N=40000 (was aborting at N=5500). Also verified on
+`if`-position, `match`-arm-position, and boxed-heap (`List`) return shapes.
+
+**v0 gate: SCALAR returns only (`Int`/`Bool`/`Char`/`Float`).** `phase_b_unify` runs
+*post-lowering*, so a generated `$u` variant is **not** registered in the CPR/worker machinery
+that lowering set up for the originals. When a member returns an ADT that routes to a Tier-2 CPR
+worker (a `match f(args)` over a width-2-ADT-returning `f`, e.g. `Result`/`Maybe`), emitting the
+worker for `f$u` crashes: `result type absent from adt_index (empty repack)` — a
+bootstrap-breaker. So v0 gates detection to **scalar returns**, which never enter the worker path.
+Consequences:
+- Phase B is a **no-op on the compiler's own code** (all its fully-tail heterogeneous cycles
+  return ADTs — `types.Type`, `Result`, `Effect`), so the self-compiled seed is byte-identical
+  apart from the new `pb_*` definitions (fixed point holds immediately — safest bootstrap outcome).
+- `unifier.apply_subst/2` ↔ `apply_subst_lookup/3` (returns `types.Type`) is therefore **not**
+  contified in v0.
+- **Phase B.1 (the real generality):** run `phase_b_unify` on the *pre-lowering* typed AST (tail
+  calls intact, `$u` decls then lowered normally with proper worker registration). That lifts the
+  scalar gate to all `i64`-returning cycles (ADTs included) and is the documented follow-up.
 - **Tail-self-recursive AND mutually-tail-recursive member.** `mutual_tco_rewrite_fn` skips any
-  function carrying an `IRTcoEntry` (self-TCO'd). Such a member is self-TCO'd and its *mutual* edge
-  is left as a plain call — **unfixed in v0** (document, don't miscompile). `unifier.apply_subst`
-  is only *non-tail* self-recursive, so it is unaffected; it is the intended v0 acceptance case.
-- **Mixed call sites.** Only internal *tail-cycle* calls are retargeted to `_unified`; every other
-  call (non-tail, or external) keeps hitting the trampoline. The retargeting must be scoped to the
-  tail edges found in detection.
-- **Acceptance case:** `unifier.apply_subst/2` ↔ `apply_subst_lookup/3` must contify (both edges
-  `musttail` in the `_unified` pair) with the suite + §2a green-task repro green and the seed at a
-  fixed point.
+  function carrying an `IRTcoEntry` (self-TCO'd), so such a member's *mutual* edge stays a plain
+  call — unfixed in v0 (no miscompile; the self edge still self-TCO's).
+- **Mixed call sites.** Only internal *tail-cycle* calls are retargeted to `$u`; non-tail and
+  external calls keep hitting the trampoline (scoped to the detected tail edges).
+- **Non-`i64` returns.** Out of scope, as Phase A.
 
 ## 5-ALT. Contification / tag-dispatch (considered, rejected as heavier)
 

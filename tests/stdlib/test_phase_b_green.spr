@@ -1,0 +1,30 @@
+import stdlib.test (TestState, new_state, assert_eq, summary)
+import stdlib.task (Scope, Task, with_scope, task_fork, task_await)
+
+# Phase B regression (docs/mutual-tco-phase-b-v0.md §2a): a HETEROGENEOUS-arity,
+# fully-tail, mutual-recursion cycle inside a green task must run in O(1) GC roots.
+#   ping/2 <-> pong/3 : neither self-recursive (self-TCO N/A), arities differ
+#   (Phase A musttail N/A). phase_b_unify pads them to ping$u/3, pong$u/3 (+ trampolines)
+#   so Phase A's musttail fires. Without Phase B this aborts a green task's 16384-slot
+#   pool at ~5250 iterations; N=40000 is well past that. GREEN only with Phase B.
+
+fn ping(n: Int, acc: List Int) -> Int =
+  if n <= 0 then list_length(acc)
+  else pong(n, acc, Cons(n, acc))
+
+fn pong(n: Int, acc: List Int, acc2: List Int) -> Int =
+  ping(n - 1, acc2)
+
+fn drive() -> Bool = ping(40000, Nil) >= 0
+
+fn run_on_green(s: Scope) -> Bool !{IO} =
+  do
+    t <- task_fork(s, \_ -> drive())
+    task_await(t)
+
+fn main() -> Unit !{IO} =
+  do
+    state <- new_state()
+    ok <- with_scope(\s -> run_on_green(s))
+    assert_eq(state, "heterogeneous-arity tail cycle (N=40000) completes in a green task", ok, true)
+    summary(state)

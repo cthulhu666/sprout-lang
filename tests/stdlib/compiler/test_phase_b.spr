@@ -1,0 +1,153 @@
+module main
+import stdlib.test (TestState, new_state, assert_true, summary)
+import stdlib.compiler.ast_to_ir as ast_to_ir
+import stdlib.compiler.typed_ast as typed_ast
+import stdlib.compiler.types as types
+import stdlib.compiler.ast as ast
+import stdlib.compiler.source as source
+
+# Phase B (signature unification) unit tests. See docs/mutual-tco-phase-b-v0.md.
+
+fn no_pos() -> source.SourcePos = source.SourcePos(0, 0, 0)
+fn int_t() -> types.Type = types.TConst(types.type_id("Int"))
+fn adt_t() -> types.Type = types.TApp(types.TConst(types.type_id("List")), int_t())
+fn tvar(n: String) -> typed_ast.TypedExpr = typed_ast.TVar(n, int_t(), no_pos())
+fn tint(n: Int) -> typed_ast.TypedExpr = typed_ast.TInt(n, int_t(), no_pos())
+fn tcall(callee: typed_ast.TypedExpr, args: List typed_ast.TypedExpr) -> typed_ast.TypedExpr =
+  typed_ast.TCall(callee, args, int_t(), no_pos())
+fn tif(c: typed_ast.TypedExpr, t: typed_ast.TypedExpr, e: typed_ast.TypedExpr) -> typed_ast.TypedExpr =
+  typed_ast.TIf(c, t, e, int_t(), no_pos())
+fn tbin(l: typed_ast.TypedExpr, r: typed_ast.TypedExpr) -> typed_ast.TypedExpr =
+  typed_ast.TBinary("+", l, r, int_t(), no_pos())
+fn tmatch(scrut: typed_ast.TypedExpr, arms: List typed_ast.TypedMatchBranch) -> typed_ast.TypedExpr =
+  typed_ast.TMatch(scrut, arms, int_t(), no_pos())
+fn arm(body: typed_ast.TypedExpr) -> typed_ast.TypedMatchBranch =
+  typed_ast.TypedMatchBranch(ast.WildcardPattern(no_pos()), body)
+fn tdo(steps: List typed_ast.TypedDoStep) -> typed_ast.TypedExpr =
+  typed_ast.TDo(steps, int_t(), no_pos())
+fn lam(p: String, body: typed_ast.TypedExpr) -> typed_ast.TypedExpr =
+  typed_ast.TLambda(Cons(ast.Param(p, Nothing), Nil), body,
+    types.TFunc(int_t(), int_t(), types.EffectPure), no_pos())
+
+fn has(s: Set, name: String) -> Bool = set_member(name, s)
+
+fn dummy_params(n: Int) -> List ast.Param =
+  if n <= 0 then Nil else Cons(ast.Param("p" ++ int_to_string(n), Nothing), dummy_params(n - 1))
+fn fndecl(name: String, arity: Int, body: typed_ast.TypedExpr) -> typed_ast.TypedDecl =
+  typed_ast.TFnDecl(name, dummy_params(arity), Nothing, Nothing, Nil, body)
+
+fn first_scc(sccs: List (List (String, Int))) -> List (String, Int) =
+  match sccs with | Nil -> Nil | Cons h _ -> h
+fn scc_size_at(sccs: List (List (String, Int)), _i: Int) -> Int = list_length(first_scc(sccs))
+fn pair_in(xs: List (String, Int), name: String, ar: Int) -> Bool =
+  match xs with
+  | Nil -> false
+  | Cons (n, a) rest -> if n == name && a == ar then true else pair_in(rest, name, ar)
+fn scc0_has(sccs: List (List (String, Int)), name: String, ar: Int) -> Bool =
+  pair_in(first_scc(sccs), name, ar)
+
+fn find_arity(decls: List typed_ast.TypedDecl, name: String) -> Int =
+  match decls with
+  | Nil -> -1
+  | Cons d rest ->
+      match d with
+      | typed_ast.TFnDecl n params _ _ _ _ -> if n == name then list_length(params) else find_arity(rest, name)
+      | _ -> find_arity(rest, name)
+
+fn find_body(decls: List typed_ast.TypedDecl, name: String) -> Maybe typed_ast.TypedExpr =
+  match decls with
+  | Nil -> Nothing
+  | Cons d rest ->
+      match d with
+      | typed_ast.TFnDecl n _ _ _ _ body -> if n == name then Just(body) else find_body(rest, name)
+      | _ -> find_body(rest, name)
+
+fn main() -> Unit !{IO} =
+  do
+    state <- new_state()
+
+    # 1. A direct call in tail position is a tail callee.
+    let t1 = ast_to_ir.pb_tail_callees(tcall(tvar("g"), Cons(tint(1), Nil)))
+    assert_true(state, "direct tail call -> {g}", has(t1, "g") && set_size(t1) == 1)
+
+    # 2. Both branches of a tail `if` are tail positions.
+    let t2 = ast_to_ir.pb_tail_callees(tif(tvar("c"), tcall(tvar("a"), Nil), tcall(tvar("b"), Nil)))
+    assert_true(state, "if branches are tail -> {a,b}", has(t2, "a") && has(t2, "b") && set_size(t2) == 2)
+
+    # 3. match arms are tail; a non-call arm contributes nothing.
+    let t3 = ast_to_ir.pb_tail_callees(tmatch(tvar("s"), Cons(arm(tcall(tvar("x"), Nil)), Cons(arm(tvar("y")), Nil))))
+    assert_true(state, "match arms tail -> {x} (y is not a call)", has(t3, "x") && set_size(t3) == 1)
+
+    # 4. A binary in tail position is NOT a function tail call; its operand calls are non-tail.
+    let t4 = ast_to_ir.pb_tail_callees(tbin(tcall(tvar("a"), Nil), tcall(tvar("b"), Nil)))
+    assert_true(state, "binary in tail pos: operand calls are non-tail -> {}", set_size(t4) == 0)
+
+    # 5. Only the LAST do-step is tail.
+    let t5 = ast_to_ir.pb_tail_callees(tdo(Cons(typed_ast.TDoExprStep(tcall(tvar("f"), Nil)),
+                                          Cons(typed_ast.TDoExprStep(tcall(tvar("g"), Nil)), Nil))))
+    assert_true(state, "do: only last step tail -> {g}", has(t5, "g") && set_size(t5) == 1)
+
+    # 6. Arguments of a tail call are NOT tail.
+    let t6 = ast_to_ir.pb_tail_callees(tcall(tvar("g"), Cons(tcall(tvar("h"), Nil), Nil)))
+    assert_true(state, "args of a tail call are non-tail -> {g} only", has(t6, "g") && set_size(t6) == 1)
+
+    # 7. An immediately-applied lambda (let/where): the let-BODY is in tail position.
+    let t7 = ast_to_ir.pb_tail_callees(tcall(lam("x", tcall(tvar("g"), Nil)), Cons(tint(1), Nil)))
+    assert_true(state, "IIFE (let/where): body is tail -> {g}", has(t7, "g") && set_size(t7) == 1)
+
+    # --- pb_hetero_sccs: heterogeneous-arity tail-call SCC detection ---
+
+    # 8. ping/2 <-> pong/3 mutual TAIL cycle, arities differ -> one heterogeneous SCC.
+    let ping = fndecl("ping", 2, tcall(tvar("pong"), Cons(tint(0), Cons(tint(0), Cons(tint(0), Nil)))))
+    let pong = fndecl("pong", 3, tcall(tvar("ping"), Cons(tint(0), Cons(tint(0), Nil))))
+    let s8 = ast_to_ir.pb_hetero_sccs(Cons(ping, Cons(pong, Nil)))
+    assert_true(state, "ping/2<->pong/3: exactly one hetero SCC", list_length(s8) == 1)
+    assert_true(state, "hetero SCC has 2 members", scc_size_at(s8, 0) == 2)
+    assert_true(state, "SCC contains (ping,2)", scc0_has(s8, "ping", 2))
+    assert_true(state, "SCC contains (pong,3)", scc0_has(s8, "pong", 3))
+
+    # 9. Same-arity cycle a/2<->b/2 -> NOT heterogeneous (Phase A's job) -> none.
+    let a2 = fndecl("a", 2, tcall(tvar("b"), Cons(tint(0), Cons(tint(0), Nil))))
+    let b2 = fndecl("b", 2, tcall(tvar("a"), Cons(tint(0), Cons(tint(0), Nil))))
+    assert_true(state, "same-arity cycle excluded", list_length(ast_to_ir.pb_hetero_sccs(Cons(a2, Cons(b2, Nil)))) == 0)
+
+    # 10. Non-tail cycle (partner call in operand position) -> no tail edge -> none.
+    let nt_p = fndecl("np", 2, tbin(tcall(tvar("nq"), Cons(tint(0), Cons(tint(0), Cons(tint(0), Nil)))), tint(1)))
+    let nt_q = fndecl("nq", 3, tcall(tvar("np"), Cons(tint(0), Cons(tint(0), Nil))))
+    assert_true(state, "non-tail cycle excluded", list_length(ast_to_ir.pb_hetero_sccs(Cons(nt_p, Cons(nt_q, Nil)))) == 0)
+
+    # 11. One-way a/2 -> b/3 (no back edge) -> not a cycle -> none.
+    let ow_a = fndecl("owa", 2, tcall(tvar("owb"), Cons(tint(0), Cons(tint(0), Cons(tint(0), Nil)))))
+    let ow_b = fndecl("owb", 3, tint(0))
+    assert_true(state, "one-way (no cycle) excluded", list_length(ast_to_ir.pb_hetero_sccs(Cons(ow_a, Cons(ow_b, Nil)))) == 0)
+
+    # --- phase_b_unify: generator (trampolines + $u variants) ---
+
+    # ping/2<->pong/3 -> 4 decls: ping/2 (tramp), ping$u/3, pong/3 (tramp), pong$u/3.
+    let u = ast_to_ir.phase_b_unify(Cons(ping, Cons(pong, Nil)))
+    assert_true(state, "unify: 2 members -> 4 decls", list_length(u) == 4)
+    assert_true(state, "unify: ping trampoline keeps arity 2", find_arity(u, "ping") == 2)
+    assert_true(state, "unify: ping$u padded to max arity 3", find_arity(u, "ping$u") == 3)
+    assert_true(state, "unify: pong trampoline keeps arity 3", find_arity(u, "pong") == 3)
+    assert_true(state, "unify: pong$u stays arity 3", find_arity(u, "pong$u") == 3)
+
+    # ping$u's tail call is RETARGETED to pong$u (the same-prototype cycle Phase A sees).
+    match find_body(u, "ping$u") with
+    | Nothing -> assert_true(state, "unify: ping$u exists", false)
+    | Just b -> assert_true(state, "unify: ping$u tail-calls pong$u (retargeted)", set_member("pong$u", ast_to_ir.pb_tail_callees(b)))
+
+    # The trampoline ping/2 forwards to ping$u (so external callers are unchanged).
+    match find_body(u, "ping") with
+    | Nothing -> assert_true(state, "unify: ping trampoline exists", false)
+    | Just b -> assert_true(state, "unify: ping trampoline forwards to ping$u", set_member("ping$u", ast_to_ir.pb_tail_callees(b)))
+
+    # No-op when there are no heterogeneous SCCs (same-arity cycle passes through unchanged).
+    assert_true(state, "unify: no hetero SCC -> decls unchanged (2)", list_length(ast_to_ir.phase_b_unify(Cons(a2, Cons(b2, Nil)))) == 2)
+
+    # v0 gate: an ADT-returning heterogeneous cycle is EXCLUDED (scalar returns only —
+    # a `$u` variant returning a width-2 ADT crashes CPR-worker emission post-lowering).
+    let padt = fndecl("padt", 2, typed_ast.TCall(tvar("qadt"), Cons(tint(0), Cons(tint(0), Cons(tint(0), Nil))), adt_t(), no_pos()))
+    let qadt = fndecl("qadt", 3, typed_ast.TCall(tvar("padt"), Cons(tint(0), Cons(tint(0), Nil)), adt_t(), no_pos()))
+    assert_true(state, "v0 gate: ADT-returning cycle excluded (scalar only)", list_length(ast_to_ir.pb_hetero_sccs(Cons(padt, Cons(qadt, Nil)))) == 0)
+
+    summary(state)

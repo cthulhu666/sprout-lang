@@ -5383,6 +5383,321 @@ export fn mutual_eligible_for(name: String, eligible: Dict (List (String, Int)))
   | Just ts -> ts
   | Nothing -> Nil
 
+# ===========================================================================
+# Phase B — signature unification for heterogeneous-arity mutual tail-call SCCs.
+# See docs/mutual-tco-phase-b-v0.md.  A typed-program pre-pass pads such SCCs to a
+# uniform max arity so Phase A's musttail (mutual_build_eligible + rewrite) fires;
+# originals become thin trampolines.
+# ===========================================================================
+
+# Names of functions called in TAIL position in `body`.  Tail positions: the body
+# itself, both `if` branches, every `match` arm, the last `do` step (only a
+# TDoExprStep), and an immediately-applied lambda's (let/where) body.  Call ARGUMENTS
+# and all non-tail sub-exprs are excluded — this is the discriminator that keeps
+# Phase B off the non-tail recursive-descent superset.  Returns names verbatim (as
+# they appear on the TVar callee), for matching against the decl fn names.
+export fn pb_tail_callees(body: typed_ast.TypedExpr) -> Set =
+  match body with
+  | typed_ast.TCall callee args _ _ ->
+      match callee with
+      | typed_ast.TVar name _ _ -> set_insert(name, set_empty())
+      | typed_ast.TLambda lparams lbody _ _ ->
+          # IIFE (let/where) at full arity: the let-body is the tail position.
+          if list_length(lparams) == list_length(args)
+          then pb_tail_callees(lbody)
+          else set_empty()
+      | _ -> set_empty()
+  | typed_ast.TIf _ t e _ _ -> set_union(pb_tail_callees(t), pb_tail_callees(e))
+  | typed_ast.TMatch _ arms _ _ -> pb_tail_callees_arms(arms)
+  | typed_ast.TDo steps _ _ -> pb_tail_callees_do_last(steps)
+  | _ -> set_empty()
+
+fn pb_tail_callees_arms(arms: List typed_ast.TypedMatchBranch) -> Set =
+  match arms with
+  | Nil -> set_empty()
+  | Cons b rest ->
+      match b with
+      | typed_ast.TypedMatchBranch _ body -> set_union(pb_tail_callees(body), pb_tail_callees_arms(rest))
+
+# Only the LAST do-step is in tail position, and only if it is a plain expression
+# step (a trailing `let`/`<-` bind is not a direct named tail call).
+fn pb_tail_callees_do_last(steps: List typed_ast.TypedDoStep) -> Set =
+  match steps with
+  | Nil -> set_empty()
+  | Cons step rest ->
+      match rest with
+      | Nil ->
+          match step with
+          | typed_ast.TDoExprStep e -> pb_tail_callees(e)
+          | typed_ast.TDoLetStep _ _ -> set_empty()
+          | typed_ast.TDoBindStep _ _ -> set_empty()
+      | _ -> pb_tail_callees_do_last(rest)
+
+# --- Heterogeneous-arity tail-call SCC detection over typed decls. -----------
+# Result: one (name, arity) list per SCC that is (a) a real mutual cycle (size >= 2)
+# over TAIL edges, (b) all-`i64`-returning, and (c) heterogeneous (members differ in
+# arity — same-arity cycles are Phase A's job). Deterministic: fns iterated in decl
+# order, members in decl order.
+
+fn pb_fn_arity(decls: List typed_ast.TypedDecl) -> Dict Int =
+  match decls with
+  | Nil -> dict_empty()
+  | Cons d rest ->
+      match d with
+      | typed_ast.TFnDecl name params _ _ _ _ -> dict_set(name, list_length(params), pb_fn_arity(rest))
+      | _ -> pb_fn_arity(rest)
+
+fn pb_fn_order(decls: List typed_ast.TypedDecl) -> List String =
+  match decls with
+  | Nil -> Nil
+  | Cons d rest ->
+      match d with
+      | typed_ast.TFnDecl name _ _ _ _ _ -> Cons(name, pb_fn_order(rest))
+      | _ -> pb_fn_order(rest)
+
+fn pb_set_keep_in(s: Set, fnset: Set) -> Set =
+  pb_keep_go(set_to_list(s), fnset, set_empty())
+
+fn pb_keep_go(xs: List String, fnset: Set, acc: Set) -> Set =
+  match xs with
+  | Nil -> acc
+  | Cons x rest ->
+      if set_member(x, fnset) then pb_keep_go(rest, fnset, set_insert(x, acc)) else pb_keep_go(rest, fnset, acc)
+
+# name -> (tail callees restricted to fns in this program).
+fn pb_tail_graph(decls: List typed_ast.TypedDecl, fnset: Set) -> Dict Set =
+  match decls with
+  | Nil -> dict_empty()
+  | Cons d rest ->
+      match d with
+      | typed_ast.TFnDecl name _ _ _ _ body ->
+          dict_set(name, pb_set_keep_in(pb_tail_callees(body), fnset), pb_tail_graph(rest, fnset))
+      | _ -> pb_tail_graph(rest, fnset)
+
+# The SCC (in `order`) of `f`: itself plus every g mutually tail-reachable with it.
+fn pb_scc_of(f: String, order: List String, graph: Dict Set) -> List String =
+  match order with
+  | Nil -> Nil
+  | Cons g rest ->
+      if g == f then Cons(f, pb_scc_of_rest(f, rest, graph))
+      else if mutual_reaches(f, g, graph) && mutual_reaches(g, f, graph)
+           then Cons(g, pb_scc_of_rest(f, rest, graph))
+           else pb_scc_of(f, rest, graph)
+
+fn pb_scc_of_rest(f: String, order: List String, graph: Dict Set) -> List String =
+  match order with
+  | Nil -> Nil
+  | Cons g rest ->
+      if g == f then Cons(f, pb_scc_of_rest(f, rest, graph))
+      else if mutual_reaches(f, g, graph) && mutual_reaches(g, f, graph)
+           then Cons(g, pb_scc_of_rest(f, rest, graph))
+           else pb_scc_of_rest(f, rest, graph)
+
+# All members pass the return gate (v0: scalar return — see pb_scalar_ret_map).
+fn pb_all_ret_ok(members: List String, ok: Dict Bool) -> Bool =
+  match members with
+  | Nil -> true
+  | Cons m rest -> mutual_ret_i64_of(m, ok) && pb_all_ret_ok(rest, ok)
+
+# True iff the members do NOT all share one arity.
+fn pb_heterogeneous(members: List String, arity: Dict Int) -> Bool =
+  match members with
+  | Nil -> false
+  | Cons m rest -> pb_any_differs(mutual_arity_of(m, arity), rest, arity)
+
+fn pb_any_differs(a0: Int, members: List String, arity: Dict Int) -> Bool =
+  match members with
+  | Nil -> false
+  | Cons m rest ->
+      if ! (mutual_arity_of(m, arity) == a0) then true else pb_any_differs(a0, rest, arity)
+
+fn pb_members_with_arity(members: List String, arity: Dict Int) -> List (String, Int) =
+  match members with
+  | Nil -> Nil
+  | Cons m rest -> Cons((m, mutual_arity_of(m, arity)), pb_members_with_arity(rest, arity))
+
+# v0 return gate: only SCALAR returns (Int/Bool/Char/Float).  A member returning an
+# ADT can route to a Tier-2 CPR worker (`match f(args)` over a width-2-ADT-returning
+# fn), and a generated `$u` variant, being created POST-lowering, is not registered in
+# the worker/adt machinery — it crashes worker emission ("result type absent from
+# adt_index").  Scalar returns never enter that path.  ADT returns are deferred to
+# Phase B.1 (run phase_b_unify PRE-lowering so `$u` decls are lowered normally).
+fn pb_scalar_name(n: String) -> Bool =
+  n == "Int" || n == "Bool" || n == "Char" || n == "Float"
+
+fn pb_is_scalar_type(t: types.Type) -> Bool =
+  match t with
+  | types.TConst id -> pb_scalar_name(types.type_id_name(id))
+  | _ -> false
+
+fn pb_scalar_ret_map(decls: List typed_ast.TypedDecl) -> Dict Bool =
+  match decls with
+  | Nil -> dict_empty()
+  | Cons d rest ->
+      match d with
+      | typed_ast.TFnDecl name _ _ _ _ body ->
+          dict_set(name, pb_is_scalar_type(typed_ast.typed_expr_type(body)), pb_scalar_ret_map(rest))
+      | _ -> pb_scalar_ret_map(rest)
+
+export fn pb_hetero_sccs(decls: List typed_ast.TypedDecl) -> List (List (String, Int)) =
+  pb_scc_collect(pb_fn_order(decls),
+                 pb_fn_order(decls),
+                 pb_tail_graph(decls, set_from_list(pb_fn_order(decls))),
+                 pb_fn_arity(decls),
+                 pb_scalar_ret_map(decls),
+                 set_empty())
+
+fn pb_scc_collect(work: List String, order: List String, graph: Dict Set,
+                  arity: Dict Int, ret: Dict Bool, seen: Set) -> List (List (String, Int)) =
+  match work with
+  | Nil -> Nil
+  | Cons f rest ->
+      if set_member(f, seen) then pb_scc_collect(rest, order, graph, arity, ret, seen)
+      else pb_scc_emit(f, rest, order, graph, arity, ret, seen)
+
+fn pb_scc_emit(f: String, rest: List String, order: List String, graph: Dict Set,
+               arity: Dict Int, ret: Dict Bool, seen: Set) -> List (List (String, Int)) =
+  if list_length(members) >= 2 && pb_all_ret_ok(members, ret) && pb_heterogeneous(members, arity)
+  then Cons(pb_members_with_arity(members, arity),
+            pb_scc_collect(rest, order, graph, arity, ret, seen2))
+  else pb_scc_collect(rest, order, graph, arity, ret, seen2)
+where
+  members = pb_scc_of(f, order, graph)
+  seen2 = set_union(seen, set_from_list(members))
+
+# --- Generator: unify each heterogeneous SCC to a uniform max arity + emit a
+# trampoline for each original.  `phase_b_unify(decls)` runs BEFORE detection in the
+# pipeline (§5a); after it, the `<name>$u` variants are a same-prototype tail cycle
+# that Phase A's musttail handles.  `$` is lexer-reserved, so `<name>$u` cannot
+# collide with any source name and is not the reserved `__sprout_` prefix. -----
+
+fn pb_int_ty() -> types.Type = types.TConst(types.type_id("Int"))
+
+fn pb_max_int(a: Int, b: Int) -> Int = if a >= b then a else b
+
+fn pb_max_arity(members: List (String, Int)) -> Int =
+  match members with
+  | Nil -> 0
+  | Cons (_n, a) rest -> pb_max_int(a, pb_max_arity(rest))
+
+fn pb_member_names(members: List (String, Int)) -> Set =
+  match members with
+  | Nil -> set_empty()
+  | Cons (n, _a) rest -> set_insert(n, pb_member_names(rest))
+
+# member-name -> (maxArity, memberSet).
+fn pb_build_index(sccs: List (List (String, Int))) -> Dict (Int, Set) =
+  match sccs with
+  | Nil -> dict_empty()
+  | Cons scc rest -> pb_index_scc(scc, pb_max_arity(scc), pb_member_names(scc), pb_build_index(rest))
+
+fn pb_index_scc(members: List (String, Int), m: Int, mset: Set, acc: Dict (Int, Set)) -> Dict (Int, Set) =
+  match members with
+  | Nil -> acc
+  | Cons (n, _a) rest -> dict_set(n, (m, mset), pb_index_scc(rest, m, mset, acc))
+
+# `count` synthetic ignored params, uniquely named with a lexer-reserved `$`.
+fn pb_pad_params(start: Int, count: Int) -> List ast.Param =
+  if count <= 0 then Nil
+  else Cons(ast.Param("pbpad$" ++ int_to_string(start), Nothing), pb_pad_params(start + 1, count - 1))
+
+fn pb_zeros(count: Int, pos: source.SourcePos) -> List typed_ast.TypedExpr =
+  if count <= 0 then Nil
+  else Cons(typed_ast.TInt(0, pb_int_ty(), pos), pb_zeros(count - 1, pos))
+
+# TVar reference for each original param (for the trampoline forwarding call).
+fn pb_var_args(params: List ast.Param, pos: source.SourcePos) -> List typed_ast.TypedExpr =
+  match params with
+  | Nil -> Nil
+  | Cons p rest ->
+      match p with
+      | ast.Param n _ -> Cons(typed_ast.TVar(n, pb_int_ty(), pos), pb_var_args(rest, pos))
+
+# Pad a call-arg list to length m with 0s.
+fn pb_pad_to(args: List typed_ast.TypedExpr, m: Int, pos: source.SourcePos) -> List typed_ast.TypedExpr =
+  list_append(args, pb_zeros(m - list_length(args), pos))
+
+# Rewrite calls to SCC members that sit in TAIL position: retarget to `<g>$u` and pad
+# args to m.  Mirrors pb_tail_callees' traversal exactly (so only true tail edges are
+# rewritten); non-tail sub-exprs and non-member calls are left untouched.
+fn pb_retarget_tail(body: typed_ast.TypedExpr, mset: Set, m: Int) -> typed_ast.TypedExpr =
+  match body with
+  | typed_ast.TCall callee args ty pos ->
+      match callee with
+      | typed_ast.TVar name vty vpos ->
+          if set_member(name, mset)
+          then typed_ast.TCall(typed_ast.TVar(name ++ "$u", vty, vpos), pb_pad_to(args, m, pos), ty, pos)
+          else body
+      | typed_ast.TLambda lparams lbody lty lpos ->
+          if list_length(lparams) == list_length(args)
+          then typed_ast.TCall(typed_ast.TLambda(lparams, pb_retarget_tail(lbody, mset, m), lty, lpos), args, ty, pos)
+          else body
+      | _ -> body
+  | typed_ast.TIf c t e ty pos ->
+      typed_ast.TIf(c, pb_retarget_tail(t, mset, m), pb_retarget_tail(e, mset, m), ty, pos)
+  | typed_ast.TMatch scrut arms ty pos ->
+      typed_ast.TMatch(scrut, pb_retarget_arms(arms, mset, m), ty, pos)
+  | typed_ast.TDo steps ty pos ->
+      typed_ast.TDo(pb_retarget_do(steps, mset, m), ty, pos)
+  | _ -> body
+
+fn pb_retarget_arms(arms: List typed_ast.TypedMatchBranch, mset: Set, m: Int) -> List typed_ast.TypedMatchBranch =
+  match arms with
+  | Nil -> Nil
+  | Cons b rest ->
+      match b with
+      | typed_ast.TypedMatchBranch pat body ->
+          Cons(typed_ast.TypedMatchBranch(pat, pb_retarget_tail(body, mset, m)), pb_retarget_arms(rest, mset, m))
+
+fn pb_retarget_do(steps: List typed_ast.TypedDoStep, mset: Set, m: Int) -> List typed_ast.TypedDoStep =
+  match steps with
+  | Nil -> Nil
+  | Cons step rest ->
+      match rest with
+      | Nil ->
+          match step with
+          | typed_ast.TDoExprStep e -> Cons(typed_ast.TDoExprStep(pb_retarget_tail(e, mset, m)), Nil)
+          | _ -> Cons(step, Nil)
+      | _ -> Cons(step, pb_retarget_do(rest, mset, m))
+
+# For an SCC member, emit [trampoline (original name/arity), `<name>$u` (arity m)].
+fn pb_gen_pair(name: String, params: List ast.Param, ret: Maybe ast.TypeExpr,
+               eff: Maybe (List String), constraints: List ast.TypeConstraint,
+               body: typed_ast.TypedExpr, m: Int, mset: Set) -> List typed_ast.TypedDecl =
+  Cons(typed_ast.TFnDecl(name, params, ret, eff, constraints, tramp_body),
+    Cons(typed_ast.TFnDecl(name ++ "$u", list_append(params, pb_pad_params(list_length(params), m - list_length(params))),
+                           ret, eff, constraints, pb_retarget_tail(body, mset, m)),
+      Nil))
+where
+  pos = typed_ast.typed_expr_pos(body)
+  tramp_body = typed_ast.TCall(typed_ast.TVar(name ++ "$u", pb_int_ty(), pos),
+                 list_append(pb_var_args(params, pos), pb_zeros(m - list_length(params), pos)),
+                 pb_int_ty(), pos)
+
+# THE Phase B pre-pass: replace each heterogeneous-tail-SCC member with its
+# trampoline + `$u` variant; pass everything else through.  No-op when there are no
+# such SCCs (the common case), so its overhead is one detection pass.
+export fn phase_b_unify(decls: List typed_ast.TypedDecl) -> List typed_ast.TypedDecl =
+  pb_unify_with(decls, pb_build_index(pb_hetero_sccs(decls)))
+
+# Program-level wrapper (used at the pipeline seam, before detection).
+export fn phase_b_program(prog: typed_ast.TypedProgram) -> typed_ast.TypedProgram =
+  match prog with
+  | typed_ast.TypedProgram decls -> typed_ast.TypedProgram(phase_b_unify(decls))
+
+fn pb_unify_with(decls: List typed_ast.TypedDecl, index: Dict (Int, Set)) -> List typed_ast.TypedDecl =
+  match decls with
+  | Nil -> Nil
+  | Cons d rest ->
+      match d with
+      | typed_ast.TFnDecl name params ret eff constraints body ->
+          match dict_get(name, index) with
+          | Just (m, mset) ->
+              list_append(pb_gen_pair(name, params, ret, eff, constraints, body, m, mset),
+                          pb_unify_with(rest, index))
+          | Nothing -> Cons(d, pb_unify_with(rest, index))
+      | _ -> Cons(d, pb_unify_with(rest, index))
+
 # translate_user_fn: returns (IRFunction, next-free-temp-index, lifted-lambdas).
 # The next-free index is the smallest idx never used as %tN/then_N/else_N/join_N
 # during body translation; the rooting pass (M2 PR 2.2) consumes it to allocate
