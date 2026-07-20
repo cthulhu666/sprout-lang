@@ -1,8 +1,18 @@
-# Mutual tail-call optimization — Phase B (contification) — v0 design
+# Mutual tail-call optimization — Phase B (signature unification) — v0 design
 
-**Status:** DESIGN PASS (2026-07-20). Implementation **DEFERRED** pending the proceed/defer
-decision in §11. This document is the design so Phase B is ready to build when warranted; it
-is non-normative (`docs/spec-v0.md` promises no mutual-TCO guarantee — this is an optimization).
+**Status:** IN PROGRESS (build started 2026-07-20, branch `feat/mutual-tco-phase-b`). Kuba chose
+"prove the risk first" (§2a, confirmed) then "build Phase B now". Non-normative
+(`docs/spec-v0.md` promises no mutual-TCO guarantee — this is an optimization).
+
+**Mechanism decision (2026-07-20): SIGNATURE UNIFICATION, not contification.** A prototype
+confirmed the simpler path: **pad each heterogeneous SCC member to the max arity so they share
+one LLVM prototype `i64(i64,…,i64)`, then Phase A's existing `musttail` fires on them** — with
+the original arities kept as thin trampolines. This reuses Phase A's proven, already-in-the-seed
+detection + rewrite; no new IR op, no dispatch tag, no whole-function merge, no whole-SCC pipeline
+seam. The uniform-`i64` ABI is the enabler: "same prototype" reduces to "same arity", which
+padding gives trivially (Sprout-level param types may differ; LLVM sees `i64` throughout). The
+tag-dispatch/contification design (§5-ALT) is retained as the heavier alternative that was
+considered and rejected. See §5 for the mechanism, §5a for the integration seam.
 
 **Relationship to Phase A.** Phase A (`docs/mutual-tco-v0.md`, LANDED) uses LLVM `musttail`
 for **same-prototype** tail-call cycles (all-`i64` ABI ⇒ same arity + `i64` return). `musttail`
@@ -88,9 +98,9 @@ a cryptic `GC root pool exhausted`. That is the concrete hazard Phase B removes.
 
 ## 3. Goals and non-goals
 
-**Goals.** Contify **heterogeneous-arity tail-call SCCs** so the cycle runs in O(1) native stack
-and O(1) GC roots (like self-TCO and Phase A). Reuse the self-TCO loop machinery
-(`IRTcoEntry`/`IRTcoLoad` slots + per-iteration rooting).
+**Goals.** Make **heterogeneous-arity tail-call SCCs** run in O(1) native stack and O(1) GC roots
+(like self-TCO and Phase A), via signature unification (§5) that reuses Phase A's `musttail`
+detection + rewrite. No new IR op, no new rooting rules.
 
 **Non-goals.**
 - **Non-tail recursion.** A non-tail cycle genuinely needs a stack; the correct transform there
@@ -118,46 +128,70 @@ jumps within one enclosing function. Sources:
 [MLton Contify (Fluet & Weeks, ICFP01)](https://www.cs.cornell.edu/people/fluet/research/contification/ICFP01/icfp01.pdf) ·
 [Compiling without Continuations (PLDI17)](https://dl.acm.org/doi/pdf/10.1145/3062341.3062380).
 
-## 5. High-level implementation overview (for approval before any edit)
+## 5. Mechanism — signature unification (chosen)
+
+A **typed-program-level pre-pass** `phase_b_unify(decls) -> decls`, run in
+`compile_program_streaming` **before** `build_ret_i64`/`build_alloc_summary` (so the generated
+decls are visible to Phase A's existing detection — see §5a), does:
 
 **Detection.**
-1. From the alloc-summary call graph, find **tail-call SCCs** with heterogeneous arity — the
-   Phase A detector minus the `arity(g)==arity(f)` gate, but **gated on actual tail position**
-   at the IR level (Phase A's `mutual_collect_hits` already finds tail-position calls; the
-   superset in §2 is call-graph-level and must be refined to true tail edges per fn).
-2. Group the tail edges into SCCs. An SCC of size 1 with only self-edges is self-TCO's job; an
-   SCC with same-arity members only is Phase A's; the residual (heterogeneous, size ≥ 2) is
-   Phase B's.
+1. Build the call graph from the typed `decls`, plus **tail-position** info: a call is a tail
+   call iff it is the value of the function body / an `if` branch / a `match` arm / the last
+   `do` step / a `let`-body (a standard typed-AST tail analysis — the call-graph superset in §2
+   is tail-AGNOSTIC and must NOT be used directly, or it generates dead `_unified` variants).
+2. Find **heterogeneous-arity tail-call SCCs**: cyclic over *tail* edges, members differ in
+   arity, all `i64`-returning. Same-arity SCCs are Phase A's; single self-edges are self-TCO's.
 
-**Transform (per heterogeneous SCC).** Merge the SCC into one synthetic function
-`__sprout_scc_<n>`:
-- **Signature:** `i64 __sprout_scc_n(i64 tag, i64 p0, … i64 p_{max-1})` — one dispatch tag plus
-  the **union of parameters** (max arity across the SCC). The all-`i64` ABI makes the union
-  trivial: no type reconciliation, unused trailing params are poison/0 on a given tag's path.
-- **Entry block:** `switch` on `tag` → `br` to the origin member's loop-head block.
-- **Bodies:** each original function's body becomes a block group inside the merged function,
-  reading its params from `IRTcoEntry` slots (self-TCO machinery).
-- **Internal tail edge f→g:** store g's args into g's slots, `br %g_loophead`. **No runtime tag
-  needed** — the target block is statically known at the call site (this is the GHC-join-point
-  insight; the tag is only for *external* entry). A new terminator op, symmetric to `IRTcoBack`
-  but targeting another member's loop-head, carries `(stores, sp_save, target_label)`.
-- **External call sites stay unchanged:** each original `f` becomes a thin **entry trampoline**
-  `f(args) = __sprout_scc_n(TAG_f, args, padding)`. This is one non-recursive frame (needn't be
-  `musttail` despite the prototype mismatch), so **no interprocedural call-site rewrite** — which
-  is what would otherwise fight the one-function-at-a-time streaming pipeline (the seam Phase A
-  hit). Partial contification (e.g. `apply_subst`'s non-tail self-calls) also just call the
-  trampoline.
+**Transform (per heterogeneous SCC, max arity `M`).**
+- For each member `f/k`, generate `f_unified/M` — `f`'s body with `M−k` extra **ignored** `Int`
+  params appended, and every **internal tail call to an SCC member** `g` retargeted to
+  `g_unified` with its args **padded to `M`** (pad value `0`; Sprout-level param types may differ,
+  LLVM sees `i64`). Non-tail / external calls are left alone.
+- Turn each original `f/k` into a **trampoline**: `f(a…) = f_unified(a…, 0…)`. External callers
+  are untouched (no interprocedural rewrite).
+- Now `{f_unified}` is a **same-prototype** (`i64(i64×M)`) tail-call SCC → **Phase A's existing
+  `mutual_build_eligible` + `mutual_tco_rewrite_fn` emit `musttail`** with zero new machinery.
+  (Empirically confirmed on a hand-written unified pair: both cycle edges emit
+  `musttail call i64 @…`, and the green-task repro of §2a completes.)
 
-**Rooting.** Identical to self-TCO: per-iteration slot liveness. Slots not live on a given tag's
-path are simply not rooted that iteration. `IRTcoBack`/the new inter-member terminator are
-non-GC-triggers and expose no operands (args passed by value, callee roots on entry) — the
-property that removes the per-frame accumulating root.
+**Rooting.** Unchanged — Phase A's `IRTailCall` is already a non-GC-trigger that exposes no
+operands; the `_unified` bodies root exactly as any function does. No new rooting rules.
 
-**Pipeline integration.** Detection piggybacks the existing alloc-summary pre-pass (as Phase A's
-did). The merge is a whole-SCC rewrite, so it needs the SCC's member bodies together — this is
-the one place Phase B is heavier than Phase A's per-fn rewrite, and the streaming pipeline seam
-must be handled (buffer the SCC's members, or run the merge in a pre-pass that emits the merged
-fn + trampolines).
+**No new IR op, no dispatch tag, no merged function.** The whole transform is per-function decl
+generation informed by the SCC analysis — it fits the streaming pipeline.
+
+## 5a. Integration seam (the load-bearing new question)
+
+The prototype proved the *back* half (Phase A `musttail`s same-prototype decls). The *front* half
+— getting generated decls in front of detection — is the real work:
+
+- **`phase_b_unify` must run at the typed-program level, before `build_alloc_summary`.** That
+  pre-pass (`finalize_summaries`) builds `mutual_build_eligible` over the `decls` list; if the
+  `_unified`/trampoline decls are generated later (e.g. during IR translation, like
+  `synthesize_eta_wrapper`), the pre-pass never sees them and no `musttail` fires. Injection point:
+  `decls = phase_b_unify(decls)` at the top of `compile_program_streaming`.
+
+**v0 limitations / edge cases (verify against real code, not the toy):**
+- **Tail-self-recursive AND mutually-tail-recursive member.** `mutual_tco_rewrite_fn` skips any
+  function carrying an `IRTcoEntry` (self-TCO'd). Such a member is self-TCO'd and its *mutual* edge
+  is left as a plain call — **unfixed in v0** (document, don't miscompile). `unifier.apply_subst`
+  is only *non-tail* self-recursive, so it is unaffected; it is the intended v0 acceptance case.
+- **Mixed call sites.** Only internal *tail-cycle* calls are retargeted to `_unified`; every other
+  call (non-tail, or external) keeps hitting the trampoline. The retargeting must be scoped to the
+  tail edges found in detection.
+- **Acceptance case:** `unifier.apply_subst/2` ↔ `apply_subst_lookup/3` must contify (both edges
+  `musttail` in the `_unified` pair) with the suite + §2a green-task repro green and the seed at a
+  fixed point.
+
+## 5-ALT. Contification / tag-dispatch (considered, rejected as heavier)
+
+The original design merged each SCC into one `__sprout_scc_<n>(i64 tag, i64 p0…p_{M-1})` with a
+`switch` on the tag to member loop-head blocks, internal edges as `br` (a new inter-member
+terminator op), and trampolines. It is the GHC-join-point / MLton-contification shape and would be
+needed if the ABI were not uniform-`i64` (real signature reconciliation) or to merge non-tail
+members. Rejected for v0: it adds a new IR op + dispatch + a whole-SCC rewrite on the
+bootstrap-critical path, where signature unification reuses Phase A entirely. Kept here as the
+fallback if a future need (non-uniform ABI, tuple/`Bool` returns) outgrows unification.
 
 ## 6. Syntax & semantics impact
 
