@@ -1,0 +1,217 @@
+module stdlib.compiler.lint_rules
+
+import stdlib.compiler.ast as ast
+import stdlib.compiler.parser as parser
+import stdlib.compiler.lexer as lexer
+import stdlib.compiler.source as source
+
+# AST-based lint findings — line, col, rule id, message. A sibling to
+# formatter.LintIssue's line-based Style checks; this is the "Lint" category,
+# built on the real parser AST instead of raw text/tokens.
+export type LintFinding (..) =
+  | LintFinding Int Int String String
+
+fn mk_finding(pos: source.SourcePos, rule_id: String, message: String) -> LintFinding =
+  LintFinding(source.position_line(pos), source.position_column(pos), rule_id, message)
+
+# ---------------------------------------------------------------------------
+# Rule: staircase-of-doom
+#
+# A chain of nested 2-branch matches, each peeling one constructor off a
+# Maybe/Result-like value, of the exact shape docs/idiomatic-sprout.md calls
+# out to flatten with `let..else`. Purely syntactic — no type info needed.
+
+fn is_var_pattern(pat: ast.Pattern) -> Bool =
+  match pat with
+  | ast.VarPattern _ _ -> true
+  | _ -> false
+
+fn has_binding_subpattern(subpats: List ast.Pattern) -> Bool =
+  match subpats with
+  | Nil -> false
+  | Cons p rest -> is_var_pattern(p) || has_binding_subpattern(rest)
+
+# A pattern let..else could bind: a constructor pattern with at least one
+# variable subpattern (Just te, Ok x, TypedOk prog env) — not Nothing, not True.
+fn is_binding_pattern(pat: ast.Pattern) -> Bool =
+  match pat with
+  | ast.ConstructorPattern _ subpats _ -> has_binding_subpattern(subpats)
+  | _ -> false
+
+# List's own Cons — self-recursive list-walk shape (`match xs with | Nil -> ..
+# | Cons h t -> match t with ...`), not a Maybe/Result unwrap. Flattening this
+# with let..else would point at the wrong fix; idiomatic-sprout.md's own
+# combinator section is what applies here instead, so this rule stays scoped
+# to Maybe/Result-shaped chains and leaves list recursion alone.
+fn is_list_cons_pattern(pat: ast.Pattern) -> Bool =
+  match pat with
+  | ast.ConstructorPattern name _ _ -> name == ast.list_ctor_cons
+  | _ -> false
+
+fn is_two_branch_match(e: ast.Expr) -> Bool =
+  match e with
+  | ast.MatchExpr _ (Cons _ (Cons _ Nil)) _ -> true
+  | _ -> false
+
+# A branch "continues" the staircase when its pattern binds a variable
+# (excluding list-walk recursion via Cons) AND its body is itself a 2-branch
+# match — the shape a `let <pat> = e else fb` guard line could replace.
+fn continues(pat: ast.Pattern, body: ast.Expr) -> Bool =
+  is_binding_pattern(pat) && ! is_list_cons_pattern (pat) && is_two_branch_match(body)
+
+# classify: given a match's two branches, decide whether exactly one of them
+# continues the staircase. Returns (terminal_body, continuing_body) — the
+# other's body is guaranteed to itself be a 2-branch MatchExpr by `continues`.
+fn classify(b1: ast.MatchBranch, b2: ast.MatchBranch) -> Maybe(ast.Expr, ast.Expr) =
+  match b1 with
+  | ast.MatchBranch p1 body1 ->
+      match b2 with
+      | ast.MatchBranch p2 body2 ->
+          let c1 = continues(p1, body1)
+              c2 = continues(p2, body2)
+          in if c1 && ! c2 then Just((body2, body1))
+             else if c2 && ! c1 then Just((body1, body2))
+             else Nothing
+
+# ---------------------------------------------------------------------------
+# Generic ast.Expr traversal — every variant, modeled on checker.sprout's
+# desugar_expr_no_ctx_i so no shape is silently skipped (a missed variant here
+# is a silent false negative, the worst failure mode for a coverage tool).
+
+fn walk_expr(e: ast.Expr) -> List LintFinding =
+  match e with
+  | ast.MatchExpr scrut branches pos -> walk_match(scrut, branches, pos)
+  | ast.IfExpr cond then_ else_ _ ->
+      list_append(walk_expr(cond), list_append(walk_expr(then_), walk_expr(else_)))
+  | ast.CallExpr callee args _ ->
+      list_append(walk_expr(callee), walk_exprs(args))
+  | ast.TupleExpr elems _ -> walk_exprs(elems)
+  | ast.BinaryExpr _ left right _ ->
+      list_append(walk_expr(left), walk_expr(right))
+  | ast.UnaryExpr _ operand _ -> walk_expr(operand)
+  | ast.LambdaExpr _ body _ -> walk_expr(body)
+  | ast.DoExpr steps _ -> walk_do_steps(steps)
+  | ast.RecordExpr _ fields _ -> walk_record_fields(fields)
+  | ast.GetFieldExpr rec_expr _ _ -> walk_expr(rec_expr)
+  | ast.IntRangeExpr lo hi _ ->
+      list_append(walk_expr(lo), walk_expr(hi))
+  | ast.StringTemplateExpr parts _ -> walk_template_parts(parts)
+  | _ -> Nil  # leaves: Var/Int/Float/Bool/String/Char/Unit — no sub-expressions
+
+fn walk_exprs(exprs: List ast.Expr) -> List LintFinding =
+  match exprs with
+  | Nil -> Nil
+  | Cons e rest -> list_append(walk_expr(e), walk_exprs(rest))
+
+fn walk_do_step(s: ast.DoStep) -> List LintFinding =
+  match s with
+  | ast.DoBindStep _ value -> walk_expr(value)
+  | ast.DoLetStep _ value -> walk_expr(value)
+  | ast.DoExprStep value -> walk_expr(value)
+
+fn walk_do_steps(steps: List ast.DoStep) -> List LintFinding =
+  match steps with
+  | Nil -> Nil
+  | Cons s rest -> list_append(walk_do_step(s), walk_do_steps(rest))
+
+fn walk_record_fields(fields: List ast.RecordField) -> List LintFinding =
+  match fields with
+  | Nil -> Nil
+  | Cons f rest ->
+      match f with
+      | ast.RecordField _ value -> list_append(walk_expr(value), walk_record_fields(rest))
+
+fn walk_template_parts(parts: List ast.TemplateExprPart) -> List LintFinding =
+  match parts with
+  | Nil -> Nil
+  | Cons p rest ->
+      match p with
+      | ast.LitPart _ -> walk_template_parts(rest)
+      | ast.InterpPart e -> list_append(walk_expr(e), walk_template_parts(rest))
+
+fn walk_branch(b: ast.MatchBranch) -> List LintFinding =
+  match b with
+  | ast.MatchBranch _ body -> walk_expr(body)
+
+fn walk_branches(branches: List ast.MatchBranch) -> List LintFinding =
+  match branches with
+  | Nil -> Nil
+  | Cons b rest -> list_append(walk_branch(b), walk_branches(rest))
+
+# Minimum chain length (number of nested matches, including the root) before
+# a chain is reported. The docs/idiomatic-sprout.md example is itself only
+# 2 deep; raising this filters out simple two-level unwraps and flags only
+# genuinely deep cascades.
+let min_staircase_depth = 3
+
+# walk_chain: the chain starting at this 2-branch match. Returns (depth,
+# findings) — depth is 1 + however deep the continuing branch's own chain
+# goes; findings covers every non-chain subexpression along the way (the
+# scrutinee at each link, each link's terminal body) but never a finding for
+# THIS node — the caller decides that once it knows the total depth.
+fn walk_chain(branches: List ast.MatchBranch, scrut: ast.Expr) -> (Int, List LintFinding) =
+  match branches with
+  | Cons b1 (Cons b2 Nil) ->
+      (match classify(b1, b2) with
+       | Just (terminal_body, continuing_match) ->
+           (match walk_chain_expr(continuing_match) with
+            | (inner_depth, inner_findings) ->
+                (1 + inner_depth,
+                  list_append(walk_expr(scrut), list_append(walk_expr(terminal_body), inner_findings))))
+       | Nothing ->
+           (1, list_append(walk_expr(scrut), list_append(walk_branch(b1), walk_branch(b2)))))
+  | _ -> (1, list_append(walk_expr(scrut), walk_branches(branches)))
+
+# walk_chain_expr: like walk_chain, but for an expression that may or may not
+# itself be a match — a chain link's continuing body is always a MatchExpr
+# (guaranteed by `continues`), but this is also the fallback used when the
+# generic walker isn't already inside a chain.
+fn walk_chain_expr(e: ast.Expr) -> (Int, List LintFinding) =
+  match e with
+  | ast.MatchExpr scrut branches _ -> walk_chain(branches, scrut)
+  | _ -> (1, walk_expr(e))
+
+fn walk_match(scrut: ast.Expr, branches: List ast.MatchBranch, pos: source.SourcePos) -> List LintFinding =
+  match walk_chain(branches, scrut) with
+  | (depth, findings) ->
+      if depth >= min_staircase_depth
+      then Cons(mk_finding(pos, "staircase-of-doom", "nested match can be flattened with let..else (docs/idiomatic-sprout.md)"), findings)
+      else findings
+
+# ---------------------------------------------------------------------------
+# Program-level entry points
+
+fn walk_instance_methods(methods: List ast.InstanceMethodImpl) -> List LintFinding =
+  match methods with
+  | Nil -> Nil
+  | Cons m rest ->
+      match m with
+      | ast.InstanceMethodImpl _ _ _ _ body -> list_append(walk_expr(body), walk_instance_methods(rest))
+
+fn walk_decl(d: ast.Decl) -> List LintFinding =
+  match d with
+  | ast.FnDecl _ _ _ _ _ body _ -> walk_expr(body)
+  | ast.LetDecl _ body _ -> walk_expr(body)
+  | ast.InstanceDecl _ _ methods _ -> walk_instance_methods(methods)
+  | _ -> Nil  # ExternFnDecl/TypeDecl/RecordDecl/ClassDecl/AliasDecl/WrapDecl: no expr body
+
+fn walk_decls(decls: List ast.Decl) -> List LintFinding =
+  match decls with
+  | Nil -> Nil
+  | Cons d rest -> list_append(walk_decl(d), walk_decls(rest))
+
+fn lint_program(prog: ast.Program) -> List LintFinding =
+  match prog with
+  | ast.Program decls _ -> walk_decls(decls)
+
+# lint_ast: run every AST-based rule over a source file. Parse failures yield
+# no findings (formatter.lint_source's text-based checks already cover files
+# that don't even parse; this rule set only has something to say once the
+# file is syntactically valid).
+export fn lint_ast(src: String) -> List LintFinding =
+  match lexer.tokenize(source.strip_headers(src)) with
+  | Err _ -> Nil
+  | Ok toks ->
+      match parser.parse_program(toks) with
+      | Err _ -> Nil
+      | Ok prog -> lint_program(prog)

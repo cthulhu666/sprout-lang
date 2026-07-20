@@ -1,6 +1,7 @@
 module stdlib.compiler.fmt_driver
 
 import stdlib.compiler.formatter as formatter
+import stdlib.compiler.lint_rules as lint_rules
 import stdlib.string as string
 
 fn print_issues(path: String, issues: List formatter.LintIssue) -> Unit !{IO} =
@@ -12,6 +13,17 @@ fn print_issues(path: String, issues: List formatter.LintIssue) -> Unit !{IO} =
           do
             print(path ++ ":" ++ int_to_string(ln) ++ ":" ++ int_to_string(col) ++ ": " ++ msg)
             print_issues(path, t)
+
+fn print_findings(path: String, findings: List lint_rules.LintFinding) -> Unit !{IO} =
+  match findings with
+  | Nil -> ()
+  | Cons h t ->
+      match h with
+      | lint_rules.LintFinding ln col rule_id msg ->
+          do
+            print(path ++ ":" ++ int_to_string(ln) ++ ":" ++ int_to_string(col) ++
+              ": [" ++ rule_id ++ "] " ++ msg)
+            print_findings(path, t)
 
 fn run_fmt_check(path: String) -> Int !{IO} =
   match read_file(path) with
@@ -53,15 +65,15 @@ fn run_lint_file(path: String) -> Int !{IO} =
   | Ok src ->
       do
         let issues = formatter.lint_source(src)
-        match issues with
-        | Nil ->
+        let findings = lint_rules.lint_ast(src)
+        print_issues(path, issues)
+        print_findings(path, findings)
+        match (issues, findings) with
+        | (Nil, Nil) ->
             do
               print("ok")
               0
-        | _ ->
-            do
-              print_issues(path, issues)
-              1
+        | _ -> 1
 
 fn main() -> Int !{IO} =
   do

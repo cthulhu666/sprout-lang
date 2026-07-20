@@ -1,0 +1,157 @@
+import stdlib.test (TestState, new_state, assert_eq, summary)
+import stdlib.compiler.lint_rules as lint_rules
+
+fn count_list(lst: List a) -> Int =
+  match lst with
+  | Nil -> 0
+  | Cons _ rest -> 1 + count_list(rest)
+
+fn finding_line(f: lint_rules.LintFinding) -> Int =
+  match f with
+  | lint_rules.LintFinding ln _ _ _ -> ln
+
+fn finding_rule(f: lint_rules.LintFinding) -> String =
+  match f with
+  | lint_rules.LintFinding _ _ rule_id _ -> rule_id
+
+fn first_line(findings: List lint_rules.LintFinding) -> Int =
+  match findings with
+  | Nil -> -1
+  | Cons f _ -> finding_line(f)
+
+fn first_rule(findings: List lint_rules.LintFinding) -> String =
+  match findings with
+  | Nil -> ""
+  | Cons f _ -> finding_rule(f)
+
+# --- fixtures -----------------------------------------------------------
+
+let docs_example =
+  "fn build(ret_te: Maybe Int, ret_ty: Int, theta: Int) -> Int =\n" ++
+  "  match ret_te with\n" ++
+  "  | Nothing -> theta\n" ++
+  "  | Just te ->\n" ++
+  "      match lookup(te, ret_ty, theta) with\n" ++
+  "      | Nothing -> theta\n" ++
+  "      | Just theta1 -> theta1\n"
+
+let three_branch_outer =
+  "fn classify(x: Int, y: Maybe Int) -> Int =\n" ++
+  "  match x with\n" ++
+  "  | 1 -> 10\n" ++
+  "  | 2 -> (match y with | Nothing -> 0 | Just v -> v)\n" ++
+  "  | 3 -> 30\n"
+
+let flat_match =
+  "fn describe(ok: Bool) -> Int =\n" ++
+  "  match ok with\n" ++
+  "  | True -> 1\n" ++
+  "  | False -> 0\n"
+
+let boolean_nested =
+  "fn weird(b: Bool, c: Bool) -> Int =\n" ++
+  "  match b with\n" ++
+  "  | True -> (match c with | True -> 1 | False -> 2)\n" ++
+  "  | False -> 3\n"
+
+let three_deep_chain =
+  "fn peel3(a: Maybe Int, b: Maybe Int, c: Maybe Int) -> Int =\n" ++
+  "  match a with\n" ++
+  "  | Nothing -> 0\n" ++
+  "  | Just x ->\n" ++
+  "      match b with\n" ++
+  "      | Nothing -> 0\n" ++
+  "      | Just y ->\n" ++
+  "          match c with\n" ++
+  "          | Nothing -> 0\n" ++
+  "          | Just z -> x + y + z\n"
+
+let four_deep_chain =
+  "fn peel4(a: Maybe Int, b: Maybe Int, c: Maybe Int, d: Maybe Int) -> Int =\n" ++
+  "  match a with\n" ++
+  "  | Nothing -> 0\n" ++
+  "  | Just w ->\n" ++
+  "      match b with\n" ++
+  "      | Nothing -> 0\n" ++
+  "      | Just x ->\n" ++
+  "          match c with\n" ++
+  "          | Nothing -> 0\n" ++
+  "          | Just y ->\n" ++
+  "              match d with\n" ++
+  "              | Nothing -> 0\n" ++
+  "              | Just z -> w + x + y + z\n"
+
+let result_chain =
+  "fn peel_result(a: Result String Int, b: Result String Int) -> Int =\n" ++
+  "  match a with\n" ++
+  "  | Err _ -> 0\n" ++
+  "  | Ok x ->\n" ++
+  "      match b with\n" ++
+  "      | Err _ -> 0\n" ++
+  "      | Ok y -> x + y\n"
+
+let ambiguous_both_continue =
+  "fn ambiguous(a: Wrap Int) -> Int =\n" ++
+  "  match a with\n" ++
+  "  | Left x -> (match lookup(x) with | Nothing -> 0 | Just y -> y)\n" ++
+  "  | Right x -> (match lookup(x) with | Nothing -> 0 | Just y -> y)\n"
+
+let list_recursion =
+  "fn join_list(sep: String, xs: List String) -> String =\n" ++
+  "  match xs with\n" ++
+  "  | Nil -> \"\"\n" ++
+  "  | Cons h t ->\n" ++
+  "      match t with\n" ++
+  "      | Nil -> h\n" ++
+  "      | _ -> h ++ sep ++ join_list(sep, t)\n"
+
+let list_recursion_wrapping_maybe =
+  "fn keys_to_pairs(d: Dict Int, keys: List String) -> List (String, Int) =\n" ++
+  "  match keys with\n" ++
+  "  | Nil -> Nil\n" ++
+  "  | Cons k rest ->\n" ++
+  "      match dict_get(k, d) with\n" ++
+  "      | Nothing -> keys_to_pairs(d, rest)\n" ++
+  "      | Just v -> Cons((k, v), keys_to_pairs(d, rest))\n"
+
+let nested_in_lambda =
+  "fn run(xs: Maybe Int, ys: Maybe Int, zs: Maybe Int) -> Int !{IO} =\n" ++
+  "  do\n" ++
+  "    let step = \\unused ->\n" ++
+  "      match xs with\n" ++
+  "      | Nothing -> 0\n" ++
+  "      | Just x ->\n" ++
+  "          match ys with\n" ++
+  "          | Nothing -> 0\n" ++
+  "          | Just y ->\n" ++
+  "              match zs with\n" ++
+  "              | Nothing -> 0\n" ++
+  "              | Just z -> x + y + z\n" ++
+  "    print(\"go\")\n"
+
+fn main() -> Unit !{IO} =
+  do
+    state <- new_state()
+
+    assert_eq(state, "docs example (depth 2): below min_staircase_depth=3, no finding", count_list(lint_rules.lint_ast(docs_example)), 0)
+
+    assert_eq(state, "3-branch outer: no finding", count_list(lint_rules.lint_ast(three_branch_outer)), 0)
+    assert_eq(state, "flat match: no finding", count_list(lint_rules.lint_ast(flat_match)), 0)
+    assert_eq(state, "boolean-pattern nesting: no finding", count_list(lint_rules.lint_ast(boolean_nested)), 0)
+    assert_eq(state, "both branches continue: no finding", count_list(lint_rules.lint_ast(ambiguous_both_continue)), 0)
+
+    assert_eq(state, "3-deep chain: exactly one finding (meets threshold)", count_list(lint_rules.lint_ast(three_deep_chain)), 1)
+    assert_eq(state, "3-deep chain: anchored at outermost match", first_line(lint_rules.lint_ast(three_deep_chain)), 2)
+    assert_eq(state, "3-deep chain: rule id", first_rule(lint_rules.lint_ast(three_deep_chain)), "staircase-of-doom")
+
+    assert_eq(state, "4-deep chain: still exactly one finding (not one per link)", count_list(lint_rules.lint_ast(four_deep_chain)), 1)
+    assert_eq(state, "4-deep chain: anchored at outermost match", first_line(lint_rules.lint_ast(four_deep_chain)), 2)
+
+    assert_eq(state, "Result chain (depth 2): below threshold, no finding", count_list(lint_rules.lint_ast(result_chain)), 0)
+
+    assert_eq(state, "3-deep chain inside lambda/do: still found", count_list(lint_rules.lint_ast(nested_in_lambda)), 1)
+
+    assert_eq(state, "list Cons/Nil recursion: no finding (not a Maybe/Result unwrap)", count_list(lint_rules.lint_ast(list_recursion)), 0)
+    assert_eq(state, "list recursion wrapping an inner Maybe match: no finding", count_list(lint_rules.lint_ast(list_recursion_wrapping_maybe)), 0)
+
+    summary(state)
