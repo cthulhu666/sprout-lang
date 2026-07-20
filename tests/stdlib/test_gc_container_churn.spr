@@ -13,7 +13,7 @@ fn dget(k: String, d: Dict Int) -> Int =
 # Each iteration allocates and drops one small Vec (value + element buffer).
 fn churn_vecs(n: Int, acc: Int) -> Int =
   if n <= 0 then acc
-  else churn_vecs(n - 1, acc + vec_length(vec_append(n, vec_from_list([n, n + 1]))))
+  else churn_vecs(n - 1, acc + vec_length(vec_append(n, [n, n + 1])))
 
 # Each iteration allocates and drops a one-entry Dict plus its key string.
 fn churn_dicts(n: Int, acc: Int) -> Int =
@@ -50,7 +50,7 @@ fn main() -> Unit !{IO} =
     assert_eq(state, "anchor dict missing key", dget("gamma", anchor_dict), 0 - 1)
 
     # Fresh containers after churn reuse swept memory.
-    let fresh = vec_append(8, vec_from_list([7]))
+    let fresh = vec_append(8, [7])
     assert_eq(state, "fresh vec after churn [1]", vec_get_or(1, 0 - 1, fresh), 8)
 
     summary(state)

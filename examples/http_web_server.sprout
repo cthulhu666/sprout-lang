@@ -194,7 +194,7 @@ fn search(req: HttpRequest) -> HttpServerResponse =
 # store. Pure handlers (`health`/`search`/`echo`) sit next to effectful ones — a pure
 # handler subsumes into the effectful route slot unchanged.
 fn routes(list_tmpl: Template, form_tmpl: Template, store: Ref Store) -> Vec Route =
-  vec_from_list([
+  [
     Route("GET", "/", \req -> see_other("/users")),
     Route("GET", "/users", \req -> handle_list(list_tmpl, store, req)),
     Route("GET", "/users/edit", \req -> handle_edit(form_tmpl, store, req)),
@@ -204,7 +204,7 @@ fn routes(list_tmpl: Template, form_tmpl: Template, store: Ref Store) -> Vec Rou
     Route("GET", "/health", health),
     Route("GET", "/search", search),
     Route("POST", "/echo", echo)
-  ])
+  ]
 
 # The logger is threaded in as an explicit capability (like `store` and the
 # templates) — there is no ambient global logger. `with_logging` wraps the

@@ -17,7 +17,7 @@ fn sample_list() -> List Int =
   [1, 2, 3]
 
 fn sample_vec() -> Vec Int =
-  vec_from_list([4, 5, 6])
+  [4, 5, 6]
 
 fn main() -> Unit !{IO} =
   print(map_and_sum_list(sample_list()) + map_and_sum_vec(sample_vec()))

@@ -16,6 +16,11 @@ fn has(hay: String, needle: String) -> Bool =
   | Nothing -> false
   | Just _ -> true
 
+fn idx_of(hay: String, needle: String) -> Int =
+  match string.find(hay, needle) with
+  | Nothing -> 0 - 1
+  | Just i -> i
+
 fn append_line(buf: Ref String, line: String) -> Unit !{IO} =
   do
     cur <- ref_read(buf)
@@ -55,6 +60,11 @@ fn main() -> Unit !{IO} =
     assert_true(state, "logs the path", has(line, "path=/users"))
     assert_true(state, "logs the status", has(line, "status=200"))
     assert_true(state, "logs a duration field", has(line, "dur_us="))
+
+    # --- access_fields orders fields method, path, status, dur_us ---------
+    assert_true(state, "method precedes path", idx_of(line, "method=GET") < idx_of(line, "path=/users"))
+    assert_true(state, "path precedes status", idx_of(line, "path=/users") < idx_of(line, "status=200"))
+    assert_true(state, "status precedes dur_us", idx_of(line, "status=200") < idx_of(line, "dur_us="))
 
     # --- the logged status reflects the handler's actual response ---------
     buf2 <- ref_new("")

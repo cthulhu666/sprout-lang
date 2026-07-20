@@ -26,9 +26,9 @@ export fn with_logging(lg: log.Logger, handler: HttpRequest -> HttpServerRespons
       resp
 
 fn access_fields(req: HttpRequest, resp: HttpServerResponse, dur_us: Int) -> Vec (String, String) =
-  vec_from_list([
+  [
     ("method", request_method(req)),
     ("path", request_path(req)),
     ("status", int_to_string(response_status(resp))),
     ("dur_us", int_to_string(dur_us))
-  ])
+  ]
