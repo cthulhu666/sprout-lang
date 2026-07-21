@@ -1,0 +1,26 @@
+import stdlib.test (TestState, new_state, assert_eq, summary)
+import stdlib.compiler.formatter as formatter
+
+fn main() -> Unit !{IO} =
+  do
+    state <- new_state()
+
+    # Regression: needs_space's fallback path (formatter.sprout
+    # needs_space_word_or_op) only forced a space before `{`, never before
+    # `[` — so any word-like token (ident/keyword/int/float/string/char,
+    # which includes a wildcard `_`, an ordinary TokenIdentKind) immediately
+    # followed by a `[`-led list-literal/list-pattern token lost its
+    # separating space. Sprout has no `arr[i]` indexing syntax (`[` only
+    # ever starts a list literal/pattern — parser.sprout's parse_primary/
+    # parse_pattern), so there is no legitimate no-space-before-`[` case to
+    # preserve.
+    assert_eq(state, "space preserved before [ after a wildcard",
+      formatter.format_source("x _ [1, 2]\n"), "x _ [1, 2]\n")
+    assert_eq(state, "space preserved before [ after an identifier",
+      formatter.format_source("foo bar [1, 2]\n"), "foo bar [1, 2]\n")
+    assert_eq(state, "space preserved before [ after a keyword",
+      formatter.format_source("x true [1, 2]\n"), "x true [1, 2]\n")
+    assert_eq(state, "space preserved before [ after an int literal",
+      formatter.format_source("x 1 [2, 3]\n"), "x 1 [2, 3]\n")
+
+    summary(state)

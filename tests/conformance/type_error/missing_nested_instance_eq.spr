@@ -6,4 +6,4 @@ module main
 # machinery, different class.
 
 fn main() -> Unit !{IO} =
-  if[()] == [()] then print("equal") else print("unequal")
+  if [()] == [()] then print("equal") else print("unequal")

@@ -52,10 +52,7 @@ fn is_list_cons_pattern(pat: ast.Pattern) -> Bool =
 
 fn is_two_branch_match(e: ast.Expr) -> Bool =
   match e with
-  # NOTE: not [_, _] sugar — `just fmt` has a bug where it strips the space
-  # between a wildcard `_` and a following `[` list-pattern literal
-  # (`_ [_, _]` -> `_[_, _]`), corrupting this line on every fmt run.
-  | ast.MatchExpr _ (Cons _ (Cons _ Nil)) _ -> true
+  | ast.MatchExpr _ [_, _] _ -> true
   | _ -> false
 
 # A branch "continues" the staircase when its pattern binds a variable

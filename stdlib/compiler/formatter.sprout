@@ -216,6 +216,10 @@ fn is_call_like(prev_prev: Maybe token.Token, prev: token.Token, next_tok: Maybe
 
 fn needs_space_word_or_op(p: token.Token, curr: token.Token, prev_prev: Maybe token.Token, next_tok: Maybe token.Token, has_equals_ahead: Bool) -> Bool =
   if tok_is_punct(curr, "{") then true
+  # `[` only ever starts a list literal/list-pattern token (parser.sprout:
+  # parse_primary/parse_pattern) — Sprout has no arr[i] indexing syntax, so
+  # there is no legitimate no-space case to protect here, unlike `(`.
+  else if tok_is_punct(curr, "[") then true
   else if tok_is_punct(curr, "(") then
     if is_call_like(prev_prev, p, next_tok, has_equals_ahead) then false else true
   else if is_inline_op(token.token_text(p)) then true
