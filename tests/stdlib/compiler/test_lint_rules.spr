@@ -280,6 +280,45 @@ let do_bind_hand_written_fixed_length =
   "    Cons a (Cons b Nil) <- get_pair()\n" ++
   "    a + b\n"
 
+# --- list-prefix-pattern fixtures -----------------------------------------
+# Sibling rule to list-shape-pattern: flags a hand-written Cons chain whose
+# tail is a discarded wildcard (`Cons h _`), not a bound variable — the
+# `Cons h _` case deliberately deferred out of list-shape-pattern's scope
+# (BACKLOG.md). `[h | _]` conveys "match a prefix, don't care about the
+# rest" more clearly than the raw constructor form; unlike `Cons h t` (used
+# for var-tail recursion), a wildcard tail can never be inspected further,
+# so there's nothing lost by naming the shape.
+
+let wildcard_tail_hand_written =
+  "fn f(xs: List Int) -> Int =\n" ++
+  "  match xs with\n" ++
+  "  | Cons h _ -> h\n" ++
+  "  | _ -> 0\n"
+
+let wildcard_tail_sugar =
+  "fn f(xs: List Int) -> Int =\n" ++
+  "  match xs with\n" ++
+  "  | [h | _] -> h\n" ++
+  "  | _ -> 0\n"
+
+let multi_wildcard_tail_hand_written =
+  "fn f(xs: List Int) -> Int =\n" ++
+  "  match xs with\n" ++
+  "  | Cons a (Cons b _) -> a + b\n" ++
+  "  | _ -> 0\n"
+
+let wildcard_tail_nested_in_head =
+  "fn f(xs: List (List Int)) -> Int =\n" ++
+  "  match xs with\n" ++
+  "  | Nil -> 0\n" ++
+  "  | Cons (Cons a _) t -> a\n"
+
+let do_bind_hand_written_wildcard_tail =
+  "fn f() -> Int !{IO} =\n" ++
+  "  do\n" ++
+  "    Cons h _ <- get_list()\n" ++
+  "    h\n"
+
 fn main() -> Unit !{IO} =
   do
     state <- new_state()
@@ -350,5 +389,20 @@ fn main() -> Unit !{IO} =
     assert_eq(state, "hand-written Cons h t pattern in a do-bind: no finding (var tail, not fixed-length)", count_list(lint_rules.lint_ast(do_bind_hand_written_var_tail)), 0)
 
     assert_eq(state, "hand-written fixed-length pattern in a do-bind: reported", count_list(lint_rules.lint_ast(do_bind_hand_written_fixed_length)), 1)
+
+    assert_eq(state, "fixed-length pattern: no list-prefix-pattern finding (mutually exclusive from list-shape-pattern)", count_by_rule(lint_rules.lint_ast(fixed_length_hand_written), "list-prefix-pattern"), 0)
+
+    assert_eq(state, "hand-written Cons h _ wildcard-tail: reported", count_list(lint_rules.lint_ast(wildcard_tail_hand_written)), 1)
+    assert_eq(state, "hand-written wildcard-tail pattern: rule id", first_rule(lint_rules.lint_ast(wildcard_tail_hand_written)), "list-prefix-pattern")
+
+    assert_eq(state, "[h | _] sugar: no finding", count_list(lint_rules.lint_ast(wildcard_tail_sugar)), 0)
+
+    assert_eq(state, "hand-written Cons a (Cons b _) multi-element wildcard tail: one finding, not one per link", count_list(lint_rules.lint_ast(multi_wildcard_tail_hand_written)), 1)
+
+    assert_eq(state, "wildcard-tail pattern nested in a head position: one finding (the inner [a | _])", count_list(lint_rules.lint_ast(wildcard_tail_nested_in_head)), 1)
+
+    assert_eq(state, "hand-written wildcard-tail pattern in a do-bind: reported", count_list(lint_rules.lint_ast(do_bind_hand_written_wildcard_tail)), 1)
+
+    assert_eq(state, "hand-written Cons h t var-tail recursion: no list-prefix-pattern finding either", count_by_rule(lint_rules.lint_ast(list_recursion_hand_written), "list-prefix-pattern"), 0)
 
     summary(state)

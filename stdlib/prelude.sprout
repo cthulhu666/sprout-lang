@@ -634,6 +634,14 @@ export fn fold_indexed(f: b -> Int -> a -> b, init: b, xs: f a) -> b where Folda
 export fn mconcat(xs: f a) -> a where Foldable f, Monoid a =
   fold(\ (acc, x) -> acc ++ x, empty(), xs)
 
+# Map each element to a Monoid value, then concatenate the results — the
+# "flatten a per-element list of findings" shape. Same O(n²) tradeoff as
+# mconcat (a fold over '++' repeatedly copies the growing accumulator); fine
+# for typical-sized inputs (e.g. walking one source file's AST), not a
+# replacement for a container-specific bulk-concat builtin on hot paths.
+export fn concat_map(f: a -> t, xs: c a) -> t where Functor c, Foldable c, Monoid t =
+  mconcat(map(f, xs))
+
 instance Semigroup String {
   fn append(left: String, right: String) -> String =
     str_concat(left, right)

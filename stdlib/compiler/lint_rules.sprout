@@ -364,7 +364,7 @@ fn find_list_shape_in_pattern(pat: ast.Pattern) -> List source.SourcePos =
         | [head, tail] ->
             if chain_terminates_in_nil(tail)
             then Cons(pos, find_list_shape_in_pattern(head))
-            else list_append(find_list_shape_in_pattern(head), find_list_shape_in_pattern(tail))
+            else find_list_shape_in_pattern(head) ++ find_list_shape_in_pattern(tail)
         | _ -> find_list_shape_in_patterns(subpats)  # malformed arity guard
       else
         find_list_shape_in_patterns(subpats)  # bare Nil: no subpatterns, no finding
@@ -372,9 +372,7 @@ fn find_list_shape_in_pattern(pat: ast.Pattern) -> List source.SourcePos =
   | _ -> Nil  # Wildcard/Var/Int/Bool/String/Char/Unit: leaves, no subpatterns
 
 fn find_list_shape_in_patterns(pats: List ast.Pattern) -> List source.SourcePos =
-  match pats with
-  | Nil -> Nil
-  | Cons p rest -> list_append(find_list_shape_in_pattern(p), find_list_shape_in_patterns(rest))
+  concat_map(find_list_shape_in_pattern, pats)
 
 fn is_written_as_ctor(src: String, line: Int, col: Int) -> Bool =
   string.starts_with(rest_of_line(src, line, col), ast.list_ctor_cons)
@@ -385,28 +383,16 @@ fn rest_of_line(src: String, line: Int, col: Int) -> String =
   where text = nth_line(str_split_lines(src), line, 1)
 
 fn drop_desugared_list_patterns(src: String, positions: List source.SourcePos) -> List source.SourcePos =
-  match positions with
-  | Nil -> Nil
-  | Cons pos rest ->
-      if is_written_as_ctor(src, source.position_line(pos), source.position_column(pos))
-      then Cons(pos, drop_desugared_list_patterns(src, rest))
-      else drop_desugared_list_patterns(src, rest)
+  filter(\pos -> is_written_as_ctor(src, source.position_line(pos), source.position_column(pos)), positions)
 
 fn list_shape_findings(src: String, prog: ast.Program) -> List LintFinding =
   match prog with
   | ast.Program decls _ ->
-      list_shape_positions_to_findings(drop_desugared_list_patterns(src, find_list_shape_in_decls(decls)))
-
-fn list_shape_positions_to_findings(positions: List source.SourcePos) -> List LintFinding =
-  match positions with
-  | Nil -> Nil
-  | Cons pos rest ->
-      Cons(mk_finding(pos, "list-shape-pattern", list_shape_message()), list_shape_positions_to_findings(rest))
+      map(\pos -> mk_finding(pos, "list-shape-pattern", list_shape_message()),
+        drop_desugared_list_patterns(src, find_list_shape_in_decls(decls)))
 
 fn find_list_shape_in_decls(decls: List ast.Decl) -> List source.SourcePos =
-  match decls with
-  | Nil -> Nil
-  | Cons d rest -> list_append(find_list_shape_in_decl(d), find_list_shape_in_decls(rest))
+  concat_map(find_list_shape_in_decl, decls)
 
 fn find_list_shape_in_decl(d: ast.Decl) -> List source.SourcePos =
   match d with
@@ -416,11 +402,7 @@ fn find_list_shape_in_decl(d: ast.Decl) -> List source.SourcePos =
   | _ -> Nil
 
 fn find_list_shape_in_instance_methods(methods: List ast.InstanceMethodImpl) -> List source.SourcePos =
-  match methods with
-  | Nil -> Nil
-  | Cons m rest ->
-      match m with
-      | ast.InstanceMethodImpl _ _ _ _ body -> list_append(find_list_shape_in_expr(body), find_list_shape_in_instance_methods(rest))
+  concat_map(\m -> match m with | ast.InstanceMethodImpl _ _ _ _ body -> find_list_shape_in_expr(body), methods)
 
 # Reuses the SAME generic expr traversal shape as walk_expr above (a
 # separate, parallel walk — see walk_expr's own header comment on why every
@@ -430,62 +412,166 @@ fn find_list_shape_in_instance_methods(methods: List ast.InstanceMethodImpl) -> 
 fn find_list_shape_in_expr(e: ast.Expr) -> List source.SourcePos =
   match e with
   | ast.MatchExpr scrut branches _ ->
-      list_append(find_list_shape_in_expr(scrut), find_list_shape_in_branches(branches))
+      find_list_shape_in_expr(scrut) ++ find_list_shape_in_branches(branches)
   | ast.IfExpr cond then_ else_ _ ->
-      list_append(find_list_shape_in_expr(cond), list_append(find_list_shape_in_expr(then_), find_list_shape_in_expr(else_)))
+      find_list_shape_in_expr(cond) ++ find_list_shape_in_expr(then_) ++ find_list_shape_in_expr(else_)
   | ast.CallExpr callee args _ ->
-      list_append(find_list_shape_in_expr(callee), find_list_shape_in_exprs(args))
+      find_list_shape_in_expr(callee) ++ find_list_shape_in_exprs(args)
   | ast.TupleExpr elems _ -> find_list_shape_in_exprs(elems)
   | ast.BinaryExpr _ left right _ ->
-      list_append(find_list_shape_in_expr(left), find_list_shape_in_expr(right))
+      find_list_shape_in_expr(left) ++ find_list_shape_in_expr(right)
   | ast.UnaryExpr _ operand _ -> find_list_shape_in_expr(operand)
   | ast.LambdaExpr _ body _ -> find_list_shape_in_expr(body)
   | ast.DoExpr steps _ -> find_list_shape_in_do_steps(steps)
   | ast.RecordExpr _ fields _ -> find_list_shape_in_record_fields(fields)
   | ast.GetFieldExpr rec_expr _ _ -> find_list_shape_in_expr(rec_expr)
   | ast.IntRangeExpr lo hi _ ->
-      list_append(find_list_shape_in_expr(lo), find_list_shape_in_expr(hi))
+      find_list_shape_in_expr(lo) ++ find_list_shape_in_expr(hi)
   | ast.StringTemplateExpr parts _ -> find_list_shape_in_template_parts(parts)
   | _ -> Nil
 
 fn find_list_shape_in_exprs(exprs: List ast.Expr) -> List source.SourcePos =
-  match exprs with
-  | Nil -> Nil
-  | Cons e rest -> list_append(find_list_shape_in_expr(e), find_list_shape_in_exprs(rest))
+  concat_map(find_list_shape_in_expr, exprs)
 
 fn find_list_shape_in_branches(branches: List ast.MatchBranch) -> List source.SourcePos =
-  match branches with
-  | Nil -> Nil
-  | Cons b rest ->
-      match b with
-      | ast.MatchBranch pat body ->
-          list_append(find_list_shape_in_pattern(pat), list_append(find_list_shape_in_expr(body), find_list_shape_in_branches(rest)))
+  concat_map(\b -> match b with
+    | ast.MatchBranch pat body -> find_list_shape_in_pattern(pat) ++ find_list_shape_in_expr(body), branches)
 
 fn find_list_shape_in_do_steps(steps: List ast.DoStep) -> List source.SourcePos =
-  match steps with
-  | Nil -> Nil
-  | Cons s rest -> list_append(find_list_shape_in_do_step(s), find_list_shape_in_do_steps(rest))
+  concat_map(find_list_shape_in_do_step, steps)
 
 fn find_list_shape_in_do_step(s: ast.DoStep) -> List source.SourcePos =
   match s with
-  | ast.DoBindStep pat value -> list_append(find_list_shape_in_pattern(pat), find_list_shape_in_expr(value))
+  | ast.DoBindStep pat value -> find_list_shape_in_pattern(pat) ++ find_list_shape_in_expr(value)
   | ast.DoLetStep _ value -> find_list_shape_in_expr(value)
   | ast.DoExprStep value -> find_list_shape_in_expr(value)
 
 fn find_list_shape_in_record_fields(fields: List ast.RecordField) -> List source.SourcePos =
-  match fields with
-  | Nil -> Nil
-  | Cons f rest ->
-      match f with
-      | ast.RecordField _ value -> list_append(find_list_shape_in_expr(value), find_list_shape_in_record_fields(rest))
+  concat_map(\f -> match f with | ast.RecordField _ value -> find_list_shape_in_expr(value), fields)
 
 fn find_list_shape_in_template_parts(parts: List ast.TemplateExprPart) -> List source.SourcePos =
-  match parts with
-  | Nil -> Nil
-  | Cons p rest ->
-      match p with
-      | ast.LitPart _ -> find_list_shape_in_template_parts(rest)
-      | ast.InterpPart e -> list_append(find_list_shape_in_expr(e), find_list_shape_in_template_parts(rest))
+  concat_map(\p -> match p with
+    | ast.LitPart _ -> Nil
+    | ast.InterpPart e -> find_list_shape_in_expr(e), parts)
+
+# ---------------------------------------------------------------------------
+# Rule: list-prefix-pattern
+#
+# Sibling to list-shape-pattern: flags a hand-written Cons chain whose tail
+# is a discarded wildcard (`Cons h _`), matchable with `[h | _]` sugar. This
+# is the `Cons h _` case list-shape-pattern deliberately deferred out of its
+# own scope (BACKLOG.md) — a materially different signal from fixed-length:
+# no exact-length claim, just "match a prefix, discard the rest." Unlike a
+# bound tail variable (`Cons h t`, used to keep recursing — NOT flagged,
+# same as list-shape-pattern), a wildcard tail can never be inspected
+# further, so naming the shape with `[…]` loses nothing.
+#
+# Same SourcePos-granularity discriminator as list-shape-pattern (`[…]`
+# sugar shares one position, the `[` token's; hand-written carries its own
+# token's position) — reuses list-shape-pattern's is_written_as_ctor filter.
+
+fn list_prefix_message() -> String =
+  "list matched with a discarded tail via raw Cons/Nil constructors — [...] list-pattern sugar reads the shape at a glance (docs/idiomatic-sprout.md)"
+
+# True when a Cons pattern chain's tail resolves to a literal wildcard —
+# i.e. the chain matches a fixed PREFIX and explicitly discards whatever
+# follows, never binding it. A tail that resolves to Nil (exact length,
+# list-shape-pattern's territory) or a bound variable (ordinary head/tail
+# recursion) is NOT a wildcard tail.
+fn chain_terminates_in_wildcard(pat: ast.Pattern) -> Bool =
+  match pat with
+  | ast.WildcardPattern _ -> true
+  | ast.ConstructorPattern name subpats _ ->
+      if name == ast.list_ctor_cons then
+        match subpats with
+        | [_, tail] -> chain_terminates_in_wildcard(tail)
+        | _ -> false  # malformed arity guard
+      else false  # Nil terminal: list-shape-pattern's territory, not this rule
+  | _ -> false  # bound variable: ordinary recursion, not flagged
+
+# Mirrors find_list_shape_in_pattern's structure exactly, swapping the
+# terminal check from chain_terminates_in_nil to chain_terminates_in_wildcard.
+fn find_prefix_pattern_in_pattern(pat: ast.Pattern) -> List source.SourcePos =
+  match pat with
+  | ast.ConstructorPattern name subpats pos ->
+      if name == ast.list_ctor_cons then
+        match subpats with
+        | [head, tail] ->
+            if chain_terminates_in_wildcard(tail)
+            then Cons(pos, find_prefix_pattern_in_pattern(head))
+            else find_prefix_pattern_in_pattern(head) ++ find_prefix_pattern_in_pattern(tail)
+        | _ -> find_prefix_pattern_in_patterns(subpats)  # malformed arity guard
+      else
+        find_prefix_pattern_in_patterns(subpats)  # bare Nil: no subpatterns, no finding
+  | ast.TuplePattern subpats _ -> find_prefix_pattern_in_patterns(subpats)
+  | _ -> Nil  # Wildcard/Var/Int/Bool/String/Char/Unit: leaves, no subpatterns
+
+fn find_prefix_pattern_in_patterns(pats: List ast.Pattern) -> List source.SourcePos =
+  concat_map(find_prefix_pattern_in_pattern, pats)
+
+fn list_prefix_findings(src: String, prog: ast.Program) -> List LintFinding =
+  match prog with
+  | ast.Program decls _ ->
+      map(\pos -> mk_finding(pos, "list-prefix-pattern", list_prefix_message()),
+        drop_desugared_list_patterns(src, find_prefix_pattern_in_decls(decls)))
+
+fn find_prefix_pattern_in_decls(decls: List ast.Decl) -> List source.SourcePos =
+  concat_map(find_prefix_pattern_in_decl, decls)
+
+fn find_prefix_pattern_in_decl(d: ast.Decl) -> List source.SourcePos =
+  match d with
+  | ast.FnDecl _ _ _ _ _ body _ -> find_prefix_pattern_in_expr(body)
+  | ast.LetDecl _ body _ -> find_prefix_pattern_in_expr(body)
+  | ast.InstanceDecl _ _ methods _ -> find_prefix_pattern_in_instance_methods(methods)
+  | _ -> Nil
+
+fn find_prefix_pattern_in_instance_methods(methods: List ast.InstanceMethodImpl) -> List source.SourcePos =
+  concat_map(\m -> match m with | ast.InstanceMethodImpl _ _ _ _ body -> find_prefix_pattern_in_expr(body), methods)
+
+fn find_prefix_pattern_in_expr(e: ast.Expr) -> List source.SourcePos =
+  match e with
+  | ast.MatchExpr scrut branches _ ->
+      find_prefix_pattern_in_expr(scrut) ++ find_prefix_pattern_in_branches(branches)
+  | ast.IfExpr cond then_ else_ _ ->
+      find_prefix_pattern_in_expr(cond) ++ find_prefix_pattern_in_expr(then_) ++ find_prefix_pattern_in_expr(else_)
+  | ast.CallExpr callee args _ ->
+      find_prefix_pattern_in_expr(callee) ++ find_prefix_pattern_in_exprs(args)
+  | ast.TupleExpr elems _ -> find_prefix_pattern_in_exprs(elems)
+  | ast.BinaryExpr _ left right _ ->
+      find_prefix_pattern_in_expr(left) ++ find_prefix_pattern_in_expr(right)
+  | ast.UnaryExpr _ operand _ -> find_prefix_pattern_in_expr(operand)
+  | ast.LambdaExpr _ body _ -> find_prefix_pattern_in_expr(body)
+  | ast.DoExpr steps _ -> find_prefix_pattern_in_do_steps(steps)
+  | ast.RecordExpr _ fields _ -> find_prefix_pattern_in_record_fields(fields)
+  | ast.GetFieldExpr rec_expr _ _ -> find_prefix_pattern_in_expr(rec_expr)
+  | ast.IntRangeExpr lo hi _ ->
+      find_prefix_pattern_in_expr(lo) ++ find_prefix_pattern_in_expr(hi)
+  | ast.StringTemplateExpr parts _ -> find_prefix_pattern_in_template_parts(parts)
+  | _ -> Nil
+
+fn find_prefix_pattern_in_exprs(exprs: List ast.Expr) -> List source.SourcePos =
+  concat_map(find_prefix_pattern_in_expr, exprs)
+
+fn find_prefix_pattern_in_branches(branches: List ast.MatchBranch) -> List source.SourcePos =
+  concat_map(\b -> match b with
+    | ast.MatchBranch pat body -> find_prefix_pattern_in_pattern(pat) ++ find_prefix_pattern_in_expr(body), branches)
+
+fn find_prefix_pattern_in_do_steps(steps: List ast.DoStep) -> List source.SourcePos =
+  concat_map(find_prefix_pattern_in_do_step, steps)
+
+fn find_prefix_pattern_in_do_step(s: ast.DoStep) -> List source.SourcePos =
+  match s with
+  | ast.DoBindStep pat value -> find_prefix_pattern_in_pattern(pat) ++ find_prefix_pattern_in_expr(value)
+  | ast.DoLetStep _ value -> find_prefix_pattern_in_expr(value)
+  | ast.DoExprStep value -> find_prefix_pattern_in_expr(value)
+
+fn find_prefix_pattern_in_record_fields(fields: List ast.RecordField) -> List source.SourcePos =
+  concat_map(\f -> match f with | ast.RecordField _ value -> find_prefix_pattern_in_expr(value), fields)
+
+fn find_prefix_pattern_in_template_parts(parts: List ast.TemplateExprPart) -> List source.SourcePos =
+  concat_map(\p -> match p with
+    | ast.LitPart _ -> Nil
+    | ast.InterpPart e -> find_prefix_pattern_in_expr(e), parts)
 
 # ---------------------------------------------------------------------------
 # Program-level entry points
@@ -551,4 +637,6 @@ export fn lint_ast(src: String) -> List LintFinding =
   | Ok toks ->
       match parser.parse_program(toks) with
       | Err _ -> Nil
-      | Ok prog -> list_append(drop_desugared_matches(src, lint_program(prog)), list_shape_findings(src, prog))
+      | Ok prog ->
+          list_append(drop_desugared_matches(src, lint_program(prog)),
+            list_append(list_shape_findings(src, prog), list_prefix_findings(src, prog)))
