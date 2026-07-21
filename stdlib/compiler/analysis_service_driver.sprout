@@ -413,7 +413,7 @@ fn collect_matches(decls: List ast.Decl, query_te: ast.TypeExpr, alias_env: Dict
           match constraint with
           | ast.TypeConstraint class_name args ->
               match args with
-              | Cons arg Nil ->
+              | [arg] ->
                   if te_matches_query(arg, query_te, alias_env)
                   then collect_matches(rest, query_te, alias_env, Cons(render_match(class_name, arg), acc))
                   else collect_matches(rest, query_te, alias_env, acc)

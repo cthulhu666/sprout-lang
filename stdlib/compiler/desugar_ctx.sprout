@@ -480,7 +480,7 @@ fn find_redundant_ctx_leaf(expr: ast.Expr, exp_name: String, fn_idx: Dict (List 
 
 fn find_redundant_vec_from_list_call(args: List ast.Expr, pos: source.SourcePos, fn_idx: Dict (List (Maybe String))) -> List source.SourcePos =
   match args with
-  | Cons inner Nil ->
+  | [inner] ->
       if is_bare_list_literal(inner)
       then Cons(pos, find_redundant_no_ctx(inner, fn_idx))
       else find_redundant_no_ctx(inner, fn_idx)

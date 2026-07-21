@@ -677,7 +677,7 @@ fn infer_print_call(
   pos: source.SourcePos
 ) -> InferResult !{IO} =
   match args with
-  | Cons single Nil ->
+  | [single] ->
       do
         pr <- infer_expr(state, env, subst, eff_subst, single)
         match pr with
@@ -3468,10 +3468,10 @@ fn pre_scan_fn_decls(decls: List ast.Decl, env: Dict types.Scheme, alias_env: Di
               pre_scan_fn_decls(rest,
                 dict_set(name, scheme_from_fn_parts(params, ret_type_maybe, effects_maybe, alias_env), env),
                 alias_env)
-      | ast.AliasDecl name Nil rhs_te _ ->
+      | ast.AliasDecl name[] rhs_te _ ->
           pre_scan_fn_decls(rest, env,
             dict_set(name, type_from_ast(rhs_te, dict_empty()), alias_env))
-      | ast.AliasDecl name (Cons param Nil) rhs_te _ ->
+      | ast.AliasDecl name[param] rhs_te _ ->
           pre_scan_fn_decls(rest, env, register_single_param_alias(name, param, rhs_te, alias_env))
       | ast.TypeDecl _ _ _ _ _ ->
           pre_scan_fn_decls(rest, register_type_decl_raw(decl, env), alias_env)
@@ -3498,11 +3498,11 @@ fn typecheck_decls_inner(
         global_env_dict(env))
   | Cons decl rest ->
       match decl with
-      | ast.AliasDecl name Nil rhs_te _ ->
+      | ast.AliasDecl name[] rhs_te _ ->
           typecheck_decls_inner(state, rest, env, subst, eff_subst,
             dict_set(name, type_from_ast(rhs_te, dict_empty()), alias_env),
             Cons(typed_ast.TPassThrough(decl), acc), env_ftv)
-      | ast.AliasDecl name (Cons param Nil) rhs_te _ ->
+      | ast.AliasDecl name[param] rhs_te _ ->
           typecheck_decls_inner(state, rest, env, subst, eff_subst,
             register_single_param_alias(name, param, rhs_te, alias_env),
             Cons(typed_ast.TPassThrough(decl), acc), env_ftv)

@@ -2604,8 +2604,8 @@ fn bind_ctor_field_args(args: List ast.Pattern, scrut_name: String,
 fn bind_wrap_inner_arg(args: List ast.Pattern, s_name: String, captures: Dict String) ->
     Result String (Dict String) =
   match args with
-  | Cons (ast.VarPattern v _) Nil -> Ok(dict_set(v, s_name, captures))
-  | Cons (ast.WildcardPattern _) Nil -> Ok(captures)
+  | [ast.VarPattern v _] -> Ok(dict_set(v, s_name, captures))
+  | [ast.WildcardPattern _] -> Ok(captures)
   | _ -> Err("ast_to_ir: wrap pattern must have exactly one inner arg (VarPattern or WildcardPattern)")
 
 # Emit binding ops for each pattern item of a TuplePattern.
@@ -2923,8 +2923,8 @@ fn is_simple_maybe_arm(pat: ast.Pattern) -> Bool =
   | ast.ConstructorPattern "Nothing" Nil _ -> true
   | ast.ConstructorPattern "Just" args _ ->
       match args with
-      | Cons (ast.VarPattern _ _) Nil -> true
-      | Cons (ast.WildcardPattern _) Nil -> true
+      | [ast.VarPattern _ _] -> true
+      | [ast.WildcardPattern _] -> true
       | _ -> false
   | _ -> false
 
@@ -2954,8 +2954,8 @@ fn is_simple_width2_arm(pat: ast.Pattern, ctors: Dict sprout_ir.CtorInfo) -> Boo
               (tag != -1) && (max_ar <= 1) &&
               (match args with
                | Nil -> true
-               | Cons (ast.VarPattern _ _) Nil -> true
-               | Cons (ast.WildcardPattern _) Nil -> true
+               | [ast.VarPattern _ _] -> true
+               | [ast.WildcardPattern _] -> true
                | _ -> false)
   | _ -> false
 
@@ -3042,7 +3042,7 @@ fn unboxed_maybe_match_target(scrut: typed_ast.TypedExpr,
 fn bind_just_arg(ctor_args: List ast.Pattern, val_ssa: String,
                  captures: Dict String) -> Dict String =
   match ctor_args with
-  | Cons (ast.VarPattern v _) Nil -> dict_set(v, val_ssa, captures)
+  | [ast.VarPattern v _] -> dict_set(v, val_ssa, captures)
   | _ -> captures
 
 # Prepend an arm's tag-test block (present for Just/Nothing, absent for wildcard).
@@ -4190,7 +4190,7 @@ fn translate_boxed_ctor_call(name: String, tag: Int, actual_ar: Int,
         match r with
         | (arg_blocks, arg_cur_lbl, arg_cur_ops, arg_names, idx1) ->
             match arg_names with
-            | Cons inner_ssa Nil -> Ok((arg_blocks, arg_cur_lbl, arg_cur_ops, inner_ssa, idx1))
+            | [inner_ssa] -> Ok((arg_blocks, arg_cur_lbl, arg_cur_ops, inner_ssa, idx1))
             | _ -> Err("ast_to_ir: wrap ctor must have exactly one field")
   else
   # NOTE: cap of 9 mirrors @sprout_make0..@sprout_make9 declared in
@@ -6188,7 +6188,7 @@ fn translate_tail_match(scrut: typed_ast.TypedExpr, arms: List typed_ast.TypedMa
                         name_prefix: String) ->
     Result String (List sprout_ir.IRBlock, Int) !{IO} =
   match arms with
-  | Cons (typed_ast.TypedMatchBranch(ast.ConstructorPattern _cname cargs _) arm_body) Nil ->
+  | [typed_ast.TypedMatchBranch(ast.ConstructorPattern _cname cargs _) arm_body] ->
       if all_var_or_wild(cargs)
       then
         match translate_expr(scrut, params, ctors, idx, cur_label, cur_ops, captures, lifted_ref,
@@ -6246,7 +6246,7 @@ fn translate_tail_unary_ctor(tag: Int, args: List typed_ast.TypedExpr, params: L
                              name_prefix: String) ->
     Result String (List sprout_ir.IRBlock, Int) !{IO} =
   match args with
-  | Cons arg Nil ->
+  | [arg] ->
       match translate_expr(arg, params, ctors, idx, cur_label, cur_ops, captures, lifted_ref,
                            top_level, let_names, fn_arities, lambda_ctr_ref, lifted_idx_ref, name_prefix) with
       | Err msg -> Err(msg)

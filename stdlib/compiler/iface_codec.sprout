@@ -50,9 +50,9 @@ fn encode_constraints(cs: List (String, String)) -> String =
 
 fn join_constraints(cs: List (String, String)) -> String =
   match cs with
-  | Nil -> ""
-  | Cons c Nil -> encode_constraint(c)
-  | Cons c rest -> string_concat_many([encode_constraint(c), " ", join_constraints(rest)])
+  | [] -> ""
+  | [c] -> encode_constraint(c)
+  | [c | rest] -> string_concat_many([encode_constraint(c), " ", join_constraints(rest)])
 
 fn encode_constraint(c: (String, String)) -> String =
   match c with
@@ -83,18 +83,18 @@ fn encode_str_list(xs: List String) -> String =
 # Join with single-space separator. O(n).
 fn join_strs(xs: List String) -> String =
   match xs with
-  | Nil -> ""
-  | Cons x Nil -> x
-  | Cons x rest -> string_concat_many([x, " ", join_strs(rest)])
+  | [] -> ""
+  | [x] -> x
+  | [x | rest] -> string_concat_many([x, " ", join_strs(rest)])
 
 fn encode_type_list(ts: List types.Type) -> String =
   string_concat_many(["(", join_types(ts), ")"])
 
 fn join_types(ts: List types.Type) -> String =
   match ts with
-  | Nil -> ""
-  | Cons t Nil -> encode_type(t)
-  | Cons t rest -> string_concat_many([encode_type(t), " ", join_types(rest)])
+  | [] -> ""
+  | [t] -> encode_type(t)
+  | [t | rest] -> string_concat_many([encode_type(t), " ", join_types(rest)])
 
 # ----------------------------------------------------------------------------
 # Decoder — String -> Maybe Scheme
@@ -407,9 +407,9 @@ fn encode_named_scheme_list(ns: List NamedScheme) -> String =
 
 fn join_named_schemes(ns: List NamedScheme) -> String =
   match ns with
-  | Nil -> ""
-  | Cons n Nil -> encode_named_scheme(n)
-  | Cons n rest -> string_concat_many([encode_named_scheme(n), " ", join_named_schemes(rest)])
+  | [] -> ""
+  | [n] -> encode_named_scheme(n)
+  | [n | rest] -> string_concat_many([encode_named_scheme(n), " ", join_named_schemes(rest)])
 
 fn encode_named_scheme(n: NamedScheme) -> String =
   match n with
@@ -421,9 +421,9 @@ fn encode_ctor_info_list(cs: List CtorInfo) -> String =
 
 fn join_ctor_infos(cs: List CtorInfo) -> String =
   match cs with
-  | Nil -> ""
-  | Cons c Nil -> encode_ctor_info(c)
-  | Cons c rest -> string_concat_many([encode_ctor_info(c), " ", join_ctor_infos(rest)])
+  | [] -> ""
+  | [c] -> encode_ctor_info(c)
+  | [c | rest] -> string_concat_many([encode_ctor_info(c), " ", join_ctor_infos(rest)])
 
 fn encode_ctor_info(c: CtorInfo) -> String =
   match c with
@@ -437,9 +437,9 @@ fn encode_class_info_list(cs: List ClassInfo) -> String =
 
 fn join_class_infos(cs: List ClassInfo) -> String =
   match cs with
-  | Nil -> ""
-  | Cons c Nil -> encode_class_info(c)
-  | Cons c rest -> string_concat_many([encode_class_info(c), " ", join_class_infos(rest)])
+  | [] -> ""
+  | [c] -> encode_class_info(c)
+  | [c | rest] -> string_concat_many([encode_class_info(c), " ", join_class_infos(rest)])
 
 fn encode_class_info(c: ClassInfo) -> String =
   match c with
@@ -457,9 +457,9 @@ fn encode_instance_info_list(is: List InstanceInfo) -> String =
 
 fn join_instance_infos(is: List InstanceInfo) -> String =
   match is with
-  | Nil -> ""
-  | Cons i Nil -> encode_instance_info(i)
-  | Cons i rest -> string_concat_many([encode_instance_info(i), " ", join_instance_infos(rest)])
+  | [] -> ""
+  | [i] -> encode_instance_info(i)
+  | [i | rest] -> string_concat_many([encode_instance_info(i), " ", join_instance_infos(rest)])
 
 fn encode_instance_info(i: InstanceInfo) -> String =
   match i with
@@ -1004,9 +1004,9 @@ fn encode_ast_typeexpr_list(xs: List ast.TypeExpr) -> String =
 
 fn join_ast_typeexprs(xs: List ast.TypeExpr) -> String =
   match xs with
-  | Nil -> ""
-  | Cons te Nil -> encode_ast_typeexpr(te)
-  | Cons te rest -> string_concat_many([encode_ast_typeexpr(te), " ", join_ast_typeexprs(rest)])
+  | [] -> ""
+  | [te] -> encode_ast_typeexpr(te)
+  | [te | rest] -> string_concat_many([encode_ast_typeexpr(te), " ", join_ast_typeexprs(rest)])
 
 # ----------------------------------------------------------------------------
 # Param encoder
@@ -1022,9 +1022,9 @@ fn encode_ast_param_list(xs: List ast.Param) -> String =
 
 fn join_ast_params(xs: List ast.Param) -> String =
   match xs with
-  | Nil -> ""
-  | Cons p Nil -> encode_ast_param(p)
-  | Cons p rest -> string_concat_many([encode_ast_param(p), " ", join_ast_params(rest)])
+  | [] -> ""
+  | [p] -> encode_ast_param(p)
+  | [p | rest] -> string_concat_many([encode_ast_param(p), " ", join_ast_params(rest)])
 
 # ----------------------------------------------------------------------------
 # Pattern encoder
@@ -1057,9 +1057,9 @@ fn encode_ast_pattern_list(xs: List ast.Pattern) -> String =
 
 fn join_ast_patterns(xs: List ast.Pattern) -> String =
   match xs with
-  | Nil -> ""
-  | Cons p Nil -> encode_ast_pattern(p)
-  | Cons p rest -> string_concat_many([encode_ast_pattern(p), " ", join_ast_patterns(rest)])
+  | [] -> ""
+  | [p] -> encode_ast_pattern(p)
+  | [p | rest] -> string_concat_many([encode_ast_pattern(p), " ", join_ast_patterns(rest)])
 
 # ----------------------------------------------------------------------------
 # Expr encoder
@@ -1112,9 +1112,9 @@ fn encode_ast_expr_list(xs: List ast.Expr) -> String =
 
 fn join_ast_exprs(xs: List ast.Expr) -> String =
   match xs with
-  | Nil -> ""
-  | Cons e Nil -> encode_ast_expr(e)
-  | Cons e rest -> string_concat_many([encode_ast_expr(e), " ", join_ast_exprs(rest)])
+  | [] -> ""
+  | [e] -> encode_ast_expr(e)
+  | [e | rest] -> string_concat_many([encode_ast_expr(e), " ", join_ast_exprs(rest)])
 
 fn encode_match_branch(b: ast.MatchBranch) -> String =
   match b with
@@ -1126,9 +1126,9 @@ fn encode_match_branch_list(xs: List ast.MatchBranch) -> String =
 
 fn join_match_branches(xs: List ast.MatchBranch) -> String =
   match xs with
-  | Nil -> ""
-  | Cons b Nil -> encode_match_branch(b)
-  | Cons b rest -> string_concat_many([encode_match_branch(b), " ", join_match_branches(rest)])
+  | [] -> ""
+  | [b] -> encode_match_branch(b)
+  | [b | rest] -> string_concat_many([encode_match_branch(b), " ", join_match_branches(rest)])
 
 fn encode_do_step(step: ast.DoStep) -> String =
   match step with
@@ -1144,9 +1144,9 @@ fn encode_do_step_list(xs: List ast.DoStep) -> String =
 
 fn join_do_steps(xs: List ast.DoStep) -> String =
   match xs with
-  | Nil -> ""
-  | Cons s Nil -> encode_do_step(s)
-  | Cons s rest -> string_concat_many([encode_do_step(s), " ", join_do_steps(rest)])
+  | [] -> ""
+  | [s] -> encode_do_step(s)
+  | [s | rest] -> string_concat_many([encode_do_step(s), " ", join_do_steps(rest)])
 
 fn encode_record_field(f: ast.RecordField) -> String =
   match f with
@@ -1158,9 +1158,9 @@ fn encode_record_field_list(xs: List ast.RecordField) -> String =
 
 fn join_record_fields(xs: List ast.RecordField) -> String =
   match xs with
-  | Nil -> ""
-  | Cons f Nil -> encode_record_field(f)
-  | Cons f rest -> string_concat_many([encode_record_field(f), " ", join_record_fields(rest)])
+  | [] -> ""
+  | [f] -> encode_record_field(f)
+  | [f | rest] -> string_concat_many([encode_record_field(f), " ", join_record_fields(rest)])
 
 fn encode_template_part(part: ast.TemplateExprPart) -> String =
   match part with
@@ -1174,9 +1174,9 @@ fn encode_template_part_list(xs: List ast.TemplateExprPart) -> String =
 
 fn join_template_parts(xs: List ast.TemplateExprPart) -> String =
   match xs with
-  | Nil -> ""
-  | Cons p Nil -> encode_template_part(p)
-  | Cons p rest -> string_concat_many([encode_template_part(p), " ", join_template_parts(rest)])
+  | [] -> ""
+  | [p] -> encode_template_part(p)
+  | [p | rest] -> string_concat_many([encode_template_part(p), " ", join_template_parts(rest)])
 
 # ----------------------------------------------------------------------------
 # Decl encoder
@@ -1192,9 +1192,9 @@ fn encode_ast_type_constraint_list(xs: List ast.TypeConstraint) -> String =
 
 fn join_type_constraints(xs: List ast.TypeConstraint) -> String =
   match xs with
-  | Nil -> ""
-  | Cons tc Nil -> encode_ast_type_constraint(tc)
-  | Cons tc rest -> string_concat_many([encode_ast_type_constraint(tc), " ", join_type_constraints(rest)])
+  | [] -> ""
+  | [tc] -> encode_ast_type_constraint(tc)
+  | [tc | rest] -> string_concat_many([encode_ast_type_constraint(tc), " ", join_type_constraints(rest)])
 
 fn encode_ast_type_constructor(ctor: ast.TypeConstructor) -> String =
   match ctor with
@@ -1206,9 +1206,9 @@ fn encode_ast_type_constructor_list(xs: List ast.TypeConstructor) -> String =
 
 fn join_type_constructors(xs: List ast.TypeConstructor) -> String =
   match xs with
-  | Nil -> ""
-  | Cons c Nil -> encode_ast_type_constructor(c)
-  | Cons c rest -> string_concat_many([encode_ast_type_constructor(c), " ", join_type_constructors(rest)])
+  | [] -> ""
+  | [c] -> encode_ast_type_constructor(c)
+  | [c | rest] -> string_concat_many([encode_ast_type_constructor(c), " ", join_type_constructors(rest)])
 
 fn encode_ast_record_field_decl(f: ast.RecordFieldDecl) -> String =
   match f with
@@ -1220,9 +1220,9 @@ fn encode_ast_record_field_decl_list(xs: List ast.RecordFieldDecl) -> String =
 
 fn join_record_field_decls(xs: List ast.RecordFieldDecl) -> String =
   match xs with
-  | Nil -> ""
-  | Cons f Nil -> encode_ast_record_field_decl(f)
-  | Cons f rest -> string_concat_many([encode_ast_record_field_decl(f), " ", join_record_field_decls(rest)])
+  | [] -> ""
+  | [f] -> encode_ast_record_field_decl(f)
+  | [f | rest] -> string_concat_many([encode_ast_record_field_decl(f), " ", join_record_field_decls(rest)])
 
 fn encode_ast_class_method_sig(m: ast.ClassMethodSig) -> String =
   match m with
@@ -1234,9 +1234,9 @@ fn encode_ast_class_method_sig_list(xs: List ast.ClassMethodSig) -> String =
 
 fn join_class_method_sigs(xs: List ast.ClassMethodSig) -> String =
   match xs with
-  | Nil -> ""
-  | Cons m Nil -> encode_ast_class_method_sig(m)
-  | Cons m rest -> string_concat_many([encode_ast_class_method_sig(m), " ", join_class_method_sigs(rest)])
+  | [] -> ""
+  | [m] -> encode_ast_class_method_sig(m)
+  | [m | rest] -> string_concat_many([encode_ast_class_method_sig(m), " ", join_class_method_sigs(rest)])
 
 fn encode_ast_instance_method_impl(m: ast.InstanceMethodImpl) -> String =
   match m with
@@ -1248,9 +1248,9 @@ fn encode_ast_instance_method_impl_list(xs: List ast.InstanceMethodImpl) -> Stri
 
 fn join_instance_method_impls(xs: List ast.InstanceMethodImpl) -> String =
   match xs with
-  | Nil -> ""
-  | Cons m Nil -> encode_ast_instance_method_impl(m)
-  | Cons m rest -> string_concat_many([encode_ast_instance_method_impl(m), " ", join_instance_method_impls(rest)])
+  | [] -> ""
+  | [m] -> encode_ast_instance_method_impl(m)
+  | [m | rest] -> string_concat_many([encode_ast_instance_method_impl(m), " ", join_instance_method_impls(rest)])
 
 # O(n) in size of the declaration.
 export fn encode_ast_decl(d: ast.Decl) -> String =
@@ -1279,9 +1279,9 @@ fn encode_ast_decl_list(xs: List ast.Decl) -> String =
 
 fn join_ast_decls(xs: List ast.Decl) -> String =
   match xs with
-  | Nil -> ""
-  | Cons d Nil -> encode_ast_decl(d)
-  | Cons d rest -> string_concat_many([encode_ast_decl(d), " ", join_ast_decls(rest)])
+  | [] -> ""
+  | [d] -> encode_ast_decl(d)
+  | [d | rest] -> string_concat_many([encode_ast_decl(d), " ", join_ast_decls(rest)])
 
 # O(n) in size of the program.
 export fn encode_ast_program(prog: ast.Program) -> String =

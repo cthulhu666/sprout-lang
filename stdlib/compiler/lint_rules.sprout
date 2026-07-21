@@ -52,6 +52,9 @@ fn is_list_cons_pattern(pat: ast.Pattern) -> Bool =
 
 fn is_two_branch_match(e: ast.Expr) -> Bool =
   match e with
+  # NOTE: not [_, _] sugar — `just fmt` has a bug where it strips the space
+  # between a wildcard `_` and a following `[` list-pattern literal
+  # (`_ [_, _]` -> `_[_, _]`), corrupting this line on every fmt run.
   | ast.MatchExpr _ (Cons _ (Cons _ Nil)) _ -> true
   | _ -> false
 
@@ -246,7 +249,7 @@ let min_staircase_depth = 3
 # decides that once it knows the total depth and blocked status.
 fn walk_chain(branches: List ast.MatchBranch, scrut: ast.Expr) -> (Int, Bool, List LintFinding) =
   match branches with
-  | Cons b1 (Cons b2 Nil) ->
+  | [b1, b2] ->
       (match classify(b1, b2) with
        | Just (terminal_pat, terminal_body, continuing_match) ->
            (match walk_chain_expr(continuing_match) with
@@ -344,7 +347,7 @@ fn chain_terminates_in_nil(pat: ast.Pattern) -> Bool =
       if name == ast.list_ctor_nil then true
       else if name == ast.list_ctor_cons then
         match subpats with
-        | Cons _ (Cons tail Nil) -> chain_terminates_in_nil(tail)
+        | [_, tail] -> chain_terminates_in_nil(tail)
         | _ -> false  # malformed arity guard
       else false
   | _ -> false  # bound variable or wildcard: not a fixed length
@@ -361,7 +364,7 @@ fn find_list_shape_in_pattern(pat: ast.Pattern) -> List source.SourcePos =
   | ast.ConstructorPattern name subpats pos ->
       if name == ast.list_ctor_cons then
         match subpats with
-        | Cons head (Cons tail Nil) ->
+        | [head, tail] ->
             if chain_terminates_in_nil(tail)
             then Cons(pos, find_list_shape_in_pattern(head))
             else list_append(find_list_shape_in_pattern(head), find_list_shape_in_pattern(tail))

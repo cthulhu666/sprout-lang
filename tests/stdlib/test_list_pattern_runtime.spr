@@ -10,6 +10,8 @@
 # arms where both sides return -1 by construction.
 
 import stdlib.test (TestState, new_state, assert_eq, summary)
+import stdlib.compiler.ast as ast
+import stdlib.compiler.source as source
 
 # One sugared function per pattern shape exercises the runtime path.
 
@@ -48,6 +50,25 @@ fn head_tail_legacy(xs: List Int) -> Int =
   | Cons a (Cons b _) -> a + b
   | _ -> -1
 
+# [x]'s element position can itself be a nested constructor pattern, not just
+# a bare var — the shape used throughout stdlib/compiler (e.g. ast_to_ir.sprout
+# bind_wrap_inner_arg: `Cons (ast.VarPattern v _) Nil`). Pins that composition,
+# not just [x] over a scalar element.
+
+fn wrap_arg_name_sugar(args: List ast.Pattern) -> String =
+  match args with
+  | [ast.VarPattern v _] -> v
+  | [ast.WildcardPattern _] -> "_"
+  | _ -> "?"
+
+fn wrap_arg_name_legacy(args: List ast.Pattern) -> String =
+  match args with
+  | Cons (ast.VarPattern v _) Nil -> v
+  | Cons (ast.WildcardPattern _) Nil -> "_"
+  | _ -> "?"
+
+let dummy_pos = source.SourcePos(0, 0, 0)
+
 fn main() -> Unit !{IO} =
   do
     state <- new_state()
@@ -71,5 +92,15 @@ fn main() -> Unit !{IO} =
     assert_eq(state, "[a, b | _] rejects empty", head_tail_sugar([]), -1)
     assert_eq(state, "[a, b | _] rejects 1-elt", head_tail_sugar([9]), -1)
     assert_eq(state, "[a, b | _] parity on matching input", head_tail_sugar([1, 2, 3]), head_tail_legacy([1, 2, 3]))
+
+    # [ast.VarPattern v _] — a nested-constructor-pattern element, not a scalar.
+    let var_pat = Cons(ast.VarPattern("v", dummy_pos), Nil)
+    let wild_pat = Cons(ast.WildcardPattern(dummy_pos), Nil)
+    let two_pat = Cons(ast.VarPattern("v", dummy_pos), Cons(ast.WildcardPattern(dummy_pos), Nil))
+    assert_eq(state, "[ast.VarPattern v _] binds the inner name", wrap_arg_name_sugar(var_pat), "v")
+    assert_eq(state, "[ast.WildcardPattern _] matches", wrap_arg_name_sugar(wild_pat), "_")
+    assert_eq(state, "[ast.VarPattern v _] rejects 2-elt", wrap_arg_name_sugar(two_pat), "?")
+    assert_eq(state, "[ast.VarPattern v _] parity on matching input", wrap_arg_name_sugar(var_pat), wrap_arg_name_legacy(var_pat))
+    assert_eq(state, "[ast.WildcardPattern _] parity on matching input", wrap_arg_name_sugar(wild_pat), wrap_arg_name_legacy(wild_pat))
 
     summary(state)
