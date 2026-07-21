@@ -144,10 +144,21 @@ fn main() -> Unit !{IO} =
     # No-op when there are no heterogeneous SCCs (same-arity cycle passes through unchanged).
     assert_true(state, "unify: no hetero SCC -> decls unchanged (2)", list_length(ast_to_ir.phase_b_unify(Cons(a2, Cons(b2, Nil)))) == 2)
 
-    # v0 gate: an ADT-returning heterogeneous cycle is EXCLUDED (scalar returns only —
-    # a `$u` variant returning a width-2 ADT crashes CPR-worker emission post-lowering).
+    # Gate lifted (§5b): an ADT-returning heterogeneous cycle IS now detected +
+    # unified. The trampoline's CPR worker repacks the width-2 ADT correctly;
+    # wider ADTs are simply never worker-routed (is_simple_width2_arm gates on
+    # max-ctor-arity<=1), so no width-3 repack is reachable.
     let padt = fndecl("padt", 2, typed_ast.TCall(tvar("qadt"), Cons(tint(0), Cons(tint(0), Cons(tint(0), Nil))), adt_t(), no_pos()))
     let qadt = fndecl("qadt", 3, typed_ast.TCall(tvar("padt"), Cons(tint(0), Cons(tint(0), Nil)), adt_t(), no_pos()))
-    assert_true(state, "v0 gate: ADT-returning cycle excluded (scalar only)", list_length(ast_to_ir.pb_hetero_sccs(Cons(padt, Cons(qadt, Nil)))) == 0)
+    assert_true(state, "ADT-returning hetero cycle is detected (gate lifted)", list_length(ast_to_ir.pb_hetero_sccs(Cons(padt, Cons(qadt, Nil)))) == 1)
+    let uadt = ast_to_ir.phase_b_unify(Cons(padt, Cons(qadt, Nil)))
+    assert_true(state, "ADT cycle unifies -> 4 decls (trampolines + $u)", list_length(uadt) == 4)
+    # Regression for the annotation fix: the trampoline body carries the REAL
+    # return type (adt_t()), not Int — so CPR-worker repack derives a non-empty
+    # ctor list instead of adt_ctors_of_type(Int)=Nil.
+    match find_body(uadt, "padt") with
+    | Nothing -> assert_true(state, "padt trampoline exists", false)
+    | Just b -> assert_true(state, "padt trampoline body typed as ADT return (not Int)",
+                            (match typed_ast.typed_expr_type(b) with | types.TApp _ _ -> true | _ -> false))
 
     summary(state)

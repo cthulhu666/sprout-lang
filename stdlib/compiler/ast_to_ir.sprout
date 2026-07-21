@@ -5516,35 +5516,37 @@ fn pb_members_with_arity(members: List String, arity: Dict Int) -> List (String,
   | Nil -> Nil
   | Cons m rest -> Cons((m, mutual_arity_of(m, arity)), pb_members_with_arity(rest, arity))
 
-# v0 return gate: only SCALAR returns (Int/Bool/Char/Float).  A member returning an
-# ADT can route to a Tier-2 CPR worker (`match f(args)` over a width-2-ADT-returning
-# fn), and a generated `$u` variant, being created POST-lowering, is not registered in
-# the worker/adt machinery — it crashes worker emission ("result type absent from
-# adt_index").  Scalar returns never enter that path.  ADT returns are deferred to
-# Phase B.1 (run phase_b_unify PRE-lowering so `$u` decls are lowered normally).
-fn pb_scalar_name(n: String) -> Bool =
-  n == "Int" || n == "Bool" || n == "Char" || n == "Float"
-
-fn pb_is_scalar_type(t: types.Type) -> Bool =
+# Return gate: a member's return type must be a single i64 value — a scalar
+# (TConst Int/Bool/Char/Float) OR a named ADT (TConst nullary / TApp
+# parameterized, a heap pointer) — so the member fits the unified i64(i64×M)
+# prototype Phase A musttail's.  Correctness when a member is match-routed to a
+# Tier-2 CPR worker is handled independently of this gate: routing is gated to
+# max-ctor-arity<=1 (is_simple_width2_arm), so the trampoline's width-2 repack
+# shim is always correct and wider ADTs are simply never worker-routed; and the
+# trampoline body carries the real return type (pb_gen_pair) so repack derives a
+# non-empty ctor list.  Tuples/functions/type-vars are excluded (not the tested
+# single-i64-return shape).  See docs/mutual-tco-phase-b-v0.md §5b.
+fn pb_ret_unifiable(t: types.Type) -> Bool =
   match t with
-  | types.TConst id -> pb_scalar_name(types.type_id_name(id))
+  | types.TConst _ -> true
+  | types.TApp _ _ -> true
   | _ -> false
 
-fn pb_scalar_ret_map(decls: List typed_ast.TypedDecl) -> Dict Bool =
+fn pb_unifiable_ret_map(decls: List typed_ast.TypedDecl) -> Dict Bool =
   match decls with
   | Nil -> dict_empty()
   | Cons d rest ->
       match d with
       | typed_ast.TFnDecl name _ _ _ _ body ->
-          dict_set(name, pb_is_scalar_type(typed_ast.typed_expr_type(body)), pb_scalar_ret_map(rest))
-      | _ -> pb_scalar_ret_map(rest)
+          dict_set(name, pb_ret_unifiable(typed_ast.typed_expr_type(body)), pb_unifiable_ret_map(rest))
+      | _ -> pb_unifiable_ret_map(rest)
 
 export fn pb_hetero_sccs(decls: List typed_ast.TypedDecl) -> List (List (String, Int)) =
   pb_scc_collect(pb_fn_order(decls),
                  pb_fn_order(decls),
                  pb_tail_graph(decls, set_from_list(pb_fn_order(decls))),
                  pb_fn_arity(decls),
-                 pb_scalar_ret_map(decls),
+                 pb_unifiable_ret_map(decls),
                  set_empty())
 
 fn pb_scc_collect(work: List String, order: List String, graph: Dict Set,
@@ -5670,9 +5672,14 @@ fn pb_gen_pair(name: String, params: List ast.Param, ret: Maybe ast.TypeExpr,
       Nil))
 where
   pos = typed_ast.typed_expr_pos(body)
+  # The trampoline body must carry the member's REAL return type: when the member
+  # is match-routed to a CPR worker, worker_source_for derives the repack ctor
+  # list from typed_expr_type(trampoline_body).  A placeholder Int here yields
+  # adt_ctors_of_type(Int)=Nil -> "empty repack" crash for ADT returns.  See §5b.
+  ret_ty = typed_ast.typed_expr_type(body)
   tramp_body = typed_ast.TCall(typed_ast.TVar(name ++ "$u", pb_int_ty(), pos),
                  list_append(pb_var_args(params, pos), pb_zeros(m - list_length(params), pos)),
-                 pb_int_ty(), pos)
+                 ret_ty, pos)
 
 # THE Phase B pre-pass: replace each heterogeneous-tail-SCC member with its
 # trampoline + `$u` variant; pass everything else through.  No-op when there are no

@@ -1,0 +1,37 @@
+import stdlib.test (TestState, new_state, assert_eq, summary)
+import stdlib.task (Scope, Task, with_scope, task_fork, task_await)
+
+# Phase B ADT-return regression (docs/mutual-tco-phase-b-v0.md §5b): a
+# HETEROGENEOUS-arity, fully-tail, mutual cycle that returns a width-2 ADT
+# (`Maybe Int`) AND is match-routed (so `ping` gets a CPR worker). Exercises
+# the whole landing at once:
+#   - gate lift: the ADT-returning hetero cycle is now detected/unified,
+#   - trampoline annotation fix: `ping`'s CPR worker repacks correctly
+#     (was: "result type absent from adt_index (empty repack)"),
+#   - musttail: ping$u/3 <-> pong$u/3 tail-loop so N=40000 completes.
+# Without Phase B for ADT returns this aborts a green task's 16384-slot pool
+# at ~5250 iterations. GREEN only with the ADT-return landing.
+
+fn ping(n: Int, acc: List Int) -> Maybe Int =
+  if n <= 0 then Just(list_length(acc))
+  else pong(n, acc, Cons(n, acc))
+
+fn pong(n: Int, acc: List Int, acc2: List Int) -> Maybe Int =
+  ping(n - 1, acc2)
+
+fn drive() -> Bool =
+  match ping(40000, Nil) with
+  | Just k -> k >= 0
+  | Nothing -> false
+
+fn run_on_green(s: Scope) -> Bool !{IO} =
+  do
+    t <- task_fork(s, \_ -> drive())
+    task_await(t)
+
+fn main() -> Unit !{IO} =
+  do
+    state <- new_state()
+    ok <- with_scope(\s -> run_on_green(s))
+    assert_eq(state, "ADT-returning heterogeneous-arity tail cycle (N=40000) completes in a green task", ok, true)
+    summary(state)

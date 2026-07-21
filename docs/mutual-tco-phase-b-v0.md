@@ -177,22 +177,25 @@ end-to-end: the §2a green-task repro (`ping/2`↔`pong/3`) auto-generates `ping
 `musttail`s both edges, and it completes at N=40000 (was aborting at N=5500). Also verified on
 `if`-position, `match`-arm-position, and boxed-heap (`List`) return shapes.
 
-**v0 gate: SCALAR returns only (`Int`/`Bool`/`Char`/`Float`).** `phase_b_unify` runs
-*post-lowering*, so a generated `$u` variant is **not** registered in the CPR/worker machinery
-that lowering set up for the originals. When a member returns an ADT that routes to a Tier-2 CPR
-worker (a `match f(args)` over a width-2-ADT-returning `f`, e.g. `Result`/`Maybe`), worker emission
-fails with `result type absent from adt_index (empty repack)` — a bootstrap-breaker (`ERROR:` line,
-zero `define`s). **The crash is on the trampoline `f`, not `f$u` — see §5b for the reproduced root
-cause.** So v0 gates detection to **scalar returns**, which never enter the worker path.
-Consequences:
-- Phase B is a **no-op on the compiler's own code** (all its fully-tail heterogeneous cycles
-  return ADTs — `types.Type`, `Result`, `Effect`), so the self-compiled seed is byte-identical
-  apart from the new `pb_*` definitions (fixed point holds immediately — safest bootstrap outcome).
-- `unifier.apply_subst/2` ↔ `apply_subst_lookup/3` (returns `types.Type`) is therefore **not**
-  contified in v0.
-- **Phase B.1 (the real generality):** run `phase_b_unify` on the *pre-lowering* typed AST (tail
-  calls intact, `$u` decls then lowered normally with proper worker registration). That lifts the
-  scalar gate to all `i64`-returning cycles (ADTs included) and is the documented follow-up.
+**Return gate: single-i64 returns — scalars AND named ADTs (LANDED 2026-07-21).** The original
+v0 shipped scalar-only (`Int`/`Bool`/`Char`/`Float`) because a match-routed ADT-returning member
+crashed CPR-worker emission with `result type absent from adt_index (empty repack)`. §5b diagnosed
+that (it is the **trampoline**, not `$u`) and the fix landed: `pb_ret_unifiable` now accepts any
+`TConst`/`TApp` return (scalar or named ADT — all single-i64), and `pb_gen_pair` annotates the
+trampoline body with the member's real return type so its CPR worker repacks correctly. No width-3
+gate is needed — routing (`is_simple_width2_arm`) already restricts CPR workers to max-ctor-arity≤1,
+so wider ADTs are never worker-routed (they still `musttail`, just without a worker). Tuples,
+function returns, and type-vars remain excluded (not single-i64 by the exercised path).
+Consequences (updated):
+- Phase B **now optimizes the compiler's own code**: `unifier.apply_subst/2` ↔ `apply_subst_lookup/3`
+  (returns `types.Type`) and ~176 `$u` sites compiler-wide are unified + `musttail`'d. The
+  self-compiled seed changes materially (no longer a no-op), but the **fixed point still holds**
+  (verified: stage-2 vs stage-3 `emit-ir compile_driver` byte-identical).
+- Regression coverage: `tests/stdlib/test_phase_b_green_adt.spr` (an ADT-returning, match-routed
+  `ping/2 ↔ pong/3` at N=40000 in a green task — root-pool-exhausts without the landing, passes
+  under `SPROUT_GC_STRESS=1` with it) + the unit assertions in `tests/stdlib/compiler/test_phase_b.spr`.
+- **Still deferred:** width-3 ADT returns (≥2-field ctor → sret) as *worker* results — needs
+  `emit_repack_one` extension, not just a gate change; currently unreachable (unrouted), so latent.
 - **Tail-self-recursive AND mutually-tail-recursive member.** `mutual_tco_rewrite_fn` skips any
   function carrying an `IRTcoEntry` (self-TCO'd), so such a member's *mutual* edge stays a plain
   call — unfixed in v0 (no miscompile; the self edge still self-TCO's).
