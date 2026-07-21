@@ -180,9 +180,10 @@ end-to-end: the §2a green-task repro (`ping/2`↔`pong/3`) auto-generates `ping
 **v0 gate: SCALAR returns only (`Int`/`Bool`/`Char`/`Float`).** `phase_b_unify` runs
 *post-lowering*, so a generated `$u` variant is **not** registered in the CPR/worker machinery
 that lowering set up for the originals. When a member returns an ADT that routes to a Tier-2 CPR
-worker (a `match f(args)` over a width-2-ADT-returning `f`, e.g. `Result`/`Maybe`), emitting the
-worker for `f$u` crashes: `result type absent from adt_index (empty repack)` — a
-bootstrap-breaker. So v0 gates detection to **scalar returns**, which never enter the worker path.
+worker (a `match f(args)` over a width-2-ADT-returning `f`, e.g. `Result`/`Maybe`), worker emission
+fails with `result type absent from adt_index (empty repack)` — a bootstrap-breaker (`ERROR:` line,
+zero `define`s). **The crash is on the trampoline `f`, not `f$u` — see §5b for the reproduced root
+cause.** So v0 gates detection to **scalar returns**, which never enter the worker path.
 Consequences:
 - Phase B is a **no-op on the compiler's own code** (all its fully-tail heterogeneous cycles
   return ADTs — `types.Type`, `Result`, `Effect`), so the self-compiled seed is byte-identical
@@ -198,6 +199,64 @@ Consequences:
 - **Mixed call sites.** Only internal *tail-cycle* calls are retargeted to `$u`; non-tail and
   external calls keep hitting the trampoline (scoped to the detected tail edges).
 - **Non-`i64` returns.** Out of scope, as Phase A.
+
+## 5b. CPR-crash diagnosis (2026-07-21) — it is the **trampoline**, not `$u`
+
+§5a claimed "emitting the worker for `f$u` crashes." **Reproduced and refuted: the crash is on
+the trampoline `f` (the original name), and `$u` can never be the culprit.**
+
+**Root cause.** `pb_gen_pair` (`ast_to_ir.sprout`) synthesizes the trampoline body
+`TCall(f$u, …)` with its type annotation hardcoded to `pb_int_ty()` — i.e. the trampoline's
+`typed_expr_type` is `Int`, regardless of what `f` actually returns. Post-lowering, CPR-worker
+emission derives the repack ctor list from that body type:
+`worker_source_for` → `adt_ctors_of_type(typed_expr_type(trampoline_body), adt_index)` →
+`adt_ctors_of_type(Int, adt_index)` → `type_head_name` = `"Int"`, absent from `adt_index` → `Nil`
+→ `translate_tail_catchall` fails with *"result type absent from adt_index (empty repack)"*. The
+emit produces an `ERROR:` line and **zero `define`s** (no valid module) — so the "bootstrap-breaker"
+framing stands; only its *attribution* to `$u` was wrong.
+
+**Why it is structurally never `$u`.** The CPR worker set is **call-site-driven**: `collect_wc_scrutinee`
+adds a name iff it appears as `match <name>(args) with …` at some site (via `tier2_worker_shape`), and
+`emit_all_workers` emits workers *solely* for that set — there is no "emit a worker for every
+ADT-returning decl" path. `phase_b_unify` never rewrites external call sites, so the **trampoline keeps
+the original name and stays match-routed** → it gets a worker. `f$u` is a synthetic name that appears
+only as a plain forwarding call (from the trampoline) or a retargeted *tail* call (from sibling `$u`s,
+via `pb_retarget_tail` — tail calls only, never match scrutinees) → it can never enter `worker_set` →
+never gets a worker → cannot hit this crash.
+
+**Primary evidence (replayable).** Lift the scalar gate to also accept named-head types:
+```
+# ast_to_ir.sprout, pb_is_scalar_type — temporary diagnostic:
+| types.TConst _ -> true
+| types.TApp _ _ -> true
+| _ -> false
+```
+then `just bootstrap-from-seed && just build-stage2` and emit IR for a heterogeneous-arity mutual-tail
+cycle returning a width-2 ADT with an ADT-typed param and a match-routed caller:
+```sprout
+fn ping(n: Int, acc: Maybe Int) -> Maybe Int = if n <= 0 then acc else pong(n - 1, acc, 0)
+fn pong(n: Int, acc: Maybe Int, x: Int) -> Maybe Int = if n <= 0 then acc else ping(n - 1, acc)
+fn main() -> Unit !{IO} = match ping(10, Just(1)) with | Just v -> term_write(int_to_string(v)) | Nothing -> term_write("none")
+```
+Observed: `ERROR: ast_to_ir: cannot emit CPR worker for 'main.ping' — result type absent from
+adt_index (empty repack)` — i.e. the **trampoline** `ping`, not `ping$u`.
+
+**Fix paths (the choice is architectural → Kuba's call, per AGENTS.md).**
+- **(a) Targeted annotation.** Give the trampoline body the member's *real* return type instead of
+  `pb_int_ty()`. Then `worker_source_for` derives the correct ctor list and the trampoline's worker
+  becomes a valid repack shim — the exact shape `synth_extern_body` already uses for externs (a
+  synthetic self-call the catch-all boxes + repacks). **Caveat (do not skip):** `pb_gen_pair` also
+  hardcodes `Int` on the *forwarded arguments* (`pb_var_args`) and the padding (`pb_zeros`). Forwarding
+  an ADT-typed value (e.g. the `apply_subst` target passes `types.Type`) while annotated `Int` is a
+  GC-rooting hazard — the doc's #1 risk (silent use-after-free, not a crash). A targeted fix must
+  correct the argument annotations too, and **must** be gated on `just test-stress` + run-canary, not
+  merely successful IR emission.
+- **(b) Phase B.1 (pre-lowering).** Run `phase_b_unify` on the pre-lowering typed AST so the
+  trampoline/`$u` decls are lowered and re-inferred normally — fixing *all* the hand-synthesized `Int`
+  annotations (return and args) in one move, with proper worker registration. Heavier, but it is likely
+  *why* this route was chosen over per-annotation whack-a-mole.
+
+The v0 scalar gate stays until one of these lands.
 
 ## 5-ALT. Contification / tag-dispatch (considered, rejected as heavier)
 
