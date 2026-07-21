@@ -20,6 +20,13 @@
 
 set -euo pipefail
 
+# Diagnostic-only: on any unguarded command failure (set -e triggering),
+# print what actually died before the script exits. Without this, a failure
+# outside an if/while/|| guard exits silently with no ESCALATION line —
+# observed repeatedly (see memory project_pr_rebase_corrupt_seed.md) with no
+# way to tell which command failed after the fact.
+trap 'echo "PR#${PR:-?}: INTERNAL ERROR at line $LINENO (exit $?): $BASH_COMMAND"' ERR
+
 if [ $# -ne 1 ]; then
   echo "usage: pr-rebase.sh <pr-number>" >&2
   exit 2
