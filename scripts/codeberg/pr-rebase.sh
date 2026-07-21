@@ -137,10 +137,20 @@ fi
 if [ -n "$COMPILER_DIFF" ]; then
   mise exec -- just fmt >/dev/null 2>&1 || echo "PR#$PR: fmt non-zero (continuing)"
 fi
-if ! git diff-index --quiet HEAD -- bootstrap/compile_driver.ll; then
-  git add bootstrap/compile_driver.ll
+# `git diff-index --quiet HEAD --` can false-positive on a bare mtime change
+# (stat-cache staleness) even when content is byte-identical — refresh-seed's
+# build always rewrites the file, so this fired on every genuine no-op
+# (author's own seed refresh already matched) and `git commit` then failed
+# with "nothing to commit" printed to stdout, swallowed by `>/dev/null`,
+# looking like a silent crash (observed on PR #219, #222, #223). Staging
+# first and diffing the index (a real hash comparison) avoids the false
+# positive entirely instead of just failing more loudly.
+git add bootstrap/compile_driver.ll
+if ! git diff --cached --quiet -- bootstrap/compile_driver.ll; then
   git commit -m "chore(bootstrap): refresh seed after rebase onto master" >/dev/null
   echo "PR#$PR: committed seed refresh"
+else
+  echo "PR#$PR: seed regen matched already-committed content (no-op)"
 fi
 
 # ---- Step 6: force-push --------------------------------------------
