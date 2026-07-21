@@ -36,6 +36,15 @@ fn first_message(findings: List lint_rules.LintFinding) -> String =
 fn mentions_let_else(msg: String) -> Bool =
   str_find(msg, "let..else") != -1
 
+# Rule-scoped count — keeps an assertion about ONE rule from breaking when a
+# fixture also happens to trip a different rule (e.g. a Cons/Nil-recursion
+# fixture used for staircase-of-doom now also legitimately trips
+# list-shape-pattern; each rule's own test should only assert its own count).
+fn count_by_rule(findings: List lint_rules.LintFinding, rule_id: String) -> Int =
+  match findings with
+  | Nil -> 0
+  | Cons f rest -> (if finding_rule(f) == rule_id then 1 else 0) + count_by_rule(rest, rule_id)
+
 # --- fixtures -----------------------------------------------------------
 
 let docs_example =
@@ -215,6 +224,62 @@ let wrap_in_let_binding_no_context =
   "fn g() -> Int = 1\n" ++
   "let v = vec_from_list([1, 2, 3])\n"
 
+# --- list-shape-pattern fixtures -----------------------------------------
+# Scoped to fixed-length chains only (a chain that terminates in a literal
+# Nil, e.g. `Cons a (Cons b Nil)`) — a corpus scan showed ordinary head/tail
+# decomposition (`Cons h t`) and discard-the-rest (`Cons h _`) together are
+# ~99% of all hand-written Cons/Nil patterns in this codebase, and `[h | t]`/
+# `[h | _]` convey nothing those don't already say. Only the fixed-length
+# case reads more clearly as `[...]` sugar.
+
+let list_recursion_hand_written =
+  "fn join_list(sep: String, xs: List String) -> String =\n" ++
+  "  match xs with\n" ++
+  "  | Nil -> \"\"\n" ++
+  "  | Cons h t -> h ++ sep ++ join_list(sep, t)\n"
+
+let list_recursion_sugar =
+  "fn join_list(sep: String, xs: List String) -> String =\n" ++
+  "  match xs with\n" ++
+  "  | [] -> \"\"\n" ++
+  "  | [h | t] -> h ++ sep ++ join_list(sep, t)\n"
+
+let fixed_length_sugar =
+  "fn pair_sum(xs: List Int) -> Int =\n" ++
+  "  match xs with\n" ++
+  "  | [a, b] -> a + b\n" ++
+  "  | _ -> 0\n"
+
+let fixed_length_hand_written =
+  "fn pair_sum(xs: List Int) -> Int =\n" ++
+  "  match xs with\n" ++
+  "  | Cons a (Cons b Nil) -> a + b\n" ++
+  "  | _ -> 0\n"
+
+let nested_fixed_length_in_head =
+  "fn f(xs: List (List Int)) -> Int =\n" ++
+  "  match xs with\n" ++
+  "  | Nil -> 0\n" ++
+  "  | Cons (Cons a (Cons b Nil)) t -> a + b\n"
+
+let non_list_pattern_unaffected =
+  "fn f(x: Maybe Int) -> Int =\n" ++
+  "  match x with\n" ++
+  "  | Nothing -> 0\n" ++
+  "  | Just v -> v\n"
+
+let do_bind_hand_written_var_tail =
+  "fn f() -> Int !{IO} =\n" ++
+  "  do\n" ++
+  "    Cons h t <- get_list()\n" ++
+  "    h\n"
+
+let do_bind_hand_written_fixed_length =
+  "fn f() -> Int !{IO} =\n" ++
+  "  do\n" ++
+  "    Cons a (Cons b Nil) <- get_pair()\n" ++
+  "    a + b\n"
+
 fn main() -> Unit !{IO} =
   do
     state <- new_state()
@@ -237,8 +302,8 @@ fn main() -> Unit !{IO} =
 
     assert_eq(state, "3-deep chain inside lambda/do: still found", count_list(lint_rules.lint_ast(nested_in_lambda)), 1)
 
-    assert_eq(state, "list Cons/Nil recursion: no finding (not a Maybe/Result unwrap)", count_list(lint_rules.lint_ast(list_recursion)), 0)
-    assert_eq(state, "list recursion wrapping an inner Maybe match: no finding", count_list(lint_rules.lint_ast(list_recursion_wrapping_maybe)), 0)
+    assert_eq(state, "list Cons/Nil recursion: no staircase-of-doom finding (not a Maybe/Result unwrap)", count_by_rule(lint_rules.lint_ast(list_recursion), "staircase-of-doom"), 0)
+    assert_eq(state, "list recursion wrapping an inner Maybe match: no staircase-of-doom finding", count_by_rule(lint_rules.lint_ast(list_recursion_wrapping_maybe), "staircase-of-doom"), 0)
 
     assert_eq(state, "already let..else (desugars to the same MatchExpr shape): no finding", count_list(lint_rules.lint_ast(already_let_else)), 0)
 
@@ -268,5 +333,22 @@ fn main() -> Unit !{IO} =
     assert_eq(state, "wrap at a call to an unresolved callee (no Vec context): no finding", count_list(lint_rules.lint_ast(wrap_outside_vec_context)), 0)
 
     assert_eq(state, "wrap in a top-level let binding (no Vec context): no finding", count_list(lint_rules.lint_ast(wrap_in_let_binding_no_context)), 0)
+
+    assert_eq(state, "hand-written Cons h t head/tail recursion: no finding (var tail, not fixed-length)", count_list(lint_rules.lint_ast(list_recursion_hand_written)), 0)
+
+    assert_eq(state, "[] / [h | t] sugar: no finding", count_list(lint_rules.lint_ast(list_recursion_sugar)), 0)
+
+    assert_eq(state, "[a, b] fixed-length sugar: no finding", count_list(lint_rules.lint_ast(fixed_length_sugar)), 0)
+
+    assert_eq(state, "hand-written Cons a (Cons b Nil) fixed-length pattern: reported", count_list(lint_rules.lint_ast(fixed_length_hand_written)), 1)
+    assert_eq(state, "hand-written fixed-length pattern: rule id", first_rule(lint_rules.lint_ast(fixed_length_hand_written)), "list-shape-pattern")
+
+    assert_eq(state, "fixed-length pattern nested in a head position (outer chain stays var-tailed): one finding (the inner [a, b])", count_list(lint_rules.lint_ast(nested_fixed_length_in_head)), 1)
+
+    assert_eq(state, "non-list ADT pattern (Maybe): no finding", count_list(lint_rules.lint_ast(non_list_pattern_unaffected)), 0)
+
+    assert_eq(state, "hand-written Cons h t pattern in a do-bind: no finding (var tail, not fixed-length)", count_list(lint_rules.lint_ast(do_bind_hand_written_var_tail)), 0)
+
+    assert_eq(state, "hand-written fixed-length pattern in a do-bind: reported", count_list(lint_rules.lint_ast(do_bind_hand_written_fixed_length)), 1)
 
     summary(state)

@@ -312,6 +312,182 @@ fn positions_to_findings(positions: List source.SourcePos) -> List LintFinding =
       Cons(mk_finding(pos, "redundant-vec-from-list", redundant_vec_wrap_message()), positions_to_findings(rest))
 
 # ---------------------------------------------------------------------------
+# Rule: list-shape-pattern
+#
+# Flags a hand-written Cons/Nil chain that matches an EXACT fixed length —
+# e.g. `Cons a (Cons b Nil)` — which reads more clearly as `[a, b]`
+# (docs/idiomatic-sprout.md "Match lists by shape with […] patterns"). Scoped
+# to fixed-length chains only: a chain whose tail is a bound variable
+# (`Cons h t`, ordinary head/tail recursion) or a wildcard (`Cons h _`,
+# discard the rest) is NOT flagged — a corpus scan showed those two shapes
+# together are ~99% of all hand-written Cons/Nil patterns in this codebase,
+# and `[h | t]`/`[h | _]` convey nothing `Cons h t`/`Cons h _` don't already
+# say. Only a chain that terminates in a literal Nil — every position pinned
+# to an exact length — gets the sugar win.
+#
+# `[…]` pattern sugar desugars to the SAME ConstructorPattern nodes with no
+# distinguishing AST marker (parser.sprout: parse_list_pattern/
+# build_cons_pattern) — but the WHOLE desugared literal shares ONE SourcePos,
+# the position of the `[` token, while a hand-written Cons/Nil node carries
+# the position of its own token. So the same source-text-sniffing trick as
+# is_written_as_match (below) tells them apart, applied as a post-filter.
+
+fn list_shape_message() -> String =
+  "list matched with a fixed length via raw Cons/Nil constructors — [...] list-pattern sugar reads the length at a glance (docs/idiomatic-sprout.md)"
+
+# True when a Cons/Nil pattern chain terminates in a literal Nil — i.e. every
+# link is pinned to an exact position, never a bound tail variable or
+# wildcard that would keep matching arbitrarily longer lists.
+fn chain_terminates_in_nil(pat: ast.Pattern) -> Bool =
+  match pat with
+  | ast.ConstructorPattern name subpats _ ->
+      if name == ast.list_ctor_nil then true
+      else if name == ast.list_ctor_cons then
+        match subpats with
+        | Cons _ (Cons tail Nil) -> chain_terminates_in_nil(tail)
+        | _ -> false  # malformed arity guard
+      else false
+  | _ -> false  # bound variable or wildcard: not a fixed length
+
+# Entry point for any pattern position: a Cons chain that terminates in Nil
+# is a fixed-length ROOT — one finding at the outermost Cons, and further
+# search continues only into the head (an independently-reportable nested
+# list, e.g. a list-of-lists' element). A chain that does NOT terminate in
+# Nil (ordinary head/tail recursion, or a discarded wildcard tail) is left
+# alone itself, but its head and tail are still searched generically for
+# fixed-length patterns nested elsewhere inside them.
+fn find_list_shape_in_pattern(pat: ast.Pattern) -> List source.SourcePos =
+  match pat with
+  | ast.ConstructorPattern name subpats pos ->
+      if name == ast.list_ctor_cons then
+        match subpats with
+        | Cons head (Cons tail Nil) ->
+            if chain_terminates_in_nil(tail)
+            then Cons(pos, find_list_shape_in_pattern(head))
+            else list_append(find_list_shape_in_pattern(head), find_list_shape_in_pattern(tail))
+        | _ -> find_list_shape_in_patterns(subpats)  # malformed arity guard
+      else
+        find_list_shape_in_patterns(subpats)  # bare Nil: no subpatterns, no finding
+  | ast.TuplePattern subpats _ -> find_list_shape_in_patterns(subpats)
+  | _ -> Nil  # Wildcard/Var/Int/Bool/String/Char/Unit: leaves, no subpatterns
+
+fn find_list_shape_in_patterns(pats: List ast.Pattern) -> List source.SourcePos =
+  match pats with
+  | Nil -> Nil
+  | Cons p rest -> list_append(find_list_shape_in_pattern(p), find_list_shape_in_patterns(rest))
+
+fn is_written_as_ctor(src: String, line: Int, col: Int) -> Bool =
+  string.starts_with(rest_of_line(src, line, col), ast.list_ctor_cons)
+  || string.starts_with(rest_of_line(src, line, col), ast.list_ctor_nil)
+
+fn rest_of_line(src: String, line: Int, col: Int) -> String =
+  str_slice(text, col - 1, str_len(text) - (col - 1))
+  where text = nth_line(str_split_lines(src), line, 1)
+
+fn drop_desugared_list_patterns(src: String, positions: List source.SourcePos) -> List source.SourcePos =
+  match positions with
+  | Nil -> Nil
+  | Cons pos rest ->
+      if is_written_as_ctor(src, source.position_line(pos), source.position_column(pos))
+      then Cons(pos, drop_desugared_list_patterns(src, rest))
+      else drop_desugared_list_patterns(src, rest)
+
+fn list_shape_findings(src: String, prog: ast.Program) -> List LintFinding =
+  match prog with
+  | ast.Program decls _ ->
+      list_shape_positions_to_findings(drop_desugared_list_patterns(src, find_list_shape_in_decls(decls)))
+
+fn list_shape_positions_to_findings(positions: List source.SourcePos) -> List LintFinding =
+  match positions with
+  | Nil -> Nil
+  | Cons pos rest ->
+      Cons(mk_finding(pos, "list-shape-pattern", list_shape_message()), list_shape_positions_to_findings(rest))
+
+fn find_list_shape_in_decls(decls: List ast.Decl) -> List source.SourcePos =
+  match decls with
+  | Nil -> Nil
+  | Cons d rest -> list_append(find_list_shape_in_decl(d), find_list_shape_in_decls(rest))
+
+fn find_list_shape_in_decl(d: ast.Decl) -> List source.SourcePos =
+  match d with
+  | ast.FnDecl _ _ _ _ _ body _ -> find_list_shape_in_expr(body)
+  | ast.LetDecl _ body _ -> find_list_shape_in_expr(body)
+  | ast.InstanceDecl _ _ methods _ -> find_list_shape_in_instance_methods(methods)
+  | _ -> Nil
+
+fn find_list_shape_in_instance_methods(methods: List ast.InstanceMethodImpl) -> List source.SourcePos =
+  match methods with
+  | Nil -> Nil
+  | Cons m rest ->
+      match m with
+      | ast.InstanceMethodImpl _ _ _ _ body -> list_append(find_list_shape_in_expr(body), find_list_shape_in_instance_methods(rest))
+
+# Reuses the SAME generic expr traversal shape as walk_expr above (a
+# separate, parallel walk — see walk_expr's own header comment on why every
+# variant is covered explicitly). Pattern positions only exist at match
+# branches and do-binds (ast.MatchBranch/ast.DoBindStep) — function/lambda
+# params are bare names (ast.Param String (Maybe TypeExpr)), no patterns.
+fn find_list_shape_in_expr(e: ast.Expr) -> List source.SourcePos =
+  match e with
+  | ast.MatchExpr scrut branches _ ->
+      list_append(find_list_shape_in_expr(scrut), find_list_shape_in_branches(branches))
+  | ast.IfExpr cond then_ else_ _ ->
+      list_append(find_list_shape_in_expr(cond), list_append(find_list_shape_in_expr(then_), find_list_shape_in_expr(else_)))
+  | ast.CallExpr callee args _ ->
+      list_append(find_list_shape_in_expr(callee), find_list_shape_in_exprs(args))
+  | ast.TupleExpr elems _ -> find_list_shape_in_exprs(elems)
+  | ast.BinaryExpr _ left right _ ->
+      list_append(find_list_shape_in_expr(left), find_list_shape_in_expr(right))
+  | ast.UnaryExpr _ operand _ -> find_list_shape_in_expr(operand)
+  | ast.LambdaExpr _ body _ -> find_list_shape_in_expr(body)
+  | ast.DoExpr steps _ -> find_list_shape_in_do_steps(steps)
+  | ast.RecordExpr _ fields _ -> find_list_shape_in_record_fields(fields)
+  | ast.GetFieldExpr rec_expr _ _ -> find_list_shape_in_expr(rec_expr)
+  | ast.IntRangeExpr lo hi _ ->
+      list_append(find_list_shape_in_expr(lo), find_list_shape_in_expr(hi))
+  | ast.StringTemplateExpr parts _ -> find_list_shape_in_template_parts(parts)
+  | _ -> Nil
+
+fn find_list_shape_in_exprs(exprs: List ast.Expr) -> List source.SourcePos =
+  match exprs with
+  | Nil -> Nil
+  | Cons e rest -> list_append(find_list_shape_in_expr(e), find_list_shape_in_exprs(rest))
+
+fn find_list_shape_in_branches(branches: List ast.MatchBranch) -> List source.SourcePos =
+  match branches with
+  | Nil -> Nil
+  | Cons b rest ->
+      match b with
+      | ast.MatchBranch pat body ->
+          list_append(find_list_shape_in_pattern(pat), list_append(find_list_shape_in_expr(body), find_list_shape_in_branches(rest)))
+
+fn find_list_shape_in_do_steps(steps: List ast.DoStep) -> List source.SourcePos =
+  match steps with
+  | Nil -> Nil
+  | Cons s rest -> list_append(find_list_shape_in_do_step(s), find_list_shape_in_do_steps(rest))
+
+fn find_list_shape_in_do_step(s: ast.DoStep) -> List source.SourcePos =
+  match s with
+  | ast.DoBindStep pat value -> list_append(find_list_shape_in_pattern(pat), find_list_shape_in_expr(value))
+  | ast.DoLetStep _ value -> find_list_shape_in_expr(value)
+  | ast.DoExprStep value -> find_list_shape_in_expr(value)
+
+fn find_list_shape_in_record_fields(fields: List ast.RecordField) -> List source.SourcePos =
+  match fields with
+  | Nil -> Nil
+  | Cons f rest ->
+      match f with
+      | ast.RecordField _ value -> list_append(find_list_shape_in_expr(value), find_list_shape_in_record_fields(rest))
+
+fn find_list_shape_in_template_parts(parts: List ast.TemplateExprPart) -> List source.SourcePos =
+  match parts with
+  | Nil -> Nil
+  | Cons p rest ->
+      match p with
+      | ast.LitPart _ -> find_list_shape_in_template_parts(rest)
+      | ast.InterpPart e -> list_append(find_list_shape_in_expr(e), find_list_shape_in_template_parts(rest))
+
+# ---------------------------------------------------------------------------
 # Program-level entry points
 
 fn walk_instance_methods(methods: List ast.InstanceMethodImpl) -> List LintFinding =
@@ -375,4 +551,4 @@ export fn lint_ast(src: String) -> List LintFinding =
   | Ok toks ->
       match parser.parse_program(toks) with
       | Err _ -> Nil
-      | Ok prog -> drop_desugared_matches(src, lint_program(prog))
+      | Ok prog -> list_append(drop_desugared_matches(src, lint_program(prog)), list_shape_findings(src, prog))
