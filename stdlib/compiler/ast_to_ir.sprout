@@ -1414,6 +1414,35 @@ fn translate_do_bind_maybe_finish_unboxed(pat: ast.Pattern, rest: List typed_ast
 #     <rest_final>: br label %do_done_K
 #   do_done_K:
 #     %result = phi i64 [%e, %do_short_K], [%rest_name, <rest_final>]
+#
+# The boxed (non-unboxed) path: taken when do_bind_unbox_target finds no
+# eligible unbox target. Split out so translate_do_bind_result's own
+# do_bind_unbox_target dispatch reads as a flat `let..else` (a call, not an
+# inline multi-line fallback — that layout tripped the let-binding's
+# step-boundary scanner, since the nested match's shallow-indented arms sat
+# at columns below the binding's own layout column).
+fn translate_do_bind_result_boxed(pat: ast.Pattern, e: typed_ast.TypedExpr,
+                                  rest: List typed_ast.TypedDoStep,
+                                  params: List String, ctors: Dict sprout_ir.CtorInfo,
+                                  idx: Int, cur_label: String, cur_ops: List sprout_ir.IROp,
+                                  captures: Dict String,
+                                  lifted_ref: Ref (List sprout_ir.IRFunction),
+                                  top_level: Set, let_names: Set, fn_arities: Dict Int,
+                                  lambda_ctr_ref: Ref Int, lifted_idx_ref: Ref (Dict Int),
+                                  name_prefix: String) ->
+    Result String (List sprout_ir.IRBlock, String, List sprout_ir.IROp, String, Int) !{IO} =
+  match translate_expr(e, params, ctors, idx, cur_label, cur_ops,
+                       captures, lifted_ref, top_level, let_names, fn_arities,
+                       lambda_ctr_ref, lifted_idx_ref, name_prefix) with
+  | Err msg -> Err(msg)
+  | Ok er ->
+      match er with
+      | (eblocks, elbl, eops, ename, eidx) ->
+          translate_do_bind_result_finish(pat, rest, eblocks, elbl, eops, ename, eidx,
+                                          params, ctors, captures, lifted_ref,
+                                          top_level, let_names, fn_arities,
+                                          lambda_ctr_ref, lifted_idx_ref, name_prefix)
+
 fn translate_do_bind_result(pat: ast.Pattern, e: typed_ast.TypedExpr,
                             rest: List typed_ast.TypedDoStep,
                             params: List String, ctors: Dict sprout_ir.CtorInfo,
@@ -1424,36 +1453,27 @@ fn translate_do_bind_result(pat: ast.Pattern, e: typed_ast.TypedExpr,
                             lambda_ctr_ref: Ref Int, lifted_idx_ref: Ref (Dict Int),
                             name_prefix: String) ->
     Result String (List sprout_ir.IRBlock, String, List sprout_ir.IROp, String, Int) !{IO} =
-  match do_bind_unbox_target(e, params, captures, let_names, top_level, ctors) with
-  | Just target ->
-      match e with
-      | typed_ast.TCall _ eargs _ _ ->
-          match translate_args_scalar(eargs, params, ctors, idx, cur_label, cur_ops, Nil, Nil, captures,
-                                      lifted_ref, top_level, let_names, fn_arities, lambda_ctr_ref,
-                                      lifted_idx_ref, name_prefix) with
-          | Err msg -> Err(msg)
-          | Ok ar ->
-              match ar with
-              | (ablocks, albl, aops, anames, aidx) ->
-                  match (fresh_name(name_prefix, aidx), fresh_name(name_prefix, aidx + 1)) with
-                  | (tag_ssa, val_ssa) ->
-                      translate_do_bind_result_finish_unboxed(pat, rest, ablocks, albl,
-                        list_append(aops, Cons(sprout_ir.IRCallUnboxed2(tag_ssa, val_ssa, sprout_ir.IRTUnknown, target, anames), Nil)),
-                        tag_ssa, val_ssa, aidx + 2, params, ctors, captures, lifted_ref,
-                        top_level, let_names, fn_arities, lambda_ctr_ref, lifted_idx_ref, name_prefix)
-      | _ -> Err("ast_to_ir: do-bind unbox target on non-call (internal error)")
-  | Nothing ->
-      match translate_expr(e, params, ctors, idx, cur_label, cur_ops,
-                           captures, lifted_ref, top_level, let_names, fn_arities,
-                           lambda_ctr_ref, lifted_idx_ref, name_prefix) with
+  let Just target = do_bind_unbox_target(e, params, captures, let_names, top_level, ctors)
+      else translate_do_bind_result_boxed(pat, e, rest, params, ctors, idx, cur_label, cur_ops,
+             captures, lifted_ref, top_level, let_names, fn_arities, lambda_ctr_ref, lifted_idx_ref,
+             name_prefix)
+  in
+  match e with
+  | typed_ast.TCall _ eargs _ _ ->
+      match translate_args_scalar(eargs, params, ctors, idx, cur_label, cur_ops, Nil, Nil, captures,
+                                  lifted_ref, top_level, let_names, fn_arities, lambda_ctr_ref,
+                                  lifted_idx_ref, name_prefix) with
       | Err msg -> Err(msg)
-      | Ok er ->
-          match er with
-          | (eblocks, elbl, eops, ename, eidx) ->
-              translate_do_bind_result_finish(pat, rest, eblocks, elbl, eops, ename, eidx,
-                                              params, ctors, captures, lifted_ref,
-                                              top_level, let_names, fn_arities,
-                                              lambda_ctr_ref, lifted_idx_ref, name_prefix)
+      | Ok ar ->
+          match ar with
+          | (ablocks, albl, aops, anames, aidx) ->
+              match (fresh_name(name_prefix, aidx), fresh_name(name_prefix, aidx + 1)) with
+              | (tag_ssa, val_ssa) ->
+                  translate_do_bind_result_finish_unboxed(pat, rest, ablocks, albl,
+                    list_append(aops, Cons(sprout_ir.IRCallUnboxed2(tag_ssa, val_ssa, sprout_ir.IRTUnknown, target, anames), Nil)),
+                    tag_ssa, val_ssa, aidx + 2, params, ctors, captures, lifted_ref,
+                    top_level, let_names, fn_arities, lambda_ctr_ref, lifted_idx_ref, name_prefix)
+  | _ -> Err("ast_to_ir: do-bind unbox target on non-call (internal error)")
 
 # Unboxed `pat <- f()` for Result: call @target -> { tag, val }, short-circuit on
 # Err by REBUILDING Err(val) (the boxed path propagated the box; unboxed has none),
