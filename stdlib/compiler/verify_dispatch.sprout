@@ -202,10 +202,46 @@ fn check_constraints(constraints: List ast.TypeConstraint, dict_heads: List (Str
   match constraints with
   | Nil -> Nil
   | Cons c crest ->
-      match dict_heads with
-      | Nil -> Nil  # fewer dicts than constraints — the caller under-supplied; stop.
-      | Cons dh drest ->
-          Cons(check_one(c, dh, theta, pos), check_constraints(crest, drest, theta, pos))
+      match take_by_class(constraint_class(c), dict_heads) with
+      | Just (dh, remaining) ->
+          Cons(check_one(c, dh, theta, pos), check_constraints(crest, remaining, theta, pos))
+      | Nothing ->
+          Cons(check_missing(c, theta, pos), check_constraints(crest, dict_heads, theta, pos))
+
+# Remove and return the first (class, head) entry in dict_heads whose class
+# matches class_name (short name), preserving order of the remainder — mirrors
+# infer.sprout's take_dict_for_class. Constraints must be matched to dicts BY
+# CLASS, not position: a constraint whose dict the resolver dropped (see
+# check_missing) leaves a gap that positional pairing would misalign against
+# every constraint after it.
+fn take_by_class(class_name: String, dict_heads: List (String, Maybe String)) -> Maybe((String, Maybe String), List (String, Maybe String)) =
+  match dict_heads with
+  | Nil -> Nothing
+  | Cons dh rest ->
+      match dh with
+      | (dict_class, _) ->
+          if short(dict_class) == short(class_name)
+          then Just((dh, rest))
+          else
+            match take_by_class(class_name, rest) with
+            | Just (found, remaining) -> Just((found, Cons(dh, remaining)))
+            | Nothing -> Nothing
+
+# No dict was injected for this constraint's class at all — as opposed to
+# check_one's "a dict exists but its head might disagree". Legitimate when the
+# constraint's var is still underdetermined at this call site (a genuinely
+# forwarded/polymorphic obligation the resolver defers to a hidden param
+# elsewhere); a real soundness gap when theta already pins the var to a
+# CONCRETE type, since a headed constraint with a concrete instantiation and
+# no dict means the resolver silently dropped an unsatisfiable instance
+# instead of rejecting the program (return-position constraints resolved only
+# after the call's return type is concrete, e.g. `concat_map`'s `Monoid t`
+# when `t` resolves to `Vec Int` and `Vec` has no Monoid instance).
+fn check_missing(c: ast.TypeConstraint, theta: Dict types.Type, pos: source.SourcePos) -> VerifyOutcome =
+  let Just v = constraint_var(c) else VerifySkip(constraint_class(c) ++ ": non-var constraint head")
+      Just truth_ty = dict_get(v, theta) else VerifySkip(constraint_class(c) ++ " " ++ v ++ ": underdetermined by source signature")
+      Just truth_head = type_head_str(truth_ty) else VerifySkip(constraint_class(c) ++ " " ++ v ++ ": truth still polymorphic")
+  in VerifyMismatch(pos, "No instance of " ++ constraint_class(c) ++ " for " ++ truth_head)
 
 fn check_one(c: ast.TypeConstraint, dict_head: (String, Maybe String), theta: Dict types.Type, pos: source.SourcePos) -> VerifyOutcome =
   match dict_head with

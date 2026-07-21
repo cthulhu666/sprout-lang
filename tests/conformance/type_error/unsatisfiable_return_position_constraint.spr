@@ -1,0 +1,14 @@
+module main
+
+# `concat_map`'s `Monoid t` constraint is return-position-only: `t` is fixed
+# by `dup`'s return type (`Vec Int`), never by an argument. `Vec` has only
+# `Semigroup`, no `Monoid` instance. This must be rejected at compile time
+# with the same diagnostic a direct-call constraint violation gets — not
+# silently accepted and crashed at runtime with "non-exhaustive match"
+# (build_constrained_fn_dicts_via_field's return-type instance lookup used
+# to drop an unresolved headed constraint instead of erroring).
+
+fn dup(x: Int) -> Vec Int = foldable_to_vec([x, x])
+
+fn main() -> Unit !{IO} =
+  print(int_to_string(vec_length(concat_map(dup, [1, 2]))))
