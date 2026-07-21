@@ -5397,41 +5397,63 @@ export fn mutual_eligible_for(name: String, eligible: Dict (List (String, Int)))
 # Phase B off the non-tail recursive-descent superset.  Returns names verbatim (as
 # they appear on the TVar callee), for matching against the decl fn names.
 export fn pb_tail_callees(body: typed_ast.TypedExpr) -> Set =
+  pb_tail_callees_sc(body, set_empty())
+
+# Scope-aware tail-callee collection.  `bound` holds names bound MORE LOCALLY than
+# the top-level fn — params, IIFE-lambda params, match-arm pattern vars, and
+# do-`let`/`<-` binders in scope for the tail step.  A tail call whose callee TVar
+# names such a local is an INDIRECT closure call, not a static edge to the
+# same-named top-level fn; recording it would fabricate a spurious SCC and later
+# route the `$u` rewrite to a global (finding #1: silent miscompile).  Mirrors
+# translate_call's capture→param→let precedence; see callee_name_shadowed.
+fn pb_tail_callees_sc(body: typed_ast.TypedExpr, bound: Set) -> Set =
   match body with
   | typed_ast.TCall callee args _ _ ->
       match callee with
-      | typed_ast.TVar name _ _ -> set_insert(name, set_empty())
+      | typed_ast.TVar name _ _ ->
+          if set_member(name, bound) then set_empty() else set_insert(name, set_empty())
       | typed_ast.TLambda lparams lbody _ _ ->
-          # IIFE (let/where) at full arity: the let-body is the tail position.
+          # IIFE (let/where) at full arity: the let-body is the tail position; the
+          # lambda params shadow within it.
           if list_length(lparams) == list_length(args)
-          then pb_tail_callees(lbody)
+          then pb_tail_callees_sc(lbody, set_union(bound, set_from_list(param_names(lparams))))
           else set_empty()
       | _ -> set_empty()
-  | typed_ast.TIf _ t e _ _ -> set_union(pb_tail_callees(t), pb_tail_callees(e))
-  | typed_ast.TMatch _ arms _ _ -> pb_tail_callees_arms(arms)
-  | typed_ast.TDo steps _ _ -> pb_tail_callees_do_last(steps)
+  | typed_ast.TIf _ t e _ _ -> set_union(pb_tail_callees_sc(t, bound), pb_tail_callees_sc(e, bound))
+  | typed_ast.TMatch _ arms _ _ -> pb_tail_callees_arms(arms, bound)
+  | typed_ast.TDo steps _ _ -> pb_tail_callees_do_last(steps, bound)
   | _ -> set_empty()
 
-fn pb_tail_callees_arms(arms: List typed_ast.TypedMatchBranch) -> Set =
+fn pb_tail_callees_arms(arms: List typed_ast.TypedMatchBranch, bound: Set) -> Set =
   match arms with
   | Nil -> set_empty()
   | Cons b rest ->
       match b with
-      | typed_ast.TypedMatchBranch _ body -> set_union(pb_tail_callees(body), pb_tail_callees_arms(rest))
+      | typed_ast.TypedMatchBranch pat body ->
+          set_union(pb_tail_callees_sc(body, set_union(bound, set_from_list(pattern_names(pat)))),
+                    pb_tail_callees_arms(rest, bound))
+
+# Names a do-step binds into scope for the steps that follow it.
+fn pb_do_step_extend_bound(step: typed_ast.TypedDoStep, bound: Set) -> Set =
+  match step with
+  | typed_ast.TDoLetStep name _ -> set_insert(name, bound)
+  | typed_ast.TDoBindStep pat _ -> set_union(bound, set_from_list(pattern_names(pat)))
+  | typed_ast.TDoExprStep _ -> bound
 
 # Only the LAST do-step is in tail position, and only if it is a plain expression
-# step (a trailing `let`/`<-` bind is not a direct named tail call).
-fn pb_tail_callees_do_last(steps: List typed_ast.TypedDoStep) -> Set =
+# step (a trailing `let`/`<-` bind is not a direct named tail call).  Earlier steps'
+# binders are threaded into `bound` so a last-step call to a shadowed name is skipped.
+fn pb_tail_callees_do_last(steps: List typed_ast.TypedDoStep, bound: Set) -> Set =
   match steps with
   | Nil -> set_empty()
   | Cons step rest ->
       match rest with
       | Nil ->
           match step with
-          | typed_ast.TDoExprStep e -> pb_tail_callees(e)
+          | typed_ast.TDoExprStep e -> pb_tail_callees_sc(e, bound)
           | typed_ast.TDoLetStep _ _ -> set_empty()
           | typed_ast.TDoBindStep _ _ -> set_empty()
-      | _ -> pb_tail_callees_do_last(rest)
+      | _ -> pb_tail_callees_do_last(rest, pb_do_step_extend_bound(step, bound))
 
 # --- Heterogeneous-arity tail-call SCC detection over typed decls. -----------
 # Result: one (name, arity) list per SCC that is (a) a real mutual cycle (size >= 2)
@@ -5470,8 +5492,10 @@ fn pb_tail_graph(decls: List typed_ast.TypedDecl, fnset: Set) -> Dict Set =
   | Nil -> dict_empty()
   | Cons d rest ->
       match d with
-      | typed_ast.TFnDecl name _ _ _ _ body ->
-          dict_set(name, pb_set_keep_in(pb_tail_callees(body), fnset), pb_tail_graph(rest, fnset))
+      | typed_ast.TFnDecl name params _ _ _ body ->
+          dict_set(name,
+                   pb_set_keep_in(pb_tail_callees_sc(body, set_from_list(param_names(params))), fnset),
+                   pb_tail_graph(rest, fnset))
       | _ -> pb_tail_graph(rest, fnset)
 
 # The SCC (in `order`) of `f`: itself plus every g mutually tail-reachable with it.
@@ -5527,10 +5551,21 @@ fn pb_members_with_arity(members: List String, arity: Dict Int) -> List (String,
 # non-empty ctor list.  Tuples/functions/type-vars are excluded (not the tested
 # single-i64-return shape).  See docs/mutual-tco-phase-b-v0.md §5b.
 fn pb_ret_unifiable(t: types.Type) -> Bool =
-  match t with
-  | types.TConst _ -> true
-  | types.TApp _ _ -> true
-  | _ -> false
+  # The conjunct makes "Phase B detection ⇒ Phase A musttail-eligibility"
+  # structural rather than coincidental: Phase A's gate is llvm_ret_type == "i64"
+  # (mutual_tco_rewrite_fn), so Phase B must not unify anything that gate would
+  # reject.  Today llvm_ret_type ≡ "i64", so this conjunct is a no-op — but it
+  # future-proofs the reserved sret return work (PR 2b), where llvm_ret_type turns
+  # conditional and a bare shape test would silently unify sret cycles Phase A then
+  # declines.  The shape test stays the STRICTER half (also excludes TFunc/TVar).
+  # (Broadening the shape test to admit TTuple is a separate missed-optimization —
+  # deferred: a tuple return has no adt_index entry, so worker-repack would derive
+  # an empty ctor list. See BACKLOG §mutual-TCO follow-ups.)
+  (llvm_ret_type(t) == "i64") &&
+  (match t with
+   | types.TConst _ -> true
+   | types.TApp _ _ -> true
+   | _ -> false)
 
 fn pb_unifiable_ret_map(decls: List typed_ast.TypedDecl) -> Dict Bool =
   match decls with
@@ -5622,45 +5657,54 @@ fn pb_pad_to(args: List typed_ast.TypedExpr, m: Int, pos: source.SourcePos) -> L
 # Rewrite calls to SCC members that sit in TAIL position: retarget to `<g>$u` and pad
 # args to m.  Mirrors pb_tail_callees' traversal exactly (so only true tail edges are
 # rewritten); non-tail sub-exprs and non-member calls are left untouched.
-fn pb_retarget_tail(body: typed_ast.TypedExpr, mset: Set, m: Int) -> typed_ast.TypedExpr =
+# `bound` is threaded identically to pb_tail_callees_sc: a callee whose name is a
+# local binding (param/IIFE/arm/do-binder) must NOT be retargeted to `<name>$u`
+# even when it collides with a member name, or the indirect closure call becomes a
+# direct global call (finding #1). Detection already drops such edges; this keeps
+# rewrite consistent when a legit SCC formed via other edges.
+fn pb_retarget_tail(body: typed_ast.TypedExpr, mset: Set, m: Int, bound: Set) -> typed_ast.TypedExpr =
   match body with
   | typed_ast.TCall callee args ty pos ->
       match callee with
       | typed_ast.TVar name vty vpos ->
-          if set_member(name, mset)
+          if set_member(name, mset) && ! set_member (name, bound)
           then typed_ast.TCall(typed_ast.TVar(name ++ "$u", vty, vpos), pb_pad_to(args, m, pos), ty, pos)
           else body
       | typed_ast.TLambda lparams lbody lty lpos ->
           if list_length(lparams) == list_length(args)
-          then typed_ast.TCall(typed_ast.TLambda(lparams, pb_retarget_tail(lbody, mset, m), lty, lpos), args, ty, pos)
+          then typed_ast.TCall(typed_ast.TLambda(lparams,
+                 pb_retarget_tail(lbody, mset, m, set_union(bound, set_from_list(param_names(lparams)))),
+                 lty, lpos), args, ty, pos)
           else body
       | _ -> body
   | typed_ast.TIf c t e ty pos ->
-      typed_ast.TIf(c, pb_retarget_tail(t, mset, m), pb_retarget_tail(e, mset, m), ty, pos)
+      typed_ast.TIf(c, pb_retarget_tail(t, mset, m, bound), pb_retarget_tail(e, mset, m, bound), ty, pos)
   | typed_ast.TMatch scrut arms ty pos ->
-      typed_ast.TMatch(scrut, pb_retarget_arms(arms, mset, m), ty, pos)
+      typed_ast.TMatch(scrut, pb_retarget_arms(arms, mset, m, bound), ty, pos)
   | typed_ast.TDo steps ty pos ->
-      typed_ast.TDo(pb_retarget_do(steps, mset, m), ty, pos)
+      typed_ast.TDo(pb_retarget_do(steps, mset, m, bound), ty, pos)
   | _ -> body
 
-fn pb_retarget_arms(arms: List typed_ast.TypedMatchBranch, mset: Set, m: Int) -> List typed_ast.TypedMatchBranch =
+fn pb_retarget_arms(arms: List typed_ast.TypedMatchBranch, mset: Set, m: Int, bound: Set) -> List typed_ast.TypedMatchBranch =
   match arms with
   | Nil -> Nil
   | Cons b rest ->
       match b with
       | typed_ast.TypedMatchBranch pat body ->
-          Cons(typed_ast.TypedMatchBranch(pat, pb_retarget_tail(body, mset, m)), pb_retarget_arms(rest, mset, m))
+          Cons(typed_ast.TypedMatchBranch(pat,
+                 pb_retarget_tail(body, mset, m, set_union(bound, set_from_list(pattern_names(pat))))),
+               pb_retarget_arms(rest, mset, m, bound))
 
-fn pb_retarget_do(steps: List typed_ast.TypedDoStep, mset: Set, m: Int) -> List typed_ast.TypedDoStep =
+fn pb_retarget_do(steps: List typed_ast.TypedDoStep, mset: Set, m: Int, bound: Set) -> List typed_ast.TypedDoStep =
   match steps with
   | Nil -> Nil
   | Cons step rest ->
       match rest with
       | Nil ->
           match step with
-          | typed_ast.TDoExprStep e -> Cons(typed_ast.TDoExprStep(pb_retarget_tail(e, mset, m)), Nil)
+          | typed_ast.TDoExprStep e -> Cons(typed_ast.TDoExprStep(pb_retarget_tail(e, mset, m, bound)), Nil)
           | _ -> Cons(step, Nil)
-      | _ -> Cons(step, pb_retarget_do(rest, mset, m))
+      | _ -> Cons(step, pb_retarget_do(rest, mset, m, pb_do_step_extend_bound(step, bound)))
 
 # For an SCC member, emit [trampoline (original name/arity), `<name>$u` (arity m)].
 fn pb_gen_pair(name: String, params: List ast.Param, ret: Maybe ast.TypeExpr,
@@ -5668,7 +5712,7 @@ fn pb_gen_pair(name: String, params: List ast.Param, ret: Maybe ast.TypeExpr,
                body: typed_ast.TypedExpr, m: Int, mset: Set) -> List typed_ast.TypedDecl =
   Cons(typed_ast.TFnDecl(name, params, ret, eff, constraints, tramp_body),
     Cons(typed_ast.TFnDecl(name ++ "$u", list_append(params, pb_pad_params(list_length(params), m - list_length(params))),
-                           ret, eff, constraints, pb_retarget_tail(body, mset, m)),
+                           ret, eff, constraints, pb_retarget_tail(body, mset, m, set_from_list(param_names(params)))),
       Nil))
 where
   pos = typed_ast.typed_expr_pos(body)

@@ -36,6 +36,15 @@ fn dummy_params(n: Int) -> List ast.Param =
 fn fndecl(name: String, arity: Int, body: typed_ast.TypedExpr) -> typed_ast.TypedDecl =
   typed_ast.TFnDecl(name, dummy_params(arity), Nothing, Nothing, Nil, body)
 
+fn named_params(names: List String) -> List ast.Param =
+  match names with
+  | Nil -> Nil
+  | Cons n rest -> Cons(ast.Param(n, Nothing), named_params(rest))
+fn fndecl_named(name: String, pnames: List String, body: typed_ast.TypedExpr) -> typed_ast.TypedDecl =
+  typed_ast.TFnDecl(name, named_params(pnames), Nothing, Nothing, Nil, body)
+fn arm_pat(name: String, body: typed_ast.TypedExpr) -> typed_ast.TypedMatchBranch =
+  typed_ast.TypedMatchBranch(ast.VarPattern(name, no_pos()), body)
+
 fn first_scc(sccs: List (List (String, Int))) -> List (String, Int) =
   match sccs with | Nil -> Nil | [h | _] -> h
 fn scc_size_at(sccs: List (List (String, Int)), _i: Int) -> Int = list_length(first_scc(sccs))
@@ -160,5 +169,27 @@ fn main() -> Unit !{IO} =
     | Nothing -> assert_true(state, "padt trampoline exists", false)
     | Just b -> assert_true(state, "padt trampoline body typed as ADT return (not Int)",
                             (match typed_ast.typed_expr_type(b) with | types.TApp _ _ -> true | _ -> false))
+
+    # --- Scope-aware tail-edge detection (finding #1: shadowing must not route) ---
+
+    # 12. An IIFE (let/where) lambda param that shadows the callee name is a LOCAL,
+    #     not the global fn — so it is not a tail edge.
+    let sh1 = ast_to_ir.pb_tail_callees(tcall(lam("g", tcall(tvar("g"), Nil)), Cons(tint(1), Nil)))
+    assert_true(state, "IIFE param shadows callee -> {} (not global g)", set_size(sh1) == 0)
+
+    # 13. A match-arm pattern variable that shadows the callee name is a LOCAL binding.
+    let sh2 = ast_to_ir.pb_tail_callees(tmatch(tvar("s"), Cons(arm_pat("g", tcall(tvar("g"), Nil)), Nil)))
+    assert_true(state, "match-arm binder shadows callee -> {}", set_size(sh2) == 0)
+
+    # 14. A fn PARAM named like a mutually-recursive member must not create a spurious
+    #     SCC: `a`'s first param is `helper`, and `a` tail-calls that PARAM (an indirect
+    #     closure call), not the top-level `helper`. Detecting {helper,a} here and
+    #     retargeting a$u's `helper(n)` to `helper$u(n,0)` would be a silent miscompile.
+    let sh_helper = fndecl_named("helper", Cons("x", Nil), tcall(tvar("a"), Cons(tvar("x"), Cons(tint(0), Nil))))
+    let sh_a = fndecl_named("a", Cons("helper", Cons("n", Nil)), tcall(tvar("helper"), Cons(tvar("n"), Nil)))
+    assert_true(state, "param shadows member: no spurious hetero SCC",
+                list_length(ast_to_ir.pb_hetero_sccs(Cons(sh_helper, Cons(sh_a, Nil)))) == 0)
+    assert_true(state, "param shadows member: phase_b_unify leaves decls unchanged (2)",
+                list_length(ast_to_ir.phase_b_unify(Cons(sh_helper, Cons(sh_a, Nil)))) == 2)
 
     summary(state)

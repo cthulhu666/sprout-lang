@@ -361,3 +361,53 @@ is a product call: how likely is user code to hit it, weighed against the build 
 converts the confirmed risk into a failing test the transform must flip to GREEN. It is NOT yet
 in the gating suite (it would stay RED until Phase B lands); hold it until the transform is built,
 or commit it to a known-broken/xfail set.
+
+## 12. Post-landing code review (2026-07-21)
+
+A recall-biased multi-angle review of the whole arc (Phase A `musttail` `15fce5d`, arc-b
+IIFE-inline `426aee2`, Phase B scalar `9367288`, Phase B width-2 ADT `06698a2`). The arc is
+well-defended: over-approximated mutual edges are loud-fail (a wrong edge is a prototype-mismatched
+`musttail` the LLVM verifier rejects, never a silent miscompile), every IR-walking pass grew an
+explicit `IRTailCall` arm, and the width-2 ADT cap is a real `IRRetUnboxed2 {tag,val}` boundary
+(not arbitrary). Ten findings survived verification; disposition below.
+
+**Fixed in this change:**
+
+- **#1 (correctness — silent miscompile) — FIXED.** `pb_tail_callees`/`pb_retarget_tail` matched
+  a tail-call callee purely by `TVar` name with no scope awareness. A parameter, IIFE-lambda
+  param, match-arm pattern var, or do-`let`/`<-` binder that *shadows* a top-level SCC member's
+  name was recorded as a static tail edge and later routed to the global `<name>$u` — turning an
+  indirect closure call into a direct call to the wrong function. Fix: thread a `bound: Set` of
+  locally-bound names through detection and retarget (seeded from the enclosing fn's params,
+  extended by lambda params / `pattern_names` / do-binders as the walk descends), skipping any
+  callee whose name is bound. Regression: `test_phase_b.spr` cases 12–14 (IIFE-, match-arm-, and
+  param-shadowing), RED-verified against the pre-fix seed. Contrived but constructible and gated by
+  nothing before this fix.
+- **#4 (altitude — predicate divergence) — FIXED (conjunct only).** `pb_ret_unifiable` re-derived
+  "returns i64" by matching type *shape* instead of consulting the authority `llvm_ret_type` that
+  Phase A's real gate uses. Fix: added the `llvm_ret_type(t) == "i64"` conjunct so "Phase B
+  detection ⇒ Phase A musttail-eligibility" is structural. A **no-op today** (`llvm_ret_type` ≡
+  `"i64"`) — its value is future-proofing the reserved sret work, where the bare shape test would
+  silently unify sret cycles Phase A then declines. The *tuple missed-optimization* half (broaden
+  the shape test to admit `TTuple`) is **deferred**, not done — see BACKLOG (a tuple return has no
+  `adt_index` entry, so worker-repack would derive an empty ctor list; broadening needs that path
+  handled first).
+
+**Deferred to BACKLOG (§1 Phase B follow-ups):** #2 missing arity re-check in `pb_retarget_tail`
+(latent; gated today by the return-type filter rejecting `TFunc`); #3 `mutual_filter_targets`
+param-type gate dropped vs `docs/mutual-tco-v0.md` §4a (loud-fail, not silent, if a non-i64 param
+ABI ever lands); #4-tuple the missed-opt above; #5 SCC name-matching assumes bare == qualified
+callee names (cross-module hetero cycle silently unoptimized if they diverge; untested); #6
+`pb_retarget_*` duplicates the `pb_tail_callees_*` tail-grammar walk (drift → detection/rewrite
+disagree); #7 SCC via repeated whole-graph reachability is O(n²·(V+E)) on every compile incl.
+bootstrap; #8 `pb_scc_of_rest` is a provably-equivalent copy of `pb_scc_of`; #9 `test_ir_codegen_closures.spr`
+T19 assertion diluted to a substring; #10 `build_ret_i64` is vacuous (`llvm_ret_type` ≡ i64), so the
+i64 eligibility gate collapses to one string test.
+
+**Checked and cleared (not defects):** tuples/functions are excluded by the return gate
+(`TTuple`/`TFunc` are distinct `Type` variants → `_ -> false`); the width-3 "empty repack" crash is
+structurally unreachable (`is_simple_width2_arm`'s `max_ar ≤ 1` gates worker routing for the whole
+type); the arity-only mutual prototype check is sound today (all values lower to i64) and loud-fail
+otherwise; `IRTailCall` is handled by every IR walker; the IIFE-inline splice models the established
+`TDoLetStep` rooting path; `$` is valid in unquoted LLVM identifiers; Phase B ordering is correct
+(runs before all arity/return maps are built). The arc adds **no** new builtins/externs.
