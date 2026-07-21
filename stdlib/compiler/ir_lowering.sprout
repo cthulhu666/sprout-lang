@@ -650,7 +650,14 @@ fn emit_ctor_reg_calls(regs: List sprout_ir.CtorReg) -> String =
 # `fn main` body into @__sprout_user_main.  The shim calls it after the
 # ctor/init preamble.  A forward declare is emitted so the call type-checks
 # even when @__sprout_user_main appears later in the output.
-export fn main_shim(regs: List sprout_ir.CtorReg, has_init: Bool, has_user_main: Bool) -> String =
+#
+# main_returns_int signals that main's declared return type was `Int`
+# (ast_to_ir emits @__sprout_user_main_int instead of @__sprout_user_main in
+# that case — see ast_to_ir.translate_decl).  When true, the i64 result is
+# truncated to i32 and becomes the process exit code; otherwise the shim
+# always `ret i32 0`, exactly as before this distinction existed, so every
+# Unit-returning main keeps its current exit-code-0 behaviour unconditionally.
+export fn main_shim(regs: List sprout_ir.CtorReg, has_init: Bool, has_user_main: Bool, main_returns_int: Bool) -> String =
   "define i32 @main(i32 %argc, ptr %argv) {\nentry:\n" ++
     # Stash argc/argv into the runtime before any user code so argv_all()/
     # argv_get() work (mirrors direct codegen).  Allocates nothing, so its
@@ -658,14 +665,24 @@ export fn main_shim(regs: List sprout_ir.CtorReg, has_init: Bool, has_user_main:
     "  %argv_set = call i64 @sprout_set_argv(i32 %argc, ptr %argv)\n" ++
     emit_ctor_reg_calls(regs) ++
     init_call(has_init) ++
-    user_main_call(has_user_main) ++
-    "  ret i32 0\n}\n"
+    user_main_call(has_user_main, main_returns_int) ++
+    main_ret(has_user_main, main_returns_int)
 
-# Emit the call to @__sprout_user_main() when the user's fn main has a body.
-# The call is i64 (all Sprout fns return i64); result is discarded.
-fn user_main_call(has_user_main: Bool) -> String =
-  if has_user_main then "  call i64 @__sprout_user_main()\n"
-  else ""
+# Emit the call to the user's main body, when non-trivial.  Calls
+# @__sprout_user_main_int (capturing the i64 result for main_ret below) when
+# main_returns_int, else @__sprout_user_main (result discarded, as before).
+fn user_main_call(has_user_main: Bool, main_returns_int: Bool) -> String =
+  if ! has_user_main then ""
+  else if main_returns_int then "  %user_main_ret = call i64 @__sprout_user_main_int()\n"
+  else "  call i64 @__sprout_user_main()\n"
+
+# Int-returning main: truncate the i64 result to the platform exit-code
+# width and return it.  Otherwise (Unit-returning or trivial-body main):
+# unconditionally ret 0, matching every existing tool's current behaviour.
+fn main_ret(has_user_main: Bool, main_returns_int: Bool) -> String =
+  if has_user_main && main_returns_int
+  then "  %exit_code = trunc i64 %user_main_ret to i32\n  ret i32 %exit_code\n}\n"
+  else "  ret i32 0\n}\n"
 
 # True if any IRFunction in the list has the given name.
 # Used to detect whether ast_to_ir produced @__sprout_user_main.
@@ -788,7 +805,8 @@ fn lower_program_body(fns: List sprout_ir.IRFunction,
   ir_header() ++ extern_decls_text ++ str_globals_text ++ ctor_globals ++ let_globals_text ++
     (if str_globals_text == "" && ctor_globals == "" && let_globals_text == "" && extern_decls_text == "" then "" else "\n") ++
     lower_fns(fns, fn_tables) ++ main_shim(ctor_regs, any_runtime_global(let_globals),
-                                            has_fn_named("__sprout_user_main", fns))
+                                            has_fn_named("__sprout_user_main", fns) || has_fn_named("__sprout_user_main_int", fns),
+                                            has_fn_named("__sprout_user_main_int", fns))
   where ctor_globals = collect_ctor_globals(ctor_regs)
         let_globals_text = lower_globals(let_globals)
         extern_decls_text = lower_extern_decls(externs, fns)

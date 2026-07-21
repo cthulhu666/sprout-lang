@@ -4842,6 +4842,19 @@ fn is_entry_fn_name(name: String) -> Bool =
   name == "main" || (n >= 5 && str_slice(name, n - 5, 5) == ".main")
   where n = str_len(name)
 
+# The synthetic name a non-trivial `main` body is translated to.  An
+# `Int`-declared return type uses __sprout_user_main_int instead of
+# __sprout_user_main: main_shim (ir_lowering.sprout) recognizes it and
+# threads the returned i64 through as the process exit code (truncated to
+# i32), rather than the unconditional `ret i32 0` used for a Unit-returning
+# main. The name (not a side channel) carries the signal all the way
+# through the streaming ir_pipeline, mirroring how __sprout_user_main
+# itself is already detected by name.
+fn user_main_fn_name(ret_ty: Maybe ast.TypeExpr) -> String =
+  match ret_ty with
+  | Just (ast.TypeName "Int") -> "__sprout_user_main_int"
+  | _ -> "__sprout_user_main"
+
 # ===========================================================================
 # TCO rewrite — self-tail-recursion -> alloca-slot loop.
 #
@@ -5860,7 +5873,7 @@ export fn translate_decl_with_idx(d: typed_ast.TypedDecl, ctors: Dict sprout_ir.
                                   lifted_idx_ref: Ref (Dict Int)) ->
     Result String (Maybe(sprout_ir.IRFunction, Int, List sprout_ir.IRFunction)) !{IO} =
   match d with
-  | typed_ast.TFnDecl name params _ _ _ body ->
+  | typed_ast.TFnDecl name params ret_ty _ _ body ->
       # __sprout_ reservation check is done once up-front in translate_program via
       # validate_reserved_namespace; no per-arm check needed here.
       # is_entry_fn_name accepts both bare `main` and the bundler-qualified
@@ -5876,7 +5889,7 @@ export fn translate_decl_with_idx(d: typed_ast.TypedDecl, ctors: Dict sprout_ir.
         # and called by the shim.  See ir_lowering.main_shim.
         match body with
         | typed_ast.TUnit _ _ -> Ok(Nothing)
-        | _ -> translate_user_fn("__sprout_user_main", params, body, ctors, top_level, let_names, fn_arities, lambda_ctr_ref, lifted_idx_ref)
+        | _ -> translate_user_fn(user_main_fn_name(ret_ty), params, body, ctors, top_level, let_names, fn_arities, lambda_ctr_ref, lifted_idx_ref)
       else translate_user_fn(name, params, body, ctors, top_level, let_names, fn_arities, lambda_ctr_ref, lifted_idx_ref)
   | typed_ast.TExternFnDecl _ _ _ _ -> Ok(Nothing)
   | typed_ast.TLetDecl _ _ -> Ok(Nothing)

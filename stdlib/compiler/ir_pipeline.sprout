@@ -35,13 +35,16 @@ import stdlib.compiler.source as source
 
 # State carried through the streaming loop.
 # Fields: next_str_idx, str_globals_acc, bodies_acc, defined_names, has_user_main,
+# main_returns_int (main's declared return type was Int — set when the emitted
+# fn name is __sprout_user_main_int rather than __sprout_user_main; see
+# ast_to_ir.translate_decl and ir_lowering.main_shim),
 # alloc_summary (may-trigger-GC map; constant, set once at init from the pre-pass),
 # mutual_eligible (fname -> [(callee, arity)] same-prototype cycle edges; constant,
 # from the same pre-pass — drives the mutual-TCO musttail rewrite in emit_one_fn).
 # All accumulator lists are in reverse emission order; reversed at assembly.
 # O(1) prepend per fn; single list_reverse + string_concat_many at the end.
 type StreamState (..) =
-  StreamState Int (Ref (List String)) (Ref (List String)) Set Bool (Dict Bool) (Dict (List (String, Int)))
+  StreamState Int (Ref (List String)) (Ref (List String)) Set Bool Bool (Dict Bool) (Dict (List (String, Int)))
 
 fn ir_fn_name(f: sprout_ir.IRFunction) -> String =
   match f with | sprout_ir.IRFunction n _ _ _ -> n
@@ -55,19 +58,19 @@ fn pair_second(p: (a, b)) -> b = match p with | (_, y) -> y
 fn emit_one_fn(f: sprout_ir.IRFunction, idx_map: Dict Int,
                state: StreamState) -> Result String StreamState !{IO} =
   match state with
-  | StreamState next_idx str_acc bodies_acc defined has_user_main summary eligible ->
+  | StreamState next_idx str_acc bodies_acc defined has_user_main main_returns_int summary eligible ->
       # Mutual-TCO runs PRE-rooting (like self-TCO): once an eligible cross-function
       # tail call is an IRTailCall, ir_rooting emits no accumulating root for it.
       emit_one_fn_rooted(ir_rooting.rewrite_one_fn_with_summary(
                            ast_to_ir.mutual_tco_rewrite_fn(f, ast_to_ir.mutual_eligible_for(ir_fn_name(f), eligible)),
                            idx_map, summary),
-                         next_idx, str_acc, bodies_acc, defined, has_user_main, summary, eligible)
+                         next_idx, str_acc, bodies_acc, defined, has_user_main, main_returns_int, summary, eligible)
 
 # Helper: emit a pre-rooted IRFunction.  Separated so we name the rooted fn
 # once and pass it to both walk_blocks_for_strs and lower_fn_with_table.
 fn emit_one_fn_rooted(rooted: sprout_ir.IRFunction, next_idx: Int,
                       str_acc: Ref (List String), bodies_acc: Ref (List String),
-                      defined: Set, has_user_main: Bool, summary: Dict Bool,
+                      defined: Set, has_user_main: Bool, main_returns_int: Bool, summary: Dict Bool,
                       eligible: Dict (List (String, Int))) ->
     Result String StreamState !{IO} =
   match rooted with
@@ -83,8 +86,9 @@ fn emit_one_fn_rooted(rooted: sprout_ir.IRFunction, next_idx: Int,
             let body_text = ir_lowering.lower_fn_with_table(rooted, fn_table) ++ "\n"
             ref_write(bodies_acc, Cons(body_text, bodies_old))
             let new_defined = set_insert(fname, defined)
-            let new_has_user_main = has_user_main || (fname == "__sprout_user_main")
-            Ok(StreamState(next_idx2, str_acc, bodies_acc, new_defined, new_has_user_main, summary, eligible))
+            let new_has_user_main = has_user_main || (fname == "__sprout_user_main") || (fname == "__sprout_user_main_int")
+            let new_main_returns_int = main_returns_int || (fname == "__sprout_user_main_int")
+            Ok(StreamState(next_idx2, str_acc, bodies_acc, new_defined, new_has_user_main, new_main_returns_int, summary, eligible))
 
 # Emit all lifted lambdas (in list order) then the main fn for one decl.
 # lifted list is [lambda0, lambda1, ..., lambdaN]; emit in that order then f.
@@ -349,7 +353,7 @@ export fn compile_program_streaming(prog: typed_ast.TypedProgram) ->
                       bodies_acc_ref <- ref_new(Nil)
                       let alloc_summary = pair_first(summaries)
                       let mutual_eligible = pair_second(summaries)
-                      let init_state = StreamState(0, str_acc_ref, bodies_acc_ref, set_empty(), false, alloc_summary, mutual_eligible)
+                      let init_state = StreamState(0, str_acc_ref, bodies_acc_ref, set_empty(), false, false, alloc_summary, mutual_eligible)
                       match stream_decls(decls, ctors, top_level_set, let_names, fn_arities,
                                          lambda_ctr_ref, lifted_idx_ref, init_state) with
                       | Err msg -> Err(msg)
@@ -364,11 +368,11 @@ export fn compile_program_streaming(prog: typed_ast.TypedProgram) ->
                         | Err msg -> Err(msg)
                         | Ok after_workers ->
                           match after_workers with
-                          | StreamState next_idx2 str_acc bodies_acc defined has_user_main summary2 eligible2 ->
+                          | StreamState next_idx2 str_acc bodies_acc defined has_user_main main_returns_int summary2 eligible2 ->
                               # Emit init fn last if there are runtime lets.
                               match runtime_lets with
                               | Nil ->
-                                  assemble_result(str_acc, bodies_acc, defined, has_user_main,
+                                  assemble_result(str_acc, bodies_acc, defined, has_user_main, main_returns_int,
                                                   let_globals, ctor_regs, externs)
                               | _ ->
                                   match ast_to_ir.synthesize_init_globals_fn(
@@ -388,12 +392,12 @@ export fn compile_program_streaming(prog: typed_ast.TypedProgram) ->
                                         let init_idx_map = dict_set("__sprout_init_globals", init_idx, lifted_idx)
                                         match emit_lifted_then_fn(init_lifted, init_fn, init_idx_map,
                                                           StreamState(next_idx2, str_acc, bodies_acc,
-                                                                      defined, has_user_main, summary2, eligible2)) with
+                                                                      defined, has_user_main, main_returns_int, summary2, eligible2)) with
                                         | Err msg -> Err(msg)
                                         | Ok final_state ->
                                             match final_state with
-                                            | StreamState _ str_acc2 bodies_acc2 defined2 has_user_main2 _ _ ->
-                                                assemble_result(str_acc2, bodies_acc2, defined2, has_user_main2,
+                                            | StreamState _ str_acc2 bodies_acc2 defined2 has_user_main2 main_returns_int2 _ _ ->
+                                                assemble_result(str_acc2, bodies_acc2, defined2, has_user_main2, main_returns_int2,
                                                                 let_globals, ctor_regs, externs)
 
 # Assemble the final LLVM IR text from accumulators.
@@ -406,7 +410,7 @@ export fn compile_program_streaming(prog: typed_ast.TypedProgram) ->
 # bodies, so the filter logic is identical to the batch path without any new
 # string literals in ir_lowering.sprout (which would shift @.str.K indices).
 fn assemble_result(str_acc: Ref (List String), bodies_acc: Ref (List String),
-                   defined_names: Set, has_user_main: Bool,
+                   defined_names: Set, has_user_main: Bool, main_returns_int: Bool,
                    let_globals: List sprout_ir.IRGlobalDecl,
                    ctor_regs: List sprout_ir.CtorReg,
                    externs: List (String, Int)) ->
@@ -428,7 +432,7 @@ fn assemble_result(str_acc: Ref (List String), bodies_acc: Ref (List String),
                   bodies_text ++
                   ir_lowering.main_shim(ctor_regs,
                                         ir_lowering.any_runtime_global(let_globals),
-                                        has_user_main)
+                                        has_user_main, main_returns_int)
     Ok(full_ir)
 
 # Build a list of IRFunction stubs with the given names and empty bodies.

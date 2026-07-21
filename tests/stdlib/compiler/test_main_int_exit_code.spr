@@ -1,0 +1,84 @@
+# Regression: `fn main() -> Int !{IO}` must propagate its returned value as
+# the process exit code. main_shim (ir_lowering.sprout) used to discard
+# __sprout_user_main's result and unconditionally `ret i32 0`, so every
+# compiled Sprout program exited 0 regardless of what `main` computed —
+# silently breaking any tool (e.g. fmt_driver.sprout's `fmt --check`) that
+# relies on a nonzero exit code to signal failure.
+#
+# This test compiles a real fixture through the actual compiler (not
+# hand-written IR), links it, runs it, and asserts the OS-level exit code.
+# Unfixed: exit code 0 -> RED. Fixed: exit code 7 -> GREEN.
+import stdlib.test (TestState, new_state, assert_true, assert_eq, summary)
+import stdlib.process as process
+import stdlib.string as string
+
+fn fixture_source() -> String =
+  "module main_int_exit_fixture\n\nfn main() -> Int !{IO} =\n  do\n    print(\"fixture running\")\n    7\n"
+
+fn clang_available() -> Bool !{IO} =
+  do
+    probe <- process.proc_run(["clang", "--version"])
+    process.proc_ok(probe)
+
+# Darwin needs -framework Security -framework CoreFoundation, matching justfile's clang_extra.
+fn is_darwin() -> Bool !{IO} =
+  do
+    r <- process.proc_run(["uname"])
+    string.trim(process.proc_stdout(r)) == "Darwin"
+
+fn runtime_sources() -> List String =
+  ["runtime/sprout_poll.c", "runtime/sprout_runtime.c", "runtime/sprout_scheduler.c"]
+
+fn link_argv(ll_path: String, bin_path: String, use_darwin: Bool) -> List String =
+  let base = [ll_path] ++ runtime_sources() ++ ["-o", bin_path]
+      extra = if use_darwin then ["-framework", "Security", "-framework", "CoreFoundation"] else []
+  in ["clang"] ++ base ++ extra
+
+fn main() -> Unit !{IO} =
+  do
+    state <- new_state()
+    have_clang <- clang_available()
+    match have_clang with
+    | false ->
+        do
+          term_write("[test_main_int_exit_code] clang not in PATH — assertion auto-passes\n")
+          assert_true(state, "Int-returning main propagates exit code (auto-skipped: no clang)", true)
+    | true ->
+        do
+          let src_path = "/tmp/sprout_main_int_exit_fixture.sprout"
+          let ll_path = "/tmp/sprout_main_int_exit_fixture.ll"
+          let bin_path = "/tmp/sprout_main_int_exit_fixture_bin"
+          use_darwin <- is_darwin()
+          match write_file(src_path, fixture_source()) with
+          | Err _ -> assert_true(state, "write fixture source", false)
+          | Ok _ ->
+              do
+                compiled <- process.proc_run(
+                  ["build/compile_driver_bin_stage1", "--emit-ir", "stdlib", src_path])
+                match process.proc_ok(compiled) with
+                | false ->
+                    do
+                      term_write("[test_main_int_exit_code] compile failed:\n")
+                      term_write(process.proc_stderr(compiled))
+                      term_write("\n")
+                      assert_true(state, "fixture compiles", false)
+                | true ->
+                    match write_file(ll_path, process.proc_stdout(compiled)) with
+                    | Err _ -> assert_true(state, "write emitted IR", false)
+                    | Ok _ ->
+                        do
+                          linked <- process.proc_run(link_argv(ll_path, bin_path, use_darwin))
+                          match process.proc_ok(linked) with
+                          | false ->
+                              do
+                                term_write("[test_main_int_exit_code] link failed:\n")
+                                term_write(process.proc_stderr(linked))
+                                term_write("\n")
+                                assert_true(state, "fixture links", false)
+                          | true ->
+                              do
+                                ran <- process.proc_run([bin_path])
+                                assert_eq(state, "Int-returning main's return value becomes the process exit code",
+                                  process.proc_exit(ran), 7)
+
+    summary(state)
