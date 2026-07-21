@@ -1,0 +1,35 @@
+module examples.spinning_cube
+
+import stdlib.gfx
+
+# Milestone 1 — the first 3D frame drawn from Sprout: a cube spinning on a grid,
+# rendered via the raylib native backend (stdlib.gfx / graphics/sprout_gfx.c).
+#
+# The render loop is the exact tail-recursive shape verified flat-stack in the
+# Milestone 0 loop spike: a `window_should_close` guard, then per-frame draw
+# calls, then the recursive call in tail position.
+#
+# Run:
+#   mise exec -- just run-gfx examples/spinning_cube.sprout
+# Auto-close after N frames (non-interactive canary):
+#   SPROUT_GFX_MAX_FRAMES=120 mise exec -- just run-gfx examples/spinning_cube.sprout
+
+fn render_loop(frame: Int) -> Unit !{IO} =
+  do
+    stop <- gfx.window_should_close()
+    if stop then gfx.close_window()
+    else
+      do
+        let angle = to_double(frame) * 0.8
+        gfx.frame_begin()
+        gfx.draw_grid(20, 1.0)
+        gfx.draw_spinning_cube(2.0, angle)
+        gfx.frame_end()
+        render_loop(frame + 1)
+
+fn main() -> Unit !{IO} =
+  do
+    gfx.open_window(800, 600, "Sprout — spinning cube")
+    gfx.set_target_fps(60)
+    gfx.set_camera(6.0, 5.0, 6.0, 0.0, 1.0, 0.0, 45.0)
+    render_loop(0)

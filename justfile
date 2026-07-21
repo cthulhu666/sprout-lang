@@ -9,6 +9,12 @@ build_dir   := justfile_directory() / "build"
 # Used UNQUOTED in recipes so bash expands it; every runtime .c is compiled+linked.
 runtime_src := "runtime/*.c"
 
+# Graphics backend (raylib) — compiled & linked ONLY by `run-gfx`, never by the
+# core build/tests/seed. Override the raylib location with SPROUT_RAYLIB_PREFIX.
+raylib_prefix := env_var_or_default("SPROUT_RAYLIB_PREFIX", `brew --prefix raylib 2>/dev/null || echo /opt/homebrew/opt/raylib`)
+gfx_src  := justfile_directory() / "graphics" / "sprout_gfx.c"
+gfx_link := if os() == "macos" { "-lraylib -framework Cocoa -framework IOKit -framework CoreVideo -framework OpenGL" } else { "-lraylib -lGL -lm -lpthread -ldl -lrt -lX11" }
+
 default:
   @just --list
 
@@ -174,6 +180,21 @@ run file: bootstrap-from-seed
   trap 'rm -f "$TMP_LL" "$TMP_BIN"' EXIT
   "{{build_dir}}/compile_driver_bin_stage1" --emit-ir "{{stdlib_root}}" {{quote(file)}} > "$TMP_LL"
   clang "$TMP_LL" {{runtime_src}} -O2 {{clang_extra}} -o "$TMP_BIN"
+  "$TMP_BIN"
+
+# Build & run a GRAPHICS program: like `run`, but also compiles the raylib shim
+# (graphics/sprout_gfx.c) and links raylib + its system frameworks. Requires
+# raylib installed (brew install raylib); override its location with
+# SPROUT_RAYLIB_PREFIX. Set SPROUT_GFX_MAX_FRAMES=N to auto-close after N frames.
+[group('dev')]
+run-gfx file: bootstrap-from-seed
+  #!/usr/bin/env bash
+  set -euo pipefail
+  TMP_LL="/tmp/sprout_gfx_$$.ll"
+  TMP_BIN="/tmp/sprout_gfx_$$"
+  trap 'rm -f "$TMP_LL" "$TMP_BIN"' EXIT
+  "{{build_dir}}/compile_driver_bin_stage1" --emit-ir "{{stdlib_root}}" {{quote(file)}} > "$TMP_LL"
+  clang "$TMP_LL" {{runtime_src}} "{{gfx_src}}" -O2 -I"{{raylib_prefix}}/include" -L"{{raylib_prefix}}/lib" {{clang_extra}} {{gfx_link}} -o "$TMP_BIN"
   "$TMP_BIN"
 
 # Build {{file}} with GC profiling compiled in (-DSPROUT_GC_PROFILE) and run it

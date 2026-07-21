@@ -1,0 +1,57 @@
+module stdlib.gfx
+
+# Native graphics backend binding (Milestone 1: raylib), implemented by the C
+# shim graphics/sprout_gfx.c. This is a *native binding*, not portable core
+# stdlib — it links only via `just run-gfx` and never enters the bootstrap seed.
+# See docs/graphics-v0.md.
+#
+# Every extern below matches a `long long`-ABI function in the shim. Doubles
+# cross as their raw bit pattern; the shim reinterprets them as floats.
+
+# --- C ABI bridge (module-private) ---
+
+extern fn gfx_open_window(w: Int, h: Int, title: String) -> Unit !{IO}
+extern fn gfx_set_target_fps(fps: Int) -> Unit !{IO}
+extern fn gfx_window_should_close() -> Int !{IO}
+extern fn gfx_set_camera(px: Double, py: Double, pz: Double,
+                         tx: Double, ty: Double, tz: Double,
+                         fovy: Double) -> Unit !{IO}
+extern fn gfx_frame_begin() -> Unit !{IO}
+extern fn gfx_draw_grid(slices: Int, spacing: Double) -> Unit !{IO}
+extern fn gfx_draw_spinning_cube(size: Double, angle: Double) -> Unit !{IO}
+extern fn gfx_frame_end() -> Unit !{IO}
+extern fn gfx_close_window() -> Unit !{IO}
+
+# --- Public API ---
+
+export fn open_window(w: Int, h: Int, title: String) -> Unit !{IO} =
+  gfx_open_window(w, h, title)
+
+export fn set_target_fps(fps: Int) -> Unit !{IO} =
+  gfx_set_target_fps(fps)
+
+# True once the window has been asked to close or the frame budget is spent.
+export fn window_should_close() -> Bool !{IO} =
+  do
+    flag <- gfx_window_should_close()
+    flag == 1
+
+export fn set_camera(px: Double, py: Double, pz: Double,
+                     tx: Double, ty: Double, tz: Double,
+                     fovy: Double) -> Unit !{IO} =
+  gfx_set_camera(px, py, pz, tx, ty, tz, fovy)
+
+export fn frame_begin() -> Unit !{IO} =
+  gfx_frame_begin()
+
+export fn draw_grid(slices: Int, spacing: Double) -> Unit !{IO} =
+  gfx_draw_grid(slices, spacing)
+
+export fn draw_spinning_cube(size: Double, angle: Double) -> Unit !{IO} =
+  gfx_draw_spinning_cube(size, angle)
+
+export fn frame_end() -> Unit !{IO} =
+  gfx_frame_end()
+
+export fn close_window() -> Unit !{IO} =
+  gfx_close_window()

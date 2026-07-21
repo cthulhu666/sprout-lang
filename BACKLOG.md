@@ -311,6 +311,25 @@ Legend:
 - [x] `P1` Add environment/config helpers such as `env_get(name) -> Maybe String`.
 - [x] `P1` Define test support for integration-style IO programs that depend on external services.
 
+### 9) Graphics / Game Engine (see `docs/graphics-v0.md`)
+
+Native rendering backend + 3D roadmap. M0 (loop spike) and M1 (spinning cube via
+raylib) have landed. Fenced from core: shim `graphics/sprout_gfx.c` links only via
+`just run-gfx`; binding `stdlib/gfx.sprout` stays out of the bootstrap seed.
+
+- [x] `M0` Loop spike — verify tail-recursive IO frame loop runs in flat stack.
+- [x] `M1` Spinning cube — raylib window driven by a Sprout frame loop, zero new builtins.
+- [ ] `M2` Math library: `Vec2/3/4`, `Mat4`, `Quat` on flat primitive `Vector Double`
+  + `vector_mutset` (NOT records/ADTs of Doubles — misses the unboxed fast path).
+  Needs `sqrt`/`sin`/`cos` `libm` builtins — **requires user approval + APPROVED_BUILTINS**.
+- [ ] `M3` glTF model loading + static draw via a C-side raylib handle registry.
+- [ ] `M4` Skeletal animation playback (raylib `UpdateModelAnimation`) — the Kenney character goal.
+- [ ] `M5+` Move engine into Sprout (glTF parse, skinning, camera, scene graph); demote
+  raylib toward a thin draw leaf; eventually swap the leaf for a modern API (Metal/WebGPU).
+- [ ] `P2` Language-core: unbox small fixed-shape numeric records (`Vec3 {x,y,z}` as 3 raw
+  f64s, not a heap pointer) — the ergonomic+fast path for individual small vectors. Additive
+  on top of the flat-buffer foundation; decide at M2.
+
 ## Current Snapshot
 
 - [x] Modules with explicit exports (`export`) are implemented.
