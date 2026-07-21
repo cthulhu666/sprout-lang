@@ -258,6 +258,38 @@ adt_index (empty repack)` — i.e. the **trampoline** `ping`, not `ping$u`.
 
 The v0 scalar gate stays until one of these lands.
 
+### Probe result (2026-07-21): path (a) alone is sufficient for width-2 ADT cycles
+
+Ran path (a) as a throwaway probe: **return-annotation fix only** (trampoline body typed
+`typed_expr_type(body)` instead of `pb_int_ty()`) + the gate lifted to accept named-head types.
+Deliberately did *not* touch `pb_var_args`/`pb_zeros` (the arg annotations), to test whether the
+feared arg-rooting hazard is real. Evidence:
+
+- **ADT-param cycle** (`ping/2 ↔ pong/3` returning `Maybe Int`, `acc : Maybe Int` forwarded through
+  the `musttail` cycle): valid IR, `ping_worker` repacks correctly, runs → `1`, **and survives
+  `SPROUT_GC_STRESS=1`**. So forwarding a heap pointer through the trampoline + cycle under a
+  collect-on-every-alloc regime is GC-safe *without* fixing the arg annotations.
+- **The real target unified:** `apply_subst$u ↔ apply_subst_lookup$u` both emit `musttail`,
+  forwarding `types.Type` — the exact ADT-arg case the caveat feared. 176 `$u` sites compiler-wide.
+- **Self-compile stable:** stage-3 (built by the fixed stage-2) builds, IR validates, and
+  `emit-ir compile_driver` is **byte-identical** between stage-2 and stage-3 — the unified
+  `apply_subst` miscompiles nothing. All five canary examples run correctly.
+
+**Why the arg-annotation caveat did not bite:** rooting is by type-*kind* (pointer vs scalar), so a
+`types.Type` roots identically to any other heap value regardless of the `Int` annotation on the
+*forwarding call arg*; and the trampoline body has **no allocation between materializing the pointer
+args and the forwarding call**, so there is no GC point at which a mis-annotation could matter. The
+`$u` body already preserves real arg types (`pb_retarget_tail` keeps original call args; only padding
+is added), so the cycle interior was never at risk.
+
+**Conclusion:** the targeted fix (a) is viable and B.1 is **not** required for correctness of the
+width-2 case — contradicting §5a's original premise. **Remaining caveat for a real landing:** the CPR
+repack path (`emit_repack_one`) only emits `IRRetUnboxed2` (width-2); a match-routed cycle member
+returning a **width-3** ADT (a ≥2-field ctor → sret) would drop fields. The probe only exercised
+width-2 (`Maybe`/the compiler's own cycles). A landing must either keep width-3 ADT returns gated or
+extend the repack — and run the full DoD (`just test`, `test-stress`, smoke-shapes, seed refresh,
+fixed-point), not just the probe's checks.
+
 ## 5-ALT. Contification / tag-dispatch (considered, rejected as heavier)
 
 The original design merged each SCC into one `__sprout_scc_<n>(i64 tag, i64 p0…p_{M-1})` with a
