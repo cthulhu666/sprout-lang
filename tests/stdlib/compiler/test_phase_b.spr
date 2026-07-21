@@ -37,7 +37,7 @@ fn fndecl(name: String, arity: Int, body: typed_ast.TypedExpr) -> typed_ast.Type
   typed_ast.TFnDecl(name, dummy_params(arity), Nothing, Nothing, Nil, body)
 
 fn first_scc(sccs: List (List (String, Int))) -> List (String, Int) =
-  match sccs with | Nil -> Nil | Cons h _ -> h
+  match sccs with | Nil -> Nil | [h | _] -> h
 fn scc_size_at(sccs: List (List (String, Int)), _i: Int) -> Int = list_length(first_scc(sccs))
 fn pair_in(xs: List (String, Int), name: String, ar: Int) -> Bool =
   match xs with

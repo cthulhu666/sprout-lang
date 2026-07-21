@@ -149,7 +149,7 @@ fn main() -> Unit !{IO} =
     # MyEq has 1 method (my_eq)
     assert_true(state, "extract_class_infos: MyEq has 1 method",
       match classes_mymod with
-      | Cons (iface_codec.ClassInfo _ _ _ methods) _ -> list_length(methods) == 1
+      | [iface_codec.ClassInfo _ _ _ methods | _] -> list_length(methods) == 1
       | _ -> false)
 
     # --- extract_instance_infos ---

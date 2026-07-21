@@ -673,7 +673,7 @@ instance Eq (Maybe a) where Eq a {
 
 fn list_eq(left: List a, right: List a) -> Bool where Eq a =
   match left with
-  | Nil -> match right with | Nil -> true | Cons _ _ -> false
+  | Nil -> match right with | Nil -> true | [_ | _] -> false
   | Cons x xs -> match right with
       | Nil -> false
       | Cons y ys -> if eq(x, y) then list_eq(xs, ys) else false
@@ -855,7 +855,7 @@ instance Ord (Maybe a) where Ord a {
 # Lexicographic; empty list is smallest (Nil < Cons). O(shared prefix).
 fn list_compare(left: List a, right: List a) -> Int where Ord a =
   match left with
-  | Nil -> match right with | Nil -> 0 | Cons _ _ -> 0 - 1
+  | Nil -> match right with | Nil -> 0 | [_ | _] -> 0 - 1
   | Cons x xs -> match right with
       | Nil -> 1
       | Cons y ys -> match compare(x, y) with | 0 -> list_compare(xs, ys) | c -> c

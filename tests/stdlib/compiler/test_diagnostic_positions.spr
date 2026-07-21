@@ -20,7 +20,7 @@ fn first_diag(result: compiler.CompileResult) -> Maybe compiler.Diagnostic =
   | compiler.CompileFail diags ->
       match diags with
       | Nil -> Nothing
-      | Cons d _ -> Just(d)
+      | [d | _] -> Just(d)
 
 fn diag_line(d: compiler.Diagnostic) -> Int =
   match d with

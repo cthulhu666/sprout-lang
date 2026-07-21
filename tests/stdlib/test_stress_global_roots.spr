@@ -22,7 +22,7 @@ fn churn(n: Int, acc: String) -> String =
 
 fn first_or(xs: List String, d: String) -> String =
   match xs with
-  | Cons s _ -> s
+  | [s | _] -> s
   | Nil -> d
 
 fn main() -> Unit !{IO} =

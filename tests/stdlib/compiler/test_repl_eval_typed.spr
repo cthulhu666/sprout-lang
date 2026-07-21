@@ -40,7 +40,7 @@ fn first_diag_msg(r: compiler.IrFullResult) -> String =
   | compiler.IrFullFail diags ->
       match diags with
       | Nil -> ""
-      | Cons d _ ->
+      | [d | _] ->
           match d with
           | compiler.DiagError _ msg -> msg
           | compiler.DiagWarning _ msg -> msg

@@ -6,7 +6,7 @@ fn count_words(s: String) -> Int =
 fn first_word(s: String) -> Maybe String =
   match strlib.words(s) with
   | Nil -> Nothing
-  | Cons w _ -> Just(w)
+  | [w | _] -> Just(w)
 
 fn words_joined(sep: String, s: String) -> String =
   match strlib.words(s) with

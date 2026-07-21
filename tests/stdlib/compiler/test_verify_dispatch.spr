@@ -37,7 +37,7 @@ fn is_skip(o: vd.VerifyOutcome) -> Bool =
   match o with | vd.VerifySkip _ -> true | _ -> false
 
 fn first_or_skip(os: List vd.VerifyOutcome) -> vd.VerifyOutcome =
-  match os with | Cons o _ -> o | Nil -> vd.VerifySkip("empty")
+  match os with | [o | _] -> o | Nil -> vd.VerifySkip("empty")
 
 fn main() -> Unit !{IO} =
   do

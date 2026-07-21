@@ -202,7 +202,7 @@ fn collect_class_param_map(decls: List typed_ast.TypedDecl, acc: Dict String) ->
 fn add_class_param_entry(class_name: String, type_params: List String, acc: Dict String) -> Dict String =
   match type_params with
   | Nil -> acc
-  | Cons param _ ->
+  | [param | _] ->
       dict_set(string.after_last_dot(class_name), param, dict_set(class_name, param, acc))
 
 # ---------------------------------------------------------------------------
@@ -1159,7 +1159,7 @@ fn lower_dispatch_callee(callee: typed_ast.TypedExpr, args: List typed_ast.Typed
 
 fn args_have_leading_tdict(args: List typed_ast.TypedExpr) -> Bool =
   match args with
-  | Cons (typed_ast.TDict _ _ _ _) _ -> true
+  | [typed_ast.TDict _ _ _ _ | _] -> true
   | _ -> false
 
 # ---------------------------------------------------------------------------

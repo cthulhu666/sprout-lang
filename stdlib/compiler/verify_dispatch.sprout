@@ -192,7 +192,7 @@ fn constraint_var(c: ast.TypeConstraint) -> Maybe String =
   match c with
   | ast.TypeConstraint _ args ->
       match args with
-      | Cons (ast.TypeName v) _ -> if starts_lower(v) then Just(v) else Nothing
+      | [ast.TypeName v | _] -> if starts_lower(v) then Just(v) else Nothing
       | _ -> Nothing
 
 fn constraint_class(c: ast.TypeConstraint) -> String =
@@ -443,7 +443,7 @@ fn dict_heads_of(args: List typed_ast.TypedExpr) -> List (String, Maybe String) 
 
 fn dict_head_from_args(head_args: List ast.TypeExpr) -> Maybe String =
   match head_args with
-  | Cons te _ -> dict_head_te(te)
+  | [te | _] -> dict_head_te(te)
   | Nil -> Nothing
 
 # The concrete head name of a resolved dict's constraint TypeExpr, or Nothing if

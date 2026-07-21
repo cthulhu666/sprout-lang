@@ -1287,7 +1287,7 @@ fn collect_injected_heads_acc(class_name: String, typed_args: List typed_ast.Typ
 fn te_head_str(type_args: List ast.TypeExpr) -> String =
   match type_args with
   | Nil -> ""
-  | Cons te _ -> te_outermost_name(te)
+  | [te | _] -> te_outermost_name(te)
 
 fn te_outermost_name(te: ast.TypeExpr) -> String =
   match te with
@@ -1515,7 +1515,7 @@ fn dispatch_head_str(te: ast.TypeExpr) -> String =
 # (evidence is still EvUnresolved at this stage, so the TypeConstraint is the source).
 fn tdict_head_str(td: typed_ast.TypedExpr) -> String =
   match td with
-  | typed_ast.TDict (ast.TypeConstraint _ (Cons head_te _)) _ _ _ -> dispatch_head_str(head_te)
+  | typed_ast.TDict (ast.TypeConstraint _ [head_te | _]) _ _ _ -> dispatch_head_str(head_te)
   | _ -> "?"
 
 fn resolved_head_str(class_name: String, resolved: Maybe typed_ast.TypedExpr) -> String =
@@ -1738,7 +1738,7 @@ fn seed_one_constraint_marker(c: ast.TypeConstraint, prog_to_fresh: Dict types.T
   | ast.TypeConstraint class_name type_args ->
       match type_args with
       | Nil -> env
-      | Cons head_te _ ->
+      | [head_te | _] ->
           let ast.TypeName prog_var = head_te else env
               Just fresh_t = dict_get(prog_var, prog_to_fresh) else env
               types.TVar fresh_name = fresh_t else env
@@ -1799,7 +1799,7 @@ fn add_eta_for_constraint(c: ast.TypeConstraint, prog_to_fresh: Dict types.Type,
   | ast.TypeConstraint class_name type_args ->
       match type_args with
       | Nil -> markers
-      | Cons head_te _ ->
+      | [head_te | _] ->
           let ast.TypeName prog_var = head_te else markers
               Just fresh_t = dict_get(prog_var, prog_to_fresh) else markers
               types.TVar fresh_name = fresh_t else markers
@@ -2228,7 +2228,7 @@ fn column_heads(rows: List (List ast.Pattern)) -> List ast.Pattern =
   | Cons row rest ->
       match row with
       | Nil -> column_heads(rest)
-      | Cons h _ -> Cons(h, column_heads(rest))
+      | [h | _] -> Cons(h, column_heads(rest))
 
 fn column_tails(rows: List (List ast.Pattern)) -> List (List ast.Pattern) =
   match rows with
@@ -2908,7 +2908,7 @@ fn infer_do_steps(
 fn is_nil_steps(steps: List ast.DoStep) -> Bool =
   match steps with
   | Nil -> true
-  | Cons _ _ -> false
+  | [_ | _] -> false
 
 fn infer_do_step(
   state: unifier.InferState,
@@ -3416,7 +3416,7 @@ fn instance_key_and_class(c: ast.TypeConstraint) -> Maybe (String, String) =
   | ast.TypeConstraint class_name type_args ->
       match type_args with
       | Nil -> Nothing
-      | Cons head_te _ ->
+      | [head_te | _] ->
           Just((str_concat("@inst:", str_concat(class_name, str_concat(":", type_head_str(type_from_ast(head_te, dict_empty()))))),
                 string.after_last_dot(class_name)))
 
@@ -3598,7 +3598,7 @@ fn typecheck_decl(
                 env_ftv)
             else
               match types.list_diff(types.ftv(unifier.apply_subst(s1, typed_ast.typed_expr_type(typed_expr))), env_ftv) with
-              | Cons _ _ ->
+              | [_ | _] ->
                   TypedDeclErr(let_pos, "value restriction: non-value binding '" ++ name ++ "' has an ambiguous polymorphic type " ++ types.type_to_string(unifier.apply_subst(s1, typed_ast.typed_expr_type(typed_expr))) ++ "; bind a value or add a concrete type annotation")
               | Nil ->
                   TypedDeclOk(
@@ -4287,7 +4287,7 @@ fn canonicalize_constrained_constraints_acc(
       match c with
       | ast.TypeConstraint class_name type_args ->
           match type_args with
-          | Cons (ast.TypeName prog_var) _ ->
+          | [ast.TypeName prog_var | _] ->
               match dict_get(prog_var, prog_to_fresh) with
               | Just fresh_t ->
                   match unifier.apply_subst(s2, fresh_t) with
@@ -4398,7 +4398,7 @@ fn constraint_source_tokens(constraints: List ast.TypeConstraint) -> List (Strin
       match c with
       | ast.TypeConstraint class_name type_args ->
           match type_args with
-          | Cons (ast.TypeName prog_var) _ -> Cons((prog_var, class_name), constraint_source_tokens(rest))
+          | [ast.TypeName prog_var | _] -> Cons((prog_var, class_name), constraint_source_tokens(rest))
           | _ -> Cons(("#none", class_name), constraint_source_tokens(rest))
 
 # §13.3(B): pre-scan registration of a FnDecl's signature. A constrained fn's
@@ -4431,7 +4431,7 @@ fn register_instance_marker(constraint: ast.TypeConstraint, env: Dict types.Sche
   | ast.TypeConstraint class_name type_args ->
       match type_args with
       | Nil -> env
-      | Cons head_te _ ->
+      | [head_te | _] ->
           dict_set(
             "@inst:" ++ class_name ++ ":" ++ type_head_str(type_from_ast(head_te, dict_empty())),
             types.mono(types.TConst(types.type_id("Unit"))),

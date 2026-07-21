@@ -468,7 +468,7 @@ fn op_check_source(src: String, state: StartupState) -> json.Json !{IO} =
     | compiler.CompileFail diags ->
         match diags with
         | Nil -> error_response("check failed")
-        | Cons d _ ->
+        | [d | _] ->
             match d with
             | compiler.DiagError _ msg -> error_response(msg)
             | compiler.DiagWarning _ msg -> error_response(msg)
@@ -515,7 +515,7 @@ fn augment_probe_source(src: String, query: String) -> String =
 fn first_param_type(params: List ast.Param) -> Maybe ast.TypeExpr =
   match params with
   | Nil -> Nothing
-  | Cons p _ -> match p with | ast.Param _ mty -> mty
+  | [p | _] -> match p with | ast.Param _ mty -> mty
 
 fn find_probe_query_type(decls: List ast.Decl) -> Maybe ast.TypeExpr =
   match decls with
@@ -603,7 +603,7 @@ fn op_type_of_in_source(src: String, expr: String, state: StartupState) -> json.
     | compiler.CompileFail diags ->
         match diags with
         | Nil -> error_response("type_of_in_source: typecheck failed")
-        | Cons d _ ->
+        | [d | _] ->
             match d with
             | compiler.DiagError _ msg -> error_response(msg)
             | compiler.DiagWarning _ msg -> error_response(msg)
@@ -796,7 +796,7 @@ fn link_and_run_eval(ir_result: compiler.IrFullResult, state: StartupState) -> j
   | compiler.IrFullFail diags ->
       match diags with
       | Nil -> error_response("eval_expr_in_source: codegen failed")
-      | Cons d _ -> error_response(diag_msg(d))
+      | [d | _] -> error_response(diag_msg(d))
   | compiler.IrFullOk ir_text ->
       match write_file(eval_ir_path(), ir_text) with
       | Err msg -> panic("write_file: eval.ir: " ++ msg)
@@ -849,7 +849,7 @@ fn eval_with_type_result(src: String, expr: String, state: StartupState, result:
   | compiler.CompileFail diags ->
       match diags with
       | Nil -> error_response("eval_expr_in_source: typecheck failed")
-      | Cons d _ ->
+      | [d | _] ->
           match d with
           | compiler.DiagError _ msg -> error_response(msg)
           | compiler.DiagWarning _ msg -> error_response(msg)
@@ -871,7 +871,7 @@ fn op_eval_expr_in_source(src: String, expr: String, state: StartupState) -> jso
 fn compile_fail_response(diags: List compiler.Diagnostic) -> json.Json =
   match diags with
   | Nil -> error_response("type check failed")
-  | Cons d _ ->
+  | [d | _] ->
       match d with
       | compiler.DiagError _ msg -> error_response(msg)
       | compiler.DiagWarning _ msg -> error_response(msg)

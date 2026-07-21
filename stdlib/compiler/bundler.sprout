@@ -386,7 +386,7 @@ fn process_work(
           ref_write(work, rest)
           errs <- process_item(item, work, visiting, seen, ordered, stdlib_root, extra_roots)
           match errs with
-          | Cons _ _ -> errs
+          | [_ | _] -> errs
           | Nil -> process_work(work, visiting, seen, ordered, stdlib_root, extra_roots)
 
 fn process_item(
@@ -487,7 +487,7 @@ fn collect_modules(entry_path: String, stdlib_root: String, extra_roots: List St
     ordered <- ref_new(Nil)
     errs <- visit_module_iter(entry_path, stdlib_root, extra_roots, seen, ordered)
     match errs with
-    | Cons e _ -> (Just(e), Nil)
+    | [e | _] -> (Just(e), Nil)
     | Nil ->
         do
           mods <- ref_read(ordered)

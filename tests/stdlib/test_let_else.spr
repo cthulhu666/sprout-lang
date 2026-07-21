@@ -6,13 +6,13 @@ import stdlib.test (TestState, new_state, assert_eq, summary)
 
 # Single refutable binding over a bare ADT (List).
 fn first_or(xs: List Int, dflt: Int) -> Int =
-  let Cons h _ = xs else dflt
+  let [h | _] = xs else dflt
   in h
 
 # Two chained bindings, each with its own distinct sentinel.
 fn second(xs: List Int) -> Int =
-  let Cons _ rest = xs else -1
-      Cons y _ = rest else -2
+  let [_ | rest] = xs else -1
+      [y | _] = rest else -2
   in y
 
 # Refutable binding over a Result (refutability comes from the pattern).

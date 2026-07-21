@@ -52,7 +52,7 @@ fn main() -> Unit !{IO} =
     let _g2 = allocate_strings(50, Nil)
     let s_back3 = match s_in_list with
                   | Nil -> set_empty()
-                  | Cons h _ -> h
+                  | [h | _] -> h
     assert_true(state, "list-roundtrip: a present", set_member("a", s_back3))
     assert_true(state, "list-roundtrip: b present", set_member("b", s_back3))
     assert_true(state, "list-roundtrip: c present", set_member("c", s_back3))

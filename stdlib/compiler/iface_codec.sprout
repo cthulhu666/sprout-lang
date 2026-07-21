@@ -629,7 +629,7 @@ fn make_local_vars(type_params: List String) -> Dict types.Type =
 fn constraint_head(type_args: List ast.TypeExpr) -> String =
   match type_args with
   | Nil -> "Unknown"
-  | Cons te _ -> te_outermost_name(te)
+  | [te | _] -> te_outermost_name(te)
 
 fn te_outermost_name(te: ast.TypeExpr) -> String =
   match te with
@@ -802,7 +802,7 @@ fn build_instance_info(class_name: String, type_args: List ast.TypeExpr) -> Inst
 fn head_type_from_args(type_args: List ast.TypeExpr) -> types.Type =
   match type_args with
   | Nil -> types.TConst(types.type_id("Unknown"))
-  | Cons te _ -> typeexpr_to_type_with_vars(te, dict_empty())
+  | [te | _] -> typeexpr_to_type_with_vars(te, dict_empty())
 
 # ============================================================================
 # Decoders for CtorInfo / ClassInfo / InstanceInfo

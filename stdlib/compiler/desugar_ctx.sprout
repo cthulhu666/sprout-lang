@@ -334,7 +334,7 @@ fn type_texpr_to_maybe_name(texpr: ast.TypeExpr) -> Maybe String =
 fn desugar_template_general(effective: List ast.Expr, pos: source.SourcePos) -> ast.Expr =
   if list_length(effective) == 1 then
     match effective with
-    | Cons single _ -> single
+    | [single | _] -> single
     | Nil -> ast.StringExpr("", pos)
   else
     ast.CallExpr(

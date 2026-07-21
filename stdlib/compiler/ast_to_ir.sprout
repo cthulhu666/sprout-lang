@@ -3927,7 +3927,7 @@ fn translate_print_call(fname: String, args: List typed_ast.TypedExpr,
       Ok((Nil, cur_label,
            list_append(cur_ops, Cons(sprout_ir.IRConst(fresh_name(name_prefix, idx), 0), Nil)),
            fresh_name(name_prefix, idx), idx + 1))
-  | Cons arg _ ->
+  | [arg | _] ->
       match translate_expr(arg, params, ctors, idx, cur_label, cur_ops,
                            captures, lifted_ref, top_level, let_names, fn_arities, lambda_ctr_ref, lifted_idx_ref,
                            name_prefix) with
@@ -3970,7 +3970,7 @@ fn translate_to_double_call(args: List typed_ast.TypedExpr,
                             name_prefix: String) ->
     Result String (List sprout_ir.IRBlock, String, List sprout_ir.IROp, String, Int) !{IO} =
   match args with
-  | Cons arg _ ->
+  | [arg | _] ->
       match translate_expr(arg, params, ctors, idx, cur_label, cur_ops,
                            captures, lifted_ref, top_level, let_names, fn_arities, lambda_ctr_ref, lifted_idx_ref,
                            name_prefix) with
@@ -4264,7 +4264,7 @@ fn translate_append_call(args: List typed_ast.TypedExpr, call_ty: types.Type,
 fn append_witness(ws: List typed_ast.TypedExpr) -> Maybe typed_ast.TypedExpr =
   match ws with
   | Nil -> Nothing
-  | Cons w _ -> Just(w)
+  | [w | _] -> Just(w)
 
 fn translate_append_operands(left: typed_ast.TypedExpr, right: typed_ast.TypedExpr,
                               witness: Maybe typed_ast.TypedExpr,
@@ -4539,7 +4539,7 @@ fn recognize_vector_op(fname: String) -> Maybe VecOp =
 #   positive would inline a heap load ir_rooting never roots (use-after-free).
 fn classify_vec_elem(args: List typed_ast.TypedExpr) -> VecRep =
   match args with
-  | Cons head _ ->
+  | [head | _] ->
       if type_is_vector_double(typed_ast.typed_expr_type(head))
       then RepScalarDouble
       else RepUnsupported

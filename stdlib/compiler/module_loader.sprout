@@ -169,7 +169,7 @@ export fn resolve_module_path(name: source.ModuleName, stdlib_root: String, extr
 fn try_extra_roots(name: source.ModuleName, extra_roots: List String) -> Maybe String =
   match extra_roots with
   | Nil -> Nothing
-  | Cons root _ ->
+  | [root | _] ->
       Just(str_concat(root, str_concat("/", str_concat(replace_dots_with_slash(source.module_name_str(name), 0, ""), ".sprout"))))
 
 # ---------------------------------------------------------------------------

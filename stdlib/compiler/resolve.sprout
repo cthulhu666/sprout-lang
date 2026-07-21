@@ -126,7 +126,7 @@ fn check_constraint(
   | ast.TypeConstraint class_name type_args ->
       match type_args with
       | Nil -> Nothing
-      | Cons head_arg _ ->
+      | [head_arg | _] ->
           # Only diagnose constraints whose head is a concrete type constructor
           # (uppercase head). A lowercase/`_`/non-letter head is a type variable —
           # forwarded/polymorphic, resolved as a hidden parameter by lowering.
@@ -218,7 +218,7 @@ fn produce_evidence(c: ast.TypeConstraint, fwd_keys: Dict Bool, tables: Tables) 
   | ast.TypeConstraint class_name type_args ->
       match type_args with
       | Nil -> typed_ast.EvUnresolved
-      | Cons head_arg _ ->
+      | [head_arg | _] ->
           typed_ast.EvClasses(
             list_map(
               \eff_class -> produce_one_class(eff_class, head_arg, type_args, fwd_keys, tables),
@@ -342,7 +342,7 @@ fn collect_class_params(decls: List typed_ast.TypedDecl, acc: Dict String) -> Di
 fn add_class_param(class_name: String, params: List String, acc: Dict String) -> Dict String =
   match params with
   | Nil -> acc
-  | Cons p _ -> dict_set(class_name, p, acc)
+  | [p | _] -> dict_set(class_name, p, acc)
 
 # Class itself followed by all transitive superclasses in DFS order, deduplicated.
 fn class_with_transitive_supers(class_name: String, super_map: Dict (List String)) -> List String =

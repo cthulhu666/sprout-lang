@@ -16,7 +16,7 @@ fn read_back() -> String !{IO} =
   do
     xs <- mutvec_get(cell, 0)
     match xs with
-    | Cons s _ -> s
+    | [s | _] -> s
     | Nil -> "empty"
 
 fn main() -> Unit !{IO} =
