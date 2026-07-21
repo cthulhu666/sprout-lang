@@ -65,3 +65,61 @@ export fn is_even(value: Int) -> Bool =
 
 export fn is_odd(value: Int) -> Bool =
   is_even(value) == false
+
+# --- Double primitives (M2 math layer; docs/graphics-v0.md) ---
+# All pure Sprout, no C builtins. Accuracy ~1e-8; slower than libm (fine for the
+# transform-scale math this layer serves). If a measured hot path ever demands
+# it, the right escalation is lowering to an LLVM intrinsic (e.g. llvm.sqrt.f64),
+# not a runtime builtin — see docs/graphics-v0.md §M2.
+
+export let pi = 3.141592653589793
+
+let two_pi = 6.283185307179586
+let half_pi = 1.5707963267948966
+# 2^52: at this magnitude a Double's ULP is exactly 1, so adding then subtracting
+# it snaps the fractional bits away — the classic branch-free round-to-integer.
+let two52 = 4503599627370496.0
+
+export fn fabs(x: Double) -> Double =
+  if x < 0.0 then -x
+  else x
+
+# Round to nearest integer (ties to even) with no Int conversion. Only exact for
+# |x| < 2^52; larger Doubles are already integral, so pass them through.
+fn round_nearest(x: Double) -> Double =
+  if fabs(x) >= two52 then x
+  else (x + two52) - two52
+
+export fn floor(x: Double) -> Double =
+  if r > x then r - 1.0
+  else r
+  where r = round_nearest(x)
+
+# Newton-Raphson (Heron): quadratic convergence, so the relative-error guard trips
+# in well under the 60-step ceiling; the ceiling only bounds pathological inputs.
+fn sqrt_iter(x: Double, guess: Double, i: Int) -> Double =
+  if i >= 60 then guess
+  else if fabs(next - guess) < 0.000000000000001 * guess then next
+  else sqrt_iter(x, next, i + 1)
+  where next = 0.5 * (guess + x / guess)
+
+export fn sqrt(x: Double) -> Double =
+  if x <= 0.0 then 0.0
+  else sqrt_iter(x, x, 0)
+
+# Reduce an angle into [-pi, pi] so the Taylor series stays accurate.
+fn reduce(x: Double) -> Double =
+  x - two_pi * floor((x + pi) / two_pi)
+
+# sin on a reduced argument via Horner-nested Taylor terms through x^17
+# (truncation error ~2e-8 at the |r|=pi worst case). Denominators are (2k)(2k+1).
+fn sin_series(r: Double) -> Double =
+  r * (1.0 - rr / 6.0 * (1.0 - rr / 20.0 * (1.0 - rr / 42.0 * (1.0 - rr / 72.0
+    * (1.0 - rr / 110.0 * (1.0 - rr / 156.0 * (1.0 - rr / 210.0 * (1.0 - rr / 272.0))))))))
+  where rr = r * r
+
+export fn sin(x: Double) -> Double =
+  sin_series(reduce(x))
+
+export fn cos(x: Double) -> Double =
+  sin(x + half_pi)

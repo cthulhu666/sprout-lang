@@ -319,9 +319,13 @@ raylib) have landed. Fenced from core: shim `graphics/sprout_gfx.c` links only v
 
 - [x] `M0` Loop spike — verify tail-recursive IO frame loop runs in flat stack.
 - [x] `M1` Spinning cube — raylib window driven by a Sprout frame loop, zero new builtins.
-- [ ] `M2` Math library: `Vec2/3/4`, `Mat4`, `Quat` on flat primitive `Vector Double`
-  + `vector_mutset` (NOT records/ADTs of Doubles — misses the unboxed fast path).
-  Needs `sqrt`/`sin`/`cos` `libm` builtins — **requires user approval + APPROVED_BUILTINS**.
+- [x] `M2a` Scalar Double primitives in `stdlib/math.sprout` — `pi`, `fabs`, `floor`,
+  `sqrt` (Newton), `sin`/`cos` (range reduction + Taylor). **Pure Sprout, NO C builtins**
+  (an earlier note claiming libm builtins were required was wrong — transcendentals are
+  ~a dozen lines of Double arithmetic each). If a measured hot path demands speed, escalate
+  to an LLVM intrinsic (`llvm.sqrt.f64`), not a runtime builtin.
+- [ ] `M2b` `Vec2/3/4`, `Mat4`, `Quat` on flat primitive `Vector Double` + `vector_mutset`
+  (NOT records/ADTs of Doubles — misses the unboxed fast path).
 - [ ] `M3` glTF model loading + static draw via a C-side raylib handle registry.
 - [ ] `M4` Skeletal animation playback (raylib `UpdateModelAnimation`) — the Kenney character goal.
 - [ ] `M5+` Move engine into Sprout (glTF parse, skinning, camera, scene graph); demote
@@ -329,6 +333,11 @@ raylib) have landed. Fenced from core: shim `graphics/sprout_gfx.c` links only v
 - [ ] `P2` Language-core: unbox small fixed-shape numeric records (`Vec3 {x,y,z}` as 3 raw
   f64s, not a heap pointer) — the ergonomic+fast path for individual small vectors. Additive
   on top of the flat-buffer foundation; decide at M2.
+- [ ] `P2` Native `Float` (f32) type + `Vector Float` unboxed path (mirrors `RepScalarDouble`
+  in the B1 codegen gate, which was built to grow past Double). Doubles-everywhere is correct
+  through M4 — float32 lives only at the GPU edge (shim `as_float`) and in raylib's own vertex
+  buffers. Earns its keep at M5+ when Sprout owns bulk GPU-bound buffers (2× memory/bandwidth,
+  GPU-native, no narrowing copy). Evidence-driven — decide by measured buffer/upload cost.
 
 ## Current Snapshot
 
