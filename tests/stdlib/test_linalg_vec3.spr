@@ -1,0 +1,71 @@
+import stdlib.test (TestState, new_state, assert_true, summary)
+import stdlib.math (fabs)
+import stdlib.linalg
+
+# TDD — Vec3 on `wrap Vec3 = MutVec Double` over the tested stdlib.mutable
+# foundation (docs/graphics-v0.md §M2b). RED until the real impls land.
+#
+# Components are checked inline (not via a Vec3-typed helper): a `wrap` type used
+# in a user annotation across modules does not currently canonicalize, so Vec3
+# values only flow into stdlib.linalg's own functions here.
+
+fn close(a: Double, b: Double) -> Bool = fabs(a - b) < 0.000001
+
+fn main() -> Unit !{IO} =
+  do
+    state <- new_state()
+
+    a <- linalg.vec3(1.0, 2.0, 3.0)
+    b <- linalg.vec3(4.0, 5.0, 6.0)
+
+    ax <- linalg.vec3_x(a)
+    ay <- linalg.vec3_y(a)
+    az <- linalg.vec3_z(a)
+    assert_true(state, "vec3 components", close(ax, 1.0) && close(ay, 2.0) && close(az, 3.0))
+
+    sum <- linalg.vec3_add(a, b)
+    sx <- linalg.vec3_x(sum)
+    sy <- linalg.vec3_y(sum)
+    sz <- linalg.vec3_z(sum)
+    assert_true(state, "add", close(sx, 5.0) && close(sy, 7.0) && close(sz, 9.0))
+
+    diff <- linalg.vec3_sub(b, a)
+    dx <- linalg.vec3_x(diff)
+    dy <- linalg.vec3_y(diff)
+    dz <- linalg.vec3_z(diff)
+    assert_true(state, "sub", close(dx, 3.0) && close(dy, 3.0) && close(dz, 3.0))
+
+    scaled <- linalg.vec3_scale(a, 2.0)
+    cx <- linalg.vec3_x(scaled)
+    cy <- linalg.vec3_y(scaled)
+    cz <- linalg.vec3_z(scaled)
+    assert_true(state, "scale", close(cx, 2.0) && close(cy, 4.0) && close(cz, 6.0))
+
+    dot <- linalg.vec3_dot(a, b)
+    assert_true(state, "dot == 32", close(dot, 32.0))
+
+    # |(3,4,0)| = 5
+    v345 <- linalg.vec3(3.0, 4.0, 0.0)
+    len <- linalg.vec3_length(v345)
+    assert_true(state, "length == 5", close(len, 5.0))
+
+    zero <- linalg.vec3(0.0, 0.0, 0.0)
+    zlen <- linalg.vec3_length(zero)
+    assert_true(state, "length of zero == 0", close(zlen, 0.0))
+
+    # normalize (3,4,0) -> (0.6, 0.8, 0), unit length
+    unit <- linalg.vec3_normalize(v345)
+    ux <- linalg.vec3_x(unit)
+    uy <- linalg.vec3_y(unit)
+    uz <- linalg.vec3_z(unit)
+    assert_true(state, "normalize direction", close(ux, 0.6) && close(uy, 0.8) && close(uz, 0.0))
+    ulen <- linalg.vec3_length(unit)
+    assert_true(state, "normalized length == 1", close(ulen, 1.0))
+
+    # a must be unchanged by the ops above (no aliasing / in-place surprises)
+    a2x <- linalg.vec3_x(a)
+    a2y <- linalg.vec3_y(a)
+    a2z <- linalg.vec3_z(a)
+    assert_true(state, "a unchanged", close(a2x, 1.0) && close(a2y, 2.0) && close(a2z, 3.0))
+
+    summary(state)

@@ -31,6 +31,12 @@ export fn mutvec_len(v: MutVec a) -> Int =
 export fn mutvec_get(v: MutVec a, i: Int) -> Maybe a !{IO} =
   vector_get(mutvec_raw(v), i)
 
+# O(1) unchecked read for fixed-layout callers (e.g. Vec3/Mat4) that know i is
+# in range. Routes through the unboxed vector_get_direct fast path, avoiding the
+# Maybe of mutvec_get. Panics if i is out of range — callers must guarantee it.
+export fn mutvec_at(v: MutVec a, i: Int) -> a !{IO} =
+  vector_get_direct(mutvec_raw(v), i)
+
 export fn mutvec_set(v: MutVec a, i: Int, val: a) -> Unit !{IO} =
   vector_mutset(mutvec_raw(v), i, val)
 

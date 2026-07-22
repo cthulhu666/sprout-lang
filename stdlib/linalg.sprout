@@ -1,0 +1,78 @@
+module stdlib.linalg
+
+# Linear algebra for graphics (docs/graphics-v0.md §M2b). Vec3/Vec4/Mat4/Quat
+# are `wrap` types over the tested flat-buffer foundation in stdlib.mutable, so
+# they are distinct + type-safe at compile time yet zero-cost at runtime (a Vec3
+# is represented exactly as its backing MutVec Double). Element math routes
+# through mutable's unboxed `Vector Double` fast path.
+
+import stdlib.mutable (MutVec, mutvec_new, mutvec_at, mutvec_set)
+import stdlib.math (sqrt)
+
+wrap Vec3 = MutVec Double
+
+fn vec3_raw(v: Vec3) -> MutVec Double =
+  match v with
+  | Vec3 mv -> mv
+
+export fn vec3(x: Double, y: Double, z: Double) -> Vec3 !{IO} =
+  do
+    mv <- mutvec_new(3, 0.0)
+    _ <- mutvec_set(mv, 0, x)
+    _ <- mutvec_set(mv, 1, y)
+    _ <- mutvec_set(mv, 2, z)
+    Vec3(mv)
+
+# Components 0..2 are always in range, so the unchecked mutvec_at is safe.
+export fn vec3_x(v: Vec3) -> Double !{IO} = mutvec_at(vec3_raw(v), 0)
+export fn vec3_y(v: Vec3) -> Double !{IO} = mutvec_at(vec3_raw(v), 1)
+export fn vec3_z(v: Vec3) -> Double !{IO} = mutvec_at(vec3_raw(v), 2)
+
+# add/sub/scale allocate a fresh Vec3 — inputs are never mutated (no aliasing).
+export fn vec3_add(a: Vec3, b: Vec3) -> Vec3 !{IO} =
+  do
+    ax <- vec3_x(a)
+    ay <- vec3_y(a)
+    az <- vec3_z(a)
+    bx <- vec3_x(b)
+    by <- vec3_y(b)
+    bz <- vec3_z(b)
+    vec3(ax + bx, ay + by, az + bz)
+
+export fn vec3_sub(a: Vec3, b: Vec3) -> Vec3 !{IO} =
+  do
+    ax <- vec3_x(a)
+    ay <- vec3_y(a)
+    az <- vec3_z(a)
+    bx <- vec3_x(b)
+    by <- vec3_y(b)
+    bz <- vec3_z(b)
+    vec3(ax - bx, ay - by, az - bz)
+
+export fn vec3_scale(v: Vec3, s: Double) -> Vec3 !{IO} =
+  do
+    x <- vec3_x(v)
+    y <- vec3_y(v)
+    z <- vec3_z(v)
+    vec3(x * s, y * s, z * s)
+
+export fn vec3_dot(a: Vec3, b: Vec3) -> Double !{IO} =
+  do
+    ax <- vec3_x(a)
+    ay <- vec3_y(a)
+    az <- vec3_z(a)
+    bx <- vec3_x(b)
+    by <- vec3_y(b)
+    bz <- vec3_z(b)
+    ax * bx + ay * by + az * bz
+
+export fn vec3_length(v: Vec3) -> Double !{IO} =
+  do
+    d <- vec3_dot(v, v)
+    sqrt(d)
+
+export fn vec3_normalize(v: Vec3) -> Vec3 !{IO} =
+  do
+    len <- vec3_length(v)
+    if len == 0.0 then vec3(0.0, 0.0, 0.0)
+    else vec3_scale(v, 1.0 / len)

@@ -1,5 +1,5 @@
 import stdlib.test (TestState, new_state, assert_eq, assert_true, summary)
-import stdlib.mutable (MutVec, mutvec_new, mutvec_get, mutvec_set, mutvec_len, mutvec_each, mutvec_fold, mutvec_zip_fold, mutvec_map_inplace)
+import stdlib.mutable (MutVec, mutvec_new, mutvec_get, mutvec_at, mutvec_set, mutvec_len, mutvec_each, mutvec_fold, mutvec_zip_fold, mutvec_map_inplace)
 
 fn main() -> Unit !{IO} =
   do
@@ -25,6 +25,12 @@ fn main() -> Unit !{IO} =
     mutvec_set(v, 2, 7)
     b2 <- mutvec_get(v, 2)
     assert_eq(state, "mutvec_set overwrite", b2, 7)
+
+    # mutvec_at: unchecked direct read (no Maybe) agrees with mutvec_get in-bounds
+    at2 <- mutvec_at(v, 2)
+    at0 <- mutvec_at(v, 0)
+    assert_eq(state, "mutvec_at reads written slot", at2, 7)
+    assert_eq(state, "mutvec_at reads fill slot", at0, 42)
 
     # two independent MutVecs do not alias each other
     p <- mutvec_new(3, 0)

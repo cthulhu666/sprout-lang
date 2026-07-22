@@ -324,8 +324,15 @@ raylib) have landed. Fenced from core: shim `graphics/sprout_gfx.c` links only v
   (an earlier note claiming libm builtins were required was wrong — transcendentals are
   ~a dozen lines of Double arithmetic each). If a measured hot path demands speed, escalate
   to an LLVM intrinsic (`llvm.sqrt.f64`), not a runtime builtin.
-- [ ] `M2b` `Vec2/3/4`, `Mat4`, `Quat` on flat primitive `Vector Double` + `vector_mutset`
-  (NOT records/ADTs of Doubles — misses the unboxed fast path).
+- [~] `M2b` `Vec2/3/4`, `Mat4`, `Quat` as `wrap` types over `stdlib.mutable`'s
+  `MutVec Double` / `MutMatrix Double` (tested flat-buffer foundation, unboxed fast path).
+  `Vec3` slice landed (`stdlib/linalg.sprout` + `mutvec_at` direct accessor); `Vec4`/`Mat4`/`Quat` pending.
+- [ ] `P2` Language-core wart: a `wrap` type used in a **user-defined function's type
+  annotation across modules** does not canonicalize — `fn f(v: linalg.Vec3)` in user code sees
+  `linalg.Vec3` as distinct from the value's `stdlib.linalg.Vec3` (Call type mismatch). Values
+  flow fine into the defining module's own functions, so stdlib APIs work; only user-written
+  helpers over imported wrap types break. Blocks ergonomic user-side Vec3/Mat4 helpers. Likely
+  in the module-qualified-type-identity machinery (docs/module-qualified-type-identity-design-2026-07-10.md).
 - [ ] `M3` glTF model loading + static draw via a C-side raylib handle registry.
 - [ ] `M4` Skeletal animation playback (raylib `UpdateModelAnimation`) — the Kenney character goal.
 - [ ] `M5+` Move engine into Sprout (glTF parse, skinning, camera, scene graph); demote
