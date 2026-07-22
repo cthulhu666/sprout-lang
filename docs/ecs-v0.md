@@ -126,6 +126,11 @@ it all stacks on.
 
 ## 9. What the prototype validated (and where it diverged)
 
+> **Superseded by §10.** This section records the first ECS prototype
+> (`stdlib.scene` + `ecs_crowd`, 6 components). §10 documents the current state:
+> the prototype grew into the **Loam** engine, `scene` moved out of `stdlib/`, and
+> the demo became a wandering-agent crowd. Read §9 as history; §10 is current.
+
 The first cut answered §6's load-bearing questions empirically. The findings
 inverted the recommended substrate in §4/§5.
 
@@ -197,3 +202,77 @@ Crucially, **the systems did not change**: `animation_system` and `render_system
 still iterate `scene_count` blind to how many entities exist or where they sit.
 Capability grew by adding data, not by rewriting loops — the whole point of the
 entity/component/system split.
+
+## 10. The Loam engine — prototype → engine seed
+
+The prototype became **Loam**, "the seed of a game engine" (botanical, like
+Sprout: the fertile ground apps root into). This realises §8 ("Path to an
+engine") and reorganises the code into three tiers by responsibility.
+
+### 10.1 Three tiers — and game code leaves `stdlib/`
+
+`stdlib/` is the *language* standard library; a scene/entity system and an AI are
+game-domain code and do not belong there. So:
+
+| Tier | Lives in | Modules |
+|---|---|---|
+| Language stdlib | `stdlib/` | `stdlib.rng` (general PRNG), `stdlib.gfx` |
+| **Loam engine** | `loam/` (a second package root) | `loam.scene`, `loam.agent` |
+| Example app | `examples/gfx/` | `ecs_agents` — supplies layout + rendering |
+
+`loam.*` resolves outside `stdlib_root` via the sanctioned second-package-root
+mechanism: `compile-driver --emit-ir <stdlib> --package-root <repo-root> <file>`
+(`resolve_module_path` extra roots; `module_name_to_path` itself stays locked to
+`stdlib_root`). `run-gfx`, `compile-examples`, and the new `test-loam` lane pass
+`--package-root`. A general-purpose *seeded* PRNG is not game-specific, so it
+stays in stdlib as `stdlib.rng` (a linear congruential generator; determinism is
+what makes the game loop reproducible and testable).
+
+### 10.2 `scene` — 9 components, and the arity ceiling
+
+`loam.scene` extends the prototype's store to the agent's needs: it adds
+`heading`, per-entity `rng` state, an `energy` stat, and a `resting` phase bit,
+for **nine** `MutVec` components. Nine is the hard ceiling: `ast_to_ir` rejects a
+single-constructor ADT of arity 10 (`sprout_make` goes to 9). A tenth component
+must therefore *group* existing ones into a sub-struct (e.g. a `Transform` holding
+pos+heading), **not** widen the constructor — grouping mixed-typed fields also
+shrinks the same-typed-accessor footgun. To fit nine, per-entity animation *rate*
+was dropped: cadence is a single global constant in the view (a uniform walk pace,
+arguably more realistic). `test_scene` sentinels every component (a distinct value
+per array, read back through each accessor) — the only guard against a miscounted
+`match` slot returning a wrong-but-same-typed component.
+
+### 10.3 `agent` — a pure AI hook and one game-loop tick
+
+`loam.agent` is the behaviour layer:
+
+- `agent_decide(seed, heading) -> (heading, seed)` — **pure** (no IO, no Scene):
+  occasionally turn to a fresh random heading, else hold course. This is the
+  "AI" — unit-testable on its own and the single swap point for smarter behaviour.
+- `world_step(s, bound) -> Unit !{IO}` — advances every entity one **fixed**
+  timestep: decide → step along heading → spend/regain energy (walk until spent,
+  rest until full; hysteresis stops clip-flicker) → bounce off the arena edge
+  (stay put + turn inward, no collisions). It touches only component arrays —
+  **no graphics**.
+
+The old `move_system` is folded into `world_step` so there is one movement path.
+
+### 10.4 The model/view split, made enforceable
+
+`world_step` is the *same* function the renderer drives and the headless test
+asserts (`tests/loam/test_agent.spr`: the AI on both branches, run-to-run
+determinism, a rester that does not move, edge containment) — all with no window.
+So "test the game loop headless" is structural, not aspirational: the loop is
+verified without gfx, and the view (`ecs_agents`) is a pure *reader* of components
+it never mutates.
+
+### 10.5 The demo — a wandering crowd
+
+`examples/gfx/ecs_agents.sprout` spawns **196** characters (14×14) that wander,
+face their heading (`draw_model`'s Y-rotation), and animate on the **run** clip
+while walking / **idle** while resting — selected per entity from the `resting`
+bit. It supersedes `ecs_crowd` (kept `character_crowd` as the pre-ECS baseline).
+Verified by screenshot at 58 FPS. The walk cycle is `assets/models/character_run.glb`,
+baked from the Kenney pack's `run.fbx` via `tools/convert_kenney.sh` (the pack has
+no dedicated *walk* clip — `run` is its only locomotion). This closes the
+`docs/graphics-v0.md` "run clip" follow-up; `jump` and one-GLB packing remain.

@@ -27,5 +27,17 @@ OUT="$OUT_DIR/characterMedium.glb"
 command -v "$BLENDER" >/dev/null 2>&1 || [ -x "$BLENDER" ] || { echo "error: Blender not found at $BLENDER (set BLENDER=...)" >&2; exit 1; }
 
 mkdir -p "$OUT_DIR"
+# The textured character model (skin baked into the material).
 "$BLENDER" --background --python "$HERE/tools/fbx_to_glb.py" -- "$SRC" "$OUT" "$SKIN"
 echo "converted -> $OUT (skin: $SKIN_NAME)"
+
+# Animation-only GLBs: one clip per file, skeleton matching the model so
+# gfx.load_animations drives it (no skin needed — the pose is what matters).
+# `idle` and `run` back examples/gfx/ecs_agents.sprout; `jump` is available too.
+for clip in idle run; do
+  CLIP_SRC="$PACK_DIR/Animations/$clip.fbx"
+  CLIP_OUT="$OUT_DIR/character_$clip.glb"
+  [ -f "$CLIP_SRC" ] || { echo "error: $CLIP_SRC not found" >&2; exit 1; }
+  "$BLENDER" --background --python "$HERE/tools/fbx_to_glb.py" -- "$CLIP_SRC" "$CLIP_OUT"
+  echo "converted -> $CLIP_OUT"
+done

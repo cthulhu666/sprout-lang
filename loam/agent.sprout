@@ -1,0 +1,102 @@
+module loam.agent
+
+import stdlib.mutable (mutvec_at, mutvec_set)
+import stdlib.math (sin, cos)
+import stdlib.rng (rng_next, rng_below)
+import loam.scene (Scene, scene_count, scene_pos_x, scene_pos_z, scene_heading, scene_rng, scene_energy, scene_resting)
+
+# Loam's behaviour layer: the game-model tick. `world_step` advances every entity
+# one fixed step — decide, move, spend/regain energy — touching ONLY component
+# arrays, never graphics. So the whole game loop runs and is asserted headless
+# (tests/loam/test_agent.spr); the renderer just reads the same components after.
+#
+# A fixed timestep (not wall-clock dt) is deliberate: reproducibility depends on
+# it. Same seeds => same trajectory, which is what makes the loop testable.
+
+# Tuning (fixed-timestep units). walk_step is units/tick; energy is a 0..full
+# stamina budget spent while walking and regained while resting.
+let walk_step = 0.08
+let energy_full = 100.0
+let energy_spend = 0.5
+let energy_regain = 1.5
+let turn_denom = 40  # ~1-in-40 chance per walking tick to pick a new heading
+let heading_hundredths = 628  # 2*pi*100: a heading in [0, 2pi) via rng_below/100
+
+# A random heading in [0, 2pi), derived from a PRNG state (radians).
+fn heading_from(seed: Int) -> Double = to_double(rng_below(seed, heading_hundredths)) / 100.0
+
+# The AI, isolated and PURE: given a per-entity PRNG state and current heading,
+# occasionally turn to a fresh random heading; otherwise hold course. Returns the
+# (heading', seed') to store back. No IO, no Scene — unit-testable on its own, and
+# the single place to swap in smarter behaviour later.
+export fn agent_decide(seed: Int, heading: Double) -> (Double, Int) =
+  let s1 = rng_next(seed)
+      s2 = rng_next(s1)
+  in if rng_below(s1, turn_denom) == 0 then (heading_from(s2), s2) else (heading, s1)
+
+fn in_bounds(v: Double, bound: Double) -> Bool = v <= bound && v >= (-bound)
+
+# Resting entity: regain energy in place; return to walking once fully recovered.
+# Hysteresis (rest until FULL, walk until empty) keeps it from flickering at the
+# threshold. Position is untouched — a rester does not move.
+fn rest_entity(s: Scene, i: Int) -> Unit !{IO} =
+  do
+    e <- mutvec_at(scene_energy(s), i)
+    let e2 = e + energy_regain
+    if e2 >= energy_full
+    then
+      do
+        mutvec_set(scene_energy(s), i, energy_full)
+        mutvec_set(scene_resting(s), i, 0)
+    else mutvec_set(scene_energy(s), i, e2)
+
+# Walking entity: decide a heading, step along it, spend energy. If the step would
+# leave the arena, stay put and turn to a fresh heading (bounce inward) — that
+# keeps wanderers on-stage without any collision handling. When energy runs out,
+# flip to resting.
+fn walk_entity(s: Scene, bound: Double, i: Int) -> Unit !{IO} =
+  do
+    seed <- mutvec_at(scene_rng(s), i)
+    heading <- mutvec_at(scene_heading(s), i)
+    px <- mutvec_at(scene_pos_x(s), i)
+    pz <- mutvec_at(scene_pos_z(s), i)
+    e <- mutvec_at(scene_energy(s), i)
+    match agent_decide(seed, heading) with
+    | (nh, nseed) ->
+        do
+          mutvec_set(scene_rng(s), i, nseed)
+          let cx = px + (cos(nh) * walk_step)
+          let cz = pz + (sin(nh) * walk_step)
+          if in_bounds(cx, bound) && in_bounds(cz, bound)
+          then
+            do
+              mutvec_set(scene_pos_x(s), i, cx)
+              mutvec_set(scene_pos_z(s), i, cz)
+              mutvec_set(scene_heading(s), i, nh)
+          else mutvec_set(scene_heading(s), i, heading_from(rng_next(nseed)))
+          let e2 = e - energy_spend
+          if e2 <= 0.0
+          then
+            do
+              mutvec_set(scene_energy(s), i, 0.0)
+              mutvec_set(scene_resting(s), i, 1)
+          else mutvec_set(scene_energy(s), i, e2)
+
+fn step_entity(s: Scene, bound: Double, i: Int) -> Unit !{IO} =
+  do
+    resting <- mutvec_at(scene_resting(s), i)
+    if resting == 1 then rest_entity(s, i) else walk_entity(s, bound, i)
+
+fn step_go(s: Scene, bound: Double, i: Int, n: Int) -> Unit !{IO} =
+  if i >= n then ()
+  else
+    do
+      step_entity(s, bound, i)
+      step_go(s, bound, i + 1, n)
+
+# Advance the whole scene one fixed tick. `bound` is the arena half-extent (the
+# app sizes it to its world). O(n) in the live entity count.
+export fn world_step(s: Scene, bound: Double) -> Unit !{IO} =
+  do
+    n <- scene_count(s)
+    step_go(s, bound, 0, n)

@@ -1,0 +1,57 @@
+import stdlib.test (TestState, new_state, assert_eq, assert_true, summary)
+import loam.scene (Scene, scene_new, scene_count, spawn, scene_model, scene_pos_x, scene_pos_z, scene_heading, scene_frame, scene_rng, scene_energy, scene_resting)
+import stdlib.mutable (mutvec_at, mutvec_set)
+
+# loam.scene is fixed-capacity SoA storage with nine same-typed component arrays.
+# A miscounted accessor slot would read the WRONG component with no type error, so
+# this test writes a DISTINCT sentinel into every component and reads each back
+# through its own accessor — the only guard against swapped accessors.
+
+fn main() -> Unit !{IO} =
+  do
+    state <- new_state()
+
+    s <- scene_new(8)
+    c0 <- scene_count(s)
+    assert_eq(state, "fresh scene: count is 0", c0, 0)
+
+    # spawn returns incrementing ids and bumps the live count.
+    id0 <- spawn(s, 111, 2.0, 3.0, 5.0, 666, 7.0)
+    assert_eq(state, "first spawn: id 0", id0, 0)
+    # frame and resting default in spawn; set them to distinct sentinels too so
+    # ALL nine arrays carry a unique value.
+    mutvec_set(scene_frame(s), 0, 8.0)
+    mutvec_set(scene_resting(s), 0, 9)
+
+    # Read every component back — each must equal its own sentinel, never a
+    # neighbour's. Distinct values mean a swap surfaces as a concrete mismatch.
+    m0 <- mutvec_at(scene_model(s), 0)
+    assert_eq(state, "model sentinel", m0, 111)
+    r0 <- mutvec_at(scene_rng(s), 0)
+    assert_eq(state, "rng sentinel", r0, 666)
+    rest0 <- mutvec_at(scene_resting(s), 0)
+    assert_eq(state, "resting sentinel", rest0, 9)
+    x0 <- mutvec_at(scene_pos_x(s), 0)
+    assert_true(state, "pos_x sentinel", x0 == 2.0)
+    z0 <- mutvec_at(scene_pos_z(s), 0)
+    assert_true(state, "pos_z sentinel", z0 == 3.0)
+    h0 <- mutvec_at(scene_heading(s), 0)
+    assert_true(state, "heading sentinel", h0 == 5.0)
+    e0 <- mutvec_at(scene_energy(s), 0)
+    assert_true(state, "energy sentinel", e0 == 7.0)
+    f0 <- mutvec_at(scene_frame(s), 0)
+    assert_true(state, "frame sentinel", f0 == 8.0)
+
+    # A second entity lands in the next slot without disturbing the first.
+    id1 <- spawn(s, 222, 20.0, 30.0, 50.0, 777, 70.0)
+    assert_eq(state, "second spawn: id 1", id1, 1)
+    c2 <- scene_count(s)
+    assert_eq(state, "count after two spawns", c2, 2)
+    m1 <- mutvec_at(scene_model(s), 1)
+    assert_eq(state, "entity 1 model isolated", m1, 222)
+    h1 <- mutvec_at(scene_heading(s), 1)
+    assert_true(state, "entity 1 heading isolated", h1 == 50.0)
+    m0b <- mutvec_at(scene_model(s), 0)
+    assert_eq(state, "entity 0 model still intact", m0b, 111)
+
+    summary(state)

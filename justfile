@@ -193,7 +193,7 @@ run-gfx file: bootstrap-from-seed
   TMP_LL="/tmp/sprout_gfx_$$.ll"
   TMP_BIN="/tmp/sprout_gfx_$$"
   trap 'rm -f "$TMP_LL" "$TMP_BIN"' EXIT
-  "{{build_dir}}/compile_driver_bin_stage1" --emit-ir "{{stdlib_root}}" {{quote(file)}} > "$TMP_LL"
+  "{{build_dir}}/compile_driver_bin_stage1" --emit-ir "{{stdlib_root}}" --package-root "{{justfile_directory()}}" {{quote(file)}} > "$TMP_LL"
   clang "$TMP_LL" {{runtime_src}} "{{gfx_src}}" -O2 -I"{{raylib_prefix}}/include" -L"{{raylib_prefix}}/lib" {{clang_extra}} {{gfx_link}} -o "$TMP_BIN"
   "$TMP_BIN"
 
@@ -257,7 +257,7 @@ debug-run file: bootstrap-from-seed
 
 # Run all stdlib + compiler-stage tests (stage-1).
 [group('test')]
-test: test-stdlib-stage1 test-type-errors test-package-resolution gfx-smoke
+test: test-stdlib-stage1 test-type-errors test-package-resolution gfx-smoke test-loam
 
 # Second-root (--package-root) module resolution gate: an app importing a module
 # from an extra package root resolves only when that root is registered
@@ -265,6 +265,34 @@ test: test-stdlib-stage1 test-type-errors test-package-resolution gfx-smoke
 [group('test')]
 test-package-resolution: bootstrap-from-seed
   bash scripts/package_resolution_gate.sh
+
+# Loam game-engine tests. loam.* lives OUTSIDE stdlib_root (it is game code, not
+# standard library), so it resolves via --package-root (the repo root). The engine
+# is renderer-independent — no gfx — so unlike the gfx examples these tests link
+# against the core runtime and actually RUN, asserting the game loop headless.
+[group('test')]
+test-loam: bootstrap-from-seed
+  #!/usr/bin/env bash
+  set -euo pipefail
+  STAGE="{{build_dir}}/compile_driver_bin_stage1"
+  ROOT="{{justfile_directory()}}"
+  TMPD=$(mktemp -d /tmp/sprout_loam_XXXXXX)
+  trap 'rm -rf "$TMPD"' EXIT
+  fail=0
+  for f in tests/loam/*.spr; do
+    [ -f "$f" ] || continue
+    if ! "$STAGE" --emit-ir "{{stdlib_root}}" --package-root "$ROOT" "$f" > "$TMPD/t.ll" 2>"$TMPD/err"; then
+      echo "test-loam: COMPILE FAILED for $f" >&2; cat "$TMPD/err" >&2; fail=1; continue
+    fi
+    if ! clang "$TMPD/t.ll" {{runtime_src}} {{clang_extra}} -o "$TMPD/t.bin" 2>"$TMPD/err"; then
+      echo "test-loam: LINK FAILED for $f" >&2; cat "$TMPD/err" >&2; fail=1; continue
+    fi
+    if ! "$TMPD/t.bin" > "$TMPD/run" 2>&1 || ! grep -q "SUITE PASSED" "$TMPD/run"; then
+      echo "test-loam: $f did not pass" >&2; cat "$TMPD/run" >&2; fail=1; continue
+    fi
+    echo "  OK $f"
+  done
+  [ "$fail" -eq 0 ] && echo "==> test-loam ✓" || { echo "==> test-loam FAILED" >&2; exit 1; }
 
 # B1-Double regression gate: assert the inline Vector-Double optimization fires on
 # genuine `Vector Double`, does NOT fire on a shadowed heap `Double` (UAF guard),
@@ -504,7 +532,7 @@ _compile-examples stage xfail="":
       for xf in $XFAIL_EXAMPLES; do [[ "$f" == "$xf" ]] && is_xfail=1 && break; done
       printf '==> %s\n' "$f" > "$TMPD/$idx.out"
       ok=1
-      "./$STAGE" --emit-ir "{{stdlib_root}}" "$f" > "$TMPD/$idx.ll" 2>"$TMPD/$idx.err"
+      "./$STAGE" --emit-ir "{{stdlib_root}}" --package-root "{{justfile_directory()}}" "$f" > "$TMPD/$idx.ll" 2>"$TMPD/$idx.err"
       if [[ $? -ne 0 ]]; then
         { printf '  COMPILE FAILED:\n'; cat "$TMPD/$idx.err"; } >> "$TMPD/$idx.out"; ok=0
       elif ! opt --passes=verify "$TMPD/$idx.ll" -o /dev/null 2>"$TMPD/$idx.err"; then
@@ -552,11 +580,12 @@ _compile-examples stage xfail="":
   echo "==> All examples compiled OK"
 
 # Stage-1: emit IR → clang link for each example.
-# Known xfail: sentry_issue_browser{,_tui} (import examples.* unresolved); the
-# graphics examples (import stdlib.gfx) need the raylib shim + link flags from
-# `just run-gfx`, so they cannot link against the core runtime here.
+# Known xfail: the graphics examples (import stdlib.gfx) need the raylib shim +
+# link flags from `just run-gfx`, so they cannot link against the core runtime
+# here. (This lane now registers the repo as a package root, so examples importing
+# examples.* — e.g. sentry_issue_browser — resolve and compile.)
 [group('examples')]
-compile-examples-stage1: (_compile-examples "build/compile_driver_bin_stage1" "examples/sentry_issue_browser.sprout examples/sentry_issue_browser_tui.sprout examples/gfx/spinning_cube.sprout examples/gfx/character_view.sprout examples/gfx/character_animated.sprout examples/gfx/character_crowd.sprout examples/gfx/ecs_crowd.sprout")
+compile-examples-stage1: (_compile-examples "build/compile_driver_bin_stage1" "examples/gfx/spinning_cube.sprout examples/gfx/character_view.sprout examples/gfx/character_animated.sprout examples/gfx/character_crowd.sprout examples/gfx/ecs_agents.sprout")
 
 # Negative type-checking conformance: each tests/conformance/type_error/<n>.spr must
 # be rejected by `--phase check` with output containing the substring in <n>.err.

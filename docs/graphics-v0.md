@@ -147,7 +147,10 @@ skins by *bone index*, so an animation loaded from a *separate* GLB
 (`IsModelAnimationValid` confirms) — no Blender action-merging into one file.
 Shim adds a model-agnostic animation-set registry (`gfx_load_animations` /
 `gfx_update_animation`). raylib 6.0 note: `ModelAnimation.keyframeCount`, not
-the older `frameCount`. Follow-ups: `run`/`jump` clips and one-GLB packing.
+the older `frameCount`. The `run` clip is now baked too
+(`assets/models/character_run.glb`, via `tools/convert_kenney.sh`) and drives the
+walking agents in `examples/gfx/ecs_agents.sprout` (see `docs/ecs-v0.md` §10).
+Follow-ups: `jump` clip and one-GLB packing.
 
 ### M5+ — hollow out the black box (proposed)
 Progressively move engine work into Sprout: glTF parsing (Sprout already has

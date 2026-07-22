@@ -1,0 +1,33 @@
+module stdlib.rng
+
+# Deterministic seeded pseudo-random numbers — a linear congruential generator
+# (LCG). Same seed produces the same sequence on every target, so it suits
+# simulations, sampling, shuffling, jitter, and property tests where
+# reproducibility matters. It is NOT cryptographic: the stream is fully
+# predictable from any output. For unpredictable bytes use crypto.random_bytes.
+#
+# State is an Int held in [0, M). One step is the classic recurrence
+#   state' = (A * state + C) mod M      M = 2^31, A = 1103515245, C = 12345
+# A * (M - 1) < 2^61 < 2^63, so the multiply never overflows an i64 — the stream
+# is identical regardless of a target's integer-overflow semantics.
+
+let rng_modulus = 2147483648  # 2^31
+let rng_mult = 1103515245
+let rng_incr = 12345
+
+# High-bit shift: the low bits of an LCG cycle with short periods, so rng_below
+# derives values from the upper bits (drop the low 16). 2^16 = 65536.
+let rng_high_shift = 65536
+
+# Non-negative modulo. Sprout has no `%` operator; for a, b >= 0 the remainder is
+# a - (a / b) * b (integer `/` truncates toward zero).
+fn imod(a: Int, b: Int) -> Int = a - ((a / b) * b)
+
+# Advance the generator one step. Pure: threading the returned state is how a
+# caller draws successive values. O(1).
+export fn rng_next(state: Int) -> Int = imod((rng_mult * state) + rng_incr, rng_modulus)
+
+# A value in [0, n) derived from `state`, taken from its high bits for better
+# uniformity than a raw `state mod n`. Total: n <= 0 yields 0. O(1).
+export fn rng_below(state: Int, n: Int) -> Int =
+  if n <= 0 then 0 else imod(state / rng_high_shift, n)

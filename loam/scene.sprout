@@ -1,0 +1,101 @@
+module loam.scene
+
+import stdlib.mutable (MutVec, mutvec_new, mutvec_at, mutvec_set)
+
+# Loam — the seed of a game engine. `scene` is its entity/component store.
+#
+# A Scene is fixed-capacity, structure-of-arrays (SoA) storage: an *entity* is an
+# integer slot, and each *component* is one `MutVec` indexed by that slot. A
+# *system* is a plain function iterating the arrays (see loam.agent). The engine
+# owns the storage; the app assigns meaning to the model handle and drives
+# rendering — so the same store backs both the game model and the view.
+#
+# Components (constructor order):
+#   count    live-entity counter (one cell)     | model    view handle (Int)
+#   pos_x    ground-plane x (Double)            | pos_z    ground-plane z (Double)
+#   heading  facing / walk direction, radians   | frame    animation playhead
+#   rng      per-entity PRNG state (Int)        | energy   stamina stat (Double)
+#   resting  behaviour phase, 0 walking / 1 resting (Int)
+#
+# Arity note: single-constructor ADTs cap at 9 fields (ast_to_ir rejects 10 —
+# sprout_make goes to 9). Nine here is exactly the ceiling, so a tenth component
+# must group existing ones into a sub-struct (e.g. a Transform holding pos+heading)
+# rather than widen this constructor. Animation *rate* is deliberately NOT a
+# component: it is a single global cadence in the view, which spends no slot and
+# reads as a uniform walk pace.
+#
+# Substrate note: the design wanted a record, but records don't reach codegen yet
+# (ast_to_ir:926 rejects them), so Scene is a single-constructor ADT over the
+# component arrays. The constructor is immutable but the arrays it holds are
+# mutable, so a Scene value shares mutable SoA storage — exactly what the ECS
+# wants. With several same-typed `MutVec` fields, a miscounted accessor would
+# return the wrong component with NO type error; test_scene sentinels every
+# component to guard against exactly that.
+
+export type Scene (..) =
+  | Scene (MutVec Int) (MutVec Int) (MutVec Double) (MutVec Double) (MutVec Double) (MutVec Double) (MutVec Int) (MutVec Double) (MutVec Int)
+
+# One-cell live-entity counter (module-private; callers use scene_count). A MutVec
+# is our only mutable cell, so a bump-able `spawn` needs one.
+fn count_cell(s: Scene) -> MutVec Int =
+  match s with | Scene c _ _ _ _ _ _ _ _ -> c
+
+export fn scene_model(s: Scene) -> MutVec Int =
+  match s with | Scene _ m _ _ _ _ _ _ _ -> m
+
+export fn scene_pos_x(s: Scene) -> MutVec Double =
+  match s with | Scene _ _ x _ _ _ _ _ _ -> x
+
+export fn scene_pos_z(s: Scene) -> MutVec Double =
+  match s with | Scene _ _ _ z _ _ _ _ _ -> z
+
+export fn scene_heading(s: Scene) -> MutVec Double =
+  match s with | Scene _ _ _ _ h _ _ _ _ -> h
+
+export fn scene_frame(s: Scene) -> MutVec Double =
+  match s with | Scene _ _ _ _ _ f _ _ _ -> f
+
+export fn scene_rng(s: Scene) -> MutVec Int =
+  match s with | Scene _ _ _ _ _ _ r _ _ -> r
+
+export fn scene_energy(s: Scene) -> MutVec Double =
+  match s with | Scene _ _ _ _ _ _ _ e _ -> e
+
+export fn scene_resting(s: Scene) -> MutVec Int =
+  match s with | Scene _ _ _ _ _ _ _ _ rs -> rs
+
+# Allocate SoA storage for up to `cap` entities; the scene starts empty.
+export fn scene_new(cap: Int) -> Scene !{IO} =
+  do
+    count <- mutvec_new(1, 0)
+    model <- mutvec_new(cap, 0)
+    pos_x <- mutvec_new(cap, 0.0)
+    pos_z <- mutvec_new(cap, 0.0)
+    heading <- mutvec_new(cap, 0.0)
+    frame <- mutvec_new(cap, 0.0)
+    rng <- mutvec_new(cap, 0)
+    energy <- mutvec_new(cap, 0.0)
+    resting <- mutvec_new(cap, 0)
+    Scene(count, model, pos_x, pos_z, heading, frame, rng, energy, resting)
+
+# O(1). The number of live (spawned) entities.
+export fn scene_count(s: Scene) -> Int !{IO} = mutvec_at(count_cell(s), 0)
+
+# Write one entity's components at the next free slot, bump the count, and return
+# its id. `frame` starts at 0.0 and `resting` at 0 (walking); the caller supplies
+# the model handle, transform, heading, PRNG seed, and starting energy. Caller
+# must not exceed the capacity passed to scene_new (fixed storage).
+export fn spawn(s: Scene, model: Int, x: Double, z: Double,
+                heading: Double, seed: Int, energy: Double) -> Int !{IO} =
+  do
+    id <- scene_count(s)
+    mutvec_set(scene_model(s), id, model)
+    mutvec_set(scene_pos_x(s), id, x)
+    mutvec_set(scene_pos_z(s), id, z)
+    mutvec_set(scene_heading(s), id, heading)
+    mutvec_set(scene_frame(s), id, 0.0)
+    mutvec_set(scene_rng(s), id, seed)
+    mutvec_set(scene_energy(s), id, energy)
+    mutvec_set(scene_resting(s), id, 0)
+    mutvec_set(count_cell(s), 0, id + 1)
+    id

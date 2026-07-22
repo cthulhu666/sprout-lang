@@ -1,0 +1,30 @@
+import stdlib.test (TestState, new_state, assert_eq, summary)
+import stdlib.rng (rng_next, rng_below)
+
+# stdlib.rng is a deterministic seeded PRNG (a linear congruential generator):
+# same seed => same sequence, on any target. These expected values are the
+# reference LCG stream for seed 1 (A=1103515245, C=12345, M=2^31), so a change in
+# the constants or the arithmetic is caught here rather than silently drifting.
+
+fn main() -> Unit !{IO} =
+  do
+    state <- new_state()
+
+    # rng_next advances the generator deterministically from a seed.
+    let s1 = rng_next(1)
+    let s2 = rng_next(s1)
+    let s3 = rng_next(s2)
+    assert_eq(state, "rng_next(1)", s1, 1103527590)
+    assert_eq(state, "rng_next(s1)", s2, 377401575)
+    assert_eq(state, "rng_next(s2)", s3, 662824084)
+
+    # rng_below(state, n) projects a state onto [0, n) using the high bits.
+    assert_eq(state, "rng_below(s1, 100)", rng_below(s1, 100), 38)
+    assert_eq(state, "rng_below(s1, 360)", rng_below(s1, 360), 278)
+    assert_eq(state, "rng_below(s2, 100)", rng_below(s2, 100), 58)
+
+    # Degenerate bounds are total: n <= 0 yields 0; mod 1 is always 0.
+    assert_eq(state, "rng_below(s1, 0) is 0", rng_below(s1, 0), 0)
+    assert_eq(state, "rng_below(s1, 1) is 0", rng_below(s1, 1), 0)
+
+    summary(state)
