@@ -5,7 +5,8 @@ import stdlib.mutable (MutVec, mutvec_new, mutvec_at, mutvec_set)
 # ECS-v0 skeleton: a fixed-capacity, structure-of-arrays scene (docs/ecs-v0.md).
 #
 # An *entity* is an integer slot. A `Scene` bundles one `MutVec` per *component*
-# (model handle, transform x, animation frame, speed) plus a one-cell live-count.
+# (model handle, transform x/z on the ground plane, animation frame, speed) plus
+# a one-cell live-count.
 # A *system* is a plain function that iterates the arrays (`move_system` here;
 # gfx systems live in the renderer-facing example, since this module stays
 # renderer-independent so it links and tests under the core runtime).
@@ -22,26 +23,29 @@ import stdlib.mutable (MutVec, mutvec_new, mutvec_at, mutvec_set)
 # Storage is fixed at `scene_new(cap)`; `spawn` fills up to `cap` (despawn /
 # growable storage are follow-ups, §2 non-goals).
 
-# Fields: count_cell, model, pos_x, frame, speed.
+# Fields: count_cell, model, pos_x, pos_z, frame, speed.
 export type Scene (..) =
-  | Scene (MutVec Int) (MutVec Int) (MutVec Double) (MutVec Double) (MutVec Double)
+  | Scene (MutVec Int) (MutVec Int) (MutVec Double) (MutVec Double) (MutVec Double) (MutVec Double)
 
 # One-cell live-entity counter (a MutVec is our only mutable cell, so a bump-able
 # `spawn` needs one). Kept module-private; callers use `scene_count`.
 fn count_cell(s: Scene) -> MutVec Int =
-  match s with | Scene c _ _ _ _ -> c
+  match s with | Scene c _ _ _ _ _ -> c
 
 export fn scene_model(s: Scene) -> MutVec Int =
-  match s with | Scene _ m _ _ _ -> m
+  match s with | Scene _ m _ _ _ _ -> m
 
 export fn scene_pos_x(s: Scene) -> MutVec Double =
-  match s with | Scene _ _ x _ _ -> x
+  match s with | Scene _ _ x _ _ _ -> x
+
+export fn scene_pos_z(s: Scene) -> MutVec Double =
+  match s with | Scene _ _ _ z _ _ -> z
 
 export fn scene_frame(s: Scene) -> MutVec Double =
-  match s with | Scene _ _ _ f _ -> f
+  match s with | Scene _ _ _ _ f _ -> f
 
 export fn scene_speed(s: Scene) -> MutVec Double =
-  match s with | Scene _ _ _ _ sp -> sp
+  match s with | Scene _ _ _ _ _ sp -> sp
 
 # Allocate SoA storage for up to `cap` entities; the scene starts empty.
 export fn scene_new(cap: Int) -> Scene !{IO} =
@@ -49,9 +53,10 @@ export fn scene_new(cap: Int) -> Scene !{IO} =
     cc <- mutvec_new(1, 0)
     model <- mutvec_new(cap, 0)
     pos_x <- mutvec_new(cap, 0.0)
+    pos_z <- mutvec_new(cap, 0.0)
     frame <- mutvec_new(cap, 0.0)
     speed <- mutvec_new(cap, 0.0)
-    Scene(cc, model, pos_x, frame, speed)
+    Scene(cc, model, pos_x, pos_z, frame, speed)
 
 # O(1). The number of live (spawned) entities.
 export fn scene_count(s: Scene) -> Int !{IO} = mutvec_at(count_cell(s), 0)
@@ -59,11 +64,12 @@ export fn scene_count(s: Scene) -> Int !{IO} = mutvec_at(count_cell(s), 0)
 # Write one entity's components at the next free slot, bump the count, and return
 # its id. Caller must not exceed the capacity passed to `scene_new` (fixed
 # storage, §6.3). `frame` starts at 0.0.
-export fn spawn(s: Scene, model: Int, x: Double, speed: Double) -> Int !{IO} =
+export fn spawn(s: Scene, model: Int, x: Double, z: Double, speed: Double) -> Int !{IO} =
   do
     id <- scene_count(s)
     mutvec_set(scene_model(s), id, model)
     mutvec_set(scene_pos_x(s), id, x)
+    mutvec_set(scene_pos_z(s), id, z)
     mutvec_set(scene_frame(s), id, 0.0)
     mutvec_set(scene_speed(s), id, speed)
     mutvec_set(count_cell(s), 0, id + 1)

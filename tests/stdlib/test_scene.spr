@@ -1,5 +1,5 @@
 import stdlib.test (TestState, new_state, assert_eq, assert_true, summary)
-import stdlib.scene (Scene, scene_new, scene_count, spawn, scene_model, scene_pos_x, scene_speed, move_system)
+import stdlib.scene (Scene, scene_new, scene_count, spawn, scene_model, scene_pos_x, scene_pos_z, scene_speed, move_system)
 import stdlib.mutable (mutvec_at)
 
 # ECS-v0 skeleton: a Scene is fixed-capacity structure-of-arrays storage. `spawn`
@@ -18,8 +18,8 @@ fn main() -> Unit !{IO} =
     assert_eq(state, "fresh scene: count is 0", c0, 0)
 
     # spawn returns incrementing ids and bumps the live count.
-    id0 <- spawn(s, 100, 10.0, 2.0)
-    id1 <- spawn(s, 200, 20.0, 3.0)
+    id0 <- spawn(s, 100, 10.0, -5.0, 2.0)
+    id1 <- spawn(s, 200, 20.0, 7.0, 3.0)
     assert_eq(state, "first spawn: id 0", id0, 0)
     assert_eq(state, "second spawn: id 1", id1, 1)
     c2 <- scene_count(s)
@@ -32,6 +32,10 @@ fn main() -> Unit !{IO} =
     assert_eq(state, "entity 1 model handle", m1, 200)
     x0 <- mutvec_at(scene_pos_x(s), 0)
     assert_true(state, "entity 0 initial pos_x", x0 == 10.0)
+    z0 <- mutvec_at(scene_pos_z(s), 0)
+    z1 <- mutvec_at(scene_pos_z(s), 1)
+    assert_true(state, "entity 0 pos_z", z0 == -5.0)
+    assert_true(state, "entity 1 pos_z", z1 == 7.0)
     sp1 <- mutvec_at(scene_speed(s), 1)
     assert_true(state, "entity 1 speed", sp1 == 3.0)
 

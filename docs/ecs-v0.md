@@ -148,8 +148,8 @@ are wanted for real (see `docs/records-v0.md` §10).
 
 ```
 type Scene (..) =
-  | Scene (MutVec Int) (MutVec Int) (MutVec Double) (MutVec Double) (MutVec Double)
-#          count_cell   model         pos_x           frame           speed
+  | Scene (MutVec Int) (MutVec Int) (MutVec Double) (MutVec Double) (MutVec Double) (MutVec Double)
+#          count_cell   model         pos_x           pos_z           frame           speed
 ```
 
 The §6.1 fallback offered a `wrap` over a tuple. That was tried and **hit the
@@ -186,3 +186,14 @@ growable storage remain follow-ups.
 "5") is kept intact as the "before"; `examples/gfx/ecs_crowd.sprout` is the same
 scene expressed as data — `spawn` N entities, run systems that iterate generically.
 Adding a character is one more `spawn`, not a new code path.
+
+### 9.6 Scaling to 100 — the §8 growth path, demonstrated
+
+The example spawns **100 entities on a 10×10 grid** (verified rendering: a full
+grid of independently-posed, lit, textured characters). Getting there from the
+5-in-a-line version was exactly the proposal's §8 recipe — *add a component*:
+`Scene` gained a `pos_z` array (now 6 components) and `spawn` a `z` parameter.
+Crucially, **the systems did not change**: `animation_system` and `render_system`
+still iterate `scene_count` blind to how many entities exist or where they sit.
+Capability grew by adding data, not by rewriting loops — the whole point of the
+entity/component/system split.

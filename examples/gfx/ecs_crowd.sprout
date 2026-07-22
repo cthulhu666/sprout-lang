@@ -2,7 +2,7 @@ module examples.gfx.ecs_crowd
 
 import stdlib.gfx
 import stdlib.linalg (anim_advance)
-import stdlib.scene (Scene, scene_new, scene_count, spawn, scene_model, scene_pos_x, scene_frame, scene_speed)
+import stdlib.scene (Scene, scene_new, scene_count, spawn, scene_model, scene_pos_x, scene_pos_z, scene_frame, scene_speed)
 import stdlib.mutable (mutvec_at, mutvec_set)
 
 # The character crowd, rebuilt on the ECS skeleton (docs/ecs-v0.md).
@@ -19,19 +19,28 @@ import stdlib.mutable (mutvec_at, mutvec_set)
 # Run:
 #   mise exec -- just run-gfx examples/gfx/ecs_crowd.sprout
 
-fn spread_x(i: Int) -> Double = (to_double(i) - 2.0) * 3.0  # -6, -3, 0, 3, 6
-fn speed_of(i: Int) -> Double = 0.3 + to_double(i) * 0.25  # 0.30 .. 1.30
+# 100 characters on a 10x10 grid, 3.0 units apart, centred on the origin.
+let grid_cols = 10
+let grid_gap = 3.0
+
+# Column/row of entity i, mapped to a ground-plane offset centred on 0. (No `%`
+# operator in Sprout, so the column is `i - (i / cols) * cols`.)
+fn grid_x(i: Int) -> Double = (to_double(i - (i / grid_cols) * grid_cols) - 4.5) * grid_gap
+fn grid_z(i: Int) -> Double = (to_double(i / grid_cols) - 4.5) * grid_gap
+
+# A little animation-speed variety so the crowd doesn't move in lockstep.
+fn speed_of(i: Int) -> Double = 0.5 + to_double(i - (i / 7) * 7) * 0.12  # 0.50 .. 1.22
 
 # Load `n` independent character instances and spawn one entity per instance:
-# distinct model handle, position, and animation speed. Each playhead is
+# distinct model handle, grid position, and animation speed. Each playhead is
 # staggered so the crowd starts out of sync.
 fn populate(s: Scene, n: Int, i: Int) -> Unit !{IO} =
   if i >= n then ()
   else
     do
       h <- gfx.load_model("assets/models/characterMedium.glb")
-      id <- spawn(s, h, spread_x(i), speed_of(i))
-      mutvec_set(scene_frame(s), id, to_double(i) * 12.0)
+      id <- spawn(s, h, grid_x(i), grid_z(i), speed_of(i))
+      mutvec_set(scene_frame(s), id, to_double(i) * 5.0)
       populate(s, n, i + 1)
 
 # System: advance every entity's animation playhead and pose its model.
@@ -59,7 +68,8 @@ fn render_go(s: Scene, i: Int, n: Int) -> Unit !{IO} =
     do
       h <- mutvec_at(scene_model(s), i)
       x <- mutvec_at(scene_pos_x(s), i)
-      gfx.draw_model(h, x, 0.0, 0.0, 0.0, 1.0)
+      z <- mutvec_at(scene_pos_z(s), i)
+      gfx.draw_model(h, x, 0.0, z, 0.0, 1.0)
       render_go(s, i + 1, n)
 
 fn render_system(s: Scene) -> Unit !{IO} =
@@ -74,7 +84,7 @@ fn render_loop(s: Scene, set: Int, clip: Int, keyframes: Double) -> Unit !{IO} =
     else
       do
         gfx.frame_begin()
-        gfx.draw_grid(24, 1.0)
+        gfx.draw_grid(40, 1.0)
         animation_system(s, set, clip, keyframes)
         render_system(s)
         gfx.frame_end()
@@ -82,11 +92,12 @@ fn render_loop(s: Scene, set: Int, clip: Int, keyframes: Double) -> Unit !{IO} =
 
 fn main() -> Unit !{IO} =
   do
-    gfx.open_window(1000, 600, "Sprout — ECS crowd")
+    gfx.open_window(1000, 600, "Sprout — ECS crowd (100 characters)")
     gfx.set_target_fps(60)
-    gfx.set_camera(0.0, 5.0, 15.0, 0.0, 1.8, 0.0, 45.0)
+    # Steep, pulled-back view so all 10 rows clear each other (little occlusion).
+    gfx.set_camera(0.0, 52.0, 30.0, 0.0, 0.0, 0.0, 45.0)
 
-    let n = 5
+    let n = 100
     s <- scene_new(n)
     populate(s, n, 0)
 
