@@ -94,8 +94,8 @@ fn main() -> Unit !{IO} =
   do
     gfx.open_window(1000, 600, "Sprout — ECS crowd (100 characters)")
     gfx.set_target_fps(60)
-    # Steep, pulled-back view so all 10 rows clear each other (little occlusion).
-    gfx.set_camera(0.0, 52.0, 30.0, 0.0, 0.0, 0.0, 45.0)
+    # Low 3/4 game view, pulled back to frame the grid.
+    gfx.set_camera(0.0, 22.0, 46.0, 0.0, 1.5, 0.0, 45.0)
 
     let n = 100
     s <- scene_new(n)
