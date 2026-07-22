@@ -14,4 +14,5 @@ fn main() -> Unit !{IO} =
     gfx.draw_grid(10, 1.0)
     gfx.draw_fps(10, 10)
     gfx.frame_end()
+    pressed <- gfx.space_pressed()
     gfx.close_window()

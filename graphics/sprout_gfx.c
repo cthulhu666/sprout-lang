@@ -153,6 +153,12 @@ long long gfx_window_should_close(void) {
   return (closed || budget) ? 1 : 0;
 }
 
+/* 1 on the frame the Space key transitions to pressed (edge, not held) — the
+ * shape a toggle wants. IsKeyPressed already fires once per press. */
+long long gfx_space_pressed(void) {
+  return IsKeyPressed(KEY_SPACE) ? 1 : 0;
+}
+
 long long gfx_set_camera(long long px, long long py, long long pz,
                          long long tx, long long ty, long long tz,
                          long long fovy) {

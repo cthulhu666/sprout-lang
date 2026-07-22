@@ -97,12 +97,19 @@ fn orbit_camera(angle: Double) -> Unit !{IO} =
   gfx.set_camera(orbit_radius * sin(angle), orbit_height, orbit_radius * cos(angle),
                  0.0, orbit_target_y, 0.0, 45.0)
 
-fn render_loop(s: Scene, set: Int, clip: Int, keyframes: Double, angle: Double) -> Unit !{IO} =
+# `paused` gates ONLY the orbit: Space toggles it, and while paused the angle
+# holds. Character animation runs every frame regardless — the pause is the
+# camera's, not the scene's.
+fn render_loop(s: Scene, set: Int, clip: Int, keyframes: Double, angle: Double,
+               paused: Bool) -> Unit !{IO} =
   do
     stop <- gfx.window_should_close()
     if stop then gfx.close_window()
     else
       do
+        toggled <- gfx.space_pressed()
+        let now_paused = if toggled then ! paused else paused
+        let next = if now_paused then angle else next_angle(angle)
         orbit_camera(angle)
         gfx.frame_begin()
         gfx.draw_grid(40, 1.0)
@@ -110,7 +117,7 @@ fn render_loop(s: Scene, set: Int, clip: Int, keyframes: Double, angle: Double) 
         render_system(s)
         gfx.draw_fps(10, 10)
         gfx.frame_end()
-        render_loop(s, set, clip, keyframes, next_angle(angle))
+        render_loop(s, set, clip, keyframes, next, now_paused)
 
 fn main() -> Unit !{IO} =
   do
@@ -128,4 +135,4 @@ fn main() -> Unit !{IO} =
     let clip = count - 1
     kf <- gfx.animation_keyframes(anims, clip)
 
-    render_loop(s, anims, clip, to_double(kf), 0.0)
+    render_loop(s, anims, clip, to_double(kf), 0.0, false)
