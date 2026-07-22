@@ -21,7 +21,7 @@ import stdlib.mutable (mutvec_at, mutvec_set)
 # --- World layout -----------------------------------------------------------
 # ONE knob: agent_count. The grid shape, its centring, and the wander arena are
 # all DERIVED from it, so resizing the crowd is a single edit here.
-let agent_count = 196
+let agent_count = 10
 let grid_gap = 3.0
 
 # Integer square root (floor) so the crowd forms a near-square grid. O(sqrt n).

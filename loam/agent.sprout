@@ -1,7 +1,7 @@
 module loam.agent
 
 import stdlib.mutable (mutvec_at, mutvec_set)
-import stdlib.math (sin, cos)
+import stdlib.math (sin, cos, pi)
 import stdlib.rng (rng_next, rng_below)
 import loam.scene (Scene, scene_count, scene_pos_x, scene_pos_z, scene_heading, scene_rng, scene_energy, scene_resting)
 
@@ -21,6 +21,26 @@ let energy_spend = 0.5
 let energy_regain = 1.5
 let turn_denom = 40  # ~1-in-40 chance per walking tick to pick a new heading
 let heading_hundredths = 628  # 2*pi*100: a heading in [0, 2pi) via rng_below/100
+let two_pi = 2.0 * pi
+
+fn clampd(v: Double, lo: Double, hi: Double) -> Double =
+  if v < lo then lo else if v > hi then hi else v
+
+# Wrap an angle into [0, 2pi) so a reflected heading stays a sane value.
+fn norm_angle(h: Double) -> Double =
+  if h < 0.0 then norm_angle(h + two_pi)
+  else if h >= two_pi then norm_angle(h - two_pi)
+  else h
+
+# Reflect heading `h` off whichever wall a step crossed: an x-wall flips the x
+# velocity (heading -> pi - h), a z-wall flips z (heading -> -h), a corner both
+# (heading -> h + pi). The reflected heading points back inward, so the agent
+# turns away from the rim and keeps moving instead of pinning against it.
+fn reflect(h: Double, hit_x: Bool, hit_z: Bool) -> Double =
+  if hit_x && hit_z then norm_angle(h + pi)
+  else if hit_x then norm_angle(pi - h)
+  else if hit_z then norm_angle(0.0 - h)
+  else h
 
 # A random heading in [0, 2pi), derived from a PRNG state (radians).
 fn heading_from(seed: Int) -> Double = to_double(rng_below(seed, heading_hundredths)) / 100.0
@@ -50,10 +70,9 @@ fn rest_entity(s: Scene, i: Int) -> Unit !{IO} =
         mutvec_set(scene_resting(s), i, 0)
     else mutvec_set(scene_energy(s), i, e2)
 
-# Walking entity: decide a heading, step along it, spend energy. If the step would
-# leave the arena, stay put and turn to a fresh heading (bounce inward) — that
-# keeps wanderers on-stage without any collision handling. When energy runs out,
-# flip to resting.
+# Walking entity: decide a heading, step along it (reflecting off the arena walls
+# so it turns back inward without pinning), and spend energy. No collision
+# handling between agents. When energy runs out, flip to resting.
 fn walk_entity(s: Scene, bound: Double, i: Int) -> Unit !{IO} =
   do
     seed <- mutvec_at(scene_rng(s), i)
@@ -67,13 +86,13 @@ fn walk_entity(s: Scene, bound: Double, i: Int) -> Unit !{IO} =
           mutvec_set(scene_rng(s), i, nseed)
           let cx = px + (cos(nh) * walk_step)
           let cz = pz + (sin(nh) * walk_step)
-          if in_bounds(cx, bound) && in_bounds(cz, bound)
-          then
-            do
-              mutvec_set(scene_pos_x(s), i, cx)
-              mutvec_set(scene_pos_z(s), i, cz)
-              mutvec_set(scene_heading(s), i, nh)
-          else mutvec_set(scene_heading(s), i, heading_from(rng_next(nseed)))
+          # Reflect off any wall the step crossed, then move along the reflected
+          # heading (clamped for the corner case). The agent always advances and
+          # always faces where it goes — no pinning, no run-in-place.
+          let rh = reflect(nh,! in_bounds (cx, bound),! in_bounds (cz, bound))
+          mutvec_set(scene_pos_x(s), i, clampd(px + (cos(rh) * walk_step), (-bound), bound))
+          mutvec_set(scene_pos_z(s), i, clampd(pz + (sin(rh) * walk_step), (-bound), bound))
+          mutvec_set(scene_heading(s), i, rh)
           let e2 = e - energy_spend
           if e2 <= 0.0
           then
