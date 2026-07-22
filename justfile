@@ -556,7 +556,7 @@ _compile-examples stage xfail="":
 # graphics examples (import stdlib.gfx) need the raylib shim + link flags from
 # `just run-gfx`, so they cannot link against the core runtime here.
 [group('examples')]
-compile-examples-stage1: (_compile-examples "build/compile_driver_bin_stage1" "examples/sentry_issue_browser.sprout examples/sentry_issue_browser_tui.sprout examples/gfx/spinning_cube.sprout examples/gfx/character_view.sprout examples/gfx/character_animated.sprout examples/gfx/character_crowd.sprout")
+compile-examples-stage1: (_compile-examples "build/compile_driver_bin_stage1" "examples/sentry_issue_browser.sprout examples/sentry_issue_browser_tui.sprout examples/gfx/spinning_cube.sprout examples/gfx/character_view.sprout examples/gfx/character_animated.sprout examples/gfx/character_crowd.sprout examples/gfx/ecs_crowd.sprout")
 
 # Negative type-checking conformance: each tests/conformance/type_error/<n>.spr must
 # be rejected by `--phase check` with output containing the substring in <n>.err.

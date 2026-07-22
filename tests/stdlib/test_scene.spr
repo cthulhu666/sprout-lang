@@ -1,0 +1,46 @@
+import stdlib.test (TestState, new_state, assert_eq, assert_true, summary)
+import stdlib.scene (Scene, scene_new, scene_count, spawn, scene_model, scene_pos_x, scene_speed, move_system)
+import stdlib.mutable (mutvec_at)
+
+# ECS-v0 skeleton: a Scene is fixed-capacity structure-of-arrays storage. `spawn`
+# writes one entity's components at the next free slot and returns its id; a
+# "system" is a plain function iterating the component arrays. Records don't
+# codegen yet (ast_to_ir:926), so Scene is a `wrap` over a tuple of MutVec arrays
+# — the substrate validated in docs/ecs-v0.md §6.1.
+
+fn main() -> Unit !{IO} =
+  do
+    state <- new_state()
+
+    # Fresh scene starts empty.
+    s <- scene_new(8)
+    c0 <- scene_count(s)
+    assert_eq(state, "fresh scene: count is 0", c0, 0)
+
+    # spawn returns incrementing ids and bumps the live count.
+    id0 <- spawn(s, 100, 10.0, 2.0)
+    id1 <- spawn(s, 200, 20.0, 3.0)
+    assert_eq(state, "first spawn: id 0", id0, 0)
+    assert_eq(state, "second spawn: id 1", id1, 1)
+    c2 <- scene_count(s)
+    assert_eq(state, "count after two spawns", c2, 2)
+
+    # Components read back at their slots.
+    m0 <- mutvec_at(scene_model(s), 0)
+    m1 <- mutvec_at(scene_model(s), 1)
+    assert_eq(state, "entity 0 model handle", m0, 100)
+    assert_eq(state, "entity 1 model handle", m1, 200)
+    x0 <- mutvec_at(scene_pos_x(s), 0)
+    assert_true(state, "entity 0 initial pos_x", x0 == 10.0)
+    sp1 <- mutvec_at(scene_speed(s), 1)
+    assert_true(state, "entity 1 speed", sp1 == 3.0)
+
+    # A system is a function over the scene: move_system advances pos_x by
+    # speed * dt for every live entity, in place.
+    move_system(s, 3.0)
+    x0b <- mutvec_at(scene_pos_x(s), 0)
+    x1b <- mutvec_at(scene_pos_x(s), 1)
+    assert_true(state, "entity 0 moved: 10 + 2*3 = 16", x0b == 16.0)
+    assert_true(state, "entity 1 moved: 20 + 3*3 = 29", x1b == 29.0)
+
+    summary(state)

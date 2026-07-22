@@ -1,0 +1,98 @@
+module examples.gfx.ecs_crowd
+
+import stdlib.gfx
+import stdlib.linalg (anim_advance)
+import stdlib.scene (Scene, scene_new, scene_count, spawn, scene_model, scene_pos_x, scene_frame, scene_speed)
+import stdlib.mutable (mutvec_at, mutvec_set)
+
+# The character crowd, rebuilt on the ECS skeleton (docs/ecs-v0.md).
+#
+# `examples/gfx/character_crowd.sprout` hand-threads two parallel arrays and a
+# hardcoded "5 characters" loop. Here the same scene is *data*: `spawn` N
+# entities into a `Scene`, then run systems that iterate it generically. Adding a
+# sixth character is a sixth `spawn`, not a new code path — that is the whole
+# point of the entity/component/system split.
+#
+# The Scene storage lives in `stdlib.scene` (renderer-independent). The two gfx
+# systems live here because they call raylib, which only links under `run-gfx`.
+#
+# Run:
+#   mise exec -- just run-gfx examples/gfx/ecs_crowd.sprout
+
+fn spread_x(i: Int) -> Double = (to_double(i) - 2.0) * 3.0  # -6, -3, 0, 3, 6
+fn speed_of(i: Int) -> Double = 0.3 + to_double(i) * 0.25  # 0.30 .. 1.30
+
+# Load `n` independent character instances and spawn one entity per instance:
+# distinct model handle, position, and animation speed. Each playhead is
+# staggered so the crowd starts out of sync.
+fn populate(s: Scene, n: Int, i: Int) -> Unit !{IO} =
+  if i >= n then ()
+  else
+    do
+      h <- gfx.load_model("assets/models/characterMedium.glb")
+      id <- spawn(s, h, spread_x(i), speed_of(i))
+      mutvec_set(scene_frame(s), id, to_double(i) * 12.0)
+      populate(s, n, i + 1)
+
+# System: advance every entity's animation playhead and pose its model.
+fn anim_go(s: Scene, set: Int, clip: Int, keyframes: Double, i: Int, n: Int) -> Unit !{IO} =
+  if i >= n then ()
+  else
+    do
+      h <- mutvec_at(scene_model(s), i)
+      cur <- mutvec_at(scene_frame(s), i)
+      spd <- mutvec_at(scene_speed(s), i)
+      let next = anim_advance(cur, spd, keyframes)
+      mutvec_set(scene_frame(s), i, next)
+      gfx.update_animation(h, set, clip, next)
+      anim_go(s, set, clip, keyframes, i + 1, n)
+
+fn animation_system(s: Scene, set: Int, clip: Int, keyframes: Double) -> Unit !{IO} =
+  do
+    n <- scene_count(s)
+    anim_go(s, set, clip, keyframes, 0, n)
+
+# System: draw every entity's model at its transform.
+fn render_go(s: Scene, i: Int, n: Int) -> Unit !{IO} =
+  if i >= n then ()
+  else
+    do
+      h <- mutvec_at(scene_model(s), i)
+      x <- mutvec_at(scene_pos_x(s), i)
+      gfx.draw_model(h, x, 0.0, 0.0, 0.0, 1.0)
+      render_go(s, i + 1, n)
+
+fn render_system(s: Scene) -> Unit !{IO} =
+  do
+    n <- scene_count(s)
+    render_go(s, 0, n)
+
+fn render_loop(s: Scene, set: Int, clip: Int, keyframes: Double) -> Unit !{IO} =
+  do
+    stop <- gfx.window_should_close()
+    if stop then gfx.close_window()
+    else
+      do
+        gfx.frame_begin()
+        gfx.draw_grid(24, 1.0)
+        animation_system(s, set, clip, keyframes)
+        render_system(s)
+        gfx.frame_end()
+        render_loop(s, set, clip, keyframes)
+
+fn main() -> Unit !{IO} =
+  do
+    gfx.open_window(1000, 600, "Sprout — ECS crowd")
+    gfx.set_target_fps(60)
+    gfx.set_camera(0.0, 5.0, 15.0, 0.0, 1.8, 0.0, 45.0)
+
+    let n = 5
+    s <- scene_new(n)
+    populate(s, n, 0)
+
+    anims <- gfx.load_animations("assets/models/character_idle.glb")
+    count <- gfx.animation_count(anims)
+    let clip = count - 1
+    kf <- gfx.animation_keyframes(anims, clip)
+
+    render_loop(s, anims, clip, to_double(kf))

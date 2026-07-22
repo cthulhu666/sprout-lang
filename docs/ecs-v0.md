@@ -1,8 +1,10 @@
-# Scene / Entity System (ECS) — v0 proposal
+# Scene / Entity System (ECS) — v0
 
-**Status:** proposal, not implemented. Forward-looking design for the graphics/
-game arc (follows `docs/graphics-v0.md`; the M0–M4 graphics work is in PR #232).
-This doc is the entry point for the next session on this thread.
+**Status:** first cut implemented (`stdlib/scene.sprout`, `tests/stdlib/test_scene.spr`,
+`examples/gfx/ecs_crowd.sprout`). Forward-looking design for the graphics/game arc
+(follows `docs/graphics-v0.md`; the M0–M4 graphics work is in PR #232). §§1–8 are the
+original design; **§9 records what the prototype actually validated and where it
+diverged from the sketch.**
 
 ## 1. Problem statement
 
@@ -87,6 +89,11 @@ run the two systems — but the same code scales to N with mixed skins/clips/pos
 
 ## 6. Open questions to validate FIRST (load-bearing)
 
+> **Answered by the prototype — see §9.** §6.1 (record ergonomics) resolved
+> *negatively*: records don't codegen, so the §5 record `Scene` is replaced by a
+> single-constructor ADT. §6.2 (the `wrap` wart) materialized as predicted and
+> steered the substrate away from `wrap`. §6.3 (fixed capacity) stands.
+
 1. **Records-of-`MutVec` ergonomics.** Is `Scene` as an immutable record holding
    mutable-array handles pleasant to write and pass around? Records are still
    experimental (`docs/records-v0.md`). **Validate this before building the ECS** —
@@ -102,10 +109,11 @@ run the two systems — but the same code scales to N with mixed skins/clips/pos
 
 ## 7. Recommended first cut
 
-A minimal **fixed-capacity SoA-ECS**: one `Scene` (record of component `MutVec`s),
-a `spawn`, and the animation + render systems — then rebuild
-`examples/gfx/character_crowd.sprout` on top of it as a before/after. Likely lands
-as a small `stdlib` scene helper + a new example. Start by answering §6.1.
+A minimal **fixed-capacity SoA-ECS**: one `Scene` (a single-ctor ADT of component
+`MutVec`s — see §9.2, not the record §5 drew), a `spawn`, and the systems — then
+rebuild the crowd on top as a before/after. This landed as `stdlib/scene.sprout`
+(gfx-free core) + `examples/gfx/ecs_crowd.sprout` (gfx systems), exactly as
+sketched. See §9 for what actually shipped.
 
 ## 8. Path to an engine
 
@@ -115,3 +123,66 @@ Each new capability is "add a component + a system":
 - `ai_state` + `behavior_system` → things act.
 This progression is how the demo becomes an engine; the ECS skeleton is the brick
 it all stacks on.
+
+## 9. What the prototype validated (and where it diverged)
+
+The first cut answered §6's load-bearing questions empirically. The findings
+inverted the recommended substrate in §4/§5.
+
+### 9.1 Records are non-executable — the record `Scene` (§5) was rejected
+
+The §6.1 spike (a record holding `MutVec` component arrays) **fails at codegen**.
+Records parse and type-check — the AST/inference carry `TRecord`/`@rec:` markers
+and `tests/conformance/run/record_types.spr` exists — but `translate_expr` in
+`stdlib/compiler/ast_to_ir.sprout:926` bails with `record not yet supported`, and
+`TGetField` (field access) at `:927` likewise. No runner exercises
+`tests/conformance/run/`, so that fixture is **dormant**, not passing. Records are
+frontend-only groundwork today. Wiring record codegen (mirroring single-ctor-ADT
+`IRMakeCtor` construction + the existing `IRGetField` projection) is a tractable
+follow-up but out of scope for "simple ECS"; it is the right path once records
+are wanted for real (see `docs/records-v0.md` §10).
+
+### 9.2 Substrate: single-constructor ADT, not a record or a `wrap`-tuple
+
+`Scene` is a **single-constructor ADT over the component arrays**:
+
+```
+type Scene (..) =
+  | Scene (MutVec Int) (MutVec Int) (MutVec Double) (MutVec Double) (MutVec Double)
+#          count_cell   model         pos_x           frame           speed
+```
+
+The §6.1 fallback offered a `wrap` over a tuple. That was tried and **hit the
+§6.2 cross-module annotation wart** immediately: a helper in the *example* module
+annotating `s: Scene` failed with `stdlib.scene.Scene vs Scene` (BACKLOG §9 P2) —
+exactly "the first place it really bites." A single-ctor ADT is the same nominal,
+zero-indirection shape `MutVec` itself uses, and it **resolves unqualified across
+module boundaries**, so game-author code stays clean (`s: Scene`, no
+qualification). The immutable constructor still shares mutable component storage
+through the `MutVec` handles it holds — the SoA property is unchanged. The `wrap`
+wart (§6.2) therefore remains open but no longer blocks the ECS.
+
+### 9.3 The core is renderer-independent; gfx systems live in the example
+
+`stdlib/scene.sprout` holds storage + `spawn` + accessors + one pure system
+(`move_system`), and imports **no** gfx — so it links and tests under the core
+runtime (`tests/stdlib/test_scene.spr`, 10 assertions). The gfx systems
+(`animation_system`, `render_system`) live in `examples/gfx/ecs_crowd.sprout`,
+which imports both `stdlib.scene` and `stdlib.gfx` (raylib links only under
+`run-gfx`). This is a cleaner split than the §5 sketch implied: the ECS core does
+not depend on the renderer.
+
+### 9.4 `spawn` and the count cell
+
+`spawn` needs to bump a live count, but a `MutVec` is Sprout's only mutable cell,
+so `count` is a one-element `MutVec Int` (`count_cell`), not a bare `Int` field as
+§5 drew it. `spawn(s, model, x, speed) -> Int` writes at the count slot, bumps the
+cell, and returns the id. Fixed capacity + `count` per §6.3; despawn/free-list/
+growable storage remain follow-ups.
+
+### 9.5 Before/after
+
+`examples/gfx/character_crowd.sprout` (hand-threaded parallel arrays, hardcoded
+"5") is kept intact as the "before"; `examples/gfx/ecs_crowd.sprout` is the same
+scene expressed as data — `spawn` N entities, run systems that iterate generically.
+Adding a character is one more `spawn`, not a new code path.
