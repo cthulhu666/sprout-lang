@@ -68,4 +68,14 @@ fn main() -> Unit !{IO} =
     a2z <- linalg.vec3_z(a)
     assert_true(state, "a unchanged", close(a2x, 1.0) && close(a2y, 2.0) && close(a2z, 3.0))
 
+    # camera_fit_distance(height, fovy_deg): distance so `height` fills the view.
+    # fovy=90 -> tan(45)=1 -> distance = height/2.
+    fit90 <- linalg.camera_fit_distance(2.0, 90.0)
+    assert_true(state, "fit distance h=2 fovy=90 == 1", close(fit90, 1.0))
+    fit90b <- linalg.camera_fit_distance(4.0, 90.0)
+    assert_true(state, "fit distance h=4 fovy=90 == 2", close(fit90b, 2.0))
+    # fovy=60 -> tan(30)=1/sqrt(3) -> distance = (h/2)*sqrt(3) = sqrt(3) for h=2
+    fit60 <- linalg.camera_fit_distance(2.0, 60.0)
+    assert_true(state, "fit distance h=2 fovy=60 == sqrt(3)", close(fit60, 1.7320508))
+
     summary(state)

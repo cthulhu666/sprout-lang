@@ -7,7 +7,7 @@ module stdlib.linalg
 # through mutable's unboxed `Vector Double` fast path.
 
 import stdlib.mutable (MutVec, mutvec_new, mutvec_at, mutvec_set)
-import stdlib.math (sqrt)
+import stdlib.math (sqrt, tan, radians)
 
 wrap Vec3 = MutVec Double
 
@@ -76,3 +76,9 @@ export fn vec3_normalize(v: Vec3) -> Vec3 !{IO} =
     len <- vec3_length(v)
     if len == 0.0 then vec3(0.0, 0.0, 0.0)
     else vec3_scale(v, 1.0 / len)
+
+# Distance a perspective camera (vertical FOV `fovy_deg`) must sit from a subject
+# of vertical extent `height` for it to exactly fill the view: (h/2) / tan(fovy/2).
+# Multiply the result by a margin (e.g. 1.2) at the call site for headroom.
+export fn camera_fit_distance(height: Double, fovy_deg: Double) -> Double =
+  (height / 2.0) / tan(radians(fovy_deg) / 2.0)

@@ -1,5 +1,5 @@
 import stdlib.test (TestState, new_state, assert_true, summary)
-import stdlib.math (pi, fabs, floor, sqrt, sin, cos)
+import stdlib.math (pi, fabs, floor, sqrt, sin, cos, tan, radians)
 
 # TDD — the Double math primitives that back the M2 vector/matrix layer
 # (docs/graphics-v0.md §M2). All implemented in PURE Sprout — no C builtins:
@@ -46,5 +46,15 @@ fn main() -> Unit !{IO} =
     # range reduction: large angle wraps correctly (sin(2pi + pi/6) == 0.5)
     assert_true(state, "sin(2pi + pi/6) == 0.5",
       close(sin(2.0 * pi + pi / 6.0), 0.5))
+
+    # --- radians (deg -> rad) ---
+    assert_true(state, "radians(180) == pi", close(radians(180.0), pi))
+    assert_true(state, "radians(90) == pi/2", close(radians(90.0), pi / 2.0))
+    assert_true(state, "radians(0) == 0", close(radians(0.0), 0.0))
+
+    # --- tan = sin/cos ---
+    assert_true(state, "tan(0) == 0", close(tan(0.0), 0.0))
+    assert_true(state, "tan(pi/4) == 1", close(tan(pi / 4.0), 1.0))
+    assert_true(state, "tan(radians(45)) == 1", close(tan(radians(45.0)), 1.0))
 
     summary(state)

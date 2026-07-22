@@ -123,3 +123,11 @@ export fn sin(x: Double) -> Double =
 
 export fn cos(x: Double) -> Double =
   sin(x + half_pi)
+
+export fn radians(deg: Double) -> Double =
+  deg * pi / 180.0
+
+# tan = sin/cos. Undefined (division by IEEE 0 -> inf) at odd multiples of pi/2;
+# callers in that domain must guard.
+export fn tan(x: Double) -> Double =
+  sin(x) / cos(x)
