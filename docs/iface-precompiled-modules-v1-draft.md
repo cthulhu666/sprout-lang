@@ -41,9 +41,14 @@ reuse) is the correct first increment, not PR 3 (codegen-skip, high-risk).**
 **Two distinct effects were separated (don't conflate them):**
 1. *Monotonic creep* ("slower and slower"): stdlib test corpus grew 101 (Jun 25)
    → 211 (Jul 21); `test-stdlib-stage1` is CPU-bound (137s wall / 13.5 min CPU at
-   8-wide) and scales with it. Cheap low-risk lever: raise the `JOBS` cap
-   (`min(8,NCPU)`→`NCPU`) and/or split `test` into two parallel jobs (worker
-   capacity 2). See BACKLOG.
+   8-wide on an 11-core dev box; the CI worker has only 4 cores — see below) and
+   scales with it. The CI worker is a GCE `e2-standard-4` (**4 vCPU / 16 GB**,
+   on-demand), so `JOBS = min(8, NCPU) = 4` is already saturated — raising the cap
+   is a no-op, and splitting `test` into parallel jobs gives no CPU-bound speedup
+   on 4 cores (and risks OOM: the box carries 16 GB swap for its two concurrent
+   `clang -O2` links). The cheap lever is a bigger worker (`e2-standard-8`); the
+   parallelism-independent lever is this iface feature. See BACKLOG "CI / Build
+   Performance".
 2. *Bimodal ~7-min spikes* (→21 min): stage-1 build-cache miss on every
    compiler-source commit (seed hash changes → `bootstrap-from-seed` re-runs
    `opt`+`clang -O2` over ~271k IR lines). Confirmed by commit `afff944` running
