@@ -49,9 +49,11 @@ static long long g_screenshot_frame = 2; /* which frame to capture (SPROUT_GFX_S
 
 /* Model handle registry. raylib returns Model/Texture structs by value, which
  * the i64 ABI cannot carry — so loaded models live here and Sprout holds an
- * integer handle (the array index). Same pattern will back textures later. */
-#define GFX_MAX_MODELS 64
-static Model g_models[GFX_MAX_MODELS];
+ * integer handle (the array index). Grows on demand (doubling) so the count of
+ * loaded models has no fixed ceiling — a scene of N animated characters loads N
+ * independent Model instances. Same pattern will back textures later. */
+static Model *g_models = NULL;
+static int g_models_cap = 0;
 static int g_model_count = 0;
 
 /* Animation-set registry: each LoadModelAnimations returns an array of clips.
@@ -186,10 +188,20 @@ long long gfx_draw_spinning_cube(long long size, long long angle) {
 }
 
 /* Load a model (glTF/GLB/OBJ/IQM/M3D — NOT FBX) and return an integer handle,
- * or -1 if the registry is full. Must be called after gfx_open_window (LoadModel
- * uploads meshes to the GPU, which needs the GL context). */
+ * or -1 only if the registry cannot grow (out of memory — logged loudly). Must
+ * be called after gfx_open_window (LoadModel uploads meshes to the GPU, which
+ * needs the GL context). */
 long long gfx_load_model(const char *path) {
-  if (g_model_count >= GFX_MAX_MODELS) return -1;
+  if (g_model_count >= g_models_cap) {
+    int new_cap = g_models_cap == 0 ? 16 : g_models_cap * 2;
+    Model *grown = realloc(g_models, (size_t)new_cap * sizeof(Model));
+    if (!grown) {
+      TraceLog(LOG_ERROR, "sprout_gfx: out of memory growing model registry to %d", new_cap);
+      return -1;
+    }
+    g_models = grown;
+    g_models_cap = new_cap;
+  }
   int h = g_model_count++;
   Model m = LoadModel(path);
   /* Repair a common FBX->glTF import defect: a diffuse with alpha 0 (fully
