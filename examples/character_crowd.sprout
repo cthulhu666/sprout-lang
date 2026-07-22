@@ -1,0 +1,83 @@
+module examples.character_crowd
+
+import stdlib.gfx
+import stdlib.linalg (anim_advance)
+import stdlib.mutable (MutVec, mutvec_new, mutvec_at, mutvec_set)
+
+# Five Kenney characters in a row, each playing the Idle clip INDEPENDENTLY at a
+# different speed and starting frame offset.
+#
+# Why five separate model loads: raylib's UpdateModelAnimation poses a model's
+# own vertex buffers, so N characters sharing one model would share one pose.
+# Each character is therefore its own loaded instance (own handle + buffers); a
+# per-character playhead lives in a MutVec Double, advanced in place each frame.
+#
+# Run:
+#   mise exec -- just run-gfx examples/character_crowd.sprout
+
+fn spread_x(i: Int) -> Double = (to_double(i) - 2.0) * 3.0  # -6, -3, 0, 3, 6
+fn speed_of(i: Int) -> Double = 0.3 + to_double(i) * 0.25  # 0.30 .. 1.30
+
+# Load `n` independent instances of the character; store handles in `models`.
+fn load_models(n: Int, i: Int, models: MutVec Int) -> Unit !{IO} =
+  if i >= n then ()
+  else
+    do
+      h <- gfx.load_model("assets/models/characterMedium.glb")
+      mutvec_set(models, i, h)
+      load_models(n, i + 1, models)
+
+# Stagger each playhead so the crowd starts out of sync.
+fn init_frames(n: Int, i: Int, frames: MutVec Double) -> Unit !{IO} =
+  if i >= n then ()
+  else
+    do
+      mutvec_set(frames, i, to_double(i) * 12.0)
+      init_frames(n, i + 1, frames)
+
+# Advance, pose, and draw every character for one frame.
+fn step_characters(n: Int, i: Int, set: Int, clip: Int, keyframes: Double,
+                   models: MutVec Int, frames: MutVec Double) -> Unit !{IO} =
+  if i >= n then ()
+  else
+    do
+      h <- mutvec_at(models, i)
+      cur <- mutvec_at(frames, i)
+      let next = anim_advance(cur, speed_of(i), keyframes)
+      mutvec_set(frames, i, next)
+      gfx.update_animation(h, set, clip, next)
+      gfx.draw_model(h, spread_x(i), 0.0, 0.0, 0.0, 1.0)
+      step_characters(n, i + 1, set, clip, keyframes, models, frames)
+
+fn render_loop(n: Int, set: Int, clip: Int, keyframes: Double,
+               models: MutVec Int, frames: MutVec Double) -> Unit !{IO} =
+  do
+    stop <- gfx.window_should_close()
+    if stop then gfx.close_window()
+    else
+      do
+        gfx.frame_begin()
+        gfx.draw_grid(24, 1.0)
+        step_characters(n, 0, set, clip, keyframes, models, frames)
+        gfx.frame_end()
+        render_loop(n, set, clip, keyframes, models, frames)
+
+fn main() -> Unit !{IO} =
+  do
+    gfx.open_window(1000, 600, "Sprout — 5 animated characters")
+    gfx.set_target_fps(60)
+    gfx.set_camera(0.0, 5.0, 15.0, 0.0, 1.8, 0.0, 45.0)
+
+    let n = 5
+    models <- mutvec_new(n, 0)
+    load_models(n, 0, models)
+
+    anims <- gfx.load_animations("assets/models/character_idle.glb")
+    count <- gfx.animation_count(anims)
+    let clip = count - 1
+    kf <- gfx.animation_keyframes(anims, clip)
+
+    frames <- mutvec_new(n, 0.0)
+    init_frames(n, 0, frames)
+
+    render_loop(n, anims, clip, to_double(kf), models, frames)
