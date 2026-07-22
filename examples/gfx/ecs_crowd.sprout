@@ -87,6 +87,7 @@ fn render_loop(s: Scene, set: Int, clip: Int, keyframes: Double) -> Unit !{IO} =
         gfx.draw_grid(40, 1.0)
         animation_system(s, set, clip, keyframes)
         render_system(s)
+        gfx.draw_fps(10, 10)
         gfx.frame_end()
         render_loop(s, set, clip, keyframes)
 

@@ -257,7 +257,7 @@ debug-run file: bootstrap-from-seed
 
 # Run all stdlib + compiler-stage tests (stage-1).
 [group('test')]
-test: test-stdlib-stage1 test-type-errors test-package-resolution
+test: test-stdlib-stage1 test-type-errors test-package-resolution gfx-smoke
 
 # Second-root (--package-root) module resolution gate: an app importing a module
 # from an extra package root resolves only when that root is registered
@@ -778,6 +778,39 @@ smoke-shapes: bootstrap-from-seed
     echo "smoke-shapes: $failed shape(s) failed" >&2; exit 1
   fi
   echo "==> smoke-shapes ✓"
+
+# gfx binding compile-smoke. The stdlib.gfx surface calls into the raylib host
+# shim, which links only under `run-gfx` — so these files can't be run in the
+# test harness. This gate compiles each to IR (type-checking the extern surface
+# and resolving every binding) and asserts the gfx externs reached the IR as
+# `declare`s. No link, no run.
+[group('smoke')]
+gfx-smoke: bootstrap-from-seed
+  #!/usr/bin/env bash
+  set -euo pipefail
+  TMPD=$(mktemp -d /tmp/sprout_gfxsmk_XXXXXX)
+  trap 'rm -rf "$TMPD"' EXIT
+  failed=0
+  for f in tests/gfx_smoke/*.spr; do
+    [ -f "$f" ] || continue
+    ir="$TMPD/$(basename "$f").ll"
+    if ! "{{build_dir}}/compile_driver_bin_stage1" --emit-ir "{{stdlib_root}}" "$f" > "$ir" 2>"$TMPD/err"; then
+      echo "gfx-smoke: emit-IR failed for $f" >&2; cat "$TMPD/err" >&2
+      failed=$((failed + 1)); continue
+    fi
+    if grep -q '^ERROR' "$ir"; then
+      echo "gfx-smoke: $f produced an ERROR line in IR" >&2; grep '^ERROR' "$ir" >&2
+      failed=$((failed + 1)); continue
+    fi
+    if ! grep -q 'declare .*@gfx_draw_fps(' "$ir"; then
+      echo "gfx-smoke: $f did not emit a declare for gfx_draw_fps" >&2
+      failed=$((failed + 1))
+    fi
+  done
+  if (( failed > 0 )); then
+    echo "gfx-smoke: $failed file(s) failed" >&2; exit 1
+  fi
+  echo "==> gfx-smoke ✓"
 
 # DoD #8 — bundle smoke.  `--phase bundle` on token.sprout, ast.sprout, and
 # prelude.sprout must produce non-empty output with no dot-prefix qualified names.

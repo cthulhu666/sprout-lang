@@ -1,0 +1,17 @@
+module gfx_surface
+
+import stdlib.gfx
+
+# Compile-smoke for the stdlib.gfx binding surface. gfx calls into raylib via the
+# host shim (graphics/sprout_gfx.c), which links ONLY under `just run-gfx` — so
+# this file is compiled to IR (type-checks the extern surface + resolves every
+# binding, e.g. `draw_fps`) but never linked or run. Driven by `just gfx-smoke`.
+fn main() -> Unit !{IO} =
+  do
+    gfx.open_window(320, 240, "smoke")
+    gfx.set_target_fps(60)
+    gfx.frame_begin()
+    gfx.draw_grid(10, 1.0)
+    gfx.draw_fps(10, 10)
+    gfx.frame_end()
+    gfx.close_window()

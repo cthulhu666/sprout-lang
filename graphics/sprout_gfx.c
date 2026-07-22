@@ -264,6 +264,16 @@ long long gfx_update_animation(long long model, long long set, long long index, 
   return 0;
 }
 
+/* Draw raylib's built-in FPS counter at (x,y) as a 2D screen-space overlay.
+ * Callable mid-frame: the frame is inside BeginMode3D, so drop to 2D for the
+ * text and re-enter 3D — frame_end's EndMode3D stays balanced. */
+long long gfx_draw_fps(long long x, long long y) {
+  EndMode3D();
+  DrawFPS((int)x, (int)y);
+  BeginMode3D(g_cam);
+  return 0;
+}
+
 long long gfx_frame_end(void) {
   EndMode3D();
   EndDrawing();
