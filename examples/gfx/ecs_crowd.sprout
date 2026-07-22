@@ -2,6 +2,7 @@ module examples.gfx.ecs_crowd
 
 import stdlib.gfx
 import stdlib.linalg (anim_advance)
+import stdlib.math (sin, cos, pi)
 import stdlib.scene (Scene, scene_new, scene_count, spawn, scene_model, scene_pos_x, scene_pos_z, scene_frame, scene_speed)
 import stdlib.mutable (mutvec_at, mutvec_set)
 
@@ -77,26 +78,46 @@ fn render_system(s: Scene) -> Unit !{IO} =
     n <- scene_count(s)
     render_go(s, 0, n)
 
-fn render_loop(s: Scene, set: Int, clip: Int, keyframes: Double) -> Unit !{IO} =
+# Orbit camera: circles the scene centre at a fixed height and radius, always
+# looking inward. `angle` (radians) advances each frame; the eye traces a circle
+# on the xz plane, height held constant.
+let orbit_radius = 46.0
+let orbit_height = 22.0
+let orbit_target_y = 1.5
+let orbit_step = 0.01  # radians/frame — ~10.5 s per revolution at 60 fps
+let two_pi = 2.0 * pi
+
+# Advance and wrap the orbit angle into [0, 2pi).
+fn next_angle(a: Double) -> Double =
+  if stepped >= two_pi then stepped - two_pi else stepped
+  where stepped = a + orbit_step
+
+# Place the camera on its orbit for the current angle.
+fn orbit_camera(angle: Double) -> Unit !{IO} =
+  gfx.set_camera(orbit_radius * sin(angle), orbit_height, orbit_radius * cos(angle),
+                 0.0, orbit_target_y, 0.0, 45.0)
+
+fn render_loop(s: Scene, set: Int, clip: Int, keyframes: Double, angle: Double) -> Unit !{IO} =
   do
     stop <- gfx.window_should_close()
     if stop then gfx.close_window()
     else
       do
+        orbit_camera(angle)
         gfx.frame_begin()
         gfx.draw_grid(40, 1.0)
         animation_system(s, set, clip, keyframes)
         render_system(s)
         gfx.draw_fps(10, 10)
         gfx.frame_end()
-        render_loop(s, set, clip, keyframes)
+        render_loop(s, set, clip, keyframes, next_angle(angle))
 
 fn main() -> Unit !{IO} =
   do
     gfx.open_window(1000, 600, "Sprout — ECS crowd (100 characters)")
     gfx.set_target_fps(60)
-    # Low 3/4 game view, pulled back to frame the grid.
-    gfx.set_camera(0.0, 22.0, 46.0, 0.0, 1.5, 0.0, 45.0)
+    # Camera is an orbit set per-frame in render_loop; angle 0 starts at the
+    # low 3/4 view (eye at (0, 22, 46)).
 
     let n = 100
     s <- scene_new(n)
@@ -107,4 +128,4 @@ fn main() -> Unit !{IO} =
     let clip = count - 1
     kf <- gfx.animation_keyframes(anims, clip)
 
-    render_loop(s, anims, clip, to_double(kf))
+    render_loop(s, anims, clip, to_double(kf), 0.0)
