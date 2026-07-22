@@ -19,6 +19,8 @@ extern fn gfx_set_camera(px: Double, py: Double, pz: Double,
 extern fn gfx_frame_begin() -> Unit !{IO}
 extern fn gfx_draw_grid(slices: Int, spacing: Double) -> Unit !{IO}
 extern fn gfx_draw_spinning_cube(size: Double, angle: Double) -> Unit !{IO}
+extern fn gfx_load_model(path: String) -> Int !{IO}
+extern fn gfx_draw_model(handle: Int, x: Double, y: Double, z: Double, angle: Double, scale: Double) -> Unit !{IO}
 extern fn gfx_frame_end() -> Unit !{IO}
 extern fn gfx_close_window() -> Unit !{IO}
 
@@ -49,6 +51,15 @@ export fn draw_grid(slices: Int, spacing: Double) -> Unit !{IO} =
 
 export fn draw_spinning_cube(size: Double, angle: Double) -> Unit !{IO} =
   gfx_draw_spinning_cube(size, angle)
+
+# Load a model (glTF/GLB/OBJ/IQM/M3D — not FBX) and return its handle. Call after
+# open_window; a handle of -1 means the model registry is full.
+export fn load_model(path: String) -> Int !{IO} =
+  gfx_load_model(path)
+
+# Draw a loaded model at (x,y,z), rotated `angle` degrees about Y, scaled by `scale`.
+export fn draw_model(handle: Int, x: Double, y: Double, z: Double, angle: Double, scale: Double) -> Unit !{IO} =
+  gfx_draw_model(handle, x, y, z, angle, scale)
 
 export fn frame_end() -> Unit !{IO} =
   gfx_frame_end()

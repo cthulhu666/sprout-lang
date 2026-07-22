@@ -40,6 +40,13 @@ static Camera3D g_cam;
 static long long g_frame_counter = 0;
 static long long g_max_frames = 0;
 
+/* Model handle registry. raylib returns Model/Texture structs by value, which
+ * the i64 ABI cannot carry — so loaded models live here and Sprout holds an
+ * integer handle (the array index). Same pattern will back textures later. */
+#define GFX_MAX_MODELS 64
+static Model g_models[GFX_MAX_MODELS];
+static int g_model_count = 0;
+
 long long gfx_open_window(long long w, long long h, const char *title) {
   const char *cap = getenv("SPROUT_GFX_MAX_FRAMES");
   g_max_frames = (cap != NULL) ? atoll(cap) : 0;
@@ -101,6 +108,28 @@ long long gfx_draw_spinning_cube(long long size, long long angle) {
   DrawCube((Vector3){ 0.0f, 0.0f, 0.0f }, s, s, s, (Color){ 190, 60, 60, 255 });
   DrawCubeWires((Vector3){ 0.0f, 0.0f, 0.0f }, s, s, s, (Color){ 235, 235, 235, 255 });
   rlPopMatrix();
+  return 0;
+}
+
+/* Load a model (glTF/GLB/OBJ/IQM/M3D — NOT FBX) and return an integer handle,
+ * or -1 if the registry is full. Must be called after gfx_open_window (LoadModel
+ * uploads meshes to the GPU, which needs the GL context). */
+long long gfx_load_model(const char *path) {
+  if (g_model_count >= GFX_MAX_MODELS) return -1;
+  int h = g_model_count++;
+  g_models[h] = LoadModel(path);
+  return h;
+}
+
+/* Draw model `handle` at (x,y,z), rotated `angle` degrees about the Y axis,
+ * uniformly scaled by `scale`. Out-of-range handles are a no-op. */
+long long gfx_draw_model(long long handle, long long x, long long y, long long z,
+                         long long angle, long long scale) {
+  if (handle < 0 || handle >= g_model_count) return 0;
+  Vector3 pos = { as_float(x), as_float(y), as_float(z) };
+  float s = as_float(scale);
+  DrawModelEx(g_models[(int)handle], pos, (Vector3){ 0.0f, 1.0f, 0.0f },
+              as_float(angle), (Vector3){ s, s, s }, WHITE);
   return 0;
 }
 

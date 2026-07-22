@@ -1,0 +1,37 @@
+module examples.character_view
+
+import stdlib.gfx
+import stdlib.linalg (camera_fit_distance)
+
+# Milestone 3 — load and draw a real 3D model from Sprout: the Kenney
+# "animated-characters-retro" character (CC0), converted from the pack's FBX to
+# GLB (raylib can't load FBX) via tools/convert_kenney.sh. Static mesh only —
+# skeletal animation is M4.
+#
+# Run:
+#   mise exec -- just run-gfx examples/character_view.sprout
+#   SPROUT_GFX_MAX_FRAMES=180 mise exec -- just run-gfx examples/character_view.sprout
+
+fn render_loop(handle: Int, frame: Int) -> Unit !{IO} =
+  do
+    stop <- gfx.window_should_close()
+    if stop then gfx.close_window()
+    else
+      do
+        let angle = to_double(frame) * 0.6
+        gfx.frame_begin()
+        gfx.draw_grid(20, 1.0)
+        gfx.draw_model(handle, 0.0, 0.0, 0.0, angle, 1.0)
+        gfx.frame_end()
+        render_loop(handle, frame + 1)
+
+fn main() -> Unit !{IO} =
+  do
+    gfx.open_window(800, 600, "Sprout — Kenney character")
+    gfx.set_target_fps(60)
+    # Frame the ~3.8-tall model: sit the camera back by the fit distance (with a
+    # 1.4x margin for headroom) and look at its mid-height.
+    let dist = camera_fit_distance(4.0, 45.0) * 1.4
+    gfx.set_camera(dist, 3.0, dist, 0.0, 1.8, 0.0, 45.0)
+    handle <- gfx.load_model("assets/models/characterMedium.glb")
+    render_loop(handle, 0)

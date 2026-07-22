@@ -333,8 +333,14 @@ raylib) have landed. Fenced from core: shim `graphics/sprout_gfx.c` links only v
   flow fine into the defining module's own functions, so stdlib APIs work; only user-written
   helpers over imported wrap types break. Blocks ergonomic user-side Vec3/Mat4 helpers. Likely
   in the module-qualified-type-identity machinery (docs/module-qualified-type-identity-design-2026-07-10.md).
-- [ ] `M3` glTF model loading + static draw via a C-side raylib handle registry.
-- [ ] `M4` Skeletal animation playback (raylib `UpdateModelAnimation`) — the Kenney character goal.
+- [x] `M3` Model loading + static draw via a C-side raylib handle registry
+  (`gfx_load_model`/`gfx_draw_model`, `examples/character_view.sprout`). The Kenney pack
+  ships FBX, which raylib CANNOT load — converted to GLB (mesh + 58-bone skeleton intact)
+  via `tools/convert_kenney.sh` (Blender headless). Added `tan`/`radians` + `camera_fit_distance`
+  (tested) to frame the model. Asset vendored: `assets/models/characterMedium.glb` (CC0, NOTICE).
+- [ ] `M4` Skeletal animation playback: raylib 6.0 `LoadModelAnimations` + `UpdateModelAnimation`
+  (bones now under `model.skeleton`, not flat `model.boneCount`). The retro pack's animations are
+  SEPARATE FBX files (idle/run/jump) — M4 must combine model+animations into one GLB in Blender.
 - [ ] `M5+` Move engine into Sprout (glTF parse, skinning, camera, scene graph); demote
   raylib toward a thin draw leaf; eventually swap the leaf for a modern API (Metal/WebGPU).
 - [ ] `P2` Language-core: unbox small fixed-shape numeric records (`Vec3 {x,y,z}` as 3 raw
