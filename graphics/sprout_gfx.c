@@ -40,6 +40,12 @@ static Camera3D g_cam;
 static long long g_frame_counter = 0;
 static long long g_max_frames = 0;
 
+/* Dev verification: if SPROUT_GFX_SCREENSHOT=<path> is set, the shim saves one
+ * PNG of a warmed-up frame (so an agent/CI can inspect the render without a
+ * human at the screen). Path is relative to the working directory. */
+static const char *g_screenshot_path = NULL;
+static int g_screenshot_done = 0;
+
 /* Model handle registry. raylib returns Model/Texture structs by value, which
  * the i64 ABI cannot carry — so loaded models live here and Sprout holds an
  * integer handle (the array index). Same pattern will back textures later. */
@@ -51,6 +57,8 @@ long long gfx_open_window(long long w, long long h, const char *title) {
   const char *cap = getenv("SPROUT_GFX_MAX_FRAMES");
   g_max_frames = (cap != NULL) ? atoll(cap) : 0;
   g_frame_counter = 0;
+  g_screenshot_path = getenv("SPROUT_GFX_SCREENSHOT");
+  g_screenshot_done = 0;
 
   SetTraceLogLevel(LOG_WARNING);
   InitWindow((int)w, (int)h, title != NULL ? title : "sprout");
@@ -117,7 +125,17 @@ long long gfx_draw_spinning_cube(long long size, long long angle) {
 long long gfx_load_model(const char *path) {
   if (g_model_count >= GFX_MAX_MODELS) return -1;
   int h = g_model_count++;
-  g_models[h] = LoadModel(path);
+  Model m = LoadModel(path);
+  /* Repair a common FBX->glTF import defect: a diffuse with alpha 0 (fully
+   * transparent) renders black/invisible under the default shader. A fully
+   * transparent base colour is never intentional, so force it opaque; RGB and
+   * already-opaque materials are left untouched. Per-draw tint still applies. */
+  for (int i = 0; i < m.materialCount; i++) {
+    if (m.materials[i].maps[MATERIAL_MAP_DIFFUSE].color.a == 0) {
+      m.materials[i].maps[MATERIAL_MAP_DIFFUSE].color.a = 255;
+    }
+  }
+  g_models[h] = m;
   return h;
 }
 
@@ -137,6 +155,11 @@ long long gfx_frame_end(void) {
   EndMode3D();
   EndDrawing();
   g_frame_counter++;
+  /* Capture once, a couple of frames in (framebuffer fully composited). */
+  if (g_screenshot_path != NULL && !g_screenshot_done && g_frame_counter >= 2) {
+    TakeScreenshot(g_screenshot_path);
+    g_screenshot_done = 1;
+  }
   return 0;
 }
 

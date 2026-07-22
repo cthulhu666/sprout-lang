@@ -89,6 +89,10 @@ loader-resolvable path; it is a *native binding*, not portable core stdlib.)
   --prefix raylib`). No install path is hardcoded in tracked files.
 - `SPROUT_GFX_MAX_FRAMES=N` — the shim auto-closes the window after N presented
   frames, so a demo runs non-interactively (the M1 canary; see §8).
+- `SPROUT_GFX_SCREENSHOT=<path>` — the shim saves one PNG of a warmed-up frame
+  (relative to the working directory) so a change can be verified *visually*
+  without a human at the screen. Pair with `SPROUT_GFX_MAX_FRAMES` to capture and
+  exit. Shim-only (no Sprout API); the output is gitignored (`sprout_shot.png`).
 - macOS link line: `-lraylib -framework Cocoa -framework IOKit -framework
   CoreVideo -framework OpenGL`. Note: macOS serves OpenGL capped at 4.1 over
   Metal (observed: `Version: 4.1 Metal`) — OpenGL is a *bootstrap* leaf, not the
