@@ -53,6 +53,59 @@ static int g_screenshot_done = 0;
 static Model g_models[GFX_MAX_MODELS];
 static int g_model_count = 0;
 
+/* Directional-light shader (GLSL 330, desktop GL). raylib auto-binds the
+ * standard uniforms by name (mvp/matModel/matNormal/colDiffuse/texture0); this
+ * only adds diffuse directional lighting + ambient so models read as 3D instead
+ * of flat silhouettes. Applied to every loaded model's materials. */
+static Shader g_light_shader;
+static int g_light_ready = 0;
+
+static const char *LIGHT_VS =
+  "#version 330\n"
+  "in vec3 vertexPosition;\n"
+  "in vec2 vertexTexCoord;\n"
+  "in vec3 vertexNormal;\n"
+  "uniform mat4 mvp;\n"
+  "uniform mat4 matModel;\n"
+  "uniform mat4 matNormal;\n"
+  "out vec2 fragTexCoord;\n"
+  "out vec3 fragNormal;\n"
+  "void main() {\n"
+  "    fragTexCoord = vertexTexCoord;\n"
+  "    fragNormal = normalize(vec3(matNormal*vec4(vertexNormal, 1.0)));\n"
+  "    gl_Position = mvp*vec4(vertexPosition, 1.0);\n"
+  "}\n";
+
+static const char *LIGHT_FS =
+  "#version 330\n"
+  "in vec2 fragTexCoord;\n"
+  "in vec3 fragNormal;\n"
+  "uniform sampler2D texture0;\n"
+  "uniform vec4 colDiffuse;\n"
+  "uniform vec3 lightDir;\n"
+  "uniform vec3 lightColor;\n"
+  "uniform vec3 ambient;\n"
+  "out vec4 finalColor;\n"
+  "void main() {\n"
+  "    vec4 base = texture(texture0, fragTexCoord)*colDiffuse;\n"
+  "    float diff = max(dot(normalize(fragNormal), normalize(lightDir)), 0.0);\n"
+  "    vec3 lit = base.rgb*(ambient + diff*lightColor);\n"
+  "    finalColor = vec4(lit, base.a);\n"
+  "}\n";
+
+/* Load and configure the lighting shader. Call after InitWindow (needs GL). */
+static void init_lighting(void) {
+  g_light_shader = LoadShaderFromMemory(LIGHT_VS, LIGHT_FS);
+  if (g_light_shader.id == 0) return; /* fall back to default shader on failure */
+  Vector3 lightDir   = { 0.5f, 1.0f, 0.4f };   /* points toward an upper-side light */
+  Vector3 lightColor = { 1.0f, 0.97f, 0.9f };  /* slightly warm key light */
+  Vector3 ambient    = { 0.28f, 0.28f, 0.34f };/* fill so the shadow side isn't black */
+  SetShaderValue(g_light_shader, GetShaderLocation(g_light_shader, "lightDir"), &lightDir, SHADER_UNIFORM_VEC3);
+  SetShaderValue(g_light_shader, GetShaderLocation(g_light_shader, "lightColor"), &lightColor, SHADER_UNIFORM_VEC3);
+  SetShaderValue(g_light_shader, GetShaderLocation(g_light_shader, "ambient"), &ambient, SHADER_UNIFORM_VEC3);
+  g_light_ready = 1;
+}
+
 long long gfx_open_window(long long w, long long h, const char *title) {
   const char *cap = getenv("SPROUT_GFX_MAX_FRAMES");
   g_max_frames = (cap != NULL) ? atoll(cap) : 0;
@@ -62,6 +115,7 @@ long long gfx_open_window(long long w, long long h, const char *title) {
 
   SetTraceLogLevel(LOG_WARNING);
   InitWindow((int)w, (int)h, title != NULL ? title : "sprout");
+  init_lighting();
 
   /* Sensible default camera; overridden by gfx_set_camera. */
   g_cam.position = (Vector3){ 6.0f, 6.0f, 6.0f };
@@ -134,6 +188,7 @@ long long gfx_load_model(const char *path) {
     if (m.materials[i].maps[MATERIAL_MAP_DIFFUSE].color.a == 0) {
       m.materials[i].maps[MATERIAL_MAP_DIFFUSE].color.a = 255;
     }
+    if (g_light_ready) m.materials[i].shader = g_light_shader;
   }
   g_models[h] = m;
   return h;

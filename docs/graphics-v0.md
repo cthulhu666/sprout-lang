@@ -128,7 +128,9 @@ entries.** See `tests/stdlib/test_native_mutmatrix.spr` for existing groundwork.
 `examples/character_view.sprout` loads the Kenney character and draws it rotating
 on the grid. Introduced the C-side model handle registry (§4:
 `gfx_load_model`/`gfx_draw_model`), plus tested `tan`/`radians`/`camera_fit_distance`
-math for framing. **Asset-pipeline finding:** the Kenney pack ships **FBX, which
+math for framing. Loaded models are drawn with a small directional-light GLSL
+shader (diffuse + ambient) so they read as 3D, not flat silhouettes.
+**Asset-pipeline finding:** the Kenney pack ships **FBX, which
 raylib cannot load** — it must be converted to GLB (which preserves the mesh and
 the 58-bone skeleton). `tools/convert_kenney.sh` (Blender headless) does this; the
 pack itself is not vendored (CC0, download from kenney.nl), but the converted
