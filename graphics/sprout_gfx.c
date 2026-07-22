@@ -114,6 +114,8 @@ long long gfx_open_window(long long w, long long h, const char *title) {
   g_screenshot_done = 0;
 
   SetTraceLogLevel(LOG_WARNING);
+  /* 4x MSAA — must be hinted before InitWindow; smooths jagged polygon/grid edges. */
+  SetConfigFlags(FLAG_MSAA_4X_HINT);
   InitWindow((int)w, (int)h, title != NULL ? title : "sprout");
   init_lighting();
 
