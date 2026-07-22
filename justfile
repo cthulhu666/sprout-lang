@@ -1292,28 +1292,51 @@ test-stress: bootstrap-from-seed
   # STRESS_FILES as each is fixed (an UNEXPECTED PASS flags that it's ready).
   STRESS_XFAIL=""
   failed=0
-  run_one() {  # prints "ok" or "fail"; never exits
-    local f="$1" name ll bin out
-    name=$(basename "$f" .spr); ll="$TMPD/$name.ll"; bin="$TMPD/$name.bin"
-    "{{build_dir}}/compile_driver_bin_stage1" --use-ir-codegen "{{stdlib_root}}" "$f" > "$ll" 2>"$TMPD/err" || { echo fail; return; }
-    clang "$ll" "$TMPD/rtobj"/*.o {{clang_extra}} -o "$bin" 2>"$TMPD/err" || { echo fail; return; }
+  NCPU=$(nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 4)
+  JOBS=$(( NCPU > 8 ? 8 : NCPU ))
+  run_one() {  # prints "ok" or "fail"; never exits.  Per-file err file avoids the
+               # shared-$TMPD/err race when invoked concurrently.
+    local f="$1" name ll bin out err
+    name=$(basename "$f" .spr); ll="$TMPD/$name.ll"; bin="$TMPD/$name.bin"; err="$TMPD/$name.err"
+    "{{build_dir}}/compile_driver_bin_stage1" --use-ir-codegen "{{stdlib_root}}" "$f" > "$ll" 2>"$err" || { echo fail; return; }
+    clang "$ll" "$TMPD/rtobj"/*.o {{clang_extra}} -o "$bin" 2>"$err" || { echo fail; return; }
     if out=$(SPROUT_GC_STRESS=1 "$bin" 2>&1); then
       echo "$out" | grep -q "SUITE FAILED" && echo fail || echo ok
     else
       echo fail
     fi
   }
+  # Dispatch every file JOBS-wide; each writes its ok/fail verdict to <name>.result.
+  # SPROUT_GC_STRESS (collect-on-every-alloc) makes each run slow and single-
+  # threaded, so fanning the fixed file set across the cores is a near-linear win.
+  declare -a pids=()
+  idx=0; active=0
+  for f in $STRESS_FILES $STRESS_XFAIL; do
+    [ -f "$f" ] || continue
+    name=$(basename "$f" .spr)
+    ( run_one "$f" > "$TMPD/$name.result" 2>/dev/null ) &
+    pids+=($!); idx=$((idx + 1)); active=$((active + 1))
+    if (( active >= JOBS )); then
+      wait -n 2>/dev/null || wait "${pids[idx - active]}" || true
+      active=$((active - 1))
+    fi
+  done
+  for pid in "${pids[@]}"; do wait "$pid" 2>/dev/null || true; done
+  # Tally gated files (must pass): absent result or non-"ok" verdict is a failure.
   for f in $STRESS_FILES; do
-    [ -f "$f" ] || { echo "test-stress: missing $f" >&2; failed=$((failed + 1)); continue; }
-    if [[ "$(run_one "$f")" == ok ]]; then
+    name=$(basename "$f" .spr)
+    if [ ! -f "$f" ]; then echo "test-stress: missing $f" >&2; failed=$((failed + 1)); continue; fi
+    if [[ "$(cat "$TMPD/$name.result" 2>/dev/null)" == ok ]]; then
       echo "  PASS (stress): $f"
     else
       echo "test-stress: $f FAILED under SPROUT_GC_STRESS=1" >&2; failed=$((failed + 1))
     fi
   done
+  # Tally xfail files (tracked; an unexpected pass is informational, never fatal).
   for f in $STRESS_XFAIL; do
     [ -f "$f" ] || continue
-    if [[ "$(run_one "$f")" == ok ]]; then
+    name=$(basename "$f" .spr)
+    if [[ "$(cat "$TMPD/$name.result" 2>/dev/null)" == ok ]]; then
       echo "  UNEXPECTED PASS (stress) — promote to STRESS_FILES: $f"
     else
       echo "  xfail (stress, tracked): $f"
@@ -1323,6 +1346,71 @@ test-stress: bootstrap-from-seed
     echo "test-stress: $failed gated file(s) failed under SPROUT_GC_STRESS=1" >&2; exit 1
   fi
   echo "==> test-stress ✓"
+
+# Run the independent, single-threaded CI gates concurrently (JOBS-wide) instead
+# of as a sequential chain of `just` steps.  On the 4-vCPU CI worker each of these
+# gates used only 1 core, leaving 3 idle for the duration; fanning them out fills
+# the cores.  Failure propagation is EXPLICIT — each gate's exit status is captured
+# and this recipe exits non-zero if ANY gate failed.  (A bare `a & b & wait` would
+# report success even when a background gate failed, silently disabling the gate.)
+# stage-1 + fmt_bin are built once as deps before fan-out; each gate's own
+# `bootstrap-from-seed`/`build-fmt-from-seed` dep then no-ops via its freshness guard.
+[group('test')]
+ci-fast-gates: bootstrap-from-seed build-fmt-from-seed
+  #!/usr/bin/env bash
+  set -uo pipefail
+  JUST="{{just_executable()}}"
+  TMPD=$(mktemp -d /tmp/sprout_gates_XXXXXX); trap 'rm -rf "$TMPD"' EXIT
+  NCPU=$(nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 4)
+  JOBS=$(( NCPU > 8 ? 8 : NCPU ))
+  # "<label>|<gate-command>"; labels are filesystem-safe (result/output filenames).
+  GATES=(
+    "approved-builtins|check-approved-builtins"
+    "smoke-shapes|smoke-shapes"
+    "bundle-smoke|bundle-smoke"
+    "fmt-check|fmt-check"
+    "type-errors|test-type-errors"
+    "example-canary|run-example-canary"
+    "gc-safety|gc-safety-check --strict"
+    "argv-smoke|argv-smoke"
+    "div-by-zero-smoke|div-by-zero-smoke"
+    "stack-overflow-smoke|stack-overflow-smoke"
+    "task-io-smoke|task-io-smoke"
+    "tco-runtime-smoke|tco-runtime-smoke"
+    "trace-dispatch-smoke|trace-dispatch-smoke"
+    "verify-dispatch-smoke|verify-dispatch-smoke"
+  )
+  declare -a pids=() labels=()
+  idx=0; active=0
+  for entry in "${GATES[@]}"; do
+    label="${entry%%|*}"; cmd="${entry#*|}"
+    labels+=("$label")
+    # word-split $cmd deliberately: it is a controlled "recipe [args]" string.
+    ( $JUST $cmd > "$TMPD/$label.out" 2>&1; echo $? > "$TMPD/$label.status" ) &
+    pids+=($!); idx=$((idx + 1)); active=$((active + 1))
+    if (( active >= JOBS )); then
+      wait -n 2>/dev/null || wait "${pids[idx - active]}" || true
+      active=$((active - 1))
+    fi
+  done
+  for pid in "${pids[@]}"; do wait "$pid" 2>/dev/null || true; done
+  failed=0
+  echo ""
+  for label in "${labels[@]}"; do
+    st=$(cat "$TMPD/$label.status" 2>/dev/null || echo 1)
+    if [ "$st" = 0 ]; then echo "  ✓ $label"; else echo "  ✗ $label (exit $st)"; failed=$((failed + 1)); fi
+  done
+  if (( failed > 0 )); then
+    echo "" >&2
+    echo "==> $failed gate(s) FAILED — full output of each below:" >&2
+    for label in "${labels[@]}"; do
+      st=$(cat "$TMPD/$label.status" 2>/dev/null || echo 1)
+      [ "$st" = 0 ] && continue
+      echo "" >&2; echo "───── $label (exit $st) ─────" >&2; cat "$TMPD/$label.out" >&2
+    done
+    exit 1
+  fi
+  echo "==> all ${#labels[@]} fast gates ✓"
 
 # GC use-after-free free-tracer (P11-2e diagnostic).  Compiles <file> via typed
 # codegen with debug info, runs it under lldb + SPROUT_GC_STRESS=1, and stops the

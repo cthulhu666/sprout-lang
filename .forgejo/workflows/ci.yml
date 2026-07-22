@@ -72,69 +72,38 @@ jobs:
         # `just refresh-seed`.
         run: just verify-bootstrap-fixed-point
 
-      - name: APPROVED_BUILTINS guard (DoD #9)
-        # Every `long long <name>(` in runtime/sprout_runtime.c must be in
-        # runtime/APPROVED_BUILTINS.  Independent of stage-1; runs early.
-        run: just check-approved-builtins
-
-      - name: Smoke shapes (DoD #7)
-        # tests/smoke_shapes/*.spr each emit-IR cleanly; contain a `define`
-        # block; no `str_concat(ptr null,…)` (null-ptr codegen regression).
-        run: just smoke-shapes
-
-      - name: Bundle smoke (DoD #8)
-        # `--phase bundle` on token/ast/prelude produces non-empty output
-        # with no dot-prefix qualified names.
-        run: just bundle-smoke
-
-      - name: Build fmt_bin via stage-1
-        run: just build-fmt-from-seed
-
-      - name: Check formatting
-        run: just fmt-check
+      - name: CI fast gates (parallel)
+        # 14 single-threaded gates fanned out JOBS-wide by `just ci-fast-gates`
+        # instead of running as a sequential chain of steps — on the 4-vCPU worker
+        # each used only 1 core, leaving 3 idle. Merged into one step because
+        # Actions steps run sequentially within a job; the recipe captures each
+        # gate's exit status, prints a per-gate ✓/✗ summary, and dumps every
+        # failed gate's full output for attribution. Covers, verbatim from the
+        # former per-step gates:
+        #   - APPROVED_BUILTINS guard (DoD #9): every `long long <name>(` in
+        #     runtime/sprout_runtime.c is in runtime/APPROVED_BUILTINS.
+        #   - Smoke shapes (DoD #7): tests/smoke_shapes/*.spr emit-IR cleanly, have
+        #     a `define` block, no `str_concat(ptr null,…)` (null-ptr regression).
+        #   - Bundle smoke (DoD #8): `--phase bundle` non-empty, no dot-prefix names.
+        #   - Check formatting (fmt-check, built via build-fmt-from-seed dep).
+        #   - Negative type-checking conformance (test-type-errors).
+        #   - Example canary (DoD #10): the canary set runs to completion, no crash.
+        #   - GC safety check (--strict).
+        #   - Regression smokes: argv / div-by-zero / stack-overflow / task-io /
+        #     tco-runtime / trace-dispatch / verify-dispatch (see justfile `smoke`).
+        run: just ci-fast-gates
 
       - name: Run stdlib tests (stage-1)
         run: just test-stdlib-stage1
 
-      - name: Negative type-checking conformance (stage-1)
-        run: just test-type-errors
-
       - name: Verify examples compile (stage-1)
         run: just compile-examples-stage1
 
-      - name: Example canary RUNS (DoD #10)
-        # Canary set (tuples, factorial, maybe_map, typeclass_collections_demo,
-        # fizzbuzz) compiles AND runs to completion without crash.
-        run: just run-example-canary
-
-      - name: Regression smokes (argv / div-by-zero / stack-overflow / typed-codegen TCO / dispatch-trace)
-        # Permanent codegen+runtime regression guards, green since the typed-codegen
-        # flip landed. argv-smoke: typed main shim wires @sprout_set_argv. div-by-zero
-        # + stack-overflow: clean panic, not LLVM UB / silent SIGSEGV. tco-runtime:
-        # deep tail recursion completes under typed codegen (no per-iteration frame or
-        # root-pool leak). trace-dispatch: SPROUT_TRACE_DISPATCH emits a per-call-site
-        # dict-resolution trace and a projection sort resolves through the precise
-        # branch. See the justfile `smoke` group.
-        run: |
-          just argv-smoke
-          just div-by-zero-smoke
-          just stack-overflow-smoke
-          just task-io-smoke
-          just tco-runtime-smoke
-          just trace-dispatch-smoke
-          just verify-dispatch-smoke
-
-      - name: GC safety check
-        run: just gc-safety-check --strict
-
-      # The two gates below moved here from the former `test-ir` job. That job
-      # ran the whole corpus through --use-ir-codegen, which is identical to
-      # `test`'s --emit-ir after the typed-codegen flip (both resolve to
-      # run_file_use_ir_codegen in compile_driver.sprout) — so its compile /
-      # test / smoke / canary steps were pure duplication (and weaker: opt-verify
-      # only, no link+run). Only these two gates were unique to it.
-      - name: GC-stress pass (typed-codegen rooting guard)
-        # Runs curated rooting-exercising tests under SPROUT_GC_STRESS=1 (collect
-        # on every allocation). Default-threshold greens hide use-after-free
-        # rooting bugs; this fails loudly. See justfile `test-stress`.
+      # Moved here from the former `test-ir` job (its other steps duplicated
+      # `test`'s --emit-ir path after the typed-codegen flip; only this gate was
+      # unique). Kept as its own step: it is now internally parallel (fanned
+      # JOBS-wide across the fixed file set, see justfile `test-stress`).
+      - name: GC-stress pass (typed-codegen rooting guard, parallel)
+        # Curated rooting tests under SPROUT_GC_STRESS=1 (collect on every alloc).
+        # Default-threshold greens hide use-after-free rooting bugs; fails loudly.
         run: just test-stress
