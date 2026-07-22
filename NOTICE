@@ -9,5 +9,6 @@ Bundled third-party assets
 assets/models/characterMedium.glb
   From the "Animated Characters Retro" pack by Kenney (https://kenney.nl),
   released under Creative Commons CC0 1.0 (public domain). Converted from the
-  pack's FBX to GLB via tools/convert_kenney.sh. Attribution to Kenney is
-  requested by the author but not legally required.
+  pack's FBX to GLB via tools/convert_kenney.sh, with the pack's humanMaleA skin
+  texture baked in. Attribution to Kenney is requested by the author but not
+  legally required.

@@ -17,12 +17,15 @@ BLENDER="${BLENDER:-/Applications/Blender.app/Contents/MacOS/Blender}"
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 SRC="$PACK_DIR/Model/characterMedium.fbx"
+SKIN_NAME="${SKIN:-humanMaleA.png}"           # override with SKIN=zombieMaleA.png etc.
+SKIN="$PACK_DIR/Skins/$SKIN_NAME"
 OUT_DIR="$HERE/assets/models"
 OUT="$OUT_DIR/characterMedium.glb"
 
 [ -f "$SRC" ] || { echo "error: $SRC not found — is PACK_DIR the extracted pack?" >&2; exit 1; }
+[ -f "$SKIN" ] || { echo "error: skin $SKIN not found (set SKIN=<name>.png)" >&2; exit 1; }
 command -v "$BLENDER" >/dev/null 2>&1 || [ -x "$BLENDER" ] || { echo "error: Blender not found at $BLENDER (set BLENDER=...)" >&2; exit 1; }
 
 mkdir -p "$OUT_DIR"
-"$BLENDER" --background --python "$HERE/tools/fbx_to_glb.py" -- "$SRC" "$OUT"
-echo "converted -> $OUT"
+"$BLENDER" --background --python "$HERE/tools/fbx_to_glb.py" -- "$SRC" "$OUT" "$SKIN"
+echo "converted -> $OUT (skin: $SKIN_NAME)"
