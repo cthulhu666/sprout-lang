@@ -8,6 +8,47 @@ importing `stdlib.compiler.compiler`, bundle (~21s), check (~8s), and codegen
 single-file compile. The only way to reduce this is to compile each module
 once and reuse the artifact downstream.
 
+## Refreshed measurement (2026-07-22) — supersedes the Origin/Problem numbers
+
+A CI-slowdown investigation (workflow wall grew ~8 → 15–20 min) re-measured the
+hot path on the current tree. `SPROUT_TIME_PHASES` was deleted with the direct
+backend (BACKLOG "Compiler / Stdlib Misc"), so the split was recovered from the
+driver's own `--phase` stops instead. Measured on `tests/stdlib/compiler/
+test_compiler.spr` (imports the full compiler), arm64 macOS / clang-22:
+
+| phase | cumulative | marginal | share |
+|---|---|---|---|
+| `--phase bundle` (re-parse all imports) | 8.76s | **8.6s** | **55%** |
+| `--phase check` | 9.30s | 0.5s | 3% |
+| `--phase lower` | 9.14s | ~0s | 0% |
+| full `--emit-ir` (+ codegen) | 15.60s | **6.5s** | **42%** |
+
+**The relative split is the robust, machine-independent signal** (absolute
+seconds differ from CI's slower GCE/clang-16 box; only shares transfer). It
+differs materially from the Origin numbers above: **check is now nearly free and
+bundle is the single largest slice** — so **PR 2 (bundle-skip via iface AST
+reuse) is the correct first increment, not PR 3 (codegen-skip, high-risk).**
+
+**Revised per-compile ROI (down from the original ~45s estimate):**
+- `--check-iface` decodes the biggest module's iface (`infer`, 118 KB) in 0.69s
+  vs its ~1.3s parse-share of bundle — iface decode is ~2× faster than re-parse,
+  so **PR 2 recovers ~half the bundle phase ≈ 4s/compile** (15.6s → ~11.5s).
+- **PR 3 recovers most of codegen ≈ 6.5s/compile** (imports become `declare`).
+- Combined: 15.6s → ~5s. Applied to the **18 heavy compiler-importing tests** +
+  the single-threaded `verify-bootstrap-fixed-point` step (the only step iface
+  helps that parallelism cannot).
+
+**Two distinct effects were separated (don't conflate them):**
+1. *Monotonic creep* ("slower and slower"): stdlib test corpus grew 101 (Jun 25)
+   → 211 (Jul 21); `test-stdlib-stage1` is CPU-bound (137s wall / 13.5 min CPU at
+   8-wide) and scales with it. Cheap low-risk lever: raise the `JOBS` cap
+   (`min(8,NCPU)`→`NCPU`) and/or split `test` into two parallel jobs (worker
+   capacity 2). See BACKLOG.
+2. *Bimodal ~7-min spikes* (→21 min): stage-1 build-cache miss on every
+   compiler-source commit (seed hash changes → `bootstrap-from-seed` re-runs
+   `opt`+`clang -O2` over ~271k IR lines). Confirmed by commit `afff944` running
+   21.2 / 20.2 / 14.4 min on byte-identical code as the cache warmed.
+
 ## Problem
 
 `compile_driver --emit-ir <file>` re-parses, re-typechecks, and re-emits IR for
