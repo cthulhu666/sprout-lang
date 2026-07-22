@@ -45,6 +45,7 @@ static long long g_max_frames = 0;
  * human at the screen). Path is relative to the working directory. */
 static const char *g_screenshot_path = NULL;
 static int g_screenshot_done = 0;
+static long long g_screenshot_frame = 2; /* which frame to capture (SPROUT_GFX_SCREENSHOT_FRAME) */
 
 /* Model handle registry. raylib returns Model/Texture structs by value, which
  * the i64 ABI cannot carry — so loaded models live here and Sprout holds an
@@ -52,6 +53,13 @@ static int g_screenshot_done = 0;
 #define GFX_MAX_MODELS 64
 static Model g_models[GFX_MAX_MODELS];
 static int g_model_count = 0;
+
+/* Animation-set registry: each LoadModelAnimations returns an array of clips.
+ * Sprout holds an int handle to the set; a clip is (set handle, clip index). */
+#define GFX_MAX_ANIMSETS 16
+static ModelAnimation *g_animsets[GFX_MAX_ANIMSETS];
+static int g_animset_counts[GFX_MAX_ANIMSETS];
+static int g_animset_count = 0;
 
 /* Directional-light shader (GLSL 330, desktop GL). raylib auto-binds the
  * standard uniforms by name (mvp/matModel/matNormal/colDiffuse/texture0); this
@@ -112,6 +120,8 @@ long long gfx_open_window(long long w, long long h, const char *title) {
   g_frame_counter = 0;
   g_screenshot_path = getenv("SPROUT_GFX_SCREENSHOT");
   g_screenshot_done = 0;
+  const char *shot_frame = getenv("SPROUT_GFX_SCREENSHOT_FRAME");
+  g_screenshot_frame = (shot_frame != NULL) ? atoll(shot_frame) : 2;
 
   SetTraceLogLevel(LOG_WARNING);
   /* 4x MSAA — must be hinted before InitWindow; smooths jagged polygon/grid edges. */
@@ -208,12 +218,46 @@ long long gfx_draw_model(long long handle, long long x, long long y, long long z
   return 0;
 }
 
+/* Load an animation set from a file (glTF/GLB/IQM/M3D). The skeleton must match
+ * the model that will play it (raylib skins by bone index). Returns a set
+ * handle, or -1 if the registry is full. */
+long long gfx_load_animations(const char *path) {
+  if (g_animset_count >= GFX_MAX_ANIMSETS) return -1;
+  int count = 0;
+  ModelAnimation *a = LoadModelAnimations(path, &count);
+  int h = g_animset_count++;
+  g_animsets[h] = a;
+  g_animset_counts[h] = count;
+  return h;
+}
+
+long long gfx_animation_count(long long set) {
+  if (set < 0 || set >= g_animset_count) return 0;
+  return g_animset_counts[(int)set];
+}
+
+/* Number of keyframes in a clip — the modulus for looping the playhead. */
+long long gfx_animation_keyframes(long long set, long long index) {
+  if (set < 0 || set >= g_animset_count) return 0;
+  if (index < 0 || index >= g_animset_counts[(int)set]) return 0;
+  return g_animsets[(int)set][(int)index].keyframeCount;
+}
+
+/* Pose `model` to clip (set,index) at `frame` (fractional frames interpolate). */
+long long gfx_update_animation(long long model, long long set, long long index, long long frame) {
+  if (model < 0 || model >= g_model_count) return 0;
+  if (set < 0 || set >= g_animset_count) return 0;
+  if (index < 0 || index >= g_animset_counts[(int)set]) return 0;
+  UpdateModelAnimation(g_models[(int)model], g_animsets[(int)set][(int)index], as_float(frame));
+  return 0;
+}
+
 long long gfx_frame_end(void) {
   EndMode3D();
   EndDrawing();
   g_frame_counter++;
   /* Capture once, a couple of frames in (framebuffer fully composited). */
-  if (g_screenshot_path != NULL && !g_screenshot_done && g_frame_counter >= 2) {
+  if (g_screenshot_path != NULL && !g_screenshot_done && g_frame_counter >= g_screenshot_frame) {
     TakeScreenshot(g_screenshot_path);
     g_screenshot_done = 1;
   }

@@ -552,10 +552,11 @@ _compile-examples stage xfail="":
   echo "==> All examples compiled OK"
 
 # Stage-1: emit IR → clang link for each example.
-# Known xfail: sentry_issue_browser{,_tui} (import examples.* unresolved).
-# (sentry_api now compiles under typed codegen — removed from xfail.)
+# Known xfail: sentry_issue_browser{,_tui} (import examples.* unresolved); the
+# graphics examples (import stdlib.gfx) need the raylib shim + link flags from
+# `just run-gfx`, so they cannot link against the core runtime here.
 [group('examples')]
-compile-examples-stage1: (_compile-examples "build/compile_driver_bin_stage1" "examples/sentry_issue_browser.sprout examples/sentry_issue_browser_tui.sprout")
+compile-examples-stage1: (_compile-examples "build/compile_driver_bin_stage1" "examples/sentry_issue_browser.sprout examples/sentry_issue_browser_tui.sprout examples/spinning_cube.sprout examples/character_view.sprout examples/character_animated.sprout")
 
 # Negative type-checking conformance: each tests/conformance/type_error/<n>.spr must
 # be rejected by `--phase check` with output containing the substring in <n>.err.

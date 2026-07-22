@@ -82,3 +82,11 @@ export fn vec3_normalize(v: Vec3) -> Vec3 !{IO} =
 # Multiply the result by a margin (e.g. 1.2) at the call site for headroom.
 export fn camera_fit_distance(height: Double, fovy_deg: Double) -> Double =
   (height / 2.0) / tan(radians(fovy_deg) / 2.0)
+
+# Advance an animation playhead by `speed` frames, wrapping back to the start
+# once it reaches `keyframes` so the clip loops. Fractional frames are fine —
+# raylib's UpdateModelAnimation interpolates between keyframes.
+export fn anim_advance(frame: Double, speed: Double, keyframes: Double) -> Double =
+  if next >= keyframes then next - keyframes
+  else next
+  where next = frame + speed

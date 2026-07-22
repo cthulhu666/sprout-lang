@@ -137,10 +137,17 @@ pack itself is not vendored (CC0, download from kenney.nl), but the converted
 `assets/models/characterMedium.glb` is (see NOTICE). raylib 6.0 note: bones live
 under `model.skeleton.boneCount`, not the older flat `model.boneCount`.
 
-### M4 — skeletal animation playback (proposed)
-Play the character's built-in animation via raylib's `UpdateModelAnimation`
-(raylib does the skinning). This reaches the original goal: an animated Kenney
-character on screen.
+### M4 — skeletal animation playback ✅ (landed)
+`examples/character_animated.sprout` plays the Kenney Idle clip — the original
+goal: an animated character on screen. raylib does the GPU skinning via
+`UpdateModelAnimation`; the Sprout loop advances the playhead with the tested
+pure `anim_advance` (loops at `keyframeCount`). **Key simplification:** raylib
+skins by *bone index*, so an animation loaded from a *separate* GLB
+(`character_idle.glb`) drives the model as long as the skeletons match
+(`IsModelAnimationValid` confirms) — no Blender action-merging into one file.
+Shim adds a model-agnostic animation-set registry (`gfx_load_animations` /
+`gfx_update_animation`). raylib 6.0 note: `ModelAnimation.keyframeCount`, not
+the older `frameCount`. Follow-ups: `run`/`jump` clips and one-GLB packing.
 
 ### M5+ — hollow out the black box (proposed)
 Progressively move engine work into Sprout: glTF parsing (Sprout already has

@@ -78,4 +78,10 @@ fn main() -> Unit !{IO} =
     fit60 <- linalg.camera_fit_distance(2.0, 60.0)
     assert_true(state, "fit distance h=2 fovy=60 == sqrt(3)", close(fit60, 1.7320508))
 
+    # anim_advance(frame, speed, keyframes): advance with wraparound at keyframes.
+    assert_true(state, "anim step no wrap", close(linalg.anim_advance(0.0, 1.5, 10.0), 1.5))
+    assert_true(state, "anim step wraps", close(linalg.anim_advance(9.0, 1.5, 10.0), 0.5))
+    assert_true(state, "anim step zero speed holds", close(linalg.anim_advance(5.0, 0.0, 10.0), 5.0))
+    assert_true(state, "anim step wraps near end", close(linalg.anim_advance(9.9, 0.2, 10.0), 0.1))
+
     summary(state)

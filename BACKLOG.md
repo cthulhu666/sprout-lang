@@ -338,9 +338,13 @@ raylib) have landed. Fenced from core: shim `graphics/sprout_gfx.c` links only v
   ships FBX, which raylib CANNOT load — converted to GLB (mesh + 58-bone skeleton intact)
   via `tools/convert_kenney.sh` (Blender headless). Added `tan`/`radians` + `camera_fit_distance`
   (tested) to frame the model. Asset vendored: `assets/models/characterMedium.glb` (CC0, NOTICE).
-- [ ] `M4` Skeletal animation playback: raylib 6.0 `LoadModelAnimations` + `UpdateModelAnimation`
-  (bones now under `model.skeleton`, not flat `model.boneCount`). The retro pack's animations are
-  SEPARATE FBX files (idle/run/jump) — M4 must combine model+animations into one GLB in Blender.
+- [x] `M4` Skeletal animation playback — `examples/character_animated.sprout` plays the Kenney
+  Idle clip, posed by raylib `UpdateModelAnimation` and driven by the Sprout loop via a tested
+  pure `anim_advance` playhead. Animations load from a SEPARATE GLB (`character_idle.glb`): raylib
+  skins by bone index, so matching skeletons is enough (`IsModelAnimationValid` true) — no Blender
+  action-merging needed. Shim: model-agnostic animation-set registry + `load_animations`/
+  `update_animation`. raylib 6.0: `keyframeCount` not `frameCount`; bones under `model.skeleton`.
+  Follow-up: `run`/`jump` clips; combine into one GLB to drop the duplicate-mesh in the anim file.
 - [ ] `M5+` Move engine into Sprout (glTF parse, skinning, camera, scene graph); demote
   raylib toward a thin draw leaf; eventually swap the leaf for a modern API (Metal/WebGPU).
 - [ ] `P2` Language-core: unbox small fixed-shape numeric records (`Vec3 {x,y,z}` as 3 raw

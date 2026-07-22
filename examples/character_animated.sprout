@@ -1,0 +1,40 @@
+module examples.character_animated
+
+import stdlib.gfx
+import stdlib.linalg (camera_fit_distance, anim_advance)
+
+# Milestone 4 — skeletal animation: the Kenney character plays its Idle clip,
+# posed each frame on the GPU by raylib's UpdateModelAnimation. The model and the
+# animation come from separate GLBs (raylib skins by bone index, so the skeletons
+# just have to match). The playhead is advanced in pure Sprout via anim_advance.
+#
+# Run:
+#   mise exec -- just run-gfx examples/character_animated.sprout
+
+fn render_loop(model: Int, set: Int, clip: Int, keyframes: Double, frame: Double) -> Unit !{IO} =
+  do
+    stop <- gfx.window_should_close()
+    if stop then gfx.close_window()
+    else
+      do
+        let next = anim_advance(frame, 0.5, keyframes)
+        gfx.update_animation(model, set, clip, next)
+        gfx.frame_begin()
+        gfx.draw_grid(20, 1.0)
+        gfx.draw_model(model, 0.0, 0.0, 0.0, 0.0, 1.0)
+        gfx.frame_end()
+        render_loop(model, set, clip, keyframes, next)
+
+fn main() -> Unit !{IO} =
+  do
+    gfx.open_window(800, 600, "Sprout — animated character")
+    gfx.set_target_fps(60)
+    let dist = camera_fit_distance(4.0, 45.0) * 1.4
+    gfx.set_camera(dist, 3.0, dist, 0.0, 1.8, 0.0, 45.0)
+    model <- gfx.load_model("assets/models/characterMedium.glb")
+    anims <- gfx.load_animations("assets/models/character_idle.glb")
+    count <- gfx.animation_count(anims)
+    # The set holds a setup pose + the Idle clip; the Idle is the last one.
+    let clip = count - 1
+    kf <- gfx.animation_keyframes(anims, clip)
+    render_loop(model, anims, clip, to_double(kf), 0.0)

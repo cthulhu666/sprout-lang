@@ -21,6 +21,10 @@ extern fn gfx_draw_grid(slices: Int, spacing: Double) -> Unit !{IO}
 extern fn gfx_draw_spinning_cube(size: Double, angle: Double) -> Unit !{IO}
 extern fn gfx_load_model(path: String) -> Int !{IO}
 extern fn gfx_draw_model(handle: Int, x: Double, y: Double, z: Double, angle: Double, scale: Double) -> Unit !{IO}
+extern fn gfx_load_animations(path: String) -> Int !{IO}
+extern fn gfx_animation_count(set: Int) -> Int !{IO}
+extern fn gfx_animation_keyframes(set: Int, index: Int) -> Int !{IO}
+extern fn gfx_update_animation(model: Int, set: Int, index: Int, frame: Double) -> Unit !{IO}
 extern fn gfx_frame_end() -> Unit !{IO}
 extern fn gfx_close_window() -> Unit !{IO}
 
@@ -60,6 +64,22 @@ export fn load_model(path: String) -> Int !{IO} =
 # Draw a loaded model at (x,y,z), rotated `angle` degrees about Y, scaled by `scale`.
 export fn draw_model(handle: Int, x: Double, y: Double, z: Double, angle: Double, scale: Double) -> Unit !{IO} =
   gfx_draw_model(handle, x, y, z, angle, scale)
+
+# Load an animation set (glTF/GLB/IQM/M3D) whose skeleton matches a model; returns
+# a set handle. A clip is identified by (set, index); animation_count gives how many.
+export fn load_animations(path: String) -> Int !{IO} =
+  gfx_load_animations(path)
+
+export fn animation_count(set: Int) -> Int !{IO} =
+  gfx_animation_count(set)
+
+# Keyframe count of a clip — the modulus for looping the playhead (see anim_advance).
+export fn animation_keyframes(set: Int, index: Int) -> Int !{IO} =
+  gfx_animation_keyframes(set, index)
+
+# Pose a model to clip (set, index) at the given frame; fractional frames interpolate.
+export fn update_animation(model: Int, set: Int, index: Int, frame: Double) -> Unit !{IO} =
+  gfx_update_animation(model, set, index, frame)
 
 export fn frame_end() -> Unit !{IO} =
   gfx_frame_end()
