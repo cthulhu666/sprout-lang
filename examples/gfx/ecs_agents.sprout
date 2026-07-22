@@ -19,17 +19,31 @@ import stdlib.mutable (mutvec_at, mutvec_set)
 #   mise exec -- just run-gfx examples/gfx/ecs_agents.sprout
 
 # --- World layout -----------------------------------------------------------
-# Characters start on a grid, then wander freely inside a square arena. `arena`
-# is the half-extent world_step keeps them within (they bounce off the edge).
-let grid_cols = 14
-let grid_rows = 14
+# ONE knob: agent_count. The grid shape, its centring, and the wander arena are
+# all DERIVED from it, so resizing the crowd is a single edit here.
+let agent_count = 196
 let grid_gap = 3.0
-let arena = 24.0
+
+# Integer square root (floor) so the crowd forms a near-square grid. O(sqrt n).
+fn isqrt_go(n: Int, i: Int) -> Int = if (i + 1) * (i + 1) > n then i else isqrt_go(n, i + 1)
+fn isqrt(n: Int) -> Int = if n <= 0 then 0 else isqrt_go(n, 1)
+
+# Near-square grid derived from the count (a non-square count leaves a partial
+# last row, which is fine — populate spawns exactly agent_count).
+let grid_cols = isqrt(agent_count)
+let grid_rows = (agent_count + grid_cols - 1) / grid_cols
+let col_center = to_double(grid_cols - 1) / 2.0
+let row_center = to_double(grid_rows - 1) / 2.0
+
+# Wander half-extent: enclose the grid plus a margin, so agents bounce at the rim
+# rather than inside the crowd.
+let grid_span = to_double(if grid_cols > grid_rows then grid_cols else grid_rows) * grid_gap
+let arena = (grid_span / 2.0) + 6.0
 
 # Column/row of entity i mapped to a ground offset centred on 0 (no `%` operator,
-# so column is i - (i/cols)*cols).
-fn grid_x(i: Int) -> Double = (to_double(i - (i / grid_cols) * grid_cols) - 6.5) * grid_gap
-fn grid_z(i: Int) -> Double = (to_double(i / grid_cols) - 6.5) * grid_gap
+# so column is i - (i/cols)*cols). Centres are derived, never hardcoded.
+fn grid_x(i: Int) -> Double = (to_double(i - (i / grid_cols) * grid_cols) - col_center) * grid_gap
+fn grid_z(i: Int) -> Double = (to_double(i / grid_cols) - row_center) * grid_gap
 
 # Per-entity PRNG seed (distinct, scrambled) and a varied starting heading and
 # energy so the crowd is out of phase from frame 0 — they don't all turn or tire
@@ -165,7 +179,7 @@ fn main() -> Unit !{IO} =
     gfx.open_window(1000, 600, "Sprout — Loam agents (wandering crowd)")
     gfx.set_target_fps(60)
 
-    let n = grid_cols * grid_rows
+    let n = agent_count
     s <- scene_new(n)
     populate(s, n, 0)
 

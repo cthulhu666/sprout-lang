@@ -268,11 +268,13 @@ it never mutates.
 
 ### 10.5 The demo — a wandering crowd
 
-`examples/gfx/ecs_agents.sprout` spawns **196** characters (14×14) that wander,
+`examples/gfx/ecs_agents.sprout` spawns **196** characters that wander,
 face their heading (`draw_model`'s Y-rotation), and animate on the **run** clip
 while walking / **idle** while resting — selected per entity from the `resting`
 bit. It supersedes `ecs_crowd` (kept `character_crowd` as the pre-ECS baseline).
-Verified by screenshot at 58 FPS. The walk cycle is `assets/models/character_run.glb`,
+Crowd size is a single knob (`agent_count`): the grid shape, its centring, and
+the wander arena are all derived from it. Verified by screenshot at 58 FPS (196
+and 256 agents). The walk cycle is `assets/models/character_run.glb`,
 baked from the Kenney pack's `run.fbx` via `tools/convert_kenney.sh` (the pack has
 no dedicated *walk* clip — `run` is its only locomotion). This closes the
 `docs/graphics-v0.md` "run clip" follow-up; `jump` and one-GLB packing remain.
