@@ -280,6 +280,24 @@ long long gfx_draw_fps(long long x, long long y) {
   return 0;
 }
 
+/* Immediate-mode button: draw a labelled box as a 2D overlay and return 1 if the
+ * left mouse button was pressed inside it this frame (else 0). Draws with a
+ * hover highlight. Self-brackets out of Mode3D like gfx_draw_fps; hit-testing is
+ * coordinate math, mode-independent. */
+long long gfx_button(long long x, long long y, long long w, long long h, const char *label) {
+  Rectangle r = { (float)x, (float)y, (float)w, (float)h };
+  int hover = CheckCollisionPointRec(GetMousePosition(), r);
+  int clicked = hover && IsMouseButtonPressed(MOUSE_BUTTON_LEFT);
+  EndMode3D();
+  DrawRectangleRec(r, hover ? (Color){ 80, 80, 96, 255 } : (Color){ 48, 48, 60, 255 });
+  DrawRectangleLinesEx(r, 2.0f, (Color){ 200, 200, 210, 255 });
+  int fs = (int)h - 12;
+  int tw = MeasureText(label, fs);
+  DrawText(label, (int)x + ((int)w - tw) / 2, (int)y + 6, fs, RAYWHITE);
+  BeginMode3D(g_cam);
+  return clicked ? 1 : 0;
+}
+
 long long gfx_frame_end(void) {
   EndMode3D();
   EndDrawing();

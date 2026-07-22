@@ -78,30 +78,45 @@ fn render_system(s: Scene) -> Unit !{IO} =
     n <- scene_count(s)
     render_go(s, 0, n)
 
-# Orbit camera: circles the scene centre at a fixed height and radius, always
-# looking inward. `angle` (radians) advances each frame; the eye traces a circle
-# on the xz plane, height held constant.
-let orbit_radius = 46.0
+# Orbit camera: circles the scene centre at a fixed height, always looking
+# inward. `angle` (radians) advances each frame; the eye traces a circle on the
+# xz plane. The circle's `radius` is the zoom level — smaller is closer in.
+let orbit_start_radius = 46.0
 let orbit_height = 22.0
 let orbit_target_y = 1.5
 let orbit_step = 0.01  # radians/frame — ~10.5 s per revolution at 60 fps
 let two_pi = 2.0 * pi
+
+# Zoom: the +/- buttons step the orbit radius, clamped to a sensible range.
+let zoom_step = 3.0
+let min_radius = 16.0
+let max_radius = 92.0
 
 # Advance and wrap the orbit angle into [0, 2pi).
 fn next_angle(a: Double) -> Double =
   if stepped >= two_pi then stepped - two_pi else stepped
   where stepped = a + orbit_step
 
-# Place the camera on its orbit for the current angle.
-fn orbit_camera(angle: Double) -> Unit !{IO} =
-  gfx.set_camera(orbit_radius * sin(angle), orbit_height, orbit_radius * cos(angle),
+fn clampd(v: Double, lo: Double, hi: Double) -> Double =
+  if v < lo then lo else if v > hi then hi else v
+
+# New orbit radius after this frame's button clicks: `+` zooms in (smaller
+# radius), `-` zooms out, both clamped.
+fn zoomed(radius: Double, plus: Bool, minus: Bool) -> Double =
+  if plus then clampd(radius - zoom_step, min_radius, max_radius)
+  else if minus then clampd(radius + zoom_step, min_radius, max_radius)
+  else radius
+
+# Place the camera on its orbit for the current angle and zoom radius.
+fn orbit_camera(radius: Double, angle: Double) -> Unit !{IO} =
+  gfx.set_camera(radius * sin(angle), orbit_height, radius * cos(angle),
                  0.0, orbit_target_y, 0.0, 45.0)
 
 # `paused` gates ONLY the orbit: Space toggles it, and while paused the angle
 # holds. Character animation runs every frame regardless — the pause is the
 # camera's, not the scene's.
 fn render_loop(s: Scene, set: Int, clip: Int, keyframes: Double, angle: Double,
-               paused: Bool) -> Unit !{IO} =
+               paused: Bool, radius: Double) -> Unit !{IO} =
   do
     stop <- gfx.window_should_close()
     if stop then gfx.close_window()
@@ -110,19 +125,21 @@ fn render_loop(s: Scene, set: Int, clip: Int, keyframes: Double, angle: Double,
         toggled <- gfx.space_pressed()
         let now_paused = if toggled then ! paused else paused
         let next = if now_paused then angle else next_angle(angle)
-        orbit_camera(angle)
+        orbit_camera(radius, angle)
         gfx.frame_begin()
         gfx.draw_grid(40, 1.0)
         animation_system(s, set, clip, keyframes)
         render_system(s)
         gfx.draw_fps(10, 10)
+        plus <- gfx.button(940, 20, 44, 44, "+")
+        minus <- gfx.button(940, 72, 44, 44, "-")
         gfx.frame_end()
-        render_loop(s, set, clip, keyframes, next, now_paused)
+        render_loop(s, set, clip, keyframes, next, now_paused, zoomed(radius, plus, minus))
 
 fn main() -> Unit !{IO} =
   do
     gfx.open_window(1000, 600, "Sprout — ECS crowd (100 characters)")
-    gfx.set_target_fps(60)
+    gfx.set_target_fps(100)
     # Camera is an orbit set per-frame in render_loop; angle 0 starts at the
     # low 3/4 view (eye at (0, 22, 46)).
 
@@ -135,4 +152,4 @@ fn main() -> Unit !{IO} =
     let clip = count - 1
     kf <- gfx.animation_keyframes(anims, clip)
 
-    render_loop(s, anims, clip, to_double(kf), 0.0, false)
+    render_loop(s, anims, clip, to_double(kf), 0.0, false, orbit_start_radius)
