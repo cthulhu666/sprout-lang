@@ -347,6 +347,10 @@ raylib) have landed. Fenced from core: shim `graphics/sprout_gfx.c` links only v
   Follow-up: `run`/`jump` clips; combine into one GLB to drop the duplicate-mesh in the anim file.
 - [ ] `M5+` Move engine into Sprout (glTF parse, skinning, camera, scene graph); demote
   raylib toward a thin draw leaf; eventually swap the leaf for a modern API (Metal/WebGPU).
+- [ ] `SCENE` Scene/entity system (ECS) — **proposal written: `docs/ecs-v0.md`** (next-session
+  entry point). SoA-ECS over `MutVec` component arrays; generalizes the crowd example. Validate
+  records-of-`MutVec` ergonomics FIRST (load-bearing; feeds records-v0). Watch the cross-module
+  `wrap`-annotation wart if Scene/Entity are wrap types.
 - [ ] `P2` Language-core: unbox small fixed-shape numeric records (`Vec3 {x,y,z}` as 3 raw
   f64s, not a heap pointer) — the ergonomic+fast path for individual small vectors. Additive
   on top of the flat-buffer foundation; decide at M2.
