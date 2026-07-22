@@ -15,7 +15,7 @@ import loam.scene (Scene, scene_count, scene_pos_x, scene_pos_z, scene_heading, 
 
 # Tuning (fixed-timestep units). walk_step is units/tick; energy is a 0..full
 # stamina budget spent while walking and regained while resting.
-let walk_step = 0.08
+let walk_step = 0.2
 let energy_full = 100.0
 let energy_spend = 0.5
 let energy_regain = 1.5
