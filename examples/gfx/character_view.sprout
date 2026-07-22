@@ -1,4 +1,4 @@
-module examples.character_view
+module examples.gfx.character_view
 
 import stdlib.gfx
 import stdlib.linalg (camera_fit_distance)
@@ -9,8 +9,8 @@ import stdlib.linalg (camera_fit_distance)
 # skeletal animation is M4.
 #
 # Run:
-#   mise exec -- just run-gfx examples/character_view.sprout
-#   SPROUT_GFX_MAX_FRAMES=180 mise exec -- just run-gfx examples/character_view.sprout
+#   mise exec -- just run-gfx examples/gfx/character_view.sprout
+#   SPROUT_GFX_MAX_FRAMES=180 mise exec -- just run-gfx examples/gfx/character_view.sprout
 
 fn render_loop(handle: Int, frame: Int) -> Unit !{IO} =
   do

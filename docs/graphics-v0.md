@@ -109,7 +109,7 @@ unless tail-call-optimized. The proven loop shape is the contract for the engine
 arithmetic churns garbage; hot-path math must use flat `Vector Double`.)
 
 ### M1 — spinning cube ✅ (landed)
-`examples/spinning_cube.sprout` drives a real GPU window: raylib 6.0 initialized,
+`examples/gfx/spinning_cube.sprout` drives a real GPU window: raylib 6.0 initialized,
 shaders compiled, render batch in VRAM, 60 FPS, cube rotating on a grid via
 raylib's own matrix stack (`rlRotatef`) — so the Sprout side supplies only a
 scalar angle (`to_double(frame) * 0.8`). **Zero new core builtins, zero seed
@@ -125,7 +125,7 @@ first `libm` builtins — `sqrt`, `sin`, `cos` — the legitimate builtin case
 entries.** See `tests/stdlib/test_native_mutmatrix.spr` for existing groundwork.
 
 ### M3 — model loading & static draw ✅ (landed)
-`examples/character_view.sprout` loads the Kenney character and draws it rotating
+`examples/gfx/character_view.sprout` loads the Kenney character and draws it rotating
 on the grid. Introduced the C-side model handle registry (§4:
 `gfx_load_model`/`gfx_draw_model`), plus tested `tan`/`radians`/`camera_fit_distance`
 math for framing. Loaded models are drawn with a small directional-light GLSL
@@ -138,7 +138,7 @@ pack itself is not vendored (CC0, download from kenney.nl), but the converted
 under `model.skeleton.boneCount`, not the older flat `model.boneCount`.
 
 ### M4 — skeletal animation playback ✅ (landed)
-`examples/character_animated.sprout` plays the Kenney Idle clip — the original
+`examples/gfx/character_animated.sprout` plays the Kenney Idle clip — the original
 goal: an animated character on screen. raylib does the GPU skinning via
 `UpdateModelAnimation`; the Sprout loop advances the playhead with the tested
 pure `anim_advance` (loops at `keyframeCount`). **Key simplification:** raylib

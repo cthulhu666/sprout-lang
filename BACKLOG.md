@@ -334,11 +334,11 @@ raylib) have landed. Fenced from core: shim `graphics/sprout_gfx.c` links only v
   helpers over imported wrap types break. Blocks ergonomic user-side Vec3/Mat4 helpers. Likely
   in the module-qualified-type-identity machinery (docs/module-qualified-type-identity-design-2026-07-10.md).
 - [x] `M3` Model loading + static draw via a C-side raylib handle registry
-  (`gfx_load_model`/`gfx_draw_model`, `examples/character_view.sprout`). The Kenney pack
+  (`gfx_load_model`/`gfx_draw_model`, `examples/gfx/character_view.sprout`). The Kenney pack
   ships FBX, which raylib CANNOT load — converted to GLB (mesh + 58-bone skeleton intact)
   via `tools/convert_kenney.sh` (Blender headless). Added `tan`/`radians` + `camera_fit_distance`
   (tested) to frame the model. Asset vendored: `assets/models/characterMedium.glb` (CC0, NOTICE).
-- [x] `M4` Skeletal animation playback — `examples/character_animated.sprout` plays the Kenney
+- [x] `M4` Skeletal animation playback — `examples/gfx/character_animated.sprout` plays the Kenney
   Idle clip, posed by raylib `UpdateModelAnimation` and driven by the Sprout loop via a tested
   pure `anim_advance` playhead. Animations load from a SEPARATE GLB (`character_idle.glb`): raylib
   skins by bone index, so matching skeletons is enough (`IsModelAnimationValid` true) — no Blender

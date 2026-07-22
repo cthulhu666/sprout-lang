@@ -1,4 +1,4 @@
-module examples.character_crowd
+module examples.gfx.character_crowd
 
 import stdlib.gfx
 import stdlib.linalg (anim_advance)
@@ -13,7 +13,7 @@ import stdlib.mutable (MutVec, mutvec_new, mutvec_at, mutvec_set)
 # per-character playhead lives in a MutVec Double, advanced in place each frame.
 #
 # Run:
-#   mise exec -- just run-gfx examples/character_crowd.sprout
+#   mise exec -- just run-gfx examples/gfx/character_crowd.sprout
 
 fn spread_x(i: Int) -> Double = (to_double(i) - 2.0) * 3.0  # -6, -3, 0, 3, 6
 fn speed_of(i: Int) -> Double = 0.3 + to_double(i) * 0.25  # 0.30 .. 1.30

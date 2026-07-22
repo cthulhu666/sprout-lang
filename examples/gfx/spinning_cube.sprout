@@ -1,4 +1,4 @@
-module examples.spinning_cube
+module examples.gfx.spinning_cube
 
 import stdlib.gfx
 
@@ -10,9 +10,9 @@ import stdlib.gfx
 # calls, then the recursive call in tail position.
 #
 # Run:
-#   mise exec -- just run-gfx examples/spinning_cube.sprout
+#   mise exec -- just run-gfx examples/gfx/spinning_cube.sprout
 # Auto-close after N frames (non-interactive canary):
-#   SPROUT_GFX_MAX_FRAMES=120 mise exec -- just run-gfx examples/spinning_cube.sprout
+#   SPROUT_GFX_MAX_FRAMES=120 mise exec -- just run-gfx examples/gfx/spinning_cube.sprout
 
 fn render_loop(frame: Int) -> Unit !{IO} =
   do

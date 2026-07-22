@@ -1,4 +1,4 @@
-module examples.character_animated
+module examples.gfx.character_animated
 
 import stdlib.gfx
 import stdlib.linalg (camera_fit_distance, anim_advance)
@@ -9,7 +9,7 @@ import stdlib.linalg (camera_fit_distance, anim_advance)
 # just have to match). The playhead is advanced in pure Sprout via anim_advance.
 #
 # Run:
-#   mise exec -- just run-gfx examples/character_animated.sprout
+#   mise exec -- just run-gfx examples/gfx/character_animated.sprout
 
 fn render_loop(model: Int, set: Int, clip: Int, keyframes: Double, frame: Double) -> Unit !{IO} =
   do
