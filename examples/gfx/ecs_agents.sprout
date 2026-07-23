@@ -4,6 +4,7 @@ import stdlib.gfx
 import stdlib.rng (rng_below)
 import loam.scene (Scene, scene_new, spawn, scene_frame)
 import loam.agent (world_step)
+import loam.driver (fixed_step)
 import loam.physics (Body, body_new)
 import loam.view (Clips, animation_system_jump, render_system_physics, orbit_next_angle, orbit_zoomed, orbit_camera)
 import stdlib.mutable (mutvec_set)
@@ -84,8 +85,14 @@ let max_radius = 100.0
 # physics `body` are threaded so an airborne agent poses on the jump clip and is drawn
 # at its risen height. `paused` gates ONLY the camera orbit (Space toggles it); the
 # simulation and animation always run.
+#
+# The model is advanced through loam.driver.fixed_step: the fixed-dt world_step runs
+# as many whole ticks as the real frame time earned (usually one at 60 FPS), so the
+# simulation keeps a constant wall-clock pace whatever the render rate — no slow-motion
+# on a slow machine, no fast-forward on a fast one. `acc` carries the sub-tick remainder
+# between frames.
 fn render_loop(s: Scene, body: Body, c: Clips, js: Int, jc: Int, jkf: Double,
-               angle: Double, paused: Bool, radius: Double) -> Unit !{IO} =
+               angle: Double, paused: Bool, radius: Double, acc: Double) -> Unit !{IO} =
   do
     stop <- gfx.window_should_close()
     if stop then gfx.close_window()
@@ -94,7 +101,8 @@ fn render_loop(s: Scene, body: Body, c: Clips, js: Int, jc: Int, jkf: Double,
         toggled <- gfx.space_pressed()
         let now_paused = if toggled then ! paused else paused
         let next = if now_paused then angle else orbit_next_angle(angle, orbit_step)
-        world_step(s, body, arena)
+        dt <- gfx.get_frame_time()
+        acc2 <- fixed_step(acc, dt, \_ -> world_step(s, body, arena))
         orbit_camera(radius, angle, orbit_height, orbit_target_y)
         gfx.frame_begin()
         gfx.draw_grid(60, 1.0)
@@ -104,7 +112,7 @@ fn render_loop(s: Scene, body: Body, c: Clips, js: Int, jc: Int, jkf: Double,
         plus <- gfx.button(940, 20, 44, 44, "+")
         minus <- gfx.button(940, 72, 44, 44, "-")
         gfx.frame_end()
-        render_loop(s, body, c, js, jc, jkf, next, now_paused, orbit_zoomed(radius, plus, minus, zoom_step, min_radius, max_radius))
+        render_loop(s, body, c, js, jc, jkf, next, now_paused, orbit_zoomed(radius, plus, minus, zoom_step, min_radius, max_radius), acc2)
 
 fn main() -> Unit !{IO} =
   do
@@ -131,4 +139,4 @@ fn main() -> Unit !{IO} =
     jump_kf <- gfx.animation_keyframes(jump_set, jump_clip)
 
     let clips = Clips(idle_set, idle_clip, to_double(idle_kf), run_set, run_clip, to_double(run_kf))
-    render_loop(s, body, clips, jump_set, jump_clip, to_double(jump_kf), 0.0, false, orbit_start_radius)
+    render_loop(s, body, clips, jump_set, jump_clip, to_double(jump_kf), 0.0, false, orbit_start_radius, 0.0)

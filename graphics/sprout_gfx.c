@@ -153,6 +153,17 @@ long long gfx_window_should_close(void) {
   return (closed || budget) ? 1 : 0;
 }
 
+/* Real seconds since the previous frame (raylib GetFrameTime). Returned as a
+ * Sprout Double, so the float is widened to double and crosses as its 64-bit
+ * IEEE-754 pattern (the inverse of `as_float`). loam.driver consumes it to run a
+ * fixed-timestep simulation independent of the render framerate. */
+long long gfx_get_frame_time(void) {
+  double d = (double)GetFrameTime();
+  long long bits;
+  memcpy(&bits, &d, sizeof(double));
+  return bits;
+}
+
 /* 1 on the frame the Space key transitions to pressed (edge, not held) — the
  * shape a toggle wants. IsKeyPressed already fires once per press. */
 long long gfx_space_pressed(void) {

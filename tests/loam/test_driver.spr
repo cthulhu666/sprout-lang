@@ -1,0 +1,66 @@
+import stdlib.test (TestState, new_state, assert_true, assert_eq, summary)
+import stdlib.mutable (MutVec, mutvec_new, mutvec_at, mutvec_set)
+import loam.driver (fixed_dt, fixed_step)
+
+# Loam's fixed-timestep driver, tested headless — no graphics. The driver decouples
+# simulation rate from render rate: given real seconds elapsed since the last frame,
+# it runs a fixed-dt `step` zero-or-more whole ticks to catch up and returns the
+# leftover sub-tick accumulator. Passing here means the model advances at a constant
+# wall-clock pace regardless of FPS, and that a stall is absorbed (spiral-of-death
+# clamp) rather than exploding into a burst of catch-up ticks.
+
+# A counter closure: `step` bumps cell 0 so a test can count how many ticks ran.
+fn bump(counter: MutVec Int) -> Unit !{IO} =
+  do
+    c <- mutvec_at(counter, 0)
+    mutvec_set(counter, 0, c + 1)
+
+# Run one fixed_step against `counter` (mutated in place); return the leftover acc.
+fn drive(counter: MutVec Int, acc: Double, elapsed: Double) -> Double !{IO} =
+  fixed_step(acc, elapsed, \_ -> bump(counter))
+
+# Whether two Doubles are within a tick's rounding slop.
+fn near(a: Double, b: Double) -> Bool =
+  let d = a - b
+  in if d < 0.0 then (0.0 - d) < 0.0001 else d < 0.0001
+
+fn main() -> Unit !{IO} =
+  do
+    state <- new_state()
+
+    # --- Exactly one tick's worth of time runs exactly one tick ---
+    c1 <- mutvec_new(1, 0)
+    l1 <- drive(c1, 0.0, fixed_dt)
+    t1 <- mutvec_at(c1, 0)
+    assert_eq(state, "one dt -> 1 tick", t1, 1)
+
+    # --- Sub-tick time runs nothing and carries the whole elapsed forward ---
+    c2 <- mutvec_new(1, 0)
+    l2 <- drive(c2, 0.0, fixed_dt / 2.0)
+    t2 <- mutvec_at(c2, 0)
+    assert_eq(state, "half dt -> 0 ticks", t2, 0)
+    assert_true(state, "half dt -> carries ~half dt", near(l2, fixed_dt / 2.0))
+
+    # --- 2.5 ticks -> 2 ticks now, 0.5 tick carried ---
+    c3 <- mutvec_new(1, 0)
+    l3 <- drive(c3, 0.0, fixed_dt * 2.5)
+    t3 <- mutvec_at(c3, 0)
+    assert_eq(state, "2.5 dt -> 2 ticks", t3, 2)
+    assert_true(state, "2.5 dt -> carries ~0.5 dt", near(l3, fixed_dt * 0.5))
+
+    # --- Carry accumulates across frames: 0.5 dt in the bank + 0.6 dt -> 1 tick ---
+    c4 <- mutvec_new(1, 0)
+    l4 <- drive(c4, fixed_dt * 0.5, fixed_dt * 0.6)
+    t4 <- mutvec_at(c4, 0)
+    assert_eq(state, "carry 0.5 + 0.6 dt -> 1 tick", t4, 1)
+    assert_true(state, "carry -> ~0.1 dt left", near(l4, fixed_dt * 0.1))
+
+    # --- Spiral-of-death clamp: a huge stall must NOT run thousands of ticks ---
+    # 10 real seconds is ~600 ticks unclamped; the guard caps it to <= ~15.
+    c5 <- mutvec_new(1, 0)
+    l5 <- drive(c5, 0.0, 10.0)
+    t5 <- mutvec_at(c5, 0)
+    assert_true(state, "huge elapsed is clamped (<= 16 ticks)", t5 <= 16)
+    assert_true(state, "huge elapsed still runs some ticks", t5 >= 10)
+
+    summary(state)

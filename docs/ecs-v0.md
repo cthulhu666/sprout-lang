@@ -309,6 +309,39 @@ next jump. A jump is `launch(body, i, impulse)` (set `vy`); `airborne(body, i)` 
 rises, peaks, lands; a grounded body stays put). This is deliberately a *reusable*
 integrator, not a jump-specific hack: gravity/falling/knockback build on it later.
 
+### 10.3b `driver` — a fixed-timestep loop, FPS-independent
+
+`world_step` and `physics_step` are **fixed-dt** ticks by design: reproducibility
+(same seed → same trajectory, the basis of the headless tests) depends on the
+timestep never being a wall-clock `dt`. But a naive loop that calls `world_step`
+once per rendered frame ties the *simulation rate* to the *render rate* — slow-motion
+on a machine that can't hold the FPS cap, fast-forward on one that exceeds it.
+
+`loam.driver` resolves this the way Godot splits `_physics_process` (fixed) from
+`_process` (variable): an **accumulator**. `fixed_step(acc, elapsed, step)` adds the
+real seconds `elapsed` since the last frame to the carried `acc`, runs `step` (the
+fixed tick) once per whole `fixed_dt` consumed, and returns the sub-tick remainder to
+carry forward. So a slow frame earns 2 ticks, a fast frame 0, and the model advances
+at a **constant wall-clock pace whatever the render rate**. `fixed_dt` matches the
+usual 60-FPS cap, so at a sustained 60 FPS the common case is exactly one tick per
+frame — behaviourally the old frame-locked loop, with graceful degradation added.
+
+Two properties make it fit the engine's grain:
+
+- **Graphics-free.** It takes `elapsed` as a *parameter*, not by reading a clock, so
+  it carries no gfx dependency and is asserted headless (`test_driver.spr`: one dt → 1
+  tick, 2.5 dt → 2 ticks + carry, carry across frames, sub-dt → 0). The example feeds
+  it `gfx.get_frame_time()` (raylib `GetFrameTime`) at the render edge.
+- **Spiral-of-death guard.** `elapsed` is clamped (`max_frame_time = 0.25s`) so a
+  stall (window drag, GC pause) is absorbed as slow-motion rather than a burst of
+  catch-up ticks that stalls harder — the role Godot's `max_physics_steps_per_frame`
+  plays.
+
+`step` is a first-class `Unit -> Unit !{e}` closure, so the same driver runs
+`world_step`, `world_step_flock`, or `physics_step` unchanged. Rendered interpolation
+between the last two states (for sub-tick visual smoothness) is deliberately deferred:
+with `fixed_dt` = render cap it buys little and would force per-frame state snapshots.
+
 ### 10.4 The model/view split, made enforceable
 
 Both step functions are the *same* functions the renderers drive and the headless
@@ -321,6 +354,8 @@ tests assert — all with no window:
   while airborne, lands back to walking.
 - `tests/loam/test_physics.spr` (drives `physics_step`): the hop arc (rise → apex →
   land) and the ground clamp (a grounded body's `y` and `vy` both stay 0).
+- `tests/loam/test_driver.spr` (drives `fixed_step`): the accumulator's tick count
+  and carry (1/2/0 ticks per the elapsed time) and the spiral-of-death clamp.
 - `tests/loam/test_flock.spr` (drives `world_step_flock`): `group_of` binning,
   flock determinism, and **cohesion** — two groups spawned as loose clouds whose mean
   distance-to-centroid shrinks while the groups stay apart.

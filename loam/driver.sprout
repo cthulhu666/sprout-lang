@@ -1,0 +1,39 @@
+module loam.driver
+
+# Loam's fixed-timestep driver — decouples the SIMULATION rate from the RENDER rate
+# so the model advances at a constant wall-clock pace regardless of FPS (Gaffer/
+# Fiedler "Fix Your Timestep!"; the same split Godot draws between _physics_process
+# and _process). The model tick (loam.agent.world_step) stays a FIXED dt and remains
+# deterministic and headless-testable; this helper owns only the accumulator that
+# runs it the right NUMBER of times per rendered frame.
+#
+# It takes elapsed real time as a PARAMETER rather than reading a clock, so it stays
+# free of any graphics dependency and is asserted headless (tests/loam/test_driver.spr).
+# The caller feeds it gfx.get_frame_time() at the render edge.
+
+# Fixed simulation timestep in seconds: 60 ticks/sec, matching the usual render cap
+# so the common case is exactly one tick per frame. (GetFrameTime jitter and a ~0
+# first frame mean the per-frame tick count is 0/1/2, not a flat 1 — statistically
+# and visually one-tick-per-frame at sustained 60 FPS.)
+export let fixed_dt = 0.016666666666666666  # 1.0 / 60.0
+
+# Spiral-of-death guard: never absorb more than this much real time in one frame. A
+# stall (window drag, GC pause, alt-tab) is then seen as slow-motion rather than a
+# burst of catch-up ticks that stalls even harder. Godot's max_physics_steps_per_frame
+# plays the same role. 0.25s caps catch-up at ~15 ticks/frame at fixed_dt = 1/60.
+let max_frame_time = 0.25
+
+# Consume whole fixed ticks from the accumulator, running `step` once each, and
+# return the sub-tick remainder to carry into the next frame. Tail-recursive.
+fn run_ticks(acc: Double, step: Unit -> Unit !{e}) -> Double !{e} =
+  if acc < fixed_dt then acc
+  else
+    do
+      step(())
+      run_ticks(acc - fixed_dt, step)
+
+# Advance the simulation by `elapsed` real seconds using fixed ticks: add (clamped)
+# elapsed to the carried `acc`, run whole ticks, return the leftover accumulator.
+export fn fixed_step(acc: Double, elapsed: Double, step: Unit -> Unit !{e}) -> Double !{e} =
+  let capped = if elapsed > max_frame_time then max_frame_time else elapsed
+  in run_ticks(acc + capped, step)

@@ -13,6 +13,7 @@ module stdlib.gfx
 extern fn gfx_open_window(w: Int, h: Int, title: String) -> Unit !{IO}
 extern fn gfx_set_target_fps(fps: Int) -> Unit !{IO}
 extern fn gfx_window_should_close() -> Int !{IO}
+extern fn gfx_get_frame_time() -> Double !{IO}
 extern fn gfx_set_camera(px: Double, py: Double, pz: Double,
                          tx: Double, ty: Double, tz: Double,
                          fovy: Double) -> Unit !{IO}
@@ -38,6 +39,12 @@ export fn open_window(w: Int, h: Int, title: String) -> Unit !{IO} =
 
 export fn set_target_fps(fps: Int) -> Unit !{IO} =
   gfx_set_target_fps(fps)
+
+# Real seconds elapsed since the previous frame (raylib GetFrameTime). Feed this to
+# loam.driver.fixed_step so the simulation advances at a constant wall-clock pace
+# regardless of FPS. ~0 on the first frame; jitters around 1/target_fps thereafter.
+export fn get_frame_time() -> Double !{IO} =
+  gfx_get_frame_time()
 
 # True once the window has been asked to close or the frame budget is spent.
 export fn window_should_close() -> Bool !{IO} =

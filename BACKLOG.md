@@ -356,6 +356,13 @@ raylib) have landed. Fenced from core: shim `graphics/sprout_gfx.c` links only v
   `gfx_draw_model_tinted(handle,x,y,z,angle,scale,r,g,b)` extern in the raylib shim +
   `APPROVED_BUILTINS` entry (runtime change → user approval per AGENTS.md §Builtin-vs-Stdlib).
   Would make N groups legible even when clouds overlap. See `docs/ecs-v0.md §10.5`.
+- [ ] `P3` Loam: **rendered interpolation** for `loam.driver`. `fixed_step` (shipped, `docs/ecs-v0.md
+  §10.3b`) decouples sim rate from render rate via a fixed-timestep accumulator, but renders the
+  latest tick state directly. When `fixed_dt` and the render rate diverge by design (e.g. a 30-Hz
+  sim rendered at 144 Hz), motion shows tick-stepping; the fix is to lerp between the previous and
+  current state by the leftover-accumulator fraction (Godot's `physics_interpolation`). Deferred
+  because at `fixed_dt` = 60-FPS cap the common case is 1 tick/frame and interpolation buys little
+  while forcing per-entity previous-state snapshots. Revisit if a sub-render sim rate is wanted.
 - [ ] `P3` Loam flocking: add **separation** (short-range repulsion) and **alignment** (match
   groupmates' heading) to `loam.agent` for fuller boids behaviour. Cohesion alone (shipped)
   clumps but lets members overlap. Separation is the O(n²) piece — needs a spatial bin to stay
