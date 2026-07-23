@@ -1,0 +1,220 @@
+module examples.gfx.ecs_flocking
+
+import stdlib.gfx
+import stdlib.linalg (anim_advance)
+import stdlib.math (sin, cos, pi)
+import stdlib.rng (rng_below, rng_next)
+import loam.scene (Scene, scene_new, scene_count, spawn, scene_model, scene_pos_x, scene_pos_z, scene_heading, scene_frame, scene_resting)
+import loam.agent (world_step_flock, group_of)
+import stdlib.mutable (mutvec_at, mutvec_set)
+
+# A flocking demo grown on Loam (the engine seed). The crowd is split into N GROUPS;
+# each group tends to FLOCK together — its members steer toward their shared centre
+# of mass while wandering and resting when tired. All of that is decided by
+# loam.agent.world_step_flock, which touches only the scene's component arrays. THIS
+# file is the view: it advances the model with world_step_flock, then reads the same
+# components to animate and draw. The flock behaviour is tested headless in
+# tests/loam/test_flock.spr; nothing here re-implements it.
+#
+# This is the sibling of ecs_agents (the plain wandering crowd): same engine, same
+# view systems, but world_step_flock instead of world_step. Groups have no colour
+# channel yet (gfx.draw_model has no tint), so the flocks are told apart purely by
+# WHERE they clump — each group spawns as a loose cloud around its own home on a
+# ring, and cohesion tightens it there into a distinct crowd.
+#
+# Run:
+#   mise exec -- just run-gfx examples/gfx/ecs_flocking.sprout
+
+# --- World layout -----------------------------------------------------------
+# TWO knobs: agent_count and group_count. The per-group cluster size, the ring the
+# group homes sit on, the wander arena, and the camera framing are all DERIVED from
+# them, so resizing the crowd or the number of flocks is a single edit here. group_of
+# (from the engine) assigns entity i to group `i mod group_count` — the SAME binning
+# world_step_flock uses, so the view and the model always agree on who is in which
+# flock.
+let agent_count = 24
+let group_count = 4
+let grid_gap = 3.0
+let two_pi = 2.0 * pi
+
+fn maxd(a: Double, b: Double) -> Double = if a > b then a else b
+
+# Integer square root (floor), used to size a group's spawn cloud. O(sqrt n).
+fn isqrt_go(n: Int, i: Int) -> Int = if (i + 1) * (i + 1) > n then i else isqrt_go(n, i + 1)
+fn isqrt(n: Int) -> Int = if n <= 0 then 0 else isqrt_go(n, 1)
+
+# Each group starts as a square-ish cloud; cluster_span is its jitter half-extent.
+let members_per_group = (agent_count + group_count - 1) / group_count
+let cluster_span = to_double(isqrt(members_per_group) + 1) * grid_gap
+
+# Group homes sit evenly on a ring big enough that adjacent clouds don't overlap
+# (arc between homes >= ~2 cluster diameters), with a sane floor for few groups.
+let ring_need = (to_double(group_count) * cluster_span * 2.2) / two_pi
+let home_radius = maxd(ring_need, cluster_span * 1.8) + 4.0
+
+# Wander half-extent: enclose the outermost cloud plus a margin, so agents bounce at
+# the rim rather than in the crowd.
+let arena = home_radius + cluster_span + 6.0
+
+# The ring position of group g, and its home on the ground plane.
+fn group_angle(g: Int) -> Double = (two_pi * to_double(g)) / to_double(group_count)
+fn home_x(g: Int) -> Double = home_radius * cos(group_angle(g))
+fn home_z(g: Int) -> Double = home_radius * sin(group_angle(g))
+
+# Per-entity PRNG seed, ADVANCED through the LCG first: rng_below reads the high
+# bits, so a raw small seed (< 65536) would divide to 0 and give every agent the same
+# jitter. A symmetric jitter in [-span, span) from a seed's high bits.
+fn seed_of(i: Int) -> Int = rng_next(rng_next((i + 1) * 7919))
+fn jitter(seed: Int, span: Double) -> Double = (to_double(rng_below(seed, 200)) / 100.0 - 1.0) * span
+fn heading_of(seed: Int) -> Double = to_double(rng_below(seed, 628)) / 100.0
+fn energy_of(i: Int) -> Double = 20.0 + to_double(i - (i / 80) * 80)  # 20 .. 100
+
+# Load one independent model instance per entity (independent skeletons => each poses
+# on its own playhead) and spawn it as a member of group `i mod group_count`, jittered
+# around that group's home so the flock starts loose and converges.
+fn populate(s: Scene, n: Int, i: Int) -> Unit !{IO} =
+  if i >= n then ()
+  else
+    do
+      h <- gfx.load_model("assets/models/characterMedium.glb")
+      let g = group_of(i, group_count)
+      let seed = seed_of(i)
+      let x = home_x(g) + jitter(seed, cluster_span)
+      let z = home_z(g) + jitter(rng_next(seed), cluster_span)
+      id <- spawn(s, h, x, z, heading_of(rng_next(rng_next(seed))), seed, energy_of(i))
+      # Stagger each playhead so walkers don't animate in lockstep (the modulo in
+      # anim_advance preserves this initial phase offset).
+      mutvec_set(scene_frame(s), id, to_double(rng_below(rng_next(rng_next(rng_next(seed))), 30)))
+      populate(s, n, i + 1)
+
+# --- Animation clips --------------------------------------------------------
+# The idle and run cycles live in separate GLBs whose skeleton matches the model.
+# Clips bundles both (set, clip index, keyframe count) so the render loop threads one
+# value instead of six.
+type Clips (..) =
+  | Clips Int Int Double Int Int Double  # idle_set idle_clip idle_kf run_set run_clip run_kf
+
+let anim_rate = 1.0  # playhead advance per tick
+let rad_to_deg = 57.29578  # 180/pi — heading (radians) to raylib's Y-rotation degrees
+# raylib's Y-rotation A faces (-sin A, cos A), but travel at heading θ is
+# (cos θ, sin θ) — a 90° offset. Face = heading°-90 so walkers face where they go.
+let facing_offset = 90.0
+
+# System: pose each entity on its ACTIVE clip — run while walking, idle while resting
+# — advancing that clip's playhead (each clip has its own keyframe count).
+fn anim_go(s: Scene, c: Clips, i: Int, n: Int) -> Unit !{IO} =
+  if i >= n then ()
+  else
+    match c with
+    | Clips is ic ikf rs rc rkf ->
+        do
+          h <- mutvec_at(scene_model(s), i)
+          resting <- mutvec_at(scene_resting(s), i)
+          cur <- mutvec_at(scene_frame(s), i)
+          if resting == 1
+          then
+            do
+              let nf = anim_advance(cur, anim_rate, ikf)
+              mutvec_set(scene_frame(s), i, nf)
+              gfx.update_animation(h, is, ic, nf)
+          else
+            do
+              let nf = anim_advance(cur, anim_rate, rkf)
+              mutvec_set(scene_frame(s), i, nf)
+              gfx.update_animation(h, rs, rc, nf)
+          anim_go(s, c, i + 1, n)
+
+fn animation_system(s: Scene, c: Clips) -> Unit !{IO} =
+  do
+    n <- scene_count(s)
+    anim_go(s, c, 0, n)
+
+# System: draw each entity at its ground position, rotated to face its heading.
+fn render_go(s: Scene, i: Int, n: Int) -> Unit !{IO} =
+  if i >= n then ()
+  else
+    do
+      h <- mutvec_at(scene_model(s), i)
+      x <- mutvec_at(scene_pos_x(s), i)
+      z <- mutvec_at(scene_pos_z(s), i)
+      heading <- mutvec_at(scene_heading(s), i)
+      gfx.draw_model(h, x, 0.0, z, (heading * rad_to_deg) - facing_offset, 1.0)
+      render_go(s, i + 1, n)
+
+fn render_system(s: Scene) -> Unit !{IO} =
+  do
+    n <- scene_count(s)
+    render_go(s, 0, n)
+
+# --- Orbit camera + zoom UI (as in the crowd demo) --------------------------
+# Framing is DERIVED from the arena so the camera keeps the whole crowd in view no
+# matter how the crowd/flock knobs are set.
+let orbit_start_radius = arena * 1.7
+let orbit_height = arena * 0.8
+let orbit_target_y = 1.5
+let orbit_step = 0.008
+let zoom_step = 3.0
+let min_radius = arena * 0.6
+let max_radius = arena * 3.0
+
+fn next_angle(a: Double) -> Double =
+  if stepped >= two_pi then stepped - two_pi else stepped
+  where stepped = a + orbit_step
+
+fn clampd(v: Double, lo: Double, hi: Double) -> Double =
+  if v < lo then lo else if v > hi then hi else v
+
+fn zoomed(radius: Double, plus: Bool, minus: Bool) -> Double =
+  if plus then clampd(radius - zoom_step, min_radius, max_radius)
+  else if minus then clampd(radius + zoom_step, min_radius, max_radius)
+  else radius
+
+fn orbit_camera(radius: Double, angle: Double) -> Unit !{IO} =
+  gfx.set_camera(radius * sin(angle), orbit_height, radius * cos(angle),
+                 0.0, orbit_target_y, 0.0, 45.0)
+
+# The frame: advance the MODEL (world_step_flock), then the VIEW (animate + draw + UI).
+# `paused` gates ONLY the camera orbit (Space toggles it); the simulation and
+# animation always run.
+fn render_loop(s: Scene, c: Clips, angle: Double, paused: Bool, radius: Double) -> Unit !{IO} =
+  do
+    stop <- gfx.window_should_close()
+    if stop then gfx.close_window()
+    else
+      do
+        toggled <- gfx.space_pressed()
+        let now_paused = if toggled then ! paused else paused
+        let next = if now_paused then angle else next_angle(angle)
+        world_step_flock(s, arena, group_count)
+        orbit_camera(radius, angle)
+        gfx.frame_begin()
+        gfx.draw_grid(80, 1.0)
+        animation_system(s, c)
+        render_system(s)
+        gfx.draw_fps(10, 10)
+        plus <- gfx.button(940, 20, 44, 44, "+")
+        minus <- gfx.button(940, 72, 44, 44, "-")
+        gfx.frame_end()
+        render_loop(s, c, next, now_paused, zoomed(radius, plus, minus))
+
+fn main() -> Unit !{IO} =
+  do
+    gfx.open_window(1000, 600, "Sprout — Loam flocking groups")
+    gfx.set_target_fps(60)
+
+    let n = agent_count
+    s <- scene_new(n)
+    populate(s, n, 0)
+
+    # Two clips from skeleton-matched GLBs; each is the last (non-pose) clip.
+    idle_set <- gfx.load_animations("assets/models/character_idle.glb")
+    idle_count <- gfx.animation_count(idle_set)
+    let idle_clip = idle_count - 1
+    idle_kf <- gfx.animation_keyframes(idle_set, idle_clip)
+    run_set <- gfx.load_animations("assets/models/character_run.glb")
+    run_count <- gfx.animation_count(run_set)
+    let run_clip = run_count - 1
+    run_kf <- gfx.animation_keyframes(run_set, run_clip)
+
+    let clips = Clips(idle_set, idle_clip, to_double(idle_kf), run_set, run_clip, to_double(run_kf))
+    render_loop(s, clips, 0.0, false, orbit_start_radius)

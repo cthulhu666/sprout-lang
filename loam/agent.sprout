@@ -1,7 +1,7 @@
 module loam.agent
 
-import stdlib.mutable (mutvec_at, mutvec_set)
-import stdlib.math (sin, cos, pi)
+import stdlib.mutable (MutVec, mutvec_at, mutvec_set, mutvec_new)
+import stdlib.math (sin, cos, sqrt, pi)
 import stdlib.rng (rng_next, rng_below)
 import loam.scene (Scene, scene_count, scene_pos_x, scene_pos_z, scene_heading, scene_rng, scene_energy, scene_resting)
 
@@ -23,8 +23,41 @@ let turn_denom = 40  # ~1-in-40 chance per walking tick to pick a new heading
 let heading_hundredths = 628  # 2*pi*100: a heading in [0, 2pi) via rng_below/100
 let two_pi = 2.0 * pi
 
+# Flocking (group cohesion). Each walking agent nudges its heading toward its
+# GROUP's centre of mass, so same-group agents converge into a flock. The nudge is
+# PROPORTIONAL to how far off-course the centroid is (see `cohere`): near the flock
+# core the correction fades to zero, which is what stops agents jittering in place.
+let cohesion_gain = 0.4  # radians of turn per unit of sin(heading-error)
+let cohesion_max_turn = 0.18  # clamp on the per-tick cohesion turn (radians)
+let cohesion_min_dist = 0.05  # within this of the centroid: treat as arrived, don't steer
+
 fn clampd(v: Double, lo: Double, hi: Double) -> Double =
   if v < lo then lo else if v > hi then hi else v
+
+# Non-negative remainder (Sprout has no `%`); used to bin an entity id into a group.
+fn imod(a: Int, b: Int) -> Int = a - ((a / b) * b)
+
+# The group an entity belongs to, derived PURELY from its id — no stored component,
+# so it costs no Scene slot (the constructor is already at its 9-field ceiling). The
+# view must colour/place groups by this SAME function to stay in sync. Round-robin
+# (id mod N) spreads ids evenly across groups regardless of spawn count.
+export fn group_of(i: Int, num_groups: Int) -> Int =
+  if num_groups <= 1 then 0 else imod(i, num_groups)
+
+# Turn a wander heading `nh` toward the group centroid (gx, gz) from position
+# (px, pz). PURE and inverse-trig-free: the 2D cross product of the facing unit
+# vector (cos nh, sin nh) with the vector-to-centroid, divided by the distance, is
+# exactly sin(heading-error) — signed, so it says WHICH way and HOW MUCH to turn.
+# The result is scaled, clamped, and added to the heading. A singleton group (or an
+# agent sitting on its centroid) yields distance ~0 => no steering, so a lone agent
+# behaves identically to the pre-flocking engine — the regression safety net.
+fn cohere(nh: Double, px: Double, pz: Double, gx: Double, gz: Double) -> Double =
+  let dx = gx - px
+      dz = gz - pz
+      dist = sqrt((dx * dx) + (dz * dz))
+  in if dist < cohesion_min_dist then nh
+     else norm_angle(nh + clampd(cohesion_gain * (((cos(nh) * dz) - (sin(nh) * dx)) / dist),
+                                 (-cohesion_max_turn), cohesion_max_turn))
 
 # Wrap an angle into [0, 2pi) so a reflected heading stays a sane value.
 fn norm_angle(h: Double) -> Double =
@@ -70,20 +103,32 @@ fn rest_entity(s: Scene, i: Int) -> Unit !{IO} =
         mutvec_set(scene_resting(s), i, 0)
     else mutvec_set(scene_energy(s), i, e2)
 
-# Walking entity: decide a heading, step along it (reflecting off the arena walls
-# so it turns back inward without pinning), and spend energy. No collision
-# handling between agents. When energy runs out, flip to resting.
-fn walk_entity(s: Scene, bound: Double, i: Int) -> Unit !{IO} =
+# Walking entity: decide a wander heading, bend it toward the group centroid
+# (flocking), step along the result (reflecting off the arena walls so it turns
+# back inward without pinning), and spend energy. No collision handling between
+# agents. When energy runs out, flip to resting. The centroid arrays are the tick's
+# pre-move snapshot (sum_x/sum_z/cnt indexed by group), so every agent steers by the
+# SAME positions — the update is simultaneous and reproducible.
+fn walk_entity(s: Scene, bound: Double,
+               sum_x: MutVec Double, sum_z: MutVec Double, cnt: MutVec Int,
+               g: Int, i: Int) -> Unit !{IO} =
   do
     seed <- mutvec_at(scene_rng(s), i)
     heading <- mutvec_at(scene_heading(s), i)
     px <- mutvec_at(scene_pos_x(s), i)
     pz <- mutvec_at(scene_pos_z(s), i)
     e <- mutvec_at(scene_energy(s), i)
+    let gr = group_of(i, g)
+    sx <- mutvec_at(sum_x, gr)
+    sz <- mutvec_at(sum_z, gr)
+    c <- mutvec_at(cnt, gr)
     match agent_decide(seed, heading) with
-    | (nh, nseed) ->
+    | (nh0, nseed) ->
         do
           mutvec_set(scene_rng(s), i, nseed)
+          # Bend the wander heading toward the group's centre of mass. `c` counts
+          # this agent's own group and always includes itself, so it is >= 1.
+          let nh = cohere(nh0, px, pz, sx / to_double(c), sz / to_double(c))
           let cx = px + (cos(nh) * walk_step)
           let cz = pz + (sin(nh) * walk_step)
           # Reflect off any wall the step crossed, then move along the reflected
@@ -101,21 +146,65 @@ fn walk_entity(s: Scene, bound: Double, i: Int) -> Unit !{IO} =
               mutvec_set(scene_resting(s), i, 1)
           else mutvec_set(scene_energy(s), i, e2)
 
-fn step_entity(s: Scene, bound: Double, i: Int) -> Unit !{IO} =
+fn step_entity(s: Scene, bound: Double,
+               sum_x: MutVec Double, sum_z: MutVec Double, cnt: MutVec Int,
+               g: Int, i: Int) -> Unit !{IO} =
   do
     resting <- mutvec_at(scene_resting(s), i)
-    if resting == 1 then rest_entity(s, i) else walk_entity(s, bound, i)
+    if resting == 1 then rest_entity(s, i) else walk_entity(s, bound, sum_x, sum_z, cnt, g, i)
 
-fn step_go(s: Scene, bound: Double, i: Int, n: Int) -> Unit !{IO} =
+fn step_go(s: Scene, bound: Double,
+           sum_x: MutVec Double, sum_z: MutVec Double, cnt: MutVec Int,
+           g: Int, i: Int, n: Int) -> Unit !{IO} =
   if i >= n then ()
   else
     do
-      step_entity(s, bound, i)
-      step_go(s, bound, i + 1, n)
+      step_entity(s, bound, sum_x, sum_z, cnt, g, i)
+      step_go(s, bound, sum_x, sum_z, cnt, g, i + 1, n)
 
-# Advance the whole scene one fixed tick. `bound` is the arena half-extent (the
-# app sizes it to its world). O(n) in the live entity count.
+# Phase A: accumulate each group's position sums and member count into the scratch
+# arrays. Resting agents count too — they are still part of the flock and anchor its
+# centre. O(n).
+fn accum_go(s: Scene, sum_x: MutVec Double, sum_z: MutVec Double, cnt: MutVec Int,
+            g: Int, i: Int, n: Int) -> Unit !{IO} =
+  if i >= n then ()
+  else
+    do
+      x <- mutvec_at(scene_pos_x(s), i)
+      z <- mutvec_at(scene_pos_z(s), i)
+      let gr = group_of(i, g)
+      sx <- mutvec_at(sum_x, gr)
+      sz <- mutvec_at(sum_z, gr)
+      c <- mutvec_at(cnt, gr)
+      mutvec_set(sum_x, gr, sx + x)
+      mutvec_set(sum_z, gr, sz + z)
+      mutvec_set(cnt, gr, c + 1)
+      accum_go(s, sum_x, sum_z, cnt, g, i + 1, n)
+
+# Advance the whole scene one fixed tick, partitioning the crowd into `num_groups`
+# FLOCKS whose members steer toward their shared centroid. Two phases so the update
+# is simultaneous: (A) snapshot every group's centroid from CURRENT positions into
+# scratch arrays, then (B) move each agent, steering it toward its group's snapshot
+# centroid. Computing centroids inline during the move would be O(n^2) AND make the
+# result depend on iteration order (agent 0's move would shift the centroid agent 1
+# sees), breaking reproducibility. `bound` is the arena half-extent; `num_groups < 1`
+# is treated as one group. O(n) per tick.
+export fn world_step_flock(s: Scene, bound: Double, num_groups: Int) -> Unit !{IO} =
+  do
+    n <- scene_count(s)
+    let g = if num_groups < 1 then 1 else num_groups
+    sum_x <- mutvec_new(g, 0.0)
+    sum_z <- mutvec_new(g, 0.0)
+    cnt <- mutvec_new(g, 0)
+    accum_go(s, sum_x, sum_z, cnt, g, 0, n)
+    step_go(s, bound, sum_x, sum_z, cnt, g, 0, n)
+
+# Advance the whole scene one fixed tick of PLAIN wandering — no flocking. This is
+# `world_step_flock` with one singleton group PER agent (num_groups = live count):
+# each agent's group centroid is its own position, so `cohere` no-ops (distance ~0)
+# and the result is identical to a cohesion-free walk. Keeping it as the two-arg
+# entry point means the wandering-crowd example is unchanged by the flocking work.
 export fn world_step(s: Scene, bound: Double) -> Unit !{IO} =
   do
     n <- scene_count(s)
-    step_go(s, bound, 0, n)
+    world_step_flock(s, bound, n)

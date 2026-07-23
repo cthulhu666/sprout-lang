@@ -351,6 +351,15 @@ raylib) have landed. Fenced from core: shim `graphics/sprout_gfx.c` links only v
   entry point). SoA-ECS over `MutVec` component arrays; generalizes the crowd example. Validate
   records-of-`MutVec` ergonomics FIRST (load-bearing; feeds records-v0). Watch the cross-module
   `wrap`-annotation wart if Scene/Entity are wrap types.
+- [ ] `P3` Loam: per-group **colour tint** for `ecs_agents` flocks. Groups are currently
+  distinguished only spatially (ring homes) because `gfx.draw_model` has no tint. Needs a
+  `gfx_draw_model_tinted(handle,x,y,z,angle,scale,r,g,b)` extern in the raylib shim +
+  `APPROVED_BUILTINS` entry (runtime change → user approval per AGENTS.md §Builtin-vs-Stdlib).
+  Would make N groups legible even when clouds overlap. See `docs/ecs-v0.md §10.5`.
+- [ ] `P3` Loam flocking: add **separation** (short-range repulsion) and **alignment** (match
+  groupmates' heading) to `loam.agent` for fuller boids behaviour. Cohesion alone (shipped)
+  clumps but lets members overlap. Separation is the O(n²) piece — needs a spatial bin to stay
+  O(n); defer until a bin exists. See `docs/ecs-v0.md §10.3`.
 - [ ] `P2` Language-core: unbox small fixed-shape numeric records (`Vec3 {x,y,z}` as 3 raw
   f64s, not a heap pointer) — the ergonomic+fast path for individual small vectors. Additive
   on top of the flat-buffer foundation; decide at M2.

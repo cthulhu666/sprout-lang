@@ -249,32 +249,68 @@ per array, read back through each accessor) — the only guard against a miscoun
 - `agent_decide(seed, heading) -> (heading, seed)` — **pure** (no IO, no Scene):
   occasionally turn to a fresh random heading, else hold course. This is the
   "AI" — unit-testable on its own and the single swap point for smarter behaviour.
-- `world_step(s, bound) -> Unit !{IO}` — advances every entity one **fixed**
-  timestep: decide → step along heading → spend/regain energy (walk until spent,
-  rest until full; hysteresis stops clip-flicker) → bounce off the arena edge
-  (stay put + turn inward, no collisions). It touches only component arrays —
-  **no graphics**.
+- `group_of(i, num_groups) -> Int` — **pure**: the flock an entity belongs to,
+  derived as `i mod num_groups`. Group is *not* a stored component — the `Scene`
+  constructor is already at its 9-field ceiling (§10.2), and a round-robin id
+  mapping needs no slot. The view must place/tint groups by this same function.
+- `cohere(nh, px, pz, gx, gz) -> Double` — **pure**, inverse-trig-free: bends a
+  wander heading `nh` toward the group centroid `(gx, gz)`. The 2D cross product of
+  the facing unit vector with the vector-to-centroid, over the distance, is exactly
+  `sin(heading-error)` — signed, so it gives direction *and* magnitude of the turn
+  (scaled, clamped). `atan2` is absent from `stdlib.math`, so this is how an agent
+  steers toward a point at all. When the centroid *is* the agent's own position
+  (distance ~0) it no-ops — the property both step functions below lean on.
+- `world_step_flock(s, bound, num_groups) -> Unit !{IO}` — advances every entity one
+  **fixed** timestep, partitioning the crowd into `num_groups` **flocks**, in **two
+  phases** so the update is simultaneous: (A) snapshot each group's centroid from
+  *current* positions into scratch arrays, then (B) for each entity, decide → bend
+  toward its group centroid (`cohere`) → step along the result → spend/regain energy
+  (walk until spent, rest until full; hysteresis stops clip-flicker) → bounce off the
+  arena edge (turn inward, no collisions). Computing centroids inline in phase B
+  would be O(n²) *and* order-dependent (agent 0's move would shift the centroid agent
+  1 sees), breaking reproducibility. Touches only component arrays — **no graphics**.
+  O(n) per tick.
+- `world_step(s, bound) -> Unit !{IO}` — plain wandering, **no flocking**. It is
+  `world_step_flock` with one singleton group *per* agent (`num_groups = live
+  count`): each agent's centroid is its own position, so `cohere` no-ops and the walk
+  is cohesion-free. Keeping this as the two-arg entry point is what lets the original
+  wandering-crowd example stay byte-for-byte unchanged by the flocking work.
 
-The old `move_system` is folded into `world_step` so there is one movement path.
+The old `move_system` is folded into these so there is one movement path.
 
 ### 10.4 The model/view split, made enforceable
 
-`world_step` is the *same* function the renderer drives and the headless test
-asserts (`tests/loam/test_agent.spr`: the AI on both branches, run-to-run
-determinism, a rester that does not move, edge containment) — all with no window.
+Both step functions are the *same* functions the renderers drive and the headless
+tests assert — all with no window:
+
+- `tests/loam/test_agent.spr` (drives `world_step`): the AI on both branches,
+  run-to-run determinism, a rester that does not move, edge containment.
+- `tests/loam/test_flock.spr` (drives `world_step_flock`): `group_of` binning,
+  flock determinism, and **cohesion** — two groups spawned as loose clouds whose mean
+  distance-to-centroid shrinks while the groups stay apart.
+
 So "test the game loop headless" is structural, not aspirational: the loop is
-verified without gfx, and the view (`ecs_agents`) is a pure *reader* of components
-it never mutates.
+verified without gfx, and each view is a pure *reader* of components it never mutates.
 
-### 10.5 The demo — a wandering crowd
+### 10.5 The demos — a wandering crowd and N flocking groups
 
-`examples/gfx/ecs_agents.sprout` spawns **196** characters that wander,
-face their heading (`draw_model`'s Y-rotation), and animate on the **run** clip
-while walking / **idle** while resting — selected per entity from the `resting`
-bit. It supersedes `ecs_crowd` (kept `character_crowd` as the pre-ECS baseline).
-Crowd size is a single knob (`agent_count`): the grid shape, its centring, and
-the wander arena are all derived from it. Verified by screenshot at 58 FPS (196
-and 256 agents). The walk cycle is `assets/models/character_run.glb`,
-baked from the Kenney pack's `run.fbx` via `tools/convert_kenney.sh` (the pack has
-no dedicated *walk* clip — `run` is its only locomotion). This closes the
-`docs/graphics-v0.md` "run clip" follow-up; `jump` and one-GLB packing remain.
+Two sibling examples share the engine and the same view systems (animation, render,
+orbit camera), differing only in which step they drive:
+
+- `examples/gfx/ecs_agents.sprout` — the **plain wandering crowd** (`world_step`).
+  One knob, `agent_count`; a near-square grid and the wander arena derive from it.
+  Supersedes `ecs_crowd` (kept `character_crowd` as the pre-ECS baseline).
+- `examples/gfx/ecs_flocking.sprout` — **N groups, each of which flocks together**
+  (`world_step_flock`): members steer toward their shared centre of mass. Two knobs,
+  `agent_count` and `group_count`; the per-group spawn cloud, the ring the group
+  homes sit on, the wander arena, and the camera framing all derive from them. Groups
+  have **no colour channel** (raylib's `draw_model` takes no tint, and adding one is a
+  runtime/builtin change deferred by scope — `BACKLOG.md §9`), so the flocks are
+  distinguished purely **spatially**: each group spawns as a loose cloud around its
+  own home on a ring, and cohesion tightens it into a distinct crowd there.
+
+Both face their heading (`draw_model`'s Y-rotation) and animate on the **run** clip
+while walking / **idle** while resting — selected per entity from the `resting` bit.
+The walk cycle is `assets/models/character_run.glb`, baked from the Kenney pack's
+`run.fbx` via `tools/convert_kenney.sh` (the pack has no dedicated *walk* clip —
+`run` is its only locomotion).
