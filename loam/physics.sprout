@@ -1,0 +1,83 @@
+module loam.physics
+
+import stdlib.mutable (MutVec, mutvec_at, mutvec_set, mutvec_new)
+
+# Loam's physics subsystem — a MINIMAL vertical-dynamics layer: a ballistic hop
+# under gravity. It lives in its OWN component store so it costs the 9-field Scene
+# no slot (the Scene is at its arity ceiling). Fixed-dt Euler integration keeps it
+# reproducible like the rest of the engine. Pure model — no graphics — so it is
+# asserted headless (tests/loam/test_physics.spr).
+#
+# Only the up/down axis lives here; horizontal motion stays in the Scene
+# (pos_x/pos_z). A jump is just "impart upward velocity" (`launch`); gravity then
+# produces the arc and the landing on its own, so "jumping" is not a stored flag but
+# the emergent fact `airborne = y > 0`.
+
+# A Body holds per-entity vertical position `y` and velocity `vy`, indexed by the
+# same entity id as the Scene.
+export type Body (..) =
+  | Body (MutVec Double) (MutVec Double)  # y, vy
+
+fn body_y_vec(b: Body) -> MutVec Double =
+  match b with | Body y _ -> y
+
+fn body_vy_vec(b: Body) -> MutVec Double =
+  match b with | Body _ vy -> vy
+
+# Downward acceleration per tick (units/tick^2), tuned with the jump impulse in
+# loam.agent for a ~33-tick airtime that matches the jump animation clip.
+let gravity = 0.02
+
+# Allocate vertical storage for `cap` entities, all grounded (y = vy = 0).
+export fn body_new(cap: Int) -> Body !{IO} =
+  do
+    y <- mutvec_new(cap, 0.0)
+    vy <- mutvec_new(cap, 0.0)
+    Body(y, vy)
+
+# O(1) reads for the renderer and tests.
+export fn body_y(b: Body, i: Int) -> Double !{IO} = mutvec_at(body_y_vec(b), i)
+export fn body_vy(b: Body, i: Int) -> Double !{IO} = mutvec_at(body_vy_vec(b), i)
+
+# Whether entity i is off the ground (mid-hop).
+export fn airborne(b: Body, i: Int) -> Bool !{IO} =
+  do
+    y <- mutvec_at(body_y_vec(b), i)
+    y > 0.0
+
+# Impart an upward velocity — a jump. Overwrites vy (a fresh launch, not additive).
+export fn launch(b: Body, i: Int, impulse: Double) -> Unit !{IO} =
+  mutvec_set(body_vy_vec(b), i, impulse)
+
+# Land at the ground, resetting BOTH y and vy. Missing the vy reset would let a
+# grounded body accumulate downward speed each tick and weaken the next jump.
+fn land(b: Body, i: Int) -> Unit !{IO} =
+  do
+    mutvec_set(body_y_vec(b), i, 0.0)
+    mutvec_set(body_vy_vec(b), i, 0.0)
+
+fn set_air(b: Body, i: Int, ny: Double, nvy: Double) -> Unit !{IO} =
+  do
+    mutvec_set(body_y_vec(b), i, ny)
+    mutvec_set(body_vy_vec(b), i, nvy)
+
+# Integrate one entity one tick: gravity pulls the velocity down, the velocity moves
+# the position, and crossing the ground clamps to rest.
+fn integrate(b: Body, i: Int) -> Unit !{IO} =
+  do
+    y <- mutvec_at(body_y_vec(b), i)
+    vy <- mutvec_at(body_vy_vec(b), i)
+    let nvy = vy - gravity
+    let ny = y + nvy
+    if ny <= 0.0 then land(b, i) else set_air(b, i, ny, nvy)
+
+fn step_go(b: Body, i: Int, n: Int) -> Unit !{IO} =
+  if i >= n then ()
+  else
+    do
+      integrate(b, i)
+      step_go(b, i + 1, n)
+
+# Advance every body one fixed tick. O(n).
+export fn physics_step(b: Body, n: Int) -> Unit !{IO} =
+  step_go(b, 0, n)

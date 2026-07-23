@@ -4,7 +4,8 @@ import stdlib.gfx
 import stdlib.rng (rng_below)
 import loam.scene (Scene, scene_new, spawn, scene_frame)
 import loam.agent (world_step)
-import loam.view (Clips, animation_system_jump, render_system, orbit_next_angle, orbit_zoomed, orbit_camera)
+import loam.physics (Body, body_new)
+import loam.view (Clips, animation_system_jump, render_system_physics, orbit_next_angle, orbit_zoomed, orbit_camera)
 import stdlib.mutable (mutvec_set)
 
 # A little game grown on Loam (the engine seed). A crowd of characters, each driven
@@ -78,11 +79,12 @@ let zoom_step = 3.0
 let min_radius = 18.0
 let max_radius = 100.0
 
-# The frame: advance the MODEL (world_step), then the VIEW (animate + draw + UI)
-# via loam.view. The jump clip (js/jc/jkf) is threaded to the animation system so a
-# leaping agent (phase >= 2) poses on it. `paused` gates ONLY the camera orbit
-# (Space toggles it); the simulation and animation always run.
-fn render_loop(s: Scene, c: Clips, js: Int, jc: Int, jkf: Double,
+# The frame: advance the MODEL (world_step — including vertical physics for jumps),
+# then the VIEW (animate + draw + UI) via loam.view. The jump clip (js/jc/jkf) and the
+# physics `body` are threaded so an airborne agent poses on the jump clip and is drawn
+# at its risen height. `paused` gates ONLY the camera orbit (Space toggles it); the
+# simulation and animation always run.
+fn render_loop(s: Scene, body: Body, c: Clips, js: Int, jc: Int, jkf: Double,
                angle: Double, paused: Bool, radius: Double) -> Unit !{IO} =
   do
     stop <- gfx.window_should_close()
@@ -92,17 +94,17 @@ fn render_loop(s: Scene, c: Clips, js: Int, jc: Int, jkf: Double,
         toggled <- gfx.space_pressed()
         let now_paused = if toggled then ! paused else paused
         let next = if now_paused then angle else orbit_next_angle(angle, orbit_step)
-        world_step(s, arena)
+        world_step(s, body, arena)
         orbit_camera(radius, angle, orbit_height, orbit_target_y)
         gfx.frame_begin()
         gfx.draw_grid(60, 1.0)
-        animation_system_jump(s, c, js, jc, jkf)
-        render_system(s)
+        animation_system_jump(s, body, c, js, jc, jkf)
+        render_system_physics(s, body)
         gfx.draw_fps(10, 10)
         plus <- gfx.button(940, 20, 44, 44, "+")
         minus <- gfx.button(940, 72, 44, 44, "-")
         gfx.frame_end()
-        render_loop(s, c, js, jc, jkf, next, now_paused, orbit_zoomed(radius, plus, minus, zoom_step, min_radius, max_radius))
+        render_loop(s, body, c, js, jc, jkf, next, now_paused, orbit_zoomed(radius, plus, minus, zoom_step, min_radius, max_radius))
 
 fn main() -> Unit !{IO} =
   do
@@ -111,6 +113,7 @@ fn main() -> Unit !{IO} =
 
     let n = agent_count
     s <- scene_new(n)
+    body <- body_new(n)
     populate(s, n, 0)
 
     # Three clips from skeleton-matched GLBs; each is the last (non-pose) clip.
@@ -128,4 +131,4 @@ fn main() -> Unit !{IO} =
     jump_kf <- gfx.animation_keyframes(jump_set, jump_clip)
 
     let clips = Clips(idle_set, idle_clip, to_double(idle_kf), run_set, run_clip, to_double(run_kf))
-    render_loop(s, clips, jump_set, jump_clip, to_double(jump_kf), 0.0, false, orbit_start_radius)
+    render_loop(s, body, clips, jump_set, jump_clip, to_double(jump_kf), 0.0, false, orbit_start_radius)

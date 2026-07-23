@@ -5,6 +5,7 @@ import stdlib.linalg (anim_advance)
 import stdlib.math (sin, cos, pi)
 import stdlib.mutable (mutvec_at, mutvec_set)
 import loam.scene (Scene, scene_count, scene_model, scene_pos_x, scene_pos_z, scene_heading, scene_frame, scene_resting)
+import loam.physics (Body, body_y, airborne)
 
 # Loam's VIEW layer: reusable rendering systems that READ the scene's component
 # arrays and draw them. This is deliberately separate from loam.scene / loam.agent
@@ -58,43 +59,65 @@ export fn animation_system(s: Scene, c: Clips) -> Unit !{IO} =
     n <- scene_count(s)
     anim_go(s, c, 0, n)
 
-# System: like animation_system, but with a third state for JUMPING. The `resting`
-# phase field is 0 walking / 1 resting / >= 2 jumping (loam.agent), so an entity with
-# phase >= 2 poses on the jump clip. Demos that never jump use animation_system and
-# need not supply a jump clip.
-fn anim_go_jump(s: Scene, c: Clips, js: Int, jc: Int, jkf: Double, i: Int, n: Int) -> Unit !{IO} =
+# System: like animation_system, but with a third state for JUMPING, keyed off the
+# physics Body — an entity that is `airborne` (y > 0) poses on the jump clip. Grounded
+# entities fall back to idle-while-resting / else run. Demos that never jump use
+# animation_system and need no jump clip or Body.
+fn anim_go_jump(s: Scene, body: Body, c: Clips, js: Int, jc: Int, jkf: Double, i: Int, n: Int) -> Unit !{IO} =
   if i >= n then ()
   else
     match c with
     | Clips is ic ikf rs rc rkf ->
         do
-          ph <- mutvec_at(scene_resting(s), i)
-          if ph == 1 then pose_entity(s, i, is, ic, ikf)
-          else if ph >= 2 then pose_entity(s, i, js, jc, jkf)
+          air <- airborne(body, i)
+          resting <- mutvec_at(scene_resting(s), i)
+          if air then pose_entity(s, i, js, jc, jkf)
+          else if resting == 1 then pose_entity(s, i, is, ic, ikf)
           else pose_entity(s, i, rs, rc, rkf)
-          anim_go_jump(s, c, js, jc, jkf, i + 1, n)
+          anim_go_jump(s, body, c, js, jc, jkf, i + 1, n)
 
-export fn animation_system_jump(s: Scene, c: Clips, jump_set: Int, jump_clip: Int, jump_kf: Double) -> Unit !{IO} =
+export fn animation_system_jump(s: Scene, body: Body, c: Clips, jump_set: Int, jump_clip: Int, jump_kf: Double) -> Unit !{IO} =
   do
     n <- scene_count(s)
-    anim_go_jump(s, c, jump_set, jump_clip, jump_kf, 0, n)
+    anim_go_jump(s, body, c, jump_set, jump_clip, jump_kf, 0, n)
 
-# System: draw each entity at its ground position, rotated to face its heading.
+# Draw one entity at ground offset (x, z), lifted to height `y`, facing its heading.
+fn draw_at(s: Scene, i: Int, y: Double) -> Unit !{IO} =
+  do
+    h <- mutvec_at(scene_model(s), i)
+    x <- mutvec_at(scene_pos_x(s), i)
+    z <- mutvec_at(scene_pos_z(s), i)
+    heading <- mutvec_at(scene_heading(s), i)
+    gfx.draw_model(h, x, y, z, (heading * rad_to_deg) - facing_offset, 1.0)
+
+# System: draw each entity on the ground plane (y = 0). For crowds with no vertical
+# motion (e.g. flocking).
 fn render_go(s: Scene, i: Int, n: Int) -> Unit !{IO} =
   if i >= n then ()
   else
     do
-      h <- mutvec_at(scene_model(s), i)
-      x <- mutvec_at(scene_pos_x(s), i)
-      z <- mutvec_at(scene_pos_z(s), i)
-      heading <- mutvec_at(scene_heading(s), i)
-      gfx.draw_model(h, x, 0.0, z, (heading * rad_to_deg) - facing_offset, 1.0)
+      draw_at(s, i, 0.0)
       render_go(s, i + 1, n)
 
 export fn render_system(s: Scene) -> Unit !{IO} =
   do
     n <- scene_count(s)
     render_go(s, 0, n)
+
+# System: draw each entity at its physics height `y` (0 when grounded), so a jumping
+# agent visibly rises off the ground and lands.
+fn render_go_physics(s: Scene, body: Body, i: Int, n: Int) -> Unit !{IO} =
+  if i >= n then ()
+  else
+    do
+      y <- body_y(body, i)
+      draw_at(s, i, y)
+      render_go_physics(s, body, i + 1, n)
+
+export fn render_system_physics(s: Scene, body: Body) -> Unit !{IO} =
+  do
+    n <- scene_count(s)
+    render_go_physics(s, body, 0, n)
 
 # --- Orbit camera controller ------------------------------------------------
 # An app holds the orbit angle and radius as loop state and feeds its own tunables

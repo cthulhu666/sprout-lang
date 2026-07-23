@@ -217,8 +217,8 @@ game-domain code and do not belong there. So:
 | Tier | Lives in | Modules |
 |---|---|---|
 | Language stdlib | `stdlib/` | `stdlib.rng` (general PRNG), `stdlib.gfx` |
-| **Loam model** | `loam/` (a second package root) | `loam.scene`, `loam.agent` — **graphics-free, headless-tested** |
-| **Loam view** | `loam/` | `loam.view` — reusable gfx systems (animation, render, orbit camera) that *read* Scene components |
+| **Loam model** | `loam/` (a second package root) | `loam.scene`, `loam.agent`, `loam.physics` — **graphics-free, headless-tested** |
+| **Loam view** | `loam/` | `loam.view` — reusable gfx systems (animation, render, orbit camera) that *read* Scene/Body components |
 | Example app | `examples/gfx/` | `ecs_agents`, `ecs_flocking` — supply only layout + the frame loop |
 
 The `model` / `view` split inside `loam/` is deliberate and load-bearing:
@@ -273,31 +273,41 @@ per array, read back through each accessor) — the only guard against a miscoun
   agent launches a rare leap this tick. Three gates: jumping enabled
   (`jump_denom > 0` — callers pass 0 to forbid it), stamina **strictly above half**
   (a jump spends half, so it can't be afforded at or below), and a 1-in-`jump_denom`
-  roll (300 for the wander tick — far rarer than a turn's 1-in-40). A jump has **no
-  Scene slot of its own**: the `resting` phase field carries it as **0 walking,
-  1 resting, ≥2 jumping**, where the ≥2 value *is* a countdown that decrements each
-  tick and holds the agent in an in-place leap until it hits 0. One Int, three states
-  plus a duration — the same "reuse the field, respect the 9-field ceiling" move as
-  `group_of`.
+  roll (300 for the wander tick — far rarer than a turn's 1-in-40). A jump stores **no
+  flag**: launching just spends half stamina and imparts upward velocity to the
+  entity's physics `Body` (§10.3a); gravity produces the arc and the landing, so
+  "jumping" is the emergent fact `airborne = y > 0`, needing no Scene slot.
 - `world_step_flock(s, bound, num_groups) -> Unit !{IO}` — advances every entity one
   **fixed** timestep, partitioning the crowd into `num_groups` **flocks**, in **two
   phases** so the update is simultaneous: (A) snapshot each group's centroid from
   *current* positions into scratch arrays, then (B) for each entity dispatch on its
-  phase — resting (regain energy in place), jumping (count the leap down), or walking
-  (decide → bend toward its group centroid via `cohere` → step + wall-reflect →
-  spend energy). Computing centroids inline in phase B would be O(n²) *and*
-  order-dependent (agent 0's move would shift the centroid agent 1 sees), breaking
-  reproducibility. Flocking agents **do not jump** (it passes `jump_denom = 0` — a
-  leap would fling a member out of its flock). Touches only component arrays — **no
-  graphics**. O(n) per tick.
-- `world_step(s, bound) -> Unit !{IO}` — plain wandering, **no flocking, but agents
-  may occasionally jump**. It is the shared tick core with one singleton group *per*
-  agent (`num_groups = live count`, so `cohere` no-ops) and jumping enabled. Keeping
-  this as the two-arg entry point means the wandering-crowd example needs no change to
-  gain leaps, and flocking stays jump-free.
+  phase — resting (regain energy in place) or walking (decide → bend toward its group
+  centroid via `cohere` → step + wall-reflect → spend energy). Computing centroids
+  inline in phase B would be O(n²) *and* order-dependent (agent 0's move would shift
+  the centroid agent 1 sees), breaking reproducibility. Flocks stay grounded and
+  **do not jump** (a leap would fling a member out) — no physics, no `Body`. Touches
+  only component arrays — **no graphics**. O(n) per tick.
+- `world_step(s, body, bound) -> Unit !{IO}` — plain wandering, **no flocking, but
+  agents carry a physics `Body` and may occasionally jump**. It integrates vertical
+  dynamics first (`physics_step`), then dispatches each agent: an **airborne** agent
+  holds its ground position while the hop carries it; a grounded one rests, walks, or
+  launches a jump. One singleton group per agent (`num_groups = live count`) makes
+  `cohere` no-op, so the walk is cohesion-free.
 
-The old `move_system` is folded into these — one movement path, dispatched by the
-`resting` phase field (walk / rest / jump).
+The old `move_system` is folded into these — one horizontal movement path
+(walk/rest), with the jump handled by the physics layer below.
+
+### 10.3a `physics` — a minimal vertical layer
+
+`loam.physics` is a tiny **vertical-dynamics** subsystem — the up/down axis a jump
+needs, kept in its **own component store** (`Body` = per-entity `y`, `vy`) so it
+costs the 9-field `Scene` no slot. `physics_step` integrates fixed-dt Euler
+(`vy -= gravity; y += vy`) and **clamps at the ground resetting both `y` and `vy`** —
+missing the `vy` reset would let a grounded body accrue downward speed and weaken the
+next jump. A jump is `launch(body, i, impulse)` (set `vy`); `airborne(body, i)` is
+`y > 0`. Pure model — no graphics — asserted headless in `test_physics.spr` (the hop
+rises, peaks, lands; a grounded body stays put). This is deliberately a *reusable*
+integrator, not a jump-specific hack: gravity/falling/knockback build on it later.
 
 ### 10.4 The model/view split, made enforceable
 
@@ -307,8 +317,10 @@ tests assert — all with no window:
 - `tests/loam/test_agent.spr` (drives `world_step`): the AI on both branches,
   run-to-run determinism, a rester that does not move, edge containment, and
   **jumping** — `should_jump`'s gating (stamina/enable/rarity) plus a leap through
-  `world_step`: spends half stamina, holds position while airborne, lands back to
-  walking.
+  `world_step`: spends half stamina, launches with upward velocity, holds position
+  while airborne, lands back to walking.
+- `tests/loam/test_physics.spr` (drives `physics_step`): the hop arc (rise → apex →
+  land) and the ground clamp (a grounded body's `y` and `vy` both stay 0).
 - `tests/loam/test_flock.spr` (drives `world_step_flock`): `group_of` binning,
   flock determinism, and **cohesion** — two groups spawned as loose clouds whose mean
   distance-to-centroid shrinks while the groups stay apart.
@@ -336,12 +348,14 @@ they differ mainly in which step they drive:
   own home on a ring, and cohesion tightens it into a distinct crowd there.
 
 Both face their heading (`draw_model`'s Y-rotation) and animate on the **run** clip
-while walking / **idle** while resting — selected per entity from the `resting` phase
-field. `ecs_agents` adds a third state: phase ≥ 2 poses on the **jump** clip, via
-`loam.view`'s `animation_system_jump` (the flocking demo uses the two-state
-`animation_system`, since flocks never leap). Both systems share one `pose_entity`
-helper, so the jump variant adds a clip choice, not a duplicated loop.
-The `idle`/`run`/`jump` clips are baked from the Kenney pack's FBX via
-`tools/convert_kenney.sh` (the pack has no dedicated *walk* clip — `run` is its only
-locomotion). The jump clip is 33 keyframes; the model's `jump_ticks` hold is tuned to
-match so a leap plays through one full cycle before the agent lands.
+while walking / **idle** while resting — selected per entity from the `resting`
+field. `ecs_agents` adds a third state: an **airborne** agent (physics `y > 0`) poses
+on the **jump** clip via `loam.view`'s `animation_system_jump`, and is drawn *lifted
+to its `y`* by `render_system_physics` — so the leap physically clears the ground
+rather than being an in-place skeletal wiggle. The flocking demo uses the grounded
+two-state `animation_system` + `render_system` (flocks never leave the ground). Both
+animation systems share one `pose_entity` helper, so the jump variant adds a clip
+choice, not a duplicated loop. The `idle`/`run`/`jump` clips are baked from the Kenney
+pack's FBX via `tools/convert_kenney.sh` (the pack has no dedicated *walk* clip —
+`run` is its only locomotion); `jump_impulse`/`gravity` are tuned for a ~33-tick
+airtime matching the jump clip.

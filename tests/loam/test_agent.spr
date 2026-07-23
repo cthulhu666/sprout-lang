@@ -1,20 +1,22 @@
 import stdlib.test (TestState, new_state, assert_eq, assert_true, summary)
 import loam.scene (Scene, scene_new, spawn, scene_pos_x, scene_pos_z, scene_heading, scene_energy, scene_resting)
 import loam.agent (agent_decide, world_step, should_jump)
+import loam.physics (Body, body_new, body_y, body_vy, airborne)
 import stdlib.mutable (mutvec_at, mutvec_set)
 
 # The engine's game loop, tested entirely headless — no graphics. This is the
 # whole point of the model/view split: world_step is the SAME function the
 # renderer drives, so passing here means the loop itself is correct and
-# reproducible, independent of any rendering.
+# reproducible, independent of any rendering. world_step carries a physics Body
+# (vertical dynamics) so agents can jump; the non-jump tests pass an inert one.
 
 # Run the world forward `k` fixed ticks.
-fn run_steps(s: Scene, bound: Double, k: Int) -> Unit !{IO} =
+fn run_steps(s: Scene, body: Body, bound: Double, k: Int) -> Unit !{IO} =
   if k <= 0 then ()
   else
     do
-      world_step(s, bound)
-      run_steps(s, bound, k - 1)
+      world_step(s, body, bound)
+      run_steps(s, body, bound, k - 1)
 
 fn main() -> Unit !{IO} =
   do
@@ -36,13 +38,15 @@ fn main() -> Unit !{IO} =
 
     # --- world_step is deterministic: same seeds => same trajectory ---
     sA <- scene_new(4)
+    bA <- body_new(4)
     a0 <- spawn(sA, 1, 0.0, 0.0, 0.0, 42, 100.0)
     a1 <- spawn(sA, 2, 1.0, (-1.0), 1.0, 14, 100.0)
-    run_steps(sA, 8.0, 25)
+    run_steps(sA, bA, 8.0, 25)
     sB <- scene_new(4)
+    bB <- body_new(4)
     b0 <- spawn(sB, 1, 0.0, 0.0, 0.0, 42, 100.0)
     b1 <- spawn(sB, 2, 1.0, (-1.0), 1.0, 14, 100.0)
-    run_steps(sB, 8.0, 25)
+    run_steps(sB, bB, 8.0, 25)
     axA <- mutvec_at(scene_pos_x(sA), 1)
     axB <- mutvec_at(scene_pos_x(sB), 1)
     azA <- mutvec_at(scene_pos_z(sA), 1)
@@ -52,10 +56,11 @@ fn main() -> Unit !{IO} =
 
     # --- A rester does not move ---
     sR <- scene_new(2)
+    bR <- body_new(2)
     r0 <- spawn(sR, 1, 5.0, 5.0, 0.0, 42, 100.0)
     mutvec_set(scene_resting(sR), 0, 1)
     mutvec_set(scene_energy(sR), 0, 0.0)
-    run_steps(sR, 8.0, 30)  # 30 * regain(1.5) = 45 < full(100): stays resting
+    run_steps(sR, bR, 8.0, 30)  # 30 * regain(1.5) = 45 < full(100): stays resting
     rx <- mutvec_at(scene_pos_x(sR), 0)
     rz <- mutvec_at(scene_pos_z(sR), 0)
     rflag <- mutvec_at(scene_resting(sR), 0)
@@ -65,8 +70,9 @@ fn main() -> Unit !{IO} =
 
     # --- A fresh walker moves, and the bounce keeps it on-stage ---
     sW <- scene_new(2)
+    bW <- body_new(2)
     w0 <- spawn(sW, 1, 0.0, 0.0, 0.0, 42, 100.0)
-    run_steps(sW, 0.1, 60)  # tiny arena: only in-bounds steps are accepted
+    run_steps(sW, bW, 0.1, 60)  # tiny arena: only in-bounds steps are accepted
     wx <- mutvec_at(scene_pos_x(sW), 0)
     wz <- mutvec_at(scene_pos_z(sW), 0)
     assert_true(state, "walker moved from origin", (wx != 0.0) || (wz != 0.0))
@@ -78,8 +84,9 @@ fn main() -> Unit !{IO} =
     # course). One step should reflect its heading back inward (~pi) and move it
     # inward — not freeze it at the rim.
     sE <- scene_new(2)
+    bE <- body_new(2)
     e0 <- spawn(sE, 1, 4.96, 0.0, 0.0, 42, 100.0)
-    world_step(sE, 5.0)
+    world_step(sE, bE, 5.0)
     ex <- mutvec_at(scene_pos_x(sE), 0)
     eh <- mutvec_at(scene_heading(sE), 0)
     assert_true(state, "wall: stays in bounds", ex <= 5.0)
@@ -95,25 +102,34 @@ fn main() -> Unit !{IO} =
     assert_true(state, "jump: disabled when denom 0 (flocks never jump)",! should_jump (80, 100.0, 0))
     assert_true(state, "jump: rare — seed 1 holds",! should_jump (1, 100.0, 300))
 
-    # --- Jump behaviour through world_step: leap, hold, land ---
+    # --- Jump via physics: launch, airborne arc, land ---
     # Seed 80 at full stamina leaps on its first wander tick: it spends half its
-    # energy, enters the jumping phase, and holds position while the jump plays.
+    # stamina and gets an upward velocity (the launch is terminal — no horizontal
+    # move that tick, and it is still at y=0 until physics raises it next tick).
     sJ <- scene_new(2)
+    bJ <- body_new(2)
     j0 <- spawn(sJ, 1, 3.0, 4.0, 0.0, 80, 100.0)
-    world_step(sJ, 50.0)
+    world_step(sJ, bJ, 50.0)
     je1 <- mutvec_at(scene_energy(sJ), 0)
-    jr1 <- mutvec_at(scene_resting(sJ), 0)
+    jvy <- body_vy(bJ, 0)
     jx1 <- mutvec_at(scene_pos_x(sJ), 0)
     jz1 <- mutvec_at(scene_pos_z(sJ), 0)
     assert_true(state, "jump: spent half stamina", je1 == 50.0)
-    assert_true(state, "jump: entered jumping phase", jr1 >= 2)
-    assert_true(state, "jump: holds position while airborne", (jx1 == 3.0) && (jz1 == 4.0))
-    # After enough ticks the jump completes and the agent walks again (and moves).
-    run_steps(sJ, 50.0, 40)
-    jr2 <- mutvec_at(scene_resting(sJ), 0)
+    assert_true(state, "jump: launched with upward velocity", jvy > 0.0)
+    assert_true(state, "jump: launch is terminal (no horizontal move)", (jx1 == 3.0) && (jz1 == 4.0))
+    # Next tick physics raises it off the ground; it holds position while airborne.
+    world_step(sJ, bJ, 50.0)
+    ja <- airborne(bJ, 0)
     jx2 <- mutvec_at(scene_pos_x(sJ), 0)
     jz2 <- mutvec_at(scene_pos_z(sJ), 0)
-    assert_eq(state, "jump: returned to walking", jr2, 0)
-    assert_true(state, "jump: moved after landing", (jx2 != 3.0) || (jz2 != 4.0))
+    assert_true(state, "jump: airborne after physics tick", ja)
+    assert_true(state, "jump: holds position while airborne", (jx2 == 3.0) && (jz2 == 4.0))
+    # Run out the hop: gravity lands it back at the ground and it walks (and moves).
+    run_steps(sJ, bJ, 50.0, 40)
+    jy3 <- body_y(bJ, 0)
+    jx3 <- mutvec_at(scene_pos_x(sJ), 0)
+    jz3 <- mutvec_at(scene_pos_z(sJ), 0)
+    assert_true(state, "jump: landed back at ground", jy3 == 0.0)
+    assert_true(state, "jump: moved after landing", (jx3 != 3.0) || (jz3 != 4.0))
 
     summary(state)
