@@ -4,7 +4,7 @@ import stdlib.mutable (MutVec, mutvec_at, mutvec_set, mutvec_new)
 import stdlib.math (sin, cos, sqrt, pi)
 import stdlib.rng (rng_next, rng_below)
 import loam.scene (Scene, EntityId, eid_index, scene_count, scene_pos_x, scene_pos_z, scene_heading, scene_frame, scene_rng, scene_energy, scene_resting)
-import loam.physics (Body, physics_step, launch, airborne)
+import loam.physics (Body, physics_step, launch, airborne, impulse_for_height)
 
 # Loam's behaviour layer: the game-model tick. `world_step` advances every entity
 # one fixed step — decide, move, spend/regain energy — touching ONLY component
@@ -36,11 +36,20 @@ let cohesion_min_dist = 0.05  # within this of the centroid: treat as arrived, d
 # possible above half energy, and it is far rarer than a turn. A jump is not a stored
 # flag — it imparts an upward velocity to the entity's physics Body (loam.physics),
 # and gravity produces the arc and the landing. So "jumping" is the emergent fact
-# `airborne = y > 0`, costing the 9-field Scene no slot. `jump_impulse` is tuned with
-# physics `gravity` for a ~33-tick airtime that matches the jump clip.
+# `airborne = y > 0`, costing the 9-field Scene no slot.
 let energy_half = energy_full / 2.0  # a jump needs strictly more than this to afford it
 let jump_cost = energy_full / 2.0  # ...and spends exactly this
-let jump_impulse = 0.33  # upward velocity imparted at launch (units/tick)
+# Loam's default world gravity is a stylized ~7x-Earth "arcade" field — still SI (m/s^2,
+# 1 unit = 1 m), just a deliberate platformer world that makes a big, snappy hop rather
+# than a realistic one. The leap is expressed by target HEIGHT and tuned against THIS
+# gravity so its ~2.7 m apex lands within the ~33-tick jump clip. impulse and gravity are
+# a coupled pair (apex = impulse^2/2g, airtime = 2*impulse/g), so a caller MUST run the
+# sim under `arcade_gravity` for the arc to match; a realistic hop instead means passing
+# earth_gravity (loam.physics) AND retuning this pair. Exported so the demo and tests use
+# the exact field the impulse was tuned for.
+export let arcade_gravity = 72.0  # m/s^2
+let jump_height = 2.7  # metres — apex of the arcade hop
+let jump_impulse = impulse_for_height(arcade_gravity, jump_height)  # ~19.7 m/s takeoff
 let wander_jump_denom = 300  # ~1-in-300 per walking tick: far rarer than a turn (1-in-40)
 
 fn clampd(v: Double, lo: Double, hi: Double) -> Double =
@@ -283,14 +292,15 @@ export fn world_step_flock(s: Scene, bound: Double, num_groups: Int) -> Unit !{I
     flock_go(s, bound, sum_x, sum_z, cnt, g, 0, n)
 
 # Advance one tick of PLAIN wandering — no flocking, but agents carry a physics Body
-# and may occasionally JUMP. Vertical dynamics are integrated FIRST (physics_step),
-# then each agent is dispatched (airborne hold / rest / walk-or-launch). One singleton
-# group per agent (num_groups = live count) makes each agent its own centroid, so
-# `cohere` no-ops and the walk is cohesion-free.
-export fn world_step(s: Scene, body: Body, bound: Double) -> Unit !{IO} =
+# and may occasionally JUMP. Vertical dynamics are integrated FIRST (physics_step) under
+# the caller's `gravity` FIELD, then each agent is dispatched (airborne hold / rest /
+# walk-or-launch). One singleton group per agent (num_groups = live count) makes each
+# agent its own centroid, so `cohere` no-ops and the walk is cohesion-free.
+export fn world_step(s: Scene, body: Body, bound: Double,
+                     gravity: EntityId -> Double -> Double) -> Unit !{IO} =
   do
     n <- scene_count(s)
-    physics_step(body, n)
+    physics_step(body, n, gravity)
     let g = if n < 1 then 1 else n
     sum_x <- mutvec_new(g, 0.0)
     sum_z <- mutvec_new(g, 0.0)

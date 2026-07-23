@@ -301,13 +301,37 @@ The old `move_system` is folded into these — one horizontal movement path
 
 `loam.physics` is a tiny **vertical-dynamics** subsystem — the up/down axis a jump
 needs, kept in its **own component store** (`Body` = per-entity `y`, `vy`) so it
-costs the 9-field `Scene` no slot. `physics_step` integrates fixed-dt Euler
-(`vy -= gravity; y += vy`) and **clamps at the ground resetting both `y` and `vy`** —
-missing the `vy` reset would let a grounded body accrue downward speed and weaken the
-next jump. A jump is `launch(body, i, impulse)` (set `vy`); `airborne(body, i)` is
-`y > 0`. Pure model — no graphics — asserted headless in `test_physics.spr` (the hop
-rises, peaks, lands; a grounded body stays put). This is deliberately a *reusable*
-integrator, not a jump-specific hack: gravity/falling/knockback build on it later.
+costs the 9-field `Scene` no slot. `physics_step` integrates semi-implicit Euler over
+real seconds (`vy -= gravity·dt; y += vy·dt`) and **clamps at the ground resetting
+both `y` and `vy`** — missing the `vy` reset would let a grounded body accrue downward
+speed and weaken the next jump. A jump is `launch(body, e, impulse)` (set `vy`);
+`airborne(body, e)` is `y > 0`. Pure model — no graphics — asserted headless in
+`test_physics.spr` (the hop rises, peaks near its target, lands; a grounded body stays
+put). This is deliberately a *reusable* integrator, not a jump-specific hack:
+gravity/falling/knockback build on it later.
+
+**Units are metric (SI).** 1 world unit = 1 metre, velocity in m/s, and the integrator
+advances by real seconds — the fixed timestep `loam.driver.fixed_dt` (1/60 s) is scaled
+into **both** the velocity and position updates, so `gravity` reads as a real
+acceleration (`earth_gravity = 9.81`), not a per-tick number tuned to the frame rate.
+This mirrors how Unity/Godot commit to "1 unit = 1 m" by baking Earth gravity into the
+solver at a fixed physics tick. A jump is expressed by **target height**:
+`impulse_for_height(g, h) = sqrt(2·g·h)` gives the takeoff velocity to clear `h` metres
+under gravity `g`; `loam.agent` tunes its leap to `0.37 m` against `earth_gravity`,
+which keeps the ~33-tick airtime that syncs the jump animation clip.
+
+Gravity is not a constant but a **field** the caller supplies:
+`physics_step(body, n, gravity)` where `gravity : EntityId -> Double -> Double` maps
+`(entity, height)` to an acceleration. A uniform world passes `\e y -> earth_gravity`;
+the signature leaves room for per-entity gravity (moon-boots on one agent), altitude
+falloff, or low-gravity zones without touching the integrator. Under a heavier or
+lighter field the same launch impulse naturally reaches a different height — that is
+the physics, and the airtime/clip sync only holds at the reference `earth_gravity`.
+
+**Scope caveat:** only the **vertical** axis is metric today. Horizontal speeds in
+`loam.agent` (`walk_step`) are nominally metres but not yet calibrated to real m/s
+(`0.2 units/tick` × 60 ≈ 12 m/s reads as a sprint) — calibrating them is deferred
+(see `BACKLOG.md`).
 
 ### 10.3b `driver` — a fixed-timestep loop, FPS-independent
 

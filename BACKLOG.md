@@ -367,6 +367,12 @@ raylib) have landed. Fenced from core: shim `graphics/sprout_gfx.c` links only v
   groupmates' heading) to `loam.agent` for fuller boids behaviour. Cohesion alone (shipped)
   clumps but lets members overlap. Separation is the O(n²) piece — needs a spatial bin to stay
   O(n); defer until a bin exists. See `docs/ecs-v0.md §10.3`.
+- [ ] `P3` Loam: **calibrate horizontal speeds to SI**. Vertical dynamics are now metric
+  (`docs/ecs-v0.md §10.3a`: 1 unit = 1 m, gravity in m/s², `fixed_dt`-scaled), but `loam.agent`
+  horizontal motion is still per-tick: `walk_step = 0.2 units/tick` × 60 ≈ 12 m/s reads as a
+  sprint. Rework the walk to `speed · fixed_dt` (m/s) like `integrate`, and retune `walk_step`,
+  `cohesion_gain`/`cohesion_max_turn` (rad/tick → rad/s), and the demos' arenas to real metres.
+  Touches the flocking determinism tests (absolute positions shift; A==B still holds).
 - [ ] `P2` Language-core: unbox small fixed-shape numeric records (`Vec3 {x,y,z}` as 3 raw
   f64s, not a heap pointer) — the ergonomic+fast path for individual small vectors. Additive
   on top of the flat-buffer foundation; decide at M2.

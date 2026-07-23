@@ -1,7 +1,9 @@
 module loam.physics
 
 import stdlib.mutable (MutVec, mutvec_at, mutvec_set, mutvec_new)
+import stdlib.math (sqrt)
 import loam.scene (EntityId, eid_index)
+import loam.driver (fixed_dt)
 
 # Loam's physics subsystem — a MINIMAL vertical-dynamics layer: a ballistic hop
 # under gravity. It lives in its OWN component store so it costs the 9-field Scene
@@ -13,6 +15,14 @@ import loam.scene (EntityId, eid_index)
 # (pos_x/pos_z). A jump is just "impart upward velocity" (`launch`); gravity then
 # produces the arc and the landing on its own, so "jumping" is not a stored flag but
 # the emergent fact `airborne = y > 0`.
+#
+# Units are SI: 1 world unit = 1 metre, velocity in m/s, gravity in m/s^2. The
+# integrator advances by real seconds (`loam.driver.fixed_dt`), NOT by a bare tick, so
+# the constants read physically (Earth gravity is 9.81, not a tuned 0.02). Gravity is
+# supplied by the caller as a FIELD `EntityId -> Double -> Double` of (entity, height),
+# so it can vary per entity or with altitude; a demo passing `\(_, _) -> earth_gravity`
+# gets a uniform Earth field. (Horizontal speeds in loam.agent are nominally metres but
+# not yet calibrated to real m/s — see BACKLOG.)
 
 # A Body holds per-entity vertical position `y` and velocity `vy`, indexed by the
 # same entity id as the Scene.
@@ -25,9 +35,14 @@ fn body_y_vec(b: Body) -> MutVec Double =
 fn body_vy_vec(b: Body) -> MutVec Double =
   match b with | Body _ vy -> vy
 
-# Downward acceleration per tick (units/tick^2), tuned with the jump impulse in
-# loam.agent for a ~33-tick airtime that matches the jump animation clip.
-let gravity = 0.02
+# Earth's surface gravity in m/s^2 — the SI reference a demo feeds to physics_step as
+# a uniform field, and the reference loam.agent tunes its jump impulse against.
+export let earth_gravity = 9.81
+
+# Takeoff velocity (m/s) needed to reach apex height `h` (m) under gravity `g` (m/s^2),
+# from v^2 = 2*g*h. Lets a jump be expressed by target HEIGHT rather than a raw velocity
+# magic-number — the caller says "clear 0.37 m" and the launch speed follows.
+export fn impulse_for_height(g: Double, h: Double) -> Double = sqrt(2.0 * g * h)
 
 # Allocate vertical storage for `cap` entities, all grounded (y = vy = 0).
 export fn body_new(cap: Int) -> Body !{IO} =
@@ -62,23 +77,26 @@ fn set_air(b: Body, i: Int, ny: Double, nvy: Double) -> Unit !{IO} =
     mutvec_set(body_y_vec(b), i, ny)
     mutvec_set(body_vy_vec(b), i, nvy)
 
-# Integrate one entity one tick: gravity pulls the velocity down, the velocity moves
-# the position, and crossing the ground clamps to rest.
-fn integrate(b: Body, i: Int) -> Unit !{IO} =
+# Integrate one entity one fixed tick of `fixed_dt` real seconds, semi-implicit Euler:
+# gravity (sampled at this entity and height) decelerates the velocity, the NEW velocity
+# moves the position, and crossing the ground clamps to rest. Scaling BOTH updates by dt
+# is what makes the arc real-time (metres and seconds) rather than per-tick.
+fn integrate(b: Body, gravity: EntityId -> Double -> Double, i: Int) -> Unit !{IO} =
   do
     y <- mutvec_at(body_y_vec(b), i)
     vy <- mutvec_at(body_vy_vec(b), i)
-    let nvy = vy - gravity
-    let ny = y + nvy
+    let nvy = vy - (gravity(EntityId(i), y) * fixed_dt)
+    let ny = y + (nvy * fixed_dt)
     if ny <= 0.0 then land(b, i) else set_air(b, i, ny, nvy)
 
-fn step_go(b: Body, i: Int, n: Int) -> Unit !{IO} =
+fn step_go(b: Body, gravity: EntityId -> Double -> Double, i: Int, n: Int) -> Unit !{IO} =
   if i >= n then ()
   else
     do
-      integrate(b, i)
-      step_go(b, i + 1, n)
+      integrate(b, gravity, i)
+      step_go(b, gravity, i + 1, n)
 
-# Advance every body one fixed tick. O(n).
-export fn physics_step(b: Body, n: Int) -> Unit !{IO} =
-  step_go(b, 0, n)
+# Advance every body one fixed tick under the gravity FIELD `gravity(entity, height)`.
+# O(n).
+export fn physics_step(b: Body, n: Int, gravity: EntityId -> Double -> Double) -> Unit !{IO} =
+  step_go(b, gravity, 0, n)

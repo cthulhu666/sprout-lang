@@ -2,8 +2,8 @@ module examples.gfx.ecs_agents
 
 import stdlib.gfx
 import stdlib.rng (rng_below)
-import loam.scene (Scene, eid_index, scene_new, spawn, scene_frame)
-import loam.agent (world_step)
+import loam.scene (Scene, EntityId, eid_index, scene_new, spawn, scene_frame)
+import loam.agent (world_step, arcade_gravity)
 import loam.driver (fixed_step)
 import loam.physics (Body, body_new)
 import loam.view (Clips, animation_system_jump, render_system_physics, orbit_next_angle, orbit_zoomed, orbit_camera)
@@ -72,6 +72,14 @@ fn populate(s: Scene, n: Int, i: Int) -> Unit !{IO} =
 # --- Orbit camera framing ---------------------------------------------------
 # The view systems (animation, render) and the orbit-camera controller live in
 # loam.view; this demo supplies only its (fixed) framing tunables.
+# The gravity FIELD handed to the sim: a uniform stylized "arcade" field (loam.agent's
+# `arcade_gravity`, ~7x Earth) that the jump impulse is tuned against, so hops keep their
+# big snappy arc. Still metric (1 unit = 1 m). The (entity, height) signature would let
+# gravity vary per agent or with height (a low-g zone, moon-boots on one entity, altitude
+# falloff); this demo keeps it constant. Pass loam.physics.earth_gravity here (and retune
+# the jump) for a physically realistic, much smaller hop instead.
+fn gravity_at(e: EntityId, y: Double) -> Double = arcade_gravity
+
 let orbit_start_radius = 52.0
 let orbit_height = 26.0
 let orbit_target_y = 1.5
@@ -102,7 +110,7 @@ fn render_loop(s: Scene, body: Body, c: Clips, js: Int, jc: Int, jkf: Double,
         let now_paused = if toggled then ! paused else paused
         let next = if now_paused then angle else orbit_next_angle(angle, orbit_step)
         dt <- gfx.get_frame_time()
-        acc2 <- fixed_step(acc, dt, \_ -> world_step(s, body, arena))
+        acc2 <- fixed_step(acc, dt, \_ -> world_step(s, body, arena, gravity_at))
         orbit_camera(radius, angle, orbit_height, orbit_target_y)
         gfx.frame_begin()
         gfx.draw_grid(60, 1.0)

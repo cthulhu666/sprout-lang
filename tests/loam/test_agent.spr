@@ -1,6 +1,6 @@
 import stdlib.test (TestState, new_state, assert_eq, assert_true, summary)
-import loam.scene (Scene, scene_new, spawn, scene_pos_x, scene_pos_z, scene_heading, scene_energy, scene_resting)
-import loam.agent (agent_decide, world_step, should_jump)
+import loam.scene (Scene, EntityId, scene_new, spawn, scene_pos_x, scene_pos_z, scene_heading, scene_energy, scene_resting)
+import loam.agent (agent_decide, world_step, should_jump, arcade_gravity)
 import loam.physics (Body, body_new, body_y, body_vy, airborne)
 import stdlib.mutable (mutvec_at, mutvec_set)
 
@@ -10,12 +10,16 @@ import stdlib.mutable (mutvec_at, mutvec_set)
 # reproducible, independent of any rendering. world_step carries a physics Body
 # (vertical dynamics) so agents can jump; the non-jump tests pass an inert one.
 
+# The arcade gravity field loam.agent tuned its jump impulse against — an airborne agent
+# must land within the ~33-tick clip, which only holds under this same field.
+fn g_arcade(e: EntityId, y: Double) -> Double = arcade_gravity
+
 # Run the world forward `k` fixed ticks.
 fn run_steps(s: Scene, body: Body, bound: Double, k: Int) -> Unit !{IO} =
   if k <= 0 then ()
   else
     do
-      world_step(s, body, bound)
+      world_step(s, body, bound, g_arcade)
       run_steps(s, body, bound, k - 1)
 
 fn main() -> Unit !{IO} =
@@ -86,7 +90,7 @@ fn main() -> Unit !{IO} =
     sE <- scene_new(2)
     bE <- body_new(2)
     e0 <- spawn(sE, 1, 4.96, 0.0, 0.0, 42, 100.0)
-    world_step(sE, bE, 5.0)
+    world_step(sE, bE, 5.0, g_arcade)
     ex <- mutvec_at(scene_pos_x(sE), 0)
     eh <- mutvec_at(scene_heading(sE), 0)
     assert_true(state, "wall: stays in bounds", ex <= 5.0)
@@ -109,7 +113,7 @@ fn main() -> Unit !{IO} =
     sJ <- scene_new(2)
     bJ <- body_new(2)
     j0 <- spawn(sJ, 1, 3.0, 4.0, 0.0, 80, 100.0)
-    world_step(sJ, bJ, 50.0)
+    world_step(sJ, bJ, 50.0, g_arcade)
     je1 <- mutvec_at(scene_energy(sJ), 0)
     jvy <- body_vy(bJ, j0)
     jx1 <- mutvec_at(scene_pos_x(sJ), 0)
@@ -118,7 +122,7 @@ fn main() -> Unit !{IO} =
     assert_true(state, "jump: launched with upward velocity", jvy > 0.0)
     assert_true(state, "jump: launch is terminal (no horizontal move)", (jx1 == 3.0) && (jz1 == 4.0))
     # Next tick physics raises it off the ground; it holds position while airborne.
-    world_step(sJ, bJ, 50.0)
+    world_step(sJ, bJ, 50.0, g_arcade)
     ja <- airborne(bJ, j0)
     jx2 <- mutvec_at(scene_pos_x(sJ), 0)
     jz2 <- mutvec_at(scene_pos_z(sJ), 0)
