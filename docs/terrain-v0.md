@@ -163,29 +163,41 @@ String-keyed, so chunk coordinates are encoded to a key.
 ## 6. Syntax / semantics impact
 
 None on the language. This is a new stdlib-level engine module plus one example. No parser,
-typechecker, evaluation-order, visibility, or spec change. The optional rendering extern (§7) is
-the only C-level change considered, and it is a graphics shim, not a core builtin.
+typechecker, evaluation-order, visibility, or spec change. The rendering externs (§7 —
+`draw_cube`, the terrain-batch pair, and the mesh-capture trio) are the only C-level changes,
+and they are graphics-shim additions, not core builtins.
 
-## 7. Rendering (the demo) and its one open question
+## 7. Rendering (the demo)
 
 `examples/gfx/terrain_demo.sprout` follows the `examples/gfx/ecs_agents.sprout` skeleton
-(window, target FPS, orbit camera from `loam.view`, recursive frame loop). It generates a region
-to a temp dir on start, then each frame pages in the chunks in a window around the camera and
-draws **one cube per tile** at `(world_x, to_double(band) * band_height, world_z)`, colored by
-biome, **culled to resident chunks** — so draw-call count scales with the visible window, not map
-size.
+(window, target FPS, orbit camera from `loam.view`, recursive frame loop). It generates a
+region to a temp dir on start, pages the chunks in, and draws **one cube per tile** at
+`(world_x, to_double(band) * band_height, world_z)`, colored by biome.
 
-`gfx.draw_model` has no color/tint and no cube asset exists, so colored cubes need one of:
-- **(A, chosen)** a `gfx.draw_cube(x, y, z, size, r, g, b)` extern wrapping raylib `DrawCube`
-  (`graphics/sprout_gfx.c` + a declaration in `stdlib/gfx.sprout`). It is a **graphics-shim**
-  extern — linked only under `run-gfx`, outside the `runtime/sprout_runtime.c` +
-  `runtime/APPROVED_BUILTINS` core-builtin discipline — so it is lighter than a core builtin,
-  though still a C addition (approved as part of this plan).
-- (B) author N colored cube `.glb` assets — no C change, but an asset-authoring dependency with
-  no in-repo tooling.
+**Colored cubes.** `gfx.draw_model` has no color/tint and no cube asset exists, so a
+`gfx.draw_cube(x, y, z, size, r, g, b)` extern wraps raylib `DrawCube` (`graphics/sprout_gfx.c`
++ `stdlib/gfx.sprout`). It is a **graphics-shim** extern — linked only under `run-gfx`, outside
+the `runtime/sprout_runtime.c` + `runtime/APPROVED_BUILTINS` core-builtin discipline — so it is
+lighter than a core builtin, though still a C addition. Colour comes from the cube's **vertex
+colour** under a dedicated cube shader (a texture-sampling model shader discards it → white),
+lit by world-space face normals so stepped relief reads as top-vs-side brightness. (The
+alternative, authoring N colored `.glb` assets, was rejected: an asset dependency with no
+in-repo tooling.)
 
-The colored-cube view is the **first rung of the asset-per-tile path**: the same
-`cull → per-tile draw` loop later takes real tile/prop assets by swapping the handle.
+**Static mesh bake (the scaling move).** Drawing one cube per tile *every frame* is
+per-frame work on data that never changes: at 256×256 (65,536 cubes ≈ 2.36 M vertices) the
+per-frame CPU rebuild + model traversal caps at ~20 FPS (measured; even a no-op draw only
+reaches ~48, so the traversal alone can't hit 60). The demo instead **bakes the whole region
+into one static GPU mesh once at startup** and draws it in a single call per frame:
+`gfx.mesh_capture_begin()` makes each `gfx.draw_cube` *append* geometry instead of drawing,
+`gfx.mesh_capture_end()` uploads the mesh and returns a handle, and `gfx.draw_captured(handle)`
+draws it (backface culling off, so cube winding need not be exact). Per-frame cost becomes
+independent of tile count → **256×256 at 59 FPS**. The same per-tile loop is reused verbatim;
+only *when* it runs changes (once, not per frame).
+
+The colored-cube view is the **first rung of the asset-per-tile path**: the same loop later
+bakes real tile/prop assets by swapping the geometry. Editable terrain would re-bake affected
+chunks; frustum/LOD culling and truly huge (memory-bounded) maps are follow-ups (§9).
 
 ## 8. Tests
 
