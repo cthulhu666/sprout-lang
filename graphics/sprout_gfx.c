@@ -69,6 +69,8 @@ static int g_animset_count = 0;
  * of flat silhouettes. Applied to every loaded model's materials. */
 static Shader g_light_shader;
 static int g_light_ready = 0;
+static Shader g_cube_shader;   /* vertex-colour lit shader for immediate-mode terrain cubes */
+static int g_cube_ready = 0;
 
 static const char *LIGHT_VS =
   "#version 330\n"
@@ -103,17 +105,60 @@ static const char *LIGHT_FS =
   "    finalColor = vec4(lit, base.a);\n"
   "}\n";
 
-/* Load and configure the lighting shader. Call after InitWindow (needs GL). */
+/* Diffuse-lit shader for immediate-mode cubes: no texture, colour comes from the
+ * per-vertex colour (DrawCube's Color), so a whole terrain of differently-coloured
+ * cubes draws under ONE shader activation with no per-cube uniform change. Normals are
+ * used in WORLD space (DrawCube emits axis-aligned world normals; no matNormal), so a
+ * top face is always lit and side faces darker regardless of camera orbit. */
+static const char *CUBE_VS =
+  "#version 330\n"
+  "in vec3 vertexPosition;\n"
+  "in vec3 vertexNormal;\n"
+  "in vec4 vertexColor;\n"
+  "uniform mat4 mvp;\n"
+  "out vec3 fragNormal;\n"
+  "out vec4 fragColor;\n"
+  "void main() {\n"
+  "    fragNormal = vertexNormal;\n"
+  "    fragColor = vertexColor;\n"
+  "    gl_Position = mvp*vec4(vertexPosition, 1.0);\n"
+  "}\n";
+
+static const char *CUBE_FS =
+  "#version 330\n"
+  "in vec3 fragNormal;\n"
+  "in vec4 fragColor;\n"
+  "uniform vec3 lightDir;\n"
+  "uniform vec3 lightColor;\n"
+  "uniform vec3 ambient;\n"
+  "out vec4 finalColor;\n"
+  "void main() {\n"
+  "    float diff = max(dot(normalize(fragNormal), normalize(lightDir)), 0.0);\n"
+  "    vec3 lit = fragColor.rgb*(ambient + diff*lightColor);\n"
+  "    finalColor = vec4(lit, fragColor.a);\n"
+  "}\n";
+
+/* Load and configure the lighting shaders. Call after InitWindow (needs GL). */
 static void init_lighting(void) {
-  g_light_shader = LoadShaderFromMemory(LIGHT_VS, LIGHT_FS);
-  if (g_light_shader.id == 0) return; /* fall back to default shader on failure */
   Vector3 lightDir   = { 0.5f, 1.0f, 0.4f };   /* points toward an upper-side light */
   Vector3 lightColor = { 1.0f, 0.97f, 0.9f };  /* slightly warm key light */
   Vector3 ambient    = { 0.28f, 0.28f, 0.34f };/* fill so the shadow side isn't black */
-  SetShaderValue(g_light_shader, GetShaderLocation(g_light_shader, "lightDir"), &lightDir, SHADER_UNIFORM_VEC3);
-  SetShaderValue(g_light_shader, GetShaderLocation(g_light_shader, "lightColor"), &lightColor, SHADER_UNIFORM_VEC3);
-  SetShaderValue(g_light_shader, GetShaderLocation(g_light_shader, "ambient"), &ambient, SHADER_UNIFORM_VEC3);
-  g_light_ready = 1;
+
+  g_light_shader = LoadShaderFromMemory(LIGHT_VS, LIGHT_FS);
+  if (g_light_shader.id != 0) {
+    SetShaderValue(g_light_shader, GetShaderLocation(g_light_shader, "lightDir"), &lightDir, SHADER_UNIFORM_VEC3);
+    SetShaderValue(g_light_shader, GetShaderLocation(g_light_shader, "lightColor"), &lightColor, SHADER_UNIFORM_VEC3);
+    SetShaderValue(g_light_shader, GetShaderLocation(g_light_shader, "ambient"), &ambient, SHADER_UNIFORM_VEC3);
+    g_light_ready = 1;
+  }
+
+  g_cube_shader = LoadShaderFromMemory(CUBE_VS, CUBE_FS);
+  if (g_cube_shader.id != 0) {
+    SetShaderValue(g_cube_shader, GetShaderLocation(g_cube_shader, "lightDir"), &lightDir, SHADER_UNIFORM_VEC3);
+    SetShaderValue(g_cube_shader, GetShaderLocation(g_cube_shader, "lightColor"), &lightColor, SHADER_UNIFORM_VEC3);
+    SetShaderValue(g_cube_shader, GetShaderLocation(g_cube_shader, "ambient"), &ambient, SHADER_UNIFORM_VEC3);
+    g_cube_ready = 1;
+  }
 }
 
 long long gfx_open_window(long long w, long long h, const char *title) {
@@ -241,18 +286,31 @@ long long gfx_load_model(const char *path) {
   return h;
 }
 
+/* Begin/end a terrain batch: activate the vertex-colour cube shader ONCE around many
+ * gfx_draw_cube calls, so a whole terrain draws under a single shader activation (one
+ * batch, no per-cube GL state change). Call gfx_terrain_begin before the tile loop and
+ * gfx_terrain_end after; between them, gfx_draw_cube colours come from the cube's own
+ * Color. Outside a begin/end pair, gfx_draw_cube falls back to the default shader. */
+long long gfx_terrain_begin(void) {
+  if (g_cube_ready) BeginShaderMode(g_cube_shader);
+  return 0;
+}
+
+long long gfx_terrain_end(void) {
+  if (g_cube_ready) EndShaderMode();
+  return 0;
+}
+
 /* Draw an axis-aligned cube of edge `size` at (x,y,z) in a flat RGB colour (0-255
- * components). Used for colored terrain tiles: one call per visible tile. Wrapped in
- * the same key-light shader as models (raylib's DrawCube emits per-face normals), so a
- * grid of stepped tiles reads as relief — top faces brighter than sides. */
+ * components) — the colour crosses as the cube's per-vertex colour. Used for coloured
+ * terrain tiles: one call per tile, inside a gfx_terrain_begin/end pair so the cube
+ * shader (vertex colour + diffuse relief) is bound once for the whole batch. */
 long long gfx_draw_cube(long long x, long long y, long long z, long long size,
                         long long r, long long g, long long b) {
   float s = as_float(size);
   Vector3 pos = { as_float(x), as_float(y), as_float(z) };
   Color col = { (unsigned char)r, (unsigned char)g, (unsigned char)b, 255 };
-  if (g_light_ready) BeginShaderMode(g_light_shader);
   DrawCube(pos, s, s, s, col);
-  if (g_light_ready) EndShaderMode();
   return 0;
 }
 
