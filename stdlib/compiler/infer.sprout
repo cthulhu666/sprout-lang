@@ -468,7 +468,7 @@ fn infer_expr(
   | ast.StringExpr v pos -> InferOk(typed_ast.TString(v, types.type_string(), pos), subst, eff_subst, types.EffectPure)
   | ast.CharExpr v pos -> InferOk(typed_ast.TChar(v, types.type_char(), pos), subst, eff_subst, types.EffectPure)
   | ast.UnitExpr pos -> InferOk(typed_ast.TUnit(types.TConst(types.type_id("Unit")), pos), subst, eff_subst, types.EffectPure)
-  | ast.VarExpr name pos -> infer_var(state, env, subst, eff_subst, name, pos)
+  | ast.VarExpr name pos -> infer_var_or_field(state, env, subst, eff_subst, name, pos)
   | ast.IfExpr cond then_ else_ pos -> infer_if(state, env, subst, eff_subst, cond, then_, else_, pos)
   | ast.CallExpr callee args pos -> infer_call(state, env, subst, eff_subst, callee, args, pos)
   | ast.MatchExpr scrut branches pos -> infer_match(state, env, subst, eff_subst, scrut, branches, pos)
@@ -520,6 +520,37 @@ fn value_var_node(name: String, t: types.Type, pos: source.SourcePos, env: Dict 
           | types.TConst class_name ->
               typed_ast.TMethodRef(name, types.type_id_name(class_name), t, pos, typed_ast.EvUnresolved)
           | _ -> typed_ast.TVar(name, t, pos)
+
+# Dot-access resolution rule (docs/records-v0.md §4.3, Scope A variable chains).
+# A dotted name `p.x` lexes as a single identifier, ambiguous between record
+# field access and module qualification (`stdlib.string.foo`).  Values and
+# modules occupy separate namespaces: split on the first `.` and check the head.
+# HEAD-FIRST so a local binding wins over any same-named module qualifier — if
+# the head is an in-scope value, the whole name is a field-access chain on it;
+# otherwise fall through to a plain (possibly module-qualified) lookup.  Field
+# access is total, so a wrong field surfaces as a type error downstream, not here.
+fn infer_var_or_field(
+  state: unifier.InferState,
+  env: Dict types.Scheme,
+  subst: Dict types.Type,
+  eff_subst: Dict types.Effect,
+  name: String,
+  pos: source.SourcePos
+) -> InferResult !{IO} =
+  match string.split_once(name, ".") with
+  | Nothing -> infer_var(state, env, subst, eff_subst, name, pos)
+  | Just (head, rest) ->
+      match dict_get(head, env) with
+      | Nothing -> infer_var(state, env, subst, eff_subst, name, pos)
+      | Just _ ->
+          infer_expr(state, env, subst, eff_subst,
+                     build_field_chain(ast.VarExpr(head, pos), rest, pos))
+
+# Fold a dotted remainder `from.x` into nested GetFieldExpr on `base`.
+fn build_field_chain(base: ast.Expr, rest: String, pos: source.SourcePos) -> ast.Expr =
+  match string.split_once(rest, ".") with
+  | Nothing -> ast.GetFieldExpr(base, rest, pos)
+  | Just (field, more) -> build_field_chain(ast.GetFieldExpr(base, field, pos), more, pos)
 
 fn infer_var(
   state: unifier.InferState,

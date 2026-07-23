@@ -6,6 +6,7 @@ import stdlib.compiler.source as source
 import stdlib.compiler.sprout_ir as sprout_ir
 import stdlib.compiler.field_kinds as fk
 import stdlib.compiler.type_kind as type_kind
+import stdlib.string as string
 
 # ---------------------------------------------------------------------------
 # Free-variable computation helpers (mirrored from codegen.sprout — not
@@ -181,10 +182,8 @@ fn compute_free_vars_match_arms(arms: List typed_ast.TypedMatchBranch,
               set_union(bound, set_from_list(pattern_names(pat))), top_level),
             compute_free_vars_match_arms(rest, bound, top_level))
 
-# Free vars in a TRecord field list.
-# Unreachable today (translate_expr rejects TRecord); kept for when that
-# translation lands — closure capture will then be correct without further
-# changes to this helper.
+# Free vars in a TRecord field list — a record literal captured inside a lambda
+# collects the free vars of each field value expression.
 # O(n * k * log(k)) where n = fields, k = field expr size.
 fn compute_free_vars_record_fields(fields: List typed_ast.TypedRecordField,
                                    bound: Set, top_level: Set) -> Set =
@@ -495,9 +494,44 @@ fn build_ctor_table_acc(decls: List typed_ast.TypedDecl, next_tag: Int,
       # next_tag is not incremented: wrap consumes no numeric tag slot.
       | typed_ast.TPassThrough (ast.WrapDecl type_name inner _) ->
           build_ctor_table_acc(rest, next_tag,
-            dict_set(type_name, sprout_ir.CtorInfo(-1, 1, 1, fk.ctor_field_kinds_string(Cons(inner, Nil))), acc),
+            dict_set(type_name, sprout_ir.CtorInfo(-1, 1, 1, fk.ctor_field_kinds_string(Cons(inner, Nil)), ""), acc),
+            regs)
+      # Records: a single-constructor product keyed by the type name.  It carries
+      # a real tag/arity (it allocates a boxed object via IRMakeCtor, unlike wrap)
+      # plus declaration-order field names so codegen can resolve `.field` offsets
+      # and reorder literal fields.  Not added to regs — GC tracing is header-driven
+      # (arity in the object header), so no runtime ctor registration is needed.
+      | typed_ast.TPassThrough (ast.RecordDecl type_name _params fields _) ->
+          build_ctor_table_acc(rest, next_tag + 1,
+            dict_set(type_name,
+              sprout_ir.CtorInfo(next_tag, record_field_count(fields), record_field_count(fields),
+                                 fk.ctor_field_kinds_string(record_field_types(fields)),
+                                 record_field_names_csv(fields)),
+              acc),
             regs)
       | _ -> build_ctor_table_acc(rest, next_tag, acc, regs)
+
+# Declaration-order field TypeExprs of a record, for field-kind computation.
+fn record_field_types(fields: List ast.RecordFieldDecl) -> List ast.TypeExpr =
+  match fields with
+  | Nil -> Nil
+  | Cons f rest ->
+      match f with
+      | ast.RecordFieldDecl _ ty -> Cons(ty, record_field_types(rest))
+
+fn record_field_count(fields: List ast.RecordFieldDecl) -> Int =
+  list_length(fields)
+
+# Comma-separated declaration-order field labels; the codegen field-offset key.
+fn record_field_names_csv(fields: List ast.RecordFieldDecl) -> String =
+  match fields with
+  | Nil -> ""
+  | Cons f rest ->
+      match f with
+      | ast.RecordFieldDecl nm _ ->
+          match rest with
+          | Nil -> nm
+          | _ -> nm ++ "," ++ record_field_names_csv(rest)
 
 fn max_arity_of(ctors: List ast.TypeConstructor, m: Int) -> Int =
   match ctors with
@@ -531,7 +565,7 @@ fn register_ctor_one(ctor_name: String, ctor_args: List ast.TypeExpr,
                      regs: List sprout_ir.CtorReg) ->
     (Dict sprout_ir.CtorInfo, Int, List sprout_ir.CtorReg) =
   register_ctor_entries(rest, next_tag + 1, max_ar,
-                        dict_set(ctor_name, sprout_ir.CtorInfo(next_tag, arity, max_ar, fks), acc),
+                        dict_set(ctor_name, sprout_ir.CtorInfo(next_tag, arity, max_ar, fks, ""), acc),
                         Cons(sprout_ir.CtorReg(ctor_name, next_tag, arity, fks), regs))
   where arity = list_length(ctor_args)
         fks = fk.ctor_field_kinds_string(ctor_args)
@@ -759,7 +793,7 @@ fn translate_expr(expr: typed_ast.TypedExpr, params: List String,
             match dict_get(name, ctors) with
             | Just entry ->
                 match entry with
-                | sprout_ir.CtorInfo tag actual_ar _max_ar _fks ->
+                | sprout_ir.CtorInfo tag actual_ar _max_ar _fks _ ->
                     # M3 PR 2: CPR-eligible ctors route through the same boxed
                     # allocation path as non-CPR ctors (@sprout_makeN).
                     # The unboxing sret optimization lands in PR 2b.
@@ -923,8 +957,54 @@ fn translate_expr(expr: typed_ast.TypedExpr, params: List String,
       translate_do(steps, params, ctors, idx, cur_label, cur_ops,
                    captures, lifted_ref, top_level, let_names, fn_arities,
                    lambda_ctr_ref, lifted_idx_ref, name_prefix)
-  | typed_ast.TRecord _ _ _ _ -> Err("ast_to_ir: record not yet supported")
-  | typed_ast.TGetField _ _ _ _ -> Err("ast_to_ir: field access not yet supported")
+  # Record construction: a record is a single-constructor product.  Reorder the
+  # literal's source-order fields into declaration order (the fixed offset layout
+  # in the ctor table), then emit one IRMakeCtor exactly like an ADT constructor.
+  | typed_ast.TRecord type_name fields _ _ ->
+      match dict_get(type_name, ctors) with
+      | Nothing -> Err("ast_to_ir: unknown record type '" ++ type_name ++ "'")
+      | Just entry ->
+          match entry with
+          | sprout_ir.CtorInfo tag _arity _max_ar _fks names_csv ->
+              match record_exprs_in_decl_order(split_on_comma(names_csv), fields) with
+              | Nothing -> Err("ast_to_ir: record '" ++ type_name ++ "' literal is missing a declared field")
+              | Just ordered_exprs ->
+                  match translate_args_ctor(ordered_exprs, params, ctors, idx, cur_label, cur_ops, Nil, Nil,
+                                            captures, lifted_ref, top_level, let_names, fn_arities, lambda_ctr_ref, lifted_idx_ref,
+                                            name_prefix) with
+                  | Err msg -> Err(msg)
+                  | Ok r ->
+                      match r with
+                      | (arg_blocks, arg_cur_lbl, arg_cur_ops, arg_names, idx1) ->
+                          Ok((arg_blocks, arg_cur_lbl,
+                               list_append(arg_cur_ops,
+                                 Cons(sprout_ir.IRMakeCtor(fresh_name(name_prefix, idx1), type_name, tag, arg_names), Nil)),
+                               fresh_name(name_prefix, idx1), idx1 + 1))
+  # Field access: resolve the field name to its declaration offset and emit a
+  # single IRGetField (an offset load), reusing the ADT field-projection op.
+  | typed_ast.TGetField rec_expr field_name _ _ ->
+      match translate_expr(rec_expr, params, ctors, idx, cur_label, cur_ops,
+                           captures, lifted_ref, top_level, let_names, fn_arities,
+                           lambda_ctr_ref, lifted_idx_ref, name_prefix) with
+      | Err msg -> Err(msg)
+      | Ok r ->
+          match r with
+          | (rec_blocks, rec_lbl, rec_ops, rec_ssa, idx1) ->
+              match record_name_of_type(typed_ast.typed_expr_type(rec_expr)) with
+              | Nothing -> Err("ast_to_ir: field access '." ++ field_name ++ "' on a non-record value")
+              | Just rname ->
+                  match dict_get(rname, ctors) with
+                  | Nothing -> Err("ast_to_ir: unknown record type '" ++ rname ++ "'")
+                  | Just entry ->
+                      match entry with
+                      | sprout_ir.CtorInfo _tag _arity _max_ar fks names_csv ->
+                          match field_index(split_on_comma(names_csv), field_name, 0) with
+                          | Nothing -> Err("ast_to_ir: record '" ++ rname ++ "' has no field '" ++ field_name ++ "'")
+                          | Just fi ->
+                              Ok((rec_blocks, rec_lbl,
+                                   list_append(rec_ops,
+                                     Cons(sprout_ir.IRGetField(fresh_name(name_prefix, idx1), rec_ssa, fi, fk.fk_at(fks, fi)), Nil)),
+                                   fresh_name(name_prefix, idx1), idx1 + 1))
 
 # Emit a single IRMakeCtor op for a 0-arity boxed constructor reference (Nil,
 # custom enum constants, etc.).  Used by translate_expr's TVar case when the
@@ -937,6 +1017,54 @@ fn translate_zero_arity_ctor(name: String, tag: Int, idx: Int,
   Ok((Nil, cur_label,
        list_append(cur_ops, Cons(sprout_ir.IRMakeCtor(fresh_name(prefix, idx), name, tag, Nil), Nil)),
        fresh_name(prefix, idx), idx + 1))
+
+# ---------------------------------------------------------------------------
+# Record codegen helpers (docs/records-v0.md §10.6)
+# ---------------------------------------------------------------------------
+
+# Split a comma-separated field-name list (CtorInfo.field_names) into segments.
+# Record field names never contain commas, so first-comma splitting is exact.
+fn split_on_comma(s: String) -> List String =
+  match string.split_once(s, ",") with
+  | Nothing -> Cons(s, Nil)
+  | Just (head, rest) -> Cons(head, split_on_comma(rest))
+
+# 0-based position of `field` in a declaration-order name list, or Nothing.
+fn field_index(names: List String, field: String, i: Int) -> Maybe Int =
+  match names with
+  | Nil -> Nothing
+  | Cons nm rest -> if nm == field then Just(i) else field_index(rest, field, i + 1)
+
+# The value expression bound to `name` in a source-order record literal.
+fn typed_field_expr_for(name: String, fields: List typed_ast.TypedRecordField) -> Maybe typed_ast.TypedExpr =
+  match fields with
+  | Nil -> Nothing
+  | Cons f rest ->
+      match f with
+      | typed_ast.TypedRecordField fname fexpr ->
+          if fname == name then Just(fexpr) else typed_field_expr_for(name, rest)
+
+# Reorder a record literal's fields (source order) into declaration order so the
+# positional IRMakeCtor lays each value at its fixed offset.  Nothing if a
+# declared field is absent (a missing-field literal — rejected upstream by
+# inference, but guarded here too).
+fn record_exprs_in_decl_order(decl_names: List String, fields: List typed_ast.TypedRecordField) -> Maybe (List typed_ast.TypedExpr) =
+  match decl_names with
+  | Nil -> Just(Nil)
+  | Cons nm rest ->
+      match typed_field_expr_for(nm, fields) with
+      | Nothing -> Nothing
+      | Just e ->
+          match record_exprs_in_decl_order(rest, fields) with
+          | Nothing -> Nothing
+          | Just es -> Just(Cons(e, es))
+
+# Head record type name of a resolved type (peels TApp for parametric records).
+fn record_name_of_type(t: types.Type) -> Maybe String =
+  match t with
+  | types.TConst tid -> Just(types.type_id_name(tid))
+  | types.TApp base _ -> record_name_of_type(base)
+  | _ -> Nothing
 
 # ---------------------------------------------------------------------------
 # translate_do — M3 PR 11
@@ -1145,12 +1273,12 @@ fn find_nothing_tag_ir(ctors: Dict sprout_ir.CtorInfo) -> Int =
   match dict_get("Nothing", ctors) with
   | Just entry ->
       match entry with
-      | sprout_ir.CtorInfo tag _ _ _ -> tag
+      | sprout_ir.CtorInfo tag _ _ _ _ -> tag
   | Nothing ->
       match dict_get("stdlib.prelude.Nothing", ctors) with
       | Just entry ->
           match entry with
-          | sprout_ir.CtorInfo tag _ _ _ -> tag
+          | sprout_ir.CtorInfo tag _ _ _ _ -> tag
       | Nothing -> 0
 
 # Ctor-tag lookup for the Result do-bind short-circuit.  Like
@@ -1162,12 +1290,12 @@ fn find_err_tag_ir(ctors: Dict sprout_ir.CtorInfo) -> Int =
   match dict_get("Err", ctors) with
   | Just entry ->
       match entry with
-      | sprout_ir.CtorInfo tag _ _ _ -> tag
+      | sprout_ir.CtorInfo tag _ _ _ _ -> tag
   | Nothing ->
       match dict_get("stdlib.prelude.Err", ctors) with
       | Just entry ->
           match entry with
-          | sprout_ir.CtorInfo tag _ _ _ -> tag
+          | sprout_ir.CtorInfo tag _ _ _ _ -> tag
       | Nothing -> 0
 
 # M3 PR 13: lower `x <- f()` where f returns `Maybe a !{IO}`.
@@ -2391,7 +2519,7 @@ fn is_wrap_match(arms: List typed_ast.TypedMatchBranch,
               match dict_get(name, ctors) with
               | Just entry ->
                   match entry with
-                  | sprout_ir.CtorInfo tag _ _ _ -> tag == -1
+                  | sprout_ir.CtorInfo tag _ _ _ _ -> tag == -1
               | Nothing -> is_wrap_match(rest, ctors)
           | _ -> is_wrap_match(rest, ctors)
 
@@ -2461,7 +2589,7 @@ fn bind_ctor_field_args(args: List ast.Pattern, scrut_name: String,
             | Nothing -> Err("ast_to_ir: unknown constructor '" ++ nested_ctor ++ "' in nested pattern")
             | Just nested_entry ->
                 match nested_entry with
-                | sprout_ir.CtorInfo nested_tag _na _nm nested_fks ->
+                | sprout_ir.CtorInfo nested_tag _na _nm nested_fks _ ->
                     match fresh_name(name_prefix, idx) with
                     | field_ssa ->
                         match fresh_name(name_prefix, idx + 1) with
@@ -2682,7 +2810,7 @@ fn bind_tuple_items(items: List ast.Pattern, scrut_name: String,
           | Nothing -> Err("ast_to_ir: unknown constructor '" ++ nested_ctor ++ "' in nested tuple pattern")
           | Just nested_entry ->
               match nested_entry with
-              | sprout_ir.CtorInfo nested_tag _na _nm nested_fks ->
+              | sprout_ir.CtorInfo nested_tag _na _nm nested_fks _ ->
                   match fresh_name(name_prefix, idx) with
                   | field_ssa ->
                       match fresh_name(name_prefix, idx + 1) with
@@ -2967,7 +3095,7 @@ fn is_simple_width2_arm(pat: ast.Pattern, ctors: Dict sprout_ir.CtorInfo) -> Boo
       | Nothing -> false
       | Just entry ->
           match entry with
-          | sprout_ir.CtorInfo tag _ar max_ar _fks ->
+          | sprout_ir.CtorInfo tag _ar max_ar _fks _ ->
               # tag == -1 is the `wrap` sentinel: wrap values are UNBOXED (the raw
               # inner value, no heap ctor/tag), so the { tag, val } worker machinery
               # (IRGetTag/IRMakeCtor) does not apply — exclude them like Bool is.
@@ -3137,7 +3265,7 @@ fn translate_unboxed_maybe_one_arm(pat: ast.Pattern, body: typed_ast.TypedExpr,
       | Nothing -> Err("ast_to_ir: unknown constructor '" ++ ctor_name ++ "' in unboxed match pattern")
       | Just entry ->
           match entry with
-          | sprout_ir.CtorInfo ctor_tag _a _m _f ->
+          | sprout_ir.CtorInfo ctor_tag _a _m _f _ ->
               do
                 let miss_lbl = fresh_arm_label(branch_idx + 1, base_idx)
                 let body_lbl = fresh_body_label(branch_idx, base_idx)
@@ -3718,7 +3846,7 @@ fn translate_match_arm_ctor(ctor_name: String, ctor_args: List ast.Pattern,
   | Nothing -> Err("ast_to_ir: unknown constructor '" ++ ctor_name ++ "' in match pattern")
   | Just entry ->
       match entry with
-      | sprout_ir.CtorInfo ctor_tag _arity _max_ar fks ->
+      | sprout_ir.CtorInfo ctor_tag _arity _max_ar fks _ ->
           if ctor_tag == -1
           then
             # Wrap match: the scrutinee IS the inner value — no tag test, no IRGetField.
@@ -4073,7 +4201,7 @@ fn translate_call(callee: typed_ast.TypedExpr, args: List typed_ast.TypedExpr,
             match dict_get(fname, ctors) with
             | Just entry ->
                 match entry with
-                | sprout_ir.CtorInfo tag actual_ar _max_ar _fks ->
+                | sprout_ir.CtorInfo tag actual_ar _max_ar _fks _ ->
                     translate_boxed_ctor_call(fname, tag, actual_ar, args, params,
                                               ctors, idx, cur_label, cur_ops,
                                               captures, lifted_ref, top_level, let_names, fn_arities,
@@ -6333,7 +6461,7 @@ fn adt_ctor_entries(cs: List ast.TypeConstructor,
           match dict_get(cname, ctors) with
           | Just entry ->
               match entry with
-              | sprout_ir.CtorInfo tag _ar _m _f -> Cons((tag, list_length(args)), adt_ctor_entries(rest, ctors))
+              | sprout_ir.CtorInfo tag _ar _m _f _ -> Cons((tag, list_length(args)), adt_ctor_entries(rest, ctors))
           | Nothing -> adt_ctor_entries(rest, ctors)
 
 fn adt_ctors_of_type(t: types.Type, adt_index: Dict (List (Int, Int))) -> List (Int, Int) =
@@ -6487,14 +6615,14 @@ fn nullary_ctor_tag_if(name: String, params: List String, captures: Dict String,
                        ctors: Dict sprout_ir.CtorInfo) -> Maybe Int =
   if name_is_local(name, params, captures) then Nothing
   else match dict_get(name, ctors) with
-       | Just entry -> (match entry with | sprout_ir.CtorInfo tag arity _m _f -> if arity == 0 then Just(tag) else Nothing)
+       | Just entry -> (match entry with | sprout_ir.CtorInfo tag arity _m _f _ -> if arity == 0 then Just(tag) else Nothing)
        | Nothing -> Nothing
 
 fn unary_ctor_tag_if(name: String, params: List String, captures: Dict String,
                      ctors: Dict sprout_ir.CtorInfo) -> Maybe Int =
   if name_is_local(name, params, captures) then Nothing
   else match dict_get(name, ctors) with
-       | Just entry -> (match entry with | sprout_ir.CtorInfo tag arity _m _f -> if arity == 1 then Just(tag) else Nothing)
+       | Just entry -> (match entry with | sprout_ir.CtorInfo tag arity _m _f _ -> if arity == 1 then Just(tag) else Nothing)
        | Nothing -> Nothing
 
 # Translate `body` so every tail position returns the { i64, i64 } worker struct.

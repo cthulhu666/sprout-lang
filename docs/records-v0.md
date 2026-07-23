@@ -310,9 +310,10 @@ existing GC object model). Any deviation requires up-front approval per
 
 ## 13. Spec/docs status
 
-This document is **non-normative**. On implementation, `docs/spec-v0.md` gains a
-records section (a §5.6.x sibling to `wrap`) covering the declaration,
-construction, access, and update forms above and their typing rules; that spec
-text becomes normative and this doc reverts to rationale. `BACKLOG.md` item 5 is
-updated to reflect the closed surface decisions and the remaining deferred items
-in §12.
+**Implementation status.** PR1 (branch `feat/records-v0`) landed the
+**declaration, construction, and dot-access** surface end-to-end on the active IR
+codegen path; `docs/spec-v0.md` §5.6.3 is the normative record section for that
+subset, and this doc is now rationale for it. Still to land: **`with` update**
+(§4.4 — PR2) and the §8 error messages / parametric coverage / disambiguation
+tests (PR3). The §5.6.3 spec text will grow the update form when PR2 lands.
+`BACKLOG.md` item 5 tracks the remaining PRs.

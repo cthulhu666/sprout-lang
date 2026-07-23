@@ -1,0 +1,53 @@
+import stdlib.test (TestState, new_state, assert_true, assert_eq, summary)
+
+# GC-rooting invariant net for records (docs/records-v0.md).  A record is a boxed
+# heap object built via IRMakeCtor; a `.field` access on a heap field is an
+# IRGetField whose i64 result must be rooted (kind IRTHeap) so it survives a
+# collection while held.  Records reuse the ADT ops, so the op-based rooting pass
+# should cover them — this test PROVES it under SPROUT_GC_STRESS=1 (collect on
+# every allocation), where an under-root of the record handle or of an extracted
+# heap field surfaces as a use-after-free.  Run gated in `just test-stress`.
+
+type Inner = (n: Int, tag: String)
+type Rec = (label: String, box: Inner, count: Int)
+
+# Each call allocates two CSTRs (int_to_string + concat) and drops them, forcing
+# the sweeper to run repeatedly between anchor assertions.
+fn churn(n: Int, acc: Int) -> Int =
+  if n <= 0 then acc
+  else churn(n - 1, acc + str_len("ab" ++ int_to_string(n)))
+
+fn main() -> Unit !{IO} =
+  do
+    state <- new_state()
+
+    # Runtime-built record with heap fields: a String label and a nested record.
+    let r = Rec(label = "lbl-" ++ int_to_string(7),
+                box = Inner(n = 42, tag = "inner-" ++ int_to_string(9)),
+                count = 3)
+
+    # Sweep many times while `r` is held live across the allocating call.
+    let total = churn(3000, 0)
+    assert_true(state, "churn produced nonzero total", total > 0)
+
+    # The record's own fields must survive the collections.
+    assert_true(state, "record String field survives churn", r.label == "lbl-7")
+    assert_eq(state, "record scalar field survives churn", r.count, 3)
+
+    # A nested-record (heap) field read, held live, then read again after churn.
+    let inner = r.box
+    let _b2 = churn(3000, 0)
+    assert_eq(state, "nested record Int field survives", inner.n, 42)
+    assert_true(state, "nested record String field survives", inner.tag == "inner-9")
+
+    # Chained access r.box.tag reconstructs the heap chain after more churn.
+    let _b3 = churn(3000, 0)
+    assert_true(state, "chained r.box.tag survives churn", r.box.tag == "inner-9")
+
+    # Extract a heap field ALONE and hold it across churn: exercises the
+    # IRGetField IRTHeap result-rooting path in isolation.
+    let lbl = r.label
+    let _b4 = churn(3000, 0)
+    assert_true(state, "extracted heap field held alone survives churn", lbl == "lbl-7")
+
+    summary(state)

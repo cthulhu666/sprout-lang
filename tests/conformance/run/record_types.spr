@@ -1,18 +1,15 @@
 # Conformance file: record types with field access
-# Covers: RecordDecl, RecordExpr, GetFieldExpr
+# Covers: RecordDecl, RecordExpr, GetFieldExpr (docs/records-v0.md v0 surface)
 
-type Point = {
-  x: Int,
-  y: Int
-}
+type Point = (x: Int, y: Int)
 
-fn make_point(x: Int, y: Int) -> Point = Point {x = x, y = y}
+fn make_point(x: Int, y: Int) -> Point = Point(x = x, y = y)
 
-fn get_x(p: Point) -> Int = get p x
+fn get_x(p: Point) -> Int = p.x
 
-fn get_y(p: Point) -> Int = get p y
+fn get_y(p: Point) -> Int = p.y
 
-fn manhattan(p: Point) -> Int = (get p x) + (get p y)
+fn manhattan(p: Point) -> Int = p.x + p.y
 
 fn main() -> Unit !{IO} =
   print(manhattan(make_point(3, 4)))

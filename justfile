@@ -1369,7 +1369,7 @@ test-stress: bootstrap-from-seed
   # through the parked sender's chan_pending across a GC storm — same rooting oracle, cap-0 path.
   # test_chan_select: (L0.11) a parked selector receives a heap value via the send-side select
   # delivery into chan_pending under a GC storm — the select rooting oracle.
-  STRESS_FILES="tests/stdlib/test_ir_rooting.spr tests/stdlib/test_ir_codegen_ctors.spr tests/stdlib/test_ir_codegen_match.spr tests/stdlib/test_ir_codegen_closures.spr tests/stdlib/test_ir_codegen_char_rooting.spr tests/stdlib/test_stress_global_roots.spr tests/stdlib/test_stress_unboxed_maybe_heap_payload.spr tests/stdlib/test_stress_cpr_tier2_worker.spr tests/stdlib/test_task_cooperative.spr tests/stdlib/test_task_nested_scope.spr tests/stdlib/test_chan.spr tests/stdlib/test_chan_close.spr tests/stdlib/test_chan_rendezvous.spr tests/stdlib/test_chan_select.spr"
+  STRESS_FILES="tests/stdlib/test_ir_rooting.spr tests/stdlib/test_ir_codegen_ctors.spr tests/stdlib/test_ir_codegen_match.spr tests/stdlib/test_ir_codegen_closures.spr tests/stdlib/test_ir_codegen_char_rooting.spr tests/stdlib/test_stress_global_roots.spr tests/stdlib/test_stress_unboxed_maybe_heap_payload.spr tests/stdlib/test_stress_cpr_tier2_worker.spr tests/stdlib/test_stress_records_heap.spr tests/stdlib/test_task_cooperative.spr tests/stdlib/test_task_nested_scope.spr tests/stdlib/test_chan.spr tests/stdlib/test_chan_close.spr tests/stdlib/test_chan_rendezvous.spr tests/stdlib/test_chan_select.spr"
   # Known-failing under stress — false-green at the default threshold, FOUND BY
   # THIS PASS (residual typed-codegen rooting UAF, GC-confirmed via
   # SPROUT_GC_DISABLE).  Tracked in BACKLOG.md; warn-only here.  Promote to

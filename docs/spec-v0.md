@@ -374,6 +374,63 @@ stdlib one.
 > room for a future generative identity (functors / path-dependent types) without
 > a spec change.
 
+### 5.6.3 Record declaration
+
+```sprout
+type Point = (x: Int, y: Int)
+```
+
+A **record** is a `type` declaration whose right-hand side is a parenthesised,
+labelled field list. It introduces a nominal product type with a fixed, ordered
+set of named, heterogeneously-typed fields known at compile time. Records join
+the parenthesis family (`(a, b)`, `f(a)`, `Just(x)`); the `label: Type` form uses
+`:` because a field is a **type annotation**, the same `:` as a function
+parameter. A parenthesised list distinguishes a record type from a tuple type by
+its labels: `(x: Int, y: Int)` is a record, `(Int, Int)` is a tuple. The v0
+implemented subset is **monomorphic** records; parametric records (`type Boxed a
+= (value: a, tag: String)`) are a planned follow-up (construction does not yet
+infer the type arguments).
+
+**Construction** is tag-prefixed, with `=` (a value binding, the same `=` as
+`let`):
+
+```sprout
+fn origin() -> Point = Point(x = 0, y = 0)
+```
+
+Every field must be supplied exactly once; there are no defaults, no partial
+construction, and no positional construction. The `:` (declaration) / `=`
+(construction) split is deliberate: `:` means *has type*, `=` means *has value*.
+
+**Field access** is dot access on a variable chain:
+
+```sprout
+fn manhattan(p: Point) -> Int = p.x + p.y
+```
+
+Because the lexer absorbs `.` into identifiers, `p.x` and `p.from.x` lex as a
+single dotted token, resolved by a name-resolution rule: split on `.`; if the
+head is an in-scope value the name is a field-access chain on it, otherwise it is
+a module qualification (`stdlib.string.length`). A local binding wins over a
+same-named module in head position. Access is **total** — `p.x` always yields the
+field's value (no `Maybe`), in contrast to `dict_get`. In v0 the head must be a
+bare variable; access on a compound expression uses an intermediate `let`.
+
+**Semantics.** Records are nominal (two records with identical fields but
+different names are distinct types), immutable, and strict (field values are
+evaluated eagerly at construction). Field scoping is per-record: a field `x` of
+`Point` is unrelated to a field `x` of another type. At runtime a record is a
+boxed single-constructor product laid out at fixed field offsets, sharing the ADT
+object model (and therefore ordinary garbage-collection behavior).
+
+Records are distinct from `Dict v` (String-keyed, homogeneous-valued, open,
+partial `dict_get -> Maybe v`) on every axis and are not interchangeable with it.
+
+Restrictions (v0): no row polymorphism or extensible records, no structural
+subtyping, no field punning or defaults, and no `deriving`. Functional update
+(`p with (x = v)`, docs/records-v0.md §4.4) is specified but lands in a
+follow-up; it is not yet part of the implemented surface.
+
 ### 5.7 Template literals (Experimental)
 
 > **Experimental** — not part of normative v0 until Phase 5 of the string

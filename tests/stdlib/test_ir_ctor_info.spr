@@ -2,45 +2,54 @@ import stdlib.test (TestState, new_state, assert_eq, assert_true, summary)
 import stdlib.compiler.sprout_ir as sprout_ir
 
 # Unit tests for sprout_ir.CtorInfo — the name-keyed constructor-table value
-# that replaced the anonymous `(Int, Int, Int, String)` 4-tuple threaded through
+# that replaced the anonymous `(Int, Int, Int, String)` tuple threaded through
 # ast_to_ir.  A named record makes every field self-documenting; these tests pin
-# the field ORDER (tag, arity, max_arity, field_kinds) so a construction-site
-# transposition of the three Int fields is caught here rather than downstream.
+# the field ORDER (tag, arity, max_arity, field_kinds, field_names) so a
+# construction-site transposition is caught here rather than downstream.
 #
-# The four field values are deliberately all-distinct (5 / 2 / 3 / "ips") so a
-# swapped pair cannot accidentally satisfy an assertion.
+# The field values are deliberately all-distinct (5 / 2 / 3 / "ips" / "a,b") so a
+# swapped pair cannot accidentally satisfy an assertion.  field_names is "" for
+# ADT/wrap constructors (positional) and a comma-separated label list for records.
 
 fn info_tag(ci: sprout_ir.CtorInfo) -> Int =
   match ci with
-  | sprout_ir.CtorInfo tag _ _ _ -> tag
+  | sprout_ir.CtorInfo tag _ _ _ _ -> tag
 
 fn info_arity(ci: sprout_ir.CtorInfo) -> Int =
   match ci with
-  | sprout_ir.CtorInfo _ arity _ _ -> arity
+  | sprout_ir.CtorInfo _ arity _ _ _ -> arity
 
 fn info_max_arity(ci: sprout_ir.CtorInfo) -> Int =
   match ci with
-  | sprout_ir.CtorInfo _ _ max_ar _ -> max_ar
+  | sprout_ir.CtorInfo _ _ max_ar _ _ -> max_ar
 
 fn info_field_kinds(ci: sprout_ir.CtorInfo) -> String =
   match ci with
-  | sprout_ir.CtorInfo _ _ _ fks -> fks
+  | sprout_ir.CtorInfo _ _ _ fks _ -> fks
+
+fn info_field_names(ci: sprout_ir.CtorInfo) -> String =
+  match ci with
+  | sprout_ir.CtorInfo _ _ _ _ names -> names
 
 fn main() -> Unit !{IO} =
   do
     state <- new_state()
 
-    let ci = sprout_ir.CtorInfo(5, 2, 3, "ips")
+    let ci = sprout_ir.CtorInfo(5, 2, 3, "ips", "a,b")
 
     assert_eq(state, "CtorInfo: tag field is position 0", info_tag(ci), 5)
     assert_eq(state, "CtorInfo: arity field is position 1", info_arity(ci), 2)
     assert_eq(state, "CtorInfo: max_arity field is position 2", info_max_arity(ci), 3)
     assert_true(state, "CtorInfo: field_kinds field is position 3",
                 info_field_kinds(ci) == "ips")
+    assert_true(state, "CtorInfo: field_names field is position 4",
+                info_field_names(ci) == "a,b")
 
-    # Wrap-sentinel shape: tag -1, arity/max_arity 1, single-field kinds.
-    let wrap_ci = sprout_ir.CtorInfo(-1, 1, 1, "p")
+    # Wrap-sentinel shape: tag -1, arity/max_arity 1, single-field kinds, no names.
+    let wrap_ci = sprout_ir.CtorInfo(-1, 1, 1, "p", "")
     assert_eq(state, "CtorInfo: wrap sentinel tag is -1", info_tag(wrap_ci), -1)
     assert_eq(state, "CtorInfo: wrap sentinel arity is 1", info_arity(wrap_ci), 1)
+    assert_true(state, "CtorInfo: positional ctor has empty field_names",
+                info_field_names(wrap_ci) == "")
 
     summary(state)

@@ -435,14 +435,18 @@ export type CtorReg (..) = CtorReg String Int Int String
 # CtorInfo is the name-keyed constructor-table value (built by build_ctor_table,
 # consumed all over ast_to_ir).  Replaces the former anonymous 4-tuple
 # `(Int, Int, Int, String)` so the fields are self-documenting at every site.
-# Fields: tag, arity, max_arity, field_kinds.
+# Fields: tag, arity, max_arity, field_kinds, field_names.
 #   tag        — runtime constructor tag; -1 is the wrap sentinel (no allocation).
 #   arity      — number of fields this constructor carries.
 #   max_arity  — largest arity across the enclosing ADT (uniform-layout sizing).
 #   field_kinds — per-field boxing encoding, same alphabet as CtorReg above.
+#   field_names — comma-separated declaration-order field labels; "" for ADT
+#                 constructors (positional).  Populated for records so codegen can
+#                 map a literal's source-order fields and a `.field` access to the
+#                 fixed declaration offset (docs/records-v0.md §10.6).
 # Distinct from CtorReg: CtorReg is the runtime-registration output list and has
 # no max_arity; this is the compile-time lookup table.  Kept separate on purpose.
-export type CtorInfo (..) = CtorInfo Int Int Int String
+export type CtorInfo (..) = CtorInfo Int Int Int String String
 
 # IR-level top-level let global declaration (M3 PR 5).
 #
