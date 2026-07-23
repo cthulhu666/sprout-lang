@@ -16,15 +16,35 @@ import loam.view (orbit_next_angle, orbit_zoomed, orbit_camera)
 # Run (auto-closes after N frames with SPROUT_GFX_MAX_FRAMES=N):
 #   mise exec -- just run-gfx examples/gfx/terrain_demo.sprout
 
-# --- Map layout (bounded location on the streaming substrate) ---------------
+# ============================================================================
+# TUNABLES — tweak these to change the map. Everything else derives from them.
+# ============================================================================
+# Map size ------------------------------------------------------------------
 let chunk_edge = 32  # tiles per chunk edge
-let region_chunks = 8  # region is region_chunks x region_chunks chunks (256x256 tiles)
+let region_chunks = 8  # map is region_chunks × region_chunks chunks; 8×32 = 256×256 tiles
 let map_dir = "/tmp"  # one file per chunk lands here (chunk_<cx>_<cz>.terrain)
-let tile_size = 1.0  # world units per tile (cube edge)
-let band_step = 0.6  # world units of height per elevation band
 
-# World span in tiles/units, and the offset that centres the map on the origin. Camera and
-# grid framing (below) DERIVE from this, so resizing the map is a one-line change here.
+# Terrain generation (fed into loam.terrain.Config) -------------------------
+let world_seed = 1337  # change for a different world
+let noise_octaves = 5  # fBm detail layers (more = finer variation)
+let noise_lattice0 = 24  # base feature size in tiles (larger = broader landforms)
+let elevation_levels = 12  # number of discrete height bands
+
+# Appearance ----------------------------------------------------------------
+let tile_size = 1.0  # world units per tile (cube edge)
+let band_step = 0.6  # world-unit height per elevation band (larger = taller relief)
+
+# Camera framing (fractions of the map span, so it scales with map size) ----
+let cam_radius_frac = 0.85
+let cam_height_frac = 0.6
+let cam_min_frac = 0.35
+let cam_max_frac = 2.5
+let cam_target_y = 4.0
+let cam_orbit_step = 0.004
+let cam_zoom_frac = 0.04
+# ============================================================================
+
+# --- Derived (do not edit; computed from the tunables above) ----------------
 let span_tiles = region_chunks * chunk_edge
 let world_span = to_double(span_tiles) * tile_size
 let half = to_double(span_tiles) / 2.0
@@ -83,14 +103,14 @@ fn draw_region(w: World, size: Int, ncx: Int, ncz: Int, cx: Int, cz: Int) -> Uni
       draw_chunk(w, cx, cz, size)
       draw_region(w, size, ncx, ncz, cx + 1, cz)
 
-# --- Orbit camera framing (derived from map size) ---------------------------
-let orbit_start_radius = world_span * 0.85
-let orbit_height = world_span * 0.6
-let orbit_target_y = 4.0
-let orbit_step = 0.004
-let zoom_step = world_span * 0.04
-let min_radius = world_span * 0.35
-let max_radius = world_span * 2.5
+# --- Orbit camera framing (derived from the camera tunables + map span) -----
+let orbit_start_radius = world_span * cam_radius_frac
+let orbit_height = world_span * cam_height_frac
+let orbit_target_y = cam_target_y
+let orbit_step = cam_orbit_step
+let zoom_step = world_span * cam_zoom_frac
+let min_radius = world_span * cam_min_frac
+let max_radius = world_span * cam_max_frac
 
 # The terrain is STATIC, so it is baked into ONE GPU mesh at startup (see main) and drawn in a
 # single call per frame — no per-frame per-tile work. The frame loop only spins the camera.
@@ -118,8 +138,8 @@ fn main() -> Unit !{IO} =
   do
     gfx.open_window(1000, 600, "Sprout — Loam terrain (chunked biome tiles)")
     gfx.set_target_fps(60)
-    let cfg = Config(seed = 1337, chunk_size = chunk_edge, octaves = 5,
-                     lattice0 = 24, elevation_levels = 12)
+    let cfg = Config(seed = world_seed, chunk_size = chunk_edge, octaves = noise_octaves,
+                     lattice0 = noise_lattice0, elevation_levels = elevation_levels)
     gen_region(cfg, map_dir, region_chunks, region_chunks, 0, 0)
     w <- world_new(cfg, map_dir)
     # Bake every tile of the region into one static mesh: mesh_capture_begin captures each

@@ -19,6 +19,28 @@ import stdlib.string (words, split_once, string_lines)
 # such primitive. Consequence: v0 terrain is STEPPED (discrete elevation), not smooth — a
 # deliberate v0/follow-up boundary, not an accident (docs/terrain-v0.md §4, §9).
 
+# ============================================================================
+# TERRAIN TUNING — the knobs that shape the world. All levels are on the noise
+# range [0, 1). Callers pass the per-world Config (seed/size/octaves/…); these are
+# the biome-classifier thresholds and are the same for every world.
+# ============================================================================
+# Elevation bands: below sea = Water, then a thin Beach margin; above the caps come
+# Mountain then Snow. Raise sea_level for more water; lower snow_level for icier peaks.
+let sea_level = 0.40
+let beach_level = 0.44
+let mountain_level = 0.68
+let snow_level = 0.82
+# Lowland biome (between beach and mountain) by temperature/moisture.
+let tundra_max_temp = 0.30  # colder than this → Tundra
+let desert_min_temp = 0.66  # hotter than this AND drier than desert_max_moist → Desert
+let desert_max_moist = 0.33
+let forest_min_moist = 0.50  # wetter than this → Forest, else Grass
+# Seed offsets that decorrelate the moisture/temperature fields from elevation (same fBm,
+# different seed). Distinct large primes so the three fields never share a lattice.
+let moist_offset = 1000003
+let temp_offset = 2000029
+# ============================================================================
+
 # --- Tile taxonomy ----------------------------------------------------------
 # A biome. Nullary variants (the 9-field cap is on product FIELDS, not variant count). The
 # tag/of pair is the (de)serialization bridge — tiles persist as their integer tag.
@@ -54,10 +76,6 @@ export fn tile_kind_of(tag: Int) -> TileKind =
 # from `seed` by offset (below), so they cost no field and stay decorrelated.
 export type Config = (seed: Int, chunk_size: Int, octaves: Int,
                       lattice0: Int, elevation_levels: Int)
-
-# Seed offsets that decorrelate the three fields drawn from the same fBm. Distinct primes.
-let moist_offset = 1000003
-let temp_offset = 2000029
 
 # --- Stateless spatial hash -------------------------------------------------
 # A PURE function of lattice coordinates (not a threaded RNG stream), so the noise value at a
@@ -117,22 +135,17 @@ export fn fbm(tx: Int, tz: Int, seed: Int, octaves: Int, lattice0: Int) -> Doubl
   fbm_go(tx, tz, seed, lattice0, 1.0, 0.0, 0.0, octaves)
 
 # --- Classification (the sole Double->Int gate — comparison only) -----------
-# Thresholds over elevation/moisture/temperature, all in [0, 1). A Whittaker-style ladder:
-# water/beach by elevation, snow/mountain caps by elevation, else a lowland biome by
-# temperature and moisture.
-let sea_level = 0.40
-let beach_level = 0.44
-let mountain_level = 0.68
-let snow_level = 0.82
-
+# A Whittaker-style ladder over the three fields: water/beach then snow/mountain caps by
+# elevation, else a lowland biome by temperature and moisture. All thresholds are the
+# module-level TERRAIN TUNING knobs at the top of this file.
 export fn classify(elev: Double, moist: Double, temp: Double) -> TileKind =
   if elev < sea_level then Water
   else if elev < beach_level then Beach
   else if elev > snow_level then Snow
   else if elev > mountain_level then Mountain
-  else if temp < 0.30 then Tundra
-  else if (temp > 0.66) && (moist < 0.33) then Desert
-  else if moist > 0.50 then Forest
+  else if temp < tundra_max_temp then Tundra
+  else if (temp > desert_min_temp) && (moist < desert_max_moist) then Desert
+  else if moist > forest_min_moist then Forest
   else Grass
 
 # The elevation BAND: how many of `levels` evenly-spaced thresholds `elev` exceeds. Recursive,
