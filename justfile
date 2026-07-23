@@ -585,7 +585,7 @@ _compile-examples stage xfail="":
 # here. (This lane now registers the repo as a package root, so examples importing
 # examples.* — e.g. sentry_issue_browser — resolve and compile.)
 [group('examples')]
-compile-examples-stage1: (_compile-examples "build/compile_driver_bin_stage1" "examples/gfx/spinning_cube.sprout examples/gfx/character_view.sprout examples/gfx/character_animated.sprout examples/gfx/character_crowd.sprout examples/gfx/ecs_agents.sprout examples/gfx/ecs_flocking.sprout")
+compile-examples-stage1: (_compile-examples "build/compile_driver_bin_stage1" "examples/gfx/spinning_cube.sprout examples/gfx/character_view.sprout examples/gfx/character_animated.sprout examples/gfx/character_crowd.sprout examples/gfx/ecs_agents.sprout examples/gfx/ecs_flocking.sprout examples/gfx/terrain_demo.sprout")
 
 # Negative type-checking conformance: each tests/conformance/type_error/<n>.spr must
 # be rejected by `--phase check` with output containing the substring in <n>.err.

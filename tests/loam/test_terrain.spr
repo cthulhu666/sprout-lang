@@ -1,0 +1,146 @@
+import stdlib.test (TestState, new_state, assert_eq, assert_true, summary)
+import stdlib.math (fabs)
+import stdlib.mutable (mutmatrix_new, mutmatrix_set)
+import loam.terrain (TileKind, Water, Grass, Mountain, Snow, Config, tile_kind_tag, classify, band_of, spatial_hash, tile_kind_at, tile_band_at, Chunk, generate_chunk, chunk_kind_tag, chunk_band, chunk_to_string, chunk_from_string, save_chunk, load_chunk, World, world_new, page_in, page_out, resident_count)
+
+# loam.terrain is a headless, seeded, deterministic terrain model: generation is a pure
+# function of (coordinate, seed), tiles are integer (kind, elevation-band) pairs, chunks
+# serialize to text and page in/out of a resident cache. Every property below is asserted
+# without a window — passing means the model is correct independent of rendering. Because
+# all persisted state is Int, equality is exact (no epsilon), which is a payoff of the
+# integer-band design (docs/terrain-v0.md §4).
+
+# A small config: seed, chunk_size, octaves, lattice0, elevation_levels. 16 levels so bands
+# can exceed 9 — exercising two-digit "tag:band" cells through the text (de)serializer.
+let cfg = Config(seed = 12345, chunk_size = 8, octaves = 4, lattice0 = 16, elevation_levels = 16)
+
+# Compare every cell of two chunks for equality (kind tag + band). Recursive; returns
+# the count of MISMATCHED cells (0 == identical).
+fn diff_go(a: Chunk, b: Chunk, size: Int, r: Int, c: Int, acc: Int) -> Int !{IO} =
+  if r >= size then acc
+  else if c >= size then diff_go(a, b, size, r + 1, 0, acc)
+  else
+    do
+      ka <- chunk_kind_tag(a, r, c)
+      kb <- chunk_kind_tag(b, r, c)
+      ba <- chunk_band(a, r, c)
+      bb <- chunk_band(b, r, c)
+      let bad = if (ka == kb) && (ba == bb) then 0 else 1
+      diff_go(a, b, size, r, c + 1, acc + bad)
+
+fn chunk_diff(a: Chunk, b: Chunk, size: Int) -> Int !{IO} = diff_go(a, b, size, 0, 0, 0)
+
+# Run a page_in for its resident-cache side effect, discarding the returned chunk. A plain
+# `<-` bind would treat the Maybe as a short-circuit family; matching sidesteps that.
+fn touch_page(w: World, cx: Int, cz: Int) -> Unit !{IO} =
+  match page_in(w, cx, cz) with | _ -> ()
+
+fn main() -> Unit !{IO} =
+  do
+    state <- new_state()
+
+    # --- classify: the biome ladder (pure, comparison-only Double->Int gate) ---
+    assert_eq(state, "classify: below sea level is Water",
+              tile_kind_tag(classify(0.10, 0.5, 0.5)), tile_kind_tag(Water))
+    assert_eq(state, "classify: very high elevation is Snow",
+              tile_kind_tag(classify(0.95, 0.5, 0.5)), tile_kind_tag(Snow))
+    assert_eq(state, "classify: high (not peak) elevation is Mountain",
+              tile_kind_tag(classify(0.72, 0.5, 0.5)), tile_kind_tag(Mountain))
+    assert_eq(state, "classify: temperate mid-elevation is Grass",
+              tile_kind_tag(classify(0.55, 0.4, 0.5)), tile_kind_tag(Grass))
+
+    # --- band_of: monotone non-decreasing + in range [0, levels) ---
+    let b_lo = band_of(0.05, 10)
+    let b_mid = band_of(0.50, 10)
+    let b_hi = band_of(0.97, 10)
+    assert_true(state, "band_of: low <= mid", b_lo <= b_mid)
+    assert_true(state, "band_of: mid <= high", b_mid <= b_hi)
+    assert_true(state, "band_of: strictly rises across the range", b_lo < b_hi)
+    assert_true(state, "band_of: within [0, levels)", (b_hi >= 0) && (b_hi < 10))
+
+    # --- spatial_hash: deterministic, in [0, 2^31), coordinate-sensitive ---
+    assert_eq(state, "spatial_hash: deterministic", spatial_hash(3, 7, 99), spatial_hash(3, 7, 99))
+    assert_true(state, "spatial_hash: non-negative and bounded",
+                (spatial_hash(3, 7, 99) >= 0) && (spatial_hash(3, 7, 99) < 2147483648))
+    assert_true(state, "spatial_hash: differs by coordinate",
+                spatial_hash(3, 7, 99) != spatial_hash(4, 7, 99))
+
+    # --- generation wiring: a chunk cell equals the pure global-coordinate field ---
+    # Global tile (gx, gz) sits in chunk (gx/size, gz/size) at local (gz mod size, gx mod size).
+    # generate_chunk must fill each cell from the GLOBAL coord, not the local one — this is
+    # the seam-correctness property that makes chunking sound.
+    ch10 <- generate_chunk(cfg, 1, 0)  # covers global x in [8,16), z in [0,8)
+    let gx = 11
+    let gz = 3
+    let lc = gx - (1 * 8)  # local col = 3
+    let lr = gz - (0 * 8)  # local row = 3
+    cellk <- chunk_kind_tag(ch10, lr, lc)
+    cellb <- chunk_band(ch10, lr, lc)
+    assert_eq(state, "wiring: chunk kind == pure field kind at global coord",
+              cellk, tile_kind_tag(tile_kind_at(cfg, gx, gz)))
+    assert_eq(state, "wiring: chunk band == pure field band at global coord",
+              cellb, tile_band_at(cfg, gx, gz))
+
+    # --- determinism: regenerating the same chunk yields identical cells ---
+    ch10b <- generate_chunk(cfg, 1, 0)
+    d <- chunk_diff(ch10, ch10b, 8)
+    assert_eq(state, "determinism: same (seed, coord) => identical chunk", d, 0)
+
+    # --- serialization round-trip (in memory) ---
+    s <- chunk_to_string(ch10)
+    match chunk_from_string(s) with
+    | Nothing -> assert_true(state, "serialize: round-trips to Just", false)
+    | Just ch10c ->
+        do
+          dd <- chunk_diff(ch10, ch10c, 8)
+          assert_eq(state, "serialize: round-trip preserves every cell", dd, 0)
+
+    # --- serialization handles two-digit bands (elevation_levels can exceed 10) ---
+    # Build a synthetic chunk with a known two-digit band so the "tag:band" text codec is
+    # exercised on multi-digit cells regardless of what the noise happens to produce.
+    kg <- mutmatrix_new(2, 2, 0)
+    eg <- mutmatrix_new(2, 2, 0)
+    mutmatrix_set(kg, 0, 0, tile_kind_tag(Snow))
+    mutmatrix_set(eg, 0, 0, 13)
+    let synth = Chunk(cx = 4, cz = 5, kind_grid = kg, elev_grid = eg)
+    ssyn <- chunk_to_string(synth)
+    match chunk_from_string(ssyn) with
+    | Nothing -> assert_true(state, "two-digit band: round-trips to Just", false)
+    | Just syn2 ->
+        do
+          k2 <- chunk_kind_tag(syn2, 0, 0)
+          b2 <- chunk_band(syn2, 0, 0)
+          assert_eq(state, "two-digit band: tag survives round-trip", k2, tile_kind_tag(Snow))
+          assert_eq(state, "two-digit band: band 13 survives round-trip", b2, 13)
+
+    # --- file round-trip: save then load from disk ---
+    # /tmp (not a subdir): write_file does not create directories and there is no mkdir builtin.
+    let dir = "/tmp"
+    match save_chunk(dir, ch10) with
+    | Err _ -> assert_true(state, "disk: save_chunk succeeds", false)
+    | Ok _ -> assert_true(state, "disk: save_chunk succeeds", true)
+    match load_chunk(dir, 1, 0) with
+    | Nothing -> assert_true(state, "disk: load returns Just after save", false)
+    | Just ch10d ->
+        do
+          df <- chunk_diff(ch10, ch10d, 8)
+          assert_eq(state, "disk: save->load preserves every cell", df, 0)
+
+    # --- paging: cache hit, count, and reload after eviction ---
+    w <- world_new(cfg, dir)
+    c_before <- resident_count(w)
+    assert_eq(state, "paging: fresh world has 0 resident chunks", c_before, 0)
+    touch_page(w, 1, 0)
+    c_after <- resident_count(w)
+    assert_eq(state, "paging: page_in makes 1 resident", c_after, 1)
+    touch_page(w, 1, 0)
+    c_again <- resident_count(w)
+    assert_eq(state, "paging: re-page_in stays 1 (cache hit)", c_again, 1)
+    page_out(w, 1, 0)
+    c_out <- resident_count(w)
+    assert_eq(state, "paging: page_out drops to 0", c_out, 0)
+    match page_in(w, 1, 0) with
+    | Nothing -> assert_true(state, "paging: reload after eviction succeeds", false)
+    | Just _ -> assert_true(state, "paging: reload after eviction succeeds", true)
+
+    summary(state)

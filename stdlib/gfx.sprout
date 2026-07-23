@@ -21,6 +21,7 @@ extern fn gfx_frame_begin() -> Unit !{IO}
 extern fn gfx_draw_grid(slices: Int, spacing: Double) -> Unit !{IO}
 extern fn gfx_draw_spinning_cube(size: Double, angle: Double) -> Unit !{IO}
 extern fn gfx_load_model(path: String) -> Int !{IO}
+extern fn gfx_draw_cube(x: Double, y: Double, z: Double, size: Double, r: Int, g: Int, b: Int) -> Unit !{IO}
 extern fn gfx_draw_model(handle: Int, x: Double, y: Double, z: Double, angle: Double, scale: Double) -> Unit !{IO}
 extern fn gfx_load_animations(path: String) -> Int !{IO}
 extern fn gfx_animation_count(set: Int) -> Int !{IO}
@@ -70,6 +71,11 @@ export fn draw_spinning_cube(size: Double, angle: Double) -> Unit !{IO} =
 # open_window; a handle of -1 means the model registry is full.
 export fn load_model(path: String) -> Int !{IO} =
   gfx_load_model(path)
+
+# Draw an axis-aligned cube of edge `size` at (x,y,z) in flat RGB (each of r,g,b in 0..255).
+# One call per visible terrain tile; shaded by the scene key light so stepped relief is visible.
+export fn draw_cube(x: Double, y: Double, z: Double, size: Double, r: Int, g: Int, b: Int) -> Unit !{IO} =
+  gfx_draw_cube(x, y, z, size, r, g, b)
 
 # Draw a loaded model at (x,y,z), rotated `angle` degrees about Y, scaled by `scale`.
 export fn draw_model(handle: Int, x: Double, y: Double, z: Double, angle: Double, scale: Double) -> Unit !{IO} =

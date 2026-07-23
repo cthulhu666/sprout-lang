@@ -1,0 +1,121 @@
+module examples.gfx.terrain_demo
+
+import stdlib.gfx
+import loam.terrain (Config, Chunk, World, generate_chunk, save_chunk, world_new, page_in, chunk_kind_tag, chunk_band)
+import loam.view (orbit_next_angle, orbit_zoomed, orbit_camera)
+
+# A terrain rendered on Loam. loam.terrain is the headless MODEL (seeded, chunked, biome
+# tiles; tested in tests/loam/test_terrain.spr); THIS file is the view. At startup it
+# generates a small bounded region of chunks to disk (the "upfront generation" half of the
+# design), then each frame PAGES those chunks into a resident cache and draws one colored
+# cube per tile — the same cull-to-resident/per-tile-draw loop that later takes real assets.
+# Terrain is STEPPED (discrete elevation bands, docs/terrain-v0.md §4), so the relief reads
+# as stacked cubes shaded by the scene key light.
+#
+# Run (auto-closes after N frames with SPROUT_GFX_MAX_FRAMES=N):
+#   mise exec -- just run-gfx examples/gfx/terrain_demo.sprout
+
+# --- Map layout (bounded location on the streaming substrate) ---------------
+let chunk_edge = 16  # tiles per chunk edge
+let region_chunks = 2  # region is region_chunks x region_chunks chunks
+let map_dir = "/tmp"  # one file per chunk lands here (chunk_<cx>_<cz>.terrain)
+let tile_size = 1.0  # world units per tile (cube edge)
+let band_step = 0.5  # world units of height per elevation band
+
+# World span in tiles/units, and the offset that centres the map on the origin.
+let span_tiles = region_chunks * chunk_edge
+let half = to_double(span_tiles) / 2.0
+
+# --- Biome palette ----------------------------------------------------------
+# TileKind tag -> flat RGB (0..255). Matches loam.terrain.tile_kind_tag order.
+fn biome_rgb(tag: Int) -> (Int, Int, Int) =
+  if tag == 0 then (40, 90, 170)  # Water
+  else if tag == 1 then (205, 185, 125)  # Beach
+  else if tag == 2 then (70, 150, 60)  # Grass
+  else if tag == 3 then (28, 100, 42)  # Forest
+  else if tag == 4 then (212, 190, 110)  # Desert
+  else if tag == 5 then (120, 112, 104)  # Mountain
+  else if tag == 6 then (236, 236, 242)  # Snow
+  else if tag == 7 then (172, 182, 162)  # Tundra
+  else (255, 0, 255)  # unknown -> magenta (a visible bug flag)
+
+# Draw one tile as a cube: centred at its world (x, z), lifted to its elevation band.
+fn draw_tile(gx: Int, gz: Int, tag: Int, band: Int) -> Unit !{IO} =
+  match biome_rgb(tag) with
+  | (r, g, b) ->
+      gfx.draw_cube((to_double(gx) - half) * tile_size, to_double(band) * band_step,
+                    (to_double(gz) - half) * tile_size, tile_size, r, g, b)
+
+# --- Offline generation pass (once at startup) ------------------------------
+fn gen_region(cfg: Config, dir: String, ncx: Int, ncz: Int, cx: Int, cz: Int) -> Unit !{IO} =
+  if cz >= ncz then ()
+  else if cx >= ncx then gen_region(cfg, dir, ncx, ncz, 0, cz + 1)
+  else
+    do
+      ch <- generate_chunk(cfg, cx, cz)
+      match save_chunk(dir, ch) with | _ -> ()
+      gen_region(cfg, dir, ncx, ncz, cx + 1, cz)
+
+# --- Per-frame draw: page chunks, draw their tiles --------------------------
+fn draw_chunk_tiles(ch: Chunk, cx: Int, cz: Int, size: Int, r: Int, c: Int) -> Unit !{IO} =
+  if r >= size then ()
+  else if c >= size then draw_chunk_tiles(ch, cx, cz, size, r + 1, 0)
+  else
+    do
+      tag <- chunk_kind_tag(ch, r, c)
+      band <- chunk_band(ch, r, c)
+      draw_tile((cx * size) + c, (cz * size) + r, tag, band)
+      draw_chunk_tiles(ch, cx, cz, size, r, c + 1)
+
+fn draw_chunk(w: World, cx: Int, cz: Int, size: Int) -> Unit !{IO} =
+  match page_in(w, cx, cz) with
+  | Nothing -> ()
+  | Just ch -> draw_chunk_tiles(ch, cx, cz, size, 0, 0)
+
+fn draw_region(w: World, size: Int, ncx: Int, ncz: Int, cx: Int, cz: Int) -> Unit !{IO} =
+  if cz >= ncz then ()
+  else if cx >= ncx then draw_region(w, size, ncx, ncz, 0, cz + 1)
+  else
+    do
+      draw_chunk(w, cx, cz, size)
+      draw_region(w, size, ncx, ncz, cx + 1, cz)
+
+# --- Orbit camera framing ---------------------------------------------------
+let orbit_start_radius = 48.0
+let orbit_height = 34.0
+let orbit_target_y = 3.0
+let orbit_step = 0.006
+let zoom_step = 3.0
+let min_radius = 20.0
+let max_radius = 110.0
+
+fn render_loop(w: World, size: Int, ncx: Int, ncz: Int,
+               angle: Double, paused: Bool, radius: Double) -> Unit !{IO} =
+  do
+    stop <- gfx.window_should_close()
+    if stop then gfx.close_window()
+    else
+      do
+        toggled <- gfx.space_pressed()
+        let now_paused = if toggled then ! paused else paused
+        let next = if now_paused then angle else orbit_next_angle(angle, orbit_step)
+        orbit_camera(radius, angle, orbit_height, orbit_target_y)
+        gfx.frame_begin()
+        gfx.draw_grid(64, 1.0)
+        draw_region(w, size, ncx, ncz, 0, 0)
+        gfx.draw_fps(10, 10)
+        plus <- gfx.button(940, 20, 44, 44, "+")
+        minus <- gfx.button(940, 72, 44, 44, "-")
+        gfx.frame_end()
+        render_loop(w, size, ncx, ncz, next, now_paused,
+                    orbit_zoomed(radius, plus, minus, zoom_step, min_radius, max_radius))
+
+fn main() -> Unit !{IO} =
+  do
+    gfx.open_window(1000, 600, "Sprout — Loam terrain (chunked biome tiles)")
+    gfx.set_target_fps(60)
+    let cfg = Config(seed = 1337, chunk_size = chunk_edge, octaves = 5,
+                     lattice0 = 24, elevation_levels = 12)
+    gen_region(cfg, map_dir, region_chunks, region_chunks, 0, 0)
+    w <- world_new(cfg, map_dir)
+    render_loop(w, chunk_edge, region_chunks, region_chunks, 0.0, false, orbit_start_radius)

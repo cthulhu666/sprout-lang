@@ -241,6 +241,21 @@ long long gfx_load_model(const char *path) {
   return h;
 }
 
+/* Draw an axis-aligned cube of edge `size` at (x,y,z) in a flat RGB colour (0-255
+ * components). Used for colored terrain tiles: one call per visible tile. Wrapped in
+ * the same key-light shader as models (raylib's DrawCube emits per-face normals), so a
+ * grid of stepped tiles reads as relief — top faces brighter than sides. */
+long long gfx_draw_cube(long long x, long long y, long long z, long long size,
+                        long long r, long long g, long long b) {
+  float s = as_float(size);
+  Vector3 pos = { as_float(x), as_float(y), as_float(z) };
+  Color col = { (unsigned char)r, (unsigned char)g, (unsigned char)b, 255 };
+  if (g_light_ready) BeginShaderMode(g_light_shader);
+  DrawCube(pos, s, s, s, col);
+  if (g_light_ready) EndShaderMode();
+  return 0;
+}
+
 /* Draw model `handle` at (x,y,z), rotated `angle` degrees about the Y axis,
  * uniformly scaled by `scale`. Out-of-range handles are a no-op. */
 long long gfx_draw_model(long long handle, long long x, long long y, long long z,

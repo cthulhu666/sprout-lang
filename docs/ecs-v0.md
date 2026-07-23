@@ -434,3 +434,21 @@ choice, not a duplicated loop. The `idle`/`run`/`jump` clips are baked from the 
 pack's FBX via `tools/convert_kenney.sh` (the pack has no dedicated *walk* clip —
 `run` is its only locomotion); `jump_impulse`/`gravity` are tuned for a ~33-tick
 airtime matching the jump clip.
+
+### 10.6 `terrain` — procedural, chunked, disk-backed ground
+
+`loam.terrain` (design: `docs/terrain-v0.md`) is the ground the agents will eventually
+stand on: a **headless, seeded, deterministic** terrain model in the same ethos as the
+rest of Loam. Generation is a **pure function of `(coordinate, seed)`** — seeded fractal
+value noise (fBm) over an integer lattice → three fields (elevation, moisture,
+temperature) → a Whittaker biome classifier — so any tile is reproducible from its global
+coordinate. Terrain is **generated upfront to disk** (one text file per chunk) and
+**paged** into a resident-chunk cache (`Ref (Dict Chunk)`), so map size is bounded by disk,
+not RAM. v0 stores only `Int`s per tile (a `TileKind` tag + an integer elevation *band*),
+because the stdlib cannot yet convert `Double`↔`Int` or parse a `Double` from text; the
+only `Double→Int` crossing is threshold classification, which is comparison-based — so v0
+terrain is deliberately **stepped** (discrete elevation), with a real-valued continuous
+field the documented follow-up. `examples/gfx/terrain_demo.sprout` renders it as one
+colored cube per tile via a new `gfx.draw_cube(x,y,z,size,r,g,b)` shim extern — the first
+colored primitive in the gfx layer (`draw_model` still has no tint), and the first rung of
+the asset-per-tile render path.

@@ -827,3 +827,32 @@ plan" item under "Design Roadmap → Current Priorities".
   - [x] **(item 5b — value-namespace fix) DONE 2026-07-17** (branch `feat/canonical-tyvar-identity`). Root-cause fix, not the defensive guard: the parser no longer desugars `a ++ b` to a bare `CallExpr(VarExpr("append"))` — it emits `ast.BinaryExpr("++")` (symmetric with `+`/`-`), and `infer.infer_binary_op` gains a `"++"` case (`append_via_semigroup`) that dispatches to the Semigroup class method by IDENTITY, selecting the instance via `@inst:Semigroup:{head}` directly — a key no user `fn append` can clobber (the old path went through the evictable `@class:append` marker / value-namespace name). Emits the same `TCall(append, [TDict, l, r])` node codegen already lowered, so `ast_to_ir` is untouched. A user `fn append` is now an ordinary function; `++` is immune. NOTE: chose (b)-style root fix over (a) the defensive guard because the guard would REGRESS `stdlib.bytes` (legit qualified exports `empty`/`append`/`to_string`). Regression test `tests/stdlib/test_operator_not_hijacked_by_user_fn.spr` (RED = check-phase `Ref String vs String`; GREEN = `++` = Semigroup). Full compiler-source gate chain green + seed refreshed (fixed point iter 2).
   - [x] **(item 5b — Part 2: codegen symbol collision + dispatch hijack) DONE 2026-07-18** (commit `cbf03a7`, branch `feat/dispatch-identity-followups`, canonical-identity sub-campaign α). Fixed BOTH remaining codegen name-as-identity manifestations: (1) the SYMBOL COLLISION — every class method emitted a bare dispatcher symbol (`@append`, `@eq`, `@to_string`, `@compare`, `@empty`, `@fmap`, `@fold_values`), colliding with an emitted user `fn <class-method-name>` → `clang: invalid redefinition`; (2) the DISPATCH HIJACK — `ast_to_ir`'s `++` peephole keyed on `fname == "append"`, so a user `fn append` emitted `ast_to_ir: append expects at least 2 arguments` (1-arg) or a silent `str_concat` miscompile (2-string). **Fix:** a shared `classmethod_dispatch_name(class, method)` (lowering) mangles every dispatcher to `__cm_<Class>_<method>`, applied at BOTH the wrapper DEFINE (`generate_one_class_wrapper`) and every dispatch CALL site (`lower_dispatch_callee`, at the `TCall` lowering choke point). The rewrite is gated on the infer-injected leading `TDict` witness — present for every genuine dispatch (input/return/forward position), absent for a user shadow — so a shadowing top-level fn keeps its bare name and calls the user's own function. `ast_to_ir`'s `++` peephole re-keys on `"__cm_Semigroup_append"`. Behavior-preserving (every dispatch already routed through the bare wrapper; this is a consistent rename — value-position eta still targets `@__tc_`). Regression test `tests/stdlib/test_classmethod_dispatch_identity.spr` (user `append`/`to_string` shadow + genuine String/List `++`). Self-hosts to a fixed point; full gate chain green + seed refreshed. This closes the codegen-side root-cause fix (b) for item 5 above.
 - [ ] `P2` **Pattern-variable names share the fresh-tyvar namespace (`infer.sprout:2050`)** (fundamentals review, static finding, not yet exercised at runtime). Pattern-bound variable names and the inferencer's fresh `t0`/`t1`/… type-variable names are drawn from the same namespace with no collision guard; a match-pattern binding whose name happens to collide with a fresh tyvar could shadow, or be shadowed by, the wrong entity during unification/substitution. Not yet triggered by a known repro — flagged as a latent hazard by the 2026-07-03 fundamentals code review among the "high/static (not yet run)" findings, adjacent to this section's tyvar-identity work (item 4). Needs a minimal repro to confirm reachability, then either a namespace separator (reserve a prefix for fresh tyvars, distinct from any user-writable pattern-variable name) or a rename pass before pattern binding. Full findings: `docs/fundamentals-code-review-handoff-2026-07-03.md`.
+
+### Terrain (loam.terrain)
+
+> v0 landed 2026-07-23 (`loam/terrain.sprout`, `tests/loam/test_terrain.spr`,
+> `examples/gfx/terrain_demo.sprout`, `gfx.draw_cube`). Design + rationale + the full
+> follow-up list: `docs/terrain-v0.md` §9. The scoping (Q1–Q8) is recorded there. These are
+> the deferred pieces, ordered by leverage.
+
+- [ ] `P1` **Real-valued continuous field + physics-ground.** Land bodies on
+  `terrain_height(x,z)` instead of `y=0` (the twin of `loam.physics`'s gravity field). Needs
+  a **`to_int` intrinsic** (mirror of `to_double`'s `sitofp` at `stdlib/prelude.sprout:1221` —
+  `fptosi`) to sample the field at arbitrary real positions, **and** a **lossless float text
+  encoding** to persist heights (`double_to_string` is `%g`/6-sig-fig lossy and there is no
+  `parse_double`). These two missing primitives are the whole reason v0 is integer-banded
+  (`docs/terrain-v0.md` §4); adding them is compiler/prelude work → seed refresh + approval.
+- [ ] `P2` **World-map scale + negative coordinates.** The coarse Civ/Settlers scale: huge
+  extent, a chunk **eviction policy** (v0 has none — chunks only accumulate), and **negative
+  coords** — v0 lattice math assumes non-negative coords (integer division / local `imod`), so
+  a world spanning the origin needs floor-division semantics in `spatial_hash`/`value_at`.
+- [ ] `P2` **Region files (many chunks per file).** Fewer files at extreme scale; blocked on
+  **partial-read I/O** (`read_file` reads a whole file, no seek), which the runtime lacks.
+- [ ] `P2` **Runtime editing / manual placement.** Mutate a resident chunk, mark dirty,
+  `write_file` it back — the write path already exists (generator uses it). Deferred in v0 (Q7).
+- [ ] `P3` **Smoother noise** (Perlin/simplex) behind the `value_at` seam if the stepped/blocky
+  look matters (value noise is deliberately the blockiest of the family; simplex's patent
+  expired 2022-01-08, so it is now free to use).
+- [ ] `P3` **Extract terrain rendering into `loam.view`** (as the view systems were extracted
+  from the demos), and the far-horizon **AAA asset/mesh/LOD** render track the current raylib
+  shim cannot reach.
