@@ -2,7 +2,7 @@ module examples.gfx.ecs_agents
 
 import stdlib.gfx
 import stdlib.rng (rng_below)
-import loam.scene (Scene, EntityId, eid_index, scene_new, spawn, scene_frame)
+import loam.scene (Scene, EntityId, eid_index, scene_new, spawn)
 import loam.agent (world_step, arcade_gravity)
 import loam.driver (fixed_step)
 import loam.physics (Body, body_new)
@@ -66,7 +66,7 @@ fn populate(s: Scene, n: Int, i: Int) -> Unit !{IO} =
       id <- spawn(s, h, grid_x(i), grid_z(i), heading_of(i), seed_of(i), energy_of(i))
       # Stagger each playhead so walkers don't animate in lockstep (the modulo in
       # anim_advance preserves this initial phase offset).
-      mutvec_set(scene_frame(s), eid_index(id), to_double(rng_below(seed_of(i) + 1, 30)))
+      mutvec_set(s.frame, eid_index(id), to_double(rng_below(seed_of(i) + 1, 30)))
       populate(s, n, i + 1)
 
 # --- Orbit camera framing ---------------------------------------------------

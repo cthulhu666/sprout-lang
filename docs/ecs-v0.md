@@ -61,7 +61,12 @@ node trees that don't map cleanly onto Sprout today.
 
 An **entity** is an integer index. A **Scene** is an immutable record holding
 mutable component arrays (the record is immutable; mutation flows through the
-`MutVec` handles it holds):
+`MutVec` handles it holds).
+
+> **Note.** This early sketch uses the *brace* record syntax and a prototype field
+> set; records-v0 settled on the paren form (`type Scene = (count: …, …)`) and the
+> shipped nine-component shape. The concrete, current declaration is §10.2 — read
+> the block below as intent, not literal syntax.
 
 ```
 type Scene = Scene {
@@ -90,9 +95,11 @@ run the two systems — but the same code scales to N with mixed skins/clips/pos
 ## 6. Open questions to validate FIRST (load-bearing)
 
 > **Answered by the prototype — see §9.** §6.1 (record ergonomics) resolved
-> *negatively*: records don't codegen, so the §5 record `Scene` is replaced by a
-> single-constructor ADT. §6.2 (the `wrap` wart) materialized as predicted and
-> steered the substrate away from `wrap`. §6.3 (fixed capacity) stands.
+> *negatively at the time*: records didn't codegen, so the §5 record `Scene` was
+> replaced by a single-constructor ADT. **Since superseded (§10.2): records-v0
+> reached codegen and `Scene` is now the record §5 drew.** §6.2 (the `wrap` wart)
+> materialized as predicted and steered the substrate away from `wrap`. §6.3 (fixed
+> capacity) stands.
 
 1. **Records-of-`MutVec` ergonomics.** Is `Scene` as an immutable record holding
    mutable-array handles pleasant to write and pass around? Records are still
@@ -134,9 +141,13 @@ it all stacks on.
 The first cut answered §6's load-bearing questions empirically. The findings
 inverted the recommended substrate in §4/§5.
 
-### 9.1 Records are non-executable — the record `Scene` (§5) was rejected
+### 9.1 Records were non-executable — the record `Scene` (§5) was rejected *(since resolved — §10.2)*
 
-The §6.1 spike (a record holding `MutVec` component arrays) **fails at codegen**.
+> **Historical.** This documents the prototype-era state. Records-v0 has since
+> reached codegen and `Scene` is now a record (§10.2); the paragraph below is why
+> it wasn't, then.
+
+The §6.1 spike (a record holding `MutVec` component arrays) **failed at codegen**.
 Records parse and type-check — the AST/inference carry `TRecord`/`@rec:` markers
 and `tests/conformance/run/record_types.spr` exists — but `translate_expr` in
 `stdlib/compiler/ast_to_ir.sprout:926` bails with `record not yet supported`, and
@@ -241,15 +252,20 @@ what makes the game loop reproducible and testable).
 
 `loam.scene` extends the prototype's store to the agent's needs: it adds
 `heading`, per-entity `rng` state, an `energy` stat, and a `resting` phase bit,
-for **nine** `MutVec` components. Nine is the hard ceiling: `ast_to_ir` rejects a
-single-constructor ADT of arity 10 (`sprout_make` goes to 9). A tenth component
-must therefore *group* existing ones into a sub-struct (e.g. a `Transform` holding
-pos+heading), **not** widen the constructor — grouping mixed-typed fields also
-shrinks the same-typed-accessor footgun. To fit nine, per-entity animation *rate*
-was dropped: cadence is a single global constant in the view (a uniform walk pace,
-arguably more realistic). `test_scene` sentinels every component (a distinct value
-per array, read back through each accessor) — the only guard against a miscounted
-`match` slot returning a wrong-but-same-typed component.
+for **nine** `MutVec` components. Since records-v0 reached codegen
+(`docs/records-v0.md`), `Scene` is now the **record** §5 originally drew — named,
+immutable fields over the mutable component arrays — not the single-constructor ADT
+the prototype fell back to (§9.1/§9.2 are that history). Nine is still the hard
+ceiling: a single-constructor product, record or ADT, lowers through `sprout_makeN`,
+which stops at `sprout_make9`. A tenth component must therefore *group* existing
+ones into a sub-struct (e.g. a `Transform` holding pos+heading), **not** widen the
+record. To fit nine, per-entity animation *rate* was dropped: cadence is a single
+global constant in the view (a uniform walk pace, arguably more realistic).
+Named-field access (`s.pos_x`) is resolved by name, not tuple position, so the
+prototype's miscounted-`match`-slot footgun — a wrong-but-same-typed component
+returned with no type error — is gone; `test_scene` still sentinels every component
+(a distinct value per array, read back through each accessor) to catch a wiring
+mistake in `scene_new`/`spawn`.
 
 ### 10.3 `agent` — a pure AI hook and one game-loop tick
 
@@ -260,7 +276,7 @@ per array, read back through each accessor) — the only guard against a miscoun
   "AI" — unit-testable on its own and the single swap point for smarter behaviour.
 - `group_of(i, num_groups) -> Int` — **pure**: the flock an entity belongs to,
   derived as `i mod num_groups`. Group is *not* a stored component — the `Scene`
-  constructor is already at its 9-field ceiling (§10.2), and a round-robin id
+  record is already at its 9-field ceiling (§10.2), and a round-robin id
   mapping needs no slot. The view must place/tint groups by this same function.
 - `cohere(nh, px, pz, gx, gz) -> Double` — **pure**, inverse-trig-free: bends a
   wander heading `nh` toward the group centroid `(gx, gz)`. The 2D cross product of

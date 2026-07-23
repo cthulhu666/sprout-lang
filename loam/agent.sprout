@@ -3,7 +3,7 @@ module loam.agent
 import stdlib.mutable (MutVec, mutvec_at, mutvec_set, mutvec_new)
 import stdlib.math (sin, cos, sqrt, pi)
 import stdlib.rng (rng_next, rng_below)
-import loam.scene (Scene, EntityId, eid_index, scene_count, scene_pos_x, scene_pos_z, scene_heading, scene_frame, scene_rng, scene_energy, scene_resting)
+import loam.scene (Scene, EntityId, eid_index, scene_count)
 import loam.physics (Body, physics_step, launch, airborne, impulse_for_height)
 
 # Loam's behaviour layer: the game-model tick. `world_step` advances every entity
@@ -125,14 +125,14 @@ fn in_bounds(v: Double, bound: Double) -> Bool = v <= bound && v >= (-bound)
 fn rest_entity(s: Scene, ent: EntityId) -> Unit !{IO} =
   do
     let idx = eid_index(ent)
-    e <- mutvec_at(scene_energy(s), idx)
+    e <- mutvec_at(s.energy, idx)
     let e2 = e + energy_regain
     if e2 >= energy_full
     then
       do
-        mutvec_set(scene_energy(s), idx, energy_full)
-        mutvec_set(scene_resting(s), idx, 0)
-    else mutvec_set(scene_energy(s), idx, e2)
+        mutvec_set(s.energy, idx, energy_full)
+        mutvec_set(s.resting, idx, 0)
+    else mutvec_set(s.energy, idx, e2)
 
 # Launch a jump: spend half the stamina budget, restart the animation playhead so
 # the jump clip plays from its first frame, and impart upward velocity to the body.
@@ -142,9 +142,9 @@ fn rest_entity(s: Scene, ent: EntityId) -> Unit !{IO} =
 fn launch_jump(s: Scene, body: Body, ent: EntityId, seed: Int, e: Double) -> Unit !{IO} =
   do
     let idx = eid_index(ent)
-    mutvec_set(scene_rng(s), idx, rng_next(rng_next(rng_next(seed))))
-    mutvec_set(scene_energy(s), idx, e - jump_cost)
-    mutvec_set(scene_frame(s), idx, 0.0)
+    mutvec_set(s.rng, idx, rng_next(rng_next(rng_next(seed))))
+    mutvec_set(s.energy, idx, e - jump_cost)
+    mutvec_set(s.frame, idx, 0.0)
     launch(body, ent, jump_impulse)
 
 # The walk MOVE: decide a wander heading, bend it toward the group centroid
@@ -158,9 +158,9 @@ fn walk_move(s: Scene, bound: Double,
              g: Int, ent: EntityId, seed: Int, e: Double) -> Unit !{IO} =
   do
     let idx = eid_index(ent)
-    heading <- mutvec_at(scene_heading(s), idx)
-    px <- mutvec_at(scene_pos_x(s), idx)
-    pz <- mutvec_at(scene_pos_z(s), idx)
+    heading <- mutvec_at(s.heading, idx)
+    px <- mutvec_at(s.pos_x, idx)
+    pz <- mutvec_at(s.pos_z, idx)
     let gr = group_of(idx, g)
     sx <- mutvec_at(sum_x, gr)
     sz <- mutvec_at(sum_z, gr)
@@ -168,7 +168,7 @@ fn walk_move(s: Scene, bound: Double,
     match agent_decide(seed, heading) with
     | (nh0, nseed) ->
         do
-          mutvec_set(scene_rng(s), idx, nseed)
+          mutvec_set(s.rng, idx, nseed)
           # Bend the wander heading toward the group's centre of mass. `c` counts
           # this agent's own group and always includes itself, so it is >= 1.
           let nh = cohere(nh0, px, pz, sx / to_double(c), sz / to_double(c))
@@ -178,16 +178,16 @@ fn walk_move(s: Scene, bound: Double,
           # heading (clamped for the corner case). The agent always advances and
           # always faces where it goes — no pinning, no run-in-place.
           let rh = reflect(nh,! in_bounds (cx, bound),! in_bounds (cz, bound))
-          mutvec_set(scene_pos_x(s), idx, clampd(px + (cos(rh) * walk_step), (-bound), bound))
-          mutvec_set(scene_pos_z(s), idx, clampd(pz + (sin(rh) * walk_step), (-bound), bound))
-          mutvec_set(scene_heading(s), idx, rh)
+          mutvec_set(s.pos_x, idx, clampd(px + (cos(rh) * walk_step), (-bound), bound))
+          mutvec_set(s.pos_z, idx, clampd(pz + (sin(rh) * walk_step), (-bound), bound))
+          mutvec_set(s.heading, idx, rh)
           let e2 = e - energy_spend
           if e2 <= 0.0
           then
             do
-              mutvec_set(scene_energy(s), idx, 0.0)
-              mutvec_set(scene_resting(s), idx, 1)
-          else mutvec_set(scene_energy(s), idx, e2)
+              mutvec_set(s.energy, idx, 0.0)
+              mutvec_set(s.resting, idx, 1)
+          else mutvec_set(s.energy, idx, e2)
 
 # --- Flock tick: rest or walk, never jump (a leap would fling a member out of its
 # flock). Body-less — flocking agents never leave the ground.
@@ -196,15 +196,15 @@ fn flock_walk(s: Scene, bound: Double,
               g: Int, ent: EntityId) -> Unit !{IO} =
   do
     let idx = eid_index(ent)
-    seed <- mutvec_at(scene_rng(s), idx)
-    e <- mutvec_at(scene_energy(s), idx)
+    seed <- mutvec_at(s.rng, idx)
+    e <- mutvec_at(s.energy, idx)
     walk_move(s, bound, sum_x, sum_z, cnt, g, ent, seed, e)
 
 fn flock_step_entity(s: Scene, bound: Double,
                      sum_x: MutVec Double, sum_z: MutVec Double, cnt: MutVec Int,
                      g: Int, ent: EntityId) -> Unit !{IO} =
   do
-    ph <- mutvec_at(scene_resting(s), eid_index(ent))
+    ph <- mutvec_at(s.resting, eid_index(ent))
     if ph == 1 then rest_entity(s, ent) else flock_walk(s, bound, sum_x, sum_z, cnt, g, ent)
 
 fn flock_go(s: Scene, bound: Double,
@@ -224,8 +224,8 @@ fn wander_walk(s: Scene, body: Body, bound: Double,
                g: Int, ent: EntityId) -> Unit !{IO} =
   do
     let idx = eid_index(ent)
-    seed <- mutvec_at(scene_rng(s), idx)
-    e <- mutvec_at(scene_energy(s), idx)
+    seed <- mutvec_at(s.rng, idx)
+    e <- mutvec_at(s.energy, idx)
     if should_jump(seed, e, wander_jump_denom)
     then launch_jump(s, body, ent, seed, e)
     else walk_move(s, bound, sum_x, sum_z, cnt, g, ent, seed, e)
@@ -234,7 +234,7 @@ fn wander_ground(s: Scene, body: Body, bound: Double,
                  sum_x: MutVec Double, sum_z: MutVec Double, cnt: MutVec Int,
                  g: Int, ent: EntityId) -> Unit !{IO} =
   do
-    ph <- mutvec_at(scene_resting(s), eid_index(ent))
+    ph <- mutvec_at(s.resting, eid_index(ent))
     if ph == 1 then rest_entity(s, ent) else wander_walk(s, body, bound, sum_x, sum_z, cnt, g, ent)
 
 fn wander_step_entity(s: Scene, body: Body, bound: Double,
@@ -261,8 +261,8 @@ fn accum_go(s: Scene, sum_x: MutVec Double, sum_z: MutVec Double, cnt: MutVec In
   if i >= n then ()
   else
     do
-      x <- mutvec_at(scene_pos_x(s), i)
-      z <- mutvec_at(scene_pos_z(s), i)
+      x <- mutvec_at(s.pos_x, i)
+      z <- mutvec_at(s.pos_z, i)
       let gr = group_of(i, g)
       sx <- mutvec_at(sum_x, gr)
       sz <- mutvec_at(sum_z, gr)

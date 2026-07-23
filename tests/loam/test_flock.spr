@@ -1,5 +1,5 @@
 import stdlib.test (TestState, new_state, assert_true, summary)
-import loam.scene (Scene, scene_new, spawn, scene_pos_x, scene_pos_z)
+import loam.scene (Scene, scene_new, spawn)
 import loam.agent (world_step_flock, group_of)
 import stdlib.mutable (mutvec_at)
 import stdlib.rng (rng_below, rng_next)
@@ -30,7 +30,7 @@ fn grp_sum_x(s: Scene, n: Int, groups: Int, g: Int, i: Int, acc: Double) -> Doub
   if i >= n then acc
   else
     do
-      x <- mutvec_at(scene_pos_x(s), i)
+      x <- mutvec_at(s.pos_x, i)
       let a2 = if group_of(i, groups) == g then acc + x else acc
       grp_sum_x(s, n, groups, g, i + 1, a2)
 
@@ -38,7 +38,7 @@ fn grp_sum_z(s: Scene, n: Int, groups: Int, g: Int, i: Int, acc: Double) -> Doub
   if i >= n then acc
   else
     do
-      z <- mutvec_at(scene_pos_z(s), i)
+      z <- mutvec_at(s.pos_z, i)
       let a2 = if group_of(i, groups) == g then acc + z else acc
       grp_sum_z(s, n, groups, g, i + 1, a2)
 
@@ -51,8 +51,8 @@ fn grp_spread_go(s: Scene, n: Int, groups: Int, g: Int, cx: Double, cz: Double,
   if i >= n then acc
   else
     do
-      x <- mutvec_at(scene_pos_x(s), i)
-      z <- mutvec_at(scene_pos_z(s), i)
+      x <- mutvec_at(s.pos_x, i)
+      z <- mutvec_at(s.pos_z, i)
       let d = if group_of(i, groups) == g
               then sqrt(((x - cx) * (x - cx)) + ((z - cz) * (z - cz)))
               else 0.0
@@ -98,10 +98,10 @@ fn main() -> Unit !{IO} =
     sB <- scene_new(8)
     spawn_flock(sB, 8, 0)
     run_steps(sB, 30.0, 2, 20)
-    axA <- mutvec_at(scene_pos_x(sA), 3)
-    axB <- mutvec_at(scene_pos_x(sB), 3)
-    azA <- mutvec_at(scene_pos_z(sA), 3)
-    azB <- mutvec_at(scene_pos_z(sB), 3)
+    axA <- mutvec_at(sA.pos_x, 3)
+    axB <- mutvec_at(sB.pos_x, 3)
+    azA <- mutvec_at(sA.pos_z, 3)
+    azB <- mutvec_at(sB.pos_z, 3)
     assert_true(state, "flock deterministic pos_x", axA == axB)
     assert_true(state, "flock deterministic pos_z", azA == azB)
 
