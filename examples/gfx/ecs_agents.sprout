@@ -4,15 +4,16 @@ import stdlib.gfx
 import stdlib.rng (rng_below)
 import loam.scene (Scene, scene_new, spawn, scene_frame)
 import loam.agent (world_step)
-import loam.view (Clips, animation_system, render_system, orbit_next_angle, orbit_zoomed, orbit_camera)
+import loam.view (Clips, animation_system_jump, render_system, orbit_next_angle, orbit_zoomed, orbit_camera)
 import stdlib.mutable (mutvec_set)
 
-# A little game grown on Loam (the engine seed). A crowd of characters, each
-# driven by a super-simple agent that wanders in random directions and rests when
-# it tires — all decided by loam.agent.world_step, which touches only the scene's
-# component arrays. THIS file is the view: it advances the model with world_step,
-# then reads the same components to animate and draw. The game logic is tested
-# headless in tests/loam/test_agent.spr; nothing here re-implements it.
+# A little game grown on Loam (the engine seed). A crowd of characters, each driven
+# by a super-simple agent that wanders in random directions, rests when it tires,
+# and occasionally LEAPS — all decided by loam.agent.world_step, which touches only
+# the scene's component arrays. THIS file is the view: it advances the model with
+# world_step, then reads the same components to animate (run while walking, idle
+# while resting, jump mid-leap) and draw. The game logic is tested headless in
+# tests/loam/test_agent.spr; nothing here re-implements it.
 #
 # Run:
 #   mise exec -- just run-gfx examples/gfx/ecs_agents.sprout
@@ -49,7 +50,9 @@ fn grid_z(i: Int) -> Double = (to_double(i / grid_cols) - row_center) * grid_gap
 # together.
 fn seed_of(i: Int) -> Int = (i + 1) * 7919
 fn heading_of(i: Int) -> Double = to_double(rng_below(seed_of(i), 628)) / 100.0
-fn energy_of(i: Int) -> Double = 20.0 + to_double(i - (i / 80) * 80)  # 20 .. 100
+# Start above the half-stamina jump threshold (varied, so the crowd tires and leaps
+# out of phase, not in lockstep): 60 .. 99.
+fn energy_of(i: Int) -> Double = 60.0 + to_double(i - (i / 40) * 40)
 
 # Load one independent model instance per entity (independent skeletons => each
 # poses on its own playhead) and spawn it into the scene.
@@ -76,9 +79,11 @@ let min_radius = 18.0
 let max_radius = 100.0
 
 # The frame: advance the MODEL (world_step), then the VIEW (animate + draw + UI)
-# via loam.view. `paused` gates ONLY the camera orbit (Space toggles it); the
-# simulation and animation always run.
-fn render_loop(s: Scene, c: Clips, angle: Double, paused: Bool, radius: Double) -> Unit !{IO} =
+# via loam.view. The jump clip (js/jc/jkf) is threaded to the animation system so a
+# leaping agent (phase >= 2) poses on it. `paused` gates ONLY the camera orbit
+# (Space toggles it); the simulation and animation always run.
+fn render_loop(s: Scene, c: Clips, js: Int, jc: Int, jkf: Double,
+               angle: Double, paused: Bool, radius: Double) -> Unit !{IO} =
   do
     stop <- gfx.window_should_close()
     if stop then gfx.close_window()
@@ -91,13 +96,13 @@ fn render_loop(s: Scene, c: Clips, angle: Double, paused: Bool, radius: Double) 
         orbit_camera(radius, angle, orbit_height, orbit_target_y)
         gfx.frame_begin()
         gfx.draw_grid(60, 1.0)
-        animation_system(s, c)
+        animation_system_jump(s, c, js, jc, jkf)
         render_system(s)
         gfx.draw_fps(10, 10)
         plus <- gfx.button(940, 20, 44, 44, "+")
         minus <- gfx.button(940, 72, 44, 44, "-")
         gfx.frame_end()
-        render_loop(s, c, next, now_paused, orbit_zoomed(radius, plus, minus, zoom_step, min_radius, max_radius))
+        render_loop(s, c, js, jc, jkf, next, now_paused, orbit_zoomed(radius, plus, minus, zoom_step, min_radius, max_radius))
 
 fn main() -> Unit !{IO} =
   do
@@ -108,7 +113,7 @@ fn main() -> Unit !{IO} =
     s <- scene_new(n)
     populate(s, n, 0)
 
-    # Two clips from skeleton-matched GLBs; each is the last (non-pose) clip.
+    # Three clips from skeleton-matched GLBs; each is the last (non-pose) clip.
     idle_set <- gfx.load_animations("assets/models/character_idle.glb")
     idle_count <- gfx.animation_count(idle_set)
     let idle_clip = idle_count - 1
@@ -117,6 +122,10 @@ fn main() -> Unit !{IO} =
     run_count <- gfx.animation_count(run_set)
     let run_clip = run_count - 1
     run_kf <- gfx.animation_keyframes(run_set, run_clip)
+    jump_set <- gfx.load_animations("assets/models/character_jump.glb")
+    jump_count <- gfx.animation_count(jump_set)
+    let jump_clip = jump_count - 1
+    jump_kf <- gfx.animation_keyframes(jump_set, jump_clip)
 
     let clips = Clips(idle_set, idle_clip, to_double(idle_kf), run_set, run_clip, to_double(run_kf))
-    render_loop(s, clips, 0.0, false, orbit_start_radius)
+    render_loop(s, clips, jump_set, jump_clip, to_double(jump_kf), 0.0, false, orbit_start_radius)

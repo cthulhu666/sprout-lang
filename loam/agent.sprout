@@ -3,7 +3,7 @@ module loam.agent
 import stdlib.mutable (MutVec, mutvec_at, mutvec_set, mutvec_new)
 import stdlib.math (sin, cos, sqrt, pi)
 import stdlib.rng (rng_next, rng_below)
-import loam.scene (Scene, scene_count, scene_pos_x, scene_pos_z, scene_heading, scene_rng, scene_energy, scene_resting)
+import loam.scene (Scene, scene_count, scene_pos_x, scene_pos_z, scene_heading, scene_frame, scene_rng, scene_energy, scene_resting)
 
 # Loam's behaviour layer: the game-model tick. `world_step` advances every entity
 # one fixed step — decide, move, spend/regain energy — touching ONLY component
@@ -30,6 +30,17 @@ let two_pi = 2.0 * pi
 let cohesion_gain = 0.4  # radians of turn per unit of sin(heading-error)
 let cohesion_max_turn = 0.18  # clamp on the per-tick cohesion turn (radians)
 let cohesion_min_dist = 0.05  # within this of the centroid: treat as arrived, don't steer
+
+# Jump: an occasional leap. It spends HALF the stamina budget, so it is only
+# possible above half energy, and it is far rarer than a turn. There is no spare
+# Scene component for a jump flag (the constructor is at its 9-field ceiling), so
+# the `resting` phase field carries it: 0 walking, 1 resting, and any value >= 2 is
+# "jumping" — the value itself counts DOWN each tick, holding the agent for the jump.
+let energy_half = energy_full / 2.0  # a jump needs strictly more than this to afford it
+let jump_cost = energy_full / 2.0  # ...and spends exactly this
+let jump_ticks = 33  # ticks a jump holds the agent (~one full jump-clip cycle: 33 keyframes)
+let jump_start = jump_ticks + 1  # initial `resting` value at launch (counts down to 0)
+let wander_jump_denom = 300  # ~1-in-300 per walking tick: far rarer than a turn (1-in-40)
 
 fn clampd(v: Double, lo: Double, hi: Double) -> Double =
   if v < lo then lo else if v > hi then hi else v
@@ -87,6 +98,15 @@ export fn agent_decide(seed: Int, heading: Double) -> (Double, Int) =
       s2 = rng_next(s1)
   in if rng_below(s1, turn_denom) == 0 then (heading_from(s2), s2) else (heading, s1)
 
+# PURE. True iff a walking agent should launch a jump THIS tick. Three gates:
+# jumping must be enabled (`jump_denom > 0` — callers pass 0 to forbid it, e.g. for
+# flocks), the agent must have MORE than half stamina (the jump spends half, so it
+# cannot afford one at or below the threshold), and a rare 1-in-`jump_denom` roll
+# must fire. Peeks two PRNG steps ahead so the roll is independent of the walk
+# decision's own draw; unit-testable on its own like agent_decide.
+export fn should_jump(seed: Int, energy: Double, jump_denom: Int) -> Bool =
+  jump_denom > 0 && energy > energy_half && rng_below(rng_next(rng_next(seed)), jump_denom) == 0
+
 fn in_bounds(v: Double, bound: Double) -> Bool = v <= bound && v >= (-bound)
 
 # Resting entity: regain energy in place; return to walking once fully recovered.
@@ -103,21 +123,38 @@ fn rest_entity(s: Scene, i: Int) -> Unit !{IO} =
         mutvec_set(scene_resting(s), i, 0)
     else mutvec_set(scene_energy(s), i, e2)
 
-# Walking entity: decide a wander heading, bend it toward the group centroid
-# (flocking), step along the result (reflecting off the arena walls so it turns
-# back inward without pinning), and spend energy. No collision handling between
-# agents. When energy runs out, flip to resting. The centroid arrays are the tick's
-# pre-move snapshot (sum_x/sum_z/cnt indexed by group), so every agent steers by the
-# SAME positions — the update is simultaneous and reproducible.
-fn walk_entity(s: Scene, bound: Double,
-               sum_x: MutVec Double, sum_z: MutVec Double, cnt: MutVec Int,
-               g: Int, i: Int) -> Unit !{IO} =
+# Launch a jump: spend half the stamina budget, restart the animation playhead so
+# the jump clip plays from its first frame, and enter the jumping phase (held for
+# jump_ticks). Advance the PRNG past the roll so the next tick differs.
+fn launch_jump(s: Scene, i: Int, seed: Int, e: Double) -> Unit !{IO} =
   do
-    seed <- mutvec_at(scene_rng(s), i)
+    mutvec_set(scene_rng(s), i, rng_next(rng_next(rng_next(seed))))
+    mutvec_set(scene_energy(s), i, e - jump_cost)
+    mutvec_set(scene_frame(s), i, 0.0)
+    mutvec_set(scene_resting(s), i, jump_start)
+
+# Jumping entity: hold position and count the jump phase DOWN; when it reaches the
+# floor, return to walking (phase 0). Energy is untouched — the cost was paid at
+# launch. A jumping agent does not move, so the jump reads as an in-place leap.
+fn jump_entity(s: Scene, i: Int) -> Unit !{IO} =
+  do
+    r <- mutvec_at(scene_resting(s), i)
+    let nr = r - 1
+    mutvec_set(scene_resting(s), i, if nr <= 1 then 0 else nr)
+
+# The walk MOVE: decide a wander heading, bend it toward the group centroid
+# (flocking), step along the result (reflecting off the arena walls so it turns back
+# inward without pinning), and spend energy — flipping to resting when spent. The
+# centroid arrays are the tick's pre-move snapshot (sum_x/sum_z/cnt indexed by
+# group), so every agent steers by the SAME positions — simultaneous, reproducible.
+# `seed`/`e` were already read by the caller (walk_entity) for the jump decision.
+fn walk_move(s: Scene, bound: Double,
+             sum_x: MutVec Double, sum_z: MutVec Double, cnt: MutVec Int,
+             g: Int, i: Int, seed: Int, e: Double) -> Unit !{IO} =
+  do
     heading <- mutvec_at(scene_heading(s), i)
     px <- mutvec_at(scene_pos_x(s), i)
     pz <- mutvec_at(scene_pos_z(s), i)
-    e <- mutvec_at(scene_energy(s), i)
     let gr = group_of(i, g)
     sx <- mutvec_at(sum_x, gr)
     sz <- mutvec_at(sum_z, gr)
@@ -146,21 +183,37 @@ fn walk_entity(s: Scene, bound: Double,
               mutvec_set(scene_resting(s), i, 1)
           else mutvec_set(scene_energy(s), i, e2)
 
-fn step_entity(s: Scene, bound: Double,
+# Walking entity: MAYBE launch a jump (rare, gated on stamina and `jump_denom`),
+# otherwise take a normal walk move. Reading seed+energy up front lets the pure
+# `should_jump` hook make the call with no side effects. `jump_denom` of 0 forbids
+# jumping (flocks pass 0), so only the plain-wander tick leaps.
+fn walk_entity(s: Scene, bound: Double, jump_denom: Int,
                sum_x: MutVec Double, sum_z: MutVec Double, cnt: MutVec Int,
                g: Int, i: Int) -> Unit !{IO} =
   do
-    resting <- mutvec_at(scene_resting(s), i)
-    if resting == 1 then rest_entity(s, i) else walk_entity(s, bound, sum_x, sum_z, cnt, g, i)
+    seed <- mutvec_at(scene_rng(s), i)
+    e <- mutvec_at(scene_energy(s), i)
+    if should_jump(seed, e, jump_denom)
+    then launch_jump(s, i, seed, e)
+    else walk_move(s, bound, sum_x, sum_z, cnt, g, i, seed, e)
 
-fn step_go(s: Scene, bound: Double,
+fn step_entity(s: Scene, bound: Double, jump_denom: Int,
+               sum_x: MutVec Double, sum_z: MutVec Double, cnt: MutVec Int,
+               g: Int, i: Int) -> Unit !{IO} =
+  do
+    ph <- mutvec_at(scene_resting(s), i)
+    if ph == 1 then rest_entity(s, i)
+    else if ph >= 2 then jump_entity(s, i)
+    else walk_entity(s, bound, jump_denom, sum_x, sum_z, cnt, g, i)
+
+fn step_go(s: Scene, bound: Double, jump_denom: Int,
            sum_x: MutVec Double, sum_z: MutVec Double, cnt: MutVec Int,
            g: Int, i: Int, n: Int) -> Unit !{IO} =
   if i >= n then ()
   else
     do
-      step_entity(s, bound, sum_x, sum_z, cnt, g, i)
-      step_go(s, bound, sum_x, sum_z, cnt, g, i + 1, n)
+      step_entity(s, bound, jump_denom, sum_x, sum_z, cnt, g, i)
+      step_go(s, bound, jump_denom, sum_x, sum_z, cnt, g, i + 1, n)
 
 # Phase A: accumulate each group's position sums and member count into the scratch
 # arrays. Resting agents count too — they are still part of the flock and anchor its
@@ -181,15 +234,15 @@ fn accum_go(s: Scene, sum_x: MutVec Double, sum_z: MutVec Double, cnt: MutVec In
       mutvec_set(cnt, gr, c + 1)
       accum_go(s, sum_x, sum_z, cnt, g, i + 1, n)
 
-# Advance the whole scene one fixed tick, partitioning the crowd into `num_groups`
-# FLOCKS whose members steer toward their shared centroid. Two phases so the update
-# is simultaneous: (A) snapshot every group's centroid from CURRENT positions into
-# scratch arrays, then (B) move each agent, steering it toward its group's snapshot
-# centroid. Computing centroids inline during the move would be O(n^2) AND make the
-# result depend on iteration order (agent 0's move would shift the centroid agent 1
-# sees), breaking reproducibility. `bound` is the arena half-extent; `num_groups < 1`
-# is treated as one group. O(n) per tick.
-export fn world_step_flock(s: Scene, bound: Double, num_groups: Int) -> Unit !{IO} =
+# The shared tick core: partition the crowd into `num_groups` FLOCKS whose members
+# steer toward their shared centroid, in two phases so the update is simultaneous:
+# (A) snapshot every group's centroid from CURRENT positions into scratch arrays,
+# then (B) move each agent, steering it toward its group's snapshot centroid.
+# Computing centroids inline during the move would be O(n^2) AND make the result
+# depend on iteration order (agent 0's move would shift the centroid agent 1 sees),
+# breaking reproducibility. `jump_denom` (0 = never) is threaded to the walk step.
+# `bound` is the arena half-extent; `num_groups < 1` is treated as one group. O(n).
+fn world_step_core(s: Scene, bound: Double, num_groups: Int, jump_denom: Int) -> Unit !{IO} =
   do
     n <- scene_count(s)
     let g = if num_groups < 1 then 1 else num_groups
@@ -197,14 +250,20 @@ export fn world_step_flock(s: Scene, bound: Double, num_groups: Int) -> Unit !{I
     sum_z <- mutvec_new(g, 0.0)
     cnt <- mutvec_new(g, 0)
     accum_go(s, sum_x, sum_z, cnt, g, 0, n)
-    step_go(s, bound, sum_x, sum_z, cnt, g, 0, n)
+    step_go(s, bound, jump_denom, sum_x, sum_z, cnt, g, 0, n)
 
-# Advance the whole scene one fixed tick of PLAIN wandering — no flocking. This is
-# `world_step_flock` with one singleton group PER agent (num_groups = live count):
-# each agent's group centroid is its own position, so `cohere` no-ops (distance ~0)
-# and the result is identical to a cohesion-free walk. Keeping it as the two-arg
-# entry point means the wandering-crowd example is unchanged by the flocking work.
+# Advance one tick with flocking into `num_groups`. Flocking agents do NOT jump
+# (jump_denom 0) — a leap would fling a member out of its flock; jumping is a
+# plain-wander behaviour. `bound` is the arena half-extent.
+export fn world_step_flock(s: Scene, bound: Double, num_groups: Int) -> Unit !{IO} =
+  world_step_core(s, bound, num_groups, 0)
+
+# Advance one tick of PLAIN wandering — no flocking, but agents may occasionally
+# JUMP. This is `world_step_core` with one singleton group PER agent (num_groups =
+# live count): each agent's group centroid is its own position, so `cohere` no-ops
+# (distance ~0) and the walk is cohesion-free. Keeping this as the two-arg entry
+# point means the wandering-crowd example needs no change to gain jumping.
 export fn world_step(s: Scene, bound: Double) -> Unit !{IO} =
   do
     n <- scene_count(s)
-    world_step_flock(s, bound, n)
+    world_step_core(s, bound, n, wander_jump_denom)

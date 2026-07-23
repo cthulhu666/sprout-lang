@@ -1,6 +1,6 @@
 import stdlib.test (TestState, new_state, assert_eq, assert_true, summary)
 import loam.scene (Scene, scene_new, spawn, scene_pos_x, scene_pos_z, scene_heading, scene_energy, scene_resting)
-import loam.agent (agent_decide, world_step)
+import loam.agent (agent_decide, world_step, should_jump)
 import stdlib.mutable (mutvec_at, mutvec_set)
 
 # The engine's game loop, tested entirely headless — no graphics. This is the
@@ -85,5 +85,35 @@ fn main() -> Unit !{IO} =
     assert_true(state, "wall: stays in bounds", ex <= 5.0)
     assert_true(state, "wall: moved inward, not pinned", ex < 4.96)
     assert_true(state, "wall: heading reflected inward (~pi)", (eh > 3.13) && (eh < 3.15))
+
+    # --- Jump: the AI hook is pure and correctly gated ---
+    # should_jump fires only when jumping is enabled (denom > 0), the agent has MORE
+    # than half stamina (a jump spends half), and a rare 1-in-denom roll hits. Seed 80
+    # rolls a jump at denom 300; seed 1 does not.
+    assert_true(state, "jump: seed 80 jumps at full energy", should_jump(80, 100.0, 300))
+    assert_true(state, "jump: blocked at half energy",! should_jump (80, 50.0, 300))
+    assert_true(state, "jump: disabled when denom 0 (flocks never jump)",! should_jump (80, 100.0, 0))
+    assert_true(state, "jump: rare — seed 1 holds",! should_jump (1, 100.0, 300))
+
+    # --- Jump behaviour through world_step: leap, hold, land ---
+    # Seed 80 at full stamina leaps on its first wander tick: it spends half its
+    # energy, enters the jumping phase, and holds position while the jump plays.
+    sJ <- scene_new(2)
+    j0 <- spawn(sJ, 1, 3.0, 4.0, 0.0, 80, 100.0)
+    world_step(sJ, 50.0)
+    je1 <- mutvec_at(scene_energy(sJ), 0)
+    jr1 <- mutvec_at(scene_resting(sJ), 0)
+    jx1 <- mutvec_at(scene_pos_x(sJ), 0)
+    jz1 <- mutvec_at(scene_pos_z(sJ), 0)
+    assert_true(state, "jump: spent half stamina", je1 == 50.0)
+    assert_true(state, "jump: entered jumping phase", jr1 >= 2)
+    assert_true(state, "jump: holds position while airborne", (jx1 == 3.0) && (jz1 == 4.0))
+    # After enough ticks the jump completes and the agent walks again (and moves).
+    run_steps(sJ, 50.0, 40)
+    jr2 <- mutvec_at(scene_resting(sJ), 0)
+    jx2 <- mutvec_at(scene_pos_x(sJ), 0)
+    jz2 <- mutvec_at(scene_pos_z(sJ), 0)
+    assert_eq(state, "jump: returned to walking", jr2, 0)
+    assert_true(state, "jump: moved after landing", (jx2 != 3.0) || (jz2 != 4.0))
 
     summary(state)

@@ -30,34 +30,54 @@ let rad_to_deg = 57.29578  # 180/pi — heading (radians) to raylib's Y-rotation
 # (cos θ, sin θ) — a 90° offset. Face = heading°-90 so walkers face where they go.
 let facing_offset = 90.0
 
-# System: pose each entity on its ACTIVE clip — run while walking, idle while resting
-# — advancing that clip's playhead (each clip has its own keyframe count).
+# Pose one entity on a given clip: advance its playhead by anim_rate (wrapping at the
+# clip's own keyframe count) and push the pose to the model. Shared by both animation
+# systems below so clip selection is the only thing that differs.
+fn pose_entity(s: Scene, i: Int, aset: Int, aclip: Int, akf: Double) -> Unit !{IO} =
+  do
+    h <- mutvec_at(scene_model(s), i)
+    cur <- mutvec_at(scene_frame(s), i)
+    let nf = anim_advance(cur, anim_rate, akf)
+    mutvec_set(scene_frame(s), i, nf)
+    gfx.update_animation(h, aset, aclip, nf)
+
+# System: pose each entity on its ACTIVE clip — idle while resting, else run.
 fn anim_go(s: Scene, c: Clips, i: Int, n: Int) -> Unit !{IO} =
   if i >= n then ()
   else
     match c with
     | Clips is ic ikf rs rc rkf ->
         do
-          h <- mutvec_at(scene_model(s), i)
           resting <- mutvec_at(scene_resting(s), i)
-          cur <- mutvec_at(scene_frame(s), i)
-          if resting == 1
-          then
-            do
-              let nf = anim_advance(cur, anim_rate, ikf)
-              mutvec_set(scene_frame(s), i, nf)
-              gfx.update_animation(h, is, ic, nf)
-          else
-            do
-              let nf = anim_advance(cur, anim_rate, rkf)
-              mutvec_set(scene_frame(s), i, nf)
-              gfx.update_animation(h, rs, rc, nf)
+          if resting == 1 then pose_entity(s, i, is, ic, ikf)
+          else pose_entity(s, i, rs, rc, rkf)
           anim_go(s, c, i + 1, n)
 
 export fn animation_system(s: Scene, c: Clips) -> Unit !{IO} =
   do
     n <- scene_count(s)
     anim_go(s, c, 0, n)
+
+# System: like animation_system, but with a third state for JUMPING. The `resting`
+# phase field is 0 walking / 1 resting / >= 2 jumping (loam.agent), so an entity with
+# phase >= 2 poses on the jump clip. Demos that never jump use animation_system and
+# need not supply a jump clip.
+fn anim_go_jump(s: Scene, c: Clips, js: Int, jc: Int, jkf: Double, i: Int, n: Int) -> Unit !{IO} =
+  if i >= n then ()
+  else
+    match c with
+    | Clips is ic ikf rs rc rkf ->
+        do
+          ph <- mutvec_at(scene_resting(s), i)
+          if ph == 1 then pose_entity(s, i, is, ic, ikf)
+          else if ph >= 2 then pose_entity(s, i, js, jc, jkf)
+          else pose_entity(s, i, rs, rc, rkf)
+          anim_go_jump(s, c, js, jc, jkf, i + 1, n)
+
+export fn animation_system_jump(s: Scene, c: Clips, jump_set: Int, jump_clip: Int, jump_kf: Double) -> Unit !{IO} =
+  do
+    n <- scene_count(s)
+    anim_go_jump(s, c, jump_set, jump_clip, jump_kf, 0, n)
 
 # System: draw each entity at its ground position, rotated to face its heading.
 fn render_go(s: Scene, i: Int, n: Int) -> Unit !{IO} =

@@ -33,8 +33,9 @@ echo "converted -> $OUT (skin: $SKIN_NAME)"
 
 # Animation-only GLBs: one clip per file, skeleton matching the model so
 # gfx.load_animations drives it (no skin needed — the pose is what matters).
-# `idle` and `run` back examples/gfx/ecs_agents.sprout; `jump` is available too.
-for clip in idle run; do
+# `idle`/`run`/`jump` back examples/gfx/ecs_agents.sprout (idle while resting, run
+# while walking, jump for the occasional leap).
+for clip in idle run jump; do
   CLIP_SRC="$PACK_DIR/Animations/$clip.fbx"
   CLIP_OUT="$OUT_DIR/character_$clip.glb"
   [ -f "$CLIP_SRC" ] || { echo "error: $CLIP_SRC not found" >&2; exit 1; }
