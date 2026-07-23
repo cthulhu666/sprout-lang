@@ -209,7 +209,13 @@ long long gfx_load_model(const char *path) {
     g_models_cap = new_cap;
   }
   int h = g_model_count++;
+  /* raylib's glTF loader warns "Colors attribute data already loaded" once per
+   * mesh carrying a COLOR_0 vertex attribute (the Kenney models do). It is benign,
+   * and with one model loaded per crowd entity it floods the log. Silence warnings
+   * for the load only, then restore LOG_WARNING so real warnings elsewhere show. */
+  SetTraceLogLevel(LOG_ERROR);
   Model m = LoadModel(path);
+  SetTraceLogLevel(LOG_WARNING);
   /* Repair a common FBX->glTF import defect: a diffuse with alpha 0 (fully
    * transparent) renders black/invisible under the default shader. A fully
    * transparent base colour is never intentional, so force it opaque; RGB and
