@@ -368,6 +368,7 @@ fn collect_expr(e: typed_ast.TypedExpr, sigs: Dict (List ast.TypeExpr, Maybe ast
   | typed_ast.TDo steps _ _ -> collect_do_steps(steps, sigs)
   | typed_ast.TRecord _ fields _ _ -> collect_record_fields(fields, sigs)
   | typed_ast.TGetField x _ _ _ -> collect_expr(x, sigs)
+  | typed_ast.TRecordUpdate base fields _ _ -> list_append(collect_expr(base, sigs), collect_record_fields(fields, sigs))
   | _ -> Nil
 
 fn collect_exprs(es: List typed_ast.TypedExpr, sigs: Dict (List ast.TypeExpr, Maybe ast.TypeExpr, List ast.TypeConstraint)) -> List VerifyOutcome =

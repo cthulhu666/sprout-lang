@@ -481,6 +481,8 @@ fn infer_expr(
       infer_record_expr(state, env, subst, eff_subst, type_name, fields, pos)
   | ast.GetFieldExpr rec_expr field_name pos ->
       infer_get_field(state, env, subst, eff_subst, rec_expr, field_name, pos)
+  | ast.RecordUpdateExpr base fields pos ->
+      infer_record_update(state, env, subst, eff_subst, base, fields, pos)
   | ast.IntRangeExpr lo hi pos -> infer_range(state, env, subst, eff_subst, lo, hi, pos)
   | ast.StringTemplateExpr _ pos ->
       InferErr(pos, "Internal error: StringTemplateExpr reached inference; desugar pass should have eliminated it")
@@ -3232,6 +3234,77 @@ fn build_tvar_subst(vars: List String, args: List types.Type, acc: Dict types.Ty
   | (Cons v rest_v, Cons a rest_a) ->
       build_tvar_subst(rest_v, rest_a, dict_set(v, a, acc))
 
+# --- Record functional update (docs/records-v0.md §4.4) ---
+
+# `base with (field = value, ...)`: the base must have a record type; each named
+# field must belong to that record and its new value must unify with the declared
+# field type; the result type equals the base type.
+fn infer_record_update(
+  state: unifier.InferState,
+  env: Dict types.Scheme,
+  subst: Dict types.Type,
+  eff_subst: Dict types.Effect,
+  base: ast.Expr,
+  fields: List ast.RecordField,
+  pos: source.SourcePos
+) -> InferResult !{IO} =
+  do
+    br <- infer_expr(state, env, subst, eff_subst, base)
+    match br with
+    | InferErr pos e -> InferErr(pos, e)
+    | InferOk typed_base s1 es1 base_eff ->
+        match record_head_name(unifier.apply_subst(s1, typed_ast.typed_expr_type(typed_base))) with
+        | Nothing -> InferErr(pos, "record update `with` requires a record value on the left")
+        | Just rec_name ->
+            infer_update_fields(state, env, s1, es1, rec_name,
+              unifier.apply_subst(s1, typed_ast.typed_expr_type(typed_base)),
+              typed_base, fields, Nil, base_eff, pos)
+
+# Head record type name of a resolved type (peels TApp for parametric records).
+fn record_head_name(t: types.Type) -> Maybe String =
+  match t with
+  | types.TConst tid -> Just(types.type_id_name(tid))
+  | types.TApp _ _ -> Just(extract_tconst_name(t))
+  | _ -> Nothing
+
+fn infer_update_fields(
+  state: unifier.InferState,
+  env: Dict types.Scheme,
+  subst: Dict types.Type,
+  eff_subst: Dict types.Effect,
+  rec_name: String,
+  base_type: types.Type,
+  typed_base: typed_ast.TypedExpr,
+  fields: List ast.RecordField,
+  acc: List typed_ast.TypedRecordField,
+  acc_eff: types.Effect,
+  pos: source.SourcePos
+) -> InferResult !{IO} =
+  match fields with
+  | Nil ->
+      InferOk(
+        typed_ast.TRecordUpdate(typed_base, typed_record_field_list_reverse(acc), base_type, pos),
+        subst, eff_subst, acc_eff)
+  | Cons field rest ->
+      match field with
+      | ast.RecordField fname fexpr ->
+          match dict_get(str_concat("@rec:", str_concat(rec_name, str_concat(":", fname))), env) with
+          | Nothing -> InferErr(pos, "record " ++ rec_name ++ " has no field `" ++ fname ++ "`")
+          | Just field_scheme ->
+              do
+                vr <- infer_expr(state, env, subst, eff_subst, fexpr)
+                match vr with
+                | InferErr pos e -> InferErr(pos, e)
+                | InferOk typed_val s1 es1 val_eff ->
+                    do
+                      field_t <- unifier.instantiate(state, field_scheme)
+                      match unifier.unify_types(s1, typed_ast.typed_expr_type(typed_val), field_t) with
+                      | Err e -> InferErr(pos, "record update field type mismatch: " ++ e)
+                      | Ok s2 ->
+                          infer_update_fields(state, env, s2, es1, rec_name, base_type, typed_base, rest,
+                            Cons(typed_ast.TypedRecordField(fname, typed_val), acc),
+                            merge_effects(acc_eff, val_eff), pos)
+
 # ---------------------------------------------------------------------------
 # Range expression (new)
 # ---------------------------------------------------------------------------
@@ -3736,6 +3809,8 @@ fn apply_subst_typed_expr(subst: Dict types.Type, e: typed_ast.TypedExpr) -> typ
       typed_ast.TRecord(name, apply_subst_typed_record_fields(subst, fields), unifier.apply_subst(subst, t), pos)
   | typed_ast.TGetField expr field t pos ->
       typed_ast.TGetField(apply_subst_typed_expr(subst, expr), field, unifier.apply_subst(subst, t), pos)
+  | typed_ast.TRecordUpdate base fields t pos ->
+      typed_ast.TRecordUpdate(apply_subst_typed_expr(subst, base), apply_subst_typed_record_fields(subst, fields), unifier.apply_subst(subst, t), pos)
 
 # ---------------------------------------------------------------------------
 # Post-inference dispatch resolution for return-type-driven typeclass methods
@@ -4017,6 +4092,8 @@ fn resolve_dispatch_typed_expr(env: Dict types.Scheme, subst: Dict types.Type, e
       typed_ast.TRecord(name, resolve_dispatch_typed_record_fields_local(env, subst, fields), t, pos)
   | typed_ast.TGetField expr field t pos ->
       typed_ast.TGetField(resolve_dispatch_typed_expr(env, subst, expr), field, t, pos)
+  | typed_ast.TRecordUpdate base fields t pos ->
+      typed_ast.TRecordUpdate(resolve_dispatch_typed_expr(env, subst, base), resolve_dispatch_typed_record_fields_local(env, subst, fields), t, pos)
 
 fn resolve_dispatch_typed_list(env: Dict types.Scheme, subst: Dict types.Type, xs: List typed_ast.TypedExpr) -> List typed_ast.TypedExpr =
   match xs with
@@ -4110,6 +4187,10 @@ fn assert_resolved_typed_expr(fn_name: String, expr: typed_ast.TypedExpr) -> Uni
     | typed_ast.TDo steps _ _ -> assert_resolved_typed_do_steps(fn_name, steps)
     | typed_ast.TRecord _ fields _ _ -> assert_resolved_typed_record_fields(fn_name, fields)
     | typed_ast.TGetField expr _ _ _ -> assert_resolved_typed_expr(fn_name, expr)
+    | typed_ast.TRecordUpdate base fields _ _ ->
+        do
+          assert_resolved_typed_expr(fn_name, base)
+          assert_resolved_typed_record_fields(fn_name, fields)
 
 fn assert_resolved_typed_expr_list(fn_name: String, exprs: List typed_ast.TypedExpr) -> Unit !{IO} =
   match exprs with

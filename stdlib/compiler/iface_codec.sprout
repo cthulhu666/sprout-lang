@@ -1106,6 +1106,8 @@ export fn encode_ast_expr(e: ast.Expr) -> String =
       string_concat_many(["(RecordExpr ", encode_quoted_str(name), " ", encode_record_field_list(fields), " ", encode_ast_pos(p), ")"])
   | ast.GetFieldExpr obj field p ->
       string_concat_many(["(GetFieldExpr ", encode_ast_expr(obj), " ", encode_quoted_str(field), " ", encode_ast_pos(p), ")"])
+  | ast.RecordUpdateExpr base fields p ->
+      string_concat_many(["(RecordUpdateExpr ", encode_ast_expr(base), " ", encode_record_field_list(fields), " ", encode_ast_pos(p), ")"])
 
 fn encode_ast_expr_list(xs: List ast.Expr) -> String =
   string_concat_many(["(", join_ast_exprs(xs), ")"])
@@ -1647,6 +1649,7 @@ fn decode_ast_expr_by_tag(s: String, bytes: Bytes, i: Int, total: Int, tag: Stri
   else if tag == "DoExpr" then decode_do_expr_at(s, bytes, i, total)
   else if tag == "RecordExpr" then decode_record_expr_at(s, bytes, i, total)
   else if tag == "GetFieldExpr" then decode_get_field_expr_at(s, bytes, i, total)
+  else if tag == "RecordUpdateExpr" then decode_record_update_expr_at(s, bytes, i, total)
   else Nothing
 
 fn decode_var_expr_at(s: String, bytes: Bytes, i: Int, total: Int) -> Maybe(ast.Expr, Int) =
@@ -1774,6 +1777,13 @@ fn decode_get_field_expr_at(s: String, bytes: Bytes, i: Int, total: Int) -> Mayb
       Just(p, m) = decode_pos_at(s, bytes, skip_ws(s, bytes, k, total), total) else Nothing
       Just end = expect_char(s, bytes, skip_ws(s, bytes, m, total), total, ')') else Nothing
   in Just((ast.GetFieldExpr(obj, field, p), end))
+
+fn decode_record_update_expr_at(s: String, bytes: Bytes, i: Int, total: Int) -> Maybe(ast.Expr, Int) =
+  let Just(base, j) = decode_ast_expr_at(s, bytes, skip_ws(s, bytes, i, total), total) else Nothing
+      Just(fields, k) = decode_record_field_list_at(s, bytes, skip_ws(s, bytes, j, total), total) else Nothing
+      Just(p, m) = decode_pos_at(s, bytes, skip_ws(s, bytes, k, total), total) else Nothing
+      Just end = expect_char(s, bytes, skip_ws(s, bytes, m, total), total, ')') else Nothing
+  in Just((ast.RecordUpdateExpr(base, fields, p), end))
 
 fn decode_ast_expr_list_at(s: String, bytes: Bytes, i: Int, total: Int) -> Maybe (List ast.Expr, Int) =
   match expect_char(s, bytes, i, total, '(') with

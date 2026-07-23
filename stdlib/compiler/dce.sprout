@@ -47,6 +47,7 @@ fn is_pure_expr(e: typed_ast.TypedExpr) -> Bool =
   | typed_ast.TDo _ _ _ -> false
   | typed_ast.TRecord _ fields _ _ -> all_pure_fields(fields)
   | typed_ast.TGetField obj _ _ _ -> is_pure_expr(obj)
+  | typed_ast.TRecordUpdate base fields _ _ -> is_pure_expr(base) && all_pure_fields(fields)
 
 fn all_pure_list(es: List typed_ast.TypedExpr) -> Bool =
   match es with
@@ -123,6 +124,7 @@ fn is_free(name: String, e: typed_ast.TypedExpr) -> Bool =
   | typed_ast.TDo steps _ _ -> is_free_in_steps(name, steps)
   | typed_ast.TRecord _ fields _ _ -> any_free_fields(name, fields)
   | typed_ast.TGetField obj _ _ _ -> is_free(name, obj)
+  | typed_ast.TRecordUpdate base fields _ _ -> is_free(name, base) || any_free_fields(name, fields)
 
 fn any_free_list(name: String, es: List typed_ast.TypedExpr) -> Bool =
   match es with
@@ -196,6 +198,8 @@ fn elim_expr(e: typed_ast.TypedExpr) -> typed_ast.TypedExpr =
       typed_ast.TRecord(name, elim_record_fields(fields), t, p)
   | typed_ast.TGetField obj fname t p ->
       typed_ast.TGetField(elim_expr(obj), fname, t, p)
+  | typed_ast.TRecordUpdate base fields t p ->
+      typed_ast.TRecordUpdate(elim_expr(base), elim_record_fields(fields), t, p)
 
 fn elim_list(es: List typed_ast.TypedExpr) -> List typed_ast.TypedExpr =
   match es with

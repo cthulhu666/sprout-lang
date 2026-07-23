@@ -190,6 +190,8 @@ fn desugar_expr_no_ctx_i(expr: ast.Expr, fn_idx: Dict (List (Maybe String))) -> 
       ast.RecordExpr(type_name, desugar_record_fields_i(fields, fn_idx), pos)
   | ast.GetFieldExpr rec_expr field_name pos ->
       ast.GetFieldExpr(desugar_expr_no_ctx_i(rec_expr, fn_idx), field_name, pos)
+  | ast.RecordUpdateExpr base fields pos ->
+      ast.RecordUpdateExpr(desugar_expr_no_ctx_i(base, fn_idx), desugar_record_fields_i(fields, fn_idx), pos)
   | ast.IntRangeExpr lo hi pos ->
       ast.IntRangeExpr(desugar_expr_no_ctx_i(lo, fn_idx), desugar_expr_no_ctx_i(hi, fn_idx), pos)
   | _ -> expr
@@ -518,6 +520,8 @@ fn find_redundant_no_ctx(expr: ast.Expr, fn_idx: Dict (List (Maybe String))) -> 
   | ast.DoExpr steps _ -> find_redundant_do_steps(steps, fn_idx)
   | ast.RecordExpr _ fields _ -> find_redundant_record_fields(fields, fn_idx)
   | ast.GetFieldExpr rec_expr _ _ -> find_redundant_no_ctx(rec_expr, fn_idx)
+  | ast.RecordUpdateExpr base fields _ ->
+      list_append(find_redundant_no_ctx(base, fn_idx), find_redundant_record_fields(fields, fn_idx))
   | ast.IntRangeExpr lo hi _ ->
       list_append(find_redundant_no_ctx(lo, fn_idx), find_redundant_no_ctx(hi, fn_idx))
   | _ -> Nil

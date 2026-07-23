@@ -50,4 +50,16 @@ fn main() -> Unit !{IO} =
     let _b4 = churn(3000, 0)
     assert_true(state, "extracted heap field held alone survives churn", lbl == "lbl-7")
 
+    # Functional update: `with` allocates a fresh record whose replaced field is a
+    # new heap String and whose OTHER heap field (box) is copied from `r` by
+    # IRGetField.  The base `r` must stay rooted across the update's allocation,
+    # and the result's copied + replaced heap fields must both survive churn.
+    let r2 = r with (label = "relabelled-" ++ int_to_string(3))
+    let _b5 = churn(3000, 0)
+    assert_true(state, "updated record's replaced heap field survives", r2.label == "relabelled-3")
+    assert_true(state, "updated record's COPIED nested heap field survives", r2.box.tag == "inner-9")
+    assert_eq(state, "updated record's copied scalar field survives", r2.count, 3)
+    # The base is unchanged (immutability under GC).
+    assert_true(state, "base label unchanged after update + churn", r.label == "lbl-7")
+
     summary(state)

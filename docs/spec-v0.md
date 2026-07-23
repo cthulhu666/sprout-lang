@@ -426,10 +426,21 @@ object model (and therefore ordinary garbage-collection behavior).
 Records are distinct from `Dict v` (String-keyed, homogeneous-valued, open,
 partial `dict_get -> Maybe v`) on every axis and are not interchangeable with it.
 
+**Functional update.** `base with (field = value, ...)` produces a **new** record
+with the named fields replaced and all others copied from the base; the base is
+unchanged (records are immutable). `with` reuses the match keyword — update-`with`
+follows a value expression, match-`with` follows `match`, and they are
+distinguished by the token after `with` (`( ident =` is an update, never a match
+branch). The base is evaluated once; updates chain left-to-right
+(`p with (x = 1) with (y = 2)`). Only declared fields may be named — an unknown
+field is a compile error. A `..`-spread is rejected (`..` is the range operator).
+
+```sprout
+fn shift_right(p: Point) -> Point = p with (x = p.x + 1)
+```
+
 Restrictions (v0): no row polymorphism or extensible records, no structural
-subtyping, no field punning or defaults, and no `deriving`. Functional update
-(`p with (x = v)`, docs/records-v0.md §4.4) is specified but lands in a
-follow-up; it is not yet part of the implemented surface.
+subtyping, no field punning or defaults, and no `deriving`.
 
 ### 5.7 Template literals (Experimental)
 

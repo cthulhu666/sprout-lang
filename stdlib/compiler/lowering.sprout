@@ -1233,6 +1233,8 @@ fn lower_expr(te: typed_ast.TypedExpr, ctx: LowerCtx) -> typed_ast.TypedExpr =
       typed_ast.TRecord(name, lower_record_fields(fields, ctx), t, pos)
   | typed_ast.TGetField e fname t pos ->
       typed_ast.TGetField(lower_expr(e, ctx), fname, t, pos)
+  | typed_ast.TRecordUpdate base fields t pos ->
+      typed_ast.TRecordUpdate(lower_expr(base, ctx), lower_record_fields(fields, ctx), t, pos)
 
 # expand_call_args: lower user args first (in order), then append expanded TDict
 # witness args at the end.  This matches Python typeclass_lowering.py which also

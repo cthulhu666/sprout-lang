@@ -66,6 +66,8 @@ export type Expr (..) =
   | DoExpr (List DoStep) source.SourcePos
   | RecordExpr String (List RecordField) source.SourcePos
   | GetFieldExpr Expr String source.SourcePos
+  # Functional record update `base with (field = value, ...)` (docs/records-v0.md §4.4).
+  | RecordUpdateExpr Expr (List RecordField) source.SourcePos
 
 # --- Template literal parts (Experimental — Phase 1 AST stub) ---
 # Parser wiring happens in Phase 3; this variant is unreachable until then.

@@ -76,6 +76,9 @@ export type TypedExpr (..) =
   | TDo (List TypedDoStep) types.Type source.SourcePos
   | TRecord String (List TypedRecordField) types.Type source.SourcePos
   | TGetField TypedExpr String types.Type source.SourcePos
+  # Functional record update: base value, updated fields (source order), result
+  # record type (= base type).  docs/records-v0.md §4.4.
+  | TRecordUpdate TypedExpr (List TypedRecordField) types.Type source.SourcePos
 
 export fn typed_expr_type(e: TypedExpr) -> types.Type =
   match e with
@@ -99,6 +102,7 @@ export fn typed_expr_type(e: TypedExpr) -> types.Type =
   | TDo _ t _ -> t
   | TRecord _ _ t _ -> t
   | TGetField _ _ t _ -> t
+  | TRecordUpdate _ _ t _ -> t
 
 export fn typed_expr_pos(e: TypedExpr) -> source.SourcePos =
   match e with
@@ -122,6 +126,7 @@ export fn typed_expr_pos(e: TypedExpr) -> source.SourcePos =
   | TDo _ _ p -> p
   | TRecord _ _ _ p -> p
   | TGetField _ _ _ p -> p
+  | TRecordUpdate _ _ _ p -> p
 
 # ---------------------------------------------------------------------------
 # Typed declarations

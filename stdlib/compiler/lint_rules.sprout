@@ -120,6 +120,7 @@ fn expr_uses_any(names: List String, e: ast.Expr) -> Bool =
   | ast.DoExpr steps _ -> do_steps_use_any(names, steps)
   | ast.RecordExpr _ fields _ -> record_fields_use_any(names, fields)
   | ast.GetFieldExpr rec_expr _ _ -> expr_uses_any(names, rec_expr)
+  | ast.RecordUpdateExpr base fields _ -> expr_uses_any(names, base) || record_fields_use_any(names, fields)
   | ast.IntRangeExpr lo hi _ -> expr_uses_any(names, lo) || expr_uses_any(names, hi)
   | ast.StringTemplateExpr parts _ -> template_parts_use_any(names, parts)
   | _ -> false  # leaves: Int/Float/Bool/String/Char/Unit — no sub-expressions
@@ -185,6 +186,7 @@ fn walk_expr(e: ast.Expr) -> List LintFinding =
   | ast.DoExpr steps _ -> walk_do_steps(steps)
   | ast.RecordExpr _ fields _ -> walk_record_fields(fields)
   | ast.GetFieldExpr rec_expr _ _ -> walk_expr(rec_expr)
+  | ast.RecordUpdateExpr base fields _ -> list_append(walk_expr(base), walk_record_fields(fields))
   | ast.IntRangeExpr lo hi _ ->
       list_append(walk_expr(lo), walk_expr(hi))
   | ast.StringTemplateExpr parts _ -> walk_template_parts(parts)
@@ -425,6 +427,7 @@ fn find_list_shape_in_expr(e: ast.Expr) -> List source.SourcePos =
   | ast.DoExpr steps _ -> find_list_shape_in_do_steps(steps)
   | ast.RecordExpr _ fields _ -> find_list_shape_in_record_fields(fields)
   | ast.GetFieldExpr rec_expr _ _ -> find_list_shape_in_expr(rec_expr)
+  | ast.RecordUpdateExpr base fields _ -> find_list_shape_in_expr(base) ++ find_list_shape_in_record_fields(fields)
   | ast.IntRangeExpr lo hi _ ->
       find_list_shape_in_expr(lo) ++ find_list_shape_in_expr(hi)
   | ast.StringTemplateExpr parts _ -> find_list_shape_in_template_parts(parts)
@@ -544,6 +547,7 @@ fn find_prefix_pattern_in_expr(e: ast.Expr) -> List source.SourcePos =
   | ast.DoExpr steps _ -> find_prefix_pattern_in_do_steps(steps)
   | ast.RecordExpr _ fields _ -> find_prefix_pattern_in_record_fields(fields)
   | ast.GetFieldExpr rec_expr _ _ -> find_prefix_pattern_in_expr(rec_expr)
+  | ast.RecordUpdateExpr base fields _ -> find_prefix_pattern_in_expr(base) ++ find_prefix_pattern_in_record_fields(fields)
   | ast.IntRangeExpr lo hi _ ->
       find_prefix_pattern_in_expr(lo) ++ find_prefix_pattern_in_expr(hi)
   | ast.StringTemplateExpr parts _ -> find_prefix_pattern_in_template_parts(parts)

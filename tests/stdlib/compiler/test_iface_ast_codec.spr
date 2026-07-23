@@ -167,6 +167,12 @@ fn main() -> Unit !{IO} =
           Cons(ast.RecordField("y", ast.IntExpr(2, pos0())), Nil)),
         pos0())))
 
+    assert_true(state, "RecordUpdateExpr roundtrip",
+      rt_expr(ast.RecordUpdateExpr(
+        ast.VarExpr("p", pos0()),
+        Cons(ast.RecordField("x", ast.IntExpr(9, pos0())), Nil),
+        pos0())))
+
     assert_true(state, "DoExpr with bind step roundtrip",
       rt_expr(ast.DoExpr(
         Cons(

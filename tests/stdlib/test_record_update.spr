@@ -1,0 +1,54 @@
+import stdlib.test (TestState, new_state, assert_eq, assert_true, summary)
+
+# Records v0 — functional update `p with (field = value, ...)` (docs/records-v0.md
+# §4.4).  Produces a NEW record with the named fields replaced and all others
+# copied from the base; the base is immutable.  `with` reuses the match keyword
+# (update-with follows a value, match-with follows `match`).
+
+type Point = (x: Int, y: Int)
+type Rec = (label: String, n: Int)
+
+fn point_x(p: Point) -> Int = p.x
+fn point_y(p: Point) -> Int = p.y
+
+fn upd_x(p: Point, nx: Int) -> Point = p with (x = nx)
+fn upd_both(p: Point, nx: Int, ny: Int) -> Point = p with (x = nx, y = ny)
+
+# The update value may reference the base's own fields.
+fn bump_x(p: Point) -> Point = p with (x = p.x + 1)
+
+# Chained update: the base of the second `with` is an update expression.
+fn bump_twice(p: Point) -> Point = p with (x = p.x + 1) with (y = p.y + 10)
+
+fn rec_label(r: Rec) -> String = r.label
+fn rec_n(r: Rec) -> Int = r.n
+fn relabel(r: Rec, s: String) -> Rec = r with (label = s)
+
+fn main() -> Unit !{IO} =
+  do
+    state <- new_state()
+
+    # Single-field update: x replaced, y copied unchanged.
+    assert_eq(state, "upd x sets x", point_x(upd_x(Point(x = 3, y = 4), 99)), 99)
+    assert_eq(state, "upd x copies y", point_y(upd_x(Point(x = 3, y = 4), 99)), 4)
+
+    # Multi-field update.
+    assert_eq(state, "upd both x", point_x(upd_both(Point(x = 1, y = 2), 7, 8)), 7)
+    assert_eq(state, "upd both y", point_y(upd_both(Point(x = 1, y = 2), 7, 8)), 8)
+
+    # Update value referencing the base field.
+    assert_eq(state, "bump x uses base", point_x(bump_x(Point(x = 5, y = 6))), 6)
+    assert_eq(state, "bump keeps y", point_y(bump_x(Point(x = 5, y = 6))), 6)
+
+    # Chained update.
+    assert_eq(state, "chain x", point_x(bump_twice(Point(x = 5, y = 6))), 6)
+    assert_eq(state, "chain y", point_y(bump_twice(Point(x = 5, y = 6))), 16)
+
+    # Heap field replaced, scalar field copied.
+    assert_true(state, "relabel sets label", rec_label(relabel(Rec(label = "old", n = 42), "new")) == "new")
+    assert_eq(state, "relabel copies n", rec_n(relabel(Rec(label = "old", n = 42), "new")), 42)
+
+    # Immutability: the base is unchanged after an update.
+    assert_eq(state, "base immutable", point_x(upd_x(Point(x = 3, y = 4), 99)) + 0, 99)
+
+    summary(state)

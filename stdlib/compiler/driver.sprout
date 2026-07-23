@@ -169,6 +169,8 @@ fn dump_expr(e: ast.Expr) -> String =
       sexp("record", Cons(q(type_name), dump_record_fields(fields)))
   | ast.GetFieldExpr record field_name _ ->
       sexp("get-field", [dump_expr(record), q(field_name)])
+  | ast.RecordUpdateExpr base fields _ ->
+      sexp("record-update", Cons(dump_expr(base), dump_record_fields(fields)))
 
 fn dump_exprs(items: List ast.Expr) -> List String =
   match items with

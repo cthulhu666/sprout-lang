@@ -310,10 +310,10 @@ existing GC object model). Any deviation requires up-front approval per
 
 ## 13. Spec/docs status
 
-**Implementation status.** PR1 (branch `feat/records-v0`) landed the
-**declaration, construction, and dot-access** surface end-to-end on the active IR
-codegen path; `docs/spec-v0.md` §5.6.3 is the normative record section for that
-subset, and this doc is now rationale for it. Still to land: **`with` update**
-(§4.4 — PR2) and the §8 error messages / parametric coverage / disambiguation
-tests (PR3). The §5.6.3 spec text will grow the update form when PR2 lands.
-`BACKLOG.md` item 5 tracks the remaining PRs.
+**Implementation status.** PR1 landed **declaration, construction, and
+dot-access**; PR2 landed **functional update `with`** (§4.4) — both end-to-end on
+the active IR codegen path (branch `feat/records-v0`). `docs/spec-v0.md` §5.6.3 is
+the normative record section, and this doc is now rationale for it. Still to land
+(PR3): §8 error-message fixtures, **parametric-record construction type-arg
+inference**, and record-vs-tuple / record-vs-call / shadowing parser tests.
+`BACKLOG.md` item 5 tracks the remaining work.

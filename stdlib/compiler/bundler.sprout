@@ -923,6 +923,8 @@ fn qualify_expr(ctx: ResolveCtx, scope: List String, expr: ast.Expr) -> ast.Expr
       ast.RecordExpr(qualify_type_name(ctx, type_name), qualify_record_fields(ctx, scope, fields), pos)
   | ast.GetFieldExpr record field_name pos ->
       ast.GetFieldExpr(qualify_expr(ctx, scope, record), field_name, pos)
+  | ast.RecordUpdateExpr base fields pos ->
+      ast.RecordUpdateExpr(qualify_expr(ctx, scope, base), qualify_record_fields(ctx, scope, fields), pos)
   | ast.StringTemplateExpr parts pos ->
       ast.StringTemplateExpr(qualify_template_parts(ctx, scope, parts), pos)
 

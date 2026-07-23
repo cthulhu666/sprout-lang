@@ -516,6 +516,9 @@ fn rewrite_expr(e: typed_ast.TypedExpr, fwd_keys: Dict Bool, tables: Tables) -> 
       typed_ast.TRecord(name, list_map(\f -> rewrite_field(f, fwd_keys, tables), fields), t, pos)
   | typed_ast.TGetField obj fld t pos ->
       typed_ast.TGetField(rewrite_expr(obj, fwd_keys, tables), fld, t, pos)
+  | typed_ast.TRecordUpdate base fields t pos ->
+      typed_ast.TRecordUpdate(rewrite_expr(base, fwd_keys, tables),
+        list_map(\f -> rewrite_field(f, fwd_keys, tables), fields), t, pos)
   | typed_ast.TMethodRef method class_name t pos _ ->
       typed_ast.TMethodRef(method, class_name, t, pos, method_ref_evidence(method, class_name, t, fwd_keys, tables))
   | _ -> e
@@ -584,6 +587,7 @@ fn check_expr(e: typed_ast.TypedExpr, tables: Tables) -> Maybe(source.SourcePos,
   | typed_ast.TDo steps _ _ -> check_expr_list(do_step_exprs(steps), tables)
   | typed_ast.TRecord _ fields _ _ -> check_expr_list(record_field_exprs(fields), tables)
   | typed_ast.TGetField obj _ _ _ -> check_expr(obj, tables)
+  | typed_ast.TRecordUpdate base fields _ _ -> check_expr_list(Cons(base, record_field_exprs(fields)), tables)
   | _ -> Nothing
 
 fn check_expr_list(

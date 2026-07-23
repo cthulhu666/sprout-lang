@@ -77,6 +77,9 @@ fn compute_free_vars(expr: typed_ast.TypedExpr, bound: Set, top_level: Set) -> S
                 compute_free_vars_match_arms(arms, bound, top_level))
   | typed_ast.TGetField obj _ _ _ ->
       compute_free_vars(obj, bound, top_level)
+  | typed_ast.TRecordUpdate base fields _ _ ->
+      set_union(compute_free_vars(base, bound, top_level),
+                compute_free_vars_record_fields(fields, bound, top_level))
 
 # O(n * k * log(k)) where n = list length, k = expr size.
 fn compute_free_vars_list(exprs: List typed_ast.TypedExpr, bound: Set, top_level: Set) -> Set =
@@ -1005,6 +1008,29 @@ fn translate_expr(expr: typed_ast.TypedExpr, params: List String,
                                    list_append(rec_ops,
                                      Cons(sprout_ir.IRGetField(fresh_name(name_prefix, idx1), rec_ssa, fi, fk.fk_at(fks, fi)), Nil)),
                                    fresh_name(name_prefix, idx1), idx1 + 1))
+  # Functional update: evaluate the base ONCE, then build a fresh record whose
+  # named fields take the updated values and whose other fields are copied from
+  # the base by offset (IRGetField), and emit one IRMakeCtor.
+  | typed_ast.TRecordUpdate base fields _ _ ->
+      match translate_expr(base, params, ctors, idx, cur_label, cur_ops,
+                           captures, lifted_ref, top_level, let_names, fn_arities,
+                           lambda_ctr_ref, lifted_idx_ref, name_prefix) with
+      | Err msg -> Err(msg)
+      | Ok r ->
+          match r with
+          | (base_blocks, base_lbl, base_ops, base_ssa, idx1) ->
+              match record_name_of_type(typed_ast.typed_expr_type(base)) with
+              | Nothing -> Err("ast_to_ir: record update `with` on a non-record value")
+              | Just rname ->
+                  match dict_get(rname, ctors) with
+                  | Nothing -> Err("ast_to_ir: unknown record type '" ++ rname ++ "'")
+                  | Just entry ->
+                      match entry with
+                      | sprout_ir.CtorInfo tag _arity _max_ar fks names_csv ->
+                          build_update_args(split_on_comma(names_csv), 0, fields, base_ssa, tag, rname, fks,
+                                            params, ctors, idx1, base_lbl, base_ops, base_blocks, Nil,
+                                            captures, lifted_ref, top_level, let_names, fn_arities,
+                                            lambda_ctr_ref, lifted_idx_ref, name_prefix)
 
 # Emit a single IRMakeCtor op for a 0-arity boxed constructor reference (Nil,
 # custom enum constants, etc.).  Used by translate_expr's TVar case when the
@@ -1764,6 +1790,10 @@ fn find_capture_type(expr: typed_ast.TypedExpr, name: String) -> Maybe types.Typ
       | Nothing -> find_capture_type_match_arms(arms, name)
   | typed_ast.TGetField obj _ _ _ ->
       find_capture_type(obj, name)
+  | typed_ast.TRecordUpdate base fields _ _ ->
+      match find_capture_type(base, name) with
+      | Just t -> Just(t)
+      | Nothing -> find_capture_type_fields(fields, name)
 
 # O(n * k) where n = list length, k = expr size.
 fn find_capture_type_list(exprs: List typed_ast.TypedExpr, name: String) -> Maybe types.Type =
@@ -4845,6 +4875,54 @@ fn translate_tuple_items(items: List typed_ast.TypedExpr, params: List String,
                                      captures, lifted_ref, top_level, let_names, fn_arities,
                                      lambda_ctr_ref, lifted_idx_ref, name_prefix)
 
+# Build the argument list for a record functional update, in declaration order.
+# For each declared field: if it is named in `update_fields`, translate the new
+# value; otherwise copy it from the pre-evaluated base (`base_ssa`) with an
+# IRGetField at its declaration offset (`field_pos`).  At the end emit the single
+# IRMakeCtor for the fresh record.  Mirrors translate_tuple_items' threading.
+fn build_update_args(decl_names: List String, field_pos: Int,
+                     update_fields: List typed_ast.TypedRecordField,
+                     base_ssa: String, tag: Int, rname: String, fks: String,
+                     params: List String, ctors: Dict sprout_ir.CtorInfo,
+                     idx: Int, cur_label: String, cur_ops: List sprout_ir.IROp,
+                     acc_blocks: List sprout_ir.IRBlock, acc_names: List String,
+                     captures: Dict String,
+                     lifted_ref: Ref (List sprout_ir.IRFunction),
+                     top_level: Set, let_names: Set, fn_arities: Dict Int,
+                     lambda_ctr_ref: Ref Int,
+                     lifted_idx_ref: Ref (Dict Int),
+                     name_prefix: String) ->
+    Result String (List sprout_ir.IRBlock, String, List sprout_ir.IROp, String, Int) !{IO} =
+  match decl_names with
+  | Nil ->
+      Ok((acc_blocks, cur_label,
+           list_append(cur_ops,
+             Cons(sprout_ir.IRMakeCtor(fresh_name(name_prefix, idx), rname, tag, list_reverse(acc_names)), Nil)),
+           fresh_name(name_prefix, idx), idx + 1))
+  | Cons nm rest ->
+      match typed_field_expr_for(nm, update_fields) with
+      | Just fexpr ->
+          match translate_expr(fexpr, params, ctors, idx, cur_label, cur_ops,
+                               captures, lifted_ref, top_level, let_names, fn_arities,
+                               lambda_ctr_ref, lifted_idx_ref, name_prefix) with
+          | Err msg -> Err(msg)
+          | Ok ir ->
+              match ir with
+              | (iblocks, icur_lbl, icur_ops, i_name, idx1) ->
+                  build_update_args(rest, field_pos + 1, update_fields, base_ssa, tag, rname, fks,
+                                    params, ctors, idx1, icur_lbl, icur_ops,
+                                    list_append(acc_blocks, iblocks), Cons(i_name, acc_names),
+                                    captures, lifted_ref, top_level, let_names, fn_arities,
+                                    lambda_ctr_ref, lifted_idx_ref, name_prefix)
+      | Nothing ->
+          build_update_args(rest, field_pos + 1, update_fields, base_ssa, tag, rname, fks,
+                            params, ctors, idx + 1, cur_label,
+                            list_append(cur_ops,
+                              Cons(sprout_ir.IRGetField(fresh_name(name_prefix, idx), base_ssa, field_pos, fk.fk_at(fks, field_pos)), Nil)),
+                            acc_blocks, Cons(fresh_name(name_prefix, idx), acc_names),
+                            captures, lifted_ref, top_level, let_names, fn_arities,
+                            lambda_ctr_ref, lifted_idx_ref, name_prefix)
+
 fn translate_args_scalar(args: List typed_ast.TypedExpr, params: List String,
                          ctors: Dict sprout_ir.CtorInfo,
                          idx: Int, cur_label: String, cur_ops: List sprout_ir.IROp,
@@ -6531,6 +6609,8 @@ fn collect_wc_expr(e: typed_ast.TypedExpr, top_level: Set,
   | typed_ast.TDo steps _ _ -> collect_wc_dosteps(steps, top_level, ctors, acc)
   | typed_ast.TRecord _ fields _ _ -> collect_wc_fields(fields, top_level, ctors, acc)
   | typed_ast.TGetField x _ _ _ -> collect_wc_expr(x, top_level, ctors, acc)
+  | typed_ast.TRecordUpdate base fields _ _ ->
+      collect_wc_fields(fields, top_level, ctors, collect_wc_expr(base, top_level, ctors, acc))
   | _ -> acc
 
 fn collect_wc_scrutinee(scrut: typed_ast.TypedExpr, arms: List typed_ast.TypedMatchBranch,

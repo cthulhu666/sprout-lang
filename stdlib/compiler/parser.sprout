@@ -769,7 +769,27 @@ fn parse_unary(tokens: Vec token.Token, i: Int) -> Result ParseError (ast.Expr, 
 fn parse_call(tokens: Vec token.Token, i: Int) -> Result ParseError (ast.Expr, Int) =
   do
     (expr, i2) <- parse_primary(tokens, i)
-    parse_call_rest(tokens, i2, expr)
+    (called, i3) <- parse_call_rest(tokens, i2, expr)
+    parse_update_rest(tokens, i3, called)
+
+# Record update postfix: `base with ( field = value, ... )` (docs/records-v0.md
+# §4.4).  Recognised only when `with` is followed by `( ident =` — a match branch
+# pattern never contains `ident =`, so this never captures the `with` of an
+# enclosing `match ... with` (which is followed by `|` or a pattern).  Loops so
+# `p with (...) with (...)` chains left-to-right.
+fn parse_update_rest(tokens: Vec token.Token, i: Int, base: ast.Expr) -> Result ParseError (ast.Expr, Int) =
+  if tok_is_keyword(tok_at(tokens, i), "with")
+     && tok_is_symbol(tok_at(tokens, i + 1), "(")
+     && tok_is_ident(tok_at(tokens, i + 2))
+     && tok_is_symbol(tok_at(tokens, i + 3), "=") then
+    do
+      (_, i2) <- expected_keyword("with", tokens, i)
+      (_, i3) <- expected_symbol("(", tokens, i2)
+      (fields, i4) <- collect_record_literal_fields(tokens, i3, Nil)
+      (_, i5) <- expected_symbol(")", tokens, i4)
+      parse_update_rest(tokens, i5,
+        ast.RecordUpdateExpr(base, list_reverse(fields), cur_pos(tokens, i)))
+  else Ok((base, i))
 
 fn parse_call_rest(tokens: Vec token.Token, i: Int, callee: ast.Expr) -> Result ParseError (ast.Expr, Int) =
   match match_symbol(tokens, i, "(") with
@@ -1127,6 +1147,7 @@ fn expr_names(expr: ast.Expr) -> List String =
   | ast.DoExpr steps _ -> do_steps_names(steps)
   | ast.RecordExpr _ fields _ -> record_fields_names(fields)
   | ast.GetFieldExpr target _ _ -> expr_names(target)
+  | ast.RecordUpdateExpr base fields _ -> list_append(expr_names(base), record_fields_names(fields))
 
 fn exprs_mention_name(exprs: List ast.Expr, name: String) -> Bool =
   match exprs with
@@ -1198,6 +1219,7 @@ fn expr_mentions_name(expr: ast.Expr, name: String) -> Bool =
   | ast.DoExpr steps _ -> do_steps_mention_name(steps, name)
   | ast.RecordExpr _ fields _ -> record_fields_mention_name(fields, name)
   | ast.GetFieldExpr target _ _ -> expr_mentions_name(target, name)
+  | ast.RecordUpdateExpr base fields _ -> expr_mentions_name(base, name) || record_fields_mention_name(fields, name)
 
 fn fresh_where_tmp_name(body: ast.Expr, value: ast.Expr) -> String =
   fresh_where_tmp_name_from_exprs(body, value, 0)
