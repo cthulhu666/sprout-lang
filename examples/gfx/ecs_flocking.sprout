@@ -3,7 +3,7 @@ module examples.gfx.ecs_flocking
 import stdlib.gfx
 import stdlib.math (sin, cos, pi)
 import stdlib.rng (rng_below, rng_next)
-import loam.scene (Scene, scene_new, spawn, scene_frame)
+import loam.scene (Scene, eid_index, scene_new, spawn, scene_frame)
 import loam.agent (world_step_flock, group_of)
 import loam.view (Clips, animation_system, render_system, orbit_next_angle, orbit_zoomed, orbit_camera)
 import stdlib.mutable (mutvec_set)
@@ -84,7 +84,7 @@ fn populate(s: Scene, n: Int, i: Int) -> Unit !{IO} =
       id <- spawn(s, h, x, z, heading_of(rng_next(rng_next(seed))), seed, energy_of(i))
       # Stagger each playhead so walkers don't animate in lockstep (the modulo in
       # anim_advance preserves this initial phase offset).
-      mutvec_set(scene_frame(s), id, to_double(rng_below(rng_next(rng_next(rng_next(seed))), 30)))
+      mutvec_set(scene_frame(s), eid_index(id), to_double(rng_below(rng_next(rng_next(rng_next(seed))), 30)))
       populate(s, n, i + 1)
 
 # --- Orbit camera framing ---------------------------------------------------

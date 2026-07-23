@@ -1,5 +1,5 @@
 import stdlib.test (TestState, new_state, assert_eq, assert_true, summary)
-import loam.scene (Scene, scene_new, scene_count, spawn, scene_model, scene_pos_x, scene_pos_z, scene_heading, scene_frame, scene_rng, scene_energy, scene_resting)
+import loam.scene (Scene, eid_index, scene_new, scene_count, spawn, scene_model, scene_pos_x, scene_pos_z, scene_heading, scene_frame, scene_rng, scene_energy, scene_resting)
 import stdlib.mutable (mutvec_at, mutvec_set)
 
 # loam.scene is fixed-capacity SoA storage with nine same-typed component arrays.
@@ -17,7 +17,7 @@ fn main() -> Unit !{IO} =
 
     # spawn returns incrementing ids and bumps the live count.
     id0 <- spawn(s, 111, 2.0, 3.0, 5.0, 666, 7.0)
-    assert_eq(state, "first spawn: id 0", id0, 0)
+    assert_eq(state, "first spawn: id 0", eid_index(id0), 0)
     # frame and resting default in spawn; set them to distinct sentinels too so
     # ALL nine arrays carry a unique value.
     mutvec_set(scene_frame(s), 0, 8.0)
@@ -44,7 +44,7 @@ fn main() -> Unit !{IO} =
 
     # A second entity lands in the next slot without disturbing the first.
     id1 <- spawn(s, 222, 20.0, 30.0, 50.0, 777, 70.0)
-    assert_eq(state, "second spawn: id 1", id1, 1)
+    assert_eq(state, "second spawn: id 1", eid_index(id1), 1)
     c2 <- scene_count(s)
     assert_eq(state, "count after two spawns", c2, 2)
     m1 <- mutvec_at(scene_model(s), 1)

@@ -1,6 +1,7 @@
 module loam.physics
 
 import stdlib.mutable (MutVec, mutvec_at, mutvec_set, mutvec_new)
+import loam.scene (EntityId, eid_index)
 
 # Loam's physics subsystem — a MINIMAL vertical-dynamics layer: a ballistic hop
 # under gravity. It lives in its OWN component store so it costs the 9-field Scene
@@ -36,18 +37,18 @@ export fn body_new(cap: Int) -> Body !{IO} =
     Body(y, vy)
 
 # O(1) reads for the renderer and tests.
-export fn body_y(b: Body, i: Int) -> Double !{IO} = mutvec_at(body_y_vec(b), i)
-export fn body_vy(b: Body, i: Int) -> Double !{IO} = mutvec_at(body_vy_vec(b), i)
+export fn body_y(b: Body, e: EntityId) -> Double !{IO} = mutvec_at(body_y_vec(b), eid_index(e))
+export fn body_vy(b: Body, e: EntityId) -> Double !{IO} = mutvec_at(body_vy_vec(b), eid_index(e))
 
-# Whether entity i is off the ground (mid-hop).
-export fn airborne(b: Body, i: Int) -> Bool !{IO} =
+# Whether entity `e` is off the ground (mid-hop).
+export fn airborne(b: Body, e: EntityId) -> Bool !{IO} =
   do
-    y <- mutvec_at(body_y_vec(b), i)
+    y <- mutvec_at(body_y_vec(b), eid_index(e))
     y > 0.0
 
 # Impart an upward velocity — a jump. Overwrites vy (a fresh launch, not additive).
-export fn launch(b: Body, i: Int, impulse: Double) -> Unit !{IO} =
-  mutvec_set(body_vy_vec(b), i, impulse)
+export fn launch(b: Body, e: EntityId, impulse: Double) -> Unit !{IO} =
+  mutvec_set(body_vy_vec(b), eid_index(e), impulse)
 
 # Land at the ground, resetting BOTH y and vy. Missing the vy reset would let a
 # grounded body accumulate downward speed each tick and weaken the next jump.

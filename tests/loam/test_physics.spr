@@ -1,4 +1,5 @@
 import stdlib.test (TestState, new_state, assert_true, summary)
+import loam.scene (EntityId)
 import loam.physics (Body, body_new, body_y, body_vy, airborne, launch, physics_step)
 
 # Loam's vertical physics, tested headless — a ballistic hop under gravity, with no
@@ -16,30 +17,32 @@ fn main() -> Unit !{IO} =
   do
     state <- new_state()
     b <- body_new(2)
+    let e0 = EntityId(0)
+    let e1 = EntityId(1)
 
     # --- A grounded body stays grounded (the vy-reset guard) ---
     # entity 1 is never launched; gravity must not accumulate downward velocity.
     run(b, 2, 50)
-    gy <- body_y(b, 1)
-    gvy <- body_vy(b, 1)
+    gy <- body_y(b, e1)
+    gvy <- body_vy(b, e1)
     assert_true(state, "grounded: y stays 0", gy == 0.0)
     assert_true(state, "grounded: vy stays 0 (clamp resets it)", gvy == 0.0)
-    assert_true(state, "grounded: not airborne",! airborne (b, 1))
+    assert_true(state, "grounded: not airborne",! airborne (b, e1))
 
     # --- A launched body rises, peaks, and lands ---
-    launch(b, 0, 0.33)
+    launch(b, e0, 0.33)
     run(b, 2, 1)
-    y1 <- body_y(b, 0)
+    y1 <- body_y(b, e0)
     assert_true(state, "hop: rises off the ground", y1 > 0.0)
-    assert_true(state, "hop: airborne after launch", airborne(b, 0))
+    assert_true(state, "hop: airborne after launch", airborne(b, e0))
     run(b, 2, 15)  # ~tick 16: near the apex
-    yp <- body_y(b, 0)
+    yp <- body_y(b, e0)
     assert_true(state, "hop: reaches a visible height", yp > 2.0)
     run(b, 2, 30)  # well past landing
-    yl <- body_y(b, 0)
-    vl <- body_vy(b, 0)
+    yl <- body_y(b, e0)
+    vl <- body_vy(b, e0)
     assert_true(state, "hop: lands back at ground", yl == 0.0)
     assert_true(state, "hop: velocity reset on landing", vl == 0.0)
-    assert_true(state, "hop: grounded again",! airborne (b, 0))
+    assert_true(state, "hop: grounded again",! airborne (b, e0))
 
     summary(state)

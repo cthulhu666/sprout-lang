@@ -32,6 +32,15 @@ import stdlib.mutable (MutVec, mutvec_new, mutvec_at, mutvec_set)
 # return the wrong component with NO type error; test_scene sentinels every
 # component to guard against exactly that.
 
+# An entity's identity: a zero-cost newtype over its integer slot. `wrap` keeps it
+# distinct from the many other Ints in the engine (model handles, group ids, counts)
+# so the type checker rejects crossing them, yet it compiles to the raw Int with no
+# allocation. Storage is still Int-indexed; a per-entity function unwraps once via
+# `eid_index`. `spawn` mints these; physics/agent/view consume them.
+export wrap EntityId = Int
+
+export fn eid_index(e: EntityId) -> Int = match e with | EntityId i -> i
+
 export type Scene (..) =
   | Scene (MutVec Int) (MutVec Int) (MutVec Double) (MutVec Double) (MutVec Double) (MutVec Double) (MutVec Int) (MutVec Double) (MutVec Int)
 
@@ -86,7 +95,7 @@ export fn scene_count(s: Scene) -> Int !{IO} = mutvec_at(count_cell(s), 0)
 # the model handle, transform, heading, PRNG seed, and starting energy. Caller
 # must not exceed the capacity passed to scene_new (fixed storage).
 export fn spawn(s: Scene, model: Int, x: Double, z: Double,
-                heading: Double, seed: Int, energy: Double) -> Int !{IO} =
+                heading: Double, seed: Int, energy: Double) -> EntityId !{IO} =
   do
     id <- scene_count(s)
     mutvec_set(scene_model(s), id, model)
@@ -98,4 +107,4 @@ export fn spawn(s: Scene, model: Int, x: Double, z: Double,
     mutvec_set(scene_energy(s), id, energy)
     mutvec_set(scene_resting(s), id, 0)
     mutvec_set(count_cell(s), 0, id + 1)
-    id
+    EntityId(id)
