@@ -6,24 +6,27 @@ import loam.view (orbit_next_angle, orbit_zoomed, orbit_camera)
 
 # A terrain rendered on Loam. loam.terrain is the headless MODEL (seeded, chunked, biome
 # tiles; tested in tests/loam/test_terrain.spr); THIS file is the view. At startup it
-# generates a small bounded region of chunks to disk (the "upfront generation" half of the
-# design), then each frame PAGES those chunks into a resident cache and draws one colored
-# cube per tile — the same cull-to-resident/per-tile-draw loop that later takes real assets.
-# Terrain is STEPPED (discrete elevation bands, docs/terrain-v0.md §4), so the relief reads
-# as stacked cubes shaded by the scene key light.
+# generates a bounded region of chunks to disk (the "upfront generation" half of the design),
+# pages them in, and BAKES every tile into one static GPU mesh (gfx.mesh_capture_*). Because
+# the terrain never changes, the frame loop then draws the whole map in a SINGLE call — no
+# per-frame per-tile work — which is what keeps a 256x256 (65k-cube) map at 60 FPS. Terrain is
+# STEPPED (discrete elevation bands, docs/terrain-v0.md §4); relief reads as stacked cubes
+# shaded by the scene key light.
 #
 # Run (auto-closes after N frames with SPROUT_GFX_MAX_FRAMES=N):
 #   mise exec -- just run-gfx examples/gfx/terrain_demo.sprout
 
 # --- Map layout (bounded location on the streaming substrate) ---------------
-let chunk_edge = 16  # tiles per chunk edge
-let region_chunks = 2  # region is region_chunks x region_chunks chunks
+let chunk_edge = 32  # tiles per chunk edge
+let region_chunks = 8  # region is region_chunks x region_chunks chunks (256x256 tiles)
 let map_dir = "/tmp"  # one file per chunk lands here (chunk_<cx>_<cz>.terrain)
 let tile_size = 1.0  # world units per tile (cube edge)
-let band_step = 0.5  # world units of height per elevation band
+let band_step = 0.6  # world units of height per elevation band
 
-# World span in tiles/units, and the offset that centres the map on the origin.
+# World span in tiles/units, and the offset that centres the map on the origin. Camera and
+# grid framing (below) DERIVE from this, so resizing the map is a one-line change here.
 let span_tiles = region_chunks * chunk_edge
+let world_span = to_double(span_tiles) * tile_size
 let half = to_double(span_tiles) / 2.0
 
 # --- Biome palette ----------------------------------------------------------
@@ -80,17 +83,18 @@ fn draw_region(w: World, size: Int, ncx: Int, ncz: Int, cx: Int, cz: Int) -> Uni
       draw_chunk(w, cx, cz, size)
       draw_region(w, size, ncx, ncz, cx + 1, cz)
 
-# --- Orbit camera framing ---------------------------------------------------
-let orbit_start_radius = 48.0
-let orbit_height = 34.0
-let orbit_target_y = 3.0
-let orbit_step = 0.006
-let zoom_step = 3.0
-let min_radius = 20.0
-let max_radius = 110.0
+# --- Orbit camera framing (derived from map size) ---------------------------
+let orbit_start_radius = world_span * 0.85
+let orbit_height = world_span * 0.6
+let orbit_target_y = 4.0
+let orbit_step = 0.004
+let zoom_step = world_span * 0.04
+let min_radius = world_span * 0.35
+let max_radius = world_span * 2.5
 
-fn render_loop(w: World, size: Int, ncx: Int, ncz: Int,
-               angle: Double, paused: Bool, radius: Double) -> Unit !{IO} =
+# The terrain is STATIC, so it is baked into ONE GPU mesh at startup (see main) and drawn in a
+# single call per frame — no per-frame per-tile work. The frame loop only spins the camera.
+fn render_loop(mesh: Int, angle: Double, paused: Bool, radius: Double) -> Unit !{IO} =
   do
     stop <- gfx.window_should_close()
     if stop then gfx.close_window()
@@ -101,15 +105,13 @@ fn render_loop(w: World, size: Int, ncx: Int, ncz: Int,
         let next = if now_paused then angle else orbit_next_angle(angle, orbit_step)
         orbit_camera(radius, angle, orbit_height, orbit_target_y)
         gfx.frame_begin()
-        gfx.draw_grid(64, 1.0)
-        gfx.terrain_begin()
-        draw_region(w, size, ncx, ncz, 0, 0)
-        gfx.terrain_end()
+        gfx.draw_grid(span_tiles + 48, 1.0)
+        gfx.draw_captured(mesh)
         gfx.draw_fps(10, 10)
         plus <- gfx.button(940, 20, 44, 44, "+")
         minus <- gfx.button(940, 72, 44, 44, "-")
         gfx.frame_end()
-        render_loop(w, size, ncx, ncz, next, now_paused,
+        render_loop(mesh, next, now_paused,
                     orbit_zoomed(radius, plus, minus, zoom_step, min_radius, max_radius))
 
 fn main() -> Unit !{IO} =
@@ -120,4 +122,9 @@ fn main() -> Unit !{IO} =
                      lattice0 = 24, elevation_levels = 12)
     gen_region(cfg, map_dir, region_chunks, region_chunks, 0, 0)
     w <- world_new(cfg, map_dir)
-    render_loop(w, chunk_edge, region_chunks, region_chunks, 0.0, false, orbit_start_radius)
+    # Bake every tile of the region into one static mesh: mesh_capture_begin captures each
+    # draw_cube instead of drawing it, so the existing per-tile loop runs ONCE, at startup.
+    gfx.mesh_capture_begin()
+    draw_region(w, chunk_edge, region_chunks, region_chunks, 0, 0)
+    mesh <- gfx.mesh_capture_end()
+    render_loop(mesh, 0.0, false, orbit_start_radius)
