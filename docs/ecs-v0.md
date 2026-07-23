@@ -207,9 +207,9 @@ entity/component/system split.
 
 The prototype became **Loam**, "the seed of a game engine" (botanical, like
 Sprout: the fertile ground apps root into). This realises §8 ("Path to an
-engine") and reorganises the code into three tiers by responsibility.
+engine") and reorganises the code by responsibility.
 
-### 10.1 Three tiers — and game code leaves `stdlib/`
+### 10.1 The tiers — and game code leaves `stdlib/`
 
 `stdlib/` is the *language* standard library; a scene/entity system and an AI are
 game-domain code and do not belong there. So:
@@ -217,8 +217,17 @@ game-domain code and do not belong there. So:
 | Tier | Lives in | Modules |
 |---|---|---|
 | Language stdlib | `stdlib/` | `stdlib.rng` (general PRNG), `stdlib.gfx` |
-| **Loam engine** | `loam/` (a second package root) | `loam.scene`, `loam.agent` |
-| Example app | `examples/gfx/` | `ecs_agents` — supplies layout + rendering |
+| **Loam model** | `loam/` (a second package root) | `loam.scene`, `loam.agent` — **graphics-free, headless-tested** |
+| **Loam view** | `loam/` | `loam.view` — reusable gfx systems (animation, render, orbit camera) that *read* Scene components |
+| Example app | `examples/gfx/` | `ecs_agents`, `ecs_flocking` — supply only layout + the frame loop |
+
+The `model` / `view` split inside `loam/` is deliberate and load-bearing:
+`loam.scene`/`loam.agent` never import `stdlib.gfx`, which is exactly what lets the
+whole game loop be asserted headless (§10.4). `loam.view` is the optional rendering
+layer — it depends on gfx and so is exercised only through the examples (it cannot
+be linked without the raylib shim). Apps compose the view systems and supply the
+world authoring the engine has no business dictating: where entities spawn, the
+camera framing, the window.
 
 `loam.*` resolves outside `stdlib_root` via the sanctioned second-package-root
 mechanism: `compile-driver --emit-ir <stdlib> --package-root <repo-root> <file>`
@@ -294,8 +303,9 @@ verified without gfx, and each view is a pure *reader* of components it never mu
 
 ### 10.5 The demos — a wandering crowd and N flocking groups
 
-Two sibling examples share the engine and the same view systems (animation, render,
-orbit camera), differing only in which step they drive:
+Two sibling examples share the engine *and* the `loam.view` systems (animation,
+render, orbit camera), so each file is now just world authoring plus a frame loop —
+they differ mainly in which step they drive:
 
 - `examples/gfx/ecs_agents.sprout` — the **plain wandering crowd** (`world_step`).
   One knob, `agent_count`; a near-square grid and the wander arena derive from it.

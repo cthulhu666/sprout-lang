@@ -1,0 +1,106 @@
+module loam.view
+
+import stdlib.gfx
+import stdlib.linalg (anim_advance)
+import stdlib.math (sin, cos, pi)
+import stdlib.mutable (mutvec_at, mutvec_set)
+import loam.scene (Scene, scene_count, scene_model, scene_pos_x, scene_pos_z, scene_heading, scene_frame, scene_resting)
+
+# Loam's VIEW layer: reusable rendering systems that READ the scene's component
+# arrays and draw them. This is deliberately separate from loam.scene / loam.agent
+# (which are graphics-free and headless-tested): the pure model never depends on
+# this module, but every gfx app can. A "system" here is the same shape as in
+# loam.agent — a function iterating the arrays — except these call gfx, so they
+# cannot be tested without a window and live outside the headless engine core.
+#
+# Apps supply layout, spawning, and the frame loop; they compose these systems and
+# the orbit-camera helpers to render. Two demos share this file verbatim
+# (examples/gfx/ecs_agents, ecs_flocking); before it existed they each cloned it.
+
+# --- Animation clips --------------------------------------------------------
+# The idle and run cycles live in separate GLBs whose skeleton matches the model.
+# Clips bundles both (set, clip index, keyframe count) so a caller threads one value
+# instead of six.
+export type Clips (..) =
+  | Clips Int Int Double Int Int Double  # idle_set idle_clip idle_kf run_set run_clip run_kf
+
+let anim_rate = 1.0  # playhead advance per tick
+let rad_to_deg = 57.29578  # 180/pi — heading (radians) to raylib's Y-rotation degrees
+# raylib's Y-rotation A faces (-sin A, cos A), but travel at heading θ is
+# (cos θ, sin θ) — a 90° offset. Face = heading°-90 so walkers face where they go.
+let facing_offset = 90.0
+
+# System: pose each entity on its ACTIVE clip — run while walking, idle while resting
+# — advancing that clip's playhead (each clip has its own keyframe count).
+fn anim_go(s: Scene, c: Clips, i: Int, n: Int) -> Unit !{IO} =
+  if i >= n then ()
+  else
+    match c with
+    | Clips is ic ikf rs rc rkf ->
+        do
+          h <- mutvec_at(scene_model(s), i)
+          resting <- mutvec_at(scene_resting(s), i)
+          cur <- mutvec_at(scene_frame(s), i)
+          if resting == 1
+          then
+            do
+              let nf = anim_advance(cur, anim_rate, ikf)
+              mutvec_set(scene_frame(s), i, nf)
+              gfx.update_animation(h, is, ic, nf)
+          else
+            do
+              let nf = anim_advance(cur, anim_rate, rkf)
+              mutvec_set(scene_frame(s), i, nf)
+              gfx.update_animation(h, rs, rc, nf)
+          anim_go(s, c, i + 1, n)
+
+export fn animation_system(s: Scene, c: Clips) -> Unit !{IO} =
+  do
+    n <- scene_count(s)
+    anim_go(s, c, 0, n)
+
+# System: draw each entity at its ground position, rotated to face its heading.
+fn render_go(s: Scene, i: Int, n: Int) -> Unit !{IO} =
+  if i >= n then ()
+  else
+    do
+      h <- mutvec_at(scene_model(s), i)
+      x <- mutvec_at(scene_pos_x(s), i)
+      z <- mutvec_at(scene_pos_z(s), i)
+      heading <- mutvec_at(scene_heading(s), i)
+      gfx.draw_model(h, x, 0.0, z, (heading * rad_to_deg) - facing_offset, 1.0)
+      render_go(s, i + 1, n)
+
+export fn render_system(s: Scene) -> Unit !{IO} =
+  do
+    n <- scene_count(s)
+    render_go(s, 0, n)
+
+# --- Orbit camera controller ------------------------------------------------
+# An app holds the orbit angle and radius as loop state and feeds its own tunables
+# (step, height, bounds) in — so the controller stays stateless and both demos reuse
+# it while sizing their camera differently.
+let two_pi = 2.0 * pi
+
+fn clampd(v: Double, lo: Double, hi: Double) -> Double =
+  if v < lo then lo else if v > hi then hi else v
+
+# Advance the orbit angle by `step`, wrapping into [0, 2pi).
+export fn orbit_next_angle(a: Double, step: Double) -> Double =
+  if stepped >= two_pi then stepped - two_pi else stepped
+  where stepped = a + step
+
+# Apply a zoom button press: `plus` pulls in (smaller radius), `minus` pushes out,
+# clamped to [lo, hi]. Neither pressed holds the radius.
+export fn orbit_zoomed(radius: Double, plus: Bool, minus: Bool,
+                       step: Double, lo: Double, hi: Double) -> Double =
+  if plus then clampd(radius - step, lo, hi)
+  else if minus then clampd(radius + step, lo, hi)
+  else radius
+
+# Place the camera on its orbit: at `angle` around the Y axis, `radius` out and
+# `height` up, looking at (0, target_y, 0) with a 45° field of view.
+export fn orbit_camera(radius: Double, angle: Double,
+                       height: Double, target_y: Double) -> Unit !{IO} =
+  gfx.set_camera(radius * sin(angle), height, radius * cos(angle),
+                 0.0, target_y, 0.0, 45.0)
