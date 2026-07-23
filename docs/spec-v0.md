@@ -440,7 +440,10 @@ fn shift_right(p: Point) -> Point = p with (x = p.x + 1)
 ```
 
 Restrictions (v0): no row polymorphism or extensible records, no structural
-subtyping, no field punning or defaults, and no `deriving`.
+subtyping, no field punning or defaults, and no `deriving`. The initial
+implementation supports records used **within their defining module**; using a
+record imported from another module is a known gap (the field markers are not yet
+canonicalized across the module boundary).
 
 ### 5.7 Template literals (Experimental)
 

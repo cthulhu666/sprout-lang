@@ -1,0 +1,1 @@
+fn bad(n: Int) -> Int = n with (x = 1)

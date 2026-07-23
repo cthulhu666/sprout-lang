@@ -1,0 +1,6 @@
+# A `Boxed Int`'s `value` field is Int; updating it with a String must be
+# rejected.  This checks that `with` applies the base record's type arguments to
+# the declared field type instead of instantiating it with a fresh variable.
+type Boxed a = (value: a, tag: String)
+
+fn bad(b: Boxed Int) -> Boxed Int = b with (value = "wrong")

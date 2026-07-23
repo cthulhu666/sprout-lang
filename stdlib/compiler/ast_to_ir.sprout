@@ -993,7 +993,7 @@ fn translate_expr(expr: typed_ast.TypedExpr, params: List String,
       | Ok r ->
           match r with
           | (rec_blocks, rec_lbl, rec_ops, rec_ssa, idx1) ->
-              match record_name_of_type(typed_ast.typed_expr_type(rec_expr)) with
+              match type_head_name(typed_ast.typed_expr_type(rec_expr)) with
               | Nothing -> Err("ast_to_ir: field access '." ++ field_name ++ "' on a non-record value")
               | Just rname ->
                   match dict_get(rname, ctors) with
@@ -1019,7 +1019,7 @@ fn translate_expr(expr: typed_ast.TypedExpr, params: List String,
       | Ok r ->
           match r with
           | (base_blocks, base_lbl, base_ops, base_ssa, idx1) ->
-              match record_name_of_type(typed_ast.typed_expr_type(base)) with
+              match type_head_name(typed_ast.typed_expr_type(base)) with
               | Nothing -> Err("ast_to_ir: record update `with` on a non-record value")
               | Just rname ->
                   match dict_get(rname, ctors) with
@@ -1084,13 +1084,6 @@ fn record_exprs_in_decl_order(decl_names: List String, fields: List typed_ast.Ty
           match record_exprs_in_decl_order(rest, fields) with
           | Nothing -> Nothing
           | Just es -> Just(Cons(e, es))
-
-# Head record type name of a resolved type (peels TApp for parametric records).
-fn record_name_of_type(t: types.Type) -> Maybe String =
-  match t with
-  | types.TConst tid -> Just(types.type_id_name(tid))
-  | types.TApp base _ -> record_name_of_type(base)
-  | _ -> Nothing
 
 # ---------------------------------------------------------------------------
 # translate_do — M3 PR 11
