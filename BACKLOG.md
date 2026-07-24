@@ -366,17 +366,17 @@ raylib) have landed. Fenced from core: shim `graphics/sprout_gfx.c` links only v
 - [x] `P3` Loam trees: **frustum culling** (landed). Trees bucket into per-chunk groups
   (`gfx_tree_push`) with per-group AABBs; `gfx_draw_trees_culled` collects visible groups and
   compacts their instances into one instanced draw per model (draw-call count stays ~constant).
-  1024² zoomed-in trees no longer stream the whole map — 29→48 FPS. See `graphics/sprout_gfx.c`,
-  `examples/gfx/terrain_rivers_demo.sprout`.
+  1024² zoomed-in trees no longer stream the whole map — 29→55 FPS (vsync-capped). See
+  `graphics/sprout_gfx.c`, `examples/gfx/terrain_rivers_demo.sprout`.
 - [ ] `P3` Loam trees: **distance LOD / model swap** (remaining half of the culling work). On top of
   the frustum culling above, swap detailed↔simple tree models per distance band, and optionally
   fade/skip trees beyond a range, for AAA density without FPS loss.
 - [ ] `P3` Loam terrain: **zoomed-OUT framerate at large maps**. Frustum culling can't help the
-  whole-map overview (everything on screen); a noisy 1024² top-surface mesh is ~15M verts → ~31 FPS.
+  whole-map overview (everything on screen); a noisy 1024² top-surface mesh is ~15M verts → ~28 FPS.
   Needs greedy meshing (merge coplanar top quads into large quads — ~10-100× fewer verts on flats)
-  and/or distance LOD on the baked chunk meshes. Separately, raylib's default ~1000-unit far-clip
-  plane cuts distant terrain on maps wider than that; raise the projection far plane in the shim
-  (custom `BeginMode3D`/projection) to see a full large map zoomed out.
+  and/or distance LOD on the baked chunk meshes. (raylib's far-clip is 4000, well beyond a 1024-unit
+  map, so the whole map IS visible — the earlier "far plane clips it" hunch was wrong; the cutoff we
+  saw was the transposed-frustum culling bug, since fixed.)
 - [ ] `P3` Loam trees: swap in **higher-poly / detailed** tree models. Instancing keeps memory flat
   (per-instance matrices, not vertices), so richer meshes cost only their own vertex upload once.
 - [ ] `P3` Loam: per-group **colour tint** for `ecs_agents` flocks. Groups are currently
