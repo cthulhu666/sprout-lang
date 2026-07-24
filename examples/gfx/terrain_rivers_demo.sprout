@@ -1,12 +1,12 @@
 module examples.gfx.terrain_rivers_demo
 
 import stdlib.gfx
-import loam.terrain (Config, Chunk, World, generate_chunk, save_chunk, load_chunk, world_new, page_in, chunk_kind_tag, chunk_band, sea_level_band, spatial_hash, TileKind, Water, Beach, Grass, Forest, Desert, Mountain, Snow, Tundra, tile_kind_of)
+import loam.terrain (Config, Chunk, World, generate_chunk, save_chunk, load_chunk, world_new, page_in, chunk_kind_tag, chunk_band, sea_level_band, spatial_hash, exposed_step_bands, TileKind, Water, Beach, Grass, Forest, Desert, Mountain, Snow, Tundra, tile_kind_of)
 import loam.hydrology (Hydrology, compute_hydrology, hydro_tier)
 import loam.vegetation (TreeKind, Palm, Broadleaf, Conifer, DarkConifer, Cactus, Shrub, tree_kind_tag, tree_for_biome)
 import loam.camera (Cam, cam_rotate, cam_zoom, cam_pitch, cam_pan)
 import loam.view (cam_apply)
-import stdlib.mutable (MutVec, mutvec_new, mutvec_at, mutvec_set)
+import stdlib.mutable (MutVec, mutvec_new, mutvec_at, mutvec_set, MutMatrix, mutmatrix_new, mutmatrix_set, mutmatrix_at_or)
 
 # The Loam terrain demo (see terrain_demo.sprout) WITH RIVERS. loam.hydrology (headless, tested in
 # tests/loam/test_hydrology.spr) computes drainage over the whole region as a global upfront pass:
@@ -95,16 +95,37 @@ fn river_rgb(tier: Int) -> (Int, Int, Int) =
   else if tier == 2 then (48, 105, 185)  # river
   else (78, 140, 205)  # creek
 
-# Draw one tile as a cube, centred at its world (x, z), lifted to its elevation band. A cell the
-# hydrology pass flagged (flow_tier > 0) is painted river-blue by tier instead of its biome colour.
-fn draw_tile(h: Hydrology, gx: Int, gz: Int, tag: Int, band: Int) -> Unit !{IO} =
+# World Y of a band's top face — mirrors the old cube (centre at band*band_step, edge tile_size),
+# so the baked top surface sits exactly where the cube tops used to.
+fn band_top_y(band: Int) -> Double = (to_double(band) * band_step) + (tile_size * 0.5)
+
+# Exposed side drop (world units) toward the neighbour at (nx, nz). Off-map neighbours drop to the
+# floor (y = 0) so the map perimeter reads as a solid slab; in-map, expose the step down to a lower
+# neighbour (0 when the neighbour is level-or-higher and hides the side).
+fn nbr_drop(this_band: Int, bands: MutMatrix Int, nx: Int, nz: Int, span: Int) -> Double !{IO} =
+  if (nx < 0) || (nz < 0) || (nx >= span) || (nz >= span) then band_top_y(this_band)
+  else
+    do
+      nb <- mutmatrix_at_or(bands, nz, nx, this_band)
+      to_double(exposed_step_bands(this_band, nb)) * band_step
+
+# Bake ONE tile as a top quad + only its exposed side walls (the top-surface mesh). Colour follows
+# the same river-over-biome rule as the old cube path; the four neighbour drops come from the global
+# band grid. A flagged river cell (flow_tier > 0) is painted river-blue by tier instead of biome.
+fn bake_tile(bands: MutMatrix Int, tags: MutMatrix Int, h: Hydrology, span: Int, gx: Int, gz: Int) -> Unit !{IO} =
   do
+    band <- mutmatrix_at_or(bands, gz, gx, 0)
+    tag <- mutmatrix_at_or(tags, gz, gx, 0)
     tier <- hydro_tier(h, gx, gz)
     let rgb = if tier > 0 then river_rgb(tier) else biome_rgb(tile_kind_of(tag))
+    dn <- nbr_drop(band, bands, gx, gz - 1, span)
+    ds <- nbr_drop(band, bands, gx, gz + 1, span)
+    de <- nbr_drop(band, bands, gx + 1, gz, span)
+    dw <- nbr_drop(band, bands, gx - 1, gz, span)
     match rgb with
     | (r, g, b) ->
-        gfx.draw_cube((to_double(gx) - half) * tile_size, to_double(band) * band_step,
-                      (to_double(gz) - half) * tile_size, tile_size, r, g, b)
+        gfx.capture_tile((to_double(gx) - half) * tile_size, (to_double(gz) - half) * tile_size,
+                         band_top_y(band), tile_size, r, g, b, dn, ds, de, dw)
 
 # --- Offline generation pass (once at startup) ------------------------------
 fn gen_region(cfg: Config, dir: String, ncx: Int, ncz: Int, cx: Int, cz: Int) -> Unit !{IO} =
@@ -123,29 +144,51 @@ fn gen_region(cfg: Config, dir: String, ncx: Int, ncz: Int, cx: Int, cz: Int) ->
             match save_chunk(dir, cfg.seed, ch) with | _ -> ()
       gen_region(cfg, dir, ncx, ncz, cx + 1, cz)
 
-# --- Bake pass: page chunks, draw their tiles (river-aware) -----------------
-fn draw_chunk_tiles(h: Hydrology, ch: Chunk, cx: Int, cz: Int, size: Int, r: Int, c: Int) -> Unit !{IO} =
+# --- Bake pass --------------------------------------------------------------
+# The top-surface bake needs each tile's four neighbour heights, including across chunk seams, so it
+# first materialises a global band+tag grid (chunks page in once; page_in caches), then bakes from
+# the grid in one flat span×span sweep — neighbour lookups are O(1) and cross-chunk-free.
+
+# Copy one paged chunk's per-cell band + kind tag into the global grids at its world offset.
+fn grid_chunk_cells(bands: MutMatrix Int, tags: MutMatrix Int, ch: Chunk, cx: Int, cz: Int, size: Int, r: Int, c: Int) -> Unit !{IO} =
   if r >= size then ()
-  else if c >= size then draw_chunk_tiles(h, ch, cx, cz, size, r + 1, 0)
+  else if c >= size then grid_chunk_cells(bands, tags, ch, cx, cz, size, r + 1, 0)
   else
     do
       tag <- chunk_kind_tag(ch, r, c)
       band <- chunk_band(ch, r, c)
-      draw_tile(h, (cx * size) + c, (cz * size) + r, tag, band)
-      draw_chunk_tiles(h, ch, cx, cz, size, r, c + 1)
+      mutmatrix_set(bands, (cz * size) + r, (cx * size) + c, band)
+      mutmatrix_set(tags, (cz * size) + r, (cx * size) + c, tag)
+      grid_chunk_cells(bands, tags, ch, cx, cz, size, r, c + 1)
 
-fn draw_chunk(w: World, h: Hydrology, cx: Int, cz: Int, size: Int) -> Unit !{IO} =
+fn grid_chunk(w: World, bands: MutMatrix Int, tags: MutMatrix Int, cx: Int, cz: Int, size: Int) -> Unit !{IO} =
   match page_in(w, cx, cz) with
   | Nothing -> ()
-  | Just ch -> draw_chunk_tiles(h, ch, cx, cz, size, 0, 0)
+  | Just ch -> grid_chunk_cells(bands, tags, ch, cx, cz, size, 0, 0)
 
-fn draw_region(w: World, h: Hydrology, size: Int, ncx: Int, ncz: Int, cx: Int, cz: Int) -> Unit !{IO} =
+# Fill the whole band+tag grid, chunk by chunk (mirrors the old draw_region recursion).
+fn build_grids(w: World, bands: MutMatrix Int, tags: MutMatrix Int, size: Int, ncx: Int, ncz: Int, cx: Int, cz: Int) -> Unit !{IO} =
   if cz >= ncz then ()
-  else if cx >= ncx then draw_region(w, h, size, ncx, ncz, 0, cz + 1)
+  else if cx >= ncx then build_grids(w, bands, tags, size, ncx, ncz, 0, cz + 1)
   else
     do
-      draw_chunk(w, h, cx, cz, size)
-      draw_region(w, h, size, ncx, ncz, cx + 1, cz)
+      grid_chunk(w, bands, tags, cx, cz, size)
+      build_grids(w, bands, tags, size, ncx, ncz, cx + 1, cz)
+
+# Bake every tile of the region from the grids into the current capture (one top-surface tile each).
+fn bake_row(bands: MutMatrix Int, tags: MutMatrix Int, h: Hydrology, span: Int, gz: Int, gx: Int) -> Unit !{IO} =
+  if gx >= span then ()
+  else
+    do
+      bake_tile(bands, tags, h, span, gx, gz)
+      bake_row(bands, tags, h, span, gz, gx + 1)
+
+fn bake_all(bands: MutMatrix Int, tags: MutMatrix Int, h: Hydrology, span: Int, gz: Int) -> Unit !{IO} =
+  if gz >= span then ()
+  else
+    do
+      bake_row(bands, tags, h, span, gz, 0)
+      bake_all(bands, tags, h, span, gz + 1)
 
 # --- Trees: load, resolve biome -> model, scatter as instances --------------
 # Truncating remainder for the (always non-negative) spatial hashes — the loam idiom.
@@ -331,9 +374,13 @@ fn main() -> Unit !{IO} =
     # Global hydrology pass over the whole region (same cfg + span as the terrain), computed once
     # upfront. flow_tier lines up cell-for-cell with the generated tiles.
     h <- compute_hydrology(cfg, span_tiles)
-    # Bake every tile of the region into one static mesh, river cells recoloured by tier.
+    # Materialise the global band+tag grid, then bake every tile of the region into one static mesh
+    # as a top-surface tile (top quad + exposed step walls only), river cells recoloured by tier.
+    bands <- mutmatrix_new(span_tiles, span_tiles, 0)
+    tags <- mutmatrix_new(span_tiles, span_tiles, 0)
+    build_grids(w, bands, tags, chunk_edge, region_chunks, region_chunks, 0, 0)
     gfx.mesh_capture_begin()
-    draw_region(w, h, chunk_edge, region_chunks, region_chunks, 0, 0)
+    bake_all(bands, tags, h, span_tiles, 0)
     mesh <- gfx.mesh_capture_end()
     # Load the vegetation models and scatter biome-appropriate trees over the region ONCE (the pass
     # queues GPU instances; the frame loop just replays them). Models load after the GL context.

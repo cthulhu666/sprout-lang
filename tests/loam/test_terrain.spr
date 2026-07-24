@@ -1,7 +1,7 @@
 import stdlib.test (TestState, new_state, assert_eq, assert_true, summary)
 import stdlib.math (fabs)
 import stdlib.mutable (mutmatrix_new, mutmatrix_set)
-import loam.terrain (TileKind, Water, Beach, Grass, Forest, Desert, Mountain, Snow, Tundra, Config, tile_kind_tag, tile_kind_of, classify, band_of, sea_level_band, spatial_hash, tile_kind_at, tile_band_at, Chunk, generate_chunk, chunk_kind_tag, chunk_band, chunk_to_string, chunk_from_string, save_chunk, load_chunk, World, world_new, page_in, page_out, resident_count)
+import loam.terrain (TileKind, Water, Beach, Grass, Forest, Desert, Mountain, Snow, Tundra, Config, tile_kind_tag, tile_kind_of, classify, band_of, sea_level_band, spatial_hash, tile_kind_at, tile_band_at, exposed_step_bands, Chunk, generate_chunk, chunk_kind_tag, chunk_band, chunk_to_string, chunk_from_string, save_chunk, load_chunk, World, world_new, page_in, page_out, resident_count)
 
 # loam.terrain is a headless, seeded, deterministic terrain model: generation is a pure
 # function of (coordinate, seed), tiles are integer (kind, elevation-band) pairs, chunks
@@ -199,5 +199,14 @@ fn main() -> Unit !{IO} =
     match page_in(w, 1, 0) with
     | Nothing -> assert_true(state, "paging: reload after eviction succeeds", false)
     | Just _ -> assert_true(state, "paging: reload after eviction succeeds", true)
+
+    # --- exposed_step_bands: the height (in elevation bands) of the wall a top-surface mesh must
+    # emit on the side of a tile facing a lower neighbour. A neighbour at the same or higher band
+    # covers that side entirely (0 exposed); a lower neighbour exposes their band difference. Used
+    # by the terrain-rivers bake to draw only the visible steps instead of full cubes.
+    assert_eq(state, "exposed_step: neighbour lower by 3 exposes 3 bands", exposed_step_bands(7, 4), 3)
+    assert_eq(state, "exposed_step: level neighbour exposes nothing", exposed_step_bands(5, 5), 0)
+    assert_eq(state, "exposed_step: taller neighbour exposes nothing", exposed_step_bands(2, 6), 0)
+    assert_eq(state, "exposed_step: one-band step", exposed_step_bands(3, 2), 1)
 
     summary(state)

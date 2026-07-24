@@ -173,6 +173,13 @@ export fn tile_kind_at(cfg: Config, gx: Int, gz: Int) -> TileKind =
 export fn tile_band_at(cfg: Config, gx: Int, gz: Int) -> Int =
   band_of(elev_at(cfg, gx, gz), cfg.elevation_levels)
 
+# How much of a tile's side is EXPOSED (in elevation bands) when its neighbour sits at `nbr_band`.
+# A neighbour level-or-higher hides that side entirely (0); a lower neighbour exposes the band
+# difference. A top-surface terrain mesh emits a side wall of this height instead of a buried cube
+# face — the geometry-reduction lever behind the terrain-rivers bake.
+export fn exposed_step_bands(this_band: Int, nbr_band: Int) -> Int =
+  if this_band > nbr_band then this_band - nbr_band else 0
+
 # --- Chunk storage ----------------------------------------------------------
 # A fixed-size square block of tiles, SoA: one grid of biome tags, one of elevation bands,
 # indexed [row=z][col=x]. `cx`/`cz` are the chunk's coordinate (in chunk units).
