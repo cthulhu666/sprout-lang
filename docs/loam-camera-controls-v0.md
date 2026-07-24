@@ -279,51 +279,55 @@ Blender-style *free* arcball that seeds absolute pitch/yaw from an arbitrary loo
 vector would still want `atan2`, but loam's rig does not, so it stays out of
 scope.)
 
-## 7. The decision that needs sign-off (builtin surface)
+## 7. The raw-input builtin surface (LANDED)
 
-Per AGENTS.md rules 4–6, exposing raw input from the runtime is a builtin
-addition and needs approval up front. These cannot be composed from existing
-Sprout surface (`term_*`, `button_held`) — they are live per-frame device state
-that only raylib can read, so they are legitimate builtins (correctness, not
-performance). Proposed **minimal** set, each a one-line raylib wrapper:
+Exposing raw per-frame input is a builtin addition (AGENTS.md rules 4–6): it is
+live device state only raylib can read, uncomposable from `term_*` / the GUI-
+button widgets, so it is a legitimate builtin (correctness, not performance).
+Approved and shipped — these now exist in `graphics/sprout_gfx.c` with `gfx.*`
+wrappers in `stdlib/gfx.sprout`:
 
-| Proposed `gfx_*` builtin              | raylib call                        | Justification |
-| ------------------------------------- | ---------------------------------- | ------------- |
-| `gfx_key_down(code) -> Int`           | `IsKeyDown(code)`                  | WASD pan + Shift modifier; no Sprout equivalent |
-| `gfx_mouse_wheel_y() -> Double`       | `GetMouseWheelMoveV().y`           | zoom (mouse wheel + trackpad two-finger); **`…MoveV`, not the scalar `…Move`** — trackpad-correct per §4b |
-| `gfx_mouse_delta_x/_y() -> Double`    | `GetMouseDelta().x/.y`             | drag orbit/pan; device state |
-| `gfx_mouse_button_down(b) -> Int`     | `IsMouseButtonDown(b)`             | gate drag on a held button |
-| `gfx_screen_to_ground(mx,my) -> …`    | `GetScreenToWorldRay` + plane hit  | **zoom-to-cursor only** — defer to its own phase (§6a) |
+| `gfx_*` builtin                    | raylib call                | role |
+| ---------------------------------- | -------------------------- | ---- |
+| `gfx_key_down(code) -> Int`        | `IsKeyDown(code)`          | WASD pan + Shift modifier |
+| `gfx_mouse_wheel_y() -> Double`    | `GetMouseWheelMoveV().y`   | zoom (wheel + trackpad two-finger); **`…MoveV`, not scalar `…Move`** — trackpad-correct per §4b |
+| `gfx_mouse_delta_x/_y() -> Double` | `GetMouseDelta().x/.y`     | drag orbit/pan |
+| `gfx_mouse_button_down(b) -> Int`  | `IsMouseButtonDown(b)`     | gate a drag on the held left button |
+| `gfx_mouse_x/_y() -> Int`          | `GetMouseX/Y()`            | gate a drag to the view region (cursor left of the panel) |
+| `gfx_screen_to_ground(mx,my)`      | `GetScreenToWorldRay` + plane hit | **not yet** — zoom-to-cursor only (§6a, Phase 3) |
 
-Each new `long long`/`double`-returning function must also be listed in
-`runtime/APPROVED_BUILTINS` with its justification (DoD #10). Key/button codes
-would be exposed as a small set of Sprout `let` constants mirroring raylib's
-`KEY_*` / `MOUSE_BUTTON_*`. (`gfx_mouse_x/_y` for RTS edge-scroll is deliberately
-*not* in this set — edge-scroll is a Phase-2 stretch, not part of the core
-mouse+trackpad scheme.)
+Note the ABI: `Double`-returning gfx builtins return `long long` carrying the
+IEEE-754 bit pattern (like `gfx_get_frame_time`), not a C `double`. Key/button
+codes are Sprout `let` constants (`gfx.key_w`, `gfx.mouse_left`, …) mirroring
+raylib's `KEY_*` / `MOUSE_BUTTON_*`. `mouse_x/_y` were pulled into this phase
+(not Phase 2 as first planned) because gating the orbit-drag against the panel
+region needs the cursor position. **`APPROVED_BUILTINS` does NOT apply here** —
+that allowlist (and DoD #10) governs only `runtime/sprout_runtime.c`; the gfx
+shim is a separate optional backend, and `stdlib/gfx.sprout` is not bundled into
+the compiler so the bootstrap seed is unaffected.
 
 **No open control-scheme decision remains** — the trackpad constraint (§4b)
-closed the earlier rotate-button question (left-drag + Shift modifier). What
-needs sign-off is only the **builtin set above** (AGENTS.md rule 6, runtime
-addition).
+closed the earlier rotate-button question (left-drag + Shift modifier).
 
-## 8. Suggested phasing
+## 8. Phasing (status)
 
-Two independently-shippable tracks; the first needs no approval at all.
-
-0. **Layout (no runtime change, ship first):** reorganise the on-screen buttons
-   per §4a — pan D-pad, whole rotate/tilt/zoom clusters, headers. Pure demo-side
-   layout constants + labels; addresses "organise them logically" on its own.
-1. **Phase 1 (core gestures, cheap):** expose `key_down`, `mouse_wheel_y`,
-   `mouse_delta_*`, `mouse_button_down` (§7). Re-wire `drive_cam` to also consume
-   input deltas. Delivers scroll-zoom + left-drag orbit/tilt + Shift-drag/WASD
-   pan on **both mouse and trackpad** — ~90% of the felt improvement, zero rig or
-   math change. Add adaptive zoom speed (§4) here.
-2. **Phase 2 (edge-scroll, stretch):** add `gfx_mouse_x/_y`; RTS edge-scroll pan.
-3. **Phase 3 (zoom-to-cursor + grab-pan):** add `gfx_screen_to_ground`; requires
-   the raycast primitive (§6a). Highest polish, most work.
+0. **Layout — LANDED.** Buttons regrouped per §4a (pan D-pad + rotate/tilt/zoom
+   clusters). Demo-side layout only; visually verified by screenshot.
+1. **Phase 1 (core gestures) — LANDED.** The §7 builtins ship, and the rivers
+   demo folds both buttons and gestures through the single `loam.camera.cam_drive`
+   fold: scroll = zoom, left-drag over the view = orbit/tilt, Shift+left-drag /
+   WASD = pan — one binding set for **mouse and trackpad**. Verified: compiles,
+   links, renders, and the camera is provably stationary with zero input (no
+   startup drift). Gesture *feel* (drag sign/scale) needs interactive testing —
+   the steps in §4b are tunable constants in the demo. Adaptive zoom speed (§4)
+   is deferred — a follow-up, not shipped in this phase.
+2. **Phase 2 (edge-scroll, stretch):** `gfx_mouse_x/_y` now exist (used for the
+   drag gate); RTS edge-scroll pan on top of them is not yet wired.
+3. **Phase 3 (zoom-to-cursor + grab-pan):** still needs `gfx_screen_to_ground`
+   (the raycast primitive, §6a). Highest polish, most work. Not started.
 
 ## 9. Follow-up
 
-Tracked in `BACKLOG.md` under the `CAM` entry. Track 0 (button layout) can land
-without approval; Phases 1–3 wait on the §7 builtin sign-off.
+Tracked in `BACKLOG.md` under the `CAM` entry: Track 0 and Phase 1 landed; the
+open items are adaptive zoom speed, edge-scroll pan, and zoom-to-cursor/grab-pan
+(the last gated on a new raycast builtin).

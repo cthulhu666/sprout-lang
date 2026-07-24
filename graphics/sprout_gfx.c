@@ -430,6 +430,60 @@ long long gfx_space_pressed(void) {
   return IsKeyPressed(KEY_SPACE) ? 1 : 0;
 }
 
+/* --- Raw per-frame input for direct-manipulation camera control -------------
+ * These expose live device state raylib reads each frame; there is no Sprout
+ * equivalent (term_* / the GUI-button widgets cannot report the wheel, a held
+ * key, or the mouse delta). Held state (IsKeyDown/IsMouseButtonDown), NOT the
+ * edge variants, so callers can drive continuous motion while a key/button is
+ * held. Doubles cross the ABI as their 64-bit IEEE-754 pattern in a GP register
+ * (see gfx_get_frame_time). */
+
+/* 1 while `key` (a raylib KEY_* code) is held. */
+long long gfx_key_down(long long key) {
+  return IsKeyDown((int)key) ? 1 : 0;
+}
+
+/* 1 while mouse `button` (a raylib MOUSE_BUTTON_* code) is held. */
+long long gfx_mouse_button_down(long long button) {
+  return IsMouseButtonDown((int)button) ? 1 : 0;
+}
+
+/* Vertical scroll this frame. GetMouseWheelMoveV().y (the vector form), NOT the
+ * scalar GetMouseWheelMove(): on macOS a trackpad's two-finger scroll blends X
+ * and Y, and the scalar returns whichever axis is larger, so vertical intent can
+ * read as horizontal. The vector form keeps the axes separate. */
+long long gfx_mouse_wheel_y(void) {
+  double d = (double)GetMouseWheelMoveV().y;
+  long long bits;
+  memcpy(&bits, &d, sizeof(double));
+  return bits;
+}
+
+/* Mouse movement since last frame, in pixels (raylib GetMouseDelta). */
+long long gfx_mouse_delta_x(void) {
+  double d = (double)GetMouseDelta().x;
+  long long bits;
+  memcpy(&bits, &d, sizeof(double));
+  return bits;
+}
+
+long long gfx_mouse_delta_y(void) {
+  double d = (double)GetMouseDelta().y;
+  long long bits;
+  memcpy(&bits, &d, sizeof(double));
+  return bits;
+}
+
+/* Mouse cursor position in window pixels — used to gate a drag against a screen
+ * region (e.g. orbit only when the cursor is over the 3D view, not the panel). */
+long long gfx_mouse_x(void) {
+  return (long long)GetMouseX();
+}
+
+long long gfx_mouse_y(void) {
+  return (long long)GetMouseY();
+}
+
 long long gfx_set_camera(long long px, long long py, long long pz,
                          long long tx, long long ty, long long tz,
                          long long fovy) {

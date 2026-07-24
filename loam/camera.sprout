@@ -103,3 +103,19 @@ export fn cam_pan(c: Cam, dr: Double, df: Double, bound: Double) -> Cam =
 # consumes it in cam_apply.
 export fn cam_eye(c: Cam) -> (Double, Double, Double) =
   (c.tx + (c.radius * sin(c.yaw)), c.height, c.tz + (c.radius * cos(c.yaw)))
+
+# Fold one frame of CONTINUOUS control input into the next Cam — the shared core
+# behind BOTH the on-screen buttons and the mouse/keyboard gestures, so the two
+# input paths can sum their per-frame contributions and apply them identically.
+# All amounts are already scaled to world/radian units by the caller (this stays
+# input-agnostic and pure, hence unit-testable): `dyaw` rotates, `dpitch` tilts,
+# `dzoom` changes distance, and `(dpan_r, dpan_f)` pan in the camera's own ground
+# frame. Bounds thread through to the clamping primitives. Order is rotate -> tilt
+# -> zoom -> pan, so panning slides along the freshly-rotated look direction.
+export fn cam_drive(c: Cam, dyaw: Double, dpitch: Double, dzoom: Double,
+                    dpan_r: Double, dpan_f: Double,
+                    zoom_lo: Double, zoom_hi: Double,
+                    pitch_lo: Double, pitch_hi: Double, pan_bound: Double) -> Cam =
+  cam_pan(cam_zoom(cam_pitch(cam_rotate(c, dyaw), dpitch, pitch_lo, pitch_hi),
+                   dzoom, zoom_lo, zoom_hi),
+          dpan_r, dpan_f, pan_bound)

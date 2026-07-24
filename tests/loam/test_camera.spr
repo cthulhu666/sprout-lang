@@ -1,6 +1,6 @@
 import stdlib.test (TestState, new_state, assert_true, summary)
 import stdlib.math (fabs, pi, sin, sqrt)
-import loam.camera (Cam, cam_rotate, cam_zoom, cam_pitch, cam_pan, cam_eye)
+import loam.camera (Cam, cam_rotate, cam_zoom, cam_pitch, cam_pan, cam_eye, cam_drive)
 
 # Headless coverage for loam.view's free-look camera controller (the whole package:
 # rotate / zoom / tilt / pan). Everything here is PURE state math — no window — so
@@ -87,5 +87,22 @@ fn main() -> Unit !{IO} =
           assert_true(state, "eye x = tx", near(ex, 0.0))
           assert_true(state, "eye y = height", near(ey, 5.0))
           assert_true(state, "eye z = tz + radius", near(ez, 10.0))
+
+    # --- cam_drive: one-frame fold of pre-scaled deltas through all four controls,
+    # in the order rotate -> tilt -> zoom -> pan. Shared by the button and gesture
+    # input paths so both stay consistent. ---
+    # A single delta touches only its own axis.
+    let dy = cam_drive(c0, 0.3, 0.0, 0.0, 0.0, 0.0, 2.0, 40.0, 0.05, 1.45, 100.0)
+    assert_true(state, "cam_drive dyaw rotates only",
+                near(dy.yaw, 0.3) && near(dy.radius, 10.0) && near(dy.height, 5.0))
+    let dz = cam_drive(c0, 0.0, 0.0, -3.0, 0.0, 0.0, 2.0, 40.0, 0.05, 1.45, 100.0)
+    assert_true(state, "cam_drive dzoom sets distance only",
+                near(dist_of(dz), d0 - 3.0) && near(dz.yaw, 0.0))
+    # Pan is applied in the POST-rotation frame: rotating a quarter-turn first, then
+    # panning "forward", must move the target along the NEW look direction (-x at
+    # yaw=pi/2), not the old one (-z). This pins the fold order.
+    let dp = cam_drive(c0, pi / 2.0, 0.0, 0.0, 0.0, 3.0, 2.0, 40.0, 0.05, 1.45, 100.0)
+    assert_true(state, "cam_drive pans in the post-rotate frame",
+                near(dp.tx, -3.0) && near(dp.tz, 0.0))
 
     summary(state)

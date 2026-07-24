@@ -4,7 +4,7 @@ import stdlib.gfx
 import loam.terrain (Config, Chunk, World, generate_chunk, save_chunk, load_chunk, world_new, page_in, chunk_kind_tag, chunk_band, sea_level_band, spatial_hash, exposed_step_bands, chunk_linear_index, TileKind, Water, Beach, Grass, Forest, Desert, Mountain, Snow, Tundra, tile_kind_of)
 import loam.hydrology (Hydrology, compute_hydrology, hydro_tier)
 import loam.vegetation (TreeKind, Palm, Broadleaf, Conifer, DarkConifer, Cactus, Shrub, tree_kind_tag, tree_for_biome)
-import loam.camera (Cam, cam_rotate, cam_zoom, cam_pitch, cam_pan)
+import loam.camera (Cam, cam_drive)
 import loam.view (cam_apply)
 import stdlib.mutable (MutVec, mutvec_new, mutvec_at, mutvec_set, MutMatrix, mutmatrix_new, mutmatrix_set, mutmatrix_at_or)
 
@@ -69,6 +69,14 @@ let cam_pitch_step = 0.02  # tilt radians per frame (~1.1°)
 let cam_pitch_min = 0.15  # ~8.6° above the horizon (shallow)
 let cam_pitch_max = 1.45  # ~83° (near top-down, not degenerate)
 let cam_pan_frac = 0.01  # pan (look-at) per frame, as a span fraction
+# Mouse/keyboard GESTURE steps (work on both a mouse and a MacBook trackpad):
+# scroll = zoom, left-drag over the view = orbit/tilt, Shift+left-drag = pan,
+# WASD = pan. Signs here are the natural ones; flip a step's sign if the motion
+# feels reversed on your setup.
+let cam_wheel_frac = 0.10  # zoom DISTANCE per scroll notch, as a span fraction
+let cam_drag_yaw = 0.006  # yaw radians per pixel of horizontal drag
+let cam_drag_pitch = 0.006  # tilt radians per pixel of vertical drag
+let cam_drag_pan_frac = 0.0015  # pan world-units per pixel of drag, as a span fraction
 # ============================================================================
 
 # --- Derived (do not edit; computed from the tunables above) ----------------
@@ -323,6 +331,10 @@ let pitch_step = cam_pitch_step  # tilt is in radians — NOT scaled by span
 let pitch_min = cam_pitch_min
 let pitch_max = cam_pitch_max
 let pan_step = world_span * cam_pan_frac
+let wheel_zoom_step = world_span * cam_wheel_frac
+let drag_yaw_step = cam_drag_yaw  # radians/px — not span-scaled
+let drag_pitch_step = cam_drag_pitch
+let drag_pan_step = world_span * cam_drag_pan_frac
 let pan_bound = half * tile_size  # keep the look-at over the map (centred on 0,0)
 
 # The starting rig reproduces the old orbit demo's opening frame exactly: same
@@ -357,18 +369,11 @@ let pair_r1 = 488  # Tilt- / Zoom- row
 
 fn bd(b: Bool) -> Double = if b then 1.0 else 0.0
 
-# Fold this frame's held buttons into the next camera state. Pure — the buttons
-# are sampled in the loop (IO), the motion they imply is computed here.
-fn drive_cam(c: Cam, rl: Bool, rr: Bool, tu: Bool, td: Bool, zi: Bool, zo: Bool,
-             pf: Bool, pb: Bool, pl: Bool, pr: Bool) -> Cam =
-  let c1 = cam_rotate(c, (bd(rr) - bd(rl)) * cam_rot_step)
-      c2 = cam_pitch(c1, (bd(tu) - bd(td)) * pitch_step, pitch_min, pitch_max)
-      c3 = cam_zoom(c2, (bd(zo) - bd(zi)) * zoom_step, min_dist, max_dist)
-  in cam_pan(c3, (bd(pr) - bd(pl)) * pan_step, (bd(pf) - bd(pb)) * pan_step, pan_bound)
-
 # The terrain+rivers are STATIC, so they are baked into ONE GPU mesh at startup (see main) and
-# drawn in a single call per frame — no per-frame per-tile work. The frame loop only drives the
-# camera from the on-screen control panel: hold a button to move/rotate/zoom/pan continuously.
+# drawn in a single call per frame — no per-frame per-tile work. The frame loop drives the camera
+# two ways that feed the SAME cam_drive fold: the on-screen buttons (hold to move continuously) and
+# mouse/keyboard gestures (scroll = zoom, left-drag over the view = orbit/tilt, Shift+left-drag =
+# pan, WASD = pan) that work on both a mouse and a MacBook trackpad.
 fn render_loop(meshes: MutVec Int, models: MutVec Int, cam: Cam) -> Unit !{IO} =
   do
     stop <- gfx.window_should_close()
@@ -399,8 +404,36 @@ fn render_loop(meshes: MutVec Int, models: MutVec Int, cam: Cam) -> Unit !{IO} =
         tdn <- gfx.button_held(col_a, pair_r1, btn_w, btn_h, "Tilt-")
         zi <- gfx.button_held(col_b, pair_r0, btn_w, btn_h, "Zoom+")
         zo <- gfx.button_held(col_b, pair_r1, btn_w, btn_h, "Zoom-")
+        # Gesture input (mouse + trackpad). Sampled alongside the buttons so it
+        # reflects the same frame's polled state.
+        wheel <- gfx.mouse_wheel_y()
+        ldown <- gfx.mouse_button_down(gfx.mouse_left)
+        mx <- gfx.mouse_x()
+        gdx <- gfx.mouse_delta_x()
+        gdy <- gfx.mouse_delta_y()
+        shift <- gfx.key_down(gfx.key_left_shift)
+        kw <- gfx.key_down(gfx.key_w)
+        ks <- gfx.key_down(gfx.key_s)
+        ka <- gfx.key_down(gfx.key_a)
+        kd <- gfx.key_down(gfx.key_d)
         gfx.frame_end()
-        render_loop(meshes, models, drive_cam(cam, rl, rr, tu, tdn, zi, zo, pf, pb, pl, pr))
+        # A left-drag counts as a camera gesture only OVER THE VIEW (left of the
+        # panel), so dragging on a button clicks it instead of orbiting. Shift
+        # switches the drag from orbit to pan.
+        let dragging = ldown && (mx < panel_x)
+        let orbit = dragging && ! shift
+        let pan_drag = dragging && shift
+        # Sum this frame's button- and gesture-derived deltas, then fold once.
+        let d_yaw = ((bd(rr) - bd(rl)) * cam_rot_step) + (if orbit then gdx * drag_yaw_step else 0.0)
+        let d_pitch = ((bd(tu) - bd(tdn)) * pitch_step) + (if orbit then gdy * drag_pitch_step else 0.0)
+        let d_zoom = ((bd(zo) - bd(zi)) * zoom_step) - (wheel * wheel_zoom_step)
+        let d_pan_r = ((bd(pr) - bd(pl)) * pan_step) + ((bd(kd) - bd(ka)) * pan_step)
+                        + (if pan_drag then (0.0 - gdx) * drag_pan_step else 0.0)
+        let d_pan_f = ((bd(pf) - bd(pb)) * pan_step) + ((bd(kw) - bd(ks)) * pan_step)
+                        + (if pan_drag then gdy * drag_pan_step else 0.0)
+        render_loop(meshes, models,
+                    cam_drive(cam, d_yaw, d_pitch, d_zoom, d_pan_r, d_pan_f,
+                              min_dist, max_dist, pitch_min, pitch_max, pan_bound))
 
 fn main() -> Unit !{IO} =
   do
