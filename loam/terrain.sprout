@@ -180,6 +180,12 @@ export fn tile_band_at(cfg: Config, gx: Int, gz: Int) -> Int =
 export fn exposed_step_bands(this_band: Int, nbr_band: Int) -> Int =
   if this_band > nbr_band then this_band - nbr_band else 0
 
+# Linear slot (cz*region_chunks + cx) of the chunk that owns global tile (gx, gz), given the chunk
+# edge `chunk_size` and `region_chunks` per side. Buckets per-tile data into per-chunk groups — e.g.
+# scattering tree instances into per-chunk batches so a view can frustum-cull them by chunk.
+export fn chunk_linear_index(gx: Int, gz: Int, chunk_size: Int, region_chunks: Int) -> Int =
+  ((gz / chunk_size) * region_chunks) + (gx / chunk_size)
+
 # --- Chunk storage ----------------------------------------------------------
 # A fixed-size square block of tiles, SoA: one grid of biome tags, one of elevation bands,
 # indexed [row=z][col=x]. `cx`/`cz` are the chunk's coordinate (in chunk units).

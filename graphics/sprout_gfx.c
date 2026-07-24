@@ -255,6 +255,22 @@ static int *g_inst_count = NULL;  /* live transforms in g_inst[h] */
 static int *g_inst_cap = NULL;    /* capacity of g_inst[h] */
 static int g_inst_reg = 0;        /* number of handle slots allocated */
 
+/* --- Per-chunk tree instance groups (frustum-culled vegetation) --------------------------------
+ * The plain registry above draws every instance of a model every frame. For a large map that means
+ * streaming the whole forest even when zoomed into a corner. These GROUPS bucket instances by a
+ * caller id (a chunk) x model handle, plus a per-group AABB, so gfx_draw_tree_group can skip a whole
+ * chunk's trees when its bounds are off-screen. Flat, statically sized, zero-initialised (NULL
+ * buffers / 0 counts / g_tg_any=0), grown lazily on push. */
+#define GFX_MAX_TREE_GROUPS 4096
+#define GFX_TREE_MODELS 64
+#define GFX_TREE_MARGIN 6.0f  /* AABB pad (world units) covering tree height/width beyond trunk base */
+static Matrix *g_tg[GFX_MAX_TREE_GROUPS * GFX_TREE_MODELS];
+static int g_tg_count[GFX_MAX_TREE_GROUPS * GFX_TREE_MODELS];
+static int g_tg_cap[GFX_MAX_TREE_GROUPS * GFX_TREE_MODELS];
+static float g_tg_bbmin[GFX_MAX_TREE_GROUPS][3];
+static float g_tg_bbmax[GFX_MAX_TREE_GROUPS][3];
+static int g_tg_any[GFX_MAX_TREE_GROUPS];
+
 /* Ensure the per-handle registry arrays cover index `h` (slots initialised empty). */
 static int inst_reg_reserve(int h) {
   if (h < g_inst_reg) return 1;
@@ -687,6 +703,86 @@ long long gfx_draw_instanced(long long handle) {
     Material mat = model.materials[model.meshMaterial[i]];
     if (g_tree_ready) mat.shader = g_tree_shader;
     DrawMeshInstanced(model.meshes[i], mat, g_inst[h], g_inst_count[h]);
+  }
+  return 0;
+}
+
+/* Queue one tree instance into group `group` (a chunk) for model `model`, growing that (group,model)
+ * buffer and the group's world AABB. Bucketing by group lets gfx_draw_tree_group frustum-cull a
+ * whole chunk's trees. Out-of-range group/model is a no-op. */
+long long gfx_tree_push(long long group, long long model, long long x, long long y, long long z,
+                        long long angle, long long scale) {
+  int grp = (int)group, mdl = (int)model;
+  if (grp < 0 || grp >= GFX_MAX_TREE_GROUPS || mdl < 0 || mdl >= GFX_TREE_MODELS) return 0;
+  int idx = grp * GFX_TREE_MODELS + mdl;
+  if (g_tg_count[idx] >= g_tg_cap[idx]) {
+    int nc = (g_tg_cap[idx] == 0) ? 64 : g_tg_cap[idx] * 2;
+    Matrix *grown = realloc(g_tg[idx], (size_t)nc * sizeof(Matrix));
+    if (!grown) { TraceLog(LOG_ERROR, "sprout_gfx: out of memory growing tree group"); return 0; }
+    g_tg[idx] = grown; g_tg_cap[idx] = nc;
+  }
+  float fx = as_float(x), fy = as_float(y), fz = as_float(z), s = as_float(scale);
+  Matrix m = MatrixMultiply(MatrixMultiply(MatrixScale(s, s, s),
+                                           MatrixRotate((Vector3){ 0.0f, 1.0f, 0.0f }, as_float(angle) * DEG2RAD)),
+                            MatrixTranslate(fx, fy, fz));
+  g_tg[idx][g_tg_count[idx]++] = m;
+  if (!g_tg_any[grp]) {
+    g_tg_bbmin[grp][0] = fx; g_tg_bbmin[grp][1] = fy; g_tg_bbmin[grp][2] = fz;
+    g_tg_bbmax[grp][0] = fx; g_tg_bbmax[grp][1] = fy; g_tg_bbmax[grp][2] = fz;
+    g_tg_any[grp] = 1;
+  } else {
+    if (fx < g_tg_bbmin[grp][0]) g_tg_bbmin[grp][0] = fx; else if (fx > g_tg_bbmax[grp][0]) g_tg_bbmax[grp][0] = fx;
+    if (fy < g_tg_bbmin[grp][1]) g_tg_bbmin[grp][1] = fy; else if (fy > g_tg_bbmax[grp][1]) g_tg_bbmax[grp][1] = fy;
+    if (fz < g_tg_bbmin[grp][2]) g_tg_bbmin[grp][2] = fz; else if (fz > g_tg_bbmax[grp][2]) g_tg_bbmax[grp][2] = fz;
+  }
+  return 0;
+}
+
+/* Scratch for compacting visible instances of one model, and the per-frame visible-group list. */
+static Matrix *g_tree_scratch = NULL;
+static int g_tree_scratch_cap = 0;
+static int g_vis[GFX_MAX_TREE_GROUPS];
+
+/* Draw all tree groups [0, group_count), frustum-culled, in ~one DrawMeshInstanced PER MODEL rather
+ * than per (group,model). Naively drawing each visible group separately explodes the draw-call count
+ * (dozens of visible groups x models x meshes) and the per-call overhead swamps the culling win — so
+ * instead we (1) collect the visible groups once, then (2) per model, COMPACT their instances into a
+ * scratch buffer and issue a single instanced draw. Result: ~30 draws/frame regardless of how many
+ * groups are visible, over only the on-screen instances. This is the call the frame loop makes. */
+long long gfx_draw_trees_culled(long long group_count) {
+  int gc = (int)group_count;
+  if (gc > GFX_MAX_TREE_GROUPS) gc = GFX_MAX_TREE_GROUPS;
+  int nvis = 0;
+  for (int g = 0; g < gc; g++) {
+    if (!g_tg_any[g]) continue;
+    float mn[3] = { g_tg_bbmin[g][0] - GFX_TREE_MARGIN, g_tg_bbmin[g][1] - GFX_TREE_MARGIN, g_tg_bbmin[g][2] - GFX_TREE_MARGIN };
+    float mx[3] = { g_tg_bbmax[g][0] + GFX_TREE_MARGIN, g_tg_bbmax[g][1] + GFX_TREE_MARGIN, g_tg_bbmax[g][2] + GFX_TREE_MARGIN };
+    if (aabb_in_frustum(mn, mx)) g_vis[nvis++] = g;
+  }
+  if (nvis == 0) return 0;
+  int nmodels = (g_model_count < GFX_TREE_MODELS) ? g_model_count : GFX_TREE_MODELS;
+  for (int mdl = 0; mdl < nmodels; mdl++) {
+    int total = 0;
+    for (int i = 0; i < nvis; i++) total += g_tg_count[g_vis[i] * GFX_TREE_MODELS + mdl];
+    if (total == 0) continue;
+    if (total > g_tree_scratch_cap) {
+      int nc = (g_tree_scratch_cap == 0) ? 1024 : g_tree_scratch_cap;
+      while (nc < total) nc *= 2;
+      g_tree_scratch = realloc(g_tree_scratch, (size_t)nc * sizeof(Matrix));
+      g_tree_scratch_cap = nc;
+    }
+    int off = 0;
+    for (int i = 0; i < nvis; i++) {
+      int idx = g_vis[i] * GFX_TREE_MODELS + mdl;
+      int cnt = g_tg_count[idx];
+      if (cnt > 0) { memcpy(g_tree_scratch + off, g_tg[idx], (size_t)cnt * sizeof(Matrix)); off += cnt; }
+    }
+    Model model = g_models[mdl];
+    for (int i = 0; i < model.meshCount; i++) {
+      Material mat = model.materials[model.meshMaterial[i]];
+      if (g_tree_ready) mat.shader = g_tree_shader;
+      DrawMeshInstanced(model.meshes[i], mat, g_tree_scratch, total);
+    }
   }
   return 0;
 }

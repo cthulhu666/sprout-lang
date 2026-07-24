@@ -1,7 +1,7 @@
 import stdlib.test (TestState, new_state, assert_eq, assert_true, summary)
 import stdlib.math (fabs)
 import stdlib.mutable (mutmatrix_new, mutmatrix_set)
-import loam.terrain (TileKind, Water, Beach, Grass, Forest, Desert, Mountain, Snow, Tundra, Config, tile_kind_tag, tile_kind_of, classify, band_of, sea_level_band, spatial_hash, tile_kind_at, tile_band_at, exposed_step_bands, Chunk, generate_chunk, chunk_kind_tag, chunk_band, chunk_to_string, chunk_from_string, save_chunk, load_chunk, World, world_new, page_in, page_out, resident_count)
+import loam.terrain (TileKind, Water, Beach, Grass, Forest, Desert, Mountain, Snow, Tundra, Config, tile_kind_tag, tile_kind_of, classify, band_of, sea_level_band, spatial_hash, tile_kind_at, tile_band_at, exposed_step_bands, chunk_linear_index, Chunk, generate_chunk, chunk_kind_tag, chunk_band, chunk_to_string, chunk_from_string, save_chunk, load_chunk, World, world_new, page_in, page_out, resident_count)
 
 # loam.terrain is a headless, seeded, deterministic terrain model: generation is a pure
 # function of (coordinate, seed), tiles are integer (kind, elevation-band) pairs, chunks
@@ -208,5 +208,13 @@ fn main() -> Unit !{IO} =
     assert_eq(state, "exposed_step: level neighbour exposes nothing", exposed_step_bands(5, 5), 0)
     assert_eq(state, "exposed_step: taller neighbour exposes nothing", exposed_step_bands(2, 6), 0)
     assert_eq(state, "exposed_step: one-band step", exposed_step_bands(3, 2), 1)
+
+    # --- chunk_linear_index: map a global tile (gx, gz) to its chunk's linear slot
+    # (cz*region_chunks + cx), used to bucket per-chunk data (e.g. tree instances) for culling.
+    assert_eq(state, "chunk_index: origin tile -> chunk 0", chunk_linear_index(0, 0, 32, 4), 0)
+    assert_eq(state, "chunk_index: last tile of chunk 0 -> 0", chunk_linear_index(31, 31, 32, 4), 0)
+    assert_eq(state, "chunk_index: first tile of chunk to the east -> 1", chunk_linear_index(32, 0, 32, 4), 1)
+    assert_eq(state, "chunk_index: first tile of chunk to the south -> region_chunks", chunk_linear_index(0, 32, 32, 4), 4)
+    assert_eq(state, "chunk_index: interior tile maps by chunk", chunk_linear_index(33, 65, 32, 4), 9)
 
     summary(state)
