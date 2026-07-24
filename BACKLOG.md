@@ -384,6 +384,22 @@ raylib) have landed. Fenced from core: shim `graphics/sprout_gfx.c` links only v
   `gfx_draw_model_tinted(handle,x,y,z,angle,scale,r,g,b)` extern in the raylib shim +
   `APPROVED_BUILTINS` entry (runtime change → user approval per AGENTS.md §Builtin-vs-Stdlib).
   Would make N groups legible even when clouds overlap. See `docs/ecs-v0.md §10.5`.
+- [ ] `CAM` Loam: **better camera controls** — keep the on-screen buttons, add a mouse+trackpad
+  gesture layer. Two tracks. **Track 0 (no approval, ship first):** reorganise the 10-button panel —
+  today two flat columns split zoom-in/out across columns and give pan no spatial layout; regroup
+  into a pan D-pad + whole rotate/tilt/zoom clusters (demo-side layout constants + labels only).
+  **Phases 1–3 (need builtin approval):** the gfx shim exposes no mouse wheel/delta/pos or keys
+  beyond Space, though raylib 6.0 provides all of them. Minimal raw-input builtins: `gfx_key_down`,
+  `gfx_mouse_wheel_y` (← `GetMouseWheelMoveV().y` — the **V** variant, trackpad-correct; scalar
+  `GetMouseWheelMove` mis-reports Mac trackpad axes), `gfx_mouse_delta_x/_y`, `gfx_mouse_button_down`
+  (+`_x/_y` for Phase-2 edge-scroll) — each a one-line raylib wrapper + `APPROVED_BUILTINS` entry
+  (runtime change → user approval per AGENTS.md §Builtin-vs-Stdlib). Scheme: scroll=zoom (mouse wheel
+  + trackpad two-finger, one primitive), left-drag=orbit/tilt, Shift+left-drag / WASD = pan — works
+  identically on mouse and trackpad, no device branch. **Do NOT** use OS pinch (GLFW desktop doesn't
+  deliver macOS magnify) or Shift+scroll (macOS zeroes it). Rotate-button question is CLOSED
+  (left-drag + modifier, forced by the trackpad having no MMB/RMB). Zoom-to-cursor + grab-pan (Phase
+  3) need a screen→ground raycast primitive (absent today). Full survey + feature→input→math table +
+  phasing + verified raylib/trackpad facts in `docs/loam-camera-controls-v0.md`.
 - [ ] `P3` Loam: **rendered interpolation** for `loam.driver`. `fixed_step` (shipped, `docs/ecs-v0.md
   §10.3b`) decouples sim rate from render rate via a fixed-timestep accumulator, but renders the
   latest tick state directly. When `fixed_dt` and the render rate diverge by design (e.g. a 30-Hz
