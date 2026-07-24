@@ -1,18 +1,25 @@
 module loam.camera
 
-import stdlib.math (sin, cos, pi)
+import stdlib.math (sin, cos, sqrt, pi)
 
 # Loam's free-look CAMERA controller: the pure state + math for a rig the user
-# drives — rotate around the target, zoom the horizontal standoff, pitch by
-# raising/lowering the eye, and PAN the look-at across the map. It is deliberately
-# graphics-free (imports only stdlib.math), so it lives in the headless engine
-# core and is unit-tested in tests/loam/test_view.spr. loam.view holds the one IO
-# function that pushes a Cam to raylib (cam_apply); everything here returns values.
+# drives — ROTATE around the target, TILT the eye up/over the target, ZOOM the
+# distance, and PAN the look-at across the map. It is deliberately graphics-free
+# (imports only stdlib.math), so it lives in the headless engine core and is
+# unit-tested in tests/loam/test_camera.spr. loam.view holds the one IO function
+# that pushes a Cam to raylib (cam_apply); everything here returns values.
 #
-# The rig keeps `height` as a SEPARATE vertical axis rather than a spherical pitch
-# angle. That has two payoffs: seeding the opening frame needs no atan2 (absent
-# from stdlib.math), and a demo can reuse its existing (radius, height) orbit
-# framing numbers verbatim as the Cam defaults, so the initial view is unchanged.
+# The four controls are ORTHOGONAL, which is what makes them feel predictable:
+#   rotate → changes yaw only
+#   tilt   → swings the eye along an arc at CONSTANT distance (angle only)
+#   zoom   → scales the distance at CONSTANT angle (size only)
+#   pan    → moves the look-at, offset unchanged
+# The eye offset from the target is stored in CARTESIAN (radius, height) form, not
+# as a spherical pitch angle. That is deliberate: tilt is an incremental 2D
+# rotation of the (horizontal = radius, vertical = height - ty) offset, and zoom is
+# a uniform scale of it — both need only sin/cos/sqrt and NEVER atan2 (absent from
+# stdlib.math). It also lets a demo reuse its existing (radius, height) orbit
+# framing numbers verbatim as the Cam defaults, so the opening frame is unchanged.
 # yaw is radians; radius/height/tx/ty/tz are world units. (tx, tz) is the ground
 # point the eye orbits and looks at; ty is that target's (fixed) height.
 export type Cam = (yaw: Double, radius: Double, height: Double,
@@ -35,17 +42,49 @@ export fn cam_rotate(c: Cam, dyaw: Double) -> Cam =
   Cam(yaw = wrap_two_pi(c.yaw + dyaw), radius = c.radius, height = c.height,
       tx = c.tx, ty = c.ty, tz = c.tz)
 
-# Zoom: change the horizontal standoff by `dr` (negative pulls in), clamped to
-# [lo, hi].
+# Zoom: change the eye's DISTANCE to the target by `dr` (negative pulls in),
+# clamped to [lo, hi]. The (horizontal, vertical) offset is scaled uniformly, so
+# the pitch ANGLE is preserved — zoom changes apparent size, not viewing angle.
+# Degenerate guard: an eye sitting exactly on the target has no direction to scale,
+# so it is left unmoved.
 export fn cam_zoom(c: Cam, dr: Double, lo: Double, hi: Double) -> Cam =
-  Cam(yaw = c.yaw, radius = clampd(c.radius + dr, lo, hi), height = c.height,
-      tx = c.tx, ty = c.ty, tz = c.tz)
+  let a = c.radius
+      b = c.height - c.ty
+      dist = sqrt((a * a) + (b * b))
+      k = if dist > 0.0 then clampd(dist + dr, lo, hi) / dist else 1.0
+  in Cam(yaw = c.yaw, radius = a * k, height = c.ty + (b * k),
+         tx = c.tx, ty = c.ty, tz = c.tz)
 
-# Pitch: raise (`dh` > 0, steeper top-down) or lower the eye, clamped to
-# [lo, hi]. The target is unmoved, so the view angle tilts.
-export fn cam_pitch(c: Cam, dh: Double, lo: Double, hi: Double) -> Cam =
-  Cam(yaw = c.yaw, radius = c.radius, height = clampd(c.height + dh, lo, hi),
-      tx = c.tx, ty = c.ty, tz = c.tz)
+# Tilt: swing the eye along an arc of CONSTANT distance around the target by `dphi`
+# radians (positive = steeper / more top-down), so the viewing angle changes but
+# the target's apparent size does not. The resulting pitch is clamped to
+# [phi_lo, phi_hi] (radians from horizontal, 0 < phi < pi/2). Implemented as a 2D
+# rotation of the (horizontal = radius, vertical = height - ty) offset; the clamp
+# caps the vertical leg at dist * sin(phi) (dist is invariant under rotation) and
+# recovers the horizontal leg from it, so the eye stays exactly on the arc.
+export fn cam_pitch(c: Cam, dphi: Double, phi_lo: Double, phi_hi: Double) -> Cam =
+  let a = c.radius
+      b = c.height - c.ty
+      dist = sqrt((a * a) + (b * b))
+      horiz_raw = (a * cos(dphi)) - (b * sin(dphi))
+      vert_raw = (a * sin(dphi)) + (b * cos(dphi))
+      # Clamp the rotated offset to the arc [phi_lo, phi_hi] (both in the first
+      # quadrant). A single delta can overshoot EITHER end — even past vertical
+      # (horiz_raw < 0) or below the horizon (vert_raw < 0) — so test each end with
+      # the leg that stays MONOTONIC there: the horizontal leg (dist·cos φ, strictly
+      # decreasing over [0, π]) detects crossing the steep ceiling; the vertical leg
+      # (dist·sin φ) the shallow floor. Pin to the crossed bound so a fast tilt stops
+      # at the limit instead of reflecting to a wrong (shallower) angle.
+      steep = horiz_raw < (dist * cos(phi_hi))
+      shallow = vert_raw < (dist * sin(phi_lo))
+      horiz = if steep then dist * cos(phi_hi)
+              else if shallow then dist * cos(phi_lo)
+              else horiz_raw
+      vert = if steep then dist * sin(phi_hi)
+             else if shallow then dist * sin(phi_lo)
+             else vert_raw
+  in Cam(yaw = c.yaw, radius = horiz, height = c.ty + vert,
+         tx = c.tx, ty = c.ty, tz = c.tz)
 
 # Pan the look-at target across the ground in the camera's OWN frame: `dr` slides
 # screen-right, `df` slides forward (into the screen). Both target coords are

@@ -55,16 +55,19 @@ let water_lift = 0.5  # bands above the sea-level band to float the surface (hid
 
 # Camera framing (fractions of the map span, so it scales with map size) ----
 let cam_radius_frac = 0.85  # opening horizontal standoff
-let cam_height_frac = 0.6  # opening eye height (the pitch)
-let cam_min_frac = 0.05  # closest zoom (horizontal standoff)
-let cam_max_frac = 9.5  # farthest zoom
+let cam_height_frac = 0.6  # opening eye height (sets the opening tilt ~35deg)
+let cam_min_frac = 0.05  # closest zoom, as a fraction of span (eye→target DISTANCE)
+let cam_max_frac = 9.5  # farthest zoom (distance)
 let cam_target_y = 4.0  # height of the ground point the eye looks at
 # Manual control steps — how far each held button moves the camera PER FRAME.
-let cam_zoom_frac = 0.04  # zoom  in/out standoff per frame
+let cam_zoom_frac = 0.04  # zoom in/out DISTANCE per frame, as a span fraction
 let cam_rot_step = 0.02  # rotate radians per frame (~1.1°)
-let cam_pitch_frac = 0.012  # pitch (eye height) per frame, as a span fraction
-let cam_pitch_min_frac = 0.1  # lowest / highest eye the pitch buttons allow
-let cam_pitch_max_frac = 1.3
+# Tilt is an ANGLE now (orbit at constant distance), so its step and bounds are
+# radians, NOT span fractions: ~1.1°/frame, clamped between a low glancing angle
+# and a near-top-down one (the opening frame sits at ~35°, inside these bounds).
+let cam_pitch_step = 0.02  # tilt radians per frame (~1.1°)
+let cam_pitch_min = 0.15  # ~8.6° above the horizon (shallow)
+let cam_pitch_max = 1.45  # ~83° (near top-down, not degenerate)
 let cam_pan_frac = 0.01  # pan (look-at) per frame, as a span fraction
 # ============================================================================
 
@@ -314,11 +317,11 @@ fn place_region(models: MutVec Int, w: World, hy: Hydrology, size: Int, ncx: Int
 let cam_start_radius = world_span * cam_radius_frac
 let cam_start_height = world_span * cam_height_frac
 let zoom_step = world_span * cam_zoom_frac
-let min_radius = world_span * cam_min_frac
-let max_radius = world_span * cam_max_frac
-let pitch_step = world_span * cam_pitch_frac
-let pitch_min = world_span * cam_pitch_min_frac
-let pitch_max = world_span * cam_pitch_max_frac
+let min_dist = world_span * cam_min_frac  # zoom clamps are eye→target DISTANCE
+let max_dist = world_span * cam_max_frac
+let pitch_step = cam_pitch_step  # tilt is in radians — NOT scaled by span
+let pitch_min = cam_pitch_min
+let pitch_max = cam_pitch_max
 let pan_step = world_span * cam_pan_frac
 let pan_bound = half * tile_size  # keep the look-at over the map (centred on 0,0)
 
@@ -346,7 +349,7 @@ fn drive_cam(c: Cam, rl: Bool, rr: Bool, tu: Bool, td: Bool, zi: Bool, zo: Bool,
              pf: Bool, pb: Bool, pl: Bool, pr: Bool) -> Cam =
   let c1 = cam_rotate(c, (bd(rr) - bd(rl)) * cam_rot_step)
       c2 = cam_pitch(c1, (bd(tu) - bd(td)) * pitch_step, pitch_min, pitch_max)
-      c3 = cam_zoom(c2, (bd(zo) - bd(zi)) * zoom_step, min_radius, max_radius)
+      c3 = cam_zoom(c2, (bd(zo) - bd(zi)) * zoom_step, min_dist, max_dist)
   in cam_pan(c3, (bd(pr) - bd(pl)) * pan_step, (bd(pf) - bd(pb)) * pan_step, pan_bound)
 
 # The terrain+rivers are STATIC, so they are baked into ONE GPU mesh at startup (see main) and
