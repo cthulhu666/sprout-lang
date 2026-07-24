@@ -1,7 +1,7 @@
 module examples.gfx.terrain_rivers_demo
 
 import stdlib.gfx
-import loam.terrain (Config, Chunk, World, generate_chunk, save_chunk, load_chunk, world_new, page_in, chunk_kind_tag, chunk_band, sea_level_band, spatial_hash, exposed_step_bands, chunk_linear_index, TileKind, Water, Beach, Grass, Forest, Desert, Mountain, Snow, Tundra, tile_kind_of)
+import loam.terrain (Config, tile_kind_at, tile_band_at, tile_kind_tag, sea_level_band, spatial_hash, exposed_step_bands, chunk_linear_index, TileKind, Water, Beach, Grass, Forest, Desert, Mountain, Snow, Tundra, tile_kind_of)
 import loam.hydrology (Hydrology, compute_hydrology, hydro_tier)
 import loam.vegetation (TreeKind, Palm, Broadleaf, Conifer, DarkConifer, Cactus, Shrub, tree_kind_tag, tree_for_biome)
 import loam.camera (Cam, cam_drive, cam_distance)
@@ -12,10 +12,18 @@ import stdlib.mutable (MutVec, mutvec_new, mutvec_at, mutvec_set, MutMatrix, mut
 # tests/loam/test_hydrology.spr) computes drainage over the whole region as a global upfront pass:
 # it fills depressions, routes D8 flow downhill, accumulates drainage area, and buckets it into a
 # per-cell flow_tier (0 = none, 1..3 = creek/river/major). THIS file is the view: at startup it
-# generates the region, runs the hydrology pass, then BAKES every tile into one static GPU mesh —
-# colouring river cells blue-by-tier instead of their biome — so the frame loop draws the whole map
-# in a single call. Rivers flow downhill and reach the sea (proven headlessly), the groundwork for a
-# raft water-transport game: flow_tier is the future navigability class, flow_dir the current.
+# generates the region STRAIGHT INTO a global band+tag grid, runs the hydrology pass, then BAKES
+# every tile into one static GPU mesh — colouring river cells blue-by-tier instead of their biome —
+# so the frame loop draws the whole map in a single call. Rivers flow downhill and reach the sea
+# (proven headlessly), the groundwork for a raft water-transport game: flow_tier is the future
+# navigability class, flow_dir the current.
+#
+# This bounded region is generated and consumed in ONE process, so the view skips loam.terrain's
+# chunk/disk STREAMING layer (page in/out, one .terrain file per chunk) — that path is for maps too
+# big to hold resident and is exercised headlessly by the World API + tests/loam/test_terrain.spr.
+# Round-tripping the region through disk text here was the dominant startup cost: re-parsing tiles
+# is ~70x slower than regenerating them, and holding every chunk resident made the GC's mark cost
+# (which scales with the live set) superlinear. Generating directly into the grid avoids both.
 #
 # Run (auto-closes after N frames with SPROUT_GFX_MAX_FRAMES=N):
 #   mise exec -- just run-gfx examples/gfx/terrain_rivers_demo.sprout
@@ -26,7 +34,6 @@ import stdlib.mutable (MutVec, mutvec_new, mutvec_at, mutvec_set, MutMatrix, mut
 # Map size ------------------------------------------------------------------
 let chunk_edge = 32  # tiles per chunk edge
 let region_chunks = 32  # map is region_chunks × region_chunks chunks; 32×32 = 1024×1024 tiles
-let map_dir = "/tmp"  # one file per chunk lands here (chunk_<cx>_<cz>.terrain)
 
 # Terrain generation (fed into loam.terrain.Config) -------------------------
 let world_seed = 2137  # change for a different world
@@ -149,54 +156,28 @@ fn bake_tile(bands: MutMatrix Int, tags: MutMatrix Int, h: Hydrology, span: Int,
         gfx.capture_tile((to_double(gx) - half) * tile_size, (to_double(gz) - half) * tile_size,
                          band_top_y(band), tile_size, r, g, b, dn, ds, de, dw)
 
-# --- Offline generation pass (once at startup) ------------------------------
-fn gen_region(cfg: Config, dir: String, ncx: Int, ncz: Int, cx: Int, cz: Int) -> Unit !{IO} =
-  if cz >= ncz then ()
-  else if cx >= ncx then gen_region(cfg, dir, ncx, ncz, 0, cz + 1)
+# --- Generation pass (once at startup) --------------------------------------
+# Tabulate the whole region's biome tag + elevation band STRAIGHT into the global grids from each
+# cell's pure field (loam.terrain.tile_kind_at / tile_band_at) — no per-chunk Chunk, no disk. The
+# bake pass below needs each tile's four neighbour heights (including across the old chunk seams);
+# a flat global grid makes those O(1) and seam-free, and keeping nothing resident but these two
+# grids keeps the GC's live set tiny (the old page-everything-in path made mark cost superlinear).
+fn gen_row(cfg: Config, bands: MutMatrix Int, tags: MutMatrix Int, span: Int, gz: Int, gx: Int) -> Unit !{IO} =
+  if gx >= span then ()
   else
     do
-      # Seed-keyed disk cache: a chunk already on disk under this seed is valid (generation is
-      # deterministic), so skip it. Only a first run — or a changed world_seed — pays the fBm cost.
-      # Match load_chunk directly (no `<-`): a `<-` bind on a Maybe-returning effect mis-strips it.
-      match load_chunk(dir, cfg.seed, cx, cz) with
-      | Just _ -> ()
-      | Nothing ->
-          do
-            ch <- generate_chunk(cfg, cx, cz)
-            match save_chunk(dir, cfg.seed, ch) with | _ -> ()
-      gen_region(cfg, dir, ncx, ncz, cx + 1, cz)
+      mutmatrix_set(tags, gz, gx, tile_kind_tag(tile_kind_at(cfg, gx, gz)))
+      mutmatrix_set(bands, gz, gx, tile_band_at(cfg, gx, gz))
+      gen_row(cfg, bands, tags, span, gz, gx + 1)
+
+fn gen_grids(cfg: Config, bands: MutMatrix Int, tags: MutMatrix Int, span: Int, gz: Int) -> Unit !{IO} =
+  if gz >= span then ()
+  else
+    do
+      gen_row(cfg, bands, tags, span, gz, 0)
+      gen_grids(cfg, bands, tags, span, gz + 1)
 
 # --- Bake pass --------------------------------------------------------------
-# The top-surface bake needs each tile's four neighbour heights, including across chunk seams, so it
-# first materialises a global band+tag grid (chunks page in once; page_in caches), then bakes from
-# the grid in one flat span×span sweep — neighbour lookups are O(1) and cross-chunk-free.
-
-# Copy one paged chunk's per-cell band + kind tag into the global grids at its world offset.
-fn grid_chunk_cells(bands: MutMatrix Int, tags: MutMatrix Int, ch: Chunk, cx: Int, cz: Int, size: Int, r: Int, c: Int) -> Unit !{IO} =
-  if r >= size then ()
-  else if c >= size then grid_chunk_cells(bands, tags, ch, cx, cz, size, r + 1, 0)
-  else
-    do
-      tag <- chunk_kind_tag(ch, r, c)
-      band <- chunk_band(ch, r, c)
-      mutmatrix_set(bands, (cz * size) + r, (cx * size) + c, band)
-      mutmatrix_set(tags, (cz * size) + r, (cx * size) + c, tag)
-      grid_chunk_cells(bands, tags, ch, cx, cz, size, r, c + 1)
-
-fn grid_chunk(w: World, bands: MutMatrix Int, tags: MutMatrix Int, cx: Int, cz: Int, size: Int) -> Unit !{IO} =
-  match page_in(w, cx, cz) with
-  | Nothing -> ()
-  | Just ch -> grid_chunk_cells(bands, tags, ch, cx, cz, size, 0, 0)
-
-# Fill the whole band+tag grid, chunk by chunk (mirrors the old draw_region recursion).
-fn build_grids(w: World, bands: MutMatrix Int, tags: MutMatrix Int, size: Int, ncx: Int, ncz: Int, cx: Int, cz: Int) -> Unit !{IO} =
-  if cz >= ncz then ()
-  else if cx >= ncx then build_grids(w, bands, tags, size, ncx, ncz, 0, cz + 1)
-  else
-    do
-      grid_chunk(w, bands, tags, cx, cz, size)
-      build_grids(w, bands, tags, size, ncx, ncz, cx + 1, cz)
-
 # Bake one chunk's tiles into the current capture. Neighbour heights come from the global grid, so
 # tiles on a chunk seam still get correct step walls against the adjacent chunk.
 fn bake_chunk_tiles(bands: MutMatrix Int, tags: MutMatrix Int, h: Hydrology, span: Int, size: Int, cx: Int, cz: Int, r: Int, c: Int) -> Unit !{IO} =
@@ -298,31 +279,26 @@ fn place_tile(models: MutVec Int, hy: Hydrology, gx: Int, gz: Int, tag: Int, ban
                 # chunks of vegetation (h is the gfx model handle, doubling as the group's model key).
                 gfx.tree_push(chunk_linear_index(gx, gz, tree_group_edge, tree_group_cols), h, wx, wy, wz, angle, sc)
 
-# Walk a chunk's tiles, queueing a tree per eligible cell (mirrors draw_chunk_tiles' recursion).
-fn place_chunk_tiles(models: MutVec Int, hy: Hydrology, ch: Chunk, cx: Int, cz: Int, size: Int, r: Int, c: Int) -> Unit !{IO} =
-  if r >= size then ()
-  else if c >= size then place_chunk_tiles(models, hy, ch, cx, cz, size, r + 1, 0)
+# Walk the region's tiles, queueing a tree per eligible cell. Reads the global band+tag grid built
+# by gen_grids (non-boxing mutmatrix_at_or), so it needs no chunk paging; place_tile buckets each
+# tree into its chunk group by GLOBAL coord, so a flat span×span sweep groups identically.
+fn place_row(models: MutVec Int, hy: Hydrology, bands: MutMatrix Int, tags: MutMatrix Int, span: Int, gz: Int, gx: Int) -> Unit !{IO} =
+  if gx >= span then ()
   else
     do
-      tag <- chunk_kind_tag(ch, r, c)
-      band <- chunk_band(ch, r, c)
-      place_tile(models, hy, (cx * size) + c, (cz * size) + r, tag, band)
-      place_chunk_tiles(models, hy, ch, cx, cz, size, r, c + 1)
+      tag <- mutmatrix_at_or(tags, gz, gx, 0)
+      band <- mutmatrix_at_or(bands, gz, gx, 0)
+      place_tile(models, hy, gx, gz, tag, band)
+      place_row(models, hy, bands, tags, span, gz, gx + 1)
 
-fn place_chunk(models: MutVec Int, w: World, hy: Hydrology, cx: Int, cz: Int, size: Int) -> Unit !{IO} =
-  match page_in(w, cx, cz) with
-  | Nothing -> ()
-  | Just ch -> place_chunk_tiles(models, hy, ch, cx, cz, size, 0, 0)
-
-# Scatter trees over the whole region, once at startup (mirrors draw_region). Instances live GPU-
-# side thereafter; the frame loop only replays them.
-fn place_region(models: MutVec Int, w: World, hy: Hydrology, size: Int, ncx: Int, ncz: Int, cx: Int, cz: Int) -> Unit !{IO} =
-  if cz >= ncz then ()
-  else if cx >= ncx then place_region(models, w, hy, size, ncx, ncz, 0, cz + 1)
+# Scatter trees over the whole region, once at startup. Instances live GPU-side thereafter; the
+# frame loop only replays them.
+fn place_region(models: MutVec Int, hy: Hydrology, bands: MutMatrix Int, tags: MutMatrix Int, span: Int, gz: Int) -> Unit !{IO} =
+  if gz >= span then ()
   else
     do
-      place_chunk(models, w, hy, cx, cz, size)
-      place_region(models, w, hy, size, ncx, ncz, cx + 1, cz)
+      place_row(models, hy, bands, tags, span, gz, 0)
+      place_region(models, hy, bands, tags, span, gz + 1)
 
 
 # --- Camera framing + control steps (derived from the tunables + map span) --
@@ -447,22 +423,22 @@ fn main() -> Unit !{IO} =
     gfx.set_target_fps(60)
     let cfg = Config(seed = world_seed, chunk_size = chunk_edge, octaves = noise_octaves,
                      lattice0 = noise_lattice0, elevation_levels = elevation_levels)
-    gen_region(cfg, map_dir, region_chunks, region_chunks, 0, 0)
-    w <- world_new(cfg, map_dir)
+    # Generate the whole region's biome tags + elevation bands directly into the global grids (no
+    # chunk/disk round-trip; see the file header). These grids feed both the bake and the trees.
+    bands <- mutmatrix_new(span_tiles, span_tiles, 0)
+    tags <- mutmatrix_new(span_tiles, span_tiles, 0)
+    gen_grids(cfg, bands, tags, span_tiles, 0)
     # Global hydrology pass over the whole region (same cfg + span as the terrain), computed once
     # upfront. flow_tier lines up cell-for-cell with the generated tiles.
     h <- compute_hydrology(cfg, span_tiles)
-    # Materialise the global band+tag grid, then bake each chunk into its OWN top-surface mesh (top
-    # quad + exposed step walls only; river cells recoloured by tier). Per-chunk meshes let the frame
-    # loop frustum-cull off-screen chunks — the win when zoomed in.
-    bands <- mutmatrix_new(span_tiles, span_tiles, 0)
-    tags <- mutmatrix_new(span_tiles, span_tiles, 0)
-    build_grids(w, bands, tags, chunk_edge, region_chunks, region_chunks, 0, 0)
+    # Bake each chunk into its OWN top-surface mesh (top quad + exposed step walls only; river cells
+    # recoloured by tier). Per-chunk meshes let the frame loop frustum-cull off-screen chunks — the
+    # win when zoomed in.
     meshes <- mutvec_new(chunk_count, -1)
     bake_region(bands, tags, h, span_tiles, chunk_edge, region_chunks, region_chunks, meshes, 0, 0)
     # Load the vegetation models and scatter biome-appropriate trees over the region ONCE (the pass
     # queues GPU instances; the frame loop just replays them). Models load after the GL context.
     models <- mutvec_new(tree_count, 0)
     load_trees(models)
-    place_region(models, w, h, chunk_edge, region_chunks, region_chunks, 0, 0)
+    place_region(models, h, bands, tags, span_tiles, 0)
     render_loop(meshes, models, cam_start)

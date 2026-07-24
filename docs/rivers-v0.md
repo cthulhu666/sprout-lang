@@ -36,8 +36,8 @@ is a pure function of its own coordinate + seed" streaming model.
 
 Rivers are computed **once, upfront, over the whole region**, deterministic in `(cfg, span)`.
 This trades terrain's per-tile locality for "reproducible from the seed + bounds" — still fully
-deterministic, just not per-tile-independent. It slots into the demo's existing "generate the
-region to disk, then bake the mesh" flow (the pass runs between generation and the bake). This is
+deterministic, just not per-tile-independent. It slots into the demo's "generate the region, then
+bake the mesh" flow (the pass runs between generation and the bake). This is
 the documented divergence from terrain-v0's streamability property, and is acceptable because the
 target is a hand-designed, fixed-size map, not an endless world.
 
