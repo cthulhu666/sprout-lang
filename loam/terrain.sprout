@@ -293,17 +293,22 @@ export fn chunk_from_string(s: String) -> Maybe Chunk !{IO} =
 # --- Disk (one file per chunk) ----------------------------------------------
 # read_file reads a whole file with no seek, so one file per chunk = one whole-file read per
 # resident chunk (docs/terrain-v0.md §5.6). `base_dir` must already exist.
-fn chunk_path(base_dir: String, cx: Int, cz: Int) -> String =
-  base_dir ++ "/chunk_" ++ int_to_string(cx) ++ "_" ++ int_to_string(cz) ++ ".terrain"
+# The cache key includes the generation `seed`: two worlds with different seeds produce different
+# terrain, so their chunks must not collide on disk. Changing OTHER generation params (octaves,
+# lattice0, …) with the same seed is NOT captured here — clear the cache or bump the seed if you
+# retune those. `base_dir` must already exist (write_file does not create directories).
+fn chunk_path(base_dir: String, seed: Int, cx: Int, cz: Int) -> String =
+  base_dir ++ "/chunk_" ++ int_to_string(seed) ++ "_"
+    ++ int_to_string(cx) ++ "_" ++ int_to_string(cz) ++ ".terrain"
 
-export fn save_chunk(base_dir: String, c: Chunk) -> Result String Unit !{IO} =
+export fn save_chunk(base_dir: String, seed: Int, c: Chunk) -> Result String Unit !{IO} =
   do
     s <- chunk_to_string(c)
-    write_file(chunk_path(base_dir, c.cx, c.cz), s)
+    write_file(chunk_path(base_dir, seed, c.cx, c.cz), s)
 
 # Match read_file directly (no do-bind): binding a Result via `<-` mis-strips the wrapper.
-export fn load_chunk(base_dir: String, cx: Int, cz: Int) -> Maybe Chunk !{IO} =
-  match read_file(chunk_path(base_dir, cx, cz)) with
+export fn load_chunk(base_dir: String, seed: Int, cx: Int, cz: Int) -> Maybe Chunk !{IO} =
+  match read_file(chunk_path(base_dir, seed, cx, cz)) with
   | Err _ -> Nothing
   | Ok content -> chunk_from_string(content)
 
@@ -331,7 +336,7 @@ export fn page_in(w: World, cx: Int, cz: Int) -> Maybe Chunk !{IO} =
     match dict_get(key, d) with
     | Just c -> Just(c)
     | Nothing ->
-        match load_chunk(w.base_dir, cx, cz) with
+        match load_chunk(w.base_dir, w.config.seed, cx, cz) with
         | Nothing -> Nothing
         | Just c ->
             do

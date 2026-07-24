@@ -157,16 +157,31 @@ fn main() -> Unit !{IO} =
 
     # --- file round-trip: save then load from disk ---
     # /tmp (not a subdir): write_file does not create directories and there is no mkdir builtin.
+    # The cache is keyed by the generation seed (chunk_<seed>_<cx>_<cz>.terrain), so a chunk saved
+    # under one seed is loaded back under that same seed.
     let dir = "/tmp"
-    match save_chunk(dir, ch10) with
+    let seed = cfg.seed
+    match save_chunk(dir, seed, ch10) with
     | Err _ -> assert_true(state, "disk: save_chunk succeeds", false)
     | Ok _ -> assert_true(state, "disk: save_chunk succeeds", true)
-    match load_chunk(dir, 1, 0) with
+    match load_chunk(dir, seed, 1, 0) with
     | Nothing -> assert_true(state, "disk: load returns Just after save", false)
     | Just ch10d ->
         do
           df <- chunk_diff(ch10, ch10d, 8)
           assert_eq(state, "disk: save->load preserves every cell", df, 0)
+
+    # --- regression: the seed is part of the cache key ---
+    # A chunk cached under one seed must NOT satisfy a load under a different seed (else changing
+    # world_seed would silently reuse stale terrain). The same (cx,cz) under a different seed is a
+    # cache MISS; under the original seed it is still a hit.
+    let other_seed = seed + 1
+    match load_chunk(dir, other_seed, 1, 0) with
+    | Just _ -> assert_true(state, "disk: different seed is a cache miss", false)
+    | Nothing -> assert_true(state, "disk: different seed is a cache miss", true)
+    match load_chunk(dir, seed, 1, 0) with
+    | Nothing -> assert_true(state, "disk: same seed still hits", false)
+    | Just _ -> assert_true(state, "disk: same seed still hits", true)
 
     # --- paging: cache hit, count, and reload after eviction ---
     w <- world_new(cfg, dir)

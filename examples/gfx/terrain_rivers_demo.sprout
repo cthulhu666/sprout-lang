@@ -1,7 +1,7 @@
 module examples.gfx.terrain_rivers_demo
 
 import stdlib.gfx
-import loam.terrain (Config, Chunk, World, generate_chunk, save_chunk, world_new, page_in, chunk_kind_tag, chunk_band, sea_level_band, spatial_hash, TileKind, Water, Beach, Grass, Forest, Desert, Mountain, Snow, Tundra, tile_kind_of)
+import loam.terrain (Config, Chunk, World, generate_chunk, save_chunk, load_chunk, world_new, page_in, chunk_kind_tag, chunk_band, sea_level_band, spatial_hash, TileKind, Water, Beach, Grass, Forest, Desert, Mountain, Snow, Tundra, tile_kind_of)
 import loam.hydrology (Hydrology, compute_hydrology, hydro_tier)
 import loam.vegetation (TreeKind, Palm, Broadleaf, Conifer, DarkConifer, Cactus, Shrub, tree_kind_tag, tree_for_biome)
 import loam.camera (Cam, cam_rotate, cam_zoom, cam_pitch, cam_pan)
@@ -112,8 +112,15 @@ fn gen_region(cfg: Config, dir: String, ncx: Int, ncz: Int, cx: Int, cz: Int) ->
   else if cx >= ncx then gen_region(cfg, dir, ncx, ncz, 0, cz + 1)
   else
     do
-      ch <- generate_chunk(cfg, cx, cz)
-      match save_chunk(dir, ch) with | _ -> ()
+      # Seed-keyed disk cache: a chunk already on disk under this seed is valid (generation is
+      # deterministic), so skip it. Only a first run — or a changed world_seed — pays the fBm cost.
+      # Match load_chunk directly (no `<-`): a `<-` bind on a Maybe-returning effect mis-strips it.
+      match load_chunk(dir, cfg.seed, cx, cz) with
+      | Just _ -> ()
+      | Nothing ->
+          do
+            ch <- generate_chunk(cfg, cx, cz)
+            match save_chunk(dir, cfg.seed, ch) with | _ -> ()
       gen_region(cfg, dir, ncx, ncz, cx + 1, cz)
 
 # --- Bake pass: page chunks, draw their tiles (river-aware) -----------------
