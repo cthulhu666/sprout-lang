@@ -31,3 +31,35 @@ export fn rng_next(state: Int) -> Int = imod((rng_mult * state) + rng_incr, rng_
 # uniformity than a raw `state mod n`. Total: n <= 0 yields 0. O(1).
 export fn rng_below(state: Int, n: Int) -> Int =
   if n <= 0 then 0 else imod(state / rng_high_shift, n)
+
+# Non-negative reduction into [0, rng_modulus). Unlike `imod` (which truncates toward
+# zero and so can return a negative remainder), this corrects the sign, so a hash of a
+# negative coordinate is still a valid generator state. O(1).
+fn rng_mod(a: Int) -> Int =
+  let m = imod(a, rng_modulus)
+  in if m < 0 then m + rng_modulus else m
+
+# The two large primes that decorrelate the x and z axes of a spatial hash (the classic
+# Perlin lattice constants). Distinct primes so the two coordinates never share a stride.
+let rng_hash_px = 73856093
+let rng_hash_pz = 19349663
+
+# A stateless 2D spatial hash: a pure Int hash of a coordinate pair, uniform in
+# [0, rng_modulus). Suits value/Perlin noise, spatial hashing, and per-cell jitter — any
+# place that needs a repeatable "random" value AT a coordinate rather than a threaded stream.
+#
+# It is a HASH, not an iterated generator: the value at a point must not depend on draw order,
+# and — crucially — evenly-spaced coordinates must not produce evenly-spaced outputs. A single
+# `rng_next` step cannot do this: it is affine (A * x + C mod 2^31), so a coordinate progression
+# maps to an output progression, and for these primes A * rng_hash_pz mod 2^31 ~= (3/5) * 2^31 —
+# meaning hash(x, z+5) ~= hash(x, z). That short spatial period renders as tiled, "copy-pasted"
+# noise. The final step multiplies the two coordinate-hashes together (`s1 * (2*s2+1)`), a mix
+# that is NONLINEAR in the coordinates, which breaks the resonance. Both factors are reduced
+# below rng_modulus first, so the product stays < 2^62 and never overflows i64.
+#
+# Coordinates may be any Int (negatives are handled), assumed within a magnitude where
+# `coord * prime` does not overflow i64 (true for any realistic map extent). O(1).
+export fn rng_hash2(ix: Int, iz: Int, seed: Int) -> Int =
+  let s1 = rng_next(rng_mod(seed + (ix * rng_hash_px)))
+      s2 = rng_next(rng_mod(s1 + (iz * rng_hash_pz)))
+  in rng_next(rng_mod(s1 * rng_mod((2 * s2) + 1)))

@@ -91,10 +91,16 @@ elevation/moisture/temperature fields → classify → tiles → chunk → disk 
 
 ### 5.1 Stateless spatial hash
 `spatial_hash(ix, iz, seed) -> Int` — a **pure function of lattice coordinates** (not a
-threaded stream), built by composing `stdlib.rng.rng_next` (pure `Int -> Int`, range
-`[0, 2^31)`) over `seed`, `ix`, `iz` mixed with distinct primes. A local non-negative `imod`
-(as `loam/agent.sprout:59` defines — `rng.imod` is not exported) keeps results in range. Purity
-here is what makes generation independent of sample/iteration order.
+threaded stream), a thin wrapper over `stdlib.rng.rng_hash2` (range `[0, 2^31)`). Purity here is
+what makes generation independent of sample/iteration order.
+
+The hash must be **nonlinear** in the coordinates. A single `rng_next` step is affine
+(`A*x + C mod 2^31`), so evenly-spaced coordinates map to evenly-spaced outputs; for the Perlin
+mixing primes `A * 19349663 mod 2^31 ≈ (3/5)·2^31`, which makes `hash(x, z+5) ≈ hash(x, z)` — a
+~5-lattice-cell period that renders as tiled, "copy-pasted" terrain. `rng_hash2` breaks this by
+multiplying the two coordinate-hashes together in its final step (a mix nonlinear in the coords);
+see `stdlib/rng.sprout` for the full rationale and the overflow bound. Switching a prime modulus
+does **not** fix it — the field stays affine and the period merely relocates.
 
 ### 5.2 Integer-lattice value noise + fBm
 - `value_at(tx, tz, L, seed) -> Double` in `[0,1)`: lattice cell `= tx / L` (integer division),

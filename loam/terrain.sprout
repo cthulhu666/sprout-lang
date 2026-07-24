@@ -1,6 +1,6 @@
 module loam.terrain
 
-import stdlib.rng (rng_next)
+import stdlib.rng (rng_hash2)
 import stdlib.mutable (MutMatrix, mutmatrix_new, mutmatrix_get, mutmatrix_set, mutmatrix_rows)
 import stdlib.string (words, split_once, string_lines)
 
@@ -70,21 +70,15 @@ export type Config = (seed: Int, chunk_size: Int, octaves: Int,
 
 # --- Stateless spatial hash -------------------------------------------------
 # A PURE function of lattice coordinates (not a threaded RNG stream), so the noise value at a
-# point never depends on sample order. Built by mixing the coords through rng.rng_next (a pure
-# Int -> Int over [0, 2^31)); each argument is reduced into [0, 2^31) first so rng_next's
-# multiply cannot overflow i64 (the invariant rng.sprout documents). Coordinates are assumed
-# non-negative in v0 (a bounded location at the origin); world-map negative coords are a
-# follow-up needing floor-division semantics (docs/terrain-v0.md §9).
-let hash_mod = 2147483648  # 2^31
+# point never depends on sample order. Delegated to stdlib.rng.rng_hash2, which uses a NONLINEAR
+# final mix: a single affine LCG step would map evenly-spaced coordinates to evenly-spaced
+# outputs, giving the field a short spatial period that renders as tiled, "copy-pasted" terrain
+# (see rng.sprout for the full rationale). `hash_mod` is rng_hash2's exclusive upper bound, used
+# below to normalize the hash into [0, 1). Coordinates are non-negative in v0 (a bounded location
+# at the origin); world-map negative coords are a follow-up (docs/terrain-v0.md §9).
+let hash_mod = 2147483648  # 2^31, == stdlib.rng.rng_modulus (rng_hash2's range is [0, hash_mod))
 
-fn nn_mod(a: Int) -> Int =
-  let m = a - ((a / hash_mod) * hash_mod)
-  in if m < 0 then m + hash_mod else m
-
-export fn spatial_hash(ix: Int, iz: Int, seed: Int) -> Int =
-  let s1 = rng_next(nn_mod(seed + (ix * 73856093)))
-      s2 = rng_next(nn_mod(s1 + (iz * 19349663)))
-  in s2
+export fn spatial_hash(ix: Int, iz: Int, seed: Int) -> Int = rng_hash2(ix, iz, seed)
 
 # --- Value noise + fBm ------------------------------------------------------
 # Double math internally; the only Int->Double is one-way `to_double`, so no missing primitive

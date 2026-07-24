@@ -35,6 +35,22 @@ fn chunk_diff(a: Chunk, b: Chunk, size: Int) -> Int !{IO} = diff_go(a, b, size, 
 fn touch_page(w: World, cx: Int, cz: Int) -> Unit !{IO} =
   match page_in(w, cx, cz) with | _ -> ()
 
+# Regression (spatial_hash tiling): the hash must NOT repeat at a small lattice shift. A single
+# affine LCG step maps evenly-spaced inputs to evenly-spaced outputs, and A * 19349663 mod 2^31
+# ~= (3/5) * 2^31, so the OLD hash had hash(x, z+5) ~= hash(x, z) — a ~120-tile visual tiling
+# ("copy-pasted N times"). We count coordinate pairs whose normalized hash differs by > 0.1
+# across a +5 z-shift; a decorrelated mixer passes most pairs (old affine hash: ~2/49; the
+# nonlinear rng_hash2: ~35/49). Threshold 30 sits cleanly between the two.
+fn hash01_at(ix: Int, iz: Int) -> Double = to_double(spatial_hash(ix, iz, 2137)) / to_double(2147483648)
+
+fn decorr_go(ix: Int, iz: Int, acc: Int) -> Int =
+  if ix > 7 then acc
+  else if iz > 7 then decorr_go(ix + 1, 1, acc)
+  else
+    let d = fabs(hash01_at(ix, iz) - hash01_at(ix, iz + 5))
+        bad = if d > 0.1 then 1 else 0
+    in decorr_go(ix, iz + 1, acc + bad)
+
 fn main() -> Unit !{IO} =
   do
     state <- new_state()
@@ -86,6 +102,10 @@ fn main() -> Unit !{IO} =
                 (spatial_hash(3, 7, 99) >= 0) && (spatial_hash(3, 7, 99) < 2147483648))
     assert_true(state, "spatial_hash: differs by coordinate",
                 spatial_hash(3, 7, 99) != spatial_hash(4, 7, 99))
+    # Regression: no short-period resonance at a +5 lattice shift (see decorr_go above). The old
+    # affine hash scored ~2/49 here (near-exact repeat -> visible terrain tiling); requires >= 30.
+    assert_true(state, "spatial_hash: no +5 z-shift resonance (>= 30/49 pairs decorrelate)",
+                decorr_go(1, 1, 0) >= 30)
 
     # --- generation wiring: a chunk cell equals the pure global-coordinate field ---
     # Global tile (gx, gz) sits in chunk (gx/size, gz/size) at local (gz mod size, gx mod size).
