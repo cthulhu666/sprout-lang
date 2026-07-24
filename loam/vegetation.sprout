@@ -1,0 +1,72 @@
+module loam.vegetation
+
+import loam.terrain (TileKind, Water, Beach, Grass, Forest, Desert, Mountain, Snow, Tundra)
+
+# Loam's vegetation classifier — a headless, deterministic answer to "what plant grows on this
+# tile?". Like loam.terrain it imports no graphics and is asserted without a window
+# (tests/loam/test_vegetation.spr); a view (examples/gfx/terrain_rivers_demo.sprout) samples it
+# and resolves each TreeKind to a concrete model.
+#
+# The single input beyond the biome is a spatial HASH `h` — a pure function of the tile's global
+# coordinate and the world seed (loam.terrain.spatial_hash, which wraps stdlib.rng.rng_hash2). It
+# does double duty: `imod(h, 100)` is the density ROLL (does this tile carry a plant?), and
+# `imod(h / 100, N)` is the category MIX (which kind, where a biome blends several). Because `h`
+# is derived, not a threaded RNG stream, placement is stable frame-to-frame and reproducible from
+# (coord, seed) alone — the same property that makes the terrain itself streamable and testable.
+#
+# Only the BIOME reaches this function, by design: the classifier's moisture/temperature fields
+# (loam.terrain.classify) are consumed at generation time and NOT persisted — a tile stores just
+# its TileKind tag + elevation band — so "tree type depending on biome" is exactly the available
+# signal. Handle resolution (TreeKind -> a specific vendored .glb) is the VIEW's job, not this
+# module's, so a biome can map to a coarse category here and fan out to several meshes there.
+
+# ============================================================================
+# VEGETATION TUNING — the density knobs. Everything else is fixed taxonomy below.
+# ============================================================================
+# Per-biome density: 0..100 = the percentage of eligible (land, non-river) tiles that carry a
+# plant. Forest is dense; deserts/snow are sparse; water is barren. Raise a value for a lusher
+# biome. The roll is `imod(h, 100)`, so density D places a plant exactly when the roll is < D.
+fn biome_density(k: TileKind) -> Int =
+  match k with
+  | Water -> 0
+  | Beach -> 8
+  | Grass -> 14
+  | Forest -> 55
+  | Desert -> 5
+  | Mountain -> 12
+  | Snow -> 4
+  | Tundra -> 6
+# ============================================================================
+
+# --- Vegetation taxonomy ----------------------------------------------------
+# The coarse plant category a biome yields. Nullary variants; `deriving (Enum)` gives
+# ordinal/from_ordinal so the view can index a per-category variant table by tag (mirrors
+# loam.terrain.TileKind). Declaration order is the tag order — keep it stable if anything
+# persists a TreeKind (nothing does today; placement is recomputed from the hash each run).
+export type TreeKind (..) deriving (Enum) =
+  | Palm | Broadleaf | Conifer | DarkConifer | Cactus | Shrub
+
+# The tag bridge, mirroring loam.terrain.tile_kind_tag — the derived `ordinal`. The view keys its
+# TreeKind -> [model handle] variant lists off this.
+export fn tree_kind_tag(k: TreeKind) -> Int = ordinal(k)
+
+# Truncating remainder for non-negative inputs (the loam idiom — see loam.agent/stdlib.rng). `h`
+# is a spatial_hash in [0, 2^31), so it is always non-negative and this is a plain modulo.
+fn imod(a: Int, b: Int) -> Int = a - ((a / b) * b)
+
+# Decide the vegetation for a tile: `Nothing` = bare (water, or the density roll missed),
+# `Just kind` = grows there. `h` is loam.terrain.spatial_hash(gx, gz, seed). The density roll uses
+# the low two digits of `h`; the category mix (where a biome blends kinds) uses the next slice,
+# so the two decisions are drawn from different parts of the hash.
+export fn tree_for_biome(k: TileKind, h: Int) -> Maybe TreeKind =
+  if imod(h, 100) >= biome_density(k) then Nothing
+  else
+    match k with
+    | Water -> Nothing
+    | Beach -> Just(Palm)
+    | Grass -> Just(Broadleaf)
+    | Forest -> if imod(h / 100, 4) == 0 then Just(Conifer) else Just(Broadleaf)
+    | Desert -> Just(Cactus)
+    | Mountain -> Just(Conifer)
+    | Snow -> Just(DarkConifer)
+    | Tundra -> if imod(h / 100, 3) == 0 then Just(Conifer) else Just(Shrub)

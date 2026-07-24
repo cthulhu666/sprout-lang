@@ -156,6 +156,44 @@ static const char *CUBE_FS =
   "    finalColor = vec4(lit, fragColor.a);\n"
   "}\n";
 
+/* Instanced tree shader: one DrawMeshInstanced call draws thousands of trees, each positioned by
+ * its own `instanceTransform` (a per-instance model matrix uploaded as a vertex attribute), so a
+ * whole forest costs a handful of draw calls instead of one DrawModel per tree. Colour is the
+ * material's colDiffuse — the Kenney models are vendored as OBJ, whose per-material MTL `Kd`
+ * raylib loads into maps[DIFFUSE].color (each tree splits into a bark mesh + a leaves mesh, drawn
+ * as separate instanced batches). Lighting matches CUBE/LIGHT: a world-space normal against a
+ * fixed key light + ambient. NB: the normal is transformed by `instanceTransform` (NOT the
+ * `matNormal` uniform, which raylib binds from the identity matModel under DrawMeshInstanced —
+ * using it would light every rotated tree as if unrotated). `wind` is reserved for a future sway. */
+static const char *TREE_VS =
+  "#version 330\n"
+  "in vec3 vertexPosition;\n"
+  "in vec3 vertexNormal;\n"
+  "in mat4 instanceTransform;\n"
+  "uniform mat4 mvp;\n"
+  "out vec3 fragNormal;\n"
+  "void main() {\n"
+  "    fragNormal = normalize(vec3(instanceTransform*vec4(vertexNormal, 0.0)));\n"
+  "    gl_Position = mvp*instanceTransform*vec4(vertexPosition, 1.0);\n"
+  "}\n";
+
+static const char *TREE_FS =
+  "#version 330\n"
+  "in vec3 fragNormal;\n"
+  "uniform vec4 colDiffuse;\n"
+  "uniform vec3 lightDir;\n"
+  "uniform vec3 lightColor;\n"
+  "uniform vec3 ambient;\n"
+  "out vec4 finalColor;\n"
+  "void main() {\n"
+  "    float diff = max(dot(normalize(fragNormal), normalize(lightDir)), 0.0);\n"
+  "    vec3 lit = colDiffuse.rgb*(ambient + diff*lightColor);\n"
+  "    finalColor = vec4(lit, colDiffuse.a);\n"
+  "}\n";
+
+static Shader g_tree_shader;   /* instanced, vertex-colour lit shader for scattered models (trees) */
+static int g_tree_ready = 0;
+
 /* Load and configure the lighting shaders. Call after InitWindow (needs GL). */
 static void init_lighting(void) {
   Vector3 lightDir   = { 0.5f, 1.0f, 0.4f };   /* points toward an upper-side light */
@@ -182,6 +220,47 @@ static void init_lighting(void) {
   g_terrain_material = LoadMaterialDefault();
   if (g_cube_ready) g_terrain_material.shader = g_cube_shader;
   g_terrain_material_ready = 1;
+
+  g_tree_shader = LoadShaderFromMemory(TREE_VS, TREE_FS);
+  if (g_tree_shader.id != 0) {
+    /* The instance-transform vertex attribute is NOT one of raylib's auto-located standard
+     * attributes; DrawMeshInstanced streams per-instance matrices into whatever location this
+     * points at, so it must be wired explicitly. (mvp/colDiffuse/vertexColor ARE auto-located
+     * by their conventional names when the shader loads.) */
+    g_tree_shader.locs[SHADER_LOC_VERTEX_INSTANCETRANSFORM] =
+      GetShaderLocationAttrib(g_tree_shader, "instanceTransform");
+    SetShaderValue(g_tree_shader, GetShaderLocation(g_tree_shader, "lightDir"), &lightDir, SHADER_UNIFORM_VEC3);
+    SetShaderValue(g_tree_shader, GetShaderLocation(g_tree_shader, "lightColor"), &lightColor, SHADER_UNIFORM_VEC3);
+    SetShaderValue(g_tree_shader, GetShaderLocation(g_tree_shader, "ambient"), &ambient, SHADER_UNIFORM_VEC3);
+    g_tree_ready = 1;
+  }
+}
+
+/* Per-model instance registry: for each model handle, a growable array of world transforms. A
+ * scene pushes every tree of a given type once at setup (gfx_instance_push), then draws them all
+ * each frame with one DrawMeshInstanced per mesh (gfx_draw_instanced). Indexed by model handle;
+ * grown lazily so it need not track the model registry's own growth. */
+static Matrix **g_inst = NULL;    /* g_inst[h] = transform buffer for model h */
+static int *g_inst_count = NULL;  /* live transforms in g_inst[h] */
+static int *g_inst_cap = NULL;    /* capacity of g_inst[h] */
+static int g_inst_reg = 0;        /* number of handle slots allocated */
+
+/* Ensure the per-handle registry arrays cover index `h` (slots initialised empty). */
+static int inst_reg_reserve(int h) {
+  if (h < g_inst_reg) return 1;
+  int nr = g_inst_reg == 0 ? 16 : g_inst_reg;
+  while (nr <= h) nr *= 2;
+  Matrix **ni = realloc(g_inst, (size_t)nr * sizeof(Matrix *));
+  int *nc = realloc(g_inst_count, (size_t)nr * sizeof(int));
+  int *np = realloc(g_inst_cap, (size_t)nr * sizeof(int));
+  if (!ni || !nc || !np) {
+    TraceLog(LOG_ERROR, "sprout_gfx: out of memory growing instance registry to %d", nr);
+    return 0;
+  }
+  g_inst = ni; g_inst_count = nc; g_inst_cap = np;
+  for (int i = g_inst_reg; i < nr; i++) { g_inst[i] = NULL; g_inst_count[i] = 0; g_inst_cap[i] = 0; }
+  g_inst_reg = nr;
+  return 1;
 }
 
 /* --- Mesh capture helpers --------------------------------------------------- */
@@ -451,6 +530,46 @@ long long gfx_draw_model(long long handle, long long x, long long y, long long z
   float s = as_float(scale);
   DrawModelEx(g_models[(int)handle], pos, (Vector3){ 0.0f, 1.0f, 0.0f },
               as_float(angle), (Vector3){ s, s, s }, WHITE);
+  return 0;
+}
+
+/* Queue one instance of model `handle` at (x,y,z), rotated `angle` degrees about Y, uniformly
+ * scaled by `scale`. Call once per object at setup; the transform is built here (mirroring
+ * DrawModelEx's scale->rotate->translate order) and stored, then replayed cheaply every frame by
+ * gfx_draw_instanced. Out-of-range handles are a no-op. */
+long long gfx_instance_push(long long handle, long long x, long long y, long long z,
+                            long long angle, long long scale) {
+  if (handle < 0 || handle >= g_model_count) return 0;
+  int h = (int)handle;
+  if (!inst_reg_reserve(h)) return 0;
+  if (g_inst_count[h] >= g_inst_cap[h]) {
+    int nc = g_inst_cap[h] == 0 ? 256 : g_inst_cap[h] * 2;
+    Matrix *grown = realloc(g_inst[h], (size_t)nc * sizeof(Matrix));
+    if (!grown) { TraceLog(LOG_ERROR, "sprout_gfx: out of memory growing instance buffer"); return 0; }
+    g_inst[h] = grown; g_inst_cap[h] = nc;
+  }
+  float s = as_float(scale);
+  Matrix m = MatrixMultiply(MatrixMultiply(MatrixScale(s, s, s),
+                                           MatrixRotate((Vector3){ 0.0f, 1.0f, 0.0f }, as_float(angle) * DEG2RAD)),
+                            MatrixTranslate(as_float(x), as_float(y), as_float(z)));
+  g_inst[h][g_inst_count[h]++] = m;
+  return 0;
+}
+
+/* Draw every queued instance of model `handle` in one DrawMeshInstanced call per mesh, under the
+ * instanced tree shader (world-normal lit, per-vertex colour x material colour). The material is
+ * copied by value with its shader overridden, so the stored model is left untouched. A no-op for
+ * out-of-range handles or handles with no queued instances. */
+long long gfx_draw_instanced(long long handle) {
+  if (handle < 0 || handle >= g_model_count) return 0;
+  int h = (int)handle;
+  if (h >= g_inst_reg || g_inst_count[h] == 0) return 0;
+  Model model = g_models[h];
+  for (int i = 0; i < model.meshCount; i++) {
+    Material mat = model.materials[model.meshMaterial[i]];
+    if (g_tree_ready) mat.shader = g_tree_shader;
+    DrawMeshInstanced(model.meshes[i], mat, g_inst[h], g_inst_count[h]);
+  }
   return 0;
 }
 

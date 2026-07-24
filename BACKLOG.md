@@ -351,6 +351,24 @@ raylib) have landed. Fenced from core: shim `graphics/sprout_gfx.c` links only v
   entry point). SoA-ECS over `MutVec` component arrays; generalizes the crowd example. Validate
   records-of-`MutVec` ergonomics FIRST (load-bearing; feeds records-v0). Watch the cross-module
   `wrap`-annotation wart if Scene/Entity are wrap types.
+- [x] `VEG` Loam: **biome-driven trees** on the terrain. Pure headless classifier
+  `loam.vegetation.tree_for_biome(TileKind, hash) -> Maybe TreeKind` (density roll + category mix
+  from one `spatial_hash`; unit-tested `tests/loam/test_vegetation.spr`) decides WHAT grows; the
+  view (`examples/gfx/terrain_rivers_demo.sprout`) resolves each `TreeKind` to one of ~15 vendored
+  Kenney models and scatters them. Rendering is **GPU instancing** — new `gfx_instance_push`/
+  `gfx_draw_instanced` in the shim (a per-model `Matrix` buffer + `DrawMeshInstanced` under a
+  dedicated instanced tree shader), so ~40k trees hold ~50 FPS in one batch per model. Assets are
+  **OBJ+MTL** (`assets/models/nature/`, CC0): the kit's UniGLTF-exported `.glb` fail raylib's cgltf
+  parser (zero meshes) — see `assets/models/nature/SOURCE.md`. Colour = MTL `Kd` via `colDiffuse`.
+- [ ] `P3` Loam trees: **wind sway**. The instanced tree shader (`TREE_VS` in `sprout_gfx.c`) has a
+  reserved `wind` hook; add a `time`/phase uniform and displace vertices by height-weighted
+  `sin(time + worldpos)` for a breeze. Per-instance phase from the instance transform's translation.
+- [ ] `P3` Loam trees: **camera-distance LOD / culling**. Instance transforms live host-side
+  (per-model `Matrix` buffers), so filter by distance to the camera each frame: cull far instances,
+  and swap detailed↔simple tree models per distance band. Needs the buffers exposed for per-frame
+  refill (today they are push-once at setup). Enables the AAA-density end-goal without FPS loss.
+- [ ] `P3` Loam trees: swap in **higher-poly / detailed** tree models. Instancing keeps memory flat
+  (per-instance matrices, not vertices), so richer meshes cost only their own vertex upload once.
 - [ ] `P3` Loam: per-group **colour tint** for `ecs_agents` flocks. Groups are currently
   distinguished only spatially (ring homes) because `gfx.draw_model` has no tint. Needs a
   `gfx_draw_model_tinted(handle,x,y,z,angle,scale,r,g,b)` extern in the raylib shim +
