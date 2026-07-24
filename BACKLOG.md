@@ -856,20 +856,21 @@ plan" item under "Design Roadmap → Current Priorities".
 - [ ] `P3` **Extract terrain rendering into `loam.view`** (as the view systems were extracted
   from the demos), and the far-horizon **AAA asset/mesh/LOD** render track the current raylib
   shim cannot reach.
-- [ ] `P2` **`deriving (Enum)` — constructor ↔ Int, to kill hand-written tag/ordinal boilerplate**
-  (surfaced 2026-07-24 building `loam.terrain`; cross-cutting, not terrain-specific). `TileKind`
-  needs `tile_kind_tag : TileKind -> Int` and `tile_kind_of : Int -> TileKind` for serialization,
-  and both hand-encode the constructor's *declaration order* — which the compiler already assigns
-  as the runtime tag (`sprout_tag` in `runtime/sprout_runtime.c`, used by the `ToString` builtin
-  but not exposed to Sprout). The ordinals are duplicated across `tile_kind_tag`, `tile_kind_of`,
-  and the on-disk format, with nothing enforcing agreement. **Fix:** add an `Enum` emitter to the
-  existing deriving framework (`stdlib/compiler/deriving.sprout` already ships `Eq`/`Ord`/`ToString`
-  with constructor enumeration + AST splicing — this is "another emitter," not new architecture),
-  so `type T (..) deriving (Enum)` yields `from_enum : T -> Int` and `to_enum : Int -> Maybe T` for
-  free, with declaration order as the single source of truth. Then `tile_kind_tag`/`tile_kind_of`
-  vanish and every enum in the tree benefits. **Design decisions:** `to_enum` is partial
-  (`Int -> Maybe T`, out-of-range → `Nothing` — safer than terrain's current `else Grass` coerce);
-  whether to also emit `succ`/`pred`/`bounded`. Prior art: Haskell `Enum`/`fromEnum`/`toEnum`, Rust
-  C-enum `as i32`, Swift `Int`-raw enums. NB: `Enum` was never in deriving-v1 scope (only
-  `Serialize`/`Deserialize` were reverted, for unrelated reasons), so this is greenfield. Ref:
-  `docs/deriving-v1-draft.md`, spec §8.6.
+- [x] `P2` **`deriving (Enum)` — constructor ↔ Int, to kill hand-written tag/ordinal boilerplate**
+  (surfaced 2026-07-24 building `loam.terrain`; landed 2026-07-24). Shipped as `deriving (Enum)`
+  on nullary-only ADTs, synthesizing `ordinal : a -> Int` and `from_ordinal : Int -> Maybe a` with
+  declaration order as the single source of truth (`stdlib/compiler/deriving.sprout`,
+  `emit_enum_instance`). Names chosen for mainstream-industry familiarity + semantic precision
+  ("ordinal" = declaration-order index, as in Java/Kotlin/Scala 3), not Haskell's `fromEnum`/`toEnum`.
+  `from_ordinal` is partial (out-of-range → `Nothing`, per the Swift/Rust failable consensus) and
+  requires a concrete return type at the call site (return-type dispatch). `loam.terrain`'s
+  `tile_kind_tag`/`tile_kind_of` are now thin wrappers over the derived methods (`tile_kind_of`
+  keeps a Grass fallback for out-of-range tags). Spec §8.6; tests `tests/stdlib/test_deriving_enum.spr`,
+  `tests/conformance/type_error/deriving_enum_field_bearing.spr`.
+- [ ] `P3` **`deriving (Enum)` breadth — `values`/`enum_values`, and optionally `succ`/`pred`/`bounded`.**
+  Deferred from the Enum landing (2026-07-24) as low-priority: no in-tree consumer needs them yet.
+  `values : List a` (all variants in declaration order) is the most-requested — near-universal in
+  industry languages (Java `values()`, Kotlin `entries`, C# `Enum.GetValues`, Scala 3 `values`,
+  Python iteration) — and rides the same return-type-dispatch path as `from_ordinal` (already
+  proven). `succ`/`pred : a -> Maybe a` and `min_bound`/`max_bound : a` are further out. Add when a
+  concrete consumer (menu iteration, exhaustive mapping) appears. Ref: spec §8.6, `docs/deriving-v1-draft.md`.

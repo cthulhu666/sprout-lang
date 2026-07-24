@@ -324,6 +324,73 @@ fn emit_ord_instance(name: String, type_params: List String, ctors: List ast.Typ
        build_ord_match_body(ctors, pos))],
     pos)
 
+# --- Enum emitter (nullary-only ADTs) ----------------------------------------
+#
+# Unlike Eq/Ord/ToString, which only DESTRUCTURE values, Enum also CONSTRUCTS
+# them: `from_ordinal` rebuilds a constructor from its ordinal. That is only
+# well-defined when every constructor is nullary (a field-bearing variant cannot
+# be rebuilt from an Int alone) — validate_one_deriving_class rejects the rest
+# up-front, so both emitter bodies below may assume nullary constructors.
+#
+#   ordinal(v)      = match v with | C0 -> 0 | C1 -> 1 | ...
+#   from_ordinal(n) = if n == 0 then Just(C0) else if n == 1 then Just(C1)
+#                     else ... else Nothing
+#
+# Ordinals are the constructors' declaration-order index (0-based), matching the
+# runtime tag the codegen already assigns.
+
+# One `| Ci -> i` branch per constructor, numbered in declaration order.
+fn build_ordinal_branches(ctors: List ast.TypeConstructor, idx: Int, pos: source.SourcePos) -> List ast.MatchBranch =
+  match ctors with
+  | Nil -> Nil
+  | Cons c rest ->
+      match c with
+      | ast.TypeConstructor name _ ->
+          Cons(ast.MatchBranch(ast.ConstructorPattern(name, Nil, pos), ast.IntExpr(idx, pos)),
+               build_ordinal_branches(rest, idx + 1, pos))
+
+fn build_ordinal_body(ctors: List ast.TypeConstructor, pos: source.SourcePos) -> ast.Expr =
+  ast.MatchExpr(ast.VarExpr("v", pos), build_ordinal_branches(ctors, 0, pos), pos)
+
+# `if n == i then Just(Ci) else <recurse>`, terminating in `Nothing` once the
+# constructor list is exhausted (the out-of-range case).
+fn build_from_ordinal_ladder(ctors: List ast.TypeConstructor, idx: Int, pos: source.SourcePos) -> ast.Expr =
+  match ctors with
+  | Nil -> ast.VarExpr("Nothing", pos)
+  | Cons c rest ->
+      match c with
+      | ast.TypeConstructor name _ ->
+          ast.IfExpr(
+            ast.BinaryExpr("==", ast.VarExpr("n", pos), ast.IntExpr(idx, pos), pos),
+            ast.CallExpr(ast.VarExpr("Just", pos), [ast.VarExpr(name, pos)], pos),
+            build_from_ordinal_ladder(rest, idx + 1, pos),
+            pos)
+
+# `Maybe <head>` return type for from_ordinal.
+fn maybe_of(head: ast.TypeExpr) -> ast.TypeExpr =
+  ast.TypeApply(ast.TypeName("Maybe"), head)
+
+# Emit `instance Enum <T> { fn ordinal(v) -> Int = ...  fn from_ordinal(n) -> Maybe T = ... }`.
+# No per-parameter constraints are emitted: an Enum-derivable type is nullary, so
+# any type parameter is necessarily phantom (no field can mention it).
+fn emit_enum_instance(name: String, type_params: List String, ctors: List ast.TypeConstructor, pos: source.SourcePos) -> ast.Decl =
+  ast.InstanceDecl(
+    ast.TypeConstraint("Enum", [instance_head_typeexpr(name, type_params)]),
+    Nil,
+    [ast.InstanceMethodImpl(
+       "ordinal",
+       [ast.Param("v", Just(instance_head_typeexpr(name, type_params)))],
+       Just(ast.TypeName("Int")),
+       Nothing,
+       build_ordinal_body(ctors, pos)),
+     ast.InstanceMethodImpl(
+       "from_ordinal",
+       [ast.Param("n", Just(ast.TypeName("Int")))],
+       Just(maybe_of(instance_head_typeexpr(name, type_params))),
+       Nothing,
+       build_from_ordinal_ladder(ctors, 0, pos))],
+    pos)
+
 # --- DerivableClass ADT + dispatch ------------------------------------------
 #
 # Models the closed set of v1-derivable classes. Parsing the user-supplied
@@ -334,6 +401,7 @@ type DerivableClass =
   | DcEq
   | DcOrd
   | DcToString
+  | DcEnum
 
 # Parse a class name as it appeared in the user's `deriving (...)` clause.
 # Returns Nothing for class names not supported in v1 (the validation pass
@@ -342,6 +410,7 @@ fn parse_derivable_class(name: String) -> Maybe DerivableClass =
   if name == "Eq" then Just(DcEq)
   else if name == "Ord" then Just(DcOrd)
   else if name == "ToString" then Just(DcToString)
+  else if name == "Enum" then Just(DcEnum)
   else Nothing
 
 # Given a parsed class and TypeDecl fields, synthesize the corresponding
@@ -352,6 +421,7 @@ fn derive_instance_for(dc: DerivableClass, name: String, type_params: List Strin
   | DcEq -> Just(emit_eq_instance(name, type_params, ctors, pos))
   | DcToString -> Just(emit_to_string_instance(name, type_params, ctors, pos))
   | DcOrd -> Just(emit_ord_instance(name, type_params, ctors, pos))
+  | DcEnum -> Just(emit_enum_instance(name, type_params, ctors, pos))
 
 # Bridge from the string class name (as it appears in the source `deriving`
 # clause) to the typed dispatch. Returns Nothing only if the class isn't
@@ -408,20 +478,36 @@ export fn validate_deriving_decls(decls: List ast.Decl) -> Maybe String =
 
 fn validate_one_deriving_decl(d: ast.Decl) -> Maybe String =
   match d with
-  | ast.TypeDecl name _ _ deriving_classes _ ->
-      validate_deriving_classes_list(name, deriving_classes)
+  | ast.TypeDecl name _ ctors deriving_classes _ ->
+      validate_deriving_classes_list(name, ctors, deriving_classes)
   | _ -> Nothing
 
-fn validate_deriving_classes_list(name: String, classes: List String) -> Maybe String =
+fn validate_deriving_classes_list(name: String, ctors: List ast.TypeConstructor, classes: List String) -> Maybe String =
   match classes with
   | Nil -> Nothing
   | Cons class_name rest ->
-      match validate_one_deriving_class(name, class_name) with
+      match validate_one_deriving_class(name, ctors, class_name) with
       | Just err -> Just(err)
-      | Nothing -> validate_deriving_classes_list(name, rest)
+      | Nothing -> validate_deriving_classes_list(name, ctors, rest)
 
-fn validate_one_deriving_class(name: String, class_name: String) -> Maybe String =
+# Name of the first constructor carrying fields, if any — the offending ctor for
+# an Enum derivation, which requires every constructor to be nullary.
+fn first_field_bearing_ctor(ctors: List ast.TypeConstructor) -> Maybe String =
+  match ctors with
+  | Nil -> Nothing
+  | Cons c rest ->
+      match c with
+      | ast.TypeConstructor cname _ ->
+          if ctor_arity(c) > 0 then Just(cname)
+          else first_field_bearing_ctor(rest)
+
+fn validate_one_deriving_class(name: String, ctors: List ast.TypeConstructor, class_name: String) -> Maybe String =
   match parse_derivable_class(class_name) with
   | Nothing ->
-      Just("unknown class in deriving clause for `" ++ name ++ "`: `" ++ class_name ++ "` (v1 supports Eq, Ord, ToString)")
+      Just("unknown class in deriving clause for `" ++ name ++ "`: `" ++ class_name ++ "` (v1 supports Eq, Ord, ToString, Enum)")
+  | Just DcEnum ->
+      match first_field_bearing_ctor(ctors) with
+      | Just cname ->
+          Just("cannot derive `Enum` for `" ++ name ++ "`: constructor `" ++ cname ++ "` has fields; Enum requires all constructors to be nullary")
+      | Nothing -> Nothing
   | Just _ -> Nothing

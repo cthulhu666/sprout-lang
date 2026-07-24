@@ -353,6 +353,18 @@ export class Ord a where Eq a {
   fn compare(left: a, right: a) -> Int
 }
 
+# A type whose values map to and from a contiguous 0-based ordinal — the
+# declaration-order index of each constructor. `deriving (Enum)` synthesizes
+# both methods for a nullary-only ADT (docs/spec-v0.md §8.6). `from_ordinal` is
+# partial: an out-of-range ordinal yields `Nothing` rather than coercing. Its
+# class variable appears only in the return, so a call must fix the target type
+# through a concrete boundary (a typed fn return / annotation), not a fully
+# polymorphic context.
+export class Enum a {
+  fn ordinal(v: a) -> Int
+  fn from_ordinal(n: Int) -> Maybe a
+}
+
 export fn ord_lt(x: a, y: a) -> Bool where Ord a =
   compare(x, y) < 0
 

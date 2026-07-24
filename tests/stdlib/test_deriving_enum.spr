@@ -1,0 +1,71 @@
+import stdlib.test (TestState, new_state, assert_true, assert_eq, summary)
+
+# `deriving (Enum)` on a nullary-only ADT synthesizes:
+#   ordinal      : a -> Int        (variant -> declaration-order index, 0-based)
+#   from_ordinal : Int -> Maybe a  (index -> variant; out-of-range -> Nothing)
+#
+# `from_ordinal` puts the class variable only in its return type, so each call
+# site must fix the target type through a concrete boundary (a typed fn return);
+# the get_color/get_dir wrappers below are exactly that carrier. Two derived
+# instances are in scope so return-type dispatch is exercised with a real choice.
+
+type Color (..) deriving (Enum) =
+  | Red
+  | Green
+  | Blue
+
+type Dir (..) deriving (Enum) =
+  | North
+  | South
+
+# Single-constructor nullary edge case.
+type Only (..) deriving (Enum) =
+  | Solo
+
+# Concrete-typed carriers that pin from_ordinal's return type at the call site.
+fn get_color(n: Int) -> Maybe Color = from_ordinal(n)
+fn get_dir(n: Int) -> Maybe Dir = from_ordinal(n)
+fn get_only(n: Int) -> Maybe Only = from_ordinal(n)
+
+# Observe a Maybe without needing Eq on the ADT: -1 marks Nothing.
+fn color_ord(m: Maybe Color) -> Int =
+  match m with
+  | Just c -> ordinal(c)
+  | Nothing -> -1
+
+fn dir_ord(m: Maybe Dir) -> Int =
+  match m with
+  | Just d -> ordinal(d)
+  | Nothing -> -1
+
+fn only_ord(m: Maybe Only) -> Int =
+  match m with
+  | Just o -> ordinal(o)
+  | Nothing -> -1
+
+fn main() -> Unit !{IO} =
+  do
+    let state = new_state()
+
+    # ordinal: declaration order, 0-based.
+    assert_eq(state, "ordinal Red", ordinal(Red), 0)
+    assert_eq(state, "ordinal Green", ordinal(Green), 1)
+    assert_eq(state, "ordinal Blue", ordinal(Blue), 2)
+    # A second instance keeps its own numbering.
+    assert_eq(state, "ordinal North", ordinal(North), 0)
+    assert_eq(state, "ordinal South", ordinal(South), 1)
+    assert_eq(state, "ordinal Solo", ordinal(Solo), 0)
+
+    # from_ordinal round-trips ordinal (dispatch pinned by the wrapper's return type).
+    assert_eq(state, "from_ordinal 0 -> Red", color_ord(get_color(0)), 0)
+    assert_eq(state, "from_ordinal 2 -> Blue", color_ord(get_color(2)), 2)
+    assert_eq(state, "from_ordinal 1 -> South", dir_ord(get_dir(1)), 1)
+    assert_eq(state, "from_ordinal 0 -> Solo", only_ord(get_only(0)), 0)
+
+    # Out-of-range -> Nothing (partial, not a coerce).
+    assert_eq(state, "Color from_ordinal 3 -> Nothing", color_ord(get_color(3)), -1)
+    assert_eq(state, "Color from_ordinal -1 -> Nothing", color_ord(get_color(0 - 1)), -1)
+    assert_eq(state, "Dir from_ordinal 2 -> Nothing", dir_ord(get_dir(2)), -1)
+    assert_eq(state, "Only from_ordinal 1 -> Nothing", only_ord(get_only(1)), -1)
+
+    summary(state)

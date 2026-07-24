@@ -360,6 +360,31 @@ instance Eq (Set a) where Eq a {
 }
 ```
 
+For a C-like enum (all constructors nullary) that needs a stable integer form —
+serialization, a lookup table, an on-disk tag — prefer `deriving (Enum)` over a
+hand-written `match` mapping each variant to a number. It makes declaration order
+the single source of truth for `ordinal`/`from_ordinal` and removes the risk of a
+tag table drifting out of sync with the type:
+
+```sprout
+# Idiomatic: let declaration order define the tags.
+type TileKind (..) deriving (Enum) =
+  | Water | Beach | Grass | Forest | Desert | Mountain | Snow | Tundra
+```
+
+`from_ordinal : Int -> Maybe a` is partial (out-of-range → `Nothing`) and must be
+called where the target type is concrete — wrap it in a domain function with a
+declared return type rather than calling it in a fully polymorphic position:
+
+```sprout
+# Concrete return type pins from_ordinal's dispatch; a total wrapper supplies a
+# fallback if the domain wants one.
+fn tile_kind_of(tag: Int) -> TileKind =
+  match from_ordinal(tag) with
+  | Just k -> k
+  | Nothing -> Grass
+```
+
 Mix freely: `deriving (Eq)` on the type and a hand-written `instance Ord` is
 fine — the derived instance and the hand-written one cover different classes.
 Do not mix them for the same class on the same type (the synthesizer would

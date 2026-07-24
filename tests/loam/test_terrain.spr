@@ -1,7 +1,7 @@
 import stdlib.test (TestState, new_state, assert_eq, assert_true, summary)
 import stdlib.math (fabs)
 import stdlib.mutable (mutmatrix_new, mutmatrix_set)
-import loam.terrain (TileKind, Water, Grass, Mountain, Snow, Config, tile_kind_tag, classify, band_of, sea_level_band, spatial_hash, tile_kind_at, tile_band_at, Chunk, generate_chunk, chunk_kind_tag, chunk_band, chunk_to_string, chunk_from_string, save_chunk, load_chunk, World, world_new, page_in, page_out, resident_count)
+import loam.terrain (TileKind, Water, Beach, Grass, Forest, Desert, Mountain, Snow, Tundra, Config, tile_kind_tag, tile_kind_of, classify, band_of, sea_level_band, spatial_hash, tile_kind_at, tile_band_at, Chunk, generate_chunk, chunk_kind_tag, chunk_band, chunk_to_string, chunk_from_string, save_chunk, load_chunk, World, world_new, page_in, page_out, resident_count)
 
 # loam.terrain is a headless, seeded, deterministic terrain model: generation is a pure
 # function of (coordinate, seed), tiles are integer (kind, elevation-band) pairs, chunks
@@ -48,6 +48,25 @@ fn main() -> Unit !{IO} =
               tile_kind_tag(classify(0.72, 0.5, 0.5)), tile_kind_tag(Mountain))
     assert_eq(state, "classify: temperate mid-elevation is Grass",
               tile_kind_tag(classify(0.55, 0.4, 0.5)), tile_kind_tag(Grass))
+
+    # --- Enum-derived tag contract: absolute ordinals ARE the on-disk format ---
+    # tile_kind_tag is the derived `ordinal`; these absolute pins fail loudly if a
+    # TileKind variant is ever reordered — which would silently remap every tile in
+    # every saved .terrain file. Do not "fix" a failure here by editing the numbers.
+    assert_eq(state, "tag Water == 0", tile_kind_tag(Water), 0)
+    assert_eq(state, "tag Beach == 1", tile_kind_tag(Beach), 1)
+    assert_eq(state, "tag Grass == 2", tile_kind_tag(Grass), 2)
+    assert_eq(state, "tag Forest == 3", tile_kind_tag(Forest), 3)
+    assert_eq(state, "tag Desert == 4", tile_kind_tag(Desert), 4)
+    assert_eq(state, "tag Mountain == 5", tile_kind_tag(Mountain), 5)
+    assert_eq(state, "tag Snow == 6", tile_kind_tag(Snow), 6)
+    assert_eq(state, "tag Tundra == 7", tile_kind_tag(Tundra), 7)
+    # tile_kind_of is the total inverse: it round-trips valid tags and falls back to
+    # Grass for out-of-range tags (from_ordinal is partial; the wrapper coerces).
+    assert_eq(state, "of(3) round-trips to Forest tag", tile_kind_tag(tile_kind_of(3)), 3)
+    assert_eq(state, "of(7) round-trips to Tundra tag", tile_kind_tag(tile_kind_of(7)), 7)
+    assert_eq(state, "of(99) out-of-range -> Grass", tile_kind_tag(tile_kind_of(99)), tile_kind_tag(Grass))
+    assert_eq(state, "of(-1) out-of-range -> Grass", tile_kind_tag(tile_kind_of(0 - 1)), tile_kind_tag(Grass))
 
     # --- band_of: monotone non-decreasing + in range [0, levels) ---
     let b_lo = band_of(0.05, 10)

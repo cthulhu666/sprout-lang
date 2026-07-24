@@ -1,0 +1,1 @@
+cannot derive `Enum` for `Bad`: constructor `HasField` has fields; Enum requires all constructors to be nullary

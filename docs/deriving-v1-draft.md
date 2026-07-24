@@ -3,6 +3,20 @@
 **Status:** shipped on `feat/deriving` (2026-06-09), with scope narrowed
 2026-06-10 to Eq/Ord/ToString. Spec section in §8.6 of `docs/spec-v0.md`.
 
+**Post-v1 addition (2026-07-24): `Enum`.** A fourth derivable class, greenfield
+(never part of the reverted Serialize/Deserialize scope), added to kill
+hand-written constructor↔Int tag boilerplate (surfaced by `loam.terrain`).
+Restricted to nullary-only ADTs; synthesizes `ordinal : a -> Int` and
+`from_ordinal : Int -> Maybe a` with declaration order as the source of truth.
+`from_ordinal` is return-type-dispatched (the class variable is only in the
+return), which the compiler's post-inference dispatch pass
+(`resolve_dispatch_typed_expr`, validated by `tests/stdlib/test_return_type_dispatch.spr`)
+handles as long as the target type is concrete at the call site — unlike the
+reverted `Deserialize`, whose fragility predated that mechanism. Names follow
+mainstream-industry convention (`ordinal`, as in Java/Kotlin/Scala 3) rather
+than Haskell's `fromEnum`/`toEnum`. See spec §8.6 and `BACKLOG.md` for the
+deferred breadth (`values`/`succ`/`pred`).
+
 **Scope revision (2026-06-10):** the initial draft included `Serialize` and
 `Deserialize` to unblock the iface PR. Reviewing the design surfaced three
 problems with that scope: (a) S-expression format was hardcoded behind a

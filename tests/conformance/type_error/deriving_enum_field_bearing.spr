@@ -1,0 +1,10 @@
+# `deriving (Enum)` requires all constructors to be nullary — a field-bearing
+# variant cannot be rebuilt from an Int alone, so from_ordinal is ill-defined.
+# The error fires eagerly at the deriving site (bundle time), not at a use site.
+type Bad (..) deriving (Enum) =
+  | Nullary
+  | HasField Int
+
+fn main() -> Unit !{IO} =
+  do
+    term_write("unreachable")

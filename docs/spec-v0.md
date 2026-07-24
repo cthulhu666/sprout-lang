@@ -651,6 +651,22 @@ non-empty.  Whitespace and line breaks inside the parentheses are allowed.
 | `Eq` | all ADT shapes | `eq(left, right)` — `match (left, right) with` per-ctor pairs comparing fields with recursive `eq`; cross-ctor pairs return false.  The `==` and `!=` infix operators desugar to `Eq.eq` dispatch for all non-primitive types; `==` on `Int`, `Bool`, `Char`, and `String` uses the built-in comparison path. |
 | `Ord` | all ADT shapes | `compare(left, right)` — nested match; constructors compared by declaration index (first-declared is least); same-ctor pairs compare fields lexicographically via `match compare(l0, r0) with \| 0 -> ... \| c -> c` chains |
 | `ToString` | all ADT shapes | `to_string(value)` — renders as `"CtorName"` for nullary, `"CtorName(to_string(f0), ..., to_string(fN-1))"` for N-field |
+| `Enum` | **nullary-only ADTs** | `ordinal(v)` — `match v with` mapping each constructor to its 0-based declaration index; `from_ordinal(n)` — `if n == 0 then Just(Ctor0) else ... else Nothing`, the total-with-`Nothing` inverse |
+
+`Enum` is restricted to types whose every constructor is nullary: `from_ordinal`
+reconstructs a constructor from an integer, which is undefined for a variant that
+carries fields.  Deriving `Enum` on a type with any field-bearing constructor is
+an eager error at the deriving site (see Error conditions).  The ordinal is the
+constructor's 0-based declaration-order index; reordering constructors renumbers
+them, which is a breaking change for any persisted ordinal.
+
+`from_ordinal : Int -> Maybe a` carries its class variable `a` only in the return
+type.  Instance selection therefore requires the target type to be concrete at
+the call site — through a type annotation, a typed function return, or unifying
+usage context.  A fully polymorphic call (no determinable return type) cannot be
+dispatched and is rejected at compile time.  In practice `from_ordinal` is
+consumed through a concrete-typed wrapper (e.g. `fn tile_of(n) -> Maybe Tile =
+from_ordinal(n)`), which satisfies this requirement.
 
 For parametric types (e.g. `type Box a = | Hold a`), the synthesized instance
 carries one instance constraint per type parameter, e.g. `instance Eq (Box a)
@@ -674,7 +690,10 @@ dicts.  Both are tracked in `BACKLOG.md`.
 
 - Unknown class in deriving clause: eager error at the deriving site:
   `unknown class in deriving clause for 'Foo': 'Bar' (v1 supports Eq, Ord,
-  ToString)`.
+  ToString, Enum)`.
+- `deriving (Enum)` on a type with a field-bearing constructor: eager error at
+  the deriving site: `cannot derive 'Enum' for 'Foo': constructor 'Bar' has
+  fields; Enum requires all constructors to be nullary`.
 - Missing field-class instance: the synthesized body references `eq(f)`,
   `to_string(f)`, etc. on each field. If the field's type has no instance of
   the derived class, the standard "no instance" error fires at the use site

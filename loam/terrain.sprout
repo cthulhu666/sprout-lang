@@ -42,33 +42,24 @@ let temp_offset = 2000029
 # ============================================================================
 
 # --- Tile taxonomy ----------------------------------------------------------
-# A biome. Nullary variants (the 9-field cap is on product FIELDS, not variant count). The
-# tag/of pair is the (de)serialization bridge — tiles persist as their integer tag.
-export type TileKind (..) =
+# A biome. Nullary variants (the 9-field cap is on product FIELDS, not variant count).
+# `deriving (Enum)` makes the constructors' declaration order the single source of truth
+# for the integer tag — `ordinal`/`from_ordinal` (docs/spec-v0.md §8.6) replace the former
+# hand-written tag tables. Tiles persist as their ordinal, so the order below is load-bearing:
+# reordering variants would silently remap every tile in every saved `.terrain` file.
+export type TileKind (..) deriving (Enum) =
   | Water | Beach | Grass | Forest | Desert | Mountain | Snow | Tundra
 
-export fn tile_kind_tag(k: TileKind) -> Int =
-  match k with
-  | Water -> 0
-  | Beach -> 1
-  | Grass -> 2
-  | Forest -> 3
-  | Desert -> 4
-  | Mountain -> 5
-  | Snow -> 6
-  | Tundra -> 7
+# The (de)serialization bridge — tiles persist as their integer tag. `tile_kind_tag` is the
+# derived `ordinal`; `tile_kind_of` is its TOTAL inverse — `from_ordinal` is partial, so this
+# wrapper supplies the Grass fallback for an unknown tag rather than failing. The concrete
+# `TileKind` return type is what pins `from_ordinal`'s return-type dispatch.
+export fn tile_kind_tag(k: TileKind) -> Int = ordinal(k)
 
-# Total inverse of tile_kind_tag; an unknown tag falls back to Grass rather than failing.
 export fn tile_kind_of(tag: Int) -> TileKind =
-  if tag == 0 then Water
-  else if tag == 1 then Beach
-  else if tag == 2 then Grass
-  else if tag == 3 then Forest
-  else if tag == 4 then Desert
-  else if tag == 5 then Mountain
-  else if tag == 6 then Snow
-  else if tag == 7 then Tundra
-  else Grass
+  match from_ordinal(tag) with
+  | Just k -> k
+  | Nothing -> Grass
 
 # --- Generation config ------------------------------------------------------
 # seed: world seed; chunk_size: tiles per chunk edge; octaves/lattice0: fBm shape;
