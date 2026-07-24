@@ -24,7 +24,10 @@ substrate, differing only in tile scale and what a tile *means*.
 - A **headless, seeded, deterministic** terrain model in the Loam ethos: same seed ⇒ same
   world, testable without a window (mirrors `docs/ecs-v0.md` §9.3).
 - A **chunked** substrate: terrain is generated **upfront to disk**, and only the chunks in use
-  are resident in memory (a cache), so map size is bounded by disk, not RAM.
+  are resident in memory (a cache), so map size is bounded by disk, not RAM. (Note: **rivers**
+  — [rivers-v0.md](./rivers-v0.md) — deliberately step outside this per-coordinate model: drainage
+  is non-local, so it is a global pass over a *bounded* region, deterministic in `(seed, bounds)`
+  rather than per tile.)
 - A **layered** generator: a continuous elevation field underneath, tiles **derived** by
   sampling it and classifying — one pipeline that later serves both a tile view and a
   continuous-field view.

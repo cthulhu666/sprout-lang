@@ -26,7 +26,9 @@ import stdlib.string (words, split_once, string_lines)
 # ============================================================================
 # Elevation bands: below sea = Water, then a thin Beach margin; above the caps come
 # Mountain then Snow. Raise sea_level for more water; lower snow_level for icier peaks.
-let sea_level = 0.40
+# `sea_level` is exported so a hydrology pass (loam.hydrology) can treat sea cells as drainage
+# outlets and a view can test "is this the sea" against the same threshold the classifier uses.
+export let sea_level = 0.40
 let beach_level = 0.44
 let mountain_level = 0.68
 let snow_level = 0.82
@@ -145,7 +147,8 @@ export fn band_of(elev: Double, levels: Int) -> Int = band_go(elev, levels, 1, 0
 
 # The elevation band at sea level, for `levels` bands — where a view should float its water
 # surface so it covers exactly the Water tiles (elev < sea_level). Keeps the water height in
-# sync with the classifier's `sea_level` (a view can't read that module-private threshold).
+# sync with the classifier's `sea_level`. (`sea_level` itself is now exported for hydrology; this
+# stays the convenient band-space accessor a view uses to float its water surface.)
 export fn sea_level_band(levels: Int) -> Int = band_of(sea_level, levels)
 
 # --- Per-coordinate field (pure) --------------------------------------------
@@ -153,7 +156,9 @@ export fn sea_level_band(levels: Int) -> Int = band_of(sea_level, levels)
 # generation: `generate_chunk` just tabulates them over a chunk's cells. Because they depend
 # only on the global coord + seed, the tile at a coordinate is identical no matter which chunk
 # computes it — the seam-correctness property tested in test_terrain.
-fn elev_at(cfg: Config, gx: Int, gz: Int) -> Double =
+# Exported: loam.hydrology samples this continuous Double field over a whole region to route
+# drainage (it must route on the smooth field, not the discrete bands, to avoid flat plateaus).
+export fn elev_at(cfg: Config, gx: Int, gz: Int) -> Double =
   fbm(gx, gz, cfg.seed, cfg.octaves, cfg.lattice0)
 
 fn moist_at(cfg: Config, gx: Int, gz: Int) -> Double =

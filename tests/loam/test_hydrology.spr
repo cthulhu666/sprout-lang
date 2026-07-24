@@ -1,0 +1,114 @@
+import stdlib.test (TestState, new_state, assert_eq, assert_true, summary)
+import loam.terrain (Config, elev_at, sea_level)
+import loam.hydrology (Hydrology, compute_hydrology, hydro_tier, hydro_dir, hydro_filled, dir_delta)
+
+# loam.hydrology computes drainage over a bounded region as a PURE function of (cfg, span):
+# it fills depressions (Planchon-Darboux), assigns a D8 flow direction to every cell, walks
+# accumulation downstream, and buckets it into a flow_tier (0 = no river). Every property below
+# is asserted headlessly (no window), exactly like tests/loam/test_terrain.spr. The invariants
+# that matter most are TERMINATION guards: a flow field with a cycle would hang the gfx demo,
+# so we prove (a) every cell drains to a valid outlet within a bounded number of steps and
+# (b) every non-sink cell flows to a STRICTLY lower filled-elevation neighbor (no A->B->A).
+
+# A small region: same terrain params as the demo (seed/octaves/lattice0) so the test exercises
+# the world the example renders; span kept modest for test speed.
+let cfg = Config(seed = 2137, chunk_size = 8, octaves = 5, lattice0 = 24, elevation_levels = 12)
+let span = 128
+
+# A cell is a valid drainage outlet iff it is sea (below sea_level) or on the map border
+# (drains off-map). Interior pits must NOT be outlets — that is the whole point of filling.
+fn is_outlet(gx: Int, gz: Int) -> Bool =
+  let is_sea = elev_at(cfg, gx, gz) < sea_level
+      is_border = (gx == 0) || (gz == 0) || (gx == (span - 1)) || (gz == (span - 1))
+  in is_sea || is_border
+
+# Walk downstream from (gx, gz) following flow_dir; return 1 if it FAILS to reach a valid outlet
+# within a step cap (a cap hit means a cycle/non-terminating field — a loud failure, not a hang),
+# else 0. Bounded depth (<= 4*span), so this recursion is always shallow.
+fn drains_bad(gx: Int, gz: Int, steps: Int, h: Hydrology) -> Int !{IO} =
+  if steps > (4 * span) then 1
+  else
+    do
+      d <- hydro_dir(h, gx, gz)
+      if d == 0 then (if is_outlet(gx, gz) then 0 else 1)
+      else
+        match dir_delta(d) with
+        | (dr, dc) -> drains_bad(gx + dc, gz + dr, steps + 1, h)
+
+# Sweep every cell, summing drains_bad. 0 == every cell drains to a valid outlet (no inland
+# dead-ends, no cycles). Int-returning direct tail recursion (TCO-safe at span^2 cells).
+fn scan_drainage(r: Int, c: Int, acc: Int, h: Hydrology) -> Int !{IO} =
+  if r >= span then acc
+  else if c >= span then scan_drainage(r + 1, 0, acc, h)
+  else
+    do
+      bad <- drains_bad(c, r, 0, h)
+      scan_drainage(r, c + 1, acc + bad, h)
+
+# 1 if the cell is non-sink but its downstream neighbor is NOT strictly lower (the failure mode
+# that permits cycles), else 0.
+fn descent_bad(gx: Int, gz: Int, h: Hydrology) -> Int !{IO} =
+  do
+    d <- hydro_dir(h, gx, gz)
+    if d == 0 then 0
+    else
+      match dir_delta(d) with
+      | (dr, dc) ->
+          do
+            here <- hydro_filled(h, gx, gz)
+            there <- hydro_filled(h, gx + dc, gz + dr)
+            if there < here then 0 else 1
+
+fn scan_descent(r: Int, c: Int, acc: Int, h: Hydrology) -> Int !{IO} =
+  if r >= span then acc
+  else if c >= span then scan_descent(r + 1, 0, acc, h)
+  else
+    do
+      bad <- descent_bad(c, r, h)
+      scan_descent(r, c + 1, acc + bad, h)
+
+# Count river cells (flow_tier > 0) so the suite isn't vacuously green on an all-zero field.
+fn count_rivers(r: Int, c: Int, acc: Int, h: Hydrology) -> Int !{IO} =
+  if r >= span then acc
+  else if c >= span then count_rivers(r + 1, 0, acc, h)
+  else
+    do
+      t <- hydro_tier(h, c, r)
+      count_rivers(r, c + 1, acc + (if t > 0 then 1 else 0), h)
+
+# Count flow_tier cells that differ between two runs (determinism check). 0 == identical.
+fn tier_diff(r: Int, c: Int, acc: Int, a: Hydrology, b: Hydrology) -> Int !{IO} =
+  if r >= span then acc
+  else if c >= span then tier_diff(r + 1, 0, acc, a, b)
+  else
+    do
+      ta <- hydro_tier(a, c, r)
+      tb <- hydro_tier(b, c, r)
+      tier_diff(r, c + 1, acc + (if ta == tb then 0 else 1), a, b)
+
+fn main() -> Unit !{IO} =
+  do
+    state <- new_state()
+
+    h <- compute_hydrology(cfg, span)
+
+    # --- Termination: every cell drains to a valid outlet, no cycles ---
+    dead_ends <- scan_drainage(0, 0, 0, h)
+    assert_eq(state, "hydrology: no inland dead-ends / cycles (every cell drains to sea or edge)",
+              dead_ends, 0)
+
+    # --- Strict descent: flow_dir always points to a strictly-lower filled neighbor ---
+    descent_violations <- scan_descent(0, 0, 0, h)
+    assert_eq(state, "hydrology: flow points strictly downhill (no flat/equal steps)",
+              descent_violations, 0)
+
+    # --- Non-vacuous: some rivers actually form ---
+    rivers <- count_rivers(0, 0, 0, h)
+    assert_true(state, "hydrology: some river cells exist", rivers > 0)
+
+    # --- Determinism: same (cfg, span) yields an identical flow_tier field ---
+    h2 <- compute_hydrology(cfg, span)
+    diffs <- tier_diff(0, 0, 0, h, h2)
+    assert_eq(state, "hydrology: deterministic (same seed+span => identical rivers)", diffs, 0)
+
+    summary(state)

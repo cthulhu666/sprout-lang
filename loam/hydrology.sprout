@@ -1,0 +1,253 @@
+module loam.hydrology
+
+import loam.terrain (Config, elev_at, sea_level)
+import stdlib.rng (rng_hash2)
+import stdlib.mutable (MutMatrix, mutmatrix_new, mutmatrix_get, mutmatrix_set)
+
+# Loam's procedural HYDROLOGY — a headless, seeded, deterministic drainage model layered on the
+# terrain field (loam.terrain). Like the rest of the engine it imports no graphics and is asserted
+# without a window (tests/loam/test_hydrology.spr); a view samples the flow_tier grid afterward.
+#
+# Rivers are inherently NON-LOCAL: whether a cell carries a river depends on its whole upstream
+# watershed. That contradicts terrain's "pure function of one coordinate" streaming property, so
+# hydrology is a GLOBAL pass over a bounded region — deterministic in (cfg, span), computed once
+# upfront (docs/rivers-v0.md). The pipeline is the classic GIS backbone:
+#   1. sample the CONTINUOUS elevation (elev_at) — routing on the smooth field, not the discrete
+#      bands, avoids flat-plateau ties;
+#   2. FILL depressions (Planchon-Darboux) so every cell drains to an outlet (sea or map edge);
+#   3. D8 FLOW DIRECTION (steepest descent on the filled field), ties broken by rng_hash2;
+#   4. ACCUMULATION (drainage area) by walking each cell downstream;
+#   5. THRESHOLD accumulation into an integer flow_tier (0 = no river, 1..3 = creek/river/major).
+# Every step is comparison/integer over one Double field, so no Double<->Int primitive is needed.
+#
+# The load-bearing correctness property is TERMINATION: the fill's epsilon slope guarantees every
+# non-outlet cell has a STRICTLY lower neighbor, so flow never cycles — otherwise the downstream
+# walks here (and a view's) would hang. tests assert strict descent + bounded drainage directly.
+
+# ============================================================================
+# HYDROLOGY TUNING
+# ============================================================================
+# Planchon-Darboux fill: `big_elev` is the "+infinity" initial water level for interior cells
+# (real elevations are in [0, 1)); `fill_epsilon` is the tiny slope carved across filled flats so
+# every cell keeps a strictly-downhill exit (the termination guarantee). Must be > 0.
+let big_elev = 1000000.0
+let fill_epsilon = 0.0000001
+# Accumulation thresholds → flow_tier. Drainage area is a cell count, so these scale with span;
+# tuned for a few hundred k cells. Higher = fewer, larger rivers.
+let tier1_min = 40  # creek
+let tier2_min = 200  # river
+let tier3_min = 900  # major river
+# Safety cap on any downstream walk: with a correct (acyclic) field no walk exceeds the map, so
+# `4 * span` can never be reached — hitting it means a bug, and the walk bails instead of hanging.
+let walk_cap_mul = 4
+# ============================================================================
+
+# The computed drainage for a `span × span` region. Grids are indexed [row=z][col=x], matching
+# loam.terrain's Chunk convention. `filled` is the Planchon-Darboux water surface (Double);
+# `flow_dir` is the D8 direction (0 = sink, 1..8 = neighbor); `flow_tier` is the river size class.
+export type Hydrology = (span: Int, filled: MutMatrix Double,
+                         flow_dir: MutMatrix Int, flow_tier: MutMatrix Int)
+
+# --- Bounds-defaulting grid reads -------------------------------------------
+fn mm_get_d(m: MutMatrix Double, r: Int, c: Int, dflt: Double) -> Double !{IO} =
+  match mutmatrix_get(m, r, c) with | Just v -> v | Nothing -> dflt
+
+fn mm_get_i(m: MutMatrix Int, r: Int, c: Int, dflt: Int) -> Int !{IO} =
+  match mutmatrix_get(m, r, c) with | Just v -> v | Nothing -> dflt
+
+# --- D8 neighbor offsets ----------------------------------------------------
+# Direction code 1..8 → (drow, dcol). row=z grows south, col=x grows east. 0 (and any other) is a
+# sink → no step. Exported so the view and tests decode a flow direction the same way.
+export fn dir_delta(d: Int) -> (Int, Int) =
+  if d == 1 then (0 - 1, 0)  # N
+  else if d == 2 then (0 - 1, 1)  # NE
+  else if d == 3 then (0, 1)  # E
+  else if d == 4 then (1, 1)  # SE
+  else if d == 5 then (1, 0)  # S
+  else if d == 6 then (1, 0 - 1)  # SW
+  else if d == 7 then (0, 0 - 1)  # W
+  else if d == 8 then (0 - 1, 0 - 1)  # NW
+  else (0, 0)
+
+# A cell is a drainage OUTLET iff it is sea (below sea_level) or on the map border (drains
+# off-map). Uses the original terrain elevation, so it agrees with the classifier's Water tiles.
+fn is_outlet(cfg: Config, span: Int, gx: Int, gz: Int) -> Bool =
+  let is_sea = elev_at(cfg, gx, gz) < sea_level
+      is_border = (gx == 0) || (gz == 0) || (gx == (span - 1)) || (gz == (span - 1))
+  in is_sea || is_border
+
+# --- Step 1: sample elevation + initialise the Planchon-Darboux water surface ---
+# z := original elevation; w := elevation at outlets, +infinity elsewhere (PD lowers it back down).
+fn init_sweep(cfg: Config, span: Int, z: MutMatrix Double, w: MutMatrix Double,
+              r: Int, c: Int) -> Int !{IO} =
+  if r >= span then 0
+  else if c >= span then init_sweep(cfg, span, z, w, r + 1, 0)
+  else
+    do
+      let e = elev_at(cfg, c, r)
+      mutmatrix_set(z, r, c, e)
+      let w0 = if is_outlet(cfg, span, c, r) then e else big_elev
+      mutmatrix_set(w, r, c, w0)
+      init_sweep(cfg, span, z, w, r, c + 1)
+
+# --- Step 2: Planchon-Darboux depression fill -------------------------------
+# Minimum filled-water level over the 8 neighbors of (r, c). Out-of-range neighbors default to
+# big_elev (they never help lower an interior cell; border cells are outlets and never lowered).
+fn min_neighbor_w(w: MutMatrix Double, r: Int, c: Int, d: Int, best: Double) -> Double !{IO} =
+  if d > 8 then best
+  else
+    match dir_delta(d) with
+    | (dr, dc) ->
+        do
+          nv <- mm_get_d(w, r + dr, c + dc, big_elev)
+          min_neighbor_w(w, r, c, d + 1, if nv < best then nv else best)
+
+# Lower one cell's water level toward drainage. Returns 1 if it changed, else 0. Only cells still
+# standing above their own terrain (w > z) can be lowered: either down to their terrain (if a
+# neighbor is already low enough to drain to) or to (lowest neighbor + epsilon).
+fn pd_cell(z: MutMatrix Double, w: MutMatrix Double, r: Int, c: Int) -> Int !{IO} =
+  do
+    zc <- mm_get_d(z, r, c, big_elev)
+    wc <- mm_get_d(w, r, c, big_elev)
+    if wc <= zc then 0
+    else
+      do
+        wn <- min_neighbor_w(w, r, c, 1, big_elev)
+        let floor_w = wn + fill_epsilon
+        let nw = if zc >= floor_w then zc
+                 else if floor_w < wc then floor_w
+                 else wc
+        if nw < wc then
+          do
+            mutmatrix_set(w, r, c, nw)
+            1
+        else 0
+
+# One forward sweep (top-left → bottom-right); returns the number of cells changed.
+fn pd_fwd(z: MutMatrix Double, w: MutMatrix Double, span: Int,
+          r: Int, c: Int, changed: Int) -> Int !{IO} =
+  if r >= span then changed
+  else if c >= span then pd_fwd(z, w, span, r + 1, 0, changed)
+  else
+    do
+      ch <- pd_cell(z, w, r, c)
+      pd_fwd(z, w, span, r, c + 1, changed + ch)
+
+# One backward sweep (bottom-right → top-left). Alternating direction each pass propagates fills
+# from all sides, so convergence takes a handful of passes instead of O(span).
+fn pd_bwd(z: MutMatrix Double, w: MutMatrix Double, span: Int,
+          r: Int, c: Int, changed: Int) -> Int !{IO} =
+  if r < 0 then changed
+  else if c < 0 then pd_bwd(z, w, span, r - 1, span - 1, changed)
+  else
+    do
+      ch <- pd_cell(z, w, r, c)
+      pd_bwd(z, w, span, r, c - 1, changed + ch)
+
+# Run forward+backward sweeps until a full pass changes nothing. Returns the pass count.
+fn pd_run(z: MutMatrix Double, w: MutMatrix Double, span: Int, pass: Int) -> Int !{IO} =
+  do
+    a <- pd_fwd(z, w, span, 0, 0, 0)
+    b <- pd_bwd(z, w, span, span - 1, span - 1, 0)
+    if (a + b) == 0 then pass
+    else pd_run(z, w, span, pass + 1)
+
+# --- Step 3: D8 flow direction ----------------------------------------------
+# Choose the direction (1..8) of the strictly-lowest filled neighbor; ties broken by rng_hash2 of
+# the neighbor coord (deterministic). Threads best (direction, water, hash). best_d starts 0, so a
+# neighbor is adopted only if strictly lower than the cell (or ties an already-adopted candidate).
+fn dir_pick(cfg: Config, w: MutMatrix Double, r: Int, c: Int,
+            d: Int, best_d: Int, best_w: Double, best_h: Int) -> Int !{IO} =
+  if d > 8 then best_d
+  else
+    match dir_delta(d) with
+    | (dr, dc) ->
+        do
+          nw <- mm_get_d(w, r + dr, c + dc, big_elev)
+          let nh = rng_hash2(c + dc, r + dr, cfg.seed)
+          let strictly_lower = nw < best_w
+          let ties_candidate = (best_d != 0) && (nw == best_w) && (nh < best_h)
+          if strictly_lower || ties_candidate then dir_pick(cfg, w, r, c, d + 1, d, nw, nh)
+          else dir_pick(cfg, w, r, c, d + 1, best_d, best_w, best_h)
+
+# 0 for outlet cells (sinks); otherwise the steepest-descent direction. PD guarantees an interior
+# non-outlet cell always has a strictly lower neighbor, so it never falls back to 0.
+fn dir_cell(cfg: Config, w: MutMatrix Double, span: Int, r: Int, c: Int) -> Int !{IO} =
+  if is_outlet(cfg, span, c, r) then 0
+  else
+    do
+      wc <- mm_get_d(w, r, c, big_elev)
+      dir_pick(cfg, w, r, c, 1, 0, wc, 2147483647)
+
+fn dir_sweep(cfg: Config, w: MutMatrix Double, dir: MutMatrix Int, span: Int,
+             r: Int, c: Int) -> Int !{IO} =
+  if r >= span then 0
+  else if c >= span then dir_sweep(cfg, w, dir, span, r + 1, 0)
+  else
+    do
+      d <- dir_cell(cfg, w, span, r, c)
+      mutmatrix_set(dir, r, c, d)
+      dir_sweep(cfg, w, dir, span, r, c + 1)
+
+# --- Step 4: flow accumulation (drainage area) ------------------------------
+# Walk one cell's path downstream to its sink, adding 1 to the accumulation of every cell on the
+# way. Bounded depth (<= walk_cap_mul * span) because the field is strictly descending; the cap is
+# a bug backstop, never reached on a correct field. Returns steps taken.
+fn walk_add(dir: MutMatrix Int, accum: MutMatrix Int, span: Int,
+            gx: Int, gz: Int, steps: Int) -> Int !{IO} =
+  if steps > (walk_cap_mul * span) then steps
+  else
+    do
+      cur <- mm_get_i(accum, gz, gx, 0)
+      mutmatrix_set(accum, gz, gx, cur + 1)
+      d <- mm_get_i(dir, gz, gx, 0)
+      if d == 0 then steps
+      else match dir_delta(d) with | (dr, dc) -> walk_add(dir, accum, span, gx + dc, gz + dr, steps + 1)
+
+fn accum_sweep(dir: MutMatrix Int, accum: MutMatrix Int, span: Int, r: Int, c: Int) -> Int !{IO} =
+  if r >= span then 0
+  else if c >= span then accum_sweep(dir, accum, span, r + 1, 0)
+  else
+    do
+      walk_add(dir, accum, span, c, r, 0)
+      accum_sweep(dir, accum, span, r, c + 1)
+
+# --- Step 5: threshold accumulation into a flow_tier ------------------------
+fn tier_of(a: Int) -> Int =
+  if a >= tier3_min then 3
+  else if a >= tier2_min then 2
+  else if a >= tier1_min then 1
+  else 0
+
+# Sea cells never carry a river (they ARE water); land cells get their accumulation's tier.
+fn tier_sweep(cfg: Config, accum: MutMatrix Int, tier: MutMatrix Int, span: Int,
+              r: Int, c: Int) -> Int !{IO} =
+  if r >= span then 0
+  else if c >= span then tier_sweep(cfg, accum, tier, span, r + 1, 0)
+  else
+    do
+      a <- mm_get_i(accum, r, c, 0)
+      let t = if elev_at(cfg, c, r) < sea_level then 0 else tier_of(a)
+      mutmatrix_set(tier, r, c, t)
+      tier_sweep(cfg, accum, tier, span, r, c + 1)
+
+# --- Entry point ------------------------------------------------------------
+# Compute the full drainage for a span×span region. Pure in (cfg, span): same inputs => same grids.
+export fn compute_hydrology(cfg: Config, span: Int) -> Hydrology !{IO} =
+  do
+    z <- mutmatrix_new(span, span, 0.0)
+    w <- mutmatrix_new(span, span, 0.0)
+    init_sweep(cfg, span, z, w, 0, 0)
+    pd_run(z, w, span, 0)
+    dir <- mutmatrix_new(span, span, 0)
+    dir_sweep(cfg, w, dir, span, 0, 0)
+    accum <- mutmatrix_new(span, span, 0)
+    accum_sweep(dir, accum, span, 0, 0)
+    tier <- mutmatrix_new(span, span, 0)
+    tier_sweep(cfg, accum, tier, span, 0, 0)
+    Hydrology(span = span, filled = w, flow_dir = dir, flow_tier = tier)
+
+# --- Accessors (for views and tests) ----------------------------------------
+export fn hydro_tier(h: Hydrology, gx: Int, gz: Int) -> Int !{IO} = mm_get_i(h.flow_tier, gz, gx, 0)
+export fn hydro_dir(h: Hydrology, gx: Int, gz: Int) -> Int !{IO} = mm_get_i(h.flow_dir, gz, gx, 0)
+export fn hydro_filled(h: Hydrology, gx: Int, gz: Int) -> Double !{IO} = mm_get_d(h.filled, gz, gx, 0.0)
