@@ -70,6 +70,7 @@ let cam_pan_frac = 0.01  # pan (look-at) per frame, as a span fraction
 
 # --- Derived (do not edit; computed from the tunables above) ----------------
 let span_tiles = region_chunks * chunk_edge
+let chunk_count = region_chunks * region_chunks  # one baked mesh per chunk
 let world_span = to_double(span_tiles) * tile_size
 let half = to_double(span_tiles) / 2.0
 let water_y = (to_double(sea_level_band(elevation_levels)) + water_lift) * band_step
@@ -175,20 +176,38 @@ fn build_grids(w: World, bands: MutMatrix Int, tags: MutMatrix Int, size: Int, n
       grid_chunk(w, bands, tags, cx, cz, size)
       build_grids(w, bands, tags, size, ncx, ncz, cx + 1, cz)
 
-# Bake every tile of the region from the grids into the current capture (one top-surface tile each).
-fn bake_row(bands: MutMatrix Int, tags: MutMatrix Int, h: Hydrology, span: Int, gz: Int, gx: Int) -> Unit !{IO} =
-  if gx >= span then ()
+# Bake one chunk's tiles into the current capture. Neighbour heights come from the global grid, so
+# tiles on a chunk seam still get correct step walls against the adjacent chunk.
+fn bake_chunk_tiles(bands: MutMatrix Int, tags: MutMatrix Int, h: Hydrology, span: Int, size: Int, cx: Int, cz: Int, r: Int, c: Int) -> Unit !{IO} =
+  if r >= size then ()
+  else if c >= size then bake_chunk_tiles(bands, tags, h, span, size, cx, cz, r + 1, 0)
   else
     do
-      bake_tile(bands, tags, h, span, gx, gz)
-      bake_row(bands, tags, h, span, gz, gx + 1)
+      bake_tile(bands, tags, h, span, (cx * size) + c, (cz * size) + r)
+      bake_chunk_tiles(bands, tags, h, span, size, cx, cz, r, c + 1)
 
-fn bake_all(bands: MutMatrix Int, tags: MutMatrix Int, h: Hydrology, span: Int, gz: Int) -> Unit !{IO} =
-  if gz >= span then ()
+# Bake each chunk into its OWN static mesh and record the handle (indexed cz*ncx + cx), so the frame
+# loop can frustum-cull per chunk — a zoomed-in view then pays only for the visible handful of
+# chunks instead of the whole map. This is what makes zooming in fast.
+fn bake_region(bands: MutMatrix Int, tags: MutMatrix Int, h: Hydrology, span: Int, size: Int, ncx: Int, ncz: Int, meshes: MutVec Int, cx: Int, cz: Int) -> Unit !{IO} =
+  if cz >= ncz then ()
+  else if cx >= ncx then bake_region(bands, tags, h, span, size, ncx, ncz, meshes, 0, cz + 1)
   else
     do
-      bake_row(bands, tags, h, span, gz, 0)
-      bake_all(bands, tags, h, span, gz + 1)
+      gfx.mesh_capture_begin()
+      bake_chunk_tiles(bands, tags, h, span, size, cx, cz, 0, 0)
+      handle <- gfx.mesh_capture_end()
+      mutvec_set(meshes, (cz * ncx) + cx, handle)
+      bake_region(bands, tags, h, span, size, ncx, ncz, meshes, cx + 1, cz)
+
+# Draw every chunk mesh; gfx.draw_captured frustum-culls the off-screen ones in the shim.
+fn draw_meshes(meshes: MutVec Int, i: Int, n: Int) -> Unit !{IO} =
+  if i >= n then ()
+  else
+    do
+      mh <- mutvec_at(meshes, i)
+      gfx.draw_captured(mh)
+      draw_meshes(meshes, i + 1, n)
 
 # --- Trees: load, resolve biome -> model, scatter as instances --------------
 # Truncating remainder for the (always non-negative) spatial hashes — the loam idiom.
@@ -333,7 +352,7 @@ fn drive_cam(c: Cam, rl: Bool, rr: Bool, tu: Bool, td: Bool, zi: Bool, zo: Bool,
 # The terrain+rivers are STATIC, so they are baked into ONE GPU mesh at startup (see main) and
 # drawn in a single call per frame — no per-frame per-tile work. The frame loop only drives the
 # camera from the on-screen control panel: hold a button to move/rotate/zoom/pan continuously.
-fn render_loop(mesh: Int, models: MutVec Int, cam: Cam) -> Unit !{IO} =
+fn render_loop(meshes: MutVec Int, models: MutVec Int, cam: Cam) -> Unit !{IO} =
   do
     stop <- gfx.window_should_close()
     if stop then gfx.close_window()
@@ -341,7 +360,7 @@ fn render_loop(mesh: Int, models: MutVec Int, cam: Cam) -> Unit !{IO} =
       do
         cam_apply(cam)
         gfx.frame_begin()
-        gfx.draw_captured(mesh)
+        draw_meshes(meshes, 0, chunk_count)
         # Trees on top of the baked terrain, before the water so an above-water tree is not tinted.
         # Each is one instanced draw call over its whole scattered batch.
         draw_trees(models, 0)
@@ -361,7 +380,7 @@ fn render_loop(mesh: Int, models: MutVec Int, cam: Cam) -> Unit !{IO} =
         pr <- gfx.button_held(col_r, row3, btn_w, btn_h, "Right")
         zo <- gfx.button_held(col_r, row4, btn_w, btn_h, "Zoom-")
         gfx.frame_end()
-        render_loop(mesh, models, drive_cam(cam, rl, rr, tu, tdn, zi, zo, pf, pb, pl, pr))
+        render_loop(meshes, models, drive_cam(cam, rl, rr, tu, tdn, zi, zo, pf, pb, pl, pr))
 
 fn main() -> Unit !{IO} =
   do
@@ -374,17 +393,17 @@ fn main() -> Unit !{IO} =
     # Global hydrology pass over the whole region (same cfg + span as the terrain), computed once
     # upfront. flow_tier lines up cell-for-cell with the generated tiles.
     h <- compute_hydrology(cfg, span_tiles)
-    # Materialise the global band+tag grid, then bake every tile of the region into one static mesh
-    # as a top-surface tile (top quad + exposed step walls only), river cells recoloured by tier.
+    # Materialise the global band+tag grid, then bake each chunk into its OWN top-surface mesh (top
+    # quad + exposed step walls only; river cells recoloured by tier). Per-chunk meshes let the frame
+    # loop frustum-cull off-screen chunks — the win when zoomed in.
     bands <- mutmatrix_new(span_tiles, span_tiles, 0)
     tags <- mutmatrix_new(span_tiles, span_tiles, 0)
     build_grids(w, bands, tags, chunk_edge, region_chunks, region_chunks, 0, 0)
-    gfx.mesh_capture_begin()
-    bake_all(bands, tags, h, span_tiles, 0)
-    mesh <- gfx.mesh_capture_end()
+    meshes <- mutvec_new(chunk_count, -1)
+    bake_region(bands, tags, h, span_tiles, chunk_edge, region_chunks, region_chunks, meshes, 0, 0)
     # Load the vegetation models and scatter biome-appropriate trees over the region ONCE (the pass
     # queues GPU instances; the frame loop just replays them). Models load after the GL context.
     models <- mutvec_new(tree_count, 0)
     load_trees(models)
     place_region(models, w, h, chunk_edge, region_chunks, region_chunks, 0, 0)
-    render_loop(mesh, models, cam_start)
+    render_loop(meshes, models, cam_start)

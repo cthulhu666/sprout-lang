@@ -73,12 +73,22 @@ static int g_light_ready = 0;
 static Shader g_cube_shader;   /* vertex-colour lit shader for cubes (immediate + captured mesh) */
 static int g_cube_ready = 0;
 
-/* Static baked meshes (e.g. a whole terrain), uploaded once and drawn in one call/frame. */
-#define GFX_MAX_MESHES 8
+/* Static baked meshes. One-mesh-per-terrain fit in a handful; per-CHUNK baking (for frustum
+ * culling) needs one slot per chunk — a 32x32-chunk map is 1024 — so the cap is generous. */
+#define GFX_MAX_MESHES 4096
 static Mesh g_meshes[GFX_MAX_MESHES];
+/* World-space AABB of each baked mesh, computed at upload, used to frustum-cull it in draw_captured. */
+static float g_mesh_min[GFX_MAX_MESHES][3];
+static float g_mesh_max[GFX_MAX_MESHES][3];
 static int g_mesh_count = 0;
 static Material g_terrain_material;
 static int g_terrain_material_ready = 0;
+
+/* Six view-frustum planes (a,b,c,d), world space, refreshed each frame in gfx_frame_begin from the
+ * current camera. A point is inside when a*x+b*y+c*z+d >= 0 for all six. Used to skip baked meshes
+ * whose AABB lies wholly outside the view (draw_captured). */
+static float g_frustum[6][4];
+static int g_frustum_valid = 0;
 
 /* Mesh capture: gfx_draw_cube appends cube geometry into these growable host arrays instead
  * of drawing, so the SAME per-tile draw loop that renders immediately can also bake a static
@@ -413,10 +423,51 @@ long long gfx_set_camera(long long px, long long py, long long pz,
   return 0;
 }
 
+/* Extract the six world-space frustum planes from the current camera (Gribb-Hartmann). Must run
+ * inside BeginMode3D so rlGetMatrix* return this frame's matrices. combo = proj * view; raylib's
+ * MatrixMultiply(a,b) yields b*a mathematically, so MatrixMultiply(view, proj) is proj*view. A
+ * raylib Matrix stores element (row i, col j) in field index i + 4*j, so row i is
+ * (m[i], m[i+4], m[i+8], m[i+12]); the planes are row3 +/- row{0,1,2}. */
+static void update_frustum(void) {
+  Matrix view = rlGetMatrixModelview();
+  Matrix proj = rlGetMatrixProjection();
+  Matrix M = MatrixMultiply(view, proj);
+  const float *m = &M.m0;  /* m[0..15], column-major: element (i,j) = m[i + 4*j] */
+  float r0[4] = { m[0], m[4], m[8],  m[12] };
+  float r1[4] = { m[1], m[5], m[9],  m[13] };
+  float r2[4] = { m[2], m[6], m[10], m[14] };
+  float r3[4] = { m[3], m[7], m[11], m[15] };
+  for (int k = 0; k < 4; k++) {
+    g_frustum[0][k] = r3[k] + r0[k];  /* left   */
+    g_frustum[1][k] = r3[k] - r0[k];  /* right  */
+    g_frustum[2][k] = r3[k] + r1[k];  /* bottom */
+    g_frustum[3][k] = r3[k] - r1[k];  /* top    */
+    g_frustum[4][k] = r3[k] + r2[k];  /* near   */
+    g_frustum[5][k] = r3[k] - r2[k];  /* far    */
+  }
+  g_frustum_valid = 1;
+}
+
+/* 1 if the AABB [mn,mx] is at least partly inside the frustum; 0 if it lies wholly outside (safe to
+ * cull). Tests each plane against the box's most-positive corner: if that corner is behind a plane,
+ * every corner is, so the box is outside. Conservative (may keep some just-outside boxes) — fine. */
+static int aabb_in_frustum(const float *mn, const float *mx) {
+  if (!g_frustum_valid) return 1;
+  for (int p = 0; p < 6; p++) {
+    float a = g_frustum[p][0], b = g_frustum[p][1], c = g_frustum[p][2], d = g_frustum[p][3];
+    float px = (a >= 0.0f) ? mx[0] : mn[0];
+    float py = (b >= 0.0f) ? mx[1] : mn[1];
+    float pz = (c >= 0.0f) ? mx[2] : mn[2];
+    if (a*px + b*py + c*pz + d < 0.0f) return 0;
+  }
+  return 1;
+}
+
 long long gfx_frame_begin(void) {
   BeginDrawing();
   ClearBackground((Color){ 24, 24, 30, 255 });
   BeginMode3D(g_cam);
+  update_frustum();
   return 0;
 }
 
@@ -549,6 +600,17 @@ long long gfx_mesh_capture_end(void) {
   UploadMesh(&m, false);
   int h = g_mesh_count++;
   g_meshes[h] = m;
+  /* World-space AABB over the captured vertices, for frustum culling in draw_captured. */
+  float mnx = g_cap_verts[0], mny = g_cap_verts[1], mnz = g_cap_verts[2];
+  float mxx = mnx, mxy = mny, mxz = mnz;
+  for (int i = 1; i < g_cap_count; i++) {
+    float x = g_cap_verts[i*3+0], y = g_cap_verts[i*3+1], z = g_cap_verts[i*3+2];
+    if (x < mnx) mnx = x; else if (x > mxx) mxx = x;
+    if (y < mny) mny = y; else if (y > mxy) mxy = y;
+    if (z < mnz) mnz = z; else if (z > mxz) mxz = z;
+  }
+  g_mesh_min[h][0] = mnx; g_mesh_min[h][1] = mny; g_mesh_min[h][2] = mnz;
+  g_mesh_max[h][0] = mxx; g_mesh_max[h][1] = mxy; g_mesh_max[h][2] = mxz;
   return h;
 }
 
@@ -564,10 +626,13 @@ long long gfx_draw_plane(long long x, long long y, long long z, long long sx, lo
   return 0;
 }
 
-/* Draw a baked mesh once (a whole terrain in a single draw call). Backface culling is off so
- * hand-authored cube winding need not be exact. Out-of-range handles are a no-op. */
+/* Draw a baked mesh once. Frustum-culled: a mesh whose AABB lies wholly outside the current view is
+ * skipped — so a caller can hand every chunk mesh to this each frame and pay only for the visible
+ * ones (the win when zoomed in). Backface culling is off so hand-authored winding need not be exact.
+ * Out-of-range handles are a no-op. */
 long long gfx_draw_captured(long long handle) {
   if (handle < 0 || handle >= g_mesh_count) return 0;
+  if (!aabb_in_frustum(g_mesh_min[(int)handle], g_mesh_max[(int)handle])) return 0;
   rlDisableBackfaceCulling();
   DrawMesh(g_meshes[(int)handle], g_terrain_material, MatrixIdentity());
   rlEnableBackfaceCulling();
