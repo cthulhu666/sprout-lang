@@ -119,6 +119,16 @@ export fn mutmatrix_get(m: MutMatrix a, r: Int, c: Int) -> Maybe a !{IO} =
       if r < 0 || r >= rows || c < 0 || c >= cols then Nothing
       else mutvec_get(data, r * cols + c)
 
+# O(1) bounds-checked read returning `dflt` when (r, c) is out of range, else the element via the
+# unboxed vector_get_direct fast path. Unlike mutmatrix_get it allocates NO Maybe per read — for
+# hot inner loops over a MutMatrix (e.g. the hydrology drainage solve, millions of neighbour reads)
+# the per-read Just allocation dominates via GC pressure, so this is the accessor to reach for there.
+export fn mutmatrix_at_or(m: MutMatrix a, r: Int, c: Int, dflt: a) -> a !{IO} =
+  match m with
+  | MutMatrix rows cols data ->
+      if r < 0 || r >= rows || c < 0 || c >= cols then dflt
+      else vector_get_direct(mutvec_raw(data), r * cols + c)
+
 # O(1). No-op when (r, c) is out of range.
 export fn mutmatrix_set(m: MutMatrix a, r: Int, c: Int, val: a) -> Unit !{IO} =
   match m with

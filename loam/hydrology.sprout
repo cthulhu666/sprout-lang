@@ -2,7 +2,7 @@ module loam.hydrology
 
 import loam.terrain (Config, elev_at, sea_level)
 import stdlib.rng (rng_hash2)
-import stdlib.mutable (MutMatrix, mutmatrix_new, mutmatrix_get, mutmatrix_set)
+import stdlib.mutable (MutMatrix, mutmatrix_new, mutmatrix_at_or, mutmatrix_set)
 
 # Loam's procedural HYDROLOGY — a headless, seeded, deterministic drainage model layered on the
 # terrain field (loam.terrain). Like the rest of the engine it imports no graphics and is asserted
@@ -49,25 +49,46 @@ export type Hydrology = (span: Int, filled: MutMatrix Double,
                          flow_dir: MutMatrix Int, flow_tier: MutMatrix Int)
 
 # --- Bounds-defaulting grid reads -------------------------------------------
+# These run millions of times in the drainage solve. Route through mutmatrix_at_or (no per-read
+# Maybe allocation) rather than mutmatrix_get + match — the discarded Just boxes were the dominant
+# cost, turning an O(cells) solve into a GC-bound superlinear one at large spans.
 fn mm_get_d(m: MutMatrix Double, r: Int, c: Int, dflt: Double) -> Double !{IO} =
-  match mutmatrix_get(m, r, c) with | Just v -> v | Nothing -> dflt
+  mutmatrix_at_or(m, r, c, dflt)
 
 fn mm_get_i(m: MutMatrix Int, r: Int, c: Int, dflt: Int) -> Int !{IO} =
-  match mutmatrix_get(m, r, c) with | Just v -> v | Nothing -> dflt
+  mutmatrix_at_or(m, r, c, dflt)
 
 # --- D8 neighbor offsets ----------------------------------------------------
 # Direction code 1..8 → (drow, dcol). row=z grows south, col=x grows east. 0 (and any other) is a
 # sink → no step. Exported so the view and tests decode a flow direction the same way.
 export fn dir_delta(d: Int) -> (Int, Int) =
-  if d == 1 then (0 - 1, 0)  # N
-  else if d == 2 then (0 - 1, 1)  # NE
-  else if d == 3 then (0, 1)  # E
-  else if d == 4 then (1, 1)  # SE
-  else if d == 5 then (1, 0)  # S
-  else if d == 6 then (1, 0 - 1)  # SW
-  else if d == 7 then (0, 0 - 1)  # W
-  else if d == 8 then (0 - 1, 0 - 1)  # NW
-  else (0, 0)
+  (dir_dr(d), dir_dc(d))
+
+# Scalar components of dir_delta. The hot solve visits 8 neighbours per cell across millions of
+# cells; returning a fresh (Int, Int) tuple there allocated ~tens of millions of pairs per run (a
+# GC firestorm). These return the row/col offset as a bare Int, so the inner loops step neighbours
+# with no allocation. dir_delta stays for the view/tests, which call it once per drawn cell.
+fn dir_dr(d: Int) -> Int =
+  if d == 1 then 0 - 1  # N
+  else if d == 2 then 0 - 1  # NE
+  else if d == 3 then 0  # E
+  else if d == 4 then 1  # SE
+  else if d == 5 then 1  # S
+  else if d == 6 then 1  # SW
+  else if d == 7 then 0  # W
+  else if d == 8 then 0 - 1  # NW
+  else 0
+
+fn dir_dc(d: Int) -> Int =
+  if d == 1 then 0  # N
+  else if d == 2 then 1  # NE
+  else if d == 3 then 1  # E
+  else if d == 4 then 1  # SE
+  else if d == 5 then 0  # S
+  else if d == 6 then 0 - 1  # SW
+  else if d == 7 then 0 - 1  # W
+  else if d == 8 then 0 - 1  # NW
+  else 0
 
 # A cell is a drainage OUTLET iff it is sea (below sea_level) or on the map border (drains
 # off-map). Uses the original terrain elevation, so it agrees with the classifier's Water tiles.
@@ -96,11 +117,9 @@ fn init_sweep(cfg: Config, span: Int, z: MutMatrix Double, w: MutMatrix Double,
 fn min_neighbor_w(w: MutMatrix Double, r: Int, c: Int, d: Int, best: Double) -> Double !{IO} =
   if d > 8 then best
   else
-    match dir_delta(d) with
-    | (dr, dc) ->
-        do
-          nv <- mm_get_d(w, r + dr, c + dc, big_elev)
-          min_neighbor_w(w, r, c, d + 1, if nv < best then nv else best)
+    do
+      nv <- mm_get_d(w, r + dir_dr(d), c + dir_dc(d), big_elev)
+      min_neighbor_w(w, r, c, d + 1, if nv < best then nv else best)
 
 # Lower one cell's water level toward drainage. Returns 1 if it changed, else 0. Only cells still
 # standing above their own terrain (w > z) can be lowered: either down to their terrain (if a
@@ -160,15 +179,15 @@ fn dir_pick(cfg: Config, w: MutMatrix Double, r: Int, c: Int,
             d: Int, best_d: Int, best_w: Double, best_h: Int) -> Int !{IO} =
   if d > 8 then best_d
   else
-    match dir_delta(d) with
-    | (dr, dc) ->
-        do
-          nw <- mm_get_d(w, r + dr, c + dc, big_elev)
-          let nh = rng_hash2(c + dc, r + dr, cfg.seed)
-          let strictly_lower = nw < best_w
-          let ties_candidate = (best_d != 0) && (nw == best_w) && (nh < best_h)
-          if strictly_lower || ties_candidate then dir_pick(cfg, w, r, c, d + 1, d, nw, nh)
-          else dir_pick(cfg, w, r, c, d + 1, best_d, best_w, best_h)
+    do
+      let nr = r + dir_dr(d)
+      let nc = c + dir_dc(d)
+      nw <- mm_get_d(w, nr, nc, big_elev)
+      let nh = rng_hash2(nc, nr, cfg.seed)
+      let strictly_lower = nw < best_w
+      let ties_candidate = (best_d != 0) && (nw == best_w) && (nh < best_h)
+      if strictly_lower || ties_candidate then dir_pick(cfg, w, r, c, d + 1, d, nw, nh)
+      else dir_pick(cfg, w, r, c, d + 1, best_d, best_w, best_h)
 
 # 0 for outlet cells (sinks); otherwise the steepest-descent direction. PD guarantees an interior
 # non-outlet cell always has a strictly lower neighbor, so it never falls back to 0.
@@ -202,7 +221,7 @@ fn walk_add(dir: MutMatrix Int, accum: MutMatrix Int, span: Int,
       mutmatrix_set(accum, gz, gx, cur + 1)
       d <- mm_get_i(dir, gz, gx, 0)
       if d == 0 then steps
-      else match dir_delta(d) with | (dr, dc) -> walk_add(dir, accum, span, gx + dc, gz + dr, steps + 1)
+      else walk_add(dir, accum, span, gx + dir_dc(d), gz + dir_dr(d), steps + 1)
 
 fn accum_sweep(dir: MutMatrix Int, accum: MutMatrix Int, span: Int, r: Int, c: Int) -> Int !{IO} =
   if r >= span then 0

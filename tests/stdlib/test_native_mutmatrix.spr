@@ -1,5 +1,5 @@
 import stdlib.test (TestState, new_state, assert_eq, assert_true, summary)
-import stdlib.mutable (MutVec, MutMatrix, mutvec_new, mutvec_get, mutvec_set, mutmatrix_new, mutmatrix_get, mutmatrix_set, mutmatrix_rows, mutmatrix_cols, mutmatrix_fold, mutmatrix_fill, mutmatrix_row_zip_fold, mutmatrix_row_zip_update, mutmatrix_row_dot, mutmatrix_row_sub_scaled_inplace, mutmatrix_row_add_scaled_into)
+import stdlib.mutable (MutVec, MutMatrix, mutvec_new, mutvec_get, mutvec_set, mutmatrix_new, mutmatrix_get, mutmatrix_at_or, mutmatrix_set, mutmatrix_rows, mutmatrix_cols, mutmatrix_fold, mutmatrix_fill, mutmatrix_row_zip_fold, mutmatrix_row_zip_update, mutmatrix_row_dot, mutmatrix_row_sub_scaled_inplace, mutmatrix_row_add_scaled_into)
 
 fn main() -> Unit !{IO} =
   do
@@ -164,6 +164,30 @@ fn main() -> Unit !{IO} =
     ks1 <- mutvec_get(kshort, 1)
     assert_true(state, "row_add_scaled_into shorter dst col 0", ks0 == 10.0)
     assert_true(state, "row_add_scaled_into shorter dst col 1", ks1 == 20.0)
+
+    # mutmatrix_at_or: non-allocating (no Maybe) bounds-checked read with a default. In-range must
+    # return the element; out-of-range (either axis, negative or overflow) must return the default —
+    # matching mutmatrix_get's bounds semantics but without allocating a Just per read.
+    ao <- mutmatrix_new(2, 3, 0)
+    mutmatrix_set(ao, 1, 2, 88)
+    mutmatrix_set(ao, 0, 0, 5)
+    in_elem <- mutmatrix_at_or(ao, 1, 2, -1)
+    assert_eq(state, "mutmatrix_at_or in-range returns element", in_elem, 88)
+    in_zero <- mutmatrix_at_or(ao, 0, 0, -1)
+    assert_eq(state, "mutmatrix_at_or in-range distinct cell", in_zero, 5)
+    col_of <- mutmatrix_at_or(ao, 0, 3, -1)
+    assert_eq(state, "mutmatrix_at_or col overflow returns default", col_of, -1)
+    row_of <- mutmatrix_at_or(ao, 2, 0, -1)
+    assert_eq(state, "mutmatrix_at_or row overflow returns default", row_of, -1)
+    neg <- mutmatrix_at_or(ao, -1, 0, -1)
+    assert_eq(state, "mutmatrix_at_or negative index returns default", neg, -1)
+    # Double matrix: the hot-path type in hydrology; exact values so == is safe.
+    aod <- mutmatrix_new(2, 2, 0.0)
+    mutmatrix_set(aod, 1, 1, 2.5)
+    d_in <- mutmatrix_at_or(aod, 1, 1, 9.0)
+    assert_true(state, "mutmatrix_at_or Double in-range", d_in == 2.5)
+    d_of <- mutmatrix_at_or(aod, 5, 5, 9.0)
+    assert_true(state, "mutmatrix_at_or Double OOB returns default", d_of == 9.0)
 
     summary(state)
 
