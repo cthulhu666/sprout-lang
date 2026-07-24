@@ -1,7 +1,7 @@
 import stdlib.test (TestState, new_state, assert_eq, assert_true, summary)
 import stdlib.math (fabs)
 import stdlib.mutable (mutmatrix_new, mutmatrix_set)
-import loam.terrain (TileKind, Water, Grass, Mountain, Snow, Config, tile_kind_tag, classify, band_of, spatial_hash, tile_kind_at, tile_band_at, Chunk, generate_chunk, chunk_kind_tag, chunk_band, chunk_to_string, chunk_from_string, save_chunk, load_chunk, World, world_new, page_in, page_out, resident_count)
+import loam.terrain (TileKind, Water, Grass, Mountain, Snow, Config, tile_kind_tag, classify, band_of, sea_level_band, spatial_hash, tile_kind_at, tile_band_at, Chunk, generate_chunk, chunk_kind_tag, chunk_band, chunk_to_string, chunk_from_string, save_chunk, load_chunk, World, world_new, page_in, page_out, resident_count)
 
 # loam.terrain is a headless, seeded, deterministic terrain model: generation is a pure
 # function of (coordinate, seed), tiles are integer (kind, elevation-band) pairs, chunks
@@ -57,6 +57,9 @@ fn main() -> Unit !{IO} =
     assert_true(state, "band_of: mid <= high", b_mid <= b_hi)
     assert_true(state, "band_of: strictly rises across the range", b_lo < b_hi)
     assert_true(state, "band_of: within [0, levels)", (b_hi >= 0) && (b_hi < 10))
+    # sea_level_band = band_of at the classifier's sea_level (0.40): with 12 bands that is 4.
+    assert_eq(state, "sea_level_band(12) matches band_of at 0.40", sea_level_band(12), band_of(0.40, 12))
+    assert_eq(state, "sea_level_band(12) is band 4", sea_level_band(12), 4)
 
     # --- spatial_hash: deterministic, in [0, 2^31), coordinate-sensitive ---
     assert_eq(state, "spatial_hash: deterministic", spatial_hash(3, 7, 99), spatial_hash(3, 7, 99))

@@ -27,6 +27,7 @@ extern fn gfx_draw_cube(x: Double, y: Double, z: Double, size: Double, r: Int, g
 extern fn gfx_mesh_capture_begin() -> Unit !{IO}
 extern fn gfx_mesh_capture_end() -> Int !{IO}
 extern fn gfx_draw_captured(handle: Int) -> Unit !{IO}
+extern fn gfx_draw_plane(x: Double, y: Double, z: Double, sx: Double, sz: Double, r: Int, g: Int, b: Int, a: Int) -> Unit !{IO}
 extern fn gfx_draw_model(handle: Int, x: Double, y: Double, z: Double, angle: Double, scale: Double) -> Unit !{IO}
 extern fn gfx_load_animations(path: String) -> Int !{IO}
 extern fn gfx_animation_count(set: Int) -> Int !{IO}
@@ -97,6 +98,13 @@ export fn draw_cube(x: Double, y: Double, z: Double, size: Double, r: Int, g: In
 export fn mesh_capture_begin() -> Unit !{IO} = gfx_mesh_capture_begin()
 export fn mesh_capture_end() -> Int !{IO} = gfx_mesh_capture_end()
 export fn draw_captured(handle: Int) -> Unit !{IO} = gfx_draw_captured(handle)
+
+# Draw a filled horizontal (XZ) plane centred at (x,y,z), size (sx,sz), in RGBA (0..255). With
+# alpha < 255 it blends — a translucent water surface. Draw AFTER the terrain so peaks poke
+# through (depth test) while valleys are covered.
+export fn draw_plane(x: Double, y: Double, z: Double, sx: Double, sz: Double,
+                     r: Int, g: Int, b: Int, a: Int) -> Unit !{IO} =
+  gfx_draw_plane(x, y, z, sx, sz, r, g, b, a)
 
 # Draw a loaded model at (x,y,z), rotated `angle` degrees about Y, scaled by `scale`.
 export fn draw_model(handle: Int, x: Double, y: Double, z: Double, angle: Double, scale: Double) -> Unit !{IO} =

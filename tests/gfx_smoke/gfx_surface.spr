@@ -19,6 +19,7 @@ fn main() -> Unit !{IO} =
     gfx.draw_cube(0.0, 0.0, 0.0, 1.0, 200, 120, 60)
     gfx.terrain_end()
     gfx.draw_captured(mesh)
+    gfx.draw_plane(0.0, 0.0, 0.0, 10.0, 10.0, 50, 110, 190, 160)
     gfx.draw_fps(10, 10)
     clicked <- gfx.button(10, 10, 40, 40, "+")
     gfx.frame_end()

@@ -158,6 +158,11 @@ fn band_go(elev: Double, levels: Int, i: Int, acc: Int) -> Int =
 
 export fn band_of(elev: Double, levels: Int) -> Int = band_go(elev, levels, 1, 0)
 
+# The elevation band at sea level, for `levels` bands — where a view should float its water
+# surface so it covers exactly the Water tiles (elev < sea_level). Keeps the water height in
+# sync with the classifier's `sea_level` (a view can't read that module-private threshold).
+export fn sea_level_band(levels: Int) -> Int = band_of(sea_level, levels)
+
 # --- Per-coordinate field (pure) --------------------------------------------
 # The three fields at a GLOBAL tile coordinate, and the derived tile. These are the heart of
 # generation: `generate_chunk` just tabulates them over a chunk's cells. Because they depend

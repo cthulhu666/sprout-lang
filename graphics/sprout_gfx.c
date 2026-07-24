@@ -420,6 +420,18 @@ long long gfx_mesh_capture_end(void) {
   return h;
 }
 
+/* Draw a filled horizontal (XZ) plane centred at (x,y,z) of size (sx,sz) in RGBA (0-255). With
+ * a < 255 it blends over whatever is already drawn — a translucent water surface at sea level.
+ * Draw it AFTER the terrain so depth-testing lets peaks above it poke through while it covers
+ * the valleys below. */
+long long gfx_draw_plane(long long x, long long y, long long z, long long sx, long long sz,
+                         long long r, long long g, long long b, long long a) {
+  DrawPlane((Vector3){ as_float(x), as_float(y), as_float(z) },
+            (Vector2){ as_float(sx), as_float(sz) },
+            (Color){ (unsigned char)r, (unsigned char)g, (unsigned char)b, (unsigned char)a });
+  return 0;
+}
+
 /* Draw a baked mesh once (a whole terrain in a single draw call). Backface culling is off so
  * hand-authored cube winding need not be exact. Out-of-range handles are a no-op. */
 long long gfx_draw_captured(long long handle) {

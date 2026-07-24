@@ -856,3 +856,20 @@ plan" item under "Design Roadmap → Current Priorities".
 - [ ] `P3` **Extract terrain rendering into `loam.view`** (as the view systems were extracted
   from the demos), and the far-horizon **AAA asset/mesh/LOD** render track the current raylib
   shim cannot reach.
+- [ ] `P2` **`deriving (Enum)` — constructor ↔ Int, to kill hand-written tag/ordinal boilerplate**
+  (surfaced 2026-07-24 building `loam.terrain`; cross-cutting, not terrain-specific). `TileKind`
+  needs `tile_kind_tag : TileKind -> Int` and `tile_kind_of : Int -> TileKind` for serialization,
+  and both hand-encode the constructor's *declaration order* — which the compiler already assigns
+  as the runtime tag (`sprout_tag` in `runtime/sprout_runtime.c`, used by the `ToString` builtin
+  but not exposed to Sprout). The ordinals are duplicated across `tile_kind_tag`, `tile_kind_of`,
+  and the on-disk format, with nothing enforcing agreement. **Fix:** add an `Enum` emitter to the
+  existing deriving framework (`stdlib/compiler/deriving.sprout` already ships `Eq`/`Ord`/`ToString`
+  with constructor enumeration + AST splicing — this is "another emitter," not new architecture),
+  so `type T (..) deriving (Enum)` yields `from_enum : T -> Int` and `to_enum : Int -> Maybe T` for
+  free, with declaration order as the single source of truth. Then `tile_kind_tag`/`tile_kind_of`
+  vanish and every enum in the tree benefits. **Design decisions:** `to_enum` is partial
+  (`Int -> Maybe T`, out-of-range → `Nothing` — safer than terrain's current `else Grass` coerce);
+  whether to also emit `succ`/`pred`/`bounded`. Prior art: Haskell `Enum`/`fromEnum`/`toEnum`, Rust
+  C-enum `as i32`, Swift `Int`-raw enums. NB: `Enum` was never in deriving-v1 scope (only
+  `Serialize`/`Deserialize` were reverted, for unrelated reasons), so this is greenfield. Ref:
+  `docs/deriving-v1-draft.md`, spec §8.6.
