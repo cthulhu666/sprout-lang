@@ -331,15 +331,29 @@ let cam_start = Cam(yaw = 0.0, radius = cam_start_radius, height = cam_start_hei
                     tx = 0.0, ty = cam_target_y, tz = 0.0)
 
 # --- Control panel (held buttons: press-and-hold to move continuously) ------
+# Buttons are grouped by FUNCTION and laid out to mirror the motion they cause:
+# PAN is a D-pad (Fwd on top, Left/Right flanking, Back below), and rotate / tilt /
+# zoom are adjacent pairs (rotate a left-right pair; tilt and zoom each a +/- column).
+# There are no header captions because the runtime exposes no general text draw
+# (only the buttons self-label), so the grouping is carried by shape + gaps alone.
+# Window is 1000x600; the panel hugs the right edge.
 let btn_w = 78
 let btn_h = 30
-let col_l = 838  # left column: rotate / tilt / zoom-in
-let col_r = 920  # right column: pan / zoom-out
-let row0 = 300
-let row1 = 336
-let row2 = 372
-let row3 = 408
-let row4 = 444
+let pad_w = 54  # narrower buttons so the pan D-pad fits three across the panel
+let panel_x = 826  # panel's left edge
+# Pan D-pad: three columns (left / centre / right) x three rows (top / mid / bottom).
+let pad_c0 = panel_x  # 826
+let pad_c1 = panel_x + 58  # 884  (pad_w 54 + 4px gap)
+let pad_c2 = panel_x + 116  # 942  (+54 = 996, inside the 1000px window)
+let pad_r0 = 306  # Fwd row
+let pad_r1 = 338  # Left / Right row
+let pad_r2 = 370  # Back row
+# Rotate / tilt / zoom clusters, stacked below the D-pad in two columns.
+let col_a = panel_x  # 826 — Rot L, Tilt +/-
+let col_b = panel_x + 82  # 908 — Rot R, Zoom +/-
+let rot_y = 414  # rotate pair row
+let pair_r0 = 452  # Tilt+ / Zoom+ row
+let pair_r1 = 488  # Tilt- / Zoom- row
 
 fn bd(b: Bool) -> Double = if b then 1.0 else 0.0
 
@@ -371,17 +385,20 @@ fn render_loop(meshes: MutVec Int, models: MutVec Int, cam: Cam) -> Unit !{IO} =
         # translucent plane while it fills the valleys.
         gfx.draw_plane(0.0, water_y, 0.0, world_span, world_span, water_r, water_g, water_b, water_alpha)
         gfx.draw_fps(10, 10)
-        # Camera control panel — left column rotates/tilts/zooms-in, right column pans/zooms-out.
-        rl <- gfx.button_held(col_l, row0, btn_w, btn_h, "Rot L")
-        rr <- gfx.button_held(col_l, row1, btn_w, btn_h, "Rot R")
-        tu <- gfx.button_held(col_l, row2, btn_w, btn_h, "Tilt+")
-        tdn <- gfx.button_held(col_l, row3, btn_w, btn_h, "Tilt-")
-        zi <- gfx.button_held(col_l, row4, btn_w, btn_h, "Zoom+")
-        pf <- gfx.button_held(col_r, row0, btn_w, btn_h, "Fwd")
-        pb <- gfx.button_held(col_r, row1, btn_w, btn_h, "Back")
-        pl <- gfx.button_held(col_r, row2, btn_w, btn_h, "Left")
-        pr <- gfx.button_held(col_r, row3, btn_w, btn_h, "Right")
-        zo <- gfx.button_held(col_r, row4, btn_w, btn_h, "Zoom-")
+        # Camera control panel — grouped by function (see the layout constants).
+        # Pan: a D-pad (Fwd top, Left/Right flanking, Back below).
+        pf <- gfx.button_held(pad_c1, pad_r0, pad_w, btn_h, "Fwd")
+        pl <- gfx.button_held(pad_c0, pad_r1, pad_w, btn_h, "Left")
+        pr <- gfx.button_held(pad_c2, pad_r1, pad_w, btn_h, "Right")
+        pb <- gfx.button_held(pad_c1, pad_r2, pad_w, btn_h, "Back")
+        # Rotate: a left/right pair.
+        rl <- gfx.button_held(col_a, rot_y, btn_w, btn_h, "Rot L")
+        rr <- gfx.button_held(col_b, rot_y, btn_w, btn_h, "Rot R")
+        # Tilt and Zoom: each a +/- column (tilt left, zoom right).
+        tu <- gfx.button_held(col_a, pair_r0, btn_w, btn_h, "Tilt+")
+        tdn <- gfx.button_held(col_a, pair_r1, btn_w, btn_h, "Tilt-")
+        zi <- gfx.button_held(col_b, pair_r0, btn_w, btn_h, "Zoom+")
+        zo <- gfx.button_held(col_b, pair_r1, btn_w, btn_h, "Zoom-")
         gfx.frame_end()
         render_loop(meshes, models, drive_cam(cam, rl, rr, tu, tdn, zi, zo, pf, pb, pl, pr))
 
