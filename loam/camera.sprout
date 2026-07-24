@@ -42,6 +42,14 @@ export fn cam_rotate(c: Cam, dyaw: Double) -> Cam =
   Cam(yaw = wrap_two_pi(c.yaw + dyaw), radius = c.radius, height = c.height,
       tx = c.tx, ty = c.ty, tz = c.tz)
 
+# The eye's straight-line DISTANCE to the target: the length of its
+# (horizontal = radius, vertical = height - ty) offset. cam_zoom/cam_pitch pivot
+# on this, and a caller can read it to make zoom adaptive (scale the step by how
+# close the eye already is, so zoom slows near the ground).
+export fn cam_distance(c: Cam) -> Double =
+  let b = c.height - c.ty
+  in sqrt((c.radius * c.radius) + (b * b))
+
 # Zoom: change the eye's DISTANCE to the target by `dr` (negative pulls in),
 # clamped to [lo, hi]. The (horizontal, vertical) offset is scaled uniformly, so
 # the pitch ANGLE is preserved — zoom changes apparent size, not viewing angle.
@@ -50,7 +58,7 @@ export fn cam_rotate(c: Cam, dyaw: Double) -> Cam =
 export fn cam_zoom(c: Cam, dr: Double, lo: Double, hi: Double) -> Cam =
   let a = c.radius
       b = c.height - c.ty
-      dist = sqrt((a * a) + (b * b))
+      dist = cam_distance(c)
       k = if dist > 0.0 then clampd(dist + dr, lo, hi) / dist else 1.0
   in Cam(yaw = c.yaw, radius = a * k, height = c.ty + (b * k),
          tx = c.tx, ty = c.ty, tz = c.tz)
@@ -65,7 +73,7 @@ export fn cam_zoom(c: Cam, dr: Double, lo: Double, hi: Double) -> Cam =
 export fn cam_pitch(c: Cam, dphi: Double, phi_lo: Double, phi_hi: Double) -> Cam =
   let a = c.radius
       b = c.height - c.ty
-      dist = sqrt((a * a) + (b * b))
+      dist = cam_distance(c)
       horiz_raw = (a * cos(dphi)) - (b * sin(dphi))
       vert_raw = (a * sin(dphi)) + (b * cos(dphi))
       # Clamp the rotated offset to the arc [phi_lo, phi_hi] (both in the first

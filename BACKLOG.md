@@ -394,12 +394,12 @@ raylib) have landed. Fenced from core: shim `graphics/sprout_gfx.c` links only v
   work: the gfx shim is separate from `sprout_runtime.c` and `stdlib/gfx.sprout` isn't bundled into
   the compiler — fixed-point verified.) Design + verified raylib/trackpad facts in
   `docs/loam-camera-controls-v0.md`.
-- [ ] `CAM` Loam camera follow-ups (Phase 1–3 leftovers): **(a)** adaptive zoom speed — scale
-  `cam_zoom`'s step by current distance so zoom slows when close (cheap, no new primitive). **(b)**
-  RTS **edge-scroll pan** — `gfx_mouse_x/_y` already exist; wire cursor-at-screen-edge → pan.
-  **(c)** **zoom-to-cursor + grab-accurate pan** — both need a new `gfx_screen_to_ground` raycast
-  primitive (`GetScreenToWorldRay` + ground-plane intersect; absent today). Gesture drag sign/scale
-  constants in the demo are tunable if the motion feels reversed. See `docs/loam-camera-controls-v0.md §8`.
+- [ ] `CAM` Loam camera follow-ups: **(a) adaptive zoom speed — DONE** (button+scroll steps scale
+  by `loam.camera.cam_distance`, so zoom is geometric and slows near the ground). **(b)** RTS
+  **edge-scroll pan** — `gfx_mouse_x/_y` already exist; wire cursor-at-screen-edge → pan. **(c)**
+  **zoom-to-cursor + grab-accurate pan** — both need a new `gfx_screen_to_ground` raycast primitive
+  (`GetScreenToWorldRay` + ground-plane intersect; absent today). Gesture drag sign/scale constants
+  in the demo are tunable if the motion feels reversed. See `docs/loam-camera-controls-v0.md §8`.
 - [ ] `P3` Loam: **rendered interpolation** for `loam.driver`. `fixed_step` (shipped, `docs/ecs-v0.md
   §10.3b`) decouples sim rate from render rate via a fixed-timestep accumulator, but renders the
   latest tick state directly. When `fixed_dt` and the render rate diverge by design (e.g. a 30-Hz

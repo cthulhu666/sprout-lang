@@ -4,7 +4,7 @@ import stdlib.gfx
 import loam.terrain (Config, Chunk, World, generate_chunk, save_chunk, load_chunk, world_new, page_in, chunk_kind_tag, chunk_band, sea_level_band, spatial_hash, exposed_step_bands, chunk_linear_index, TileKind, Water, Beach, Grass, Forest, Desert, Mountain, Snow, Tundra, tile_kind_of)
 import loam.hydrology (Hydrology, compute_hydrology, hydro_tier)
 import loam.vegetation (TreeKind, Palm, Broadleaf, Conifer, DarkConifer, Cactus, Shrub, tree_kind_tag, tree_for_biome)
-import loam.camera (Cam, cam_drive)
+import loam.camera (Cam, cam_drive, cam_distance)
 import loam.view (cam_apply)
 import stdlib.mutable (MutVec, mutvec_new, mutvec_at, mutvec_set, MutMatrix, mutmatrix_new, mutmatrix_set, mutmatrix_at_or)
 
@@ -60,7 +60,11 @@ let cam_min_frac = 0.05  # closest zoom, as a fraction of span (eye→target DIS
 let cam_max_frac = 9.5  # farthest zoom (distance)
 let cam_target_y = 4.0  # height of the ground point the eye looks at
 # Manual control steps — how far each held button moves the camera PER FRAME.
-let cam_zoom_frac = 0.04  # zoom in/out DISTANCE per frame, as a span fraction
+# Zoom is ADAPTIVE: the step is a fraction of the CURRENT eye-to-target distance,
+# so a notch moves far when zoomed out and little when close (geometric zoom, the
+# map-viewer feel). cam_zoom still takes an absolute delta — the caller scales it
+# by cam_distance each frame.
+let cam_zoom_frac = 0.04  # button zoom: 4% of current distance per frame
 let cam_rot_step = 0.02  # rotate radians per frame (~1.1°)
 # Tilt is an ANGLE now (orbit at constant distance), so its step and bounds are
 # radians, NOT span fractions: ~1.1°/frame, clamped between a low glancing angle
@@ -73,7 +77,7 @@ let cam_pan_frac = 0.01  # pan (look-at) per frame, as a span fraction
 # scroll = zoom, left-drag over the view = orbit/tilt, Shift+left-drag = pan,
 # WASD = pan. Signs here are the natural ones; flip a step's sign if the motion
 # feels reversed on your setup.
-let cam_wheel_frac = 0.10  # zoom DISTANCE per scroll notch, as a span fraction
+let cam_wheel_frac = 0.10  # scroll zoom: 10% of current distance per notch (adaptive)
 let cam_drag_yaw = 0.006  # yaw radians per pixel of horizontal drag
 let cam_drag_pitch = 0.006  # tilt radians per pixel of vertical drag
 let cam_drag_pan_frac = 0.0015  # pan world-units per pixel of drag, as a span fraction
@@ -324,14 +328,13 @@ fn place_region(models: MutVec Int, w: World, hy: Hydrology, size: Int, ncx: Int
 # --- Camera framing + control steps (derived from the tunables + map span) --
 let cam_start_radius = world_span * cam_radius_frac
 let cam_start_height = world_span * cam_height_frac
-let zoom_step = world_span * cam_zoom_frac
 let min_dist = world_span * cam_min_frac  # zoom clamps are eye→target DISTANCE
 let max_dist = world_span * cam_max_frac
 let pitch_step = cam_pitch_step  # tilt is in radians — NOT scaled by span
 let pitch_min = cam_pitch_min
 let pitch_max = cam_pitch_max
 let pan_step = world_span * cam_pan_frac
-let wheel_zoom_step = world_span * cam_wheel_frac
+# (zoom steps are NOT derived here — they scale by the current distance each frame.)
 let drag_yaw_step = cam_drag_yaw  # radians/px — not span-scaled
 let drag_pitch_step = cam_drag_pitch
 let drag_pan_step = world_span * cam_drag_pan_frac
@@ -424,9 +427,12 @@ fn render_loop(meshes: MutVec Int, models: MutVec Int, cam: Cam) -> Unit !{IO} =
         let orbit = dragging && ! shift
         let pan_drag = dragging && shift
         # Sum this frame's button- and gesture-derived deltas, then fold once.
+        # Zoom is adaptive: both the button and wheel steps scale by the current
+        # eye-to-target distance, so a notch moves proportionally (slower near the ground).
+        let cur_dist = cam_distance(cam)
         let d_yaw = ((bd(rr) - bd(rl)) * cam_rot_step) + (if orbit then gdx * drag_yaw_step else 0.0)
         let d_pitch = ((bd(tu) - bd(tdn)) * pitch_step) + (if orbit then gdy * drag_pitch_step else 0.0)
-        let d_zoom = ((bd(zo) - bd(zi)) * zoom_step) - (wheel * wheel_zoom_step)
+        let d_zoom = (((bd(zo) - bd(zi)) * cam_zoom_frac) - (wheel * cam_wheel_frac)) * cur_dist
         let d_pan_r = ((bd(pr) - bd(pl)) * pan_step) + ((bd(kd) - bd(ka)) * pan_step)
                         + (if pan_drag then (0.0 - gdx) * drag_pan_step else 0.0)
         let d_pan_f = ((bd(pf) - bd(pb)) * pan_step) + ((bd(kw) - bd(ks)) * pan_step)

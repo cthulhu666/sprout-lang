@@ -1,6 +1,6 @@
 import stdlib.test (TestState, new_state, assert_true, summary)
 import stdlib.math (fabs, pi, sin, sqrt)
-import loam.camera (Cam, cam_rotate, cam_zoom, cam_pitch, cam_pan, cam_eye, cam_drive)
+import loam.camera (Cam, cam_rotate, cam_zoom, cam_pitch, cam_pan, cam_eye, cam_drive, cam_distance)
 
 # Headless coverage for loam.view's free-look camera controller (the whole package:
 # rotate / zoom / tilt / pan). Everything here is PURE state math — no window — so
@@ -104,5 +104,12 @@ fn main() -> Unit !{IO} =
     let dp = cam_drive(c0, pi / 2.0, 0.0, 0.0, 0.0, 3.0, 2.0, 40.0, 0.05, 1.45, 100.0)
     assert_true(state, "cam_drive pans in the post-rotate frame",
                 near(dp.tx, -3.0) && near(dp.tz, 0.0))
+
+    # --- cam_distance: eye->target offset length (horizontal radius + vertical
+    # height-ty). Used by adaptive zoom to scale the step by how close you are. ---
+    assert_true(state, "cam_distance of base", near(cam_distance(c0), d0))
+    # With ty != 0 the vertical leg is height - ty, not height.
+    let off = Cam(yaw = 0.0, radius = 3.0, height = 6.0, tx = 0.0, ty = 2.0, tz = 0.0)
+    assert_true(state, "cam_distance uses height - ty", near(cam_distance(off), 5.0))
 
     summary(state)

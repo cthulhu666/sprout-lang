@@ -319,8 +319,10 @@ closed the earlier rotate-button question (left-drag + Shift modifier).
    WASD = pan — one binding set for **mouse and trackpad**. Verified: compiles,
    links, renders, and the camera is provably stationary with zero input (no
    startup drift). Gesture *feel* (drag sign/scale) needs interactive testing —
-   the steps in §4b are tunable constants in the demo. Adaptive zoom speed (§4)
-   is deferred — a follow-up, not shipped in this phase.
+   the steps in §4b are tunable constants in the demo. **Adaptive zoom speed
+   (§4) shipped:** the button and scroll steps scale by `loam.camera.cam_distance`
+   each frame, so a notch is a constant *proportion* of the current standoff —
+   geometric zoom that slows near the ground.
 2. **Phase 2 (edge-scroll, stretch):** `gfx_mouse_x/_y` now exist (used for the
    drag gate); RTS edge-scroll pan on top of them is not yet wired.
 3. **Phase 3 (zoom-to-cursor + grab-pan):** still needs `gfx_screen_to_ground`
