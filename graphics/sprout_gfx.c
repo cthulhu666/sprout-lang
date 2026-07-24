@@ -448,11 +448,13 @@ static void update_frustum(void) {
   Matrix view = rlGetMatrixModelview();
   Matrix proj = rlGetMatrixProjection();
   Matrix M = MatrixMultiply(view, proj);
-  const float *m = &M.m0;  /* m[0..15], column-major: element (i,j) = m[i + 4*j] */
-  float r0[4] = { m[0], m[4], m[8],  m[12] };
-  float r1[4] = { m[1], m[5], m[9],  m[13] };
-  float r2[4] = { m[2], m[6], m[10], m[14] };
-  float r3[4] = { m[3], m[7], m[11], m[15] };
+  /* raylib Matrix fields are named by LOGICAL position: m0,m4,m8,m12 = row 0, etc. (the struct
+   * stores them column-major, so &M.m0 in MEMORY order is m0,m4,m8,m12,m1,... — indexing a float*
+   * by k would read the transpose. Access by field name to get true rows.) */
+  float r0[4] = { M.m0, M.m4, M.m8,  M.m12 };
+  float r1[4] = { M.m1, M.m5, M.m9,  M.m13 };
+  float r2[4] = { M.m2, M.m6, M.m10, M.m14 };
+  float r3[4] = { M.m3, M.m7, M.m11, M.m15 };
   for (int k = 0; k < 4; k++) {
     g_frustum[0][k] = r3[k] + r0[k];  /* left   */
     g_frustum[1][k] = r3[k] - r0[k];  /* right  */
