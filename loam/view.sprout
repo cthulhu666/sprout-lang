@@ -6,6 +6,7 @@ import stdlib.math (sin, cos, pi)
 import stdlib.mutable (mutvec_at, mutvec_set)
 import loam.scene (Scene, EntityId, eid_index, scene_count)
 import loam.physics (Body, body_y, airborne)
+import loam.camera (Cam, cam_eye)
 
 # Loam's VIEW layer: reusable rendering systems that READ the scene's component
 # arrays and draw them. This is deliberately separate from loam.scene / loam.agent
@@ -152,3 +153,15 @@ export fn orbit_camera(radius: Double, angle: Double,
                        height: Double, target_y: Double) -> Unit !{IO} =
   gfx.set_camera(radius * sin(angle), height, radius * cos(angle),
                  0.0, target_y, 0.0, 45.0)
+
+# --- Free-look camera controller (the whole package) ------------------------
+# The pure rig — rotate / zoom / pitch / pan — lives in loam.camera (graphics-free,
+# headless-tested). This is its ONE IO seam: push a Cam to raylib. Kept beside the
+# orbit_* helpers (not replacing them) so the four demos that still auto-spin the
+# simple camera are untouched.
+
+# Place the raylib camera from the rig: eye on its orbit, looking at the panned
+# ground target (tx, ty, tz), 45° field of view.
+export fn cam_apply(c: Cam) -> Unit !{IO} =
+  match cam_eye(c) with
+  | (ex, ey, ez) -> gfx.set_camera(ex, ey, ez, c.tx, c.ty, c.tz, 45.0)

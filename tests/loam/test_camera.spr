@@ -1,0 +1,59 @@
+import stdlib.test (TestState, new_state, assert_true, summary)
+import stdlib.math (fabs, pi)
+import loam.camera (Cam, cam_rotate, cam_zoom, cam_pitch, cam_pan, cam_eye)
+
+# Headless coverage for loam.view's free-look camera controller (the whole package:
+# rotate / zoom / pitch / pan). Everything here is PURE state math — no window — so
+# passing means the raylib eye placement (cam_apply, the only IO) is fed correct
+# numbers. The camera keeps `height` as a separate vertical axis (not a spherical
+# pitch angle), so zoom changes only the horizontal standoff and pitch only the eye
+# height; this reproduces the demo's original orbit framing with a movable look-at.
+
+fn near(a: Double, b: Double) -> Bool = fabs(a - b) < 0.0001
+
+# A neutral rig at yaw 0 over the origin: eye is `radius` out along +z, `height` up.
+fn base() -> Cam = Cam(yaw = 0.0, radius = 10.0, height = 5.0, tx = 0.0, ty = 0.0, tz = 0.0)
+
+fn main() -> Unit !{IO} =
+  do
+    state <- new_state()
+    let c0 = base()
+
+    # --- Zoom: adjusts the horizontal standoff, clamped to [lo, hi] ---
+    let zin = cam_zoom(c0, -3.0, 2.0, 20.0)
+    assert_true(state, "zoom in shrinks radius", near(zin.radius, 7.0))
+    let zlo = cam_zoom(c0, -50.0, 2.0, 20.0)
+    assert_true(state, "zoom clamps at lo", near(zlo.radius, 2.0))
+    let zhi = cam_zoom(c0, 50.0, 2.0, 20.0)
+    assert_true(state, "zoom clamps at hi", near(zhi.radius, 20.0))
+
+    # --- Pitch: raises/lowers the eye height, clamped to [lo, hi] ---
+    let pu = cam_pitch(c0, 3.0, 1.0, 12.0)
+    assert_true(state, "pitch up raises height", near(pu.height, 8.0))
+    let pdn = cam_pitch(c0, -50.0, 1.0, 12.0)
+    assert_true(state, "pitch clamps at lo", near(pdn.height, 1.0))
+
+    # --- Rotate: adds yaw, wrapping into [0, 2pi) ---
+    let r1 = cam_rotate(c0, 0.5)
+    assert_true(state, "rotate adds yaw", near(r1.yaw, 0.5))
+    let rw = cam_rotate(Cam(yaw = 6.2, radius = 10.0, height = 5.0, tx = 0.0, ty = 0.0, tz = 0.0), 0.3)
+    assert_true(state, "rotate wraps past 2pi", near(rw.yaw, 6.5 - (2.0 * pi)))
+
+    # --- Pan: moves the look-at target in the camera's own ground frame ---
+    # At yaw 0, screen-right is +x and forward (into the screen) is -z.
+    let pr = cam_pan(c0, 2.0, 0.0, 100.0)
+    assert_true(state, "pan right moves target +x", near(pr.tx, 2.0) && near(pr.tz, 0.0))
+    let pf = cam_pan(c0, 0.0, 3.0, 100.0)
+    assert_true(state, "pan forward moves target -z", near(pf.tx, 0.0) && near(pf.tz, -3.0))
+    let pc = cam_pan(c0, 500.0, 0.0, 50.0)
+    assert_true(state, "pan clamps target to bound", near(pc.tx, 50.0))
+
+    # --- Eye placement: (tx, height, tz + radius) at yaw 0 ---
+    match cam_eye(c0) with
+    | (ex, ey, ez) ->
+        do
+          assert_true(state, "eye x = tx", near(ex, 0.0))
+          assert_true(state, "eye y = height", near(ey, 5.0))
+          assert_true(state, "eye z = tz + radius", near(ez, 10.0))
+
+    summary(state)

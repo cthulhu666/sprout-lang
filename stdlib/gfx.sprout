@@ -38,6 +38,7 @@ extern fn gfx_update_animation(model: Int, set: Int, index: Int, frame: Double) 
 extern fn gfx_draw_fps(x: Int, y: Int) -> Unit !{IO}
 extern fn gfx_space_pressed() -> Int !{IO}
 extern fn gfx_button(x: Int, y: Int, w: Int, h: Int, label: String) -> Int !{IO}
+extern fn gfx_button_held(x: Int, y: Int, w: Int, h: Int, label: String) -> Int !{IO}
 extern fn gfx_frame_end() -> Unit !{IO}
 extern fn gfx_close_window() -> Unit !{IO}
 
@@ -158,6 +159,14 @@ export fn button(x: Int, y: Int, w: Int, h: Int, label: String) -> Bool !{IO} =
   do
     clicked <- gfx_button(x, y, w, h, label)
     clicked == 1
+
+# Held variant of `button`: True on EVERY frame the box is held down (not edge-
+# triggered), so holding it repeats an action smoothly. Suited to continuous
+# camera control — rotate/pan/zoom nudge each frame while pressed.
+export fn button_held(x: Int, y: Int, w: Int, h: Int, label: String) -> Bool !{IO} =
+  do
+    held <- gfx_button_held(x, y, w, h, label)
+    held == 1
 
 export fn frame_end() -> Unit !{IO} =
   gfx_frame_end()

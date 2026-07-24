@@ -158,6 +158,17 @@ Progressively move engine work into Sprout: glTF parsing (Sprout already has
 `bytes` + `json`), skinning matrices, camera, a scene graph. Demote raylib toward
 a thin draw leaf; eventually swap the leaf for a modern API (Metal/WebGPU — §7).
 
+**Camera — first slice landed.** `loam.camera` is a pure, graphics-free free-look
+rig (`Cam` = yaw / radius / height / target x·y·z) with `cam_rotate`, `cam_zoom`,
+`cam_pitch`, and `cam_pan` — all headless-tested (`tests/loam/test_camera.spr`).
+raylib keeps only the final push: `loam.view.cam_apply` calls `gfx_set_camera`
+once per frame. The rig keeps `height` as a separate axis (not a spherical pitch
+angle) so it needs no `atan2` and reuses a demo's existing orbit framing numbers
+verbatim as its defaults. Driving it needs a *held* button, so the shim gains
+`gfx_button_held` (raylib `IsMouseButtonDown` — repeats while held, unlike the
+edge-triggered `gfx_button`); `examples/gfx/terrain_rivers_demo.sprout` wires a
+rotate/tilt/zoom/pan control panel from it. Mouse/touchpad drag is the next slice.
+
 ## 7. Backend migration (why not OpenGL forever)
 
 raylib runs on OpenGL, which is legacy (last release 4.6 in 2017; Apple

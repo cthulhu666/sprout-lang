@@ -1,0 +1,66 @@
+module loam.camera
+
+import stdlib.math (sin, cos, pi)
+
+# Loam's free-look CAMERA controller: the pure state + math for a rig the user
+# drives — rotate around the target, zoom the horizontal standoff, pitch by
+# raising/lowering the eye, and PAN the look-at across the map. It is deliberately
+# graphics-free (imports only stdlib.math), so it lives in the headless engine
+# core and is unit-tested in tests/loam/test_view.spr. loam.view holds the one IO
+# function that pushes a Cam to raylib (cam_apply); everything here returns values.
+#
+# The rig keeps `height` as a SEPARATE vertical axis rather than a spherical pitch
+# angle. That has two payoffs: seeding the opening frame needs no atan2 (absent
+# from stdlib.math), and a demo can reuse its existing (radius, height) orbit
+# framing numbers verbatim as the Cam defaults, so the initial view is unchanged.
+# yaw is radians; radius/height/tx/ty/tz are world units. (tx, tz) is the ground
+# point the eye orbits and looks at; ty is that target's (fixed) height.
+export type Cam = (yaw: Double, radius: Double, height: Double,
+                   tx: Double, ty: Double, tz: Double)
+
+let two_pi = 2.0 * pi
+
+fn clampd(v: Double, lo: Double, hi: Double) -> Double =
+  if v < lo then lo else if v > hi then hi else v
+
+# Wrap an angle into [0, 2pi). Rotation steps are small (one lap at most), so a
+# single add/subtract suffices.
+fn wrap_two_pi(a: Double) -> Double =
+  if a >= two_pi then a - two_pi
+  else if a < 0.0 then a + two_pi
+  else a
+
+# Rotate the rig `dyaw` radians around its target (negative = the other way).
+export fn cam_rotate(c: Cam, dyaw: Double) -> Cam =
+  Cam(yaw = wrap_two_pi(c.yaw + dyaw), radius = c.radius, height = c.height,
+      tx = c.tx, ty = c.ty, tz = c.tz)
+
+# Zoom: change the horizontal standoff by `dr` (negative pulls in), clamped to
+# [lo, hi].
+export fn cam_zoom(c: Cam, dr: Double, lo: Double, hi: Double) -> Cam =
+  Cam(yaw = c.yaw, radius = clampd(c.radius + dr, lo, hi), height = c.height,
+      tx = c.tx, ty = c.ty, tz = c.tz)
+
+# Pitch: raise (`dh` > 0, steeper top-down) or lower the eye, clamped to
+# [lo, hi]. The target is unmoved, so the view angle tilts.
+export fn cam_pitch(c: Cam, dh: Double, lo: Double, hi: Double) -> Cam =
+  Cam(yaw = c.yaw, radius = c.radius, height = clampd(c.height + dh, lo, hi),
+      tx = c.tx, ty = c.ty, tz = c.tz)
+
+# Pan the look-at target across the ground in the camera's OWN frame: `dr` slides
+# screen-right, `df` slides forward (into the screen). Both target coords are
+# clamped to [-bound, bound] so the eye cannot drift off the map into emptiness.
+# With the eye at (tx + radius·sin yaw, height, tz + radius·cos yaw), forward
+# (eye→target on the ground, normalised) is (-sin yaw, -cos yaw) and screen-right
+# is its clockwise perpendicular (cos yaw, -sin yaw).
+export fn cam_pan(c: Cam, dr: Double, df: Double, bound: Double) -> Cam =
+  Cam(yaw = c.yaw, radius = c.radius, height = c.height,
+      tx = clampd(c.tx + (dr * cos(c.yaw)) - (df * sin(c.yaw)), 0.0 - bound, bound),
+      ty = c.ty,
+      tz = clampd(c.tz - (dr * sin(c.yaw)) - (df * cos(c.yaw)), 0.0 - bound, bound))
+
+# The camera eye's world position: `radius` out along yaw around the target,
+# lifted `height`. Pure, so the placement is testable without a window; loam.view
+# consumes it in cam_apply.
+export fn cam_eye(c: Cam) -> (Double, Double, Double) =
+  (c.tx + (c.radius * sin(c.yaw)), c.height, c.tz + (c.radius * cos(c.yaw)))

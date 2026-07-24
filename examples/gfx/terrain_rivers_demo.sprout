@@ -4,7 +4,8 @@ import stdlib.gfx
 import loam.terrain (Config, Chunk, World, generate_chunk, save_chunk, world_new, page_in, chunk_kind_tag, chunk_band, sea_level_band, spatial_hash, TileKind, Water, Beach, Grass, Forest, Desert, Mountain, Snow, Tundra, tile_kind_of)
 import loam.hydrology (Hydrology, compute_hydrology, hydro_tier)
 import loam.vegetation (TreeKind, Palm, Broadleaf, Conifer, DarkConifer, Cactus, Shrub, tree_kind_tag, tree_for_biome)
-import loam.view (orbit_next_angle, orbit_zoomed, orbit_camera)
+import loam.camera (Cam, cam_rotate, cam_zoom, cam_pitch, cam_pan)
+import loam.view (cam_apply)
 import stdlib.mutable (MutVec, mutvec_new, mutvec_at, mutvec_set)
 
 # The Loam terrain demo (see terrain_demo.sprout) WITH RIVERS. loam.hydrology (headless, tested in
@@ -24,7 +25,7 @@ import stdlib.mutable (MutVec, mutvec_new, mutvec_at, mutvec_set)
 # ============================================================================
 # Map size ------------------------------------------------------------------
 let chunk_edge = 32  # tiles per chunk edge
-let region_chunks = 8  # map is region_chunks × region_chunks chunks; 8×32 = 256×256 tiles
+let region_chunks = 32  # map is region_chunks × region_chunks chunks; 32×32 = 1024×1024 tiles
 let map_dir = "/tmp"  # one file per chunk lands here (chunk_<cx>_<cz>.terrain)
 
 # Terrain generation (fed into loam.terrain.Config) -------------------------
@@ -53,13 +54,18 @@ let water_alpha = 165  # 0 = invisible, 255 = opaque
 let water_lift = 0.5  # bands above the sea-level band to float the surface (hides the beds)
 
 # Camera framing (fractions of the map span, so it scales with map size) ----
-let cam_radius_frac = 0.85
-let cam_height_frac = 0.6
-let cam_min_frac = 0.05
-let cam_max_frac = 9.5
-let cam_target_y = 4.0
-let cam_orbit_step = 0.004
-let cam_zoom_frac = 0.04
+let cam_radius_frac = 0.85  # opening horizontal standoff
+let cam_height_frac = 0.6  # opening eye height (the pitch)
+let cam_min_frac = 0.05  # closest zoom (horizontal standoff)
+let cam_max_frac = 9.5  # farthest zoom
+let cam_target_y = 4.0  # height of the ground point the eye looks at
+# Manual control steps — how far each held button moves the camera PER FRAME.
+let cam_zoom_frac = 0.04  # zoom  in/out standoff per frame
+let cam_rot_step = 0.02  # rotate radians per frame (~1.1°)
+let cam_pitch_frac = 0.012  # pitch (eye height) per frame, as a span fraction
+let cam_pitch_min_frac = 0.1  # lowest / highest eye the pitch buttons allow
+let cam_pitch_max_frac = 1.3
+let cam_pan_frac = 0.01  # pan (look-at) per frame, as a span fraction
 # ============================================================================
 
 # --- Derived (do not edit; computed from the tunables above) ----------------
@@ -235,27 +241,55 @@ fn draw_trees(models: MutVec Int, i: Int) -> Unit !{IO} =
       gfx.draw_instanced(h)
       draw_trees(models, i + 1)
 
-# --- Orbit camera framing (derived from the camera tunables + map span) -----
-let orbit_start_radius = world_span * cam_radius_frac
-let orbit_height = world_span * cam_height_frac
-let orbit_target_y = cam_target_y
-let orbit_step = cam_orbit_step
+# --- Camera framing + control steps (derived from the tunables + map span) --
+let cam_start_radius = world_span * cam_radius_frac
+let cam_start_height = world_span * cam_height_frac
 let zoom_step = world_span * cam_zoom_frac
 let min_radius = world_span * cam_min_frac
 let max_radius = world_span * cam_max_frac
+let pitch_step = world_span * cam_pitch_frac
+let pitch_min = world_span * cam_pitch_min_frac
+let pitch_max = world_span * cam_pitch_max_frac
+let pan_step = world_span * cam_pan_frac
+let pan_bound = half * tile_size  # keep the look-at over the map (centred on 0,0)
+
+# The starting rig reproduces the old orbit demo's opening frame exactly: same
+# horizontal standoff and eye height, looking at the map centre.
+let cam_start = Cam(yaw = 0.0, radius = cam_start_radius, height = cam_start_height,
+                    tx = 0.0, ty = cam_target_y, tz = 0.0)
+
+# --- Control panel (held buttons: press-and-hold to move continuously) ------
+let btn_w = 78
+let btn_h = 30
+let col_l = 838  # left column: rotate / tilt / zoom-in
+let col_r = 920  # right column: pan / zoom-out
+let row0 = 300
+let row1 = 336
+let row2 = 372
+let row3 = 408
+let row4 = 444
+
+fn bd(b: Bool) -> Double = if b then 1.0 else 0.0
+
+# Fold this frame's held buttons into the next camera state. Pure — the buttons
+# are sampled in the loop (IO), the motion they imply is computed here.
+fn drive_cam(c: Cam, rl: Bool, rr: Bool, tu: Bool, td: Bool, zi: Bool, zo: Bool,
+             pf: Bool, pb: Bool, pl: Bool, pr: Bool) -> Cam =
+  let c1 = cam_rotate(c, (bd(rr) - bd(rl)) * cam_rot_step)
+      c2 = cam_pitch(c1, (bd(tu) - bd(td)) * pitch_step, pitch_min, pitch_max)
+      c3 = cam_zoom(c2, (bd(zo) - bd(zi)) * zoom_step, min_radius, max_radius)
+  in cam_pan(c3, (bd(pr) - bd(pl)) * pan_step, (bd(pf) - bd(pb)) * pan_step, pan_bound)
 
 # The terrain+rivers are STATIC, so they are baked into ONE GPU mesh at startup (see main) and
-# drawn in a single call per frame — no per-frame per-tile work. The frame loop only spins the camera.
-fn render_loop(mesh: Int, models: MutVec Int, angle: Double, paused: Bool, radius: Double) -> Unit !{IO} =
+# drawn in a single call per frame — no per-frame per-tile work. The frame loop only drives the
+# camera from the on-screen control panel: hold a button to move/rotate/zoom/pan continuously.
+fn render_loop(mesh: Int, models: MutVec Int, cam: Cam) -> Unit !{IO} =
   do
     stop <- gfx.window_should_close()
     if stop then gfx.close_window()
     else
       do
-        toggled <- gfx.space_pressed()
-        let now_paused = if toggled then ! paused else paused
-        let next = if now_paused then angle else orbit_next_angle(angle, orbit_step)
-        orbit_camera(radius, angle, orbit_height, orbit_target_y)
+        cam_apply(cam)
         gfx.frame_begin()
         gfx.draw_captured(mesh)
         # Trees on top of the baked terrain, before the water so an above-water tree is not tinted.
@@ -265,11 +299,19 @@ fn render_loop(mesh: Int, models: MutVec Int, angle: Double, paused: Bool, radiu
         # translucent plane while it fills the valleys.
         gfx.draw_plane(0.0, water_y, 0.0, world_span, world_span, water_r, water_g, water_b, water_alpha)
         gfx.draw_fps(10, 10)
-        plus <- gfx.button(940, 20, 44, 44, "+")
-        minus <- gfx.button(940, 72, 44, 44, "-")
+        # Camera control panel — left column rotates/tilts/zooms-in, right column pans/zooms-out.
+        rl <- gfx.button_held(col_l, row0, btn_w, btn_h, "Rot L")
+        rr <- gfx.button_held(col_l, row1, btn_w, btn_h, "Rot R")
+        tu <- gfx.button_held(col_l, row2, btn_w, btn_h, "Tilt+")
+        tdn <- gfx.button_held(col_l, row3, btn_w, btn_h, "Tilt-")
+        zi <- gfx.button_held(col_l, row4, btn_w, btn_h, "Zoom+")
+        pf <- gfx.button_held(col_r, row0, btn_w, btn_h, "Fwd")
+        pb <- gfx.button_held(col_r, row1, btn_w, btn_h, "Back")
+        pl <- gfx.button_held(col_r, row2, btn_w, btn_h, "Left")
+        pr <- gfx.button_held(col_r, row3, btn_w, btn_h, "Right")
+        zo <- gfx.button_held(col_r, row4, btn_w, btn_h, "Zoom-")
         gfx.frame_end()
-        render_loop(mesh, models, next, now_paused,
-                    orbit_zoomed(radius, plus, minus, zoom_step, min_radius, max_radius))
+        render_loop(mesh, models, drive_cam(cam, rl, rr, tu, tdn, zi, zo, pf, pb, pl, pr))
 
 fn main() -> Unit !{IO} =
   do
@@ -291,4 +333,4 @@ fn main() -> Unit !{IO} =
     models <- mutvec_new(tree_count, 0)
     load_trees(models)
     place_region(models, w, h, chunk_edge, region_chunks, region_chunks, 0, 0)
-    render_loop(mesh, models, 0.0, false, orbit_start_radius)
+    render_loop(mesh, models, cam_start)

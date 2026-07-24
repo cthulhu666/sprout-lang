@@ -635,6 +635,27 @@ long long gfx_button(long long x, long long y, long long w, long long h, const c
   return clicked ? 1 : 0;
 }
 
+/* Like gfx_button, but HELD: returns 1 on every frame the left mouse button is
+ * down inside the box (IsMouseButtonDown, not ...Pressed), so holding it repeats
+ * an action frame-by-frame. This is what continuous camera control (rotate / pan
+ * / zoom) wants — one press orbits smoothly rather than nudging once per click.
+ * The box brightens while held so the press reads visually. */
+long long gfx_button_held(long long x, long long y, long long w, long long h, const char *label) {
+  Rectangle r = { (float)x, (float)y, (float)w, (float)h };
+  int hover = CheckCollisionPointRec(GetMousePosition(), r);
+  int held = hover && IsMouseButtonDown(MOUSE_BUTTON_LEFT);
+  EndMode3D();
+  DrawRectangleRec(r, held  ? (Color){ 110, 120, 150, 255 }
+                     : hover ? (Color){ 80, 80, 96, 255 }
+                             : (Color){ 48, 48, 60, 255 });
+  DrawRectangleLinesEx(r, 2.0f, (Color){ 200, 200, 210, 255 });
+  int fs = (int)h - 12;
+  int tw = MeasureText(label, fs);
+  DrawText(label, (int)x + ((int)w - tw) / 2, (int)y + 6, fs, RAYWHITE);
+  BeginMode3D(g_cam);
+  return held ? 1 : 0;
+}
+
 long long gfx_frame_end(void) {
   EndMode3D();
   EndDrawing();
