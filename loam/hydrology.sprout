@@ -37,10 +37,12 @@ let fill_epsilon = 0.0000001
 # caller (e.g. the terrain-rivers demo, reading its settings from a config file) can sweep them
 # without recompiling; default_hydro_params reproduces the historical fixed values.
 export type HydroParams = (tier1_min: Int, tier2_min: Int, tier3_min: Int,
-                           carve1: Int, carve2: Int, carve3: Int)
+                           carve1: Int, carve2: Int, carve3: Int,
+                           widen2: Int, widen3: Int)
 export fn default_hydro_params() -> HydroParams =
   HydroParams(tier1_min = 40, tier2_min = 200, tier3_min = 900,  # accumulation → creek/river/major
-              carve1 = 1, carve2 = 2, carve3 = 3)  # channel carve depth (bands) by tier
+              carve1 = 1, carve2 = 2, carve3 = 3,  # channel carve depth (bands) by tier
+              widen2 = 0, widen3 = 1)  # sideways widen radius (cells): river none, major 1 → 3 wide
 
 # Channel carve depth (in elevation bands) for a cell's flow_tier: how far below its own terrain a
 # river cell's floor is lowered so the water sits in a valley with visible banks (the demo maps this
@@ -54,6 +56,77 @@ export fn carve_depth(p: HydroParams, tier: Int) -> Int =
   else if tier == 2 then p.carve2
   else if tier == 1 then p.carve1
   else 0
+
+# --- River widening (make big rivers WIDE, not just deep) --------------------
+# A 1-tile-wide major river reads as a creek regardless of depth. `widen_radius` is how many cells
+# sideways a river of a given tier spreads its water: creeks (tier ≤ 1) never widen, rivers spread
+# `widen2`, majors `widen3` (default 0 / 1 → a major becomes 3 tiles wide). Pure, unit-tested.
+export fn widen_radius(p: HydroParams, tier: Int) -> Int =
+  if tier >= 3 then p.widen3
+  else if tier == 2 then p.widen2
+  else 0
+
+fn iabs(x: Int) -> Int = if x < 0 then 0 - x else x
+
+fn max_widen(p: HydroParams) -> Int =
+  if p.widen3 > p.widen2 then p.widen3 else p.widen2
+
+# The rendered tier at (gx, gz) AFTER widening: a river cell keeps its own tier; a non-river cell is
+# promoted to the tier of the largest river within THAT river's widen radius (Chebyshev distance),
+# so it carves + colours as water. Reads the ORIGINAL flow_tier (widen_rivers double-buffers so
+# promotions never cascade). `best` threads the running max over the (2r+1)² neighbourhood box.
+fn wt_scan(h: Hydrology, p: HydroParams, gx: Int, gz: Int, r: Int, dr: Int, dc: Int, best: Int) -> Int !{IO} =
+  if dr > r then best
+  else if dc > r then wt_scan(h, p, gx, gz, r, dr + 1, 0 - r, best)
+  else
+    do
+      t <- mm_get_i(h.flow_tier, gz + dr, gx + dc, 0)
+      let d = if iabs(dr) > iabs(dc) then iabs(dr) else iabs(dc)
+      let cand = if (t > 0) && (d > 0) && (widen_radius(p, t) >= d) then t else 0
+      wt_scan(h, p, gx, gz, r, dr, dc + 1, if cand > best then cand else best)
+
+fn render_tier_at(h: Hydrology, p: HydroParams, gx: Int, gz: Int) -> Int !{IO} =
+  do
+    own <- mm_get_i(h.flow_tier, gz, gx, 0)
+    if own > 0 then own
+    else
+      do
+        let r = max_widen(p)
+        if r <= 0 then 0
+        else wt_scan(h, p, gx, gz, r, 0 - r, 0 - r, 0)
+
+# Fill `out` with the widened tier of every cell (computed from the original flow_tier in `h`).
+fn widen_fill(h: Hydrology, p: HydroParams, out: MutMatrix Int, span: Int, r: Int, c: Int) -> Int !{IO} =
+  if r >= span then 0
+  else if c >= span then widen_fill(h, p, out, span, r + 1, 0)
+  else
+    do
+      rt <- render_tier_at(h, p, c, r)
+      mutmatrix_set(out, r, c, rt)
+      widen_fill(h, p, out, span, r, c + 1)
+
+# Copy the widened grid back into flow_tier.
+fn widen_commit(h: Hydrology, src: MutMatrix Int, span: Int, r: Int, c: Int) -> Int !{IO} =
+  if r >= span then 0
+  else if c >= span then widen_commit(h, src, span, r + 1, 0)
+  else
+    do
+      v <- mm_get_i(src, r, c, 0)
+      mutmatrix_set(h.flow_tier, r, c, v)
+      widen_commit(h, src, span, r, c + 1)
+
+# Widen rivers in place: dilate flow_tier so big rivers span multiple tiles. Double-buffered (fill a
+# temp grid from the ORIGINAL tiers, then commit) so a promoted cell can't seed further promotion —
+# widening is bounded to widen_radius, not an unbounded flood. No-op when no tier widens (default
+# creek/river), preserving the pre-widen look exactly. Runs after compute_hydrology, before carving.
+export fn widen_rivers(h: Hydrology, p: HydroParams, span: Int) -> Unit !{IO} =
+  if max_widen(p) <= 0 then ()
+  else
+    do
+      tmp <- mutmatrix_new(span, span, 0)
+      widen_fill(h, p, tmp, span, 0, 0)
+      widen_commit(h, tmp, span, 0, 0)
+      ()
 # Safety cap on any downstream walk: with a correct (acyclic) field no walk exceeds the map, so
 # `4 * span` can never be reached — hitting it means a bug, and the walk bails instead of hanging.
 let walk_cap_mul = 4

@@ -74,15 +74,18 @@ at `4·span` steps so a regression fails loudly instead of hanging.
 
 - `Hydrology = (span, filled: MutMatrix Double, flow_dir: MutMatrix Int, flow_tier: MutMatrix Int)`
   — grids indexed `[row=z][col=x]`, matching `Chunk`.
-- `HydroParams = (tier1_min, tier2_min, tier3_min, carve1, carve2, carve3)` — the
-  accumulation→`flow_tier` cutoffs plus the per-tier channel carve depths (§6a).
-  `default_hydro_params()` reproduces the stock `40 / 200 / 900` tiers and `1 / 2 / 3` carve.
-  Parameterized (not module constants) so a caller — e.g. the terrain-rivers demo reading a config
-  file — can sweep the river size classes and channel depth without recompiling.
+- `HydroParams = (tier1_min, tier2_min, tier3_min, carve1, carve2, carve3, widen2, widen3)` — the
+  accumulation→`flow_tier` cutoffs, the per-tier channel carve depths (§6a), and the per-tier sideways
+  widen radii (§6b). `default_hydro_params()` reproduces the stock `40 / 200 / 900` tiers, `1 / 2 / 3`
+  carve, `0 / 1` widen. Parameterized (not module constants) so a caller — e.g. the terrain-rivers
+  demo reading a config file — can sweep river size, channel depth and width without recompiling.
 - `compute_hydrology(cfg, span, p: HydroParams) -> Hydrology !{IO}` — the whole pipeline; pure in
   `(cfg, span, p)`.
 - `carve_depth(p, tier) -> Int` — pure: how many elevation bands a river cell of that `flow_tier` is
   sunk below its own terrain (0 for non-river/sea). Monotonic in tier (§6a).
+- `widen_radius(p, tier) -> Int` — pure: how many cells sideways a river of that tier spreads (§6b).
+- `widen_rivers(h, p, span) -> Unit !{IO}` — dilates `flow_tier` in place so big rivers span multiple
+  tiles (§6b). Double-buffered; a no-op when no tier widens.
 - `hydro_tier / hydro_dir / hydro_filled (h, gx, gz)` — per-cell accessors.
 - `dir_delta(d) -> (drow, dcol)` — D8 decode, shared by module, view and tests.
 
@@ -114,6 +117,23 @@ lowered *at least* as much as its upstream neighbour — carving can only steepe
 reverse it. `carve_depth` monotonicity is unit-tested; the carve itself is a pure band adjustment the
 demo applies over the existing `flow_tier` grid (no new grid, no runtime, no assets).
 
+## 6b. River width (visual — step 1.5)
+
+A 1-tile-wide major river reads as a creek no matter how deep it is carved. `widen_rivers` **dilates
+the `flow_tier` grid in place** so a river spreads `widen_radius(tier)` cells sideways (default
+`0 / 1` for river / major → a major becomes 3 tiles wide; creeks never widen). A non-river cell
+within a river's radius is promoted to that river's tier, so it then carves, colours and skips-trees
+as water via the *unchanged* downstream readers — widening needs **no new grid threaded through the
+bake**, just one call after `compute_hydrology`.
+
+Two correctness points: it is **double-buffered** (the widened tiers are computed into a temp grid
+from the *original* `flow_tier`, then committed) so a promoted cell cannot seed further promotion —
+spread is bounded to `widen_radius`, not an unbounded flood; and it is a **no-op when no tier widens**
+(`max_widen ≤ 0`), so the pre-widen look is preserved exactly. The dilation adds no measurable startup
+cost (≈0 s of the 1024² demo's generate+solve+bake). `widen_radius` (pure) and `widen_rivers` (on a
+synthetic 3×3 grid — a centre major promotes its neighbours; radius 0 leaves them untouched) are both
+unit-tested.
+
 ## 7. Tests
 
 `tests/loam/test_hydrology.spr` (TDD — written failing first), at span 128:
@@ -125,6 +145,8 @@ demo applies over the existing `flow_tier` grid (no new grid, no runtime, no ass
   river cells (proves `flow_tier` reads the params rather than a hardcoded threshold).
 - **Carve depth**: `carve_depth` is 0 for tier 0, the per-tier depth otherwise, and monotonic in tier
   (the property that keeps a carved river flowing downhill — §6a).
+- **Widen**: `widen_radius` per tier; `widen_rivers` on a synthetic 3×3 grid dilates a centre major
+  to its neighbours, and radius 0 leaves them untouched (§6b).
 
 `tests/loam/test_config.spr` covers `loam/config.sprout`, the `key value` (Int) reader the demo
 uses to load these knobs from a file: comment/blank tolerance, multi-key parse, malformed-value
@@ -148,9 +170,10 @@ sample that rescales for longer rivers (`lattice0 128`, `octaves 3`).
 ## 8. Roadmap (raft game)
 
 1. **Valley carving** — ✅ landed (§6a): river cells sunk into shaded channels with banks, depth by
-   tier, config-tunable. Still to do: **meander** (lateral offset, stronger in low-gradient
-   lowlands) to de-blockify the D8 right-angle paths into sinuous ribbons; **width** for major
-   rivers (widen into neighbour cells); and the **animated translucent water surface** on top of the
+   tier, config-tunable.
+1b. **Width** — ✅ landed (§6b): major rivers dilate to multiple tiles, config-tunable radius.
+   Still to do: **meander** (lateral offset, stronger in low-gradient lowlands) to de-blockify the D8
+   right-angle paths into sinuous ribbons; the **animated translucent water surface** on top of the
    opaque bed (a `uTime` water shader — runtime work), with **waterfalls** where the carve/band drop
    between consecutive flow cells is steep, and **dam** props placed like trees.
 2. **Raft mechanics** — current from `flow_dir` + accumulation (downstream cheap, upstream

@@ -1,6 +1,7 @@
 import stdlib.test (TestState, new_state, assert_eq, assert_true, summary)
 import loam.terrain (Config, elev_at, sea_level)
-import loam.hydrology (Hydrology, HydroParams, default_hydro_params, carve_depth, compute_hydrology, hydro_tier, hydro_dir, hydro_filled, dir_delta)
+import loam.hydrology (Hydrology, HydroParams, default_hydro_params, carve_depth, widen_radius, widen_rivers, compute_hydrology, hydro_tier, hydro_dir, hydro_filled, dir_delta)
+import stdlib.mutable (mutmatrix_new, mutmatrix_set)
 
 # loam.hydrology computes drainage over a bounded region as a PURE function of (cfg, span):
 # it fills depressions (Planchon-Darboux), assigns a D8 flow direction to every cell, walks
@@ -116,7 +117,7 @@ fn main() -> Unit !{IO} =
     #     actually reads HydroParams rather than a hardcoded threshold. ---
     h_strict <- compute_hydrology(cfg, span,
                                   HydroParams(tier1_min = 100000, tier2_min = 200000, tier3_min = 900000,
-                                              carve1 = 1, carve2 = 2, carve3 = 3))
+                                              carve1 = 1, carve2 = 2, carve3 = 3, widen2 = 0, widen3 = 1))
     rivers_strict <- count_rivers(0, 0, 0, h_strict)
     assert_true(state, "hydrology: raising the tier thresholds yields fewer river cells",
                 rivers_strict < rivers)
@@ -131,7 +132,41 @@ fn main() -> Unit !{IO} =
     assert_true(state, "carve: monotonic non-decreasing in tier",
                 (carve_depth(dp, 0) <= carve_depth(dp, 1)) && (carve_depth(dp, 1) <= carve_depth(dp, 2))
                   && (carve_depth(dp, 2) <= carve_depth(dp, 3)))
-    let dp2 = HydroParams(tier1_min = 40, tier2_min = 200, tier3_min = 900, carve1 = 5, carve2 = 6, carve3 = 7)
+    let dp2 = HydroParams(tier1_min = 40, tier2_min = 200, tier3_min = 900, carve1 = 5, carve2 = 6, carve3 = 7,
+                          widen2 = 0, widen3 = 1)
     assert_eq(state, "carve: honors HydroParams carve depths", carve_depth(dp2, 1), 5)
+
+    # --- Widen radius: creeks (tier ≤ 1) never widen, river = widen2, major = widen3. ---
+    assert_eq(state, "widen: creek radius is 0", widen_radius(dp, 1), 0)
+    assert_eq(state, "widen: river radius (default widen2=0)", widen_radius(dp, 2), 0)
+    assert_eq(state, "widen: major radius (default widen3=1)", widen_radius(dp, 3), 1)
+    let dpw = HydroParams(tier1_min = 40, tier2_min = 200, tier3_min = 900, carve1 = 1, carve2 = 2, carve3 = 3,
+                          widen2 = 1, widen3 = 2)
+    assert_eq(state, "widen: honors HydroParams widen radii", widen_radius(dpw, 3), 2)
+
+    # --- widen_rivers dilates the flow_tier grid in place. Synthetic 3×3: one major (tier 3) at the
+    #     centre; with widen3=1 every neighbour (Chebyshev dist 1) is promoted to tier 3. With
+    #     widen3=0 nothing spreads. Built directly (not via compute_hydrology) so the check is exact. ---
+    ft <- mutmatrix_new(3, 3, 0)
+    mutmatrix_set(ft, 1, 1, 3)  # centre cell = major river
+    fd <- mutmatrix_new(3, 3, 0)
+    fl <- mutmatrix_new(3, 3, 0.0)
+    let hw = Hydrology(span = 3, filled = fl, flow_dir = fd, flow_tier = ft)
+    widen_rivers(hw, dp, 3)  # dp has widen3 = 1
+    corner <- hydro_tier(hw, 0, 0)  # a corner, Chebyshev dist 1 from centre
+    centre <- hydro_tier(hw, 1, 1)
+    assert_eq(state, "widen: major river spreads to a diagonal neighbour", corner, 3)
+    assert_eq(state, "widen: the core major cell is unchanged", centre, 3)
+
+    ft0 <- mutmatrix_new(3, 3, 0)
+    mutmatrix_set(ft0, 1, 1, 3)
+    fd0 <- mutmatrix_new(3, 3, 0)
+    fl0 <- mutmatrix_new(3, 3, 0.0)
+    let hw0 = Hydrology(span = 3, filled = fl0, flow_dir = fd0, flow_tier = ft0)
+    let no_widen = HydroParams(tier1_min = 40, tier2_min = 200, tier3_min = 900, carve1 = 1, carve2 = 2, carve3 = 3,
+                               widen2 = 0, widen3 = 0)
+    widen_rivers(hw0, no_widen, 3)
+    corner0 <- hydro_tier(hw0, 0, 0)
+    assert_eq(state, "widen: radius 0 leaves neighbours untouched", corner0, 0)
 
     summary(state)

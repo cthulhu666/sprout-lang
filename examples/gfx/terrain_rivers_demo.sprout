@@ -2,7 +2,7 @@ module examples.gfx.terrain_rivers_demo
 
 import stdlib.gfx
 import loam.terrain (Config, tile_kind_at, tile_band_at, tile_kind_tag, sea_level_band, spatial_hash, exposed_step_bands, chunk_linear_index, TileKind, Water, Beach, Grass, Forest, Desert, Mountain, Snow, Tundra, tile_kind_of)
-import loam.hydrology (Hydrology, HydroParams, compute_hydrology, hydro_tier, carve_depth)
+import loam.hydrology (Hydrology, HydroParams, compute_hydrology, hydro_tier, carve_depth, widen_rivers)
 import loam.config (parse_config, cfg_int)
 import loam.vegetation (TreeKind, Palm, Broadleaf, Conifer, DarkConifer, Cactus, Shrub, tree_kind_tag, tree_for_biome)
 import loam.camera (Cam, cam_drive, cam_distance, tree_cull_dist)
@@ -52,6 +52,8 @@ let def_tier3_min = 900  # → major river
 let def_carve1 = 1  # channel carve depth (elevation bands) — creek
 let def_carve2 = 2  # → river
 let def_carve3 = 3  # → major river (deeper = more dramatic valley; 0 = flat, painted-on)
+let def_widen2 = 0  # sideways widen radius (cells) — river stays 1 wide
+let def_widen3 = 1  # → major river spreads 1 cell each side (3 wide); 0 = 1-wide like the rest
 
 # Appearance ----------------------------------------------------------------
 let tile_size = 1.0  # world units per tile (cube edge)
@@ -516,6 +518,8 @@ fn main() -> Unit !{IO} =
     let cv1 = cfg_int(settings, "carve1", def_carve1)
     let cv2 = cfg_int(settings, "carve2", def_carve2)
     let cv3 = cfg_int(settings, "carve3", def_carve3)
+    let wd2 = cfg_int(settings, "widen2", def_widen2)
+    let wd3 = cfg_int(settings, "widen3", def_widen3)
     # Derived map dimensions (formerly module constants; now depend on the config).
     let span_tiles = region_chunks * chunk_edge
     let chunk_count = region_chunks * region_chunks  # one baked mesh per chunk
@@ -528,7 +532,7 @@ fn main() -> Unit !{IO} =
     let cfg = Config(seed = seed, chunk_size = chunk_edge, octaves = octaves,
                      lattice0 = lattice0, elevation_levels = elevation_levels)
     let params = HydroParams(tier1_min = t1, tier2_min = t2, tier3_min = t3,
-                             carve1 = cv1, carve2 = cv2, carve3 = cv3)
+                             carve1 = cv1, carve2 = cv2, carve3 = cv3, widen2 = wd2, widen3 = wd3)
     # Opening rig: same span-scaled standoff/height as before, looking at the map centre.
     let cam_start = Cam(yaw = 0.0, radius = world_span * cam_radius_frac,
                         height = world_span * cam_height_frac, tx = 0.0, ty = cam_target_y, tz = 0.0)
@@ -537,7 +541,8 @@ fn main() -> Unit !{IO} =
           ++ " octaves=" ++ int_to_string(octaves) ++ " lattice0=" ++ int_to_string(lattice0)
           ++ " levels=" ++ int_to_string(elevation_levels) ++ " tiers=" ++ int_to_string(t1)
           ++ "/" ++ int_to_string(t2) ++ "/" ++ int_to_string(t3) ++ " carve=" ++ int_to_string(cv1)
-          ++ "/" ++ int_to_string(cv2) ++ "/" ++ int_to_string(cv3))
+          ++ "/" ++ int_to_string(cv2) ++ "/" ++ int_to_string(cv3) ++ " widen=" ++ int_to_string(wd2)
+          ++ "/" ++ int_to_string(wd3))
 
     gfx.open_window(1000, 600, "Sprout — Loam terrain with rivers (drainage-routed)")
     gfx.set_target_fps(60)
@@ -560,6 +565,10 @@ fn main() -> Unit !{IO} =
     # Global hydrology pass over the whole region (same cfg + span as the terrain), computed once
     # upfront. flow_tier lines up cell-for-cell with the generated tiles; params sets the tiers.
     h <- compute_hydrology(cfg, span_tiles, params)
+    # Widen big rivers: dilate flow_tier in place so a major river spans multiple tiles instead of one
+    # (a 1-wide major reads as a creek). Runs BEFORE carve/bake so the widened cells carve, colour and
+    # skip-trees as water too. No-op when no tier widens (default river/creek), so this is additive.
+    widen_rivers(h, params, span_tiles)
     # Carve river cells into channels: lower each river cell's band by carve_depth(tier) so the water
     # floor sits in a valley with banks (the bake draws the banks for free). Must run AFTER hydrology
     # (needs flow_tier) and BEFORE the bake (which reads the lowered bands).
