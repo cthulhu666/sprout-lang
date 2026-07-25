@@ -1,0 +1,16 @@
+module main
+
+# Concrete-instance devirtualization shape (docs/scalar-replacement-v0.md, A-full): `from_ordinal(tag)`
+# at a statically-known `Enum Color` instance must NOT build a runtime dictionary. Before A-full,
+# `color_of` heap-allocated two `sprout_alloc_closure_env` envs (one dead) and called the generic
+# `__cm_Enum_from_ordinal` wrapper indirectly; after, it calls `__tc_Enum_Color_from_ordinal` directly
+# with no closure allocation.
+
+type Color (..) deriving (Enum) = Red | Green | Blue
+
+fn color_of(tag: Int) -> Color =
+  match from_ordinal(tag) with
+  | Just c -> c
+  | Nothing -> Red
+
+fn main() -> Unit !{IO} = print(ordinal(color_of(2)))

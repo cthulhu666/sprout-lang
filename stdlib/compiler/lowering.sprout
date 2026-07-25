@@ -1162,6 +1162,62 @@ fn args_have_leading_tdict(args: List typed_ast.TypedExpr) -> Bool =
   | [typed_ast.TDict _ _ _ _ | _] -> true
   | _ -> false
 
+# Concrete-instance devirtualization (docs/scalar-replacement-v0.md, A-full).
+# A class-method call whose dispatch dictionary is a fully-resolved CONCRETE instance
+# with no inner-constraint dicts is lowered to a DIRECT call of the concrete
+# __tc_{Class}_{Type}_{method} fn, dropping the runtime dictionary entirely — no
+# per-call sprout_alloc_closure_env, no generic __cm_ wrapper indirection.  This is
+# the devirtualization analogue of CPR: an identity known at compile time should not
+# be rebuilt (as a dict of eta-closures) and dispatched through at run time.
+#
+# The gate is deliberately narrow: the args carry EXACTLY ONE leading TDict whose
+# evidence is EvClasses[EvInstance _ key []] — a single class block, concrete, with
+# EMPTY children (no context constraints ⇒ the concrete fn takes only the user args,
+# so dropping every witness is sound).  Any other shape — EvForward/polymorphic, a
+# superclass-expanded multi-block dict, or an instance with inner dicts — falls back
+# to today's dictionary-passing path.  Multi-block / inner-dict devirt is a follow-up.
+fn try_devirt_concrete(callee: typed_ast.TypedExpr, args: List typed_ast.TypedExpr, t: types.Type, pos: source.SourcePos, ctx: LowerCtx) -> Maybe typed_ast.TypedExpr =
+  let typed_ast.TVar mname mt mpos = callee else Nothing
+      Just impl_name = devirt_concrete_target(mname, args, ctx) else Nothing
+  in Just(typed_ast.TCall(
+       # `mt` is the method's monomorphic type at this call site — with empty children
+       # the concrete fn takes only user args, so its signature IS `mt` (no dict params).
+       typed_ast.TVar(impl_name, mt, mpos),
+       expand_user_args(args, ctx),
+       t, pos))
+
+# The concrete __tc_ impl name IFF `mname` (an unshadowed class method) is dispatched
+# on a sole leading concrete instance dict whose instance is in ctx_inst.  Nothing
+# otherwise — the caller then keeps today's generic __cm_ dispatch.  The bound-var
+# guard is defensive: a shadowed method resolves to the user binding and reaches here
+# without a leading TDict anyway (see lower_dispatch_callee), so it already misses.
+fn devirt_concrete_target(mname: String, args: List typed_ast.TypedExpr, ctx: LowerCtx) -> Maybe String =
+  if list_member(mname, ctx_bound_vars(ctx)) then Nothing
+  else
+    let Just key = sole_leading_concrete_key(args) else Nothing
+        Just method_map = dict_get(key, ctx_inst(ctx)) else Nothing
+    in dict_get_method(mname, method_map)
+
+# The instance key of a call whose args are `[TDict(EvClasses[EvInstance _ key []]) | user]`
+# with NO further TDict among the user args.  The single-block, empty-children shape is
+# what makes dropping the whole dictionary sound.
+fn sole_leading_concrete_key(args: List typed_ast.TypedExpr) -> Maybe String =
+  match args with
+  | Cons (typed_ast.TDict _ _ _ ev) rest ->
+      if args_have_tdict(rest) then Nothing else concrete_single_instance_key(ev)
+  | _ -> Nothing
+
+fn concrete_single_instance_key(ev: typed_ast.Evidence) -> Maybe String =
+  match ev with
+  | typed_ast.EvClasses [typed_ast.EvInstance _ key Nil] -> Just(key)
+  | _ -> Nothing
+
+fn args_have_tdict(args: List typed_ast.TypedExpr) -> Bool =
+  match args with
+  | [typed_ast.TDict _ _ _ _ | _] -> true
+  | Cons _ rest -> args_have_tdict(rest)
+  | Nil -> false
+
 # ---------------------------------------------------------------------------
 # Expression lowering
 # ---------------------------------------------------------------------------
@@ -1212,7 +1268,10 @@ fn lower_expr(te: typed_ast.TypedExpr, ctx: LowerCtx) -> typed_ast.TypedExpr =
   | typed_ast.TMatch scrut branches t pos ->
       typed_ast.TMatch(lower_expr(scrut, ctx), lower_branches(branches, ctx), t, pos)
   | typed_ast.TCall callee args t pos ->
-      typed_ast.TCall(lower_dispatch_callee(callee, args, ctx), expand_call_args(args, ctx), t, pos)
+      match try_devirt_concrete(callee, args, t, pos, ctx) with
+      | Just devirt -> devirt
+      | Nothing ->
+          typed_ast.TCall(lower_dispatch_callee(callee, args, ctx), expand_call_args(args, ctx), t, pos)
   | typed_ast.TDict _ t pos _ ->
       # TDict should only appear as a prefix arg inside TCall — never standalone.
       # If seen standalone, emit as unit.  Note: `t` here is the constraint evidence

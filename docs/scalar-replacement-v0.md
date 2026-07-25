@@ -37,8 +37,10 @@ its hot loop** — its own comment records that returning "a fresh `(Int, Int)` 
 optimization removes the *need* for — the demo is the measurement, not the scope.
 
 **Measured cost.** The `terrain_rivers_demo` bake and tree-scatter passes each walk 1024² tiles;
-each `bake_tile` allocates an rgb `(Int,Int,Int)` tuple + a `Maybe` (`tile_kind_of`→`from_ordinal`),
-each `place_tile` a `Maybe` (`tree_for_biome`) + a tuple (`variant_range`). Because the collector is
+each `bake_tile` allocates an rgb `(Int,Int,Int)` tuple + the `from_ordinal` typeclass-dispatch
+**dictionary** (two `sprout_alloc_closure_env` envs — the second per-tile allocation; the
+`tile_kind_of`→`from_ordinal` `Maybe` itself is already CPR-unboxed to `{i64,i64}`, so it is *not* the
+box), each `place_tile` a `Maybe` (`tree_for_biome`) + a tuple (`variant_range`). Because the collector is
 non-generational (full-heap mark each cycle, over the resident 1024² grids), this young garbage is
 superlinear: measured **bake 9.4s → 0.19s (48×)** and **place 11.6s → 0.14s (86×)** with GC
 suppressed (`SPROUT_GC_THRESHOLD=1e8`). ~59s of the demo's ~80s startup was collecting these boxes.
@@ -135,6 +137,12 @@ per-cell rgb tuple *and* `loam.hydrology`'s hand-split `dir_delta` *and* the com
 tuple-threading passes. Expected: `bake_region` collapses toward its ~0.19s floor.
 
 ### Stage 2 — arg-position / nested results (direction, separate approval)
+
+> **Correction (post-implementation).** This subsection's premise — that
+> `biome_rgb(tile_kind_of(tag))` boxes an inner `Maybe` — was wrong: the `from_ordinal` `Maybe` is
+> already CPR-unboxed. The actual demo residue was the `from_ordinal` dispatch **dictionary**, since
+> removed by devirtualization (`docs/devirtualization-v0.md`). Arg-position/nested CPR below remains a
+> valid *general* direction, but it was **not** the rivers-demo bottleneck.
 
 `biome_rgb(tile_kind_of(tag))` boxes the inner `Maybe` because it is a call argument, not a
 scrutinee. Two composable routes, both already proposed elsewhere:
@@ -293,13 +301,18 @@ so no SRA binding is ever live across such a boundary — this keeps the change 
 not all ~9 do-helpers.
 
 **Measured (demo, via full compile path):** `bake_tile` now calls `river_rgb_worker`/`biome_rgb_worker`
-and its rgb `(Int,Int,Int)` tuple alloc is gone (3-phi merge, zero `alloc_tuple_blob`). This removes
-one of the two per-tile allocations; `tile_kind_of`'s `Maybe` is **arg-position (§4 Stage 2)** and
-survives — so expect roughly half the per-tile young garbage removed, not the full GC-suppressed floor.
+and its rgb `(Int,Int,Int)` tuple alloc is gone (3-phi merge, zero `alloc_tuple_blob`). This removed the
+**first** of the two per-tile allocations. The **second** was the `from_ordinal` typeclass-dispatch
+dictionary (two closure envs) — **not** a `Maybe` box (that is already CPR-unboxed) — and it has since
+been eliminated by **concrete-instance devirtualization** (`docs/devirtualization-v0.md`): `tile_kind_of`
+now calls `@__tc_Enum_…_from_ordinal_worker` directly with no dictionary. Net: `bake_tile` is
+**allocation-free** — the full GC-suppressed floor, not half.
 
 ### Follow-ups (see BACKLOG)
 
-- **Stage 2** — arg-position/nested (`biome_rgb(tile_kind_of(tag))`'s `Maybe`): the rest of the bake win.
+- **Devirt beyond the clean case** — multi-block (superclass, e.g. `Ord`) and context-constrained
+  instances (`Eq (Maybe a) where Eq a`), passing resolved inner/super dicts to the concrete fn
+  (`docs/devirtualization-v0.md` §5). Increment 1 handles single-block, empty-context instances only.
 - **SRA in `let..in`** (pure, non-do-block) and across a Maybe/Result do-bind (thread the SRA map
   through the `translate_do_bind_*` helpers instead of resetting).
 - **Heap-field tuples** (`(String, String)`): needs per-slot rooting in `IRCallUnboxed{2,3}` + a

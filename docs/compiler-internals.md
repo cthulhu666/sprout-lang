@@ -139,3 +139,23 @@ extern-CPR path above — these workers are **Sprout-defined and Sprout-called**
   (`sra_escape_ok` over the exhaustive `compute_free_vars`): `x` may escape nowhere but the one
   consuming scrutinee. A `sra_rest_plain` guard bars a Maybe/Result do-bind in the continuation
   (those reset the SRA map), confining the change to `translate_do`.
+
+## Concrete-instance devirtualization
+
+Design + status: `docs/devirtualization-v0.md` (LANDED). A related but distinct optimization in
+`lowering.sprout` (the dictionary-passing pass), not `ast_to_ir.sprout`.
+
+- **What.** A class-method call whose dispatch dictionary is a **statically-known concrete instance**
+  is lowered to a **direct call** of the concrete `__tc_{Class}_{Type}_{method}` fn, dropping the
+  runtime dictionary — no `sprout_alloc_closure_env`, no generic `__cm_` wrapper indirection. Before,
+  every concrete class-method call built a dict of eta-closures (one per method, most dead) and called
+  the generic wrapper, which then dispatched *indirectly* to the concrete fn.
+- **Gate (`try_devirt_concrete`).** Fires iff the leading (and only) `TDict`'s evidence is
+  `EvClasses [EvInstance _ key Nil]` — a **single class block**, **concrete**, **empty `children`** —
+  and `ctx_inst[key]` resolves the method. `children == Nil` is the soundness hinge: it guarantees the
+  concrete fn takes only the user args, so dropping every dict witness is sound. Context-constrained
+  instances (`Eq (Maybe a) where Eq a` → non-empty children) and superclass-expanded dispatch (`Ord` →
+  multi-block) fall back to dictionary-passing; polymorphic/forwarded (`EvForward`) always must.
+- **Composes with CPR.** The retargeted callee is a real top-level fn, so the match-site Maybe/tuple
+  CPR routes it to that fn's `_worker` — the returned `Maybe`/tuple stays unboxed. This is what makes
+  the rivers-demo `bake_tile` fully allocation-free (tuple SRA + devirt).

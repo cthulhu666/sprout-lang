@@ -193,6 +193,25 @@ fn lowered_fn_body_dict_var_name(result: lowering.LowerResult, fname: String) ->
           | Nothing -> "__no_fn"
           | Just body -> call_body_first_tc_var(body)
 
+# The callee name of fname's lowered body call.  Used to assert concrete-instance
+# devirtualization: a direct call at a known instance retargets its callee to the
+# concrete __tc_{Class}_{Type}_{method} fn (docs/devirtualization-v0.md).
+fn call_body_callee_name(body: typed_ast.TypedExpr) -> String =
+  match body with
+  | typed_ast.TCall (typed_ast.TVar name _ _) _ _ _ -> name
+  | typed_ast.TCall _ _ _ _ -> "__not_var_callee"
+  | _ -> "__not_call"
+
+fn lowered_fn_body_callee_name(result: lowering.LowerResult, fname: String) -> String =
+  match result with
+  | lowering.LowerErr _ -> "__lower_err"
+  | lowering.LowerOk prog ->
+      match prog with
+      | typed_ast.TypedProgram decls ->
+          match first_fn_body_named(decls, fname) with
+          | Nothing -> "__no_fn"
+          | Just body -> call_body_callee_name(body)
+
 # Find the first __tc_* TVar in args whose name starts with the given prefix.
 fn find_tc_var_for_prefix_in_args(args: List typed_ast.TypedExpr, prefix: String) -> String =
   match args with
@@ -343,12 +362,17 @@ fn main() -> Unit !{IO} =
       str_starts_with(lowered_fn_body_dict_var_for_prefix(r_dual, "main", "__tc_CB_Bool_"), "__tc_CB_Bool_"))
 
     # Gap 3: direct (non-container) constrained call — constraint var is the arg type
-    # itself.  Verifies scan_prog_to_fresh_for_instance works for the simple case and
-    # doesn't regress (the fix must not break non-container dispatch).
+    # itself.  With concrete-instance devirtualization (docs/devirtualization-v0.md) this
+    # direct call at a KNOWN instance resolves to the Int instance by RETARGETING the callee
+    # to the concrete __tc_Greet_Int_greet fn and DROPPING the dict witness (no __cm_ wrapper,
+    # no dict arg).  The "resolves to Int not the wrong instance" intent is now expressed as
+    # the callee name; the absence of an injected dict is the devirt signature.
     r_direct <- run_lower("class Greet a {\n  fn greet(x: a) -> String\n}\ninstance Greet Int {\n  fn greet(x: Int) -> String = \"hi\"\n}\nfn main() -> String = greet(42)")
     assert_true(state, "direct constrained call lowers ok", is_lower_ok(r_direct))
-    assert_true(state, "direct constrained call injects correct dict",
-      str_starts_with(lowered_fn_body_dict_var_name(r_direct, "main"), "__tc_Greet_Int_"))
+    assert_true(state, "direct constrained call devirtualizes to the Int instance fn",
+      str_starts_with(lowered_fn_body_callee_name(r_direct, "main"), "__tc_Greet_Int_greet"))
+    assert_eq(state, "direct constrained call injects NO dict (devirtualized)",
+      lowered_fn_body_dict_var_name(r_direct, "main"), "__none")
 
     # P1-shadowed: a function parameter named after a class method must NOT be eta-expanded.
     # The name 'myshow' here refers to the local param (Int -> String), not the class method.

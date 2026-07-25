@@ -1,0 +1,64 @@
+import stdlib.test (TestState, new_state, assert_eq, summary)
+
+# Concrete-instance devirtualization (docs/scalar-replacement-v0.md, A-full): a class-method call
+# whose dictionary is a fully-resolved concrete instance (no forwarded/polymorphic dict) is lowered
+# to a DIRECT call of the concrete `__tc_{Class}_{Type}_{method}` fn, dropping the runtime dictionary
+# entirely — no `sprout_alloc_closure_env`, no generic `__cm_` wrapper indirection. The optimization
+# is value-NEUTRAL, so these assert the SEMANTICS are unchanged; the IR-shape win (no closure allocs
+# at the concrete site) is checked separately against the emitted IR / smoke shape 09.
+
+type Dir (..) deriving (Enum) = North | East | South | West
+
+# CONCRETE return-type dispatch: from_ordinal @ Dir — the demo's `tile_kind_of` shape. Devirt target.
+fn dir_of(tag: Int) -> Dir =
+  match from_ordinal(tag) with
+  | Just d -> d
+  | Nothing -> North
+
+# CONCRETE argument dispatch: ordinal @ Dir. Devirt target.
+fn dir_tag(d: Dir) -> Int = ordinal(d)
+
+# POLYMORPHIC consumer: `ordinal(v)` here dispatches on a FORWARDED dict (Enum a is a hidden param),
+# NOT a concrete instance — devirt must NOT fire, the dict stays forwarded. Guards the soundness gate:
+# the result must still be correct when called at a concrete type.
+fn generic_tag(v: a) -> Int !{} where Enum a = ordinal(v)
+
+# CONCRETE Eq, NO context (instance Eq Int) — proves devirt is not Enum-only: fires for any class
+# without superclass/context. `eq(a,b)` at Int -> direct __tc_Eq_Int_eq, no dict.
+fn int_eq(a: Int, b: Int) -> Bool = eq(a, b)
+
+# CONCRETE Eq WITH context (instance Eq (Maybe a) where Eq a) — the CRITICAL negative. The evidence
+# carries a non-empty `children` (the inner Eq Int dict), so the gate MUST fall back to the generic
+# dict-passing path. If devirt wrongly fired it would DROP the inner Eq Int dict arg -> arity mismatch
+# / miscompile. A correct bool result proves the fallback preserved the needed witness.
+fn maybe_int_eq(a: Maybe Int, b: Maybe Int) -> Bool = eq(a, b)
+
+# CONCRETE Ord (instance Ord Int where Eq Int) — Ord has superclass Eq, so its dispatch evidence is
+# not a lone empty-children block; documents that Ord falls back (still correct via dict-passing).
+fn int_lt(a: Int, b: Int) -> Bool = compare(a, b) < 0
+
+fn main() -> Unit !{IO} =
+  do
+    state <- new_state()
+    # concrete from_ordinal round-trips through the derived ordinal
+    assert_eq(state, "dir_of 0 -> North -> 0", dir_tag(dir_of(0)), 0)
+    assert_eq(state, "dir_of 2 -> South -> 2", dir_tag(dir_of(2)), 2)
+    assert_eq(state, "dir_of 3 -> West -> 3", dir_tag(dir_of(3)), 3)
+    # out-of-range from_ordinal -> Nothing -> North (0)
+    assert_eq(state, "dir_of 9 -> Nothing -> North -> 0", dir_tag(dir_of(9)), 0)
+    # concrete ordinal directly
+    assert_eq(state, "ordinal East -> 1", dir_tag(East), 1)
+    # polymorphic path (forwarded dict, must NOT devirt) still correct at a concrete type
+    assert_eq(state, "generic_tag West -> 3", generic_tag(West), 3)
+    assert_eq(state, "generic_tag North -> 0", generic_tag(North), 0)
+    # concrete Eq, no context -> devirt fires (non-Enum class)
+    assert_eq(state, "int_eq 5 5 -> True", int_eq(5, 5), true)
+    assert_eq(state, "int_eq 5 6 -> False", int_eq(5, 6), false)
+    # concrete Eq WITH context -> MUST fall back; correct result proves the inner dict survived
+    assert_eq(state, "maybe_int_eq Just5 Just5 -> True", maybe_int_eq(Just(5), Just(5)), true)
+    assert_eq(state, "maybe_int_eq Just5 Just6 -> False", maybe_int_eq(Just(5), Just(6)), false)
+    assert_eq(state, "maybe_int_eq Just5 Nothing -> False", maybe_int_eq(Just(5), Nothing), false)
+    # concrete Ord (superclass Eq) -> falls back; still correct
+    assert_eq(state, "int_lt 3 5 -> True", int_lt(3, 5), true)
+    assert_eq(state, "int_lt 5 3 -> False", int_lt(5, 3), false)
+    summary(state)
