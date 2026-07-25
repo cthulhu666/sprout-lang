@@ -368,15 +368,21 @@ raylib) have landed. Fenced from core: shim `graphics/sprout_gfx.c` links only v
   compacts their instances into one instanced draw per model (draw-call count stays ~constant).
   1024² zoomed-in trees no longer stream the whole map — 29→55 FPS (vsync-capped). See
   `graphics/sprout_gfx.c`, `examples/gfx/terrain_rivers_demo.sprout`.
-- [ ] `P3` Loam trees: **distance LOD / model swap** (remaining half of the culling work). On top of
-  the frustum culling above, swap detailed↔simple tree models per distance band, and optionally
-  fade/skip trees beyond a range, for AAA density without FPS loss.
-- [ ] `P3` Loam terrain: **zoomed-OUT framerate at large maps**. Frustum culling can't help the
-  whole-map overview (everything on screen); a noisy 1024² top-surface mesh is ~15M verts → ~28 FPS.
-  Needs greedy meshing (merge coplanar top quads into large quads — ~10-100× fewer verts on flats)
-  and/or distance LOD on the baked chunk meshes. (raylib's far-clip is 4000, well beyond a 1024-unit
-  map, so the whole map IS visible — the earlier "far plane clips it" hunch was wrong; the cutoff we
-  saw was the transposed-frustum culling bug, since fixed.)
+- [x] `P3` Loam trees: **distance LOD** (the zoomed-out FPS fix). `gfx.draw_trees_culled(count,
+  cull_dist)` now skips tree groups whose centre is beyond `cull_dist` world units from the camera
+  eye (squared-distance compare; `<= 0` disables), on top of the existing frustum cull. Radius is
+  `loam.camera.tree_cull_dist(span, frac)` (fraction-of-span, unit-tested) with a demo tunable
+  `tree_cull_frac`. Measured: whole-map overview **27 → 56 FPS** at frac 0.35, near-invisible (far
+  trees are sub-pixel). Still open: **model swap** (detailed↔simple per distance band) and **fade**
+  to hide the cull pop, for AAA density.
+- [ ] `P3` Loam terrain: **zoomed-OUT framerate — terrain-mesh half** (lower priority than thought).
+  Profiling the overview (see the tree-LOD item above) found the dominant cost was TREES, not
+  terrain: skip-trees 27→59 FPS, skip-terrain only 27→32. So terrain verts are a minor lever. The
+  earlier "~15M verts" was an overestimate — measured **8.84M** (top 6.29M = every tile's quad,
+  wall 2.55M), and removing all 2.55M wall verts moved FPS only 27→29 (not vertex-bound). Greedy
+  meshing (merge coplanar top quads) would be visually lossless but is worth ~+5 FPS at most, needs
+  new rectangular-quad + wall shim primitives, and must merge WITHIN each 32² chunk to keep the
+  per-chunk frustum cull. Only pursue if terrain verts later dominate (e.g. much bigger maps).
 - [ ] `P3` Loam trees: swap in **higher-poly / detailed** tree models. Instancing keeps memory flat
   (per-instance matrices, not vertices), so richer meshes cost only their own vertex upload once.
 - [ ] `P3` Loam: per-group **colour tint** for `ecs_agents` flocks. Groups are currently

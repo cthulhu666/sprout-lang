@@ -50,6 +50,15 @@ export fn cam_distance(c: Cam) -> Double =
   let b = c.height - c.ty
   in sqrt((c.radius * c.radius) + (b * b))
 
+# World cull radius for tree distance-LOD: a fraction of the map span (so it scales
+# with map size, like the camera framing fractions), fed to gfx.draw_trees_culled.
+# The frame loop culls tree groups whose centre is farther than this from the eye —
+# a zoomed-out overview (every tree far and sub-pixel) then draws almost none. A
+# fraction <= 0 disables culling, returning the 0 sentinel draw_trees_culled reads
+# as "draw all" (rather than a negative radius). Graphics-free and unit-tested.
+export fn tree_cull_dist(span: Double, frac: Double) -> Double =
+  if frac <= 0.0 then 0.0 else span * frac
+
 # Zoom: change the eye's DISTANCE to the target by `dr` (negative pulls in),
 # clamped to [lo, hi]. The (horizontal, vertical) offset is scaled uniformly, so
 # the pitch ANGLE is preserved — zoom changes apparent size, not viewing angle.

@@ -4,7 +4,7 @@ import stdlib.gfx
 import loam.terrain (Config, tile_kind_at, tile_band_at, tile_kind_tag, sea_level_band, spatial_hash, exposed_step_bands, chunk_linear_index, TileKind, Water, Beach, Grass, Forest, Desert, Mountain, Snow, Tundra, tile_kind_of)
 import loam.hydrology (Hydrology, compute_hydrology, hydro_tier)
 import loam.vegetation (TreeKind, Palm, Broadleaf, Conifer, DarkConifer, Cactus, Shrub, tree_kind_tag, tree_for_biome)
-import loam.camera (Cam, cam_drive, cam_distance)
+import loam.camera (Cam, cam_drive, cam_distance, tree_cull_dist)
 import loam.view (cam_apply)
 import stdlib.mutable (MutVec, mutvec_new, mutvec_at, mutvec_set, MutMatrix, mutmatrix_new, mutmatrix_set, mutmatrix_at_or)
 
@@ -52,6 +52,11 @@ let tree_base_scale = 1.0  # world-unit scale applied to every tree model
 let tree_scale_var = 30  # +/- percent hash-driven scale spread, so a stand is not uniform
 let tree_jitter = 0.7  # max in-tile position jitter as a fraction of tile_size (breaks the grid)
 let variant_offset = 3000017  # seed offset decorrelating the variant/jitter/scale hash from placement
+# Distance-LOD for trees: cull tree groups whose centre is farther than this fraction of the map
+# span from the camera. Trees are the dominant zoomed-out cost (they don't frustum-cull when the
+# whole map is on screen) and are sub-pixel from far away, so dropping the distant ones recovers
+# most of the overview framerate for a near-invisible change. 0 disables (draw every group).
+let tree_cull_frac = 0.35  # ~one-third of the map; tune up to see trees farther, down for more FPS
 
 # Water surface (a translucent plane at sea level) --------------------------
 let water_r = 45
@@ -102,6 +107,7 @@ let tree_group_count = tree_group_cols * tree_group_cols
 let world_span = to_double(span_tiles) * tile_size
 let half = to_double(span_tiles) / 2.0
 let water_y = (to_double(sea_level_band(elevation_levels)) + water_lift) * band_step
+let tree_cull = tree_cull_dist(world_span, tree_cull_frac)  # world-unit tree cull radius
 
 # --- Biome palette ----------------------------------------------------------
 # Biome -> flat RGB (0..255). Matching on TileKind (not the raw Int tag) means adding a biome
@@ -364,7 +370,7 @@ fn render_loop(meshes: MutVec Int, models: MutVec Int, cam: Cam) -> Unit !{IO} =
         draw_meshes(meshes, 0, chunk_count)
         # Trees on top of the baked terrain, before the water so an above-water tree is not tinted.
         # Each is one instanced draw call over its whole scattered batch.
-        gfx.draw_trees_culled(tree_group_count)
+        gfx.draw_trees_culled(tree_group_count, tree_cull)
         # Water surface last, so depth-testing lets land above sea level poke through the
         # translucent plane while it fills the valleys.
         gfx.draw_plane(0.0, water_y, 0.0, world_span, world_span, water_r, water_g, water_b, water_alpha)

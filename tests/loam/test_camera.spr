@@ -1,6 +1,6 @@
 import stdlib.test (TestState, new_state, assert_true, summary)
 import stdlib.math (fabs, pi, sin, sqrt)
-import loam.camera (Cam, cam_rotate, cam_zoom, cam_pitch, cam_pan, cam_eye, cam_drive, cam_distance)
+import loam.camera (Cam, cam_rotate, cam_zoom, cam_pitch, cam_pan, cam_eye, cam_drive, cam_distance, tree_cull_dist)
 
 # Headless coverage for loam.view's free-look camera controller (the whole package:
 # rotate / zoom / tilt / pan). Everything here is PURE state math — no window — so
@@ -111,5 +111,12 @@ fn main() -> Unit !{IO} =
     # With ty != 0 the vertical leg is height - ty, not height.
     let off = Cam(yaw = 0.0, radius = 3.0, height = 6.0, tx = 0.0, ty = 2.0, tz = 0.0)
     assert_true(state, "cam_distance uses height - ty", near(cam_distance(off), 5.0))
+
+    # --- tree_cull_dist: world cull radius for tree distance-LOD, from map span x
+    # a tunable fraction. frac <= 0 disables culling (yields the 0 sentinel that
+    # gfx.draw_trees_culled reads as draw-all), NOT a negative radius. ---
+    assert_true(state, "tree_cull_dist scales with span", near(tree_cull_dist(1000.0, 3.0), 3000.0))
+    assert_true(state, "tree_cull_dist frac 0 disables", near(tree_cull_dist(1000.0, 0.0), 0.0))
+    assert_true(state, "tree_cull_dist negative frac clamps to 0", near(tree_cull_dist(1000.0, 0.0 - 2.0), 0.0))
 
     summary(state)

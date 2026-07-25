@@ -34,7 +34,7 @@ extern fn gfx_draw_model(handle: Int, x: Double, y: Double, z: Double, angle: Do
 extern fn gfx_instance_push(handle: Int, x: Double, y: Double, z: Double, angle: Double, scale: Double) -> Unit !{IO}
 extern fn gfx_draw_instanced(handle: Int) -> Unit !{IO}
 extern fn gfx_tree_push(group: Int, model: Int, x: Double, y: Double, z: Double, angle: Double, scale: Double) -> Unit !{IO}
-extern fn gfx_draw_trees_culled(group_count: Int) -> Unit !{IO}
+extern fn gfx_draw_trees_culled(group_count: Int, cull_dist: Double) -> Unit !{IO}
 extern fn gfx_load_animations(path: String) -> Int !{IO}
 extern fn gfx_animation_count(set: Int) -> Int !{IO}
 extern fn gfx_animation_keyframes(set: Int, index: Int) -> Int !{IO}
@@ -151,11 +151,13 @@ export fn draw_instanced(handle: Int) -> Unit !{IO} =
 export fn tree_push(group: Int, model: Int, x: Double, y: Double, z: Double, angle: Double, scale: Double) -> Unit !{IO} =
   gfx_tree_push(group, model, x, y, z, angle, scale)
 
-# Draw all tree groups [0, group_count) in one pass, frustum-culling off-screen groups and issuing
-# one instanced draw per model over the compacted visible instances (see gfx_draw_trees_culled).
-# Draw-call count stays ~constant regardless of how many groups are visible.
-export fn draw_trees_culled(group_count: Int) -> Unit !{IO} =
-  gfx_draw_trees_culled(group_count)
+# Draw all tree groups [0, group_count) in one pass, issuing one instanced draw per model over the
+# compacted visible instances (see gfx_draw_trees_culled). Draw-call count stays ~constant
+# regardless of how many groups are visible. A group is drawn only if its centre is within
+# `cull_dist` world units of the camera (distance-LOD, so a zoomed-out overview draws almost none)
+# AND its AABB is in the frustum. `cull_dist` <= 0 disables the distance test (draw all visible).
+export fn draw_trees_culled(group_count: Int, cull_dist: Double) -> Unit !{IO} =
+  gfx_draw_trees_culled(group_count, cull_dist)
 
 # Load an animation set (glTF/GLB/IQM/M3D) whose skeleton matches a model; returns
 # a set handle. A clip is identified by (set, index); animation_count gives how many.

@@ -805,12 +805,29 @@ static int g_vis[GFX_MAX_TREE_GROUPS];
  * instead we (1) collect the visible groups once, then (2) per model, COMPACT their instances into a
  * scratch buffer and issue a single instanced draw. Result: ~30 draws/frame regardless of how many
  * groups are visible, over only the on-screen instances. This is the call the frame loop makes. */
-long long gfx_draw_trees_culled(long long group_count) {
+/* Draw all tree groups' visible instances, batched one DrawMeshInstanced per model.
+ * A group is drawn only if it passes BOTH culls:
+ *   - distance LOD: its centre is within `cull_dist` of the camera eye (so a
+ *     zoomed-out overview, where every tree is far and sub-pixel, draws none —
+ *     the dominant zoomed-out cost). cull_dist <= 0 disables the distance test.
+ *   - frustum: its padded AABB intersects the view (the zoomed-in win, unchanged).
+ * cull_dist crosses the ABI as a Double (its IEEE-754 bit pattern). */
+long long gfx_draw_trees_culled(long long group_count, long long cull_dist) {
   int gc = (int)group_count;
   if (gc > GFX_MAX_TREE_GROUPS) gc = GFX_MAX_TREE_GROUPS;
+  float cull = as_float(cull_dist);
+  float cull2 = cull * cull;  /* compare squared distances — no per-group sqrt */
+  float ex = g_cam.position.x, ey = g_cam.position.y, ez = g_cam.position.z;
   int nvis = 0;
   for (int g = 0; g < gc; g++) {
     if (!g_tg_any[g]) continue;
+    if (cull > 0.0f) {  /* distance LOD: skip groups whose centre is beyond cull_dist */
+      float gx = 0.5f * (g_tg_bbmin[g][0] + g_tg_bbmax[g][0]);
+      float gy = 0.5f * (g_tg_bbmin[g][1] + g_tg_bbmax[g][1]);
+      float gz = 0.5f * (g_tg_bbmin[g][2] + g_tg_bbmax[g][2]);
+      float dx = gx - ex, dy = gy - ey, dz = gz - ez;
+      if ((dx*dx + dy*dy + dz*dz) > cull2) continue;
+    }
     float mn[3] = { g_tg_bbmin[g][0] - GFX_TREE_MARGIN, g_tg_bbmin[g][1] - GFX_TREE_MARGIN, g_tg_bbmin[g][2] - GFX_TREE_MARGIN };
     float mx[3] = { g_tg_bbmax[g][0] + GFX_TREE_MARGIN, g_tg_bbmax[g][1] + GFX_TREE_MARGIN, g_tg_bbmax[g][2] + GFX_TREE_MARGIN };
     if (aabb_in_frustum(mn, mx)) g_vis[nvis++] = g;
