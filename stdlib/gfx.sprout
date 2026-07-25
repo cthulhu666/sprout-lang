@@ -24,8 +24,12 @@ extern fn gfx_load_model(path: String) -> Int !{IO}
 extern fn gfx_terrain_begin() -> Unit !{IO}
 extern fn gfx_terrain_end() -> Unit !{IO}
 extern fn gfx_draw_cube(x: Double, y: Double, z: Double, size: Double, r: Int, g: Int, b: Int) -> Unit !{IO}
-extern fn gfx_capture_tile(cx: Double, cz: Double, top_y: Double, size: Double, r: Int, g: Int, b: Int,
-                           dn: Double, ds: Double, de: Double, dw: Double) -> Unit !{IO}
+extern fn gfx_capture_quad(p0x: Double, p0y: Double, p0z: Double,
+                           p1x: Double, p1y: Double, p1z: Double,
+                           p2x: Double, p2y: Double, p2z: Double,
+                           p3x: Double, p3y: Double, p3z: Double,
+                           nx: Double, ny: Double, nz: Double,
+                           r: Int, g: Int, b: Int) -> Unit !{IO}
 extern fn gfx_mesh_capture_begin() -> Unit !{IO}
 extern fn gfx_mesh_capture_end() -> Int !{IO}
 extern fn gfx_draw_captured(handle: Int) -> Unit !{IO}
@@ -108,14 +112,18 @@ export fn draw_cube(x: Double, y: Double, z: Double, size: Double, r: Int, g: In
 # (each draw_cube appends its geometry), then handle <- mesh_capture_end(). Thereafter draw the
 # whole terrain in a single call per frame with draw_captured(handle) — no per-frame per-tile
 # work. This is how large static terrain stays at 60 FPS (docs/terrain-v0.md §7). -1 on failure.
-# Capture one heightfield tile into the current static mesh: a top quad at (cx, top_y, cz) of edge
-# `size` plus only the side walls facing a lower neighbour (dn/ds/de/dw = each side's world-space
-# drop; 0 = no wall). The scalable alternative to draw_cube for terrain — a stepped map buries most
-# cube faces, so emitting just tops + visible steps cuts baked vertices several-fold. Directions
-# use loam's grid convention: +z south, +x east, so dn is the -z (north) side. Capture-mode only.
-export fn capture_tile(cx: Double, cz: Double, top_y: Double, size: Double, r: Int, g: Int, b: Int,
-                       dn: Double, ds: Double, de: Double, dw: Double) -> Unit !{IO} =
-  gfx_capture_tile(cx, cz, top_y, size, r, g, b, dn, ds, de, dw)
+# Append one quad to the current static mesh: corners p0..p3 (baked as triangles p0,p1,p2 and
+# p0,p2,p3, so wind them CCW for the face `(nx,ny,nz)`), flat colour (r,g,b). The GENERAL
+# mesh-building primitive — a caller bakes arbitrary static geometry, e.g. loam.terrain_mesh
+# decomposes a terrain tile into a top quad + exposed wall quads. Capture-mode only (no-op outside
+# a mesh_capture_begin/end pair; there is no immediate-mode fallback).
+export fn capture_quad(p0x: Double, p0y: Double, p0z: Double,
+                       p1x: Double, p1y: Double, p1z: Double,
+                       p2x: Double, p2y: Double, p2z: Double,
+                       p3x: Double, p3y: Double, p3z: Double,
+                       nx: Double, ny: Double, nz: Double,
+                       r: Int, g: Int, b: Int) -> Unit !{IO} =
+  gfx_capture_quad(p0x, p0y, p0z, p1x, p1y, p1z, p2x, p2y, p2z, p3x, p3y, p3z, nx, ny, nz, r, g, b)
 
 export fn mesh_capture_begin() -> Unit !{IO} = gfx_mesh_capture_begin()
 export fn mesh_capture_end() -> Int !{IO} = gfx_mesh_capture_end()

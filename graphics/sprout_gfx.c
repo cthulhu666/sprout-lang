@@ -314,44 +314,6 @@ static void cap_cube(float cx, float cy, float cz, float s,
   cap_quad(c000,c010,c110,c100,  0.0f, 0.0f,-1.0f, r,g,b);  /* -Z */
 }
 
-/* Capture ONE heightfield tile as a top quad plus only the side walls that are exposed — the
- * scalable alternative to cap_cube for terrain. A stepped cube-terrain buries 5 of every 6 faces
- * under neighbours; emitting just the top and the exposed steps cuts vertices several-fold. Each
- * dN/dS/dE/dW is the world-space drop of that side (0 = neighbour is level-or-higher, so no wall;
- * >0 = neighbour is lower, so a wall drops that far). Directions follow loam's grid convention:
- * +z is south, +x is east, so N is the -z edge and W is the -x edge. Backface culling is off for
- * the baked terrain mesh, so wall winding need not be exact. */
-static void cap_tile(float cx, float cz, float top_y, float s,
-                     unsigned char r, unsigned char g, unsigned char b,
-                     float dn, float ds, float de, float dw) {
-  float h = s * 0.5f;
-  float x0=cx-h, x1=cx+h, z0=cz-h, z1=cz+h;
-  cap_reserve(6 + 6*4);  /* top + up to four walls */
-  /* Top face at y = top_y. */
-  float t00[3]={x0,top_y,z0}, t01[3]={x0,top_y,z1}, t11[3]={x1,top_y,z1}, t10[3]={x1,top_y,z0};
-  cap_quad(t00,t01,t11,t10, 0.0f,1.0f,0.0f, r,g,b);
-  /* North wall on the -z edge, dropping dn. */
-  if (dn > 0.0f) {
-    float a[3]={x0,top_y,z0}, bb[3]={x1,top_y,z0}, c[3]={x1,top_y-dn,z0}, d[3]={x0,top_y-dn,z0};
-    cap_quad(a,bb,c,d, 0.0f,0.0f,-1.0f, r,g,b);
-  }
-  /* South wall on the +z edge. */
-  if (ds > 0.0f) {
-    float a[3]={x0,top_y,z1}, bb[3]={x1,top_y,z1}, c[3]={x1,top_y-ds,z1}, d[3]={x0,top_y-ds,z1};
-    cap_quad(a,bb,c,d, 0.0f,0.0f,1.0f, r,g,b);
-  }
-  /* East wall on the +x edge. */
-  if (de > 0.0f) {
-    float a[3]={x1,top_y,z0}, bb[3]={x1,top_y,z1}, c[3]={x1,top_y-de,z1}, d[3]={x1,top_y-de,z0};
-    cap_quad(a,bb,c,d, 1.0f,0.0f,0.0f, r,g,b);
-  }
-  /* West wall on the -x edge. */
-  if (dw > 0.0f) {
-    float a[3]={x0,top_y,z0}, bb[3]={x0,top_y,z1}, c[3]={x0,top_y-dw,z1}, d[3]={x0,top_y-dw,z0};
-    cap_quad(a,bb,c,d, -1.0f,0.0f,0.0f, r,g,b);
-  }
-}
-
 long long gfx_open_window(long long w, long long h, const char *title) {
   const char *cap = getenv("SPROUT_GFX_MAX_FRAMES");
   g_max_frames = (cap != NULL) ? atoll(cap) : 0;
@@ -608,18 +570,25 @@ long long gfx_draw_cube(long long x, long long y, long long z, long long size,
   return 0;
 }
 
-/* Capture one heightfield tile (top + exposed side walls) into the current mesh. Only meaningful
- * inside a mesh_capture_begin/end pair — a no-op otherwise (there is no immediate-mode fallback;
- * this exists specifically to bake large terrain cheaply). (cx,cz) is the tile centre, top_y the
- * world height of its top face, size the tile edge; r,g,b the flat colour; dN/dS/dE/dW the exposed
- * side drops (0 = no wall). See cap_tile for the geometry. */
-long long gfx_capture_tile(long long cx, long long cz, long long top_y, long long size,
-                           long long r, long long g, long long b,
-                           long long dn, long long ds, long long de, long long dw) {
+/* Append one quad to the active capture: corners p0..p3 (two triangles p0,p1,p2 and p0,p2,p3),
+ * a face normal (nx,ny,nz), a flat RGB colour. The general mesh-building primitive — a caller bakes
+ * arbitrary static geometry from Sprout (e.g. loam.terrain_mesh decomposes a terrain tile into a
+ * top quad + wall quads). Coords/normal cross the ABI as Doubles (IEEE-754 bits); rgb as ints.
+ * A no-op outside a mesh_capture_begin/end pair. */
+long long gfx_capture_quad(long long p0x, long long p0y, long long p0z,
+                           long long p1x, long long p1y, long long p1z,
+                           long long p2x, long long p2y, long long p2z,
+                           long long p3x, long long p3y, long long p3z,
+                           long long nx, long long ny, long long nz,
+                           long long r, long long g, long long b) {
   if (!g_capturing) return 0;
-  cap_tile(as_float(cx), as_float(cz), as_float(top_y), as_float(size),
-           (unsigned char)r, (unsigned char)g, (unsigned char)b,
-           as_float(dn), as_float(ds), as_float(de), as_float(dw));
+  cap_reserve(6);
+  float v0[3] = { as_float(p0x), as_float(p0y), as_float(p0z) };
+  float v1[3] = { as_float(p1x), as_float(p1y), as_float(p1z) };
+  float v2[3] = { as_float(p2x), as_float(p2y), as_float(p2z) };
+  float v3[3] = { as_float(p3x), as_float(p3y), as_float(p3z) };
+  cap_quad(v0, v1, v2, v3, as_float(nx), as_float(ny), as_float(nz),
+           (unsigned char)r, (unsigned char)g, (unsigned char)b);
   return 0;
 }
 

@@ -104,35 +104,35 @@ instance_clear(group: Int) -> Unit !{IO}
 
 ### 4b. Generic mesh capture
 
-Replace the terrain-specific tile with a general quad:
+Replace the terrain-specific tile with a general quad (LANDED):
 
 ```
-capture_quad(ax,ay,az, bx,by,bz, cx,cy,cz, dx,dy,dz,   # 4 corners (CCW)
-             nx,ny,nz,                                   # face normal
-             r,g,b: Int) -> Unit !{IO}
+capture_quad(p0x,p0y,p0z, p1x,p1y,p1z, p2x,p2y,p2z, p3x,p3y,p3z,   # 4 corners
+             nx,ny,nz,                                              # face normal
+             r,g,b: Int) -> Unit !{IO}    # triangles p0,p1,p2 and p0,p2,p3
 ```
 
-Terrain baking then **composes** it in Sprout: a tile is one top quad + up to
-four exposed wall quads. That decomposition (which walls are exposed, winding,
-colour, neighbour-drop heights) moves from C into **pure, unit-tested Sprout** —
-the honest TDD artifact for this refactor.
+`capture_tile` is **removed**; a caller bakes arbitrary static geometry from
+`capture_quad`. Terrain composes it: a tile is one top quad + a wall quad per
+exposed (stepping-down) side. The 18-arg extern was FFI-checked (emits/lowers
+cleanly), so the explicit 4-corner form is used — no compact/vec workaround.
 
-**Pre-check — FFI arg count (verify before building on it).** As drawn,
-`capture_quad` is 12 position + 3 normal + 3 colour = **18 `long long` extern
-args**; the current max is `capture_tile` at 11. Before committing terrain to it,
-emit IR for an 18-arg extern stub and confirm the extern-call codegen lowers and
-runs. If it spills/caps, use a **compact quad** — origin + two edge vectors +
-normal + colour = 12 args (`capture_quad(ox,oy,oz, ux,uy,uz, vx,vy,vz, nx,ny,nz? …)`)
-— or introduce a vec helper. Decide by the codegen check, in §7.
+**Measured decision — the terrain bake emits inline, NOT via a pure List
+decomposition.** The plan first materialised the decomposition as a pure,
+unit-tested `loam.terrain_mesh.tile_quads : … -> List Quad` (top + wall quads as
+records) and fed it to `capture_quad`. It was correct (11 passing tests) but
+**regressed the 1024² bake ~3.2× (28.5s → 92s)** — not from the extra FFI (1→5
+crossings/tile is ~0.2µs/tile) but from **heap allocation**: ~30 objects/tile
+(a `List` of `Quad`-of-`Vec3` records) × 1M tiles ≈ 30M allocations + GC. So the
+decomposition + module + tests were **dropped**. `bake_tile` instead computes
+corners and calls `capture_quad` **inline** per face — generic *and*
+allocation-free, back to the 28.5s baseline, identical render.
 
-**Risk — bake-path FFI cost (measure, don't assume).** `capture_tile` is **1 FFI
-crossing/tile**; composing quads is **up to 5/tile** — ~5M crossings over a 1024²
-map, on the startup path the recent perf refactor tuned. Plan: capture the
-**baseline bake time on master first**, then implement `capture_quad`, move the
-decomposition to Sprout, and re-measure. If it regresses materially, keep a
-batched fast-path (retain a terrain-specific convenience) — decided by the
-number, not aesthetics. (Aside: `capture_quad` is also what greedy terrain
-meshing wanted, but that's deprioritized and must not justify a regression here.)
+Lesson (recorded so it isn't re-attempted): a per-cell Sprout decomposition that
+heap-allocates does not scale to 1M cells; the generic primitive is fine, the
+intermediate data structure is the cost. This mirrors real engines — a generic
+mesh API driven by a tight allocation-free mesher, not per-cell quad objects.
+The bake geometry is verified by screenshot (as all gfx is), not unit tests.
 
 ### 4c. Retire
 
@@ -152,32 +152,37 @@ merging first keeps history reviewable.)
 Then, one PR, **phased commits** (a capture-path problem must not block the
 instancing win):
 
-1. **Instancing unification** — new `instance_push`/`draw_instances`; remove flat
-   path + tree path; rename shim internals. Migrate `terrain_rivers_demo`
-   (trees → instances). Verify FPS unchanged (still ~56 at overview).
-2. **Mesh capture** — `capture_quad`; pure-Sprout terrain tile decomposition +
-   its tests; migrate `terrain_rivers_demo` + `terrain_demo`. Measure bake time.
+1. **Instancing unification — LANDED.** `instance_push`/`instance_clear`/
+   `draw_instances`; flat + tree paths removed; shim de-tree-ified. rivers demo
+   migrated; overview 59 FPS (was 56), renders identically.
+2. **Mesh capture — LANDED.** `capture_quad` (general); `capture_tile` removed;
+   rivers demo bakes inline (no pure decomposition — it regressed 3.2×, §4b).
+   Bake back to 28.5s baseline, terrain renders identically.
 3. **Retire** — drop `draw_spinning_cube`/`terrain_begin`/`terrain_end`; fix
-   `spinning_cube.sprout`.
+   `spinning_cube.sprout`. (next)
 4. **Migrate ECS/character demos (optional this pass)** — crowds via
-   `instance_push` instead of per-entity `draw_model`. Bigger; may defer to a
-   follow-up if it grows.
+   `instance_push`/`instance_clear` instead of per-entity `draw_model`. Bigger;
+   may defer to a follow-up.
 
 ## 6. Verification
 
-- Pure Sprout (terrain decomposition, any instancing helpers) — unit tests under
-  `tests/loam/` or `tests/stdlib/`.
-- GPU behavior — `compile-examples-stage1` + a clean screenshot per migrated demo
-  (frame-budget self-close, **no `SIGKILL`** — hard-kills leak GL contexts and
-  crash `UploadMesh`). Confirm the rivers overview still ~56 FPS and looks the
-  same; confirm crowds render.
+- GPU behaviour (all of the instancing + capture surface) — verified by
+  `compile-examples-stage1` + a clean screenshot per migrated demo (frame-budget
+  self-close, **no `SIGKILL`** — hard-kills leak GL contexts and crash
+  `UploadMesh`), plus a bake-time check. The bake geometry is *not* unit-tested
+  (the pure-decomposition attempt regressed 3.2×, §4b), consistent with the rest
+  of the screenshot-verified gfx shim. Confirmed: rivers overview 59 FPS, bake
+  28.5s, renders identically before/after.
 - `APPROVED_BUILTINS`/seed untouched (gfx shim ≠ `sprout_runtime.c`; not bundled
   into the compiler).
 
-## 7. Open naming questions (confirm before coding)
+## 7. Resolved API decisions
 
-1. `draw_instances(model_count, cull_dist)` vs `draw_instanced(...)` (plural to
-   signal "all groups")? 
-2. `capture_quad` corner order / param explosion (12 position args) — acceptable,
-   or introduce a point/vec helper first?
-3. Keep the 64-model / 4096-group caps, or make them dynamic?
+1. `draw_instances(group_count, cull_dist)` — `group_count` is the bucket scan
+   bound; the shim reads model count from the registry. Plural noun over the old
+   `draw_instanced` adjective.
+2. `capture_quad` — explicit 4-corner form (18 extern args); FFI-checked to lower
+   cleanly, so no compact/vec workaround. Not consumed via a record type on the
+   hot path (see §4b).
+3. 64-model / 4096-group caps kept (documented constants), not made dynamic —
+   generous for current demos; revisit if a scene needs more.

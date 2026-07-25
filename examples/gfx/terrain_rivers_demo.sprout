@@ -144,9 +144,12 @@ fn nbr_drop(this_band: Int, bands: MutMatrix Int, nx: Int, nz: Int, span: Int) -
       nb <- mutmatrix_at_or(bands, nz, nx, this_band)
       to_double(exposed_step_bands(this_band, nb)) * band_step
 
-# Bake ONE tile as a top quad + only its exposed side walls (the top-surface mesh). Colour follows
-# the same river-over-biome rule as the old cube path; the four neighbour drops come from the global
-# band grid. A flagged river cell (flow_tier > 0) is painted river-blue by tier instead of biome.
+# Bake ONE tile into the current mesh capture: a top quad plus one wall quad per side that steps
+# DOWN to a lower neighbour (drop > 0; level/higher sides are hidden, so no wall). Colour follows the
+# river-over-biome rule; the four neighbour drops come from the global band grid. Emits directly via
+# the generic gfx.capture_quad, computing corners inline — NO intermediate list/records, so baking a
+# 1024^2 map stays allocation-free (a pure List-of-quads decomposition regressed the bake ~3x).
+# Winding/normals match the old capture_tile: +z is south, +x is east, so dn is the -z (north) side.
 fn bake_tile(bands: MutMatrix Int, tags: MutMatrix Int, h: Hydrology, span: Int, gx: Int, gz: Int) -> Unit !{IO} =
   do
     band <- mutmatrix_at_or(bands, gz, gx, 0)
@@ -159,8 +162,20 @@ fn bake_tile(bands: MutMatrix Int, tags: MutMatrix Int, h: Hydrology, span: Int,
     dw <- nbr_drop(band, bands, gx - 1, gz, span)
     match rgb with
     | (r, g, b) ->
-        gfx.capture_tile((to_double(gx) - half) * tile_size, (to_double(gz) - half) * tile_size,
-                         band_top_y(band), tile_size, r, g, b, dn, ds, de, dw)
+        do
+          let ty = band_top_y(band)
+          let mx = (to_double(gx) - half) * tile_size
+          let mz = (to_double(gz) - half) * tile_size
+          let hh = tile_size * 0.5
+          let x0 = mx - hh
+          let x1 = mx + hh
+          let z0 = mz - hh
+          let z1 = mz + hh
+          gfx.capture_quad(x0, ty, z0, x0, ty, z1, x1, ty, z1, x1, ty, z0, 0.0, 1.0, 0.0, r, g, b)
+          if dn > 0.0 then gfx.capture_quad(x0, ty, z0, x1, ty, z0, x1, ty - dn, z0, x0, ty - dn, z0, 0.0, 0.0, 0.0 - 1.0, r, g, b) else ()
+          if ds > 0.0 then gfx.capture_quad(x0, ty, z1, x1, ty, z1, x1, ty - ds, z1, x0, ty - ds, z1, 0.0, 0.0, 1.0, r, g, b) else ()
+          if de > 0.0 then gfx.capture_quad(x1, ty, z0, x1, ty, z1, x1, ty - de, z1, x1, ty - de, z0, 1.0, 0.0, 0.0, r, g, b) else ()
+          if dw > 0.0 then gfx.capture_quad(x0, ty, z0, x0, ty, z1, x0, ty - dw, z1, x0, ty - dw, z0, 0.0 - 1.0, 0.0, 0.0, r, g, b) else ()
 
 # --- Generation pass (once at startup) --------------------------------------
 # Tabulate the whole region's biome tag + elevation band STRAIGHT into the global grids from each
