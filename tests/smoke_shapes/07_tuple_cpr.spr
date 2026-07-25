@@ -1,0 +1,15 @@
+module main
+
+# Tuple-CPR shape (docs/scalar-replacement-v0.md, Stage 1): a tuple-returning fn whose result is
+# immediately destructured by a tuple pattern at a match scrutinee should NOT heap-allocate the
+# tuple at the matched call site — the worker returns the fields by value. All-scalar fields, so
+# there is no GC-rooting hazard. Before Stage 1, `use_pair` lowers with a boxed `swap_pair` call +
+# tuple-field loads; after, it calls the unboxed worker and binds x/y directly.
+
+fn swap_pair(a: Int, b: Int) -> (Int, Int) = (b, a)
+
+fn use_pair(a: Int, b: Int) -> Int =
+  match swap_pair(a, b) with
+  | (x, y) -> x + y
+
+fn main() -> Unit !{IO} = print(use_pair(3, 4))
