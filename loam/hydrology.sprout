@@ -36,9 +36,24 @@ let fill_epsilon = 0.0000001
 # tuned for a few hundred k cells. Higher = fewer, larger rivers. Bundled as HydroParams so a
 # caller (e.g. the terrain-rivers demo, reading its settings from a config file) can sweep them
 # without recompiling; default_hydro_params reproduces the historical fixed values.
-export type HydroParams = (tier1_min: Int, tier2_min: Int, tier3_min: Int)
+export type HydroParams = (tier1_min: Int, tier2_min: Int, tier3_min: Int,
+                           carve1: Int, carve2: Int, carve3: Int)
 export fn default_hydro_params() -> HydroParams =
-  HydroParams(tier1_min = 40, tier2_min = 200, tier3_min = 900)  # creek / river / major
+  HydroParams(tier1_min = 40, tier2_min = 200, tier3_min = 900,  # accumulation → creek/river/major
+              carve1 = 1, carve2 = 2, carve3 = 3)  # channel carve depth (bands) by tier
+
+# Channel carve depth (in elevation bands) for a cell's flow_tier: how far below its own terrain a
+# river cell's floor is lowered so the water sits in a valley with visible banks (the demo maps this
+# over the tier grid and subtracts from the band grid before baking; the existing wall bake then
+# draws the banks for free). 0 for non-river/sea (tier 0). MONOTONIC in tier — bigger rivers cut
+# deeper — which is exactly what keeps a carved river flowing downhill: carve grows with accumulation
+# downstream, so it lowers a downstream cell at least as much as its upstream neighbour, never lifting
+# it above. Pure, so it is unit-tested headlessly.
+export fn carve_depth(p: HydroParams, tier: Int) -> Int =
+  if tier >= 3 then p.carve3
+  else if tier == 2 then p.carve2
+  else if tier == 1 then p.carve1
+  else 0
 # Safety cap on any downstream walk: with a correct (acyclic) field no walk exceeds the map, so
 # `4 * span` can never be reached — hitting it means a bug, and the walk bails instead of hanging.
 let walk_cap_mul = 4

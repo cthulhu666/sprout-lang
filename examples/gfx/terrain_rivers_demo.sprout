@@ -2,7 +2,7 @@ module examples.gfx.terrain_rivers_demo
 
 import stdlib.gfx
 import loam.terrain (Config, tile_kind_at, tile_band_at, tile_kind_tag, sea_level_band, spatial_hash, exposed_step_bands, chunk_linear_index, TileKind, Water, Beach, Grass, Forest, Desert, Mountain, Snow, Tundra, tile_kind_of)
-import loam.hydrology (Hydrology, HydroParams, compute_hydrology, hydro_tier)
+import loam.hydrology (Hydrology, HydroParams, compute_hydrology, hydro_tier, carve_depth)
 import loam.config (parse_config, cfg_int)
 import loam.vegetation (TreeKind, Palm, Broadleaf, Conifer, DarkConifer, Cactus, Shrub, tree_kind_tag, tree_for_biome)
 import loam.camera (Cam, cam_drive, cam_distance, tree_cull_dist)
@@ -49,6 +49,9 @@ let def_elevation_levels = 12  # number of discrete height bands
 let def_tier1_min = 40  # hydrology accumulation → creek
 let def_tier2_min = 200  # → river
 let def_tier3_min = 900  # → major river
+let def_carve1 = 1  # channel carve depth (elevation bands) — creek
+let def_carve2 = 2  # → river
+let def_carve3 = 3  # → major river (deeper = more dramatic valley; 0 = flat, painted-on)
 
 # Appearance ----------------------------------------------------------------
 let tile_size = 1.0  # world units per tile (cube edge)
@@ -201,6 +204,30 @@ fn gen_grids(cfg: Config, bands: MutMatrix Int, tags: MutMatrix Int, span: Int, 
     do
       gen_row(cfg, bands, tags, span, gz, 0)
       gen_grids(cfg, bands, tags, span, gz + 1)
+
+# --- Carve pass -------------------------------------------------------------
+# Lower each river cell's elevation band by carve_depth(flow_tier) BEFORE baking, so the water floor
+# sits in a valley. The existing bake then draws banks for free: a land neighbour, now higher than
+# the carved river cell, emits an earth-coloured step wall down to it (nbr_drop/exposed_step_bands),
+# and the river cell's own top quad — coloured by river_rgb — becomes the shaded water floor. Clamped
+# at band 0 so a low river never pokes below the world floor. Non-river cells carve 0 (a no-op set).
+# Trees are unaffected: place_tile skips river cells, so lowering their band changes no tree height.
+fn carve_row(h: Hydrology, p: HydroParams, bands: MutMatrix Int, span: Int, gz: Int, gx: Int) -> Unit !{IO} =
+  if gx >= span then ()
+  else
+    do
+      t <- hydro_tier(h, gx, gz)
+      b <- mutmatrix_at_or(bands, gz, gx, 0)
+      let nb = b - carve_depth(p, t)
+      mutmatrix_set(bands, gz, gx, if nb < 0 then 0 else nb)
+      carve_row(h, p, bands, span, gz, gx + 1)
+
+fn carve_bands(h: Hydrology, p: HydroParams, bands: MutMatrix Int, span: Int, gz: Int) -> Unit !{IO} =
+  if gz >= span then ()
+  else
+    do
+      carve_row(h, p, bands, span, gz, 0)
+      carve_bands(h, p, bands, span, gz + 1)
 
 # --- Bake pass --------------------------------------------------------------
 # Bake one chunk's tiles into the current capture. Neighbour heights come from the global grid, so
@@ -451,8 +478,7 @@ fn render_loop(meshes: MutVec Int, models: MutVec Int, cam: Cam,
 # Read the settings dict from the config file named as the FIRST CLI ARG:
 #   just run-gfx examples/gfx/terrain_rivers_demo.sprout <file.conf>
 # No arg, or an unreadable path, falls back to an empty dict (⇒ every knob takes its def_* default)
-# with a loud note — so a typo in the path is visible, not silently ignored during a sweep. Matches
-# read_file directly (no `<-` bind), per loam/terrain.sprout's Result-wrapper caveat.
+# with a loud note, so a typo in the path is visible rather than silently ignored during a sweep.
 # Matches argv_get / read_file DIRECTLY (no `<-` bind): both return `T !{IO}`, and binding one via
 # `<-` mis-strips the Maybe/Result wrapper (per loam/terrain.sprout; the prelude's argv_collect does
 # the same). So this is a plain expression body, not a do-block.
@@ -487,6 +513,9 @@ fn main() -> Unit !{IO} =
     let t1 = cfg_int(settings, "tier1_min", def_tier1_min)
     let t2 = cfg_int(settings, "tier2_min", def_tier2_min)
     let t3 = cfg_int(settings, "tier3_min", def_tier3_min)
+    let cv1 = cfg_int(settings, "carve1", def_carve1)
+    let cv2 = cfg_int(settings, "carve2", def_carve2)
+    let cv3 = cfg_int(settings, "carve3", def_carve3)
     # Derived map dimensions (formerly module constants; now depend on the config).
     let span_tiles = region_chunks * chunk_edge
     let chunk_count = region_chunks * region_chunks  # one baked mesh per chunk
@@ -498,7 +527,8 @@ fn main() -> Unit !{IO} =
     let water_y = (to_double(sea_level_band(elevation_levels)) + water_lift) * band_step
     let cfg = Config(seed = seed, chunk_size = chunk_edge, octaves = octaves,
                      lattice0 = lattice0, elevation_levels = elevation_levels)
-    let params = HydroParams(tier1_min = t1, tier2_min = t2, tier3_min = t3)
+    let params = HydroParams(tier1_min = t1, tier2_min = t2, tier3_min = t3,
+                             carve1 = cv1, carve2 = cv2, carve3 = cv3)
     # Opening rig: same span-scaled standoff/height as before, looking at the map centre.
     let cam_start = Cam(yaw = 0.0, radius = world_span * cam_radius_frac,
                         height = world_span * cam_height_frac, tx = 0.0, ty = cam_target_y, tz = 0.0)
@@ -506,7 +536,8 @@ fn main() -> Unit !{IO} =
           ++ "x" ++ int_to_string(chunk_edge) ++ ") seed=" ++ int_to_string(seed)
           ++ " octaves=" ++ int_to_string(octaves) ++ " lattice0=" ++ int_to_string(lattice0)
           ++ " levels=" ++ int_to_string(elevation_levels) ++ " tiers=" ++ int_to_string(t1)
-          ++ "/" ++ int_to_string(t2) ++ "/" ++ int_to_string(t3))
+          ++ "/" ++ int_to_string(t2) ++ "/" ++ int_to_string(t3) ++ " carve=" ++ int_to_string(cv1)
+          ++ "/" ++ int_to_string(cv2) ++ "/" ++ int_to_string(cv3))
 
     gfx.open_window(1000, 600, "Sprout — Loam terrain with rivers (drainage-routed)")
     gfx.set_target_fps(60)
@@ -529,6 +560,10 @@ fn main() -> Unit !{IO} =
     # Global hydrology pass over the whole region (same cfg + span as the terrain), computed once
     # upfront. flow_tier lines up cell-for-cell with the generated tiles; params sets the tiers.
     h <- compute_hydrology(cfg, span_tiles, params)
+    # Carve river cells into channels: lower each river cell's band by carve_depth(tier) so the water
+    # floor sits in a valley with banks (the bake draws the banks for free). Must run AFTER hydrology
+    # (needs flow_tier) and BEFORE the bake (which reads the lowered bands).
+    carve_bands(h, params, bands, span_tiles, 0)
     # Bake each chunk into its OWN top-surface mesh (top quad + exposed step walls only; river cells
     # recoloured by tier). Per-chunk meshes let the frame loop frustum-cull off-screen chunks — the
     # win when zoomed in.

@@ -74,12 +74,15 @@ at `4·span` steps so a regression fails loudly instead of hanging.
 
 - `Hydrology = (span, filled: MutMatrix Double, flow_dir: MutMatrix Int, flow_tier: MutMatrix Int)`
   — grids indexed `[row=z][col=x]`, matching `Chunk`.
-- `HydroParams = (tier1_min, tier2_min, tier3_min)` — the accumulation→`flow_tier` cutoffs.
-  `default_hydro_params()` reproduces the stock `40 / 200 / 900`. Parameterized (not module
-  constants) so a caller — e.g. the terrain-rivers demo reading a config file — can sweep the river
-  size classes without recompiling.
+- `HydroParams = (tier1_min, tier2_min, tier3_min, carve1, carve2, carve3)` — the
+  accumulation→`flow_tier` cutoffs plus the per-tier channel carve depths (§6a).
+  `default_hydro_params()` reproduces the stock `40 / 200 / 900` tiers and `1 / 2 / 3` carve.
+  Parameterized (not module constants) so a caller — e.g. the terrain-rivers demo reading a config
+  file — can sweep the river size classes and channel depth without recompiling.
 - `compute_hydrology(cfg, span, p: HydroParams) -> Hydrology !{IO}` — the whole pipeline; pure in
   `(cfg, span, p)`.
+- `carve_depth(p, tier) -> Int` — pure: how many elevation bands a river cell of that `flow_tier` is
+  sunk below its own terrain (0 for non-river/sea). Monotonic in tier (§6a).
 - `hydro_tier / hydro_dir / hydro_filled (h, gx, gz)` — per-cell accessors.
 - `dir_delta(d) -> (drow, dcol)` — D8 decode, shared by module, view and tests.
 
@@ -95,6 +98,22 @@ samples) and `sea_level` (so the pass and the drains-to-sea test agree with the 
 "is sea"). No change to `Chunk`, its serialization, `TileKind`, or generation. No compiler,
 runtime, or bootstrap-seed change — hydrology is app code, not bundled into the seed.
 
+## 6a. Channel carving (visual — the "looks like a river" step 1)
+
+Painting river cells blue on the flat terrain top does not read as a river; a river reads from
+**depth**. So before baking, the demo lowers each river cell's elevation band by `carve_depth(tier)`
+(1 / 2 / 3 bands for creek / river / major by default, config-tunable). The existing top-surface bake
+then produces the channel for free: a land neighbour, now higher than the carved cell, emits its
+earth-coloured step wall down to it (the **bank**), and the river cell's own top quad — coloured by
+`river_rgb` and lit by the scene shader — becomes the **shaded water floor**. Opaque; a translucent
+animated surface is later work.
+
+The load-bearing property is that carving **preserves downhill flow**: carve depth is monotonic in
+`flow_tier`, and `flow_tier` (via accumulation) is non-decreasing downstream, so a downstream cell is
+lowered *at least* as much as its upstream neighbour — carving can only steepen the descent, never
+reverse it. `carve_depth` monotonicity is unit-tested; the carve itself is a pure band adjustment the
+demo applies over the existing `flow_tier` grid (no new grid, no runtime, no assets).
+
 ## 7. Tests
 
 `tests/loam/test_hydrology.spr` (TDD — written failing first), at span 128:
@@ -104,6 +123,8 @@ runtime, or bootstrap-seed change — hydrology is app code, not bundled into th
 - **Determinism**: same `(cfg, span)` ⇒ identical `flow_tier`.
 - **Thresholds honored**: raising `HydroParams` cutoffs above any achievable drainage area leaves no
   river cells (proves `flow_tier` reads the params rather than a hardcoded threshold).
+- **Carve depth**: `carve_depth` is 0 for tier 0, the per-tier depth otherwise, and monotonic in tier
+  (the property that keeps a carved river flowing downhill — §6a).
 
 `tests/loam/test_config.spr` covers `loam/config.sprout`, the `key value` (Int) reader the demo
 uses to load these knobs from a file: comment/blank tolerance, multi-key parse, malformed-value
@@ -126,8 +147,12 @@ sample that rescales for longer rivers (`lattice0 128`, `octaves 3`).
 
 ## 8. Roadmap (raft game)
 
-1. **Meander + valley carving** — lateral offset (stronger in low-gradient lowlands); lower
-   terrain near river cells so rivers sit in valleys.
+1. **Valley carving** — ✅ landed (§6a): river cells sunk into shaded channels with banks, depth by
+   tier, config-tunable. Still to do: **meander** (lateral offset, stronger in low-gradient
+   lowlands) to de-blockify the D8 right-angle paths into sinuous ribbons; **width** for major
+   rivers (widen into neighbour cells); and the **animated translucent water surface** on top of the
+   opaque bed (a `uTime` water shader — runtime work), with **waterfalls** where the carve/band drop
+   between consecutive flow cells is steep, and **dam** props placed like trees.
 2. **Raft mechanics** — current from `flow_dir` + accumulation (downstream cheap, upstream
    portage); navigability tiers from a true Strahler order; rapids where the band drop is steep;
    confluences = junctions, mouths = ports, lakes = hubs.

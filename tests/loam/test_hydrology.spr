@@ -1,6 +1,6 @@
 import stdlib.test (TestState, new_state, assert_eq, assert_true, summary)
 import loam.terrain (Config, elev_at, sea_level)
-import loam.hydrology (Hydrology, HydroParams, default_hydro_params, compute_hydrology, hydro_tier, hydro_dir, hydro_filled, dir_delta)
+import loam.hydrology (Hydrology, HydroParams, default_hydro_params, carve_depth, compute_hydrology, hydro_tier, hydro_dir, hydro_filled, dir_delta)
 
 # loam.hydrology computes drainage over a bounded region as a PURE function of (cfg, span):
 # it fills depressions (Planchon-Darboux), assigns a D8 flow direction to every cell, walks
@@ -115,9 +115,23 @@ fn main() -> Unit !{IO} =
     #     at most span^2 = 16384 cells of accumulation) leave NO river cells, proving flow_tier
     #     actually reads HydroParams rather than a hardcoded threshold. ---
     h_strict <- compute_hydrology(cfg, span,
-                                  HydroParams(tier1_min = 100000, tier2_min = 200000, tier3_min = 900000))
+                                  HydroParams(tier1_min = 100000, tier2_min = 200000, tier3_min = 900000,
+                                              carve1 = 1, carve2 = 2, carve3 = 3))
     rivers_strict <- count_rivers(0, 0, 0, h_strict)
     assert_true(state, "hydrology: raising the tier thresholds yields fewer river cells",
                 rivers_strict < rivers)
+
+    # --- Carve depth: 0 for non-river/sea (tier 0), the per-tier depth otherwise, MONOTONIC in tier
+    #     (bigger rivers cut deeper — the property that keeps a carved river flowing downhill). ---
+    let dp = default_hydro_params()
+    assert_eq(state, "carve: tier 0 (no river) is not carved", carve_depth(dp, 0), 0)
+    assert_eq(state, "carve: tier 1 (creek) depth", carve_depth(dp, 1), 1)
+    assert_eq(state, "carve: tier 2 (river) depth", carve_depth(dp, 2), 2)
+    assert_eq(state, "carve: tier 3 (major) depth", carve_depth(dp, 3), 3)
+    assert_true(state, "carve: monotonic non-decreasing in tier",
+                (carve_depth(dp, 0) <= carve_depth(dp, 1)) && (carve_depth(dp, 1) <= carve_depth(dp, 2))
+                  && (carve_depth(dp, 2) <= carve_depth(dp, 3)))
+    let dp2 = HydroParams(tier1_min = 40, tier2_min = 200, tier3_min = 900, carve1 = 5, carve2 = 6, carve3 = 7)
+    assert_eq(state, "carve: honors HydroParams carve depths", carve_depth(dp2, 1), 5)
 
     summary(state)
