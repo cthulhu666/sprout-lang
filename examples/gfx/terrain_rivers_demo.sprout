@@ -1,8 +1,8 @@
 module examples.gfx.terrain_rivers_demo
 
 import stdlib.gfx
-import loam.terrain (Config, tile_kind_at, tile_band_at, tile_kind_tag, sea_level_band, spatial_hash, exposed_step_bands, chunk_linear_index, TileKind, Water, Beach, Grass, Forest, Desert, Mountain, Snow, Tundra, tile_kind_of)
-import loam.hydrology (Hydrology, HydroParams, compute_hydrology, hydro_tier, carve_depth, widen_rivers)
+import loam.terrain (Config, tile_kind_at, tile_band_at, tile_kind_tag, sea_level_band, spatial_hash, exposed_step_bands, chunk_linear_index, tile_kind_of, band_of, elev_at)
+import loam.hydrology (Hydrology, HydroParams, compute_hydrology, hydro_tier, hydro_dir, hydro_filled, carve_depth, widen_rivers)
 import loam.config (parse_config, cfg_int)
 import loam.vegetation (TreeKind, Palm, Broadleaf, Conifer, DarkConifer, Cactus, Shrub, tree_kind_tag, tree_for_biome)
 import loam.camera (Cam, cam_drive, cam_distance, tree_cull_dist)
@@ -25,6 +25,15 @@ import stdlib.mutable (MutVec, mutvec_new, mutvec_at, mutvec_set, MutMatrix, mut
 # Round-tripping the region through disk text here was the dominant startup cost: re-parsing tiles
 # is ~70x slower than regenerating them, and holding every chunk resident made the GC's mark cost
 # (which scales with the live set) superlinear. Generating directly into the grid avoids both.
+#
+# FOUR SWITCHABLE VIEWS over the same routed world (top-left selector buttons): 0 Main (biomes +
+# rivers + trees), 1 Relief (grey elevation ramp + rivers — a shaded drainage map), 2 Flow (each land
+# cell hued by its D8 flow direction — the "current" field), 3 Lakes (Relief + blue quads where the
+# depression-fill ponded a basin). Sea + rivers appear in every view; trees only in Main. The terrain
+# is baked ONCE with per-vertex DATA (biome tag, flow tier/dir, elevation band, lake flag) instead of
+# a colour; the CUBE shader (graphics/sprout_gfx.c) computes each view's colour from a uViewMode
+# uniform, so a view switch is a single gfx.set_view_mode call — INSTANT, no re-bake (an earlier
+# re-bake-per-switch cost ~9s at 1024²).
 #
 # Run (auto-closes after N frames with SPROUT_GFX_MAX_FRAMES=N):
 #   mise exec -- just run-gfx examples/gfx/terrain_rivers_demo.sprout
@@ -117,26 +126,25 @@ let cam_drag_pan_frac = 0.0015  # pan world-units per pixel of drag, as a span f
 # count is independent of group count — hence the finest (per-chunk) grouping for tight culling.
 # tree_group_cols is the ceil-divide `(span + edge - 1) / edge` so the group grid need not divide.
 
-# --- Biome palette ----------------------------------------------------------
-# Biome -> flat RGB (0..255). Matching on TileKind (not the raw Int tag) means adding a biome
-# is a compile error here (non-exhaustive match) rather than a silent wrong colour.
-fn biome_rgb(k: TileKind) -> (Int, Int, Int) =
-  match k with
-  | Water -> (40, 90, 170)
-  | Beach -> (205, 185, 125)
-  | Grass -> (70, 150, 60)
-  | Forest -> (28, 100, 42)
-  | Desert -> (212, 190, 110)
-  | Mountain -> (120, 112, 104)
-  | Snow -> (236, 236, 242)
-  | Tundra -> (172, 182, 162)
+# ============================================================================
+# FOUR VIEWS over the SAME generated+routed world (0 Main / 1 Relief / 2 Flow / 3 Lakes), switched by
+# the top-left buttons. The four palettes — biome, river-by-tier, grey elevation relief, and the D8
+# flow-direction wheel — USED to be Sprout functions colouring each vertex at bake time, which made a
+# switch a full re-bake (~9s at 1024²). They now live in the CUBE fragment shader (graphics/
+# sprout_gfx.c, CUBE_FS). The bake writes per-vertex DATA (biome tag, flow tier, D8 dir, elevation
+# band, lake flag) via gfx.capture_quad_data — ONCE — and the shader picks each view's colour from a
+# uViewMode uniform, so a view switch is a single gfx.set_view_mode call: instant, no re-bake. Retune
+# the palettes in CUBE_FS. (The biome ramp there is indexed by tile_kind_tag = ordinal(TileKind):
+# 0 Water,1 Beach,2 Grass,3 Forest,4 Desert,5 Mountain,6 Snow,7 Tundra — keep it in that order.)
+# ============================================================================
 
-# River palette by flow_tier: bigger rivers read as deeper, more saturated blue. Only used where
-# the hydrology pass marked a land cell as carrying a river (tier > 0).
-fn river_rgb(tier: Int) -> (Int, Int, Int) =
-  if tier >= 3 then (30, 75, 155)  # major navigable river
-  else if tier == 2 then (48, 105, 185)  # river
-  else (78, 140, 205)  # creek
+# Lakes (view 3): a cell is "flooded" when the Planchon-Darboux fill raised the water surface
+# (hydro_filled) above the ORIGINAL ground (elev_at, the pre-carve pure field) by more than lake_eps —
+# a depression the solver ponded so it can drain. lake_lift floats the (opaque) lake quad a touch above
+# the bed so it never z-fights the terrain top. The quad is baked in EVERY view; the shader shows it
+# only in Lakes and discards it otherwise, so toggling Lakes also needs no re-bake.
+let lake_eps = 0.0005
+let lake_lift = 0.12
 
 # World Y of a band's top face — mirrors the old cube (centre at band*band_step, edge tile_size),
 # so the baked top surface sits exactly where the cube tops used to.
@@ -152,39 +160,54 @@ fn nbr_drop(this_band: Int, bands: MutMatrix Int, nx: Int, nz: Int, span: Int) -
       nb <- mutmatrix_at_or(bands, nz, nx, this_band)
       to_double(exposed_step_bands(this_band, nb)) * band_step
 
-# Bake ONE tile into the current mesh capture: a top quad plus one wall quad per side that steps
-# DOWN to a lower neighbour (drop > 0; level/higher sides are hidden, so no wall). Colour follows the
-# river-over-biome rule; the four neighbour drops come from the global band grid. Emits directly via
-# the generic gfx.capture_quad, computing corners inline — NO intermediate list/records, so baking a
-# 1024^2 map stays allocation-free (a pure List-of-quads decomposition regressed the bake ~3x).
-# Winding/normals match the old capture_tile: +z is south, +x is east, so dn is the -z (north) side.
-fn bake_tile(bands: MutMatrix Int, tags: MutMatrix Int, h: Hydrology, span: Int, gx: Int, gz: Int) -> Unit !{IO} =
+# Where the depression-fill flooded a basin (filled > original ground), bake a lake-surface quad at
+# the filled level, flagged lake=1. Baked in every view; the shader shows it only in Lakes (discards
+# it otherwise), so it costs no re-bake to toggle. Compared against elev_at (pre-carve pure field), so
+# carved river channels — not fill ponds — do not spuriously read as lakes. band carries the surface
+# band for consistency; the shader colours a lake quad blue regardless.
+fn bake_lake(cfg: Config, h: Hydrology, levels: Int, x0: Double, x1: Double, z0: Double, z1: Double,
+             gx: Int, gz: Int) -> Unit !{IO} =
+  do
+    fl <- hydro_filled(h, gx, gz)
+    let e = elev_at(cfg, gx, gz)
+    if fl > (e + lake_eps) then
+      do
+        let lb = band_of(fl, levels)
+        let ly = band_top_y(lb) + lake_lift
+        gfx.capture_quad_data(x0, ly, z0, x0, ly, z1, x1, ly, z1, x1, ly, z0, 0.0, 1.0, 0.0, 0, 0, 0, lb, 1)
+    else ()
+
+# Bake ONE tile into the current mesh capture: a top quad plus one wall quad per side that steps DOWN
+# to a lower neighbour (drop > 0; level/higher sides are hidden, so no wall), then a lake quad if the
+# cell is flooded. Every quad carries the tile's DATA (tag/tier/dir/band, lake=0 for land) via
+# gfx.capture_quad_data — the shader turns that into the current view's colour, so this bake is
+# VIEW-INDEPENDENT and runs once. Corners are computed inline — NO intermediate list/records, so baking
+# a 1024^2 map stays allocation-free. Winding/normals: +z is south, +x is east, so dn is the -z side.
+fn bake_tile(cfg: Config, bands: MutMatrix Int, tags: MutMatrix Int, h: Hydrology, levels: Int, span: Int, gx: Int, gz: Int) -> Unit !{IO} =
   do
     band <- mutmatrix_at_or(bands, gz, gx, 0)
     tag <- mutmatrix_at_or(tags, gz, gx, 0)
     tier <- hydro_tier(h, gx, gz)
-    let rgb = if tier > 0 then river_rgb(tier) else biome_rgb(tile_kind_of(tag))
+    dir <- hydro_dir(h, gx, gz)
     dn <- nbr_drop(band, bands, gx, gz - 1, span)
     ds <- nbr_drop(band, bands, gx, gz + 1, span)
     de <- nbr_drop(band, bands, gx + 1, gz, span)
     dw <- nbr_drop(band, bands, gx - 1, gz, span)
-    match rgb with
-    | (r, g, b) ->
-        do
-          let ty = band_top_y(band)
-          let half = to_double(span) / 2.0  # map centred on origin; from span (was a module global)
-          let mx = (to_double(gx) - half) * tile_size
-          let mz = (to_double(gz) - half) * tile_size
-          let hh = tile_size * 0.5
-          let x0 = mx - hh
-          let x1 = mx + hh
-          let z0 = mz - hh
-          let z1 = mz + hh
-          gfx.capture_quad(x0, ty, z0, x0, ty, z1, x1, ty, z1, x1, ty, z0, 0.0, 1.0, 0.0, r, g, b)
-          if dn > 0.0 then gfx.capture_quad(x0, ty, z0, x1, ty, z0, x1, ty - dn, z0, x0, ty - dn, z0, 0.0, 0.0, 0.0 - 1.0, r, g, b) else ()
-          if ds > 0.0 then gfx.capture_quad(x0, ty, z1, x1, ty, z1, x1, ty - ds, z1, x0, ty - ds, z1, 0.0, 0.0, 1.0, r, g, b) else ()
-          if de > 0.0 then gfx.capture_quad(x1, ty, z0, x1, ty, z1, x1, ty - de, z1, x1, ty - de, z0, 1.0, 0.0, 0.0, r, g, b) else ()
-          if dw > 0.0 then gfx.capture_quad(x0, ty, z0, x0, ty, z1, x0, ty - dw, z1, x0, ty - dw, z0, 0.0 - 1.0, 0.0, 0.0, r, g, b) else ()
+    let ty = band_top_y(band)
+    let half = to_double(span) / 2.0  # map centred on origin; from span (was a module global)
+    let mx = (to_double(gx) - half) * tile_size
+    let mz = (to_double(gz) - half) * tile_size
+    let hh = tile_size * 0.5
+    let x0 = mx - hh
+    let x1 = mx + hh
+    let z0 = mz - hh
+    let z1 = mz + hh
+    gfx.capture_quad_data(x0, ty, z0, x0, ty, z1, x1, ty, z1, x1, ty, z0, 0.0, 1.0, 0.0, tag, tier, dir, band, 0)
+    if dn > 0.0 then gfx.capture_quad_data(x0, ty, z0, x1, ty, z0, x1, ty - dn, z0, x0, ty - dn, z0, 0.0, 0.0, 0.0 - 1.0, tag, tier, dir, band, 0) else ()
+    if ds > 0.0 then gfx.capture_quad_data(x0, ty, z1, x1, ty, z1, x1, ty - ds, z1, x0, ty - ds, z1, 0.0, 0.0, 1.0, tag, tier, dir, band, 0) else ()
+    if de > 0.0 then gfx.capture_quad_data(x1, ty, z0, x1, ty, z1, x1, ty - de, z1, x1, ty - de, z0, 1.0, 0.0, 0.0, tag, tier, dir, band, 0) else ()
+    if dw > 0.0 then gfx.capture_quad_data(x0, ty, z0, x0, ty, z1, x0, ty - dw, z1, x0, ty - dw, z0, 0.0 - 1.0, 0.0, 0.0, tag, tier, dir, band, 0) else ()
+    bake_lake(cfg, h, levels, x0, x1, z0, z1, gx, gz)
 
 # --- Generation pass (once at startup) --------------------------------------
 # Tabulate the whole region's biome tag + elevation band STRAIGHT into the global grids from each
@@ -234,27 +257,27 @@ fn carve_bands(h: Hydrology, p: HydroParams, bands: MutMatrix Int, span: Int, gz
 # --- Bake pass --------------------------------------------------------------
 # Bake one chunk's tiles into the current capture. Neighbour heights come from the global grid, so
 # tiles on a chunk seam still get correct step walls against the adjacent chunk.
-fn bake_chunk_tiles(bands: MutMatrix Int, tags: MutMatrix Int, h: Hydrology, span: Int, size: Int, cx: Int, cz: Int, r: Int, c: Int) -> Unit !{IO} =
+fn bake_chunk_tiles(cfg: Config, bands: MutMatrix Int, tags: MutMatrix Int, h: Hydrology, levels: Int, span: Int, size: Int, cx: Int, cz: Int, r: Int, c: Int) -> Unit !{IO} =
   if r >= size then ()
-  else if c >= size then bake_chunk_tiles(bands, tags, h, span, size, cx, cz, r + 1, 0)
+  else if c >= size then bake_chunk_tiles(cfg, bands, tags, h, levels, span, size, cx, cz, r + 1, 0)
   else
     do
-      bake_tile(bands, tags, h, span, (cx * size) + c, (cz * size) + r)
-      bake_chunk_tiles(bands, tags, h, span, size, cx, cz, r, c + 1)
+      bake_tile(cfg, bands, tags, h, levels, span, (cx * size) + c, (cz * size) + r)
+      bake_chunk_tiles(cfg, bands, tags, h, levels, span, size, cx, cz, r, c + 1)
 
 # Bake each chunk into its OWN static mesh and record the handle (indexed cz*ncx + cx), so the frame
 # loop can frustum-cull per chunk — a zoomed-in view then pays only for the visible handful of
 # chunks instead of the whole map. This is what makes zooming in fast.
-fn bake_region(bands: MutMatrix Int, tags: MutMatrix Int, h: Hydrology, span: Int, size: Int, ncx: Int, ncz: Int, meshes: MutVec Int, cx: Int, cz: Int) -> Unit !{IO} =
+fn bake_region(cfg: Config, bands: MutMatrix Int, tags: MutMatrix Int, h: Hydrology, levels: Int, span: Int, size: Int, ncx: Int, ncz: Int, meshes: MutVec Int, cx: Int, cz: Int) -> Unit !{IO} =
   if cz >= ncz then ()
-  else if cx >= ncx then bake_region(bands, tags, h, span, size, ncx, ncz, meshes, 0, cz + 1)
+  else if cx >= ncx then bake_region(cfg, bands, tags, h, levels, span, size, ncx, ncz, meshes, 0, cz + 1)
   else
     do
       gfx.mesh_capture_begin()
-      bake_chunk_tiles(bands, tags, h, span, size, cx, cz, 0, 0)
+      bake_chunk_tiles(cfg, bands, tags, h, levels, span, size, cx, cz, 0, 0)
       handle <- gfx.mesh_capture_end()
       mutvec_set(meshes, (cz * ncx) + cx, handle)
-      bake_region(bands, tags, h, span, size, ncx, ncz, meshes, cx + 1, cz)
+      bake_region(cfg, bands, tags, h, levels, span, size, ncx, ncz, meshes, cx + 1, cz)
 
 # Draw every chunk mesh; gfx.draw_captured frustum-culls the off-screen ones in the shim.
 fn draw_meshes(meshes: MutVec Int, i: Int, n: Int) -> Unit !{IO} =
@@ -391,15 +414,32 @@ let col_b = panel_x + 82  # 908 — Rot R, Zoom +/-
 let rot_y = 414  # rotate pair row
 let pair_r0 = 452  # Tilt+ / Zoom+ row
 let pair_r1 = 488  # Tilt- / Zoom- row
+# Hydrology-view selector: four edge-triggered buttons in a top-left strip, clear of the camera panel
+# (panel_x = 826). gfx.button fires once per click (IsMouseButtonPressed), so a click switches exactly
+# once; the current view's button is marked with a leading ">". Columns at 10 / 106 / 202 / 298.
+let view_bar_x = 10
+let view_bar_y = 40
+let view_btn_w = 92
+let view_btn_gap = 4  # column pitch = view_btn_w + gap = 96; strip ends at 298 + 92 = 390, left of panel_x
+let vb_c0 = view_bar_x  # 10   — Main
+let vb_c1 = view_bar_x + 96  # 106 — Relief
+let vb_c2 = view_bar_x + 192  # 202 — Flow
+let vb_c3 = view_bar_x + 288  # 298 — Lakes
 
 fn bd(b: Bool) -> Double = if b then 1.0 else 0.0
 
-# The terrain+rivers are STATIC, so they are baked into ONE GPU mesh at startup (see main) and
-# drawn in a single call per frame — no per-frame per-tile work. The frame loop drives the camera
-# two ways that feed the SAME cam_drive fold: the on-screen buttons (hold to move continuously) and
+# The label for a view selector button — a leading ">" marks the active view.
+fn view_label(view: Int, this: Int, name: String) -> String =
+  if view == this then "> " ++ name else name
+
+# The terrain+rivers are STATIC per view, so they are baked into per-chunk GPU meshes and drawn in
+# one call each per frame — no per-frame per-tile work. The frame loop drives the camera two ways
+# that feed the SAME cam_drive fold: the on-screen buttons (hold to move continuously) and
 # mouse/keyboard gestures (scroll = zoom, left-drag over the view = orbit/tilt, Shift+left-drag =
-# pan, WASD = pan) that work on both a mouse and a MacBook trackpad.
-fn render_loop(meshes: MutVec Int, models: MutVec Int, cam: Cam,
+# pan, WASD = pan) that work on both a mouse and a MacBook trackpad. `view` selects which of the four
+# hydrology views the shader renders; the top-left buttons switch it via gfx.set_view_mode — a single
+# uniform write, no re-bake (the terrain is baked ONCE with per-vertex data; see bake_tile).
+fn render_loop(meshes: MutVec Int, models: MutVec Int, cam: Cam, view: Int,
                world_span: Double, chunk_count: Int, tree_group_count: Int, water_y: Double) -> Unit !{IO} =
   do
     # Span-scaled framing + tree-cull, derived from world_span (were module constants; world_span is
@@ -418,16 +458,22 @@ fn render_loop(meshes: MutVec Int, models: MutVec Int, cam: Cam,
         cam_apply(cam)
         gfx.frame_begin()
         draw_meshes(meshes, 0, chunk_count)
-        # Trees on top of the baked terrain, before the water so an above-water tree is not tinted.
-        # Each is one instanced draw call over its whole scattered batch.
-        gfx.draw_instances(tree_group_count, tree_cull)
-        # Water surface last, so depth-testing lets land above sea level poke through the
-        # translucent plane while it fills the valleys.
+        # Trees belong to the Main view only — the hydrology views strip vegetation so nothing hides
+        # the drainage. Drawn before the water so an above-water tree is not tinted. (Instances stay
+        # resident across a view switch; they are simply not replayed in views 1..3.)
+        if view == 0 then gfx.draw_instances(tree_group_count, tree_cull) else ()
+        # Sea surface last, so depth-testing lets land above sea level poke through the translucent
+        # plane while it fills the valleys. Sea IS hydrology, so it is drawn in every view.
         gfx.draw_plane(0.0, water_y, 0.0, world_span, world_span, water_r, water_g, water_b, water_alpha)
         # Scene done — composite it through the post-process shader and switch to 2D so the HUD below
         # draws CRISP on top (unblurred, unvignetted). Everything after this is screen-space overlay.
         gfx.overlay_begin()
         gfx.draw_fps(10, 10)
+        # Hydrology-view selector (top-left strip). Edge-triggered: each fires once per click.
+        vm <- gfx.button(vb_c0, view_bar_y, view_btn_w, btn_h, view_label(view, 0, "Main"))
+        vr <- gfx.button(vb_c1, view_bar_y, view_btn_w, btn_h, view_label(view, 1, "Relief"))
+        vf <- gfx.button(vb_c2, view_bar_y, view_btn_w, btn_h, view_label(view, 2, "Flow"))
+        vk <- gfx.button(vb_c3, view_bar_y, view_btn_w, btn_h, view_label(view, 3, "Lakes"))
         # Camera control panel — grouped by function (see the layout constants).
         # Pan: a D-pad (Fwd top, Left/Right flanking, Back below).
         pf <- gfx.button_held(pad_c1, pad_r0, pad_w, btn_h, "Fwd")
@@ -447,6 +493,7 @@ fn render_loop(meshes: MutVec Int, models: MutVec Int, cam: Cam,
         wheel <- gfx.mouse_wheel_y()
         ldown <- gfx.mouse_button_down(gfx.mouse_left)
         mx <- gfx.mouse_x()
+        my <- gfx.mouse_y()
         gdx <- gfx.mouse_delta_x()
         gdy <- gfx.mouse_delta_y()
         shift <- gfx.key_down(gfx.key_left_shift)
@@ -455,10 +502,11 @@ fn render_loop(meshes: MutVec Int, models: MutVec Int, cam: Cam,
         ka <- gfx.key_down(gfx.key_a)
         kd <- gfx.key_down(gfx.key_d)
         gfx.frame_end()
-        # A left-drag counts as a camera gesture only OVER THE VIEW (left of the
-        # panel), so dragging on a button clicks it instead of orbiting. Shift
+        # A left-drag counts as a camera gesture only OVER THE VIEW (left of the panel and BELOW the
+        # top selector strip), so pressing a view button switches the view instead of orbiting. Shift
         # switches the drag from orbit to pan.
-        let dragging = ldown && (mx < panel_x)
+        let in_view_bar = (mx >= view_bar_x) && (mx < vb_c3 + view_btn_w) && (my >= view_bar_y) && (my < view_bar_y + btn_h)
+        let dragging = ldown && (mx < panel_x) && ! in_view_bar
         let orbit = dragging && ! shift
         let pan_drag = dragging && shift
         # Sum this frame's button- and gesture-derived deltas, then fold once.
@@ -472,10 +520,15 @@ fn render_loop(meshes: MutVec Int, models: MutVec Int, cam: Cam,
                         + (if pan_drag then (0.0 - gdx) * drag_pan_step else 0.0)
         let d_pan_f = ((bd(pf) - bd(pb)) * pan_step) + ((bd(kw) - bd(ks)) * pan_step)
                         + (if pan_drag then gdy * drag_pan_step else 0.0)
+        # A clicked selector picks a new view; unchanged otherwise. On a change, the switch is ONE
+        # uniform write — gfx.set_view_mode — that retints the already-baked terrain in the shader. No
+        # re-bake, no re-upload: instant. (Trees are drawn only in Main, gated above.)
+        let next_view = if vm then 0 else if vr then 1 else if vf then 2 else if vk then 3 else view
+        if next_view != view then gfx.set_view_mode(next_view) else ()
         render_loop(meshes, models,
                     cam_drive(cam, d_yaw, d_pitch, d_zoom, d_pan_r, d_pan_f,
                               min_dist, max_dist, pitch_min, pitch_max, pan_bound),
-                    world_span, chunk_count, tree_group_count, water_y)
+                    next_view, world_span, chunk_count, tree_group_count, water_y)
 
 # Read the settings dict from the config file named as the FIRST CLI ARG:
 #   just run-gfx examples/gfx/terrain_rivers_demo.sprout <file.conf>
@@ -544,7 +597,7 @@ fn main() -> Unit !{IO} =
           ++ "/" ++ int_to_string(cv2) ++ "/" ++ int_to_string(cv3) ++ " widen=" ++ int_to_string(wd2)
           ++ "/" ++ int_to_string(wd3))
 
-    gfx.open_window(1000, 600, "Sprout — Loam terrain with rivers (drainage-routed)")
+    gfx.open_window(1000, 600, "Sprout — Loam terrain with rivers (Main / Relief / Flow / Lakes)")
     gfx.set_target_fps(60)
     # Distance fog (roadmap #1, docs/gfx-effects-roadmap-v0.md): distant terrain fades into a pale
     # sky haze — the cheapest atmosphere/depth cue, applied in the scene shaders (no post pass, no
@@ -573,14 +626,22 @@ fn main() -> Unit !{IO} =
     # floor sits in a valley with banks (the bake draws the banks for free). Must run AFTER hydrology
     # (needs flow_tier) and BEFORE the bake (which reads the lowered bands).
     carve_bands(h, params, bands, span_tiles, 0)
-    # Bake each chunk into its OWN top-surface mesh (top quad + exposed step walls only; river cells
-    # recoloured by tier). Per-chunk meshes let the frame loop frustum-cull off-screen chunks — the
-    # win when zoomed in.
+    # Bake each chunk into its OWN mesh, ONCE. Every quad carries per-vertex DATA (tag/tier/dir/band,
+    # + lake quads flagged) rather than a colour; the shader turns that into the current view's colour
+    # (gfx.set_view_mode), so switching views never re-bakes. Per-chunk meshes still frustum-cull when
+    # zoomed in. This bake is view-independent — there is no longer a per-view mesh set.
+    let start_view = 0
     meshes <- mutvec_new(chunk_count, -1)
-    bake_region(bands, tags, h, span_tiles, chunk_edge, region_chunks, region_chunks, meshes, 0, 0)
+    bake_region(cfg, bands, tags, h, elevation_levels, span_tiles, chunk_edge, region_chunks, region_chunks, meshes, 0, 0)
+    # Tell the shader the band count (for the relief ramp) and select the opening view. set_view_mode
+    # MUST be called before the first frame: the shader defaults to -1 (raw vertex colour), which would
+    # misread the data-encoded terrain — set_view_mode(0) puts it into the biome-decoding Main view.
+    gfx.set_terrain_levels(elevation_levels)
+    gfx.set_view_mode(start_view)
     # Load the vegetation models and scatter biome-appropriate trees over the region ONCE (the pass
-    # queues GPU instances; the frame loop just replays them). Models load after the GL context.
+    # queues GPU instances; the frame loop just replays them, and only in the Main view). Models load
+    # after the GL context.
     models <- mutvec_new(tree_count, 0)
     load_trees(models)
     place_region(cfg, models, h, bands, tags, span_tiles, half, tree_group_edge, tree_group_cols, 0)
-    render_loop(meshes, models, cam_start, world_span, chunk_count, tree_group_count, water_y)
+    render_loop(meshes, models, cam_start, start_view, world_span, chunk_count, tree_group_count, water_y)

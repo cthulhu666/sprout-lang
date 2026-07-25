@@ -72,6 +72,8 @@ static Shader g_light_shader;
 static int g_light_ready = 0;
 static Shader g_cube_shader;   /* vertex-colour lit shader for baked/captured meshes (terrain material) */
 static int g_cube_ready = 0;
+static int g_loc_view_mode = -1; /* CUBE uViewMode uniform: <0 raw colour (default), 0..3 terrain view */
+static int g_loc_levels = -1;    /* CUBE uLevels uniform: elevation band count for the relief ramp */
 
 /* Static baked meshes. One-mesh-per-terrain fit in a handful; per-CHUNK baking (for frustum
  * culling) needs one slot per chunk — a 32x32-chunk map is 1024 — so the cap is generous. */
@@ -171,6 +173,12 @@ static const char *CUBE_VS =
   "    fragDepth = gl_Position.w;\n"
   "}\n";
 
+/* When uViewMode < 0 (the default) the vertex colour IS the colour — every existing baked-mesh demo
+ * (spinning_cube, terrain_demo, …) is unchanged. When uViewMode is 0..3 the terrain-rivers demo has
+ * baked per-vertex DATA into the colour attribute (see gfx_capture_quad_data), and this shader
+ * decodes it and picks the colour for the current view — so switching views is one uniform, no
+ * re-bake. The four ramps below mirror the Sprout demo's original biome/river/dir/relief palettes.
+ * uLevels is the elevation band count, for the grey relief ramp. */
 static const char *CUBE_FS =
   "#version 330\n"
   "in vec3 fragNormal;\n"
@@ -179,12 +187,70 @@ static const char *CUBE_FS =
   "uniform vec3 lightDir;\n"
   "uniform vec3 lightColor;\n"
   "uniform vec3 ambient;\n"
+  "uniform int uViewMode;\n"   /* <0 = raw vertex colour; 0 Main, 1 Relief, 2 Flow, 3 Lakes */
+  "uniform int uLevels;\n"     /* elevation band count, for the relief ramp */
   FOG_GLSL
   "out vec4 finalColor;\n"
+  "vec3 biome_rgb(int t){\n"
+  "    if(t==0) return vec3(40.0,90.0,170.0)/255.0;\n"
+  "    else if(t==1) return vec3(205.0,185.0,125.0)/255.0;\n"
+  "    else if(t==2) return vec3(70.0,150.0,60.0)/255.0;\n"
+  "    else if(t==3) return vec3(28.0,100.0,42.0)/255.0;\n"
+  "    else if(t==4) return vec3(212.0,190.0,110.0)/255.0;\n"
+  "    else if(t==5) return vec3(120.0,112.0,104.0)/255.0;\n"
+  "    else if(t==6) return vec3(236.0,236.0,242.0)/255.0;\n"
+  "    else return vec3(172.0,182.0,162.0)/255.0;\n"
+  "}\n"
+  "vec3 river_rgb(int t){\n"
+  "    if(t>=3) return vec3(30.0,75.0,155.0)/255.0;\n"
+  "    else if(t==2) return vec3(48.0,105.0,185.0)/255.0;\n"
+  "    else return vec3(78.0,140.0,205.0)/255.0;\n"
+  "}\n"
+  "vec3 dir_rgb(int d){\n"
+  "    if(d==1) return vec3(232.0,62.0,62.0)/255.0;\n"
+  "    else if(d==2) return vec3(236.0,142.0,40.0)/255.0;\n"
+  "    else if(d==3) return vec3(230.0,214.0,52.0)/255.0;\n"
+  "    else if(d==4) return vec3(120.0,208.0,66.0)/255.0;\n"
+  "    else if(d==5) return vec3(52.0,200.0,158.0)/255.0;\n"
+  "    else if(d==6) return vec3(60.0,150.0,236.0)/255.0;\n"
+  "    else if(d==7) return vec3(126.0,96.0,222.0)/255.0;\n"
+  "    else if(d==8) return vec3(214.0,82.0,200.0)/255.0;\n"
+  "    else return vec3(40.0,44.0,52.0)/255.0;\n"
+  "}\n"
+  "vec3 land_rgb(int band){\n"
+  "    int sp = uLevels<=1 ? 1 : uLevels-1;\n"
+  "    float g = (60.0 + float(band)*175.0/float(sp))/255.0;\n"
+  "    return vec3(g,g,g);\n"
+  "}\n"
   "void main() {\n"
+  "    vec3 col;\n"
+  "    float outA = 1.0;\n"
+  "    if(uViewMode < 0){\n"
+  "        col = fragColor.rgb;\n"
+  "        outA = fragColor.a;\n"
+  "    } else {\n"
+  "        int tag  = int(fragColor.r*255.0 + 0.5);\n"
+  "        int tier = int(fragColor.g*255.0 + 0.5);\n"
+  "        int dir  = int(fragColor.b*255.0 + 0.5);\n"
+  "        int abnd = int(fragColor.a*255.0 + 0.5);\n"
+  "        bool lake = abnd >= 128;\n"
+  "        int band = lake ? abnd-128 : abnd;\n"
+  "        if(lake){\n"
+  "            if(uViewMode != 3) discard;\n"
+  "            col = vec3(40.0,120.0,205.0)/255.0;\n"
+  "        } else if(tier > 0){\n"
+  "            col = river_rgb(tier);\n"
+  "        } else if(uViewMode == 0){\n"
+  "            col = biome_rgb(tag);\n"
+  "        } else if(uViewMode == 2){\n"
+  "            col = dir_rgb(dir);\n"
+  "        } else {\n"
+  "            col = land_rgb(band);\n"
+  "        }\n"
+  "    }\n"
   "    float diff = max(dot(normalize(fragNormal), normalize(lightDir)), 0.0);\n"
-  "    vec3 lit = fragColor.rgb*(ambient + diff*lightColor);\n"
-  "    finalColor = vec4(apply_fog(lit, fragDepth), fragColor.a);\n"
+  "    vec3 lit = col*(ambient + diff*lightColor);\n"
+  "    finalColor = vec4(apply_fog(lit, fragDepth), outA);\n"
   "}\n";
 
 /* Instanced-props shader: one DrawMeshInstanced call draws thousands of copies of a model, each
@@ -413,6 +479,13 @@ static void init_lighting(void) {
     SetShaderValue(g_cube_shader, GetShaderLocation(g_cube_shader, "lightDir"), &lightDir, SHADER_UNIFORM_VEC3);
     SetShaderValue(g_cube_shader, GetShaderLocation(g_cube_shader, "lightColor"), &lightColor, SHADER_UNIFORM_VEC3);
     SetShaderValue(g_cube_shader, GetShaderLocation(g_cube_shader, "ambient"), &ambient, SHADER_UNIFORM_VEC3);
+    /* Default the terrain-view uniforms so every other cube-shader demo (which never sets them) draws
+     * with raw vertex colour: uViewMode = -1. uLevels only matters for the relief ramp; seed a sane 12. */
+    g_loc_view_mode = GetShaderLocation(g_cube_shader, "uViewMode");
+    g_loc_levels = GetShaderLocation(g_cube_shader, "uLevels");
+    int vm0 = -1, lv0 = 12;
+    SetShaderValue(g_cube_shader, g_loc_view_mode, &vm0, SHADER_UNIFORM_INT);
+    SetShaderValue(g_cube_shader, g_loc_levels, &lv0, SHADER_UNIFORM_INT);
     g_cube_ready = 1;
   }
 
@@ -466,24 +539,26 @@ static void cap_reserve(int extra) {
 }
 
 static void cap_vertex(float x, float y, float z, float nx, float ny, float nz,
-                       unsigned char r, unsigned char g, unsigned char b) {
+                       unsigned char r, unsigned char g, unsigned char b, unsigned char a) {
   int i = g_cap_count;
   g_cap_verts[i*3+0] = x; g_cap_verts[i*3+1] = y; g_cap_verts[i*3+2] = z;
   g_cap_norms[i*3+0] = nx; g_cap_norms[i*3+1] = ny; g_cap_norms[i*3+2] = nz;
-  g_cap_cols[i*4+0] = r; g_cap_cols[i*4+1] = g; g_cap_cols[i*4+2] = b; g_cap_cols[i*4+3] = 255;
+  g_cap_cols[i*4+0] = r; g_cap_cols[i*4+1] = g; g_cap_cols[i*4+2] = b; g_cap_cols[i*4+3] = a;
   g_cap_count++;
 }
 
-/* A quad as two triangles (v0,v1,v2)+(v0,v2,v3), one flat normal, one colour. */
+/* A quad as two triangles (v0,v1,v2)+(v0,v2,v3), one flat normal, one RGBA. The alpha channel is a
+ * real byte now (not forced to 255): gfx_capture_quad passes 255, but gfx_capture_quad_data smuggles
+ * per-vertex DATA (a packed elevation band + lake flag) through it for the shader-decoded views. */
 static void cap_quad(const float *v0, const float *v1, const float *v2, const float *v3,
                      float nx, float ny, float nz,
-                     unsigned char r, unsigned char g, unsigned char b) {
-  cap_vertex(v0[0],v0[1],v0[2], nx,ny,nz, r,g,b);
-  cap_vertex(v1[0],v1[1],v1[2], nx,ny,nz, r,g,b);
-  cap_vertex(v2[0],v2[1],v2[2], nx,ny,nz, r,g,b);
-  cap_vertex(v0[0],v0[1],v0[2], nx,ny,nz, r,g,b);
-  cap_vertex(v2[0],v2[1],v2[2], nx,ny,nz, r,g,b);
-  cap_vertex(v3[0],v3[1],v3[2], nx,ny,nz, r,g,b);
+                     unsigned char r, unsigned char g, unsigned char b, unsigned char a) {
+  cap_vertex(v0[0],v0[1],v0[2], nx,ny,nz, r,g,b,a);
+  cap_vertex(v1[0],v1[1],v1[2], nx,ny,nz, r,g,b,a);
+  cap_vertex(v2[0],v2[1],v2[2], nx,ny,nz, r,g,b,a);
+  cap_vertex(v0[0],v0[1],v0[2], nx,ny,nz, r,g,b,a);
+  cap_vertex(v2[0],v2[1],v2[2], nx,ny,nz, r,g,b,a);
+  cap_vertex(v3[0],v3[1],v3[2], nx,ny,nz, r,g,b,a);
 }
 
 /* Append one axis-aligned cube (36 vertices, per-face flat normals) to the capture. Backface
@@ -495,12 +570,12 @@ static void cap_cube(float cx, float cy, float cz, float s,
   cap_reserve(36);
   float c000[3]={x0,y0,z0}, c001[3]={x0,y0,z1}, c010[3]={x0,y1,z0}, c011[3]={x0,y1,z1};
   float c100[3]={x1,y0,z0}, c101[3]={x1,y0,z1}, c110[3]={x1,y1,z0}, c111[3]={x1,y1,z1};
-  cap_quad(c010,c011,c111,c110,  0.0f, 1.0f, 0.0f, r,g,b);  /* +Y top */
-  cap_quad(c000,c100,c101,c001,  0.0f,-1.0f, 0.0f, r,g,b);  /* -Y bottom */
-  cap_quad(c100,c110,c111,c101,  1.0f, 0.0f, 0.0f, r,g,b);  /* +X */
-  cap_quad(c000,c001,c011,c010, -1.0f, 0.0f, 0.0f, r,g,b);  /* -X */
-  cap_quad(c001,c101,c111,c011,  0.0f, 0.0f, 1.0f, r,g,b);  /* +Z */
-  cap_quad(c000,c010,c110,c100,  0.0f, 0.0f,-1.0f, r,g,b);  /* -Z */
+  cap_quad(c010,c011,c111,c110,  0.0f, 1.0f, 0.0f, r,g,b,255);  /* +Y top */
+  cap_quad(c000,c100,c101,c001,  0.0f,-1.0f, 0.0f, r,g,b,255);  /* -Y bottom */
+  cap_quad(c100,c110,c111,c101,  1.0f, 0.0f, 0.0f, r,g,b,255);  /* +X */
+  cap_quad(c000,c001,c011,c010, -1.0f, 0.0f, 0.0f, r,g,b,255);  /* -X */
+  cap_quad(c001,c101,c111,c011,  0.0f, 0.0f, 1.0f, r,g,b,255);  /* +Z */
+  cap_quad(c000,c010,c110,c100,  0.0f, 0.0f,-1.0f, r,g,b,255);  /* -Z */
 }
 
 long long gfx_open_window(long long w, long long h, const char *title) {
@@ -757,7 +832,32 @@ long long gfx_capture_quad(long long p0x, long long p0y, long long p0z,
   float v2[3] = { as_float(p2x), as_float(p2y), as_float(p2z) };
   float v3[3] = { as_float(p3x), as_float(p3y), as_float(p3z) };
   cap_quad(v0, v1, v2, v3, as_float(nx), as_float(ny), as_float(nz),
-           (unsigned char)r, (unsigned char)g, (unsigned char)b);
+           (unsigned char)r, (unsigned char)g, (unsigned char)b, 255);
+  return 0;
+}
+
+/* Append a quad carrying per-vertex DATA (not a colour) for the shader-decoded terrain views: the
+ * CUBE shader, when uViewMode >= 0, reads the vertex-colour attribute as a packed payload — R=biome
+ * tag, G=flow tier, B=flow direction, A=elevation band with the lake flag in bit 7 — and computes
+ * the on-screen colour for the current view from it (see CUBE_FS). This is what lets a view switch be
+ * a single uniform change instead of a full re-bake: geometry+data are baked ONCE. tag/tier/dir must
+ * be < 128 and band <= 126 (bit 7 is the lake flag). A no-op outside a mesh_capture_begin/end pair. */
+long long gfx_capture_quad_data(long long p0x, long long p0y, long long p0z,
+                                long long p1x, long long p1y, long long p1z,
+                                long long p2x, long long p2y, long long p2z,
+                                long long p3x, long long p3y, long long p3z,
+                                long long nx, long long ny, long long nz,
+                                long long tag, long long tier, long long dir,
+                                long long band, long long lake) {
+  if (!g_capturing) return 0;
+  cap_reserve(6);
+  float v0[3] = { as_float(p0x), as_float(p0y), as_float(p0z) };
+  float v1[3] = { as_float(p1x), as_float(p1y), as_float(p1z) };
+  float v2[3] = { as_float(p2x), as_float(p2y), as_float(p2z) };
+  float v3[3] = { as_float(p3x), as_float(p3y), as_float(p3z) };
+  unsigned char a = (unsigned char)((band & 0x7F) | (lake ? 0x80 : 0));
+  cap_quad(v0, v1, v2, v3, as_float(nx), as_float(ny), as_float(nz),
+           (unsigned char)tag, (unsigned char)tier, (unsigned char)dir, a);
   return 0;
 }
 
@@ -798,6 +898,36 @@ long long gfx_mesh_capture_end(void) {
   g_mesh_min[h][0] = mnx; g_mesh_min[h][1] = mny; g_mesh_min[h][2] = mnz;
   g_mesh_max[h][0] = mxx; g_mesh_max[h][1] = mxy; g_mesh_max[h][2] = mxz;
   return h;
+}
+
+/* Free every captured terrain mesh and reset the registry to empty, so the caller can re-bake a
+ * fresh set into the same handle range (0..). Only touches CAPTURED meshes (g_meshes); loaded models
+ * (g_models) and their GPU instances are a separate registry, left intact — so a view-switching demo
+ * can swap the whole baked terrain without disturbing resident trees. The registry is otherwise
+ * append-only up to GFX_MAX_MESHES with no way to reclaim a slot, so re-baking without this leaks. */
+long long gfx_mesh_reset(void) {
+  for (int i = 0; i < g_mesh_count; i++) UnloadMesh(g_meshes[i]);
+  g_mesh_count = 0;
+  return 0;
+}
+
+/* Select which colour a data-encoded terrain mesh (gfx_capture_quad_data) renders: -1 = raw vertex
+ * colour (the default; leaves all other cube-shader demos untouched), 0 Main / 1 Relief / 2 Flow /
+ * 3 Lakes. This is the whole point of Fix A — a view switch is this one uniform write, no re-bake. */
+long long gfx_set_view_mode(long long mode) {
+  if (!g_cube_ready) return 0;
+  int m = (int)mode;
+  SetShaderValue(g_cube_shader, g_loc_view_mode, &m, SHADER_UNIFORM_INT);
+  return 0;
+}
+
+/* Elevation band count used by the shader's grey relief ramp (Relief/Lakes views). Set once when the
+ * demo knows its config; independent of the view mode. */
+long long gfx_set_terrain_levels(long long levels) {
+  if (!g_cube_ready) return 0;
+  int l = (int)levels;
+  SetShaderValue(g_cube_shader, g_loc_levels, &l, SHADER_UNIFORM_INT);
+  return 0;
 }
 
 /* Draw a filled horizontal (XZ) plane centred at (x,y,z) of size (sx,sz) in RGBA (0-255). With
