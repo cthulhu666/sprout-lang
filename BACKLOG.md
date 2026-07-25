@@ -390,6 +390,15 @@ raylib) have landed. Fenced from core: shim `graphics/sprout_gfx.c` links only v
   `gfx_draw_model_tinted(handle,x,y,z,angle,scale,r,g,b)` extern in the raylib shim +
   `APPROVED_BUILTINS` entry (runtime change → user approval per AGENTS.md §Builtin-vs-Stdlib).
   Would make N groups legible even when clouds overlap. See `docs/ecs-v0.md §10.5`.
+- [ ] `GFX` Loam: **migrate ECS/character crowds off per-entity draw_model onto instancing** (Phase 4
+  of the gfx engine-API sweep, `docs/gfx-engine-api-v0.md`). `render_system`/`render_system_physics`
+  in `loam.view` draw N entities with N `gfx.draw_model` calls; the new `gfx.instance_push` /
+  `instance_clear` / `draw_instances` batch that into ~one draw per model. Each frame a dynamic crowd
+  `instance_clear`s its group and re-pushes every entity's transform. **Caveat:** the character demos
+  use ANIMATED skinned models, and `DrawMeshInstanced` applies one shared pose to all instances — it
+  can't give each instance its own skeletal pose. So only the non-animated flocking-style crowds
+  instance cleanly; animated crowds need a different approach (per-pose batching, or accept per-entity
+  draws for skinned models). Scope it before implementing.
 - [x] `CAM` Loam: **better camera controls** — kept the on-screen buttons, added a mouse+trackpad
   gesture layer. **Track 0 (landed):** regrouped the panel into a pan D-pad + rotate/tilt/zoom
   clusters. **Phase 1 (landed):** added raw-input gfx builtins (`gfx_key_down`, `gfx_mouse_wheel_y`
