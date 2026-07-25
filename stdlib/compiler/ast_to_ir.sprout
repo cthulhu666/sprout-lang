@@ -3375,6 +3375,103 @@ fn translate_unboxed_maybe_match(ufn: String, call_args: List typed_ast.TypedExp
                     arm_blocks, phi_incoming, fresh_join_label(base),
                     fresh_name(name_prefix, base + 1), idx_after)
 
+# --- Tuple-CPR (docs/scalar-replacement-v0.md, Stage 1) ---------------------
+# `match f(args) with | (a, b) -> body` over a top-level fn returning a 2-tuple of non-heap scalars
+# unboxes to `@f_worker` returning `{ i64, i64 }`, so the tuple never touches the heap. All-scalar
+# fields ⇒ the two returned slots carry no GC-rooting obligation (the milestone-1 guard). The tuple
+# pattern is irrefutable (one arm, no tag test), so the call site is simpler than the Maybe path.
+
+# A 2-tuple whose fields are both non-heap scalars (Int/Bool/Char).
+fn is_scalar_tuple2_type(t: types.Type) -> Bool =
+  match t with
+  | types.TTuple items ->
+      (match items with
+       | [t0, t1] -> type_kind.type_is_non_heap_scalar(t0) && type_kind.type_is_non_heap_scalar(t1)
+       | _ -> false)
+  | _ -> false
+
+# A tuple pattern binds only vars/wildcards — the bound value is a raw returned slot, no box handle.
+fn all_simple_tuple_binders(pats: List ast.Pattern) -> Bool =
+  match pats with
+  | Nil -> true
+  | Cons p rest ->
+      (match p with | ast.VarPattern _ _ -> true | ast.WildcardPattern _ -> true | _ -> false)
+      && all_simple_tuple_binders(rest)
+
+# Shared shape core (shadow-free), used by BOTH the call-site router and collect_wc_scrutinee: a
+# single irrefutable 2-var/wildcard tuple arm over a scalar 2-tuple result.
+fn tuple_worker_shape(arms: List typed_ast.TypedMatchBranch, call_ty: types.Type) -> Bool =
+  match arms with
+  | [typed_ast.TypedMatchBranch armpat _] ->
+      (match armpat with
+       | ast.TuplePattern pats _ -> (list_length(pats) == 2) && all_simple_tuple_binders(pats)
+       | _ -> false)
+      && is_scalar_tuple2_type(call_ty)
+  | _ -> false
+
+# Returns Just (worker_name, args, binders, body) when the tuple peephole applies.
+fn unboxed_tuple_match_target(scrut: typed_ast.TypedExpr,
+                              arms: List typed_ast.TypedMatchBranch,
+                              params: List String, captures: Dict String,
+                              let_names: Set, top_level: Set,
+                              ctors: Dict sprout_ir.CtorInfo) ->
+    Maybe(String, List typed_ast.TypedExpr, List ast.Pattern, typed_ast.TypedExpr) =
+  let typed_ast.TCall callee args _ _ = scrut else Nothing
+      typed_ast.TVar name _ _ = callee else Nothing
+      [typed_ast.TypedMatchBranch(ast.TuplePattern pats _) body] = arms else Nothing
+  in
+    if set_member(name, top_level)
+       && ! callee_name_shadowed (name, params, captures, let_names, ctors)
+       && tuple_worker_shape(arms, typed_ast.typed_expr_type(scrut))
+    then Just((name ++ "_worker", args, pats, body))
+    else Nothing
+
+# Bind the tuple pattern's two binders to the two unboxed return slots (VarPattern → slot; wildcard
+# binds nothing). Mirrors bind_just_arg for the tuple case.
+fn bind_one_slot(p: ast.Pattern, ssa: String, caps: Dict String) -> Dict String =
+  match p with
+  | ast.VarPattern v _ -> dict_set(v, ssa, caps)
+  | _ -> caps
+
+fn bind_tuple_slots(pats: List ast.Pattern, slot0: String, slot1: String, caps: Dict String) -> Dict String =
+  match pats with
+  | [p0, p1] -> bind_one_slot(p1, slot1, bind_one_slot(p0, slot0, caps))
+  | _ -> caps
+
+# Emit an unboxed tuple match: eval args, `IRCallUnboxed2` → (slot0, slot1), bind the two pattern
+# vars directly to the slots, translate the single arm body in place. No tag test / phi / join.
+fn translate_unboxed_tuple_match(worker: String, call_args: List typed_ast.TypedExpr,
+                                 binders: List ast.Pattern, body: typed_ast.TypedExpr,
+                                 params: List String, ctors: Dict sprout_ir.CtorInfo, idx: Int,
+                                 cur_label: String, cur_ops: List sprout_ir.IROp,
+                                 captures: Dict String,
+                                 lifted_ref: Ref (List sprout_ir.IRFunction),
+                                 top_level: Set, let_names: Set, fn_arities: Dict Int,
+                                 lambda_ctr_ref: Ref Int, lifted_idx_ref: Ref (Dict Int),
+                                 name_prefix: String) ->
+    Result String (List sprout_ir.IRBlock, String, List sprout_ir.IROp, String, Int) !{IO} =
+  match translate_args_scalar(call_args, params, ctors, idx, cur_label, cur_ops, Nil, Nil,
+                              captures, lifted_ref, top_level, let_names, fn_arities, lambda_ctr_ref,
+                              lifted_idx_ref, name_prefix) with
+  | Err msg -> Err(msg)
+  | Ok r ->
+      match r with
+      | (arg_blocks, arg_lbl, arg_ops, arg_names, idx1) ->
+          do
+            let slot0 = fresh_name(name_prefix, idx1)
+            let slot1 = fresh_name(name_prefix, idx1 + 1)
+            let call_ops = list_append(arg_ops,
+              Cons(sprout_ir.IRCallUnboxed2(slot0, slot1, sprout_ir.IRTScalar, worker, arg_names), Nil))
+            let body_caps = bind_tuple_slots(binders, slot0, slot1, captures)
+            match translate_expr(body, params, ctors, idx1 + 2, arg_lbl, call_ops, body_caps,
+                                 lifted_ref, top_level, let_names, fn_arities, lambda_ctr_ref,
+                                 lifted_idx_ref, name_prefix) with
+            | Err msg -> Err(msg)
+            | Ok br ->
+                match br with
+                | (b_blocks, b_lbl, b_ops, b_name, idx2) ->
+                    Ok((list_append(arg_blocks, b_blocks), b_lbl, b_ops, b_name, idx2))
+
 # Entry point: translate a TMatch expression.
 fn translate_match(scrut: typed_ast.TypedExpr, arms: List typed_ast.TypedMatchBranch,
                    match_ty: types.Type, params: List String,
@@ -3399,6 +3496,16 @@ fn translate_match(scrut: typed_ast.TypedExpr, arms: List typed_ast.TypedMatchBr
                                         cur_label, cur_ops, captures, lifted_ref, top_level, let_names,
                                         fn_arities, lambda_ctr_ref, lifted_idx_ref, name_prefix)
   | Nothing ->
+      # Tuple-CPR peephole: `match f(args) with (a,b) ->` over a scalar-2-tuple-returning top-level
+      # fn routes to `@f_worker` returning { i64, i64 } — the tuple never touches the heap.
+      match unboxed_tuple_match_target(scrut, arms, params, captures, let_names, top_level, ctors) with
+      | Just ttgt ->
+          (match ttgt with
+           | (worker, targs, binders, tbody) ->
+               translate_unboxed_tuple_match(worker, targs, binders, tbody, params, ctors, idx,
+                                             cur_label, cur_ops, captures, lifted_ref, top_level,
+                                             let_names, fn_arities, lambda_ctr_ref, lifted_idx_ref, name_prefix))
+      | Nothing ->
       match translate_expr(scrut, params, ctors, idx, cur_label, cur_ops,
                            captures, lifted_ref, top_level, let_names, fn_arities, lambda_ctr_ref, lifted_idx_ref,
                            name_prefix) with
@@ -6609,10 +6716,13 @@ fn collect_wc_expr(e: typed_ast.TypedExpr, top_level: Set,
 fn collect_wc_scrutinee(scrut: typed_ast.TypedExpr, arms: List typed_ast.TypedMatchBranch,
                         top_level: Set, ctors: Dict sprout_ir.CtorInfo, acc: Set) -> Set =
   match scrut with
-  | typed_ast.TCall callee _ _ _ ->
+  | typed_ast.TCall callee _ call_ty _ ->
       match callee with
       | typed_ast.TVar name _ _ ->
-          if set_member(name, top_level) && tier2_worker_shape(name, arms, ctors)
+          # ADT (width-2) OR tuple (scalar 2-tuple) result matched immediately → f needs a worker.
+          # Shadow-free superset of the router (tier2_worker_shape / tuple_worker_shape).
+          if set_member(name, top_level)
+             && (tier2_worker_shape(name, arms, ctors) || tuple_worker_shape(arms, call_ty))
           then set_insert(name, acc)
           else acc
       | _ -> acc
@@ -6719,9 +6829,24 @@ fn translate_tail_unboxed(body: typed_ast.TypedExpr, params: List String,
                         lifted_ref, top_level, let_names, fn_arities, result_adt_ctors,
                         worker_set, self_name, lambda_ctr_ref, lifted_idx_ref, name_prefix)
   | typed_ast.TMatch scrut arms _ _ ->
-      translate_tail_match(scrut, arms, body, params, ctors, idx, cur_label, cur_ops, captures,
-                           lifted_ref, top_level, let_names, fn_arities, result_adt_ctors,
-                           worker_set, self_name, lambda_ctr_ref, lifted_idx_ref, name_prefix)
+      # A tuple-worker tail that is itself a match (e.g. unwrapping a `wrap (Int,Int)` via
+      # `match s with | W p -> p`) must NOT go through the ADT-oriented translate_tail_match, which
+      # tag-dispatches the scrutinee — a wrap value has no tag. Detect the tuple result from the body
+      # type and box-and-extract instead (translate_expr handles wrap identity correctly).
+      if is_scalar_tuple2_type(typed_ast.typed_expr_type(body))
+      then translate_tail_tuple_repack(body, params, ctors, idx, cur_label, cur_ops, captures,
+                                       lifted_ref, top_level, let_names, fn_arities,
+                                       lambda_ctr_ref, lifted_idx_ref, name_prefix)
+      else translate_tail_match(scrut, arms, body, params, ctors, idx, cur_label, cur_ops, captures,
+                                lifted_ref, top_level, let_names, fn_arities, result_adt_ctors,
+                                worker_set, self_name, lambda_ctr_ref, lifted_idx_ref, name_prefix)
+  | typed_ast.TTuple items _ _ ->
+      # Tuple-CPR worker tail: a 2-tuple literal returns its fields unboxed as { i64, i64 } (only
+      # reached for a tuple worker; an ADT worker's result is never a tuple). Non-literal tuple tails
+      # fall to the catch-all, which repacks via IRGetTupleField (see translate_tail_catchall).
+      translate_tail_tuple(items, params, ctors, idx, cur_label, cur_ops, captures,
+                           lifted_ref, top_level, let_names, fn_arities,
+                           lambda_ctr_ref, lifted_idx_ref, name_prefix)
   | typed_ast.TVar name _ _ ->
       match nullary_ctor_tag_if(name, params, captures, ctors) with
       | Just tag ->
@@ -6859,6 +6984,60 @@ fn translate_tail_unary_ctor(tag: Int, args: List typed_ast.TypedExpr, params: L
                     Nil)), idx1 + 1))
   | _ -> Err("ast_to_ir: worker unary ctor with non-single arg (internal error)")
 
+# tail 2-tuple literal `(e0, e1)`: evaluate both fields, return { e0, e1 } unboxed. Stage-1 fields
+# are scalar, so the two slots need no rooting. Mirrors translate_tail_unary_ctor's block sealing.
+fn translate_tail_tuple(items: List typed_ast.TypedExpr, params: List String,
+                        ctors: Dict sprout_ir.CtorInfo, idx: Int,
+                        cur_label: String, cur_ops: List sprout_ir.IROp,
+                        captures: Dict String,
+                        lifted_ref: Ref (List sprout_ir.IRFunction),
+                        top_level: Set, let_names: Set, fn_arities: Dict Int,
+                        lambda_ctr_ref: Ref Int, lifted_idx_ref: Ref (Dict Int),
+                        name_prefix: String) ->
+    Result String (List sprout_ir.IRBlock, Int) !{IO} =
+  match translate_args_scalar(items, params, ctors, idx, cur_label, cur_ops, Nil, Nil, captures,
+                              lifted_ref, top_level, let_names, fn_arities, lambda_ctr_ref,
+                              lifted_idx_ref, name_prefix) with
+  | Err msg -> Err(msg)
+  | Ok r ->
+      match r with
+      | (ablocks, albl, aops, anames, idx1) ->
+          match anames with
+          | [n0, n1] ->
+              Ok((list_append(ablocks,
+                    Cons(sprout_ir.IRBlock(albl,
+                           list_append(aops, Cons(sprout_ir.IRRetUnboxed2(fresh_name(name_prefix, idx1), n0, n1), Nil))),
+                    Nil)), idx1 + 1))
+          | _ -> Err("ast_to_ir: tuple worker tail with != 2 items (internal error)")
+
+# Repack a NON-literal tuple tail (a match/var/call returning a 2-tuple, e.g. unwrapping a
+# `wrap (Int,Int)`): translate it normally to a boxed tuple (wrap-aware), then read its two fields
+# into the { i64, i64 } worker struct. The tuple already exists here, so this adds no allocation;
+# it just avoids handing the boxed handle back to the caller. Fields scalar in Stage 1 (no rooting).
+fn translate_tail_tuple_repack(body: typed_ast.TypedExpr, params: List String,
+                               ctors: Dict sprout_ir.CtorInfo, idx: Int,
+                               cur_label: String, cur_ops: List sprout_ir.IROp,
+                               captures: Dict String,
+                               lifted_ref: Ref (List sprout_ir.IRFunction),
+                               top_level: Set, let_names: Set, fn_arities: Dict Int,
+                               lambda_ctr_ref: Ref Int, lifted_idx_ref: Ref (Dict Int),
+                               name_prefix: String) ->
+    Result String (List sprout_ir.IRBlock, Int) !{IO} =
+  match translate_expr(body, params, ctors, idx, cur_label, cur_ops, captures, lifted_ref,
+                       top_level, let_names, fn_arities, lambda_ctr_ref, lifted_idx_ref, name_prefix) with
+  | Err msg -> Err(msg)
+  | Ok r ->
+      match r with
+      | (blocks, lbl, ops, box_ssa, idx1) ->
+          Ok((list_append(blocks,
+                Cons(sprout_ir.IRBlock(lbl,
+                       list_append(ops,
+                         Cons(sprout_ir.IRGetTupleField(fresh_name(name_prefix, idx1), box_ssa, 0, sprout_ir.IRTScalar),
+                         Cons(sprout_ir.IRGetTupleField(fresh_name(name_prefix, idx1 + 1), box_ssa, 1, sprout_ir.IRTScalar),
+                         Cons(sprout_ir.IRRetUnboxed2(fresh_name(name_prefix, idx1 + 2),
+                                fresh_name(name_prefix, idx1), fresh_name(name_prefix, idx1 + 1)), Nil))))),
+                Nil)), idx1 + 3))
+
 # tail chained call to a { i64, i64 }-returning target (a Maybe-extern _unboxed).
 fn translate_tail_chain(target_fn: String, args: List typed_ast.TypedExpr, params: List String,
                         ctors: Dict sprout_ir.CtorInfo, idx: Int,
@@ -6962,7 +7141,13 @@ fn translate_tail_catchall(body: typed_ast.TypedExpr, params: List String,
   # routing guarantees this is a width-2 ADT that SHOULD resolve (wrap/Bool are
   # excluded upstream), so an empty list is an internal invariant break.
   match result_adt_ctors with
-  | Nil -> Err("ast_to_ir: cannot emit CPR worker — result type absent from adt_index (empty repack)")
+  | Nil ->
+      # No ADT ctors ⇒ a TUPLE worker: ADT workers are guaranteed a non-empty ctor list by the
+      # routing invariant (wrap/Bool excluded upstream), so an empty list here is a tuple result
+      # (Tuple-CPR, docs/scalar-replacement-v0.md). Repack a non-literal tuple tail (a forwarded
+      # tuple call, or a var holding a tuple) by boxing it, then reading its two fields.
+      translate_tail_tuple_repack(body, params, ctors, idx, cur_label, cur_ops, captures, lifted_ref,
+                                  top_level, let_names, fn_arities, lambda_ctr_ref, lifted_idx_ref, name_prefix)
   | _ ->
   match translate_expr(body, params, ctors, idx, cur_label, cur_ops, captures, lifted_ref,
                        top_level, let_names, fn_arities, lambda_ctr_ref, lifted_idx_ref, name_prefix) with

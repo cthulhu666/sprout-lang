@@ -1,0 +1,46 @@
+import stdlib.test (TestState, new_state, assert_eq, summary)
+
+# Tuple-CPR (docs/scalar-replacement-v0.md, Stage 1): a fn returning a 2-tuple that is immediately
+# matched by a tuple pattern unboxes to a `{ i64, i64 }` worker — the tuple never touches the heap.
+# The optimization is value-NEUTRAL, so these assert the SEMANTICS are identical whether the result
+# is boxed or unboxed. The IR-shape win (no sprout_alloc_tuple_blob at the matched call site) is
+# checked separately via tests/smoke_shapes/07_tuple_cpr.spr. Three tail shapes are exercised so the
+# worker's every path is covered:
+#   - direct tuple literal `(b, a)`          → the fast IRRetUnboxed2 path
+#   - if-chain bottoming in tuple literals    → recursion into the tuple tail per branch
+#   - forwarding another tuple call           → the tuple-repack catch-all (box then extract fields)
+
+fn swap_pair(a: Int, b: Int) -> (Int, Int) = (b, a)
+
+fn use_swap(a: Int, b: Int) -> Int =
+  match swap_pair(a, b) with
+  | (x, y) -> (x * 10) + y
+
+fn slice_of(tag: Int) -> (Int, Int) =
+  if tag == 0 then (0, 2)
+  else if tag == 1 then (2, 4)
+  else (6, 3)
+
+fn base_plus_cnt(tag: Int) -> Int =
+  match slice_of(tag) with
+  | (base, cnt) -> base + cnt
+
+fn forward(a: Int, b: Int) -> (Int, Int) = swap_pair(a, b)
+
+fn use_forward(a: Int, b: Int) -> Int =
+  match forward(a, b) with
+  | (x, y) -> x - y
+
+fn main() -> Unit !{IO} =
+  do
+    state <- new_state()
+    # direct tuple-literal tail
+    assert_eq(state, "swap 3,4 -> (4,3) -> 43", use_swap(3, 4), 43)
+    assert_eq(state, "swap 0,0 -> 0", use_swap(0, 0), 0)
+    # if-chain tail bottoming in tuple literals
+    assert_eq(state, "slice tag0 -> 0+2", base_plus_cnt(0), 2)
+    assert_eq(state, "slice tag1 -> 2+4", base_plus_cnt(1), 6)
+    assert_eq(state, "slice tag9 -> 6+3", base_plus_cnt(9), 9)
+    # forwarding (non-literal) tail → repack path; forward(7,2)=swap(7,2)=(2,7) -> 2-7
+    assert_eq(state, "forward 7,2 -> (2,7) -> -5", use_forward(7, 2), 0 - 5)
+    summary(state)
