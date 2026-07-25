@@ -450,7 +450,7 @@ export fn ir_header() -> String =
   # Stack save/restore intrinsics for TCO loops (reset per-iteration root allocas).
   "declare ptr @llvm.stacksave()\n" ++
   "declare void @llvm.stackrestore(ptr)\n" ++
-  # Boxed-ADT constructors.  Mirrors the sprout_make0..sprout_make9 set in
+  # Boxed-ADT constructors.  Mirrors the sprout_make0..sprout_make10 set in
   # codegen.sprout (compiler intrinsic table).  All arities are declared
   # unconditionally — only the ones actually called are linked.
   # NOTE: arity cap of 9 mirrored in ast_to_ir.sprout's translate_boxed_ctor_call.
@@ -465,6 +465,7 @@ export fn ir_header() -> String =
   "declare i64 @sprout_make7(i64, i64, i64, i64, i64, i64, i64, i64)\n" ++
   "declare i64 @sprout_make8(i64, i64, i64, i64, i64, i64, i64, i64, i64)\n" ++
   "declare i64 @sprout_make9(i64, i64, i64, i64, i64, i64, i64, i64, i64, i64)\n" ++
+  "declare i64 @sprout_make10(i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64)\n" ++
   # Tier-1 CPR peephole: unboxed { i64, i64 } (SproutUnboxed2) variants of the
   # Maybe-returning externs.  Emitted by IRCallUnboxed2 when a `match` scrutinizes
   # one of these directly.  Arg signatures mirror the boxed externs' uniform-i64

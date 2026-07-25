@@ -134,6 +134,44 @@ cost (≈0 s of the 1024² demo's generate+solve+bake). `widen_radius` (pure) an
 synthetic 3×3 grid — a centre major promotes its neighbours; radius 0 leaves them untouched) are both
 unit-tested.
 
+## 6c. River meander (visual — step 1c)
+
+The D8 flow field bends only in 45° increments, so on gentle terrain a river renders as an
+axis-aligned **staircase** of right angles. `meander_rivers` bends it into a sinuous ribbon by
+**displacing the rendered mask (`flow_tier`) laterally** by a smooth seeded noise field — and,
+crucially, leaves `flow_dir`/`filled` untouched. Those two carry every drainage invariant (strict
+descent, bounded accumulation, termination); meandering only the *paint* keeps them true **by
+construction**, so no hydrology property test changes. It composes with the other passes exactly like
+widening — rewrite `flow_tier` in place, double-buffered, then the *unchanged* carve/bake/tree-skip
+readers follow — and runs **before** `widen_rivers` (relocate the thin centre line, then thicken it).
+
+Three design points, each fixing a concrete failure mode:
+
+- **Forward-scatter, not backward-gather.** Each source river cell *stamps* its tier at the displaced
+  target (max-merge on collision). A backward warp (`out[c] = src[c+off]`) can leave a **gap** in a
+  1-cell creek at a noise extremum; forward-scatter never drops a source cell, so a creek stays
+  connected — spatial neighbours (a river path is a chain of them) get near-equal smooth offsets, so
+  their targets stay adjacent.
+- **The flatness gate is a carve-correctness constraint, not flavour.** A displaced river lands on
+  terrain the D8 solve never routed it through; carve then lowers *that* band, so on a slope a
+  meandering channel would climb **uphill**. `meander_amp_eff` pins amplitude toward 0 as local relief
+  rises (full on a floodplain, half on a moderate slope, zero in a gorge), keeping gorge rivers on
+  their D8 path so the carved channel still descends.
+- **Coherent noise, entirely in `Int`.** Sprout has no `Double→Int` primitive (the numeric layer's
+  `floor`/`round_nearest` deliberately stay in `Double`), and the offsets must be integer cell counts.
+  So the displacement is **integer bilinear interpolation of per-lattice-corner `rng_hash2` hashes**
+  (mirrors terrain's `value_at`, but never leaves `Int`). Amplitude ≪ wavelength keeps the field
+  slowly varying (|Δ| per cell ≪ 1), which is what guarantees a smooth bend rather than a tear.
+
+`meander_amp` (max lateral cells) and `meander_wavelength` (bend period) are config-tunable
+`HydroParams` fields; `meander_amp = 0` is an exact no-op (the straight-river look). Adding these two
+fields pushed `HydroParams` to 10 fields, past the runtime's former `sprout_make9` ceiling — so the
+constructor-arity cap was lifted to 10 (runtime `sprout_make10`, the `ir_header` declare, the
+`ast_to_ir` cap check, and the object-header arity nibble which already had spare bits). `meander_amp`,
+`meander_wavelength`, `meander_corner`/`meander_axis`/`meander_offset` (pure, unit-tested directly),
+`local_relief`, and `meander_rivers` (synthetic-grid displacement/determinism/no-op) are all tested in
+`tests/loam/test_hydrology.spr`.
+
 ## 7. Tests
 
 `tests/loam/test_hydrology.spr` (TDD — written failing first), at span 128:
@@ -147,6 +185,10 @@ unit-tested.
   (the property that keeps a carved river flowing downhill — §6a).
 - **Widen**: `widen_radius` per tier; `widen_rivers` on a synthetic 3×3 grid dilates a centre major
   to its neighbours, and radius 0 leaves them untouched (§6b).
+- **Meander** (§6c): `meander_offset` is bounded to `[-amp, amp]`, non-vacuous, coherent (no
+  adjacent-cell teleport), and an exact no-op at `amp = 0`; `meander_rivers` on a synthetic grid over a
+  flat cfg relocates the mask, keeps river cells alive, is deterministic, and is an exact no-op at
+  `amp = 0`.
 
 `tests/loam/test_config.spr` covers `loam/config.sprout`, the `key value` (Int) reader the demo
 uses to load these knobs from a file: comment/blank tolerance, multi-key parse, malformed-value
@@ -172,8 +214,9 @@ sample that rescales for longer rivers (`lattice0 128`, `octaves 3`).
 1. **Valley carving** — ✅ landed (§6a): river cells sunk into shaded channels with banks, depth by
    tier, config-tunable.
 1b. **Width** — ✅ landed (§6b): major rivers dilate to multiple tiles, config-tunable radius.
-   Still to do: **meander** (lateral offset, stronger in low-gradient lowlands) to de-blockify the D8
-   right-angle paths into sinuous ribbons; the **animated translucent water surface** on top of the
+1c. **Meander** — ✅ landed (§6c): the river mask is displaced laterally by a coherent, flatness-gated
+   noise field so the D8 staircase reads as sinuous ribbons, config-tunable amplitude/wavelength.
+   Still to do: the **animated translucent water surface** on top of the
    opaque bed (a `uTime` water shader — runtime work), with **waterfalls** where the carve/band drop
    between consecutive flow cells is steep, and **dam** props placed like trees.
 2. **Raft mechanics** — current from `flow_dir` + accumulation (downstream cheap, upstream

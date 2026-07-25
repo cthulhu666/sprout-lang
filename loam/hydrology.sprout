@@ -2,6 +2,7 @@ module loam.hydrology
 
 import loam.terrain (Config, elev_at, sea_level)
 import stdlib.rng (rng_hash2)
+import stdlib.math (fabs)
 import stdlib.mutable (MutMatrix, mutmatrix_new, mutmatrix_at_or, mutmatrix_set)
 
 # Loam's procedural HYDROLOGY — a headless, seeded, deterministic drainage model layered on the
@@ -38,11 +39,13 @@ let fill_epsilon = 0.0000001
 # without recompiling; default_hydro_params reproduces the historical fixed values.
 export type HydroParams = (tier1_min: Int, tier2_min: Int, tier3_min: Int,
                            carve1: Int, carve2: Int, carve3: Int,
-                           widen2: Int, widen3: Int)
+                           widen2: Int, widen3: Int,
+                           meander_amp: Int, meander_wavelength: Int)
 export fn default_hydro_params() -> HydroParams =
   HydroParams(tier1_min = 40, tier2_min = 200, tier3_min = 900,  # accumulation → creek/river/major
               carve1 = 1, carve2 = 2, carve3 = 3,  # channel carve depth (bands) by tier
-              widen2 = 0, widen3 = 1)  # sideways widen radius (cells): river none, major 1 → 3 wide
+              widen2 = 0, widen3 = 1,  # sideways widen radius (cells): river none, major 1 → 3 wide
+              meander_amp = 2, meander_wavelength = 24)  # lateral wiggle: ±2 cells, ~24-cell period
 
 # Channel carve depth (in elevation bands) for a cell's flow_tier: how far below its own terrain a
 # river cell's floor is lowered so the water sits in a valley with visible banks (the demo maps this
@@ -125,6 +128,174 @@ export fn widen_rivers(h: Hydrology, p: HydroParams, span: Int) -> Unit !{IO} =
     do
       tmp <- mutmatrix_new(span, span, 0)
       widen_fill(h, p, tmp, span, 0, 0)
+      widen_commit(h, tmp, span, 0, 0)
+      ()
+
+# --- River meander (de-blockify the D8 staircase into sinuous ribbons) -------
+# The D8 flow field has only 8 headings, so rivers render as axis-aligned staircases. Meander bends
+# them into sinuous ribbons by displacing the RENDERED river mask (flow_tier) laterally by a smooth,
+# seeded noise field, leaving flow_dir/filled (which carry the termination + accumulation
+# correctness) untouched — so every drainage invariant stays true by construction. Like widen_rivers
+# it rewrites flow_tier in place, double-buffered, and is a no-op at meander_amp <= 0.
+#
+# The displacement is COHERENT integer noise: integer bilinear interpolation of per-lattice-corner
+# hashes (rng_hash2), staying entirely in Int (Sprout has no Double->Int primitive, and the offsets
+# must be Int cell counts). `wl` sets the lattice spacing; `amp` the max lateral cells. The field
+# varies slowly (|delta| per cell << 1 for amp << wl), so adjacent cells shift almost identically and
+# the ribbon bends rather than scatters — but the integer offset still increments by 1 every so often,
+# which would leave a 1-cell gap between two consecutive targets. meander_scatter closes those by
+# stamping a CONNECTED segment along the flow topology (see there), so a thin creek stays unbroken.
+
+# Distinct salts decorrelate the x- and z-axis noise fields (cf. terrain's moisture/temp offsets).
+let meander_salt_x = 0
+let meander_salt_z = 1013904223
+
+# Local-relief thresholds (Double, compile-time like every other appearance constant). The flatness
+# GATE is a carve-correctness constraint, not flavour: a displaced river lands on terrain D8 never
+# routed it through, and carve then lowers THAT band — so on a slope a meandering channel would climb
+# uphill. Pinning amplitude toward 0 as local relief rises keeps rivers in gorges on their D8 path.
+#
+# Calibrated to the DEFAULT world's river-cell relief (measured: most river cells fall in [0.02,0.06],
+# a steep V-valley tail beyond; docs/rivers-v0.md §6c). The band-safety argument fixes the same
+# numbers independently: a shift of `amp` cells over relief R moves the carved floor ~R*amp, and
+# keeping that under one band (~1/levels ≈ 0.083) needs R < ~0.04 at amp 2. So full amplitude below
+# 0.04 (floodplains meander freely), half through 0.08, zero above (gorges stay on the D8 path). On a
+# smoother world (broad basins) relief is lower, so rivers there meander fully — which is the goal.
+let meander_flat_max = 0.04  # relief below this => full amplitude (a floodplain)
+let meander_steep_min = 0.08  # relief above this => zero amplitude (a gorge; river stays put)
+
+# Signed offset at one lattice CORNER: a hash reduced into [-amp, amp]. rng_hash2 is non-negative in
+# [0, 2^31), so a plain modulo then a shift centres it. (amp > 0 guaranteed by meander_axis.)
+fn meander_corner(seed: Int, lx: Int, lz: Int, amp: Int) -> Int =
+  let m = (2 * amp) + 1
+      raw = rng_hash2(lx, lz, seed)
+  in (raw - ((raw / m) * m)) - amp
+
+# Integer bilinear interpolation of the four surrounding corner offsets — one axis of displacement.
+# wl = lattice spacing (cells); gx, gz are non-negative, so integer `/` floors. Weights sum to
+# wl*wl, so dividing by wl*wl yields an offset in [-amp, amp].
+fn meander_axis(seed: Int, gx: Int, gz: Int, amp: Int, wl: Int) -> Int =
+  if (amp <= 0) || (wl <= 0) then 0
+  else
+    let lx = gx / wl
+        lz = gz / wl
+        fx = gx - (lx * wl)
+        fz = gz - (lz * wl)
+        o00 = meander_corner(seed, lx, lz, amp)
+        o10 = meander_corner(seed, lx + 1, lz, amp)
+        o01 = meander_corner(seed, lx, lz + 1, amp)
+        o11 = meander_corner(seed, lx + 1, lz + 1, amp)
+        top = (o00 * (wl - fx)) + (o10 * fx)
+        bot = (o01 * (wl - fx)) + (o11 * fx)
+        num = (top * (wl - fz)) + (bot * fz)
+    in num / (wl * wl)
+
+# The (x, z) lateral displacement at a cell. Pure — no terrain, no window — so it is directly
+# unit-tested. Two decorrelated axes give a 2D wiggle. amp<=0 or wl<=0 => (0, 0) exactly.
+export fn meander_offset(seed: Int, gx: Int, gz: Int, amp: Int, wl: Int) -> (Int, Int) =
+  (meander_axis(seed + meander_salt_x, gx, gz, amp, wl),
+   meander_axis(seed + meander_salt_z, gx, gz, amp, wl))
+
+# Max |elevation difference| to the 8 neighbours — the local slope. Pure (elev_at is pure).
+fn relief_scan(cfg: Config, gx: Int, gz: Int, e: Double, d: Int, best: Double) -> Double =
+  if d > 8 then best
+  else
+    let en = elev_at(cfg, gx + dir_dc(d), gz + dir_dr(d))
+        diff = fabs(en - e)
+    in relief_scan(cfg, gx, gz, e, d + 1, if diff > best then diff else best)
+
+fn local_relief(cfg: Config, gx: Int, gz: Int) -> Double =
+  relief_scan(cfg, gx, gz, elev_at(cfg, gx, gz), 1, 0.0)
+
+# Pure flatness gate: full amp on a floodplain, half on a moderate slope, 0 in a gorge. Split out from
+# meander_amp_eff so its three branches are unit-tested directly (against known relief values). A
+# stepwise gate keeps the offset integer (no Double->Int).
+export fn meander_gate(relief: Double, amp: Int) -> Int =
+  if relief >= meander_steep_min then 0
+  else if relief >= meander_flat_max then amp / 2
+  else amp
+
+fn meander_amp_eff(cfg: Config, gx: Int, gz: Int, amp: Int) -> Int =
+  meander_gate(local_relief(cfg, gx, gz), amp)
+
+fn in_span(v: Int, span: Int) -> Bool = (v >= 0) && (v < span)
+
+# The displaced target of a cell (pure: relief and the noise field are both pure). One accessor per
+# axis so the hot scatter avoids allocating a tuple per river cell (cf. dir_dr/dir_dc).
+fn meander_tx(cfg: Config, p: HydroParams, gx: Int, gz: Int) -> Int =
+  gx + meander_axis(cfg.seed + meander_salt_x, gx, gz, meander_amp_eff(cfg, gx, gz, p.meander_amp), p.meander_wavelength)
+fn meander_tz(cfg: Config, p: HydroParams, gx: Int, gz: Int) -> Int =
+  gz + meander_axis(cfg.seed + meander_salt_z, gx, gz, meander_amp_eff(cfg, gx, gz, p.meander_amp), p.meander_wavelength)
+
+# Max-merge stamp one cell (skips out-of-range).
+fn stamp_cell(out: MutMatrix Int, x: Int, z: Int, tier: Int, span: Int) -> Int !{IO} =
+  if in_span(x, span) && in_span(z, span) then
+    do
+      prev <- mm_get_i(out, z, x, 0)
+      mutmatrix_set(out, z, x, if tier > prev then tier else prev)
+      0
+  else 0
+
+# Stamp `tier` (max-merge) along the integer line (x0,z0)->(x1,z1): a connected 8-neighbour segment,
+# so a displaced ribbon has no gaps. Integer DDA over the dominant axis; `steps` is tiny (the two
+# endpoints are the displaced targets of adjacent river cells, so they differ by only a few cells).
+fn stamp_line_go(out: MutMatrix Int, x0: Int, z0: Int, dx: Int, dz: Int, steps: Int,
+                 tier: Int, span: Int, i: Int) -> Int !{IO} =
+  if i > steps then 0
+  else
+    do
+      stamp_cell(out, x0 + ((dx * i) / steps), z0 + ((dz * i) / steps), tier, span)
+      stamp_line_go(out, x0, z0, dx, dz, steps, tier, span, i + 1)
+
+fn stamp_line(out: MutMatrix Int, x0: Int, z0: Int, x1: Int, z1: Int, tier: Int, span: Int) -> Int !{IO} =
+  let dx = x1 - x0
+      dz = z1 - z0
+      adx = iabs(dx)
+      adz = iabs(dz)
+      steps = if adx > adz then adx else adz
+  in if steps <= 0 then stamp_cell(out, x0, z0, tier, span)
+     else stamp_line_go(out, x0, z0, dx, dz, steps, tier, span, 0)
+
+# Forward-scatter one row-major sweep. Each river cell stamps a CONNECTED segment from its own
+# displaced target to its flow-DOWNSTREAM neighbour's displaced target (max-merge). Bridging along the
+# real flow topology — not scan order — is what guarantees the relocated ribbon has no 1-cell gaps
+# where the integer offset increments: forward-scatter alone drops no source cell, but consecutive
+# targets can land 2 apart, which tears a thin (never-widened) creek. An outlet cell (flow_dir 0) has
+# no downstream, so it stamps just its own target. Reads the ORIGINAL flow_tier/flow_dir in `h`.
+fn meander_scatter(h: Hydrology, cfg: Config, p: HydroParams, out: MutMatrix Int,
+                   span: Int, r: Int, c: Int) -> Int !{IO} =
+  if r >= span then 0
+  else if c >= span then meander_scatter(h, cfg, p, out, span, r + 1, 0)
+  else
+    do
+      t <- mm_get_i(h.flow_tier, r, c, 0)
+      if t <= 0 then meander_scatter(h, cfg, p, out, span, r, c + 1)
+      else
+        do
+          let tx0 = meander_tx(cfg, p, c, r)
+          let tz0 = meander_tz(cfg, p, c, r)
+          d <- mm_get_i(h.flow_dir, r, c, 0)
+          if d == 0 then
+            do
+              stamp_cell(out, tx0, tz0, t, span)
+              meander_scatter(h, cfg, p, out, span, r, c + 1)
+          else
+            do
+              let nc = c + dir_dc(d)
+              let nr = r + dir_dr(d)
+              stamp_line(out, tx0, tz0, meander_tx(cfg, p, nc, nr), meander_tz(cfg, p, nc, nr), t, span)
+              meander_scatter(h, cfg, p, out, span, r, c + 1)
+
+# Meander rivers in place: displace the flow_tier mask laterally by a coherent noise field, gated by
+# local flatness. Double-buffered (scatter into a temp grid from the ORIGINAL tiers, then commit).
+# No-op when meander_amp/wavelength <= 0. Runs after compute_hydrology, BEFORE widen (widen then
+# thickens the relocated ribbon) and carve.
+export fn meander_rivers(h: Hydrology, cfg: Config, p: HydroParams, span: Int) -> Unit !{IO} =
+  if (p.meander_amp <= 0) || (p.meander_wavelength <= 0) then ()
+  else
+    do
+      tmp <- mutmatrix_new(span, span, 0)
+      meander_scatter(h, cfg, p, tmp, span, 0, 0)
       widen_commit(h, tmp, span, 0, 0)
       ()
 # Safety cap on any downstream walk: with a correct (acyclic) field no walk exceeds the map, so

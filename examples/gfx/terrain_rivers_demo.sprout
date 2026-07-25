@@ -2,7 +2,7 @@ module examples.gfx.terrain_rivers_demo
 
 import stdlib.gfx
 import loam.terrain (Config, tile_kind_at, tile_band_at, tile_kind_tag, sea_level_band, spatial_hash, exposed_step_bands, chunk_linear_index, tile_kind_of, band_of, elev_at)
-import loam.hydrology (Hydrology, HydroParams, compute_hydrology, hydro_tier, hydro_dir, hydro_filled, carve_depth, widen_rivers)
+import loam.hydrology (Hydrology, HydroParams, compute_hydrology, hydro_tier, hydro_dir, hydro_filled, carve_depth, widen_rivers, meander_rivers)
 import loam.config (parse_config, cfg_int)
 import loam.vegetation (TreeKind, Palm, Broadleaf, Conifer, DarkConifer, Cactus, Shrub, tree_kind_tag, tree_for_biome)
 import loam.camera (Cam, cam_drive, cam_distance, tree_cull_dist)
@@ -63,6 +63,8 @@ let def_carve2 = 2  # → river
 let def_carve3 = 3  # → major river (deeper = more dramatic valley; 0 = flat, painted-on)
 let def_widen2 = 0  # sideways widen radius (cells) — river stays 1 wide
 let def_widen3 = 1  # → major river spreads 1 cell each side (3 wide); 0 = 1-wide like the rest
+let def_meander_amp = 2  # lateral meander amplitude (cells): rivers wiggle ±2 off the D8 path; 0 = straight
+let def_meander_wavelength = 24  # meander period (cells): larger = longer, lazier bends
 
 # Appearance ----------------------------------------------------------------
 let tile_size = 1.0  # world units per tile (cube edge)
@@ -573,6 +575,8 @@ fn main() -> Unit !{IO} =
     let cv3 = cfg_int(settings, "carve3", def_carve3)
     let wd2 = cfg_int(settings, "widen2", def_widen2)
     let wd3 = cfg_int(settings, "widen3", def_widen3)
+    let mamp = cfg_int(settings, "meander_amp", def_meander_amp)
+    let mwl = cfg_int(settings, "meander_wavelength", def_meander_wavelength)
     # Derived map dimensions (formerly module constants; now depend on the config).
     let span_tiles = region_chunks * chunk_edge
     let chunk_count = region_chunks * region_chunks  # one baked mesh per chunk
@@ -585,7 +589,8 @@ fn main() -> Unit !{IO} =
     let cfg = Config(seed = seed, chunk_size = chunk_edge, octaves = octaves,
                      lattice0 = lattice0, elevation_levels = elevation_levels)
     let params = HydroParams(tier1_min = t1, tier2_min = t2, tier3_min = t3,
-                             carve1 = cv1, carve2 = cv2, carve3 = cv3, widen2 = wd2, widen3 = wd3)
+                             carve1 = cv1, carve2 = cv2, carve3 = cv3, widen2 = wd2, widen3 = wd3,
+                             meander_amp = mamp, meander_wavelength = mwl)
     # Opening rig: same span-scaled standoff/height as before, looking at the map centre.
     let cam_start = Cam(yaw = 0.0, radius = world_span * cam_radius_frac,
                         height = world_span * cam_height_frac, tx = 0.0, ty = cam_target_y, tz = 0.0)
@@ -618,6 +623,11 @@ fn main() -> Unit !{IO} =
     # Global hydrology pass over the whole region (same cfg + span as the terrain), computed once
     # upfront. flow_tier lines up cell-for-cell with the generated tiles; params sets the tiers.
     h <- compute_hydrology(cfg, span_tiles, params)
+    # Meander: displace the flow_tier mask laterally by a smooth, flatness-gated noise field so the D8
+    # staircase reads as sinuous ribbons instead of axis-aligned right angles. Rewrites flow_tier only
+    # (flow_dir/filled — the drainage correctness — are untouched). Runs BEFORE widen so widen thickens
+    # the relocated ribbon; a no-op when meander_amp <= 0, preserving the straight-river look exactly.
+    meander_rivers(h, cfg, params, span_tiles)
     # Widen big rivers: dilate flow_tier in place so a major river spans multiple tiles instead of one
     # (a 1-wide major reads as a creek). Runs BEFORE carve/bake so the widened cells carve, colour and
     # skip-trees as water too. No-op when no tier widens (default river/creek), so this is additive.

@@ -46,18 +46,27 @@ fn translate_source(src: String) -> Result String String !{IO} =
       | Ok prog ->
           do
             tc <- checker.typecheck_typed(prog, Nil)
-            match tc with
-            | typed_ast.TypedErr _ msg -> Err("check: " ++ msg)
-            | typed_ast.TypedOk typed_prog env ->
-                match lowering.lower_program(typed_prog, env) with
-                | lowering.LowerErr msg -> Err("lower: " ++ msg)
-                | lowering.LowerOk lowered ->
-                    match ast_to_ir.translate_program(lowered) with
-                    | Err msg -> Err(msg)
-                    | Ok pair ->
-                        match pair with
-                        | (ir_prog, idx_map) ->
-                            Ok(ir_lowering.lower_program(ir_rooting.insert_roots(ir_prog, idx_map)))
+            finish_translate(tc)
+
+# The post-typecheck tail of the pipeline, split into one-stage helpers so no single nested-match
+# chain runs staircase-deep (the pipeline is inherently 6 stages: lex, parse, check, lower, translate,
+# emit-IR). Behaviour is identical to one long match chain.
+fn finish_translate(tc: typed_ast.TypedResult) -> Result String String !{IO} =
+  match tc with
+  | typed_ast.TypedErr _ msg -> Err("check: " ++ msg)
+  | typed_ast.TypedOk typed_prog env -> emit_lowered(lowering.lower_program(typed_prog, env))
+
+fn emit_lowered(lr: lowering.LowerResult) -> Result String String !{IO} =
+  match lr with
+  | lowering.LowerErr msg -> Err("lower: " ++ msg)
+  | lowering.LowerOk lowered -> emit_ir(lowered)
+
+fn emit_ir(lowered: typed_ast.TypedProgram) -> Result String String !{IO} =
+  match ast_to_ir.translate_program(lowered) with
+  | Err msg -> Err(msg)
+  | Ok pair ->
+      match pair with
+      | (ir_prog, idx_map) -> Ok(ir_lowering.lower_program(ir_rooting.insert_roots(ir_prog, idx_map)))
 
 # True iff translate_source(src) returned Err whose message contains needle.
 # Important: must `match translate_source(...)` DIRECTLY rather than binding
@@ -365,15 +374,19 @@ fn main() -> Unit !{IO} =
                 m2_arity)
 
     # ---------------------------------------------------------------------------
-    # S3 test: 10-arity ctor must yield Err "arity exceeds 9".
-    # max_arity = 10 -> not CPR-eligible (CPR is max_arity <= 2), so the boxed
-    # path fires and hits the guard in translate_boxed_ctor_call before
-    # emitting @sprout_make10 (which is undeclared in ir_header).
-    s3 <- translated_err_contains(
+    # S3 test: the boxed-ctor arity ceiling is 10 (runtime sprout_make0..make10).
+    # A 10-arity ctor now compiles and emits @sprout_make10 (added for HydroParams,
+    # docs/rivers-v0.md §6c); an 11-arity ctor still hits the guard in
+    # translate_boxed_ctor_call (@sprout_make11 is undeclared in ir_header).
+    s3_ok <- translated_ok_ir_contains(
       "type BigCtor = BigCtor Int Int Int Int Int Int Int Int Int Int\nfn mk() -> BigCtor = BigCtor(1,2,3,4,5,6,7,8,9,10)",
-      "arity exceeds 9")
-    assert_true(state, "S3: 10-arity ctor yields Err \"arity exceeds 9\"",
-                s3)
+      "@sprout_make10")
+    assert_true(state, "S3: 10-arity ctor now compiles and emits @sprout_make10", s3_ok)
+    s3_err <- translated_err_contains(
+      "type BigCtor = BigCtor Int Int Int Int Int Int Int Int Int Int Int\nfn mk() -> BigCtor = BigCtor(1,2,3,4,5,6,7,8,9,10,11)",
+      "arity exceeds 10")
+    assert_true(state, "S3: 11-arity ctor yields Err \"arity exceeds 10\"",
+                s3_err)
 
     # ---------------------------------------------------------------------------
     # M3 PR 15a: Bool ctor fields are now accepted (IRZextI1ToI64 wiring done).

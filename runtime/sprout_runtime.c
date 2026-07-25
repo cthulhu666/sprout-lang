@@ -318,6 +318,7 @@ long long sprout_make6(long long tag, long long a0, long long a1, long long a2, 
 long long sprout_make7(long long tag, long long a0, long long a1, long long a2, long long a3, long long a4, long long a5, long long a6);
 long long sprout_make8(long long tag, long long a0, long long a1, long long a2, long long a3, long long a4, long long a5, long long a6, long long a7);
 long long sprout_make9(long long tag, long long a0, long long a1, long long a2, long long a3, long long a4, long long a5, long long a6, long long a7, long long a8);
+long long sprout_make10(long long tag, long long a0, long long a1, long long a2, long long a3, long long a4, long long a5, long long a6, long long a7, long long a8, long long a9);
 long long sprout_rebox2(long long tag, long long f0);
 long long sprout_rebox3(long long tag, long long f0, long long f1);
 long long sprout_tag(long long h);
@@ -568,7 +569,7 @@ static int sprout_gc_hdrcheck_on(void) {
  *         bits 8-9  = GC color (unused in this phase, written as 0)
  *         bits 10-13 = reserved GC bits (written as 0)
  *         bits 14-63 = aux (50 bits); interpretation per kind:
- *           OBJ:     (tag << 4) | arity  — low 4 bits = ctor arity (0..9)
+ *           OBJ:     (tag << 4) | arity  — low 4 bits = ctor arity (0..15)
  *           CLOSURE: n_caps
  *           TUPLE:   width in words
  *           others:  0
@@ -596,11 +597,12 @@ static inline void sprout_hdr_write(void* payload, SproutHeapKind kind, unsigned
 
 /* Write tag into OBJ header keeping the arity nibble intact.
  * Must be called before first use of sprout_tag on this payload.
- * Arity must fit in 4 bits (0..9); checked in debug mode. */
+ * Arity must fit in 4 bits (0..15); checked in debug mode. Current max ctor
+ * arity is 10 (sprout_make0..sprout_make10), well within the nibble. */
 static inline void sprout_obj_write_tag(void* payload, long long tag, int arity) {
-  /* Debug arity-range check: 4-bit nibble holds 0..9 (max ctor arity). */
-  if (sprout_gc_hdrcheck_on() && (arity < 0 || arity > 9)) {
-    fprintf(stderr, "[sprout] sprout_obj_write_tag: arity %d out of 0..9 range\n", arity);
+  /* Debug arity-range check: 4-bit nibble physically holds 0..15. */
+  if (sprout_gc_hdrcheck_on() && (arity < 0 || arity > 15)) {
+    fprintf(stderr, "[sprout] sprout_obj_write_tag: arity %d out of 0..15 range\n", arity);
     abort();
   }
   sprout_hdr_write(payload, SPROUT_HEAP_OBJ,
@@ -3878,7 +3880,7 @@ static void sprout_debug_adt_rec(long long val, int depth) {
   const char* fk = (meta->field_kinds != NULL) ? meta->field_kinds : "";
   /* Read only the fields this object actually has; reading beyond the ctor
      arity is OOB on exact-size objects. */
-  for (long long i = 0; i < meta->arity && i < 9; i++) {
+  for (long long i = 0; i < meta->arity && i < 10; i++) {
     if (i > 0) fprintf(stderr, ", ");
     char kind = (fk[i] != '\0') ? fk[i] : '_';
     sprout_debug_field(sprout_field(val, i), kind, depth);
@@ -4050,6 +4052,15 @@ long long sprout_make9(long long tag, long long a0, long long a1, long long a2, 
   ((long long*)obj)[0] = a0; ((long long*)obj)[1] = a1; ((long long*)obj)[2] = a2;
   ((long long*)obj)[3] = a3; ((long long*)obj)[4] = a4; ((long long*)obj)[5] = a5;
   ((long long*)obj)[6] = a6; ((long long*)obj)[7] = a7; ((long long*)obj)[8] = a8;
+  return box_ptr(obj);
+}
+long long sprout_make10(long long tag, long long a0, long long a1, long long a2, long long a3, long long a4, long long a5, long long a6, long long a7, long long a8, long long a9) {
+  void* obj = sprout_alloc_obj_raw(10, "sprout_make10: out of memory");
+  sprout_obj_write_tag(obj, tag, 10);
+  ((long long*)obj)[0] = a0; ((long long*)obj)[1] = a1; ((long long*)obj)[2] = a2;
+  ((long long*)obj)[3] = a3; ((long long*)obj)[4] = a4; ((long long*)obj)[5] = a5;
+  ((long long*)obj)[6] = a6; ((long long*)obj)[7] = a7; ((long long*)obj)[8] = a8;
+  ((long long*)obj)[9] = a9;
   return box_ptr(obj);
 }
 

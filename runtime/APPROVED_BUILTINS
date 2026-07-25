@@ -135,6 +135,7 @@ sprout_make6
 sprout_make7
 sprout_make8
 sprout_make9
+sprout_make10  # boxed-ADT constructor for a 10-field record (HydroParams); codegen emits @sprout_makeN and the runtime must define each arity — pure allocation, cannot live in Sprout
 sprout_nothing
 sprout_rebox2  # CPR wrapper helper: boxes { tag, f0 } struct back to i64 heap pointer; needs C-level ctor-arity dispatch that Sprout stdlib cannot call directly
 sprout_rebox3  # CPR wrapper helper: boxes { tag, f0, f1 } struct back to i64 heap pointer; same rationale as sprout_rebox2

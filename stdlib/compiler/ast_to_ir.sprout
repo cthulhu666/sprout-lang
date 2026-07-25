@@ -4846,11 +4846,11 @@ fn translate_boxed_ctor_call(name: String, tag: Int, actual_ar: Int,
             | [inner_ssa] -> Ok((arg_blocks, arg_cur_lbl, arg_cur_ops, inner_ssa, idx1))
             | _ -> Err("ast_to_ir: wrap ctor must have exactly one field")
   else
-  # NOTE: cap of 9 mirrors @sprout_make0..@sprout_make9 declared in
+  # NOTE: cap of 10 mirrors @sprout_make0..@sprout_make10 declared in
   # ir_lowering.sprout's ir_header(). If you lift this, also extend
-  # ir_header's declares.
-  if actual_ar >= 10
-  then Err("ast_to_ir: ctor arity exceeds 9 (got " ++ int_to_string(actual_ar) ++ "); add a runtime sprout_make_wide entry point and lift this check")
+  # ir_header's declares AND add the matching sprout_makeN to the runtime.
+  if actual_ar >= 11
+  then Err("ast_to_ir: ctor arity exceeds 10 (got " ++ int_to_string(actual_ar) ++ "); add a runtime sprout_makeN entry point and lift this check")
   else if list_length(args) != actual_ar
   then Err("ast_to_ir: ctor application has wrong arity (got " ++ int_to_string(list_length(args)) ++ ", expected " ++ int_to_string(actual_ar) ++ ")")
   else
