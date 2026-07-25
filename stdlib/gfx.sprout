@@ -51,6 +51,12 @@ extern fn gfx_mouse_y() -> Int !{IO}
 extern fn gfx_button(x: Int, y: Int, w: Int, h: Int, label: String) -> Int !{IO}
 extern fn gfx_button_held(x: Int, y: Int, w: Int, h: Int, label: String) -> Int !{IO}
 extern fn gfx_frame_end() -> Unit !{IO}
+extern fn gfx_post_vignette(intensity: Double, radius: Double) -> Unit !{IO}
+extern fn gfx_post_tonemap(exposure: Double, saturation: Double) -> Unit !{IO}
+extern fn gfx_post_motion_blur(static_amount: Double, motion_gain: Double) -> Unit !{IO}
+extern fn gfx_post_altitude_blur(low_alt: Double, high_alt: Double, amt_low: Double, amt_high: Double) -> Unit !{IO}
+extern fn gfx_post_disable() -> Unit !{IO}
+extern fn gfx_overlay_begin() -> Unit !{IO}
 extern fn gfx_close_window() -> Unit !{IO}
 
 # --- Public API ---
@@ -243,6 +249,59 @@ export fn button_held(x: Int, y: Int, w: Int, h: Int, label: String) -> Bool !{I
 
 export fn frame_end() -> Unit !{IO} =
   gfx_frame_end()
+
+# --- Post-processing (opt-in full-screen effects) ---------------------------
+# Effects are OFF by default; each setter below turns ONE on and configures it,
+# so a demo opts in à la carte (e.g. call post_vignette + post_tonemap in main).
+# With any effect enabled the shim renders the 3D scene into an off-screen target
+# and presents it through one full-screen shader; with none, it draws straight to
+# the window (unchanged, and keeps 4x MSAA). See docs/gfx-postprocess-v0.md.
+#
+# NB: the 2D overlays (draw_fps, button/_held) are drawn INTO the scene between
+# frame_begin and frame_end, so they are post-processed too (a first-cut tradeoff;
+# UI-crisp-on-top is the documented Phase-2 follow-up).
+
+# Darken the frame toward the corners. `intensity` 0..1 (0 = none, 1 = corners to
+# black); `radius` 0..1 is the normalised centre→corner distance where darkening
+# begins (smaller = larger dark border). Focuses the eye on the map centre.
+export fn post_vignette(intensity: Double, radius: Double) -> Unit !{IO} =
+  gfx_post_vignette(intensity, radius)
+
+# Filmic tone-map (ACES) with pre-exposure and a saturation grade. `exposure` scales scene
+# brightness before the curve (1.0 = neutral; >1 brightens, then highlights roll off instead of
+# clipping — tames blown-out sky/water glints and enriches midtone contrast). `saturation` grades
+# the result: 1.0 = neutral, >1 = punchier colour (counters ACES' highlight desaturation), <1 =
+# toward greyscale. Saturation is the most VISIBLE knob on a mostly-midtone scene.
+export fn post_tonemap(exposure: Double, saturation: Double) -> Unit !{IO} =
+  gfx_post_tonemap(exposure, saturation)
+
+# Blur that scales with camera motion. Both args are a unitless "amount" (~0.5 reads as
+# clearly soft, 1.0 strong; the shim maps amount -> ~6 px of kernel radius). `static_amount`
+# is the constant softness while the camera is still (0 = sharp); `motion_gain` adds amount
+# per world-unit of per-frame camera travel, so the view softens while orbiting/zooming and
+# snaps back to `static_amount` at rest. Total amount is clamped so a fast whip can't smear to
+# mush. NB: amounts below ~0.15 are sub-pixel and invisible (they sample the same texel).
+export fn post_motion_blur(static_amount: Double, motion_gain: Double) -> Unit !{IO} =
+  gfx_post_motion_blur(static_amount, motion_gain)
+
+# Drive the blur baseline from camera ALTITUDE (eye height) instead of a constant: height in
+# [low_alt, high_alt] maps linearly to a blur amount in [amt_low, amt_high] (clamped outside).
+# amt_high > amt_low blurs the high overview (haze); swap them to blur when low. Motion blur, if
+# also set, still adds on top. To combine both, call post_motion_blur FIRST (it clears any altitude
+# map), then post_altitude_blur (it keeps the motion gain). Enables the blur effect.
+export fn post_altitude_blur(low_alt: Double, high_alt: Double, amt_low: Double, amt_high: Double) -> Unit !{IO} =
+  gfx_post_altitude_blur(low_alt, high_alt, amt_low, amt_high)
+
+# Turn ALL post-effects off, restoring the direct-to-screen (MSAA) render.
+export fn post_disable() -> Unit !{IO} =
+  gfx_post_disable()
+
+# Mark the scene -> HUD transition so UI draws CRISP on top of the post-processed scene (unblurred,
+# unvignetted). Call AFTER the 3D draws and BEFORE the UI (draw_fps / button / button_held), then
+# frame_end. Without it, UI is drawn into the scene and post-processed too. Harmless without any
+# effect enabled (UI is crisp either way). Once per frame.
+export fn overlay_begin() -> Unit !{IO} =
+  gfx_overlay_begin()
 
 export fn close_window() -> Unit !{IO} =
   gfx_close_window()

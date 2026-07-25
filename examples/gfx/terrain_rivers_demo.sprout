@@ -389,6 +389,9 @@ fn render_loop(meshes: MutVec Int, models: MutVec Int, cam: Cam) -> Unit !{IO} =
         # Water surface last, so depth-testing lets land above sea level poke through the
         # translucent plane while it fills the valleys.
         gfx.draw_plane(0.0, water_y, 0.0, world_span, world_span, water_r, water_g, water_b, water_alpha)
+        # Scene done — composite it through the post-process shader and switch to 2D so the HUD below
+        # draws CRISP on top (unblurred, unvignetted). Everything after this is screen-space overlay.
+        gfx.overlay_begin()
         gfx.draw_fps(10, 10)
         # Camera control panel — grouped by function (see the layout constants).
         # Pan: a D-pad (Fwd top, Left/Right flanking, Back below).
@@ -442,6 +445,15 @@ fn main() -> Unit !{IO} =
   do
     gfx.open_window(1000, 600, "Sprout — Loam terrain with rivers (drainage-routed)")
     gfx.set_target_fps(60)
+    # Post-processing (see stdlib.gfx / docs/gfx-postprocess-v0.md): vignette to frame the map, a
+    # filmic tone-map so bright water/sky roll off instead of clipping, and an ALTITUDE-driven blur —
+    # the higher the camera, the softer the overview (amount is unitless; ~0.5 reads as clearly soft,
+    # and the shim maps it to ~6 px of kernel). Anchors below map eye height ~300 -> sharp, ~1600 ->
+    # hazy; swap the last two amounts to blur when LOW instead. The HUD is drawn crisp on top via
+    # gfx.overlay_begin() in the frame loop, so only the terrain is affected.
+    gfx.post_vignette(0.7, 0.35)  # strong + tight, so the falloff reaches onto the terrain
+    gfx.post_tonemap(1.35, 1.4)  # exposure + a punchy saturation grade (the visible knob)
+    gfx.post_altitude_blur(300.0, 1600.0, 0.0, 0.8)
     let cfg = Config(seed = world_seed, chunk_size = chunk_edge, octaves = noise_octaves,
                      lattice0 = noise_lattice0, elevation_levels = elevation_levels)
     # Generate the whole region's biome tags + elevation bands directly into the global grids (no
