@@ -70,7 +70,7 @@ static int g_animset_count = 0;
  * of flat silhouettes. Applied to every loaded model's materials. */
 static Shader g_light_shader;
 static int g_light_ready = 0;
-static Shader g_cube_shader;   /* vertex-colour lit shader for cubes (immediate + captured mesh) */
+static Shader g_cube_shader;   /* vertex-colour lit shader for baked/captured meshes (terrain material) */
 static int g_cube_ready = 0;
 
 /* Static baked meshes. One-mesh-per-terrain fit in a handful; per-CHUNK baking (for frustum
@@ -486,18 +486,6 @@ long long gfx_draw_grid(long long slices, long long spacing) {
   return 0;
 }
 
-/* A cube of the given edge size, spun `angle` degrees about the Y axis using
- * raylib's own matrix stack — so the rotation math lives entirely in raylib and
- * the Sprout side supplies only a scalar angle. */
-long long gfx_draw_spinning_cube(long long size, long long angle) {
-  float s = as_float(size);
-  rlPushMatrix();
-  rlRotatef(as_float(angle), 0.0f, 1.0f, 0.0f);
-  DrawCube((Vector3){ 0.0f, 0.0f, 0.0f }, s, s, s, (Color){ 190, 60, 60, 255 });
-  DrawCubeWires((Vector3){ 0.0f, 0.0f, 0.0f }, s, s, s, (Color){ 235, 235, 235, 255 });
-  rlPopMatrix();
-  return 0;
-}
 
 /* Load a model (glTF/GLB/OBJ/IQM/M3D — NOT FBX) and return an integer handle,
  * or -1 only if the registry cannot grow (out of memory — logged loudly). Must
@@ -536,26 +524,11 @@ long long gfx_load_model(const char *path) {
   return h;
 }
 
-/* Begin/end a terrain batch: activate the vertex-colour cube shader ONCE around many
- * gfx_draw_cube calls, so a whole terrain draws under a single shader activation (one
- * batch, no per-cube GL state change). Call gfx_terrain_begin before the tile loop and
- * gfx_terrain_end after; between them, gfx_draw_cube colours come from the cube's own
- * Color. Outside a begin/end pair, gfx_draw_cube falls back to the default shader. */
-long long gfx_terrain_begin(void) {
-  if (g_cube_ready) BeginShaderMode(g_cube_shader);
-  return 0;
-}
-
-long long gfx_terrain_end(void) {
-  if (g_cube_ready) EndShaderMode();
-  return 0;
-}
-
 /* Draw an axis-aligned cube of edge `size` at (x,y,z) in a flat RGB colour (0-255
  * components) — the colour crosses as the cube's per-vertex colour. Two modes:
  *  - inside a mesh_capture_begin/end pair: APPEND the cube's geometry to the capture
  *    (baked into a static mesh, drawn later in one call) — the scalable path;
- *  - otherwise: draw immediately (inside a terrain_begin/end pair for the cube shader). */
+ *  - otherwise: draw immediately under the active shader. */
 long long gfx_draw_cube(long long x, long long y, long long z, long long size,
                         long long r, long long g, long long b) {
   float s = as_float(size);

@@ -134,12 +134,14 @@ intermediate data structure is the cost. This mirrors real engines — a generic
 mesh API driven by a tight allocation-free mesher, not per-cell quad objects.
 The bake geometry is verified by screenshot (as all gfx is), not unit tests.
 
-### 4c. Retire
+### 4c. Retire (LANDED)
 
-- `draw_spinning_cube`: fold the spin into `spinning_cube.sprout` if a generic
-  transform is exposed, else drop the toy (the demo is illustrative only).
-  **Low priority; optional** — flag if it needs an unexposed transform primitive.
-- `terrain_begin`/`terrain_end`: remove; nothing calls them.
+- `draw_spinning_cube`: removed. `spinning_cube.sprout` now gets its motion from
+  GENERAL primitives — a static `draw_cube` with an orbiting `set_camera` each
+  frame — so no bespoke transform primitive was needed after all.
+- `terrain_begin`/`terrain_end`: removed (no callers; they were just
+  `Begin/EndShaderMode`). The baked-terrain material keeps its vertex-colour lit
+  shader via the capture/`draw_captured` path, unaffected.
 
 ## 5. Migration plan
 
@@ -158,11 +160,12 @@ instancing win):
 2. **Mesh capture — LANDED.** `capture_quad` (general); `capture_tile` removed;
    rivers demo bakes inline (no pure decomposition — it regressed 3.2×, §4b).
    Bake back to 28.5s baseline, terrain renders identically.
-3. **Retire** — drop `draw_spinning_cube`/`terrain_begin`/`terrain_end`; fix
-   `spinning_cube.sprout`. (next)
+3. **Retire — LANDED.** `draw_spinning_cube`, `terrain_begin`, `terrain_end`
+   removed; `spinning_cube.sprout` reworked to orbit the camera around a static
+   `draw_cube` (general primitives only).
 4. **Migrate ECS/character demos (optional this pass)** — crowds via
    `instance_push`/`instance_clear` instead of per-entity `draw_model`. Bigger;
-   may defer to a follow-up.
+   deferred to a follow-up (tracked in BACKLOG).
 
 ## 6. Verification
 

@@ -19,10 +19,7 @@ extern fn gfx_set_camera(px: Double, py: Double, pz: Double,
                          fovy: Double) -> Unit !{IO}
 extern fn gfx_frame_begin() -> Unit !{IO}
 extern fn gfx_draw_grid(slices: Int, spacing: Double) -> Unit !{IO}
-extern fn gfx_draw_spinning_cube(size: Double, angle: Double) -> Unit !{IO}
 extern fn gfx_load_model(path: String) -> Int !{IO}
-extern fn gfx_terrain_begin() -> Unit !{IO}
-extern fn gfx_terrain_end() -> Unit !{IO}
 extern fn gfx_draw_cube(x: Double, y: Double, z: Double, size: Double, r: Int, g: Int, b: Int) -> Unit !{IO}
 extern fn gfx_capture_quad(p0x: Double, p0y: Double, p0z: Double,
                            p1x: Double, p1y: Double, p1z: Double,
@@ -87,24 +84,14 @@ export fn frame_begin() -> Unit !{IO} =
 export fn draw_grid(slices: Int, spacing: Double) -> Unit !{IO} =
   gfx_draw_grid(slices, spacing)
 
-export fn draw_spinning_cube(size: Double, angle: Double) -> Unit !{IO} =
-  gfx_draw_spinning_cube(size, angle)
-
 # Load a model (glTF/GLB/OBJ/IQM/M3D — not FBX) and return its handle. Call after
 # open_window; a handle of -1 means the model registry is full.
 export fn load_model(path: String) -> Int !{IO} =
   gfx_load_model(path)
 
-# Begin/end a terrain batch: bind the vertex-colour cube shader ONCE around many draw_cube
-# calls, so a whole terrain draws under a single shader activation (no per-cube GL state
-# change). Wrap the tile loop: `terrain_begin(); <draw_cube per tile>; terrain_end()`.
-export fn terrain_begin() -> Unit !{IO} = gfx_terrain_begin()
-export fn terrain_end() -> Unit !{IO} = gfx_terrain_end()
-
 # Draw an axis-aligned cube of edge `size` at (x,y,z) in flat RGB (each of r,g,b in 0..255).
-# Inside a mesh_capture_begin/end pair it is APPENDED to a static mesh (drawn later in one
-# call); otherwise it draws immediately (inside a terrain_begin/end pair). Shaded by the scene
-# key light (top faces brighter than sides) so stepped relief is visible.
+# Inside a mesh_capture_begin/end pair it is APPENDED to a static mesh (drawn later in one call);
+# otherwise it draws immediately. Shaded by the scene key light (top faces brighter than sides).
 export fn draw_cube(x: Double, y: Double, z: Double, size: Double, r: Int, g: Int, b: Int) -> Unit !{IO} =
   gfx_draw_cube(x, y, z, size, r, g, b)
 
