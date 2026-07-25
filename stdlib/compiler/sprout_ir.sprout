@@ -201,6 +201,20 @@ export type IROp (..) =
   # No GC trigger between materializing <val> and the ret, so <val> needs no
   # extra root here (the callee already rooted it if heap).
   | IRRetUnboxed2 String String String
+  # IRCallUnboxed3 <s0> <s1> <s2> <val_kind> <fn> <args> — width-3 tuple-CPR call
+  # (docs/scalar-replacement-v0.md, C1).  A `match f(args) with (a,b,c) ->` over a
+  # top-level fn returning a scalar 3-tuple routes to `@f_worker` returning
+  # { i64, i64, i64 } DIRECTLY (LLVM-to-LLVM; no sret — that is only needed at the
+  # LLVM-to-C extern boundary, see docs/compiler-internals.md).  Lowers to a
+  # `call { i64, i64, i64 }` + three extractvalues.  <val_kind> is IRTScalar for
+  # the milestone (all three fields non-heap → no rooting).  The struct SSA is
+  # synthesized at lowering (derived from <s0>); the rooting pass sees three defs.
+  | IRCallUnboxed3 String String String IRType String (List String)
+  # IRRetUnboxed3 <base> <s0> <s1> <s2> — width-3 tuple-CPR worker return.  Packs
+  # the three scalar fields into the { i64, i64, i64 } worker ABI (three
+  # insertvalues + ret).  Emitted only inside a `define { i64, i64, i64 }
+  # @<fn>_worker`.  No GC trigger between the fields and the ret.
+  | IRRetUnboxed3 String String String String
   | IRStrConst String String String
   | IRStrSlice String String String String
   | IRStrConcat String String String
@@ -540,6 +554,10 @@ fn print_op(op: IROp) -> String =
       "    (" ++ tag ++ ", " ++ val ++ ") = call_unboxed2 @" ++ fname ++ "(" ++ print_call_args(args) ++ ")"
   | IRRetUnboxed2 _base tag val ->
       "    ret_unboxed2 (" ++ tag ++ ", " ++ val ++ ")"
+  | IRCallUnboxed3 s0 s1 s2 _vk fname args ->
+      "    (" ++ s0 ++ ", " ++ s1 ++ ", " ++ s2 ++ ") = call_unboxed3 @" ++ fname ++ "(" ++ print_call_args(args) ++ ")"
+  | IRRetUnboxed3 _base s0 s1 s2 ->
+      "    ret_unboxed3 (" ++ s0 ++ ", " ++ s1 ++ ", " ++ s2 ++ ")"
   | IRStrConst r raw s ->
       "    " ++ r ++ " = strconst (" ++ raw ++ ") \"" ++ s ++ "\""
   | IRStrSlice r s start len ->

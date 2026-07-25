@@ -1,0 +1,84 @@
+import stdlib.test (TestState, new_state, assert_eq, summary)
+
+# Intra-function tuple SRA (docs/scalar-replacement-v0.md, C2 / Stage 3): a scalar tuple that is
+# `let`-bound in a do-block and consumed by a single later tuple-pattern match — with no other use —
+# is scalar-replaced: no heap tuple is allocated, the `if` merges the fields via per-field phis, and
+# the producers become width-3 workers. This mirrors the rivers-demo `bake_tile` shape exactly:
+#   let rgb = if cond then f(k) else g(k)   -- producers return (Int,Int,Int)
+#   _ <- <intervening effectful bind>       -- does NOT touch rgb (like the demo's nbr_drop binds)
+#   match rgb with | (r,g,b) -> <effectful arm using r,g,b>
+# The optimization is value-NEUTRAL, so these assert the SEMANTICS are identical to the boxed path.
+# The IR-shape win (no sprout_alloc_tuple_blob; pick_a/pick_b get { i64,i64,i64 } workers) is checked
+# separately against the emitted IR.
+
+fn pick_a(k: Int) -> (Int, Int, Int) = (k, k + 1, k + 2)
+fn pick_b(k: Int) -> (Int, Int, Int) = (k + 10, k + 20, k + 30)
+
+fn pair_a(k: Int) -> (Int, Int) = (k, k + 1)
+fn pair_b(k: Int) -> (Int, Int) = (k + 10, k + 20)
+
+# Width-2 SRA: exercises scalar_tuple_width = Just 2, the IRCallUnboxed2 producer path, and the
+# 2-phi merge — symmetric to the width-3 blend_check, and the width the reseed hits on any 2-tuple
+# `let`/match in the compiler's own do-blocks.
+fn blend2(state: TestState, cond: Bool, k: Int, label: String, expected: Int) -> Unit !{IO} =
+  do
+    let t = if cond then pair_a(k) else pair_b(k)
+    _ <- new_state()
+    match t with
+    | (a, b) -> assert_eq(state, label, (a * 10) + b, expected)
+
+# SRA-eligible: `t` is bound to an if-of-tuple-calls, an intervening bind does not touch it, and it is
+# consumed by exactly one tuple match. The arm is effectful (assert_eq), as in the demo.
+fn blend_check(state: TestState, cond: Bool, k: Int, label: String, expected: Int) -> Unit !{IO} =
+  do
+    let t = if cond then pick_a(k) else pick_b(k)
+    _ <- new_state()
+    match t with
+    | (a, b, c) -> assert_eq(state, label, (a * 100) + (b * 10) + c, expected)
+
+# A literal producer (no `if`) is also SRA-eligible: `t = (k, k*2, k*3)` then matched.
+fn lit_check(state: TestState, k: Int, label: String, expected: Int) -> Unit !{IO} =
+  do
+    let t = (k, k * 2, k * 3)
+    _ <- new_state()
+    match t with
+    | (a, b, c) -> assert_eq(state, label, a + b + c, expected)
+
+# NEGATIVE (default-deny): `t` is consumed by a tuple match AND read in an earlier let → it ESCAPES
+# the single-consumer rule, so SRA must NOT fire (the tuple stays boxed). The result must still be
+# correct — this checks the escape analysis denies without breaking semantics.
+fn escape_twice(state: TestState, k: Int, label: String, expected: Int) -> Unit !{IO} =
+  do
+    let t = pick_a(k)
+    let extra = match t with | (a, _b, _c) -> a
+    _ <- new_state()
+    match t with
+    | (a, b, c) -> assert_eq(state, label, a + b + c + extra, expected)
+
+fn sum_triple(p: (Int, Int, Int)) -> Int =
+  match p with | (a, b, c) -> a + b + c
+
+# NEGATIVE (default-deny): `t` is passed as a call ARGUMENT (escapes as a boxed value), with no tuple
+# match consumer → SRA must not fire. Correct result via the boxed path.
+fn escape_arg(state: TestState, k: Int, label: String, expected: Int) -> Unit !{IO} =
+  do
+    let t = pick_a(k)
+    _ <- new_state()
+    assert_eq(state, label, sum_triple(t), expected)
+
+fn main() -> Unit !{IO} =
+  do
+    state <- new_state()
+    # if-branch producers (pick_a / pick_b) → the N-phi merge path
+    blend_check(state, true, 1, "blend true 1 -> (1,2,3) -> 123", 123)
+    blend_check(state, false, 1, "blend false 1 -> (11,21,31) -> 1341", 1341)
+    blend_check(state, true, 5, "blend true 5 -> (5,6,7) -> 567", 567)
+    # width-2 if-producer → 2-phi merge
+    blend2(state, true, 3, "blend2 true 3 -> (3,4) -> 34", 34)
+    blend2(state, false, 3, "blend2 false 3 -> (13,23) -> 153", 153)
+    # literal producer → the direct-scalars path
+    lit_check(state, 4, "lit 4 -> (4,8,12) -> 24", 24)
+    # NEGATIVE: escaping tuples must stay boxed and still compute correctly
+    escape_twice(state, 1, "escape_twice 1 -> (1,2,3)+1 -> 7", 7)
+    escape_arg(state, 2, "escape_arg 2 -> (2,3,4) -> 9", 9)
+    summary(state)

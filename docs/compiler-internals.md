@@ -115,3 +115,27 @@ non-empty set silently returned `Nil` until the sret branch was added.
   breaks every width=3 extern the same way `native_set_to_list` broke.
 - Do not add sret to the width=2 path — it works today via direct return; adding
   sret there is unnecessary and risks regressing the working case.
+
+## Tuple-CPR and intra-function tuple SRA (scalar replacement)
+
+Design + status: `docs/scalar-replacement-v0.md` (Appendix B, LANDED). Distinct from the
+extern-CPR path above — these workers are **Sprout-defined and Sprout-called**.
+
+- **Tuple-return CPR.** `match f(args) with (a,b[,c]) ->` over a top-level fn returning a
+  scalar 2-/3-tuple routes to `@f_worker` returning the fields by value
+  (`IRCallUnboxed2`/`IRRetUnboxed2` at width 2; `IRCallUnboxed3`/`IRRetUnboxed3` at width 3).
+  **Width 3 returns `{i64,i64,i64}` DIRECTLY — no sret.** The sret warning above is about the
+  LLVM-to-C boundary; a tuple worker never crosses it (both sides are Sprout-emitted LLVM,
+  which is internally self-consistent). Adding sret here would be wrong.
+- **Single width oracle.** `scalar_tuple_width(t) -> Maybe Int` is consulted by the router, the
+  worker's declared return type, the repack tail, and the worker-chain — so the call-site op and
+  the worker's `ret` type are derived from one number and cannot diverge (a mismatch fails
+  `opt --passes=verify` loudly, never a silent wrong-registers return).
+- **Intra-function SRA (do-block-localized).** `let x = <producer>; …; match x with (tuple-pat)`
+  is scalar-replaced: the tuple never allocates, an `if`-producer merges fields via N per-field
+  phis, and fn producers become width-w workers. Worker-collection and `translate_do` share the
+  shadow-free `sra_core_eligible` oracle (translation adds a shadow gate ⇒ translation ⊆
+  collection, so every worker called is emitted). Soundness = a **default-deny** escape check
+  (`sra_escape_ok` over the exhaustive `compute_free_vars`): `x` may escape nowhere but the one
+  consuming scrutinee. A `sra_rest_plain` guard bars a Maybe/Result do-bind in the continuation
+  (those reset the SRA map), confining the change to `translate_do`.

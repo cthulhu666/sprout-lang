@@ -1,6 +1,7 @@
 # Scalar replacement / tuple-CPR — eliminating short-lived allocations (proposal)
 
-Status: proposal / design-for-approval (do NOT implement before sign-off). §4 is the approval gate.
+Status: LANDED (Stage 1 width-2/3 CPR + Stage 3 do-block SRA). See **Appendix B** for what shipped.
+§4 was the approval gate; Stage 2 (arg-position) remains a separately-approved follow-up.
 Date: 2026-07-25.
 Scope: `stdlib/compiler/` (extend the existing CPR unboxing in `ast_to_ir.sprout` + `ir_lowering.sprout`); no runtime/builtin change in the first cut.
 Follows the AGENTS.md **Design Change Process**.
@@ -102,9 +103,15 @@ is immediately destructured by a tuple pattern at a match/`let` scrutinee.
   `unboxed_maybe_match_target` (`ast_to_ir.sprout:3182`) but for a tuple pattern instead of a
   `ConstructorPattern`.
 - **Emit:** a `@f_worker` returning the fields by value. Width 2 reuses the existing `{i64,i64}`
-  ABI; **width 3 reuses the sret ABI that already exists** for width-3 unboxed externs
-  (`docs/compiler-internals.md:74-99`, "width=3 sret"), so no new ABI is invented for the common
-  3-tuple (rgb) case. Wider tuples fall back to the boxed path (documented cap, not silent).
+  ABI; **width 3 uses a DIRECT `{i64,i64,i64}` return — NOT sret** (correction to the original
+  sketch, verified 2026-07-25). The sret convention in `docs/compiler-internals.md:74-99` is
+  required **only at the LLVM-to-C extern boundary** (a Sprout caller invoking a Clang-compiled
+  runtime function, where the two frontends must agree on the 24-byte struct-return ABI). A
+  tuple-CPR worker is **Sprout-defined and called by Sprout-emitted code** — an LLVM-to-LLVM path,
+  which is internally self-consistent, so the direct multi-register/memory return is correct and
+  needs no sret. Empirically confirmed: a standalone `define {i64,i64,i64}` + `call` + `extractvalue`
+  compiles, `opt --passes=verify`-passes, and returns the right values on arm64 Darwin. Wider tuples
+  (≥4) fall back to the boxed path (documented cap, not silent).
 - **Wrapper:** `@f` still allocates the tuple for non-matching callers (`sprout_alloc_tuple_blob`),
   exactly as CPR v2 keeps the boxed wrapper. No call site outside the recognized pattern changes.
 - **New IR:** a tuple-flavoured unboxed call/return. Either reuse `IRCallUnboxed2`/`IRRetUnboxed2`
@@ -248,3 +255,52 @@ and no `alloc_tuple_blob`; wrapper still boxes. (b) run → `7`. (c) `just test`
 refresh-seed` (compiler uses tuples → real seed change, **not** `seed-fp-ack`) + `verify-bootstrap-
 fixed-point`. (e) `SPROUT_GC_STRESS=1 just test` (unboxing correctness gate). (f) compiler-source DoD:
 smoke-shapes, bundle-smoke, example canary. Then the heap-field + width-3 increments per §4.
+
+---
+
+## Appendix B — Implementation status (LANDED)
+
+All in `stdlib/compiler/`. Tests: `tests/stdlib/test_tuple_cpr.spr` (width-2/3 CPR),
+`tests/stdlib/test_tuple_sra.spr` (SRA), `tests/smoke_shapes/07_tuple_cpr.spr` + `08_tuple_cpr_w3.spr`.
+
+### Stage 1 — tuple-return CPR (width 2), then width-3 CPR (C1)
+
+`match f(args) with (a,b[,c]) ->` over a top-level fn returning a scalar 2- or 3-tuple routes to
+`@f_worker` returning the fields by value. **Width 3 uses a DIRECT `{i64,i64,i64}` return, NOT sret**
+(§4, verified) — the worker is Sprout-defined and Sprout-called (LLVM-to-LLVM, self-consistent); sret
+is only for the LLVM-to-C extern boundary. New IR ops `IRCallUnboxed3`/`IRRetUnboxed3` mirror the
+width-2 pair (three insertvalues/extractvalues); classified in every exhaustive `ir_rooting` match.
+`scalar_tuple_width(t) -> Maybe Int` is the **single width oracle** — the router (`tuple_worker_shape`),
+the worker's declared return type (`worker_ret_ty`/`emit_worker_fn`), the repack tail
+(`translate_tail_tuple_repack`), and the worker-chain (`translate_tail_chain`, now width-parameterised)
+all read it on the same fn-result type, so call-site and `ret` widths cannot diverge (a divergence
+mismatches under `opt --passes=verify`, never silent).
+
+### Stage 3 — intra-function tuple SRA, do-block-localized (C2)
+
+The `let x = <producer>; …; match x with (tuple-pat) -> …` shape (the rivers-demo `bake_tile` shape)
+is scalar-replaced: no heap tuple, the fields flow as N SSA scalars, an `if`-producer merges them via
+N per-field phis (`build_tuple_phis`), and fn producers (`river_rgb`/`biome_rgb`-style) become
+width-w workers. Two consumers share one **shadow-free** eligibility oracle `sra_core_eligible`:
+worker-collection (`collect_wc_sra_producers`, emits the producer workers) and `translate_do` (fires
+the rewrite, adding only a shadow gate → translation ⊆ collection, so a called worker is always
+emitted). Producer lowering is `translate_tuple_scalars` (tuple literal / width-w worker call /
+`if`-with-N-phi). Soundness rests on a **default-deny** escape/linearity check (`sra_escape_ok`, using
+the exhaustive `compute_free_vars`): `x` must escape nowhere but the single consuming scrutinee — any
+rebind, second use, or use in another step denies. A `sra_rest_plain` guard requires no Maybe/Result
+do-bind in the continuation (those route to `translate_do_bind_*`, which reset the SRA map to empty),
+so no SRA binding is ever live across such a boundary — this keeps the change to `translate_do` only,
+not all ~9 do-helpers.
+
+**Measured (demo, via full compile path):** `bake_tile` now calls `river_rgb_worker`/`biome_rgb_worker`
+and its rgb `(Int,Int,Int)` tuple alloc is gone (3-phi merge, zero `alloc_tuple_blob`). This removes
+one of the two per-tile allocations; `tile_kind_of`'s `Maybe` is **arg-position (§4 Stage 2)** and
+survives — so expect roughly half the per-tile young garbage removed, not the full GC-suppressed floor.
+
+### Follow-ups (see BACKLOG)
+
+- **Stage 2** — arg-position/nested (`biome_rgb(tile_kind_of(tag))`'s `Maybe`): the rest of the bake win.
+- **SRA in `let..in`** (pure, non-do-block) and across a Maybe/Result do-bind (thread the SRA map
+  through the `translate_do_bind_*` helpers instead of resetting).
+- **Heap-field tuples** (`(String, String)`): needs per-slot rooting in `IRCallUnboxed{2,3}` + a
+  multi-slot `op_heap_def`.

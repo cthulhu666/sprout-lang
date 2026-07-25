@@ -96,6 +96,10 @@ fn op_triggers_gc(op: sprout_ir.IROp) -> Bool =
       if is_nonallocating_unboxed_read(fname) then false else true
   # IRRetUnboxed2 is a terminator: two insertvalues + ret, pure — no allocation.
   | sprout_ir.IRRetUnboxed2 _ _ _ -> false
+  # IRCallUnboxed3 calls a Sprout `@f_worker` (a user fn) — may transitively allocate; trigger.
+  | sprout_ir.IRCallUnboxed3 _ _ _ _ _ _ -> true
+  # IRRetUnboxed3 is a terminator: three insertvalues + ret, pure — no allocation.
+  | sprout_ir.IRRetUnboxed3 _ _ _ _ -> false
   # IRMakeCtor lowers to @sprout_makeN which always allocates; trigger.
   | sprout_ir.IRMakeCtor _ _ _ _ -> true
   # IRMkClosure allocates env via @sprout_alloc_closure_env; trigger.
@@ -203,6 +207,14 @@ fn op_produces_simple_heap(op: sprout_ir.IROp) -> Maybe String =
       | _ -> Just(val)
   # IRRetUnboxed2 is a terminator — it produces no SSA def to root.
   | sprout_ir.IRRetUnboxed2 _ _ _ -> Nothing
+  # IRCallUnboxed3 produces three scalar defs.  The router only emits it for an
+  # all-non-heap-scalar 3-tuple (scalar_tuple_width guard), so none of the three
+  # slots is heap → no rooting.  A future heap-field width-3 increment must extend
+  # this (op_heap_def returns a single Maybe; three heap slots would need multi-def
+  # rooting here AND in update_scope).
+  | sprout_ir.IRCallUnboxed3 _ _ _ _ _ _ -> Nothing
+  # IRRetUnboxed3 is a terminator — it produces no SSA def to root.
+  | sprout_ir.IRRetUnboxed3 _ _ _ _ -> Nothing
   # FIX R4#7: honour the kind field. IRTScalar slots (Int, Bool, Char) are
   # not heap; IRTHeap slots (String, ADT, closure) are; IRTUnknown is
   # treated as heap (conservative). This avoids over-rooting scalar captures
@@ -392,6 +404,10 @@ fn op_uses(op: sprout_ir.IROp) -> List String =
   | sprout_ir.IRCallUnboxed2 _ _ _ _ args -> args
   # Both the packed tag and payload are live into the ret (base is a fresh def).
   | sprout_ir.IRRetUnboxed2 _ tag val -> [tag, val]
+  # Width-3 unboxed call reads its args (the three slot defs are results, not uses).
+  | sprout_ir.IRCallUnboxed3 _ _ _ _ _ args -> args
+  # All three packed fields are live into the ret (base is a fresh def).
+  | sprout_ir.IRRetUnboxed3 _ s0 s1 s2 -> [s0, s1, s2]
   | sprout_ir.IRStrConst _ _ _ -> Nil
   | sprout_ir.IRStrSlice _ s start len -> [s, start, len]
   | sprout_ir.IRStrConcat _ a b -> [a, b]
@@ -458,6 +474,10 @@ fn op_def(op: sprout_ir.IROp) -> Maybe String =
   # and emission is gated by update_scope's in_scope_ord (op_produces_simple_heap),
   # so <val> is never rooted before it is defined.
   | sprout_ir.IRCallUnboxed2 _ val _ _ _ -> Just(val)
+  # Three scalar defs; report <s0> for liveness kill (s1/s2 un-killed here — a
+  # harmless over-approximation, exactly as IRCallUnboxed2's <tag>; all scalar, so
+  # none is ever rooted).  IRRetUnboxed3 is a terminator and falls to the catch-all.
+  | sprout_ir.IRCallUnboxed3 s0 _ _ _ _ _ -> Just(s0)
   | sprout_ir.IRStrConst r _ _ -> Just(r)
   | sprout_ir.IRStrSlice r _ _ _ -> Just(r)
   | sprout_ir.IRStrConcat r _ _ -> Just(r)
@@ -723,6 +743,11 @@ fn op_exposes_operands(op: sprout_ir.IROp) -> Bool =
   | sprout_ir.IRCallUnboxed2 _ _ _ _ _ -> true
   # IRRetUnboxed2 is a terminator: insertvalue+ret, no allocation, no exposure.
   | sprout_ir.IRRetUnboxed2 _ _ _ -> false
+  # Like IRCall, a width-3 unboxed worker call may collect before consuming its
+  # operands; root the heap operands across it (additive — only adds roots).
+  | sprout_ir.IRCallUnboxed3 _ _ _ _ _ _ -> true
+  # IRRetUnboxed3 is a terminator: insertvalue+ret, no allocation, no exposure.
+  | sprout_ir.IRRetUnboxed3 _ _ _ _ -> false
   # Everything else does NOT expose operands: str builtins SPROUT_HANDLE their
   # inputs before allocating; the rest do not allocate.  EXHAUSTIVE on purpose —
   # no `_` catch-all, so a new allocating IROp is a COMPILE ERROR until its
@@ -1058,6 +1083,9 @@ fn op_raw_callee(op: sprout_ir.IROp) -> Maybe String =
       if is_nonallocating_read(fname) then Nothing else Just(fname)
   | sprout_ir.IRCallUnboxed2 _ _ _ fname _ ->
       if is_nonallocating_unboxed_read(fname) then Nothing else Just(fname)
+  # Width-3 unboxed call targets a Sprout `@f_worker` (never an allow-listed extern
+  # read), so the call-graph edge is always Just(fname) — the fixpoint refines it.
+  | sprout_ir.IRCallUnboxed3 _ _ _ _ fname _ -> Just(fname)
   | _ -> Nothing
 
 # Trigger contribution from NON-call ops only (calls are deferred to callee
@@ -1067,6 +1095,8 @@ fn op_noncall_trigger(op: sprout_ir.IROp) -> Bool =
   match op with
   | sprout_ir.IRCall _ _ _ _ -> false
   | sprout_ir.IRCallUnboxed2 _ _ _ _ _ -> false
+  # Width-3 unboxed call is a call — deferred to callee resolution (op_raw_callee).
+  | sprout_ir.IRCallUnboxed3 _ _ _ _ _ _ -> false
   | _ -> op_triggers_gc(op)
 
 fn scan_op_raw(op: sprout_ir.IROp, acc: (Bool, Set)) -> (Bool, Set) =
@@ -1188,6 +1218,10 @@ fn op_triggers_gc_summary(op: sprout_ir.IROp, summary: Dict Bool) -> Bool =
   | sprout_ir.IRCallUnboxed2 _ _ _ fname _ ->
       if is_nonallocating_unboxed_read(fname) then false
       else match dict_get(fname, summary) with | Just b -> b | Nothing -> true
+  # Width-3 worker call: refine via the summary (absent → conservatively a trigger),
+  # so a proven-pure worker lets its call site elide roots.
+  | sprout_ir.IRCallUnboxed3 _ _ _ _ fname _ ->
+      match dict_get(fname, summary) with | Just b -> b | Nothing -> true
   | _ -> op_triggers_gc(op)
 
 # ---------------------------------------------------------------------------

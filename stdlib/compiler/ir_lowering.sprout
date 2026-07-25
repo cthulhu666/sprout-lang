@@ -194,6 +194,21 @@ fn lower_op(op: sprout_ir.IROp, ret_ty: String, str_table: Dict (String, Int)) -
       "  " ++ base ++ "$r0 = insertvalue { i64, i64 } undef, i64 " ++ tag ++ ", 0\n" ++
       "  " ++ base ++ "$r1 = insertvalue { i64, i64 } " ++ base ++ "$r0, i64 " ++ val ++ ", 1\n" ++
       "  ret { i64, i64 } " ++ base ++ "$r1"
+  # Width-3 tuple-CPR call: unboxed { i64, i64, i64 } worker call + three extractvalues.
+  # Direct register/memory return (LLVM-to-LLVM self-consistent; no sret).  The struct SSA
+  # (<s0>$st) is synthesized here — it never exists at IR level.  The worker is a Sprout
+  # `define { i64, i64, i64 } @<fn>` emitted by emit_worker_fn, so no `declare` is needed.
+  | sprout_ir.IRCallUnboxed3 s0 s1 s2 _vk fname args ->
+      "  " ++ s0 ++ "$st = call { i64, i64, i64 } @" ++ fname ++ "(" ++ lower_call_args(args) ++ ")\n" ++
+      "  " ++ s0 ++ " = extractvalue { i64, i64, i64 } " ++ s0 ++ "$st, 0\n" ++
+      "  " ++ s1 ++ " = extractvalue { i64, i64, i64 } " ++ s0 ++ "$st, 1\n" ++
+      "  " ++ s2 ++ " = extractvalue { i64, i64, i64 } " ++ s0 ++ "$st, 2"
+  # Width-3 tuple-CPR worker return: pack three scalars into { i64, i64, i64 } by value.
+  | sprout_ir.IRRetUnboxed3 base s0 s1 s2 ->
+      "  " ++ base ++ "$r0 = insertvalue { i64, i64, i64 } undef, i64 " ++ s0 ++ ", 0\n" ++
+      "  " ++ base ++ "$r1 = insertvalue { i64, i64, i64 } " ++ base ++ "$r0, i64 " ++ s1 ++ ", 1\n" ++
+      "  " ++ base ++ "$r2 = insertvalue { i64, i64, i64 } " ++ base ++ "$r1, i64 " ++ s2 ++ ", 2\n" ++
+      "  ret { i64, i64, i64 } " ++ base ++ "$r2"
   | sprout_ir.IRStrConst r raw _ ->
       match dict_get(raw, str_table) with
       | Just entry ->

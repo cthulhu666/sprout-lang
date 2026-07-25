@@ -31,6 +31,42 @@ fn use_forward(a: Int, b: Int) -> Int =
   match forward(a, b) with
   | (x, y) -> x - y
 
+# --- Width 3 (C1): the { i64, i64, i64 } direct-return worker ---
+
+fn rgb3(k: Int) -> (Int, Int, Int) = (k, k + 1, k + 2)
+
+fn use_rgb3(k: Int) -> Int =
+  match rgb3(k) with
+  | (r, g, b) -> (r * 100) + (g * 10) + b
+
+fn shift3(tag: Int) -> (Int, Int, Int) =
+  if tag == 0 then (1, 2, 3)
+  else (7, 8, 9)
+
+fn sum3(tag: Int) -> Int =
+  match shift3(tag) with
+  | (a, b, c) -> a + b + c
+
+fn fwd3(k: Int) -> (Int, Int, Int) = rgb3(k)
+
+fn use_fwd3(k: Int) -> Int =
+  match fwd3(k) with
+  | (r, g, b) -> r + g + b
+
+# Width-3 REPACK path: a `wrap (Int,Int,Int)` unwrapped via a bare-var match tail. As a routed
+# worker, rgb_unwrap's tail is `match x with Rgb p -> p` — NOT a tuple literal and NOT a chain, so
+# it hits translate_tail_tuple_repack (box-and-extract → 3× IRGetTupleField + IRRetUnboxed3). This
+# is the width-3 analogue of the `wrap (Int,Int)` case that segfaulted at width-2 before the repack
+# fix; without this test the width-3 repack branch is unexercised.
+wrap Rgb = (Int, Int, Int)
+
+fn rgb_unwrap(x: Rgb) -> (Int, Int, Int) =
+  match x with | Rgb p -> p
+
+fn use_rgb_unwrap(a: Int, b: Int, c: Int) -> Int =
+  match rgb_unwrap(Rgb((a, b, c))) with
+  | (r, g, b2) -> (r * 100) + (g * 10) + b2
+
 fn main() -> Unit !{IO} =
   do
     state <- new_state()
@@ -43,4 +79,15 @@ fn main() -> Unit !{IO} =
     assert_eq(state, "slice tag9 -> 6+3", base_plus_cnt(9), 9)
     # forwarding (non-literal) tail → repack path; forward(7,2)=swap(7,2)=(2,7) -> 2-7
     assert_eq(state, "forward 7,2 -> (2,7) -> -5", use_forward(7, 2), 0 - 5)
+    # width-3: direct tuple-literal tail
+    assert_eq(state, "rgb3 1 -> (1,2,3) -> 123", use_rgb3(1), 123)
+    assert_eq(state, "rgb3 5 -> (5,6,7) -> 567", use_rgb3(5), 567)
+    # width-3: if-chain tail bottoming in tuple literals
+    assert_eq(state, "shift3 tag0 -> 1+2+3", sum3(0), 6)
+    assert_eq(state, "shift3 tag9 -> 7+8+9", sum3(9), 24)
+    # width-3: forwarding (non-literal) tail -> chain path
+    assert_eq(state, "fwd3 2 -> (2,3,4) -> 9", use_fwd3(2), 9)
+    # width-3: wrap-unwrap bare-var tail -> repack path (box-and-extract, IRRetUnboxed3)
+    assert_eq(state, "rgb_unwrap 4,5,6 -> 456", use_rgb_unwrap(4, 5, 6), 456)
+    assert_eq(state, "rgb_unwrap 0,0,0 -> 0", use_rgb_unwrap(0, 0, 0), 0)
     summary(state)
