@@ -1,6 +1,6 @@
 import stdlib.test (TestState, new_state, assert_eq, assert_true, summary)
 import loam.terrain (Config, elev_at, sea_level)
-import loam.hydrology (Hydrology, compute_hydrology, hydro_tier, hydro_dir, hydro_filled, dir_delta)
+import loam.hydrology (Hydrology, HydroParams, default_hydro_params, compute_hydrology, hydro_tier, hydro_dir, hydro_filled, dir_delta)
 
 # loam.hydrology computes drainage over a bounded region as a PURE function of (cfg, span):
 # it fills depressions (Planchon-Darboux), assigns a D8 flow direction to every cell, walks
@@ -90,7 +90,7 @@ fn main() -> Unit !{IO} =
   do
     state <- new_state()
 
-    h <- compute_hydrology(cfg, span)
+    h <- compute_hydrology(cfg, span, default_hydro_params())
 
     # --- Termination: every cell drains to a valid outlet, no cycles ---
     dead_ends <- scan_drainage(0, 0, 0, h)
@@ -107,8 +107,17 @@ fn main() -> Unit !{IO} =
     assert_true(state, "hydrology: some river cells exist", rivers > 0)
 
     # --- Determinism: same (cfg, span) yields an identical flow_tier field ---
-    h2 <- compute_hydrology(cfg, span)
+    h2 <- compute_hydrology(cfg, span, default_hydro_params())
     diffs <- tier_diff(0, 0, 0, h, h2)
     assert_eq(state, "hydrology: deterministic (same seed+span => identical rivers)", diffs, 0)
+
+    # --- Thresholds are honored: cutoffs above any achievable drainage area (a span^2 region has
+    #     at most span^2 = 16384 cells of accumulation) leave NO river cells, proving flow_tier
+    #     actually reads HydroParams rather than a hardcoded threshold. ---
+    h_strict <- compute_hydrology(cfg, span,
+                                  HydroParams(tier1_min = 100000, tier2_min = 200000, tier3_min = 900000))
+    rivers_strict <- count_rivers(0, 0, 0, h_strict)
+    assert_true(state, "hydrology: raising the tier thresholds yields fewer river cells",
+                rivers_strict < rivers)
 
     summary(state)

@@ -187,7 +187,7 @@ run file: bootstrap-from-seed
 # raylib installed (brew install raylib); override its location with
 # SPROUT_RAYLIB_PREFIX. Set SPROUT_GFX_MAX_FRAMES=N to auto-close after N frames.
 [group('dev')]
-run-gfx file: bootstrap-from-seed
+run-gfx file *args: bootstrap-from-seed
   #!/usr/bin/env bash
   set -euo pipefail
   TMP_LL="/tmp/sprout_gfx_$$.ll"
@@ -195,7 +195,7 @@ run-gfx file: bootstrap-from-seed
   trap 'rm -f "$TMP_LL" "$TMP_BIN"' EXIT
   "{{build_dir}}/compile_driver_bin_stage1" --emit-ir "{{stdlib_root}}" --package-root "{{justfile_directory()}}" {{quote(file)}} > "$TMP_LL"
   clang "$TMP_LL" {{runtime_src}} "{{gfx_src}}" -O2 -I"{{raylib_prefix}}/include" -L"{{raylib_prefix}}/lib" {{clang_extra}} {{gfx_link}} -o "$TMP_BIN"
-  "$TMP_BIN"
+  "$TMP_BIN" {{args}}
 
 # Build {{file}} with GC profiling compiled in (-DSPROUT_GC_PROFILE) and run it
 # with SPROUT_GC_PROFILE=1, printing a "[gc profile] ..." summary to stderr at

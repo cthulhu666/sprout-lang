@@ -74,7 +74,12 @@ at `4·span` steps so a regression fails loudly instead of hanging.
 
 - `Hydrology = (span, filled: MutMatrix Double, flow_dir: MutMatrix Int, flow_tier: MutMatrix Int)`
   — grids indexed `[row=z][col=x]`, matching `Chunk`.
-- `compute_hydrology(cfg, span) -> Hydrology !{IO}` — the whole pipeline; pure in `(cfg, span)`.
+- `HydroParams = (tier1_min, tier2_min, tier3_min)` — the accumulation→`flow_tier` cutoffs.
+  `default_hydro_params()` reproduces the stock `40 / 200 / 900`. Parameterized (not module
+  constants) so a caller — e.g. the terrain-rivers demo reading a config file — can sweep the river
+  size classes without recompiling.
+- `compute_hydrology(cfg, span, p: HydroParams) -> Hydrology !{IO}` — the whole pipeline; pure in
+  `(cfg, span, p)`.
 - `hydro_tier / hydro_dir / hydro_filled (h, gx, gz)` — per-cell accessors.
 - `dir_delta(d) -> (drow, dcol)` — D8 decode, shared by module, view and tests.
 
@@ -97,6 +102,27 @@ runtime, or bootstrap-seed change — hydrology is app code, not bundled into th
 - **Strict descent**: `flow_dir` always points to a strictly-lower filled neighbor.
 - **Non-vacuous**: some river cells exist.
 - **Determinism**: same `(cfg, span)` ⇒ identical `flow_tier`.
+- **Thresholds honored**: raising `HydroParams` cutoffs above any achievable drainage area leaves no
+  river cells (proves `flow_tier` reads the params rather than a hardcoded threshold).
+
+`tests/loam/test_config.spr` covers `loam/config.sprout`, the `key value` (Int) reader the demo
+uses to load these knobs from a file: comment/blank tolerance, multi-key parse, malformed-value
+skip, and `cfg_int` default fallback.
+
+## 7a. Config-driven demo (`examples/gfx/terrain_rivers_demo.sprout`)
+
+Map size, terrain-gen (`seed / octaves / lattice0 / elevation_levels`) and the `HydroParams` tiers
+are read from a config file named as the first CLI arg — so the demo re-runs with different settings
+**without recompiling**, the workflow for rescaling the world until rivers span many tiles:
+
+```
+just run-gfx examples/gfx/terrain_rivers_demo.sprout examples/gfx/terrain_rivers.conf
+```
+
+Int-only (the stdlib cannot parse a `Double` from text; every scale knob is an `Int`, appearance
+Doubles stay compile-time). No arg or an unreadable path falls back to defaults that byte-match the
+former hardcoded constants, so the stock world is unchanged. `terrain_rivers.conf` is a documented
+sample that rescales for longer rivers (`lattice0 128`, `octaves 3`).
 
 ## 8. Roadmap (raft game)
 

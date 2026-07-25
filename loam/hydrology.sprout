@@ -33,10 +33,12 @@ import stdlib.mutable (MutMatrix, mutmatrix_new, mutmatrix_at_or, mutmatrix_set)
 let big_elev = 1000000.0
 let fill_epsilon = 0.0000001
 # Accumulation thresholds → flow_tier. Drainage area is a cell count, so these scale with span;
-# tuned for a few hundred k cells. Higher = fewer, larger rivers.
-let tier1_min = 40  # creek
-let tier2_min = 200  # river
-let tier3_min = 900  # major river
+# tuned for a few hundred k cells. Higher = fewer, larger rivers. Bundled as HydroParams so a
+# caller (e.g. the terrain-rivers demo, reading its settings from a config file) can sweep them
+# without recompiling; default_hydro_params reproduces the historical fixed values.
+export type HydroParams = (tier1_min: Int, tier2_min: Int, tier3_min: Int)
+export fn default_hydro_params() -> HydroParams =
+  HydroParams(tier1_min = 40, tier2_min = 200, tier3_min = 900)  # creek / river / major
 # Safety cap on any downstream walk: with a correct (acyclic) field no walk exceeds the map, so
 # `4 * span` can never be reached — hitting it means a bug, and the walk bails instead of hanging.
 let walk_cap_mul = 4
@@ -232,27 +234,28 @@ fn accum_sweep(dir: MutMatrix Int, accum: MutMatrix Int, span: Int, r: Int, c: I
       accum_sweep(dir, accum, span, r, c + 1)
 
 # --- Step 5: threshold accumulation into a flow_tier ------------------------
-fn tier_of(a: Int) -> Int =
-  if a >= tier3_min then 3
-  else if a >= tier2_min then 2
-  else if a >= tier1_min then 1
+fn tier_of(p: HydroParams, a: Int) -> Int =
+  if a >= p.tier3_min then 3
+  else if a >= p.tier2_min then 2
+  else if a >= p.tier1_min then 1
   else 0
 
 # Sea cells never carry a river (they ARE water); land cells get their accumulation's tier.
-fn tier_sweep(cfg: Config, accum: MutMatrix Int, tier: MutMatrix Int, span: Int,
+fn tier_sweep(cfg: Config, p: HydroParams, accum: MutMatrix Int, tier: MutMatrix Int, span: Int,
               r: Int, c: Int) -> Int !{IO} =
   if r >= span then 0
-  else if c >= span then tier_sweep(cfg, accum, tier, span, r + 1, 0)
+  else if c >= span then tier_sweep(cfg, p, accum, tier, span, r + 1, 0)
   else
     do
       a <- mm_get_i(accum, r, c, 0)
-      let t = if elev_at(cfg, c, r) < sea_level then 0 else tier_of(a)
+      let t = if elev_at(cfg, c, r) < sea_level then 0 else tier_of(p, a)
       mutmatrix_set(tier, r, c, t)
-      tier_sweep(cfg, accum, tier, span, r, c + 1)
+      tier_sweep(cfg, p, accum, tier, span, r, c + 1)
 
 # --- Entry point ------------------------------------------------------------
-# Compute the full drainage for a span×span region. Pure in (cfg, span): same inputs => same grids.
-export fn compute_hydrology(cfg: Config, span: Int) -> Hydrology !{IO} =
+# Compute the full drainage for a span×span region. Pure in (cfg, span, p): same inputs => same
+# grids. `p` sets the accumulation→flow_tier thresholds (default_hydro_params for the stock values).
+export fn compute_hydrology(cfg: Config, span: Int, p: HydroParams) -> Hydrology !{IO} =
   do
     z <- mutmatrix_new(span, span, 0.0)
     w <- mutmatrix_new(span, span, 0.0)
@@ -263,7 +266,7 @@ export fn compute_hydrology(cfg: Config, span: Int) -> Hydrology !{IO} =
     accum <- mutmatrix_new(span, span, 0)
     accum_sweep(dir, accum, span, 0, 0)
     tier <- mutmatrix_new(span, span, 0)
-    tier_sweep(cfg, accum, tier, span, 0, 0)
+    tier_sweep(cfg, p, accum, tier, span, 0, 0)
     Hydrology(span = span, filled = w, flow_dir = dir, flow_tier = tier)
 
 # --- Accessors (for views and tests) ----------------------------------------

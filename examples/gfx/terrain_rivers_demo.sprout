@@ -2,7 +2,8 @@ module examples.gfx.terrain_rivers_demo
 
 import stdlib.gfx
 import loam.terrain (Config, tile_kind_at, tile_band_at, tile_kind_tag, sea_level_band, spatial_hash, exposed_step_bands, chunk_linear_index, TileKind, Water, Beach, Grass, Forest, Desert, Mountain, Snow, Tundra, tile_kind_of)
-import loam.hydrology (Hydrology, compute_hydrology, hydro_tier)
+import loam.hydrology (Hydrology, HydroParams, compute_hydrology, hydro_tier)
+import loam.config (parse_config, cfg_int)
 import loam.vegetation (TreeKind, Palm, Broadleaf, Conifer, DarkConifer, Cactus, Shrub, tree_kind_tag, tree_for_biome)
 import loam.camera (Cam, cam_drive, cam_distance, tree_cull_dist)
 import loam.view (cam_apply)
@@ -31,15 +32,23 @@ import stdlib.mutable (MutVec, mutvec_new, mutvec_at, mutvec_set, MutMatrix, mut
 # ============================================================================
 # TUNABLES — tweak these to change the map. Everything else derives from them.
 # ============================================================================
-# Map size ------------------------------------------------------------------
-let chunk_edge = 32  # tiles per chunk edge
-let region_chunks = 32  # map is region_chunks × region_chunks chunks; 32×32 = 1024×1024 tiles
-
-# Terrain generation (fed into loam.terrain.Config) -------------------------
-let world_seed = 2137  # change for a different world
-let noise_octaves = 5  # fBm detail layers (more = finer variation)
-let noise_lattice0 = 24  # base feature size in tiles (larger = broader landforms)
-let elevation_levels = 12  # number of discrete height bands
+# Map size, terrain generation and hydrology thresholds are READ FROM A CONFIG FILE at startup
+# (loam.config), so the demo re-runs with different settings WITHOUT recompiling — the "rescale to
+# make rivers span many tiles" workflow. Pass the file as the first CLI arg:
+#   just run-gfx examples/gfx/terrain_rivers_demo.sprout examples/gfx/terrain_rivers.conf
+# main() reads each knob with the default below (each matching the historical hardcoded value), so
+# running with NO config reproduces the old 1024×1024, lattice0=24 world byte-for-byte. Only Int
+# knobs are file-driven — the stdlib cannot parse a Double from text (loam/terrain.sprout), and
+# every scale knob IS an Int; the appearance Doubles further down stay compile-time constants.
+let def_chunk_edge = 32  # tiles per chunk edge
+let def_region_chunks = 32  # map is region_chunks × region_chunks chunks; 32×32 = 1024×1024 tiles
+let def_seed = 2137  # world seed
+let def_octaves = 5  # fBm detail layers (more = finer variation)
+let def_lattice0 = 24  # base feature size in tiles (larger = broader landforms, longer rivers)
+let def_elevation_levels = 12  # number of discrete height bands
+let def_tier1_min = 40  # hydrology accumulation → creek
+let def_tier2_min = 200  # → river
+let def_tier3_min = 900  # → major river
 
 # Appearance ----------------------------------------------------------------
 let tile_size = 1.0  # world units per tile (cube edge)
@@ -95,19 +104,13 @@ let cam_drag_pitch = 0.006  # tilt radians per pixel of vertical drag
 let cam_drag_pan_frac = 0.0015  # pan world-units per pixel of drag, as a span fraction
 # ============================================================================
 
-# --- Derived (do not edit; computed from the tunables above) ----------------
-let span_tiles = region_chunks * chunk_edge
-let chunk_count = region_chunks * region_chunks  # one baked mesh per chunk
-# Trees are bucketed into per-chunk instance groups and frustum + distance culled. gfx.draw_instances
-# compacts the visible groups' instances into one draw per model, so the draw-call count is
-# independent of how many groups exist — so we use the finest (per-chunk) groups for tight culling.
-let tree_group_edge = chunk_edge  # group edge in tiles (= one chunk)
-let tree_group_cols = (span_tiles + tree_group_edge - 1) / tree_group_edge  # ceil, so it need not divide
-let tree_group_count = tree_group_cols * tree_group_cols
-let world_span = to_double(span_tiles) * tile_size
-let half = to_double(span_tiles) / 2.0
-let water_y = (to_double(sea_level_band(elevation_levels)) + water_lift) * band_step
-let tree_cull = tree_cull_dist(world_span, tree_cull_frac)  # world-unit tree cull radius
+# --- Derived map dimensions -------------------------------------------------
+# span_tiles / chunk_count / tree_group_edge|cols|count / world_span / half / water_y all depend on
+# the CONFIG-DRIVEN map size + elevation_levels, so they are computed in main() (they can no longer
+# be module-level constants). Trees bucket into per-chunk instance groups (tree_group_edge = one
+# chunk); gfx.draw_instances compacts the visible groups into one draw per model, so the draw-call
+# count is independent of group count — hence the finest (per-chunk) grouping for tight culling.
+# tree_group_cols is the ceil-divide `(span + edge - 1) / edge` so the group grid need not divide.
 
 # --- Biome palette ----------------------------------------------------------
 # Biome -> flat RGB (0..255). Matching on TileKind (not the raw Int tag) means adding a biome
@@ -164,6 +167,7 @@ fn bake_tile(bands: MutMatrix Int, tags: MutMatrix Int, h: Hydrology, span: Int,
     | (r, g, b) ->
         do
           let ty = band_top_y(band)
+          let half = to_double(span) / 2.0  # map centred on origin; from span (was a module global)
           let mx = (to_double(gx) - half) * tile_size
           let mz = (to_double(gz) - half) * tile_size
           let hh = tile_size * 0.5
@@ -276,18 +280,19 @@ fn variant_range(tag: Int) -> (Int, Int) =
 # Place at most one tree on tile (gx, gz): skip river cells; ask loam.vegetation what (if anything)
 # grows on this biome for this tile's hash; then pick a variant + jitter/rotate/scale it (all from
 # a decorrelated hash so the scatter looks organic but is fully reproducible) and queue an instance.
-fn place_tile(models: MutVec Int, hy: Hydrology, gx: Int, gz: Int, tag: Int, band: Int) -> Unit !{IO} =
+fn place_tile(cfg: Config, models: MutVec Int, hy: Hydrology, gx: Int, gz: Int, tag: Int, band: Int,
+              half: Double, tge: Int, tgc: Int) -> Unit !{IO} =
   do
     tier <- hydro_tier(hy, gx, gz)
     if tier > 0 then ()
     else
-      match tree_for_biome(tile_kind_of(tag), spatial_hash(gx, gz, world_seed)) with
+      match tree_for_biome(tile_kind_of(tag), spatial_hash(gx, gz, cfg.seed)) with
       | Nothing -> ()
       | Just tk ->
           match variant_range(tree_kind_tag(tk)) with
           | (base, cnt) ->
               do
-                let hv = spatial_hash(gx, gz, world_seed + variant_offset)
+                let hv = spatial_hash(gx, gz, cfg.seed + variant_offset)
                 h <- mutvec_at(models, base + imod(hv, cnt))
                 let jx = ((to_double(imod(hv, 1000)) / 1000.0) - 0.5) * tree_jitter * tile_size
                 let jz = ((to_double(imod(hv / 7, 1000)) / 1000.0) - 0.5) * tree_jitter * tile_size
@@ -298,49 +303,40 @@ fn place_tile(models: MutVec Int, hy: Hydrology, gx: Int, gz: Int, tag: Int, ban
                 let wy = (to_double(band) * band_step) + (tile_size * 0.5)
                 # Bucket the tree into its chunk's group so the frame loop can frustum-cull whole
                 # chunks of vegetation (h is the gfx model handle, doubling as the group's model key).
-                gfx.instance_push(chunk_linear_index(gx, gz, tree_group_edge, tree_group_cols), h, wx, wy, wz, angle, sc)
+                gfx.instance_push(chunk_linear_index(gx, gz, tge, tgc), h, wx, wy, wz, angle, sc)
 
 # Walk the region's tiles, queueing a tree per eligible cell. Reads the global band+tag grid built
 # by gen_grids (non-boxing mutmatrix_at_or), so it needs no chunk paging; place_tile buckets each
 # tree into its chunk group by GLOBAL coord, so a flat span×span sweep groups identically.
-fn place_row(models: MutVec Int, hy: Hydrology, bands: MutMatrix Int, tags: MutMatrix Int, span: Int, gz: Int, gx: Int) -> Unit !{IO} =
+fn place_row(cfg: Config, models: MutVec Int, hy: Hydrology, bands: MutMatrix Int, tags: MutMatrix Int, span: Int, half: Double, tge: Int, tgc: Int, gz: Int, gx: Int) -> Unit !{IO} =
   if gx >= span then ()
   else
     do
       tag <- mutmatrix_at_or(tags, gz, gx, 0)
       band <- mutmatrix_at_or(bands, gz, gx, 0)
-      place_tile(models, hy, gx, gz, tag, band)
-      place_row(models, hy, bands, tags, span, gz, gx + 1)
+      place_tile(cfg, models, hy, gx, gz, tag, band, half, tge, tgc)
+      place_row(cfg, models, hy, bands, tags, span, half, tge, tgc, gz, gx + 1)
 
 # Scatter trees over the whole region, once at startup. Instances live GPU-side thereafter; the
 # frame loop only replays them.
-fn place_region(models: MutVec Int, hy: Hydrology, bands: MutMatrix Int, tags: MutMatrix Int, span: Int, gz: Int) -> Unit !{IO} =
+fn place_region(cfg: Config, models: MutVec Int, hy: Hydrology, bands: MutMatrix Int, tags: MutMatrix Int, span: Int, half: Double, tge: Int, tgc: Int, gz: Int) -> Unit !{IO} =
   if gz >= span then ()
   else
     do
-      place_row(models, hy, bands, tags, span, gz, 0)
-      place_region(models, hy, bands, tags, span, gz + 1)
+      place_row(cfg, models, hy, bands, tags, span, half, tge, tgc, gz, 0)
+      place_region(cfg, models, hy, bands, tags, span, half, tge, tgc, gz + 1)
 
 
-# --- Camera framing + control steps (derived from the tunables + map span) --
-let cam_start_radius = world_span * cam_radius_frac
-let cam_start_height = world_span * cam_height_frac
-let min_dist = world_span * cam_min_frac  # zoom clamps are eye→target DISTANCE
-let max_dist = world_span * cam_max_frac
-let pitch_step = cam_pitch_step  # tilt is in radians — NOT scaled by span
+# --- Camera control steps that do NOT scale with map span (compile-time) ----
+# Tilt and drag-rotate are in radians, so they are NOT multiplied by world_span. The span-scaled
+# framing (opening standoff/height → cam_start, zoom-distance clamps min/max_dist, pan_step,
+# drag_pan_step, pan_bound) now derives from world_span in main() / render_loop, because world_span
+# depends on the config-driven map size and can no longer be a module constant.
+let pitch_step = cam_pitch_step  # tilt radians/frame
 let pitch_min = cam_pitch_min
 let pitch_max = cam_pitch_max
-let pan_step = world_span * cam_pan_frac
-# (zoom steps are NOT derived here — they scale by the current distance each frame.)
-let drag_yaw_step = cam_drag_yaw  # radians/px — not span-scaled
+let drag_yaw_step = cam_drag_yaw  # radians/px
 let drag_pitch_step = cam_drag_pitch
-let drag_pan_step = world_span * cam_drag_pan_frac
-let pan_bound = half * tile_size  # keep the look-at over the map (centred on 0,0)
-
-# The starting rig reproduces the old orbit demo's opening frame exactly: same
-# horizontal standoff and eye height, looking at the map centre.
-let cam_start = Cam(yaw = 0.0, radius = cam_start_radius, height = cam_start_height,
-                    tx = 0.0, ty = cam_target_y, tz = 0.0)
 
 # --- Control panel (held buttons: press-and-hold to move continuously) ------
 # Buttons are grouped by FUNCTION and laid out to mirror the motion they cause:
@@ -374,8 +370,18 @@ fn bd(b: Bool) -> Double = if b then 1.0 else 0.0
 # two ways that feed the SAME cam_drive fold: the on-screen buttons (hold to move continuously) and
 # mouse/keyboard gestures (scroll = zoom, left-drag over the view = orbit/tilt, Shift+left-drag =
 # pan, WASD = pan) that work on both a mouse and a MacBook trackpad.
-fn render_loop(meshes: MutVec Int, models: MutVec Int, cam: Cam) -> Unit !{IO} =
+fn render_loop(meshes: MutVec Int, models: MutVec Int, cam: Cam,
+               world_span: Double, chunk_count: Int, tree_group_count: Int, water_y: Double) -> Unit !{IO} =
   do
+    # Span-scaled framing + tree-cull, derived from world_span (were module constants; world_span is
+    # now config-driven). pan_bound = half·tile_size = (span/2)·tile_size = world_span/2. The radian
+    # steps (pitch_*, drag_yaw/pitch) stay compile-time module lets — they do NOT scale with span.
+    let tree_cull = tree_cull_dist(world_span, tree_cull_frac)
+    let min_dist = world_span * cam_min_frac
+    let max_dist = world_span * cam_max_frac
+    let pan_step = world_span * cam_pan_frac
+    let drag_pan_step = world_span * cam_drag_pan_frac
+    let pan_bound = world_span / 2.0
     stop <- gfx.window_should_close()
     if stop then gfx.close_window()
     else
@@ -439,10 +445,69 @@ fn render_loop(meshes: MutVec Int, models: MutVec Int, cam: Cam) -> Unit !{IO} =
                         + (if pan_drag then gdy * drag_pan_step else 0.0)
         render_loop(meshes, models,
                     cam_drive(cam, d_yaw, d_pitch, d_zoom, d_pan_r, d_pan_f,
-                              min_dist, max_dist, pitch_min, pitch_max, pan_bound))
+                              min_dist, max_dist, pitch_min, pitch_max, pan_bound),
+                    world_span, chunk_count, tree_group_count, water_y)
+
+# Read the settings dict from the config file named as the FIRST CLI ARG:
+#   just run-gfx examples/gfx/terrain_rivers_demo.sprout <file.conf>
+# No arg, or an unreadable path, falls back to an empty dict (⇒ every knob takes its def_* default)
+# with a loud note — so a typo in the path is visible, not silently ignored during a sweep. Matches
+# read_file directly (no `<-` bind), per loam/terrain.sprout's Result-wrapper caveat.
+# Matches argv_get / read_file DIRECTLY (no `<-` bind): both return `T !{IO}`, and binding one via
+# `<-` mis-strips the Maybe/Result wrapper (per loam/terrain.sprout; the prelude's argv_collect does
+# the same). So this is a plain expression body, not a do-block.
+fn read_settings() -> Dict Int !{IO} =
+  match argv_get(0) with
+  | Nothing ->
+      do
+        print("[config] no file given — using built-in defaults")
+        dict_empty()
+  | Just path ->
+      match read_file(path) with
+      | Ok text ->
+          do
+            print("[config] loaded " ++ path)
+            parse_config(text)
+      | Err e ->
+          do
+            print("[config] could not read " ++ path ++ ": " ++ e ++ " — using defaults")
+            dict_empty()
 
 fn main() -> Unit !{IO} =
   do
+    # --- Settings: config file (argv[0]) over def_* defaults; a no-config run reproduces the old
+    #     1024×1024, lattice0=24 world exactly, since each default matches the former constant. ----
+    settings <- read_settings()
+    let chunk_edge = cfg_int(settings, "chunk_edge", def_chunk_edge)
+    let region_chunks = cfg_int(settings, "region_chunks", def_region_chunks)
+    let seed = cfg_int(settings, "seed", def_seed)
+    let octaves = cfg_int(settings, "octaves", def_octaves)
+    let lattice0 = cfg_int(settings, "lattice0", def_lattice0)
+    let elevation_levels = cfg_int(settings, "elevation_levels", def_elevation_levels)
+    let t1 = cfg_int(settings, "tier1_min", def_tier1_min)
+    let t2 = cfg_int(settings, "tier2_min", def_tier2_min)
+    let t3 = cfg_int(settings, "tier3_min", def_tier3_min)
+    # Derived map dimensions (formerly module constants; now depend on the config).
+    let span_tiles = region_chunks * chunk_edge
+    let chunk_count = region_chunks * region_chunks  # one baked mesh per chunk
+    let tree_group_edge = chunk_edge  # tree instance group = one chunk
+    let tree_group_cols = (span_tiles + tree_group_edge - 1) / tree_group_edge  # ceil-divide
+    let tree_group_count = tree_group_cols * tree_group_cols
+    let world_span = to_double(span_tiles) * tile_size
+    let half = to_double(span_tiles) / 2.0  # map centred on origin
+    let water_y = (to_double(sea_level_band(elevation_levels)) + water_lift) * band_step
+    let cfg = Config(seed = seed, chunk_size = chunk_edge, octaves = octaves,
+                     lattice0 = lattice0, elevation_levels = elevation_levels)
+    let params = HydroParams(tier1_min = t1, tier2_min = t2, tier3_min = t3)
+    # Opening rig: same span-scaled standoff/height as before, looking at the map centre.
+    let cam_start = Cam(yaw = 0.0, radius = world_span * cam_radius_frac,
+                        height = world_span * cam_height_frac, tx = 0.0, ty = cam_target_y, tz = 0.0)
+    print("[loam] span=" ++ int_to_string(span_tiles) ++ " (" ++ int_to_string(region_chunks)
+          ++ "x" ++ int_to_string(chunk_edge) ++ ") seed=" ++ int_to_string(seed)
+          ++ " octaves=" ++ int_to_string(octaves) ++ " lattice0=" ++ int_to_string(lattice0)
+          ++ " levels=" ++ int_to_string(elevation_levels) ++ " tiers=" ++ int_to_string(t1)
+          ++ "/" ++ int_to_string(t2) ++ "/" ++ int_to_string(t3))
+
     gfx.open_window(1000, 600, "Sprout — Loam terrain with rivers (drainage-routed)")
     gfx.set_target_fps(60)
     # Distance fog (roadmap #1, docs/gfx-effects-roadmap-v0.md): distant terrain fades into a pale
@@ -456,16 +521,14 @@ fn main() -> Unit !{IO} =
     # gfx.post_vignette(0.7, 0.35)
     # gfx.post_tonemap(1.35, 1.4)
     # gfx.post_altitude_blur(300.0, 1600.0, 0.0, 0.8)
-    let cfg = Config(seed = world_seed, chunk_size = chunk_edge, octaves = noise_octaves,
-                     lattice0 = noise_lattice0, elevation_levels = elevation_levels)
     # Generate the whole region's biome tags + elevation bands directly into the global grids (no
     # chunk/disk round-trip; see the file header). These grids feed both the bake and the trees.
     bands <- mutmatrix_new(span_tiles, span_tiles, 0)
     tags <- mutmatrix_new(span_tiles, span_tiles, 0)
     gen_grids(cfg, bands, tags, span_tiles, 0)
     # Global hydrology pass over the whole region (same cfg + span as the terrain), computed once
-    # upfront. flow_tier lines up cell-for-cell with the generated tiles.
-    h <- compute_hydrology(cfg, span_tiles)
+    # upfront. flow_tier lines up cell-for-cell with the generated tiles; params sets the tiers.
+    h <- compute_hydrology(cfg, span_tiles, params)
     # Bake each chunk into its OWN top-surface mesh (top quad + exposed step walls only; river cells
     # recoloured by tier). Per-chunk meshes let the frame loop frustum-cull off-screen chunks — the
     # win when zoomed in.
@@ -475,5 +538,5 @@ fn main() -> Unit !{IO} =
     # queues GPU instances; the frame loop just replays them). Models load after the GL context.
     models <- mutvec_new(tree_count, 0)
     load_trees(models)
-    place_region(models, h, bands, tags, span_tiles, 0)
-    render_loop(meshes, models, cam_start)
+    place_region(cfg, models, h, bands, tags, span_tiles, half, tree_group_edge, tree_group_cols, 0)
+    render_loop(meshes, models, cam_start, world_span, chunk_count, tree_group_count, water_y)
