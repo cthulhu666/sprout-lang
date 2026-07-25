@@ -57,6 +57,7 @@ extern fn gfx_post_motion_blur(static_amount: Double, motion_gain: Double) -> Un
 extern fn gfx_post_altitude_blur(low_alt: Double, high_alt: Double, amt_low: Double, amt_high: Double) -> Unit !{IO}
 extern fn gfx_post_disable() -> Unit !{IO}
 extern fn gfx_fog(density: Double, r: Int, g: Int, b: Int) -> Unit !{IO}
+extern fn gfx_supersample(factor: Int) -> Unit !{IO}
 extern fn gfx_overlay_begin() -> Unit !{IO}
 extern fn gfx_close_window() -> Unit !{IO}
 
@@ -305,6 +306,14 @@ export fn post_disable() -> Unit !{IO} =
 # Tip: half the scene fades to fog at ~0.69/density view units — e.g. density 0.002 ≈ 350-unit half.
 export fn fog(density: Double, r: Int, g: Int, b: Int) -> Unit !{IO} =
   gfx_fog(density, r, g, b)
+
+# Supersampling anti-aliasing. Render the scene at `factor`× the window resolution, then downsample
+# on present — the honest fix for the minification "shimmer/crawl" of high-frequency tile terrain
+# during camera motion (MSAA can't touch that; it only smooths silhouettes). `factor` 1 = off
+# (direct render, keeps MSAA); 2 = the sweet spot (~4× fragments, cheap on a light scene). Set once
+# at setup. Composes with post effects and fog. Trades the window's 4× MSAA for higher-quality SSAA.
+export fn supersample(factor: Int) -> Unit !{IO} =
+  gfx_supersample(factor)
 
 # Mark the scene -> HUD transition so UI draws CRISP on top of the post-processed scene (unblurred,
 # unvignetted). Call AFTER the 3D draws and BEFORE the UI (draw_fps / button / button_held), then

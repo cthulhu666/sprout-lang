@@ -64,8 +64,11 @@ Ordered by AAA-uplift-per-engineering; each tagged with what it needs.
    PBR bloom *"requires an HDR floating-point colour buffer"*, but threshold bloom on LDR
    *"still works as a cheaper stylized approximation and is what many engines actually ship."*
    Reuses the `blit_pass` chain (Phase-2 plan in `gfx-postprocess-v0.md`). ([PBR bloom](https://learnopengl.com/Guest-Articles/2022/Phys.-Based-Bloom))
-6. **Anti-aliasing (FXAA/SMAA)** — *cheap post-pass.* The off-screen post path drops the
-   window's MSAA; TAA needs motion vectors loam lacks, so FXAA/SMAA is the practical re-AA.
+6. **Anti-aliasing** — **← SSAA 2× IMPLEMENTED** (`gfx.supersample`). The high-frequency tile
+   terrain *minification-shimmers* during camera motion (MSAA only touches silhouettes, not
+   sub-pixel tile crawl). SSAA — render at N× and downsample — is the honest fix and reuses the
+   render-texture path. FXAA/SMAA (cheaper, single-pass, but softens and only partially fixes
+   temporal crawl) remains an option for weaker GPUs; TAA needs motion vectors loam lacks.
 
 ### Skip / defer
 - **Cascaded shadow maps + soft shadows** — biggest uplift *and* biggest cost (~40 ms in

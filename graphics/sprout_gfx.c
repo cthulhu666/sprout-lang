@@ -249,12 +249,11 @@ static int   g_fog_r = 0, g_fog_g = 0, g_fog_b = 0;
  * non-multisampled target, so redirecting through it would silently drop MSAA.
  * Only opt-in callers pay that tradeoff (and the blur masks the aliasing).
  *
- * blit_pass is the reusable atom of ALL post-processing: run one full-screen
- * shader from a source texture into a destination target (NULL = the screen).
- * A single-pass effect is one blit_pass; a future multi-pass effect (bloom:
- * bright-pass -> ping-pong blur -> composite, docs/gfx-postprocess-v0.md) is a
- * CHAIN of blit_pass calls into scratch targets, with THIS present as the
- * unchanged final link. See docs/gfx-postprocess-v0.md for the extension path. */
+ * present_scene_shaded is the reusable atom: draw the scene texture through POST_FS into the
+ * currently-active target, scaled to the window (so it also serves as the SSAA downsample). The
+ * caller owns the BeginDrawing/BeginTextureMode bracket. A future multi-pass effect (bloom:
+ * bright-pass -> ping-pong blur -> composite, docs/gfx-postprocess-v0.md) is a CHAIN of such
+ * passes into scratch targets, with THIS present as the unchanged final link. */
 #define GFX_POST_VIGNETTE 1
 #define GFX_POST_TONEMAP  2
 #define GFX_POST_BLUR     4
@@ -326,6 +325,14 @@ static Shader g_post_shader;
 static int g_post_ready = 0;
 static int g_post_mask = 0;                 /* OR of GFX_POST_* — 0 disables the whole path */
 
+/* Supersampling anti-aliasing (SSAA): the scene renders into a target `g_ssaa`× the window on each
+ * axis, then downsamples to the window (bilinear) on present — more samples per final pixel, which
+ * resolves the minification shimmer of the high-frequency tile terrain (MSAA can't; it only touches
+ * silhouettes). g_ssaa 1 = off. The off-screen path activates when post OR ssaa is on (use_offscreen).
+ * g_win_* is the window/framebuffer size; g_scene_target is sized g_win_* × g_ssaa. */
+static int g_ssaa  = 1;
+static int g_win_w = 0, g_win_h = 0;
+
 /* Effect params (defaults are the tasteful settings; setters overwrite them). */
 static float g_vig_intensity = 0.55f;
 static float g_vig_radius    = 0.55f;
@@ -355,10 +362,21 @@ static int g_prev_cam_valid = 0;
 /* Cached POST_FS uniform locations (GetShaderLocation once, set each frame). */
 static int g_loc_resolution, g_loc_mask, g_loc_vig_int, g_loc_vig_rad, g_loc_exposure, g_loc_saturation, g_loc_blur;
 
+/* (Re)allocate the off-screen scene target at (w,h). Bilinear filter so the SSAA present
+ * downsamples smoothly. Reused by gfx_supersample to resize when the SSAA factor changes. */
+static void alloc_scene_target(int w, int h) {
+  if (g_scene_target_ready) { UnloadRenderTexture(g_scene_target); g_scene_target_ready = 0; }
+  g_scene_target = LoadRenderTexture(w, h);
+  g_scene_target_ready = (g_scene_target.id != 0);
+  if (g_scene_target_ready) SetTextureFilter(g_scene_target.texture, TEXTURE_FILTER_BILINEAR);
+}
+
+/* True when the scene must render off-screen: any post effect OR supersampling is on. */
+static int use_offscreen(void) { return g_scene_target_ready && (g_post_mask != 0 || g_ssaa > 1); }
+
 /* Build the post shader and its render target. Call after InitWindow (needs GL).
- * The target is sized to the framebuffer; the window is not resizable, so a fixed
- * size is correct (no resize handling). NULL vs = raylib's default full-screen
- * vertex shader, which supplies fragTexCoord/fragColor for POST_FS. */
+ * The window is not resizable, so a fixed size is correct (no resize handling). NULL vs =
+ * raylib's default full-screen vertex shader, which supplies fragTexCoord/fragColor for POST_FS. */
 static void init_post(void) {
   g_post_shader = LoadShaderFromMemory(NULL, POST_FS);
   if (g_post_shader.id != 0) {
@@ -371,21 +389,9 @@ static void init_post(void) {
     g_loc_blur       = GetShaderLocation(g_post_shader, "uBlur");
     g_post_ready = 1;
   }
-  g_scene_target = LoadRenderTexture(GetRenderWidth(), GetRenderHeight());
-  g_scene_target_ready = (g_scene_target.id != 0);
-}
-
-/* Run one full-screen shader pass: sample `src` through `sh` into `dst` (NULL =
- * the screen). raylib render textures are y-flipped, so the source rect has a
- * NEGATIVE height to present them upright. The one primitive every post-process
- * pass — single- or (later) multi-pass — is built from. */
-static void blit_pass(Texture2D src, RenderTexture2D *dst, Shader sh) {
-  if (dst) BeginTextureMode(*dst); else BeginDrawing();
-  if (sh.id) BeginShaderMode(sh);
-  DrawTextureRec(src, (Rectangle){ 0.0f, 0.0f, (float)src.width, -(float)src.height },
-                 (Vector2){ 0.0f, 0.0f }, WHITE);
-  if (sh.id) EndShaderMode();
-  if (dst) EndTextureMode(); else EndDrawing();
+  g_win_w = GetRenderWidth();
+  g_win_h = GetRenderHeight();
+  alloc_scene_target(g_win_w, g_win_h);   /* SSAA 1× until gfx_supersample resizes it */
 }
 
 /* Load and configure the lighting shaders. Call after InitWindow (needs GL). */
@@ -661,7 +667,7 @@ long long gfx_frame_begin(void) {
   /* With any post-effect enabled, render the 3D scene into the off-screen target
    * so gfx_frame_end can present it through POST_FS; otherwise draw straight to
    * the backbuffer (keeps 4x MSAA — see the post-processing block). */
-  if (g_post_mask != 0 && g_scene_target_ready) BeginTextureMode(g_scene_target);
+  if (use_offscreen()) BeginTextureMode(g_scene_target);
   else BeginDrawing();
   /* Clear to the fog colour when fog is on, so distant terrain fades into the horizon seamlessly. */
   ClearBackground(g_fog_on ? (Color){ (unsigned char)g_fog_r, (unsigned char)g_fog_g, (unsigned char)g_fog_b, 255 }
@@ -1053,7 +1059,10 @@ static void present_scene_shaded(void) {
   float amount = blur_baseline() + camera_motion() * g_blur_gain;
   if (amount > g_blur_max) amount = g_blur_max;
   float blur = amount * GFX_BLUR_PX_PER_UNIT;   /* amount (unitless) -> kernel radius in pixels */
-  if (g_post_ready) {
+  /* Run POST_FS only when an effect is enabled; with SSAA alone the present is a plain bilinear
+   * downsample (the shader would just be a passthrough). */
+  int shade = (g_post_mask != 0 && g_post_ready);
+  if (shade) {
     float res[2] = { (float)g_scene_target.texture.width, (float)g_scene_target.texture.height };
     SetShaderValue(g_post_shader, g_loc_resolution, res, SHADER_UNIFORM_VEC2);
     SetShaderValue(g_post_shader, g_loc_mask, &g_post_mask, SHADER_UNIFORM_INT);
@@ -1062,14 +1071,15 @@ static void present_scene_shaded(void) {
     SetShaderValue(g_post_shader, g_loc_exposure, &g_exposure, SHADER_UNIFORM_FLOAT);
     SetShaderValue(g_post_shader, g_loc_saturation, &g_saturation, SHADER_UNIFORM_FLOAT);
     SetShaderValue(g_post_shader, g_loc_blur, &blur, SHADER_UNIFORM_FLOAT);
+    BeginShaderMode(g_post_shader);
   }
-  Shader sh = g_post_ready ? g_post_shader : (Shader){ 0 };
-  if (sh.id) BeginShaderMode(sh);
-  /* render textures are y-flipped -> negative source height to present upright */
-  DrawTextureRec(g_scene_target.texture,
+  /* Draw the (possibly SSAA-oversized) scene texture scaled to the window — the bilinear
+   * minification IS the supersample resolve. Render textures are y-flipped -> negative src height. */
+  DrawTexturePro(g_scene_target.texture,
                  (Rectangle){ 0.0f, 0.0f, (float)g_scene_target.texture.width, -(float)g_scene_target.texture.height },
-                 (Vector2){ 0.0f, 0.0f }, WHITE);
-  if (sh.id) EndShaderMode();
+                 (Rectangle){ 0.0f, 0.0f, (float)g_win_w, (float)g_win_h },
+                 (Vector2){ 0.0f, 0.0f }, 0.0f, WHITE);
+  if (shade) EndShaderMode();
 }
 
 /* Mark the scene -> HUD transition so subsequent UI draws crisp ON TOP of the post-processed
@@ -1080,7 +1090,7 @@ static void present_scene_shaded(void) {
 long long gfx_overlay_begin(void) {
   if (g_overlay) return 0;
   EndMode3D();                              /* leave the 3D pass; now in 2D */
-  if (g_post_mask != 0 && g_scene_target_ready) {
+  if (use_offscreen()) {
     EndTextureMode();                       /* resolve the off-screen scene... */
     BeginDrawing();                         /* ...and present it to the backbuffer, left OPEN for UI */
     present_scene_shaded();
@@ -1098,7 +1108,7 @@ long long gfx_frame_end(void) {
     g_overlay = 0;
   } else {
     EndMode3D();
-    if (g_post_mask != 0 && g_scene_target_ready) {
+    if (use_offscreen()) {
       EndTextureMode();       /* scene pass done — resolve the off-screen target */
       BeginDrawing();
       present_scene_shaded();  /* present through POST_FS (UI, if any, was drawn into the scene) */
@@ -1188,6 +1198,19 @@ long long gfx_fog(long long density, long long r, long long g, long long b) {
     SetShaderValue(g_light_shader, GetShaderLocation(g_light_shader, "uFogDensity"), &d, SHADER_UNIFORM_FLOAT);
     SetShaderValue(g_light_shader, GetShaderLocation(g_light_shader, "uFogColor"), &c, SHADER_UNIFORM_VEC3);
   }
+  return 0;
+}
+
+/* Supersampling AA: render the scene at `factor`× the window on each axis into the off-screen
+ * target, then downsample (bilinear) on present. Adds samples per final pixel, which resolves the
+ * minification shimmer of high-frequency geometry (the tile terrain) that MSAA can't. factor 1
+ * disables it (direct-to-screen, keeps the window's MSAA); 2 is the sweet spot. Clamped [1,4].
+ * Cost is factor²× the scene target + fragment shading — cheap on a GPU-light scene. */
+long long gfx_supersample(long long factor) {
+  int f = (int)factor;
+  if (f < 1) f = 1; else if (f > 4) f = 4;
+  g_ssaa = f;
+  alloc_scene_target(g_win_w * f, g_win_h * f);
   return 0;
 }
 
