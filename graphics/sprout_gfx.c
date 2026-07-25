@@ -166,16 +166,17 @@ static const char *CUBE_FS =
   "    finalColor = vec4(lit, fragColor.a);\n"
   "}\n";
 
-/* Instanced tree shader: one DrawMeshInstanced call draws thousands of trees, each positioned by
- * its own `instanceTransform` (a per-instance model matrix uploaded as a vertex attribute), so a
- * whole forest costs a handful of draw calls instead of one DrawModel per tree. Colour is the
- * material's colDiffuse — the Kenney models are vendored as OBJ, whose per-material MTL `Kd`
- * raylib loads into maps[DIFFUSE].color (each tree splits into a bark mesh + a leaves mesh, drawn
- * as separate instanced batches). Lighting matches CUBE/LIGHT: a world-space normal against a
- * fixed key light + ambient. NB: the normal is transformed by `instanceTransform` (NOT the
- * `matNormal` uniform, which raylib binds from the identity matModel under DrawMeshInstanced —
- * using it would light every rotated tree as if unrotated). `wind` is reserved for a future sway. */
-static const char *TREE_VS =
+/* Instanced-props shader: one DrawMeshInstanced call draws thousands of copies of a model, each
+ * positioned by its own `instanceTransform` (a per-instance model matrix uploaded as a vertex
+ * attribute), so a whole forest/crowd/field costs a handful of draw calls instead of one DrawModel
+ * per object. Colour is the material's colDiffuse — e.g. the Kenney models are vendored as OBJ,
+ * whose per-material MTL `Kd` raylib loads into maps[DIFFUSE].color (a tree splits into a bark mesh
+ * + a leaves mesh, drawn as separate instanced batches). Lighting matches CUBE/LIGHT: a world-space
+ * normal against a fixed key light + ambient. NB: the normal is transformed by `instanceTransform`
+ * (NOT the `matNormal` uniform, which raylib binds from the identity matModel under
+ * DrawMeshInstanced — using it would light every rotated instance as if unrotated). `wind` is
+ * reserved for a future sway. */
+static const char *INSTANCE_VS =
   "#version 330\n"
   "in vec3 vertexPosition;\n"
   "in vec3 vertexNormal;\n"
@@ -187,7 +188,7 @@ static const char *TREE_VS =
   "    gl_Position = mvp*instanceTransform*vec4(vertexPosition, 1.0);\n"
   "}\n";
 
-static const char *TREE_FS =
+static const char *INSTANCE_FS =
   "#version 330\n"
   "in vec3 fragNormal;\n"
   "uniform vec4 colDiffuse;\n"
@@ -201,8 +202,8 @@ static const char *TREE_FS =
   "    finalColor = vec4(lit, colDiffuse.a);\n"
   "}\n";
 
-static Shader g_tree_shader;   /* instanced, vertex-colour lit shader for scattered models (trees) */
-static int g_tree_ready = 0;
+static Shader g_instance_shader;   /* instanced, vertex-colour lit shader for scattered models (trees) */
+static int g_instance_ready = 0;
 
 /* Load and configure the lighting shaders. Call after InitWindow (needs GL). */
 static void init_lighting(void) {
@@ -231,63 +232,38 @@ static void init_lighting(void) {
   if (g_cube_ready) g_terrain_material.shader = g_cube_shader;
   g_terrain_material_ready = 1;
 
-  g_tree_shader = LoadShaderFromMemory(TREE_VS, TREE_FS);
-  if (g_tree_shader.id != 0) {
+  g_instance_shader = LoadShaderFromMemory(INSTANCE_VS, INSTANCE_FS);
+  if (g_instance_shader.id != 0) {
     /* The instance-transform vertex attribute is NOT one of raylib's auto-located standard
      * attributes; DrawMeshInstanced streams per-instance matrices into whatever location this
      * points at, so it must be wired explicitly. (mvp/colDiffuse/vertexColor ARE auto-located
      * by their conventional names when the shader loads.) */
-    g_tree_shader.locs[SHADER_LOC_VERTEX_INSTANCETRANSFORM] =
-      GetShaderLocationAttrib(g_tree_shader, "instanceTransform");
-    SetShaderValue(g_tree_shader, GetShaderLocation(g_tree_shader, "lightDir"), &lightDir, SHADER_UNIFORM_VEC3);
-    SetShaderValue(g_tree_shader, GetShaderLocation(g_tree_shader, "lightColor"), &lightColor, SHADER_UNIFORM_VEC3);
-    SetShaderValue(g_tree_shader, GetShaderLocation(g_tree_shader, "ambient"), &ambient, SHADER_UNIFORM_VEC3);
-    g_tree_ready = 1;
+    g_instance_shader.locs[SHADER_LOC_VERTEX_INSTANCETRANSFORM] =
+      GetShaderLocationAttrib(g_instance_shader, "instanceTransform");
+    SetShaderValue(g_instance_shader, GetShaderLocation(g_instance_shader, "lightDir"), &lightDir, SHADER_UNIFORM_VEC3);
+    SetShaderValue(g_instance_shader, GetShaderLocation(g_instance_shader, "lightColor"), &lightColor, SHADER_UNIFORM_VEC3);
+    SetShaderValue(g_instance_shader, GetShaderLocation(g_instance_shader, "ambient"), &ambient, SHADER_UNIFORM_VEC3);
+    g_instance_ready = 1;
   }
 }
 
-/* Per-model instance registry: for each model handle, a growable array of world transforms. A
- * scene pushes every tree of a given type once at setup (gfx_instance_push), then draws them all
- * each frame with one DrawMeshInstanced per mesh (gfx_draw_instanced). Indexed by model handle;
- * grown lazily so it need not track the model registry's own growth. */
-static Matrix **g_inst = NULL;    /* g_inst[h] = transform buffer for model h */
-static int *g_inst_count = NULL;  /* live transforms in g_inst[h] */
-static int *g_inst_cap = NULL;    /* capacity of g_inst[h] */
-static int g_inst_reg = 0;        /* number of handle slots allocated */
-
-/* --- Per-chunk tree instance groups (frustum-culled vegetation) --------------------------------
- * The plain registry above draws every instance of a model every frame. For a large map that means
- * streaming the whole forest even when zoomed into a corner. These GROUPS bucket instances by a
- * caller id (a chunk) x model handle, plus a per-group AABB, so gfx_draw_tree_group can skip a whole
- * chunk's trees when its bounds are off-screen. Flat, statically sized, zero-initialised (NULL
- * buffers / 0 counts / g_tg_any=0), grown lazily on push. */
-#define GFX_MAX_TREE_GROUPS 4096
-#define GFX_TREE_MODELS 64
-#define GFX_TREE_MARGIN 6.0f  /* AABB pad (world units) covering tree height/width beyond trunk base */
-static Matrix *g_tg[GFX_MAX_TREE_GROUPS * GFX_TREE_MODELS];
-static int g_tg_count[GFX_MAX_TREE_GROUPS * GFX_TREE_MODELS];
-static int g_tg_cap[GFX_MAX_TREE_GROUPS * GFX_TREE_MODELS];
-static float g_tg_bbmin[GFX_MAX_TREE_GROUPS][3];
-static float g_tg_bbmax[GFX_MAX_TREE_GROUPS][3];
-static int g_tg_any[GFX_MAX_TREE_GROUPS];
-
-/* Ensure the per-handle registry arrays cover index `h` (slots initialised empty). */
-static int inst_reg_reserve(int h) {
-  if (h < g_inst_reg) return 1;
-  int nr = g_inst_reg == 0 ? 16 : g_inst_reg;
-  while (nr <= h) nr *= 2;
-  Matrix **ni = realloc(g_inst, (size_t)nr * sizeof(Matrix *));
-  int *nc = realloc(g_inst_count, (size_t)nr * sizeof(int));
-  int *np = realloc(g_inst_cap, (size_t)nr * sizeof(int));
-  if (!ni || !nc || !np) {
-    TraceLog(LOG_ERROR, "sprout_gfx: out of memory growing instance registry to %d", nr);
-    return 0;
-  }
-  g_inst = ni; g_inst_count = nc; g_inst_cap = np;
-  for (int i = g_inst_reg; i < nr; i++) { g_inst[i] = NULL; g_inst_count[i] = 0; g_inst_cap[i] = 0; }
-  g_inst_reg = nr;
-  return 1;
-}
+/* --- Instanced-props registry: spatial groups, frustum + distance culled ----------------------
+ * One system for every repeated prop (trees, rocks, crowds, ...). Instances bucket by a caller-
+ * assigned GROUP id (keep it spatially coherent — e.g. one per chunk) x model handle, each group
+ * carrying a world AABB, so gfx_draw_instances can skip a whole group when it is off-screen or
+ * beyond the LOD cull distance. Drawing per (group,model) would explode the draw-call count, so
+ * draw compacts each model's visible instances into one DrawMeshInstanced. Flat, statically sized,
+ * zero-initialised (NULL buffers / 0 counts / g_grp_any=0), grown lazily on push. A group can be
+ * cleared and re-pushed each frame (dynamic movers) — see gfx_instance_clear. */
+#define GFX_MAX_GROUPS 4096
+#define GFX_INSTANCE_MODELS 64
+#define GFX_INSTANCE_MARGIN 6.0f  /* AABB pad (world units) covering model height/width beyond origin */
+static Matrix *g_grp[GFX_MAX_GROUPS * GFX_INSTANCE_MODELS];
+static int g_grp_count[GFX_MAX_GROUPS * GFX_INSTANCE_MODELS];
+static int g_grp_cap[GFX_MAX_GROUPS * GFX_INSTANCE_MODELS];
+static float g_grp_bbmin[GFX_MAX_GROUPS][3];
+static float g_grp_bbmax[GFX_MAX_GROUPS][3];
+static int g_grp_any[GFX_MAX_GROUPS];
 
 /* --- Mesh capture helpers --------------------------------------------------- */
 static void cap_reserve(int extra) {
@@ -723,138 +699,109 @@ long long gfx_draw_model(long long handle, long long x, long long y, long long z
   return 0;
 }
 
-/* Queue one instance of model `handle` at (x,y,z), rotated `angle` degrees about Y, uniformly
- * scaled by `scale`. Call once per object at setup; the transform is built here (mirroring
- * DrawModelEx's scale->rotate->translate order) and stored, then replayed cheaply every frame by
- * gfx_draw_instanced. Out-of-range handles are a no-op. */
-long long gfx_instance_push(long long handle, long long x, long long y, long long z,
-                            long long angle, long long scale) {
-  if (handle < 0 || handle >= g_model_count) return 0;
-  int h = (int)handle;
-  if (!inst_reg_reserve(h)) return 0;
-  if (g_inst_count[h] >= g_inst_cap[h]) {
-    int nc = g_inst_cap[h] == 0 ? 256 : g_inst_cap[h] * 2;
-    Matrix *grown = realloc(g_inst[h], (size_t)nc * sizeof(Matrix));
-    if (!grown) { TraceLog(LOG_ERROR, "sprout_gfx: out of memory growing instance buffer"); return 0; }
-    g_inst[h] = grown; g_inst_cap[h] = nc;
-  }
-  float s = as_float(scale);
-  Matrix m = MatrixMultiply(MatrixMultiply(MatrixScale(s, s, s),
-                                           MatrixRotate((Vector3){ 0.0f, 1.0f, 0.0f }, as_float(angle) * DEG2RAD)),
-                            MatrixTranslate(as_float(x), as_float(y), as_float(z)));
-  g_inst[h][g_inst_count[h]++] = m;
-  return 0;
-}
-
-/* Draw every queued instance of model `handle` in one DrawMeshInstanced call per mesh, under the
- * instanced tree shader (world-normal lit, per-vertex colour x material colour). The material is
- * copied by value with its shader overridden, so the stored model is left untouched. A no-op for
- * out-of-range handles or handles with no queued instances. */
-long long gfx_draw_instanced(long long handle) {
-  if (handle < 0 || handle >= g_model_count) return 0;
-  int h = (int)handle;
-  if (h >= g_inst_reg || g_inst_count[h] == 0) return 0;
-  Model model = g_models[h];
-  for (int i = 0; i < model.meshCount; i++) {
-    Material mat = model.materials[model.meshMaterial[i]];
-    if (g_tree_ready) mat.shader = g_tree_shader;
-    DrawMeshInstanced(model.meshes[i], mat, g_inst[h], g_inst_count[h]);
-  }
-  return 0;
-}
-
-/* Queue one tree instance into group `group` (a chunk) for model `model`, growing that (group,model)
- * buffer and the group's world AABB. Bucketing by group lets gfx_draw_tree_group frustum-cull a
- * whole chunk's trees. Out-of-range group/model is a no-op. */
-long long gfx_tree_push(long long group, long long model, long long x, long long y, long long z,
+/* Queue one instance of `model` into spatial bucket `group` at (x,y,z), rotated `angle` degrees
+ * about Y and uniformly scaled by `scale`. Grows that (group,model) buffer and the group's world
+ * AABB (rebuilt from scratch after the group is emptied, so a cleared+re-pushed group re-bounds to
+ * its current instances). The transform mirrors DrawModelEx's scale->rotate->translate order.
+ * Out-of-range group/model is a no-op. */
+long long gfx_instance_push(long long group, long long model, long long x, long long y, long long z,
                         long long angle, long long scale) {
   int grp = (int)group, mdl = (int)model;
-  if (grp < 0 || grp >= GFX_MAX_TREE_GROUPS || mdl < 0 || mdl >= GFX_TREE_MODELS) return 0;
-  int idx = grp * GFX_TREE_MODELS + mdl;
-  if (g_tg_count[idx] >= g_tg_cap[idx]) {
-    int nc = (g_tg_cap[idx] == 0) ? 64 : g_tg_cap[idx] * 2;
-    Matrix *grown = realloc(g_tg[idx], (size_t)nc * sizeof(Matrix));
-    if (!grown) { TraceLog(LOG_ERROR, "sprout_gfx: out of memory growing tree group"); return 0; }
-    g_tg[idx] = grown; g_tg_cap[idx] = nc;
+  if (grp < 0 || grp >= GFX_MAX_GROUPS || mdl < 0 || mdl >= GFX_INSTANCE_MODELS) return 0;
+  int idx = grp * GFX_INSTANCE_MODELS + mdl;
+  if (g_grp_count[idx] >= g_grp_cap[idx]) {
+    int nc = (g_grp_cap[idx] == 0) ? 64 : g_grp_cap[idx] * 2;
+    Matrix *grown = realloc(g_grp[idx], (size_t)nc * sizeof(Matrix));
+    if (!grown) { TraceLog(LOG_ERROR, "sprout_gfx: out of memory growing instance group"); return 0; }
+    g_grp[idx] = grown; g_grp_cap[idx] = nc;
   }
   float fx = as_float(x), fy = as_float(y), fz = as_float(z), s = as_float(scale);
   Matrix m = MatrixMultiply(MatrixMultiply(MatrixScale(s, s, s),
                                            MatrixRotate((Vector3){ 0.0f, 1.0f, 0.0f }, as_float(angle) * DEG2RAD)),
                             MatrixTranslate(fx, fy, fz));
-  g_tg[idx][g_tg_count[idx]++] = m;
-  if (!g_tg_any[grp]) {
-    g_tg_bbmin[grp][0] = fx; g_tg_bbmin[grp][1] = fy; g_tg_bbmin[grp][2] = fz;
-    g_tg_bbmax[grp][0] = fx; g_tg_bbmax[grp][1] = fy; g_tg_bbmax[grp][2] = fz;
-    g_tg_any[grp] = 1;
+  g_grp[idx][g_grp_count[idx]++] = m;
+  if (!g_grp_any[grp]) {
+    g_grp_bbmin[grp][0] = fx; g_grp_bbmin[grp][1] = fy; g_grp_bbmin[grp][2] = fz;
+    g_grp_bbmax[grp][0] = fx; g_grp_bbmax[grp][1] = fy; g_grp_bbmax[grp][2] = fz;
+    g_grp_any[grp] = 1;
   } else {
-    if (fx < g_tg_bbmin[grp][0]) g_tg_bbmin[grp][0] = fx; else if (fx > g_tg_bbmax[grp][0]) g_tg_bbmax[grp][0] = fx;
-    if (fy < g_tg_bbmin[grp][1]) g_tg_bbmin[grp][1] = fy; else if (fy > g_tg_bbmax[grp][1]) g_tg_bbmax[grp][1] = fy;
-    if (fz < g_tg_bbmin[grp][2]) g_tg_bbmin[grp][2] = fz; else if (fz > g_tg_bbmax[grp][2]) g_tg_bbmax[grp][2] = fz;
+    if (fx < g_grp_bbmin[grp][0]) g_grp_bbmin[grp][0] = fx; else if (fx > g_grp_bbmax[grp][0]) g_grp_bbmax[grp][0] = fx;
+    if (fy < g_grp_bbmin[grp][1]) g_grp_bbmin[grp][1] = fy; else if (fy > g_grp_bbmax[grp][1]) g_grp_bbmax[grp][1] = fy;
+    if (fz < g_grp_bbmin[grp][2]) g_grp_bbmin[grp][2] = fz; else if (fz > g_grp_bbmax[grp][2]) g_grp_bbmax[grp][2] = fz;
   }
   return 0;
 }
 
-/* Scratch for compacting visible instances of one model, and the per-frame visible-group list. */
-static Matrix *g_tree_scratch = NULL;
-static int g_tree_scratch_cap = 0;
-static int g_vis[GFX_MAX_TREE_GROUPS];
+/* Empty one spatial bucket: zero all its (group,model) instance counts and reset its AABB flag,
+ * keeping the allocated buffers for reuse. Dynamic callers (moving crowds) clear their group each
+ * frame and re-push; static callers (scenery) never call this. Out-of-range group is a no-op. */
+long long gfx_instance_clear(long long group) {
+  int grp = (int)group;
+  if (grp < 0 || grp >= GFX_MAX_GROUPS) return 0;
+  for (int m = 0; m < GFX_INSTANCE_MODELS; m++) g_grp_count[grp * GFX_INSTANCE_MODELS + m] = 0;
+  g_grp_any[grp] = 0;
+  return 0;
+}
 
-/* Draw all tree groups [0, group_count), frustum-culled, in ~one DrawMeshInstanced PER MODEL rather
- * than per (group,model). Naively drawing each visible group separately explodes the draw-call count
- * (dozens of visible groups x models x meshes) and the per-call overhead swamps the culling win — so
- * instead we (1) collect the visible groups once, then (2) per model, COMPACT their instances into a
- * scratch buffer and issue a single instanced draw. Result: ~30 draws/frame regardless of how many
- * groups are visible, over only the on-screen instances. This is the call the frame loop makes. */
-/* Draw all tree groups' visible instances, batched one DrawMeshInstanced per model.
+/* Scratch for compacting visible instances of one model, and the per-frame visible-group list. */
+static Matrix *g_inst_scratch = NULL;
+static int g_inst_scratch_cap = 0;
+static int g_vis[GFX_MAX_GROUPS];
+
+/* Draw all instance groups [0, group_count), batched ~one DrawMeshInstanced PER MODEL rather than
+ * per (group,model): drawing each visible group separately would explode the draw-call count
+ * (visible groups x models x meshes) and the per-call overhead would swamp the culling win. So we
+ * (1) collect the groups that survive culling, then (2) per model, COMPACT their instances into a
+ * scratch buffer and issue one instanced draw — ~one draw/model/frame regardless of group count.
  * A group is drawn only if it passes BOTH culls:
- *   - distance LOD: its centre is within `cull_dist` of the camera eye (so a
- *     zoomed-out overview, where every tree is far and sub-pixel, draws none —
- *     the dominant zoomed-out cost). cull_dist <= 0 disables the distance test.
- *   - frustum: its padded AABB intersects the view (the zoomed-in win, unchanged).
- * cull_dist crosses the ABI as a Double (its IEEE-754 bit pattern). */
-long long gfx_draw_trees_culled(long long group_count, long long cull_dist) {
+ *   - distance LOD: its centre is within `cull_dist` of the camera eye, so a zoomed-out view where
+ *     every instance is far and sub-pixel draws almost none. cull_dist <= 0 disables the distance test.
+ *   - frustum: its padded AABB intersects the view (the zoomed-in win).
+ * The MODEL count is read from the loaded-model registry; `group_count` is the bucket scan bound.
+ * cull_dist crosses the ABI as a Double (its IEEE-754 bit pattern). This is the frame-loop call. */
+long long gfx_draw_instances(long long group_count, long long cull_dist) {
   int gc = (int)group_count;
-  if (gc > GFX_MAX_TREE_GROUPS) gc = GFX_MAX_TREE_GROUPS;
+  if (gc > GFX_MAX_GROUPS) gc = GFX_MAX_GROUPS;
   float cull = as_float(cull_dist);
   float cull2 = cull * cull;  /* compare squared distances — no per-group sqrt */
   float ex = g_cam.position.x, ey = g_cam.position.y, ez = g_cam.position.z;
   int nvis = 0;
   for (int g = 0; g < gc; g++) {
-    if (!g_tg_any[g]) continue;
+    if (!g_grp_any[g]) continue;
     if (cull > 0.0f) {  /* distance LOD: skip groups whose centre is beyond cull_dist */
-      float gx = 0.5f * (g_tg_bbmin[g][0] + g_tg_bbmax[g][0]);
-      float gy = 0.5f * (g_tg_bbmin[g][1] + g_tg_bbmax[g][1]);
-      float gz = 0.5f * (g_tg_bbmin[g][2] + g_tg_bbmax[g][2]);
+      float gx = 0.5f * (g_grp_bbmin[g][0] + g_grp_bbmax[g][0]);
+      float gy = 0.5f * (g_grp_bbmin[g][1] + g_grp_bbmax[g][1]);
+      float gz = 0.5f * (g_grp_bbmin[g][2] + g_grp_bbmax[g][2]);
       float dx = gx - ex, dy = gy - ey, dz = gz - ez;
       if ((dx*dx + dy*dy + dz*dz) > cull2) continue;
     }
-    float mn[3] = { g_tg_bbmin[g][0] - GFX_TREE_MARGIN, g_tg_bbmin[g][1] - GFX_TREE_MARGIN, g_tg_bbmin[g][2] - GFX_TREE_MARGIN };
-    float mx[3] = { g_tg_bbmax[g][0] + GFX_TREE_MARGIN, g_tg_bbmax[g][1] + GFX_TREE_MARGIN, g_tg_bbmax[g][2] + GFX_TREE_MARGIN };
+    float mn[3] = { g_grp_bbmin[g][0] - GFX_INSTANCE_MARGIN, g_grp_bbmin[g][1] - GFX_INSTANCE_MARGIN, g_grp_bbmin[g][2] - GFX_INSTANCE_MARGIN };
+    float mx[3] = { g_grp_bbmax[g][0] + GFX_INSTANCE_MARGIN, g_grp_bbmax[g][1] + GFX_INSTANCE_MARGIN, g_grp_bbmax[g][2] + GFX_INSTANCE_MARGIN };
     if (aabb_in_frustum(mn, mx)) g_vis[nvis++] = g;
   }
   if (nvis == 0) return 0;
-  int nmodels = (g_model_count < GFX_TREE_MODELS) ? g_model_count : GFX_TREE_MODELS;
+  int nmodels = (g_model_count < GFX_INSTANCE_MODELS) ? g_model_count : GFX_INSTANCE_MODELS;
   for (int mdl = 0; mdl < nmodels; mdl++) {
     int total = 0;
-    for (int i = 0; i < nvis; i++) total += g_tg_count[g_vis[i] * GFX_TREE_MODELS + mdl];
+    for (int i = 0; i < nvis; i++) total += g_grp_count[g_vis[i] * GFX_INSTANCE_MODELS + mdl];
     if (total == 0) continue;
-    if (total > g_tree_scratch_cap) {
-      int nc = (g_tree_scratch_cap == 0) ? 1024 : g_tree_scratch_cap;
+    if (total > g_inst_scratch_cap) {
+      int nc = (g_inst_scratch_cap == 0) ? 1024 : g_inst_scratch_cap;
       while (nc < total) nc *= 2;
-      g_tree_scratch = realloc(g_tree_scratch, (size_t)nc * sizeof(Matrix));
-      g_tree_scratch_cap = nc;
+      g_inst_scratch = realloc(g_inst_scratch, (size_t)nc * sizeof(Matrix));
+      g_inst_scratch_cap = nc;
     }
     int off = 0;
     for (int i = 0; i < nvis; i++) {
-      int idx = g_vis[i] * GFX_TREE_MODELS + mdl;
-      int cnt = g_tg_count[idx];
-      if (cnt > 0) { memcpy(g_tree_scratch + off, g_tg[idx], (size_t)cnt * sizeof(Matrix)); off += cnt; }
+      int idx = g_vis[i] * GFX_INSTANCE_MODELS + mdl;
+      int cnt = g_grp_count[idx];
+      if (cnt > 0) { memcpy(g_inst_scratch + off, g_grp[idx], (size_t)cnt * sizeof(Matrix)); off += cnt; }
     }
     Model model = g_models[mdl];
     for (int i = 0; i < model.meshCount; i++) {
       Material mat = model.materials[model.meshMaterial[i]];
-      if (g_tree_ready) mat.shader = g_tree_shader;
-      DrawMeshInstanced(model.meshes[i], mat, g_tree_scratch, total);
+      if (g_instance_ready) mat.shader = g_instance_shader;
+      DrawMeshInstanced(model.meshes[i], mat, g_inst_scratch, total);
     }
   }
   return 0;

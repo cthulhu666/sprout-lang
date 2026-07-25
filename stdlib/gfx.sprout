@@ -31,10 +31,9 @@ extern fn gfx_mesh_capture_end() -> Int !{IO}
 extern fn gfx_draw_captured(handle: Int) -> Unit !{IO}
 extern fn gfx_draw_plane(x: Double, y: Double, z: Double, sx: Double, sz: Double, r: Int, g: Int, b: Int, a: Int) -> Unit !{IO}
 extern fn gfx_draw_model(handle: Int, x: Double, y: Double, z: Double, angle: Double, scale: Double) -> Unit !{IO}
-extern fn gfx_instance_push(handle: Int, x: Double, y: Double, z: Double, angle: Double, scale: Double) -> Unit !{IO}
-extern fn gfx_draw_instanced(handle: Int) -> Unit !{IO}
-extern fn gfx_tree_push(group: Int, model: Int, x: Double, y: Double, z: Double, angle: Double, scale: Double) -> Unit !{IO}
-extern fn gfx_draw_trees_culled(group_count: Int, cull_dist: Double) -> Unit !{IO}
+extern fn gfx_instance_push(group: Int, model: Int, x: Double, y: Double, z: Double, angle: Double, scale: Double) -> Unit !{IO}
+extern fn gfx_instance_clear(group: Int) -> Unit !{IO}
+extern fn gfx_draw_instances(group_count: Int, cull_dist: Double) -> Unit !{IO}
 extern fn gfx_load_animations(path: String) -> Int !{IO}
 extern fn gfx_animation_count(set: Int) -> Int !{IO}
 extern fn gfx_animation_keyframes(set: Int, index: Int) -> Int !{IO}
@@ -133,31 +132,27 @@ export fn draw_plane(x: Double, y: Double, z: Double, sx: Double, sz: Double,
 export fn draw_model(handle: Int, x: Double, y: Double, z: Double, angle: Double, scale: Double) -> Unit !{IO} =
   gfx_draw_model(handle, x, y, z, angle, scale)
 
-# Queue one instance of a loaded model at (x,y,z), rotated `angle` degrees about Y, scaled by
-# `scale`. Call once per object at setup; draw them all cheaply each frame with `draw_instanced`.
-# One DrawMeshInstanced call renders the whole batch, so thousands of trees stay ~free per frame.
-export fn instance_push(handle: Int, x: Double, y: Double, z: Double, angle: Double, scale: Double) -> Unit !{IO} =
-  gfx_instance_push(handle, x, y, z, angle, scale)
+# Instanced-props rendering: one system for every repeated model (trees, rocks, crowds, …), drawn
+# with frustum + distance culling. `instance_push` queues one instance of `model` into spatial
+# bucket `group` (a caller-assigned id — keep it spatially coherent, e.g. one per chunk, so culling
+# can drop whole buckets); the transform is Y-rotation `angle` + uniform `scale` at (x,y,z). A group
+# in [0, 4096); a model handle in [0, 64). Static scenery pushes once at setup; dynamic movers
+# `instance_clear` their group each frame and re-push.
+export fn instance_push(group: Int, model: Int, x: Double, y: Double, z: Double, angle: Double, scale: Double) -> Unit !{IO} =
+  gfx_instance_push(group, model, x, y, z, angle, scale)
 
-# Draw every instance queued for `handle` (via `instance_push`) in one instanced draw call per
-# mesh, under the tree shader (per-vertex colour x material colour, world-normal lit).
-export fn draw_instanced(handle: Int) -> Unit !{IO} =
-  gfx_draw_instanced(handle)
+# Empty one spatial bucket (counts -> 0, allocations kept) so a dynamic caller can re-push it this
+# frame. Static callers never need this.
+export fn instance_clear(group: Int) -> Unit !{IO} =
+  gfx_instance_clear(group)
 
-# Grouped instancing for frustum-culled scatter (e.g. per-chunk trees). tree_push queues one
-# instance of `model` into group `group` (a chunk index) and grows that group's bounds; every group
-# handed to draw_tree_group each frame is drawn only when its bounds are on-screen, so a zoomed-in
-# view pays for the visible chunks' vegetation instead of the whole map's. `group` in [0, 4096).
-export fn tree_push(group: Int, model: Int, x: Double, y: Double, z: Double, angle: Double, scale: Double) -> Unit !{IO} =
-  gfx_tree_push(group, model, x, y, z, angle, scale)
-
-# Draw all tree groups [0, group_count) in one pass, issuing one instanced draw per model over the
-# compacted visible instances (see gfx_draw_trees_culled). Draw-call count stays ~constant
-# regardless of how many groups are visible. A group is drawn only if its centre is within
-# `cull_dist` world units of the camera (distance-LOD, so a zoomed-out overview draws almost none)
-# AND its AABB is in the frustum. `cull_dist` <= 0 disables the distance test (draw all visible).
-export fn draw_trees_culled(group_count: Int, cull_dist: Double) -> Unit !{IO} =
-  gfx_draw_trees_culled(group_count, cull_dist)
+# Draw all groups [0, group_count) in one pass: one instanced draw per model over the compacted
+# visible instances, so the draw-call count is ~constant regardless of group count. A group draws
+# only if its centre is within `cull_dist` world units of the camera (distance-LOD, so a zoomed-out
+# overview draws almost none) AND its AABB is in the frustum. `cull_dist` <= 0 disables the distance
+# test (draw all visible).
+export fn draw_instances(group_count: Int, cull_dist: Double) -> Unit !{IO} =
+  gfx_draw_instances(group_count, cull_dist)
 
 # Load an animation set (glTF/GLB/IQM/M3D) whose skeleton matches a model; returns
 # a set handle. A clip is identified by (set, index); animation_count gives how many.

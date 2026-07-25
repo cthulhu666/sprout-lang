@@ -98,9 +98,9 @@ let cam_drag_pan_frac = 0.0015  # pan world-units per pixel of drag, as a span f
 # --- Derived (do not edit; computed from the tunables above) ----------------
 let span_tiles = region_chunks * chunk_edge
 let chunk_count = region_chunks * region_chunks  # one baked mesh per chunk
-# Trees are bucketed into per-chunk groups and frustum-culled. draw_trees_culled compacts the
-# visible groups' instances into one draw per model, so the draw-call count is independent of how
-# many groups exist — meaning we use the finest (per-chunk) groups for the tightest culling.
+# Trees are bucketed into per-chunk instance groups and frustum + distance culled. gfx.draw_instances
+# compacts the visible groups' instances into one draw per model, so the draw-call count is
+# independent of how many groups exist — so we use the finest (per-chunk) groups for tight culling.
 let tree_group_edge = chunk_edge  # group edge in tiles (= one chunk)
 let tree_group_cols = (span_tiles + tree_group_edge - 1) / tree_group_edge  # ceil, so it need not divide
 let tree_group_count = tree_group_cols * tree_group_cols
@@ -283,7 +283,7 @@ fn place_tile(models: MutVec Int, hy: Hydrology, gx: Int, gz: Int, tag: Int, ban
                 let wy = (to_double(band) * band_step) + (tile_size * 0.5)
                 # Bucket the tree into its chunk's group so the frame loop can frustum-cull whole
                 # chunks of vegetation (h is the gfx model handle, doubling as the group's model key).
-                gfx.tree_push(chunk_linear_index(gx, gz, tree_group_edge, tree_group_cols), h, wx, wy, wz, angle, sc)
+                gfx.instance_push(chunk_linear_index(gx, gz, tree_group_edge, tree_group_cols), h, wx, wy, wz, angle, sc)
 
 # Walk the region's tiles, queueing a tree per eligible cell. Reads the global band+tag grid built
 # by gen_grids (non-boxing mutmatrix_at_or), so it needs no chunk paging; place_tile buckets each
@@ -370,7 +370,7 @@ fn render_loop(meshes: MutVec Int, models: MutVec Int, cam: Cam) -> Unit !{IO} =
         draw_meshes(meshes, 0, chunk_count)
         # Trees on top of the baked terrain, before the water so an above-water tree is not tinted.
         # Each is one instanced draw call over its whole scattered batch.
-        gfx.draw_trees_culled(tree_group_count, tree_cull)
+        gfx.draw_instances(tree_group_count, tree_cull)
         # Water surface last, so depth-testing lets land above sea level poke through the
         # translucent plane while it fills the valleys.
         gfx.draw_plane(0.0, water_y, 0.0, world_span, world_span, water_r, water_g, water_b, water_alpha)
