@@ -444,6 +444,15 @@ raylib) have landed. Fenced from core: shim `graphics/sprout_gfx.c` links only v
   through M4 — float32 lives only at the GPU edge (shim `as_float`) and in raylib's own vertex
   buffers. Earns its keep at M5+ when Sprout owns bulk GPU-bound buffers (2× memory/bandwidth,
   GPU-native, no narrowing copy). Evidence-driven — decide by measured buffer/upload cost.
+- [ ] `P3` Loam: **Lakes-view design decision (deferred 2026-07-25).** The Lakes view flags a cell
+  as a lake when the Planchon-Darboux fill exceeds the pre-carve ground (`hydro_filled > elev_at +
+  lake_eps`) — measured ~9.6% of land at the long-rivers config (octaves=3, lattice0=128; not a bug,
+  these are genuine filled basins). It reads as inconsistent because Main/Relief/Flow don't render
+  that pooled water. Options: (a) leave as-is [current]; (b) show lake water in ALL views for
+  consistency — now trivial: drop the `discard` in `CUBE_FS` (graphics/sprout_gfx.c) so lake quads
+  aren't view-gated; (c) threshold to real/deep lakes (min fill depth and/or connected area) so the
+  scattered speckle becomes a few believable lakes — a `lake_eps`/area tweak in
+  `examples/gfx/terrain_rivers_demo.sprout`. Left as-is on 2026-07-25 pending a call.
 
 ## Current Snapshot
 
