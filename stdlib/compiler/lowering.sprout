@@ -1018,21 +1018,16 @@ fn resolve_eta_fwd_type_name_dict(class_name: String, tvar_name: String, pos: so
       | _ -> Nothing
 
 fn try_eta_forwarded_without_class(name: String, t: types.Type, ctx: LowerCtx) -> Maybe typed_ast.TypedExpr =
-  match t with
-  | types.TFunc param _ _ ->
-      match tvar_head_name(param) with
-      | Just tvar_name ->
-          match find_forwarded_method_for_tvar(name, tvar_name, vec_to_list(dict_entries(ctx_fwd(ctx)))) with
-          | Just impl_name -> Just(make_eta_lambda(impl_name, t, dummy_pos()))
-          | Nothing ->
-              match find_forwarded_method_any(name, vec_to_list(dict_entries(ctx_fwd(ctx)))) with
-              | Just impl_name -> Just(make_eta_lambda(impl_name, t, dummy_pos()))
-              | Nothing -> Nothing
-      | Nothing ->
-          match find_forwarded_method_any(name, vec_to_list(dict_entries(ctx_fwd(ctx)))) with
-          | Just impl_name -> Just(make_eta_lambda(impl_name, t, dummy_pos()))
-          | Nothing -> Nothing
-  | _ -> Nothing
+  let types.TFunc param _ _ = t else Nothing
+      Just impl_name = eta_forwarded_impl(name, param, vec_to_list(dict_entries(ctx_fwd(ctx)))) else Nothing
+  in Just(make_eta_lambda(impl_name, t, dummy_pos()))
+
+# The forwarded impl for `name`: prefer the tvar-headed slot, else any slot carrying the method.
+# A missing tvar head or a for-tvar miss both fall through to the any-slot scan.
+fn eta_forwarded_impl(name: String, param: types.Type, entries: List (String, Dict String)) -> Maybe String =
+  let Just tvar_name = tvar_head_name(param) else find_forwarded_method_any(name, entries)
+      Just impl_name = find_forwarded_method_for_tvar(name, tvar_name, entries) else find_forwarded_method_any(name, entries)
+  in Just(impl_name)
 
 fn find_forwarded_method_for_tvar(method_name: String, tvar_name: String, entries: List (String, Dict String)) -> Maybe String =
   match entries with
@@ -1072,41 +1067,47 @@ fn lookup_class_marker_scheme(method_name: String, scheme_env: Dict types.Scheme
   | Nothing -> dict_get("@class:" ++ string.after_last_dot(method_name), scheme_env)
 
 fn try_eta_in_class(class_name: String, name: String, t: types.Type, ctx: LowerCtx) -> Maybe typed_ast.TypedExpr =
-  match t with
-  | types.TFunc param _ _ ->
-      match eta_class_type(class_name, name, t, param, ctx) with
-      | class_type ->
-          match first_concrete_head_str(class_type) with
-          | Just head ->
-              match find_concrete_method_impl(class_name, name, head, ctx) with
-              | Just impl_name ->
-                  match lookup_eta_inner_dicts_general(string.after_last_dot(class_name), head, class_type, ctx) with
-                  | Nothing -> Just(make_eta_lambda(impl_name, t, dummy_pos()))
-                  | Just inner_dicts ->
-                      # If any inner dict is the __unresolved_* sentinel it means the
-                      # inner constraint (e.g. MyEq a) is not in scope — the caller only
-                      # forwarded the outer one (MyEq (Box a)).  Prefer the forwarded slot
-                      # so we emit a well-formed 2-arg lambda instead of a dangling ref.
-                      if has_unresolved_dict(inner_dicts) then
-                        match find_fwd_method_for_head(class_name, name, head, ctx) with
-                        | Just fwd_slot -> Just(make_eta_lambda(fwd_slot, t, dummy_pos()))
-                        | Nothing -> Nothing
-                      else
-                        Just(make_eta_lambda_with_dicts(impl_name, t, inner_dicts, dummy_pos()))
-              | Nothing ->
-                  match find_fwd_method_for_head(class_name, name, head, ctx) with
-                  | Just fwd_slot -> Just(make_eta_lambda(fwd_slot, t, dummy_pos()))
-                  | Nothing -> Nothing
-          | Nothing ->
-              # @eta_fwd markers (distinct from per-function @fwd:) are threaded into
-              # scheme_env during typecheck_decl. Key: "@eta_fwd:{fresh_tvar}:{class_name}".
-              # Maps fresh TVar names back to programmer constraint var names (e.g., "b"),
-              # enabling exact slot selection when multiple same-class constraints exist.
-              match tvar_head_name(class_type) with
-              | Just tvar_name ->
-                  eta_forwarded_method(name, class_name, tvar_name, t, ctx)
-              | Nothing -> Nothing
-  | _ -> Nothing
+  let types.TFunc param _ _ = t else Nothing
+  in eta_in_class_by_head(class_name, name, t, eta_class_type(class_name, name, t, param, ctx), ctx)
+
+# Split on whether the class type has a concrete head: a concrete head resolves to an instance
+# (or its forwarded slot); an abstract (tvar) head forwards via the @eta_fwd marker.
+fn eta_in_class_by_head(class_name: String, name: String, t: types.Type, class_type: types.Type, ctx: LowerCtx) -> Maybe typed_ast.TypedExpr =
+  match first_concrete_head_str(class_type) with
+  | Just head -> eta_in_class_concrete(class_name, name, t, head, class_type, ctx)
+  | Nothing -> eta_in_class_forwarded(class_name, name, t, class_type, ctx)
+
+# Concrete head: use the instance impl if one exists, else fall back to a forwarded slot.
+fn eta_in_class_concrete(class_name: String, name: String, t: types.Type, head: String, class_type: types.Type, ctx: LowerCtx) -> Maybe typed_ast.TypedExpr =
+  match find_concrete_method_impl(class_name, name, head, ctx) with
+  | Just impl_name -> eta_in_class_with_impl(class_name, name, t, head, class_type, impl_name, ctx)
+  | Nothing -> eta_fwd_slot_lambda(class_name, name, head, t, ctx)
+
+fn eta_in_class_with_impl(class_name: String, name: String, t: types.Type, head: String, class_type: types.Type, impl_name: String, ctx: LowerCtx) -> Maybe typed_ast.TypedExpr =
+  match lookup_eta_inner_dicts_general(string.after_last_dot(class_name), head, class_type, ctx) with
+  | Nothing -> Just(make_eta_lambda(impl_name, t, dummy_pos()))
+  | Just inner_dicts ->
+      # If any inner dict is the __unresolved_* sentinel it means the inner constraint
+      # (e.g. MyEq a) is not in scope — the caller only forwarded the outer one
+      # (MyEq (Box a)).  Prefer the forwarded slot so we emit a well-formed 2-arg lambda
+      # instead of a dangling ref.
+      if has_unresolved_dict(inner_dicts) then eta_fwd_slot_lambda(class_name, name, head, t, ctx)
+      else Just(make_eta_lambda_with_dicts(impl_name, t, inner_dicts, dummy_pos()))
+
+# Emit an eta-lambda over the forwarded hidden-dict slot for (class, method, head), or Nothing.
+fn eta_fwd_slot_lambda(class_name: String, name: String, head: String, t: types.Type, ctx: LowerCtx) -> Maybe typed_ast.TypedExpr =
+  match find_fwd_method_for_head(class_name, name, head, ctx) with
+  | Just fwd_slot -> Just(make_eta_lambda(fwd_slot, t, dummy_pos()))
+  | Nothing -> Nothing
+
+# Abstract (tvar) head: forward via the @eta_fwd marker.  @eta_fwd markers (distinct from
+# per-function @fwd:) are threaded into scheme_env during typecheck_decl, keyed
+# "@eta_fwd:{fresh_tvar}:{class_name}" — they map fresh TVar names back to programmer constraint
+# var names (e.g. "b"), enabling exact slot selection when multiple same-class constraints exist.
+fn eta_in_class_forwarded(class_name: String, name: String, t: types.Type, class_type: types.Type, ctx: LowerCtx) -> Maybe typed_ast.TypedExpr =
+  match tvar_head_name(class_type) with
+  | Just tvar_name -> eta_forwarded_method(name, class_name, tvar_name, t, ctx)
+  | Nothing -> Nothing
 
 fn eta_forwarded_method(method_name: String, class_name: String, tvar_name: String, method_type: types.Type, ctx: LowerCtx) -> Maybe typed_ast.TypedExpr =
   match eta_forwarded_method_for_prog_var(method_name, class_name, tvar_name, method_type, ctx) with

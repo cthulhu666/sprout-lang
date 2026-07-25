@@ -1,0 +1,35 @@
+import stdlib.test (TestState, new_state, assert_eq, summary)
+
+# Eta-forwarding of a class method used in VALUE position inside a polymorphic constrained function.
+# This routes through lowering's eta-expansion path (try_eta_in_class / try_eta_forwarded_without_class):
+# `to_string` / `ordinal` here are not applied directly but passed as first-class functions, so the
+# lowering must reconstruct an eta-lambda that forwards the (hidden) dictionary slot. This is a
+# behavior guard for that lowering path (a refactor of those functions must keep these results).
+
+type Tri (..) deriving (Enum) = A | B | C
+
+# `ordinal` passed to a higher-order combinator: the Enum a dict is forwarded, and `ordinal` is
+# eta-expanded to a lambda capturing the forwarded slot. Exercises the forwarded-eta path.
+fn apply_fn(f: a -> Int, x: a) -> Int = f(x)
+
+fn tag_via_hof(x: a) -> Int !{} where Enum a = apply_fn(ordinal, x)
+
+# Two forwarded dicts at once: a value-position `ordinal` plus a direct `from_ordinal` consumer,
+# so both the tvar-headed and any-slot forwarding branches are live in one function.
+fn round_via_hof(n: Int, probe: a) -> Int !{} where Enum a =
+  let _ = probe
+  in apply_fn(ordinal, first_or(from_ordinal(n), probe))
+
+fn first_or(m: Maybe a, dflt: a) -> a =
+  match m with
+  | Just v -> v
+  | Nothing -> dflt
+
+fn main() -> Unit !{IO} =
+  do
+    state <- new_state()
+    assert_eq(state, "tag_via_hof A -> 0", tag_via_hof(A), 0)
+    assert_eq(state, "tag_via_hof C -> 2", tag_via_hof(C), 2)
+    assert_eq(state, "round_via_hof 1 -> B -> 1", round_via_hof(1, A), 1)
+    assert_eq(state, "round_via_hof 9 -> Nothing -> probe A -> 0", round_via_hof(9, A), 0)
+    summary(state)
