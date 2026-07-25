@@ -150,12 +150,17 @@ Design + status: `docs/devirtualization-v0.md` (LANDED). A related but distinct 
   runtime dictionary — no `sprout_alloc_closure_env`, no generic `__cm_` wrapper indirection. Before,
   every concrete class-method call built a dict of eta-closures (one per method, most dead) and called
   the generic wrapper, which then dispatched *indirectly* to the concrete fn.
-- **Gate (`try_devirt_concrete`).** Fires iff the leading (and only) `TDict`'s evidence is
-  `EvClasses [EvInstance _ key Nil]` — a **single class block**, **concrete**, **empty `children`** —
-  and `ctx_inst[key]` resolves the method. `children == Nil` is the soundness hinge: it guarantees the
-  concrete fn takes only the user args, so dropping every dict witness is sound. Context-constrained
-  instances (`Eq (Maybe a) where Eq a` → non-empty children) and superclass-expanded dispatch (`Ord` →
-  multi-block) fall back to dictionary-passing; polymorphic/forwarded (`EvForward`) always must.
+- **Gate (`try_devirt_concrete`).** Fires iff the leading (and only) `TDict` is `EvClasses blocks` and
+  one block is a fully-resolved **concrete** `EvInstance` *providing the method* (`ctx_inst[key]` has
+  `mname`). It retargets to that concrete fn and passes `consume_inner_dicts(children)` — the instance's
+  **own context dicts** — as trailing args, dropping the user-arg witness and any **sibling superclass
+  blocks**. Soundness hinge: a concrete instance fn's arity is exactly `user_args + |children|` — it
+  never takes superclass dicts (those live only in the `__cm_` wrapper; a concrete body resolves supers
+  concretely), so the block is found *by method presence* (which also skips the super blocks) and the
+  trailing dicts match by construction. Covers `Enum`/`Eq`/`ToString` (all dicts dropped), `Ord`
+  (super block dropped, 2→0), and context-constrained/combined instances (inner dict forwarded).
+  `EvForward`/polymorphic and unresolved inner dicts fall back. `opt --passes=verify` catches an arity
+  mismatch; a dict *ordering* bug would not (all `i64`), so a multi-constraint value test guards order.
 - **Composes with CPR.** The retargeted callee is a real top-level fn, so the match-site Maybe/tuple
   CPR routes it to that fn's `_worker` — the returned `Maybe`/tuple stays unboxed. This is what makes
   the rivers-demo `bake_tile` fully allocation-free (tuple SRA + devirt).

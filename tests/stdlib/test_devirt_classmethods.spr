@@ -27,15 +27,51 @@ fn generic_tag(v: a) -> Int !{} where Enum a = ordinal(v)
 # without superclass/context. `eq(a,b)` at Int -> direct __tc_Eq_Int_eq, no dict.
 fn int_eq(a: Int, b: Int) -> Bool = eq(a, b)
 
-# CONCRETE Eq WITH context (instance Eq (Maybe a) where Eq a) — the CRITICAL negative. The evidence
-# carries a non-empty `children` (the inner Eq Int dict), so the gate MUST fall back to the generic
-# dict-passing path. If devirt wrongly fired it would DROP the inner Eq Int dict arg -> arity mismatch
-# / miscompile. A correct bool result proves the fallback preserved the needed witness.
+# CONCRETE Eq WITH context (instance Eq (Maybe a) where Eq a) — devirt-beyond passes the RESOLVED
+# inner Eq Int dict as a trailing arg to __tc_Eq_Maybe_a_eq (drops the outer wrapper, keeps the inner).
+# A wrong inner-dict count would be an arity mismatch / miscompile; a correct bool proves it.
 fn maybe_int_eq(a: Maybe Int, b: Maybe Int) -> Bool = eq(a, b)
 
-# CONCRETE Ord (instance Ord Int where Eq Int) — Ord has superclass Eq, so its dispatch evidence is
-# not a lone empty-children block; documents that Ord falls back (still correct via dict-passing).
+# CONCRETE Ord (instance Ord Int) — Ord has superclass Eq, so the dispatch evidence is multi-block
+# (Ord block + Eq super block). devirt-beyond DROPS the sibling Eq super block: __tc_Ord_Int_compare
+# takes only (a,b), no dicts (2 closures -> 0).
 fn int_lt(a: Int, b: Int) -> Bool = compare(a, b) < 0
+
+# USER Ord instance whose compare USES the superclass eq — the soundness case. `eq(a,b)` inside compare
+# resolves CONCRETELY (to __tc_Eq_Rank_eq), so __tc_Ord_Rank_compare still takes no Eq dict; dropping
+# the sibling Eq super block at the call site is sound. Verified: the concrete fn arity is (a,b) only.
+type Rank = Lo | Mid | Hi
+
+fn rank_ord(r: Rank) -> Int =
+  match r with
+  | Lo -> 0
+  | Mid -> 1
+  | Hi -> 2
+
+instance Eq Rank {
+  fn eq(a: Rank, b: Rank) -> Bool = rank_ord(a) == rank_ord(b)
+}
+
+instance Ord Rank {
+  fn compare(a: Rank, b: Rank) -> Int =
+    if eq(a, b) then 0
+    else rank_ord(a) - rank_ord(b)
+}
+
+fn rank_lt(a: Rank, b: Rank) -> Bool = compare(a, b) < 0
+fn rank_eq(a: Rank, b: Rank) -> Bool = eq(a, b)
+
+# COMBINED: Ord (Maybe a) where Ord a — multi-block (Ord super Eq) AND context-constrained (inner Ord).
+# devirt-beyond retargets to __tc_Ord_Maybe_a_compare and passes the resolved inner Ord Int dict(s),
+# dropping the sibling super block. The hardest shape; a correct result proves inner dicts survive.
+fn maybe_int_lt(a: Maybe Int, b: Maybe Int) -> Bool = compare(a, b) < 0
+
+# MULTI-CHILD context (instance Ord (a,b) where Ord a, Ord b) — TWO distinct inner dicts. This is the
+# dict-ORDERING guard: consume_inner_dicts must hand the concrete fn its inner dicts in inst_constraints
+# order. A swap (Ord String where Ord Int is expected) runs an Int through the String dict — wrong/crash
+# — yet still passes opt-verify (all dicts are i64), so ONLY a value test catches it. Inputs are chosen
+# so the SECOND (String) component decides (equal Ints), exercising the b-dict, not short-circuiting it.
+fn pair_lt(a: (Int, String), b: (Int, String)) -> Bool = compare(a, b) < 0
 
 fn main() -> Unit !{IO} =
   do
@@ -58,7 +94,21 @@ fn main() -> Unit !{IO} =
     assert_eq(state, "maybe_int_eq Just5 Just5 -> True", maybe_int_eq(Just(5), Just(5)), true)
     assert_eq(state, "maybe_int_eq Just5 Just6 -> False", maybe_int_eq(Just(5), Just(6)), false)
     assert_eq(state, "maybe_int_eq Just5 Nothing -> False", maybe_int_eq(Just(5), Nothing), false)
-    # concrete Ord (superclass Eq) -> falls back; still correct
+    # concrete Ord (superclass Eq) -> devirt-beyond drops the sibling super block; still correct
     assert_eq(state, "int_lt 3 5 -> True", int_lt(3, 5), true)
     assert_eq(state, "int_lt 5 3 -> False", int_lt(5, 3), false)
+    # user Ord whose compare uses eq -> concrete eq resolution, devirt sound
+    assert_eq(state, "rank_lt Lo Hi -> True", rank_lt(Lo, Hi), true)
+    assert_eq(state, "rank_lt Hi Lo -> False", rank_lt(Hi, Lo), false)
+    assert_eq(state, "rank_lt Mid Mid -> False (equal)", rank_lt(Mid, Mid), false)
+    assert_eq(state, "rank_eq Mid Mid -> True", rank_eq(Mid, Mid), true)
+    assert_eq(state, "rank_eq Lo Hi -> False", rank_eq(Lo, Hi), false)
+    # combined Ord (Maybe Int): multi-block + context -> inner dicts must survive
+    assert_eq(state, "maybe_int_lt Just1 Just2 -> True", maybe_int_lt(Just(1), Just(2)), true)
+    assert_eq(state, "maybe_int_lt Just2 Just1 -> False", maybe_int_lt(Just(2), Just(1)), false)
+    assert_eq(state, "maybe_int_lt Just5 Just5 -> False (equal)", maybe_int_lt(Just(5), Just(5)), false)
+    # multi-child dict ORDERING: 2nd (String) component decides -> exercises the b-dict specifically
+    assert_eq(state, "pair_lt (1,a) (1,b) -> True (2nd decides)", pair_lt((1, "a"), (1, "b")), true)
+    assert_eq(state, "pair_lt (1,b) (1,a) -> False (2nd decides)", pair_lt((1, "b"), (1, "a")), false)
+    assert_eq(state, "pair_lt (1,z) (2,a) -> True (1st decides)", pair_lt((1, "z"), (2, "a")), true)
     summary(state)

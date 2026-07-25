@@ -1163,55 +1163,78 @@ fn args_have_leading_tdict(args: List typed_ast.TypedExpr) -> Bool =
   | [typed_ast.TDict _ _ _ _ | _] -> true
   | _ -> false
 
-# Concrete-instance devirtualization (docs/scalar-replacement-v0.md, A-full).
-# A class-method call whose dispatch dictionary is a fully-resolved CONCRETE instance
-# with no inner-constraint dicts is lowered to a DIRECT call of the concrete
-# __tc_{Class}_{Type}_{method} fn, dropping the runtime dictionary entirely — no
-# per-call sprout_alloc_closure_env, no generic __cm_ wrapper indirection.  This is
-# the devirtualization analogue of CPR: an identity known at compile time should not
-# be rebuilt (as a dict of eta-closures) and dispatched through at run time.
+# Concrete-instance devirtualization (docs/devirtualization-v0.md).
+# A class-method call whose dispatch dictionary is a fully-resolved CONCRETE instance is
+# lowered to a DIRECT call of the concrete __tc_{Class}_{Type}_{method} fn, dropping the
+# generic __cm_ wrapper and the dead dict-of-eta-closures — no per-call
+# sprout_alloc_closure_env, no wrapper indirection.  The devirtualization analogue of CPR:
+# an identity known at compile time should not be rebuilt and dispatched through at run time.
 #
-# The gate is deliberately narrow: the args carry EXACTLY ONE leading TDict whose
-# evidence is EvClasses[EvInstance _ key []] — a single class block, concrete, with
-# EMPTY children (no context constraints ⇒ the concrete fn takes only the user args,
-# so dropping every witness is sound).  Any other shape — EvForward/polymorphic, a
-# superclass-expanded multi-block dict, or an instance with inner dicts — falls back
-# to today's dictionary-passing path.  Multi-block / inner-dict devirt is a follow-up.
+# The concrete fn takes user args + one dict per the instance's OWN context constraints
+# (its `children`) — NEVER superclass dicts (those exist only in the __cm_ wrapper for its
+# internal super-method access; a concrete instance body resolves supers concretely).  So
+# the retarget passes exactly `consume_inner_dicts(children)` as trailing args and drops the
+# user-arg witness and any sibling superclass blocks.  With empty children this is a plain
+# direct call (Enum/Eq/ToString on flat types); with a superclass (Ord) the super block is
+# dropped (2 closures → 0); with a context constraint (Eq (Maybe a) where Eq a) the resolved
+# inner dict is forwarded (outer dropped).  EvForward/polymorphic, an unresolved inner dict,
+# or more than one leading TDict all fall back to today's dictionary-passing path.
 fn try_devirt_concrete(callee: typed_ast.TypedExpr, args: List typed_ast.TypedExpr, t: types.Type, pos: source.SourcePos, ctx: LowerCtx) -> Maybe typed_ast.TypedExpr =
   let typed_ast.TVar mname mt mpos = callee else Nothing
-      Just impl_name = devirt_concrete_target(mname, args, ctx) else Nothing
+      Just(impl_name, inner_dicts) = devirt_concrete_target(mname, args, pos, ctx) else Nothing
   in Just(typed_ast.TCall(
-       # `mt` is the method's monomorphic type at this call site — with empty children
-       # the concrete fn takes only user args, so its signature IS `mt` (no dict params).
        typed_ast.TVar(impl_name, mt, mpos),
-       expand_user_args(args, ctx),
+       list_append(expand_user_args(args, ctx), inner_dicts),
        t, pos))
 
-# The concrete __tc_ impl name IFF `mname` (an unshadowed class method) is dispatched
-# on a sole leading concrete instance dict whose instance is in ctx_inst.  Nothing
-# otherwise — the caller then keeps today's generic __cm_ dispatch.  The bound-var
-# guard is defensive: a shadowed method resolves to the user binding and reaches here
-# without a leading TDict anyway (see lower_dispatch_callee), so it already misses.
-fn devirt_concrete_target(mname: String, args: List typed_ast.TypedExpr, ctx: LowerCtx) -> Maybe String =
+# (concrete __tc_ impl name, resolved inner-dict trailing args) IFF `mname` (an unshadowed
+# class method) is dispatched on a sole leading concrete instance dict providing it.  Nothing
+# otherwise — the caller keeps today's generic __cm_ dispatch.  The bound-var guard is
+# defensive: a shadowed method resolves to the user binding and reaches here without a leading
+# TDict anyway (see lower_dispatch_callee), so it already misses.
+fn devirt_concrete_target(mname: String, args: List typed_ast.TypedExpr, pos: source.SourcePos, ctx: LowerCtx) -> Maybe (String, List typed_ast.TypedExpr) =
   if list_member(mname, ctx_bound_vars(ctx)) then Nothing
   else
-    let Just key = sole_leading_concrete_key(args) else Nothing
-        Just method_map = dict_get(key, ctx_inst(ctx)) else Nothing
-    in dict_get_method(mname, method_map)
+    let Just blocks = sole_leading_ev_classes(args) else Nothing
+        Just(impl_name, children) = concrete_block_providing(mname, blocks, ctx) else Nothing
+    in devirt_finish(impl_name, children, pos, ctx)
 
-# The instance key of a call whose args are `[TDict(EvClasses[EvInstance _ key []]) | user]`
-# with NO further TDict among the user args.  The single-block, empty-children shape is
-# what makes dropping the whole dictionary sound.
-fn sole_leading_concrete_key(args: List typed_ast.TypedExpr) -> Maybe String =
+# Resolve the instance's own context dicts; fall back if any is an unresolved sentinel (the
+# inner constraint is not in scope — the __cm_ path forwards a slot we cannot reconstruct here).
+fn devirt_finish(impl_name: String, children: List typed_ast.Evidence, pos: source.SourcePos, ctx: LowerCtx) -> Maybe (String, List typed_ast.TypedExpr) =
+  let inner_dicts = consume_inner_dicts(children, pos, ctx)
+  in if has_unresolved_dict(inner_dicts) then Nothing
+     else Just((impl_name, inner_dicts))
+
+# The EvClasses blocks of the SOLE leading TDict (no further TDict among the user args).
+fn sole_leading_ev_classes(args: List typed_ast.TypedExpr) -> Maybe (List typed_ast.Evidence) =
   match args with
-  | Cons (typed_ast.TDict _ _ _ ev) rest ->
-      if args_have_tdict(rest) then Nothing else concrete_single_instance_key(ev)
+  | Cons (typed_ast.TDict _ _ _ (typed_ast.EvClasses blocks)) rest ->
+      if args_have_tdict(rest) then Nothing else Just(blocks)
   | _ -> Nothing
 
-fn concrete_single_instance_key(ev: typed_ast.Evidence) -> Maybe String =
-  match ev with
-  | typed_ast.EvClasses [typed_ast.EvInstance _ key Nil] -> Just(key)
-  | _ -> Nothing
+# (impl_name, children) of the block whose fully-resolved concrete instance PROVIDES `mname`.
+# Only the dispatch class's block carries the method (e.g. `compare` is in the Ord block, not
+# the Eq super block), so matching by method presence in ctx_inst[key] both identifies the
+# right block AND skips sibling superclass blocks — whose dicts the concrete fn never takes.
+# ASSUMPTION: method SHORT-names are unique across the blocks in play (Eq/Ord/Enum/ToString do
+# not collide). `dict_get_method`'s after_last_dot fallback would otherwise let a same-named
+# method in a sibling block be selected; no such collision exists in the current class set.
+fn concrete_block_providing(mname: String, blocks: List typed_ast.Evidence, ctx: LowerCtx) -> Maybe (String, List typed_ast.Evidence) =
+  match blocks with
+  | Nil -> Nothing
+  | Cons (typed_ast.EvInstance _ key children) rest ->
+      match block_impl_if_resolved(mname, key, children, ctx) with
+      | Just impl_name -> Just((impl_name, children))
+      | Nothing -> concrete_block_providing(mname, rest, ctx)
+  | Cons _ rest -> concrete_block_providing(mname, rest, ctx)
+
+fn block_impl_if_resolved(mname: String, key: String, children: List typed_ast.Evidence, ctx: LowerCtx) -> Maybe String =
+  if evidence_list_fully_resolved(children) then
+    match dict_get(key, ctx_inst(ctx)) with
+    | Just method_map -> dict_get_method(mname, method_map)
+    | Nothing -> Nothing
+  else Nothing
 
 fn args_have_tdict(args: List typed_ast.TypedExpr) -> Bool =
   match args with

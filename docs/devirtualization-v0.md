@@ -1,6 +1,7 @@
 # Concrete-instance devirtualization (v0)
 
-Status: **LANDED** (increment 1 — single-block, empty-context instances). Follow-ups in `BACKLOG.md`.
+Status: **LANDED**. Increment 1 covered single-block, empty-context instances; increment 2 extended to
+superclass-expanded dispatch (`Ord`) and context-constrained instances (`Eq (Maybe a) where Eq a`).
 
 ## 1. Problem statement
 
@@ -59,21 +60,26 @@ One call-site rewrite in `stdlib/compiler/lowering.sprout`, gated on evidence sh
 `TCall` arm, `try_devirt_concrete` fires iff:
 
 - the callee is an **unshadowed** `TVar` class method, and
-- the args carry **exactly one** leading `TDict` whose evidence is
-  `EvClasses [EvInstance _ key Nil]` — a **single class block**, a **concrete** `EvInstance`, with
-  **empty `children`** (no context-constraint dicts), and
-- `ctx_inst[key]` resolves the method to a concrete impl name.
+- the args carry **exactly one** leading `TDict` whose evidence is `EvClasses blocks`, and
+- among `blocks`, the one whose fully-resolved **concrete** `EvInstance` *provides `mname`*
+  (`ctx_inst[key]` resolves the method) — call its context evidence `children`, and
+- `consume_inner_dicts(children)` contains no unresolved sentinel.
 
-On a hit it emits `TCall(TVar(impl_name, mt, …), expand_user_args(args), …)` — the concrete fn, the
-original user args only, **every dictionary witness dropped**. The callee type is the method's
-monomorphic type `mt` at the site, which (empty children ⇒ no dict params) is exactly the concrete fn's
-signature. Anything else falls through to today's `__cm_` dictionary-passing path unchanged.
+On a hit it emits `TCall(TVar(impl_name, mt, …), expand_user_args(args) ++ consume_inner_dicts(children), …)`
+— the concrete fn, the original user args, plus the instance's **own context dicts** as trailing args.
+The user-arg `TDict` witness and any **sibling superclass blocks** are dropped. Anything else
+(EvForward/polymorphic, unresolved inner dict, >1 leading TDict) falls through to the `__cm_` path.
 
-**Why the gate is sound.** Dropping every witness is correct **only** when the concrete fn takes just
-the user args. `children == Nil` is that guarantee: a context-constrained instance
-(`instance Eq (Maybe a) where Eq a`) carries the inner `Eq a` dict as non-empty `children`, so its
-concrete fn expects that dict as a trailing param — the gate rejects it (falls back). The single-block
-requirement rejects superclass-expanded dispatch (`Ord`, whose evidence carries the `Eq` super-block).
+**Why the gate is sound.** The concrete fn `__tc_{Class}_{Type}_{method}` takes user args + one dict
+per the instance's own context constraints (its `children`) — **never** superclass dicts. Superclass
+dicts exist only in the generic `__cm_` wrapper for its internal super-method access; a concrete instance
+*body* resolves super methods concretely (verified: `__tc_Ord_Rank_compare` whose body calls `eq` still
+takes only `(a, b)` — no Eq dict). So the concrete fn's arity is exactly `user_args + |children|`, and
+passing `consume_inner_dicts(children)` matches it by construction. The **dispatch block is identified
+by method presence** (`compare` lives only in the `Ord` block, not the `Eq` super block), which both
+picks the right block and skips sibling supers. `opt --passes=verify` catches an arity/type mismatch;
+a dict-*ordering* mistake would not (all dicts are `i64`), so a multi-constraint value test
+(`compare` on `(Int, String)`) is the guard that the inner dicts land in `inst_constraints` order.
 
 **Composition with CPR.** Because the retargeted callee is a real top-level fn, the match-site
 Maybe/tuple CPR (`ast_to_ir.sprout`) routes it to that fn's `_worker` automatically — so
@@ -82,14 +88,20 @@ Maybe/tuple CPR (`ast_to_ir.sprout`) routes it to that fn's `_worker` automatica
 
 ## 5. Scope (honest, verified)
 
-Devirt fires for concrete calls to classes **without a superclass and instances without a context
-constraint**: `Enum`, `Eq` (on flat types), `ToString`. It does **not** fire for:
-- `Ord` (superclass `Eq` → not a lone block) — falls back, still correct;
-- context-constrained instances (`Eq (Maybe a) where Eq a`) — falls back, inner dict preserved;
-- polymorphic/forwarded dispatch — stays dictionary-passing (must).
+Devirt fires for any concrete class-method call whose dispatch instance is fully resolved:
+- **no superclass, no context** (`Enum`, `Eq`/`ToString` on flat types): direct call, **all dicts
+  dropped** — the full win;
+- **superclass** (`Ord`): the sibling super block is dropped; `__tc_Ord_Int_compare(a, b)` takes no
+  dicts, so **2 closures → 0**;
+- **context-constrained** (`Eq (Maybe a) where Eq a`): the resolved inner dict is forwarded as a
+  trailing arg; the **outer** wrapper + dict are dropped (the inner remains a closure — recursively
+  devirt'ing it would be monomorphization, out of scope);
+- **combined** (`Ord (Maybe a) where Ord a`): both — sibling super block dropped, inner Ord dict
+  forwarded.
 
-Extending to multi-block (superclass) and inner-dict instances — passing the resolved inner/super dicts
-as trailing args to the concrete fn instead of the eta-closures — is a documented follow-up.
+It does **not** fire for polymorphic/forwarded dispatch (`EvForward` — genuinely run-time, must stay
+dictionary-passing) or when an inner dict is unresolved. Deeper wins still open: recursively devirt'ing
+a concrete inner dict (monomorphization) is deliberately out of scope.
 
 ## 6. Semantics / type-system / error impact
 
@@ -98,15 +110,18 @@ only the lowering of an already-resolved concrete dispatch changes.
 
 ## 7. Tests
 
-- `tests/stdlib/test_devirt_classmethods.spr` — behavior (value-neutral) across shapes: concrete `Enum`
-  `from_ordinal`/`ordinal` (devirt), concrete no-context `Eq Int` (devirt, proves non-Enum), concrete
-  context `Eq (Maybe Int)` (**must fall back**, inner dict preserved), concrete `Ord Int` (superclass
-  → fall back), and a **polymorphic** consumer (forwarded dict, must not devirt).
+- `tests/stdlib/test_devirt_classmethods.spr` — behavior (value-neutral) across every shape: concrete
+  `Enum` `from_ordinal`/`ordinal`, no-context `Eq Int`, superclass `Ord Int` (**2→0**), a **user `Ord`
+  whose `compare` uses `eq`** (proves the super method resolves concretely, so no Eq dict is needed),
+  context `Eq (Maybe Int)`, combined `Ord (Maybe Int)`, and the **multi-child ordering guard**
+  `compare` on `(Int, String)` with the *second* component deciding (a swapped inner dict would run an
+  Int through the String dict — caught here, invisible to `opt --passes=verify`). Plus a **polymorphic**
+  consumer (forwarded dict, must not devirt).
 - `tests/smoke_shapes/09_devirt_classmethod.spr` — IR shape: concrete `from_ordinal` emits no
   `sprout_alloc_closure_env` and a direct `__tc_` call.
-- IR-verified gate on both sides (devirt vs fallback) per shape; `bake_tile` in `terrain_rivers_demo`
-  is now **allocation-free** (tuple SRA + devirt); `opt --passes=verify` clean; the self-hosted reseed
-  reaches a fixed point (the compiler devirt'ing its own `Eq`/`ToString` calls compiles itself).
+- IR-verified gate per shape (direct `__tc_` vs `__cm_` fallback); `opt --passes=verify` clean; the
+  self-hosted reseed reaches a fixed point — the compiler devirt's its own `Eq`/`Ord`/`ToString` calls
+  (including multi-child instances) and still compiles itself.
 
 ## 8. Measured result
 

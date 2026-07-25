@@ -310,9 +310,9 @@ now calls `@__tc_Enum_…_from_ordinal_worker` directly with no dictionary. Net:
 
 ### Follow-ups (see BACKLOG)
 
-- **Devirt beyond the clean case** — multi-block (superclass, e.g. `Ord`) and context-constrained
-  instances (`Eq (Maybe a) where Eq a`), passing resolved inner/super dicts to the concrete fn
-  (`docs/devirtualization-v0.md` §5). Increment 1 handles single-block, empty-context instances only.
+- **Devirt beyond the clean case — DONE** (`docs/devirtualization-v0.md`, increment 2): superclass
+  (`Ord`) and context-constrained instances (`Eq (Maybe a) where Eq a`) now devirtualize too, forwarding
+  the resolved inner dicts. Only recursive inner-dict devirt (monomorphization) remains out of scope.
 - **SRA in `let..in`** (pure, non-do-block) and across a Maybe/Result do-bind (thread the SRA map
   through the `translate_do_bind_*` helpers instead of resetting).
 - **Heap-field tuples** (`(String, String)`): needs per-slot rooting in `IRCallUnboxed{2,3}` + a
