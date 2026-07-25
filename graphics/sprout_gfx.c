@@ -110,27 +110,44 @@ static const char *LIGHT_VS =
   "uniform mat4 matNormal;\n"
   "out vec2 fragTexCoord;\n"
   "out vec3 fragNormal;\n"
+  "out float fragDepth;\n"           /* view-space depth (clip.w) for distance fog */
   "void main() {\n"
   "    fragTexCoord = vertexTexCoord;\n"
   "    fragNormal = normalize(vec3(matNormal*vec4(vertexNormal, 1.0)));\n"
   "    gl_Position = mvp*vec4(vertexPosition, 1.0);\n"
+  "    fragDepth = gl_Position.w;\n"
   "}\n";
+
+/* Exponential distance fog, shared verbatim by all three scene shaders: blend the lit colour
+ * toward uFogColor by 1-exp(-density*viewDepth) (Beer-Lambert). uFogDensity 0 disables it (the
+ * default), so demos that never call gfx_fog are visually unchanged. Applied in the FORWARD pass
+ * (needs per-fragment distance, which the post-process colour texture lacks) — the cheapest AAA
+ * cohesion cue, no extra render targets. See docs/gfx-effects-roadmap-v0.md #1. */
+#define FOG_GLSL \
+  "uniform vec3 uFogColor;\n" \
+  "uniform float uFogDensity;\n" \
+  "vec3 apply_fog(vec3 col, float depth) {\n" \
+  "    float f = 1.0 - exp(-uFogDensity * depth);\n" \
+  "    return mix(col, uFogColor, clamp(f, 0.0, 1.0));\n" \
+  "}\n"
 
 static const char *LIGHT_FS =
   "#version 330\n"
   "in vec2 fragTexCoord;\n"
   "in vec3 fragNormal;\n"
+  "in float fragDepth;\n"
   "uniform sampler2D texture0;\n"
   "uniform vec4 colDiffuse;\n"
   "uniform vec3 lightDir;\n"
   "uniform vec3 lightColor;\n"
   "uniform vec3 ambient;\n"
+  FOG_GLSL
   "out vec4 finalColor;\n"
   "void main() {\n"
   "    vec4 base = texture(texture0, fragTexCoord)*colDiffuse;\n"
   "    float diff = max(dot(normalize(fragNormal), normalize(lightDir)), 0.0);\n"
   "    vec3 lit = base.rgb*(ambient + diff*lightColor);\n"
-  "    finalColor = vec4(lit, base.a);\n"
+  "    finalColor = vec4(apply_fog(lit, fragDepth), base.a);\n"
   "}\n";
 
 /* Diffuse-lit shader for immediate-mode cubes: no texture, colour comes from the
@@ -146,24 +163,28 @@ static const char *CUBE_VS =
   "uniform mat4 mvp;\n"
   "out vec3 fragNormal;\n"
   "out vec4 fragColor;\n"
+  "out float fragDepth;\n"
   "void main() {\n"
   "    fragNormal = vertexNormal;\n"
   "    fragColor = vertexColor;\n"
   "    gl_Position = mvp*vec4(vertexPosition, 1.0);\n"
+  "    fragDepth = gl_Position.w;\n"
   "}\n";
 
 static const char *CUBE_FS =
   "#version 330\n"
   "in vec3 fragNormal;\n"
   "in vec4 fragColor;\n"
+  "in float fragDepth;\n"
   "uniform vec3 lightDir;\n"
   "uniform vec3 lightColor;\n"
   "uniform vec3 ambient;\n"
+  FOG_GLSL
   "out vec4 finalColor;\n"
   "void main() {\n"
   "    float diff = max(dot(normalize(fragNormal), normalize(lightDir)), 0.0);\n"
   "    vec3 lit = fragColor.rgb*(ambient + diff*lightColor);\n"
-  "    finalColor = vec4(lit, fragColor.a);\n"
+  "    finalColor = vec4(apply_fog(lit, fragDepth), fragColor.a);\n"
   "}\n";
 
 /* Instanced-props shader: one DrawMeshInstanced call draws thousands of copies of a model, each
@@ -183,27 +204,37 @@ static const char *INSTANCE_VS =
   "in mat4 instanceTransform;\n"
   "uniform mat4 mvp;\n"
   "out vec3 fragNormal;\n"
+  "out float fragDepth;\n"
   "void main() {\n"
   "    fragNormal = normalize(vec3(instanceTransform*vec4(vertexNormal, 0.0)));\n"
   "    gl_Position = mvp*instanceTransform*vec4(vertexPosition, 1.0);\n"
+  "    fragDepth = gl_Position.w;\n"
   "}\n";
 
 static const char *INSTANCE_FS =
   "#version 330\n"
   "in vec3 fragNormal;\n"
+  "in float fragDepth;\n"
   "uniform vec4 colDiffuse;\n"
   "uniform vec3 lightDir;\n"
   "uniform vec3 lightColor;\n"
   "uniform vec3 ambient;\n"
+  FOG_GLSL
   "out vec4 finalColor;\n"
   "void main() {\n"
   "    float diff = max(dot(normalize(fragNormal), normalize(lightDir)), 0.0);\n"
   "    vec3 lit = colDiffuse.rgb*(ambient + diff*lightColor);\n"
-  "    finalColor = vec4(lit, colDiffuse.a);\n"
+  "    finalColor = vec4(apply_fog(lit, fragDepth), colDiffuse.a);\n"
   "}\n";
 
 static Shader g_instance_shader;   /* instanced, vertex-colour lit shader for scattered models (trees) */
 static int g_instance_ready = 0;
+
+/* Distance fog (docs/gfx-effects-roadmap-v0.md #1). Applied in the scene shaders (uFogDensity
+ * defaults to 0 = off, so untouched demos are unchanged); frame_begin also clears the background
+ * to the fog colour when on, so distant terrain fades into the horizon with no visible edge. */
+static int   g_fog_on = 0;
+static int   g_fog_r = 0, g_fog_g = 0, g_fog_b = 0;
 
 /* --- Post-processing -------------------------------------------------------
  * Opt-in full-screen effects. When any effect is enabled (g_post_mask != 0) the
@@ -632,7 +663,9 @@ long long gfx_frame_begin(void) {
    * the backbuffer (keeps 4x MSAA — see the post-processing block). */
   if (g_post_mask != 0 && g_scene_target_ready) BeginTextureMode(g_scene_target);
   else BeginDrawing();
-  ClearBackground((Color){ 24, 24, 30, 255 });
+  /* Clear to the fog colour when fog is on, so distant terrain fades into the horizon seamlessly. */
+  ClearBackground(g_fog_on ? (Color){ (unsigned char)g_fog_r, (unsigned char)g_fog_g, (unsigned char)g_fog_b, 255 }
+                           : (Color){ 24, 24, 30, 255 });
   BeginMode3D(g_cam);
   update_frustum();
   return 0;
@@ -1130,6 +1163,31 @@ long long gfx_post_altitude_blur(long long low_alt, long long high_alt, long lon
 
 long long gfx_post_disable(void) {
   g_post_mask = 0;
+  return 0;
+}
+
+/* Exponential distance fog. `density` is the fog coefficient (Beer-Lambert: fog = 1-exp(-density*
+ * viewDepth)); 0 disables it. Colour is RGB 0..255 — typically a pale sky/haze tone. Pushes the
+ * uniforms to all three scene shaders (set once at setup; not per-frame). frame_begin then clears
+ * the background to this colour so distant geometry fades seamlessly into the horizon.
+ * Density scale: at density d, the half-fog distance (col 50% toward fog) is ~0.69/d view units. */
+long long gfx_fog(long long density, long long r, long long g, long long b) {
+  float d = as_float(density);
+  Vector3 c = { (float)r / 255.0f, (float)g / 255.0f, (float)b / 255.0f };
+  g_fog_on = (d > 0.0f);
+  g_fog_r = (int)r; g_fog_g = (int)g; g_fog_b = (int)b;
+  if (g_cube_ready) {
+    SetShaderValue(g_cube_shader, GetShaderLocation(g_cube_shader, "uFogDensity"), &d, SHADER_UNIFORM_FLOAT);
+    SetShaderValue(g_cube_shader, GetShaderLocation(g_cube_shader, "uFogColor"), &c, SHADER_UNIFORM_VEC3);
+  }
+  if (g_instance_ready) {
+    SetShaderValue(g_instance_shader, GetShaderLocation(g_instance_shader, "uFogDensity"), &d, SHADER_UNIFORM_FLOAT);
+    SetShaderValue(g_instance_shader, GetShaderLocation(g_instance_shader, "uFogColor"), &c, SHADER_UNIFORM_VEC3);
+  }
+  if (g_light_ready) {
+    SetShaderValue(g_light_shader, GetShaderLocation(g_light_shader, "uFogDensity"), &d, SHADER_UNIFORM_FLOAT);
+    SetShaderValue(g_light_shader, GetShaderLocation(g_light_shader, "uFogColor"), &c, SHADER_UNIFORM_VEC3);
+  }
   return 0;
 }
 

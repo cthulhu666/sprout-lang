@@ -56,6 +56,7 @@ extern fn gfx_post_tonemap(exposure: Double, saturation: Double) -> Unit !{IO}
 extern fn gfx_post_motion_blur(static_amount: Double, motion_gain: Double) -> Unit !{IO}
 extern fn gfx_post_altitude_blur(low_alt: Double, high_alt: Double, amt_low: Double, amt_high: Double) -> Unit !{IO}
 extern fn gfx_post_disable() -> Unit !{IO}
+extern fn gfx_fog(density: Double, r: Int, g: Int, b: Int) -> Unit !{IO}
 extern fn gfx_overlay_begin() -> Unit !{IO}
 extern fn gfx_close_window() -> Unit !{IO}
 
@@ -295,6 +296,15 @@ export fn post_altitude_blur(low_alt: Double, high_alt: Double, amt_low: Double,
 # Turn ALL post-effects off, restoring the direct-to-screen (MSAA) render.
 export fn post_disable() -> Unit !{IO} =
   gfx_post_disable()
+
+# Exponential distance fog — the cheapest cohesion/atmosphere cue (roadmap #1). `density` is the
+# Beer-Lambert coefficient (fog = 1 - exp(-density * view_depth)); 0 disables it. The colour is RGB
+# 0..255, usually a pale sky/haze tone; the background clears to it too, so distant terrain fades
+# into the horizon with no visible edge. Applied in the SCENE shaders (independent of the post pass
+# and of MSAA), so it works with or without post-processing. Set once at setup.
+# Tip: half the scene fades to fog at ~0.69/density view units — e.g. density 0.002 ≈ 350-unit half.
+export fn fog(density: Double, r: Int, g: Int, b: Int) -> Unit !{IO} =
+  gfx_fog(density, r, g, b)
 
 # Mark the scene -> HUD transition so UI draws CRISP on top of the post-processed scene (unblurred,
 # unvignetted). Call AFTER the 3D draws and BEFORE the UI (draw_fps / button / button_held), then

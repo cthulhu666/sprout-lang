@@ -445,15 +445,14 @@ fn main() -> Unit !{IO} =
   do
     gfx.open_window(1000, 600, "Sprout — Loam terrain with rivers (drainage-routed)")
     gfx.set_target_fps(60)
-    # Post-processing (see stdlib.gfx / docs/gfx-postprocess-v0.md): vignette to frame the map, a
-    # filmic tone-map so bright water/sky roll off instead of clipping, and an ALTITUDE-driven blur —
-    # the higher the camera, the softer the overview (amount is unitless; ~0.5 reads as clearly soft,
-    # and the shim maps it to ~6 px of kernel). Anchors below map eye height ~300 -> sharp, ~1600 ->
-    # hazy; swap the last two amounts to blur when LOW instead. The HUD is drawn crisp on top via
-    # gfx.overlay_begin() in the frame loop, so only the terrain is affected.
-    gfx.post_vignette(0.7, 0.35)  # strong + tight, so the falloff reaches onto the terrain
-    gfx.post_tonemap(1.35, 1.4)  # exposure + a punchy saturation grade (the visible knob)
-    gfx.post_altitude_blur(300.0, 1600.0, 0.0, 0.8)
+    # Distance fog (roadmap #1, docs/gfx-effects-roadmap-v0.md): distant terrain fades into a pale
+    # sky haze — the cheapest atmosphere/depth cue, applied in the scene shaders (no post pass, no
+    # extra buffers). density is the Beer-Lambert coefficient; the colour doubles as the horizon.
+    gfx.fog(0.0008, 176, 194, 214)
+    # The earlier full-screen post effects are disabled for now (kept here for easy re-enable):
+    # gfx.post_vignette(0.7, 0.35)
+    # gfx.post_tonemap(1.35, 1.4)
+    # gfx.post_altitude_blur(300.0, 1600.0, 0.0, 0.8)
     let cfg = Config(seed = world_seed, chunk_size = chunk_edge, octaves = noise_octaves,
                      lattice0 = noise_lattice0, elevation_levels = elevation_levels)
     # Generate the whole region's biome tags + elevation bands directly into the global grids (no
