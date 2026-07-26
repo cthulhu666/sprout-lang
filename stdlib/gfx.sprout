@@ -32,6 +32,11 @@ extern fn gfx_mesh_capture_end() -> Int !{IO}
 extern fn gfx_mesh_reset() -> Unit !{IO}
 extern fn gfx_capture_quad_data(p0x: Double, p0y: Double, p0z: Double, p1x: Double, p1y: Double, p1z: Double, p2x: Double, p2y: Double, p2z: Double, p3x: Double, p3y: Double, p3z: Double, nx: Double, ny: Double, nz: Double, tag: Int, tier: Int, dir: Int, band: Int, lake: Int) -> Unit !{IO}
 extern fn gfx_capture_quad_data_vn(p0x: Double, p0y: Double, p0z: Double, p1x: Double, p1y: Double, p1z: Double, p2x: Double, p2y: Double, p2z: Double, p3x: Double, p3y: Double, p3z: Double, n0x: Double, n0y: Double, n0z: Double, n1x: Double, n1y: Double, n1z: Double, n2x: Double, n2y: Double, n2z: Double, n3x: Double, n3y: Double, n3z: Double, tag: Int, tier: Int, dir: Int, band: Int, lake: Int) -> Unit !{IO}
+extern fn gfx_set_time(t: Double) -> Unit !{IO}
+extern fn gfx_get_time() -> Double !{IO}
+extern fn gfx_begin_blend_alpha() -> Unit !{IO}
+extern fn gfx_end_blend() -> Unit !{IO}
+extern fn gfx_set_depth_mask(on: Bool) -> Unit !{IO}
 extern fn gfx_set_view_mode(mode: Int) -> Unit !{IO}
 extern fn gfx_set_terrain_levels(levels: Int) -> Unit !{IO}
 extern fn gfx_draw_captured(handle: Int) -> Unit !{IO}
@@ -157,6 +162,16 @@ export fn set_view_mode(mode: Int) -> Unit !{IO} = gfx_set_view_mode(mode)
 
 # Elevation band count for the shader's grey relief ramp (Relief/Lakes). Set once when config is known.
 export fn set_terrain_levels(levels: Int) -> Unit !{IO} = gfx_set_terrain_levels(levels)
+
+# Animation clock (seconds) for any uTime-driven shader surface; get_time is the engine wall-clock.
+export fn set_time(t: Double) -> Unit !{IO} = gfx_set_time(t)
+export fn get_time() -> Double !{IO} = gfx_get_time()
+
+# General transparency state — compose a transparent pass: draw opaque, then begin_blend_alpha();
+# set_depth_mask(false); <draw transparent>; set_depth_mask(true); end_blend(). Not water-specific.
+export fn begin_blend_alpha() -> Unit !{IO} = gfx_begin_blend_alpha()
+export fn end_blend() -> Unit !{IO} = gfx_end_blend()
+export fn set_depth_mask(on: Bool) -> Unit !{IO} = gfx_set_depth_mask(on)
 
 export fn mesh_capture_begin() -> Unit !{IO} = gfx_mesh_capture_begin()
 export fn mesh_capture_end() -> Int !{IO} = gfx_mesh_capture_end()

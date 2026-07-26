@@ -74,6 +74,7 @@ static Shader g_cube_shader;   /* vertex-colour lit shader for baked/captured me
 static int g_cube_ready = 0;
 static int g_loc_view_mode = -1; /* CUBE uViewMode uniform: <0 raw colour (default), 0..3 terrain view */
 static int g_loc_levels = -1;    /* CUBE uLevels uniform: elevation band count for the relief ramp */
+static int g_loc_time = -1;      /* CUBE uTime uniform: seconds, for animated surfaces (water ribbon) */
 
 /* Static baked meshes. One-mesh-per-terrain fit in a handful; per-CHUNK baking (for frustum
  * culling) needs one slot per chunk — a 32x32-chunk map is 1024 — so the cap is generous. */
@@ -166,9 +167,11 @@ static const char *CUBE_VS =
   "out vec3 fragNormal;\n"
   "out vec4 fragColor;\n"
   "out float fragDepth;\n"
+  "out vec2 fragWorldXZ;\n"
   "void main() {\n"
   "    fragNormal = vertexNormal;\n"
   "    fragColor = vertexColor;\n"
+  "    fragWorldXZ = vertexPosition.xz;\n"
   "    gl_Position = mvp*vec4(vertexPosition, 1.0);\n"
   "    fragDepth = gl_Position.w;\n"
   "}\n";
@@ -184,11 +187,13 @@ static const char *CUBE_FS =
   "in vec3 fragNormal;\n"
   "in vec4 fragColor;\n"
   "in float fragDepth;\n"
+  "in vec2 fragWorldXZ;\n"
   "uniform vec3 lightDir;\n"
   "uniform vec3 lightColor;\n"
   "uniform vec3 ambient;\n"
   "uniform int uViewMode;\n"   /* <0 = raw vertex colour; 0 Main, 1 Relief, 2 Flow, 3 Lakes */
   "uniform int uLevels;\n"     /* elevation band count, for the relief ramp */
+  "uniform float uTime;\n"     /* seconds; drives animated surfaces (e.g. the water ribbon) */
   FOG_GLSL
   "out vec4 finalColor;\n"
   "vec3 biome_rgb(int t){\n"
@@ -217,6 +222,19 @@ static const char *CUBE_FS =
   "    else if(d==8) return vec3(214.0,82.0,200.0)/255.0;\n"
   "    else return vec3(40.0,44.0,52.0)/255.0;\n"
   "}\n"
+  /* Unit DOWNSTREAM direction in world XZ for a D8 code (1..8): x=east(dcol), z=south(drow). Lets the
+   * water ripple scroll along each river's real flow instead of one global direction. */
+  "vec2 flow_dir_vec(int d){\n"
+  "    if(d==1) return vec2(0.0,-1.0);\n"
+  "    else if(d==2) return normalize(vec2(1.0,-1.0));\n"
+  "    else if(d==3) return vec2(1.0,0.0);\n"
+  "    else if(d==4) return normalize(vec2(1.0,1.0));\n"
+  "    else if(d==5) return vec2(0.0,1.0);\n"
+  "    else if(d==6) return normalize(vec2(-1.0,1.0));\n"
+  "    else if(d==7) return vec2(-1.0,0.0);\n"
+  "    else if(d==8) return normalize(vec2(-1.0,-1.0));\n"
+  "    else return vec2(1.0,0.0);\n"
+  "}\n"
   "vec3 land_rgb(int band){\n"
   "    int sp = uLevels<=1 ? 1 : uLevels-1;\n"
   "    float g = (60.0 + float(band)*175.0/float(sp))/255.0;\n"
@@ -235,7 +253,17 @@ static const char *CUBE_FS =
   "        int abnd = int(fragColor.a*255.0 + 0.5);\n"
   "        bool lake = abnd >= 128;\n"
   "        int band = lake ? abnd-128 : abnd;\n"
-  "        if(lake){\n"
+  "        bool water = (tag == 100);\n"   /* ribbon water-surface marker (baked by the demo) */
+  "        if(water && uViewMode == 0){\n"
+  "            vec3 base = river_rgb(tier);\n"
+  "            vec2 fv = flow_dir_vec(dir);\n"                 /* downstream, in world XZ */
+  "            float along = dot(fv, fragWorldXZ);\n"          /* distance along the flow */
+  "            float across = dot(vec2(-fv.y, fv.x), fragWorldXZ);\n"
+  "            float w1 = sin(along*0.9 - uTime*2.2);\n"       /* crest travels DOWNSTREAM */
+  "            float w2 = sin(along*0.5 - uTime*1.3 + across*0.8);\n"
+  "            col = base + vec3(0.05,0.06,0.08)*w1 + vec3(0.02,0.03,0.05)*w2;\n"
+  "            outA = 0.60;\n"
+  "        } else if(lake){\n"
   "            if(uViewMode != 3) discard;\n"
   "            col = vec3(40.0,120.0,205.0)/255.0;\n"
   "        } else if(tier > 0){\n"
@@ -483,9 +511,12 @@ static void init_lighting(void) {
      * with raw vertex colour: uViewMode = -1. uLevels only matters for the relief ramp; seed a sane 12. */
     g_loc_view_mode = GetShaderLocation(g_cube_shader, "uViewMode");
     g_loc_levels = GetShaderLocation(g_cube_shader, "uLevels");
+    g_loc_time = GetShaderLocation(g_cube_shader, "uTime");
     int vm0 = -1, lv0 = 12;
+    float t0 = 0.0f;
     SetShaderValue(g_cube_shader, g_loc_view_mode, &vm0, SHADER_UNIFORM_INT);
     SetShaderValue(g_cube_shader, g_loc_levels, &lv0, SHADER_UNIFORM_INT);
+    SetShaderValue(g_cube_shader, g_loc_time, &t0, SHADER_UNIFORM_FLOAT);
     g_cube_ready = 1;
   }
 
@@ -971,6 +1002,40 @@ long long gfx_set_terrain_levels(long long levels) {
   if (!g_cube_ready) return 0;
   int l = (int)levels;
   SetShaderValue(g_cube_shader, g_loc_levels, &l, SHADER_UNIFORM_INT);
+  return 0;
+}
+
+/* Update the cube shader's animation clock (seconds). General: any uTime-driven surface reads it. */
+long long gfx_set_time(long long t) {
+  if (!g_cube_ready) return 0;
+  float tv = as_float(t);
+  SetShaderValue(g_cube_shader, g_loc_time, &tv, SHADER_UNIFORM_FLOAT);
+  return 0;
+}
+
+/* The engine wall-clock in seconds (raylib GetTime) — a general time source for animation. */
+long long gfx_get_time(void) {
+  double d = GetTime();
+  long long bits;
+  memcpy(&bits, &d, sizeof(double));
+  return bits;
+}
+
+/* --- General transparency state (an app composes its own transparent pass from these) -------------
+ * begin_blend_alpha / end_blend wrap standard alpha blending; set_depth_mask toggles depth-buffer
+ * WRITES (the depth TEST still applies). Recipe: draw opaque, then begin_blend_alpha(); set_depth_mask(0);
+ * <draw transparent, back-to-front-ish>; set_depth_mask(1); end_blend(). Not water-specific. */
+long long gfx_begin_blend_alpha(void) {
+  BeginBlendMode(BLEND_ALPHA);
+  return 0;
+}
+long long gfx_end_blend(void) {
+  EndBlendMode();
+  return 0;
+}
+long long gfx_set_depth_mask(long long on) {
+  if (on) rlEnableDepthMask();
+  else rlDisableDepthMask();
   return 0;
 }
 

@@ -2,8 +2,10 @@ module examples.gfx.terrain_rivers_demo
 
 import stdlib.gfx
 import loam.terrain (Config, tile_kind_at, tile_band_at, tile_kind_tag, spatial_hash, chunk_linear_index, tile_kind_of, band_of, elev_at, sea_level)
-import loam.hydrology (Hydrology, HydroParams, compute_hydrology, hydro_tier, hydro_dir, hydro_filled, carve_depth, widen_rivers, meander_rivers)
+import loam.hydrology (Hydrology, HydroParams, compute_hydrology, hydro_tier, hydro_dir, hydro_filled, carve_depth, widen_rivers, meander_rivers, dir_delta)
 import loam.surface (ground_y, sink, corner_height, corner_normal)
+import loam.ribbon (RibbonPos, smooth_positions, ribbon_px, ribbon_pz)
+import stdlib.math (sqrt)
 import loam.config (parse_config, cfg_int)
 import loam.vegetation (TreeKind, Palm, Broadleaf, Conifer, DarkConifer, Cactus, Shrub, tree_kind_tag, tree_for_biome)
 import loam.camera (Cam, cam_drive, cam_distance, tree_cull_dist)
@@ -15,8 +17,10 @@ import stdlib.mutable (MutVec, mutvec_new, mutvec_at, mutvec_set, MutMatrix, mut
 # it fills depressions, routes D8 flow downhill, accumulates drainage area, and buckets it into a
 # per-cell flow_tier (0 = none, 1..3 = creek/river/major). THIS file is the view: at startup it
 # generates the region STRAIGHT INTO a global band+tag grid, runs the hydrology pass, then BAKES
-# every tile into one static GPU mesh — colouring river cells blue-by-tier instead of their biome —
-# so the frame loop draws the whole map in a single call. Rivers flow downhill and reach the sea
+# every tile into a smooth continuous heightfield mesh (docs/terrain-smooth-mesh-v0.md) plus a
+# separate translucent SMOOTH WATER RIBBON along each river's smoothed centerline (loam.ribbon) — the
+# terrain bed is land-coloured, the ribbon is the only water, so no blocky per-tile blue tiles remain.
+# So the frame loop draws the whole map in a couple of calls. Rivers flow downhill and reach the sea
 # (proven headlessly), the groundwork for a raft water-transport game: flow_tier is the future
 # navigability class, flow_dir the current.
 #
@@ -98,6 +102,21 @@ let water_g = 110
 let water_b = 190
 let water_alpha = 165  # 0 = invisible, 255 = opaque
 let water_lift = 0.5  # bands above the sea-level band to float the surface (hides the beds)
+
+# --- Smooth water ribbon (docs/rivers-v0.md §6d) ------------------------------------------------
+# The D8 river mask is a staircase of tile-square tops. loam.ribbon smooths each river cell's
+# centerline (neighbour-averaging); the bake lays a continuous quad strip from each cell's smoothed
+# point to its flow-downstream neighbour's, at the (smooth, descending) filled water level, widened by
+# tier. This reads as a smooth river winding over the terrain. The BED is land-coloured (bake_tile
+# emits tier=0 on the terrain top), so ONLY the ribbon is blue — no blocky per-tile river tiles.
+let ribbon_passes = 2  # centerline smoothing passes (0 = blocky per-tile look)
+let ribbon_hw_creek = 0.34  # half-width (tiles) by tier: creek / river / major
+let ribbon_hw_river = 0.64
+let ribbon_hw_major = 1.05
+let ribbon_lift = 0.1  # ELEVATION BANDS the ribbon floats above the fill (× terrain_step in bake_ribbon)
+# Water-surface marker baked into the ribbon quads' tag byte (biomes are 0..7, so 100 is a safe
+# sentinel). CUBE_FS (graphics/sprout_gfx.c) renders tag==100 as translucent animated water in Main.
+let ribbon_water_tag = 100
 
 # Camera framing (fractions of the map span, so it scales with map size) ----
 let cam_radius_frac = 0.85  # opening horizontal standoff
@@ -188,7 +207,9 @@ fn bake_tile(cfg: Config, cy: MutMatrix Double, bands: MutMatrix Int, tags: MutM
   do
     band <- mutmatrix_at_or(bands, gz, gx, 0)
     tag <- mutmatrix_at_or(tags, gz, gx, 0)
-    tier <- hydro_tier(h, gx, gz)
+    # Option B (docs/terrain-smooth-mesh-v0.md): the terrain bakes with tier=0 everywhere, so a river
+    # cell's BED renders as its land biome — no blocky per-tile blue. The only water is the smooth
+    # translucent ribbon (bake_ribbon), which carries the real tier. dir is kept for the Flow view.
     dir <- hydro_dir(h, gx, gz)
     let half = to_double(span) / 2.0  # map centred on origin
     let hh = tile_size * 0.5
@@ -218,14 +239,14 @@ fn bake_tile(cfg: Config, cy: MutMatrix Double, bands: MutMatrix Int, tags: MutM
                     do
                       gfx.capture_quad_data_vn(x0, ynw, z0, x0, ysw, z1, x1, yse, z1, x1, yne, z0,
                                                a0, b0, c0, a1, b1, c1, a2, b2, c2, a3, b3, c3,
-                                               tag, tier, dir, band, 0)
+                                               tag, 0, dir, band, 0)
                       # Rim skirt: drop the boundary edge straight to y=0 (replaces the old per-tile
                       # step walls). Only where the neighbour is off-map. Backface culling is off, so
                       # winding is not critical; the outward face normal is flat (per-face is fine here).
-                      if gx <= 0 then gfx.capture_quad_data(x0, ynw, z0, x0, ysw, z1, x0, 0.0, z1, x0, 0.0, z0, 0.0 - 1.0, 0.0, 0.0, tag, tier, dir, band, 0) else ()
-                      if gx >= span - 1 then gfx.capture_quad_data(x1, yne, z0, x1, yse, z1, x1, 0.0, z1, x1, 0.0, z0, 1.0, 0.0, 0.0, tag, tier, dir, band, 0) else ()
-                      if gz <= 0 then gfx.capture_quad_data(x0, ynw, z0, x1, yne, z0, x1, 0.0, z0, x0, 0.0, z0, 0.0, 0.0, 0.0 - 1.0, tag, tier, dir, band, 0) else ()
-                      if gz >= span - 1 then gfx.capture_quad_data(x0, ysw, z1, x1, yse, z1, x1, 0.0, z1, x0, 0.0, z1, 0.0, 0.0, 1.0, tag, tier, dir, band, 0) else ()
+                      if gx <= 0 then gfx.capture_quad_data(x0, ynw, z0, x0, ysw, z1, x0, 0.0, z1, x0, 0.0, z0, 0.0 - 1.0, 0.0, 0.0, tag, 0, dir, band, 0) else ()
+                      if gx >= span - 1 then gfx.capture_quad_data(x1, yne, z0, x1, yse, z1, x1, 0.0, z1, x1, 0.0, z0, 1.0, 0.0, 0.0, tag, 0, dir, band, 0) else ()
+                      if gz <= 0 then gfx.capture_quad_data(x0, ynw, z0, x1, yne, z0, x1, 0.0, z0, x0, 0.0, z0, 0.0, 0.0, 0.0 - 1.0, tag, 0, dir, band, 0) else ()
+                      if gz >= span - 1 then gfx.capture_quad_data(x0, ysw, z1, x1, yse, z1, x1, 0.0, z1, x0, 0.0, z1, 0.0, 0.0, 1.0, tag, 0, dir, band, 0) else ()
                       bake_lake(cfg, h, levels, terrain_step, x0, x1, z0, z1, gx, gz)
 
 # --- Generation pass (once at startup) --------------------------------------
@@ -326,19 +347,87 @@ fn bake_chunk_tiles(cfg: Config, cy: MutMatrix Double, bands: MutMatrix Int, tag
       bake_tile(cfg, cy, bands, tags, h, levels, terrain_step, span, (cx * size) + c, (cz * size) + r)
       bake_chunk_tiles(cfg, cy, bands, tags, h, levels, terrain_step, span, size, cx, cz, r, c + 1)
 
-# Bake each chunk into its OWN static mesh and record the handle (indexed cz*ncx + cx), so the frame
-# loop can frustum-cull per chunk — a zoomed-in view then pays only for the visible handful of
-# chunks instead of the whole map. This is what makes zooming in fast.
-fn bake_region(cfg: Config, cy: MutMatrix Double, bands: MutMatrix Int, tags: MutMatrix Int, h: Hydrology, levels: Int, terrain_step: Double, span: Int, size: Int, ncx: Int, ncz: Int, meshes: MutVec Int, cx: Int, cz: Int) -> Unit !{IO} =
+# --- Smooth water ribbon bake -----------------------------------------------
+# Ribbon half-width (world tiles) by tier — a creek stays thin, a major spreads wide.
+fn ribbon_half_width(tier: Int) -> Double =
+  if tier >= 3 then ribbon_hw_major
+  else if tier == 2 then ribbon_hw_river
+  else ribbon_hw_creek
+
+# Lay one segment of the smooth water ribbon: a quad from this river cell's smoothed centerline point
+# to its flow-downstream neighbour's, at the filled water level (ground_y of the fill — the SAME
+# continuous mapping as the terrain, so the ribbon tracks the surface at any relief), widened by tier
+# along the flow perpendicular. Consecutive segments share an endpoint, so the ribbon is continuous.
+# Emitted with tag=ribbon_water_tag so CUBE_FS renders it as translucent animated water in Main (and
+# flat river_rgb via the tier field in the other views). An outlet (dir 0) is covered by its upstream
+# neighbour's segment.
+fn bake_ribbon(cfg: Config, h: Hydrology, rp: RibbonPos, levels: Int, terrain_step: Double, span: Int, gx: Int, gz: Int, half: Double) -> Unit !{IO} =
+  do
+    tier <- hydro_tier(h, gx, gz)
+    dir <- hydro_dir(h, gx, gz)
+    if (tier <= 0) || (dir == 0) then ()
+    else
+      match dir_delta(dir) with
+      | (ddr, ddc) ->
+          do
+            let nx = gx + ddc
+            let nz = gz + ddr
+            cpx <- ribbon_px(rp, gx, gz)
+            cpz <- ribbon_pz(rp, gx, gz)
+            dpx <- ribbon_px(rp, nx, nz)
+            dpz <- ribbon_pz(rp, nx, nz)
+            let cx = (cpx - half) * tile_size
+            let cz = (cpz - half) * tile_size
+            let dxw = (dpx - half) * tile_size
+            let dzw = (dpz - half) * tile_size
+            let fx = dxw - cx
+            let fz = dzw - cz
+            let len = sqrt((fx * fx) + (fz * fz))
+            if len < 0.0001 then ()
+            else
+              do
+                let px = (0.0 - fz) / len  # unit flow-perpendicular
+                let pz = fx / len
+                let hw = ribbon_half_width(tier) * tile_size
+                flc <- hydro_filled(h, gx, gz)
+                fld <- hydro_filled(h, nx, nz)
+                # Float the ribbon ribbon_lift BANDS above the fill (× terrain_step) so the clearance
+                # scales with the vertical relief — a fixed world-unit lift that clears flat terrain
+                # would clip through the taller, rougher terrain at high relief.
+                let yc = ground_y(flc, levels, terrain_step, tile_size) + (ribbon_lift * terrain_step)
+                let yd = ground_y(fld, levels, terrain_step, tile_size) + (ribbon_lift * terrain_step)
+                gfx.capture_quad_data(cx + (px * hw), yc, cz + (pz * hw),
+                                      cx - (px * hw), yc, cz - (pz * hw),
+                                      dxw - (px * hw), yd, dzw - (pz * hw),
+                                      dxw + (px * hw), yd, dzw + (pz * hw),
+                                      0.0, 1.0, 0.0, ribbon_water_tag, tier, dir, band_of(flc, levels), 0)
+
+fn bake_chunk_ribbon(cfg: Config, h: Hydrology, rp: RibbonPos, levels: Int, terrain_step: Double, span: Int, size: Int, cx: Int, cz: Int, r: Int, c: Int) -> Unit !{IO} =
+  if r >= size then ()
+  else if c >= size then bake_chunk_ribbon(cfg, h, rp, levels, terrain_step, span, size, cx, cz, r + 1, 0)
+  else
+    do
+      bake_ribbon(cfg, h, rp, levels, terrain_step, span, (cx * size) + c, (cz * size) + r, to_double(span) / 2.0)
+      bake_chunk_ribbon(cfg, h, rp, levels, terrain_step, span, size, cx, cz, r, c + 1)
+
+# Bake each chunk into TWO static meshes — opaque terrain and translucent water ribbon — recording
+# both handles at cz*ncx + cx. Per-chunk baking lets the frame loop frustum-cull both; the terrain
+# draws opaque, the ribbon in a later blended pass (render_loop) so the smooth water blends over the
+# land bed instead of z-fighting it.
+fn bake_region(cfg: Config, cy: MutMatrix Double, bands: MutMatrix Int, tags: MutMatrix Int, h: Hydrology, rp: RibbonPos, levels: Int, terrain_step: Double, span: Int, size: Int, ncx: Int, ncz: Int, meshes: MutVec Int, ribbon_meshes: MutVec Int, cx: Int, cz: Int) -> Unit !{IO} =
   if cz >= ncz then ()
-  else if cx >= ncx then bake_region(cfg, cy, bands, tags, h, levels, terrain_step, span, size, ncx, ncz, meshes, 0, cz + 1)
+  else if cx >= ncx then bake_region(cfg, cy, bands, tags, h, rp, levels, terrain_step, span, size, ncx, ncz, meshes, ribbon_meshes, 0, cz + 1)
   else
     do
       gfx.mesh_capture_begin()
       bake_chunk_tiles(cfg, cy, bands, tags, h, levels, terrain_step, span, size, cx, cz, 0, 0)
       handle <- gfx.mesh_capture_end()
       mutvec_set(meshes, (cz * ncx) + cx, handle)
-      bake_region(cfg, cy, bands, tags, h, levels, terrain_step, span, size, ncx, ncz, meshes, cx + 1, cz)
+      gfx.mesh_capture_begin()
+      bake_chunk_ribbon(cfg, h, rp, levels, terrain_step, span, size, cx, cz, 0, 0)
+      rhandle <- gfx.mesh_capture_end()
+      mutvec_set(ribbon_meshes, (cz * ncx) + cx, rhandle)
+      bake_region(cfg, cy, bands, tags, h, rp, levels, terrain_step, span, size, ncx, ncz, meshes, ribbon_meshes, cx + 1, cz)
 
 # Draw every chunk mesh; gfx.draw_captured frustum-culls the off-screen ones in the shim.
 fn draw_meshes(meshes: MutVec Int, i: Int, n: Int) -> Unit !{IO} =
@@ -500,7 +589,7 @@ fn view_label(view: Int, this: Int, name: String) -> String =
 # pan, WASD = pan) that work on both a mouse and a MacBook trackpad. `view` selects which of the four
 # hydrology views the shader renders; the top-left buttons switch it via gfx.set_view_mode — a single
 # uniform write, no re-bake (the terrain is baked ONCE with per-vertex data; see bake_tile).
-fn render_loop(meshes: MutVec Int, cam: Cam, view: Int,
+fn render_loop(meshes: MutVec Int, ribbon_meshes: MutVec Int, cam: Cam, view: Int,
                world_span: Double, chunk_count: Int, tree_group_count: Int, water_y: Double) -> Unit !{IO} =
   do
     # Span-scaled framing + tree-cull, derived from world_span (were module constants; world_span is
@@ -523,6 +612,17 @@ fn render_loop(meshes: MutVec Int, cam: Cam, view: Int,
         # the drainage. Drawn before the water so an above-water tree is not tinted. (Instances stay
         # resident across a view switch; they are simply not replayed in views 1..3.)
         if view == 0 then gfx.draw_instances(tree_group_count, tree_cull) else ()
+        # Smooth water ribbon: a translucent, animated (uTime) pass over the opaque terrain. Alpha
+        # blend on, depth WRITE off (test still applies) so the water blends over the land bed showing
+        # through, then restore. Drawn every view (CUBE_FS renders it as flat river colour outside Main;
+        # only Main animates + goes translucent). This is what replaces the blocky per-tile blue.
+        t <- gfx.get_time()
+        gfx.set_time(t)
+        gfx.begin_blend_alpha()
+        gfx.set_depth_mask(false)
+        draw_meshes(ribbon_meshes, 0, chunk_count)
+        gfx.set_depth_mask(true)
+        gfx.end_blend()
         # Sea surface last, so depth-testing lets land above sea level poke through the translucent
         # plane while it fills the valleys. Sea IS hydrology, so it is drawn in every view.
         gfx.draw_plane(0.0, water_y, 0.0, world_span, world_span, water_r, water_g, water_b, water_alpha)
@@ -586,7 +686,7 @@ fn render_loop(meshes: MutVec Int, cam: Cam, view: Int,
         # re-bake, no re-upload: instant. (Trees are drawn only in Main, gated above.)
         let next_view = if vm then 0 else if vr then 1 else if vf then 2 else if vk then 3 else view
         if next_view != view then gfx.set_view_mode(next_view) else ()
-        render_loop(meshes,
+        render_loop(meshes, ribbon_meshes,
                     cam_drive(cam, d_yaw, d_pitch, d_zoom, d_pan_r, d_pan_f,
                               min_dist, max_dist, pitch_min, pitch_max, pan_bound),
                     next_view, world_span, chunk_count, tree_group_count, water_y)
@@ -624,7 +724,7 @@ fn read_settings() -> Dict Int !{IO} =
 # place_region) keeps the frame-loop live set tiny.
 fn build_world(cfg: Config, params: HydroParams, levels: Int, terrain_step: Double, span: Int,
                chunk_edge: Int, region_chunks: Int, chunk_count: Int, half: Double, tge: Int, tgc: Int,
-               start_view: Int) -> MutVec Int !{IO} =
+               start_view: Int) -> (MutVec Int, MutVec Int) !{IO} =
   do
     # Biome tags + integer bands (Relief datum) + continuous tile-centre heights (mesh geometry, at the
     # config-driven terrain_step vertical scale), tabulated into global grids — no chunk/disk round-trip.
@@ -642,10 +742,14 @@ fn build_world(cfg: Config, params: HydroParams, levels: Int, terrain_step: Doub
     # Shared mesh-vertex corner grid ((span+1)²) from the carved heights — seam-free, built once.
     corners <- mutmatrix_new(span + 1, span + 1, 0.0)
     fill_corners(heights, corners, span, 0)
-    # Bake each chunk into its OWN static mesh (per-vertex DATA + gradient normals), so a view switch
-    # is one uniform (set_view_mode) and a zoomed-in view frustum-culls per chunk.
+    # Smooth the river centerlines once (neighbour-averaging) for the water-ribbon bake — computed from
+    # the FINAL flow_tier (post meander + widen) so the ribbon follows the rendered rivers.
+    rp <- smooth_positions(h, span, ribbon_passes)
+    # Bake each chunk into TWO static meshes (opaque terrain + translucent ribbon), per-vertex DATA +
+    # gradient normals, so a view switch is one uniform and a zoomed-in view frustum-culls per chunk.
     meshes <- mutvec_new(chunk_count, -1)
-    bake_region(cfg, corners, bands, tags, h, levels, terrain_step, span, chunk_edge, region_chunks, region_chunks, meshes, 0, 0)
+    ribbon_meshes <- mutvec_new(chunk_count, -1)
+    bake_region(cfg, corners, bands, tags, h, rp, levels, terrain_step, span, chunk_edge, region_chunks, region_chunks, meshes, ribbon_meshes, 0, 0)
     # Band count for the shader relief ramp; select the opening view BEFORE the first frame (the shader
     # defaults to -1 = raw vertex colour, which would misread the data-encoded terrain).
     gfx.set_terrain_levels(levels)
@@ -655,7 +759,7 @@ fn build_world(cfg: Config, params: HydroParams, levels: Int, terrain_step: Doub
     models <- mutvec_new(tree_count, 0)
     load_trees(models)
     place_region(cfg, models, h, heights, tags, span, half, tge, tgc, 0)
-    meshes
+    (meshes, ribbon_meshes)
 
 fn main() -> Unit !{IO} =
   do
@@ -727,8 +831,11 @@ fn main() -> Unit !{IO} =
     # Build + route + bake the world ONCE, in a helper whose working grids (bands/tags/heights/corners,
     # hydrology, tree models) fall out of scope on return — so they are NOT in the GC live set the frame
     # loop marks each frame (the file's whole startup/GC design; see build_world). It returns just the
-    # per-chunk mesh handles; the trees live GPU-side after its place_region.
+    # per-chunk mesh handles (opaque terrain + translucent ribbon); trees live GPU-side after
+    # place_region.
     let start_view = 0
-    meshes <- build_world(cfg, params, elevation_levels, terrain_step, span_tiles, chunk_edge, region_chunks,
-                          chunk_count, half, tree_group_edge, tree_group_cols, start_view)
-    render_loop(meshes, cam_start, start_view, world_span, chunk_count, tree_group_count, water_y)
+    baked <- build_world(cfg, params, elevation_levels, terrain_step, span_tiles, chunk_edge, region_chunks,
+                         chunk_count, half, tree_group_edge, tree_group_cols, start_view)
+    match baked with
+    | (meshes, ribbon_meshes) ->
+        render_loop(meshes, ribbon_meshes, cam_start, start_view, world_span, chunk_count, tree_group_count, water_y)

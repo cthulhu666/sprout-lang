@@ -938,13 +938,20 @@ plan" item under "Design Roadmap → Current Priorities".
   (`normal_from_slopes`/`corner_height`/`corner_normal`); the new gfx host fn `capture_quad_data_vn`
   (4 per-vertex normals) shades it smoothly. Interior step walls deleted; map rim gets a skirt. No
   FPS regression (60-cap at steady state). Follow-ups below.
-- [ ] `P3` **Smooth-terrain follow-ups (the AAA layers deliberately deferred).** The terrain
-  landform is smooth; these add richness on top: (1) **rivers still read blocky** — the fix is
-  re-enabling/rebuilding the removed smooth-water **ribbon** (per-tile river *colour* is the
-  dominant blockiness, not the carve); (2) **detail normal maps** for micro-bump without geometry;
-  (3) **splat + triplanar material blending** to soften hard per-tile biome-colour seams;
-  (4) **per-vertex `band` datum** for a smooth Relief ramp (currently per-quad, so Relief facets);
-  (5) terrain **LOD** (the per-chunk mesh is the natural seam). Ref: `docs/terrain-smooth-mesh-v0.md` §10.
+- [x] `P3` **Smooth rivers — ribbon on the smooth terrain (landed 2026-07-26).** Ported
+  `loam/ribbon.sprout` (+`tests/loam/test_ribbon.spr`) and the translucent animated-water shader path
+  (CUBE_FS `tag==100` + `flow_dir_vec`/`uTime`; gfx externs `set_time`/`get_time`/blend/`depth_mask`)
+  from the `rivers-ribbon` branch, adapted to the continuous mesh: the ribbon rides at
+  `ground_y(fill)` (same vertical mapping, tracks any relief). **Option B** — the terrain bakes with
+  `tier=0`, so a river's bed is its land biome and the smooth ribbon is the ONLY water (kills the
+  blocky per-tile blue; widening couldn't, since carve is shallow and majors are 3 tiles wide).
+  Residual: minor edge stipple where the thin ribbon clips higher land (tune `ribbon_lift`/half-widths).
+- [ ] `P3` **Smooth-terrain follow-ups (the AAA layers deliberately deferred).** On top of the smooth
+  landform + rivers: (1) **detail normal maps** for micro-bump without geometry; (2) **splat +
+  triplanar material blending** to soften hard per-tile biome-colour seams; (3) **per-vertex `band`
+  datum** for a smooth Relief ramp (currently per-quad, so Relief facets); (4) terrain **LOD** (the
+  per-chunk mesh is the natural seam); (5) sample terrain height under the ribbon to kill the edge
+  stipple. Ref: `docs/terrain-smooth-mesh-v0.md` §10.
 - [x] `P2` **`deriving (Enum)` — constructor ↔ Int, to kill hand-written tag/ordinal boilerplate**
   (surfaced 2026-07-24 building `loam.terrain`; landed 2026-07-24). Shipped as `deriving (Enum)`
   on nullary-only ADTs, synthesizing `ordinal : a -> Int` and `from_ordinal : Int -> Maybe a` with

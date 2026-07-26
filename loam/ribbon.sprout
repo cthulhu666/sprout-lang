@@ -1,0 +1,99 @@
+module loam.ribbon
+
+import loam.hydrology (Hydrology, hydro_tier)
+import stdlib.mutable (MutMatrix, mutmatrix_new, mutmatrix_at_or, mutmatrix_set)
+
+# Loam's river-RIBBON geometry helper — turns the blocky per-tile river mask into a smooth centerline
+# for a continuous water-surface mesh (docs/rivers-v0.md §6d). The D8 flow field only bends in 45°
+# steps, so a river's cell-center chain is a staircase of right angles; smooth_positions rounds those
+# kinks by NEIGHBOUR-AVERAGING each river cell's centerline point toward the mean of its river
+# neighbours' points. Pure/headless (imports no graphics): a view maps the smoothed grid positions to
+# world coordinates and emits the ribbon quads. Only WHICH point each river cell contributes moves;
+# the flow model (flow_dir/filled) is untouched.
+
+# Smoothed centerline points, indexed [row=gz][col=gx] like every other loam grid. px/pz are in GRID
+# coordinates: cell (gx, gz)'s center starts at (gx, gz) — matching the view's world mapping, which
+# centres tile gx at world (gx - half)*tile_size. The view scales these smoothed points the same way.
+export type RibbonPos = (px: MutMatrix Double, pz: MutMatrix Double)
+
+export fn ribbon_px(rp: RibbonPos, gx: Int, gz: Int) -> Double !{IO} = mutmatrix_at_or(rp.px, gz, gx, 0.0)
+export fn ribbon_pz(rp: RibbonPos, gx: Int, gz: Int) -> Double !{IO} = mutmatrix_at_or(rp.pz, gz, gx, 0.0)
+
+# Accumulate (sum px, sum pz, count) over the river neighbours of (gx, gz): a 3×3 box scan over the
+# Moore neighbourhood (dr, dc in -1..1) skipping the centre, reading the source grids. Seeded with the
+# cell's OWN point (count 1), so the average is own-plus-river-neighbours — a straight run averages
+# back to its own center (stays straight); a corner is pulled toward the inside. Box scan mirrors
+# hydrology.wt_scan; the sum is order-independent, so no fixed neighbour order is needed.
+fn accum(h: Hydrology, sx: MutMatrix Double, sz: MutMatrix Double, gx: Int, gz: Int,
+         dr: Int, dc: Int, ax: Double, az: Double, cnt: Int) -> (Double, Double, Int) !{IO} =
+  if dr > 1 then (ax, az, cnt)
+  else if dc > 1 then accum(h, sx, sz, gx, gz, dr + 1, 0 - 1, ax, az, cnt)
+  else if (dr == 0) && (dc == 0) then accum(h, sx, sz, gx, gz, dr, dc + 1, ax, az, cnt)
+  else
+    do
+      t <- hydro_tier(h, gx + dc, gz + dr)
+      if t > 0 then
+        do
+          px <- mutmatrix_at_or(sx, gz + dr, gx + dc, 0.0)
+          pz <- mutmatrix_at_or(sz, gz + dr, gx + dc, 0.0)
+          accum(h, sx, sz, gx, gz, dr, dc + 1, ax + px, az + pz, cnt + 1)
+      else accum(h, sx, sz, gx, gz, dr, dc + 1, ax, az, cnt)
+
+# One smoothing pass over every cell: a river cell becomes the average of its own point and its river
+# neighbours' points; a non-river cell is copied through unchanged (its point is never read anyway).
+# Double-buffered (reads src, writes dst) so a cell's move never feeds its neighbours within a pass.
+fn pass_cell(h: Hydrology, sx: MutMatrix Double, sz: MutMatrix Double,
+             dx: MutMatrix Double, dz: MutMatrix Double, gx: Int, gz: Int) -> Unit !{IO} =
+  do
+    t <- hydro_tier(h, gx, gz)
+    ox <- mutmatrix_at_or(sx, gz, gx, 0.0)
+    oz <- mutmatrix_at_or(sz, gz, gx, 0.0)
+    if t <= 0 then
+      do
+        mutmatrix_set(dx, gz, gx, ox)
+        mutmatrix_set(dz, gz, gx, oz)
+    else
+      match accum(h, sx, sz, gx, gz, 0 - 1, 0 - 1, ox, oz, 1) with
+      | (ax, az, cnt) ->
+          do
+            mutmatrix_set(dx, gz, gx, ax / to_double(cnt))
+            mutmatrix_set(dz, gz, gx, az / to_double(cnt))
+
+fn pass_sweep(h: Hydrology, sx: MutMatrix Double, sz: MutMatrix Double,
+              dx: MutMatrix Double, dz: MutMatrix Double, span: Int, r: Int, c: Int) -> Unit !{IO} =
+  if r >= span then ()
+  else if c >= span then pass_sweep(h, sx, sz, dx, dz, span, r + 1, 0)
+  else
+    do
+      pass_cell(h, sx, sz, dx, dz, c, r)
+      pass_sweep(h, sx, sz, dx, dz, span, r, c + 1)
+
+# Initialise every cell's point to its grid center (gx, gz) — the view's tile-center convention.
+fn init_sweep(px: MutMatrix Double, pz: MutMatrix Double, span: Int, r: Int, c: Int) -> Unit !{IO} =
+  if r >= span then ()
+  else if c >= span then init_sweep(px, pz, span, r + 1, 0)
+  else
+    do
+      mutmatrix_set(px, r, c, to_double(c))
+      mutmatrix_set(pz, r, c, to_double(r))
+      init_sweep(px, pz, span, r, c + 1)
+
+# Run `passes` neighbour-averaging passes and return the smoothed centerline points. `passes <= 0`
+# returns the raw grid centers (an exact no-op — the blocky look). Deterministic in (h, span, passes).
+export fn smooth_positions(h: Hydrology, span: Int, passes: Int) -> RibbonPos !{IO} =
+  do
+    ax <- mutmatrix_new(span, span, 0.0)
+    az <- mutmatrix_new(span, span, 0.0)
+    init_sweep(ax, az, span, 0, 0)
+    bx <- mutmatrix_new(span, span, 0.0)
+    bz <- mutmatrix_new(span, span, 0.0)
+    run_passes(h, span, passes, ax, az, bx, bz, 0)
+
+# Ping-pong the two buffers `passes` times; return whichever holds the final result.
+fn run_passes(h: Hydrology, span: Int, passes: Int, ax: MutMatrix Double, az: MutMatrix Double,
+              bx: MutMatrix Double, bz: MutMatrix Double, done: Int) -> RibbonPos !{IO} =
+  if done >= passes then RibbonPos(px = ax, pz = az)
+  else
+    do
+      pass_sweep(h, ax, az, bx, bz, span, 0, 0)
+      run_passes(h, span, passes, bx, bz, ax, az, done + 1)
