@@ -790,6 +790,19 @@ dot-guard `infer.is_lowercase_name` has (a dotted name is never a type variable)
    First milestone constraints: POSIX-only (no Windows separator/drive-letter
    abstraction), no absolute-vs-relative type distinction, no eager
    normalization, no symlink resolution, no byte-level (OsString-style) paths.
+18. **Scoped type variables (signature tyvars visible in bodies) — deferred, no current demand.**
+    Analysis: [scoped-type-variables-analysis-2026-07-26.md](./docs/scoped-type-variables-analysis-2026-07-26.md).
+    Sprout has no `ScopedTypeVariables` equivalent, and the feature does not apply
+    today: implicit HM quantification (no user `forall`) means no lexical binder,
+    and there are no local type annotations (`spec-v0.md:124`) for a body `:: a`
+    to reuse. An audit of `stdlib/`+`stdlib/compiler/` found zero code that needs
+    to pin a return-polymorphic type inside a body and cannot — `mconcat`/`empty`/
+    `from_ordinal` all resolve via a sibling occurrence or are machine-generated.
+    Hard prerequisite: local type annotations must land first. Realistic trigger:
+    a binary serialization / codec library (a `decode : Bytes -> Maybe a`-style
+    method consumed in isolation) — ties to candidate #4 and §2.5. Revisit only
+    then; not deliberated on its own merits to date (only cited as GHC
+    extension-sprawl evidence, `haskell-lessons-learned.md` §10).
 
 ### Self-Hosting Follow-Ups (post-M7)
 
