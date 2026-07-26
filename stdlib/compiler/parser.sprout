@@ -791,6 +791,51 @@ fn parse_update_rest(tokens: Vec token.Token, i: Int, base: ast.Expr) -> Result 
         ast.RecordUpdateExpr(base, list_reverse(fields), cur_pos(tokens, i)))
   else Ok((base, i))
 
+# Package C-b: `_`-placeholder partial application (docs/currying-and-pipe-decision-v1.md §9a).
+# A bare `_` in a call-argument position is a hole. A call carrying >=1 hole
+# desugars to a lambda over the holes, left-to-right, at parse time:
+#   add(_, 3)     -> \__sprout_ph_0 -> add(__sprout_ph_0, 3)
+#   add3(_, _, 3) -> \(__sprout_ph_0, __sprout_ph_1) -> add3(__sprout_ph_0, __sprout_ph_1, 3)
+# The result is an ordinary lambda; the checker and codegen never see `_`.
+fn arg_is_hole(e: ast.Expr) -> Bool =
+  match e with
+  | ast.VarExpr name _ -> name == "_"
+  | _ -> false
+
+fn any_arg_hole(args: List ast.Expr) -> Bool =
+  match args with
+  | Nil -> false
+  | Cons a rest -> if arg_is_hole(a) then true else any_arg_hole(rest)
+
+fn ph_param_name(index: Int) -> String = "__sprout_ph_" ++ int_to_string(index)
+
+# Replace each hole with a fresh VarExpr; `next` counts holes seen so far so the
+# names line up with hole_params.
+fn fill_holes(args: List ast.Expr, next: Int, pos: source.SourcePos) -> List ast.Expr =
+  match args with
+  | Nil -> Nil
+  | Cons a rest ->
+      if arg_is_hole(a) then
+        Cons(ast.VarExpr(ph_param_name(next), pos), fill_holes(rest, next + 1, pos))
+      else
+        Cons(a, fill_holes(rest, next, pos))
+
+# One lambda parameter per hole, names matching fill_holes.
+fn hole_params(args: List ast.Expr, next: Int) -> List ast.Param =
+  match args with
+  | Nil -> Nil
+  | Cons a rest ->
+      if arg_is_hole(a) then
+        Cons(ast.Param(ph_param_name(next), Nothing), hole_params(rest, next + 1))
+      else
+        hole_params(rest, next)
+
+fn desugar_placeholder_call(callee: ast.Expr, args: List ast.Expr, pos: source.SourcePos) -> ast.Expr =
+  if any_arg_hole(args) then
+    ast.LambdaExpr(hole_params(args, 0), ast.CallExpr(callee, fill_holes(args, 0, pos), pos), pos)
+  else
+    ast.CallExpr(callee, args, pos)
+
 fn parse_call_rest(tokens: Vec token.Token, i: Int, callee: ast.Expr) -> Result ParseError (ast.Expr, Int) =
   match match_symbol(tokens, i, "(") with
   | Nothing -> Ok((callee, i))
@@ -798,7 +843,7 @@ fn parse_call_rest(tokens: Vec token.Token, i: Int, callee: ast.Expr) -> Result 
       do
         (args, i3) <- collect_call_args(tokens, i2, Nil)
         (_, i4) <- expected_symbol(")", tokens, i3)
-        parse_call_rest(tokens, i4, ast.CallExpr(callee, list_reverse(args), cur_pos(tokens, i)))
+        parse_call_rest(tokens, i4, desugar_placeholder_call(callee, list_reverse(args), cur_pos(tokens, i)))
 
 fn collect_call_args(tokens: Vec token.Token, i: Int, acc: List ast.Expr) -> Result ParseError (List ast.Expr, Int) =
   if tok_is_symbol(tok_at(tokens, i), ")") then Ok((acc, i))

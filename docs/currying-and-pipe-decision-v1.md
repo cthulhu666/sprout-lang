@@ -1,11 +1,17 @@
 # Currying and Pipe Semantics — Decision (v1)
 
-**Status:** Proposed / undecided. This is a decision-support document, not normative. It
-frames a single coupled language decision and the mechanics needed to rule on it. Nothing
-here is implemented; `docs/spec-v0.md` remains the source of truth for current behavior.
+**Status:** **Decided — Package C-b** (n-ary + `_`-placeholder partials), 2026-07-26. This
+document is retained for rationale; `docs/spec-v0.md` §5.3 is normative for the placeholder
+syntax. Implementation is staged: **part 1 — placeholder partial application — is LANDED**
+(parser desugar; `tests/stdlib/test_placeholder_partial.spr`). **Part 2 — n-ary arity checking**
+(make under-application a compile error, retiring §5.3's under-application clause) is follow-up
+work, tracked in `BACKLOG.md`.
 
-**Owner decision required:** is Sprout a *curried* or an *n-ary* language? Everything below
-follows from that one answer.
+**Owner decision (RULED):** Sprout is an **n-ary** language with explicit `_`-placeholder
+partial application (Package C-b) — chosen over curried (A) and pure n-ary (C-a). The deciding
+factor: C-b delivers first-class, any-position "pass partials around" ergonomics without
+Package A's closure-ABI / GC-rooting cost, while keeping n-ary's clean call-site arity errors.
+Rationale in §4 / §9a / §11 below.
 
 ---
 

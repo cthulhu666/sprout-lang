@@ -120,6 +120,23 @@ silently resolves to nothing — there is no error at import time; the symbols s
 never bind, surfacing later as an `Unknown variable` at the use site. Keep a user
 program in a single file (or contribute the shared code under `stdlib/`).
 
+## Partial Application with `_`
+
+Leave arguments as holes with `_`, and a call becomes a function of the holes —
+in **any** position, not just left-to-right:
+
+```sprout
+add(_, 1)              # \x -> add(x, 1)   — increment
+add(10, _)             # \x -> add(10, x)
+map(add(_, 100), xs)   # add 100 to every element
+
+# multiple holes -> a multi-argument function, filled left-to-right
+add3(_, _, 3)          # \(a, b) -> add3(a, b, 3)
+```
+
+A `_` binds to the innermost enclosing call, so in `f(g(_), 3)` the hole belongs
+to `g`. Operator sections (`_ * 2`) are not yet supported — write `\x -> x * 2`.
+
 ## Iteration Combinators
 
 The prelude provides effect-polymorphic iteration combinators — use these instead

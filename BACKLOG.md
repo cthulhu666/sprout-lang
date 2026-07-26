@@ -643,17 +643,26 @@ dot-guard `infer.is_lowercase_name` has (a dotted name is never a type variable)
    next call site applies a single argument, under-saturating it; the malformed call returns
    an `Int` that the following application reinterprets as a closure pointer (`inttoptr` +
    `load`) → SIGSEGV. Saturating the partial in one call (`feed_two(add3(1), 2, 3)`) works, so
-   only incremental application is affected. The fix needs a design decision: either support
-   incremental partial application (a curried closure-calling convention that builds a fresh
-   partial on under-saturation) or reject under-saturating re-application at the checker (as a
-   clean type error, not a segfault). This decision also gates an `ap`/`<*>`-style Applicative
-   interface (which feeds one wrapped argument at a time); a `map2`/`map3` interface — fully
-   saturated application — is unaffected. Counterpart defect (checker rejecting function-typed
-   returns because `ctor_result_type` over-stripped arrows) is fixed in `infer.sprout` via
+   only incremental application is affected. **RULED 2026-07-26: Package C-b** (n-ary +
+   `_`-placeholder partials) — see
+   [currying-and-pipe-decision-v1.md](./docs/currying-and-pipe-decision-v1.md). Under C-b the
+   segfault is fixed by rejecting under-saturating application at the checker as a clean arity
+   error (n-ary), not by building curried partials.
+   **Part 1 LANDED:** `_`-placeholder partial application — `add(_, 3)` desugars to a lambda at
+   parse time (`desugar_placeholder_call` in `parser.sprout`); regression
+   `tests/stdlib/test_placeholder_partial.spr`. Gives first-class, any-position partials to pass
+   around, with no curried closure ABI. Normative in `spec-v0.md` §5.3.
+   **Part 2 (OPEN — this is what kills the segfault):** n-ary arity checking. Make the checker
+   reject under-application (`add3(1)`, `add3(1)(2)(3)`) with a precise "expects N args, got M"
+   error at the call site, and retire `spec-v0.md` §5.3's under-application clause. Until it
+   lands the segfault remains for hand-written incremental application; placeholder partials do
+   not hit it (they build ordinary lambdas).
+   **Deferred to v2:** operator sections (`_ * 2`, `10 - _`) — parser represents operators as a
+   distinct `BinaryExpr` node, so sections need a second small handler.
+   Applicative stays useful under C-b via `map2`/`map3`/`traverse` (saturated application);
+   `ap`/`<*>` is not the idiom. Counterpart defect (checker rejecting function-typed returns
+   because `ctor_result_type` over-stripped arrows) is fixed in `infer.sprout` via
    `fn_return_type`; regression: `tests/stdlib/test_function_returning_function.spr`.
-   The remaining crash is coupled to the currying model and to V1 candidate "Revisit `|>`
-   multi-arg semantics" below; both are framed for decision in
-   [currying-and-pipe-decision-v1.md](./docs/currying-and-pipe-decision-v1.md).
 
 ### V1 Roadmap Candidates
 

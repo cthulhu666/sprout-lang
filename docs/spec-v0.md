@@ -203,6 +203,27 @@ Lambda expressions are anonymous functions.
   more arguments than it declares is a compile/runtime error in the current
   contract.
 
+**Placeholder partial application.** A bare `_` in a call-argument position is a
+*hole*. A call containing one or more holes desugars, at parse time, to a lambda
+that binds the holes left-to-right:
+
+```sprout
+add(_, 3)      # ≡ \p -> add(p, 3)
+add(1, _)      # ≡ \p -> add(1, p)  (any position, not only leftmost)
+add3(_, _, 3)  # ≡ \(p, q) -> add3(p, q, 3)  (multiple holes -> multi-param lambda)
+```
+
+- A `_` binds to the **innermost enclosing call**: in `f(g(_), 3)` the hole
+  belongs to `g`, giving `f(\p -> g(p), 3)`.
+- Multiple holes in one call produce a multi-parameter lambda, one parameter per
+  hole, in source order.
+- Non-hole arguments are captured by expression and re-evaluated on each call.
+- A `_` outside call-argument position — in function position (`_(x)`), as a
+  bare expression, or inside a list/record/tuple literal — is not a placeholder
+  and is rejected. Operator sections (`_ + 1`) are not part of v0.
+- The result is an ordinary lambda: placeholders add no type-system, evaluation,
+  or runtime semantics beyond the desugaring.
+
 ### 5.4 If expression
 
 ```sprout
