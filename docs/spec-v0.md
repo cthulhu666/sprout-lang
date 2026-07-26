@@ -661,6 +661,49 @@ Tuple instances format nested tuples recursively.  A 6-tuple or larger has no
 `ToString` instance in the current prelude; adding one requires an explicit
 instance declaration.
 
+### `Applicative` class and `mapN` helpers
+
+```
+class Applicative f where Functor f {
+  fn pure(x: a) -> f a
+  fn map2(g: a -> b -> c, xs: f a, ys: f b) -> f c
+}
+```
+
+`Applicative` lifts an n-ary function over values in a context `f`.  Its primitive
+is `map2` (apply a two-argument function to two wrapped values), **not** the
+classic `ap`/`<*>` (`f (a -> b) -> f a -> f b`).  `ap` feeds one wrapped argument
+at a time, which requires curried partial application; Sprout is n-ary with
+explicit `_`-placeholder partials (§5.3), so the `map2` presentation is the
+idiomatic one.  `map2` composes with fully-saturated calls only.
+
+`pure` lifts a plain value.  Its class variable `f` appears only in the return
+type, so — exactly like `Enum.from_ordinal` (§8.6) — instance selection requires
+the target type to be determinable at the call site (an annotation, a typed
+return, or unifying context).  A fully polymorphic `pure(x)` cannot be dispatched.
+
+| Type | `pure` | `map2` semantics |
+|---|---|---|
+| `Maybe` | `Just(x)` | fail-fast — any `Nothing` collapses the result |
+| `Result e` | `Ok(x)` | fail-fast — the first `Err` short-circuits (left-biased) |
+| `List` | `[x]` (singleton) | cartesian product — for each `x` in `xs`, combine with every `y` in `ys` (the list-monad-consistent instance) |
+
+Error-*accumulating* semantics (collect all failures rather than short-circuit)
+need a distinct `Validation` type, since a type admits only one `Applicative`
+instance; it is deferred (tracked in `BACKLOG.md`).  The pairwise "zip" behaviour
+for `List` is likewise a separate future `ZipList` newtype.
+
+`map3`, `map4`, and `map5` are free functions (`where Applicative f`) that lift 3-,
+4-, and 5-argument functions:
+
+```
+map3(add3, Just(1), Just(2), Just(3))            # Just(6)
+map4(mk4, Ok(1), Err("x"), Ok(3), Ok(4))         # Err("x")
+```
+
+They derive from `map2` by threading arguments through the context as tuples and
+destructuring them in a final combiner (no currying is used or required).
+
 ## 8.6 Automatic Instance Derivation (`deriving`) (Experimental)
 
 A `type` declaration may carry a `deriving (...)` clause between the optional

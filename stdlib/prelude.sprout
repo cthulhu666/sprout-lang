@@ -630,6 +630,16 @@ export class Foldable f {
   fn fold_values(step: b -> a -> b, init: b, xs: f a) -> b
 }
 
+# Applicative (Package C-b shape): the primitive is `map2` (apply an n-ary function
+# to values in a context), NOT `ap`/`<*>` — the latter feeds one wrapped argument at
+# a time, which needs curried partial application that Sprout does not have. `pure`
+# lifts a plain value; its `f`-only-in-return signature dispatches on the target type
+# (same as `Enum`). `map3`..`map5` derive from `map2` below.
+export class Applicative f where Functor f {
+  fn pure(x: a) -> f a
+  fn map2(g: a -> b -> c, xs: f a, ys: f b) -> f c
+}
+
 export fn map(f: a -> b, xs: c a) -> c b where Functor c =
   fmap(f, xs)
 
@@ -653,6 +663,26 @@ export fn mconcat(xs: f a) -> a where Foldable f, Monoid a =
 # replacement for a container-specific bulk-concat builtin on hot paths.
 export fn concat_map(f: a -> t, xs: c a) -> t where Functor c, Foldable c, Monoid t =
   mconcat(map(f, xs))
+
+# Internal pairing combiner for the map3..map5 derivations below: without currying,
+# an n-ary lift is built by threading arguments through `map2` as tuples and
+# destructuring them in the final combiner.
+fn ap_pair(x: a, y: b) -> (a, b) = (x, y)
+
+# map3..map5: lift a 3-, 4-, or 5-argument function over an Applicative, derived from
+# map2 by threading arguments through the context as tuples and destructuring them in
+# a final combiner (no currying is used or required). map5 reuses map3 over three
+# independent sub-results to keep each combiner shallow.
+export fn map3(g: a -> b -> c -> d, fa: f a, fb: f b, fc: f c) -> f d where Applicative f =
+  map2(\ (ab, c) -> match ab with | (a, b) -> g(a, b, c), map2(ap_pair, fa, fb), fc)
+
+export fn map4(g: a -> b -> c -> d -> e, fa: f a, fb: f b, fc: f c, fd: f d) -> f e where Applicative f =
+  map2(\ (ab, cd) -> match ab with | (a, b) -> match cd with | (c, d) -> g(a, b, c, d),
+       map2(ap_pair, fa, fb), map2(ap_pair, fc, fd))
+
+export fn map5(g: a -> b -> c -> d -> e -> r, fa: f a, fb: f b, fc: f c, fd: f d, fe: f e) -> f r where Applicative f =
+  map3(\ (ab, cd, ev) -> match ab with | (a, b) -> match cd with | (c, d) -> g(a, b, c, d, ev),
+       map2(ap_pair, fa, fb), map2(ap_pair, fc, fd), fe)
 
 instance Semigroup String {
   fn append(left: String, right: String) -> String =
@@ -929,6 +959,43 @@ instance Functor Maybe {
 instance Foldable List {
   fn fold_values(step: b -> a -> b, init: b, xs: List a) -> b =
     list_fold(step, init, xs)
+}
+
+# O(n·m): the cartesian ("list monad") product — for each x in xs, combine it with
+# every y in ys. This is the instance consistent with a List monad; the pairwise
+# ("zip") behaviour is a separate ZipList newtype, deferred.
+fn map2_list(g: a -> b -> c, xs: List a, ys: List b) -> List c =
+  match xs with
+  | Nil -> Nil
+  | Cons x rest -> list_append(list_map(\y -> g(x, y), ys), map2_list(g, rest, ys))
+
+instance Applicative List {
+  # pure produces a singleton — the unit of the cartesian product.
+  fn pure(x: a) -> List a = Cons(x, Nil)
+  fn map2(g: a -> b -> c, xs: List a, ys: List b) -> List c = map2_list(g, xs, ys)
+}
+
+instance Applicative Maybe {
+  fn pure(x: a) -> Maybe a = Just(x)
+  # Fail-fast: any Nothing collapses the whole result. `do` desugars to the same
+  # nested match, so this is flat source with identical short-circuit codegen.
+  fn map2(g: a -> b -> c, mx: Maybe a, my: Maybe b) -> Maybe c =
+    do
+      x <- mx
+      y <- my
+      Just(g(x, y))
+}
+
+instance Applicative (Result e) {
+  fn pure(x: a) -> Result e a = Ok(x)
+  # Fail-fast: the first Err short-circuits (left-biased); `do` carries the Err
+  # through automatically. Error-accumulating semantics need a distinct type
+  # (Validation), deferred — a type has one instance.
+  fn map2(g: a -> b -> c, rx: Result e a, ry: Result e b) -> Result e c =
+    do
+      x <- rx
+      y <- ry
+      Ok(g(x, y))
 }
 
 instance Functor Vec {

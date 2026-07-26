@@ -16,6 +16,17 @@ import stdlib.test (TestState, new_state, assert_eq, assert_true, assert_false, 
 fn double(x: Int) -> Int = x * 2
 fn inc(x: Int) -> Int = x + 1
 
+# Combiners for the Applicative laws below.
+fn add2(x: Int, y: Int) -> Int = x + y
+fn fst2(x: Int, y: Int) -> Int = x
+fn snd2(x: Int, y: Int) -> Int = y
+
+# Typed `pure` anchors: give `map2`'s arguments a concrete `f` so instance dispatch
+# resolves (same role as nil_int()/no_int() for Eq). `m_pure(3) == Just(3)` and
+# `l_pure(3) == [3]` by definition, so these still exercise the pure/map2 laws.
+fn m_pure(x: Int) -> Maybe Int = pure(x)
+fn l_pure(x: Int) -> List Int = pure(x)
+
 # Typed helpers that anchor concrete element types for Eq resolution.
 fn nil_int() -> List Int = Nil
 fn no_int() -> Maybe Int = Nothing
@@ -150,5 +161,29 @@ fn main() -> Unit !{IO} =
     assert_eq(state, "monoid string right identity empty", s_empty ++ "", s_empty)
     assert_eq(state, "monoid string right identity single", s_single ++ "", s_single)
     assert_eq(state, "monoid string right identity multi", s_multi ++ "", s_multi)
+
+    # -----------------------------------------------------------------------
+    # Applicative laws (map2/pure "monoidal" formulation).
+    #   Homomorphism:  map2(g, pure(x), pure(y)) == pure(g(x, y))
+    #   Left identity:  map2(snd, pure(u), v)    == v
+    #   Right identity: map2(fst, v, pure(u))    == v
+    # The concrete expected value on the RHS anchors `f` so `pure` dispatches.
+    # -----------------------------------------------------------------------
+
+    # Maybe (fail-fast).
+    assert_eq(state, "applicative maybe homomorphism",
+      map2(add2, m_pure(1), m_pure(2)), Just(3))
+    assert_eq(state, "applicative maybe left identity",
+      map2(snd2, m_pure(0), m_just_1), m_just_1)
+    assert_eq(state, "applicative maybe right identity",
+      map2(fst2, m_just_1, m_pure(0)), m_just_1)
+
+    # List (cartesian product): pure is a singleton, so it is the product unit.
+    assert_eq(state, "applicative list homomorphism",
+      map2(add2, l_pure(1), l_pure(2)), Cons(3, Nil))
+    assert_eq(state, "applicative list left identity",
+      map2(snd2, l_pure(0), li_multi), li_multi)
+    assert_eq(state, "applicative list right identity",
+      map2(fst2, li_multi, l_pure(0)), li_multi)
 
     summary(state)

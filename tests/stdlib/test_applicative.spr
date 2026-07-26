@@ -1,0 +1,41 @@
+import stdlib.test (TestState, new_state, assert_eq, assert_true, summary)
+
+# Applicative core (Package C-b: map2-based, not ap/<*>).
+#   class Applicative f where Functor f { pure, map2 }
+#   map3..map5 derived as free functions.
+# Instances: Maybe (fail-fast), Result (fail-fast), List (cartesian product).
+
+fn add2(x: Int, y: Int) -> Int = x + y
+fn add3v(x: Int, y: Int, z: Int) -> Int = x + y + z
+fn add4v(a: Int, b: Int, c: Int, d: Int) -> Int = a + b + c + d
+fn add5v(a: Int, b: Int, c: Int, d: Int, e: Int) -> Int = a + b + c + d + e
+
+fn main() -> Unit !{IO} =
+  do
+    state <- new_state()
+
+    # pure — return-type-directed dispatch fixes f from the expected value.
+    assert_eq(state, "pure Maybe", pure(5), Just(5))
+    assert_eq(state, "pure Result", pure(5), Ok(5))
+    assert_eq(state, "pure List", pure(5), [5])
+
+    # map2 Maybe — fail-fast: any Nothing collapses the whole result.
+    assert_eq(state, "map2 Maybe both Just", map2(add2, Just(2), Just(3)), Just(5))
+    assert_eq(state, "map2 Maybe left Nothing", map2(add2, Nothing, Just(3)), Nothing)
+    assert_eq(state, "map2 Maybe right Nothing", map2(add2, Just(2), Nothing), Nothing)
+
+    # map2 Result — fail-fast: first Err wins.
+    assert_eq(state, "map2 Result both Ok", map2(add2, Ok(2), Ok(3)), Ok(5))
+    assert_eq(state, "map2 Result left Err", map2(add2, Err("bad"), Ok(3)), Err("bad"))
+    assert_eq(state, "map2 Result right Err", map2(add2, Ok(2), Err("oops")), Err("oops"))
+
+    # map2 List — cartesian product: for each x in xs, for each y in ys.
+    assert_eq(state, "map2 List cartesian", map2(add2, [1, 2], [10, 20]), [11, 21, 12, 22])
+
+    # map3..map5 Maybe.
+    assert_eq(state, "map3 Maybe", map3(add3v, Just(1), Just(2), Just(3)), Just(6))
+    assert_eq(state, "map3 Maybe fail", map3(add3v, Just(1), Nothing, Just(3)), Nothing)
+    assert_eq(state, "map4 Maybe", map4(add4v, Just(1), Just(2), Just(3), Just(4)), Just(10))
+    assert_eq(state, "map5 Maybe", map5(add5v, Just(1), Just(2), Just(3), Just(4), Just(5)), Just(15))
+
+    summary(state)
