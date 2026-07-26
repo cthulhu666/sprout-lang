@@ -1,0 +1,3 @@
+# A bare `_` outside call-argument position is not a placeholder (v0): rejected.
+module main
+fn main() -> Int = _

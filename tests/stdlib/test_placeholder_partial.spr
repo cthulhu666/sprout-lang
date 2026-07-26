@@ -15,6 +15,10 @@ fn add3(a: Int, b: Int, c: Int) -> Int = a + b + c
 fn apply_int(f: Int -> Int, x: Int) -> Int = f(x)
 fn apply2(f: Int -> Int -> Int, x: Int, y: Int) -> Int = f(x, y)
 
+fn sub(a: Int, b: Int) -> Int = a - b
+fn incby(x: Int, k: Int) -> Int = x + k
+fn twice(f: Int -> Int, n: Int) -> Int = f(n)
+
 fn main() -> Unit !{IO} =
   do
     state <- new_state()
@@ -27,5 +31,14 @@ fn main() -> Unit !{IO} =
     assert_eq(state, "two holes", apply2(add3(_, _, 3), 10, 20), 33)
     # placeholder value passed through a higher-order function
     assert_eq(state, "hole passed through hof", apply_int(add(_, 100), 1), 101)
+
+    # nested holes at two levels bind to their own lambda (no cross-capture):
+    # twice(incby(_, 100), _) = \p -> twice(\q -> incby(q, 100), p)
+    assert_eq(state, "nested holes both levels", apply_int(twice(incby(_, 100), _), 5), 105)
+
+    # `|>` fills the hole positionally (the piped value lands at the `_`),
+    # rather than being appended as the last argument.
+    assert_eq(state, "pipe fills hole in position 1", 10 |> sub(_, 3), 7)
+    assert_eq(state, "pipe fills hole in position 2", 10 |> sub(3, _), -7)
 
     summary(state)

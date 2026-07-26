@@ -223,6 +223,11 @@ add3(_, _, 3)  # ≡ \(p, q) -> add3(p, q, 3)  (multiple holes -> multi-param la
   and is rejected. Operator sections (`_ + 1`) are not part of v0.
 - The result is an ordinary lambda: placeholders add no type-system, evaluation,
   or runtime semantics beyond the desugaring.
+- Composed with the pipe operator, a placeholder gives **positional** control:
+  because `f(a, _)` is already a lambda, `x |> f(a, _)` applies it to `x`, i.e.
+  `f(a, x)` — the piped value fills the hole rather than being appended as the
+  final argument. (The no-placeholder multi-argument pipe form is governed by the
+  `|>` rule and remains under review; see `docs/currying-and-pipe-decision-v1.md`.)
 
 ### 5.4 If expression
 

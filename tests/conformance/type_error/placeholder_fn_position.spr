@@ -1,0 +1,3 @@
+# A `_` in function position is not a placeholder (v0): rejected.
+module main
+fn main() -> Int = _(3)

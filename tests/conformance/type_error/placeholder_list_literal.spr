@@ -1,0 +1,3 @@
+# A `_` inside a list literal is not a placeholder (v0): rejected.
+module main
+fn main() -> List Int = [_, 3]
