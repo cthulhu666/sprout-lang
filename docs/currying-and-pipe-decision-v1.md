@@ -89,7 +89,7 @@ Gathered empirically before framing the options:
 
 ---
 
-## 4. The decision: two coherent packages
+## 4. The decision: the coherent packages
 
 Each package resolves currying **and** the pipe in one consistent design.
 
@@ -110,6 +110,13 @@ into one resolved answer. Package C-a leaves two surfaces standing — arity-awa
 *and* a parser-sugar pipe whose two-mode shape must be separately ruled on. Fewer independent
 design surfaces is itself an architectural argument for A, visible only once the decisions are
 coupled.
+
+**A third option.** Package C-a has a refinement, **Package C-b**, that keeps n-ary functions
+but adds `_`-placeholder partial application to recover the ergonomics of passing partials
+around — *without* Package A's runtime cost. It was surfaced by the requirement that users be
+able to pass partially-applied functions around, is developed in §9a, and is folded into the
+recommendation (§11) and the decision (§12). **Treat the top-level choice as three-way: A, C-a,
+or C-b.**
 
 ---
 
@@ -245,6 +252,103 @@ safe to schedule *before* the decision is final.
 
 ---
 
+## 9a. Package C-b — n-ary + explicit placeholder partials
+
+Package C-a's one ergonomic cost is that partial application requires an explicit lambda: where
+a curried language writes `map(add(1), xs)`, C-a forces `map(\x -> add(1, x), xs)`. **Package
+C-b removes that cost** by adding a `_`-placeholder sugar for partial application while keeping
+everything else about C-a (n-ary functions, call-site arity errors, no runtime-arity
+machinery). It is C-a plus one parser-level feature — and it is the option that best satisfies
+the requirement *"users must be able to pass partially-applied functions around"* **without**
+paying Package A's runtime-arity / GC cost.
+
+### 9a.1 New empirical grounding (gathered this session)
+
+Four facts, each verified by compiling and running probes on the current compiler, reshape the
+choice:
+
+1. **Passing an arity-1 partial around already works.** `apply_fn(add(1), 41)` → 42;
+   `list_fold(add, 0, list_map(add(1), [10,20,30]))` → 63. The common functional idiom
+   (map/filter with a one-remaining partial) is *not* broken today — only *incremental*
+   application of a partial with ≥2 remaining args (`f(2)(3)` inside a callee) crashes.
+2. **Multi-parameter lambdas exist and work.** `\(x, y) -> add3(x, y, 3)` parses
+   (`parser.sprout:874` — parenthesized, comma-separated params), lowers to an n-ary arity-2
+   closure, and returns the right answer when applied saturated (`f(a, b)` → 63).
+3. **`_` is free in expression position.** It currently lexes as an ordinary identifier and
+   dies at the checker as `Unknown variable: _`. No existing valid program uses it, so
+   repurposing it is backward-compatible and bootstrap-safe. (The `match`-pattern wildcard is a
+   separate parse context — no collision.)
+4. **The Defect #2 segfault is still live** (reproduced this session on the current master line).
+
+Facts 1–3 are load-bearing: placeholder partials desugar entirely onto machinery that already
+works, so they **cannot reach** the crashing code path.
+
+### 9a.2 The feature
+
+A bare `_` in a **call-argument** or **binary-operator-operand** position marks a hole. The
+enclosing application desugars — **at parse time**, the same phase as list literals, string
+templates, and `|>` — to a lambda over its holes, left-to-right.
+
+**Scope rule, the whole design in one sentence:** *a `_` binds to the innermost application
+(call or operator) that directly contains it; that application becomes a lambda over its holes.*
+
+Implemented as a **bottom-up parse-time transform**: when the parser finishes a `CallExpr` /
+binop, it checks its *direct* arguments for `_`; if any are present it wraps that node in a
+`LambdaExpr` with fresh gensym parameters (the parser already gensyms — `parser.sprout:1242`).
+Because it runs innermost-first, an outer call never sees a raw `_` — it sees the already-built
+lambda. The recursion order *is* the innermost-binding rule; nothing extra resolves scope.
+
+| Source | Desugars to | Note |
+|---|---|---|
+| `add(_, 3)` | `\x -> add(x, 3)` | single hole → arity-1 |
+| `add(1, _)` | `\x -> add(1, x)` | any position — beats currying's left-to-right-only |
+| `add3(_, _, 3)` | `\(a, b) -> add3(a, b, 3)` | multi-hole → n-ary lambda (fact 2) |
+| `_ + 1` | `\x -> x + 1` | operator section |
+| `10 - _` | `\x -> 10 - x` | right section |
+| `map(add(_, 3), xs)` | `map(\x -> add(x, 3), xs)` | the killer case — falls out for free |
+| `f(g(_), 3)` | `f(\x -> g(x), 3)` | `_` binds to `g` (innermost); consistent |
+
+The typechecker and codegen **never see `_`** — they see an ordinary lambda. Zero new
+type-system, runtime, ABI, or GC surface; the entire feature lives in the parser.
+
+### 9a.3 Rejected in v1 (loud errors, each naming the explicit-lambda alternative)
+
+- `_` in function position (`_(3)`).
+- Bare `_` outside any application (`let y = _`).
+- `_` inside a list / tuple / record literal (`[_, 3]`) — falls out of the "call/operator only"
+  rule; deliberately scoped out of v1 to avoid surprising literal-hole behavior; revisitable.
+
+The `f(g(_))` case is **not** rejected — it has one consistent meaning (bind to `g`). Following
+Scala's lesson, the design keeps a single crisp rule rather than overloading `_` across
+eta-expansion, sections, and type wildcards with differing extents — that overloading is what
+made Scala's `_` notoriously confusing.
+
+### 9a.4 One semantic subtlety to spec
+
+Non-hole arguments are captured **by expression**, re-evaluated per call: `add(_, g())` →
+`\x -> add(x, g())`, so `g()` runs on each invocation. For pure `g` (the common case; Sprout
+tracks effects) this is unobservable; a user wanting single evaluation binds the value first.
+
+### 9a.5 How C-b reshapes the decision
+
+- It **satisfies "pass partials around"** — `add(_, 3)` is a first-class value you can store,
+  pass, and apply anywhere — with *more* flexibility than currying (any position, not just
+  left-to-right).
+- It does so with **none of Package A's cost**: no closure-ABI change, no runtime-arity field,
+  no GC-rooting of intermediate partials (§8.4), no new segfault surface. It only ever builds
+  ordinary lambdas, which already work.
+- It **keeps C-a's beginner-friendly win**: `add3(1)(2)(3)` and a bare `add3(1)` remain clean
+  arity errors at the call site.
+- Cost vs. A: no point-free / `andMap` / `<*>` — partials are always written with a visible
+  `_`. For Sprout's "explicit, beginner-friendly, safe" identity this is arguably a feature.
+
+**Tests on implementation:** a desugaring golden test per table row; the rejected positions
+produce the specified errors; `add(_, 3)` passed through a higher-order function and applied
+returns correctly; multi-hole `add3(_, _, 3)` applied saturated returns correctly; and — shared
+with C-a — `add3(1)(2)(3)` is a clean arity error, not a segfault.
+
+---
+
 ## 10. Compatibility / migration
 
 - **Package A:** pipe *meaning* is unchanged (data-last). No existing code breaks. New surface
@@ -271,12 +375,24 @@ allocation path (Section 8.4) looks genuinely hard to get provably right, then C
 runtime risk plus call-site arity errors becomes the safer, on-brand choice, with Roc as proof
 it suits this audience. The tiebreaker is rooting feasibility, not ergonomics.
 
+**C-b changes the calculus (revised lean).** The requirement that users pass partially-applied
+functions around was the strongest pull toward A — only a curried language makes `add(1)` a
+first-class value for free. **Package C-b satisfies that requirement without A's runtime-arity /
+GC risk**, by desugaring `add(_, 3)` to an ordinary lambda (§9a) on machinery already verified
+to work. If that requirement is the deciding factor, C-b — not A — is the lowest-risk way to meet
+it, and it inherits C-a's call-site arity errors. Revised lean: **choose A only if point-free /
+`<*>`-level ergonomics are wanted for their own sake *and* the §8.4 rooting PoC comes back clean;
+otherwise C-b**, which delivers first-class, any-position partials at parser cost only.
+
 ---
 
 ## 12. Decision needed
 
-1. **Curried (A) or n-ary (C-a)?** This is the ruling everything else follows from.
-2. If **C-a:** which backlog #12 resolution — keep-as-is, Elixir value-first, or explicit-lambda?
+1. **Curried (A), n-ary (C-a), or n-ary + placeholder partials (C-b)?** This is the ruling
+   everything else follows from. C-b is C-a plus the §9a placeholder sugar; pick it when
+   passing partials around matters but A's runtime cost is unwanted.
+2. If **C-a or C-b:** which backlog #12 resolution — keep-as-is, Elixir value-first, or
+   explicit-lambda?
 3. Regardless of 1: schedule the common **arity-field + clean-panic** step (Section 8.5 PR 1 /
    Section 9) to kill the Defect #2 segfault now, since it is shared by both packages.
 
