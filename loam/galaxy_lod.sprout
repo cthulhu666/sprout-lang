@@ -1,0 +1,38 @@
+module loam.galaxy_lod
+
+# Pure level-of-detail math for the galaxy-map demo's quadtree tile pyramid (examples/gfx/galaxy_map).
+# Graphics-free — no gfx, no IO — so it is unit-tested headlessly in tests/loam/test_galaxy_lod.spr,
+# exactly like loam.camera / loam.config. These MUST mirror the universegen catalog exporter's tiling
+# (app/CatalogExporter.hs): a level-L quadtree has 2^L x 2^L tiles over the galactic (x,y) plane.
+#
+# The demo layers ONE impure step on top of these — tile_index, which needs a Double->Int floor
+# (gfx.double_to_int) that the core stdlib still lacks — so tile_index stays in the demo; everything
+# here is pure and testable.
+
+# 2^n for n >= 0.
+export fn pow2(n: Int) -> Int = if n <= 0 then 1 else 2 * pow2(n - 1)
+
+# Base group id for a level = sum of 4^l for l < level  (0, 1, 5, 21, 85, 341, ...). Levels occupy
+# CONTIGUOUS ascending group ranges, so drawing the groups [0, level_offset(L+1)) covers exactly
+# levels 0..L — which is how the demo turns the zoom-derived level into both what it streams and
+# what it draws, in one draw_instances call.
+export fn level_offset(level: Int) -> Int =
+  if level <= 0 then 0
+  else level_offset(level - 1) + (pow2(level - 1) * pow2(level - 1))
+
+# Permanent instance-group id of a tile: level base + row-major offset within the level's grid.
+export fn group_of(level: Int, ix: Int, iy: Int) -> Int =
+  level_offset(level) + (iy * pow2(level)) + ix
+
+# Clamp an Int into [lo, hi].
+export fn clampi(v: Int, lo: Int, hi: Int) -> Int =
+  if v < lo then lo else if v > hi then hi else v
+
+# Camera eye-distance -> desired max detail level. stdlib.math is int-only (no log2 on a Double), so
+# a threshold ladder: far away shows only the coarse levels, close in reaches the deepest.
+export fn desired_level(dist: Double) -> Int =
+  if dist > 60000.0 then 0
+  else if dist > 28000.0 then 1
+  else if dist > 12000.0 then 2
+  else if dist > 5000.0 then 3
+  else 4

@@ -1,0 +1,50 @@
+import stdlib.test (TestState, new_state, assert_eq, summary)
+import loam.galaxy_lod (pow2, level_offset, group_of, clampi, desired_level)
+
+# loam.galaxy_lod holds the PURE quadtree level-of-detail math for the galaxy-map demo. These must
+# mirror the universegen catalog exporter's tiling: a level-L quadtree has 2^L x 2^L tiles, and each
+# tile gets a PERMANENT instance-group id. The critical property is that levels occupy CONTIGUOUS
+# ascending id ranges, so drawing groups [0, level_offset(L+1)) covers exactly levels 0..L.
+
+fn main() -> Unit !{IO} =
+  do
+    state <- new_state()
+
+    # pow2
+    assert_eq(state, "pow2 0", pow2(0), 1)
+    assert_eq(state, "pow2 3", pow2(3), 8)
+    assert_eq(state, "pow2 4", pow2(4), 16)
+
+    # level_offset = cumulative 4^l: 0, 1, 5, 21, 85, 341
+    assert_eq(state, "level_offset 0", level_offset(0), 0)
+    assert_eq(state, "level_offset 1", level_offset(1), 1)
+    assert_eq(state, "level_offset 2", level_offset(2), 5)
+    assert_eq(state, "level_offset 3", level_offset(3), 21)
+    assert_eq(state, "level_offset 4", level_offset(4), 85)
+    assert_eq(state, "level_offset 5 (total tiles L0..L4)", level_offset(5), 341)
+
+    # group_of: level base + row-major (iy*2^level + ix)
+    assert_eq(state, "group_of L0 origin", group_of(0, 0, 0), 0)
+    assert_eq(state, "group_of L1 (0,0)", group_of(1, 0, 0), 1)
+    assert_eq(state, "group_of L1 (1,1)", group_of(1, 1, 1), 4)
+    assert_eq(state, "group_of L2 (0,0)", group_of(2, 0, 0), 5)
+    assert_eq(state, "group_of L4 (0,0)", group_of(4, 0, 0), 85)
+
+    # CONTIGUITY INVARIANT: the last tile of level L is exactly level_offset(L+1) - 1, so level L's
+    # ids fill [level_offset(L), level_offset(L+1)) with no gap or overlap into the next level.
+    assert_eq(state, "L2 last id == level_offset(3)-1", group_of(2, 3, 3), 20)
+    assert_eq(state, "L4 last id == level_offset(5)-1", group_of(4, 15, 15), 340)
+
+    # clampi
+    assert_eq(state, "clampi below", clampi(0 - 1, 0, 3), 0)
+    assert_eq(state, "clampi inside", clampi(2, 0, 3), 2)
+    assert_eq(state, "clampi above", clampi(5, 0, 3), 3)
+
+    # desired_level ladder (far -> coarse, near -> fine), capped by the caller at the populated depth
+    assert_eq(state, "desired_level far", desired_level(100000.0), 0)
+    assert_eq(state, "desired_level 40k", desired_level(40000.0), 1)
+    assert_eq(state, "desired_level 20k", desired_level(20000.0), 2)
+    assert_eq(state, "desired_level 8k", desired_level(8000.0), 3)
+    assert_eq(state, "desired_level near", desired_level(1000.0), 4)
+
+    summary(state)

@@ -770,6 +770,51 @@ long long gfx_set_camera(long long px, long long py, long long pz,
   return 0;
 }
 
+/* Override the projection near/far clip planes. raylib's defaults are 0.01 / 1000, but a galaxy is
+ * ~100,000 light-years across, so the galaxy-map demo pushes the far plane far out. rlSetClipPlanes
+ * sets rlgl state that BeginMode3D consumes when it rebuilds the projection each frame, so one call
+ * at setup persists (and update_frustum, which reads the actual projection matrix, stays consistent).
+ * near/far cross the ABI as Sprout Doubles. */
+long long gfx_set_clip_planes(long long near_plane, long long far_plane) {
+  rlSetClipPlanes((double)as_float(near_plane), (double)as_float(far_plane));
+  return 0;
+}
+
+/* --- World->screen projection for click-picking -----------------------------
+ * gfx_world_to_screen projects a world point against the current camera and caches the screen (x,y)
+ * for gfx_projected_x/_y; it returns 1 if the point is in front of the camera (screen coords valid),
+ * 0 if behind. GetWorldToScreen/GetCameraMatrix build their own matrices from g_cam (independent of
+ * the current 2D/3D GL state), so this is correct even called during the overlay/click-handling pass.
+ * The demo projects every loaded star and picks the nearest cached point to the mouse. The split
+ * trio mirrors the mouse_x/mouse_y idiom because the i64 ABI returns a single word. */
+static float g_proj_x = 0.0f, g_proj_y = 0.0f;
+
+long long gfx_world_to_screen(long long x, long long y, long long z) {
+  Vector3 pos = { as_float(x), as_float(y), as_float(z) };
+  Vector3 vp = Vector3Transform(pos, GetCameraMatrix(g_cam));  /* view space: in front => z < 0 */
+  Vector2 s = GetWorldToScreen(pos, g_cam);
+  g_proj_x = s.x;
+  g_proj_y = s.y;
+  return (vp.z < 0.0f) ? 1 : 0;
+}
+
+long long gfx_projected_x(void) {
+  double d = (double)g_proj_x; long long bits; memcpy(&bits, &d, sizeof(double)); return bits;
+}
+long long gfx_projected_y(void) {
+  double d = (double)g_proj_y; long long bits; memcpy(&bits, &d, sizeof(double)); return bits;
+}
+
+/* Floor a Sprout Double to an Int. The core stdlib has no Double->Int conversion yet (stdlib.math's
+ * floor returns a Double); the galaxy-map demo needs one to bin world coordinates into integer tile
+ * indices. Lives here (non-bootstrap gfx binding) as a stopgap — promoting it to a core runtime/
+ * prelude primitive is a BACKLOG item. Full double precision (not narrowed through as_float). */
+long long gfx_double_to_int(long long d) {
+  double v;
+  memcpy(&v, &d, sizeof(double));
+  return (long long)floor(v);
+}
+
 /* Extract the six world-space frustum planes from the current camera (Gribb-Hartmann). Must run
  * inside BeginMode3D so rlGetMatrix* return this frame's matrices. combo = proj * view; raylib's
  * MatrixMultiply(a,b) yields b*a mathematically, so MatrixMultiply(view, proj) is proj*view. A
@@ -865,6 +910,32 @@ long long gfx_load_model(const char *path) {
     }
     if (g_light_ready) m.materials[i].shader = g_light_shader;
   }
+  g_models[h] = m;
+  return h;
+}
+
+/* Create a uniformly-coloured unit-radius sphere model and return its handle (same registry and
+ * doubling growth as gfx_load_model). Built for a starfield: gfx_draw_instances forces the instance
+ * shader, which colours by the material's colDiffuse — so (r,g,b) here is the colour of EVERY
+ * instance of this model, and per-star size comes from the instance push `scale`. Create one per
+ * star class up front so the handle equals the class code. Low ring/slice counts keep it cheap when
+ * drawn by the thousand. Call after gfx_open_window (uploads the mesh to the GPU). r,g,b are 0..255. */
+long long gfx_sphere_model(long long r, long long g, long long b) {
+  if (g_model_count >= g_models_cap) {
+    int new_cap = g_models_cap == 0 ? 16 : g_models_cap * 2;
+    Model *grown = realloc(g_models, (size_t)new_cap * sizeof(Model));
+    if (!grown) {
+      TraceLog(LOG_ERROR, "sprout_gfx: out of memory growing model registry to %d", new_cap);
+      return -1;
+    }
+    g_models = grown;
+    g_models_cap = new_cap;
+  }
+  int h = g_model_count++;
+  Model m = LoadModelFromMesh(GenMeshSphere(1.0f, 8, 12));
+  m.materials[0].maps[MATERIAL_MAP_DIFFUSE].color =
+    (Color){ (unsigned char)r, (unsigned char)g, (unsigned char)b, 255 };
+  if (g_instance_ready) m.materials[0].shader = g_instance_shader;
   g_models[h] = m;
   return h;
 }
@@ -1303,6 +1374,20 @@ long long gfx_button_held(long long x, long long y, long long w, long long h, co
   DrawText(label, (int)x + ((int)w - tw) / 2, (int)y + 6, fs, RAYWHITE);
   if (!g_overlay) BeginMode3D(g_cam);
   return held ? 1 : 0;
+}
+
+/* Draw a line of text at screen (x,y), `size` px tall, in flat RGB. Self-brackets out of Mode3D
+ * exactly like gfx_draw_fps / gfx_button so it is callable mid-frame; in the overlay pass it is
+ * already in 2D screen space. This is the one general text primitive — before it, raylib DrawText
+ * was reachable from Sprout only as a centred button label. x,y,size,r,g,b are Ints. */
+long long gfx_draw_text(long long x, long long y, const char *text,
+                        long long size, long long r, long long g, long long b) {
+  Color c = { (unsigned char)r, (unsigned char)g, (unsigned char)b, 255 };
+  if (g_overlay) { DrawText(text, (int)x, (int)y, (int)size, c); return 0; }
+  EndMode3D();
+  DrawText(text, (int)x, (int)y, (int)size, c);
+  BeginMode3D(g_cam);
+  return 0;
 }
 
 /* Per-frame camera motion in world units (eye + look-at travel since last frame),

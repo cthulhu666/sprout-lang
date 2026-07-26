@@ -323,6 +323,15 @@ Native rendering backend + 3D roadmap. M0 (loop spike) and M1 (spinning cube via
 raylib) have landed. Fenced from core: shim `graphics/sprout_gfx.c` links only via
 `just run-gfx`; binding `stdlib/gfx.sprout` stays out of the bootstrap seed.
 
+**Galaxy map demo follow-ups** (scene 1 landed — `examples/gfx/galaxy_map.sprout`, `loam/galaxy_lod.sprout`, catalog exporter in `universegen`; see `docs/galaxy-map-demo-v0.md`):
+- [ ] `P1` **Spectral-class filter** on the galaxy map (e.g. "show only red dwarfs / M-class"). Render side is nearly free (colour is per-model → draw only enabled `classCode`s). The real work: galaxy-*wide* coverage vs. spatial streaming — have the exporter emit a **class-partitioned pyramid** (e.g. `catalog/by-class/M/L<level>/…`) so a filter fills the on-screen budget from the filtered class when zoomed out; include the active filter in the residency key. `classCode` is already on every catalog line.
+- [ ] `P1` **Solar-system scene (scene 2)** — the `view: Int` switch + stub are scaffolded. Build it to lazily `read_file` `systems/block-<floor(id/10000)>/SYS-<id>.json` for the selected system and draw planets/orbits (per-system files carry full ellipse descriptors). Needs a real float parser (see next item).
+- [ ] `P1` **Promote `gfx.double_to_int` to a core runtime/prelude primitive** (`double_to_int`/`floor_to_int`). The stdlib has NO Double→Int conversion (`math.floor` returns a `Double`); the galaxy demo bins world coords into tile indices via a stopgap in the gfx shim. A core primitive (bridge a C cast) is broadly useful and lets `tile_index` move into the graphics-free, headless-tested `loam.galaxy_lod`.
+- [ ] `P1` **Add a `parse_double` builtin** — Sprout cannot parse a float from text at all (`json_parse` is int-only; `loam.config` is int-only; the galaxy catalog carries pre-formatted strings + fixed-point ints to dodge this). The runtime already has `strtod` wired only to env-var tuning; expose it. Unblocks float configs and scene 2's real orbital numbers.
+- [ ] `P2` **Galaxy streaming: eviction** — the demo never evicts loaded tiles (worst case ~64 MB of transforms if you visit everything at max detail). If it bites, add LRU eviction of far tiles' groups (`instance_clear` + drop from the residency `Dict`).
+- [ ] `P2` **Galaxy streaming: spread first-load over frames** — `load_budget` throttles reads/frame, but a fresh region still pops in over several frames. Fine as-is; prioritize detail-load by screen-space size if it ever reads as laggy.
+- [ ] `P2` **Star-size / density tuning** — zoomed into the dense core the field reads as a solid mass. Consider a screen-constant point/billboard primitive (fixed pixel size regardless of distance) instead of fixed world-size spheres, if a cleaner look is wanted at both zoom extremes.
+
 - [x] `M0` Loop spike — verify tail-recursive IO frame loop runs in flat stack.
 - [x] `M1` Spinning cube — raylib window driven by a Sprout frame loop, zero new builtins.
 - [x] `M2a` Scalar Double primitives in `stdlib/math.sprout` — `pi`, `fabs`, `floor`,

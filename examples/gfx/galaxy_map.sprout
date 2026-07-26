@@ -1,0 +1,346 @@
+module examples.gfx.galaxy_map
+
+import stdlib.gfx
+import stdlib.string (split_once)
+import stdlib.math (min)
+import loam.camera (Cam, cam_drive, cam_distance)
+import loam.view (cam_apply)
+import loam.config (parse_config, cfg_int)
+import loam.galaxy_lod (pow2, level_offset, group_of, clampi, desired_level)
+
+# Sprout / Loam — 3D GALAXY MAP (scene 1) with zoom-adaptive streaming.
+#
+# Renders a star catalog exported from ~/GameDev/universegen (1,000,000 systems) as an instanced 3D
+# point cloud you can orbit, tilt, zoom and pan. Stars are coloured by spectral class; black holes
+# are the violet/magenta landmarks (the supermassive one sits at the galactic centre).
+#
+# STREAMING / LoD. The catalog is a quadtree pyramid over the galactic plane (levels L0..L4). Each
+# star lives at exactly ONE level (incremental refinement: brightest promoted to coarse levels), so
+# the stars visible in a region at detail level L are the UNION of that region's tiles at levels
+# 0..L. Every tile has a PERMANENT instance group (id = level_offset(level) + iy*2^level + ix); we
+# lazy-load each tile once (throttled to load_budget/frame) and never evict — 341 tiles fit well
+# under the 4096-group cap and ~64 MB of transforms. Because levels occupy contiguous ascending
+# group ranges, draw_instances(level_offset(L+1), ...) draws EXACTLY levels 0..L — so the zoom-
+# derived level is both what we stream and what we draw, and the engine frustum-culls the rest.
+#
+# Axis map: galaxy (x,y) -> world (x,z), galaxy z -> world height. The disk lies on the ground plane
+# so the free-look camera's ground pan glides across it and tilt reveals the halo.
+#
+# Catalog line:  id|xi|yi|zi|classCode|sizeCode|name|detailLine   (xi,yi,zi in integer light-years)
+# Produced by `cabal run catalog` in the universegen repo.
+#
+# Run (pass the catalog directory as the first arg):
+#   mise exec -- just run-gfx examples/gfx/galaxy_map.sprout /Users/cthulhu/GameDev/universegen/catalog
+# Canary + screenshot:
+#   SPROUT_GFX_MAX_FRAMES=120 SPROUT_GFX_SCREENSHOT=galaxy.png \
+#     mise exec -- just run-gfx examples/gfx/galaxy_map.sprout /Users/cthulhu/GameDev/universegen/catalog
+
+# --- Tunables (compile-time; a .conf loader is a later-stage polish) --------------------------------
+let default_catalog = "catalog"  # relative fallback; the real catalog dir is passed as argv[0]
+
+let star_scale = 3.0  # per-star render radius = sizeCode (ly) * this. Tuned for visibility.
+let near_plane = 5.0
+let far_plane = 400000.0  # a galaxy is ~100k ly across; the default 1000 far plane would clip it
+
+let init_radius = 90000.0  # opening camera: pulled back to frame the whole ~50k-ly-radius disk
+let init_height = 90000.0
+let init_yaw = 0.5
+
+let zoom_min = 300.0
+let zoom_max = 260000.0
+let pan_bound = 60000.0
+let pitch_min = 0.03
+let pitch_max = 1.52
+
+let drag_yaw_step = 0.005  # radians per pixel of horizontal drag
+let drag_pitch_step = 0.005  # radians per pixel of vertical drag
+let wheel_zoom_frac = 0.12  # zoom step as a fraction of current eye distance per wheel notch
+let key_pan_frac = 0.02  # WASD pan per frame as a fraction of eye distance
+let drag_pan_frac = 0.0018  # shift-drag pan per pixel as a fraction of eye distance
+
+let stream_max_level = 4  # deepest catalog level (matches the exporter's populated depth)
+let load_budget = 6  # max NEW tiles read per frame — throttles streaming so it never hitches
+let neighbor_radius = 1  # (2r+1)^2 block of tiles loaded per level around the camera target
+let draw_cull = 0.0  # 0 = frustum-only; group_count already bounds the levels drawn
+
+fn bd(b: Bool) -> Double = if b then 1.0 else 0.0
+
+# --- Star colour palette: one sphere model per classCode (0..11) --------------------------------
+# The instance shader colours per MODEL, so we create the models in class order (handle == class).
+# 0 O  1 B  2 A  3 F  4 G  5 K  6 M  7 Red Giant  8 White Dwarf  9 BH-stellar 10 BH-inter 11 BH-super.
+# Black-hole colours are deliberately non-stellar (violet/magenta) so they read as exotic landmarks.
+fn make_models() -> Unit !{IO} =
+  do
+    _o <- gfx.sphere_model(155, 176, 255)  # 0  O   blue-white
+    _b <- gfx.sphere_model(170, 191, 255)  # 1  B
+    _a <- gfx.sphere_model(210, 220, 255)  # 2  A   white-blue
+    _f <- gfx.sphere_model(248, 247, 240)  # 3  F   white
+    _g <- gfx.sphere_model(255, 244, 180)  # 4  G   yellow
+    _k <- gfx.sphere_model(255, 200, 120)  # 5  K   orange
+    _m <- gfx.sphere_model(255, 150, 110)  # 6  M   red-orange (red dwarfs)
+    _rg <- gfx.sphere_model(255, 120, 80)  # 7  Red Giant
+    _wd <- gfx.sphere_model(220, 235, 255)  # 8  White Dwarf
+    _bs <- gfx.sphere_model(180, 80, 255)  # 9  BH stellar-mass
+    _bi <- gfx.sphere_model(210, 110, 255)  # 10 BH intermediate-mass
+    _bh <- gfx.sphere_model(255, 90, 230)  # 11 BH supermassive
+    ()
+
+# --- Tile / group math ---------------------------------------------------------------------------
+# The pure quadtree math (pow2, level_offset, group_of, clampi, desired_level) lives in the
+# graphics-free, headless-tested loam.galaxy_lod. tile_index adds the one impure step — a Double->Int
+# floor via gfx.double_to_int (the core stdlib has no such conversion yet) — so it stays here.
+fn tile_index(coord: Double, level: Int, radius: Double) -> Int =
+  let n = pow2(level)
+      raw = gfx.double_to_int((coord + radius) / (2.0 * radius) * to_double(n))
+  in clampi(raw, 0, n - 1)
+
+fn tile_path(dir: String, level: Int, ix: Int, iy: Int) -> String =
+  dir ++ "/L" ++ to_string(level) ++ "/tile_" ++ to_string(ix) ++ "_" ++ to_string(iy) ++ ".txt"
+
+# --- Catalog parsing ----------------------------------------------------------------------------
+# Split a pipe-delimited line into fields. detailLine (last) never contains '|'.
+fn split_pipe(s: String) -> List String =
+  match split_once(s, "|") with
+  | Nothing -> Cons(s, Nil)
+  | Just (h, rest) -> Cons(h, split_pipe(rest))
+
+# Push one parsed star into instance group `group` (model = classCode, per-star size = scale).
+# Galaxy (x,y,z) -> world (x, z, y): the disk lands on the ground plane, halo z becomes height.
+fn push_fields(fields: List String, group: Int, sscale: Double) -> Unit !{IO} =
+  match fields with
+  | [_id, xs, ys, zs, cs, szs | _] ->
+      match (parse_int(xs), parse_int(ys), parse_int(zs), parse_int(cs), parse_int(szs)) with
+      | (Just xi, Just yi, Just zi, Just ci, Just szi) ->
+          gfx.instance_push(group, ci, to_double(xi), to_double(zi), to_double(yi),
+                            0.0, to_double(szi) * sscale)
+      | _ -> ()
+  | _ -> ()
+
+# Push every star line of a tile. Lines come from str_split_lines (a C extern, O(n)); the pure-Sprout
+# string_lines is O(n^2) on a ~600 KB tile (char-at per index) and made streaming grind for minutes.
+fn push_lines(lines: List String, group: Int, sscale: Double) -> Unit !{IO} =
+  match lines with
+  | Nil -> ()
+  | Cons line rest ->
+      do
+        push_fields(split_pipe(line), group, sscale)
+        push_lines(rest, group, sscale)
+
+# --- Streaming: lazy-load tiles near the camera, once each, throttled ---------------------------
+# Load a single tile into its permanent group if not already loaded and budget remains. A missing
+# tile (sparse deep grid) is marked loaded without spending budget, so it is never retried. Returns
+# the updated (loaded set, remaining budget).
+fn load_one(dir: String, level: Int, ix: Int, iy: Int, loaded: Dict Int, budget: Int) -> (Dict Int, Int) !{IO} =
+  if budget <= 0 then (loaded, budget)
+  else
+    let gid = group_of(level, ix, iy)
+        key = to_string(gid)
+    in match dict_get(key, loaded) with
+       | Just _ -> (loaded, budget)
+       | Nothing ->
+           match read_file(tile_path(dir, level, ix, iy)) with
+           | Err _ -> (dict_set(key, 1, loaded), budget)
+           | Ok text ->
+               do
+                 push_lines(str_split_lines(text), gid, star_scale)
+                 (dict_set(key, 1, loaded), budget - 1)
+
+# A row (dj sweep) then the block (di sweep) of tiles around (cx, cy) at one level.
+fn load_row(dir: String, level: Int, cx: Int, cy: Int, di: Int, dj: Int, loaded: Dict Int, budget: Int) -> (Dict Int, Int) !{IO} =
+  if dj > neighbor_radius then (loaded, budget)
+  else
+    let n = pow2(level)
+        ix = clampi(cx + di, 0, n - 1)
+        iy = clampi(cy + dj, 0, n - 1)
+    in match load_one(dir, level, ix, iy, loaded, budget) with
+       | (l2, b2) -> load_row(dir, level, cx, cy, di, dj + 1, l2, b2)
+
+fn load_cols(dir: String, level: Int, cx: Int, cy: Int, di: Int, loaded: Dict Int, budget: Int) -> (Dict Int, Int) !{IO} =
+  if di > neighbor_radius then (loaded, budget)
+  else
+    match load_row(dir, level, cx, cy, di, 0 - neighbor_radius, loaded, budget) with
+    | (l2, b2) -> load_cols(dir, level, cx, cy, di + 1, l2, b2)
+
+# Load the focus block at every level 0..maxlvl (the additive union that covers the region).
+fn load_levels(dir: String, cam: Cam, maxlvl: Int, level: Int, radius: Double, loaded: Dict Int, budget: Int) -> (Dict Int, Int) !{IO} =
+  if level > maxlvl then (loaded, budget)
+  else
+    let cx = tile_index(cam.tx, level, radius)
+        cy = tile_index(cam.tz, level, radius)
+    in match load_cols(dir, level, cx, cy, 0 - neighbor_radius, loaded, budget) with
+       | (l2, b2) -> load_levels(dir, cam, maxlvl, level + 1, radius, l2, b2)
+
+# --- Picking: on right-click, re-read the focus tiles and select the star nearest the cursor ------
+# A click is rare, so rather than retain every streamed star we re-parse the focus tiles on demand
+# and project each star to the screen (gfx.world_to_screen). `best` threads the nearest hit so far as
+# (screen-distance^2, name, detailLine). Every arm is !{IO} (via keep_best) so the effect rows unify.
+let pick_radius2 = 900.0  # 30px selection radius, squared
+let pick_far = 100000000.0  # sentinel screen-distance^2 (Sprout has no 1e8 exponent literal):
+                                # larger than any on-screen distance^2, so any real hit beats it
+
+# Lift a pure "keep the current best" into !{IO} so it unifies with the projecting arms.
+fn keep_best(best: (Double, String, String)) -> (Double, String, String) !{IO} =
+  do
+    _t <- gfx.get_time()
+    best
+
+fn pick_line(line: String, mx: Double, my: Double, best: (Double, String, String)) -> (Double, String, String) !{IO} =
+  match split_pipe(line) with
+  | [_id, xs, ys, zs, _cs, _szs, name, detail | _] ->
+      match (parse_int(xs), parse_int(ys), parse_int(zs)) with
+      | (Just xi, Just yi, Just zi) ->
+          do
+            front <- gfx.world_to_screen(to_double(xi), to_double(zi), to_double(yi))
+            sx <- gfx.projected_x()
+            sy <- gfx.projected_y()
+            let d2 = if front then ((sx - mx) * (sx - mx)) + ((sy - my) * (sy - my)) else pick_far
+            match best with
+            | (bd0, bn, bdt) -> if d2 < bd0 then (d2, name, detail) else (bd0, bn, bdt)
+      | _ -> keep_best(best)
+  | _ -> keep_best(best)
+
+fn pick_lines(lines: List String, mx: Double, my: Double, best: (Double, String, String)) -> (Double, String, String) !{IO} =
+  match lines with
+  | Nil -> keep_best(best)
+  | Cons line rest ->
+      do
+        b2 <- pick_line(line, mx, my, best)
+        pick_lines(rest, mx, my, b2)
+
+fn pick_tile(dir: String, level: Int, ix: Int, iy: Int, mx: Double, my: Double, best: (Double, String, String)) -> (Double, String, String) !{IO} =
+  match read_file(tile_path(dir, level, ix, iy)) with
+  | Err _ -> keep_best(best)
+  | Ok text -> pick_lines(str_split_lines(text), mx, my, best)
+
+fn pick_row(dir: String, level: Int, cx: Int, cy: Int, di: Int, dj: Int, mx: Double, my: Double, best: (Double, String, String)) -> (Double, String, String) !{IO} =
+  if dj > neighbor_radius then keep_best(best)
+  else
+    let n = pow2(level)
+        ix = clampi(cx + di, 0, n - 1)
+        iy = clampi(cy + dj, 0, n - 1)
+    in do
+         b2 <- pick_tile(dir, level, ix, iy, mx, my, best)
+         pick_row(dir, level, cx, cy, di, dj + 1, mx, my, b2)
+
+fn pick_cols(dir: String, level: Int, cx: Int, cy: Int, di: Int, mx: Double, my: Double, best: (Double, String, String)) -> (Double, String, String) !{IO} =
+  if di > neighbor_radius then keep_best(best)
+  else
+    do
+      b2 <- pick_row(dir, level, cx, cy, di, 0 - neighbor_radius, mx, my, best)
+      pick_cols(dir, level, cx, cy, di + 1, mx, my, b2)
+
+fn pick_levels(dir: String, cam: Cam, maxlvl: Int, level: Int, radius: Double, mx: Double, my: Double, best: (Double, String, String)) -> (Double, String, String) !{IO} =
+  if level > maxlvl then keep_best(best)
+  else
+    let cx = tile_index(cam.tx, level, radius)
+        cy = tile_index(cam.tz, level, radius)
+    in do
+         b2 <- pick_cols(dir, level, cx, cy, 0 - neighbor_radius, mx, my, best)
+         pick_levels(dir, cam, maxlvl, level + 1, radius, mx, my, b2)
+
+# Run a pick this frame only on `do_pick`; otherwise keep the current selection. Factored out so the
+# call site binds a plain function (binding an `if` via `<-` does not parse).
+fn maybe_pick(do_pick: Bool, dir: String, cam: Cam, maxlvl: Int, radius: Double,
+              mx: Double, my: Double, seed: (Double, String, String)) -> (Double, String, String) !{IO} =
+  if do_pick then pick_levels(dir, cam, maxlvl, 0, radius, mx, my, seed)
+  else keep_best(seed)
+
+# Catalog directory from argv[0], else the built-in default (matched directly — argv_get returns
+# Maybe X !{IO}, and binding via `<-` would mis-strip the Maybe, per loam/terrain.sprout).
+fn catalog_dir() -> String !{IO} =
+  match argv_get(0) with
+  | Just p ->
+      do
+        print("[galaxy] catalog dir: " ++ p)
+        p
+  | Nothing ->
+      do
+        print("[galaxy] No catalog directory given. Pass one as the first argument, e.g.:")
+        print("[galaxy]   just run-gfx examples/gfx/galaxy_map.sprout <path>/catalog")
+        print("[galaxy] Falling back to ./" ++ default_catalog)
+        default_catalog
+
+# Galaxy radius from the catalog meta.txt (key/value ints), so tile binning matches the exporter.
+fn read_radius(dir: String) -> Double !{IO} =
+  match read_file(dir ++ "/meta.txt") with
+  | Ok text -> to_double(cfg_int(parse_config(text), "galaxy_radius_ly", 50000))
+  | Err _ -> 50000.0
+
+# --- Render loop --------------------------------------------------------------------------------
+fn render_loop(dir: String, cam: Cam, radius: Double, loaded: Dict Int,
+               sel_name: String, sel_detail: String, prev_rdown: Bool, view: Int) -> Unit !{IO} =
+  do
+    stop <- gfx.window_should_close()
+    if stop then gfx.close_window()
+    else
+      do
+        let dist = cam_distance(cam)
+        let lvl = min(desired_level(dist), stream_max_level)
+        streamed <- load_levels(dir, cam, lvl, 0, radius, loaded, load_budget)
+        cam_apply(cam)
+        gfx.frame_begin()
+        # Scene 1 draws the galaxy; scene 2 (stub) leaves the frame dark for its placeholder text.
+        if view == 0 then gfx.draw_instances(level_offset(lvl + 1), draw_cull) else ()
+        gfx.overlay_begin()
+        gfx.draw_fps(10, 10)
+        if view == 0
+          then gfx.draw_text(10, 34, "drag: orbit/tilt   shift+drag / WASD: pan   wheel: zoom   right-click: inspect", 18, 180, 190, 210)
+          else gfx.draw_text(10, 34, "SOLAR SYSTEM VIEW - coming in the next iteration", 20, 255, 220, 120)
+        if view == 0 then gfx.draw_text(10, 56, "LoD level " ++ to_string(lvl), 18, 150, 200, 150) else ()
+        gfx.draw_text(20, 724, sel_name, 22, 255, 240, 170)
+        gfx.draw_text(20, 752, sel_detail, 16, 200, 210, 230)
+        # One scene-switch button; its label and action depend on the current view.
+        let toggle_label = if view == 0 then "System >" else "< Galaxy"
+        toggle <- gfx.button(1108, 728, 156, 46, toggle_label)
+        wheel <- gfx.mouse_wheel_y()
+        ldown <- gfx.mouse_button_down(gfx.mouse_left)
+        rdown <- gfx.mouse_button_down(gfx.mouse_right)
+        mx <- gfx.mouse_x()
+        my <- gfx.mouse_y()
+        gdx <- gfx.mouse_delta_x()
+        gdy <- gfx.mouse_delta_y()
+        shift <- gfx.key_down(gfx.key_left_shift)
+        kw <- gfx.key_down(gfx.key_w)
+        ks <- gfx.key_down(gfx.key_s)
+        ka <- gfx.key_down(gfx.key_a)
+        kd <- gfx.key_down(gfx.key_d)
+        gfx.frame_end()
+        let do_pick = rdown && ! prev_rdown && (view == 0)
+        let pseed = (pick_far, sel_name, sel_detail)
+        picked <- maybe_pick(do_pick, dir, cam, lvl, radius, to_double(mx), to_double(my), pseed)
+        let next_view = if toggle then (if view == 0 then 1 else 0) else view
+        # Don't treat a left-click over the scene-switch button (bottom-right) as a camera drag.
+        let over_ui = (mx >= 1090) && (my >= 715)
+        let orbit = ldown && ! shift && (view == 0) && ! over_ui
+        let pan_drag = ldown && shift && ! over_ui
+        let d_yaw = if orbit then gdx * drag_yaw_step else 0.0
+        let d_pitch = if orbit then gdy * drag_pitch_step else 0.0
+        let d_zoom = (0.0 - wheel) * wheel_zoom_frac * dist
+        let d_pan_r = ((bd(kd) - bd(ka)) * key_pan_frac * dist)
+                        + (if pan_drag then (0.0 - gdx) * drag_pan_frac * dist else 0.0)
+        let d_pan_f = ((bd(kw) - bd(ks)) * key_pan_frac * dist)
+                        + (if pan_drag then gdy * drag_pan_frac * dist else 0.0)
+        # Camera motion applies only in the galaxy view; the stub scene freezes it.
+        let cam2 = if view == 0
+                     then cam_drive(cam, d_yaw, d_pitch, d_zoom, d_pan_r, d_pan_f,
+                                    zoom_min, zoom_max, pitch_min, pitch_max, pan_bound)
+                     else cam
+        match streamed with
+        | (loaded2, _) ->
+            match picked with
+            | (best_d2, best_name, best_detail) ->
+                let name2 = if best_d2 < pick_radius2 then best_name else sel_name
+                    detail2 = if best_d2 < pick_radius2 then best_detail else sel_detail
+                in render_loop(dir, cam2, radius, loaded2, name2, detail2, rdown, next_view)
+
+fn main() -> Unit !{IO} =
+  do
+    gfx.open_window(1280, 800, "Sprout — Galaxy Map")
+    gfx.set_target_fps(60)
+    gfx.set_clip_planes(near_plane, far_plane)
+    make_models()
+    dir <- catalog_dir()
+    radius <- read_radius(dir)
+    render_loop(dir, Cam(yaw = init_yaw, radius = init_radius, height = init_height,
+                         tx = 0.0, ty = 0.0, tz = 0.0), radius, dict_empty(),
+                "No system selected", "Right-click a star to inspect it", false, 0)

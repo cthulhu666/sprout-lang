@@ -70,6 +70,13 @@ extern fn gfx_fog(density: Double, r: Int, g: Int, b: Int) -> Unit !{IO}
 extern fn gfx_supersample(factor: Int) -> Unit !{IO}
 extern fn gfx_overlay_begin() -> Unit !{IO}
 extern fn gfx_close_window() -> Unit !{IO}
+extern fn gfx_set_clip_planes(near_plane: Double, far_plane: Double) -> Unit !{IO}
+extern fn gfx_sphere_model(r: Int, g: Int, b: Int) -> Int !{IO}
+extern fn gfx_world_to_screen(x: Double, y: Double, z: Double) -> Int !{IO}
+extern fn gfx_projected_x() -> Double !{IO}
+extern fn gfx_projected_y() -> Double !{IO}
+extern fn gfx_draw_text(x: Int, y: Int, text: String, size: Int, r: Int, g: Int, b: Int) -> Unit !{IO}
+extern fn gfx_double_to_int(d: Double) -> Int
 
 # --- Public API ---
 
@@ -385,3 +392,44 @@ export fn overlay_begin() -> Unit !{IO} =
 
 export fn close_window() -> Unit !{IO} =
   gfx_close_window()
+
+# --- Galaxy-map primitives (large-scale scenes, point clouds, picking, HUD text) ---
+
+# Override the projection near/far clip planes (raylib defaults 0.01 / 1000). A scene that spans tens
+# of thousands of world units — e.g. a ~100k-light-year galaxy — clips to black under the default far
+# plane, so push it out (near small, far large). Persists; call once after open_window.
+export fn set_clip_planes(near_plane: Double, far_plane: Double) -> Unit !{IO} =
+  gfx_set_clip_planes(near_plane, far_plane)
+
+# Create a uniformly-coloured unit-radius sphere model and return its handle (same registry as
+# load_model). For instancing a starfield: draw_instances colours per MODEL (not per instance), so
+# make one sphere per star class and vary per-star size via the instance_push `scale`. The handle of
+# the first sphere_model created is 0, the next 1, … — create them in class order so handle == class
+# code. Call after open_window (it uploads a mesh to the GPU).
+export fn sphere_model(r: Int, g: Int, b: Int) -> Int !{IO} =
+  gfx_sphere_model(r, g, b)
+
+# Project a world point to 2D screen pixels against the current camera, for click-picking. Returns
+# True if the point is in front of the camera — then projected_x()/projected_y() hold its screen
+# coords; False if behind (coords meaningless). Usage: on a click, project each candidate point and
+# pick the one whose (projected_x, projected_y) is nearest the mouse within a pixel radius.
+export fn world_to_screen(x: Double, y: Double, z: Double) -> Bool !{IO} =
+  do
+    front <- gfx_world_to_screen(x, y, z)
+    front == 1
+
+# Screen coords cached by the most recent world_to_screen call (only meaningful when it returned True).
+export fn projected_x() -> Double !{IO} = gfx_projected_x()
+export fn projected_y() -> Double !{IO} = gfx_projected_y()
+
+# Draw a line of text at screen pixel (x, y), `size` px tall, in flat RGB (each 0..255). A 2D overlay
+# like draw_fps/button — call inside a frame (ideally after overlay_begin for a crisp HUD). The
+# default raylib font is ASCII; keep text to basic Latin.
+export fn draw_text(x: Int, y: Int, text: String, size: Int, r: Int, g: Int, b: Int) -> Unit !{IO} =
+  gfx_draw_text(x, y, text, size, r, g, b)
+
+# Floor a Double to an Int. Stopgap for a missing core primitive (stdlib has no Double->Int; math.floor
+# returns a Double) — the galaxy map bins world coords into integer tile indices. Pure. See BACKLOG:
+# promote to a core runtime/prelude builtin.
+export fn double_to_int(d: Double) -> Int =
+  gfx_double_to_int(d)
