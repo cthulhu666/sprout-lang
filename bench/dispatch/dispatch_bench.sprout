@@ -1,0 +1,67 @@
+module main
+
+# Microbenchmark witness for concrete-instance devirtualization
+# (docs/devirtualization-v0.md).  A tight loop over a CONCRETE class-method call
+# — `weight` at instance `Weight Coin`, which has no superclass and no context:
+# the maximal devirt shape (dispatch dictionary dropped entirely).
+#
+# Pre-devirt, every `weight(..)` at a statically-known instance was lowered
+# identically to a polymorphic call: it materialized a `sprout_alloc_closure_env`
+# dispatch dictionary and routed through the generic `__cm_Weight_weight` wrapper's
+# indirect call.  Devirt lowers it to a direct call of `__tc_Weight_Coin_weight`
+# with ZERO heap allocation.  (Measured in the fold body: one closure_env alloc +
+# a __cm_ wrapper call per iteration at baseline, both gone post-devirt.  Classes
+# whose dispatch materializes two eta closures — e.g. derived `Enum from_ordinal`,
+# docs/devirtualization-v0.md §1 — drop both; a single-method class drops one.)
+#
+# `coin_of` is a pure match (no allocation), so the dispatch dictionary is the
+# loop's ONLY per-iteration heap traffic — this isolates the win that heavier,
+# allocation-rich loops (A*, the digit net) dilute or hide in cold code.
+
+class Weight a {
+  fn weight(item: a) -> Int
+}
+
+type Coin = Copper | Silver | Gold
+
+instance Weight Coin {
+  fn weight(c: Coin) -> Int =
+    match c with
+    | Copper -> 1
+    | Silver -> 5
+    | Gold -> 25
+}
+
+# Half-open loop bound: upto(n) is [0, n) as n iterations (IntRange is inclusive).
+fn upto(n: Int) -> IntRange = range(0, n - 1)
+
+# Sprout has no `%` operator; integer modulo is `n - (n / m) * m`.
+fn mod3(n: Int) -> Int = n - (n / 3) * 3
+
+# i |-> a Coin, cycling Copper/Silver/Gold. Pure: a single `match`, no allocation.
+fn coin_of(i: Int) -> Coin =
+  match mod3(i) with
+  | 0 -> Copper
+  | 1 -> Silver
+  | _ -> Gold
+
+# Sum weight(coin_of(i)) for i in [0, n). One concrete class-method call per
+# iteration; the fold accumulator and `coin_of` allocate nothing, so pre-devirt
+# every iteration paid one dispatch-dict closure and post-devirt pays none.
+fn total_weight(n: Int) -> Int =
+  range_fold(\ (acc, i) -> acc + weight(coin_of(i)), 0, upto(n))
+
+fn repeat_total(n: Int, reps: Int, acc: Int) -> Int =
+  if reps <= 0 then acc
+  else repeat_total(n, reps - 1, acc + total_weight(n))
+
+fn main() -> Unit !{IO} =
+  do
+    t0 <- time_now_micros()
+    let total = repeat_total(1000000, 20, 0)
+    t1 <- time_now_micros()
+    print("checksum=")
+    print(total)
+    print(" time_us=")
+    print(t1 - t0)
+    print("\n")
