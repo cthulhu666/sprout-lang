@@ -1,9 +1,18 @@
 # Smooth terrain mesh (de-Minecraft the terrain-rivers demo) — v0 design
 
-Status: **proposal, awaiting approval**. Scope: `examples/gfx/terrain_rivers_demo.sprout`,
+Status: **LANDED** (2026-07-26). Scope: `examples/gfx/terrain_rivers_demo.sprout`,
 a new `loam/surface.sprout` module + its test, and one new gfx host function in
 `graphics/sprout_gfx.c` / `stdlib/gfx.sprout`. No change to language semantics, the spec, or the
 runtime (`runtime/sprout_runtime.c`).
+
+**Follow-up landed the same day — configurable vertical relief + decoupled rivers.** Smoothing the
+terrain exposed that the true vertical scale was tiny (~7 units over a 1024-wide map — the old step
+walls *faked* relief). Fix: split the single `band_step` into a **config-driven `terrain_step`**
+(height; `relief` knob = world-units/band × 10, since the config is Int-only) and a **fixed
+`carve_step`** (river depth), so rivers stay shallow at any exaggeration. Small/medium maps read
+alpine; the 1024² *overview* still reads gentle (perspective over a huge span + `lattice0=128`'s broad
+landforms) — sharper peaks there need `lattice0`↓/`octaves`↑ (trades river length) or a redistribution
+curve, tracked as a follow-up. No new host fn or test surface (pure `ground_y`/`sink` param changes).
 
 This is "rung (c)" of the de-blockifying ladder discussed with the user: continuous heightfield mesh
 **plus per-vertex gradient normals**. Rungs (a) more-bands and (b) continuous-mesh/per-face-normals
