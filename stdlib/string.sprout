@@ -180,36 +180,26 @@ export fn replace_all(from: String, to: String, s: String) -> String =
     | Nothing -> s
     | Just (before, after) -> before ++ to ++ replace_all(from, to, after)
 
-fn append_line(acc: Vec String, current: String) -> Vec String =
-  vec_append(current, acc)
+# Strip a single trailing '\r' — for a CRLF line that str_split_lines split on the '\n'.
+fn strip_trailing_cr(s: String) -> String =
+  if ends_with(s, "\r") then take(s, length(s) - 1) else s
 
-fn line_count_until(raw: String, line_start: Int, newline_index: Int) -> Int =
-  if newline_index > line_start && is_carriage_return(char_at_or(raw, newline_index - 1, '?')) then
-    newline_index - line_start - 1
-  else
-    newline_index - line_start
+# Restore string_lines' exact contract on top of str_split_lines (a C extern that splits on '\n' in
+# O(n) but keeps the '\r' and always emits a final segment, even an empty one): strip the CR from
+# every line EXCEPT the final segment, and drop that final segment iff it is empty. So a trailing
+# '\n' (or the empty string) yields no trailing blank line, an interior blank line is preserved, and
+# a final non-newline-terminated line keeps any trailing '\r' — matching the old codepoint scanner.
+fn finalize_lines(xs: List String) -> List String =
+  match xs with
+  | Nil -> Nil
+  | [last] -> if is_empty(last) then Nil else Cons(last, Nil)
+  | [head | rest] -> Cons(strip_trailing_cr(head), finalize_lines(rest))
 
-fn lines_loop(raw: String, index: Int, line_start: Int, total: Int, acc: Vec String) -> Vec String =
-  if index >= total then
-    if line_start >= total then acc
-    else append_line(acc, slice(raw, line_start, total - line_start))
-  else
-    if is_newline(char_at_or(raw, index, '?')) then
-      lines_loop(
-        raw,
-        index + 1,
-        index + 1,
-        total,
-        append_line(acc, slice(raw, line_start, line_count_until(raw, line_start, index)))
-      )
-    else if is_carriage_return(char_at_or(raw, index, '?')) then
-      lines_loop(raw, index + 1, line_start, total, acc)
-    else
-      lines_loop(raw, index + 1, line_start, total, acc)
-
-# O(n^2) in the number of codepoints: repeated `char_at`/`slice` on persistent strings.
+# O(n): str_split_lines is one C-side pass; finalize_lines is one more pass with O(line) CR strips.
+# (The previous pure-Sprout version was O(n^2) — char_at/slice per codepoint index — which made a
+# ~650 KB input grind for many seconds; see docs/galaxy-map-demo-v0.md for where that bit.)
 export fn string_lines(raw: String) -> Vec String =
-  lines_loop(raw, 0, 0, length(raw), vec_empty())
+  vec_from_list(finalize_lines(str_split_lines(raw)))
 
 fn digit_value(ch: Char) -> Maybe Int =
   find("0123456789", string_from_char(ch))

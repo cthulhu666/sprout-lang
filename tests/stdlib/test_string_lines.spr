@@ -1,0 +1,57 @@
+import stdlib.test (TestState, new_state, assert_eq, summary)
+import stdlib.string (string_lines)
+
+# Characterization test for string_lines, pinning its exact splitting contract so the O(n)
+# reimplementation (str_split_lines + post-pass) preserves behavior for its REPL/LSP/compiler
+# consumers. Contract: split on '\n'; strip a '\r' immediately before a '\n' (CRLF); preserve
+# interior empty lines; NO trailing empty line after a final '\n'; "" -> no lines; a final
+# non-newline-terminated line keeps any trailing '\r'.
+
+fn nth(v: Vec String, i: Int) -> String = vec_get_or(i, "<none>", v)
+
+fn main() -> Unit !{IO} =
+  do
+    state <- new_state()
+
+    let empty = string_lines("")
+    assert_eq(state, "empty string -> no lines", vec_length(empty), 0)
+
+    let one = string_lines("a")
+    assert_eq(state, "no newline: one line", vec_length(one), 1)
+    assert_eq(state, "no newline: content", nth(one, 0), "a")
+
+    let trail = string_lines("a\n")
+    assert_eq(state, "trailing newline: no empty tail", vec_length(trail), 1)
+    assert_eq(state, "trailing newline: content", nth(trail, 0), "a")
+
+    let two = string_lines("a\nb")
+    assert_eq(state, "two lines: count", vec_length(two), 2)
+    assert_eq(state, "two lines [0]", nth(two, 0), "a")
+    assert_eq(state, "two lines [1]", nth(two, 1), "b")
+
+    let blank = string_lines("a\n\nb")
+    assert_eq(state, "interior blank: count", vec_length(blank), 3)
+    assert_eq(state, "interior blank [0]", nth(blank, 0), "a")
+    assert_eq(state, "interior blank [1] empty", nth(blank, 1), "")
+    assert_eq(state, "interior blank [2]", nth(blank, 2), "b")
+
+    let crlf = string_lines("a\r\nb")
+    assert_eq(state, "CRLF: count", vec_length(crlf), 2)
+    assert_eq(state, "CRLF [0] cr stripped", nth(crlf, 0), "a")
+    assert_eq(state, "CRLF [1]", nth(crlf, 1), "b")
+
+    let crlf_trail = string_lines("a\r\nb\r\n")
+    assert_eq(state, "CRLF + trailing: count", vec_length(crlf_trail), 2)
+    assert_eq(state, "CRLF trailing [0]", nth(crlf_trail, 0), "a")
+    assert_eq(state, "CRLF trailing [1] cr stripped", nth(crlf_trail, 1), "b")
+
+    let lone = string_lines("\n")
+    assert_eq(state, "lone newline -> one empty line", vec_length(lone), 1)
+    assert_eq(state, "lone newline [0] empty", nth(lone, 0), "")
+
+    let final_cr = string_lines("a\nb\r")
+    assert_eq(state, "final non-terminated line keeps cr: count", vec_length(final_cr), 2)
+    assert_eq(state, "final cr [0]", nth(final_cr, 0), "a")
+    assert_eq(state, "final cr [1] keeps cr", nth(final_cr, 1), "b\r")
+
+    summary(state)
