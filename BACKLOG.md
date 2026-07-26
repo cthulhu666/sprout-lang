@@ -652,11 +652,23 @@ dot-guard `infer.is_lowercase_name` has (a dotted name is never a type variable)
    parse time (`desugar_placeholder_call` in `parser.sprout`); regression
    `tests/stdlib/test_placeholder_partial.spr`. Gives first-class, any-position partials to pass
    around, with no curried closure ABI. Normative in `spec-v0.md` §5.3.
-   **Part 2 (OPEN — this is what kills the segfault):** n-ary arity checking. Make the checker
-   reject under-application (`add3(1)`, `add3(1)(2)(3)`) with a precise "expects N args, got M"
-   error at the call site, and retire `spec-v0.md` §5.3's under-application clause. Until it
-   lands the segfault remains for hand-written incremental application; placeholder partials do
-   not hit it (they build ordinary lambdas).
+   **Part 2 LANDED (kills the segfault): n-ary arity checking (Approach B).** The checker rejects
+   under-application of a known function — `add3(1)`, `add3(1)(2)(3)` → `'add3' expects 3
+   arguments, got 1` — before the malformed partial is ever built. A top-level function's declared
+   param count is stored as an `@arity:{name}` env marker (`pre_scan_fn_decls`); `infer_call_var`
+   rejects `args < arity` via `under_application_error` (`infer.sprout`). Scope: direct calls to
+   known-arity functions/externs. Fixtures `tests/conformance/type_error/nary_{under_application,
+   incremental_chain}`; `test_ir_partial_application` + `test_function_returning_function` migrated
+   to `_`-placeholder form. `spec-v0.md` §5.3 under-application clause retired (now n-ary).
+   **Part 3 / Approach A (OPEN, completeness) — arity-aware types.** B enforces only at direct
+   call sites; under-application *through a function-typed value* (a `f: A->B->C` parameter applied
+   to fewer args) is not caught, because `TFunc` is curried and carries no arity. A gives the type
+   system a real n-ary arrow (or an arity tag on `TFunc`) so arity flows through unification/
+   generalization — catching all under-application and improving diagnostics. Large type-system
+   change (unification, generalization, every function type); B's semantics/tests/migration carry
+   forward and A deletes B's checker pass. Do after B beds in; likely deferrable indefinitely since
+   most residual cases already surface as function-vs-expected type mismatches (e.g. the two-hole
+   pipe edge).
    **Deferred to v2:** operator sections (`_ * 2`, `10 - _`) — parser represents operators as a
    distinct `BinaryExpr` node, so sections need a second small handler.
    Applicative stays useful under C-b via `map2`/`map3`/`traverse` (saturated application);

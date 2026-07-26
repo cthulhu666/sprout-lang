@@ -1,0 +1,6 @@
+# n-ary (Package C-b): under-applying a known function is a compile error,
+# not a silently-built partial. `add3(1)` supplies 1 of 3 args. Use `_` instead.
+module main
+fn add3(a: Int, b: Int, c: Int) -> Int = a + b + c
+fn feed(f: Int -> Int -> Int) -> Int = f(2, 3)
+fn main() -> Int = feed(add3(1))

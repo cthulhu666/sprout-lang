@@ -1,8 +1,8 @@
 import stdlib.test (TestState, new_state, assert_eq, summary)
 import stdlib.string as string
 
-# Regression: a top-level `let` bound to a partial application (closure)
-# must be invokable from `main` and return the correct result.
+# Regression: a top-level `let` bound to a closure (here a `_`-placeholder
+# partial) must be invokable from `main` and return the correct result.
 #
 # Symptom of the bug: codegen for the call site loaded the closure
 # pointer from the global but omitted the application, so the closure
@@ -10,7 +10,7 @@ import stdlib.string as string
 # emitted instead of `print_str(apply(closure, arg))`), producing
 # garbage output rather than the expected string.
 
-let f = string.repeat("dupa")
+let f = string.repeat("dupa", _)
 
 fn main() -> Unit !{IO} =
   do

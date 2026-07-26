@@ -1,0 +1,5 @@
+# The Defect #2 segfault shape, now a clean compile error: add3(1) under-applies
+# add3 (arity 3), rejected before the malformed partial is ever built.
+module main
+fn add3(a: Int, b: Int, c: Int) -> Int = a + b + c
+fn main() -> Int = add3(1)(2)(3)

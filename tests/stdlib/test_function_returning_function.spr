@@ -16,8 +16,8 @@ fn apply_int(f: Int -> Int, x: Int) -> Int = f(x)
 # Case 1: return a lambda (no partial application involved).
 fn adder(n: Int) -> Int -> Int = \m -> n + m
 
-# Case 2: return a partially-applied named function (the Applicative-relevant shape).
-fn partial_ret(n: Int) -> Int -> Int = add(n)
+# Case 2: return a placeholder partial (n-ary form; `add(n)` is now an arity error).
+fn partial_ret(n: Int) -> Int -> Int = add(n, _)
 
 # Case 3: an instance method whose return type is a function (exercises 4030 path).
 class MakeAdder t {

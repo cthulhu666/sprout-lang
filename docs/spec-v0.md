@@ -197,11 +197,14 @@ Lambda expressions are anonymous functions.
 - Parameter annotations are optional and follow the same rules as named functions.
 - Lambdas capture surrounding lexical bindings by value.
 - A lambda with parameters `x, y` has function type `tx -> ty -> tr`.
-- v0 function application allows under-application for ordinary function values.
-  Calling a function with fewer arguments than it declares returns a new
-  function value that captures the supplied arguments. Calling a function with
-  more arguments than it declares is a compile/runtime error in the current
-  contract.
+- Function application is **n-ary**: a call saturates its callee. **Under-application
+  of a known function** — supplying fewer arguments than its declared arity — is a
+  **compile error** (`'f' expects N arguments, got M`); use a `_`-placeholder partial
+  (above) to partially apply. A function whose declared return type is itself a
+  function (e.g. `-> Int -> Int`) is not under-application: it is saturated at its own
+  parameter count and returns that function. *(Enforcement covers direct calls to
+  known-arity functions; under-application through a function-typed value is completed
+  by the arity-aware-types follow-up — see `BACKLOG.md`.)*
 
 **Placeholder partial application.** A bare `_` in a call-argument position is a
 *hole*. A call containing one or more holes desugars, at parse time, to a lambda

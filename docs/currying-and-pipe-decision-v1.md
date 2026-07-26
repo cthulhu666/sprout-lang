@@ -2,10 +2,11 @@
 
 **Status:** **Decided — Package C-b** (n-ary + `_`-placeholder partials), 2026-07-26. This
 document is retained for rationale; `docs/spec-v0.md` §5.3 is normative for the placeholder
-syntax. Implementation is staged: **part 1 — placeholder partial application — is LANDED**
-(parser desugar; `tests/stdlib/test_placeholder_partial.spr`). **Part 2 — n-ary arity checking**
-(make under-application a compile error, retiring §5.3's under-application clause) is follow-up
-work, tracked in `BACKLOG.md`.
+syntax. Implementation is staged: **part 1 — placeholder partial application — LANDED** (parser desugar;
+`tests/stdlib/test_placeholder_partial.spr`). **Part 2 — n-ary arity checking (Approach B) —
+LANDED** (`under_application_error` in `infer.sprout` rejects under-application of known functions;
+`add3(1)(2)(3)` is now a clean compile error, not a segfault). **Approach A (arity-aware types)**,
+which extends enforcement through function-typed values, is future completeness work in `BACKLOG.md`.
 
 **Owner decision (RULED):** Sprout is an **n-ary** language with explicit `_`-placeholder
 partial application (Package C-b) — chosen over curried (A) and pure n-ary (C-a). The deciding

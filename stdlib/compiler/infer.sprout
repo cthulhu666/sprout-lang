@@ -668,6 +668,47 @@ fn infer_call(
         | InferOk typed_callee s1 es1 callee_eff ->
             infer_call_inner(state, env, s1, es1, callee, typed_callee, callee_eff, dict_empty(), args, pos)
 
+# Package C-b part 2 (n-ary): a top-level function's declared parameter count is
+# stored as an "@arity:{name}" env marker (see pre_scan_fn_decls). A call that
+# supplies fewer arguments is under-application — rejected here as a clean arity
+# error rather than silently building a partial the curried codegen miscompiles.
+# `_`-placeholder partials (spec §5.3) are the n-ary way to partially apply.
+fn arity_marker(n: Int) -> types.Scheme =
+  types.mono(types.TConst(types.type_id(int_to_string(n))))
+
+fn fn_declared_arity(name: String, env: Dict types.Scheme) -> Maybe Int =
+  match dict_get("@arity:" ++ name, env) with
+  | Nothing -> Nothing
+  | Just scheme ->
+      match scheme with
+      | types.Scheme _ _ body _ _ ->
+          match body with
+          | types.TConst id -> parse_int(types.type_id_name(id))
+          | _ -> Nothing
+
+fn call_arity_error(name: String, got: Int, want: Int) -> String =
+  "'" ++ name ++ "' expects " ++ int_to_string(want) ++ " arguments, got "
+    ++ int_to_string(got) ++ " (Sprout is n-ary; use `_` for partial application)"
+
+fn count_leading_arrows(t: types.Type) -> Int =
+  match t with
+  | types.TFunc _ ret _ -> 1 + count_leading_arrows(ret)
+  | _ -> 0
+
+# Nothing if the call is saturated, if the callee has no declared arity (a
+# function-typed parameter — that is A's job), or if `name` is shadowed by a
+# local binding whose own type has fewer arrows than the declared arity (the
+# global `@arity:{name}` marker is keyed by name, so a parameter shadowing a
+# same-named top-level function must not inherit its arity). Just an error
+# otherwise.
+fn under_application_error(name: String, callee_type: types.Type, got: Int, env: Dict types.Scheme) -> Maybe String =
+  match fn_declared_arity(name, env) with
+  | Nothing -> Nothing
+  | Just want ->
+      if got >= want then Nothing
+      else if count_leading_arrows(callee_type) < want then Nothing
+      else Just(call_arity_error(name, got, want))
+
 # Infer a call whose callee is a bare variable `name` (the common case).
 fn infer_call_var(
   state: unifier.InferState,
@@ -685,8 +726,11 @@ fn infer_call_var(
   | Just scheme ->
       do
         (t, prog_to_fresh) <- unifier.instantiate_with_vars(state, scheme)
-        infer_call_inner(state, env, subst, eff_subst, callee,
-          typed_ast.TVar(name, t, cpos), types.EffectPure, prog_to_fresh, args, pos)
+        match under_application_error(name, t, list_length(args), env) with
+        | Just msg -> InferErr(cpos, msg)
+        | Nothing ->
+            infer_call_inner(state, env, subst, eff_subst, callee,
+              typed_ast.TVar(name, t, cpos), types.EffectPure, prog_to_fresh, args, pos)
 
 # `print` is a type-erased runtime renderer, so it cannot recover per-element
 # types of a tuple (a Bool prints as 1, a static-String element as its raw
@@ -3617,14 +3661,16 @@ fn pre_scan_fn_decls(decls: List ast.Decl, env: Dict types.Scheme, alias_env: Di
       match decl with
       | ast.FnDecl name params ret_type_maybe effects_maybe constraints _ _ ->
           pre_scan_fn_decls(rest,
-            register_fn_decl_scheme(name, params, ret_type_maybe, effects_maybe, constraints, alias_env, env),
+            dict_set("@arity:" ++ name, arity_marker(list_length(params)),
+              register_fn_decl_scheme(name, params, ret_type_maybe, effects_maybe, constraints, alias_env, env)),
             alias_env)
       | ast.ExternFnDecl name params ret_type_maybe effects_maybe _ ->
           match dict_get(name, env) with
           | Just _ -> pre_scan_fn_decls(rest, env, alias_env)
           | Nothing ->
               pre_scan_fn_decls(rest,
-                dict_set(name, scheme_from_fn_parts(params, ret_type_maybe, effects_maybe, alias_env), env),
+                dict_set("@arity:" ++ name, arity_marker(list_length(params)),
+                  dict_set(name, scheme_from_fn_parts(params, ret_type_maybe, effects_maybe, alias_env), env)),
                 alias_env)
       | ast.AliasDecl name [] rhs_te _ ->
           pre_scan_fn_decls(rest, env,

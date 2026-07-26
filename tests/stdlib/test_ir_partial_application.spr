@@ -1,23 +1,21 @@
 import stdlib.test (TestState, new_state, assert_eq, summary)
 import stdlib.string as string
 
-# Regression (PR 11, typed IR codegen): partial application of a multi-arg
-# function must build a closure (IRMkClosure + a synthesized @__sprout_partial_N
-# wrapper that captures the supplied args), and a top-level `let` bound to such
-# a closure must be applied via IRLoadGlobal + IRApplyClosure.
+# Regression (PR 11, typed IR codegen): a top-level `let` bound to a closure must
+# be lowered via IRLoadGlobal + IRApplyClosure, not a direct `call` against the
+# global slot (which segfaulted at runtime on the typed --use-ir-codegen path).
 #
-# Before the fix the typed (--use-ir-codegen) path lowered `repeat("ab")` as a
-# saturated one-arg `call @stdlib.string.repeat` (arity mismatch -> garbage) and
-# lowered `rep(3)` as a direct `call @rep` against the global slot, segfaulting
-# at runtime. The direct (--emit-ir) path already handled both correctly.
+# Under Package C-b (n-ary) the closure is built with a `_`-placeholder partial
+# (`f(a, _)` desugars to `\p -> f(a, p)`); implicit partial application (`f(a)`)
+# is now a compile error. The lowering path exercised here is unchanged.
 
 fn add3(a: Int, b: Int, c: Int) -> Int = a + b + c
 
-# top-level let bound to a partial application of a stdlib fn (captures "ab")
-let rep = string.repeat("ab")
+# top-level let bound to a placeholder partial of a stdlib fn (captures "ab")
+let rep = string.repeat("ab", _)
 
-# top-level let bound to a partial application of a user fn (captures 5, 6)
-let add_5_6 = add3(5, 6)
+# top-level let bound to a placeholder partial of a user fn (captures 5, 6)
+let add_5_6 = add3(5, 6, _)
 
 fn main() -> Unit !{IO} =
   do
