@@ -1,0 +1,100 @@
+import stdlib.test (TestState, new_state, assert_true, summary)
+import stdlib.math (fabs, sqrt)
+import stdlib.mutable (MutMatrix, mutmatrix_new, mutmatrix_set)
+import loam.surface (ground_y, sink, normal_from_slopes, corner_height, corner_normal)
+
+# Headless coverage for loam.surface — the pure geometry of the CONTINUOUS terrain mesh (rung (c),
+# docs/terrain-smooth-mesh-v0.md). All math, no window: passing means the de-quantized ground height,
+# the continuous carve, and the gradient normals are correct before the GPU bake ever sees them.
+
+fn near(a: Double, b: Double) -> Bool = fabs(a - b) < 0.0001
+
+# band_top_y(band) = band*band_step + tile_size/2 — the OLD quantized tile top, for the identity check.
+fn band_top_y(band: Int, band_step: Double, tile_size: Double) -> Double =
+  (to_double(band) * band_step) + (tile_size * 0.5)
+
+# A 2x2 tile-centre height grid (rows = z, cols = x): [[1,3],[5,7]].
+fn heights2() -> MutMatrix Double !{IO} =
+  do
+    m <- mutmatrix_new(2, 2, 0.0)
+    mutmatrix_set(m, 0, 0, 1.0)
+    mutmatrix_set(m, 0, 1, 3.0)
+    mutmatrix_set(m, 1, 0, 5.0)
+    mutmatrix_set(m, 1, 1, 7.0)
+    m
+
+# A 3x3 CORNER grid tilted purely east: cy[i][j] = j (height rises by 1 per +x step).
+fn corner_east_tilt() -> MutMatrix Double !{IO} =
+  do
+    m <- mutmatrix_new(3, 3, 0.0)
+    mutmatrix_set(m, 0, 1, 1.0)
+    mutmatrix_set(m, 0, 2, 2.0)
+    mutmatrix_set(m, 1, 1, 1.0)
+    mutmatrix_set(m, 1, 2, 2.0)
+    mutmatrix_set(m, 2, 1, 1.0)
+    mutmatrix_set(m, 2, 2, 2.0)
+    m
+
+fn main() -> Unit !{IO} =
+  do
+    state <- new_state()
+
+    # --- ground_y: the un-floored band_top_y (de-quantized vertical axis) ---
+    # On a band boundary (elev*levels integral), ground_y coincides with band_top_y of that band.
+    assert_true(state, "ground_y on a band boundary == band_top_y",
+                near(ground_y(0.5, 12, 0.6, 1.0), band_top_y(6, 0.6, 1.0)))
+    assert_true(state, "ground_y boundary numeric", near(ground_y(0.5, 12, 0.6, 1.0), 4.1))
+    # Strictly between two boundaries, ground_y lies strictly between the two band tops — this is the
+    # fractional height the old band_of() threw away.
+    let mid = ground_y(6.5 / 12.0, 12, 0.6, 1.0)
+    assert_true(state, "ground_y mid numeric", near(mid, 4.4))
+    assert_true(state, "ground_y strictly between the band tops",
+                (mid > band_top_y(6, 0.6, 1.0)) && (mid < band_top_y(7, 0.6, 1.0)))
+
+    # --- sink: the continuous carve (drop N bands of world-units, clamp at floor) ---
+    assert_true(state, "sink drops bands_down * band_step", near(sink(5.0, 2, 0.6, 0.0), 3.8))
+    assert_true(state, "sink of 0 bands is a no-op", near(sink(5.0, 0, 0.6, 0.0), 5.0))
+    assert_true(state, "sink clamps at the world floor", near(sink(0.5, 3, 0.6, 0.0), 0.0))
+
+    # --- normal_from_slopes: gradient normals (the de-facet half) ---
+    match normal_from_slopes(2.0, 2.0, 2.0, 2.0, 1.0) with
+    | (fx, fy, fz) ->
+        assert_true(state, "flat field ⇒ straight up",
+                    near(fx, 0.0) && near(fy, 1.0) && near(fz, 0.0))
+    # Ground rising toward +x (east): normal tilts back toward -x, stays unit length.
+    match normal_from_slopes(0.0, 2.0, 0.0, 0.0, 1.0) with
+    | (ex, ey, ez) ->
+        do
+          assert_true(state, "east slope tilts normal west",
+                      near(ex, 0.0 - 0.70710678) && near(ey, 0.70710678) && near(ez, 0.0))
+          assert_true(state, "east-slope normal is unit length",
+                      near(sqrt((ex * ex) + (ey * ey) + (ez * ez)), 1.0))
+    # Ground rising toward +z (south): normal tilts back toward -z.
+    match normal_from_slopes(0.0, 0.0, 0.0, 2.0, 1.0) with
+    | (sx, sy, sz) ->
+        assert_true(state, "south slope tilts normal north",
+                    near(sx, 0.0) && near(sy, 0.70710678) && near(sz, 0.0 - 0.70710678))
+
+    # --- corner_height: average of the touching tile centres, edge-clamped ---
+    hs <- heights2()
+    # Interior vertex (1,1) sees all four cells: (1+3+5+7)/4 = 4.
+    ch11 <- corner_height(hs, 2, 1, 1)
+    assert_true(state, "interior corner averages all four cells", near(ch11, 4.0))
+    # Map corner (0,0) clamps to the single cell h[0][0] = 1.
+    ch00 <- corner_height(hs, 2, 0, 0)
+    assert_true(state, "map-corner vertex is the single cell", near(ch00, 1.0))
+    # Top-edge vertex (0,1) averages the two top cells: (1+3)/2 = 2.
+    ch01 <- corner_height(hs, 2, 0, 1)
+    assert_true(state, "edge corner averages the two edge cells", near(ch01, 2.0))
+    # Far map corner (2,2) clamps to h[1][1] = 7.
+    ch22 <- corner_height(hs, 2, 2, 2)
+    assert_true(state, "far map-corner vertex is the single cell", near(ch22, 7.0))
+
+    # --- corner_normal: gradient over the corner grid, border-clamped ---
+    cy <- corner_east_tilt()
+    match corner_normal(cy, 3, 1, 1, 1.0) with
+    | (nx, ny, nz) ->
+        assert_true(state, "east-tilt corner normal leans west",
+                    near(nx, 0.0 - 0.70710678) && near(ny, 0.70710678) && near(nz, 0.0))
+
+    summary(state)

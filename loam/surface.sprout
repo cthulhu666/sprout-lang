@@ -1,0 +1,72 @@
+module loam.surface
+
+import stdlib.math (sqrt, clamp)
+import stdlib.mutable (MutMatrix, mutmatrix_at_or)
+
+# Loam's CONTINUOUS terrain surface: the pure geometry that turns the smooth elevation field into a
+# smooth, gradient-shaded heightfield mesh instead of the quantized voxel staircase (see
+# docs/terrain-smooth-mesh-v0.md). Graphics-free — imports only stdlib.math + stdlib.mutable — so it
+# lives in the headless engine core and is unit-tested in tests/loam/test_surface.spr. The demo
+# (examples/gfx/terrain_rivers_demo.sprout) owns the IO bake that feeds these numbers to the GPU.
+#
+# The key identity: band_of(e, L) = floor(e * L) and fbm ∈ [0, 1), so the QUANTIZED tile top
+# band_top_y(band_of(e)) is exactly ground_y(e) with the floor removed. Dropping the floor
+# de-quantizes the vertical axis; per-vertex normals from the height gradient de-facet the shading.
+
+# World Y of the continuous ground at elevation `elev` — the un-floored band_top_y. `levels` is the
+# elevation band count (sets the vertical scale together with band_step); tile_size floats the top
+# face at the old cube-top height (+tile_size/2), so trees/lakes keyed to it line up.
+export fn ground_y(elev: Double, levels: Int, band_step: Double, tile_size: Double) -> Double =
+  (elev * to_double(levels) * band_step) + (tile_size * 0.5)
+
+# Sink a height by `bands_down` elevation bands (the continuous carve: a river cell drops
+# carve_depth(tier) bands worth of world-units), clamped at the world floor so a deep channel never
+# pokes below the slab. bands_down = 0 is a no-op (non-river cells).
+export fn sink(height: Double, bands_down: Int, band_step: Double, floor_y: Double) -> Double =
+  let dropped = height - (to_double(bands_down) * band_step)
+  in if dropped < floor_y then floor_y else dropped
+
+# Unit surface normal of a heightfield from CENTRAL DIFFERENCES of the four axis neighbours' heights:
+# west/east along +x, north/south along +z (+x east, +z south). `cell` is the world distance between
+# adjacent samples. For y = h(x,z) the normal is (-dh/dx, 1, -dh/dz); scaling by 2*cell clears the
+# divisions, giving (hw-he, 2*cell, hn-hs) normalized. A flat field ⇒ (0,1,0); a degenerate zero
+# vector falls back to straight up.
+export fn normal_from_slopes(hw: Double, he: Double, hn: Double, hs: Double, cell: Double) -> (Double, Double, Double) =
+  let nx = hw - he
+  in let ny = 2.0 * cell
+  in let nz = hn - hs
+  in let len = sqrt((nx * nx) + (ny * ny) + (nz * nz))
+  in if len < 0.000000000001 then (0.0, 1.0, 0.0)
+     else (nx / len, ny / len, nz / len)
+
+# Height of the mesh vertex at grid corner (ci, cj) — the average of the up-to-4 tile centres that
+# meet there, read from the global tile-centre height grid `heights` (span×span). Corner indices run
+# 0..span; a corner touches tiles x∈{cj-1,cj}, z∈{ci-1,ci}, each clamped into range, so edge/corner
+# vertices average the 2/1 cells that exist. Computed from the single global grid ⇒ identical on both
+# sides of a chunk seam (seam-free by construction).
+export fn corner_height(heights: MutMatrix Double, span: Int, ci: Int, cj: Int) -> Double !{IO} =
+  do
+    let x0 = clamp(cj - 1, 0, span - 1)
+    let x1 = clamp(cj, 0, span - 1)
+    let z0 = clamp(ci - 1, 0, span - 1)
+    let z1 = clamp(ci, 0, span - 1)
+    a <- mutmatrix_at_or(heights, z0, x0, 0.0)
+    b <- mutmatrix_at_or(heights, z0, x1, 0.0)
+    c <- mutmatrix_at_or(heights, z1, x0, 0.0)
+    d <- mutmatrix_at_or(heights, z1, x1, 0.0)
+    (a + b + c + d) / 4.0
+
+# Unit normal at mesh corner (ci, cj), central-differenced over the CORNER height grid `cy`
+# (cspan×cspan, cspan = span+1); neighbours clamped at the border. `cell` is the tile spacing (world
+# units between adjacent corners). Wraps normal_from_slopes with the four clamped corner-height reads.
+export fn corner_normal(cy: MutMatrix Double, cspan: Int, ci: Int, cj: Int, cell: Double) -> (Double, Double, Double) !{IO} =
+  do
+    let w = clamp(cj - 1, 0, cspan - 1)
+    let e = clamp(cj + 1, 0, cspan - 1)
+    let n = clamp(ci - 1, 0, cspan - 1)
+    let s = clamp(ci + 1, 0, cspan - 1)
+    hw <- mutmatrix_at_or(cy, ci, w, 0.0)
+    he <- mutmatrix_at_or(cy, ci, e, 0.0)
+    hn <- mutmatrix_at_or(cy, n, cj, 0.0)
+    hs <- mutmatrix_at_or(cy, s, cj, 0.0)
+    normal_from_slopes(hw, he, hn, hs, cell)
