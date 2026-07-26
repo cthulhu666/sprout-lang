@@ -561,6 +561,20 @@ static void cap_quad(const float *v0, const float *v1, const float *v2, const fl
   cap_vertex(v3[0],v3[1],v3[2], nx,ny,nz, r,g,b,a);
 }
 
+/* Like cap_quad, but each corner carries its OWN normal (n0..n3) — per-vertex normals, so a
+ * continuous heightfield shades smoothly (Gouraud) across tile boundaries instead of per-facet.
+ * The two triangles (v0,v1,v2) and (v0,v2,v3) reuse the shared corners' normals. */
+static void cap_quad_vn(const float *v0, const float *v1, const float *v2, const float *v3,
+                        const float *n0, const float *n1, const float *n2, const float *n3,
+                        unsigned char r, unsigned char g, unsigned char b, unsigned char a) {
+  cap_vertex(v0[0],v0[1],v0[2], n0[0],n0[1],n0[2], r,g,b,a);
+  cap_vertex(v1[0],v1[1],v1[2], n1[0],n1[1],n1[2], r,g,b,a);
+  cap_vertex(v2[0],v2[1],v2[2], n2[0],n2[1],n2[2], r,g,b,a);
+  cap_vertex(v0[0],v0[1],v0[2], n0[0],n0[1],n0[2], r,g,b,a);
+  cap_vertex(v2[0],v2[1],v2[2], n2[0],n2[1],n2[2], r,g,b,a);
+  cap_vertex(v3[0],v3[1],v3[2], n3[0],n3[1],n3[2], r,g,b,a);
+}
+
 /* Append one axis-aligned cube (36 vertices, per-face flat normals) to the capture. Backface
  * culling is disabled when the baked mesh is drawn, so face winding need not be exact. */
 static void cap_cube(float cx, float cy, float cz, float s,
@@ -858,6 +872,36 @@ long long gfx_capture_quad_data(long long p0x, long long p0y, long long p0z,
   unsigned char a = (unsigned char)((band & 0x7F) | (lake ? 0x80 : 0));
   cap_quad(v0, v1, v2, v3, as_float(nx), as_float(ny), as_float(nz),
            (unsigned char)tag, (unsigned char)tier, (unsigned char)dir, a);
+  return 0;
+}
+
+/* Like gfx_capture_quad_data, but with FOUR per-vertex normals (n0..n3, one per corner) instead of a
+ * single face normal. The continuous-terrain bake (examples/gfx/terrain_rivers_demo.sprout) supplies
+ * height-gradient normals here so the smooth heightfield shades smoothly rather than per-facet. Data
+ * packing (r=tag, g=tier, b=dir, a=band|lake<<7) is identical to gfx_capture_quad_data. */
+long long gfx_capture_quad_data_vn(long long p0x, long long p0y, long long p0z,
+                                   long long p1x, long long p1y, long long p1z,
+                                   long long p2x, long long p2y, long long p2z,
+                                   long long p3x, long long p3y, long long p3z,
+                                   long long n0x, long long n0y, long long n0z,
+                                   long long n1x, long long n1y, long long n1z,
+                                   long long n2x, long long n2y, long long n2z,
+                                   long long n3x, long long n3y, long long n3z,
+                                   long long tag, long long tier, long long dir,
+                                   long long band, long long lake) {
+  if (!g_capturing) return 0;
+  cap_reserve(6);
+  float v0[3] = { as_float(p0x), as_float(p0y), as_float(p0z) };
+  float v1[3] = { as_float(p1x), as_float(p1y), as_float(p1z) };
+  float v2[3] = { as_float(p2x), as_float(p2y), as_float(p2z) };
+  float v3[3] = { as_float(p3x), as_float(p3y), as_float(p3z) };
+  float n0[3] = { as_float(n0x), as_float(n0y), as_float(n0z) };
+  float n1[3] = { as_float(n1x), as_float(n1y), as_float(n1z) };
+  float n2[3] = { as_float(n2x), as_float(n2y), as_float(n2z) };
+  float n3[3] = { as_float(n3x), as_float(n3y), as_float(n3z) };
+  unsigned char a = (unsigned char)((band & 0x7F) | (lake ? 0x80 : 0));
+  cap_quad_vn(v0, v1, v2, v3, n0, n1, n2, n3,
+              (unsigned char)tag, (unsigned char)tier, (unsigned char)dir, a);
   return 0;
 }
 

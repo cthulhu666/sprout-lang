@@ -31,6 +31,7 @@ extern fn gfx_mesh_capture_begin() -> Unit !{IO}
 extern fn gfx_mesh_capture_end() -> Int !{IO}
 extern fn gfx_mesh_reset() -> Unit !{IO}
 extern fn gfx_capture_quad_data(p0x: Double, p0y: Double, p0z: Double, p1x: Double, p1y: Double, p1z: Double, p2x: Double, p2y: Double, p2z: Double, p3x: Double, p3y: Double, p3z: Double, nx: Double, ny: Double, nz: Double, tag: Int, tier: Int, dir: Int, band: Int, lake: Int) -> Unit !{IO}
+extern fn gfx_capture_quad_data_vn(p0x: Double, p0y: Double, p0z: Double, p1x: Double, p1y: Double, p1z: Double, p2x: Double, p2y: Double, p2z: Double, p3x: Double, p3y: Double, p3z: Double, n0x: Double, n0y: Double, n0z: Double, n1x: Double, n1y: Double, n1z: Double, n2x: Double, n2y: Double, n2z: Double, n3x: Double, n3y: Double, n3z: Double, tag: Int, tier: Int, dir: Int, band: Int, lake: Int) -> Unit !{IO}
 extern fn gfx_set_view_mode(mode: Int) -> Unit !{IO}
 extern fn gfx_set_terrain_levels(levels: Int) -> Unit !{IO}
 extern fn gfx_draw_captured(handle: Int) -> Unit !{IO}
@@ -135,6 +136,20 @@ export fn capture_quad_data(p0x: Double, p0y: Double, p0z: Double,
                             nx: Double, ny: Double, nz: Double,
                             tag: Int, tier: Int, dir: Int, band: Int, lake: Int) -> Unit !{IO} =
   gfx_capture_quad_data(p0x, p0y, p0z, p1x, p1y, p1z, p2x, p2y, p2z, p3x, p3y, p3z, nx, ny, nz, tag, tier, dir, band, lake)
+
+# Like capture_quad_data but with FOUR per-vertex normals (n0..n3, one per corner) — the smooth
+# terrain bake supplies height-gradient normals so the continuous heightfield shades smoothly
+# (Gouraud) instead of per-facet. Data (tag/tier/dir/band/lake) is packed exactly as capture_quad_data.
+export fn capture_quad_data_vn(p0x: Double, p0y: Double, p0z: Double,
+                               p1x: Double, p1y: Double, p1z: Double,
+                               p2x: Double, p2y: Double, p2z: Double,
+                               p3x: Double, p3y: Double, p3z: Double,
+                               n0x: Double, n0y: Double, n0z: Double,
+                               n1x: Double, n1y: Double, n1z: Double,
+                               n2x: Double, n2y: Double, n2z: Double,
+                               n3x: Double, n3y: Double, n3z: Double,
+                               tag: Int, tier: Int, dir: Int, band: Int, lake: Int) -> Unit !{IO} =
+  gfx_capture_quad_data_vn(p0x, p0y, p0z, p1x, p1y, p1z, p2x, p2y, p2z, p3x, p3y, p3z, n0x, n0y, n0z, n1x, n1y, n1z, n2x, n2y, n2z, n3x, n3y, n3z, tag, tier, dir, band, lake)
 
 # Select which colour a data-encoded terrain mesh renders: -1 raw vertex colour (default), 0 Main /
 # 1 Relief / 2 Flow / 3 Lakes. The instant view switch. Cheap enough to call every frame.

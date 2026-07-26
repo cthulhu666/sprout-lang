@@ -930,6 +930,21 @@ plan" item under "Design Roadmap → Current Priorities".
 - [ ] `P3` **Extract terrain rendering into `loam.view`** (as the view systems were extracted
   from the demos), and the far-horizon **AAA asset/mesh/LOD** render track the current raylib
   shim cannot reach.
+- [x] `P3` **Smooth terrain mesh (de-Minecraft the terrain-rivers demo)** — landed 2026-07-26,
+  `docs/terrain-smooth-mesh-v0.md`. Replaced the quantized voxel bake (flat band-top quads + step
+  walls) with a continuous shared-vertex heightfield: `loam/surface.sprout` (headless, tested in
+  `tests/loam/test_surface.spr`) supplies `ground_y` (the un-floored `band_top_y` that de-quantizes
+  the vertical axis), continuous `sink` carve, and height-gradient per-vertex normals
+  (`normal_from_slopes`/`corner_height`/`corner_normal`); the new gfx host fn `capture_quad_data_vn`
+  (4 per-vertex normals) shades it smoothly. Interior step walls deleted; map rim gets a skirt. No
+  FPS regression (60-cap at steady state). Follow-ups below.
+- [ ] `P3` **Smooth-terrain follow-ups (the AAA layers deliberately deferred).** The terrain
+  landform is smooth; these add richness on top: (1) **rivers still read blocky** — the fix is
+  re-enabling/rebuilding the removed smooth-water **ribbon** (per-tile river *colour* is the
+  dominant blockiness, not the carve); (2) **detail normal maps** for micro-bump without geometry;
+  (3) **splat + triplanar material blending** to soften hard per-tile biome-colour seams;
+  (4) **per-vertex `band` datum** for a smooth Relief ramp (currently per-quad, so Relief facets);
+  (5) terrain **LOD** (the per-chunk mesh is the natural seam). Ref: `docs/terrain-smooth-mesh-v0.md` §10.
 - [x] `P2` **`deriving (Enum)` — constructor ↔ Int, to kill hand-written tag/ordinal boilerplate**
   (surfaced 2026-07-24 building `loam.terrain`; landed 2026-07-24). Shipped as `deriving (Enum)`
   on nullary-only ADTs, synthesizing `ordinal : a -> Int` and `from_ordinal : Int -> Maybe a` with

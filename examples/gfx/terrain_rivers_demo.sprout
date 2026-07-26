@@ -1,8 +1,9 @@
 module examples.gfx.terrain_rivers_demo
 
 import stdlib.gfx
-import loam.terrain (Config, tile_kind_at, tile_band_at, tile_kind_tag, sea_level_band, spatial_hash, exposed_step_bands, chunk_linear_index, tile_kind_of, band_of, elev_at)
+import loam.terrain (Config, tile_kind_at, tile_band_at, tile_kind_tag, spatial_hash, chunk_linear_index, tile_kind_of, band_of, elev_at, sea_level)
 import loam.hydrology (Hydrology, HydroParams, compute_hydrology, hydro_tier, hydro_dir, hydro_filled, carve_depth, widen_rivers, meander_rivers)
+import loam.surface (ground_y, sink, corner_height, corner_normal)
 import loam.config (parse_config, cfg_int)
 import loam.vegetation (TreeKind, Palm, Broadleaf, Conifer, DarkConifer, Cactus, Shrub, tree_kind_tag, tree_for_biome)
 import loam.camera (Cam, cam_drive, cam_distance, tree_cull_dist)
@@ -148,25 +149,17 @@ let cam_drag_pan_frac = 0.0015  # pan world-units per pixel of drag, as a span f
 let lake_eps = 0.0005
 let lake_lift = 0.12
 
-# World Y of a band's top face — mirrors the old cube (centre at band*band_step, edge tile_size),
-# so the baked top surface sits exactly where the cube tops used to.
-fn band_top_y(band: Int) -> Double = (to_double(band) * band_step) + (tile_size * 0.5)
-
-# Exposed side drop (world units) toward the neighbour at (nx, nz). Off-map neighbours drop to the
-# floor (y = 0) so the map perimeter reads as a solid slab; in-map, expose the step down to a lower
-# neighbour (0 when the neighbour is level-or-higher and hides the side).
-fn nbr_drop(this_band: Int, bands: MutMatrix Int, nx: Int, nz: Int, span: Int) -> Double !{IO} =
-  if (nx < 0) || (nz < 0) || (nx >= span) || (nz >= span) then band_top_y(this_band)
-  else
-    do
-      nb <- mutmatrix_at_or(bands, nz, nx, this_band)
-      to_double(exposed_step_bands(this_band, nb)) * band_step
+# CONTINUOUS heightfield bake (docs/terrain-smooth-mesh-v0.md). Each tile emits ONE quad whose four
+# corners take their Y from the corner-height grid `cy` (the average of the touching tile-centre
+# heights — seam-free) and their normal from the height gradient (loam.surface.corner_normal), so the
+# surface reads smooth and Gouraud-shaded instead of as a voxel staircase. There are NO step walls:
+# the band quantization they bridged is gone. The map rim gets a downward SKIRT to y=0 (below), so the
+# perimeter still reads as a solid slab without any interior stepping.
 
 # Where the depression-fill flooded a basin (filled > original ground), bake a lake-surface quad at
 # the filled level, flagged lake=1. Baked in every view; the shader shows it only in Lakes (discards
-# it otherwise), so it costs no re-bake to toggle. Compared against elev_at (pre-carve pure field), so
-# carved river channels — not fill ponds — do not spuriously read as lakes. band carries the surface
-# band for consistency; the shader colours a lake quad blue regardless.
+# it otherwise). Compared against elev_at (pre-carve pure field) so carved river channels do not read
+# as lakes. Floated on the SAME continuous mapping as the terrain (ground_y of the filled level).
 fn bake_lake(cfg: Config, h: Hydrology, levels: Int, x0: Double, x1: Double, z0: Double, z1: Double,
              gx: Int, gz: Int) -> Unit !{IO} =
   do
@@ -174,42 +167,58 @@ fn bake_lake(cfg: Config, h: Hydrology, levels: Int, x0: Double, x1: Double, z0:
     let e = elev_at(cfg, gx, gz)
     if fl > (e + lake_eps) then
       do
-        let lb = band_of(fl, levels)
-        let ly = band_top_y(lb) + lake_lift
-        gfx.capture_quad_data(x0, ly, z0, x0, ly, z1, x1, ly, z1, x1, ly, z0, 0.0, 1.0, 0.0, 0, 0, 0, lb, 1)
+        let ly = ground_y(fl, levels, band_step, tile_size) + lake_lift
+        gfx.capture_quad_data(x0, ly, z0, x0, ly, z1, x1, ly, z1, x1, ly, z0, 0.0, 1.0, 0.0, 0, 0, 0, band_of(fl, levels), 1)
     else ()
 
-# Bake ONE tile into the current mesh capture: a top quad plus one wall quad per side that steps DOWN
-# to a lower neighbour (drop > 0; level/higher sides are hidden, so no wall), then a lake quad if the
-# cell is flooded. Every quad carries the tile's DATA (tag/tier/dir/band, lake=0 for land) via
-# gfx.capture_quad_data — the shader turns that into the current view's colour, so this bake is
-# VIEW-INDEPENDENT and runs once. Corners are computed inline — NO intermediate list/records, so baking
-# a 1024^2 map stays allocation-free. Winding/normals: +z is south, +x is east, so dn is the -z side.
-fn bake_tile(cfg: Config, bands: MutMatrix Int, tags: MutMatrix Int, h: Hydrology, levels: Int, span: Int, gx: Int, gz: Int) -> Unit !{IO} =
+# Bake ONE tile: a single smooth top quad (four continuous corner heights + four per-vertex gradient
+# normals), plus a rim skirt on any map-edge side, plus a lake quad if flooded. Every quad carries the
+# tile's DATA (tag/tier/dir/band, lake=0 for land) — the shader turns that into the current view's
+# colour, so this bake is VIEW-INDEPENDENT and runs once. Corners: row = z (gz north edge, gz+1 south),
+# col = x (gx west edge, gx+1 east); +z south, +x east. cy is (span+1)² so gz+1/gx+1 are in range.
+fn bake_tile(cfg: Config, cy: MutMatrix Double, bands: MutMatrix Int, tags: MutMatrix Int, h: Hydrology, levels: Int, span: Int, gx: Int, gz: Int) -> Unit !{IO} =
   do
     band <- mutmatrix_at_or(bands, gz, gx, 0)
     tag <- mutmatrix_at_or(tags, gz, gx, 0)
     tier <- hydro_tier(h, gx, gz)
     dir <- hydro_dir(h, gx, gz)
-    dn <- nbr_drop(band, bands, gx, gz - 1, span)
-    ds <- nbr_drop(band, bands, gx, gz + 1, span)
-    de <- nbr_drop(band, bands, gx + 1, gz, span)
-    dw <- nbr_drop(band, bands, gx - 1, gz, span)
-    let ty = band_top_y(band)
-    let half = to_double(span) / 2.0  # map centred on origin; from span (was a module global)
-    let mx = (to_double(gx) - half) * tile_size
-    let mz = (to_double(gz) - half) * tile_size
+    let half = to_double(span) / 2.0  # map centred on origin
     let hh = tile_size * 0.5
-    let x0 = mx - hh
-    let x1 = mx + hh
-    let z0 = mz - hh
-    let z1 = mz + hh
-    gfx.capture_quad_data(x0, ty, z0, x0, ty, z1, x1, ty, z1, x1, ty, z0, 0.0, 1.0, 0.0, tag, tier, dir, band, 0)
-    if dn > 0.0 then gfx.capture_quad_data(x0, ty, z0, x1, ty, z0, x1, ty - dn, z0, x0, ty - dn, z0, 0.0, 0.0, 0.0 - 1.0, tag, tier, dir, band, 0) else ()
-    if ds > 0.0 then gfx.capture_quad_data(x0, ty, z1, x1, ty, z1, x1, ty - ds, z1, x0, ty - ds, z1, 0.0, 0.0, 1.0, tag, tier, dir, band, 0) else ()
-    if de > 0.0 then gfx.capture_quad_data(x1, ty, z0, x1, ty, z1, x1, ty - de, z1, x1, ty - de, z0, 1.0, 0.0, 0.0, tag, tier, dir, band, 0) else ()
-    if dw > 0.0 then gfx.capture_quad_data(x0, ty, z0, x0, ty, z1, x0, ty - dw, z1, x0, ty - dw, z0, 0.0 - 1.0, 0.0, 0.0, tag, tier, dir, band, 0) else ()
-    bake_lake(cfg, h, levels, x0, x1, z0, z1, gx, gz)
+    let x0 = ((to_double(gx) - half) * tile_size) - hh
+    let x1 = ((to_double(gx) - half) * tile_size) + hh
+    let z0 = ((to_double(gz) - half) * tile_size) - hh
+    let z1 = ((to_double(gz) - half) * tile_size) + hh
+    # Four corner vertex heights: NW (gz,gx) / SW (gz+1,gx) / SE (gz+1,gx+1) / NE (gz,gx+1).
+    ynw <- mutmatrix_at_or(cy, gz, gx, 0.0)
+    ysw <- mutmatrix_at_or(cy, gz + 1, gx, 0.0)
+    yse <- mutmatrix_at_or(cy, gz + 1, gx + 1, 0.0)
+    yne <- mutmatrix_at_or(cy, gz, gx + 1, 0.0)
+    # Per-vertex gradient normals at the same corners (cspan = span + 1). Shared corners get identical
+    # normals from adjacent tiles, so the shading is continuous across tile/chunk seams.
+    nnw <- corner_normal(cy, span + 1, gz, gx, tile_size)
+    nsw <- corner_normal(cy, span + 1, gz + 1, gx, tile_size)
+    nse <- corner_normal(cy, span + 1, gz + 1, gx + 1, tile_size)
+    nne <- corner_normal(cy, span + 1, gz, gx + 1, tile_size)
+    match nnw with
+    | (a0, b0, c0) ->
+        match nsw with
+        | (a1, b1, c1) ->
+            match nse with
+            | (a2, b2, c2) ->
+                match nne with
+                | (a3, b3, c3) ->
+                    do
+                      gfx.capture_quad_data_vn(x0, ynw, z0, x0, ysw, z1, x1, yse, z1, x1, yne, z0,
+                                               a0, b0, c0, a1, b1, c1, a2, b2, c2, a3, b3, c3,
+                                               tag, tier, dir, band, 0)
+                      # Rim skirt: drop the boundary edge straight to y=0 (replaces the old per-tile
+                      # step walls). Only where the neighbour is off-map. Backface culling is off, so
+                      # winding is not critical; the outward face normal is flat (per-face is fine here).
+                      if gx <= 0 then gfx.capture_quad_data(x0, ynw, z0, x0, ysw, z1, x0, 0.0, z1, x0, 0.0, z0, 0.0 - 1.0, 0.0, 0.0, tag, tier, dir, band, 0) else ()
+                      if gx >= span - 1 then gfx.capture_quad_data(x1, yne, z0, x1, yse, z1, x1, 0.0, z1, x1, 0.0, z0, 1.0, 0.0, 0.0, tag, tier, dir, band, 0) else ()
+                      if gz <= 0 then gfx.capture_quad_data(x0, ynw, z0, x1, yne, z0, x1, 0.0, z0, x0, 0.0, z0, 0.0, 0.0, 0.0 - 1.0, tag, tier, dir, band, 0) else ()
+                      if gz >= span - 1 then gfx.capture_quad_data(x0, ysw, z1, x1, yse, z1, x1, 0.0, z1, x0, 0.0, z1, 0.0, 0.0, 1.0, tag, tier, dir, band, 0) else ()
+                      bake_lake(cfg, h, levels, x0, x1, z0, z1, gx, gz)
 
 # --- Generation pass (once at startup) --------------------------------------
 # Tabulate the whole region's biome tag + elevation band STRAIGHT into the global grids from each
@@ -217,28 +226,31 @@ fn bake_tile(cfg: Config, bands: MutMatrix Int, tags: MutMatrix Int, h: Hydrolog
 # bake pass below needs each tile's four neighbour heights (including across the old chunk seams);
 # a flat global grid makes those O(1) and seam-free, and keeping nothing resident but these two
 # grids keeps the GC's live set tiny (the old page-everything-in path made mark cost superlinear).
-fn gen_row(cfg: Config, bands: MutMatrix Int, tags: MutMatrix Int, span: Int, gz: Int, gx: Int) -> Unit !{IO} =
+fn gen_row(cfg: Config, bands: MutMatrix Int, tags: MutMatrix Int, heights: MutMatrix Double, levels: Int, span: Int, gz: Int, gx: Int) -> Unit !{IO} =
   if gx >= span then ()
   else
     do
       mutmatrix_set(tags, gz, gx, tile_kind_tag(tile_kind_at(cfg, gx, gz)))
       mutmatrix_set(bands, gz, gx, tile_band_at(cfg, gx, gz))
-      gen_row(cfg, bands, tags, span, gz, gx + 1)
+      # Continuous tile-centre ground height (the un-floored band top) — the source of truth for the
+      # smooth mesh; `bands` above is kept only as the Relief-ramp datum.
+      mutmatrix_set(heights, gz, gx, ground_y(elev_at(cfg, gx, gz), levels, band_step, tile_size))
+      gen_row(cfg, bands, tags, heights, levels, span, gz, gx + 1)
 
-fn gen_grids(cfg: Config, bands: MutMatrix Int, tags: MutMatrix Int, span: Int, gz: Int) -> Unit !{IO} =
+fn gen_grids(cfg: Config, bands: MutMatrix Int, tags: MutMatrix Int, heights: MutMatrix Double, levels: Int, span: Int, gz: Int) -> Unit !{IO} =
   if gz >= span then ()
   else
     do
-      gen_row(cfg, bands, tags, span, gz, 0)
-      gen_grids(cfg, bands, tags, span, gz + 1)
+      gen_row(cfg, bands, tags, heights, levels, span, gz, 0)
+      gen_grids(cfg, bands, tags, heights, levels, span, gz + 1)
 
 # --- Carve pass -------------------------------------------------------------
-# Lower each river cell's elevation band by carve_depth(flow_tier) BEFORE baking, so the water floor
-# sits in a valley. The existing bake then draws banks for free: a land neighbour, now higher than
-# the carved river cell, emits an earth-coloured step wall down to it (nbr_drop/exposed_step_bands),
-# and the river cell's own top quad — coloured by river_rgb — becomes the shaded water floor. Clamped
-# at band 0 so a low river never pokes below the world floor. Non-river cells carve 0 (a no-op set).
-# Trees are unaffected: place_tile skips river cells, so lowering their band changes no tree height.
+# Lower each river cell by carve_depth(flow_tier) BEFORE building the corner grid, so the water floor
+# sits in a continuous valley and the smooth mesh forms banks for free (higher land neighbours slope
+# down to the carved cell). Two parallel carves: `bands` (integer, the Relief-ramp datum) is clamped
+# at band 0; `heights` (continuous, the geometry) sinks carve_depth bands of world-units, clamped at
+# the world floor (ground at elevation 0 = tile_size/2). Non-river cells carve 0 (a no-op). Trees are
+# unaffected: place_tile skips river cells, so lowering their height changes no tree placement.
 fn carve_row(h: Hydrology, p: HydroParams, bands: MutMatrix Int, span: Int, gz: Int, gx: Int) -> Unit !{IO} =
   if gx >= span then ()
   else
@@ -256,30 +268,68 @@ fn carve_bands(h: Hydrology, p: HydroParams, bands: MutMatrix Int, span: Int, gz
       carve_row(h, p, bands, span, gz, 0)
       carve_bands(h, p, bands, span, gz + 1)
 
-# --- Bake pass --------------------------------------------------------------
-# Bake one chunk's tiles into the current capture. Neighbour heights come from the global grid, so
-# tiles on a chunk seam still get correct step walls against the adjacent chunk.
-fn bake_chunk_tiles(cfg: Config, bands: MutMatrix Int, tags: MutMatrix Int, h: Hydrology, levels: Int, span: Int, size: Int, cx: Int, cz: Int, r: Int, c: Int) -> Unit !{IO} =
-  if r >= size then ()
-  else if c >= size then bake_chunk_tiles(cfg, bands, tags, h, levels, span, size, cx, cz, r + 1, 0)
+# Continuous analogue of carve_row over the `heights` grid: sink each river cell carve_depth(tier)
+# bands of world-units, clamped at the world floor (tile_size/2). loam.surface.sink does the clamp.
+fn carve_h_row(h: Hydrology, p: HydroParams, heights: MutMatrix Double, span: Int, gz: Int, gx: Int) -> Unit !{IO} =
+  if gx >= span then ()
   else
     do
-      bake_tile(cfg, bands, tags, h, levels, span, (cx * size) + c, (cz * size) + r)
-      bake_chunk_tiles(cfg, bands, tags, h, levels, span, size, cx, cz, r, c + 1)
+      t <- hydro_tier(h, gx, gz)
+      cur <- mutmatrix_at_or(heights, gz, gx, 0.0)
+      mutmatrix_set(heights, gz, gx, sink(cur, carve_depth(p, t), band_step, tile_size * 0.5))
+      carve_h_row(h, p, heights, span, gz, gx + 1)
+
+fn carve_heights(h: Hydrology, p: HydroParams, heights: MutMatrix Double, span: Int, gz: Int) -> Unit !{IO} =
+  if gz >= span then ()
+  else
+    do
+      carve_h_row(h, p, heights, span, gz, 0)
+      carve_heights(h, p, heights, span, gz + 1)
+
+# --- Corner grid ------------------------------------------------------------
+# Build the shared mesh-vertex heights: cy[(span+1)²], each corner the average of the up-to-4
+# tile-centre heights touching it (loam.surface.corner_height, edge-clamped). Computed ONCE from the
+# global carved `heights` grid, so both sides of every chunk seam read the identical corner ⇒ the mesh
+# is C0-continuous and seam-free. The bake reads corner heights + gradient normals from this grid.
+fn fill_corner_row(heights: MutMatrix Double, cy: MutMatrix Double, span: Int, ci: Int, cj: Int) -> Unit !{IO} =
+  if cj > span then ()
+  else
+    do
+      v <- corner_height(heights, span, ci, cj)
+      mutmatrix_set(cy, ci, cj, v)
+      fill_corner_row(heights, cy, span, ci, cj + 1)
+
+fn fill_corners(heights: MutMatrix Double, cy: MutMatrix Double, span: Int, ci: Int) -> Unit !{IO} =
+  if ci > span then ()
+  else
+    do
+      fill_corner_row(heights, cy, span, ci, 0)
+      fill_corners(heights, cy, span, ci + 1)
+
+# --- Bake pass --------------------------------------------------------------
+# Bake one chunk's tiles into the current capture. Corner heights + normals come from the global cy
+# grid, so tiles on a chunk seam share vertices/normals with the adjacent chunk (seam-free).
+fn bake_chunk_tiles(cfg: Config, cy: MutMatrix Double, bands: MutMatrix Int, tags: MutMatrix Int, h: Hydrology, levels: Int, span: Int, size: Int, cx: Int, cz: Int, r: Int, c: Int) -> Unit !{IO} =
+  if r >= size then ()
+  else if c >= size then bake_chunk_tiles(cfg, cy, bands, tags, h, levels, span, size, cx, cz, r + 1, 0)
+  else
+    do
+      bake_tile(cfg, cy, bands, tags, h, levels, span, (cx * size) + c, (cz * size) + r)
+      bake_chunk_tiles(cfg, cy, bands, tags, h, levels, span, size, cx, cz, r, c + 1)
 
 # Bake each chunk into its OWN static mesh and record the handle (indexed cz*ncx + cx), so the frame
 # loop can frustum-cull per chunk — a zoomed-in view then pays only for the visible handful of
 # chunks instead of the whole map. This is what makes zooming in fast.
-fn bake_region(cfg: Config, bands: MutMatrix Int, tags: MutMatrix Int, h: Hydrology, levels: Int, span: Int, size: Int, ncx: Int, ncz: Int, meshes: MutVec Int, cx: Int, cz: Int) -> Unit !{IO} =
+fn bake_region(cfg: Config, cy: MutMatrix Double, bands: MutMatrix Int, tags: MutMatrix Int, h: Hydrology, levels: Int, span: Int, size: Int, ncx: Int, ncz: Int, meshes: MutVec Int, cx: Int, cz: Int) -> Unit !{IO} =
   if cz >= ncz then ()
-  else if cx >= ncx then bake_region(cfg, bands, tags, h, levels, span, size, ncx, ncz, meshes, 0, cz + 1)
+  else if cx >= ncx then bake_region(cfg, cy, bands, tags, h, levels, span, size, ncx, ncz, meshes, 0, cz + 1)
   else
     do
       gfx.mesh_capture_begin()
-      bake_chunk_tiles(cfg, bands, tags, h, levels, span, size, cx, cz, 0, 0)
+      bake_chunk_tiles(cfg, cy, bands, tags, h, levels, span, size, cx, cz, 0, 0)
       handle <- gfx.mesh_capture_end()
       mutvec_set(meshes, (cz * ncx) + cx, handle)
-      bake_region(cfg, bands, tags, h, levels, span, size, ncx, ncz, meshes, cx + 1, cz)
+      bake_region(cfg, cy, bands, tags, h, levels, span, size, ncx, ncz, meshes, cx + 1, cz)
 
 # Draw every chunk mesh; gfx.draw_captured frustum-culls the off-screen ones in the shim.
 fn draw_meshes(meshes: MutVec Int, i: Int, n: Int) -> Unit !{IO} =
@@ -334,7 +384,7 @@ fn variant_range(tag: Int) -> (Int, Int) =
 # Place at most one tree on tile (gx, gz): skip river cells; ask loam.vegetation what (if anything)
 # grows on this biome for this tile's hash; then pick a variant + jitter/rotate/scale it (all from
 # a decorrelated hash so the scatter looks organic but is fully reproducible) and queue an instance.
-fn place_tile(cfg: Config, models: MutVec Int, hy: Hydrology, gx: Int, gz: Int, tag: Int, band: Int,
+fn place_tile(cfg: Config, models: MutVec Int, hy: Hydrology, gx: Int, gz: Int, tag: Int, gy: Double,
               half: Double, tge: Int, tgc: Int) -> Unit !{IO} =
   do
     tier <- hydro_tier(hy, gx, gz)
@@ -354,7 +404,7 @@ fn place_tile(cfg: Config, models: MutVec Int, hy: Hydrology, gx: Int, gz: Int, 
                 let sc = tree_base_scale * (1.0 + ((to_double(imod(hv, (2 * tree_scale_var) + 1)) - to_double(tree_scale_var)) / 100.0))
                 let wx = ((to_double(gx) - half) * tile_size) + jx
                 let wz = ((to_double(gz) - half) * tile_size) + jz
-                let wy = (to_double(band) * band_step) + (tile_size * 0.5)
+                let wy = gy  # continuous tile-centre ground height (the smooth mesh top)
                 # Bucket the tree into its chunk's group so the frame loop can frustum-cull whole
                 # chunks of vegetation (h is the gfx model handle, doubling as the group's model key).
                 gfx.instance_push(chunk_linear_index(gx, gz, tge, tgc), h, wx, wy, wz, angle, sc)
@@ -362,23 +412,23 @@ fn place_tile(cfg: Config, models: MutVec Int, hy: Hydrology, gx: Int, gz: Int, 
 # Walk the region's tiles, queueing a tree per eligible cell. Reads the global band+tag grid built
 # by gen_grids (non-boxing mutmatrix_at_or), so it needs no chunk paging; place_tile buckets each
 # tree into its chunk group by GLOBAL coord, so a flat span×span sweep groups identically.
-fn place_row(cfg: Config, models: MutVec Int, hy: Hydrology, bands: MutMatrix Int, tags: MutMatrix Int, span: Int, half: Double, tge: Int, tgc: Int, gz: Int, gx: Int) -> Unit !{IO} =
+fn place_row(cfg: Config, models: MutVec Int, hy: Hydrology, heights: MutMatrix Double, tags: MutMatrix Int, span: Int, half: Double, tge: Int, tgc: Int, gz: Int, gx: Int) -> Unit !{IO} =
   if gx >= span then ()
   else
     do
       tag <- mutmatrix_at_or(tags, gz, gx, 0)
-      band <- mutmatrix_at_or(bands, gz, gx, 0)
-      place_tile(cfg, models, hy, gx, gz, tag, band, half, tge, tgc)
-      place_row(cfg, models, hy, bands, tags, span, half, tge, tgc, gz, gx + 1)
+      gy <- mutmatrix_at_or(heights, gz, gx, 0.0)
+      place_tile(cfg, models, hy, gx, gz, tag, gy, half, tge, tgc)
+      place_row(cfg, models, hy, heights, tags, span, half, tge, tgc, gz, gx + 1)
 
 # Scatter trees over the whole region, once at startup. Instances live GPU-side thereafter; the
 # frame loop only replays them.
-fn place_region(cfg: Config, models: MutVec Int, hy: Hydrology, bands: MutMatrix Int, tags: MutMatrix Int, span: Int, half: Double, tge: Int, tgc: Int, gz: Int) -> Unit !{IO} =
+fn place_region(cfg: Config, models: MutVec Int, hy: Hydrology, heights: MutMatrix Double, tags: MutMatrix Int, span: Int, half: Double, tge: Int, tgc: Int, gz: Int) -> Unit !{IO} =
   if gz >= span then ()
   else
     do
-      place_row(cfg, models, hy, bands, tags, span, half, tge, tgc, gz, 0)
-      place_region(cfg, models, hy, bands, tags, span, half, tge, tgc, gz + 1)
+      place_row(cfg, models, hy, heights, tags, span, half, tge, tgc, gz, 0)
+      place_region(cfg, models, hy, heights, tags, span, half, tge, tgc, gz + 1)
 
 
 # --- Camera control steps that do NOT scale with map span (compile-time) ----
@@ -441,7 +491,7 @@ fn view_label(view: Int, this: Int, name: String) -> String =
 # pan, WASD = pan) that work on both a mouse and a MacBook trackpad. `view` selects which of the four
 # hydrology views the shader renders; the top-left buttons switch it via gfx.set_view_mode — a single
 # uniform write, no re-bake (the terrain is baked ONCE with per-vertex data; see bake_tile).
-fn render_loop(meshes: MutVec Int, models: MutVec Int, cam: Cam, view: Int,
+fn render_loop(meshes: MutVec Int, cam: Cam, view: Int,
                world_span: Double, chunk_count: Int, tree_group_count: Int, water_y: Double) -> Unit !{IO} =
   do
     # Span-scaled framing + tree-cull, derived from world_span (were module constants; world_span is
@@ -527,7 +577,7 @@ fn render_loop(meshes: MutVec Int, models: MutVec Int, cam: Cam, view: Int,
         # re-bake, no re-upload: instant. (Trees are drawn only in Main, gated above.)
         let next_view = if vm then 0 else if vr then 1 else if vf then 2 else if vk then 3 else view
         if next_view != view then gfx.set_view_mode(next_view) else ()
-        render_loop(meshes, models,
+        render_loop(meshes,
                     cam_drive(cam, d_yaw, d_pitch, d_zoom, d_pan_r, d_pan_f,
                               min_dist, max_dist, pitch_min, pitch_max, pan_bound),
                     next_view, world_span, chunk_count, tree_group_count, water_y)
@@ -555,6 +605,48 @@ fn read_settings() -> Dict Int !{IO} =
           do
             print("[config] could not read " ++ path ++ ": " ++ e ++ " — using defaults")
             dict_empty()
+
+# Generate + route + carve + bake the whole world ONCE, returning only the per-chunk mesh handles.
+# CRITICAL for framerate: every working grid (bands, tags, heights, corners), the hydrology state, and
+# the tree models are LOCAL to this function, so they become unreachable the moment it returns — before
+# render_loop starts. The GC's mark cost scales with the live set (see the file header), and the frame
+# loop allocates each frame, so keeping these span²/(span+1)² grids resident during rendering would tax
+# every collection. Returning just `meshes` (the GPU handles; the tree instances live GPU-side after
+# place_region) keeps the frame-loop live set tiny.
+fn build_world(cfg: Config, params: HydroParams, levels: Int, span: Int, chunk_edge: Int,
+               region_chunks: Int, chunk_count: Int, half: Double, tge: Int, tgc: Int,
+               start_view: Int) -> MutVec Int !{IO} =
+  do
+    # Biome tags + integer bands (Relief datum) + continuous tile-centre heights (mesh geometry),
+    # tabulated straight into global grids from each cell's pure field — no chunk/disk round-trip.
+    bands <- mutmatrix_new(span, span, 0)
+    tags <- mutmatrix_new(span, span, 0)
+    heights <- mutmatrix_new(span, span, 0.0)
+    gen_grids(cfg, bands, tags, heights, levels, span, 0)
+    # Global hydrology (fill → D8 route → accumulate → tier), then meander + widen the flow_tier mask.
+    h <- compute_hydrology(cfg, span, params)
+    meander_rivers(h, cfg, params, span)
+    widen_rivers(h, params, span)
+    # Carve river cells in lockstep: integer bands (datum) and continuous heights (geometry).
+    carve_bands(h, params, bands, span, 0)
+    carve_heights(h, params, heights, span, 0)
+    # Shared mesh-vertex corner grid ((span+1)²) from the carved heights — seam-free, built once.
+    corners <- mutmatrix_new(span + 1, span + 1, 0.0)
+    fill_corners(heights, corners, span, 0)
+    # Bake each chunk into its OWN static mesh (per-vertex DATA + gradient normals), so a view switch
+    # is one uniform (set_view_mode) and a zoomed-in view frustum-culls per chunk.
+    meshes <- mutvec_new(chunk_count, -1)
+    bake_region(cfg, corners, bands, tags, h, levels, span, chunk_edge, region_chunks, region_chunks, meshes, 0, 0)
+    # Band count for the shader relief ramp; select the opening view BEFORE the first frame (the shader
+    # defaults to -1 = raw vertex colour, which would misread the data-encoded terrain).
+    gfx.set_terrain_levels(levels)
+    gfx.set_view_mode(start_view)
+    # Vegetation: load models, scatter biome-appropriate trees ONCE (queues GPU instances the frame
+    # loop replays; only in Main). Trees sit on the continuous ground height (place_row reads heights).
+    models <- mutvec_new(tree_count, 0)
+    load_trees(models)
+    place_region(cfg, models, h, heights, tags, span, half, tge, tgc, 0)
+    meshes
 
 fn main() -> Unit !{IO} =
   do
@@ -585,7 +677,9 @@ fn main() -> Unit !{IO} =
     let tree_group_count = tree_group_cols * tree_group_cols
     let world_span = to_double(span_tiles) * tile_size
     let half = to_double(span_tiles) / 2.0  # map centred on origin
-    let water_y = (to_double(sea_level_band(elevation_levels)) + water_lift) * band_step
+    # Sea surface on the SAME continuous mapping as the terrain: the ground height at sea_level
+    # elevation, floated water_lift bands above it so beaches sit just above the waterline.
+    let water_y = ground_y(sea_level, elevation_levels, band_step, tile_size) + (water_lift * band_step)
     let cfg = Config(seed = seed, chunk_size = chunk_edge, octaves = octaves,
                      lattice0 = lattice0, elevation_levels = elevation_levels)
     let params = HydroParams(tier1_min = t1, tier2_min = t2, tier3_min = t3,
@@ -615,43 +709,11 @@ fn main() -> Unit !{IO} =
     # gfx.post_vignette(0.7, 0.35)
     # gfx.post_tonemap(1.35, 1.4)
     # gfx.post_altitude_blur(300.0, 1600.0, 0.0, 0.8)
-    # Generate the whole region's biome tags + elevation bands directly into the global grids (no
-    # chunk/disk round-trip; see the file header). These grids feed both the bake and the trees.
-    bands <- mutmatrix_new(span_tiles, span_tiles, 0)
-    tags <- mutmatrix_new(span_tiles, span_tiles, 0)
-    gen_grids(cfg, bands, tags, span_tiles, 0)
-    # Global hydrology pass over the whole region (same cfg + span as the terrain), computed once
-    # upfront. flow_tier lines up cell-for-cell with the generated tiles; params sets the tiers.
-    h <- compute_hydrology(cfg, span_tiles, params)
-    # Meander: displace the flow_tier mask laterally by a smooth, flatness-gated noise field so the D8
-    # staircase reads as sinuous ribbons instead of axis-aligned right angles. Rewrites flow_tier only
-    # (flow_dir/filled — the drainage correctness — are untouched). Runs BEFORE widen so widen thickens
-    # the relocated ribbon; a no-op when meander_amp <= 0, preserving the straight-river look exactly.
-    meander_rivers(h, cfg, params, span_tiles)
-    # Widen big rivers: dilate flow_tier in place so a major river spans multiple tiles instead of one
-    # (a 1-wide major reads as a creek). Runs BEFORE carve/bake so the widened cells carve, colour and
-    # skip-trees as water too. No-op when no tier widens (default river/creek), so this is additive.
-    widen_rivers(h, params, span_tiles)
-    # Carve river cells into channels: lower each river cell's band by carve_depth(tier) so the water
-    # floor sits in a valley with banks (the bake draws the banks for free). Must run AFTER hydrology
-    # (needs flow_tier) and BEFORE the bake (which reads the lowered bands).
-    carve_bands(h, params, bands, span_tiles, 0)
-    # Bake each chunk into its OWN mesh, ONCE. Every quad carries per-vertex DATA (tag/tier/dir/band,
-    # + lake quads flagged) rather than a colour; the shader turns that into the current view's colour
-    # (gfx.set_view_mode), so switching views never re-bakes. Per-chunk meshes still frustum-cull when
-    # zoomed in. This bake is view-independent — there is no longer a per-view mesh set.
+    # Build + route + bake the world ONCE, in a helper whose working grids (bands/tags/heights/corners,
+    # hydrology, tree models) fall out of scope on return — so they are NOT in the GC live set the frame
+    # loop marks each frame (the file's whole startup/GC design; see build_world). It returns just the
+    # per-chunk mesh handles; the trees live GPU-side after its place_region.
     let start_view = 0
-    meshes <- mutvec_new(chunk_count, -1)
-    bake_region(cfg, bands, tags, h, elevation_levels, span_tiles, chunk_edge, region_chunks, region_chunks, meshes, 0, 0)
-    # Tell the shader the band count (for the relief ramp) and select the opening view. set_view_mode
-    # MUST be called before the first frame: the shader defaults to -1 (raw vertex colour), which would
-    # misread the data-encoded terrain — set_view_mode(0) puts it into the biome-decoding Main view.
-    gfx.set_terrain_levels(elevation_levels)
-    gfx.set_view_mode(start_view)
-    # Load the vegetation models and scatter biome-appropriate trees over the region ONCE (the pass
-    # queues GPU instances; the frame loop just replays them, and only in the Main view). Models load
-    # after the GL context.
-    models <- mutvec_new(tree_count, 0)
-    load_trees(models)
-    place_region(cfg, models, h, bands, tags, span_tiles, half, tree_group_edge, tree_group_cols, 0)
-    render_loop(meshes, models, cam_start, start_view, world_span, chunk_count, tree_group_count, water_y)
+    meshes <- build_world(cfg, params, elevation_levels, span_tiles, chunk_edge, region_chunks,
+                          chunk_count, half, tree_group_edge, tree_group_cols, start_view)
+    render_loop(meshes, cam_start, start_view, world_span, chunk_count, tree_group_count, water_y)

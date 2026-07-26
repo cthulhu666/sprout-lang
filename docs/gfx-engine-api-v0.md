@@ -132,6 +132,27 @@ Lesson (recorded so it isn't re-attempted): a per-cell Sprout decomposition that
 heap-allocates does not scale to 1M cells; the generic primitive is fine, the
 intermediate data structure is the cost. This mirrors real engines — a generic
 mesh API driven by a tight allocation-free mesher, not per-cell quad objects.
+
+**Data-carrying + per-vertex-normal variants (LANDED).** Two supersets of
+`capture_quad` carry per-vertex *data* through the colour attribute for the
+shader-decoded terrain views (biome/relief/flow/lakes), so a view switch is one
+uniform (`set_view_mode`), no re-bake:
+
+```
+capture_quad_data(   …4 corners…, nx,ny,nz,                       # one face normal
+                     tag,tier,dir,band,lake: Int) -> Unit !{IO}
+capture_quad_data_vn(…4 corners…, n0x,n0y,n0z, … n3x,n3y,n3z,     # FOUR per-vertex normals
+                     tag,tier,dir,band,lake: Int) -> Unit !{IO}
+```
+
+The `_vn` form is the **smooth-terrain** primitive (docs/terrain-smooth-mesh-v0.md):
+a continuous heightfield needs a *height-gradient* normal at each vertex to shade
+smoothly (Gouraud) instead of per-facet — `dFdx/dFdz` in-shader cannot help, as a
+flat triangle's derivatives are constant. Data packing is `r=tag, g=tier, b=dir,
+a=band|lake<<7`, identical across the three; only the normal count differs (1 vs 4).
+The capture buffer already stored a normal per vertex, so `_vn` is a 4-line
+`cap_quad_vn` variant in the shim, leaving `capture_quad`/`capture_quad_data` and
+every other captured-mesh demo unchanged.
 The bake geometry is verified by screenshot (as all gfx is), not unit tests.
 
 ### 4c. Retire (LANDED)
