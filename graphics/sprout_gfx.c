@@ -240,6 +240,32 @@ static const char *CUBE_FS =
   "    float g = (60.0 + float(band)*175.0/float(sp))/255.0;\n"
   "    return vec3(g,g,g);\n"
   "}\n"
+  /* World-space value noise (hash-lattice, smooth-interpolated) for asset-free procedural terrain
+   * texture. Stable under camera motion because it's keyed on world XZ, not screen space. */
+  "float hash21(vec2 p){ return fract(sin(dot(p, vec2(127.1,311.7)))*43758.5453); }\n"
+  "float vnoise(vec2 p){\n"
+  "    vec2 i = floor(p); vec2 f = fract(p);\n"
+  "    float a = hash21(i);\n"
+  "    float b = hash21(i+vec2(1.0,0.0));\n"
+  "    float c = hash21(i+vec2(0.0,1.0));\n"
+  "    float d = hash21(i+vec2(1.0,1.0));\n"
+  "    vec2 u = f*f*(3.0-2.0*f);\n"
+  "    return mix(mix(a,b,u.x), mix(c,d,u.x), u.y);\n"
+  "}\n"
+  /* Procedural triplanar-lite for the Main land surface (asset-free; the demo has no textures and the
+   * colour attribute is busy carrying view data, so this modulates the decoded biome colour in place):
+   * a SLOPE SPLAT lays rock over steep faces of ANY biome (cliffs read as rock, not stretched biome
+   * colour), and two octaves of world-space value noise give the surface material texture instead of a
+   * flat patch. Note: this softens SLOPE-driven seams; flat biome-to-biome seams still snap at the tile
+   * edge (a fragment only knows its own tile's tag) — that needs baked per-vertex biome weights. */
+  "vec3 land_material(vec3 base, vec3 nrm, vec2 wxz){\n"
+  "    float slope = 1.0 - clamp(nrm.y, 0.0, 1.0);\n"     /* 0 flat, 1 vertical */
+  "    float rockAmt = smoothstep(0.30, 0.62, slope);\n"
+  "    vec3 rock = vec3(102.0,95.0,86.0)/255.0;\n"
+  "    vec3 col = mix(base, rock, rockAmt);\n"
+  "    float n = 0.6*vnoise(wxz*0.20) + 0.4*vnoise(wxz*0.9);\n"  /* two octaves */
+  "    return col * (0.86 + 0.24*n);\n"                   /* subtle brightness break-up */
+  "}\n"
   "void main() {\n"
   "    vec3 col;\n"
   "    float outA = 1.0;\n"
@@ -269,7 +295,7 @@ static const char *CUBE_FS =
   "        } else if(tier > 0){\n"
   "            col = river_rgb(tier);\n"
   "        } else if(uViewMode == 0){\n"
-  "            col = biome_rgb(tag);\n"
+  "            col = land_material(biome_rgb(tag), normalize(fragNormal), fragWorldXZ);\n"
   "        } else if(uViewMode == 2){\n"
   "            col = dir_rgb(dir);\n"
   "        } else {\n"
