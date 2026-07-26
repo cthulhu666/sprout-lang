@@ -946,12 +946,18 @@ plan" item under "Design Roadmap → Current Priorities".
   `tier=0`, so a river's bed is its land biome and the smooth ribbon is the ONLY water (kills the
   blocky per-tile blue; widening couldn't, since carve is shallow and majors are 3 tiles wide).
   Residual: minor edge stipple where the thin ribbon clips higher land (tune `ribbon_lift`/half-widths).
+- [~] `P3` **Procedural triplanar-lite material (landed 2026-07-26, partial).** Main-view slope-splat
+  (rock over steep faces of any biome) + world-space value-noise surface texture, asset-free and
+  scoped to the `uViewMode==0` land branch (CUBE_FS `land_material`). Softens SLOPE seams and breaks
+  up flat colour. **Still open:** flat biome-to-biome seams (grass→desert on the flats) snap at the
+  tile edge — a fragment only knows its own tile's tag; blending them needs baked **per-vertex biome
+  weights** (a new capture-attribute channel, like the normals). That's the real remaining "splat".
 - [ ] `P3` **Smooth-terrain follow-ups (the AAA layers deliberately deferred).** On top of the smooth
-  landform + rivers: (1) **detail normal maps** for micro-bump without geometry; (2) **splat +
-  triplanar material blending** to soften hard per-tile biome-colour seams; (3) **per-vertex `band`
-  datum** for a smooth Relief ramp (currently per-quad, so Relief facets); (4) terrain **LOD** (the
-  per-chunk mesh is the natural seam); (5) sample terrain height under the ribbon to kill the edge
-  stipple. Ref: `docs/terrain-smooth-mesh-v0.md` §10.
+  landform + rivers + material: (1) **per-vertex biome weights** to blend flat biome seams (above);
+  (2) **detail normal maps** for micro-bump; (3) **per-vertex `band` datum** for a smooth Relief ramp
+  (currently per-quad, so Relief facets); (4) terrain **LOD** (the per-chunk mesh is the natural seam).
+  The ribbon edge-stipple is largely fixed (float above cell terrain, commit `7f1ffcb`); residual
+  faint edge speckle remains. Ref: `docs/terrain-smooth-mesh-v0.md` §10.
 - [x] `P2` **`deriving (Enum)` — constructor ↔ Int, to kill hand-written tag/ordinal boilerplate**
   (surfaced 2026-07-24 building `loam.terrain`; landed 2026-07-24). Shipped as `deriving (Enum)`
   on nullary-only ADTs, synthesizing `ordinal : a -> Int` and `from_ordinal : Int -> Maybe a` with
