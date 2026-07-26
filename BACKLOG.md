@@ -960,9 +960,13 @@ plan" item under "Design Roadmap → Current Priorities".
   int), so the relief is a smooth gradient. Main/Flow unaffected (they don't read band); lake detection
   still works (terrain band stays <128).
 - [ ] `P3` **Smooth-terrain follow-ups (deferred).** (1) **per-vertex biome weights** to blend flat
-  biome seams (the heavier one — needs a new capture attribute + a Sprout biome palette); (2) **detail
-  normal maps** for micro-bump; (3) terrain **LOD** (the per-chunk mesh is the natural seam); (4) the
-  faint residual ribbon edge speckle. Ref: `docs/terrain-smooth-mesh-v0.md` §10.
+  biome seams (the heaviest — needs a new capture attribute + a Sprout biome palette mirroring the
+  shader); (2) **detail normal maps** for micro-bump; (3) terrain **LOD** (the per-chunk mesh is the
+  natural seam); (4) the faint residual ribbon edge speckle (sample terrain height under the ribbon
+  edges, not just the cell); (5) an **elevation redistribution curve** (`elev^k` on the render height,
+  classification untouched) so the big 1024² map reads as plains-and-peaks rather than uniform swells
+  from the overview — relief sets height, this sets character without trading river length via
+  `lattice0`/`octaves`. Ref: `docs/terrain-smooth-mesh-v0.md` §10.
 - [x] `P2` **`deriving (Enum)` — constructor ↔ Int, to kill hand-written tag/ordinal boilerplate**
   (surfaced 2026-07-24 building `loam.terrain`; landed 2026-07-24). Shipped as `deriving (Enum)`
   on nullary-only ADTs, synthesizing `ordinal : a -> Int` and `from_ordinal : Int -> Maybe a` with
