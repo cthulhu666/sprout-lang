@@ -235,9 +235,11 @@ static const char *CUBE_FS =
   "    else if(d==8) return normalize(vec2(-1.0,-1.0));\n"
   "    else return vec2(1.0,0.0);\n"
   "}\n"
-  "vec3 land_rgb(int band){\n"
-  "    int sp = uLevels<=1 ? 1 : uLevels-1;\n"
-  "    float g = (60.0 + float(band)*175.0/float(sp))/255.0;\n"
+  /* Grey relief ramp indexed by the (now fractional, GPU-interpolated) elevation band, so the shaded
+   * relief is a smooth gradient rather than per-tile facets. */
+  "vec3 land_rgb(float band){\n"
+  "    float sp = uLevels<=1 ? 1.0 : float(uLevels-1);\n"
+  "    float g = (60.0 + band*175.0/sp)/255.0;\n"
   "    return vec3(g,g,g);\n"
   "}\n"
   /* World-space value noise (hash-lattice, smooth-interpolated) for asset-free procedural terrain
@@ -278,7 +280,7 @@ static const char *CUBE_FS =
   "        int dir  = int(fragColor.b*255.0 + 0.5);\n"
   "        int abnd = int(fragColor.a*255.0 + 0.5);\n"
   "        bool lake = abnd >= 128;\n"
-  "        int band = lake ? abnd-128 : abnd;\n"
+  "        float band = fragColor.a*255.0 - (lake ? 128.0 : 0.0);\n"
   "        bool water = (tag == 100);\n"   /* ribbon water-surface marker (baked by the demo) */
   "        if(water && uViewMode == 0){\n"
   "            vec3 base = river_rgb(tier);\n"
@@ -623,13 +625,14 @@ static void cap_quad(const float *v0, const float *v1, const float *v2, const fl
  * The two triangles (v0,v1,v2) and (v0,v2,v3) reuse the shared corners' normals. */
 static void cap_quad_vn(const float *v0, const float *v1, const float *v2, const float *v3,
                         const float *n0, const float *n1, const float *n2, const float *n3,
-                        unsigned char r, unsigned char g, unsigned char b, unsigned char a) {
-  cap_vertex(v0[0],v0[1],v0[2], n0[0],n0[1],n0[2], r,g,b,a);
-  cap_vertex(v1[0],v1[1],v1[2], n1[0],n1[1],n1[2], r,g,b,a);
-  cap_vertex(v2[0],v2[1],v2[2], n2[0],n2[1],n2[2], r,g,b,a);
-  cap_vertex(v0[0],v0[1],v0[2], n0[0],n0[1],n0[2], r,g,b,a);
-  cap_vertex(v2[0],v2[1],v2[2], n2[0],n2[1],n2[2], r,g,b,a);
-  cap_vertex(v3[0],v3[1],v3[2], n3[0],n3[1],n3[2], r,g,b,a);
+                        unsigned char r, unsigned char g, unsigned char b,
+                        unsigned char a0, unsigned char a1, unsigned char a2, unsigned char a3) {
+  cap_vertex(v0[0],v0[1],v0[2], n0[0],n0[1],n0[2], r,g,b,a0);
+  cap_vertex(v1[0],v1[1],v1[2], n1[0],n1[1],n1[2], r,g,b,a1);
+  cap_vertex(v2[0],v2[1],v2[2], n2[0],n2[1],n2[2], r,g,b,a2);
+  cap_vertex(v0[0],v0[1],v0[2], n0[0],n0[1],n0[2], r,g,b,a0);
+  cap_vertex(v2[0],v2[1],v2[2], n2[0],n2[1],n2[2], r,g,b,a2);
+  cap_vertex(v3[0],v3[1],v3[2], n3[0],n3[1],n3[2], r,g,b,a3);
 }
 
 /* Append one axis-aligned cube (36 vertices, per-face flat normals) to the capture. Backface
@@ -945,7 +948,8 @@ long long gfx_capture_quad_data_vn(long long p0x, long long p0y, long long p0z,
                                    long long n2x, long long n2y, long long n2z,
                                    long long n3x, long long n3y, long long n3z,
                                    long long tag, long long tier, long long dir,
-                                   long long band, long long lake) {
+                                   long long band0, long long band1, long long band2,
+                                   long long band3, long long lake) {
   if (!g_capturing) return 0;
   cap_reserve(6);
   float v0[3] = { as_float(p0x), as_float(p0y), as_float(p0z) };
@@ -956,9 +960,16 @@ long long gfx_capture_quad_data_vn(long long p0x, long long p0y, long long p0z,
   float n1[3] = { as_float(n1x), as_float(n1y), as_float(n1z) };
   float n2[3] = { as_float(n2x), as_float(n2y), as_float(n2z) };
   float n3[3] = { as_float(n3x), as_float(n3y), as_float(n3z) };
-  unsigned char a = (unsigned char)((band & 0x7F) | (lake ? 0x80 : 0));
+  /* Per-corner elevation band arrives as a Double (avoids a Double→Int in Sprout); round each to the
+   * 0..127 alpha byte, OR in the lake flag. Interpolated across the quad, the GPU recovers a smooth
+   * fractional band for the Relief ramp (which reads fragColor.a*255, not the re-rounded int). */
+  int lk = lake ? 0x80 : 0;
+  unsigned char a0 = (unsigned char)(((int)(as_float(band0) + 0.5f) & 0x7F) | lk);
+  unsigned char a1 = (unsigned char)(((int)(as_float(band1) + 0.5f) & 0x7F) | lk);
+  unsigned char a2 = (unsigned char)(((int)(as_float(band2) + 0.5f) & 0x7F) | lk);
+  unsigned char a3 = (unsigned char)(((int)(as_float(band3) + 0.5f) & 0x7F) | lk);
   cap_quad_vn(v0, v1, v2, v3, n0, n1, n2, n3,
-              (unsigned char)tag, (unsigned char)tier, (unsigned char)dir, a);
+              (unsigned char)tag, (unsigned char)tier, (unsigned char)dir, a0, a1, a2, a3);
   return 0;
 }
 

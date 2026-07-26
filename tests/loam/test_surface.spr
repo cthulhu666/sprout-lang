@@ -1,7 +1,7 @@
 import stdlib.test (TestState, new_state, assert_true, summary)
 import stdlib.math (fabs, sqrt)
 import stdlib.mutable (MutMatrix, mutmatrix_new, mutmatrix_set)
-import loam.surface (ground_y, sink, normal_from_slopes, corner_height, corner_normal)
+import loam.surface (ground_y, sink, normal_from_slopes, corner_height, corner_normal, corner_avg_i)
 
 # Headless coverage for loam.surface — the pure geometry of the CONTINUOUS terrain mesh (rung (c),
 # docs/terrain-smooth-mesh-v0.md). All math, no window: passing means the de-quantized ground height,
@@ -21,6 +21,16 @@ fn heights2() -> MutMatrix Double !{IO} =
     mutmatrix_set(m, 0, 1, 3.0)
     mutmatrix_set(m, 1, 0, 5.0)
     mutmatrix_set(m, 1, 1, 7.0)
+    m
+
+# A 2x2 INTEGER grid (rows = z, cols = x): [[1,3],[5,7]] — the corner_avg_i analogue of heights2.
+fn bands2() -> MutMatrix Int !{IO} =
+  do
+    m <- mutmatrix_new(2, 2, 0)
+    mutmatrix_set(m, 0, 0, 1)
+    mutmatrix_set(m, 0, 1, 3)
+    mutmatrix_set(m, 1, 0, 5)
+    mutmatrix_set(m, 1, 1, 7)
     m
 
 # A 3x3 CORNER grid tilted purely east: cy[i][j] = j (height rises by 1 per +x step).
@@ -89,6 +99,15 @@ fn main() -> Unit !{IO} =
     # Far map corner (2,2) clamps to h[1][1] = 7.
     ch22 <- corner_height(hs, 2, 2, 2)
     assert_true(state, "far map-corner vertex is the single cell", near(ch22, 7.0))
+
+    # --- corner_avg_i: same averaging over an Int grid, returning the fractional Double ---
+    bs <- bands2()
+    ci11 <- corner_avg_i(bs, 2, 1, 1)
+    assert_true(state, "corner_avg_i interior averages all four bands", near(ci11, 4.0))
+    ci00 <- corner_avg_i(bs, 2, 0, 0)
+    assert_true(state, "corner_avg_i map-corner is the single band", near(ci00, 1.0))
+    ci01 <- corner_avg_i(bs, 2, 0, 1)
+    assert_true(state, "corner_avg_i edge averages the two edge bands", near(ci01, 2.0))
 
     # --- corner_normal: gradient over the corner grid, border-clamped ---
     cy <- corner_east_tilt()

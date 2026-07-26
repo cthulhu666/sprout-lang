@@ -56,6 +56,21 @@ export fn corner_height(heights: MutMatrix Double, span: Int, ci: Int, cj: Int) 
     d <- mutmatrix_at_or(heights, z1, x1, 0.0)
     (a + b + c + d) / 4.0
 
+# Same corner averaging as corner_height, but over an INTEGER cell grid `m` (e.g. the elevation-band
+# datum), returning the fractional Double average. A view bakes this per mesh corner so a per-quad
+# integer datum (which facets across tile boundaries) instead interpolates smoothly across the mesh.
+export fn corner_avg_i(m: MutMatrix Int, span: Int, ci: Int, cj: Int) -> Double !{IO} =
+  do
+    let x0 = clamp(cj - 1, 0, span - 1)
+    let x1 = clamp(cj, 0, span - 1)
+    let z0 = clamp(ci - 1, 0, span - 1)
+    let z1 = clamp(ci, 0, span - 1)
+    a <- mutmatrix_at_or(m, z0, x0, 0)
+    b <- mutmatrix_at_or(m, z0, x1, 0)
+    c <- mutmatrix_at_or(m, z1, x0, 0)
+    d <- mutmatrix_at_or(m, z1, x1, 0)
+    to_double(a + b + c + d) / 4.0
+
 # Unit normal at mesh corner (ci, cj), central-differenced over the CORNER height grid `cy`
 # (cspan×cspan, cspan = span+1); neighbours clamped at the border. `cell` is the tile spacing (world
 # units between adjacent corners). Wraps normal_from_slopes with the four clamped corner-height reads.

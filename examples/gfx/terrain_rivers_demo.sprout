@@ -3,7 +3,7 @@ module examples.gfx.terrain_rivers_demo
 import stdlib.gfx
 import loam.terrain (Config, tile_kind_at, tile_band_at, tile_kind_tag, spatial_hash, chunk_linear_index, tile_kind_of, band_of, elev_at, sea_level)
 import loam.hydrology (Hydrology, HydroParams, compute_hydrology, hydro_tier, hydro_dir, hydro_filled, carve_depth, widen_rivers, meander_rivers, dir_delta)
-import loam.surface (ground_y, sink, corner_height, corner_normal)
+import loam.surface (ground_y, sink, corner_height, corner_normal, corner_avg_i)
 import loam.ribbon (RibbonPos, smooth_positions, ribbon_px, ribbon_pz)
 import stdlib.math (sqrt)
 import loam.config (parse_config, cfg_int)
@@ -222,6 +222,13 @@ fn bake_tile(cfg: Config, cy: MutMatrix Double, bands: MutMatrix Int, tags: MutM
     ysw <- mutmatrix_at_or(cy, gz + 1, gx, 0.0)
     yse <- mutmatrix_at_or(cy, gz + 1, gx + 1, 0.0)
     yne <- mutmatrix_at_or(cy, gz, gx + 1, 0.0)
+    # Per-corner blended elevation band (average of the touching tiles' bands) so the Relief ramp
+    # interpolates smoothly across the mesh instead of faceting per tile. Passed as Doubles; the shim
+    # rounds each to the alpha byte and the GPU re-interpolates it back to a smooth fractional band.
+    bnw <- corner_avg_i(bands, span, gz, gx)
+    bsw <- corner_avg_i(bands, span, gz + 1, gx)
+    bse <- corner_avg_i(bands, span, gz + 1, gx + 1)
+    bne <- corner_avg_i(bands, span, gz, gx + 1)
     # Per-vertex gradient normals at the same corners (cspan = span + 1). Shared corners get identical
     # normals from adjacent tiles, so the shading is continuous across tile/chunk seams.
     nnw <- corner_normal(cy, span + 1, gz, gx, tile_size)
@@ -239,7 +246,7 @@ fn bake_tile(cfg: Config, cy: MutMatrix Double, bands: MutMatrix Int, tags: MutM
                     do
                       gfx.capture_quad_data_vn(x0, ynw, z0, x0, ysw, z1, x1, yse, z1, x1, yne, z0,
                                                a0, b0, c0, a1, b1, c1, a2, b2, c2, a3, b3, c3,
-                                               tag, 0, dir, band, 0)
+                                               tag, 0, dir, bnw, bsw, bse, bne, 0)
                       # Rim skirt: drop the boundary edge straight to y=0 (replaces the old per-tile
                       # step walls). Only where the neighbour is off-map. Backface culling is off, so
                       # winding is not critical; the outward face normal is flat (per-face is fine here).

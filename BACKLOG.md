@@ -952,12 +952,17 @@ plan" item under "Design Roadmap → Current Priorities".
   up flat colour. **Still open:** flat biome-to-biome seams (grass→desert on the flats) snap at the
   tile edge — a fragment only knows its own tile's tag; blending them needs baked **per-vertex biome
   weights** (a new capture-attribute channel, like the normals). That's the real remaining "splat".
-- [ ] `P3` **Smooth-terrain follow-ups (the AAA layers deliberately deferred).** On top of the smooth
-  landform + rivers + material: (1) **per-vertex biome weights** to blend flat biome seams (above);
-  (2) **detail normal maps** for micro-bump; (3) **per-vertex `band` datum** for a smooth Relief ramp
-  (currently per-quad, so Relief facets); (4) terrain **LOD** (the per-chunk mesh is the natural seam).
-  The ribbon edge-stipple is largely fixed (float above cell terrain, commit `7f1ffcb`); residual
-  faint edge speckle remains. Ref: `docs/terrain-smooth-mesh-v0.md` §10.
+- [x] `P3` **Per-vertex `band` datum — smooth Relief ramp (landed 2026-07-26).** The `band` datum was
+  per-quad, so the Relief/Lakes grey ramp faceted per tile. Now the bake blends `band` per mesh corner
+  (loam.surface.corner_avg_i, tested) and carries four per-vertex bands through `capture_quad_data_vn`
+  (passed as Doubles → the shim rounds each to the alpha byte, dodging the missing Double→Int); the
+  GPU re-interpolates it and `land_rgb` reads the FRACTIONAL band (`fragColor.a*255`, not the re-rounded
+  int), so the relief is a smooth gradient. Main/Flow unaffected (they don't read band); lake detection
+  still works (terrain band stays <128).
+- [ ] `P3` **Smooth-terrain follow-ups (deferred).** (1) **per-vertex biome weights** to blend flat
+  biome seams (the heavier one — needs a new capture attribute + a Sprout biome palette); (2) **detail
+  normal maps** for micro-bump; (3) terrain **LOD** (the per-chunk mesh is the natural seam); (4) the
+  faint residual ribbon edge speckle. Ref: `docs/terrain-smooth-mesh-v0.md` §10.
 - [x] `P2` **`deriving (Enum)` — constructor ↔ Int, to kill hand-written tag/ordinal boilerplate**
   (surfaced 2026-07-24 building `loam.terrain`; landed 2026-07-24). Shipped as `deriving (Enum)`
   on nullary-only ADTs, synthesizing `ordinal : a -> Int` and `from_ordinal : Int -> Maybe a` with
