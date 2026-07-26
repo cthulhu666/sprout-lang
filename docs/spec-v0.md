@@ -226,8 +226,9 @@ add3(_, _, 3)  # ≡ \(p, q) -> add3(p, q, 3)  (multiple holes -> multi-param la
 - Composed with the pipe operator, a placeholder gives **positional** control:
   because `f(a, _)` is already a lambda, `x |> f(a, _)` applies it to `x`, i.e.
   `f(a, x)` — the piped value fills the hole rather than being appended as the
-  final argument. (The no-placeholder multi-argument pipe form is governed by the
-  `|>` rule and remains under review; see `docs/currying-and-pipe-decision-v1.md`.)
+  final argument. Bare multi-argument pipe stays append (§5.5); `_` is the
+  explicit way to place the piped value elsewhere. This settles the `|>` multi-arg
+  question of `docs/currying-and-pipe-decision-v1.md`.
 
 ### 5.4 If expression
 
@@ -300,7 +301,12 @@ The pipe operator is a binary operator that threads a value into the final
 argument position of the expression on its right:
 
 - `value |> f` means `f(value)`
-- `value |> g(a, b)` means `g(a, b, value)`
+- `value |> g(a, b)` means `g(a, b, value)` — with no placeholder, the piped value
+  is appended as the final argument (data-last convention).
+- `value |> g(a, _)` means `g(a, value)` — a `_` placeholder in the piped call
+  fills at the hole's position instead of the final position (§5.3), the explicit
+  way to thread a value into a non-final argument. Append and hole-fill coincide
+  only when the hole is last.
 
 It associates to the left, so `x |> f(a) |> g(b)` means `g(b, f(a, x))`.
 

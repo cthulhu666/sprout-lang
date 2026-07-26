@@ -397,8 +397,9 @@ otherwise C-b**, which delivers first-class, any-position partials at parser cos
 1. **Curried (A), n-ary (C-a), or n-ary + placeholder partials (C-b)?** This is the ruling
    everything else follows from. C-b is C-a plus the §9a placeholder sugar; pick it when
    passing partials around matters but A's runtime cost is unwanted.
-2. If **C-a or C-b:** which backlog #12 resolution — keep-as-is, Elixir value-first, or
-   explicit-lambda?
+2. ~~If **C-a or C-b:** which backlog #12 resolution?~~ **RESOLVED (C-b):** bare multi-arg
+   `|>` keeps the append form; the `_` placeholder gives explicit positional fill
+   (`x |> f(_, b)` = `f(x, b)`). Normative in `spec-v0.md` §5.5.
 3. Regardless of 1: schedule the common **arity-field + clean-panic** step (Section 8.5 PR 1 /
    Section 9) to kill the Defect #2 segfault now, since it is shared by both packages.
 

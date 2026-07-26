@@ -730,11 +730,13 @@ dot-guard `infer.is_lowercase_name` has (a dotted name is never a type variable)
    RHS) that are not compositionally obvious. Options: drop the multi-arg form and require
    explicit lambdas (`x |> fn(y) = f(a, y)`), adopt Elixir-style value-first (`f(x, a, b)`),
    or keep as-is. First-class use is already covered by `pipe_apply` in the prelude.
-   Decision deferred; current behaviour unchanged.
-   **Coupled with Current Priorities item 9 (currying model)** — the two are one decision,
-   framed together in [currying-and-pipe-decision-v1.md](./docs/currying-and-pipe-decision-v1.md):
-   a curried Sprout collapses this operator to the single rule `x |> g` ≡ `g(x)`; an n-ary
-   Sprout keeps it as parser sugar and resolves the two-mode shape syntactically.
+   **RESOLVED 2026-07-26 (Package C-b).** Bare multi-arg `x |> f(a, b)` keeps the append form
+   (`f(a, b, x)`, data-last). The `_`-placeholder partial (Current Priorities item 9 / part 1,
+   landed) is the explicit way to place the piped value at a non-final position:
+   `x |> f(_, b)` = `f(x, b)`, `x |> f(a, _)` = `f(a, x)` (append and hole-fill coincide only
+   when the hole is last). The "two-mode / not compositionally obvious" concern is retired —
+   position is now explicit via `_` rather than implicit. Normative in `spec-v0.md` §5.5;
+   rationale in [currying-and-pipe-decision-v1.md](./docs/currying-and-pipe-decision-v1.md).
 13. Add logging, debugging, profiling, and introspection to the self-hosted compiler (future).
    Design doc: [observability-guard-rails.md](./docs/observability-guard-rails.md).
    These features are not scheduled, but the design constraints in that doc must be respected in all Stage 2+ self-hosted compiler code so they remain practical to add. The six constraints — source locations first-class, explicit typed passes, explicit capability passing, no premature pass fusion, type survival into typed core, accurate effect annotations — are active guard rails, not future work items.
