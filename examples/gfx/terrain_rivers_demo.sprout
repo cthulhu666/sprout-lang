@@ -113,7 +113,7 @@ let ribbon_passes = 2  # centerline smoothing passes (0 = blocky per-tile look)
 let ribbon_hw_creek = 0.34  # half-width (tiles) by tier: creek / river / major
 let ribbon_hw_river = 0.64
 let ribbon_hw_major = 1.05
-let ribbon_lift = 0.1  # ELEVATION BANDS the ribbon floats above the fill (× terrain_step in bake_ribbon)
+let ribbon_lift = 0.1  # clearance (ELEVATION BANDS × terrain_step) above max(fill, cell terrain) — see bake_ribbon
 # Water-surface marker baked into the ribbon quads' tag byte (biomes are 0..7, so 100 is a safe
 # sentinel). CUBE_FS (graphics/sprout_gfx.c) renders tag==100 as translucent animated water in Main.
 let ribbon_water_tag = 100
@@ -354,14 +354,28 @@ fn ribbon_half_width(tier: Int) -> Double =
   else if tier == 2 then ribbon_hw_river
   else ribbon_hw_creek
 
+# Highest of the four mesh corners over cell (gx, gz), read from the corner grid `cy` (all Int-indexed,
+# so no Double→grid conversion). The ribbon floats above THIS so a bumpy bed (high octaves) never pokes
+# up through the flat water surface — the dominant source of the ribbon "stipple".
+fn cell_top_max(cy: MutMatrix Double, gx: Int, gz: Int) -> Double !{IO} =
+  do
+    a <- mutmatrix_at_or(cy, gz, gx, 0.0)
+    b <- mutmatrix_at_or(cy, gz + 1, gx, 0.0)
+    c <- mutmatrix_at_or(cy, gz + 1, gx + 1, 0.0)
+    d <- mutmatrix_at_or(cy, gz, gx + 1, 0.0)
+    let ab = if a > b then a else b
+    let cd = if c > d then c else d
+    if ab > cd then ab else cd
+
 # Lay one segment of the smooth water ribbon: a quad from this river cell's smoothed centerline point
 # to its flow-downstream neighbour's, at the filled water level (ground_y of the fill — the SAME
 # continuous mapping as the terrain, so the ribbon tracks the surface at any relief), widened by tier
 # along the flow perpendicular. Consecutive segments share an endpoint, so the ribbon is continuous.
 # Emitted with tag=ribbon_water_tag so CUBE_FS renders it as translucent animated water in Main (and
 # flat river_rgb via the tier field in the other views). An outlet (dir 0) is covered by its upstream
-# neighbour's segment.
-fn bake_ribbon(cfg: Config, h: Hydrology, rp: RibbonPos, levels: Int, terrain_step: Double, span: Int, gx: Int, gz: Int, half: Double) -> Unit !{IO} =
+# neighbour's segment. Each end is floated above BOTH the fill level and the cell's highest terrain
+# corner (cell_top_max), so the flat water never z-fights / gets poked through by the bumpy bed.
+fn bake_ribbon(cfg: Config, cy: MutMatrix Double, h: Hydrology, rp: RibbonPos, levels: Int, terrain_step: Double, span: Int, gx: Int, gz: Int, half: Double) -> Unit !{IO} =
   do
     tier <- hydro_tier(h, gx, gz)
     dir <- hydro_dir(h, gx, gz)
@@ -391,24 +405,30 @@ fn bake_ribbon(cfg: Config, h: Hydrology, rp: RibbonPos, levels: Int, terrain_st
                 let hw = ribbon_half_width(tier) * tile_size
                 flc <- hydro_filled(h, gx, gz)
                 fld <- hydro_filled(h, nx, nz)
-                # Float the ribbon ribbon_lift BANDS above the fill (× terrain_step) so the clearance
-                # scales with the vertical relief — a fixed world-unit lift that clears flat terrain
-                # would clip through the taller, rougher terrain at high relief.
-                let yc = ground_y(flc, levels, terrain_step, tile_size) + (ribbon_lift * terrain_step)
-                let yd = ground_y(fld, levels, terrain_step, tile_size) + (ribbon_lift * terrain_step)
+                # Each end sits above max(fill level, cell's highest terrain corner), + a clearance that
+                # scales with relief (ribbon_lift bands × terrain_step). Clamping to the terrain corner
+                # keeps the flat water from being poked through by the bumpy bed at high octaves; the
+                # fill level dominates in the (common) case where the bed is carved below it.
+                let clr = ribbon_lift * terrain_step
+                cmc <- cell_top_max(cy, gx, gz)
+                cmd <- cell_top_max(cy, nx, nz)
+                let basec = ground_y(flc, levels, terrain_step, tile_size)
+                let based = ground_y(fld, levels, terrain_step, tile_size)
+                let yc = (if basec > cmc then basec else cmc) + clr
+                let yd = (if based > cmd then based else cmd) + clr
                 gfx.capture_quad_data(cx + (px * hw), yc, cz + (pz * hw),
                                       cx - (px * hw), yc, cz - (pz * hw),
                                       dxw - (px * hw), yd, dzw - (pz * hw),
                                       dxw + (px * hw), yd, dzw + (pz * hw),
                                       0.0, 1.0, 0.0, ribbon_water_tag, tier, dir, band_of(flc, levels), 0)
 
-fn bake_chunk_ribbon(cfg: Config, h: Hydrology, rp: RibbonPos, levels: Int, terrain_step: Double, span: Int, size: Int, cx: Int, cz: Int, r: Int, c: Int) -> Unit !{IO} =
+fn bake_chunk_ribbon(cfg: Config, cy: MutMatrix Double, h: Hydrology, rp: RibbonPos, levels: Int, terrain_step: Double, span: Int, size: Int, cx: Int, cz: Int, r: Int, c: Int) -> Unit !{IO} =
   if r >= size then ()
-  else if c >= size then bake_chunk_ribbon(cfg, h, rp, levels, terrain_step, span, size, cx, cz, r + 1, 0)
+  else if c >= size then bake_chunk_ribbon(cfg, cy, h, rp, levels, terrain_step, span, size, cx, cz, r + 1, 0)
   else
     do
-      bake_ribbon(cfg, h, rp, levels, terrain_step, span, (cx * size) + c, (cz * size) + r, to_double(span) / 2.0)
-      bake_chunk_ribbon(cfg, h, rp, levels, terrain_step, span, size, cx, cz, r, c + 1)
+      bake_ribbon(cfg, cy, h, rp, levels, terrain_step, span, (cx * size) + c, (cz * size) + r, to_double(span) / 2.0)
+      bake_chunk_ribbon(cfg, cy, h, rp, levels, terrain_step, span, size, cx, cz, r, c + 1)
 
 # Bake each chunk into TWO static meshes — opaque terrain and translucent water ribbon — recording
 # both handles at cz*ncx + cx. Per-chunk baking lets the frame loop frustum-cull both; the terrain
@@ -424,7 +444,7 @@ fn bake_region(cfg: Config, cy: MutMatrix Double, bands: MutMatrix Int, tags: Mu
       handle <- gfx.mesh_capture_end()
       mutvec_set(meshes, (cz * ncx) + cx, handle)
       gfx.mesh_capture_begin()
-      bake_chunk_ribbon(cfg, h, rp, levels, terrain_step, span, size, cx, cz, 0, 0)
+      bake_chunk_ribbon(cfg, cy, h, rp, levels, terrain_step, span, size, cx, cz, 0, 0)
       rhandle <- gfx.mesh_capture_end()
       mutvec_set(ribbon_meshes, (cz * ncx) + cx, rhandle)
       bake_region(cfg, cy, bands, tags, h, rp, levels, terrain_step, span, size, ncx, ncz, meshes, ribbon_meshes, cx + 1, cz)
