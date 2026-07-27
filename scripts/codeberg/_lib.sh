@@ -135,6 +135,18 @@ ci_is_green() {
   [ "$state" = "success" ]
 }
 
+# Pure: succeeds (0) iff an HTTP status from the ff-merge POST means the merge
+# actually landed — Gitea returns 200 (some builds 201). EVERYTHING else means
+# "did not merge". Critically this includes 500, which THIS Gitea returns for a
+# non-fast-forwardable fast-forward-only merge (not the 405/409 you'd expect;
+# observed on PR#271, 2026-07-27). So a caller must NEVER treat a non-2xx code
+# as a fatal/unknown error on its own — it must diagnose fast-forwardability
+# (git merge-base --is-ancestor) to route between retry, rebase, and escalate.
+# Kept pure/offline for unit testing — see pr-babysit-test.sh.
+is_merge_success() {
+  [ "${1:-}" = "200" ] || [ "${1:-}" = "201" ]
+}
+
 # Build one pr-monitor event line. Args: <pr> <state> <merged> <ci> <sha>.
 # Emits the FULL <sha> unchanged: the caller feeds this line's sha= field into
 # the ff-merge POST's head_commit_id, which requires the full 40-char SHA — a
