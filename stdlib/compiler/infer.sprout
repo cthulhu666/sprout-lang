@@ -3465,10 +3465,13 @@ export fn typecheck_decls(
         match check_overlapping_instances(decls, dict_empty()) with
         | Just err_msg -> typed_ast.TypedErr(dummy_pos(), err_msg)
         | Nothing ->
-            # Wrap scanned_env as GlobalEnv at this seam — scanned_env is the
-            # output of pre_scan_fn_decls (Dict, raw pre-pass). From here on
-            # the env flows between decls as the wrap-protected GlobalEnv.
-            typecheck_decls_inner(state, decls, GlobalEnv(scanned_env), subst, eff_subst, dict_empty(), Nil, unifier.ftv_env(scanned_env))
+            match check_missing_superclass_instances(decls) with
+            | Just err_msg -> typed_ast.TypedErr(dummy_pos(), err_msg)
+            | Nothing ->
+                # Wrap scanned_env as GlobalEnv at this seam — scanned_env is the
+                # output of pre_scan_fn_decls (Dict, raw pre-pass). From here on
+                # the env flows between decls as the wrap-protected GlobalEnv.
+                typecheck_decls_inner(state, decls, GlobalEnv(scanned_env), subst, eff_subst, dict_empty(), Nil, unifier.ftv_env(scanned_env))
 
 # ---------------------------------------------------------------------------
 # Strict type-name validation pass
@@ -3635,6 +3638,92 @@ fn check_overlapping_instances(decls: List ast.Decl, seen: Dict Bool) -> Maybe S
               | Just _ -> Just(str_concat("Overlapping instances for ", cls))
               | Nothing -> check_overlapping_instances(rest, dict_set(key, true, seen))
       | _ -> check_overlapping_instances(rest, seen)
+
+# ---------------------------------------------------------------------------
+# Superclass-instance completeness
+# ---------------------------------------------------------------------------
+#
+# `class Sub a where Sup a` makes Sup a superclass of Sub, so an `instance Sub T`
+# requires an `instance Sup T`. A forwarded Sub dict is super-expanded to also carry
+# Sup's methods; a missing Sup instance leaves that slot unresolvable and lowering
+# null-fills it → SIGSEGV at the call site (BACKLOG Dispatch Soundness). Reject it at
+# the instance site, mirroring GHC's "arising from the superclasses of an instance
+# declaration". Decl-scoped: the bundled prelude's classes/instances are in `decls`,
+# so this covers prelude and user instances alike.
+fn check_missing_superclass_instances(decls: List ast.Decl) -> Maybe String =
+  check_inst_supers_go(decls, build_class_super_map(decls, dict_empty()), build_inst_key_set(decls, dict_empty()))
+
+fn check_inst_supers_go(decls: List ast.Decl, super_map: Dict (List String), inst_set: Dict Bool) -> Maybe String =
+  match decls with
+  | Nil -> Nothing
+  | Cons decl rest ->
+      match decl with
+      | ast.InstanceDecl constraint _ _ _ ->
+          match superclass_check_one(constraint, super_map, inst_set) with
+          | Just err -> Just(err)
+          | Nothing -> check_inst_supers_go(rest, super_map, inst_set)
+      | _ -> check_inst_supers_go(rest, super_map, inst_set)
+
+fn superclass_check_one(constraint: ast.TypeConstraint, super_map: Dict (List String), inst_set: Dict Bool) -> Maybe String =
+  match constraint with
+  | ast.TypeConstraint class_name type_args ->
+      match type_args with
+      | Nil -> Nothing
+      | [head_te | _] ->
+          check_super_list(
+            super_list_of(string.after_last_dot(class_name), super_map),
+            string.after_last_dot(class_name),
+            type_head_str(type_from_ast(head_te, dict_empty())),
+            inst_set)
+
+fn check_super_list(supers: List String, cls: String, head: String, inst_set: Dict Bool) -> Maybe String =
+  match supers with
+  | Nil -> Nothing
+  | Cons super_name rest ->
+      match dict_get(super_name ++ ":" ++ head, inst_set) with
+      | Just _ -> check_super_list(rest, cls, head, inst_set)
+      | Nothing -> Just("No instance of " ++ super_name ++ " for " ++ string.after_last_dot(head)
+                        ++ ", required as a superclass of " ++ cls)
+
+fn super_list_of(cls: String, super_map: Dict (List String)) -> List String =
+  match dict_get(cls, super_map) with
+  | Just supers -> supers
+  | Nothing -> Nil
+
+# class (bare name) -> its superclass class names (bare), from decl ClassDecls.
+fn build_class_super_map(decls: List ast.Decl, acc: Dict (List String)) -> Dict (List String) =
+  match decls with
+  | Nil -> acc
+  | Cons decl rest ->
+      match decl with
+      | ast.ClassDecl name _ _ superclasses _ ->
+          build_class_super_map(rest,
+            dict_set(string.after_last_dot(name), super_names(superclasses), acc))
+      | _ -> build_class_super_map(rest, acc)
+
+fn super_names(supers: List ast.TypeConstraint) -> List String =
+  match supers with
+  | Nil -> Nil
+  | Cons c rest ->
+      match c with
+      | ast.TypeConstraint sname _ -> Cons(string.after_last_dot(sname), super_names(rest))
+
+# set of "{bare_class}:{head}" for every instance declared.
+fn build_inst_key_set(decls: List ast.Decl, acc: Dict Bool) -> Dict Bool =
+  match decls with
+  | Nil -> acc
+  | Cons decl rest ->
+      match decl with
+      | ast.InstanceDecl constraint _ _ _ ->
+          match constraint with
+          | ast.TypeConstraint class_name type_args ->
+              match type_args with
+              | Nil -> build_inst_key_set(rest, acc)
+              | [head_te | _] ->
+                  build_inst_key_set(rest,
+                    dict_set(string.after_last_dot(class_name) ++ ":"
+                             ++ type_head_str(type_from_ast(head_te, dict_empty())), true, acc))
+      | _ -> build_inst_key_set(rest, acc)
 
 # Pre-scan pass: register FnDecl signatures (with their constraint field) and
 # TypeDecl constructors for all declarations without typechecking bodies.

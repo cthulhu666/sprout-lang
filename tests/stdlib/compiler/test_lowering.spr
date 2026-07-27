@@ -453,7 +453,7 @@ fn main() -> Unit !{IO} =
     # forwarded MyOrd (Box a) key → forwarded slot used directly (2-arg inner call).
     # The forwarded MyOrd (Box a) dict already carries its own + superclass slots, so
     # they are not reconstructed here (was 4 args via resolve_tdict).
-    r_p1b_super <- run_lower("class MyEq a {\n  fn my_eq(x: a, y: a) -> Bool\n}\nclass MyOrd a where MyEq a {\n  fn my_less(x: a, y: a) -> Bool\n}\ntype Box a = Box a\ninstance MyEq Int {\n  fn my_eq(x: Int, y: Int) -> Bool = true\n}\ninstance MyOrd Int {\n  fn my_less(x: Int, y: Int) -> Bool = true\n}\ninstance MyOrd (Box a) where MyOrd a {\n  fn my_less(x: Box a, y: Box a) -> Bool = true\n}\nfn test(f: (Box a -> Box a -> Bool) -> Bool) -> Bool where MyOrd (Box a), MyOrd a = f(my_less)")
+    r_p1b_super <- run_lower("class MyEq a {\n  fn my_eq(x: a, y: a) -> Bool\n}\nclass MyOrd a where MyEq a {\n  fn my_less(x: a, y: a) -> Bool\n}\ntype Box a = Box a\ninstance MyEq Int {\n  fn my_eq(x: Int, y: Int) -> Bool = true\n}\ninstance MyOrd Int {\n  fn my_less(x: Int, y: Int) -> Bool = true\n}\ninstance MyOrd (Box a) where MyOrd a {\n  fn my_less(x: Box a, y: Box a) -> Bool = true\n}\ninstance MyEq (Box a) where MyEq a {\n  fn my_eq(x: Box a, y: Box a) -> Bool = true\n}\nfn test(f: (Box a -> Box a -> Bool) -> Bool) -> Bool where MyOrd (Box a), MyOrd a = f(my_less)")
     assert_true(state, "p1b-super-inner: lowers ok", is_lower_ok(r_p1b_super))
     assert_eq(state, "p1b-super-inner: forwarded slot used directly (2-arg inner call)", lowered_fn_lambda_inner_arg_count(r_p1b_super, "test"), 2)
 

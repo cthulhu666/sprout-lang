@@ -1,0 +1,25 @@
+module main
+
+# instance Sub Widget is declared, but its superclass instance Sup Widget is not.
+# The compiler must reject this (a forwarded Sub dict would carry an unresolvable
+# Sup slot and null-fill at runtime). See BACKLOG Dispatch Soundness.
+
+class Sup a {
+  fn sup_m(x: a) -> a
+}
+
+class Sub a where Sup a {
+  fn sub_m(x: a) -> a
+}
+
+type Widget =
+  | Widget
+
+instance Sub Widget {
+  fn sub_m(x: Widget) -> Widget = x
+}
+
+# Use the instance so it survives to typecheck (an unused instance is pruned).
+fn main() -> Unit !{IO} =
+  match sub_m(Widget) with
+  | Widget -> ()
