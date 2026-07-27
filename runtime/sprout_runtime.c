@@ -5199,6 +5199,15 @@ static void json_append_value(ByteBuf* out, long long value) {
     char int_buf[64];
     snprintf(int_buf, sizeof(int_buf), "%lld", sprout_field(value, 0));
     buf_append_cstr(out, int_buf);
+  } else if (json_ctor_is(ctor_name, "JsonFloat")) {
+    /* JsonFloat holds a Double (i64 IEEE-754 bits in field 0). %.17g round-trips it as a
+     * valid JSON number literal, which the Sprout json_parse re-reads via parse_double. */
+    double d;
+    long long bits = sprout_field(value, 0);
+    memcpy(&d, &bits, sizeof(d));
+    char flt_buf[64];
+    snprintf(flt_buf, sizeof(flt_buf), "%.17g", d);
+    buf_append_cstr(out, flt_buf);
   } else if (json_ctor_is(ctor_name, "JsonString")) {
     json_append_escaped_string(out, (const char*)(uintptr_t)sprout_field(value, 0));
   } else if (json_ctor_is(ctor_name, "JsonArray")) {
@@ -5442,6 +5451,12 @@ long long json_stringify(long long value) {
   char* result = sprout_gc_adopt_cstr(raw, raw_len, "json_stringify: out of memory");  return (long long)(uintptr_t)result;
 }
 
+/* SUPERSEDED: JSON parsing now lives in pure Sprout (stdlib/json.sprout `json_parse`), which also
+ * supports float numbers (JsonFloat). This C tree-parser is no longer bound by any `extern fn` and
+ * is dead from Sprout's side. It is kept (rather than deleted) only because its low-level helpers
+ * sprout_json_skip_ws / sprout_json_parse_string / sprout_json_parse_hex4 are SHARED with the
+ * separate by-key extractor sprout_json_extract_string/_int; removing this cluster wholesale would
+ * break those. Tracked for removal in BACKLOG (extract the shared helpers, drop the rest). */
 long long json_parse(long long raw_val) {
   const char* raw = (const char*)raw_val;
   if (raw == NULL) tcp_fail("json_parse expects String");

@@ -1285,6 +1285,66 @@ export fn parse_int(s: String) -> Maybe Int =
   | Just c ->
       if c == '-' then negate_maybe(accum_digits(s, 1, 0, false))
       else accum_digits(s, 0, 0, false)
+
+# 10^k as a Double for any k (k < 0 divides). Places the fraction and applies a
+# scientific-notation exponent in parse_double.
+fn pow10_pos(k: Int) -> Double = if k <= 0 then 1.0 else 10.0 * pow10_pos(k - 1)
+fn pow10(k: Int) -> Double = if k < 0 then 1.0 / pow10_pos(0 - k) else pow10_pos(k)
+
+# Split `s` on the first occurrence of single-char `sep` into (before, after); Nothing if
+# absent. Prelude-native (str_find/str_slice) since split_once lives in stdlib.string, which
+# depends on prelude. NB str_slice's third arg is a LENGTH, not an end index (both char-based).
+fn split_on_char(s: String, sep: String) -> Maybe (String, String) =
+  let i = str_find(s, sep)
+  in if i < 0 then Nothing
+     else Just((str_slice(s, 0, i), str_slice(s, i + str_len(sep), str_len(s))))
+
+# A run of decimal digits as a non-negative Double; empty string -> 0.0 (so an absent int or
+# fraction part reads as zero). Nothing on any non-digit. Leading zeros are preserved by the
+# caller passing the substring's length to pow10.
+fn digits_double(s: String) -> Maybe Double =
+  if str_len(s) <= 0 then Just(0.0)
+  else match parse_int(s) with
+       | Nothing -> Nothing
+       | Just n -> if n < 0 then Nothing else Just(to_double(n))
+
+# Non-negative mantissa "int[.frac]" -> Double. `int` or `frac` may be empty (".5", "5.");
+# a lone "." is rejected.
+fn parse_mantissa(mant: String) -> Maybe Double =
+  match split_on_char(mant, ".") with
+  | Nothing -> if str_len(mant) <= 0 then Nothing else digits_double(mant)
+  | Just (ip, fp) ->
+      if (str_len(ip) <= 0) && (str_len(fp) <= 0) then Nothing
+      else match (digits_double(ip), digits_double(fp)) with
+           | (Just iv, Just fv) -> Just(iv + (fv / pow10(str_len(fp))))
+           | _ -> Nothing
+
+# Split off an optional 'e'/'E' exponent: returns (mantissa, exponent). No exponent -> 0;
+# a present-but-malformed exponent -> Nothing.
+fn split_exponent(body: String) -> Maybe (String, Int) =
+  match (match split_on_char(body, "e") with
+         | Just p -> Just(p)
+         | Nothing -> split_on_char(body, "E")) with
+  | Nothing -> Just((body, 0))
+  | Just (mant, es) ->
+      match parse_int(es) with
+      | Nothing -> Nothing
+      | Just e -> Just((mant, e))
+
+# Parse a decimal Double from text: optional leading '-', an integer part, an optional
+# '.' fraction, and an optional 'e'/'E' exponent (with optional sign). Returns Nothing on
+# any malformed input, never crashes. Pure Sprout — no strtod builtin: the magnitude is
+# `intpart + frac/10^len(frac)`, then scaled by `10^exp`. Accurate to Double arithmetic
+# (fine for config/JSON data), NOT a bit-exact strtod round-trip.
+export fn parse_double(s: String) -> Maybe Double =
+  let neg = str_starts_with(s, "-")
+      body = if neg then str_slice(s, 1, str_len(s)) else s
+  in match split_exponent(body) with
+     | Nothing -> Nothing
+     | Just (mant, e) ->
+         match parse_mantissa(mant) with
+         | Nothing -> Nothing
+         | Just mag -> Just(if neg then 0.0 - (mag * pow10(e)) else mag * pow10(e))
 extern fn int_to_string(n: Int) -> String
 extern fn double_to_string(x: Double) -> String
 extern fn char_to_string(c: Char) -> String

@@ -282,6 +282,7 @@ fn truthy(value: Maybe Json) -> Bool =
       | JsonNull -> false
       | JsonBool b -> b
       | JsonInt n -> ! (n == 0)
+      | JsonFloat x -> (x < 0.0) || (x > 0.0)
       | JsonString s -> ! string.is_empty (s)
       | JsonArray arr -> match arr with | JsonArrayNil -> false | _ -> true
       | JsonObject obj -> match obj with | JsonObjectNil -> false | _ -> true
@@ -293,6 +294,7 @@ fn scalar_to_string(value: Maybe Json) -> String =
       match v with
       | JsonString s -> s
       | JsonInt n -> int_to_string(n)
+      | JsonFloat x -> double_to_string(x)
       | JsonBool b -> if b then "true" else "false"
       | JsonNull -> ""
       | _ -> ""

@@ -91,8 +91,8 @@ A small `rand`/`srand` or a pure LCG in stdlib would close this.
 lowering to inline `sitofp`, no runtime builtin), and `double_to_string` +
 `instance ToString Double` render a `Double` as decimal text (`%g`, `.0`
 appended for integrals). Also `==`/`!=` now work on `Double`. Still missing:
-`from_int`'s inverse `to_int` (`fptosi`), and **string→float parsing** — loading
-a dataset from a text/CSV file still needs a float parser that does not exist.
+`from_int`'s inverse `to_int` (`fptosi`). **string→float parsing** is now covered
+by the pure-Sprout `parse_double` (prelude), so loading a dataset from text/CSV works.
 
 ### 3.3 No `zip`/`zip_with`, no matrix type
 

@@ -204,8 +204,9 @@ are read from a config file named as the first CLI arg — so the demo re-runs w
 just run-gfx examples/gfx/terrain_rivers_demo.sprout examples/gfx/terrain_rivers.conf
 ```
 
-Int-only (the stdlib cannot parse a `Double` from text; every scale knob is an `Int`, appearance
-Doubles stay compile-time). No arg or an unreadable path falls back to defaults that byte-match the
+Int-only (the `.conf` loader `loam.config` is Int-only; every scale knob is an `Int`, appearance
+Doubles stay compile-time). (A general `parse_double` now exists in the prelude, but the config
+format stays Int for simplicity.) No arg or an unreadable path falls back to defaults that byte-match the
 former hardcoded constants, so the stock world is unchanged. `terrain_rivers.conf` is a documented
 sample that rescales for longer rivers (`lattice0 128`, `octaves 3`).
 

@@ -36,6 +36,25 @@ fn stringify_round_trip_ok(input: String) -> Bool =
   | Err _ -> false
   | Ok v -> is_ok(json.parse(json.stringify(v)))
 
+fn abs_d(x: Double) -> Double = if x < 0.0 then 0.0 - x else x
+
+# Double has no Eq instance, so float results are checked with an absolute tolerance.
+fn top_float_approx(input: String, target: Double, eps: Double) -> Bool =
+  let Ok v = json.parse(input) else false
+      Just x = json.json_get_float(v) else false
+  in abs_d(x - target) < eps
+
+fn field_float_approx(input: String, key: String, target: Double, eps: Double) -> Bool =
+  let Ok v = json.parse(input) else false
+      Just fv = json.json_get_field(v, key) else false
+      Just x = json.json_get_float(fv) else false
+  in abs_d(x - target) < eps
+
+fn int_on_float_is_nothing(input: String) -> Bool =
+  match json.parse(input) with
+  | Err _ -> false
+  | Ok v -> is_nothing_int(json.json_get_int(v))
+
 fn main() -> Unit !{IO} =
   do
     state <- new_state()
@@ -115,5 +134,19 @@ fn main() -> Unit !{IO} =
       | Ok _ -> true
       | Err _ -> false
     assert_true(state, "CPR regression: inline do-block match on parse result", cpr_regression_ok)
+
+    # --- float parsing (Scope B: pure-Sprout parser, JsonFloat) ---
+
+    assert_true(state, "parse decimal <1", top_float_approx("0.104", 0.104, 0.00001))
+    assert_true(state, "parse decimal >1", top_float_approx("179.84", 179.84, 0.001))
+    assert_true(state, "parse negative decimal", top_float_approx("-179.84", 0.0 - 179.84, 0.001))
+    assert_true(state, "parse scientific notation", top_float_approx("8.5e-2", 0.085, 0.00001))
+    assert_true(state, "parse capital-E exponent", top_float_approx("2.34E-2", 0.0234, 0.00001))
+    assert_true(state, "json_get_float coerces an integer", top_float_approx("42", 42.0, 0.0001))
+    assert_true(state, "float object field", field_float_approx("{\"au\": 0.5}", "au", 0.5, 0.0001))
+    assert_true(state, "array of floats parses", is_ok(json.parse("[0.1, 0.2, 0.3]")))
+    assert_true(state, "json_get_int on a float returns Nothing", int_on_float_is_nothing("0.104"))
+    assert_true(state, "float round-trips through stringify", stringify_round_trip_ok("{\"au\": 0.104}"))
+    assert_true(state, "negative float round-trips", stringify_round_trip_ok("-1.5e-1"))
 
     summary(state)

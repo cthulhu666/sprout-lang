@@ -42,8 +42,9 @@ examples/gfx/galaxy_map.sprout  ──▶  stdlib.gfx  ──▶  graphics/sprou
   - `classCode` — 0..11 (see palette below); indexes the demo's colour-model table.
   - `sizeCode` — per-star render radius in ly (visibility, not physical scale).
   - `detailLine` — **pre-formatted ASCII** panel text (e.g. `Class M, 0.44 Msun, 2686 K, 0.005 Lsun,
-    32093 ly from core`), so the demo never parses a float (Sprout has no float parser yet). ASCII
-    only — raylib's default font has no `☉`/`·`/`—`.
+    32093 ly from core`) for the star-catalog lines, so the overview never parses a float. ASCII
+    only — raylib's default font has no `☉`/`·`/`—`. (Scene 2 reads the per-system JSON directly:
+    `stdlib.json` now parses floats via the pure-Sprout `parse_double`, so no pre-formatting there.)
 - `meta.txt` carries `galaxy_radius_ly`, `ly_per_unit`, `max_level`, `tile_budget`, and counts.
 - Invariants guarded by `universegen/scripts/verify_catalog.sh`: every system appears exactly once,
   all black holes are in L0, coordinates stay within ±radius, per-tile budgets are respected.
@@ -148,8 +149,9 @@ These are gfx-binding additions (non-bootstrap; no seed refresh):
   key should include the active filter. `classCode` is already on every catalog line for this.
 - **Solar-system scene (scene 2).** Already scaffolded via `view`. The real build lazily reads
   `systems/block-<floor(id/10000)>/SYS-<id>.json` for the selected system and draws planets/orbits
-  (the per-system files carry full ellipse descriptors). This is where a real float parser
-  (`parse_double`) becomes worthwhile.
+  (the per-system files carry full ellipse descriptors). The float-parsing blocker is now removed:
+  `stdlib.json` parses float numbers (`JsonFloat`, read via `json_get_float`) using the pure-Sprout
+  `parse_double` (prelude), so scene 2 walks the real JSON tree — no fixed-point pre-export needed.
 
 ## Running
 
