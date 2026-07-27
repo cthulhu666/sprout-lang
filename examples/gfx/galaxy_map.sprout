@@ -2,11 +2,13 @@ module examples.gfx.galaxy_map
 
 import stdlib.gfx
 import stdlib.string (split_once)
-import stdlib.math (min)
+import stdlib.math (min, pi)
+import stdlib.json as json
 import loam.camera (Cam, cam_drive, cam_distance)
 import loam.view (cam_apply)
 import loam.config (parse_config, cfg_int)
 import loam.galaxy_lod (pow2, level_offset, group_of, clampi, desired_level, next_level)
+import loam.orbit (ellipse_point)
 
 # Sprout / Loam — 3D GALAXY MAP (scene 1) with zoom-adaptive streaming.
 #
@@ -57,6 +59,21 @@ let drag_pitch_step = 0.005  # radians per pixel of vertical drag
 let wheel_zoom_frac = 0.12  # zoom step as a fraction of current eye distance per wheel notch
 let key_pan_frac = 0.02  # WASD pan per frame as a fraction of eye distance
 let drag_pan_frac = 0.0018  # shift-drag pan per pixel as a fraction of eye distance
+
+# --- Scene 2 (solar-system view) tunables -------------------------------------------------------
+# Systems vary wildly in extent (this catalog has compact 0.5-AU systems and spread 30-AU ones), so
+# the AU->world scale is FIT per system: the outer orbit maps to `fit_world_radius`, and body sizes
+# stay in fixed world units. That frames every system the same way regardless of its AU span.
+let fit_world_radius = 520.0  # world radius the outermost orbit's apoapsis is scaled to
+let sun_size = 18.0  # star render radius (world units); small enough not to swallow inner orbits
+let planet_size_scale = 6.0  # planet render radius (world units) = radiusEarths * this
+let planet_min_size = 3.5  # floor so sub-Earth planets stay visible
+let orbit_segments = 96  # line segments per orbit ellipse (loam.orbit sampled at 2pi/segments)
+let s2_init_radius = 900.0  # opening scene-2 camera: angled overhead of the system at origin
+let s2_init_height = 520.0
+let s2_zoom_min = 60.0
+let s2_zoom_max = 8000.0
+let s2_pan_bound = 2500.0
 
 let stream_max_level = 4  # deepest catalog level (matches the exporter's populated depth)
 let lod_hysteresis = 0.15  # deadband (fraction of a boundary) so the LoD level never flip-flops on a zoom boundary
@@ -288,9 +305,131 @@ fn read_radius(dir: String) -> Double !{IO} =
   | Ok text -> to_double(cfg_int(parse_config(text), "galaxy_radius_ly", 50000))
   | Err _ -> 50000.0
 
+# --- Scene 2: solar-system view -----------------------------------------------------------------
+# A planet reduced to what the view draws: orbit shape (semi-major AU `a`, eccentricity `e`,
+# argument of periapsis `argperi` rad), current position (`nu` = true anomaly rad), and body size
+# (`rad` = radiusEarths). Parsed from the per-system JSON; orbit geometry via loam.orbit.
+type Planet = (a: Double, e: Double, argperi: Double, nu: Double, rad: Double)
+
+let two_pi = 2.0 * pi
+fn deg2rad(d: Double) -> Double = d * pi / 180.0
+fn max_d(a: Double, b: Double) -> Double = if a > b then a else b
+
+# Zero-pad a small non-negative Int to 3 digits (block-000 .. block-099) for the systems/ path.
+fn pad3(n: Int) -> String =
+  let s = to_string(n)
+  in if str_len(s) >= 3 then s else if str_len(s) == 2 then "0" ++ s else "00" ++ s
+
+# The catalog `name` / JSON file stem is SYS-%05d (SYS-00001 .. SYS-135793). pad5 rebuilds it from a
+# raw id — used only by the argv[6] "open directly into system view" screenshot/canary affordance.
+fn pad5(n: Int) -> String =
+  let s = to_string(n)
+  in if str_len(s) >= 5 then s
+     else if str_len(s) == 4 then "0" ++ s
+     else if str_len(s) == 3 then "00" ++ s
+     else if str_len(s) == 2 then "000" ++ s
+     else "0000" ++ s
+
+# Path to a system's JSON from its catalog `name` (== the file stem, e.g. "SYS-00001"). The systems/
+# tree is a sibling of the catalog dir; block = floor(id/10000), zero-padded to 3. Nothing if `name`
+# is not a "SYS-<id>" stem (e.g. the "No system selected" sentinel).
+fn sys_path(dir: String, name: String) -> Maybe String =
+  if ! str_starts_with (name, "SYS-") then Nothing
+  else
+    match parse_int(str_slice(name, 4, str_len(name))) with
+    | Nothing -> Nothing
+    | Just id -> Just(dir ++ "/../systems/block-" ++ pad3(id / 10000) ++ "/" ++ name ++ ".json")
+
+# Read one Double field of a JSON object, falling back to `dflt` if absent/not a number.
+fn jfield_double(obj: json.Json, key: String, dflt: Double) -> Double =
+  let Just v = json.json_get_field(obj, key) else dflt
+      Just x = json.json_get_float(v) else dflt
+  in x
+
+fn planet_of(j: json.Json) -> Planet =
+  Planet(a = jfield_double(j, "orbitSemiMajorAU", 1.0),
+         e = jfield_double(j, "eccentricity", 0.0),
+         argperi = deg2rad(jfield_double(j, "argumentOfPeriapsisDeg", 0.0)),
+         nu = deg2rad(jfield_double(j, "trueAnomalyDeg", 0.0)),
+         rad = jfield_double(j, "radiusEarths", 1.0))
+
+fn planets_from_array(arr: json.JsonArray) -> List Planet =
+  match json.json_array_next(arr) with
+  | Nothing -> Nil
+  | Just step ->
+      match step with
+      | json.JsonArrayStep head tail -> Cons(planet_of(head), planets_from_array(tail))
+
+# Load a system's planets from its JSON (pure: read_file/json.parse are Result-typed). Any failure
+# along the way — no path, unreadable file, parse error, missing "planets" array — yields Nil (the
+# scene then draws just the star). Uses the pure-Sprout float-capable json_parse.
+fn load_planets(dir: String, name: String) -> List Planet =
+  let Just path = sys_path(dir, name) else Nil
+      Ok text = read_file(path) else Nil
+      Ok root = json.parse(text) else Nil
+      Just pv = json.json_get_field(root, "planets") else Nil
+      Just arr = json.json_get_array(pv) else Nil
+  in planets_from_array(arr)
+
+# Outer extent of a system in AU (max apoapsis a(1+e)), floored so a planetless system still frames.
+fn orbit_extent(ps: List Planet, acc: Double) -> Double =
+  match ps with
+  | Nil -> acc
+  | Cons p rest -> orbit_extent(rest, max_d(acc, p.a * (1.0 + p.e)))
+
+# One orbit segment between true anomalies t0..t1, in world units (`scale` = world units per AU;
+# orbital plane laid on world x/z).
+fn draw_seg(scale: Double, a: Double, e: Double, argperi: Double, t0: Double, t1: Double) -> Unit !{IO} =
+  match ellipse_point(a, e, argperi, t0) with
+  | (x0, z0) ->
+      match ellipse_point(a, e, argperi, t1) with
+      | (x1, z1) ->
+          gfx.draw_line3d(x0 * scale, 0.0, z0 * scale, x1 * scale, 0.0, z1 * scale, 90, 110, 150)
+
+fn orbit_seg(scale: Double, a: Double, e: Double, argperi: Double, i: Int) -> Unit !{IO} =
+  if i >= orbit_segments then ()
+  else
+    do
+      draw_seg(scale, a, e, argperi,
+               to_double(i) * two_pi / to_double(orbit_segments),
+               to_double(i + 1) * two_pi / to_double(orbit_segments))
+      orbit_seg(scale, a, e, argperi, i + 1)
+
+# Colour a planet by size: sub-2-Earth-radii read as rocky (brown), larger as gas/ice (pale).
+fn planet_rgb(rad: Double) -> (Int, Int, Int) =
+  if rad < 2.0 then (190, 150, 120) else (200, 195, 150)
+
+fn draw_one_planet(scale: Double, p: Planet) -> Unit !{IO} =
+  do
+    orbit_seg(scale, p.a, p.e, p.argperi, 0)
+    match ellipse_point(p.a, p.e, p.argperi, p.nu) with
+    | (x, z) ->
+        match planet_rgb(p.rad) with
+        | (pr, pg, pb) ->
+            gfx.draw_sphere(x * scale, 0.0, z * scale,
+                            max_d(p.rad * planet_size_scale, planet_min_size), pr, pg, pb)
+
+fn draw_planets(scale: Double, ps: List Planet) -> Unit !{IO} =
+  match ps with
+  | Nil -> ()
+  | Cons p rest ->
+      do
+        draw_one_planet(scale, p)
+        draw_planets(scale, rest)
+
+# Draw a system (already-parsed planets): star at the origin, then every planet's orbit + body, with
+# the AU->world scale fit so the outermost orbit reaches `fit_world_radius`. Planets are parsed once
+# on entry and cached in the render loop — NOT re-read per frame (that dropped the frame rate).
+fn draw_system(ps: List Planet) -> Unit !{IO} =
+  do
+    let scale = fit_world_radius / orbit_extent(ps, 0.2)
+    gfx.draw_sphere(0.0, 0.0, 0.0, sun_size, 255, 240, 180)
+    draw_planets(scale, ps)
+
 # --- Render loop --------------------------------------------------------------------------------
-fn render_loop(dir: String, cam: Cam, radius: Double, loaded: Dict Int,
-               sel_name: String, sel_detail: String, prev_rdown: Bool, view: Int, prev_lvl: Int) -> Unit !{IO} =
+fn render_loop(dir: String, cam: Cam, scam: Cam, radius: Double, loaded: Dict Int,
+               sel_name: String, sel_detail: String, prev_rdown: Bool, view: Int, prev_lvl: Int,
+               csys: String, cplanets: List Planet) -> Unit !{IO} =
   do
     stop <- gfx.window_should_close()
     if stop then gfx.close_window()
@@ -300,17 +439,24 @@ fn render_loop(dir: String, cam: Cam, radius: Double, loaded: Dict Int,
         # Hysteretic LoD: step at most one level from the previously-committed level, and only once the
         # eye has moved a deadband PAST the boundary — so hovering on a zoom boundary can't flip-flop.
         let lvl = next_level(prev_lvl, dist, stream_max_level, lod_hysteresis)
+        # Scene-2 planet cache: (re)parse the selected system's JSON only when it changes, so a static
+        # system view runs at full frame rate instead of re-reading the file every frame.
+        let need_load = (view == 1) && ! (sel_name == csys)
+        let cplanets2 = if need_load then load_planets(dir, sel_name) else cplanets
+        let csys2 = if need_load then sel_name else csys
         streamed <- load_levels(dir, cam, lvl, 0, radius, loaded, load_budget)
-        cam_apply(cam)
+        cam_apply(if view == 0 then cam else scam)
         gfx.frame_begin()
-        # Scene 1 draws the galaxy; scene 2 (stub) leaves the frame dark for its placeholder text.
-        if view == 0 then gfx.draw_instances(level_offset(lvl + 1), draw_cull) else ()
+        # Scene 1 draws the galaxy point cloud; scene 2 draws the selected system (star + orbits + planets).
+        if view == 0 then gfx.draw_instances(level_offset(lvl + 1), draw_cull) else draw_system(cplanets2)
         gfx.overlay_begin()
         gfx.draw_fps(10, 10)
         if view == 0
           then gfx.draw_text(10, 34, "drag: orbit/tilt   shift+drag / WASD: pan   wheel: zoom   right-click: inspect", 18, 180, 190, 210)
-          else gfx.draw_text(10, 34, "SOLAR SYSTEM VIEW - coming in the next iteration", 20, 255, 220, 120)
-        if view == 0 then gfx.draw_text(10, 56, "LoD level " ++ to_string(lvl), 18, 150, 200, 150) else ()
+          else gfx.draw_text(10, 34, "SOLAR SYSTEM   drag: orbit/tilt   wheel: zoom   (< Galaxy to return)", 18, 255, 220, 120)
+        if view == 0
+          then gfx.draw_text(10, 56, "LoD level " ++ to_string(lvl), 18, 150, 200, 150)
+          else gfx.draw_text(10, 56, "system " ++ sel_name, 18, 255, 230, 150)
         gfx.draw_text(20, 724, sel_name, 22, 255, 240, 170)
         gfx.draw_text(20, 752, sel_detail, 16, 200, 210, 230)
         # One scene-switch button; its label and action depend on the current view.
@@ -335,27 +481,33 @@ fn render_loop(dir: String, cam: Cam, radius: Double, loaded: Dict Int,
         let next_view = if toggle then (if view == 0 then 1 else 0) else view
         # Don't treat a left-click over the scene-switch button (bottom-right) as a camera drag.
         let over_ui = (mx >= 1090) && (my >= 715)
-        let orbit = ldown && ! shift && (view == 0) && ! over_ui
+        # Whichever view is active drives its own camera; the other's is held. Zoom/pan scale by the
+        # ACTIVE eye distance so both the galaxy (ly) and system (AU-world) scales feel the same.
+        let active = if view == 0 then cam else scam
+        let adist = cam_distance(active)
+        let orbit = ldown && ! shift && ! over_ui
         let pan_drag = ldown && shift && ! over_ui
         let d_yaw = if orbit then gdx * drag_yaw_step else 0.0
         let d_pitch = if orbit then gdy * drag_pitch_step else 0.0
-        let d_zoom = (0.0 - wheel) * wheel_zoom_frac * dist
-        let d_pan_r = ((bd(kd) - bd(ka)) * key_pan_frac * dist)
-                        + (if pan_drag then (0.0 - gdx) * drag_pan_frac * dist else 0.0)
-        let d_pan_f = ((bd(kw) - bd(ks)) * key_pan_frac * dist)
-                        + (if pan_drag then gdy * drag_pan_frac * dist else 0.0)
-        # Camera motion applies only in the galaxy view; the stub scene freezes it.
-        let cam2 = if view == 0
-                     then cam_drive(cam, d_yaw, d_pitch, d_zoom, d_pan_r, d_pan_f,
-                                    zoom_min, zoom_max, pitch_min, pitch_max, pan_bound)
-                     else cam
+        let d_zoom = (0.0 - wheel) * wheel_zoom_frac * adist
+        let d_pan_r = ((bd(kd) - bd(ka)) * key_pan_frac * adist)
+                        + (if pan_drag then (0.0 - gdx) * drag_pan_frac * adist else 0.0)
+        let d_pan_f = ((bd(kw) - bd(ks)) * key_pan_frac * adist)
+                        + (if pan_drag then gdy * drag_pan_frac * adist else 0.0)
+        let zlo = if view == 0 then zoom_min else s2_zoom_min
+        let zhi = if view == 0 then zoom_max else s2_zoom_max
+        let pbnd = if view == 0 then pan_bound else s2_pan_bound
+        let driven = cam_drive(active, d_yaw, d_pitch, d_zoom, d_pan_r, d_pan_f,
+                               zlo, zhi, pitch_min, pitch_max, pbnd)
+        let cam2 = if view == 0 then driven else cam
+        let scam2 = if view == 1 then driven else scam
         match streamed with
         | (loaded2, _) ->
             match picked with
             | (best_d2, best_name, best_detail) ->
                 let name2 = if best_d2 < pick_radius2 then best_name else sel_name
                     detail2 = if best_d2 < pick_radius2 then best_detail else sel_detail
-                in render_loop(dir, cam2, radius, loaded2, name2, detail2, rdown, next_view, lvl)
+                in render_loop(dir, cam2, scam2, radius, loaded2, name2, detail2, rdown, next_view, lvl, csys2, cplanets2)
 
 fn main() -> Unit !{IO} =
   do
@@ -376,5 +528,14 @@ fn main() -> Unit !{IO} =
     # Seed the committed LoD level straight off the nominal ladder so the opening frame is at the
     # right detail immediately; render_loop's next_level then applies hysteresis from here on.
     let seed_lvl = min(desired_level(cam_distance(cam0)), stream_max_level)
-    render_loop(dir, cam0, radius, dict_empty(),
-                "No system selected", "Right-click a star to inspect it", false, 0, seed_lvl)
+    # Scene-2 camera: angled overhead of the system at the origin (AU-world scale). Persists across
+    # entries; the system is always at the origin so it needs no per-system reset.
+    let scam0 = Cam(yaw = 0.6, radius = s2_init_radius, height = s2_init_height,
+                    tx = 0.0, ty = 0.0, tz = 0.0)
+    # Optional argv[6] = a system id to open DIRECTLY in the solar-system view (screenshot/canary of
+    # scene 2, which otherwise needs an interactive right-click). Absent/negative -> normal galaxy start.
+    sys_arg <- arg_int(6, 0 - 1)
+    let init_view = if sys_arg >= 0 then 1 else 0
+    let init_name = if sys_arg >= 0 then "SYS-" ++ pad5(sys_arg) else "No system selected"
+    render_loop(dir, cam0, scam0, radius, dict_empty(),
+                init_name, "Right-click a star to inspect it", false, init_view, seed_lvl, "", Nil)

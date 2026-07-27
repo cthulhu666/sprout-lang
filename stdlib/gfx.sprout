@@ -21,6 +21,8 @@ extern fn gfx_frame_begin() -> Unit !{IO}
 extern fn gfx_draw_grid(slices: Int, spacing: Double) -> Unit !{IO}
 extern fn gfx_load_model(path: String) -> Int !{IO}
 extern fn gfx_draw_cube(x: Double, y: Double, z: Double, size: Double, r: Int, g: Int, b: Int) -> Unit !{IO}
+extern fn gfx_draw_line3d(x0: Double, y0: Double, z0: Double, x1: Double, y1: Double, z1: Double, r: Int, g: Int, b: Int) -> Unit !{IO}
+extern fn gfx_draw_sphere(x: Double, y: Double, z: Double, radius: Double, r: Int, g: Int, b: Int) -> Unit !{IO}
 extern fn gfx_capture_quad(p0x: Double, p0y: Double, p0z: Double,
                            p1x: Double, p1y: Double, p1z: Double,
                            p2x: Double, p2y: Double, p2z: Double,
@@ -119,6 +121,15 @@ export fn load_model(path: String) -> Int !{IO} =
 # otherwise it draws immediately. Shaded by the scene key light (top faces brighter than sides).
 export fn draw_cube(x: Double, y: Double, z: Double, size: Double, r: Int, g: Int, b: Int) -> Unit !{IO} =
   gfx_draw_cube(x, y, z, size, r, g, b)
+
+# Draw a 3D line segment in a flat RGB colour (immediate-mode, inside frame_begin/frame_end).
+# Scene 2 draws each planet's orbit as a loop of these along loam.orbit.ellipse_point samples.
+export fn draw_line3d(x0: Double, y0: Double, z0: Double, x1: Double, y1: Double, z1: Double, r: Int, g: Int, b: Int) -> Unit !{IO} =
+  gfx_draw_line3d(x0, y0, z0, x1, y1, z1, r, g, b)
+
+# Draw a solid sphere in a flat RGB colour (immediate-mode). Scene 2 draws the star and planets.
+export fn draw_sphere(x: Double, y: Double, z: Double, radius: Double, r: Int, g: Int, b: Int) -> Unit !{IO} =
+  gfx_draw_sphere(x, y, z, radius, r, g, b)
 
 # Bake many draw_cube calls into ONE static GPU mesh: mesh_capture_begin(), run the tile loop
 # (each draw_cube appends its geometry), then handle <- mesh_capture_end(). Thereafter draw the

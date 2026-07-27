@@ -959,6 +959,30 @@ long long gfx_draw_cube(long long x, long long y, long long z, long long size,
   return 0;
 }
 
+/* Draw a 3D line segment (x0,y0,z0)->(x1,y1,z1) in a flat RGB colour. Immediate-mode under the
+ * active shader — the galaxy solar-system scene draws each orbit ellipse as a loop of these. Coords
+ * cross the ABI as Double IEEE-754 bits (as_float); rgb are 0-255 ints. */
+long long gfx_draw_line3d(long long x0, long long y0, long long z0,
+                          long long x1, long long y1, long long z1,
+                          long long r, long long g, long long b) {
+  Vector3 p0 = { as_float(x0), as_float(y0), as_float(z0) };
+  Vector3 p1 = { as_float(x1), as_float(y1), as_float(z1) };
+  Color col = { (unsigned char)r, (unsigned char)g, (unsigned char)b, 255 };
+  DrawLine3D(p0, p1, col);
+  return 0;
+}
+
+/* Draw a solid sphere of `radius` at (x,y,z) in a flat RGB colour. Immediate-mode under the active
+ * shader — the galaxy solar-system scene draws the star and each planet with this. Coords/radius
+ * cross the ABI as Double bits (as_float); rgb are 0-255 ints. Low ring/slice counts keep it cheap. */
+long long gfx_draw_sphere(long long x, long long y, long long z, long long radius,
+                          long long r, long long g, long long b) {
+  Vector3 pos = { as_float(x), as_float(y), as_float(z) };
+  Color col = { (unsigned char)r, (unsigned char)g, (unsigned char)b, 255 };
+  DrawSphereEx(pos, as_float(radius), 12, 16, col);
+  return 0;
+}
+
 /* Append one quad to the active capture: corners p0..p3 (two triangles p0,p1,p2 and p0,p2,p3),
  * a face normal (nx,ny,nz), a flat RGB colour. The general mesh-building primitive — a caller bakes
  * arbitrary static geometry from Sprout (e.g. loam.terrain_mesh decomposes a terrain tile into a

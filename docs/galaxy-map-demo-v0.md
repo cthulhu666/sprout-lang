@@ -1,7 +1,8 @@
 # Galaxy Map Demo (v0)
 
-Status: experimental example (`examples/gfx/galaxy_map.sprout`), not normative. Scene 1 of a planned
-two-scene demo. Scene 2 (solar-system view) is scaffolded but stubbed.
+Status: experimental example (`examples/gfx/galaxy_map.sprout`), not normative. A two-scene demo:
+**scene 1** is the streaming galaxy map; **scene 2** is the solar-system view — right-click a star,
+then `System >` to fly into it and see its star, planets, and orbits (built; see "Scene 2" below).
 
 ## What it is
 
@@ -118,6 +119,10 @@ These are gfx-binding additions (non-bootstrap; no seed refresh):
   since the i64 ABI returns one word).
 - `gfx.draw_text(x,y,text,size,r,g,b)` — the first general text primitive (previously `DrawText` was
   reachable only as a button label).
+- `gfx.draw_line3d(x0,y0,z0,x1,y1,z1,r,g,b)` — an immediate-mode 3D line (`DrawLine3D`); scene 2
+  draws each orbit ellipse as a loop of these.
+- `gfx.draw_sphere(x,y,z,radius,r,g,b)` — an immediate-mode solid sphere (`DrawSphereEx`); scene 2's
+  star and planets. (Distinct from `sphere_model`, which is for the instanced starfield.)
 - `gfx.double_to_int(d) -> Int` — a **stopgap** floor conversion; the core stdlib has none
   (`math.floor` returns a `Double`). See BACKLOG: promote to a core runtime/prelude primitive.
 
@@ -140,6 +145,29 @@ These are gfx-binding additions (non-bootstrap; no seed refresh):
   star is sub-pixel at any of these scales. The `/2^level` falloff keeps the dense levels legible; the
   `sizeCode` and `star_scale` numbers are hand-tuned for the opening framing.
 
+## Scene 2 — solar-system view (built)
+
+Right-click a star in scene 1 to select it, then the `System >` button flips `view` to 1 and flies
+into that system. The scene:
+
+- **Loads the real per-system JSON.** `systems/block-<floor(id/10000)>/SYS-<id>.json` (a sibling of
+  the catalog dir) is `read_file` + `json.parse`d into a `List Planet`. The `name` catalog field is
+  the file stem (`SYS-00001`), so the id and path derive from the current selection — no extra pick
+  state. Parsing uses the pure-Sprout, **float-capable** `json_parse` (`json_get_float`); no
+  fixed-point pre-export. Parsed **once on entry** and cached in the loop (re-reading per frame
+  halved the frame rate — GC churn from the parse).
+- **Draws star + orbits + planets.** The star is an immediate-mode `draw_sphere` at the origin; each
+  planet's orbit is a polyline loop of `draw_line3d` sampled from `loam.orbit.ellipse_point` (pure
+  Kepler-ellipse math from `orbitSemiMajorAU`/`eccentricity`/`argumentOfPeriapsisDeg`), and the
+  planet body sits at its current `trueAnomalyDeg`, sized by `radiusEarths`, coloured by size.
+- **Fits scale per system.** Systems span 0.5–30 AU; the AU→world scale is fit so the outermost
+  orbit reaches `fit_world_radius`, with body sizes in fixed world units — so a compact 5-planet and
+  a spread 9-planet system both frame the same way.
+- **Own camera.** A separate AU-scale `Cam` (the system is always at the origin), driven by the same
+  `loam.camera` rig; the galaxy camera is held while in scene 2.
+- **Scripting.** `argv[6] = <system id>` opens directly in scene 2 for that system (screenshot/canary
+  of a view that otherwise needs an interactive right-click).
+
 ## Planned extensions (next iterations — designed for, not built)
 
 - **Spectral-class filter** (e.g. "show only red dwarfs"). Nearly free at the render layer (colour is
@@ -147,11 +175,9 @@ These are gfx-binding additions (non-bootstrap; no seed refresh):
   coverage vs. spatial streaming: the exporter should be able to emit a **class-partitioned pyramid**
   so a filter fills the on-screen budget from the filtered class when zoomed out, and the residency
   key should include the active filter. `classCode` is already on every catalog line for this.
-- **Solar-system scene (scene 2).** Already scaffolded via `view`. The real build lazily reads
-  `systems/block-<floor(id/10000)>/SYS-<id>.json` for the selected system and draws planets/orbits
-  (the per-system files carry full ellipse descriptors). The float-parsing blocker is now removed:
-  `stdlib.json` parses float numbers (`JsonFloat`, read via `json_get_float`) using the pure-Sprout
-  `parse_double` (prelude), so scene 2 walks the real JSON tree — no fixed-point pre-export needed.
+- **Scene 2 depth:** moons (per-planet `moons[]`), asteroid belts, rings (`hasRings`), a per-planet
+  detail panel on hover, and a log-radius option so *spread* systems don't bury inner planets in the
+  star. All the data is already in the per-system JSON.
 
 ## Running
 
