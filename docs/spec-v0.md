@@ -148,19 +148,22 @@ fn first_or(xs: List Int, dflt: Int) -> Int =
   in h
 ```
 
-Each binding is `<pattern> = <expr>` or `<pattern> = <expr> else <expr>`.
-Bindings are **sequential**: each is in scope for later bindings and the body
-(a binding's own right-hand side sees the *previous* meaning of any name it
-rebinds). A binding
+Each binding is `<pattern> = <expr>` (irrefutable, no `else`),
+`<pattern> = <expr> else <expr>` (**constant else**), or
+`<pattern> = <expr> else <residual-pat> -> <handler>` (**binding-else** — the
+residual pattern names the refuted value). Bindings are **sequential**: each is
+in scope for later bindings and the body (a binding's own right-hand side sees
+the *previous* meaning of any name it rebinds). With continuation `<rest>` (the
+remaining bindings and body), a binding desugars to a single `match`:
 
 ```
-<pat> = <e> else <fb>
+<pat> = <e> else <fb>            →  match <e> with | <pat> -> <rest> | _      -> <fb>
+<pat> = <e> else <rpat> -> <h>   →  match <e> with | <pat> -> <rest> | <rpat> -> <h>
+<pat> = <e>                      →  match <e> with | <pat> -> <rest>
 ```
 
-with continuation `<rest>` (the remaining bindings and body) is exactly
-`match <e> with | <pat> -> <rest> | _ -> <fb>`; a binding without `else` is
-`match <e> with | <pat> -> <rest>`. Thus a non-matching refutable pattern
-short-circuits the whole block to that binding's `else` value.
+Thus a non-matching refutable pattern short-circuits the whole block to that
+binding's `else`.
 
 Rules:
 
@@ -173,9 +176,14 @@ Rules:
   an error (its wildcard arm is unreachable). An irrefutable pattern without an
   `else` is an ordinary local binding.
 - Each `else` supplies its own value, so distinct bindings may fail to distinct
-  results. `else` does not bind the refuted value (a residual-binding form and
-  monadic propagation are planned — see
-  `docs/let-else-and-monadic-binding-plan.md`).
+  results. A **binding-else** (`else <residual-pat> -> <handler>`) matches the
+  refuted value against `<residual-pat>`, a full pattern spliced verbatim into the
+  second arm: `else Err msg -> use(msg)` names the failing payload, and a bare
+  variable binds the whole scrutinee (no failure constructor is ever injected).
+  The residual is checked for exhaustiveness like any match arm — a residual that
+  leaves cases uncovered is a non-exhaustive-match error. Constant vs binding-else
+  is disambiguated on the `->` after the else. (Monadic propagation — a no-`else`
+  form — remains planned; see `docs/let-else-and-monadic-binding-plan.md`.)
 - Every `else` and the body must unify to the block's result type. At least one
   binding is required.
 - `let … in` is an ordinary expression (usable anywhere), and **complements**

@@ -1,0 +1,13 @@
+module main
+
+# A binding-else splices its residual pattern verbatim into the second match arm.
+# When that residual does not cover the remaining shapes, the desugared match is
+# non-exhaustive and W5 rejects it — no dedicated check. Here the success pattern
+# `Just v` and the residual `Just w` both cover only `Just`, so `Nothing` is left
+# uncovered:  match mx with | Just v -> v | Just w -> w.
+fn bad(mx: Maybe Int) -> Int =
+  let Just v = mx else Just w -> w
+  in v
+
+fn main() -> Unit !{IO} =
+  print(int_to_string(bad(Nothing)))

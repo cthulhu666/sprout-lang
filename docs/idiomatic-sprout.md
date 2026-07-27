@@ -32,6 +32,34 @@ A refutable pattern *requires* `else`; an irrefutable binding must not have one.
 The right-hand sides are pure, and every `else` and the body unify to one result
 type.
 
+When the failure case needs the *value* it failed on — the common "format the
+error from its payload" shape — write a **binding-else** whose residual pattern
+names that value. It replaces the classic rightward staircase where each `Err`
+arm re-reads its own payload:
+
+```sprout
+# Nested — each level re-matches to reach its own error payload:
+fn validate(req: Request) -> Result String Session =
+  match require_int(req, "id") with
+  | Err msg -> Err(msg)
+  | Ok id ->
+      match require_str(req, "kind") with
+      | Err msg -> Err(`kind: ${msg}`)
+      | Ok kind -> Ok(session(id, kind))
+
+# Idiomatic — the residual pattern binds the payload right at the `else`:
+fn validate(req: Request) -> Result String Session =
+  let Ok id   = require_int(req, "id")    else Err msg -> Err(msg)
+      Ok kind = require_str(req, "kind")  else Err msg -> Err(`kind: ${msg}`)
+  in Ok(session(id, kind))
+```
+
+The residual (`Err msg`) is a *full* pattern spliced into the fallback arm: it
+binds `msg` for the handler, and a bare variable (`else other -> …`) would bind
+the whole failing value instead. A constant `else` and a binding-`else` are told
+apart by the `->`. The RHS must still be pure, but the body after `in` may be a
+`do` block — so a pure validation gate can guard an effectful action.
+
 ## Reach for a combinator on a single `Maybe`/`Result`
 
 `let..else` (above) shines for a *chain* of binds. For a *single* value, the

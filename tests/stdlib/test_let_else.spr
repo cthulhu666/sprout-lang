@@ -32,6 +32,35 @@ fn mixed(mx: Maybe Int) -> Int =
       Just v = mx else base
   in base + v
 
+# Tier 1b: binding-else — the else's residual pattern names the failing payload.
+# `Err code` binds the Int carried by the failing branch; a constant else can't.
+fn recover_code(r: Result Int Int) -> Int =
+  let Ok v = r else Err code -> code
+  in v
+
+# A residual pattern that carries no payload (a plain `Nothing`), distinct from a
+# constant else only in that it is a pattern — exhaustiveness still self-enforces.
+fn maybe_or_zero(mx: Maybe Int) -> Int =
+  let Just v = mx else Nothing -> 0
+  in v
+
+# Chained binding-else: each Result step recovers from its own payload; a first
+# failure short-circuits the whole block (the second step never runs).
+fn two_step(a: Result Int Int, b: Result Int Int) -> Int =
+  let Ok x = a else Err code -> code
+      Ok y = b else Err code -> code
+  in x + y
+
+# A bare *variable* residual binds the WHOLE scrutinee (the full Result), not an
+# unwrapped payload — the design decision that keeps this parser-only and uniform
+# with bare-ADT bindings. Here `other` is the failing `Result Int Int` itself.
+fn whole_scrut(r: Result Int Int) -> Int =
+  let Ok v = r else other ->
+        (match other with
+         | Err e -> e + 100
+         | Ok w -> w)
+  in v
+
 fn main() -> Unit !{IO} =
   do
     state <- new_state()
@@ -45,4 +74,12 @@ fn main() -> Unit !{IO} =
     assert_eq(state, "irrefutable block, no else", plain(3), 8)
     assert_eq(state, "mixed block: Just", mixed(Just(5)), 15)
     assert_eq(state, "mixed block: Nothing short-circuits to else", mixed(Nothing), 10)
+    assert_eq(state, "binding-else: Ok binds value", recover_code(Ok(5)), 5)
+    assert_eq(state, "binding-else: Err payload recovered", recover_code(Err(42)), 42)
+    assert_eq(state, "maybe residual: Just", maybe_or_zero(Just(7)), 7)
+    assert_eq(state, "maybe residual: Nothing", maybe_or_zero(Nothing), 0)
+    assert_eq(state, "chained binding-else: both Ok", two_step(Ok(3), Ok(4)), 7)
+    assert_eq(state, "chained binding-else: first Err short-circuits", two_step(Err(7), Ok(4)), 7)
+    assert_eq(state, "chained binding-else: second Err", two_step(Ok(3), Err(9)), 9)
+    assert_eq(state, "bare residual binds whole scrutinee", whole_scrut(Err(5)), 105)
     summary(state)

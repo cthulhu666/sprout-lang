@@ -514,30 +514,70 @@ fn parse_do_expr(tokens: Vec token.Token, i: Int) -> Result ParseError (ast.Expr
 # ---------------------------------------------------------------------------
 # `let … in` binding block (pure expression position)
 #
-#   let <pat> = <rhs> [else <fb>]      -- one or more, layout-aligned
-#       <pat> = <rhs> [else <fb>]
-#   in  <body>                         -- `in` dedented to the `let` column
+#   let <pat> = <rhs> [else <fb>]              -- one or more, layout-aligned
+#       <pat> = <rhs> [else <rpat> -> <h>]     -- binding-else: <rpat> names the
+#   in  <body>                                 --   failing value (`in` at `let` col)
 #
 # Bindings are sequential (each in scope for later bindings + body). Each
 # desugars right-over the body to a match; `in` closes the block. No new AST
 # node — the refutability rules enforce themselves through W5:
-#   pat = e else fb  →  match e with | pat -> <rest> | _ -> fb   (always exhaustive)
-#   pat = e          →  match e with | pat -> <rest>             (single arm)
+#   pat = e else fb          →  match e | pat -> <rest> | _    -> fb   (exhaustive)
+#   pat = e else rpat -> h    →  match e | pat -> <rest> | rpat -> h    (W5-checked)
+#   pat = e                  →  match e | pat -> <rest>                (single arm)
 # so a refutable pattern without `else` is a non-exhaustive match (error), and an
-# `else` on an irrefutable pattern makes the wildcard arm unreachable (error).
+# `else` on an irrefutable pattern makes the trailing arm unreachable (error).
+# The binding-else residual is a *full* pattern spliced verbatim into arm 2 — a
+# bare variable binds the whole scrutinee, so it stays parser-only and uniform
+# with bare-ADT bindings (no failure ctor is ever injected). Constant vs
+# binding-else is disambiguated on a `->` after the else pattern.
 
-fn build_let_binding_match(pat: ast.Pattern, rhs: ast.Expr, fb: Maybe ast.Expr, rest: ast.Expr, pos: source.SourcePos) -> ast.Expr =
+# The else-arm pattern: an explicit residual (binding-else) or a wildcard (the
+# classic constant else). A residual is spliced verbatim, so W5 decides whether
+# the two arms are exhaustive.
+fn residual_or_wild(residual: Maybe ast.Pattern, pos: source.SourcePos) -> ast.Pattern =
+  match residual with
+  | Just rp -> rp
+  | Nothing -> ast.WildcardPattern(pos)
+
+fn build_let_binding_match(pat: ast.Pattern, rhs: ast.Expr, residual: Maybe ast.Pattern, fb: Maybe ast.Expr, rest: ast.Expr, pos: source.SourcePos) -> ast.Expr =
   match fb with
   | Just fbe ->
       ast.MatchExpr(rhs,
         Cons(ast.MatchBranch(pat, rest),
-          Cons(ast.MatchBranch(ast.WildcardPattern(pos), fbe), Nil)),
+          Cons(ast.MatchBranch(residual_or_wild(residual, pos), fbe), Nil)),
         pos)
   | Nothing ->
       ast.MatchExpr(rhs, Cons(ast.MatchBranch(pat, rest), Nil), pos)
 
-# Parses one binding `<pat> = <rhs> [else <fb>]` from its exact token slice.
-fn parse_let_binding_sub(step_tokens: Vec token.Token) -> Result ParseError ((ast.Pattern, ast.Expr, Maybe ast.Expr), Int) =
+# A constant else: the whole clause is one expression, re-parsed from `e`.
+fn parse_let_else_constant(step_tokens: Vec token.Token, e: Int) -> Result ParseError (Maybe ast.Pattern, ast.Expr) =
+  do
+    (fb, _) <- parse_expr(step_tokens, e)
+    Ok((Nothing, fb))
+
+# After a residual pattern parsed cleanly (ending at `f`): a `->` makes it a
+# binding-else (`<rpat> -> <handler>`); anything else means the pattern was really
+# the start of a constant expression, so fall back to parsing one from `e`.
+fn parse_let_else_after_pat(step_tokens: Vec token.Token, e: Int, rpat: ast.Pattern, f: Int) -> Result ParseError (Maybe ast.Pattern, ast.Expr) =
+  match match_symbol(step_tokens, f, "->") with
+  | Just (_, g) ->
+      do
+        (handler, _) <- parse_expr(step_tokens, g)
+        Ok((Just(rpat), handler))
+  | Nothing -> parse_let_else_constant(step_tokens, e)
+
+# Parses the else clause after `else` has been consumed at index `e`: either a
+# binding-else `<rpat> -> <handler>` (residual pattern followed by `->`) or the
+# classic constant `<expr>`. Disambiguates on a `->` after a well-formed pattern;
+# a pattern that fails to parse, or one not followed by `->`, is a constant else.
+fn parse_let_else_clause(step_tokens: Vec token.Token, e: Int) -> Result ParseError (Maybe ast.Pattern, ast.Expr) =
+  match parse_pattern(step_tokens, e) with
+  | Ok (rpat, f) -> parse_let_else_after_pat(step_tokens, e, rpat, f)
+  | Err _ -> parse_let_else_constant(step_tokens, e)
+
+# Parses one binding `<pat> = <rhs> [else <fb> | else <rpat> -> <h>]` from its
+# exact token slice.
+fn parse_let_binding_sub(step_tokens: Vec token.Token) -> Result ParseError ((ast.Pattern, ast.Expr, Maybe ast.Pattern, Maybe ast.Expr), Int) =
   do
     (pat, b) <- parse_pattern(step_tokens, 0)
     (_, c) <- expected_symbol("=", step_tokens, b)
@@ -545,10 +585,10 @@ fn parse_let_binding_sub(step_tokens: Vec token.Token) -> Result ParseError ((as
     if tok_is_keyword(tok_at(step_tokens, d), "else") then
       do
         (_, e) <- expected_keyword("else", step_tokens, d)
-        (fb, _) <- parse_expr(step_tokens, e)
-        Ok(((pat, rhs, Just(fb)), 0))
+        (residual, fb) <- parse_let_else_clause(step_tokens, e)
+        Ok(((pat, rhs, residual, Just(fb)), 0))
     else
-      Ok(((pat, rhs, Nothing), 0))
+      Ok(((pat, rhs, Nothing, Nothing), 0))
 
 # Parses one binding (given its layout-scanned slice end), recurses for the rest.
 fn parse_let_binding_step(tokens: Vec token.Token, i: Int, block_col: Int, binding_end: Int) -> Result ParseError (ast.Expr, Int) =
@@ -556,7 +596,7 @@ fn parse_let_binding_step(tokens: Vec token.Token, i: Int, block_col: Int, bindi
     (binding, _) <- parse_let_binding_sub(vec_slice(i, binding_end - i, tokens))
     (rest, k) <- parse_let_block(tokens, binding_end, block_col)
     match binding with
-    | (pat, rhs, fb) -> Ok((build_let_binding_match(pat, rhs, fb, rest, cur_pos(tokens, i)), k))
+    | (pat, rhs, residual, fb) -> Ok((build_let_binding_match(pat, rhs, residual, fb, rest, cur_pos(tokens, i)), k))
 
 # Collects bindings at block_col until `in`, then parses the body.
 fn parse_let_block(tokens: Vec token.Token, i: Int, block_col: Int) -> Result ParseError (ast.Expr, Int) =

@@ -241,8 +241,8 @@ let min_staircase_depth = 3
 # walk_chain: the chain starting at this 2-branch match. Returns (depth,
 # blocked, findings) — depth is 1 + however deep the continuing branch's own
 # chain goes; blocked is true when ANY link's terminal branch needs its own
-# (failing-pattern) payload, meaning the chain can't be fully expressed with
-# let..else even though it has the staircase shape; findings covers every
+# (failing-pattern) payload, meaning the flat form needs a binding-else
+# (`else <pat> -> <h>`, Tier 1b) rather than a constant else; findings covers every
 # non-chain subexpression along the way (the scrutinee at each link, each
 # link's terminal body) but never a finding for THIS node — the caller
 # decides that once it knows the total depth and blocked status.
@@ -274,13 +274,13 @@ fn walk_chain_expr(e: ast.Expr) -> (Int, Bool, List LintFinding) =
   | ast.MatchExpr scrut branches _ -> walk_chain(branches, scrut)
   | _ -> (1, false, walk_expr(e))
 
-# A chain we can positively recommend fixing names the fix (let..else, with
-# a doc pointer); a chain that's merely deep but has a link `let..else` can't
-# express gets a softer nudge instead — it's still worth a look, but there's
-# no simple rewrite to point at.
+# Both shapes have a concrete fix in let..else, so both name it. A chain whose
+# terminal recovers using the *failing* pattern's payload needs the binding-else
+# form (`else <pat> -> <handler>`, Tier 1b) so the payload is in scope; a chain
+# that bails to a constant uses the plain constant else. The message says which.
 fn staircase_message(blocked: Bool) -> String =
   if blocked
-  then "nested match runs several layers deep — consider whether it can be restructured"
+  then "nested match can be flattened with let..else — the failing case carries a payload, so use a binding-else `else <pat> -> ...` (docs/idiomatic-sprout.md)"
   else "nested match can be flattened with let..else (docs/idiomatic-sprout.md)"
 
 fn walk_match(scrut: ast.Expr, branches: List ast.MatchBranch, pos: source.SourcePos) -> List LintFinding =

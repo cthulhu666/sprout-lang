@@ -350,13 +350,13 @@ fn main() -> Unit !{IO} =
 
     assert_eq(state, "blocked chain (terminal uses own payload): still reported", count_list(lint_rules.lint_ast(blocked_own_payload)), 1)
     assert_eq(state, "blocked chain: rule id unchanged", first_rule(lint_rules.lint_ast(blocked_own_payload)), "staircase-of-doom")
-    assert_eq(state, "blocked chain: message does not reference let..else", mentions_let_else(first_message(lint_rules.lint_ast(blocked_own_payload))), false)
+    assert_eq(state, "payload chain: message points to let..else (binding-else, Tier 1b)", mentions_let_else(first_message(lint_rules.lint_ast(blocked_own_payload))), true)
 
     assert_eq(state, "leaf match arm using its own payload stays clean (leaf never becomes an else-fallback)", count_list(lint_rules.lint_ast(leaf_match_arm_uses_own_payload_is_clean)), 1)
     assert_eq(state, "leaf match arm using its own payload: message still references let..else", mentions_let_else(first_message(lint_rules.lint_ast(leaf_match_arm_uses_own_payload_is_clean))), true)
 
     assert_eq(state, "blocked at intermediate link: still reported once", count_list(lint_rules.lint_ast(blocked_at_intermediate_link)), 1)
-    assert_eq(state, "blocked at intermediate link: softer message propagates to the root", mentions_let_else(first_message(lint_rules.lint_ast(blocked_at_intermediate_link))), false)
+    assert_eq(state, "payload at intermediate link: binding-else message propagates to the root", mentions_let_else(first_message(lint_rules.lint_ast(blocked_at_intermediate_link))), true)
 
     assert_eq(state, "redundant wrap at Vec-typed call arg: reported", count_list(lint_rules.lint_ast(redundant_call_arg)), 1)
     assert_eq(state, "redundant wrap at Vec-typed call arg: rule id", first_rule(lint_rules.lint_ast(redundant_call_arg)), "redundant-vec-from-list")

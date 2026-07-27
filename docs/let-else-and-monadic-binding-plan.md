@@ -1,6 +1,7 @@
 # Refutable Binding — `let-else` fused with Monadic Propagation — Design Plan
 
-**Status:** PLAN. Drafted 2026-07-07. **Tier 1 LANDED 2026-07-07** (see §6). One
+**Status:** PLAN. Drafted 2026-07-07. **Tier 1 LANDED 2026-07-07** (§6);
+**Tier 1b LANDED 2026-07-27** (§6b). One
 binding construct delivered in capability tiers; the smallest tier is
 self-contained and touches neither the monad machinery nor the effect system.
 
@@ -44,7 +45,7 @@ of the `else` clause**:
 |-----------|------|----------------------|
 | `let Ok x = e` *(no else)* | **propagate / monadic** | `\| Err err -> Err err` (re-inject residual) |
 | `let Ok x = e else -1` | **fail-with-constant** (classic `let-else`) | `\| _ -> -1` |
-| `let Ok x = e else err -> recover(err)` | **fail-with-value** (handle) | `\| Err err -> recover(err)` |
+| `let Ok x = e else Err err -> recover(err)` | **fail-with-value** (handle) | `\| Err err -> recover(err)` |
 
 Making **"no else" mean propagate** puts the monad on the *default* path (the
 common case — thread the error onward — is the shortest to write), with `else` as
@@ -71,7 +72,7 @@ gives a natural, independently-shippable staging:
 | Tier | Adds | Machinery | Coupling |
 |------|------|-----------|----------|
 | **1** | `else <expr>` (constant) — refutable bind, else **required** | parser + desugar-to-`match` + refutability (reuse W5) | none |
-| 1b | `else <pat> -> <expr>` (bind the residual / handle) | + one match-arm in the else | none |
+| **1b** ✓ | `else <pat> -> <expr>` (bind the residual / handle) — **LANDED** | + one match-arm in the else | none |
 | 2 | no-else **propagate** for `Result`/`Maybe`, structurally (a built-in `?`) | + residual re-injection for two known types | none |
 | 3 | no-else propagate via a `Monad`/`Bind` class (user-defined) | + typeclass, monad-generic desugar | **effect-system design (D2)** |
 
@@ -185,6 +186,45 @@ fn first_fn_body_line(src: String) -> Int =
   in  position_line(pos)
 ```
 
+## 6b. Tier 1b — LANDED as binding-else (2026-07-27)
+
+Adds the residual-binding `else` mode: `<pat> = <e> else <rpat> -> <handler>`,
+where `<rpat>` is a **full pattern** matched against the refuted value and spliced
+verbatim into the second arm:
+
+```
+<pat> = <e> else <rpat> -> <h>   →   match <e> with | <pat> -> <rest> | <rpat> -> <h>
+```
+
+So `let Ok x = e else Err msg -> fmt(msg)` names the failing payload, and a bare
+variable (`else other -> …`) binds the whole scrutinee. **No failure constructor
+is ever injected** — that keeps the feature parser-only and uniform with the
+bare-ADT bindings Tier 1 already supports (there is no canonical failure ctor for
+`FnDecl … = d else …`), and it resolves the row-3 contradiction in §2 (the
+residual is written in full, not grown by the compiler).
+
+Implemented **entirely in the parser** (`parse_let_else_clause` /
+`parse_let_else_after_pat` / `parse_let_else_constant`, threading a
+`Maybe ast.Pattern` residual through `parse_let_binding_sub` /
+`build_let_binding_match` in `stdlib/compiler/parser.sprout`). Constant vs
+binding-else is disambiguated by speculatively parsing a pattern after `else` and
+committing to binding-else only if a `->` follows; a pattern that fails to parse,
+or one not followed by `->`, falls back to the existing constant-`else` path
+(`parse_expr`), so every previously-valid program parses identically. No AST node,
+no checker/inference/codegen change — **exhaustiveness self-enforces through W5**:
+the residual is checked like any match arm, so a residual that leaves cases
+uncovered is a non-exhaustive-match error (`tests/conformance/type_error/
+let_binding_else_nonexhaustive_residual`). Tests: `tests/stdlib/test_let_else.spr`
+(payload recovery, `Nothing` residual, chained short-circuit, bare-var-binds-whole-
+scrutinee). The `staircase-of-doom` lint (`stdlib/compiler/lint_rules.sprout`) now
+points payload-carrying chains at binding-else instead of a soft "restructure"
+nudge. Spec §5.2.1 updated; `docs/idiomatic-sprout.md` gained a binding-else
+example. **Follow-on (not in this change):** sweep the ~4 real compiler staircases
+(`analysis_service_driver.op_session_update`, `driver.run_file`, and constraint
+cascades in `infer.sprout`) onto binding-else — filed in `BACKLOG.md`. Purity is
+unchanged (RHS pure; the body after `in` may be a `do` block, so a pure validation
+gate can guard an effectful action). Effectful-RHS let..else remains a later tier.
+
 ## 7. Open decisions
 
 1. **Binding syntax** — RESOLVED (2026-07-07, revised): a single **sequential
@@ -199,8 +239,9 @@ fn first_fn_body_line(src: String) -> Int =
    different surface. `in` stays a keyword.
 2. **Tier 3 at all in v0?** — is "let-else + built-in `?` for Result/Maybe"
    (Tiers 1–2) enough, leaving user-defined monads out of v0?
-3. **`else foo` vs `else foo -> h` disambiguation** (Tier 1b) — split on presence
-   of `->`.
+3. **`else foo` vs `else foo -> h` disambiguation** (Tier 1b) — RESOLVED &
+   LANDED: split on the presence of `->` after a speculatively-parsed pattern;
+   no `->` (or a pattern that doesn't parse) is the constant `else`. See §6b.
 4. **Tier 3 effect coupling** — relationship to effect rows; gated on the deferred
    effect-system design (D2).
 
