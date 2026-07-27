@@ -1,4 +1,4 @@
-import stdlib.test (TestState, new_state, assert_eq, assert_true, assert_false, summary)
+import stdlib.test (check_eq, check_true, check_false, run_suite)
 import stdlib.string (concat, length, slice, take, drop, find, starts_with, ends_with, contains, is_empty, strip_prefix, strip_suffix, trim, trim_left, trim_right, join, replace_all, rsplit_once, substring_after_last)
 
 # Regression: global lets that call string_concat_many (via join) must work.
@@ -7,103 +7,100 @@ import stdlib.string (concat, length, slice, take, drop, find, starts_with, ends
 let global_join_result = join("|", ["foo", "bar", "baz"])
 
 fn main() -> Unit !{IO} =
-  do
-    state <- new_state()
+  run_suite("string", [
+    check_eq("concat", concat("foo", "bar"), "foobar"),
+    check_eq("concat empty", concat("", "bar"), "bar"),
 
-    assert_eq(state, "concat", concat("foo", "bar"), "foobar")
-    assert_eq(state, "concat empty", concat("", "bar"), "bar")
+    check_eq("length hello", length("hello"), 5),
+    check_eq("length empty", length(""), 0),
 
-    assert_eq(state, "length hello", length("hello"), 5)
-    assert_eq(state, "length empty", length(""), 0)
+    check_eq("take", take("hello", 3), "hel"),
+    check_eq("take zero", take("hello", 0), ""),
+    check_eq("take all", take("hello", 5), "hello"),
 
-    assert_eq(state, "take", take("hello", 3), "hel")
-    assert_eq(state, "take zero", take("hello", 0), "")
-    assert_eq(state, "take all", take("hello", 5), "hello")
+    check_eq("drop", drop("hello", 2), "llo"),
+    check_eq("drop zero", drop("hello", 0), "hello"),
+    check_eq("drop all", drop("hello", 5), ""),
 
-    assert_eq(state, "drop", drop("hello", 2), "llo")
-    assert_eq(state, "drop zero", drop("hello", 0), "hello")
-    assert_eq(state, "drop all", drop("hello", 5), "")
+    check_eq("slice mid", slice("hello", 1, 3), "ell"),
+    check_eq("slice start", slice("hello", 0, 2), "he"),
 
-    assert_eq(state, "slice mid", slice("hello", 1, 3), "ell")
-    assert_eq(state, "slice start", slice("hello", 0, 2), "he")
+    check_eq("find found", find("hello", "ll"), Just(2)),
+    check_eq("find not found", find("hello", "xyz"), Nothing),
+    check_eq("find empty needle", find("hello", ""), Just(0)),
 
-    assert_eq(state, "find found", find("hello", "ll"), Just(2))
-    assert_eq(state, "find not found", find("hello", "xyz"), Nothing)
-    assert_eq(state, "find empty needle", find("hello", ""), Just(0))
+    check_true("starts_with match", starts_with("hello", "hel")),
+    check_false("starts_with no match", starts_with("hello", "ell")),
+    check_true("starts_with empty", starts_with("hello", "")),
 
-    assert_true(state, "starts_with match", starts_with("hello", "hel"))
-    assert_false(state, "starts_with no match", starts_with("hello", "ell"))
-    assert_true(state, "starts_with empty", starts_with("hello", ""))
+    check_true("ends_with match", ends_with("hello", "llo")),
+    check_false("ends_with no match", ends_with("hello", "hel")),
 
-    assert_true(state, "ends_with match", ends_with("hello", "llo"))
-    assert_false(state, "ends_with no match", ends_with("hello", "hel"))
+    check_true("contains match", contains("hello world", "world")),
+    check_false("contains no match", contains("hello", "xyz")),
 
-    assert_true(state, "contains match", contains("hello world", "world"))
-    assert_false(state, "contains no match", contains("hello", "xyz"))
+    check_true("is_empty empty", is_empty("")),
+    check_false("is_empty nonempty", is_empty("x")),
 
-    assert_true(state, "is_empty empty", is_empty(""))
-    assert_false(state, "is_empty nonempty", is_empty("x"))
+    check_eq("trim both", trim("  hello  "), "hello"),
+    check_eq("trim_left", trim_left("  hi"), "hi"),
+    check_eq("trim_right", trim_right("hi  "), "hi"),
 
-    assert_eq(state, "trim both", trim("  hello  "), "hello")
-    assert_eq(state, "trim_left", trim_left("  hi"), "hi")
-    assert_eq(state, "trim_right", trim_right("hi  "), "hi")
+    check_eq("strip_prefix found", strip_prefix("hello", "hel"), Just("lo")),
+    check_eq("strip_prefix missing", strip_prefix("hello", "xyz"), Nothing),
 
-    assert_eq(state, "strip_prefix found", strip_prefix("hello", "hel"), Just("lo"))
-    assert_eq(state, "strip_prefix missing", strip_prefix("hello", "xyz"), Nothing)
+    check_eq("strip_suffix found", strip_suffix("hello", "llo"), Just("he")),
+    check_eq("strip_suffix missing", strip_suffix("hello", "xyz"), Nothing),
 
-    assert_eq(state, "strip_suffix found", strip_suffix("hello", "llo"), Just("he"))
-    assert_eq(state, "strip_suffix missing", strip_suffix("hello", "xyz"), Nothing)
+    check_eq("join basic", join("|", ["a", "b", "c"]), "a|b|c"),
+    check_eq("join single", join(",", ["x"]), "x"),
+    check_eq("join empty sep", join("", ["hi", "there"]), "hithere"),
+    check_eq("join global let", global_join_result, "foo|bar|baz"),
 
-    assert_eq(state, "join basic", join("|", ["a", "b", "c"]), "a|b|c")
-    assert_eq(state, "join single", join(",", ["x"]), "x")
-    assert_eq(state, "join empty sep", join("", ["hi", "there"]), "hithere")
-    assert_eq(state, "join global let", global_join_result, "foo|bar|baz")
-
-    assert_eq(state, "replace_all single", replace_all("o", "0", "foo"), "f00")
-    assert_eq(state, "replace_all no match", replace_all("xyz", "_", "hello"), "hello")
-    assert_eq(state, "replace_all multi-char", replace_all("\\n", "\\\\n", "a\\nb\\nc"), "a\\\\nb\\\\nc")
-    assert_eq(state, "replace_all empty from", replace_all("", "x", "abc"), "abc")
-    assert_eq(state, "replace_all chained via pipe",
+    check_eq("replace_all single", replace_all("o", "0", "foo"), "f00"),
+    check_eq("replace_all no match", replace_all("xyz", "_", "hello"), "hello"),
+    check_eq("replace_all multi-char", replace_all("\\n", "\\\\n", "a\\nb\\nc"), "a\\\\nb\\\\nc"),
+    check_eq("replace_all empty from", replace_all("", "x", "abc"), "abc"),
+    check_eq("replace_all chained via pipe",
       "abc" |> replace_all("a", "X") |> replace_all("c", "Y"),
-      "XbY")
+      "XbY"),
 
     # rsplit_once: split around the LAST occurrence of sep -> Just((head, tail)),
     # or Nothing when sep is absent.
-    assert_eq(state, "rsplit_once multi-segment", rsplit_once("a.b.c", "."), Just(("a.b", "c")))
-    assert_eq(state, "rsplit_once single segment", rsplit_once("plain", "."), Nothing)
-    assert_eq(state, "rsplit_once trailing sep", rsplit_once("a.b.", "."), Just(("a.b", "")))
-    assert_eq(state, "rsplit_once leading sep only", rsplit_once(".x", "."), Just(("", "x")))
-    assert_eq(state, "rsplit_once sep is whole", rsplit_once(".", "."), Just(("", "")))
-    assert_eq(state, "rsplit_once multi-char sep", rsplit_once("a::b::c", "::"), Just(("a::b", "c")))
+    check_eq("rsplit_once multi-segment", rsplit_once("a.b.c", "."), Just(("a.b", "c"))),
+    check_eq("rsplit_once single segment", rsplit_once("plain", "."), Nothing),
+    check_eq("rsplit_once trailing sep", rsplit_once("a.b.", "."), Just(("a.b", ""))),
+    check_eq("rsplit_once leading sep only", rsplit_once(".x", "."), Just(("", "x"))),
+    check_eq("rsplit_once sep is whole", rsplit_once(".", "."), Just(("", ""))),
+    check_eq("rsplit_once multi-char sep", rsplit_once("a::b::c", "::"), Just(("a::b", "c"))),
 
     # Eq for tuples (arities 2-5): structural, componentwise.
-    assert_true(state, "tuple2 eq", (1, "x") == (1, "x"))
-    assert_false(state, "tuple2 ne fst", (1, "x") == (2, "x"))
-    assert_false(state, "tuple2 ne snd", (1, "x") == (1, "y"))
-    assert_true(state, "tuple3 eq", (1, "x", true) == (1, "x", true))
-    assert_false(state, "tuple3 ne", (1, "x", true) == (1, "x", false))
-    assert_true(state, "tuple4 eq", (1, 2, 3, 4) == (1, 2, 3, 4))
-    assert_true(state, "tuple5 eq", (1, 2, 3, 4, 5) == (1, 2, 3, 4, 5))
-    assert_false(state, "tuple5 ne", (1, 2, 3, 4, 5) == (1, 2, 3, 4, 9))
+    check_true("tuple2 eq", (1, "x") == (1, "x")),
+    check_false("tuple2 ne fst", (1, "x") == (2, "x")),
+    check_false("tuple2 ne snd", (1, "x") == (1, "y")),
+    check_true("tuple3 eq", (1, "x", true) == (1, "x", true)),
+    check_false("tuple3 ne", (1, "x", true) == (1, "x", false)),
+    check_true("tuple4 eq", (1, 2, 3, 4) == (1, 2, 3, 4)),
+    check_true("tuple5 eq", (1, 2, 3, 4, 5) == (1, 2, 3, 4, 5)),
+    check_false("tuple5 ne", (1, 2, 3, 4, 5) == (1, 2, 3, 4, 9)),
 
     # substring_after_last: tail after the last sep, or the whole string if absent.
-    assert_eq(state, "substring_after_last multi", substring_after_last("a.b.c", "."), "c")
-    assert_eq(state, "substring_after_last absent", substring_after_last("plain", "."), "plain")
-    assert_eq(state, "substring_after_last trailing", substring_after_last("a.b.", "."), "")
-    assert_eq(state, "substring_after_last module name", substring_after_last("stdlib.compiler.types.Type", "."), "Type")
+    check_eq("substring_after_last multi", substring_after_last("a.b.c", "."), "c"),
+    check_eq("substring_after_last absent", substring_after_last("plain", "."), "plain"),
+    check_eq("substring_after_last trailing", substring_after_last("a.b.", "."), ""),
+    check_eq("substring_after_last module name", substring_after_last("stdlib.compiler.types.Type", "."), "Type"),
 
     # Regression: GC rooting hole in emit_binary string comparison path.
     # lv and rv were unrooted when coerce_value triggered GC (string_concat_many
     # in emit_template). Under SPROUT_GC_THRESHOLD=1 this crashes or gives wrong results.
-    assert_true(state, "str == eq", "hello" == "hello")
-    assert_false(state, "str == ne", "hello" == "world")
-    assert_true(state, "str != ne", "hello" != "world")
-    assert_false(state, "str != eq", "hello" != "hello")
+    check_true("str == eq", "hello" == "hello"),
+    check_false("str == ne", "hello" == "world"),
+    check_true("str != ne", "hello" != "world"),
+    check_false("str != eq", "hello" != "hello"),
 
     # Eq Char: instance Eq Char must dispatch through the typeclass path.
-    assert_true(state, "char eq same", eq('a', 'a'))
-    assert_true(state, "char eq diff", eq('a', 'b') == false)
-    assert_true(state, "char eq unicode same", eq('é', 'é'))
-    assert_true(state, "char eq unicode diff", eq('é', 'à') == false)
-
-    summary(state)
+    check_true("char eq same", eq('a', 'a')),
+    check_true("char eq diff", eq('a', 'b') == false),
+    check_true("char eq unicode same", eq('é', 'é')),
+    check_true("char eq unicode diff", eq('é', 'à') == false)
+  ])

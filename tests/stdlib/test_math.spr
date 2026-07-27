@@ -1,34 +1,33 @@
-import stdlib.test (TestState, new_state, assert_eq, assert_true, assert_false, summary)
+import stdlib.test (check_eq, check_true, check_false, run_suite)
 import stdlib.math (abs, min, max, clamp, sign, mod, pow, gcd, lcm, is_even, is_odd)
 
 fn main() -> Unit !{IO} =
-  do
-    state <- new_state()
-    assert_eq(state, "abs positive", abs(5), 5)
-    assert_eq(state, "abs negative", abs(-3), 3)
-    assert_eq(state, "abs zero", abs(0), 0)
-    assert_eq(state, "min picks lesser", min(3, 7), 3)
-    assert_eq(state, "min picks lesser 2", min(7, 3), 3)
-    assert_eq(state, "max picks greater", max(3, 7), 7)
-    assert_eq(state, "max picks greater 2", max(7, 3), 7)
-    assert_eq(state, "clamp within range", clamp(5, 0, 10), 5)
-    assert_eq(state, "clamp below lo", clamp(-5, 0, 10), 0)
-    assert_eq(state, "clamp above hi", clamp(15, 0, 10), 10)
-    assert_eq(state, "sign positive", sign(42), 1)
-    assert_eq(state, "sign negative", sign(-7), -1)
-    assert_eq(state, "sign zero", sign(0), 0)
-    assert_eq(state, "mod basic", mod(10, 3), Just(1))
-    assert_eq(state, "mod exact", mod(9, 3), Just(0))
-    assert_eq(state, "mod zero divisor", mod(10, 0), Nothing)
-    assert_eq(state, "pow positive exp", pow(2, 10), Just(1024))
-    assert_eq(state, "pow zero exp", pow(5, 0), Just(1))
-    assert_eq(state, "pow negative exp", pow(2, -1), Nothing)
-    assert_eq(state, "gcd basic", gcd(12, 8), 4)
-    assert_eq(state, "gcd coprime", gcd(7, 13), 1)
-    assert_eq(state, "lcm basic", lcm(4, 6), 12)
-    assert_true(state, "is_even 0", is_even(0))
-    assert_true(state, "is_even 4", is_even(4))
-    assert_false(state, "is_even 3", is_even(3))
-    assert_true(state, "is_odd 7", is_odd(7))
-    assert_false(state, "is_odd 4", is_odd(4))
-    summary(state)
+  run_suite("math", [
+    check_eq("abs positive", abs(5), 5),
+    check_eq("abs negative", abs(-3), 3),
+    check_eq("abs zero", abs(0), 0),
+    check_eq("min picks lesser", min(3, 7), 3),
+    check_eq("min picks lesser 2", min(7, 3), 3),
+    check_eq("max picks greater", max(3, 7), 7),
+    check_eq("max picks greater 2", max(7, 3), 7),
+    check_eq("clamp within range", clamp(5, 0, 10), 5),
+    check_eq("clamp below lo", clamp(-5, 0, 10), 0),
+    check_eq("clamp above hi", clamp(15, 0, 10), 10),
+    check_eq("sign positive", sign(42), 1),
+    check_eq("sign negative", sign(-7), -1),
+    check_eq("sign zero", sign(0), 0),
+    check_eq("mod basic", mod(10, 3), Just(1)),
+    check_eq("mod exact", mod(9, 3), Just(0)),
+    check_eq("mod zero divisor", mod(10, 0), Nothing),
+    check_eq("pow positive exp", pow(2, 10), Just(1024)),
+    check_eq("pow zero exp", pow(5, 0), Just(1)),
+    check_eq("pow negative exp", pow(2, -1), Nothing),
+    check_eq("gcd basic", gcd(12, 8), 4),
+    check_eq("gcd coprime", gcd(7, 13), 1),
+    check_eq("lcm basic", lcm(4, 6), 12),
+    check_true("is_even 0", is_even(0)),
+    check_true("is_even 4", is_even(4)),
+    check_false("is_even 3", is_even(3)),
+    check_true("is_odd 7", is_odd(7)),
+    check_false("is_odd 4", is_odd(4))
+  ])

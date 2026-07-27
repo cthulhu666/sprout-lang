@@ -81,3 +81,61 @@ export fn summary(state: TestState) -> Unit !{IO} =
         print(int_to_string(p) ++ " passed, " ++ int_to_string(f) ++ " failed")
         if f > 0 then print("SUITE FAILED")
         else print("SUITE PASSED")
+
+# ---------------------------------------------------------------------------
+# Pure-list API (preferred). An assertion is a value, not an effect: `check_eq`
+# evaluates `eq`/`to_string` eagerly and returns a monomorphic `TestCase`, so a
+# heterogeneous set of assertions (Int here, String there) forms one homogeneous
+# `Vec TestCase`. `run_suite` folds it purely and prints once — no `TestState`
+# threaded through every call, no `do`, no per-assertion IO.
+#
+#   import stdlib.test (check_eq, check_true, run_suite)
+#
+#   fn main() -> Unit !{IO} =
+#     run_suite("math", [
+#       check_eq("abs(-3)", abs(-3), 3),
+#       check_true("is_even 4", is_even(4)),
+#     ])
+#
+# Use the effectful TestState API above only when producing the actual value
+# needs IO (e.g. a Ref-backed capture sink, channels) — those cases can't be a
+# pure `TestCase`.
+# ---------------------------------------------------------------------------
+
+export type TestCase =
+  | TestCase String Bool String
+  # TestCase label passed detail
+
+# eq for the check, ToString only for the failure detail — same two orthogonal
+# constraints as assert_eq, resolved concretely at each (monomorphic) call site.
+export fn check_eq(label: String, actual: a, expected: a) -> TestCase where Eq a, ToString a =
+  if eq(actual, expected) then TestCase(label, true, "")
+  else TestCase(label, false, "expected " ++ to_string(expected) ++ ", got " ++ to_string(actual))
+
+export fn check_true(label: String, condition: Bool) -> TestCase =
+  TestCase(label, condition, "expected true, got false")
+
+export fn check_false(label: String, condition: Bool) -> TestCase =
+  TestCase(label, condition == false, "expected false, got true")
+
+# Fold helpers (private): build the per-case report and count failures.
+fn case_report(acc: String, c: TestCase) -> String =
+  match c with
+  | TestCase label passed detail ->
+      if passed then acc ++ "PASS: " ++ label ++ "\n"
+      else acc ++ "FAIL: " ++ label ++ " (" ++ detail ++ ")\n"
+
+fn case_fail_count(acc: Int, c: TestCase) -> Int =
+  match c with
+  | TestCase _ passed _ -> if passed then acc else acc + 1
+
+# Print one PASS/FAIL line per case, then "N passed, M failed" and the
+# SUITE PASSED/FAILED verdict the justfile runner greps for. Emits a single
+# print (the whole report is a pure fold) so output survives buffered capture.
+export fn run_suite(name: String, cases: Vec TestCase) -> Unit !{IO} =
+  do
+    let report = vec_fold(case_report, "", cases)
+    let fails = vec_fold(case_fail_count, 0, cases)
+    let total = vec_length(cases)
+    let verdict = if fails > 0 then "SUITE FAILED" else "SUITE PASSED"
+    print(report ++ name ++ ": " ++ int_to_string(total - fails) ++ " passed, " ++ int_to_string(fails) ++ " failed\n" ++ verdict)
