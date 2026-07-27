@@ -41,6 +41,4 @@ export fn parse_config(text: String) -> Dict Int =
 
 # Look a key up, falling back to `dflt` when absent — so a config lists only the knobs it overrides.
 export fn cfg_int(d: Dict Int, key: String, dflt: Int) -> Int =
-  match dict_get(key, d) with
-  | Just v -> v
-  | Nothing -> dflt
+  maybe_with_default(dflt, dict_get(key, d))

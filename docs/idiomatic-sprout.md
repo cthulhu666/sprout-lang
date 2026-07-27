@@ -32,6 +32,28 @@ A refutable pattern *requires* `else`; an irrefutable binding must not have one.
 The right-hand sides are pure, and every `else` and the body unify to one result
 type.
 
+## Reach for a combinator on a single `Maybe`/`Result`
+
+`let..else` (above) shines for a *chain* of binds. For a *single* value, the
+prelude combinators are shorter than a two-arm `match`:
+
+```sprout
+# unwrap-or-default — the value, or a fallback:
+maybe_with_default(dflt, dict_get(key, d))   # vs. match … | Just v -> v | Nothing -> dflt
+
+# transform the payload (Functor `map`):
+map(trim, dict_get(key, d))                  # Maybe String -> Maybe String
+
+# chain another fallible step (Monad `and_then`):
+and_then(parse_int, dict_get("port", d))     # Maybe String -> Maybe Int
+```
+
+`map` and `and_then` work over any `Functor`/`Monad` — `Maybe`, `Result`, and
+`List` — so the same two names cover every container; `Result` adds
+`result_map_error`/`result_with_default`. Still `match` directly when you branch
+on the shape instead of threading the payload onward (see "Match the producing
+call directly").
+
 ## Transform collections with combinators, not index loops
 
 Work on elements directly with the prelude's combinators. They pass you the
