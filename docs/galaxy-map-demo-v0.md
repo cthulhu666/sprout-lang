@@ -121,6 +121,9 @@ These are gfx-binding additions (non-bootstrap; no seed refresh):
   so it would clip to black without pushing far out (`rlSetClipPlanes`, persists).
 - `gfx.sphere_model(r,g,b) -> handle` — a uniformly-coloured unit sphere model for instancing a
   starfield (`GenMeshSphere` + `LoadModelFromMesh`), coloured via the material's `colDiffuse`.
+- `gfx.star_model(r,g,b) -> handle` — like `sphere_model`, but tagged **emissive**: `draw_instances`
+  renders it full-bright (no key-light shading) through the star shader, so it reads as a glowing
+  star, not a matte lit ball. The scene-1 starfield uses this (one per spectral class).
 - `gfx.world_to_screen(x,y,z) -> Bool` + `gfx.projected_x()/projected_y()` — project a world point to
   screen for click-picking (`GetWorldToScreen`; the split trio matches the `mouse_x`/`mouse_y` idiom
   since the i64 ABI returns one word).
@@ -128,8 +131,17 @@ These are gfx-binding additions (non-bootstrap; no seed refresh):
   reachable only as a button label).
 - `gfx.draw_line3d(x0,y0,z0,x1,y1,z1,r,g,b)` — an immediate-mode 3D line (`DrawLine3D`); scene 2
   draws each orbit ellipse as a loop of these.
-- `gfx.draw_sphere(x,y,z,radius,r,g,b)` — an immediate-mode solid sphere (`DrawSphereEx`); scene 2's
-  star and planets. (Distinct from `sphere_model`, which is for the instanced starfield.)
+- `gfx.draw_sphere(x,y,z,radius,r,g,b)` — an immediate-mode diffuse-lit solid sphere (`DrawSphereEx`).
+  (Distinct from `sphere_model`, which is for the instanced starfield.)
+- `gfx.draw_star(x,y,z,radius,r,g,b)` — an immediate-mode **emissive** sphere (finer tessellation);
+  scene 2's sun. Full-bright, no shaded side.
+- `gfx.draw_planet(x,y,z,radius,seed,kind,r,g,b)` — an immediate-mode sphere with a **procedural**
+  surface (no texture asset), `kind` = 0 rocky (noise continents + oceans + polar ice caps) / 1 gas
+  giant (turbulent latitude bands) / 2 moon (grey mottle); `seed` varies it per body. Lit from a star
+  at the world origin (day side faces it) with a blue atmosphere limb on rocky/gas bodies. Scene 2's
+  planets and moons.
+- `gfx.post_bloom(threshold, intensity)` — additive bloom (bright-pass → blurred glow) over the
+  scene, so emissive stars/sun bleed a halo; the galaxy demo enables it with `supersample(2)`.
 - `gfx.draw_instances_masked(group_count, cull_dist, class_mask)` — like `draw_instances`, but draws
   only the models whose bit is set in `class_mask` (bit *m* == model *m*). Since the starfield pushes
   one model per spectral class (model index == `classCode`), this is the spectral-class filter — and
@@ -172,14 +184,26 @@ into that system. The scene:
   state. Parsing uses the pure-Sprout, **float-capable** `json_parse` (`json_get_float`); no
   fixed-point pre-export. Parsed **once on entry** and cached in the loop (re-reading per frame
   halved the frame rate — GC churn from the parse).
-- **Draws star + orbits + planets.** The star is an immediate-mode `draw_sphere` at the origin; each
-  planet's orbit is a polyline loop of `draw_line3d` sampled from `loam.orbit.ellipse_point` (pure
-  Kepler-ellipse math from `orbitSemiMajorAU`/`eccentricity`/`argumentOfPeriapsisDeg`), and the
-  planet body sits at its current `trueAnomalyDeg`, sized by `radiusEarths`, coloured by size.
+- **Draws star + orbits + planets.** The star is an **emissive** `draw_star` at the origin (glowing,
+  not diffuse-lit); each planet's orbit is a polyline loop of `draw_line3d` sampled from
+  `loam.orbit.ellipse_point` (pure Kepler-ellipse math from
+  `orbitSemiMajorAU`/`eccentricity`/`argumentOfPeriapsisDeg`), and the planet body sits at its current
+  `trueAnomalyDeg`, sized by `radiusEarths`. Each body is a **procedural** `draw_planet`: `planet_kind`
+  picks rocky vs gas giant by the sub-2-Earth-radius split, `planet_rgb` supplies the base tint the
+  shader derives its surface from, and `planet_seed` (static orbit params — never `trueAnomaly`, which
+  would make the surface swim) varies it per planet. Bodies are lit from the star at the origin, so the
+  day-side terminator points at it, with a camera fill light keeping the viewed side legible.
 - **Rings and moons.** A planet with `hasRings` gets a flat ring circle (`draw_line3d` loop) around
-  it; a planet with N `moons` gets N schematic dots just outside it — real moon distances are far
-  sub-pixel at system scale, so the dots indicate *presence*, not true geometry (the count is exact,
-  shown in the panel). `hasRings` reads through a new `stdlib.json.json_get_bool` accessor.
+  it; a planet with N `moons` gets N schematic dots just outside it (each a small `draw_planet` of
+  `kind` 2, a grey mottled moon) — real moon distances are far sub-pixel at system scale, so the dots
+  indicate *presence*, not true geometry (the count is exact, shown in the panel). `hasRings` reads
+  through a new `stdlib.json.json_get_bool` accessor.
+- **Look (procedural, no assets).** Stars are emissive + bloomed (`gfx.post_bloom`, scene-wide); the
+  sun glows. Planets/moons get their surfaces analytically in the shader (3D value-noise fBm →
+  continents/bands/mottle) so the demo stays asset-free. Bloom is threshold-based, so it keys on
+  brightness — the dark procedural planets now sit below the threshold and no longer bloom like the
+  sun (the earlier flat-tan planets did); an emissive-only bloom source is the principled follow-up
+  (`BACKLOG.md`).
 - **Hover detail panel.** Moving the cursor over a planet projects each planet to the screen
   (`world_to_screen`, same as scene-1 picking, but over the in-memory cached list) and shows the
   nearest one's name, type, radius, mass, temperature, semi-major axis, moon count, and rings in the

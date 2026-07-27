@@ -24,6 +24,7 @@ extern fn gfx_draw_cube(x: Double, y: Double, z: Double, size: Double, r: Int, g
 extern fn gfx_draw_line3d(x0: Double, y0: Double, z0: Double, x1: Double, y1: Double, z1: Double, r: Int, g: Int, b: Int) -> Unit !{IO}
 extern fn gfx_draw_sphere(x: Double, y: Double, z: Double, radius: Double, r: Int, g: Int, b: Int) -> Unit !{IO}
 extern fn gfx_draw_star(x: Double, y: Double, z: Double, radius: Double, r: Int, g: Int, b: Int) -> Unit !{IO}
+extern fn gfx_draw_planet(x: Double, y: Double, z: Double, radius: Double, seed: Double, kind: Int, r: Int, g: Int, b: Int) -> Unit !{IO}
 extern fn gfx_capture_quad(p0x: Double, p0y: Double, p0z: Double,
                            p1x: Double, p1y: Double, p1z: Double,
                            p2x: Double, p2y: Double, p2z: Double,
@@ -143,6 +144,15 @@ export fn draw_sphere(x: Double, y: Double, z: Double, radius: Double, r: Int, g
 # the instanced equivalent (star_model). Immediate-mode.
 export fn draw_star(x: Double, y: Double, z: Double, radius: Double, r: Int, g: Int, b: Int) -> Unit !{IO} =
   gfx_draw_star(x, y, z, radius, r, g, b)
+
+# Draw a PROCEDURAL planet or moon (scene 2): a diffuse-lit sphere whose surface is synthesised in the
+# shader — no texture asset. `seed` varies the surface per body; `kind` selects the style: 0 = rocky
+# (noise continents + oceans + polar ice caps), 1 = gas giant (turbulent latitude bands), 2 = moon
+# (grey cratered mottle). (r,g,b) is the base tint the surface derives from. Lit from a star assumed
+# at the WORLD ORIGIN (the day side faces it), with a blue atmosphere limb on rocky/gas bodies. Use
+# this for planets/moons; use draw_star for the (emissive) star. Immediate-mode.
+export fn draw_planet(x: Double, y: Double, z: Double, radius: Double, seed: Double, kind: Int, r: Int, g: Int, b: Int) -> Unit !{IO} =
+  gfx_draw_planet(x, y, z, radius, seed, kind, r, g, b)
 
 # Bake many draw_cube calls into ONE static GPU mesh: mesh_capture_begin(), run the tile loop
 # (each draw_cube appends its geometry), then handle <- mesh_capture_end(). Thereafter draw the

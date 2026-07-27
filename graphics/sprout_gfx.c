@@ -406,6 +406,97 @@ static int g_star_ready = 0;
  * Static zero-init means every model is lit (non-emissive) until explicitly made a star. */
 static unsigned char g_model_emissive[64];
 
+/* PROCEDURAL PLANET shader (scene-2 planets + moons). Unlike the flat draw_sphere, this synthesises
+ * a surface analytically from the sphere's object-space direction (seamless — no UV, no texture): a
+ * 3D value-noise fBm drives continents/oceans + polar ice caps (rocky), latitude bands (gas giant),
+ * or a cratered grey mottle (moon), selected by uType and varied per body by uSeed. Lighting is
+ * physical for this scene — the star sits at the WORLD ORIGIN, so the day side faces it: the light
+ * direction is normalize(-uCenter). A fresnel limb term adds a blue atmosphere glow on the lit side
+ * for rocky/gas bodies. World position (for the eye/limb vector) is reconstructed as uCenter +
+ * uRadius*dir, so no matModel is needed (unreliable for immediate-mode DrawSphereEx). */
+static const char *PLANET_VS =
+  "#version 330\n"
+  "in vec3 vertexPosition;\n"
+  "in vec4 vertexColor;\n"
+  "uniform mat4 mvp;\n"
+  /* rlgl bakes DrawSphereEx's push-matrix transform INTO the vertex on the CPU, so vertexPosition is
+   * already WORLD space (not local). The FS recovers the unit surface direction as (vWorld-uCenter)
+   * / uRadius — using vertexPosition directly as a direction would point from the galaxy origin. */
+  "out vec3 vWorld;\n"
+  "out vec4 vCol;\n"
+  "out float vDepth;\n"
+  "void main() {\n"
+  "    vWorld = vertexPosition;\n"
+  "    vCol = vertexColor;\n"
+  "    gl_Position = mvp*vec4(vertexPosition, 1.0);\n"
+  "    vDepth = gl_Position.w;\n"
+  "}\n";
+
+static const char *PLANET_FS =
+  "#version 330\n"
+  "in vec3 vWorld;\n"
+  "in vec4 vCol;\n"
+  "in float vDepth;\n"
+  "uniform float uSeed;\n"
+  "uniform int uType;\n"     /* 0 rocky, 1 gas giant, 2 moon */
+  "uniform vec3 uCenter;\n"  /* planet world position (star is at the origin) */
+  "uniform float uRadius;\n"
+  "uniform vec3 uEye;\n"
+  FOG_GLSL
+  "out vec4 finalColor;\n"
+  /* Compact 3D value noise + 4-octave fBm on the unit sphere direction (seamless, no poles/seams). */
+  "float hash(vec3 p) {\n"
+  "    p = fract(p*0.3183099 + 0.1); p *= 17.0;\n"
+  "    return fract(p.x*p.y*p.z*(p.x + p.y + p.z));\n"
+  "}\n"
+  "float vnoise(vec3 x) {\n"
+  "    vec3 i = floor(x); vec3 f = fract(x); f = f*f*(3.0 - 2.0*f);\n"
+  "    return mix(mix(mix(hash(i+vec3(0,0,0)), hash(i+vec3(1,0,0)), f.x),\n"
+  "                   mix(hash(i+vec3(0,1,0)), hash(i+vec3(1,1,0)), f.x), f.y),\n"
+  "               mix(mix(hash(i+vec3(0,0,1)), hash(i+vec3(1,0,1)), f.x),\n"
+  "                   mix(hash(i+vec3(0,1,1)), hash(i+vec3(1,1,1)), f.x), f.y), f.z);\n"
+  "}\n"
+  "float fbm(vec3 p) {\n"
+  "    float a = 0.5, s = 0.0;\n"
+  "    for (int i = 0; i < 4; i++) { s += a*vnoise(p); p *= 2.0; a *= 0.5; }\n"
+  "    return s;\n"
+  "}\n"
+  "vec3 surface(vec3 d, vec3 base) {\n"
+  "    if (uType == 1) {\n"                               /* gas giant: turbulent latitude bands */
+  "        float band = sin(d.y*10.0 + fbm(d*3.0 + uSeed)*2.5);\n"
+  "        vec3 dark = base*0.6; vec3 lite = mix(base, vec3(1.0), 0.15);\n"
+  "        return mix(dark, lite, 0.5 + 0.5*band);\n"
+  "    } else if (uType == 2) {\n"                        /* moon: grey mottle */
+  "        float n = fbm(d*6.0 + uSeed);\n"
+  "        return base*(0.6 + 0.5*n);\n"
+  "    }\n"
+  "    float h = fbm(d*3.5 + uSeed);\n"                    /* rocky: continents / oceans + ice caps */
+  "    vec3 ocean = base*0.35 + vec3(0.0, 0.02, 0.08);\n"
+  "    vec3 land = mix(base, vec3(0.30, 0.45, 0.20), 0.5);\n"
+  "    vec3 col = (h > 0.52) ? land : ocean;\n"
+  "    float ice = smoothstep(0.78, 0.90, abs(d.y));\n"
+  "    return mix(col, vec3(0.90, 0.95, 1.0), ice);\n"
+  "}\n"
+  "void main() {\n"
+  "    vec3 n = (uRadius > 1e-4) ? normalize(vWorld - uCenter) : vec3(0.0, 1.0, 0.0);\n"
+  "    vec3 surf = surface(n, vCol.rgb);\n"
+  "    vec3 V = normalize(uEye - vWorld);\n"
+  "    vec3 L = (length(uCenter) > 1e-3) ? normalize(-uCenter) : vec3(0.0, 1.0, 0.0);\n"
+  "    float key = max(dot(n, L), 0.0);\n"                 /* star key light (physical day-side terminator) */
+  "    float fill = max(dot(n, V), 0.0);\n"                /* camera headlight so the viewed side is never black */
+  "    vec3 lit = surf*(0.10 + 0.85*key + 0.30*fill);\n"
+  "    if (uType == 0 || uType == 1) {\n"                  /* atmosphere: blue fresnel limb on the star-lit side */
+  "        float rim = pow(1.0 - max(dot(n, V), 0.0), 3.0);\n"
+  "        lit += rim*key*vec3(0.35, 0.55, 1.0)*0.8;\n"
+  "    }\n"
+  "    finalColor = vec4(apply_fog(lit, vDepth), 1.0);\n"
+  "}\n";
+
+static Shader g_planet_shader;
+static int    g_planet_ready = 0;
+static int    g_loc_planet_seed = -1, g_loc_planet_type = -1, g_loc_planet_center = -1,
+              g_loc_planet_radius = -1, g_loc_planet_eye = -1;
+
 /* Distance fog (docs/gfx-effects-roadmap-v0.md #1). Applied in the scene shaders (uFogDensity
  * defaults to 0 = off, so untouched demos are unchanged); frame_begin also clears the background
  * to the fog colour when on, so distant terrain fades into the horizon with no visible edge. */
@@ -708,6 +799,18 @@ static void init_lighting(void) {
   }
   g_star_shader = LoadShaderFromMemory(STAR_VS, STAR_FS);
   if (g_star_shader.id != 0) g_star_ready = 1;
+
+  /* Procedural planet shader (scene-2 planets/moons). No light uniforms — it lights from the star at
+   * the world origin (see PLANET_FS). Fog uniforms default to 0 (off) unless gfx_fog sets them. */
+  g_planet_shader = LoadShaderFromMemory(PLANET_VS, PLANET_FS);
+  if (g_planet_shader.id != 0) {
+    g_loc_planet_seed   = GetShaderLocation(g_planet_shader, "uSeed");
+    g_loc_planet_type   = GetShaderLocation(g_planet_shader, "uType");
+    g_loc_planet_center = GetShaderLocation(g_planet_shader, "uCenter");
+    g_loc_planet_radius = GetShaderLocation(g_planet_shader, "uRadius");
+    g_loc_planet_eye    = GetShaderLocation(g_planet_shader, "uEye");
+    g_planet_ready = 1;
+  }
 }
 
 /* --- Instanced-props registry: spatial groups, frustum + distance culled ----------------------
@@ -1154,6 +1257,33 @@ long long gfx_draw_star(long long x, long long y, long long z, long long radius,
   if (g_star_ready) BeginShaderMode(g_star_shader);
   DrawSphereEx(pos, as_float(radius), 24, 32, col);
   if (g_star_ready) EndShaderMode();
+  return 0;
+}
+
+/* Draw a PROCEDURAL planet/moon (scene 2): a diffuse-lit sphere whose surface is synthesised in the
+ * shader from `seed`+`kind` (0 rocky continents+ice, 1 gas-giant bands, 2 moon mottle) — no texture.
+ * (r,g,b) is the base tint the procedural surface derives from. Lit from the star at the world origin
+ * (day side faces it) with a blue atmosphere limb on rocky/gas bodies. Higher tessellation (24x32)
+ * for a smooth silhouette. Immediate-mode; coords/radius/seed cross as Doubles, kind/r/g/b as Ints. */
+long long gfx_draw_planet(long long x, long long y, long long z, long long radius,
+                          long long seed, long long kind, long long r, long long g, long long b) {
+  Vector3 pos = { as_float(x), as_float(y), as_float(z) };
+  float rad = as_float(radius);
+  Color col = { (unsigned char)r, (unsigned char)g, (unsigned char)b, 255 };
+  if (g_planet_ready) {
+    float s = as_float(seed);
+    int t = (int)kind;
+    float center[3] = { pos.x, pos.y, pos.z };
+    float eye[3] = { g_cam.position.x, g_cam.position.y, g_cam.position.z };
+    SetShaderValue(g_planet_shader, g_loc_planet_seed, &s, SHADER_UNIFORM_FLOAT);
+    SetShaderValue(g_planet_shader, g_loc_planet_type, &t, SHADER_UNIFORM_INT);
+    SetShaderValue(g_planet_shader, g_loc_planet_center, center, SHADER_UNIFORM_VEC3);
+    SetShaderValue(g_planet_shader, g_loc_planet_radius, &rad, SHADER_UNIFORM_FLOAT);
+    SetShaderValue(g_planet_shader, g_loc_planet_eye, eye, SHADER_UNIFORM_VEC3);
+    BeginShaderMode(g_planet_shader);
+  }
+  DrawSphereEx(pos, rad, 24, 32, col);
+  if (g_planet_ready) EndShaderMode();
   return 0;
 }
 
@@ -1874,6 +2004,10 @@ long long gfx_fog(long long density, long long r, long long g, long long b) {
   if (g_star_ready) {
     SetShaderValue(g_star_shader, GetShaderLocation(g_star_shader, "uFogDensity"), &d, SHADER_UNIFORM_FLOAT);
     SetShaderValue(g_star_shader, GetShaderLocation(g_star_shader, "uFogColor"), &c, SHADER_UNIFORM_VEC3);
+  }
+  if (g_planet_ready) {
+    SetShaderValue(g_planet_shader, GetShaderLocation(g_planet_shader, "uFogDensity"), &d, SHADER_UNIFORM_FLOAT);
+    SetShaderValue(g_planet_shader, GetShaderLocation(g_planet_shader, "uFogColor"), &c, SHADER_UNIFORM_VEC3);
   }
   return 0;
 }

@@ -635,9 +635,18 @@ fn orbit_seg(scale: Double, a: Double, e: Double, argperi: Double, i: Int) -> Un
                to_double(i + 1) * two_pi / to_double(orbit_segments))
       orbit_seg(scale, a, e, argperi, i + 1)
 
-# Colour a planet by size: sub-2-Earth-radii read as rocky (brown), larger as gas/ice (pale).
+# Colour a planet by size: sub-2-Earth-radii read as rocky (brown), larger as gas/ice (pale). This
+# is the BASE tint the procedural planet shader derives its surface from (land/ocean or bands).
 fn planet_rgb(rad: Double) -> (Int, Int, Int) =
   if rad < 2.0 then (190, 150, 120) else (200, 195, 150)
+
+# Procedural-surface style for gfx.draw_planet: 0 = rocky (continents + ice), 1 = gas giant (bands).
+# Same sub-2-Earth split as planet_rgb, so a body's tint and surface style agree.
+fn planet_kind(rad: Double) -> Int = if rad < 2.0 then 0 else 1
+
+# A per-body noise seed from STATIC orbit params only (never `nu`, which changes as the planet moves —
+# that would make the surface swim). Distinct per planet within a system, so surfaces differ.
+fn planet_seed(p: Planet) -> Double = (p.a * 3.3) + (p.argperi * 1.7)
 
 # A flat circle of `rr` around (cx, cz) on the world x/z plane — a planet's ring, as a line loop.
 fn ring_seg(cx: Double, cz: Double, rr: Double, i: Int) -> Unit !{IO} =
@@ -657,7 +666,9 @@ fn moon_dots(cx: Double, cz: Double, off: Double, count: Int, i: Int) -> Unit !{
   else
     do
       let ang = to_double(i) * two_pi / to_double(if count < 1 then 1 else count)
-      gfx.draw_sphere(cx + (off * cos(ang)), 0.0, cz + (off * sin(ang)), moon_size, 180, 180, 195)
+      # kind 2 = moon (grey cratered mottle); seed per moon from its index so they differ.
+      gfx.draw_planet(cx + (off * cos(ang)), 0.0, cz + (off * sin(ang)), moon_size,
+                      (to_double(i) * 2.7) + 0.5, 2, 180, 180, 195)
       moon_dots(cx, cz, off, count, i + 1)
 
 fn draw_one_planet(scale: Double, p: Planet) -> Unit !{IO} =
@@ -670,7 +681,7 @@ fn draw_one_planet(scale: Double, p: Planet) -> Unit !{IO} =
           let pz = z * scale
           let prad = max_d(p.rad * planet_size_scale, planet_min_size)
           match planet_rgb(p.rad) with
-          | (pr, pg, pb) -> gfx.draw_sphere(px, 0.0, pz, prad, pr, pg, pb)
+          | (pr, pg, pb) -> gfx.draw_planet(px, 0.0, pz, prad, planet_seed(p), planet_kind(p.rad), pr, pg, pb)
           if p.rings then ring_seg(px, pz, prad * ring_scale, 0) else ()
           moon_dots(px, pz, prad + moon_offset, p.moons, 0)
 
