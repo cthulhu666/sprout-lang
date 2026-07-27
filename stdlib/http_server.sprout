@@ -58,9 +58,7 @@ fn parse_header_pair(pair: (String, String)) -> Maybe (String, String) =
       else Just((lower_ascii(string.trim(name)), string.trim(value)))
 
 fn parse_header_line(raw: String) -> Maybe (String, String) =
-  match string.split_once(raw, ":") with
-  | Nothing -> Nothing
-  | Just pair -> parse_header_pair(pair)
+  and_then(parse_header_pair, string.split_once(raw, ":"))
 
 fn result_from_maybe(err: e, value: Maybe a) -> Result e a =
   match value with
@@ -100,9 +98,7 @@ fn content_length_result(m: Maybe Int) -> ServerResult Int =
   | Nothing -> Err(HttpInvalidRequest("invalid Content-Length"))
 
 fn request_body_start(raw: String) -> Maybe Int =
-  match find_headers_end(raw) with
-  | Nothing -> Nothing
-  | Just pos -> Just(pos + 4)
+  map(\pos -> pos + 4, find_headers_end(raw))
 
 # The header block spans from just past the request line to the blank-line
 # terminator. A header-less request (HTTP/1.0-style) has the terminator right after
@@ -192,7 +188,7 @@ fn continue_read_request(conn: Int, raw: String, prefix: (RequestLine, Dict Stri
       parse(full)
 where
   (_req, _headers, content_length) = prefix
-  body_start = match request_body_start(raw) with | Nothing -> 0 | Just pos -> pos
+  body_start = maybe_with_default(0, request_body_start(raw))
   body = string.drop(raw, body_start)
 
 fn headers_to_lines(keys: Vec String, headers: Dict String, index: Int, total: Int, acc: String) -> String =
