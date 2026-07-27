@@ -1,4 +1,4 @@
-import stdlib.test (TestState, new_state, assert_eq, assert_true, summary)
+import stdlib.test (check_eq, run_suite)
 
 # Regression: vec_sort_by with a projection whose key type differs from the
 # element type (f: a -> k with k != a). Before the dict-resolver fix, the
@@ -27,31 +27,28 @@ fn tag_at(i: Int, v: Vec (Int, Int)) -> Int =
   | Just p -> match p with | (_, t) -> t
 
 fn main() -> Unit !{IO} =
-  do
-    state <- new_state()
-
+  let v = foldable_to_vec([(3, 100), (1, 200), (2, 50)])
+      sorted = vec_sort_by(fst, v)
+      s = foldable_to_vec([(1, 10), (2, 20), (1, 30), (2, 40), (1, 50)])
+      st = vec_sort_by(fst, s)
+  in run_suite("vec_sort_projection", [
     # --- projection ordering: sort tuples by their first component ---
-    let v = foldable_to_vec([(3, 100), (1, 200), (2, 50)])
-    let sorted = vec_sort_by(fst, v)
-    assert_eq(state, "proj key[0]", key_at(0, sorted), 1)
-    assert_eq(state, "proj key[1]", key_at(1, sorted), 2)
-    assert_eq(state, "proj key[2]", key_at(2, sorted), 3)
+    check_eq("proj key[0]", key_at(0, sorted), 1),
+    check_eq("proj key[1]", key_at(1, sorted), 2),
+    check_eq("proj key[2]", key_at(2, sorted), 3),
 
     # --- stability: equal keys preserve input order (deferred in the
     # stack-safety test until this dispatch fix; now runnable). Input has three
     # key=1 and two key=2 rows with distinct tags; sorting by key must keep the
     # tags in their original relative order. ---
-    let s = foldable_to_vec([(1, 10), (2, 20), (1, 30), (2, 40), (1, 50)])
-    let st = vec_sort_by(fst, s)
-    assert_eq(state, "stable key[0]", key_at(0, st), 1)
-    assert_eq(state, "stable key[1]", key_at(1, st), 1)
-    assert_eq(state, "stable key[2]", key_at(2, st), 1)
-    assert_eq(state, "stable key[3]", key_at(3, st), 2)
-    assert_eq(state, "stable key[4]", key_at(4, st), 2)
-    assert_eq(state, "stable tag[0]", tag_at(0, st), 10)
-    assert_eq(state, "stable tag[1]", tag_at(1, st), 30)
-    assert_eq(state, "stable tag[2]", tag_at(2, st), 50)
-    assert_eq(state, "stable tag[3]", tag_at(3, st), 20)
-    assert_eq(state, "stable tag[4]", tag_at(4, st), 40)
-
-    summary(state)
+    check_eq("stable key[0]", key_at(0, st), 1),
+    check_eq("stable key[1]", key_at(1, st), 1),
+    check_eq("stable key[2]", key_at(2, st), 1),
+    check_eq("stable key[3]", key_at(3, st), 2),
+    check_eq("stable key[4]", key_at(4, st), 2),
+    check_eq("stable tag[0]", tag_at(0, st), 10),
+    check_eq("stable tag[1]", tag_at(1, st), 30),
+    check_eq("stable tag[2]", tag_at(2, st), 50),
+    check_eq("stable tag[3]", tag_at(3, st), 20),
+    check_eq("stable tag[4]", tag_at(4, st), 40)
+  ])

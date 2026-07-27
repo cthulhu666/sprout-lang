@@ -1,4 +1,4 @@
-import stdlib.test (TestState, new_state, assert_true, summary)
+import stdlib.test (check_true, run_suite)
 import stdlib.math (pi)
 import loam.orbit (ellipse_r, ellipse_point, ellipse_semi_minor)
 
@@ -12,32 +12,25 @@ fn abs_d(x: Double) -> Double = if x < 0.0 then 0.0 - x else x
 fn approx(x: Double, target: Double, eps: Double) -> Bool = abs_d(x - target) < eps
 
 fn main() -> Unit !{IO} =
-  do
-    state <- new_state()
-
+  let (x0, z0) = ellipse_point(0.104, 0.181, 0.0, 0.0)
+  in let (x1, z1) = ellipse_point(0.104, 0.181, pi / 2.0, 0.0)
+  in run_suite("orbit", [
     # r = a(1-e) at periapsis (nu=0), a(1+e) at apoapsis (nu=pi).
-    assert_true(state, "periapsis at nu=0", approx(ellipse_r(0.104, 0.181, 0.0), 0.085176, 0.0005))
-    assert_true(state, "apoapsis at nu=pi", approx(ellipse_r(0.104, 0.181, pi), 0.122824, 0.0005))
+    check_true("periapsis at nu=0", approx(ellipse_r(0.104, 0.181, 0.0), 0.085176, 0.0005)),
+    check_true("apoapsis at nu=pi", approx(ellipse_r(0.104, 0.181, pi), 0.122824, 0.0005)),
 
     # Semi-minor axis b = a sqrt(1-e^2).
-    assert_true(state, "semi-minor axis", approx(ellipse_semi_minor(0.104, 0.181), 0.102, 0.001))
+    check_true("semi-minor axis", approx(ellipse_semi_minor(0.104, 0.181), 0.102, 0.001)),
 
     # ellipse_point at periapsis with arg_peri=0 sits on +x at r=a(1-e), z~0.
-    match ellipse_point(0.104, 0.181, 0.0, 0.0) with
-    | (x, z) ->
-        do
-          assert_true(state, "point nu=0 arg=0 -> x=a(1-e)", approx(x, 0.085176, 0.0005))
-          assert_true(state, "point nu=0 arg=0 -> z=0", approx(z, 0.0, 0.0001))
+    check_true("point nu=0 arg=0 -> x=a(1-e)", approx(x0, 0.085176, 0.0005)),
+    check_true("point nu=0 arg=0 -> z=0", approx(z0, 0.0, 0.0001)),
 
     # arg_peri = pi/2 rotates the periapsis onto +z.
-    match ellipse_point(0.104, 0.181, pi / 2.0, 0.0) with
-    | (x, z) ->
-        do
-          assert_true(state, "point arg=pi/2 -> x~0", approx(x, 0.0, 0.0005))
-          assert_true(state, "point arg=pi/2 -> z=a(1-e)", approx(z, 0.085176, 0.0005))
+    check_true("point arg=pi/2 -> x~0", approx(x1, 0.0, 0.0005)),
+    check_true("point arg=pi/2 -> z=a(1-e)", approx(z1, 0.085176, 0.0005)),
 
     # Circular orbit (e=0): radius is constant = a at any true anomaly.
-    assert_true(state, "circular r=a at nu=0", approx(ellipse_r(1.0, 0.0, 0.0), 1.0, 0.0001))
-    assert_true(state, "circular r=a at nu=pi/2", approx(ellipse_r(1.0, 0.0, pi / 2.0), 1.0, 0.0001))
-
-    summary(state)
+    check_true("circular r=a at nu=0", approx(ellipse_r(1.0, 0.0, 0.0), 1.0, 0.0001)),
+    check_true("circular r=a at nu=pi/2", approx(ellipse_r(1.0, 0.0, pi / 2.0), 1.0, 0.0001))
+  ])

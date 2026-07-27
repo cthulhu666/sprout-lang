@@ -1,4 +1,4 @@
-import stdlib.test (TestState, new_state, assert_eq, summary)
+import stdlib.test (check_eq, run_suite)
 
 # W4 (F-DISPATCH): the class variable `a` is the SECOND parameter of `describe`.
 # The first *concrete* argument is the String `tag`. The instance dict must be
@@ -18,10 +18,9 @@ instance Desc Int {
 }
 
 fn main() -> Unit !{IO} =
-  do
-    state <- new_state()
+  run_suite("dispatch_constraint_position", [
     # Discriminating case: class-var arg (pos 2) is Int → must pick Desc Int.
-    assert_eq(state, "class-var Int at position 2 picks Desc Int", describe("tag", 42), "INT")
+    check_eq("class-var Int at position 2 picks Desc Int", describe("tag", 42), "INT"),
     # Control: class-var arg (pos 2) is String → Desc String.
-    assert_eq(state, "class-var String at position 2 picks Desc String", describe("tag", "hi"), "STRING")
-    summary(state)
+    check_eq("class-var String at position 2 picks Desc String", describe("tag", "hi"), "STRING")
+  ])

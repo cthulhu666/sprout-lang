@@ -1,4 +1,4 @@
-import stdlib.test (TestState, new_state, assert_true, assert_false, summary)
+import stdlib.test (check_true, check_false, run_suite)
 
 # Regression test: `==` / `!=` on ADT values must desugar to `eq()` dispatch,
 # not fall through to pointer-identity icmp.
@@ -14,31 +14,28 @@ fn not(b: Bool) -> Bool = if b then false else true
 fn equal_pair(x: a, y: a) -> Bool where Eq a = x == y
 
 fn main() -> Unit !{IO} =
-  do
-    state <- new_state()
-
+  run_suite("eq_operator_adt_dispatch", [
     # ---- 1. Nullary concrete ------------------------------------------------
-    assert_true(state, "Dead == Dead is true", Dead == Dead)
-    assert_false(state, "Dead == Alive 1 is false", Dead == Alive(1))
+    check_true("Dead == Dead is true", Dead == Dead),
+    check_false("Dead == Alive 1 is false", Dead == Alive(1)),
 
     # ---- 2. Field-bearing concrete -----------------------------------------
-    assert_true(state, "Alive 1 == Alive 1 is true", Alive(1) == Alive(1))
-    assert_false(state, "Alive 1 == Alive 2 is false", Alive(1) == Alive(2))
+    check_true("Alive 1 == Alive 1 is true", Alive(1) == Alive(1)),
+    check_false("Alive 1 == Alive 2 is false", Alive(1) == Alive(2)),
 
     # ---- 3. != operator ----------------------------------------------------
-    assert_true(state, "Dead != Alive 0 is true", Dead != Alive(0))
-    assert_false(state, "Dead != Dead is false", Dead != Dead)
+    check_true("Dead != Alive 0 is true", Dead != Alive(0)),
+    check_false("Dead != Dead is false", Dead != Dead),
 
     # ---- 4. Polymorphic via equal_pair -------------------------------------
-    assert_true(state, "equal_pair Dead Dead", equal_pair(Dead, Dead))
-    assert_false(state, "equal_pair Dead (Alive 1)", equal_pair(Dead, Alive(1)))
-    assert_true(state, "equal_pair 42 42 (Int)", equal_pair(42, 42))
-    assert_false(state, "equal_pair 1 2 (Int)", equal_pair(1, 2))
+    check_true("equal_pair Dead Dead", equal_pair(Dead, Dead)),
+    check_false("equal_pair Dead (Alive 1)", equal_pair(Dead, Alive(1))),
+    check_true("equal_pair 42 42 (Int)", equal_pair(42, 42)),
+    check_false("equal_pair 1 2 (Int)", equal_pair(1, 2)),
 
     # ---- 5. Maybe Int (predeclared Eq instance) ----------------------------
-    assert_true(state, "Just 1 == Just 1", Just(1) == Just(1))
-    assert_false(state, "Just 1 == Just 2", Just(1) == Just(2))
-    assert_false(state, "Just 1 == Nothing", Just(1) == Nothing)
-    assert_true(state, "Nothing == Nothing", Nothing == Nothing)
-
-    summary(state)
+    check_true("Just 1 == Just 1", Just(1) == Just(1)),
+    check_false("Just 1 == Just 2", Just(1) == Just(2)),
+    check_false("Just 1 == Nothing", Just(1) == Nothing),
+    check_true("Nothing == Nothing", Nothing == Nothing)
+  ])

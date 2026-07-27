@@ -1,5 +1,5 @@
 module main
-import stdlib.test (TestState, new_state, assert_eq, summary)
+import stdlib.test (check_eq, run_suite)
 
 # Positive guard for module-qualified type identity
 # (docs/module-qualified-type-identity-design-2026-07-10.md §10).
@@ -16,7 +16,6 @@ fn second(m: LMaybe Int) -> Int =
   | MyJust _ y -> y
 
 fn main() -> Unit !{IO} =
-  do
-    state <- new_state()
-    assert_eq(state, "non-colliding local ADT resolves and matches", second(MyJust(3, 9)), 9)
-    summary(state)
+  run_suite("local_type_no_collision_control", [
+    check_eq("non-colliding local ADT resolves and matches", second(MyJust(3, 9)), 9)
+  ])

@@ -1,6 +1,6 @@
 module test_operator_not_hijacked_by_user_fn
 
-import stdlib.test (TestState, new_state, assert_eq, summary)
+import stdlib.test (check_eq, run_suite)
 
 # Regression for BACKLOG Dispatch-Soundness item 5b (the `++`/Semigroup operator
 # name-dispatch hijack). The parser used to desugar `a ++ b` to a bare `append(a, b)`
@@ -16,8 +16,7 @@ import stdlib.test (TestState, new_state, assert_eq, summary)
 fn append(log: Ref String, s: String) -> Unit !{IO} = ref_write(log, s)
 
 fn main() -> Unit !{IO} =
-  do
-    state <- new_state()
-    assert_eq(state, "++ concatenates (not hijacked)", "hel" ++ "lo", "hello")
-    assert_eq(state, "chained ++", "a" ++ "b" ++ "c", "abc")
-    summary(state)
+  run_suite("operator_not_hijacked_by_user_fn", [
+    check_eq("++ concatenates (not hijacked)", "hel" ++ "lo", "hello"),
+    check_eq("chained ++", "a" ++ "b" ++ "c", "abc")
+  ])

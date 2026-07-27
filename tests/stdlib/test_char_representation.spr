@@ -13,7 +13,7 @@
 #   - a Char carried in a tuple
 #   - MULTI-BYTE chars throughout (the swept-multi-byte-char UAF class)
 import stdlib.string (char_at)
-import stdlib.test (TestState, new_state, assert_eq, assert_true, assert_false, summary)
+import stdlib.test (check_eq, check_true, check_false, run_suite)
 
 # Non-trivial: builds a Maybe, compares the payload (not a trivial accessor).
 fn char_at_eq(s: String, i: Int, expected: Char) -> Bool =
@@ -35,61 +35,58 @@ fn pair_snd_is(c: Char) -> Bool =
   | (_, b) -> b == c
 
 fn main() -> Unit !{IO} =
-  do
-    state <- new_state()
-
+  run_suite("char_representation", [
     # Equality — ASCII
-    assert_true(state, "eq a a", 'a' == 'a')
-    assert_false(state, "eq a b", 'a' == 'b')
-    assert_true(state, "ne a b", 'a' != 'b')
+    check_true("eq a a", 'a' == 'a'),
+    check_false("eq a b", 'a' == 'b'),
+    check_true("ne a b", 'a' != 'b'),
 
     # Equality — multi-byte (2-byte UTF-8)
-    assert_true(state, "eq lambda lambda", 'λ' == 'λ')
-    assert_false(state, "eq lambda a", 'λ' == 'a')
-    assert_true(state, "ne lambda a", 'λ' != 'a')
+    check_true("eq lambda lambda", 'λ' == 'λ'),
+    check_false("eq lambda a", 'λ' == 'a'),
+    check_true("ne lambda a", 'λ' != 'a'),
 
     # Pattern dispatch returns the right value, incl. multi-byte arm + default
-    assert_eq(state, "rank a", rank('a'), 1)
-    assert_eq(state, "rank b", rank('b'), 2)
-    assert_eq(state, "rank lambda", rank('λ'), 3)
-    assert_eq(state, "rank default", rank('z'), 0)
+    check_eq("rank a", rank('a'), 1),
+    check_eq("rank b", rank('b'), 2),
+    check_eq("rank lambda", rank('λ'), 3),
+    check_eq("rank default", rank('z'), 0),
 
     # to_string / char_to_string / char_to_str encoding
-    assert_eq(state, "to_string a", to_string('a'), "a")
-    assert_eq(state, "char_to_string a", char_to_string('a'), "a")
-    assert_eq(state, "to_string lambda", to_string('λ'), "λ")
-    assert_eq(state, "char_to_str 97", char_to_str(97), "a")
-    assert_eq(state, "char_to_str 955", char_to_str(955), "λ")
+    check_eq("to_string a", to_string('a'), "a"),
+    check_eq("char_to_string a", char_to_string('a'), "a"),
+    check_eq("to_string lambda", to_string('λ'), "λ"),
+    check_eq("char_to_str 97", char_to_str(97), "a"),
+    check_eq("char_to_str 955", char_to_str(955), "λ"),
 
     # char_from_codepoint round-trip (encode today, identity after the flip)
-    assert_true(state, "from_cp 97", char_from_codepoint(97) == 'a')
-    assert_true(state, "from_cp 955", char_from_codepoint(955) == 'λ')
-    assert_true(state, "from_cp 10003", char_from_codepoint(10003) == '✓')
+    check_true("from_cp 97", char_from_codepoint(97) == 'a'),
+    check_true("from_cp 955", char_from_codepoint(955) == 'λ'),
+    check_true("from_cp 10003", char_from_codepoint(10003) == '✓'),
 
     # char_at / str_char_at result equality (Maybe Char ABI flips in Phase 2)
-    assert_true(state, "char_at ascii", char_at_eq("abc", 1, 'b'))
-    assert_true(state, "char_at multibyte", char_at_eq("aλb", 1, 'λ'))
+    check_true("char_at ascii", char_at_eq("abc", 1, 'b')),
+    check_true("char_at multibyte", char_at_eq("aλb", 1, 'λ')),
 
     # Char in a tuple
-    assert_true(state, "tuple snd ascii", pair_snd_is('q'))
-    assert_true(state, "tuple snd multibyte", pair_snd_is('λ'))
+    check_true("tuple snd ascii", pair_snd_is('q')),
+    check_true("tuple snd multibyte", pair_snd_is('λ')),
 
     # 4-byte / high-codepoint chars (U+1F600 = 128512) — the path most likely to
     # surprise the i64-codepoint flip.
-    assert_true(state, "eq emoji emoji", '😀' == '😀')
-    assert_false(state, "eq emoji lambda", '😀' == 'λ')
-    assert_eq(state, "to_string emoji", to_string('😀'), "😀")
-    assert_eq(state, "char_to_str 128512", char_to_str(128512), "😀")
-    assert_true(state, "from_cp 128512", char_from_codepoint(128512) == '😀')
-    assert_true(state, "char_at emoji", char_at_eq("a😀b", 1, '😀'))
+    check_true("eq emoji emoji", '😀' == '😀'),
+    check_false("eq emoji lambda", '😀' == 'λ'),
+    check_eq("to_string emoji", to_string('😀'), "😀"),
+    check_eq("char_to_str 128512", char_to_str(128512), "😀"),
+    check_true("from_cp 128512", char_from_codepoint(128512) == '😀'),
+    check_true("char_at emoji", char_at_eq("a😀b", 1, '😀')),
 
     # Ordering is by codepoint value and is preserved across UTF-8 byte widths.
     # (In Phase 2 this lowers to integer icmp on codepoints, replacing str_compare;
     # UTF-8 byte order and codepoint order coincide, so results are unchanged.)
-    assert_true(state, "ord ascii lt 2byte", 'a' < 'λ')
-    assert_true(state, "ord 2byte lt 3byte", 'λ' < '✓')
-    assert_true(state, "ord 3byte lt 4byte", '✓' < '😀')
-    assert_false(state, "ord 4byte lt ascii", '😀' < 'a')
-    assert_true(state, "ord ge emoji ascii", '😀' >= 'a')
-
-    summary(state)
+    check_true("ord ascii lt 2byte", 'a' < 'λ'),
+    check_true("ord 2byte lt 3byte", 'λ' < '✓'),
+    check_true("ord 3byte lt 4byte", '✓' < '😀'),
+    check_false("ord 4byte lt ascii", '😀' < 'a'),
+    check_true("ord ge emoji ascii", '😀' >= 'a')
+  ])

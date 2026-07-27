@@ -1,4 +1,4 @@
-import stdlib.test (TestState, new_state, assert_eq, summary)
+import stdlib.test (check_eq, run_suite)
 
 # Tuple-CPR (docs/scalar-replacement-v0.md, Stage 1): a fn returning a 2-tuple that is immediately
 # matched by a tuple pattern unboxes to a `{ i64, i64 }` worker — the tuple never touches the heap.
@@ -68,26 +68,25 @@ fn use_rgb_unwrap(a: Int, b: Int, c: Int) -> Int =
   | (r, g, b2) -> (r * 100) + (g * 10) + b2
 
 fn main() -> Unit !{IO} =
-  do
-    state <- new_state()
+  run_suite("tuple_cpr", [
     # direct tuple-literal tail
-    assert_eq(state, "swap 3,4 -> (4,3) -> 43", use_swap(3, 4), 43)
-    assert_eq(state, "swap 0,0 -> 0", use_swap(0, 0), 0)
+    check_eq("swap 3,4 -> (4,3) -> 43", use_swap(3, 4), 43),
+    check_eq("swap 0,0 -> 0", use_swap(0, 0), 0),
     # if-chain tail bottoming in tuple literals
-    assert_eq(state, "slice tag0 -> 0+2", base_plus_cnt(0), 2)
-    assert_eq(state, "slice tag1 -> 2+4", base_plus_cnt(1), 6)
-    assert_eq(state, "slice tag9 -> 6+3", base_plus_cnt(9), 9)
+    check_eq("slice tag0 -> 0+2", base_plus_cnt(0), 2),
+    check_eq("slice tag1 -> 2+4", base_plus_cnt(1), 6),
+    check_eq("slice tag9 -> 6+3", base_plus_cnt(9), 9),
     # forwarding (non-literal) tail → repack path; forward(7,2)=swap(7,2)=(2,7) -> 2-7
-    assert_eq(state, "forward 7,2 -> (2,7) -> -5", use_forward(7, 2), 0 - 5)
+    check_eq("forward 7,2 -> (2,7) -> -5", use_forward(7, 2), 0 - 5),
     # width-3: direct tuple-literal tail
-    assert_eq(state, "rgb3 1 -> (1,2,3) -> 123", use_rgb3(1), 123)
-    assert_eq(state, "rgb3 5 -> (5,6,7) -> 567", use_rgb3(5), 567)
+    check_eq("rgb3 1 -> (1,2,3) -> 123", use_rgb3(1), 123),
+    check_eq("rgb3 5 -> (5,6,7) -> 567", use_rgb3(5), 567),
     # width-3: if-chain tail bottoming in tuple literals
-    assert_eq(state, "shift3 tag0 -> 1+2+3", sum3(0), 6)
-    assert_eq(state, "shift3 tag9 -> 7+8+9", sum3(9), 24)
+    check_eq("shift3 tag0 -> 1+2+3", sum3(0), 6),
+    check_eq("shift3 tag9 -> 7+8+9", sum3(9), 24),
     # width-3: forwarding (non-literal) tail -> chain path
-    assert_eq(state, "fwd3 2 -> (2,3,4) -> 9", use_fwd3(2), 9)
+    check_eq("fwd3 2 -> (2,3,4) -> 9", use_fwd3(2), 9),
     # width-3: wrap-unwrap bare-var tail -> repack path (box-and-extract, IRRetUnboxed3)
-    assert_eq(state, "rgb_unwrap 4,5,6 -> 456", use_rgb_unwrap(4, 5, 6), 456)
-    assert_eq(state, "rgb_unwrap 0,0,0 -> 0", use_rgb_unwrap(0, 0, 0), 0)
-    summary(state)
+    check_eq("rgb_unwrap 4,5,6 -> 456", use_rgb_unwrap(4, 5, 6), 456),
+    check_eq("rgb_unwrap 0,0,0 -> 0", use_rgb_unwrap(0, 0, 0), 0)
+  ])

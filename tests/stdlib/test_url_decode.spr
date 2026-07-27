@@ -1,4 +1,4 @@
-import stdlib.test (TestState, new_state, assert_true, assert_eq, summary)
+import stdlib.test (check_eq, check_true, run_suite)
 import stdlib.url (percent_decode, query_decode, parse_query)
 import stdlib.bytes (Utf8Error)
 import stdlib.string as string
@@ -37,35 +37,32 @@ fn show_pairs(ps: Vec (String, String)) -> String =
   show_pairs_from(ps, 0, vec_length(ps), "")
 
 fn main() -> Unit !{IO} =
-  do
-    state <- new_state()
-
+  run_suite("url_decode", [
     # percent_decode: %XX only
-    assert_eq(state, "percent_decode passes plain text through", decoded(percent_decode("hello")), "hello")
-    assert_eq(state, "percent_decode resolves %20 to space", decoded(percent_decode("a%20b")), "a b")
-    assert_eq(state, "percent_decode leaves '+' untouched", decoded(percent_decode("a+b")), "a+b")
+    check_eq("percent_decode passes plain text through", decoded(percent_decode("hello")), "hello"),
+    check_eq("percent_decode resolves %20 to space", decoded(percent_decode("a%20b")), "a b"),
+    check_eq("percent_decode leaves '+' untouched", decoded(percent_decode("a+b")), "a+b"),
     # Multi-byte: %C3%A9 is the UTF-8 encoding of é (two bytes).
-    assert_eq(state, "percent_decode joins multi-byte escapes", decoded(percent_decode("%C3%A9")), "é")
-    assert_eq(state, "decoded é is two UTF-8 bytes", string.byte_length(decoded(percent_decode("%C3%A9"))), 2)
-    assert_eq(state, "percent_decode handles lowercase hex", decoded(percent_decode("%c3%a9")), "é")
+    check_eq("percent_decode joins multi-byte escapes", decoded(percent_decode("%C3%A9")), "é"),
+    check_eq("decoded é is two UTF-8 bytes", string.byte_length(decoded(percent_decode("%C3%A9"))), 2),
+    check_eq("percent_decode handles lowercase hex", decoded(percent_decode("%c3%a9")), "é"),
 
     # query_decode: '+' -> space, plus %XX
-    assert_eq(state, "query_decode maps '+' to space", decoded(query_decode("a+b")), "a b")
-    assert_eq(state, "query_decode also resolves %20", decoded(query_decode("a%20b")), "a b")
+    check_eq("query_decode maps '+' to space", decoded(query_decode("a+b")), "a b"),
+    check_eq("query_decode also resolves %20", decoded(query_decode("a%20b")), "a b"),
 
     # Malformed escapes fail loudly (not silently corrupt).
-    assert_true(state, "percent_decode rejects non-hex escape", is_err(percent_decode("%zz")))
-    assert_true(state, "percent_decode rejects truncated escape", is_err(percent_decode("%2")))
-    assert_true(state, "percent_decode rejects a trailing '%'", is_err(percent_decode("abc%")))
+    check_true("percent_decode rejects non-hex escape", is_err(percent_decode("%zz"))),
+    check_true("percent_decode rejects truncated escape", is_err(percent_decode("%2"))),
+    check_true("percent_decode rejects a trailing '%'", is_err(percent_decode("abc%"))),
 
     # parse_query
-    assert_eq(state, "parse_query splits key/value pairs", show_pairs(parse_query("a=1&b=2")), "a=1,b=2")
-    assert_eq(state, "parse_query preserves duplicate keys in order", show_pairs(parse_query("a=1&a=2")), "a=1,a=2")
-    assert_eq(state, "parse_query treats a bare key as empty value", show_pairs(parse_query("flag")), "flag=")
-    assert_eq(state, "parse_query keeps an explicit empty value", show_pairs(parse_query("a=")), "a=")
-    assert_eq(state, "parse_query on empty string is empty", show_pairs(parse_query("")), "")
-    assert_eq(state, "parse_query decodes each side", show_pairs(parse_query("q=a%20b")), "q=a b")
-    assert_eq(state, "parse_query skips empty segments", show_pairs(parse_query("a=1&&b=2")), "a=1,b=2")
-    assert_eq(state, "parse_query drops a pair with a malformed escape", show_pairs(parse_query("a=1&b=%zz")), "a=1")
-
-    summary(state)
+    check_eq("parse_query splits key/value pairs", show_pairs(parse_query("a=1&b=2")), "a=1,b=2"),
+    check_eq("parse_query preserves duplicate keys in order", show_pairs(parse_query("a=1&a=2")), "a=1,a=2"),
+    check_eq("parse_query treats a bare key as empty value", show_pairs(parse_query("flag")), "flag="),
+    check_eq("parse_query keeps an explicit empty value", show_pairs(parse_query("a=")), "a="),
+    check_eq("parse_query on empty string is empty", show_pairs(parse_query("")), ""),
+    check_eq("parse_query decodes each side", show_pairs(parse_query("q=a%20b")), "q=a b"),
+    check_eq("parse_query skips empty segments", show_pairs(parse_query("a=1&&b=2")), "a=1,b=2"),
+    check_eq("parse_query drops a pair with a malformed escape", show_pairs(parse_query("a=1&b=%zz")), "a=1")
+  ])

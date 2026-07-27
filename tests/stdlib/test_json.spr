@@ -1,4 +1,4 @@
-import stdlib.test (TestState, new_state, assert_eq, assert_true, assert_false, summary)
+import stdlib.test (check_true, check_false, run_suite)
 import stdlib.json as json
 
 fn is_ok(r: Result json.JsonError json.Json) -> Bool =
@@ -71,102 +71,99 @@ fn is_nothing_bool(m: Maybe Bool) -> Bool =
   | Just _ -> false
 
 fn main() -> Unit !{IO} =
-  do
-    state <- new_state()
+  let obj_result = json.parse("{\"name\": \"Alice\", \"age\": 30}")
 
+      missing_key_result =
+        match obj_result with
+        | Ok v -> json.json_get_field(v, "missing")
+        | Err _ -> Nothing
+
+      str_field =
+        match obj_result with
+        | Ok v -> json.json_get_field(v, "age")
+        | Err _ -> Nothing
+
+      str_on_nonstring =
+        match str_field with
+        | Nothing -> Nothing
+        | Just v -> json.json_get_string(v)
+
+      int_field =
+        match obj_result with
+        | Ok v -> json.json_get_field(v, "name")
+        | Err _ -> Nothing
+
+      int_on_nonint =
+        match int_field with
+        | Nothing -> Nothing
+        | Just v -> json.json_get_int(v)
+
+      arr_on_nonarr =
+        match obj_result with
+        | Ok v ->
+            match json.json_get_field(v, "name") with
+            | Nothing -> Nothing
+            | Just name_val -> json.json_get_array(name_val)
+        | Err _ -> Nothing
+
+      # Regression: CPR worker for non-allowlisted externs (json_parse) previously
+      # generated `ret { i64, i64 } undef`, causing non-exhaustive match at runtime.
+      cpr_regression_ok =
+        match json.parse("99") with
+        | Ok _ -> true
+        | Err _ -> false
+  in run_suite("json", [
     # --- Happy-path sanity checks ---
 
-    assert_true(state, "parse simple object", is_ok(json.parse("{\"key\": \"value\"}")))
-    assert_true(state, "parse integer", is_ok(json.parse("42")))
-    assert_true(state, "parse boolean true", is_ok(json.parse("true")))
-    assert_true(state, "parse null", is_ok(json.parse("null")))
-    assert_true(state, "parse array", is_ok(json.parse("[1, 2, 3]")))
+    check_true("parse simple object", is_ok(json.parse("{\"key\": \"value\"}"))),
+    check_true("parse integer", is_ok(json.parse("42"))),
+    check_true("parse boolean true", is_ok(json.parse("true"))),
+    check_true("parse null", is_ok(json.parse("null"))),
+    check_true("parse array", is_ok(json.parse("[1, 2, 3]"))),
 
     # --- Malformed input: parse must return Err, not crash ---
 
-    assert_true(state, "malformed: empty string", is_err(json.parse("")))
-    assert_true(state, "malformed: truncated object", is_err(json.parse("{")))
-    assert_true(state, "malformed: trailing garbage", is_err(json.parse("42 garbage")))
-    assert_true(state, "malformed: mismatched brackets", is_err(json.parse("[1, 2")))
-    assert_true(state, "malformed: bare word undefined", is_err(json.parse("undefined")))
-    assert_true(state, "malformed: unclosed string", is_err(json.parse("\"hello")))
-    assert_true(state, "malformed: double comma", is_err(json.parse("[1,,2]")))
-    assert_true(state, "malformed: unquoted key", is_err(json.parse("{key: 1}")))
+    check_true("malformed: empty string", is_err(json.parse(""))),
+    check_true("malformed: truncated object", is_err(json.parse("{"))),
+    check_true("malformed: trailing garbage", is_err(json.parse("42 garbage"))),
+    check_true("malformed: mismatched brackets", is_err(json.parse("[1, 2"))),
+    check_true("malformed: bare word undefined", is_err(json.parse("undefined"))),
+    check_true("malformed: unclosed string", is_err(json.parse("\"hello"))),
+    check_true("malformed: double comma", is_err(json.parse("[1,,2]"))),
+    check_true("malformed: unquoted key", is_err(json.parse("{key: 1}"))),
 
     # --- Edge cases for json_get_* helpers on valid JSON ---
 
-    let obj_result = json.parse("{\"name\": \"Alice\", \"age\": 30}")
+    check_true("json_get_field missing key returns Nothing", is_nothing_json(missing_key_result)),
 
-    let missing_key_result =
-      match obj_result with
-      | Ok v -> json.json_get_field(v, "missing")
-      | Err _ -> Nothing
+    check_true("json_get_string on non-string returns Nothing", is_nothing_string(str_on_nonstring)),
 
-    assert_true(state, "json_get_field missing key returns Nothing", is_nothing_json(missing_key_result))
+    check_true("json_get_int on non-int returns Nothing", is_nothing_int(int_on_nonint)),
 
-    let str_field =
-      match obj_result with
-      | Ok v -> json.json_get_field(v, "age")
-      | Err _ -> Nothing
-
-    let str_on_nonstring =
-      match str_field with
-      | Nothing -> Nothing
-      | Just v -> json.json_get_string(v)
-
-    assert_true(state, "json_get_string on non-string returns Nothing", is_nothing_string(str_on_nonstring))
-
-    let int_field =
-      match obj_result with
-      | Ok v -> json.json_get_field(v, "name")
-      | Err _ -> Nothing
-
-    let int_on_nonint =
-      match int_field with
-      | Nothing -> Nothing
-      | Just v -> json.json_get_int(v)
-
-    assert_true(state, "json_get_int on non-int returns Nothing", is_nothing_int(int_on_nonint))
-
-    let arr_on_nonarr =
-      match obj_result with
-      | Ok v ->
-          match json.json_get_field(v, "name") with
-          | Nothing -> Nothing
-          | Just name_val -> json.json_get_array(name_val)
-      | Err _ -> Nothing
-
-    assert_true(state, "json_get_array on non-array returns Nothing", is_nothing_array(arr_on_nonarr))
+    check_true("json_get_array on non-array returns Nothing", is_nothing_array(arr_on_nonarr)),
 
     # --- json_stringify round-trip ---
 
-    assert_true(state, "stringify round-trip parses back successfully", stringify_round_trip_ok("{\"x\": 1}"))
+    check_true("stringify round-trip parses back successfully", stringify_round_trip_ok("{\"x\": 1}")),
 
-    # Regression: CPR worker for non-allowlisted externs (json_parse) previously
-    # generated `ret { i64, i64 } undef`, causing non-exhaustive match at runtime.
-    let cpr_regression_ok =
-      match json.parse("99") with
-      | Ok _ -> true
-      | Err _ -> false
-    assert_true(state, "CPR regression: inline do-block match on parse result", cpr_regression_ok)
+    check_true("CPR regression: inline do-block match on parse result", cpr_regression_ok),
 
     # --- float parsing (Scope B: pure-Sprout parser, JsonFloat) ---
 
-    assert_true(state, "parse decimal <1", top_float_approx("0.104", 0.104, 0.00001))
-    assert_true(state, "parse decimal >1", top_float_approx("179.84", 179.84, 0.001))
-    assert_true(state, "parse negative decimal", top_float_approx("-179.84", 0.0 - 179.84, 0.001))
-    assert_true(state, "parse scientific notation", top_float_approx("8.5e-2", 0.085, 0.00001))
-    assert_true(state, "parse capital-E exponent", top_float_approx("2.34E-2", 0.0234, 0.00001))
-    assert_true(state, "json_get_float coerces an integer", top_float_approx("42", 42.0, 0.0001))
-    assert_true(state, "float object field", field_float_approx("{\"au\": 0.5}", "au", 0.5, 0.0001))
-    assert_true(state, "array of floats parses", is_ok(json.parse("[0.1, 0.2, 0.3]")))
-    assert_true(state, "json_get_int on a float returns Nothing", int_on_float_is_nothing("0.104"))
-    assert_true(state, "float round-trips through stringify", stringify_round_trip_ok("{\"au\": 0.104}"))
-    assert_true(state, "negative float round-trips", stringify_round_trip_ok("-1.5e-1"))
+    check_true("parse decimal <1", top_float_approx("0.104", 0.104, 0.00001)),
+    check_true("parse decimal >1", top_float_approx("179.84", 179.84, 0.001)),
+    check_true("parse negative decimal", top_float_approx("-179.84", 0.0 - 179.84, 0.001)),
+    check_true("parse scientific notation", top_float_approx("8.5e-2", 0.085, 0.00001)),
+    check_true("parse capital-E exponent", top_float_approx("2.34E-2", 0.0234, 0.00001)),
+    check_true("json_get_float coerces an integer", top_float_approx("42", 42.0, 0.0001)),
+    check_true("float object field", field_float_approx("{\"au\": 0.5}", "au", 0.5, 0.0001)),
+    check_true("array of floats parses", is_ok(json.parse("[0.1, 0.2, 0.3]"))),
+    check_true("json_get_int on a float returns Nothing", int_on_float_is_nothing("0.104")),
+    check_true("float round-trips through stringify", stringify_round_trip_ok("{\"au\": 0.104}")),
+    check_true("negative float round-trips", stringify_round_trip_ok("-1.5e-1")),
 
     # --- json_get_bool (accessor for the JsonBool variant) ---
-    assert_true(state, "json_get_bool on true", is_just_true(bool_of("true")))
-    assert_false(state, "json_get_bool on false", is_just_true(bool_of("false")))
-    assert_true(state, "json_get_bool on a non-bool returns Nothing", is_nothing_bool(bool_of("42")))
-
-    summary(state)
+    check_true("json_get_bool on true", is_just_true(bool_of("true"))),
+    check_false("json_get_bool on false", is_just_true(bool_of("false"))),
+    check_true("json_get_bool on a non-bool returns Nothing", is_nothing_bool(bool_of("42")))
+  ])

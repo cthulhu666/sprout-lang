@@ -1,5 +1,5 @@
 module main
-import stdlib.test (TestState, new_state, assert_eq, assert_true, summary)
+import stdlib.test (check_eq, check_true, run_suite)
 import stdlib.compiler.analysis_service_driver as svc
 import stdlib.string as string
 
@@ -7,51 +7,48 @@ fn empty_session() -> svc.SessionState =
   svc.SessionState(vec_empty(), vec_empty())
 
 fn main() -> Unit !{IO} =
-  do
-    state <- new_state()
-
+  let s0 = empty_session()
+  in let s1 = svc.session_add_line(s0, "import", "import stdlib.string as string")
+  in let src1 = svc.rebuild_session_source(s1)
+  in let s2 = svc.session_add_line(s1, "declaration", "fn greet() -> String = \"hi\"")
+  in let src2 = svc.rebuild_session_source(s2)
+  in let src_empty = svc.rebuild_session_source(empty_session())
+  in let s_imp = svc.session_add_line(empty_session(), "import", "import stdlib.math as math")
+  in let src_imp = svc.rebuild_session_source(s_imp)
+  in let s_decl = svc.session_add_line(empty_session(), "declaration", "let x = 42")
+  in let src_decl = svc.rebuild_session_source(s_decl)
+  in let s_two_imp = svc.session_add_line(
+       svc.session_add_line(empty_session(), "import", "import stdlib.string as string"),
+       "import", "import stdlib.math as math")
+  in let src_two = svc.rebuild_session_source(s_two_imp)
+  in run_suite("session_state", [
     # session_add_line — import kind
-    let s0 = empty_session()
-    let s1 = svc.session_add_line(s0, "import", "import stdlib.string as string")
-    let src1 = svc.rebuild_session_source(s1)
-    assert_true(state, "add import: source contains import line",
-      string.contains(src1, "import stdlib.string as string"))
+    check_true("add import: source contains import line",
+      string.contains(src1, "import stdlib.string as string")),
 
     # session_add_line — declaration kind
-    let s2 = svc.session_add_line(s1, "declaration", "fn greet() -> String = \"hi\"")
-    let src2 = svc.rebuild_session_source(s2)
-    assert_true(state, "add decl: source contains import",
-      string.contains(src2, "import stdlib.string as string"))
-    assert_true(state, "add decl: source contains declaration",
-      string.contains(src2, "fn greet()"))
+    check_true("add decl: source contains import",
+      string.contains(src2, "import stdlib.string as string")),
+    check_true("add decl: source contains declaration",
+      string.contains(src2, "fn greet()")),
 
     # rebuild_session_source — no imports, no decls → just module header
-    let src_empty = svc.rebuild_session_source(empty_session())
-    assert_eq(state, "empty session source is module header only",
-      src_empty, "module app.session")
+    check_eq("empty session source is module header only",
+      src_empty, "module app.session"),
 
     # rebuild_session_source — import only, no decls
-    let s_imp = svc.session_add_line(empty_session(), "import", "import stdlib.math as math")
-    let src_imp = svc.rebuild_session_source(s_imp)
-    assert_true(state, "import-only session has module header",
-      string.starts_with(src_imp, "module app.session"))
-    assert_true(state, "import-only session has import line",
-      string.contains(src_imp, "import stdlib.math as math"))
-    assert_true(state, "import-only session has no extra blank decl section",
-      string.contains(src_imp, "fn ") == false)
+    check_true("import-only session has module header",
+      string.starts_with(src_imp, "module app.session")),
+    check_true("import-only session has import line",
+      string.contains(src_imp, "import stdlib.math as math")),
+    check_true("import-only session has no extra blank decl section",
+      string.contains(src_imp, "fn ") == false),
 
     # session_add_line — wrong kind defaults to declaration bucket
-    let s_decl = svc.session_add_line(empty_session(), "declaration", "let x = 42")
-    let src_decl = svc.rebuild_session_source(s_decl)
-    assert_true(state, "declaration-only session contains let binding",
-      string.contains(src_decl, "let x = 42"))
+    check_true("declaration-only session contains let binding",
+      string.contains(src_decl, "let x = 42")),
 
     # Multiple imports accumulate
-    let s_two_imp = svc.session_add_line(
-      svc.session_add_line(empty_session(), "import", "import stdlib.string as string"),
-      "import", "import stdlib.math as math")
-    let src_two = svc.rebuild_session_source(s_two_imp)
-    assert_true(state, "two imports: first present", string.contains(src_two, "import stdlib.string"))
-    assert_true(state, "two imports: second present", string.contains(src_two, "import stdlib.math"))
-
-    summary(state)
+    check_true("two imports: first present", string.contains(src_two, "import stdlib.string")),
+    check_true("two imports: second present", string.contains(src_two, "import stdlib.math"))
+  ])

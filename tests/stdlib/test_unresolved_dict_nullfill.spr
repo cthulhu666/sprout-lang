@@ -1,4 +1,4 @@
-import stdlib.test (TestState, new_state, assert_eq, summary)
+import stdlib.test (check_eq, run_suite)
 
 # Regression: parametric `deriving (ToString)` with a nullary constructor.
 #
@@ -19,10 +19,9 @@ type Box a (..) deriving (ToString) =
   | Hold a
 
 fn main() -> Unit !{IO} =
-  do
-    state <- new_state()
+  run_suite("unresolved_dict_nullfill", [
     # Free type var, nullary ctor — inner dict unresolved + null-filled, unused.
-    assert_eq(state, "to_string Empty", to_string(Empty), "Empty")
+    check_eq("to_string Empty", to_string(Empty), "Empty"),
     # Concrete inner type — inner ToString Int dict resolves to a real witness.
-    assert_eq(state, "to_string Hold 42", to_string(Hold(42)), "Hold(42)")
-    summary(state)
+    check_eq("to_string Hold 42", to_string(Hold(42)), "Hold(42)")
+  ])

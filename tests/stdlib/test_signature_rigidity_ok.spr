@@ -1,4 +1,4 @@
-import stdlib.test (TestState, new_state, assert_eq, summary)
+import stdlib.test (check_eq, run_suite)
 
 # W3/F-RIGID positive guard: genuinely polymorphic signatures must STILL be
 # accepted after the rigidity check. Each declared type variable stays abstract
@@ -16,10 +16,9 @@ fn swap_(p: (a, b)) -> (b, a) =
 fn empty_() -> List a = Nil
 
 fn main() -> Unit !{IO} =
-  do
-    state <- new_state()
-    assert_eq(state, "polymorphic id at Int", id_(7), 7)
-    assert_eq(state, "polymorphic id at String", id_("hi"), "hi")
-    assert_eq(state, "polymorphic const", const_(42, "ignored"), 42)
-    assert_eq(state, "polymorphic swap", swap_((1, "a")), ("a", 1))
-    summary(state)
+  run_suite("signature_rigidity_ok", [
+    check_eq("polymorphic id at Int", id_(7), 7),
+    check_eq("polymorphic id at String", id_("hi"), "hi"),
+    check_eq("polymorphic const", const_(42, "ignored"), 42),
+    check_eq("polymorphic swap", swap_((1, "a")), ("a", 1))
+  ])

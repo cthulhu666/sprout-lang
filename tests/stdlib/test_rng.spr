@@ -1,4 +1,4 @@
-import stdlib.test (TestState, new_state, assert_eq, assert_true, summary)
+import stdlib.test (check_eq, check_true, run_suite)
 import stdlib.rng (rng_next, rng_below, rng_hash2)
 
 # stdlib.rng is a deterministic seeded PRNG (a linear congruential generator):
@@ -7,41 +7,39 @@ import stdlib.rng (rng_next, rng_below, rng_hash2)
 # the constants or the arithmetic is caught here rather than silently drifting.
 
 fn main() -> Unit !{IO} =
-  do
-    state <- new_state()
+  # rng_next advances the generator deterministically from a seed.
+  let s1 = rng_next(1)
+      s2 = rng_next(s1)
+      s3 = rng_next(s2)
 
-    # rng_next advances the generator deterministically from a seed.
-    let s1 = rng_next(1)
-    let s2 = rng_next(s1)
-    let s3 = rng_next(s2)
-    assert_eq(state, "rng_next(1)", s1, 1103527590)
-    assert_eq(state, "rng_next(s1)", s2, 377401575)
-    assert_eq(state, "rng_next(s2)", s3, 662824084)
+      # rng_hash2 is a stateless 2D spatial hash. Reference values pin the exact arithmetic
+      # (primes + nonlinear mix), so a constant/algorithm change is caught here, not silently
+      # in downstream noise. Deterministic and bounded in [0, 2^31).
+      h37 = rng_hash2(3, 7, 99)
+      h001 = rng_hash2(0, 0, 1)
+      # Decorrelation: a +5 shift on either axis must land far away, NOT near h37. The old affine
+      # single-LCG-step hash failed this (hash(x, z+5) ~= hash(x, z)), which rendered as tiled noise.
+      h3_12 = rng_hash2(3, 12, 99)  # +5 in z
+      h8_7 = rng_hash2(8, 7, 99)  # +5 in x
+  in run_suite("rng", [
+    check_eq("rng_next(1)", s1, 1103527590),
+    check_eq("rng_next(s1)", s2, 377401575),
+    check_eq("rng_next(s2)", s3, 662824084),
 
     # rng_below(state, n) projects a state onto [0, n) using the high bits.
-    assert_eq(state, "rng_below(s1, 100)", rng_below(s1, 100), 38)
-    assert_eq(state, "rng_below(s1, 360)", rng_below(s1, 360), 278)
-    assert_eq(state, "rng_below(s2, 100)", rng_below(s2, 100), 58)
+    check_eq("rng_below(s1, 100)", rng_below(s1, 100), 38),
+    check_eq("rng_below(s1, 360)", rng_below(s1, 360), 278),
+    check_eq("rng_below(s2, 100)", rng_below(s2, 100), 58),
 
     # Degenerate bounds are total: n <= 0 yields 0; mod 1 is always 0.
-    assert_eq(state, "rng_below(s1, 0) is 0", rng_below(s1, 0), 0)
-    assert_eq(state, "rng_below(s1, 1) is 0", rng_below(s1, 1), 0)
+    check_eq("rng_below(s1, 0) is 0", rng_below(s1, 0), 0),
+    check_eq("rng_below(s1, 1) is 0", rng_below(s1, 1), 0),
 
-    # rng_hash2 is a stateless 2D spatial hash. Reference values pin the exact arithmetic
-    # (primes + nonlinear mix), so a constant/algorithm change is caught here, not silently
-    # in downstream noise. Deterministic and bounded in [0, 2^31).
-    let h37 = rng_hash2(3, 7, 99)
-    let h001 = rng_hash2(0, 0, 1)
-    assert_eq(state, "rng_hash2(3, 7, 99)", h37, 1269841102)
-    assert_eq(state, "rng_hash2(0, 0, 1)", h001, 855780075)
-    assert_true(state, "rng_hash2: non-negative and bounded", (h37 >= 0) && (h37 < 2147483648))
-    # Decorrelation: a +5 shift on either axis must land far away, NOT near h37. The old affine
-    # single-LCG-step hash failed this (hash(x, z+5) ~= hash(x, z)), which rendered as tiled noise.
-    let h3_12 = rng_hash2(3, 12, 99)  # +5 in z
-    let h8_7 = rng_hash2(8, 7, 99)  # +5 in x
-    assert_true(state, "rng_hash2: +5 z-shift decorrelates (no affine resonance)",
-                (h37 - h3_12) > 100000000)
-    assert_true(state, "rng_hash2: +5 x-shift decorrelates (no affine resonance)",
+    check_eq("rng_hash2(3, 7, 99)", h37, 1269841102),
+    check_eq("rng_hash2(0, 0, 1)", h001, 855780075),
+    check_true("rng_hash2: non-negative and bounded", (h37 >= 0) && (h37 < 2147483648)),
+    check_true("rng_hash2: +5 z-shift decorrelates (no affine resonance)",
+                (h37 - h3_12) > 100000000),
+    check_true("rng_hash2: +5 x-shift decorrelates (no affine resonance)",
                 (h37 - h8_7) > 100000000)
-
-    summary(state)
+  ])

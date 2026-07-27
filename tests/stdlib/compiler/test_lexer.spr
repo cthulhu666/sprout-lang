@@ -1,4 +1,4 @@
-import stdlib.test (TestState, new_state, assert_eq, assert_true, assert_false, summary)
+import stdlib.test (check_eq, check_true, check_false, run_suite)
 import stdlib.compiler.lexer as lexer
 import stdlib.compiler.token as token
 import stdlib.collections (Vec, vec_get)
@@ -52,98 +52,95 @@ fn make_templates(n: Int, acc: List String) -> String =
   else make_templates(n - 1, Cons("`x` ", acc))
 
 fn main() -> Unit !{IO} =
-  do
-    state <- new_state()
-
+  run_suite("lexer", [
     # Keywords
-    assert_eq(state, "fn kind", tok_kind_at("fn", 0), "keyword")
-    assert_eq(state, "fn text", tok_text_at("fn", 0), "fn")
-    assert_eq(state, "type keyword", tok_kind_at("type", 0), "keyword")
-    assert_eq(state, "match keyword", tok_kind_at("match", 0), "keyword")
-    assert_eq(state, "true keyword", tok_kind_at("true", 0), "keyword")
-    assert_eq(state, "false keyword", tok_kind_at("false", 0), "keyword")
-    assert_eq(state, "if keyword", tok_kind_at("if", 0), "keyword")
-    assert_eq(state, "do keyword", tok_kind_at("do", 0), "keyword")
-    assert_eq(state, "where keyword", tok_kind_at("where", 0), "keyword")
-    assert_eq(state, "let keyword", tok_kind_at("let", 0), "keyword")
+    check_eq("fn kind", tok_kind_at("fn", 0), "keyword"),
+    check_eq("fn text", tok_text_at("fn", 0), "fn"),
+    check_eq("type keyword", tok_kind_at("type", 0), "keyword"),
+    check_eq("match keyword", tok_kind_at("match", 0), "keyword"),
+    check_eq("true keyword", tok_kind_at("true", 0), "keyword"),
+    check_eq("false keyword", tok_kind_at("false", 0), "keyword"),
+    check_eq("if keyword", tok_kind_at("if", 0), "keyword"),
+    check_eq("do keyword", tok_kind_at("do", 0), "keyword"),
+    check_eq("where keyword", tok_kind_at("where", 0), "keyword"),
+    check_eq("let keyword", tok_kind_at("let", 0), "keyword"),
 
     # Identifiers
-    assert_eq(state, "ident kind", tok_kind_at("main", 0), "ident")
-    assert_eq(state, "ident text", tok_text_at("main", 0), "main")
-    assert_eq(state, "ident underscore", tok_kind_at("my_var", 0), "ident")
+    check_eq("ident kind", tok_kind_at("main", 0), "ident"),
+    check_eq("ident text", tok_text_at("main", 0), "main"),
+    check_eq("ident underscore", tok_kind_at("my_var", 0), "ident"),
 
     # Integer literals
-    assert_eq(state, "int kind", tok_kind_at("42", 0), "int")
-    assert_eq(state, "int text", tok_text_at("42", 0), "42")
-    assert_eq(state, "zero int", tok_kind_at("0", 0), "int")
+    check_eq("int kind", tok_kind_at("42", 0), "int"),
+    check_eq("int text", tok_text_at("42", 0), "42"),
+    check_eq("zero int", tok_kind_at("0", 0), "int"),
 
     # Float literals (Double feature) — `digits.digits` lexes as one float token
-    assert_eq(state, "float kind", tok_kind_at("3.14", 0), "float")
-    assert_eq(state, "float text", tok_text_at("3.14", 0), "3.14")
-    assert_eq(state, "float leading-zero kind", tok_kind_at("0.5", 0), "float")
+    check_eq("float kind", tok_kind_at("3.14", 0), "float"),
+    check_eq("float text", tok_text_at("3.14", 0), "3.14"),
+    check_eq("float leading-zero kind", tok_kind_at("0.5", 0), "float"),
     # A range `1..5` must NOT be eaten as a float: `.` needs a digit after it
-    assert_eq(state, "range first token stays int", tok_kind_at("1..5", 0), "int")
-    assert_eq(state, "range first int text", tok_text_at("1..5", 0), "1")
+    check_eq("range first token stays int", tok_kind_at("1..5", 0), "int"),
+    check_eq("range first int text", tok_text_at("1..5", 0), "1"),
 
     # String literals
-    assert_eq(state, "string kind", tok_kind_at("\"hello\"", 0), "string")
-    assert_eq(state, "string text", tok_text_at("\"hello\"", 0), "hello")
-    assert_eq(state, "empty string kind", tok_kind_at("\"\"", 0), "string")
-    assert_eq(state, "empty string text", tok_text_at("\"\"", 0), "")
+    check_eq("string kind", tok_kind_at("\"hello\"", 0), "string"),
+    check_eq("string text", tok_text_at("\"hello\"", 0), "hello"),
+    check_eq("empty string kind", tok_kind_at("\"\"", 0), "string"),
+    check_eq("empty string text", tok_text_at("\"\"", 0), ""),
 
     # Char literals
-    assert_eq(state, "char kind", tok_kind_at("'a'", 0), "char")
-    assert_eq(state, "char text", tok_text_at("'a'", 0), "a")
+    check_eq("char kind", tok_kind_at("'a'", 0), "char"),
+    check_eq("char text", tok_text_at("'a'", 0), "a"),
 
     # Symbols
-    assert_eq(state, "arrow kind", tok_kind_at("->", 0), "symbol")
-    assert_eq(state, "arrow text", tok_text_at("->", 0), "->")
-    assert_eq(state, "equals kind", tok_kind_at("=", 0), "symbol")
-    assert_eq(state, "double equals kind", tok_kind_at("==", 0), "symbol")
-    assert_eq(state, "pipe kind", tok_kind_at("|", 0), "symbol")
-    assert_eq(state, "colon kind", tok_kind_at(":", 0), "symbol")
-    assert_eq(state, "backslash kind", tok_kind_at("\\", 0), "symbol")
+    check_eq("arrow kind", tok_kind_at("->", 0), "symbol"),
+    check_eq("arrow text", tok_text_at("->", 0), "->"),
+    check_eq("equals kind", tok_kind_at("=", 0), "symbol"),
+    check_eq("double equals kind", tok_kind_at("==", 0), "symbol"),
+    check_eq("pipe kind", tok_kind_at("|", 0), "symbol"),
+    check_eq("colon kind", tok_kind_at(":", 0), "symbol"),
+    check_eq("backslash kind", tok_kind_at("\\", 0), "symbol"),
 
     # Two-token sequence
-    assert_eq(state, "fn main first kind", tok_kind_at("fn main", 0), "keyword")
-    assert_eq(state, "fn main second kind", tok_kind_at("fn main", 1), "ident")
-    assert_eq(state, "fn main second text", tok_text_at("fn main", 1), "main")
+    check_eq("fn main first kind", tok_kind_at("fn main", 0), "keyword"),
+    check_eq("fn main second kind", tok_kind_at("fn main", 1), "ident"),
+    check_eq("fn main second text", tok_text_at("fn main", 1), "main"),
 
     # EOF on empty input
-    assert_eq(state, "empty string eof", tok_kind_at("", 0), "eof")
+    check_eq("empty string eof", tok_kind_at("", 0), "eof"),
 
     # Comments are skipped
-    assert_eq(state, "comment skipped kind", tok_kind_at("# a comment\nfoo", 0), "ident")
-    assert_eq(state, "comment skipped text", tok_text_at("# a comment\nfoo", 0), "foo")
+    check_eq("comment skipped kind", tok_kind_at("# a comment\nfoo", 0), "ident"),
+    check_eq("comment skipped text", tok_text_at("# a comment\nfoo", 0), "foo"),
 
     # Error case
-    assert_false(state, "at-sign is lex error", lex_ok("@"))
+    check_false("at-sign is lex error", lex_ok("@")),
 
     # Template literal: tokens and content ordering
     # Token layout for `hello`: [template_start, template_lit, template_end, eof]
-    assert_eq(state, "template start kind", tok_kind_at("`hello`", 0), "template_start")
-    assert_eq(state, "template lit kind", tok_kind_at("`hello`", 1), "template_lit")
-    assert_eq(state, "template lit text correct order", tok_text_at("`hello`", 1), "hello")
-    assert_eq(state, "template end kind", tok_kind_at("`hello`", 2), "template_end")
+    check_eq("template start kind", tok_kind_at("`hello`", 0), "template_start"),
+    check_eq("template lit kind", tok_kind_at("`hello`", 1), "template_lit"),
+    check_eq("template lit text correct order", tok_text_at("`hello`", 1), "hello"),
+    check_eq("template end kind", tok_kind_at("`hello`", 2), "template_end"),
 
     # Template with escape sequence — ensures escape decoding preserves order
-    assert_eq(state, "template escape text", tok_text_at("`a\\nb`", 1), "a\nb")
+    check_eq("template escape text", tok_text_at("`a\\nb`", 1), "a\nb"),
 
     # W9/X1+X2: template escapes must match spec §5.7 (only \` \${ \n \t \\).
     # An unrecognised escape used to silently pass through as the raw char
     # (\r -> "r", \0 -> "0"); it must now be a clean tokenize error, matching
     # how string/char literals already reject \0.
-    assert_false(state, "template \\r rejected (not a spec escape)", lex_ok("`a\\rb`"))
-    assert_false(state, "template \\0 rejected (as in string literals)", lex_ok("`a\\0b`"))
-    assert_false(state, "template unknown escape \\z rejected", lex_ok("`a\\zb`"))
+    check_false("template \\r rejected (not a spec escape)", lex_ok("`a\\rb`")),
+    check_false("template \\0 rejected (as in string literals)", lex_ok("`a\\0b`")),
+    check_false("template unknown escape \\z rejected", lex_ok("`a\\zb`")),
     # Controls: the five spec-sanctioned escapes stay valid.
-    assert_true(state, "template \\n \\t \\\\ still valid", lex_ok("`x\\ny\\tz\\\\w`"))
+    check_true("template \\n \\t \\\\ still valid", lex_ok("`x\\ny\\tz\\\\w`")),
 
     # String escape sequence — ensures escape decoding preserves order
-    assert_eq(state, "string escape text", tok_text_at("\"a\\nb\"", 0), "a\nb")
+    check_eq("string escape text", tok_text_at("\"a\\nb\"", 0), "a\nb"),
 
     # Mutual-recursion stress: tokenize_from ↔ scan_template_from cycle.
     # N simple templates produce 3N + 1 tokens (start, lit, end per template, plus eof).
-    assert_eq(state, "200 templates token count", token_count(make_templates(200, Nil)), 601)
-
-    summary(state)
+    check_eq("200 templates token count", token_count(make_templates(200, Nil)), 601)
+  ])

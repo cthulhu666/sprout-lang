@@ -1,4 +1,4 @@
-import stdlib.test (TestState, new_state, assert_eq, summary)
+import stdlib.test (check_eq, run_suite)
 import stdlib.log (format_iso8601)
 
 # `format_iso8601(micros)` renders wall-clock microseconds-since-epoch as an
@@ -11,27 +11,24 @@ fn s(secs: Int) -> Int =
   secs * 1000000
 
 fn main() -> Unit !{IO} =
-  do
-    state <- new_state()
-
+  run_suite("time_iso8601", [
     # The epoch itself.
-    assert_eq(state, "epoch 0 is 1970-01-01T00:00:00Z",
-      format_iso8601(0), "1970-01-01T00:00:00Z")
+    check_eq("epoch 0 is 1970-01-01T00:00:00Z",
+      format_iso8601(0), "1970-01-01T00:00:00Z"),
 
     # Year/era arithmetic: 946684800s after epoch is 2000-01-01.
-    assert_eq(state, "2000-01-01 boundary",
-      format_iso8601(s(946684800)), "2000-01-01T00:00:00Z")
+    check_eq("2000-01-01 boundary",
+      format_iso8601(s(946684800)), "2000-01-01T00:00:00Z"),
 
     # Time-of-day and zero-padding: 1 day + 1h1m1s after epoch.
-    assert_eq(state, "time-of-day with zero-padding",
-      format_iso8601(s(90061)), "1970-01-02T01:01:01Z")
+    check_eq("time-of-day with zero-padding",
+      format_iso8601(s(90061)), "1970-01-02T01:01:01Z"),
 
     # Sub-second micros are truncated, not rounded.
-    assert_eq(state, "sub-second micros truncate to the whole second",
-      format_iso8601(s(90061) + 999999), "1970-01-02T01:01:01Z")
+    check_eq("sub-second micros truncate to the whole second",
+      format_iso8601(s(90061) + 999999), "1970-01-02T01:01:01Z"),
 
     # Leap day: 1582934400s after epoch is 2020-02-29 (a real leap-year date).
-    assert_eq(state, "leap-year Feb 29",
+    check_eq("leap-year Feb 29",
       format_iso8601(s(1582934400)), "2020-02-29T00:00:00Z")
-
-    summary(state)
+  ])

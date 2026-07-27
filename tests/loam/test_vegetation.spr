@@ -1,4 +1,4 @@
-import stdlib.test (TestState, new_state, assert_eq, assert_true, summary)
+import stdlib.test (check_eq, run_suite)
 import loam.terrain (TileKind, Water, Beach, Grass, Forest, Desert, Mountain, Snow, Tundra)
 import loam.vegetation (TreeKind, Palm, Broadleaf, Conifer, DarkConifer, Cactus, Shrub, tree_kind_tag, tree_for_biome)
 
@@ -22,39 +22,36 @@ fn veg_tag(m: Maybe TreeKind) -> Int =
   | Just k -> tree_kind_tag(k)
 
 fn main() -> Unit !{IO} =
-  do
-    state <- new_state()
-
+  let once = veg_tag(tree_for_biome(Forest, 424242))
+  in let twice = veg_tag(tree_for_biome(Forest, 424242))
+  in run_suite("vegetation", [
     # --- Water is always bare, whatever the hash ---
-    assert_eq(state, "Water: bare at h=0", veg_tag(tree_for_biome(Water, 0)), -1)
-    assert_eq(state, "Water: bare at h=100", veg_tag(tree_for_biome(Water, 100)), -1)
+    check_eq("Water: bare at h=0", veg_tag(tree_for_biome(Water, 0)), -1),
+    check_eq("Water: bare at h=100", veg_tag(tree_for_biome(Water, 100)), -1),
 
     # --- each land biome maps to its category when the density roll passes (h=0) ---
-    assert_eq(state, "Beach -> Palm", veg_tag(tree_for_biome(Beach, 0)), tree_kind_tag(Palm))
-    assert_eq(state, "Grass -> Broadleaf", veg_tag(tree_for_biome(Grass, 0)), tree_kind_tag(Broadleaf))
-    assert_eq(state, "Forest -> Conifer at category 0", veg_tag(tree_for_biome(Forest, 0)), tree_kind_tag(Conifer))
-    assert_eq(state, "Desert -> Cactus", veg_tag(tree_for_biome(Desert, 0)), tree_kind_tag(Cactus))
-    assert_eq(state, "Mountain -> Conifer", veg_tag(tree_for_biome(Mountain, 0)), tree_kind_tag(Conifer))
-    assert_eq(state, "Snow -> DarkConifer", veg_tag(tree_for_biome(Snow, 0)), tree_kind_tag(DarkConifer))
-    assert_eq(state, "Tundra -> Conifer at category 0", veg_tag(tree_for_biome(Tundra, 0)), tree_kind_tag(Conifer))
+    check_eq("Beach -> Palm", veg_tag(tree_for_biome(Beach, 0)), tree_kind_tag(Palm)),
+    check_eq("Grass -> Broadleaf", veg_tag(tree_for_biome(Grass, 0)), tree_kind_tag(Broadleaf)),
+    check_eq("Forest -> Conifer at category 0", veg_tag(tree_for_biome(Forest, 0)), tree_kind_tag(Conifer)),
+    check_eq("Desert -> Cactus", veg_tag(tree_for_biome(Desert, 0)), tree_kind_tag(Cactus)),
+    check_eq("Mountain -> Conifer", veg_tag(tree_for_biome(Mountain, 0)), tree_kind_tag(Conifer)),
+    check_eq("Snow -> DarkConifer", veg_tag(tree_for_biome(Snow, 0)), tree_kind_tag(DarkConifer)),
+    check_eq("Tundra -> Conifer at category 0", veg_tag(tree_for_biome(Tundra, 0)), tree_kind_tag(Conifer)),
 
     # --- within-biome variety: the category slice (h/100) flips the mix ---
-    assert_eq(state, "Forest -> Broadleaf at category 1", veg_tag(tree_for_biome(Forest, 100)), tree_kind_tag(Broadleaf))
-    assert_eq(state, "Tundra -> Shrub at category 1", veg_tag(tree_for_biome(Tundra, 100)), tree_kind_tag(Shrub))
+    check_eq("Forest -> Broadleaf at category 1", veg_tag(tree_for_biome(Forest, 100)), tree_kind_tag(Broadleaf)),
+    check_eq("Tundra -> Shrub at category 1", veg_tag(tree_for_biome(Tundra, 100)), tree_kind_tag(Shrub)),
 
     # --- density gate: a high roll leaves the tile bare in every land biome ---
-    assert_eq(state, "Beach: bare when roll fails", veg_tag(tree_for_biome(Beach, 99)), -1)
-    assert_eq(state, "Forest: bare when roll fails", veg_tag(tree_for_biome(Forest, 99)), -1)
-    assert_eq(state, "Desert: bare when roll fails", veg_tag(tree_for_biome(Desert, 99)), -1)
-    assert_eq(state, "Snow: bare when roll fails", veg_tag(tree_for_biome(Snow, 99)), -1)
+    check_eq("Beach: bare when roll fails", veg_tag(tree_for_biome(Beach, 99)), -1),
+    check_eq("Forest: bare when roll fails", veg_tag(tree_for_biome(Forest, 99)), -1),
+    check_eq("Desert: bare when roll fails", veg_tag(tree_for_biome(Desert, 99)), -1),
+    check_eq("Snow: bare when roll fails", veg_tag(tree_for_biome(Snow, 99)), -1),
 
     # --- density boundary is exclusive: roll < density passes, roll == density fails (Beach = 8) ---
-    assert_eq(state, "Beach: roll 7 < density 8 places", veg_tag(tree_for_biome(Beach, 7)), tree_kind_tag(Palm))
-    assert_eq(state, "Beach: roll 8 == density 8 is bare", veg_tag(tree_for_biome(Beach, 8)), -1)
+    check_eq("Beach: roll 7 < density 8 places", veg_tag(tree_for_biome(Beach, 7)), tree_kind_tag(Palm)),
+    check_eq("Beach: roll 8 == density 8 is bare", veg_tag(tree_for_biome(Beach, 8)), -1),
 
     # --- determinism: pure, so the same (biome, hash) always yields the same result ---
-    let once = veg_tag(tree_for_biome(Forest, 424242))
-    let twice = veg_tag(tree_for_biome(Forest, 424242))
-    assert_eq(state, "determinism: same (biome, hash) => same TreeKind", once, twice)
-
-    summary(state)
+    check_eq("determinism: same (biome, hash) => same TreeKind", once, twice)
+  ])

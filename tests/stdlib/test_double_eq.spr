@@ -1,4 +1,4 @@
-import stdlib.test (TestState, new_state, assert_true, assert_false, summary)
+import stdlib.test (check_true, check_false, run_suite)
 
 # TDD — `==` / `!=` on Double.
 #
@@ -14,17 +14,14 @@ import stdlib.test (TestState, new_state, assert_true, assert_false, summary)
 # equality checks are deterministic (no rounding surprises).
 
 fn main() -> Unit !{IO} =
-  do
-    state <- new_state()
-
+  run_suite("double_eq", [
     # --- == on Double (RED today) ---
-    assert_true(state, "3.0 == 3.0", 3.0 == 3.0)
-    assert_false(state, "3.0 == 4.0", 3.0 == 4.0)
-    assert_true(state, "0.5 == 0.5", 0.5 == 0.5)
-    assert_true(state, "arithmetic result equality: 1.0 + 2.0 == 3.0", 1.0 + 2.0 == 3.0)
+    check_true("3.0 == 3.0", 3.0 == 3.0),
+    check_false("3.0 == 4.0", 3.0 == 4.0),
+    check_true("0.5 == 0.5", 0.5 == 0.5),
+    check_true("arithmetic result equality: 1.0 + 2.0 == 3.0", 1.0 + 2.0 == 3.0),
 
     # --- != on Double (lowers to !(oeq); the != path wraps in TUnary "!") ---
-    assert_true(state, "3.0 != 4.0", 3.0 != 4.0)
-    assert_false(state, "3.0 != 3.0", 3.0 != 3.0)
-
-    summary(state)
+    check_true("3.0 != 4.0", 3.0 != 4.0),
+    check_false("3.0 != 3.0", 3.0 != 3.0)
+  ])

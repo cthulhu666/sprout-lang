@@ -1,5 +1,5 @@
 module main
-import stdlib.test (TestState, new_state, assert_true, summary)
+import stdlib.test (check_true, run_suite)
 import stdlib.compiler.parser as parser
 
 # The decl-keyword predicate is the single source of truth for which keywords
@@ -9,39 +9,36 @@ import stdlib.compiler.parser as parser
 # skip an `export` modifier, and reject expressions.
 
 fn main() -> Unit !{IO} =
-  do
-    state <- new_state()
-
+  run_suite("decl_keyword_predicate", [
     # is_decl_keyword covers every keyword parse_decl_dispatch handles.
-    assert_true(state, "extern is a decl keyword", parser.is_decl_keyword("extern"))
-    assert_true(state, "fn is a decl keyword", parser.is_decl_keyword("fn"))
-    assert_true(state, "let is a decl keyword", parser.is_decl_keyword("let"))
-    assert_true(state, "class is a decl keyword", parser.is_decl_keyword("class"))
-    assert_true(state, "instance is a decl keyword", parser.is_decl_keyword("instance"))
-    assert_true(state, "type is a decl keyword", parser.is_decl_keyword("type"))
-    assert_true(state, "wrap is a decl keyword", parser.is_decl_keyword("wrap"))
-    assert_true(state, "export is not itself a decl keyword",
-      parser.is_decl_keyword("export") == false)
-    assert_true(state, "an identifier is not a decl keyword",
-      parser.is_decl_keyword("foo") == false)
+    check_true("extern is a decl keyword", parser.is_decl_keyword("extern")),
+    check_true("fn is a decl keyword", parser.is_decl_keyword("fn")),
+    check_true("let is a decl keyword", parser.is_decl_keyword("let")),
+    check_true("class is a decl keyword", parser.is_decl_keyword("class")),
+    check_true("instance is a decl keyword", parser.is_decl_keyword("instance")),
+    check_true("type is a decl keyword", parser.is_decl_keyword("type")),
+    check_true("wrap is a decl keyword", parser.is_decl_keyword("wrap")),
+    check_true("export is not itself a decl keyword",
+      parser.is_decl_keyword("export") == false),
+    check_true("an identifier is not a decl keyword",
+      parser.is_decl_keyword("foo") == false),
 
     # submission_starts_decl routes real submissions, including the wrap and
     # extern cases the REPL previously misrouted to the expression path.
-    assert_true(state, "wrap submission is a declaration",
-      parser.submission_starts_decl("wrap Minutes = Int"))
-    assert_true(state, "extern submission is a declaration",
-      parser.submission_starts_decl("extern fn c_now() -> Int"))
-    assert_true(state, "fn submission is a declaration",
-      parser.submission_starts_decl("fn f() = 1"))
-    assert_true(state, "exported wrap is a declaration",
-      parser.submission_starts_decl("export wrap Minutes = Int"))
-    assert_true(state, "exported fn is a declaration",
-      parser.submission_starts_decl("export fn f() = 1"))
-    assert_true(state, "an expression is not a declaration",
-      parser.submission_starts_decl("1 + 2") == false)
-    assert_true(state, "a call is not a declaration",
-      parser.submission_starts_decl("Minutes(5)") == false)
-    assert_true(state, "empty input is not a declaration",
+    check_true("wrap submission is a declaration",
+      parser.submission_starts_decl("wrap Minutes = Int")),
+    check_true("extern submission is a declaration",
+      parser.submission_starts_decl("extern fn c_now() -> Int")),
+    check_true("fn submission is a declaration",
+      parser.submission_starts_decl("fn f() = 1")),
+    check_true("exported wrap is a declaration",
+      parser.submission_starts_decl("export wrap Minutes = Int")),
+    check_true("exported fn is a declaration",
+      parser.submission_starts_decl("export fn f() = 1")),
+    check_true("an expression is not a declaration",
+      parser.submission_starts_decl("1 + 2") == false),
+    check_true("a call is not a declaration",
+      parser.submission_starts_decl("Minutes(5)") == false),
+    check_true("empty input is not a declaration",
       parser.submission_starts_decl("") == false)
-
-    summary(state)
+  ])

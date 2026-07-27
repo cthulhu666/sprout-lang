@@ -1,4 +1,4 @@
-import stdlib.test (TestState, new_state, assert_true, summary)
+import stdlib.test (check_true, run_suite)
 
 # Regression test for return-type typeclass dispatch (infer.sprout fix).
 #
@@ -53,14 +53,13 @@ fn is_nothing_bool(m: Maybe Bool) -> Bool =
   match m with | Nothing -> true | _ -> false
 
 fn main() -> Unit !{IO} =
-  do
-    state <- new_state()
+  run_suite("return_type_dispatch", [
     # Int dispatch — the class var `a` is unified to Int via the expected return.
-    assert_true(state, "id_int(\"one\") = Just(1)", is_just_one(id_int("one")))
-    assert_true(state, "id_int(\"two\") = Just(2)", is_just_two(id_int("two")))
-    assert_true(state, "id_int(\"x\") = Nothing", is_nothing_int(id_int("x")))
+    check_true("id_int(\"one\") = Just(1)", is_just_one(id_int("one"))),
+    check_true("id_int(\"two\") = Just(2)", is_just_two(id_int("two"))),
+    check_true("id_int(\"x\") = Nothing", is_nothing_int(id_int("x"))),
     # Bool dispatch — same call site shape, different return type.
-    assert_true(state, "id_bool(\"yes\") = Just(true)", is_just_true(id_bool("yes")))
-    assert_true(state, "id_bool(\"no\") = Just(false)", is_just_false(id_bool("no")))
-    assert_true(state, "id_bool(\"x\") = Nothing", is_nothing_bool(id_bool("x")))
-    summary(state)
+    check_true("id_bool(\"yes\") = Just(true)", is_just_true(id_bool("yes"))),
+    check_true("id_bool(\"no\") = Just(false)", is_just_false(id_bool("no"))),
+    check_true("id_bool(\"x\") = Nothing", is_nothing_bool(id_bool("x")))
+  ])

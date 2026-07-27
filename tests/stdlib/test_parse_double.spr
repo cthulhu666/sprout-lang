@@ -1,4 +1,4 @@
-import stdlib.test (TestState, new_state, assert_true, summary)
+import stdlib.test (check_true, run_suite)
 
 # parse_double (prelude) parses a decimal Double from text: optional '-', integer part,
 # optional '.frac', optional 'e'/'E' exponent. Pure Sprout (no strtod builtin). Double has
@@ -17,28 +17,25 @@ fn is_nothing(m: Maybe Double) -> Bool =
   | Just _ -> false
 
 fn main() -> Unit !{IO} =
-  do
-    state <- new_state()
-
+  run_suite("parse_double", [
     # --- well-formed numbers ---
-    assert_true(state, "integer", approx(parse_double("42"), 42.0, 0.0001))
-    assert_true(state, "zero", approx(parse_double("0"), 0.0, 0.0001))
-    assert_true(state, "simple decimal <1", approx(parse_double("0.104"), 0.104, 0.00001))
-    assert_true(state, "decimal >1", approx(parse_double("179.84"), 179.84, 0.001))
-    assert_true(state, "negative decimal", approx(parse_double("-179.84"), 0.0 - 179.84, 0.001))
-    assert_true(state, "leading-zero fraction", approx(parse_double("0.085"), 0.085, 0.00001))
-    assert_true(state, "sci notation neg exp", approx(parse_double("8.5e-2"), 0.085, 0.00001))
-    assert_true(state, "sci notation capital E", approx(parse_double("2.34E-2"), 0.0234, 0.00001))
-    assert_true(state, "sci notation pos exp", approx(parse_double("1.5e3"), 1500.0, 0.01))
-    assert_true(state, "negative sci", approx(parse_double("-1.0e-1"), 0.0 - 0.1, 0.0001))
-    assert_true(state, "trailing dot", approx(parse_double("5."), 5.0, 0.0001))
-    assert_true(state, "leading dot", approx(parse_double(".5"), 0.5, 0.0001))
+    check_true("integer", approx(parse_double("42"), 42.0, 0.0001)),
+    check_true("zero", approx(parse_double("0"), 0.0, 0.0001)),
+    check_true("simple decimal <1", approx(parse_double("0.104"), 0.104, 0.00001)),
+    check_true("decimal >1", approx(parse_double("179.84"), 179.84, 0.001)),
+    check_true("negative decimal", approx(parse_double("-179.84"), 0.0 - 179.84, 0.001)),
+    check_true("leading-zero fraction", approx(parse_double("0.085"), 0.085, 0.00001)),
+    check_true("sci notation neg exp", approx(parse_double("8.5e-2"), 0.085, 0.00001)),
+    check_true("sci notation capital E", approx(parse_double("2.34E-2"), 0.0234, 0.00001)),
+    check_true("sci notation pos exp", approx(parse_double("1.5e3"), 1500.0, 0.01)),
+    check_true("negative sci", approx(parse_double("-1.0e-1"), 0.0 - 0.1, 0.0001)),
+    check_true("trailing dot", approx(parse_double("5."), 5.0, 0.0001)),
+    check_true("leading dot", approx(parse_double(".5"), 0.5, 0.0001)),
 
     # --- malformed input returns Nothing, never crashes ---
-    assert_true(state, "empty -> Nothing", is_nothing(parse_double("")))
-    assert_true(state, "garbage -> Nothing", is_nothing(parse_double("abc")))
-    assert_true(state, "dangling exponent -> Nothing", is_nothing(parse_double("1.0e")))
-    assert_true(state, "lone dot -> Nothing", is_nothing(parse_double(".")))
-    assert_true(state, "trailing garbage -> Nothing", is_nothing(parse_double("1.5x")))
-
-    summary(state)
+    check_true("empty -> Nothing", is_nothing(parse_double(""))),
+    check_true("garbage -> Nothing", is_nothing(parse_double("abc"))),
+    check_true("dangling exponent -> Nothing", is_nothing(parse_double("1.0e"))),
+    check_true("lone dot -> Nothing", is_nothing(parse_double("."))),
+    check_true("trailing garbage -> Nothing", is_nothing(parse_double("1.5x")))
+  ])

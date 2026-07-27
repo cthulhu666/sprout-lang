@@ -1,4 +1,4 @@
-import stdlib.test (TestState, new_state, assert_eq, assert_true, summary)
+import stdlib.test (check_eq, check_true, run_suite)
 
 # Regression: vec_sort must not have a recursion-depth ceiling. Before the
 # bottom-up rewrite, decorated_merge_sorted / decorated_values_to_list / list_take
@@ -19,15 +19,13 @@ fn is_sorted_go(v: Vec Int, i: Int, n: Int) -> Bool =
   else false
 
 fn main() -> Unit !{IO} =
-  do
-    state <- new_state()
-
+  let big = vec_sort(vec_from_list(list_reverse(desc_list(99999, Nil))))
+  in run_suite("vec_sort_stacksafe", [
     # --- large sort: the stack-safety gate (crashes on the old code) ---
-    let big = vec_sort(vec_from_list(list_reverse(desc_list(99999, Nil))))
-    assert_eq(state, "100k length preserved", vec_length(big), 100000)
-    assert_eq(state, "100k first element", vec_get_or(0, -1, big), 0)
-    assert_eq(state, "100k last element", vec_get_or(99999, -1, big), 99999)
-    assert_true(state, "100k fully non-decreasing", is_sorted_go(big, 0, 100000))
+    check_eq("100k length preserved", vec_length(big), 100000),
+    check_eq("100k first element", vec_get_or(0, -1, big), 0),
+    check_eq("100k last element", vec_get_or(99999, -1, big), 99999),
+    check_true("100k fully non-decreasing", is_sorted_go(big, 0, 100000)),
 
     # NOTE: a stability-by-projection test (vec_sort_by with key != element type)
     # is deliberately omitted here: vec_sort_by crashes on a pre-existing Ord-dict
@@ -38,10 +36,9 @@ fn main() -> Unit !{IO} =
     # unchanged. Stability coverage lands with the dispatch fix.
 
     # --- edge cases ---
-    assert_eq(state, "empty sorts to empty", vec_sort(vec_empty()), vec_empty())
-    assert_eq(state, "singleton", vec_sort(foldable_to_vec([42])), foldable_to_vec([42]))
-    assert_eq(state, "all equal", vec_sort(foldable_to_vec([7, 7, 7, 7])), foldable_to_vec([7, 7, 7, 7]))
-    assert_eq(state, "already sorted", vec_sort(foldable_to_vec([1, 2, 3, 4, 5])), foldable_to_vec([1, 2, 3, 4, 5]))
-    assert_eq(state, "reverse sorted", vec_sort(foldable_to_vec([5, 4, 3, 2, 1])), foldable_to_vec([1, 2, 3, 4, 5]))
-
-    summary(state)
+    check_eq("empty sorts to empty", vec_sort(vec_empty()), vec_empty()),
+    check_eq("singleton", vec_sort(foldable_to_vec([42])), foldable_to_vec([42])),
+    check_eq("all equal", vec_sort(foldable_to_vec([7, 7, 7, 7])), foldable_to_vec([7, 7, 7, 7])),
+    check_eq("already sorted", vec_sort(foldable_to_vec([1, 2, 3, 4, 5])), foldable_to_vec([1, 2, 3, 4, 5])),
+    check_eq("reverse sorted", vec_sort(foldable_to_vec([5, 4, 3, 2, 1])), foldable_to_vec([1, 2, 3, 4, 5]))
+  ])

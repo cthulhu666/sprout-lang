@@ -1,4 +1,4 @@
-import stdlib.test (TestState, new_state, assert_eq, summary)
+import stdlib.test (check_eq, run_suite)
 
 # Regression for the return-first / input-later constraint-ordering bug: a
 # RETURN-position constraint declared BEFORE an input-position one must still
@@ -27,9 +27,8 @@ fn pick(x: b) -> a where Default a, Tag b =
   if tag(x) > 0 then def() else def()
 
 fn main() -> Unit !{IO} =
-  do
-    state <- new_state()
+  run_suite("return_position_constraint_order", [
     # int_to_string forces pick's return `a` to Int → Default resolves to Default Int.
-    assert_eq(state, "return-first constraint gets its own dict (true)", int_to_string(pick(true)), "42")
-    assert_eq(state, "return-first constraint gets its own dict (false)", int_to_string(pick(false)), "42")
-    summary(state)
+    check_eq("return-first constraint gets its own dict (true)", int_to_string(pick(true)), "42"),
+    check_eq("return-first constraint gets its own dict (false)", int_to_string(pick(false)), "42")
+  ])

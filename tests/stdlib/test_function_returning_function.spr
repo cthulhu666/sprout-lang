@@ -6,7 +6,7 @@
 # constructors, wrong for functions). For `f(n) -> Int -> Int` it over-stripped
 # to the final Int, so any function-typed body was rejected. The fix strips
 # exactly list_length(params) arrows.
-import stdlib.test (TestState, new_state, assert_eq, summary)
+import stdlib.test (check_eq, run_suite)
 
 fn add(x: Int, y: Int) -> Int = x + y
 
@@ -29,11 +29,8 @@ instance MakeAdder Int {
 }
 
 fn main() -> Unit !{IO} =
-  do
-    state <- new_state()
-
-    assert_eq(state, "fn returns lambda", apply_int(adder(5), 3), 8)
-    assert_eq(state, "fn returns partial application", apply_int(partial_ret(10), 7), 17)
-    assert_eq(state, "instance method returns function", apply_int(make_adder(100), 1), 101)
-
-    summary(state)
+  run_suite("function_returning_function", [
+    check_eq("fn returns lambda", apply_int(adder(5), 3), 8),
+    check_eq("fn returns partial application", apply_int(partial_ret(10), 7), 17),
+    check_eq("instance method returns function", apply_int(make_adder(100), 1), 101)
+  ])

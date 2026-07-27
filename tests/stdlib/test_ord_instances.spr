@@ -1,4 +1,4 @@
-import stdlib.test (TestState, new_state, assert_true, assert_eq, summary)
+import stdlib.test (check_true, run_suite)
 import stdlib.collections (Vec, vec_from_list)
 
 # Ord instances for tuples (2-5) and containers (Maybe, List, Result, Vec).
@@ -10,38 +10,35 @@ import stdlib.collections (Vec, vec_from_list)
 # declaration/tag order == semantic order == derived order.
 
 fn main() -> Unit !{IO} =
-  do
-    state <- new_state()
-
+  run_suite("ord_instances", [
     # Tuples: lexicographic.
-    assert_true(state, "tuple2 lt on snd", ord_lt((1, 2), (1, 3)))
-    assert_true(state, "tuple2 eq", compare((1, 2), (1, 2)) == 0)
-    assert_true(state, "tuple2 gt on fst", ord_gt((2, 0), (1, 9)))
-    assert_true(state, "tuple3 lt on third", ord_lt((1, 2, 3), (1, 2, 4)))
-    assert_true(state, "tuple4 eq", compare((1, 2, 3, 4), (1, 2, 3, 4)) == 0)
-    assert_true(state, "tuple5 lt on last", ord_lt((1, 2, 3, 4, 5), (1, 2, 3, 4, 6)))
+    check_true("tuple2 lt on snd", ord_lt((1, 2), (1, 3))),
+    check_true("tuple2 eq", compare((1, 2), (1, 2)) == 0),
+    check_true("tuple2 gt on fst", ord_gt((2, 0), (1, 9))),
+    check_true("tuple3 lt on third", ord_lt((1, 2, 3), (1, 2, 4))),
+    check_true("tuple4 eq", compare((1, 2, 3, 4), (1, 2, 3, 4)) == 0),
+    check_true("tuple5 lt on last", ord_lt((1, 2, 3, 4, 5), (1, 2, 3, 4, 6))),
 
     # Maybe: Nothing < Just (semantic).
-    assert_true(state, "maybe nothing lt just", ord_lt(Nothing, Just(1)))
-    assert_true(state, "maybe just gt nothing", ord_gt(Just(1), Nothing))
-    assert_true(state, "maybe nothing eq", compare(Nothing, no_int()) == 0)
-    assert_true(state, "maybe just lt just", ord_lt(Just(1), Just(2)))
+    check_true("maybe nothing lt just", ord_lt(Nothing, Just(1))),
+    check_true("maybe just gt nothing", ord_gt(Just(1), Nothing)),
+    check_true("maybe nothing eq", compare(Nothing, no_int()) == 0),
+    check_true("maybe just lt just", ord_lt(Just(1), Just(2))),
 
     # List: [] < [x], lexicographic.
-    assert_true(state, "list empty lt nonempty", ord_lt(nil_int(), [1]))
-    assert_true(state, "list lt lexicographic", ord_lt([1, 2], [1, 3]))
-    assert_true(state, "list prefix lt longer", ord_lt([1], [1, 2]))
-    assert_true(state, "list eq", compare([1, 2], [1, 2]) == 0)
+    check_true("list empty lt nonempty", ord_lt(nil_int(), [1])),
+    check_true("list lt lexicographic", ord_lt([1, 2], [1, 3])),
+    check_true("list prefix lt longer", ord_lt([1], [1, 2])),
+    check_true("list eq", compare([1, 2], [1, 2]) == 0),
 
     # Result: Ok < Err.
-    assert_true(state, "result ok lt err", ord_lt(ok_int(), err_str()))
-    assert_true(state, "result ok lt ok", ord_lt(Ok(1), ok2()))
+    check_true("result ok lt err", ord_lt(ok_int(), err_str())),
+    check_true("result ok lt ok", ord_lt(Ok(1), ok2())),
 
     # Vec: lexicographic like List.
-    assert_true(state, "vec lt lexicographic", ord_lt(vec_from_list([1, 2]), vec_from_list([1, 3])))
-    assert_true(state, "vec eq", compare(vec_from_list([1, 2]), vec_from_list([1, 2])) == 0)
-
-    summary(state)
+    check_true("vec lt lexicographic", ord_lt(vec_from_list([1, 2]), vec_from_list([1, 3]))),
+    check_true("vec eq", compare(vec_from_list([1, 2]), vec_from_list([1, 2])) == 0)
+  ])
 
 # Concrete-typed helpers to anchor Ord resolution (avoid ambiguous literals).
 fn no_int() -> Maybe Int = Nothing

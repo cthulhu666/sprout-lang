@@ -1,4 +1,4 @@
-import stdlib.test (TestState, new_state, assert_eq, summary)
+import stdlib.test (check_eq, run_suite)
 
 # W8/P1 (D5): parse_int is the TOTAL public conversion — Just(n) for a valid
 # signed decimal integer, Nothing for junk (previously junk silently became 0 via
@@ -9,13 +9,12 @@ fn describe(m: Maybe Int) -> String =
   | Nothing -> "Nothing"
 
 fn main() -> Unit !{IO} =
-  do
-    state <- new_state()
-    assert_eq(state, "parse_int 42", describe(parse_int("42")), "Just 42")
-    assert_eq(state, "parse_int -7", describe(parse_int("-7")), "Just -7")
-    assert_eq(state, "parse_int 0", describe(parse_int("0")), "Just 0")
-    assert_eq(state, "parse_int abc = Nothing", describe(parse_int("abc")), "Nothing")
-    assert_eq(state, "parse_int empty = Nothing", describe(parse_int("")), "Nothing")
-    assert_eq(state, "parse_int 12x = Nothing", describe(parse_int("12x")), "Nothing")
-    assert_eq(state, "parse_int lone minus = Nothing", describe(parse_int("-")), "Nothing")
-    summary(state)
+  run_suite("parse_int_total", [
+    check_eq("parse_int 42", describe(parse_int("42")), "Just 42"),
+    check_eq("parse_int -7", describe(parse_int("-7")), "Just -7"),
+    check_eq("parse_int 0", describe(parse_int("0")), "Just 0"),
+    check_eq("parse_int abc = Nothing", describe(parse_int("abc")), "Nothing"),
+    check_eq("parse_int empty = Nothing", describe(parse_int("")), "Nothing"),
+    check_eq("parse_int 12x = Nothing", describe(parse_int("12x")), "Nothing"),
+    check_eq("parse_int lone minus = Nothing", describe(parse_int("-")), "Nothing")
+  ])

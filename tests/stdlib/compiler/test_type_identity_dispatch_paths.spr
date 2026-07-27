@@ -1,5 +1,5 @@
 module main
-import stdlib.test (TestState, new_state, assert_eq, summary)
+import stdlib.test (check_eq, run_suite)
 
 # Regression guard for module-qualified type identity across the dispatch paths the
 # original T7 tests missed (code-review finding 1,
@@ -41,8 +41,7 @@ fn get_zero() -> Cell =
   zero()
 
 fn main() -> Unit !{IO} =
-  do
-    state <- new_state()
-    assert_eq(state, "constrained-fn dispatch on module-local type", describe(MkBox(1)), "BOX")
-    assert_eq(state, "return-type dispatch on module-local type", cell_val(get_zero()), 7)
-    summary(state)
+  run_suite("type_identity_dispatch_paths", [
+    check_eq("constrained-fn dispatch on module-local type", describe(MkBox(1)), "BOX"),
+    check_eq("return-type dispatch on module-local type", cell_val(get_zero()), 7)
+  ])

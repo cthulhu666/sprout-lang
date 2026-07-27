@@ -1,4 +1,4 @@
-import stdlib.test (TestState, new_state, assert_eq, summary)
+import stdlib.test (check_eq, run_suite)
 
 # W4 sibling guard: two same-class constraints (Sh a, Sh b) with the method
 # called on each arg. Because the constraint var is at an arg head, the forwarded
@@ -15,8 +15,7 @@ fn both(x: a, y: b) -> String where Sh a, Sh b =
   sh(x) ++ "-" ++ sh(y)
 
 fn main() -> Unit !{IO} =
-  do
-    state <- new_state()
-    assert_eq(state, "two-constraint forwards distinct dicts", both(42, true), "int-bool")
-    assert_eq(state, "two-constraint reversed", both(false, 7), "bool-int")
-    summary(state)
+  run_suite("dispatch_two_constraints", [
+    check_eq("two-constraint forwards distinct dicts", both(42, true), "int-bool"),
+    check_eq("two-constraint reversed", both(false, 7), "bool-int")
+  ])

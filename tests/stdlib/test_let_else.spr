@@ -1,4 +1,4 @@
-import stdlib.test (TestState, new_state, assert_eq, summary)
+import stdlib.test (check_eq, run_suite)
 
 # `let … in` block: layout-aligned bindings under one `let`, `in` dedented to the
 # `let` column. Each binding `<pat> = <e>` (irrefutable) or `<pat> = <e> else <fb>`
@@ -62,24 +62,23 @@ fn whole_scrut(r: Result Int Int) -> Int =
   in v
 
 fn main() -> Unit !{IO} =
-  do
-    state <- new_state()
-    assert_eq(state, "single refutable: match", first_or(Cons(7, Nil), 0), 7)
-    assert_eq(state, "single refutable: else", first_or(Nil, 99), 99)
-    assert_eq(state, "two bindings: second element", second(Cons(1, Cons(2, Nil))), 2)
-    assert_eq(state, "two bindings: first sentinel", second(Nil), -1)
-    assert_eq(state, "two bindings: second sentinel", second(Cons(1, Nil)), -2)
-    assert_eq(state, "Result: Ok binds value", ok_or(Ok(5), 0), 5)
-    assert_eq(state, "Result: Err takes else", ok_or(Err("nope"), 42), 42)
-    assert_eq(state, "irrefutable block, no else", plain(3), 8)
-    assert_eq(state, "mixed block: Just", mixed(Just(5)), 15)
-    assert_eq(state, "mixed block: Nothing short-circuits to else", mixed(Nothing), 10)
-    assert_eq(state, "binding-else: Ok binds value", recover_code(Ok(5)), 5)
-    assert_eq(state, "binding-else: Err payload recovered", recover_code(Err(42)), 42)
-    assert_eq(state, "maybe residual: Just", maybe_or_zero(Just(7)), 7)
-    assert_eq(state, "maybe residual: Nothing", maybe_or_zero(Nothing), 0)
-    assert_eq(state, "chained binding-else: both Ok", two_step(Ok(3), Ok(4)), 7)
-    assert_eq(state, "chained binding-else: first Err short-circuits", two_step(Err(7), Ok(4)), 7)
-    assert_eq(state, "chained binding-else: second Err", two_step(Ok(3), Err(9)), 9)
-    assert_eq(state, "bare residual binds whole scrutinee", whole_scrut(Err(5)), 105)
-    summary(state)
+  run_suite("let_else", [
+    check_eq("single refutable: match", first_or(Cons(7, Nil), 0), 7),
+    check_eq("single refutable: else", first_or(Nil, 99), 99),
+    check_eq("two bindings: second element", second(Cons(1, Cons(2, Nil))), 2),
+    check_eq("two bindings: first sentinel", second(Nil), -1),
+    check_eq("two bindings: second sentinel", second(Cons(1, Nil)), -2),
+    check_eq("Result: Ok binds value", ok_or(Ok(5), 0), 5),
+    check_eq("Result: Err takes else", ok_or(Err("nope"), 42), 42),
+    check_eq("irrefutable block, no else", plain(3), 8),
+    check_eq("mixed block: Just", mixed(Just(5)), 15),
+    check_eq("mixed block: Nothing short-circuits to else", mixed(Nothing), 10),
+    check_eq("binding-else: Ok binds value", recover_code(Ok(5)), 5),
+    check_eq("binding-else: Err payload recovered", recover_code(Err(42)), 42),
+    check_eq("maybe residual: Just", maybe_or_zero(Just(7)), 7),
+    check_eq("maybe residual: Nothing", maybe_or_zero(Nothing), 0),
+    check_eq("chained binding-else: both Ok", two_step(Ok(3), Ok(4)), 7),
+    check_eq("chained binding-else: first Err short-circuits", two_step(Err(7), Ok(4)), 7),
+    check_eq("chained binding-else: second Err", two_step(Ok(3), Err(9)), 9),
+    check_eq("bare residual binds whole scrutinee", whole_scrut(Err(5)), 105)
+  ])

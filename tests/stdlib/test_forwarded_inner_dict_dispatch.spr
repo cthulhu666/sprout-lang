@@ -1,4 +1,4 @@
-import stdlib.test (TestState, new_state, assert_eq, summary)
+import stdlib.test (check_eq, run_suite)
 
 # M3b-5 runtime guard: a value-position class method inside a function that
 # FORWARDS a parameterized constraint (Tag (Box a)) lowers to the forwarded
@@ -38,9 +38,8 @@ fn tag_via_hof(x: Box a) -> String where Tag (Box a), Tag a =
   apply_tag(tag, x)
 
 fn main() -> Unit !{IO} =
-  do
-    state <- new_state()
+  run_suite("forwarded_inner_dict_dispatch", [
     # The forwarded Box dict must dispatch to the correct element instance.
-    assert_eq(state, "forwarded Box(Int) reaches inner Int dict", tag_via_hof(Box(42)), "box(int)")
-    assert_eq(state, "forwarded Box(Bool) reaches inner Bool dict", tag_via_hof(Box(true)), "box(bool)")
-    summary(state)
+    check_eq("forwarded Box(Int) reaches inner Int dict", tag_via_hof(Box(42)), "box(int)"),
+    check_eq("forwarded Box(Bool) reaches inner Bool dict", tag_via_hof(Box(true)), "box(bool)")
+  ])

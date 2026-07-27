@@ -1,4 +1,4 @@
-import stdlib.test (TestState, new_state, assert_true, summary)
+import stdlib.test (check_true, run_suite)
 
 # Parametric ADTs with `deriving (Eq)`: the emitter must:
 #  - emit `instance Eq (Box a) where Eq a { ... }` (instance constraint on `a`)
@@ -14,17 +14,16 @@ type Pair a b (..) deriving (Eq) =
 fn not(b: Bool) -> Bool = if b then false else true
 
 fn main() -> Unit !{IO} =
-  do
-    state <- new_state()
+  run_suite("deriving_eq_parametric", [
     # Nullary case in a parametric type — should still match same-ctor pair.
-    assert_true(state, "Empty eq Empty", eq(Empty, Empty))
+    check_true("Empty eq Empty", eq(Empty, Empty)),
     # Single-field case — field comparison via Eq Int.
-    assert_true(state, "Hold 5 eq Hold 5", eq(Hold(5), Hold(5)))
-    assert_true(state, "Hold 5 neq Hold 6", not(eq(Hold(5), Hold(6))))
+    check_true("Hold 5 eq Hold 5", eq(Hold(5), Hold(5))),
+    check_true("Hold 5 neq Hold 6", not(eq(Hold(5), Hold(6)))),
     # Cross-ctor case in same type — false.
-    assert_true(state, "Empty neq Hold 0", not(eq(Empty, Hold(0))))
+    check_true("Empty neq Hold 0", not(eq(Empty, Hold(0)))),
     # Two-field ctor — both fields must match (different param types).
-    assert_true(state, "Pair 1 true eq Pair 1 true", eq(Pair(1, true), Pair(1, true)))
-    assert_true(state, "Pair 1 true neq Pair 1 false", not(eq(Pair(1, true), Pair(1, false))))
-    assert_true(state, "Pair 1 true neq Pair 2 true", not(eq(Pair(1, true), Pair(2, true))))
-    summary(state)
+    check_true("Pair 1 true eq Pair 1 true", eq(Pair(1, true), Pair(1, true))),
+    check_true("Pair 1 true neq Pair 1 false", not(eq(Pair(1, true), Pair(1, false)))),
+    check_true("Pair 1 true neq Pair 2 true", not(eq(Pair(1, true), Pair(2, true))))
+  ])

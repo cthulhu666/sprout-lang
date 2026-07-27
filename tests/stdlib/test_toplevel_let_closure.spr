@@ -1,4 +1,4 @@
-import stdlib.test (TestState, new_state, assert_eq, summary)
+import stdlib.test (check_eq, run_suite)
 import stdlib.string as string
 
 # Regression: a top-level `let` bound to a closure (here a `_`-placeholder
@@ -13,9 +13,8 @@ import stdlib.string as string
 let f = string.repeat("dupa", _)
 
 fn main() -> Unit !{IO} =
-  do
-    state <- new_state()
-    assert_eq(state, "top-level let closure: f(3) = dupadupadupa", f(3), "dupadupadupa")
-    assert_eq(state, "top-level let closure: f(0) = ''", f(0), "")
-    assert_eq(state, "top-level let closure: f(1) = dupa", f(1), "dupa")
-    summary(state)
+  run_suite("toplevel_let_closure", [
+    check_eq("top-level let closure: f(3) = dupadupadupa", f(3), "dupadupadupa"),
+    check_eq("top-level let closure: f(0) = ''", f(0), ""),
+    check_eq("top-level let closure: f(1) = dupa", f(1), "dupa")
+  ])

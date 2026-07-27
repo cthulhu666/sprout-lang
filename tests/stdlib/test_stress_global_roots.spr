@@ -1,4 +1,4 @@
-import stdlib.test (TestState, new_state, assert_eq, summary)
+import stdlib.test (check_eq, run_suite)
 
 # W1 (F-GROOT) runtime regression.  Before the fix the typed codegen path never
 # GC-registered top-level `let` globals, so under SPROUT_GC_STRESS=1 (collect on
@@ -26,13 +26,12 @@ fn first_or(xs: List String, d: String) -> String =
   | Nil -> d
 
 fn main() -> Unit !{IO} =
-  do
-    state <- new_state()
-    # Force ~500 collections under stress before touching the globals.
-    let junk = churn(500, "")
-    assert_eq(state, "local churn produced 500 chars", str_len(junk), 500)
+  # Force ~500 collections under stress before touching the globals.
+  let junk = churn(500, "")
+  in run_suite("stress_global_roots", [
+    check_eq("local churn produced 500 chars", str_len(junk), 500),
     # If greeting's slot was swept, its recycled memory reads back garbage.
-    assert_eq(state, "string global survives GC churn", greeting, "hello, world")
+    check_eq("string global survives GC churn", greeting, "hello, world"),
     # Ctor-built (List String) global — exercises IRMakeCtor heap production.
-    assert_eq(state, "list-string global survives GC churn", first_or(names, "none"), "alice")
-    summary(state)
+    check_eq("list-string global survives GC churn", first_or(names, "none"), "alice")
+  ])

@@ -1,4 +1,4 @@
-import stdlib.test (TestState, new_state, assert_eq, summary)
+import stdlib.test (check_eq, run_suite)
 
 # Non-contiguous constraint positions: a fn with three type vars but constraints
 # on only the FIRST and THIRD (scheme-var positions 0 and 2), the middle var
@@ -29,9 +29,8 @@ fn outer(x: a, y: b, z: c) -> String where Label a, Label c =
   inner(x) ++ "-" ++ inner(z)
 
 fn main() -> Unit !{IO} =
-  do
-    state <- new_state()
-    assert_eq(state, "gap positions 0/2: Int _ String", outer(1, true, "hi"), "I-S")
-    assert_eq(state, "gap positions 0/2: Bool _ Int", outer(false, 0, 9), "B-I")
-    assert_eq(state, "gap positions 0/2: String _ Bool", outer("x", 5, true), "S-B")
-    summary(state)
+  run_suite("constraint_position_gap", [
+    check_eq("gap positions 0/2: Int _ String", outer(1, true, "hi"), "I-S"),
+    check_eq("gap positions 0/2: Bool _ Int", outer(false, 0, 9), "B-I"),
+    check_eq("gap positions 0/2: String _ Bool", outer("x", 5, true), "S-B")
+  ])

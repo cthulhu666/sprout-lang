@@ -1,4 +1,4 @@
-import stdlib.test (TestState, new_state, assert_eq, summary)
+import stdlib.test (check_eq, run_suite)
 import stdlib.collections (Foldable, List, Vec, vec_length, foldable_to_vec)
 
 # Mixed-constraint dispatch guard for the §13.3(B) S3 flip: an externally-called
@@ -23,9 +23,8 @@ fn tagged_count(x: a, xs: List Int) -> String where Label a, Foldable List =
   label(x) ++ ":" ++ int_to_string(vec_length(foldable_to_vec(xs)))
 
 fn main() -> Unit !{IO} =
-  do
-    state <- new_state()
-    assert_eq(state, "mixed dispatch: Bool tag + 3-elem count", tagged_count(true, [1, 2, 3]), "B:3")
-    assert_eq(state, "mixed dispatch: Int tag + 2-elem count", tagged_count(7, [10, 20]), "I:2")
-    assert_eq(state, "mixed dispatch: empty list", tagged_count(false, []), "B:0")
-    summary(state)
+  run_suite("mixed_constraint_dispatch", [
+    check_eq("mixed dispatch: Bool tag + 3-elem count", tagged_count(true, [1, 2, 3]), "B:3"),
+    check_eq("mixed dispatch: Int tag + 2-elem count", tagged_count(7, [10, 20]), "I:2"),
+    check_eq("mixed dispatch: empty list", tagged_count(false, []), "B:0")
+  ])

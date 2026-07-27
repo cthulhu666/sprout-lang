@@ -1,60 +1,57 @@
-import stdlib.test (TestState, new_state, assert_eq, summary)
+import stdlib.test (check_eq, run_suite)
 
 fn double(x: Int) -> Int = x * 2
 fn inc(x: Int) -> Int = x + 1
 fn square(x: Int) -> Int = x * x
 
 fn main() -> Unit !{IO} =
-  do
-    state <- new_state()
-
+  let q = double >> double
+      p = double << double
+  in run_suite("fn_compose", [
     # -----------------------------------------------------------------------
     # rcompose: f >> g applies f first, then g
     # -----------------------------------------------------------------------
 
-    assert_eq(state, "rcompose basic", rcompose(double, inc)(3), 7)
-    assert_eq(state, "rcompose identity left", rcompose(\x -> x, double)(5), 10)
-    assert_eq(state, "rcompose identity right", rcompose(double, \x -> x)(5), 10)
+    check_eq("rcompose basic", rcompose(double, inc)(3), 7),
+    check_eq("rcompose identity left", rcompose(\x -> x, double)(5), 10),
+    check_eq("rcompose identity right", rcompose(double, \x -> x)(5), 10),
 
     # -----------------------------------------------------------------------
     # lcompose: f << g applies g first, then f
     # -----------------------------------------------------------------------
 
-    assert_eq(state, "lcompose basic", lcompose(inc, double)(3), 7)
-    assert_eq(state, "lcompose identity left", lcompose(\x -> x, double)(5), 10)
-    assert_eq(state, "lcompose identity right", lcompose(double, \x -> x)(5), 10)
+    check_eq("lcompose basic", lcompose(inc, double)(3), 7),
+    check_eq("lcompose identity left", lcompose(\x -> x, double)(5), 10),
+    check_eq("lcompose identity right", lcompose(double, \x -> x)(5), 10),
 
     # -----------------------------------------------------------------------
     # >> operator desugars to rcompose
     # -----------------------------------------------------------------------
 
-    assert_eq(state, ">> basic", (double >> inc)(3), 7)
-    assert_eq(state, ">> chained", (double >> inc >> square)(2), 25)
+    check_eq(">> basic", (double >> inc)(3), 7),
+    check_eq(">> chained", (double >> inc >> square)(2), 25),
 
     # let-bound composed function (REPL regression)
-    let q = double >> double
-    assert_eq(state, ">> let bound call", q(4), 16)
+    check_eq(">> let bound call", q(4), 16),
 
     # used with map (REPL regression)
-    assert_eq(state, ">> with map", map(double >> inc, Cons(1, Cons(2, Cons(3, Nil)))),
-                                    Cons(3, Cons(5, Cons(7, Nil))))
+    check_eq(">> with map", map(double >> inc, Cons(1, Cons(2, Cons(3, Nil)))),
+                                    Cons(3, Cons(5, Cons(7, Nil)))),
 
     # -----------------------------------------------------------------------
     # << operator desugars to lcompose
     # -----------------------------------------------------------------------
 
-    assert_eq(state, "<< basic", (inc << double)(3), 7)
-    assert_eq(state, "<< chained", (square << inc << double)(2), 25)
+    check_eq("<< basic", (inc << double)(3), 7),
+    check_eq("<< chained", (square << inc << double)(2), 25),
 
-    let p = double << double
-    assert_eq(state, "<< let bound call", p(4), 16)
+    check_eq("<< let bound call", p(4), 16),
 
     # -----------------------------------------------------------------------
     # >> and << are inverses: f >> g == g << f
     # -----------------------------------------------------------------------
 
-    assert_eq(state, ">> and << inverse",
+    check_eq(">> and << inverse",
       (double >> inc)(5),
       (inc << double)(5))
-
-    summary(state)
+  ])

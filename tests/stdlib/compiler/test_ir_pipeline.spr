@@ -1,5 +1,5 @@
 module main
-import stdlib.test (TestState, new_state, assert_true, assert_eq, summary)
+import stdlib.test (check_eq, check_true, run_suite)
 import stdlib.compiler.ir_pipeline as ir_pipeline
 import stdlib.compiler.ast_to_ir as ast_to_ir
 import stdlib.compiler.ir_rooting as ir_rooting
@@ -23,37 +23,30 @@ fn trivial_program() -> typed_ast.TypedProgram =
   )
 
 fn main() -> Unit !{IO} =
-  do
-    state <- new_state()
-
+  run_suite("ir_pipeline",
     # compile_program_streaming should succeed on trivial program.
-    match ir_pipeline.compile_program_streaming(trivial_program()) with
+    (match ir_pipeline.compile_program_streaming(trivial_program()) with
     | Err msg ->
-        do
-          assert_true(state, "streaming compile should succeed (got Err: " ++ msg ++ ")", false)
-          summary(state)
+        [check_true("streaming compile should succeed (got Err: " ++ msg ++ ")", false)]
     | Ok streaming_ir ->
 
         # Batch path result for comparison.
         match ast_to_ir.translate_program(trivial_program()) with
         | Err msg2 ->
-            do
-              assert_true(state, "batch compile should succeed (got Err: " ++ msg2 ++ ")", false)
-              summary(state)
+            [check_true("batch compile should succeed (got Err: " ++ msg2 ++ ")", false)]
         | Ok pair ->
             match pair with
             | (ir_prog, idx_map) ->
-                do
-                  let batch_ir = ir_lowering.lower_program(ir_rooting.insert_roots(ir_prog, idx_map))
-
-                  # Both paths must produce output containing "define" blocks.
-                  assert_true(state, "streaming IR contains define",
-                    str_find(streaming_ir, "define ") >= 0)
-                  assert_true(state, "batch IR contains define",
-                    str_find(batch_ir, "define ") >= 0)
+                let batch_ir = ir_lowering.lower_program(ir_rooting.insert_roots(ir_prog, idx_map))
+                in
+                # Both paths must produce output containing "define" blocks.
+                [
+                  check_true("streaming IR contains define",
+                    str_find(streaming_ir, "define ") >= 0),
+                  check_true("batch IR contains define",
+                    str_find(batch_ir, "define ") >= 0),
 
                   # Both paths must produce byte-identical IR.
-                  assert_eq(state, "streaming IR matches batch IR",
+                  check_eq("streaming IR matches batch IR",
                     streaming_ir, batch_ir)
-
-                  summary(state)
+                ]))

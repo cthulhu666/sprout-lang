@@ -1,4 +1,4 @@
-import stdlib.test (TestState, new_state, assert_eq, summary)
+import stdlib.test (check_eq, run_suite)
 
 # Concrete-instance devirtualization (docs/scalar-replacement-v0.md, A-full): a class-method call
 # whose dictionary is a fully-resolved concrete instance (no forwarded/polymorphic dict) is lowered
@@ -74,41 +74,40 @@ fn maybe_int_lt(a: Maybe Int, b: Maybe Int) -> Bool = compare(a, b) < 0
 fn pair_lt(a: (Int, String), b: (Int, String)) -> Bool = compare(a, b) < 0
 
 fn main() -> Unit !{IO} =
-  do
-    state <- new_state()
+  run_suite("devirt_classmethods", [
     # concrete from_ordinal round-trips through the derived ordinal
-    assert_eq(state, "dir_of 0 -> North -> 0", dir_tag(dir_of(0)), 0)
-    assert_eq(state, "dir_of 2 -> South -> 2", dir_tag(dir_of(2)), 2)
-    assert_eq(state, "dir_of 3 -> West -> 3", dir_tag(dir_of(3)), 3)
+    check_eq("dir_of 0 -> North -> 0", dir_tag(dir_of(0)), 0),
+    check_eq("dir_of 2 -> South -> 2", dir_tag(dir_of(2)), 2),
+    check_eq("dir_of 3 -> West -> 3", dir_tag(dir_of(3)), 3),
     # out-of-range from_ordinal -> Nothing -> North (0)
-    assert_eq(state, "dir_of 9 -> Nothing -> North -> 0", dir_tag(dir_of(9)), 0)
+    check_eq("dir_of 9 -> Nothing -> North -> 0", dir_tag(dir_of(9)), 0),
     # concrete ordinal directly
-    assert_eq(state, "ordinal East -> 1", dir_tag(East), 1)
+    check_eq("ordinal East -> 1", dir_tag(East), 1),
     # polymorphic path (forwarded dict, must NOT devirt) still correct at a concrete type
-    assert_eq(state, "generic_tag West -> 3", generic_tag(West), 3)
-    assert_eq(state, "generic_tag North -> 0", generic_tag(North), 0)
+    check_eq("generic_tag West -> 3", generic_tag(West), 3),
+    check_eq("generic_tag North -> 0", generic_tag(North), 0),
     # concrete Eq, no context -> devirt fires (non-Enum class)
-    assert_eq(state, "int_eq 5 5 -> True", int_eq(5, 5), true)
-    assert_eq(state, "int_eq 5 6 -> False", int_eq(5, 6), false)
+    check_eq("int_eq 5 5 -> True", int_eq(5, 5), true),
+    check_eq("int_eq 5 6 -> False", int_eq(5, 6), false),
     # concrete Eq WITH context -> MUST fall back; correct result proves the inner dict survived
-    assert_eq(state, "maybe_int_eq Just5 Just5 -> True", maybe_int_eq(Just(5), Just(5)), true)
-    assert_eq(state, "maybe_int_eq Just5 Just6 -> False", maybe_int_eq(Just(5), Just(6)), false)
-    assert_eq(state, "maybe_int_eq Just5 Nothing -> False", maybe_int_eq(Just(5), Nothing), false)
+    check_eq("maybe_int_eq Just5 Just5 -> True", maybe_int_eq(Just(5), Just(5)), true),
+    check_eq("maybe_int_eq Just5 Just6 -> False", maybe_int_eq(Just(5), Just(6)), false),
+    check_eq("maybe_int_eq Just5 Nothing -> False", maybe_int_eq(Just(5), Nothing), false),
     # concrete Ord (superclass Eq) -> devirt-beyond drops the sibling super block; still correct
-    assert_eq(state, "int_lt 3 5 -> True", int_lt(3, 5), true)
-    assert_eq(state, "int_lt 5 3 -> False", int_lt(5, 3), false)
+    check_eq("int_lt 3 5 -> True", int_lt(3, 5), true),
+    check_eq("int_lt 5 3 -> False", int_lt(5, 3), false),
     # user Ord whose compare uses eq -> concrete eq resolution, devirt sound
-    assert_eq(state, "rank_lt Lo Hi -> True", rank_lt(Lo, Hi), true)
-    assert_eq(state, "rank_lt Hi Lo -> False", rank_lt(Hi, Lo), false)
-    assert_eq(state, "rank_lt Mid Mid -> False (equal)", rank_lt(Mid, Mid), false)
-    assert_eq(state, "rank_eq Mid Mid -> True", rank_eq(Mid, Mid), true)
-    assert_eq(state, "rank_eq Lo Hi -> False", rank_eq(Lo, Hi), false)
+    check_eq("rank_lt Lo Hi -> True", rank_lt(Lo, Hi), true),
+    check_eq("rank_lt Hi Lo -> False", rank_lt(Hi, Lo), false),
+    check_eq("rank_lt Mid Mid -> False (equal)", rank_lt(Mid, Mid), false),
+    check_eq("rank_eq Mid Mid -> True", rank_eq(Mid, Mid), true),
+    check_eq("rank_eq Lo Hi -> False", rank_eq(Lo, Hi), false),
     # combined Ord (Maybe Int): multi-block + context -> inner dicts must survive
-    assert_eq(state, "maybe_int_lt Just1 Just2 -> True", maybe_int_lt(Just(1), Just(2)), true)
-    assert_eq(state, "maybe_int_lt Just2 Just1 -> False", maybe_int_lt(Just(2), Just(1)), false)
-    assert_eq(state, "maybe_int_lt Just5 Just5 -> False (equal)", maybe_int_lt(Just(5), Just(5)), false)
+    check_eq("maybe_int_lt Just1 Just2 -> True", maybe_int_lt(Just(1), Just(2)), true),
+    check_eq("maybe_int_lt Just2 Just1 -> False", maybe_int_lt(Just(2), Just(1)), false),
+    check_eq("maybe_int_lt Just5 Just5 -> False (equal)", maybe_int_lt(Just(5), Just(5)), false),
     # multi-child dict ORDERING: 2nd (String) component decides -> exercises the b-dict specifically
-    assert_eq(state, "pair_lt (1,a) (1,b) -> True (2nd decides)", pair_lt((1, "a"), (1, "b")), true)
-    assert_eq(state, "pair_lt (1,b) (1,a) -> False (2nd decides)", pair_lt((1, "b"), (1, "a")), false)
-    assert_eq(state, "pair_lt (1,z) (2,a) -> True (1st decides)", pair_lt((1, "z"), (2, "a")), true)
-    summary(state)
+    check_eq("pair_lt (1,a) (1,b) -> True (2nd decides)", pair_lt((1, "a"), (1, "b")), true),
+    check_eq("pair_lt (1,b) (1,a) -> False (2nd decides)", pair_lt((1, "b"), (1, "a")), false),
+    check_eq("pair_lt (1,z) (2,a) -> True (1st decides)", pair_lt((1, "z"), (2, "a")), true)
+  ])

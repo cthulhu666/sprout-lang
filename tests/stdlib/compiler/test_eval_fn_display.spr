@@ -1,55 +1,52 @@
 module main
-import stdlib.test (TestState, new_state, assert_eq, assert_true, assert_false, summary)
+import stdlib.test (check_eq, check_true, check_false, run_suite)
 import stdlib.compiler.analysis_service_driver as svc
 import stdlib.compiler.types as types
 
 fn main() -> Unit !{IO} =
-  do
-    state <- new_state()
-
-    # Regression: evaluating a bare function name (e.g. `vec_singleton`) in the
-    # REPL produced garbage output because the eval path wrapped it in
-    # `print(to_string(...))` despite there being no ToString instance for
-    # function types.  The fix adds is_function_scheme + fn_display_type_str.
-
+  # Regression: evaluating a bare function name (e.g. `vec_singleton`) in the
+  # REPL produced garbage output because the eval path wrapped it in
+  # `print(to_string(...))` despite there being no ToString instance for
+  # function types.  The fix adds is_function_scheme + fn_display_type_str.
+  let fn_int_str = types.mono(types.TFunc(types.type_int(), types.type_string(), types.effect_pure()))
+      fn_int_int = types.mono(types.TFunc(types.type_int(), types.type_int(), types.effect_pure()))
+      int_scheme = types.mono(types.type_int())
+      list_scheme = types.mono(types.type_list(types.type_int()))
+      poly_vec = types.Scheme(Cons("a", Nil), Nil, types.type_list(types.TVar(types.tyvar_id("a"))), types.effect_pure(), Nil)
+  in
+  run_suite("eval_fn_display", [
     # is_function_scheme: function types → true
-    let fn_int_str = types.mono(types.TFunc(types.type_int(), types.type_string(), types.effect_pure()))
-    assert_true(state, "Int -> String is a function scheme",
-      svc.is_function_scheme(fn_int_str))
+    check_true("Int -> String is a function scheme",
+      svc.is_function_scheme(fn_int_str)),
 
-    let fn_int_int = types.mono(types.TFunc(types.type_int(), types.type_int(), types.effect_pure()))
-    assert_true(state, "Int -> Int is a function scheme",
-      svc.is_function_scheme(fn_int_int))
+    check_true("Int -> Int is a function scheme",
+      svc.is_function_scheme(fn_int_int)),
 
     # is_function_scheme: non-function types → false
-    let int_scheme = types.mono(types.type_int())
-    assert_false(state, "Int is not a function scheme",
-      svc.is_function_scheme(int_scheme))
+    check_false("Int is not a function scheme",
+      svc.is_function_scheme(int_scheme)),
 
-    let list_scheme = types.mono(types.type_list(types.type_int()))
-    assert_false(state, "List Int is not a function scheme",
-      svc.is_function_scheme(list_scheme))
+    check_false("List Int is not a function scheme",
+      svc.is_function_scheme(list_scheme)),
 
     # fn_display_type_str: strips leading "forall X. " so display reads
     # "<fn: a -> Vec a>" not "<fn: forall a. a -> Vec a>"
-    assert_eq(state, "single-var forall stripped",
-      svc.fn_display_type_str("forall a. a -> Vec a"), "a -> Vec a")
+    check_eq("single-var forall stripped",
+      svc.fn_display_type_str("forall a. a -> Vec a"), "a -> Vec a"),
 
-    assert_eq(state, "multi-var forall stripped",
-      svc.fn_display_type_str("forall a b. a -> b -> Vec a"), "a -> b -> Vec a")
+    check_eq("multi-var forall stripped",
+      svc.fn_display_type_str("forall a b. a -> b -> Vec a"), "a -> b -> Vec a"),
 
-    assert_eq(state, "monomorphic function type unchanged",
-      svc.fn_display_type_str("Int -> String"), "Int -> String")
+    check_eq("monomorphic function type unchanged",
+      svc.fn_display_type_str("Int -> String"), "Int -> String"),
 
-    assert_eq(state, "non-function type unchanged",
-      svc.fn_display_type_str("Int"), "Int")
+    check_eq("non-function type unchanged",
+      svc.fn_display_type_str("Int"), "Int"),
 
     # is_polymorphic_scheme: forall-quantified types → true
-    let poly_vec = types.Scheme(Cons("a", Nil), Nil, types.type_list(types.TVar(types.tyvar_id("a"))), types.effect_pure(), Nil)
-    assert_true(state, "forall a. List a is polymorphic",
-      svc.is_polymorphic_scheme(poly_vec))
+    check_true("forall a. List a is polymorphic",
+      svc.is_polymorphic_scheme(poly_vec)),
 
-    assert_false(state, "mono Int is not polymorphic",
+    check_false("mono Int is not polymorphic",
       svc.is_polymorphic_scheme(int_scheme))
-
-    summary(state)
+  ])

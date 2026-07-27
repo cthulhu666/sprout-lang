@@ -1,32 +1,29 @@
-import stdlib.test (TestState, new_state, assert_eq, assert_true, assert_false, summary)
+import stdlib.test (check_eq, check_true, check_false, run_suite)
 import stdlib.compiler.types as types
 
 fn main() -> Unit !{IO} =
-  do
-    state <- new_state()
+  run_suite("types", [
+    check_eq("type_int", types.type_int(), types.TConst(types.type_id("Int"))),
+    check_eq("type_bool", types.type_bool(), types.TConst(types.type_id("Bool"))),
+    check_eq("type_string", types.type_string(), types.TConst(types.type_id("String"))),
+    check_eq("type_list int", types.type_list(types.type_int()), types.TApp(types.TConst(types.type_id("List")), types.TConst(types.type_id("Int")))),
+    check_eq("type_maybe bool", types.type_maybe(types.type_bool()), types.TApp(types.TConst(types.type_id("Maybe")), types.TConst(types.type_id("Bool")))),
 
-    assert_eq(state, "type_int", types.type_int(), types.TConst(types.type_id("Int")))
-    assert_eq(state, "type_bool", types.type_bool(), types.TConst(types.type_id("Bool")))
-    assert_eq(state, "type_string", types.type_string(), types.TConst(types.type_id("String")))
-    assert_eq(state, "type_list int", types.type_list(types.type_int()), types.TApp(types.TConst(types.type_id("List")), types.TConst(types.type_id("Int"))))
-    assert_eq(state, "type_maybe bool", types.type_maybe(types.type_bool()), types.TApp(types.TConst(types.type_id("Maybe")), types.TConst(types.type_id("Bool"))))
+    check_true("TConst eq same", eq(types.TConst(types.type_id("Int")), types.TConst(types.type_id("Int")))),
+    check_false("TConst neq diff", eq(types.TConst(types.type_id("Int")), types.TConst(types.type_id("Bool")))),
+    check_true("TVar eq same", eq(types.TVar(types.tyvar_id("a")), types.TVar(types.tyvar_id("a")))),
+    check_false("TVar neq diff", eq(types.TVar(types.tyvar_id("a")), types.TVar(types.tyvar_id("b")))),
+    check_true("TApp eq", eq(types.TApp(types.TConst(types.type_id("List")), types.TConst(types.type_id("Int"))), types.TApp(types.TConst(types.type_id("List")), types.TConst(types.type_id("Int"))))),
+    check_false("TApp neq", eq(types.TApp(types.TConst(types.type_id("List")), types.TConst(types.type_id("Int"))), types.TApp(types.TConst(types.type_id("List")), types.TConst(types.type_id("Bool"))))),
 
-    assert_true(state, "TConst eq same", eq(types.TConst(types.type_id("Int")), types.TConst(types.type_id("Int"))))
-    assert_false(state, "TConst neq diff", eq(types.TConst(types.type_id("Int")), types.TConst(types.type_id("Bool"))))
-    assert_true(state, "TVar eq same", eq(types.TVar(types.tyvar_id("a")), types.TVar(types.tyvar_id("a"))))
-    assert_false(state, "TVar neq diff", eq(types.TVar(types.tyvar_id("a")), types.TVar(types.tyvar_id("b"))))
-    assert_true(state, "TApp eq", eq(types.TApp(types.TConst(types.type_id("List")), types.TConst(types.type_id("Int"))), types.TApp(types.TConst(types.type_id("List")), types.TConst(types.type_id("Int")))))
-    assert_false(state, "TApp neq", eq(types.TApp(types.TConst(types.type_id("List")), types.TConst(types.type_id("Int"))), types.TApp(types.TConst(types.type_id("List")), types.TConst(types.type_id("Bool")))))
+    check_eq("effect_pure", types.effect_pure(), types.EffectPure),
+    check_eq("effect_io", types.effect_io(), types.EffectIO),
+    check_true("EffectPure eq", eq(types.EffectPure, types.EffectPure)),
+    check_true("EffectIO eq", eq(types.EffectIO, types.EffectIO)),
+    check_false("effect neq pure/io", eq(types.EffectPure, types.EffectIO)),
 
-    assert_eq(state, "effect_pure", types.effect_pure(), types.EffectPure)
-    assert_eq(state, "effect_io", types.effect_io(), types.EffectIO)
-    assert_true(state, "EffectPure eq", eq(types.EffectPure, types.EffectPure))
-    assert_true(state, "EffectIO eq", eq(types.EffectIO, types.EffectIO))
-    assert_false(state, "effect neq pure/io", eq(types.EffectPure, types.EffectIO))
-
-    assert_eq(state, "type_to_string Int", types.type_to_string(types.TConst(types.type_id("Int"))), "Int")
-    assert_eq(state, "type_to_string TVar", types.type_to_string(types.TVar(types.tyvar_id("a"))), "a")
-    assert_eq(state, "effect_to_string pure", types.effect_to_string(types.EffectPure), "pure")
-    assert_eq(state, "effect_to_string io", types.effect_to_string(types.EffectIO), "!{IO}")
-
-    summary(state)
+    check_eq("type_to_string Int", types.type_to_string(types.TConst(types.type_id("Int"))), "Int"),
+    check_eq("type_to_string TVar", types.type_to_string(types.TVar(types.tyvar_id("a"))), "a"),
+    check_eq("effect_to_string pure", types.effect_to_string(types.EffectPure), "pure"),
+    check_eq("effect_to_string io", types.effect_to_string(types.EffectIO), "!{IO}")
+  ])

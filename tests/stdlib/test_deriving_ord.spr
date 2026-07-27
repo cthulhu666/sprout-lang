@@ -1,4 +1,4 @@
-import stdlib.test (TestState, new_state, assert_true, assert_eq, summary)
+import stdlib.test (check_eq, check_true, run_suite)
 
 # `deriving (Ord)` on a nullary-only ADT compares by declaration order:
 # first-declared is least; equal constructors return 0.
@@ -30,47 +30,45 @@ type Outer (..) deriving (Eq, Ord) =
   | Outer Inner Int
 
 fn main() -> Unit !{IO} =
-  do
-    state <- new_state()
+  run_suite("deriving_ord", [
     # Nullary: same-ctor → 0.
-    assert_eq(state, "compare Low Low", compare(Low, Low), 0)
-    assert_eq(state, "compare Mid Mid", compare(Mid, Mid), 0)
-    assert_eq(state, "compare High High", compare(High, High), 0)
+    check_eq("compare Low Low", compare(Low, Low), 0),
+    check_eq("compare Mid Mid", compare(Mid, Mid), 0),
+    check_eq("compare High High", compare(High, High), 0),
     # Nullary: declaration order: Low < Mid < High.
-    assert_true(state, "Low < Mid", compare(Low, Mid) < 0)
-    assert_true(state, "Low < High", compare(Low, High) < 0)
-    assert_true(state, "Mid < High", compare(Mid, High) < 0)
-    assert_true(state, "Mid > Low", compare(Mid, Low) > 0)
-    assert_true(state, "High > Low", compare(High, Low) > 0)
-    assert_true(state, "High > Mid", compare(High, Mid) > 0)
+    check_true("Low < Mid", compare(Low, Mid) < 0),
+    check_true("Low < High", compare(Low, High) < 0),
+    check_true("Mid < High", compare(Mid, High) < 0),
+    check_true("Mid > Low", compare(Mid, Low) > 0),
+    check_true("High > Low", compare(High, Low) > 0),
+    check_true("High > Mid", compare(High, Mid) > 0),
 
     # Single-field: same field → 0.
-    assert_eq(state, "Priority same", compare(Priority(3), Priority(3)), 0)
+    check_eq("Priority same", compare(Priority(3), Priority(3)), 0),
     # Single-field: smaller first field → negative.
-    assert_true(state, "Priority 1 < 2", compare(Priority(1), Priority(2)) < 0)
+    check_true("Priority 1 < 2", compare(Priority(1), Priority(2)) < 0),
     # Single-field: larger first field → positive.
-    assert_true(state, "Priority 5 > 2", compare(Priority(5), Priority(2)) > 0)
+    check_true("Priority 5 > 2", compare(Priority(5), Priority(2)) > 0),
 
     # Two-field: both same → 0.
-    assert_eq(state, "Score same", compare(Score(1, 2), Score(1, 2)), 0)
+    check_eq("Score same", compare(Score(1, 2), Score(1, 2)), 0),
     # Two-field: different first field dominates.
-    assert_true(state, "Score first lt", compare(Score(1, 9), Score(2, 0)) < 0)
-    assert_true(state, "Score first gt", compare(Score(3, 0), Score(2, 9)) > 0)
+    check_true("Score first lt", compare(Score(1, 9), Score(2, 0)) < 0),
+    check_true("Score first gt", compare(Score(3, 0), Score(2, 9)) > 0),
     # Two-field: same first, different second.
-    assert_true(state, "Score second lt", compare(Score(1, 1), Score(1, 2)) < 0)
-    assert_true(state, "Score second gt", compare(Score(1, 3), Score(1, 2)) > 0)
+    check_true("Score second lt", compare(Score(1, 1), Score(1, 2)) < 0),
+    check_true("Score second gt", compare(Score(1, 3), Score(1, 2)) > 0),
 
     # Mixed-ctor (declaration-order): Empty < Labeled.
-    assert_true(state, "Empty < Labeled", compare(Empty, Labeled(0)) < 0)
-    assert_true(state, "Labeled > Empty", compare(Labeled(99), Empty) > 0)
+    check_true("Empty < Labeled", compare(Empty, Labeled(0)) < 0),
+    check_true("Labeled > Empty", compare(Labeled(99), Empty) > 0),
     # Same-ctor with field.
-    assert_eq(state, "Labeled same", compare(Labeled(5), Labeled(5)), 0)
-    assert_true(state, "Labeled lt", compare(Labeled(1), Labeled(2)) < 0)
+    check_eq("Labeled same", compare(Labeled(5), Labeled(5)), 0),
+    check_true("Labeled lt", compare(Labeled(1), Labeled(2)) < 0),
 
     # Nested ADT: Outer wraps Inner + Int; Inner has its own Ord.
-    assert_eq(state, "Outer same", compare(Outer (ILow, 1), Outer (ILow, 1)), 0)
-    assert_true(state, "Outer first field lt", compare(Outer (ILow, 99), Outer (IHigh, 0)) < 0)
-    assert_true(state, "Outer first field gt", compare(Outer (IHigh, 0), Outer (ILow, 99)) > 0)
-    assert_true(state, "Outer second field lt", compare(Outer (ILow, 1), Outer (ILow, 2)) < 0)
-
-    summary(state)
+    check_eq("Outer same", compare(Outer (ILow, 1), Outer (ILow, 1)), 0),
+    check_true("Outer first field lt", compare(Outer (ILow, 99), Outer (IHigh, 0)) < 0),
+    check_true("Outer first field gt", compare(Outer (IHigh, 0), Outer (ILow, 99)) > 0),
+    check_true("Outer second field lt", compare(Outer (ILow, 1), Outer (ILow, 2)) < 0)
+  ])

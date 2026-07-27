@@ -1,4 +1,4 @@
-import stdlib.test (TestState, new_state, assert_eq, summary)
+import stdlib.test (check_eq, run_suite)
 import stdlib.string as string
 
 # Regression (PR 11, typed IR codegen): a top-level `let` bound to a closure must
@@ -18,11 +18,10 @@ let rep = string.repeat("ab", _)
 let add_5_6 = add3(5, 6, _)
 
 fn main() -> Unit !{IO} =
-  do
-    state <- new_state()
-    assert_eq(state, "stdlib partial: rep(3) = ababab", rep(3), "ababab")
-    assert_eq(state, "stdlib partial: rep(0) = ''", rep(0), "")
-    assert_eq(state, "stdlib partial: rep(1) = ab", rep(1), "ab")
-    assert_eq(state, "user-fn partial: add_5_6(7) = 18", add_5_6(7), 18)
-    assert_eq(state, "user-fn partial: add_5_6(0) = 11", add_5_6(0), 11)
-    summary(state)
+  run_suite("ir_partial_application", [
+    check_eq("stdlib partial: rep(3) = ababab", rep(3), "ababab"),
+    check_eq("stdlib partial: rep(0) = ''", rep(0), ""),
+    check_eq("stdlib partial: rep(1) = ab", rep(1), "ab"),
+    check_eq("user-fn partial: add_5_6(7) = 18", add_5_6(7), 18),
+    check_eq("user-fn partial: add_5_6(0) = 11", add_5_6(0), 11)
+  ])

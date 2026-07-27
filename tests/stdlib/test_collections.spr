@@ -1,67 +1,61 @@
-import stdlib.test (TestState, new_state, assert_eq, assert_true, assert_false, summary)
+import stdlib.test (check_eq, check_true, check_false, run_suite)
 import stdlib.collections (Vec, Dict, foldable_to_vec, vec_get_or, vec_reverse, vec_slice, vec_sum_by, dict_keys, dict_values, dict_remove, dict_get, dict_set, dict_from_list)
 
 fn main() -> Unit !{IO} =
-  do
-    state <- new_state()
+  let v = foldable_to_vec([10, 20, 30, 40])
+  in let d = {alpha: 1, beta: 2, gamma: 3}
+  in let d2 = dict_remove("beta", d)
+  in let keys = dict_keys(d)
+  in let vals = dict_values(d)
+  in let vals2 = dict_values(d2)
+  in run_suite("collections", [
+    check_eq("vec_get_or index 0", vec_get_or(0, -1, v), 10),
+    check_eq("vec_get_or index 2", vec_get_or(2, -1, v), 30),
+    check_eq("vec_get_or out of bounds", vec_get_or(99, -1, v), -1),
 
-    let v = foldable_to_vec([10, 20, 30, 40])
-
-    assert_eq(state, "vec_get_or index 0", vec_get_or(0, -1, v), 10)
-    assert_eq(state, "vec_get_or index 2", vec_get_or(2, -1, v), 30)
-    assert_eq(state, "vec_get_or out of bounds", vec_get_or(99, -1, v), -1)
-
-    assert_eq(state, "vec_reverse", vec_reverse(v), foldable_to_vec([40, 30, 20, 10]))
-    assert_eq(state, "vec_slice", vec_slice(1, 2, v), foldable_to_vec([20, 30]))
+    check_eq("vec_reverse", vec_reverse(v), foldable_to_vec([40, 30, 20, 10])),
+    check_eq("vec_slice", vec_slice(1, 2, v), foldable_to_vec([20, 30])),
 
     # vec_eq_from: equal, differ-in-element (else-false path), differ-in-length (guard)
-    assert_true(state, "vec eq self", v == v)
-    assert_false(state, "vec eq differs (element)", v == foldable_to_vec([10, 20, 99, 40]))
-    assert_false(state, "vec eq differs (length)", v == foldable_to_vec([10, 20, 30]))
+    check_true("vec eq self", v == v),
+    check_false("vec eq differs (element)", v == foldable_to_vec([10, 20, 99, 40])),
+    check_false("vec eq differs (length)", v == foldable_to_vec([10, 20, 30])),
 
-    assert_eq(state, "vec_sum_by identity", vec_sum_by(\x -> x, v), 100)
-    assert_eq(state, "vec_sum_by halved", vec_sum_by(\x -> x / 10, v), 10)
+    check_eq("vec_sum_by identity", vec_sum_by(\x -> x, v), 100),
+    check_eq("vec_sum_by halved", vec_sum_by(\x -> x / 10, v), 10),
 
-    let d = {alpha: 1, beta: 2, gamma: 3}
-    let d2 = dict_remove("beta", d)
-
-    assert_eq(state, "dict eq self", d, d)
-    assert_eq(state, "dict remove reduces", d2, {alpha: 1, gamma: 3})
+    check_eq("dict eq self", d, d),
+    check_eq("dict remove reduces", d2, {alpha: 1, gamma: 3}),
 
     # dict_entries_eq: differ-in-value (else-false path), differ-in-length (guard)
-    assert_false(state, "dict eq differs (value)", d == {alpha: 1, beta: 99, gamma: 3})
-    assert_false(state, "dict eq differs (length)", d == d2)
+    check_false("dict eq differs (value)", d == {alpha: 1, beta: 99, gamma: 3}),
+    check_false("dict eq differs (length)", d == d2),
 
-    let keys = dict_keys(d)
-    let vals = dict_values(d)
+    check_eq("dict_keys count", vec_sum_by(\_ -> 1, keys), 3),
+    check_eq("dict_values sum", vec_sum_by(\x -> x, vals), 6),
 
-    assert_eq(state, "dict_keys count", vec_sum_by(\_ -> 1, keys), 3)
-    assert_eq(state, "dict_values sum", vec_sum_by(\x -> x, vals), 6)
-
-    let vals2 = dict_values(d2)
-    assert_eq(state, "dict_remove reduces count", vec_sum_by(\_ -> 1, vals2), 2)
-    assert_eq(state, "dict_remove reduces sum", vec_sum_by(\x -> x, vals2), 4)
+    check_eq("dict_remove reduces count", vec_sum_by(\_ -> 1, vals2), 2),
+    check_eq("dict_remove reduces sum", vec_sum_by(\x -> x, vals2), 4),
 
     # dict_get: hit returns Just, miss returns Nothing
-    assert_eq(state, "dict_get hit", dict_get("alpha", d), Just(1))
-    assert_eq(state, "dict_get miss", dict_get("zzz", d), Nothing)
+    check_eq("dict_get hit", dict_get("alpha", d), Just(1)),
+    check_eq("dict_get miss", dict_get("zzz", d), Nothing),
 
     # dict_set: overwrite an existing key replaces the value, keeps the count
-    assert_eq(state, "dict_set overwrite", dict_set("alpha", 100, d), {alpha: 100, beta: 2, gamma: 3})
+    check_eq("dict_set overwrite", dict_set("alpha", 100, d), {alpha: 100, beta: 2, gamma: 3}),
 
     # dict_from_list: build from key/value pairs
-    assert_eq(state, "dict_from_list", dict_from_list([("x", 1), ("y", 2)]), {x: 1, y: 2})
+    check_eq("dict_from_list", dict_from_list([("x", 1), ("y", 2)]), {x: 1, y: 2}),
 
     # Semigroup ++ dispatches through the resolved instance (regression: used to
     # miscompile to null for every concrete type outside String/List).
     # dict ++ : right-biased merge (right's value wins on a key collision).
-    assert_eq(state, "dict ++ right-biased", {alpha: 1, beta: 2} ++ {beta: 99, gamma: 3}, {alpha: 1, beta: 99, gamma: 3})
+    check_eq("dict ++ right-biased", {alpha: 1, beta: 2} ++ {beta: 99, gamma: 3}, {alpha: 1, beta: 99, gamma: 3}),
     # vec ++ : concatenation via the Vec Semigroup instance. Element-level, not
     # just the sum — a wrong element order or a dropped/duplicated element still
     # sums to 10, so it would slip past a sum-only check.
-    assert_eq(state, "vec ++ concat order", foldable_to_vec([1, 2, 3]) ++ foldable_to_vec([4, 5]), foldable_to_vec([1, 2, 3, 4, 5]))
-    assert_eq(state, "vec ++ empty left identity", foldable_to_vec([]) ++ foldable_to_vec([1, 2, 3]), foldable_to_vec([1, 2, 3]))
-    assert_eq(state, "vec ++ empty right identity", foldable_to_vec([1, 2, 3]) ++ foldable_to_vec([]), foldable_to_vec([1, 2, 3]))
-    assert_eq(state, "vec ++ sum", vec_sum_by(\x -> x, foldable_to_vec([1, 2]) ++ foldable_to_vec([3, 4])), 10)
-
-    summary(state)
+    check_eq("vec ++ concat order", foldable_to_vec([1, 2, 3]) ++ foldable_to_vec([4, 5]), foldable_to_vec([1, 2, 3, 4, 5])),
+    check_eq("vec ++ empty left identity", foldable_to_vec([]) ++ foldable_to_vec([1, 2, 3]), foldable_to_vec([1, 2, 3])),
+    check_eq("vec ++ empty right identity", foldable_to_vec([1, 2, 3]) ++ foldable_to_vec([]), foldable_to_vec([1, 2, 3])),
+    check_eq("vec ++ sum", vec_sum_by(\x -> x, foldable_to_vec([1, 2]) ++ foldable_to_vec([3, 4])), 10)
+  ])

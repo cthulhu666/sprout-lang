@@ -1,4 +1,4 @@
-import stdlib.test (TestState, new_state, assert_eq, summary)
+import stdlib.test (check_eq, run_suite)
 
 # Regression: check_instance_method_body must apply s1 to typed_body so that
 # class-method references used as values inside instance method bodies have
@@ -29,8 +29,7 @@ fn run_showcase(x: a) -> String where Showcase a =
   showcase(x)
 
 fn main() -> Unit !{IO} =
-  do
-    state <- new_state()
-    assert_eq(state, "instance method body with class method as value", run_showcase(42), "42")
-    assert_eq(state, "instance method body — second concrete type", run_showcase(true), "true")
-    summary(state)
+  run_suite("instance_method_subst", [
+    check_eq("instance method body with class method as value", run_showcase(42), "42"),
+    check_eq("instance method body — second concrete type", run_showcase(true), "true")
+  ])

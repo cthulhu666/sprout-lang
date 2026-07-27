@@ -1,4 +1,4 @@
-import stdlib.test (TestState, new_state, assert_true, assert_eq, summary)
+import stdlib.test (check_eq, run_suite)
 
 # Long-lived Vec and Dict contents must survive heavy GC churn. A Vec's
 # element buffer is a separate allocation from its GC-tracked value, so this
@@ -21,36 +21,33 @@ fn churn_dicts(n: Int, acc: Int) -> Int =
   else churn_dicts(n - 1, acc + dget("k" ++ int_to_string(n), dict_set("k" ++ int_to_string(n), n, dict_empty())))
 
 fn main() -> Unit !{IO} =
-  do
-    state <- new_state()
-
-    # Anchors allocated before the churn.
-    let anchor_vec = vec_from_list([11, 22, 33, 44, 55])
-    let modified = vec_set(2, 999, anchor_vec)
-    let anchor_dict = dict_set("beta", 222, dict_set("alpha", 111, dict_empty()))
-
-    let vec_total = churn_vecs(2000, 0)
-    let dict_total = churn_dicts(2000, 0)
-    assert_eq(state, "vec churn total", vec_total, 6000)
-    assert_eq(state, "dict churn total (sum 1..2000)", dict_total, 2001000)
+  # Anchors allocated before the churn.
+  let anchor_vec = vec_from_list([11, 22, 33, 44, 55])
+      modified = vec_set(2, 999, anchor_vec)
+      anchor_dict = dict_set("beta", 222, dict_set("alpha", 111, dict_empty()))
+      vec_total = churn_vecs(2000, 0)
+      dict_total = churn_dicts(2000, 0)
+      fresh = vec_append(8, [7])
+  in
+  run_suite("gc_container_churn", [
+    check_eq("vec churn total", vec_total, 6000),
+    check_eq("dict churn total (sum 1..2000)", dict_total, 2001000),
 
     # Vec element buffer intact after churn.
-    assert_eq(state, "anchor vec length", vec_length(anchor_vec), 5)
-    assert_eq(state, "anchor vec [0]", vec_get_or(0, 0 - 1, anchor_vec), 11)
-    assert_eq(state, "anchor vec [2]", vec_get_or(2, 0 - 1, anchor_vec), 33)
-    assert_eq(state, "anchor vec [4]", vec_get_or(4, 0 - 1, anchor_vec), 55)
+    check_eq("anchor vec length", vec_length(anchor_vec), 5),
+    check_eq("anchor vec [0]", vec_get_or(0, 0 - 1, anchor_vec), 11),
+    check_eq("anchor vec [2]", vec_get_or(2, 0 - 1, anchor_vec), 33),
+    check_eq("anchor vec [4]", vec_get_or(4, 0 - 1, anchor_vec), 55),
 
     # vec_set is copy-on-write: both buffers must survive independently.
-    assert_eq(state, "modified vec [2]", vec_get_or(2, 0 - 1, modified), 999)
-    assert_eq(state, "original untouched by vec_set", vec_get_or(2, 0 - 1, anchor_vec), 33)
+    check_eq("modified vec [2]", vec_get_or(2, 0 - 1, modified), 999),
+    check_eq("original untouched by vec_set", vec_get_or(2, 0 - 1, anchor_vec), 33),
 
     # Dict nodes intact after churn.
-    assert_eq(state, "anchor dict alpha", dget("alpha", anchor_dict), 111)
-    assert_eq(state, "anchor dict beta", dget("beta", anchor_dict), 222)
-    assert_eq(state, "anchor dict missing key", dget("gamma", anchor_dict), 0 - 1)
+    check_eq("anchor dict alpha", dget("alpha", anchor_dict), 111),
+    check_eq("anchor dict beta", dget("beta", anchor_dict), 222),
+    check_eq("anchor dict missing key", dget("gamma", anchor_dict), 0 - 1),
 
     # Fresh containers after churn reuse swept memory.
-    let fresh = vec_append(8, [7])
-    assert_eq(state, "fresh vec after churn [1]", vec_get_or(1, 0 - 1, fresh), 8)
-
-    summary(state)
+    check_eq("fresh vec after churn [1]", vec_get_or(1, 0 - 1, fresh), 8)
+  ])

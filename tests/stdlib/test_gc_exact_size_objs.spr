@@ -1,4 +1,4 @@
-import stdlib.test (TestState, new_state, assert_true, summary)
+import stdlib.test (check_true, run_suite)
 
 # Regression net for exact-size OBJ allocation: each ctor arity gets its own
 # slot size and freelist class, freelists link through the slot's first payload
@@ -25,24 +25,22 @@ fn churn(n: Int, acc: Int) -> Int =
   else churn(n - 1, acc + spectrum_sum(A2(1, 1)) + spectrum_sum(A0) + spectrum_sum(A9(1, 0, 0, 0, 0, 0, 0, 0, 0)))
 
 fn main() -> Unit !{IO} =
-  do
-    state <- new_state()
+  # Objects allocated before the churn: fields must survive collections.
+  let keep1 = A1(7)
+      keep9 = A9(1, 2, 3, 4, 5, 6, 7, 8, 9)
+      churned = churn(10000, 0)
+      # Fresh allocations reuse freelist blocks left by the churn garbage;
+      # fields must round-trip in every arity class.
+      fresh0 = A0
+      fresh2 = A2(11, 31)
+      fresh9 = A9(9, 8, 7, 6, 5, 4, 3, 2, 1)
+  in
+  run_suite("gc_exact_size_objs", [
+    check_true("churn allocated and summed", churned == 30000),
+    check_true("arity-1 field survives churn", spectrum_sum(keep1) == 7),
+    check_true("arity-9 fields survive churn", spectrum_sum(keep9) == 45),
 
-    # Objects allocated before the churn: fields must survive collections.
-    let keep1 = A1(7)
-    let keep9 = A9(1, 2, 3, 4, 5, 6, 7, 8, 9)
-    let churned = churn(10000, 0)
-    assert_true(state, "churn allocated and summed", churned == 30000)
-    assert_true(state, "arity-1 field survives churn", spectrum_sum(keep1) == 7)
-    assert_true(state, "arity-9 fields survive churn", spectrum_sum(keep9) == 45)
-
-    # Fresh allocations reuse freelist blocks left by the churn garbage;
-    # fields must round-trip in every arity class.
-    let fresh0 = A0
-    let fresh2 = A2(11, 31)
-    let fresh9 = A9(9, 8, 7, 6, 5, 4, 3, 2, 1)
-    assert_true(state, "arity-0 after freelist reuse", spectrum_sum(fresh0) == 0)
-    assert_true(state, "arity-2 fields after freelist reuse", spectrum_sum(fresh2) == 42)
-    assert_true(state, "arity-9 fields after freelist reuse", spectrum_sum(fresh9) == 45)
-
-    summary(state)
+    check_true("arity-0 after freelist reuse", spectrum_sum(fresh0) == 0),
+    check_true("arity-2 fields after freelist reuse", spectrum_sum(fresh2) == 42),
+    check_true("arity-9 fields after freelist reuse", spectrum_sum(fresh9) == 45)
+  ])

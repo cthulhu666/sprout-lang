@@ -1,5 +1,5 @@
 module main
-import stdlib.test (TestState, new_state, assert_eq, assert_true, summary)
+import stdlib.test (check_eq, check_true, run_suite)
 import stdlib.compiler.types as types
 
 # G6: the opaque TypeId API centralizes every operation on a type's canonical
@@ -8,22 +8,21 @@ import stdlib.compiler.types as types
 # and symbol derive from it; concreteness reads the LAST segment (a qualified
 # concrete type starts with a lowercase module component).
 fn main() -> Unit !{IO} =
-  do
-    state <- new_state()
+  run_suite("type_id_api", [
     # equality is exact on the canonical (dotted) name
-    assert_true(state, "eq same", types.type_id_eq(types.type_id("main.Maybe"), types.type_id("main.Maybe")))
-    assert_true(state, "neq cross-module",
-      types.type_id_eq(types.type_id("main.Maybe"), types.type_id("Maybe")) == false)
+    check_true("eq same", types.type_id_eq(types.type_id("main.Maybe"), types.type_id("main.Maybe"))),
+    check_true("neq cross-module",
+      types.type_id_eq(types.type_id("main.Maybe"), types.type_id("Maybe")) == false),
     # display shows the short name
-    assert_eq(state, "display strips module", types.type_id_display(types.type_id("main.Maybe")), "Maybe")
-    assert_eq(state, "display bare", types.type_id_display(types.type_id("Int")), "Int")
+    check_eq("display strips module", types.type_id_display(types.type_id("main.Maybe")), "Maybe"),
+    check_eq("display bare", types.type_id_display(types.type_id("Int")), "Int"),
     # concreteness reads the last segment's case
-    assert_true(state, "qualified concrete is concrete", types.type_id_is_concrete(types.type_id("main.Maybe")))
-    assert_true(state, "bare concrete is concrete", types.type_id_is_concrete(types.type_id("Int")))
-    assert_true(state, "lowercase tyvar not concrete", types.type_id_is_concrete(types.type_id("a")) == false)
+    check_true("qualified concrete is concrete", types.type_id_is_concrete(types.type_id("main.Maybe"))),
+    check_true("bare concrete is concrete", types.type_id_is_concrete(types.type_id("Int"))),
+    check_true("lowercase tyvar not concrete", types.type_id_is_concrete(types.type_id("a")) == false),
     # symbol mangling sanitizes dots for LLVM
-    assert_eq(state, "symbol dots to underscores", types.type_id_symbol(types.type_id("main.Maybe")), "main_Maybe")
-    assert_eq(state, "symbol bare unchanged", types.type_id_symbol(types.type_id("Int")), "Int")
+    check_eq("symbol dots to underscores", types.type_id_symbol(types.type_id("main.Maybe")), "main_Maybe"),
+    check_eq("symbol bare unchanged", types.type_id_symbol(types.type_id("Int")), "Int"),
     # round-trip: mint then read back the raw canonical name
-    assert_eq(state, "round-trip name", types.type_id_name(types.type_id("stdlib.compiler.types.Type")), "stdlib.compiler.types.Type")
-    summary(state)
+    check_eq("round-trip name", types.type_id_name(types.type_id("stdlib.compiler.types.Type")), "stdlib.compiler.types.Type")
+  ])

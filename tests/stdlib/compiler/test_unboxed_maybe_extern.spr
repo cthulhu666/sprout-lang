@@ -1,5 +1,5 @@
 module main
-import stdlib.test (TestState, new_state, assert_true, summary)
+import stdlib.test (check_true, run_suite)
 import stdlib.compiler.ast_to_ir as ast_to_ir
 import stdlib.compiler.ir_rooting as ir_rooting
 import stdlib.compiler.ir_lowering as ir_lowering
@@ -58,22 +58,20 @@ fn probe_program() -> typed_ast.TypedProgram =
       Nil)))
 
 fn main() -> Unit !{IO} =
-  do
-    state <- new_state()
+  run_suite("unboxed_maybe_extern",
     match ast_to_ir.translate_program(probe_program()) with
     | Err msg ->
-        do
-          assert_true(state, "translate should succeed (got Err: " ++ msg ++ ")", false)
-          summary(state)
+        [check_true("translate should succeed (got Err: " ++ msg ++ ")", false)]
     | Ok pair ->
         match pair with
         | (ir_prog, idx_map) ->
-            do
-              let ir = ir_lowering.lower_program(ir_rooting.insert_roots(ir_prog, idx_map))
-              assert_true(state, "unboxed call emitted",
-                str_find(ir, "@vector_get_unboxed") >= 0)
-              assert_true(state, "extractvalue emitted",
-                str_find(ir, "extractvalue") >= 0)
-              assert_true(state, "no boxed vector_get call at match site",
+            let ir = ir_lowering.lower_program(ir_rooting.insert_roots(ir_prog, idx_map))
+            in
+            [
+              check_true("unboxed call emitted",
+                str_find(ir, "@vector_get_unboxed") >= 0),
+              check_true("extractvalue emitted",
+                str_find(ir, "extractvalue") >= 0),
+              check_true("no boxed vector_get call at match site",
                 str_find(ir, "call i64 @vector_get(") < 0)
-              summary(state)
+            ])

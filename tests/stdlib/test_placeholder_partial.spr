@@ -7,7 +7,7 @@
 #   add3(_, _, 3)  ≡  \(p, q) -> add3(p, q, 3)   (multi-hole -> n-ary lambda)
 # The result is an ordinary lambda value, so it can be passed around and applied.
 # Before implementation this failed to compile with "Unknown variable: _".
-import stdlib.test (TestState, new_state, assert_eq, summary)
+import stdlib.test (check_eq, run_suite)
 
 fn add(x: Int, y: Int) -> Int = x + y
 fn add3(a: Int, b: Int, c: Int) -> Int = a + b + c
@@ -20,25 +20,22 @@ fn incby(x: Int, k: Int) -> Int = x + k
 fn twice(f: Int -> Int, n: Int) -> Int = f(n)
 
 fn main() -> Unit !{IO} =
-  do
-    state <- new_state()
-
+  run_suite("placeholder_partial", [
     # single hole, second argument fixed
-    assert_eq(state, "hole in position 1", apply_int(add(_, 3), 10), 13)
+    check_eq("hole in position 1", apply_int(add(_, 3), 10), 13),
     # single hole, first argument fixed (any position, unlike currying)
-    assert_eq(state, "hole in position 2", apply_int(add(1, _), 10), 11)
+    check_eq("hole in position 2", apply_int(add(1, _), 10), 11),
     # two holes -> n-ary lambda, applied saturated
-    assert_eq(state, "two holes", apply2(add3(_, _, 3), 10, 20), 33)
+    check_eq("two holes", apply2(add3(_, _, 3), 10, 20), 33),
     # placeholder value passed through a higher-order function
-    assert_eq(state, "hole passed through hof", apply_int(add(_, 100), 1), 101)
+    check_eq("hole passed through hof", apply_int(add(_, 100), 1), 101),
 
     # nested holes at two levels bind to their own lambda (no cross-capture):
     # twice(incby(_, 100), _) = \p -> twice(\q -> incby(q, 100), p)
-    assert_eq(state, "nested holes both levels", apply_int(twice(incby(_, 100), _), 5), 105)
+    check_eq("nested holes both levels", apply_int(twice(incby(_, 100), _), 5), 105),
 
     # `|>` fills the hole positionally (the piped value lands at the `_`),
     # rather than being appended as the last argument.
-    assert_eq(state, "pipe fills hole in position 1", 10 |> sub(_, 3), 7)
-    assert_eq(state, "pipe fills hole in position 2", 10 |> sub(3, _), -7)
-
-    summary(state)
+    check_eq("pipe fills hole in position 1", 10 |> sub(_, 3), 7),
+    check_eq("pipe fills hole in position 2", 10 |> sub(3, _), -7)
+  ])

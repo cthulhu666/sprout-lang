@@ -1,4 +1,4 @@
-import stdlib.test (TestState, new_state, assert_eq, summary)
+import stdlib.test (check_eq, run_suite)
 import stdlib.collections (Foldable, List, Vec, vec_length, foldable_to_vec)
 
 # §13.3(B) S4 guard: constrained dispatch through the PROVISIONAL-scheme paths
@@ -43,13 +43,12 @@ fn mixed_later(x: a, xs: List Int) -> String where Tag a, Foldable List =
   tag(x) ++ ":" ++ int_to_string(vec_length(foldable_to_vec(xs)))
 
 fn main() -> Unit !{IO} =
-  do
-    state <- new_state()
-    assert_eq(state, "recursion: Int tag x3", tag_n(7, 3), "III")
-    assert_eq(state, "recursion: Bool tag x2", tag_n(true, 2), "BB")
-    assert_eq(state, "recursion: zero iterations", tag_n(9, 0), "")
-    assert_eq(state, "forward-ref: Int through both dicts", caller_first(4), "[I]!")
-    assert_eq(state, "forward-ref: Bool through both dicts", caller_first(false), "[B]!")
-    assert_eq(state, "fwd-ref mixed: Bool tag + 3-elem count", count_before_def(true), "B:3")
-    assert_eq(state, "fwd-ref mixed: Int tag + 2-elem count", count_before_def(false), "I:2")
-    summary(state)
+  run_suite("constrained_recursion_dispatch", [
+    check_eq("recursion: Int tag x3", tag_n(7, 3), "III"),
+    check_eq("recursion: Bool tag x2", tag_n(true, 2), "BB"),
+    check_eq("recursion: zero iterations", tag_n(9, 0), ""),
+    check_eq("forward-ref: Int through both dicts", caller_first(4), "[I]!"),
+    check_eq("forward-ref: Bool through both dicts", caller_first(false), "[B]!"),
+    check_eq("fwd-ref mixed: Bool tag + 3-elem count", count_before_def(true), "B:3"),
+    check_eq("fwd-ref mixed: Int tag + 2-elem count", count_before_def(false), "I:2")
+  ])

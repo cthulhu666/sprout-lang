@@ -1,4 +1,4 @@
-import stdlib.test (TestState, new_state, assert_eq, assert_true, assert_false, summary)
+import stdlib.test (check_eq, check_true, check_false, run_suite)
 import stdlib.compiler.lexer as lexer
 import stdlib.compiler.parser as parser
 import stdlib.compiler.ast as ast
@@ -44,21 +44,18 @@ fn is_int_expr(raw: String) -> Bool =
           | _ -> false
 
 fn main() -> Unit !{IO} =
-  do
-    state <- new_state()
-
+  run_suite("parser_float_literal", [
     # --- Float literals now parse (RED today) ---
-    assert_true(state, "3.14 parses as an expression", parses("3.14"))
-    assert_true(state, "0.5 parses as an expression", parses("0.5"))
-    assert_true(state, "3.14 + 1.0 parses as a binary expr", parses("3.14 + 1.0"))
+    check_true("3.14 parses as an expression", parses("3.14")),
+    check_true("0.5 parses as an expression", parses("0.5")),
+    check_true("3.14 + 1.0 parses as a binary expr", parses("3.14 + 1.0")),
 
     # --- Node identity: float literal -> FloatExpr carrying its text ---
-    assert_eq(state, "3.14 parses to FloatExpr \"3.14\"", float_text("3.14"), "3.14")
-    assert_eq(state, "0.5 parses to FloatExpr \"0.5\"", float_text("0.5"), "0.5")
+    check_eq("3.14 parses to FloatExpr \"3.14\"", float_text("3.14"), "3.14"),
+    check_eq("0.5 parses to FloatExpr \"0.5\"", float_text("0.5"), "0.5"),
 
     # --- Integers still parse, and stay IntExpr (no regression) ---
-    assert_true(state, "42 still parses", parses("42"))
-    assert_true(state, "42 stays an IntExpr", is_int_expr("42"))
-    assert_false(state, "3.14 is not an IntExpr", is_int_expr("3.14"))
-
-    summary(state)
+    check_true("42 still parses", parses("42")),
+    check_true("42 stays an IntExpr", is_int_expr("42")),
+    check_false("3.14 is not an IntExpr", is_int_expr("3.14"))
+  ])

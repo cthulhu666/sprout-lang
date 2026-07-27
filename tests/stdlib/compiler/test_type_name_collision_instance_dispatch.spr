@@ -1,5 +1,5 @@
 module main
-import stdlib.test (TestState, new_state, assert_eq, summary)
+import stdlib.test (check_eq, run_suite)
 
 # Regression guard for module-qualified type identity — runtime dispatch half
 # (docs/module-qualified-type-identity-design-2026-07-10.md §10, Change C.3).
@@ -35,7 +35,6 @@ instance ToString (Maybe a) {
 }
 
 fn main() -> Unit !{IO} =
-  do
-    state <- new_state()
-    assert_eq(state, "shadowing type dispatches to its own instance", to_string(Wrap(5)), "MAIN")
-    summary(state)
+  run_suite("type_name_collision_instance_dispatch", [
+    check_eq("shadowing type dispatches to its own instance", to_string(Wrap(5)), "MAIN")
+  ])

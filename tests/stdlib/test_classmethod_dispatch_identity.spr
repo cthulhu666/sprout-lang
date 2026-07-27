@@ -1,4 +1,4 @@
-import stdlib.test (TestState, new_state, assert_eq, summary)
+import stdlib.test (check_eq, run_suite)
 
 # Regression guard for BACKLOG Dispatch-Soundness item 5b (canonical-identity
 # sub-campaign α): class-method dispatch must key on a mangled dispatch identity,
@@ -30,14 +30,13 @@ fn to_string(n: Int) -> String =
   "user-ts"
 
 fn main() -> Unit !{IO} =
-  do
-    state <- new_state()
+  run_suite("classmethod_dispatch_identity", [
     # (1) user `append` resolves to the user fn, not the Semigroup peephole.
-    assert_eq(state, "user append not hijacked", append(5), 6)
+    check_eq("user append not hijacked", append(5), 6),
     # (2) user `to_string` resolves to the user fn, not the ToString wrapper.
-    assert_eq(state, "user to_string not hijacked", to_string(9), "user-ts")
+    check_eq("user to_string not hijacked", to_string(9), "user-ts"),
     # (3) genuine Semigroup `++` on String still dispatches correctly.
-    assert_eq(state, "genuine string append", "a" ++ "b", "ab")
+    check_eq("genuine string append", "a" ++ "b", "ab"),
     # (4) genuine Semigroup `++` on List still dispatches correctly.
-    assert_eq(state, "genuine list append", list_length([1, 2] ++ [3]), 3)
-    summary(state)
+    check_eq("genuine list append", list_length([1, 2] ++ [3]), 3)
+  ])

@@ -1,11 +1,10 @@
-import stdlib.test (TestState, new_state, assert_eq, summary)
+import stdlib.test (check_eq, run_suite)
 import demo.greet (greeting)
 
 # App entry that imports a module (`demo.greet`) which does NOT live under
 # stdlib_root. It resolves only via `--package-root <roots-dir>`; without that
 # flag `demo.greet` is unresolvable and `greeting` is an unknown variable.
 fn main() -> Unit !{IO} =
-  do
-    state <- new_state()
-    assert_eq(state, "second-root import resolves", greeting(), "hi from demo pkg")
-    summary(state)
+  run_suite("app", [
+    check_eq("second-root import resolves", greeting(), "hi from demo pkg")
+  ])

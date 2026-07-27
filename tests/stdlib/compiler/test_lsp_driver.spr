@@ -1,5 +1,5 @@
 module main
-import stdlib.test (TestState, new_state, assert_eq, assert_true, assert_false, summary)
+import stdlib.test (check_eq, run_suite)
 import stdlib.compiler.lsp_driver as lsp
 import stdlib.json as json
 
@@ -17,78 +17,75 @@ fn well_formed_position() -> json.Json =
     json.JsonObjectNil)))
 
 fn main() -> Unit !{IO} =
-  do
-    state <- new_state()
-
+  run_suite("lsp_driver", [
     # parse_content_length
-    assert_eq(state, "parse_content_length: valid header",
-      lsp.parse_content_length("Content-Length: 42"), Just(42))
-    assert_eq(state, "parse_content_length: zero",
-      lsp.parse_content_length("Content-Length: 0"), Just(0))
-    assert_eq(state, "parse_content_length: unrelated header",
-      lsp.parse_content_length("Content-Type: application/vscode-jsonrpc"), Nothing)
-    assert_eq(state, "parse_content_length: empty string",
-      lsp.parse_content_length(""), Nothing)
-    assert_eq(state, "parse_content_length: partial prefix",
-      lsp.parse_content_length("Content-Length:42"), Nothing)
+    check_eq("parse_content_length: valid header",
+      lsp.parse_content_length("Content-Length: 42"), Just(42)),
+    check_eq("parse_content_length: zero",
+      lsp.parse_content_length("Content-Length: 0"), Just(0)),
+    check_eq("parse_content_length: unrelated header",
+      lsp.parse_content_length("Content-Type: application/vscode-jsonrpc"), Nothing),
+    check_eq("parse_content_length: empty string",
+      lsp.parse_content_length(""), Nothing),
+    check_eq("parse_content_length: partial prefix",
+      lsp.parse_content_length("Content-Length:42"), Nothing),
     # W8/P1: correct prefix but a non-numeric value — parse_int is total, so the
     # Just-arm must yield Nothing (not Just(0)). Exercises the and_then bind arm.
-    assert_eq(state, "parse_content_length: malformed value",
-      lsp.parse_content_length("Content-Length: abc"), Nothing)
+    check_eq("parse_content_length: malformed value",
+      lsp.parse_content_length("Content-Length: abc"), Nothing),
 
     # extract_word — basic identifiers
-    assert_eq(state, "extract_word: middle of word",
-      lsp.extract_word("hello world", 2), "hello")
-    assert_eq(state, "extract_word: second word",
-      lsp.extract_word("hello world", 8), "world")
-    assert_eq(state, "extract_word: start of string",
-      lsp.extract_word("hello", 0), "hello")
-    assert_eq(state, "extract_word: end of word (col at last char)",
-      lsp.extract_word("hello", 4), "hello")
+    check_eq("extract_word: middle of word",
+      lsp.extract_word("hello world", 2), "hello"),
+    check_eq("extract_word: second word",
+      lsp.extract_word("hello world", 8), "world"),
+    check_eq("extract_word: start of string",
+      lsp.extract_word("hello", 0), "hello"),
+    check_eq("extract_word: end of word (col at last char)",
+      lsp.extract_word("hello", 4), "hello"),
 
     # extract_word — at a non-ident character gives empty string
-    assert_eq(state, "extract_word: space gives empty",
-      lsp.extract_word("hello world", 5), "")
-    assert_eq(state, "extract_word: open paren gives empty",
-      lsp.extract_word("foo(bar)", 3), "")
+    check_eq("extract_word: space gives empty",
+      lsp.extract_word("hello world", 5), ""),
+    check_eq("extract_word: open paren gives empty",
+      lsp.extract_word("foo(bar)", 3), ""),
 
     # extract_word — qualified names (dot included)
-    assert_eq(state, "extract_word: dotted name from middle",
-      lsp.extract_word("string.join(\"|\")", 8), "string.join")
-    assert_eq(state, "extract_word: dotted name from start",
-      lsp.extract_word("string.join(\"|\")", 0), "string.join")
+    check_eq("extract_word: dotted name from middle",
+      lsp.extract_word("string.join(\"|\")", 8), "string.join"),
+    check_eq("extract_word: dotted name from start",
+      lsp.extract_word("string.join(\"|\")", 0), "string.join"),
 
     # extract_word — empty string input
-    assert_eq(state, "extract_word: empty line",
-      lsp.extract_word("", 0), "")
+    check_eq("extract_word: empty line",
+      lsp.extract_word("", 0), ""),
 
     # extract_word — col past end of line
-    assert_eq(state, "extract_word: col past end",
-      lsp.extract_word("hi", 10), "")
+    check_eq("extract_word: col past end",
+      lsp.extract_word("hi", 10), ""),
 
     # extract_hover_params — exercises every failure branch individually,
     # plus the well-formed happy path.
-    assert_eq(state, "extract_hover_params: well-formed accepted",
+    check_eq("extract_hover_params: well-formed accepted",
       lsp.extract_hover_params(hover_params_json(json.JsonString("file:///a.spr"), well_formed_position())),
-      Just(lsp.HoverParams("file:///a.spr", 3, 7)))
-    assert_eq(state, "extract_hover_params: missing textDocument rejected",
+      Just(lsp.HoverParams("file:///a.spr", 3, 7))),
+    check_eq("extract_hover_params: missing textDocument rejected",
       lsp.extract_hover_params(json.JsonObject(json.JsonObjectCons("position", well_formed_position(), json.JsonObjectNil))),
-      Nothing)
-    assert_eq(state, "extract_hover_params: missing uri rejected",
+      Nothing),
+    check_eq("extract_hover_params: missing uri rejected",
       lsp.extract_hover_params(hover_params_json(json.JsonInt(1), well_formed_position())),
-      Nothing)
-    assert_eq(state, "extract_hover_params: missing position rejected",
+      Nothing),
+    check_eq("extract_hover_params: missing position rejected",
       lsp.extract_hover_params(json.JsonObject(json.JsonObjectCons("textDocument",
         json.JsonObject(json.JsonObjectCons("uri", json.JsonString("file:///a.spr"), json.JsonObjectNil)),
         json.JsonObjectNil))),
-      Nothing)
-    assert_eq(state, "extract_hover_params: missing line rejected",
+      Nothing),
+    check_eq("extract_hover_params: missing line rejected",
       lsp.extract_hover_params(hover_params_json(json.JsonString("file:///a.spr"),
         json.JsonObject(json.JsonObjectCons("character", json.JsonInt(7), json.JsonObjectNil)))),
-      Nothing)
-    assert_eq(state, "extract_hover_params: missing character rejected",
+      Nothing),
+    check_eq("extract_hover_params: missing character rejected",
       lsp.extract_hover_params(hover_params_json(json.JsonString("file:///a.spr"),
         json.JsonObject(json.JsonObjectCons("line", json.JsonInt(3), json.JsonObjectNil)))),
       Nothing)
-
-    summary(state)
+  ])

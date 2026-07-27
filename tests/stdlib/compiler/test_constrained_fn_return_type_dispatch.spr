@@ -1,4 +1,4 @@
-import stdlib.test (TestState, new_state, assert_eq, summary)
+import stdlib.test (check_eq, run_suite)
 
 # Regression tests for constrained-function return-type dispatch.
 #
@@ -49,23 +49,20 @@ fn is_just_true(m: Maybe Bool) -> Bool =
   match m with | Just b -> b | _ -> false
 
 fn main() -> Unit !{IO} =
-  do
-    state <- new_state()
-
+  run_suite("constrained_fn_return_type_dispatch", [
     # Single-level (pre-existing working case)
-    assert_eq(state, "direct Int works", is_just_int_42(deser_direct_int("x")), true)
-    assert_eq(state, "direct Bool works", is_just_true(deser_direct_bool("x")), true)
+    check_eq("direct Int works", is_just_int_42(deser_direct_int("x")), true),
+    check_eq("direct Bool works", is_just_true(deser_direct_bool("x")), true),
 
     # 2-level consistent 'a' chain (was BROKEN — no dict injected)
-    assert_eq(state, "2-level_a Int", is_just_int_42(get_int_a("x")), true)
-    assert_eq(state, "2-level_a Bool", is_just_true(get_bool_a("x")), true)
+    check_eq("2-level_a Int", is_just_int_42(get_int_a("x")), true),
+    check_eq("2-level_a Bool", is_just_true(get_bool_a("x")), true),
 
     # 2-level name-mismatch chain (was BROKEN)
-    assert_eq(state, "2-level_v Int", is_just_int_42(get_int_v("x")), true)
-    assert_eq(state, "2-level_v Bool", is_just_true(get_bool_v("x")), true)
+    check_eq("2-level_v Int", is_just_int_42(get_int_v("x")), true),
+    check_eq("2-level_v Bool", is_just_true(get_bool_v("x")), true),
 
     # 3-level chain
-    assert_eq(state, "3-level Int", is_just_int_42(get_int_3("x")), true)
-    assert_eq(state, "3-level Bool", is_just_true(get_bool_3("x")), true)
-
-    summary(state)
+    check_eq("3-level Int", is_just_int_42(get_int_3("x")), true),
+    check_eq("3-level Bool", is_just_true(get_bool_3("x")), true)
+  ])

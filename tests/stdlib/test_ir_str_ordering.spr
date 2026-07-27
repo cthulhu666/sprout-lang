@@ -1,4 +1,4 @@
-import stdlib.test (TestState, new_state, assert_eq, assert_true, assert_false, summary)
+import stdlib.test (check_true, check_false, run_suite)
 
 # Verifies that Char ordering comparisons (<, <=, >, >=) lower correctly via
 # --use-ir-codegen (PR 11 prep / IRStrCompare op).
@@ -32,32 +32,29 @@ import stdlib.test (TestState, new_state, assert_eq, assert_true, assert_false, 
 # when that type-checker restriction is lifted.
 
 fn main() -> Unit !{IO} =
-  do
-    state <- new_state()
-
+  run_suite("ir_str_ordering", [
     # Char ordering — strict less than
-    assert_true(state, "char lt a b", 'a' < 'b')
-    assert_false(state, "char lt b a", 'b' < 'a')
-    assert_false(state, "char lt same", 'a' < 'a')
+    check_true("char lt a b", 'a' < 'b'),
+    check_false("char lt b a", 'b' < 'a'),
+    check_false("char lt same", 'a' < 'a'),
 
     # Char ordering — less than or equal
-    assert_true(state, "char le a b", 'a' <= 'b')
-    assert_true(state, "char le same", 'a' <= 'a')
-    assert_false(state, "char le b a", 'b' <= 'a')
+    check_true("char le a b", 'a' <= 'b'),
+    check_true("char le same", 'a' <= 'a'),
+    check_false("char le b a", 'b' <= 'a'),
 
     # Char ordering — strict greater than
-    assert_true(state, "char gt b a", 'b' > 'a')
-    assert_false(state, "char gt a b", 'a' > 'b')
-    assert_false(state, "char gt same", 'a' > 'a')
+    check_true("char gt b a", 'b' > 'a'),
+    check_false("char gt a b", 'a' > 'b'),
+    check_false("char gt same", 'a' > 'a'),
 
     # Char ordering — greater than or equal (the exact compile_driver blocker)
-    assert_true(state, "char ge b a", 'b' >= 'a')
-    assert_true(state, "char ge same", 'a' >= 'a')
-    assert_false(state, "char ge a b", 'a' >= 'b')
+    check_true("char ge b a", 'b' >= 'a'),
+    check_true("char ge same", 'a' >= 'a'),
+    check_false("char ge a b", 'a' >= 'b'),
 
     # ASCII ordering edge cases
-    assert_true(state, "char lt 0 a", '0' < 'a')
-    assert_true(state, "char lt A a", 'A' < 'a')
-    assert_true(state, "char ge z A", 'z' >= 'A')
-
-    summary(state)
+    check_true("char lt 0 a", '0' < 'a'),
+    check_true("char lt A a", 'A' < 'a'),
+    check_true("char ge z A", 'z' >= 'A')
+  ])

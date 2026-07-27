@@ -1,4 +1,4 @@
-import stdlib.test (TestState, new_state, assert_true, summary)
+import stdlib.test (check_true, run_suite)
 
 class MyEq a {
   fn my_eq(x: a, y: a) -> Bool
@@ -25,8 +25,7 @@ fn box_eq_via_hof(x: Box a, y: Box a) -> Bool where MyEq (Box a) =
   apply_eq(my_eq, x, y)
 
 fn main() -> Unit !{IO} =
-  do
-    state <- new_state()
-    assert_true(state, "constrained eta method compiles and runs", apply_box_eq(my_eq))
-    assert_true(state, "forwarded MyEq (Box a) eta in hof", box_eq_via_hof(Box(1), Box(2)))
-    summary(state)
+  run_suite("constrained_eta_codegen", [
+    check_true("constrained eta method compiles and runs", apply_box_eq(my_eq)),
+    check_true("forwarded MyEq (Box a) eta in hof", box_eq_via_hof(Box(1), Box(2)))
+  ])

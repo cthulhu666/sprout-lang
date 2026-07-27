@@ -1,4 +1,4 @@
-import stdlib.test (TestState, new_state, assert_true, summary)
+import stdlib.test (check_true, run_suite)
 
 # Stress test for the @eta_fwd: marker plumbing in check_fn_body /
 # compute_eta_fwd_markers (replacing the old extract_fwd_markers env walk).
@@ -51,10 +51,9 @@ fn ord_uses_eq(x: a, y: a) -> Bool where MyOrd a =
   if my_lt(x, y) then false else my_eq(x, y)
 
 fn main() -> Unit !{IO} =
-  do
-    state <- new_state()
-    assert_true(state, "two-constraint fn dispatches both", eq_and_show(1, 1) == "1")
-    assert_true(state, "two-constraint fn dispatches false branch", eq_and_show(1, 2) == "ne")
-    assert_true(state, "superclass forwarded dispatch (lt false, eq true)", ord_uses_eq(1, 1))
-    assert_true(state, "superclass forwarded dispatch (lt true)", ord_uses_eq(2, 1) == false)
-    summary(state)
+  run_suite("compute_eta_fwd_markers", [
+    check_true("two-constraint fn dispatches both", eq_and_show(1, 1) == "1"),
+    check_true("two-constraint fn dispatches false branch", eq_and_show(1, 2) == "ne"),
+    check_true("superclass forwarded dispatch (lt false, eq true)", ord_uses_eq(1, 1)),
+    check_true("superclass forwarded dispatch (lt true)", ord_uses_eq(2, 1) == false)
+  ])
