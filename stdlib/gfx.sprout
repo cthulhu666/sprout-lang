@@ -23,6 +23,7 @@ extern fn gfx_load_model(path: String) -> Int !{IO}
 extern fn gfx_draw_cube(x: Double, y: Double, z: Double, size: Double, r: Int, g: Int, b: Int) -> Unit !{IO}
 extern fn gfx_draw_line3d(x0: Double, y0: Double, z0: Double, x1: Double, y1: Double, z1: Double, r: Int, g: Int, b: Int) -> Unit !{IO}
 extern fn gfx_draw_sphere(x: Double, y: Double, z: Double, radius: Double, r: Int, g: Int, b: Int) -> Unit !{IO}
+extern fn gfx_draw_star(x: Double, y: Double, z: Double, radius: Double, r: Int, g: Int, b: Int) -> Unit !{IO}
 extern fn gfx_capture_quad(p0x: Double, p0y: Double, p0z: Double,
                            p1x: Double, p1y: Double, p1z: Double,
                            p2x: Double, p2y: Double, p2z: Double,
@@ -75,6 +76,7 @@ extern fn gfx_overlay_begin() -> Unit !{IO}
 extern fn gfx_close_window() -> Unit !{IO}
 extern fn gfx_set_clip_planes(near_plane: Double, far_plane: Double) -> Unit !{IO}
 extern fn gfx_sphere_model(r: Int, g: Int, b: Int) -> Int !{IO}
+extern fn gfx_star_model(r: Int, g: Int, b: Int) -> Int !{IO}
 extern fn gfx_world_to_screen(x: Double, y: Double, z: Double) -> Int !{IO}
 extern fn gfx_projected_x() -> Double !{IO}
 extern fn gfx_projected_y() -> Double !{IO}
@@ -129,9 +131,17 @@ export fn draw_cube(x: Double, y: Double, z: Double, size: Double, r: Int, g: In
 export fn draw_line3d(x0: Double, y0: Double, z0: Double, x1: Double, y1: Double, z1: Double, r: Int, g: Int, b: Int) -> Unit !{IO} =
   gfx_draw_line3d(x0, y0, z0, x1, y1, z1, r, g, b)
 
-# Draw a solid sphere in a flat RGB colour (immediate-mode). Scene 2 draws the star and planets.
+# Draw a solid sphere in a flat RGB colour (immediate-mode). Diffuse-lit (a shaded near/far side),
+# which is correct for planets and moons — scene 2 draws those with this.
 export fn draw_sphere(x: Double, y: Double, z: Double, radius: Double, r: Int, g: Int, b: Int) -> Unit !{IO} =
   gfx_draw_sphere(x, y, z, radius, r, g, b)
+
+# Draw an EMISSIVE (self-luminous) sphere in a flat RGB colour — a star. Unlike draw_sphere it is
+# full-bright with no shaded side (a star IS the light, not lit by one) and tessellates finer, so a
+# large on-screen body stays smooth. Scene 2 draws the sun with this; the scene-1 point cloud uses
+# the instanced equivalent (star_model). Immediate-mode.
+export fn draw_star(x: Double, y: Double, z: Double, radius: Double, r: Int, g: Int, b: Int) -> Unit !{IO} =
+  gfx_draw_star(x, y, z, radius, r, g, b)
 
 # Bake many draw_cube calls into ONE static GPU mesh: mesh_capture_begin(), run the tile loop
 # (each draw_cube appends its geometry), then handle <- mesh_capture_end(). Thereafter draw the
@@ -427,6 +437,14 @@ export fn set_clip_planes(near_plane: Double, far_plane: Double) -> Unit !{IO} =
 # code. Call after open_window (it uploads a mesh to the GPU).
 export fn sphere_model(r: Int, g: Int, b: Int) -> Int !{IO} =
   gfx_sphere_model(r, g, b)
+
+# Like sphere_model, but the sphere is EMISSIVE (self-luminous): draw_instances renders it full-bright
+# with no key-light shading, so it reads as a glowing star rather than a matte shaded ball. This is
+# the starfield primitive — one per spectral class, handle == class code, per-star size via the
+# instance_push `scale`, exactly like sphere_model. Emissiveness only takes effect for handles in the
+# instanced range (< 64). Call after open_window.
+export fn star_model(r: Int, g: Int, b: Int) -> Int !{IO} =
+  gfx_star_model(r, g, b)
 
 # Project a world point to 2D screen pixels against the current camera, for click-picking. Returns
 # True if the point is in front of the camera — then projected_x()/projected_y() hold its screen

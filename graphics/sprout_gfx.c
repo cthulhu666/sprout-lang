@@ -352,6 +352,60 @@ static const char *INSTANCE_FS =
 static Shader g_instance_shader;   /* instanced, vertex-colour lit shader for scattered models (trees) */
 static int g_instance_ready = 0;
 
+/* EMISSIVE (self-luminous) shaders for stars. A star is not lit from outside — it IS the light — so
+ * unlike INSTANCE_FS/LIGHT_FS these drop the diffuse `dot(N, lightDir)` term entirely and emit the
+ * body colour at full brightness (still folded through apply_fog, so a fogged scene fades distant
+ * stars for depth). Two variants because a star reaches the GPU two ways:
+ *   - STAR_INSTANCE_FS: paired with INSTANCE_VS for the scene-1 point cloud (DrawMeshInstanced);
+ *     colour is the material's colDiffuse (one per spectral-class sphere model), exactly as INSTANCE_FS.
+ *   - STAR_VS/STAR_FS: for the immediate-mode scene-2 sun (DrawSphereEx), whose colour arrives as the
+ *     per-vertex attribute (fragColor), like DrawCube under CUBE_VS — NOT colDiffuse (which is white).
+ * Emissive is the root-cause fix for stars reading as matte shaded balls; bloom (roadmap #5) then
+ * bleeds a glow from these full-bright pixels — which is why emissive must land first. */
+static const char *STAR_INSTANCE_FS =
+  "#version 330\n"
+  "in vec3 fragNormal;\n"      /* emitted by INSTANCE_VS; unused (a star has no shaded side) */
+  "in float fragDepth;\n"
+  "uniform vec4 colDiffuse;\n"
+  FOG_GLSL
+  "out vec4 finalColor;\n"
+  "void main() {\n"
+  "    finalColor = vec4(apply_fog(colDiffuse.rgb, fragDepth), colDiffuse.a);\n"
+  "}\n";
+
+static const char *STAR_VS =
+  "#version 330\n"
+  "in vec3 vertexPosition;\n"
+  "in vec4 vertexColor;\n"
+  "uniform mat4 mvp;\n"
+  "out vec4 fragColor;\n"
+  "out float fragDepth;\n"
+  "void main() {\n"
+  "    fragColor = vertexColor;\n"
+  "    gl_Position = mvp*vec4(vertexPosition, 1.0);\n"
+  "    fragDepth = gl_Position.w;\n"
+  "}\n";
+
+static const char *STAR_FS =
+  "#version 330\n"
+  "in vec4 fragColor;\n"
+  "in float fragDepth;\n"
+  FOG_GLSL
+  "out vec4 finalColor;\n"
+  "void main() {\n"
+  "    finalColor = vec4(apply_fog(fragColor.rgb, fragDepth), fragColor.a);\n"
+  "}\n";
+
+static Shader g_star_instance_shader;   /* instanced emissive shader for the scene-1 star point cloud */
+static int g_star_instance_ready = 0;
+static Shader g_star_shader;            /* immediate-mode emissive shader for the scene-2 sun */
+static int g_star_ready = 0;
+
+/* Per-instanced-model emissive flag (index == model handle, 0..GFX_INSTANCE_MODELS-1). Set by
+ * gfx_star_model; read by draw_instances_impl to bind g_star_instance_shader instead of the lit one.
+ * Static zero-init means every model is lit (non-emissive) until explicitly made a star. */
+static unsigned char g_model_emissive[64];
+
 /* Distance fog (docs/gfx-effects-roadmap-v0.md #1). Applied in the scene shaders (uFogDensity
  * defaults to 0 = off, so untouched demos are unchanged); frame_begin also clears the background
  * to the fog colour when on, so distant terrain fades into the horizon with no visible edge. */
@@ -566,6 +620,19 @@ static void init_lighting(void) {
     SetShaderValue(g_instance_shader, GetShaderLocation(g_instance_shader, "ambient"), &ambient, SHADER_UNIFORM_VEC3);
     g_instance_ready = 1;
   }
+
+  /* Emissive star shaders (see STAR_* above). The instanced one reuses INSTANCE_VS, so — like
+   * g_instance_shader — it must wire the instanceTransform attribute by hand (not auto-located).
+   * No light uniforms: emissive shaders ignore the key light. Fog uniforms default to 0 (off);
+   * gfx_fog updates them if a demo enables fog. */
+  g_star_instance_shader = LoadShaderFromMemory(INSTANCE_VS, STAR_INSTANCE_FS);
+  if (g_star_instance_shader.id != 0) {
+    g_star_instance_shader.locs[SHADER_LOC_VERTEX_INSTANCETRANSFORM] =
+      GetShaderLocationAttrib(g_star_instance_shader, "instanceTransform");
+    g_star_instance_ready = 1;
+  }
+  g_star_shader = LoadShaderFromMemory(STAR_VS, STAR_FS);
+  if (g_star_shader.id != 0) g_star_ready = 1;
 }
 
 /* --- Instanced-props registry: spatial groups, frustum + distance culled ----------------------
@@ -578,6 +645,8 @@ static void init_lighting(void) {
  * cleared and re-pushed each frame (dynamic movers) — see gfx_instance_clear. */
 #define GFX_MAX_GROUPS 4096
 #define GFX_INSTANCE_MODELS 64
+/* g_model_emissive is indexed by instanced-model handle, so it must cover every instanced model. */
+_Static_assert(sizeof(g_model_emissive) >= GFX_INSTANCE_MODELS, "g_model_emissive must be >= GFX_INSTANCE_MODELS");
 #define GFX_INSTANCE_MARGIN 6.0f  /* AABB pad (world units) covering model height/width beyond origin */
 static Matrix *g_grp[GFX_MAX_GROUPS * GFX_INSTANCE_MODELS];
 static int g_grp_count[GFX_MAX_GROUPS * GFX_INSTANCE_MODELS];
@@ -940,6 +1009,21 @@ long long gfx_sphere_model(long long r, long long g, long long b) {
   return h;
 }
 
+/* Like gfx_sphere_model, but the sphere is EMISSIVE (self-luminous): gfx_draw_instances draws it
+ * through the emissive star shader (full-bright colDiffuse, no key-light shading) instead of the lit
+ * instance shader — so it reads as a glowing star, not a matte shaded ball. The scene-1 starfield
+ * primitive: create one per spectral class up front so the handle equals the class code, per-star
+ * size via the instance push scale, exactly as gfx_sphere_model. Reuses gfx_sphere_model for the
+ * mesh + registry slot, then flips the emissive flag and swaps the shader. The flag is keyed by
+ * handle, so emissiveness only takes effect for handles inside the instanced range (< 64). */
+long long gfx_star_model(long long r, long long g, long long b) {
+  long long h = gfx_sphere_model(r, g, b);
+  if (h < 0) return h;
+  if (h < GFX_INSTANCE_MODELS) g_model_emissive[(int)h] = 1;
+  if (g_star_instance_ready) g_models[h].materials[0].shader = g_star_instance_shader;
+  return h;
+}
+
 /* Draw an axis-aligned cube of edge `size` at (x,y,z) in a flat RGB colour (0-255
  * components) — the colour crosses as the cube's per-vertex colour. Two modes:
  *  - inside a mesh_capture_begin/end pair: APPEND the cube's geometry to the capture
@@ -980,6 +1064,21 @@ long long gfx_draw_sphere(long long x, long long y, long long z, long long radiu
   Vector3 pos = { as_float(x), as_float(y), as_float(z) };
   Color col = { (unsigned char)r, (unsigned char)g, (unsigned char)b, 255 };
   DrawSphereEx(pos, as_float(radius), 12, 16, col);
+  return 0;
+}
+
+/* Draw an EMISSIVE (self-luminous) sphere in a flat RGB colour — the scene-2 sun. Unlike
+ * gfx_draw_sphere (diffuse-lit, which is correct for planets/moons) this binds the emissive star
+ * shader, so the whole disc is full-bright with no shaded side, and it tessellates finer (24x32 vs
+ * 12x16) because a large on-screen body shows facets at the starfield's low count. Immediate-mode;
+ * coords/radius cross as Doubles. */
+long long gfx_draw_star(long long x, long long y, long long z, long long radius,
+                        long long r, long long g, long long b) {
+  Vector3 pos = { as_float(x), as_float(y), as_float(z) };
+  Color col = { (unsigned char)r, (unsigned char)g, (unsigned char)b, 255 };
+  if (g_star_ready) BeginShaderMode(g_star_shader);
+  DrawSphereEx(pos, as_float(radius), 24, 32, col);
+  if (g_star_ready) EndShaderMode();
   return 0;
 }
 
@@ -1313,9 +1412,14 @@ static long long draw_instances_impl(long long group_count, long long cull_dist,
       if (cnt > 0) { memcpy(g_inst_scratch + off, g_grp[idx], (size_t)cnt * sizeof(Matrix)); off += cnt; }
     }
     Model model = g_models[mdl];
+    /* Emissive models (gfx_star_model) draw through the self-luminous star shader; all others
+     * through the lit instance shader. Both bind here (not once for the whole pass) so a starfield
+     * and lit props can coexist across models in one draw_instances call. */
+    int emissive = (mdl < GFX_INSTANCE_MODELS) && g_model_emissive[mdl] && g_star_instance_ready;
     for (int i = 0; i < model.meshCount; i++) {
       Material mat = model.materials[model.meshMaterial[i]];
-      if (g_instance_ready) mat.shader = g_instance_shader;
+      if (emissive) mat.shader = g_star_instance_shader;
+      else if (g_instance_ready) mat.shader = g_instance_shader;
       DrawMeshInstanced(model.meshes[i], mat, g_inst_scratch, total);
     }
   }
@@ -1615,6 +1719,14 @@ long long gfx_fog(long long density, long long r, long long g, long long b) {
   if (g_light_ready) {
     SetShaderValue(g_light_shader, GetShaderLocation(g_light_shader, "uFogDensity"), &d, SHADER_UNIFORM_FLOAT);
     SetShaderValue(g_light_shader, GetShaderLocation(g_light_shader, "uFogColor"), &c, SHADER_UNIFORM_VEC3);
+  }
+  if (g_star_instance_ready) {
+    SetShaderValue(g_star_instance_shader, GetShaderLocation(g_star_instance_shader, "uFogDensity"), &d, SHADER_UNIFORM_FLOAT);
+    SetShaderValue(g_star_instance_shader, GetShaderLocation(g_star_instance_shader, "uFogColor"), &c, SHADER_UNIFORM_VEC3);
+  }
+  if (g_star_ready) {
+    SetShaderValue(g_star_shader, GetShaderLocation(g_star_shader, "uFogDensity"), &d, SHADER_UNIFORM_FLOAT);
+    SetShaderValue(g_star_shader, GetShaderLocation(g_star_shader, "uFogColor"), &c, SHADER_UNIFORM_VEC3);
   }
   return 0;
 }

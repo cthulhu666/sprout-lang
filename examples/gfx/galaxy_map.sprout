@@ -121,7 +121,7 @@ fn make_models_from(c: Int) -> Unit !{IO} =
     match class_rgb(c) with
     | (r, g, b) ->
         do
-          _h <- gfx.sphere_model(r, g, b)
+          _h <- gfx.star_model(r, g, b)
           make_models_from(c + 1)
 
 fn make_models() -> Unit !{IO} = make_models_from(0)
@@ -692,7 +692,7 @@ fn system_scale(ps: List Planet) -> Double =
 # loop — NOT re-read per frame (that dropped the frame rate).
 fn draw_system(scale: Double, ps: List Planet) -> Unit !{IO} =
   do
-    gfx.draw_sphere(0.0, 0.0, 0.0, sun_size, 255, 240, 180)
+    gfx.draw_star(0.0, 0.0, 0.0, sun_size, 255, 240, 180)
     draw_planets(scale, ps)
 
 # --- Scene 2 hover: project each planet to screen, keep the one nearest the cursor for the detail
