@@ -39,12 +39,10 @@ fn build_lsp_state(stdlib_root: String) -> LspState !{IO} =
 fn lsp_send(body: String) -> Unit !{IO} =
   term_write("Content-Length: " ++ int_to_string(string.byte_length(body)) ++ "\r\n\r\n" ++ body)
 
+# W8/P1: parse_int is total (Maybe Int); a malformed header yields Nothing
+# instead of Just(0).
 export fn parse_content_length(line: String) -> Maybe Int =
-  match string.strip_prefix(line, "Content-Length: ") with
-  | Nothing -> Nothing
-  # W8/P1: parse_int is total (Maybe Int); a malformed header now yields Nothing
-  # instead of Just(0).
-  | Just value -> parse_int(value)
+  and_then(parse_int, string.strip_prefix(line, "Content-Length: "))
 
 fn read_headers_loop(cl: Maybe Int) -> Maybe Int !{IO} =
   match term_read_line() with
@@ -105,14 +103,10 @@ fn get_params(req: json.Json) -> json.Json =
   | Nothing -> json.JsonNull
 
 fn json_get_str(obj: json.Json, key: String) -> Maybe String =
-  match json.json_get_field(obj, key) with
-  | Nothing -> Nothing
-  | Just v -> json.json_get_string(v)
+  and_then(json.json_get_string, json.json_get_field(obj, key))
 
 fn json_get_int_fld(obj: json.Json, key: String) -> Maybe Int =
-  match json.json_get_field(obj, key) with
-  | Nothing -> Nothing
-  | Just v -> json.json_get_int(v)
+  and_then(json.json_get_int, json.json_get_field(obj, key))
 
 fn send_message(msg: json.Json) -> Unit !{IO} =
   lsp_send(json.stringify(msg))

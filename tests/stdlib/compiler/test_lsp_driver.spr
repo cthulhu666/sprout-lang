@@ -31,6 +31,10 @@ fn main() -> Unit !{IO} =
       lsp.parse_content_length(""), Nothing)
     assert_eq(state, "parse_content_length: partial prefix",
       lsp.parse_content_length("Content-Length:42"), Nothing)
+    # W8/P1: correct prefix but a non-numeric value — parse_int is total, so the
+    # Just-arm must yield Nothing (not Just(0)). Exercises the and_then bind arm.
+    assert_eq(state, "parse_content_length: malformed value",
+      lsp.parse_content_length("Content-Length: abc"), Nothing)
 
     # extract_word — basic identifiers
     assert_eq(state, "extract_word: middle of word",

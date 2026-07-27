@@ -317,9 +317,7 @@ fn collect_template_part_nodes_i(parts: List ast.TemplateExprPart, pos: source.S
 # Extract the bare constructor name from a Maybe TypeExpr, or Nothing if not
 # a simple TypeName.  Used to propagate "StringTemplate"/"Vec" context downward.
 fn type_expr_bare_name(te: Maybe ast.TypeExpr) -> Maybe String =
-  match te with
-  | Nothing -> Nothing
-  | Just texpr -> type_texpr_to_maybe_name(texpr)
+  and_then(type_texpr_to_maybe_name, te)
 
 fn type_texpr_to_maybe_name(texpr: ast.TypeExpr) -> Maybe String =
   match texpr with
