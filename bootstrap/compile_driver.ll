@@ -253880,6 +253880,45 @@ join_1:
   ret i64 %t$2
 }
 
+define i64 @__tc_Functor_Result_e_fmap(i64 %f, i64 %r) {
+entry:
+  %t$0 = call i64 @sprout_tag(i64 %r)
+  br label %arm_0_1
+arm_0_1:
+  %t$3 = add i64 0, 8
+  %t$4 = icmp eq i64 %t$0, %t$3
+  br i1 %t$4, label %body_0_1, label %arm_1_1
+body_0_1:
+  %t$5 = call i64 @sprout_field(i64 %r, i64 0)
+  %t$12 = alloca i64
+  store i64 %t$5, ptr %t$12
+  %t$13 = call i64 @sprout_gc_push_i64_root(ptr %t$12)
+  %t$6 = call i64 @sprout_make1(i64 8, i64 %t$5)
+  %t$14 = call i64 @sprout_gc_pop_roots(i64 1)
+  br label %join_1
+arm_1_1:
+  %t$7 = add i64 0, 7
+  %t$8 = icmp eq i64 %t$0, %t$7
+  br i1 %t$8, label %body_1_1, label %arm_2_1
+body_1_1:
+  %t$9 = call i64 @sprout_field(i64 %r, i64 0)
+  %t$10$env_ptr = inttoptr i64 %f to ptr
+  %t$10$code = load ptr, ptr %t$10$env_ptr
+  %t$10 = call i64 (i64, i64) %t$10$code(i64 %f, i64 %t$9)
+  %t$15 = alloca i64
+  store i64 %t$10, ptr %t$15
+  %t$16 = call i64 @sprout_gc_push_i64_root(ptr %t$15)
+  %t$11 = call i64 @sprout_make1(i64 7, i64 %t$10)
+  %t$17 = call i64 @sprout_gc_pop_roots(i64 1)
+  br label %join_1
+arm_2_1:
+  call void @sprout_abort_match()
+  unreachable
+join_1:
+  %t$2 = phi i64 [%t$6, %body_0_1], [%t$11, %body_1_1]
+  ret i64 %t$2
+}
+
 define i64 @__tc_Foldable_List_fold_values(i64 %step, i64 %init, i64 %xs) {
 entry:
   %t$1 = alloca i64

@@ -956,6 +956,16 @@ instance Functor Maybe {
     | Just x -> Just(f(x))
 }
 
+# Functor (Result e): map over the Ok value, pass Err through unchanged. Required as
+# the superclass of Applicative (Result e) — without it, a forwarded Applicative dict
+# (map3/map4/map5) over Result has an unresolvable Functor slot and null-fills.
+instance Functor (Result e) {
+  fn fmap(f: a -> b, r: Result e a) -> Result e b =
+    match r with
+    | Err x -> Err(x)
+    | Ok v -> Ok(f(v))
+}
+
 instance Foldable List {
   fn fold_values(step: b -> a -> b, init: b, xs: List a) -> b =
     list_fold(step, init, xs)

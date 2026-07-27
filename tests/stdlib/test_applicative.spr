@@ -38,4 +38,16 @@ fn main() -> Unit !{IO} =
     assert_eq(state, "map4 Maybe", map4(add4v, Just(1), Just(2), Just(3), Just(4)), Just(10))
     assert_eq(state, "map5 Maybe", map5(add5v, Just(1), Just(2), Just(3), Just(4), Just(5)), Just(15))
 
+    # map3..map5 Result — regression for the missing `Functor (Result e)` superclass:
+    # without it the forwarded Applicative dict's Functor slot null-filled and crashed.
+    assert_eq(state, "map3 Result ok", map3(add3v, Ok(1), Ok(2), Ok(3)), Ok(6))
+    assert_eq(state, "map3 Result fail", map3(add3v, Ok(1), Err("x"), Ok(3)), Err("x"))
+    assert_eq(state, "map4 Result ok", map4(add4v, Ok(1), Ok(2), Ok(3), Ok(4)), Ok(10))
+    assert_eq(state, "map5 Result ok", map5(add5v, Ok(1), Ok(2), Ok(3), Ok(4), Ok(5)), Ok(15))
+
+    # map3..map5 List — cartesian; singletons collapse to one result.
+    assert_eq(state, "map3 List", map3(add3v, [1], [2], [3]), [6])
+    assert_eq(state, "map4 List", map4(add4v, [1], [2], [3], [4]), [10])
+    assert_eq(state, "map5 List", map5(add5v, [1], [2], [3], [4], [5]), [15])
+
     summary(state)
