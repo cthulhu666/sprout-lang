@@ -2,7 +2,7 @@ module examples.gfx.galaxy_map
 
 import stdlib.gfx
 import stdlib.string (split_once)
-import stdlib.math (min, pi)
+import stdlib.math (min, pi, sin, cos)
 import stdlib.json as json
 import loam.camera (Cam, cam_drive, cam_distance)
 import loam.view (cam_apply)
@@ -69,6 +69,11 @@ let sun_size = 18.0  # star render radius (world units); small enough not to swa
 let planet_size_scale = 6.0  # planet render radius (world units) = radiusEarths * this
 let planet_min_size = 3.5  # floor so sub-Earth planets stay visible
 let orbit_segments = 96  # line segments per orbit ellipse (loam.orbit sampled at 2pi/segments)
+let ring_segments = 48  # segments in a planet's ring circle
+let ring_scale = 1.9  # ring radius = planet render radius * this
+let moon_offset = 12.0  # world-unit gap from a planet's surface to its (schematic) moon dots
+let moon_size = 2.2  # moon dot render radius (world units)
+let s2_pick_r2 = 400.0  # 20px hover radius (squared) for the scene-2 planet detail panel
 let s2_init_radius = 900.0  # opening scene-2 camera: angled overhead of the system at origin
 let s2_init_height = 520.0
 let s2_zoom_min = 60.0
@@ -306,10 +311,13 @@ fn read_radius(dir: String) -> Double !{IO} =
   | Err _ -> 50000.0
 
 # --- Scene 2: solar-system view -----------------------------------------------------------------
-# A planet reduced to what the view draws: orbit shape (semi-major AU `a`, eccentricity `e`,
-# argument of periapsis `argperi` rad), current position (`nu` = true anomaly rad), and body size
-# (`rad` = radiusEarths). Parsed from the per-system JSON; orbit geometry via loam.orbit.
-type Planet = (a: Double, e: Double, argperi: Double, nu: Double, rad: Double)
+# A planet reduced to what the view draws and reports: orbit shape (semi-major AU `a`, eccentricity
+# `e`, argument of periapsis `argperi` rad), current position (`nu` = true anomaly rad), body size
+# (`rad` = radiusEarths), `rings`/`moons` (needed by the renderer), and `name` + a PRE-FORMATTED
+# `detail` line for the panel. Type/mass/temperature are folded into `detail` at parse time — the
+# same trick the star catalog uses — to stay within the 10-field constructor-arity ceiling.
+type Planet = (a: Double, e: Double, argperi: Double, nu: Double, rad: Double,
+               rings: Bool, moons: Int, name: String, detail: String)
 
 let two_pi = 2.0 * pi
 fn deg2rad(d: Double) -> Double = d * pi / 180.0
@@ -346,12 +354,45 @@ fn jfield_double(obj: json.Json, key: String, dflt: Double) -> Double =
       Just x = json.json_get_float(v) else dflt
   in x
 
+fn jfield_string(obj: json.Json, key: String, dflt: String) -> String =
+  let Just v = json.json_get_field(obj, key) else dflt
+      Just s = json.json_get_string(v) else dflt
+  in s
+
+fn jfield_bool(obj: json.Json, key: String) -> Bool =
+  let Just v = json.json_get_field(obj, key) else false
+      Just b = json.json_get_bool(v) else false
+  in b
+
+fn json_array_len(arr: json.JsonArray, acc: Int) -> Int =
+  match json.json_array_next(arr) with
+  | Nothing -> acc
+  | Just step ->
+      match step with
+      | json.JsonArrayStep _head tail -> json_array_len(tail, acc + 1)
+
+# Length of an array-valued field (0 if absent/not an array) — used for the moon count.
+fn jfield_count(obj: json.Json, key: String) -> Int =
+  let Just v = json.json_get_field(obj, key) else 0
+      Just arr = json.json_get_array(v) else 0
+  in json_array_len(arr, 0)
+
 fn planet_of(j: json.Json) -> Planet =
-  Planet(a = jfield_double(j, "orbitSemiMajorAU", 1.0),
-         e = jfield_double(j, "eccentricity", 0.0),
-         argperi = deg2rad(jfield_double(j, "argumentOfPeriapsisDeg", 0.0)),
-         nu = deg2rad(jfield_double(j, "trueAnomalyDeg", 0.0)),
-         rad = jfield_double(j, "radiusEarths", 1.0))
+  let rad = jfield_double(j, "radiusEarths", 1.0)
+      a = jfield_double(j, "orbitSemiMajorAU", 1.0)
+      ptype = jfield_string(j, "planetType", "?")
+      mass = jfield_double(j, "massEarths", 0.0)
+      temp = jfield_double(j, "surfaceTemperatureK", 0.0)
+  in Planet(a = a,
+            e = jfield_double(j, "eccentricity", 0.0),
+            argperi = deg2rad(jfield_double(j, "argumentOfPeriapsisDeg", 0.0)),
+            nu = deg2rad(jfield_double(j, "trueAnomalyDeg", 0.0)),
+            rad = rad,
+            rings = jfield_bool(j, "hasRings"),
+            moons = jfield_count(j, "moons"),
+            name = jfield_string(j, "planetName", "?"),
+            detail = ptype ++ "   R " ++ to_string(rad) ++ " Re   M " ++ to_string(mass)
+                       ++ " Me   " ++ to_string(temp) ++ " K   a " ++ to_string(a) ++ " AU")
 
 fn planets_from_array(arr: json.JsonArray) -> List Planet =
   match json.json_array_next(arr) with
@@ -399,15 +440,40 @@ fn orbit_seg(scale: Double, a: Double, e: Double, argperi: Double, i: Int) -> Un
 fn planet_rgb(rad: Double) -> (Int, Int, Int) =
   if rad < 2.0 then (190, 150, 120) else (200, 195, 150)
 
+# A flat circle of `rr` around (cx, cz) on the world x/z plane — a planet's ring, as a line loop.
+fn ring_seg(cx: Double, cz: Double, rr: Double, i: Int) -> Unit !{IO} =
+  if i >= ring_segments then ()
+  else
+    do
+      let a0 = to_double(i) * two_pi / to_double(ring_segments)
+      let a1 = to_double(i + 1) * two_pi / to_double(ring_segments)
+      gfx.draw_line3d(cx + (rr * cos(a0)), 0.0, cz + (rr * sin(a0)),
+                      cx + (rr * cos(a1)), 0.0, cz + (rr * sin(a1)), 170, 160, 120)
+      ring_seg(cx, cz, rr, i + 1)
+
+# `count` schematic moon dots evenly spaced just outside the planet (real moon distances are far
+# sub-pixel at system scale, so this indicates moon PRESENCE, not true geometry — see the panel/docs).
+fn moon_dots(cx: Double, cz: Double, off: Double, count: Int, i: Int) -> Unit !{IO} =
+  if i >= count then ()
+  else
+    do
+      let ang = to_double(i) * two_pi / to_double(if count < 1 then 1 else count)
+      gfx.draw_sphere(cx + (off * cos(ang)), 0.0, cz + (off * sin(ang)), moon_size, 180, 180, 195)
+      moon_dots(cx, cz, off, count, i + 1)
+
 fn draw_one_planet(scale: Double, p: Planet) -> Unit !{IO} =
   do
     orbit_seg(scale, p.a, p.e, p.argperi, 0)
     match ellipse_point(p.a, p.e, p.argperi, p.nu) with
     | (x, z) ->
-        match planet_rgb(p.rad) with
-        | (pr, pg, pb) ->
-            gfx.draw_sphere(x * scale, 0.0, z * scale,
-                            max_d(p.rad * planet_size_scale, planet_min_size), pr, pg, pb)
+        do
+          let px = x * scale
+          let pz = z * scale
+          let prad = max_d(p.rad * planet_size_scale, planet_min_size)
+          match planet_rgb(p.rad) with
+          | (pr, pg, pb) -> gfx.draw_sphere(px, 0.0, pz, prad, pr, pg, pb)
+          if p.rings then ring_seg(px, pz, prad * ring_scale, 0) else ()
+          moon_dots(px, pz, prad + moon_offset, p.moons, 0)
 
 fn draw_planets(scale: Double, ps: List Planet) -> Unit !{IO} =
   match ps with
@@ -417,19 +483,65 @@ fn draw_planets(scale: Double, ps: List Planet) -> Unit !{IO} =
         draw_one_planet(scale, p)
         draw_planets(scale, rest)
 
-# Draw a system (already-parsed planets): star at the origin, then every planet's orbit + body, with
-# the AU->world scale fit so the outermost orbit reaches `fit_world_radius`. Planets are parsed once
-# on entry and cached in the render loop — NOT re-read per frame (that dropped the frame rate).
-fn draw_system(ps: List Planet) -> Unit !{IO} =
+# AU->world scale fitting the outermost orbit to `fit_world_radius` (used for drawing AND hover
+# projection, so both agree). Computed from the cached planet list in the render loop.
+fn system_scale(ps: List Planet) -> Double =
+  fit_world_radius / orbit_extent(ps, 0.2)
+
+# Draw a system (already-parsed planets, pre-computed `scale`): star at the origin, then every
+# planet's orbit + body + rings + moons. Planets are parsed once on entry and cached in the render
+# loop — NOT re-read per frame (that dropped the frame rate).
+fn draw_system(scale: Double, ps: List Planet) -> Unit !{IO} =
   do
-    let scale = fit_world_radius / orbit_extent(ps, 0.2)
     gfx.draw_sphere(0.0, 0.0, 0.0, sun_size, 255, 240, 180)
     draw_planets(scale, ps)
+
+# --- Scene 2 hover: project each planet to screen, keep the one nearest the cursor for the detail
+# panel. Mirrors the scene-1 pick, but over the in-memory (cached) planet list — no file re-read. ---
+fn keep_np(bd2: Double, best: Maybe Planet) -> (Double, Maybe Planet) !{IO} =
+  do
+    _t <- gfx.get_time()
+    (bd2, best)
+
+fn planet_screen_d2(p: Planet, scale: Double, mx: Double, my: Double) -> Double !{IO} =
+  match ellipse_point(p.a, p.e, p.argperi, p.nu) with
+  | (x, z) ->
+      do
+        front <- gfx.world_to_screen(x * scale, 0.0, z * scale)
+        sx <- gfx.projected_x()
+        sy <- gfx.projected_y()
+        if front then ((sx - mx) * (sx - mx)) + ((sy - my) * (sy - my)) else pick_far
+
+fn nearest_planet(ps: List Planet, scale: Double, mx: Double, my: Double,
+                  bd2: Double, best: Maybe Planet) -> (Double, Maybe Planet) !{IO} =
+  match ps with
+  | Nil -> keep_np(bd2, best)
+  | Cons p rest ->
+      do
+        d2 <- planet_screen_d2(p, scale, mx, my)
+        let nd = if d2 < bd2 then d2 else bd2
+        let nb = if d2 < bd2 then Just(p) else best
+        nearest_planet(rest, scale, mx, my, nd, nb)
+
+# Factored so the call site binds a plain function (binding an `if` via `<-` does not parse).
+fn maybe_hover(active: Bool, ps: List Planet, scale: Double, mx: Double, my: Double) -> (Double, Maybe Planet) !{IO} =
+  if active then nearest_planet(ps, scale, mx, my, pick_far, Nothing)
+  else keep_np(pick_far, Nothing)
+
+fn planet_line1(p: Planet) -> String = p.name
+fn planet_line2(p: Planet) -> String =
+  p.detail ++ "   moons " ++ to_string(p.moons) ++ (if p.rings then "   (rings)" else "")
+
+# Turn a hover result into the two panel lines, blank unless a planet is within the hover radius.
+fn hover_lines(h: (Double, Maybe Planet)) -> (String, String) =
+  match h with
+  | (hd2, Just p) -> if hd2 < s2_pick_r2 then (planet_line1(p), planet_line2(p)) else ("", "")
+  | (_, Nothing) -> ("", "")
 
 # --- Render loop --------------------------------------------------------------------------------
 fn render_loop(dir: String, cam: Cam, scam: Cam, radius: Double, loaded: Dict Int,
                sel_name: String, sel_detail: String, prev_rdown: Bool, view: Int, prev_lvl: Int,
-               csys: String, cplanets: List Planet) -> Unit !{IO} =
+               csys: String, cplanets: List Planet, hov1: String, hov2: String) -> Unit !{IO} =
   do
     stop <- gfx.window_should_close()
     if stop then gfx.close_window()
@@ -444,11 +556,12 @@ fn render_loop(dir: String, cam: Cam, scam: Cam, radius: Double, loaded: Dict In
         let need_load = (view == 1) && ! (sel_name == csys)
         let cplanets2 = if need_load then load_planets(dir, sel_name) else cplanets
         let csys2 = if need_load then sel_name else csys
+        let s2scale = system_scale(cplanets2)
         streamed <- load_levels(dir, cam, lvl, 0, radius, loaded, load_budget)
         cam_apply(if view == 0 then cam else scam)
         gfx.frame_begin()
         # Scene 1 draws the galaxy point cloud; scene 2 draws the selected system (star + orbits + planets).
-        if view == 0 then gfx.draw_instances(level_offset(lvl + 1), draw_cull) else draw_system(cplanets2)
+        if view == 0 then gfx.draw_instances(level_offset(lvl + 1), draw_cull) else draw_system(s2scale, cplanets2)
         gfx.overlay_begin()
         gfx.draw_fps(10, 10)
         if view == 0
@@ -457,8 +570,16 @@ fn render_loop(dir: String, cam: Cam, scam: Cam, radius: Double, loaded: Dict In
         if view == 0
           then gfx.draw_text(10, 56, "LoD level " ++ to_string(lvl), 18, 150, 200, 150)
           else gfx.draw_text(10, 56, "system " ++ sel_name, 18, 255, 230, 150)
-        gfx.draw_text(20, 724, sel_name, 22, 255, 240, 170)
-        gfx.draw_text(20, 752, sel_detail, 16, 200, 210, 230)
+        # Bottom-left panel: galaxy view shows the selected star; system view shows the hovered planet.
+        if view == 0
+          then
+            do
+              gfx.draw_text(20, 724, sel_name, 22, 255, 240, 170)
+              gfx.draw_text(20, 752, sel_detail, 16, 200, 210, 230)
+          else
+            do
+              gfx.draw_text(20, 724, if hov1 == "" then "hover a planet for details" else hov1, 20, 255, 240, 170)
+              gfx.draw_text(20, 752, hov2, 15, 200, 210, 230)
         # One scene-switch button; its label and action depend on the current view.
         let toggle_label = if view == 0 then "System >" else "< Galaxy"
         toggle <- gfx.button(1108, 728, 156, 46, toggle_label)
@@ -478,6 +599,8 @@ fn render_loop(dir: String, cam: Cam, scam: Cam, radius: Double, loaded: Dict In
         let do_pick = rdown && ! prev_rdown && (view == 0)
         let pseed = (pick_far, sel_name, sel_detail)
         picked <- maybe_pick(do_pick, dir, cam, lvl, radius, to_double(mx), to_double(my), pseed)
+        # Scene-2 hover: nearest planet to the cursor (in-memory list, same scale as the draw).
+        hovered <- maybe_hover((view == 1), cplanets2, s2scale, to_double(mx), to_double(my))
         let next_view = if toggle then (if view == 0 then 1 else 0) else view
         # Don't treat a left-click over the scene-switch button (bottom-right) as a camera drag.
         let over_ui = (mx >= 1090) && (my >= 715)
@@ -505,9 +628,11 @@ fn render_loop(dir: String, cam: Cam, scam: Cam, radius: Double, loaded: Dict In
         | (loaded2, _) ->
             match picked with
             | (best_d2, best_name, best_detail) ->
-                let name2 = if best_d2 < pick_radius2 then best_name else sel_name
-                    detail2 = if best_d2 < pick_radius2 then best_detail else sel_detail
-                in render_loop(dir, cam2, scam2, radius, loaded2, name2, detail2, rdown, next_view, lvl, csys2, cplanets2)
+                match hover_lines(hovered) with
+                | (hov1b, hov2b) ->
+                    let name2 = if best_d2 < pick_radius2 then best_name else sel_name
+                        detail2 = if best_d2 < pick_radius2 then best_detail else sel_detail
+                    in render_loop(dir, cam2, scam2, radius, loaded2, name2, detail2, rdown, next_view, lvl, csys2, cplanets2, hov1b, hov2b)
 
 fn main() -> Unit !{IO} =
   do
@@ -538,4 +663,4 @@ fn main() -> Unit !{IO} =
     let init_view = if sys_arg >= 0 then 1 else 0
     let init_name = if sys_arg >= 0 then "SYS-" ++ pad5(sys_arg) else "No system selected"
     render_loop(dir, cam0, scam0, radius, dict_empty(),
-                init_name, "Right-click a star to inspect it", false, init_view, seed_lvl, "", Nil)
+                init_name, "Right-click a star to inspect it", false, init_view, seed_lvl, "", Nil, "", "")

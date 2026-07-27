@@ -305,6 +305,11 @@ export fn json_get_int(value: Json) -> Maybe Int =
   | JsonInt n -> Just(n)
   | _ -> Nothing
 
+export fn json_get_bool(value: Json) -> Maybe Bool =
+  match value with
+  | JsonBool b -> Just(b)
+  | _ -> Nothing
+
 # A number as a Double, accepting either a float OR an integer literal (integers still parse to
 # JsonInt, so callers wanting a Double from any JSON number use this rather than json_get_int).
 export fn json_get_float(value: Json) -> Maybe Double =

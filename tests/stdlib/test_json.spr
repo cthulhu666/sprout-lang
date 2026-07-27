@@ -55,6 +55,21 @@ fn int_on_float_is_nothing(input: String) -> Bool =
   | Err _ -> false
   | Ok v -> is_nothing_int(json.json_get_int(v))
 
+fn bool_of(input: String) -> Maybe Bool =
+  match json.parse(input) with
+  | Err _ -> Nothing
+  | Ok v -> json.json_get_bool(v)
+
+fn is_just_true(m: Maybe Bool) -> Bool =
+  match m with
+  | Just b -> b
+  | Nothing -> false
+
+fn is_nothing_bool(m: Maybe Bool) -> Bool =
+  match m with
+  | Nothing -> true
+  | Just _ -> false
+
 fn main() -> Unit !{IO} =
   do
     state <- new_state()
@@ -148,5 +163,10 @@ fn main() -> Unit !{IO} =
     assert_true(state, "json_get_int on a float returns Nothing", int_on_float_is_nothing("0.104"))
     assert_true(state, "float round-trips through stringify", stringify_round_trip_ok("{\"au\": 0.104}"))
     assert_true(state, "negative float round-trips", stringify_round_trip_ok("-1.5e-1"))
+
+    # --- json_get_bool (accessor for the JsonBool variant) ---
+    assert_true(state, "json_get_bool on true", is_just_true(bool_of("true")))
+    assert_false(state, "json_get_bool on false", is_just_true(bool_of("false")))
+    assert_true(state, "json_get_bool on a non-bool returns Nothing", is_nothing_bool(bool_of("42")))
 
     summary(state)

@@ -160,6 +160,16 @@ into that system. The scene:
   planet's orbit is a polyline loop of `draw_line3d` sampled from `loam.orbit.ellipse_point` (pure
   Kepler-ellipse math from `orbitSemiMajorAU`/`eccentricity`/`argumentOfPeriapsisDeg`), and the
   planet body sits at its current `trueAnomalyDeg`, sized by `radiusEarths`, coloured by size.
+- **Rings and moons.** A planet with `hasRings` gets a flat ring circle (`draw_line3d` loop) around
+  it; a planet with N `moons` gets N schematic dots just outside it — real moon distances are far
+  sub-pixel at system scale, so the dots indicate *presence*, not true geometry (the count is exact,
+  shown in the panel). `hasRings` reads through a new `stdlib.json.json_get_bool` accessor.
+- **Hover detail panel.** Moving the cursor over a planet projects each planet to the screen
+  (`world_to_screen`, same as scene-1 picking, but over the in-memory cached list) and shows the
+  nearest one's name, type, radius, mass, temperature, semi-major axis, moon count, and rings in the
+  bottom-left panel. Type/mass/temp are folded into a pre-formatted `detail` string at parse time (so
+  the `Planet` record stays within the 10-field constructor-arity ceiling — the star catalog uses the
+  same trick).
 - **Fits scale per system.** Systems span 0.5–30 AU; the AU→world scale is fit so the outermost
   orbit reaches `fit_world_radius`, with body sizes in fixed world units — so a compact 5-planet and
   a spread 9-planet system both frame the same way.
@@ -175,9 +185,12 @@ into that system. The scene:
   coverage vs. spatial streaming: the exporter should be able to emit a **class-partitioned pyramid**
   so a filter fills the on-screen budget from the filtered class when zoomed out, and the residency
   key should include the active filter. `classCode` is already on every catalog line for this.
-- **Scene 2 depth:** moons (per-planet `moons[]`), asteroid belts, rings (`hasRings`), a per-planet
-  detail panel on hover, and a log-radius option so *spread* systems don't bury inner planets in the
-  star. All the data is already in the per-system JSON.
+- **Scene 2 depth — remaining.** Rings, moons, and the hover detail panel are built (above).
+  Still open: **asteroid belts** (the exporter emits `asteroidBelts: []` for every system in this
+  catalog — nothing to draw until it populates them); a **log-radius** option so *spread* (~30 AU)
+  systems don't bury inner planets in the star (linear-r framing keeps ellipses honest but crowds the
+  centre); and true moon geometry (needs a >10-field `Planet` or a moon sub-record — the constructor
+  arity ceiling is 10; see BACKLOG).
 
 ## Running
 
