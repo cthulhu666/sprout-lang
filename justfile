@@ -456,14 +456,30 @@ _build-stage in_bin out_bin:
     echo "ERROR: {{in_bin}} not found" >&2; exit 1
   fi
   TMP_LL="/tmp/sprout_build_$$.ll"
-  trap 'rm -f "$TMP_LL"' EXIT
+  TMP_BIN="{{out_bin}}.$$.tmp"
+  trap 'rm -f "$TMP_LL" "$TMP_BIN"' EXIT
   echo "==> Emitting LLVM IR via {{in_bin}}..."
+  # --emit-ir exits 0 even on a source error, writing "ERROR: ..." into the output
+  # instead of IR (the byte-identity blind spot). Detect that here and fail loudly
+  # with the actual source error, rather than letting `opt` fail later with a
+  # cryptic "expected top-level entity" that hides the real cause.
   ./{{in_bin}} --emit-ir "{{stdlib_root}}" "{{driver}}" > "$TMP_LL"
+  # Diagnostics are "ERROR: bundle: ..." (parse) or "<line>:<col>: ERROR: check: ..."
+  # (typecheck) — both anchored at line start. The prefix guards against matching
+  # "ERROR:" inside emitted IR string constants (which begin with @.str).
+  if grep -qE "^([0-9]+:[0-9]+: )?ERROR:" "$TMP_LL"; then
+    echo "ERROR: compile failed while emitting IR via {{in_bin}} — source error:" >&2
+    grep -E "^([0-9]+:[0-9]+: )?ERROR:" "$TMP_LL" | head -8 >&2
+    exit 1
+  fi
   echo "==> Validating IR..."
   opt --passes=verify "$TMP_LL" -o /dev/null
   echo "==> Linking with clang..."
   mkdir -p "{{build_dir}}"
-  clang "$TMP_LL" {{runtime_src}} -O2 {{clang_extra}} -o "{{out_bin}}"
+  # Build to a temp then move, so a failed build never leaves a STALE {{out_bin}}
+  # behind (which would silently be used by the next step as if freshly built).
+  clang "$TMP_LL" {{runtime_src}} -O2 {{clang_extra}} -o "$TMP_BIN"
+  mv -f "$TMP_BIN" "{{out_bin}}"
   echo "==> Built {{out_bin}}"
 
 # Build compile_driver_bin_stage2 from stage-1.
