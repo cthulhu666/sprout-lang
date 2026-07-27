@@ -1,0 +1,81 @@
+module main
+import stdlib.test (TestState, new_state, assert_eq, summary)
+
+# Effectful-RHS let..else (do-local): a `do`-block bind may carry a refutable
+# pattern + `else`, for both effectful `<-` binds and pure `let` binds. Desugars
+# to `__t <- e ; match __t | pat -> do{rest} | residual -> handler` (bind) or
+# `match e | pat -> do{rest} | residual -> handler` (let).
+
+# A custom two-constructor result ADT — the shape the compiler's own inference
+# code uses (InferResult). `<-` on `Outcome !{IO}` strips the effect and binds the
+# Outcome value, which the refutable pattern destructures. (A bare `Result` would
+# instead trigger do-over-Result monadic bind, unwrapping the Ok payload — a
+# different, pre-existing `<-` semantics, out of scope here.)
+type Outcome = Good Int | Bad Int
+
+# An effectful producer: sequences an IO effect, then yields the given Outcome.
+fn io_outcome(o: Outcome) -> Outcome !{IO} =
+  do
+    print("")
+    o
+
+# Effectful refutable bind: the residual names the failing `Bad` payload.
+fn eff_recover(o: Outcome) -> Int !{IO} =
+  do
+    Good v <- io_outcome(o) else Bad code -> code
+    v
+
+# Pure refutable `let` as a do-statement, interleaved after an effect.
+fn pure_in_do(r: Result Int Int) -> Int !{IO} =
+  do
+    print("")
+    let Ok v = r else Err code -> code
+    v
+
+# The mixed block: effectful `<-` bind then pure `let` bind, both refutable.
+fn mixed(a: Outcome, b: Result Int Int) -> Int !{IO} =
+  do
+    Good x <- io_outcome(a) else Bad code -> code
+    let Ok y = b else Err code -> code
+    x + y
+
+# Chained effectful binds; a first failure short-circuits (the second never runs).
+fn chained(a: Outcome, b: Outcome) -> Int !{IO} =
+  do
+    Good x <- io_outcome(a) else Bad code -> code
+    Good y <- io_outcome(b) else Bad code -> code
+    x + y
+
+# Regression: the do-`let` now parses a *pattern*, but an irrefutable wildcard
+# `let _ = e` (no else) must still be accepted, exactly as the old ident-only
+# parser did — alongside a refutable `let` in the same block.
+fn wildcard_discard(r: Result Int Int) -> Int !{IO} =
+  do
+    let _ = 99
+    let Ok v = r else Err code -> code
+    v
+
+fn main() -> Unit !{IO} =
+  do
+    state <- new_state()
+    r1 <- eff_recover(Good(5))
+    assert_eq(state, "eff bind: Good binds value", r1, 5)
+    r2 <- eff_recover(Bad(42))
+    assert_eq(state, "eff bind: Bad payload recovered", r2, 42)
+    r3 <- pure_in_do(Ok(7))
+    assert_eq(state, "pure let in do: Ok", r3, 7)
+    r4 <- pure_in_do(Err(9))
+    assert_eq(state, "pure let in do: Err payload", r4, 9)
+    r5 <- mixed(Good(3), Ok(4))
+    assert_eq(state, "mixed <-/let: both success", r5, 7)
+    r6 <- mixed(Bad(11), Ok(4))
+    assert_eq(state, "mixed: effectful Bad short-circuits", r6, 11)
+    r7 <- mixed(Good(3), Err(13))
+    assert_eq(state, "mixed: pure Err payload", r7, 13)
+    r8 <- chained(Good(3), Good(4))
+    assert_eq(state, "chained: both success", r8, 7)
+    r9 <- chained(Bad(7), Good(4))
+    assert_eq(state, "chained: first Bad short-circuits", r9, 7)
+    r10 <- wildcard_discard(Ok(5))
+    assert_eq(state, "wildcard `let _ =` still parses alongside refutable let", r10, 5)
+    summary(state)

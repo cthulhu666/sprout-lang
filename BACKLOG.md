@@ -42,17 +42,24 @@ Legend:
   bare var binds the whole scrutinee; no failure ctor injected). Parser-only (disambiguate on `->`);
   W5 self-enforces residual exhaustiveness; `staircase-of-doom` lint now points payload chains at
   binding-else. Spec §5.2.1 + plan §6b; tests + `tests/conformance/type_error/let_binding_else_nonexhaustive_residual`.
-  **Remaining tiers:** 2 no-else propagate for `Result`/`Maybe` (a built-in `?`); 3 general
-  monad-generic propagate (entangled with effect-system design D2); effectful-RHS let..else (a `do`
-  body already works, but the *bindings* must be pure). Prior art (verified): Rust `let-else`/`?`,
-  Swift `guard`, Haskell `do`/MonadFail, OCaml binding operators. Plan + staging:
-  `docs/let-else-and-monadic-binding-plan.md`.
-- [ ] `P3` **Sweep real staircases onto binding-else (Tier 1b follow-on).** The feature landed
-  without adopters (kept separate from the semantics change). ~4 pure-prefix compiler staircases are
-  net-positive to flatten: `analysis_service_driver.op_session_update` (verified compiles),
-  `driver.run_file`, and the constraint/error cascades in `infer.sprout` (:3426, :4422). The 9
-  test-file staircases are `do`/`<-` compile-harness plumbing — skip (need effectful-RHS let..else).
-  Run `just lint` for the current inventory; each converted site keeps byte-identical codegen.
+  **Effectful-RHS (do-local) LANDED 2026-07-27:** inside a `do` block, both `<pat> <- <e>` and
+  `let <pat> = <e>` accept the same refutable `else`; parse-time desugar into `__t <- e; match __t | …`
+  (bind) or `match e | …` (let), no downstream/typing change. Surface **(A)** — `do`-local, keeping
+  `let..in` always-pure — chosen over widening `let..in`. Design `docs/effectful-let-else-v0.md`;
+  spec §5.2.2; `tests/stdlib/test_effectful_let_else.spr`; verified faithful by converting `infer_range`
+  → stage-3 self-host, then reverted. **Remaining tiers:** 2 no-else propagate for `Result`/`Maybe`
+  (a built-in `?`); 3 general monad-generic propagate (entangled with effect-system design D2). Prior
+  art (verified): Rust `let-else`/`?`, Swift `guard`, Haskell `do`/MonadFail, OCaml binding operators.
+  Plan + staging: `docs/let-else-and-monadic-binding-plan.md`.
+- [ ] `P3` **Sweep real staircases onto binding-else (follow-on).** Both tiers landed without
+  adopters (kept separate from the semantics changes). Now convertible: the pure-prefix sites
+  (`analysis_service_driver.op_session_update` — verified compiles; `driver.run_file`'s pure tail,
+  its `read_file` head stays a `match`) via Tier 1b, AND — since effectful-RHS (do-local) landed — the
+  `do`-block cascades in `infer.sprout` (`infer_range` verified via stage-3 self-host; the constraint
+  cascades ~:3426/:4422) plus the 9 `test_ir_codegen_*` compile-pipeline harnesses. Each conversion is
+  behaviour-preserving; both drivers are currently untested (need behavioural tests when swept). Run
+  `just lint` for the live inventory. Kept out of the feature PRs on purpose (don't mix refactors with
+  semantics changes).
 - [ ] `P2` Revisit string-interpolation type-directed dispatch (Mechanism A): Phase 4 ships a simple syntactic-coercion form (elaborator inserts `template_to_string` only at `String`-expected contexts; default template result is `String`). Evaluate migrating to an `IsTemplate` typeclass with instances for `String` and `StringTemplate` once usage patterns settle. Class-based dispatch is more principled and consistent with the rest of the class system; tradeoff is added constraint-machinery overhead and possible defaulting ambiguity. Decision should be driven by whether a third meaningful instance (e.g. `Bytes`, a logging frame, a tagged-template processor) lands and forces generality.
 - [x] `P1` Validate type-name references in `TypeDecl` field and constraint positions resolve to a declared type (strict type-name validation). Landed in PR feat/strict-typedecl-validation: `validate_all_decls` pass in `stdlib/compiler/infer.sprout` runs after `pre_scan_fn_decls`, walks `TypeDecl` constructor fields, `RecordDecl` field types, and `AliasDecl` RHS type-exprs; emits `type-validation: unknown type name \`X\` in declaration \`Y\`` on the first unresolved uppercase `TypeName`. Mutual recursion between ADTs is safe (pass runs post-scan). Positions NOT yet covered (see follow-up below): `ClassDecl` method signatures, `InstanceDecl` constraint types, `FnDecl` param/return annotations.
 - [ ] `P2` Extend strict type-name validation to `ClassDecl` method signatures, `InstanceDecl` constraint types, and `FnDecl` param/return annotations (follow-up to P1 above). The `validate_decl` function in `stdlib/compiler/infer.sprout` currently matches `| _ -> Nothing` for these positions. Extend it — the main complication for `FnDecl`/`ClassDecl` is correctly threading local type-parameter sets into `validate_te` so that method-specific variables like `a`, `b` in `fmap(f: a -> b) -> f b` are not flagged.

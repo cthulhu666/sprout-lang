@@ -459,28 +459,74 @@ fn step_has_bind_arrow(tokens: Vec token.Token, i: Int, depth: Int) -> Bool =
   else if depth == 0 && tok_is_symbol(tok_at(tokens, i), "<-") then true
   else step_has_bind_arrow(tokens, i + 1, update_bracket_depth(tok_at(tokens, i), depth))
 
+# A do step as parsed, before the binding-else desugar. A plain step passes
+# through unchanged; a refutable step (`<pat> <- <e> else …` or `let <pat> = <e>
+# else …`) carries the pieces the collector needs to splice the *remaining* steps
+# into the success arm. Fields: is_bind (`<-` vs pure `let`), success pattern, the
+# bound value/scrutinee, the optional residual pattern, the else handler, and the
+# source position of the binding (so the desugared match reads as `<-`/`let`, not
+# `match`, keeping the staircase lint from re-flagging generated code).
+type DoStepParse (..) =
+  | DoStepPlain ast.DoStep
+  | DoStepRefutable Bool ast.Pattern ast.Expr (Maybe ast.Pattern) ast.Expr source.SourcePos
+
+fn do_tmp_name(pos: source.SourcePos) -> String =
+  "__do" ++ int_to_string(source.position_line(pos)) ++ "_" ++ int_to_string(source.position_column(pos))
+
+# Desugars a refutable do step, given the already-collected `rest` steps, into
+# ordinary steps: an effectful bind runs the value into a fresh temp then matches
+# it; a pure `let` matches the value directly. The success arm carries `rest` as a
+# nested `do`; the else arm is the residual pattern (or a wildcard for a constant
+# else). This is exactly the hand-written `<-`/`match` staircase, so inference,
+# effect threading and codegen are unchanged.
+fn build_do_refutable(is_bind: Bool, success_pat: ast.Pattern, value: ast.Expr, residual: Maybe ast.Pattern, handler: ast.Expr, rest: List ast.DoStep, pos: source.SourcePos) -> List ast.DoStep =
+  let branches = Cons(ast.MatchBranch(success_pat, ast.DoExpr(rest, pos)),
+                   Cons(ast.MatchBranch(residual_or_wild(residual, pos), handler), Nil))
+  in if is_bind then
+       let tmp = do_tmp_name(pos)
+       in Cons(ast.DoBindStep(ast.VarPattern(tmp, pos), value),
+            Cons(ast.DoExprStep(ast.MatchExpr(ast.VarExpr(tmp, pos), branches, pos)), Nil))
+     else
+       Cons(ast.DoExprStep(ast.MatchExpr(value, branches, pos)), Nil)
+
 # Parses one do step from a sub-slice of tokens (step_tokens is the exact tokens for this step).
-fn parse_do_step_sub(step_tokens: Vec token.Token) -> Result ParseError (ast.DoStep, Int) =
-  if tok_is_keyword(tok_at(step_tokens, 0), "let") then
+fn parse_do_step_sub(step_tokens: Vec token.Token) -> Result ParseError (DoStepParse, Int) =
+  let slice_pos = tok_pos(tok_at(step_tokens, 0))
+  in if tok_is_keyword(tok_at(step_tokens, 0), "let") then
     do
       (_, i2) <- expected_keyword("let", step_tokens, 0)
-      (name_tok, i3) <- expected_ident("do let binding name", step_tokens, i2)
+      (pat, i3) <- parse_pattern(step_tokens, i2)
       (_, i4) <- expected_symbol("=", step_tokens, i3)
-      (value, _) <- parse_expr(step_tokens, i4)
-      Ok((ast.DoLetStep(token.token_text(name_tok), value), 0))
+      (value, i5) <- parse_expr(step_tokens, i4)
+      if tok_is_keyword(tok_at(step_tokens, i5), "else") then
+        do
+          (_, i6) <- expected_keyword("else", step_tokens, i5)
+          (residual, handler) <- parse_let_else_clause(step_tokens, i6)
+          Ok((DoStepRefutable(false, pat, value, residual, handler, slice_pos), 0))
+      else
+        match pat with
+        | ast.VarPattern name _ -> Ok((DoStepPlain(ast.DoLetStep(name, value)), 0))
+        | ast.WildcardPattern _ -> Ok((DoStepPlain(ast.DoLetStep("_", value)), 0))
+        | _ -> Err(ParseError("refutable `let` binding in a do block requires an `else`", slice_pos))
   else if step_has_bind_arrow(step_tokens, 0, 0) then
     do
       (pattern, i2) <- parse_pattern(step_tokens, 0)
       (_, i3) <- expected_symbol("<-", step_tokens, i2)
-      (value, _) <- parse_expr(step_tokens, i3)
-      Ok((ast.DoBindStep(pattern, value), 0))
+      (value, i4) <- parse_expr(step_tokens, i3)
+      if tok_is_keyword(tok_at(step_tokens, i4), "else") then
+        do
+          (_, i5) <- expected_keyword("else", step_tokens, i4)
+          (residual, handler) <- parse_let_else_clause(step_tokens, i5)
+          Ok((DoStepRefutable(true, pattern, value, residual, handler, slice_pos), 0))
+      else
+        Ok((DoStepPlain(ast.DoBindStep(pattern, value)), 0))
   else
     do
       (value, _) <- parse_expr(step_tokens, 0)
-      Ok((ast.DoExprStep(value), 0))
+      Ok((DoStepPlain(ast.DoExprStep(value)), 0))
 
 # Parses one do step from tokens[i..end_i) and returns (step, end_i).
-fn parse_do_step(tokens: Vec token.Token, i: Int, end_i: Int) -> Result ParseError (ast.DoStep, Int) =
+fn parse_do_step(tokens: Vec token.Token, i: Int, end_i: Int) -> Result ParseError (DoStepParse, Int) =
   match parse_do_step_sub(vec_slice(i, end_i - i, tokens)) with
   | Err e -> Err(e)
   | Ok (step, _) -> Ok((step, end_i))
@@ -499,8 +545,15 @@ fn collect_do_steps(tokens: Vec token.Token, i: Int, do_line: Int, block_col: In
 
 fn collect_do_steps_at(tokens: Vec token.Token, i: Int, do_line: Int, block_col: Int, acc: List ast.DoStep) -> Result ParseError (List ast.DoStep, Int) =
   do
-    (step, i2) <- parse_do_step(tokens, i, scan_do_step_end(tokens, i, i, do_line, 0, block_col))
-    collect_do_steps(tokens, i2, do_line, block_col, Cons(step, acc))
+    (stepres, i2) <- parse_do_step(tokens, i, scan_do_step_end(tokens, i, i, do_line, 0, block_col))
+    match stepres with
+    | DoStepPlain step -> collect_do_steps(tokens, i2, do_line, block_col, Cons(step, acc))
+    | DoStepRefutable is_bind pat value residual handler pos ->
+        do
+          (rest, i3) <- collect_do_steps(tokens, i2, do_line, block_col, Nil)
+          match rest with
+          | Nil -> Err(ParseError("a binding-else do step needs at least one following step as its success continuation", pos))
+          | [_ | _] -> Ok((list_append(list_reverse(acc), build_do_refutable(is_bind, pat, value, residual, handler, rest, pos)), i3))
 
 fn parse_do_expr(tokens: Vec token.Token, i: Int) -> Result ParseError (ast.Expr, Int) =
   do

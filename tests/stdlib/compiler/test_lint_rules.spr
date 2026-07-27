@@ -144,6 +144,18 @@ let already_let_else =
   "    if is_cont(b1) && is_cont(b2) && is_cont(b3) then Just((b0, i))\n" ++
   "    else Nothing\n"
 
+# A do block written with effectful-RHS binding-else (do-local refutable binds).
+# The parser desugars each into a nested match, but positions them at the `<-`/`let`
+# source, so `is_written_as_match` drops them — no staircase finding, just like
+# `already_let_else`. Guards the desugar's position choice against regression.
+let already_do_binding_else =
+  "fn eff(a: Result Int Int, b: Result Int Int, c: Result Int Int) -> Int !{IO} =\n" ++
+  "  do\n" ++
+  "    Ok x <- io_result(a) else Err e -> e\n" ++
+  "    Ok y <- io_result(b) else Err e -> e\n" ++
+  "    Ok z <- io_result(c) else Err e -> e\n" ++
+  "    x + y + z\n"
+
 let blocked_own_payload =
   "fn op_session_update(req: Json, state: Int) -> Json =\n" ++
   "  match require_int_field(req, \"session_id\") with\n" ++
@@ -345,6 +357,7 @@ fn main() -> Unit !{IO} =
     assert_eq(state, "list recursion wrapping an inner Maybe match: no staircase-of-doom finding", count_by_rule(lint_rules.lint_ast(list_recursion_wrapping_maybe), "staircase-of-doom"), 0)
 
     assert_eq(state, "already let..else (desugars to the same MatchExpr shape): no finding", count_list(lint_rules.lint_ast(already_let_else)), 0)
+    assert_eq(state, "do binding-else (new syntax, desugars to matches at bind positions): no finding", count_by_rule(lint_rules.lint_ast(already_do_binding_else), "staircase-of-doom"), 0)
 
     assert_eq(state, "clean chain: message references let..else", mentions_let_else(first_message(lint_rules.lint_ast(three_deep_chain))), true)
 

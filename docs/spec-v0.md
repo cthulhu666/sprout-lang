@@ -191,6 +191,38 @@ Rules:
   are visible in a `let … in` RHS/body; `let … in` bindings are not visible in
   `where`).
 
+### 5.2.2 Refutable binds in `do` blocks *(experimental)*
+
+Inside a `do` block, both the effectful bind (`<pattern> <- <e>`) and the pure
+local bind (`let <pattern> = <e>`) may carry a refutable pattern with an `else`,
+using the same constant/binding-else forms as §5.2.1:
+
+```sprout
+fn infer_range(…) -> InferResult !{IO} =
+  do
+    InferOk lo s1 _ _ <- infer_expr(env, e_lo) else InferErr p e -> InferErr(p, e)
+    let Ok s2 = unify_int(s1, lo) else Err e -> InferErr(pos, `not Int: ${e}`)
+    InferOk(build(lo), s2, …)
+```
+
+A refutable `do` step short-circuits the block to its `else`; the remaining steps
+form the success continuation. With continuation `<rest>` (the following steps as a
+nested `do`), a step desugars to a single `match`:
+
+```
+<pat> <- <e> else <fb | rpat -> h>   →   __t <- <e>
+<rest>                                    match __t with | <pat> -> do <rest> | <else-arm>
+let <pat> = <e> else <fb | rpat -> h>  →  match <e> with | <pat> -> do <rest> | <else-arm>
+```
+
+The effectful form runs `<e>`'s effect exactly once (via the ordinary `<-`) before
+the branch; the pure form matches the value directly. Exhaustiveness is enforced by
+the same non-exhaustive-match rule (a residual leaving cases uncovered is an error).
+A refutable step with **no following step** is an error (it would have no success
+continuation). RHS effect handling is inherited from `<-` and is unchanged — this is
+purely a parse-time rewrite (`docs/effectful-let-else-v0.md`). Monadic propagation (a
+no-`else` form) remains planned.
+
 ### 5.3 Lambda expression
 
 ```sprout
