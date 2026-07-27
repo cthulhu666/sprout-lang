@@ -6,7 +6,7 @@ import stdlib.math (min)
 import loam.camera (Cam, cam_drive, cam_distance)
 import loam.view (cam_apply)
 import loam.config (parse_config, cfg_int)
-import loam.galaxy_lod (pow2, level_offset, group_of, clampi, desired_level)
+import loam.galaxy_lod (pow2, level_offset, group_of, clampi, desired_level, next_level)
 
 # Sprout / Loam — 3D GALAXY MAP (scene 1) with zoom-adaptive streaming.
 #
@@ -38,7 +38,7 @@ import loam.galaxy_lod (pow2, level_offset, group_of, clampi, desired_level)
 # --- Tunables (compile-time; a .conf loader is a later-stage polish) --------------------------------
 let default_catalog = "catalog"  # relative fallback; the real catalog dir is passed as argv[0]
 
-let star_scale = 3.0  # per-star render radius = sizeCode (ly) * this. Tuned for visibility.
+let star_scale = 1.0  # per-star render radius = sizeCode (ly) * this * level falloff (see star_size).
 let near_plane = 5.0
 let far_plane = 400000.0  # a galaxy is ~100k ly across; the default 1000 far plane would clip it
 
@@ -59,6 +59,7 @@ let key_pan_frac = 0.02  # WASD pan per frame as a fraction of eye distance
 let drag_pan_frac = 0.0018  # shift-drag pan per pixel as a fraction of eye distance
 
 let stream_max_level = 4  # deepest catalog level (matches the exporter's populated depth)
+let lod_hysteresis = 0.15  # deadband (fraction of a boundary) so the LoD level never flip-flops on a zoom boundary
 let load_budget = 6  # max NEW tiles read per frame — throttles streaming so it never hitches
 let neighbor_radius = 1  # (2r+1)^2 block of tiles loaded per level around the camera target
 let draw_cull = 0.0  # 0 = frustum-only; group_count already bounds the levels drawn
@@ -93,6 +94,14 @@ fn tile_index(coord: Double, level: Int, radius: Double) -> Int =
   let n = pow2(level)
       raw = gfx.double_to_int((coord + radius) / (2.0 * radius) * to_double(n))
   in clampi(raw, 0, n - 1)
+
+# Per-star render scale for a tile at `level`. A quadtree halves linear tile spacing per level, so
+# dividing the render radius by 2^level keeps the star-radius-to-neighbour-spacing ratio roughly
+# constant at every depth: the brightest L0 stars stay large landmarks, while the dense deep-level
+# stars shrink to fine dots instead of merging into a solid carpet. It also softens LoD pop-in —
+# a level that streams in on zoom arrives as small points, not full-size balls.
+fn star_size(level: Int) -> Double =
+  star_scale / to_double(pow2(level))
 
 fn tile_path(dir: String, level: Int, ix: Int, iy: Int) -> String =
   dir ++ "/L" ++ to_string(level) ++ "/tile_" ++ to_string(ix) ++ "_" ++ to_string(iy) ++ ".txt"
@@ -142,7 +151,7 @@ fn load_one(dir: String, level: Int, ix: Int, iy: Int, loaded: Dict Int, budget:
            | Err _ -> (dict_set(key, 1, loaded), budget)
            | Ok text ->
                do
-                 push_lines(str_split_lines(text), gid, star_scale)
+                 push_lines(str_split_lines(text), gid, star_size(level))
                  (dict_set(key, 1, loaded), budget - 1)
 
 # A row (dj sweep) then the block (di sweep) of tiles around (cx, cy) at one level.
@@ -260,6 +269,19 @@ fn catalog_dir() -> String !{IO} =
         print("[galaxy] Falling back to ./" ++ default_catalog)
         default_catalog
 
+# Optional integer camera override from argv[idx] (falls back to `dflt`). Lets a screenshot/canary
+# run script the opening camera without a rebuild, e.g.
+#   just run-gfx examples/gfx/galaxy_map.sprout <catalog> <radius> <height> <yaw_milli> <tx> <tz>
+# All values are integer light-years except yaw, which is milliradians (500 = 0.5 rad). Absent args
+# keep the init_* defaults, so the plain `run-gfx <catalog>` invocation is unchanged.
+fn arg_int(idx: Int, dflt: Int) -> Int !{IO} =
+  match argv_get(idx) with
+  | Nothing -> dflt
+  | Just s ->
+      match parse_int(s) with
+      | Just n -> n
+      | Nothing -> dflt
+
 # Galaxy radius from the catalog meta.txt (key/value ints), so tile binning matches the exporter.
 fn read_radius(dir: String) -> Double !{IO} =
   match read_file(dir ++ "/meta.txt") with
@@ -268,14 +290,16 @@ fn read_radius(dir: String) -> Double !{IO} =
 
 # --- Render loop --------------------------------------------------------------------------------
 fn render_loop(dir: String, cam: Cam, radius: Double, loaded: Dict Int,
-               sel_name: String, sel_detail: String, prev_rdown: Bool, view: Int) -> Unit !{IO} =
+               sel_name: String, sel_detail: String, prev_rdown: Bool, view: Int, prev_lvl: Int) -> Unit !{IO} =
   do
     stop <- gfx.window_should_close()
     if stop then gfx.close_window()
     else
       do
         let dist = cam_distance(cam)
-        let lvl = min(desired_level(dist), stream_max_level)
+        # Hysteretic LoD: step at most one level from the previously-committed level, and only once the
+        # eye has moved a deadband PAST the boundary — so hovering on a zoom boundary can't flip-flop.
+        let lvl = next_level(prev_lvl, dist, stream_max_level, lod_hysteresis)
         streamed <- load_levels(dir, cam, lvl, 0, radius, loaded, load_budget)
         cam_apply(cam)
         gfx.frame_begin()
@@ -331,7 +355,7 @@ fn render_loop(dir: String, cam: Cam, radius: Double, loaded: Dict Int,
             | (best_d2, best_name, best_detail) ->
                 let name2 = if best_d2 < pick_radius2 then best_name else sel_name
                     detail2 = if best_d2 < pick_radius2 then best_detail else sel_detail
-                in render_loop(dir, cam2, radius, loaded2, name2, detail2, rdown, next_view)
+                in render_loop(dir, cam2, radius, loaded2, name2, detail2, rdown, next_view, lvl)
 
 fn main() -> Unit !{IO} =
   do
@@ -341,6 +365,16 @@ fn main() -> Unit !{IO} =
     make_models()
     dir <- catalog_dir()
     radius <- read_radius(dir)
-    render_loop(dir, Cam(yaw = init_yaw, radius = init_radius, height = init_height,
-                         tx = 0.0, ty = 0.0, tz = 0.0), radius, dict_empty(),
-                "No system selected", "Right-click a star to inspect it", false, 0)
+    cam_radius <- arg_int(1, gfx.double_to_int(init_radius))
+    cam_height <- arg_int(2, gfx.double_to_int(init_height))
+    cam_yaw_milli <- arg_int(3, gfx.double_to_int(init_yaw * 1000.0))
+    cam_tx <- arg_int(4, 0)
+    cam_tz <- arg_int(5, 0)
+    let cam0 = Cam(yaw = to_double(cam_yaw_milli) / 1000.0,
+                   radius = to_double(cam_radius), height = to_double(cam_height),
+                   tx = to_double(cam_tx), ty = 0.0, tz = to_double(cam_tz))
+    # Seed the committed LoD level straight off the nominal ladder so the opening frame is at the
+    # right detail immediately; render_loop's next_level then applies hysteresis from here on.
+    let seed_lvl = min(desired_level(cam_distance(cam0)), stream_max_level)
+    render_loop(dir, cam0, radius, dict_empty(),
+                "No system selected", "Right-click a star to inspect it", false, 0, seed_lvl)

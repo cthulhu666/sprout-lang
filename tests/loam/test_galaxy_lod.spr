@@ -1,5 +1,5 @@
 import stdlib.test (TestState, new_state, assert_eq, summary)
-import loam.galaxy_lod (pow2, level_offset, group_of, clampi, desired_level)
+import loam.galaxy_lod (pow2, level_offset, group_of, clampi, desired_level, next_level)
 
 # loam.galaxy_lod holds the PURE quadtree level-of-detail math for the galaxy-map demo. These must
 # mirror the universegen catalog exporter's tiling: a level-L quadtree has 2^L x 2^L tiles, and each
@@ -46,5 +46,22 @@ fn main() -> Unit !{IO} =
     assert_eq(state, "desired_level 20k", desired_level(20000.0), 2)
     assert_eq(state, "desired_level 8k", desired_level(8000.0), 3)
     assert_eq(state, "desired_level near", desired_level(1000.0), 4)
+
+    # level_boundary single-sources the ladder thresholds; its values are covered indirectly by the
+    # desired_level and next_level assertions (Double has no Eq instance to assert them directly).
+    # next_level: hysteresis around the boundaries with a deadband of `hys` (here 0.15). It steps at
+    # most ONE level per call and only once the distance has moved a hys-fraction PAST the boundary
+    # being crossed, so hovering on a boundary does not flip-flop.
+    # Boundary(0)=60000 -> finer band <51000, coarser band >69000.
+    assert_eq(state, "next_level hold-finer in deadband", next_level(0, 55000.0, 4, 0.15), 0)
+    assert_eq(state, "next_level step finer past band", next_level(0, 50000.0, 4, 0.15), 1)
+    assert_eq(state, "next_level hold-coarser in deadband", next_level(1, 65000.0, 4, 0.15), 1)
+    assert_eq(state, "next_level step coarser past band", next_level(1, 70000.0, 4, 0.15), 0)
+    # Steps only one level even when the target is several away (progressive refinement).
+    assert_eq(state, "next_level one step toward deep", next_level(0, 1000.0, 4, 0.15), 1)
+    # Cannot exceed maxlvl.
+    assert_eq(state, "next_level capped at maxlvl", next_level(4, 1000.0, 4, 0.15), 4)
+    # Holds at the exact nominal boundary (inside both deadbands).
+    assert_eq(state, "next_level holds at nominal boundary", next_level(2, 12000.0, 4, 0.15), 2)
 
     summary(state)

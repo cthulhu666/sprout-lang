@@ -55,11 +55,29 @@ examples/gfx/galaxy_map.sprout  ──▶  stdlib.gfx  ──▶  graphics/sprou
   `group_of(level,ix,iy) = level_offset(level) + iy·2^level + ix` (level bases `0,1,5,21,85`). Tiles
   are lazy-loaded once (throttled to `load_budget` reads/frame) and never cleared — so there is no
   eviction/reload/free-list, and no boundary-crossing stutter.
+- **Per-star size scales with the star's level.** A star's render radius is
+  `sizeCode · star_scale / 2^level` (`star_size` in the demo). A quadtree halves linear tile spacing
+  per level, so dividing the radius by `2^level` holds the star-radius-to-neighbour-spacing ratio
+  roughly constant at every depth: the brightest L0 stars (and all black holes, forced into L0) stay
+  large landmarks, while the dense deep-level stars shrink to fine dots instead of merging into one
+  solid carpet. This is also what makes zoom **visually smooth** — a level that streams in on zoom-in
+  arrives as small points rather than popping in as full-size spheres. (Before this, a flat
+  `star_scale` made every level's stars the same world size, so zooming into the core drew a wall of
+  overlapping balls.)
 - **`group_count` is the LoD selector.** Because levels occupy contiguous ascending group ranges,
   `gfx.draw_instances(level_offset(L+1), …)` draws exactly levels 0..L. The zoom-derived level (a
   distance ladder in `desired_level`) is therefore both what is streamed *and* what is drawn, in one
   call; the engine frustum-culls the rest. Deep tiles loaded from an earlier zoom-in are simply not
   scanned when zoomed back out.
+- **Hysteretic level selection.** The committed level is threaded through the render loop and updated
+  per frame by `next_level(cur, dist, maxlvl, hys)`, not read straight off `desired_level`. A level is
+  a discrete choice, so selecting off the raw ladder makes it flip-flop whenever the eye hovers on a
+  boundary — streaming and un-streaming a whole level's stars every other frame. `next_level` adds a
+  deadband of `hys` (0.15): it steps finer only once the distance drops that fraction *below* the
+  boundary and coarser only once it rises that fraction *above*, and moves at most one level per frame
+  (a fast zoom refines progressively). `desired_level` is kept only to seed the committed level at
+  startup so the opening frame is already at the right detail. Both read `level_boundary`, the single
+  source of the ladder thresholds. Pure and headless-tested in `tests/loam/test_galaxy_lod.spr`.
 - **Picking (right-click).** No retained star store — a click re-reads the ~focus tiles, projects each
   star with `gfx.world_to_screen`, and selects the nearest to the cursor within a pixel radius. Its
   `name`/`detailLine` render in the bottom-left panel.
@@ -117,8 +135,9 @@ These are gfx-binding additions (non-bootstrap; no seed refresh):
   C-implemented `str_split_lines` extern is O(n).
 - The generator's disk is **uniform** (`generateDiskStar` draws `baseTheta` uniformly over the full
   circle), so there are no visible spiral arms — the render is faithful to the data.
-- Zoomed into the dense core the field reads as a solid mass; star sizing (`star_scale`, per-class
-  `sizeCode`) is a visibility compromise, not physical.
+- Star sizing (`sizeCode · star_scale / 2^level`) is a visibility compromise, not physical — a real
+  star is sub-pixel at any of these scales. The `/2^level` falloff keeps the dense levels legible; the
+  `sizeCode` and `star_scale` numbers are hand-tuned for the opening framing.
 
 ## Planned extensions (next iterations — designed for, not built)
 
@@ -139,6 +158,21 @@ mise exec -- just run-gfx examples/gfx/galaxy_map.sprout /Users/cthulhu/GameDev/
 # canary + screenshot:
 SPROUT_GFX_MAX_FRAMES=120 SPROUT_GFX_SCREENSHOT=galaxy.png \
   mise exec -- just run-gfx examples/gfx/galaxy_map.sprout /Users/cthulhu/GameDev/universegen/catalog
+```
+
+**Scripting the opening camera** (for screenshots / canaries at a fixed viewpoint). Optional integer
+args after the catalog dir override the starting `Cam` without a rebuild:
+`… <catalog> <radius> <height> <yaw_milli> <tx> <tz>` — all light-years except `yaw_milli`
+(milliradians; 500 = 0.5 rad). A small `height` with a large `radius` gives a low pitch (disk seen
+near edge-on); a small `radius`+`height` zooms into the core (deeper LoD). Absent args keep the
+`init_*` defaults. Note `TakeScreenshot` writes relative to the working directory (the repo root).
+```
+# edge-on overview:
+SPROUT_GFX_MAX_FRAMES=110 SPROUT_GFX_SCREENSHOT=hero.png SPROUT_GFX_SCREENSHOT_FRAME=100 \
+  mise exec -- just run-gfx examples/gfx/galaxy_map.sprout <catalog> 85000 14000 700 0 0
+# zoomed into the core (deepest LoD):
+SPROUT_GFX_MAX_FRAMES=160 SPROUT_GFX_SCREENSHOT=core.png SPROUT_GFX_SCREENSHOT_FRAME=150 \
+  mise exec -- just run-gfx examples/gfx/galaxy_map.sprout <catalog> 3000 3000 500 0 0
 ```
 
 Regenerate the catalog (in the universegen repo):

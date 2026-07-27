@@ -28,11 +28,35 @@ export fn group_of(level: Int, ix: Int, iy: Int) -> Int =
 export fn clampi(v: Int, lo: Int, hi: Int) -> Int =
   if v < lo then lo else if v > hi then hi else v
 
-# Camera eye-distance -> desired max detail level. stdlib.math is int-only (no log2 on a Double), so
-# a threshold ladder: far away shows only the coarse levels, close in reaches the deepest.
+# Nominal eye-distance boundary between adjacent detail levels `l` and `l+1` (the ladder crossed as
+# you zoom). The SINGLE source of the LoD thresholds — both desired_level and next_level read it, so
+# the ladder is defined once. stdlib.math is int-only (no log2 on a Double), hence a threshold ladder
+# rather than a computed log: far away shows only the coarse levels, close in reaches the deepest.
+export fn level_boundary(l: Int) -> Double =
+  if l <= 0 then 60000.0
+  else if l <= 1 then 28000.0
+  else if l <= 2 then 12000.0
+  else 5000.0
+
+# Camera eye-distance -> desired max detail level, straight off the nominal ladder (no hysteresis).
+# Used to SEED the committed level at startup; the per-frame update uses next_level.
 export fn desired_level(dist: Double) -> Int =
-  if dist > 60000.0 then 0
-  else if dist > 28000.0 then 1
-  else if dist > 12000.0 then 2
-  else if dist > 5000.0 then 3
+  if dist > level_boundary(0) then 0
+  else if dist > level_boundary(1) then 1
+  else if dist > level_boundary(2) then 2
+  else if dist > level_boundary(3) then 3
   else 4
+
+# Hysteretic per-frame level update: given the currently-committed level `cur` and the eye distance,
+# return the next committed level. A star level is a DISCRETE choice, so selecting straight off the
+# ladder makes it flip-flop whenever the eye hovers on a boundary — one frame level 1, the next level
+# 2, streaming and un-streaming a whole level's worth of stars. next_level adds a deadband of `hys`
+# (a fraction, e.g. 0.15): it steps FINER (cur+1) only once the distance has dropped a hys-fraction
+# BELOW the cur->cur+1 boundary, and COARSER (cur-1) only once it has risen a hys-fraction ABOVE the
+# (cur-1)->cur boundary; inside the band it holds. It moves at most one level per call, so a fast
+# zoom refines progressively (one level per frame) instead of dumping every level in at once. `maxlvl`
+# caps the deepest populated level.
+export fn next_level(cur: Int, dist: Double, maxlvl: Int, hys: Double) -> Int =
+  if (cur < maxlvl) && (dist < level_boundary(cur) * (1.0 - hys)) then cur + 1
+  else if (cur > 0) && (dist > level_boundary(cur - 1) * (1.0 + hys)) then cur - 1
+  else cur
