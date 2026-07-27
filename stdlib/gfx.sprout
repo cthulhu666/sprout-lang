@@ -23,8 +23,7 @@ extern fn gfx_load_model(path: String) -> Int !{IO}
 extern fn gfx_draw_cube(x: Double, y: Double, z: Double, size: Double, r: Int, g: Int, b: Int) -> Unit !{IO}
 extern fn gfx_draw_line3d(x0: Double, y0: Double, z0: Double, x1: Double, y1: Double, z1: Double, r: Int, g: Int, b: Int) -> Unit !{IO}
 extern fn gfx_draw_sphere(x: Double, y: Double, z: Double, radius: Double, r: Int, g: Int, b: Int) -> Unit !{IO}
-extern fn gfx_draw_star(x: Double, y: Double, z: Double, radius: Double, r: Int, g: Int, b: Int) -> Unit !{IO}
-extern fn gfx_draw_planet(x: Double, y: Double, z: Double, radius: Double, seed: Double, kind: Int, r: Int, g: Int, b: Int) -> Unit !{IO}
+extern fn gfx_draw_sphere_shaded(h: Int, x: Double, y: Double, z: Double, radius: Double, r: Int, g: Int, b: Int) -> Unit !{IO}
 extern fn gfx_capture_quad(p0x: Double, p0y: Double, p0z: Double,
                            p1x: Double, p1y: Double, p1z: Double,
                            p2x: Double, p2y: Double, p2z: Double,
@@ -78,7 +77,14 @@ extern fn gfx_overlay_begin() -> Unit !{IO}
 extern fn gfx_close_window() -> Unit !{IO}
 extern fn gfx_set_clip_planes(near_plane: Double, far_plane: Double) -> Unit !{IO}
 extern fn gfx_sphere_model(r: Int, g: Int, b: Int) -> Int !{IO}
-extern fn gfx_star_model(r: Int, g: Int, b: Int) -> Int !{IO}
+extern fn gfx_load_shader(vs: String, fs: String) -> Int !{IO}
+extern fn gfx_shader_set_float(h: Int, name: String, v: Double) -> Unit !{IO}
+extern fn gfx_shader_set_vec3(h: Int, name: String, x: Double, y: Double, z: Double) -> Unit !{IO}
+extern fn gfx_shader_set_int(h: Int, name: String, i: Int) -> Unit !{IO}
+extern fn gfx_model_set_shader(model_h: Int, shader_h: Int) -> Unit !{IO}
+extern fn gfx_camera_x() -> Double !{IO}
+extern fn gfx_camera_y() -> Double !{IO}
+extern fn gfx_camera_z() -> Double !{IO}
 extern fn gfx_world_to_screen(x: Double, y: Double, z: Double) -> Int !{IO}
 extern fn gfx_projected_x() -> Double !{IO}
 extern fn gfx_projected_y() -> Double !{IO}
@@ -138,21 +144,13 @@ export fn draw_line3d(x0: Double, y0: Double, z0: Double, x1: Double, y1: Double
 export fn draw_sphere(x: Double, y: Double, z: Double, radius: Double, r: Int, g: Int, b: Int) -> Unit !{IO} =
   gfx_draw_sphere(x, y, z, radius, r, g, b)
 
-# Draw an EMISSIVE (self-luminous) sphere in a flat RGB colour — a star. Unlike draw_sphere it is
-# full-bright with no shaded side (a star IS the light, not lit by one) and tessellates finer, so a
-# large on-screen body stays smooth. Scene 2 draws the sun with this; the scene-1 point cloud uses
-# the instanced equivalent (star_model). Immediate-mode.
-export fn draw_star(x: Double, y: Double, z: Double, radius: Double, r: Int, g: Int, b: Int) -> Unit !{IO} =
-  gfx_draw_star(x, y, z, radius, r, g, b)
-
-# Draw a PROCEDURAL planet or moon (scene 2): a diffuse-lit sphere whose surface is synthesised in the
-# shader — no texture asset. `seed` varies the surface per body; `kind` selects the style: 0 = rocky
-# (noise continents + oceans + polar ice caps), 1 = gas giant (turbulent latitude bands), 2 = moon
-# (grey cratered mottle). (r,g,b) is the base tint the surface derives from. Lit from a star assumed
-# at the WORLD ORIGIN (the day side faces it), with a blue atmosphere limb on rocky/gas bodies. Use
-# this for planets/moons; use draw_star for the (emissive) star. Immediate-mode.
-export fn draw_planet(x: Double, y: Double, z: Double, radius: Double, seed: Double, kind: Int, r: Int, g: Int, b: Int) -> Unit !{IO} =
-  gfx_draw_planet(x, y, z, radius, seed, kind, r, g, b)
+# Draw an immediate-mode sphere under a custom shader `h` (from load_shader), finely tessellated
+# (24x32) for a smooth silhouette. The flat (r,g,b) crosses as the mesh's per-vertex colour (a shader
+# reads it as `vertexColor`); set any other uniforms first with shader_set_*. This is the generic
+# primitive the galaxy demo builds emissive stars (loam.starfield) and procedural planets
+# (loam.planet) on — the engine has no built-in notion of either.
+export fn draw_sphere_shaded(h: Int, x: Double, y: Double, z: Double, radius: Double, r: Int, g: Int, b: Int) -> Unit !{IO} =
+  gfx_draw_sphere_shaded(h, x, y, z, radius, r, g, b)
 
 # Bake many draw_cube calls into ONE static GPU mesh: mesh_capture_begin(), run the tile loop
 # (each draw_cube appends its geometry), then handle <- mesh_capture_end(). Thereafter draw the
@@ -458,13 +456,32 @@ export fn set_clip_planes(near_plane: Double, far_plane: Double) -> Unit !{IO} =
 export fn sphere_model(r: Int, g: Int, b: Int) -> Int !{IO} =
   gfx_sphere_model(r, g, b)
 
-# Like sphere_model, but the sphere is EMISSIVE (self-luminous): draw_instances renders it full-bright
-# with no key-light shading, so it reads as a glowing star rather than a matte shaded ball. This is
-# the starfield primitive — one per spectral class, handle == class code, per-star size via the
-# instance_push `scale`, exactly like sphere_model. Emissiveness only takes effect for handles in the
-# instanced range (< 64). Call after open_window.
-export fn star_model(r: Int, g: Int, b: Int) -> Int !{IO} =
-  gfx_star_model(r, g, b)
+# --- Generic custom shaders ---
+# Compile a shader from GLSL source and return a handle. An empty vs/fs string means "use raylib's
+# default" for that stage. If the vertex shader declares an `instanceTransform` attribute the shader
+# is instancing-capable (usable via model_set_shader + draw_instances). Domain look-and-feel lives in
+# the CALLER's GLSL (see loam.starfield / loam.planet), not in the engine. Call after open_window.
+export fn load_shader(vs: String, fs: String) -> Int !{IO} =
+  gfx_load_shader(vs, fs)
+
+# Set a named uniform on shader `h` (looked up each call — cheap for a few per-frame uniforms).
+export fn shader_set_float(h: Int, name: String, v: Double) -> Unit !{IO} =
+  gfx_shader_set_float(h, name, v)
+export fn shader_set_vec3(h: Int, name: String, x: Double, y: Double, z: Double) -> Unit !{IO} =
+  gfx_shader_set_vec3(h, name, x, y, z)
+export fn shader_set_int(h: Int, name: String, i: Int) -> Unit !{IO} =
+  gfx_shader_set_int(h, name, i)
+
+# Assign shader `shader_h` to model `model_h`, so draw_instances / draw_model render it under that
+# shader (e.g. an emissive instanced starfield). Use an instancing-capable shader for instanced draws.
+export fn model_set_shader(model_h: Int, shader_h: Int) -> Unit !{IO} =
+  gfx_model_set_shader(model_h, shader_h)
+
+# The current camera eye position (as last set by set_camera), read component-wise (the i64 ABI
+# returns one word). For view-dependent shading — a caller feeds these into its shader's eye uniform.
+export fn camera_x() -> Double !{IO} = gfx_camera_x()
+export fn camera_y() -> Double !{IO} = gfx_camera_y()
+export fn camera_z() -> Double !{IO} = gfx_camera_z()
 
 # Project a world point to 2D screen pixels against the current camera, for click-picking. Returns
 # True if the point is in front of the camera — then projected_x()/projected_y() hold its screen

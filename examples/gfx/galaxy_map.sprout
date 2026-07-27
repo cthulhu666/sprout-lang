@@ -11,6 +11,8 @@ import loam.config (parse_config, cfg_int)
 import loam.galaxy_lod (pow2, level_offset, group_of, clampi, desired_level, next_level, tile_index_i)
 import loam.galaxy_filter (num_classes, mask_all, mask_none, bit_test, bit_toggle, popcount, class_name, class_rgb)
 import loam.orbit (ellipse_point)
+import loam.starfield as sf
+import loam.planet as pl
 
 # Sprout / Loam — 3D GALAXY MAP (scene 1) with zoom-adaptive streaming.
 #
@@ -115,16 +117,19 @@ fn bd(b: Bool) -> Double = if b then 1.0 else 0.0
 # Colours come from loam.galaxy_filter.class_rgb — the SINGLE source shared with the filter legend, so
 # a star and its checkbox swatch can never disagree. Black-hole classes (9..11) are deliberately
 # violet/magenta so they read as exotic landmarks. Created in ascending order so handle == classCode.
-fn make_models_from(c: Int) -> Unit !{IO} =
+# Build one sphere model per spectral class, each assigned the emissive instanced shader `star_sh`
+# (from loam.starfield) so the starfield renders as glowing stars, not matte lit balls.
+fn make_models_from(c: Int, star_sh: Int) -> Unit !{IO} =
   if c >= num_classes then ()
   else
     match class_rgb(c) with
     | (r, g, b) ->
         do
-          _h <- gfx.star_model(r, g, b)
-          make_models_from(c + 1)
+          h <- gfx.sphere_model(r, g, b)
+          gfx.model_set_shader(h, star_sh)
+          make_models_from(c + 1, star_sh)
 
-fn make_models() -> Unit !{IO} = make_models_from(0)
+fn make_models(star_sh: Int) -> Unit !{IO} = make_models_from(0, star_sh)
 
 # --- Tile / group math ---------------------------------------------------------------------------
 # The pure quadtree math (pow2, level_offset, group_of, clampi, desired_level) lives in the
@@ -661,17 +666,17 @@ fn ring_seg(cx: Double, cz: Double, rr: Double, i: Int) -> Unit !{IO} =
 
 # `count` schematic moon dots evenly spaced just outside the planet (real moon distances are far
 # sub-pixel at system scale, so this indicates moon PRESENCE, not true geometry — see the panel/docs).
-fn moon_dots(cx: Double, cz: Double, off: Double, count: Int, i: Int) -> Unit !{IO} =
+fn moon_dots(cx: Double, cz: Double, off: Double, count: Int, i: Int, planet_sh: Int) -> Unit !{IO} =
   if i >= count then ()
   else
     do
       let ang = to_double(i) * two_pi / to_double(if count < 1 then 1 else count)
       # kind 2 = moon (grey cratered mottle); seed per moon from its index so they differ.
-      gfx.draw_planet(cx + (off * cos(ang)), 0.0, cz + (off * sin(ang)), moon_size,
-                      (to_double(i) * 2.7) + 0.5, 2, 180, 180, 195)
-      moon_dots(cx, cz, off, count, i + 1)
+      pl.draw_planet(planet_sh, cx + (off * cos(ang)), 0.0, cz + (off * sin(ang)), moon_size,
+                     (to_double(i) * 2.7) + 0.5, 2, 180, 180, 195)
+      moon_dots(cx, cz, off, count, i + 1, planet_sh)
 
-fn draw_one_planet(scale: Double, p: Planet) -> Unit !{IO} =
+fn draw_one_planet(scale: Double, p: Planet, planet_sh: Int) -> Unit !{IO} =
   do
     orbit_seg(scale, p.a, p.e, p.argperi, 0)
     match ellipse_point(p.a, p.e, p.argperi, p.nu) with
@@ -681,17 +686,17 @@ fn draw_one_planet(scale: Double, p: Planet) -> Unit !{IO} =
           let pz = z * scale
           let prad = max_d(p.rad * planet_size_scale, planet_min_size)
           match planet_rgb(p.rad) with
-          | (pr, pg, pb) -> gfx.draw_planet(px, 0.0, pz, prad, planet_seed(p), planet_kind(p.rad), pr, pg, pb)
+          | (pr, pg, pb) -> pl.draw_planet(planet_sh, px, 0.0, pz, prad, planet_seed(p), planet_kind(p.rad), pr, pg, pb)
           if p.rings then ring_seg(px, pz, prad * ring_scale, 0) else ()
-          moon_dots(px, pz, prad + moon_offset, p.moons, 0)
+          moon_dots(px, pz, prad + moon_offset, p.moons, 0, planet_sh)
 
-fn draw_planets(scale: Double, ps: List Planet) -> Unit !{IO} =
+fn draw_planets(scale: Double, ps: List Planet, planet_sh: Int) -> Unit !{IO} =
   match ps with
   | Nil -> ()
   | Cons p rest ->
       do
-        draw_one_planet(scale, p)
-        draw_planets(scale, rest)
+        draw_one_planet(scale, p, planet_sh)
+        draw_planets(scale, rest, planet_sh)
 
 # AU->world scale fitting the outermost orbit to `fit_world_radius` (used for drawing AND hover
 # projection, so both agree). Computed from the cached planet list in the render loop.
@@ -701,10 +706,10 @@ fn system_scale(ps: List Planet) -> Double =
 # Draw a system (already-parsed planets, pre-computed `scale`): star at the origin, then every
 # planet's orbit + body + rings + moons. Planets are parsed once on entry and cached in the render
 # loop — NOT re-read per frame (that dropped the frame rate).
-fn draw_system(scale: Double, ps: List Planet) -> Unit !{IO} =
+fn draw_system(scale: Double, ps: List Planet, sun_sh: Int, planet_sh: Int) -> Unit !{IO} =
   do
-    gfx.draw_star(0.0, 0.0, 0.0, sun_size, 255, 240, 180)
-    draw_planets(scale, ps)
+    sf.draw_star(sun_sh, 0.0, 0.0, 0.0, sun_size, 255, 240, 180)
+    draw_planets(scale, ps, planet_sh)
 
 # --- Scene 2 hover: project each planet to screen, keep the one nearest the cursor for the detail
 # panel. Mirrors the scene-1 pick, but over the in-memory (cached) planet list — no file re-read. ---
@@ -793,7 +798,7 @@ fn legend_none_btn(active: Bool) -> Bool !{IO} =
 fn render_loop(dir: String, cam: Cam, scam: Cam, radius: Double, loaded: Dict Int,
                sel_name: String, sel_detail: String, prev_rdown: Bool, view: Int, prev_lvl: Int,
                csys: String, cplanets: List Planet, hov1: String, hov2: String,
-               mask: Int, prev_ldown: Bool) -> Unit !{IO} =
+               mask: Int, prev_ldown: Bool, sun_sh: Int, planet_sh: Int) -> Unit !{IO} =
   do
     stop <- gfx.window_should_close()
     if stop then gfx.close_window()
@@ -814,7 +819,7 @@ fn render_loop(dir: String, cam: Cam, scam: Cam, radius: Double, loaded: Dict In
         gfx.frame_begin()
         # Scene 1 draws the galaxy point cloud, filtered to the enabled spectral classes (model index
         # == classCode, so the mask enables/disables whole classes); scene 2 draws the selected system.
-        if view == 0 then gfx.draw_instances_masked(level_offset(lvl + 1), draw_cull, mask) else draw_system(s2scale, cplanets2)
+        if view == 0 then gfx.draw_instances_masked(level_offset(lvl + 1), draw_cull, mask) else draw_system(s2scale, cplanets2, sun_sh, planet_sh)
         gfx.overlay_begin()
         gfx.draw_fps(10, 10)
         if view == 0
@@ -903,7 +908,7 @@ fn render_loop(dir: String, cam: Cam, scam: Cam, radius: Double, loaded: Dict In
                 | (hov1b, hov2b) ->
                     let name2 = if best_d2 < pick_radius2 then best_name else sel_name
                         detail2 = if best_d2 < pick_radius2 then best_detail else sel_detail
-                    in render_loop(dir, cam2, scam2, radius, loaded2, name2, detail2, rdown, next_view, lvl, csys2, cplanets2, hov1b, hov2b, mask2, ldown)
+                    in render_loop(dir, cam2, scam2, radius, loaded2, name2, detail2, rdown, next_view, lvl, csys2, cplanets2, hov1b, hov2b, mask2, ldown, sun_sh, planet_sh)
 
 fn main() -> Unit !{IO} =
   do
@@ -922,7 +927,12 @@ fn main() -> Unit !{IO} =
     # source is the principled upgrade (see BACKLOG); Stage-3 dark procedural planets also mitigate it.
     gfx.supersample(2)
     gfx.post_bloom(0.62, 0.95)
-    make_models()
+    # Load the demo's procedural shaders (authored in loam, not the engine): emissive stars (instanced
+    # for the point cloud, immediate for the sun) + procedural planets. Handles thread into the draws.
+    star_sh <- sf.load_instance_shader()
+    sun_sh <- sf.load_immediate_shader()
+    planet_sh <- pl.load_shader()
+    make_models(star_sh)
     radius <- read_radius(dir)
     cam_radius <- arg_int(1, gfx.double_to_int(init_radius))
     cam_height <- arg_int(2, gfx.double_to_int(init_height))
@@ -949,4 +959,4 @@ fn main() -> Unit !{IO} =
     init_mask <- arg_int(7, mask_all)
     render_loop(dir, cam0, scam0, radius, dict_empty(),
                 init_name, "Right-click a star to inspect it", false, init_view, seed_lvl, "", Nil, "", "",
-                init_mask, false)
+                init_mask, false, sun_sh, planet_sh)
