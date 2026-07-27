@@ -164,6 +164,13 @@ export fn list_append(left: List a, right: List a) -> List a =
   | Nil -> right
   | Cons x rest -> Cons(x, list_append(rest, right))
 
+# O(sum of |f(x)|) with repeated append cost: bind for the List monad — apply f
+# to each element and concatenate the results (flatten-map). Backs `Monad List`.
+export fn list_flat_map(f: a -> List b, xs: List a) -> List b =
+  match xs with
+  | Nil -> Nil
+  | Cons x rest -> list_append(f(x), list_flat_map(f, rest))
+
 export fn vec_empty() -> Vec a =
   Vec(vector_empty())
 
@@ -640,6 +647,19 @@ export class Applicative f where Functor f {
   fn map2(g: a -> b -> c, xs: f a, ys: f b) -> f c
 }
 
+# Monad completes the Functor -> Applicative -> Monad tower: `flat_map` is
+# monadic bind (thread `xs : m a` into `f : a -> m b`, short-circuiting on the
+# empty/error case). `pure` is inherited from the Applicative superclass, so
+# Monad adds only bind. The method is `flat_map`; the exported combinator is
+# `and_then` (the `fmap`/`map`, `fold_values`/`fold` free-fn-delegates-to-method
+# idiom), keeping the class-method name out of the global namespace.
+export class Monad m where Applicative m {
+  fn flat_map(f: a -> m b, xs: m a) -> m b
+}
+
+export fn and_then(f: a -> m b, xs: m a) -> m b where Monad m =
+  flat_map(f, xs)
+
 export fn map(f: a -> b, xs: c a) -> c b where Functor c =
   fmap(f, xs)
 
@@ -985,6 +1005,12 @@ instance Applicative List {
   fn map2(g: a -> b -> c, xs: List a, ys: List b) -> List c = map2_list(g, xs, ys)
 }
 
+instance Monad List {
+  # Bind = flatten-map: concatenate f applied across every element. Consistent
+  # with the cartesian-product Applicative above.
+  fn flat_map(f: a -> List b, xs: List a) -> List b = list_flat_map(f, xs)
+}
+
 instance Applicative Maybe {
   fn pure(x: a) -> Maybe a = Just(x)
   # Fail-fast: any Nothing collapses the whole result. `do` desugars to the same
@@ -994,6 +1020,14 @@ instance Applicative Maybe {
       x <- mx
       y <- my
       Just(g(x, y))
+}
+
+instance Monad Maybe {
+  # Nothing short-circuits; Just x feeds the payload to the continuation.
+  fn flat_map(f: a -> Maybe b, mx: Maybe a) -> Maybe b =
+    match mx with
+    | Nothing -> Nothing
+    | Just x -> f(x)
 }
 
 instance Applicative (Result e) {
@@ -1006,6 +1040,14 @@ instance Applicative (Result e) {
       x <- rx
       y <- ry
       Ok(g(x, y))
+}
+
+instance Monad (Result e) {
+  # Left-biased: the first Err short-circuits; Ok x feeds the payload onward.
+  fn flat_map(f: a -> Result e b, rx: Result e a) -> Result e b =
+    match rx with
+    | Err e -> Err(e)
+    | Ok x -> f(x)
 }
 
 instance Functor Vec {
@@ -1103,6 +1145,20 @@ export fn result_pipe_ok(f: a -> b, r: Result e a) -> Result e b =
 
 export fn result_pipe_error(f: e -> f_err, r: Result e a) -> Result f_err a =
   result_map_error(f, r)
+
+# Maybe combinators, mirroring the result_* family. Bind/map are the generic
+# `and_then`/`map` (Monad/Functor); these cover the axes those classes do not:
+# unwrap-or-default and left-biased fallback (the Alternative `<|>` shape, kept
+# as a free fn because a Maybe-only Alternative class would be single-instance).
+export fn maybe_with_default(fallback: a, m: Maybe a) -> a =
+  match m with
+  | Just x -> x
+  | Nothing -> fallback
+
+export fn maybe_or_else(primary: Maybe a, fallback: Maybe a) -> Maybe a =
+  match primary with
+  | Just x -> Just(x)
+  | Nothing -> fallback
 
 export fn after(effect: Unit !{IO}, value: a) -> a !{IO} =
   value

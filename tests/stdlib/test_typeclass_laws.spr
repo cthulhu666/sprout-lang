@@ -21,6 +21,18 @@ fn add2(x: Int, y: Int) -> Int = x + y
 fn fst2(x: Int, y: Int) -> Int = x
 fn snd2(x: Int, y: Int) -> Int = y
 
+# Kleisli arrows (a -> m a) for the Monad laws. One per instance so the concrete
+# return type anchors dispatch, same role as m_pure/l_pure for Applicative.
+fn mk_inc(x: Int) -> Maybe Int = Just(x + 1)
+fn mk_dbl(x: Int) -> Maybe Int = Just(x * 2)
+fn lk_dup(x: Int) -> List Int = Cons(x, Cons(x + 100, Nil))
+fn lk_inc(x: Int) -> List Int = Cons(x + 1, Nil)
+fn rk_inc(x: Int) -> Result String Int = Ok(x + 1)
+fn rk_dbl(x: Int) -> Result String Int = Ok(x * 2)
+# Typed `pure` anchors for the right-identity law over each instance.
+fn r_pure(x: Int) -> Result String Int = pure(x)
+fn ok_7() -> Result String Int = Ok(7)
+
 # Typed `pure` anchors: give `map2`'s arguments a concrete `f` so instance dispatch
 # resolves (same role as nil_int()/no_int() for Eq). `m_pure(3) == Just(3)` and
 # `l_pure(3) == [3]` by definition, so these still exercise the pure/map2 laws.
@@ -185,5 +197,42 @@ fn main() -> Unit !{IO} =
       map2(snd2, l_pure(0), li_multi), li_multi)
     assert_eq(state, "applicative list right identity",
       map2(fst2, li_multi, l_pure(0)), li_multi)
+
+    # -----------------------------------------------------------------------
+    # Monad laws (generic and_then / flat_map).
+    #   Left identity:  and_then(f, pure(x)) == f(x)
+    #   Right identity: and_then(pure, m)    == m
+    #   Associativity:  and_then(g, and_then(f, m))
+    #                     == and_then(\x -> and_then(g, f(x)), m)
+    # Result is reduced to Int via result_with_default to avoid needing Eq Result.
+    # -----------------------------------------------------------------------
+
+    # Maybe — left identity (both the Just and Nothing carriers).
+    assert_eq(state, "monad maybe left identity", and_then(mk_inc, m_pure(5)), mk_inc(5))
+    # Maybe — right identity.
+    assert_eq(state, "monad maybe right identity just", and_then(m_pure, m_just_1), m_just_1)
+    assert_eq(state, "monad maybe right identity nothing", and_then(m_pure, m_nothing), m_nothing)
+    # Maybe — associativity.
+    assert_eq(state, "monad maybe associativity",
+      and_then(mk_dbl, and_then(mk_inc, m_just_1)),
+      and_then(\x -> and_then(mk_dbl, mk_inc(x)), m_just_1))
+
+    # List — left identity, right identity, associativity.
+    assert_eq(state, "monad list left identity", and_then(lk_dup, l_pure(5)), lk_dup(5))
+    assert_eq(state, "monad list right identity", and_then(l_pure, li_multi), li_multi)
+    assert_eq(state, "monad list associativity",
+      and_then(lk_dup, and_then(lk_inc, li_multi)),
+      and_then(\x -> and_then(lk_dup, lk_inc(x)), li_multi))
+
+    # Result — same laws, reduced to Int (Ok path) via result_with_default.
+    assert_eq(state, "monad result left identity",
+      result_with_default(-1, and_then(rk_inc, r_pure(5))),
+      result_with_default(-1, rk_inc(5)))
+    assert_eq(state, "monad result right identity",
+      result_with_default(-1, and_then(r_pure, ok_7())),
+      result_with_default(-1, ok_7()))
+    assert_eq(state, "monad result associativity",
+      result_with_default(-1, and_then(rk_dbl, and_then(rk_inc, ok_7()))),
+      result_with_default(-1, and_then(\x -> and_then(rk_dbl, rk_inc(x)), ok_7())))
 
     summary(state)

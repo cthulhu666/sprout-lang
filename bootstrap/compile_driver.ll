@@ -4616,6 +4616,51 @@ join_1:
   ret i64 %t$2
 }
 
+define i64 @list_flat_map(i64 %f, i64 %xs) {
+entry:
+  %t$0 = call i64 @sprout_tag(i64 %xs)
+  br label %arm_0_1
+arm_0_1:
+  %t$3 = add i64 0, 5
+  %t$4 = icmp eq i64 %t$0, %t$3
+  br i1 %t$4, label %body_0_1, label %arm_1_1
+body_0_1:
+  %t$5 = call i64 @sprout_make0(i64 5)
+  br label %join_1
+arm_1_1:
+  %t$6 = add i64 0, 6
+  %t$7 = icmp eq i64 %t$0, %t$6
+  br i1 %t$7, label %body_1_1, label %arm_2_1
+body_1_1:
+  %t$8 = call i64 @sprout_field(i64 %xs, i64 0)
+  %t$9 = call i64 @sprout_field(i64 %xs, i64 1)
+  %t$13 = alloca i64
+  store i64 %f, ptr %t$13
+  %t$14 = call i64 @sprout_gc_push_i64_root(ptr %t$13)
+  %t$15 = alloca i64
+  store i64 %t$9, ptr %t$15
+  %t$16 = call i64 @sprout_gc_push_i64_root(ptr %t$15)
+  %t$10$env_ptr = inttoptr i64 %f to ptr
+  %t$10$code = load ptr, ptr %t$10$env_ptr
+  %t$10 = call i64 (i64, i64) %t$10$code(i64 %f, i64 %t$8)
+  %t$17 = alloca i64
+  store i64 %t$10, ptr %t$17
+  %t$18 = call i64 @sprout_gc_push_i64_root(ptr %t$17)
+  %t$11 = call i64 @list_flat_map(i64 %f, i64 %t$9)
+  %t$19 = alloca i64
+  store i64 %t$11, ptr %t$19
+  %t$20 = call i64 @sprout_gc_push_i64_root(ptr %t$19)
+  %t$12 = call i64 @list_append(i64 %t$10, i64 %t$11)
+  %t$21 = call i64 @sprout_gc_pop_roots(i64 4)
+  br label %join_1
+arm_2_1:
+  call void @sprout_abort_match()
+  unreachable
+join_1:
+  %t$2 = phi i64 [%t$5, %body_0_1], [%t$12, %body_1_1]
+  ret i64 %t$2
+}
+
 define i64 @vec_empty() {
 entry:
   %t$0 = call i64 @vector_empty()
@@ -8336,6 +8381,31 @@ entry:
   ret i64 %t$3
 }
 
+define i64 @and_then(i64 %f, i64 %xs, i64 %__tc_Monad_0_flat_map, i64 %__tc_Applicative_0_pure, i64 %__tc_Applicative_0_map2, i64 %__tc_Functor_0_fmap) {
+entry:
+  %t$1 = alloca i64
+  store i64 %xs, ptr %t$1
+  %t$2 = call i64 @sprout_gc_push_i64_root(ptr %t$1)
+  %t$3 = alloca i64
+  store i64 %f, ptr %t$3
+  %t$4 = call i64 @sprout_gc_push_i64_root(ptr %t$3)
+  %t$5 = alloca i64
+  store i64 %__tc_Monad_0_flat_map, ptr %t$5
+  %t$6 = call i64 @sprout_gc_push_i64_root(ptr %t$5)
+  %t$7 = alloca i64
+  store i64 %__tc_Functor_0_fmap, ptr %t$7
+  %t$8 = call i64 @sprout_gc_push_i64_root(ptr %t$7)
+  %t$9 = alloca i64
+  store i64 %__tc_Applicative_0_pure, ptr %t$9
+  %t$10 = call i64 @sprout_gc_push_i64_root(ptr %t$9)
+  %t$11 = alloca i64
+  store i64 %__tc_Applicative_0_map2, ptr %t$11
+  %t$12 = call i64 @sprout_gc_push_i64_root(ptr %t$11)
+  %t$0 = call i64 @__cm_Monad_flat_map(i64 %f, i64 %xs, i64 %__tc_Monad_0_flat_map, i64 %__tc_Applicative_0_pure, i64 %__tc_Applicative_0_map2, i64 %__tc_Functor_0_fmap)
+  %t$13 = call i64 @sprout_gc_pop_roots(i64 6)
+  ret i64 %t$0
+}
+
 define i64 @map(i64 %f, i64 %xs, i64 %__tc_Functor_0_fmap) {
 entry:
   %t$1 = alloca i64
@@ -10126,6 +10196,61 @@ entry:
   %t$0 = call i64 @result_map_error(i64 %f, i64 %r)
   %t$5 = call i64 @sprout_gc_pop_roots(i64 2)
   ret i64 %t$0
+}
+
+define i64 @maybe_with_default(i64 %fallback, i64 %m) {
+entry:
+  %t$0 = call i64 @sprout_tag(i64 %m)
+  br label %arm_0_1
+arm_0_1:
+  %t$3 = add i64 0, 1
+  %t$4 = icmp eq i64 %t$0, %t$3
+  br i1 %t$4, label %body_0_1, label %arm_1_1
+body_0_1:
+  %t$5 = call i64 @sprout_field(i64 %m, i64 0)
+  br label %join_1
+arm_1_1:
+  %t$6 = add i64 0, 0
+  %t$7 = icmp eq i64 %t$0, %t$6
+  br i1 %t$7, label %body_1_1, label %arm_2_1
+body_1_1:
+  br label %join_1
+arm_2_1:
+  call void @sprout_abort_match()
+  unreachable
+join_1:
+  %t$2 = phi i64 [%t$5, %body_0_1], [%fallback, %body_1_1]
+  ret i64 %t$2
+}
+
+define i64 @maybe_or_else(i64 %primary, i64 %fallback) {
+entry:
+  %t$0 = call i64 @sprout_tag(i64 %primary)
+  br label %arm_0_1
+arm_0_1:
+  %t$3 = add i64 0, 1
+  %t$4 = icmp eq i64 %t$0, %t$3
+  br i1 %t$4, label %body_0_1, label %arm_1_1
+body_0_1:
+  %t$5 = call i64 @sprout_field(i64 %primary, i64 0)
+  %t$9 = alloca i64
+  store i64 %t$5, ptr %t$9
+  %t$10 = call i64 @sprout_gc_push_i64_root(ptr %t$9)
+  %t$6 = call i64 @sprout_make1(i64 1, i64 %t$5)
+  %t$11 = call i64 @sprout_gc_pop_roots(i64 1)
+  br label %join_1
+arm_1_1:
+  %t$7 = add i64 0, 0
+  %t$8 = icmp eq i64 %t$0, %t$7
+  br i1 %t$8, label %body_1_1, label %arm_2_1
+body_1_1:
+  br label %join_1
+arm_2_1:
+  call void @sprout_abort_match()
+  unreachable
+join_1:
+  %t$2 = phi i64 [%t$6, %body_0_1], [%fallback, %body_1_1]
+  ret i64 %t$2
 }
 
 define i64 @after(i64 %effect, i64 %value) {
@@ -252212,6 +252337,14 @@ entry:
   ret i64 %t$0
 }
 
+define i64 @__cm_Monad_flat_map(i64 %f, i64 %xs, i64 %__tc_Monad_0_flat_map, i64 %__tc_Applicative_0_pure, i64 %__tc_Applicative_0_map2, i64 %__tc_Functor_0_fmap) {
+entry:
+  %t$0$env_ptr = inttoptr i64 %__tc_Monad_0_flat_map to ptr
+  %t$0$code = load ptr, ptr %t$0$env_ptr
+  %t$0 = call i64 (i64, i64, i64) %t$0$code(i64 %__tc_Monad_0_flat_map, i64 %f, i64 %xs)
+  ret i64 %t$0
+}
+
 define i64 @__tc_Semigroup_String_append(i64 %left, i64 %right) {
 entry:
   %t$0 = call i64 @str_concat(i64 %left, i64 %right)
@@ -254374,6 +254507,19 @@ entry:
   ret i64 %t$0
 }
 
+define i64 @__tc_Monad_List_flat_map(i64 %f, i64 %xs) {
+entry:
+  %t$1 = alloca i64
+  store i64 %xs, ptr %t$1
+  %t$2 = call i64 @sprout_gc_push_i64_root(ptr %t$1)
+  %t$3 = alloca i64
+  store i64 %f, ptr %t$3
+  %t$4 = call i64 @sprout_gc_push_i64_root(ptr %t$3)
+  %t$0 = call i64 @list_flat_map(i64 %f, i64 %xs)
+  %t$5 = call i64 @sprout_gc_pop_roots(i64 2)
+  ret i64 %t$0
+}
+
 define i64 @__tc_Applicative_Maybe_pure(i64 %x) {
 entry:
   %t$1 = alloca i64
@@ -254423,6 +254569,35 @@ do_done_0:
   ret i64 %t$15
 }
 
+define i64 @__tc_Monad_Maybe_flat_map(i64 %f, i64 %mx) {
+entry:
+  %t$0 = call i64 @sprout_tag(i64 %mx)
+  br label %arm_0_1
+arm_0_1:
+  %t$3 = add i64 0, 0
+  %t$4 = icmp eq i64 %t$0, %t$3
+  br i1 %t$4, label %body_0_1, label %arm_1_1
+body_0_1:
+  %t$5 = call i64 @sprout_make0(i64 0)
+  br label %join_1
+arm_1_1:
+  %t$6 = add i64 0, 1
+  %t$7 = icmp eq i64 %t$0, %t$6
+  br i1 %t$7, label %body_1_1, label %arm_2_1
+body_1_1:
+  %t$8 = call i64 @sprout_field(i64 %mx, i64 0)
+  %t$9$env_ptr = inttoptr i64 %f to ptr
+  %t$9$code = load ptr, ptr %t$9$env_ptr
+  %t$9 = call i64 (i64, i64) %t$9$code(i64 %f, i64 %t$8)
+  br label %join_1
+arm_2_1:
+  call void @sprout_abort_match()
+  unreachable
+join_1:
+  %t$2 = phi i64 [%t$5, %body_0_1], [%t$9, %body_1_1]
+  ret i64 %t$2
+}
+
 define i64 @__tc_Applicative_Result_e_pure(i64 %x) {
 entry:
   %t$1 = alloca i64
@@ -254466,6 +254641,40 @@ do_done_4:
 do_done_0:
   %t$11 = phi i64 [%rx, %do_short_0], [%t$10, %do_done_4]
   ret i64 %t$11
+}
+
+define i64 @__tc_Monad_Result_e_flat_map(i64 %f, i64 %rx) {
+entry:
+  %t$0 = call i64 @sprout_tag(i64 %rx)
+  br label %arm_0_1
+arm_0_1:
+  %t$3 = add i64 0, 8
+  %t$4 = icmp eq i64 %t$0, %t$3
+  br i1 %t$4, label %body_0_1, label %arm_1_1
+body_0_1:
+  %t$5 = call i64 @sprout_field(i64 %rx, i64 0)
+  %t$11 = alloca i64
+  store i64 %t$5, ptr %t$11
+  %t$12 = call i64 @sprout_gc_push_i64_root(ptr %t$11)
+  %t$6 = call i64 @sprout_make1(i64 8, i64 %t$5)
+  %t$13 = call i64 @sprout_gc_pop_roots(i64 1)
+  br label %join_1
+arm_1_1:
+  %t$7 = add i64 0, 7
+  %t$8 = icmp eq i64 %t$0, %t$7
+  br i1 %t$8, label %body_1_1, label %arm_2_1
+body_1_1:
+  %t$9 = call i64 @sprout_field(i64 %rx, i64 0)
+  %t$10$env_ptr = inttoptr i64 %f to ptr
+  %t$10$code = load ptr, ptr %t$10$env_ptr
+  %t$10 = call i64 (i64, i64) %t$10$code(i64 %f, i64 %t$9)
+  br label %join_1
+arm_2_1:
+  call void @sprout_abort_match()
+  unreachable
+join_1:
+  %t$2 = phi i64 [%t$6, %body_0_1], [%t$10, %body_1_1]
+  ret i64 %t$2
 }
 
 define i64 @__tc_Functor_Vec_fmap(i64 %f, i64 %xs) {

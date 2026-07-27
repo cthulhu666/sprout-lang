@@ -704,6 +704,59 @@ map4(mk4, Ok(1), Err("x"), Ok(3), Ok(4))         # Err("x")
 They derive from `map2` by threading arguments through the context as tuples and
 destructuring them in a final combiner (no currying is used or required).
 
+### `Monad` class and generic `and_then`
+
+```
+class Monad m where Applicative m {
+  fn flat_map(f: a -> m b, xs: m a) -> m b
+}
+
+and_then(f: a -> m b, xs: m a) -> m b where Monad m   # = flat_map(f, xs)
+```
+
+`Monad` completes the `Functor → Applicative → Monad` tower.  Its sole method
+`flat_map` is monadic bind: thread the payload of `xs : m a` into a continuation
+`f : a -> m b`, short-circuiting on the empty/error case.  `pure` is inherited
+from the `Applicative` superclass, so `Monad` adds only bind.  Dispatch keys on
+`xs` (an ordinary argument), so — unlike `pure` — a `flat_map`/`and_then` call
+needs no return-type annotation.
+
+The exported combinator is the free function **`and_then`**, delegating to
+`flat_map`; the method-vs-free-fn split mirrors `Functor.fmap`/`map` and
+`Foldable.fold_values`/`fold`, keeping the class-method name out of the global
+namespace.
+
+| Type | `flat_map` semantics |
+|---|---|
+| `Maybe` | `Nothing` short-circuits; `Just x` feeds `x` onward |
+| `Result e` | left-biased — the first `Err` short-circuits; `Ok x` feeds `x` onward |
+| `List` | flatten-map — `f` is applied to every element and the results concatenated (consistent with the cartesian-product `Applicative`) |
+
+The three Monad laws (left identity `and_then(f, pure(x)) == f(x)`, right identity
+`and_then(pure, m) == m`, associativity) hold for all three instances and are
+checked in `tests/stdlib/test_typeclass_laws.spr`.
+
+`do`/`<-` already performs the same bind for `Maybe`/`Result` structurally in the
+desugarer; the `Monad` class does not currently wire into `do` (a monad-generic
+`do` and a built-in `?` propagation form are future work, see
+`docs/let-else-and-monadic-binding-plan.md`).
+
+An `Alternative` class (a generic `<|>`/`or_else`) is **not** provided: the only
+lawful `List` instance duplicates `Semigroup (List a)`'s `++`, so with `List`
+excluded the class would have a single `Maybe` instance — ceremony with no
+dispatch payoff.  The `Maybe` fallback is therefore a free function.
+
+### `Maybe`/`Result` combinator free functions
+
+Beyond the generic `map` (`Functor`) and `and_then` (`Monad`), the prelude
+provides per-type combinators covering the axes no class does:
+
+| Function | Meaning |
+|---|---|
+| `maybe_with_default(fallback, m)` | `m`'s value, or `fallback` when `Nothing` |
+| `maybe_or_else(primary, fallback)` | `primary` when `Just`, else `fallback` (left-biased choice) |
+| `result_map`, `result_map_error`, `result_and_then`, `result_with_default`, `result_pipe*` | the `Result` family (see prelude) |
+
 ## 8.6 Automatic Instance Derivation (`deriving`) (Experimental)
 
 A `type` declaration may carry a `deriving (...)` clause between the optional

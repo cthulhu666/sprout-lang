@@ -1,0 +1,74 @@
+import stdlib.test (TestState, new_state, assert_eq, assert_true, assert_false, summary)
+
+# Behavioral tests for the Monad class (generic `and_then` / `flat_map`) and the
+# Maybe combinator free fns (`maybe_with_default`, `maybe_or_else`).
+#
+# `and_then(f, xs)` is monadic bind: thread `xs : m a` into `f : a -> m b`,
+# short-circuiting on the empty/error case. Dispatch is on `xs`.
+
+# Typed anchors so instance/Eq resolution has a concrete `m`.
+fn no_int() -> Maybe Int = Nothing
+fn nil_int() -> List Int = Nil
+fn ok3() -> Result String Int = Ok(3)
+fn err_boom() -> Result String Int = Err("boom")
+
+# Kleisli arrows for each instance.
+fn m_inc(x: Int) -> Maybe Int = Just(x + 1)
+fn m_none(x: Int) -> Maybe Int = Nothing
+fn r_inc(x: Int) -> Result String Int = Ok(x + 1)
+fn l_dup(x: Int) -> List Int = Cons(x, Cons(x * 10, Nil))
+fn dbl(x: Int) -> Int = x * 2
+
+# Polymorphic-over-Monad users: these force the runtime Monad dict to be
+# ASSEMBLED and FORWARDED (concrete call sites devirtualize the dict away, so the
+# monomorphic tests below never exercise it). Monad m -> Applicative m -> Functor m
+# is the first three-level class hierarchy in the codebase; `bind_lift` reaches the
+# Applicative superclass `pure` slot through the Monad dict. Regression guard for
+# the forwarded-superclass-dict null-fill family (BACKLOG "missing SUPERCLASS
+# instance null-fills a forwarded dict").
+fn bind_twice(f: a -> m a, x: m a) -> m a where Monad m =
+  and_then(f, and_then(f, x))
+fn bind_lift(f: a -> b, x: m a) -> m b where Monad m =
+  and_then(\v -> pure(f(v)), x)
+
+fn main() -> Unit !{IO} =
+  do
+    state <- new_state()
+
+    # --- Monad Maybe (this block is also the flat_map signature spike) --------
+    assert_eq(state, "maybe and_then just", and_then(m_inc, Just(3)), Just(4))
+    assert_eq(state, "maybe and_then nothing", and_then(m_inc, no_int()), no_int())
+    assert_eq(state, "maybe and_then f-returns-nothing", and_then(m_none, Just(3)), no_int())
+
+    # --- Monad Result (reduced to Int via result_with_default to avoid Eq Result)
+    assert_eq(state, "result and_then ok", result_with_default(-1, and_then(r_inc, ok3())), 4)
+    assert_eq(state, "result and_then err short-circuits",
+      result_with_default(-1, and_then(r_inc, err_boom())), -1)
+
+    # --- Monad List (flat_map = concat-map) ----------------------------------
+    assert_eq(state, "list and_then flattens",
+      and_then(l_dup, Cons(1, Cons(2, Nil))),
+      Cons(1, Cons(10, Cons(2, Cons(20, Nil)))))
+    assert_eq(state, "list and_then empty", and_then(l_dup, nil_int()), nil_int())
+
+    # --- maybe_with_default --------------------------------------------------
+    assert_eq(state, "maybe_with_default just", maybe_with_default(0, Just(5)), 5)
+    assert_eq(state, "maybe_with_default nothing", maybe_with_default(0, no_int()), 0)
+
+    # --- maybe_or_else -------------------------------------------------------
+    assert_eq(state, "maybe_or_else primary present", maybe_or_else(Just(5), Just(9)), Just(5))
+    assert_eq(state, "maybe_or_else falls back", maybe_or_else(no_int(), Just(9)), Just(9))
+    assert_eq(state, "maybe_or_else both nothing", maybe_or_else(no_int(), no_int()), no_int())
+
+    # --- polymorphic-over-Monad (forwarded-dict / superclass-slot path) -------
+    assert_eq(state, "bind_twice maybe", bind_twice(m_inc, Just(1)), Just(3))
+    assert_eq(state, "bind_twice maybe nothing", bind_twice(m_inc, no_int()), no_int())
+    # and_then(l_dup, and_then(l_dup, [1])) = and_then(l_dup, [1,10])
+    #   = l_dup(1) ++ l_dup(10) = [1,10] ++ [10,100]
+    assert_eq(state, "bind_twice list", bind_twice(l_dup, Cons(1, Nil)),
+      Cons(1, Cons(10, Cons(10, Cons(100, Nil)))))
+    assert_eq(state, "bind_lift maybe (superclass pure)", bind_lift(dbl, Just(5)), Just(10))
+    assert_eq(state, "bind_lift maybe nothing", bind_lift(dbl, no_int()), no_int())
+    assert_eq(state, "bind_lift list", bind_lift(dbl, Cons(1, Cons(2, Nil))), Cons(2, Cons(4, Nil)))
+
+    summary(state)
