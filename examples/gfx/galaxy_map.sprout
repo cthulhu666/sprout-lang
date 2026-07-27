@@ -8,6 +8,7 @@ import loam.camera (Cam, cam_drive, cam_distance)
 import loam.view (cam_apply)
 import loam.config (parse_config, cfg_int)
 import loam.galaxy_lod (pow2, level_offset, group_of, clampi, desired_level, next_level)
+import loam.galaxy_filter (num_classes, mask_all, mask_none, bit_test, bit_toggle, popcount, class_name, class_rgb)
 import loam.orbit (ellipse_point)
 
 # Sprout / Loam — 3D GALAXY MAP (scene 1) with zoom-adaptive streaming.
@@ -28,14 +29,23 @@ import loam.orbit (ellipse_point)
 # Axis map: galaxy (x,y) -> world (x,z), galaxy z -> world height. The disk lies on the ground plane
 # so the free-look camera's ground pan glides across it and tilt reveals the halo.
 #
-# Catalog line:  id|xi|yi|zi|classCode|sizeCode|name|detailLine   (xi,yi,zi in integer light-years)
-# Produced by `cabal run catalog` in the universegen repo.
+# SPECTRAL-CLASS FILTER (scene 1). The right-side legend is 12 clickable class checkboxes (multiselect)
+# + All/None; scene 1 draws only the enabled classes via gfx.draw_instances_masked (model index ==
+# classCode, so the mask enables whole classes — nearly free, as the draw already batches per model).
+# The demo streams a class-BALANCED catalog so every class has galaxy-wide coverage at every zoom:
+# the raw universegen catalog is brightest-first (L0 holds zero M/F/G/K stars, so filtering to a dim
+# class over it is a blank screen), and `just rebalance-galaxy` re-pyramids it per class first. See
+# tools/galaxy_rebalance.sprout and docs/galaxy-map-demo-v0.md.
 #
-# Run (pass the catalog directory as the first arg):
-#   mise exec -- just run-gfx examples/gfx/galaxy_map.sprout /Users/cthulhu/GameDev/universegen/catalog
-# Canary + screenshot:
+# Catalog line:  id|xi|yi|zi|classCode|sizeCode|name|detailLine   (xi,yi,zi in integer light-years)
+# Produced by `cabal run catalog` in the universegen repo, then re-pyramided by `just rebalance-galaxy`.
+#
+# Run (pass the BALANCED catalog directory as the first arg):
+#   just rebalance-galaxy ~/GameDev/universegen/catalog ~/GameDev/universegen/catalog-balanced
+#   mise exec -- just run-gfx examples/gfx/galaxy_map.sprout ~/GameDev/universegen/catalog-balanced
+# Canary + screenshot (argv[7] = initial class mask, e.g. 64 = M-only):
 #   SPROUT_GFX_MAX_FRAMES=120 SPROUT_GFX_SCREENSHOT=galaxy.png \
-#     mise exec -- just run-gfx examples/gfx/galaxy_map.sprout /Users/cthulhu/GameDev/universegen/catalog
+#     mise exec -- just run-gfx examples/gfx/galaxy_map.sprout ~/GameDev/universegen/catalog-balanced 85000 14000 700 0 0 -1 64
 
 # --- Tunables (compile-time; a .conf loader is a later-stage polish) --------------------------------
 let default_catalog = "catalog"  # relative fallback; the real catalog dir is passed as argv[0]
@@ -86,27 +96,34 @@ let load_budget = 6  # max NEW tiles read per frame — throttles streaming so i
 let neighbor_radius = 1  # (2r+1)^2 block of tiles loaded per level around the camera target
 let draw_cull = 0.0  # 0 = frustum-only; group_count already bounds the levels drawn
 
+# --- Spectral-class filter legend (scene 1) -----------------------------------------------------
+# A right-side stack of 12 clickable class checkboxes (multiselect): the box is filled with the class
+# colour when ON, dark when OFF, so it doubles as the palette swatch. Below the rows sit All / None.
+# The demo streams a class-BALANCED catalog (tools/galaxy_rebalance) so every class has galaxy-wide
+# coverage at every zoom — the filter draws only the enabled classes' models via draw_instances_masked.
+let leg_x = 1038  # left edge of the legend panel (also the click hit-test left bound)
+let leg_y = 62  # top of the first class row
+let leg_w = 234  # panel width for the click hit-test
+let leg_rh = 30  # per-class row height
+let leg_btn_y = leg_y + (num_classes * leg_rh) + 6  # All / None buttons sit just below the 12 rows
+
 fn bd(b: Bool) -> Double = if b then 1.0 else 0.0
 
 # --- Star colour palette: one sphere model per classCode (0..11) --------------------------------
-# The instance shader colours per MODEL, so we create the models in class order (handle == class).
-# 0 O  1 B  2 A  3 F  4 G  5 K  6 M  7 Red Giant  8 White Dwarf  9 BH-stellar 10 BH-inter 11 BH-super.
-# Black-hole colours are deliberately non-stellar (violet/magenta) so they read as exotic landmarks.
-fn make_models() -> Unit !{IO} =
-  do
-    _o <- gfx.sphere_model(155, 176, 255)  # 0  O   blue-white
-    _b <- gfx.sphere_model(170, 191, 255)  # 1  B
-    _a <- gfx.sphere_model(210, 220, 255)  # 2  A   white-blue
-    _f <- gfx.sphere_model(248, 247, 240)  # 3  F   white
-    _g <- gfx.sphere_model(255, 244, 180)  # 4  G   yellow
-    _k <- gfx.sphere_model(255, 200, 120)  # 5  K   orange
-    _m <- gfx.sphere_model(255, 150, 110)  # 6  M   red-orange (red dwarfs)
-    _rg <- gfx.sphere_model(255, 120, 80)  # 7  Red Giant
-    _wd <- gfx.sphere_model(220, 235, 255)  # 8  White Dwarf
-    _bs <- gfx.sphere_model(180, 80, 255)  # 9  BH stellar-mass
-    _bi <- gfx.sphere_model(210, 110, 255)  # 10 BH intermediate-mass
-    _bh <- gfx.sphere_model(255, 90, 230)  # 11 BH supermassive
-    ()
+# The instance shader colours per MODEL, so we create the models in class order (handle == classCode).
+# Colours come from loam.galaxy_filter.class_rgb — the SINGLE source shared with the filter legend, so
+# a star and its checkbox swatch can never disagree. Black-hole classes (9..11) are deliberately
+# violet/magenta so they read as exotic landmarks. Created in ascending order so handle == classCode.
+fn make_models_from(c: Int) -> Unit !{IO} =
+  if c >= num_classes then ()
+  else
+    match class_rgb(c) with
+    | (r, g, b) ->
+        do
+          _h <- gfx.sphere_model(r, g, b)
+          make_models_from(c + 1)
+
+fn make_models() -> Unit !{IO} = make_models_from(0)
 
 # --- Tile / group math ---------------------------------------------------------------------------
 # The pure quadtree math (pow2, level_offset, group_of, clampi, desired_level) lives in the
@@ -215,65 +232,69 @@ fn keep_best(best: (Double, String, String)) -> (Double, String, String) !{IO} =
     _t <- gfx.get_time()
     best
 
-fn pick_line(line: String, mx: Double, my: Double, best: (Double, String, String)) -> (Double, String, String) !{IO} =
+# `mask` is threaded through the whole pick chain so a click can only select a star whose spectral
+# class is currently VISIBLE — right-clicking never picks a filtered-out (undrawn) star.
+fn pick_line(line: String, mx: Double, my: Double, mask: Int, best: (Double, String, String)) -> (Double, String, String) !{IO} =
   match split_pipe(line) with
-  | [_id, xs, ys, zs, _cs, _szs, name, detail | _] ->
-      match (parse_int(xs), parse_int(ys), parse_int(zs)) with
-      | (Just xi, Just yi, Just zi) ->
-          do
-            front <- gfx.world_to_screen(to_double(xi), to_double(zi), to_double(yi))
-            sx <- gfx.projected_x()
-            sy <- gfx.projected_y()
-            let d2 = if front then ((sx - mx) * (sx - mx)) + ((sy - my) * (sy - my)) else pick_far
-            match best with
-            | (bd0, bn, bdt) -> if d2 < bd0 then (d2, name, detail) else (bd0, bn, bdt)
+  | [_id, xs, ys, zs, cs, _szs, name, detail | _] ->
+      match (parse_int(xs), parse_int(ys), parse_int(zs), parse_int(cs)) with
+      | (Just xi, Just yi, Just zi, Just ci) ->
+          if ! bit_test (mask, ci) then keep_best(best)  # class filtered out — not selectable
+          else
+            do
+              front <- gfx.world_to_screen(to_double(xi), to_double(zi), to_double(yi))
+              sx <- gfx.projected_x()
+              sy <- gfx.projected_y()
+              let d2 = if front then ((sx - mx) * (sx - mx)) + ((sy - my) * (sy - my)) else pick_far
+              match best with
+              | (bd0, bn, bdt) -> if d2 < bd0 then (d2, name, detail) else (bd0, bn, bdt)
       | _ -> keep_best(best)
   | _ -> keep_best(best)
 
-fn pick_lines(lines: List String, mx: Double, my: Double, best: (Double, String, String)) -> (Double, String, String) !{IO} =
+fn pick_lines(lines: List String, mx: Double, my: Double, mask: Int, best: (Double, String, String)) -> (Double, String, String) !{IO} =
   match lines with
   | Nil -> keep_best(best)
   | Cons line rest ->
       do
-        b2 <- pick_line(line, mx, my, best)
-        pick_lines(rest, mx, my, b2)
+        b2 <- pick_line(line, mx, my, mask, best)
+        pick_lines(rest, mx, my, mask, b2)
 
-fn pick_tile(dir: String, level: Int, ix: Int, iy: Int, mx: Double, my: Double, best: (Double, String, String)) -> (Double, String, String) !{IO} =
+fn pick_tile(dir: String, level: Int, ix: Int, iy: Int, mx: Double, my: Double, mask: Int, best: (Double, String, String)) -> (Double, String, String) !{IO} =
   match read_file(tile_path(dir, level, ix, iy)) with
   | Err _ -> keep_best(best)
-  | Ok text -> pick_lines(str_split_lines(text), mx, my, best)
+  | Ok text -> pick_lines(str_split_lines(text), mx, my, mask, best)
 
-fn pick_row(dir: String, level: Int, cx: Int, cy: Int, di: Int, dj: Int, mx: Double, my: Double, best: (Double, String, String)) -> (Double, String, String) !{IO} =
+fn pick_row(dir: String, level: Int, cx: Int, cy: Int, di: Int, dj: Int, mx: Double, my: Double, mask: Int, best: (Double, String, String)) -> (Double, String, String) !{IO} =
   if dj > neighbor_radius then keep_best(best)
   else
     let n = pow2(level)
         ix = clampi(cx + di, 0, n - 1)
         iy = clampi(cy + dj, 0, n - 1)
     in do
-         b2 <- pick_tile(dir, level, ix, iy, mx, my, best)
-         pick_row(dir, level, cx, cy, di, dj + 1, mx, my, b2)
+         b2 <- pick_tile(dir, level, ix, iy, mx, my, mask, best)
+         pick_row(dir, level, cx, cy, di, dj + 1, mx, my, mask, b2)
 
-fn pick_cols(dir: String, level: Int, cx: Int, cy: Int, di: Int, mx: Double, my: Double, best: (Double, String, String)) -> (Double, String, String) !{IO} =
+fn pick_cols(dir: String, level: Int, cx: Int, cy: Int, di: Int, mx: Double, my: Double, mask: Int, best: (Double, String, String)) -> (Double, String, String) !{IO} =
   if di > neighbor_radius then keep_best(best)
   else
     do
-      b2 <- pick_row(dir, level, cx, cy, di, 0 - neighbor_radius, mx, my, best)
-      pick_cols(dir, level, cx, cy, di + 1, mx, my, b2)
+      b2 <- pick_row(dir, level, cx, cy, di, 0 - neighbor_radius, mx, my, mask, best)
+      pick_cols(dir, level, cx, cy, di + 1, mx, my, mask, b2)
 
-fn pick_levels(dir: String, cam: Cam, maxlvl: Int, level: Int, radius: Double, mx: Double, my: Double, best: (Double, String, String)) -> (Double, String, String) !{IO} =
+fn pick_levels(dir: String, cam: Cam, maxlvl: Int, level: Int, radius: Double, mx: Double, my: Double, mask: Int, best: (Double, String, String)) -> (Double, String, String) !{IO} =
   if level > maxlvl then keep_best(best)
   else
     let cx = tile_index(cam.tx, level, radius)
         cy = tile_index(cam.tz, level, radius)
     in do
-         b2 <- pick_cols(dir, level, cx, cy, 0 - neighbor_radius, mx, my, best)
-         pick_levels(dir, cam, maxlvl, level + 1, radius, mx, my, b2)
+         b2 <- pick_cols(dir, level, cx, cy, 0 - neighbor_radius, mx, my, mask, best)
+         pick_levels(dir, cam, maxlvl, level + 1, radius, mx, my, mask, b2)
 
 # Run a pick this frame only on `do_pick`; otherwise keep the current selection. Factored out so the
 # call site binds a plain function (binding an `if` via `<-` does not parse).
 fn maybe_pick(do_pick: Bool, dir: String, cam: Cam, maxlvl: Int, radius: Double,
-              mx: Double, my: Double, seed: (Double, String, String)) -> (Double, String, String) !{IO} =
-  if do_pick then pick_levels(dir, cam, maxlvl, 0, radius, mx, my, seed)
+              mx: Double, my: Double, mask: Int, seed: (Double, String, String)) -> (Double, String, String) !{IO} =
+  if do_pick then pick_levels(dir, cam, maxlvl, 0, radius, mx, my, mask, seed)
   else keep_best(seed)
 
 # Catalog directory from argv[0], else the built-in default (matched directly — argv_get returns
@@ -538,10 +559,52 @@ fn hover_lines(h: (Double, Maybe Planet)) -> (String, String) =
   | (hd2, Just p) -> if hd2 < s2_pick_r2 then (planet_line1(p), planet_line2(p)) else ("", "")
   | (_, Nothing) -> ("", "")
 
+# --- Spectral-class filter legend: draw + hit-test ----------------------------------------------
+# One checkbox row for class `c`: box filled with the class colour when enabled, dark when disabled
+# (so the box IS the palette swatch), and the class name bright when enabled, dim when not.
+fn draw_legend_row(mask: Int, c: Int) -> Unit !{IO} =
+  let ry = leg_y + (c * leg_rh)
+  in match class_rgb(c) with
+     | (r, g, b) ->
+         do
+           gfx.draw_rect(leg_x + 8, ry + 5, 18, 18, 200, 200, 210)  # box border
+           if bit_test(mask, c)
+             then gfx.draw_rect(leg_x + 10, ry + 7, 14, 14, r, g, b)
+             else gfx.draw_rect(leg_x + 10, ry + 7, 14, 14, 40, 40, 48)
+           if bit_test(mask, c)
+             then gfx.draw_text(leg_x + 34, ry + 5, class_name(c), 18, 235, 235, 245)
+             else gfx.draw_text(leg_x + 34, ry + 5, class_name(c), 18, 110, 110, 120)
+
+fn draw_legend(mask: Int, c: Int) -> Unit !{IO} =
+  if c >= num_classes then ()
+  else
+    do
+      draw_legend_row(mask, c)
+      draw_legend(mask, c + 1)
+
+# Class index (0..num_classes-1) under screen pixel (mx, my), or -1 if the cursor is outside the rows.
+# Pure integer math — the row is `(my - leg_y) / leg_rh` within the panel's x/y bounds.
+fn legend_hit(mx: Int, my: Int) -> Int =
+  if (mx >= leg_x) && (mx <= leg_x + leg_w) && (my >= leg_y) && (my < leg_y + (num_classes * leg_rh))
+    then (my - leg_y) / leg_rh
+    else 0 - 1
+
+# An !{IO} `false` for the inactive branch of a conditional button (binding an `if` via `<-` does not
+# parse, so the buttons — which must only draw in scene 1 — go through these plain helpers).
+fn no_button() -> Bool !{IO} =
+  do
+    _t <- gfx.get_time()
+    false
+fn legend_all_btn(active: Bool) -> Bool !{IO} =
+  if active then gfx.button(leg_x + 8, leg_btn_y, 106, 30, "All") else no_button()
+fn legend_none_btn(active: Bool) -> Bool !{IO} =
+  if active then gfx.button(leg_x + 120, leg_btn_y, 106, 30, "None") else no_button()
+
 # --- Render loop --------------------------------------------------------------------------------
 fn render_loop(dir: String, cam: Cam, scam: Cam, radius: Double, loaded: Dict Int,
                sel_name: String, sel_detail: String, prev_rdown: Bool, view: Int, prev_lvl: Int,
-               csys: String, cplanets: List Planet, hov1: String, hov2: String) -> Unit !{IO} =
+               csys: String, cplanets: List Planet, hov1: String, hov2: String,
+               mask: Int, prev_ldown: Bool) -> Unit !{IO} =
   do
     stop <- gfx.window_should_close()
     if stop then gfx.close_window()
@@ -560,8 +623,9 @@ fn render_loop(dir: String, cam: Cam, scam: Cam, radius: Double, loaded: Dict In
         streamed <- load_levels(dir, cam, lvl, 0, radius, loaded, load_budget)
         cam_apply(if view == 0 then cam else scam)
         gfx.frame_begin()
-        # Scene 1 draws the galaxy point cloud; scene 2 draws the selected system (star + orbits + planets).
-        if view == 0 then gfx.draw_instances(level_offset(lvl + 1), draw_cull) else draw_system(s2scale, cplanets2)
+        # Scene 1 draws the galaxy point cloud, filtered to the enabled spectral classes (model index
+        # == classCode, so the mask enables/disables whole classes); scene 2 draws the selected system.
+        if view == 0 then gfx.draw_instances_masked(level_offset(lvl + 1), draw_cull, mask) else draw_system(s2scale, cplanets2)
         gfx.overlay_begin()
         gfx.draw_fps(10, 10)
         if view == 0
@@ -580,9 +644,19 @@ fn render_loop(dir: String, cam: Cam, scam: Cam, radius: Double, loaded: Dict In
             do
               gfx.draw_text(20, 724, if hov1 == "" then "hover a planet for details" else hov1, 20, 255, 240, 170)
               gfx.draw_text(20, 752, hov2, 15, 200, 210, 230)
+        # Scene-1 spectral-class filter legend: header + 12 class checkboxes (drawn only in the galaxy view).
+        if view == 0
+          then
+            do
+              gfx.draw_text(leg_x + 8, leg_y - 26, "SPECTRAL CLASS  " ++ to_string(popcount(mask)) ++ "/" ++ to_string(num_classes), 16, 180, 190, 210)
+              draw_legend(mask, 0)
+          else ()
         # One scene-switch button; its label and action depend on the current view.
         let toggle_label = if view == 0 then "System >" else "< Galaxy"
         toggle <- gfx.button(1108, 728, 156, 46, toggle_label)
+        # All / None mask presets (scene 1 only, via helpers so the buttons don't draw in scene 2).
+        all_click <- legend_all_btn(view == 0)
+        none_click <- legend_none_btn(view == 0)
         wheel <- gfx.mouse_wheel_y()
         ldown <- gfx.mouse_button_down(gfx.mouse_left)
         rdown <- gfx.mouse_button_down(gfx.mouse_right)
@@ -598,12 +672,20 @@ fn render_loop(dir: String, cam: Cam, scam: Cam, radius: Double, loaded: Dict In
         gfx.frame_end()
         let do_pick = rdown && ! prev_rdown && (view == 0)
         let pseed = (pick_far, sel_name, sel_detail)
-        picked <- maybe_pick(do_pick, dir, cam, lvl, radius, to_double(mx), to_double(my), pseed)
+        picked <- maybe_pick(do_pick, dir, cam, lvl, radius, to_double(mx), to_double(my), mask, pseed)
+        # Spectral-class filter update (scene 1). A left-click EDGE on a checkbox row toggles that
+        # class; All/None set every / no class. Edge-detected so holding the button doesn't re-fire.
+        let lclick = ldown && ! prev_ldown && (view == 0)
+        let hit = if lclick then legend_hit(mx, my) else 0 - 1
+        let mask_row = if hit >= 0 then bit_toggle(mask, hit) else mask
+        let mask2 = if all_click then mask_all else if none_click then mask_none else mask_row
         # Scene-2 hover: nearest planet to the cursor (in-memory list, same scale as the draw).
         hovered <- maybe_hover((view == 1), cplanets2, s2scale, to_double(mx), to_double(my))
         let next_view = if toggle then (if view == 0 then 1 else 0) else view
-        # Don't treat a left-click over the scene-switch button (bottom-right) as a camera drag.
-        let over_ui = (mx >= 1090) && (my >= 715)
+        # Don't treat a left-click over UI as a camera drag: the scene-switch button (bottom-right), or
+        # in scene 1 the filter legend + All/None buttons (right side, y from the header to below them).
+        let over_legend = (view == 0) && (mx >= leg_x) && (my >= leg_y - 28) && (my <= leg_btn_y + 30)
+        let over_ui = over_legend || ((mx >= 1090) && (my >= 715))
         # Whichever view is active drives its own camera; the other's is held. Zoom/pan scale by the
         # ACTIVE eye distance so both the galaxy (ly) and system (AU-world) scales feel the same.
         let active = if view == 0 then cam else scam
@@ -632,7 +714,7 @@ fn render_loop(dir: String, cam: Cam, scam: Cam, radius: Double, loaded: Dict In
                 | (hov1b, hov2b) ->
                     let name2 = if best_d2 < pick_radius2 then best_name else sel_name
                         detail2 = if best_d2 < pick_radius2 then best_detail else sel_detail
-                    in render_loop(dir, cam2, scam2, radius, loaded2, name2, detail2, rdown, next_view, lvl, csys2, cplanets2, hov1b, hov2b)
+                    in render_loop(dir, cam2, scam2, radius, loaded2, name2, detail2, rdown, next_view, lvl, csys2, cplanets2, hov1b, hov2b, mask2, ldown)
 
 fn main() -> Unit !{IO} =
   do
@@ -662,5 +744,9 @@ fn main() -> Unit !{IO} =
     sys_arg <- arg_int(6, 0 - 1)
     let init_view = if sys_arg >= 0 then 1 else 0
     let init_name = if sys_arg >= 0 then "SYS-" ++ pad5(sys_arg) else "No system selected"
+    # Optional argv[7] = initial spectral-class filter mask (bit c == class c shown). Absent -> all
+    # classes shown (mask_all). Lets a screenshot/canary open on a filtered view, e.g. 64 = M-only.
+    init_mask <- arg_int(7, mask_all)
     render_loop(dir, cam0, scam0, radius, dict_empty(),
-                init_name, "Right-click a star to inspect it", false, init_view, seed_lvl, "", Nil, "", "")
+                init_name, "Right-click a star to inspect it", false, init_view, seed_lvl, "", Nil, "", "",
+                init_mask, false)

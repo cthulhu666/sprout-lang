@@ -20,10 +20,17 @@ galaxy.json (645 MB, 1M systems)                         ~/GameDev/universegen
    │  cabal run catalog  (app/CatalogExporter.hs)
    ▼
 catalog/  meta.txt + L<level>/tile_<ix>_<iy>.txt         a quadtree LoD pyramid (~97 MB)
+   │  just rebalance-galaxy  (tools/galaxy_rebalance.sprout, Sprout-side, for the spectral filter)
+   ▼
+catalog-balanced/  same layout, per-class-budgeted        class-balanced pyramid (~48 MB)
    │  read_file + str_split_lines + parse_int  (at runtime, streamed per-tile)
    ▼
 examples/gfx/galaxy_map.sprout  ──▶  stdlib.gfx  ──▶  graphics/sprout_gfx.c (raylib)
 ```
+
+(The rebalance step is only needed for the spectral-class filter — see "Spectral-class filter" below.
+The demo runs directly on `catalog/` too; only the dim-class-zoomed-out filter case needs the
+balanced pyramid.)
 
 ### Offline: the catalog exporter (`universegen/app/CatalogExporter.hs`)
 
@@ -123,8 +130,17 @@ These are gfx-binding additions (non-bootstrap; no seed refresh):
   draws each orbit ellipse as a loop of these.
 - `gfx.draw_sphere(x,y,z,radius,r,g,b)` — an immediate-mode solid sphere (`DrawSphereEx`); scene 2's
   star and planets. (Distinct from `sphere_model`, which is for the instanced starfield.)
+- `gfx.draw_instances_masked(group_count, cull_dist, class_mask)` — like `draw_instances`, but draws
+  only the models whose bit is set in `class_mask` (bit *m* == model *m*). Since the starfield pushes
+  one model per spectral class (model index == `classCode`), this is the spectral-class filter — and
+  nearly free, because the draw already batches one instanced call per model, so a masked-off class is
+  just a skipped iteration. An all-ones mask behaves exactly like `draw_instances`.
+- `gfx.draw_rect(x,y,w,h,r,g,b)` — a filled 2D rectangle (`DrawRectangle`); the filter legend's
+  class swatches / checkbox boxes. (Before this, `DrawRectangle` was reachable only inside `button`.)
 - `gfx.double_to_int(d) -> Int` — a **stopgap** floor conversion; the core stdlib has none
   (`math.floor` returns a `Double`). See BACKLOG: promote to a core runtime/prelude primitive.
+  (The *offline* rebalance tool avoids it entirely — its coordinates are integer ly, so it bins with
+  the pure-integer `loam.galaxy_lod.tile_index_i`.)
 
 ## Coordinate / camera conventions
 
@@ -178,13 +194,41 @@ into that system. The scene:
 - **Scripting.** `argv[6] = <system id>` opens directly in scene 2 for that system (screenshot/canary
   of a view that otherwise needs an interactive right-click).
 
+## Spectral-class filter (built)
+
+Right-side legend of 12 clickable class checkboxes (multiselect) + `All`/`None`. Each checkbox box is
+filled with the class colour when enabled (so it doubles as the palette swatch) and dark when not;
+scene 1 draws only the enabled classes via `gfx.draw_instances_masked` (model index == `classCode`,
+so the mask enables/disables whole classes). The filter is instant — a pure render mask, no restream —
+and picking respects it (a right-click can only select a currently-visible star). `argv[7]` opens on
+an initial mask (e.g. `64` = M-only) for screenshots.
+
+- **The hard part was coverage, not rendering.** The render mask is nearly free, but the raw catalog
+  is ordered **brightest-first**, so its coarse levels are all bright classes — L0 holds *zero*
+  M/F/G/K/A stars (verified). Filtering to a dim class (M dwarfs are 74% of all stars) over that
+  pyramid is a **blank screen** when zoomed out. The fix rebuilds coverage **per class**.
+- **`tools/galaxy_rebalance.sprout` (run via `just rebalance-galaxy`)** re-pyramids the existing
+  catalog into a class-**balanced** one: the exporter's shallowest-fit tiling, but with a **per-class**
+  per-tile budget, so every class fills the coarse levels first and appears galaxy-wide at every zoom.
+  It is a **Sprout-side** transform that consumes the *catalog* (universegen's output), not
+  `galaxy.json` — so **universegen is untouched**. It is headless (no gfx): integer-ly coordinates bin
+  with the pure `loam.galaxy_lod.tile_index_i`, so no `double_to_int`. The demo then streams the
+  balanced catalog for both the `All` view and any filter.
+- **Tradeoffs (deliberate).** The catalog dropped per-star luminosity, so within-class order is a
+  spatial sample (as-encountered), not brightest-first — fine for a filter overview. The per-class
+  per-tile budget (default 800) caps deep-zoom density for the huge M class and bounds the tool's
+  memory; overflow past the deepest level is dropped (the source places unconditionally). At budget
+  800 the balanced catalog keeps ~492k of 1M stars (48 MB); every class has L0 presence.
+- **Follow-ups (BACKLOG):** a brightness-ordered rebalance (needs luminosity carried on the catalog
+  line, or re-reading `galaxy.json`); a higher/adaptive budget so dense M regions keep full depth.
+
+The filter math is a pure, headless-tested module: `loam.galaxy_filter` (class bitmask via integer
+arithmetic — Sprout has no bitwise ops; `>>`/`<<` are function composition — plus the shared
+`class_name`/`class_rgb` palette). Tests in `tests/loam/test_galaxy_filter.spr`. The demo's star
+models are now built from `class_rgb`, so a star and its legend swatch can never diverge.
+
 ## Planned extensions (next iterations — designed for, not built)
 
-- **Spectral-class filter** (e.g. "show only red dwarfs"). Nearly free at the render layer (colour is
-  per-model, so filtering = drawing only the enabled `classCode`s). The real work is galaxy-*wide*
-  coverage vs. spatial streaming: the exporter should be able to emit a **class-partitioned pyramid**
-  so a filter fills the on-screen budget from the filtered class when zoomed out, and the residency
-  key should include the active filter. `classCode` is already on every catalog line for this.
 - **Scene 2 depth — remaining.** Rings, moons, and the hover detail panel are built (above).
   Still open: **asteroid belts** (the exporter emits `asteroidBelts: []` for every system in this
   catalog — nothing to draw until it populates them); a **log-radius** option so *spread* (~30 AU)
@@ -195,11 +239,19 @@ into that system. The scene:
 ## Running
 
 ```
-mise exec -- just run-gfx examples/gfx/galaxy_map.sprout /Users/cthulhu/GameDev/universegen/catalog
+# One-time (for the spectral filter): re-pyramid the catalog into a class-balanced one.
+mise exec -- just rebalance-galaxy /Users/cthulhu/GameDev/universegen/catalog \
+                                   /Users/cthulhu/GameDev/universegen/catalog-balanced
+
+mise exec -- just run-gfx examples/gfx/galaxy_map.sprout /Users/cthulhu/GameDev/universegen/catalog-balanced
 # canary + screenshot:
 SPROUT_GFX_MAX_FRAMES=120 SPROUT_GFX_SCREENSHOT=galaxy.png \
-  mise exec -- just run-gfx examples/gfx/galaxy_map.sprout /Users/cthulhu/GameDev/universegen/catalog
+  mise exec -- just run-gfx examples/gfx/galaxy_map.sprout /Users/cthulhu/GameDev/universegen/catalog-balanced
 ```
+
+`argv[7]` is the initial spectral-class filter mask (bit *c* = class *c* shown; absent = all). It
+requires the camera args to be present too (positional), so a filtered screenshot passes the full row,
+e.g. M-only edge-on overview: `… <catalog-balanced> 85000 14000 700 0 0 -1 64`.
 
 **Scripting the opening camera** (for screenshots / canaries at a fixed viewpoint). Optional integer
 args after the catalog dir override the starting `Cam` without a rebuild:

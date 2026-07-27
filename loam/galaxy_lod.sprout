@@ -28,6 +28,16 @@ export fn group_of(level: Int, ix: Int, iy: Int) -> Int =
 export fn clampi(v: Int, lo: Int, hi: Int) -> Int =
   if v < lo then lo else if v > hi then hi else v
 
+# Tile index of an INTEGER coordinate (light-years) at `level`, clamped into [0, 2^level). Pure
+# integer arithmetic, no Double->Int floor: for a non-negative numerator, integer division already
+# floors, so ((coord + radius) * n) / (2 * radius) EXACTLY equals the exporter's
+# floor((coord + radius) / (2 * radius) * n). Used by the offline rebalance tool
+# (tools/galaxy_rebalance), which bins raw integer ly coordinates and cannot use gfx.double_to_int.
+# (The demo's own tile_index takes a Double camera coord, so it still needs the gfx floor.)
+export fn tile_index_i(coord: Int, level: Int, radius: Int) -> Int =
+  let n = pow2(level)
+  in clampi(((coord + radius) * n) / (2 * radius), 0, n - 1)
+
 # Nominal eye-distance boundary between adjacent detail levels `l` and `l+1` (the ladder crossed as
 # you zoom). The SINGLE source of the LoD thresholds — both desired_level and next_level read it, so
 # the ladder is defined once. stdlib.math is int-only (no log2 on a Double), hence a threshold ladder

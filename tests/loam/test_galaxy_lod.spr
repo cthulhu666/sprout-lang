@@ -1,5 +1,5 @@
 import stdlib.test (TestState, new_state, assert_eq, summary)
-import loam.galaxy_lod (pow2, level_offset, group_of, clampi, desired_level, next_level)
+import loam.galaxy_lod (pow2, level_offset, group_of, clampi, desired_level, next_level, tile_index_i)
 
 # loam.galaxy_lod holds the PURE quadtree level-of-detail math for the galaxy-map demo. These must
 # mirror the universegen catalog exporter's tiling: a level-L quadtree has 2^L x 2^L tiles, and each
@@ -34,6 +34,19 @@ fn main() -> Unit !{IO} =
     # ids fill [level_offset(L), level_offset(L+1)) with no gap or overlap into the next level.
     assert_eq(state, "L2 last id == level_offset(3)-1", group_of(2, 3, 3), 20)
     assert_eq(state, "L4 last id == level_offset(5)-1", group_of(4, 15, 15), 340)
+
+    # tile_index_i: pure integer binning, MUST match the exporter's float floor. radius 50000.
+    # L0 has one tile: everything maps to 0.
+    assert_eq(state, "tile_index_i L0 anything", tile_index_i(0 - 12345, 0, 50000), 0)
+    # L1 (n=2): coord just below centre -> lower half (0); centre and above -> upper half (1).
+    assert_eq(state, "tile_index_i L1 min edge", tile_index_i(0 - 50000, 1, 50000), 0)
+    assert_eq(state, "tile_index_i L1 just below centre", tile_index_i(0 - 1, 1, 50000), 0)
+    assert_eq(state, "tile_index_i L1 centre", tile_index_i(0, 1, 50000), 1)
+    assert_eq(state, "tile_index_i L1 max clamps", tile_index_i(50000, 1, 50000), 1)
+    # L4 (n=16): centre coord -> tile 8 (floor(0.5*16)); out-of-range clamps to [0,15].
+    assert_eq(state, "tile_index_i L4 centre", tile_index_i(0, 4, 50000), 8)
+    assert_eq(state, "tile_index_i L4 min edge", tile_index_i(0 - 50000, 4, 50000), 0)
+    assert_eq(state, "tile_index_i L4 above max clamps", tile_index_i(99999, 4, 50000), 15)
 
     # clampi
     assert_eq(state, "clampi below", clampi(0 - 1, 0, 3), 0)

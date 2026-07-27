@@ -1,0 +1,205 @@
+module tools.galaxy_rebalance
+
+import stdlib.string (split_once)
+import loam.config (parse_config, cfg_int)
+import loam.galaxy_lod (pow2, group_of, tile_index_i)
+
+# Offline build tool: re-pyramid an existing galaxy catalog into a CLASS-BALANCED catalog for the
+# galaxy-map spectral-class filter (examples/gfx/galaxy_map).
+#
+# WHY. The source catalog (from universegen) is ordered BRIGHTEST-FIRST, so its coarse levels are all
+# bright classes — L0 holds zero M/F/G/K/A stars. A spectral filter over that pyramid shows a BLANK
+# screen when zoomed out on a dim class (M dwarfs are 74% of all stars, yet none reach L0). This tool
+# rebuilds coverage PER CLASS: it re-runs the exporter's shallowest-fit tiling with a PER-CLASS
+# per-tile budget, so every class fills the coarse levels first and appears galaxy-wide at every zoom.
+# The demo then streams the balanced pyramid and filters by drawing only the enabled classes' models
+# (gfx.draw_instances_masked) — instant multiselect, no restream. See docs/galaxy-map-demo-v0.md.
+#
+# It consumes the CATALOG (universegen's output), not galaxy.json, so universegen is untouched and
+# the whole transform lives in the Sprout repo. It is headless (no gfx): coordinates are integer
+# light-years, so tiling uses loam.galaxy_lod.tile_index_i (pure integer floor) — no gfx.double_to_int.
+#
+# TRADEOFF. The catalog dropped per-star luminosity, so within-class order is as-encountered (a
+# spatial sample), not brightest-first — fine for a filter overview. The per-class per-tile budget
+# caps deep-zoom density for the huge M class; overflow beyond the deepest level is dropped (the
+# source places unconditionally, we do not) to bound this tool's memory. Documented in the demo doc.
+#
+# Layout: writes <out>/meta.txt (copied) + <out>/L<level>/tile_<ix>_<iy>.txt, same format as the
+# source. Point the demo at <out> as its catalog dir. Run via `just rebalance-galaxy` (which mkdirs
+# the level dirs first — write_file does not create directories).
+
+let num_classes = 12
+let default_budget = 800  # per class, per tile — L0 gets <= this of each class (see WHY/TRADEOFF)
+let max_level = 4  # deepest populated level in the source catalog (L0..L4)
+
+# --- catalog line: id|xi|yi|zi|classCode|sizeCode|name|detail (detail may contain no '|') ---------
+fn split_pipe(s: String) -> List String =
+  match split_once(s, "|") with
+  | Nothing -> Cons(s, Nil)
+  | Just (h, rest) -> Cons(h, split_pipe(rest))
+
+# Parse just the fields tiling needs: (xi, yi, classCode). Nothing on a malformed/blank line.
+fn line_key(line: String) -> Maybe (Int, Int, Int) =
+  match split_pipe(line) with
+  | [_id, xs, ys, _zs, cs | _] ->
+      match (parse_int(xs), parse_int(ys), parse_int(cs)) with
+      | (Just xi, Just yi, Just ci) -> Just((xi, yi, ci))
+      | _ -> Nothing
+  | _ -> Nothing
+
+# Packed count key: one slot per (tile-group, class). gid < 341, class < 12, so gid*12+class is unique.
+fn count_key(gid: Int, cls: Int) -> String = to_string((gid * num_classes) + cls)
+
+fn get_count(counts: Dict Int, gid: Int, cls: Int) -> Int =
+  match dict_get(count_key(gid, cls), counts) with
+  | Just n -> n
+  | Nothing -> 0
+
+# Shallowest level in [0, max_level] whose (level, tile, class) bucket still has room, or -1 if the
+# star overflows every level (dropped). Mirrors the exporter's shallowest-fit, but the budget is
+# PER CLASS — that is what forces each class into the coarse levels rather than only the brightest.
+fn fit_level(xi: Int, yi: Int, cls: Int, radius: Int, budget: Int, counts: Dict Int, level: Int) -> Int =
+  if level > max_level then 0 - 1
+  else
+    let gid = group_of(level, tile_index_i(xi, level, radius), tile_index_i(yi, level, radius))
+    in if get_count(counts, gid, cls) < budget then level
+       else fit_level(xi, yi, cls, radius, budget, counts, level + 1)
+
+fn get_tile_lines(out: Dict (List String), gid: Int) -> List String =
+  match dict_get(to_string(gid), out) with
+  | Just ls -> ls
+  | Nothing -> Nil
+
+# Place one line into its shallowest-fitting (level, tile) at its class budget; drop on overflow.
+fn place_line(line: String, radius: Int, budget: Int, st: (Dict Int, Dict (List String))) -> (Dict Int, Dict (List String)) =
+  match st with
+  | (counts, out) ->
+      match line_key(line) with
+      | Nothing -> (counts, out)
+      | Just (xi, yi, cls) ->
+          let level = fit_level(xi, yi, cls, radius, budget, counts, 0)
+          in if level < 0 then (counts, out)
+             else
+               let gid = group_of(level, tile_index_i(xi, level, radius), tile_index_i(yi, level, radius))
+                   counts2 = dict_set(count_key(gid, cls), get_count(counts, gid, cls) + 1, counts)
+                   out2 = dict_set(to_string(gid), Cons(line, get_tile_lines(out, gid)), out)
+               in (counts2, out2)
+
+# Fold every line of a tile into the (counts, out) accumulator. Pure — the IO (reading the tile) is
+# the caller's. Recursion depth = lines in one tile (~ the source per-tile budget), like the demo's
+# push_lines, so it stays within the same bounds that already stream fine.
+fn fold_lines(lines: List String, radius: Int, budget: Int, st: (Dict Int, Dict (List String))) -> (Dict Int, Dict (List String)) =
+  match lines with
+  | Nil -> st
+  | Cons line rest -> fold_lines(rest, radius, budget, place_line(line, radius, budget, st))
+
+fn src_tile_path(dir: String, level: Int, ix: Int, iy: Int) -> String =
+  dir ++ "/L" ++ to_string(level) ++ "/tile_" ++ to_string(ix) ++ "_" ++ to_string(iy) ++ ".txt"
+
+# Read + fold one source tile (missing tile in the sparse deep grid = skip, no error).
+fn process_tile(dir: String, radius: Int, budget: Int, level: Int, ix: Int, iy: Int, st: (Dict Int, Dict (List String))) -> (Dict Int, Dict (List String)) !{IO} =
+  match read_file(src_tile_path(dir, level, ix, iy)) with
+  | Err _ -> st
+  | Ok text -> fold_lines(str_split_lines(text), radius, budget, st)
+
+# Sweep the 2^level x 2^level grid of one source level (iy inner, ix outer).
+fn process_row(dir: String, radius: Int, budget: Int, level: Int, ix: Int, iy: Int, n: Int, st: (Dict Int, Dict (List String))) -> (Dict Int, Dict (List String)) !{IO} =
+  if iy >= n then st
+  else
+    do
+      st2 <- process_tile(dir, radius, budget, level, ix, iy, st)
+      process_row(dir, radius, budget, level, ix, iy + 1, n, st2)
+
+fn process_cols(dir: String, radius: Int, budget: Int, level: Int, ix: Int, n: Int, st: (Dict Int, Dict (List String))) -> (Dict Int, Dict (List String)) !{IO} =
+  if ix >= n then st
+  else
+    do
+      st2 <- process_row(dir, radius, budget, level, ix, 0, n, st)
+      process_cols(dir, radius, budget, level, ix + 1, n, st2)
+
+fn process_levels(dir: String, radius: Int, budget: Int, level: Int, st: (Dict Int, Dict (List String))) -> (Dict Int, Dict (List String)) !{IO} =
+  if level > max_level then st
+  else
+    do
+      print("[rebalance] scanning source L" ++ to_string(level) ++ " ...")
+      st2 <- process_cols(dir, radius, budget, level, 0, pow2(level), st)
+      process_levels(dir, radius, budget, level + 1, st2)
+
+# --- writing the balanced pyramid ----------------------------------------------------------------
+fn out_tile_path(dir: String, level: Int, ix: Int, iy: Int) -> String =
+  dir ++ "/L" ++ to_string(level) ++ "/tile_" ++ to_string(ix) ++ "_" ++ to_string(iy) ++ ".txt"
+
+# Write one output tile from its accumulated lines (skip empty — matches the sparse source layout).
+fn write_tile(out_dir: String, out: Dict (List String), level: Int, ix: Int, iy: Int) -> Unit !{IO} =
+  let gid = group_of(level, ix, iy)
+  in match get_tile_lines(out, gid) with
+     | Nil -> ()
+     | ls ->
+         match write_file(out_tile_path(out_dir, level, ix, iy), string_join_newlines(ls)) with
+         | Ok _ -> ()
+         | Err e -> print("[rebalance] WRITE FAILED " ++ out_tile_path(out_dir, level, ix, iy) ++ ": " ++ e)
+
+fn write_row(out_dir: String, out: Dict (List String), level: Int, ix: Int, iy: Int, n: Int) -> Unit !{IO} =
+  if iy >= n then ()
+  else
+    do
+      write_tile(out_dir, out, level, ix, iy)
+      write_row(out_dir, out, level, ix, iy + 1, n)
+
+fn write_cols(out_dir: String, out: Dict (List String), level: Int, ix: Int, n: Int) -> Unit !{IO} =
+  if ix >= n then ()
+  else
+    do
+      write_row(out_dir, out, level, ix, 0, n)
+      write_cols(out_dir, out, level, ix + 1, n)
+
+fn write_levels(out_dir: String, out: Dict (List String), level: Int) -> Unit !{IO} =
+  if level > max_level then ()
+  else
+    do
+      write_cols(out_dir, out, level, 0, pow2(level))
+      write_levels(out_dir, out, level + 1)
+
+# --- arg / meta helpers --------------------------------------------------------------------------
+fn arg_int(idx: Int, dflt: Int) -> Int !{IO} =
+  match argv_get(idx) with
+  | Nothing -> dflt
+  | Just s -> match parse_int(s) with | Just n -> n | Nothing -> dflt
+
+fn read_radius(dir: String) -> Int !{IO} =
+  match read_file(dir ++ "/meta.txt") with
+  | Ok text -> cfg_int(parse_config(text), "galaxy_radius_ly", 50000)
+  | Err _ -> 50000
+
+# Copy meta.txt verbatim so the balanced catalog is self-contained (same radius the demo bins with).
+fn copy_meta(in_dir: String, out_dir: String) -> Unit !{IO} =
+  match read_file(in_dir ++ "/meta.txt") with
+  | Err _ -> print("[rebalance] WARN: no meta.txt in source; balanced catalog will fall back to defaults")
+  | Ok text ->
+      match write_file(out_dir ++ "/meta.txt", text) with
+      | Ok _ -> ()
+      | Err e -> print("[rebalance] WRITE FAILED meta.txt: " ++ e)
+
+fn run(in_dir: String, out_dir: String, budget: Int) -> Unit !{IO} =
+  do
+    radius <- read_radius(in_dir)
+    print("[rebalance] in=" ++ in_dir ++ " out=" ++ out_dir
+            ++ " radius=" ++ to_string(radius) ++ " budget/class/tile=" ++ to_string(budget))
+    final <- process_levels(in_dir, radius, budget, 0, (dict_empty(), dict_empty()))
+    match final with
+    | (_, out) ->
+        do
+          print("[rebalance] writing balanced pyramid ...")
+          copy_meta(in_dir, out_dir)
+          write_levels(out_dir, out, 0)
+          print("[rebalance] done -> " ++ out_dir)
+
+fn main() -> Unit !{IO} =
+  do
+    budget <- arg_int(2, default_budget)
+    match argv_get(0) with
+    | Nothing -> print("usage: galaxy_rebalance <in_catalog_dir> <out_catalog_dir> [budget_per_class_per_tile]")
+    | Just in_dir ->
+        match argv_get(1) with
+        | Nothing -> print("usage: galaxy_rebalance <in_catalog_dir> <out_catalog_dir> [budget_per_class_per_tile]")
+        | Just out_dir -> run(in_dir, out_dir, budget)

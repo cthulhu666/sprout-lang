@@ -1,0 +1,74 @@
+module loam.galaxy_filter
+
+import loam.galaxy_lod (pow2)
+
+# Pure spectral-class filter math for the galaxy-map demo (examples/gfx/galaxy_map). Graphics-free —
+# no gfx, no IO — so it is unit-tested headlessly in tests/loam/test_galaxy_filter.spr, exactly like
+# loam.galaxy_lod / loam.camera.
+#
+# A "filter" is a CLASS BITMASK: bit c set == spectral class c (0..11) is drawn. Sprout has NO bitwise
+# operators (`>>` / `<<` are function COMPOSITION), so every mask op is integer arithmetic over pow2:
+# bit c lives in the pow2(c) place, and "is bit c set" is the parity of `mask / pow2(c)`. Non-negative
+# masks only, so integer division truncates toward zero and the parity test is exact.
+#
+# The 12 classes mirror the demo palette and the universegen classCode table:
+#   0 O  1 B  2 A  3 F  4 G  5 K  6 M  7 Red Giant  8 White Dwarf  9 BH-stellar 10 BH-inter 11 BH-super
+
+export let num_classes = 12
+
+# All low `num_classes` bits set (2^12 - 1 = 4095) — every class shown. `mask_none` shows nothing.
+export let mask_all = pow2(num_classes) - 1
+export let mask_none = 0
+
+# Parity of a non-negative int: its low bit. (n/2)*2 drops the low bit, so n minus that IS the low bit.
+fn low_bit(n: Int) -> Int = n - ((n / 2) * 2)
+
+# Is class `i`'s bit set in `mask`? The i-th bit is the low bit of `mask / pow2(i)`.
+export fn bit_test(mask: Int, i: Int) -> Bool = low_bit(mask / pow2(i)) == 1
+
+# Set / clear / toggle class `i`'s bit. Written via bit_test so they stay idempotent (set an already-
+# set bit, clear an already-clear bit) without over/under-shooting the mask.
+export fn bit_set(mask: Int, i: Int) -> Int = if bit_test(mask, i) then mask else mask + pow2(i)
+export fn bit_clear(mask: Int, i: Int) -> Int = if bit_test(mask, i) then mask - pow2(i) else mask
+export fn bit_toggle(mask: Int, i: Int) -> Int =
+  if bit_test(mask, i) then mask - pow2(i) else mask + pow2(i)
+
+# Number of enabled classes (the demo's "N/12" legend header). Counts bits 0..num_classes-1.
+fn popcount_go(mask: Int, i: Int, acc: Int) -> Int =
+  if i >= num_classes then acc
+  else popcount_go(mask, i + 1, if bit_test(mask, i) then acc + 1 else acc)
+export fn popcount(mask: Int) -> Int = popcount_go(mask, 0, 0)
+
+# Short palette label for a class code — the checkbox-row text. Unknown codes read as "?".
+export fn class_name(c: Int) -> String =
+  if c == 0 then "O"
+  else if c == 1 then "B"
+  else if c == 2 then "A"
+  else if c == 3 then "F"
+  else if c == 4 then "G"
+  else if c == 5 then "K"
+  else if c == 6 then "M"
+  else if c == 7 then "Red Giant"
+  else if c == 8 then "White Dwarf"
+  else if c == 9 then "BH stellar"
+  else if c == 10 then "BH inter"
+  else if c == 11 then "BH super"
+  else "?"
+
+# Palette colour (r,g,b) for a class code — the SINGLE source shared by the demo's sphere models
+# (make_models) and the legend swatches, so the star colour and its checkbox always agree. Non-stellar
+# black-hole classes (9..11) are deliberately violet/magenta so they read as exotic landmarks.
+export fn class_rgb(c: Int) -> (Int, Int, Int) =
+  if c == 0 then (155, 176, 255)
+  else if c == 1 then (170, 191, 255)
+  else if c == 2 then (210, 220, 255)
+  else if c == 3 then (248, 247, 240)
+  else if c == 4 then (255, 244, 180)
+  else if c == 5 then (255, 200, 120)
+  else if c == 6 then (255, 150, 110)
+  else if c == 7 then (255, 120, 80)
+  else if c == 8 then (220, 235, 255)
+  else if c == 9 then (180, 80, 255)
+  else if c == 10 then (210, 110, 255)
+  else if c == 11 then (255, 90, 230)
+  else (255, 150, 110)

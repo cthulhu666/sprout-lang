@@ -47,6 +47,7 @@ extern fn gfx_draw_model(handle: Int, x: Double, y: Double, z: Double, angle: Do
 extern fn gfx_instance_push(group: Int, model: Int, x: Double, y: Double, z: Double, angle: Double, scale: Double) -> Unit !{IO}
 extern fn gfx_instance_clear(group: Int) -> Unit !{IO}
 extern fn gfx_draw_instances(group_count: Int, cull_dist: Double) -> Unit !{IO}
+extern fn gfx_draw_instances_masked(group_count: Int, cull_dist: Double, class_mask: Int) -> Unit !{IO}
 extern fn gfx_load_animations(path: String) -> Int !{IO}
 extern fn gfx_animation_count(set: Int) -> Int !{IO}
 extern fn gfx_animation_keyframes(set: Int, index: Int) -> Int !{IO}
@@ -78,6 +79,7 @@ extern fn gfx_world_to_screen(x: Double, y: Double, z: Double) -> Int !{IO}
 extern fn gfx_projected_x() -> Double !{IO}
 extern fn gfx_projected_y() -> Double !{IO}
 extern fn gfx_draw_text(x: Int, y: Int, text: String, size: Int, r: Int, g: Int, b: Int) -> Unit !{IO}
+extern fn gfx_draw_rect(x: Int, y: Int, w: Int, h: Int, r: Int, g: Int, b: Int) -> Unit !{IO}
 extern fn gfx_double_to_int(d: Double) -> Int
 
 # --- Public API ---
@@ -235,6 +237,12 @@ export fn instance_clear(group: Int) -> Unit !{IO} =
 # test (draw all visible).
 export fn draw_instances(group_count: Int, cull_dist: Double) -> Unit !{IO} =
   gfx_draw_instances(group_count, cull_dist)
+
+# Like draw_instances, but draw only the models whose bit is set in `class_mask` (bit m == model m).
+# Since a starfield pushes one model per class (model index == class code), this filters by class —
+# nearly free, as the draw already batches per model. All-bits mask == draw_instances.
+export fn draw_instances_masked(group_count: Int, cull_dist: Double, class_mask: Int) -> Unit !{IO} =
+  gfx_draw_instances_masked(group_count, cull_dist, class_mask)
 
 # Load an animation set (glTF/GLB/IQM/M3D) whose skeleton matches a model; returns
 # a set handle. A clip is identified by (set, index); animation_count gives how many.
@@ -438,6 +446,12 @@ export fn projected_y() -> Double !{IO} = gfx_projected_y()
 # default raylib font is ASCII; keep text to basic Latin.
 export fn draw_text(x: Int, y: Int, text: String, size: Int, r: Int, g: Int, b: Int) -> Unit !{IO} =
   gfx_draw_text(x, y, text, size, r, g, b)
+
+# Draw a filled `w` x `h` rectangle at screen pixel (x, y) in flat RGB (each 0..255). A 2D overlay
+# like draw_text — call inside a frame (after overlay_begin for a crisp HUD). Used for the galaxy
+# map's spectral-class legend swatches / checkbox boxes.
+export fn draw_rect(x: Int, y: Int, w: Int, h: Int, r: Int, g: Int, b: Int) -> Unit !{IO} =
+  gfx_draw_rect(x, y, w, h, r, g, b)
 
 # Floor a Double to an Int. Stopgap for a missing core primitive (stdlib has no Double->Int; math.floor
 # returns a Double) — the galaxy map bins world coords into integer tile indices. Pure. See BACKLOG:

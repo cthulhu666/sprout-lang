@@ -1267,8 +1267,13 @@ static int g_vis[GFX_MAX_GROUPS];
  *     every instance is far and sub-pixel draws almost none. cull_dist <= 0 disables the distance test.
  *   - frustum: its padded AABB intersects the view (the zoomed-in win).
  * The MODEL count is read from the loaded-model registry; `group_count` is the bucket scan bound.
- * cull_dist crosses the ABI as a Double (its IEEE-754 bit pattern). This is the frame-loop call. */
-long long gfx_draw_instances(long long group_count, long long cull_dist) {
+ * cull_dist crosses the ABI as a Double (its IEEE-754 bit pattern). This is the frame-loop call.
+ *
+ * `class_mask` is a per-MODEL visibility bitmask (bit m set == draw model m); a whole model is
+ * skipped when its bit is clear. Since the galaxy-map pushes one model per spectral class (model
+ * index == classCode), this is the spectral-class filter — nearly free, because the draw already
+ * loops per model. gfx_draw_instances passes an all-ones mask (draw everything). */
+static long long draw_instances_impl(long long group_count, long long cull_dist, long long class_mask) {
   int gc = (int)group_count;
   if (gc > GFX_MAX_GROUPS) gc = GFX_MAX_GROUPS;
   float cull = as_float(cull_dist);
@@ -1291,6 +1296,7 @@ long long gfx_draw_instances(long long group_count, long long cull_dist) {
   if (nvis == 0) return 0;
   int nmodels = (g_model_count < GFX_INSTANCE_MODELS) ? g_model_count : GFX_INSTANCE_MODELS;
   for (int mdl = 0; mdl < nmodels; mdl++) {
+    if (!((class_mask >> mdl) & 1LL)) continue;  /* spectral-class filter: skip a masked-off model */
     int total = 0;
     for (int i = 0; i < nvis; i++) total += g_grp_count[g_vis[i] * GFX_INSTANCE_MODELS + mdl];
     if (total == 0) continue;
@@ -1314,6 +1320,18 @@ long long gfx_draw_instances(long long group_count, long long cull_dist) {
     }
   }
   return 0;
+}
+
+/* Draw every model in groups [0, group_count) — the unfiltered frame-loop call. */
+long long gfx_draw_instances(long long group_count, long long cull_dist) {
+  return draw_instances_impl(group_count, cull_dist, ~0LL);
+}
+
+/* Like gfx_draw_instances, but draw only the models whose bit is set in class_mask (bit m == model
+ * m). The galaxy-map's spectral-class filter: model index == classCode, so the mask enables/disables
+ * whole spectral classes. class_mask is an Int (crosses the ABI as a plain integer, not a Double). */
+long long gfx_draw_instances_masked(long long group_count, long long cull_dist, long long class_mask) {
+  return draw_instances_impl(group_count, cull_dist, class_mask);
 }
 
 /* Load an animation set from a file (glTF/GLB/IQM/M3D). The skeleton must match
@@ -1410,6 +1428,21 @@ long long gfx_draw_text(long long x, long long y, const char *text,
   if (g_overlay) { DrawText(text, (int)x, (int)y, (int)size, c); return 0; }
   EndMode3D();
   DrawText(text, (int)x, (int)y, (int)size, c);
+  BeginMode3D(g_cam);
+  return 0;
+}
+
+/* Draw a filled 2D rectangle at screen (x,y), w x h px, in flat RGB — the general filled-rect
+ * primitive (raylib DrawRectangle was reachable from Sprout only inside gfx_button before this).
+ * Used by the galaxy-map legend for spectral-class swatches / checkbox boxes. Self-brackets out of
+ * Mode3D exactly like gfx_draw_text so it is callable mid-frame; already in 2D in the overlay pass.
+ * x,y,w,h,r,g,b are Ints. */
+long long gfx_draw_rect(long long x, long long y, long long w, long long h,
+                        long long r, long long g, long long b) {
+  Color c = { (unsigned char)r, (unsigned char)g, (unsigned char)b, 255 };
+  if (g_overlay) { DrawRectangle((int)x, (int)y, (int)w, (int)h, c); return 0; }
+  EndMode3D();
+  DrawRectangle((int)x, (int)y, (int)w, (int)h, c);
   BeginMode3D(g_cam);
   return 0;
 }
