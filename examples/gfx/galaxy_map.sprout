@@ -4,10 +4,11 @@ import stdlib.gfx
 import stdlib.string (split_once)
 import stdlib.math (min, pi, sin, cos)
 import stdlib.json as json
+import stdlib.process (proc_run)
 import loam.camera (Cam, cam_drive, cam_distance)
 import loam.view (cam_apply)
 import loam.config (parse_config, cfg_int)
-import loam.galaxy_lod (pow2, level_offset, group_of, clampi, desired_level, next_level)
+import loam.galaxy_lod (pow2, level_offset, group_of, clampi, desired_level, next_level, tile_index_i)
 import loam.galaxy_filter (num_classes, mask_all, mask_none, bit_test, bit_toggle, popcount, class_name, class_rgb)
 import loam.orbit (ellipse_point)
 
@@ -32,20 +33,20 @@ import loam.orbit (ellipse_point)
 # SPECTRAL-CLASS FILTER (scene 1). The right-side legend is 12 clickable class checkboxes (multiselect)
 # + All/None; scene 1 draws only the enabled classes via gfx.draw_instances_masked (model index ==
 # classCode, so the mask enables whole classes — nearly free, as the draw already batches per model).
-# The demo streams a class-BALANCED catalog so every class has galaxy-wide coverage at every zoom:
-# the raw universegen catalog is brightest-first (L0 holds zero M/F/G/K stars, so filtering to a dim
-# class over it is a blank screen), and `just rebalance-galaxy` re-pyramids it per class first. See
-# tools/galaxy_rebalance.sprout and docs/galaxy-map-demo-v0.md.
+# The filter needs a class-BALANCED catalog: the raw universegen catalog is brightest-first (L0 holds
+# zero M/F/G/K stars, so filtering to a dim class over it is a blank screen). The demo builds one at
+# STARTUP — `ensure_balanced` re-pyramids the catalog per class into `<catalog>-balanced` and caches it
+# (rebuilt only if that dir is absent) — so there is no separate tool or just recipe. See the
+# "Class-balanced catalog" section below and docs/galaxy-map-demo-v0.md.
 #
 # Catalog line:  id|xi|yi|zi|classCode|sizeCode|name|detailLine   (xi,yi,zi in integer light-years)
-# Produced by `cabal run catalog` in the universegen repo, then re-pyramided by `just rebalance-galaxy`.
+# Produced by `cabal run catalog` in the universegen repo.
 #
-# Run (pass the BALANCED catalog directory as the first arg):
-#   just rebalance-galaxy ~/GameDev/universegen/catalog ~/GameDev/universegen/catalog-balanced
-#   mise exec -- just run-gfx examples/gfx/galaxy_map.sprout ~/GameDev/universegen/catalog-balanced
+# Run (pass the SOURCE catalog directory as the first arg; the balanced cache is built on first run):
+#   mise exec -- just run-gfx examples/gfx/galaxy_map.sprout ~/GameDev/universegen/catalog
 # Canary + screenshot (argv[7] = initial class mask, e.g. 64 = M-only):
 #   SPROUT_GFX_MAX_FRAMES=120 SPROUT_GFX_SCREENSHOT=galaxy.png \
-#     mise exec -- just run-gfx examples/gfx/galaxy_map.sprout ~/GameDev/universegen/catalog-balanced 85000 14000 700 0 0 -1 64
+#     mise exec -- just run-gfx examples/gfx/galaxy_map.sprout ~/GameDev/universegen/catalog 85000 14000 700 0 0 -1 64
 
 # --- Tunables (compile-time; a .conf loader is a later-stage polish) --------------------------------
 let default_catalog = "catalog"  # relative fallback; the real catalog dir is passed as argv[0]
@@ -99,8 +100,8 @@ let draw_cull = 0.0  # 0 = frustum-only; group_count already bounds the levels d
 # --- Spectral-class filter legend (scene 1) -----------------------------------------------------
 # A right-side stack of 12 clickable class checkboxes (multiselect): the box is filled with the class
 # colour when ON, dark when OFF, so it doubles as the palette swatch. Below the rows sit All / None.
-# The demo streams a class-BALANCED catalog (tools/galaxy_rebalance) so every class has galaxy-wide
-# coverage at every zoom — the filter draws only the enabled classes' models via draw_instances_masked.
+# The demo streams a class-BALANCED catalog (built at startup by ensure_balanced) so every class has
+# galaxy-wide coverage at every zoom — the filter draws only the enabled classes via draw_instances_masked.
 let leg_x = 1038  # left edge of the legend panel (also the click hit-test left bound)
 let leg_y = 62  # top of the first class row
 let leg_w = 234  # panel width for the click hit-test
@@ -330,6 +331,183 @@ fn read_radius(dir: String) -> Double !{IO} =
   match read_file(dir ++ "/meta.txt") with
   | Ok text -> to_double(cfg_int(parse_config(text), "galaxy_radius_ly", 50000))
   | Err _ -> 50000.0
+
+# --- Class-balanced catalog: build-once-and-cache at startup (for the spectral-class filter) -----
+# The raw universegen catalog is BRIGHTEST-FIRST, so its coarse levels are all bright classes — L0
+# holds zero M/F/G/K/A stars, and filtering to a dim class over it is a BLANK screen zoomed out (M
+# dwarfs are 74% of all stars). ensure_balanced re-pyramids the catalog PER CLASS (shallowest-fit with
+# a PER-CLASS per-tile budget), so every class fills the coarse levels first and appears galaxy-wide at
+# every zoom. It runs at startup (before the window opens), consumes the CATALOG not galaxy.json (so
+# universegen is untouched), and is headless — integer-ly coords bin with the pure tile_index_i, no
+# double_to_int. Output is cached in `<src>-balanced` (a SIBLING of src, so `<dir>/../systems` still
+# resolves for scene 2); it is rebuilt only when the cache's meta.txt is absent — delete that dir to
+# force a rebuild. TRADEOFF: the catalog dropped luminosity, so within-class order is a spatial sample
+# (as-encountered), not brightest-first (fine for an overview); the per-class budget caps deep M
+# density and bounds memory (overflow past the deepest level is dropped). See docs/galaxy-map-demo-v0.md.
+let rebalance_budget = 800  # stars kept per class, per tile — L0 gets <= this of each class
+
+fn read_radius_i(dir: String) -> Int !{IO} =
+  match read_file(dir ++ "/meta.txt") with
+  | Ok text -> cfg_int(parse_config(text), "galaxy_radius_ly", 50000)
+  | Err _ -> 50000
+
+# Parse just the fields tiling needs from a catalog line: (xi, yi, classCode). Nothing if malformed.
+fn line_key(line: String) -> Maybe (Int, Int, Int) =
+  match split_pipe(line) with
+  | [_id, xs, ys, _zs, cs | _] ->
+      match (parse_int(xs), parse_int(ys), parse_int(cs)) with
+      | (Just xi, Just yi, Just ci) -> Just((xi, yi, ci))
+      | _ -> Nothing
+  | _ -> Nothing
+
+# Packed count key, one slot per (tile-group, class): gid < 341, class < 12, so gid*12+class is unique.
+fn count_key(gid: Int, cls: Int) -> String = to_string((gid * num_classes) + cls)
+fn get_count(counts: Dict Int, gid: Int, cls: Int) -> Int =
+  match dict_get(count_key(gid, cls), counts) with
+  | Just n -> n
+  | Nothing -> 0
+
+# Shallowest level in [0, stream_max_level] whose (level, tile, class) bucket still has room, or -1 if
+# the star overflows every level (dropped). Shallowest-fit like the exporter, but the budget is PER
+# CLASS — that is what forces every class into the coarse levels rather than only the brightest.
+fn fit_level(xi: Int, yi: Int, cls: Int, radius: Int, counts: Dict Int, level: Int) -> Int =
+  if level > stream_max_level then 0 - 1
+  else
+    let gid = group_of(level, tile_index_i(xi, level, radius), tile_index_i(yi, level, radius))
+    in if get_count(counts, gid, cls) < rebalance_budget then level
+       else fit_level(xi, yi, cls, radius, counts, level + 1)
+
+fn get_tile_lines(out: Dict (List String), gid: Int) -> List String =
+  match dict_get(to_string(gid), out) with
+  | Just ls -> ls
+  | Nothing -> Nil
+
+# Place one line into its shallowest-fitting (level, tile) at its class budget; drop on overflow.
+fn place_line(line: String, radius: Int, st: (Dict Int, Dict (List String))) -> (Dict Int, Dict (List String)) =
+  match st with
+  | (counts, out) ->
+      match line_key(line) with
+      | Nothing -> (counts, out)
+      | Just (xi, yi, cls) ->
+          let level = fit_level(xi, yi, cls, radius, counts, 0)
+          in if level < 0 then (counts, out)
+             else
+               let gid = group_of(level, tile_index_i(xi, level, radius), tile_index_i(yi, level, radius))
+                   counts2 = dict_set(count_key(gid, cls), get_count(counts, gid, cls) + 1, counts)
+                   out2 = dict_set(to_string(gid), Cons(line, get_tile_lines(out, gid)), out)
+               in (counts2, out2)
+
+fn fold_lines(lines: List String, radius: Int, st: (Dict Int, Dict (List String))) -> (Dict Int, Dict (List String)) =
+  match lines with
+  | Nil -> st
+  | Cons line rest -> fold_lines(rest, radius, place_line(line, radius, st))
+
+# Read + fold one source tile (a missing tile in the sparse deep grid is skipped, not an error).
+fn rb_tile(src: String, radius: Int, level: Int, ix: Int, iy: Int, st: (Dict Int, Dict (List String))) -> (Dict Int, Dict (List String)) !{IO} =
+  match read_file(tile_path(src, level, ix, iy)) with
+  | Err _ -> st
+  | Ok text -> fold_lines(str_split_lines(text), radius, st)
+
+fn rb_row(src: String, radius: Int, level: Int, ix: Int, iy: Int, n: Int, st: (Dict Int, Dict (List String))) -> (Dict Int, Dict (List String)) !{IO} =
+  if iy >= n then st
+  else
+    do
+      st2 <- rb_tile(src, radius, level, ix, iy, st)
+      rb_row(src, radius, level, ix, iy + 1, n, st2)
+
+fn rb_cols(src: String, radius: Int, level: Int, ix: Int, n: Int, st: (Dict Int, Dict (List String))) -> (Dict Int, Dict (List String)) !{IO} =
+  if ix >= n then st
+  else
+    do
+      st2 <- rb_row(src, radius, level, ix, 0, n, st)
+      rb_cols(src, radius, level, ix + 1, n, st2)
+
+fn rb_levels(src: String, radius: Int, level: Int, st: (Dict Int, Dict (List String))) -> (Dict Int, Dict (List String)) !{IO} =
+  if level > stream_max_level then st
+  else
+    do
+      print("[galaxy] rebalance: scanning source L" ++ to_string(level) ++ " ...")
+      st2 <- rb_cols(src, radius, level, 0, pow2(level), st)
+      rb_levels(src, radius, level + 1, st2)
+
+# Write one output tile from its accumulated lines (skip empty — matches the sparse source layout).
+fn rb_write_tile(cache: String, out: Dict (List String), level: Int, ix: Int, iy: Int) -> Unit !{IO} =
+  let gid = group_of(level, ix, iy)
+  in match get_tile_lines(out, gid) with
+     | Nil -> ()
+     | ls ->
+         match write_file(tile_path(cache, level, ix, iy), string_join_newlines(ls)) with
+         | Ok _ -> ()
+         | Err e -> print("[galaxy] rebalance WRITE FAILED " ++ tile_path(cache, level, ix, iy) ++ ": " ++ e)
+
+fn rb_write_row(cache: String, out: Dict (List String), level: Int, ix: Int, iy: Int, n: Int) -> Unit !{IO} =
+  if iy >= n then ()
+  else
+    do
+      rb_write_tile(cache, out, level, ix, iy)
+      rb_write_row(cache, out, level, ix, iy + 1, n)
+
+fn rb_write_cols(cache: String, out: Dict (List String), level: Int, ix: Int, n: Int) -> Unit !{IO} =
+  if ix >= n then ()
+  else
+    do
+      rb_write_row(cache, out, level, ix, 0, n)
+      rb_write_cols(cache, out, level, ix + 1, n)
+
+fn rb_write_levels(cache: String, out: Dict (List String), level: Int) -> Unit !{IO} =
+  if level > stream_max_level then ()
+  else
+    do
+      rb_write_cols(cache, out, level, 0, pow2(level))
+      rb_write_levels(cache, out, level + 1)
+
+# Copy meta.txt verbatim: the balanced catalog is self-contained (same radius the demo bins with) AND
+# meta.txt is the cache-present sentinel (ensure_balanced rebuilds only when it is absent).
+fn copy_meta(src: String, cache: String) -> Unit !{IO} =
+  match read_file(src ++ "/meta.txt") with
+  | Err _ -> print("[galaxy] rebalance WARN: no meta.txt in source; balanced catalog falls back to defaults")
+  | Ok text ->
+      match write_file(cache ++ "/meta.txt", text) with
+      | Ok _ -> ()
+      | Err e -> print("[galaxy] rebalance WRITE FAILED meta.txt: " ++ e)
+
+# `mkdir -p` the balanced level dirs (write_file does not create directories) by composing
+# stdlib.process — no mkdir builtin needed (Builtin-vs-Stdlib rule 4; the compiler shells mkdir too).
+fn level_dirs(cache: String, level: Int, acc: List String) -> List String =
+  if level > stream_max_level then acc
+  else level_dirs(cache, level + 1, Cons(cache ++ "/L" ++ to_string(level), acc))
+fn make_dirs(cache: String) -> Unit !{IO} =
+  do
+    _r <- proc_run(Cons("mkdir", Cons("-p", level_dirs(cache, 0, Nil))))
+    ()
+
+fn build_balanced(src: String, cache: String) -> Unit !{IO} =
+  do
+    radius <- read_radius_i(src)
+    print("[galaxy] rebalance: radius=" ++ to_string(radius) ++ " budget/class/tile=" ++ to_string(rebalance_budget))
+    make_dirs(cache)
+    final <- rb_levels(src, radius, 0, (dict_empty(), dict_empty()))
+    match final with
+    | (_, out) ->
+        do
+          copy_meta(src, cache)
+          rb_write_levels(cache, out, 0)
+          print("[galaxy] rebalance: done -> " ++ cache)
+
+# Return the class-balanced catalog dir for `src`, building it once if the cache is absent. The cache
+# `<src>-balanced` is a SIBLING of src, so the demo's scene-2 `<dir>/../systems` path still resolves.
+fn ensure_balanced(src: String) -> String !{IO} =
+  let cache = src ++ "-balanced"
+  in match read_file(cache ++ "/meta.txt") with
+     | Ok _ ->
+         do
+           print("[galaxy] using cached balanced catalog: " ++ cache)
+           cache
+     | Err _ ->
+         do
+           print("[galaxy] building class-balanced catalog (one-time, ~15s) -> " ++ cache)
+           build_balanced(src, cache)
+           cache
 
 # --- Scene 2: solar-system view -----------------------------------------------------------------
 # A planet reduced to what the view draws and reports: orbit shape (semi-major AU `a`, eccentricity
@@ -718,11 +896,14 @@ fn render_loop(dir: String, cam: Cam, scam: Cam, radius: Double, loaded: Dict In
 
 fn main() -> Unit !{IO} =
   do
+    # Resolve the catalog and build/reuse the class-balanced cache BEFORE opening the window, so the
+    # one-time ~15s rebuild prints to the console instead of presenting a frozen window.
+    src_dir <- catalog_dir()
+    dir <- ensure_balanced(src_dir)
     gfx.open_window(1280, 800, "Sprout — Galaxy Map")
     gfx.set_target_fps(60)
     gfx.set_clip_planes(near_plane, far_plane)
     make_models()
-    dir <- catalog_dir()
     radius <- read_radius(dir)
     cam_radius <- arg_int(1, gfx.double_to_int(init_radius))
     cam_height <- arg_int(2, gfx.double_to_int(init_height))

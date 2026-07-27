@@ -20,17 +20,17 @@ galaxy.json (645 MB, 1M systems)                         ~/GameDev/universegen
    │  cabal run catalog  (app/CatalogExporter.hs)
    ▼
 catalog/  meta.txt + L<level>/tile_<ix>_<iy>.txt         a quadtree LoD pyramid (~97 MB)
-   │  just rebalance-galaxy  (tools/galaxy_rebalance.sprout, Sprout-side, for the spectral filter)
+   │  ensure_balanced (in galaxy_map.sprout) — rebalances per class AT STARTUP, cached
    ▼
-catalog-balanced/  same layout, per-class-budgeted        class-balanced pyramid (~48 MB)
+catalog-balanced/  same layout, per-class-budgeted        class-balanced pyramid (~48 MB, built once)
    │  read_file + str_split_lines + parse_int  (at runtime, streamed per-tile)
    ▼
 examples/gfx/galaxy_map.sprout  ──▶  stdlib.gfx  ──▶  graphics/sprout_gfx.c (raylib)
 ```
 
-(The rebalance step is only needed for the spectral-class filter — see "Spectral-class filter" below.
-The demo runs directly on `catalog/` too; only the dim-class-zoomed-out filter case needs the
-balanced pyramid.)
+(The rebalance step exists only for the spectral-class filter — see "Spectral-class filter" below.
+The demo builds `<catalog>-balanced` on first launch and reuses it thereafter; you pass the plain
+`catalog/` and never manage the balanced copy by hand.)
 
 ### Offline: the catalog exporter (`universegen/app/CatalogExporter.hs`)
 
@@ -207,13 +207,17 @@ an initial mask (e.g. `64` = M-only) for screenshots.
   is ordered **brightest-first**, so its coarse levels are all bright classes — L0 holds *zero*
   M/F/G/K/A stars (verified). Filtering to a dim class (M dwarfs are 74% of all stars) over that
   pyramid is a **blank screen** when zoomed out. The fix rebuilds coverage **per class**.
-- **`tools/galaxy_rebalance.sprout` (run via `just rebalance-galaxy`)** re-pyramids the existing
-  catalog into a class-**balanced** one: the exporter's shallowest-fit tiling, but with a **per-class**
-  per-tile budget, so every class fills the coarse levels first and appears galaxy-wide at every zoom.
-  It is a **Sprout-side** transform that consumes the *catalog* (universegen's output), not
-  `galaxy.json` — so **universegen is untouched**. It is headless (no gfx): integer-ly coordinates bin
-  with the pure `loam.galaxy_lod.tile_index_i`, so no `double_to_int`. The demo then streams the
-  balanced catalog for both the `All` view and any filter.
+- **`ensure_balanced` (in `galaxy_map.sprout`, run at STARTUP)** re-pyramids the existing catalog into
+  a class-**balanced** one: the exporter's shallowest-fit tiling, but with a **per-class** per-tile
+  budget, so every class fills the coarse levels first and appears galaxy-wide at every zoom. It is a
+  **Sprout-side** transform that consumes the *catalog* (universegen's output), not `galaxy.json` — so
+  **universegen is untouched** — and it is **not a separate tool or `just` recipe**: the demo builds
+  it on first launch into `<catalog>-balanced` (a sibling of `catalog/`, so scene 2's `<dir>/../systems`
+  still resolves) and **caches** it, rebuilding only if that directory is absent (delete it to force a
+  rebuild). The rebalance is headless — integer-ly coordinates bin with the pure
+  `loam.galaxy_lod.tile_index_i`, no `double_to_int` — and creates its output dirs by shelling
+  `mkdir -p` via `stdlib.process` (no `mkdir` builtin; `write_file` can't create directories). The demo
+  then streams the balanced catalog for both the `All` view and any filter.
 - **Tradeoffs (deliberate).** The catalog dropped per-star luminosity, so within-class order is a
   spatial sample (as-encountered), not brightest-first — fine for a filter overview. The per-class
   per-tile budget (default 800) caps deep-zoom density for the huge M class and bounds the tool's
@@ -239,19 +243,17 @@ models are now built from `class_rgb`, so a star and its legend swatch can never
 ## Running
 
 ```
-# One-time (for the spectral filter): re-pyramid the catalog into a class-balanced one.
-mise exec -- just rebalance-galaxy /Users/cthulhu/GameDev/universegen/catalog \
-                                   /Users/cthulhu/GameDev/universegen/catalog-balanced
-
-mise exec -- just run-gfx examples/gfx/galaxy_map.sprout /Users/cthulhu/GameDev/universegen/catalog-balanced
+# Pass the plain catalog/. On first launch the demo builds catalog-balanced (~15 s) for the
+# spectral filter and caches it; later launches reuse it.
+mise exec -- just run-gfx examples/gfx/galaxy_map.sprout /Users/cthulhu/GameDev/universegen/catalog
 # canary + screenshot:
 SPROUT_GFX_MAX_FRAMES=120 SPROUT_GFX_SCREENSHOT=galaxy.png \
-  mise exec -- just run-gfx examples/gfx/galaxy_map.sprout /Users/cthulhu/GameDev/universegen/catalog-balanced
+  mise exec -- just run-gfx examples/gfx/galaxy_map.sprout /Users/cthulhu/GameDev/universegen/catalog
 ```
 
 `argv[7]` is the initial spectral-class filter mask (bit *c* = class *c* shown; absent = all). It
 requires the camera args to be present too (positional), so a filtered screenshot passes the full row,
-e.g. M-only edge-on overview: `… <catalog-balanced> 85000 14000 700 0 0 -1 64`.
+e.g. M-only edge-on overview: `… <catalog> 85000 14000 700 0 0 -1 64`.
 
 **Scripting the opening camera** (for screenshots / canaries at a fixed viewpoint). Optional integer
 args after the catalog dir override the starting `Cam` without a rebuild:

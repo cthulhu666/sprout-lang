@@ -197,25 +197,6 @@ run-gfx file *args: bootstrap-from-seed
   clang "$TMP_LL" {{runtime_src}} "{{gfx_src}}" -O2 -I"{{raylib_prefix}}/include" -L"{{raylib_prefix}}/lib" {{clang_extra}} {{gfx_link}} -o "$TMP_BIN"
   "$TMP_BIN" {{args}}
 
-# Offline build tool for the galaxy-map spectral-class FILTER: re-pyramid an existing catalog into a
-# class-BALANCED catalog (every spectral class covered galaxy-wide at every zoom, so a dim-class
-# filter isn't blank when zoomed out — see tools/galaxy_rebalance.sprout / docs/galaxy-map-demo-v0.md).
-# Headless (no gfx), links the core runtime. `budget` is stars kept PER CLASS per tile (default 800).
-# Point the demo at <out_dir> as its catalog. e.g.:
-#   just rebalance-galaxy ~/GameDev/universegen/catalog ~/GameDev/universegen/catalog-balanced 800
-[group('dev')]
-rebalance-galaxy in_dir out_dir budget="800": bootstrap-from-seed
-  #!/usr/bin/env bash
-  set -euo pipefail
-  TMP_LL="/tmp/sprout_rebal_$$.ll"
-  TMP_BIN="/tmp/sprout_rebal_$$"
-  trap 'rm -f "$TMP_LL" "$TMP_BIN"' EXIT
-  # write_file does not create directories: pre-create the balanced level dirs L0..L4.
-  for l in 0 1 2 3 4; do mkdir -p "{{out_dir}}/L$l"; done
-  "{{build_dir}}/compile_driver_bin_stage1" --emit-ir "{{stdlib_root}}" --package-root "{{justfile_directory()}}" tools/galaxy_rebalance.sprout > "$TMP_LL"
-  clang "$TMP_LL" {{runtime_src}} {{clang_extra}} -O2 -o "$TMP_BIN"
-  "$TMP_BIN" "{{in_dir}}" "{{out_dir}}" "{{budget}}"
-
 # Build {{file}} with GC profiling compiled in (-DSPROUT_GC_PROFILE) and run it
 # with SPROUT_GC_PROFILE=1, printing a "[gc profile] ..." summary to stderr at
 # exit: cycles, heap_lookup_calls, drain edges, sweep visits, mark-root slots,
