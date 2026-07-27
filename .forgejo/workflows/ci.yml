@@ -73,7 +73,7 @@ jobs:
         run: just verify-bootstrap-fixed-point
 
       - name: CI fast gates (parallel)
-        # 14 single-threaded gates fanned out JOBS-wide by `just ci-fast-gates`
+        # 16 single-threaded gates fanned out JOBS-wide by `just ci-fast-gates`
         # instead of running as a sequential chain of steps — on the 4-vCPU worker
         # each used only 1 core, leaving 3 idle. Merged into one step because
         # Actions steps run sequentially within a job; the recipe captures each
@@ -87,6 +87,10 @@ jobs:
         #   - Bundle smoke (DoD #8): `--phase bundle` non-empty, no dot-prefix names.
         #   - Check formatting (fmt-check, built via build-fmt-from-seed dep).
         #   - Negative type-checking conformance (test-type-errors).
+        #   - Negative parse conformance (test-parse-errors).
+        #   - Golden-stdout conformance (test-conformance-run): each
+        #     tests/conformance/run/*.spr's stdout must equal its .out (XFAIL-quarantined
+        #     fixtures excepted; an unexpected pass or orphan .out fails the gate).
         #   - Example canary (DoD #10): the canary set runs to completion, no crash.
         #   - GC safety check (--strict).
         #   - Regression smokes: argv / div-by-zero / stack-overflow / task-io /

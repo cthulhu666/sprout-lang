@@ -257,7 +257,7 @@ debug-run file: bootstrap-from-seed
 
 # Run all stdlib + compiler-stage tests (stage-1).
 [group('test')]
-test: test-stdlib-stage1 test-type-errors test-package-resolution gfx-smoke test-loam
+test: test-stdlib-stage1 test-type-errors test-parse-errors test-conformance-run test-package-resolution gfx-smoke test-loam
 
 # Second-root (--package-root) module resolution gate: an app importing a module
 # from an extra package root resolves only when that root is registered
@@ -293,6 +293,74 @@ test-loam: bootstrap-from-seed
     echo "  OK $f"
   done
   [ "$fail" -eq 0 ] && echo "==> test-loam ✓" || { echo "==> test-loam FAILED" >&2; exit 1; }
+
+# Golden-stdout conformance gate. Each tests/conformance/run/<name>.spr is
+# compiled (stage-1), linked, and run; its stdout must equal <name>.out byte for
+# byte. tests/conformance/run/XFAIL quarantines known-broken fixtures WITHOUT
+# silently skipping them: a quarantined fixture that starts passing again turns
+# the gate RED (so quarantine self-heals), as does an orphan .out with no .spr.
+# NOTE: --emit-ir exits 0 even on a source error (writes "ERROR: ..." where IR
+# should go — the byte-identity blind spot), so a compile failure is detected by
+# grepping the emitted output, not by exit status.
+[group('test')]
+test-conformance-run: bootstrap-from-seed
+  #!/usr/bin/env bash
+  set -uo pipefail
+  STAGE="{{build_dir}}/compile_driver_bin_stage1"
+  DIR="tests/conformance/run"
+  TMPD=$(mktemp -d /tmp/sprout_conf_run_XXXXXX); trap 'rm -rf "$TMPD"' EXIT
+  RTO="$TMPD/rtobj"; mkdir -p "$RTO"
+  for rtsrc in {{runtime_src}}; do
+    clang -c "$rtsrc" -O2 {{clang_extra}} -o "$RTO/$(basename "$rtsrc" .c).o" 2>"$TMPD/rt.err" \
+      || { echo "ERROR: runtime compile failed ($rtsrc)"; cat "$TMPD/rt.err"; exit 1; }
+  done
+  # Load the XFAIL manifest (first token per non-comment line).
+  declare -A xfail=()
+  if [[ -f "$DIR/XFAIL" ]]; then
+    while read -r name _; do
+      [[ -z "$name" || "$name" == \#* ]] && continue
+      xfail["$name"]=1
+    done < "$DIR/XFAIL"
+  fi
+  failed=0; xfailed=0; passed=0
+  # Orphan .out (golden with no source) — the exact rot that hid a deleted fixture.
+  for out in "$DIR"/*.out; do
+    [ -f "$out" ] || continue
+    name="$(basename "$out" .out)"
+    [[ -f "$DIR/$name.spr" ]] || { echo "  ORPHAN  $name.out has no $name.spr"; failed=$((failed + 1)); }
+  done
+  for spr in "$DIR"/*.spr; do
+    [ -f "$spr" ] || continue
+    name="$(basename "$spr" .spr)"
+    golden="$DIR/$name.out"
+    ok=1; why=""
+    if [[ ! -f "$golden" ]]; then ok=0; why="no .out golden"; fi
+    if [[ $ok -eq 1 ]]; then
+      "$STAGE" --emit-ir "{{stdlib_root}}" "$spr" > "$TMPD/t.ll" 2>"$TMPD/t.err"
+      if grep -qE "^([0-9]+:[0-9]+: )?ERROR:" "$TMPD/t.ll" "$TMPD/t.err"; then
+        ok=0; why="compile: $(grep -hE '^([0-9]+:[0-9]+: )?ERROR:' "$TMPD/t.ll" "$TMPD/t.err" | head -1)"
+      elif ! clang "$TMPD/t.ll" "$RTO"/*.o {{clang_extra}} -o "$TMPD/t.bin" 2>"$TMPD/t.err"; then
+        ok=0; why="link: $(grep -iE 'undefined|error' "$TMPD/t.err" | head -1)"
+      else
+        # Golden-stdout: assert stdout only, deliberately ignoring the binary's
+        # exit code (a fixture that prints the right thing then exits nonzero is
+        # not what this corpus checks — see conformance/{run,runtime_error}).
+        got="$("$TMPD/t.bin" 2>/dev/null)"
+        [[ "$got" == "$(cat "$golden")" ]] || { ok=0; why="stdout mismatch"; }
+      fi
+    fi
+    if [[ -n "${xfail[$name]:-}" ]]; then
+      if [[ $ok -eq 1 ]]; then echo "  UNEXPECTED PASS  $name (remove from XFAIL)"; failed=$((failed + 1))
+      else echo "  xfail  $name ($why)"; xfailed=$((xfailed + 1)); fi
+    else
+      if [[ $ok -eq 1 ]]; then passed=$((passed + 1))
+      else echo "  FAIL  $name — $why"; failed=$((failed + 1)); fi
+    fi
+  done
+  echo ""
+  echo "==> conformance/run: $passed passed, $xfailed xfail (quarantined), $failed failed"
+  [ "$failed" -eq 0 ] || { echo "==> test-conformance-run FAILED" >&2; exit 1; }
+  echo "==> test-conformance-run ✓"
 
 # B1-Double regression gate: assert the inline Vector-Double optimization fires on
 # genuine `Vector Double`, does NOT fire on a shadowed heap `Double` (UAF guard),
@@ -603,12 +671,15 @@ _compile-examples stage xfail="":
 [group('examples')]
 compile-examples-stage1: (_compile-examples "build/compile_driver_bin_stage1" "examples/gfx/spinning_cube.sprout examples/gfx/character_view.sprout examples/gfx/character_animated.sprout examples/gfx/character_crowd.sprout examples/gfx/ecs_agents.sprout examples/gfx/ecs_flocking.sprout examples/gfx/terrain_demo.sprout examples/gfx/terrain_rivers_demo.sprout examples/gfx/galaxy_map.sprout")
 
-# Negative type-checking conformance: each tests/conformance/type_error/<n>.spr must
-# be rejected by `--phase check` with output containing the substring in <n>.err.
-# (`--phase check` exits 0 even on type errors, so matching is by output content.)
-# xfail = fixtures whose expected diagnostic is not yet produced (tracked TODO).
+# Negative-diagnostic conformance: each tests/conformance/<dir>/<n>.spr must be
+# rejected by `--phase check` with output containing the substring in <n>.err.
+# Covers both parse-phase and type-phase rejections — `--phase check` runs the
+# bundler (parse) first, so a parse error surfaces here too. (`--phase check`
+# exits 0 even on a source error — the byte-identity blind spot — so matching is
+# by output content, never exit status.) <noun> labels the summary; xfail =
+# fixtures whose expected diagnostic is not yet produced (tracked TODO).
 [private]
-_test-type-errors stage xfail="":
+_test-reject stage dir noun xfail="":
   #!/usr/bin/env bash
   set -euo pipefail
   STAGE="{{stage}}"
@@ -618,10 +689,10 @@ _test-type-errors stage xfail="":
   fi
   total_failed=0
   total_xfail=0
-  for spr in tests/conformance/type_error/*.spr; do
+  for spr in tests/conformance/{{dir}}/*.spr; do
     [ -f "$spr" ] || continue
     name="$(basename "${spr%.spr}")"
-    err="tests/conformance/type_error/$name.err"
+    err="tests/conformance/{{dir}}/$name.err"
     if [[ ! -f "$err" ]]; then
       echo "==> $name"; echo "  MISSING .err"; total_failed=$((total_failed + 1)); continue
     fi
@@ -639,19 +710,24 @@ _test-type-errors stage xfail="":
     fi
   done
   echo ""
-  [[ $total_xfail -gt 0 ]] && echo "==> $total_xfail type-error fixture(s) xfail (expected)"
+  [[ $total_xfail -gt 0 ]] && echo "==> $total_xfail {{noun}} fixture(s) xfail (expected)"
   if [ "$total_failed" -gt 0 ]; then
-    echo "==> $total_failed type-error fixture(s) FAILED"
+    echo "==> $total_failed {{noun}} fixture(s) FAILED"
     exit 1
   fi
-  echo "==> All type-error fixtures rejected as expected"
+  echo "==> All {{noun}} fixtures rejected as expected"
 
 # Stage-1 negative type-checking gate. No xfail — every fixture is expected to
 # be rejected with its diagnostic. (Overlapping-instance and do-block
 # family-conflict diagnostics landed in PR-3; missing_nested_instance{,_maybe}
 # via the resolve pass in #110.)
 [group('test')]
-test-type-errors: (_test-type-errors "build/compile_driver_bin_stage1" "")
+test-type-errors: (_test-reject "build/compile_driver_bin_stage1" "type_error" "type-error" "")
+
+# Stage-1 negative parse gate: tests/conformance/parse_error/<n>.spr must be
+# rejected at parse time with the diagnostic substring in <n>.err.
+[group('test')]
+test-parse-errors: (_test-reject "build/compile_driver_bin_stage1" "parse_error" "parse-error" "")
 
 # Stage-2: emit IR → clang link for each example.
 [group('examples')]
@@ -1470,6 +1546,8 @@ ci-fast-gates: bootstrap-from-seed build-fmt-from-seed
     "bundle-smoke|bundle-smoke"
     "fmt-check|fmt-check"
     "type-errors|test-type-errors"
+    "parse-errors|test-parse-errors"
+    "conformance-run|test-conformance-run"
     "example-canary|run-example-canary"
     "gc-safety|gc-safety-check --strict"
     "argv-smoke|argv-smoke"

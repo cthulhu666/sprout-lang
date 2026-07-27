@@ -1,0 +1,24 @@
+# Quarantined golden-stdout fixtures: known-broken, NOT silently skipped.
+#
+# The `test-conformance-run` gate runs every tests/conformance/run/*.spr, diffs
+# stdout against the sibling .out, and treats a basename listed here as an
+# expected failure. If a quarantined fixture starts PASSING again, the gate goes
+# RED ("UNEXPECTED PASS — remove from XFAIL") so quarantine is self-healing.
+#
+# Root cause (all 8): each fixture references prelude constructors or combinators
+# without importing them. Bare .spr files are self-contained and get NO prelude
+# (README §Not Yet Supported), so these names are unbound today. Four additionally
+# use the `Cons`/`Nil` cons-list type, which was REMOVED from the language (Sprout
+# lists are `Vec` / `[...]`) — those need rewriting, not just an import.
+#
+# Repair tracked in BACKLOG (conformance-run fixture rehabilitation).
+# Format: one basename (no extension) per line; `#` comments and blank lines ignored.
+
+aoc2025_day1_sample              # `>>` compose lowers to @lcompose (prelude) — unbound without import
+stdlib_two_constraints_same_class # @Err (Result ctor, prelude) unbound without import
+stdlib_mixed_io_maybe_do         # `Just` ctor (prelude Maybe) unknown without import
+stdlib_mixed_io_result_do        # `Ok` ctor (prelude Result) unknown without import
+stdlib_laws_functor              # uses removed `Cons`/`Nil` cons-list — rewrite to Vec
+stdlib_laws_monoid               # uses removed `Cons`/`Nil` cons-list — rewrite to Vec
+stdlib_string_template_basic     # uses removed `Cons`/`Nil` cons-list — rewrite to Vec
+stdlib_string_template_callsite  # uses removed `Cons`/`Nil` cons-list — rewrite to Vec
