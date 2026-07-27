@@ -433,6 +433,7 @@ static int   g_fog_r = 0, g_fog_g = 0, g_fog_b = 0;
 #define GFX_POST_VIGNETTE 1
 #define GFX_POST_TONEMAP  2
 #define GFX_POST_BLUR     4
+#define GFX_POST_BLOOM    8
 /* Blur "amount" (static + motion) is unitless in the API; this converts it to the kernel's
  * pixel radius. ~6 px per unit makes amount 0.5 a clearly-soft focus and 1.0 a strong one,
  * so intuitive small values do something — a RAW sub-pixel radius (amount 0.05 -> 0.05 px)
@@ -444,6 +445,7 @@ static const char *POST_FS =
   "in vec2 fragTexCoord;\n"
   "in vec4 fragColor;\n"
   "uniform sampler2D texture0;\n"
+  "uniform sampler2D texture1;\n"   /* blurred bloom (bright-pass, half-res) — added when GFX_POST_BLOOM set */
   "uniform vec4 colDiffuse;\n"
   "uniform vec2 uResolution;\n"     /* scene target size in pixels, for texel-sized blur steps */
   "uniform int  uMask;\n"           /* GFX_POST_* bit flags */
@@ -452,6 +454,7 @@ static const char *POST_FS =
   "uniform float uExposure;\n"      /* pre-tonemap multiply */
   "uniform float uSaturation;\n"    /* post-tonemap grade: 1 = neutral, >1 punchier, <1 toward grey */
   "uniform float uBlur;\n"          /* blur kernel radius in pixels (0 = sharp) */
+  "uniform float uBloomIntensity;\n" /* scales the added bloom (0 = none) */
   "out vec4 finalColor;\n"
   /* 13-tap Gaussian: centre + inner ring (axial ±1, diagonal ±1) + outer axial (±2), spread by
    * `radiusPx` texels. Two rings give a smoother, wider falloff than a 3x3 tent, so even a small
@@ -482,6 +485,12 @@ static const char *POST_FS =
   "    vec2 uv = fragTexCoord;\n"
   "    vec3 col = ((uMask & 4) != 0 && uBlur > 0.01) ? blurred(uv, uBlur)\n"
   "                                                  : texture(texture0, uv).rgb;\n"
+  /* Additive bloom: the blurred bright-pass glows around emissive pixels (stars). Added BEFORE the
+   * tone-map so the glow rolls off with the scene when tone-mapping is on; on an LDR scene over black
+   * (the galaxy) additive-over-black rarely clips except at star cores, which is the intended look. */
+  "    if ((uMask & 8) != 0) {\n"
+  "        col += uBloomIntensity * texture(texture1, uv).rgb;\n"
+  "    }\n"
   "    if ((uMask & 2) != 0) {\n"
   "        col = aces(col * uExposure);\n"
   "        float luma = dot(col, vec3(0.2126, 0.7152, 0.0722));\n"   /* Rec.709 luminance */
@@ -494,6 +503,61 @@ static const char *POST_FS =
   "    }\n"
   "    finalColor = vec4(col, 1.0) * colDiffuse * fragColor;\n"
   "}\n";
+
+/* --- Bloom (docs/gfx-effects-roadmap-v0.md #5) ------------------------------
+ * A three-stage chain the shim runs into half-res scratch targets after the scene resolves and
+ * before the final present: (1) BLOOM_PREFILTER_FS keeps only the bright part of the scene (soft
+ * luminance threshold, colour preserved); (2) BLOOM_BLUR_FS blurs it with a separable 9-tap
+ * Gaussian, ping-ponged H then V a couple of rounds for a wide, cheap glow; (3) POST_FS adds the
+ * result on top (GFX_POST_BLOOM bit). Threshold bloom on the LDR target is the cheaper stylized
+ * approximation (a true thresholdless HDR version awaits the RGBA16F target, roadmap #4) — but over
+ * the black galaxy backdrop it reads exactly as a star glow. Both shaders use raylib's default
+ * full-screen vertex shader (NULL vs), which supplies fragTexCoord. */
+static const char *BLOOM_PREFILTER_FS =
+  "#version 330\n"
+  "in vec2 fragTexCoord;\n"
+  "uniform sampler2D texture0;\n"
+  "uniform float uThreshold;\n"
+  "out vec4 finalColor;\n"
+  "void main() {\n"
+  "    vec3 c = texture(texture0, fragTexCoord).rgb;\n"
+  "    float l = dot(c, vec3(0.2126, 0.7152, 0.0722));\n"    /* Rec.709 luminance */
+  "    float k = max(l - uThreshold, 0.0) / max(l, 1e-4);\n" /* soft knee: keep bright pixels, scale by excess */
+  "    finalColor = vec4(c * k, 1.0);\n"
+  "}\n";
+
+static const char *BLOOM_BLUR_FS =
+  "#version 330\n"
+  "in vec2 fragTexCoord;\n"
+  "uniform sampler2D texture0;\n"
+  "uniform vec2 uDir;\n"          /* one-axis texel step (1/w,0) or (0,1/h), pre-scaled by spread */
+  "out vec4 finalColor;\n"
+  "void main() {\n"
+  /* Symmetric 9-tap Gaussian (weights sum to 1): centre + 4 taps each side. */
+  "    vec3 c = texture(texture0, fragTexCoord).rgb * 0.2270270270;\n"
+  "    c += texture(texture0, fragTexCoord + uDir*1.0).rgb * 0.1945945946;\n"
+  "    c += texture(texture0, fragTexCoord - uDir*1.0).rgb * 0.1945945946;\n"
+  "    c += texture(texture0, fragTexCoord + uDir*2.0).rgb * 0.1216216216;\n"
+  "    c += texture(texture0, fragTexCoord - uDir*2.0).rgb * 0.1216216216;\n"
+  "    c += texture(texture0, fragTexCoord + uDir*3.0).rgb * 0.0540540541;\n"
+  "    c += texture(texture0, fragTexCoord - uDir*3.0).rgb * 0.0540540541;\n"
+  "    c += texture(texture0, fragTexCoord + uDir*4.0).rgb * 0.0162162162;\n"
+  "    c += texture(texture0, fragTexCoord - uDir*4.0).rgb * 0.0162162162;\n"
+  "    finalColor = vec4(c, 1.0);\n"
+  "}\n";
+
+static Shader g_bloom_prefilter;
+static Shader g_bloom_blur;
+static int    g_bloom_shaders_ready = 0;
+static int    g_loc_prefilter_thresh = -1;
+static int    g_loc_blur_dir = -1;
+/* Half-window-res ping-pong scratch targets; allocated lazily on the first gfx_post_bloom call. */
+static RenderTexture2D g_bloom_a, g_bloom_b;
+static int    g_bloom_targets_ready = 0;
+static float  g_bloom_threshold = 0.6f;
+static float  g_bloom_intensity = 1.0f;
+#define GFX_BLOOM_BLUR_SPREAD 1.5f   /* texel-step multiplier — widens the glow without more taps */
+#define GFX_BLOOM_BLUR_ROUNDS 2      /* H+V passes; more = wider, softer glow */
 
 static RenderTexture2D g_scene_target;
 static int g_scene_target_ready = 0;
@@ -537,6 +601,7 @@ static int g_prev_cam_valid = 0;
 
 /* Cached POST_FS uniform locations (GetShaderLocation once, set each frame). */
 static int g_loc_resolution, g_loc_mask, g_loc_vig_int, g_loc_vig_rad, g_loc_exposure, g_loc_saturation, g_loc_blur;
+static int g_loc_texture1 = -1, g_loc_bloom_int = -1;   /* POST_FS bloom sampler + intensity */
 
 /* (Re)allocate the off-screen scene target at (w,h). Bilinear filter so the SSAA present
  * downsamples smoothly. Reused by gfx_supersample to resize when the SSAA factor changes. */
@@ -563,7 +628,17 @@ static void init_post(void) {
     g_loc_exposure   = GetShaderLocation(g_post_shader, "uExposure");
     g_loc_saturation = GetShaderLocation(g_post_shader, "uSaturation");
     g_loc_blur       = GetShaderLocation(g_post_shader, "uBlur");
+    g_loc_texture1   = GetShaderLocation(g_post_shader, "texture1");
+    g_loc_bloom_int  = GetShaderLocation(g_post_shader, "uBloomIntensity");
     g_post_ready = 1;
+  }
+  /* Bloom bright-pass + blur shaders (their scratch targets are allocated lazily on gfx_post_bloom). */
+  g_bloom_prefilter = LoadShaderFromMemory(NULL, BLOOM_PREFILTER_FS);
+  g_bloom_blur      = LoadShaderFromMemory(NULL, BLOOM_BLUR_FS);
+  if (g_bloom_prefilter.id != 0 && g_bloom_blur.id != 0) {
+    g_loc_prefilter_thresh = GetShaderLocation(g_bloom_prefilter, "uThreshold");
+    g_loc_blur_dir         = GetShaderLocation(g_bloom_blur, "uDir");
+    g_bloom_shaders_ready = 1;
   }
   g_win_w = GetRenderWidth();
   g_win_h = GetRenderHeight();
@@ -1573,6 +1648,44 @@ static float blur_baseline(void) {
   return g_alt_amt_lo + t * (g_alt_amt_hi - g_alt_amt_lo);   /* higher amt at hi anchor = blurrier overview */
 }
 
+/* Full-screen blit of `src` into render target `dst` through optional shader `sh`. All intermediate
+ * bloom passes are render-target -> render-target with POSITIVE src height (a straight copy, no
+ * y-flip): every bloom target then shares the scene target's (upside-down) storage orientation, so
+ * POST_FS samples texture0 (scene) and texture1 (bloom) at the same fragTexCoord and they align. The
+ * final present's flip is applied by present_scene_shaded's geometry and orients both together. */
+static void bloom_blit(Texture2D src, RenderTexture2D dst, Shader sh, int use_sh) {
+  BeginTextureMode(dst);
+  if (use_sh) BeginShaderMode(sh);
+  DrawTexturePro(src,
+                 (Rectangle){ 0.0f, 0.0f, (float)src.width, (float)src.height },
+                 (Rectangle){ 0.0f, 0.0f, (float)dst.texture.width, (float)dst.texture.height },
+                 (Vector2){ 0.0f, 0.0f }, 0.0f, WHITE);
+  if (use_sh) EndShaderMode();
+  EndTextureMode();
+}
+
+/* Bloom chain: scene -> bright-pass -> ping-pong Gaussian blur, leaving the glow in g_bloom_a for
+ * present_scene_shaded to add. No-op unless the bloom bit is set and everything is ready. Runs
+ * BETWEEN the scene's EndTextureMode and the final BeginDrawing (its own BeginTextureMode brackets
+ * would nest illegally otherwise) — the frame_end/overlay_begin call sites enforce that. */
+static void run_bloom_chain(void) {
+  if (!(g_post_mask & GFX_POST_BLOOM) || !g_bloom_shaders_ready || !g_bloom_targets_ready) return;
+  /* (1) bright-pass: scene target (may be SSAA-oversized) -> half-res g_bloom_a (also a downsample). */
+  SetShaderValue(g_bloom_prefilter, g_loc_prefilter_thresh, &g_bloom_threshold, SHADER_UNIFORM_FLOAT);
+  bloom_blit(g_scene_target.texture, g_bloom_a, g_bloom_prefilter, 1);
+  /* (2) separable Gaussian, H then V, GFX_BLOOM_BLUR_ROUNDS times, ping-ponging a<->b (ends in a). */
+  float invw = GFX_BLOOM_BLUR_SPREAD / (float)g_bloom_a.texture.width;
+  float invh = GFX_BLOOM_BLUR_SPREAD / (float)g_bloom_a.texture.height;
+  for (int i = 0; i < GFX_BLOOM_BLUR_ROUNDS; i++) {
+    float dh[2] = { invw, 0.0f };
+    SetShaderValue(g_bloom_blur, g_loc_blur_dir, dh, SHADER_UNIFORM_VEC2);
+    bloom_blit(g_bloom_a.texture, g_bloom_b, g_bloom_blur, 1);   /* horizontal: a -> b */
+    float dv[2] = { 0.0f, invh };
+    SetShaderValue(g_bloom_blur, g_loc_blur_dir, dv, SHADER_UNIFORM_VEC2);
+    bloom_blit(g_bloom_b.texture, g_bloom_a, g_bloom_blur, 1);   /* vertical:   b -> a */
+  }
+}
+
 /* Draw the off-screen scene through POST_FS into the CURRENTLY-ACTIVE target (the caller owns the
  * BeginDrawing/BeginTextureMode bracket). Computes this frame's blur (baseline + motion, clamped) and
  * sets the uniforms. Runs the camera bookkeeping via camera_motion(), so it must be called EXACTLY
@@ -1593,7 +1706,15 @@ static void present_scene_shaded(void) {
     SetShaderValue(g_post_shader, g_loc_exposure, &g_exposure, SHADER_UNIFORM_FLOAT);
     SetShaderValue(g_post_shader, g_loc_saturation, &g_saturation, SHADER_UNIFORM_FLOAT);
     SetShaderValue(g_post_shader, g_loc_blur, &blur, SHADER_UNIFORM_FLOAT);
+    if ((g_post_mask & GFX_POST_BLOOM) && g_bloom_targets_ready) {
+      SetShaderValue(g_post_shader, g_loc_bloom_int, &g_bloom_intensity, SHADER_UNIFORM_FLOAT);
+    }
     BeginShaderMode(g_post_shader);
+    /* Bind the blurred bloom (run_bloom_chain left it in g_bloom_a) to the texture1 sampler. Must be
+     * inside the active shader mode; a no-op when the loc is -1 (bloom compiled out / bit off). */
+    if ((g_post_mask & GFX_POST_BLOOM) && g_bloom_targets_ready && g_loc_texture1 >= 0) {
+      SetShaderValueTexture(g_post_shader, g_loc_texture1, g_bloom_a.texture);
+    }
   }
   /* Draw the (possibly SSAA-oversized) scene texture scaled to the window — the bilinear
    * minification IS the supersample resolve. Render textures are y-flipped -> negative src height. */
@@ -1614,6 +1735,7 @@ long long gfx_overlay_begin(void) {
   EndMode3D();                              /* leave the 3D pass; now in 2D */
   if (use_offscreen()) {
     EndTextureMode();                       /* resolve the off-screen scene... */
+    run_bloom_chain();                      /* ...build the glow into scratch targets (no-op if off)... */
     BeginDrawing();                         /* ...and present it to the backbuffer, left OPEN for UI */
     present_scene_shaded();
   }
@@ -1632,6 +1754,7 @@ long long gfx_frame_end(void) {
     EndMode3D();
     if (use_offscreen()) {
       EndTextureMode();       /* scene pass done — resolve the off-screen target */
+      run_bloom_chain();      /* build the glow into scratch targets (no-op if bloom off) */
       BeginDrawing();
       present_scene_shaded();  /* present through POST_FS (UI, if any, was drawn into the scene) */
       EndDrawing();
@@ -1690,6 +1813,30 @@ long long gfx_post_altitude_blur(long long low_alt, long long high_alt, long lon
   g_alt_amt_hi = as_float(amt_high);
   g_blur_alt_on = 1;
   g_post_mask |= GFX_POST_BLUR;
+  return 0;
+}
+
+/* Additive bloom (docs/gfx-effects-roadmap-v0.md #5): a blurred bright-pass composited over the
+ * scene, so emissive pixels (stars) bleed a soft glow. `threshold` is the luminance (0..~1) above
+ * which a pixel contributes (lower = more of the scene glows); `intensity` scales the added glow
+ * (1.0 = full strength, 0 = none). Enables the off-screen path, trading the window's MSAA — pair
+ * with gfx_supersample if edge aliasing shows. Lazily allocates two half-window-res scratch targets
+ * on the first call; a later call just updates the params. */
+long long gfx_post_bloom(long long threshold, long long intensity) {
+  g_bloom_threshold = as_float(threshold);
+  g_bloom_intensity = as_float(intensity);
+  if (!g_bloom_targets_ready && g_bloom_shaders_ready) {
+    int bw = g_win_w / 2; if (bw < 1) bw = 1;
+    int bh = g_win_h / 2; if (bh < 1) bh = 1;
+    g_bloom_a = LoadRenderTexture(bw, bh);
+    g_bloom_b = LoadRenderTexture(bw, bh);
+    if (g_bloom_a.id != 0 && g_bloom_b.id != 0) {
+      SetTextureFilter(g_bloom_a.texture, TEXTURE_FILTER_BILINEAR);
+      SetTextureFilter(g_bloom_b.texture, TEXTURE_FILTER_BILINEAR);
+      g_bloom_targets_ready = 1;
+    }
+  }
+  if (g_bloom_targets_ready) g_post_mask |= GFX_POST_BLOOM;
   return 0;
 }
 

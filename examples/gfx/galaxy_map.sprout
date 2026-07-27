@@ -903,6 +903,14 @@ fn main() -> Unit !{IO} =
     gfx.open_window(1280, 800, "Sprout — Galaxy Map")
     gfx.set_target_fps(60)
     gfx.set_clip_planes(near_plane, far_plane)
+    # Bloom makes the emissive stars bleed a soft halo (they read as glowing points, not flat discs);
+    # supersample(2) restores anti-aliasing the off-screen post path gives up (a starfield is light
+    # geometry, so 2x is cheap). threshold 0.62 concentrates the glow on the genuinely bright bodies
+    # (keeps the black backdrop dark instead of a milky haze, and limits scene-2 planet bloom);
+    # intensity 0.95. Threshold bloom keys on brightness, not emissiveness — an emissive-only bloom
+    # source is the principled upgrade (see BACKLOG); Stage-3 dark procedural planets also mitigate it.
+    gfx.supersample(2)
+    gfx.post_bloom(0.62, 0.95)
     make_models()
     radius <- read_radius(dir)
     cam_radius <- arg_int(1, gfx.double_to_int(init_radius))

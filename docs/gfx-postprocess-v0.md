@@ -19,10 +19,11 @@ Goals
 - A structure that extends to **multi-pass** effects (bloom, DoF) with no rewrite.
 
 Non-goals (v0)
-- Bloom / depth-of-field (Phase 2 — see §6).
+- Depth-of-field (Phase 2 — needs the target's depth attachment + a CoC pass). Bloom
+  was a v0 non-goal but has since landed — see §6.
 - Multisampled off-screen target: the render texture is single-sampled, so the
-  opt-in path trades the window's 4× MSAA for effects (the blur masks aliasing).
-  FXAA-as-a-pass is the documented mitigation (Phase 2).
+  opt-in path trades the window's 4× MSAA for effects (the blur masks aliasing;
+  `gfx.supersample` is the implemented SSAA mitigation, FXAA-as-a-pass an option).
 
 Delivered after the first cut
 - **UI-crisp-on-top** via `overlay_begin()` (§3a): opt-in seam so the HUD draws sharp
@@ -125,27 +126,38 @@ the screenshot harness — `SPROUT_GFX_SCREENSHOT=<relative.png>`
 before/after on `examples/gfx/terrain_rivers_demo.sprout`. (raylib's `TakeScreenshot`
 resolves the path against the working dir, so pass a **relative** filename.)
 
-## 6. Phase 2 — the multi-pass extension path (bloom)
+## 6. Phase 2 — bloom (IMPLEMENTED)
 
-Bloom reuses the **entire** v0 substrate — `g_scene_target`, `blit_pass`, the y-flip,
-the screenshot placement, and the API shape — and only ADDS to it. The delta:
+Bloom reuses the **entire** v0 substrate — `g_scene_target`, the y-flip, the screenshot
+placement, and the API shape — and only ADDS to it. As built (`GFX_POST_BLOOM`,
+`gfx_post_bloom`):
 
-- **+2 scratch `RenderTexture2D`s** (ping-pong) allocated beside `g_scene_target`.
-- **+3 shaders**: bright-pass (threshold), separable Gaussian blur (H/V), composite.
-- **+ a chain of `blit_pass` calls** in `gfx_frame_end`, with the v0 present as the
-  **unchanged final link**:
+- **+2 scratch `RenderTexture2D`s** (`g_bloom_a`/`g_bloom_b`, half window res, ping-pong),
+  allocated **lazily** on the first `gfx_post_bloom` call.
+- **+2 shaders**: `BLOOM_PREFILTER_FS` (soft-knee luminance bright-pass) and
+  `BLOOM_BLUR_FS` (separable 9-tap Gaussian, H/V via a `uDir` uniform). The composite is
+  **folded into `POST_FS`** rather than a third shader — one fewer pass and target than the
+  original plan (which composited into a separate `sceneHDR`).
+- **+ `bloom_blit(src, dst, sh)`** — the render-target→render-target atom; unlike the final
+  present it uses **positive** src height (straight copy) so every bloom target shares the
+  scene target's storage orientation and `POST_FS` samples `texture0`/`texture1` at one uv.
+- **+ `run_bloom_chain()`** called in BOTH present paths (`gfx_frame_end` and
+  `gfx_overlay_begin`), between the scene's `EndTextureMode` and the final `BeginDrawing`:
 
 ```
-scene ─blit_pass(brightpass)─▶ scratchA
-scratchA ⇄ scratchB  (blit_pass(blurH/blurV) × N)
-scene + scratchB ─blit_pass(composite)─▶ sceneHDR
-sceneHDR ─blit_pass(POST_FS)─▶ screen        # ← v0 present, untouched
+scene ─bloom_blit(prefilter)─▶ bloom_a          # bright-pass + downsample to half-res
+bloom_a ⇄ bloom_b  (bloom_blit(blurH/blurV) × GFX_BLOOM_BLUR_ROUNDS, ends in bloom_a)
+present: POST_FS(texture0=scene, texture1=bloom_a) ─▶ screen   # additive composite, then tonemap/vignette
 ```
 
-- **+ additive API**: `post_bloom(threshold: Double, intensity: Double)`.
+- **API**: `post_bloom(threshold: Double, intensity: Double)`.
 
-Because tone-map/vignette stay the *last* pass in both phases, v0's present code is
-Phase 2's tail verbatim — nothing is thrown away.
+Because the additive composite happens *inside* `POST_FS` before its tone-map/vignette, the
+v0 present is still the single, final pass — nothing is thrown away.
+
+**Known limitation:** threshold bloom keys on brightness, so bright *lit* surfaces (planets)
+bloom like emissive ones. The principled fix — an emissive-only bloom source — is tracked in
+`BACKLOG.md` (§9); see also `docs/gfx-effects-roadmap-v0.md` #5.
 
 Related follow-ups (not scheduled): UI-crisp-on-top (draw overlays after the present,
 needs a `ui_begin` seam), FXAA-as-a-pass to recover the MSAA lost to the off-screen

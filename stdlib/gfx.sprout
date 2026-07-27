@@ -68,6 +68,7 @@ extern fn gfx_frame_end() -> Unit !{IO}
 extern fn gfx_post_vignette(intensity: Double, radius: Double) -> Unit !{IO}
 extern fn gfx_post_tonemap(exposure: Double, saturation: Double) -> Unit !{IO}
 extern fn gfx_post_motion_blur(static_amount: Double, motion_gain: Double) -> Unit !{IO}
+extern fn gfx_post_bloom(threshold: Double, intensity: Double) -> Unit !{IO}
 extern fn gfx_post_altitude_blur(low_alt: Double, high_alt: Double, amt_low: Double, amt_high: Double) -> Unit !{IO}
 extern fn gfx_post_disable() -> Unit !{IO}
 extern fn gfx_fog(density: Double, r: Int, g: Int, b: Int) -> Unit !{IO}
@@ -373,6 +374,15 @@ export fn post_vignette(intensity: Double, radius: Double) -> Unit !{IO} =
 # toward greyscale. Saturation is the most VISIBLE knob on a mostly-midtone scene.
 export fn post_tonemap(exposure: Double, saturation: Double) -> Unit !{IO} =
   gfx_post_tonemap(exposure, saturation)
+
+# Additive bloom: a blurred bright-pass composited over the scene, so emissive pixels (stars) bleed a
+# soft glow. `threshold` is the luminance (0..~1) above which a pixel contributes to the glow (lower =
+# more of the scene blooms); `intensity` scales the added glow (1.0 = full, 0 = none). Enables the
+# off-screen post path, which trades the window's MSAA — pair with `supersample(2)` if edges alias.
+# Over a dark backdrop (a starfield) it reads as a star halo; this is the LDR approximation of PBR
+# bloom (a thresholdless HDR version awaits an RGBA16F target). See docs/gfx-effects-roadmap-v0.md #5.
+export fn post_bloom(threshold: Double, intensity: Double) -> Unit !{IO} =
+  gfx_post_bloom(threshold, intensity)
 
 # Blur that scales with camera motion. Both args are a unitless "amount" (~0.5 reads as
 # clearly soft, 1.0 strong; the shim maps amount -> ~6 px of kernel radius). `static_amount`

@@ -60,10 +60,16 @@ Ordered by AAA-uplift-per-engineering; each tagged with what it needs.
    accumulation";* HDR + tone-map + gamma unlock the next tier and make the existing ACES
    curve do its real job. raylib's `LoadRenderTexture` is RGBA8-only → hand-build the FBO via
    `rlgl`. ([LearnOpenGL HDR](https://learnopengl.com/Advanced-Lighting/HDR))
-5. **Bloom** — *cheap threshold version now (LDR); real thresholdless version after #4.* Real
-   PBR bloom *"requires an HDR floating-point colour buffer"*, but threshold bloom on LDR
-   *"still works as a cheaper stylized approximation and is what many engines actually ship."*
-   Reuses the `blit_pass` chain (Phase-2 plan in `gfx-postprocess-v0.md`). ([PBR bloom](https://learnopengl.com/Guest-Articles/2022/Phys.-Based-Bloom))
+5. **Bloom** — *cheap threshold version now (LDR); real thresholdless version after #4.* **←
+   IMPLEMENTED** (`gfx.post_bloom`, `GFX_POST_BLOOM`). Soft-knee luminance bright-pass → separable
+   9-tap Gaussian blur, ping-ponged H/V into two half-res scratch targets by `run_bloom_chain()`
+   (between the scene resolve and the present), then added over the scene in `POST_FS` via a
+   `texture1`/`uBloomIntensity` composite. Real PBR bloom *"requires an HDR floating-point colour
+   buffer"*, but threshold bloom on LDR *"still works as a cheaper stylized approximation and is what
+   many engines actually ship."* — over the galaxy's black backdrop it reads as a star glow. **Known
+   limitation:** it keys on brightness, so bright *lit* surfaces (planets) bloom like emissive ones;
+   the principled fix is an emissive-only bloom source (BACKLOG). A thresholdless HDR version still
+   awaits #4. ([PBR bloom](https://learnopengl.com/Guest-Articles/2022/Phys.-Based-Bloom))
 6. **Anti-aliasing** — **← SSAA 2× IMPLEMENTED** (`gfx.supersample`). The high-frequency tile
    terrain *minification-shimmers* during camera motion (MSAA only touches silhouettes, not
    sub-pixel tile crawl). SSAA — render at N× and downsample — is the honest fix and reuses the
