@@ -1,0 +1,30 @@
+module loam.orbit
+
+import stdlib.math (sin, cos, sqrt)
+
+# Pure Kepler-ellipse math for the galaxy-map solar-system scene (examples/gfx/galaxy_map, scene 2).
+# Graphics-free — no gfx, no IO — so it is unit-tested headlessly in tests/loam/test_orbit.spr, like
+# loam.camera / loam.galaxy_lod. Angles are RADIANS; the demo converts the catalog's degree fields
+# (argumentOfPeriapsisDeg, trueAnomalyDeg) at the call site. Distances are whatever unit the caller
+# uses for the semi-major axis (the demo uses AU, then scales AU -> world units for the camera).
+
+# Orbital radius (distance from the focus / star) at true anomaly `nu` for an ellipse with
+# semi-major axis `a` and eccentricity `e`:  r = a(1 - e^2) / (1 + e cos nu).
+# At nu = 0 (periapsis) this is a(1 - e); at nu = pi (apoapsis) a(1 + e). For a circle (e = 0) it is
+# constant at `a`.
+export fn ellipse_r(a: Double, e: Double, nu: Double) -> Double =
+  (a * (1.0 - (e * e))) / (1.0 + (e * cos(nu)))
+
+# Position of the orbiting body in its orbital plane, star at the origin, with the ellipse oriented
+# by the argument of periapsis `arg_peri`. The perifocal position (r cos nu, r sin nu) rotated by
+# arg_peri collapses to (r cos(nu + arg_peri), r sin(nu + arg_peri)). Returns (x, z): the demo lays
+# the orbital plane on world (x, z) with the star's height as y, matching the galaxy-disk axis map.
+export fn ellipse_point(a: Double, e: Double, arg_peri: Double, nu: Double) -> (Double, Double) =
+  let r = ellipse_r(a, e, nu)
+      ang = nu + arg_peri
+  in (r * cos(ang), r * sin(ang))
+
+# Semi-minor axis  b = a sqrt(1 - e^2).  Handy for framing/labelling; the exporter also emits it as
+# orbitSemiMinorAU, so this doubles as a cross-check against the catalog.
+export fn ellipse_semi_minor(a: Double, e: Double) -> Double =
+  a * sqrt(1.0 - (e * e))
