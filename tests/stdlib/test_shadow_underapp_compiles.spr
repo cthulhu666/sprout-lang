@@ -1,0 +1,37 @@
+import stdlib.test (TestState, new_state, assert_eq, summary)
+
+# Regression (n-ary arity check, Package C-b): a LOCAL binding that shadows a
+# top-level function, then under-applies that local, must COMPILE.
+#
+# The checker keys a function's declared arity by name (`@arity:{name}`, see
+# infer.pre_scan_fn_decls). A same-named local (a `let` binding or a parameter)
+# must NOT inherit the top-level function's arity: under-applying the local is a
+# value-level partial, which Package C-b permits (policing under-application
+# through function values is Approach A's job, deferred).
+#
+# The bug: the name-keyed `@arity` marker leaked onto the shadowing local, so when
+# surrounding context resolved the local's type to its arrow chain before the
+# check ran, `under_application_error` rejected `add3(1)` with a spurious
+# "'add3' expects 3 arguments, got 1". Fixed by having a local binding drop the
+# `@arity:{name}` marker (infer.bind_local_scheme). Both forms below returned 6
+# and now compile; before the fix `let_shadow` failed to compile.
+
+fn add3(a: Int, b: Int, c: Int) -> Int = a + b + c
+
+# `add3` is the LOCAL lambda here, not the top-level add3/3. `add3(1)` under-applies
+# the local (returns a function); the chained applications saturate it.
+fn let_shadow() -> Int =
+  let add3 = \a -> \b -> \c -> a + b + c
+  in add3(1)(2)(3)
+
+# `add3` is the PARAMETER here. `add3(1)` under-applies the passed function value.
+fn param_shadow(add3: Int -> Int -> Int -> Int) -> Int =
+  add3(1)(2)(3)
+
+fn main() -> Unit !{IO} =
+  do
+    state <- new_state()
+    assert_eq(state, "let-local shadow under-application compiles + runs", let_shadow(), 6)
+    assert_eq(state, "parameter shadow under-application compiles + runs",
+      param_shadow(\a -> \b -> \c -> a + b + c), 6)
+    summary(state)

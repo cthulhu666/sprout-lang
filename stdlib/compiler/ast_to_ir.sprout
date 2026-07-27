@@ -5026,9 +5026,9 @@ fn translate_direct_call(fname: String, args: List typed_ast.TypedExpr,
           match r with
           | (arg_blocks, arg_cur_lbl, arg_cur_ops, arg_names, idx1) ->
               # B1: inline Vector element access. try_vector_intrinsic recognizes the
-              # op (by name), gates on full application (an under-applied call must
-              # still reach translate_partial_application below to build its closure)
-              # and on the element representation; Nothing = use the general path.
+              # op (by name), gates on full application (an under-applied call falls
+              # through to translate_general_call, which rejects it — inference should
+              # already have) and on the element representation; Nothing = general path.
               match try_vector_intrinsic(fname, args, arg_blocks, arg_cur_lbl,
                                          arg_cur_ops, arg_names, idx1, fn_arities, name_prefix) with
               | Just r -> r
@@ -5036,28 +5036,6 @@ fn translate_direct_call(fname: String, args: List typed_ast.TypedExpr,
                   translate_general_call(fname, call_ty, arg_blocks, arg_cur_lbl,
                                          arg_cur_ops, arg_names, idx1, fn_arities,
                                          lifted_ref, lambda_ctr_ref, name_prefix)
-
-# Partial application of a direct fn (arg count < arity): synthesize a
-# @__sprout_partial_N wrapper capturing the supplied args, then emit IRMkClosure.
-# Mirrors codegen.sprout emit_direct_fn_call's n_args < n_params branch (:2719).
-fn translate_partial_application(fname: String, arity: Int,
-                                 arg_blocks: List sprout_ir.IRBlock, cur_lbl: String,
-                                 cur_ops: List sprout_ir.IROp, arg_names: List String,
-                                 idx: Int,
-                                 lifted_ref: Ref (List sprout_ir.IRFunction),
-                                 lambda_ctr_ref: Ref Int, name_prefix: String) ->
-    Result String (List sprout_ir.IRBlock, String, List sprout_ir.IROp, String, Int) !{IO} =
-  do
-    ctr <- ref_read(lambda_ctr_ref)
-    ref_write(lambda_ctr_ref, ctr + 1)
-    let wrapper_name = "__sprout_partial_" ++ int_to_string(ctr)
-    let wrapper_fn = synthesize_partial_wrapper(fname, arity, list_length(arg_names), wrapper_name)
-    existing_lifted <- ref_read(lifted_ref)
-    ref_write(lifted_ref, Cons(wrapper_fn, existing_lifted))
-    Ok((arg_blocks, cur_lbl,
-         list_append(cur_ops,
-           Cons(sprout_ir.IRMkClosure(fresh_name(name_prefix, idx), wrapper_name, arg_names), Nil)),
-         fresh_name(name_prefix, idx), idx + 1))
 
 fn translate_string_builtin(kind: StringBuiltin, fname: String,
                             args: List typed_ast.TypedExpr,
@@ -5124,10 +5102,11 @@ fn finish_direct_call(fname: String, call_ty: types.Type,
         call_op = sprout_ir.IRCall(result, ret_irtype(call_ty),
                                    fname, arg_names)
 
-# The general (non-intrinsic) call path: under-applied → partial-application
-# closure; fully applied (or unknown arity) → direct call. Reached when
-# try_vector_intrinsic declines. Extracted so the dispatch site's outer match
-# has a single-expression arm (avoids same-column nested-match layout ambiguity).
+# The general (non-intrinsic) call path: under-applied a known-arity fn → loud
+# internal error (inference should have rejected it); fully applied (or unknown
+# arity) → direct call. Reached when try_vector_intrinsic declines. Extracted so
+# the dispatch site's outer match has a single-expression arm (avoids same-column
+# nested-match layout ambiguity).
 fn translate_general_call(fname: String, call_ty: types.Type,
                           arg_blocks: List sprout_ir.IRBlock, cur_lbl: String,
                           cur_ops: List sprout_ir.IROp, arg_names: List String,
@@ -5137,10 +5116,15 @@ fn translate_general_call(fname: String, call_ty: types.Type,
     Result String (List sprout_ir.IRBlock, String, List sprout_ir.IROp, String, Int) =
   match dict_get(fname, fn_arities) with
   | Just arity ->
+      # Under-application of a known-arity direct fn is rejected in inference
+      # (infer.under_application_error, n-ary Package C-b), so it never reaches
+      # codegen. If it does, the arity check leaked — fail loudly rather than
+      # silently synthesize a partial wrapper (precise-or-loud; the wrapper path is
+      # retired). `_`-placeholder partials build ordinary lambdas, not this path.
       if arity > list_length(arg_names)
-      then translate_partial_application(fname, arity, arg_blocks, cur_lbl,
-                                         cur_ops, arg_names, idx,
-                                         lifted_ref, lambda_ctr_ref, name_prefix)
+      then Err("internal error: under-application of '" ++ fname ++ "' reached codegen (arity "
+                 ++ int_to_string(arity) ++ ", got " ++ int_to_string(list_length(arg_names))
+                 ++ "); the n-ary arity check should have rejected it before lowering")
       else finish_direct_call(fname, call_ty, arg_blocks, cur_lbl,
                               cur_ops, arg_names, idx, name_prefix)
   | Nothing ->
@@ -5200,8 +5184,8 @@ fn classify_vec_elem(args: List typed_ast.TypedExpr) -> VecRep =
 
 # True iff every declared parameter is supplied — the arity comes from the
 # DECLARATION (externs are in fn_arities), NOT a hardcoded literal. An
-# under-applied call returns false so it reaches translate_partial_application
-# to build its closure (the fully-applied-only invariant at the dispatch site).
+# under-applied call returns false; the vector fast-path then declines it and
+# translate_general_call rejects the under-application (inference should already).
 fn is_fully_applied(fname: String, arg_names: List String, fn_arities: Dict Int) -> Bool =
   match dict_get(fname, fn_arities) with
   | Just arity -> list_length(arg_names) == arity
@@ -6714,37 +6698,6 @@ fn build_wrapper_arg_ssas(idx: Int, arity: Int) -> List String =
   if idx >= arity then Nil
   else Cons("%a" ++ int_to_string(idx), build_wrapper_arg_ssas(idx + 1, arity))
 
-# Synthesize @__sprout_partial_N for a partial application of a direct fn:
-# `f(applied_args…)` where the call site supplies fewer args than `f`'s arity.
-# The wrapper takes (env$, remaining params), loads the captured `applied`
-# args from env slots 1..applied, then calls the real fn with all args.
-# Mirrors codegen.sprout's emit_partial_direct_wrapper_lines (codegen.sprout:1453);
-# simpler here because the typed ABI is uniform-i64 (only arity matters).
-fn synthesize_partial_wrapper(fn_name: String, arity: Int, applied: Int,
-                              wrapper_name: String) -> sprout_ir.IRFunction =
-  sprout_ir.IRFunction(wrapper_name,
-                        Cons(("env$", sprout_ir.IRTHeap),
-                             build_wrapper_arg_params(0, arity - applied)),
-                        "i64",
-                        Cons(sprout_ir.IRBlock("entry",
-                              list_append(build_partial_capture_loads(0, applied),
-                              Cons(sprout_ir.IRCall("%ret", sprout_ir.IRTUnknown, fn_name,
-                                     list_append(build_partial_capture_ssas(0, applied),
-                                                 build_wrapper_arg_ssas(0, arity - applied))),
-                              Cons(sprout_ir.IRRet("%ret"), Nil)))),
-                        Nil))
-
-# IRLoadEnvSlot for each of the `applied` captured args (env slots 1..applied;
-# slot 0 holds the code ptr).  Captured value i lands in SSA %cap<i>.
-fn build_partial_capture_loads(i: Int, applied: Int) -> List sprout_ir.IROp =
-  if i >= applied then Nil
-  else Cons(sprout_ir.IRLoadEnvSlot("%cap" ++ int_to_string(i), "%env$", i + 1, sprout_ir.IRTHeap),
-            build_partial_capture_loads(i + 1, applied))
-
-fn build_partial_capture_ssas(i: Int, applied: Int) -> List String =
-  if i >= applied then Nil
-  else Cons("%cap" ++ int_to_string(i), build_partial_capture_ssas(i + 1, applied))
-
 export fn build_top_level_let_names(decls: List typed_ast.TypedDecl) -> Set =
   match decls with
   | Nil -> set_empty()
@@ -6781,10 +6734,10 @@ fn classify_let_decls_ir_acc(decls: List typed_ast.TypedDecl,
 # sequence, IRStoreGlobal the result into the corresponding @name slot,
 # end with `ret void`.  Mirrors codegen.sprout:3276-3297.
 # Returns (init_fn, lifted) where `lifted` are functions synthesized while
-# translating the let-initializer bodies (partial-application/eta wrappers,
-# lifted lambdas).  Callers MUST emit `lifted` alongside init_fn — a top-level
-# `let` bound to a partial application (e.g. `let f = repeat("x")`) builds a
-# @__sprout_partial_N wrapper here; dropping it leaves an undefined reference.
+# translating the let-initializer bodies (eta wrappers and lifted lambdas).
+# Callers MUST emit `lifted` alongside init_fn — a top-level `let` bound to a
+# `_`-placeholder partial (e.g. `let f = repeat("x", _)`) lifts a lambda here;
+# dropping it leaves an undefined reference.
 export fn synthesize_init_globals_fn(runtime_lets: List (source.GlobalName, typed_ast.TypedExpr),
                                      ctors: Dict sprout_ir.CtorInfo,
                                      top_level: Set, let_names: Set,
