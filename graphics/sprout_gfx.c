@@ -444,10 +444,13 @@ static const char *PLANET_FS =
   "uniform vec3 uEye;\n"
   FOG_GLSL
   "out vec4 finalColor;\n"
-  /* Compact 3D value noise + 4-octave fBm on the unit sphere direction (seamless, no poles/seams). */
-  "float hash(vec3 p) {\n"
-  "    p = fract(p*0.3183099 + 0.1); p *= 17.0;\n"
-  "    return fract(p.x*p.y*p.z*(p.x + p.y + p.z));\n"
+  /* Compact 3D value noise + 4-octave fBm on the unit sphere direction (seamless, no poles/seams).
+   * hash = Dave Hoskins' hash13 — deliberately NOT a symmetric polynomial, so the noise has no mirror
+   * plane (a symmetric hash like fract(x*y*z*(x+y+z)) produces a Rorschach-inkblot surface). */
+  "float hash(vec3 p3) {\n"
+  "    p3 = fract(p3 * vec3(0.1031, 0.1030, 0.0973));\n"
+  "    p3 += dot(p3, p3.yxz + 33.33);\n"
+  "    return fract((p3.x + p3.y) * p3.z);\n"
   "}\n"
   "float vnoise(vec3 x) {\n"
   "    vec3 i = floor(x); vec3 f = fract(x); f = f*f*(3.0 - 2.0*f);\n"
@@ -462,15 +465,17 @@ static const char *PLANET_FS =
   "    return s;\n"
   "}\n"
   "vec3 surface(vec3 d, vec3 base) {\n"
+  /* Asymmetric per-axis seed offset: varies each body AND shifts the sample off any lattice symmetry. */
+  "    vec3 so = vec3(uSeed, uSeed*1.37 + 11.0, uSeed*2.71 + 23.0);\n"
   "    if (uType == 1) {\n"                               /* gas giant: turbulent latitude bands */
-  "        float band = sin(d.y*10.0 + fbm(d*3.0 + uSeed)*2.5);\n"
+  "        float band = sin(d.y*10.0 + fbm(d*3.0 + so)*2.5);\n"
   "        vec3 dark = base*0.6; vec3 lite = mix(base, vec3(1.0), 0.15);\n"
   "        return mix(dark, lite, 0.5 + 0.5*band);\n"
   "    } else if (uType == 2) {\n"                        /* moon: grey mottle */
-  "        float n = fbm(d*6.0 + uSeed);\n"
+  "        float n = fbm(d*6.0 + so);\n"
   "        return base*(0.6 + 0.5*n);\n"
   "    }\n"
-  "    float h = fbm(d*3.5 + uSeed);\n"                    /* rocky: continents / oceans + ice caps */
+  "    float h = fbm(d*3.5 + so);\n"                       /* rocky: continents / oceans + ice caps */
   "    vec3 ocean = base*0.35 + vec3(0.0, 0.02, 0.08);\n"
   "    vec3 land = mix(base, vec3(0.30, 0.45, 0.20), 0.5);\n"
   "    vec3 col = (h > 0.52) ? land : ocean;\n"
@@ -482,12 +487,15 @@ static const char *PLANET_FS =
   "    vec3 surf = surface(n, vCol.rgb);\n"
   "    vec3 V = normalize(uEye - vWorld);\n"
   "    vec3 L = (length(uCenter) > 1e-3) ? normalize(-uCenter) : vec3(0.0, 1.0, 0.0);\n"
-  "    float key = max(dot(n, L), 0.0);\n"                 /* star key light (physical day-side terminator) */
-  "    float fill = max(dot(n, V), 0.0);\n"                /* camera headlight so the viewed side is never black */
-  "    vec3 lit = surf*(0.10 + 0.85*key + 0.30*fill);\n"
+  "    float ndl = dot(n, L);\n"
+  /* Half-Lambert wrap (Valve): light wraps past the terminator, so the night side is dim but never
+   * black — planets stay visible from any camera angle WITHOUT a view-dependent term (which would
+   * peak dead-centre and read as a fake specular highlight). 0.28 floor keeps the far side legible. */
+  "    float hl = 0.5 + 0.5*ndl;\n"
+  "    vec3 lit = surf*(0.28 + 0.72*hl*hl);\n"
   "    if (uType == 0 || uType == 1) {\n"                  /* atmosphere: blue fresnel limb on the star-lit side */
   "        float rim = pow(1.0 - max(dot(n, V), 0.0), 3.0);\n"
-  "        lit += rim*key*vec3(0.35, 0.55, 1.0)*0.8;\n"
+  "        lit += rim*max(ndl, 0.0)*vec3(0.35, 0.55, 1.0)*0.8;\n"
   "    }\n"
   "    finalColor = vec4(apply_fog(lit, vDepth), 1.0);\n"
   "}\n";
