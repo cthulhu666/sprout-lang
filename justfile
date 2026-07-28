@@ -1182,6 +1182,42 @@ stack-overflow-smoke: bootstrap-from-seed
   fi
   echo "==> stack-overflow-smoke ✓ (clean panic, exit $ec)"
 
+# Stdout-flush-on-abnormal-exit regression (CI gate). A program prints a sentinel
+# line, THEN overflows the native stack (SIGSEGV -> crash handler -> `_exit`,
+# which bypasses stdio flushing). With stdout captured to a FILE it is fully
+# buffered by libc, so without the startup `setvbuf(stdout, _IOLBF)` the sentinel
+# is discarded on `_exit` and lost. The gate asserts the pre-crash line survives.
+# RED signal (fix missing/reverted): the sentinel is absent from captured stdout.
+[group('smoke')]
+flush-on-crash-smoke: bootstrap-from-seed
+  #!/usr/bin/env bash
+  set -uo pipefail
+  TMPD=$(mktemp -d /tmp/sprout_flush_XXXXXX)
+  trap 'rm -rf "$TMPD"' EXIT
+  FIXTURE=tests/stack_overflow_smoke/print_then_overflow.spr
+  RDYN=""; [ "$(uname)" != "Darwin" ] && RDYN="-rdynamic"
+  if ! "{{build_dir}}/compile_driver_bin_stage1" --emit-ir "{{stdlib_root}}" "$FIXTURE" > "$TMPD/out.ll" 2>"$TMPD/emit.err"; then
+    echo "flush-on-crash-smoke: emit-IR failed" >&2; cat "$TMPD/emit.err" >&2; exit 1
+  fi
+  if ! clang "$TMPD/out.ll" {{runtime_src}} -O2 $RDYN {{clang_extra}} -o "$TMPD/bin" 2>"$TMPD/link.err"; then
+    echo "flush-on-crash-smoke: link failed" >&2; cat "$TMPD/link.err" >&2; exit 1
+  fi
+  # stdout -> a regular file so libc fully buffers it (the case where the bug bites).
+  set +e
+  "$TMPD/bin" > "$TMPD/run.out" 2>"$TMPD/run.err"
+  ec=$?
+  set -e
+  if [ "$ec" -eq 0 ]; then
+    echo "flush-on-crash-smoke: fixture did NOT crash (exit 0) — recursion folded; make it deeper" >&2
+    exit 1
+  fi
+  if ! grep -q "SENTINEL_BEFORE_CRASH" "$TMPD/run.out"; then
+    echo "flush-on-crash-smoke: pre-crash stdout was LOST (buffered output discarded on _exit)" >&2
+    echo "  -> startup setvbuf(stdout, _IOLBF) missing or reverted; see sprout_set_argv" >&2
+    exit 1
+  fi
+  echo "==> flush-on-crash-smoke ✓ (pre-crash stdout survived a crash, exit $ec)"
+
 # (The former `task-guard-smoke` recipe was retired at L0.3: both guards it tested
 # became obsolete — nested scopes are now supported, and under the top-level pump
 # task-0 is a materialized task so `task_yield` from main is a legal no-op rather
@@ -1562,6 +1598,7 @@ ci-fast-gates: bootstrap-from-seed build-fmt-from-seed
     "argv-smoke|argv-smoke"
     "div-by-zero-smoke|div-by-zero-smoke"
     "stack-overflow-smoke|stack-overflow-smoke"
+    "flush-on-crash-smoke|flush-on-crash-smoke"
     "task-io-smoke|task-io-smoke"
     "tco-runtime-smoke|tco-runtime-smoke"
     "trace-dispatch-smoke|trace-dispatch-smoke"
@@ -1669,7 +1706,7 @@ gate-quick: fmt-check test compile-examples-stage1 smoke-shapes bundle-smoke
 # advisory), so it runs in the body rather than as an arg-less dependency.
 # Full CI-parity battery (slow, ~15-25m); a green run means CI will not surprise you.
 [group('gate')]
-gate: fmt-check smoke-shapes bundle-smoke loud-fail-smoke argv-smoke trace-dispatch-smoke verify-dispatch-smoke div-by-zero-smoke stack-overflow-smoke tco-runtime-smoke check-approved-builtins verify-bootstrap-fixed-point compile-examples-stage1 run-example-canary test task-io-smoke test-stress
+gate: fmt-check smoke-shapes bundle-smoke loud-fail-smoke argv-smoke trace-dispatch-smoke verify-dispatch-smoke div-by-zero-smoke stack-overflow-smoke flush-on-crash-smoke tco-runtime-smoke check-approved-builtins verify-bootstrap-fixed-point compile-examples-stage1 run-example-canary test task-io-smoke test-stress
   #!/usr/bin/env bash
   set -euo pipefail
   echo "==> gate: gc-safety-check --strict..."

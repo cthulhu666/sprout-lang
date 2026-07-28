@@ -2002,6 +2002,15 @@ long long env_get(const char* name) {
 long long sprout_set_argv(int argc, char** argv) {
   g_sprout_argc = argc;
   g_sprout_argv = argv;
+  /* Line-buffer stdout even when it is a pipe/file (libc would otherwise fully
+   * buffer it). This flushes each newline-terminated `print` to the OS promptly,
+   * so output already produced survives an abnormal exit — the crash handler
+   * `_exit(128+sig)` and abort() paths bypass stdio flushing, which would
+   * otherwise discard a buffered pre-crash line. `fflush` in the async-signal
+   * crash handler is not an option (not async-signal-safe; deadlocks against a
+   * `printf` that owned the stdio lock when the signal fired), so we keep the
+   * buffer small here instead. */
+  setvbuf(stdout, NULL, _IOLBF, 0);
   sprout_capture_stack_bounds();
   sprout_install_crash_handlers();
   sprout_debug_alloc_maybe_enable();

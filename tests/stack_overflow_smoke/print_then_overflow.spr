@@ -1,0 +1,25 @@
+module main
+
+# Regression fixture for the stdout-flush-on-abnormal-exit fix.
+#
+# Prints a sentinel line, THEN overflows the native stack (SIGSEGV -> the
+# runtime crash handler -> `_exit(128+sig)`, which bypasses stdio flushing).
+# When stdout is captured to a pipe/file it is fully buffered by libc, so the
+# single short sentinel line sits in the buffer and — without a startup
+# `setvbuf(stdout, _IOLBF)` — is discarded on `_exit`, i.e. LOST exactly when a
+# user most needs their pre-crash output to debug.
+#
+# The recursion mirrors deep_recursion.spr: non-tail (result flows through
+# `combine`) and not accumulator-foldable, so codegen/LLVM cannot rewrite it
+# into a loop and the native stack genuinely overflows.
+fn combine(n: Int, r: Int) -> Int =
+  if r > n then r - n else n + r
+
+fn go(n: Int) -> Int =
+  if n <= 0 then 1
+  else combine(n, go(n - 1))
+
+fn main() -> Unit !{IO} =
+  do
+    print("SENTINEL_BEFORE_CRASH")
+    print(go(100000000))
