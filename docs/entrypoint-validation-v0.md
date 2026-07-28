@@ -64,6 +64,45 @@ type-check concern. Enforcing it needs an explicit executable-vs-library compile
 mode threaded from the driver. Until then, `executable_error/missing_main` is
 xfailed in the `test-executable-errors` gate.
 
+### 4a. If revived: prior art, preferred shape, and priority
+
+**Prior art.** Across state-of-the-art languages, "missing `main` is an error" is
+a property of the *build target / link mode*, decided by the invocation or build
+system — never inferred from type-checking a lone unit:
+
+| Language | "executable" signal | missing `main` when… |
+| --- | --- | --- |
+| Rust | crate-type `bin` vs `lib` (cargo `src/main.rs` vs `src/lib.rs`) | building a `bin` crate → `E0601`; a `lib` never needs one |
+| Go | source clause `package main` | a `main` package with no `func main` fails; named packages are libraries |
+| Haskell (GHC) | link an executable vs `-c` / library | linking an exe with no `Main.main` fails; `-c`/lib need none |
+| C/C++ | linker mode: executable vs object/shared lib | `main` required only at *link* for an exe; objects/libs never |
+| Zig | subcommand `build-exe` vs `build-lib`/`build-obj` | `build-exe` requires `pub fn main` |
+
+Sprout cannot reuse Go's source marker: `module main` is a namespace path, not an
+executable signal (runnable examples declare `module examples.<name>` and bare
+files declare no module at all). So the signal must come from the invocation.
+
+**Preferred shape: opt-in `--require-main`, NOT main-required-by-default on
+`--emit-ir`.** Sprout's whole-program bundling makes *every* `--emit-ir` produce a
+single-`main_shim` module, so executable-vs-library intent genuinely is a property
+of the invocation, not the inputs. The correct semantic home is the **run
+boundary**: `just run` / `run-gfx` / `debug-run` / `run-example-canary` exist to
+*execute a program* (`compile → link → run the binary`), so requiring `main` there
+is definitional. They would pass `--require-main`; `--emit-ir` (IR plumbing used to
+inspect library modules, byte-identity checks, `compile-examples`) stays permissive.
+Making `--emit-ir` itself require `main` (the "default-on" alternative) puts the
+check on the wrong boundary: it redefines `--emit-ir` from "lower this unit" to
+"build a program", breaks the two main-less `sentry_*` examples, and still needs an
+opt-*out* flag to recover library IR inspection — same surface, inverted default,
+plus a migration.
+
+**What it buys / priority.** It converts `just run prog.spr` on a missing/misnamed
+/mis-placed `main` from *"links and runs a binary that silently does nothing"* into
+a clear `Executable entrypoint \`main\` is missing`. It complements the
+signature validation above (that catches a *malformed* `main`; this catches a
+*missing* one). Severity is low — a beginner-facing papercut, not a soundness fix —
+so it is **deliberately deferred** as low-value, not blocked by difficulty.
+
 ## 5. Tests
 
 - Negative: `conformance/executable_error/{main_arity_mismatch, main_int_entrypoint,
