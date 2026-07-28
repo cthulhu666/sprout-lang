@@ -23,7 +23,7 @@ Current bottlenecks are mostly:
 
 ### 1. Land mutable combinators first
 
-Implement the safe stdlib API proposed in `docs/mutable-element-combinators-v1.md`:
+Implement the safe stdlib API proposed in `docs/archive/mutable-element-combinators-v1.md`:
 
 - `mutvec_len`
 - `mutvec_each`
@@ -138,7 +138,7 @@ be a dead end; this plan does not revisit it.
 1. **Kernel home:** same `stdlib.mutable` module, Double-typed, grouped under a
    `# Double numeric kernels` section. Relocate to a dedicated numeric module later only if the
    surface grows.
-2. **Proposal drift:** trim `docs/mutable-element-combinators-v1.md` to the 9 combinators that
+2. **Proposal drift:** trim `docs/archive/mutable-element-combinators-v1.md` to the 9 combinators that
    actually shipped; the 3 unimplemented whole-matrix entries (`mutmatrix_map_inplace`,
    `mutmatrix_zip_inplace`, `mutmatrix_row_fold`) become a "future additions" note, not an
    implied contract.

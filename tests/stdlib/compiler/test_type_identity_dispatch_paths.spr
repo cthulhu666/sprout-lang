@@ -3,7 +3,7 @@ import stdlib.test (check_eq, run_suite)
 
 # Regression guard for module-qualified type identity across the dispatch paths the
 # original T7 tests missed (code-review finding 1,
-# docs/type-identity-review-findings-2026-07-10.md): instance dispatch on a MODULE-LOCAL
+# docs/archive/type-identity-review-findings-2026-07-10.md): instance dispatch on a MODULE-LOCAL
 # concrete type (canonical id "main.Box") via
 #   (a) a constrained function's concrete argument (concrete_typeexpr / TDict-head path), and
 #   (b) return-position dispatch (find_inst_in_return_type / type_to_typeexpr path).

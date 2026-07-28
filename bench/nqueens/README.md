@@ -150,7 +150,7 @@ N=13 (73,712 solutions):
   Sprout (post-P0) 5,700 ms  (Python/Ruby not measured at N=13 — too slow)
 ```
 
-Optimization trajectory and next steps: see [`docs/nqueens-optim-iteration-2026-05-28.md`](../../docs/nqueens-optim-iteration-2026-05-28.md).
+Optimization trajectory and next steps: see [`docs/archive/nqueens-optim-iteration-2026-05-28.md`](../../docs/archive/nqueens-optim-iteration-2026-05-28.md).
 Target: match Haskell UArray (~108 ms N=12). Remaining gap ~8.6× after P0; next iteration is P1 (inline GC root push/pop or enable LTO).
 
 ---
@@ -161,7 +161,7 @@ Target: match Haskell UArray (~108 ms N=12). Remaining gap ~8.6× after P0; next
 
 **Updated 2026-05-28** — the prior framing (GC tracing dominates) turned out
 to be wrong; the actual bottleneck was the GC root push/pop function-call
-overhead. See [`docs/nqueens-optim-iteration-2026-05-28.md`](../../docs/nqueens-optim-iteration-2026-05-28.md) for the full profile-driven analysis.
+overhead. See [`docs/archive/nqueens-optim-iteration-2026-05-28.md`](../../docs/archive/nqueens-optim-iteration-2026-05-28.md) for the full profile-driven analysis.
 
 Before any optimization (2026-05-26), the Sprout N=12 binary retired ~29
 billion instructions in 1.6 s. The first hypothesis blamed `vec_set` copying

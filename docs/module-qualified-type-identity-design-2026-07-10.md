@@ -48,7 +48,7 @@ type variable, so add the guard if a future dispatch shape ever surfaces it.
 fundamentals-review **W11/T7** (`unifier.sprout:190`), which cannot be fixed at the
 unifier — see §1.
 **Related:** `docs/iface-precompiled-modules-v1-draft.md`,
-`docs/iface-arc-double-inference-handoff-2026-07-04.md` (this change is a prerequisite
+`docs/archive/iface-arc-double-inference-handoff-2026-07-04.md` (this change is a prerequisite
 for both — see §9).
 
 ---

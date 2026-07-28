@@ -7,7 +7,7 @@ Scope: `stdlib/compiler/` (extend the existing CPR unboxing in `ast_to_ir.sprout
 Follows the AGENTS.md **Design Change Process**.
 
 Continues the CPR thread (`docs/unboxed-adt-returns-v1-draft.md`, shipped v1/v2). Sibling of — not
-overlapping with — the root-elision proposal (`docs/effects-and-nonalloc-analysis-2026-07-11.md`,
+overlapping with — the root-elision proposal (`docs/archive/effects-and-nonalloc-analysis-2026-07-11.md`,
 which removes GC *roots* around allocating calls) and the accessor inliner
 (`docs/accessor-inliner-design-2026-07-11.md`, which exposes more call sites). This proposal removes
 the *allocations themselves*.
@@ -70,7 +70,7 @@ therefore misses:
 
 **Non-goals (hard fence).**
 - **No generational GC / runtime GC change** in this proposal — that is the other lever
-  (`docs/generational-gc-v1-draft.md`), deliberately not chosen here. This is a compiler-only fix.
+  (`docs/archive/generational-gc-v1-draft.md`), deliberately not chosen here. This is a compiler-only fix.
 - **No new user syntax.** Purely an internal optimization; source is unchanged and behavior identical.
 - **No general monomorphization / size-heuristic inliner** (same fence as the accessor-inliner doc).
 - **No change to nullary-ctor representation.** Nullary ctors are already singleton-cached in

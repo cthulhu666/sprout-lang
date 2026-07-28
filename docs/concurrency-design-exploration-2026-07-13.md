@@ -99,7 +99,7 @@ primitive layer toward terseness at the cost of being easy to reason about.
 |---|---|---|
 | Runtime threading | **Single-threaded.** `pthread.h` used only for stack-bounds capture. No `pthread_create`, mutexes, atomics. | `runtime/sprout_runtime.c:23,245-247`; grep: 0 matches for create/mutex/atomic |
 | GC | Stop-the-world, single-threaded mark-sweep; all state is plain `static` globals | `runtime/sprout_runtime.c` globals; `docs/compiler-internals.md` |
-| Effects | **Scaffolding, unenforced.** `Effect = EffectPure \| EffectIO \| EffectRow \| EffectVar` exists; local inference exists; no interprocedural propagation, no enforcement. `fn pure_leak(x)->Int = print_int(x)` compiles clean. | `stdlib/compiler/types.sprout:14-18`; `docs/effects-and-nonalloc-analysis-2026-07-11.md:22-28` |
+| Effects | **Scaffolding, unenforced.** `Effect = EffectPure \| EffectIO \| EffectRow \| EffectVar` exists; local inference exists; no interprocedural propagation, no enforcement. `fn pure_leak(x)->Int = print_int(x)` compiles clean. | `stdlib/compiler/types.sprout:14-18`; `docs/archive/effects-and-nonalloc-analysis-2026-07-11.md:22-28` |
 | Concurrency surface | **None** in the native path. No `spawn`/`async`/`channel`/`actor`. The only "reactor" is in the Python reference interpreter, not the compiled runtime. | grep; `examples/http_echo_server.sprout:7` |
 | HTTP server | Sequential blocking accept loop, one connection at a time | `stdlib/http_server.sprout:287-296` |
 | Do-notation | Already **effect/monad-polymorphic**: binds raw `!{IO}` values *and* `Result` (short-circuits `Err`) | `http_server.sprout:291` (raw IO) vs `:148` (Result) |

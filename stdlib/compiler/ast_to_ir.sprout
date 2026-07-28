@@ -5531,7 +5531,7 @@ fn user_main_fn_name(ret_ty: Maybe ast.TypeExpr) -> String =
 # the (non-tail) call, and that root accumulates per frame -> root-pool
 # exhaustion. As an IRTcoBack (not a GC trigger), no such root is emitted.
 # v1: self-recursion only, i64 returns only. See
-# docs/typed-tco-implementation-2026-06-27.md.
+# docs/archive/typed-tco-implementation-2026-06-27.md.
 # ===========================================================================
 
 fn tco_block_label(b: sprout_ir.IRBlock) -> String =

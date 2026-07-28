@@ -55,7 +55,7 @@ body's value) and, because an IIFE is applied exactly once, never duplicates the
 higher-priority than) the heterogeneous-arity contification (Phase B).
 **Motivating bug:** SCRAM PBKDF2 (`stdlib/scram.sprout` `hi_loop`↔`hi_step`) exhausts a
 green task's GC-root pool on the first request of the Postgres-backed HTTP demo.
-**Related:** `docs/typed-tco-implementation-2026-06-27.md` (self-TCO, the v1 this generalizes).
+**Related:** `docs/archive/typed-tco-implementation-2026-06-27.md` (self-TCO, the v1 this generalizes).
 
 ---
 
@@ -287,7 +287,7 @@ v0 is silent (an optimization, not a checked contract). Two follow-ups are noted
 This document is **non-normative** (a design draft). `docs/spec-v0.md` states no guarantee
 about mutual-TCO, and v0 adds none — it is an optimization, not a promised contract, so the
 normative spec is unchanged. If a future v1 adds a checked `@tailrec`-style guarantee, *that*
-becomes a spec change. `docs/typed-tco-implementation-2026-06-27.md` is updated to point here
+becomes a spec change. `docs/archive/typed-tco-implementation-2026-06-27.md` is updated to point here
 for the mutual case; `BACKLOG.md` tracks the deferred annotation/diagnostic and the
 `bundler.sprout` de-contification cleanup.
 

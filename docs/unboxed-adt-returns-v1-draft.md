@@ -10,7 +10,7 @@
 
 Date: 2026-05-27.
 
-Supersedes: `docs/unboxed-maybe-v1-draft.md` (extern-only scope).
+Supersedes: `docs/archive/unboxed-maybe-v1-draft.md` (extern-only scope).
 
 ---
 
@@ -99,7 +99,7 @@ For N-queens N=12 (~1.47 s baseline after CPR v2):
    but not booleans or `Nil`. Each `is_free` call in N-queens allocates one
    `True` or `False` heap object.
 3. **GC registration overhead** — `register_managed_ptr` on every allocation.
-   Generational GC (see `docs/generational-gc-v1-draft.md`) should help.
+   Generational GC (see `docs/archive/generational-gc-v1-draft.md`) should help.
 
 ---
 

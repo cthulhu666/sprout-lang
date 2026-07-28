@@ -114,7 +114,7 @@ fn op_triggers_gc(op: sprout_ir.IROp) -> Bool =
   # PR 2.5: pattern-matching ops — all three are non-trigger by design.
   # IRGetTag / IRGetField lower to @sprout_tag / @sprout_field, pure reads.
   # IRAbortMatch never allocates.
-  # See docs/pr-2.5-pattern-matching-plan.md "Rooting" section.
+  # See docs/archive/pr-2.5-pattern-matching-plan.md "Rooting" section.
   | sprout_ir.IRGetTag _ _ -> false
   | sprout_ir.IRGetField _ _ _ _ -> false
   # B1: raw i64 loads/store into a Vector's backing data; no allocation.
@@ -861,7 +861,7 @@ fn unroot_op(n: Int, idx: Int, prefix: String) -> (sprout_ir.IROp, Int) =
 # live or non-top value.  At every trigger the rooted set is a superset of the old
 # per-trigger scheme's, so safety follows from that scheme's.  The stack is emptied
 # before each block terminator (empty-at-boundary), so cross-block rooting is
-# unchanged.  See docs/root-once-rooting-design-2026-06-30.md.
+# unchanged.  See docs/archive/root-once-rooting-design-2026-06-30.md.
 
 # `need` (def order) minus values already rooted; preserves def order.
 fn delta_to_push(need: List String, rooted: List String) -> List String =

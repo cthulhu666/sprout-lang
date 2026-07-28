@@ -389,7 +389,7 @@ export type IROp (..) =
   # new values into the slots and branches back.  Because state flows through the
   # SLOTS (re-loaded per iteration), no SSA value spans the back-edge, so the
   # single-pass ir_rooting liveness analysis stays sound.  See
-  # docs/typed-tco-implementation-2026-06-27.md.
+  # docs/archive/typed-tco-implementation-2026-06-27.md.
   #
   # IRTcoEntry <slots> <sp_save>  — entry block.  slots = (slot, lltype, in_name).
   # Lowers to, for each: `<slot> = alloca <ty>` + `store <ty> <in>, ptr <slot>`;
