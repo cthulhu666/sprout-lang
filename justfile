@@ -370,7 +370,7 @@ b1-gate: bootstrap-from-seed
   bash scripts/b1_gate.sh
 
 [private]
-_test-stdlib stage:
+_test-stdlib stage dirs="tests/stdlib tests/stdlib/compiler":
   #!/usr/bin/env bash
   set -euo pipefail
   STAGE="{{stage}}"
@@ -390,7 +390,7 @@ _test-stdlib stage:
   declare -a files=()
   declare -a outs=()
   declare -a stats=()
-  for dir in tests/stdlib tests/stdlib/compiler; do
+  for dir in {{dirs}}; do
     [ -d "$dir" ] || continue
     for f in "$dir"/*.spr "$dir"/*.sprout; do
       [ -f "$f" ] || continue
@@ -460,9 +460,23 @@ _test-stdlib stage:
   echo ""
   echo "==> All suites PASSED"
 
-# Stage-1: emit IR → clang link → run for each test file.
+# Stage-1: emit IR → clang link → run for each test file. Full suite (core + compiler);
+# this is the local/master gate — keep it running BOTH dirs (DoD #5, `just test`).
 [group('test')]
 test-stdlib-stage1: (_test-stdlib "build/compile_driver_bin_stage1")
+
+# Stage-1, core only (tests/stdlib/*, excluding the tests/stdlib/compiler/ subdir).
+# CI runs this on every PR; the compiler subdir is gated on compiler-affecting paths
+# (see .forgejo/workflows/ci.yml "Detect compiler-affecting changes"). The glob in
+# _test-stdlib is non-recursive, so "tests/stdlib" does NOT pull in the compiler subdir.
+[group('test')]
+test-stdlib-core-stage1: (_test-stdlib "build/compile_driver_bin_stage1" "tests/stdlib")
+
+# Stage-1, compiler subdir only (tests/stdlib/compiler/*). The 58 self-hosted-compiler
+# suites each re-bundle the whole compiler (~260k IR lines, ~15s emit); ~61% of the
+# stdlib-test CPU. PR-gated to compiler-affecting paths; always run on master + nightly.
+[group('test')]
+test-stdlib-compiler-stage1: (_test-stdlib "build/compile_driver_bin_stage1" "tests/stdlib/compiler")
 
 # Stage-2: emit IR → clang link → run for each test file.
 [group('test')]

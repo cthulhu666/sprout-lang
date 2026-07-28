@@ -97,8 +97,55 @@ jobs:
         #     tco-runtime / trace-dispatch / verify-dispatch (see justfile `smoke`).
         run: just ci-fast-gates
 
-      - name: Run stdlib tests (stage-1)
-        run: just test-stdlib-stage1
+      - name: Detect compiler-affecting changes
+        # The 58 tests/stdlib/compiler/ suites each re-bundle the whole self-hosted
+        # compiler (~260k IR lines, ~15s emit) — ~61% of the stdlib-test CPU. They only
+        # need to run when something they depend on changed. This step decides whether
+        # to run them on THIS event; the next step is gated on its output.
+        #
+        # FAIL OPEN: on any non-pull_request event (push to master, nightly, dispatch)
+        # OR on any detection error, run the compiler tests. A wrong "skip" would hide a
+        # real breakage; a wrong "run" only costs time — so uncertainty always runs.
+        #
+        # Dependency surface (conservative): the compiler is written in Sprout and pulls
+        # in the prelude/stdlib, is built from the seed, and links the C runtime — so a
+        # change to ANY of stdlib/ runtime/ bootstrap/ tests/stdlib/compiler/ justfile
+        # .forgejo/ triggers a run. Only docs/examples/gfx-only PRs skip.
+        id: detect
+        run: |
+          set -u
+          if [ "${{ github.event_name }}" != "pull_request" ]; then
+            echo "non-PR event (${{ github.event_name }}) — running compiler tests"
+            echo "run_compiler=true" >> "$GITHUB_OUTPUT"; exit 0
+          fi
+          BASE="${{ github.base_ref }}"
+          # Shallow checkout has no base commit; fetch just its tip (depth 1). A plain
+          # two-dot tree diff (origin/BASE HEAD) needs no common ancestor and OVER-reports
+          # if base moved — safe direction (never under-reports a change).
+          if [ -z "$BASE" ] || ! git fetch --depth=1 origin "$BASE" 2>/dev/null; then
+            echo "could not resolve/fetch base '$BASE' — running compiler tests (fail open)"
+            echo "run_compiler=true" >> "$GITHUB_OUTPUT"; exit 0
+          fi
+          CHANGED=$(git diff --name-only "origin/$BASE" HEAD) || {
+            echo "git diff failed — running compiler tests (fail open)"
+            echo "run_compiler=true" >> "$GITHUB_OUTPUT"; exit 0; }
+          if printf '%s\n' "$CHANGED" | grep -qE '^(stdlib/|runtime/|bootstrap/|tests/stdlib/compiler/|justfile|\.forgejo/)'; then
+            echo "compiler-affecting paths changed — running compiler tests"
+            echo "run_compiler=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "no compiler-affecting paths changed — SKIPPING compiler tests (still run on master + nightly)"
+            printf 'changed files:\n%s\n' "$CHANGED"
+            echo "run_compiler=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Run stdlib core tests (stage-1)
+        # tests/stdlib/* excluding the compiler/ subdir — always runs.
+        run: just test-stdlib-core-stage1
+
+      - name: Run compiler tests (stage-1)
+        # tests/stdlib/compiler/* — gated by the detect step above.
+        if: steps.detect.outputs.run_compiler == 'true'
+        run: just test-stdlib-compiler-stage1
 
       - name: Verify examples compile (stage-1)
         run: just compile-examples-stage1
