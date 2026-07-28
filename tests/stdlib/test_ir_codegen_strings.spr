@@ -1,6 +1,7 @@
 import stdlib.test (check_true, run_suite)
 import stdlib.compiler.sprout_ir as sprout_ir
 import stdlib.compiler.ir_lowering as ir_lowering
+import testsupport.ir_verify (clang_verifies_ir)
 
 # ---------------------------------------------------------------------------
 # Tests for Milestone 2, PR 2.1: string-allocating IR ops + lowering.
@@ -79,7 +80,12 @@ fn two_fns_program() -> sprout_ir.IRProgram =
     Nil)), Nil, Nil, Nil)
 
 fn main() -> Unit !{IO} =
-  run_suite("ir_codegen_strings", [
+  do
+    # Substring checks are blind to whole-module malformation; verify a
+    # representative lowered program of each shape actually compiles.
+    greeting_compiles <- clang_verifies_ir(ir_lowering.lower_program(greeting_program()))
+    concat_compiles <- clang_verifies_ir(ir_lowering.lower_program(concat_program()))
+    run_suite("ir_codegen_strings", [
     # --- Pretty printer covers the new ops.
     check_true("pretty: strconst rendered",
                 contains(sprout_ir.print_ir_program(greeting_program()), "strconst")),
@@ -139,5 +145,7 @@ fn main() -> Unit !{IO} =
                 contains(ir_lowering.lower_program(two_fns_program()), "@.str.1")),
     check_true("second fn's GEP references @.str.1, not @.str.0",
                 contains(ir_lowering.lower_program(two_fns_program()),
-                         "ptr @.str.1, i64 0, i64 0"))
+                         "ptr @.str.1, i64 0, i64 0")),
+    check_true("greeting lowered IR compiles under clang", greeting_compiles),
+    check_true("concat lowered IR compiles under clang", concat_compiles)
   ])

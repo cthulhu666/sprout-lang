@@ -1,6 +1,7 @@
 import stdlib.test (check_true, run_suite)
 import stdlib.compiler.sprout_ir as sprout_ir
 import stdlib.compiler.ir_lowering as ir_lowering
+import testsupport.ir_verify (clang_verifies_ir)
 
 # ---------------------------------------------------------------------------
 # Tests for Milestone 1, PR 1.4: control-flow IR ops (IRBr, IRCondBr, IRPhi)
@@ -117,7 +118,12 @@ fn sign_program() -> sprout_ir.IRProgram =
     Nil), Nil, Nil, Nil)
 
 fn main() -> Unit !{IO} =
-  run_suite("ir_codegen_control", [
+  do
+    # Substring checks are blind to whole-module malformation; verify a
+    # representative lowered program of each shape actually compiles.
+    abs_compiles <- clang_verifies_ir(ir_lowering.lower_program(abs_program()))
+    sign_compiles <- clang_verifies_ir(ir_lowering.lower_program(sign_program()))
+    run_suite("ir_codegen_control", [
     # --- Pretty printer covers the new ops.
     check_true("pretty: condbr op rendered",
                 contains(sprout_ir.print_ir_program(abs_program()), "condbr")),
@@ -160,5 +166,7 @@ fn main() -> Unit !{IO} =
                 contains(ir_lowering.lower_program(sign_program()), "phi i64 [%t11, %then_8], [%t14, %else_9]")),
     # Outer phi — picks up the inner join label as one of its incoming labels.
     check_true("sign emits outer phi merging at inner-join",
-                contains(ir_lowering.lower_program(sign_program()), "phi i64 [%t5, %then_2], [%t15, %join_10]"))
+                contains(ir_lowering.lower_program(sign_program()), "phi i64 [%t5, %then_2], [%t15, %join_10]")),
+    check_true("abs lowered IR compiles under clang", abs_compiles),
+    check_true("sign lowered IR compiles under clang", sign_compiles)
   ])

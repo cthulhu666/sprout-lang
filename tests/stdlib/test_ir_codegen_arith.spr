@@ -1,6 +1,7 @@
 import stdlib.test (check_true, run_suite)
 import stdlib.compiler.sprout_ir as sprout_ir
 import stdlib.compiler.ir_lowering as ir_lowering
+import testsupport.ir_verify (clang_verifies_ir)
 
 # ---------------------------------------------------------------------------
 # Tests for Milestone 1, PR 1.3: scalar arithmetic + comparison IR ops.
@@ -62,7 +63,12 @@ fn is_zero_program() -> sprout_ir.IRProgram =
     Nil), Nil, Nil, Nil)
 
 fn main() -> Unit !{IO} =
-  run_suite("ir_codegen_arith", [
+  do
+    # Substring checks are blind to whole-module malformation; verify a
+    # representative lowered program of each return kind actually compiles.
+    add1_compiles <- clang_verifies_ir(ir_lowering.lower_program(add1_program()))
+    is_zero_compiles <- clang_verifies_ir(ir_lowering.lower_program(is_zero_program()))
+    run_suite("ir_codegen_arith", [
     # --- Pretty printer covers each new op.
     check_true("pretty: iadd op rendered",
                 contains(sprout_ir.print_ir_program(add1_program()), "iadd")),
@@ -95,5 +101,8 @@ fn main() -> Unit !{IO} =
     check_true("is_zero emits icmp eq i64 %x, %t0",
                 contains(ir_lowering.lower_program(is_zero_program()), "icmp eq i64 %x, %t0")),
     check_true("is_zero returns i1 %t1",
-                contains(ir_lowering.lower_program(is_zero_program()), "ret i1 %t1"))
+                contains(ir_lowering.lower_program(is_zero_program()), "ret i1 %t1")),
+    # Whole-module verification: the lowered IR is accepted by clang.
+    check_true("add1 lowered IR compiles under clang", add1_compiles),
+    check_true("is_zero lowered IR compiles under clang", is_zero_compiles)
   ])

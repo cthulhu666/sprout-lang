@@ -1,6 +1,7 @@
 import stdlib.test (check_eq, check_true, run_suite)
 import stdlib.compiler.sprout_ir as sprout_ir
 import stdlib.compiler.ir_lowering as ir_lowering
+import testsupport.ir_verify (clang_verifies_ir)
 
 # ---------------------------------------------------------------------------
 # Tests for Milestone 1, PR 1.2: trivial-program IR construction + rendering.
@@ -30,7 +31,12 @@ fn identity_program() -> sprout_ir.IRProgram =
     Nil), Nil, Nil, Nil)
 
 fn main() -> Unit !{IO} =
-  run_suite("ir_codegen_basic", [
+  do
+    # Substring checks are blind to whole-module malformation; verify a
+    # representative lowered program of each shape actually compiles.
+    answer_compiles <- clang_verifies_ir(ir_lowering.lower_program(answer_program()))
+    identity_compiles <- clang_verifies_ir(ir_lowering.lower_program(identity_program()))
+    run_suite("ir_codegen_basic", [
     # print_ir_program: pretty-printer marks a populated program with a
     # non-empty header line.
     check_eq("print_ir_program empty",
@@ -59,5 +65,7 @@ fn main() -> Unit !{IO} =
 
     # Synthetic C-ABI main shim is always present so the IR links cleanly.
     check_true("main shim is emitted",
-                contains(ir_lowering.lower_program(answer_program()), "define i32 @main(i32 %argc, ptr %argv)"))
+                contains(ir_lowering.lower_program(answer_program()), "define i32 @main(i32 %argc, ptr %argv)")),
+    check_true("answer lowered IR compiles under clang", answer_compiles),
+    check_true("identity lowered IR compiles under clang", identity_compiles)
   ])

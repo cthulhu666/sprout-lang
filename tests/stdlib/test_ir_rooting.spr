@@ -2,6 +2,7 @@ import stdlib.test (check_eq, check_true, check_false, run_suite)
 import stdlib.compiler.sprout_ir as sprout_ir
 import stdlib.compiler.ir_lowering as ir_lowering
 import stdlib.compiler.ir_rooting as ir_rooting
+import testsupport.ir_verify (clang_verifies_ir)
 
 # ---------------------------------------------------------------------------
 # Tests for Milestone 2, PR 2.2: dataflow rooting pass.
@@ -641,7 +642,12 @@ fn test27_program() -> sprout_ir.IRProgram =
     Nil))), Nil, Nil, Nil)
 
 fn main() -> Unit !{IO} =
-  run_suite("ir_rooting", [
+  do
+    # Substring checks are blind to whole-module malformation; verify a
+    # representative rooted+lowered program of each shape actually compiles.
+    test2_compiles <- clang_verifies_ir(lower(test2_program()))
+    test23_compiles <- clang_verifies_ir(lower(test23_program()))
+    run_suite("ir_rooting", [
     # --- Test 13: long-block live_after characterization (push count locked).
     check_eq("T13: long block push count (coalesced O(N): 5 values, 5 pushes)",
               count(lower(test13_program()), "call i64 @sprout_gc_push_i64_root"), 5),
@@ -798,5 +804,9 @@ fn main() -> Unit !{IO} =
 
     # --- Test 27 (fixpoint transitive alloc): deepest fn allocates → propagates up → rooted.
     check_true("T27: push_i64_root present across transitively allocating chain (f27->a27->b27)",
-                contains(lower(test27_program()), "call i64 @sprout_gc_push_i64_root"))
+                contains(lower(test27_program()), "call i64 @sprout_gc_push_i64_root")),
+
+    # Whole-module verification: the rooted+lowered IR is accepted by clang.
+    check_true("T2 (single-fn) rooted IR compiles under clang", test2_compiles),
+    check_true("T23 (two-fn, alloc fixpoint) rooted IR compiles under clang", test23_compiles)
   ])

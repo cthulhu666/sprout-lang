@@ -8,6 +8,7 @@ import stdlib.compiler.checker as checker
 import stdlib.compiler.lowering as lowering
 import stdlib.compiler.ast_to_ir as ast_to_ir
 import stdlib.compiler.typed_ast as typed_ast
+import testsupport.ir_verify (clang_verifies_ir)
 
 # Tests for Milestone 2, PR 2.4: lambda lifting + closure emission.
 # See docs/gc-rooting-model-c-plan-2026-06-02.md.
@@ -51,6 +52,14 @@ fn translated_err_contains(src: String, needle: String) -> Bool !{IO} =
 fn translated_ok_ir_contains(src: String, needle: String) -> Bool !{IO} =
   match translate_source(src) with
   | Ok ir -> str_find(ir, needle) != -1
+  | Err _ -> false
+
+# True iff translate_source(src) returned Ok and clang accepts the lowered IR.
+# Substring checks (translated_ok_ir_contains) are blind to whole-module
+# malformation; this closes that gap for a representative closure program.
+fn translated_ir_compiles(src: String) -> Bool !{IO} =
+  match translate_source(src) with
+  | Ok ir -> clang_verifies_ir(ir)
   | Err _ -> false
 
 fn main() -> Unit !{IO} =
@@ -280,5 +289,14 @@ fn main() -> Unit !{IO} =
       "fn outer(n: Int) -> Int = (\\g -> g(5))(\\x -> x + n)",
       "%t0 = alloca")
     assert_false(state, "T22: idx_map fix — rooting pass must not emit %t0 alloca in lifted body (would collide with IRLoadEnvSlot)", t22)
+
+    # Whole-module verification: representative lifted-lambda programs (a
+    # simple lift, and a capturing lambda VALUE composed with IRApplyClosure)
+    # produce IR that actually compiles under clang.
+    lift_compiles <- translated_ir_compiles("fn mk() -> (a -> a) = \\x -> x")
+    assert_true(state, "T1 vehicle: simple lambda-lift IR compiles under clang", lift_compiles)
+    capture_compiles <- translated_ir_compiles(
+      "fn outer(n: Int) -> Int = (\\g -> g(5))(\\x -> x + n)")
+    assert_true(state, "T4/T6 vehicle: capturing lambda VALUE + closure-apply IR compiles under clang", capture_compiles)
 
     summary(state)

@@ -1,6 +1,7 @@
 import stdlib.test (check_true, run_suite)
 import stdlib.compiler.sprout_ir as sprout_ir
 import stdlib.compiler.ir_lowering as ir_lowering
+import testsupport.ir_verify (clang_verifies_ir)
 
 # ---------------------------------------------------------------------------
 # Tests for Milestone 1, PR 1.5: direct calls + recursion (IRCall).
@@ -129,7 +130,12 @@ fn twice_and_add4_program() -> sprout_ir.IRProgram =
     Nil)), Nil, Nil, Nil)
 
 fn main() -> Unit !{IO} =
-  run_suite("ir_codegen_calls", [
+  do
+    # Substring checks are blind to whole-module malformation; verify a
+    # representative lowered program of each shape actually compiles.
+    fact_compiles <- clang_verifies_ir(ir_lowering.lower_program(fact_program()))
+    add4_compiles <- clang_verifies_ir(ir_lowering.lower_program(twice_and_add4_program()))
+    run_suite("ir_codegen_calls", [
     # --- Pretty printer covers the new op.
     check_true("pretty: call op rendered",
                 contains(sprout_ir.print_ir_program(fact_program()), "= call i64 @fact")),
@@ -173,5 +179,7 @@ fn main() -> Unit !{IO} =
                          "%t0 = call i64 @twice(i64 %n)")),
     check_true("add4 emits second twice() call",
                 contains(ir_lowering.lower_program(twice_and_add4_program()),
-                         "%t1 = call i64 @twice(i64 %n)"))
+                         "%t1 = call i64 @twice(i64 %n)")),
+    check_true("fact lowered IR compiles under clang", fact_compiles),
+    check_true("add4 lowered IR compiles under clang", add4_compiles)
   ])

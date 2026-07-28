@@ -298,10 +298,15 @@ fn main() -> Unit !{IO} =
         print("ERROR: usage: compile-driver --phase <phase> <stdlib-root> [--package-root <dir>] <file>...")
     | ["--phase" | _] ->
         print("ERROR: --phase requires an argument: bundle|check|lower|recheck|scan-info|dump-qualify")
+    # --package-root before the bare form: the general arm would otherwise bind
+    # path to the literal "--package-root". Mirrors the --emit-ir surface so the
+    # typed-codegen path resolves dotted non-stdlib imports (e.g. testsupport.*).
+    | ["--use-ir-codegen", stdlib_root, "--package-root", dir, path | _] ->
+        run_file_use_ir_codegen(path, stdlib_root, Cons(dir, Nil))
     | ["--use-ir-codegen", stdlib_root, path | _] ->
         run_file_use_ir_codegen(path, stdlib_root, Nil)
     | ["--use-ir-codegen" | _] ->
-        print("ERROR: usage: compile-driver --use-ir-codegen <stdlib-root> <file>")
+        print("ERROR: usage: compile-driver --use-ir-codegen <stdlib-root> [--package-root <dir>] <file>")
     | ["--emit-iface", stdlib_root, module_name, path | _] ->
         run_file_emit_iface(module_name, path, stdlib_root)
     | ["--emit-iface" | _] ->

@@ -407,7 +407,7 @@ _test-stdlib stage dirs="tests/stdlib tests/stdlib/compiler":
       set +e
       echo "==> $f" > "$TMPD/$idx.out"
       ok=1
-      "./$STAGE" --emit-ir "{{stdlib_root}}" "$f" > "$TMPD/$idx.ll" 2>"$TMPD/$idx.err"
+      "./$STAGE" --emit-ir "{{stdlib_root}}" --package-root "{{justfile_directory()}}" "$f" > "$TMPD/$idx.ll" 2>"$TMPD/$idx.err"
       if [[ $? -ne 0 ]]; then
         { echo "  COMPILE FAILED:"; cat "$TMPD/$idx.err"; } >> "$TMPD/$idx.out"; ok=0
       elif ! opt --passes=verify "$TMPD/$idx.ll" -o /dev/null 2>"$TMPD/$idx.err"; then
@@ -1532,7 +1532,7 @@ test-stress: bootstrap-from-seed
                # shared-$TMPD/err race when invoked concurrently.
     local f="$1" name ll bin out err
     name=$(basename "$f" .spr); ll="$TMPD/$name.ll"; bin="$TMPD/$name.bin"; err="$TMPD/$name.err"
-    "{{build_dir}}/compile_driver_bin_stage1" --use-ir-codegen "{{stdlib_root}}" "$f" > "$ll" 2>"$err" || { echo fail; return; }
+    "{{build_dir}}/compile_driver_bin_stage1" --use-ir-codegen "{{stdlib_root}}" --package-root "{{justfile_directory()}}" "$f" > "$ll" 2>"$err" || { echo fail; return; }
     clang "$ll" "$TMPD/rtobj"/*.o {{clang_extra}} -o "$bin" 2>"$err" || { echo fail; return; }
     if out=$(SPROUT_GC_STRESS=1 "$bin" 2>&1); then
       echo "$out" | grep -q "SUITE FAILED" && echo fail || echo ok

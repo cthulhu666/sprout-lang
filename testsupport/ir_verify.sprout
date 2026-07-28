@@ -1,0 +1,45 @@
+module testsupport.ir_verify
+
+# Shared IR-verification helper for the IR-codegen test suites.
+#
+# The IR-codegen unit tests build LLVM IR in memory (via `sprout_ir` builders /
+# `ir_lowering`) and assert on its printed text with `contains(ir, "...")`.
+# Substring checks are blind to whether the IR is actually well-formed — a test
+# can match every expected substring while the surrounding module is malformed
+# (this hid bug #2 in PR 2.5). `clang_verifies_ir` closes that gap: it feeds the
+# emitted IR to `clang -c -x ir` and reports whether clang accepts it.
+#
+# Lives under `testsupport.` (resolved via `--package-root`) rather than in
+# `stdlib/` so test-only machinery stays out of the shipped standard library.
+
+import stdlib.process as process
+
+# Returns true iff `clang` accepts `ir` as a well-formed LLVM IR module.
+# If clang is not installed the assertion auto-passes (CI always has clang; a
+# local run without it should not spuriously fail). On rejection the clang
+# stderr is echoed to stdout to make the failure diagnosable.
+export fn clang_verifies_ir(ir: String) -> Bool !{IO} =
+  do
+    probe <- process.proc_run(Cons("clang", Cons("--version", Nil)))
+    match process.proc_ok(probe) with
+    | false ->
+        do
+          term_write("[clang_verifies_ir] clang not in PATH — assertion auto-passes\n")
+          true
+    | true ->
+        do
+          result <- process.proc_run_stdin(
+            Cons("clang",
+            Cons("-c",
+            Cons("-x", Cons("ir",
+            Cons("-o", Cons("/dev/null",
+            Cons("-", Nil))))))),
+            ir)
+          match process.proc_ok(result) with
+          | true -> true
+          | false ->
+              do
+                term_write("[clang_verifies_ir] clang rejected IR — stderr:\n")
+                term_write(process.proc_stderr(result))
+                term_write("\n")
+                false

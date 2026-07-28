@@ -8,6 +8,7 @@ import stdlib.compiler.checker as checker
 import stdlib.compiler.lowering as lowering
 import stdlib.compiler.ast_to_ir as ast_to_ir
 import stdlib.compiler.typed_ast as typed_ast
+import testsupport.ir_verify (clang_verifies_ir)
 
 # Tests for Milestone 2, PR 2.3: constructor allocation (boxed ADTs only).
 # See docs/gc-rooting-model-c-plan-2026-06-02.md.
@@ -419,5 +420,13 @@ fn main() -> Unit !{IO} =
     assert_true(state,
                 "Unit ctor field emits @sprout_make3 with i64 0 sentinel (M3 PR 15e)",
                 unit_field_ctor)
+
+    # Whole-module verification: substring checks are blind to whole-module
+    # malformation; verify representative rooted+lowered ctor programs
+    # actually compile under clang.
+    t3_compiles <- clang_verifies_ir(lower_with_roots(t3_program()))
+    assert_true(state, "T3 (heap-arg ctor) lowered IR compiles under clang", t3_compiles)
+    t5_compiles <- clang_verifies_ir(lower_with_roots(t5_program()))
+    assert_true(state, "T5 (ctor-of-ctor composition) lowered IR compiles under clang", t5_compiles)
 
     summary(state)

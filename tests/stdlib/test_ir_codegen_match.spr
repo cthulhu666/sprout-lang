@@ -1,5 +1,4 @@
 import stdlib.test (TestState, new_state, assert_eq, assert_true, assert_false, summary)
-import stdlib.process as process
 import stdlib.compiler.sprout_ir as sprout_ir
 import stdlib.compiler.ir_lowering as ir_lowering
 import stdlib.compiler.ir_rooting as ir_rooting
@@ -9,6 +8,7 @@ import stdlib.compiler.checker as checker
 import stdlib.compiler.lowering as lowering
 import stdlib.compiler.ast_to_ir as ast_to_ir
 import stdlib.compiler.typed_ast as typed_ast
+import testsupport.ir_verify (clang_verifies_ir)
 
 # PR 2.5 — IR-level pattern matching.
 # Phase 1 (this file): hand-built IRPrograms exercising the new IR ops
@@ -79,52 +79,8 @@ fn translated_ok_ir_contains(src: String, needle: String) -> Bool !{IO} =
   | Ok ir -> str_find(ir, needle) != -1
   | Err _ -> false
 
-# Verify that an already-lowered IR string passes clang's LLVM verifier.
-#
-# /code-review-v2 fix D (issues #8, #14, #15):
-#  - #15: takes the IR string directly (not src), so translate_source
-#    is called only ONCE per test — the caller matches on translate_source
-#    and passes `ir` here. The old translated_ir_verifies(src) re-ran
-#    translate_source internally, duplicating the pipeline whenever a
-#    T-match-N also called translated_ok_ir_contains on the same src.
-#  - #14: probes `clang --version` before verifying. If clang is absent
-#    from PATH the helper emits a diagnostic and returns true (auto-skip)
-#    rather than false (false-failure). Auto-skip is friendlier to
-#    environments where clang is not always installed; CI always has it.
-#    The clang-availability check runs per-call (7 invocations). At 7
-#    calls that is negligible — a Ref cache would add surface area for
-#    no measurable gain.
-#  - #8: on clang-rejects-IR, surface clang's stderr via term_write
-#    before returning false. Previously both an Err from translate_source
-#    AND a clang rejection produced a silent false, making failures
-#    impossible to diagnose without re-running manually.
-#    Note: term_write writes to stdout (not stderr) — no stderr-writing
-#    builtin exists; stdout diagnostic is better than silence.
-fn clang_verifies_ir(ir: String) -> Bool !{IO} =
-  do
-    probe <- process.proc_run(Cons("clang", Cons("--version", Nil)))
-    match process.proc_ok(probe) with
-    | false ->
-        do
-          term_write("[clang_verifies_ir] clang not in PATH — assertion auto-passes\n")
-          true
-    | true ->
-        do
-          result <- process.proc_run_stdin(
-            Cons("clang",
-            Cons("-c",
-            Cons("-x", Cons("ir",
-            Cons("-o", Cons("/dev/null",
-            Cons("-", Nil))))))),
-            ir)
-          match process.proc_ok(result) with
-          | true -> true
-          | false ->
-              do
-                term_write("[clang_verifies_ir] clang rejected IR — stderr:\n")
-                term_write(process.proc_stderr(result))
-                term_write("\n")
-                false
+# clang_verifies_ir (does clang accept this IR?) now lives in the shared
+# testsupport.ir_verify module, imported above.
 
 # --------------------------------------------------------------------------
 # Hand-built programs for each new op.

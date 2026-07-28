@@ -46,7 +46,7 @@ for src in \
   old_ir="$SCRATCH/old.ll"
   new_ir="$SCRATCH/new.ll"
 
-  "$OLD" --emit-ir stdlib "$src" >"$old_ir" 2>/dev/null || true
+  "$OLD" --emit-ir stdlib --package-root "$REPO_ROOT" "$src" >"$old_ir" 2>/dev/null || true
   # OLD cannot compile this file (or emits an error) → not a byte-identity case.
   if [[ ! -s "$old_ir" ]] || grep -q "^ERROR:" "$old_ir" 2>/dev/null; then
     n_skip=$((n_skip + 1))
@@ -54,7 +54,7 @@ for src in \
   fi
 
   n_total=$((n_total + 1))
-  "$NEW" --emit-ir stdlib "$src" >"$new_ir" 2>/dev/null || true
+  "$NEW" --emit-ir stdlib --package-root "$REPO_ROOT" "$src" >"$new_ir" 2>/dev/null || true
 
   if cmp -s "$old_ir" "$new_ir"; then
     n_match=$((n_match + 1))
