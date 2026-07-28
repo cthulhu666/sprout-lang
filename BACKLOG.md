@@ -51,15 +51,20 @@ Legend:
   (a built-in `?`); 3 general monad-generic propagate (entangled with effect-system design D2). Prior
   art (verified): Rust `let-else`/`?`, Swift `guard`, Haskell `do`/MonadFail, OCaml binding operators.
   Plan + staging: `docs/let-else-and-monadic-binding-plan.md`.
-- [ ] `P3` **Sweep real staircases onto binding-else (follow-on).** Both tiers landed without
-  adopters (kept separate from the semantics changes). Now convertible: the pure-prefix sites
-  (`analysis_service_driver.op_session_update` — verified compiles; `driver.run_file`'s pure tail,
-  its `read_file` head stays a `match`) via Tier 1b, AND — since effectful-RHS (do-local) landed — the
-  `do`-block cascades in `infer.sprout` (`infer_range` verified via stage-3 self-host; the constraint
-  cascades ~:3426/:4422) plus the 9 `test_ir_codegen_*` compile-pipeline harnesses. Each conversion is
-  behaviour-preserving; both drivers are currently untested (need behavioural tests when swept). Run
-  `just lint` for the live inventory. Kept out of the feature PRs on purpose (don't mix refactors with
-  semantics changes).
+- [x] `P3` **Sweep `infer.sprout` do-block cascades — DONE 2026-07-28.** `infer_range` and
+  `check_fn_body` (:3430/:4523) flattened onto effectful-RHS let..else; behaviour-preserving, guarded
+  by the self-host fixed point (both are in the compiler's own closure) + the inference suite; added
+  the previously-missing `range_needs_int` conformance test. `infer:1668` (`resolve_obligation`)
+  deliberately NOT converted — it is an inverted first-success-wins alternatives chain (descend on
+  `Nothing`, terminal on `Just`), the wrong polarity for let..else, in delicate soundness code.
+- [ ] `P3` **Sweep the driver staircases (follow-on).** `analysis_service_driver.op_session_update`
+  (Tier 1b pure-prefix) and `driver.run_file` (effectful `read_file` head + pure tail). Deferred from
+  the infer sweep because neither is in the compiler's closure, so the self-host fixed point does NOT
+  guard them — each needs its own behavioural test first: `op_session_update` = export + build a
+  `StartupState` (5 refs) + a json request to hit the validator error arms (moderate); `run_file` =
+  temp-file + stdout capture (disproportionate for a dump-AST debug driver — consider leaving it).
+  Both conversions are behaviour-preserving. The 9 `test_ir_codegen_*` compile-pipeline harnesses are
+  also convertible but are deliberately-nested test fixtures — leave them.
 - [ ] `P2` Revisit string-interpolation type-directed dispatch (Mechanism A): Phase 4 ships a simple syntactic-coercion form (elaborator inserts `template_to_string` only at `String`-expected contexts; default template result is `String`). Evaluate migrating to an `IsTemplate` typeclass with instances for `String` and `StringTemplate` once usage patterns settle. Class-based dispatch is more principled and consistent with the rest of the class system; tradeoff is added constraint-machinery overhead and possible defaulting ambiguity. Decision should be driven by whether a third meaningful instance (e.g. `Bytes`, a logging frame, a tagged-template processor) lands and forces generality.
 - [x] `P1` Validate type-name references in `TypeDecl` field and constraint positions resolve to a declared type (strict type-name validation). Landed in PR feat/strict-typedecl-validation: `validate_all_decls` pass in `stdlib/compiler/infer.sprout` runs after `pre_scan_fn_decls`, walks `TypeDecl` constructor fields, `RecordDecl` field types, and `AliasDecl` RHS type-exprs; emits `type-validation: unknown type name \`X\` in declaration \`Y\`` on the first unresolved uppercase `TypeName`. Mutual recursion between ADTs is safe (pass runs post-scan). Positions NOT yet covered (see follow-up below): `ClassDecl` method signatures, `InstanceDecl` constraint types, `FnDecl` param/return annotations.
 - [ ] `P2` Extend strict type-name validation to `ClassDecl` method signatures, `InstanceDecl` constraint types, and `FnDecl` param/return annotations (follow-up to P1 above). The `validate_decl` function in `stdlib/compiler/infer.sprout` currently matches `| _ -> Nothing` for these positions. Extend it — the main complication for `FnDecl`/`ClassDecl` is correctly threading local type-parameter sets into `validate_te` so that method-specific variables like `a`, `b` in `fmap(f: a -> b) -> f b` are not flagged.

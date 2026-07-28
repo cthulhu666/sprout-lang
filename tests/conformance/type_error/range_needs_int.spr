@@ -1,0 +1,9 @@
+module main
+
+# A range `lo..hi` whose bounds are not Int is rejected: infer_range unifies both
+# bounds against Int and reports "Range needs Int" otherwise. Guards that error arm
+# (previously uncovered) across the effectful-let-else conversion of infer_range.
+fn main() -> Unit !{IO} =
+  do
+    let r = "a".."z"
+    print("unreached")
