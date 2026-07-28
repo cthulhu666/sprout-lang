@@ -210,9 +210,17 @@ into that system. The scene:
   bottom-left panel. Type/mass/temp are folded into a pre-formatted `detail` string at parse time (so
   the `Planet` record stays within the 10-field constructor-arity ceiling — the star catalog uses the
   same trick).
-- **Fits scale per system.** Systems span 0.5–30 AU; the AU→world scale is fit so the outermost
-  orbit reaches `fit_world_radius`, with body sizes in fixed world units — so a compact 5-planet and
-  a spread 9-planet system both frame the same way.
+- **Fits scale per system, with a sqrt radial compression.** Systems span 0.5–30 AU, a dynamic range
+  (up to ~70× inner-to-outer) that a *linear* AU→world scale cannot show: fitting the outer orbit to
+  `fit_world_radius` shrinks the inner orbits below the star's own render radius, so the star swallows
+  the inner planets (and a 10-Earth giant dwarfs everything). Instead each orbit gets its own **uniform
+  sqrt-compressed scale** `k(a) = fit / sqrt(a · a_ext)` (world semi-major `= fit·sqrt(a/a_ext)`) from
+  the pure `loam.system_view`. Scaling each orbit uniformly *about the origin* — where `loam.orbit`
+  places the star's focus — keeps every orbit a true ellipse of unchanged eccentricity and shared
+  focus; only the spacing *between* orbits is compressed, so the inner planets spread clear of the star
+  while the outer orbit still fits the frame. Body radii are sqrt-compressed the same way
+  (`body_world_size`, keeping the size ordering) so giants stop dominating. Headless-tested in
+  `tests/loam/test_system_view.spr`. A compact and a spread system both frame legibly.
 - **Own camera.** A separate AU-scale `Cam` (the system is always at the origin), driven by the same
   `loam.camera` rig; the galaxy camera is held while in scene 2.
 - **Scripting.** `argv[6] = <system id>` opens directly in scene 2 for that system (screenshot/canary
@@ -274,12 +282,11 @@ legend swatch can never diverge.
 
 ## Planned extensions (next iterations — designed for, not built)
 
-- **Scene 2 depth — remaining.** Rings, moons, and the hover detail panel are built (above).
-  Still open: **asteroid belts** (the exporter emits `asteroidBelts: []` for every system in this
-  catalog — nothing to draw until it populates them); a **log-radius** option so *spread* (~30 AU)
-  systems don't bury inner planets in the star (linear-r framing keeps ellipses honest but crowds the
-  centre); and true moon geometry (needs a >10-field `Planet` or a moon sub-record — the constructor
-  arity ceiling is 10; see BACKLOG).
+- **Scene 2 depth — remaining.** Rings, moons, the hover detail panel, and the **sqrt radial/body
+  compression** (spread systems no longer bury inner planets in the star — see "Fits scale per system"
+  above) are built. Still open: **asteroid belts** (the exporter emits `asteroidBelts: []` for every
+  system in this catalog — nothing to draw until it populates them); and true moon geometry (needs a
+  >10-field `Planet` or a moon sub-record — the constructor arity ceiling is 10; see BACKLOG).
 
 ## Running
 

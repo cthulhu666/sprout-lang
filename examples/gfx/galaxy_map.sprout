@@ -12,6 +12,7 @@ import loam.galaxy_lod (pow2, level_offset, group_of, clampi, desired_level, nex
 import loam.galaxy_filter (num_classes, mask_all, mask_none, bit_test, bit_toggle, popcount, class_name, class_rgb)
 import loam.galaxy_sample (hash01, sample_seed, level_thresholds, keep_level)
 import loam.orbit (ellipse_point)
+import loam.system_view (orbit_world_scale, body_world_size)
 import loam.starfield as sf
 import loam.planet as pl
 
@@ -706,40 +707,45 @@ fn moon_dots(cx: Double, cz: Double, off: Double, count: Int, i: Int, planet_sh:
                      (to_double(i) * 2.7) + 0.5, 2, 180, 180, 195)
       moon_dots(cx, cz, off, count, i + 1, planet_sh)
 
-fn draw_one_planet(scale: Double, p: Planet, planet_sh: Int) -> Unit !{IO} =
+# `a_ext` is the system's outer orbit extent (max apoapsis); each orbit gets its own uniform
+# sqrt-compressed scale from it (loam.system_view), so inner orbits spread clear of the star while every
+# ellipse keeps its true shape and shared focus. Body radius is sqrt-compressed too (giants stop dwarfing).
+fn draw_one_planet(a_ext: Double, p: Planet, planet_sh: Int) -> Unit !{IO} =
   do
+    let scale = orbit_world_scale(p.a, a_ext, fit_world_radius)
     orbit_seg(scale, p.a, p.e, p.argperi, 0)
     match ellipse_point(p.a, p.e, p.argperi, p.nu) with
     | (x, z) ->
         do
           let px = x * scale
           let pz = z * scale
-          let prad = max_d(p.rad * planet_size_scale, planet_min_size)
+          let prad = body_world_size(p.rad, planet_size_scale, planet_min_size)
           match planet_rgb(p.rad) with
           | (pr, pg, pb) -> pl.draw_planet(planet_sh, px, 0.0, pz, prad, planet_seed(p), planet_kind(p.rad), pr, pg, pb)
           if p.rings then ring_seg(px, pz, prad * ring_scale, 0) else ()
           moon_dots(px, pz, prad + moon_offset, p.moons, 0, planet_sh)
 
-fn draw_planets(scale: Double, ps: List Planet, planet_sh: Int) -> Unit !{IO} =
+fn draw_planets(a_ext: Double, ps: List Planet, planet_sh: Int) -> Unit !{IO} =
   match ps with
   | Nil -> ()
   | Cons p rest ->
       do
-        draw_one_planet(scale, p, planet_sh)
-        draw_planets(scale, rest, planet_sh)
+        draw_one_planet(a_ext, p, planet_sh)
+        draw_planets(a_ext, rest, planet_sh)
 
-# AU->world scale fitting the outermost orbit to `fit_world_radius` (used for drawing AND hover
-# projection, so both agree). Computed from the cached planet list in the render loop.
-fn system_scale(ps: List Planet) -> Double =
-  fit_world_radius / orbit_extent(ps, 0.2)
+# The system's outer orbit extent (largest apoapsis, AU), the reference every per-orbit sqrt scale is
+# fit against (used for drawing AND hover projection, so both agree). Computed once from the cached
+# planet list in the render loop.
+fn system_extent(ps: List Planet) -> Double =
+  orbit_extent(ps, 0.2)
 
-# Draw a system (already-parsed planets, pre-computed `scale`): star at the origin, then every
-# planet's orbit + body + rings + moons. Planets are parsed once on entry and cached in the render
-# loop — NOT re-read per frame (that dropped the frame rate).
-fn draw_system(scale: Double, ps: List Planet, sun_sh: Int, planet_sh: Int) -> Unit !{IO} =
+# Draw a system (already-parsed planets, pre-computed extent): star at the origin, then every planet's
+# orbit + body + rings + moons. Planets are parsed once on entry and cached in the render loop — NOT
+# re-read per frame (that dropped the frame rate).
+fn draw_system(a_ext: Double, ps: List Planet, sun_sh: Int, planet_sh: Int) -> Unit !{IO} =
   do
     sf.draw_star(sun_sh, 0.0, 0.0, 0.0, sun_size, 255, 240, 180)
-    draw_planets(scale, ps, planet_sh)
+    draw_planets(a_ext, ps, planet_sh)
 
 # --- Scene 2 hover: project each planet to screen, keep the one nearest the cursor for the detail
 # panel. Mirrors the scene-1 pick, but over the in-memory (cached) planet list — no file re-read. ---
@@ -757,20 +763,20 @@ fn planet_screen_d2(p: Planet, scale: Double, mx: Double, my: Double) -> Double 
         sy <- gfx.projected_y()
         if front then ((sx - mx) * (sx - mx)) + ((sy - my) * (sy - my)) else pick_far
 
-fn nearest_planet(ps: List Planet, scale: Double, mx: Double, my: Double,
+fn nearest_planet(ps: List Planet, a_ext: Double, mx: Double, my: Double,
                   bd2: Double, best: Maybe Planet) -> (Double, Maybe Planet) !{IO} =
   match ps with
   | Nil -> keep_np(bd2, best)
   | Cons p rest ->
       do
-        d2 <- planet_screen_d2(p, scale, mx, my)
+        d2 <- planet_screen_d2(p, orbit_world_scale(p.a, a_ext, fit_world_radius), mx, my)
         let nd = if d2 < bd2 then d2 else bd2
         let nb = if d2 < bd2 then Just(p) else best
-        nearest_planet(rest, scale, mx, my, nd, nb)
+        nearest_planet(rest, a_ext, mx, my, nd, nb)
 
 # Factored so the call site binds a plain function (binding an `if` via `<-` does not parse).
-fn maybe_hover(active: Bool, ps: List Planet, scale: Double, mx: Double, my: Double) -> (Double, Maybe Planet) !{IO} =
-  if active then nearest_planet(ps, scale, mx, my, pick_far, Nothing)
+fn maybe_hover(active: Bool, ps: List Planet, a_ext: Double, mx: Double, my: Double) -> (Double, Maybe Planet) !{IO} =
+  if active then nearest_planet(ps, a_ext, mx, my, pick_far, Nothing)
   else keep_np(pick_far, Nothing)
 
 fn planet_line1(p: Planet) -> String = p.name
@@ -843,13 +849,13 @@ fn render_loop(dir: String, cam: Cam, scam: Cam, radius: Double, loaded: Dict In
         let need_load = (view == 1) && ! (sel_name == csys)
         let cplanets2 = if need_load then load_planets(dir, sel_name) else cplanets
         let csys2 = if need_load then sel_name else csys
-        let s2scale = system_scale(cplanets2)
+        let s2ext = system_extent(cplanets2)
         streamed <- load_levels(dir, cam, lvl, 0, radius, loaded, load_budget)
         cam_apply(if view == 0 then cam else scam)
         gfx.frame_begin()
         # Scene 1 draws the galaxy point cloud, filtered to the enabled spectral classes (model index
         # == classCode, so the mask enables/disables whole classes); scene 2 draws the selected system.
-        if view == 0 then gfx.draw_instances_masked(level_offset(lvl + 1), draw_cull, mask) else draw_system(s2scale, cplanets2, sun_sh, planet_sh)
+        if view == 0 then gfx.draw_instances_masked(level_offset(lvl + 1), draw_cull, mask) else draw_system(s2ext, cplanets2, sun_sh, planet_sh)
         gfx.overlay_begin()
         gfx.draw_fps(10, 10)
         if view == 0
@@ -904,7 +910,7 @@ fn render_loop(dir: String, cam: Cam, scam: Cam, radius: Double, loaded: Dict In
         let mask_row = if hit >= 0 then bit_toggle(mask, hit) else mask
         let mask2 = if all_click then mask_all else if none_click then mask_none else mask_row
         # Scene-2 hover: nearest planet to the cursor (in-memory list, same scale as the draw).
-        hovered <- maybe_hover((view == 1), cplanets2, s2scale, to_double(mx), to_double(my))
+        hovered <- maybe_hover((view == 1), cplanets2, s2ext, to_double(mx), to_double(my))
         let next_view = if toggle then (if view == 0 then 1 else 0) else view
         # Don't treat a left-click over UI as a camera drag: the scene-switch button (bottom-right), or
         # in scene 1 the filter legend + All/None buttons (right side, y from the header to below them).
