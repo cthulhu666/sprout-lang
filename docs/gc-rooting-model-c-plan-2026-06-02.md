@@ -1,8 +1,23 @@
 # GC Rooting — Model C Plan (typed Sprout-IR + linear types)
 
 **Date:** 2026-06-02
-**Status:** Proposal — to be executed incrementally; supersedes the linter+defer path discussed in [`gc-rooting-fix-plan-2026-06-01.md`](gc-rooting-fix-plan-2026-06-01.md) once Milestone 2 lands.
+**Status:** In execution. **Milestones 1–2 complete; Milestone 3 substantially complete.** Supersedes the linter+defer path in [`gc-rooting-fix-plan-2026-06-01.md`](gc-rooting-fix-plan-2026-06-01.md). See the **Status — 2026-07-29** section below for the current, verified state (which is well ahead of the milestone tables that follow).
 **Companion:** [`gc-rooting-fix-plan-2026-06-01.md`](gc-rooting-fix-plan-2026-06-01.md) — original Problem A / Problem B framing and stress-mode verification context.
+
+---
+
+## Status — 2026-07-29 (verified)
+
+The milestone tables further down were written as a *proposal* and describe a two-codegen-path world that no longer exists. Current reality, verified end-to-end on a tree rebased onto `origin/master`:
+
+- **The Sprout-IR path is the sole codegen path.** `--emit-ir` (the default compile surface) and `--use-ir-codegen` both dispatch through `ast_to_ir` + `ir_lowering`. The old direct AST→LLVM backend `stdlib/compiler/codegen.sprout` **has been deleted** — there is no `--use-direct-codegen` flag. This means the M3 "flip default + retire old codegen" is substantially done, not a future step.
+- **M2 acceptance is met.** Both acceptance clauses verified:
+  1. `just test` passes through the IR path (only 8 pre-existing `conformance/run` `xfail`s remain, all unrelated *fixture rot* — missing prelude imports / the removed `Cons`/`Nil` cons-list type — tracked separately under "conformance-run fixture rehabilitation").
+  2. Self-compile works: the stage-1 driver emits its own IR under `--use-ir-codegen`, that IR clang-links into a working stage-2 driver, and stage-2 re-emits **byte-identical** IR (a self-hosting fixed point). The committed seed is a verified fixed point (`verify-bootstrap-fixed-point ✓`).
+  - Additional evidence: all 230 `tests/stdlib{,/compiler}` suites compile+run cleanly under an explicit `--use-ir-codegen` sweep; the curated `test-stress` GC oracle (`SPROUT_GC_STRESS=1`) is green with an empty XFAIL set.
+- **Open residuals (do NOT block M2 acceptance).** `ast_to_ir.translate_expr` still rejects a `TDict` expression (`"TDict not yet supported"`) and refutable do-bind patterns (bind to constructor/int/bool/string/char patterns). Both are **empirically unexercised**: the full self-compile and the entire test suite never reach them, and a hand-constructed dict-forwarding program (the pattern most likely to materialize a runtime dictionary) compiles through the IR path without producing a `TDict`. Their reachability by real user programs is itself unverified — tracked as a prioritized residual in `BACKLOG.md` (Model C item). If a reachable case is found, each ships as its own design-gated PR.
+
+The per-milestone tables below are retained for historical context and rationale; treat this section as the authoritative status.
 
 ---
 
@@ -61,7 +76,7 @@ Add heap ops with rooting handled by dataflow analysis in the AST→IR translato
 
 **End-of-milestone state:** `--use-ir-codegen` compiles everything the old codegen handles. Stress-mode is clean.
 
-**Acceptance:** `just test` passes under both flags; stage-1 self-compile works under `SPROUT_GC_THRESHOLD=1` with `--use-ir-codegen`.
+**Acceptance:** `just test` passes under both flags; stage-1 self-compile works under `SPROUT_GC_THRESHOLD=1` with `--use-ir-codegen`. — **✅ MET (2026-07-29); see the "Status — 2026-07-29" section above for the verification evidence.**
 
 ---
 

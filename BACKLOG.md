@@ -623,32 +623,30 @@ dot-guard `infer.is_lowercase_name` has (a dotted name is never a type variable)
 
 1. Execute Model C GC-rooting plan (typed Sprout-IR + linear types).
    Design doc: [gc-rooting-model-c-plan-2026-06-02.md](./docs/gc-rooting-model-c-plan-2026-06-02.md).
-   Status: Milestone 1 (scalar IR scaffolding, PRs 1.1–1.5) and Milestone 2 PRs 2.1–2.5
-   (heap ops + dataflow rooting + boxed ctor allocation + closures + pattern matching)
-   have landed. M2 acceptance ("stage-1 self-compile under `--use-ir-codegen` with
-   `SPROUT_GC_THRESHOLD=1`") is still gated on PR 2.6+ — the residual expression forms
-   still rejected by `ast_to_ir.translate_expr`: `TChar`, `TUnit`, `TTuple`, `TDo`,
-   `TRecord`, `TGetField`, `TDict`, `TUnary`, `TRange`. Each ships in its own follow-up
-   PR alongside the matching `Pattern` (where one exists). **Before PR 2.6**, land the
-   `clang_verifies_ir` promotion (see "PR 2.5 v2 code-review follow-ups (still open)"
-   below) so each new IR-codegen test for the residual forms uses the shared helper
-   from the start. Five deferred items from the PR 2.3 code-review pass are tracked in
-   the "Language Core and Safety" section above.
-   PR 2.5 v2 code-review follow-ups (still open):
-   - Promote the `clang_verifies_ir` test helper (currently local to
-     `tests/stdlib/test_ir_codegen_match.spr`) to a shared module under
-     `tests/stdlib/`, and adopt it in `test_ir_codegen_arith / basic / calls /
-     closures / control / ctors / strings` and `test_ir_rooting`.  Closes the
-     substring-blindness gap that hid bug #2 in PR 2.5.  Closed for the match
-     and closures suites; remaining 6 suites need the same upgrade.
-     **Sequencing**: land this *before* any PR 2.6+ (the residual M2
-     expression-form PRs — `TChar`, `TUnit`, `TTuple`, `TDo`, `TRecord`,
-     `TGetField`, `TDict`, `TUnary`, `TRange`).  Two reasons: (a) each new
-     IR-codegen test for the residual forms should adopt the shared helper
-     from the start rather than accumulating substring-only tests that later
-     need rewriting; (b) substring-blindness is the bug class most likely to
-     recur in new-form codegen (PR 2.5 bug #2 was exactly a "substring
-     passes / clang rejects" case in freshly-added match-codegen).
+   Status (2026-07-29, verified): **M1 complete, M2 acceptance MET, M3 substantially
+   complete.** The Sprout-IR path is now the *sole* codegen path — `--emit-ir` (the
+   default) and `--use-ir-codegen` both dispatch through `ast_to_ir` + `ir_lowering`,
+   and the old direct backend `stdlib/compiler/codegen.sprout` has been deleted (M3.2).
+   M2 acceptance was re-verified end-to-end on a tree rebased onto `origin/master`:
+   `just test` green through the IR path (only the 8 pre-existing `conformance/run`
+   fixture-rot `xfail`s remain — see "conformance-run fixture rehabilitation"); the
+   full `tests/stdlib{,/compiler}` corpus (230 suites) compiles+runs clean under an
+   explicit `--use-ir-codegen` sweep; stage-1 self-compiles to a **byte-identical**
+   fixed point (stage-2 re-emits identical IR); `verify-bootstrap-fixed-point` and the
+   `test-stress` GC oracle (`SPROUT_GC_STRESS=1`, empty XFAIL) both green. The
+   `clang_verifies_ir` promotion is DONE (all 8 IR-codegen suites adopt the shared
+   `testsupport/ir_verify.sprout` helper). Five deferred items from the PR 2.3
+   code-review pass are tracked in the "Language Core and Safety" section above.
+   Remaining M2/M3 residuals — `ast_to_ir.translate_expr` still rejects a `TDict`
+   expression and refutable do-bind patterns (bind to constructor/int/bool/string/char
+   patterns). Both are **empirically unexercised**: neither self-compile nor any test in
+   the suite reaches them, and a hand-built dict-forwarding program (the pattern most
+   likely to materialize a runtime dictionary) compiles through the IR path without
+   producing a `TDict`. **Next step is a reachability assessment**, not a speculative
+   implementation: determine whether any real user program can force `TDict`/refutable
+   do-bind under the current devirtualization + monomorphization. If a reachable case is
+   found, each form ships as its own design-gated PR (AGENTS.md Rule 5); if none is, mark
+   the plan's M2/M3 residuals closed and move to M4 (user-facing linear types).
    List-pattern sugar — pending sweeps (2026-06-08):
    - Expression-side sweep: rewrite multi-element `Cons(a, Cons(b, …))`
      *constructions* in `ast_to_ir.sprout`, `compiler.sprout`, and similar
