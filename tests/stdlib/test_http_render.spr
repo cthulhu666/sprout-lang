@@ -1,4 +1,4 @@
-import stdlib.test (TestState, new_state, assert_true, assert_eq, summary)
+import stdlib.test (check_true, check_eq, run_suite)
 import stdlib.http_server (HttpServerResponse, ok, response, with_header, render)
 import stdlib.string as string
 
@@ -26,23 +26,22 @@ fn count_from(hay: String, needle: String, acc: Int) -> Int =
   | Just pos -> count_from(string.drop(hay, pos + string.length(needle)), needle, acc + 1)
 
 fn main() -> Unit !{IO} =
-  do
-    state <- new_state()
+  run_suite("http_render", [
     # (1) A plain response carries a byte-accurate Content-Length ("hello" = 5 bytes).
-    assert_true(state, "content-length matches body length",
-      contains(rendered(ok("hello")), "content-length: 5"))
+    check_true("content-length matches body length",
+      contains(rendered(ok("hello")), "content-length: 5")),
     # Content-Length is byte-oriented: "héllo" is 5 codepoints but 6 UTF-8 bytes. This
     # discriminates byte_length from the codepoint-counting length (which would emit 5).
-    assert_true(state, "content-length counts bytes, not codepoints",
-      contains(rendered(ok("héllo")), "content-length: 6"))
+    check_true("content-length counts bytes, not codepoints",
+      contains(rendered(ok("héllo")), "content-length: 6")),
     # (2) The default content type is still text/plain when the caller sets nothing.
-    assert_true(state, "default content-type is text/plain",
-      contains(rendered(ok("hi")), "text/plain"))
+    check_true("default content-type is text/plain",
+      contains(rendered(ok("hi")), "text/plain")),
     # (3) Overriding the content type REPLACES it — exactly one media type on the wire.
-    assert_true(state, "override sets text/html",
-      contains(rendered(with_header("content-type", "text/html", ok("<h1>hi</h1>"))), "text/html"))
-    assert_true(state, "override drops the default text/plain",
-      ! contains (rendered(with_header("content-type", "text/html", ok("<h1>hi</h1>"))), "text/plain"))
-    assert_eq(state, "exactly one media type on override",
+    check_true("override sets text/html",
+      contains(rendered(with_header("content-type", "text/html", ok("<h1>hi</h1>"))), "text/html")),
+    check_true("override drops the default text/plain",
+      ! contains (rendered(with_header("content-type", "text/html", ok("<h1>hi</h1>"))), "text/plain")),
+    check_eq("exactly one media type on override",
       count_from(rendered(with_header("content-type", "text/html", ok("<h1>hi</h1>"))), "text/", 0), 1)
-    summary(state)
+  ])

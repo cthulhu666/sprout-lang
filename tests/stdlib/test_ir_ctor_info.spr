@@ -1,4 +1,4 @@
-import stdlib.test (TestState, new_state, assert_eq, assert_true, summary)
+import stdlib.test (check_eq, check_true, run_suite)
 import stdlib.compiler.sprout_ir as sprout_ir
 
 # Unit tests for sprout_ir.CtorInfo — the name-keyed constructor-table value
@@ -32,24 +32,19 @@ fn info_field_names(ci: sprout_ir.CtorInfo) -> String =
   | sprout_ir.CtorInfo _ _ _ _ names -> names
 
 fn main() -> Unit !{IO} =
-  do
-    state <- new_state()
-
-    let ci = sprout_ir.CtorInfo(5, 2, 3, "ips", "a,b")
-
-    assert_eq(state, "CtorInfo: tag field is position 0", info_tag(ci), 5)
-    assert_eq(state, "CtorInfo: arity field is position 1", info_arity(ci), 2)
-    assert_eq(state, "CtorInfo: max_arity field is position 2", info_max_arity(ci), 3)
-    assert_true(state, "CtorInfo: field_kinds field is position 3",
-                info_field_kinds(ci) == "ips")
-    assert_true(state, "CtorInfo: field_names field is position 4",
-                info_field_names(ci) == "a,b")
-
-    # Wrap-sentinel shape: tag -1, arity/max_arity 1, single-field kinds, no names.
-    let wrap_ci = sprout_ir.CtorInfo(-1, 1, 1, "p", "")
-    assert_eq(state, "CtorInfo: wrap sentinel tag is -1", info_tag(wrap_ci), -1)
-    assert_eq(state, "CtorInfo: wrap sentinel arity is 1", info_arity(wrap_ci), 1)
-    assert_true(state, "CtorInfo: positional ctor has empty field_names",
+  # Wrap-sentinel shape: tag -1, arity/max_arity 1, single-field kinds, no names.
+  let ci = sprout_ir.CtorInfo(5, 2, 3, "ips", "a,b")
+      wrap_ci = sprout_ir.CtorInfo(-1, 1, 1, "p", "")
+  in run_suite("ir_ctor_info", [
+    check_eq("CtorInfo: tag field is position 0", info_tag(ci), 5),
+    check_eq("CtorInfo: arity field is position 1", info_arity(ci), 2),
+    check_eq("CtorInfo: max_arity field is position 2", info_max_arity(ci), 3),
+    check_true("CtorInfo: field_kinds field is position 3",
+                info_field_kinds(ci) == "ips"),
+    check_true("CtorInfo: field_names field is position 4",
+                info_field_names(ci) == "a,b"),
+    check_eq("CtorInfo: wrap sentinel tag is -1", info_tag(wrap_ci), -1),
+    check_eq("CtorInfo: wrap sentinel arity is 1", info_arity(wrap_ci), 1),
+    check_true("CtorInfo: positional ctor has empty field_names",
                 info_field_names(wrap_ci) == "")
-
-    summary(state)
+  ])

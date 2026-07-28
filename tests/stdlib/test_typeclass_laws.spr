@@ -1,4 +1,4 @@
-import stdlib.test (TestState, new_state, assert_eq, assert_true, assert_false, summary)
+import stdlib.test (check_eq, check_true, check_false, run_suite)
 
 # Law-oriented conformance tests for Functor, Semigroup, and Monoid instances.
 #
@@ -44,135 +44,128 @@ fn nil_int() -> List Int = Nil
 fn no_int() -> Maybe Int = Nothing
 
 fn main() -> Unit !{IO} =
-  do
-    state <- new_state()
-
+  let li_empty = nil_int()
+      li_single = Cons(42, Nil)
+      li_multi = Cons(1, Cons(2, Cons(3, Nil)))
+      m_nothing = no_int()
+      m_just_1 = Just(7)
+      m_just_2 = Just(100)
+      la = Cons(1, Cons(2, Nil))
+      lb = Cons(3, Nil)
+      lc = Cons(4, Cons(5, Nil))
+      sa = "foo"
+      sb = "bar"
+      sc = "baz"
+      s_empty = ""
+      s_single = "x"
+      s_multi = "hello"
+  in run_suite("typeclass_laws", [
     # -----------------------------------------------------------------------
     # Functor List — identity law
     # nil_int() gives a concrete List Int so Eq (List Int) resolves.
     # -----------------------------------------------------------------------
 
-    let li_empty = nil_int()
-    let li_single = Cons(42, Nil)
-    let li_multi = Cons(1, Cons(2, Cons(3, Nil)))
-
-    assert_eq(state, "functor list identity empty", map(\x -> x, li_empty), li_empty)
-    assert_eq(state, "functor list identity single", map(\x -> x, li_single), li_single)
-    assert_eq(state, "functor list identity multi", map(\x -> x, li_multi), li_multi)
+    check_eq("functor list identity empty", map(\x -> x, li_empty), li_empty),
+    check_eq("functor list identity single", map(\x -> x, li_single), li_single),
+    check_eq("functor list identity multi", map(\x -> x, li_multi), li_multi),
 
     # -----------------------------------------------------------------------
     # Functor List — composition law (f = double, g = inc)
     # -----------------------------------------------------------------------
 
-    assert_eq(state, "functor list composition empty",
+    check_eq("functor list composition empty",
       map(double, map(inc, li_empty)),
-      map(\x -> double(inc(x)), li_empty))
+      map(\x -> double(inc(x)), li_empty)),
 
-    assert_eq(state, "functor list composition single",
+    check_eq("functor list composition single",
       map(double, map(inc, li_single)),
-      map(\x -> double(inc(x)), li_single))
+      map(\x -> double(inc(x)), li_single)),
 
-    assert_eq(state, "functor list composition multi",
+    check_eq("functor list composition multi",
       map(double, map(inc, li_multi)),
-      map(\x -> double(inc(x)), li_multi))
+      map(\x -> double(inc(x)), li_multi)),
 
     # -----------------------------------------------------------------------
     # Functor Maybe — identity law
     # no_int() gives a concrete Maybe Int so Eq (Maybe Int) resolves.
     # -----------------------------------------------------------------------
 
-    let m_nothing = no_int()
-    let m_just_1 = Just(7)
-    let m_just_2 = Just(100)
-
-    assert_eq(state, "functor maybe identity nothing", map(\x -> x, m_nothing), m_nothing)
-    assert_eq(state, "functor maybe identity just 7", map(\x -> x, m_just_1), m_just_1)
-    assert_eq(state, "functor maybe identity just 100", map(\x -> x, m_just_2), m_just_2)
+    check_eq("functor maybe identity nothing", map(\x -> x, m_nothing), m_nothing),
+    check_eq("functor maybe identity just 7", map(\x -> x, m_just_1), m_just_1),
+    check_eq("functor maybe identity just 100", map(\x -> x, m_just_2), m_just_2),
 
     # -----------------------------------------------------------------------
     # Functor Maybe — composition law (f = double, g = inc)
     # -----------------------------------------------------------------------
 
-    assert_eq(state, "functor maybe composition nothing",
+    check_eq("functor maybe composition nothing",
       map(double, map(inc, m_nothing)),
-      map(\x -> double(inc(x)), m_nothing))
+      map(\x -> double(inc(x)), m_nothing)),
 
-    assert_eq(state, "functor maybe composition just 7",
+    check_eq("functor maybe composition just 7",
       map(double, map(inc, m_just_1)),
-      map(\x -> double(inc(x)), m_just_1))
+      map(\x -> double(inc(x)), m_just_1)),
 
-    assert_eq(state, "functor maybe composition just 100",
+    check_eq("functor maybe composition just 100",
       map(double, map(inc, m_just_2)),
-      map(\x -> double(inc(x)), m_just_2))
+      map(\x -> double(inc(x)), m_just_2)),
 
     # -----------------------------------------------------------------------
     # Semigroup List — associativity
     # -----------------------------------------------------------------------
 
-    let la = Cons(1, Cons(2, Nil))
-    let lb = Cons(3, Nil)
-    let lc = Cons(4, Cons(5, Nil))
-
-    assert_eq(state, "semigroup list assoc non-empty",
+    check_eq("semigroup list assoc non-empty",
       (la ++ lb) ++ lc,
-      la ++ (lb ++ lc))
+      la ++ (lb ++ lc)),
 
-    assert_eq(state, "semigroup list assoc left empty",
+    check_eq("semigroup list assoc left empty",
       (nil_int() ++ lb) ++ lc,
-      nil_int() ++ (lb ++ lc))
+      nil_int() ++ (lb ++ lc)),
 
-    assert_eq(state, "semigroup list assoc right empty",
+    check_eq("semigroup list assoc right empty",
       (la ++ lb) ++ nil_int(),
-      la ++ (lb ++ nil_int()))
+      la ++ (lb ++ nil_int())),
 
     # -----------------------------------------------------------------------
     # Semigroup String — associativity
     # -----------------------------------------------------------------------
 
-    let sa = "foo"
-    let sb = "bar"
-    let sc = "baz"
-
-    assert_eq(state, "semigroup string assoc non-empty",
+    check_eq("semigroup string assoc non-empty",
       (sa ++ sb) ++ sc,
-      sa ++ (sb ++ sc))
+      sa ++ (sb ++ sc)),
 
-    assert_eq(state, "semigroup string assoc left empty",
+    check_eq("semigroup string assoc left empty",
       ("" ++ sb) ++ sc,
-      "" ++ (sb ++ sc))
+      "" ++ (sb ++ sc)),
 
-    assert_eq(state, "semigroup string assoc right empty",
+    check_eq("semigroup string assoc right empty",
       (sa ++ sb) ++ "",
-      sa ++ (sb ++ ""))
+      sa ++ (sb ++ "")),
 
     # -----------------------------------------------------------------------
     # Monoid List — left and right identity
     # nil_int() is used so the empty side has a concrete type for Eq.
     # -----------------------------------------------------------------------
 
-    assert_eq(state, "monoid list left identity empty", nil_int() ++ li_empty, li_empty)
-    assert_eq(state, "monoid list left identity single", nil_int() ++ li_single, li_single)
-    assert_eq(state, "monoid list left identity multi", nil_int() ++ li_multi, li_multi)
+    check_eq("monoid list left identity empty", nil_int() ++ li_empty, li_empty),
+    check_eq("monoid list left identity single", nil_int() ++ li_single, li_single),
+    check_eq("monoid list left identity multi", nil_int() ++ li_multi, li_multi),
 
-    assert_eq(state, "monoid list right identity empty", li_empty ++ nil_int(), li_empty)
-    assert_eq(state, "monoid list right identity single", li_single ++ nil_int(), li_single)
-    assert_eq(state, "monoid list right identity multi", li_multi ++ nil_int(), li_multi)
+    check_eq("monoid list right identity empty", li_empty ++ nil_int(), li_empty),
+    check_eq("monoid list right identity single", li_single ++ nil_int(), li_single),
+    check_eq("monoid list right identity multi", li_multi ++ nil_int(), li_multi),
 
     # -----------------------------------------------------------------------
     # Monoid String — left and right identity
     # -----------------------------------------------------------------------
 
-    let s_empty = ""
-    let s_single = "x"
-    let s_multi = "hello"
+    check_eq("monoid string left identity empty", "" ++ s_empty, s_empty),
+    check_eq("monoid string left identity single", "" ++ s_single, s_single),
+    check_eq("monoid string left identity multi", "" ++ s_multi, s_multi),
 
-    assert_eq(state, "monoid string left identity empty", "" ++ s_empty, s_empty)
-    assert_eq(state, "monoid string left identity single", "" ++ s_single, s_single)
-    assert_eq(state, "monoid string left identity multi", "" ++ s_multi, s_multi)
-
-    assert_eq(state, "monoid string right identity empty", s_empty ++ "", s_empty)
-    assert_eq(state, "monoid string right identity single", s_single ++ "", s_single)
-    assert_eq(state, "monoid string right identity multi", s_multi ++ "", s_multi)
+    check_eq("monoid string right identity empty", s_empty ++ "", s_empty),
+    check_eq("monoid string right identity single", s_single ++ "", s_single),
+    check_eq("monoid string right identity multi", s_multi ++ "", s_multi),
 
     # -----------------------------------------------------------------------
     # Applicative laws (map2/pure "monoidal" formulation).
@@ -183,20 +176,20 @@ fn main() -> Unit !{IO} =
     # -----------------------------------------------------------------------
 
     # Maybe (fail-fast).
-    assert_eq(state, "applicative maybe homomorphism",
-      map2(add2, m_pure(1), m_pure(2)), Just(3))
-    assert_eq(state, "applicative maybe left identity",
-      map2(snd2, m_pure(0), m_just_1), m_just_1)
-    assert_eq(state, "applicative maybe right identity",
-      map2(fst2, m_just_1, m_pure(0)), m_just_1)
+    check_eq("applicative maybe homomorphism",
+      map2(add2, m_pure(1), m_pure(2)), Just(3)),
+    check_eq("applicative maybe left identity",
+      map2(snd2, m_pure(0), m_just_1), m_just_1),
+    check_eq("applicative maybe right identity",
+      map2(fst2, m_just_1, m_pure(0)), m_just_1),
 
     # List (cartesian product): pure is a singleton, so it is the product unit.
-    assert_eq(state, "applicative list homomorphism",
-      map2(add2, l_pure(1), l_pure(2)), Cons(3, Nil))
-    assert_eq(state, "applicative list left identity",
-      map2(snd2, l_pure(0), li_multi), li_multi)
-    assert_eq(state, "applicative list right identity",
-      map2(fst2, li_multi, l_pure(0)), li_multi)
+    check_eq("applicative list homomorphism",
+      map2(add2, l_pure(1), l_pure(2)), Cons(3, Nil)),
+    check_eq("applicative list left identity",
+      map2(snd2, l_pure(0), li_multi), li_multi),
+    check_eq("applicative list right identity",
+      map2(fst2, li_multi, l_pure(0)), li_multi),
 
     # -----------------------------------------------------------------------
     # Monad laws (generic and_then / flat_map).
@@ -208,31 +201,30 @@ fn main() -> Unit !{IO} =
     # -----------------------------------------------------------------------
 
     # Maybe — left identity (both the Just and Nothing carriers).
-    assert_eq(state, "monad maybe left identity", and_then(mk_inc, m_pure(5)), mk_inc(5))
+    check_eq("monad maybe left identity", and_then(mk_inc, m_pure(5)), mk_inc(5)),
     # Maybe — right identity.
-    assert_eq(state, "monad maybe right identity just", and_then(m_pure, m_just_1), m_just_1)
-    assert_eq(state, "monad maybe right identity nothing", and_then(m_pure, m_nothing), m_nothing)
+    check_eq("monad maybe right identity just", and_then(m_pure, m_just_1), m_just_1),
+    check_eq("monad maybe right identity nothing", and_then(m_pure, m_nothing), m_nothing),
     # Maybe — associativity.
-    assert_eq(state, "monad maybe associativity",
+    check_eq("monad maybe associativity",
       and_then(mk_dbl, and_then(mk_inc, m_just_1)),
-      and_then(\x -> and_then(mk_dbl, mk_inc(x)), m_just_1))
+      and_then(\x -> and_then(mk_dbl, mk_inc(x)), m_just_1)),
 
     # List — left identity, right identity, associativity.
-    assert_eq(state, "monad list left identity", and_then(lk_dup, l_pure(5)), lk_dup(5))
-    assert_eq(state, "monad list right identity", and_then(l_pure, li_multi), li_multi)
-    assert_eq(state, "monad list associativity",
+    check_eq("monad list left identity", and_then(lk_dup, l_pure(5)), lk_dup(5)),
+    check_eq("monad list right identity", and_then(l_pure, li_multi), li_multi),
+    check_eq("monad list associativity",
       and_then(lk_dup, and_then(lk_inc, li_multi)),
-      and_then(\x -> and_then(lk_dup, lk_inc(x)), li_multi))
+      and_then(\x -> and_then(lk_dup, lk_inc(x)), li_multi)),
 
     # Result — same laws, reduced to Int (Ok path) via result_with_default.
-    assert_eq(state, "monad result left identity",
+    check_eq("monad result left identity",
       result_with_default(-1, and_then(rk_inc, r_pure(5))),
-      result_with_default(-1, rk_inc(5)))
-    assert_eq(state, "monad result right identity",
+      result_with_default(-1, rk_inc(5))),
+    check_eq("monad result right identity",
       result_with_default(-1, and_then(r_pure, ok_7())),
-      result_with_default(-1, ok_7()))
-    assert_eq(state, "monad result associativity",
+      result_with_default(-1, ok_7())),
+    check_eq("monad result associativity",
       result_with_default(-1, and_then(rk_dbl, and_then(rk_inc, ok_7()))),
       result_with_default(-1, and_then(\x -> and_then(rk_dbl, rk_inc(x)), ok_7())))
-
-    summary(state)
+  ])

@@ -1,4 +1,4 @@
-import stdlib.test (TestState, new_state, assert_true, summary)
+import stdlib.test (check_true, run_suite)
 
 # Regression guard for M3b-4b (resolve side): the resolve pass fills the
 # Evidence field of value-position class-method references (TMethodRef) by
@@ -10,18 +10,13 @@ import stdlib.test (TestState, new_state, assert_true, summary)
 fn apply_show(f: (Int) -> String, x: Int) -> String = f(x)
 
 fn main() -> Unit !{IO} =
-  do
-    state <- new_state()
-
-    assert_true(
-      state,
+  run_suite("value_position_method_ref", [
+    check_true(
       "to_string passed as a value dispatches to the Int instance",
       apply_show(to_string, 7) == "7"
-    )
-    assert_true(
-      state,
+    ),
+    check_true(
       "value-position to_string via list_map renders each element",
       list_map(to_string, [1, 2, 3]) == ["1", "2", "3"]
     )
-
-    summary(state)
+  ])

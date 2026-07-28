@@ -1,4 +1,4 @@
-import stdlib.test (TestState, new_state, assert_eq, summary)
+import stdlib.test (check_eq, run_suite)
 
 # Regression test for the dict-resolution soundness bug (BACKLOG §1):
 # `vec_sort(vec: Vec a) -> Vec a where Ord a = vec_sort_by(\v -> v, vec)`.
@@ -9,23 +9,20 @@ import stdlib.test (TestState, new_state, assert_eq, summary)
 # Before the fix, every assertion here crashes (exit 139) rather than failing.
 
 fn main() -> Unit !{IO} =
-  do
-    state <- new_state()
-
-    assert_eq(state, "vec_sort ascending",
+  run_suite("vec_sort_forwarding", [
+    check_eq("vec_sort ascending",
       vec_sort(foldable_to_vec([5, 3, 1, 4, 2])),
-      foldable_to_vec([1, 2, 3, 4, 5]))
-    assert_eq(state, "vec_sort already sorted",
+      foldable_to_vec([1, 2, 3, 4, 5])),
+    check_eq("vec_sort already sorted",
       vec_sort(foldable_to_vec([1, 2, 3])),
-      foldable_to_vec([1, 2, 3]))
-    assert_eq(state, "vec_sort singleton",
+      foldable_to_vec([1, 2, 3])),
+    check_eq("vec_sort singleton",
       vec_sort(foldable_to_vec([42])),
-      foldable_to_vec([42]))
-    assert_eq(state, "vec_sort empty",
+      foldable_to_vec([42])),
+    check_eq("vec_sort empty",
       vec_sort(vec_empty()),
-      foldable_to_vec([]))
-    assert_eq(state, "vec_sort to_string",
+      foldable_to_vec([])),
+    check_eq("vec_sort to_string",
       to_string(vec_sort(foldable_to_vec([3, 1, 2]))),
       "[1, 2, 3]")
-
-    summary(state)
+  ])

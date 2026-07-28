@@ -1,4 +1,4 @@
-import stdlib.test (TestState, new_state, assert_eq, summary)
+import stdlib.test (check_eq, run_suite)
 
 # Regression: a function parameter whose name collides with a top-level fn name
 # must still be CAPTURED when referenced (in value position) inside a lambda the
@@ -31,12 +31,11 @@ fn body(x: Int) -> Int =
   999
 
 fn main() -> Unit !{IO} =
-  do
-    state <- new_state()
+  run_suite("param_shadows_toplevel_fn", [
     # Correct: caller(5, \z -> 42) = run_thunk(\z -> use_handler(\z->42, 5))
     #        = (\z->42)(0) + 5 = 47.
     # Buggy:  the body param resolves to top-level body (eta-expanded), so
     #        use_handler(\a0 -> body(a0), 5) = body(0) + 5 = 999 + 5 = 1004.
-    assert_eq(state, "param shadowing top-level fn is captured, not re-resolved",
+    check_eq("param shadowing top-level fn is captured, not re-resolved",
               caller(5, \z -> 42), 47)
-    summary(state)
+  ])

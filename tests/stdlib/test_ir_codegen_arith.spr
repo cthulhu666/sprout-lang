@@ -1,4 +1,4 @@
-import stdlib.test (TestState, new_state, assert_eq, assert_true, assert_false, summary)
+import stdlib.test (check_true, run_suite)
 import stdlib.compiler.sprout_ir as sprout_ir
 import stdlib.compiler.ir_lowering as ir_lowering
 
@@ -62,41 +62,38 @@ fn is_zero_program() -> sprout_ir.IRProgram =
     Nil), Nil, Nil, Nil)
 
 fn main() -> Unit !{IO} =
-  do
-    state <- new_state()
-
+  run_suite("ir_codegen_arith", [
     # --- Pretty printer covers each new op.
-    assert_true(state, "pretty: iadd op rendered",
-                contains(sprout_ir.print_ir_program(add1_program()), "iadd"))
-    assert_true(state, "pretty: isub op rendered",
-                contains(sprout_ir.print_ir_program(sub1_program()), "isub"))
-    assert_true(state, "pretty: imul op rendered",
-                contains(sprout_ir.print_ir_program(mul2_program()), "imul"))
-    assert_true(state, "pretty: icmp op rendered",
-                contains(sprout_ir.print_ir_program(is_zero_program()), "icmp eq"))
-    assert_true(state, "pretty: ret-ty rendered for i1",
-                contains(sprout_ir.print_ir_program(is_zero_program()), "-> i1"))
+    check_true("pretty: iadd op rendered",
+                contains(sprout_ir.print_ir_program(add1_program()), "iadd")),
+    check_true("pretty: isub op rendered",
+                contains(sprout_ir.print_ir_program(sub1_program()), "isub")),
+    check_true("pretty: imul op rendered",
+                contains(sprout_ir.print_ir_program(mul2_program()), "imul")),
+    check_true("pretty: icmp op rendered",
+                contains(sprout_ir.print_ir_program(is_zero_program()), "icmp eq")),
+    check_true("pretty: ret-ty rendered for i1",
+                contains(sprout_ir.print_ir_program(is_zero_program()), "-> i1")),
 
     # --- Lowering: add1 (Int-returning).
-    assert_true(state, "add1 defines i64 result",
-                contains(ir_lowering.lower_program(add1_program()), "define i64 @add1(i64 %x)"))
-    assert_true(state, "add1 emits add i64 %x, %t0",
-                contains(ir_lowering.lower_program(add1_program()), "add i64 %x, %t0"))
-    assert_true(state, "add1 returns i64 %t1",
-                contains(ir_lowering.lower_program(add1_program()), "ret i64 %t1"))
+    check_true("add1 defines i64 result",
+                contains(ir_lowering.lower_program(add1_program()), "define i64 @add1(i64 %x)")),
+    check_true("add1 emits add i64 %x, %t0",
+                contains(ir_lowering.lower_program(add1_program()), "add i64 %x, %t0")),
+    check_true("add1 returns i64 %t1",
+                contains(ir_lowering.lower_program(add1_program()), "ret i64 %t1")),
 
     # --- Lowering: sub1, mul2 share the same shape with sub / mul instructions.
-    assert_true(state, "sub1 emits sub i64 %x, %t0",
-                contains(ir_lowering.lower_program(sub1_program()), "sub i64 %x, %t0"))
-    assert_true(state, "mul2 emits mul i64 %x, %t0",
-                contains(ir_lowering.lower_program(mul2_program()), "mul i64 %x, %t0"))
+    check_true("sub1 emits sub i64 %x, %t0",
+                contains(ir_lowering.lower_program(sub1_program()), "sub i64 %x, %t0")),
+    check_true("mul2 emits mul i64 %x, %t0",
+                contains(ir_lowering.lower_program(mul2_program()), "mul i64 %x, %t0")),
 
     # --- Lowering: is_zero (Bool-returning) — note define i1 and ret i1.
-    assert_true(state, "is_zero defines i1 result",
-                contains(ir_lowering.lower_program(is_zero_program()), "define i1 @is_zero(i64 %x)"))
-    assert_true(state, "is_zero emits icmp eq i64 %x, %t0",
-                contains(ir_lowering.lower_program(is_zero_program()), "icmp eq i64 %x, %t0"))
-    assert_true(state, "is_zero returns i1 %t1",
+    check_true("is_zero defines i1 result",
+                contains(ir_lowering.lower_program(is_zero_program()), "define i1 @is_zero(i64 %x)")),
+    check_true("is_zero emits icmp eq i64 %x, %t0",
+                contains(ir_lowering.lower_program(is_zero_program()), "icmp eq i64 %x, %t0")),
+    check_true("is_zero returns i1 %t1",
                 contains(ir_lowering.lower_program(is_zero_program()), "ret i1 %t1"))
-
-    summary(state)
+  ])

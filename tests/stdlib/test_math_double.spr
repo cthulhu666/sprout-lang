@@ -1,4 +1,4 @@
-import stdlib.test (TestState, new_state, assert_true, summary)
+import stdlib.test (check_true, run_suite)
 import stdlib.math (pi, fabs, floor, sqrt, sin, cos, tan, radians)
 
 # TDD — the Double math primitives that back the M2 vector/matrix layer
@@ -11,50 +11,41 @@ fn dabs(x: Double) -> Double = if x < 0.0 then -x else x
 fn close(a: Double, b: Double) -> Bool = dabs(a - b) < 0.000001
 
 fn main() -> Unit !{IO} =
-  do
-    state <- new_state()
-
+  run_suite("math_double", [
     # --- fabs ---
-    assert_true(state, "fabs(-2.5) == 2.5", fabs(-2.5) == 2.5)
-    assert_true(state, "fabs(2.5) == 2.5", fabs(2.5) == 2.5)
-
+    check_true("fabs(-2.5) == 2.5", fabs(-2.5) == 2.5),
+    check_true("fabs(2.5) == 2.5", fabs(2.5) == 2.5),
     # --- floor (incl. negatives, where round-toward-zero would differ) ---
-    assert_true(state, "floor(3.7) == 3.0", floor(3.7) == 3.0)
-    assert_true(state, "floor(5.0) == 5.0", floor(5.0) == 5.0)
-    assert_true(state, "floor(-1.2) == -2.0", floor(-1.2) == -2.0)
-
+    check_true("floor(3.7) == 3.0", floor(3.7) == 3.0),
+    check_true("floor(5.0) == 5.0", floor(5.0) == 5.0),
+    check_true("floor(-1.2) == -2.0", floor(-1.2) == -2.0),
     # --- sqrt (Newton-Raphson) ---
-    assert_true(state, "sqrt(0.0) == 0.0", sqrt(0.0) == 0.0)
-    assert_true(state, "sqrt(1.0) == 1.0", close(sqrt(1.0), 1.0))
-    assert_true(state, "sqrt(16.0) == 4.0", close(sqrt(16.0), 4.0))
-    assert_true(state, "sqrt(2.0) ~ 1.41421356", close(sqrt(2.0), 1.4142135623))
-    assert_true(state, "sqrt(1e6) == 1000.0", close(sqrt(1000000.0), 1000.0))
-
+    check_true("sqrt(0.0) == 0.0", sqrt(0.0) == 0.0),
+    check_true("sqrt(1.0) == 1.0", close(sqrt(1.0), 1.0)),
+    check_true("sqrt(16.0) == 4.0", close(sqrt(16.0), 4.0)),
+    check_true("sqrt(2.0) ~ 1.41421356", close(sqrt(2.0), 1.4142135623)),
+    check_true("sqrt(1e6) == 1000.0", close(sqrt(1000000.0), 1000.0)),
     # --- pi ---
-    assert_true(state, "pi ~ 3.14159265", close(pi, 3.14159265))
-
+    check_true("pi ~ 3.14159265", close(pi, 3.14159265)),
     # --- sin / cos (range reduction + Taylor) ---
-    assert_true(state, "sin(0) == 0", close(sin(0.0), 0.0))
-    assert_true(state, "sin(pi/2) == 1", close(sin(pi / 2.0), 1.0))
-    assert_true(state, "sin(pi) == 0", close(sin(pi), 0.0))
-    assert_true(state, "cos(0) == 1", close(cos(0.0), 1.0))
-    assert_true(state, "cos(pi/2) == 0", close(cos(pi / 2.0), 0.0))
-    assert_true(state, "cos(pi) == -1", close(cos(pi), -1.0))
+    check_true("sin(0) == 0", close(sin(0.0), 0.0)),
+    check_true("sin(pi/2) == 1", close(sin(pi / 2.0), 1.0)),
+    check_true("sin(pi) == 0", close(sin(pi), 0.0)),
+    check_true("cos(0) == 1", close(cos(0.0), 1.0)),
+    check_true("cos(pi/2) == 0", close(cos(pi / 2.0), 0.0)),
+    check_true("cos(pi) == -1", close(cos(pi), -1.0)),
     # identity check at an arbitrary angle: sin^2 + cos^2 == 1
-    assert_true(state, "sin^2+cos^2 == 1 @ 2.3",
-      close(sin(2.3) * sin(2.3) + cos(2.3) * cos(2.3), 1.0))
+    check_true("sin^2+cos^2 == 1 @ 2.3",
+      close(sin(2.3) * sin(2.3) + cos(2.3) * cos(2.3), 1.0)),
     # range reduction: large angle wraps correctly (sin(2pi + pi/6) == 0.5)
-    assert_true(state, "sin(2pi + pi/6) == 0.5",
-      close(sin(2.0 * pi + pi / 6.0), 0.5))
-
+    check_true("sin(2pi + pi/6) == 0.5",
+      close(sin(2.0 * pi + pi / 6.0), 0.5)),
     # --- radians (deg -> rad) ---
-    assert_true(state, "radians(180) == pi", close(radians(180.0), pi))
-    assert_true(state, "radians(90) == pi/2", close(radians(90.0), pi / 2.0))
-    assert_true(state, "radians(0) == 0", close(radians(0.0), 0.0))
-
+    check_true("radians(180) == pi", close(radians(180.0), pi)),
+    check_true("radians(90) == pi/2", close(radians(90.0), pi / 2.0)),
+    check_true("radians(0) == 0", close(radians(0.0), 0.0)),
     # --- tan = sin/cos ---
-    assert_true(state, "tan(0) == 0", close(tan(0.0), 0.0))
-    assert_true(state, "tan(pi/4) == 1", close(tan(pi / 4.0), 1.0))
-    assert_true(state, "tan(radians(45)) == 1", close(tan(radians(45.0)), 1.0))
-
-    summary(state)
+    check_true("tan(0) == 0", close(tan(0.0), 0.0)),
+    check_true("tan(pi/4) == 1", close(tan(pi / 4.0), 1.0)),
+    check_true("tan(radians(45)) == 1", close(tan(radians(45.0)), 1.0))
+  ])

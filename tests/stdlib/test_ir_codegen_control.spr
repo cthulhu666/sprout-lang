@@ -1,4 +1,4 @@
-import stdlib.test (TestState, new_state, assert_eq, assert_true, assert_false, summary)
+import stdlib.test (check_true, run_suite)
 import stdlib.compiler.sprout_ir as sprout_ir
 import stdlib.compiler.ir_lowering as ir_lowering
 
@@ -117,51 +117,48 @@ fn sign_program() -> sprout_ir.IRProgram =
     Nil), Nil, Nil, Nil)
 
 fn main() -> Unit !{IO} =
-  do
-    state <- new_state()
-
+  run_suite("ir_codegen_control", [
     # --- Pretty printer covers the new ops.
-    assert_true(state, "pretty: condbr op rendered",
-                contains(sprout_ir.print_ir_program(abs_program()), "condbr"))
-    assert_true(state, "pretty: br op rendered",
-                contains(sprout_ir.print_ir_program(abs_program()), "br join_4"))
-    assert_true(state, "pretty: phi op rendered",
-                contains(sprout_ir.print_ir_program(abs_program()), "phi i64"))
+    check_true("pretty: condbr op rendered",
+                contains(sprout_ir.print_ir_program(abs_program()), "condbr")),
+    check_true("pretty: br op rendered",
+                contains(sprout_ir.print_ir_program(abs_program()), "br join_4")),
+    check_true("pretty: phi op rendered",
+                contains(sprout_ir.print_ir_program(abs_program()), "phi i64")),
 
     # --- Lowering: abs.
-    assert_true(state, "abs defines i64 result",
-                contains(ir_lowering.lower_program(abs_program()), "define i64 @abs(i64 %x)"))
-    assert_true(state, "abs emits icmp slt",
-                contains(ir_lowering.lower_program(abs_program()), "icmp slt i64 %x, %t0"))
-    assert_true(state, "abs emits conditional branch",
-                contains(ir_lowering.lower_program(abs_program()), "br i1 %t1, label %then_2, label %else_3"))
-    assert_true(state, "abs emits then-block label",
-                contains(ir_lowering.lower_program(abs_program()), "then_2:"))
-    assert_true(state, "abs emits else-block label",
-                contains(ir_lowering.lower_program(abs_program()), "else_3:"))
-    assert_true(state, "abs emits join-block label",
-                contains(ir_lowering.lower_program(abs_program()), "join_4:"))
-    assert_true(state, "abs emits unconditional br to join",
-                contains(ir_lowering.lower_program(abs_program()), "br label %join_4"))
-    assert_true(state, "abs emits phi i64 merging two values",
-                contains(ir_lowering.lower_program(abs_program()), "phi i64 [%t6, %then_2], [%x, %else_3]"))
-    assert_true(state, "abs returns i64 %t7",
-                contains(ir_lowering.lower_program(abs_program()), "ret i64 %t7"))
+    check_true("abs defines i64 result",
+                contains(ir_lowering.lower_program(abs_program()), "define i64 @abs(i64 %x)")),
+    check_true("abs emits icmp slt",
+                contains(ir_lowering.lower_program(abs_program()), "icmp slt i64 %x, %t0")),
+    check_true("abs emits conditional branch",
+                contains(ir_lowering.lower_program(abs_program()), "br i1 %t1, label %then_2, label %else_3")),
+    check_true("abs emits then-block label",
+                contains(ir_lowering.lower_program(abs_program()), "then_2:")),
+    check_true("abs emits else-block label",
+                contains(ir_lowering.lower_program(abs_program()), "else_3:")),
+    check_true("abs emits join-block label",
+                contains(ir_lowering.lower_program(abs_program()), "join_4:")),
+    check_true("abs emits unconditional br to join",
+                contains(ir_lowering.lower_program(abs_program()), "br label %join_4")),
+    check_true("abs emits phi i64 merging two values",
+                contains(ir_lowering.lower_program(abs_program()), "phi i64 [%t6, %then_2], [%x, %else_3]")),
+    check_true("abs returns i64 %t7",
+                contains(ir_lowering.lower_program(abs_program()), "ret i64 %t7")),
 
     # --- Lowering: nested sign-or-zero.
-    assert_true(state, "sign defines i64 result",
-                contains(ir_lowering.lower_program(sign_program()), "define i64 @sign(i64 %x)"))
+    check_true("sign defines i64 result",
+                contains(ir_lowering.lower_program(sign_program()), "define i64 @sign(i64 %x)")),
     # Outer condbr.
-    assert_true(state, "sign emits outer condbr",
-                contains(ir_lowering.lower_program(sign_program()), "br i1 %t1, label %then_2, label %else_3"))
+    check_true("sign emits outer condbr",
+                contains(ir_lowering.lower_program(sign_program()), "br i1 %t1, label %then_2, label %else_3")),
     # Inner condbr — proves there are two layers of branching.
-    assert_true(state, "sign emits inner condbr",
-                contains(ir_lowering.lower_program(sign_program()), "br i1 %t7, label %then_8, label %else_9"))
+    check_true("sign emits inner condbr",
+                contains(ir_lowering.lower_program(sign_program()), "br i1 %t7, label %then_8, label %else_9")),
     # Inner phi.
-    assert_true(state, "sign emits inner phi",
-                contains(ir_lowering.lower_program(sign_program()), "phi i64 [%t11, %then_8], [%t14, %else_9]"))
+    check_true("sign emits inner phi",
+                contains(ir_lowering.lower_program(sign_program()), "phi i64 [%t11, %then_8], [%t14, %else_9]")),
     # Outer phi — picks up the inner join label as one of its incoming labels.
-    assert_true(state, "sign emits outer phi merging at inner-join",
+    check_true("sign emits outer phi merging at inner-join",
                 contains(ir_lowering.lower_program(sign_program()), "phi i64 [%t5, %then_2], [%t15, %join_10]"))
-
-    summary(state)
+  ])

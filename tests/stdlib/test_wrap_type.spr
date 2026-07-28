@@ -1,5 +1,5 @@
 module main
-import stdlib.test (TestState, new_state, assert_eq, assert_true, summary)
+import stdlib.test (check_eq, run_suite)
 
 # Behavioral tests for the 'wrap' zero-cost distinct type feature.
 #
@@ -36,32 +36,27 @@ fn add_ages(a: Age, b: Age) -> Age =
       | Age y -> Age(x + y)
 
 fn main() -> Unit !{IO} =
-  do
-    state <- new_state()
-
+  let s = Score((3, 7))
+      (wins, losses) = score_value(s)
+  in run_suite("wrap_type", [
     # Basic construction and extraction
-    assert_eq(state, "Age wraps Int: extract 42",
-      age_value(Age(42)), 42)
-    assert_eq(state, "Age wraps Int: extract 0",
-      age_value(Age(0)), 0)
-    assert_eq(state, "Name wraps String",
-      name_value(Name("Alice")), "Alice")
+    check_eq("Age wraps Int: extract 42",
+      age_value(Age(42)), 42),
+    check_eq("Age wraps Int: extract 0",
+      age_value(Age(0)), 0),
+    check_eq("Name wraps String",
+      name_value(Name("Alice")), "Alice"),
 
     # Two wrap types over the same underlying type are distinct;
     # their values are independently tracked.
-    assert_eq(state, "Age and UserId are independent",
-      age_value(Age(10)) + userid_value(UserId(32)), 42)
+    check_eq("Age and UserId are independent",
+      age_value(Age(10)) + userid_value(UserId(32)), 42),
 
     # Operations on the inner type via wrap/unwrap roundtrip
-    assert_eq(state, "add_ages: 10 + 32 = 42",
-      age_value(add_ages(Age(10), Age(32))), 42)
+    check_eq("add_ages: 10 + 32 = 42",
+      age_value(add_ages(Age(10), Age(32))), 42),
 
     # Wrap over a tuple type
-    let s = Score((3, 7))
-    match score_value(s) with
-    | (wins, losses) ->
-        do
-          assert_eq(state, "Score tuple: wins", wins, 3)
-          assert_eq(state, "Score tuple: losses", losses, 7)
-
-    summary(state)
+    check_eq("Score tuple: wins", wins, 3),
+    check_eq("Score tuple: losses", losses, 7)
+  ])

@@ -1,4 +1,4 @@
-import stdlib.test (TestState, new_state, assert_eq, summary)
+import stdlib.test (check_eq, run_suite)
 import stdlib.http_server (HttpRequest, parse, query_string, query_pairs, query_param, query_param_all)
 import stdlib.string as string
 
@@ -57,32 +57,29 @@ fn qpairs(raw: String) -> String =
   with_req(raw, \r -> show_pairs(query_pairs(r)))
 
 fn main() -> Unit !{IO} =
-  do
-    state <- new_state()
+  run_suite("query_params", [
+    check_eq("query_string is the raw substring after '?'",
+      qstring("GET /search?q=foo HTTP/1.1\r\n\r\n"), "q=foo"),
+    check_eq("query_string is empty when there is no query",
+      qstring("GET /search HTTP/1.1\r\n\r\n"), ""),
 
-    assert_eq(state, "query_string is the raw substring after '?'",
-      qstring("GET /search?q=foo HTTP/1.1\r\n\r\n"), "q=foo")
-    assert_eq(state, "query_string is empty when there is no query",
-      qstring("GET /search HTTP/1.1\r\n\r\n"), "")
+    check_eq("query_param reads a single value",
+      qparam("GET /search?q=foo HTTP/1.1\r\n\r\n", "q"), "foo"),
+    check_eq("query_param reads a later key",
+      qparam("GET /search?a=1&b=2 HTTP/1.1\r\n\r\n", "b"), "2"),
+    check_eq("query_param on an absent key is Nothing",
+      qparam("GET /search?a=1 HTTP/1.1\r\n\r\n", "missing"), "<none>"),
 
-    assert_eq(state, "query_param reads a single value",
-      qparam("GET /search?q=foo HTTP/1.1\r\n\r\n", "q"), "foo")
-    assert_eq(state, "query_param reads a later key",
-      qparam("GET /search?a=1&b=2 HTTP/1.1\r\n\r\n", "b"), "2")
-    assert_eq(state, "query_param on an absent key is Nothing",
-      qparam("GET /search?a=1 HTTP/1.1\r\n\r\n", "missing"), "<none>")
+    check_eq("query_param percent-decodes the value",
+      qparam("GET /search?q=hello%20world HTTP/1.1\r\n\r\n", "q"), "hello world"),
+    check_eq("query_param maps '+' to space",
+      qparam("GET /search?q=a+b HTTP/1.1\r\n\r\n", "q"), "a b"),
 
-    assert_eq(state, "query_param percent-decodes the value",
-      qparam("GET /search?q=hello%20world HTTP/1.1\r\n\r\n", "q"), "hello world")
-    assert_eq(state, "query_param maps '+' to space",
-      qparam("GET /search?q=a+b HTTP/1.1\r\n\r\n", "q"), "a b")
+    check_eq("query_param returns the FIRST of a repeated key",
+      qparam("GET /search?a=1&a=2 HTTP/1.1\r\n\r\n", "a"), "1"),
+    check_eq("query_param_all returns every value of a repeated key",
+      qall("GET /search?a=1&a=2 HTTP/1.1\r\n\r\n", "a"), "1,2"),
 
-    assert_eq(state, "query_param returns the FIRST of a repeated key",
-      qparam("GET /search?a=1&a=2 HTTP/1.1\r\n\r\n", "a"), "1")
-    assert_eq(state, "query_param_all returns every value of a repeated key",
-      qall("GET /search?a=1&a=2 HTTP/1.1\r\n\r\n", "a"), "1,2")
-
-    assert_eq(state, "query_pairs is the ordered decoded pair list",
+    check_eq("query_pairs is the ordered decoded pair list",
       qpairs("GET /search?a=1&b=2 HTTP/1.1\r\n\r\n"), "a=1,b=2")
-
-    summary(state)
+  ])

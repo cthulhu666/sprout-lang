@@ -1,4 +1,4 @@
-import stdlib.test (TestState, new_state, assert_eq, summary)
+import stdlib.test (check_eq, run_suite)
 
 # Regression (n-ary arity check, Package C-b): a LOCAL binding that shadows a
 # top-level function, then under-applies that local, must COMPILE.
@@ -29,9 +29,8 @@ fn param_shadow(add3: Int -> Int -> Int -> Int) -> Int =
   add3(1)(2)(3)
 
 fn main() -> Unit !{IO} =
-  do
-    state <- new_state()
-    assert_eq(state, "let-local shadow under-application compiles + runs", let_shadow(), 6)
-    assert_eq(state, "parameter shadow under-application compiles + runs",
+  run_suite("shadow_underapp_compiles", [
+    check_eq("let-local shadow under-application compiles + runs", let_shadow(), 6),
+    check_eq("parameter shadow under-application compiles + runs",
       param_shadow(\a -> \b -> \c -> a + b + c), 6)
-    summary(state)
+  ])

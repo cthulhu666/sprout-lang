@@ -1,4 +1,4 @@
-import stdlib.test (TestState, new_state, assert_true, summary)
+import stdlib.test (check_true, run_suite)
 import stdlib.http_server (HttpServerResponse, see_other, render)
 import stdlib.string as string
 
@@ -20,10 +20,9 @@ fn contains(hay: String, needle: String) -> Bool =
   | Just _ -> true
 
 fn main() -> Unit !{IO} =
-  do
-    state <- new_state()
-    assert_true(state, "see_other renders a 303 status line",
-      contains(rendered(see_other("/users")), "303 See Other"))
-    assert_true(state, "see_other sets the Location header",
+  run_suite("http_redirect", [
+    check_true("see_other renders a 303 status line",
+      contains(rendered(see_other("/users")), "303 See Other")),
+    check_true("see_other sets the Location header",
       contains(rendered(see_other("/users")), "location: /users"))
-    summary(state)
+  ])

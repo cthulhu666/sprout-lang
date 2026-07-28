@@ -1,4 +1,4 @@
-import stdlib.test (TestState, new_state, assert_true, summary)
+import stdlib.test (check_true, run_suite)
 
 # M3b-5 (PR-A) coverage: a value-position class method used inside a function that
 # FORWARDS the constraint drives the EvForward eta-reroute arm of
@@ -36,16 +36,13 @@ fn label_both_positions(x: Wrap a) -> Bool where Label (Wrap a) =
   apply_label(label, x) == label(x)
 
 fn main() -> Unit !{IO} =
-  do
-    state <- new_state()
-    assert_true(
-      state,
+  run_suite("value_position_reroute", [
+    check_true(
       "forwarded Label (Wrap a) value-position reroute selects the Wrap instance",
       label_via_hof(Wrap(1)) == "wrap"
-    )
-    assert_true(
-      state,
+    ),
+    check_true(
       "value-position and call-position of a forwarded method agree",
       label_both_positions(Wrap(1))
     )
-    summary(state)
+  ])

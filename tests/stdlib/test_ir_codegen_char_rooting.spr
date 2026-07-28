@@ -1,4 +1,4 @@
-import stdlib.test (TestState, new_state, assert_eq, assert_true, summary)
+import stdlib.test (check_eq, check_true, run_suite)
 import stdlib.compiler.source as source
 import stdlib.compiler.lexer as lexer
 import stdlib.compiler.token as token
@@ -30,24 +30,21 @@ fn tok_count(raw: String) -> Int =
   | Ok toks -> vec_length(toks)
 
 fn main() -> Unit !{IO} =
-  do
-    state <- new_state()
-
+  run_suite("ir_codegen_char_rooting", [
     # --- Multi-byte Char round-trips through decode_char_at (the é case) ---
     # "Aé" — 'A' is ASCII (offset 0), 'é' is 2-byte UTF-8 (offset 1).
-    assert_eq(state, "char-root: ASCII 'A' decodes",
-              decoded_str(bytes_from_utf8("Aé"), 0), "A")
-    assert_eq(state, "char-root: 2-byte 'é' decodes (UAF if Char unrooted)",
-              decoded_str(bytes_from_utf8("Aé"), 1), "é")
-    assert_eq(state, "char-root: 3-byte '─' decodes",
-              decoded_str(bytes_from_utf8("─"), 0), "─")
+    check_eq("char-root: ASCII 'A' decodes",
+              decoded_str(bytes_from_utf8("Aé"), 0), "A"),
+    check_eq("char-root: 2-byte 'é' decodes (UAF if Char unrooted)",
+              decoded_str(bytes_from_utf8("Aé"), 1), "é"),
+    check_eq("char-root: 3-byte '─' decodes",
+              decoded_str(bytes_from_utf8("─"), 0), "─"),
 
     # --- Lexing survives box-drawing chars + multi-char operators ---
     # The box-drawing chars in the comment header are 3-byte heap Chars; a
     # collected one corrupts the heap so a later token read aborts.
-    assert_true(state, "lex-root: && amid box-drawing comment tokenizes",
-                tok_count("# ─── header ───\nfn f(a: Bool, b: Bool) -> Bool = a && b\n") > 0)
-    assert_true(state, "lex-root: bare && tokenizes",
+    check_true("lex-root: && amid box-drawing comment tokenizes",
+                tok_count("# ─── header ───\nfn f(a: Bool, b: Bool) -> Bool = a && b\n") > 0),
+    check_true("lex-root: bare && tokenizes",
                 tok_count("&&") > 0)
-
-    summary(state)
+  ])

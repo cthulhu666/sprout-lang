@@ -1,5 +1,5 @@
 module main
-import stdlib.test (TestState, new_state, assert_eq, assert_true, summary)
+import stdlib.test (check_eq, run_suite)
 
 # TDD regression test for M3 PR 15b: WrapDecl ctor registration in
 # ast_to_ir's build_ctor_table.
@@ -22,16 +22,11 @@ fn double_cents(c: Cents) -> Cents =
   | Cents n -> Cents(n * 2)
 
 fn main() -> Unit !{IO} =
-  do
-    state <- new_state()
-
-    assert_eq(state, "wrap construction and extraction: 42",
-      cents_value(Cents(42)), 42)
-
-    assert_eq(state, "wrap construction and extraction: 0",
-      cents_value(Cents(0)), 0)
-
-    assert_eq(state, "wrap double: 10 -> 20",
+  run_suite("ir_codegen_wrap_ctor", [
+    check_eq("wrap construction and extraction: 42",
+      cents_value(Cents(42)), 42),
+    check_eq("wrap construction and extraction: 0",
+      cents_value(Cents(0)), 0),
+    check_eq("wrap double: 10 -> 20",
       cents_value(double_cents(Cents(10))), 20)
-
-    summary(state)
+  ])

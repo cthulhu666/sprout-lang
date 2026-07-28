@@ -1,4 +1,4 @@
-import stdlib.test (TestState, new_state, assert_true, summary)
+import stdlib.test (check_true, run_suite)
 
 # Regression guard for the dict-resolution north-star refactor.
 #
@@ -9,23 +9,17 @@ import stdlib.test (TestState, new_state, assert_true, summary)
 # The negative case lives in tests/conformance/type_error/ (see plan doc).
 
 fn main() -> Unit !{IO} =
-  do
-    state <- new_state()
-
-    assert_true(
-      state,
+  run_suite("nested_tostring_dispatch", [
+    check_true(
       "List of List renders with inner List dict",
       to_string([[1]]) == "[[1]]"
-    )
-    assert_true(
-      state,
+    ),
+    check_true(
       "List of Maybe renders with inner Maybe dict",
       to_string([Just(1)]) == "[Just(1)]"
-    )
-    assert_true(
-      state,
+    ),
+    check_true(
       "List of tuple renders with inner tuple dict",
       to_string([(1, 2)]) == "[(1, 2)]"
     )
-
-    summary(state)
+  ])

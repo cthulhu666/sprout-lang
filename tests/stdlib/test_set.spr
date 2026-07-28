@@ -1,4 +1,4 @@
-import stdlib.test (TestState, new_state, assert_eq, assert_true, assert_false, summary)
+import stdlib.test (check_eq, check_true, check_false, run_suite)
 
 # Regression tests for stdlib `Set`.  These were added after a June 2026
 # investigation into a suspected Set-in-Dict GC anomaly — under stress GC
@@ -22,98 +22,95 @@ fn allocate_strings(n: Int, acc: List String) -> List String =
   else allocate_strings(n - 1, Cons(int_to_string(n), acc))
 
 fn main() -> Unit !{IO} =
-  do
-    state <- new_state()
-
+  let s = build_set()
+      d = put_in_dict(s)
+      s_back = get_from_dict(d)
+      d2 = put_in_dict(build_set())
+      _garbage = allocate_strings(50, Nil)
+      s_back2 = get_from_dict(d2)
+      s_in_list = Cons(build_set(), Nil)
+      _g2 = allocate_strings(50, Nil)
+      s_back3 = match s_in_list with
+                | Nil -> set_empty()
+                | [h | _] -> h
+      d3 = dict_set("blk2", set_insert("y", set_insert("x", set_empty())),
+            dict_set("blk1", build_set(), dict_empty()))
+      _g3 = allocate_strings(50, Nil)
+      s_blk1_direct = match dict_get("blk1", d3) with | Nothing -> set_empty() | Just s -> s
+      s_blk2 = match dict_get("blk2", d3) with | Nothing -> set_empty() | Just s -> s
+      merged = list_fold(\ (s, x) -> set_insert(x, s),
+                          set_empty(),
+                          Cons("p", Cons("q", Cons("r", Cons("s", Nil)))))
+      _g4 = allocate_strings(50, Nil)
+      s5 = (\s -> set_insert("z", set_insert("w", s)))(build_set())
+      _g5 = allocate_strings(50, Nil)
+      u_disjoint = set_union(build_set(), set_insert("y", set_insert("x", set_empty())))
+      u_overlap = set_union(build_set(), set_insert("b", set_insert("a", set_empty())))
+      big = set_insert("d", set_insert("c", set_insert("b", set_insert("a", set_empty()))))
+      rem = set_insert("c", set_insert("a", set_empty()))
+      dif = set_diff(big, rem)
+      dropped = set_remove("b", build_set())
+      same = set_remove("zzz", build_set())
+  in run_suite("set", [
     # Baseline: direct membership before any storage.
-    let s = build_set()
-    assert_true(state, "direct: a present", set_member("a", s))
-    assert_true(state, "direct: b present", set_member("b", s))
-    assert_true(state, "direct: c present", set_member("c", s))
+    check_true("direct: a present", set_member("a", s)),
+    check_true("direct: b present", set_member("b", s)),
+    check_true("direct: c present", set_member("c", s)),
 
     # Store in Dict, retrieve, check.
-    let d = put_in_dict(s)
-    let s_back = get_from_dict(d)
-    assert_true(state, "dict-roundtrip: a present", set_member("a", s_back))
-    assert_true(state, "dict-roundtrip: b present", set_member("b", s_back))
-    assert_true(state, "dict-roundtrip: c present", set_member("c", s_back))
-    assert_false(state, "dict-roundtrip: x absent", set_member("x", s_back))
+    check_true("dict-roundtrip: a present", set_member("a", s_back)),
+    check_true("dict-roundtrip: b present", set_member("b", s_back)),
+    check_true("dict-roundtrip: c present", set_member("c", s_back)),
+    check_false("dict-roundtrip: x absent", set_member("x", s_back)),
 
     # Same as above but with allocations between store and retrieve.
-    let d2 = put_in_dict(build_set())
-    let _garbage = allocate_strings(50, Nil)
-    let s_back2 = get_from_dict(d2)
-    assert_true(state, "alloc-then-get: a present", set_member("a", s_back2))
-    assert_true(state, "alloc-then-get: b present", set_member("b", s_back2))
-    assert_true(state, "alloc-then-get: c present", set_member("c", s_back2))
+    check_true("alloc-then-get: a present", set_member("a", s_back2)),
+    check_true("alloc-then-get: b present", set_member("b", s_back2)),
+    check_true("alloc-then-get: c present", set_member("c", s_back2)),
 
     # Store Set in List<Set>; force allocations; pull head; check.
-    let s_in_list = Cons(build_set(), Nil)
-    let _g2 = allocate_strings(50, Nil)
-    let s_back3 = match s_in_list with
-                  | Nil -> set_empty()
-                  | [h | _] -> h
-    assert_true(state, "list-roundtrip: a present", set_member("a", s_back3))
-    assert_true(state, "list-roundtrip: b present", set_member("b", s_back3))
-    assert_true(state, "list-roundtrip: c present", set_member("c", s_back3))
+    check_true("list-roundtrip: a present", set_member("a", s_back3)),
+    check_true("list-roundtrip: b present", set_member("b", s_back3)),
+    check_true("list-roundtrip: c present", set_member("c", s_back3)),
 
     # Dict<String, Set> built incrementally — mimics per-block liveness store.
-    let d3 = dict_set("blk2", set_insert("y", set_insert("x", set_empty())),
-              dict_set("blk1", build_set(), dict_empty()))
-    let _g3 = allocate_strings(50, Nil)
-    let s_blk1_direct = match dict_get("blk1", d3) with | Nothing -> set_empty() | Just s -> s
-    assert_true(state, "dict-of-sets: blk1 has a", set_member("a", s_blk1_direct))
-    assert_true(state, "dict-of-sets: blk1 has c", set_member("c", s_blk1_direct))
-    let s_blk2 = match dict_get("blk2", d3) with | Nothing -> set_empty() | Just s -> s
-    assert_true(state, "dict-of-sets: blk2 has x", set_member("x", s_blk2))
-    assert_true(state, "dict-of-sets: blk2 has y", set_member("y", s_blk2))
-    assert_false(state, "dict-of-sets: blk1 missing x", set_member("x", s_blk1_direct))
+    check_true("dict-of-sets: blk1 has a", set_member("a", s_blk1_direct)),
+    check_true("dict-of-sets: blk1 has c", set_member("c", s_blk1_direct)),
+    check_true("dict-of-sets: blk2 has x", set_member("x", s_blk2)),
+    check_true("dict-of-sets: blk2 has y", set_member("y", s_blk2)),
+    check_false("dict-of-sets: blk1 missing x", set_member("x", s_blk1_direct)),
 
     # Set merged via list_fold — mimics ls_union pattern over many ops.
-    let merged = list_fold(\ (s, x) -> set_insert(x, s),
-                            set_empty(),
-                            Cons("p", Cons("q", Cons("r", Cons("s", Nil)))))
-    let _g4 = allocate_strings(50, Nil)
-    assert_true(state, "fold-built: p present", set_member("p", merged))
-    assert_true(state, "fold-built: q present", set_member("q", merged))
-    assert_true(state, "fold-built: r present", set_member("r", merged))
-    assert_true(state, "fold-built: s present", set_member("s", merged))
+    check_true("fold-built: p present", set_member("p", merged)),
+    check_true("fold-built: q present", set_member("q", merged)),
+    check_true("fold-built: r present", set_member("r", merged)),
+    check_true("fold-built: s present", set_member("s", merged)),
 
     # Set passed through higher-order function (\s -> set_insert(..., s)).
-    let s5 = (\s -> set_insert("z", set_insert("w", s)))(build_set())
-    let _g5 = allocate_strings(50, Nil)
-    assert_true(state, "hof-passed: a survives", set_member("a", s5))
-    assert_true(state, "hof-passed: z added", set_member("z", s5))
+    check_true("hof-passed: a survives", set_member("a", s5)),
+    check_true("hof-passed: z added", set_member("z", s5)),
 
     # set_union: combine two disjoint sets, then with overlap.
-    let u_disjoint = set_union(build_set(), set_insert("y", set_insert("x", set_empty())))
-    assert_eq(state, "set_union disjoint: size", set_size(u_disjoint), 5)
-    assert_true(state, "set_union disjoint: a", set_member("a", u_disjoint))
-    assert_true(state, "set_union disjoint: y", set_member("y", u_disjoint))
-    let u_overlap = set_union(build_set(), set_insert("b", set_insert("a", set_empty())))
-    assert_eq(state, "set_union overlap: size dedup'd", set_size(u_overlap), 3)
+    check_eq("set_union disjoint: size", set_size(u_disjoint), 5),
+    check_true("set_union disjoint: a", set_member("a", u_disjoint)),
+    check_true("set_union disjoint: y", set_member("y", u_disjoint)),
+    check_eq("set_union overlap: size dedup'd", set_size(u_overlap), 3),
 
     # set_diff: remove a subset.
-    let big = set_insert("d", set_insert("c", set_insert("b", set_insert("a", set_empty()))))
-    let rem = set_insert("c", set_insert("a", set_empty()))
-    let dif = set_diff(big, rem)
-    assert_eq(state, "set_diff: size", set_size(dif), 2)
-    assert_true(state, "set_diff: b kept", set_member("b", dif))
-    assert_true(state, "set_diff: d kept", set_member("d", dif))
-    assert_false(state, "set_diff: a removed", set_member("a", dif))
-    assert_false(state, "set_diff: c removed", set_member("c", dif))
+    check_eq("set_diff: size", set_size(dif), 2),
+    check_true("set_diff: b kept", set_member("b", dif)),
+    check_true("set_diff: d kept", set_member("d", dif)),
+    check_false("set_diff: a removed", set_member("a", dif)),
+    check_false("set_diff: c removed", set_member("c", dif)),
 
     # set_remove: drop a single element.
-    let dropped = set_remove("b", build_set())
-    assert_eq(state, "set_remove: size", set_size(dropped), 2)
-    assert_true(state, "set_remove: a kept", set_member("a", dropped))
-    assert_false(state, "set_remove: b gone", set_member("b", dropped))
+    check_eq("set_remove: size", set_size(dropped), 2),
+    check_true("set_remove: a kept", set_member("a", dropped)),
+    check_false("set_remove: b gone", set_member("b", dropped)),
     # Removing a non-member is a no-op.
-    let same = set_remove("zzz", build_set())
-    assert_eq(state, "set_remove non-member: size", set_size(same), 3)
+    check_eq("set_remove non-member: size", set_size(same), 3),
 
     # ToString instance — order is BST in-order (alphabetic for strings).
-    assert_eq(state, "to_string Set", to_string(build_set()), "{a, b, c}")
-    assert_eq(state, "to_string empty Set", to_string(set_empty()), "{}")
-
-    summary(state)
+    check_eq("to_string Set", to_string(build_set()), "{a, b, c}"),
+    check_eq("to_string empty Set", to_string(set_empty()), "{}")
+  ])

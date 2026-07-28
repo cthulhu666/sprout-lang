@@ -1,4 +1,4 @@
-import stdlib.test (TestState, new_state, assert_eq, summary)
+import stdlib.test (check_eq, run_suite)
 import stdlib.http_server (HttpRequest, HttpServerError, HttpInvalidRequest, HttpServerUnsupportedStatus, parse, request_method, request_path, request_body)
 
 # Regression: a header-less request (request line immediately followed by the blank
@@ -18,21 +18,20 @@ fn describe_err(e: HttpServerError) -> String =
   | HttpServerUnsupportedStatus code -> `Err status ${int_to_string(code)}`
 
 fn main() -> Unit !{IO} =
-  do
-    state <- new_state()
+  run_suite("http_server_parse", [
     # The regression case: no headers at all.
-    assert_eq(state, "header-less request parses to empty-header request",
-      describe(parse("GET / HTTP/1.1\r\n\r\n")), "GET / body=")
+    check_eq("header-less request parses to empty-header request",
+      describe(parse("GET / HTTP/1.1\r\n\r\n")), "GET / body="),
     # Contrast: the normal path with headers + a body still parses.
-    assert_eq(state, "request with headers + body",
+    check_eq("request with headers + body",
       describe(parse("POST /x HTTP/1.1\r\nHost: h\r\nContent-Length: 3\r\n\r\nabc")),
-      "POST /x body=abc")
+      "POST /x body=abc"),
     # Multiple headers before the body — exercises parse_header_line across several
     # lines and the body-offset computation (request_body_start).
-    assert_eq(state, "request with multiple headers + body",
+    check_eq("request with multiple headers + body",
       describe(parse("POST /y HTTP/1.1\r\nHost: h\r\nX-Tag: v\r\nContent-Length: 5\r\n\r\nhello")),
-      "POST /y body=hello")
+      "POST /y body=hello"),
     # A structurally invalid request (no header terminator) is still a clean Err.
-    assert_eq(state, "missing terminator is a clean Err",
+    check_eq("missing terminator is a clean Err",
       describe(parse("GET / HTTP/1.1\r\n")), "Err missing header terminator")
-    summary(state)
+  ])

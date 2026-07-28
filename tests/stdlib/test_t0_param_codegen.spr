@@ -1,4 +1,4 @@
-import stdlib.test (TestState, new_state, assert_eq, summary)
+import stdlib.test (check_eq, run_suite)
 
 # Regression (PR 11 item 2a): a function parameter literally named `t0` (or any
 # `t<N>`) must not collide with the codegen's synthetic `%t<N>` temporaries on
@@ -14,8 +14,7 @@ fn double(t0: Int) -> Int =
   t0 + t0
 
 fn main() -> Unit !{IO} =
-  do
-    state <- new_state()
-    assert_eq(state, "t0/t1 params do not collide with synthetic temps",
+  run_suite("t0_param_codegen", [
+    check_eq("t0/t1 params do not collide with synthetic temps",
               shift(3, 4), 13)
-    summary(state)
+  ])

@@ -1,4 +1,4 @@
-import stdlib.test (TestState, new_state, assert_eq, assert_true, assert_false, summary)
+import stdlib.test (check_eq, check_true, check_false, run_suite)
 import stdlib.compiler.sprout_ir as sprout_ir
 import stdlib.compiler.ir_lowering as ir_lowering
 import stdlib.compiler.ir_rooting as ir_rooting
@@ -641,165 +641,162 @@ fn test27_program() -> sprout_ir.IRProgram =
     Nil))), Nil, Nil, Nil)
 
 fn main() -> Unit !{IO} =
-  do
-    state <- new_state()
-
+  run_suite("ir_rooting", [
     # --- Test 13: long-block live_after characterization (push count locked).
-    assert_eq(state, "T13: long block push count (coalesced O(N): 5 values, 5 pushes)",
-              count(lower(test13_program()), "call i64 @sprout_gc_push_i64_root"), 5)
-    assert_eq(state, "T13: one pop_roots(i64 5) (deferred batch pop at end of liveness)",
-              count(lower(test13_program()), "@sprout_gc_pop_roots(i64 5)"), 1)
+    check_eq("T13: long block push count (coalesced O(N): 5 values, 5 pushes)",
+              count(lower(test13_program()), "call i64 @sprout_gc_push_i64_root"), 5),
+    check_eq("T13: one pop_roots(i64 5) (deferred batch pop at end of liveness)",
+              count(lower(test13_program()), "@sprout_gc_pop_roots(i64 5)"), 1),
 
     # --- Test 1: no rooting emitted.  Search for the call site, not the
     # declare line (the header always declares the runtime functions).
-    assert_false(state, "T1: no push_i64_root call site for single concat",
-                 contains(lower(test1_program()), "call i64 @sprout_gc_push_i64_root"))
-    assert_false(state, "T1: no pop_roots call site for single concat",
-                 contains(lower(test1_program()), "call i64 @sprout_gc_pop_roots"))
+    check_false("T1: no push_i64_root call site for single concat",
+                 contains(lower(test1_program()), "call i64 @sprout_gc_push_i64_root")),
+    check_false("T1: no pop_roots call site for single concat",
+                 contains(lower(test1_program()), "call i64 @sprout_gc_pop_roots")),
 
     # --- Test 2: exactly one root pushed and one pop(i64 1).
-    assert_eq(state, "T2: exactly one push_i64_root call",
-              count(lower(test2_program()), "call i64 @sprout_gc_push_i64_root"), 1)
-    assert_eq(state, "T2: exactly one pop_roots(i64 1) call",
-              count(lower(test2_program()), "@sprout_gc_pop_roots(i64 1)"), 1)
+    check_eq("T2: exactly one push_i64_root call",
+              count(lower(test2_program()), "call i64 @sprout_gc_push_i64_root"), 1),
+    check_eq("T2: exactly one pop_roots(i64 1) call",
+              count(lower(test2_program()), "@sprout_gc_pop_roots(i64 1)"), 1),
 
     # --- Test 3: 4 total root pushes; at least one pop(2); at least two pop(1).
-    assert_eq(state, "T3: three push_i64_root calls (coalesced)",
-              count(lower(test3_program()), "call i64 @sprout_gc_push_i64_root"), 3)
-    assert_eq(state, "T3: one pop_roots(i64 3) (deferred batch pop)",
-              count(lower(test3_program()), "@sprout_gc_pop_roots(i64 3)"), 1)
+    check_eq("T3: three push_i64_root calls (coalesced)",
+              count(lower(test3_program()), "call i64 @sprout_gc_push_i64_root"), 3),
+    check_eq("T3: one pop_roots(i64 3) (deferred batch pop)",
+              count(lower(test3_program()), "@sprout_gc_pop_roots(i64 3)"), 1),
 
     # --- Test 4: phi-of-heap — exactly one push.  Neither arm pre-roots; the
     # root sits in the join block before the %zw concat.
-    assert_eq(state, "T4: exactly one push_i64_root (phi rooted across %zw)",
-              count(lower(test4_program()), "call i64 @sprout_gc_push_i64_root"), 1)
-    assert_eq(state, "T4: exactly one pop_roots(i64 1)",
-              count(lower(test4_program()), "@sprout_gc_pop_roots(i64 1)"), 1)
+    check_eq("T4: exactly one push_i64_root (phi rooted across %zw)",
+              count(lower(test4_program()), "call i64 @sprout_gc_push_i64_root"), 1),
+    check_eq("T4: exactly one pop_roots(i64 1)",
+              count(lower(test4_program()), "@sprout_gc_pop_roots(i64 1)"), 1),
 
     # --- Test 5: heap param %s seeded into heap_origin (S2 regression).
     # %s is live across IRCall bar(%s) → 1 root there.  %s is ALSO an operand of
     # the following IRMakeCtor, and @sprout_makeN allocates before storing its
     # operands without SPROUT_HANDLE-protecting them, so %s must be rooted across
     # the make too → a second root.  (Both roots are pop_roots(i64 1).)
-    assert_eq(state, "T5: one push_i64_root (heap param rooted once across call AND make)",
-              count(lower(test5_program()), "call i64 @sprout_gc_push_i64_root"), 1)
-    assert_eq(state, "T5: one pop_roots(i64 1) (single coalesced root)",
-              count(lower(test5_program()), "@sprout_gc_pop_roots(i64 1)"), 1)
+    check_eq("T5: one push_i64_root (heap param rooted once across call AND make)",
+              count(lower(test5_program()), "call i64 @sprout_gc_push_i64_root"), 1),
+    check_eq("T5: one pop_roots(i64 1) (single coalesced root)",
+              count(lower(test5_program()), "@sprout_gc_pop_roots(i64 1)"), 1),
 
     # --- Test 6: IRMakeCtor operand rooted across the make (PR-A regression).
     # %a is dead after the make but must be rooted because @sprout_makeN
     # allocates before storing operands and does not handle-protect them.
-    assert_eq(state, "T6: exactly one push_i64_root for IRMakeCtor operand",
-              count(lower(test6_program()), "call i64 @sprout_gc_push_i64_root"), 1)
-    assert_eq(state, "T6: exactly one pop_roots(i64 1) around the make",
-              count(lower(test6_program()), "@sprout_gc_pop_roots(i64 1)"), 1)
+    check_eq("T6: exactly one push_i64_root for IRMakeCtor operand",
+              count(lower(test6_program()), "call i64 @sprout_gc_push_i64_root"), 1),
+    check_eq("T6: exactly one pop_roots(i64 1) around the make",
+              count(lower(test6_program()), "@sprout_gc_pop_roots(i64 1)"), 1),
 
     # --- Test 7: IRMkClosure capture rooted across the mk-closure (PR-A regression).
     # %c is dead after the mk-closure but must be rooted because
     # @sprout_alloc_closure_env allocates before the capture stores.
-    assert_eq(state, "T7: exactly one push_i64_root for IRMkClosure capture",
-              count(lower(test7_program()), "call i64 @sprout_gc_push_i64_root"), 1)
-    assert_eq(state, "T7: exactly one pop_roots(i64 1) around the mk-closure",
-              count(lower(test7_program()), "@sprout_gc_pop_roots(i64 1)"), 1)
+    check_eq("T7: exactly one push_i64_root for IRMkClosure capture",
+              count(lower(test7_program()), "call i64 @sprout_gc_push_i64_root"), 1),
+    check_eq("T7: exactly one pop_roots(i64 1) around the mk-closure",
+              count(lower(test7_program()), "@sprout_gc_pop_roots(i64 1)"), 1),
 
     # --- Test 8: IRMakeTuple operand rooted across the tuple build.
-    assert_eq(state, "T8: exactly one push_i64_root for IRMakeTuple operand",
-              count(lower(test8_program()), "call i64 @sprout_gc_push_i64_root"), 1)
-    assert_eq(state, "T8: exactly one pop_roots(i64 1) around the tuple build",
-              count(lower(test8_program()), "@sprout_gc_pop_roots(i64 1)"), 1)
+    check_eq("T8: exactly one push_i64_root for IRMakeTuple operand",
+              count(lower(test8_program()), "call i64 @sprout_gc_push_i64_root"), 1),
+    check_eq("T8: exactly one pop_roots(i64 1) around the tuple build",
+              count(lower(test8_program()), "@sprout_gc_pop_roots(i64 1)"), 1),
 
     # --- Test 9: IRGetTupleField result rooted across a later trigger.
     # 2 pushes: %a at the tuple build, %x across the %cd concat.
-    assert_eq(state, "T9: two push_i64_root (tuple operand + extracted value across trigger)",
-              count(lower(test9_program()), "call i64 @sprout_gc_push_i64_root"), 2)
+    check_eq("T9: two push_i64_root (tuple operand + extracted value across trigger)",
+              count(lower(test9_program()), "call i64 @sprout_gc_push_i64_root"), 2),
 
     # --- Test 14: scalar-kind IRGetTupleField result is NOT rooted (vs Test 9).
     # 1 push: only %a at the tuple build; the scalar %x needs no root.
-    assert_eq(state, "T14: one push_i64_root (scalar tuple field skipped across trigger)",
-              count(lower(test14_program()), "call i64 @sprout_gc_push_i64_root"), 1)
+    check_eq("T14: one push_i64_root (scalar tuple field skipped across trigger)",
+              count(lower(test14_program()), "call i64 @sprout_gc_push_i64_root"), 1),
 
     # --- Test 10: value live across IRMakeTuple is rooted (IRMakeTuple is a trigger).
-    assert_eq(state, "T10: one push_i64_root (heap value live across IRMakeTuple)",
-              count(lower(test10_program()), "call i64 @sprout_gc_push_i64_root"), 1)
+    check_eq("T10: one push_i64_root (heap value live across IRMakeTuple)",
+              count(lower(test10_program()), "call i64 @sprout_gc_push_i64_root"), 1),
 
     # --- Test 11: IRCall operand rooted across the call (PR 11 item 4 regression).
     # %a is dead after the call but must be rooted because @ref_new (and any
     # runtime builtin) may collect before consuming its operand.
-    assert_eq(state, "T11: exactly one push_i64_root for IRCall operand",
-              count(lower(test11_program()), "call i64 @sprout_gc_push_i64_root"), 1)
-    assert_eq(state, "T11: exactly one pop_roots(i64 1) around the call",
-              count(lower(test11_program()), "@sprout_gc_pop_roots(i64 1)"), 1)
+    check_eq("T11: exactly one push_i64_root for IRCall operand",
+              count(lower(test11_program()), "call i64 @sprout_gc_push_i64_root"), 1),
+    check_eq("T11: exactly one pop_roots(i64 1) around the call",
+              count(lower(test11_program()), "@sprout_gc_pop_roots(i64 1)"), 1),
 
     # --- Test 12: IRCall with mixed heap+scalar operands roots only the heap one.
-    assert_eq(state, "T12: exactly one push_i64_root (heap operand only, scalar skipped)",
-              count(lower(test12_program()), "call i64 @sprout_gc_push_i64_root"), 1)
+    check_eq("T12: exactly one push_i64_root (heap operand only, scalar skipped)",
+              count(lower(test12_program()), "call i64 @sprout_gc_push_i64_root"), 1),
 
     # --- Header declares the rooting runtime functions.
-    assert_true(state, "header declares @sprout_gc_push_i64_root",
+    check_true("header declares @sprout_gc_push_i64_root",
                 contains(lower(test1_program()),
-                         "declare i64 @sprout_gc_push_i64_root(ptr)"))
-    assert_true(state, "header declares @sprout_gc_pop_roots",
+                         "declare i64 @sprout_gc_push_i64_root(ptr)")),
+    check_true("header declares @sprout_gc_pop_roots",
                 contains(lower(test1_program()),
-                         "declare i64 @sprout_gc_pop_roots(i64)"))
+                         "declare i64 @sprout_gc_pop_roots(i64)")),
 
     # --- Test 15: heap value rooted in entry, live across br, re-rooted in next.
     # Guards the block-end pop (before the terminator) + successor re-seed.
-    assert_eq(state, "T15: two push_i64_root (rooted in entry, re-rooted in next)",
-              count(lower(test15_program()), "call i64 @sprout_gc_push_i64_root"), 2)
-    assert_eq(state, "T15: two pop_roots(i64 1) (entry block-end + next end-of-liveness)",
-              count(lower(test15_program()), "@sprout_gc_pop_roots(i64 1)"), 2)
+    check_eq("T15: two push_i64_root (rooted in entry, re-rooted in next)",
+              count(lower(test15_program()), "call i64 @sprout_gc_push_i64_root"), 2),
+    check_eq("T15: two pop_roots(i64 1) (entry block-end + next end-of-liveness)",
+              count(lower(test15_program()), "@sprout_gc_pop_roots(i64 1)"), 2),
 
     # --- Test 16: interleaved lifetimes — %a over-retained under live %b, popped
     # together.  Pushed once each (no re-rooting); safe over-retention.
-    assert_eq(state, "T16: two push_i64_root (interleaved, each pushed once)",
-              count(lower(test16_program()), "call i64 @sprout_gc_push_i64_root"), 2)
-    assert_eq(state, "T16: one pop_roots(i64 2) (over-retained %a popped with %b)",
-              count(lower(test16_program()), "@sprout_gc_pop_roots(i64 2)"), 1)
+    check_eq("T16: two push_i64_root (interleaved, each pushed once)",
+              count(lower(test16_program()), "call i64 @sprout_gc_push_i64_root"), 2),
+    check_eq("T16: one pop_roots(i64 2) (over-retained %a popped with %b)",
+              count(lower(test16_program()), "@sprout_gc_pop_roots(i64 2)"), 1),
 
     # --- Test 17 (B2): vector_get_direct is a NON-trigger — no root around it.
-    assert_false(state, "T17: no push_i64_root across vector_get_direct (non-allocating read)",
-                 contains(lower(test17_program()), "call i64 @sprout_gc_push_i64_root"))
-    assert_false(state, "T17: no pop_roots across vector_get_direct",
-                 contains(lower(test17_program()), "call i64 @sprout_gc_pop_roots"))
+    check_false("T17: no push_i64_root across vector_get_direct (non-allocating read)",
+                 contains(lower(test17_program()), "call i64 @sprout_gc_push_i64_root")),
+    check_false("T17: no pop_roots across vector_get_direct",
+                 contains(lower(test17_program()), "call i64 @sprout_gc_pop_roots")),
 
     # --- Test 18 (B2 negative lock): vector_get STAYS a trigger (it boxes a Maybe).
-    assert_true(state, "T18: vector_get (allocating) still roots the live heap value",
-                contains(lower(test18_program()), "call i64 @sprout_gc_push_i64_root"))
+    check_true("T18: vector_get (allocating) still roots the live heap value",
+                contains(lower(test18_program()), "call i64 @sprout_gc_push_i64_root")),
 
     # --- Test 19 (B2): vector_mutset is a NON-trigger — plain store, no alloc.
-    assert_false(state, "T19: no push_i64_root across vector_mutset (non-allocating store)",
-                 contains(lower(test19_program()), "call i64 @sprout_gc_push_i64_root"))
+    check_false("T19: no push_i64_root across vector_mutset (non-allocating store)",
+                 contains(lower(test19_program()), "call i64 @sprout_gc_push_i64_root")),
 
     # --- Test 20 (B2 reach): vector_get_unboxed (IRCallUnboxed2) is a NON-trigger.
-    assert_false(state, "T20: no push_i64_root across vector_get_unboxed (non-allocating unboxed read)",
-                 contains(lower(test20_program()), "call i64 @sprout_gc_push_i64_root"))
+    check_false("T20: no push_i64_root across vector_get_unboxed (non-allocating unboxed read)",
+                 contains(lower(test20_program()), "call i64 @sprout_gc_push_i64_root")),
 
     # --- Test 21 (negative lock): regex_find_range_unboxed STAYS a trigger (allocates payload).
-    assert_true(state, "T21: regex_find_range_unboxed (allocating unboxed) still roots the live heap value",
-                contains(lower(test21_program()), "call i64 @sprout_gc_push_i64_root"))
+    check_true("T21: regex_find_range_unboxed (allocating unboxed) still roots the live heap value",
+                contains(lower(test21_program()), "call i64 @sprout_gc_push_i64_root")),
 
     # --- Test 22 (B2 reach): env_get_unboxed is a NON-trigger (returns getenv ptr, no alloc).
-    assert_false(state, "T22: no push_i64_root across env_get_unboxed (non-allocating unboxed read)",
-                 contains(lower(test22_program()), "call i64 @sprout_gc_push_i64_root"))
+    check_false("T22: no push_i64_root across env_get_unboxed (non-allocating unboxed read)",
+                 contains(lower(test22_program()), "call i64 @sprout_gc_push_i64_root")),
 
     # --- Test 23 (alloc fixpoint): call to a provably-non-triggering Sprout fn is a non-trigger.
-    assert_false(state, "T23: no push_i64_root across call to non-allocating Sprout fn g23",
-                 contains(lower(test23_program()), "call i64 @sprout_gc_push_i64_root"))
+    check_false("T23: no push_i64_root across call to non-allocating Sprout fn g23",
+                 contains(lower(test23_program()), "call i64 @sprout_gc_push_i64_root")),
 
     # --- Test 24 (fixpoint negative lock): call to an allocating Sprout fn STILL roots.
-    assert_true(state, "T24: allocating Sprout fn h24 still roots the live heap value",
-                contains(lower(test24_program()), "call i64 @sprout_gc_push_i64_root"))
+    check_true("T24: allocating Sprout fn h24 still roots the live heap value",
+                contains(lower(test24_program()), "call i64 @sprout_gc_push_i64_root")),
 
     # --- Test 25 (fixpoint recursion): self-recursive non-allocating fn stays non-trigger.
-    assert_false(state, "T25: no push_i64_root across call to self-recursive non-allocating grec25",
-                 contains(lower(test25_program()), "call i64 @sprout_gc_push_i64_root"))
+    check_false("T25: no push_i64_root across call to self-recursive non-allocating grec25",
+                 contains(lower(test25_program()), "call i64 @sprout_gc_push_i64_root")),
 
     # --- Test 26 (fixpoint transitive non-alloc): 3-deep non-allocating chain → elided.
-    assert_false(state, "T26: no push_i64_root across transitively non-allocating chain (f26->a26->b26)",
-                 contains(lower(test26_program()), "call i64 @sprout_gc_push_i64_root"))
+    check_false("T26: no push_i64_root across transitively non-allocating chain (f26->a26->b26)",
+                 contains(lower(test26_program()), "call i64 @sprout_gc_push_i64_root")),
 
     # --- Test 27 (fixpoint transitive alloc): deepest fn allocates → propagates up → rooted.
-    assert_true(state, "T27: push_i64_root present across transitively allocating chain (f27->a27->b27)",
+    check_true("T27: push_i64_root present across transitively allocating chain (f27->a27->b27)",
                 contains(lower(test27_program()), "call i64 @sprout_gc_push_i64_root"))
-
-    summary(state)
+  ])
