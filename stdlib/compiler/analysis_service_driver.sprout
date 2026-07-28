@@ -537,7 +537,7 @@ export type InstancesResult (..) =
 
 fn resolve_instances_from_bundle(result: bundler.BundleResult, query_display: String) -> InstancesResult =
   match result with
-  | bundler.BundleErr msg -> InstancesErr(msg)
+  | bundler.BundleErr _ msg -> InstancesErr(msg)
   | bundler.BundleOk prog ->
       match prog with
       | ast.Program decls _ ->
@@ -894,30 +894,24 @@ fn op_session_destroy(req: json.Json, state: StartupState) -> json.Json !{IO} =
         ok_response(json.JsonBool(true))
 
 fn op_session_update(req: json.Json, state: StartupState) -> json.Json !{IO} =
-  match require_int_field(req, "session_id") with
-  | Err msg -> error_response(msg)
-  | Ok session_id ->
-      match require_string_field(req, "kind") with
-      | Err msg -> error_response(msg)
-      | Ok kind ->
-          match require_string_field(req, "line") with
-          | Err msg -> error_response(msg)
-          | Ok line ->
+  do
+    let Ok session_id = require_int_field(req, "session_id") else Err msg -> error_response(msg)
+    let Ok kind = require_string_field(req, "kind") else Err msg -> error_response(msg)
+    let Ok line = require_string_field(req, "line") else Err msg -> error_response(msg)
+    sessions <- ref_read(state_sessions(state))
+    match dict_get(int_to_string(session_id), sessions) with
+    | Nothing -> error_response("unknown session: " ++ int_to_string(session_id))
+    | Just sess ->
+        do
+          let new_sess = session_add_line(sess, kind, line)
+          let check_src = rebuild_session_source(new_sess)
+          check_result <- compiler.compile_source_with_cache(check_src, source.StdlibRoot(state_stdlib_root(state)), state_cache(state))
+          match check_result with
+          | compiler.CompileFail diags -> compile_fail_response(diags)
+          | compiler.CompileOk _ ->
               do
-                sessions <- ref_read(state_sessions(state))
-                match dict_get(int_to_string(session_id), sessions) with
-                | Nothing -> error_response("unknown session: " ++ int_to_string(session_id))
-                | Just sess ->
-                    do
-                      let new_sess = session_add_line(sess, kind, line)
-                      let check_src = rebuild_session_source(new_sess)
-                      check_result <- compiler.compile_source_with_cache(check_src, source.StdlibRoot(state_stdlib_root(state)), state_cache(state))
-                      match check_result with
-                      | compiler.CompileFail diags -> compile_fail_response(diags)
-                      | compiler.CompileOk _ ->
-                          do
-                            ref_write(state_sessions(state), dict_set(int_to_string(session_id), new_sess, sessions))
-                            ok_response(json.JsonBool(true))
+                ref_write(state_sessions(state), dict_set(int_to_string(session_id), new_sess, sessions))
+                ok_response(json.JsonBool(true))
 
 fn op_session_eval(req: json.Json, state: StartupState) -> json.Json !{IO} =
   match require_int_field(req, "session_id") with

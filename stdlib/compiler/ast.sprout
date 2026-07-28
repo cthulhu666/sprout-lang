@@ -127,6 +127,21 @@ export type Decl (..) =
   | AliasDecl String (List String) TypeExpr source.SourcePos
   | WrapDecl String TypeExpr source.SourcePos
 
+# Position of a declaration — every Decl variant carries a SourcePos in its last
+# field. Used at diagnostic-construction seams so bundle-time errors report the
+# offending declaration's location (guideline #5).
+export fn decl_pos(d: Decl) -> source.SourcePos =
+  match d with
+  | FnDecl _ _ _ _ _ _ p -> p
+  | ExternFnDecl _ _ _ _ p -> p
+  | TypeDecl _ _ _ _ p -> p
+  | RecordDecl _ _ _ p -> p
+  | LetDecl _ _ p -> p
+  | ClassDecl _ _ _ _ p -> p
+  | InstanceDecl _ _ _ p -> p
+  | AliasDecl _ _ _ p -> p
+  | WrapDecl _ _ p -> p
+
 # --- Program ---
 
 export type Program (..) =

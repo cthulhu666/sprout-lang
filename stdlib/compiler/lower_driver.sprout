@@ -58,13 +58,11 @@ fn run_file(path: String, stdlib_root: String) -> Unit !{IO} =
                   match tc_result with
                   | typed_ast.TypedErr _ msg -> print("ERROR: check: " ++ msg)
                   | typed_ast.TypedOk typed_prog env ->
-                      match lowering.lower_program(typed_prog, env) with
-                      | lowering.LowerErr msg -> print("ERROR: lower: " ++ msg)
-                      | lowering.LowerOk lowered ->
-                          do
-                            print("OK")
-                            match lowered with
-                            | typed_ast.TypedProgram decls -> print_tc_names(decls)
+                      do
+                        let lowered = lowering.lower_program(typed_prog, env)
+                        print("OK")
+                        match lowered with
+                        | typed_ast.TypedProgram decls -> print_tc_names(decls)
 
 # ---------------------------------------------------------------------------
 # Batch entry point: stdlib_root as argv[0], file paths as argv[1..N]

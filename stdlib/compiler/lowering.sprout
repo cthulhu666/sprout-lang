@@ -9,10 +9,6 @@ import stdlib.string as string
 # Public API
 # ---------------------------------------------------------------------------
 
-export type LowerResult (..) =
-  | LowerOk typed_ast.TypedProgram
-  | LowerErr String
-
 # lower_program: transform a TypedProgram (with TDict evidence nodes) into a
 # typed TypedProgram using the dictionary-passing lowering:
 #
@@ -25,11 +21,12 @@ export type LowerResult (..) =
 # Types are preserved through lowering: lower_expr returns TypedExpr, and
 # generated declarations carry types derived from the scheme environment.
 # This is the Sprout-native equivalent of Python's lower_typeclasses pass.
-export fn lower_program(prog: typed_ast.TypedProgram, env: Dict types.Scheme) -> LowerResult =
+# Lowering is total — it cannot fail — so it returns a TypedProgram directly.
+export fn lower_program(prog: typed_ast.TypedProgram, env: Dict types.Scheme) -> typed_ast.TypedProgram =
   match prog with
   | typed_ast.TypedProgram decls -> lower_program_decls(decls, env)
 
-fn lower_program_decls(decls: List typed_ast.TypedDecl, scheme_env: Dict types.Scheme) -> LowerResult =
+fn lower_program_decls(decls: List typed_ast.TypedDecl, scheme_env: Dict types.Scheme) -> typed_ast.TypedProgram =
   match lower_decls(decls,
                     LowerEnv(collect_class_order(decls, dict_empty()),
                              collect_instance_table(decls, dict_empty()),
@@ -39,10 +36,10 @@ fn lower_program_decls(decls: List typed_ast.TypedDecl, scheme_env: Dict types.S
                              collect_class_param_map(decls, dict_empty())),
                     Nil, Nil, Nil) with
   | (user_rev, wrapper_rev, inst_rev) ->
-      LowerOk(typed_ast.TypedProgram(
+      typed_ast.TypedProgram(
         list_append(
           list_append(list_reverse(user_rev), list_reverse(wrapper_rev)),
-          list_reverse(inst_rev))))
+          list_reverse(inst_rev)))
 
 # ---------------------------------------------------------------------------
 # Internal types

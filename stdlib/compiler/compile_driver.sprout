@@ -90,7 +90,7 @@ fn run_file_bundle(path: String, stdlib_root: String, extra_roots: List String) 
   do
     result <- compiler.compile_phase_bundle_with_roots(source.FilePath(path), source.StdlibRoot(stdlib_root), extra_roots)
     match result with
-    | bundler.BundleErr msg -> print("ERROR: bundle: " ++ msg)
+    | bundler.BundleErr _ msg -> print("ERROR: bundle: " ++ msg)
     | bundler.BundleOk prog ->
         do
           print("OK")

@@ -46,13 +46,10 @@ fn translate_source(src: String) -> Result String String !{IO} =
             match tc with
             | typed_ast.TypedErr _ msg -> Err("check: " ++ msg)
             | typed_ast.TypedOk typed_prog env ->
-                match lowering.lower_program(typed_prog, env) with
-                | lowering.LowerErr msg -> Err("lower: " ++ msg)
-                | lowering.LowerOk lowered ->
-                    # Drive the same streaming orchestrator that --use-ir-codegen
-                    # uses (ir_pipeline.compile_program_streaming) so the test
-                    # exercises the production codegen path end to end.
-                    ir_pipeline.compile_program_streaming(lowered)
+                # Drive the same streaming orchestrator that --use-ir-codegen
+                # uses (ir_pipeline.compile_program_streaming) so the test
+                # exercises the production codegen path end to end.
+                ir_pipeline.compile_program_streaming(lowering.lower_program(typed_prog, env))
 
 fn get_ir_or_msg(src: String) -> String !{IO} =
   do

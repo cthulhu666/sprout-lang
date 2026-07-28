@@ -54,12 +54,7 @@ fn translate_source(src: String) -> Result String String !{IO} =
 fn finish_translate(tc: typed_ast.TypedResult) -> Result String String !{IO} =
   match tc with
   | typed_ast.TypedErr _ msg -> Err("check: " ++ msg)
-  | typed_ast.TypedOk typed_prog env -> emit_lowered(lowering.lower_program(typed_prog, env))
-
-fn emit_lowered(lr: lowering.LowerResult) -> Result String String !{IO} =
-  match lr with
-  | lowering.LowerErr msg -> Err("lower: " ++ msg)
-  | lowering.LowerOk lowered -> emit_ir(lowered)
+  | typed_ast.TypedOk typed_prog env -> emit_ir(lowering.lower_program(typed_prog, env))
 
 fn emit_ir(lowered: typed_ast.TypedProgram) -> Result String String !{IO} =
   match ast_to_ir.translate_program(lowered) with

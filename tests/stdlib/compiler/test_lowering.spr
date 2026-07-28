@@ -7,34 +7,43 @@ import stdlib.compiler.lowering as lowering
 import stdlib.compiler.typed_ast as typed_ast
 import stdlib.compiler.types as types
 
-fn run_lower(src: String) -> lowering.LowerResult !{IO} =
+# Local pipeline-outcome ADT for the test harness. lowering.lower_program is now
+# total (returns TypedProgram), but run_lower also surfaces upstream lex/parse/
+# typecheck/resolve failures — so it needs its own success-or-error type. A
+# bespoke ADT (not Result) is required: a `do`-block `<-` bind strips a Result
+# wrapper, which would collapse LOk prog back to a bare TypedProgram.
+type LowerOutcome =
+  | LOk typed_ast.TypedProgram
+  | LErr String
+
+fn run_lower(src: String) -> LowerOutcome !{IO} =
   match lexer.tokenize(src) with
-  | Err _ -> lowering.LowerErr("lex error")
+  | Err _ -> LErr("lex error")
   | Ok toks ->
       match parser.parse_program(toks) with
-      | Err _ -> lowering.LowerErr("parse error")
+      | Err _ -> LErr("parse error")
       | Ok prog ->
           do
             tc <- checker.typecheck_typed(prog, Nil)
             match tc with
-            | typed_ast.TypedErr _ msg -> lowering.LowerErr("typecheck: " ++ msg)
+            | typed_ast.TypedErr _ msg -> LErr("typecheck: " ++ msg)
             | typed_ast.TypedOk typed_prog env ->
                 # Post-M3b, lowering is a mechanical Evidence consumer: the resolve
                 # pass must run first to populate each TDict's Evidence (mirrors the
                 # production pipeline in compiler.compile_phase_check).
                 match resolve.resolve_program(typed_prog, env) with
-                | resolve.ResolveErr _ msg -> lowering.LowerErr("resolve: " ++ msg)
-                | resolve.ResolveOk resolved -> lowering.lower_program(resolved, env)
+                | resolve.ResolveErr _ msg -> LErr("resolve: " ++ msg)
+                | resolve.ResolveOk resolved -> LOk(lowering.lower_program(resolved, env))
 
-fn is_lower_ok(r: lowering.LowerResult) -> Bool =
+fn is_lower_ok(r: LowerOutcome) -> Bool =
   match r with
-  | lowering.LowerOk _ -> true
-  | lowering.LowerErr _ -> false
+  | LOk _ -> true
+  | LErr _ -> false
 
-fn lower_err_msg(r: lowering.LowerResult) -> String =
+fn lower_err_msg(r: LowerOutcome) -> String =
   match r with
-  | lowering.LowerOk _ -> "__ok"
-  | lowering.LowerErr msg -> msg
+  | LOk _ -> "__ok"
+  | LErr msg -> msg
 
 fn has_tc_name_in(decls: List typed_ast.TypedDecl) -> Bool =
   match decls with
@@ -46,10 +55,10 @@ fn has_tc_name_in(decls: List typed_ast.TypedDecl) -> Bool =
           else has_tc_name_in(rest)
       | _ -> has_tc_name_in(rest)
 
-fn lower_has_tc_decl(r: lowering.LowerResult) -> Bool =
+fn lower_has_tc_decl(r: LowerOutcome) -> Bool =
   match r with
-  | lowering.LowerErr _ -> false
-  | lowering.LowerOk prog ->
+  | LErr _ -> false
+  | LOk prog ->
       match prog with
       | typed_ast.TypedProgram decls -> has_tc_name_in(decls)
 
@@ -66,10 +75,10 @@ fn is_sentinel_type(t: types.Type) -> Bool =
   | types.TVar name -> types.tyvar_name(name) == "?gen" || types.tyvar_name(name) == "?lambda"
   | _ -> false
 
-fn body_type_is_sentinel(r: lowering.LowerResult) -> Bool =
+fn body_type_is_sentinel(r: LowerOutcome) -> Bool =
   match r with
-  | lowering.LowerErr _ -> false
-  | lowering.LowerOk prog ->
+  | LErr _ -> false
+  | LOk prog ->
       match prog with
       | typed_ast.TypedProgram decls ->
           match first_fn_body_in(decls) with
@@ -99,10 +108,10 @@ fn body_first_arg_is_lambda(body: typed_ast.TypedExpr) -> Bool =
   | typed_ast.TCall _ args _ _ -> first_arg_is_lambda(args)
   | _ -> false
 
-fn lowered_fn_body_has_lambda_first_arg(result: lowering.LowerResult, fname: String) -> Bool =
+fn lowered_fn_body_has_lambda_first_arg(result: LowerOutcome, fname: String) -> Bool =
   match result with
-  | lowering.LowerErr _ -> false
-  | lowering.LowerOk prog ->
+  | LErr _ -> false
+  | LOk prog ->
       match prog with
       | typed_ast.TypedProgram decls ->
           match first_fn_body_named(decls, fname) with
@@ -122,10 +131,10 @@ fn lambda_arg_inner_callee(body: typed_ast.TypedExpr) -> String =
       | _ -> "__first_arg_not_lambda"
   | _ -> "__body_not_call"
 
-fn lowered_fn_lambda_inner_callee(result: lowering.LowerResult, fname: String) -> String =
+fn lowered_fn_lambda_inner_callee(result: LowerOutcome, fname: String) -> String =
   match result with
-  | lowering.LowerErr _ -> "__lower_err"
-  | lowering.LowerOk prog ->
+  | LErr _ -> "__lower_err"
+  | LOk prog ->
       match prog with
       | typed_ast.TypedProgram decls ->
           match first_fn_body_named(decls, fname) with
@@ -151,10 +160,10 @@ fn lambda_arg_inner_call_arg_count(body: typed_ast.TypedExpr) -> Int =
       | _ -> -2
   | _ -> -3
 
-fn lowered_fn_lambda_inner_arg_count(result: lowering.LowerResult, fname: String) -> Int =
+fn lowered_fn_lambda_inner_arg_count(result: LowerOutcome, fname: String) -> Int =
   match result with
-  | lowering.LowerErr _ -> -4
-  | lowering.LowerOk prog ->
+  | LErr _ -> -4
+  | LOk prog ->
       match prog with
       | typed_ast.TypedProgram decls ->
           match first_fn_body_named(decls, fname) with
@@ -183,10 +192,10 @@ fn call_body_first_tc_var(body: typed_ast.TypedExpr) -> String =
   | _ -> "__not_call"
 
 # Return the name of the first __tc_* TVar found in fname's lowered body call args.
-fn lowered_fn_body_dict_var_name(result: lowering.LowerResult, fname: String) -> String =
+fn lowered_fn_body_dict_var_name(result: LowerOutcome, fname: String) -> String =
   match result with
-  | lowering.LowerErr _ -> "__lower_err"
-  | lowering.LowerOk prog ->
+  | LErr _ -> "__lower_err"
+  | LOk prog ->
       match prog with
       | typed_ast.TypedProgram decls ->
           match first_fn_body_named(decls, fname) with
@@ -202,10 +211,10 @@ fn call_body_callee_name(body: typed_ast.TypedExpr) -> String =
   | typed_ast.TCall _ _ _ _ -> "__not_var_callee"
   | _ -> "__not_call"
 
-fn lowered_fn_body_callee_name(result: lowering.LowerResult, fname: String) -> String =
+fn lowered_fn_body_callee_name(result: LowerOutcome, fname: String) -> String =
   match result with
-  | lowering.LowerErr _ -> "__lower_err"
-  | lowering.LowerOk prog ->
+  | LErr _ -> "__lower_err"
+  | LOk prog ->
       match prog with
       | typed_ast.TypedProgram decls ->
           match first_fn_body_named(decls, fname) with
@@ -229,10 +238,10 @@ fn call_body_tc_var_for_prefix(body: typed_ast.TypedExpr, prefix: String) -> Str
   | _ -> "__not_call"
 
 # Return the name of the first __tc_* TVar in fname's body that matches prefix.
-fn lowered_fn_body_dict_var_for_prefix(result: lowering.LowerResult, fname: String, prefix: String) -> String =
+fn lowered_fn_body_dict_var_for_prefix(result: LowerOutcome, fname: String, prefix: String) -> String =
   match result with
-  | lowering.LowerErr _ -> "__lower_err"
-  | lowering.LowerOk prog ->
+  | LErr _ -> "__lower_err"
+  | LOk prog ->
       match prog with
       | typed_ast.TypedProgram decls ->
           match first_fn_body_named(decls, fname) with
@@ -250,10 +259,10 @@ fn first_match_branch_body(body: typed_ast.TypedExpr) -> Maybe typed_ast.TypedEx
           | typed_ast.TypedMatchBranch _ branch_body -> Just(branch_body)
   | _ -> Nothing
 
-fn lowered_fn_match_branch_has_lambda_first_arg(result: lowering.LowerResult, fname: String) -> Bool =
+fn lowered_fn_match_branch_has_lambda_first_arg(result: LowerOutcome, fname: String) -> Bool =
   match result with
-  | lowering.LowerErr _ -> false
-  | lowering.LowerOk prog ->
+  | LErr _ -> false
+  | LOk prog ->
       match prog with
       | typed_ast.TypedProgram decls ->
           match first_fn_body_named(decls, fname) with
@@ -275,10 +284,10 @@ fn last_do_expr_step_body(steps: List typed_ast.TypedDoStep) -> Maybe typed_ast.
           | _ -> Nothing
       | _ -> last_do_expr_step_body(rest)
 
-fn lowered_fn_do_last_step_has_lambda_first_arg(result: lowering.LowerResult, fname: String) -> Bool =
+fn lowered_fn_do_last_step_has_lambda_first_arg(result: LowerOutcome, fname: String) -> Bool =
   match result with
-  | lowering.LowerErr _ -> false
-  | lowering.LowerOk prog ->
+  | LErr _ -> false
+  | LOk prog ->
       match prog with
       | typed_ast.TypedProgram decls ->
           let Just body = first_fn_body_named(decls, fname) else false
@@ -315,9 +324,9 @@ fn main() -> Unit !{IO} =
     assert_false(state, "simple fn body type is non-sentinel", body_type_is_sentinel(r1))
     assert_false(state, "class wrapper body type is non-sentinel", body_type_is_sentinel(r4))
 
-    # Error propagation — lex errors become LowerErr
+    # Error propagation — lex errors become LErr
     r5 <- run_lower("@invalid syntax")
-    assert_false(state, "lex error propagates to LowerErr", is_lower_ok(r5))
+    assert_false(state, "lex error propagates to LErr", is_lower_ok(r5))
 
     # Regression: class method in value position must be eta-expanded to a TLambda,
     # not left as a bare TVar (which generates a generic closure including dict slots

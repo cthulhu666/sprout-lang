@@ -32,15 +32,12 @@ fn translate_source(src: String) -> Result String String !{IO} =
             match tc with
             | typed_ast.TypedErr _ msg -> Err("check: " ++ msg)
             | typed_ast.TypedOk typed_prog env ->
-                match lowering.lower_program(typed_prog, env) with
-                | lowering.LowerErr msg -> Err("lower: " ++ msg)
-                | lowering.LowerOk lowered ->
-                    match ast_to_ir.translate_program(lowered) with
-                    | Err msg -> Err(msg)
-                    | Ok pair ->
-                        match pair with
-                        | (ir_prog, idx_map) ->
-                            Ok(ir_lowering.lower_program(ir_rooting.insert_roots(ir_prog, idx_map)))
+                match ast_to_ir.translate_program(lowering.lower_program(typed_prog, env)) with
+                | Err msg -> Err(msg)
+                | Ok pair ->
+                    match pair with
+                    | (ir_prog, idx_map) ->
+                        Ok(ir_lowering.lower_program(ir_rooting.insert_roots(ir_prog, idx_map)))
 
 fn translated_ok_contains(src: String, needle: String) -> Bool !{IO} =
   match translate_source(src) with

@@ -23,7 +23,7 @@ fn run_file(path: String, stdlib_root: String) -> Unit !{IO} =
   do
     result <- bundler.bundle_file(source.FilePath(path), source.StdlibRoot(stdlib_root))
     match result with
-    | bundler.BundleErr msg -> print("ERROR: " ++ msg)
+    | bundler.BundleErr _ msg -> print("ERROR: " ++ msg)
     | bundler.BundleOk prog ->
         match prog with
         | ast.Program decls _ ->

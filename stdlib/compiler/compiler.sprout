@@ -146,7 +146,7 @@ export fn compile_full(path: source.FilePath, stdlib_root: source.StdlibRoot) ->
   do
     bundle_result <- bundler.bundle_file(path, stdlib_root)
     match bundle_result with
-    | bundler.BundleErr msg -> FullFail(Cons (DiagError(no_pos(), "bundle: " ++ msg), Nil))
+    | bundler.BundleErr pos msg -> FullFail(Cons (DiagError(pos, "bundle: " ++ msg), Nil))
     | bundler.BundleOk prog ->
         do
           cache <- module_loader.new_cache()
@@ -155,9 +155,7 @@ export fn compile_full(path: source.FilePath, stdlib_root: source.StdlibRoot) ->
           match tc_result with
           | typed_ast.TypedErr pos msg -> FullFail(Cons (DiagError(pos, "check: " ++ msg), Nil))
           | typed_ast.TypedOk typed_prog env ->
-              match lowering.lower_program(typed_prog, env) with
-              | lowering.LowerErr msg -> FullFail(Cons (DiagError(no_pos(), "lower: " ++ msg), Nil))
-              | lowering.LowerOk lowered -> FullOk(lowered, env)
+              FullOk(lowering.lower_program(typed_prog, env), env)
 
 # ---------------------------------------------------------------------------
 # Full IR pipeline: bundle → typecheck → lower → codegen
@@ -219,7 +217,7 @@ export fn compile_phase_check_with_roots(path: source.FilePath, stdlib_root: sou
   do
     bundle_result <- bundler.bundle_file_with_roots(path, stdlib_root, extra_roots)
     match bundle_result with
-    | bundler.BundleErr msg -> typed_ast.TypedErr(no_pos(), "bundle: " ++ msg)
+    | bundler.BundleErr pos msg -> typed_ast.TypedErr(pos, "bundle: " ++ msg)
     | bundler.BundleOk prog ->
         do
           cache <- module_loader.new_cache()
@@ -258,9 +256,7 @@ export fn compile_phase_lower_with_roots(path: source.FilePath, stdlib_root: sou
     match check_result with
     | typed_ast.TypedErr pos msg -> typed_ast.TypedErr(pos, msg)
     | typed_ast.TypedOk typed_prog env ->
-        match lowering.lower_program(typed_prog, env) with
-        | lowering.LowerErr msg -> typed_ast.TypedErr(no_pos(), "lower: " ++ msg)
-        | lowering.LowerOk lowered -> typed_ast.TypedOk(dce.elim_program(lowered), env)
+        typed_ast.TypedOk(dce.elim_program(lowering.lower_program(typed_prog, env)), env)
 
 export fn compile_phase_recheck(path: source.FilePath, stdlib_root: source.StdlibRoot) -> typed_ast.TypedResult !{IO} =
   compile_phase_recheck_with_roots(path, stdlib_root, Nil)
@@ -296,7 +292,7 @@ fn compile_phase_check_with_cache(path: source.FilePath, stdlib_root: source.Std
   do
     bundle_result <- bundler.bundle_file(path, stdlib_root)
     match bundle_result with
-    | bundler.BundleErr msg -> typed_ast.TypedErr(no_pos(), "bundle: " ++ msg)
+    | bundler.BundleErr pos msg -> typed_ast.TypedErr(pos, "bundle: " ++ msg)
     | bundler.BundleOk prog ->
         do
           prelude_pairs <- module_loader.load_prelude_pairs(source.stdlib_root_str(stdlib_root), cache)
@@ -331,9 +327,7 @@ fn compile_phase_lower_with_cache(path: source.FilePath, stdlib_root: source.Std
     match check_result with
     | typed_ast.TypedErr pos msg -> typed_ast.TypedErr(pos, msg)
     | typed_ast.TypedOk typed_prog env ->
-        match lowering.lower_program(typed_prog, env) with
-        | lowering.LowerErr msg -> typed_ast.TypedErr(no_pos(), "lower: " ++ msg)
-        | lowering.LowerOk lowered -> typed_ast.TypedOk(dce.elim_program(lowered), env)
+        typed_ast.TypedOk(dce.elim_program(lowering.lower_program(typed_prog, env)), env)
 
 fn compile_phase_recheck_with_cache(path: source.FilePath, stdlib_root: source.StdlibRoot, cache) -> typed_ast.TypedResult !{IO} =
   compile_phase_lower_with_cache(path, stdlib_root, cache)
