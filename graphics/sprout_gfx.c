@@ -955,10 +955,42 @@ static int aabb_in_frustum(const float *mn, const float *mx) {
   return 1;
 }
 
+/* Dev/analysis camera override: if SPROUT_GFX_CAM_RADIUS is set, ignore the app's camera and orbit a
+ * fixed target — reproducible screenshots at a chosen zoom/angle/location, for ANY gfx demo, with no
+ * code edits (parallels SPROUT_GFX_SCREENSHOT). Env (floats; yaw in degrees):
+ *   SPROUT_GFX_CAM_RADIUS  horizontal standoff (REQUIRED to activate)
+ *   SPROUT_GFX_CAM_TX / _TZ  look-at target world x / z   (default 0)
+ *   SPROUT_GFX_CAM_TY        target height                (default 4)
+ *   SPROUT_GFX_CAM_HEIGHT    eye height above the target  (default radius*0.6)
+ *   SPROUT_GFX_CAM_YAW       orbit angle, degrees         (default 0) */
+static void apply_cam_override(void) {
+  static int parsed = 0, active = 0;
+  static float tx = 0, tz = 0, ty = 4, radius = 0, height = 0, yaw = 0;
+  if (!parsed) {
+    parsed = 1;
+    const char *r = getenv("SPROUT_GFX_CAM_RADIUS");
+    if (r) {
+      active = 1;
+      radius = (float)atof(r);
+      const char *v;
+      v = getenv("SPROUT_GFX_CAM_TX");     tx = v ? (float)atof(v) : 0.0f;
+      v = getenv("SPROUT_GFX_CAM_TZ");     tz = v ? (float)atof(v) : 0.0f;
+      v = getenv("SPROUT_GFX_CAM_TY");     ty = v ? (float)atof(v) : 4.0f;
+      v = getenv("SPROUT_GFX_CAM_HEIGHT"); height = v ? (float)atof(v) : radius * 0.6f;
+      v = getenv("SPROUT_GFX_CAM_YAW");    yaw = v ? (float)atof(v) : 0.0f;
+    }
+  }
+  if (!active) return;
+  float yr = yaw * (3.14159265f / 180.0f);
+  g_cam.target   = (Vector3){ tx, ty, tz };
+  g_cam.position = (Vector3){ tx + radius * sinf(yr), ty + height, tz + radius * cosf(yr) };
+}
+
 long long gfx_frame_begin(void) {
   /* With any post-effect enabled, render the 3D scene into the off-screen target
    * so gfx_frame_end can present it through POST_FS; otherwise draw straight to
    * the backbuffer (keeps 4x MSAA — see the post-processing block). */
+  apply_cam_override();
   if (use_offscreen()) BeginTextureMode(g_scene_target);
   else BeginDrawing();
   /* Clear to the fog colour when fog is on, so distant terrain fades into the horizon seamlessly. */
