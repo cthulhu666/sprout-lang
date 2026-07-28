@@ -15,19 +15,19 @@ fn contains(haystack: String, needle: String) -> Bool =
   str_find(haystack, needle) != -1
 
 # Both sources include a main that calls make/get so DCE cannot eliminate them.
-# fn main() -> Int is recognized as the Sprout entry point.
+# fn main() -> Int !{IO} is recognized as the Sprout entry point.
 
 let wrap_src =
   "wrap Age = Int\n" ++
   "fn make(n: Int) -> Age = Age(n)\n" ++
   "fn get(a: Age) -> Int = match a with | Age n -> n\n" ++
-  "fn main() -> Int = get(make(42))\n"
+  "fn main() -> Int !{IO} = get(make(42))\n"
 
 let regular_adt_src =
   "type Age = Age Int\n" ++
   "fn make(n: Int) -> Age = Age(n)\n" ++
   "fn get(a: Age) -> Int = match a with | Age n -> n\n" ++
-  "fn main() -> Int = get(make(42))\n"
+  "fn main() -> Int !{IO} = get(make(42))\n"
 
 fn ir_ok(r: compiler.IrFullResult) -> Bool =
   match r with

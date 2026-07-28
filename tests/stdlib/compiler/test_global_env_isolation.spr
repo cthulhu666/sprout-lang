@@ -71,7 +71,7 @@ fn main() -> Unit !{IO} =
     let src3 = "class MyShow a {\n  fn myshow(x: a) -> String\n}\n" ++
                "instance MyShow Int {\n  fn myshow(x: Int) -> String = \"int\"\n}\n" ++
                "fn show_via_constraint(x: a) -> String where MyShow a = myshow(x)\n" ++
-               "fn main() -> String = show_via_constraint(42)\n"
+               "fn probe() -> String = show_via_constraint(42)\n"
     r3 <- run_check(src3)
     assert_true(state, "cascade resolution through @fwd marker typechecks", is_typed_ok(r3))
 

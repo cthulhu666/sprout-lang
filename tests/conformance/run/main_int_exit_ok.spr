@@ -1,0 +1,7 @@
+# Positive entrypoint fixture: an `Int !{IO}` main is a valid executable
+# entrypoint (the returned Int is the process exit code). Must be accepted by
+# validate_entrypoint and run to completion.
+fn main() -> Int !{IO} =
+  do
+    print("exit ok")
+    0

@@ -257,7 +257,7 @@ debug-run file: bootstrap-from-seed
 
 # Run all stdlib + compiler-stage tests (stage-1).
 [group('test')]
-test: test-stdlib-stage1 test-type-errors test-parse-errors test-conformance-run test-package-resolution gfx-smoke test-loam
+test: test-stdlib-stage1 test-type-errors test-parse-errors test-executable-errors test-conformance-run test-package-resolution gfx-smoke test-loam
 
 # Second-root (--package-root) module resolution gate: an app importing a module
 # from an extra package root resolves only when that root is registered
@@ -728,6 +728,14 @@ test-type-errors: (_test-reject "build/compile_driver_bin_stage1" "type_error" "
 # rejected at parse time with the diagnostic substring in <n>.err.
 [group('test')]
 test-parse-errors: (_test-reject "build/compile_driver_bin_stage1" "parse_error" "parse-error" "")
+
+# Stage-1 executable-entrypoint gate: a DEFINED `main` with a malformed signature
+# (nonzero args, non-Unit/Int return, pure, or effect-polymorphic) is rejected by
+# validate_entrypoint at check time. `missing_main` is xfail — enforcing a REQUIRED
+# main needs an explicit executable-vs-library compile mode (a library legitimately
+# has none, e.g. examples/sentry_api.sprout); tracked in BACKLOG §7.3.
+[group('test')]
+test-executable-errors: (_test-reject "build/compile_driver_bin_stage1" "executable_error" "executable-error" "missing_main")
 
 # Stage-2: emit IR → clang link for each example.
 [group('examples')]
@@ -1547,6 +1555,7 @@ ci-fast-gates: bootstrap-from-seed build-fmt-from-seed
     "fmt-check|fmt-check"
     "type-errors|test-type-errors"
     "parse-errors|test-parse-errors"
+    "executable-errors|test-executable-errors"
     "conformance-run|test-conformance-run"
     "example-canary|run-example-canary"
     "gc-safety|gc-safety-check --strict"

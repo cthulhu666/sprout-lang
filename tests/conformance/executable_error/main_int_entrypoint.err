@@ -1,1 +1,1 @@
-Executable entrypoint `main` must have type Unit !{IO} or Int !{IO}, got String !{IO}
+Executable entrypoint `main` must return Unit or Int

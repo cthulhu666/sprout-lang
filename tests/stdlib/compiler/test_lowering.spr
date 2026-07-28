@@ -347,19 +347,19 @@ fn main() -> Unit !{IO} =
     # Use a user-defined Box type (avoids Cons/Nil not being in scope in the isolated
     # typecheck env) with a concrete Box Int instance so the first-arg heuristic
     # resolves to Box (wrong) vs the prog_to_fresh scan which resolves to Int (correct).
-    r_dict_conc <- run_lower("class MyC a {\n  fn myop(x: a) -> String\n}\ninstance MyC Int {\n  fn myop(x: Int) -> String = \"int\"\n}\ntype Box a = Box a\ninstance MyC (Box Int) {\n  fn myop(xs: Box Int) -> String = \"boxint\"\n}\nfn boxwrap(xs: Box a) -> String where MyC a = \"ok\"\nfn main() -> String = boxwrap(Box(42))")
+    r_dict_conc <- run_lower("class MyC a {\n  fn myop(x: a) -> String\n}\ninstance MyC Int {\n  fn myop(x: Int) -> String = \"int\"\n}\ntype Box a = Box a\ninstance MyC (Box Int) {\n  fn myop(xs: Box Int) -> String = \"boxint\"\n}\nfn boxwrap(xs: Box a) -> String where MyC a = \"ok\"\nfn probe() -> String = boxwrap(Box(42))")
     assert_true(state, "constrained dict injection (container arg) lowers ok", is_lower_ok(r_dict_conc))
     assert_true(state, "constrained dict injection uses Int dict not Box dict",
-      str_starts_with(lowered_fn_body_dict_var_name(r_dict_conc, "main"), "__tc_MyC_Int_"))
+      str_starts_with(lowered_fn_body_dict_var_name(r_dict_conc, "probe"), "__tc_MyC_Int_"))
 
     # Gap 2: two independent constraint vars, both in container positions.
     # Each must resolve to its own element dict (Int / Bool), not the container dicts.
-    r_dual <- run_lower("class CA a {\n  fn opA(x: a) -> String\n}\nclass CB a {\n  fn opB(x: a) -> Int\n}\ninstance CA Int {\n  fn opA(x: Int) -> String = \"a\"\n}\ninstance CB Bool {\n  fn opB(x: Bool) -> Int = 0\n}\ntype BoxA a = BoxA a\ntype BoxB a = BoxB a\ninstance CA (BoxA Int) {\n  fn opA(xs: BoxA Int) -> String = \"abox\"\n}\ninstance CB (BoxB Bool) {\n  fn opB(xs: BoxB Bool) -> Int = 1\n}\nfn dual(x: BoxA a, y: BoxB b) -> String where CA a, CB b = \"ok\"\nfn main() -> String = dual(BoxA(42), BoxB(true))")
+    r_dual <- run_lower("class CA a {\n  fn opA(x: a) -> String\n}\nclass CB a {\n  fn opB(x: a) -> Int\n}\ninstance CA Int {\n  fn opA(x: Int) -> String = \"a\"\n}\ninstance CB Bool {\n  fn opB(x: Bool) -> Int = 0\n}\ntype BoxA a = BoxA a\ntype BoxB a = BoxB a\ninstance CA (BoxA Int) {\n  fn opA(xs: BoxA Int) -> String = \"abox\"\n}\ninstance CB (BoxB Bool) {\n  fn opB(xs: BoxB Bool) -> Int = 1\n}\nfn dual(x: BoxA a, y: BoxB b) -> String where CA a, CB b = \"ok\"\nfn probe() -> String = dual(BoxA(42), BoxB(true))")
     assert_true(state, "dual constraint (two containers) lowers ok", is_lower_ok(r_dual))
     assert_true(state, "dual constraint: first var resolves to Int dict (CA)",
-      str_starts_with(lowered_fn_body_dict_var_for_prefix(r_dual, "main", "__tc_CA_Int_"), "__tc_CA_Int_"))
+      str_starts_with(lowered_fn_body_dict_var_for_prefix(r_dual, "probe", "__tc_CA_Int_"), "__tc_CA_Int_"))
     assert_true(state, "dual constraint: second var resolves to Bool dict (CB)",
-      str_starts_with(lowered_fn_body_dict_var_for_prefix(r_dual, "main", "__tc_CB_Bool_"), "__tc_CB_Bool_"))
+      str_starts_with(lowered_fn_body_dict_var_for_prefix(r_dual, "probe", "__tc_CB_Bool_"), "__tc_CB_Bool_"))
 
     # Gap 3: direct (non-container) constrained call — constraint var is the arg type
     # itself.  With concrete-instance devirtualization (docs/devirtualization-v0.md) this
@@ -367,12 +367,12 @@ fn main() -> Unit !{IO} =
     # to the concrete __tc_Greet_Int_greet fn and DROPPING the dict witness (no __cm_ wrapper,
     # no dict arg).  The "resolves to Int not the wrong instance" intent is now expressed as
     # the callee name; the absence of an injected dict is the devirt signature.
-    r_direct <- run_lower("class Greet a {\n  fn greet(x: a) -> String\n}\ninstance Greet Int {\n  fn greet(x: Int) -> String = \"hi\"\n}\nfn main() -> String = greet(42)")
+    r_direct <- run_lower("class Greet a {\n  fn greet(x: a) -> String\n}\ninstance Greet Int {\n  fn greet(x: Int) -> String = \"hi\"\n}\nfn probe() -> String = greet(42)")
     assert_true(state, "direct constrained call lowers ok", is_lower_ok(r_direct))
     assert_true(state, "direct constrained call devirtualizes to the Int instance fn",
-      str_starts_with(lowered_fn_body_callee_name(r_direct, "main"), "__tc_Greet_Int_greet"))
+      str_starts_with(lowered_fn_body_callee_name(r_direct, "probe"), "__tc_Greet_Int_greet"))
     assert_eq(state, "direct constrained call injects NO dict (devirtualized)",
-      lowered_fn_body_dict_var_name(r_direct, "main"), "__none")
+      lowered_fn_body_dict_var_name(r_direct, "probe"), "__none")
 
     # P1-shadowed: a function parameter named after a class method must NOT be eta-expanded.
     # The name 'myshow' here refers to the local param (Int -> String), not the class method.

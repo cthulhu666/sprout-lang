@@ -1,1 +1,1 @@
-main must not be effect-polymorphic
+Executable entrypoint `main` must not be effect-polymorphic

@@ -1,1 +1,1 @@
-Function main requires undeclared effects
+Executable entrypoint `main` must declare the {IO} effect

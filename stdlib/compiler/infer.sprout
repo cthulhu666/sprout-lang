@@ -3464,7 +3464,15 @@ export fn typecheck_decls(
                 # Wrap scanned_env as GlobalEnv at this seam — scanned_env is the
                 # output of pre_scan_fn_decls (Dict, raw pre-pass). From here on
                 # the env flows between decls as the wrap-protected GlobalEnv.
-                typecheck_decls_inner(state, decls, GlobalEnv(scanned_env), subst, eff_subst, dict_empty(), Nil, unifier.ftv_env(scanned_env))
+                match typecheck_decls_inner(state, decls, GlobalEnv(scanned_env), subst, eff_subst, dict_empty(), Nil, unifier.ftv_env(scanned_env)) with
+                | typed_ast.TypedErr p m -> typed_ast.TypedErr(p, m)
+                | typed_ast.TypedOk prog schemes ->
+                    # Final gate: a DEFINED `main` must be a well-formed entrypoint.
+                    # Runs only on an otherwise-valid program, so a broken main body
+                    # reports its own error first (this never masks it).
+                    match validate_entrypoint(decls) with
+                    | Just msg -> typed_ast.TypedErr(dummy_pos(), msg)
+                    | Nothing -> typed_ast.TypedOk(prog, schemes)
 
 # ---------------------------------------------------------------------------
 # Strict type-name validation pass
@@ -3596,6 +3604,71 @@ fn validate_all_decls(decls: List ast.Decl, declared: List String) -> Maybe Stri
       match validate_decl(decl, declared) with
       | Just e -> Just(e)
       | Nothing -> validate_all_decls(rest, declared)
+
+# ---------------------------------------------------------------------------
+# Executable entrypoint validation
+# ---------------------------------------------------------------------------
+#
+# A function named `main` (bare, or the entry module's qualified `<mod>.main`)
+# is only ever an intended process entrypoint, so if one is DEFINED it must be
+# well-formed: zero parameters, a `Unit` or `Int` return type, and a concrete
+# `!{IO}` effect (not pure, not effect-polymorphic). An `Int` return is the
+# process exit code (see ast_to_ir.user_main_fn_name); any other return type
+# would be forced through the Unit wrapper and miscompile.
+#
+# Runs as a FINAL gate on an otherwise-valid program (only when the body
+# typechecks), so a broken `main` body reports its own error first and this
+# check never masks it. A MISSING `main` is NOT an error here: a library
+# legitimately defines none, and typecheck cannot distinguish a library check
+# from an executable build. "missing main" is enforced only on the executable
+# codegen path.
+#
+# is_main_decl_name mirrors ast_to_ir.is_entry_fn_name / codegen.is_entry_fn_name.
+fn is_main_decl_name(name: String) -> Bool =
+  name == "main" || (n >= 5 && str_slice(name, n - 5, 5) == ".main")
+  where n = str_len(name)
+
+fn main_return_ok(ret: Maybe ast.TypeExpr) -> Bool =
+  match ret with
+  | Just (ast.TypeName "Unit") -> true
+  | Just (ast.TypeName "Int") -> true
+  | _ -> false
+
+# An effect name is a variable (polymorphic) iff it is lowercase; concrete
+# effects like `IO` are capitalized.
+fn any_effect_var(effs: List String) -> Bool =
+  match effs with
+  | Nil -> false
+  | Cons e rest -> if is_lowercase_name(e) then true else any_effect_var(rest)
+
+fn main_effect_error(effects: Maybe (List String)) -> Maybe String =
+  match effects with
+  | Nothing -> Just("Executable entrypoint `main` must declare the {IO} effect")
+  | Just effs ->
+      if any_effect_var(effs) then Just("Executable entrypoint `main` must not be effect-polymorphic")
+      else if str_list_contains(effs, "IO") == false then Just("Executable entrypoint `main` must declare the {IO} effect")
+      else Nothing
+
+fn check_main_signature(params: List ast.Param, ret: Maybe ast.TypeExpr, effects: Maybe (List String)) -> Maybe String =
+  match params with
+  | [] ->
+      if main_return_ok(ret) == false then Just("Executable entrypoint `main` must return Unit or Int")
+      else main_effect_error(effects)
+  | _ -> Just("Executable entrypoint `main` must take zero arguments")
+
+# Returns the first entrypoint diagnostic among the decls, or Nothing.
+fn validate_entrypoint(decls: List ast.Decl) -> Maybe String =
+  match decls with
+  | Nil -> Nothing
+  | Cons decl rest ->
+      match decl with
+      | ast.FnDecl name params ret effects _ _ _ ->
+          if is_main_decl_name(name) then
+            match check_main_signature(params, ret, effects) with
+            | Just e -> Just(e)
+            | Nothing -> validate_entrypoint(rest)
+          else validate_entrypoint(rest)
+      | _ -> validate_entrypoint(rest)
 
 # ---------------------------------------------------------------------------
 # Overlapping-instance validation pass
