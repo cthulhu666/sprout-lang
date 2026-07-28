@@ -1,7 +1,7 @@
 # Galaxy Map Demo (v0)
 
 Status: experimental example (`examples/gfx/galaxy_map.sprout`), not normative. A two-scene demo:
-**scene 1** is the streaming galaxy map; **scene 2** is the solar-system view — right-click a star,
+**scene 1** is the streaming galaxy map; **scene 2** is the solar-system view — click a star,
 then `System >` to fly into it and see its star, planets, and orbits (built; see "Scene 2" below).
 
 ## What it is
@@ -9,7 +9,7 @@ then `System >` to fly into it and see its star, planets, and orbits (built; see
 A 3D galaxy map of the 1,000,000-system universe produced by the Haskell generator at
 `~/GameDev/universegen`. Stars are drawn as an instanced 3D point cloud, coloured by spectral class;
 black holes are the violet/magenta landmarks (the supermassive one anchors the galactic centre). The
-camera orbits, tilts, zooms and pans; right-clicking a system shows its details. Level-of-detail is
+camera orbits, tilts, zooms and pans; clicking a system shows its details. Level-of-detail is
 **zoom-adaptive**: only a coarse overview is shown when zoomed out, and finer stars stream in as you
 zoom into a region — so all 1M systems are reachable without ever drawing them at once.
 
@@ -87,9 +87,14 @@ The demo builds `<catalog>-balanced` on first launch and reuses it thereafter; y
   (a fast zoom refines progressively). `desired_level` is kept only to seed the committed level at
   startup so the opening frame is already at the right detail. Both read `level_boundary`, the single
   source of the ladder thresholds. Pure and headless-tested in `tests/loam/test_galaxy_lod.spr`.
-- **Picking (right-click).** No retained star store — a click re-reads the ~focus tiles, projects each
+- **Picking (left-click).** Left-click is overloaded: a press-and-drag ORBITS the camera, so
+  selection is a **tap** — press and release in place. The tap is detected on the release edge by
+  `loam.camera.is_tap` (the press-down point is latched on the press edge and threaded through the
+  render loop; a release within a small `click_slop` square of it is a tap, larger is a drag). On a
+  tap, and only off the UI, the pick re-reads the ~focus tiles (no retained star store), projects each
   star with `gfx.world_to_screen`, and selects the nearest to the cursor within a pixel radius. Its
-  `name`/`detailLine` render in the bottom-left panel.
+  `name`/`detailLine` render in the bottom-left panel. `is_tap` is pure and headless-tested in
+  `tests/loam/test_camera.spr`.
 - **Scene switch.** A `view: Int` threaded through the render loop (0 = galaxy, 1 = solar-system
   stub) with one toggle button — the app-managed pattern the real scene 2 will build on.
 
@@ -174,7 +179,7 @@ These are gfx-binding additions (non-bootstrap; no seed refresh):
 
 ## Scene 2 — solar-system view (built)
 
-Right-click a star in scene 1 to select it, then the `System >` button flips `view` to 1 and flies
+Click a star in scene 1 to select it, then the `System >` button flips `view` to 1 and flies
 into that system. The scene:
 
 - **Loads the real per-system JSON.** `systems/block-<floor(id/10000)>/SYS-<id>.json` (a sibling of
@@ -224,7 +229,7 @@ into that system. The scene:
 - **Own camera.** A separate AU-scale `Cam` (the system is always at the origin), driven by the same
   `loam.camera` rig; the galaxy camera is held while in scene 2.
 - **Scripting.** `argv[6] = <system id>` opens directly in scene 2 for that system (screenshot/canary
-  of a view that otherwise needs an interactive right-click).
+  of a view that otherwise needs an interactive click).
 
 ## Spectral-class filter (built)
 
@@ -232,7 +237,7 @@ Right-side legend of 12 clickable class checkboxes (multiselect) + `All`/`None`.
 filled with the class colour when enabled (so it doubles as the palette swatch) and dark when not;
 scene 1 draws only the enabled classes via `gfx.draw_instances_masked` (model index == `classCode`,
 so the mask enables/disables whole classes). The filter is instant — a pure render mask, no restream —
-and picking respects it (a right-click can only select a currently-visible star). `argv[7]` opens on
+and picking respects it (a click can only select a currently-visible star). `argv[7]` opens on
 an initial mask (e.g. `64` = M-only) for screenshots.
 
 - **The hard part was coverage, not rendering.** The render mask is nearly free, but the raw catalog

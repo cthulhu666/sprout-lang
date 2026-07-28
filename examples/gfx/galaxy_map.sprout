@@ -5,7 +5,7 @@ import stdlib.string (split_once)
 import stdlib.math (min, pi, sin, cos)
 import stdlib.json as json
 import stdlib.process (proc_run)
-import loam.camera (Cam, cam_drive, cam_distance)
+import loam.camera (Cam, cam_drive, cam_distance, is_tap)
 import loam.view (cam_apply)
 import loam.config (parse_config, cfg_int)
 import loam.galaxy_lod (pow2, level_offset, group_of, clampi, desired_level, next_level, tile_index_i)
@@ -74,6 +74,7 @@ let drag_pitch_step = 0.005  # radians per pixel of vertical drag
 let wheel_zoom_frac = 0.12  # zoom step as a fraction of current eye distance per wheel notch
 let key_pan_frac = 0.02  # WASD pan per frame as a fraction of eye distance
 let drag_pan_frac = 0.0018  # shift-drag pan per pixel as a fraction of eye distance
+let click_slop = 6  # px; a left press+release moving within this square is a select-tap, not an orbit drag
 
 # --- Scene 2 (solar-system view) tunables -------------------------------------------------------
 # Systems vary wildly in extent (this catalog has compact 0.5-AU systems and spread 30-AU ones), so
@@ -226,8 +227,10 @@ fn load_levels(dir: String, cam: Cam, maxlvl: Int, level: Int, radius: Double, l
     in match load_cols(dir, level, cx, cy, 0 - neighbor_radius, loaded, budget) with
        | (l2, b2) -> load_levels(dir, cam, maxlvl, level + 1, radius, l2, b2)
 
-# --- Picking: on right-click, re-read the focus tiles and select the star nearest the cursor ------
-# A click is rare, so rather than retain every streamed star we re-parse the focus tiles on demand
+# --- Picking: on a left-click TAP, re-read the focus tiles and select the star nearest the cursor --
+# Left-click is overloaded (drag orbits the camera; a press+release in place SELECTS — see is_tap in
+# loam.camera and the render loop's release-edge gate). A click is rare, so rather than retain every
+# streamed star we re-parse the focus tiles on demand
 # and project each star to the screen (gfx.world_to_screen). `best` threads the nearest hit so far as
 # (screen-distance^2, name, detailLine). Every arm is !{IO} (via keep_best) so the effect rows unify.
 let pick_radius2 = 900.0  # 30px selection radius, squared
@@ -241,7 +244,7 @@ fn keep_best(best: (Double, String, String)) -> (Double, String, String) !{IO} =
     best
 
 # `mask` is threaded through the whole pick chain so a click can only select a star whose spectral
-# class is currently VISIBLE — right-clicking never picks a filtered-out (undrawn) star.
+# class is currently VISIBLE — clicking never picks a filtered-out (undrawn) star.
 fn pick_line(line: String, mx: Double, my: Double, mask: Int, best: (Double, String, String)) -> (Double, String, String) !{IO} =
   match split_pipe(line) with
   | [_id, xs, ys, zs, cs, _szs, name, detail | _] ->
@@ -832,7 +835,7 @@ fn legend_none_btn(active: Bool) -> Bool !{IO} =
 
 # --- Render loop --------------------------------------------------------------------------------
 fn render_loop(dir: String, cam: Cam, scam: Cam, radius: Double, loaded: Dict Int,
-               sel_name: String, sel_detail: String, prev_rdown: Bool, view: Int, prev_lvl: Int,
+               sel_name: String, sel_detail: String, dnx: Int, dny: Int, view: Int, prev_lvl: Int,
                csys: String, cplanets: List Planet, hov1: String, hov2: String,
                mask: Int, prev_ldown: Bool, sun_sh: Int, planet_sh: Int) -> Unit !{IO} =
   do
@@ -859,7 +862,7 @@ fn render_loop(dir: String, cam: Cam, scam: Cam, radius: Double, loaded: Dict In
         gfx.overlay_begin()
         gfx.draw_fps(10, 10)
         if view == 0
-          then gfx.draw_text(10, 34, "drag: orbit/tilt   shift+drag / WASD: pan   wheel: zoom   right-click: inspect", 18, 180, 190, 210)
+          then gfx.draw_text(10, 34, "click: inspect   drag: orbit/tilt   shift+drag / WASD: pan   wheel: zoom", 18, 180, 190, 210)
           else gfx.draw_text(10, 34, "SOLAR SYSTEM   drag: orbit/tilt   wheel: zoom   (< Galaxy to return)", 18, 255, 220, 120)
         if view == 0
           then gfx.draw_text(10, 56, "LoD level " ++ to_string(lvl), 18, 150, 200, 150)
@@ -889,7 +892,6 @@ fn render_loop(dir: String, cam: Cam, scam: Cam, radius: Double, loaded: Dict In
         none_click <- legend_none_btn(view == 0)
         wheel <- gfx.mouse_wheel_y()
         ldown <- gfx.mouse_button_down(gfx.mouse_left)
-        rdown <- gfx.mouse_button_down(gfx.mouse_right)
         mx <- gfx.mouse_x()
         my <- gfx.mouse_y()
         gdx <- gfx.mouse_delta_x()
@@ -900,7 +902,18 @@ fn render_loop(dir: String, cam: Cam, scam: Cam, radius: Double, loaded: Dict In
         ka <- gfx.key_down(gfx.key_a)
         kd <- gfx.key_down(gfx.key_d)
         gfx.frame_end()
-        let do_pick = rdown && ! prev_rdown && (view == 0)
+        # UI hit-region (computed before the pick so a click on the legend / buttons never selects a
+        # star): the scene-switch button (bottom-right), or in scene 1 the filter legend + All/None.
+        let over_legend = (view == 0) && (mx >= leg_x) && (my >= leg_y - 28) && (my <= leg_btn_y + 30)
+        let over_ui = over_legend || ((mx >= 1090) && (my >= 715))
+        # Left-click SELECT (scene 1). Left-drag orbits, so selection is a TAP: latch the press-down
+        # point on the press edge, and on the RELEASE edge pick only if the pointer barely moved
+        # (is_tap) and the gesture stayed off the UI. dnx2/dny2 carry the latched point to next frame.
+        let l_press = ldown && ! prev_ldown
+        let l_release = ! ldown && prev_ldown
+        let dnx2 = if l_press then mx else dnx
+        let dny2 = if l_press then my else dny
+        let do_pick = l_release && (view == 0) && ! over_ui && is_tap(dnx2, dny2, mx, my, click_slop)
         let pseed = (pick_far, sel_name, sel_detail)
         picked <- maybe_pick(do_pick, dir, cam, lvl, radius, to_double(mx), to_double(my), mask, pseed)
         # Spectral-class filter update (scene 1). A left-click EDGE on a checkbox row toggles that
@@ -912,10 +925,6 @@ fn render_loop(dir: String, cam: Cam, scam: Cam, radius: Double, loaded: Dict In
         # Scene-2 hover: nearest planet to the cursor (in-memory list, same scale as the draw).
         hovered <- maybe_hover((view == 1), cplanets2, s2ext, to_double(mx), to_double(my))
         let next_view = if toggle then (if view == 0 then 1 else 0) else view
-        # Don't treat a left-click over UI as a camera drag: the scene-switch button (bottom-right), or
-        # in scene 1 the filter legend + All/None buttons (right side, y from the header to below them).
-        let over_legend = (view == 0) && (mx >= leg_x) && (my >= leg_y - 28) && (my <= leg_btn_y + 30)
-        let over_ui = over_legend || ((mx >= 1090) && (my >= 715))
         # Whichever view is active drives its own camera; the other's is held. Zoom/pan scale by the
         # ACTIVE eye distance so both the galaxy (ly) and system (AU-world) scales feel the same.
         let active = if view == 0 then cam else scam
@@ -944,7 +953,7 @@ fn render_loop(dir: String, cam: Cam, scam: Cam, radius: Double, loaded: Dict In
                 | (hov1b, hov2b) ->
                     let name2 = if best_d2 < pick_radius2 then best_name else sel_name
                         detail2 = if best_d2 < pick_radius2 then best_detail else sel_detail
-                    in render_loop(dir, cam2, scam2, radius, loaded2, name2, detail2, rdown, next_view, lvl, csys2, cplanets2, hov1b, hov2b, mask2, ldown, sun_sh, planet_sh)
+                    in render_loop(dir, cam2, scam2, radius, loaded2, name2, detail2, dnx2, dny2, next_view, lvl, csys2, cplanets2, hov1b, hov2b, mask2, ldown, sun_sh, planet_sh)
 
 fn main() -> Unit !{IO} =
   do
@@ -986,7 +995,7 @@ fn main() -> Unit !{IO} =
     let scam0 = Cam(yaw = 0.6, radius = s2_init_radius, height = s2_init_height,
                     tx = 0.0, ty = 0.0, tz = 0.0)
     # Optional argv[6] = a system id to open DIRECTLY in the solar-system view (screenshot/canary of
-    # scene 2, which otherwise needs an interactive right-click). Absent/negative -> normal galaxy start.
+    # scene 2, which otherwise needs an interactive click). Absent/negative -> normal galaxy start.
     sys_arg <- arg_int(6, 0 - 1)
     let init_view = if sys_arg >= 0 then 1 else 0
     let init_name = if sys_arg >= 0 then "SYS-" ++ pad5(sys_arg) else "No system selected"
@@ -994,5 +1003,5 @@ fn main() -> Unit !{IO} =
     # classes shown (mask_all). Lets a screenshot/canary open on a filtered view, e.g. 64 = M-only.
     init_mask <- arg_int(7, mask_all)
     render_loop(dir, cam0, scam0, radius, dict_empty(),
-                init_name, "Right-click a star to inspect it", false, init_view, seed_lvl, "", Nil, "", "",
+                init_name, "Click a star to inspect it", 0, 0, init_view, seed_lvl, "", Nil, "", "",
                 init_mask, false, sun_sh, planet_sh)

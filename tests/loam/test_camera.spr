@@ -1,6 +1,6 @@
 import stdlib.test (TestState, new_state, assert_true, summary)
 import stdlib.math (fabs, pi, sin, sqrt)
-import loam.camera (Cam, cam_rotate, cam_zoom, cam_pitch, cam_pan, cam_eye, cam_drive, cam_distance, tree_cull_dist)
+import loam.camera (Cam, cam_rotate, cam_zoom, cam_pitch, cam_pan, cam_eye, cam_drive, cam_distance, tree_cull_dist, is_tap)
 
 # Headless coverage for loam.view's free-look camera controller (the whole package:
 # rotate / zoom / tilt / pan). Everything here is PURE state math — no window — so
@@ -118,5 +118,18 @@ fn main() -> Unit !{IO} =
     assert_true(state, "tree_cull_dist scales with span", near(tree_cull_dist(1000.0, 3.0), 3000.0))
     assert_true(state, "tree_cull_dist frac 0 disables", near(tree_cull_dist(1000.0, 0.0), 0.0))
     assert_true(state, "tree_cull_dist negative frac clamps to 0", near(tree_cull_dist(1000.0, 0.0 - 2.0), 0.0))
+
+    # --- is_tap: LEFT-button gesture classifier. A press+release within a `slop`-pixel
+    # square (Chebyshev, per-axis) is a TAP (select); anything larger is an orbit DRAG.
+    # This is what lets the galaxy map overload left-click for both camera and picking. ---
+    assert_true(state, "is_tap same pixel is a tap", is_tap(100, 200, 100, 200, 6))
+    assert_true(state, "is_tap within slop each axis", is_tap(100, 200, 105, 195, 6))
+    # Boundary: movement exactly == slop still counts (<=), on either axis.
+    assert_true(state, "is_tap exactly at slop is a tap", is_tap(100, 200, 106, 194, 6))
+    # Direction-agnostic: an up-left move of the same magnitude is still a tap (abs).
+    assert_true(state, "is_tap is direction-agnostic", is_tap(100, 200, 94, 206, 6))
+    # A drag past slop in EITHER axis is not a tap.
+    assert_true(state, "is_tap fails past slop in x",! is_tap (100, 200, 107, 200, 6))
+    assert_true(state, "is_tap fails past slop in y",! is_tap (100, 200, 100, 208, 6))
 
     summary(state)

@@ -59,6 +59,20 @@ export fn cam_distance(c: Cam) -> Double =
 export fn tree_cull_dist(span: Double, frac: Double) -> Double =
   if frac <= 0.0 then 0.0 else span * frac
 
+# Gesture classifier for the LEFT button, which is overloaded: a press-and-drag
+# ORBITS the rig, but a press-and-release-in-place is a TAP (a click — the galaxy
+# map uses it to SELECT a system). A tap is distinguished on the release edge: the
+# pointer moved no more than `slop` pixels from where it went down. Chebyshev
+# (max-per-axis) rather than Euclidean, so it needs no multiply/sqrt and reads as a
+# small square dead-zone; graphics-free and unit-tested. `slop` absorbs the jitter
+# of a physical click (a mouse rarely lands on the exact same pixel it left).
+export fn is_tap(down_x: Int, down_y: Int, up_x: Int, up_y: Int, slop: Int) -> Bool =
+  let dx = up_x - down_x
+      dy = up_y - down_y
+      ax = if dx < 0 then 0 - dx else dx
+      ay = if dy < 0 then 0 - dy else dy
+  in (ax <= slop) && (ay <= slop)
+
 # Zoom: change the eye's DISTANCE to the target by `dr` (negative pulls in),
 # clamped to [lo, hi]. The (horizontal, vertical) offset is scaled uniformly, so
 # the pitch ANGLE is preserved — zoom changes apparent size, not viewing angle.
