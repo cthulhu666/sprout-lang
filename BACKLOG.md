@@ -65,6 +65,19 @@ Legend:
   temp-file + stdout capture (disproportionate for a dump-AST debug driver — consider leaving it).
   Both conversions are behaviour-preserving. The 9 `test_ir_codegen_*` compile-pipeline harnesses are
   also convertible but are deliberately-nested test fixtures — leave them.
+- [ ] `P4` **`staircase-of-doom` lint false-positives on inverted alternatives chains.** The rule's
+  `classify` treats any chain of 2-arm matches as a flattenable staircase, but an inverted
+  first-success-wins chain (continuing branch is a nullary `Nothing`, terminals are value-bearing
+  `Just x -> result`) is the wrong polarity for `let..else` and reads worse when forced. Concrete
+  case: `infer.sprout` `resolve_obligation` (:1668), flagged `blocked=false` but genuinely not a clean
+  fit (it stays flagged, needing `--no-verify` on any commit touching the file). Refine the rule to
+  detect the polarity (continuing branch binds nothing / terminals carry the payload) and either not
+  flag or emit a distinct message.
+- [ ] `P4` **Effectful-`let..else` surface (B) — unify `do` and `let..in`.** Shipped as surface (A),
+  `do`-local, keeping `let..in` always-pure (`docs/effectful-let-else-v0.md` §5). (B) would let a
+  `let..in` block hold `<-` bindings (one flat mixed `=`/`<-` list), at the cost of reclassifying
+  `let..in` as sometimes-effectful. Deferred as a possible future unification — revisit only if the
+  two-construct split (`do` for effects, `let..in` for pure) proves to be friction in practice.
 - [ ] `P2` Revisit string-interpolation type-directed dispatch (Mechanism A): Phase 4 ships a simple syntactic-coercion form (elaborator inserts `template_to_string` only at `String`-expected contexts; default template result is `String`). Evaluate migrating to an `IsTemplate` typeclass with instances for `String` and `StringTemplate` once usage patterns settle. Class-based dispatch is more principled and consistent with the rest of the class system; tradeoff is added constraint-machinery overhead and possible defaulting ambiguity. Decision should be driven by whether a third meaningful instance (e.g. `Bytes`, a logging frame, a tagged-template processor) lands and forces generality.
 - [x] `P1` Validate type-name references in `TypeDecl` field and constraint positions resolve to a declared type (strict type-name validation). Landed in PR feat/strict-typedecl-validation: `validate_all_decls` pass in `stdlib/compiler/infer.sprout` runs after `pre_scan_fn_decls`, walks `TypeDecl` constructor fields, `RecordDecl` field types, and `AliasDecl` RHS type-exprs; emits `type-validation: unknown type name \`X\` in declaration \`Y\`` on the first unresolved uppercase `TypeName`. Mutual recursion between ADTs is safe (pass runs post-scan). Positions NOT yet covered (see follow-up below): `ClassDecl` method signatures, `InstanceDecl` constraint types, `FnDecl` param/return annotations.
 - [ ] `P2` Extend strict type-name validation to `ClassDecl` method signatures, `InstanceDecl` constraint types, and `FnDecl` param/return annotations (follow-up to P1 above). The `validate_decl` function in `stdlib/compiler/infer.sprout` currently matches `| _ -> Nothing` for these positions. Extend it — the main complication for `FnDecl`/`ClassDecl` is correctly threading local type-parameter sets into `validate_te` so that method-specific variables like `a`, `b` in `fmap(f: a -> b) -> f b` are not flagged.
