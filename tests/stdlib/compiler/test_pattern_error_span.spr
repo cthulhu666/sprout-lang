@@ -1,0 +1,41 @@
+module main
+import stdlib.test (TestState, new_state, assert_true, summary)
+import stdlib.compiler.compiler as compiler
+import stdlib.compiler.source as source
+
+# Regression for guideline #5 (errors carry a source location from inception),
+# pattern-inference edition. A type error discovered while inferring a *pattern*
+# must report the offending pattern's position, not no_pos() (line 0).
+#
+# Fixture: an Int scrutinee matched against a tuple pattern `(a, b)` on line 3 —
+# infer_tuple_pattern_unified fails to unify Int with a 2-tuple.
+
+fn first_diag(result: compiler.CompileResult) -> Maybe compiler.Diagnostic =
+  match result with
+  | compiler.CompileOk _ -> Nothing
+  | compiler.CompileFail diags ->
+      match diags with
+      | Nil -> Nothing
+      | [d | _] -> Just(d)
+
+fn diag_line(d: compiler.Diagnostic) -> Int =
+  match d with
+  | compiler.DiagError pos _ -> source.position_line(pos)
+  | compiler.DiagWarning pos _ -> source.position_line(pos)
+
+fn main() -> Unit !{IO} =
+  do
+    state <- new_state()
+    match env_get("SPROUT_STDLIB_ROOT") with
+    | Nothing -> ()
+    | Just stdlib_root ->
+        do
+          let src = "fn f(x: Int) -> Int =\n  match x with\n  | (a, b) -> a\n"
+          r <- compiler.compile_source_with_root(src, source.StdlibRoot(stdlib_root))
+          assert_true(state, "tuple-vs-Int pattern mismatch produces CompileFail",
+            match r with | compiler.CompileFail _ -> true | _ -> false)
+          assert_true(state, "pattern-inference error reports the pattern's line (3, not 0)",
+            match first_diag(r) with
+            | Nothing -> false
+            | Just d -> diag_line(d) == 3)
+    summary(state)

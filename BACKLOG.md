@@ -857,13 +857,25 @@ dot-guard `infer.is_lowercase_name` has (a dotted name is never a type variable)
    - `opaque type` for Scala 3-style module-boundary transparency
      (transparent within defining module, opaque to callers). Distinct from the
      already-shipped `export type Name` export-opacity feature.
-16. Span `BundleErr`, `LowerErr`, and codegen errors (guideline #5 Phase 3).
-   Phase 1+2 landed in `fix/span-error-types`: `Diagnostic`, `InferErr`, `TypedErr`,
-   `CheckErr`, `BodyErr` all carry `SourcePos`; lex/parse/type errors now print
-   `line:col: ERROR: msg`. Remaining gaps — every `no_pos()` and `dummy_pos()` call in
-   `compiler.sprout` that wraps a `BundleErr`/`LowerErr`/`IrLinesErr` — require adding
-   `SourcePos` to `BundleResult`, `LowerResult`, and `IrLinesResult`. Sequencing: land
-   after deriving-v1 to avoid compounding bootstrap cycles.
+16. Span remaining error sites (guideline #5 Phase 3, tail).
+   Landed on master: `Diagnostic`, `InferErr`, `TypedErr`, `CheckErr`, `BodyErr` carry
+   `SourcePos` (Phase 1+2); lex/parse/type errors print `line:col: ERROR: msg`.
+   PR #286: `BundleErr` spanned (via `ast.decl_pos` + validator threading) and the
+   vestigial `LowerResult` collapsed. Branch `fix/span-pattern-inference`: all
+   pattern-inference errors spanned (`ast.pattern_pos` + threading through
+   `check_pattern_type`/`infer_tuple_pattern`/`check_pattern_list`/`infer_ctor_pattern`),
+   plus branch-unify / fn-body / instance-method return-mismatch sites via
+   `typed_expr_pos`, and `no_pos()`/`dummy_pos()` consolidated to a single guarded
+   `no_pos()`. Remaining `no_pos()` *error* sites, each needing its own threading:
+   - `infer_call_resolve` `CallErr` (828/831/835) — thread a call `pos` in from its
+     two callers (the call expr carries one).
+   - `typecheck_decls` `TypedErr` (validate_all_decls / check_overlapping_instances /
+     check_missing_superclass_instances / validate_entrypoint) — each returns a bare
+     `Maybe String`; thread the offending decl's pos out, as done for
+     `validate_deriving_decls` in #286.
+   - codegen / IR-emit errors (`IrLinesErr`).
+   `typecheck_decl`'s `BodyLenient` internal-invariant arm intentionally stays `no_pos()`
+   (unreachable-by-construction; no meaningful source position).
 17. Add `stdlib.path` as the canonical Path API (v1).
    Design doc: [stdlib-path-v1-draft.md](./docs/stdlib-path-v1-draft.md).
    (Overlaps the proposed `stdlib.os` module in "OS and Process Primitives" above, which

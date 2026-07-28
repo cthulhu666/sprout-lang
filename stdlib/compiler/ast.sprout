@@ -25,6 +25,20 @@ export type Pattern (..) =
   | TuplePattern (List Pattern) source.SourcePos
   | ConstructorPattern String (List Pattern) source.SourcePos
 
+# Position of a pattern — every Pattern variant carries a SourcePos last. Used so
+# pattern-inference type errors report the offending pattern's location (#5).
+export fn pattern_pos(p: Pattern) -> source.SourcePos =
+  match p with
+  | WildcardPattern pos -> pos
+  | VarPattern _ pos -> pos
+  | IntPattern _ pos -> pos
+  | BoolPattern _ pos -> pos
+  | StringPattern _ pos -> pos
+  | CharPattern _ pos -> pos
+  | UnitPattern pos -> pos
+  | TuplePattern _ pos -> pos
+  | ConstructorPattern _ _ pos -> pos
+
 # --- Function parameters ---
 
 export type Param (..) =

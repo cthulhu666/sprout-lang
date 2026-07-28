@@ -445,10 +445,14 @@ fn typed_method_rev_acc(xs: List typed_ast.TypedInstanceMethod, acc: List typed_
   | Nil -> acc
   | Cons h t -> typed_method_rev_acc(t, Cons(h, acc))
 
-fn dummy_pos() -> source.SourcePos = source.SourcePos(0, 0, 0)
+# The positionless sentinel. Use ONLY where no source position exists — a
+# compiler-synthesized node, or a whole-file/IO error with no single span. Never
+# as a shortcut at an error site where a real position is already in scope
+# (that is the guideline-#5 regression this campaign fixes).
+fn no_pos() -> source.SourcePos = source.SourcePos(0, 0, 0)
 
 fn dummy_unit() -> typed_ast.TypedExpr =
-  typed_ast.TUnit(types.TConst(types.type_id("Unit")), dummy_pos())
+  typed_ast.TUnit(types.TConst(types.type_id("Unit")), no_pos())
 
 # ---------------------------------------------------------------------------
 # Expression inference
@@ -821,14 +825,14 @@ fn infer_call_resolve(
   match arg_types with
   | Nil ->
       match unifier.apply_subst(subst, callee_type) with
-      | types.TFunc _ _ _ -> CallErr(dummy_pos(), callee_display ++ " requires arguments but was called with none")
+      | types.TFunc _ _ _ -> CallErr(no_pos(), callee_display ++ " requires arguments but was called with none")
       | resolved ->
           match unifier.unify_types(subst, resolved, ret_type) with
-          | Err e -> CallErr(dummy_pos(), "Call type mismatch: " ++ e)
+          | Err e -> CallErr(no_pos(), "Call type mismatch: " ++ e)
           | Ok s3 -> CallOk(unifier.apply_subst(s3, ret_type), s3, eff_subst, eff)
   | _ ->
       match unifier.unify_types(subst, callee_type, build_fn_type(arg_types, ret_type)) with
-      | Err e -> CallErr(dummy_pos(), "Call type mismatch: " ++ e)
+      | Err e -> CallErr(no_pos(), "Call type mismatch: " ++ e)
       | Ok s3 -> CallOk(unifier.apply_subst(s3, ret_type), s3, eff_subst, eff)
 
 # --- Constraint checking ---
@@ -2721,7 +2725,7 @@ fn infer_branch_unify(
   body_eff: types.Effect
 ) -> InferResult !{IO} =
   match unifier.unify_types(subst, typed_ast.typed_expr_type(typed_body), ret_type) with
-  | Err e -> InferErr(dummy_pos(), "Match branch type mismatch: " ++ e)
+  | Err e -> InferErr(typed_ast.typed_expr_pos(typed_body), "Match branch type mismatch: " ++ e)
   | Ok s3 -> InferOk(typed_body, s3, eff_subst, body_eff)
 
 # --- Pattern inference ---
@@ -2739,25 +2743,26 @@ export fn infer_pattern(
 ) -> InferResult !{IO} =
   match pat with
   | ast.WildcardPattern _ ->
-      InferOk(typed_ast.TUnit(expected, dummy_pos()), subst, eff_subst, types.EffectPure)
+      InferOk(typed_ast.TUnit(expected, no_pos()), subst, eff_subst, types.EffectPure)
   | ast.VarPattern name _ ->
-      InferOk(typed_ast.TUnit(expected, dummy_pos()), dict_set(name, expected, subst), eff_subst, types.EffectPure)
-  | ast.IntPattern _ _ ->
-      check_pattern_type(subst, eff_subst, expected, types.type_int(), "Int")
-  | ast.BoolPattern _ _ ->
-      check_pattern_type(subst, eff_subst, expected, types.type_bool(), "Bool")
-  | ast.StringPattern _ _ ->
-      check_pattern_type(subst, eff_subst, expected, types.type_string(), "String")
-  | ast.CharPattern _ _ ->
-      check_pattern_type(subst, eff_subst, expected, types.type_char(), "Char")
-  | ast.UnitPattern _ ->
-      check_pattern_type(subst, eff_subst, expected, types.TConst(types.type_id("Unit")), "Unit")
-  | ast.TuplePattern pats _ ->
-      infer_tuple_pattern(state, env, subst, eff_subst, expected, pats)
-  | ast.ConstructorPattern name fields _ ->
-      infer_ctor_pattern(state, env, subst, eff_subst, expected, name, fields)
+      InferOk(typed_ast.TUnit(expected, no_pos()), dict_set(name, expected, subst), eff_subst, types.EffectPure)
+  | ast.IntPattern _ pos ->
+      check_pattern_type(pos, subst, eff_subst, expected, types.type_int(), "Int")
+  | ast.BoolPattern _ pos ->
+      check_pattern_type(pos, subst, eff_subst, expected, types.type_bool(), "Bool")
+  | ast.StringPattern _ pos ->
+      check_pattern_type(pos, subst, eff_subst, expected, types.type_string(), "String")
+  | ast.CharPattern _ pos ->
+      check_pattern_type(pos, subst, eff_subst, expected, types.type_char(), "Char")
+  | ast.UnitPattern pos ->
+      check_pattern_type(pos, subst, eff_subst, expected, types.TConst(types.type_id("Unit")), "Unit")
+  | ast.TuplePattern pats pos ->
+      infer_tuple_pattern(pos, state, env, subst, eff_subst, expected, pats)
+  | ast.ConstructorPattern name fields pos ->
+      infer_ctor_pattern(pos, state, env, subst, eff_subst, expected, name, fields)
 
 fn check_pattern_type(
+  pos: source.SourcePos,
   subst: Dict types.Type,
   eff_subst: Dict types.Effect,
   expected: types.Type,
@@ -2765,11 +2770,12 @@ fn check_pattern_type(
   label: String
 ) -> InferResult !{IO} =
   match unifier.unify_types(subst, expected, expected_type) with
-  | Err e -> InferErr(dummy_pos(), label ++ " pattern: " ++ e)
+  | Err e -> InferErr(pos, label ++ " pattern: " ++ e)
   | Ok s1 ->
-      InferOk(typed_ast.TUnit(expected_type, dummy_pos()), s1, eff_subst, types.EffectPure)
+      InferOk(typed_ast.TUnit(expected_type, no_pos()), s1, eff_subst, types.EffectPure)
 
 fn infer_tuple_pattern(
+  pos: source.SourcePos,
   state: unifier.InferState,
   env: Dict types.Scheme,
   subst: Dict types.Type,
@@ -2779,9 +2785,10 @@ fn infer_tuple_pattern(
 ) -> InferResult !{IO} =
   do
     elem_vars <- make_fresh_var_list(state, pats)
-    infer_tuple_pattern_unified(state, env, subst, eff_subst, expected, elem_vars, pats)
+    infer_tuple_pattern_unified(pos, state, env, subst, eff_subst, expected, elem_vars, pats)
 
 fn infer_tuple_pattern_unified(
+  pos: source.SourcePos,
   state: unifier.InferState,
   env: Dict types.Scheme,
   subst: Dict types.Type,
@@ -2791,9 +2798,9 @@ fn infer_tuple_pattern_unified(
   pats: List ast.Pattern
 ) -> InferResult !{IO} =
   match unifier.unify_types(subst, expected, types.TTuple(elem_vars)) with
-  | Err e -> InferErr(dummy_pos(), "Tuple pattern: " ++ e)
+  | Err e -> InferErr(pos, "Tuple pattern: " ++ e)
   | Ok s1 ->
-      check_pattern_list(state, env, s1, eff_subst, elem_vars, pats)
+      check_pattern_list(pos, state, env, s1, eff_subst, elem_vars, pats)
 
 fn make_fresh_var_list(state: unifier.InferState, pats: List ast.Pattern) -> List types.Type !{IO} =
   match pats with
@@ -2805,6 +2812,7 @@ fn make_fresh_var_list(state: unifier.InferState, pats: List ast.Pattern) -> Lis
         Cons(types.TVar(types.tyvar_id(v)), rest_vars)
 
 fn check_pattern_list(
+  pos: source.SourcePos,
   state: unifier.InferState,
   env: Dict types.Scheme,
   subst: Dict types.Type,
@@ -2814,17 +2822,18 @@ fn check_pattern_list(
 ) -> InferResult !{IO} =
   match (expected_list, pats) with
   | (Nil, Nil) ->
-      InferOk(typed_ast.TUnit(types.TConst(types.type_id("Unit")), dummy_pos()), subst, eff_subst, types.EffectPure)
+      InferOk(typed_ast.TUnit(types.TConst(types.type_id("Unit")), no_pos()), subst, eff_subst, types.EffectPure)
   | (Cons exp_h exp_rest, Cons pat_h pat_rest) ->
       do
         r <- infer_pattern(state, env, subst, eff_subst, exp_h, pat_h)
         match r with
-        | InferErr pos e -> InferErr(pos, e)
+        | InferErr epos e -> InferErr(epos, e)
         | InferOk _ s1 es1 _ ->
-            check_pattern_list(state, env, s1, es1, exp_rest, pat_rest)
-  | _ -> InferErr(dummy_pos(), "Tuple pattern arity mismatch")
+            check_pattern_list(pos, state, env, s1, es1, exp_rest, pat_rest)
+  | _ -> InferErr(pos, "Tuple pattern arity mismatch")
 
 fn infer_ctor_pattern(
+  pos: source.SourcePos,
   state: unifier.InferState,
   env: Dict types.Scheme,
   subst: Dict types.Type,
@@ -2834,13 +2843,14 @@ fn infer_ctor_pattern(
   fields: List ast.Pattern
 ) -> InferResult !{IO} =
   match dict_get(name, env) with
-  | Nothing -> InferErr(dummy_pos(), "Unknown constructor: " ++ name)
+  | Nothing -> InferErr(pos, "Unknown constructor: " ++ name)
   | Just scheme ->
       do
         ctor_type <- unifier.instantiate(state, scheme)
-        infer_ctor_pattern_typed(state, env, subst, eff_subst, expected, name, fields, ctor_type)
+        infer_ctor_pattern_typed(pos, state, env, subst, eff_subst, expected, name, fields, ctor_type)
 
 fn infer_ctor_pattern_typed(
+  pos: source.SourcePos,
   state: unifier.InferState,
   env: Dict types.Scheme,
   subst: Dict types.Type,
@@ -2851,9 +2861,9 @@ fn infer_ctor_pattern_typed(
   ctor_type: types.Type
 ) -> InferResult !{IO} =
   match unifier.unify_types(subst, expected, ctor_result_type(ctor_type)) with
-  | Err e -> InferErr(dummy_pos(), "Constructor " ++ name ++ ": " ++ e)
+  | Err e -> InferErr(pos, "Constructor " ++ name ++ ": " ++ e)
   | Ok s1 ->
-      check_pattern_list(state, env, s1, eff_subst, ctor_param_types(ctor_type), fields)
+      check_pattern_list(pos, state, env, s1, eff_subst, ctor_param_types(ctor_type), fields)
 
 fn ctor_result_type(t: types.Type) -> types.Type =
   match t with
@@ -3453,13 +3463,13 @@ export fn typecheck_decls(
     # Runs after pre_scan so mutually recursive ADTs are always in the declared set.
     let declared_types = collect_declared_type_names(decls, builtin_type_names())
     match validate_all_decls(decls, declared_types) with
-    | Just err_msg -> typed_ast.TypedErr(dummy_pos(), err_msg)
+    | Just err_msg -> typed_ast.TypedErr(no_pos(), err_msg)
     | Nothing ->
         match check_overlapping_instances(decls, dict_empty()) with
-        | Just err_msg -> typed_ast.TypedErr(dummy_pos(), err_msg)
+        | Just err_msg -> typed_ast.TypedErr(no_pos(), err_msg)
         | Nothing ->
             match check_missing_superclass_instances(decls) with
-            | Just err_msg -> typed_ast.TypedErr(dummy_pos(), err_msg)
+            | Just err_msg -> typed_ast.TypedErr(no_pos(), err_msg)
             | Nothing ->
                 # Wrap scanned_env as GlobalEnv at this seam — scanned_env is the
                 # output of pre_scan_fn_decls (Dict, raw pre-pass). From here on
@@ -3471,7 +3481,7 @@ export fn typecheck_decls(
                     # Runs only on an otherwise-valid program, so a broken main body
                     # reports its own error first (this never masks it).
                     match validate_entrypoint(decls) with
-                    | Just msg -> typed_ast.TypedErr(dummy_pos(), msg)
+                    | Just msg -> typed_ast.TypedErr(no_pos(), msg)
                     | Nothing -> typed_ast.TypedOk(prog, schemes)
 
 # ---------------------------------------------------------------------------
@@ -3916,7 +3926,7 @@ fn typecheck_decl(
         | typed_ast.BodyLenient ->
             # BodyLenient is no longer produced (fn_body_err always returns BodyErr).
             # Retained as a constructor only to avoid breaking the typed_ast public API.
-            TypedDeclErr(dummy_pos(), "internal: unexpected BodyLenient in " ++ name)
+            TypedDeclErr(no_pos(), "internal: unexpected BodyLenient in " ++ name)
         | typed_ast.BodyOk typed_body inferred_fn_type ->
             TypedDeclOk(
               typed_ast.TFnDecl(name, params, ret_type_maybe, effects_maybe, constraints, typed_body),
@@ -4582,7 +4592,7 @@ fn check_fn_body(
         # (fn_body_env), so recursive self-calls inject dicts from the Scheme —
         # no @constrained_N self markers to seed. fwd_env holds only @fwd/@eta_fwd.
         InferOk typed_body s1 _ _ <- typecheck_expr(state, fn_body_env(name, params, inst_type, constraint_source_tokens(constraints), fwd_env), subst, eff_subst, body) else InferErr pos msg -> (fn_body_err(name, pos, msg), dict_empty(), Nil)
-        let Ok s2 = unifier.unify_types(s1, typed_ast.typed_expr_type(typed_body), fn_return_type(inst_type, list_length(params))) else Err e -> (typed_ast.BodyErr(dummy_pos(), "Return type mismatch in " ++ name ++ ": " ++ e), dict_empty(), Nil)
+        let Ok s2 = unifier.unify_types(s1, typed_ast.typed_expr_type(typed_body), fn_return_type(inst_type, list_length(params))) else Err e -> (typed_ast.BodyErr(typed_ast.typed_expr_pos(typed_body), "Return type mismatch in " ++ name ++ ": " ++ e), dict_empty(), Nil)
         match rigidity_violation(prog_to_fresh, s2, types.scheme_vars(decl_scheme)) with
         | Just bad ->
             (typed_ast.BodyErr(fn_pos, "Signature too general for its body in " ++ name ++ ": type variable " ++ bad), dict_empty(), Nil)
@@ -4860,7 +4870,7 @@ fn check_instance_method(
         | InferErr pos msg -> instance_method_err(name, pos, msg)
         | InferOk typed_body s1 _ _ ->
             match unifier.unify_types(s1, typed_ast.typed_expr_type(typed_body), fn_return_type(inst_type, list_length(params))) with
-            | Err e -> InstanceMethodErr(dummy_pos(), "Return type mismatch in instance method " ++ name ++ ": " ++ e)
+            | Err e -> InstanceMethodErr(typed_ast.typed_expr_pos(typed_body), "Return type mismatch in instance method " ++ name ++ ": " ++ e)
             | Ok s2 ->
                 InstanceMethodOk(
                   typed_ast.TypedInstanceMethod(name, params, ret_maybe, eff_maybe, resolve_dispatch_typed_expr(body_env, s2, typed_body)))

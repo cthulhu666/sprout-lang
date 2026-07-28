@@ -115,7 +115,7 @@ fn ctx_bound_vars(ctx: LowerCtx) -> List String =
 fn ctx_with_bound(vars: List String, ctx: LowerCtx) -> LowerCtx =
   LowerCtx(ctx_class_order(ctx), ctx_fwd(ctx), ctx_inst(ctx), ctx_super_map(ctx), ctx_inst_meta(ctx), ctx_scheme_env(ctx), ctx_class_params(ctx), list_append(ctx_bound_vars(ctx), vars))
 
-fn dummy_pos() -> source.SourcePos = source.SourcePos(0, 0, 0)
+fn no_pos() -> source.SourcePos = source.SourcePos(0, 0, 0)
 
 fn param_names_from_list(ps: List ast.Param) -> List String =
   match ps with
@@ -470,13 +470,13 @@ fn generate_one_class_wrapper(
           typed_ast.TVar(
             tc_slot_name(class_name, 0, method_name),
             lookup_scheme_type(method_name, scheme_env),
-            dummy_pos()),
+            no_pos()),
           generate_typed_param_vars(
             params,
             lookup_scheme_type(method_name, scheme_env),
-            dummy_pos()),
+            no_pos()),
           tfunc_result_type(lookup_scheme_type(method_name, scheme_env)),
-          dummy_pos()))
+          no_pos()))
 
 # ---------------------------------------------------------------------------
 # Instance function generation
@@ -972,7 +972,7 @@ fn lookup_eta_inner_dicts_general(class_name: String, head: String, actual_param
           match resolve_eta_substituted_inner_dicts(
             inst_constraints,
             unify_type_args_list(inst_type_args, Cons(type_to_eta_typeexpr(actual_param), Nil), dict_empty()),
-            dummy_pos(),
+            no_pos(),
             ctx) with
           | Nil -> Nothing
           | inner_dicts -> Just(inner_dicts)
@@ -1017,7 +1017,7 @@ fn resolve_eta_fwd_type_name_dict(class_name: String, tvar_name: String, pos: so
 fn try_eta_forwarded_without_class(name: String, t: types.Type, ctx: LowerCtx) -> Maybe typed_ast.TypedExpr =
   let types.TFunc param _ _ = t else Nothing
       Just impl_name = eta_forwarded_impl(name, param, vec_to_list(dict_entries(ctx_fwd(ctx)))) else Nothing
-  in Just(make_eta_lambda(impl_name, t, dummy_pos()))
+  in Just(make_eta_lambda(impl_name, t, no_pos()))
 
 # The forwarded impl for `name`: prefer the tvar-headed slot, else any slot carrying the method.
 # A missing tvar head or a for-tvar miss both fall through to the any-slot scan.
@@ -1082,19 +1082,19 @@ fn eta_in_class_concrete(class_name: String, name: String, t: types.Type, head: 
 
 fn eta_in_class_with_impl(class_name: String, name: String, t: types.Type, head: String, class_type: types.Type, impl_name: String, ctx: LowerCtx) -> Maybe typed_ast.TypedExpr =
   match lookup_eta_inner_dicts_general(string.after_last_dot(class_name), head, class_type, ctx) with
-  | Nothing -> Just(make_eta_lambda(impl_name, t, dummy_pos()))
+  | Nothing -> Just(make_eta_lambda(impl_name, t, no_pos()))
   | Just inner_dicts ->
       # If any inner dict is the __unresolved_* sentinel it means the inner constraint
       # (e.g. MyEq a) is not in scope — the caller only forwarded the outer one
       # (MyEq (Box a)).  Prefer the forwarded slot so we emit a well-formed 2-arg lambda
       # instead of a dangling ref.
       if has_unresolved_dict(inner_dicts) then eta_fwd_slot_lambda(class_name, name, head, t, ctx)
-      else Just(make_eta_lambda_with_dicts(impl_name, t, inner_dicts, dummy_pos()))
+      else Just(make_eta_lambda_with_dicts(impl_name, t, inner_dicts, no_pos()))
 
 # Emit an eta-lambda over the forwarded hidden-dict slot for (class, method, head), or Nothing.
 fn eta_fwd_slot_lambda(class_name: String, name: String, head: String, t: types.Type, ctx: LowerCtx) -> Maybe typed_ast.TypedExpr =
   match find_fwd_method_for_head(class_name, name, head, ctx) with
-  | Just fwd_slot -> Just(make_eta_lambda(fwd_slot, t, dummy_pos()))
+  | Just fwd_slot -> Just(make_eta_lambda(fwd_slot, t, no_pos()))
   | Nothing -> Nothing
 
 # Abstract (tvar) head: forward via the @eta_fwd marker.  @eta_fwd markers (distinct from
@@ -1120,7 +1120,7 @@ fn eta_forwarded_method(method_name: String, class_name: String, tvar_name: Stri
 
 fn eta_forwarded_method_for_prog_var(method_name: String, class_name: String, prog_var: String, method_type: types.Type, ctx: LowerCtx) -> Maybe typed_ast.TypedExpr =
   match find_fwd_method_for_head(class_name, method_name, prog_var, ctx) with
-  | Just impl_name -> Just(make_eta_lambda(impl_name, method_type, dummy_pos()))
+  | Just impl_name -> Just(make_eta_lambda(impl_name, method_type, no_pos()))
   | Nothing -> Nothing
 
 fn lookup_eta_fwd_scheme(tvar_name: String, class_name: String, ctx: LowerCtx) -> Maybe types.Scheme =
@@ -1545,7 +1545,7 @@ fn eta_from_evidence(method: String, t: types.Type, pos: source.SourcePos, ev: t
       | Just method_map ->
           match dict_get_method(method, method_map) with
           | Nothing -> Nothing
-          | Just fwd_slot -> Just(make_eta_lambda(fwd_slot, t, dummy_pos()))
+          | Just fwd_slot -> Just(make_eta_lambda(fwd_slot, t, no_pos()))
   | _ -> Nothing
 
 fn eta_from_instance(method: String, key: String, t: types.Type, pos: source.SourcePos, inner_dicts: List typed_ast.TypedExpr, ctx: LowerCtx) -> Maybe typed_ast.TypedExpr =

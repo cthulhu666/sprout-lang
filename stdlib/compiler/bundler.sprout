@@ -147,7 +147,7 @@ fn empty_resolve_ctx() -> ResolveCtx =
 # Utilities
 # ---------------------------------------------------------------------------
 
-fn dummy_pos() -> source.SourcePos = source.SourcePos(0, 0, 0)
+fn no_pos() -> source.SourcePos = source.SourcePos(0, 0, 0)
 
 fn qualified_name(module_name: source.ModuleName, name: source.RawName) -> source.QualifiedName =
   source.QualifiedName(
@@ -1094,7 +1094,7 @@ fn make_bundle_or_err(modules: List ParsedModule, stdlib_root: String, extra_roo
   | Nothing ->
       match deriving.validate_deriving_decls(qualified) with
       | Just (pos, err_msg) -> BundleErr(pos, "deriving: " ++ err_msg)
-      | Nothing -> BundleOk(ast.Program(deriving.expand_deriving_decls(qualified), dummy_pos()))
+      | Nothing -> BundleOk(ast.Program(deriving.expand_deriving_decls(qualified), no_pos()))
   where qualified = qualify_all_modules(modules, build_all_symbols(modules), stdlib_root, extra_roots)
 
 export fn bundle_file(path: source.FilePath, stdlib_root: source.StdlibRoot) -> BundleResult !{IO} =
@@ -1108,8 +1108,8 @@ export fn bundle_file_with_roots(path: source.FilePath, stdlib_root: source.Stdl
     (err, modules) <- collect_modules(source.filepath_str(path), source.stdlib_root_str(stdlib_root), extra_roots)
     match err with
     # Module-load / import-parse failures: no single decl span (parse errors
-    # embed their own `at L:C` in the message text). dummy_pos() is honest here.
-    | Just msg -> BundleErr(dummy_pos(), msg)
+    # embed their own `at L:C` in the message text). no_pos() is honest here.
+    | Just msg -> BundleErr(no_pos(), msg)
     | Nothing -> make_bundle_or_err(modules, source.stdlib_root_str(stdlib_root), extra_roots)
 
 # ---------------------------------------------------------------------------
