@@ -232,28 +232,45 @@ an initial mask (e.g. `64` = M-only) for screenshots.
   M/F/G/K/A stars (verified). Filtering to a dim class (M dwarfs are 74% of all stars) over that
   pyramid is a **blank screen** when zoomed out. The fix rebuilds coverage **per class**.
 - **`ensure_balanced` (in `galaxy_map.sprout`, run at STARTUP)** re-pyramids the existing catalog into
-  a class-**balanced** one: the exporter's shallowest-fit tiling, but with a **per-class** per-tile
-  budget, so every class fills the coarse levels first and appears galaxy-wide at every zoom. It is a
-  **Sprout-side** transform that consumes the *catalog* (universegen's output), not `galaxy.json` — so
-  **universegen is untouched** — and it is **not a separate tool or `just` recipe**: the demo builds
-  it on first launch into `<catalog>-balanced` (a sibling of `catalog/`, so scene 2's `<dir>/../systems`
-  still resolves) and **caches** it, rebuilding only if that directory is absent (delete it to force a
-  rebuild). The rebalance is headless — integer-ly coordinates bin with the pure
-  `loam.galaxy_lod.tile_index_i`, no `double_to_int` — and creates its output dirs by shelling
-  `mkdir -p` via `stdlib.process` (no `mkdir` builtin; `write_file` can't create directories). The demo
-  then streams the balanced catalog for both the `All` view and any filter.
-- **Tradeoffs (deliberate).** The catalog dropped per-star luminosity, so within-class order is a
-  spatial sample (as-encountered), not brightest-first — fine for a filter overview. The per-class
-  per-tile budget (default 800) caps deep-zoom density for the huge M class and bounds the tool's
-  memory; overflow past the deepest level is dropped (the source places unconditionally). At budget
-  800 the balanced catalog keeps ~492k of 1M stars (48 MB); every class has L0 presence.
+  a class-**balanced** one: shallowest-fit tiling with a **per-class** per-tile budget, so every class
+  fills the coarse levels first and appears galaxy-wide at every zoom. It is a **Sprout-side** transform
+  that consumes the *catalog* (universegen's output), not `galaxy.json` — so **universegen is
+  untouched** — and it is **not a separate tool or `just` recipe**: the demo builds it on first launch
+  into `<catalog>-balanced` (a sibling of `catalog/`, so scene 2's `<dir>/../systems` still resolves)
+  and **caches** it, rebuilding only if that directory is absent (delete it to force a rebuild). The
+  rebalance is headless — integer-ly coordinates bin with the pure `loam.galaxy_lod.tile_index_i`, no
+  `double_to_int` — and creates its output dirs by shelling `mkdir -p` via `stdlib.process` (no `mkdir`
+  builtin; `write_file` can't create directories). The demo then streams the balanced catalog for both
+  the `All` view and any filter.
+- **Which stars fill a bucket: a spatially-uniform hash sample (streaming, two-pass).** A bucket keeps
+  up to `budget` stars; *which* ones must be spread across the whole tile, not clustered in one
+  sub-quadrant (see "Coarse-level clumping" below). The rebalance therefore keeps a **hash-thresholded
+  sample**: whether a star is kept depends only on `hash(id)` (via `loam.galaxy_sample`), which is
+  uncorrelated with position. "Keep the `budget` lowest-hash" is a global sort of the whole scan set,
+  and a pure-Sprout merge sort of the current ~1M-line scan **does not finish in minutes** at startup —
+  so instead the build is a **streaming two-pass count-then-keep**: pass 1 tallies each class's count
+  in every nested tile (a Dict bounded to `≤ 341×12` slots — *independent of star count*); from those
+  counts `loam.galaxy_sample.level_thresholds` derives a per-bucket cumulative hash threshold
+  `t_L = min(1, t_{L-1} + budget/count_L)`; pass 2 re-streams and keeps each star at the shallowest
+  level whose threshold `hash01(id)` falls under. Peak memory is the **output** (bounded by
+  `budget × #buckets`) plus the counts — both independent of the number of stars — so the rebalance
+  **scales to a 10M+ star galaxy** at the cost of one extra streaming pass over the source.
+- **Tradeoffs (deliberate).** The kept count per bucket is `budget` in *expectation* (± O(√budget)),
+  not exactly `budget` — the price of the O(n) streaming sample vs. an exact top-`budget`, and
+  invisible for a visual LoD. The catalog dropped per-star luminosity, so the sample is spatially
+  uniform, not brightest-first — fine for a filter overview. The per-class per-tile budget (default
+  800) caps deep-zoom density for the huge M class; overflow past the deepest level is dropped. At
+  budget 800 the balanced catalog keeps ~½M of 1M stars; every class has L0 presence.
 - **Follow-ups (BACKLOG):** a brightness-ordered rebalance (needs luminosity carried on the catalog
   line, or re-reading `galaxy.json`); a higher/adaptive budget so dense M regions keep full depth.
 
-The filter math is a pure, headless-tested module: `loam.galaxy_filter` (class bitmask via integer
-arithmetic — Sprout has no bitwise ops; `>>`/`<<` are function composition — plus the shared
-`class_name`/`class_rgb` palette). Tests in `tests/loam/test_galaxy_filter.spr`. The demo's star
-models are now built from `class_rgb`, so a star and its legend swatch can never diverge.
+The filter and sampling math are pure, headless-tested modules: `loam.galaxy_filter` (class bitmask via
+integer arithmetic — Sprout has no bitwise ops; `>>`/`<<` are function composition — plus the shared
+`class_name`/`class_rgb` palette; tests in `tests/loam/test_galaxy_filter.spr`) and `loam.galaxy_sample`
+(the `hash01` / `level_thresholds` / `keep_level` spatially-uniform sampler; tests in
+`tests/loam/test_galaxy_sample.spr`, including a regression that a position-correlated id set is still
+kept spread across the whole tile). The demo's star models are built from `class_rgb`, so a star and its
+legend swatch can never diverge.
 
 ## Planned extensions (next iterations — designed for, not built)
 

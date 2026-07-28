@@ -1,0 +1,68 @@
+module loam.galaxy_sample
+
+import stdlib.rng (rng_hash2)
+
+# Pure spatially-uniform sampling math for the galaxy-map demo's class-balanced rebalance
+# (examples/gfx/galaxy_map, build_balanced). Graphics-free — no gfx, no IO — so it is unit-tested
+# headlessly in tests/loam/test_galaxy_sample.spr, exactly like loam.galaxy_lod / loam.galaxy_filter.
+#
+# THE BUG THIS FIXES. The rebalance keeps up to `budget` stars per (level, tile, class) bucket so a
+# dim class still has coarse-LoD coverage. The original kept the FIRST `budget` stars it scanned; the
+# scan is spatial (tile-by-tile), so a dense class hit its budget before the scan left one sub-quadrant
+# and ended up CLUMPED in a corner of the tile instead of spread galaxy-wide (BACKLOG P2, spotted
+# 2026-07-27). The fix keeps a HASH-thresholded sample instead: whether a star is kept depends only on
+# hash(id), which is uncorrelated with position, so the kept set is spread uniformly over the tile.
+#
+# WHY A THRESHOLD, NOT A SORT. "Keep the `budget` lowest-hash" is a global sort of the whole scan set
+# (~1M lines for the current catalog, and this must scale to 10M+). A pure-Sprout merge sort of 1M keys
+# does not finish in minutes at startup. Instead the demo does a STREAMING two-pass count-then-keep:
+# pass 1 tallies the class-count in each nested tile; from those counts this module derives a per-bucket
+# hash THRESHOLD, and pass 2 keeps a star at the shallowest level whose threshold its hash falls under.
+# Memory is bounded by the OUTPUT (budget x #buckets) + the counts — both independent of the star count,
+# so it scales to an arbitrarily large galaxy. TRADEOFF: the kept count per bucket is `budget` in
+# EXPECTATION (+/- O(sqrt budget)) rather than exactly `budget` — invisible for a visual LoD, and it is
+# exactly what removes the scan-order dependence that caused the clump.
+
+# rng_hash2's range is [0, 2^31) — the hash upper bound, used to normalize into [0, 1).
+let hash_mod = 2147483648  # 2^31, == stdlib.rng.rng_modulus
+
+# Fixed seed so the sample is deterministic across launches (a rebuilt catalog is byte-reproducible).
+export let sample_seed = 2654435761
+
+# Decorrelate a sequential star id (SYS-00001, SYS-00002, ...) from spatial/scan order. rng_hash2 is
+# NONLINEAR in its input (see stdlib.rng), so consecutive ids scatter across [0, hash_mod) rather than
+# staying adjacent — which is what makes a hash-threshold sample spatially uniform. Safe for any
+# realistic id: id * rng_hash_px stays well within i64 for ids far beyond 100M.
+export fn star_hash(id: Int, seed: Int) -> Int = rng_hash2(id, 0, seed)
+
+# star_hash normalized to [0, 1) — the uniform variate the threshold sampler compares against.
+export fn hash01(id: Int, seed: Int) -> Double = to_double(star_hash(id, seed)) / to_double(hash_mod)
+
+fn min_d(a: Double, b: Double) -> Double = if a < b then a else b
+
+# Cumulative keep-thresholds for one (tile-column, class): given the class-star counts in the star's
+# nested tiles at levels 0..max — `counts` = [count_L0, count_L1, ..., count_Lmax], monotonically
+# NON-INCREASING because a coarser tile contains its finer sub-tiles — and the per-bucket `budget`,
+# returns [t_L0, ..., t_Lmax] with t_L = min(1, t_{L-1} + budget/count_L). A uniform hash keeps a
+# fraction `budget/count_L` of level L's stars, i.e. ~budget of them, sampled spatially uniformly. A
+# count of 0 (defensive; a star is always in its own tile so counts are >= 1 in practice) yields 1.0
+# rather than dividing by zero.
+fn lt_go(counts: List Int, budget: Int, prev: Double, acc: List Double) -> List Double =
+  match counts with
+  | Nil -> list_reverse(acc)
+  | Cons c rest ->
+      let t = if c <= 0 then 1.0 else min_d(1.0, prev + (to_double(budget) / to_double(c)))
+      in lt_go(rest, budget, t, Cons(t, acc))
+
+export fn level_thresholds(counts: List Int, budget: Int) -> List Double =
+  lt_go(counts, budget, 0.0, Nil)
+
+# Shallowest level whose cumulative threshold `h` falls under, or -1 if `h` is above every threshold
+# (the star overflows past the deepest kept level and is dropped — matching the original's "dropped on
+# overflow past the deepest level"). Levels are indexed from 0 in `thresholds` order (coarsest first).
+fn kl_go(h: Double, thresholds: List Double, level: Int) -> Int =
+  match thresholds with
+  | Nil -> 0 - 1
+  | Cons t rest -> if h < t then level else kl_go(h, rest, level + 1)
+
+export fn keep_level(h: Double, thresholds: List Double) -> Int = kl_go(h, thresholds, 0)

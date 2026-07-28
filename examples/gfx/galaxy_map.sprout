@@ -10,6 +10,7 @@ import loam.view (cam_apply)
 import loam.config (parse_config, cfg_int)
 import loam.galaxy_lod (pow2, level_offset, group_of, clampi, desired_level, next_level, tile_index_i)
 import loam.galaxy_filter (num_classes, mask_all, mask_none, bit_test, bit_toggle, popcount, class_name, class_rgb)
+import loam.galaxy_sample (hash01, sample_seed, level_thresholds, keep_level)
 import loam.orbit (ellipse_point)
 import loam.starfield as sf
 import loam.planet as pl
@@ -356,12 +357,13 @@ fn read_radius_i(dir: String) -> Int !{IO} =
   | Ok text -> cfg_int(parse_config(text), "galaxy_radius_ly", 50000)
   | Err _ -> 50000
 
-# Parse just the fields tiling needs from a catalog line: (xi, yi, classCode). Nothing if malformed.
-fn line_key(line: String) -> Maybe (Int, Int, Int) =
+# Parse the fields the rebalance needs from a catalog line: (id, xi, yi, classCode). Nothing if
+# malformed. `id` feeds the hash-threshold sampler (loam.galaxy_sample); xi/yi/class feed the tiling.
+fn line_key(line: String) -> Maybe (Int, Int, Int, Int) =
   match split_pipe(line) with
-  | [_id, xs, ys, _zs, cs | _] ->
-      match (parse_int(xs), parse_int(ys), parse_int(cs)) with
-      | (Just xi, Just yi, Just ci) -> Just((xi, yi, ci))
+  | [ids, xs, ys, _zs, cs | _] ->
+      match (parse_int(ids), parse_int(xs), parse_int(ys), parse_int(cs)) with
+      | (Just id, Just xi, Just yi, Just ci) -> Just((id, xi, yi, ci))
       | _ -> Nothing
   | _ -> Nothing
 
@@ -372,68 +374,96 @@ fn get_count(counts: Dict Int, gid: Int, cls: Int) -> Int =
   | Just n -> n
   | Nothing -> 0
 
-# Shallowest level in [0, stream_max_level] whose (level, tile, class) bucket still has room, or -1 if
-# the star overflows every level (dropped). Shallowest-fit like the exporter, but the budget is PER
-# CLASS — that is what forces every class into the coarse levels rather than only the brightest.
-fn fit_level(xi: Int, yi: Int, cls: Int, radius: Int, counts: Dict Int, level: Int) -> Int =
-  if level > stream_max_level then 0 - 1
-  else
-    let gid = group_of(level, tile_index_i(xi, level, radius), tile_index_i(yi, level, radius))
-    in if get_count(counts, gid, cls) < rebalance_budget then level
-       else fit_level(xi, yi, cls, radius, counts, level + 1)
-
 fn get_tile_lines(out: Dict (List String), gid: Int) -> List String =
   match dict_get(to_string(gid), out) with
   | Just ls -> ls
   | Nothing -> Nil
 
-# Place one line into its shallowest-fitting (level, tile) at its class budget; drop on overflow.
-fn place_line(line: String, radius: Int, st: (Dict Int, Dict (List String))) -> (Dict Int, Dict (List String)) =
-  match st with
-  | (counts, out) ->
-      match line_key(line) with
-      | Nothing -> (counts, out)
-      | Just (xi, yi, cls) ->
-          let level = fit_level(xi, yi, cls, radius, counts, 0)
-          in if level < 0 then (counts, out)
-             else
-               let gid = group_of(level, tile_index_i(xi, level, radius), tile_index_i(yi, level, radius))
-                   counts2 = dict_set(count_key(gid, cls), get_count(counts, gid, cls) + 1, counts)
-                   out2 = dict_set(to_string(gid), Cons(line, get_tile_lines(out, gid)), out)
-               in (counts2, out2)
+# All source tile paths for L0..stream_max_level (341 of them). Enumerated ONCE as a small list so the
+# two streaming rebalance passes (count, then place) walk the same tiles without duplicating the 2-D
+# grid nesting — and without ever holding the source's stars in memory (the key to scaling to 10M+).
+fn tile_paths_row(src: String, level: Int, ix: Int, iy: Int, n: Int, acc: List String) -> List String =
+  if iy >= n then acc
+  else tile_paths_row(src, level, ix, iy + 1, n, Cons(tile_path(src, level, ix, iy), acc))
+fn tile_paths_cols(src: String, level: Int, ix: Int, n: Int, acc: List String) -> List String =
+  if ix >= n then acc
+  else tile_paths_cols(src, level, ix + 1, n, tile_paths_row(src, level, ix, 0, n, acc))
+fn tile_paths_levels(src: String, level: Int, acc: List String) -> List String =
+  if level > stream_max_level then acc
+  else tile_paths_levels(src, level + 1, tile_paths_cols(src, level, 0, pow2(level), acc))
+fn all_tile_paths(src: String) -> List String = tile_paths_levels(src, 0, Nil)
 
-fn fold_lines(lines: List String, radius: Int, st: (Dict Int, Dict (List String))) -> (Dict Int, Dict (List String)) =
+# --- Pass 1: class-counts per nested tile. For every star, bump the (level, tile, class) counter at
+# EACH level it belongs to (L0..max). The counts Dict is bounded to <= 341*12 slots regardless of how
+# many stars there are — this is what lets the rebalance scale to a 10M+ star galaxy: pass 2 needs the
+# per-bucket counts, not the stars themselves. -------------------------------------------------------
+fn bump_counts(xi: Int, yi: Int, cls: Int, radius: Int, level: Int, counts: Dict Int) -> Dict Int =
+  if level > stream_max_level then counts
+  else
+    let gid = group_of(level, tile_index_i(xi, level, radius), tile_index_i(yi, level, radius))
+        counts2 = dict_set(count_key(gid, cls), get_count(counts, gid, cls) + 1, counts)
+    in bump_counts(xi, yi, cls, radius, level + 1, counts2)
+
+fn count_lines(radius: Int, lines: List String, counts: Dict Int) -> Dict Int =
   match lines with
-  | Nil -> st
-  | Cons line rest -> fold_lines(rest, radius, place_line(line, radius, st))
+  | Nil -> counts
+  | Cons line rest ->
+      match line_key(line) with
+      | Nothing -> count_lines(radius, rest, counts)
+      | Just (_id, xi, yi, cls) -> count_lines(radius, rest, bump_counts(xi, yi, cls, radius, 0, counts))
 
-# Read + fold one source tile (a missing tile in the sparse deep grid is skipped, not an error).
-fn rb_tile(src: String, radius: Int, level: Int, ix: Int, iy: Int, st: (Dict Int, Dict (List String))) -> (Dict Int, Dict (List String)) !{IO} =
-  match read_file(tile_path(src, level, ix, iy)) with
-  | Err _ -> st
-  | Ok text -> fold_lines(str_split_lines(text), radius, st)
+fn count_tile(radius: Int, path: String, counts: Dict Int) -> Dict Int !{IO} =
+  match read_file(path) with
+  | Err _ -> counts
+  | Ok text -> count_lines(radius, str_split_lines(text), counts)
 
-fn rb_row(src: String, radius: Int, level: Int, ix: Int, iy: Int, n: Int, st: (Dict Int, Dict (List String))) -> (Dict Int, Dict (List String)) !{IO} =
-  if iy >= n then st
+fn count_scan(radius: Int, paths: List String, counts: Dict Int) -> Dict Int !{IO} =
+  match paths with
+  | Nil -> counts
+  | Cons path rest ->
+      do
+        counts2 <- count_tile(radius, path, counts)
+        count_scan(radius, rest, counts2)
+
+# --- Pass 2: keep a spatially-uniform sample. For each star, gather the class-counts of its nested
+# tiles [count_L0..count_Lmax], turn them into cumulative hash-thresholds (loam.galaxy_sample), and
+# keep the star at the shallowest level whose threshold hash01(id) falls under — dropping it if it
+# overflows past the deepest. Because the keep decision is on hash(id), not scan order, each bucket's
+# kept set is spread over the whole tile — the P2 clump fix. ------------------------------------------
+fn star_counts(xi: Int, yi: Int, cls: Int, radius: Int, counts: Dict Int, level: Int, acc: List Int) -> List Int =
+  if level > stream_max_level then list_reverse(acc)
   else
-    do
-      st2 <- rb_tile(src, radius, level, ix, iy, st)
-      rb_row(src, radius, level, ix, iy + 1, n, st2)
+    let gid = group_of(level, tile_index_i(xi, level, radius), tile_index_i(yi, level, radius))
+    in star_counts(xi, yi, cls, radius, counts, level + 1, Cons(get_count(counts, gid, cls), acc))
 
-fn rb_cols(src: String, radius: Int, level: Int, ix: Int, n: Int, st: (Dict Int, Dict (List String))) -> (Dict Int, Dict (List String)) !{IO} =
-  if ix >= n then st
-  else
-    do
-      st2 <- rb_row(src, radius, level, ix, 0, n, st)
-      rb_cols(src, radius, level, ix + 1, n, st2)
+fn place_line(radius: Int, counts: Dict Int, line: String, out: Dict (List String)) -> Dict (List String) =
+  match line_key(line) with
+  | Nothing -> out
+  | Just (id, xi, yi, cls) ->
+      let cs = star_counts(xi, yi, cls, radius, counts, 0, Nil)
+          level = keep_level(hash01(id, sample_seed), level_thresholds(cs, rebalance_budget))
+      in if level < 0 then out
+         else
+           let gid = group_of(level, tile_index_i(xi, level, radius), tile_index_i(yi, level, radius))
+           in dict_set(to_string(gid), Cons(line, get_tile_lines(out, gid)), out)
 
-fn rb_levels(src: String, radius: Int, level: Int, st: (Dict Int, Dict (List String))) -> (Dict Int, Dict (List String)) !{IO} =
-  if level > stream_max_level then st
-  else
-    do
-      print("[galaxy] rebalance: scanning source L" ++ to_string(level) ++ " ...")
-      st2 <- rb_cols(src, radius, level, 0, pow2(level), st)
-      rb_levels(src, radius, level + 1, st2)
+fn place_lines(radius: Int, counts: Dict Int, lines: List String, out: Dict (List String)) -> Dict (List String) =
+  match lines with
+  | Nil -> out
+  | Cons line rest -> place_lines(radius, counts, rest, place_line(radius, counts, line, out))
+
+fn place_tile(radius: Int, counts: Dict Int, path: String, out: Dict (List String)) -> Dict (List String) !{IO} =
+  match read_file(path) with
+  | Err _ -> out
+  | Ok text -> place_lines(radius, counts, str_split_lines(text), out)
+
+fn place_scan(radius: Int, counts: Dict Int, paths: List String, out: Dict (List String)) -> Dict (List String) !{IO} =
+  match paths with
+  | Nil -> out
+  | Cons path rest ->
+      do
+        out2 <- place_tile(radius, counts, path, out)
+        place_scan(radius, counts, rest, out2)
 
 # Write one output tile from its accumulated lines (skip empty — matches the sparse source layout).
 fn rb_write_tile(cache: String, out: Dict (List String), level: Int, ix: Int, iy: Int) -> Unit !{IO} =
@@ -491,13 +521,13 @@ fn build_balanced(src: String, cache: String) -> Unit !{IO} =
     radius <- read_radius_i(src)
     print("[galaxy] rebalance: radius=" ++ to_string(radius) ++ " budget/class/tile=" ++ to_string(rebalance_budget))
     make_dirs(cache)
-    final <- rb_levels(src, radius, 0, (dict_empty(), dict_empty()))
-    match final with
-    | (_, out) ->
-        do
-          copy_meta(src, cache)
-          rb_write_levels(cache, out, 0)
-          print("[galaxy] rebalance: done -> " ++ cache)
+    print("[galaxy] rebalance: pass 1/2 counting per-class tile density ...")
+    counts <- count_scan(radius, all_tile_paths(src), dict_empty())
+    print("[galaxy] rebalance: pass 2/2 placing spatially-uniform samples ...")
+    out <- place_scan(radius, counts, all_tile_paths(src), dict_empty())
+    copy_meta(src, cache)
+    rb_write_levels(cache, out, 0)
+    print("[galaxy] rebalance: done -> " ++ cache)
 
 # Return the class-balanced catalog dir for `src`, building it once if the cache is absent. The cache
 # `<src>-balanced` is a SIBLING of src, so the demo's scene-2 `<dir>/../systems` path still resolves.
