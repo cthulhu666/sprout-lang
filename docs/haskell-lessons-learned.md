@@ -55,7 +55,12 @@ catastrophically bad for performance and fragments the ecosystem.
 - The Haskell Foundation's 2021 goals document lists "String types" as one of the top pain points for
   new users and production deployments alike.
 
-**Sprout implication:** Sprout's `str` is a value-typed, GC-managed byte sequence with O(1) length.
+**Sprout implication:** Sprout's `String` is a value-typed, GC-managed, always-valid-UTF-8
+contiguous byte sequence — the core trap (a singly-linked list of boxed chars) is avoided. Note
+one accuracy caveat: length is **not** O(1) today. `stdlib/string.length` is O(codepoints) (it
+scans for UTF-8 boundaries) and `byte_length` is O(bytes) (`strlen`); an O(1) byte-length would
+require storing a length header on the string object. There is one canonical text type (`String`),
+with `Bytes` for raw bytes and `Char` — not four competing string representations.
 
 ---
 
@@ -81,8 +86,16 @@ into a single opaque bucket.
 - `rio`, a "standard library replacement" by FP Complete, bundles an opinionated effect-via-ReaderT
   solution because the standard approach is considered inadequate for production use.
 
-**Sprout implication:** Sprout's `!{IO}` effect set in types is a direct response. The goal is for
-fine-grained effect sets (e.g., `!{FileIO, Net}`) to be expressible and checkable without a library.
+**Sprout implication:** Sprout's `!{IO}` effect annotation in types is a direct response, and
+avoiding a proliferation of competing effect libraries is a design goal. Accurate current status
+(do not overstate): only **closed `!{IO}` and singleton `!{e}`** are in the language contract;
+multi-entry / fine-grained rows such as `!{FileIO, Net}` are explicitly *not part of the contract
+yet* (`spec-v0.md` §type-forms; `types.sprout` labels `EffectRow` "future use"). Enforcement is also
+partial: today only `main` is checked to declare its effect — the pure→IO boundary is **not** yet
+enforced on ordinary function bodies (`unify_effects` treats pure and IO as mutually compatible).
+Fine-grained, inferred, checked effect sets remain the aspiration; see
+`docs/cross-language-design-lessons.md` §A for the PureScript cautionary tale (effect rows only pay
+off when *inference* carries the weight) and the Koka reference design.
 
 ---
 
@@ -229,8 +242,17 @@ bites nearly every beginner and has no obvious benefit in modern Haskell.
   times, consistently ranking as one of the top Haskell questions. The confusion is not a beginner
   outlier; it is a structural feature of the language's learning curve.
 
-**Sprout implication:** Sprout should have a uniform polymorphism rule with no special cases for
-binding position.
+**Sprout implication:** Sprout avoids Haskell's *monomorphism restriction* (the constraint-based,
+signature-sensitive rule that surprises beginners). It does, however, apply the standard ML
+**value restriction**: a top-level `let` generalizes only when its RHS is a syntactic value
+(literal, variable, lambda, tuple, constructor-of-values), staying monomorphic for a call/`if`/
+`match`/`do` RHS (`stdlib/compiler/infer.sprout`, W3/F-VALRESTR; conformance test
+`value_restriction.spr`). So the rule is *uniform* (it keys on RHS syntactic form, not on binding
+position or type signatures) but it is not "no special cases." This is the right call — unlike
+Haskell's MR, the value restriction is a soundness mechanism (see
+`docs/cross-language-design-lessons.md` §C: SML found only 31 η-expansions needed across 200k LOC,
+and OCaml needs it to keep mutable refs sound). The refinement worth adopting is OCaml's *relaxed*
+value restriction, to keep abstract combinator types polymorphic without η-expansion.
 
 ---
 
