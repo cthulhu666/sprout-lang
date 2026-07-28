@@ -56,11 +56,17 @@ catastrophically bad for performance and fragments the ecosystem.
   new users and production deployments alike.
 
 **Sprout implication:** Sprout's `String` is a value-typed, GC-managed, always-valid-UTF-8
-contiguous byte sequence — the core trap (a singly-linked list of boxed chars) is avoided. Note
-one accuracy caveat: length is **not** O(1) today. `stdlib/string.length` is O(codepoints) (it
-scans for UTF-8 boundaries) and `byte_length` is O(bytes) (`strlen`); an O(1) byte-length would
-require storing a length header on the string object. There is one canonical text type (`String`),
-with `Bytes` for raw bytes and `Char` — not four competing string representations.
+contiguous byte sequence — the core trap (a singly-linked list of boxed chars) is avoided. There is
+one canonical text type (`String`), with `Bytes` for raw bytes and `Char` — not four competing
+string representations. Length-complexity accuracy (the earlier "O(1) length" phrasing was too
+strong): `byte_length` **is O(1) for every GC-managed string** — the inline heap header's `aux`
+field stores the byte count at allocation and is kept in sync (`runtime/sprout_runtime.c`
+`str_byte_len`, HDRCHECK-verified) — and falls back to `strlen` (O(n)) *only* for static string
+literals, which are not GC-headered. `length` (codepoint count) is O(n) by design
+(`sprout_utf8_codepoint_count`), which is the correct, industry-standard choice for a variable-width
+UTF-8 buffer: O(1) codepoint length is impossible without either a cached counter or a fixed-width
+encoding, and Rust/Go/Swift all likewise leave codepoint/grapheme count O(n). The one remaining gap
+is that literals don't carry a length header — tracked in `BACKLOG.md`.
 
 ---
 
