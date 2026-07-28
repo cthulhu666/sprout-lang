@@ -160,3 +160,10 @@ For any non-trivial language change, include:
 ## Known Limitations
 
 See [README.md §Not Yet Supported](./README.md#not-yet-supported-common-gotchas) for current syntax and naming gotchas (e.g. the word `not` is not an operator — use the `!` prefix), along with the idiomatic form for each. (Prefix `!` and `-` negation and effectful list iteration via `list_each`/`list_fold` all work now; a `let..in` block — including refutable `<pat> = <e> else <fb>` bindings — works as a pure function body, e.g. `tests/stdlib/test_let_else.spr`.)
+
+## Pull Requests (Codeberg)
+
+The remote is **Codeberg** (a Gitea instance), not GitHub — do **not** use `gh`. Land work via a feature branch + PR to `master`.
+
+- **Open a PR with `scripts/codeberg/pr-create.sh "<title>" <body-file> [base=master]`** — NOT `tea pr create`. Any `tea` command that reads the local repo (even with `--repo <slug>`) **fails from a git worktree**: the worktree's `.git` is a pointer file tea's go-git library cannot read, so it dies with `Error: local repository required`. Because Sprout is developed in worktrees, PR creation goes through the Gitea REST API instead; the script wraps that (idempotent existing-PR check, pushes the branch first, escapes the body via `jq --rawfile`) and prints the PR URL. The API token is read from the `tea login` config.
+- **Other Codeberg ops from a worktree also live in `scripts/codeberg/`**: `pr-monitor.sh`, `pr-rebase.sh`, `pr-babysit.sh`, plus `_lib.sh`'s `codeberg_curl` helper for ad-hoc API calls. Check there before hand-rolling `tea`/`curl`. The `codeberg-merge` skill wraps `pr-babysit.sh` to shepherd open PRs through CI to a fast-forward merge (handling the master-moved → rebase → seed-regeneration cascade).
