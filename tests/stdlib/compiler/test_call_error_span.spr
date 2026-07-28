@@ -1,0 +1,42 @@
+module main
+import stdlib.test (TestState, new_state, assert_true, summary)
+import stdlib.compiler.compiler as compiler
+import stdlib.compiler.source as source
+
+# Regression for guideline #5 (errors carry a source location from inception),
+# call-resolution edition. A type error discovered while unifying a callee's
+# function type against its argument types (infer_call_resolve) must report the
+# call site's position, not no_pos() (line 0).
+#
+# Fixture: `g` expects Int; `f` calls `g("hello")` on line 2 — infer_call_resolve
+# fails to unify the callee's Int parameter with the String argument.
+
+fn first_diag(result: compiler.CompileResult) -> Maybe compiler.Diagnostic =
+  match result with
+  | compiler.CompileOk _ -> Nothing
+  | compiler.CompileFail diags ->
+      match diags with
+      | Nil -> Nothing
+      | [d | _] -> Just(d)
+
+fn diag_line(d: compiler.Diagnostic) -> Int =
+  match d with
+  | compiler.DiagError pos _ -> source.position_line(pos)
+  | compiler.DiagWarning pos _ -> source.position_line(pos)
+
+fn main() -> Unit !{IO} =
+  do
+    state <- new_state()
+    match env_get("SPROUT_STDLIB_ROOT") with
+    | Nothing -> ()
+    | Just stdlib_root ->
+        do
+          let src = "fn g(x: Int) -> Int = x\nfn f() -> Int = g(\"hello\")\n"
+          r <- compiler.compile_source_with_root(src, source.StdlibRoot(stdlib_root))
+          assert_true(state, "arg-type mismatch produces CompileFail",
+            match r with | compiler.CompileFail _ -> true | _ -> false)
+          assert_true(state, "call-resolution error reports the call site's line (2, not 0)",
+            match first_diag(r) with
+            | Nothing -> false
+            | Just d -> diag_line(d) == 2)
+    summary(state)

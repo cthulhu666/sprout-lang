@@ -865,9 +865,11 @@ dot-guard `infer.is_lowercase_name` has (a dotted name is never a type variable)
    `check_pattern_type`/`infer_tuple_pattern`/`check_pattern_list`/`infer_ctor_pattern`),
    plus branch-unify / fn-body / instance-method return-mismatch sites via
    `typed_expr_pos`, and `no_pos()`/`dummy_pos()` consolidated to a single guarded
-   `no_pos()`. Remaining `no_pos()` *error* sites, each needing its own threading:
-   - `infer_call_resolve` `CallErr` (828/831/835) — thread a call `pos` in from its
-     two callers (the call expr carries one).
+   `no_pos()`. Branch `fix/span-call-resolve`: `infer_call_resolve`'s three `CallErr`
+   sites spanned — a `pos` param threaded in from both callers (`infer_call_inner`'s
+   call-expr pos and `eq_via_class_method`'s pos), so an argument-type mismatch now
+   reports the call site's line (`g("hello")` → `7:14: … Call type mismatch`, was 0).
+   Remaining `no_pos()` *error* sites, each needing its own threading:
    - `typecheck_decls` `TypedErr` (validate_all_decls / check_overlapping_instances /
      check_missing_superclass_instances / validate_entrypoint) — each returns a bare
      `Maybe String`; thread the offending decl's pos out, as done for

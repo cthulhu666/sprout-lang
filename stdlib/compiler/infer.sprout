@@ -802,7 +802,8 @@ fn infer_call_inner(
             list_map(\e -> typed_ast.typed_expr_type(e), typed_args),
             types.TVar(types.tyvar_id(v)),
             merge_effects(callee_eff, args_eff),
-            callee_display_name(callee))
+            callee_display_name(callee),
+            pos)
           match r with
           | CallErr pos e -> InferErr(pos, e)
           | CallOk ret_t s3 es3 call_eff ->
@@ -820,19 +821,20 @@ fn infer_call_resolve(
   arg_types: List types.Type,
   ret_type: types.Type,
   eff: types.Effect,
-  callee_display: String
+  callee_display: String,
+  pos: source.SourcePos
 ) -> CallResult !{IO} =
   match arg_types with
   | Nil ->
       match unifier.apply_subst(subst, callee_type) with
-      | types.TFunc _ _ _ -> CallErr(no_pos(), callee_display ++ " requires arguments but was called with none")
+      | types.TFunc _ _ _ -> CallErr(pos, callee_display ++ " requires arguments but was called with none")
       | resolved ->
           match unifier.unify_types(subst, resolved, ret_type) with
-          | Err e -> CallErr(no_pos(), "Call type mismatch: " ++ e)
+          | Err e -> CallErr(pos, "Call type mismatch: " ++ e)
           | Ok s3 -> CallOk(unifier.apply_subst(s3, ret_type), s3, eff_subst, eff)
   | _ ->
       match unifier.unify_types(subst, callee_type, build_fn_type(arg_types, ret_type)) with
-      | Err e -> CallErr(no_pos(), "Call type mismatch: " ++ e)
+      | Err e -> CallErr(pos, "Call type mismatch: " ++ e)
       | Ok s3 -> CallOk(unifier.apply_subst(s3, ret_type), s3, eff_subst, eff)
 
 # --- Constraint checking ---
@@ -2148,7 +2150,8 @@ fn eq_via_class_method(
                Cons(typed_ast.typed_expr_type(typed_right), Nil)),
           types.TVar(types.tyvar_id(v)),
           eff,
-          "'eq'")
+          "'eq'",
+          pos)
         match r with
         | CallErr pos e -> InferErr(pos, op ++ " via Eq.eq: " ++ e)
         | CallOk ret_t s3 es3 call_eff ->
