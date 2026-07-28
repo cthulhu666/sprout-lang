@@ -14,6 +14,7 @@ import loam.galaxy_sample (hash01, sample_seed, level_thresholds, keep_level)
 import loam.orbit (ellipse_point)
 import loam.system_view (orbit_world_scale, body_world_size)
 import loam.starfield as sf
+import loam.billboard as bb
 import loam.planet as pl
 
 # Sprout / Loam — 3D GALAXY MAP (scene 1) with zoom-adaptive streaming.
@@ -120,15 +121,16 @@ fn bd(b: Bool) -> Double = if b then 1.0 else 0.0
 # Colours come from loam.galaxy_filter.class_rgb — the SINGLE source shared with the filter legend, so
 # a star and its checkbox swatch can never disagree. Black-hole classes (9..11) are deliberately
 # violet/magenta so they read as exotic landmarks. Created in ascending order so handle == classCode.
-# Build one sphere model per spectral class, each assigned the emissive instanced shader `star_sh`
-# (from loam.starfield) so the starfield renders as glowing stars, not matte lit balls.
+# Build one BILLBOARD model per spectral class, each assigned the instanced billboard-glow shader
+# `star_sh` (from loam.billboard) so the starfield renders as round glowing point sprites — no faceted
+# sphere silhouette at any zoom, not even on the huge central black hole. Handle == classCode.
 fn make_models_from(c: Int, star_sh: Int) -> Unit !{IO} =
   if c >= num_classes then ()
   else
     match class_rgb(c) with
     | (r, g, b) ->
         do
-          h <- gfx.sphere_model(r, g, b)
+          h <- gfx.billboard_model(r, g, b)
           gfx.model_set_shader(h, star_sh)
           make_models_from(c + 1, star_sh)
 
@@ -974,7 +976,7 @@ fn main() -> Unit !{IO} =
     gfx.post_bloom(0.62, 0.95)
     # Load the demo's procedural shaders (authored in loam, not the engine): emissive stars (instanced
     # for the point cloud, immediate for the sun) + procedural planets. Handles thread into the draws.
-    star_sh <- sf.load_instance_shader()
+    star_sh <- bb.glow_shader()
     sun_sh <- sf.load_immediate_shader()
     planet_sh <- pl.load_shader()
     make_models(star_sh)

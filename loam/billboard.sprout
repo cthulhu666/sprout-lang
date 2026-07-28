@@ -1,0 +1,68 @@
+module loam.billboard
+
+# Instanced BILLBOARD (point-sprite) shading — a general engine capability, authored HERE in Sprout
+# and handed to the generic gfx shader API. A billboard is a camera-facing quad: the vertex shader
+# takes the unit quad from gfx.billboard_model, reads the per-instance world position and size out of
+# `instanceTransform`, and rebuilds the quad in SCREEN space (offset in NDC), which is inherently
+# camera-facing. The fragment shader shapes a radial glow, so an instanced point cloud (stars,
+# particles, spark lights, distant markers) renders as round glowing sprites with NO polygon
+# silhouette at any zoom — the win over instanced sphere meshes, which show their facets up close.
+# A MINIMUM pixel size keeps far points visible instead of vanishing sub-pixel (a point light never
+# shrinks below a few px). Domain stays out of here: colour is the material's colDiffuse (per model),
+# size is the instance scale — a caller picks both.
+
+import stdlib.gfx as gfx
+
+# Camera-facing quad, built in NDC. `mvp` is projection*view (the base model is identity, as for any
+# instanced draw). Position and size are read via M*v (same semantics as the engine's other instance
+# shaders): M*(0,0,0,1) is the translation, |M*(1,0,0,0)| is the uniform scale (the sprite diameter).
+# The world size projects to an NDC half-extent `size/2 * uProjScale / w` per axis (uProjScale = the
+# perspective diagonal, so x carries the aspect and sprites stay round); a floor of `min_px` NDC keeps
+# distant points from disappearing. Offsetting in clip space (× w) means the perspective divide lands
+# the corner exactly `ndc_half` from the centre on screen. uProjScale/uViewportH are fed by the engine.
+let glow_vs =
+  "#version 330\n" ++
+  "in vec3 vertexPosition;\n" ++
+  "in mat4 instanceTransform;\n" ++
+  "uniform mat4 mvp;\n" ++
+  "uniform vec2 uProjScale;\n" ++
+  "uniform float uViewportH;\n" ++
+  "out vec2 vUV;\n" ++
+  "void main() {\n" ++
+  "  vec3 center = (instanceTransform * vec4(0.0, 0.0, 0.0, 1.0)).xyz;\n" ++
+  "  float size = length((instanceTransform * vec4(1.0, 0.0, 0.0, 0.0)).xyz);\n" ++
+  "  vec4 c = mvp * vec4(center, 1.0);\n" ++
+  "  if (c.w <= 0.0) { gl_Position = vec4(2.0, 2.0, 2.0, 1.0); return; }\n" ++
+  "  vec2 ndc_half = (size * 0.5) * uProjScale / c.w;\n" ++
+  "  float min_ndc = 3.0 / uViewportH;\n" ++
+  "  float k = max(1.0, min_ndc / max(ndc_half.y, 1e-6));\n" ++
+  "  ndc_half = ndc_half * k;\n" ++
+  "  vec2 off = vertexPosition.xy * 2.0 * ndc_half;\n" ++
+  "  vUV = vertexPosition.xy * 2.0;\n" ++
+  "  gl_Position = vec4(c.xy + off * c.w, c.z, c.w);\n" ++
+  "}\n"
+
+# Radial glow: a soft-edged disc with a hot, slightly whitened core, alpha-blended so a dense field
+# stays coloured instead of blowing to white (bloom, if enabled, still bleeds the halo further).
+# Corners (|vUV| > 1) and near-transparent edges are discarded so overlapping sprites do not punch
+# depth-buffer holes in each other.
+let glow_fs =
+  "#version 330\n" ++
+  "in vec2 vUV;\n" ++
+  "uniform vec4 colDiffuse;\n" ++
+  "out vec4 finalColor;\n" ++
+  "void main() {\n" ++
+  "  float d = length(vUV);\n" ++
+  "  if (d > 1.0) discard;\n" ++
+  "  float glow = smoothstep(1.0, 0.0, d);\n" ++
+  "  float core = pow(glow, 3.0);\n" ++
+  "  float a = clamp(glow * 0.55 + core, 0.0, 1.0);\n" ++
+  "  if (a < 0.02) discard;\n" ++
+  "  vec3 col = colDiffuse.rgb + core * (vec3(1.0) - colDiffuse.rgb) * 0.6;\n" ++
+  "  finalColor = vec4(col, a);\n" ++
+  "}\n"
+
+# Compile the instanced billboard-glow shader; assign it to gfx.billboard_model handles via
+# gfx.model_set_shader. Call after open_window. Reusable by any instanced point cloud, not stars only.
+export fn glow_shader() -> Int !{IO} =
+  gfx.load_shader(glow_vs, glow_fs)

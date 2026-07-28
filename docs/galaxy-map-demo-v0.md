@@ -65,14 +65,16 @@ The demo builds `<catalog>-balanced` on first launch and reuses it thereafter; y
   are lazy-loaded once (throttled to `load_budget` reads/frame) and never cleared — so there is no
   eviction/reload/free-list, and no boundary-crossing stutter.
 - **Per-star size scales with the star's level.** A star's render radius is
-  `sizeCode · star_scale / 2^level` (`star_size` in the demo). A quadtree halves linear tile spacing
-  per level, so dividing the radius by `2^level` holds the star-radius-to-neighbour-spacing ratio
-  roughly constant at every depth: the brightest L0 stars (and all black holes, forced into L0) stay
-  large landmarks, while the dense deep-level stars shrink to fine dots instead of merging into one
-  solid carpet. This is also what makes zoom **visually smooth** — a level that streams in on zoom-in
-  arrives as small points rather than popping in as full-size spheres. (Before this, a flat
-  `star_scale` made every level's stars the same world size, so zooming into the core drew a wall of
-  overlapping balls.)
+  `sizeCode · star_scale / 2^level` (`star_size` in the demo) — the sprite *diameter*, passed as the
+  billboard instance scale. A quadtree halves linear tile spacing per level, so dividing the radius by
+  `2^level` holds the star-radius-to-neighbour-spacing ratio roughly constant at every depth: the
+  brightest L0 stars (and all black holes, forced into L0) stay large landmarks, while the dense
+  deep-level stars shrink to fine dots instead of merging into one solid carpet. This is also what
+  makes zoom **visually smooth** — a level that streams in on zoom-in arrives as small points rather
+  than popping in as full-size discs. (Before this, a flat `star_scale` made every level's stars the
+  same world size, so zooming into the core drew a wall of overlapping balls.) The billboard's
+  minimum-pixel floor (in `loam.billboard`) is what keeps this world-size falloff from making the L0
+  overview vanish — a far star never renders below ~3 px.
 - **`group_count` is the LoD selector.** Because levels occupy contiguous ascending group ranges,
   `gfx.draw_instances(level_offset(L+1), …)` draws exactly levels 0..L. The zoom-derived level (a
   distance ladder in `desired_level`) is therefore both what is streamed *and* what is drawn, in one
@@ -126,6 +128,20 @@ These are gfx-binding additions (non-bootstrap; no seed refresh):
   so it would clip to black without pushing far out (`rlSetClipPlanes`, persists).
 - `gfx.sphere_model(r,g,b) -> handle` — a uniformly-coloured unit sphere model for instancing a
   starfield (`GenMeshSphere` + `LoadModelFromMesh`), coloured via the material's `colDiffuse`.
+- `gfx.billboard_model(r,g,b) -> handle` — a uniformly-coloured unit **quad** model, the instanced
+  counterpart of `sphere_model`, for **billboards (point sprites)**. Registered identically, so it
+  flows through `instance_push`/`draw_instances`/`draw_instances_masked` and the per-tile group
+  culling unchanged — a star is still one instance with a position + scale. Assign a billboard-capable
+  shader (`loam.billboard.glow_shader`) via `model_set_shader`; a star then renders as a round glowing
+  **screen-space sprite** instead of a faceted sphere mesh — no low-poly silhouette at any zoom (not
+  even on the huge central black hole, previously a visible decagon), and cheaper (4 verts vs an 8×12
+  sphere). The instanced draw auto-feeds two billboard uniforms — `uProjScale` (the projection's
+  `(Px,Py)` perspective diagonal, so sprites stay round) and `uViewportH` (target height, for the
+  minimum-pixel size floor that keeps distant points from vanishing sub-pixel) — by the same
+  convention it feeds `mvp`/`colDiffuse`, so a billboard shader authored in loam needs no per-frame
+  Sprout call. This is the "screen-constant point/billboard primitive" the LoD notes flagged; the glow
+  look (radial falloff, hot whitened core) lives in `loam.billboard`, not the shim. General engine
+  capability — reusable by any instanced point cloud (particles, spark lights, distant markers).
 - `gfx.load_shader(vs, fs) -> handle` + `gfx.shader_set_float/vec3/int(h, name, …)` +
   `gfx.draw_sphere_shaded(h, …)` + `gfx.model_set_shader(model_h, shader_h)` — the **generic
   custom-shader API**. A caller authors GLSL (a string) and drives it from Sprout, so domain
@@ -176,6 +192,14 @@ These are gfx-binding additions (non-bootstrap; no seed refresh):
 - Star sizing (`sizeCode · star_scale / 2^level`) is a visibility compromise, not physical — a real
   star is sub-pixel at any of these scales. The `/2^level` falloff keeps the dense levels legible; the
   `sizeCode` and `star_scale` numbers are hand-tuned for the opening framing.
+- Stars are drawn as **billboards (screen-space point sprites)**, not sphere meshes — `loam.billboard`
+  glow sprites on `gfx.billboard_model` (see the primitives list above). This replaced the original
+  instanced sphere models: at close range a world-size sphere shows its low-poly facets (the central
+  supermassive black hole was a visible decagon), whereas a billboard has no silhouette to facet at
+  any zoom, and it is cheaper. The tradeoff a billboard introduces — world-size sprites vanishing
+  sub-pixel when zoomed out — is handled by the primitive's minimum-pixel floor, so both zoom extremes
+  read well. The now-removed instanced emissive sphere shader (`loam.starfield.load_instance_shader`)
+  is gone; `loam.starfield` retains only the *immediate* emissive shader for the scene-2 sun.
 
 ## Scene 2 — solar-system view (built)
 

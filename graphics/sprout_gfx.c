@@ -70,6 +70,14 @@ static int g_model_count = 0;
 #define GFX_MAX_SHADERS 32
 static Shader g_shaders[GFX_MAX_SHADERS];
 static int g_shader_count = 0;
+/* Billboard uniform locations, cached per shader at load time (-1 if the shader does not declare
+ * them). A screen-space billboard shader builds a camera-facing quad in NDC from the projection
+ * scale, with a minimum pixel size; the instanced draw feeds these from the live camera/viewport each
+ * frame — the same auto-fed convention as mvp/colDiffuse — so any billboard shader authored in loam
+ * works with no per-frame Sprout call. uProjScale = (Px,Py) perspective diagonal; uViewportH = target
+ * height in px (for the min-size floor). */
+static int g_shader_projscale_loc[GFX_MAX_SHADERS];
+static int g_shader_viewporth_loc[GFX_MAX_SHADERS];
 
 /* Animation-set registry: each LoadModelAnimations returns an array of clips.
  * Sprout holds an int handle to the set; a clip is (set handle, clip index). */
@@ -1070,6 +1078,49 @@ long long gfx_sphere_model(long long r, long long g, long long b) {
   return h;
 }
 
+/* A unit quad in the XY plane (corners at ±0.5), for instanced BILLBOARDS (point sprites). Registered
+ * exactly like gfx_sphere_model, so it flows through instance_push / draw_instances / _masked and the
+ * per-tile group culling unchanged — a starfield point is still one instance with a position + scale.
+ * The mesh carries no orientation of its own: a billboard vertex shader (authored in loam, assigned
+ * via gfx_model_set_shader) reads the quad corner from vertexPosition.xy and rebuilds the quad in NDC
+ * — inherently camera-facing — using the auto-fed uProjScale/uViewportH (see draw_instances_impl), so
+ * a star renders as a round sprite instead of a faceted sphere (no low-poly silhouette even on the
+ * huge central black hole).
+ * (r,g,b) is the material colDiffuse, the colour of every instance of this model. Call after
+ * gfx_open_window (uploads the mesh to the GPU). */
+long long gfx_billboard_model(long long r, long long g, long long b) {
+  if (g_model_count >= g_models_cap) {
+    int new_cap = g_models_cap == 0 ? 16 : g_models_cap * 2;
+    Model *grown = realloc(g_models, (size_t)new_cap * sizeof(Model));
+    if (!grown) {
+      TraceLog(LOG_ERROR, "sprout_gfx: out of memory growing model registry to %d", new_cap);
+      return -1;
+    }
+    g_models = grown;
+    g_models_cap = new_cap;
+  }
+  Mesh mesh = { 0 };
+  mesh.vertexCount = 4;
+  mesh.triangleCount = 2;
+  mesh.vertices  = (float *)MemAlloc(4 * 3 * sizeof(float));
+  mesh.texcoords = (float *)MemAlloc(4 * 2 * sizeof(float));
+  mesh.indices   = (unsigned short *)MemAlloc(6 * sizeof(unsigned short));
+  const float verts[12] = { -0.5f,-0.5f,0.0f,  0.5f,-0.5f,0.0f,  0.5f,0.5f,0.0f,  -0.5f,0.5f,0.0f };
+  const float uvs[8]    = { 0.0f,0.0f,  1.0f,0.0f,  1.0f,1.0f,  0.0f,1.0f };
+  const unsigned short idx[6] = { 0,1,2,  0,2,3 };
+  memcpy(mesh.vertices,  verts, sizeof(verts));
+  memcpy(mesh.texcoords, uvs,   sizeof(uvs));
+  memcpy(mesh.indices,   idx,   sizeof(idx));
+  UploadMesh(&mesh, false);
+  int h = g_model_count++;
+  Model m = LoadModelFromMesh(mesh);
+  m.materials[0].maps[MATERIAL_MAP_DIFFUSE].color =
+    (Color){ (unsigned char)r, (unsigned char)g, (unsigned char)b, 255 };
+  if (g_instance_ready) m.materials[0].shader = g_instance_shader;
+  g_models[h] = m;
+  return h;
+}
+
 /* --- Generic custom-shader API --------------------------------------------
  * Load a caller-authored shader and drive it from Sprout, so domain look-and-feel (emissive stars,
  * procedural planets, ...) lives in the demo / loam layer as data, not baked into this engine. Thin
@@ -1092,6 +1143,12 @@ long long gfx_load_shader(const char *vs, const char *fs) {
   if (loc != -1) s.locs[SHADER_LOC_VERTEX_INSTANCETRANSFORM] = loc;
   int h = g_shader_count++;
   g_shaders[h] = s;
+  /* Cache the optional billboard uniforms. GetShaderLocation warns on a miss, which is normal here
+   * (most shaders are not billboards), so silence it for the probe. */
+  SetTraceLogLevel(LOG_ERROR);
+  g_shader_projscale_loc[h] = GetShaderLocation(s, "uProjScale");
+  g_shader_viewporth_loc[h] = GetShaderLocation(s, "uViewportH");
+  SetTraceLogLevel(LOG_WARNING);
   return h;
 }
 
@@ -1480,6 +1537,12 @@ static long long draw_instances_impl(long long group_count, long long cull_dist,
   float cull = as_float(cull_dist);
   float cull2 = cull * cull;  /* compare squared distances — no per-group sqrt */
   float ex = g_cam.position.x, ey = g_cam.position.y, ez = g_cam.position.z;
+  /* Projection scale + viewport for any billboard-shader model in this pass (fed as uProjScale /
+   * uViewportH). Py = 1/tan(fovy/2) is the perspective y-scale; Px = Py/aspect keeps sprites round. */
+  float vp_h = (float)GetScreenHeight();
+  float vp_w = (float)GetScreenWidth();
+  float proj_py = 1.0f / tanf(g_cam.fovy * 0.5f * DEG2RAD);
+  float proj_px = proj_py * (vp_h / (vp_w > 0.0f ? vp_w : 1.0f));
   int nvis = 0;
   for (int g = 0; g < gc; g++) {
     if (!g_grp_any[g]) continue;
@@ -1524,6 +1587,16 @@ static long long draw_instances_impl(long long group_count, long long cull_dist,
       int capable = (mat.shader.locs != NULL &&
                      mat.shader.locs[SHADER_LOC_VERTEX_INSTANCETRANSFORM] != -1);
       if (!capable && g_instance_ready) mat.shader = g_instance_shader;
+      /* Feed the projection scale + viewport to a billboard shader (matched to its cached uProjScale/
+       * uViewportH locations by shader program id). Non-billboard shaders lack these and are skipped. */
+      for (int sh = 0; sh < g_shader_count; sh++) {
+        if (g_shaders[sh].id != mat.shader.id || g_shader_projscale_loc[sh] == -1) continue;
+        float ps[2] = { proj_px, proj_py };
+        SetShaderValue(mat.shader, g_shader_projscale_loc[sh], ps, SHADER_UNIFORM_VEC2);
+        if (g_shader_viewporth_loc[sh] != -1)
+          SetShaderValue(mat.shader, g_shader_viewporth_loc[sh], &vp_h, SHADER_UNIFORM_FLOAT);
+        break;
+      }
       DrawMeshInstanced(model.meshes[i], mat, g_inst_scratch, total);
     }
   }

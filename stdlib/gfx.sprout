@@ -77,6 +77,7 @@ extern fn gfx_overlay_begin() -> Unit !{IO}
 extern fn gfx_close_window() -> Unit !{IO}
 extern fn gfx_set_clip_planes(near_plane: Double, far_plane: Double) -> Unit !{IO}
 extern fn gfx_sphere_model(r: Int, g: Int, b: Int) -> Int !{IO}
+extern fn gfx_billboard_model(r: Int, g: Int, b: Int) -> Int !{IO}
 extern fn gfx_load_shader(vs: String, fs: String) -> Int !{IO}
 extern fn gfx_shader_set_float(h: Int, name: String, v: Double) -> Unit !{IO}
 extern fn gfx_shader_set_vec3(h: Int, name: String, x: Double, y: Double, z: Double) -> Unit !{IO}
@@ -455,6 +456,16 @@ export fn set_clip_planes(near_plane: Double, far_plane: Double) -> Unit !{IO} =
 # code. Call after open_window (it uploads a mesh to the GPU).
 export fn sphere_model(r: Int, g: Int, b: Int) -> Int !{IO} =
   gfx_sphere_model(r, g, b)
+
+# Create a uniformly-coloured unit BILLBOARD (point-sprite) model and return its handle — a camera-
+# facing quad, the instanced counterpart of sphere_model. Registered identically, so it drives
+# instance_push / draw_instances / draw_instances_masked and the per-tile group culling unchanged.
+# Assign a billboard-capable shader (one that reads the auto-fed uCamRight/uCamUp basis and shapes a
+# radial glow — see loam.billboard) via model_set_shader. A star then renders as a round glowing
+# sprite instead of a faceted sphere: no low-poly silhouette at any zoom, cheaper to draw. Per-star
+# size still comes from the instance_push `scale`. Call after open_window (uploads the mesh).
+export fn billboard_model(r: Int, g: Int, b: Int) -> Int !{IO} =
+  gfx_billboard_model(r, g, b)
 
 # --- Generic custom shaders ---
 # Compile a shader from GLSL source and return a handle. An empty vs/fs string means "use raylib's

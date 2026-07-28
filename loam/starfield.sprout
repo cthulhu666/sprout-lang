@@ -1,27 +1,13 @@
 module loam.starfield
 
-# Emissive (self-luminous) star shaders for the galaxy demo, authored HERE in Sprout and handed to
-# the generic gfx shader API — the engine has no built-in notion of a "star". A star is not lit from
-# outside (it IS the light), so these drop all diffuse shading and emit the body colour full-bright;
-# bloom (gfx.post_bloom) then bleeds the glow. Two variants, because a star reaches the GPU two ways:
-#   - instanced (scene-1 point cloud, gfx.draw_instances): colour is the material's colDiffuse. The VS
-#     declares `instanceTransform`, which makes gfx.load_shader mark the shader instancing-capable.
-#   - immediate (scene-2 sun, gfx.draw_sphere_shaded): colour arrives as the per-vertex attribute.
+# Emissive (self-luminous) star shader for the galaxy demo's scene-2 sun, authored HERE in Sprout and
+# handed to the generic gfx shader API — the engine has no built-in notion of a "star". A star is not
+# lit from outside (it IS the light), so this drops all diffuse shading and emits the body colour
+# full-bright; bloom (gfx.post_bloom) then bleeds the glow. This is the IMMEDIATE variant (scene-2 sun,
+# gfx.draw_sphere_shaded): colour arrives as the per-vertex attribute. (Scene 1's instanced point cloud
+# uses loam.billboard's screen-space glow sprites instead of an emissive sphere mesh.)
 
 import stdlib.gfx as gfx
-
-let emissive_instance_vs =
-  "#version 330\n" ++
-  "in vec3 vertexPosition;\n" ++
-  "in mat4 instanceTransform;\n" ++
-  "uniform mat4 mvp;\n" ++
-  "void main() { gl_Position = mvp*instanceTransform*vec4(vertexPosition, 1.0); }\n"
-
-let emissive_instance_fs =
-  "#version 330\n" ++
-  "uniform vec4 colDiffuse;\n" ++
-  "out vec4 finalColor;\n" ++
-  "void main() { finalColor = colDiffuse; }\n"
 
 let emissive_vs =
   "#version 330\n" ++
@@ -36,11 +22,6 @@ let emissive_fs =
   "in vec4 fragColor;\n" ++
   "out vec4 finalColor;\n" ++
   "void main() { finalColor = fragColor; }\n"
-
-# Compile the INSTANCED emissive shader (for the scene-1 point cloud): assign it to the starfield
-# sphere models via gfx.model_set_shader. Call after open_window.
-export fn load_instance_shader() -> Int !{IO} =
-  gfx.load_shader(emissive_instance_vs, emissive_instance_fs)
 
 # Compile the IMMEDIATE emissive shader (for the scene-2 sun): pass its handle to draw_star.
 export fn load_immediate_shader() -> Int !{IO} =
