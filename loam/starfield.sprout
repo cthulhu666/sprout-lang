@@ -10,18 +10,20 @@ module loam.starfield
 import stdlib.gfx as gfx
 
 let emissive_vs =
-  "#version 330\n" ++
-  "in vec3 vertexPosition;\n" ++
-  "in vec4 vertexColor;\n" ++
-  "uniform mat4 mvp;\n" ++
-  "out vec4 fragColor;\n" ++
-  "void main() { fragColor = vertexColor; gl_Position = mvp*vec4(vertexPosition, 1.0); }\n"
+  `#version 330
+in vec3 vertexPosition;
+in vec4 vertexColor;
+uniform mat4 mvp;
+out vec4 fragColor;
+void main() { fragColor = vertexColor; gl_Position = mvp*vec4(vertexPosition, 1.0); }
+`
 
 let emissive_fs =
-  "#version 330\n" ++
-  "in vec4 fragColor;\n" ++
-  "out vec4 finalColor;\n" ++
-  "void main() { finalColor = fragColor; }\n"
+  `#version 330
+in vec4 fragColor;
+out vec4 finalColor;
+void main() { finalColor = fragColor; }
+`
 
 # Compile the IMMEDIATE emissive shader (for the scene-2 sun): pass its handle to draw_star.
 export fn load_immediate_shader() -> Int !{IO} =

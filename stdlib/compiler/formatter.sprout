@@ -1,6 +1,7 @@
 module stdlib.compiler.formatter
 import stdlib.compiler.lexer as lexer
 import stdlib.compiler.token as token
+import stdlib.compiler.source as source
 import stdlib.string as string
 
 # ---------------------------------------------------------------------------
@@ -442,8 +443,82 @@ fn drop_trailing_empty(lines: List String) -> List String =
       if h == "" then list_reverse(t)
       else lines
 
-export fn format_source(src: String) -> String =
+# Multi-line template protection.
+#
+# The formatter is line-based — it maps format_line over physical lines. A
+# backtick template spanning multiple lines would have its boundary and
+# interior lines re-lexed as code and reformatted, silently corrupting the
+# string (`x=1` inside the template -> `x = 1`; a `#`-led line mis-split as a
+# comment). To prevent that we tokenize the whole file once, find every
+# template whose closing backtick sits on a later line than its opening one,
+# and pass those physical lines through verbatim.
+
+type TplSpan =
+  | TplSpan Int Int
+
+# Open-template start-line stack (for nesting) + collected multi-line spans.
+type SpanState =
+  | SpanState (List Int) (List TplSpan)
+
+fn tok_line(tok: token.Token) -> Int =
+  source.position_line(token.token_position(tok))
+
+fn span_step(state: SpanState, tok: token.Token) -> SpanState =
+  match state with
+  | SpanState stack spans ->
+      match token.token_kind(tok) with
+      | token.TokenTemplateStart -> SpanState(Cons(tok_line(tok), stack), spans)
+      | token.TokenTemplateEnd ->
+          match stack with
+          | Nil -> state
+          | Cons start_line rest ->
+              if tok_line(tok) > start_line
+              then SpanState(rest, Cons (TplSpan(start_line, tok_line(tok)), spans))
+              else SpanState(rest, spans)
+      | _ -> state
+
+fn collect_spans_go(toks: Vec token.Token, total: Int, state: SpanState, i: Int) -> SpanState =
+  if i >= total then state
+  else
+    match vec_get(i, toks) with
+    | Nothing -> state
+    | Just tok -> collect_spans_go(toks, total, span_step(state, tok), i + 1)
+
+fn collect_spans(toks: Vec token.Token) -> List TplSpan =
+  match collect_spans_go(toks, vec_length(toks), SpanState (Nil, Nil), 0) with
+  | SpanState _ spans -> spans
+
+fn line_in_spans(line_no: Int, spans: List TplSpan) -> Bool =
+  match spans with
+  | Nil -> false
+  | Cons h rest ->
+      match h with
+      | TplSpan lo hi ->
+          if line_no >= lo && line_no <= hi then true
+          else line_in_spans(line_no, rest)
+
+# Format each physical line, but pass template-spanned lines through verbatim.
+# line_no is 1-based to match token SourcePos line numbering.
+fn format_lines_indexed(lines: List String, spans: List TplSpan, line_no: Int) -> List String =
+  match lines with
+  | Nil -> Nil
+  | Cons h t ->
+      Cons(
+        if line_in_spans(line_no, spans) then h else format_line(h),
+        format_lines_indexed(t, spans, line_no + 1))
+
+# Original line-by-line behaviour; the safety-net path when whole-file
+# tokenize fails (no multi-line span info available).
+fn format_per_line(src: String) -> String =
   string.join("\n", list_map(format_line, drop_trailing_empty(str_split_lines(src)))) ++ "\n"
+
+export fn format_source(src: String) -> String =
+  match lexer.tokenize(source.strip_headers(src)) with
+  | Err _ -> format_per_line(src)
+  | Ok toks ->
+      string.join("\n",
+        format_lines_indexed(drop_trailing_empty(str_split_lines(src)), collect_spans(toks), 1))
+        ++ "\n"
 
 # ---------------------------------------------------------------------------
 # lint helpers
@@ -476,9 +551,14 @@ fn trailing_then_tab(raw_line: String, ln: Int, base: List LintIssue) -> List Li
       Cons(LintIssue(ln, find_tab_col(raw_line, 0), "tab indentation is not allowed"), base)
     else base
 
-fn lint_line(state: LintState, raw_line: String) -> LintState =
+# Whitespace rules are line-based, so — like format_source — they must skip
+# lines inside a multi-line template: trailing spaces / tabs there are string
+# content, not lint violations.
+fn lint_line_spanned(spans: List TplSpan, state: LintState, raw_line: String) -> LintState =
   LintState(
-    lint_line_issues(raw_line, lint_state_line_no(state), lint_state_issues(state)),
+    if line_in_spans(lint_state_line_no(state), spans)
+    then lint_state_issues(state)
+    else lint_line_issues(raw_line, lint_state_line_no(state), lint_state_issues(state)),
     lint_state_line_no(state) + 1)
 
 fn last_line_no(lines: List String) -> Int =
@@ -497,11 +577,16 @@ fn add_format_issue(src: String, issues: List LintIssue) -> List LintIssue =
     Cons(LintIssue(1, 1, "file is not formatted"), issues)
   else issues
 
-fn run_lint_fold(lines: List String) -> LintState =
-  list_fold(lint_line, LintState (Nil, 1), lines)
+fn run_lint_fold(spans: List TplSpan, lines: List String) -> LintState =
+  list_fold(\ (st, raw_line) -> lint_line_spanned(spans, st, raw_line), LintState (Nil, 1), lines)
+
+fn lint_spans(src: String) -> List TplSpan =
+  match lexer.tokenize(source.strip_headers(src)) with
+  | Err _ -> Nil
+  | Ok toks -> collect_spans(toks)
 
 export fn lint_source(src: String) -> List LintIssue =
-  run_lint_fold(lines)
+  run_lint_fold(lint_spans(src), lines)
     |> lint_state_issues
     |> add_missing_newline_issue(src, lines)
     |> add_format_issue(src)

@@ -16,58 +16,60 @@ module loam.nebula
 import stdlib.gfx as gfx
 
 let gas_vs =
-  "#version 330\n" ++
-  "in vec3 vertexPosition;\n" ++
-  "uniform mat4 mvp;\n" ++
-  "uniform mat4 matModel;\n" ++
-  "out vec3 vWorld;\n" ++
-  "void main() {\n" ++
-  "  vWorld = (matModel * vec4(vertexPosition, 1.0)).xyz;\n" ++
-  "  gl_Position = mvp * vec4(vertexPosition, 1.0);\n" ++
-  "}\n"
+  `#version 330
+in vec3 vertexPosition;
+uniform mat4 mvp;
+uniform mat4 matModel;
+out vec3 vWorld;
+void main() {
+  vWorld = (matModel * vec4(vertexPosition, 1.0)).xyz;
+  gl_Position = mvp * vec4(vertexPosition, 1.0);
+}
+`
 
 let gas_fs =
-  "#version 330\n" ++
-  "in vec3 vWorld;\n" ++
-  "uniform float uRadius;\n" ++
-  "uniform float uFade;\n" ++
-  "uniform float uColorMix;\n" ++
-  "uniform sampler2D texture0;\n" ++
-  "out vec4 finalColor;\n" ++
-  "float hash(vec3 p3) {\n" ++
-  "  p3 = fract(p3 * vec3(0.1031, 0.1030, 0.0973));\n" ++
-  "  p3 += dot(p3, p3.yzx + 33.33);\n" ++
-  "  return fract((p3.x + p3.y) * p3.z);\n" ++
-  "}\n" ++
-  "float vnoise(vec3 x) {\n" ++
-  "  vec3 i = floor(x); vec3 f = fract(x); f = f*f*(3.0 - 2.0*f);\n" ++
-  "  return mix(mix(mix(hash(i+vec3(0,0,0)), hash(i+vec3(1,0,0)), f.x),\n" ++
-  "                 mix(hash(i+vec3(0,1,0)), hash(i+vec3(1,1,0)), f.x), f.y),\n" ++
-  "             mix(mix(hash(i+vec3(0,0,1)), hash(i+vec3(1,0,1)), f.x),\n" ++
-  "                 mix(hash(i+vec3(0,1,1)), hash(i+vec3(1,1,1)), f.x), f.y), f.z);\n" ++
-  "}\n" ++
-  "float fbm(vec3 p) {\n" ++
-  "  float a = 0.5, s = 0.0;\n" ++
-  "  for (int k = 0; k < 5; k++) { s += a*vnoise(p); p *= 2.0; a *= 0.5; }\n" ++
-  "  return s;\n" ++
-  "}\n" ++
-  "void main() {\n" ++
-  "  vec2 q = vWorld.xz / uRadius;\n" ++
-  "  float r = length(q);\n" ++
-  "  vec2 uv = q * 0.5 + 0.5;\n" ++
-  "  vec4 field = texture(texture0, uv);\n" ++
-  "  float dens = pow(clamp(field.a, 0.0, 1.0), 0.6);\n" ++
-  "  float n = pow(clamp(fbm(vec3(q * 5.0, 0.4)), 0.0, 1.0), 1.2);\n" ++
-  "  vec3 warm = vec3(1.0, 0.75, 0.42);\n" ++
-  "  vec3 blue = vec3(0.28, 0.45, 0.92);\n" ++
-  "  vec3 violet = vec3(0.55, 0.32, 0.86);\n" ++
-  "  vec3 radial = mix(warm, blue, smoothstep(0.10, 0.5, r));\n" ++
-  "  radial = mix(radial, violet, smoothstep(0.5, 1.0, r));\n" ++
-  "  vec3 col = mix(radial, field.rgb, uColorMix);\n" ++
-  "  float edge = 1.0 - smoothstep(0.85, 1.15, r);\n" ++
-  "  float a = dens * n * edge * uFade * 0.9;\n" ++
-  "  finalColor = vec4(col, a);\n" ++
-  "}\n"
+  `#version 330
+in vec3 vWorld;
+uniform float uRadius;
+uniform float uFade;
+uniform float uColorMix;
+uniform sampler2D texture0;
+out vec4 finalColor;
+float hash(vec3 p3) {
+  p3 = fract(p3 * vec3(0.1031, 0.1030, 0.0973));
+  p3 += dot(p3, p3.yzx + 33.33);
+  return fract((p3.x + p3.y) * p3.z);
+}
+float vnoise(vec3 x) {
+  vec3 i = floor(x); vec3 f = fract(x); f = f*f*(3.0 - 2.0*f);
+  return mix(mix(mix(hash(i+vec3(0,0,0)), hash(i+vec3(1,0,0)), f.x),
+                 mix(hash(i+vec3(0,1,0)), hash(i+vec3(1,1,0)), f.x), f.y),
+             mix(mix(hash(i+vec3(0,0,1)), hash(i+vec3(1,0,1)), f.x),
+                 mix(hash(i+vec3(0,1,1)), hash(i+vec3(1,1,1)), f.x), f.y), f.z);
+}
+float fbm(vec3 p) {
+  float a = 0.5, s = 0.0;
+  for (int k = 0; k < 5; k++) { s += a*vnoise(p); p *= 2.0; a *= 0.5; }
+  return s;
+}
+void main() {
+  vec2 q = vWorld.xz / uRadius;
+  float r = length(q);
+  vec2 uv = q * 0.5 + 0.5;
+  vec4 field = texture(texture0, uv);
+  float dens = pow(clamp(field.a, 0.0, 1.0), 0.6);
+  float n = pow(clamp(fbm(vec3(q * 5.0, 0.4)), 0.0, 1.0), 1.2);
+  vec3 warm = vec3(1.0, 0.75, 0.42);
+  vec3 blue = vec3(0.28, 0.45, 0.92);
+  vec3 violet = vec3(0.55, 0.32, 0.86);
+  vec3 radial = mix(warm, blue, smoothstep(0.10, 0.5, r));
+  radial = mix(radial, violet, smoothstep(0.5, 1.0, r));
+  vec3 col = mix(radial, field.rgb, uColorMix);
+  float edge = 1.0 - smoothstep(0.85, 1.15, r);
+  float a = dens * n * edge * uFade * 0.9;
+  finalColor = vec4(col, a);
+}
+`
 
 # Compile the nebula-gas shader; draw it via gfx.draw_shaded_plane and drive uRadius/uFade with
 # gfx.shader_set_float. Call after open_window.

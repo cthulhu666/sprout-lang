@@ -1,6 +1,9 @@
 import stdlib.test (check_eq, run_suite)
 import stdlib.compiler.formatter as formatter
 
+fn issue_count(src: String) -> Int =
+  list_length(formatter.lint_source(src))
+
 fn main() -> Unit !{IO} =
   run_suite("formatter", [
     # Regression: needs_space's fallback path (formatter.sprout
@@ -19,5 +22,55 @@ fn main() -> Unit !{IO} =
     check_eq("space preserved before [ after a keyword",
       formatter.format_source("x true [1, 2]\n"), "x true [1, 2]\n"),
     check_eq("space preserved before [ after an int literal",
-      formatter.format_source("x 1 [2, 3]\n"), "x 1 [2, 3]\n")
+      formatter.format_source("x 1 [2, 3]\n"), "x 1 [2, 3]\n"),
+
+    # Multi-line backtick templates must round-trip verbatim. The formatter
+    # is line-based (format_source maps format_line over physical lines); a
+    # template spanning lines had its interior lines re-lexed as code, so
+    # `a=1` inside the template became `a = 1`. Fix: protect every physical
+    # line spanned by a multi-line template (start..end inclusive).
+    # (Inputs use \n-bearing normal strings so this test file itself contains
+    #  no multi-line backtick and stays fmt-safe.)
+    check_eq("multi-line backtick interior preserved verbatim",
+      formatter.format_source("let s =\n  `a=1\nb=2\nc=3`\n"),
+      "let s =\n  `a=1\nb=2\nc=3`\n"),
+
+    # Start line protected too: a `#`-led content line (e.g. a shader
+    # `#version` directive) was mangled by split_comment treating `#` as a
+    # trailing comment and re-joining with a two-space gap.
+    check_eq("multi-line backtick start line with # preserved",
+      formatter.format_source("let s =\n  `#version 330\nb=2`\n"),
+      "let s =\n  `#version 330\nb=2`\n"),
+
+    # Protection must not over-reach: code on lines outside the template
+    # still gets formatted normally, while a genuine interior line (y=2) is
+    # preserved.
+    check_eq("code outside a multi-line template still formats",
+      formatter.format_source("a=1\nlet s =\n  `x=1\ny=2\nz=3`\nw=9\n"),
+      "a = 1\nlet s =\n  `x=1\ny=2\nz=3`\nw = 9\n"),
+
+    # Idempotence: formatting already-formatted output (with a real interior
+    # template line) is a no-op.
+    check_eq("multi-line template formatting is idempotent",
+      formatter.format_source("a = 1\nlet s =\n  `x=1\ny=2\nz=3`\nw = 9\n"),
+      "a = 1\nlet s =\n  `x=1\ny=2\nz=3`\nw = 9\n"),
+
+    # Fallback: when whole-file tokenize fails (here an unterminated string),
+    # the formatter falls through to the original per-line behavior with no
+    # regression — outside code still formats, the bad line is left as-is.
+    check_eq("whole-file lex failure falls back to per-line formatting",
+      formatter.format_source("x=1\n\"oops\n"),
+      "x = 1\n\"oops\n"),
+
+    # lint_source is line-based like format_source was, so its whitespace rules
+    # must also skip multi-line-template content lines — a trailing space inside
+    # a template is intentional string data, not a lint violation (and "fixing"
+    # it would corrupt the string). "foo   " below has trailing whitespace.
+    check_eq("lint ignores trailing whitespace inside a multi-line template",
+      issue_count("let s =\n  `start\nfoo   \nend`\n"), 0),
+
+    # Over-reach guard: trailing whitespace OUTSIDE a template is still linted
+    # (trailing-whitespace issue + the resulting not-formatted issue = 2).
+    check_eq("lint still flags trailing whitespace outside a template",
+      issue_count("x = 1\ny = 2 \n"), 2)
   ])

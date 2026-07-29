@@ -201,6 +201,18 @@ let greeting = "hello, " ++ name ++ "!"
 let msg = `processed ${done} of ${total}`
 ```
 
+Backtick templates may span multiple physical lines — the newlines are literal
+content. This is the idiomatic way to embed a multi-line block (a shader, a
+query, an HTML fragment) instead of a `"…\n" ++ "…\n"` chain:
+
+```sprout
+let vertex_shader =
+  `#version 330
+in vec3 pos;
+void main() { gl_Position = vec4(pos, 1.0); }
+`
+```
+
 ## Make illegal states unrepresentable
 
 Encode invariants in types rather than runtime checks or boolean flags, and return
