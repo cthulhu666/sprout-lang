@@ -214,8 +214,12 @@ fn lower_op(op: sprout_ir.IROp, ret_ty: String, str_table: Dict (String, Int)) -
       | Just entry ->
           match entry with
           | (gname, len) ->
-              "  " ++ raw ++ " = getelementptr inbounds [" ++ int_to_string(len) ++
-                " x i8], ptr " ++ gname ++ ", i64 0, i64 0\n" ++
+              # String literals are emitted as { i64 header, [len x i8] bytes }
+              # (see emit_str_global): the CSTR header lives at payload-8 so the
+              # String value points at field 1 (the bytes), giving byte_length an
+              # O(1) header read consistent with GC-managed strings.
+              "  " ++ raw ++ " = getelementptr inbounds { i64, [" ++ int_to_string(len) ++
+                " x i8] }, ptr " ++ gname ++ ", i64 0, i32 1, i64 0\n" ++
               "  " ++ r ++ " = ptrtoint ptr " ++ raw ++ " to i64"
       | Nothing -> "  ; ERROR: missing str global for " ++ raw
   | sprout_ir.IRStrSlice r s start len ->
@@ -796,13 +800,23 @@ fn walk_ops_for_strs(ops: List sprout_ir.IROp, next_idx: Int,
                                 dict_set(raw, (gname, len), fn_table))
       | _ -> walk_ops_for_strs(rest, next_idx, globals_acc, fn_table)
 
+# Emit a string-literal global as a header-prefixed CSTR block:
+#   { i64 header, [len x i8] bytes }
+# where header = sprout_hdr_make(SPROUT_HEAP_CSTR=10, byte_len) so that the
+# byte just before the payload (field 1) is a valid CSTR header identical in
+# layout to GC-managed strings. The use-site GEP (see IRStrConst lowering)
+# points the String value at field 1, so payload-8 reads this header. `len`
+# includes the trailing NUL; the header's aux is the NUL-free byte length.
 export fn emit_str_global(idx: Int, s: String) -> (String, Int, String) =
-  (gname ++ " = private unnamed_addr constant [" ++ int_to_string(len) ++
-     " x i8] c\"" ++ body ++ "\"\n",
+  (gname ++ " = private unnamed_addr constant { i64, [" ++ int_to_string(len) ++
+     " x i8] } { i64 " ++ int_to_string(hdr) ++ ", [" ++ int_to_string(len) ++
+     " x i8] c\"" ++ body ++ "\" }\n",
    len, gname)
   where gname = "@.str." ++ int_to_string(idx)
         body = encode_str_for_ir(s, 0, "") ++ "\\00"
-        len = str_byte_len(s) + 1
+        byte_len = str_byte_len(s)
+        len = byte_len + 1
+        hdr = 10 + byte_len * 16384
 
 # lower_program: top-level entry.  Returns the complete LLVM IR text.
 export fn lower_program(prog: sprout_ir.IRProgram) -> String =

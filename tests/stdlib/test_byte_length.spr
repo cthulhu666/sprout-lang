@@ -1,0 +1,29 @@
+import stdlib.test (check_eq, run_suite)
+import stdlib.string (byte_length, length, concat, slice)
+
+# Pins byte_length across the string-representation change (headered literals).
+# byte_length must equal the UTF-8 byte count for BOTH string literals (static,
+# .rodata) and GC-managed strings (concat/slice results). The multi-byte cases
+# are the load-bearing guard: if the literal's payload pointer were mis-offset
+# (e.g. pointing into the header prefix instead of the bytes), both the byte
+# count AND the string content would be wrong, so these checks fail loudly.
+fn main() -> Unit !{IO} =
+  run_suite("byte_length", [
+    # ASCII literals: byte length == codepoint length
+    check_eq("ascii literal", byte_length("hello"), 5),
+    check_eq("empty literal", byte_length(""), 0),
+
+    # Multi-byte UTF-8 literals: bytes > codepoints (guards literal content survives)
+    check_eq("accented bytes", byte_length("café"), 5),
+    check_eq("accented codepoints", length("café"), 4),
+    check_eq("emoji bytes", byte_length("😀"), 4),
+    check_eq("emoji codepoints", length("😀"), 1),
+
+    # GC-managed strings (already headered): concat + slice results
+    check_eq("concat bytes", byte_length(concat("ab", "cde")), 5),
+    check_eq("slice bytes", byte_length(slice("hello", 1, 3)), 3),
+    check_eq("concat multibyte bytes", byte_length(concat("ca", "fé")), 5),
+
+    # Content integrity: a multi-byte literal round-trips unchanged
+    check_eq("literal content", concat("ca", "fé"), "café")
+  ])
