@@ -58,15 +58,15 @@ catastrophically bad for performance and fragments the ecosystem.
 **Sprout implication:** Sprout's `String` is a value-typed, GC-managed, always-valid-UTF-8
 contiguous byte sequence — the core trap (a singly-linked list of boxed chars) is avoided. There is
 one canonical text type (`String`), with `Bytes` for raw bytes and `Char` — not four competing
-string representations. Length-complexity accuracy (the earlier "O(1) length" phrasing was too
-strong): `byte_length` **is O(1) for every GC-managed string** — the inline heap header's `aux`
-field stores the byte count at allocation and is kept in sync (`runtime/sprout_runtime.c`
-`str_byte_len`, HDRCHECK-verified) — and falls back to `strlen` (O(n)) *only* for static string
-literals, which are not GC-headered. `length` (codepoint count) is O(n) by design
-(`sprout_utf8_codepoint_count`), which is the correct, industry-standard choice for a variable-width
-UTF-8 buffer: O(1) codepoint length is impossible without either a cached counter or a fixed-width
-encoding, and Rust/Go/Swift all likewise leave codepoint/grapheme count O(n). The one remaining gap
-is that literals don't carry a length header — tracked in `BACKLOG.md`.
+string representations. Length complexity: **`byte_length` is O(1) for every `String`** — arena
+strings, static literals (header-prefixed by `ir_lowering.emit_str_global`), and interned strings
+(`intern_string`, covering env/argv/map keys) all carry a CSTR header at `payload-8`, so
+`str_byte_len` reads the byte count directly with no arena-membership check
+(`runtime/sprout_runtime.c`; the invariant is enforced by `SPROUT_GC_HDRCHECK=1`). `length`
+(codepoint count) is O(n) *by design* (`sprout_utf8_codepoint_count`), which is the correct,
+industry-standard choice for a variable-width UTF-8 buffer: O(1) codepoint length is impossible
+without either a cached counter or a fixed-width encoding, and Rust/Go/Swift all likewise leave
+codepoint/grapheme count O(n).
 
 ---
 

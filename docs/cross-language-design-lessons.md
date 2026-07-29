@@ -25,7 +25,7 @@ Verified against the current spec, compiler, prelude, and tests (2026-07). Verdi
 | # | Trap | Verdict | Evidence |
 |---|------|---------|----------|
 | 1 | Laziness by default | ✅ | Strict; `spec-v0.md` §6; no thunk primitive |
-| 2 | `String = [Char]` | ✅ (with a nuance) | UTF-8 buffer, trap avoided. `byte_length` is **O(1)** for GC-managed strings (header `aux` stores it, `runtime/sprout_runtime.c` `str_byte_len`), O(n) `strlen` only for static literals; `length` (codepoints) is O(n) by design, as in Rust/Go/Swift |
+| 2 | `String = [Char]` | ✅ | UTF-8 buffer, trap avoided. `byte_length` is **O(1)** for *every* String — arena, literal, and interned all carry a CSTR header at `payload-8` (`runtime/sprout_runtime.c` `str_byte_len`, `HDRCHECK`-enforced); `length` (codepoints) is O(n) by design, as in Rust/Go/Swift |
 | 3 | No effect tracking | ⚠️ | Only `!{IO}`+`!{e}` in contract; `!{FileIO,Net}` "future use"; pure→IO **not enforced on fn bodies** (`infer.sprout:4584`, `unifier.sprout:245-248`) |
 | 4 | Orphan instances | ✅ | Overlaps *unconditionally rejected* `infer.sprout:3677-3684` (ahead of the doc's "pending") |
 | 5 | Partial functions | ✅ | No head/tail; `Maybe` accessors; exhaustiveness sound (nested-product gap deferred) |
@@ -39,11 +39,12 @@ Verified against the current spec, compiler, prelude, and tests (2026-07). Verdi
 | 13 | First-class modules | 🕗 | Namespace-only; functors deferred; `module-qualified-type-identity-design-2026-07-10.md:164-168` |
 
 **The #2/#3/#9 accuracy fixes were made in `haskell-lessons-learned.md` in the same change that added
-this doc.** #2 turned out to be a *documentation* error, not a design gap: the earlier audit trusted a
-stale `stdlib/string.sprout` comment ("O(bytes)… strlen"), but the runtime already makes `byte_length`
-O(1) for GC-managed strings via a header field — only static literals (no header) and codepoint-count
-(O(n) by design) remain non-O(1). #3 (effect claim overstated) and #9 (value restriction is a special
-case) are the substantive corrections. Items #11/#12/#13 are genuinely undecided and correctly hedged.
+this doc.** #2 was first corrected as a *documentation* error (the audit had trusted a
+stale `stdlib/string.sprout` comment) and then closed as a *design* change: string literals and
+interned strings are now header-prefixed too, so `byte_length` is O(1) for **every** String
+(codepoint `length` stays O(n) by design; see `BACKLOG.md` and §D). #3 (effect claim overstated) and
+#9 (value restriction is a special case) are the substantive corrections. Items #11/#12/#13 are
+genuinely undecided and correctly hedged.
 
 ---
 

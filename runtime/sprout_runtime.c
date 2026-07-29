@@ -1284,9 +1284,19 @@ static const char* intern_string(const char* s) {
   InternBucket* entry = (InternBucket*)malloc(sizeof(InternBucket));
   if (!entry) tcp_fail("intern_string: out of memory");
   size_t len = strlen(s);
-  entry->str = (char*)malloc(len + 1);
-  if (!entry->str) tcp_fail("intern_string: out of memory for string");
-  memcpy(entry->str, s, len + 1);
+  /* Header-prefix the interned buffer so its payload is a valid CSTR block
+   * (header at payload-8), matching arena strings. This is the single chokepoint
+   * that turns a bare C string into a headered Sprout String, so str_byte_len can
+   * read the length from payload-8 without an arena-membership check. Interned
+   * strings are permanent (never freed), non-arena (GC's heap_lookup returns NULL
+   * for them, so the collector skips them), and 16-byte-aligned by malloc, so the
+   * payload is 8-aligned like arena payloads. */
+  char* raw = (char*)malloc(8 + len + 1);
+  if (!raw) tcp_fail("intern_string: out of memory for string");
+  uint64_t hdr = sprout_hdr_make(SPROUT_HEAP_CSTR, (unsigned long long)len);
+  memcpy(raw, &hdr, 8);
+  memcpy(raw + 8, s, len + 1);
+  entry->str = raw + 8;
   entry->next = g_intern_table[bucket];
   g_intern_table[bucket] = entry;
   return entry->str;
@@ -1997,7 +2007,8 @@ long long env_get(const char* name) {
   if (name == NULL) tcp_fail("env_get: null name");
   const char* value = getenv(name);
   if (value == NULL) return sprout_make0(find_ctor_tag_by_name("Nothing"));
-  return sprout_make1(find_ctor_tag_by_name("Just"), (long long)(uintptr_t)value);
+  /* getenv returns bare libc memory; intern to a headered Sprout String. */
+  return sprout_make1(find_ctor_tag_by_name("Just"), (long long)(uintptr_t)intern_string(value));
 }
 long long sprout_set_argv(int argc, char** argv) {
   g_sprout_argc = argc;
@@ -2033,7 +2044,8 @@ long long argv_get(long long index) {
   if (index < 0) return sprout_make0(find_ctor_tag_by_name("Nothing"));
   if (g_sprout_argv == NULL) return sprout_make0(find_ctor_tag_by_name("Nothing"));
   if (index >= (long long)(g_sprout_argc - 1)) return sprout_make0(find_ctor_tag_by_name("Nothing"));
-  return sprout_make1(find_ctor_tag_by_name("Just"), (long long)(uintptr_t)g_sprout_argv[index + 1]);
+  /* argv is bare libc memory; intern to a headered Sprout String. */
+  return sprout_make1(find_ctor_tag_by_name("Just"), (long long)(uintptr_t)intern_string(g_sprout_argv[index + 1]));
 }
 long long read_file(long long path_i) {
   const char* path = (const char*)(uintptr_t)path_i;
@@ -2443,10 +2455,10 @@ long long term_read_key(void) {
                 ssize_t third_count = read(STDIN_FILENO, &third, 1);
                 if (third_count > 0) {
                   tcsetattr(STDIN_FILENO, TCSANOW, &oldt);
-                  if (third == 'A') return (long long)(uintptr_t)token_up;
-                  if (third == 'B') return (long long)(uintptr_t)token_down;
-                  if (third == 'C') return (long long)(uintptr_t)token_right;
-                  if (third == 'D') return (long long)(uintptr_t)token_left;
+                  if (third == 'A') return (long long)(uintptr_t)intern_string(token_up);
+                  if (third == 'B') return (long long)(uintptr_t)intern_string(token_down);
+                  if (third == 'C') return (long long)(uintptr_t)intern_string(token_right);
+                  if (third == 'D') return (long long)(uintptr_t)intern_string(token_left);
                 }
               }
             }
@@ -2456,17 +2468,19 @@ long long term_read_key(void) {
       }
     }
   }
-  if (ch == EOF) return (long long)(uintptr_t)"";
-  if (ch == 1) return (long long)(uintptr_t)token_ctrl_a;
-  if (ch == 2) return (long long)(uintptr_t)token_ctrl_b;
-  if (ch == 4) return (long long)(uintptr_t)token_ctrl_d;
-  if (ch == 5) return (long long)(uintptr_t)token_ctrl_e;
-  if (ch == 6) return (long long)(uintptr_t)token_ctrl_f;
-  if (ch == 12) return (long long)(uintptr_t)token_ctrl_l;
-  if (ch == 8 || ch == 127) return (long long)(uintptr_t)token_backspace;
-  if (ch == 27) return (long long)(uintptr_t)token_escape;
-  if (ch == '\n' || ch == '\r') return (long long)(uintptr_t)token_enter;
-  if (ch == '\t') return (long long)(uintptr_t)token_tab;
+  /* Key-name tokens are static C literals; intern to headered Sprout Strings
+   * (deduped, permanent) so byte_length reads them via the payload-8 header. */
+  if (ch == EOF) return (long long)(uintptr_t)intern_string("");
+  if (ch == 1) return (long long)(uintptr_t)intern_string(token_ctrl_a);
+  if (ch == 2) return (long long)(uintptr_t)intern_string(token_ctrl_b);
+  if (ch == 4) return (long long)(uintptr_t)intern_string(token_ctrl_d);
+  if (ch == 5) return (long long)(uintptr_t)intern_string(token_ctrl_e);
+  if (ch == 6) return (long long)(uintptr_t)intern_string(token_ctrl_f);
+  if (ch == 12) return (long long)(uintptr_t)intern_string(token_ctrl_l);
+  if (ch == 8 || ch == 127) return (long long)(uintptr_t)intern_string(token_backspace);
+  if (ch == 27) return (long long)(uintptr_t)intern_string(token_escape);
+  if (ch == '\n' || ch == '\r') return (long long)(uintptr_t)intern_string(token_enter);
+  if (ch == '\t') return (long long)(uintptr_t)intern_string(token_tab);
   /* A single read() byte >= 0x80 is at most the lead of a multibyte sequence,
    * never a complete UTF-8 char, so returning it would mint an invalid String.
    * Reject with a clean panic, uniform with the other UTF-8 builtins (review
@@ -4481,13 +4495,15 @@ SproutUnboxed2 env_get_unboxed(const char* name) {
   if (name == NULL) tcp_fail("env_get_unboxed: null name");
   const char* value = getenv(name);
   if (value == NULL) return (SproutUnboxed2){ cached_tag_nothing(), 0 };
-  return (SproutUnboxed2){ cached_tag_just(), (int64_t)(uintptr_t)value };
+  /* getenv returns bare libc memory; intern to a headered Sprout String. */
+  return (SproutUnboxed2){ cached_tag_just(), (int64_t)(uintptr_t)intern_string(value) };
 }
 
 SproutUnboxed2 argv_get_unboxed(long long index) {
   if (index < 0 || g_sprout_argv == NULL || index >= (long long)(g_sprout_argc - 1))
     return (SproutUnboxed2){ cached_tag_nothing(), 0 };
-  return (SproutUnboxed2){ cached_tag_just(), (int64_t)(uintptr_t)g_sprout_argv[index + 1] };
+  /* argv is bare libc memory; intern to a headered Sprout String. */
+  return (SproutUnboxed2){ cached_tag_just(), (int64_t)(uintptr_t)intern_string(g_sprout_argv[index + 1]) };
 }
 
 SproutUnboxed2 term_read_line_unboxed(void) {
@@ -4584,16 +4600,20 @@ SproutUnboxed2 bytes_get_unboxed(long long bytes_h, long long index) {
 /* str_char_at_byte / str_char_width_at_byte removed: replaced by the safe,
  * total decode_char_at over Bytes in stdlib.compiler.source (review F3). */
 
-/* str_byte_len: byte length of the string (strlen).
- * O(1) fast path for managed CSTRs: header aux stores the byte count at
- * allocation time and is always in sync (HDRCHECK verifies this).
- * Falls back to strlen for static string literals not in the GC heap. */
+/* str_byte_len: O(1) byte length read from the CSTR header at payload-8.
+ * Every Sprout String is a headered CSTR block — arena strings (alloc_cstr /
+ * adopt_cstr), header-prefixed static literals (ir_lowering.emit_str_global),
+ * and interned strings (intern_string, covering env/argv/map-key/term-key) all
+ * carry the header immediately before the payload — so the header is read
+ * directly, with no arena-membership check. The strlen fallback is defensive
+ * (should be unreachable given the invariant); SPROUT_GC_HDRCHECK=1 asserts
+ * aux == strlen on every call, turning any invariant violation into a loud
+ * abort rather than a wrong length. */
 long long str_byte_len(long long s_val) {
   const char* s = (const char*)s_val;
   if (s == NULL) tcp_fail("str_byte_len: null input");
-  void* hdr = sprout_heap_lookup((void*)s);
-  uint64_t h = 0;
-  if (hdr != NULL) memcpy(&h, hdr, 8);
+  uint64_t h;
+  memcpy(&h, s - 8, 8);
   if ((h & 0xFF) == SPROUT_HEAP_CSTR) {
     unsigned long long len = (unsigned long long)(h >> 14);
     if (sprout_gc_hdrcheck_on()) {

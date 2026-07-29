@@ -1,5 +1,6 @@
 import stdlib.test (check_eq, run_suite)
 import stdlib.string (byte_length, length, concat, slice)
+import stdlib.collections (dict_from_list, dict_keys, vec_get_or)
 
 # Pins byte_length across the string-representation change (headered literals).
 # byte_length must equal the UTF-8 byte count for BOTH string literals (static,
@@ -25,5 +26,13 @@ fn main() -> Unit !{IO} =
     check_eq("concat multibyte bytes", byte_length(concat("ca", "fé")), 5),
 
     # Content integrity: a multi-byte literal round-trips unchanged
-    check_eq("literal content", concat("ca", "fé"), "café")
+    check_eq("literal content", concat("ca", "fé"), "café"),
+
+    # Map keys are interned strings (a previously bare producer); their
+    # byte_length must be correct via the headered read. Multi-byte key guards
+    # both the aux value and content of the interned string.
+    check_eq("map key bytes (interned)",
+      byte_length(vec_get_or(0, "", dict_keys(dict_from_list([("café", 1)])))), 5),
+    check_eq("map key content (interned)",
+      vec_get_or(0, "", dict_keys(dict_from_list([("café", 1)]))), "café")
   ])

@@ -114,9 +114,14 @@ fn main() -> Unit !{IO} =
     check_true("strconst emits literal body",
                 contains(ir_lowering.lower_program(greeting_program()),
                          "[6 x i8] c\"hello\\00\"")),
-    check_true("strconst emits getelementptr",
+    # Literals are header-prefixed CSTR blocks: { i64 header, [N x i8] bytes }.
+    # For "hello" (5 bytes) the header = sprout_hdr_make(CSTR=10, 5) = 10 + 5*16384.
+    check_true("strconst emits headered CSTR struct global",
                 contains(ir_lowering.lower_program(greeting_program()),
-                         "%t0 = getelementptr inbounds [6 x i8], ptr @.str.0, i64 0, i64 0")),
+                         "{ i64, [6 x i8] } { i64 81930,")),
+    check_true("strconst emits getelementptr into the bytes field",
+                contains(ir_lowering.lower_program(greeting_program()),
+                         "%t0 = getelementptr inbounds { i64, [6 x i8] }, ptr @.str.0, i64 0, i32 1, i64 0")),
     check_true("strconst emits ptrtoint",
                 contains(ir_lowering.lower_program(greeting_program()),
                          "%t1 = ptrtoint ptr %t0 to i64")),
@@ -145,7 +150,7 @@ fn main() -> Unit !{IO} =
                 contains(ir_lowering.lower_program(two_fns_program()), "@.str.1")),
     check_true("second fn's GEP references @.str.1, not @.str.0",
                 contains(ir_lowering.lower_program(two_fns_program()),
-                         "ptr @.str.1, i64 0, i64 0")),
+                         "ptr @.str.1, i64 0, i32 1, i64 0")),
     check_true("greeting lowered IR compiles under clang", greeting_compiles),
     check_true("concat lowered IR compiles under clang", concat_compiles)
   ])
