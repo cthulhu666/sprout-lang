@@ -1,0 +1,18 @@
+import stdlib.test (check_true, check_false, run_suite)
+
+# Regression guard: logical `!` on genuine Bool operands must keep working after
+# infer_unary was tightened to reject `!` on non-Bool (e.g. `! 3`).  `!` lowers to
+# IRBoolNot (`xor i64, 1`), which is correct precisely when the operand is a 0/1
+# Bool — the tightened typechecker is what now guarantees that.
+
+fn not_of(b: Bool) -> Bool = ! b
+
+fn main() -> Unit !{IO} =
+  run_suite("unary_not", [
+    check_false("! true is false",! true),
+    check_true("! false is true",! false),
+    check_true("double negation: ! (! true)",! (! true)),
+    check_true("! on a comparison result",! (3 > 5)),
+    check_false("! on a comparison result (false case)",! (3 < 5)),
+    check_true("! through a Bool-typed binding", not_of(false))
+  ])

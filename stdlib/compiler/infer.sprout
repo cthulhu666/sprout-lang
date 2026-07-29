@@ -2232,9 +2232,26 @@ fn infer_unary(
     match r with
     | InferErr pos e -> InferErr(pos, e)
     | InferOk typed_operand s1 es1 eff ->
-        InferOk(
-          typed_ast.TUnary(op, typed_operand, typed_ast.typed_expr_type(typed_operand), pos),
-          s1, es1, eff)
+        # `!` : Bool -> Bool and unary `-` : Int -> Int / Double -> Double are
+        # compiler primitives with fixed operand types.  Constrain the operand
+        # here; without it the operand type flows through unchecked and codegen
+        # miscompiles — `! 3` lowers `xor i64, 1` over raw Int bits, yielding 2.
+        if op == "!" then
+          match unifier.unify_types(s1, typed_ast.typed_expr_type(typed_operand), types.type_bool()) with
+          | Err e -> InferErr(pos, "! (logical not) needs a Bool operand: " ++ e)
+          | Ok s2 ->
+              InferOk(typed_ast.TUnary(op, typed_operand, types.type_bool(), pos), s2, es1, eff)
+        else if op == "-" then
+          match unifier.unify_types(s1, typed_ast.typed_expr_type(typed_operand), types.type_int()) with
+          | Ok s2 ->
+              InferOk(typed_ast.TUnary(op, typed_operand, types.type_int(), pos), s2, es1, eff)
+          | Err _ ->
+              match unifier.unify_types(s1, typed_ast.typed_expr_type(typed_operand), types.type_double()) with
+              | Err e -> InferErr(pos, "- (negation) needs an Int or Double operand: " ++ e)
+              | Ok s2 ->
+                  InferOk(typed_ast.TUnary(op, typed_operand, types.type_double(), pos), s2, es1, eff)
+        else
+          InferErr(pos, "unknown unary operator: " ++ op)
 
 # --- Exhaustiveness checking ---
 

@@ -273,6 +273,20 @@ add3(_, _, 3)  # ≡ \(p, q) -> add3(p, q, 3)  (multiple holes -> multi-param la
   explicit way to place the piped value elsewhere. This settles the `|>` multi-arg
   question of `docs/currying-and-pipe-decision-v1.md`.
 
+### 5.3b Prefix operators
+
+Two prefix operators are built in:
+
+- `!e` — logical negation. The operand must have type `Bool`, and the result has
+  type `Bool`. `! 3` is a type error (the operand is not `Bool`).
+- `-e` — arithmetic negation. The operand must have type `Int` or `Double`, and
+  the result has that same type. `- true` is a type error.
+
+The operand type is checked, not inferred through: applying a prefix operator to
+an operand of the wrong type is rejected at compile time. (`!` and `-` are
+compiler primitives in v0; `docs/operators-v0.md` proposes giving all operators
+first-class signatures.)
+
 ### 5.4 If expression
 
 ```sprout

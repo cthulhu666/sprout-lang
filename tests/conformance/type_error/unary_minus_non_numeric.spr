@@ -1,0 +1,4 @@
+# Unary `-` is arithmetic negation: Int -> Int or Double -> Double.  Applying it
+# to a Bool must be rejected.  Before the fix, `- true` typed as Bool and codegen
+# lowered `sub i64 0, 1` = -1 (a silent miscompile).
+fn bad() -> Bool = -true

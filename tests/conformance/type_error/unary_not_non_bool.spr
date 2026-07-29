@@ -1,0 +1,4 @@
+# `!` is logical negation: Bool -> Bool.  Applying it to an Int must be rejected.
+# Before the fix, infer_unary let the operand type flow through unchecked, so
+# `! 3` typed as Int and codegen lowered `xor i64 3, 1` = 2 (a silent miscompile).
+fn bad() -> Int = ! 3
