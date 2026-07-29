@@ -158,6 +158,18 @@ These are gfx-binding additions (non-bootstrap; no seed refresh):
   primitive (sun corona, explosion flash, light source). The galaxy demo layers three at the galactic
   centre for the **core bulge** (see "Galactic-core glow" below). Backed by raylib `GenImageGradientRadial`
   (a cached soft-gradient texture) + `DrawBillboard` under `BLEND_ADDITIVE`. Call inside the 3D pass.
+- `gfx.draw_shaded_plane(sh,x,y,z,half) ` — a large horizontal (XZ) quad of half-extent `half` under a
+  custom shader, drawn **additively with depth-write off** — a volumetric gas / fog / energy-field
+  plane in a ground plane. The shader gets each fragment's world position (auto-fed `matModel`); if a
+  density field is active (below) it is bound as the shader's `texture0`. The galaxy demo draws the
+  nebula gas with it (`loam.nebula`).
+- `gfx.density_begin(half)` + `gfx.density_build()` — a **density field**: a top-down (x,z) grid of the
+  instanced point cloud. `density_begin` sets the extent (once, before streaming); every
+  `instance_push` then bins its point (count + the model's colour) automatically; `density_build`
+  normalises + blurs + uploads it as an RGBA texture (`rgb` = mean population colour, `a` = density),
+  rebuilt only when new points arrived. `draw_shaded_plane` binds it as `texture0`, so a field shader
+  can key on the **actual structure** of the cloud (star density, spiral arms, clusters) and its
+  population colour rather than a fixed formula. General: any point-cloud heat/influence field.
 - `gfx.draw_text(x,y,text,size,r,g,b)` — the first general text primitive (previously `DrawText` was
   reachable only as a button label).
 - `gfx.draw_line3d(x0,y0,z0,x1,y1,z1,r,g,b)` — an immediate-mode 3D line (`DrawLine3D`); scene 2
@@ -222,6 +234,36 @@ screen into a warm additive wash. So the bulge is **distance-faded**: `draw_core
 galaxy, gone once the camera descends past ~0.35·radius. The glow is the *unresolved* core light, so as
 the LoD resolves individual stars the bulge dissolves rather than floods the view; at `fade == 0` the
 three draws are skipped entirely (zero cost, and the core-zoom render is unchanged). Scene 1 only.
+
+The bulge fade — and the nebula gas below — are keyed to the **LoD ladder** (`level_boundary`): full
+through LoD 0–1, fading across LoD 2–3, gone only at the deepest core zoom. So the atmosphere persists
+while you explore mid-zoom and only dissolves as the LoD resolves individual stars.
+
+## Nebula atmosphere — data-driven gas (built)
+
+To push the look toward a real galaxy (warm bulge + cool disk gas, à la Andromeda) without fabricating
+structure the uniform data lacks, the demo adds a **volumetric gas layer that traces the actual star
+field** rather than a fixed formula:
+
+- **Density field (engine, general).** As tiles stream, every `gfx.instance_push` bins its star into a
+  top-down (x,z) grid — accumulating count and the star's spectral colour. `gfx.density_build`
+  normalises + blurs it into a texture (`rgb` = mean population colour, `a` = density). This is a
+  general point-cloud field, not galaxy-specific.
+- **Gas plane (`loam.nebula` on `gfx.draw_shaded_plane`).** A large additive ground-plane quad whose
+  fBm-noise shader **samples the density texture**: gas brightness follows real star density, and its
+  hue is a blend (`uColorMix`) of a radial palette (warm gold core → cool blue → violet rim) and the
+  field's own population colour. fBm adds wispiness; the plane lies in the galactic plane, so edge-on
+  it reads as a haze band and from a high angle as a broad disk.
+- **Why this matters for structure.** The gas *is* a blurred picture of where the stars are. A uniform
+  disk gives smooth haze; **a spiral galaxy would give gas that follows the arms, automatically** — and
+  with `uColorMix` raised, young-star arms read blue and the old bulge gold straight from the stellar
+  populations. It shows what is really in the data, so it stays believable for any structure the
+  generator produces. (`uColorMix` defaults low because the current uniform catalog has no colour
+  structure to trace; raise it once the generator emits populations.)
+- **Nebula knots.** A few cool-toned `gfx.draw_glow` sprites scattered in the disk plane — the bright
+  embedded gas-cluster glows of the reference nebulae. Decorative demo composition, not per-star.
+- **Fade.** Gas, bulge, and knots share one LoD-keyed `atmo` factor, so the whole atmosphere is a
+  far-field layer that dissolves as you zoom in; at the deepest core zoom the render is unchanged.
 
 ## Scene 2 — solar-system view (built)
 

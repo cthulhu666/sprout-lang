@@ -8,13 +8,14 @@ import stdlib.process (proc_run)
 import loam.camera (Cam, cam_drive, cam_distance, is_tap)
 import loam.view (cam_apply)
 import loam.config (parse_config, cfg_int)
-import loam.galaxy_lod (pow2, level_offset, group_of, clampi, desired_level, next_level, tile_index_i)
+import loam.galaxy_lod (pow2, level_offset, group_of, clampi, desired_level, next_level, tile_index_i, level_boundary)
 import loam.galaxy_filter (num_classes, mask_all, mask_none, bit_test, bit_toggle, popcount, class_name, class_rgb)
 import loam.galaxy_sample (hash01, sample_seed, level_thresholds, keep_level)
 import loam.orbit (ellipse_point)
 import loam.system_view (orbit_world_scale, body_world_size)
 import loam.starfield as sf
 import loam.billboard as bb
+import loam.nebula as nb
 import loam.planet as pl
 
 # Sprout / Loam — 3D GALAXY MAP (scene 1) with zoom-adaptive streaming.
@@ -857,11 +858,24 @@ fn draw_core_glow(radius: Double, fade: Double) -> Unit !{IO} =
         gfx.draw_glow(0.0, 0.0, 0.0, radius * 0.13, scale_i(200, fade), scale_i(168, fade), scale_i(118, fade))
     else ()
 
+# A few cool-toned nebula knots scattered in the disk plane — the bright embedded gas-cluster glows of
+# Image 2. Fixed positions (as fractions of the galaxy radius) and blue/violet tints; additive
+# `draw_glow` sprites, distance-faded with the rest of the atmosphere. Decorative, not per-star.
+fn draw_nebula_knots(radius: Double, fade: Double) -> Unit !{IO} =
+  if fade > 0.0
+    then
+      do
+        gfx.draw_glow(radius * 0.45, 0.0, radius * 0.25, radius * 0.30, scale_i(58, fade), scale_i(72, fade), scale_i(135, fade))
+        gfx.draw_glow(-radius * 0.55, 0.0, -radius * 0.18, radius * 0.32, scale_i(98, fade), scale_i(56, fade), scale_i(122, fade))
+        gfx.draw_glow(radius * 0.12, 0.0, -radius * 0.52, radius * 0.26, scale_i(70, fade), scale_i(60, fade), scale_i(118, fade))
+        gfx.draw_glow(-radius * 0.28, 0.0, radius * 0.5, radius * 0.28, scale_i(54, fade), scale_i(78, fade), scale_i(120, fade))
+    else ()
+
 # --- Render loop --------------------------------------------------------------------------------
 fn render_loop(dir: String, cam: Cam, scam: Cam, radius: Double, loaded: Dict Int,
                sel_name: String, sel_detail: String, dnx: Int, dny: Int, view: Int, prev_lvl: Int,
                csys: String, cplanets: List Planet, hov1: String, hov2: String,
-               mask: Int, prev_ldown: Bool, sun_sh: Int, planet_sh: Int) -> Unit !{IO} =
+               mask: Int, prev_ldown: Bool, sun_sh: Int, planet_sh: Int, gas_sh: Int) -> Unit !{IO} =
   do
     stop <- gfx.window_should_close()
     if stop then gfx.close_window()
@@ -884,11 +898,21 @@ fn render_loop(dir: String, cam: Cam, scam: Cam, radius: Double, loaded: Dict In
         # == classCode, so the mask enables/disables whole classes); scene 2 draws the selected system.
         if view == 0
           then
-            do
-              gfx.draw_instances_masked(level_offset(lvl + 1), draw_cull, mask)
-              # Bulge fade: full when viewing the whole galaxy (dist >= radius), gone once zoomed in
-              # past ~0.35·radius, so descending into the field resolves stars instead of a warm wash.
-              draw_core_glow(radius, clamp01((dist - radius * 0.35) / (radius * 0.65)))
+            # Atmosphere fade keyed to the LoD ladder: full through LoD 0–1 (dist >= level_boundary(1)),
+            # fading across LoD 2–3, gone by the deepest core zoom (dist <= level_boundary(3)) — so the
+            # far-field gas/glow persists while you explore mid-zoom, and only dissolves as the LoD
+            # resolves individual stars, never a full-screen wash at the core.
+            let atmo = clamp01((dist - level_boundary(3)) / (level_boundary(1) - level_boundary(3)))
+            in
+              do
+                # Rebuild the density texture if new tiles streamed in, then draw the gas plane first
+                # (background, traces the real star density), stars crisp over it, then the bulge + knots.
+                gfx.density_build()
+                gfx.shader_set_float(gas_sh, "uFade", atmo)
+                gfx.draw_shaded_plane(gas_sh, 0.0, 0.0, 0.0, radius)
+                gfx.draw_instances_masked(level_offset(lvl + 1), draw_cull, mask)
+                draw_core_glow(radius, atmo)
+                draw_nebula_knots(radius, atmo)
           else draw_system(s2ext, cplanets2, sun_sh, planet_sh)
         gfx.overlay_begin()
         gfx.draw_fps(10, 10)
@@ -984,7 +1008,7 @@ fn render_loop(dir: String, cam: Cam, scam: Cam, radius: Double, loaded: Dict In
                 | (hov1b, hov2b) ->
                     let name2 = if best_d2 < pick_radius2 then best_name else sel_name
                         detail2 = if best_d2 < pick_radius2 then best_detail else sel_detail
-                    in render_loop(dir, cam2, scam2, radius, loaded2, name2, detail2, dnx2, dny2, next_view, lvl, csys2, cplanets2, hov1b, hov2b, mask2, ldown, sun_sh, planet_sh)
+                    in render_loop(dir, cam2, scam2, radius, loaded2, name2, detail2, dnx2, dny2, next_view, lvl, csys2, cplanets2, hov1b, hov2b, mask2, ldown, sun_sh, planet_sh, gas_sh)
 
 fn main() -> Unit !{IO} =
   do
@@ -1008,8 +1032,17 @@ fn main() -> Unit !{IO} =
     star_sh <- bb.glow_shader()
     sun_sh <- sf.load_immediate_shader()
     planet_sh <- pl.load_shader()
+    gas_sh <- nb.gas_shader()
     make_models(star_sh)
     radius <- read_radius(dir)
+    gfx.shader_set_float(gas_sh, "uRadius", radius)
+    # Density field over the disk (±radius mapped to the grid); instance_push bins stars into it as
+    # they stream, and the gas shader samples it so the gas traces the real star structure.
+    gfx.density_begin(radius)
+    # uColorMix leans on the radial palette for the current uniform data (which has no colour structure
+    # to trace); raise toward 1.0 once the generator provides stellar populations, so young-star arms
+    # read blue and the old bulge gold straight from the data.
+    gfx.shader_set_float(gas_sh, "uColorMix", 0.35)
     cam_radius <- arg_int(1, gfx.double_to_int(init_radius))
     cam_height <- arg_int(2, gfx.double_to_int(init_height))
     cam_yaw_milli <- arg_int(3, gfx.double_to_int(init_yaw * 1000.0))
@@ -1035,4 +1068,4 @@ fn main() -> Unit !{IO} =
     init_mask <- arg_int(7, mask_all)
     render_loop(dir, cam0, scam0, radius, dict_empty(),
                 init_name, "Click a star to inspect it", 0, 0, init_view, seed_lvl, "", Nil, "", "",
-                init_mask, false, sun_sh, planet_sh)
+                init_mask, false, sun_sh, planet_sh, gas_sh)

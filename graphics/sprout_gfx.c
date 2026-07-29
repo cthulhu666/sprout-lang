@@ -1156,6 +1156,141 @@ long long gfx_draw_glow(long long x, long long y, long long z, long long size,
   return 0;
 }
 
+/* --- Density field: a top-down (x,z) grid of the instanced point cloud -------------------------
+ * A general "where are the points, and what colour" field: every gfx_instance_push bins its instance
+ * into a grid cell (accumulating count + the model's colour), and gfx_density_build normalises + blurs
+ * it into an RGBA texture (rgb = mean population colour, a = density). A shader drawn via
+ * gfx_draw_shaded_plane samples it as texture0 to key a field on the ACTUAL structure of the cloud —
+ * e.g. galaxy gas that traces the real star density (spiral arms) instead of a fixed formula. Cheap:
+ * accumulation is O(1) per push, the build is one blur+upload over a small grid, and it only rebuilds
+ * when new points have arrived (dirty flag). The grid is fixed-resolution; the extent is set by
+ * gfx_density_begin (the galaxy half-width). */
+#define GFX_DENSITY_RES 128
+static float *g_dens_acc = NULL;    /* GFX_DENSITY_RES^2 * 4 floats: sum_r, sum_g, sum_b, count */
+static float g_dens_half = 0.0f;    /* world half-extent mapped to the grid (±g_dens_half -> 0..1) */
+static Texture2D g_dens_tex;
+static int g_dens_tex_ready = 0;
+static int g_dens_dirty = 0;
+
+/* Allocate/clear the density grid and set its world half-extent. Call once before streaming. */
+long long gfx_density_begin(long long half) {
+  g_dens_half = as_float(half);
+  int n = GFX_DENSITY_RES * GFX_DENSITY_RES * 4;
+  if (!g_dens_acc) g_dens_acc = (float *)malloc((size_t)n * sizeof(float));
+  for (int i = 0; i < n; i++) g_dens_acc[i] = 0.0f;
+  g_dens_dirty = 1;
+  return 0;
+}
+
+/* Bin one instance (world x,z + its model's colour) into the grid. Called from gfx_instance_push. */
+static void density_accumulate(float wx, float wz, int model) {
+  if (!g_dens_acc || g_dens_half <= 0.0f) return;
+  float u = (wx / g_dens_half) * 0.5f + 0.5f;
+  float v = (wz / g_dens_half) * 0.5f + 0.5f;
+  if (u < 0.0f || u >= 1.0f || v < 0.0f || v >= 1.0f) return;
+  int cx = (int)(u * GFX_DENSITY_RES), cy = (int)(v * GFX_DENSITY_RES);
+  Color col = (model >= 0 && model < g_model_count)
+    ? g_models[model].materials[0].maps[MATERIAL_MAP_DIFFUSE].color
+    : (Color){ 255, 255, 255, 255 };
+  int idx = (cy * GFX_DENSITY_RES + cx) * 4;
+  g_dens_acc[idx + 0] += (float)col.r;
+  g_dens_acc[idx + 1] += (float)col.g;
+  g_dens_acc[idx + 2] += (float)col.b;
+  g_dens_acc[idx + 3] += 1.0f;
+  g_dens_dirty = 1;
+}
+
+/* Separable 3-tap box blur (one axis controlled by `stride`) over a scalar plane, in place via tmp. */
+static void density_blur1(float *a, float *tmp, int stride) {
+  int R = GFX_DENSITY_RES;
+  for (int y = 0; y < R; y++) for (int x = 0; x < R; x++) {
+    int i = y * R + x;
+    int lo = (stride == 1) ? (x > 0 ? i - 1 : i) : (y > 0 ? i - R : i);
+    int hi = (stride == 1) ? (x < R - 1 ? i + 1 : i) : (y < R - 1 ? i + R : i);
+    tmp[i] = (a[lo] + a[i] + a[hi]) * (1.0f / 3.0f);
+  }
+  for (int i = 0; i < R * R; i++) a[i] = tmp[i];
+}
+
+/* Normalise (mean colour + density/maxcount), blur, and upload the grid as an RGBA texture. No-op if
+ * nothing new arrived. Cheap enough to call every frame. */
+long long gfx_density_build(void) {
+  if (!g_dens_acc || !g_dens_dirty) return 0;
+  int R = GFX_DENSITY_RES, N = R * R;
+  float *dens = (float *)malloc((size_t)N * sizeof(float));
+  float *cr = (float *)malloc((size_t)N * sizeof(float));
+  float *cg = (float *)malloc((size_t)N * sizeof(float));
+  float *cb = (float *)malloc((size_t)N * sizeof(float));
+  float *tmp = (float *)malloc((size_t)N * sizeof(float));
+  float maxc = 1.0f;
+  for (int i = 0; i < N; i++) { float c = g_dens_acc[i * 4 + 3]; if (c > maxc) maxc = c; }
+  for (int i = 0; i < N; i++) {
+    float c = g_dens_acc[i * 4 + 3];
+    dens[i] = c / maxc;
+    if (c > 0.0f) { cr[i] = g_dens_acc[i*4+0]/c/255.0f; cg[i] = g_dens_acc[i*4+1]/c/255.0f; cb[i] = g_dens_acc[i*4+2]/c/255.0f; }
+    else { cr[i] = cg[i] = cb[i] = 0.0f; }
+  }
+  /* Two separable blur passes each — smooths Poisson cell noise into soft haze and spreads colour. */
+  for (int p = 0; p < 2; p++) { density_blur1(dens, tmp, 1); density_blur1(dens, tmp, R);
+                                density_blur1(cr, tmp, 1); density_blur1(cr, tmp, R);
+                                density_blur1(cg, tmp, 1); density_blur1(cg, tmp, R);
+                                density_blur1(cb, tmp, 1); density_blur1(cb, tmp, R); }
+  unsigned char *px = (unsigned char *)malloc((size_t)N * 4);
+  for (int i = 0; i < N; i++) {
+    float rr = cr[i] < 0 ? 0 : (cr[i] > 1 ? 1 : cr[i]);
+    float gg = cg[i] < 0 ? 0 : (cg[i] > 1 ? 1 : cg[i]);
+    float bb = cb[i] < 0 ? 0 : (cb[i] > 1 ? 1 : cb[i]);
+    float dd = dens[i] < 0 ? 0 : (dens[i] > 1 ? 1 : dens[i]);
+    px[i*4+0] = (unsigned char)(rr * 255.0f);
+    px[i*4+1] = (unsigned char)(gg * 255.0f);
+    px[i*4+2] = (unsigned char)(bb * 255.0f);
+    px[i*4+3] = (unsigned char)(dd * 255.0f);
+  }
+  if (!g_dens_tex_ready) {
+    Image img = { px, R, R, 1, PIXELFORMAT_UNCOMPRESSED_R8G8B8A8 };
+    g_dens_tex = LoadTextureFromImage(img);
+    SetTextureFilter(g_dens_tex, TEXTURE_FILTER_BILINEAR);
+    g_dens_tex_ready = 1;
+  } else {
+    UpdateTexture(g_dens_tex, px);
+  }
+  free(dens); free(cr); free(cg); free(cb); free(tmp); free(px);
+  g_dens_dirty = 0;
+  return 0;
+}
+
+/* Cached unit plane (XZ, centred at origin, spanning ±0.5) for gfx_draw_shaded_plane. */
+static Model g_plane_model;
+static int g_plane_ready = 0;
+static void ensure_plane_model(void) {
+  if (g_plane_ready) return;
+  g_plane_model = LoadModelFromMesh(GenMeshPlane(1.0f, 1.0f, 1, 1));
+  g_plane_ready = 1;
+}
+
+/* Draw a large horizontal (XZ) quad of half-extent `half` centred at (x,y,z), under custom shader
+ * `sh`, ADDITIVELY with depth-write off — a volumetric gas / fog / energy-field plane lying in a
+ * ground plane. The shader receives each fragment's world position (raylib auto-feeds `matModel`), so
+ * it can drive a procedural field keyed on world (x,z) — see loam.nebula (fBm gas graded by radius).
+ * If a density field is active (gfx_density_*), it is bound as the shader's texture0, so the shader
+ * can key the field on the ACTUAL point-cloud structure (star density + colour), not just a formula.
+ * Depth-write off (test on) so nearer stars stay crisp over the gas. Must be called in the 3D pass. */
+long long gfx_draw_shaded_plane(long long sh, long long x, long long y, long long z, long long half) {
+  if (sh < 0 || sh >= g_shader_count) return 0;
+  ensure_plane_model();
+  float h = as_float(half);
+  Matrix t = MatrixMultiply(MatrixScale(2.0f * h, 1.0f, 2.0f * h),
+                            MatrixTranslate(as_float(x), as_float(y), as_float(z)));
+  g_plane_model.materials[0].shader = g_shaders[sh];
+  if (g_dens_tex_ready) g_plane_model.materials[0].maps[MATERIAL_MAP_DIFFUSE].texture = g_dens_tex;
+  rlDisableDepthMask();
+  BeginBlendMode(BLEND_ADDITIVE);
+  DrawMesh(g_plane_model.meshes[0], g_plane_model.materials[0], t);
+  EndBlendMode();
+  rlEnableDepthMask();
+  return 0;
+}
+
 /* --- Generic custom-shader API --------------------------------------------
  * Load a caller-authored shader and drive it from Sprout, so domain look-and-feel (emissive stars,
  * procedural planets, ...) lives in the demo / loam layer as data, not baked into this engine. Thin
@@ -1518,6 +1653,7 @@ long long gfx_instance_push(long long group, long long model, long long x, long 
     g_grp[idx] = grown; g_grp_cap[idx] = nc;
   }
   float fx = as_float(x), fy = as_float(y), fz = as_float(z), s = as_float(scale);
+  density_accumulate(fx, fz, mdl);  /* bin into the top-down density field (ground plane = world x,z) */
   Matrix m = MatrixMultiply(MatrixMultiply(MatrixScale(s, s, s),
                                            MatrixRotate((Vector3){ 0.0f, 1.0f, 0.0f }, as_float(angle) * DEG2RAD)),
                             MatrixTranslate(fx, fy, fz));

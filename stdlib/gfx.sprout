@@ -79,6 +79,9 @@ extern fn gfx_set_clip_planes(near_plane: Double, far_plane: Double) -> Unit !{I
 extern fn gfx_sphere_model(r: Int, g: Int, b: Int) -> Int !{IO}
 extern fn gfx_billboard_model(r: Int, g: Int, b: Int) -> Int !{IO}
 extern fn gfx_draw_glow(x: Double, y: Double, z: Double, size: Double, r: Int, g: Int, b: Int) -> Unit !{IO}
+extern fn gfx_draw_shaded_plane(sh: Int, x: Double, y: Double, z: Double, half: Double) -> Unit !{IO}
+extern fn gfx_density_begin(half: Double) -> Unit !{IO}
+extern fn gfx_density_build() -> Unit !{IO}
 extern fn gfx_load_shader(vs: String, fs: String) -> Int !{IO}
 extern fn gfx_shader_set_float(h: Int, name: String, v: Double) -> Unit !{IO}
 extern fn gfx_shader_set_vec3(h: Int, name: String, x: Double, y: Double, z: Double) -> Unit !{IO}
@@ -475,6 +478,25 @@ export fn billboard_model(r: Int, g: Int, b: Int) -> Int !{IO} =
 # (a tight bright one + a wide dim one) for a soft falloff.
 export fn draw_glow(x: Double, y: Double, z: Double, size: Double, r: Int, g: Int, b: Int) -> Unit !{IO} =
   gfx_draw_glow(x, y, z, size, r, g, b)
+
+# Draw a large horizontal (XZ) quad of half-extent `half` centred at (x,y,z), under custom shader `sh`,
+# ADDITIVELY with depth-write off — a volumetric gas / fog / energy-field plane in a ground plane. The
+# shader gets each fragment's world position (via the auto-fed matModel), so it can drive a procedural
+# field keyed on world (x,z); nearer geometry stays crisp over it (depth-test on, write off). The look
+# (e.g. fBm nebula gas graded by radius) lives in the shader — see loam.nebula. Call in the 3D pass.
+export fn draw_shaded_plane(sh: Int, x: Double, y: Double, z: Double, half: Double) -> Unit !{IO} =
+  gfx_draw_shaded_plane(sh, x, y, z, half)
+
+# Density field: a top-down (x,z) grid of the instanced point cloud (star density + mean colour). Call
+# density_begin(half) ONCE before streaming (half = the galaxy half-width mapped to the grid); every
+# instance_push then bins its point automatically. density_build normalises + blurs + uploads it as a
+# texture (rebuilds only when new points arrived), which draw_shaded_plane binds as its shader's
+# texture0 — so a gas/field shader can trace the ACTUAL cloud structure (spiral arms, clusters) and its
+# population colour, instead of a fixed radial formula. General: any point-cloud heat/influence field.
+export fn density_begin(half: Double) -> Unit !{IO} =
+  gfx_density_begin(half)
+export fn density_build() -> Unit !{IO} =
+  gfx_density_build()
 
 # --- Generic custom shaders ---
 # Compile a shader from GLSL source and return a handle. An empty vs/fs string means "use raylib's
