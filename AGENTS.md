@@ -31,19 +31,21 @@ For coding tasks, work is done only when **all applicable** items below are true
 2. The tests drafted under Definition of Ready (failing tests, regression tests, coverage-gap tests) now pass.
 3. Relevant docs/spec updates are complete and in sync with the implementation.
 4. `mise exec -- just fmt` has been run and any reformatted files staged, for any change that touches `.sprout` or `.spr` files.
-5. The entire test suite has been run via `mise exec -- just test` with no explicit test filter, for any change that modifies code, language semantics, stdlib behavior, builtins, runtime behavior, or the normative spec.
+5. The full test suite has been run via `mise exec -- just test` (no explicit test filter) for any change to **language semantics, `stdlib/`, builtins, runtime behavior, or the normative spec**. For a change confined to `loam/`, `examples/`, or the graphics shim, the proportionate area gate (#12/#13) stands in for the full suite — `just test` already includes `test-loam` and `gfx-smoke`, and the full suite is always a safe superset if in doubt.
 6. `mise exec -- just compile-examples-stage1` passes (or the failing examples exactly match the pre-existing known-broken set). Run after every change that touches `stdlib/`, the runtime, or any example file.
 7. **Compiler-source changes** (any edit under `stdlib/compiler/`) — smoke shapes: each shape in `tests/smoke_shapes/*.spr` emits IR cleanly via `compile_driver_bin_stage1 --emit-ir`, the IR contains at least one `define` block, and contains no `str_concat(ptr null,…)` occurrence (null-ptr codegen regression guard).
 8. **Compiler-source changes** (any edit under `stdlib/compiler/`) — bundle smoke: `compile_driver_bin_stage1 --phase bundle` on `stdlib/compiler/token.sprout`, `stdlib/compiler/ast.sprout`, and `stdlib/prelude.sprout` produces non-empty output containing no dot-prefix qualified names (lines beginning with `.`).
 9. **Compiler-source changes** (any edit under `stdlib/compiler/`) — bootstrap seed: run `just refresh-seed` and stage the updated `bootstrap/compile_driver.ll`. CI's `just verify-bootstrap-fixed-point` gates on this; a stale seed blocks all CI gates. Use the 2-step bootstrap if the committed seed predates a parser change (see [docs/debugging.md §2-Step Bootstrap Protocol](docs/debugging.md#2-step-bootstrap-protocol)).
 10. **Runtime changes** (any edit to `runtime/sprout_runtime.c`) — APPROVED_BUILTINS: every newly-added `long long <name>(…)` function is also listed in `runtime/APPROVED_BUILTINS` with an inline justification explaining why the operation cannot be done in Sprout. Per "Builtin vs Stdlib" rules 4–6.
 11. **Bootstrap/runtime changes** (any edit under `bootstrap/` or to `runtime/sprout_runtime.c`) — example canary: `examples/tuples.sprout`, `examples/factorial.sprout`, `examples/maybe_map.sprout`, `examples/typeclass_collections_demo.sprout`, `examples/fizzbuzz.sprout` each compile *and run* to completion without crash. (`just compile-examples-stage1` only covers compile; running these is currently a manual gate until CI covers it.)
-12. The changes are committed.
-13. A self-review has been performed before handoff.
+12. **Loam engine changes** (any edit under `loam/`) — run `mise exec -- just test-loam` (headless, fast, and itself part of `just test`). New pure logic ships with a headless test in `tests/loam/` (Code and Testing §What tests to write #1).
+13. **Graphics / example changes with a runtime surface** (any edit to `graphics/sprout_gfx.c`, `stdlib/gfx.sprout`, or under `examples/` that alters observable runtime or visual behavior) — BUILD and RUN it and confirm the behavior first-hand; a headless canary satisfies this, e.g. `SPROUT_GFX_MAX_FRAMES=<n> SPROUT_GFX_SCREENSHOT=<relative>.png mise exec -- just run-gfx <example> …` (the screenshot path must be relative — raylib resolves it against the working dir). This gate exists because `just compile-examples-stage1` and `gfx-smoke` only *compile-check*: neither links the shim nor exercises `load_model`, shaders, input, or the render loop. Manual — running needs a GL context, not yet in CI. Pure refactors, comment-only, or docs edits with no behavior change are exempt.
+14. The changes are committed.
+15. A self-review has been performed before handoff.
 
 **Verification notes:**
 - During implementation, run individual test files for fast feedback (see "Code and Testing" §How to run tests); `mise exec -- just test` is the full gate required for #5.
-- Docs/examples-only changes may skip the full suite when they do not modify `stdlib/`, test expectations, or the normative spec, but must still be verified in a way that matches the change.
+- Docs/examples-only changes may skip the full suite when they do not modify `stdlib/`, test expectations, or the normative spec, but must still be verified in a way that matches the change — for an example/graphics/loam change that means the proportionate area gate (#12/#13): its own test suite and/or actually running it, not just a compile.
 
 ## Commit Guidance
 
