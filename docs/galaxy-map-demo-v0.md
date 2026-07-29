@@ -1,8 +1,10 @@
 # Galaxy Map Demo (v0)
 
-Status: experimental example (`examples/gfx/galaxy_map.sprout`), not normative. A two-scene demo:
+Status: experimental example (`examples/gfx/galaxy_map.sprout`), not normative. A three-scene demo:
 **scene 1** is the streaming galaxy map; **scene 2** is the solar-system view — click a star,
-then `System >` to fly into it and see its star, planets, and orbits (built; see "Scene 2" below).
+then `System >` to fly into it and see its star, planets, and orbits (built; see "Scene 2" below);
+**scene 3** is a third-person view of a spaceship inside that system — `Board ship` from scene 2
+(built; see "Scene 3" below).
 
 ## What it is
 
@@ -319,6 +321,30 @@ into that system. The scene:
 - **Scripting.** `argv[6] = <system id>` opens directly in scene 2 for that system (screenshot/canary
   of a view that otherwise needs an interactive click).
 
+## Scene 3 — third-person spaceship (built, iteration 1)
+
+From scene 2 the **`Board ship`** button flips `view` to 2: a **third-person view of a spaceship
+inside the selected system**. It reuses scene 2's `draw_system` verbatim (star at the origin, planets,
+orbits, rings, moons on the same AU→world scale), so the system's bodies stay visible around the ship,
+and adds one `gfx.draw_model` of the hull. `< System` returns to scene 2.
+
+- **Model.** `assets/models/rusty_spaceship.glb` (glTF/GLB via raylib's `LoadModel`). At **44 MB it is
+  *not committed*** (`.gitignore`); drop the file in to see it. `gfx.load_model` returns `-1` only on
+  OOM, so an absent file yields an empty model that simply draws nothing (the system still renders).
+- **Scale gotcha.** raylib **bakes the glTF node transforms** into the mesh, so the model's baked
+  bounding box (`GetModelBoundingBox`) is ~19 world units on its longest axis — the *raw* accessor
+  `min`/`max` are ~90× larger, before the node scale. `ship_scale = 2.8` maps the baked extent to ~53
+  world units (a hero body a little larger than the planets ~6–20 and the sun 18). Measure with the
+  same loader that renders, not the raw accessors.
+- **Static ship, orbit camera.** Iteration 1 places the ship at a fixed point in the mid-orbit region,
+  lifted above the plane. A third `Cam` (`shipcam`) targets the ship position, so the `loam.camera` rig
+  circles/tilts/zooms around it — "third person" is the orbit rig pointed at the ship. Panning is
+  disabled here (the target stays on the ship); the galaxy and system cameras are held.
+- **Scripting.** `argv[9] = 1` (with a system via `argv[6]`) boots straight into scene 3 for a
+  screenshot/canary, which otherwise needs two interactive clicks.
+- **Next iteration.** The galaxy's stars behind the ship, and (optionally) a flyable ship with a chase
+  camera — see "Planned extensions".
+
 ## Spectral-class filter (built)
 
 Right-side legend of 12 clickable class checkboxes (multiselect) + `All`/`None`. Each checkbox box is
@@ -430,6 +456,10 @@ of space games like Elite: Dangerous.
   above) are built. Still open: **asteroid belts** (the exporter emits `asteroidBelts: []` for every
   system in this catalog — nothing to draw until it populates them); and true moon geometry (needs a
   >10-field `Planet` or a moon sub-record — the constructor arity ceiling is 10; see BACKLOG).
+- **Scene 3 depth — remaining.** Iteration 1 is a static ship with an orbit camera. Next: the
+  **galaxy's stars rendered behind the ship** (the point cloud as a backdrop, not just the local
+  system), and optionally a **flyable ship** (WASD thrust + a chase camera that trails its heading,
+  replacing the fixed placement + orbit rig).
 
 ## Running
 
@@ -440,6 +470,10 @@ mise exec -- just run-gfx examples/gfx/galaxy_map.sprout /Users/cthulhu/GameDev/
 # canary + screenshot:
 SPROUT_GFX_MAX_FRAMES=120 SPROUT_GFX_SCREENSHOT=galaxy.png \
   mise exec -- just run-gfx examples/gfx/galaxy_map.sprout /Users/cthulhu/GameDev/universegen/catalog
+# scene 3 (ship) canary — argv[6]=system id, argv[9]=1 boots straight into the ship view
+# (SPROUT_GFX_SCREENSHOT must be a RELATIVE path — raylib resolves it against the working dir):
+SPROUT_GFX_MAX_FRAMES=120 SPROUT_GFX_SCREENSHOT=ship.png SPROUT_GFX_SCREENSHOT_FRAME=100 \
+  mise exec -- just run-gfx examples/gfx/galaxy_map.sprout /Users/cthulhu/GameDev/universegen/catalog 85000 14000 700 0 0 13 4095 1 1
 ```
 
 `argv[7]` is the initial spectral-class filter mask (bit *c* = class *c* shown; absent = all). It

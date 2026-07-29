@@ -25,6 +25,15 @@ import loam.planet as pl
 # point cloud you can orbit, tilt, zoom and pan. Stars are coloured by spectral class; black holes
 # are the violet/magenta landmarks (the supermassive one sits at the galactic centre).
 #
+# THREE SCENES, toggled by the `view` integer threaded through render_loop:
+#   view 0 — GALAXY: the point cloud (this file's main subject). Click a star to inspect it.
+#   view 1 — SYSTEM: a selected star's planets (draw_system); entered via "System >" / a click.
+#   view 2 — SHIP  : a third-person view of a static spaceship placed inside the selected system,
+#                    with that system's bodies visible around it (draw_ship_scene). Entered from the
+#                    system view via "Board ship"; the orbit camera targets the ship. A later
+#                    iteration adds the galaxy's stars behind it. Model: loam ship_model_path (a 44 MB
+#                    GLB, NOT committed — see .gitignore; the ship is simply omitted when it is absent).
+#
 # STREAMING / LoD. The catalog is a quadtree pyramid over the galactic plane (levels L0..L4). Each
 # star lives at exactly ONE level (incremental refinement: brightest promoted to coarse levels), so
 # the stars visible in a region at detail level L are the UNION of that region's tiles at levels
@@ -98,6 +107,28 @@ let s2_init_height = 520.0
 let s2_zoom_min = 60.0
 let s2_zoom_max = 8000.0
 let s2_pan_bound = 2500.0
+
+# --- Scene 3 (third-person spaceship view) tunables ---------------------------------------------
+# A STATIC ship placed inside the selected system, drawn under the SAME AU->world scale as scene 2
+# (star at the origin, planets out to fit_world_radius) so the system's bodies stay visible around
+# it. The orbit camera (loam.camera) targets the ship, so a left-drag circles it — that is the
+# "third person" framing. raylib bakes the GLB's node transforms, so the model's baked bounding box
+# is ~19 world units on its longest axis (measured via GetModelBoundingBox — the raw glTF accessor
+# min/max are ~90x larger, before the node scale). ship_scale maps that to ~53 world units: a hero
+# body a little larger than the planets (~6..20) and the sun (18). The model is not committed (see
+# .gitignore); load_model returns -1 only on OOM, so an absent file yields an empty model that
+# simply draws nothing.
+let ship_model_path = "assets/models/rusty_spaceship.glb"
+let ship_pos_x = 180.0  # in the mid-orbit region (planets lie within ~520 of the origin on x/z)
+let ship_pos_y = 90.0  # lifted above the orbital plane so the hull reads clearly against the disk
+let ship_pos_z = 180.0
+let ship_scale = 2.8  # baked model ~19-unit extent -> ~53 world units
+let ship_yaw = 30.0  # heading in degrees about Y (draw_model rotates about Y only)
+let s3_init_yaw = 0.6  # opening ship-cam angle (borrows scene 2's angled-overhead feel)
+let s3_init_radius = 110.0
+let s3_init_height = 150.0  # eye ~60 world units above the ship (ship_pos_y + 60)
+let s3_zoom_min = 30.0  # closest the camera may pull in to the ship
+let s3_zoom_max = 1500.0  # farthest — pulled back the whole system frames behind the ship
 
 let stream_max_level = 4  # deepest catalog level (matches the exporter's populated depth)
 let lod_hysteresis = 0.15  # deadband (fraction of a boundary) so the LoD level never flip-flops on a zoom boundary
@@ -793,6 +824,18 @@ fn draw_system(a_ext: Double, ps: List Planet, sun_sh: Int, planet_sh: Int) -> U
     sf.draw_star(sun_sh, 0.0, 0.0, 0.0, sun_size, 255, 240, 180)
     draw_planets(a_ext, ps, planet_sh)
 
+# Scene 3 (third-person ship): the same system as scene 2 (star + planets, so the bodies are
+# visible around the ship) plus the spaceship model at its fixed placement. The orbit camera
+# targets the ship, so this draws a static scene the user circles. `ship_model` is the load_model
+# handle; -1 means the (uncommitted) GLB was absent, so the draw is skipped and only the system
+# shows. draw_model rotates about Y only, so ship_yaw is the ship's heading.
+fn draw_ship_scene(a_ext: Double, ps: List Planet, sun_sh: Int, planet_sh: Int, ship_model: Int) -> Unit !{IO} =
+  do
+    draw_system(a_ext, ps, sun_sh, planet_sh)
+    if ship_model >= 0
+      then gfx.draw_model(ship_model, ship_pos_x, ship_pos_y, ship_pos_z, ship_yaw, ship_scale)
+      else ()
+
 # --- Scene 2 hover: project each planet to screen, keep the one nearest the cursor for the detail
 # panel. Mirrors the scene-1 pick, but over the in-memory (cached) planet list — no file re-read. ---
 fn keep_np(bd2: Double, best: Maybe Planet) -> (Double, Maybe Planet) !{IO} =
@@ -875,6 +918,12 @@ fn legend_all_btn(active: Bool) -> Bool !{IO} =
   if active then gfx.button(leg_x + 8, leg_btn_y, 106, 30, "All") else no_button()
 fn legend_none_btn(active: Bool) -> Bool !{IO} =
   if active then gfx.button(leg_x + 120, leg_btn_y, 106, 30, "None") else no_button()
+
+# "Board ship" button — drawn only in scene 2 (the system view), left of the scene-toggle button.
+# Clicking it enters scene 3 (the third-person ship view of the same system). Goes through the
+# same conditional-button idiom as the legend buttons so the `if` is not bound via `<-`.
+fn board_btn(active: Bool) -> Bool !{IO} =
+  if active then gfx.button(932, 728, 156, 46, "Board ship") else no_button()
 
 # The galactic-core bulge: three stacked additive glows at the galactic centre (world origin, where the
 # supermassive black hole sits) — a wide faint halo, a mid body, and a bright warm core. Additive, so
@@ -972,11 +1021,12 @@ fn draw_selection_marker(xi: Int, yi: Int, zi: Int) -> Unit !{IO} =
   in gfx.draw_line3d(wx, wy, wz, wx, 0.0, wz, mk_r, mk_g, mk_b)
 
 # --- Render loop --------------------------------------------------------------------------------
-fn render_loop(dir: String, cam: Cam, scam: Cam, radius: Double, loaded: Dict Int,
+fn render_loop(dir: String, cam: Cam, scam: Cam, shipcam: Cam, radius: Double, loaded: Dict Int,
                sel_name: String, sel_detail: String, sel_x: Int, sel_y: Int, sel_z: Int, has_sel: Bool,
                dnx: Int, dny: Int, view: Int, prev_lvl: Int,
                csys: String, cplanets: List Planet, hov1: String, hov2: String,
-               mask: Int, prev_ldown: Bool, show_grid: Bool, sun_sh: Int, planet_sh: Int, gas_sh: Int) -> Unit !{IO} =
+               mask: Int, prev_ldown: Bool, show_grid: Bool, sun_sh: Int, planet_sh: Int, gas_sh: Int,
+               ship_model: Int) -> Unit !{IO} =
   do
     stop <- gfx.window_should_close()
     if stop then gfx.close_window()
@@ -986,14 +1036,16 @@ fn render_loop(dir: String, cam: Cam, scam: Cam, radius: Double, loaded: Dict In
         # Hysteretic LoD: step at most one level from the previously-committed level, and only once the
         # eye has moved a deadband PAST the boundary — so hovering on a zoom boundary can't flip-flop.
         let lvl = next_level(prev_lvl, dist, stream_max_level, lod_hysteresis)
-        # Scene-2 planet cache: (re)parse the selected system's JSON only when it changes, so a static
-        # system view runs at full frame rate instead of re-reading the file every frame.
-        let need_load = (view == 1) && ! (sel_name == csys)
+        # Scene-2/3 planet cache: (re)parse the selected system's JSON only when it changes, so a static
+        # system view runs at full frame rate instead of re-reading the file every frame. Scene 3 (ship)
+        # shows the same system, so it needs the planets loaded too — the || covers a direct-to-ship
+        # canary boot where scene 2 was never visited.
+        let need_load = (view == 1 || view == 2) && ! (sel_name == csys)
         let cplanets2 = if need_load then load_planets(dir, sel_name) else cplanets
         let csys2 = if need_load then sel_name else csys
         let s2ext = system_extent(cplanets2)
         streamed <- load_levels(dir, cam, lvl, 0, radius, loaded, load_budget)
-        cam_apply(if view == 0 then cam else scam)
+        cam_apply(if view == 0 then cam else if view == 1 then scam else shipcam)
         gfx.frame_begin()
         # Scene 1 draws the galaxy point cloud, filtered to the enabled spectral classes (model index
         # == classCode, so the mask enables/disables whole classes); scene 2 draws the selected system.
@@ -1019,25 +1071,34 @@ fn render_loop(dir: String, cam: Cam, scam: Cam, radius: Double, loaded: Dict In
                 if show_grid then draw_sector_grid(radius) else ()
                 # Selection drop-line at the picked star's true 3D position (once a star is picked).
                 if has_sel then draw_selection_marker(sel_x, sel_y, sel_z) else ()
-          else draw_system(s2ext, cplanets2, sun_sh, planet_sh)
+          else if view == 1 then draw_system(s2ext, cplanets2, sun_sh, planet_sh)
+          else draw_ship_scene(s2ext, cplanets2, sun_sh, planet_sh, ship_model)
         gfx.overlay_begin()
         gfx.draw_fps(10, 10)
         if view == 0
           then gfx.draw_text(10, 34, "click: inspect   drag: orbit/tilt   shift+drag / WASD: pan   wheel: zoom", 18, 180, 190, 210)
-          else gfx.draw_text(10, 34, "SOLAR SYSTEM   drag: orbit/tilt   wheel: zoom   (< Galaxy to return)", 18, 255, 220, 120)
+          else if view == 1
+          then gfx.draw_text(10, 34, "SOLAR SYSTEM   drag: orbit/tilt   wheel: zoom   (< Galaxy to return)", 18, 255, 220, 120)
+          else gfx.draw_text(10, 34, "SHIP   drag: orbit/tilt   wheel: zoom   (< System to return)", 18, 150, 220, 255)
         if view == 0
           then gfx.draw_text(10, 56, "LoD level " ++ to_string(lvl), 18, 150, 200, 150)
           else gfx.draw_text(10, 56, "system " ++ sel_name, 18, 255, 230, 150)
-        # Bottom-left panel: galaxy view shows the selected star; system view shows the hovered planet.
+        # Bottom-left panel: galaxy shows the selected star; system shows the hovered planet; ship shows
+        # the ship + which system it sits in.
         if view == 0
           then
             do
               gfx.draw_text(20, 724, sel_name, 22, 255, 240, 170)
               gfx.draw_text(20, 752, sel_detail, 16, 200, 210, 230)
-          else
+          else if view == 1
+          then
             do
               gfx.draw_text(20, 724, if hov1 == "" then "hover a planet for details" else hov1, 20, 255, 240, 170)
               gfx.draw_text(20, 752, hov2, 15, 200, 210, 230)
+          else
+            do
+              gfx.draw_text(20, 724, "RUSTY SPACESHIP", 22, 200, 220, 255)
+              gfx.draw_text(20, 752, "docked in " ++ sel_name, 16, 200, 210, 230)
         # Scene-1 spectral-class filter legend: header + 12 class checkboxes (drawn only in the galaxy view).
         if view == 0
           then
@@ -1045,9 +1106,13 @@ fn render_loop(dir: String, cam: Cam, scam: Cam, radius: Double, loaded: Dict In
               gfx.draw_text(leg_x + 8, leg_y - 26, "SPECTRAL CLASS  " ++ to_string(popcount(mask)) ++ "/" ++ to_string(num_classes), 16, 180, 190, 210)
               draw_legend(mask, 0)
           else ()
-        # One scene-switch button; its label and action depend on the current view.
-        let toggle_label = if view == 0 then "System >" else "< Galaxy"
+        # Scene-navigation button (bottom-right): its label + action depend on the view. Galaxy -> System,
+        # System -> Galaxy, Ship -> System (one step back up the galaxy > system > ship chain).
+        let toggle_label = if view == 0 then "System >" else if view == 1 then "< Galaxy" else "< System"
         toggle <- gfx.button(1108, 728, 156, 46, toggle_label)
+        # "Board ship" enters the third-person ship scene; drawn only in the system view, left of the
+        # nav button (a helper so the button doesn't draw in the other scenes).
+        board <- board_btn(view == 1)
         # All / None mask presets (scene 1 only, via helpers so the buttons don't draw in scene 2).
         all_click <- legend_all_btn(view == 0)
         none_click <- legend_none_btn(view == 0)
@@ -1066,7 +1131,10 @@ fn render_loop(dir: String, cam: Cam, scam: Cam, radius: Double, loaded: Dict In
         # UI hit-region (computed before the pick so a click on the legend / buttons never selects a
         # star): the scene-switch button (bottom-right), or in scene 1 the filter legend + All/None.
         let over_legend = (view == 0) && (mx >= leg_x) && (my >= leg_y - 28) && (my <= leg_btn_y + 30)
-        let over_ui = over_legend || ((mx >= 1090) && (my >= 715))
+        # The "Board ship" button (scene 2 only) sits left of the nav button; guard its region too so a
+        # click on it never starts an orbit-drag.
+        let over_board = (view == 1) && (mx >= 932) && (mx <= 1088) && (my >= 728)
+        let over_ui = over_legend || over_board || ((mx >= 1090) && (my >= 715))
         # Left-click SELECT (scene 1). Left-drag orbits, so selection is a TAP: latch the press-down
         # point on the press edge, and on the RELEASE edge pick only if the pointer barely moved
         # (is_tap) and the gesture stayed off the UI. dnx2/dny2 carry the latched point to next frame.
@@ -1085,27 +1153,37 @@ fn render_loop(dir: String, cam: Cam, scam: Cam, radius: Double, loaded: Dict In
         let mask2 = if all_click then mask_all else if none_click then mask_none else mask_row
         # Scene-2 hover: nearest planet to the cursor (in-memory list, same scale as the draw).
         hovered <- maybe_hover((view == 1), cplanets2, s2ext, to_double(mx), to_double(my))
-        let next_view = if toggle then (if view == 0 then 1 else 0) else view
-        # Whichever view is active drives its own camera; the other's is held. Zoom/pan scale by the
-        # ACTIVE eye distance so both the galaxy (ly) and system (AU-world) scales feel the same.
-        let active = if view == 0 then cam else scam
+        # Nav: "Board ship" -> scene 3; the toggle steps back up the chain (galaxy>system>ship): galaxy
+        # -> system, system -> galaxy, ship -> system.
+        let next_view = if board then 2
+                        else if toggle then (if view == 0 then 1 else if view == 1 then 0 else 1)
+                        else view
+        # Whichever view is active drives its own camera; the others are held. Zoom/pan scale by the
+        # ACTIVE eye distance so the galaxy (ly), system and ship (AU-world) scales all feel the same.
+        let ship_view = view == 2
+        let active = if view == 0 then cam else if view == 1 then scam else shipcam
         let adist = cam_distance(active)
         let orbit = ldown && ! shift && ! over_ui
         let pan_drag = ldown && shift && ! over_ui
         let d_yaw = if orbit then gdx * drag_yaw_step else 0.0
         let d_pitch = if orbit then gdy * drag_pitch_step else 0.0
         let d_zoom = (0.0 - wheel) * wheel_zoom_frac * adist
-        let d_pan_r = ((bd(kd) - bd(ka)) * key_pan_frac * adist)
-                        + (if pan_drag then (0.0 - gdx) * drag_pan_frac * adist else 0.0)
-        let d_pan_f = ((bd(kw) - bd(ks)) * key_pan_frac * adist)
-                        + (if pan_drag then gdy * drag_pan_frac * adist else 0.0)
-        let zlo = if view == 0 then zoom_min else s2_zoom_min
-        let zhi = if view == 0 then zoom_max else s2_zoom_max
+        # The ship scene keeps the camera centred on the ship, so panning is disabled there (its target
+        # is the ship position); galaxy and system panning are unchanged.
+        let d_pan_r = if ship_view then 0.0
+                      else ((bd(kd) - bd(ka)) * key_pan_frac * adist)
+                             + (if pan_drag then (0.0 - gdx) * drag_pan_frac * adist else 0.0)
+        let d_pan_f = if ship_view then 0.0
+                      else ((bd(kw) - bd(ks)) * key_pan_frac * adist)
+                             + (if pan_drag then gdy * drag_pan_frac * adist else 0.0)
+        let zlo = if view == 0 then zoom_min else if view == 1 then s2_zoom_min else s3_zoom_min
+        let zhi = if view == 0 then zoom_max else if view == 1 then s2_zoom_max else s3_zoom_max
         let pbnd = if view == 0 then pan_bound else s2_pan_bound
         let driven = cam_drive(active, d_yaw, d_pitch, d_zoom, d_pan_r, d_pan_f,
                                zlo, zhi, pitch_min, pitch_max, pbnd)
         let cam2 = if view == 0 then driven else cam
         let scam2 = if view == 1 then driven else scam
+        let shipcam2 = if view == 2 then driven else shipcam
         match streamed with
         | (loaded2, _) ->
             match picked with
@@ -1119,7 +1197,7 @@ fn render_loop(dir: String, cam: Cam, scam: Cam, radius: Double, loaded: Dict In
                         sel_y2 = if hit then best_y else sel_y
                         sel_z2 = if hit then best_z else sel_z
                         has_sel2 = has_sel || hit
-                    in render_loop(dir, cam2, scam2, radius, loaded2, name2, detail2, sel_x2, sel_y2, sel_z2, has_sel2, dnx2, dny2, next_view, lvl, csys2, cplanets2, hov1b, hov2b, mask2, ldown, show_grid, sun_sh, planet_sh, gas_sh)
+                    in render_loop(dir, cam2, scam2, shipcam2, radius, loaded2, name2, detail2, sel_x2, sel_y2, sel_z2, has_sel2, dnx2, dny2, next_view, lvl, csys2, cplanets2, hov1b, hov2b, mask2, ldown, show_grid, sun_sh, planet_sh, gas_sh, ship_model)
 
 fn main() -> Unit !{IO} =
   do
@@ -1145,6 +1223,10 @@ fn main() -> Unit !{IO} =
     planet_sh <- pl.load_shader()
     gas_sh <- nb.gas_shader()
     make_models(star_sh)
+    # The third-person ship scene's model (glTF/GLB via raylib's LoadModel). The 44 MB file is not
+    # committed (see .gitignore); load_model returns -1 when it is absent, and draw_ship_scene then
+    # simply omits the ship (the system still renders).
+    ship_model <- gfx.load_model(ship_model_path)
     radius <- read_radius(dir)
     gfx.shader_set_float(gas_sh, "uRadius", radius)
     # Density field over the disk (±radius mapped to the grid); instance_push bins stars into it as
@@ -1169,10 +1251,17 @@ fn main() -> Unit !{IO} =
     # entries; the system is always at the origin so it needs no per-system reset.
     let scam0 = Cam(yaw = 0.6, radius = s2_init_radius, height = s2_init_height,
                     tx = 0.0, ty = 0.0, tz = 0.0)
+    # Scene-3 (ship) camera: orbits the STATIC ship at its fixed placement, so its look-at target IS
+    # the ship position. Persists across entries like scam0.
+    let shipcam0 = Cam(yaw = s3_init_yaw, radius = s3_init_radius, height = s3_init_height,
+                       tx = ship_pos_x, ty = ship_pos_y, tz = ship_pos_z)
     # Optional argv[6] = a system id to open DIRECTLY in the solar-system view (screenshot/canary of
     # scene 2, which otherwise needs an interactive click). Absent/negative -> normal galaxy start.
     sys_arg <- arg_int(6, 0 - 1)
-    let init_view = if sys_arg >= 0 then 1 else 0
+    # Optional argv[9] = 1 to boot straight into the third-person SHIP scene (requires a system via
+    # argv[6]). Lets a headless screenshot capture scene 3, which otherwise needs two interactive clicks.
+    ship_arg <- arg_int(9, 0)
+    let init_view = if sys_arg >= 0 then (if ship_arg >= 1 then 2 else 1) else 0
     let init_name = if sys_arg >= 0 then "SYS-" ++ pad5(sys_arg) else "No system selected"
     # Optional argv[7] = initial spectral-class filter mask (bit c == class c shown). Absent -> all
     # classes shown (mask_all). Lets a screenshot/canary open on a filtered view, e.g. 64 = M-only.
@@ -1181,6 +1270,6 @@ fn main() -> Unit !{IO} =
     # through the render loop, gating draw_sector_grid) so it can be made switchable again without
     # rewiring; argv[8] = 0 turns it off at launch (default on), e.g. for a grid-free screenshot.
     init_grid <- arg_int(8, 1)
-    render_loop(dir, cam0, scam0, radius, dict_empty(),
+    render_loop(dir, cam0, scam0, shipcam0, radius, dict_empty(),
                 init_name, "Click a star to inspect it", 0, 0, 0, false, 0, 0, init_view, seed_lvl, "", Nil, "", "",
-                init_mask, false,! (init_grid == 0), sun_sh, planet_sh, gas_sh)
+                init_mask, false,! (init_grid == 0), sun_sh, planet_sh, gas_sh, ship_model)
