@@ -42,15 +42,20 @@ corruption into a loud, local signal.*
 
 ## What would raise confidence further (ranked by leverage)
 
-1. **Turn on HDRCHECK (and equivalents) in CI.** The single highest-leverage lever: run the full
-   suite + example canary under `SPROUT_GC_HDRCHECK=1` on every PR. The enforcer already exists;
-   it is just off by default. Generalize to a "debug-assertions" runtime build that checks every
-   invariant the runtime relies on (header kinds, arities, tags) and is exercised in CI.
-2. **A *run* tier for the example canary.** `compile-examples` only compiles; DoD #11 (compile
-   *and run* the canary set) is a manual gate. Automating it — run representative programs with
-   input fixtures — closes the exact blind spot that historically hid runtime-only bugs
-   (cf. `docs/retro-dict-dispatch-soundness-2026-07-13.md`: a wrong dictionary was a runtime
-   SIGSEGV invisible to compile-only gates).
+1. **✅ DONE — HDRCHECK on in CI.** The `test` job in `.forgejo/workflows/ci.yml` declares
+   `SPROUT_GC_HDRCHECK=1` at job level, so every binary it runs (bootstrap, fixed-point verify,
+   `ci-fast-gates` incl. the example canary, the stdlib + compiler suites, `compile-examples`,
+   `test-stress`) executes under the enforcer — one declaration, near-zero added CI time. A
+   bare-string producer slipping in is now a guaranteed abort on every PR, not a ~1/256 silent
+   wrong length in production. Reproduce locally with `SPROUT_GC_HDRCHECK=1 just test`.
+   *Remaining generalization (backlog):* a full "debug-assertions" runtime build that checks every
+   invariant the runtime relies on (header kinds, arities, tags), not just CSTR aux.
+2. **✅ DONE — run tier for the example canary.** `just run-example-canary` compiles *and runs* the
+   canary set to completion, and it is part of `ci-fast-gates` (so it runs on every PR), closing
+   DoD #11's former manual gate. This closes the exact blind spot that historically hid
+   runtime-only bugs (cf. `docs/retro-dict-dispatch-soundness-2026-07-13.md`: a wrong dictionary
+   was a runtime SIGSEGV invisible to compile-only gates). *Remaining (backlog):* richer input
+   fixtures so the run tier exercises more than the canaries' built-in paths.
 3. **ASan/UBSan build of the C runtime in CI.** A `payload-8` read or any pointer error would be
    caught immediately. A safety-first language's runtime should run its tests under sanitizers.
 4. **A typed-IR / Core-lint verifier (the deep fix).** Elaborate the IR and typecheck it so a

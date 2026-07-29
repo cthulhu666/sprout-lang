@@ -38,6 +38,20 @@ jobs:
   test:
     needs: setup
     runs-on: [self-hosted, linux-x86_64]
+    # Turn the runtime's invariant enforcers ON for every binary this job runs.
+    # These are runtime-read env vars (see sprout_runtime.c), so a single job-level
+    # declaration covers bootstrap, fixed-point verify, ci-fast-gates (incl. the
+    # example canary), the stdlib/compiler test suites, compile-examples, and
+    # test-stress — no duplicated pass, near-zero added CI time.
+    #   SPROUT_GC_HDRCHECK=1 — strlen-checks every CSTR header's aux byte-length at
+    #     str_byte_len and at GC sweep, and abort()s on mismatch. This is the
+    #     enforcer for the "every Sprout String is headered" invariant that lets
+    #     str_byte_len read payload-8 with no arena-membership check (see
+    #     docs/runtime-invariant-confidence-v0.md). Off by default; a bare-string
+    #     producer slipping in is a ~1/256 SILENT wrong length in prod but a
+    #     guaranteed loud abort here. Reproduce locally: SPROUT_GC_HDRCHECK=1 just test
+    env:
+      SPROUT_GC_HDRCHECK: "1"
     steps:
       - uses: actions/checkout@v4
 
