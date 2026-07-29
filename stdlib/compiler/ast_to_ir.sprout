@@ -845,10 +845,27 @@ fn translate_expr(expr: typed_ast.TypedExpr, params: List String,
                       # path stricter than direct codegen, a backstop for future
                       # compiler regressions.
                       if str_starts_with(name, "__unresolved_")
-                      then Ok((Nil, cur_label,
-                                list_append(cur_ops,
-                                  Cons(sprout_ir.IRConst(fresh_name(name_prefix, idx), 0), Nil)),
-                                fresh_name(name_prefix, idx), idx + 1))
+                      then
+                        # Poison the unresolved dict instead of null-filling it.
+                        # The slot is provably dead for the legitimate free-tyvar
+                        # case (the method body never reaches it), so the poison
+                        # is inert there.  But the "never invoked" invariant has
+                        # been violated before (the missing-superclass SIGSEGV,
+                        # PR #268); a bare `i64 0` turns any future violation into
+                        # a SILENT crash when the null dict is applied.  Emit a
+                        # closure whose code pointer PANICS on apply — loud and
+                        # located — mirroring the eta-wrapper synthesis above.
+                        # Reuses @panic (IRPanic); no runtime change, no builtin.
+                        do
+                          ctr <- ref_read(lambda_ctr_ref)
+                          ref_write(lambda_ctr_ref, ctr + 1)
+                          let thunk_name = "__sprout_ir_unresolved_thunk_" ++ int_to_string(ctr)
+                          existing_lifted <- ref_read(lifted_ref)
+                          ref_write(lifted_ref, Cons(synthesize_unresolved_poison_thunk(thunk_name), existing_lifted))
+                          Ok((Nil, cur_label,
+                               list_append(cur_ops,
+                                 Cons(sprout_ir.IRMkClosure(fresh_name(name_prefix, idx), thunk_name, Nil), Nil)),
+                               fresh_name(name_prefix, idx), idx + 1))
                       else Err("ast_to_ir: unbound variable '" ++ name ++ "'")
   | typed_ast.TBinary op left right _ _ ->
       translate_binary(op, left, right, params, ctors, idx, cur_label, cur_ops,
@@ -6688,6 +6705,25 @@ fn synthesize_eta_wrapper(fn_name: String, arity: Int, wrapper_name: String) -> 
                         Cons(sprout_ir.IRBlock("entry",
                               Cons(sprout_ir.IRCall("%ret", sprout_ir.IRTUnknown, fn_name, build_wrapper_arg_ssas(0, arity)),
                               Cons(sprout_ir.IRRet("%ret"), Nil))),
+                        Nil))
+
+# Poison thunk for an unresolved (free-tyvar) typeclass dict — see the
+# `__unresolved_` branch in translate_expr.  A closure whose slot-0 code pointer
+# is this thunk lowers exactly like any other closure (IRMkClosure), so applying
+# it via the closure ABI (ir_lowering IRApplyClosure: `load code; call code(...)`)
+# runs the thunk, which PANICS with a located message.  Takes only the implicit
+# `env$` handle; the apply site may pass extra method args, which a `noreturn`
+# panic ignores.  Reuses the existing `@panic` builtin (IRPanic) — no runtime
+# change.  The message substring "unresolved typeclass dictionary" is pinned by
+# tests/stdlib/test_unresolved_dict_poison.spr.
+fn synthesize_unresolved_poison_thunk(thunk_name: String) -> sprout_ir.IRFunction =
+  sprout_ir.IRFunction(thunk_name,
+                        Cons(("env$", sprout_ir.IRTHeap), Nil),
+                        "i64",
+                        Cons(sprout_ir.IRBlock("entry",
+                              Cons(sprout_ir.IRStrConst("%__poison_msg", "%__poison_msg_raw",
+                                     "runtime error: dispatched through an unresolved typeclass dictionary — a required instance was missing at compile time (compiler-soundness backstop; please report)"),
+                              Cons(sprout_ir.IRPanic("%__poison_msg"), Nil))),
                         Nil))
 
 fn build_wrapper_arg_params(idx: Int, arity: Int) -> List (String, sprout_ir.IRType) =

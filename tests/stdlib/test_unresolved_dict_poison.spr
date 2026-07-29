@@ -1,0 +1,62 @@
+import stdlib.test (new_state, assert_true, summary)
+import stdlib.compiler.ast_to_ir as ast_to_ir
+import stdlib.compiler.ir_lowering as ir_lowering
+import stdlib.compiler.typed_ast as typed_ast
+import stdlib.compiler.types as types
+import stdlib.compiler.source as source
+
+# Loud unresolved-dict sink (compiler-soundness backstop).
+#
+# `lowering` mints an `__unresolved_<Class>...` sentinel for a typeclass dict
+# whose type variable is free (provably never invoked — see
+# test_unresolved_dict_nullfill.spr, which pins that `to_string(Empty)` runs
+# correctly because the dict is never reached). Codegen used to null-fill that
+# sentinel with a bare `i64 0`; if the "never invoked" invariant is EVER
+# violated (as it was by the missing-superclass bug, PR #268), applying that
+# null closure is a SILENT SIGSEGV — a wrong-answer/crash bug, not a diagnostic.
+#
+# The fix lowers the sentinel to a POISON CLOSURE whose code pointer panics with
+# a located message when — and only when — it is actually applied. A
+# never-applied poison stays inert, so the legitimate dead-dict case is
+# unchanged (guarded by test_unresolved_dict_nullfill.spr staying green).
+#
+# This tripwire feeds a bare `__unresolved_` sentinel straight to
+# `translate_program` (bypassing typecheck, so no prelude bundling is needed)
+# and asserts the emitted IR carries the poison thunk. RED before the fix: the
+# sentinel lowers to `IRConst 0`, so the IR contains neither the thunk symbol
+# nor its panic message — both asserts fail.
+
+fn contains(haystack: String, needle: String) -> Bool =
+  str_find(haystack, needle) != -1
+
+# One function whose body is exactly the `__unresolved_<Class>_<head>` TVar that
+# `lowering` hands `ast_to_ir` for an unresolvable free-tyvar dict. It reaches
+# translate_expr's unbound-name branch and takes the null-fill / poison path.
+fn probe_program() -> typed_ast.TypedProgram =
+  typed_ast.TypedProgram(
+    Cons(typed_ast.TFnDecl("poison_probe", Nil, Nothing, Nothing, Nil,
+           typed_ast.TVar("__unresolved_ToString_Box",
+                          types.TConst(types.type_id("Int")),
+                          source.SourcePos(0, 0, 0))),
+    Nil))
+
+# Lower the probe to LLVM text.  `<-` on translate_program's `Result … !{IO}`
+# binds the success value (the (IRProgram, Dict Int) tuple), so this helper
+# returns a plain `String !{IO}` — never `<-`-bound as a Result by main.
+fn probe_ir() -> String !{IO} =
+  do
+    pair <- ast_to_ir.translate_program(probe_program())
+    match pair with
+    | (ir_prog, _) -> ir_lowering.lower_program(ir_prog)
+
+fn main() -> Unit !{IO} =
+  do
+    state <- new_state()
+    ll <- probe_ir()
+    # The sentinel lowers to a poison thunk, not a bare `i64 0` null-fill.
+    assert_true(state, "poison thunk emitted for __unresolved_ sentinel",
+                contains(ll, "__sprout_ir_unresolved_thunk"))
+    # The poison thunk panics loudly rather than yielding a null dict.
+    assert_true(state, "poison thunk carries a located panic message",
+                contains(ll, "unresolved typeclass dictionary"))
+    summary(state)
