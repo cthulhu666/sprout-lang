@@ -1,0 +1,39 @@
+import stdlib.test (check_true, run_suite)
+import stdlib.math (fabs)
+import loam.vista (project_body)
+
+# loam.vista holds the PURE planetarium-projection math for the galaxy-map ship scene (scene 3): a
+# distant body is placed on a render sphere of radius `sphere_r` around the ship (at the origin), in
+# its TRUE direction from the ship and at its TRUE angular size (floored so sub-pixel specks stay
+# visible). These guard the three behaviours the vista relies on: correct direction*sphere_r
+# placement, angular render radius = sphere_r*rad/dist, the min-size floor, and the zero-distance
+# guard. Numbers are chosen so the results are exact in binary float where possible; a `near`
+# tolerance covers the normalised directions that are not.
+
+fn near(a: Double, b: Double) -> Bool = fabs(a - b) < 0.0001
+
+fn proj_ok(res: (Double, Double, Double, Double),
+           ex: Double, ey: Double, ez: Double, er: Double) -> Bool =
+  match res with
+  | (x, y, z, r) -> near(x, ex) && near(y, ey) && near(z, ez) && near(r, er)
+
+fn main() -> Unit !{IO} =
+  run_suite("vista", [
+    # 3-4-5 direction from the origin: dir (0.6,0,0.8) out at sphere_r=10 -> (6,0,8); angular radius
+    # 10*0.5/5 = 1.0 (above the 0.1 floor).
+    check_true("direction*sphere_r placement + angular size",
+      proj_ok(project_body(0.0, 0.0, 0.0, 3.0, 0.0, 4.0, 0.5, 10.0, 0.1), 6.0, 0.0, 8.0, 1.0)),
+    # Sub-pixel body hits the floor: 100*0.001/10 = 0.01 < 2.0 -> 2.0; still placed at (100,0,0).
+    check_true("tiny body floored to min_size",
+      proj_ok(project_body(0.0, 0.0, 0.0, 10.0, 0.0, 0.0, 0.001, 100.0, 2.0), 100.0, 0.0, 0.0, 2.0)),
+    # The sun as seen from a ship 1 AU out on +x: direction is -x, so it renders behind the origin at
+    # (-sphere_r,0,0). Angular radius 8*0.25/1 = 2.0.
+    check_true("sun placed opposite the ship offset",
+      proj_ok(project_body(1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.25, 8.0, 0.5), -8.0, 0.0, 0.0, 2.0)),
+    # Farther body subtends a SMALLER angle (both above the floor): 10*1/5 = 2.0 vs 10*1/10 = 1.0.
+    check_true("farther body is smaller",
+      proj_ok(project_body(0.0, 0.0, 0.0, 0.0, 0.0, 10.0, 1.0, 10.0, 0.01), 0.0, 0.0, 10.0, 1.0)),
+    # Zero-distance guard: a body on the ship has no direction; parked straight ahead (+z) at min_size.
+    check_true("zero distance parked at +z, min_size",
+      proj_ok(project_body(5.0, 5.0, 5.0, 5.0, 5.0, 5.0, 0.5, 10.0, 0.5), 0.0, 0.0, 10.0, 0.5))
+  ])

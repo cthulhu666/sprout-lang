@@ -14,6 +14,7 @@ import loam.galaxy_sample (hash01, sample_seed, level_thresholds, keep_level)
 import loam.polar_grid (in_disc, ring_of, wedge_of, ring_radius, boundary_point)
 import loam.orbit (ellipse_point)
 import loam.system_view (orbit_world_scale, body_world_size)
+import loam.vista (project_body)
 import loam.starfield as sf
 import loam.billboard as bb
 import loam.nebula as nb
@@ -28,11 +29,14 @@ import loam.planet as pl
 # THREE SCENES, toggled by the `view` integer threaded through render_loop:
 #   view 0 — GALAXY: the point cloud (this file's main subject). Click a star to inspect it.
 #   view 1 — SYSTEM: a selected star's planets (draw_system); entered via "System >" / a click.
-#   view 2 — SHIP  : a third-person view of a static spaceship placed inside the selected system,
-#                    with that system's bodies visible around it (draw_ship_scene). Entered from the
-#                    system view via "Board ship"; the orbit camera targets the ship. A later
-#                    iteration adds the galaxy's stars behind it. Model: loam ship_model_path (a 44 MB
-#                    GLB, NOT committed — see .gitignore; the ship is simply omitted when it is absent).
+#   view 2 — SHIP  : a third-person view of a spaceship out in the selected system — a realistic
+#                    VISTA, not the map: the ship is the hero at the origin, the sun is a small
+#                    distant disc and the planets are pinpoint specks, projected onto a render sphere
+#                    in their true directions and angular sizes (loam.vista + draw_vista_scene). No
+#                    orbit lines, no size inflation. Entered from the system view via "Board ship";
+#                    the orbit camera circles the ship. A later iteration adds the galaxy's stars
+#                    behind it. Model: loam ship_model_path (a 44 MB GLB, NOT committed — see
+#                    .gitignore; the ship is simply omitted when it is absent).
 #
 # STREAMING / LoD. The catalog is a quadtree pyramid over the galactic plane (levels L0..L4). Each
 # star lives at exactly ONE level (incremental refinement: brightest promoted to coarse levels), so
@@ -108,27 +112,41 @@ let s2_zoom_min = 60.0
 let s2_zoom_max = 8000.0
 let s2_pan_bound = 2500.0
 
-# --- Scene 3 (third-person spaceship view) tunables ---------------------------------------------
-# A STATIC ship placed inside the selected system, drawn under the SAME AU->world scale as scene 2
-# (star at the origin, planets out to fit_world_radius) so the system's bodies stay visible around
-# it. The orbit camera (loam.camera) targets the ship, so a left-drag circles it — that is the
-# "third person" framing. raylib bakes the GLB's node transforms, so the model's baked bounding box
-# is ~19 world units on its longest axis (measured via GetModelBoundingBox — the raw glTF accessor
-# min/max are ~90x larger, before the node scale). ship_scale maps that to ~53 world units: a hero
-# body a little larger than the planets (~6..20) and the sun (18). The model is not committed (see
-# .gitignore); load_model returns -1 only on OOM, so an absent file yields an empty model that
-# simply draws nothing.
+# --- Scene 3 (third-person ship — realistic in-system vista) tunables ---------------------------
+# The ship is the hero at the WORLD ORIGIN and the camera (loam.camera) orbits it. The star system is
+# a physically-scaled VISTA, NOT the scene-2 map: the sun and planets are projected onto a distant
+# render sphere (loam.vista.project_body) in their true directions from the ship and at their true
+# angular sizes, so the sun is a small ~0.5-degree disc and every planet is a pinpoint speck — the
+# view from actually being out in the system. AU distances never enter world coordinates (a ~50 m
+# ship and a 1 AU sun span ~10 orders of magnitude — no single linear scale or depth buffer holds
+# both), so there are no orbit lines and no size inflation. The model is not committed (see
+# .gitignore); load_model returns -1 only on OOM, so an absent file yields an empty model that draws
+# nothing.
 let ship_model_path = "assets/models/rusty_spaceship.glb"
-let ship_pos_x = 180.0  # in the mid-orbit region (planets lie within ~520 of the origin on x/z)
-let ship_pos_y = 90.0  # lifted above the orbital plane so the hull reads clearly against the disk
-let ship_pos_z = 180.0
-let ship_scale = 2.8  # baked model ~19-unit extent -> ~53 world units
-let ship_yaw = 30.0  # heading in degrees about Y (draw_model rotates about Y only)
-let s3_init_yaw = 0.6  # opening ship-cam angle (borrows scene 2's angled-overhead feel)
-let s3_init_radius = 110.0
-let s3_init_height = 150.0  # eye ~60 world units above the ship (ship_pos_y + 60)
-let s3_zoom_min = 30.0  # closest the camera may pull in to the ship
-let s3_zoom_max = 1500.0  # farthest — pulled back the whole system frames behind the ship
+let ship_scale = 2.8  # baked model ~19-unit extent -> ~53 world units (GetModelBoundingBox, not the
+# raw glTF accessors, which are ~90x larger before the node scale)
+let ship_yaw = 30.0  # hull heading in degrees about Y (draw_model rotates about Y only)
+
+# Where the ship sits, as distance from the sun in AU (1 AU ~ 150M km). At ~1 AU the sun is a small
+# ~0.5-degree disc and the planets are specks — the "inner system" look. Raise it for a lonelier
+# outer-system vista (the sun shrinks toward a point); lower it to sit closer to the star.
+let ship_sun_dist_au = 1.0
+let vista_sphere_r = 8000.0  # fixed world distance every distant body sits at (>> the camera
+# standoff, so they read as a parallax-free backdrop)
+let sun_radius_au = 0.00465  # the Sun's radius in AU (696,000 km / 149.6M km) -> ~0.53-deg disc at 1 AU
+let earth_radius_au = 0.0000426  # Earth's radius in AU; a planet's radius is radiusEarths * this
+let vista_min_speck = 10.0  # min body render radius on the sphere (~1.5 px) so a sub-pixel planet
+# still shows as a crisp speck
+let sun_disc_boost = 2.0  # scales the sun's TRUE ~0.5-degree disc up so it reads clearly against the
+# black (real would be ~half this); the planets are left at their true speck size, so the contrast
+# the scene is about — bright disc vs pinpoint specks — is preserved
+let sun_glow_scale = 4.0  # wide warm additive halo size as a multiple of the (boosted) sun disc
+let s3_init_yaw = 1.5708  # opening ship-cam angle (~pi/2): look down -x so the distant sun (placed
+# at -x from a ship 1 AU out on +x) sits behind the ship, roughly centred
+let s3_init_radius = 95.0
+let s3_init_height = 30.0  # only slightly above the ship, so the view axis stays near the sun
+let s3_zoom_min = 60.0  # keep the camera clear of the near clip plane (the hull spans ~53 units)
+let s3_zoom_max = 2000.0  # stay well inside vista_sphere_r so the backdrop stays ahead of the camera
 
 let stream_max_level = 4  # deepest catalog level (matches the exporter's populated depth)
 let lod_hysteresis = 0.15  # deadband (fraction of a boundary) so the LoD level never flip-flops on a zoom boundary
@@ -829,11 +847,51 @@ fn draw_system(a_ext: Double, ps: List Planet, sun_sh: Int, planet_sh: Int) -> U
 # targets the ship, so this draws a static scene the user circles. `ship_model` is the load_model
 # handle; -1 means the (uncommitted) GLB was absent, so the draw is skipped and only the system
 # shows. draw_model rotates about Y only, so ship_yaw is the ship's heading.
-fn draw_ship_scene(a_ext: Double, ps: List Planet, sun_sh: Int, planet_sh: Int, ship_model: Int) -> Unit !{IO} =
+# --- Scene 3: the realistic in-system vista (see the scene-3 tunables above) --------------------
+# The sun, projected onto the render sphere in its true direction from the ship at its (boosted) true
+# angular size. Built like loam's galactic-core bulge: a wide faint warm halo + a tight bright halo
+# (additive draw_glow layers accumulate into a smooth luminous corona) with a full-bright emissive
+# disc on top (sf.draw_star), which bloom then bleeds. glow `size` is a world diameter, so the halo
+# multipliers are of the disc radius.
+fn draw_vista_sun(sun_sh: Int) -> Unit !{IO} =
+  match project_body(ship_sun_dist_au, 0.0, 0.0, 0.0, 0.0, 0.0,
+                     sun_radius_au, vista_sphere_r, vista_min_speck) with
+  | (x, y, z, r) ->
+      let disc = r * sun_disc_boost
+      in do
+        gfx.draw_glow(x, y, z, disc * sun_glow_scale, 90, 62, 26)
+        gfx.draw_glow(x, y, z, disc * 2.2, 255, 236, 190)
+        sf.draw_star(sun_sh, x, y, z, disc, 255, 250, 235)
+
+# One planet as a distant speck: a crisp full-bright emissive dot (sf.draw_star) in the planet's tint —
+# a pinpoint of reflected light, the way a naked-eye planet reads. Its orbital position is the real
+# ellipse point (loam.orbit) in AU; project_body turns the ship->planet AU vector into a world
+# direction on the render sphere and a floored (speck-sized) angular radius.
+fn draw_vista_planet(p: Planet, sun_sh: Int) -> Unit !{IO} =
+  match ellipse_point(p.a, p.e, p.argperi, p.nu) with
+  | (ax, az) ->
+      match project_body(ship_sun_dist_au, 0.0, 0.0, ax, 0.0, az,
+                         p.rad * earth_radius_au, vista_sphere_r, vista_min_speck) with
+      | (x, y, z, r) ->
+          match planet_rgb(p.rad) with
+          | (pr, pg, pb) -> sf.draw_star(sun_sh, x, y, z, r, pr, pg, pb)
+
+fn draw_vista_planets(ps: List Planet, sun_sh: Int) -> Unit !{IO} =
+  match ps with
+  | Nil -> ()
+  | Cons p rest ->
+      do
+        draw_vista_planet(p, sun_sh)
+        draw_vista_planets(rest, sun_sh)
+
+# Scene 3: the distant sun + planet specks (the backdrop), then the ship as the hero at the origin.
+# Backdrop first so the ship depth-tests in front of it. ship_model -1 (absent GLB) draws no ship.
+fn draw_vista_scene(ps: List Planet, sun_sh: Int, ship_model: Int) -> Unit !{IO} =
   do
-    draw_system(a_ext, ps, sun_sh, planet_sh)
+    draw_vista_sun(sun_sh)
+    draw_vista_planets(ps, sun_sh)
     if ship_model >= 0
-      then gfx.draw_model(ship_model, ship_pos_x, ship_pos_y, ship_pos_z, ship_yaw, ship_scale)
+      then gfx.draw_model(ship_model, 0.0, 0.0, 0.0, ship_yaw, ship_scale)
       else ()
 
 # --- Scene 2 hover: project each planet to screen, keep the one nearest the cursor for the detail
@@ -1072,7 +1130,7 @@ fn render_loop(dir: String, cam: Cam, scam: Cam, shipcam: Cam, radius: Double, l
                 # Selection drop-line at the picked star's true 3D position (once a star is picked).
                 if has_sel then draw_selection_marker(sel_x, sel_y, sel_z) else ()
           else if view == 1 then draw_system(s2ext, cplanets2, sun_sh, planet_sh)
-          else draw_ship_scene(s2ext, cplanets2, sun_sh, planet_sh, ship_model)
+          else draw_vista_scene(cplanets2, sun_sh, ship_model)
         gfx.overlay_begin()
         gfx.draw_fps(10, 10)
         if view == 0
@@ -1098,7 +1156,7 @@ fn render_loop(dir: String, cam: Cam, scam: Cam, shipcam: Cam, radius: Double, l
           else
             do
               gfx.draw_text(20, 724, "RUSTY SPACESHIP", 22, 200, 220, 255)
-              gfx.draw_text(20, 752, "docked in " ++ sel_name, 16, 200, 210, 230)
+              gfx.draw_text(20, 752, "adrift in " ++ sel_name ++ "   ~1 AU from the star", 16, 200, 210, 230)
         # Scene-1 spectral-class filter legend: header + 12 class checkboxes (drawn only in the galaxy view).
         if view == 0
           then
@@ -1251,10 +1309,10 @@ fn main() -> Unit !{IO} =
     # entries; the system is always at the origin so it needs no per-system reset.
     let scam0 = Cam(yaw = 0.6, radius = s2_init_radius, height = s2_init_height,
                     tx = 0.0, ty = 0.0, tz = 0.0)
-    # Scene-3 (ship) camera: orbits the STATIC ship at its fixed placement, so its look-at target IS
-    # the ship position. Persists across entries like scam0.
+    # Scene-3 (ship) camera: orbits the ship, which is drawn at the WORLD ORIGIN, so its look-at
+    # target is the origin. Persists across entries like scam0.
     let shipcam0 = Cam(yaw = s3_init_yaw, radius = s3_init_radius, height = s3_init_height,
-                       tx = ship_pos_x, ty = ship_pos_y, tz = ship_pos_z)
+                       tx = 0.0, ty = 0.0, tz = 0.0)
     # Optional argv[6] = a system id to open DIRECTLY in the solar-system view (screenshot/canary of
     # scene 2, which otherwise needs an interactive click). Absent/negative -> normal galaxy start.
     sys_arg <- arg_int(6, 0 - 1)

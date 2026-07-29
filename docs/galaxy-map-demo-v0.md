@@ -3,8 +3,8 @@
 Status: experimental example (`examples/gfx/galaxy_map.sprout`), not normative. A three-scene demo:
 **scene 1** is the streaming galaxy map; **scene 2** is the solar-system view — click a star,
 then `System >` to fly into it and see its star, planets, and orbits (built; see "Scene 2" below);
-**scene 3** is a third-person view of a spaceship inside that system — `Board ship` from scene 2
-(built; see "Scene 3" below).
+**scene 3** is a third-person view of a spaceship out in that system (a realistic vista — sun a
+distant disc, planets specks) — `Board ship` from scene 2 (built; see "Scene 3" below).
 
 ## What it is
 
@@ -321,25 +321,39 @@ into that system. The scene:
 - **Scripting.** `argv[6] = <system id>` opens directly in scene 2 for that system (screenshot/canary
   of a view that otherwise needs an interactive click).
 
-## Scene 3 — third-person spaceship (built, iteration 1)
+## Scene 3 — third-person ship, realistic in-system vista (built, iteration 1)
 
-From scene 2 the **`Board ship`** button flips `view` to 2: a **third-person view of a spaceship
-inside the selected system**. It reuses scene 2's `draw_system` verbatim (star at the origin, planets,
-orbits, rings, moons on the same AU→world scale), so the system's bodies stay visible around the ship,
-and adds one `gfx.draw_model` of the hull. `< System` returns to scene 2.
+From scene 2 the **`Board ship`** button flips `view` to 2: a **third-person view of a spaceship out in
+the selected system** — a physically-scaled *vista*, **not** the scene-2 map. The ship is the hero at
+the world origin, near-black space around it, the sun a small distant disc and the planets pinpoint
+specks. No orbit lines, no size inflation. `< System` returns to scene 2.
 
+- **Why not just place things at true coordinates.** A ~50 m ship and a 1 AU sun span ~10 orders of
+  magnitude; no single linear world scale (float32) or ordinary depth buffer holds both — this is the
+  standard space-scale problem. So AU distances never enter world coordinates.
+- **Planetarium projection (`loam.vista.project_body`, pure + headless-tested in
+  `tests/loam/test_vista.spr`).** The ship sits at the origin; every distant body (sun, each planet) is
+  placed on a render **sphere** of radius `vista_sphere_r` (8000) around it, in the body's **true
+  direction** from the ship and at its **true angular size** (`sphere_r · body_rad_au / dist`), floored
+  to `vista_min_speck` so a sub-pixel body still draws as a crisp speck. Because all bodies share one
+  distance, orbiting the nearby ship gives them negligible parallax — they read as a fixed backdrop,
+  which is correct. Positions come from the real per-system JSON: sun at the AU origin, planets at their
+  `loam.orbit` ellipse points; the ship is `ship_sun_dist_au` (1.0 AU) out. Astronomical constants
+  (`sun_radius_au`, `earth_radius_au`) are the real values.
+- **Look.** The sun is a full-bright emissive disc (`loam.starfield.draw_star`, so bloom bleeds a halo)
+  under two additive `draw_glow` layers (a corona), its true ~0.5° disc scaled up by `sun_disc_boost`
+  (2.0) so it reads clearly against the black; the planets are true-size crisp emissive specks in their
+  `planet_rgb` tint. All tunables live in the scene-3 block in `galaxy_map.sprout`.
 - **Model.** `assets/models/rusty_spaceship.glb` (glTF/GLB via raylib's `LoadModel`). At **44 MB it is
   *not committed*** (`.gitignore`); drop the file in to see it. `gfx.load_model` returns `-1` only on
-  OOM, so an absent file yields an empty model that simply draws nothing (the system still renders).
+  OOM, so an absent file yields an empty model that simply draws nothing (the vista still renders).
 - **Scale gotcha.** raylib **bakes the glTF node transforms** into the mesh, so the model's baked
   bounding box (`GetModelBoundingBox`) is ~19 world units on its longest axis — the *raw* accessor
   `min`/`max` are ~90× larger, before the node scale. `ship_scale = 2.8` maps the baked extent to ~53
-  world units (a hero body a little larger than the planets ~6–20 and the sun 18). Measure with the
-  same loader that renders, not the raw accessors.
-- **Static ship, orbit camera.** Iteration 1 places the ship at a fixed point in the mid-orbit region,
-  lifted above the plane. A third `Cam` (`shipcam`) targets the ship position, so the `loam.camera` rig
-  circles/tilts/zooms around it — "third person" is the orbit rig pointed at the ship. Panning is
-  disabled here (the target stays on the ship); the galaxy and system cameras are held.
+  world units. Measure with the same loader that renders, not the raw accessors.
+- **Camera.** A third `Cam` (`shipcam`) targets the origin, so the `loam.camera` rig circles/tilts/zooms
+  around the ship — "third person" is the orbit rig pointed at the ship. Panning is disabled here (the
+  target stays on the ship); the galaxy and system cameras are held.
 - **Scripting.** `argv[9] = 1` (with a system via `argv[6]`) boots straight into scene 3 for a
   screenshot/canary, which otherwise needs two interactive clicks.
 - **Next iteration.** The galaxy's stars behind the ship, and (optionally) a flyable ship with a chase
