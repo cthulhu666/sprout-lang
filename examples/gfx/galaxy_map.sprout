@@ -144,6 +144,17 @@ let sun_disc_boost = 2.0  # scales the sun's TRUE ~0.5-degree disc up so it read
 let sun_glow_scale = 4.0  # wide warm additive halo size as a multiple of the (boosted) sun disc
 let vista_sky_r = 60000.0  # sky-dome sphere radius (camera-centred); < far clip (400000), > the
 # planet sphere (8000) and the ship, so the procedural sky sits behind everything
+
+# --- Scene 3 real-star layer: a few hundred ACTUAL catalog stars near the system, projected in their
+# true directions over the faked sky-dome as class-coloured glows (brighter than the procedural field,
+# so they read as landmark stars). Source is the system's finest-level tile; sized by the catalog size
+# code. Cached per system (rebuilt on change), drawn as immediate billboards (few hundred -> cheap).
+let bg_star_level = 4  # catalog level to sample the system's neighbourhood from (finest = local stars)
+let bg_star_max = 260  # cap on real stars drawn (a "couple hundred")
+let bg_star_min_code = 1  # skip the very dimmest (size code below this) so the kept set skews brighter
+let bg_star_sphere_r = 30000.0  # render sphere for real stars: in front of the sky dome, behind bodies
+let bg_star_min_size = 42.0  # smallest real-star dot (world units on the sphere; ~1.5 px)
+let bg_star_size_scale = 12.0  # extra dot size per unit of catalog size code (brighter -> bigger)
 let s3_init_yaw = 1.5708  # opening ship-cam angle (~pi/2): look down -x so the distant sun (placed
 # at -x from a ship 1 AU out on +x) sits behind the ship, roughly centred
 let s3_init_radius = 95.0
@@ -851,6 +862,65 @@ fn draw_system(a_ext: Double, ps: List Planet, sun_sh: Int, planet_sh: Int) -> U
 # handle; -1 means the (uncommitted) GLB was absent, so the draw is skipped and only the system
 # shows. draw_model rotates about Y only, so ship_yaw is the ship's heading.
 # --- Scene 3: the realistic in-system vista (see the scene-3 tunables above) --------------------
+# A real catalog star projected onto the star sphere: world position + a size-code-derived dot size,
+# tinted by spectral class. Cached per system so it is parsed once, not per frame.
+type BgStar = (x: Double, y: Double, z: Double, r: Int, g: Int, b: Int, size: Double)
+
+# Dot size for a star of catalog size code `szi`: a floor plus a per-code increment, so brighter
+# (larger) stars read as bigger landmark dots.
+fn bg_star_size(szi: Int) -> Double = bg_star_min_size + (to_double(szi) * bg_star_size_scale)
+
+# Parse one catalog line into a BgStar as seen from the system at galaxy coords (sx,sy,sz). The star's
+# direction is projected onto the star sphere with project_body's angular term zeroed (body_rad = 0),
+# so it returns direction*sphere_r and floors the size to bg_star_size. Galaxy (x,y,z) -> world
+# (x, z, y), matching the instanced field. Nothing for: unparseable, too dim, or the system's own star.
+fn bgstar_of(fields: List String, sx: Int, sy: Int, sz: Int) -> Maybe BgStar =
+  match fields with
+  | [_id, xs, ys, zs, cs, szs | _] ->
+      match (parse_int(xs), parse_int(ys), parse_int(zs), parse_int(cs), parse_int(szs)) with
+      | (Just xi, Just yi, Just zi, Just ci, Just szi) ->
+          if (szi < bg_star_min_code) || ((xi == sx) && (yi == sy) && (zi == sz)) then Nothing
+          else
+            match project_body(to_double(sx), to_double(sz), to_double(sy),
+                               to_double(xi), to_double(zi), to_double(yi),
+                               0.0, bg_star_sphere_r, bg_star_size(szi)) with
+            | (wx, wy, wz, r) ->
+                match class_rgb(ci) with
+                | (pr, pg, pb) -> Just (BgStar(x = wx, y = wy, z = wz, r = pr, g = pg, b = pb, size = r))
+      | _ -> Nothing
+  | _ -> Nothing
+
+# Take up to `n` real stars from the tile lines (first-N that qualify — biased brighter by the size-code
+# floor in bgstar_of; a magnitude sort is a later refinement).
+fn take_bgstars(lines: List String, sx: Int, sy: Int, sz: Int, n: Int, acc: List BgStar) -> List BgStar =
+  if n <= 0 then acc
+  else
+    match lines with
+    | Nil -> acc
+    | Cons line rest ->
+        match bgstar_of(split_pipe(line), sx, sy, sz) with
+        | Nothing -> take_bgstars(rest, sx, sy, sz, n, acc)
+        | Just s -> take_bgstars(rest, sx, sy, sz, n - 1, Cons(s, acc))
+
+# Load the real-star layer for the system at galaxy (sx,sy,sz): read its finest-level tile and project
+# up to bg_star_max stars. Any failure (no tile) yields Nil — the faked sky-dome still stands alone.
+fn load_bgstars(dir: String, sx: Int, sy: Int, sz: Int, radius: Double) -> List BgStar =
+  let ix = tile_index(to_double(sx), bg_star_level, radius)
+      iy = tile_index(to_double(sy), bg_star_level, radius)
+  in match read_file(tile_path(dir, bg_star_level, ix, iy)) with
+     | Err _ -> Nil
+     | Ok text -> take_bgstars(str_split_lines(text), sx, sy, sz, bg_star_max, Nil)
+
+# Draw the cached real stars as additive glows (brighter, slightly haloed — landmark stars over the
+# procedural field). Additive + depth-write-off (draw_glow), so no ordering concerns among them.
+fn draw_bgstars(bg: List BgStar) -> Unit !{IO} =
+  match bg with
+  | Nil -> ()
+  | Cons s rest ->
+      do
+        gfx.draw_glow(s.x, s.y, s.z, s.size, s.r, s.g, s.b)
+        draw_bgstars(rest)
+
 # The sun, projected onto the render sphere in its true direction from the ship at its (boosted) true
 # angular size. Built like loam's galactic-core bulge: a wide faint warm halo + a tight bright halo
 # (additive draw_glow layers accumulate into a smooth luminous corona) with a full-bright emissive
@@ -891,10 +961,11 @@ fn draw_vista_planets(ps: List Planet, sun_sh: Int) -> Unit !{IO} =
 # sun + planet specks, then the ship as the hero at the origin. Sky first (depth-write off, so it never
 # occludes); the ship depth-tests in front of the backdrop. `(cdx,cdy,cdz)` is the galactic-centre
 # direction from the ship's system, orienting the bulge/band. ship_model -1 (absent GLB) draws no ship.
-fn draw_vista_scene(ps: List Planet, sun_sh: Int, sky_sh: Int,
+fn draw_vista_scene(ps: List Planet, bg: List BgStar, sun_sh: Int, sky_sh: Int,
                     cdx: Double, cdy: Double, cdz: Double, ship_model: Int) -> Unit !{IO} =
   do
     sky.draw_sky(sky_sh, vista_sky_r, cdx, cdy, cdz)
+    draw_bgstars(bg)
     draw_vista_sun(sun_sh)
     draw_vista_planets(ps, sun_sh)
     if ship_model >= 0
@@ -1091,7 +1162,7 @@ fn render_loop(dir: String, cam: Cam, scam: Cam, shipcam: Cam, radius: Double, l
                dnx: Int, dny: Int, view: Int, prev_lvl: Int,
                csys: String, cplanets: List Planet, hov1: String, hov2: String,
                mask: Int, prev_ldown: Bool, show_grid: Bool, sun_sh: Int, planet_sh: Int, gas_sh: Int,
-               ship_model: Int, sky_sh: Int) -> Unit !{IO} =
+               ship_model: Int, sky_sh: Int, bgstars: List BgStar, bgsys: String) -> Unit !{IO} =
   do
     stop <- gfx.window_should_close()
     if stop then gfx.close_window()
@@ -1109,6 +1180,11 @@ fn render_loop(dir: String, cam: Cam, scam: Cam, shipcam: Cam, radius: Double, l
         let cplanets2 = if need_load then load_planets(dir, sel_name) else cplanets
         let csys2 = if need_load then sel_name else csys
         let s2ext = system_extent(cplanets2)
+        # Scene-3 real-star cache: (re)load the projected real stars only when the boarded system
+        # changes (tracked by bgsys, separate from csys since scene 2 may have loaded the planets first).
+        let need_bg = (view == 2) && ! (sel_name == bgsys)
+        let bgstars2 = if need_bg then load_bgstars(dir, sel_x, sel_y, sel_z, radius) else bgstars
+        let bgsys2 = if need_bg then sel_name else bgsys
         streamed <- load_levels(dir, cam, lvl, 0, radius, loaded, load_budget)
         cam_apply(if view == 0 then cam else if view == 1 then scam else shipcam)
         gfx.frame_begin()
@@ -1145,7 +1221,7 @@ fn render_loop(dir: String, cam: Cam, scam: Cam, shipcam: Cam, radius: Double, l
                 # Selection drop-line at the picked star's true 3D position (once a star is picked).
                 if has_sel then draw_selection_marker(sel_x, sel_y, sel_z) else ()
           else if view == 1 then draw_system(s2ext, cplanets2, sun_sh, planet_sh)
-          else draw_vista_scene(cplanets2, sun_sh, sky_sh, cdx, cdy, cdz, ship_model)
+          else draw_vista_scene(cplanets2, bgstars2, sun_sh, sky_sh, cdx, cdy, cdz, ship_model)
         gfx.overlay_begin()
         gfx.draw_fps(10, 10)
         if view == 0
@@ -1270,7 +1346,7 @@ fn render_loop(dir: String, cam: Cam, scam: Cam, shipcam: Cam, radius: Double, l
                         sel_y2 = if hit then best_y else sel_y
                         sel_z2 = if hit then best_z else sel_z
                         has_sel2 = has_sel || hit
-                    in render_loop(dir, cam2, scam2, shipcam2, radius, loaded2, name2, detail2, sel_x2, sel_y2, sel_z2, has_sel2, dnx2, dny2, next_view, lvl, csys2, cplanets2, hov1b, hov2b, mask2, ldown, show_grid, sun_sh, planet_sh, gas_sh, ship_model, sky_sh)
+                    in render_loop(dir, cam2, scam2, shipcam2, radius, loaded2, name2, detail2, sel_x2, sel_y2, sel_z2, has_sel2, dnx2, dny2, next_view, lvl, csys2, cplanets2, hov1b, hov2b, mask2, ldown, show_grid, sun_sh, planet_sh, gas_sh, ship_model, sky_sh, bgstars2, bgsys2)
 
 fn main() -> Unit !{IO} =
   do
@@ -1335,6 +1411,12 @@ fn main() -> Unit !{IO} =
     # Optional argv[9] = 1 to boot straight into the third-person SHIP scene (requires a system via
     # argv[6]). Lets a headless screenshot capture scene 3, which otherwise needs two interactive clicks.
     ship_arg <- arg_int(9, 0)
+    # Optional argv[10..12] = the boarded system's galaxy position (x,y,z in ly), so a direct-to-ship
+    # canary (argv[9]) gets a REAL system position without an interactive pick — it orients the sky's
+    # bulge/band and sources the real-star layer. Absent -> 0 (galactic centre; still renders).
+    bsx <- arg_int(10, 0)
+    bsy <- arg_int(11, 0)
+    bsz <- arg_int(12, 0)
     let init_view = if sys_arg >= 0 then (if ship_arg >= 1 then 2 else 1) else 0
     let init_name = if sys_arg >= 0 then "SYS-" ++ pad5(sys_arg) else "No system selected"
     # Optional argv[7] = initial spectral-class filter mask (bit c == class c shown). Absent -> all
@@ -1345,5 +1427,5 @@ fn main() -> Unit !{IO} =
     # rewiring; argv[8] = 0 turns it off at launch (default on), e.g. for a grid-free screenshot.
     init_grid <- arg_int(8, 1)
     render_loop(dir, cam0, scam0, shipcam0, radius, dict_empty(),
-                init_name, "Click a star to inspect it", 0, 0, 0, false, 0, 0, init_view, seed_lvl, "", Nil, "", "",
-                init_mask, false,! (init_grid == 0), sun_sh, planet_sh, gas_sh, ship_model, sky_sh)
+                init_name, "Click a star to inspect it", bsx, bsy, bsz, false, 0, 0, init_view, seed_lvl, "", Nil, "", "",
+                init_mask, false,! (init_grid == 0), sun_sh, planet_sh, gas_sh, ship_model, sky_sh, Nil, "")

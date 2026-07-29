@@ -350,8 +350,13 @@ specks. No orbit lines, no size inflation. `< System` returns to scene 2.
   world x/z plane, so the band is directions with small `|dir.y|` (`uBandNormal`), and the bulge is a
   glow toward `uCoreDir = normalize(centre − system)` (centre = the origin black hole). Drawn on a
   **camera-centred sphere seen from inside** via the new `gfx.set_backface_cull(false)` toggle (mirror
-  of `set_depth_mask`) + depth-write off, so it never occludes. A couple hundred *real* brightest
-  catalog stars are layered on top (next).
+  of `set_depth_mask`) + depth-write off, so it never occludes.
+- **Real stars on top.** A couple hundred *actual* catalog stars near the system, projected in their
+  true directions over the faked field as brighter, class-coloured glows (landmark stars). Sourced
+  from the system's finest-level tile (reusing scene 1's field parser), sized by the catalog size
+  code, and placed with `project_body` at `body_rad = 0` (so it returns direction only, size floored).
+  Cached per system, drawn as ~260 immediate billboards. They cluster toward the galactic centre — the
+  same direction the bulge glows — because that is where the real neighbourhood is densest.
 - **Model.** `assets/models/rusty_spaceship.glb` (glTF/GLB via raylib's `LoadModel`). At **44 MB it is
   *not committed*** (`.gitignore`); drop the file in to see it. `gfx.load_model` returns `-1` only on
   OOM, so an absent file yields an empty model that simply draws nothing (the vista still renders).
@@ -363,9 +368,11 @@ specks. No orbit lines, no size inflation. `< System` returns to scene 2.
   around the ship — "third person" is the orbit rig pointed at the ship. Panning is disabled here (the
   target stays on the ship); the galaxy and system cameras are held.
 - **Scripting.** `argv[9] = 1` (with a system via `argv[6]`) boots straight into scene 3 for a
-  screenshot/canary, which otherwise needs two interactive clicks.
-- **Next.** The couple hundred *real* brightest catalog stars layered over the faked sky, and
-  (optionally) a flyable ship with a chase camera — see "Planned extensions".
+  screenshot/canary, which otherwise needs two interactive clicks. `argv[10..12]` give the boarded
+  system's galaxy position (x,y,z, ly) so the canary orients the sky and sources the real-star layer
+  without an interactive pick (e.g. SYS-00013 is `-25141 6520 436`); absent → the galactic centre.
+- **Next.** Optionally a flyable ship with a chase camera, and star labels/selection on the real
+  layer — see "Planned extensions".
 
 ## Spectral-class filter (built)
 
@@ -492,10 +499,11 @@ mise exec -- just run-gfx examples/gfx/galaxy_map.sprout /Users/cthulhu/GameDev/
 # canary + screenshot:
 SPROUT_GFX_MAX_FRAMES=120 SPROUT_GFX_SCREENSHOT=galaxy.png \
   mise exec -- just run-gfx examples/gfx/galaxy_map.sprout /Users/cthulhu/GameDev/universegen/catalog
-# scene 3 (ship) canary — argv[6]=system id, argv[9]=1 boots straight into the ship view
+# scene 3 (ship) canary — argv[6]=system id, argv[9]=1 boots straight into the ship view,
+# argv[10..12]=that system's galaxy x,y,z (orients the sky + sources the real-star layer).
 # (SPROUT_GFX_SCREENSHOT must be a RELATIVE path — raylib resolves it against the working dir):
 SPROUT_GFX_MAX_FRAMES=120 SPROUT_GFX_SCREENSHOT=ship.png SPROUT_GFX_SCREENSHOT_FRAME=100 \
-  mise exec -- just run-gfx examples/gfx/galaxy_map.sprout /Users/cthulhu/GameDev/universegen/catalog 85000 14000 700 0 0 13 4095 1 1
+  mise exec -- just run-gfx examples/gfx/galaxy_map.sprout /Users/cthulhu/GameDev/universegen/catalog 85000 14000 700 0 0 13 4095 1 1 -25141 6520 436
 ```
 
 `argv[7]` is the initial spectral-class filter mask (bit *c* = class *c* shown; absent = all). It
