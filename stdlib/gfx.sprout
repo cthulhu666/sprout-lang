@@ -78,6 +78,7 @@ extern fn gfx_close_window() -> Unit !{IO}
 extern fn gfx_set_clip_planes(near_plane: Double, far_plane: Double) -> Unit !{IO}
 extern fn gfx_sphere_model(r: Int, g: Int, b: Int) -> Int !{IO}
 extern fn gfx_billboard_model(r: Int, g: Int, b: Int) -> Int !{IO}
+extern fn gfx_draw_glow(x: Double, y: Double, z: Double, size: Double, r: Int, g: Int, b: Int) -> Unit !{IO}
 extern fn gfx_load_shader(vs: String, fs: String) -> Int !{IO}
 extern fn gfx_shader_set_float(h: Int, name: String, v: Double) -> Unit !{IO}
 extern fn gfx_shader_set_vec3(h: Int, name: String, x: Double, y: Double, z: Double) -> Unit !{IO}
@@ -466,6 +467,14 @@ export fn sphere_model(r: Int, g: Int, b: Int) -> Int !{IO} =
 # size still comes from the instance_push `scale`. Call after open_window (uploads the mesh).
 export fn billboard_model(r: Int, g: Int, b: Int) -> Int !{IO} =
   gfx_billboard_model(r, g, b)
+
+# Draw an immediate-mode, ADDITIVE, camera-facing radial glow of world-space `size` at (x,y,z), tinted
+# (r,g,b). A general soft-light primitive — a luminous halo with no geometry to facet, additively
+# blended so it brightens whatever is behind it (a sun's corona, an explosion flash, a light source, a
+# galactic-core bulge). Call inside the 3D pass (after frame_begin, before overlay_begin). Layer a few
+# (a tight bright one + a wide dim one) for a soft falloff.
+export fn draw_glow(x: Double, y: Double, z: Double, size: Double, r: Int, g: Int, b: Int) -> Unit !{IO} =
+  gfx_draw_glow(x, y, z, size, r, g, b)
 
 # --- Generic custom shaders ---
 # Compile a shader from GLSL source and return a handle. An empty vs/fs string means "use raylib's

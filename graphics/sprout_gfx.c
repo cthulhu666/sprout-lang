@@ -1121,6 +1121,41 @@ long long gfx_billboard_model(long long r, long long g, long long b) {
   return h;
 }
 
+/* Soft radial glow texture (bright centre → transparent edge), lazily generated once and reused by
+ * every gfx_draw_glow. GenImageGradientRadial gives the falloff; additive blend then makes overlapping
+ * glows accumulate luminously. */
+static Texture2D g_glow_tex;
+static int g_glow_ready = 0;
+static void ensure_glow_tex(void) {
+  if (g_glow_ready) return;
+  Image img = GenImageGradientRadial(128, 128, 0.0f, WHITE, (Color){ 0, 0, 0, 0 });
+  g_glow_tex = LoadTextureFromImage(img);
+  SetTextureFilter(g_glow_tex, TEXTURE_FILTER_BILINEAR);
+  UnloadImage(img);
+  g_glow_ready = 1;
+}
+
+/* Draw an immediate-mode, ADDITIVE, camera-facing radial glow of world-space `size` at (x,y,z), tinted
+ * (r,g,b). A general light primitive — a soft luminous halo with no geometry to facet, additively
+ * blended so it brightens whatever is behind it (a sun's corona, an explosion flash, a light source,
+ * or — in the galaxy demo — the bright bulge at the galactic core). Must be called inside the 3D pass
+ * (after gfx_frame_begin, before gfx_overlay_begin); DrawBillboard orients it to the current camera.
+ * Layer several (a tight bright one + a wide dim one) for a soft falloff. r,g,b are 0..255. */
+long long gfx_draw_glow(long long x, long long y, long long z, long long size,
+                        long long r, long long g, long long b) {
+  ensure_glow_tex();
+  Vector3 pos = { as_float(x), as_float(y), as_float(z) };
+  Color tint = { (unsigned char)r, (unsigned char)g, (unsigned char)b, 255 };
+  /* Depth WRITE off (test stays on): the glow is light, not surface — nearer stars still occlude it,
+   * but it must never punch a depth hole that hides stars behind it. */
+  rlDisableDepthMask();
+  BeginBlendMode(BLEND_ADDITIVE);
+  DrawBillboard(g_cam, g_glow_tex, pos, as_float(size), tint);
+  EndBlendMode();
+  rlEnableDepthMask();
+  return 0;
+}
+
 /* --- Generic custom-shader API --------------------------------------------
  * Load a caller-authored shader and drive it from Sprout, so domain look-and-feel (emissive stars,
  * procedural planets, ...) lives in the demo / loam layer as data, not baked into this engine. Thin

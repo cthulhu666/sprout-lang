@@ -152,6 +152,12 @@ These are gfx-binding additions (non-bootstrap; no seed refresh):
 - `gfx.world_to_screen(x,y,z) -> Bool` + `gfx.projected_x()/projected_y()` — project a world point to
   screen for click-picking (`GetWorldToScreen`; the split trio matches the `mouse_x`/`mouse_y` idiom
   since the i64 ABI returns one word).
+- `gfx.draw_glow(x,y,z,size,r,g,b)` — an immediate-mode **additive, camera-facing radial glow** of
+  world-space `size` at a point, tinted `(r,g,b)`. A soft luminous halo with no geometry to facet,
+  additively blended (depth-write off, so it never occludes what's behind it) — a general light
+  primitive (sun corona, explosion flash, light source). The galaxy demo layers three at the galactic
+  centre for the **core bulge** (see "Galactic-core glow" below). Backed by raylib `GenImageGradientRadial`
+  (a cached soft-gradient texture) + `DrawBillboard` under `BLEND_ADDITIVE`. Call inside the 3D pass.
 - `gfx.draw_text(x,y,text,size,r,g,b)` — the first general text primitive (previously `DrawText` was
   reachable only as a button label).
 - `gfx.draw_line3d(x0,y0,z0,x1,y1,z1,r,g,b)` — an immediate-mode 3D line (`DrawLine3D`); scene 2
@@ -200,6 +206,22 @@ These are gfx-binding additions (non-bootstrap; no seed refresh):
   sub-pixel when zoomed out — is handled by the primitive's minimum-pixel floor, so both zoom extremes
   read well. The now-removed instanced emissive sphere shader (`loam.starfield.load_instance_shader`)
   is gone; `loam.starfield` retains only the *immediate* emissive shader for the scene-2 sun.
+
+## Galactic-core glow (built)
+
+The generator's disk is uniform (no spiral arms, no brightness concentration), so the raw overview is a
+flat carpet of dots. A **galactic-core bulge** gives it a bright nucleus: `draw_core_glow` (in the demo)
+layers three `gfx.draw_glow` additive sprites at the galactic centre (world origin, where the
+supermassive black hole sits) — a wide faint halo, a mid body, and a bright warm core — which
+accumulate into a smooth luminous falloff. The warm old-population tint and the three-layer stack are
+demo composition; the additive-glow primitive itself (`gfx.draw_glow`) is domain-agnostic.
+
+Because a `draw_glow` sprite is **world-size**, zooming into the core would otherwise turn the whole
+screen into a warm additive wash. So the bulge is **distance-faded**: `draw_core_glow` takes a `fade`
+(0..1) derived from the camera distance relative to the galaxy radius — full when viewing the whole
+galaxy, gone once the camera descends past ~0.35·radius. The glow is the *unresolved* core light, so as
+the LoD resolves individual stars the bulge dissolves rather than floods the view; at `fade == 0` the
+three draws are skipped entirely (zero cost, and the core-zoom render is unchanged). Scene 1 only.
 
 ## Scene 2 — solar-system view (built)
 
