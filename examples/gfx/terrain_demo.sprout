@@ -87,7 +87,7 @@ fn gen_region(cfg: Config, dir: String, ncx: Int, ncz: Int, cx: Int, cz: Int) ->
   else
     do
       ch <- generate_chunk(cfg, cx, cz)
-      match save_chunk(dir, ch) with | _ -> ()
+      match save_chunk(dir, cfg.seed, ch) with | _ -> ()
       gen_region(cfg, dir, ncx, ncz, cx + 1, cz)
 
 # --- Per-frame draw: page chunks, draw their tiles --------------------------
