@@ -87,6 +87,7 @@ pr_snapshot() {
   echo "${prefix}TITLE=$(jq -r '.title // "" | @sh' "$tmp")"
   echo "${prefix}HEAD_SHA=$(jq -r '.head.sha // "none"' "$tmp")"
   echo "${prefix}HEAD_REF=$(jq -r '.head.ref // "none"' "$tmp")"
+  echo "${prefix}BASE_REF=$(jq -r '.base.ref // "master"' "$tmp")"
   echo "${prefix}MERGEABLE=$(jq -r '.mergeable // "?"' "$tmp")"
 }
 

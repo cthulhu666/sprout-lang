@@ -1,14 +1,22 @@
 #!/usr/bin/env bash
 # Full Step 4 of the codeberg-merge skill executed as one script:
-# rebase a PR's branch onto current master, handle the bootstrap-seed
-# conflict via --theirs, regenerate the seed iff the rebase introduces
-# any compiler-source diff vs master (bug #3 heuristic), run fmt,
-# commit the seed if it changed, force-push (using a temp local branch
-# if the canonical branch is checked out in a worktree), then requeue
-# the auto-merge.
+# rebase a PR's branch onto its ACTUAL configured base (the PR's own
+# base.ref — NOT hardcoded to master; a PR whose base is a sibling branch,
+# e.g. a deliberately stacked PR chain, must rebase onto that branch, not
+# master, or the rebase silently drops its base's commits from the pushed
+# branch — a real bug this fixes, see docs/... / PR#298 incident), or with
+# --onto, onto an explicit ref (used by pr-babysit.sh's merge-train stacking
+# pre-pass to validate a PR's final queue position before its predecessor
+# actually merges). Handles the bootstrap-seed conflict via --theirs,
+# regenerates the seed iff the rebase introduces any compiler-source diff vs
+# REAL master (bug #3 heuristic — deliberately not vs the rebase target, so a
+# stacked diff is judged by what it will actually add to master), runs fmt,
+# commits the seed if it changed, force-pushes (using a temp local branch if
+# the canonical branch is checked out in a worktree), then requeues the
+# auto-merge.
 #
 # Usage:
-#   scripts/codeberg/pr-rebase.sh <pr-number>
+#   scripts/codeberg/pr-rebase.sh [--onto=<ref>] <pr-number>
 #
 # Exit codes:
 #   0 — success; PR is force-pushed and auto-merge requeued.
@@ -27,8 +35,15 @@ set -euo pipefail
 # way to tell which command failed after the fact.
 trap 'echo "PR#${PR:-?}: INTERNAL ERROR at line $LINENO (exit $?): $BASH_COMMAND"' ERR
 
+ONTO_REF=""
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --onto=*) ONTO_REF="${1#*=}"; shift ;;
+    *) break ;;
+  esac
+done
 if [ $# -ne 1 ]; then
-  echo "usage: pr-rebase.sh <pr-number>" >&2
+  echo "usage: pr-rebase.sh [--onto=<ref>] <pr-number>" >&2
   exit 2
 fi
 PR=$1
@@ -58,6 +73,7 @@ DRAFT=$(jq -r '.draft // false' "$tmp")
 TITLE=$(jq -r '.title // ""' "$tmp")
 HEAD_REF=$(jq -r '.head.ref // "none"' "$tmp")
 HEAD_SHA=$(jq -r '.head.sha // "none"' "$tmp")
+BASE_REF=$(jq -r '.base.ref // "master"' "$tmp")
 
 if [ "$DRAFT" = "true" ]; then echo "PR#$PR: draft — skipping"; exit 0; fi
 if title_is_wip "$TITLE"; then echo "PR#$PR: WIP-titled — skipping"; exit 0; fi
@@ -82,11 +98,19 @@ if git worktree list --porcelain | grep -q "^branch refs/heads/$HEAD_REF$"; then
 fi
 
 # ---- Step 3: fetch + checkout + rebase ----------------------------
-git fetch origin master "$HEAD_REF" >/dev/null 2>&1
+# Default to the PR's OWN declared base — not master. A PR whose base is a
+# sibling branch (e.g. a deliberately stacked PR chain) must rebase onto that
+# branch; rebasing onto master instead silently drops the base's commits
+# from the pushed branch (real bug this fixes — see PR#298 incident).
+ONTO=${ONTO_REF:-origin/$BASE_REF}
+git fetch origin master "$HEAD_REF" "$BASE_REF" >/dev/null 2>&1
+case "$ONTO" in
+  origin/*) git fetch origin "${ONTO#origin/}" >/dev/null 2>&1 ;;
+esac
 git checkout -B "$LOCAL_BRANCH" "origin/$HEAD_REF" >/dev/null 2>&1
 
-echo "PR#$PR: rebasing onto origin/master ($(git rev-parse origin/master | cut -c1-12))"
-git rebase origin/master 2>&1 | tail -5 || true
+echo "PR#$PR: rebasing onto $ONTO ($(git rev-parse "$ONTO" | cut -c1-12))"
+git rebase "$ONTO" 2>&1 | tail -5 || true
 NON_SEED_CONFLICT=0
 # NB: use git-path, not a literal .git/ — in a git worktree .git is a FILE
 # pointing at the common gitdir, so `.git/rebase-merge` never exists and this

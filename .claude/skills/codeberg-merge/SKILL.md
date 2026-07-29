@@ -75,12 +75,16 @@ skipped (draft/WIP), and every `ESCALATION:` line with a suggested next step.
   merge in the setup-green / test-not-spawned window.
 - **Fast-forward-only merge** with the FULL head SHA (a truncated SHA spuriously
   409s).
-- **Master-moved race**: a non-success merge is NOT judged by HTTP code (Gitea
+- **Base-moved race**: a non-success merge is NOT judged by HTTP code (Gitea
   returns 500, not 405/409, for a non-ff ff-only merge). It diagnoses with
-  `git merge-base --is-ancestor` → retry (transient), recheck (already in
-  master), or rebase via `pr-rebase.sh` (which regenerates the bootstrap seed
-  iff compiler source changed) then re-gates. Merges are **serialized** so the
-  cascade resolves in order instead of thrashing.
+  `git merge-base --is-ancestor` against the PR's OWN declared `base.ref` — NOT
+  hardcoded master; a stacked PR (base = a sibling PR's branch) must be judged
+  against that branch, or the diagnosis is a category error, not just
+  imprecise (this dropped a stacked PR's base commits once — PR#298 incident)
+  → retry (transient), recheck (already in base), or rebase via `pr-rebase.sh`
+  (also base-aware; regenerates the bootstrap seed iff compiler source
+  changed) then re-gates. Merges are **serialized** so the cascade resolves in
+  order instead of thrashing.
 - **Caps**: ≤3 rebases and ≤3 transient merge-retries per PR, plus the wall-clock
   cap. A breach escalates that PR only.
 

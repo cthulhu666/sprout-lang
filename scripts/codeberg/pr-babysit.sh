@@ -15,10 +15,13 @@
 #      stop scanning this cycle and re-evaluate the rest against the moved master
 #      (serialized merges — the ff-only cascade resolves in order, not by thrash).
 #   4. Non-success is NOT trusted by status code (Gitea returns 500, not 405/409,
-#      for a non-ff ff-only merge). Diagnose with `git merge-base --is-ancestor`:
-#        - head already in master  -> recheck next cycle (merged elsewhere)
-#        - head descends from master (genuinely ff-able) -> transient; retry
-#        - diverged -> pr-rebase.sh, then let CI re-run and re-gate
+#      for a non-ff ff-only merge). Diagnose with `git merge-base --is-ancestor`
+#      against the PR's OWN declared base (base.ref — not hardcoded master; a
+#      stacked PR's ff target is its base branch, and comparing it against
+#      master instead is a category error, not just imprecision — see PR#298):
+#        - head already in base  -> recheck next cycle (merged elsewhere)
+#        - head descends from base (genuinely ff-able) -> transient; retry
+#        - diverged -> pr-rebase.sh (also base-aware), then let CI re-run and re-gate
 #   5. Caps: <=3 rebases and <=3 transient-retries per PR, and a wall-clock cap;
 #      breaching any escalates that PR but does NOT stop the others.
 #
@@ -66,6 +69,7 @@ active_left() { local pr; for pr in "${PRS[@]}"; do [ "${st[$pr]}" = active ] &&
 
 log "babysitting PRs: ${PRS[*]} (interval=${INTERVAL}s cap=${MAX_WALL}s dry=${DRY})"
 start=$SECONDS
+
 while active_left; do
   if [ $((SECONDS - start)) -ge "$MAX_WALL" ]; then
     for pr in "${PRS[@]}"; do
@@ -110,11 +114,14 @@ while active_left; do
       break   # master moved — restart so the rest re-evaluate against the new tip
     fi
 
-    # ---- non-success: diagnose fast-forwardability rather than trust the HTTP code.
-    git fetch origin master "${P_HEAD_REF}" >/dev/null 2>&1 || true
-    if git merge-base --is-ancestor "${P_HEAD_SHA}" origin/master 2>/dev/null; then
-      log "PR#$pr merge HTTP=$HTTP but head already in master — rechecking next cycle"; continue
-    elif git merge-base --is-ancestor origin/master "${P_HEAD_SHA}" 2>/dev/null; then
+    # ---- non-success: diagnose fast-forwardability against the PR's OWN base
+    # (not hardcoded master — a stacked PR's ff target is its base branch;
+    # comparing against master there is a category error, not just imprecise).
+    P_BASE=${P_BASE_REF:-master}
+    git fetch origin "$P_BASE" "${P_HEAD_REF}" >/dev/null 2>&1 || true
+    if git merge-base --is-ancestor "${P_HEAD_SHA}" "origin/$P_BASE" 2>/dev/null; then
+      log "PR#$pr merge HTTP=$HTTP but head already in $P_BASE — rechecking next cycle"; continue
+    elif git merge-base --is-ancestor "origin/$P_BASE" "${P_HEAD_SHA}" 2>/dev/null; then
       ret[$pr]=$(( ${ret[$pr]} + 1 ))
       if [ "${ret[$pr]}" -gt "$MAX_RETRY" ]; then
         echo "ESCALATION: PR#$pr fast-forwardable but merge kept failing HTTP=$HTTP (body: $(head -c 200 "/tmp/cm_bmerge_$pr.out" 2>/dev/null))"
