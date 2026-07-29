@@ -639,16 +639,25 @@ dot-guard `infer.is_lowercase_name` has (a dotted name is never a type variable)
    `clang_verifies_ir` promotion is DONE (all 8 IR-codegen suites adopt the shared
    `testsupport/ir_verify.sprout` helper). Five deferred items from the PR 2.3
    code-review pass are tracked in the "Language Core and Safety" section above.
-   Remaining M2/M3 residuals — `ast_to_ir.translate_expr` still rejects a `TDict`
-   expression and refutable do-bind patterns (bind to constructor/int/bool/string/char
-   patterns). Both are **empirically unexercised**: neither self-compile nor any test in
-   the suite reaches them, and a hand-built dict-forwarding program (the pattern most
-   likely to materialize a runtime dictionary) compiles through the IR path without
-   producing a `TDict`. **Next step is a reachability assessment**, not a speculative
-   implementation: determine whether any real user program can force `TDict`/refutable
-   do-bind under the current devirtualization + monomorphization. If a reachable case is
-   found, each form ships as its own design-gated PR (AGENTS.md Rule 5); if none is, mark
-   the plan's M2/M3 residuals closed and move to M4 (user-facing linear types).
+   M2/M3 residuals — reachability assessment DONE (2026-07-29):
+   - `TDict` expression: **NOT reachable — closed.** `lowering.lower_program` runs before
+     `ast_to_ir` and eliminates every `TDict` (in-`TCall` witnesses → concrete instance
+     fn-refs / hidden dict params via `expand_call_args`; a standalone `TDict` → `TUnit`,
+     `lowering.sprout:1296`). So `ast_to_ir`'s `"TDict not yet supported"` arm is
+     structurally-unreachable dead code; no implementation needed.
+   - Refutable do-bind without `else` (e.g. `Just(x) <- e`): **was reachable — FIXED.**
+     It type-checked then crashed at codegen with an internal `ast_to_ir` error (no
+     fallback, since the direct backend is gone). Root cause: the parser's `<-` do-step
+     accepted any pattern without `else`, unlike the sibling `let` do-step which already
+     rejected refutable patterns. Fix: `parser.is_irrefutable_do_bind_pattern` gates the
+     no-`else` `<-` arm (allows var/wildcard/unit/tuple-of-irrefutable — exactly what
+     `ast_to_ir.do_bind_captures` lowers), else a parse diagnostic "refutable `<-` binding
+     in a do block requires an `else`". Prior-art survey (Rust/Swift require an explicit
+     refutable construct; Scala 3 tightened toward this; Haskell/OCaml allow-with-fallback)
+     backed the reject-at-parse choice, consistent with Sprout's existing `let..else`.
+     Regression: `tests/conformance/parse_error/refutable_do_bind_no_else.spr`.
+   With both residuals resolved, the M2/M3 codegen-parity axis is closed; next is M4
+   (user-facing linear types).
    List-pattern sugar — pending sweeps (2026-06-08):
    - Expression-side sweep: rewrite multi-element `Cons(a, Cons(b, …))`
      *constructions* in `ast_to_ir.sprout`, `compiler.sprout`, and similar

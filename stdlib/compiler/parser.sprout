@@ -489,6 +489,25 @@ fn build_do_refutable(is_bind: Bool, success_pat: ast.Pattern, value: ast.Expr, 
      else
        Cons(ast.DoExprStep(ast.MatchExpr(value, branches, pos)), Nil)
 
+# A do-bind `<pat> <- e` without `else` is legal only for an irrefutable pattern
+# (one that always matches): a variable, wildcard, unit, or a tuple of irrefutable
+# patterns. This mirrors exactly what `ast_to_ir.do_bind_captures` can lower; a
+# refutable pattern (constructor/literal) needs an `else` handler — see the `let`
+# case in parse_do_step_sub and build_do_refutable. O(n) in pattern nodes.
+fn is_irrefutable_do_bind_pattern(pat: ast.Pattern) -> Bool =
+  match pat with
+  | ast.VarPattern _ _ -> true
+  | ast.WildcardPattern _ -> true
+  | ast.UnitPattern _ -> true
+  | ast.TuplePattern items _ -> all_irrefutable_do_bind(items)
+  | _ -> false
+
+fn all_irrefutable_do_bind(pats: List ast.Pattern) -> Bool =
+  match pats with
+  | Nil -> true
+  | Cons p rest ->
+      if is_irrefutable_do_bind_pattern(p) then all_irrefutable_do_bind(rest) else false
+
 # Parses one do step from a sub-slice of tokens (step_tokens is the exact tokens for this step).
 fn parse_do_step_sub(step_tokens: Vec token.Token) -> Result ParseError (DoStepParse, Int) =
   let slice_pos = tok_pos(tok_at(step_tokens, 0))
@@ -519,7 +538,10 @@ fn parse_do_step_sub(step_tokens: Vec token.Token) -> Result ParseError (DoStepP
           (residual, handler) <- parse_let_else_clause(step_tokens, i5)
           Ok((DoStepRefutable(true, pattern, value, residual, handler, slice_pos), 0))
       else
-        Ok((DoStepPlain(ast.DoBindStep(pattern, value)), 0))
+        if is_irrefutable_do_bind_pattern(pattern) then
+          Ok((DoStepPlain(ast.DoBindStep(pattern, value)), 0))
+        else
+          Err(ParseError("refutable `<-` binding in a do block requires an `else`", slice_pos))
   else
     do
       (value, _) <- parse_expr(step_tokens, 0)

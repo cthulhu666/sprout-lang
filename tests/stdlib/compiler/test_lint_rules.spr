@@ -280,16 +280,20 @@ let non_list_pattern_unaffected =
   "  | Nothing -> 0\n" ++
   "  | Just v -> v\n"
 
+# These exercise the list-shape/list-prefix lint on a refutable list pattern
+# reached via a do-bind. A refutable `<-` pattern now requires an `else` (parser:
+# is_irrefutable_do_bind_pattern), so each carries one; it desugars to a match at
+# parse time, and the lint still flags the hand-written list pattern in that match.
 let do_bind_hand_written_var_tail =
   "fn f() -> Int !{IO} =\n" ++
   "  do\n" ++
-  "    Cons h t <- get_list()\n" ++
+  "    Cons h t <- get_list() else 0\n" ++
   "    h\n"
 
 let do_bind_hand_written_fixed_length =
   "fn f() -> Int !{IO} =\n" ++
   "  do\n" ++
-  "    Cons a (Cons b Nil) <- get_pair()\n" ++
+  "    Cons a (Cons b Nil) <- get_pair() else 0\n" ++
   "    a + b\n"
 
 # --- list-prefix-pattern fixtures -----------------------------------------
@@ -328,7 +332,7 @@ let wildcard_tail_nested_in_head =
 let do_bind_hand_written_wildcard_tail =
   "fn f() -> Int !{IO} =\n" ++
   "  do\n" ++
-  "    Cons h _ <- get_list()\n" ++
+  "    Cons h _ <- get_list() else 0\n" ++
   "    h\n"
 
 fn main() -> Unit !{IO} =

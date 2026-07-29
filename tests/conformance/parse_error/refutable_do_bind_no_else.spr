@@ -1,0 +1,4 @@
+fn run() -> Unit !{IO} =
+  do
+    Just(x) <- fetch
+    consume(x)
