@@ -15,6 +15,7 @@ import loam.polar_grid (in_disc, ring_of, wedge_of, ring_radius, boundary_point)
 import loam.orbit (ellipse_point)
 import loam.system_view (orbit_world_scale, body_world_size)
 import loam.vista (project_body)
+import loam.skydome as sky
 import loam.starfield as sf
 import loam.billboard as bb
 import loam.nebula as nb
@@ -141,6 +142,8 @@ let sun_disc_boost = 2.0  # scales the sun's TRUE ~0.5-degree disc up so it read
 # black (real would be ~half this); the planets are left at their true speck size, so the contrast
 # the scene is about — bright disc vs pinpoint specks — is preserved
 let sun_glow_scale = 4.0  # wide warm additive halo size as a multiple of the (boosted) sun disc
+let vista_sky_r = 60000.0  # sky-dome sphere radius (camera-centred); < far clip (400000), > the
+# planet sphere (8000) and the ship, so the procedural sky sits behind everything
 let s3_init_yaw = 1.5708  # opening ship-cam angle (~pi/2): look down -x so the distant sun (placed
 # at -x from a ship 1 AU out on +x) sits behind the ship, roughly centred
 let s3_init_radius = 95.0
@@ -884,10 +887,14 @@ fn draw_vista_planets(ps: List Planet, sun_sh: Int) -> Unit !{IO} =
         draw_vista_planet(p, sun_sh)
         draw_vista_planets(rest, sun_sh)
 
-# Scene 3: the distant sun + planet specks (the backdrop), then the ship as the hero at the origin.
-# Backdrop first so the ship depth-tests in front of it. ship_model -1 (absent GLB) draws no ship.
-fn draw_vista_scene(ps: List Planet, sun_sh: Int, ship_model: Int) -> Unit !{IO} =
+# Scene 3: the procedural sky (faked galaxy stars + Milky Way band + bulge) first, then the distant
+# sun + planet specks, then the ship as the hero at the origin. Sky first (depth-write off, so it never
+# occludes); the ship depth-tests in front of the backdrop. `(cdx,cdy,cdz)` is the galactic-centre
+# direction from the ship's system, orienting the bulge/band. ship_model -1 (absent GLB) draws no ship.
+fn draw_vista_scene(ps: List Planet, sun_sh: Int, sky_sh: Int,
+                    cdx: Double, cdy: Double, cdz: Double, ship_model: Int) -> Unit !{IO} =
   do
+    sky.draw_sky(sky_sh, vista_sky_r, cdx, cdy, cdz)
     draw_vista_sun(sun_sh)
     draw_vista_planets(ps, sun_sh)
     if ship_model >= 0
@@ -1084,7 +1091,7 @@ fn render_loop(dir: String, cam: Cam, scam: Cam, shipcam: Cam, radius: Double, l
                dnx: Int, dny: Int, view: Int, prev_lvl: Int,
                csys: String, cplanets: List Planet, hov1: String, hov2: String,
                mask: Int, prev_ldown: Bool, show_grid: Bool, sun_sh: Int, planet_sh: Int, gas_sh: Int,
-               ship_model: Int) -> Unit !{IO} =
+               ship_model: Int, sky_sh: Int) -> Unit !{IO} =
   do
     stop <- gfx.window_should_close()
     if stop then gfx.close_window()
@@ -1105,6 +1112,14 @@ fn render_loop(dir: String, cam: Cam, scam: Cam, shipcam: Cam, radius: Double, l
         streamed <- load_levels(dir, cam, lvl, 0, radius, loaded, load_budget)
         cam_apply(if view == 0 then cam else if view == 1 then scam else shipcam)
         gfx.frame_begin()
+        # Scene-3 sky orientation: the galactic-centre direction from the ship's system. The system
+        # sits at the picked star's galaxy position (galaxy x,y,z -> world x, z-height, z), and the
+        # centre is the world origin, so the direction is its negation. Zero (an argv canary boot with
+        # no pick) falls back to +x so the shader's normalize stays well-defined.
+        let has_sys = ! ((sel_x == 0) && (sel_y == 0) && (sel_z == 0))
+        let cdx = if has_sys then 0.0 - to_double(sel_x) else 1.0
+        let cdy = if has_sys then 0.0 - to_double(sel_z) else 0.0
+        let cdz = if has_sys then 0.0 - to_double(sel_y) else 0.0
         # Scene 1 draws the galaxy point cloud, filtered to the enabled spectral classes (model index
         # == classCode, so the mask enables/disables whole classes); scene 2 draws the selected system.
         if view == 0
@@ -1130,7 +1145,7 @@ fn render_loop(dir: String, cam: Cam, scam: Cam, shipcam: Cam, radius: Double, l
                 # Selection drop-line at the picked star's true 3D position (once a star is picked).
                 if has_sel then draw_selection_marker(sel_x, sel_y, sel_z) else ()
           else if view == 1 then draw_system(s2ext, cplanets2, sun_sh, planet_sh)
-          else draw_vista_scene(cplanets2, sun_sh, ship_model)
+          else draw_vista_scene(cplanets2, sun_sh, sky_sh, cdx, cdy, cdz, ship_model)
         gfx.overlay_begin()
         gfx.draw_fps(10, 10)
         if view == 0
@@ -1255,7 +1270,7 @@ fn render_loop(dir: String, cam: Cam, scam: Cam, shipcam: Cam, radius: Double, l
                         sel_y2 = if hit then best_y else sel_y
                         sel_z2 = if hit then best_z else sel_z
                         has_sel2 = has_sel || hit
-                    in render_loop(dir, cam2, scam2, shipcam2, radius, loaded2, name2, detail2, sel_x2, sel_y2, sel_z2, has_sel2, dnx2, dny2, next_view, lvl, csys2, cplanets2, hov1b, hov2b, mask2, ldown, show_grid, sun_sh, planet_sh, gas_sh, ship_model)
+                    in render_loop(dir, cam2, scam2, shipcam2, radius, loaded2, name2, detail2, sel_x2, sel_y2, sel_z2, has_sel2, dnx2, dny2, next_view, lvl, csys2, cplanets2, hov1b, hov2b, mask2, ldown, show_grid, sun_sh, planet_sh, gas_sh, ship_model, sky_sh)
 
 fn main() -> Unit !{IO} =
   do
@@ -1280,6 +1295,7 @@ fn main() -> Unit !{IO} =
     sun_sh <- sf.load_immediate_shader()
     planet_sh <- pl.load_shader()
     gas_sh <- nb.gas_shader()
+    sky_sh <- sky.load_shader()
     make_models(star_sh)
     # The third-person ship scene's model (glTF/GLB via raylib's LoadModel). The 44 MB file is not
     # committed (see .gitignore); load_model returns -1 when it is absent, and draw_ship_scene then
@@ -1330,4 +1346,4 @@ fn main() -> Unit !{IO} =
     init_grid <- arg_int(8, 1)
     render_loop(dir, cam0, scam0, shipcam0, radius, dict_empty(),
                 init_name, "Click a star to inspect it", 0, 0, 0, false, 0, 0, init_view, seed_lvl, "", Nil, "", "",
-                init_mask, false,! (init_grid == 0), sun_sh, planet_sh, gas_sh, ship_model)
+                init_mask, false,! (init_grid == 0), sun_sh, planet_sh, gas_sh, ship_model, sky_sh)

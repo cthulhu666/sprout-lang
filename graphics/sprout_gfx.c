@@ -1598,6 +1598,14 @@ long long gfx_set_depth_mask(long long on) {
   else rlDisableDepthMask();
   return 0;
 }
+/* Toggle back-face culling (mirror of gfx_set_depth_mask). Off lets a sphere be seen from the INSIDE
+ * — the sky-dome case: a camera-centred sphere under a starfield shader whose front faces point away
+ * from the eye. Restore with on=true after the draw so the rest of the scene culls normally. */
+long long gfx_set_backface_cull(long long on) {
+  if (on) rlEnableBackfaceCulling();
+  else rlDisableBackfaceCulling();
+  return 0;
+}
 
 /* Draw a filled horizontal (XZ) plane centred at (x,y,z) of size (sx,sz) in RGBA (0-255). With
  * a < 255 it blends over whatever is already drawn — a translucent water surface at sea level.

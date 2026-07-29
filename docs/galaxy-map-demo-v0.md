@@ -344,6 +344,14 @@ specks. No orbit lines, no size inflation. `< System` returns to scene 2.
   under two additive `draw_glow` layers (a corona), its true ~0.5° disc scaled up by `sun_disc_boost`
   (2.0) so it reads clearly against the black; the planets are true-size crisp emissive specks in their
   `planet_rgb` tint. All tunables live in the scene-3 block in `galaxy_map.sprout`.
+- **Sky (faked galaxy, `loam.skydome`).** Thousands of background stars, the Milky Way band, and the
+  central bulge glow are a GPU fragment shader over the view direction — no geometry, no catalog read
+  (one `draw_sphere_shaded` call). Correct directions from the galaxy's own geometry: the disk is the
+  world x/z plane, so the band is directions with small `|dir.y|` (`uBandNormal`), and the bulge is a
+  glow toward `uCoreDir = normalize(centre − system)` (centre = the origin black hole). Drawn on a
+  **camera-centred sphere seen from inside** via the new `gfx.set_backface_cull(false)` toggle (mirror
+  of `set_depth_mask`) + depth-write off, so it never occludes. A couple hundred *real* brightest
+  catalog stars are layered on top (next).
 - **Model.** `assets/models/rusty_spaceship.glb` (glTF/GLB via raylib's `LoadModel`). At **44 MB it is
   *not committed*** (`.gitignore`); drop the file in to see it. `gfx.load_model` returns `-1` only on
   OOM, so an absent file yields an empty model that simply draws nothing (the vista still renders).
@@ -356,8 +364,8 @@ specks. No orbit lines, no size inflation. `< System` returns to scene 2.
   target stays on the ship); the galaxy and system cameras are held.
 - **Scripting.** `argv[9] = 1` (with a system via `argv[6]`) boots straight into scene 3 for a
   screenshot/canary, which otherwise needs two interactive clicks.
-- **Next iteration.** The galaxy's stars behind the ship, and (optionally) a flyable ship with a chase
-  camera — see "Planned extensions".
+- **Next.** The couple hundred *real* brightest catalog stars layered over the faked sky, and
+  (optionally) a flyable ship with a chase camera — see "Planned extensions".
 
 ## Spectral-class filter (built)
 

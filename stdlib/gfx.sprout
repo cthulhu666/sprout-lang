@@ -40,6 +40,7 @@ extern fn gfx_get_time() -> Double !{IO}
 extern fn gfx_begin_blend_alpha() -> Unit !{IO}
 extern fn gfx_end_blend() -> Unit !{IO}
 extern fn gfx_set_depth_mask(on: Bool) -> Unit !{IO}
+extern fn gfx_set_backface_cull(on: Bool) -> Unit !{IO}
 extern fn gfx_set_view_mode(mode: Int) -> Unit !{IO}
 extern fn gfx_set_terrain_levels(levels: Int) -> Unit !{IO}
 extern fn gfx_draw_captured(handle: Int) -> Unit !{IO}
@@ -219,6 +220,9 @@ export fn get_time() -> Double !{IO} = gfx_get_time()
 export fn begin_blend_alpha() -> Unit !{IO} = gfx_begin_blend_alpha()
 export fn end_blend() -> Unit !{IO} = gfx_end_blend()
 export fn set_depth_mask(on: Bool) -> Unit !{IO} = gfx_set_depth_mask(on)
+# Toggle back-face culling. Off (false) lets a sphere be drawn seen from the INSIDE — a camera-centred
+# sky dome under a starfield shader. Restore with true after the draw. Mirror of set_depth_mask.
+export fn set_backface_cull(on: Bool) -> Unit !{IO} = gfx_set_backface_cull(on)
 
 export fn mesh_capture_begin() -> Unit !{IO} = gfx_mesh_capture_begin()
 export fn mesh_capture_end() -> Int !{IO} = gfx_mesh_capture_end()
