@@ -3466,13 +3466,13 @@ export fn typecheck_decls(
     # Runs after pre_scan so mutually recursive ADTs are always in the declared set.
     let declared_types = collect_declared_type_names(decls, builtin_type_names())
     match validate_all_decls(decls, declared_types) with
-    | Just err_msg -> typed_ast.TypedErr(no_pos(), err_msg)
+    | Just (pos, err_msg) -> typed_ast.TypedErr(pos, err_msg)
     | Nothing ->
         match check_overlapping_instances(decls, dict_empty()) with
-        | Just err_msg -> typed_ast.TypedErr(no_pos(), err_msg)
+        | Just (pos, err_msg) -> typed_ast.TypedErr(pos, err_msg)
         | Nothing ->
             match check_missing_superclass_instances(decls) with
-            | Just err_msg -> typed_ast.TypedErr(no_pos(), err_msg)
+            | Just (pos, err_msg) -> typed_ast.TypedErr(pos, err_msg)
             | Nothing ->
                 # Wrap scanned_env as GlobalEnv at this seam — scanned_env is the
                 # output of pre_scan_fn_decls (Dict, raw pre-pass). From here on
@@ -3484,7 +3484,7 @@ export fn typecheck_decls(
                     # Runs only on an otherwise-valid program, so a broken main body
                     # reports its own error first (this never masks it).
                     match validate_entrypoint(decls) with
-                    | Just msg -> typed_ast.TypedErr(no_pos(), msg)
+                    | Just (pos, msg) -> typed_ast.TypedErr(pos, msg)
                     | Nothing -> typed_ast.TypedOk(prog, schemes)
 
 # ---------------------------------------------------------------------------
@@ -3610,12 +3610,12 @@ fn validate_decl(decl: ast.Decl, declared: List String) -> Maybe String =
       validate_te(inner, name, declared)
   | _ -> Nothing
 
-fn validate_all_decls(decls: List ast.Decl, declared: List String) -> Maybe String =
+fn validate_all_decls(decls: List ast.Decl, declared: List String) -> Maybe(source.SourcePos, String) =
   match decls with
   | Nil -> Nothing
   | Cons decl rest ->
       match validate_decl(decl, declared) with
-      | Just e -> Just(e)
+      | Just e -> Just((ast.decl_pos(decl), e))
       | Nothing -> validate_all_decls(rest, declared)
 
 # ---------------------------------------------------------------------------
@@ -3670,7 +3670,7 @@ fn check_main_signature(params: List ast.Param, ret: Maybe ast.TypeExpr, effects
   | _ -> Just("Executable entrypoint `main` must take zero arguments")
 
 # Returns the first entrypoint diagnostic among the decls, or Nothing.
-fn validate_entrypoint(decls: List ast.Decl) -> Maybe String =
+fn validate_entrypoint(decls: List ast.Decl) -> Maybe(source.SourcePos, String) =
   match decls with
   | Nil -> Nothing
   | Cons decl rest ->
@@ -3678,7 +3678,7 @@ fn validate_entrypoint(decls: List ast.Decl) -> Maybe String =
       | ast.FnDecl name params ret effects _ _ _ ->
           if is_main_decl_name(name) then
             match check_main_signature(params, ret, effects) with
-            | Just e -> Just(e)
+            | Just e -> Just((ast.decl_pos(decl), e))
             | Nothing -> validate_entrypoint(rest)
           else validate_entrypoint(rest)
       | _ -> validate_entrypoint(rest)
@@ -3704,7 +3704,7 @@ fn instance_key_and_class(c: ast.TypeConstraint) -> Maybe (String, String) =
           Just((str_concat("@inst:", str_concat(class_name, str_concat(":", type_head_str(type_from_ast(head_te, dict_empty()))))),
                 string.after_last_dot(class_name)))
 
-fn check_overlapping_instances(decls: List ast.Decl, seen: Dict Bool) -> Maybe String =
+fn check_overlapping_instances(decls: List ast.Decl, seen: Dict Bool) -> Maybe(source.SourcePos, String) =
   match decls with
   | Nil -> Nothing
   | Cons decl rest ->
@@ -3714,7 +3714,7 @@ fn check_overlapping_instances(decls: List ast.Decl, seen: Dict Bool) -> Maybe S
           | Nothing -> check_overlapping_instances(rest, seen)
           | Just (key, cls) ->
               match dict_get(key, seen) with
-              | Just _ -> Just(str_concat("Overlapping instances for ", cls))
+              | Just _ -> Just((ast.decl_pos(decl), str_concat("Overlapping instances for ", cls)))
               | Nothing -> check_overlapping_instances(rest, dict_set(key, true, seen))
       | _ -> check_overlapping_instances(rest, seen)
 
@@ -3737,17 +3737,17 @@ fn check_overlapping_instances(decls: List ast.Decl, seen: Dict Bool) -> Maybe S
 # superclass may constrain a SUBSET of the class variables, so the required instance
 # is `Sup A`, not `Sup A B`. Do NOT generalize this to "all type args": that would
 # encode the wrong assumption. When multi-parameter classes land, revisit here.
-fn check_missing_superclass_instances(decls: List ast.Decl) -> Maybe String =
+fn check_missing_superclass_instances(decls: List ast.Decl) -> Maybe(source.SourcePos, String) =
   check_inst_supers_go(decls, build_class_super_map(decls, dict_empty()), build_inst_key_set(decls, dict_empty()))
 
-fn check_inst_supers_go(decls: List ast.Decl, super_map: Dict (List String), inst_set: Dict Bool) -> Maybe String =
+fn check_inst_supers_go(decls: List ast.Decl, super_map: Dict (List String), inst_set: Dict Bool) -> Maybe(source.SourcePos, String) =
   match decls with
   | Nil -> Nothing
   | Cons decl rest ->
       match decl with
       | ast.InstanceDecl constraint _ _ _ ->
           match superclass_check_one(constraint, super_map, inst_set) with
-          | Just err -> Just(err)
+          | Just err -> Just((ast.decl_pos(decl), err))
           | Nothing -> check_inst_supers_go(rest, super_map, inst_set)
       | _ -> check_inst_supers_go(rest, super_map, inst_set)
 

@@ -880,11 +880,15 @@ dot-guard `infer.is_lowercase_name` has (a dotted name is never a type variable)
    sites spanned — a `pos` param threaded in from both callers (`infer_call_inner`'s
    call-expr pos and `eq_via_class_method`'s pos), so an argument-type mismatch now
    reports the call site's line (`g("hello")` → `7:14: … Call type mismatch`, was 0).
+   Branch `fix/span-decl-validators`: the four `typecheck_decls` validators
+   (`validate_all_decls` / `validate_entrypoint` / `check_overlapping_instances` /
+   `check_missing_superclass_instances`) each widened from bare `Maybe String` to
+   `Maybe (source.SourcePos, String)`, wrapping the error with `ast.decl_pos(decl)`
+   at the outer scanner's seam (inner helpers keep `Maybe String`) — the #286
+   `validate_deriving_decls` recipe. An unknown ctor-field type, a bad `main`
+   signature, an overlapping instance, or a missing superclass instance now report
+   the offending declaration's line, not 0.
    Remaining `no_pos()` *error* sites, each needing its own threading:
-   - `typecheck_decls` `TypedErr` (validate_all_decls / check_overlapping_instances /
-     check_missing_superclass_instances / validate_entrypoint) — each returns a bare
-     `Maybe String`; thread the offending decl's pos out, as done for
-     `validate_deriving_decls` in #286.
    - codegen / IR-emit errors (`IrLinesErr`).
    `typecheck_decl`'s `BodyLenient` internal-invariant arm intentionally stays `no_pos()`
    (unreachable-by-construction; no meaningful source position).

@@ -1,0 +1,64 @@
+module main
+import stdlib.test (TestState, new_state, assert_true, summary)
+import stdlib.compiler.compiler as compiler
+import stdlib.compiler.source as source
+
+# Regression for guideline #5 (errors carry a source location from inception),
+# decl-validator edition. The four top-level validators in typecheck_decls
+# (validate_all_decls / validate_entrypoint / check_overlapping_instances /
+# check_missing_superclass_instances) each returned a bare `Maybe String`, so a
+# rejected declaration reported no_pos() (line 0). Each must now report the
+# offending decl's line, via ast.decl_pos threaded out of the outer scanner —
+# the same recipe #286 applied to validate_deriving_decls.
+
+fn first_diag(result: compiler.CompileResult) -> Maybe compiler.Diagnostic =
+  match result with
+  | compiler.CompileOk _ -> Nothing
+  | compiler.CompileFail diags ->
+      match diags with
+      | Nil -> Nothing
+      | [d | _] -> Just(d)
+
+fn diag_line(d: compiler.Diagnostic) -> Int =
+  match d with
+  | compiler.DiagError pos _ -> source.position_line(pos)
+  | compiler.DiagWarning pos _ -> source.position_line(pos)
+
+fn diag_line_is(result: compiler.CompileResult, want: Int) -> Bool =
+  match first_diag(result) with
+  | Nothing -> false
+  | Just d -> diag_line(d) == want
+
+fn main() -> Unit !{IO} =
+  do
+    state <- new_state()
+    match env_get("SPROUT_STDLIB_ROOT") with
+    | Nothing -> ()
+    | Just root ->
+        do
+          # validate_all_decls: unknown type `Bogus` in the ctor field of the
+          # `Wrapper` type declaration on line 1.
+          let v1 = "type Wrapper (..) =\n  | Wrap Bogus\n"
+          r1 <- compiler.compile_source_with_root(v1, source.StdlibRoot(root))
+          assert_true(state, "validate_all_decls reports the type decl's line (1, not 0)",
+            diag_line_is(r1, 1))
+
+          # validate_entrypoint: a defined `main` with a bad return type on line 1.
+          let v2 = "fn main() -> String !{IO} =\n  \"x\"\n"
+          r2 <- compiler.compile_source_with_root(v2, source.StdlibRoot(root))
+          assert_true(state, "validate_entrypoint reports the main decl's line (1, not 0)",
+            diag_line_is(r2, 1))
+
+          # check_overlapping_instances: the second `instance ToString Foo` on line 6.
+          let v3 = "type Foo (..) =\n  | MkFoo\ninstance ToString Foo {\n  fn to_string(x: Foo) -> String = \"a\"\n}\ninstance ToString Foo {\n  fn to_string(x: Foo) -> String = \"b\"\n}\nfn main() -> Unit !{IO} = print(to_string(MkFoo))\n"
+          r3 <- compiler.compile_source_with_root(v3, source.StdlibRoot(root))
+          assert_true(state, "check_overlapping_instances reports the 2nd instance's line (6, not 0)",
+            diag_line_is(r3, 6))
+
+          # check_missing_superclass_instances: `instance Sub Widget` on line 9,
+          # missing its required `Sup Widget`.
+          let v4 = "class Sup a {\n  fn sup_m(x: a) -> a\n}\nclass Sub a where Sup a {\n  fn sub_m(x: a) -> a\n}\ntype Widget =\n  | Widget\ninstance Sub Widget {\n  fn sub_m(x: Widget) -> Widget = x\n}\nfn main() -> Unit !{IO} =\n  match sub_m(Widget) with\n  | Widget -> ()\n"
+          r4 <- compiler.compile_source_with_root(v4, source.StdlibRoot(root))
+          assert_true(state, "check_missing_superclass_instances reports the instance's line (9, not 0)",
+            diag_line_is(r4, 9))
+    summary(state)
