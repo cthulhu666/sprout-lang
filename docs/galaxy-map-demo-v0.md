@@ -373,6 +373,56 @@ integer arithmetic — Sprout has no bitwise ops; `>>`/`<<` are function composi
 kept spread across the whole tile). The demo's star models are built from `class_rgb`, so a star and its
 legend swatch can never diverge.
 
+## Radial sector grid (built)
+
+A galactocentric **polar partition** of the disk for navigation/orientation: a small undivided
+**Core** disc around the central black hole (radius `sector_core_frac`·R, default 0.15·R), then
+`sector_rings` (5) equal-**area** annuli × `sector_wedges` (12, 30° clock-face) wedges tiling
+`[core, rim]`. This is the astronomically faithful framing — real galactic structure is described in
+galactocentric cylindrical coordinates (radius R, azimuth φ) — in contrast to the Cartesian cube grids
+of space games like Elite: Dangerous.
+
+- **Equal-area rings, not equal-width.** Over the annulus `[inner, outer]` the k-th ring boundary is
+  `r_k = √(inner² + (k/rings)·(outer²−inner²))`, so every ring encloses the same area. Squaring the
+  edge removes the `√` for binning: a star is in ring `j = floor(rings·(x²+y²−inner²)/(outer²−inner²))`
+  — exact integer arithmetic, no `sqrt`, no `Double→Int` floor, mirroring `loam.galaxy_lod.tile_index_i`
+  (`inner = 0` recovers the plain `radius·√(k/rings)` full-disc case). Because the generator's disk is
+  areal-uniform, equal area also means ~equal star **population** per ring (measured full-disc on this
+  catalog: 20.14 / 20.00 / 19.90 / 20.00 / 19.96 %), so each ring is a comparably-dense navigation band.
+  Visually the rings thin outward — the same sqrt spacing scene 2 uses for orbits. **Why an inner
+  radius:** on the full disc the innermost equal-area ring spans `[0, R/√5] = 0.447·R` — nearly half the
+  radius — so carving a small `Core` disc out first (and tiling the rings over `[core, rim]`) keeps the
+  central navigation cells a sensible size instead of one dominant blob.
+- **Wedges without `atan2`.** The stdlib has no `atan2` (see `loam/camera.sprout`). Binning an angle
+  does not require recovering it: a star is in wedge `j` iff it is counter-clockwise-of-or-on boundary
+  ray `j` and strictly clockwise of ray `j+1`, tested by the sign of the cross product
+  `cos(θ_k)·y − sin(θ_k)·x` (the range-reduction step a real `atan2` does first). A scale-relative
+  epsilon (`1e-6·|p|`, above the Taylor-series `sin`/`cos` noise floor, below a wedge half-width) makes
+  every boundary cleanly lower-closed. Wedge 0 starts at galaxy +x, counter-clockwise; the centre
+  (undefined azimuth) falls through to wedge 0.
+- **Pure, general, headless-tested: `loam.polar_grid`.** `in_disc` (the Core test) + `ring_of` (equal-
+  area over `[inner, outer]`) / `wedge_of` / `sector_id` / `sector_count` (the uniform `ring·w + wedge`
+  grid) + `ring_radius` / `boundary_point` (the overlay's circle/spoke geometry). It is
+  renderer-independent engine code — nothing in it is galaxy-specific (a radar/minimap ring grid is an
+  equal consumer) — with the Core radius, ring, and wedge counts all parameters end-to-end; `0.15`/`5`/
+  `12` live only in the demo. Tests: `tests/loam/test_polar_grid.spr` (44 assertions, incl. the annulus
+  binning and the wedge-seam boundary cases). The galaxy naming — a small undivided **"Core"** disc,
+  else `R<ring>-W<wedge>` with 1-based ring numbers (ASCII only; raylib's default font has no middot) —
+  is demo presentation, not baked into the grid.
+- **Where it shows.** Selecting a star appends its sector to the detail panel
+  (`…ly from core   Sector R2-W07`, or `Core`); the label is folded in at pick time and the star's
+  galaxy `(x,y,z)` rides along in the pick result. A **selection drop-line** is then drawn from the
+  picked star's true 3D position straight down to the disk plane. Its length makes the cylindrical-radius
+  binning legible — a rare halo star (large `|z|`) visibly hangs off the thin disk, and the line's foot
+  marks the in-plane point that lands in the very cell its label names, so "R4 yet looks farther than an
+  R5 star" reads as height rather than a bug. (`ly from core` is itself the in-plane radius, so the panel
+  number and the ring always agree.) For the 99.8% of stars in the disk the line is near-zero, a light
+  selection tick. The grid itself — the Core circle, the annulus ring circles, and spokes from the Core
+  out to the rim (so the Core stays an undivided disc) — is **always drawn** on the disk ground plane
+  with `gfx.draw_line3d` (thin, non-additive, reads at any zoom, no distance fade). A `show_grid` flag is
+  kept threaded through the render loop (gating the draw) as a programmatic toggle in case it should be
+  made switchable again; `argv[8] = 0` disables it at launch (default on) for a grid-free screenshot.
+
 ## Planned extensions (next iterations — designed for, not built)
 
 - **Scene 2 depth — remaining.** Rings, moons, the hover detail panel, and the **sqrt radial/body
@@ -394,7 +444,9 @@ SPROUT_GFX_MAX_FRAMES=120 SPROUT_GFX_SCREENSHOT=galaxy.png \
 
 `argv[7]` is the initial spectral-class filter mask (bit *c* = class *c* shown; absent = all). It
 requires the camera args to be present too (positional), so a filtered screenshot passes the full row,
-e.g. M-only edge-on overview: `… <catalog> 85000 14000 700 0 0 -1 64`.
+e.g. M-only edge-on overview: `… <catalog> 85000 14000 700 0 0 -1 64`. `argv[8]` (non-zero) opens with
+the radial **sector grid** overlay on, e.g. a top-down grid canary:
+`… <catalog> 45000 120000 0 0 0 -1 4095 1`.
 
 **Scripting the opening camera** (for screenshots / canaries at a fixed viewpoint). Optional integer
 args after the catalog dir override the starting `Cam` without a rebuild:

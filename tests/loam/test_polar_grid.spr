@@ -1,0 +1,91 @@
+import stdlib.test (check_eq, check_true, check_false, run_suite)
+import stdlib.math (fabs)
+import loam.polar_grid (in_disc, ring_of, wedge_of, sector_id, sector_count, ring_radius, boundary_point)
+
+# loam.polar_grid is the PURE, renderer-independent polar spatial partition of a plane about a
+# centre: `rings` equal-AREA annuli x `w` equal-angle wedges. Graphics-free, so it is unit-tested
+# headlessly here (like loam.galaxy_lod / loam.camera). General engine code — the galaxy map is one
+# consumer (rings=5, w=12, radius=galaxy_radius_ly), but nothing here mentions a galaxy.
+#
+# Equal-area rings: the k-th boundary is r_k = radius*sqrt(k/rings), so the AREA between successive
+# rings is constant. Squaring the edge removes the sqrt for binning: ring j iff
+# radius^2*(j/rings) <= x^2+y^2 < radius^2*((j+1)/rings), i.e. j = floor(rings*(x^2+y^2)/radius^2) —
+# exact integer arithmetic, mirroring loam.galaxy_lod.tile_index_i (integer division floors).
+#
+# Wedges: index 0 starts at the +x axis and runs counter-clockwise; wedge j spans [j*d, (j+1)*d)
+# with d = 2*pi/w, lower-closed. Verified against a uniform-density catalog: 5 equal-area rings hold
+# 20.14 / 20.00 / 19.90 / 20.00 / 19.96 % of stars — equal area ~= equal population.
+
+# Tuple component extractors for the Double render helpers (boundary_point returns (x, y)).
+fn px(p: (Double, Double)) -> Double = match p with | (a, _) -> a
+fn py(p: (Double, Double)) -> Double = match p with | (_, b) -> b
+
+# Approximate Double equality (Taylor-series sin/cos carry ~2e-8 error; 0.5 ly is far coarser).
+fn near(actual: Double, expected: Double) -> Bool = fabs(actual - expected) < 0.5
+
+fn main() -> Unit !{IO} =
+  run_suite("polar_grid", [
+    # --- in_disc: open central disc (boundary point is OUTSIDE, so a ring owns it). ---
+    check_true("in_disc centre", in_disc(0, 0, 7500)),
+    check_true("in_disc inside", in_disc(7000, 0, 7500)),
+    check_false("in_disc on boundary is outside", in_disc(7500, 0, 7500)),
+    check_false("in_disc outside", in_disc(10000, 0, 7500)),
+
+    # --- ring_of: equal-area annuli. Full disc (inner 0), radius 50000, rings 5:
+    #     edges ~= 22361 / 31623 / 38730 / 44721. ---
+    check_eq("ring_of centre", ring_of(0, 0, 0, 50000, 5), 0),
+    check_eq("ring_of inner", ring_of(10000, 0, 0, 50000, 5), 0),
+    check_eq("ring_of just inside r1", ring_of(22360, 0, 0, 50000, 5), 0),
+    check_eq("ring_of just outside r1", ring_of(22361, 0, 0, 50000, 5), 1),
+    check_eq("ring_of uses y (40000 -> ring 3)", ring_of(0, 40000, 0, 50000, 5), 3),
+    check_eq("ring_of rim clamps to last", ring_of(50000, 0, 0, 50000, 5), 4),
+    check_eq("ring_of beyond rim clamps", ring_of(60000, 0, 0, 50000, 5), 4),
+    check_eq("ring_of diagonal at rim", ring_of(30000, 40000, 0, 50000, 5), 4),
+
+    # --- ring_of over a carved annulus [7500, 50000], rings 5: edge r1 ~= 23345. A point inside the
+    #     inner radius (a core the caller handles separately) clamps to ring 0. ---
+    check_eq("ring_of annulus at inner edge", ring_of(7500, 0, 7500, 50000, 5), 0),
+    check_eq("ring_of annulus just outside core", ring_of(10000, 0, 7500, 50000, 5), 0),
+    check_eq("ring_of annulus just inside r1", ring_of(23345, 0, 7500, 50000, 5), 0),
+    check_eq("ring_of annulus just outside r1", ring_of(23346, 0, 7500, 50000, 5), 1),
+    check_eq("ring_of annulus rim clamps", ring_of(50000, 0, 7500, 50000, 5), 4),
+    check_eq("ring_of annulus inside core clamps to 0", ring_of(0, 0, 7500, 50000, 5), 0),
+
+    # --- wedge_of: 12 wedges (30 deg each), 0 at +x, CCW. ---
+    check_eq("wedge +x axis", wedge_of(1000, 0, 12), 0),
+    check_eq("wedge 45deg", wedge_of(1000, 1000, 12), 1),
+    check_eq("wedge 90deg (+y)", wedge_of(0, 1000, 12), 3),
+    check_eq("wedge 180deg (-x)", wedge_of(0 - 1000, 0, 12), 6),
+    check_eq("wedge 270deg (-y)", wedge_of(0, 0 - 1000, 12), 9),
+    check_eq("wedge 315deg", wedge_of(1000, 0 - 1000, 12), 10),
+    check_eq("wedge origin -> 0 (undefined angle)", wedge_of(0, 0, 12), 0),
+    # generality: the wedge count is a parameter (4 quadrants here).
+    check_eq("wedge w=4 +x", wedge_of(1000, 0, 4), 0),
+    check_eq("wedge w=4 +y", wedge_of(0, 1000, 4), 1),
+    check_eq("wedge w=4 -x", wedge_of(0 - 1000, 0, 4), 2),
+    check_eq("wedge w=4 -y", wedge_of(0, 0 - 1000, 4), 3),
+
+    # --- sector_id / sector_count: uniform ring*w + wedge grid (Core-collapsing is the consumer's job). ---
+    check_eq("sector_id (0,0)", sector_id(0, 0, 12), 0),
+    check_eq("sector_id (1,0)", sector_id(1, 0, 12), 12),
+    check_eq("sector_id (1,5)", sector_id(1, 5, 12), 17),
+    check_eq("sector_id (4,11) last", sector_id(4, 11, 12), 59),
+    check_eq("sector_count 5x12", sector_count(5, 12), 60),
+    check_eq("sector_count 1x4", sector_count(1, 4), 4),
+
+    # --- ring_radius: equal-area boundary r_k = sqrt(inner^2 + (k/rings)*(outer^2-inner^2)). ---
+    check_true("ring_radius full-disc k0 -> 0", near(ring_radius(0, 0.0, 50000.0, 5), 0.0)),
+    check_true("ring_radius full-disc k5 -> outer", near(ring_radius(5, 0.0, 50000.0, 5), 50000.0)),
+    check_true("ring_radius full-disc k1 -> outer/sqrt5", near(ring_radius(1, 0.0, 50000.0, 5), 22360.679)),
+    check_true("ring_radius annulus k0 -> inner", near(ring_radius(0, 7500.0, 50000.0, 5), 7500.0)),
+    check_true("ring_radius annulus k5 -> outer", near(ring_radius(5, 7500.0, 50000.0, 5), 50000.0)),
+    check_true("ring_radius annulus k1 ~= 23345", near(ring_radius(1, 7500.0, 50000.0, 5), 23345.24)),
+
+    # --- boundary_point: polar->cartesian at angle k*2pi/w, distance dist (spoke/circle sampling). ---
+    check_true("boundary_point k0 -> (dist,0)",
+      near(px(boundary_point(0, 12, 1000.0)), 1000.0) && near(py(boundary_point(0, 12, 1000.0)), 0.0)),
+    check_true("boundary_point k3 -> (0,dist)",
+      near(px(boundary_point(3, 12, 1000.0)), 0.0) && near(py(boundary_point(3, 12, 1000.0)), 1000.0)),
+    check_true("boundary_point k6 -> (-dist,0)",
+      near(px(boundary_point(6, 12, 1000.0)), 0.0 - 1000.0) && near(py(boundary_point(6, 12, 1000.0)), 0.0))
+  ])

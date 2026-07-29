@@ -11,6 +11,7 @@ import loam.config (parse_config, cfg_int)
 import loam.galaxy_lod (pow2, level_offset, group_of, clampi, desired_level, next_level, tile_index_i, level_boundary)
 import loam.galaxy_filter (num_classes, mask_all, mask_none, bit_test, bit_toggle, popcount, class_name, class_rgb)
 import loam.galaxy_sample (hash01, sample_seed, level_thresholds, keep_level)
+import loam.polar_grid (in_disc, ring_of, wedge_of, ring_radius, boundary_point)
 import loam.orbit (ellipse_point)
 import loam.system_view (orbit_world_scale, body_world_size)
 import loam.starfield as sf
@@ -103,6 +104,25 @@ let lod_hysteresis = 0.15  # deadband (fraction of a boundary) so the LoD level 
 let load_budget = 6  # max NEW tiles read per frame — throttles streaming so it never hitches
 let neighbor_radius = 1  # (2r+1)^2 block of tiles loaded per level around the camera target
 let draw_cull = 0.0  # 0 = frustum-only; group_count already bounds the levels drawn
+
+# --- Radial sector grid (scene 1) ---------------------------------------------------------------
+# A galactocentric polar partition of the disk: a small undivided "Core" disc around the central black
+# hole (radius sector_core_frac * galaxy radius), then `sector_rings` equal-AREA annuli x
+# `sector_wedges` equal-angle wedges tiling [core, rim]. The pure geometry is loam.polar_grid
+# (renderer-independent, headless-tested); this demo supplies only the galaxy naming (the "Core" +
+# 1-based ring labels) and the ground-plane overlay. Equal-area rings hold ~equal star counts (the
+# generator's disk is areal-uniform), so each ring is a comparably-populated navigation band. Core
+# fraction, ring and wedge counts are all parameters here — nothing downstream hardcodes them.
+let sector_core_frac = 0.15  # undivided "Core" disc radius as a fraction of the galaxy radius
+let sector_rings = 5  # equal-area annuli tiling [core, rim]
+let sector_wedges = 12  # 30-degree clock-face wedges; wedge 0 at +x (galaxy +x), counter-clockwise
+let grid_segments = 96  # line segments per ring circle in the overlay (smoothness of the drawn rings)
+let grid_r = 70  # overlay ring/spoke colour (dim steel blue, additive-free draw_line3d)
+let grid_g = 90
+let grid_b = 130
+let mk_r = 255  # selection drop-line colour (bright yellow — matches the sel_name panel text)
+let mk_g = 240
+let mk_b = 120
 
 # --- Spectral-class filter legend (scene 1) -----------------------------------------------------
 # A right-side stack of 12 clickable class checkboxes (multiselect): the box is filled with the class
@@ -230,6 +250,20 @@ fn load_levels(dir: String, cam: Cam, maxlvl: Int, level: Int, radius: Double, l
     in match load_cols(dir, level, cx, cy, 0 - neighbor_radius, loaded, budget) with
        | (l2, b2) -> load_levels(dir, cam, maxlvl, level + 1, radius, l2, b2)
 
+# --- Radial sector naming (galaxy-specific presentation over the pure loam.polar_grid) -----------
+# Zero-pad a wedge index to two digits so labels align (W00..W11).
+fn pad2(n: Int) -> String = if n < 10 then "0" ++ to_string(n) else to_string(n)
+
+# Human-readable sector of a star at galaxy-plane (xi, yi) light-years. A small central disc (radius
+# sector_core_frac * galaxy radius, around the central black hole) is the undivided "Core"; outside it
+# the equal-area rings tile [core, rim] and each is wedged, labelled "R<ring>-W<wedge>" with 1-based
+# ring numbers. ASCII only — raylib's default font has no middot/emdash. wedge_of needs no radius.
+fn sector_label(xi: Int, yi: Int, radius: Int) -> String =
+  let core = gfx.double_to_int(sector_core_frac * to_double(radius))
+  in if in_disc(xi, yi, core) then "Core"
+     else "R" ++ to_string(ring_of(xi, yi, core, radius, sector_rings) + 1)
+            ++ "-W" ++ pad2(wedge_of(xi, yi, sector_wedges))
+
 # --- Picking: on a left-click TAP, re-read the focus tiles and select the star nearest the cursor --
 # Left-click is overloaded (drag orbits the camera; a press+release in place SELECTS — see is_tap in
 # loam.camera and the render loop's release-edge gate). A click is rare, so rather than retain every
@@ -241,14 +275,14 @@ let pick_far = 100000000.0  # sentinel screen-distance^2 (Sprout has no 1e8 expo
                                 # larger than any on-screen distance^2, so any real hit beats it
 
 # Lift a pure "keep the current best" into !{IO} so it unifies with the projecting arms.
-fn keep_best(best: (Double, String, String)) -> (Double, String, String) !{IO} =
+fn keep_best(best: (Double, String, String, Int, Int, Int)) -> (Double, String, String, Int, Int, Int) !{IO} =
   do
     _t <- gfx.get_time()
     best
 
 # `mask` is threaded through the whole pick chain so a click can only select a star whose spectral
 # class is currently VISIBLE — clicking never picks a filtered-out (undrawn) star.
-fn pick_line(line: String, mx: Double, my: Double, mask: Int, best: (Double, String, String)) -> (Double, String, String) !{IO} =
+fn pick_line(line: String, mx: Double, my: Double, mask: Int, radius: Double, best: (Double, String, String, Int, Int, Int)) -> (Double, String, String, Int, Int, Int) !{IO} =
   match split_pipe(line) with
   | [_id, xs, ys, zs, cs, _szs, name, detail | _] ->
       match (parse_int(xs), parse_int(ys), parse_int(zs), parse_int(cs)) with
@@ -260,54 +294,60 @@ fn pick_line(line: String, mx: Double, my: Double, mask: Int, best: (Double, Str
               sx <- gfx.projected_x()
               sy <- gfx.projected_y()
               let d2 = if front then ((sx - mx) * (sx - mx)) + ((sy - my) * (sy - my)) else pick_far
+              # The winning star's radial sector is folded into its detail line here (xi,yi in scope);
+              # its galaxy (xi,yi,zi) rides along in the result so the render loop can draw the
+              # selection marker + drop-line at the star's true 3D position.
               match best with
-              | (bd0, bn, bdt) -> if d2 < bd0 then (d2, name, detail) else (bd0, bn, bdt)
+              | (bd0, bn, bdt, bx, by, bz) ->
+                  if d2 < bd0
+                  then (d2, name, detail ++ "   Sector " ++ sector_label(xi, yi, gfx.double_to_int(radius)), xi, yi, zi)
+                  else (bd0, bn, bdt, bx, by, bz)
       | _ -> keep_best(best)
   | _ -> keep_best(best)
 
-fn pick_lines(lines: List String, mx: Double, my: Double, mask: Int, best: (Double, String, String)) -> (Double, String, String) !{IO} =
+fn pick_lines(lines: List String, mx: Double, my: Double, mask: Int, radius: Double, best: (Double, String, String, Int, Int, Int)) -> (Double, String, String, Int, Int, Int) !{IO} =
   match lines with
   | Nil -> keep_best(best)
   | Cons line rest ->
       do
-        b2 <- pick_line(line, mx, my, mask, best)
-        pick_lines(rest, mx, my, mask, b2)
+        b2 <- pick_line(line, mx, my, mask, radius, best)
+        pick_lines(rest, mx, my, mask, radius, b2)
 
-fn pick_tile(dir: String, level: Int, ix: Int, iy: Int, mx: Double, my: Double, mask: Int, best: (Double, String, String)) -> (Double, String, String) !{IO} =
+fn pick_tile(dir: String, level: Int, ix: Int, iy: Int, mx: Double, my: Double, mask: Int, radius: Double, best: (Double, String, String, Int, Int, Int)) -> (Double, String, String, Int, Int, Int) !{IO} =
   match read_file(tile_path(dir, level, ix, iy)) with
   | Err _ -> keep_best(best)
-  | Ok text -> pick_lines(str_split_lines(text), mx, my, mask, best)
+  | Ok text -> pick_lines(str_split_lines(text), mx, my, mask, radius, best)
 
-fn pick_row(dir: String, level: Int, cx: Int, cy: Int, di: Int, dj: Int, mx: Double, my: Double, mask: Int, best: (Double, String, String)) -> (Double, String, String) !{IO} =
+fn pick_row(dir: String, level: Int, cx: Int, cy: Int, di: Int, dj: Int, mx: Double, my: Double, mask: Int, radius: Double, best: (Double, String, String, Int, Int, Int)) -> (Double, String, String, Int, Int, Int) !{IO} =
   if dj > neighbor_radius then keep_best(best)
   else
     let n = pow2(level)
         ix = clampi(cx + di, 0, n - 1)
         iy = clampi(cy + dj, 0, n - 1)
     in do
-         b2 <- pick_tile(dir, level, ix, iy, mx, my, mask, best)
-         pick_row(dir, level, cx, cy, di, dj + 1, mx, my, mask, b2)
+         b2 <- pick_tile(dir, level, ix, iy, mx, my, mask, radius, best)
+         pick_row(dir, level, cx, cy, di, dj + 1, mx, my, mask, radius, b2)
 
-fn pick_cols(dir: String, level: Int, cx: Int, cy: Int, di: Int, mx: Double, my: Double, mask: Int, best: (Double, String, String)) -> (Double, String, String) !{IO} =
+fn pick_cols(dir: String, level: Int, cx: Int, cy: Int, di: Int, mx: Double, my: Double, mask: Int, radius: Double, best: (Double, String, String, Int, Int, Int)) -> (Double, String, String, Int, Int, Int) !{IO} =
   if di > neighbor_radius then keep_best(best)
   else
     do
-      b2 <- pick_row(dir, level, cx, cy, di, 0 - neighbor_radius, mx, my, mask, best)
-      pick_cols(dir, level, cx, cy, di + 1, mx, my, mask, b2)
+      b2 <- pick_row(dir, level, cx, cy, di, 0 - neighbor_radius, mx, my, mask, radius, best)
+      pick_cols(dir, level, cx, cy, di + 1, mx, my, mask, radius, b2)
 
-fn pick_levels(dir: String, cam: Cam, maxlvl: Int, level: Int, radius: Double, mx: Double, my: Double, mask: Int, best: (Double, String, String)) -> (Double, String, String) !{IO} =
+fn pick_levels(dir: String, cam: Cam, maxlvl: Int, level: Int, radius: Double, mx: Double, my: Double, mask: Int, best: (Double, String, String, Int, Int, Int)) -> (Double, String, String, Int, Int, Int) !{IO} =
   if level > maxlvl then keep_best(best)
   else
     let cx = tile_index(cam.tx, level, radius)
         cy = tile_index(cam.tz, level, radius)
     in do
-         b2 <- pick_cols(dir, level, cx, cy, 0 - neighbor_radius, mx, my, mask, best)
+         b2 <- pick_cols(dir, level, cx, cy, 0 - neighbor_radius, mx, my, mask, radius, best)
          pick_levels(dir, cam, maxlvl, level + 1, radius, mx, my, mask, b2)
 
 # Run a pick this frame only on `do_pick`; otherwise keep the current selection. Factored out so the
 # call site binds a plain function (binding an `if` via `<-` does not parse).
 fn maybe_pick(do_pick: Bool, dir: String, cam: Cam, maxlvl: Int, radius: Double,
-              mx: Double, my: Double, mask: Int, seed: (Double, String, String)) -> (Double, String, String) !{IO} =
+              mx: Double, my: Double, mask: Int, seed: (Double, String, String, Int, Int, Int)) -> (Double, String, String, Int, Int, Int) !{IO} =
   if do_pick then pick_levels(dir, cam, maxlvl, 0, radius, mx, my, mask, seed)
   else keep_best(seed)
 
@@ -871,11 +911,72 @@ fn draw_nebula_knots(radius: Double, fade: Double) -> Unit !{IO} =
         gfx.draw_glow(-radius * 0.28, 0.0, radius * 0.5, radius * 0.28, scale_i(54, fade), scale_i(78, fade), scale_i(120, fade))
     else ()
 
+# --- Radial sector-grid overlay (scene 1) -------------------------------------------------------
+# A galactocentric polar grid drawn on the disk (world ground plane, y = 0): `sector_rings` concentric
+# equal-AREA ring circles plus `sector_wedges` radial spokes, all about the core at the origin. The
+# geometry comes from loam.polar_grid (ring_radius / boundary_point), so the overlay and the panel's
+# sector labels share one source of truth. The galaxy plane is world x/z (the starfield's axis map), so
+# a plane point (px, py) draws at world (px, 0, py). Drawn with draw_line3d — thin, non-additive lines
+# that read at any zoom, so unlike the core glow no distance fade is needed; the toggle gates it.
+
+# One segment of a ring circle of radius `r` (samples i and i+1 of grid_segments around the circle).
+fn grid_ring_seg(r: Double, i: Int) -> Unit !{IO} =
+  if i >= grid_segments then ()
+  else
+    match boundary_point(i, grid_segments, r) with
+    | (x0, z0) ->
+        match boundary_point(i + 1, grid_segments, r) with
+        | (x1, z1) ->
+            do
+              gfx.draw_line3d(x0, 0.0, z0, x1, 0.0, z1, grid_r, grid_g, grid_b)
+              grid_ring_seg(r, i + 1)
+
+# The ring circles at equal-area boundaries k = 0..sector_rings over the annulus [core, rim]: k = 0 is
+# the core circle (the undivided Core boundary), k = sector_rings is the rim.
+fn grid_rings(core: Double, radius: Double, k: Int) -> Unit !{IO} =
+  if k > sector_rings then ()
+  else
+    do
+      grid_ring_seg(ring_radius(k, core, radius, sector_rings), 0)
+      grid_rings(core, radius, k + 1)
+
+# The wedge spokes: one radial line per wedge boundary, from the core circle out to the rim, so the
+# undivided Core disc carries no spokes.
+fn grid_spokes(r_in: Double, r_out: Double, j: Int) -> Unit !{IO} =
+  if j >= sector_wedges then ()
+  else
+    match boundary_point(j, sector_wedges, r_in) with
+    | (x0, z0) ->
+        match boundary_point(j, sector_wedges, r_out) with
+        | (x1, z1) ->
+            do
+              gfx.draw_line3d(x0, 0.0, z0, x1, 0.0, z1, grid_r, grid_g, grid_b)
+              grid_spokes(r_in, r_out, j + 1)
+
+fn draw_sector_grid(radius: Double) -> Unit !{IO} =
+  let core = sector_core_frac * radius
+  in do
+       grid_rings(core, radius, 0)
+       grid_spokes(core, radius, 0)
+
+# --- Selection marker (scene 1) -----------------------------------------------------------------
+# A drop-line from the picked star's true 3D position down to the disk plane. Its length reveals halo
+# height: a rare high-|z| star visibly hangs off the thin disk, and the line's foot marks the in-plane
+# point that lands in the sector its label names (the ring is binned on in-plane radius). For the 99.8%
+# of stars in the disk the line is near-zero — a light selection tick.
+# Galaxy (x,y,z) -> world (x, z, y): the star sits at world (xi, zi, yi); its projection is (xi, 0, yi).
+fn draw_selection_marker(xi: Int, yi: Int, zi: Int) -> Unit !{IO} =
+  let wx = to_double(xi)
+      wy = to_double(zi)
+      wz = to_double(yi)
+  in gfx.draw_line3d(wx, wy, wz, wx, 0.0, wz, mk_r, mk_g, mk_b)
+
 # --- Render loop --------------------------------------------------------------------------------
 fn render_loop(dir: String, cam: Cam, scam: Cam, radius: Double, loaded: Dict Int,
-               sel_name: String, sel_detail: String, dnx: Int, dny: Int, view: Int, prev_lvl: Int,
+               sel_name: String, sel_detail: String, sel_x: Int, sel_y: Int, sel_z: Int, has_sel: Bool,
+               dnx: Int, dny: Int, view: Int, prev_lvl: Int,
                csys: String, cplanets: List Planet, hov1: String, hov2: String,
-               mask: Int, prev_ldown: Bool, sun_sh: Int, planet_sh: Int, gas_sh: Int) -> Unit !{IO} =
+               mask: Int, prev_ldown: Bool, show_grid: Bool, sun_sh: Int, planet_sh: Int, gas_sh: Int) -> Unit !{IO} =
   do
     stop <- gfx.window_should_close()
     if stop then gfx.close_window()
@@ -913,6 +1014,11 @@ fn render_loop(dir: String, cam: Cam, scam: Cam, radius: Double, loaded: Dict In
                 gfx.draw_instances_masked(level_offset(lvl + 1), draw_cull, mask)
                 draw_core_glow(radius, atmo)
                 draw_nebula_knots(radius, atmo)
+                # Radial sector grid, always drawn over the field on the disk plane. `show_grid` is a
+                # programmatic toggle (default on; argv[8]=0 disables) kept in case it should be switchable.
+                if show_grid then draw_sector_grid(radius) else ()
+                # Selection drop-line at the picked star's true 3D position (once a star is picked).
+                if has_sel then draw_selection_marker(sel_x, sel_y, sel_z) else ()
           else draw_system(s2ext, cplanets2, sun_sh, planet_sh)
         gfx.overlay_begin()
         gfx.draw_fps(10, 10)
@@ -969,7 +1075,7 @@ fn render_loop(dir: String, cam: Cam, scam: Cam, radius: Double, loaded: Dict In
         let dnx2 = if l_press then mx else dnx
         let dny2 = if l_press then my else dny
         let do_pick = l_release && (view == 0) && ! over_ui && is_tap(dnx2, dny2, mx, my, click_slop)
-        let pseed = (pick_far, sel_name, sel_detail)
+        let pseed = (pick_far, sel_name, sel_detail, sel_x, sel_y, sel_z)
         picked <- maybe_pick(do_pick, dir, cam, lvl, radius, to_double(mx), to_double(my), mask, pseed)
         # Spectral-class filter update (scene 1). A left-click EDGE on a checkbox row toggles that
         # class; All/None set every / no class. Edge-detected so holding the button doesn't re-fire.
@@ -1003,12 +1109,17 @@ fn render_loop(dir: String, cam: Cam, scam: Cam, radius: Double, loaded: Dict In
         match streamed with
         | (loaded2, _) ->
             match picked with
-            | (best_d2, best_name, best_detail) ->
+            | (best_d2, best_name, best_detail, best_x, best_y, best_z) ->
                 match hover_lines(hovered) with
                 | (hov1b, hov2b) ->
-                    let name2 = if best_d2 < pick_radius2 then best_name else sel_name
-                        detail2 = if best_d2 < pick_radius2 then best_detail else sel_detail
-                    in render_loop(dir, cam2, scam2, radius, loaded2, name2, detail2, dnx2, dny2, next_view, lvl, csys2, cplanets2, hov1b, hov2b, mask2, ldown, sun_sh, planet_sh, gas_sh)
+                    let hit = best_d2 < pick_radius2
+                        name2 = if hit then best_name else sel_name
+                        detail2 = if hit then best_detail else sel_detail
+                        sel_x2 = if hit then best_x else sel_x
+                        sel_y2 = if hit then best_y else sel_y
+                        sel_z2 = if hit then best_z else sel_z
+                        has_sel2 = has_sel || hit
+                    in render_loop(dir, cam2, scam2, radius, loaded2, name2, detail2, sel_x2, sel_y2, sel_z2, has_sel2, dnx2, dny2, next_view, lvl, csys2, cplanets2, hov1b, hov2b, mask2, ldown, show_grid, sun_sh, planet_sh, gas_sh)
 
 fn main() -> Unit !{IO} =
   do
@@ -1066,6 +1177,10 @@ fn main() -> Unit !{IO} =
     # Optional argv[7] = initial spectral-class filter mask (bit c == class c shown). Absent -> all
     # classes shown (mask_all). Lets a screenshot/canary open on a filtered view, e.g. 64 = M-only.
     init_mask <- arg_int(7, mask_all)
+    # The sector-grid overlay is always shown. `show_grid` is kept as a programmatic toggle (threaded
+    # through the render loop, gating draw_sector_grid) so it can be made switchable again without
+    # rewiring; argv[8] = 0 turns it off at launch (default on), e.g. for a grid-free screenshot.
+    init_grid <- arg_int(8, 1)
     render_loop(dir, cam0, scam0, radius, dict_empty(),
-                init_name, "Click a star to inspect it", 0, 0, init_view, seed_lvl, "", Nil, "", "",
-                init_mask, false, sun_sh, planet_sh, gas_sh)
+                init_name, "Click a star to inspect it", 0, 0, 0, false, 0, 0, init_view, seed_lvl, "", Nil, "", "",
+                init_mask, false,! (init_grid == 0), sun_sh, planet_sh, gas_sh)
