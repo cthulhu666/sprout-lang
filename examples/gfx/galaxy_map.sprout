@@ -153,8 +153,15 @@ let bg_star_level = 4  # catalog level to sample the system's neighbourhood from
 let bg_star_max = 260  # cap on real stars drawn (a "couple hundred")
 let bg_star_min_code = 1  # skip the very dimmest (size code below this) so the kept set skews brighter
 let bg_star_sphere_r = 30000.0  # render sphere for real stars: in front of the sky dome, behind bodies
-let bg_star_min_size = 42.0  # smallest real-star dot (world units on the sphere; ~1.5 px)
-let bg_star_size_scale = 12.0  # extra dot size per unit of catalog size code (brighter -> bigger)
+# Real stars are point sources: the catalog size code drives only a GENTLE, capped halo (never a disc),
+# and each star gets a white-hot core so it reads as a star, not a coloured ball. The size code is
+# large (e.g. SYS-00013's own star is 45), so it is scaled down hard and clamped.
+let bg_star_halo_min = 60.0  # smallest real-star halo (world units on the sphere; ~2 px)
+let bg_star_halo_per_code = 1.2  # halo growth per unit of catalog size code
+let bg_star_halo_max = 120.0  # cap (~4 px) so even a giant reads as a bright star, never a ball
+let bg_star_whiten = 60  # percent each star's spectral tint is mixed toward white, so a SINGLE small
+# glow reads as a white-hot star carrying a subtle tint (not a saturated ball) — one draw per star
+# keeps the frame rate up
 let s3_init_yaw = 1.5708  # opening ship-cam angle (~pi/2): look down -x so the distant sun (placed
 # at -x from a ship 1 AU out on +x) sits behind the ship, roughly centred
 let s3_init_radius = 95.0
@@ -866,9 +873,15 @@ fn draw_system(a_ext: Double, ps: List Planet, sun_sh: Int, planet_sh: Int) -> U
 # tinted by spectral class. Cached per system so it is parsed once, not per frame.
 type BgStar = (x: Double, y: Double, z: Double, r: Int, g: Int, b: Int, size: Double)
 
-# Dot size for a star of catalog size code `szi`: a floor plus a per-code increment, so brighter
-# (larger) stars read as bigger landmark dots.
-fn bg_star_size(szi: Int) -> Double = bg_star_min_size + (to_double(szi) * bg_star_size_scale)
+# Halo size for a star of catalog size code `szi`: a small floor plus a gentle per-code increment,
+# clamped to a hard cap so a big star reads as a brighter point, not a bigger ball.
+fn bg_star_size(szi: Int) -> Double =
+  let s = bg_star_halo_min + (to_double(szi) * bg_star_halo_per_code)
+  in if s > bg_star_halo_max then bg_star_halo_max else s
+
+# Mix a 0..255 channel toward white by bg_star_whiten percent, so the stored star colour is a mostly-
+# white tint (a hot star), not a saturated hue.
+fn whiten_c(c: Int) -> Int = c + (((255 - c) * bg_star_whiten) / 100)
 
 # Parse one catalog line into a BgStar as seen from the system at galaxy coords (sx,sy,sz). The star's
 # direction is projected onto the star sphere with project_body's angular term zeroed (body_rad = 0),
@@ -886,7 +899,8 @@ fn bgstar_of(fields: List String, sx: Int, sy: Int, sz: Int) -> Maybe BgStar =
                                0.0, bg_star_sphere_r, bg_star_size(szi)) with
             | (wx, wy, wz, r) ->
                 match class_rgb(ci) with
-                | (pr, pg, pb) -> Just (BgStar(x = wx, y = wy, z = wz, r = pr, g = pg, b = pb, size = r))
+                | (pr, pg, pb) -> Just (BgStar(x = wx, y = wy, z = wz,
+                                               r = whiten_c(pr), g = whiten_c(pg), b = whiten_c(pb), size = r))
       | _ -> Nothing
   | _ -> Nothing
 
@@ -911,8 +925,9 @@ fn load_bgstars(dir: String, sx: Int, sy: Int, sz: Int, radius: Double) -> List 
      | Err _ -> Nil
      | Ok text -> take_bgstars(str_split_lines(text), sx, sy, sz, bg_star_max, Nil)
 
-# Draw the cached real stars as additive glows (brighter, slightly haloed — landmark stars over the
-# procedural field). Additive + depth-write-off (draw_glow), so no ordering concerns among them.
+# Draw each cached real star as a STAR, not a ball: one small, mostly-white (pre-whitened) additive
+# glow that bloom bleeds into a point of light. Small + white-hot reads as a star; the retained spectral
+# tint colours it subtly. One draw per star keeps the frame rate up. Depth-write-off (draw_glow).
 fn draw_bgstars(bg: List BgStar) -> Unit !{IO} =
   match bg with
   | Nil -> ()

@@ -352,11 +352,14 @@ specks. No orbit lines, no size inflation. `< System` returns to scene 2.
   **camera-centred sphere seen from inside** via the new `gfx.set_backface_cull(false)` toggle (mirror
   of `set_depth_mask`) + depth-write off, so it never occludes.
 - **Real stars on top.** A couple hundred *actual* catalog stars near the system, projected in their
-  true directions over the faked field as brighter, class-coloured glows (landmark stars). Sourced
-  from the system's finest-level tile (reusing scene 1's field parser), sized by the catalog size
-  code, and placed with `project_body` at `body_rad = 0` (so it returns direction only, size floored).
-  Cached per system, drawn as ~260 immediate billboards. They cluster toward the galactic centre — the
-  same direction the bulge glows — because that is where the real neighbourhood is densest.
+  true directions over the faked field as landmark stars. Each is one small additive glow whose colour
+  is pre-mixed toward white (`bg_star_whiten`), so it reads as a white-hot **point of light** with a
+  subtle spectral tint — a star, not a saturated ball; the catalog size code (which is large, e.g. 45)
+  drives only a gentle, hard-capped size lift, never a disc. Sourced from the system's finest-level
+  tile (reusing scene 1's field parser), placed with `project_body` at `body_rad = 0` (so it returns
+  direction only, size floored). Cached per system, one glow per star (~260) to hold the frame rate.
+  They cluster toward the galactic centre — the same direction the bulge glows — because that is where
+  the real neighbourhood is densest.
 - **Model.** `assets/models/rusty_spaceship.glb` (glTF/GLB via raylib's `LoadModel`). At **44 MB it is
   *not committed*** (`.gitignore`); drop the file in to see it. `gfx.load_model` returns `-1` only on
   OOM, so an absent file yields an empty model that simply draws nothing (the vista still renders).
