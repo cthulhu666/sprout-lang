@@ -206,12 +206,18 @@ let sc_align_omega_tol = 0.10  # aligned needs |omega| under this (rad/s) — ab
 # without ringing while the hold stays stiff enough to track the dither below as crisp small pulses.
 let sc_hold_kp = 40.0
 let sc_hold_kd = 12.0
-# Station-keeping dither: the target bearing is nudged by a low-frequency pseudo-random noise so the
-# PD hold never goes dead-still — it fires constant tiny corrections (a live ship holding attitude).
-# Amplitude stays UNDER sc_align_tol so the dither never breaks the "aligned" gate.
-let sc_jitter_amp = 0.012  # dither amplitude (rad, ~0.7 deg)
-let sc_jitter_hz = 4.0  # how often the noise target re-rolls (per second); slow enough to read as a maneuver
+# Station-keeping dither: the target bearing is nudged by a pseudo-random noise so the PD hold never
+# goes dead-still. Two regimes. UNDER DRIVE (align/spool/cruise) a steady low-amplitude twitch reads as
+# a live hold. COASTING (idle, adrift) instead fires SPARSE, irregular corrections: time is split into
+# slow windows and only a fraction of them nudge (the rest are quiet), so the ship twitches now and
+# then at random rather than constantly. All amplitudes stay UNDER sc_align_tol (smooth PD, not a slew).
+let sc_jitter_amp = 0.012  # under-drive dither amplitude (rad, ~0.7 deg)
+let sc_jitter_hz = 4.0  # under-drive re-roll rate (per second)
 let sc_jitter_seed = 90210  # decorrelates the dither hash from the star-sampling hash
+let coast_jitter_amp = 0.02  # coasting nudge amplitude (rad, ~1.1 deg) — a touch larger, since sparse
+let coast_jitter_hz = 0.65  # coasting: slow correction windows per second (~1 every 1.5 s)
+let coast_jitter_prob = 0.4  # ...and the fraction of windows that actually fire (rest stay quiet)
+let coast_fire_seed = 1337  # hash seed deciding whether a coasting window fires
 # Per-hull geometry so the ship-draw + thruster-plume code is hull-AGNOSTIC: adding a new hull is
 # adding one ShipProfile (measured once) + pointing draw_vista_scene at it — nothing below hardcodes
 # rusty's numbers. All lengths are world units at the profile's own `scale`. The plume VFX are layered
@@ -231,6 +237,7 @@ type HullGeom = (
 
 type DrivePlume = (
   aft: Double,  # main-drive nozzle (~bell mouth) behind the hull centre, along -forward
+  lat: Double,  # lateral nozzle offset (+starboard) — the bell is off the rotation centre on this GLB
   len: Double,  # exhaust column length aft of the nozzle
   r0: Double,  # exhaust width at the nozzle (tight, so it doesn't wash forward over the hull)
   r1: Double  # ...blooming to this at the tail (wide + dim, well aft of the hull)
@@ -250,7 +257,7 @@ type ShipProfile = (hull: HullGeom, drive: DrivePlume, rcs: RcsPlume)
 # vista camera auto-orbits, so cross-frame eyeballing lies — see the nose/plume calibration history).
 let rusty_profile = ShipProfile(
   hull = HullGeom(scale = 2.8, fwd_az = 0.0, ctr_fwd = 12.5, ctr_side = 17.5),
-  drive = DrivePlume(aft = 34.0, len = 54.0, r0 = 3.5, r1 = 14.0),
+  drive = DrivePlume(aft = 34.0, lat = 3.5, len = 54.0, r0 = 3.5, r1 = 14.0),
   rcs = RcsPlume(fwd = 20.0, side = 8.0, len = 14.0, r0 = 4.5, r1 = 1.6)
 )
 
@@ -1249,9 +1256,10 @@ fn draw_ship_thrusters(heading: Double, thrust: Double, phase: Int, sp: ShipProf
       mag = if thrust < 0.0 then 0.0 - thrust else thrust
       bscale = 0.3 + (0.7 * mag)  # floor so a micro-correction is a small-but-visible puff, up to full
       flick = 1.0 + (0.10 * sin(gfx.get_time() * 22.0))
-      # Nozzle mouth = hull centre stepped aft along -fwd; the trail then continues further aft.
-      nx = 0.0 - (fwd_x * dr.aft)
-      nz = 0.0 - (fwd_z * dr.aft)
+      # Nozzle mouth = hull centre stepped aft along -fwd, plus a lateral (rgt) shift so it sits on the
+      # bell (which is off the rotation centre on this GLB); the trail then continues further aft.
+      nx = (0.0 - (fwd_x * dr.aft)) + (rgt_x * dr.lat)
+      nz = (0.0 - (fwd_z * dr.aft)) + (rgt_z * dr.lat)
   in do
     if mag < 0.02 then () else draw_rcs_couple(0.0, 0.0, fwd_x, fwd_z, rgt_x, rgt_z, side, bscale, rc)
     if phase == sc_cruise
@@ -1854,6 +1862,22 @@ fn draw_overlay_hud(view: Int, lvl: Int, sel_name: String, sel_detail: String,
           draw_legend(mask, 0)
       else ()
 
+# Under-drive station-keeping dither: a steady low-amplitude nudge re-rolled ~sc_jitter_hz/sec, so the
+# PD hold twitches continuously (a live ship holding attitude while the drive is engaged).
+fn active_dither(now: Double) -> Double =
+  let jtick = gfx.double_to_int(now * sc_jitter_hz)
+  in (hash01(jtick, sc_jitter_seed) - 0.5) * 2.0 * sc_jitter_amp
+
+# Coasting dither: split time into slow windows (~coast_jitter_hz/sec); only a coast_jitter_prob
+# fraction of windows fire a random nudge, the rest hold at 0. So an adrift ship makes occasional,
+# irregular corrections (a burst when a window fires or the nudge changes) with quiet gaps between —
+# "less often and more random" than the steady under-drive twitch.
+fn coast_dither(now: Double) -> Double =
+  let win = gfx.double_to_int(now * coast_jitter_hz)
+  in if hash01(win, coast_fire_seed) < coast_jitter_prob
+     then (hash01(win, sc_jitter_seed) - 0.5) * 2.0 * coast_jitter_amp
+     else 0.0
+
 # --- Render loop --------------------------------------------------------------------------------
 fn render_loop(dir: String, cam: Cam, scam: Cam, shipcam: Cam, radius: Double, loaded: Dict Int,
                sel_name: String, sel_detail: String, sel_x: Int, sel_y: Int, sel_z: Int, has_sel: Bool,
@@ -2101,14 +2125,12 @@ fn render_loop(dir: String, cam: Cam, scam: Cam, shipcam: Cam, radius: Double, l
         # drive is engaged (align slews to it, spool/cruise hold it); when idle the ship holds its
         # CURRENT heading — so selecting a target does NOT pre-emptively turn the hull (the deliberate
         # turn is the align phase).
-        let att_ref = if (cur_scphase == sc_align) || (cur_scphase == sc_spool) || (cur_scphase == sc_cruise)
-                      then sc_target_bearing
-                      else cur_heading
-        # Station-keeping dither: re-roll a pseudo-random offset ~sc_jitter_hz times/sec (held ~1/hz s,
-        # so the ship makes a small correction toward it over several frames, then a new one). Kept
-        # under sc_align_tol so the PD hold stays "aligned" while it constantly twitches.
-        let jtick = gfx.double_to_int(now * sc_jitter_hz)
-        let att_target = att_ref + ((hash01(jtick, sc_jitter_seed) - 0.5) * 2.0 * sc_jitter_amp)
+        # Under drive (align/spool/cruise) the hull tracks the travel vector with a steady twitch;
+        # coasting (idle, adrift) it holds its current heading with SPARSE, irregular corrections.
+        let under_drive = (cur_scphase == sc_align) || (cur_scphase == sc_spool) || (cur_scphase == sc_cruise)
+        let att_ref = if under_drive then sc_target_bearing else cur_heading
+        let att_dither = if under_drive then active_dither(now) else coast_dither(now)
+        let att_target = att_ref + att_dither
         let att = attitude_step(cur_heading, cur_omega, att_target, dtf,
                                 sc_turn_accel, sc_turn_omega_max, sc_align_tol, sc_hold_kp, sc_hold_kd)
         let sc_aligned = attitude_aligned(att.heading, att.omega, sc_target_bearing,
