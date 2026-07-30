@@ -1208,16 +1208,15 @@ fn draw_ship_thrusters(heading: Double, thrust: Int, phase: Int) -> Unit !{IO} =
       fwd_z = cos(heading)
       rgt_x = cos(heading)
       rgt_z = 0.0 - sin(heading)
-      # Hull centre in world = pivot + the measured local offset, rotated into the heading frame.
-      ctr_x = (ship_ctr_side * rgt_x) + (ship_ctr_fwd * fwd_x)
-      ctr_z = (ship_ctr_side * rgt_z) + (ship_ctr_fwd * fwd_z)
+      # The hull is drawn recentred (draw_vista_scene offsets by -pivot→centre), so the hull centre
+      # IS the world origin here. Anchor every plume at (0,0) and step out along the hull axes.
       side = to_double(thrust)
       flick = 1.0 + (0.10 * sin(gfx.get_time() * 22.0))
-      # Nozzle mouth = hull centre, stepped aft along -fwd; the trail then continues further aft.
-      nx = ctr_x - (fwd_x * plume_drive_aft)
-      nz = ctr_z - (fwd_z * plume_drive_aft)
+      # Nozzle mouth = hull centre stepped aft along -fwd; the trail then continues further aft.
+      nx = 0.0 - (fwd_x * plume_drive_aft)
+      nz = 0.0 - (fwd_z * plume_drive_aft)
   in do
-    if thrust == 0 then () else draw_rcs_couple(ctr_x, ctr_z, fwd_x, fwd_z, rgt_x, rgt_z, side)
+    if thrust == 0 then () else draw_rcs_couple(0.0, 0.0, fwd_x, fwd_z, rgt_x, rgt_z, side)
     if phase == sc_cruise
       then do
         gfx.draw_glow(nx, 0.0, nz, plume_nozzle_r * flick, 210, 230, 255)  # small hot blue-white bell-mouth spot
@@ -1240,9 +1239,17 @@ fn draw_vista_scene(oax: Double, oaz: Double, ps: List Planet, bg: List BgStar, 
     draw_vista_sun(oax, oaz, sun_sh)
     draw_vista_planets(oax, oaz, ps, sun_sh)
     if ship_model >= 0
-      then do
-        gfx.draw_model(ship_model, 0.0, 0.0, 0.0, ship_draw_yaw(heading), ship_scale)
-        draw_ship_thrusters(heading, thrust, phase)
+      then
+        # Recentre so the ship yaws about its own hull centre, not the GLB pivot (which sits ~21u off
+        # it). draw_model puts the PIVOT at the draw position and rotates about it; placing the pivot at
+        # -(pivot→centre offset, rotated into the heading frame) lands the hull centre on the world
+        # origin for every heading, so the ship spins in place instead of swinging like a door on a
+        # hinge. The plumes then anchor at the origin (see draw_ship_thrusters).
+        let hcx = (ship_ctr_side * cos(heading)) + (ship_ctr_fwd * sin(heading))
+            hcz = (ship_ctr_side * (0.0 - sin(heading))) + (ship_ctr_fwd * cos(heading))
+        in do
+          gfx.draw_model(ship_model, 0.0 - hcx, 0.0, 0.0 - hcz, ship_draw_yaw(heading), ship_scale)
+          draw_ship_thrusters(heading, thrust, phase)
       else ()
 
 # --- Ship-view body markers (2D HUD overlay) ----------------------------------------------------
