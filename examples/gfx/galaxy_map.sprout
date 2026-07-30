@@ -140,11 +140,8 @@ let s2_pan_bound = 2500.0
 # .gitignore); load_model returns -1 only on OOM, so an absent file yields an empty model that draws
 # nothing.
 let ship_model_path = "assets/models/rusty_spaceship.glb"
-let ship_scale = 2.8  # baked model ~19-unit extent -> ~53 world units (GetModelBoundingBox, not the
-# raw glTF accessors, which are ~90x larger before the node scale)
-let ship_fwd_az = 0.0  # the GLB's baked forward axis, MEASURED against fixed world axes in-frame: the
-# hull nose points along world +Z (azimuth 0) at draw_model yaw 0, and yaw runs +1:1 with the bearing
-# azimuth. So draw yaw = ship_fwd_az + heading points the nose along the bearing. See ship_draw_yaw.
+# All per-hull geometry (draw scale, forward-axis calibration, hull-centre offset, and the exhaust
+# nozzle placements + plume sizes) lives in `rusty_profile: ShipProfile` below — search "ShipProfile".
 
 # Where the ship sits, as distance from the sun in AU (1 AU ~ 150M km). At ~1 AU the sun is a small
 # ~0.5-degree disc and the planets are specks — the "inner system" look. Raise it for a lonelier
@@ -204,31 +201,53 @@ let sc_turn_accel = 2.5  # RCS angular acceleration (rad/s^2)
 let sc_turn_omega_max = 1.8  # angular-rate cap (rad/s) — a brisk but weighty swing
 let sc_align_tol = 0.03  # aligned when heading within ~1.7 deg of the target bearing (rad)
 let sc_align_omega_tol = 0.08  # ...and nearly stopped (rad/s), so a fast fly-through isn't "aligned"
-# Thruster plume VFX — layered ADDITIVE glow billboards (draw_glow; no new gfx primitive). Additive so
-# overlapping glows bloom and read as emitted light, not solid geometry. Offsets in world units (ship
-# extent ~53). The RCS couple fires OFF-axis (fore one side, aft the other) to make the torque.
-let plume_nose = 20.0  # RCS nozzle fore/aft offset from hull centre along the hull axis
-let plume_side = 8.0  # ...and lateral offset onto the firing flank, so the couple produces a yaw moment
-# RCS jet: a short directional cold-gas burst — small glows shooting OUTWARD (sideways) from the
-# nozzle, shrinking + dimming, so it reads as expelled gas producing torque, not a static orb.
-let rcs_core_r = 4.5  # burst glow at the nozzle mouth (hot blue-white)
-let rcs_tip_r = 1.6  # ...shrinking to this at the tip of the burst
-let rcs_burst_len = 14.0  # how far the gas burst reaches out from the nozzle
-let rcs_burst_steps = 6  # glows composing one burst (dense enough to fuse into a jet, not dots)
-# Main drive: a trail of glows stepping aft from the nozzle, cooling white->red. TIGHT at the nozzle
-# (so it doesn't wash forward over the hull) and blooming WIDE only far aft (clear of the hull), which
-# is what makes it read as exhaust leaving the engine rather than a blob at mid-ship.
-let plume_drive_aft = 34.0  # nozzle position behind the hull centre (~the engine bell mouth) while cruising
-let plume_nozzle_r = 3.5  # hot core glow right at the bell mouth (small + intense, minimal forward wash)
-let plume_core_r = 3.5  # trail width at the nozzle end (tight)
-let plume_tail_r = 14.0  # widest glow at the end of the trail (dim red, well aft of the hull)
-let plume_len = 54.0  # how far aft the exhaust trail reaches from the nozzle
-let plume_steps = 16  # glow billboards composing the trail (dense enough to fuse into a column)
-# The GLB's visible hull centre is offset from its pivot (draw_model puts the pivot at the origin);
-# measured against fixed world axes. Plumes are placed relative to this centre, rotated by heading, so
-# they stay on the hull. Local frame: +Z = forward (nose), +X = right (starboard).
-let ship_ctr_fwd = 12.5  # hull centre forward of the pivot (local +Z, world units)
-let ship_ctr_side = 17.5  # hull centre to starboard of the pivot (local +X, world units)
+# Per-hull geometry so the ship-draw + thruster-plume code is hull-AGNOSTIC: adding a new hull is
+# adding one ShipProfile (measured once) + pointing draw_vista_scene at it — nothing below hardcodes
+# rusty's numbers. All lengths are world units at the profile's own `scale`. The plume VFX are layered
+# ADDITIVE glow billboards (draw_glow; no new gfx primitive): additive so overlapping glows bloom and
+# read as emitted light, not solid geometry. Local frame convention: +Z = forward (nose), +X = right.
+# Grouped into sub-records so no constructor exceeds the 10-field arity ceiling (see Planet), and so
+# each draw fn takes only the piece it needs. HullGeom = how the model sits + turns; DrivePlume /
+# RcsPlume = where the exhaust nozzles are and how big each plume draws.
+type HullGeom = (
+  scale: Double,  # draw_model scale (rusty: baked ~19u extent -> ~53 world units)
+  fwd_az: Double,  # baked forward-axis azimuth at yaw 0 (deg), MEASURED in-frame vs fixed world axes;
+                      # rusty noses along world +Z (az 0) and yaw runs +1:1 with the bearing, so
+                      # draw_yaw = fwd_az + heading. A hull baked facing elsewhere sets this to suit.
+  ctr_fwd: Double,  # hull centre forward of the GLB pivot (local +Z). draw_model rotates about the
+  ctr_side: Double  # ...pivot, off the visible centre; the ship is drawn at -(this offset) so it
+)  #    yaws about its centre, not like a door on a hinge (see draw_vista_scene).
+
+type DrivePlume = (
+  aft: Double,  # main-drive nozzle (~bell mouth) behind the hull centre, along -forward
+  len: Double,  # exhaust column length aft of the nozzle
+  r0: Double,  # exhaust width at the nozzle (tight, so it doesn't wash forward over the hull)
+  r1: Double  # ...blooming to this at the tail (wide + dim, well aft of the hull)
+)
+
+type RcsPlume = (
+  fwd: Double,  # RCS nozzle fore/aft offset from the hull centre along the axis
+  side: Double,  # ...and lateral offset onto the firing flank (the off-axis pair makes the couple)
+  len: Double,  # RCS cold-gas burst reach out from the nozzle
+  r0: Double,  # RCS burst width at the nozzle mouth (hot)
+  r1: Double  # ...shrinking to this at the burst tip
+)
+
+type ShipProfile = (hull: HullGeom, drive: DrivePlume, rcs: RcsPlume)
+
+# The rusty_spaceship.glb hull. Every value here was measured against fixed in-frame world axes (the
+# vista camera auto-orbits, so cross-frame eyeballing lies — see the nose/plume calibration history).
+let rusty_profile = ShipProfile(
+  hull = HullGeom(scale = 2.8, fwd_az = 0.0, ctr_fwd = 12.5, ctr_side = 17.5),
+  drive = DrivePlume(aft = 34.0, len = 54.0, r0 = 3.5, r1 = 14.0),
+  rcs = RcsPlume(fwd = 20.0, side = 8.0, len = 14.0, r0 = 4.5, r1 = 1.6)
+)
+
+# Glow billboard COUNTS are render density, not hull geometry (they scale continuity with the count,
+# so the same values fuse the trail/burst into a smooth column for any reasonably-sized hull) — kept
+# module-level rather than per-profile. A hull far larger than rusty may want these raised in step.
+let plume_steps = 16  # glows composing the main-drive trail
+let rcs_burst_steps = 6  # glows composing one RCS burst
 
 # --- Scene 3 real-star layer: a few hundred ACTUAL catalog stars near the system, projected in their
 # true directions over the faked sky-dome as class-coloured glows (brighter than the procedural field,
@@ -1141,70 +1160,72 @@ fn draw_vista_planets(oax: Double, oaz: Double, ps: List Planet, sun_sh: Int) ->
 # vista's auto-orbit): the model's baked nose is world +Z at yaw 0, and draw_model's Y rotation tracks
 # the bearing azimuth +1:1, so yaw = ship_fwd_az + heading points the nose along the true bearing. The
 # hull then faces the target (nose overlays the reticle) and the (sin h, cos h) plumes sit fore/aft.
-fn ship_draw_yaw(heading: Double) -> Double =
-  ship_fwd_az + (heading * 180.0 / pi)
+fn ship_draw_yaw(fwd_az: Double, heading: Double) -> Double =
+  fwd_az + (heading * 180.0 / pi)
 
 # One RCS gas burst: `rcs_burst_steps` small glows shooting OUTWARD from the nozzle at (nx,nz) along the
 # expel direction (ex,ez), shrinking (core → tip) and dimming as they go — a sharp directional cold-gas
 # jet (hot blue-white at the mouth, fading blue). This is the visible reaction mass being thrown, so the
 # torque reads physically instead of a static orb hovering by the hull.
-fn draw_rcs_burst(nx: Double, nz: Double, ex: Double, ez: Double, i: Int) -> Unit !{IO} =
+fn draw_rcs_burst(nx: Double, nz: Double, ex: Double, ez: Double, rc: RcsPlume, i: Int) -> Unit !{IO} =
   if i >= rcs_burst_steps then ()
   else
     let t = to_double(i) / to_double(rcs_burst_steps - 1)
-        d = rcs_burst_len * t
+        d = rc.len * t
         px = nx + (ex * d)
         pz = nz + (ez * d)
-        size = lerp(rcs_core_r, rcs_tip_r, t)
+        size = lerp(rc.r0, rc.r1, t)
         cr = gfx.double_to_int(lerp(170.0, 30.0, t))
         cg = gfx.double_to_int(lerp(215.0, 100.0, t))
         cb = gfx.double_to_int(lerp(255.0, 195.0, t))
     in do
       gfx.draw_glow(px, 0.0, pz, size, cr, cg, cb)
-      draw_rcs_burst(nx, nz, ex, ez, i + 1)
+      draw_rcs_burst(nx, nz, ex, ez, rc, i + 1)
 
 # The yaw couple: a fore nozzle expels to one flank and an aft nozzle to the OTHER (that off-axis pair
 # is the torque). Each burst starts on the flank it fires from (the ±rgt*side offset) and shoots further
 # out that way. `side` (-1/+1) flips both, so the jets visibly swap flanks when the bang-bang controller
 # switches from spin-up to braking. Cool-blue reaction jets.
 fn draw_rcs_couple(ctr_x: Double, ctr_z: Double, fwd_x: Double, fwd_z: Double,
-                   rgt_x: Double, rgt_z: Double, side: Double) -> Unit !{IO} =
+                   rgt_x: Double, rgt_z: Double, side: Double, rc: RcsPlume) -> Unit !{IO} =
   do
     # fore nozzle: forward of centre, on the -side flank, expelling further -side (force pushes fore +side)
-    draw_rcs_burst((ctr_x + (fwd_x * plume_nose)) - (rgt_x * plume_side * side),
-                   (ctr_z + (fwd_z * plume_nose)) - (rgt_z * plume_side * side),
-                   0.0 - (rgt_x * side), 0.0 - (rgt_z * side), 0)
+    draw_rcs_burst((ctr_x + (fwd_x * rc.fwd)) - (rgt_x * rc.side * side),
+                   (ctr_z + (fwd_z * rc.fwd)) - (rgt_z * rc.side * side),
+                   0.0 - (rgt_x * side), 0.0 - (rgt_z * side), rc, 0)
     # aft nozzle: behind centre, on the +side flank, expelling further +side (force pushes aft -side)
-    draw_rcs_burst((ctr_x - (fwd_x * plume_nose)) + (rgt_x * plume_side * side),
-                   (ctr_z - (fwd_z * plume_nose)) + (rgt_z * plume_side * side),
-                   rgt_x * side, rgt_z * side, 0)
+    draw_rcs_burst((ctr_x - (fwd_x * rc.fwd)) + (rgt_x * rc.side * side),
+                   (ctr_z - (fwd_z * rc.fwd)) + (rgt_z * rc.side * side),
+                   rgt_x * side, rgt_z * side, rc, 0)
 
 # The main-drive exhaust column: `plume_steps` additive glows stepping aft from the nozzle at (nx,nz)
 # along the aft direction (afx,afz). Parameter t (0 at the nozzle → 1 at the tail) drives BOTH the
 # widening (core radius → tail radius) and the cooling (white-gold → dim red): because additive
 # brightness IS the tint magnitude, cooling toward dark-red also fades the trail out, so the far end
 # dissolves into the black naturally. `flick` is a shared per-frame breathing factor on the radii.
-fn draw_plume_trail(nx: Double, nz: Double, afx: Double, afz: Double, flick: Double, i: Int) -> Unit !{IO} =
+fn draw_plume_trail(nx: Double, nz: Double, afx: Double, afz: Double, flick: Double, dr: DrivePlume, i: Int) -> Unit !{IO} =
   if i >= plume_steps then ()
   else
     let t = to_double(i) / to_double(plume_steps - 1)
-        d = plume_len * t
+        d = dr.len * t
         px = nx + (afx * d)
         pz = nz + (afz * d)
-        size = lerp(plume_core_r, plume_tail_r, t) * flick
+        size = lerp(dr.r0, dr.r1, t) * flick
         cg = gfx.double_to_int(lerp(215.0, 60.0, t))  # green channel: gold → deep red
         cb = gfx.double_to_int(lerp(170.0, 15.0, t))  # blue channel: warm-white tip → none
     in do
       gfx.draw_glow(px, 0.0, pz, size, 255, cg, cb)
-      draw_plume_trail(nx, nz, afx, afz, flick, i + 1)
+      draw_plume_trail(nx, nz, afx, afz, flick, dr, i + 1)
 
 # Maneuvering-thruster VFX (no new gfx primitive — layered emissive draw_glow billboards). While
 # ALIGNING, the RCS couple fires to yaw the hull (`thrust` -1/+1 = which way; 0 = coasting, no jets).
 # While CRUISING, the main drive burns aft as a tapering exhaust column. Positions derive from the hull
 # axis fwd=(sin h, cos h) and its right-perpendicular, so the plumes rotate with the ship. A slow
 # sin(time) flicker breathes the drive so it looks live rather than a frozen decal.
-fn draw_ship_thrusters(heading: Double, thrust: Int, phase: Int) -> Unit !{IO} =
-  let fwd_x = sin(heading)
+fn draw_ship_thrusters(heading: Double, thrust: Int, phase: Int, sp: ShipProfile) -> Unit !{IO} =
+  let dr = sp.drive
+      rc = sp.rcs
+      fwd_x = sin(heading)
       fwd_z = cos(heading)
       rgt_x = cos(heading)
       rgt_z = 0.0 - sin(heading)
@@ -1213,14 +1234,14 @@ fn draw_ship_thrusters(heading: Double, thrust: Int, phase: Int) -> Unit !{IO} =
       side = to_double(thrust)
       flick = 1.0 + (0.10 * sin(gfx.get_time() * 22.0))
       # Nozzle mouth = hull centre stepped aft along -fwd; the trail then continues further aft.
-      nx = 0.0 - (fwd_x * plume_drive_aft)
-      nz = 0.0 - (fwd_z * plume_drive_aft)
+      nx = 0.0 - (fwd_x * dr.aft)
+      nz = 0.0 - (fwd_z * dr.aft)
   in do
-    if thrust == 0 then () else draw_rcs_couple(0.0, 0.0, fwd_x, fwd_z, rgt_x, rgt_z, side)
+    if thrust == 0 then () else draw_rcs_couple(0.0, 0.0, fwd_x, fwd_z, rgt_x, rgt_z, side, rc)
     if phase == sc_cruise
       then do
-        gfx.draw_glow(nx, 0.0, nz, plume_nozzle_r * flick, 210, 230, 255)  # small hot blue-white bell-mouth spot
-        draw_plume_trail(nx, nz, 0.0 - fwd_x, 0.0 - fwd_z, flick, 0)
+        gfx.draw_glow(nx, 0.0, nz, dr.r0 * flick, 210, 230, 255)  # small hot blue-white bell-mouth spot
+        draw_plume_trail(nx, nz, 0.0 - fwd_x, 0.0 - fwd_z, flick, dr, 0)
       else ()
 
 # Scene 3: the procedural sky (faked galaxy stars + Milky Way band + bulge) first, then the distant
@@ -1231,7 +1252,7 @@ fn draw_ship_thrusters(heading: Double, thrust: Int, phase: Int) -> Unit !{IO} =
 # is what makes the target body's disc swell; the sky/bg-stars are galaxy-scale so they do not shift.
 # `heading`/`thrust`/`phase` drive the hull yaw and the maneuvering-thruster plumes.
 fn draw_vista_scene(oax: Double, oaz: Double, ps: List Planet, bg: List BgStar, sun_sh: Int, sky_sh: Int,
-                    cdx: Double, cdy: Double, cdz: Double, ship_model: Int,
+                    cdx: Double, cdy: Double, cdz: Double, ship_model: Int, sp: ShipProfile,
                     heading: Double, thrust: Int, phase: Int) -> Unit !{IO} =
   do
     sky.draw_sky(sky_sh, vista_sky_r, cdx, cdy, cdz)
@@ -1245,11 +1266,12 @@ fn draw_vista_scene(oax: Double, oaz: Double, ps: List Planet, bg: List BgStar, 
         # -(pivot→centre offset, rotated into the heading frame) lands the hull centre on the world
         # origin for every heading, so the ship spins in place instead of swinging like a door on a
         # hinge. The plumes then anchor at the origin (see draw_ship_thrusters).
-        let hcx = (ship_ctr_side * cos(heading)) + (ship_ctr_fwd * sin(heading))
-            hcz = (ship_ctr_side * (0.0 - sin(heading))) + (ship_ctr_fwd * cos(heading))
+        let hg = sp.hull
+            hcx = (hg.ctr_side * cos(heading)) + (hg.ctr_fwd * sin(heading))
+            hcz = (hg.ctr_side * (0.0 - sin(heading))) + (hg.ctr_fwd * cos(heading))
         in do
-          gfx.draw_model(ship_model, 0.0 - hcx, 0.0, 0.0 - hcz, ship_draw_yaw(heading), ship_scale)
-          draw_ship_thrusters(heading, thrust, phase)
+          gfx.draw_model(ship_model, 0.0 - hcx, 0.0, 0.0 - hcz, ship_draw_yaw(hg.fwd_az, heading), hg.scale)
+          draw_ship_thrusters(heading, thrust, phase, sp)
       else ()
 
 # --- Ship-view body markers (2D HUD overlay) ----------------------------------------------------
@@ -1893,7 +1915,7 @@ fn render_loop(dir: String, cam: Cam, scam: Cam, shipcam: Cam, radius: Double, l
                 # Jump route from the current system to the selected target (a distinct in-range pick).
                 if has_sel && is_diff then draw_jump_route(loc_x, loc_y, loc_z, sel_x, sel_y, sel_z) else ()
           else if view == 1 then draw_system(s2ext, cplanets2, sun_sh, planet_sh)
-          else draw_vista_scene(cur_ax, cur_az, cplanets2, bgstars2, sun_sh, sky_sh, cdx, cdy, cdz, ship_model, cur_heading, cur_thrust, cur_scphase)
+          else draw_vista_scene(cur_ax, cur_az, cplanets2, bgstars2, sun_sh, sky_sh, cdx, cdy, cdz, ship_model, rusty_profile, cur_heading, cur_thrust, cur_scphase)
         gfx.overlay_begin()
         gfx.draw_fps(10, 10)
         # The scene HUD is hidden while the warp tunnel fills the screen; during spool it stays up under
