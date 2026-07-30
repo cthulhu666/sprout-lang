@@ -142,8 +142,9 @@ let s2_pan_bound = 2500.0
 let ship_model_path = "assets/models/rusty_spaceship.glb"
 let ship_scale = 2.8  # baked model ~19-unit extent -> ~53 world units (GetModelBoundingBox, not the
 # raw glTF accessors, which are ~90x larger before the node scale)
-let ship_yaw = 30.0  # baked-model heading calibration (deg about Y): the hull's facing at dynamic
-# heading 0. The supercruise attitude adds onto this (ship_draw_yaw); draw_model rotates about Y only.
+let ship_fwd_az = 0.0  # the GLB's baked forward axis, MEASURED against fixed world axes in-frame: the
+# hull nose points along world +Z (azimuth 0) at draw_model yaw 0, and yaw runs +1:1 with the bearing
+# azimuth. So draw yaw = ship_fwd_az + heading points the nose along the bearing. See ship_draw_yaw.
 
 # Where the ship sits, as distance from the sun in AU (1 AU ~ 150M km). At ~1 AU the sun is a small
 # ~0.5-degree disc and the planets are specks — the "inner system" look. Raise it for a lonelier
@@ -1117,11 +1118,13 @@ fn draw_vista_planets(oax: Double, oaz: Double, ps: List Planet, sun_sh: Int) ->
         draw_vista_planet(oax, oaz, p, sun_sh)
         draw_vista_planets(oax, oaz, rest, sun_sh)
 
-# Ship hull heading (radians, loam.attitude bearing convention) -> draw_model yaw (degrees). `ship_yaw`
-# is the baked-model calibration offset; the dynamic heading adds on top. Subtracted because draw_model's
-# Y rotation runs opposite to the atan2(dx,dz) bearing sense (calibrated against the vista, see docs).
+# Ship hull heading (radians, loam.attitude bearing convention) -> draw_model yaw (degrees). Measured
+# calibration (fixed world-axis reference lines drawn in the SAME frame as the model, to defeat the
+# vista's auto-orbit): the model's baked nose is world +Z at yaw 0, and draw_model's Y rotation tracks
+# the bearing azimuth +1:1, so yaw = ship_fwd_az + heading points the nose along the true bearing. The
+# hull then faces the target (nose overlays the reticle) and the (sin h, cos h) plumes sit fore/aft.
 fn ship_draw_yaw(heading: Double) -> Double =
-  ship_yaw - (heading * 180.0 / pi)
+  ship_fwd_az + (heading * 180.0 / pi)
 
 # One RCS puff pair for the yaw couple: a fore nozzle on one side and an aft nozzle on the other (that
 # off-axis pair is what makes the torque). `side` (-1/+1) flips which diagonal fires, so the plumes
