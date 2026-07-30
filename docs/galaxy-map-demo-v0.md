@@ -353,9 +353,16 @@ specks. No orbit lines, no size inflation. `< System` returns to scene 2.
   distance is the **true ship→body range in AU** (`sqrt` on the AU vector, ship at `(1 AU, 0, 0)`),
   formatted `N.NN` (`fmt_au`); the jump HUD's integer truncation would read "0"/"1" at system scale.
   The star is warm-tinted and labelled `Star` (the system name is already in the corner HUD); planets
-  are HUD-cyan. **Known limitation:** labels can overlap when bodies line up on screen (worst near
-  edge-on) — overlap declutter is a follow-up (BACKLOG). Only bodies in front of the camera show
-  (the far hemisphere is correctly hidden).
+  are HUD-cyan. Only bodies in front of the camera show (the far hemisphere is correctly hidden).
+- **Label declutter.** When bodies line up on screen (worst near edge-on), overlapping labels would
+  pile up, so a body's **label is hidden when a *nearer* body (smaller true AU distance) sits within a
+  clustering box** (`marker_declutter_x/y`) of it. The globally-nearest body in a cluster keeps its
+  label; the rest defer to it (chains collapse to the single nearest; strict `<` on distance, so a body
+  never occludes itself). A hidden-label body still draws a **dimmed, smaller bracket + centre dot** (an
+  occlusion indicator — "a body is here, its label is behind a nearer one"), so nothing silently
+  vanishes. Drawn in two passes — all brackets, then all labels — so a shown label is never painted
+  over by a later dim bracket. The rule is uniform (the star's own label can be occluded by an inner
+  planet; it reappears as the camera orbits).
 - **Sky (faked galaxy, `loam.skydome`).** Thousands of background stars, the Milky Way band, and the
   central bulge glow are a GPU fragment shader over the view direction — no geometry, no catalog read
   (one `draw_sphere_shaded` call). Correct directions from the galaxy's own geometry: the disk is the
