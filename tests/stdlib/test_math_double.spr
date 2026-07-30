@@ -10,6 +10,9 @@ import stdlib.math (pi, fabs, floor, sqrt, sin, cos, tan, radians, fclamp, lerp)
 fn dabs(x: Double) -> Double = if x < 0.0 then -x else x
 fn close(a: Double, b: Double) -> Bool = dabs(a - b) < 0.000001
 
+# NaN is the only Double not equal to itself — the standard IEEE detection.
+fn is_nan(x: Double) -> Bool = ! (x == x)
+
 fn main() -> Unit !{IO} =
   run_suite("math_double", [
     # --- fabs ---
@@ -21,6 +24,10 @@ fn main() -> Unit !{IO} =
     check_true("floor(-1.2) == -2.0", floor(-1.2) == -2.0),
     # --- sqrt (Newton-Raphson) ---
     check_true("sqrt(0.0) == 0.0", sqrt(0.0) == 0.0),
+    # Out-of-domain (x < 0) is IEEE NaN, not the old silent 0.0 lie
+    # (Rule 2, docs/math-partiality-v0.md). Regression guard.
+    check_true("sqrt(-4.0) is NaN", is_nan(sqrt(-4.0))),
+    check_true("sqrt(-0.001) is NaN", is_nan(sqrt(-0.001))),
     check_true("sqrt(1.0) == 1.0", close(sqrt(1.0), 1.0)),
     check_true("sqrt(16.0) == 4.0", close(sqrt(16.0), 4.0)),
     check_true("sqrt(2.0) ~ 1.41421356", close(sqrt(2.0), 1.4142135623)),

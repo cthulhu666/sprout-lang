@@ -1,6 +1,12 @@
 module stdlib.math
 import stdlib.collections (Maybe)
 
+# Partiality convention (docs/math-partiality-v0.md). Two domains, two rules:
+#   Rule 1 — Int out-of-domain -> Maybe (mod, pow). Interim: when the Exn effect
+#            lands, effectful variants are added alongside, never replacing these.
+#   Rule 2 — Double out-of-domain -> IEEE NaN / +-inf (sqrt, tan). Terminal.
+# A partial function follows exactly one; nothing returns a silent in-band lie.
+
 fn int_abs(value: Int) -> Int =
   if value < 0 then 0 - value
   else value
@@ -44,12 +50,11 @@ export fn pow(base: Int, exp: Int) -> Maybe Int =
   if exp < 0 then Nothing
   else Just(pow_loop(base, exp, 1))
 
+# `right` is guarded nonzero and non-negative (int_abs), so the modulus is
+# positive: call the total helper directly instead of matching mod's Maybe.
 fn gcd_loop(left: Int, right: Int) -> Int =
   if right == 0 then left
-  else
-    match mod(left, right) with
-    | Nothing -> left
-    | Just remainder -> gcd_loop(right, remainder)
+  else gcd_loop(right, euclidean_remainder(left, right))
 
 export fn gcd(left: Int, right: Int) -> Int =
   gcd_loop(int_abs(left), int_abs(right))
@@ -58,10 +63,10 @@ export fn lcm(left: Int, right: Int) -> Int =
   if left == 0 || right == 0 then 0
   else int_abs((left / gcd(left, right)) * right)
 
+# The modulus 2 is a positive literal, so the total helper applies directly —
+# no need to match mod's Maybe for a case that cannot occur.
 export fn is_even(value: Int) -> Bool =
-  match mod(value, 2) with
-  | Just remainder -> remainder == 0
-  | Nothing -> false
+  euclidean_remainder(value, 2) == 0
 
 export fn is_odd(value: Int) -> Bool =
   is_even(value) == false
@@ -79,6 +84,10 @@ let half_pi = 1.5707963267948966
 # 2^52: at this magnitude a Double's ULP is exactly 1, so adding then subtracting
 # it snaps the fractional bits away — the classic branch-free round-to-integer.
 let two52 = 4503599627370496.0
+
+# The IEEE quiet NaN, our out-of-domain Double result (Rule 2). Double `/` lowers
+# to an unguarded fdiv (only integer `/` traps), so 0.0/0.0 is a genuine NaN.
+let nan = 0.0 / 0.0
 
 export fn fabs(x: Double) -> Double =
   if x < 0.0 then -x
@@ -103,8 +112,12 @@ fn sqrt_iter(x: Double, guess: Double, i: Int) -> Double =
   else sqrt_iter(x, next, i + 1)
   where next = 0.5 * (guess + x / guess)
 
+# sqrt(0) == 0 is exact; a negative argument is outside the real domain, so it
+# yields NaN (Rule 2) rather than the old silent 0.0. x == 0 is special-cased to
+# skip the Newton step, whose first guess would divide 0/0.
 export fn sqrt(x: Double) -> Double =
-  if x <= 0.0 then 0.0
+  if x < 0.0 then nan
+  else if x == 0.0 then 0.0
   else sqrt_iter(x, x, 0)
 
 # Reduce an angle into [-pi, pi] so the Taylor series stays accurate.
