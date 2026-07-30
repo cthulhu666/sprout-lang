@@ -70,10 +70,18 @@ Legend:
   `classify` treats any chain of 2-arm matches as a flattenable staircase, but an inverted
   first-success-wins chain (continuing branch is a nullary `Nothing`, terminals are value-bearing
   `Just x -> result`) is the wrong polarity for `let..else` and reads worse when forced. Concrete
-  case: `infer.sprout` `resolve_obligation` (:1668), flagged `blocked=false` but genuinely not a clean
-  fit (it stays flagged, needing `--no-verify` on any commit touching the file). Refine the rule to
-  detect the polarity (continuing branch binds nothing / terminals carry the payload) and either not
-  flag or emit a distinct message.
+  case: `infer.sprout` `resolve_obligation` (:1699 as of the existentials PR), flagged `blocked=false`
+  but genuinely not a clean fit (it stays flagged, needing `--no-verify` on any commit touching the
+  file). Refine the rule to detect the polarity — precise diagnosis (2026-07-30): the false positive
+  is an **ambiguous-polarity** chain where *both* branches descend (the terminal branch's body is
+  itself a 2-branch `MatchExpr`), so `classify` picks the binding side and the real descent lands in
+  the `else`. Candidate fix: in `walk_chain`, do not treat a node as a flattenable link when the
+  terminal branch's body `is_two_branch_match` (only `run_file`-style chains with a genuine constant/
+  simple terminal stay flagged). **Companion true-positive:** `driver.sprout` `run_file` (:313) is a
+  real 3-deep `Result` staircase — flatten it to a `do` + effectful `let..else` (the effectful tier
+  landed). Together these two are the *only* reason the binding-annotations (PR #312) and
+  existentials (`1504c6d`) commits used `--no-verify`; fixing both makes those files lint-clean. Not
+  in `compile_driver`'s closure (driver + lint_rules), so the fix is a seed-fp-ack, not a full reseed.
 - [ ] `P4` **Effectful-`let..else` surface (B) — unify `do` and `let..in`.** Shipped as surface (A),
   `do`-local, keeping `let..in` always-pure (`docs/effectful-let-else-v0.md` §5). (B) would let a
   `let..in` block hold `<-` bindings (one flat mixed `=`/`<-` list), at the cost of reclassifying
