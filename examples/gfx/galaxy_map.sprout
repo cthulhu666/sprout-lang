@@ -103,6 +103,11 @@ let far_plane = 400000.0  # a galaxy is ~100k ly across; the default 1000 far pl
 let init_radius = 90000.0  # opening camera: pulled back to frame the whole ~50k-ly-radius disk
 let init_height = 90000.0
 let init_yaw = 0.5
+# "Jump to me" framing when the galaxy map is OPENED (via `M` or `< Galaxy`): a 45-deg overhead
+# centred on the ship's current location. radius = height so the eye-distance is r*sqrt(2) ~= 8000 ly
+# — squarely inside LoD 3's (5000, 12000] band (loam.galaxy_lod.level_boundary), so you land on the
+# individual stars around you, and next_level refines 0->3 over a few frames.
+let map_recenter_r = 5657.0
 
 let zoom_min = 300.0
 let zoom_max = 260000.0
@@ -2211,7 +2216,14 @@ fn render_loop(dir: String, cam: Cam, scam: Cam, shipcam: Cam, radius: Double, l
         let pbnd = if view == 0 then pan_bound else s2_pan_bound
         let driven = cam_drive(active, d_yaw, d_pitch, d_zoom, d_pan_r, d_pan_f,
                                zlo, zhi, pitch_min, pitch_max, pbnd)
-        let cam2 = if view == 0 then driven else cam
+        # Opening the galaxy map (the enter-view-0 edge, via `M` or `< Galaxy`) snaps the galaxy camera
+        # to a LoD-3 overhead centred on the ship's current location — "here's you" — instead of wherever
+        # the map was last panned. Once you are in the map, panning/zoom persist normally (the edge only
+        # fires on entry). The galaxy target maps galaxy (x, y) -> world (tx, tz), same as boot centring.
+        let entering_galaxy = (next_view == 0) && ! (view == 0)
+        let cam_here = Cam(yaw = cam.yaw, radius = map_recenter_r, height = map_recenter_r,
+                           tx = to_double(loc_x), ty = 0.0, tz = to_double(loc_y))
+        let cam2 = if entering_galaxy then cam_here else if view == 0 then driven else cam
         let scam2 = if view == 1 then driven else scam
         let shipcam2 = if view == 2 then driven else shipcam
         # Engage the interstellar jump from the vista's "Jump" button (Space stays reserved for the
