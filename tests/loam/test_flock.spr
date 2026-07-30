@@ -1,6 +1,6 @@
 import stdlib.test (TestState, new_state, assert_true, summary)
 import loam.scene (Scene, scene_new, spawn)
-import loam.agent (world_step_flock, group_of)
+import loam.agent (world_step_flock, group_of, group_index)
 import stdlib.mutable (mutvec_at)
 import stdlib.rng (rng_below, rng_next)
 import stdlib.math (sqrt)
@@ -31,7 +31,7 @@ fn grp_sum_x(s: Scene, n: Int, groups: Int, g: Int, i: Int, acc: Double) -> Doub
   else
     do
       x <- mutvec_at(s.pos_x, i)
-      let a2 = if group_of(i, groups) == g then acc + x else acc
+      let a2 = if group_index(group_of(i, groups)) == g then acc + x else acc
       grp_sum_x(s, n, groups, g, i + 1, a2)
 
 fn grp_sum_z(s: Scene, n: Int, groups: Int, g: Int, i: Int, acc: Double) -> Double !{IO} =
@@ -39,12 +39,12 @@ fn grp_sum_z(s: Scene, n: Int, groups: Int, g: Int, i: Int, acc: Double) -> Doub
   else
     do
       z <- mutvec_at(s.pos_z, i)
-      let a2 = if group_of(i, groups) == g then acc + z else acc
+      let a2 = if group_index(group_of(i, groups)) == g then acc + z else acc
       grp_sum_z(s, n, groups, g, i + 1, a2)
 
 fn grp_count(s: Scene, n: Int, groups: Int, g: Int, i: Int, acc: Int) -> Int =
   if i >= n then acc
-  else grp_count(s, n, groups, g, i + 1, if group_of(i, groups) == g then acc + 1 else acc)
+  else grp_count(s, n, groups, g, i + 1, if group_index(group_of(i, groups)) == g then acc + 1 else acc)
 
 fn grp_spread_go(s: Scene, n: Int, groups: Int, g: Int, cx: Double, cz: Double,
                  i: Int, acc: Double) -> Double !{IO} =
@@ -53,7 +53,7 @@ fn grp_spread_go(s: Scene, n: Int, groups: Int, g: Int, cx: Double, cz: Double,
     do
       x <- mutvec_at(s.pos_x, i)
       z <- mutvec_at(s.pos_z, i)
-      let d = if group_of(i, groups) == g
+      let d = if group_index(group_of(i, groups)) == g
               then sqrt(((x - cx) * (x - cx)) + ((z - cz) * (z - cz)))
               else 0.0
       grp_spread_go(s, n, groups, g, cx, cz, i + 1, acc + d)
@@ -76,7 +76,7 @@ fn spawn_flock(s: Scene, n: Int, i: Int) -> Unit !{IO} =
   else
     do
       let seed = rng_next(rng_next((i + 1) * 7919))
-      let hx = if group_of(i, 2) == 0 then (-12.0) else 12.0
+      let hx = if group_index(group_of(i, 2)) == 0 then (-12.0) else 12.0
       let jx = (to_double(rng_below(seed, 200)) / 100.0 - 1.0) * 6.0  # [-6, 6]
       let jz = (to_double(rng_below(rng_next(seed), 200)) / 100.0 - 1.0) * 6.0
       let hd = to_double(rng_below(rng_next(rng_next(seed)), 628)) / 100.0
@@ -88,8 +88,8 @@ fn main() -> Unit !{IO} =
     state <- new_state()
 
     # --- group_of: round-robin binning, singleton degenerate ---
-    assert_true(state, "group_of round-robins", (group_of(0, 3) == 0) && (group_of(4, 3) == 1))
-    assert_true(state, "group_of collapses to 0 for one group", group_of(7, 1) == 0)
+    assert_true(state, "group_of round-robins", (group_index(group_of(0, 3)) == 0) && (group_index(group_of(4, 3)) == 1))
+    assert_true(state, "group_of collapses to 0 for one group", group_index(group_of(7, 1)) == 0)
 
     # --- world_step_flock is deterministic: same seeds => same trajectory ---
     sA <- scene_new(8)

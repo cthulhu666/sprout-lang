@@ -58,12 +58,25 @@ fn clampd(v: Double, lo: Double, hi: Double) -> Double =
 # Non-negative remainder (Sprout has no `%`); used to bin an entity id into a group.
 fn imod(a: Int, b: Int) -> Int = a - ((a / b) * b)
 
+# A flock's identity: a zero-cost newtype over the group index `group_of` computes.
+# `wrap` keeps a group id distinct from entity ids and raw counts at the boundaries
+# that consume one AS an id — a caller computing a per-group quantity (e.g. a group's
+# home position) takes a GroupId, so an entity index or a group COUNT can't be passed
+# there by mistake. It compiles to the raw Int (no box, no tag); `group_index` unwraps
+# once at leaf sites that need a plain array index. NB this is boundary typing, not
+# index-site safety: once unwrapped to index a `MutVec Int`, the group/entity
+# distinction is gone — true per-container index safety would need a group-indexed
+# container type (see BACKLOG).
+export wrap GroupId = Int
+
+export fn group_index(g: GroupId) -> Int = match g with | GroupId i -> i
+
 # The group an entity belongs to, derived PURELY from its id — no stored component,
 # so it costs no Scene slot (the constructor is already at its 9-field ceiling). The
 # view must colour/place groups by this SAME function to stay in sync. Round-robin
 # (id mod N) spreads ids evenly across groups regardless of spawn count.
-export fn group_of(i: Int, num_groups: Int) -> Int =
-  if num_groups <= 1 then 0 else imod(i, num_groups)
+export fn group_of(i: Int, num_groups: Int) -> GroupId =
+  if num_groups <= 1 then GroupId(0) else GroupId(imod(i, num_groups))
 
 # Turn a wander heading `nh` toward the group centroid (gx, gz) from position
 # (px, pz). PURE and inverse-trig-free: the 2D cross product of the facing unit
@@ -161,10 +174,10 @@ fn walk_move(s: Scene, bound: Double,
     heading <- mutvec_at(s.heading, idx)
     px <- mutvec_at(s.pos_x, idx)
     pz <- mutvec_at(s.pos_z, idx)
-    let gr = group_of(idx, g)
-    sx <- mutvec_at(sum_x, gr)
-    sz <- mutvec_at(sum_z, gr)
-    c <- mutvec_at(cnt, gr)
+    let gri = group_index(group_of(idx, g))
+    sx <- mutvec_at(sum_x, gri)
+    sz <- mutvec_at(sum_z, gri)
+    c <- mutvec_at(cnt, gri)
     match agent_decide(seed, heading) with
     | (nh0, nseed) ->
         do
@@ -263,13 +276,13 @@ fn accum_go(s: Scene, sum_x: MutVec Double, sum_z: MutVec Double, cnt: MutVec In
     do
       x <- mutvec_at(s.pos_x, i)
       z <- mutvec_at(s.pos_z, i)
-      let gr = group_of(i, g)
-      sx <- mutvec_at(sum_x, gr)
-      sz <- mutvec_at(sum_z, gr)
-      c <- mutvec_at(cnt, gr)
-      mutvec_set(sum_x, gr, sx + x)
-      mutvec_set(sum_z, gr, sz + z)
-      mutvec_set(cnt, gr, c + 1)
+      let gri = group_index(group_of(i, g))
+      sx <- mutvec_at(sum_x, gri)
+      sz <- mutvec_at(sum_z, gri)
+      c <- mutvec_at(cnt, gri)
+      mutvec_set(sum_x, gri, sx + x)
+      mutvec_set(sum_z, gri, sz + z)
+      mutvec_set(cnt, gri, c + 1)
       accum_go(s, sum_x, sum_z, cnt, g, i + 1, n)
 
 # Both ticks are two-phase so the update is simultaneous: (A) snapshot every group's

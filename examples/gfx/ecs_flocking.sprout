@@ -4,7 +4,7 @@ import stdlib.gfx
 import stdlib.math (sin, cos, pi)
 import stdlib.rng (rng_below, rng_next)
 import loam.scene (Scene, eid_index, scene_new, spawn)
-import loam.agent (world_step_flock, group_of)
+import loam.agent (world_step_flock, group_of, GroupId, group_index)
 import loam.view (Clips, animation_system, render_system, orbit_next_angle, orbit_zoomed, orbit_camera)
 import stdlib.mutable (mutvec_set)
 
@@ -56,10 +56,12 @@ let home_radius = maxd(ring_need, cluster_span * 1.8) + 4.0
 # the rim rather than in the crowd.
 let arena = home_radius + cluster_span + 6.0
 
-# The ring position of group g, and its home on the ground plane.
-fn group_angle(g: Int) -> Double = (two_pi * to_double(g)) / to_double(group_count)
-fn home_x(g: Int) -> Double = home_radius * cos(group_angle(g))
-fn home_z(g: Int) -> Double = home_radius * sin(group_angle(g))
+# The ring position of group g, and its home on the ground plane. Typed on GroupId
+# so a bare entity index or the group count can't be passed here — the id is unwrapped
+# once, at the leaf where the angle is actually computed.
+fn group_angle(g: GroupId) -> Double = (two_pi * to_double(group_index(g))) / to_double(group_count)
+fn home_x(g: GroupId) -> Double = home_radius * cos(group_angle(g))
+fn home_z(g: GroupId) -> Double = home_radius * sin(group_angle(g))
 
 # Per-entity PRNG seed, ADVANCED through the LCG first: rng_below reads the high
 # bits, so a raw small seed (< 65536) would divide to 0 and give every agent the same
