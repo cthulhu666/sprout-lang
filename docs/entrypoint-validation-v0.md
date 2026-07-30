@@ -86,7 +86,7 @@ files declare no module at all). So the signal must come from the invocation.
 `--emit-ir`.** Sprout's whole-program bundling makes *every* `--emit-ir` produce a
 single-`main_shim` module, so executable-vs-library intent genuinely is a property
 of the invocation, not the inputs. The correct semantic home is the **run
-boundary**: `just run` / `run-gfx` / `debug-run` / `run-example-canary` exist to
+boundary**: `just run` / `debug-run` / `run-example-canary` exist to
 *execute a program* (`compile → link → run the binary`), so requiring `main` there
 is definitional. They would pass `--require-main`; `--emit-ir` (IR plumbing used to
 inspect library modules, byte-identity checks, `compile-examples`) stays permissive.

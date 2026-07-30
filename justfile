@@ -9,12 +9,6 @@ build_dir   := justfile_directory() / "build"
 # Used UNQUOTED in recipes so bash expands it; every runtime .c is compiled+linked.
 runtime_src := "runtime/*.c"
 
-# Graphics backend (raylib) — compiled & linked ONLY by `run-gfx`, never by the
-# core build/tests/seed. Override the raylib location with SPROUT_RAYLIB_PREFIX.
-raylib_prefix := env_var_or_default("SPROUT_RAYLIB_PREFIX", `brew --prefix raylib 2>/dev/null || echo /opt/homebrew/opt/raylib`)
-gfx_src  := justfile_directory() / "graphics" / "sprout_gfx.c"
-gfx_link := if os() == "macos" { "-lraylib -framework Cocoa -framework IOKit -framework CoreVideo -framework OpenGL" } else { "-lraylib -lGL -lm -lpthread -ldl -lrt -lX11" }
-
 default:
   @just --list
 
@@ -182,21 +176,6 @@ run file: bootstrap-from-seed
   clang "$TMP_LL" {{runtime_src}} -O2 {{clang_extra}} -o "$TMP_BIN"
   "$TMP_BIN"
 
-# Build & run a GRAPHICS program: like `run`, but also compiles the raylib shim
-# (graphics/sprout_gfx.c) and links raylib + its system frameworks. Requires
-# raylib installed (brew install raylib); override its location with
-# SPROUT_RAYLIB_PREFIX. Set SPROUT_GFX_MAX_FRAMES=N to auto-close after N frames.
-[group('dev')]
-run-gfx file *args: bootstrap-from-seed
-  #!/usr/bin/env bash
-  set -euo pipefail
-  TMP_LL="/tmp/sprout_gfx_$$.ll"
-  TMP_BIN="/tmp/sprout_gfx_$$"
-  trap 'rm -f "$TMP_LL" "$TMP_BIN"' EXIT
-  "{{build_dir}}/compile_driver_bin_stage1" --emit-ir "{{stdlib_root}}" --package-root "{{justfile_directory()}}" {{quote(file)}} > "$TMP_LL"
-  clang "$TMP_LL" {{runtime_src}} "{{gfx_src}}" -O2 -I"{{raylib_prefix}}/include" -L"{{raylib_prefix}}/lib" {{clang_extra}} {{gfx_link}} -o "$TMP_BIN"
-  "$TMP_BIN" {{args}}
-
 # Build {{file}} with GC profiling compiled in (-DSPROUT_GC_PROFILE) and run it
 # with SPROUT_GC_PROFILE=1, printing a "[gc profile] ..." summary to stderr at
 # exit: cycles, heap_lookup_calls, drain edges, sweep visits, mark-root slots,
@@ -257,7 +236,7 @@ debug-run file: bootstrap-from-seed
 
 # Run all stdlib + compiler-stage tests (stage-1).
 [group('test')]
-test: test-stdlib-stage1 test-type-errors test-parse-errors test-executable-errors test-conformance-run test-package-resolution gfx-smoke test-loam
+test: test-stdlib-stage1 test-type-errors test-parse-errors test-executable-errors test-conformance-run test-package-resolution
 
 # Second-root (--package-root) module resolution gate: an app importing a module
 # from an extra package root resolves only when that root is registered
@@ -265,34 +244,6 @@ test: test-stdlib-stage1 test-type-errors test-parse-errors test-executable-erro
 [group('test')]
 test-package-resolution: bootstrap-from-seed
   bash scripts/package_resolution_gate.sh
-
-# Loam game-engine tests. loam.* lives OUTSIDE stdlib_root (it is game code, not
-# standard library), so it resolves via --package-root (the repo root). The engine
-# is renderer-independent — no gfx — so unlike the gfx examples these tests link
-# against the core runtime and actually RUN, asserting the game loop headless.
-[group('test')]
-test-loam: bootstrap-from-seed
-  #!/usr/bin/env bash
-  set -euo pipefail
-  STAGE="{{build_dir}}/compile_driver_bin_stage1"
-  ROOT="{{justfile_directory()}}"
-  TMPD=$(mktemp -d /tmp/sprout_loam_XXXXXX)
-  trap 'rm -rf "$TMPD"' EXIT
-  fail=0
-  for f in tests/loam/*.spr; do
-    [ -f "$f" ] || continue
-    if ! "$STAGE" --emit-ir "{{stdlib_root}}" --package-root "$ROOT" "$f" > "$TMPD/t.ll" 2>"$TMPD/err"; then
-      echo "test-loam: COMPILE FAILED for $f" >&2; cat "$TMPD/err" >&2; fail=1; continue
-    fi
-    if ! clang "$TMPD/t.ll" {{runtime_src}} {{clang_extra}} -o "$TMPD/t.bin" 2>"$TMPD/err"; then
-      echo "test-loam: LINK FAILED for $f" >&2; cat "$TMPD/err" >&2; fail=1; continue
-    fi
-    if ! "$TMPD/t.bin" > "$TMPD/run" 2>&1 || ! grep -q "SUITE PASSED" "$TMPD/run"; then
-      echo "test-loam: $f did not pass" >&2; cat "$TMPD/run" >&2; fail=1; continue
-    fi
-    echo "  OK $f"
-  done
-  [ "$fail" -eq 0 ] && echo "==> test-loam ✓" || { echo "==> test-loam FAILED" >&2; exit 1; }
 
 # Golden-stdout conformance gate. Each tests/conformance/run/<name>.spr is
 # compiled (stage-1), linked, and run; its stdout must equal <name>.out byte for
@@ -677,13 +628,11 @@ _compile-examples stage xfail="":
   fi
   echo "==> All examples compiled OK"
 
-# Stage-1: emit IR → clang link for each example.
-# Known xfail: the graphics examples (import stdlib.gfx) need the raylib shim +
-# link flags from `just run-gfx`, so they cannot link against the core runtime
-# here. (This lane now registers the repo as a package root, so examples importing
-# examples.* — e.g. sentry_issue_browser — resolve and compile.)
+# Stage-1: emit IR → clang link for each example. (This lane registers the repo as
+# a package root, so examples importing examples.* — e.g. sentry_issue_browser —
+# resolve and compile.)
 [group('examples')]
-compile-examples-stage1: (_compile-examples "build/compile_driver_bin_stage1" "examples/gfx/spinning_cube.sprout examples/gfx/character_view.sprout examples/gfx/character_animated.sprout examples/gfx/character_crowd.sprout examples/gfx/ecs_agents.sprout examples/gfx/ecs_flocking.sprout examples/gfx/terrain_demo.sprout examples/gfx/terrain_rivers_demo.sprout examples/gfx/galaxy_map.sprout")
+compile-examples-stage1: (_compile-examples "build/compile_driver_bin_stage1" "")
 
 # Negative-diagnostic conformance: each tests/conformance/<dir>/<n>.spr must be
 # rejected by `--phase check` with output containing the substring in <n>.err.
@@ -921,39 +870,6 @@ smoke-shapes: bootstrap-from-seed
     echo "smoke-shapes: $failed shape(s) failed" >&2; exit 1
   fi
   echo "==> smoke-shapes ✓"
-
-# gfx binding compile-smoke. The stdlib.gfx surface calls into the raylib host
-# shim, which links only under `run-gfx` — so these files can't be run in the
-# test harness. This gate compiles each to IR (type-checking the extern surface
-# and resolving every binding) and asserts the gfx externs reached the IR as
-# `declare`s. No link, no run.
-[group('smoke')]
-gfx-smoke: bootstrap-from-seed
-  #!/usr/bin/env bash
-  set -euo pipefail
-  TMPD=$(mktemp -d /tmp/sprout_gfxsmk_XXXXXX)
-  trap 'rm -rf "$TMPD"' EXIT
-  failed=0
-  for f in tests/gfx_smoke/*.spr; do
-    [ -f "$f" ] || continue
-    ir="$TMPD/$(basename "$f").ll"
-    if ! "{{build_dir}}/compile_driver_bin_stage1" --emit-ir "{{stdlib_root}}" "$f" > "$ir" 2>"$TMPD/err"; then
-      echo "gfx-smoke: emit-IR failed for $f" >&2; cat "$TMPD/err" >&2
-      failed=$((failed + 1)); continue
-    fi
-    if grep -q '^ERROR' "$ir"; then
-      echo "gfx-smoke: $f produced an ERROR line in IR" >&2; grep '^ERROR' "$ir" >&2
-      failed=$((failed + 1)); continue
-    fi
-    if ! grep -q 'declare .*@gfx_draw_fps(' "$ir"; then
-      echo "gfx-smoke: $f did not emit a declare for gfx_draw_fps" >&2
-      failed=$((failed + 1))
-    fi
-  done
-  if (( failed > 0 )); then
-    echo "gfx-smoke: $failed file(s) failed" >&2; exit 1
-  fi
-  echo "==> gfx-smoke ✓"
 
 # DoD #8 — bundle smoke.  `--phase bundle` on token.sprout, ast.sprout, and
 # prelude.sprout must produce non-empty output with no dot-prefix qualified names.

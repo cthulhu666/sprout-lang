@@ -196,7 +196,7 @@ export fn atan2(y: Double, x: Double) -> Double =
 # The two domain-agnostic numeric atoms every animation/graphics caller reaches for.
 # fclamp is the Double counterpart of the Int `clamp` above (f-prefix, like fabs).
 # lerp is the affine blend of a..b by t; t is UNclamped, so it also extrapolates
-# (t<0 or t>1) — callers wanting a bounded blend clamp t first, or use loam.ease.
+# (t<0 or t>1) — callers wanting a bounded blend clamp t first.
 
 export fn fclamp(x: Double, lo: Double, hi: Double) -> Double =
   if x < lo then lo
