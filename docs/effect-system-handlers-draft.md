@@ -344,3 +344,92 @@ Per the constraints in `observability-guard-rails.md`:
 6. **Accurate effect annotations:** A function declared `!{Test}` gets the Test handler
    record parameter in the IR. A `handle` expression produces a reduced effect row
    (handled labels removed). This is computed in `infer_handle` and reflected in `THandle`.
+
+---
+
+## 11. Abortive Handlers — the `exn` Effect (exploration, fork deferred)
+
+Status: design exploration, not a committed plan. It records the analysis behind
+treating exceptions as an effect so it is not re-derived from scratch. The one
+implementation decision it surfaces (§11.3) is **deliberately open**.
+
+### 11.1 Exceptions are the zero-shot corner of this design
+
+Algebraic effect operations differ by **how many times the handler resumes the
+continuation `k`**:
+
+- **multi-shot** (resume `k` ≥ 0 times) — async, generators, backtracking. Needs
+  heap-allocated continuations. Explicitly a non-goal here (Non-Goal 1, §3).
+- **one-shot** (resume `k` exactly once) — state, reader, the `Test` effect. This
+  is what §6 designs.
+- **zero-shot / abortive** (never resume `k`) — **this is an exception.** `raise`
+  performs an operation whose handler *discards* the continuation.
+
+So "exceptions as an effect" is not a separate feature — it is the abortive corner
+of the handler machinery this draft already describes. An `exn` effect would look
+like Koka's `exn` (`fn f() -> Int / exn`, verified against the Koka book): the value
+type stays total, the *effect row* carries the partiality, and a `handle` strips it.
+
+### 11.2 Why `exn` does NOT ride §6's one-shot codegen
+
+§6 makes one-shot handlers cheap precisely because they **resume**: "calling `k()`
+in a branch body is equivalent to returning from the handler branch" — an ordinary
+tail call, no heap allocation, no non-local jump.
+
+An abortive handler does the opposite: it **never** calls `k`, which means the
+frames between the `raise` site and the enclosing `handle` must be **discarded** — a
+genuine **non-local transfer of control** (an unwind). That is exactly the mechanism
+§6 says one-shot linearity lets it avoid. So `exn` does not free-ride on the drafted
+codegen; it needs the unwinding capability §6 deferred.
+
+### 11.3 Two implementation universes (the deferred fork)
+
+**Universe A — true unwinding.** `raise` unwinds task frames to the nearest installed
+`handle` marker (via the green-thread scheduler's existing stack-suspension machinery,
+or setjmp/longjmp). Fast happy path (no per-call check). **Hard part:** the GC uses
+type-aware rooting; an unwind skips frames, so the unwind path must correctly settle
+GC roots on discarded frames or it corrupts the heap (see `docs/compiler-internals.md`
+GC ABI invariants).
+
+**Universe B — monadic lowering to `Result`.** The `!{Exn}` row is *erased at codegen*
+into the same `Result`/`Maybe` threading a caller would write by hand: an `!{Exn}`
+call returns a hidden sum and the compiler inserts the short-circuit check. No runtime
+primitive, no unwinding, **no GC-rooting hazard** — it is provably the plumbing the
+user would otherwise write. Cost: a branch after each fallible call (the cost `Maybe`
+has today, hidden from the source). This is essentially Koka's evidence-passing /
+monadic translation specialized to the abortive case.
+
+Universe B is notable because it **reconciles "Maybe vs exceptions"**: the *source*
+reads like exceptions (clean call, partiality only in the effect row, recoverable at
+any `handle`) while the *compiled code* is the `Result`-threading. It also means `exn`
+can ship with **no new runtime primitive** — Universe A's unwinding becomes a later
+performance optimization, not a prerequisite.
+
+**The fork (A vs B) is deferred** — it turns on whether the same non-local machinery
+is wanted anyway for async/generators (which would favour building A once).
+
+### 11.4 Runtime half: task-boundary panic isolation
+
+A restricted form of Universe A is buildable **without any type-system work**:
+task-boundary panic isolation ("let it crash" at task granularity) — a panic in a
+green task unwinds to its `with_scope`/`task_spawn` frame instead of the process-fatal
+path, the scheduler marks the task failed, and a supervisor responds. A task boundary
+is effectively a built-in abortive handler. Shipping it first is independently valuable
+(server robustness) and de-risks Universe A's unwinding. Tracked in `BACKLOG.md`.
+
+### 11.5 Relation to the math partiality convention
+
+`docs/math-partiality-v0.md` keeps `mod`/`pow` on `Maybe` as an interim (Rule 1), with
+the commitment that the eventual `Exn` variants are **additive** (Rust's `checked_div`
+pattern), never a replacement — so the migration is non-breaking whichever universe
+lands. Under Universe B specifically, `Maybe`-returning math and an `!{Exn}` variant
+are the *same lowering* wearing different source syntax.
+
+### 11.6 Prior art
+
+- **Koka** — `exn` (exceptions) and `div` (divergence) are built-in effects; a raising
+  function shows `/ exn` in its type. Verified against the Koka book.
+- **OCaml 5** — effect handlers in the runtime (untyped in the type system); exceptions
+  predate them as the abortive special case.
+- **Eff / Frank / Unison** — abilities/effects with handlers; exceptions fall out as the
+  discard-continuation handler.
