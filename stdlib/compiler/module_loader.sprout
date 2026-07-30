@@ -255,7 +255,7 @@ fn find_pair(pairs: List (String, types.Scheme), name: String) -> Maybe types.Sc
 fn ctor_value_names(ctors: List ast.TypeConstructor, acc: List String) -> List String =
   match ctors with
   | Nil -> acc
-  | Cons (ast.TypeConstructor name _) rest -> ctor_value_names(rest, Cons(name, acc))
+  | Cons (ast.TypeConstructor name _ _ _) rest -> ctor_value_names(rest, Cons(name, acc))
 
 fn class_method_names_acc(methods: List ast.ClassMethodSig, acc: List String) -> List String =
   match methods with

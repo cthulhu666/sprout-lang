@@ -18,9 +18,9 @@ import stdlib.compiler.iface_codec as iface_codec
 fn sample_type_decl_colour() -> ast.Decl =
   ast.TypeDecl("mymod.Colour",
     Nil,
-    Cons(ast.TypeConstructor("Red", Nil),
-      Cons(ast.TypeConstructor("Green", Nil),
-        Cons(ast.TypeConstructor("Blue", Nil), Nil))),
+    Cons(ast.TypeConstructor("Red", Nil, Nil, Nil),
+      Cons(ast.TypeConstructor("Green", Nil, Nil, Nil),
+        Cons(ast.TypeConstructor("Blue", Nil, Nil, Nil), Nil))),
     Nil,
     source.SourcePos(0, 0, 0))
 
@@ -28,8 +28,8 @@ fn sample_type_decl_colour() -> ast.Decl =
 fn sample_type_decl_maybe() -> ast.Decl =
   ast.TypeDecl("mymod.Maybe",
     Cons("a", Nil),
-    Cons(ast.TypeConstructor("Just", Cons(ast.TypeName("a"), Nil)),
-      Cons(ast.TypeConstructor("Nothing", Nil), Nil)),
+    Cons(ast.TypeConstructor("Just", Cons(ast.TypeName("a"), Nil), Nil, Nil),
+      Cons(ast.TypeConstructor("Nothing", Nil, Nil, Nil), Nil)),
     Nil,
     source.SourcePos(0, 0, 0))
 
@@ -37,7 +37,7 @@ fn sample_type_decl_maybe() -> ast.Decl =
 fn sample_type_decl_other() -> ast.Decl =
   ast.TypeDecl("other.mod.OtherThing",
     Nil,
-    Cons(ast.TypeConstructor("Blah", Nil), Nil),
+    Cons(ast.TypeConstructor("Blah", Nil, Nil, Nil), Nil),
     Nil,
     source.SourcePos(0, 0, 0))
 

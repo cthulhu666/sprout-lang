@@ -246,7 +246,7 @@ fn dump_method_impls(items: List ast.InstanceMethodImpl) -> List String =
 
 fn dump_ctor(c: ast.TypeConstructor) -> String =
   match c with
-  | ast.TypeConstructor name args -> sexp("ctor", Cons(q(name), dump_types(args)))
+  | ast.TypeConstructor name args _ _ -> sexp("ctor", Cons(q(name), dump_types(args)))
 
 fn dump_ctors(items: List ast.TypeConstructor) -> List String =
   match items with

@@ -265,8 +265,8 @@ fn main() -> Unit !{IO} =
     assert_true(state, "TypeDecl roundtrip",
       rt_decl(ast.TypeDecl("MyType",
         Cons("a", Nil),
-        Cons(ast.TypeConstructor("Just", Cons(ast.TypeName("a"), Nil)),
-          Cons(ast.TypeConstructor("Nothing", Nil), Nil)),
+        Cons(ast.TypeConstructor("Just", Cons(ast.TypeName("a"), Nil), Nil, Nil),
+          Cons(ast.TypeConstructor("Nothing", Nil, Nil, Nil), Nil)),
         Cons("Eq", Cons("ToString", Nil)),
         pos0())))
 
@@ -355,9 +355,9 @@ fn main() -> Unit !{IO} =
           Cons(
             ast.TypeDecl("Color",
               Nil,
-              Cons(ast.TypeConstructor("Red", Nil),
-                Cons(ast.TypeConstructor("Green", Nil),
-                  Cons(ast.TypeConstructor("Blue", Nil), Nil))),
+              Cons(ast.TypeConstructor("Red", Nil, Nil, Nil),
+                Cons(ast.TypeConstructor("Green", Nil, Nil, Nil),
+                  Cons(ast.TypeConstructor("Blue", Nil, Nil, Nil), Nil))),
               Nil,
               pos0()),
             Nil))),

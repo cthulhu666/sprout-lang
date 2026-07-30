@@ -420,6 +420,47 @@ registered.
 method signatures, `InstanceDecl` constraint types, and `FnDecl` param/return
 type annotations are not yet validated (tracked in BACKLOG.md).
 
+#### Existential constructors (experimental — Stage 0a)
+
+A constructor may bind an **existential** type variable with a constructor-level
+`exists` prefix. The variable scopes over the constructor's fields but is
+**absent from the type head**, so constructing a value *hides* the field's type:
+
+```sprout
+type Boxed = | exists a. Boxed a
+
+# Each element's type (Int / String / Bool) is hidden behind `Boxed`, so this
+# heterogeneous list typechecks as `List Boxed`:
+let row = [Boxed(1), Boxed("hi"), Boxed(true)]
+```
+
+**Construction (pack).** `Boxed(v)` accepts a value of any type; the bound
+variable is instantiated to that type and then hidden — it does not appear in the
+result type `Boxed`.
+
+**Match (unpack).** Matching `Boxed x` binds `x` to a fresh **abstract** type,
+distinct from every concrete type and from every other unpacked existential.
+`x` may be moved, ignored, or re-packed, but it **must not be used at a concrete
+type or unified with a different existential** — doing so is a compile error:
+
+```
+existential type escapes its scope: a hidden `exists`-bound type cannot be used
+at a concrete or a different hidden type
+```
+
+So `match b with | Boxed x -> x` returned at a concrete type, `x + 1`, and
+merging two separately-unpacked existentials are all rejected; re-packing
+(`Boxed x -> Boxed(x)`) and ignoring (`Boxed _ -> ...`) are allowed.
+
+**Runtime.** Zero cost — the same tagged representation as an ordinary
+constructor; the hidden type is erased.
+
+**Status (experimental).** Stage 0a covers **unconstrained** existentials only.
+The constrained form and its `any C` single-field sugar (`| Shown (any ToString)`
+≡ `| exists a. ToString a => Shown a`), which packs a class dictionary for use on
+the unpacked value, is Stage 0b and not yet implemented. Full GADTs (index
+refinement) are out of scope. Design and staging: `docs/gadts-v0.md`.
+
 ### 5.6.1 `wrap` declaration
 
 ```sprout

@@ -1430,11 +1430,42 @@ fn wrap_where_binding(inner: ast.Expr, binding: (ast.Pattern, ast.Expr)) -> ast.
 # ---------------------------------------------------------------------------
 # Type constructor parsing
 
+# Match a contextual keyword: an identifier token whose text is `word`. Used for
+# `exists` (Stage 0a existentials), which is deliberately NOT a reserved keyword
+# so it stays usable as an ordinary identifier everywhere except ctor position.
+fn match_contextual(tokens: Vec token.Token, i: Int, word: String) -> Maybe(token.Token, Int) =
+  match match_ident(tokens, i) with
+  | Just (t, i2) -> if token.token_text(t) == word then Just((t, i2)) else Nothing
+  | Nothing -> Nothing
+
+# Parse an optional `exists <vars>.` prefix on a constructor (Stage 0a). Returns
+# the existential var names (Nil if no prefix). The lexer glues '.' onto the
+# preceding identifier (is_ident_continue admits '.'), so `exists a.` arrives as
+# tokens [exists, "a."] — the terminating dot rides on the last var token. We
+# strip it; a space-separated standalone "." is handled as a fallback.
+fn parse_exists_prefix(tokens: Vec token.Token, i: Int) -> Result ParseError (List String, Int) =
+  match match_contextual(tokens, i, "exists") with
+  | Nothing -> Ok((Nil, i))
+  | Just (_, i2) -> collect_exist_vars(tokens, i2, Nil)
+
+fn collect_exist_vars(tokens: Vec token.Token, i: Int, acc: List String) -> Result ParseError (List String, Int) =
+  match match_ident(tokens, i) with
+  | Just (t, i2) ->
+      let txt = token.token_text(t)
+      in if string.ends_with(txt, ".")
+         then Ok((list_reverse(Cons(string.slice(txt, 0, string.length(txt) - 1), acc)), i2))
+         else collect_exist_vars(tokens, i2, Cons(txt, acc))
+  | Nothing ->
+      do
+        (_, i2) <- expected_symbol(".", tokens, i)
+        Ok((list_reverse(acc), i2))
+
 fn parse_type_constructor_def(tokens: Vec token.Token, i: Int) -> Result ParseError (ast.TypeConstructor, Int) =
   do
-    (t, i2) <- expected_ident("constructor name", tokens, i)
+    (exist_vars, i0) <- parse_exists_prefix(tokens, i)
+    (t, i2) <- expected_ident("constructor name", tokens, i0)
     (args, i3) <- collect_type_atoms(tokens, i2, Nil)
-    Ok((ast.TypeConstructor(token.token_text(t), list_reverse(args)), i3))
+    Ok((ast.TypeConstructor(token.token_text(t), list_reverse(args), exist_vars, Nil), i3))
 
 fn collect_type_constructors(tokens: Vec token.Token, i: Int, acc: List ast.TypeConstructor) -> Result ParseError (List ast.TypeConstructor, Int) =
   match match_symbol(tokens, i, "|") with

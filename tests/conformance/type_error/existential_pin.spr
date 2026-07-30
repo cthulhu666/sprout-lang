@@ -1,0 +1,16 @@
+module main
+
+# Stage 0a soundness — concrete-pin escape. Using the unpacked skolem `x` at a
+# concrete type (here via `+`, which forces `x : Int`) must be rejected: the
+# hidden type is abstract, not Int. This shape is NOT caught by a naive
+# "does the branch result mention the skolem" scan (x + 1 : Int has no skolem in
+# its result) — nominal skolem-consts catch it because unify(skolem, Int) fails.
+
+type Boxed = | exists a. Boxed a
+
+fn pin(b: Boxed) -> Int =
+  match b with
+  | Boxed x -> x + 1
+
+fn main() -> Unit !{IO} =
+  print(pin(Boxed(41)))

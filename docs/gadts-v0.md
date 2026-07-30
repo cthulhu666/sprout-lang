@@ -168,9 +168,12 @@ must-not-escape *inside a single branch* — with no cross-branch equalities, no
 principal-type loss, no mandatory signatures, no exhaustiveness change. That is a
 strictly smaller, self-contained feature. So:
 
-- **Stage 0a — unconstrained existentials.** A constructor may bind a type
-  variable absent from the head. De-risks the one novel mechanism (skolem +
-  escape check) with zero runtime change.
+- **Stage 0a — unconstrained existentials. ✅ IMPLEMENTED (2026-07-30).** A
+  constructor may bind a type variable absent from the head. De-risks the one
+  novel mechanism (skolem + escape check) with zero runtime change. Shipped with
+  the nominal-skolem representation of §7 (a rigid `TConst`, not a marked
+  `TVar`), so the escape check is a diagnostic rather than soundness code. Spec
+  §5.6 (experimental).
 - **Stage 0b — constrained existentials.** Add `C a =>` on the bound variable;
   pack the dictionary into the constructor (a Rust vtable / GHC hidden dict
   field) and restore it on unpack. This is the *useful* form — heterogeneous
@@ -286,12 +289,23 @@ forms share one implementation.
 
 ## 7. Type-system impact
 
-- Introduces Sprout's **first rigid/skolem variables** and the **escape check**
-  that keeps them from leaking — the single soundness-critical addition.
-- `generalize`/`instantiate` must **not** generalize a hidden existential
-  variable at the enclosing `let`, and must produce a fresh skolem per match.
-  This interaction (and any interaction with the `!{e}` effect-row variable) is
-  the prototype's first job to pin down.
+- Introduces Sprout's **first rigid/skolem types**. **As implemented (Stage 0a),
+  a skolem is a fresh, uniquely-named rigid `TConst` (`$sk<n>`)** minted on the
+  pattern/unpack path (`unifier.instantiate_ctor_pattern`) — *not* a marked
+  `TVar`. This is the key simplification over the original sketch: because the
+  existing unifier already treats two `TConst`s as equal only on name identity,
+  a skolem unifies with a concrete type or a distinct skolem **nowhere**, so
+  rigidity + the escape guard fall out of ordinary unification. No rank/level
+  machinery and no post-hoc "did this var stay a variable" scan are needed; the
+  "escape check" is purely a **diagnostic** (`types.type_mentions_skolem` at the
+  mismatch site → the message in §8). A leaked skolem is an inert, unusable type,
+  which is why nominal rigidity is sound without levels.
+- The pack (expression) path instantiates the same constructor scheme normally
+  (existential vars become flexible unknowns that *hide* the field type); only
+  the unpack (pattern) path skolemizes. Existential vars are derived, not marked:
+  they are exactly the ctor scheme's `type_vars` that do not appear in its result
+  type (a head param always does; an existential never does). No interaction with
+  the `!{e}` effect-row variable arose.
 - **No** loss of principal types, **no** mandatory signatures, **no** cross-branch
   equalities. Exhaustiveness is unchanged: an existential constructor is still
   one ordinary constructor of its type.

@@ -23,8 +23,8 @@ fn box_int() -> types.Type =
 fn box_decl() -> typed_ast.TypedDecl =
   typed_ast.TPassThrough(
     ast.TypeDecl("Box", Cons("a", Nil),
-      Cons(ast.TypeConstructor("Empty", Nil),
-        Cons(ast.TypeConstructor("Full", Cons(ast.TypeName("a"), Nil)), Nil)),
+      Cons(ast.TypeConstructor("Empty", Nil, Nil, Nil),
+        Cons(ast.TypeConstructor("Full", Cons(ast.TypeName("a"), Nil), Nil, Nil), Nil)),
       Nil, no_pos()))
 
 # fn bget(i) = if i < 0 then Empty else Full(i)

@@ -313,7 +313,7 @@ fn register_type_decl_raw(decl: ast.Decl, env: Dict types.Scheme) -> Dict types.
   # may itself be polymorphic, but Foo always has the same representation).
   | ast.WrapDecl name inner _ ->
       register_ctors_for_type(name, Nil, dict_empty(),
-        [ast.TypeConstructor(name, [inner])], env)
+        [ast.TypeConstructor(name, [inner], Nil, Nil)], env)
   | _ -> env
 
 fn build_local_params(params: List String, acc: Dict types.Type) -> Dict types.Type =
@@ -352,10 +352,21 @@ fn register_one_ctor(
   env: Dict types.Scheme
 ) -> Dict types.Scheme =
   match ctor with
-  | ast.TypeConstructor name fields ->
+  # exist_vars: existentially-bound vars (docs/gadts-v0.md §6). They are quantified
+  # in the scheme (so each use instantiates them fresh) and resolvable in the field
+  # types (local_vars), but ABSENT from result_type (built from type_params only) —
+  # which is exactly what makes `Boxed(x)` hide x's type. On the pattern (unpack)
+  # path they are re-instantiated to rigid skolems; see instantiate_ctor_pattern.
+  | ast.TypeConstructor name fields exist_vars _ ->
       dict_set(
         name,
-        types.Scheme(type_params, Nil, ctor_fn_type(fields, local_vars, result_type), types.EffectPure, Nil),
+        types.Scheme(
+          list_append(type_params, exist_vars),
+          Nil,
+          ctor_fn_type(fields, build_local_params(exist_vars, local_vars), result_type),
+          types.EffectPure,
+          Nil
+        ),
         env
       )
 
@@ -385,7 +396,7 @@ fn collect_ctor_names(ctors: List ast.TypeConstructor, acc: List String) -> List
   | Nil -> acc
   | Cons ctor rest ->
       match ctor with
-      | ast.TypeConstructor name _ -> collect_ctor_names(rest, Cons(name, acc))
+      | ast.TypeConstructor name _ _ _ -> collect_ctor_names(rest, Cons(name, acc))
 
 # ---------------------------------------------------------------------------
 # Effect merging
@@ -2880,7 +2891,10 @@ fn infer_ctor_pattern(
   | Nothing -> InferErr(pos, "Unknown constructor: " ++ name)
   | Just scheme ->
       do
-        ctor_type <- unifier.instantiate(state, scheme)
+        # Pattern position: existential vars in the ctor scheme become rigid
+        # skolems (see instantiate_ctor_pattern), unlike the expression/pack path
+        # which hides them as flexible unknowns. docs/gadts-v0.md §6/§7.
+        ctor_type <- unifier.instantiate_ctor_pattern(state, scheme)
         infer_ctor_pattern_typed(pos, state, env, subst, eff_subst, expected, name, fields, ctor_type)
 
 fn infer_ctor_pattern_typed(
@@ -3610,7 +3624,7 @@ fn validate_ctors(
   | Nil -> Nothing
   | Cons ctor rest ->
       match ctor with
-      | ast.TypeConstructor _ fields ->
+      | ast.TypeConstructor _ fields _ _ ->
           match validate_te_list(fields, decl_name, declared) with
           | Just e -> Just(e)
           | Nothing -> validate_ctors(rest, decl_name, declared)

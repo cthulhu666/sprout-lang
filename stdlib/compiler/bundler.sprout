@@ -576,7 +576,7 @@ fn add_decl_to_symbols(mod_name: String, exported: List String, ctor_types: List
   # callers can reference both Foo (as a type) and Foo(...) (as a constructor).
   | ast.WrapDecl name inner _ ->
       add_type_to_symbols(mod_name, name,
-        [ast.TypeConstructor(name, [inner])],
+        [ast.TypeConstructor(name, [inner], Nil, Nil)],
         exported, ctor_types, acc)
   | ast.ExternFnDecl _ _ _ _ _ -> acc
 
@@ -632,7 +632,7 @@ fn add_ctors(mod_name: String, ctors: List ast.TypeConstructor, export_ctors: Bo
   | Nil -> (vl, ev, ctor_map)
   | Cons ctor rest ->
       match ctor with
-      | ast.TypeConstructor ctor_name _ ->
+      | ast.TypeConstructor ctor_name _ _ _ ->
           add_ctors(mod_name, rest, export_ctors,
             dict_set(ctor_name, source.qualified_name_str(qualified_name(source.ModuleName(mod_name), source.RawName(ctor_name))), vl),
             if export_ctors then dict_set(ctor_name, source.qualified_name_str(qualified_name(source.ModuleName(mod_name), source.RawName(ctor_name))), ev) else ev,
@@ -969,8 +969,11 @@ fn qualify_ctor_args(ctx: ResolveCtx, ctors: List ast.TypeConstructor) -> List a
   | Nil -> Nil
   | Cons ctor rest ->
       match ctor with
-      | ast.TypeConstructor name args ->
-          Cons(ast.TypeConstructor(qualify_value_name(ctx, Nil, name), qualify_type_list(ctx, args)),
+      # exist_vars are locally-bound type variables (not qualified). exist_constraints
+      # pass through unchanged — always Nil in Stage 0a; Stage 0b must qualify their
+      # class names + type args here.
+      | ast.TypeConstructor name args exist_vars exist_constraints ->
+          Cons(ast.TypeConstructor(qualify_value_name(ctx, Nil, name), qualify_type_list(ctx, args), exist_vars, exist_constraints),
                qualify_ctor_args(ctx, rest))
 
 fn qualify_record_field_decls(ctx: ResolveCtx, fields: List ast.RecordFieldDecl) -> List ast.RecordFieldDecl =

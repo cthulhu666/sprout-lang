@@ -95,8 +95,14 @@ export type TemplateExprPart (..) =
 export type TypeConstraint (..) =
   | TypeConstraint String (List TypeExpr)
 
+# TypeConstructor name fields exist_vars exist_constraints
+# exist_vars: existentially-bound type variables introduced by an `exists` prefix
+# (`| exists a. Boxed a`); they scope over the fields but are ABSENT from the type
+# head, so `Boxed(x)` hides x's type. Nil for an ordinary constructor.
+# exist_constraints: class constraints on those vars (Stage 0b, `any C` sugar);
+# always Nil in Stage 0a. See docs/gadts-v0.md §6.
 export type TypeConstructor (..) =
-  | TypeConstructor String (List TypeExpr)
+  | TypeConstructor String (List TypeExpr) (List String) (List TypeConstraint)
 
 export type RecordFieldDecl (..) =
   | RecordFieldDecl String TypeExpr

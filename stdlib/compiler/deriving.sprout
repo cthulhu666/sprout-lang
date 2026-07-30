@@ -41,7 +41,7 @@ fn side_prefix(side: Side) -> String =
 # O(n).
 fn ctor_arity(ctor: ast.TypeConstructor) -> Int =
   match ctor with
-  | ast.TypeConstructor _ fields -> list_length(fields)
+  | ast.TypeConstructor _ fields _ _ -> list_length(fields)
 
 # Fresh-ish variable name for the i-th field of one side of an eq comparison.
 # Prefix `__d_` keeps these distinct from any user-declared name.
@@ -83,7 +83,7 @@ fn build_eq_field_call(i: Int, pos: source.SourcePos) -> ast.Expr =
 #   (Ctor l0 l1 ..., Ctor r0 r1 ...) -> eq(l0, r0) && eq(l1, r1) && ...
 fn build_eq_same_ctor_branch(ctor: ast.TypeConstructor, pos: source.SourcePos) -> ast.MatchBranch =
   match ctor with
-  | ast.TypeConstructor name _ ->
+  | ast.TypeConstructor name _ _ _ ->
       ast.MatchBranch(
         ast.TuplePattern(
           [build_ctor_var_pattern(name, DLeft, ctor_arity(ctor), pos),
@@ -190,7 +190,7 @@ fn build_to_string_field_call(i: Int, pos: source.SourcePos) -> ast.Expr =
 # Build one match branch: `| Ctor(f0, f1, ...) -> "Ctor(...)"`.
 fn build_to_string_ctor_branch(ctor: ast.TypeConstructor, pos: source.SourcePos) -> ast.MatchBranch =
   match ctor with
-  | ast.TypeConstructor name _ ->
+  | ast.TypeConstructor name _ _ _ ->
       ast.MatchBranch(
         build_ctor_var_pattern(name, DValue, ctor_arity(ctor), pos),
         build_to_string_branch_body(name, ctor_arity(ctor), pos))
@@ -266,7 +266,7 @@ fn build_wildcard_field_patterns(i: Int, arity: Int, pos: source.SourcePos) -> L
 # When idx > outer_idx: right ctor declared later than left → left is smaller → -1.
 fn build_ord_inner_branch(c: ast.TypeConstructor, idx: Int, outer_idx: Int, pos: source.SourcePos) -> ast.MatchBranch =
   match c with
-  | ast.TypeConstructor name fields ->
+  | ast.TypeConstructor name fields _ _ ->
       if idx == outer_idx then
         ast.MatchBranch(
           build_ctor_var_pattern(name, DRight, list_length(fields), pos),
@@ -293,7 +293,7 @@ fn build_ord_inner_match(outer_idx: Int, all_ctors: List ast.TypeConstructor, po
 # O(arity).
 fn build_ord_outer_branch(c: ast.TypeConstructor, idx: Int, all_ctors: List ast.TypeConstructor, pos: source.SourcePos) -> ast.MatchBranch =
   match c with
-  | ast.TypeConstructor name fields ->
+  | ast.TypeConstructor name fields _ _ ->
       ast.MatchBranch(
         build_ctor_var_pattern(name, DLeft, list_length(fields), pos),
         build_ord_inner_match(idx, all_ctors, pos))
@@ -345,7 +345,7 @@ fn build_ordinal_branches(ctors: List ast.TypeConstructor, idx: Int, pos: source
   | Nil -> Nil
   | Cons c rest ->
       match c with
-      | ast.TypeConstructor name _ ->
+      | ast.TypeConstructor name _ _ _ ->
           Cons(ast.MatchBranch(ast.ConstructorPattern(name, Nil, pos), ast.IntExpr(idx, pos)),
                build_ordinal_branches(rest, idx + 1, pos))
 
@@ -359,7 +359,7 @@ fn build_from_ordinal_ladder(ctors: List ast.TypeConstructor, idx: Int, pos: sou
   | Nil -> ast.VarExpr("Nothing", pos)
   | Cons c rest ->
       match c with
-      | ast.TypeConstructor name _ ->
+      | ast.TypeConstructor name _ _ _ ->
           ast.IfExpr(
             ast.BinaryExpr("==", ast.VarExpr("n", pos), ast.IntExpr(idx, pos), pos),
             ast.CallExpr(ast.VarExpr("Just", pos), [ast.VarExpr(name, pos)], pos),
@@ -497,7 +497,7 @@ fn first_field_bearing_ctor(ctors: List ast.TypeConstructor) -> Maybe String =
   | Nil -> Nothing
   | Cons c rest ->
       match c with
-      | ast.TypeConstructor cname _ ->
+      | ast.TypeConstructor cname _ _ _ ->
           if ctor_arity(c) > 0 then Just(cname)
           else first_field_bearing_ctor(rest)
 

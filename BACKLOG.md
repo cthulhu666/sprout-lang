@@ -105,13 +105,15 @@ Legend:
   GADTs' four hard prerequisites (local per-branch equalities, mandatory signatures, bidirectional
   checking, constraint-aware exhaustiveness) — they introduce exactly **one** new mechanism, a
   rigid/skolem variable that must not escape a single match branch. Staging:
-  - [ ] `P2` **Stage 0a — unconstrained existentials (M).** A constructor binds a type variable
-    absent from the head (`| Boxed (exists a. a)`, spelling TBD). Introduces Sprout's first
-    rigid/skolem variable + the escape check; **zero runtime change** (same tagged union, index
-    erased). Recommended first cut / spike to de-risk the skolem–`generalize`/`instantiate`
-    interaction cheaply. Binder surface syntax is the one open design decision (`gadts-v0.md`
-    ratifies none — "surface forms illustrative"); pick it before writing the Definition-of-Ready
-    failing test.
+  - [x] `P2` **Stage 0a — unconstrained existentials (M). LANDED 2026-07-30.** Constructor-level
+    `exists` prefix (`| exists a. Boxed a`) binds a type var absent from the head, hiding the field
+    type. Skolem = a fresh rigid `TConst` (`$sk<n>`) minted on the pattern/unpack path
+    (`unifier.instantiate_ctor_pattern`); the existing nominal `unify(TConst,TConst)` rule enforces
+    soundness for free (unifying a skolem with a concrete type or a distinct skolem fails), so the
+    escape check is a pure diagnostic (`type_mentions_skolem` → "escapes its scope") with no
+    bespoke soundness code. Existential vars derived as `scheme.type_vars \ ftv(result)`; **zero
+    runtime change**. Spec §5.6 (experimental). Tests: `tests/stdlib/test_existential_0a.spr`,
+    `tests/conformance/type_error/existential_{escape,pin,merge}.spr`.
   - [ ] `P3` **Stage 0b — constrained existentials (L).** Add `C a =>` on the bound variable and
     pack the class dictionary into the constructor (a Rust trait-object vtable / GHC hidden-dict
     field), restored on unpack. The **useful** form (heterogeneous render/log lists, interface

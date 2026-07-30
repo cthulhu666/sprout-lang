@@ -1,0 +1,16 @@
+module main
+
+# Stage 0a soundness — two-skolem merge. Each `Boxed` pattern is unpacked to its
+# OWN fresh skolem, so `x` and `y` have DISTINCT abstract types. Putting them in
+# one list forces those two skolems to unify, which must be rejected (a naive
+# result-scan would miss it: [x, y] would just be `List <skolem>`). Nominal
+# skolem-consts catch it — unify($sk_x, $sk_y) fails on distinct names.
+
+type Boxed = | exists a. Boxed a
+
+fn merge(b1: Boxed, b2: Boxed) -> Int =
+  match (b1, b2) with
+  | (Boxed x, Boxed y) -> list_length([x, y])
+
+fn main() -> Unit !{IO} =
+  print(merge(Boxed(1), Boxed("two")))

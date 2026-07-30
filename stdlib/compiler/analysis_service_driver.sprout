@@ -97,7 +97,7 @@ fn ctor_names(ctors: List ast.TypeConstructor, acc: List String) -> List String 
   | Nil -> acc
   | Cons ctor rest ->
       match ctor with
-      | ast.TypeConstructor name _ -> ctor_names(rest, Cons(name, acc))
+      | ast.TypeConstructor name _ _ _ -> ctor_names(rest, Cons(name, acc))
 
 fn method_sig_names(methods: List ast.ClassMethodSig, acc: List String) -> List String =
   match methods with

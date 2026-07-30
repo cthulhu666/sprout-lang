@@ -541,7 +541,7 @@ fn max_arity_of(ctors: List ast.TypeConstructor, m: Int) -> Int =
   | Nil -> m
   | Cons tc rest ->
       match tc with
-      | ast.TypeConstructor _ args ->
+      | ast.TypeConstructor _ args _ _ ->
           match list_length(args) with
           | n -> max_arity_of(rest, if n > m then n else m)
 
@@ -552,7 +552,7 @@ fn register_ctor_entries(ctors: List ast.TypeConstructor, next_tag: Int,
   | Nil -> (acc, next_tag, regs)
   | Cons tc rest ->
       match tc with
-      | ast.TypeConstructor ctor_name ctor_args ->
+      | ast.TypeConstructor ctor_name ctor_args _ _ ->
           register_ctor_one(ctor_name, ctor_args, rest, next_tag, max_ar, acc, regs)
 
 # /code-review fix #9: helper that computes arity and fks ONCE per ctor.
@@ -6999,7 +6999,7 @@ fn adt_ctor_entries(cs: List ast.TypeConstructor,
   | Nil -> Nil
   | Cons c rest ->
       match c with
-      | ast.TypeConstructor cname args ->
+      | ast.TypeConstructor cname args _ _ ->
           match dict_get(cname, ctors) with
           | Just entry ->
               match entry with

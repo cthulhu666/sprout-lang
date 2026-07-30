@@ -20,9 +20,16 @@ fn describe(b: Boxed) -> String =
   match b with
   | Boxed _ -> "boxed"
 
+# Legal use of the unpacked skolem: re-packing it does NOT let it escape (the
+# result is the concrete `Boxed`, not the hidden type), so this must typecheck.
+# Guards against an over-restrictive escape check that rejects all skolem uses.
+fn rebox(b: Boxed) -> Boxed =
+  match b with
+  | Boxed x -> Boxed(x)
+
 fn main() -> Unit !{IO} =
-  let items = [Boxed(1), Boxed("hi"), Boxed(true)] in
   run_suite("existential_0a", [
-    check_eq("heterogeneous list length", list_length(items), 3),
-    check_eq("describe ignores hidden value", describe(Boxed(42)), "boxed")
+    check_eq("heterogeneous list length", list_length([Boxed(1), Boxed("hi"), Boxed(true)]), 3),
+    check_eq("describe ignores hidden value", describe(Boxed(42)), "boxed"),
+    check_eq("legal re-box round-trips", describe(rebox(Boxed(7))), "boxed")
   ])

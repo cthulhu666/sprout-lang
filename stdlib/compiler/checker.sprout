@@ -119,7 +119,7 @@ fn dump_ctor_names(ctors: List ast.TypeConstructor, env: Dict types.Scheme) -> U
   | Cons ctor rest ->
       do
         match ctor with
-        | ast.TypeConstructor ctor_name _ -> print_name_scheme(ctor_name, env)
+        | ast.TypeConstructor ctor_name _ _ _ -> print_name_scheme(ctor_name, env)
         dump_ctor_names(rest, env)
 
 fn print_name_scheme(name: String, env: Dict types.Scheme) -> Unit !{IO} =

@@ -66,6 +66,27 @@ export fn type_id_name(id: TypeId) -> String =
 export fn type_id_eq(a: TypeId, b: TypeId) -> Bool =
   type_id_name(a) == type_id_name(b)
 
+# A skolem is a rigid type CONSTANT minted for an unpacked existential var
+# (unifier.instantiate_ctor_pattern); its name is "$sk<n>" and "$" cannot open a
+# user identifier, so this predicate never fires on a real type. Used to rephrase
+# a unification mismatch involving a skolem as an "existential escapes its scope"
+# diagnostic rather than leaking the internal "$sk3" name. See docs/gadts-v0.md.
+export fn is_skolem_name(name: String) -> Bool =
+  string.starts_with(name, "$sk")
+
+export fn type_mentions_skolem(t: Type) -> Bool =
+  match t with
+  | TVar _ -> false
+  | TConst id -> is_skolem_name(type_id_name(id))
+  | TApp base arg -> type_mentions_skolem(base) || type_mentions_skolem(arg)
+  | TFunc p r _ -> type_mentions_skolem(p) || type_mentions_skolem(r)
+  | TTuple items -> any_mentions_skolem(items)
+
+fn any_mentions_skolem(items: List Type) -> Bool =
+  match items with
+  | Nil -> false
+  | Cons h t -> if type_mentions_skolem(h) then true else any_mentions_skolem(t)
+
 # Display form: the short (last-segment) name, for diagnostics.
 export fn type_id_display(id: TypeId) -> String =
   string.after_last_dot(type_id_name(id))

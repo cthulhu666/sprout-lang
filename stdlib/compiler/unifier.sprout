@@ -173,6 +173,14 @@ fn unify_tfunc(subst: Dict types.Type, p1: types.Type, r1: types.Type, p2: types
   | Err e -> Err(e)
   | Ok s1 -> unify_applied(s1, apply_subst(s1, r1), apply_subst(s1, r2))
 
+# A unification mismatch. If either side is (or mentions) a skolem, the real
+# fault is an existential type leaking out of its match branch — rephrase rather
+# than surface the internal "$sk3" name. See docs/gadts-v0.md §7/§8.
+fn type_mismatch_error(l: types.Type, r: types.Type) -> String =
+  if types.type_mentions_skolem(l) || types.type_mentions_skolem(r)
+  then "existential type escapes its scope: a hidden `exists`-bound type cannot be used at a concrete or a different hidden type"
+  else "Type mismatch: " ++ types.type_to_string(l) ++ " vs " ++ types.type_to_string(r)
+
 fn unify_applied(
   subst: Dict types.Type,
   l: types.Type,
@@ -192,12 +200,12 @@ fn unify_applied(
       # same-short-named types from different modules — distinct layouts, one
       # identity. The bundler already resolves references to canonical names, so
       # equal identity means equal name; the prelude's canonical form is unqualified.
-      if types.type_id_eq(a, b) then Ok(subst) else Err("Type mismatch: " ++ types.type_id_name(a) ++ " vs " ++ types.type_id_name(b))
+      if types.type_id_eq(a, b) then Ok(subst) else Err(type_mismatch_error(l, r))
   | (types.TApp bl al, types.TApp br ar) -> unify_tapp(subst, bl, al, br, ar)
   | (types.TFunc p1 r1 _, types.TFunc p2 r2 _) -> unify_tfunc(subst, p1, r1, p2, r2)
   | (types.TTuple xs, types.TTuple ys) -> unify_list(subst, xs, ys)
   | _ ->
-      Err("Type mismatch: " ++ types.type_to_string(l) ++ " vs " ++ types.type_to_string(r))
+      Err(type_mismatch_error(l, r))
 
 fn unify_list_step(subst: Dict types.Type, x: types.Type, y: types.Type, xr: List types.Type, yr: List types.Type) -> Result String (Dict types.Type) =
   match unify_applied(subst, apply_subst(subst, x), apply_subst(subst, y)) with
@@ -267,6 +275,59 @@ export fn instantiate_with_vars(state: InferState, scheme: types.Scheme) -> (typ
     effect_repl <- build_effect_repl(state, types.scheme_effect_vars(scheme), dict_empty())
     let t = apply_full_subst(type_repl, effect_repl, types.scheme_type(scheme))
     (t, type_repl)
+
+# Instantiate a constructor scheme for use in a PATTERN (unpack). A scheme var
+# that does NOT appear in the ctor's result type is existential (a head param
+# always appears in the result; an existential never does) and is instantiated
+# to a fresh rigid skolem TConst ($sk<n>). The existing nominal-unification rule
+# (unify(TConst,TConst) succeeds only on name equality) then keeps it abstract
+# for free: unifying a skolem with a concrete type or a distinct skolem fails,
+# which is exactly the existential escape/merge soundness guard. Ordinary type
+# params instantiate to fresh TVars, as in `instantiate`. See docs/gadts-v0.md.
+export fn instantiate_ctor_pattern(state: InferState, scheme: types.Scheme) -> types.Type !{IO} =
+  do
+    let body = types.scheme_type(scheme)
+    let result_ftv = types.ftv(ctor_result_of(body))
+    type_repl <- build_ctor_pattern_repl(state, types.scheme_vars(scheme), result_ftv, dict_empty())
+    effect_repl <- build_effect_repl(state, types.scheme_effect_vars(scheme), dict_empty())
+    apply_full_subst(type_repl, effect_repl, body)
+
+fn ctor_result_of(t: types.Type) -> types.Type =
+  match t with
+  | types.TFunc _ ret _ -> ctor_result_of(ret)
+  | _ -> t
+
+fn build_ctor_pattern_repl(state: InferState, vars: List String, result_ftv: List String, acc: Dict types.Type) -> Dict types.Type !{IO} =
+  match vars with
+  | Nil -> acc
+  | Cons v rest ->
+      do
+        repl <- fresh_ctor_pattern_var(state, v, result_ftv)
+        build_ctor_pattern_repl(state, rest, result_ftv, dict_set(v, repl, acc))
+
+fn fresh_ctor_pattern_var(state: InferState, v: String, result_ftv: List String) -> types.Type !{IO} =
+  if list_member(v, result_ftv) then fresh_pattern_tvar(state) else fresh_pattern_skolem(state)
+
+fn fresh_pattern_tvar(state: InferState) -> types.Type !{IO} =
+  do
+    name <- fresh(state)
+    types.TVar(types.tyvar_id(name))
+
+fn fresh_pattern_skolem(state: InferState) -> types.Type !{IO} =
+  do
+    n <- fresh_skolem(state)
+    types.TConst(types.type_id(n))
+
+# A skolem is a rigid, uniquely-named type CONSTANT (not a variable). "$" cannot
+# open a user identifier, so "$sk<n>" can never name a real type — same
+# no-collision guarantee as `fresh`. Shares the tyvar counter for uniqueness.
+fn fresh_skolem(state: InferState) -> String !{IO} =
+  match state with
+  | InferState t_ref _ _ ->
+      do
+        n <- ref_read(t_ref)
+        ref_write(t_ref, n + 1)
+        "$sk" ++ int_to_string(n)
 
 fn build_type_repl(state: InferState, vars: List String, acc: Dict types.Type) -> Dict types.Type !{IO} =
   match vars with

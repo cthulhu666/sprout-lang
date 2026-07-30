@@ -698,12 +698,24 @@ fn collect_ctor_infos_from_decls(decls: List typed_ast.TypedDecl, prefix: String
           | _ -> collect_ctor_infos_from_decls(rest, prefix, acc)
       | _ -> collect_ctor_infos_from_decls(rest, prefix, acc)
 
+# Extend a type's local-var dict with its constructor's existential vars so their
+# field types resolve. Mirrors infer.build_local_params (kept local to avoid a
+# cross-module dependency for one small helper).
+fn add_exist_iface_locals(vars: List String, acc: Dict types.Type) -> Dict types.Type =
+  match vars with
+  | Nil -> acc
+  | Cons v rest -> add_exist_iface_locals(rest, dict_set(v, types.TVar(types.tyvar_id(v)), acc))
+
 fn collect_ctors_for_type(ctors: List ast.TypeConstructor, adt_name: String, local_vars: Dict types.Type, acc: List CtorInfo) -> List CtorInfo =
   match ctors with
   | Nil -> acc
-  | Cons (ast.TypeConstructor ctor_name field_exprs) rest ->
+  # exist_vars must be in scope to resolve existential field types (`a` in
+  # `| exists a. Boxed a`). They are quantified into the exported scheme's field
+  # types; a downstream importer recovers existential-ness the same way the
+  # unpack path does (a ctor scheme var absent from the result). docs/gadts-v0.md.
+  | Cons (ast.TypeConstructor ctor_name field_exprs exist_vars _) rest ->
       collect_ctors_for_type(rest, adt_name, local_vars,
-        Cons(CtorInfo(ctor_name, adt_name, typeexpr_list_to_types(field_exprs, local_vars)), acc))
+        Cons(CtorInfo(ctor_name, adt_name, typeexpr_list_to_types(field_exprs, add_exist_iface_locals(exist_vars, local_vars))), acc))
 
 # ---------------------------------------------------------------------------
 # ClassInfo extraction
@@ -1200,8 +1212,9 @@ fn join_type_constraints(xs: List ast.TypeConstraint) -> String =
 
 fn encode_ast_type_constructor(ctor: ast.TypeConstructor) -> String =
   match ctor with
-  | ast.TypeConstructor name fields ->
-      string_concat_many(["(TypeConstructor ", encode_quoted_str(name), " ", encode_ast_typeexpr_list(fields), ")"])
+  | ast.TypeConstructor name fields exist_vars exist_constraints ->
+      string_concat_many(["(TypeConstructor ", encode_quoted_str(name), " ", encode_ast_typeexpr_list(fields),
+        " ", encode_str_list(exist_vars), " ", encode_ast_type_constraint_list(exist_constraints), ")"])
 
 fn encode_ast_type_constructor_list(xs: List ast.TypeConstructor) -> String =
   string_concat_many(["(", join_type_constructors(xs), ")"])
@@ -1963,8 +1976,10 @@ fn decode_ast_type_constructor_at(s: String, bytes: Bytes, i: Int, total: Int) -
 fn decode_type_constructor_body(s: String, bytes: Bytes, i: Int, total: Int) -> Maybe(ast.TypeConstructor, Int) =
   let Just(name, j) = decode_quoted_str_at(s, bytes, skip_ws(s, bytes, i, total), total) else Nothing
       Just(fields, k) = decode_ast_typeexpr_list_at(s, bytes, skip_ws(s, bytes, j, total), total) else Nothing
-      Just end = expect_char(s, bytes, skip_ws(s, bytes, k, total), total, ')') else Nothing
-  in Just((ast.TypeConstructor(name, fields), end))
+      Just(exist_vars, k2) = decode_str_list_at(s, bytes, skip_ws(s, bytes, k, total), total) else Nothing
+      Just(exist_constraints, k3) = decode_ast_type_constraint_list_at(s, bytes, skip_ws(s, bytes, k2, total), total) else Nothing
+      Just end = expect_char(s, bytes, skip_ws(s, bytes, k3, total), total, ')') else Nothing
+  in Just((ast.TypeConstructor(name, fields, exist_vars, exist_constraints), end))
 
 fn decode_ast_type_constructor_list_at(s: String, bytes: Bytes, i: Int, total: Int) -> Maybe (List ast.TypeConstructor, Int) =
   match expect_char(s, bytes, i, total, '(') with
