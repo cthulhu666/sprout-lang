@@ -1,5 +1,5 @@
 import stdlib.test (check_true, run_suite)
-import stdlib.math (pi, fabs, floor, sqrt, sin, cos, tan, radians)
+import stdlib.math (pi, fabs, floor, sqrt, sin, cos, tan, radians, fclamp, lerp)
 
 # TDD — the Double math primitives that back the M2 vector/matrix layer
 # (docs/graphics-v0.md §M2). All implemented in PURE Sprout — no C builtins:
@@ -47,5 +47,17 @@ fn main() -> Unit !{IO} =
     # --- tan = sin/cos ---
     check_true("tan(0) == 0", close(tan(0.0), 0.0)),
     check_true("tan(pi/4) == 1", close(tan(pi / 4.0), 1.0)),
-    check_true("tan(radians(45)) == 1", close(tan(radians(45.0)), 1.0))
+    check_true("tan(radians(45)) == 1", close(tan(radians(45.0)), 1.0)),
+    # --- fclamp (Double clamp; mirrors the Int `clamp`, `fabs`-style f-prefix) ---
+    check_true("fclamp below -> lo", fclamp(-1.0, 0.0, 10.0) == 0.0),
+    check_true("fclamp within -> x", fclamp(5.0, 0.0, 10.0) == 5.0),
+    check_true("fclamp above -> hi", fclamp(12.5, 0.0, 10.0) == 10.0),
+    check_true("fclamp at lo edge", fclamp(0.0, 0.0, 10.0) == 0.0),
+    check_true("fclamp at hi edge", fclamp(10.0, 0.0, 10.0) == 10.0),
+    # --- lerp (Double-only; exact at these binary-representable points) ---
+    check_true("lerp t=0 -> a", lerp(2.0, 8.0, 0.0) == 2.0),
+    check_true("lerp t=1 -> b", lerp(2.0, 8.0, 1.0) == 8.0),
+    check_true("lerp t=0.5 -> mid", lerp(2.0, 8.0, 0.5) == 5.0),
+    check_true("lerp extrapolates t=2", lerp(2.0, 8.0, 2.0) == 14.0),
+    check_true("lerp negative t", lerp(0.0, 10.0, -0.5) == -5.0)
   ])

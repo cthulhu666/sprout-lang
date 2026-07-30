@@ -20,6 +20,8 @@ import loam.starfield as sf
 import loam.billboard as bb
 import loam.nebula as nb
 import loam.planet as pl
+import loam.ftl (phase_idle, phase_spool, phase_tunnel, phase_arrive, jump_distance, jump_fuel_cost, can_jump, advance_phase, phase_progress, refuel)
+import loam.warp as warp
 
 # Sprout / Loam — 3D GALAXY MAP (scene 1) with zoom-adaptive streaming.
 #
@@ -38,6 +40,11 @@ import loam.planet as pl
 #                    the orbit camera circles the ship. A later iteration adds the galaxy's stars
 #                    behind it. Model: loam ship_model_path (a 44 MB GLB, NOT committed — see
 #                    .gitignore; the ship is simply omitted when it is absent).
+#
+# JUMP DRIVE (FTL, scene 0). Select a target star and "Engage Jump" (or Space): the drive SPOOLS, a
+# warp TUNNEL opens (loam.warp), and you ARRIVE in that system's ship vista (view 2). Free-jump gated
+# by a fuel+range economy; the pure logic (distance, gating, the spool/tunnel/arrive state machine,
+# the self-balancing refuel) is loam.ftl (headless-tested). See docs/ftl-v0.md.
 #
 # STREAMING / LoD. The catalog is a quadtree pyramid over the galactic plane (levels L0..L4). Each
 # star lives at exactly ONE level (incremental refinement: brightest promoted to coarse levels), so
@@ -168,6 +175,27 @@ let s3_init_radius = 95.0
 let s3_init_height = 30.0  # only slightly above the ship, so the view axis stays near the sun
 let s3_zoom_min = 60.0  # keep the camera clear of the near clip plane (the hull spans ~53 units)
 let s3_zoom_max = 2000.0  # stay well inside vista_sphere_r so the backdrop stays ahead of the camera
+
+# --- Scene 0 interstellar JUMP DRIVE (FTL) ------------------------------------------------------
+# The believable-FTL mechanic (Elite-canonical, combat stripped): from the galaxy view, select a
+# target star and Engage — the drive SPOOLS, a warp TUNNEL opens (loam.warp), and you ARRIVE in that
+# system's ship vista (view 2). Free-jump (any in-range star — our galaxy is a free point cloud with
+# no gate graph) gated by a fuel+range economy. The pure logic (distance, gating, the
+# spool/tunnel/arrive state machine, the self-balancing refuel) is loam.ftl, headless-tested in
+# tests/loam/test_ftl.spr; this block is only the tunables + HUD. See docs/ftl-v0.md.
+let jump_range_ly = 6000.0  # max single-hop reach. INFLATED for playability: a realistic drive is
+# ~tens of ly, which at this catalog's ~90 ly mean spacing would reach only nearest neighbours;
+# 6000 ly reaches a visible local cluster you can actually pick.
+let fuel_max = 100.0
+let fuel_per_ly = 0.012  # a full-range 6000 ly hop costs ~72 fuel; short hops cost little
+let refuel_amount = 45.0  # FLAT arrival top-up; with cost proportional to distance, short hops net a
+# gain and long hops a drain — self-balancing, never a hard strand (loam.ftl.refuel)
+let spool_secs = 2.2  # drive spins up (HUD countdown) before the tunnel opens
+let tunnel_secs = 2.6  # seconds inside the warp tunnel
+let warp_sphere_r = 8000.0  # camera-centred warp-dome radius (like vista_sphere_r; < the far clip)
+let jump_r = 120  # jump-drive accent + route-line colour (cyan)
+let jump_g = 200
+let jump_b = 255
 
 let stream_max_level = 4  # deepest catalog level (matches the exporter's populated depth)
 let lod_hysteresis = 0.15  # deadband (fraction of a boundary) so the LoD level never flip-flops on a zoom boundary
@@ -1076,6 +1104,17 @@ fn legend_none_btn(active: Bool) -> Bool !{IO} =
 fn board_btn(active: Bool) -> Bool !{IO} =
   if active then gfx.button(932, 728, 156, 46, "Board ship") else no_button()
 
+# The scene-navigation toggle (bottom-right) — a helper so it can be suppressed (drawn only when
+# `active`) while the jump drive is busy, so a spool/tunnel can't be aborted mid-jump.
+fn nav_btn(active: Bool, label: String) -> Bool !{IO} =
+  if active then gfx.button(1108, 728, 156, 46, label) else no_button()
+
+# "Engage Jump" (galaxy view only) — drawn/clickable only when `active` (a valid, in-range, fuelled
+# target is selected and the drive is idle). Occupies the same bottom slot as "Board ship" (which is
+# system-view only, so they never coexist). Clicking it — or Space — engages the interstellar jump.
+fn jump_btn(active: Bool) -> Bool !{IO} =
+  if active then gfx.button(932, 728, 156, 46, "Engage Jump") else no_button()
+
 # The galactic-core bulge: three stacked additive glows at the galactic centre (world origin, where the
 # supermassive black hole sits) — a wide faint halo, a mid body, and a bright warm core. Additive, so
 # they accumulate into a smooth luminous falloff, giving the otherwise-uniform disk a bright nucleus.
@@ -1171,13 +1210,90 @@ fn draw_selection_marker(xi: Int, yi: Int, zi: Int) -> Unit !{IO} =
       wz = to_double(yi)
   in gfx.draw_line3d(wx, wy, wz, wx, 0.0, wz, mk_r, mk_g, mk_b)
 
+# --- Jump drive HUD + route (scene 0) -----------------------------------------------------------
+# The jump ROUTE: a line from the ship's current system (a = loc) to the selected target star
+# (b = sel) in the jump-drive tint, so you see the hop you are about to make. Same galaxy (x,y,z) ->
+# world (x, z, y) axis map as the selection marker.
+fn draw_jump_route(ax: Int, ay: Int, az: Int, bx: Int, by: Int, bz: Int) -> Unit !{IO} =
+  gfx.draw_line3d(to_double(ax), to_double(az), to_double(ay),
+                  to_double(bx), to_double(bz), to_double(by), jump_r, jump_g, jump_b)
+
+# The jump HUD (galaxy view, drive idle): a fuel gauge, the drive range, and the selected target's
+# jump status — distance + fuel cost when ready, or why it is blocked (no target / out of range / low
+# fuel). Sits along the bottom between the info panel (left) and the buttons (right). `can_j` tints
+# the status line cyan when ready, red when blocked.
+fn draw_jump_hud(tgt: String, has_sel: Bool, is_diff: Bool, jdist: Double, jcost: Double,
+                 fuel: Double, can_j: Bool) -> Unit !{IO} =
+  let fillw = gfx.double_to_int(196.0 * fuel / fuel_max)
+      di = to_string(gfx.double_to_int(jdist))
+      ci = to_string(gfx.double_to_int(jcost))
+      status = if ! has_sel then "SELECT A TARGET STAR"
+               else if ! is_diff then "AT THIS STAR"
+               else if can_j then "JUMP -> " ++ tgt ++ "   " ++ di ++ " ly   fuel -" ++ ci
+               else if jdist > jump_range_ly then "OUT OF RANGE   " ++ di ++ " ly  (max " ++ to_string(gfx.double_to_int(jump_range_ly)) ++ ")"
+               else "LOW FUEL   need " ++ ci ++ " / " ++ to_string(gfx.double_to_int(fuel))
+      sr = if can_j then jump_r else 255
+      sg = if can_j then jump_g else 120
+      sb = if can_j then jump_b else 120
+  in do
+       gfx.draw_text(420, 700, "FUEL", 16, 180, 190, 210)
+       gfx.draw_rect(470, 700, 200, 16, 30, 40, 55)
+       gfx.draw_rect(472, 702, fillw, 12, 120, 210, 150)
+       gfx.draw_text(686, 700, "range " ++ to_string(gfx.double_to_int(jump_range_ly)) ++ " ly", 16, 180, 190, 210)
+       gfx.draw_text(420, 722, status, 18, sr, sg, sb)
+
+# Centered banner + progress bar for the spool and tunnel phases (drawn over the galaxy / the warp).
+# `prog` (0..1) fills the bar; colour is the jump-drive tint.
+fn draw_status_hud(label: String, prog: Double) -> Unit !{IO} =
+  let fw = gfx.double_to_int(420.0 * prog)
+  in do
+       gfx.draw_text(432, 300, label, 40, jump_r, jump_g, jump_b)
+       gfx.draw_rect(432, 356, 420, 14, 30, 40, 55)
+       gfx.draw_rect(432, 356, fw, 14, jump_r, jump_g, jump_b)
+
+# The scene overlay HUD (instructions, LoD/system line, info panel, spectral legend) — extracted so
+# the whole block can be suppressed while the warp tunnel fills the screen (`if ! in_tunnel then ...`).
+fn draw_overlay_hud(view: Int, lvl: Int, sel_name: String, sel_detail: String,
+                    hov1: String, hov2: String, mask: Int) -> Unit !{IO} =
+  do
+    if view == 0
+      then gfx.draw_text(10, 34, "click: inspect   drag: orbit/tilt   shift+drag / WASD: pan   wheel: zoom", 18, 180, 190, 210)
+      else if view == 1
+      then gfx.draw_text(10, 34, "SOLAR SYSTEM   drag: orbit/tilt   wheel: zoom   (< Galaxy to return)", 18, 255, 220, 120)
+      else gfx.draw_text(10, 34, "SHIP   drag: orbit/tilt   wheel: zoom   (< System to return)", 18, 150, 220, 255)
+    if view == 0
+      then gfx.draw_text(10, 56, "LoD level " ++ to_string(lvl), 18, 150, 200, 150)
+      else gfx.draw_text(10, 56, "system " ++ sel_name, 18, 255, 230, 150)
+    if view == 0
+      then
+        do
+          gfx.draw_text(20, 724, sel_name, 22, 255, 240, 170)
+          gfx.draw_text(20, 752, sel_detail, 16, 200, 210, 230)
+      else if view == 1
+      then
+        do
+          gfx.draw_text(20, 724, if hov1 == "" then "hover a planet for details" else hov1, 20, 255, 240, 170)
+          gfx.draw_text(20, 752, hov2, 15, 200, 210, 230)
+      else
+        do
+          gfx.draw_text(20, 724, "RUSTY SPACESHIP", 22, 200, 220, 255)
+          gfx.draw_text(20, 752, "adrift in " ++ sel_name ++ "   ~1 AU from the star", 16, 200, 210, 230)
+    if view == 0
+      then
+        do
+          gfx.draw_text(leg_x + 8, leg_y - 26, "SPECTRAL CLASS  " ++ to_string(popcount(mask)) ++ "/" ++ to_string(num_classes), 16, 180, 190, 210)
+          draw_legend(mask, 0)
+      else ()
+
 # --- Render loop --------------------------------------------------------------------------------
 fn render_loop(dir: String, cam: Cam, scam: Cam, shipcam: Cam, radius: Double, loaded: Dict Int,
                sel_name: String, sel_detail: String, sel_x: Int, sel_y: Int, sel_z: Int, has_sel: Bool,
                dnx: Int, dny: Int, view: Int, prev_lvl: Int,
                csys: String, cplanets: List Planet, hov1: String, hov2: String,
                mask: Int, prev_ldown: Bool, show_grid: Bool, sun_sh: Int, planet_sh: Int, gas_sh: Int,
-               ship_model: Int, sky_sh: Int, bgstars: List BgStar, bgsys: String) -> Unit !{IO} =
+               ship_model: Int, sky_sh: Int, bgstars: List BgStar, bgsys: String,
+               loc_name: String, loc_x: Int, loc_y: Int, loc_z: Int,
+               fuel: Double, ftl_phase: Int, ftl_timer: Double, warp_sh: Int) -> Unit !{IO} =
   do
     stop <- gfx.window_should_close()
     if stop then gfx.close_window()
@@ -1201,7 +1317,26 @@ fn render_loop(dir: String, cam: Cam, scam: Cam, shipcam: Cam, radius: Double, l
         let bgstars2 = if need_bg then load_bgstars(dir, sel_x, sel_y, sel_z, radius) else bgstars
         let bgsys2 = if need_bg then sel_name else bgsys
         streamed <- load_levels(dir, cam, lvl, 0, radius, loaded, load_budget)
-        cam_apply(if view == 0 then cam else if view == 1 then scam else shipcam)
+        let acam = if view == 0 then cam else if view == 1 then scam else shipcam
+        cam_apply(acam)
+        # The warp tunnel radiates from the travel direction = the active camera's look axis
+        # (eye -> target). Read the eye (as just set by cam_apply) and take the target from the Cam.
+        wex <- gfx.camera_x()
+        wey <- gfx.camera_y()
+        wez <- gfx.camera_z()
+        let fwd_x = acam.tx - wex
+        let fwd_y = acam.ty - wey
+        let fwd_z = acam.tz - wez
+        # Jump-drive frame state, derived from the threaded phase/timer.
+        let in_tunnel = ftl_phase == phase_tunnel
+        let busy = ! (ftl_phase == phase_idle)  # spool/tunnel/arrive: freeze the normal UI
+        let hud_on = ! busy
+        let tprog = phase_progress(ftl_phase, ftl_timer, spool_secs, tunnel_secs)
+        let is_diff = ! ((sel_x == loc_x) && (sel_y == loc_y) && (sel_z == loc_z))
+        let jdist = jump_distance(loc_x, loc_y, loc_z, sel_x, sel_y, sel_z)
+        let jcost = jump_fuel_cost(jdist, fuel_per_ly)
+        # A jump is offered only from the galaxy view, for a distinct in-range, fuelled target, drive idle.
+        let can_j = (view == 0) && has_sel && is_diff && (ftl_phase == phase_idle) && can_jump(jdist, jump_range_ly, fuel, fuel_per_ly)
         gfx.frame_begin()
         # Scene-3 sky orientation: the galactic-centre direction from the ship's system. The system
         # sits at the picked star's galaxy position (galaxy x,y,z -> world x, z-height, z), and the
@@ -1213,7 +1348,11 @@ fn render_loop(dir: String, cam: Cam, scam: Cam, shipcam: Cam, radius: Double, l
         let cdz = if has_sys then 0.0 - to_double(sel_y) else 0.0
         # Scene 1 draws the galaxy point cloud, filtered to the enabled spectral classes (model index
         # == classCode, so the mask enables/disables whole classes); scene 2 draws the selected system.
-        if view == 0
+        # During a jump's TUNNEL phase the warp shader replaces the scene entirely (drawn on a camera-
+        # centred inside-out sphere), so the galaxy/system/vista draw is skipped.
+        if in_tunnel
+          then warp.draw_warp(warp_sh, warp_sphere_r, tprog, fwd_x, fwd_y, fwd_z)
+          else if view == 0
           then
             # Atmosphere fade keyed to the LoD ladder: full through LoD 0–1 (dist >= level_boundary(1)),
             # fading across LoD 2–3, gone by the deepest core zoom (dist <= level_boundary(3)) — so the
@@ -1235,51 +1374,30 @@ fn render_loop(dir: String, cam: Cam, scam: Cam, shipcam: Cam, radius: Double, l
                 if show_grid then draw_sector_grid(radius) else ()
                 # Selection drop-line at the picked star's true 3D position (once a star is picked).
                 if has_sel then draw_selection_marker(sel_x, sel_y, sel_z) else ()
+                # Jump route from the current system to the selected target (a distinct in-range pick).
+                if has_sel && is_diff then draw_jump_route(loc_x, loc_y, loc_z, sel_x, sel_y, sel_z) else ()
           else if view == 1 then draw_system(s2ext, cplanets2, sun_sh, planet_sh)
           else draw_vista_scene(cplanets2, bgstars2, sun_sh, sky_sh, cdx, cdy, cdz, ship_model)
         gfx.overlay_begin()
         gfx.draw_fps(10, 10)
-        if view == 0
-          then gfx.draw_text(10, 34, "click: inspect   drag: orbit/tilt   shift+drag / WASD: pan   wheel: zoom", 18, 180, 190, 210)
-          else if view == 1
-          then gfx.draw_text(10, 34, "SOLAR SYSTEM   drag: orbit/tilt   wheel: zoom   (< Galaxy to return)", 18, 255, 220, 120)
-          else gfx.draw_text(10, 34, "SHIP   drag: orbit/tilt   wheel: zoom   (< System to return)", 18, 150, 220, 255)
-        if view == 0
-          then gfx.draw_text(10, 56, "LoD level " ++ to_string(lvl), 18, 150, 200, 150)
-          else gfx.draw_text(10, 56, "system " ++ sel_name, 18, 255, 230, 150)
-        # Bottom-left panel: galaxy shows the selected star; system shows the hovered planet; ship shows
-        # the ship + which system it sits in.
-        if view == 0
-          then
-            do
-              gfx.draw_text(20, 724, sel_name, 22, 255, 240, 170)
-              gfx.draw_text(20, 752, sel_detail, 16, 200, 210, 230)
-          else if view == 1
-          then
-            do
-              gfx.draw_text(20, 724, if hov1 == "" then "hover a planet for details" else hov1, 20, 255, 240, 170)
-              gfx.draw_text(20, 752, hov2, 15, 200, 210, 230)
-          else
-            do
-              gfx.draw_text(20, 724, "RUSTY SPACESHIP", 22, 200, 220, 255)
-              gfx.draw_text(20, 752, "adrift in " ++ sel_name ++ "   ~1 AU from the star", 16, 200, 210, 230)
-        # Scene-1 spectral-class filter legend: header + 12 class checkboxes (drawn only in the galaxy view).
-        if view == 0
-          then
-            do
-              gfx.draw_text(leg_x + 8, leg_y - 26, "SPECTRAL CLASS  " ++ to_string(popcount(mask)) ++ "/" ++ to_string(num_classes), 16, 180, 190, 210)
-              draw_legend(mask, 0)
-          else ()
+        # The scene HUD is hidden while the warp tunnel fills the screen; during spool it stays up under
+        # the spool banner. The jump HUD (fuel/range/target status) shows only while the drive is idle.
+        if ! in_tunnel then draw_overlay_hud(view, lvl, sel_name, sel_detail, hov1, hov2, mask) else ()
+        if (view == 0) && hud_on then draw_jump_hud(sel_name, has_sel, is_diff, jdist, jcost, fuel, can_j) else ()
+        if ftl_phase == phase_spool then draw_status_hud("JUMP DRIVE SPOOLING", tprog) else ()
+        if in_tunnel then draw_status_hud("JUMPING", tprog) else ()
         # Scene-navigation button (bottom-right): its label + action depend on the view. Galaxy -> System,
         # System -> Galaxy, Ship -> System (one step back up the galaxy > system > ship chain).
         let toggle_label = if view == 0 then "System >" else if view == 1 then "< Galaxy" else "< System"
-        toggle <- gfx.button(1108, 728, 156, 46, toggle_label)
-        # "Board ship" enters the third-person ship scene; drawn only in the system view, left of the
-        # nav button (a helper so the button doesn't draw in the other scenes).
-        board <- board_btn(view == 1)
+        # All bottom-bar buttons are suppressed while the drive is busy (spool/tunnel), so a jump can't
+        # be aborted or a scene switched mid-jump. "Engage Jump" (galaxy view) shares the "Board ship"
+        # slot and is drawn only when a valid jump is available (can_j).
+        toggle <- nav_btn(hud_on, toggle_label)
+        jumpc <- jump_btn(can_j)
+        board <- board_btn((view == 1) && hud_on)
         # All / None mask presets (scene 1 only, via helpers so the buttons don't draw in scene 2).
-        all_click <- legend_all_btn(view == 0)
-        none_click <- legend_none_btn(view == 0)
+        all_click <- legend_all_btn((view == 0) && hud_on)
+        none_click <- legend_none_btn((view == 0) && hud_on)
         wheel <- gfx.mouse_wheel_y()
         ldown <- gfx.mouse_button_down(gfx.mouse_left)
         mx <- gfx.mouse_x()
@@ -1291,6 +1409,8 @@ fn render_loop(dir: String, cam: Cam, scam: Cam, shipcam: Cam, radius: Double, l
         ks <- gfx.key_down(gfx.key_s)
         ka <- gfx.key_down(gfx.key_a)
         kd <- gfx.key_down(gfx.key_d)
+        sp <- gfx.space_pressed()
+        dtf <- gfx.get_frame_time()
         gfx.frame_end()
         # UI hit-region (computed before the pick so a click on the legend / buttons never selects a
         # star): the scene-switch button (bottom-right), or in scene 1 the filter legend + All/None.
@@ -1298,7 +1418,10 @@ fn render_loop(dir: String, cam: Cam, scam: Cam, shipcam: Cam, radius: Double, l
         # The "Board ship" button (scene 2 only) sits left of the nav button; guard its region too so a
         # click on it never starts an orbit-drag.
         let over_board = (view == 1) && (mx >= 932) && (mx <= 1088) && (my >= 728)
-        let over_ui = over_legend || over_board || ((mx >= 1090) && (my >= 715))
+        # The "Engage Jump" button occupies the same slot in the galaxy view — guard it too so a click
+        # on it never starts an orbit-drag or a star pick.
+        let over_jump = (view == 0) && (mx >= 932) && (mx <= 1088) && (my >= 728)
+        let over_ui = over_legend || over_board || over_jump || ((mx >= 1090) && (my >= 715))
         # Left-click SELECT (scene 1). Left-drag orbits, so selection is a TAP: latch the press-down
         # point on the press edge, and on the RELEASE edge pick only if the pointer barely moved
         # (is_tap) and the gesture stayed off the UI. dnx2/dny2 carry the latched point to next frame.
@@ -1306,12 +1429,12 @@ fn render_loop(dir: String, cam: Cam, scam: Cam, shipcam: Cam, radius: Double, l
         let l_release = ! ldown && prev_ldown
         let dnx2 = if l_press then mx else dnx
         let dny2 = if l_press then my else dny
-        let do_pick = l_release && (view == 0) && ! over_ui && is_tap(dnx2, dny2, mx, my, click_slop)
+        let do_pick = l_release && (view == 0) && (ftl_phase == phase_idle) && ! over_ui && is_tap(dnx2, dny2, mx, my, click_slop)
         let pseed = (pick_far, sel_name, sel_detail, sel_x, sel_y, sel_z)
         picked <- maybe_pick(do_pick, dir, cam, lvl, radius, to_double(mx), to_double(my), mask, pseed)
         # Spectral-class filter update (scene 1). A left-click EDGE on a checkbox row toggles that
         # class; All/None set every / no class. Edge-detected so holding the button doesn't re-fire.
-        let lclick = ldown && ! prev_ldown && (view == 0)
+        let lclick = ldown && ! prev_ldown && (view == 0) && (ftl_phase == phase_idle)
         let hit = if lclick then legend_hit(mx, my) else 0 - 1
         let mask_row = if hit >= 0 then bit_toggle(mask, hit) else mask
         let mask2 = if all_click then mask_all else if none_click then mask_none else mask_row
@@ -1348,20 +1471,41 @@ fn render_loop(dir: String, cam: Cam, scam: Cam, shipcam: Cam, radius: Double, l
         let cam2 = if view == 0 then driven else cam
         let scam2 = if view == 1 then driven else scam
         let shipcam2 = if view == 2 then driven else shipcam
+        # Engage the jump from the "Engage Jump" button or Space (only meaningful when a jump is
+        # available). advance_phase runs the spool -> tunnel -> arrive machine off this frame's delta.
+        let engage = jumpc || (sp && can_j)
+        let ftl_step = advance_phase(ftl_phase, ftl_timer, dtf, engage, can_j, spool_secs, tunnel_secs)
         match streamed with
         | (loaded2, _) ->
             match picked with
             | (best_d2, best_name, best_detail, best_x, best_y, best_z) ->
                 match hover_lines(hovered) with
                 | (hov1b, hov2b) ->
-                    let hit = best_d2 < pick_radius2
-                        name2 = if hit then best_name else sel_name
-                        detail2 = if hit then best_detail else sel_detail
-                        sel_x2 = if hit then best_x else sel_x
-                        sel_y2 = if hit then best_y else sel_y
-                        sel_z2 = if hit then best_z else sel_z
-                        has_sel2 = has_sel || hit
-                    in render_loop(dir, cam2, scam2, shipcam2, radius, loaded2, name2, detail2, sel_x2, sel_y2, sel_z2, has_sel2, dnx2, dny2, next_view, lvl, csys2, cplanets2, hov1b, hov2b, mask2, ldown, show_grid, sun_sh, planet_sh, gas_sh, ship_model, sky_sh, bgstars2, bgsys2)
+                    match ftl_step with
+                    | (ftl_phase2, ftl_timer2) ->
+                        let hit = best_d2 < pick_radius2
+                            name2 = if hit then best_name else sel_name
+                            detail2 = if hit then best_detail else sel_detail
+                            sel_x2 = if hit then best_x else sel_x
+                            sel_y2 = if hit then best_y else sel_y
+                            sel_z2 = if hit then best_z else sel_z
+                            has_sel2 = has_sel || hit
+                            # Arrival (the single frame advance_phase reports `arrive`): the destination
+                            # becomes the ship's current location, the jump burns fuel then the star tops
+                            # it up, and the view drops into the destination's ship vista (view 2). The
+                            # existing need_load/need_bg paths then stream the destination next frame.
+                            arrived = ftl_phase2 == phase_arrive
+                            nv = if arrived then 2 else next_view
+                            # The FIRST star you select establishes where the ship IS (you "board" there),
+                            # so subsequent picks are jump targets rather than everything reading out-of-
+                            # range from the seed origin. After that, only a jump moves your location.
+                            first_here = hit && ! has_sel
+                            loc_name2 = if arrived then sel_name else if first_here then best_name else loc_name
+                            loc_x2 = if arrived then sel_x else if first_here then best_x else loc_x
+                            loc_y2 = if arrived then sel_y else if first_here then best_y else loc_y
+                            loc_z2 = if arrived then sel_z else if first_here then best_z else loc_z
+                            fuel2 = if arrived then refuel(fuel, jcost, refuel_amount, fuel_max) else fuel
+                        in render_loop(dir, cam2, scam2, shipcam2, radius, loaded2, name2, detail2, sel_x2, sel_y2, sel_z2, has_sel2, dnx2, dny2, nv, lvl, csys2, cplanets2, hov1b, hov2b, mask2, ldown, show_grid, sun_sh, planet_sh, gas_sh, ship_model, sky_sh, bgstars2, bgsys2, loc_name2, loc_x2, loc_y2, loc_z2, fuel2, ftl_phase2, ftl_timer2, warp_sh)
 
 fn main() -> Unit !{IO} =
   do
@@ -1387,6 +1531,7 @@ fn main() -> Unit !{IO} =
     planet_sh <- pl.load_shader()
     gas_sh <- nb.gas_shader()
     sky_sh <- sky.load_shader()
+    warp_sh <- warp.load_shader()
     make_models(star_sh)
     # The third-person ship scene's model (glTF/GLB via raylib's LoadModel). The 44 MB file is not
     # committed (see .gitignore); load_model returns -1 when it is absent, and draw_ship_scene then
@@ -1441,6 +1586,18 @@ fn main() -> Unit !{IO} =
     # through the render loop, gating draw_sector_grid) so it can be made switchable again without
     # rewiring; argv[8] = 0 turns it off at launch (default on), e.g. for a grid-free screenshot.
     init_grid <- arg_int(8, 1)
+    # Optional argv[13] = 1 auto-engages a jump at boot: start in the galaxy view with the target at the
+    # boarded system's position (argv[10..12]) and the ship's current location seeded 3000 ly off it (an
+    # in-range origin), then seed the phase at `spool` so the drive runs spool -> tunnel -> arrive with no
+    # interaction — a headless canary can screenshot the warp tunnel (mid-run) and the arrival vista.
+    jump_arg <- arg_int(13, 0)
+    let auto_jump = jump_arg >= 1
+    let start_view = if auto_jump then 0 else init_view
+    let loc0_x = if auto_jump then bsx + 3000 else bsx
+    let ftl0 = if auto_jump then phase_spool else phase_idle
+    # The ship's starting location = the boarded system (or the auto-jump origin above); a jump updates
+    # it. fuel starts full. The drive is idle unless the canary seeded a jump.
     render_loop(dir, cam0, scam0, shipcam0, radius, dict_empty(),
-                init_name, "Click a star to inspect it", bsx, bsy, bsz, false, 0, 0, init_view, seed_lvl, "", Nil, "", "",
-                init_mask, false,! (init_grid == 0), sun_sh, planet_sh, gas_sh, ship_model, sky_sh, Nil, "")
+                init_name, "Click a star to inspect it", bsx, bsy, bsz, auto_jump, 0, 0, start_view, seed_lvl, "", Nil, "", "",
+                init_mask, false,! (init_grid == 0), sun_sh, planet_sh, gas_sh, ship_model, sky_sh, Nil, "",
+                init_name, loc0_x, bsy, bsz, fuel_max, ftl0, 0.0, warp_sh)

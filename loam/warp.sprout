@@ -1,0 +1,90 @@
+module loam.warp
+
+# Procedural hyperspace / warp-tunnel shader for the galaxy-map jump (loam.ftl phase 2). The same
+# skeleton as loam.skydome — a pass-through vertex shader and a fragment shader that recovers the view
+# direction on a CAMERA-CENTRED sphere seen from the inside — but instead of a static night sky it
+# draws blue-shifted star STREAKS radiating from the travel direction (uForward), their length,
+# density, brightness and flow speed all driven by uProgress (0..1) so the tunnel ramps up out of
+# spool and blooms to a bright vanishing point as the drive punches through. An overall envelope fades
+# it in at the start and to black at the very end, masking the hard cut to the destination vista.
+#
+# The only per-frame plumbing beyond draw_sky's is one uProgress float and a uForward vec3 (the demo
+# computes it from the active camera's eye->target); uTime comes from the engine clock. Uses only the
+# existing generic gfx shader API — no new engine primitive. Authored in Sprout, like every loam
+# shader (skydome / planet / nebula / starfield).
+
+import stdlib.gfx as gfx
+
+let warp_vs =
+  "#version 330\n" ++
+  "in vec3 vertexPosition;\n" ++
+  "uniform mat4 mvp;\n" ++
+  "out vec3 vWorld;\n" ++
+  "void main() {\n" ++
+  "  vWorld = vertexPosition;\n" ++
+  "  gl_Position = mvp*vec4(vertexPosition, 1.0);\n" ++
+  "}\n"
+
+let warp_fs =
+  "#version 330\n" ++
+  "in vec3 vWorld;\n" ++
+  "uniform vec3 uEye;\n" ++
+  "uniform vec3 uForward;\n" ++
+  "uniform float uProgress;\n" ++
+  "uniform float uTime;\n" ++
+  "out vec4 finalColor;\n" ++
+  "float hash1(float n) { return fract(sin(n*12.9898) * 43758.5453123); }\n" ++
+  "void main() {\n" ++
+  "  vec3 dir = normalize(vWorld - uEye);\n" ++
+  "  vec3 fwd = normalize(uForward);\n" ++
+  "  float c = dot(dir, fwd);\n" ++
+  #cross-section of the tunnel: the component of the view dir perpendicular to travel
+  "  vec3 proj = dir - fwd*c;\n" ++
+  "  float rad = length(proj);\n" ++
+  #stable basis around the travel axis, so the streak angle is well-defined
+  "  vec3 up = abs(fwd.y) < 0.99 ? vec3(0.0,1.0,0.0) : vec3(1.0,0.0,0.0);\n" ++
+  "  vec3 right = normalize(cross(fwd, up));\n" ++
+  "  vec3 up2 = cross(right, fwd);\n" ++
+  "  float ang = atan(dot(proj, up2), dot(proj, right)) / 6.2831853 + 0.5;\n" ++
+  #discrete angular streaks; more of them, and more lit, as the jump builds
+  "  float spokes = 40.0 + 90.0*uProgress;\n" ++
+  "  float cell = floor(ang*spokes);\n" ++
+  "  float h = hash1(cell*1.7 + 3.0);\n" ++
+  "  float flow = fract(rad*(2.0 + 6.0*uProgress) - uTime*(1.2 + 5.0*uProgress) + h*7.0);\n" ++
+  "  float streak = smoothstep(0.65, 1.0, flow) * step(0.32, h);\n" ++
+  #fade out at the vanishing point and toward the rim
+  "  float radial = smoothstep(0.015, 0.22, rad) * smoothstep(1.25, 0.4, rad);\n" ++
+  "  float body = streak * radial * (0.35 + 1.5*uProgress);\n" ++
+  #bright bluish core that blooms straight ahead as we accelerate through
+  "  float core = pow(max(c,0.0), 8.0)*(0.12+0.5*uProgress) + pow(max(c,0.0),64.0)*(0.4+1.4*uProgress);\n" ++
+  "  vec3 streakCol = mix(vec3(0.55,0.72,1.0), vec3(0.85,0.93,1.0), uProgress);\n" ++
+  "  vec3 col = body*streakCol + core*vec3(0.80,0.90,1.0);\n" ++
+  #envelope: ramp in from spool, fade to black at the end to hide the cut to the vista
+  "  float env = smoothstep(0.0, 0.15, uProgress) * smoothstep(1.0, 0.75, uProgress);\n" ++
+  "  finalColor = vec4(col*env, 1.0);\n" ++
+  "}\n"
+
+# Compile the warp shader. Call after open_window; pass the handle to draw_warp.
+export fn load_shader() -> Int !{IO} = gfx.load_shader(warp_vs, warp_fs)
+
+# Draw the warp tunnel as a camera-centred sphere of `radius`. `progress` (0..1) is loam.ftl's
+# phase_progress for the tunnel phase; `(fwd_x,fwd_y,fwd_z)` is the travel direction (the active
+# camera's eye->target, need not be normalised — the shader normalises). Depth writes and back-face
+# culling are disabled so it is seen from inside and covers the frame; both are restored after. During
+# the tunnel phase the demo draws ONLY this (the normal scene is skipped), so it is the whole view.
+export fn draw_warp(sh: Int, radius: Double, progress: Double,
+                    fwd_x: Double, fwd_y: Double, fwd_z: Double) -> Unit !{IO} =
+  do
+    ex <- gfx.camera_x()
+    ey <- gfx.camera_y()
+    ez <- gfx.camera_z()
+    t <- gfx.get_time()
+    gfx.shader_set_vec3(sh, "uEye", ex, ey, ez)
+    gfx.shader_set_vec3(sh, "uForward", fwd_x, fwd_y, fwd_z)
+    gfx.shader_set_float(sh, "uProgress", progress)
+    gfx.shader_set_float(sh, "uTime", t)
+    gfx.set_depth_mask(false)
+    gfx.set_backface_cull(false)
+    gfx.draw_sphere_shaded(sh, ex, ey, ez, radius, 255, 255, 255)
+    gfx.set_backface_cull(true)
+    gfx.set_depth_mask(true)

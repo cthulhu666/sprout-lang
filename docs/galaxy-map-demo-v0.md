@@ -377,6 +377,48 @@ specks. No orbit lines, no size inflation. `< System` returns to scene 2.
 - **Next.** Optionally a flyable ship with a chase camera, and star labels/selection on the real
   layer — see "Planned extensions".
 
+## Interstellar jump drive — FTL (scene 0, built, iteration 1)
+
+The galaxy view is also where you **travel between stars**. Select a target star, then **Engage Jump**
+(the bottom button, or **Space**): the drive **spools** (a countdown), a **warp tunnel** opens, and you
+**arrive** in that system's third-person ship vista (scene 3) — the tunnel resolves straight into "you
+are now here, in space". Full design + the verified prior-art survey it is based on is in
+[docs/ftl-v0.md](ftl-v0.md); this is the demo-side summary.
+
+- **The shape** is the Elite-Dangerous-canonical pair (supercruise + a map-selected hyperspace jump),
+  **stripped of combat**: no interdiction/mass-lock (the demo has no NPCs to be pulled out by — it stays
+  a documented future hook). Iteration 1 builds the **interstellar jump**; the **intra-system
+  supercruise** is designed in the doc and deferred to iteration 2.
+- **Free-jump.** Any star within `jump_range_ly` is a valid target — our galaxy is a free point cloud
+  with no gate graph, so a gate network would need edges the generator doesn't emit. The range is
+  **inflated for playability** (`6000` ly; a realistic drive is ~tens of ly, which at this catalog's
+  ~90 ly mean spacing would reach only nearest neighbours).
+- **Fuel + range economy.** A jump needs the target in range AND fuel for its cost (`dist · fuel_per_ly`).
+  Arrival tops fuel up by a **flat** `refuel_amount`; since cost scales with distance but the top-up is
+  flat, short hops net a gain and long hops a drain — self-balancing, and with the range cap it can
+  **never hard-strand** you. The HUD shows a fuel gauge, the range, and the target's distance/cost (or
+  the blocked reason: `OUT OF RANGE` / `LOW FUEL` / `SELECT TARGET`). A cyan **route line** is drawn
+  from the ship's current system to the selected target.
+- **Pure logic in loam, headless-tested.** The jump geometry, the economy, and the `idle → spool →
+  tunnel → arrive` **state machine** (advanced by `gfx.get_frame_time()`) are `loam.ftl` — 27 assertions
+  in `tests/loam/test_ftl.spr` cover the range/fuel gate, every phase transition, and the refuel sign.
+  The general interpolation atoms it builds on are `loam.ease` (`clamp01`/`smoothstep`/`ease_out`/
+  `inv_lerp`/`remap`, on the new `stdlib.math` `fclamp`/`lerp`), tested in `tests/loam/test_ease.spr`.
+- **The warp tunnel (`loam.warp`)** is a GPU shader, a near-copy of `loam.skydome`'s skeleton — a
+  camera-centred inside-out sphere whose fragment shader draws blue-shifted radial star-streaks from the
+  travel axis, length/brightness/flow driven by a `uProgress` uniform, with an envelope that fades in
+  from spool and to black at the end (masking the cut to the vista). No new engine primitive — it uses
+  the existing generic gfx shader API, like every loam shader.
+- **State.** `render_loop` threads the ship's **current location** (`loc_*`, distinct from the `sel_*`
+  target so a jump has a *from* and a *to*), `fuel`, and the `ftl_phase`/`ftl_timer`. The **first star
+  you pick establishes your location** ("board here"), so later picks are jump targets rather than
+  every star reading out-of-range from the seed origin; after that, only a jump moves you. Arrival sets
+  `loc := sel`, burns+tops-up fuel, and flips to view 2; the existing per-system JSON / real-star
+  streaming (`need_load`/`need_bg`) then loads the destination on the next frame — no new loader.
+- **Scripting.** `argv[13] = 1` auto-engages a jump at boot (galaxy view → spool → tunnel → arrival
+  vista) with no interaction, so a headless screenshot can capture the warp tunnel mid-run and the
+  destination vista — see Running below.
+
 ## Spectral-class filter (built)
 
 Right-side legend of 12 clickable class checkboxes (multiselect) + `All`/`None`. Each checkbox box is
@@ -507,6 +549,13 @@ SPROUT_GFX_MAX_FRAMES=120 SPROUT_GFX_SCREENSHOT=galaxy.png \
 # (SPROUT_GFX_SCREENSHOT must be a RELATIVE path — raylib resolves it against the working dir):
 SPROUT_GFX_MAX_FRAMES=120 SPROUT_GFX_SCREENSHOT=ship.png SPROUT_GFX_SCREENSHOT_FRAME=100 \
   mise exec -- just run-gfx examples/gfx/galaxy_map.sprout /Users/cthulhu/GameDev/universegen/catalog 85000 14000 700 0 0 13 4095 1 1 -25141 6520 436
+# interstellar JUMP canary — argv[13]=1 auto-engages a jump at boot (galaxy view -> spool -> warp
+# tunnel -> arrival vista) with no interaction. argv[6]=destination system id, argv[10..12]=its galaxy
+# x,y,z (the ship's current location is seeded 3000 ly off it, an in-range origin). The phase timing is
+# wall-clock (set_target_fps(60)), so the tunnel spans ~frames 132..288 and arrival is ~frame 288 at
+# 60 fps — pick SPROUT_GFX_SCREENSHOT_FRAME in the warp window, and a later frame for the arrival vista:
+SPROUT_GFX_MAX_FRAMES=210 SPROUT_GFX_SCREENSHOT=warp.png SPROUT_GFX_SCREENSHOT_FRAME=200 \
+  mise exec -- just run-gfx examples/gfx/galaxy_map.sprout /Users/cthulhu/GameDev/universegen/catalog 85000 14000 700 0 0 13 4095 1 0 -25141 6520 436 1
 ```
 
 `argv[7]` is the initial spectral-class filter mask (bit *c* = class *c* shown; absent = all). It

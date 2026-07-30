@@ -1,0 +1,60 @@
+import stdlib.test (check_true, run_suite)
+import stdlib.math (fabs)
+import loam.ftl (jump_distance, jump_fuel_cost, in_range, can_jump, advance_phase, phase_progress, refuel)
+
+# loam.ftl — the PURE interstellar-jump logic for the galaxy-map demo (scene 0 -> spool -> warp
+# tunnel -> arrive in the destination vista). No graphics, no IO: just the jump geometry, the
+# fuel+range economy, and the phase state machine advanced by a frame delta. The demo threads the
+# phase/timer through its render loop and drives the animation + arrival side-effects off these.
+#
+# Phase codes (Int, matching the demo's `view: Int` idiom): 0 idle, 1 spool, 2 tunnel, 3 arrive.
+# These guard: distance/cost geometry, the range+fuel gate, every phase transition (incl. the
+# blocked-when-!can idle case and the one-frame arrive->idle latch), progress bounds, and the
+# self-balancing refuel (short hop nets fuel, long hop drains).
+
+fn near(a: Double, b: Double) -> Bool = fabs(a - b) < 0.0001
+
+fn ph_ok(res: (Int, Double), ep: Int, et: Double) -> Bool =
+  match res with
+  | (p, t) -> (p == ep) && near(t, et)
+
+fn main() -> Unit !{IO} =
+  run_suite("ftl", [
+    # --- jump_distance: Euclidean ly between two integer star coords ---
+    check_true("distance 3-4-5", near(jump_distance(0, 0, 0, 3, 4, 0), 5.0)),
+    check_true("distance zero", near(jump_distance(7, 7, 7, 7, 7, 7), 0.0)),
+    check_true("distance with negatives", near(jump_distance(-1, -2, -2, 2, 2, 2), 6.4031242)),
+    # --- fuel cost is linear in distance ---
+    check_true("cost = dist*per_ly", near(jump_fuel_cost(10.0, 2.0), 20.0)),
+    # --- in_range (inclusive boundary) ---
+    check_true("in range", in_range(5.0, 10.0)),
+    check_true("out of range",! in_range (15.0, 10.0)),
+    check_true("range boundary inclusive", in_range(10.0, 10.0)),
+    # --- can_jump: in range AND enough fuel ---
+    check_true("can jump: in range + fuel", can_jump(5.0, 10.0, 20.0, 2.0)),
+    check_true("cannot: out of range",! can_jump (15.0, 10.0, 999.0, 2.0)),
+    check_true("cannot: low fuel",! can_jump (5.0, 10.0, 8.0, 2.0)),
+    check_true("can: fuel exactly cost", can_jump(5.0, 10.0, 10.0, 2.0)),
+    # --- advance_phase: idle transitions gate on engage && can ---
+    check_true("idle+engage+can -> spool", ph_ok(advance_phase(0, 0.0, 0.016, true, true, 2.0, 3.0), 1, 0.0)),
+    check_true("idle+engage+!can stays idle", ph_ok(advance_phase(0, 0.0, 0.016, true, false, 2.0, 3.0), 0, 0.0)),
+    check_true("idle+!engage stays idle", ph_ok(advance_phase(0, 0.0, 0.016, false, true, 2.0, 3.0), 0, 0.0)),
+    # --- advance_phase: spool accumulates then crosses to tunnel ---
+    check_true("spool accumulates timer", ph_ok(advance_phase(1, 0.0, 0.5, false, true, 2.0, 3.0), 1, 0.5)),
+    check_true("spool crosses -> tunnel", ph_ok(advance_phase(1, 1.8, 0.5, false, true, 2.0, 3.0), 2, 0.0)),
+    # --- advance_phase: tunnel accumulates then crosses to arrive ---
+    check_true("tunnel accumulates timer", ph_ok(advance_phase(2, 0.0, 1.0, false, true, 2.0, 3.0), 2, 1.0)),
+    check_true("tunnel crosses -> arrive", ph_ok(advance_phase(2, 2.9, 0.5, false, true, 2.0, 3.0), 3, 0.0)),
+    # --- advance_phase: arrive is a one-frame latch back to idle ---
+    check_true("arrive -> idle next frame", ph_ok(advance_phase(3, 0.0, 0.016, false, true, 2.0, 3.0), 0, 0.0)),
+    # --- phase_progress: 0..1 within the current phase, clamped ---
+    check_true("progress spool half", near(phase_progress(1, 1.0, 2.0, 3.0), 0.5)),
+    check_true("progress tunnel half", near(phase_progress(2, 1.5, 2.0, 3.0), 0.5)),
+    check_true("progress arrive = 1", near(phase_progress(3, 0.0, 2.0, 3.0), 1.0)),
+    check_true("progress idle = 0", near(phase_progress(0, 9.0, 2.0, 3.0), 0.0)),
+    check_true("progress clamps over 1", near(phase_progress(1, 5.0, 2.0, 3.0), 1.0)),
+    # --- refuel economy: flat refuel + distance-proportional cost ---
+    check_true("short hop nets fuel", near(refuel(50.0, 5.0, 20.0, 100.0), 65.0)),
+    check_true("long hop drains fuel", near(refuel(50.0, 40.0, 20.0, 100.0), 30.0)),
+    check_true("refuel caps at fuel_max", near(refuel(90.0, 5.0, 20.0, 100.0), 100.0))
+  ])

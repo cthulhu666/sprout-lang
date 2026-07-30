@@ -131,3 +131,17 @@ export fn radians(deg: Double) -> Double =
 # callers in that domain must guard.
 export fn tan(x: Double) -> Double =
   sin(x) / cos(x)
+
+# --- General Double utilities (clamping / interpolation) ---
+# The two domain-agnostic numeric atoms every animation/graphics caller reaches for.
+# fclamp is the Double counterpart of the Int `clamp` above (f-prefix, like fabs).
+# lerp is the affine blend of a..b by t; t is UNclamped, so it also extrapolates
+# (t<0 or t>1) — callers wanting a bounded blend clamp t first, or use loam.ease.
+
+export fn fclamp(x: Double, lo: Double, hi: Double) -> Double =
+  if x < lo then lo
+  else if x > hi then hi
+  else x
+
+export fn lerp(a: Double, b: Double, t: Double) -> Double =
+  a + (b - a) * t
