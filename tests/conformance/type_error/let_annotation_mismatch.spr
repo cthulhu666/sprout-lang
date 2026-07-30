@@ -1,0 +1,10 @@
+module main
+
+# TDD — binding-level type annotation `let x : T = e`
+# (docs/binding-annotations-v0.md). `bad` is annotated Int but initialized
+# with a String; the checker must reject the mismatch (§8: reuses the
+# existing unification-failure path). RED until the feature lands (today
+# `parse_let_decl` doesn't accept `: TypeExpr` at all).
+let bad: Int = "hello"
+
+fn main() -> Unit !{IO} = ()

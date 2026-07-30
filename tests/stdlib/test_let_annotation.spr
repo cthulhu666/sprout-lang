@@ -1,0 +1,31 @@
+import stdlib.test (check_eq, check_true, run_suite)
+
+# TDD — binding-level type annotations on top-level `let` bindings,
+# `let x : T = e` (design: docs/binding-annotations-v0.md). RED until the
+# parser/checker/desugar support lands: `parse_let_decl` does not yet accept
+# an optional `: TypeExpr` after the name (docs/binding-annotations-v0.md §4.1),
+# so today this file is expected to fail to parse.
+#
+# ann_vec is the key case: `Vec Int` at a `let` site must drive the same
+# context-directed literal lowering (bare `[...]` -> vec_from_list(...)) that
+# a `fn` param/return annotation already drives (docs/binding-annotations-v0.md
+# §4.4). vec_length/vec_get only typecheck against a real Vec, so if the
+# lowering doesn't fire (ann_vec stays a List), this suite fails to compile.
+
+let ann_int: Int = 5
+
+let ann_list: List Int = [1, 2, 3]
+
+let ann_vec: Vec Int = [10, 20, 30]
+
+fn add_step(acc: Int, x: Int) -> Int = acc + x
+
+fn main() -> Unit !{IO} =
+  run_suite("let_annotation", [
+    check_eq("ann_int : Int = 5", ann_int, 5),
+    check_eq("ann_list : List Int equals literal", ann_list, [1, 2, 3]),
+    check_eq("list_fold sum over ann_list", list_fold(add_step, 0, ann_list), 6),
+    check_true("list_member 2 in ann_list", list_member(2, ann_list)),
+    check_eq("vec_length ann_vec", vec_length(ann_vec), 3),
+    check_eq("vec_get 0 ann_vec", vec_get(0, ann_vec), Just(10))
+  ])

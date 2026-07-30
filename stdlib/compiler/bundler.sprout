@@ -561,7 +561,7 @@ fn add_decl_to_symbols(mod_name: String, exported: List String, ctor_types: List
   match decl with
   | ast.FnDecl name _ _ _ _ _ _ ->
       add_value_to_symbols(mod_name, name, str_list_member(name, exported), acc)
-  | ast.LetDecl name _ _ ->
+  | ast.LetDecl name _ _ _ ->
       add_value_to_symbols(mod_name, name, str_list_member(name, exported), acc)
   | ast.TypeDecl name _ ctors _ _ ->
       add_type_to_symbols(mod_name, name, ctors, exported, ctor_types, acc)
@@ -1006,10 +1006,11 @@ fn qualify_decl(ctx: ResolveCtx, decl: ast.Decl) -> ast.Decl =
         type_params,
         qualify_record_field_decls(ctx, fields),
         pos)
-  | ast.LetDecl name body pos ->
+  | ast.LetDecl name body anno pos ->
       ast.LetDecl(
         dict_get_or(name, ctx_value_locals(ctx), name),
         qualify_expr(ctx, Nil, body),
+        anno,
         pos)
   | ast.ClassDecl name type_params methods superclasses pos ->
       ast.ClassDecl(
@@ -1069,7 +1070,7 @@ fn validate_qualified_decl(decl: ast.Decl) -> Maybe String =
   | ast.TypeDecl name _ _ _ _ ->
       if str_starts_with(name, ".") then Just("TypeDecl name starts with '.': " ++ name)
       else Nothing
-  | ast.LetDecl name _ _ ->
+  | ast.LetDecl name _ _ _ ->
       if str_starts_with(name, ".") then Just("LetDecl name starts with '.': " ++ name)
       else Nothing
   | ast.ClassDecl name _ _ _ _ ->
@@ -1122,7 +1123,7 @@ fn decl_orig_name(decl: ast.Decl) -> String =
   | ast.FnDecl name _ _ _ _ _ _ -> name
   | ast.TypeDecl name _ _ _ _ -> name
   | ast.RecordDecl name _ _ _ -> name
-  | ast.LetDecl name _ _ -> name
+  | ast.LetDecl name _ _ _ -> name
   | ast.ClassDecl name _ _ _ _ -> name
   | ast.InstanceDecl constraint _ _ _ ->
       match constraint with

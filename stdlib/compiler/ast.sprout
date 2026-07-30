@@ -114,7 +114,7 @@ export type InstanceMethodImpl (..) =
 # FnDecl name params return_type effects constraints body pos
 # TypeDecl name type_params constructors deriving_classes pos
 # RecordDecl name type_params fields pos
-# LetDecl name body pos
+# LetDecl name body type_annotation pos
 # ClassDecl name type_params methods superclasses pos
 # InstanceDecl constraint instance_constraints methods pos
 # AliasDecl name type_params rhs pos
@@ -135,7 +135,7 @@ export type Decl (..) =
   | ExternFnDecl String (List Param) (Maybe TypeExpr) (Maybe (List String)) source.SourcePos
   | TypeDecl String (List String) (List TypeConstructor) (List String) source.SourcePos
   | RecordDecl String (List String) (List RecordFieldDecl) source.SourcePos
-  | LetDecl String Expr source.SourcePos
+  | LetDecl String Expr (Maybe TypeExpr) source.SourcePos
   | ClassDecl String (List String) (List ClassMethodSig) (List TypeConstraint) source.SourcePos
   | InstanceDecl TypeConstraint (List TypeConstraint) (List InstanceMethodImpl) source.SourcePos
   | AliasDecl String (List String) TypeExpr source.SourcePos
@@ -150,7 +150,7 @@ export fn decl_pos(d: Decl) -> source.SourcePos =
   | ExternFnDecl _ _ _ _ p -> p
   | TypeDecl _ _ _ _ p -> p
   | RecordDecl _ _ _ p -> p
-  | LetDecl _ _ p -> p
+  | LetDecl _ _ _ p -> p
   | ClassDecl _ _ _ _ p -> p
   | InstanceDecl _ _ _ p -> p
   | AliasDecl _ _ _ p -> p

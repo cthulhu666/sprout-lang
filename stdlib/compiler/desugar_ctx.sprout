@@ -86,8 +86,11 @@ fn desugar_decl_i(d: ast.Decl, fn_idx: Dict (List (Maybe String))) -> ast.Decl =
   match d with
   | ast.FnDecl name params ret effs constraints body pos ->
       ast.FnDecl(name, params, ret, effs, constraints, desugar_expr_i(body, type_expr_bare_name(ret), fn_idx), pos)
-  | ast.LetDecl name body pos ->
-      ast.LetDecl(name, desugar_expr_i(body, Nothing, fn_idx), pos)
+  | ast.LetDecl name body anno pos ->
+      # Coercion parity: a `let x : T = e` annotation drives the same
+      # expected-type-name literal lowering (Vec/StringTemplate) that a fn
+      # param/return annotation does.
+      ast.LetDecl(name, desugar_expr_i(body, type_expr_bare_name(anno), fn_idx), anno, pos)
   | ast.InstanceDecl constraint inst_constraints methods pos ->
       ast.InstanceDecl(constraint, inst_constraints, desugar_instance_methods_i(methods, fn_idx), pos)
   | _ -> d
@@ -423,7 +426,7 @@ fn find_redundant_decls(decls: List ast.Decl, fn_idx: Dict (List (Maybe String))
 fn find_redundant_decl(d: ast.Decl, fn_idx: Dict (List (Maybe String))) -> List source.SourcePos =
   match d with
   | ast.FnDecl _ _ ret _ _ body _ -> find_redundant_expr(body, type_expr_bare_name(ret), fn_idx)
-  | ast.LetDecl _ body _ -> find_redundant_expr(body, Nothing, fn_idx)
+  | ast.LetDecl _ body _ _ -> find_redundant_expr(body, Nothing, fn_idx)
   | ast.InstanceDecl _ _ methods _ -> find_redundant_instance_methods(methods, fn_idx)
   | _ -> Nil
 

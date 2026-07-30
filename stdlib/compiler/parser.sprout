@@ -1570,13 +1570,25 @@ fn parse_optional_where_body(tokens: Vec token.Token, i: Int, body: ast.Expr) ->
         (bindings, i3) <- collect_where_bindings(tokens, i2, Nil)
         Ok((desugar_where(body, bindings), i3))
 
+# Optional `: TypeExpr` annotation (used by `let x : T = e`). Absent -> Nothing,
+# leaving the cursor unmoved; present -> Just the parsed type. Mirrors the
+# parameter-annotation idiom in parse_param_cont.
+fn parse_optional_type_anno(tokens: Vec token.Token, i: Int) -> Result ParseError (Maybe ast.TypeExpr, Int) =
+  match match_symbol(tokens, i, ":") with
+  | Nothing -> Ok((Nothing, i))
+  | Just (_, i2) ->
+      do
+        (ty, i3) <- parse_type_expr(tokens, i2)
+        Ok((Just(ty), i3))
+
 fn parse_let_decl(tokens: Vec token.Token, i: Int) -> Result ParseError (ast.Decl, Int) =
   do
     (_, i2) <- expected_keyword("let", tokens, i)
     (name_tok, i3) <- expected_ident("let binding name", tokens, i2)
-    (_, i4) <- expected_symbol("=", tokens, i3)
+    (anno, i3b) <- parse_optional_type_anno(tokens, i3)
+    (_, i4) <- expected_symbol("=", tokens, i3b)
     (body, i5) <- parse_expr(tokens, i4)
-    Ok((ast.LetDecl(token.token_text(name_tok), body, cur_pos(tokens, i)), i5))
+    Ok((ast.LetDecl(token.token_text(name_tok), body, anno, cur_pos(tokens, i)), i5))
 
 fn parse_record_field_decl(tokens: Vec token.Token, i: Int) -> Result ParseError (ast.RecordFieldDecl, Int) =
   do

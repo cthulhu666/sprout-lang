@@ -278,7 +278,7 @@ fn main() -> Unit !{IO} =
         pos0())))
 
     assert_true(state, "LetDecl roundtrip",
-      rt_decl(ast.LetDecl("pi", ast.IntExpr(3, pos0()), pos0())))
+      rt_decl(ast.LetDecl("pi", ast.IntExpr(3, pos0()), Nothing, pos0())))
 
     assert_true(state, "ClassDecl roundtrip",
       rt_decl(ast.ClassDecl("Eq",
@@ -343,7 +343,7 @@ fn main() -> Unit !{IO} =
 
     let sample_prog = ast.Program(
       Cons(
-        ast.LetDecl("answer", ast.IntExpr(42, pos0()), pos0()),
+        ast.LetDecl("answer", ast.IntExpr(42, pos0()), Nothing, pos0()),
         Cons(
           ast.FnDecl("double",
             Cons(ast.Param("x", Just(ast.TypeName("Int"))), Nil),

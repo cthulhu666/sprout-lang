@@ -1265,7 +1265,10 @@ export fn encode_ast_decl(d: ast.Decl) -> String =
       string_concat_many(["(TypeDecl ", encode_quoted_str(name), " ", encode_str_list(type_params), " ", encode_ast_type_constructor_list(ctors), " ", encode_str_list(deriving_classes), " ", encode_ast_pos(p), ")"])
   | ast.RecordDecl name type_params fields p ->
       string_concat_many(["(RecordDecl ", encode_quoted_str(name), " ", encode_str_list(type_params), " ", encode_ast_record_field_decl_list(fields), " ", encode_ast_pos(p), ")"])
-  | ast.LetDecl name body p ->
+  | ast.LetDecl name body _ p ->
+      # The `let x : T = e` annotation is definition-local (only used to check the
+      # RHS at its definition site); importers need only the inferred scheme, so it
+      # is intentionally not round-tripped through the interface.
       string_concat_many(["(LetDecl ", encode_quoted_str(name), " ", encode_ast_expr(body), " ", encode_ast_pos(p), ")"])
   | ast.ClassDecl name type_params methods superclasses p ->
       string_concat_many(["(ClassDecl ", encode_quoted_str(name), " ", encode_str_list(type_params), " ", encode_ast_class_method_sig_list(methods), " ", encode_ast_type_constraint_list(superclasses), " ", encode_ast_pos(p), ")"])
@@ -2118,7 +2121,7 @@ fn decode_let_decl_body(s: String, bytes: Bytes, i: Int, total: Int) -> Maybe(as
       Just(body, k) = decode_ast_expr_at(s, bytes, skip_ws(s, bytes, j, total), total) else Nothing
       Just(pos, m) = decode_pos_at(s, bytes, skip_ws(s, bytes, k, total), total) else Nothing
       Just end = expect_char(s, bytes, skip_ws(s, bytes, m, total), total, ')') else Nothing
-  in Just((ast.LetDecl(name, body, pos), end))
+  in Just((ast.LetDecl(name, body, Nothing, pos), end))
 
 fn decode_class_decl_body(s: String, bytes: Bytes, i: Int, total: Int) -> Maybe(ast.Decl, Int) =
   let Just(name, j) = decode_quoted_str_at(s, bytes, skip_ws(s, bytes, i, total), total) else Nothing

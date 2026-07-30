@@ -399,7 +399,7 @@ fn find_list_shape_in_decls(decls: List ast.Decl) -> List source.SourcePos =
 fn find_list_shape_in_decl(d: ast.Decl) -> List source.SourcePos =
   match d with
   | ast.FnDecl _ _ _ _ _ body _ -> find_list_shape_in_expr(body)
-  | ast.LetDecl _ body _ -> find_list_shape_in_expr(body)
+  | ast.LetDecl _ body _ _ -> find_list_shape_in_expr(body)
   | ast.InstanceDecl _ _ methods _ -> find_list_shape_in_instance_methods(methods)
   | _ -> Nil
 
@@ -524,7 +524,7 @@ fn find_prefix_pattern_in_decls(decls: List ast.Decl) -> List source.SourcePos =
 fn find_prefix_pattern_in_decl(d: ast.Decl) -> List source.SourcePos =
   match d with
   | ast.FnDecl _ _ _ _ _ body _ -> find_prefix_pattern_in_expr(body)
-  | ast.LetDecl _ body _ -> find_prefix_pattern_in_expr(body)
+  | ast.LetDecl _ body _ _ -> find_prefix_pattern_in_expr(body)
   | ast.InstanceDecl _ _ methods _ -> find_prefix_pattern_in_instance_methods(methods)
   | _ -> Nil
 
@@ -590,7 +590,7 @@ fn walk_instance_methods(methods: List ast.InstanceMethodImpl) -> List LintFindi
 fn walk_decl(d: ast.Decl) -> List LintFinding =
   match d with
   | ast.FnDecl _ _ _ _ _ body _ -> walk_expr(body)
-  | ast.LetDecl _ body _ -> walk_expr(body)
+  | ast.LetDecl _ body _ _ -> walk_expr(body)
   | ast.InstanceDecl _ _ methods _ -> walk_instance_methods(methods)
   | _ -> Nil  # ExternFnDecl/TypeDecl/RecordDecl/ClassDecl/AliasDecl/WrapDecl: no expr body
 

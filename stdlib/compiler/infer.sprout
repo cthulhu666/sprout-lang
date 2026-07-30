@@ -243,6 +243,20 @@ fn build_type_var_dict(vars: List String, acc: Dict types.Type) -> Dict types.Ty
   | Nil -> acc
   | Cons name rest -> build_type_var_dict(rest, dict_set(name, types.TVar(types.tyvar_id(name)), acc))
 
+# Check a top-level `let x : T = e` annotation against the inferred RHS type.
+# Nothing -> pass the substitution through unchanged. Just te -> resolve te
+# (seeding its free lowercase tyvars as TVars, as fn signatures do) and unify it
+# against the inferred RHS type, so the annotation narrows the binding's scheme
+# before generalization. A mismatch is a loud, located error.
+fn apply_let_annotation(anno: Maybe ast.TypeExpr, s1: Dict types.Type, rhs_type: types.Type, alias_env: Dict types.Type, name: String) -> Result String (Dict types.Type) =
+  match anno with
+  | Nothing -> Ok(s1)
+  | Just te ->
+      let decl_type = type_from_ast(te, build_type_var_dict(collect_te_vars(te, Nil), alias_env))
+      in match unifier.unify_types(s1, unifier.apply_subst(s1, rhs_type), decl_type) with
+         | Ok s2 -> Ok(s2)
+         | Err e -> Err("type annotation mismatch for `" ++ name ++ "`: " ++ e)
+
 fn scheme_from_fn_parts_inner(
   type_params: List String,
   params: List ast.Param,
@@ -3972,38 +3986,43 @@ fn typecheck_decl(
             typed_ast.TExternFnDecl(name, params, ret_type_maybe, effects_maybe),
             GlobalEnv(dict_set(name, scheme_from_fn_parts(params, ret_type_maybe, effects_maybe, alias_env), global_env_dict(env))),
             env_ftv)
-  | ast.LetDecl name expr let_pos ->
+  | ast.LetDecl name expr anno let_pos ->
       do
         r <- typecheck_expr(state, global_env_dict(env), subst, eff_subst, expr)
         match r with
         | InferErr pos e -> TypedDeclErr(pos, e)
-        | InferOk typed_expr s1 _ _ ->
-            # Value restriction (W3/F-VALRESTR): a syntactic value generalizes;
-            # a non-value (function call, if/match/do, ...) does not. A non-value
-            # whose type still has free type variables is ambiguous — it can be
-            # neither generalized (unsound: `mutvec_new(1, Nil)` written at Int and
-            # read at String) nor pinned to one type (no whole-program substitution
-            # threads across decls) — so it is rejected, as SML rejects
-            # ungeneralizable top-level type variables.
-            if is_syntactic_value(expr) then
-              TypedDeclOk(
-                typed_ast.TLetDecl(name, typed_expr),
-                GlobalEnv(dict_set(name,
-                  unifier.generalize(env_ftv, s1, eff_subst,
-                    typed_ast.typed_expr_type(typed_expr), types.EffectPure),
-                  global_env_dict(env))),
-                env_ftv)
-            else
-              match types.list_diff(types.ftv(unifier.apply_subst(s1, typed_ast.typed_expr_type(typed_expr))), env_ftv) with
-              | [_ | _] ->
-                  TypedDeclErr(let_pos, "value restriction: non-value binding '" ++ name ++ "' has an ambiguous polymorphic type " ++ types.type_to_string(unifier.apply_subst(s1, typed_ast.typed_expr_type(typed_expr))) ++ "; bind a value or add a concrete type annotation")
-              | Nil ->
+        | InferOk typed_expr s1raw _ _ ->
+            # An optional `let x : T = e` annotation is checked against the
+            # inferred RHS type before generalization, narrowing the scheme.
+            match apply_let_annotation(anno, s1raw, typed_ast.typed_expr_type(typed_expr), alias_env, name) with
+            | Err msg -> TypedDeclErr(let_pos, msg)
+            | Ok s1 ->
+                # Value restriction (W3/F-VALRESTR): a syntactic value generalizes;
+                # a non-value (function call, if/match/do, ...) does not. A non-value
+                # whose type still has free type variables is ambiguous — it can be
+                # neither generalized (unsound: `mutvec_new(1, Nil)` written at Int and
+                # read at String) nor pinned to one type (no whole-program substitution
+                # threads across decls) — so it is rejected, as SML rejects
+                # ungeneralizable top-level type variables.
+                if is_syntactic_value(expr) then
                   TypedDeclOk(
                     typed_ast.TLetDecl(name, typed_expr),
                     GlobalEnv(dict_set(name,
-                      types.mono(unifier.apply_subst(s1, typed_ast.typed_expr_type(typed_expr))),
+                      unifier.generalize(env_ftv, s1, eff_subst,
+                        typed_ast.typed_expr_type(typed_expr), types.EffectPure),
                       global_env_dict(env))),
                     env_ftv)
+                else
+                  match types.list_diff(types.ftv(unifier.apply_subst(s1, typed_ast.typed_expr_type(typed_expr))), env_ftv) with
+                  | [_ | _] ->
+                      TypedDeclErr(let_pos, "value restriction: non-value binding '" ++ name ++ "' has an ambiguous polymorphic type " ++ types.type_to_string(unifier.apply_subst(s1, typed_ast.typed_expr_type(typed_expr))) ++ "; bind a value or add a concrete type annotation")
+                  | Nil ->
+                      TypedDeclOk(
+                        typed_ast.TLetDecl(name, typed_expr),
+                        GlobalEnv(dict_set(name,
+                          types.mono(unifier.apply_subst(s1, typed_ast.typed_expr_type(typed_expr))),
+                          global_env_dict(env))),
+                        env_ftv)
   | ast.AliasDecl _ _ _ _ ->
       TypedDeclOk(typed_ast.TPassThrough(decl), env, env_ftv)
   | ast.ClassDecl class_name type_params methods superclasses _ ->

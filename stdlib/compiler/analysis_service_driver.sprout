@@ -117,7 +117,7 @@ fn collect_decl_names(decls: List ast.Decl, acc: List String) -> List String =
           collect_decl_names(rest, ctor_names(ctors, Cons(name, acc)))
       | ast.RecordDecl name _ _ _ ->
           collect_decl_names(rest, Cons(name, acc))
-      | ast.LetDecl name _ _ ->
+      | ast.LetDecl name _ _ _ ->
           collect_decl_names(rest, Cons(name, acc))
       | ast.ClassDecl name _ methods _ _ ->
           collect_decl_names(rest, method_sig_names(methods, Cons(name, acc)))
@@ -171,7 +171,7 @@ fn collect_decl_locations(
             Cons("type", categories), Cons(name, names),
             Cons(source.position_line(pos) + line_offset, lines),
             Cons(source.position_column(pos), cols))
-      | ast.LetDecl name _ pos ->
+      | ast.LetDecl name _ _ pos ->
           collect_decl_locations(rest, line_offset,
             Cons("let", categories), Cons(name, names),
             Cons(source.position_line(pos) + line_offset, lines),
