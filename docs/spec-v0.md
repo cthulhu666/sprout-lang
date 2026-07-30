@@ -136,6 +136,26 @@ let answer = 42
 Bindings are immutable.
 At top level, `let` initializers must be pure.
 
+**Type annotation (experimental).** A top-level `let` binding may carry an
+optional type annotation between the name and `=`:
+
+```sprout
+let answer : Int = 42
+```
+
+The initializer is checked against the written type: its inferred type must
+unify with the annotation, or it is a compile error
+(`type annotation mismatch for \`<name>\`: …`). The annotation is applied before
+generalization, so it narrows the binding's type — and, like a function
+parameter/return annotation, it drives the same expected-type-directed literal
+lowering, so `let xs : Vec Int = [1, 2, 3]` yields a `Vec` (§5.5.1) at the
+binding site. Free lowercase names in the annotation are ordinary type variables
+(`let id_pair : (a, a) = …`).
+
+This version annotates **top-level** `let` bindings only; annotations on
+`let … in` (§5.2.1), function-local `where` bindings, and do-block `let` steps
+are not yet part of the language. See `docs/binding-annotations-v0.md`.
+
 ### 5.2.1 `let … in` binding block
 
 In pure expression position, a `let … in` block introduces one or more local
