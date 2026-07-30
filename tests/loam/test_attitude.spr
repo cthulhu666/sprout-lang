@@ -3,27 +3,31 @@ import stdlib.math (pi, fabs)
 import loam.attitude (Attitude, wrap_pi, bearing, attitude_step, attitude_aligned)
 
 # loam.attitude — the PURE rotational core for the galaxy-map demo: the ship's yaw is a physical body
-# with momentum, slewed toward a target bearing by maneuvering thrusters (bang-bang with braking:
-# full torque toward the error, then flip to counter-thrust once inside braking distance, settling
-# without ringing). The translational dual is loam.supercruise; this drives ship_heading before the
-# drive engages. Graphics-free and IO-free (only stdlib.math), so the slew dynamics are unit-tested
-# here; the demo threads (heading, omega) through its render loop and reads `thrust` for plume VFX.
+# with momentum, slewed toward a target bearing by maneuvering thrusters. FAR from the target it is
+# BANG-BANG WITH BRAKING (full torque, flip to counter-thrust inside braking distance) so the gross
+# slew is time-optimal and settles without ringing; WITHIN the tolerance it switches to a PROPORTIONAL-
+# DERIVATIVE micro-hold that emits small CONTINUOUS thrust — so a dithered target (station-keeping
+# noise, added by the demo) produces constant tiny corrections instead of the ship going dead-still.
+# `thrust` is the signed RCS command FRACTION in [-1,1]: magnitude = how hard the couple fires (the
+# demo scales the plume size by it), sign = which side. Graphics-free / IO-free, so it is unit-tested.
 #
-# Guards: angle wrapping into (-pi, pi]; the atan2 bearing convention (heading 0 = +z, +x = +pi/2);
-# the aligned predicate; spin-up from rest (accelerate toward the target, thrust +1); convergence to
-# the target with omega settling to ~0; and the no-large-overshoot property that makes braking real.
+# Guards: angle wrapping; the atan2 bearing convention; the aligned predicate; gross spin-up from rest
+# (full thrust +1); convergence with omega settling to ~0 (overdamped PD, no ring); the no-overshoot
+# property; and the micro-hold — a within-tolerance error yields a small SIGNED proportional thrust.
 
 fn near(a: Double, b: Double) -> Bool = fabs(a - b) < 0.0001
 
-# Fixed slew params for the sim runners: dt=0.05, ang_accel=3.0, omega_max=1.5, tol=0.01.
+# Fixed slew params: dt=0.05, ang_accel=3.0, omega_max=1.5, tol=0.01, hold_kp=40, hold_kd=8
+# (a=3,kp=40 -> wn=sqrt(120)=10.95; kd=8 -> zeta=(3*8)/(2*wn)=1.10, overdamped).
 fn step1(a: Attitude, target: Double) -> Attitude =
-  attitude_step(a.heading, a.omega, target, 0.05, 3.0, 1.5, 0.01)
+  attitude_step(a.heading, a.omega, target, 0.05, 3.0, 1.5, 0.01, 40.0, 8.0)
 
 fn run_att(a: Attitude, target: Double, n: Int) -> Attitude =
   if n <= 0 then a
   else run_att(step1(a, target), target, n - 1)
 
-# Peak heading reached over the sim — the overshoot guard (bang-bang braking must not sail past target).
+# Peak heading reached over the sim — the overshoot guard (bang-bang braking + overdamped hold must
+# not sail past the target).
 fn peak_head(a: Attitude, target: Double, n: Int, mx: Double) -> Double =
   if n <= 0 then mx
   else
@@ -32,9 +36,12 @@ fn peak_head(a: Attitude, target: Double, n: Int, mx: Double) -> Double =
     in peak_head(a2, target, n - 1, mx2)
 
 fn main() -> Unit !{IO} =
-  let start = Attitude(heading = 0.0, omega = 0.0, thrust = 0)
+  let start = Attitude(heading = 0.0, omega = 0.0, thrust = 0.0)
       first = step1(start, 1.0)
       settled = run_att(start, 1.0, 100)
+      # within-tolerance micro-hold: a tiny +error (0.005 <= tol 0.01) with the ship at rest
+      micro_pos = attitude_step(1.0, 0.0, 1.005, 0.05, 3.0, 1.5, 0.01, 40.0, 8.0)
+      micro_neg = attitude_step(1.0, 0.0, 0.995, 0.05, 3.0, 1.5, 0.01, 40.0, 8.0)
   in run_suite("attitude", [
     # --- wrap_pi: fold any angle into (-pi, pi] ---
     check_true("wrap_pi(0.5) == 0.5", near(wrap_pi(0.5), 0.5)),
@@ -50,16 +57,20 @@ fn main() -> Unit !{IO} =
     check_true("not aligned when far", attitude_aligned(0.0, 0.0, 1.0, 0.01, 0.03) == false),
     check_true("not aligned when spinning on-target",
       attitude_aligned(1.0, 0.5, 1.0, 0.01, 0.03) == false),
-    # --- spin-up from rest: accelerate toward +target, RCS couple thrust +1 ---
+    # --- gross spin-up from rest: accelerate toward +target at FULL thrust +1 ---
     check_true("first step accelerates +", first.omega > 0.0),
     check_true("first step heading advances", first.heading > 0.0),
-    check_true("first step thrust = +1", first.thrust == 1),
-    # --- convergence: settles at the target with omega ~ 0, and reads as aligned ---
+    check_true("gross slew fires full thrust", first.thrust > 0.99),
+    # --- convergence: overdamped PD settles at the target, omega ~ 0, reads as aligned ---
     check_true("settles at target heading", fabs(settled.heading - 1.0) < 0.02),
     check_true("settles with ~zero omega", fabs(settled.omega) < 0.03),
     check_true("aligned after settling",
       attitude_aligned(settled.heading, settled.omega, 1.0, 0.02, 0.05)),
-    check_true("thrust idle after settling", settled.thrust == 0),
+    check_true("hold thrust ~idle after settling", fabs(settled.thrust) < 0.05),
+    # --- micro-hold: a within-tolerance error yields a SMALL SIGNED proportional thrust (not full) ---
+    check_true("micro +err fires small + thrust", (micro_pos.thrust > 0.0) && (micro_pos.thrust < 1.0)),
+    check_true("micro +err nudges heading up", micro_pos.heading > 1.0),
+    check_true("micro -err fires small - thrust", (micro_neg.thrust < 0.0) && (micro_neg.thrust > 0.0 - 1.0)),
     # --- braking is real: no large overshoot past the target ---
     check_true("no large overshoot", peak_head(start, 1.0, 100, 0.0) < 1.1)
   ])

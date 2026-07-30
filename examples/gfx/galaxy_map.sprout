@@ -197,10 +197,21 @@ let vista_pick_r2 = 3600.0  # vista body-pick radius^2 (px^2) ~60 px, generous f
 
 # --- Maneuvering thrusters (FTL iteration 2): the ship must yaw to FACE the travel vector before the
 # drive engages (the align phase), via loam.attitude's bang-bang-with-braking slew. ---
-let sc_turn_accel = 2.5  # RCS angular acceleration (rad/s^2)
-let sc_turn_omega_max = 1.8  # angular-rate cap (rad/s) — a brisk but weighty swing
-let sc_align_tol = 0.03  # aligned when heading within ~1.7 deg of the target bearing (rad)
-let sc_align_omega_tol = 0.08  # ...and nearly stopped (rad/s), so a fast fly-through isn't "aligned"
+let sc_turn_accel = 1.15  # RCS angular acceleration (rad/s^2) — LOW so the hull feels HEAVY: a long,
+# visible spin-up ramp and a long braking arc (momentum you can see), not a snappy servo.
+let sc_turn_omega_max = 0.95  # angular-rate cap (rad/s) — a slow, weighty swing
+let sc_align_tol = 0.03  # gross-slew -> PD micro-hold boundary (~1.7 deg); also the align tolerance
+let sc_align_omega_tol = 0.10  # aligned needs |omega| under this (rad/s) — above the micro-hold jitter
+# PD micro-hold gains: overdamped (wn=sqrt(accel*kp)~7, zeta~1.5) so the gross-slew handoff settles
+# without ringing while the hold stays stiff enough to track the dither below as crisp small pulses.
+let sc_hold_kp = 40.0
+let sc_hold_kd = 12.0
+# Station-keeping dither: the target bearing is nudged by a low-frequency pseudo-random noise so the
+# PD hold never goes dead-still — it fires constant tiny corrections (a live ship holding attitude).
+# Amplitude stays UNDER sc_align_tol so the dither never breaks the "aligned" gate.
+let sc_jitter_amp = 0.012  # dither amplitude (rad, ~0.7 deg)
+let sc_jitter_hz = 4.0  # how often the noise target re-rolls (per second); slow enough to read as a maneuver
+let sc_jitter_seed = 90210  # decorrelates the dither hash from the star-sampling hash
 # Per-hull geometry so the ship-draw + thruster-plume code is hull-AGNOSTIC: adding a new hull is
 # adding one ShipProfile (measured once) + pointing draw_vista_scene at it — nothing below hardcodes
 # rusty's numbers. All lengths are world units at the profile's own `scale`. The plume VFX are layered
@@ -1167,36 +1178,38 @@ fn ship_draw_yaw(fwd_az: Double, heading: Double) -> Double =
 # expel direction (ex,ez), shrinking (core → tip) and dimming as they go — a sharp directional cold-gas
 # jet (hot blue-white at the mouth, fading blue). This is the visible reaction mass being thrown, so the
 # torque reads physically instead of a static orb hovering by the hull.
-fn draw_rcs_burst(nx: Double, nz: Double, ex: Double, ez: Double, rc: RcsPlume, i: Int) -> Unit !{IO} =
+# `scale` (0..1) shrinks the whole burst — reach AND radii — so its size reflects the RCS thrust
+# magnitude: a gross-slew jet is full, a station-keeping micro-correction is a small puff.
+fn draw_rcs_burst(nx: Double, nz: Double, ex: Double, ez: Double, rc: RcsPlume, scale: Double, i: Int) -> Unit !{IO} =
   if i >= rcs_burst_steps then ()
   else
     let t = to_double(i) / to_double(rcs_burst_steps - 1)
-        d = rc.len * t
+        d = rc.len * scale * t
         px = nx + (ex * d)
         pz = nz + (ez * d)
-        size = lerp(rc.r0, rc.r1, t)
+        size = lerp(rc.r0, rc.r1, t) * scale
         cr = gfx.double_to_int(lerp(170.0, 30.0, t))
         cg = gfx.double_to_int(lerp(215.0, 100.0, t))
         cb = gfx.double_to_int(lerp(255.0, 195.0, t))
     in do
       gfx.draw_glow(px, 0.0, pz, size, cr, cg, cb)
-      draw_rcs_burst(nx, nz, ex, ez, rc, i + 1)
+      draw_rcs_burst(nx, nz, ex, ez, rc, scale, i + 1)
 
 # The yaw couple: a fore nozzle expels to one flank and an aft nozzle to the OTHER (that off-axis pair
 # is the torque). Each burst starts on the flank it fires from (the ±rgt*side offset) and shoots further
 # out that way. `side` (-1/+1) flips both, so the jets visibly swap flanks when the bang-bang controller
 # switches from spin-up to braking. Cool-blue reaction jets.
 fn draw_rcs_couple(ctr_x: Double, ctr_z: Double, fwd_x: Double, fwd_z: Double,
-                   rgt_x: Double, rgt_z: Double, side: Double, rc: RcsPlume) -> Unit !{IO} =
+                   rgt_x: Double, rgt_z: Double, side: Double, scale: Double, rc: RcsPlume) -> Unit !{IO} =
   do
     # fore nozzle: forward of centre, on the -side flank, expelling further -side (force pushes fore +side)
     draw_rcs_burst((ctr_x + (fwd_x * rc.fwd)) - (rgt_x * rc.side * side),
                    (ctr_z + (fwd_z * rc.fwd)) - (rgt_z * rc.side * side),
-                   0.0 - (rgt_x * side), 0.0 - (rgt_z * side), rc, 0)
+                   0.0 - (rgt_x * side), 0.0 - (rgt_z * side), rc, scale, 0)
     # aft nozzle: behind centre, on the +side flank, expelling further +side (force pushes aft -side)
     draw_rcs_burst((ctr_x - (fwd_x * rc.fwd)) + (rgt_x * rc.side * side),
                    (ctr_z - (fwd_z * rc.fwd)) + (rgt_z * rc.side * side),
-                   rgt_x * side, rgt_z * side, rc, 0)
+                   rgt_x * side, rgt_z * side, rc, scale, 0)
 
 # The main-drive exhaust column: `plume_steps` additive glows stepping aft from the nozzle at (nx,nz)
 # along the aft direction (afx,afz). Parameter t (0 at the nozzle → 1 at the tail) drives BOTH the
@@ -1222,7 +1235,7 @@ fn draw_plume_trail(nx: Double, nz: Double, afx: Double, afz: Double, flick: Dou
 # While CRUISING, the main drive burns aft as a tapering exhaust column. Positions derive from the hull
 # axis fwd=(sin h, cos h) and its right-perpendicular, so the plumes rotate with the ship. A slow
 # sin(time) flicker breathes the drive so it looks live rather than a frozen decal.
-fn draw_ship_thrusters(heading: Double, thrust: Int, phase: Int, sp: ShipProfile) -> Unit !{IO} =
+fn draw_ship_thrusters(heading: Double, thrust: Double, phase: Int, sp: ShipProfile) -> Unit !{IO} =
   let dr = sp.drive
       rc = sp.rcs
       fwd_x = sin(heading)
@@ -1231,13 +1244,16 @@ fn draw_ship_thrusters(heading: Double, thrust: Int, phase: Int, sp: ShipProfile
       rgt_z = 0.0 - sin(heading)
       # The hull is drawn recentred (draw_vista_scene offsets by -pivot→centre), so the hull centre
       # IS the world origin here. Anchor every plume at (0,0) and step out along the hull axes.
-      side = to_double(thrust)
+      # `thrust` is the signed RCS command fraction: sign picks the firing flank, magnitude sizes it.
+      side = if thrust >= 0.0 then 1.0 else 0.0 - 1.0
+      mag = if thrust < 0.0 then 0.0 - thrust else thrust
+      bscale = 0.3 + (0.7 * mag)  # floor so a micro-correction is a small-but-visible puff, up to full
       flick = 1.0 + (0.10 * sin(gfx.get_time() * 22.0))
       # Nozzle mouth = hull centre stepped aft along -fwd; the trail then continues further aft.
       nx = 0.0 - (fwd_x * dr.aft)
       nz = 0.0 - (fwd_z * dr.aft)
   in do
-    if thrust == 0 then () else draw_rcs_couple(0.0, 0.0, fwd_x, fwd_z, rgt_x, rgt_z, side, rc)
+    if mag < 0.02 then () else draw_rcs_couple(0.0, 0.0, fwd_x, fwd_z, rgt_x, rgt_z, side, bscale, rc)
     if phase == sc_cruise
       then do
         gfx.draw_glow(nx, 0.0, nz, dr.r0 * flick, 210, 230, 255)  # small hot blue-white bell-mouth spot
@@ -1253,7 +1269,7 @@ fn draw_ship_thrusters(heading: Double, thrust: Int, phase: Int, sp: ShipProfile
 # `heading`/`thrust`/`phase` drive the hull yaw and the maneuvering-thruster plumes.
 fn draw_vista_scene(oax: Double, oaz: Double, ps: List Planet, bg: List BgStar, sun_sh: Int, sky_sh: Int,
                     cdx: Double, cdy: Double, cdz: Double, ship_model: Int, sp: ShipProfile,
-                    heading: Double, thrust: Int, phase: Int) -> Unit !{IO} =
+                    heading: Double, thrust: Double, phase: Int) -> Unit !{IO} =
   do
     sky.draw_sky(sky_sh, vista_sky_r, cdx, cdy, cdz)
     draw_bgstars(bg)
@@ -1804,7 +1820,7 @@ fn render_loop(dir: String, cam: Cam, scam: Cam, shipcam: Cam, radius: Double, l
                loc_name: String, loc_x: Int, loc_y: Int, loc_z: Int,
                fuel: Double, ftl_phase: Int, ftl_timer: Double, warp_sh: Int,
                ship_ax: Double, ship_az: Double, sc_phase: Int, sc_timer: Double, sc_target: Int,
-               sc_boot: Int, ship_heading: Double, ship_omega: Double, ship_thrust: Int) -> Unit !{IO} =
+               sc_boot: Int, ship_heading: Double, ship_omega: Double, ship_thrust: Double) -> Unit !{IO} =
   do
     stop <- gfx.window_should_close()
     if stop then gfx.close_window()
@@ -1861,7 +1877,7 @@ fn render_loop(dir: String, cam: Cam, scam: Cam, shipcam: Cam, radius: Double, l
         # facing on a system change so a fresh vista starts pointed forward (+z), not mid-swing.
         let cur_heading = if need_load then 0.0 else ship_heading
         let cur_omega = if need_load then 0.0 else ship_omega
-        let cur_thrust = if need_load then 0 else ship_thrust
+        let cur_thrust = if need_load then 0.0 else ship_thrust
         # Supercruise auto-engage canary (argv[14] >= 0): once the system has loaded and the drive is
         # idle, lock that body index and force an engage, then consume the boot target (one-shot). Lets
         # a headless screenshot capture a mid-cruise disc-swell without input (mirrors argv[13]).
@@ -1956,6 +1972,7 @@ fn render_loop(dir: String, cam: Cam, scam: Cam, shipcam: Cam, radius: Double, l
         kd <- gfx.key_down(gfx.key_d)
         sp <- gfx.space_pressed()
         dtf <- gfx.get_frame_time()
+        now <- gfx.get_time()
         gfx.frame_end()
         # UI hit-region (computed before the pick so a click on the legend / buttons never selects a
         # star): the scene-switch button (bottom-right), or in scene 1 the filter legend + All/None.
@@ -2035,10 +2052,21 @@ fn render_loop(dir: String, cam: Cam, scam: Cam, shipcam: Cam, radius: Double, l
         # travel vector. In other phases the heading is held (no torque). Rendered NEXT frame via the
         # threaded ship_heading/ship_thrust (this frame's draw already ran, above).
         let sc_target_bearing = bearing(sc_tx - cur_ax, sc_tz - cur_az)
-        let att = if (cur_scphase == sc_align) || (cur_scphase == sc_cruise)
-                  then attitude_step(cur_heading, cur_omega, sc_target_bearing, dtf,
-                                     sc_turn_accel, sc_turn_omega_max, sc_align_tol)
-                  else Attitude(heading = cur_heading, omega = 0.0, thrust = 0)
+        # Attitude runs EVERY frame so the maneuvering thrusters make constant station-keeping micro-
+        # corrections even when not maneuvering. The hold reference is the travel vector only while the
+        # drive is engaged (align slews to it, spool/cruise hold it); when idle the ship holds its
+        # CURRENT heading — so selecting a target does NOT pre-emptively turn the hull (the deliberate
+        # turn is the align phase).
+        let att_ref = if (cur_scphase == sc_align) || (cur_scphase == sc_spool) || (cur_scphase == sc_cruise)
+                      then sc_target_bearing
+                      else cur_heading
+        # Station-keeping dither: re-roll a pseudo-random offset ~sc_jitter_hz times/sec (held ~1/hz s,
+        # so the ship makes a small correction toward it over several frames, then a new one). Kept
+        # under sc_align_tol so the PD hold stays "aligned" while it constantly twitches.
+        let jtick = gfx.double_to_int(now * sc_jitter_hz)
+        let att_target = att_ref + ((hash01(jtick, sc_jitter_seed) - 0.5) * 2.0 * sc_jitter_amp)
+        let att = attitude_step(cur_heading, cur_omega, att_target, dtf,
+                                sc_turn_accel, sc_turn_omega_max, sc_align_tol, sc_hold_kp, sc_hold_kd)
         let sc_aligned = attitude_aligned(att.heading, att.omega, sc_target_bearing,
                                           sc_align_tol, sc_align_omega_tol)
         let sc_step_res = sc_advance(cur_scphase, cur_sctimer, dtf, sc_engage, sc_can, sc_aligned, sc_arr, sc_spool_secs)
@@ -2212,4 +2240,4 @@ fn main() -> Unit !{IO} =
                 boot_name, boot_detail, boot_sx, boot_sy, boot_sz, boot_has, 0, 0, start_view, seed_lvl, "", Nil, "", "",
                 init_mask, false,! (init_grid == 0), sun_sh, planet_sh, gas_sh, ship_model, sky_sh, Nil, "",
                 boot_name, loc0_x, loc0_y, loc0_z, fuel_max, ftl0, 0.0, warp_sh,
-                ship_sun_dist_au, 0.0, sc_idle, 0.0, 0 - 1, sc_boot_arg, 0.0, 0.0, 0)
+                ship_sun_dist_au, 0.0, sc_idle, 0.0, 0 - 1, sc_boot_arg, 0.0, 0.0, 0.0)
