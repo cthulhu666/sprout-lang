@@ -1,0 +1,28 @@
+import stdlib.test (check_eq, run_suite)
+
+# TDD — Stage 0a: unconstrained existential constructors (docs/gadts-v0.md §5/§6).
+# Ratified syntax: a constructor-level `exists` prefix binds a type variable that
+# is absent from the type head, so `Boxed(x)` HIDES x's type behind `Boxed`.
+# RED until parser + checker support lands: today `| exists a. Boxed a` is a
+# parse error (`exists` is neither a keyword nor an uppercase constructor name).
+#
+# The observable payoff of 0a is a HETEROGENEOUS list that typechecks. Without
+# existentials, `[Boxed(1), Boxed("hi"), Boxed(true)]` fails to unify Int vs
+# String vs Bool; with the hidden `a`, every element is plainly `Boxed`, so the
+# list is `List Boxed` and counts to 3. The unpacked value is abstract
+# (unconstrained), so `describe` may only ignore it — using it at a concrete
+# type is the escape error covered by
+# tests/conformance/type_error/existential_escape.spr.
+
+type Boxed = | exists a. Boxed a
+
+fn describe(b: Boxed) -> String =
+  match b with
+  | Boxed _ -> "boxed"
+
+fn main() -> Unit !{IO} =
+  let items = [Boxed(1), Boxed("hi"), Boxed(true)] in
+  run_suite("existential_0a", [
+    check_eq("heterogeneous list length", list_length(items), 3),
+    check_eq("describe ignores hidden value", describe(Boxed(42)), "boxed")
+  ])

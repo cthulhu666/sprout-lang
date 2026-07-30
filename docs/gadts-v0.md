@@ -231,12 +231,37 @@ one dictionary devirtualization is designed to leave behind, and it adds no new
 runtime dispatch *mechanism* — it points the existing dict-passing path at a
 heap field.
 
-## 6. Syntax and semantics impact (illustrative)
+## 6. Syntax and semantics impact
 
-- **Syntax.** A per-constructor existential binder, e.g.
-  `| Shown (exists a. ToString a => a)` (form not ratified). The AST constructor
-  node gains an optional list of existentially-bound variables plus their
-  constraints.
+**Ratified surface syntax (2026-07-30).** The binder is a **constructor-level
+`exists` prefix**, with **`any C` as single-field sugar**:
+
+```sprout
+# Explicit prefix — scopes over ALL of the constructor's fields.
+# Unconstrained (Stage 0a):
+type Boxed  = | exists a. Boxed a
+# Constrained (Stage 0b):
+type Shown  = | exists a. ToString a => Shown a
+# Shared hidden state — one `s` spanning several fields (needs the prefix):
+type Widget = | exists s. W s (s -> Event -> s) (s -> String)
+
+# `any C` sugar — the ergonomic 90% case (single hidden var, single
+# constraint, single field). Lands with Stage 0b (it is inherently
+# constrained; there is no unconstrained `any`).
+type Shown2 = | Shown2 (any ToString)   #  ≡  | exists a. ToString a => Shown2 a
+```
+
+The prefix placement (before the constructor name, not wrapping one field) is
+deliberate: it is the only form that lets the hidden variable scope over
+multiple fields, which the `Widget` closure-over-state case requires. `any C`
+desugars to a fresh prefix binder, so it is strictly a shorthand — the two
+forms share one implementation.
+
+- **Syntax / AST.** `TypeConstructor String (List TypeExpr)` (`ast.sprout:99`)
+  gains an optional existential-binder payload: the bound variables
+  `(List String)` and their constraints `(List TypeConstraint)` (empty for
+  Stage 0a). The parser accepts the `exists <vars>. [<constraints> =>]` prefix
+  in constructor position and desugars a field-position `any C` into it.
 - **Construction (pack).** `Shown(v)` checks `v` against the bound variable
   instantiated to a fresh unification unknown; if constrained, the resolved
   dictionary for that type is captured into the constructor. The hidden variable

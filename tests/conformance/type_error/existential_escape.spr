@@ -1,0 +1,17 @@
+module main
+
+# Stage 0a soundness test — THE escape check (docs/gadts-v0.md §7/§8).
+# Unpacking `Boxed(x)` binds `x` to a fresh rigid (skolem) type scoped to that
+# match branch. Returning it at a concrete type (here `Int`, forced by the
+# declared return) would let the hidden type leak out of its scope and MUST be
+# rejected. RED for the right reason today = a parse error on `exists`; after
+# the feature lands = a located "existential ... escapes its scope" diagnostic.
+
+type Boxed = | exists a. Boxed a
+
+fn leak(b: Boxed) -> Int =
+  match b with
+  | Boxed x -> x
+
+fn main() -> Unit !{IO} =
+  print(leak(Boxed(42)))
