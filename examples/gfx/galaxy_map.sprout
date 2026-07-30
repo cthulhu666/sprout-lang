@@ -208,15 +208,22 @@ let sc_align_omega_tol = 0.08  # ...and nearly stopped (rad/s), so a fast fly-th
 # overlapping glows bloom and read as emitted light, not solid geometry. Offsets in world units (ship
 # extent ~53). The RCS couple fires OFF-axis (fore one side, aft the other) to make the torque.
 let plume_nose = 20.0  # RCS nozzle fore/aft offset from hull centre along the hull axis
-let plume_side = 8.0  # ...and lateral offset, so the couple produces a yaw moment
-let rcs_core_r = 5.0  # RCS bright cold-gas core (tight, hot blue-white)
-let rcs_halo_r = 11.0  # ...and its soft surrounding halo (wide, dim blue)
-# Main drive: a tapering trail of glows stepping aft from the nozzle, cooling white->red as it widens.
-let plume_drive_aft = 30.0  # nozzle position behind the hull centre while cruising
-let plume_core_r = 5.5  # hot core glow at the nozzle mouth (blue-white, brightest)
-let plume_tail_r = 13.0  # widest glow at the end of the trail (dim red)
-let plume_len = 46.0  # how far aft the exhaust trail reaches from the nozzle
-let plume_steps = 11  # glow billboards composing the trail (dense enough to fuse into a column)
+let plume_side = 8.0  # ...and lateral offset onto the firing flank, so the couple produces a yaw moment
+# RCS jet: a short directional cold-gas burst — small glows shooting OUTWARD (sideways) from the
+# nozzle, shrinking + dimming, so it reads as expelled gas producing torque, not a static orb.
+let rcs_core_r = 4.5  # burst glow at the nozzle mouth (hot blue-white)
+let rcs_tip_r = 1.6  # ...shrinking to this at the tip of the burst
+let rcs_burst_len = 14.0  # how far the gas burst reaches out from the nozzle
+let rcs_burst_steps = 6  # glows composing one burst (dense enough to fuse into a jet, not dots)
+# Main drive: a trail of glows stepping aft from the nozzle, cooling white->red. TIGHT at the nozzle
+# (so it doesn't wash forward over the hull) and blooming WIDE only far aft (clear of the hull), which
+# is what makes it read as exhaust leaving the engine rather than a blob at mid-ship.
+let plume_drive_aft = 34.0  # nozzle position behind the hull centre (~the engine bell mouth) while cruising
+let plume_nozzle_r = 3.5  # hot core glow right at the bell mouth (small + intense, minimal forward wash)
+let plume_core_r = 3.5  # trail width at the nozzle end (tight)
+let plume_tail_r = 14.0  # widest glow at the end of the trail (dim red, well aft of the hull)
+let plume_len = 54.0  # how far aft the exhaust trail reaches from the nozzle
+let plume_steps = 16  # glow billboards composing the trail (dense enough to fuse into a column)
 # The GLB's visible hull centre is offset from its pivot (draw_model puts the pivot at the origin);
 # measured against fixed world axes. Plumes are placed relative to this centre, rotated by heading, so
 # they stay on the hull. Local frame: +Z = forward (nose), +X = right (starboard).
@@ -1137,23 +1144,40 @@ fn draw_vista_planets(oax: Double, oaz: Double, ps: List Planet, sun_sh: Int) ->
 fn ship_draw_yaw(heading: Double) -> Double =
   ship_fwd_az + (heading * 180.0 / pi)
 
-# A single reaction jet: a tight bright core glow inside a wide dim halo (two additive layers → a soft
-# cold-gas puff with a hot centre, per draw_glow's own "layer a tight bright + a wide dim" recipe).
-fn draw_rcs_jet(x: Double, z: Double) -> Unit !{IO} =
-  do
-    gfx.draw_glow(x, 0.0, z, rcs_halo_r, 40, 90, 190)  # wide, dim blue wash
-    gfx.draw_glow(x, 0.0, z, rcs_core_r, 170, 210, 255)  # tight, hot blue-white core
+# One RCS gas burst: `rcs_burst_steps` small glows shooting OUTWARD from the nozzle at (nx,nz) along the
+# expel direction (ex,ez), shrinking (core → tip) and dimming as they go — a sharp directional cold-gas
+# jet (hot blue-white at the mouth, fading blue). This is the visible reaction mass being thrown, so the
+# torque reads physically instead of a static orb hovering by the hull.
+fn draw_rcs_burst(nx: Double, nz: Double, ex: Double, ez: Double, i: Int) -> Unit !{IO} =
+  if i >= rcs_burst_steps then ()
+  else
+    let t = to_double(i) / to_double(rcs_burst_steps - 1)
+        d = rcs_burst_len * t
+        px = nx + (ex * d)
+        pz = nz + (ez * d)
+        size = lerp(rcs_core_r, rcs_tip_r, t)
+        cr = gfx.double_to_int(lerp(170.0, 30.0, t))
+        cg = gfx.double_to_int(lerp(215.0, 100.0, t))
+        cb = gfx.double_to_int(lerp(255.0, 195.0, t))
+    in do
+      gfx.draw_glow(px, 0.0, pz, size, cr, cg, cb)
+      draw_rcs_burst(nx, nz, ex, ez, i + 1)
 
-# One RCS puff pair for the yaw couple: a fore nozzle on one side and an aft nozzle on the other (that
-# off-axis pair is what makes the torque). `side` (-1/+1) flips which diagonal fires, so the jets
-# visibly swap when the bang-bang controller switches from spin-up to braking. Cool-blue reaction jets.
+# The yaw couple: a fore nozzle expels to one flank and an aft nozzle to the OTHER (that off-axis pair
+# is the torque). Each burst starts on the flank it fires from (the ±rgt*side offset) and shoots further
+# out that way. `side` (-1/+1) flips both, so the jets visibly swap flanks when the bang-bang controller
+# switches from spin-up to braking. Cool-blue reaction jets.
 fn draw_rcs_couple(ctr_x: Double, ctr_z: Double, fwd_x: Double, fwd_z: Double,
                    rgt_x: Double, rgt_z: Double, side: Double) -> Unit !{IO} =
   do
-    draw_rcs_jet(ctr_x + (fwd_x * plume_nose) + (rgt_x * plume_side * side),
-                 ctr_z + (fwd_z * plume_nose) + (rgt_z * plume_side * side))
-    draw_rcs_jet((ctr_x - (fwd_x * plume_nose)) - (rgt_x * plume_side * side),
-                 (ctr_z - (fwd_z * plume_nose)) - (rgt_z * plume_side * side))
+    # fore nozzle: forward of centre, on the -side flank, expelling further -side (force pushes fore +side)
+    draw_rcs_burst((ctr_x + (fwd_x * plume_nose)) - (rgt_x * plume_side * side),
+                   (ctr_z + (fwd_z * plume_nose)) - (rgt_z * plume_side * side),
+                   0.0 - (rgt_x * side), 0.0 - (rgt_z * side), 0)
+    # aft nozzle: behind centre, on the +side flank, expelling further +side (force pushes aft -side)
+    draw_rcs_burst((ctr_x - (fwd_x * plume_nose)) + (rgt_x * plume_side * side),
+                   (ctr_z - (fwd_z * plume_nose)) + (rgt_z * plume_side * side),
+                   rgt_x * side, rgt_z * side, 0)
 
 # The main-drive exhaust column: `plume_steps` additive glows stepping aft from the nozzle at (nx,nz)
 # along the aft direction (afx,afz). Parameter t (0 at the nozzle → 1 at the tail) drives BOTH the
@@ -1196,7 +1220,7 @@ fn draw_ship_thrusters(heading: Double, thrust: Int, phase: Int) -> Unit !{IO} =
     if thrust == 0 then () else draw_rcs_couple(ctr_x, ctr_z, fwd_x, fwd_z, rgt_x, rgt_z, side)
     if phase == sc_cruise
       then do
-        gfx.draw_glow(nx, 0.0, nz, plume_core_r * flick, 210, 230, 255)  # hot blue-white nozzle spot
+        gfx.draw_glow(nx, 0.0, nz, plume_nozzle_r * flick, 210, 230, 255)  # small hot blue-white bell-mouth spot
         draw_plume_trail(nx, nz, 0.0 - fwd_x, 0.0 - fwd_z, flick, 0)
       else ()
 
