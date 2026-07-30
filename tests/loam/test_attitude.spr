@@ -1,0 +1,65 @@
+import stdlib.test (check_true, run_suite)
+import stdlib.math (pi, fabs)
+import loam.attitude (Attitude, wrap_pi, bearing, attitude_step, attitude_aligned)
+
+# loam.attitude — the PURE rotational core for the galaxy-map demo: the ship's yaw is a physical body
+# with momentum, slewed toward a target bearing by maneuvering thrusters (bang-bang with braking:
+# full torque toward the error, then flip to counter-thrust once inside braking distance, settling
+# without ringing). The translational dual is loam.supercruise; this drives ship_heading before the
+# drive engages. Graphics-free and IO-free (only stdlib.math), so the slew dynamics are unit-tested
+# here; the demo threads (heading, omega) through its render loop and reads `thrust` for plume VFX.
+#
+# Guards: angle wrapping into (-pi, pi]; the atan2 bearing convention (heading 0 = +z, +x = +pi/2);
+# the aligned predicate; spin-up from rest (accelerate toward the target, thrust +1); convergence to
+# the target with omega settling to ~0; and the no-large-overshoot property that makes braking real.
+
+fn near(a: Double, b: Double) -> Bool = fabs(a - b) < 0.0001
+
+# Fixed slew params for the sim runners: dt=0.05, ang_accel=3.0, omega_max=1.5, tol=0.01.
+fn step1(a: Attitude, target: Double) -> Attitude =
+  attitude_step(a.heading, a.omega, target, 0.05, 3.0, 1.5, 0.01)
+
+fn run_att(a: Attitude, target: Double, n: Int) -> Attitude =
+  if n <= 0 then a
+  else run_att(step1(a, target), target, n - 1)
+
+# Peak heading reached over the sim — the overshoot guard (bang-bang braking must not sail past target).
+fn peak_head(a: Attitude, target: Double, n: Int, mx: Double) -> Double =
+  if n <= 0 then mx
+  else
+    let a2 = step1(a, target)
+        mx2 = if a2.heading > mx then a2.heading else mx
+    in peak_head(a2, target, n - 1, mx2)
+
+fn main() -> Unit !{IO} =
+  let start = Attitude(heading = 0.0, omega = 0.0, thrust = 0)
+      first = step1(start, 1.0)
+      settled = run_att(start, 1.0, 100)
+  in run_suite("attitude", [
+    # --- wrap_pi: fold any angle into (-pi, pi] ---
+    check_true("wrap_pi(0.5) == 0.5", near(wrap_pi(0.5), 0.5)),
+    check_true("wrap_pi(2pi+0.3) == 0.3", near(wrap_pi(2.0 * pi + 0.3), 0.3)),
+    check_true("wrap_pi(-2pi-0.3) == -0.3", near(wrap_pi(0.0 - 2.0 * pi - 0.3), 0.0 - 0.3)),
+    # --- bearing (heading 0 = +z; +x = +pi/2) ---
+    check_true("bearing(0,1) == 0", near(bearing(0.0, 1.0), 0.0)),
+    check_true("bearing(1,0) == pi/2", near(bearing(1.0, 0.0), pi / 2.0)),
+    check_true("bearing(-1,0) == -pi/2", near(bearing(0.0 - 1.0, 0.0), 0.0 - pi / 2.0)),
+    check_true("bearing(0,-1) == pi", near(bearing(0.0, 0.0 - 1.0), pi)),
+    # --- aligned predicate: on-target AND still ---
+    check_true("aligned when on-target & still", attitude_aligned(1.0, 0.0, 1.0, 0.01, 0.03)),
+    check_true("not aligned when far", attitude_aligned(0.0, 0.0, 1.0, 0.01, 0.03) == false),
+    check_true("not aligned when spinning on-target",
+      attitude_aligned(1.0, 0.5, 1.0, 0.01, 0.03) == false),
+    # --- spin-up from rest: accelerate toward +target, RCS couple thrust +1 ---
+    check_true("first step accelerates +", first.omega > 0.0),
+    check_true("first step heading advances", first.heading > 0.0),
+    check_true("first step thrust = +1", first.thrust == 1),
+    # --- convergence: settles at the target with omega ~ 0, and reads as aligned ---
+    check_true("settles at target heading", fabs(settled.heading - 1.0) < 0.02),
+    check_true("settles with ~zero omega", fabs(settled.omega) < 0.03),
+    check_true("aligned after settling",
+      attitude_aligned(settled.heading, settled.omega, 1.0, 0.02, 0.05)),
+    check_true("thrust idle after settling", settled.thrust == 0),
+    # --- braking is real: no large overshoot past the target ---
+    check_true("no large overshoot", peak_head(start, 1.0, 100, 0.0) < 1.1)
+  ])

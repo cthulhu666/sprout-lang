@@ -1,6 +1,6 @@
 import stdlib.test (check_true, run_suite)
 import stdlib.math (fabs)
-import loam.supercruise (sc_idle, sc_spool, sc_cruise, sc_speed, sc_step, sc_arrived, sc_advance)
+import loam.supercruise (sc_idle, sc_align, sc_spool, sc_cruise, sc_speed, sc_step, sc_arrived, sc_advance)
 
 # loam.supercruise — the PURE intra-system supercruise logic for the galaxy-map demo (FTL iteration
 # 2). On-rails point-and-go: pick a body in the ship vista, engage, and the ship's AU position slides
@@ -50,12 +50,25 @@ fn main() -> Unit !{IO} =
     # --- convergence: repeated stepping reaches the standoff ring ---
     check_true("converges to standoff", arrived_after(100)),
     check_true("not yet arrived after 1 step",! arrived_after (1)),
-    # --- sc_advance: the phase machine (idle -> spool -> cruise -> drop) ---
-    check_true("idle+engage+can -> spool", ph_ok(sc_advance(sc_idle, 0.0, 0.016, true, true, false, 1.0), sc_spool, 0.0)),
-    check_true("idle+engage+!can stays idle", ph_ok(sc_advance(sc_idle, 0.0, 0.016, true, false, false, 1.0), sc_idle, 0.0)),
-    check_true("idle+!engage stays idle", ph_ok(sc_advance(sc_idle, 0.0, 0.016, false, true, false, 1.0), sc_idle, 0.0)),
-    check_true("spool accumulates timer", ph_ok(sc_advance(sc_spool, 0.5, 0.3, false, true, false, 1.0), sc_spool, 0.8)),
-    check_true("spool -> cruise at spool_s", ph_ok(sc_advance(sc_spool, 0.9, 0.2, false, true, false, 1.0), sc_cruise, 0.0)),
-    check_true("cruise + !arrived stays cruise", ph_ok(sc_advance(sc_cruise, 0.0, 0.1, false, true, false, 1.0), sc_cruise, 0.1)),
-    check_true("cruise + arrived -> idle", ph_ok(sc_advance(sc_cruise, 5.0, 0.1, false, true, true, 1.0), sc_idle, 0.0))
+    # --- sc_advance: the phase machine (idle -> align -> spool -> cruise -> drop) ---
+    # signature: sc_advance(phase, timer, dt, engage, can, aligned, arrived, spool_s)
+    # idle now enters ALIGN (rotate to bearing) before spool; align holds until `aligned`.
+    check_true("idle+engage+can -> align",
+      ph_ok(sc_advance(sc_idle, 0.0, 0.016, true, true, false, false, 1.0), sc_align, 0.0)),
+    check_true("idle+engage+!can stays idle",
+      ph_ok(sc_advance(sc_idle, 0.0, 0.016, true, false, false, false, 1.0), sc_idle, 0.0)),
+    check_true("idle+!engage stays idle",
+      ph_ok(sc_advance(sc_idle, 0.0, 0.016, false, true, false, false, 1.0), sc_idle, 0.0)),
+    check_true("align + !aligned accumulates timer",
+      ph_ok(sc_advance(sc_align, 0.5, 0.3, false, true, false, false, 1.0), sc_align, 0.8)),
+    check_true("align + aligned -> spool",
+      ph_ok(sc_advance(sc_align, 0.4, 0.1, false, true, true, false, 1.0), sc_spool, 0.0)),
+    check_true("spool accumulates timer",
+      ph_ok(sc_advance(sc_spool, 0.5, 0.3, false, true, false, false, 1.0), sc_spool, 0.8)),
+    check_true("spool -> cruise at spool_s",
+      ph_ok(sc_advance(sc_spool, 0.9, 0.2, false, true, false, false, 1.0), sc_cruise, 0.0)),
+    check_true("cruise + !arrived stays cruise",
+      ph_ok(sc_advance(sc_cruise, 0.0, 0.1, false, true, false, false, 1.0), sc_cruise, 0.1)),
+    check_true("cruise + arrived -> idle",
+      ph_ok(sc_advance(sc_cruise, 5.0, 0.1, false, true, false, true, 1.0), sc_idle, 0.0))
   ])

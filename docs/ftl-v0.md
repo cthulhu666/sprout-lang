@@ -116,10 +116,22 @@ Deliberate deviations, each forced by our context:
     UX. Speed `v = clamp((remaining − standoff)·k, v_min, v_max)` AU/s: fast far, eases to the drop,
     with a `v_min` floor so the approach never Zeno-stalls. Standoff is larger for the star (don't fly
     into it) and a few body-radii for a planet, with a floor.
-  - **State machine** `sc_idle → sc_spool → sc_cruise`, mirroring the interstellar machine but with
-    cruise ending on a **spatial** condition (arrival within the standoff), not a timer — so `arrived`
-    is a caller-supplied gate. On a system change the ship AU position + drive reset (a fresh system
-    starts you 1 AU out); within a system they persist across galaxy↔vista toggles.
+  - **Attitude: the ship turns to face the travel vector *before* the drive engages** (added in a
+    second pass over iteration 2). The hull yaw is a physical body with momentum, slewed toward the
+    target bearing by maneuvering thrusters — a **bang-bang-with-braking** (time-optimal) controller:
+    full RCS torque toward the heading error, then a flip to full counter-thrust once inside the
+    braking distance `ω²/2α`, settling at the bearing without ringing. This reads as physical (you see
+    the RCS couple fire, then flip to brake) and, because it terminates deterministically, is unit-
+    testable. Yaw-only: `draw_model` rotates about Y alone, which also matches supercruise being planar
+    in (x, z). Visual effects reuse `draw_sphere` (no new gfx primitive): a **cool-blue RCS couple**
+    (fore/aft, off-axis) fires while aligning and flips side on the brake; a **main-drive plume** burns
+    aft while cruising.
+  - **State machine** `sc_idle → sc_align → sc_spool → sc_cruise`, mirroring the interstellar machine.
+    Both `align` and `cruise` end on a **spatial** condition (`aligned` / `arrived`), not a timer — so
+    those are caller-supplied gates — while `spool` is the one timed phase. Turn-then-charge: `align`
+    holds until the ship faces the target, only then does the drive spool. On a system change the ship
+    AU position, heading + drive reset (a fresh system starts you 1 AU out, facing forward); within a
+    system they persist across galaxy↔vista toggles.
   - **Target picking** reuses the body-marker projection (nearest body to the cursor); the locked
     target's reticle is highlighted and always labelled (exempt from declutter).
 
@@ -140,7 +152,11 @@ route planning when a target is out of single-hop range.
 
 ## Engine-hook mapping (implementation)
 
-- **`stdlib.math`** — the two general numeric atoms `fclamp` / `lerp`.
+- **`stdlib.math`** — the general numeric atoms `fclamp` / `lerp`, plus `atan` / `atan2` (pure, same
+  self-hosted style as `sin`: a halving reduction `atan(x)=2·atan(x/(1+√(1+x²)))` down to a Taylor
+  series, then `atan2` quadrant bookkeeping) for the attitude bearing. Also fixed a latent `floor` bug
+  the bearing flushed out — `round_nearest`'s `+2^52` magic-number round was wrong for negative inputs
+  (they land in the ULP=0.5 binade and snap to a half-integer); now rounds the magnitude and re-signs.
 - **`loam.ease`** (new, pure, headless-tested) — `clamp01` / `smoothstep` / `ease_out` / `inv_lerp` /
   `remap`. Domain-agnostic easing; reused by the jump fade, iter-2 supercruise, camera dollies.
 - **`loam.ftl`** (new, pure, headless-tested — `tests/loam/test_ftl.spr`) — the whole risky core:
@@ -155,9 +171,16 @@ route planning when a target is out of single-hop range.
 - **`loam.supercruise`** (new, pure, headless-tested — `tests/loam/test_supercruise.spr`) — the
   intra-system closing kinematics + machine: `sc_speed` (clamped proximity speed), `sc_step` (one
   convergent frame of on-rails travel toward the target), `sc_arrived` (standoff test), `sc_advance`
-  (the `idle→spool→cruise` machine, cruise ending on `arrived` rather than a timer). Phase codes are
-  `Int` (0..2), matching `loam.ftl`. 17 assertions lock the speed clamp, `sc_step` convergence, the
-  standoff arrival, and every transition before any rendering.
+  (the `idle→align→spool→cruise` machine, `align`/`cruise` ending on the caller's `aligned`/`arrived`
+  gates). Phase codes are `Int` unordered tags. 19 assertions lock the speed clamp, `sc_step`
+  convergence, the standoff arrival, and every transition (incl. the align gate) before any rendering.
+- **`loam.attitude`** (new, pure, headless-tested — `tests/loam/test_attitude.spr`) — the rotational
+  dual of `loam.supercruise`: `wrap_pi` (shortest-path angle fold), `bearing` (atan2 direction),
+  `attitude_step` (one bang-bang-with-braking slew frame, returning an `Attitude` record of heading +
+  angular velocity + the RCS couple sign for the VFX), `attitude_aligned` (settle predicate: on-target
+  *and* nearly stopped). The controller uses a **terminal capture** (null ω when the target is within
+  one frame's stopping range) to defeat the discrete-step chatter a fixed `omega_tol` would cause. 18
+  assertions lock wrapping, the bearing convention, spin-up, convergence, and no-overshoot.
 - **`galaxy_map.sprout`** — threads `loc_*` (current location, distinct from the `sel_*` target),
   `fuel`, `ftl_phase`, `ftl_timer`, `warp_sh` through `render_loop`; advances the machine with
   `gfx.get_frame_time()`; draws the warp during the tunnel phase (skipping the normal scene) and the
@@ -167,16 +190,22 @@ route planning when a target is out of single-hop range.
   For supercruise it also threads the ship's **AU position** `(ship_ax, ship_az)` + `sc_phase`/
   `sc_timer`/`sc_target` through `render_loop`, feeds that moving position to `project_body` as the
   observer (sun, planets, and the markers), steps it with `sc_step` while cruising, and resets it on a
-  system change. A second canary (`argv[14]=<body index>`) auto-targets + supercruises at boot.
+  system change. A second canary (`argv[14]=<body index>`) auto-targets + supercruises at boot. The
+  attitude adds three more threaded accumulators — `ship_heading` / `ship_omega` / `ship_thrust` —
+  stepped by `attitude_step` after each frame's draw (render-current-state, then integrate); the
+  heading feeds `draw_model`'s yaw (via a calibration offset) and the thruster-plume VFX.
 
 ## Tests
 
 - `tests/loam/test_ftl.spr` (27 assertions) — the jump geometry, the range+fuel gate, every phase
   transition (incl. blocked-when-`!can` and the arrive→idle latch), progress bounds, refuel economy.
-- `tests/loam/test_supercruise.spr` (17) — the proximity speed clamp, `sc_step` convergence to the
-  standoff, the arrival test, and every supercruise transition.
+- `tests/loam/test_supercruise.spr` (19) — the proximity speed clamp, `sc_step` convergence to the
+  standoff, the arrival test, and every supercruise transition (incl. the `align` gate).
+- `tests/loam/test_attitude.spr` (18) — angle wrap, the bearing convention, thruster spin-up,
+  convergence to the target with ω settling, and the no-large-overshoot property.
 - `tests/loam/test_ease.spr` (19) — the interpolation atoms.
-- `tests/stdlib/test_math_double.spr` — extended with `fclamp` / `lerp`.
+- `tests/stdlib/test_math_double.spr` — extended with `fclamp` / `lerp` / `atan` / `atan2` and the
+  negative-`floor` regression cases.
 - The rendering (warp shader, the moving-observer vista, HUD, arrival flows) is validated by the
   build-and-run gate (headless screenshot canaries), per AGENTS DoD #13 — GLSL and the render loop are
   not unit-testable.

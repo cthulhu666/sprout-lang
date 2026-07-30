@@ -18,6 +18,7 @@ module loam.supercruise
 import stdlib.math (sqrt, fclamp)
 
 export let sc_idle = 0
+export let sc_align = 3
 export let sc_spool = 1
 export let sc_cruise = 2
 
@@ -50,16 +51,23 @@ export fn sc_arrived(sx: Double, sz: Double, tx: Double, tz: Double, standoff: D
   in sqrt((dx * dx) + (dz * dz)) <= standoff
 
 # Advance the supercruise phase machine by one frame. `engage` is the trigger this frame (button/
-# Space); `can` is the gate (a valid target locked && drive idle) evaluated by the caller; `arrived`
-# is sc_arrived for the current position (also caller-computed, since cruise ends spatially). Idle
-# launches on `engage && can`; spool accumulates `timer` until `spool_s` then enters cruise; cruise
-# holds until `arrived`, then drops to idle. The caller does the stepping (sc_step) while in cruise.
-export fn sc_advance(phase: Int, timer: Double, dt: Double, engage: Bool, can: Bool, arrived: Bool,
-                     spool_s: Double) -> (Int, Double) =
-  if phase == sc_spool then
+# Space); `can` is the gate (a valid target locked && drive idle) evaluated by the caller; `aligned`
+# is caller-computed (loam.attitude — is the ship pointed at the target and settled?); `arrived` is
+# sc_arrived for the current position (also caller-computed, since these phases end spatially, not on
+# a timer). Idle launches ALIGN on `engage && can`; align holds (accumulating `timer` for the HUD)
+# until `aligned` — the ship must physically turn to face the travel vector BEFORE the drive charges;
+# spool then accumulates until `spool_s` and enters cruise; cruise holds until `arrived`, then drops
+# to idle. The caller drives the rotation (attitude_step) in align and the translation (sc_step) in
+# cruise. Phase codes are unordered tags (idle 0, spool 1, cruise 2, align 3); the flow is
+# idle -> align -> spool -> cruise -> idle regardless of the numeric values.
+export fn sc_advance(phase: Int, timer: Double, dt: Double, engage: Bool, can: Bool, aligned: Bool,
+                     arrived: Bool, spool_s: Double) -> (Int, Double) =
+  if phase == sc_align then
+    if aligned then (sc_spool, 0.0) else (sc_align, timer + dt)
+  else if phase == sc_spool then
     let t2 = timer + dt
     in if t2 >= spool_s then (sc_cruise, 0.0) else (sc_spool, t2)
   else if phase == sc_cruise then
     if arrived then (sc_idle, 0.0) else (sc_cruise, timer + dt)
-  else if (engage && can) then (sc_spool, 0.0)
+  else if (engage && can) then (sc_align, 0.0)
   else (sc_idle, 0.0)

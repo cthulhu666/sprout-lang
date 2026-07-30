@@ -1,0 +1,69 @@
+module loam.attitude
+
+# PURE rotational dynamics for the galaxy-map demo — the ship's yaw treated as a physical body with
+# momentum. Where loam.supercruise integrates POSITION from a proximity-scaled speed, this integrates
+# HEADING from a thruster-driven angular acceleration. Used to swing the ship to point at the
+# supercruise target BEFORE the drive engages (the align phase): idle -> align -> spool -> cruise.
+#
+# Controller: BANG-BANG WITH BRAKING (time-optimal slew). Each frame apply full torque toward the
+# heading error, but once inside the braking distance (omega^2 / 2a) flip to full counter-thrust so
+# the ship arrests exactly at the target instead of ringing past it. This is what makes the maneuver
+# look physical — you see the RCS couple fire one way to spin up, then flip to brake — and it settles
+# deterministically, so it is unit-tested in tests/loam/test_attitude.spr.
+#
+# Graphics-free and IO-free (only stdlib.math). The demo threads (heading, omega) through its render
+# loop, calls attitude_step each frame while aligning, feeds heading (as degrees) to draw_model, and
+# reads `thrust` (-1/0/+1, the firing RCS couple this frame) to place the plume VFX on the right side.
+
+import stdlib.math (pi, floor, fabs, fclamp, atan2)
+
+# The ship's rotational state plus the RCS couple firing this frame: thrust +1/-1 = torque this
+# way / that way (which side the plumes flare), 0 = coasting or settled (no plume).
+export type Attitude = (heading: Double, omega: Double, thrust: Int)
+
+# Fold an angle into (-pi, pi] so the shortest-path error is used (turn left vs right, never the long
+# way around). Same magic as stdlib.math's sin range-reduction, one period wide and centered on 0.
+export fn wrap_pi(a: Double) -> Double =
+  a - two_pi * floor((a + pi) / two_pi)
+  where two_pi = 2.0 * pi
+
+# Target bearing from a direction vector in the orbital (x, z) plane. Convention: heading 0 points +z
+# (into the screen / system forward) and +x is +pi/2 (starboard). atan2(dx, dz) realizes exactly that.
+export fn bearing(dx: Double, dz: Double) -> Double =
+  atan2(dx, dz)
+
+# Aligned when the heading is within `tol` of the target AND the ship is nearly still (|omega| <=
+# omega_tol) — a fast fly-through of the target bearing is NOT aligned; the drive waits for a settle.
+export fn attitude_aligned(heading: Double, omega: Double, target: Double,
+                           tol: Double, omega_tol: Double) -> Bool =
+  (fabs(wrap_pi(target - heading)) <= tol) && (fabs(omega) <= omega_tol)
+
+fn fsign(x: Double) -> Double =
+  if x > 0.0 then 1.0
+  else if x < 0.0 then 0.0 - 1.0
+  else 0.0
+
+fn fsign_i(x: Double) -> Int =
+  if x > 0.0 then 1
+  else if x < 0.0 then 0 - 1
+  else 0
+
+# One frame of the slew. `ang_accel` is the thruster angular acceleration (rad/s^2), `omega_max` the
+# angular-rate cap, `tol`/`omega_tol` the settle window. Returns the new Attitude. Bang-bang law:
+#   - already aligned -> stop dead (omega 0, no plume).
+#   - closing on the target and inside braking distance omega^2/(2a) -> counter-thrust (brake).
+#   - otherwise -> full thrust toward the error (which also arrests any wrong-way spin, since the
+#     error's sign opposes an overshooting omega).
+export fn attitude_step(heading: Double, omega: Double, target: Double, dt: Double,
+                        ang_accel: Double, omega_max: Double, tol: Double) -> Attitude =
+  let e = wrap_pi(target - heading)
+  in if (fabs(e) <= tol) && (fabs(omega) <= ang_accel * dt)
+     then Attitude(heading = heading, omega = 0.0, thrust = 0)
+     else
+       let d_brake = (omega * omega) / (2.0 * ang_accel)
+           closing = (omega * e) > 0.0
+           td = if closing && (fabs(e) <= d_brake) then 0.0 - fsign(omega)
+                else fsign(e)
+           omega2 = fclamp(omega + td * ang_accel * dt, 0.0 - omega_max, omega_max)
+           heading2 = heading + omega2 * dt
+       in Attitude(heading = heading2, omega = omega2, thrust = fsign_i(td))

@@ -21,7 +21,8 @@ import loam.billboard as bb
 import loam.nebula as nb
 import loam.planet as pl
 import loam.ftl (phase_idle, phase_spool, phase_tunnel, phase_arrive, jump_distance, jump_fuel_cost, can_jump, advance_phase, phase_progress, refuel)
-import loam.supercruise (sc_idle, sc_spool, sc_cruise, sc_speed, sc_step, sc_arrived, sc_advance)
+import loam.supercruise (sc_idle, sc_align, sc_spool, sc_cruise, sc_speed, sc_step, sc_arrived, sc_advance)
+import loam.attitude (Attitude, bearing, attitude_step, attitude_aligned)
 import loam.warp as warp
 
 # Sprout / Loam — 3D GALAXY MAP (scene 1) with zoom-adaptive streaming.
@@ -141,7 +142,8 @@ let s2_pan_bound = 2500.0
 let ship_model_path = "assets/models/rusty_spaceship.glb"
 let ship_scale = 2.8  # baked model ~19-unit extent -> ~53 world units (GetModelBoundingBox, not the
 # raw glTF accessors, which are ~90x larger before the node scale)
-let ship_yaw = 30.0  # hull heading in degrees about Y (draw_model rotates about Y only)
+let ship_yaw = 30.0  # baked-model heading calibration (deg about Y): the hull's facing at dynamic
+# heading 0. The supercruise attitude adds onto this (ship_draw_yaw); draw_model rotates about Y only.
 
 # Where the ship sits, as distance from the sun in AU (1 AU ~ 150M km). At ~1 AU the sun is a small
 # ~0.5-degree disc and the planets are specks — the "inner system" look. Raise it for a lonelier
@@ -194,6 +196,20 @@ let sc_standoff_min = 0.06  # planet drop-out distance floor (AU)
 let sc_standoff_body_mult = 800.0  # planet standoff = radius_au * this (radii are ~4e-5 AU, so ~0.03)
 let sc_star_standoff = 0.5  # star drop-out distance (AU) — well clear of the disc
 let vista_pick_r2 = 3600.0  # vista body-pick radius^2 (px^2) ~60 px, generous for pinpoint specks
+
+# --- Maneuvering thrusters (FTL iteration 2): the ship must yaw to FACE the travel vector before the
+# drive engages (the align phase), via loam.attitude's bang-bang-with-braking slew. ---
+let sc_turn_accel = 2.5  # RCS angular acceleration (rad/s^2)
+let sc_turn_omega_max = 1.8  # angular-rate cap (rad/s) — a brisk but weighty swing
+let sc_align_tol = 0.03  # aligned when heading within ~1.7 deg of the target bearing (rad)
+let sc_align_omega_tol = 0.08  # ...and nearly stopped (rad/s), so a fast fly-through isn't "aligned"
+# Thruster plume VFX — emissive spheres (draw_sphere; no new gfx primitive). Offsets in world units
+# (ship extent ~53). The RCS couple fires OFF-axis (fore one side, aft the other) to make the torque.
+let plume_nose = 16.0  # RCS nozzle fore/aft offset from ship centre along the hull axis
+let plume_side = 7.0  # ...and lateral offset, so the couple produces a yaw moment
+let plume_r = 3.2  # RCS puff radius
+let plume_drive_aft = 20.0  # main-drive plume offset behind the ship while cruising
+let plume_drive_r = 5.5  # main-drive plume radius
 
 # --- Scene 3 real-star layer: a few hundred ACTUAL catalog stars near the system, projected in their
 # true directions over the faked sky-dome as class-coloured glows (brighter than the procedural field,
@@ -1101,21 +1117,58 @@ fn draw_vista_planets(oax: Double, oaz: Double, ps: List Planet, sun_sh: Int) ->
         draw_vista_planet(oax, oaz, p, sun_sh)
         draw_vista_planets(oax, oaz, rest, sun_sh)
 
+# Ship hull heading (radians, loam.attitude bearing convention) -> draw_model yaw (degrees). `ship_yaw`
+# is the baked-model calibration offset; the dynamic heading adds on top. Subtracted because draw_model's
+# Y rotation runs opposite to the atan2(dx,dz) bearing sense (calibrated against the vista, see docs).
+fn ship_draw_yaw(heading: Double) -> Double =
+  ship_yaw - (heading * 180.0 / pi)
+
+# One RCS puff pair for the yaw couple: a fore nozzle on one side and an aft nozzle on the other (that
+# off-axis pair is what makes the torque). `side` (-1/+1) flips which diagonal fires, so the plumes
+# visibly swap when the bang-bang controller switches from spin-up to braking. Cool-blue reaction jets.
+fn draw_rcs_couple(fwd_x: Double, fwd_z: Double, rgt_x: Double, rgt_z: Double, side: Double) -> Unit !{IO} =
+  do
+    gfx.draw_sphere((fwd_x * plume_nose) + (rgt_x * plume_side * side), 0.0,
+                    (fwd_z * plume_nose) + (rgt_z * plume_side * side), plume_r, 120, 180, 255)
+    gfx.draw_sphere((0.0 - (fwd_x * plume_nose)) - (rgt_x * plume_side * side), 0.0,
+                    (0.0 - (fwd_z * plume_nose)) - (rgt_z * plume_side * side), plume_r, 120, 180, 255)
+
+# Maneuvering-thruster VFX (no new gfx primitive — just emissive draw_sphere puffs). While ALIGNING,
+# the RCS couple fires to yaw the hull (`thrust` -1/+1 = which way; 0 = coasting, no jets). While
+# CRUISING, the main drive burns aft. Positions derive from the hull axis fwd=(sin h, cos h) and its
+# right-perpendicular, so the plumes rotate with the ship.
+fn draw_ship_thrusters(heading: Double, thrust: Int, phase: Int) -> Unit !{IO} =
+  let fwd_x = sin(heading)
+      fwd_z = cos(heading)
+      rgt_x = cos(heading)
+      rgt_z = 0.0 - sin(heading)
+      side = to_double(thrust)
+  in do
+    if thrust == 0 then () else draw_rcs_couple(fwd_x, fwd_z, rgt_x, rgt_z, side)
+    if phase == sc_cruise
+      then gfx.draw_sphere(0.0 - (fwd_x * plume_drive_aft), 0.0, 0.0 - (fwd_z * plume_drive_aft),
+                           plume_drive_r, 255, 150, 60)
+      else ()
+
 # Scene 3: the procedural sky (faked galaxy stars + Milky Way band + bulge) first, then the distant
 # sun + planet specks, then the ship as the hero at the origin. Sky first (depth-write off, so it never
 # occludes); the ship depth-tests in front of the backdrop. `(cdx,cdy,cdz)` is the galactic-centre
 # direction from the ship's system, orienting the bulge/band. ship_model -1 (absent GLB) draws no ship.
 # `(oax,oaz)` is the ship's AU position (the projection observer) — it MOVES during supercruise, which
 # is what makes the target body's disc swell; the sky/bg-stars are galaxy-scale so they do not shift.
+# `heading`/`thrust`/`phase` drive the hull yaw and the maneuvering-thruster plumes.
 fn draw_vista_scene(oax: Double, oaz: Double, ps: List Planet, bg: List BgStar, sun_sh: Int, sky_sh: Int,
-                    cdx: Double, cdy: Double, cdz: Double, ship_model: Int) -> Unit !{IO} =
+                    cdx: Double, cdy: Double, cdz: Double, ship_model: Int,
+                    heading: Double, thrust: Int, phase: Int) -> Unit !{IO} =
   do
     sky.draw_sky(sky_sh, vista_sky_r, cdx, cdy, cdz)
     draw_bgstars(bg)
     draw_vista_sun(oax, oaz, sun_sh)
     draw_vista_planets(oax, oaz, ps, sun_sh)
     if ship_model >= 0
-      then gfx.draw_model(ship_model, 0.0, 0.0, 0.0, ship_yaw, ship_scale)
+      then do
+        gfx.draw_model(ship_model, 0.0, 0.0, 0.0, ship_draw_yaw(heading), ship_scale)
+        draw_ship_thrusters(heading, thrust, phase)
       else ()
 
 # --- Ship-view body markers (2D HUD overlay) ----------------------------------------------------
@@ -1598,7 +1651,8 @@ fn draw_sc_hud(phase: Int, target: Int, tname: String, dist: Double) -> Unit !{I
   if target < 0
     then gfx.draw_text(420, 722, "Click a body to target it", 18, 150, 160, 180)
     else
-      let status = if phase == sc_spool then "SUPERCRUISE SPOOLING -> " ++ tname
+      let status = if phase == sc_align then "ALIGNING -> " ++ tname
+                   else if phase == sc_spool then "SUPERCRUISE SPOOLING -> " ++ tname
                    else if phase == sc_cruise then "SUPERCRUISE -> " ++ tname ++ "   " ++ fmt_au(dist) ++ " AU"
                    else "TARGET " ++ tname ++ "   " ++ fmt_au(dist) ++ " AU   (Space to supercruise)"
       in gfx.draw_text(420, 722, status, 18, marker_hi_r, marker_hi_g, marker_hi_b)
@@ -1647,7 +1701,7 @@ fn render_loop(dir: String, cam: Cam, scam: Cam, shipcam: Cam, radius: Double, l
                loc_name: String, loc_x: Int, loc_y: Int, loc_z: Int,
                fuel: Double, ftl_phase: Int, ftl_timer: Double, warp_sh: Int,
                ship_ax: Double, ship_az: Double, sc_phase: Int, sc_timer: Double, sc_target: Int,
-               sc_boot: Int) -> Unit !{IO} =
+               sc_boot: Int, ship_heading: Double, ship_omega: Double, ship_thrust: Int) -> Unit !{IO} =
   do
     stop <- gfx.window_should_close()
     if stop then gfx.close_window()
@@ -1700,6 +1754,11 @@ fn render_loop(dir: String, cam: Cam, scam: Cam, shipcam: Cam, radius: Double, l
         let cur_scphase = if need_load then sc_idle else sc_phase
         let cur_sctimer = if need_load then 0.0 else sc_timer
         let cur_sctarget = if need_load then 0 - 1 else sc_target
+        # Ship attitude (heading/omega, radians) + last frame's RCS thrust for the plume VFX. Reset the
+        # facing on a system change so a fresh vista starts pointed forward (+z), not mid-swing.
+        let cur_heading = if need_load then 0.0 else ship_heading
+        let cur_omega = if need_load then 0.0 else ship_omega
+        let cur_thrust = if need_load then 0 else ship_thrust
         # Supercruise auto-engage canary (argv[14] >= 0): once the system has loaded and the drive is
         # idle, lock that body index and force an engage, then consume the boot target (one-shot). Lets
         # a headless screenshot capture a mid-cruise disc-swell without input (mirrors argv[13]).
@@ -1753,7 +1812,7 @@ fn render_loop(dir: String, cam: Cam, scam: Cam, shipcam: Cam, radius: Double, l
                 # Jump route from the current system to the selected target (a distinct in-range pick).
                 if has_sel && is_diff then draw_jump_route(loc_x, loc_y, loc_z, sel_x, sel_y, sel_z) else ()
           else if view == 1 then draw_system(s2ext, cplanets2, sun_sh, planet_sh)
-          else draw_vista_scene(cur_ax, cur_az, cplanets2, bgstars2, sun_sh, sky_sh, cdx, cdy, cdz, ship_model)
+          else draw_vista_scene(cur_ax, cur_az, cplanets2, bgstars2, sun_sh, sky_sh, cdx, cdy, cdz, ship_model, cur_heading, cur_thrust, cur_scphase)
         gfx.overlay_begin()
         gfx.draw_fps(10, 10)
         # The scene HUD is hidden while the warp tunnel fills the screen; during spool it stays up under
@@ -1865,10 +1924,21 @@ fn render_loop(dir: String, cam: Cam, scam: Cam, shipcam: Cam, radius: Double, l
         let engage = jumpc || (sp && can_j)
         let ftl_step = advance_phase(ftl_phase, ftl_timer, dtf, engage, can_j, spool_secs, tunnel_secs)
         # Supercruise machine (view 2): engage from the "Supercruise" button or Space, gated on a body
-        # locked + drive idle. sc_advance runs spool -> cruise -> drop off this frame's delta + arrival.
+        # locked + drive idle. sc_advance runs align -> spool -> cruise -> drop off this frame's delta.
         let sc_can = (view == 2) && (eff_target >= 0) && (cur_scphase == sc_idle) && ! busy
         let sc_engage = (view == 2) && (scc || sp || boot_fire)
-        let sc_step_res = sc_advance(cur_scphase, cur_sctimer, dtf, sc_engage, sc_can, sc_arr, sc_spool_secs)
+        # Attitude: slew the hull toward the target bearing during ALIGN (and hold it locked through
+        # CRUISE); `aligned` gates align -> spool, so the drive charges only once the ship faces the
+        # travel vector. In other phases the heading is held (no torque). Rendered NEXT frame via the
+        # threaded ship_heading/ship_thrust (this frame's draw already ran, above).
+        let sc_target_bearing = bearing(sc_tx - cur_ax, sc_tz - cur_az)
+        let att = if (cur_scphase == sc_align) || (cur_scphase == sc_cruise)
+                  then attitude_step(cur_heading, cur_omega, sc_target_bearing, dtf,
+                                     sc_turn_accel, sc_turn_omega_max, sc_align_tol)
+                  else Attitude(heading = cur_heading, omega = 0.0, thrust = 0)
+        let sc_aligned = attitude_aligned(att.heading, att.omega, sc_target_bearing,
+                                          sc_align_tol, sc_align_omega_tol)
+        let sc_step_res = sc_advance(cur_scphase, cur_sctimer, dtf, sc_engage, sc_can, sc_aligned, sc_arr, sc_spool_secs)
         match streamed with
         | (loaded2, _) ->
             match picked with
@@ -1909,7 +1979,12 @@ fn render_loop(dir: String, cam: Cam, scam: Cam, shipcam: Cam, radius: Double, l
                             # The canary's forced target must persist past the one frame boot_fire is
                             # true (which consumes it), so the cruise it launched has a target to close on.
                             sc_target2 = if boot_fire then sc_boot else scpick
-                        in render_loop(dir, cam2, scam2, shipcam2, radius, loaded2, name2, detail2, sel_x2, sel_y2, sel_z2, has_sel2, dnx2, dny2, nv, lvl, csys2, cplanets2, hov1b, hov2b, mask2, ldown, show_grid, sun_sh, planet_sh, gas_sh, ship_model, sky_sh, bgstars2, bgsys2, loc_name2, loc_x2, loc_y2, loc_z2, fuel2, ftl_phase2, ftl_timer2, warp_sh, ship_ax2, ship_az2, sc_phase2, sc_timer2, sc_target2, sc_boot2)
+                            # Carry the stepped attitude to next frame (heading/omega integrated by
+                            # attitude_step; thrust is the RCS couple that fired, for the plume VFX).
+                            ship_heading2 = att.heading
+                            ship_omega2 = att.omega
+                            ship_thrust2 = att.thrust
+                        in render_loop(dir, cam2, scam2, shipcam2, radius, loaded2, name2, detail2, sel_x2, sel_y2, sel_z2, has_sel2, dnx2, dny2, nv, lvl, csys2, cplanets2, hov1b, hov2b, mask2, ldown, show_grid, sun_sh, planet_sh, gas_sh, ship_model, sky_sh, bgstars2, bgsys2, loc_name2, loc_x2, loc_y2, loc_z2, fuel2, ftl_phase2, ftl_timer2, warp_sh, ship_ax2, ship_az2, sc_phase2, sc_timer2, sc_target2, sc_boot2, ship_heading2, ship_omega2, ship_thrust2)
 
 fn main() -> Unit !{IO} =
   do
@@ -2034,4 +2109,4 @@ fn main() -> Unit !{IO} =
                 boot_name, boot_detail, boot_sx, boot_sy, boot_sz, boot_has, 0, 0, start_view, seed_lvl, "", Nil, "", "",
                 init_mask, false,! (init_grid == 0), sun_sh, planet_sh, gas_sh, ship_model, sky_sh, Nil, "",
                 boot_name, loc0_x, loc0_y, loc0_z, fuel_max, ftl0, 0.0, warp_sh,
-                ship_sun_dist_au, 0.0, sc_idle, 0.0, 0 - 1, sc_boot_arg)
+                ship_sun_dist_au, 0.0, sc_idle, 0.0, 0 - 1, sc_boot_arg, 0.0, 0.0, 0)

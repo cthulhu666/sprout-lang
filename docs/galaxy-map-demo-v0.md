@@ -364,12 +364,19 @@ specks. No orbit lines, no size inflation. `< System` returns to scene 2.
   over by a later dim bracket. The rule is uniform (the star's own label can be occluded by an inner
   planet; it reappears as the camera orbits).
 - **Supercruise (intra-system FTL).** Click a body to lock it (green reticle), then **Supercruise**
-  (button / Space): the ship's AU position — the projection observer — slides on-rails toward the
-  target at a proximity-scaled speed, so its disc swells and every body's range recomputes live, then
-  auto-drops at a standoff. This is FTL iteration 2; the pure kinematics + machine are
-  `loam.supercruise` (headless-tested), and the *only* rendering change was making the vista observer a
-  moving, threaded position (`project_body` was already a supercruise renderer). Full design +
-  prior-art: [docs/ftl-v0.md](ftl-v0.md) §Two-mode model.
+  (button / Space): the ship first **yaws to face the target** on maneuvering thrusters, then the drive
+  spools, then the ship's AU position — the projection observer — slides on-rails toward the target at
+  a proximity-scaled speed, so its disc swells and every body's range recomputes live, then auto-drops
+  at a standoff (HUD walks `ALIGNING → SPOOLING → SUPERCRUISE`). This is FTL iteration 2; the pure
+  kinematics + machine are `loam.supercruise` and the rotational dynamics `loam.attitude` (both
+  headless-tested), and the *only* rendering change was making the vista observer a moving, threaded
+  position (`project_body` was already a supercruise renderer). Full design + prior-art:
+  [docs/ftl-v0.md](ftl-v0.md) §Two-mode model.
+- **Maneuvering thrusters (attitude before cruise).** The hull heading is a physical body with
+  momentum, slewed to the travel bearing by a bang-bang-with-braking controller (`loam.attitude`) — you
+  see a cool-blue **RCS couple** fire to spin up, flip to brake, then a **main-drive plume** aft during
+  cruise. All VFX are emissive `draw_sphere` puffs (no new gfx primitive); yaw-only, matching
+  `draw_model`'s Y-axis rotation and the planar (x, z) supercruise.
 - **Sky (faked galaxy, `loam.skydome`).** Thousands of background stars, the Milky Way band, and the
   central bulge glow are a GPU fragment shader over the view direction — no geometry, no catalog read
   (one `draw_sphere_shaded` call). Correct directions from the galaxy's own geometry: the disk is the
@@ -605,9 +612,11 @@ SPROUT_GFX_MAX_FRAMES=120 SPROUT_GFX_SCREENSHOT=ship.png SPROUT_GFX_SCREENSHOT_F
 SPROUT_GFX_MAX_FRAMES=210 SPROUT_GFX_SCREENSHOT=warp.png SPROUT_GFX_SCREENSHOT_FRAME=200 \
   mise exec -- just run-gfx examples/gfx/galaxy_map.sprout /Users/cthulhu/GameDev/universegen/catalog 85000 14000 700 0 0 13 4095 1 0 -25141 6520 436 1
 # intra-system SUPERCRUISE canary — argv[14]=<body index> (0=star, 1..n=planet) auto-targets that body
-# in the ship vista and supercruises to it (spool -> cruise -> auto-drop at a standoff). Here it boots
-# SYS-07671's vista (argv[6]/[9]) and cruises to the star (0); the disc swells + ranges update live:
-SPROUT_GFX_MAX_FRAMES=240 SPROUT_GFX_SCREENSHOT=cruise.png SPROUT_GFX_SCREENSHOT_FRAME=70 \
+# in the ship vista and supercruises to it: the ship first ALIGNS to face it (maneuvering thrusters,
+# RCS plumes), then SPOOLS, then CRUISES to it (disc swells + ranges update live) and auto-drops at a
+# standoff. Phase timing is wall-clock (set_target_fps(60)): align+spool spans ~frames 0..160, cruise
+# ~160+. Pick the frame for the phase — ~40 for the aligning-with-thrusters shot, ~185 for cruise:
+SPROUT_GFX_MAX_FRAMES=240 SPROUT_GFX_SCREENSHOT=cruise.png SPROUT_GFX_SCREENSHOT_FRAME=185 \
   mise exec -- just run-gfx examples/gfx/galaxy_map.sprout /Users/cthulhu/GameDev/universegen/catalog 3000 1400 700 0 0 7671 4095 1 1 -20697 11670 -339 0 0
 ```
 

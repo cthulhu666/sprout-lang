@@ -101,9 +101,18 @@ export fn fabs(x: Double) -> Double =
 
 # Round to nearest integer (ties to even) with no Int conversion. Only exact for
 # |x| < 2^52; larger Doubles are already integral, so pass them through.
-fn round_nearest(x: Double) -> Double =
-  if fabs(x) >= two52 then x
+#
+# The 2^52 magic-number round works ONLY for x >= 0: for a NEGATIVE x, (x + 2^52)
+# drops below 2^52 into the ULP=0.5 binade, so it snaps to a half-integer instead
+# of an integer (e.g. -0.5477 -> -0.5) and floor then computes -1.5. So round the
+# magnitude and re-sign — round_nearest(x) = -round_nearest(-x) for x < 0.
+fn round_nearest_pos(x: Double) -> Double =
+  if x >= two52 then x
   else (x + two52) - two52
+
+fn round_nearest(x: Double) -> Double =
+  if x < 0.0 then 0.0 - round_nearest_pos(0.0 - x)
+  else round_nearest_pos(x)
 
 export fn floor(x: Double) -> Double =
   if r > x then r - 1.0
@@ -153,6 +162,35 @@ export fn radians(deg: Double) -> Double =
 # callers in that domain must guard.
 export fn tan(x: Double) -> Double =
   sin(x) / cos(x)
+
+# atan via the Maclaurin series, accurate only for small |x|: sum (-1)^k x^(2k+1)/(2k+1)
+# through x^13, Horner-nested on x2 = x*x. The reduction below keeps |x| small before this runs.
+fn atan_series(x: Double) -> Double =
+  x * (1.0 - x2 * (1.0 / 3.0 - x2 * (1.0 / 5.0 - x2 * (1.0 / 7.0 - x2
+    * (1.0 / 9.0 - x2 * (1.0 / 11.0 - x2 * (1.0 / 13.0)))))))
+  where x2 = x * x
+
+# Halving reduction: atan(x) = 2*atan(x / (1 + sqrt(1 + x^2))), applied `depth` times before the
+# series. Each pass shrinks the argument toward 0 (and SATURATES — even huge x collapses to ~1 on the
+# first pass, ~0.2 by the third), so a fixed depth of 3 covers the whole real line to ~1e-9.
+fn atan_reduce(x: Double, depth: Int) -> Double =
+  if depth <= 0 then atan_series(x)
+  else 2.0 * atan_reduce(x / (1.0 + sqrt(1.0 + x * x)), depth - 1)
+
+export fn atan(x: Double) -> Double =
+  atan_reduce(x, 3)
+
+# Full-circle bearing atan2(y, x) in (-pi, pi]. atan alone loses the sign of x (a target dead-ahead
+# and dead-astern share a ratio), so the x<0 branch adds ±pi to place the quadrant, and x==0 handles
+# the poles. atan2(0,0) is defined as 0 (there is no meaningful direction; 0 is the conventional pick).
+export fn atan2(y: Double, x: Double) -> Double =
+  if x > 0.0 then atan(y / x)
+  else if x < 0.0 then
+    if y >= 0.0 then atan(y / x) + pi
+    else atan(y / x) - pi
+  else if y > 0.0 then half_pi
+  else if y < 0.0 then -half_pi
+  else 0.0
 
 # --- General Double utilities (clamping / interpolation) ---
 # The two domain-agnostic numeric atoms every animation/graphics caller reaches for.
