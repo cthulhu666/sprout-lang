@@ -200,8 +200,12 @@ The constrained form covers **heterogeneous "render/log these" collections**:
 
 ```sprout
 type Shown = | Shown (exists a. ToString a => a)
-let row : List Shown = [Shown(42), Shown("hi"), Shown(true)]  # each via its own dict
+let row = [Shown(42), Shown("hi"), Shown(true)]  # : List Shown, inferred from the Shown ctor
 ```
+
+(No `let` annotation is used here — Sprout has none yet; the `Shown` constructor
+fixes the element type, so inference alone suffices. See §6 for how existential
+values are introduced given that limitation.)
 
 **A deliberate counter-example — the ECS.** One might expect Sprout's scene/ECS
 ("N heterogeneous things, each with its own type," `ecs-v0.md:12`) to want
@@ -243,6 +247,17 @@ heap field.
   escape** into the branch result or into any unification variable outliving the
   branch. If constrained, the captured dictionary is brought into scope so class
   methods resolve on `x`.
+- **Introduction (how a value gets its existential type).** Sprout has **no
+  binding-level type annotation** — the only annotation surface is `fn`
+  params/returns (spec §5.1). So a value of an existential type is introduced
+  either (a) through a **nominal wrapper's constructor** (`Shown(42)` — the type
+  is inferred from the constructor, no annotation needed, as in §5.1), or (b)
+  where a **`fn`-boundary expected type** applies. The clean *anonymous* form —
+  writing the existential type directly at a binding, `let row : List (any C) =
+  …` — is **blocked** until binding-level annotations exist. That is a separate,
+  general feature proposed in `docs/binding-annotations-v0.md` (three independent
+  features, this arc among them, converge on it); it is the prerequisite for the
+  friendlier `any C` spelling, not part of this arc.
 
 ## 7. Type-system impact
 
@@ -272,8 +287,13 @@ heap field.
 - **Purely additive.** No existing program's meaning changes; ordinary ADTs are
   the no-existential-binder case.
 - **Runtime.** Unconstrained (0a): zero representation change — same tagged
-  union, indices erased. Constrained (0b): one extra hidden field per such
-  constructor (the dictionary), same shape as an ordinary heap field.
+  union, indices erased. Constrained (0b): needs a **reified dictionary** stored
+  in the constructor — and that value does **not exist today**. Lowering
+  currently flattens each class into *per-method hidden parameters*
+  (`__tc_<Class>_<idx>_<method>`, `lowering.sprout:427-465`); there is no single
+  boxed dictionary to pack. So 0b must first introduce a reified dict
+  representation, then store it as a heap field — additional work beyond the
+  escape check, reflected in the estimate below.
 - **Bootstrap.** Any implementation touches `stdlib/compiler/` (parser + infer),
   so it carries the seed-refresh + likely 2-step-bootstrap tax and the
   smoke/bundle gates — independent of the feature's intrinsic difficulty.
@@ -283,7 +303,7 @@ heap field.
 | Scope | Size | Rationale |
 |---|---|---|
 | Stage 0a (unconstrained) | **M** | Parser/AST + pack + unpack + **escape check** (the one new mechanism); no runtime change. |
-| Stage 0b (constrained) | **L** | 0a + dictionary pack/unpack in codegen (beyond passing a dict as a hidden arg → storing it in a heap field). This is the useful form. |
+| Stage 0b (constrained) | **L** | 0a + a **reified dictionary** value (none exists today — dicts are flattened to per-method hidden params, `lowering.sprout:427-465`) + pack/unpack of it in codegen. This is the useful form; the missing dict representation is why it is firmly L, not M+. |
 | Stage 1 (index refinement) | **XL** | Local-equality solver + bidirectional checking + mandatory signatures + constraint-aware exhaustiveness; blocked on the local-annotations gate. Out of scope. |
 
 **Recommended path:** ship **0a as a spike** to validate the skolem-escape
@@ -320,6 +340,8 @@ specified here.
 
 ## See also
 
+- `docs/binding-annotations-v0.md` — binding-level `let x : T = e`, the
+  prerequisite that unblocks the anonymous `any C` introduction form (§6).
 - `docs/scoped-type-variables-analysis-2026-07-26.md` — the local-annotations /
   scoped-signature-variable gate that Stage 1 depends on.
 - `docs/hm-typechecker.md` — the `generalize`/`instantiate` model Stage 0 must
