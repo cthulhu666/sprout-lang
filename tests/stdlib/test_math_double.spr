@@ -1,5 +1,5 @@
 import stdlib.test (check_true, run_suite)
-import stdlib.math (pi, fabs, floor, sqrt, sin, cos, tan, radians, fclamp, lerp)
+import stdlib.math (pi, fabs, floor, sqrt, sin, cos, tan, radians, fclamp, lerp, nan, is_nan)
 
 # TDD — the Double math primitives that back the M2 vector/matrix layer
 # (docs/graphics-v0.md §M2). All implemented in PURE Sprout — no C builtins:
@@ -9,9 +9,6 @@ import stdlib.math (pi, fabs, floor, sqrt, sin, cos, tan, radians, fclamp, lerp)
 # Local approximate equality — Double `==` is exact, useless for transcendentals.
 fn dabs(x: Double) -> Double = if x < 0.0 then -x else x
 fn close(a: Double, b: Double) -> Bool = dabs(a - b) < 0.000001
-
-# NaN is the only Double not equal to itself — the standard IEEE detection.
-fn is_nan(x: Double) -> Bool = ! (x == x)
 
 fn main() -> Unit !{IO} =
   run_suite("math_double", [
@@ -28,6 +25,11 @@ fn main() -> Unit !{IO} =
     # (Rule 2, docs/math-partiality-v0.md). Regression guard.
     check_true("sqrt(-4.0) is NaN", is_nan(sqrt(-4.0))),
     check_true("sqrt(-0.001) is NaN", is_nan(sqrt(-0.001))),
+    check_true("exported nan is NaN", is_nan(nan)),
+    # In-domain edge cases still follow IEEE: +inf is its own root (Newton would
+    # compute inf/inf = NaN), and -0.0 keeps its sign (1.0 / -0.0 == -inf < 0).
+    check_true("sqrt(+inf) == +inf", sqrt(1.0 / 0.0) == (1.0 / 0.0)),
+    check_true("sqrt(-0.0) keeps the sign", 1.0 / sqrt(-0.0) < 0.0),
     check_true("sqrt(1.0) == 1.0", close(sqrt(1.0), 1.0)),
     check_true("sqrt(16.0) == 4.0", close(sqrt(16.0), 4.0)),
     check_true("sqrt(2.0) ~ 1.41421356", close(sqrt(2.0), 1.4142135623)),
@@ -55,6 +57,9 @@ fn main() -> Unit !{IO} =
     check_true("tan(0) == 0", close(tan(0.0), 0.0)),
     check_true("tan(pi/4) == 1", close(tan(pi / 4.0), 1.0)),
     check_true("tan(radians(45)) == 1", close(tan(radians(45.0)), 1.0)),
+    # Rule 2: tan blows up at the pole (odd multiples of pi/2). Pins the
+    # documented out-of-domain behavior so a sin/cos change can't silently break it.
+    check_true("tan(pi/2) blows up (pole)", fabs(tan(pi / 2.0)) > 1000.0),
     # --- fclamp (Double clamp; mirrors the Int `clamp`, `fabs`-style f-prefix) ---
     check_true("fclamp below -> lo", fclamp(-1.0, 0.0, 10.0) == 0.0),
     check_true("fclamp within -> x", fclamp(5.0, 0.0, 10.0) == 5.0),

@@ -30,14 +30,25 @@ A partial `math` function follows exactly one rule, chosen by its result type:
 - **Rule 1 — Int out-of-domain returns `Maybe`.** `mod`, `pow`. `Int` has no
   spare bottom value (every bit pattern is a valid integer), so an out-of-domain
   result must be surfaced explicitly. This is **interim**: see §5.
-- **Rule 2 — Double out-of-domain returns IEEE `NaN` / `±inf`.** `sqrt`, `tan`.
-  `Double` *has* a bottom value, and IEEE NaN self-propagates through downstream
-  arithmetic, so a numeric pipeline can check once at the end. This is
-  **terminal** — it matches every mainstream language and will not migrate.
+- **Rule 2 — Double out-of-domain returns IEEE-style `NaN` / `±inf`.** `sqrt`,
+  `tan`. `Double` *has* a bottom value, and IEEE NaN self-propagates through
+  downstream arithmetic, so a numeric pipeline can check once at the end (with
+  `math.is_nan`). This is **terminal** — it matches every mainstream language and
+  will not migrate. Two caveats: (a) the Double layer is pure-Sprout (~1e-8
+  accuracy), so it is IEEE *in spirit*, not bit-exact — the in-domain edges that
+  matter (`sqrt(+inf) = +inf`, `sqrt(-0.0) = -0.0`, `sqrt(NaN) = NaN`) are handled
+  explicitly, but general rounding is not IEEE-guaranteed; (b) the functions are
+  **strict** — there is no roundoff tolerance, so a caller that may produce a
+  slightly-negative value (a discriminant, `sqrt(a - b)`) gets `NaN`, and must
+  clamp at the call site if it wants `0`. Clamping inside `sqrt` is deliberately
+  rejected: it would reintroduce exactly the silent-`0.0` lie this change removed.
 
 Nothing returns a silent in-band lie. The rules diverge by domain because the
 capability differs: sentinels require a spare value the type has (`Double` does,
 `Int` does not), so the split is forced, not arbitrary.
+
+`math` exports `nan` (the quiet NaN) and `is_nan(x)` so callers can produce and
+detect the Rule-2 sentinel without reinventing the `!(x == x)` idiom.
 
 ## 3. Prior-art survey
 
@@ -116,10 +127,13 @@ Minimal first pass — coherence without overcommitment:
 
 1. Wrote this convention down (§2) and mirrored it as a header comment in
    `stdlib/math.sprout`.
-2. Fixed the one violator: `sqrt(x < 0)` now returns `NaN`, not `0.0`
-   (`sqrt(0.0) == 0.0` is preserved). Regression tests in
+2. Fixed the one violator: `sqrt(x < 0)` now returns `NaN`, not `0.0`. In-domain
+   IEEE edges are handled too — `sqrt(+inf) = +inf` (Newton alone would give
+   `inf/inf = NaN`) and `sqrt(-0.0) = -0.0` (sign preserved). Regression tests in
    `tests/stdlib/test_math_double.spr`.
-3. Internal tidy: `is_even` and `gcd_loop` call the total private
+3. Exported `nan` and `is_nan` so callers can detect the Rule-2 sentinel, and a
+   `tan`-pole test pins its out-of-domain behavior.
+4. Internal tidy: `is_even` and `gcd_loop` call the total private
    `euclidean_remainder` directly instead of matching `mod`'s `Maybe` for a
    `Nothing` case that cannot occur.
 

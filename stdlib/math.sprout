@@ -4,8 +4,11 @@ import stdlib.collections (Maybe)
 # Partiality convention (docs/math-partiality-v0.md). Two domains, two rules:
 #   Rule 1 — Int out-of-domain -> Maybe (mod, pow). Interim: when the Exn effect
 #            lands, effectful variants are added alongside, never replacing these.
-#   Rule 2 — Double out-of-domain -> IEEE NaN / +-inf (sqrt, tan). Terminal.
+#   Rule 2 — Double out-of-domain -> IEEE-style NaN / +-inf (sqrt, tan). Terminal.
+#            Strict: no roundoff tolerance (a tiny-negative input is NaN, not 0),
+#            and IEEE in spirit not bit-exact (the Double layer is pure-Sprout).
 # A partial function follows exactly one; nothing returns a silent in-band lie.
+# Callers detect a Rule-2 NaN with `is_nan`.
 
 fn int_abs(value: Int) -> Int =
   if value < 0 then 0 - value
@@ -85,9 +88,12 @@ let half_pi = 1.5707963267948966
 # it snaps the fractional bits away — the classic branch-free round-to-integer.
 let two52 = 4503599627370496.0
 
-# The IEEE quiet NaN, our out-of-domain Double result (Rule 2). Double `/` lowers
+# The IEEE quiet NaN — the out-of-domain Double result (Rule 2). Double `/` lowers
 # to an unguarded fdiv (only integer `/` traps), so 0.0/0.0 is a genuine NaN.
-let nan = 0.0 / 0.0
+export let nan = 0.0 / 0.0
+
+# Detect a Rule-2 NaN: NaN is the only Double not equal to itself (ordered `==`).
+export fn is_nan(x: Double) -> Bool = ! (x == x)
 
 export fn fabs(x: Double) -> Double =
   if x < 0.0 then -x
@@ -112,12 +118,15 @@ fn sqrt_iter(x: Double, guess: Double, i: Int) -> Double =
   else sqrt_iter(x, next, i + 1)
   where next = 0.5 * (guess + x / guess)
 
-# sqrt(0) == 0 is exact; a negative argument is outside the real domain, so it
-# yields NaN (Rule 2) rather than the old silent 0.0. x == 0 is special-cased to
-# skip the Newton step, whose first guess would divide 0/0.
+# Domain: x >= 0. A negative argument is outside the real domain -> NaN (Rule 2),
+# not the old silent 0.0. Both zeros return x unchanged (preserving -0.0, per IEEE)
+# and skip the Newton step, whose first guess would divide 0/0. +inf is its own
+# root, but Newton would compute inf/inf = NaN, so short-circuit it — only +inf
+# satisfies `x * 0.5 == x` among positive x.
 export fn sqrt(x: Double) -> Double =
   if x < 0.0 then nan
-  else if x == 0.0 then 0.0
+  else if x == 0.0 then x
+  else if x * 0.5 == x then x
   else sqrt_iter(x, x, 0)
 
 # Reduce an angle into [-pi, pi] so the Taylor series stays accurate.
