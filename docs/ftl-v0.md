@@ -1,9 +1,9 @@
 # FTL / Jump Drive (v0)
 
-Status: **experimental example**, not normative. Design + first implementation of faster-than-light
-travel for the loam galaxy-map demo (`examples/gfx/galaxy_map.sprout`). Iteration 1 (the
-**interstellar jump**) is built; the **intra-system supercruise** is designed here and deferred to
-iteration 2 (`BACKLOG.md`).
+Status: **experimental example**, not normative. Design + implementation of faster-than-light travel
+for the loam galaxy-map demo (`examples/gfx/galaxy_map.sprout`). Both modes are now **built**:
+iteration 1 the **interstellar jump** (`loam.ftl`), iteration 2 the **intra-system supercruise**
+(`loam.supercruise`).
 
 ## Problem
 
@@ -103,11 +103,25 @@ Deliberate deviations, each forced by our context:
   (button or Space). Phases: `idle → spool → tunnel → arrive`. Spool is a countdown; the tunnel is a
   procedural warp shader; arrival drops you into the destination's **ship vista (view 2)** — the
   tunnel resolves straight into "you are now here, in space". Gated by the economy below.
-- **Intra-system supercruise (iteration 2, designed).** In the vista, select a body and close on it:
-  animate the ship's AU position toward the target so `loam.vista.project_body`'s angular size grows
-  (the sun/planet disc swells), with Elite-style proximity-scaled speed and an auto-drop at a
-  standoff distance. The vista's planetarium projection is *already* a supercruise renderer — it only
-  needs a moving ship position. No new scene, no system reload.
+- **Intra-system supercruise (iteration 2, built).** In the vista, **click a body** to lock it (a
+  green target reticle), then **Supercruise** (button / Space): the drive **spools** briefly, then
+  **cruises** — the ship's AU position slides on-rails toward the target at a proximity-scaled speed,
+  so `loam.vista.project_body`'s angular size grows (the disc swells) and *every* body's range
+  recomputes as the single observer moves — and **auto-drops** at a standoff. The planetarium
+  projection *is* the supercruise renderer: the only change was making the observer a moving,
+  threaded position. No new scene, no system reload, no new gfx primitive.
+
+  - **Piloting: on-rails point-and-go** (not a throttle/free-steer) — it fits the orbit-around-ship
+    vista camera (which has no cockpit "forward") and mirrors the interstellar select→engage→arrive
+    UX. Speed `v = clamp((remaining − standoff)·k, v_min, v_max)` AU/s: fast far, eases to the drop,
+    with a `v_min` floor so the approach never Zeno-stalls. Standoff is larger for the star (don't fly
+    into it) and a few body-radii for a planet, with a floor.
+  - **State machine** `sc_idle → sc_spool → sc_cruise`, mirroring the interstellar machine but with
+    cruise ending on a **spatial** condition (arrival within the standoff), not a timer — so `arrived`
+    is a caller-supplied gate. On a system change the ship AU position + drive reset (a fresh system
+    starts you 1 AU out); within a system they persist across galaxy↔vista toggles.
+  - **Target picking** reuses the body-marker projection (nearest body to the cursor); the locked
+    target's reticle is highlighted and always labelled (exempt from declutter).
 
 ### Economy model
 
@@ -138,24 +152,37 @@ route planning when a target is out of single-hop range.
   through VS; fragment recovers `dir = normalize(vWorld − uEye)` on a camera-centred inside-out
   sphere), drawing blue-shifted radial star-streaks from the travel axis, driven by a `uProgress`
   uniform. Uses only the existing generic gfx shader API — **no new engine primitive**.
+- **`loam.supercruise`** (new, pure, headless-tested — `tests/loam/test_supercruise.spr`) — the
+  intra-system closing kinematics + machine: `sc_speed` (clamped proximity speed), `sc_step` (one
+  convergent frame of on-rails travel toward the target), `sc_arrived` (standoff test), `sc_advance`
+  (the `idle→spool→cruise` machine, cruise ending on `arrived` rather than a timer). Phase codes are
+  `Int` (0..2), matching `loam.ftl`. 17 assertions lock the speed clamp, `sc_step` convergence, the
+  standoff arrival, and every transition before any rendering.
 - **`galaxy_map.sprout`** — threads `loc_*` (current location, distinct from the `sel_*` target),
   `fuel`, `ftl_phase`, `ftl_timer`, `warp_sh` through `render_loop`; advances the machine with
   `gfx.get_frame_time()`; draws the warp during the tunnel phase (skipping the normal scene) and the
   fuel/range/status HUD when idle; performs the arrival side-effects (loc := sel, refuel, view := 2)
   on the one-frame `arrive`, after which the existing `need_load`/`need_bg` paths stream the
   destination. A canary arg (`argv[13]=1`) auto-engages a jump at boot for a headless screenshot.
+  For supercruise it also threads the ship's **AU position** `(ship_ax, ship_az)` + `sc_phase`/
+  `sc_timer`/`sc_target` through `render_loop`, feeds that moving position to `project_body` as the
+  observer (sun, planets, and the markers), steps it with `sc_step` while cruising, and resets it on a
+  system change. A second canary (`argv[14]=<body index>`) auto-targets + supercruises at boot.
 
 ## Tests
 
 - `tests/loam/test_ftl.spr` (27 assertions) — the jump geometry, the range+fuel gate, every phase
   transition (incl. blocked-when-`!can` and the arrive→idle latch), progress bounds, refuel economy.
+- `tests/loam/test_supercruise.spr` (17) — the proximity speed clamp, `sc_step` convergence to the
+  standoff, the arrival test, and every supercruise transition.
 - `tests/loam/test_ease.spr` (19) — the interpolation atoms.
 - `tests/stdlib/test_math_double.spr` — extended with `fclamp` / `lerp`.
-- The rendering (warp shader, HUD, arrival flow) is validated by the build-and-run gate (a headless
-  screenshot canary), per AGENTS DoD #13 — GLSL and the render loop are not unit-testable.
+- The rendering (warp shader, the moving-observer vista, HUD, arrival flows) is validated by the
+  build-and-run gate (headless screenshot canaries), per AGENTS DoD #13 — GLSL and the render loop are
+  not unit-testable.
 
 ## Roadmap
 
-Iteration 2 (supercruise) and further follow-ups (scoop-class refuel, multi-hop routing, an
-interdiction hook, the clamp/lerp consolidation of the scattered `clampd`/`clamp01` copies) are
-tracked in `BACKLOG.md`.
+Both drive modes are built. Further follow-ups (scoop-class refuel, multi-hop routing, an interdiction
+hook on the spool phase, richer supercruise motion cues, the clamp/lerp consolidation of the scattered
+`clampd`/`clamp01` copies) are tracked in `BACKLOG.md`.

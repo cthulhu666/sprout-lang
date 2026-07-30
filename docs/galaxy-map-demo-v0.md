@@ -363,6 +363,13 @@ specks. No orbit lines, no size inflation. `< System` returns to scene 2.
   vanishes. Drawn in two passes — all brackets, then all labels — so a shown label is never painted
   over by a later dim bracket. The rule is uniform (the star's own label can be occluded by an inner
   planet; it reappears as the camera orbits).
+- **Supercruise (intra-system FTL).** Click a body to lock it (green reticle), then **Supercruise**
+  (button / Space): the ship's AU position — the projection observer — slides on-rails toward the
+  target at a proximity-scaled speed, so its disc swells and every body's range recomputes live, then
+  auto-drops at a standoff. This is FTL iteration 2; the pure kinematics + machine are
+  `loam.supercruise` (headless-tested), and the *only* rendering change was making the vista observer a
+  moving, threaded position (`project_body` was already a supercruise renderer). Full design +
+  prior-art: [docs/ftl-v0.md](ftl-v0.md) §Two-mode model.
 - **Sky (faked galaxy, `loam.skydome`).** Thousands of background stars, the Milky Way band, and the
   central bulge glow are a GPU fragment shader over the view direction — no geometry, no catalog read
   (one `draw_sphere_shaded` call). Correct directions from the galaxy's own geometry: the disk is the
@@ -597,6 +604,11 @@ SPROUT_GFX_MAX_FRAMES=120 SPROUT_GFX_SCREENSHOT=ship.png SPROUT_GFX_SCREENSHOT_F
 # 60 fps — pick SPROUT_GFX_SCREENSHOT_FRAME in the warp window, and a later frame for the arrival vista:
 SPROUT_GFX_MAX_FRAMES=210 SPROUT_GFX_SCREENSHOT=warp.png SPROUT_GFX_SCREENSHOT_FRAME=200 \
   mise exec -- just run-gfx examples/gfx/galaxy_map.sprout /Users/cthulhu/GameDev/universegen/catalog 85000 14000 700 0 0 13 4095 1 0 -25141 6520 436 1
+# intra-system SUPERCRUISE canary — argv[14]=<body index> (0=star, 1..n=planet) auto-targets that body
+# in the ship vista and supercruises to it (spool -> cruise -> auto-drop at a standoff). Here it boots
+# SYS-07671's vista (argv[6]/[9]) and cruises to the star (0); the disc swells + ranges update live:
+SPROUT_GFX_MAX_FRAMES=240 SPROUT_GFX_SCREENSHOT=cruise.png SPROUT_GFX_SCREENSHOT_FRAME=70 \
+  mise exec -- just run-gfx examples/gfx/galaxy_map.sprout /Users/cthulhu/GameDev/universegen/catalog 3000 1400 700 0 0 7671 4095 1 1 -20697 11670 -339 0 0
 ```
 
 `argv[7]` is the initial spectral-class filter mask (bit *c* = class *c* shown; absent = all). It

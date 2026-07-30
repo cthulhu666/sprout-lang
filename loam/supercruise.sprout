@@ -1,0 +1,65 @@
+module loam.supercruise
+
+# PURE intra-system supercruise logic for the galaxy-map demo (FTL iteration 2 — the second of the
+# two-mode drive, alongside loam.ftl's interstellar jump). ON-RAILS point-and-go: in the ship vista
+# you pick a body, engage, and the ship's AU position slides straight toward it at a proximity-scaled
+# speed (Elite-canonical: fast far, easing as you close), auto-dropping at a standoff radius so you
+# never fly into the body. The vista's planetarium projection (loam.vista.project_body) is already a
+# supercruise renderer — it only needs a MOVING observer position, which is what this module drives.
+#
+# Graphics-free and IO-free (only stdlib.math), so it is unit-tested in tests/loam/test_supercruise
+# .spr. The demo threads the ship AU position (x,z in the orbital plane) + the phase/timer through its
+# render loop, feeds the position to project_body as the observer, and reads the phase for the HUD.
+#
+# Phase codes are Int (0 idle, 1 spool, 2 cruise), matching the demo's `view: Int` idiom and loam.ftl.
+# Unlike the interstellar machine (whose tunnel ends on a TIMER), cruise ends on a SPATIAL condition
+# (arrival within the standoff), so `arrived` is a caller-supplied gate rather than an elapsed time.
+
+import stdlib.math (sqrt, fclamp)
+
+export let sc_idle = 0
+export let sc_spool = 1
+export let sc_cruise = 2
+
+# Closing speed (AU/s): proportional to the remaining approach distance, clamped to [v_min, v_max].
+# The v_max cap keeps far travel bounded; the v_min floor guarantees the ship actually reaches the
+# standoff (no Zeno stall as the proportional term shrinks toward zero).
+export fn sc_speed(remaining: Double, k: Double, v_min: Double, v_max: Double) -> Double =
+  fclamp(remaining * k, v_min, v_max)
+
+# One frame of on-rails travel: move (sx,sz) toward (tx,tz) by speed*dt, where speed eases with the
+# distance to the STANDOFF ring (rem - standoff), so the ship slows as it nears its stopping point.
+# No move once already within the standoff. Returns the new (sx, sz).
+export fn sc_step(sx: Double, sz: Double, tx: Double, tz: Double, dt: Double,
+                  k: Double, v_min: Double, v_max: Double, standoff: Double) -> (Double, Double) =
+  let dx = tx - sx
+      dz = tz - sz
+      rem = sqrt((dx * dx) + (dz * dz))
+  in if rem <= standoff then (sx, sz)
+     else
+       let v = sc_speed(rem - standoff, k, v_min, v_max)
+           travel = v * dt
+           ux = dx / rem
+           uz = dz / rem
+       in (sx + (ux * travel), sz + (uz * travel))
+
+# Arrived when the ship is within the standoff radius of the target (inclusive).
+export fn sc_arrived(sx: Double, sz: Double, tx: Double, tz: Double, standoff: Double) -> Bool =
+  let dx = tx - sx
+      dz = tz - sz
+  in sqrt((dx * dx) + (dz * dz)) <= standoff
+
+# Advance the supercruise phase machine by one frame. `engage` is the trigger this frame (button/
+# Space); `can` is the gate (a valid target locked && drive idle) evaluated by the caller; `arrived`
+# is sc_arrived for the current position (also caller-computed, since cruise ends spatially). Idle
+# launches on `engage && can`; spool accumulates `timer` until `spool_s` then enters cruise; cruise
+# holds until `arrived`, then drops to idle. The caller does the stepping (sc_step) while in cruise.
+export fn sc_advance(phase: Int, timer: Double, dt: Double, engage: Bool, can: Bool, arrived: Bool,
+                     spool_s: Double) -> (Int, Double) =
+  if phase == sc_spool then
+    let t2 = timer + dt
+    in if t2 >= spool_s then (sc_cruise, 0.0) else (sc_spool, t2)
+  else if phase == sc_cruise then
+    if arrived then (sc_idle, 0.0) else (sc_cruise, timer + dt)
+  else if (engage && can) then (sc_spool, 0.0)
+  else (sc_idle, 0.0)

@@ -21,6 +21,7 @@ import loam.billboard as bb
 import loam.nebula as nb
 import loam.planet as pl
 import loam.ftl (phase_idle, phase_spool, phase_tunnel, phase_arrive, jump_distance, jump_fuel_cost, can_jump, advance_phase, phase_progress, refuel)
+import loam.supercruise (sc_idle, sc_spool, sc_cruise, sc_speed, sc_step, sc_arrived, sc_advance)
 import loam.warp as warp
 
 # Sprout / Loam — 3D GALAXY MAP (scene 1) with zoom-adaptive streaming.
@@ -178,6 +179,21 @@ let marker_declutter_x = 120  # horizontal clustering radius (px) — sized to t
 let marker_declutter_y = 22  # vertical clustering radius (px) — ~one 2-line label tall
 let marker_half_occ = 7  # bracket half-size for an occluded (label-hidden) body (< marker_half)
 let marker_dim_pct = 45  # occluded bracket/dot brightness, percent of the full marker colour
+let marker_hi_r = 130  # locked supercruise-target marker/label colour (bright green target-lock)
+let marker_hi_g = 255
+let marker_hi_b = 150
+
+# --- Intra-system supercruise (FTL iteration 2): on-rails point-and-go to a body in the vista. The
+# ship's AU position (the projection observer) slides toward the locked target at a proximity-scaled
+# speed and auto-drops at a standoff, so the target disc swells. Pure logic in loam.supercruise.
+let sc_spool_secs = 1.0  # brief charge before cruise (the interdiction hook, per docs/ftl-v0.md)
+let sc_k = 0.9  # speed = clamp(remaining_to_standoff * k, v_min, v_max), AU/s
+let sc_v_min = 0.15  # floor so the approach never Zeno-stalls (AU/s)
+let sc_v_max = 6.0  # cap on closing speed (AU/s) — crosses a ~30 AU system in a few seconds
+let sc_standoff_min = 0.06  # planet drop-out distance floor (AU)
+let sc_standoff_body_mult = 800.0  # planet standoff = radius_au * this (radii are ~4e-5 AU, so ~0.03)
+let sc_star_standoff = 0.5  # star drop-out distance (AU) — well clear of the disc
+let vista_pick_r2 = 3600.0  # vista body-pick radius^2 (px^2) ~60 px, generous for pinpoint specks
 
 # --- Scene 3 real-star layer: a few hundred ACTUAL catalog stars near the system, projected in their
 # true directions over the faked sky-dome as class-coloured glows (brighter than the procedural field,
@@ -1054,8 +1070,8 @@ fn draw_bgstars(bg: List BgStar) -> Unit !{IO} =
 # (additive draw_glow layers accumulate into a smooth luminous corona) with a full-bright emissive
 # disc on top (sf.draw_star), which bloom then bleeds. glow `size` is a world diameter, so the halo
 # multipliers are of the disc radius.
-fn draw_vista_sun(sun_sh: Int) -> Unit !{IO} =
-  match project_body(ship_sun_dist_au, 0.0, 0.0, 0.0, 0.0, 0.0,
+fn draw_vista_sun(oax: Double, oaz: Double, sun_sh: Int) -> Unit !{IO} =
+  match project_body(oax, 0.0, oaz, 0.0, 0.0, 0.0,
                      sun_radius_au, vista_sphere_r, vista_min_speck) with
   | (x, y, z, r) ->
       let disc = r * sun_disc_boost
@@ -1068,34 +1084,36 @@ fn draw_vista_sun(sun_sh: Int) -> Unit !{IO} =
 # a pinpoint of reflected light, the way a naked-eye planet reads. Its orbital position is the real
 # ellipse point (loam.orbit) in AU; project_body turns the ship->planet AU vector into a world
 # direction on the render sphere and a floored (speck-sized) angular radius.
-fn draw_vista_planet(p: Planet, sun_sh: Int) -> Unit !{IO} =
+fn draw_vista_planet(oax: Double, oaz: Double, p: Planet, sun_sh: Int) -> Unit !{IO} =
   match ellipse_point(p.a, p.e, p.argperi, p.nu) with
   | (ax, az) ->
-      match project_body(ship_sun_dist_au, 0.0, 0.0, ax, 0.0, az,
+      match project_body(oax, 0.0, oaz, ax, 0.0, az,
                          p.rad * earth_radius_au, vista_sphere_r, vista_min_speck) with
       | (x, y, z, r) ->
           match planet_rgb(p.rad) with
           | (pr, pg, pb) -> sf.draw_star(sun_sh, x, y, z, r, pr, pg, pb)
 
-fn draw_vista_planets(ps: List Planet, sun_sh: Int) -> Unit !{IO} =
+fn draw_vista_planets(oax: Double, oaz: Double, ps: List Planet, sun_sh: Int) -> Unit !{IO} =
   match ps with
   | Nil -> ()
   | Cons p rest ->
       do
-        draw_vista_planet(p, sun_sh)
-        draw_vista_planets(rest, sun_sh)
+        draw_vista_planet(oax, oaz, p, sun_sh)
+        draw_vista_planets(oax, oaz, rest, sun_sh)
 
 # Scene 3: the procedural sky (faked galaxy stars + Milky Way band + bulge) first, then the distant
 # sun + planet specks, then the ship as the hero at the origin. Sky first (depth-write off, so it never
 # occludes); the ship depth-tests in front of the backdrop. `(cdx,cdy,cdz)` is the galactic-centre
 # direction from the ship's system, orienting the bulge/band. ship_model -1 (absent GLB) draws no ship.
-fn draw_vista_scene(ps: List Planet, bg: List BgStar, sun_sh: Int, sky_sh: Int,
+# `(oax,oaz)` is the ship's AU position (the projection observer) — it MOVES during supercruise, which
+# is what makes the target body's disc swell; the sky/bg-stars are galaxy-scale so they do not shift.
+fn draw_vista_scene(oax: Double, oaz: Double, ps: List Planet, bg: List BgStar, sun_sh: Int, sky_sh: Int,
                     cdx: Double, cdy: Double, cdz: Double, ship_model: Int) -> Unit !{IO} =
   do
     sky.draw_sky(sky_sh, vista_sky_r, cdx, cdy, cdz)
     draw_bgstars(bg)
-    draw_vista_sun(sun_sh)
-    draw_vista_planets(ps, sun_sh)
+    draw_vista_sun(oax, oaz, sun_sh)
+    draw_vista_planets(oax, oaz, ps, sun_sh)
     if ship_model >= 0
       then gfx.draw_model(ship_model, 0.0, 0.0, 0.0, ship_yaw, ship_scale)
       else ()
@@ -1110,16 +1128,18 @@ fn fmt_au(d: Double) -> String =
       frac = scaled - (whole * 100)
   in to_string(whole) ++ "." ++ (if frac < 10 then "0" else "") ++ to_string(frac)
 
-# True ship->body distance in AU. The ship sits at (ship_sun_dist_au, 0, 0); a body's orbital point
-# is (ax, 0, az) AU (the sun is (0,0,0), so ax=az=0 gives ship_sun_dist_au). Used only for the label,
-# NOT the projection — bodies are drawn on the fixed render sphere, so distance is informational.
-fn body_dist_au(ax: Double, az: Double) -> Double =
-  let dx = ax - ship_sun_dist_au
-  in sqrt((dx * dx) + (az * az))
+# Straight-line AU distance between two points in the orbital plane (observer -> body). The observer
+# is the ship's AU position (moves during supercruise); bodies are the sun at (0,0) and planets at
+# their ellipse points. Used for the label + the supercruise target range, NOT the projection.
+fn body_dist_au(oax: Double, oaz: Double, tx: Double, tz: Double) -> Double =
+  let dx = tx - oax
+      dz = tz - oaz
+  in sqrt((dx * dx) + (dz * dz))
 
-# A projected on-screen body marker: screen position, label text, true AU distance, and colour. Built
-# once per frame (world_to_screen is IO), then decluttered and drawn purely from this list.
-type Marker = (sx: Int, sy: Int, name: String, dist: Double, r: Int, g: Int, b: Int)
+# A projected on-screen body marker: screen position, label, true AU distance, colour, and whether it
+# is the locked supercruise target (`hi` — always labelled + full bracket, exempt from declutter).
+# Built once per frame (world_to_screen is IO), then decluttered and drawn purely from this list.
+type Marker = (sx: Int, sy: Int, name: String, dist: Double, r: Int, g: Int, b: Int, hi: Bool)
 
 fn iabs(n: Int) -> Int = if n < 0 then 0 - n else n
 fn dimc(c: Int) -> Int = (c * marker_dim_pct) / 100
@@ -1128,36 +1148,44 @@ fn dimc(c: Int) -> Int = (c * marker_dim_pct) / 100
 # iff it is in front of the camera. world_to_screen reads the cached camera, so it is valid in the 2D
 # overlay phase. The far hemisphere is thus correctly dropped (you cannot see bodies behind you).
 fn add_marker(wx: Double, wy: Double, wz: Double, name: String, dist: Double,
-              r: Int, g: Int, b: Int, acc: List Marker) -> List Marker !{IO} =
+              r: Int, g: Int, b: Int, hi: Bool, acc: List Marker) -> List Marker !{IO} =
   do
     front <- gfx.world_to_screen(wx, wy, wz)
     sx <- gfx.projected_x()
     sy <- gfx.projected_y()
     if front
       then Cons(Marker(sx = gfx.double_to_int(sx), sy = gfx.double_to_int(sy),
-                       name = name, dist = dist, r = r, g = g, b = b), acc)
+                       name = name, dist = dist, r = r, g = g, b = b, hi = hi), acc)
       else acc
 
-# The central star, labelled "Star" (not the system name, which the top-left HUD already shows).
-fn add_star_marker(star_name: String, acc: List Marker) -> List Marker !{IO} =
-  match project_body(ship_sun_dist_au, 0.0, 0.0, 0.0, 0.0, 0.0,
-                     sun_radius_au, vista_sphere_r, vista_min_speck) with
-  | (x, y, z, _r) -> add_marker(x, y, z, star_name, ship_sun_dist_au,
-                                marker_star_r, marker_star_g, marker_star_b, acc)
+# The central star (body index 0), labelled "Star". Highlighted when it is the supercruise target.
+fn add_star_marker(oax: Double, oaz: Double, star_name: String, target: Int, acc: List Marker) -> List Marker !{IO} =
+  let hi = target == 0
+      cr = if hi then marker_hi_r else marker_star_r
+      cg = if hi then marker_hi_g else marker_star_g
+      cb = if hi then marker_hi_b else marker_star_b
+  in match project_body(oax, 0.0, oaz, 0.0, 0.0, 0.0,
+                        sun_radius_au, vista_sphere_r, vista_min_speck) with
+     | (x, y, z, _r) -> add_marker(x, y, z, star_name, body_dist_au(oax, oaz, 0.0, 0.0), cr, cg, cb, hi, acc)
 
-fn add_planet_markers(ps: List Planet, acc: List Marker) -> List Marker !{IO} =
+# Planets are body indices 1..n (0 is the star). `idx` is the running index; the one matching `target`
+# is highlighted as the supercruise lock.
+fn add_planet_markers(oax: Double, oaz: Double, ps: List Planet, idx: Int, target: Int, acc: List Marker) -> List Marker !{IO} =
   match ps with
   | Nil -> acc
   | Cons p rest ->
       match ellipse_point(p.a, p.e, p.argperi, p.nu) with
       | (ax, az) ->
-          match project_body(ship_sun_dist_au, 0.0, 0.0, ax, 0.0, az,
-                             p.rad * earth_radius_au, vista_sphere_r, vista_min_speck) with
-          | (x, y, z, _r) ->
-              do
-                acc2 <- add_marker(x, y, z, p.name, body_dist_au(ax, az),
-                                   marker_r, marker_g, marker_b, acc)
-                add_planet_markers(rest, acc2)
+          let hi = idx == target
+              cr = if hi then marker_hi_r else marker_r
+              cg = if hi then marker_hi_g else marker_g
+              cb = if hi then marker_hi_b else marker_b
+          in match project_body(oax, 0.0, oaz, ax, 0.0, az,
+                                p.rad * earth_radius_au, vista_sphere_r, vista_min_speck) with
+             | (x, y, z, _r) ->
+                 do
+                   acc2 <- add_marker(x, y, z, p.name, body_dist_au(oax, oaz, ax, az), cr, cg, cb, hi, acc)
+                   add_planet_markers(oax, oaz, rest, idx + 1, target, acc2)
 
 # Declutter test: is `m` occluded by a NEARER body (strictly smaller AU distance) whose bracket sits
 # within the clustering box? The globally-nearest body in a cluster has no nearer neighbour, so it
@@ -1204,35 +1232,121 @@ fn draw_label(m: Marker) -> Unit !{IO} =
     gfx.draw_text(m.sx + marker_half + 6, m.sy - 16, m.name, 14, m.r, m.g, m.b)
     gfx.draw_text(m.sx + marker_half + 6, m.sy, fmt_au(m.dist) ++ " AU", 13, m.r, m.g, m.b)
 
-# Pass 1: every body's bracket — full+bright if its label shows, dim+small+dot if occluded.
+# Pass 1: every body's bracket. The locked supercruise target (`hi`) always gets a full bright bracket;
+# otherwise full+bright if its label shows, dim+small+dot if occluded.
 fn draw_marker_brackets(todo: List Marker, all: List Marker) -> Unit !{IO} =
   match todo with
   | Nil -> ()
   | Cons m rest ->
       do
-        if occluded_by(m, all)
+        if m.hi
+          then draw_bracket(m.sx, m.sy, marker_half, m.r, m.g, m.b)
+          else if occluded_by(m, all)
           then draw_occluded_marker(m)
           else draw_bracket(m.sx, m.sy, marker_half, m.r, m.g, m.b)
         draw_marker_brackets(rest, all)
 
-# Pass 2: labels for the non-occluded bodies only, drawn AFTER all brackets so a full label is never
-# painted over by a later dim bracket.
+# Pass 2: labels for the target and the non-occluded bodies, drawn AFTER all brackets so a full label
+# is never painted over by a later dim bracket. The target's label always shows (exempt from declutter).
 fn draw_marker_labels(todo: List Marker, all: List Marker) -> Unit !{IO} =
   match todo with
   | Nil -> ()
   | Cons m rest ->
       do
-        if occluded_by(m, all) then () else draw_label(m)
+        if m.hi then draw_label(m) else if occluded_by(m, all) then () else draw_label(m)
         draw_marker_labels(rest, all)
 
 # Reticle every body in the current system (star + all planets). Project once, then declutter: when
 # labels would overlap, keep the nearest body's and replace the rest with the dim occlusion marker.
-fn draw_vista_markers(ps: List Planet, star_name: String) -> Unit !{IO} =
+fn draw_vista_markers(oax: Double, oaz: Double, ps: List Planet, star_name: String, target: Int) -> Unit !{IO} =
   do
-    ms <- add_star_marker(star_name, Nil)
-    all <- add_planet_markers(ps, ms)
+    ms <- add_star_marker(oax, oaz, star_name, target, Nil)
+    all <- add_planet_markers(oax, oaz, ps, 1, target, ms)
     draw_marker_brackets(all, all)
     draw_marker_labels(all, all)
+
+# --- Supercruise vista picker + target geometry -------------------------------------------------
+# Screen-space squared distance from a body's projected on-sphere position to (mx,my); pick_far when
+# the body is behind the camera. Mirrors the scene-1/2 pick over the vista projection.
+fn body_screen_d2(wx: Double, wy: Double, wz: Double, mx: Double, my: Double) -> Double !{IO} =
+  do
+    front <- gfx.world_to_screen(wx, wy, wz)
+    sx <- gfx.projected_x()
+    sy <- gfx.projected_y()
+    if front then ((sx - mx) * (sx - mx)) + ((sy - my) * (sy - my)) else pick_far
+
+fn vista_pick_planets(ps: List Planet, idx: Int, oax: Double, oaz: Double, mx: Double, my: Double,
+                      bd: Double, bi: Int) -> (Double, Int) !{IO} =
+  match ps with
+  | Nil -> (bd, bi)
+  | Cons p rest ->
+      match ellipse_point(p.a, p.e, p.argperi, p.nu) with
+      | (ax, az) ->
+          match project_body(oax, 0.0, oaz, ax, 0.0, az,
+                             p.rad * earth_radius_au, vista_sphere_r, vista_min_speck) with
+          | (x, y, z, _r) ->
+              do
+                d <- body_screen_d2(x, y, z, mx, my)
+                let nd = if d < bd then d else bd
+                let ni = if d < bd then idx else bi
+                vista_pick_planets(rest, idx + 1, oax, oaz, mx, my, nd, ni)
+
+# Pick the body (0=star, 1..n=planet) nearest the cursor in the vista, or -1 if none within the pick
+# radius. Seeds the search with the star, then compares every planet — same shape as the scene-1 pick.
+fn vista_pick(ps: List Planet, oax: Double, oaz: Double, mx: Double, my: Double) -> Int !{IO} =
+  match project_body(oax, 0.0, oaz, 0.0, 0.0, 0.0, sun_radius_au, vista_sphere_r, vista_min_speck) with
+  | (sx0, sy0, sz0, _r) ->
+      do
+        sd <- body_screen_d2(sx0, sy0, sz0, mx, my)
+        res <- vista_pick_planets(ps, 1, oax, oaz, mx, my, sd, 0)
+        match res with
+        | (bd, bi) -> if bd < vista_pick_r2 then bi else 0 - 1
+
+# The AU position of body `target` (0=star at origin, i=planet i-1's ellipse point); the observer's own
+# position when there is no target (so a spurious step is a no-op).
+fn target_pos(target: Int, ps: List Planet, oax: Double, oaz: Double) -> (Double, Double) =
+  if target < 0 then (oax, oaz)
+  else if target == 0 then (0.0, 0.0)
+  else match list_at_planet(ps, target - 1) with
+       | Just p -> ellipse_point(p.a, p.e, p.argperi, p.nu)
+       | Nothing -> (oax, oaz)
+
+fn list_at_planet(ps: List Planet, k: Int) -> Maybe Planet =
+  match ps with
+  | Nil -> Nothing
+  | Cons p rest -> if k <= 0 then Just(p) else list_at_planet(rest, k - 1)
+
+fn fst2(t: (Double, Double)) -> Double = match t with | (a, _) -> a
+fn snd2(t: (Double, Double)) -> Double = match t with | (_, b) -> b
+fn sc_ph(t: (Int, Double)) -> Int = match t with | (p, _) -> p
+fn sc_tm(t: (Int, Double)) -> Double = match t with | (_, tm) -> tm
+
+# Pick the vista target only on a fresh click, else keep the current one (the maybe_pick/maybe_hover
+# idiom — the inactive branch is an IO function so both `if` arms share the effect row).
+fn keep_int(n: Int) -> Int !{IO} =
+  do
+    _t <- gfx.get_time()
+    n
+
+fn vista_pick_maybe(active: Bool, ps: List Planet, oax: Double, oaz: Double,
+                    mx: Double, my: Double, cur: Int) -> Int !{IO} =
+  if active then vista_pick(ps, oax, oaz, mx, my) else keep_int(cur)
+
+# Standoff (AU) at which supercruise auto-drops: larger for the star (don't fly into it), a few body
+# radii for a planet with a floor. Keeps the arrival a comfortable "parked nearby" distance.
+fn target_standoff(target: Int, ps: List Planet) -> Double =
+  if target == 0 then sc_star_standoff
+  else match list_at_planet(ps, target - 1) with
+       | Just p -> let r = (p.rad * earth_radius_au) * sc_standoff_body_mult
+                   in if r < sc_standoff_min then sc_standoff_min else r
+       | Nothing -> sc_standoff_min
+
+# The locked target's display name (for the supercruise HUD): "Star", or the planet's name.
+fn target_name(target: Int, ps: List Planet) -> String =
+  if target == 0 then "Star"
+  else match list_at_planet(ps, target - 1) with
+       | Just p -> p.name
+       | Nothing -> "-"
 
 # --- Scene 2 hover: project each planet to screen, keep the one nearest the cursor for the detail
 # panel. Mirrors the scene-1 pick, but over the in-memory (cached) planet list — no file re-read. ---
@@ -1336,6 +1450,11 @@ fn nav_btn(active: Bool, label: String) -> Bool !{IO} =
 # system-view only, so they never coexist). Clicking it — or Space — engages the interstellar jump.
 fn jump_btn(active: Bool) -> Bool !{IO} =
   if active then gfx.button(932, 728, 156, 46, "Engage Jump") else no_button()
+
+# "Supercruise" button — the vista-view (view 2) context action in the left slot (never coexists with
+# "Engage Jump"/"Ship >", which are galaxy/system view). Active only with a body locked and drive idle.
+fn sc_btn(active: Bool) -> Bool !{IO} =
+  if active then gfx.button(932, 728, 156, 46, "Supercruise") else no_button()
 
 # The galactic-core bulge: three stacked additive glows at the galactic centre (world origin, where the
 # supermassive black hole sits) — a wide faint halo, a mid body, and a bright warm core. Additive, so
@@ -1473,6 +1592,17 @@ fn draw_status_hud(label: String, prog: Double) -> Unit !{IO} =
        gfx.draw_rect(432, 356, 420, 14, 30, 40, 55)
        gfx.draw_rect(432, 356, fw, 14, jump_r, jump_g, jump_b)
 
+# The supercruise HUD line (vista view): prompt to target when none locked, else the locked target's
+# name + live AU range and the drive state (idle "Space to engage" / spooling / cruising).
+fn draw_sc_hud(phase: Int, target: Int, tname: String, dist: Double) -> Unit !{IO} =
+  if target < 0
+    then gfx.draw_text(420, 722, "Click a body to target it", 18, 150, 160, 180)
+    else
+      let status = if phase == sc_spool then "SUPERCRUISE SPOOLING -> " ++ tname
+                   else if phase == sc_cruise then "SUPERCRUISE -> " ++ tname ++ "   " ++ fmt_au(dist) ++ " AU"
+                   else "TARGET " ++ tname ++ "   " ++ fmt_au(dist) ++ " AU   (Space to supercruise)"
+      in gfx.draw_text(420, 722, status, 18, marker_hi_r, marker_hi_g, marker_hi_b)
+
 # The scene overlay HUD (instructions, LoD/system line, info panel, spectral legend) — extracted so
 # the whole block can be suppressed while the warp tunnel fills the screen (`if ! in_tunnel then ...`).
 fn draw_overlay_hud(view: Int, lvl: Int, sel_name: String, sel_detail: String,
@@ -1515,7 +1645,9 @@ fn render_loop(dir: String, cam: Cam, scam: Cam, shipcam: Cam, radius: Double, l
                mask: Int, prev_ldown: Bool, show_grid: Bool, sun_sh: Int, planet_sh: Int, gas_sh: Int,
                ship_model: Int, sky_sh: Int, bgstars: List BgStar, bgsys: String,
                loc_name: String, loc_x: Int, loc_y: Int, loc_z: Int,
-               fuel: Double, ftl_phase: Int, ftl_timer: Double, warp_sh: Int) -> Unit !{IO} =
+               fuel: Double, ftl_phase: Int, ftl_timer: Double, warp_sh: Int,
+               ship_ax: Double, ship_az: Double, sc_phase: Int, sc_timer: Double, sc_target: Int,
+               sc_boot: Int) -> Unit !{IO} =
   do
     stop <- gfx.window_should_close()
     if stop then gfx.close_window()
@@ -1559,6 +1691,28 @@ fn render_loop(dir: String, cam: Cam, scam: Cam, shipcam: Cam, radius: Double, l
         let jcost = jump_fuel_cost(jdist, fuel_per_ly)
         # A jump is offered only from the galaxy view, for a distinct in-range, fuelled target, drive idle.
         let can_j = (view == 0) && has_sel && is_diff && (ftl_phase == phase_idle) && can_jump(jdist, jump_range_ly, fuel, fuel_per_ly)
+        # --- Intra-system supercruise state (FTL iteration 2). Reset the ship's AU position + drive when
+        # the system changes (a jump / first vista entry) so a fresh system starts you at the default
+        # standoff from the star; otherwise position, locked target, and any in-progress cruise persist
+        # across galaxy<->vista toggles within the system. `need_load` is exactly the system-change edge.
+        let cur_ax = if need_load then ship_sun_dist_au else ship_ax
+        let cur_az = if need_load then 0.0 else ship_az
+        let cur_scphase = if need_load then sc_idle else sc_phase
+        let cur_sctimer = if need_load then 0.0 else sc_timer
+        let cur_sctarget = if need_load then 0 - 1 else sc_target
+        # Supercruise auto-engage canary (argv[14] >= 0): once the system has loaded and the drive is
+        # idle, lock that body index and force an engage, then consume the boot target (one-shot). Lets
+        # a headless screenshot capture a mid-cruise disc-swell without input (mirrors argv[13]).
+        let boot_fire = (sc_boot >= 0) && (view == 2) && ! need_load && (cur_scphase == sc_idle)
+        let eff_target = if boot_fire then sc_boot else cur_sctarget
+        let sc_boot2 = if boot_fire then 0 - 1 else sc_boot
+        # Locked-target geometry (AU): its position, the auto-drop standoff, the live range, and arrival.
+        let sc_tp = target_pos(eff_target, cplanets2, cur_ax, cur_az)
+        let sc_tx = fst2(sc_tp)
+        let sc_tz = snd2(sc_tp)
+        let sc_standoff = target_standoff(eff_target, cplanets2)
+        let sc_dist = body_dist_au(cur_ax, cur_az, sc_tx, sc_tz)
+        let sc_arr = sc_arrived(cur_ax, cur_az, sc_tx, sc_tz, sc_standoff)
         gfx.frame_begin()
         # Scene-3 sky orientation: the galactic-centre direction from the ship's system. The system
         # sits at the picked star's galaxy position (galaxy x,y,z -> world x, z-height, z), and the
@@ -1599,7 +1753,7 @@ fn render_loop(dir: String, cam: Cam, scam: Cam, shipcam: Cam, radius: Double, l
                 # Jump route from the current system to the selected target (a distinct in-range pick).
                 if has_sel && is_diff then draw_jump_route(loc_x, loc_y, loc_z, sel_x, sel_y, sel_z) else ()
           else if view == 1 then draw_system(s2ext, cplanets2, sun_sh, planet_sh)
-          else draw_vista_scene(cplanets2, bgstars2, sun_sh, sky_sh, cdx, cdy, cdz, ship_model)
+          else draw_vista_scene(cur_ax, cur_az, cplanets2, bgstars2, sun_sh, sky_sh, cdx, cdy, cdz, ship_model)
         gfx.overlay_begin()
         gfx.draw_fps(10, 10)
         # The scene HUD is hidden while the warp tunnel fills the screen; during spool it stays up under
@@ -1607,8 +1761,10 @@ fn render_loop(dir: String, cam: Cam, scam: Cam, shipcam: Cam, radius: Double, l
         if ! in_tunnel then draw_overlay_hud(view, lvl, sel_name, sel_detail, hov1, hov2, mask) else ()
         # Ship-view body reticles: an Elite-style corner-bracket + name/distance label on every body
         # in the current system, so the pinpoint specks are identifiable. Overlay phase (crisp 2D).
-        if (view == 2) && ! in_tunnel then draw_vista_markers(cplanets2, "Star") else ()
+        if (view == 2) && ! in_tunnel then draw_vista_markers(cur_ax, cur_az, cplanets2, "Star", eff_target) else ()
         if (view == 0) && hud_on then draw_jump_hud(sel_name, has_sel, is_diff, jdist, jcost, fuel, can_j) else ()
+        # Supercruise HUD (vista): target prompt / lock + live range + drive state.
+        if (view == 2) && ! in_tunnel then draw_sc_hud(cur_scphase, eff_target, target_name(eff_target, cplanets2), sc_dist) else ()
         if ftl_phase == phase_spool then draw_status_hud("JUMP DRIVE SPOOLING", tprog) else ()
         if in_tunnel then draw_status_hud("JUMPING", tprog) else ()
         # Scene-navigation button (bottom-right): its label + action depend on the view. Galaxy -> System,
@@ -1620,6 +1776,8 @@ fn render_loop(dir: String, cam: Cam, scam: Cam, shipcam: Cam, radius: Double, l
         toggle <- nav_btn(hud_on, toggle_label)
         jumpc <- jump_btn(can_j)
         board <- board_btn((view == 1) && hud_on)
+        # "Supercruise" (vista view, left slot) — active only with a body locked and the drive idle.
+        scc <- sc_btn((view == 2) && (eff_target >= 0) && (cur_scphase == sc_idle) && hud_on)
         # All / None mask presets (scene 1 only, via helpers so the buttons don't draw in scene 2).
         all_click <- legend_all_btn((view == 0) && hud_on)
         none_click <- legend_none_btn((view == 0) && hud_on)
@@ -1646,7 +1804,9 @@ fn render_loop(dir: String, cam: Cam, scam: Cam, shipcam: Cam, radius: Double, l
         # The "Engage Jump" button occupies the same slot in the galaxy view — guard it too so a click
         # on it never starts an orbit-drag or a star pick.
         let over_jump = (view == 0) && (mx >= 932) && (mx <= 1088) && (my >= 728)
-        let over_ui = over_legend || over_board || over_jump || ((mx >= 1090) && (my >= 715))
+        # The "Supercruise" button shares that left slot in the vista — guard it too.
+        let over_sc = (view == 2) && (mx >= 932) && (mx <= 1088) && (my >= 728)
+        let over_ui = over_legend || over_board || over_jump || over_sc || ((mx >= 1090) && (my >= 715))
         # Left-click SELECT (scene 1). Left-drag orbits, so selection is a TAP: latch the press-down
         # point on the press edge, and on the RELEASE edge pick only if the pointer barely moved
         # (is_tap) and the gesture stayed off the UI. dnx2/dny2 carry the latched point to next frame.
@@ -1657,6 +1817,10 @@ fn render_loop(dir: String, cam: Cam, scam: Cam, shipcam: Cam, radius: Double, l
         let do_pick = l_release && (view == 0) && (ftl_phase == phase_idle) && ! over_ui && is_tap(dnx2, dny2, mx, my, click_slop)
         let pseed = (pick_far, sel_name, sel_detail, sel_x, sel_y, sel_z)
         picked <- maybe_pick(do_pick, dir, cam, lvl, radius, to_double(mx), to_double(my), mask, pseed)
+        # Vista TARGET pick (view 2): a tap on a body locks it as the supercruise target (or deselects
+        # on empty space). Only while the drive is idle — you cannot retarget mid-cruise (on-rails).
+        let vista_click = l_release && (view == 2) && (cur_scphase == sc_idle) && ! over_ui && is_tap(dnx2, dny2, mx, my, click_slop)
+        scpick <- vista_pick_maybe(vista_click, cplanets2, cur_ax, cur_az, to_double(mx), to_double(my), cur_sctarget)
         # Spectral-class filter update (scene 1). A left-click EDGE on a checkbox row toggles that
         # class; All/None set every / no class. Edge-detected so holding the button doesn't re-fire.
         let lclick = ldown && ! prev_ldown && (view == 0) && (ftl_phase == phase_idle)
@@ -1700,6 +1864,11 @@ fn render_loop(dir: String, cam: Cam, scam: Cam, shipcam: Cam, radius: Double, l
         # available). advance_phase runs the spool -> tunnel -> arrive machine off this frame's delta.
         let engage = jumpc || (sp && can_j)
         let ftl_step = advance_phase(ftl_phase, ftl_timer, dtf, engage, can_j, spool_secs, tunnel_secs)
+        # Supercruise machine (view 2): engage from the "Supercruise" button or Space, gated on a body
+        # locked + drive idle. sc_advance runs spool -> cruise -> drop off this frame's delta + arrival.
+        let sc_can = (view == 2) && (eff_target >= 0) && (cur_scphase == sc_idle) && ! busy
+        let sc_engage = (view == 2) && (scc || sp || boot_fire)
+        let sc_step_res = sc_advance(cur_scphase, cur_sctimer, dtf, sc_engage, sc_can, sc_arr, sc_spool_secs)
         match streamed with
         | (loaded2, _) ->
             match picked with
@@ -1728,7 +1897,19 @@ fn render_loop(dir: String, cam: Cam, scam: Cam, shipcam: Cam, radius: Double, l
                             loc_y2 = if arrived then sel_y else loc_y
                             loc_z2 = if arrived then sel_z else loc_z
                             fuel2 = if arrived then refuel(fuel, jcost, refuel_amount, fuel_max) else fuel
-                        in render_loop(dir, cam2, scam2, shipcam2, radius, loaded2, name2, detail2, sel_x2, sel_y2, sel_z2, has_sel2, dnx2, dny2, nv, lvl, csys2, cplanets2, hov1b, hov2b, mask2, ldown, show_grid, sun_sh, planet_sh, gas_sh, ship_model, sky_sh, bgstars2, bgsys2, loc_name2, loc_x2, loc_y2, loc_z2, fuel2, ftl_phase2, ftl_timer2, warp_sh)
+                            # Supercruise results: advance the machine, and while cruising slide the ship
+                            # AU position toward the locked target (auto-drop handled by sc_advance).
+                            sc_phase2 = sc_ph(sc_step_res)
+                            sc_timer2 = sc_tm(sc_step_res)
+                            ship_next = if sc_phase2 == sc_cruise
+                                        then sc_step(cur_ax, cur_az, sc_tx, sc_tz, dtf, sc_k, sc_v_min, sc_v_max, sc_standoff)
+                                        else (cur_ax, cur_az)
+                            ship_ax2 = fst2(ship_next)
+                            ship_az2 = snd2(ship_next)
+                            # The canary's forced target must persist past the one frame boot_fire is
+                            # true (which consumes it), so the cruise it launched has a target to close on.
+                            sc_target2 = if boot_fire then sc_boot else scpick
+                        in render_loop(dir, cam2, scam2, shipcam2, radius, loaded2, name2, detail2, sel_x2, sel_y2, sel_z2, has_sel2, dnx2, dny2, nv, lvl, csys2, cplanets2, hov1b, hov2b, mask2, ldown, show_grid, sun_sh, planet_sh, gas_sh, ship_model, sky_sh, bgstars2, bgsys2, loc_name2, loc_x2, loc_y2, loc_z2, fuel2, ftl_phase2, ftl_timer2, warp_sh, ship_ax2, ship_az2, sc_phase2, sc_timer2, sc_target2, sc_boot2)
 
 fn main() -> Unit !{IO} =
   do
@@ -1846,7 +2027,11 @@ fn main() -> Unit !{IO} =
     let loc0_y = if random_home then home.y else bsy
     let loc0_z = if random_home then home.z else bsz
     let ftl0 = if auto_jump then phase_spool else phase_idle
+    # Optional argv[14] = a body index (0=star, 1..n=planet) to auto-target and supercruise to at boot
+    # (in the random-home vista), so a headless screenshot can capture a mid-cruise disc-swell.
+    sc_boot_arg <- arg_int(14, 0 - 1)
     render_loop(dir, cam0, scam0, shipcam0, radius, dict_empty(),
                 boot_name, boot_detail, boot_sx, boot_sy, boot_sz, boot_has, 0, 0, start_view, seed_lvl, "", Nil, "", "",
                 init_mask, false,! (init_grid == 0), sun_sh, planet_sh, gas_sh, ship_model, sky_sh, Nil, "",
-                boot_name, loc0_x, loc0_y, loc0_z, fuel_max, ftl0, 0.0, warp_sh)
+                boot_name, loc0_x, loc0_y, loc0_z, fuel_max, ftl0, 0.0, warp_sh,
+                ship_sun_dist_au, 0.0, sc_idle, 0.0, 0 - 1, sc_boot_arg)
