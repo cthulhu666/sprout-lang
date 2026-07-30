@@ -20,7 +20,8 @@ integer **light-years**; a system's planets are in **AU**.
 ## Goals / non-goals
 
 **Goals.** A believable, legible two-mode design. Interstellar travel that reads as a deliberate hop
-(select → spool → tunnel → arrive) with a meaningful economy. Reuse the demo's existing data and
+(select in the map → align → spool → tunnel → arrive, fronted from the cockpit) with a meaningful
+economy. Reuse the demo's existing data and
 scenes; no generator change. Keep the risky logic pure and headless-tested.
 
 **Non-goals (this iteration).** Combat, NPCs, or **interdiction** (see below). A flyable free-roam
@@ -99,10 +100,15 @@ Deliberate deviations, each forced by our context:
 
 ### Two-mode model
 
-- **Interstellar jump (iteration 1, built).** From the galaxy view: select a target star, **Engage**
-  (button or Space). Phases: `idle → spool → tunnel → arrive`. Spool is a countdown; the tunnel is a
-  procedural warp shader; arrival drops you into the destination's **ship vista (view 2)** — the
-  tunnel resolves straight into "you are now here, in space". Gated by the economy below.
+- **Interstellar jump (iteration 1, built; cockpit-fronted in a later pass).** Select a target star in
+  the galaxy **map**, then from the ship **vista** press **Jump**. Phases: `idle → align → spool →
+  tunnel → arrive`. The drive first **aligns** the hull to the destination bearing (the same
+  turn-then-charge as supercruise, via `loam.attitude` — the star's galaxy-space direction projected
+  into the vista's orbital plane), then **spools** (a countdown), opens the procedural **warp tunnel**
+  over the cockpit camera, and **arrives** in the destination's **ship vista (view 2)** — the tunnel
+  resolves straight into "you are now here, in space". The vista is **loc-keyed**: aiming at a distant
+  star does not teleport the cockpit there; you keep seeing your current system until arrival flips
+  `loc := sel`. Gated by the economy below.
 - **Intra-system supercruise (iteration 2, built).** In the vista, **click a body** to lock it (a
   green target reticle), then **Supercruise** (button / Space): the drive **spools** briefly, then
   **cruises** — the ship's AU position slides on-rails toward the target at a proximity-scaled speed,
@@ -129,7 +135,9 @@ Deliberate deviations, each forced by our context:
     fires while aligning and flips side on the brake; a **main-drive plume** — a dense trail of glows
     stepping aft from the nozzle, cooling white-hot → red as it widens into a tapering exhaust column,
     with a `sin(time)` flicker — burns aft while cruising.
-  - **State machine** `sc_idle → sc_align → sc_spool → sc_cruise`, mirroring the interstellar machine.
+  - **State machine** `sc_idle → sc_align → sc_spool → sc_cruise`, mirroring the interstellar machine —
+    which now front-loads the **same** align (`idle → align → spool → tunnel → arrive`), driven by the
+    same `loam.attitude` step and `attitude_aligned` gate, just toward a star bearing instead of a body.
     Both `align` and `cruise` end on a **spatial** condition (`aligned` / `arrived`), not a timer — so
     those are caller-supplied gates — while `spool` is the one timed phase. Turn-then-charge: `align`
     holds until the ship faces the target, only then does the drive spool. On a system change the ship
@@ -163,10 +171,11 @@ route planning when a target is out of single-hop range.
 - **`loam.ease`** (new, pure, headless-tested) — `clamp01` / `smoothstep` / `ease_out` / `inv_lerp` /
   `remap`. Domain-agnostic easing; reused by the jump fade, iter-2 supercruise, camera dollies.
 - **`loam.ftl`** (new, pure, headless-tested — `tests/loam/test_ftl.spr`) — the whole risky core:
-  `jump_distance`, `jump_fuel_cost`, `in_range`, `can_jump`, `advance_phase` (the `idle→spool→tunnel→
-  arrive` machine, advanced by a frame delta), `phase_progress`, `refuel`. Phase codes are `Int`
-  (0..3), matching the demo's `view: Int` idiom. 27 assertions lock down gating + every transition +
-  the refuel sign before any rendering exists.
+  `jump_distance`, `jump_fuel_cost`, `in_range`, `can_jump`, `advance_phase` (the `idle→align→spool→
+  tunnel→arrive` machine, advanced by a frame delta; `align` holds on the caller's `aligned` gate,
+  mirroring supercruise), `phase_progress`, `refuel`. Phase codes are `Int` (0..4; `align` is 4, an
+  unordered tag so the others keep their codes), matching the demo's `view: Int` idiom. 31 assertions
+  lock down gating + every transition (incl. the align gate) + the refuel sign before any rendering.
 - **`loam.warp`** (new) — the warp-tunnel GPU shader, a near-copy of `loam.skydome`'s skeleton (pass-
   through VS; fragment recovers `dir = normalize(vWorld − uEye)` on a camera-centred inside-out
   sphere), drawing blue-shifted radial star-streaks from the travel axis, driven by a `uProgress`
@@ -185,11 +194,16 @@ route planning when a target is out of single-hop range.
   one frame's stopping range) to defeat the discrete-step chatter a fixed `omega_tol` would cause. 18
   assertions lock wrapping, the bearing convention, spin-up, convergence, and no-overshoot.
 - **`galaxy_map.sprout`** — threads `loc_*` (current location, distinct from the `sel_*` target),
-  `fuel`, `ftl_phase`, `ftl_timer`, `warp_sh` through `render_loop`; advances the machine with
-  `gfx.get_frame_time()`; draws the warp during the tunnel phase (skipping the normal scene) and the
-  fuel/range/status HUD when idle; performs the arrival side-effects (loc := sel, refuel, view := 2)
-  on the one-frame `arrive`, after which the existing `need_load`/`need_bg` paths stream the
-  destination. A canary arg (`argv[13]=1`) auto-engages a jump at boot for a headless screenshot.
+  `fuel`, `ftl_phase`, `ftl_timer`, `warp_sh` through `render_loop`; the **Jump** button lives in the
+  vista (view 2) and is gated on a distinct in-range fuelled target with both drives idle (`can_j`);
+  advances the machine with `gfx.get_frame_time()`, driving the hull rotation with the shared
+  `attitude_step` toward the star bearing during `align`; draws the warp during the tunnel phase
+  (skipping the normal scene) and the align/spool banners + a vista jump readout otherwise. The vista
+  is **loc-keyed** (view 2 loads/orients on `loc_*`, view 1 on `sel_*`) so a selected far target does
+  not teleport the cockpit; arrival (`loc := sel`, refuel) then makes the existing `need_load`/
+  `need_bg` paths stream the destination — no view switch, since the jump already ran in the vista. A
+  canary arg (`argv[13]=1`) auto-engages a cockpit jump at boot (seeding `align`) for a headless
+  screenshot of the align, tunnel, and arrival.
   For supercruise it also threads the ship's **AU position** `(ship_ax, ship_az)` + `sc_phase`/
   `sc_timer`/`sc_target` through `render_loop`, feeds that moving position to `project_body` as the
   observer (sun, planets, and the markers), steps it with `sc_step` while cruising, and resets it on a
@@ -200,8 +214,9 @@ route planning when a target is out of single-hop range.
 
 ## Tests
 
-- `tests/loam/test_ftl.spr` (27 assertions) — the jump geometry, the range+fuel gate, every phase
-  transition (incl. blocked-when-`!can` and the arrive→idle latch), progress bounds, refuel economy.
+- `tests/loam/test_ftl.spr` (31 assertions) — the jump geometry, the range+fuel gate, every phase
+  transition (incl. the idle→align launch, the align hold-until-aligned gate, blocked-when-`!can`, and
+  the arrive→idle latch), progress bounds, refuel economy.
 - `tests/loam/test_supercruise.spr` (19) — the proximity speed clamp, `sc_step` convergence to the
   standoff, the arrival test, and every supercruise transition (incl. the `align` gate).
 - `tests/loam/test_attitude.spr` (18) — angle wrap, the bearing convention, thruster spin-up,

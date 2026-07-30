@@ -1,20 +1,24 @@
 module loam.ftl
 
 # PURE interstellar-jump ("jump drive") logic for the galaxy-map demo. The believable-FTL design is
-# the Elite-Dangerous-canonical shape stripped of combat: from the galaxy view you pick a target
-# star, spool the drive, ride an animated warp tunnel, and arrive in the destination system's
-# third-person vista. Travel is FREE-JUMP (any in-range star — our galaxy is a free point cloud with
-# no gate graph) and gated by a fuel+range economy. There is no interdiction — the demo has no NPCs
-# to be pulled out by; that stays a documented future hook (see docs/ftl-v0.md).
+# the Elite-Dangerous-canonical shape stripped of combat: pick a target star in the galaxy map, then
+# from the ship VISTA the drive ALIGNS the hull to the destination bearing, spools, opens an animated
+# warp tunnel, and arrives in the destination system's third-person vista. The align phase mirrors the
+# intra-system supercruise (loam.supercruise): the ship must physically turn to face the travel vector
+# before the drive charges. Travel is FREE-JUMP (any in-range star — our galaxy is a free point cloud
+# with no gate graph) and gated by a fuel+range economy. There is no interdiction — the demo has no
+# NPCs to be pulled out by; that stays a documented future hook (see docs/ftl-v0.md).
 #
 # This module is the headless core: the jump geometry, the economy, and the phase state machine.
 # Graphics-free and IO-free (only stdlib.math + loam.ease), so it is unit-tested in
-# tests/loam/test_ftl.spr; the demo threads `phase`/`timer` through its render loop, drives the warp
-# shader off phase_progress, and performs the arrival side-effects (load destination, refuel, switch
-# to the vista) on the one-frame `arrive` phase.
+# tests/loam/test_ftl.spr; the demo threads `phase`/`timer` through its render loop, drives the hull
+# rotation (loam.attitude) during align, the warp shader off phase_progress, and performs the arrival
+# side-effects (load destination, refuel) on the one-frame `arrive` phase.
 #
-# Phase codes are Int (0 idle, 1 spool, 2 tunnel, 3 arrive), matching the demo's `view: Int` idiom —
-# a small closed set threaded as a plain word, no nullary-ADT machinery needed.
+# Phase codes are Int (0 idle, 1 spool, 2 tunnel, 3 arrive, 4 align), matching the demo's `view: Int`
+# idiom — a small closed set threaded as a plain word, no nullary-ADT machinery needed. Like
+# supercruise's tags they are UNORDERED: the flow is idle -> align -> spool -> tunnel -> arrive ->
+# idle regardless of the numeric values (align is 4 so idle/spool/tunnel/arrive keep their codes).
 
 import stdlib.math (sqrt, fclamp)
 import loam.ease (clamp01)
@@ -23,6 +27,7 @@ export let phase_idle = 0
 export let phase_spool = 1
 export let phase_tunnel = 2
 export let phase_arrive = 3
+export let phase_align = 4
 
 # Straight-line light-year distance between two integer star coordinates (the catalog stores raw ly).
 export fn jump_distance(ax: Int, ay: Int, az: Int, bx: Int, by: Int, bz: Int) -> Double =
@@ -45,24 +50,32 @@ export fn can_jump(dist: Double, range: Double, fuel: Double, per_ly: Double) ->
   in_range(dist, range) && (fuel >= jump_fuel_cost(dist, per_ly))
 
 # Advance the jump state machine by one frame of `dt` seconds. `engage` is the trigger this frame
-# (button/Space); `can` is the gate (can_jump && idle) evaluated by the caller. Returns the next
-# (phase, timer). Idle only launches on `engage && can`; spool and tunnel accumulate `timer` until
-# their durations elapse; arrive is a one-frame latch that returns to idle (the caller does the
-# arrival side-effects on the frame it observes `arrive`). `timer` resets to 0 at every transition.
-export fn advance_phase(phase: Int, timer: Double, dt: Double, engage: Bool, can: Bool,
+# (button/key); `can` is the gate (can_jump && idle) evaluated by the caller; `aligned` is caller-
+# computed (loam.attitude — is the hull pointed at the destination bearing and settled?). Returns the
+# next (phase, timer). Idle launches ALIGN on `engage && can`; align HOLDS (accumulating `timer` for
+# the HUD) until `aligned` — the ship must physically turn to face the travel vector before the drive
+# charges (the caller drives the rotation via attitude_step in this phase); spool and tunnel then
+# accumulate `timer` until their durations elapse; arrive is a one-frame latch that returns to idle
+# (the caller does the arrival side-effects on the frame it observes `arrive`). `timer` resets to 0 at
+# every transition. This front-loaded align mirrors loam.supercruise's align -> spool handoff.
+export fn advance_phase(phase: Int, timer: Double, dt: Double, engage: Bool, can: Bool, aligned: Bool,
                         spool_s: Double, tunnel_s: Double) -> (Int, Double) =
-  if phase == phase_spool then
+  if phase == phase_align then
+    if aligned then (phase_spool, 0.0) else (phase_align, timer + dt)
+  else if phase == phase_spool then
     let t2 = timer + dt
     in if t2 >= spool_s then (phase_tunnel, 0.0) else (phase_spool, t2)
   else if phase == phase_tunnel then
     let t2 = timer + dt
     in if t2 >= tunnel_s then (phase_arrive, 0.0) else (phase_tunnel, t2)
   else if phase == phase_arrive then (phase_idle, 0.0)
-  else if (engage && can) then (phase_spool, 0.0)
+  else if (engage && can) then (phase_align, 0.0)
   else (phase_idle, 0.0)
 
 # Normalised 0..1 progress within the current phase, for the warp shader / HUD bar. Spool and tunnel
-# report their fraction elapsed (clamped); arrive is complete (1.0); idle is 0.0.
+# report their fraction elapsed (clamped); arrive is complete (1.0); align has no fixed duration (it
+# ends on the spatial `aligned` gate, not a timer) so it reports 0.0 — the HUD shows an ALIGNING
+# label rather than a bar, as supercruise does; idle is 0.0.
 export fn phase_progress(phase: Int, timer: Double, spool_s: Double, tunnel_s: Double) -> Double =
   if phase == phase_spool then clamp01(timer / spool_s)
   else if phase == phase_tunnel then clamp01(timer / tunnel_s)

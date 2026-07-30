@@ -2,15 +2,19 @@ import stdlib.test (check_true, run_suite)
 import stdlib.math (fabs)
 import loam.ftl (jump_distance, jump_fuel_cost, in_range, can_jump, advance_phase, phase_progress, refuel)
 
-# loam.ftl — the PURE interstellar-jump logic for the galaxy-map demo (scene 0 -> spool -> warp
-# tunnel -> arrive in the destination vista). No graphics, no IO: just the jump geometry, the
-# fuel+range economy, and the phase state machine advanced by a frame delta. The demo threads the
-# phase/timer through its render loop and drives the animation + arrival side-effects off these.
+# loam.ftl — the PURE interstellar-jump logic for the galaxy-map demo. The jump is fronted from the
+# ship VISTA (like the intra-system supercruise): pick a target star in the map, then from the cockpit
+# the drive ALIGNS the hull to the destination bearing, SPOOLS, opens a warp TUNNEL, and ARRIVES in
+# the destination vista. No graphics, no IO: just the jump geometry, the fuel+range economy, and the
+# phase state machine advanced by a frame delta. The demo threads the phase/timer through its render
+# loop and drives the animation + arrival side-effects off these.
 #
-# Phase codes (Int, matching the demo's `view: Int` idiom): 0 idle, 1 spool, 2 tunnel, 3 arrive.
-# These guard: distance/cost geometry, the range+fuel gate, every phase transition (incl. the
-# blocked-when-!can idle case and the one-frame arrive->idle latch), progress bounds, and the
-# self-balancing refuel (short hop nets fuel, long hop drains).
+# Phase codes (Int, matching the demo's `view: Int` idiom): 0 idle, 1 spool, 2 tunnel, 3 arrive,
+# 4 align (an unordered tag, like supercruise's; the flow is idle -> align -> spool -> tunnel ->
+# arrive -> idle regardless of the numeric values). These guard: distance/cost geometry, the range+
+# fuel gate, every phase transition (incl. the align hold-until-aligned gate, the blocked-when-!can
+# idle case, and the one-frame arrive->idle latch), progress bounds, and the self-balancing refuel
+# (short hop nets fuel, long hop drains).
 
 fn near(a: Double, b: Double) -> Bool = fabs(a - b) < 0.0001
 
@@ -35,18 +39,23 @@ fn main() -> Unit !{IO} =
     check_true("cannot: out of range",! can_jump (15.0, 10.0, 999.0, 2.0)),
     check_true("cannot: low fuel",! can_jump (5.0, 10.0, 8.0, 2.0)),
     check_true("can: fuel exactly cost", can_jump(5.0, 10.0, 10.0, 2.0)),
-    # --- advance_phase: idle transitions gate on engage && can ---
-    check_true("idle+engage+can -> spool", ph_ok(advance_phase(0, 0.0, 0.016, true, true, 2.0, 3.0), 1, 0.0)),
-    check_true("idle+engage+!can stays idle", ph_ok(advance_phase(0, 0.0, 0.016, true, false, 2.0, 3.0), 0, 0.0)),
-    check_true("idle+!engage stays idle", ph_ok(advance_phase(0, 0.0, 0.016, false, true, 2.0, 3.0), 0, 0.0)),
+    # --- advance_phase: idle launches ALIGN (not spool) on engage && can ---
+    check_true("idle+engage+can -> align", ph_ok(advance_phase(0, 0.0, 0.016, true, true, false, 2.0, 3.0), 4, 0.0)),
+    check_true("idle+engage+!can stays idle", ph_ok(advance_phase(0, 0.0, 0.016, true, false, false, 2.0, 3.0), 0, 0.0)),
+    check_true("idle+!engage stays idle", ph_ok(advance_phase(0, 0.0, 0.016, false, true, true, 2.0, 3.0), 0, 0.0)),
+    # --- advance_phase: align holds (accumulating timer) until the hull is aligned, then spools ---
+    check_true("align holds while not aligned", ph_ok(advance_phase(4, 0.0, 0.5, false, true, false, 2.0, 3.0), 4, 0.5)),
+    check_true("align -> spool when aligned", ph_ok(advance_phase(4, 1.2, 0.5, false, true, true, 2.0, 3.0), 1, 0.0)),
     # --- advance_phase: spool accumulates then crosses to tunnel ---
-    check_true("spool accumulates timer", ph_ok(advance_phase(1, 0.0, 0.5, false, true, 2.0, 3.0), 1, 0.5)),
-    check_true("spool crosses -> tunnel", ph_ok(advance_phase(1, 1.8, 0.5, false, true, 2.0, 3.0), 2, 0.0)),
+    check_true("spool accumulates timer", ph_ok(advance_phase(1, 0.0, 0.5, false, true, true, 2.0, 3.0), 1, 0.5)),
+    check_true("spool crosses -> tunnel", ph_ok(advance_phase(1, 1.8, 0.5, false, true, true, 2.0, 3.0), 2, 0.0)),
     # --- advance_phase: tunnel accumulates then crosses to arrive ---
-    check_true("tunnel accumulates timer", ph_ok(advance_phase(2, 0.0, 1.0, false, true, 2.0, 3.0), 2, 1.0)),
-    check_true("tunnel crosses -> arrive", ph_ok(advance_phase(2, 2.9, 0.5, false, true, 2.0, 3.0), 3, 0.0)),
+    check_true("tunnel accumulates timer", ph_ok(advance_phase(2, 0.0, 1.0, false, true, true, 2.0, 3.0), 2, 1.0)),
+    check_true("tunnel crosses -> arrive", ph_ok(advance_phase(2, 2.9, 0.5, false, true, true, 2.0, 3.0), 3, 0.0)),
     # --- advance_phase: arrive is a one-frame latch back to idle ---
-    check_true("arrive -> idle next frame", ph_ok(advance_phase(3, 0.0, 0.016, false, true, 2.0, 3.0), 0, 0.0)),
+    check_true("arrive -> idle next frame", ph_ok(advance_phase(3, 0.0, 0.016, false, true, true, 2.0, 3.0), 0, 0.0)),
+    # --- phase_progress: align has no fixed duration -> reports 0 (HUD shows the ALIGNING label) ---
+    check_true("progress align = 0", near(phase_progress(4, 9.0, 2.0, 3.0), 0.0)),
     # --- phase_progress: 0..1 within the current phase, clamped ---
     check_true("progress spool half", near(phase_progress(1, 1.0, 2.0, 3.0), 0.5)),
     check_true("progress tunnel half", near(phase_progress(2, 1.5, 2.0, 3.0), 0.5)),

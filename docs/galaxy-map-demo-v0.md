@@ -410,12 +410,15 @@ specks. No orbit lines, no size inflation. `< System` returns to scene 2.
 - **Next.** Optionally a flyable ship with a chase camera, and star labels/selection on the real
   layer — see "Planned extensions".
 
-## Interstellar jump drive — FTL (scene 0, built, iteration 1)
+## Interstellar jump drive — FTL (cockpit-fronted, built, iteration 1)
 
-The galaxy view is also where you **travel between stars**. Select a target star, then **Engage Jump**
-(the bottom button, or **Space**): the drive **spools** (a countdown), a **warp tunnel** opens, and you
-**arrive** in that system's third-person ship vista (scene 3) — the tunnel resolves straight into "you
-are now here, in space". Full design + the verified prior-art survey it is based on is in
+You **travel between stars from the cockpit.** Select a target star in the galaxy view, then from the
+ship vista (scene 3) press **Jump** (the bottom button, left of Supercruise): the drive **aligns** the
+hull to the destination bearing (the same turn-then-charge as the supercruise align), **spools** (a
+countdown), a **warp tunnel** opens over the cockpit, and you **arrive** in the destination system's
+third-person ship vista — the tunnel resolves straight into "you are now here, in space". Because the
+vista is **loc-keyed**, selecting a far target does *not* teleport the cockpit there; you keep seeing
+your current system until arrival. Full design + the verified prior-art survey it is based on is in
 [docs/ftl-v0.md](ftl-v0.md); this is the demo-side summary.
 
 - **The shape** is the Elite-Dangerous-canonical pair (supercruise + a map-selected hyperspace jump),
@@ -432,9 +435,11 @@ are now here, in space". Full design + the verified prior-art survey it is based
   **never hard-strand** you. The HUD shows a fuel gauge, the range, and the target's distance/cost (or
   the blocked reason: `OUT OF RANGE` / `LOW FUEL` / `SELECT TARGET`). A cyan **route line** is drawn
   from the ship's current system to the selected target.
-- **Pure logic in loam, headless-tested.** The jump geometry, the economy, and the `idle → spool →
-  tunnel → arrive` **state machine** (advanced by `gfx.get_frame_time()`) are `loam.ftl` — 27 assertions
-  in `tests/loam/test_ftl.spr` cover the range/fuel gate, every phase transition, and the refuel sign.
+- **Pure logic in loam, headless-tested.** The jump geometry, the economy, and the `idle → align →
+  spool → tunnel → arrive` **state machine** (advanced by `gfx.get_frame_time()`; `align` holds on the
+  caller's `aligned` gate, driven by the shared `loam.attitude` toward the star bearing) are `loam.ftl`
+  — 31 assertions in `tests/loam/test_ftl.spr` cover the range/fuel gate, every phase transition (incl.
+  the align gate), and the refuel sign.
   The general interpolation atoms it builds on are `loam.ease` (`clamp01`/`smoothstep`/`ease_out`/
   `inv_lerp`/`remap`, on the new `stdlib.math` `fclamp`/`lerp`), tested in `tests/loam/test_ease.spr`.
 - **The warp tunnel (`loam.warp`)** is a GPU shader, a near-copy of `loam.skydome`'s skeleton — a
@@ -445,12 +450,17 @@ are now here, in space". Full design + the verified prior-art survey it is based
 - **State.** `render_loop` threads the ship's **current location** (`loc_*`, distinct from the `sel_*`
   target so a jump has a *from* and a *to*), `fuel`, and the `ftl_phase`/`ftl_timer`. `loc_*` is
   **seeded at boot to a random real home system** (see "Starting home" below) and **moves only on jump
-  arrival** — picking a star selects a jump target, it does not relocate you. Arrival sets `loc := sel`,
-  burns+tops-up fuel, and flips to view 2; the existing per-system JSON / real-star streaming
-  (`need_load`/`need_bg`) then loads the destination on the next frame — no new loader.
-- **Scripting.** `argv[13] = 1` auto-engages a jump at boot (galaxy view → spool → tunnel → arrival
-  vista) with no interaction, so a headless screenshot can capture the warp tunnel mid-run and the
-  destination vista — see Running below.
+  arrival** — picking a star selects a jump target, it does not relocate you. The **vista is loc-keyed**
+  (view 2 loads/orients on `loc_*`; the system inspector, view 1, previews `sel_*`) so aiming at a
+  distant star does not move the cockpit. Arrival sets `loc := sel` and burns+tops-up fuel; you are
+  already in the vista, so there is no view switch — the existing per-system JSON / real-star streaming
+  (`need_load`/`need_bg`) simply loads the destination on the next frame. The **Jump** button lives in
+  the vista (in its own slot left of Supercruise) and is enabled only for a distinct, in-range, fuelled
+  target with both drives idle; Space stays reserved for supercruise so the two cockpit drives never
+  clash over one key.
+- **Scripting.** `argv[13] = 1` auto-engages a cockpit jump at boot — it opens the ship vista at the
+  `align` phase and runs align → spool → tunnel → arrival with no interaction, so a headless screenshot
+  can capture the pre-jump align, the warp tunnel mid-run, and the destination vista — see Running below.
 
 ### Starting home (built)
 
@@ -604,13 +614,14 @@ SPROUT_GFX_MAX_FRAMES=120 SPROUT_GFX_SCREENSHOT=galaxy.png \
 # (SPROUT_GFX_SCREENSHOT must be a RELATIVE path — raylib resolves it against the working dir):
 SPROUT_GFX_MAX_FRAMES=120 SPROUT_GFX_SCREENSHOT=ship.png SPROUT_GFX_SCREENSHOT_FRAME=100 \
   mise exec -- just run-gfx examples/gfx/galaxy_map.sprout /Users/cthulhu/GameDev/universegen/catalog 85000 14000 700 0 0 13 4095 1 1 -25141 6520 436
-# interstellar JUMP canary — argv[13]=1 auto-engages a jump at boot (galaxy view -> spool -> warp
-# tunnel -> arrival vista) with no interaction. argv[6]=destination system id, argv[10..12]=its galaxy
-# x,y,z (the ship's current location is seeded 3000 ly off it, an in-range origin). The phase timing is
-# wall-clock (set_target_fps(60)), so the tunnel spans ~frames 132..288 and arrival is ~frame 288 at
-# 60 fps — pick SPROUT_GFX_SCREENSHOT_FRAME in the warp window, and a later frame for the arrival vista:
-SPROUT_GFX_MAX_FRAMES=210 SPROUT_GFX_SCREENSHOT=warp.png SPROUT_GFX_SCREENSHOT_FRAME=200 \
-  mise exec -- just run-gfx examples/gfx/galaxy_map.sprout /Users/cthulhu/GameDev/universegen/catalog 85000 14000 700 0 0 13 4095 1 0 -25141 6520 436 1
+# interstellar JUMP canary — argv[13]=1 auto-engages a COCKPIT jump at boot: opens the ship vista at the
+# `align` phase and runs align -> spool -> warp tunnel -> arrival vista with no interaction. argv[6]=the
+# ORIGIN system id + argv[10..12]=its galaxy x,y,z (the vista is loc-keyed, so it loads/orients on this);
+# the jump target is seeded 3000 ly off it, an in-range destination. Phase timing is wall-clock
+# (set_target_fps(60)): pick SPROUT_GFX_SCREENSHOT_FRAME ~40 for the pre-jump ALIGN, ~150 for SPOOLING,
+# ~260 for the JUMPING tunnel, ~400 for the arrival vista:
+SPROUT_GFX_MAX_FRAMES=405 SPROUT_GFX_SCREENSHOT=jump.png SPROUT_GFX_SCREENSHOT_FRAME=40 \
+  mise exec -- just run-gfx examples/gfx/galaxy_map.sprout /Users/cthulhu/GameDev/universegen/catalog 8000 3000 0 0 0 13 4095 1 0 -25141 6520 436 1
 # intra-system SUPERCRUISE canary — argv[14]=<body index> (0=star, 1..n=planet) auto-targets that body
 # in the ship vista and supercruises to it: the ship first ALIGNS to face it (maneuvering thrusters,
 # RCS plumes), then SPOOLS, then CRUISES to it (disc swells + ranges update live) and auto-drops at a

@@ -20,7 +20,7 @@ import loam.starfield as sf
 import loam.billboard as bb
 import loam.nebula as nb
 import loam.planet as pl
-import loam.ftl (phase_idle, phase_spool, phase_tunnel, phase_arrive, jump_distance, jump_fuel_cost, can_jump, advance_phase, phase_progress, refuel)
+import loam.ftl (phase_idle, phase_spool, phase_tunnel, phase_arrive, phase_align, jump_distance, jump_fuel_cost, can_jump, advance_phase, phase_progress, refuel)
 import loam.supercruise (sc_idle, sc_align, sc_spool, sc_cruise, sc_speed, sc_step, sc_arrived, sc_advance)
 import loam.attitude (Attitude, bearing, attitude_step, attitude_aligned)
 import loam.warp as warp
@@ -44,10 +44,13 @@ import loam.warp as warp
 #                    behind it. Model: loam ship_model_path (a 44 MB GLB, NOT committed — see
 #                    .gitignore; the ship is simply omitted when it is absent).
 #
-# JUMP DRIVE (FTL, scene 0). Select a target star and "Engage Jump" (or Space): the drive SPOOLS, a
-# warp TUNNEL opens (loam.warp), and you ARRIVE in that system's ship vista (view 2). Free-jump gated
-# by a fuel+range economy; the pure logic (distance, gating, the spool/tunnel/arrive state machine,
-# the self-balancing refuel) is loam.ftl (headless-tested). See docs/ftl-v0.md.
+# JUMP DRIVE (FTL). Select a target star in the galaxy map, then from the ship VISTA press "Jump": the
+# drive ALIGNS the hull to the destination bearing (loam.attitude, exactly like the intra-system
+# supercruise align), SPOOLS, a warp TUNNEL opens (loam.warp) over the cockpit, and you ARRIVE in the
+# destination system's vista. The vista is loc-keyed, so aiming at a distant star does NOT teleport the
+# cockpit there — you see your current system until arrival flips loc := sel. Free-jump gated by a fuel
+# +range economy; the pure logic (distance, gating, the align/spool/tunnel/arrive state machine, the
+# self-balancing refuel) is loam.ftl (headless-tested). See docs/ftl-v0.md.
 #
 # BOOT. The ship is placed in a RANDOM real system at launch (its "home"): pick_home reads one line
 # from the balanced catalog's L0 root tile, seeded by the monotonic clock, and the demo opens in that
@@ -84,6 +87,11 @@ import loam.warp as warp
 # Canary + screenshot (argv[7] = initial class mask, e.g. 64 = M-only):
 #   SPROUT_GFX_MAX_FRAMES=120 SPROUT_GFX_SCREENSHOT=galaxy.png \
 #     mise exec -- just run-gfx examples/gfx/galaxy_map.sprout ~/GameDev/universegen/catalog 85000 14000 700 0 0 -1 64
+# Auto-jump canary (argv[6]=origin system, argv[10..12]=its position, argv[13]=1 auto-engages a cockpit
+# jump: boots the vista at align, then spool -> tunnel -> arrive). Screenshot a chosen frame to capture
+# the ALIGN (~40), SPOOLING (~150), JUMPING tunnel (~260), or arrival vista (~400):
+#   SPROUT_GFX_MAX_FRAMES=405 SPROUT_GFX_SCREENSHOT_FRAME=40 SPROUT_GFX_SCREENSHOT=jump.png \
+#     mise exec -- just run-gfx examples/gfx/galaxy_map.sprout ~/GameDev/universegen/catalog 8000 3000 0 0 0 42 255 1 0 1000 2000 500 1
 
 # --- Tunables (compile-time; a .conf loader is a later-stage polish) --------------------------------
 let default_catalog = "catalog"  # relative fallback; the real catalog dir is passed as argv[0]
@@ -311,6 +319,9 @@ let warp_sphere_r = 8000.0  # camera-centred warp-dome radius (like vista_sphere
 let jump_r = 120  # jump-drive accent + route-line colour (cyan)
 let jump_g = 200
 let jump_b = 255
+# Approximate glyph advance (percent of font size) for the default raylib font, used to estimate a
+# label's pixel width when centring a hud_button (Sprout has no MeasureText primitive). Tuned by eye.
+let hud_btn_char_frac = 50
 
 let stream_max_level = 4  # deepest catalog level (matches the exporter's populated depth)
 let lod_hysteresis = 0.15  # deadband (fraction of a boundary) so the LoD level never flip-flops on a zoom boundary
@@ -1645,40 +1656,86 @@ fn legend_hit(mx: Int, my: Int) -> Int =
     else 0 - 1
 
 # An !{IO} `false` for the inactive branch of a conditional button (binding an `if` via `<-` does not
-# parse, so the buttons — which must only draw in scene 1 — go through these plain helpers).
+# parse, so the buttons — which draw only in the view they belong to — go through these plain helpers).
 fn no_button() -> Bool !{IO} =
   do
     _t <- gfx.get_time()
     false
-fn legend_all_btn(active: Bool) -> Bool !{IO} =
-  if active then gfx.button(leg_x + 8, leg_btn_y, 106, 30, "All") else no_button()
-fn legend_none_btn(active: Bool) -> Bool !{IO} =
-  if active then gfx.button(leg_x + 120, leg_btn_y, 106, 30, "None") else no_button()
+
+# A HUD button, composed in Sprout from the flat `draw_rect`/`draw_text` primitives (the styling lives
+# in the demo, not the gfx shim) to fit the map's cyan HUD: a dark chip, a thin cyan border, a bright
+# LEFT ACTION-SPINE, and Elite-style CORNER BRACKETS (the same reticle language as the body markers),
+# with the label estimate-centred (no MeasureText primitive → width ~ str_len * fs * frac%). Draws +
+# hit-tests in one call like the old gfx.button, but the mouse comes in as (mx, my, pressed) — the
+# caller reads it before the buttons so the click logic stays in Sprout. Returns True on the press
+# edge inside the box. `draw_rect` is opaque (no alpha primitive), so the fill is a solid dark that
+# reads over the near-black backdrop; hover brightens the fill, spine, border, brackets, and label.
+fn hud_button(x: Int, y: Int, w: Int, h: Int, label: String,
+              mx: Int, my: Int, pressed: Bool, active: Bool) -> Bool !{IO} =
+  if ! active then no_button()
+  else
+    let hover = (mx >= x) && (mx < x + w) && (my >= y) && (my < y + h)
+        fbr = if hover then 20 else 12
+        fbg = if hover then 44 else 22
+        fbb = if hover then 64 else 34
+        abr = if hover then 172 else 120
+        abg = if hover then 226 else 200
+        bbr = if hover then 150 else 84
+        bbg = if hover then 215 else 156
+        bbb = if hover then 255 else 206
+        tbr = if hover then 240 else 208
+        tbg = if hover then 250 else 230
+        fs = if h - 18 < 12 then 12 else h - 18
+        lw = (str_len(label) * fs * hud_btn_char_frac) / 100
+        tx = x + ((w - lw) / 2)
+        ty = y + ((h - fs) / 2)
+        leg = min(14, min(w / 5, h / 3))
+    in do
+         gfx.draw_rect(x, y, w, h, fbr, fbg, fbb)  # dark chip body
+         gfx.draw_rect(x, y, w, 2, bbr, bbg, bbb)  # border: top
+         gfx.draw_rect(x, y + h - 2, w, 2, bbr, bbg, bbb)  #         bottom
+         gfx.draw_rect(x, y, 2, h, bbr, bbg, bbb)  #         left
+         gfx.draw_rect(x + w - 2, y, 2, h, bbr, bbg, bbb)  #         right
+         gfx.draw_rect(x, y, 3, h, abr, abg, 255)  # left action-spine (cyan)
+         gfx.draw_rect(x, y, leg, 2, abr, abg, 255)  # corner brackets: TL
+         gfx.draw_rect(x, y, 2, leg, abr, abg, 255)
+         gfx.draw_rect(x + w - leg, y, leg, 2, abr, abg, 255)  #                  TR
+         gfx.draw_rect(x + w - 2, y, 2, leg, abr, abg, 255)
+         gfx.draw_rect(x, y + h - 2, leg, 2, abr, abg, 255)  #                  BL
+         gfx.draw_rect(x, y + h - leg, 2, leg, abr, abg, 255)
+         gfx.draw_rect(x + w - leg, y + h - 2, leg, 2, abr, abg, 255)  #             BR
+         gfx.draw_rect(x + w - 2, y + h - leg, 2, leg, abr, abg, 255)
+         gfx.draw_text(tx, ty, label, fs, tbr, tbg, 255)  # estimate-centred label
+         hover && pressed
+
+fn legend_all_btn(active: Bool, mx: Int, my: Int, pressed: Bool) -> Bool !{IO} =
+  hud_button(leg_x + 8, leg_btn_y, 106, 30, "All", mx, my, pressed, active)
+fn legend_none_btn(active: Bool, mx: Int, my: Int, pressed: Bool) -> Bool !{IO} =
+  hud_button(leg_x + 120, leg_btn_y, 106, 30, "None", mx, my, pressed, active)
 
 # "Ship >" button — drawn only in the system view, in the left context-action slot (beside the
 # scene-toggle). Descends to the ship vista of the same system; the ">" matches the "System >"
 # go-deeper convention (vs the "< …" back labels). It reads as navigation, not a first-time
-# boarding action — the ship is already where you are (you boot aboard it). Goes through the same
-# conditional-button idiom as the legend buttons so the `if` is not bound via `<-`. (Internally still
-# `board_btn`/`board`/`over_board` — the relabel is visible-only, to keep the change minimal.)
-fn board_btn(active: Bool) -> Bool !{IO} =
-  if active then gfx.button(932, 728, 156, 46, "Ship >") else no_button()
+# boarding action — the ship is already where you are (you boot aboard it).
+fn board_btn(active: Bool, mx: Int, my: Int, pressed: Bool) -> Bool !{IO} =
+  hud_button(932, 728, 156, 46, "Ship >", mx, my, pressed, active)
 
 # The scene-navigation toggle (bottom-right) — a helper so it can be suppressed (drawn only when
 # `active`) while the jump drive is busy, so a spool/tunnel can't be aborted mid-jump.
-fn nav_btn(active: Bool, label: String) -> Bool !{IO} =
-  if active then gfx.button(1108, 728, 156, 46, label) else no_button()
+fn nav_btn(active: Bool, label: String, mx: Int, my: Int, pressed: Bool) -> Bool !{IO} =
+  hud_button(1108, 728, 156, 46, label, mx, my, pressed, active)
 
-# "Engage Jump" (galaxy view only) — drawn/clickable only when `active` (a valid, in-range, fuelled
-# target is selected and the drive is idle). Occupies the same bottom slot as "Ship >" (which is
-# system-view only, so they never coexist). Clicking it — or Space — engages the interstellar jump.
-fn jump_btn(active: Bool) -> Bool !{IO} =
-  if active then gfx.button(932, 728, 156, 46, "Engage Jump") else no_button()
+# "Jump" — the interstellar jump is now fronted from the VISTA (view 2), so this shares the bottom bar
+# with "Supercruise": Jump sits in its own slot LEFT of the Supercruise slot. Active only for a valid,
+# in-range, fuelled, distinct target with both drives idle. Clicking it engages the align -> spool ->
+# tunnel -> arrive machine (Space stays reserved for supercruise so the two cockpit drives never clash).
+fn jump_btn(active: Bool, mx: Int, my: Int, pressed: Bool) -> Bool !{IO} =
+  hud_button(752, 728, 156, 46, "Jump", mx, my, pressed, active)
 
-# "Supercruise" button — the vista-view (view 2) context action in the left slot (never coexists with
-# "Engage Jump"/"Ship >", which are galaxy/system view). Active only with a body locked and drive idle.
-fn sc_btn(active: Bool) -> Bool !{IO} =
-  if active then gfx.button(932, 728, 156, 46, "Supercruise") else no_button()
+# "Supercruise" button — the vista-view (view 2) context action, in the slot right of "Jump". Active
+# only with a body locked and both drives idle.
+fn sc_btn(active: Bool, mx: Int, my: Int, pressed: Bool) -> Bool !{IO} =
+  hud_button(932, 728, 156, 46, "Supercruise", mx, my, pressed, active)
 
 # The galactic-core bulge: three stacked additive glows at the galactic centre (world origin, where the
 # supermassive black hole sits) — a wide faint halo, a mid body, and a bright warm core. Additive, so
@@ -1828,19 +1885,36 @@ fn draw_sc_hud(phase: Int, target: Target, tname: String, dist: Double) -> Unit 
                    else "TARGET " ++ tname ++ "   " ++ fmt_au(dist) ++ " AU   (Space to supercruise)"
       in gfx.draw_text(420, 722, status, 18, marker_hi_r, marker_hi_g, marker_hi_b)
 
+# Vista jump readout (view 2, drive idle, a distinct target set): the selected star + its distance/
+# fuel cost and readiness, one line above the supercruise line. Cyan + "READY" when the "Jump" button
+# is live, else the blocked reason. Concise — the galaxy map's jump HUD carries the fuel/range gauge.
+fn draw_vista_jump_status(tgt: String, jdist: Double, jcost: Double, ready: Bool) -> Unit !{IO} =
+  let di = to_string(gfx.double_to_int(jdist))
+      ci = to_string(gfx.double_to_int(jcost))
+      msg = if ready then "JUMP -> " ++ tgt ++ "   " ++ di ++ " ly   fuel -" ++ ci ++ "   READY"
+            else if jdist > jump_range_ly then "JUMP -> " ++ tgt ++ "   OUT OF RANGE (" ++ di ++ " ly)"
+            else "JUMP -> " ++ tgt ++ "   LOW FUEL (need " ++ ci ++ ")"
+      cr = if ready then jump_r else 210
+      cg = if ready then jump_g else 150
+      cb = if ready then jump_b else 120
+  in gfx.draw_text(420, 698, msg, 16, cr, cg, cb)
+
 # The scene overlay HUD (instructions, LoD/system line, info panel, spectral legend) — extracted so
 # the whole block can be suppressed while the warp tunnel fills the screen (`if ! in_tunnel then ...`).
 fn draw_overlay_hud(view: Int, lvl: Int, sel_name: String, sel_detail: String,
-                    hov1: String, hov2: String, mask: Int) -> Unit !{IO} =
+                    here_name: String, hov1: String, hov2: String, mask: Int) -> Unit !{IO} =
   do
     if view == 0
       then gfx.draw_text(10, 34, "click: inspect   drag: orbit/tilt   shift+drag / WASD: pan   wheel: zoom", 18, 180, 190, 210)
       else if view == 1
       then gfx.draw_text(10, 34, "SOLAR SYSTEM   drag: orbit/tilt   wheel: zoom   (< Galaxy to return)", 18, 255, 220, 120)
       else gfx.draw_text(10, 34, "SHIP   drag: orbit/tilt   wheel: zoom   (< System to return)", 18, 150, 220, 255)
+    # The cockpit (view 2) names the system the ship is IN (here_name = loc); the system inspector
+    # (view 1) names the SELECTED star it is previewing (sel_name).
     if view == 0
       then gfx.draw_text(10, 56, "LoD level " ++ to_string(lvl), 18, 150, 200, 150)
-      else gfx.draw_text(10, 56, "system " ++ sel_name, 18, 255, 230, 150)
+      else if view == 1 then gfx.draw_text(10, 56, "system " ++ sel_name, 18, 255, 230, 150)
+      else gfx.draw_text(10, 56, "system " ++ here_name, 18, 150, 220, 255)
     if view == 0
       then
         do
@@ -1854,7 +1928,7 @@ fn draw_overlay_hud(view: Int, lvl: Int, sel_name: String, sel_detail: String,
       else
         do
           gfx.draw_text(20, 724, "RUSTY SPACESHIP", 22, 200, 220, 255)
-          gfx.draw_text(20, 752, "adrift in " ++ sel_name ++ "   ~1 AU from the star", 16, 200, 210, 230)
+          gfx.draw_text(20, 752, "adrift in " ++ here_name ++ "   ~1 AU from the star", 16, 200, 210, 230)
     if view == 0
       then
         do
@@ -1898,19 +1972,27 @@ fn render_loop(dir: String, cam: Cam, scam: Cam, shipcam: Cam, radius: Double, l
         # Hysteretic LoD: step at most one level from the previously-committed level, and only once the
         # eye has moved a deadband PAST the boundary — so hovering on a zoom boundary can't flip-flop.
         let lvl = next_level(prev_lvl, dist, stream_max_level, lod_hysteresis)
-        # Scene-2/3 planet cache: (re)parse the selected system's JSON only when it changes, so a static
-        # system view runs at full frame rate instead of re-reading the file every frame. Scene 3 (ship)
-        # shows the same system, so it needs the planets loaded too — the || covers a direct-to-ship
-        # canary boot where scene 2 was never visited.
-        let need_load = (view == 1 || view == 2) && ! (sel_name == csys)
-        let cplanets2 = if need_load then load_planets(dir, sel_name) else cplanets
-        let csys2 = if need_load then sel_name else csys
+        # Which system the non-galaxy views render. The SYSTEM inspector (view 1) previews the SELECTED
+        # star (the one you might jump to); the ship COCKPIT (view 2) shows where the ship physically IS
+        # (loc), NOT the selected target — with the jump now fronted from the cockpit, sel and loc differ
+        # while you aim at a distant star, and only converge on arrival (loc := sel). Keying the vista on
+        # loc is what keeps "select a target in the map" from teleporting the cockpit to the destination.
+        let vsys_name = if view == 2 then loc_name else sel_name
+        let vsx = if view == 2 then loc_x else sel_x
+        let vsy = if view == 2 then loc_y else sel_y
+        let vsz = if view == 2 then loc_z else sel_z
+        # Scene-2/3 planet cache: (re)parse that system's JSON only when it changes, so a static view
+        # runs at full frame rate instead of re-reading the file every frame. Scene 3 (ship) shows a
+        # system too, so it needs the planets loaded — the || covers a direct-to-ship canary boot.
+        let need_load = (view == 1 || view == 2) && ! (vsys_name == csys)
+        let cplanets2 = if need_load then load_planets(dir, vsys_name) else cplanets
+        let csys2 = if need_load then vsys_name else csys
         let s2ext = system_extent(cplanets2)
-        # Scene-3 real-star cache: (re)load the projected real stars only when the boarded system
-        # changes (tracked by bgsys, separate from csys since scene 2 may have loaded the planets first).
-        let need_bg = (view == 2) && ! (sel_name == bgsys)
-        let bgstars2 = if need_bg then load_bgstars(dir, sel_x, sel_y, sel_z, radius) else bgstars
-        let bgsys2 = if need_bg then sel_name else bgsys
+        # Scene-3 real-star cache: (re)load the projected real stars only when the ship's system changes
+        # (tracked by bgsys, separate from csys since scene 2 may have loaded the planets first).
+        let need_bg = (view == 2) && ! (vsys_name == bgsys)
+        let bgstars2 = if need_bg then load_bgstars(dir, vsx, vsy, vsz, radius) else bgstars
+        let bgsys2 = if need_bg then vsys_name else bgsys
         streamed <- load_levels(dir, cam, lvl, 0, radius, loaded, load_budget)
         let acam = if view == 0 then cam else if view == 1 then scam else shipcam
         cam_apply(acam)
@@ -1930,8 +2012,11 @@ fn render_loop(dir: String, cam: Cam, scam: Cam, shipcam: Cam, radius: Double, l
         let is_diff = ! ((sel_x == loc_x) && (sel_y == loc_y) && (sel_z == loc_z))
         let jdist = jump_distance(loc_x, loc_y, loc_z, sel_x, sel_y, sel_z)
         let jcost = jump_fuel_cost(jdist, fuel_per_ly)
-        # A jump is offered only from the galaxy view, for a distinct in-range, fuelled target, drive idle.
-        let can_j = (view == 0) && has_sel && is_diff && (ftl_phase == phase_idle) && can_jump(jdist, jump_range_ly, fuel, fuel_per_ly)
+        # `jump_ready` = a distinct, in-range, fuelled target is selected (view-independent planning
+        # state, shown by the galaxy-map jump HUD). The jump is ENGAGED from the vista, so `can_j`
+        # (below, once the supercruise phase is known) additionally requires view 2 with both drives
+        # idle — you plan the hop in the map, then jump from the cockpit.
+        let jump_ready = has_sel && is_diff && can_jump(jdist, jump_range_ly, fuel, fuel_per_ly)
         # --- Intra-system supercruise state (FTL iteration 2). Reset the ship's AU position + drive when
         # the system changes (a jump / first vista entry) so a fresh system starts you at the default
         # standoff from the star; otherwise position, locked target, and any in-progress cruise persist
@@ -1941,6 +2026,9 @@ fn render_loop(dir: String, cam: Cam, scam: Cam, shipcam: Cam, radius: Double, l
         let cur_scphase = if need_load then sc_idle else sc_phase
         let cur_sctimer = if need_load then 0.0 else sc_timer
         let cur_sctarget = if need_load then NoTarget else sc_target
+        # The interstellar jump is available only from the cockpit (view 2), with both drives idle so the
+        # single ship-attitude state is never fought over by a jump-align and a supercruise-align at once.
+        let can_j = (view == 2) && jump_ready && (ftl_phase == phase_idle) && (cur_scphase == sc_idle)
         # Ship attitude (heading/omega, radians) + last frame's RCS thrust for the plume VFX. Reset the
         # facing on a system change so a fresh vista starts pointed forward (+z), not mid-swing.
         let cur_heading = if need_load then 0.0 else ship_heading
@@ -1960,14 +2048,14 @@ fn render_loop(dir: String, cam: Cam, scam: Cam, shipcam: Cam, radius: Double, l
         let sc_dist = body_dist_au(cur_ax, cur_az, sc_tx, sc_tz)
         let sc_arr = sc_arrived(cur_ax, cur_az, sc_tx, sc_tz, sc_standoff)
         gfx.frame_begin()
-        # Scene-3 sky orientation: the galactic-centre direction from the ship's system. The system
-        # sits at the picked star's galaxy position (galaxy x,y,z -> world x, z-height, z), and the
-        # centre is the world origin, so the direction is its negation. Zero (an argv canary boot with
-        # no pick) falls back to +x so the shader's normalize stays well-defined.
-        let has_sys = ! ((sel_x == 0) && (sel_y == 0) && (sel_z == 0))
-        let cdx = if has_sys then 0.0 - to_double(sel_x) else 1.0
-        let cdy = if has_sys then 0.0 - to_double(sel_z) else 0.0
-        let cdz = if has_sys then 0.0 - to_double(sel_y) else 0.0
+        # Scene-3 sky orientation: the galactic-centre direction from the ship's system (loc, via vsx/
+        # vsy/vsz — the vista is loc-keyed). The system sits at that galaxy position (galaxy x,y,z ->
+        # world x, z-height, z), and the centre is the world origin, so the direction is its negation.
+        # Zero (an argv canary boot with no pick) falls back to +x so the shader's normalize stays valid.
+        let has_sys = ! ((vsx == 0) && (vsy == 0) && (vsz == 0))
+        let cdx = if has_sys then 0.0 - to_double(vsx) else 1.0
+        let cdy = if has_sys then 0.0 - to_double(vsz) else 0.0
+        let cdz = if has_sys then 0.0 - to_double(vsy) else 0.0
         # Scene 1 draws the galaxy point cloud, filtered to the enabled spectral classes (model index
         # == classCode, so the mask enables/disables whole classes); scene 2 draws the selected system.
         # During a jump's TUNNEL phase the warp shader replaces the scene entirely (drawn on a camera-
@@ -2004,33 +2092,44 @@ fn render_loop(dir: String, cam: Cam, scam: Cam, shipcam: Cam, radius: Double, l
         gfx.draw_fps(10, 10)
         # The scene HUD is hidden while the warp tunnel fills the screen; during spool it stays up under
         # the spool banner. The jump HUD (fuel/range/target status) shows only while the drive is idle.
-        if ! in_tunnel then draw_overlay_hud(view, lvl, sel_name, sel_detail, hov1, hov2, mask) else ()
+        if ! in_tunnel then draw_overlay_hud(view, lvl, sel_name, sel_detail, loc_name, hov1, hov2, mask) else ()
         # Ship-view body reticles: an Elite-style corner-bracket + name/distance label on every body
         # in the current system, so the pinpoint specks are identifiable. Overlay phase (crisp 2D).
         if (view == 2) && ! in_tunnel then draw_vista_markers(cur_ax, cur_az, cplanets2, "Star", eff_target) else ()
-        if (view == 0) && hud_on then draw_jump_hud(sel_name, has_sel, is_diff, jdist, jcost, fuel, can_j) else ()
+        if (view == 0) && hud_on then draw_jump_hud(sel_name, has_sel, is_diff, jdist, jcost, fuel, jump_ready) else ()
         # Supercruise HUD (vista): target prompt / lock + live range + drive state.
         if (view == 2) && ! in_tunnel then draw_sc_hud(cur_scphase, eff_target, target_name(eff_target, cplanets2), sc_dist) else ()
+        # Vista jump readout — only with a distinct target set and the drive idle (the align/spool/
+        # tunnel banners take over the screen once engaged).
+        if (view == 2) && (ftl_phase == phase_idle) && has_sel && is_diff
+          then draw_vista_jump_status(sel_name, jdist, jcost, can_j) else ()
+        # Jump-drive phase banners. Align has no progress bar — it ends on the alignment gate, not a
+        # timer (like supercruise's align) — so it shows just the centred label.
+        if ftl_phase == phase_align then gfx.draw_text(432, 300, "JUMP DRIVE ALIGNING", 40, jump_r, jump_g, jump_b) else ()
         if ftl_phase == phase_spool then draw_status_hud("JUMP DRIVE SPOOLING", tprog) else ()
         if in_tunnel then draw_status_hud("JUMPING", tprog) else ()
         # Scene-navigation button (bottom-right): its label + action depend on the view. Galaxy -> System,
         # System -> Galaxy, Ship -> System (one step back up the galaxy > system > ship chain).
         let toggle_label = if view == 0 then "System >" else if view == 1 then "< Galaxy" else "< System"
-        # All bottom-bar buttons are suppressed while the drive is busy (spool/tunnel), so a jump can't
-        # be aborted or a scene switched mid-jump. "Engage Jump" (galaxy view) shares the "Ship >"
-        # slot and is drawn only when a valid jump is available (can_j).
-        toggle <- nav_btn(hud_on, toggle_label)
-        jumpc <- jump_btn(can_j)
-        board <- board_btn((view == 1) && hud_on)
-        # "Supercruise" (vista view, left slot) — active only with a body locked and the drive idle.
-        scc <- sc_btn((view == 2) && has_target(eff_target) && (cur_scphase == sc_idle) && hud_on)
-        # All / None mask presets (scene 1 only, via helpers so the buttons don't draw in scene 2).
-        all_click <- legend_all_btn((view == 0) && hud_on)
-        none_click <- legend_none_btn((view == 0) && hud_on)
-        wheel <- gfx.mouse_wheel_y()
+        # The mouse is read BEFORE the buttons draw: hud_button styles + hit-tests in Sprout, so it
+        # takes the pointer as (mx, my, bpress). `bpress` is the left-press EDGE this frame (the same
+        # ldown/prev_ldown edge the star-pick uses). All bottom-bar buttons are suppressed while the
+        # drive is busy (spool/tunnel), so a jump can't be aborted or a scene switched mid-jump.
         ldown <- gfx.mouse_button_down(gfx.mouse_left)
         mx <- gfx.mouse_x()
         my <- gfx.mouse_y()
+        let bpress = ldown && ! prev_ldown
+        toggle <- nav_btn(hud_on, toggle_label, mx, my, bpress)
+        # "Jump" (vista, left-of-Supercruise slot) — drawn only when a valid interstellar jump is
+        # available (can_j, now view-2-gated); clicking it engages align -> spool -> tunnel -> arrive.
+        jumpc <- jump_btn(can_j, mx, my, bpress)
+        board <- board_btn((view == 1) && hud_on, mx, my, bpress)
+        # "Supercruise" (vista view, right of Jump) — active only with a body locked and both drives idle.
+        scc <- sc_btn((view == 2) && has_target(eff_target) && (cur_scphase == sc_idle) && hud_on, mx, my, bpress)
+        # All / None mask presets (scene 1 only, via helpers so the buttons don't draw in scene 2).
+        all_click <- legend_all_btn((view == 0) && hud_on, mx, my, bpress)
+        none_click <- legend_none_btn((view == 0) && hud_on, mx, my, bpress)
+        wheel <- gfx.mouse_wheel_y()
         gdx <- gfx.mouse_delta_x()
         gdy <- gfx.mouse_delta_y()
         shift <- gfx.key_down(gfx.key_left_shift)
@@ -2048,10 +2147,10 @@ fn render_loop(dir: String, cam: Cam, scam: Cam, shipcam: Cam, radius: Double, l
         # The "Ship >" button (system view only) sits left of the nav button; guard its region too so a
         # click on it never starts an orbit-drag.
         let over_board = (view == 1) && (mx >= 932) && (mx <= 1088) && (my >= 728)
-        # The "Engage Jump" button occupies the same slot in the galaxy view — guard it too so a click
-        # on it never starts an orbit-drag or a star pick.
-        let over_jump = (view == 0) && (mx >= 932) && (mx <= 1088) && (my >= 728)
-        # The "Supercruise" button shares that left slot in the vista — guard it too.
+        # The "Jump" button (vista, left-of-Supercruise slot) — guard its region so a click on it never
+        # starts an orbit-drag or a body-pick.
+        let over_jump = (view == 2) && (mx >= 752) && (mx <= 908) && (my >= 728)
+        # The "Supercruise" button (vista, right of Jump) — guard it too.
         let over_sc = (view == 2) && (mx >= 932) && (mx <= 1088) && (my >= 728)
         let over_ui = over_legend || over_board || over_jump || over_sc || ((mx >= 1090) && (my >= 715))
         # Left-click SELECT (scene 1). Left-drag orbits, so selection is a TAP: latch the press-down
@@ -2066,7 +2165,7 @@ fn render_loop(dir: String, cam: Cam, scam: Cam, shipcam: Cam, radius: Double, l
         picked <- maybe_pick(do_pick, dir, cam, lvl, radius, to_double(mx), to_double(my), mask, pseed)
         # Vista TARGET pick (view 2): a tap on a body locks it as the supercruise target (or deselects
         # on empty space). Only while the drive is idle — you cannot retarget mid-cruise (on-rails).
-        let vista_click = l_release && (view == 2) && (cur_scphase == sc_idle) && ! over_ui && is_tap(dnx2, dny2, mx, my, click_slop)
+        let vista_click = l_release && (view == 2) && (cur_scphase == sc_idle) && ! busy && ! over_ui && is_tap(dnx2, dny2, mx, my, click_slop)
         scpick <- vista_pick_maybe(vista_click, cplanets2, cur_ax, cur_az, to_double(mx), to_double(my), cur_sctarget)
         # Spectral-class filter update (scene 1). A left-click EDGE on a checkbox row toggles that
         # class; All/None set every / no class. Edge-detected so holding the button doesn't re-fire.
@@ -2107,34 +2206,45 @@ fn render_loop(dir: String, cam: Cam, scam: Cam, shipcam: Cam, radius: Double, l
         let cam2 = if view == 0 then driven else cam
         let scam2 = if view == 1 then driven else scam
         let shipcam2 = if view == 2 then driven else shipcam
-        # Engage the jump from the "Engage Jump" button or Space (only meaningful when a jump is
-        # available). advance_phase runs the spool -> tunnel -> arrive machine off this frame's delta.
-        let engage = jumpc || (sp && can_j)
-        let ftl_step = advance_phase(ftl_phase, ftl_timer, dtf, engage, can_j, spool_secs, tunnel_secs)
+        # Engage the interstellar jump from the vista's "Jump" button (Space stays reserved for the
+        # intra-system supercruise, so the two cockpit drives never fight over one key). `can_j` already
+        # requires view 2 with both drives idle.
+        let engage = jumpc
         # Supercruise machine (view 2): engage from the "Supercruise" button or Space, gated on a body
-        # locked + drive idle. sc_advance runs align -> spool -> cruise -> drop off this frame's delta.
+        # locked + both drives idle. sc_advance runs align -> spool -> cruise -> drop off this frame's delta.
         let sc_can = (view == 2) && has_target(eff_target) && (cur_scphase == sc_idle) && ! busy
         let sc_engage = (view == 2) && (scc || sp || boot_fire)
-        # Attitude: slew the hull toward the target bearing during ALIGN (and hold it locked through
-        # CRUISE); `aligned` gates align -> spool, so the drive charges only once the ship faces the
-        # travel vector. In other phases the heading is held (no torque). Rendered NEXT frame via the
-        # threaded ship_heading/ship_thrust (this frame's draw already ran, above).
+        # Ship attitude (heading/omega): ONE physical body, driven toward at most one target bearing —
+        # the two drives are mutually exclusive (can_j / sc_can each require the other idle):
+        #   jump-align -> the destination STAR's bearing (the galaxy delta projected into the orbital
+        #                 plane via the sky's gal->world map, world x<-gal x, world z<-gal y);
+        #   supercruise align/spool/cruise -> the locked BODY's bearing;
+        #   otherwise  -> hold the CURRENT heading (selecting a target does NOT pre-turn the hull; the
+        #                 deliberate turn is the align phase). Rendered NEXT frame via the threaded
+        #                 ship_heading/ship_thrust (this frame's draw already ran, above).
+        # attitude_step runs EVERY frame so the RCS makes constant station-keeping micro-corrections:
+        # under an active drive it tracks the bearing with a steady twitch; coasting it holds heading
+        # with SPARSE, irregular corrections. `aligned` (below) gates each drive's align -> spool.
         let sc_target_bearing = bearing(sc_tx - cur_ax, sc_tz - cur_az)
-        # Attitude runs EVERY frame so the maneuvering thrusters make constant station-keeping micro-
-        # corrections even when not maneuvering. The hold reference is the travel vector only while the
-        # drive is engaged (align slews to it, spool/cruise hold it); when idle the ship holds its
-        # CURRENT heading — so selecting a target does NOT pre-emptively turn the hull (the deliberate
-        # turn is the align phase).
-        # Under drive (align/spool/cruise) the hull tracks the travel vector with a steady twitch;
-        # coasting (idle, adrift) it holds its current heading with SPARSE, irregular corrections.
+        let jump_bearing = bearing(to_double(sel_x - loc_x), to_double(sel_y - loc_y))
+        let jump_aligning = ftl_phase == phase_align
         let under_drive = (cur_scphase == sc_align) || (cur_scphase == sc_spool) || (cur_scphase == sc_cruise)
-        let att_ref = if under_drive then sc_target_bearing else cur_heading
-        let att_dither = if under_drive then active_dither(now) else coast_dither(now)
+        let drive_active = jump_aligning || under_drive
+        let att_ref = if jump_aligning then jump_bearing
+                      else if under_drive then sc_target_bearing
+                      else cur_heading
+        let att_dither = if drive_active then active_dither(now) else coast_dither(now)
         let att_target = att_ref + att_dither
         let att = attitude_step(cur_heading, cur_omega, att_target, dtf,
                                 sc_turn_accel, sc_turn_omega_max, sc_align_tol, sc_hold_kp, sc_hold_kd)
         let sc_aligned = attitude_aligned(att.heading, att.omega, sc_target_bearing,
                                           sc_align_tol, sc_align_omega_tol)
+        let jump_aligned = attitude_aligned(att.heading, att.omega, jump_bearing,
+                                            sc_align_tol, sc_align_omega_tol)
+        # Advance both drive machines off this frame's delta; only the non-idle one moves. The jump
+        # machine now front-loads an align (idle -> align -> spool -> tunnel -> arrive), gated by
+        # jump_aligned exactly as supercruise's align is gated by sc_aligned.
+        let ftl_step = advance_phase(ftl_phase, ftl_timer, dtf, engage, can_j, jump_aligned, spool_secs, tunnel_secs)
         let sc_step_res = sc_advance(cur_scphase, cur_sctimer, dtf, sc_engage, sc_can, sc_aligned, sc_arr, sc_spool_secs)
         match streamed with
         | (loaded2, _) ->
@@ -2278,32 +2388,36 @@ fn main() -> Unit !{IO} =
     # through the render loop, gating draw_sector_grid) so it can be made switchable again without
     # rewiring; argv[8] = 0 turns it off at launch (default on), e.g. for a grid-free screenshot.
     init_grid <- arg_int(8, 1)
-    # Optional argv[13] = 1 auto-engages a jump at boot: start in the galaxy view with the target at the
-    # boarded system's position (argv[10..12]) and the ship's current location seeded 3000 ly off it (an
-    # in-range origin), then seed the phase at `spool` so the drive runs spool -> tunnel -> arrive with no
-    # interaction — a headless canary can screenshot the warp tunnel (mid-run) and the arrival vista.
-    # Normal boot drops the ship into its random home system's ship vista (view 2). The explicit
-    # system canary (argv[6]) and the auto-jump canary (argv[13], both read earlier) override this.
+    # Optional argv[13] = 1 auto-engages a jump at boot, IN THE COCKPIT: start in the ship vista (view 2)
+    # of the REAL origin system (argv[6] name + argv[10..12] position), with a DISTINCT in-range jump
+    # target seeded 3000 ly off it, and the drive phase seeded at `align` — so the ship slews to the
+    # destination bearing, spools, opens the warp tunnel, and arrives with NO interaction. A headless
+    # canary can screenshot the pre-jump ALIGN (the new cockpit behaviour), the warp tunnel (mid-run),
+    # and the arrival vista. Normal boot drops the ship into its random home system's ship vista (view
+    # 2). The explicit system canary (argv[6]) and the auto-jump canary (argv[13]) override this.
     let random_home = (home.found) && ! canary_boot
-    let start_view = if auto_jump then 0 else if random_home then 2 else init_view
-    # Selection = the jump TARGET. At a random home it starts ON the home so the vista's need_load
-    # path streams the home system and no self-jump is offered (is_diff = false). The canaries keep
-    # their prior seeds. Location = where the ship IS; a jump is the only thing that moves it.
-    let boot_name = if random_home then home.name else init_name
+    let start_view = if random_home then 2 else if auto_jump then 2 else init_view
+    # Selection = the jump TARGET. At a random home it starts ON the home so no self-jump is offered
+    # (is_diff = false). The auto-jump canary seeds a DISTINCT target so the jump proceeds. Location =
+    # where the ship IS (loc, below); the vista is loc-keyed, and a jump is the only thing that moves it.
+    let boot_name = if random_home then home.name else if auto_jump then "SYS-TARGET" else init_name
     let boot_detail = if random_home then home.detail else "Click a star to inspect it"
-    let boot_sx = if random_home then home.x else bsx
+    let boot_sx = if random_home then home.x else if auto_jump then bsx + 3000 else bsx
     let boot_sy = if random_home then home.y else bsy
     let boot_sz = if random_home then home.z else bsz
     let boot_has = if random_home then true else auto_jump
-    let loc0_x = if auto_jump then bsx + 3000 else if random_home then home.x else bsx
+    # The ship's current LOCATION (loc). For the auto-jump canary this is the real origin (argv[6]/
+    # argv[10..12]); the vista loads + orients on it until arrival sets loc := sel.
+    let loc0_name = if random_home then home.name else init_name
+    let loc0_x = if random_home then home.x else bsx
     let loc0_y = if random_home then home.y else bsy
     let loc0_z = if random_home then home.z else bsz
-    let ftl0 = if auto_jump then phase_spool else phase_idle
+    let ftl0 = if auto_jump then phase_align else phase_idle
     # Optional argv[14] = a body index (0=star, 1..n=planet) to auto-target and supercruise to at boot
     # (in the random-home vista), so a headless screenshot can capture a mid-cruise disc-swell.
     sc_boot_arg <- arg_int(14, 0 - 1)
     render_loop(dir, cam0, scam0, shipcam0, radius, dict_empty(),
                 boot_name, boot_detail, boot_sx, boot_sy, boot_sz, boot_has, 0, 0, start_view, seed_lvl, "", Nil, "", "",
                 init_mask, false,! (init_grid == 0), sun_sh, planet_sh, gas_sh, ship_model, sky_sh, Nil, "",
-                boot_name, loc0_x, loc0_y, loc0_z, fuel_max, ftl0, 0.0, warp_sh,
+                loc0_name, loc0_x, loc0_y, loc0_z, fuel_max, ftl0, 0.0, warp_sh,
                 ship_sun_dist_au, 0.0, sc_idle, 0.0, NoTarget, sc_boot_arg, 0.0, 0.0, 0.0)
