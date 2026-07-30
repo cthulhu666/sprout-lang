@@ -1330,9 +1330,36 @@ fn add_marker(wx: Double, wy: Double, wz: Double, name: String, dist: Double,
                        name = name, dist = dist, r = r, g = g, b = b, hi = hi), acc)
       else acc
 
+# The supercruise target — the body the drive will fly to. An ADT rather than a magic Int (which had
+# NoTarget = -1, Star = 0, planets = 1..n) so "no target" / "the star" / "planet N" are distinct,
+# compiler-checked cases and can't be confused with a bare index. `Planet` carries the BODY index
+# (1..n; the planet-list index is that minus one, matching the marker + list numbering). Command-line
+# canary values stay Int (you pass ints to the binary) and cross into Target via target_of_index at
+# the boot boundary; everything internal is a Target.
+type Target =
+  | NoTarget
+  | Star
+  | PlanetTarget Int
+
+# Boundary conversion: a raw body index (from a screen pick or an argv canary) -> Target.
+fn target_of_index(i: Int) -> Target =
+  if i < 0 then NoTarget
+  else if i == 0 then Star
+  else PlanetTarget(i)
+
+# Is any body locked (star or planet)? Replaces the old `target >= 0` test.
+fn has_target(t: Target) -> Bool =
+  match t with
+  | NoTarget -> false
+  | Star -> true
+  | PlanetTarget n -> true
+
 # The central star (body index 0), labelled "Star". Highlighted when it is the supercruise target.
-fn add_star_marker(oax: Double, oaz: Double, star_name: String, target: Int, acc: List Marker) -> List Marker !{IO} =
-  let hi = target == 0
+fn add_star_marker(oax: Double, oaz: Double, star_name: String, target: Target, acc: List Marker) -> List Marker !{IO} =
+  let hi = match target with
+           | Star -> true
+           | NoTarget -> false
+           | PlanetTarget n -> false
       cr = if hi then marker_hi_r else marker_star_r
       cg = if hi then marker_hi_g else marker_star_g
       cb = if hi then marker_hi_b else marker_star_b
@@ -1342,13 +1369,16 @@ fn add_star_marker(oax: Double, oaz: Double, star_name: String, target: Int, acc
 
 # Planets are body indices 1..n (0 is the star). `idx` is the running index; the one matching `target`
 # is highlighted as the supercruise lock.
-fn add_planet_markers(oax: Double, oaz: Double, ps: List Planet, idx: Int, target: Int, acc: List Marker) -> List Marker !{IO} =
+fn add_planet_markers(oax: Double, oaz: Double, ps: List Planet, idx: Int, target: Target, acc: List Marker) -> List Marker !{IO} =
   match ps with
   | Nil -> acc
   | Cons p rest ->
       match ellipse_point(p.a, p.e, p.argperi, p.nu) with
       | (ax, az) ->
-          let hi = idx == target
+          let hi = match target with
+                   | PlanetTarget n -> n == idx
+                   | Star -> false
+                   | NoTarget -> false
               cr = if hi then marker_hi_r else marker_r
               cg = if hi then marker_hi_g else marker_g
               cb = if hi then marker_hi_b else marker_b
@@ -1430,7 +1460,7 @@ fn draw_marker_labels(todo: List Marker, all: List Marker) -> Unit !{IO} =
 
 # Reticle every body in the current system (star + all planets). Project once, then declutter: when
 # labels would overlap, keep the nearest body's and replace the rest with the dim occlusion marker.
-fn draw_vista_markers(oax: Double, oaz: Double, ps: List Planet, star_name: String, target: Int) -> Unit !{IO} =
+fn draw_vista_markers(oax: Double, oaz: Double, ps: List Planet, star_name: String, target: Target) -> Unit !{IO} =
   do
     ms <- add_star_marker(oax, oaz, star_name, target, Nil)
     all <- add_planet_markers(oax, oaz, ps, 1, target, ms)
@@ -1476,12 +1506,14 @@ fn vista_pick(ps: List Planet, oax: Double, oaz: Double, mx: Double, my: Double)
 
 # The AU position of body `target` (0=star at origin, i=planet i-1's ellipse point); the observer's own
 # position when there is no target (so a spurious step is a no-op).
-fn target_pos(target: Int, ps: List Planet, oax: Double, oaz: Double) -> (Double, Double) =
-  if target < 0 then (oax, oaz)
-  else if target == 0 then (0.0, 0.0)
-  else match list_at_planet(ps, target - 1) with
-       | Just p -> ellipse_point(p.a, p.e, p.argperi, p.nu)
-       | Nothing -> (oax, oaz)
+fn target_pos(target: Target, ps: List Planet, oax: Double, oaz: Double) -> (Double, Double) =
+  match target with
+  | NoTarget -> (oax, oaz)
+  | Star -> (0.0, 0.0)
+  | PlanetTarget n ->
+      match list_at_planet(ps, n - 1) with
+      | Just p -> ellipse_point(p.a, p.e, p.argperi, p.nu)
+      | Nothing -> (oax, oaz)
 
 fn list_at_planet(ps: List Planet, k: Int) -> Maybe Planet =
   match ps with
@@ -1495,30 +1527,42 @@ fn sc_tm(t: (Int, Double)) -> Double = match t with | (_, tm) -> tm
 
 # Pick the vista target only on a fresh click, else keep the current one (the maybe_pick/maybe_hover
 # idiom — the inactive branch is an IO function so both `if` arms share the effect row).
-fn keep_int(n: Int) -> Int !{IO} =
+fn keep_target(t: Target) -> Target !{IO} =
   do
     _t <- gfx.get_time()
-    n
+    t
 
+# Pick a body under the cursor this frame (converting the raw pick index to a Target), or keep the
+# currently-locked target when there is no fresh click.
 fn vista_pick_maybe(active: Bool, ps: List Planet, oax: Double, oaz: Double,
-                    mx: Double, my: Double, cur: Int) -> Int !{IO} =
-  if active then vista_pick(ps, oax, oaz, mx, my) else keep_int(cur)
+                    mx: Double, my: Double, cur: Target) -> Target !{IO} =
+  if active
+    then do
+      bi <- vista_pick(ps, oax, oaz, mx, my)
+      target_of_index(bi)
+    else keep_target(cur)
 
 # Standoff (AU) at which supercruise auto-drops: larger for the star (don't fly into it), a few body
 # radii for a planet with a floor. Keeps the arrival a comfortable "parked nearby" distance.
-fn target_standoff(target: Int, ps: List Planet) -> Double =
-  if target == 0 then sc_star_standoff
-  else match list_at_planet(ps, target - 1) with
-       | Just p -> let r = (p.rad * earth_radius_au) * sc_standoff_body_mult
-                   in if r < sc_standoff_min then sc_standoff_min else r
-       | Nothing -> sc_standoff_min
+fn target_standoff(target: Target, ps: List Planet) -> Double =
+  match target with
+  | Star -> sc_star_standoff
+  | NoTarget -> sc_standoff_min
+  | PlanetTarget n ->
+      match list_at_planet(ps, n - 1) with
+      | Just p -> let r = (p.rad * earth_radius_au) * sc_standoff_body_mult
+                  in if r < sc_standoff_min then sc_standoff_min else r
+      | Nothing -> sc_standoff_min
 
 # The locked target's display name (for the supercruise HUD): "Star", or the planet's name.
-fn target_name(target: Int, ps: List Planet) -> String =
-  if target == 0 then "Star"
-  else match list_at_planet(ps, target - 1) with
-       | Just p -> p.name
-       | Nothing -> "-"
+fn target_name(target: Target, ps: List Planet) -> String =
+  match target with
+  | Star -> "Star"
+  | NoTarget -> "-"
+  | PlanetTarget n ->
+      match list_at_planet(ps, n - 1) with
+      | Just p -> p.name
+      | Nothing -> "-"
 
 # --- Scene 2 hover: project each planet to screen, keep the one nearest the cursor for the detail
 # panel. Mirrors the scene-1 pick, but over the in-memory (cached) planet list — no file re-read. ---
@@ -1766,8 +1810,8 @@ fn draw_status_hud(label: String, prog: Double) -> Unit !{IO} =
 
 # The supercruise HUD line (vista view): prompt to target when none locked, else the locked target's
 # name + live AU range and the drive state (idle "Space to engage" / spooling / cruising).
-fn draw_sc_hud(phase: Int, target: Int, tname: String, dist: Double) -> Unit !{IO} =
-  if target < 0
+fn draw_sc_hud(phase: Int, target: Target, tname: String, dist: Double) -> Unit !{IO} =
+  if ! has_target (target)
     then gfx.draw_text(420, 722, "Click a body to target it", 18, 150, 160, 180)
     else
       let status = if phase == sc_align then "ALIGNING -> " ++ tname
@@ -1819,7 +1863,7 @@ fn render_loop(dir: String, cam: Cam, scam: Cam, shipcam: Cam, radius: Double, l
                ship_model: Int, sky_sh: Int, bgstars: List BgStar, bgsys: String,
                loc_name: String, loc_x: Int, loc_y: Int, loc_z: Int,
                fuel: Double, ftl_phase: Int, ftl_timer: Double, warp_sh: Int,
-               ship_ax: Double, ship_az: Double, sc_phase: Int, sc_timer: Double, sc_target: Int,
+               ship_ax: Double, ship_az: Double, sc_phase: Int, sc_timer: Double, sc_target: Target,
                sc_boot: Int, ship_heading: Double, ship_omega: Double, ship_thrust: Double) -> Unit !{IO} =
   do
     stop <- gfx.window_should_close()
@@ -1872,7 +1916,7 @@ fn render_loop(dir: String, cam: Cam, scam: Cam, shipcam: Cam, radius: Double, l
         let cur_az = if need_load then 0.0 else ship_az
         let cur_scphase = if need_load then sc_idle else sc_phase
         let cur_sctimer = if need_load then 0.0 else sc_timer
-        let cur_sctarget = if need_load then 0 - 1 else sc_target
+        let cur_sctarget = if need_load then NoTarget else sc_target
         # Ship attitude (heading/omega, radians) + last frame's RCS thrust for the plume VFX. Reset the
         # facing on a system change so a fresh vista starts pointed forward (+z), not mid-swing.
         let cur_heading = if need_load then 0.0 else ship_heading
@@ -1882,7 +1926,7 @@ fn render_loop(dir: String, cam: Cam, scam: Cam, shipcam: Cam, radius: Double, l
         # idle, lock that body index and force an engage, then consume the boot target (one-shot). Lets
         # a headless screenshot capture a mid-cruise disc-swell without input (mirrors argv[13]).
         let boot_fire = (sc_boot >= 0) && (view == 2) && ! need_load && (cur_scphase == sc_idle)
-        let eff_target = if boot_fire then sc_boot else cur_sctarget
+        let eff_target = if boot_fire then target_of_index(sc_boot) else cur_sctarget
         let sc_boot2 = if boot_fire then 0 - 1 else sc_boot
         # Locked-target geometry (AU): its position, the auto-drop standoff, the live range, and arrival.
         let sc_tp = target_pos(eff_target, cplanets2, cur_ax, cur_az)
@@ -1955,7 +1999,7 @@ fn render_loop(dir: String, cam: Cam, scam: Cam, shipcam: Cam, radius: Double, l
         jumpc <- jump_btn(can_j)
         board <- board_btn((view == 1) && hud_on)
         # "Supercruise" (vista view, left slot) — active only with a body locked and the drive idle.
-        scc <- sc_btn((view == 2) && (eff_target >= 0) && (cur_scphase == sc_idle) && hud_on)
+        scc <- sc_btn((view == 2) && has_target(eff_target) && (cur_scphase == sc_idle) && hud_on)
         # All / None mask presets (scene 1 only, via helpers so the buttons don't draw in scene 2).
         all_click <- legend_all_btn((view == 0) && hud_on)
         none_click <- legend_none_btn((view == 0) && hud_on)
@@ -2045,7 +2089,7 @@ fn render_loop(dir: String, cam: Cam, scam: Cam, shipcam: Cam, radius: Double, l
         let ftl_step = advance_phase(ftl_phase, ftl_timer, dtf, engage, can_j, spool_secs, tunnel_secs)
         # Supercruise machine (view 2): engage from the "Supercruise" button or Space, gated on a body
         # locked + drive idle. sc_advance runs align -> spool -> cruise -> drop off this frame's delta.
-        let sc_can = (view == 2) && (eff_target >= 0) && (cur_scphase == sc_idle) && ! busy
+        let sc_can = (view == 2) && has_target(eff_target) && (cur_scphase == sc_idle) && ! busy
         let sc_engage = (view == 2) && (scc || sp || boot_fire)
         # Attitude: slew the hull toward the target bearing during ALIGN (and hold it locked through
         # CRUISE); `aligned` gates align -> spool, so the drive charges only once the ship faces the
@@ -2109,7 +2153,7 @@ fn render_loop(dir: String, cam: Cam, scam: Cam, shipcam: Cam, radius: Double, l
                             ship_az2 = snd2(ship_next)
                             # The canary's forced target must persist past the one frame boot_fire is
                             # true (which consumes it), so the cruise it launched has a target to close on.
-                            sc_target2 = if boot_fire then sc_boot else scpick
+                            sc_target2 = if boot_fire then target_of_index(sc_boot) else scpick
                             # Carry the stepped attitude to next frame (heading/omega integrated by
                             # attitude_step; thrust is the RCS couple that fired, for the plume VFX).
                             ship_heading2 = att.heading
@@ -2240,4 +2284,4 @@ fn main() -> Unit !{IO} =
                 boot_name, boot_detail, boot_sx, boot_sy, boot_sz, boot_has, 0, 0, start_view, seed_lvl, "", Nil, "", "",
                 init_mask, false,! (init_grid == 0), sun_sh, planet_sh, gas_sh, ship_model, sky_sh, Nil, "",
                 boot_name, loc0_x, loc0_y, loc0_z, fuel_max, ftl0, 0.0, warp_sh,
-                ship_sun_dist_au, 0.0, sc_idle, 0.0, 0 - 1, sc_boot_arg, 0.0, 0.0, 0.0)
+                ship_sun_dist_au, 0.0, sc_idle, 0.0, NoTarget, sc_boot_arg, 0.0, 0.0, 0.0)
