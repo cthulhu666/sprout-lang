@@ -311,6 +311,7 @@ export let key_w = 87
 export let key_a = 65
 export let key_s = 83
 export let key_d = 68
+export let key_m = 77
 export let key_left_shift = 340
 # raylib mouse-button codes.
 export let mouse_left = 0

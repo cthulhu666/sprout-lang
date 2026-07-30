@@ -1905,10 +1905,10 @@ fn draw_overlay_hud(view: Int, lvl: Int, sel_name: String, sel_detail: String,
                     here_name: String, hov1: String, hov2: String, mask: Int) -> Unit !{IO} =
   do
     if view == 0
-      then gfx.draw_text(10, 34, "click: inspect   drag: orbit/tilt   shift+drag / WASD: pan   wheel: zoom", 18, 180, 190, 210)
+      then gfx.draw_text(10, 34, "click: inspect   drag: orbit/tilt   shift+drag / WASD: pan   wheel: zoom   [m] system", 18, 180, 190, 210)
       else if view == 1
-      then gfx.draw_text(10, 34, "SOLAR SYSTEM   drag: orbit/tilt   wheel: zoom   (< Galaxy to return)", 18, 255, 220, 120)
-      else gfx.draw_text(10, 34, "SHIP   drag: orbit/tilt   wheel: zoom   (< System to return)", 18, 150, 220, 255)
+      then gfx.draw_text(10, 34, "SOLAR SYSTEM   drag: orbit/tilt   wheel: zoom   [M] galaxy   (< Galaxy to return)", 18, 255, 220, 120)
+      else gfx.draw_text(10, 34, "SHIP   drag: orbit/tilt   wheel: zoom   [m] system  [M] galaxy", 18, 150, 220, 255)
     # The cockpit (view 2) names the system the ship is IN (here_name = loc); the system inspector
     # (view 1) names the SELECTED star it is previewing (sel_name).
     if view == 0
@@ -2137,6 +2137,7 @@ fn render_loop(dir: String, cam: Cam, scam: Cam, shipcam: Cam, radius: Double, l
         ks <- gfx.key_down(gfx.key_s)
         ka <- gfx.key_down(gfx.key_a)
         kd <- gfx.key_down(gfx.key_d)
+        km <- gfx.key_down(gfx.key_m)
         sp <- gfx.space_pressed()
         dtf <- gfx.get_frame_time()
         now <- gfx.get_time()
@@ -2176,8 +2177,15 @@ fn render_loop(dir: String, cam: Cam, scam: Cam, shipcam: Cam, radius: Double, l
         # Scene-2 hover: nearest planet to the cursor (in-memory list, same scale as the draw).
         hovered <- maybe_hover((view == 1), cplanets2, s2ext, to_double(mx), to_double(my))
         # Nav: "Ship >" -> scene 3; the toggle steps back up the chain (galaxy>system>ship): galaxy
-        # -> system, system -> galaxy, ship -> system.
-        let next_view = if board then 2
+        # -> system, system -> galaxy, ship -> system. Keyboard shortcuts jump straight to a map from
+        # any scene: `m` -> the system view, `Shift+m` -> the galaxy view. All gated on hud_on so a
+        # scene can't be switched mid-jump (spool/tunnel), matching the suppressed nav buttons. (Held,
+        # not edge: setting the target view is idempotent, so a tap switches and sticks.)
+        let key_gal = km && shift && hud_on
+        let key_sys = km && ! shift && hud_on
+        let next_view = if key_gal then 0
+                        else if key_sys then 1
+                        else if board then 2
                         else if toggle then (if view == 0 then 1 else if view == 1 then 0 else 1)
                         else view
         # Whichever view is active drives its own camera; the others are held. Zoom/pan scale by the
