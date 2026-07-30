@@ -206,11 +206,16 @@ let sc_align_tol = 0.03  # aligned when heading within ~1.7 deg of the target be
 let sc_align_omega_tol = 0.08  # ...and nearly stopped (rad/s), so a fast fly-through isn't "aligned"
 # Thruster plume VFX — emissive spheres (draw_sphere; no new gfx primitive). Offsets in world units
 # (ship extent ~53). The RCS couple fires OFF-axis (fore one side, aft the other) to make the torque.
-let plume_nose = 16.0  # RCS nozzle fore/aft offset from ship centre along the hull axis
-let plume_side = 7.0  # ...and lateral offset, so the couple produces a yaw moment
+let plume_nose = 20.0  # RCS nozzle fore/aft offset from hull centre along the hull axis
+let plume_side = 8.0  # ...and lateral offset, so the couple produces a yaw moment
 let plume_r = 3.2  # RCS puff radius
-let plume_drive_aft = 20.0  # main-drive plume offset behind the ship while cruising
+let plume_drive_aft = 30.0  # main-drive plume offset behind the hull centre while cruising (~nozzle)
 let plume_drive_r = 5.5  # main-drive plume radius
+# The GLB's visible hull centre is offset from its pivot (draw_model puts the pivot at the origin);
+# measured against fixed world axes. Plumes are placed relative to this centre, rotated by heading, so
+# they stay on the hull. Local frame: +Z = forward (nose), +X = right (starboard).
+let ship_ctr_fwd = 12.5  # hull centre forward of the pivot (local +Z, world units)
+let ship_ctr_side = 17.5  # hull centre to starboard of the pivot (local +X, world units)
 
 # --- Scene 3 real-star layer: a few hundred ACTUAL catalog stars near the system, projected in their
 # true directions over the faked sky-dome as class-coloured glows (brighter than the procedural field,
@@ -1129,12 +1134,13 @@ fn ship_draw_yaw(heading: Double) -> Double =
 # One RCS puff pair for the yaw couple: a fore nozzle on one side and an aft nozzle on the other (that
 # off-axis pair is what makes the torque). `side` (-1/+1) flips which diagonal fires, so the plumes
 # visibly swap when the bang-bang controller switches from spin-up to braking. Cool-blue reaction jets.
-fn draw_rcs_couple(fwd_x: Double, fwd_z: Double, rgt_x: Double, rgt_z: Double, side: Double) -> Unit !{IO} =
+fn draw_rcs_couple(ctr_x: Double, ctr_z: Double, fwd_x: Double, fwd_z: Double,
+                   rgt_x: Double, rgt_z: Double, side: Double) -> Unit !{IO} =
   do
-    gfx.draw_sphere((fwd_x * plume_nose) + (rgt_x * plume_side * side), 0.0,
-                    (fwd_z * plume_nose) + (rgt_z * plume_side * side), plume_r, 120, 180, 255)
-    gfx.draw_sphere((0.0 - (fwd_x * plume_nose)) - (rgt_x * plume_side * side), 0.0,
-                    (0.0 - (fwd_z * plume_nose)) - (rgt_z * plume_side * side), plume_r, 120, 180, 255)
+    gfx.draw_sphere(ctr_x + (fwd_x * plume_nose) + (rgt_x * plume_side * side), 0.0,
+                    ctr_z + (fwd_z * plume_nose) + (rgt_z * plume_side * side), plume_r, 120, 180, 255)
+    gfx.draw_sphere((ctr_x - (fwd_x * plume_nose)) - (rgt_x * plume_side * side), 0.0,
+                    (ctr_z - (fwd_z * plume_nose)) - (rgt_z * plume_side * side), plume_r, 120, 180, 255)
 
 # Maneuvering-thruster VFX (no new gfx primitive — just emissive draw_sphere puffs). While ALIGNING,
 # the RCS couple fires to yaw the hull (`thrust` -1/+1 = which way; 0 = coasting, no jets). While
@@ -1145,11 +1151,14 @@ fn draw_ship_thrusters(heading: Double, thrust: Int, phase: Int) -> Unit !{IO} =
       fwd_z = cos(heading)
       rgt_x = cos(heading)
       rgt_z = 0.0 - sin(heading)
+      # Hull centre in world = pivot + the measured local offset, rotated into the heading frame.
+      ctr_x = (ship_ctr_side * rgt_x) + (ship_ctr_fwd * fwd_x)
+      ctr_z = (ship_ctr_side * rgt_z) + (ship_ctr_fwd * fwd_z)
       side = to_double(thrust)
   in do
-    if thrust == 0 then () else draw_rcs_couple(fwd_x, fwd_z, rgt_x, rgt_z, side)
+    if thrust == 0 then () else draw_rcs_couple(ctr_x, ctr_z, fwd_x, fwd_z, rgt_x, rgt_z, side)
     if phase == sc_cruise
-      then gfx.draw_sphere(0.0 - (fwd_x * plume_drive_aft), 0.0, 0.0 - (fwd_z * plume_drive_aft),
+      then gfx.draw_sphere(ctr_x - (fwd_x * plume_drive_aft), 0.0, ctr_z - (fwd_z * plume_drive_aft),
                            plume_drive_r, 255, 150, 60)
       else ()
 
