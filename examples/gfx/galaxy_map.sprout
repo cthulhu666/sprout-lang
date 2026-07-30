@@ -1910,9 +1910,9 @@ fn draw_overlay_hud(view: Int, lvl: Int, sel_name: String, sel_detail: String,
                     here_name: String, hov1: String, hov2: String, mask: Int) -> Unit !{IO} =
   do
     if view == 0
-      then gfx.draw_text(10, 34, "click: inspect   drag: orbit/tilt   shift+drag / WASD: pan   wheel: zoom   [m] system", 18, 180, 190, 210)
+      then gfx.draw_text(10, 34, "click: inspect   drag: orbit/tilt   shift+drag / WASD: pan   wheel: zoom   [m] system   [Esc] ship", 18, 180, 190, 210)
       else if view == 1
-      then gfx.draw_text(10, 34, "SOLAR SYSTEM   drag: orbit/tilt   wheel: zoom   [M] galaxy   (< Galaxy to return)", 18, 255, 220, 120)
+      then gfx.draw_text(10, 34, "SOLAR SYSTEM   drag: orbit/tilt   wheel: zoom   [M] galaxy   [Esc] ship", 18, 255, 220, 120)
       else gfx.draw_text(10, 34, "SHIP   drag: orbit/tilt   wheel: zoom   [m] system  [M] galaxy", 18, 150, 220, 255)
     # The cockpit (view 2) names the system the ship is IN (here_name = loc); the system inspector
     # (view 1) names the SELECTED star it is previewing (sel_name).
@@ -2143,6 +2143,7 @@ fn render_loop(dir: String, cam: Cam, scam: Cam, shipcam: Cam, radius: Double, l
         ka <- gfx.key_down(gfx.key_a)
         kd <- gfx.key_down(gfx.key_d)
         km <- gfx.key_down(gfx.key_m)
+        kesc <- gfx.key_down(gfx.key_escape)
         sp <- gfx.space_pressed()
         dtf <- gfx.get_frame_time()
         now <- gfx.get_time()
@@ -2188,7 +2189,12 @@ fn render_loop(dir: String, cam: Cam, scam: Cam, shipcam: Cam, radius: Double, l
         # not edge: setting the target view is idempotent, so a tap switches and sticks.)
         let key_gal = km && shift && hud_on
         let key_sys = km && ! shift && hud_on
-        let next_view = if key_gal then 0
+        # ESC backs out to the ship vista (the main scene) from either map; in the vista it does nothing
+        # (quitting is the OS close button — SetExitKey(key_null) took ESC off raylib's quit). hud_on so
+        # a jump isn't interrupted.
+        let key_ship = kesc && ((view == 0) || (view == 1)) && hud_on
+        let next_view = if key_ship then 2
+                        else if key_gal then 0
                         else if key_sys then 1
                         else if board then 2
                         else if toggle then (if view == 0 then 1 else if view == 1 then 0 else 1)
@@ -2328,6 +2334,11 @@ fn main() -> Unit !{IO} =
       then print("[galaxy] ship home: " ++ home.name ++ " at (" ++ to_string(home.x) ++ ", " ++ to_string(home.y) ++ ", " ++ to_string(home.z) ++ ")")
       else print("[galaxy] no catalog home found; starting at the galactic centre")
     gfx.open_window(1280, 800, "Sprout — Galaxy Map")
+    # The ship vista is the MAIN scene, so ESC is repurposed as "back to the ship" from the maps
+    # (see the ESC handling in render_loop) rather than raylib's default quit. Disabling the exit key
+    # frees ESC for that; the OS window-close (the red button / Cmd+W) still quits. A confirmation
+    # guard on that close is future work (BACKLOG).
+    gfx.set_exit_key(gfx.key_null)
     gfx.set_target_fps(60)
     gfx.set_clip_planes(near_plane, far_plane)
     # Bloom makes the emissive stars bleed a soft halo (they read as glowing points, not flat discs);

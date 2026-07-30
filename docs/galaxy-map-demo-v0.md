@@ -598,6 +598,24 @@ of space games like Elite: Dangerous.
   system), and optionally a **flyable ship** (WASD thrust + a chase camera that trails its heading,
   replacing the fixed placement + orbit rig).
 
+## Navigation & keyboard shortcuts
+
+The **ship vista is the main scene** — the demo boots into it, and jumps arrive there. The three scenes
+form a chain (galaxy > system > ship) navigated by the bottom-bar buttons (`System >` / `< Galaxy` /
+`Ship >` / `< System`), plus keyboard shortcuts:
+
+- **`m`** — open the **system (solar-system) view** from any scene.
+- **`Shift+m`** — open the **galaxy map** from any scene. Opening the galaxy map **recenters on the
+  ship's current location at LoD 3** (a 45° overhead on the stars around you, ~8000 ly eye-distance),
+  rather than wherever it was last panned; panning/zoom then persist until you leave.
+- **`Esc`** — from either map, **back out to the ship view**. In the ship view Esc does nothing (it is
+  the top of the chain). Esc is deliberately **not** a quit key here: `set_exit_key(key_null)` takes it
+  off raylib's default quit so it can mean "back", leaving quit to the OS window-close (a confirmation
+  guard on that is future work — see BACKLOG).
+
+All shortcuts are suppressed while the jump drive is busy (spool/tunnel), so a jump can't be
+interrupted by a scene switch.
+
 ## Running
 
 ```

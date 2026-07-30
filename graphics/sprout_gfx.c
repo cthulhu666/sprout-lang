@@ -780,6 +780,16 @@ long long gfx_set_target_fps(long long fps) {
   return 0;
 }
 
+/* Set raylib's exit key (SetExitKey). By default ESC (KEY_ESCAPE) trips
+ * WindowShouldClose; pass KEY_NULL (0) to disable that so ESC becomes an
+ * ordinary readable key (freeing it for in-app "back" navigation) while the OS
+ * window-close request still closes the window. Thin input-config wrapper, like
+ * gfx_set_target_fps. */
+long long gfx_set_exit_key(long long key) {
+  SetExitKey((int)key);
+  return 0;
+}
+
 /* Returns 1 when the loop should stop (window closed OR frame budget hit),
  * else 0. Returned as an Int so it crosses the ABI as a plain immediate. */
 long long gfx_window_should_close(void) {
