@@ -344,6 +344,18 @@ specks. No orbit lines, no size inflation. `< System` returns to scene 2.
   under two additive `draw_glow` layers (a corona), its true ~0.5° disc scaled up by `sun_disc_boost`
   (2.0) so it reads clearly against the black; the planets are true-size crisp emissive specks in their
   `planet_rgb` tint. All tunables live in the scene-3 block in `galaxy_map.sprout`.
+- **Body markers (HUD).** Because the bodies are pinpoint specks, every body in the current system
+  (the star + all planets) carries an **Elite-style corner-bracket reticle** with a name + distance
+  label, so they are identifiable. Drawn as a 2D overlay (`overlay_begin` phase): each body's on-sphere
+  world position (the same `project_body` result it is *drawn* at) is run through `world_to_screen`
+  (valid in 2D — it reads the cached camera), front-culled, and a reticle of four L-shaped corners
+  (filled `draw_rect`s — no rectangle-outline primitive needed) is drawn at that screen point. The
+  distance is the **true ship→body range in AU** (`sqrt` on the AU vector, ship at `(1 AU, 0, 0)`),
+  formatted `N.NN` (`fmt_au`); the jump HUD's integer truncation would read "0"/"1" at system scale.
+  The star is warm-tinted and labelled `Star` (the system name is already in the corner HUD); planets
+  are HUD-cyan. **Known limitation:** labels can overlap when bodies line up on screen (worst near
+  edge-on) — overlap declutter is a follow-up (BACKLOG). Only bodies in front of the camera show
+  (the far hemisphere is correctly hidden).
 - **Sky (faked galaxy, `loam.skydome`).** Thousands of background stars, the Milky Way band, and the
   central bulge glow are a GPU fragment shader over the view direction — no geometry, no catalog read
   (one `draw_sphere_shaded` call). Correct directions from the galaxy's own geometry: the disk is the

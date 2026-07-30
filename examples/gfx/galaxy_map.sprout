@@ -2,7 +2,7 @@ module examples.gfx.galaxy_map
 
 import stdlib.gfx
 import stdlib.string (split_once)
-import stdlib.math (min, mod, pi, sin, cos)
+import stdlib.math (min, mod, pi, sin, cos, sqrt)
 import stdlib.json as json
 import stdlib.process (proc_run)
 import loam.camera (Cam, cam_drive, cam_distance, is_tap)
@@ -158,6 +158,19 @@ let sun_disc_boost = 2.0  # scales the sun's TRUE ~0.5-degree disc up so it read
 let sun_glow_scale = 4.0  # wide warm additive halo size as a multiple of the (boosted) sun disc
 let vista_sky_r = 60000.0  # sky-dome sphere radius (camera-centred); < far clip (400000), > the
 # planet sphere (8000) and the ship, so the procedural sky sits behind everything
+
+# --- Ship-view body markers: an Elite-style corner-bracket reticle + name/distance label on every
+# body in the current system, so the pinpoint specks are identifiable. Drawn as a 2D overlay (screen
+# space) from each body's projected screen position; distance is the true ship->body range in AU.
+let marker_half = 11  # half-size of the bracket box (px); the body sits at its centre
+let marker_leg = 5  # length of each corner-bracket leg (px)
+let marker_thick = 2  # bracket line thickness (px)
+let marker_r = 120  # planet marker/label colour (HUD cyan, matching the jump HUD)
+let marker_g = 200
+let marker_b = 255
+let marker_star_r = 255  # star marker/label colour (warm, to set the central star apart)
+let marker_star_g = 214
+let marker_star_b = 150
 
 # --- Scene 3 real-star layer: a few hundred ACTUAL catalog stars near the system, projected in their
 # true directions over the faked sky-dome as class-coloured glows (brighter than the procedural field,
@@ -1080,6 +1093,84 @@ fn draw_vista_scene(ps: List Planet, bg: List BgStar, sun_sh: Int, sky_sh: Int,
       then gfx.draw_model(ship_model, 0.0, 0.0, 0.0, ship_yaw, ship_scale)
       else ()
 
+# --- Ship-view body markers (2D HUD overlay) ----------------------------------------------------
+# Format a non-negative Double as N.NN — the jump HUD only integer-truncates (fine for kilo-ly
+# ranges), but system distances are fractional AU where "0"/"1" would be useless. Rounds to the
+# nearest hundredth via double_to_int (truncation) after a +0.5 bias; inputs here are always >= 0.
+fn fmt_au(d: Double) -> String =
+  let scaled = gfx.double_to_int((d * 100.0) + 0.5)
+      whole = scaled / 100
+      frac = scaled - (whole * 100)
+  in to_string(whole) ++ "." ++ (if frac < 10 then "0" else "") ++ to_string(frac)
+
+# True ship->body distance in AU. The ship sits at (ship_sun_dist_au, 0, 0); a body's orbital point
+# is (ax, 0, az) AU (the sun is (0,0,0), so ax=az=0 gives ship_sun_dist_au). Used only for the label,
+# NOT the projection — bodies are drawn on the fixed render sphere, so distance is informational.
+fn body_dist_au(ax: Double, az: Double) -> Double =
+  let dx = ax - ship_sun_dist_au
+  in sqrt((dx * dx) + (az * az))
+
+# An Elite-style corner-bracket reticle centred on (cx, cy) with a name + distance label to its right.
+# Four L-shaped corners (each two short filled rects), so no rectangle-outline primitive is needed.
+fn draw_body_marker(cx: Int, cy: Int, name: String, dist: Double, r: Int, g: Int, b: Int) -> Unit !{IO} =
+  let lx = cx - marker_half
+      rx = cx + marker_half
+      ty = cy - marker_half
+      by = cy + marker_half
+  in do
+    gfx.draw_rect(lx, ty, marker_leg, marker_thick, r, g, b)  # top-left corner
+    gfx.draw_rect(lx, ty, marker_thick, marker_leg, r, g, b)
+    gfx.draw_rect(rx - marker_leg, ty, marker_leg, marker_thick, r, g, b)  # top-right
+    gfx.draw_rect(rx - marker_thick, ty, marker_thick, marker_leg, r, g, b)
+    gfx.draw_rect(lx, by - marker_thick, marker_leg, marker_thick, r, g, b)  # bottom-left
+    gfx.draw_rect(lx, by - marker_leg, marker_thick, marker_leg, r, g, b)
+    gfx.draw_rect(rx - marker_leg, by - marker_thick, marker_leg, marker_thick, r, g, b)  # bottom-right
+    gfx.draw_rect(rx - marker_thick, by - marker_leg, marker_thick, marker_leg, r, g, b)
+    gfx.draw_text(rx + 6, cy - 16, name, 14, r, g, b)
+    gfx.draw_text(rx + 6, cy, fmt_au(dist) ++ " AU", 13, r, g, b)
+
+# Project a body's on-sphere world position to the screen and, if it is in front of the camera, draw
+# its marker there. world_to_screen reads the cached camera, so it is valid in the 2D overlay phase.
+fn marker_at(wx: Double, wy: Double, wz: Double, name: String, dist: Double, r: Int, g: Int, b: Int) -> Unit !{IO} =
+  do
+    front <- gfx.world_to_screen(wx, wy, wz)
+    sx <- gfx.projected_x()
+    sy <- gfx.projected_y()
+    if front
+      then draw_body_marker(gfx.double_to_int(sx), gfx.double_to_int(sy), name, dist, r, g, b)
+      else ()
+
+# The central star's marker, at its projected sphere position. Labelled "Star" (not the system name,
+# which the top-left HUD already shows) to avoid a redundant collision with the inner-planet labels.
+fn draw_star_marker(star_name: String) -> Unit !{IO} =
+  match project_body(ship_sun_dist_au, 0.0, 0.0, 0.0, 0.0, 0.0,
+                     sun_radius_au, vista_sphere_r, vista_min_speck) with
+  | (x, y, z, _r) -> marker_at(x, y, z, star_name, ship_sun_dist_au, marker_star_r, marker_star_g, marker_star_b)
+
+# One planet's marker at its projected sphere position, labelled with its name + true AU distance.
+fn draw_planet_marker(p: Planet) -> Unit !{IO} =
+  match ellipse_point(p.a, p.e, p.argperi, p.nu) with
+  | (ax, az) ->
+      match project_body(ship_sun_dist_au, 0.0, 0.0, ax, 0.0, az,
+                         p.rad * earth_radius_au, vista_sphere_r, vista_min_speck) with
+      | (x, y, z, _r) -> marker_at(x, y, z, p.name, body_dist_au(ax, az), marker_r, marker_g, marker_b)
+
+fn draw_planet_markers(ps: List Planet) -> Unit !{IO} =
+  match ps with
+  | Nil -> ()
+  | Cons p rest ->
+      do
+        draw_planet_marker(p)
+        draw_planet_markers(rest)
+
+# Draw a reticle on every body in the current system (the star + all planets). Called in the overlay
+# phase so the brackets/labels are crisp 2D over the vista. Body specks and markers use the SAME
+# project_body, so a marker always sits exactly on its speck. Overlap declutter is a follow-up.
+fn draw_vista_markers(ps: List Planet, star_name: String) -> Unit !{IO} =
+  do
+    draw_star_marker(star_name)
+    draw_planet_markers(ps)
+
 # --- Scene 2 hover: project each planet to screen, keep the one nearest the cursor for the detail
 # panel. Mirrors the scene-1 pick, but over the in-memory (cached) planet list — no file re-read. ---
 fn keep_np(bd2: Double, best: Maybe Planet) -> (Double, Maybe Planet) !{IO} =
@@ -1451,6 +1542,9 @@ fn render_loop(dir: String, cam: Cam, scam: Cam, shipcam: Cam, radius: Double, l
         # The scene HUD is hidden while the warp tunnel fills the screen; during spool it stays up under
         # the spool banner. The jump HUD (fuel/range/target status) shows only while the drive is idle.
         if ! in_tunnel then draw_overlay_hud(view, lvl, sel_name, sel_detail, hov1, hov2, mask) else ()
+        # Ship-view body reticles: an Elite-style corner-bracket + name/distance label on every body
+        # in the current system, so the pinpoint specks are identifiable. Overlay phase (crisp 2D).
+        if (view == 2) && ! in_tunnel then draw_vista_markers(cplanets2, "Star") else ()
         if (view == 0) && hud_on then draw_jump_hud(sel_name, has_sel, is_diff, jdist, jcost, fuel, can_j) else ()
         if ftl_phase == phase_spool then draw_status_hud("JUMP DRIVE SPOOLING", tprog) else ()
         if in_tunnel then draw_status_hud("JUMPING", tprog) else ()
