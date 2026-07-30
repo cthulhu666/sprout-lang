@@ -2,7 +2,7 @@ module examples.gfx.galaxy_map
 
 import stdlib.gfx
 import stdlib.string (split_once)
-import stdlib.math (min, mod, pi, sin, cos, sqrt)
+import stdlib.math (min, mod, pi, sin, cos, sqrt, lerp)
 import stdlib.json as json
 import stdlib.process (proc_run)
 import loam.camera (Cam, cam_drive, cam_distance, is_tap)
@@ -204,13 +204,19 @@ let sc_turn_accel = 2.5  # RCS angular acceleration (rad/s^2)
 let sc_turn_omega_max = 1.8  # angular-rate cap (rad/s) — a brisk but weighty swing
 let sc_align_tol = 0.03  # aligned when heading within ~1.7 deg of the target bearing (rad)
 let sc_align_omega_tol = 0.08  # ...and nearly stopped (rad/s), so a fast fly-through isn't "aligned"
-# Thruster plume VFX — emissive spheres (draw_sphere; no new gfx primitive). Offsets in world units
-# (ship extent ~53). The RCS couple fires OFF-axis (fore one side, aft the other) to make the torque.
+# Thruster plume VFX — layered ADDITIVE glow billboards (draw_glow; no new gfx primitive). Additive so
+# overlapping glows bloom and read as emitted light, not solid geometry. Offsets in world units (ship
+# extent ~53). The RCS couple fires OFF-axis (fore one side, aft the other) to make the torque.
 let plume_nose = 20.0  # RCS nozzle fore/aft offset from hull centre along the hull axis
 let plume_side = 8.0  # ...and lateral offset, so the couple produces a yaw moment
-let plume_r = 3.2  # RCS puff radius
-let plume_drive_aft = 30.0  # main-drive plume offset behind the hull centre while cruising (~nozzle)
-let plume_drive_r = 5.5  # main-drive plume radius
+let rcs_core_r = 5.0  # RCS bright cold-gas core (tight, hot blue-white)
+let rcs_halo_r = 11.0  # ...and its soft surrounding halo (wide, dim blue)
+# Main drive: a tapering trail of glows stepping aft from the nozzle, cooling white->red as it widens.
+let plume_drive_aft = 30.0  # nozzle position behind the hull centre while cruising
+let plume_core_r = 5.5  # hot core glow at the nozzle mouth (blue-white, brightest)
+let plume_tail_r = 13.0  # widest glow at the end of the trail (dim red)
+let plume_len = 46.0  # how far aft the exhaust trail reaches from the nozzle
+let plume_steps = 11  # glow billboards composing the trail (dense enough to fuse into a column)
 # The GLB's visible hull centre is offset from its pivot (draw_model puts the pivot at the origin);
 # measured against fixed world axes. Plumes are placed relative to this centre, rotated by heading, so
 # they stay on the hull. Local frame: +Z = forward (nose), +X = right (starboard).
@@ -1131,21 +1137,48 @@ fn draw_vista_planets(oax: Double, oaz: Double, ps: List Planet, sun_sh: Int) ->
 fn ship_draw_yaw(heading: Double) -> Double =
   ship_fwd_az + (heading * 180.0 / pi)
 
+# A single reaction jet: a tight bright core glow inside a wide dim halo (two additive layers → a soft
+# cold-gas puff with a hot centre, per draw_glow's own "layer a tight bright + a wide dim" recipe).
+fn draw_rcs_jet(x: Double, z: Double) -> Unit !{IO} =
+  do
+    gfx.draw_glow(x, 0.0, z, rcs_halo_r, 40, 90, 190)  # wide, dim blue wash
+    gfx.draw_glow(x, 0.0, z, rcs_core_r, 170, 210, 255)  # tight, hot blue-white core
+
 # One RCS puff pair for the yaw couple: a fore nozzle on one side and an aft nozzle on the other (that
-# off-axis pair is what makes the torque). `side` (-1/+1) flips which diagonal fires, so the plumes
+# off-axis pair is what makes the torque). `side` (-1/+1) flips which diagonal fires, so the jets
 # visibly swap when the bang-bang controller switches from spin-up to braking. Cool-blue reaction jets.
 fn draw_rcs_couple(ctr_x: Double, ctr_z: Double, fwd_x: Double, fwd_z: Double,
                    rgt_x: Double, rgt_z: Double, side: Double) -> Unit !{IO} =
   do
-    gfx.draw_sphere(ctr_x + (fwd_x * plume_nose) + (rgt_x * plume_side * side), 0.0,
-                    ctr_z + (fwd_z * plume_nose) + (rgt_z * plume_side * side), plume_r, 120, 180, 255)
-    gfx.draw_sphere((ctr_x - (fwd_x * plume_nose)) - (rgt_x * plume_side * side), 0.0,
-                    (ctr_z - (fwd_z * plume_nose)) - (rgt_z * plume_side * side), plume_r, 120, 180, 255)
+    draw_rcs_jet(ctr_x + (fwd_x * plume_nose) + (rgt_x * plume_side * side),
+                 ctr_z + (fwd_z * plume_nose) + (rgt_z * plume_side * side))
+    draw_rcs_jet((ctr_x - (fwd_x * plume_nose)) - (rgt_x * plume_side * side),
+                 (ctr_z - (fwd_z * plume_nose)) - (rgt_z * plume_side * side))
 
-# Maneuvering-thruster VFX (no new gfx primitive — just emissive draw_sphere puffs). While ALIGNING,
-# the RCS couple fires to yaw the hull (`thrust` -1/+1 = which way; 0 = coasting, no jets). While
-# CRUISING, the main drive burns aft. Positions derive from the hull axis fwd=(sin h, cos h) and its
-# right-perpendicular, so the plumes rotate with the ship.
+# The main-drive exhaust column: `plume_steps` additive glows stepping aft from the nozzle at (nx,nz)
+# along the aft direction (afx,afz). Parameter t (0 at the nozzle → 1 at the tail) drives BOTH the
+# widening (core radius → tail radius) and the cooling (white-gold → dim red): because additive
+# brightness IS the tint magnitude, cooling toward dark-red also fades the trail out, so the far end
+# dissolves into the black naturally. `flick` is a shared per-frame breathing factor on the radii.
+fn draw_plume_trail(nx: Double, nz: Double, afx: Double, afz: Double, flick: Double, i: Int) -> Unit !{IO} =
+  if i >= plume_steps then ()
+  else
+    let t = to_double(i) / to_double(plume_steps - 1)
+        d = plume_len * t
+        px = nx + (afx * d)
+        pz = nz + (afz * d)
+        size = lerp(plume_core_r, plume_tail_r, t) * flick
+        cg = gfx.double_to_int(lerp(215.0, 60.0, t))  # green channel: gold → deep red
+        cb = gfx.double_to_int(lerp(170.0, 15.0, t))  # blue channel: warm-white tip → none
+    in do
+      gfx.draw_glow(px, 0.0, pz, size, 255, cg, cb)
+      draw_plume_trail(nx, nz, afx, afz, flick, i + 1)
+
+# Maneuvering-thruster VFX (no new gfx primitive — layered emissive draw_glow billboards). While
+# ALIGNING, the RCS couple fires to yaw the hull (`thrust` -1/+1 = which way; 0 = coasting, no jets).
+# While CRUISING, the main drive burns aft as a tapering exhaust column. Positions derive from the hull
+# axis fwd=(sin h, cos h) and its right-perpendicular, so the plumes rotate with the ship. A slow
+# sin(time) flicker breathes the drive so it looks live rather than a frozen decal.
 fn draw_ship_thrusters(heading: Double, thrust: Int, phase: Int) -> Unit !{IO} =
   let fwd_x = sin(heading)
       fwd_z = cos(heading)
@@ -1155,11 +1188,16 @@ fn draw_ship_thrusters(heading: Double, thrust: Int, phase: Int) -> Unit !{IO} =
       ctr_x = (ship_ctr_side * rgt_x) + (ship_ctr_fwd * fwd_x)
       ctr_z = (ship_ctr_side * rgt_z) + (ship_ctr_fwd * fwd_z)
       side = to_double(thrust)
+      flick = 1.0 + (0.10 * sin(gfx.get_time() * 22.0))
+      # Nozzle mouth = hull centre, stepped aft along -fwd; the trail then continues further aft.
+      nx = ctr_x - (fwd_x * plume_drive_aft)
+      nz = ctr_z - (fwd_z * plume_drive_aft)
   in do
     if thrust == 0 then () else draw_rcs_couple(ctr_x, ctr_z, fwd_x, fwd_z, rgt_x, rgt_z, side)
     if phase == sc_cruise
-      then gfx.draw_sphere(ctr_x - (fwd_x * plume_drive_aft), 0.0, ctr_z - (fwd_z * plume_drive_aft),
-                           plume_drive_r, 255, 150, 60)
+      then do
+        gfx.draw_glow(nx, 0.0, nz, plume_core_r * flick, 210, 230, 255)  # hot blue-white nozzle spot
+        draw_plume_trail(nx, nz, 0.0 - fwd_x, 0.0 - fwd_z, flick, 0)
       else ()
 
 # Scene 3: the procedural sky (faked galaxy stars + Milky Way band + bulge) first, then the distant

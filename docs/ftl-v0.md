@@ -123,9 +123,12 @@ Deliberate deviations, each forced by our context:
     braking distance `ω²/2α`, settling at the bearing without ringing. This reads as physical (you see
     the RCS couple fire, then flip to brake) and, because it terminates deterministically, is unit-
     testable. Yaw-only: `draw_model` rotates about Y alone, which also matches supercruise being planar
-    in (x, z). Visual effects reuse `draw_sphere` (no new gfx primitive): a **cool-blue RCS couple**
-    (fore/aft, off-axis) fires while aligning and flips side on the brake; a **main-drive plume** burns
-    aft while cruising.
+    in (x, z). Visual effects reuse the existing `draw_glow` billboard (no new gfx primitive) —
+    layered **additive** glows so the exhaust reads as emitted light, not solid geometry: a
+    **cool-blue RCS couple** (fore/aft, off-axis; each jet a tight bright core inside a dim halo)
+    fires while aligning and flips side on the brake; a **main-drive plume** — a dense trail of glows
+    stepping aft from the nozzle, cooling white-hot → red as it widens into a tapering exhaust column,
+    with a `sin(time)` flicker — burns aft while cruising.
   - **State machine** `sc_idle → sc_align → sc_spool → sc_cruise`, mirroring the interstellar machine.
     Both `align` and `cruise` end on a **spatial** condition (`aligned` / `arrived`), not a timer — so
     those are caller-supplied gates — while `spool` is the one timed phase. Turn-then-charge: `align`
