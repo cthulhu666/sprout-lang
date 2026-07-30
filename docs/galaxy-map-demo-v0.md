@@ -4,7 +4,7 @@ Status: experimental example (`examples/gfx/galaxy_map.sprout`), not normative. 
 **scene 1** is the streaming galaxy map; **scene 2** is the solar-system view — click a star,
 then `System >` to fly into it and see its star, planets, and orbits (built; see "Scene 2" below);
 **scene 3** is a third-person view of a spaceship out in that system (a realistic vista — sun a
-distant disc, planets specks) — `Board ship` from scene 2 (built; see "Scene 3" below).
+distant disc, planets specks) — `Ship >` from scene 2 (built; see "Scene 3" below).
 
 ## What it is
 
@@ -323,7 +323,7 @@ into that system. The scene:
 
 ## Scene 3 — third-person ship, realistic in-system vista (built, iteration 1)
 
-From scene 2 the **`Board ship`** button flips `view` to 2: a **third-person view of a spaceship out in
+From scene 2 the **`Ship >`** button flips `view` to 2: a **third-person view of a spaceship out in
 the selected system** — a physically-scaled *vista*, **not** the scene-2 map. The ship is the hero at
 the world origin, near-black space around it, the sun a small distant disc and the planets pinpoint
 specks. No orbit lines, no size inflation. `< System` returns to scene 2.

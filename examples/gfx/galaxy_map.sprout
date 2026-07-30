@@ -38,7 +38,7 @@ import loam.warp as warp
 #                    in their true directions and angular sizes (loam.vista + draw_vista_scene). No
 #                    orbit lines, no size inflation. This is where the demo OPENS (the ship starts in
 #                    a random real system, see BOOT below) and where a jump arrives; also reachable
-#                    from the system view via "Board ship". The orbit camera circles the ship. A later iteration adds the galaxy's stars
+#                    from the system view via the "Ship >" button. The orbit camera circles the ship. A later iteration adds the galaxy's stars
 #                    behind it. Model: loam ship_model_path (a 44 MB GLB, NOT committed — see
 #                    .gitignore; the ship is simply omitted when it is absent).
 #
@@ -1163,11 +1163,14 @@ fn legend_all_btn(active: Bool) -> Bool !{IO} =
 fn legend_none_btn(active: Bool) -> Bool !{IO} =
   if active then gfx.button(leg_x + 120, leg_btn_y, 106, 30, "None") else no_button()
 
-# "Board ship" button — drawn only in scene 2 (the system view), left of the scene-toggle button.
-# Clicking it enters scene 3 (the third-person ship view of the same system). Goes through the
-# same conditional-button idiom as the legend buttons so the `if` is not bound via `<-`.
+# "Ship >" button — drawn only in the system view, in the left context-action slot (beside the
+# scene-toggle). Descends to the ship vista of the same system; the ">" matches the "System >"
+# go-deeper convention (vs the "< …" back labels). It reads as navigation, not a first-time
+# boarding action — the ship is already where you are (you boot aboard it). Goes through the same
+# conditional-button idiom as the legend buttons so the `if` is not bound via `<-`. (Internally still
+# `board_btn`/`board`/`over_board` — the relabel is visible-only, to keep the change minimal.)
 fn board_btn(active: Bool) -> Bool !{IO} =
-  if active then gfx.button(932, 728, 156, 46, "Board ship") else no_button()
+  if active then gfx.button(932, 728, 156, 46, "Ship >") else no_button()
 
 # The scene-navigation toggle (bottom-right) — a helper so it can be suppressed (drawn only when
 # `active`) while the jump drive is busy, so a spool/tunnel can't be aborted mid-jump.
@@ -1175,7 +1178,7 @@ fn nav_btn(active: Bool, label: String) -> Bool !{IO} =
   if active then gfx.button(1108, 728, 156, 46, label) else no_button()
 
 # "Engage Jump" (galaxy view only) — drawn/clickable only when `active` (a valid, in-range, fuelled
-# target is selected and the drive is idle). Occupies the same bottom slot as "Board ship" (which is
+# target is selected and the drive is idle). Occupies the same bottom slot as "Ship >" (which is
 # system-view only, so they never coexist). Clicking it — or Space — engages the interstellar jump.
 fn jump_btn(active: Bool) -> Bool !{IO} =
   if active then gfx.button(932, 728, 156, 46, "Engage Jump") else no_button()
@@ -1455,7 +1458,7 @@ fn render_loop(dir: String, cam: Cam, scam: Cam, shipcam: Cam, radius: Double, l
         # System -> Galaxy, Ship -> System (one step back up the galaxy > system > ship chain).
         let toggle_label = if view == 0 then "System >" else if view == 1 then "< Galaxy" else "< System"
         # All bottom-bar buttons are suppressed while the drive is busy (spool/tunnel), so a jump can't
-        # be aborted or a scene switched mid-jump. "Engage Jump" (galaxy view) shares the "Board ship"
+        # be aborted or a scene switched mid-jump. "Engage Jump" (galaxy view) shares the "Ship >"
         # slot and is drawn only when a valid jump is available (can_j).
         toggle <- nav_btn(hud_on, toggle_label)
         jumpc <- jump_btn(can_j)
@@ -1480,7 +1483,7 @@ fn render_loop(dir: String, cam: Cam, scam: Cam, shipcam: Cam, radius: Double, l
         # UI hit-region (computed before the pick so a click on the legend / buttons never selects a
         # star): the scene-switch button (bottom-right), or in scene 1 the filter legend + All/None.
         let over_legend = (view == 0) && (mx >= leg_x) && (my >= leg_y - 28) && (my <= leg_btn_y + 30)
-        # The "Board ship" button (scene 2 only) sits left of the nav button; guard its region too so a
+        # The "Ship >" button (system view only) sits left of the nav button; guard its region too so a
         # click on it never starts an orbit-drag.
         let over_board = (view == 1) && (mx >= 932) && (mx <= 1088) && (my >= 728)
         # The "Engage Jump" button occupies the same slot in the galaxy view — guard it too so a click
@@ -1505,7 +1508,7 @@ fn render_loop(dir: String, cam: Cam, scam: Cam, shipcam: Cam, radius: Double, l
         let mask2 = if all_click then mask_all else if none_click then mask_none else mask_row
         # Scene-2 hover: nearest planet to the cursor (in-memory list, same scale as the draw).
         hovered <- maybe_hover((view == 1), cplanets2, s2ext, to_double(mx), to_double(my))
-        # Nav: "Board ship" -> scene 3; the toggle steps back up the chain (galaxy>system>ship): galaxy
+        # Nav: "Ship >" -> scene 3; the toggle steps back up the chain (galaxy>system>ship): galaxy
         # -> system, system -> galaxy, ship -> system.
         let next_view = if board then 2
                         else if toggle then (if view == 0 then 1 else if view == 1 then 0 else 1)
