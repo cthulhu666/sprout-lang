@@ -2,7 +2,7 @@ module examples.gfx.galaxy_map
 
 import stdlib.gfx
 import stdlib.string (split_once)
-import stdlib.math (min, pi, sin, cos)
+import stdlib.math (min, mod, pi, sin, cos)
 import stdlib.json as json
 import stdlib.process (proc_run)
 import loam.camera (Cam, cam_drive, cam_distance, is_tap)
@@ -36,8 +36,9 @@ import loam.warp as warp
 #                    VISTA, not the map: the ship is the hero at the origin, the sun is a small
 #                    distant disc and the planets are pinpoint specks, projected onto a render sphere
 #                    in their true directions and angular sizes (loam.vista + draw_vista_scene). No
-#                    orbit lines, no size inflation. Entered from the system view via "Board ship";
-#                    the orbit camera circles the ship. A later iteration adds the galaxy's stars
+#                    orbit lines, no size inflation. This is where the demo OPENS (the ship starts in
+#                    a random real system, see BOOT below) and where a jump arrives; also reachable
+#                    from the system view via "Board ship". The orbit camera circles the ship. A later iteration adds the galaxy's stars
 #                    behind it. Model: loam ship_model_path (a 44 MB GLB, NOT committed — see
 #                    .gitignore; the ship is simply omitted when it is absent).
 #
@@ -45,6 +46,12 @@ import loam.warp as warp
 # warp TUNNEL opens (loam.warp), and you ARRIVE in that system's ship vista (view 2). Free-jump gated
 # by a fuel+range economy; the pure logic (distance, gating, the spool/tunnel/arrive state machine,
 # the self-balancing refuel) is loam.ftl (headless-tested). See docs/ftl-v0.md.
+#
+# BOOT. The ship is placed in a RANDOM real system at launch (its "home"): pick_home reads one line
+# from the balanced catalog's L0 root tile, seeded by the monotonic clock, and the demo opens in that
+# system's ship vista (view 2). `loc_*` (where the ship is) is seeded from the home and moves only on
+# jump arrival — there is no first-click "board" step. Persistence of the home across runs is future
+# work (BACKLOG); the explicit argv[6] system canary and argv[13] auto-jump canary override the home.
 #
 # STREAMING / LoD. The catalog is a quadtree pyramid over the galactic plane (levels L0..L4). Each
 # star lives at exactly ONE level (incremental refinement: brightest promoted to coarse levels), so
@@ -511,6 +518,64 @@ fn line_key(line: String) -> Maybe (Int, Int, Int, Int) =
       | (Just id, Just xi, Just yi, Just ci) -> Just((id, xi, yi, ci))
       | _ -> Nothing
   | _ -> Nothing
+
+# --- Starting home: place the ship in a real random system at boot ------------------------------
+# The ship needs a location from frame 1 (no "board a star first" step). We source it from a real
+# catalog star so its galaxy coordinates are consistent with a picked jump target. Persistence
+# (save/restore the chosen home across runs) is future work; see docs/galaxy-map-demo-v0.md.
+type Home = (found: Bool, name: String, detail: String, x: Int, y: Int, z: Int)
+
+let no_home = Home(found = false, name = "No system selected",
+                   detail = "Click a star to inspect it", x = 0, y = 0, z = 0)
+
+# Parse one L0 catalog line into a start location, mirroring pick_line's field layout
+# (id|x|y|z|class|size|name|detail). Nothing if malformed or if it is the galactic-centre sentinel
+# at (0,0,0) — that position doubles as the "no system" marker (has_sys), so it must never be a home.
+fn home_of_line(line: String) -> Maybe (String, String, Int, Int, Int) =
+  match split_pipe(line) with
+  | [_id, xs, ys, zs, _cs, _szs, name, detail | _] ->
+      match (parse_int(xs), parse_int(ys), parse_int(zs)) with
+      | (Just xi, Just yi, Just zi) ->
+          if (xi == 0) && (yi == 0) && (zi == 0) then Nothing
+          else Just((name, detail, xi, yi, zi))
+      | _ -> Nothing
+  | _ -> Nothing
+
+# Collect every valid home from a tile's lines. Order is irrelevant — the pick is a hashed index.
+fn collect_homes(lines: List String, acc: List (String, String, Int, Int, Int)) -> List (String, String, Int, Int, Int) =
+  match lines with
+  | Nil -> acc
+  | Cons line rest ->
+      match home_of_line(line) with
+      | Just h -> collect_homes(rest, Cons(h, acc))
+      | Nothing -> collect_homes(rest, acc)
+
+fn homes_len(xs: List (String, String, Int, Int, Int), acc: Int) -> Int =
+  match xs with
+  | Nil -> acc
+  | Cons _ rest -> homes_len(rest, acc + 1)
+
+fn home_at(xs: List (String, String, Int, Int, Int), k: Int) -> Maybe (String, String, Int, Int, Int) =
+  match xs with
+  | Nil -> Nothing
+  | Cons h rest -> if k <= 0 then Just(h) else home_at(rest, k - 1)
+
+# Choose the ship's starting home from the balanced catalog's L0 root tile (a few thousand landmark
+# stars, always on disk, cheap to read once), indexed by a per-run seed so each launch starts
+# somewhere new. Falls back to `no_home` (galactic centre) if the tile is absent/empty — the caller
+# then keeps the old galaxy-view boot rather than dropping into a broken vista.
+fn pick_home(dir: String, seed: Int) -> Home !{IO} =
+  match read_file(tile_path(dir, 0, 0, 0)) with
+  | Err _ -> no_home
+  | Ok text ->
+      let homes = collect_homes(str_split_lines(text), Nil)
+          n = homes_len(homes, 0)
+      in match mod(seed, n) with
+         | Nothing -> no_home
+         | Just k ->
+             match home_at(homes, k) with
+             | Just (nm, dt, x, y, z) -> Home(found = true, name = nm, detail = dt, x = x, y = y, z = z)
+             | Nothing -> no_home
 
 # Packed count key, one slot per (tile-group, class): gid < 341, class < 12, so gid*12+class is unique.
 fn count_key(gid: Int, cls: Int) -> String = to_string((gid * num_classes) + cls)
@@ -1496,14 +1561,12 @@ fn render_loop(dir: String, cam: Cam, scam: Cam, shipcam: Cam, radius: Double, l
                             # existing need_load/need_bg paths then stream the destination next frame.
                             arrived = ftl_phase2 == phase_arrive
                             nv = if arrived then 2 else next_view
-                            # The FIRST star you select establishes where the ship IS (you "board" there),
-                            # so subsequent picks are jump targets rather than everything reading out-of-
-                            # range from the seed origin. After that, only a jump moves your location.
-                            first_here = hit && ! has_sel
-                            loc_name2 = if arrived then sel_name else if first_here then best_name else loc_name
-                            loc_x2 = if arrived then sel_x else if first_here then best_x else loc_x
-                            loc_y2 = if arrived then sel_y else if first_here then best_y else loc_y
-                            loc_z2 = if arrived then sel_z else if first_here then best_z else loc_z
+                            # The ship's location is seeded to its random home at boot and moves ONLY on
+                            # jump arrival — picking a star selects a jump target, it does not relocate you.
+                            loc_name2 = if arrived then sel_name else loc_name
+                            loc_x2 = if arrived then sel_x else loc_x
+                            loc_y2 = if arrived then sel_y else loc_y
+                            loc_z2 = if arrived then sel_z else loc_z
                             fuel2 = if arrived then refuel(fuel, jcost, refuel_amount, fuel_max) else fuel
                         in render_loop(dir, cam2, scam2, shipcam2, radius, loaded2, name2, detail2, sel_x2, sel_y2, sel_z2, has_sel2, dnx2, dny2, nv, lvl, csys2, cplanets2, hov1b, hov2b, mask2, ldown, show_grid, sun_sh, planet_sh, gas_sh, ship_model, sky_sh, bgstars2, bgsys2, loc_name2, loc_x2, loc_y2, loc_z2, fuel2, ftl_phase2, ftl_timer2, warp_sh)
 
@@ -1513,6 +1576,14 @@ fn main() -> Unit !{IO} =
     # one-time ~15s rebuild prints to the console instead of presenting a frozen window.
     src_dir <- catalog_dir()
     dir <- ensure_balanced(src_dir)
+    # Place the ship in a random real system at boot (its "home"), seeded by the monotonic clock so
+    # each launch starts somewhere new. Read before the window opens (one cheap tile read). A jump
+    # is the only thing that moves the ship afterwards; persistence across runs is future work.
+    boot_seed <- time_now_micros()
+    home <- pick_home(dir, boot_seed)
+    if home.found
+      then print("[galaxy] ship home: " ++ home.name ++ " at (" ++ to_string(home.x) ++ ", " ++ to_string(home.y) ++ ", " ++ to_string(home.z) ++ ")")
+      else print("[galaxy] no catalog home found; starting at the galactic centre")
     gfx.open_window(1280, 800, "Sprout — Galaxy Map")
     gfx.set_target_fps(60)
     gfx.set_clip_planes(near_plane, far_plane)
@@ -1551,9 +1622,19 @@ fn main() -> Unit !{IO} =
     cam_yaw_milli <- arg_int(3, gfx.double_to_int(init_yaw * 1000.0))
     cam_tx <- arg_int(4, 0)
     cam_tz <- arg_int(5, 0)
+    # Read the boot-mode args early: the explicit system canary (argv[6]) and the auto-jump canary
+    # (argv[13]) drive their own framing, so a canary boot must NOT be re-centered on the random home.
+    sys_arg <- arg_int(6, 0 - 1)
+    jump_arg <- arg_int(13, 0)
+    let auto_jump = jump_arg >= 1
+    let canary_boot = (sys_arg >= 0) || auto_jump
+    # Center the galaxy camera on the home star (galaxy x,y -> world x,z) so "you are here" is framed
+    # when you toggle out to the map. Normal boot only; an explicit argv[4]/argv[5] pan target wins.
+    let cam_tx2 = if (home.found) && ! canary_boot && (cam_tx == 0) then home.x else cam_tx
+    let cam_tz2 = if (home.found) && ! canary_boot && (cam_tz == 0) then home.y else cam_tz
     let cam0 = Cam(yaw = to_double(cam_yaw_milli) / 1000.0,
                    radius = to_double(cam_radius), height = to_double(cam_height),
-                   tx = to_double(cam_tx), ty = 0.0, tz = to_double(cam_tz))
+                   tx = to_double(cam_tx2), ty = 0.0, tz = to_double(cam_tz2))
     # Seed the committed LoD level straight off the nominal ladder so the opening frame is at the
     # right detail immediately; render_loop's next_level then applies hysteresis from here on.
     let seed_lvl = min(desired_level(cam_distance(cam0)), stream_max_level)
@@ -1565,9 +1646,7 @@ fn main() -> Unit !{IO} =
     # target is the origin. Persists across entries like scam0.
     let shipcam0 = Cam(yaw = s3_init_yaw, radius = s3_init_radius, height = s3_init_height,
                        tx = 0.0, ty = 0.0, tz = 0.0)
-    # Optional argv[6] = a system id to open DIRECTLY in the solar-system view (screenshot/canary of
-    # scene 2, which otherwise needs an interactive click). Absent/negative -> normal galaxy start.
-    sys_arg <- arg_int(6, 0 - 1)
+    # argv[6] (the system canary) is read earlier, before cam0, so it can suppress home-centering.
     # Optional argv[9] = 1 to boot straight into the third-person SHIP scene (requires a system via
     # argv[6]). Lets a headless screenshot capture scene 3, which otherwise needs two interactive clicks.
     ship_arg <- arg_int(9, 0)
@@ -1590,14 +1669,24 @@ fn main() -> Unit !{IO} =
     # boarded system's position (argv[10..12]) and the ship's current location seeded 3000 ly off it (an
     # in-range origin), then seed the phase at `spool` so the drive runs spool -> tunnel -> arrive with no
     # interaction — a headless canary can screenshot the warp tunnel (mid-run) and the arrival vista.
-    jump_arg <- arg_int(13, 0)
-    let auto_jump = jump_arg >= 1
-    let start_view = if auto_jump then 0 else init_view
-    let loc0_x = if auto_jump then bsx + 3000 else bsx
+    # Normal boot drops the ship into its random home system's ship vista (view 2). The explicit
+    # system canary (argv[6]) and the auto-jump canary (argv[13], both read earlier) override this.
+    let random_home = (home.found) && ! canary_boot
+    let start_view = if auto_jump then 0 else if random_home then 2 else init_view
+    # Selection = the jump TARGET. At a random home it starts ON the home so the vista's need_load
+    # path streams the home system and no self-jump is offered (is_diff = false). The canaries keep
+    # their prior seeds. Location = where the ship IS; a jump is the only thing that moves it.
+    let boot_name = if random_home then home.name else init_name
+    let boot_detail = if random_home then home.detail else "Click a star to inspect it"
+    let boot_sx = if random_home then home.x else bsx
+    let boot_sy = if random_home then home.y else bsy
+    let boot_sz = if random_home then home.z else bsz
+    let boot_has = if random_home then true else auto_jump
+    let loc0_x = if auto_jump then bsx + 3000 else if random_home then home.x else bsx
+    let loc0_y = if random_home then home.y else bsy
+    let loc0_z = if random_home then home.z else bsz
     let ftl0 = if auto_jump then phase_spool else phase_idle
-    # The ship's starting location = the boarded system (or the auto-jump origin above); a jump updates
-    # it. fuel starts full. The drive is idle unless the canary seeded a jump.
     render_loop(dir, cam0, scam0, shipcam0, radius, dict_empty(),
-                init_name, "Click a star to inspect it", bsx, bsy, bsz, auto_jump, 0, 0, start_view, seed_lvl, "", Nil, "", "",
+                boot_name, boot_detail, boot_sx, boot_sy, boot_sz, boot_has, 0, 0, start_view, seed_lvl, "", Nil, "", "",
                 init_mask, false,! (init_grid == 0), sun_sh, planet_sh, gas_sh, ship_model, sky_sh, Nil, "",
-                init_name, loc0_x, bsy, bsz, fuel_max, ftl0, 0.0, warp_sh)
+                boot_name, loc0_x, loc0_y, loc0_z, fuel_max, ftl0, 0.0, warp_sh)

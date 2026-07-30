@@ -410,14 +410,34 @@ are now here, in space". Full design + the verified prior-art survey it is based
   from spool and to black at the end (masking the cut to the vista). No new engine primitive — it uses
   the existing generic gfx shader API, like every loam shader.
 - **State.** `render_loop` threads the ship's **current location** (`loc_*`, distinct from the `sel_*`
-  target so a jump has a *from* and a *to*), `fuel`, and the `ftl_phase`/`ftl_timer`. The **first star
-  you pick establishes your location** ("board here"), so later picks are jump targets rather than
-  every star reading out-of-range from the seed origin; after that, only a jump moves you. Arrival sets
-  `loc := sel`, burns+tops-up fuel, and flips to view 2; the existing per-system JSON / real-star
-  streaming (`need_load`/`need_bg`) then loads the destination on the next frame — no new loader.
+  target so a jump has a *from* and a *to*), `fuel`, and the `ftl_phase`/`ftl_timer`. `loc_*` is
+  **seeded at boot to a random real home system** (see "Starting home" below) and **moves only on jump
+  arrival** — picking a star selects a jump target, it does not relocate you. Arrival sets `loc := sel`,
+  burns+tops-up fuel, and flips to view 2; the existing per-system JSON / real-star streaming
+  (`need_load`/`need_bg`) then loads the destination on the next frame — no new loader.
 - **Scripting.** `argv[13] = 1` auto-engages a jump at boot (galaxy view → spool → tunnel → arrival
   vista) with no interaction, so a headless screenshot can capture the warp tunnel mid-run and the
   destination vista — see Running below.
+
+### Starting home (built)
+
+The demo **opens with the ship already in a real random system** — no first-click "board a star"
+step. At boot `pick_home` reads one line from the balanced catalog's **L0 root tile** (a few thousand
+landmark stars, always on disk), indexed by `time_now_micros()` so each launch starts **somewhere
+new**, and parses it exactly like `pick_line` (`id|x|y|z|class|size|name|detail`) into the home's name
++ galaxy coordinates. The galactic-centre sentinel at `(0,0,0)` is filtered out (it doubles as the
+"no system" marker). The demo then opens in that system's **ship vista (view 2)**: `loc_*` and `sel_*`
+are both seeded to the home, so `is_diff` is false (no self-jump offered) and the `sel_name != csys`
+load path streams the home system on the first frame. The galaxy camera is also centered on the home
+so "you are here" is framed when you toggle out to the map. A boot log line reports the choice
+(`[galaxy] ship home: SYS-… at (x, y, z)`).
+
+**Precedence:** the explicit `argv[6]` system canary and the `argv[13]` auto-jump canary both override
+the random home (they set their own view/framing), so screenshots stay deterministic.
+
+**Persistence across runs is future work** (BACKLOG): the home is currently re-randomized each launch.
+The `loc_*`/`sel_*` split already models "where you are" independently of "where you're aiming", which
+is exactly what a saved-home restore will populate.
 
 ## Spectral-class filter (built)
 
@@ -539,7 +559,9 @@ of space games like Elite: Dangerous.
 
 ```
 # Pass the plain catalog/. On first launch the demo builds catalog-balanced (~15 s) for the
-# spectral filter and caches it; later launches reuse it.
+# spectral filter and caches it; later launches reuse it. The ship opens in a RANDOM real home
+# system's ship vista (see "Starting home"); the console prints the chosen home. Toggle out with
+# `< System` to reach the galaxy map (centered on your home) and select a jump target.
 mise exec -- just run-gfx examples/gfx/galaxy_map.sprout /Users/cthulhu/GameDev/universegen/catalog
 # canary + screenshot:
 SPROUT_GFX_MAX_FRAMES=120 SPROUT_GFX_SCREENSHOT=galaxy.png \
