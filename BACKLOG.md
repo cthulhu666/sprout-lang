@@ -79,6 +79,50 @@ Legend:
   `let..in` block hold `<-` bindings (one flat mixed `=`/`<-` list), at the cost of reclassifying
   `let..in` as sometimes-effectful. Deferred as a possible future unification — revisit only if the
   two-construct split (`do` for effects, `let..in` for pure) proves to be friction in practice.
+- [~] `P2` **Binding-level type annotations `let x : T = e`.** Design + prior art:
+  `docs/binding-annotations-v0.md`; spec §5.2 (experimental). **Phase 1 LANDED 2026-07-30 (PR #312):**
+  **top-level** `let` bindings accept an optional annotation, checked against the initializer via
+  infer-then-unify (`apply_let_annotation` in `infer.sprout`, mirroring `check_fn_body`) — no
+  checking-mode machinery added. `LetDecl` gained a `Maybe TypeExpr` field (before the trailing
+  `SourcePos`); the annotation's head-name threads into `desugar_ctx.desugar_decl_i` so the
+  `Vec`/`StringTemplate` literal lowering fires at `let` sites (coercion parity with `fn`
+  boundaries); annotation is definition-local, deliberately **not** round-tripped through module
+  interfaces. Tests: `tests/stdlib/test_let_annotation.spr`, `tests/conformance/type_error/let_annotation_mismatch.spr`.
+  **Deferred follow-ups:**
+  - [ ] `P2` **Phase 2 — `let…in` and `where` binding annotations.** Those bindings have no
+    dedicated binding AST node to hang an annotation on (`let…in` at `parser.sprout:655`/`686`,
+    `where` at `:1219` are desugared), so annotating them is materially more invasive than the
+    `LetDecl` field. Specify separately when undertaken (`docs/binding-annotations-v0.md` §5).
+  - [ ] `P3` **do-block `let`/`<-` step annotations.** `DoLetStep String Expr` (`ast.sprout:54`)
+    has the same shape as `LetDecl` and could carry a `Maybe TypeExpr` field the same way; deferred
+    with Phase 2 since the two share the "annotate a non-top-level binding" surface.
+  - [ ] `P2` **Anonymous `any C` introduction — `let row : List (any C) = …`.** Blocked on the
+    existential/GADTs arc (`docs/gadts-v0.md` §6): a type-directed rewrite that boxes each element
+    into a per-value dictionary needs inferred types, so it cannot ride the Phase-1 syntactic
+    coercion. Belongs to that arc, not this one.
+- [~] `P2` **Existentials / GADTs (staged).** Analysis + verified prior art + staging + T-shirt
+  estimate: `docs/gadts-v0.md` (non-normative). The insight: existentials need none of full
+  GADTs' four hard prerequisites (local per-branch equalities, mandatory signatures, bidirectional
+  checking, constraint-aware exhaustiveness) — they introduce exactly **one** new mechanism, a
+  rigid/skolem variable that must not escape a single match branch. Staging:
+  - [ ] `P2` **Stage 0a — unconstrained existentials (M).** A constructor binds a type variable
+    absent from the head (`| Boxed (exists a. a)`, spelling TBD). Introduces Sprout's first
+    rigid/skolem variable + the escape check; **zero runtime change** (same tagged union, index
+    erased). Recommended first cut / spike to de-risk the skolem–`generalize`/`instantiate`
+    interaction cheaply. Binder surface syntax is the one open design decision (`gadts-v0.md`
+    ratifies none — "surface forms illustrative"); pick it before writing the Definition-of-Ready
+    failing test.
+  - [ ] `P3` **Stage 0b — constrained existentials (L).** Add `C a =>` on the bound variable and
+    pack the class dictionary into the constructor (a Rust trait-object vtable / GHC hidden-dict
+    field), restored on unpack. The **useful** form (heterogeneous render/log lists, interface
+    values with hidden state, handler registries) and the honest home for the one dictionary
+    devirtualization must leave behind. L not M because a **reified dictionary value does not exist
+    today** — lowering flattens each class to per-method hidden params (`lowering.sprout:427-465`),
+    so 0b must first introduce a boxed-dict representation. Depends on 0a.
+  - [ ] `P4` **Stage 1 — index refinement (full GADTs) (XL).** `IntLit : Int -> Expr Int`.
+    Deferred behind the local-annotations gate (`docs/scoped-type-variables-analysis-2026-07-26.md`);
+    needs an OutsideIn-style local-equality solver + bidirectional checking + constraint-aware
+    exhaustiveness. Out of scope for v0/v1.
 - [ ] `P2` Revisit string-interpolation type-directed dispatch (Mechanism A): Phase 4 ships a simple syntactic-coercion form (elaborator inserts `template_to_string` only at `String`-expected contexts; default template result is `String`). Evaluate migrating to an `IsTemplate` typeclass with instances for `String` and `StringTemplate` once usage patterns settle. Class-based dispatch is more principled and consistent with the rest of the class system; tradeoff is added constraint-machinery overhead and possible defaulting ambiguity. Decision should be driven by whether a third meaningful instance (e.g. `Bytes`, a logging frame, a tagged-template processor) lands and forces generality.
 - [x] `P1` Validate type-name references in `TypeDecl` field and constraint positions resolve to a declared type (strict type-name validation). Landed in PR feat/strict-typedecl-validation: `validate_all_decls` pass in `stdlib/compiler/infer.sprout` runs after `pre_scan_fn_decls`, walks `TypeDecl` constructor fields, `RecordDecl` field types, and `AliasDecl` RHS type-exprs; emits `type-validation: unknown type name \`X\` in declaration \`Y\`` on the first unresolved uppercase `TypeName`. Mutual recursion between ADTs is safe (pass runs post-scan). Positions NOT yet covered (see follow-up below): `ClassDecl` method signatures, `InstanceDecl` constraint types, `FnDecl` param/return annotations.
 - [ ] `P2` Extend strict type-name validation to `ClassDecl` method signatures, `InstanceDecl` constraint types, and `FnDecl` param/return annotations (follow-up to P1 above). The `validate_decl` function in `stdlib/compiler/infer.sprout` currently matches `| _ -> Nothing` for these positions. Extend it — the main complication for `FnDecl`/`ClassDecl` is correctly threading local type-parameter sets into `validate_te` so that method-specific variables like `a`, `b` in `fmap(f: a -> b) -> f b` are not flagged.
