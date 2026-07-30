@@ -1707,7 +1707,107 @@ fn lower_branches(branches: List typed_ast.TypedMatchBranch, ctx: LowerCtx) -> L
   | Cons b rest ->
       match b with
       | typed_ast.TypedMatchBranch pat body ->
-          Cons(typed_ast.TypedMatchBranch(pat, lower_expr(body, ctx_with_bound(pat_bound_names(pat), ctx))), lower_branches(rest, ctx))
+          match enrich_existential_branch(pat, ctx) with
+          | (ext_pat, bctx) ->
+              Cons(typed_ast.TypedMatchBranch(ext_pat, lower_expr(body, ctx_with_bound(pat_bound_names(ext_pat), bctx))),
+                   lower_branches(rest, ctx))
+
+# Stage 0b: prepare a match branch to unpack a constrained existential
+# (docs/gadts-v0.md §5b/§7). A ctor with existential constraints packs one hidden
+# dictionary field per constraint AFTER its user fields. Two jobs here: (1) extend
+# the pattern to bind each witness field to a synthetic `$wtns_<var>` variable so
+# ast_to_ir emits the IRGetField, and (2) seed ctx_fwd so a class method on the
+# unpacked value forwards that witness. The forwarding key uses the STABLE
+# `$ex_<var>` identity infer stored as the @fwd marker value — re-derived here from
+# the same pattern var, so resolve's EvForward key and this seeding agree.
+fn enrich_existential_branch(pat: ast.Pattern, ctx: LowerCtx) -> (ast.Pattern, LowerCtx) =
+  match pat with
+  | ast.ConstructorPattern name fields ppos ->
+      match dict_get(name, ctx_scheme_env(ctx)) with
+      | Just scheme -> existential_branch_build(name, fields, ppos, scheme, ctx)
+      | Nothing -> (pat, ctx)
+  | _ -> (pat, ctx)
+
+fn existential_branch_build(name: String, fields: List ast.Pattern, ppos: source.SourcePos, scheme: types.Scheme, ctx: LowerCtx) -> (ast.Pattern, LowerCtx) =
+  match types.scheme_constraints(scheme) with
+  | Nil -> (ast.ConstructorPattern(name, fields, ppos), ctx)
+  | cons ->
+      match scheme_param_types(types.scheme_type(scheme)) with
+      | param_types ->
+          (ast.ConstructorPattern(name,
+             list_append(fields, witness_patterns_for(cons, param_types, fields, ppos)), ppos),
+           ctx_with_fwd(seed_fwd_for_cons(cons, param_types, fields, ctx_fwd(ctx), ctx_class_order(ctx)), ctx))
+
+# One appended witness pattern per constraint (constraint order == the physical
+# witness-field order register_ctor_one lays down). A var-bound existential field
+# gets a `$wtns_<var>` binder; a wildcard/other field gets a wildcard (witness
+# packed but unused — nothing can call a method on it).
+fn witness_patterns_for(cons: List (String, String), param_types: List types.Type, fields: List ast.Pattern, ppos: source.SourcePos) -> List ast.Pattern =
+  match cons with
+  | Nil -> Nil
+  | Cons entry rest ->
+      match entry with
+      | (existv, _) ->
+          Cons(witness_pattern_for(field_var_for_constraint(existv, param_types, fields), ppos),
+               witness_patterns_for(rest, param_types, fields, ppos))
+
+fn witness_pattern_for(field_var: Maybe String, ppos: source.SourcePos) -> ast.Pattern =
+  match field_var with
+  | Just vname -> ast.VarPattern(witness_var_name(vname), ppos)
+  | Nothing -> ast.WildcardPattern(ppos)
+
+fn witness_var_name(vname: String) -> String =
+  "$wtns_" ++ vname
+
+fn seed_fwd_for_cons(cons: List (String, String), param_types: List types.Type, fields: List ast.Pattern, fwd: Dict (Dict String), class_order: Dict (List String)) -> Dict (Dict String) =
+  match cons with
+  | Nil -> fwd
+  | Cons entry rest ->
+      match entry with
+      | (existv, class_name) ->
+          seed_fwd_for_cons(rest, param_types, fields,
+            seed_one_fwd(existv, class_name, param_types, fields, fwd, class_order), class_order)
+
+fn seed_one_fwd(existv: String, class_name: String, param_types: List types.Type, fields: List ast.Pattern, fwd: Dict (Dict String), class_order: Dict (List String)) -> Dict (Dict String) =
+  match field_var_for_constraint(existv, param_types, fields) with
+  | Just vname ->
+      dict_set(constraint_key_str(string.after_last_dot(class_name),
+                                  Cons(ast.TypeName(types.existential_fwd_head(vname)), Nil)),
+               method_map_to_witness(class_methods_for(string.after_last_dot(class_name), class_order), witness_var_name(vname), dict_empty()),
+               fwd)
+  | Nothing -> fwd
+
+fn method_map_to_witness(methods: List String, witness_name: String, acc: Dict String) -> Dict String =
+  match methods with
+  | Nil -> acc
+  | Cons m rest -> method_map_to_witness(rest, witness_name, dict_set(m, witness_name, acc))
+
+# The pattern variable bound to the field whose scheme type is the existential var
+# `existv`, or Nothing when that field is a wildcard (or absent).
+fn field_var_for_constraint(existv: String, param_types: List types.Type, fields: List ast.Pattern) -> Maybe String =
+  match (param_types, fields) with
+  | (Cons pt pts, Cons f fs) ->
+      if lowering_type_is_var_named(pt, existv) then pattern_var_name(f)
+      else field_var_for_constraint(existv, pts, fs)
+  | _ -> Nothing
+
+fn lowering_type_is_var_named(t: types.Type, var: String) -> Bool =
+  match t with
+  | types.TVar n -> types.tyvar_identity(n) == var
+  | _ -> false
+
+fn pattern_var_name(p: ast.Pattern) -> Maybe String =
+  match p with
+  | ast.VarPattern v _ -> Just(v)
+  | _ -> Nothing
+
+fn scheme_param_types(t: types.Type) -> List types.Type =
+  match t with
+  | types.TFunc p rest _ -> Cons(p, scheme_param_types(rest))
+  | _ -> Nil
+
+fn ctx_with_fwd(fwd: Dict (Dict String), ctx: LowerCtx) -> LowerCtx =
+  LowerCtx(ctx_class_order(ctx), fwd, ctx_inst(ctx), ctx_super_map(ctx), ctx_inst_meta(ctx), ctx_scheme_env(ctx), ctx_class_params(ctx), ctx_bound_vars(ctx))
 
 fn lower_do_steps(steps: List typed_ast.TypedDoStep, ctx: LowerCtx) -> List typed_ast.TypedDoStep =
   match steps with

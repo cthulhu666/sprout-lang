@@ -122,13 +122,33 @@ Legend:
     bespoke soundness code. Existential vars derived as `scheme.type_vars \ ftv(result)`; **zero
     runtime change**. Spec §5.6 (experimental). Tests: `tests/stdlib/test_existential_0a.spr`,
     `tests/conformance/type_error/existential_{escape,pin,merge}.spr`.
-  - [ ] `P3` **Stage 0b — constrained existentials (L).** Add `C a =>` on the bound variable and
-    pack the class dictionary into the constructor (a Rust trait-object vtable / GHC hidden-dict
-    field), restored on unpack. The **useful** form (heterogeneous render/log lists, interface
-    values with hidden state, handler registries) and the honest home for the one dictionary
-    devirtualization must leave behind. L not M because a **reified dictionary value does not exist
-    today** — lowering flattens each class to per-method hidden params (`lowering.sprout:427-465`),
-    so 0b must first introduce a boxed-dict representation. Depends on 0a.
+  - [x] `P3` **Stage 0b — constrained existentials via `any C` (M actual; est. L). LANDED
+    2026-07-30, scoped to single-method superclass-free classes.** `| Shown (any ToString)` desugars
+    (parser) to a fresh existential var + a `ToString` constraint on the ctor. Construction routes
+    through the existing `where C a` dict-injection path (`inject_constrained_fn_dicts_via_field`) —
+    the ctor scheme's constraint field carries `(var, class)`, so `Shown(v)` requires+resolves the
+    instance and **packs the method function-pointer(s)** as hidden `'p'` ctor fields (ctor
+    arity/fks grow by the witness count). Unpack seeds a skolem-keyed `@fwd` given marker whose VALUE
+    is a stable `$ex_<var>` forwarding identity (`types.existential_fwd_head`), shared by infer and
+    lowering so resolve's EvForward key and lowering's `ctx_fwd` seeding agree with **no drift and no
+    body scan**; a class method on the unpacked value then forwards the packed witness. **No reified
+    dict struct was needed** — the per-method pointers ARE the dictionary, redirected into the heap
+    value (the residual devirtualization leaves behind, `docs/gadts-v0.md §5.2`). Missing-instance
+    construction rejected at the site ("No instance…"). Spec §5.6; example
+    `examples/existential_render.sprout`; tests `tests/stdlib/test_existential_0b.spr`,
+    `tests/conformance/type_error/existential_missing_instance.spr`.
+    - [ ] `P3` **Multi-method / superclass existentials (witness-slot enumerator).** The crude
+      one-witness-slot-per-constraint count (`ast_to_ir.witness_slot_count`) is exact only for a
+      single-method superclass-free class; a richer class is currently rejected with a located error
+      (`infer.check_existential_constraints`). Generalize by extracting ONE
+      `witness_slots(exist_constraints, class_order, super_map)` enumerator (transitive-super method
+      expansion, matching lowering's dict expansion) and calling it from BOTH the lowering witness
+      expansion and the ctor-table count so they cannot drift — then drop the guard.
+    - [ ] `P3` **Explicit constrained-prefix form + constraint keyword.** Only the `any C` sugar
+      landed. The explicit `| exists a. <constraint> Shown a` (needed for the multi-field
+      shared-hidden-state `Widget` case, `docs/gadts-v0.md §5.1`) is deferred, along with its
+      constraint-keyword decision: the doc "ratified" Haskell's `=>`, but every other Sprout
+      constraint site uses `where` (`class Ord a where Eq a`); pick one when this lands.
   - [ ] `P4` **Stage 1 — index refinement (full GADTs) (XL).** `IntLit : Int -> Expr Int`.
     Deferred behind the local-annotations gate (`docs/scoped-type-variables-analysis-2026-07-26.md`);
     needs an OutsideIn-style local-equality solver + bidirectional checking + constraint-aware

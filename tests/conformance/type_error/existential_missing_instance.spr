@@ -1,0 +1,16 @@
+module main
+
+# Stage 0b constrained-existentials soundness test (docs/gadts-v0.md §5/§6).
+# `Shown` may only pack a value whose type has a `ToString` instance — that is
+# the entire point of `any ToString`. `NoShow` has no such instance, so
+# `Shown(NoShow)` must be rejected at the construction site with the same
+# "no instance" diagnostic a direct `to_string(NoShow)` call would get — not
+# accepted and left to fail later when `render` tries to unpack it.
+
+type Shown = | Shown (any ToString)
+
+type NoShow = | NoShow
+
+fn bad() -> Shown = Shown(NoShow)
+
+fn main() -> Unit !{IO} = print("unreachable")

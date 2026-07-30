@@ -1,0 +1,36 @@
+module examples.existential_render
+
+# Constrained existentials — the `any C` sugar (docs/gadts-v0.md, spec §5.6).
+#
+# A `Cell` hides a value of ANY type, as long as that type can render itself as
+# text (`ToString`). The concrete type is erased behind the interface: constructing
+# `Cell(42)` forgets that it held an Int and packs Int's `ToString` witness inside
+# the box. So one flat `List Cell` can hold an Int, a String, a Bool, and a
+# user-defined type side by side — each rendered through its OWN packed witness.
+# Neither a closed sum nor a struct-of-arrays can express this: the element types
+# differ and the set is open to any future `ToString` instance.
+
+type Cell = | Cell (any ToString)
+
+# A user-defined type with its own ToString instance — proof the box is not
+# limited to built-ins; any type with the interface qualifies.
+type Temp = | Celsius Int
+
+instance ToString Temp {
+  fn to_string(t: Temp) -> String =
+    match t with
+    | Celsius c -> `${int_to_string(c)} deg C`
+}
+
+# Unpacking binds the hidden value at a rigid, abstract type — all you can do with
+# it is what the interface allows. `to_string` dispatches on the witness packed at
+# construction, so each element renders as its own concrete type would.
+fn render(cell: Cell) -> String =
+  match cell with
+  | Cell x -> to_string(x)
+
+fn row() -> List Cell =
+  [Cell(42), Cell("ready"), Cell(true), Cell (Celsius(21))]
+
+fn main() -> Unit !{IO} =
+  list_each(\cell -> print(render(cell)), row())

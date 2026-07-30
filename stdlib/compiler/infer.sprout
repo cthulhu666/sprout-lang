@@ -357,7 +357,15 @@ fn register_one_ctor(
   # types (local_vars), but ABSENT from result_type (built from type_params only) —
   # which is exactly what makes `Boxed(x)` hide x's type. On the pattern (unpack)
   # path they are re-instantiated to rigid skolems; see instantiate_ctor_pattern.
-  | ast.TypeConstructor name fields exist_vars _ ->
+  #
+  # exist_constraints (Stage 0b): a constrained existential like `Shown (any
+  # ToString)` records `ToString existv0` here. Threading them into the scheme's
+  # constraint field (as (head_token, class) pairs keyed by the exist var name)
+  # routes construction through the SAME §13.3(B) dict-injection path a `where C a`
+  # function uses: `constrained_fn_field(name)` reads these back, so `Shown(42)`
+  # requires `ToString Int`, resolves the witness, and rejects a missing instance
+  # at the construction site — no constructor-specific obligation code needed.
+  | ast.TypeConstructor name fields exist_vars exist_constraints ->
       dict_set(
         name,
         types.Scheme(
@@ -365,10 +373,26 @@ fn register_one_ctor(
           Nil,
           ctor_fn_type(fields, build_local_params(exist_vars, local_vars), result_type),
           types.EffectPure,
-          Nil
+          exist_constraint_pairs(exist_constraints)
         ),
         env
       )
+
+# Convert a constructor's existential constraints to the scheme constraint field's
+# (head_token, class) shape. The head_token is the exist var's own name: a ctor
+# scheme registers `exist_vars` verbatim as its scheme binders (no generalize
+# renaming), so instantiate_with_vars keys prog_to_fresh by that exact name and
+# resolve_obligation's precise lookup hits. Mirrors the concrete-ctor-head case of
+# canonicalize_constrained_constraints (a stable source name, not a #pos token).
+fn exist_constraint_pairs(cs: List ast.TypeConstraint) -> List (String, String) =
+  match cs with
+  | Nil -> Nil
+  | Cons c rest ->
+      match c with
+      | ast.TypeConstraint class_name [ast.TypeName v | _] ->
+          Cons((v, class_name), exist_constraint_pairs(rest))
+      | ast.TypeConstraint class_name _ ->
+          Cons(("#none", class_name), exist_constraint_pairs(rest))
 
 fn ctor_fn_type(fields: List ast.TypeExpr, local_vars: Dict types.Type, result: types.Type) -> types.Type =
   match fields with
@@ -955,17 +979,26 @@ fn check_instance_for_marker(
                   else check_instance_fwd(types.type_id_name(class_name), typed_callee, typed_args, env, ret_t, s3, es3, call_eff, pos)
                 Just head_str = concrete_type_str(unifier.apply_subst(subst, typed_ast.typed_expr_type(cv_arg)))
                   else check_instance_fwd(types.type_id_name(class_name), typed_callee, typed_args, env, ret_t, s3, es3, call_eff, pos)
-                Just _ = dict_get("@inst:" ++ types.type_id_name(class_name) ++ ":" ++ head_str, env)
-                  else InferErr(pos, "No instance of " ++ types.type_id_name(class_name) ++ " for " ++ head_str)
             in
-              InferOk(
-                typed_ast.TCall(typed_callee,
-                  Cons(typed_ast.TDict(
-                    ast.TypeConstraint(types.type_id_name(class_name), Cons(type_to_typeexpr_with_prog_vars(unifier.apply_subst(subst, typed_ast.typed_expr_type(cv_arg)), types.type_id_name(class_name), env), Nil)),
-                    types.TConst(class_name), pos, typed_ast.EvUnresolved),
-                    typed_args),
-                  ret_t, pos),
-                s3, es3, call_eff)
+              if types.is_skolem_name(head_str) then
+                # Stage 0b: the dispatch value is an unpacked existential (a rigid
+                # skolem, docs/gadts-v0.md §7). Its dictionary is the pattern-provided
+                # given, keyed PRECISELY by the skolem name — never a class-only scan,
+                # which could grab an ambient same-class dict (a silent miscompile:
+                # advisor Crack 1). extend_env_with_existential_givens seeded it.
+                resolve_skolem_given(types.type_id_name(class_name), head_str, typed_callee, typed_args, env, ret_t, s3, es3, call_eff, pos)
+              else
+                let Just _ = dict_get("@inst:" ++ types.type_id_name(class_name) ++ ":" ++ head_str, env)
+                      else InferErr(pos, "No instance of " ++ types.type_id_name(class_name) ++ " for " ++ head_str)
+                in
+                  InferOk(
+                    typed_ast.TCall(typed_callee,
+                      Cons(typed_ast.TDict(
+                        ast.TypeConstraint(types.type_id_name(class_name), Cons(type_to_typeexpr_with_prog_vars(unifier.apply_subst(subst, typed_ast.typed_expr_type(cv_arg)), types.type_id_name(class_name), env), Nil)),
+                        types.TConst(class_name), pos, typed_ast.EvUnresolved),
+                        typed_args),
+                      ret_t, pos),
+                    s3, es3, call_eff)
           else
             # Return-position dispatch — first_concrete_typed_arg_str would pick
             # an irrelevant arg type (e.g. the String input of `deserialize`).
@@ -1002,6 +1035,36 @@ fn check_instance_fwd(
           InferOk(typed_ast.TCall(typed_callee, Cons(tdict, typed_args), ret_t, pos), s3, es3, call_eff)
       | Nothing ->
           InferOk(typed_ast.TCall(typed_callee, typed_args, ret_t, pos), s3, es3, call_eff)
+
+# Stage 0b: resolve a class-method call whose dispatch value is an unpacked
+# existential skolem. The witness was packed into the box and seeded as
+# `@fwd:{skolem}:{class}` by extend_env_with_existential_givens; look it up
+# PRECISELY (never scan_fwd_markers, which is class-only and would risk grabbing
+# an ambient same-class dict). A skolem with no given is unsatisfiable — a loud
+# error, not a silently missing dict. The emitted TDict carries the skolem as its
+# constraint head so lowering forwards the packed ctor field (see lowering's
+# EvForward path); its evidence is left EvUnresolved for that pass to fill.
+fn resolve_skolem_given(
+  class_name: String,
+  skolem_name: String,
+  typed_callee: typed_ast.TypedExpr,
+  typed_args: List typed_ast.TypedExpr,
+  env: Dict types.Scheme,
+  ret_t: types.Type,
+  s3: Dict types.Type,
+  es3: Dict types.Effect,
+  call_eff: types.Effect,
+  pos: source.SourcePos
+) -> InferResult =
+  match dict_get("@fwd:" ++ skolem_name ++ ":" ++ class_name, env) with
+  | Just fwd_scheme ->
+      match fwd_scheme_to_tdict(fwd_scheme, class_name, pos) with
+      | Just tdict ->
+          InferOk(typed_ast.TCall(typed_callee, Cons(tdict, typed_args), ret_t, pos), s3, es3, call_eff)
+      | Nothing ->
+          InferErr(pos, "internal: existential dict marker malformed for " ++ class_name)
+  | Nothing ->
+      InferErr(pos, "No instance of " ++ class_name ++ " for the unpacked existential value")
 
 # Walk each arg looking for one whose raw TVar head maps to a @fwd marker.
 fn find_fwd_tdict_in_args(class_name: String, args: List typed_ast.TypedExpr, env: Dict types.Scheme, pos: source.SourcePos) -> Maybe typed_ast.TypedExpr =
@@ -1792,9 +1855,39 @@ fn inject_constrained_fn_dicts_via_field(
                   _ <- trace_dispatch(name, class_name, head_token, prog_to_fresh, s3, resolved, path)
                   match resolved with
                   | Nothing ->
-                      inject_constrained_fn_dicts_via_field(name, rest, prog_to_fresh, env, typed_callee, typed_args, subst, ret_t, s3, es3, call_eff, pos)
+                      # An unresolved constraint whose head is a CONCRETE, non-skolem
+                      # type with no instance is unsatisfiable — reject loudly at the
+                      # call/construction site (spec §8; mirrors the class-method path's
+                      # "No instance" error). Without this a constrained-existential
+                      # `Shown(NoShow)` would drop its witness and surface only as a
+                      # downstream codegen arity mismatch. A tyvar head (polymorphic,
+                      # forwarded) or a skolem (re-pack, forwarded) still skips — that
+                      # is the legitimate no-dict-here case, unchanged.
+                      match concrete_unsatisfiable_head(class_name, head_token, name, prog_to_fresh, s3, env) with
+                      | Just head_str -> InferErr(pos, "No instance of " ++ class_name ++ " for " ++ head_str)
+                      | Nothing ->
+                          inject_constrained_fn_dicts_via_field(name, rest, prog_to_fresh, env, typed_callee, typed_args, subst, ret_t, s3, es3, call_eff, pos)
                   | Just tdict ->
                       inject_constrained_fn_dicts_via_field(name, rest, prog_to_fresh, env, typed_callee, list_append(typed_args, Cons(tdict, Nil)), subst, ret_t, s3, es3, call_eff, pos)
+
+# Returns Just(head) when the constraint's head resolves to a CONCRETE, non-skolem
+# type that has no instance — an unsatisfiable obligation to reject. Returns Nothing
+# for a type-variable head (polymorphic/forwarded) or a skolem (existential re-pack,
+# forwarded): those are the legitimate "no dict injected here" cases. Only consulted
+# on the resolve-Nothing path, so a Just here is a genuine hard miss.
+fn concrete_unsatisfiable_head(class_name: String, head_token: String, name: String, prog_to_fresh: Dict types.Type, s3: Dict types.Type, env: Dict types.Scheme) -> Maybe String =
+  match dict_get(decode_constraint_var(head_token, name, env), prog_to_fresh) with
+  | Just fresh_t -> concrete_missing_inst(class_name, unifier.apply_subst(s3, fresh_t), env)
+  | Nothing -> Nothing
+
+fn concrete_missing_inst(class_name: String, t: types.Type, env: Dict types.Scheme) -> Maybe String =
+  match concrete_type_str(t) with
+  | Just head_str ->
+      if types.is_skolem_name(head_str) then Nothing
+      else match dict_get("@inst:" ++ class_name ++ ":" ++ head_str, env) with
+           | Just _ -> Nothing
+           | Nothing -> Just(head_str)
+  | Nothing -> Nothing
 
 # Resolve one field constraint's dict from its head_token. A CONCRETE-ctor head
 # (a plain type name with an `@inst:{class}:{head}` instance) resolves DIRECTLY by
@@ -2745,7 +2838,13 @@ fn infer_branch(
         match pr with
         | InferErr pos e -> InferErr(pos, e)
         | InferOk _ s1 es1 _ ->
-            infer_branch_body(state, extend_env_from_pattern(pat, s1, env), s1, es1, ret_type, body)
+            # extend_env_with_existential_givens seeds @fwd markers for any packed
+            # existential dict the pattern unpacks (Stage 0b), keyed by the skolem so
+            # a class method on the unpacked value forwards the packed witness rather
+            # than searching global instances (which have none for a skolem).
+            infer_branch_body(state,
+              extend_env_with_existential_givens(pat, s1, extend_env_from_pattern(pat, s1, env)),
+              s1, es1, ret_type, body)
 
 fn infer_branch_body(
   state: unifier.InferState,
@@ -2948,6 +3047,91 @@ fn extend_env_from_pattern_list(pats: List ast.Pattern, subst: Dict types.Type, 
   match pats with
   | Nil -> env
   | Cons h t -> extend_env_from_pattern_list(t, subst, extend_env_from_pattern(h, subst, env))
+
+# Stage 0b: seed the pattern-provided "given" dictionaries for a constrained
+# existential (docs/gadts-v0.md §5b/§7). Unpacking `Shown x` (from `Shown (any
+# ToString)`) binds `x` at a rigid skolem `$sk<n>` that has no global ToString
+# instance; the witness travels INSIDE the box. We recover the skolem off `subst`
+# (the same `s1` that binds `x`, so both ends agree by construction) and seed
+# `@fwd:{skolem}:{class}` — the identical marker a `where C a` function seeds via
+# seed_forward_markers — so `to_string(x)` in the branch resolves the packed
+# witness through the standard forward path. Recurses into tuple/ctor sub-patterns
+# so `(Shown x, ...)` is handled; nested existentials use the same s1.
+fn extend_env_with_existential_givens(pat: ast.Pattern, subst: Dict types.Type, env: Dict types.Scheme) -> Dict types.Scheme =
+  match pat with
+  | ast.ConstructorPattern name fields _ ->
+      extend_env_givens_list(fields, subst, seed_ctor_givens(name, fields, subst, env))
+  | ast.TuplePattern pats _ -> extend_env_givens_list(pats, subst, env)
+  | _ -> env
+
+fn extend_env_givens_list(pats: List ast.Pattern, subst: Dict types.Type, env: Dict types.Scheme) -> Dict types.Scheme =
+  match pats with
+  | Nil -> env
+  | Cons h t -> extend_env_givens_list(t, subst, extend_env_with_existential_givens(h, subst, env))
+
+fn seed_ctor_givens(name: String, fields: List ast.Pattern, subst: Dict types.Type, env: Dict types.Scheme) -> Dict types.Scheme =
+  match dict_get(name, env) with
+  | Just scheme ->
+      seed_existential_givens(types.scheme_constraints(scheme),
+                              ctor_param_types(types.scheme_type(scheme)), fields, subst, env)
+  | Nothing -> env
+
+# For each existential constraint (var, class) of the matched constructor, find the
+# field whose type is that var, read the skolem bound to the corresponding pattern
+# variable, and seed `@fwd:{skolem}:{class}`. A wildcard/non-var field or a
+# non-skolem binding (defensive) is skipped — nothing can call a method on it.
+fn seed_existential_givens(
+  constraints: List (String, String),
+  param_types: List types.Type,
+  fields: List ast.Pattern,
+  subst: Dict types.Type,
+  env: Dict types.Scheme
+) -> Dict types.Scheme =
+  match constraints with
+  | Nil -> env
+  | Cons entry rest ->
+      match entry with
+      | (var, class_name) ->
+          seed_existential_givens(rest, param_types, fields, subst,
+            seed_one_given(var, class_name, param_types, fields, subst, env))
+
+fn seed_one_given(var: String, class_name: String, param_types: List types.Type, fields: List ast.Pattern, subst: Dict types.Type, env: Dict types.Scheme) -> Dict types.Scheme =
+  match field_pattern_for_var(param_types, fields, var) with
+  | Just (ast.VarPattern vname _) ->
+      seed_from_skolem(class_name, vname, unifier.apply_subst(subst, types.TVar(types.tyvar_id(vname))), env)
+  | _ -> env
+
+# Key the given marker by the SKOLEM (so a method call on the unpacked value, whose
+# arg type IS the skolem, finds it) but store the STABLE forwarding identity
+# `$ex_<var>` as the value — that becomes the emitted TDict's head, and lowering
+# re-derives the identical name from the pattern var to seed ctx_fwd. See
+# types.existential_fwd_head.
+fn seed_from_skolem(class_name: String, vname: String, t: types.Type, env: Dict types.Scheme) -> Dict types.Scheme =
+  match skolem_name_of_type(t) with
+  | Just sk -> dict_set("@fwd:" ++ sk ++ ":" ++ class_name,
+                        types.mono(types.TConst(types.type_id(types.existential_fwd_head(vname)))), env)
+  | Nothing -> env
+
+# Walk the ctor's param types alongside the pattern fields, returning the field
+# pattern at the position whose declared type is the type var `var`.
+fn field_pattern_for_var(param_types: List types.Type, fields: List ast.Pattern, var: String) -> Maybe ast.Pattern =
+  match (param_types, fields) with
+  | (Cons pt pts, Cons f fs) ->
+      if type_is_var_named(pt, var) then Just(f) else field_pattern_for_var(pts, fs, var)
+  | _ -> Nothing
+
+fn type_is_var_named(t: types.Type, var: String) -> Bool =
+  match t with
+  | types.TVar n -> types.tyvar_identity(n) == var
+  | _ -> false
+
+fn skolem_name_of_type(t: types.Type) -> Maybe String =
+  match t with
+  | types.TConst name -> skolem_name_if_skolem(types.type_id_name(name))
+  | _ -> Nothing
+
+fn skolem_name_if_skolem(s: String) -> Maybe String =
+  if types.is_skolem_name(s) then Just(s) else Nothing
 
 # ---------------------------------------------------------------------------
 # Do expression
@@ -3519,6 +3703,9 @@ export fn typecheck_decls(
             match check_missing_superclass_instances(decls) with
             | Just (pos, err_msg) -> typed_ast.TypedErr(pos, err_msg)
             | Nothing ->
+              match check_existential_constraints(decls) with
+              | Just (pos, err_msg) -> typed_ast.TypedErr(pos, err_msg)
+              | Nothing ->
                 # Wrap scanned_env as GlobalEnv at this seam — scanned_env is the
                 # output of pre_scan_fn_decls (Dict, raw pre-pass). From here on
                 # the env flows between decls as the wrap-protected GlobalEnv.
@@ -3782,6 +3969,79 @@ fn check_overlapping_instances(decls: List ast.Decl, seen: Dict Bool) -> Maybe(s
 # superclass may constrain a SUBSET of the class variables, so the required instance
 # is `Sup A`, not `Sup A B`. Do NOT generalize this to "all type args": that would
 # encode the wrong assumption. When multi-parameter classes land, revisit here.
+# Stage 0b guard (docs/gadts-v0.md §5b/§10): the crude one-witness-slot-per-
+# constraint packing (ast_to_ir.register_ctor_one) is EXACT only when the
+# constrained class contributes exactly one dictionary method — a single-method
+# class with no superclasses (e.g. ToString). Reject `any C` on a richer class with
+# a clear, located message rather than let it surface as a downstream ctor-arity
+# mismatch. Multi-method / superclass existentials await the shared witness-slot
+# enumerator (BACKLOG). Skips any C that is not a known class here — a separate
+# check reports an unknown class.
+fn check_existential_constraints(decls: List ast.Decl) -> Maybe(source.SourcePos, String) =
+  check_exist_ctors_go(decls, build_class_methods_map(decls, dict_empty()), build_class_super_map(decls, dict_empty()))
+
+fn check_exist_ctors_go(decls: List ast.Decl, methods_map: Dict (List String), super_map: Dict (List String)) -> Maybe(source.SourcePos, String) =
+  match decls with
+  | Nil -> Nothing
+  | Cons decl rest ->
+      match decl with
+      | ast.TypeDecl _ _ ctors _ _ ->
+          match check_exist_ctors_list(ctors, ast.decl_pos(decl), methods_map, super_map) with
+          | Just err -> Just(err)
+          | Nothing -> check_exist_ctors_go(rest, methods_map, super_map)
+      | _ -> check_exist_ctors_go(rest, methods_map, super_map)
+
+fn check_exist_ctors_list(ctors: List ast.TypeConstructor, pos: source.SourcePos, methods_map: Dict (List String), super_map: Dict (List String)) -> Maybe(source.SourcePos, String) =
+  match ctors with
+  | Nil -> Nothing
+  | Cons ctor rest ->
+      match ctor with
+      | ast.TypeConstructor _ _ _ exist_constraints ->
+          match check_exist_constraint_list(exist_constraints, pos, methods_map, super_map) with
+          | Just err -> Just(err)
+          | Nothing -> check_exist_ctors_list(rest, pos, methods_map, super_map)
+
+fn check_exist_constraint_list(cs: List ast.TypeConstraint, pos: source.SourcePos, methods_map: Dict (List String), super_map: Dict (List String)) -> Maybe(source.SourcePos, String) =
+  match cs with
+  | Nil -> Nothing
+  | Cons c rest ->
+      match check_one_exist_constraint(c, pos, methods_map, super_map) with
+      | Just err -> Just(err)
+      | Nothing -> check_exist_constraint_list(rest, pos, methods_map, super_map)
+
+fn check_one_exist_constraint(c: ast.TypeConstraint, pos: source.SourcePos, methods_map: Dict (List String), super_map: Dict (List String)) -> Maybe(source.SourcePos, String) =
+  match c with
+  | ast.TypeConstraint class_name _ ->
+      match dict_get(string.after_last_dot(class_name), methods_map) with
+      | Nothing -> Nothing
+      | Just methods ->
+          if list_length(methods) != 1 then
+            Just((pos, "existential `any " ++ class_name ++ "` is only supported for single-method classes (Stage 0b); " ++ class_name ++ " has " ++ int_to_string(list_length(methods)) ++ " methods"))
+          else if exist_class_has_supers(string.after_last_dot(class_name), super_map) then
+            Just((pos, "existential `any " ++ class_name ++ "` is not yet supported for classes with superclasses (Stage 0b)"))
+          else Nothing
+
+fn exist_class_has_supers(class_name: String, super_map: Dict (List String)) -> Bool =
+  match dict_get(class_name, super_map) with
+  | Just (Cons _ _) -> true
+  | _ -> false
+
+fn build_class_methods_map(decls: List ast.Decl, acc: Dict (List String)) -> Dict (List String) =
+  match decls with
+  | Nil -> acc
+  | Cons decl rest ->
+      match decl with
+      | ast.ClassDecl name _ methods _ _ ->
+          build_class_methods_map(rest, dict_set(string.after_last_dot(name), class_method_names(methods), acc))
+      | _ -> build_class_methods_map(rest, acc)
+
+fn class_method_names(methods: List ast.ClassMethodSig) -> List String =
+  match methods with
+  | Nil -> Nil
+  | Cons m rest ->
+      match m with
+      | ast.ClassMethodSig mname _ _ _ -> Cons(mname, class_method_names(rest))
+
 fn check_missing_superclass_instances(decls: List ast.Decl) -> Maybe(source.SourcePos, String) =
   check_inst_supers_go(decls, build_class_super_map(decls, dict_empty()), build_inst_key_set(decls, dict_empty()))
 

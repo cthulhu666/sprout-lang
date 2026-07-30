@@ -174,10 +174,22 @@ strictly smaller, self-contained feature. So:
   the nominal-skolem representation of §7 (a rigid `TConst`, not a marked
   `TVar`), so the escape check is a diagnostic rather than soundness code. Spec
   §5.6 (experimental).
-- **Stage 0b — constrained existentials.** Add `C a =>` on the bound variable;
-  pack the dictionary into the constructor (a Rust vtable / GHC hidden dict
-  field) and restore it on unpack. This is the *useful* form — heterogeneous
-  render/log lists, interface-with-hidden-state values, handler registries.
+- **Stage 0b — constrained existentials via `any C`. ✅ IMPLEMENTED (2026-07-30),
+  scoped to single-method, superclass-free classes.** A field `(any ToString)`
+  desugars to a fresh existential var + a `ToString` constraint; constructing
+  `Shown(v)` resolves and **packs the dictionary** (the class's method
+  function-pointers) as a hidden `'p'` heap field, and matching `Shown x` restores
+  it so `to_string(x)` dispatches through the packed witness — a Rust trait object /
+  GHC hidden dict field, built by redirecting the existing per-method-pointer
+  dict-passing path into a ctor field (no new runtime). This is the *useful* form —
+  heterogeneous render/log lists. **Scope:** only the `any C` sugar landed (the
+  explicit `exists a. <constraint> Shown a` prefix and its constraint keyword are
+  deferred — see BACKLOG); and only classes contributing exactly **one** dictionary
+  method (single method, no superclasses) are supported — the crude one-slot-per-
+  constraint packing is exact there and a richer class is rejected with a located
+  error pending the shared witness-slot enumerator (BACKLOG). Missing-instance
+  construction (`Shown(NoShow)`) is rejected at the construction site with the
+  standard "No instance" diagnostic (§8). Spec §5.6 (experimental).
 - **Stage 1 — index refinement (full GADTs).** Deferred behind the
   local-annotations gate; needs the OutsideIn-style local-equality solver and
   constraint-aware exhaustiveness. **XL, out of scope for v0/v1.**
@@ -326,13 +338,18 @@ forms share one implementation.
 - **Purely additive.** No existing program's meaning changes; ordinary ADTs are
   the no-existential-binder case.
 - **Runtime.** Unconstrained (0a): zero representation change — same tagged
-  union, indices erased. Constrained (0b): needs a **reified dictionary** stored
-  in the constructor — and that value does **not exist today**. Lowering
-  currently flattens each class into *per-method hidden parameters*
-  (`__tc_<Class>_<idx>_<method>`, `lowering.sprout:427-465`); there is no single
-  boxed dictionary to pack. So 0b must first introduce a reified dict
-  representation, then store it as a heap field — additional work beyond the
-  escape check, reflected in the estimate below.
+  union, indices erased. Constrained (0b, as implemented): **no new reified
+  dictionary struct was needed after all.** Lowering flattens each class into
+  *per-method hidden parameters* (`__tc_<Class>_<idx>_<method>`) — i.e. a dict is
+  already just a tuple of method function-pointers threaded through the code. Stage
+  0b simply **redirects those same pointers into the constructor's payload**: pack
+  stores them as extra `'p'` (traced) heap fields on `IRMakeCtor` (ctor arity/fks
+  grow by the witness count), and unpack binds them back and seeds the branch's
+  forward-map so a class method on the unpacked value dispatches through them
+  unchanged. The residual dynamic dispatch is exactly the dictionary
+  devirtualization is designed to leave behind (§5.2). Single-method scope keeps
+  the witness count a crude one-per-constraint; the general count awaits a shared
+  enumerator (BACKLOG).
 - **Bootstrap.** Any implementation touches `stdlib/compiler/` (parser + infer),
   so it carries the seed-refresh + likely 2-step-bootstrap tax and the
   smoke/bundle gates — independent of the feature's intrinsic difficulty.
@@ -342,7 +359,7 @@ forms share one implementation.
 | Scope | Size | Rationale |
 |---|---|---|
 | Stage 0a (unconstrained) | **M** | Parser/AST + pack + unpack + **escape check** (the one new mechanism); no runtime change. |
-| Stage 0b (constrained) | **L** | 0a + a **reified dictionary** value (none exists today — dicts are flattened to per-method hidden params, `lowering.sprout:427-465`) + pack/unpack of it in codegen. This is the useful form; the missing dict representation is why it is firmly L, not M+. |
+| Stage 0b (constrained, `any C`) | **M** (actual) | Estimated L for a "reified dictionary that doesn't exist"; in practice **no struct was needed** — the per-method hidden-param pointers are the dictionary, redirected into a ctor field. Real work was the pack obligation (reused the `where C a` dict-injection path), the unpack forwarding contract (skolem-keyed given marker + a stable `$ex_<var>` forwarding identity shared by infer and lowering), and the ctor arity/fks bookkeeping. Scoped to single-method classes; multi-method awaits the witness-slot enumerator. |
 | Stage 1 (index refinement) | **XL** | Local-equality solver + bidirectional checking + mandatory signatures + constraint-aware exhaustiveness; blocked on the local-annotations gate. Out of scope. |
 
 **Recommended path:** ship **0a as a spike** to validate the skolem-escape

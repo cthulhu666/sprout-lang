@@ -455,11 +455,41 @@ merging two separately-unpacked existentials are all rejected; re-packing
 **Runtime.** Zero cost — the same tagged representation as an ordinary
 constructor; the hidden type is erased.
 
-**Status (experimental).** Stage 0a covers **unconstrained** existentials only.
-The constrained form and its `any C` single-field sugar (`| Shown (any ToString)`
-≡ `| exists a. ToString a => Shown a`), which packs a class dictionary for use on
-the unpacked value, is Stage 0b and not yet implemented. Full GADTs (index
-refinement) are out of scope. Design and staging: `docs/gadts-v0.md`.
+**Constrained existentials via `any C` (experimental — Stage 0b).** A
+constructor field written `(any C)` hides a value of any type that has an instance
+of the single-method class `C`, and makes that instance available on the unpacked
+value:
+
+```sprout
+type Shown = | Shown (any ToString)     # ≡ hides a value with a ToString instance
+
+let cells = [Shown(42), Shown("hi"), Shown(true)]   # : List Shown
+
+fn render(s: Shown) -> String =
+  match s with
+  | Shown x -> to_string(x)             # dispatches on the packed witness
+```
+
+Construction resolves the class instance at the value's concrete type and **packs
+its dictionary** into the constructor; constructing with a type that has no
+instance is rejected at the construction site with the usual "No instance of `C`
+for `T`" error (§8). Matching binds the value at the abstract existential type
+(as above), but the packed dictionary is in scope, so a call to a `C` method on it
+dispatches through the packed witness — each element renders as its own concrete
+type would. **Scope:** only the `any C` sugar is provided (no explicit
+constrained-prefix form yet), and only classes with **exactly one method and no
+superclasses** are supported; a richer class is rejected with a located error.
+
+**Runtime.** The packed dictionary is the class's method function-pointer(s)
+stored as hidden constructor fields (traced by the GC); a method call on the
+unpacked value forwards them. No new runtime mechanism — the existing
+dictionary-passing path is redirected into the heap value.
+
+**Status (experimental).** Stage 0a (unconstrained) and Stage 0b (`any C`, scope
+above) are implemented. The explicit constrained-prefix form
+(`| exists a. <constraint> Shown a`), multi-method / superclass existentials, and
+full GADTs (index refinement) are out of scope for now. Design and staging:
+`docs/gadts-v0.md`.
 
 ### 5.6.1 `wrap` declaration
 

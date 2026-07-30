@@ -1,0 +1,26 @@
+# TDD — Stage 0b: constrained existentials via the `any C` sugar
+# (docs/gadts-v0.md §5/§6). RED until parser+checker+codegen support lands.
+# The payoff over 0a: the unpacked value is no longer opaque — its packed
+# `ToString` witness renders it, so a heterogeneous list maps to
+# `["42","hi","true"]`.
+
+import stdlib.test (check_eq, run_suite)
+
+type Shown = | Shown (any ToString)
+
+fn render(s: Shown) -> String =
+  match s with
+  | Shown x -> to_string(x)
+
+fn main() -> Unit !{IO} =
+  run_suite("existential_0b", [
+    check_eq("int renders", render(Shown(42)), "42"),
+    check_eq("string renders", render(Shown("hi")), "hi"),
+    check_eq("bool renders", render(Shown(true)), "true"),
+    check_eq("heterogeneous list length", list_length([Shown(42), Shown("hi"), Shown(true)]), 3),
+    check_eq(
+      "heterogeneous list renders via each element's own witness",
+      string_concat_many(list_map(render, [Shown(42), Shown("hi"), Shown(true)])),
+      "42hitrue"
+    )
+  ])

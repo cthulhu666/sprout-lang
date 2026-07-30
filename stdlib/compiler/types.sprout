@@ -74,6 +74,16 @@ export fn type_id_eq(a: TypeId, b: TypeId) -> Bool =
 export fn is_skolem_name(name: String) -> Bool =
   string.starts_with(name, "$sk")
 
+# Stage 0b: the STABLE forwarding identity for a constrained existential's packed
+# dictionary (docs/gadts-v0.md §5b/§7). The skolem `$sk<n>` that unpacking mints is
+# fresh-per-instantiation and unknown to codegen, so it cannot key the dict
+# forwarding. This name is instead derived from the pattern-bound variable — which
+# BOTH infer (seeds the @fwd marker's value) and lowering (seeds ctx_fwd) can see —
+# so the two ends agree by construction. The `$` prefix makes resolve treat it as a
+# non-concrete head (→ EvForward), and marks it reserved (no source-name collision).
+export fn existential_fwd_head(var_name: String) -> String =
+  "$ex_" ++ var_name
+
 export fn type_mentions_skolem(t: Type) -> Bool =
   match t with
   | TVar _ -> false

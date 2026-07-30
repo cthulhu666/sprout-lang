@@ -1464,8 +1464,69 @@ fn parse_type_constructor_def(tokens: Vec token.Token, i: Int) -> Result ParseEr
   do
     (exist_vars, i0) <- parse_exists_prefix(tokens, i)
     (t, i2) <- expected_ident("constructor name", tokens, i0)
-    (args, i3) <- collect_type_atoms(tokens, i2, Nil)
-    Ok((ast.TypeConstructor(token.token_text(t), list_reverse(args), exist_vars, Nil), i3))
+    (fields, any_vars, any_cons, i3) <- collect_ctor_fields(tokens, i2, Nil, Nil, Nil, 0)
+    # The `any C` sugar hoists a fresh existential var + constraint per occurrence;
+    # they extend any explicit `exists`-prefix vars. Stage 0b (docs/gadts-v0.md §6).
+    Ok((ast.TypeConstructor(token.token_text(t), fields,
+                            list_append(exist_vars, any_vars), any_cons), i3))
+
+# Collect constructor fields, recognizing the `any C` sugar (docs/gadts-v0.md §6)
+# in field position. A field `(any ToString)` (or bare `any ToString`) desugars
+# to a fresh existentially-bound var and a `ToString <var>` constraint, hoisted
+# onto the constructor; ordinary fields pass through parse_type_atom unchanged.
+# `idx` names successive fresh vars uniquely within this constructor.
+fn collect_ctor_fields(
+  tokens: Vec token.Token, i: Int,
+  fields_acc: List ast.TypeExpr, vars_acc: List String, cons_acc: List ast.TypeConstraint,
+  idx: Int
+) -> Result ParseError (List ast.TypeExpr, List String, List ast.TypeConstraint, Int) =
+  match parse_any_field(tokens, i, idx) with
+  | Just (field_te, var_name, constraint, i2) ->
+      collect_ctor_fields(tokens, i2,
+        Cons(field_te, fields_acc), Cons(var_name, vars_acc), Cons(constraint, cons_acc), idx + 1)
+  | Nothing ->
+      if starts_type_atom(tokens, i) then
+        do
+          (ty, i2) <- parse_type_atom(tokens, i)
+          collect_ctor_fields(tokens, i2, Cons(ty, fields_acc), vars_acc, cons_acc, idx)
+      else
+        Ok((list_reverse(fields_acc), list_reverse(vars_acc), list_reverse(cons_acc), i))
+
+# Detect and parse the `any C` sugar in constructor-field position. Two spellings:
+# `(any ToString)` (canonical) and bare `any ToString`. Both require an uppercase
+# class name after `any`; a lowercase follower (or no `any`) yields Nothing so the
+# caller falls back to normal atom parsing — an ordinary `any`-named type stays
+# untouched. Produces (field type, fresh var name, constraint, next index).
+fn parse_any_field(tokens: Vec token.Token, i: Int, idx: Int) -> Maybe(ast.TypeExpr, String, ast.TypeConstraint, Int) =
+  match match_symbol(tokens, i, "(") with
+  | Just (_, i1) ->
+      match any_class_at(tokens, i1) with
+      | Just (class_name, i2) ->
+          match match_symbol(tokens, i2, ")") with
+          | Just (_, i3) -> Just(build_any_field(class_name, idx, i3))
+          | Nothing -> Nothing
+      | Nothing -> Nothing
+  | Nothing ->
+      match any_class_at(tokens, i) with
+      | Just (class_name, i2) -> Just(build_any_field(class_name, idx, i2))
+      | Nothing -> Nothing
+
+# If tokens at i are `any <UppercaseClass>`, return (class_name, index-after-class).
+fn any_class_at(tokens: Vec token.Token, i: Int) -> Maybe (String, Int) =
+  match match_contextual(tokens, i, "any") with
+  | Nothing -> Nothing
+  | Just (_, i1) ->
+      match match_ident(tokens, i1) with
+      | Just (t, i2) ->
+          if is_constructor_name(token.token_text(t))
+          then Just((token.token_text(t), i2))
+          else Nothing
+      | Nothing -> Nothing
+
+fn build_any_field(class_name: String, idx: Int, next_i: Int) -> (ast.TypeExpr, String, ast.TypeConstraint, Int) =
+  let var_name = string.concat("existv", int_to_string(idx))
+  in (ast.TypeName(var_name), var_name,
+      ast.TypeConstraint(class_name, Cons(ast.TypeName(var_name), Nil)), next_i)
 
 fn collect_type_constructors(tokens: Vec token.Token, i: Int, acc: List ast.TypeConstructor) -> Result ParseError (List ast.TypeConstructor, Int) =
   match match_symbol(tokens, i, "|") with
