@@ -1,0 +1,3 @@
+# A `where` constraint whose variable is not bound by the `exists` prefix (`b` is
+# free; only `a` is bound). Rejected at parse time.
+type Foo = | exists a. Bar a where ToString b

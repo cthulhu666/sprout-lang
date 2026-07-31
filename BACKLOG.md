@@ -165,11 +165,41 @@ Legend:
         today, but it is a residual drift surface (pre-existing: lowering + resolve already had two
         copies before this landed). Re-point resolve to `types.class_with_transitive_supers` for a
         true single source.
-    - [ ] `P3` **Explicit constrained-prefix form + constraint keyword.** Only the `any C` sugar
-      landed. The explicit `| exists a. <constraint> Shown a` (needed for the multi-field
-      shared-hidden-state `Widget` case, `docs/gadts-v0.md §5.1`) is deferred, along with its
-      constraint-keyword decision: the doc "ratified" Haskell's `=>`, but every other Sprout
-      constraint site uses `where` (`class Ord a where Eq a`); pick one when this lands.
+    - [x] `P3` **Explicit constrained-prefix form + constraint keyword. LANDED 2026-07-31.**
+      Constraint keyword decided: **`where`** (not `=>`), matching every other Sprout constraint site.
+      Syntax `| exists a. Shown a where ToString a` (multiple constraints comma-separated). Parser:
+      `parse_ctor_where_clause` reuses `collect_constraints`, appended to `exist_constraints`;
+      `validate_ctor_where` rejects a `where` with no `exists` prefix or a constraint var not bound by
+      it (parse-time, blocks Haskell-style DatatypeContexts). Because item 1 (witness-slot enumerator)
+      already made the backend constraint-list-driven, the new surface was mostly parser wiring — with
+      one real backend fix: a constrained var appearing ONLY nested in a compound field
+      (`Bag (List a) where Describe a`) never seeded its unpack given (both infer's
+      `field_pattern_for_var` and lowering's `field_var_for_constraint` matched a field whose type IS
+      the bare var). Now both select the field via the shared `list_member(var, types.ftv(pt))`
+      "mentions" predicate (so their `$ex_<var>` forwarding heads still agree), and infer's new
+      `skolem_for_var_in` co-walks the declared field type against the unpacked skolem type to recover
+      the skolem from within `List $sk`. The flagship multi-field shared-state `Widget`
+      (`docs/gadts-v0.md §5.1`) already worked from Stage 0a. Tests:
+      `tests/stdlib/test_existential_prefix{,_compound}.spr`,
+      `tests/conformance/parse_error/ctor_where_{on_head_param,unbound_var}.spr`.
+      - [ ] `P4` **Ambiguous existential construction → opaque arity error.** Constructing an
+        existential whose type is undetermined — an empty compound container, `Bag([])` — leaves the
+        constraint's var a free tyvar, so no witness is injected at construction and it surfaces
+        downstream as `ast_to_ir: ctor application has wrong arity`. It IS rejected (fails loudly), but
+        the message is opaque. Inference should detect the unresolved-tyvar-head existential constraint
+        at a top-level construction (no forwarding given in scope) and emit a located "ambiguous
+        existential: cannot determine which `C` instance to pack" error instead. New sharp edge unique
+        to compound-field existentials (`any C`'s single value field is always determinate).
+      - [ ] `P4` **First-mentioning field wildcard-bound while a later field binds the var.** Both
+        passes select the FIRST field mentioning the constrained var. If that field is wildcard- or
+        non-var-bound while a *later* field binds the same var (`exists a. T (List a) a where ToString a`
+        matched `T _ x`, then `to_string(x)`), no given is seeded — infer's `seed_one_given` falls to
+        `_ -> env` and lowering's `pattern_var_name` returns `Nothing`. Consistent across both passes
+        (both skip) and fails loudly with "No instance", so not a soundness hole or silent miscompile,
+        and not a regression (the old bare-var path could not express multi-field vars at all). The
+        working sibling `T xs x` (first field var-bound) resolves both `xs`-elements and `x` (shared
+        skolem, one `$ex_xs` head). Fix: pick the first VAR-BOUND mentioning field, not merely the first
+        mentioning one — in both passes, keeping them in lockstep.
   - [ ] `P4` **Stage 1 — index refinement (full GADTs) (XL).** `IntLit : Int -> Expr Int`.
     Deferred behind the local-annotations gate (`docs/scoped-type-variables-analysis-2026-07-26.md`);
     needs an OutsideIn-style local-equality solver + bidirectional checking + constraint-aware

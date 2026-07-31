@@ -189,10 +189,21 @@ strictly smaller, self-contained feature. So:
   enumerator (`types.witness_slots_for_class` = `class_with_transitive_supers` ×
   `class_methods_for`) so they cannot drift; lowering seeds a `ctx_fwd` block per
   effective class under its own key, and infer seeds `@fwd` givens for the direct
-  class and each superclass. **Scope:** only the `any C` sugar landed (the explicit
-  `exists a. <constraint> Shown a` prefix and its constraint keyword remain deferred
-  — see BACKLOG). Missing-instance construction (`Shown(NoShow)`) is rejected at the
-  construction site with the standard "No instance" diagnostic (§8). Spec §5.6
+  class and each superclass. **Explicit `exists … where` prefix landed 2026-07-31.**
+  Both the `any C` sugar and the explicit prefix compile through one path; the
+  prefix additionally expresses a hidden var spanning **multiple fields** (shared
+  hidden state — the `Widget` case, which already worked from Stage 0a's shared
+  skolemization), **multiple constraints** on one var, and a constrained var nested
+  in a **compound field** (`Bag (List a) where Describe a`). The last needed a real
+  fix: unpack given-seeding now co-walks the declared field type against the
+  unpacked skolem type to recover the skolem even when the var only appears nested
+  (infer `skolem_for_var_in`), and both infer and lowering select the forwarding
+  field via the shared `types.ftv` "mentions" predicate so their `$ex_<var>` heads
+  agree. Missing-instance construction (`Shown(NoShow)`) is rejected at the
+  construction site with the standard "No instance" diagnostic (§8). **Known gap:**
+  an *ambiguous* existential construction whose element type is undetermined
+  (`Bag([])` — an empty container) currently surfaces as an opaque ctor-arity
+  mismatch rather than a located "ambiguous existential" error (BACKLOG). Spec §5.6
   (experimental).
 - **Stage 1 — index refinement (full GADTs).** Deferred behind the
   local-annotations gate; needs the OutsideIn-style local-equality solver and
@@ -252,22 +263,29 @@ heap field.
 
 ## 6. Syntax and semantics impact
 
-**Ratified surface syntax (2026-07-30).** The binder is a **constructor-level
-`exists` prefix**, with **`any C` as single-field sugar**:
+**Ratified surface syntax.** The binder is a **constructor-level `exists`
+prefix**, with **`any C` as single-field sugar**. The constraint clause is a
+trailing **`where`** (ratified 2026-07-31, superseding the earlier `=>` sketch) —
+consistent with every other Sprout constraint site (`class C a where Super a`,
+`fn f(x) where P a`):
 
 ```sprout
 # Explicit prefix — scopes over ALL of the constructor's fields.
 # Unconstrained (Stage 0a):
 type Boxed  = | exists a. Boxed a
-# Constrained (Stage 0b):
-type Shown  = | exists a. ToString a => Shown a
+# Constrained (Stage 0b), single class:
+type Shown  = | exists a. Shown a where ToString a
+# Multiple constraints on one hidden var:
+type Q      = | exists a. Q a where ToString a, Eq a
 # Shared hidden state — one `s` spanning several fields (needs the prefix):
 type Widget = | exists s. W s (s -> Event -> s) (s -> String)
+# The hidden var may sit nested in a compound field, not just bare:
+type Bag    = | exists a. Bag (List a) where Describe a
 
 # `any C` sugar — the ergonomic 90% case (single hidden var, single
 # constraint, single field). Lands with Stage 0b (it is inherently
 # constrained; there is no unconstrained `any`).
-type Shown2 = | Shown2 (any ToString)   #  ≡  | exists a. ToString a => Shown2 a
+type Shown2 = | Shown2 (any ToString)   #  ≡  | exists a. Shown2 a where ToString a
 ```
 
 The prefix placement (before the constructor name, not wrapping one field) is
@@ -275,6 +293,12 @@ deliberate: it is the only form that lets the hidden variable scope over
 multiple fields, which the `Widget` closure-over-state case requires. `any C`
 desugars to a fresh prefix binder, so it is strictly a shorthand — the two
 forms share one implementation.
+
+A `where` clause is valid only on an existential constructor: each constraint
+must apply a class to a variable bound by the `exists` prefix. A `where` with no
+prefix, or a constraint on a non-existential variable, is a parse error — this
+keeps the form from becoming a class constraint on a head parameter (Haskell's
+deprecated DatatypeContexts).
 
 - **Syntax / AST.** `TypeConstructor String (List TypeExpr)` (`ast.sprout:99`)
   gains an optional existential-binder payload: the bound variables

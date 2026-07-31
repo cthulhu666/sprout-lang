@@ -3096,9 +3096,11 @@ fn seed_existential_givens(
             seed_one_given(var, class_name, param_types, fields, subst, env))
 
 fn seed_one_given(var: String, class_name: String, param_types: List types.Type, fields: List ast.Pattern, subst: Dict types.Type, env: Dict types.Scheme) -> Dict types.Scheme =
-  match field_pattern_for_var(param_types, fields, var) with
-  | Just (ast.VarPattern vname _) ->
-      seed_from_skolem(class_name, vname, unifier.apply_subst(subst, types.TVar(types.tyvar_id(vname))), env)
+  match field_and_declared_for_var(param_types, fields, var) with
+  | Just (ast.VarPattern vname _, declared_pt) ->
+      match skolem_for_var_in(declared_pt, unifier.apply_subst(subst, types.TVar(types.tyvar_id(vname))), var) with
+      | Just sk -> seed_given_for_skolem(class_name, vname, sk, env)
+      | Nothing -> env
   | _ -> env
 
 # Key the given marker by the SKOLEM (so a method call on the unpacked value, whose
@@ -3106,34 +3108,60 @@ fn seed_one_given(var: String, class_name: String, param_types: List types.Type,
 # `$ex_<var>` as the value — that becomes the emitted TDict's head, and lowering
 # re-derives the identical name from the pattern var to seed ctx_fwd. See
 # types.existential_fwd_head.
-fn seed_from_skolem(class_name: String, vname: String, t: types.Type, env: Dict types.Scheme) -> Dict types.Scheme =
-  match skolem_name_of_type(t) with
-  | Just sk ->
-      # Seed the direct `@fwd:sk:class` given, then layer superclass givens
-      # (`@fwd:sk:super` for each `@super:class:*`) — a multi-method/superclass
-      # existential must forward its inherited methods too, exactly as a
-      # `where C a` function does via seed_fwd_with_supers. The stable
-      # `$ex_<var>` head is passed as the marker value so lowering's ctx_fwd,
-      # keyed by the same head, agrees for every effective class. class_name is
-      # already qualified (bundler.qualify_ctor_args qualifies exist_constraints),
-      # so it matches resolve_skolem_given's lookup off the class marker.
-      seed_superclass_fwd_markers(class_name, sk, types.existential_fwd_head(vname),
-        dict_set("@fwd:" ++ sk ++ ":" ++ class_name,
-                 types.mono(types.TConst(types.type_id(types.existential_fwd_head(vname)))), env))
-  | Nothing -> env
+fn seed_given_for_skolem(class_name: String, vname: String, sk: String, env: Dict types.Scheme) -> Dict types.Scheme =
+  # Seed the direct `@fwd:sk:class` given, then layer superclass givens
+  # (`@fwd:sk:super` for each `@super:class:*`) — a multi-method/superclass
+  # existential must forward its inherited methods too, exactly as a
+  # `where C a` function does via seed_fwd_with_supers. The stable
+  # `$ex_<var>` head is passed as the marker value so lowering's ctx_fwd,
+  # keyed by the same head, agrees for every effective class. class_name is
+  # already qualified (bundler.qualify_ctor_args qualifies exist_constraints),
+  # so it matches resolve_skolem_given's lookup off the class marker.
+  seed_superclass_fwd_markers(class_name, sk, types.existential_fwd_head(vname),
+    dict_set("@fwd:" ++ sk ++ ":" ++ class_name,
+             types.mono(types.TConst(types.type_id(types.existential_fwd_head(vname)))), env))
 
-# Walk the ctor's param types alongside the pattern fields, returning the field
-# pattern at the position whose declared type is the type var `var`.
-fn field_pattern_for_var(param_types: List types.Type, fields: List ast.Pattern, var: String) -> Maybe ast.Pattern =
+# Find the first field whose DECLARED type MENTIONS the existential var, returning
+# its pattern together with that declared type. Uses the shared `types.ftv`
+# predicate so this and lowering's field_var_for_constraint select the identical
+# field — the `$ex_<vname>` forwarding head must agree across the two passes. A
+# constrained var may sit bare (`Shown a`), in a function (`s -> String`), or
+# nested in a compound field (`Bag (List a)`); all three mention the var.
+fn field_and_declared_for_var(param_types: List types.Type, fields: List ast.Pattern, var: String) -> Maybe(ast.Pattern, types.Type) =
   match (param_types, fields) with
   | (Cons pt pts, Cons f fs) ->
-      if type_is_var_named(pt, var) then Just(f) else field_pattern_for_var(pts, fs, var)
+      if list_member(var, types.ftv(pt)) then Just((f, pt))
+      else field_and_declared_for_var(pts, fs, var)
   | _ -> Nothing
 
-fn type_is_var_named(t: types.Type, var: String) -> Bool =
-  match t with
-  | types.TVar n -> types.tyvar_identity(n) == var
-  | _ -> false
+# Locate the skolem the existential var `var` was instantiated to, by co-walking
+# the DECLARED field type (which mentions `var`) against the field's ACTUAL type
+# after unpack (the skolem sits in the same structural position). The bare case
+# (declared `TVar var`, actual `$sk`) is the leaf; `List a`/`List $sk`,
+# `a -> T`/`$sk -> T`, and tuples recurse. Co-walking by var name disambiguates a
+# field mentioning several vars (`Pair a b` → `$ska`/`$skb`).
+fn skolem_for_var_in(declared: types.Type, actual: types.Type, var: String) -> Maybe String =
+  match (declared, actual) with
+  | (types.TVar n, _) ->
+      if types.tyvar_identity(n) == var then skolem_name_of_type(actual) else Nothing
+  | (types.TApp d1 d2, types.TApp a1 a2) ->
+      match skolem_for_var_in(d1, a1, var) with
+      | Just sk -> Just(sk)
+      | Nothing -> skolem_for_var_in(d2, a2, var)
+  | (types.TFunc d1 dr _, types.TFunc a1 ar _) ->
+      match skolem_for_var_in(d1, a1, var) with
+      | Just sk -> Just(sk)
+      | Nothing -> skolem_for_var_in(dr, ar, var)
+  | (types.TTuple d_items, types.TTuple a_items) -> skolem_for_var_in_list(d_items, a_items, var)
+  | _ -> Nothing
+
+fn skolem_for_var_in_list(d_items: List types.Type, a_items: List types.Type, var: String) -> Maybe String =
+  match (d_items, a_items) with
+  | (Cons d dt, Cons a at) ->
+      match skolem_for_var_in(d, a, var) with
+      | Just sk -> Just(sk)
+      | Nothing -> skolem_for_var_in_list(dt, at, var)
+  | _ -> Nothing
 
 fn skolem_name_of_type(t: types.Type) -> Maybe String =
   match t with

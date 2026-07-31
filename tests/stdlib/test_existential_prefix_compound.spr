@@ -1,0 +1,51 @@
+# Explicit-prefix existentials, COMPOUND-FIELD case (docs/gadts-v0.md §6).
+# A constrained existential var that appears ONLY nested inside a compound field
+# (`List a`), never as a bare field. `any C` could never express this (it is always
+# a bare field), so this is genuinely new surface: the unpack must seed the packed
+# witness given for the skolem even though no field's type IS the bare var.
+#
+# `Describe` has TWO methods with DISTINCT return types (String vs Int): a
+# mis-mapped witness slot produces observably wrong output rather than a crash. We
+# exercise BOTH dictionary-consumption paths on the unpacked element type:
+#   - first-class / eta:  `list_map(dname, xs)`   (the s3 `__eta_unresolved` path)
+#   - direct application: `dname(h)` / `dsize(h)`  (the s6 "No instance" path)
+
+import stdlib.test (check_eq, run_suite)
+
+class Describe a {
+  fn dname(v: a) -> String
+  fn dsize(v: a) -> Int
+}
+
+instance Describe Int {
+  fn dname(v: Int) -> String = "int"
+  fn dsize(v: Int) -> Int = v
+}
+
+instance Describe String {
+  fn dname(v: String) -> String = "str"
+  fn dsize(v: String) -> Int = str_len(v)
+}
+
+type Bag = | exists a. Bag (List a) where Describe a
+
+# First-class: the method is passed as a value to list_map.
+fn bag_names(b: Bag) -> String =
+  match b with
+  | Bag xs -> string_concat_many(list_map(dname, xs))
+
+# Direct application on an element extracted from the compound field.
+fn bag_head(b: Bag) -> String =
+  match b with
+  | Bag xs ->
+      match xs with
+      | Nil -> "empty"
+      | Cons h _ -> `${dname(h)}=${int_to_string(dsize(h))}`
+
+fn main() -> Unit !{IO} =
+  run_suite("existential_prefix_compound", [
+    check_eq("first-class over Int elements", bag_names(Bag([1, 2, 3])), "intintint"),
+    check_eq("first-class over String elements", bag_names(Bag(["a", "bb"])), "strstr"),
+    check_eq("direct apply on Int element", bag_head(Bag([9, 8])), "int=9"),
+    check_eq("direct apply on String element", bag_head(Bag(["ab", "c"])), "str=2")
+  ])

@@ -1,0 +1,58 @@
+# Explicit `exists <vars>. <Ctor> <fields> where <constraints>` prefix
+# (docs/gadts-v0.md §6). The `any C` sugar is the single-bare-field 90% case; the
+# explicit prefix additionally expresses: a var spanning MULTIPLE fields (shared
+# hidden state), MULTIPLE constraints on one var, and — see
+# test_existential_prefix_compound.spr — a constrained var nested in a compound
+# field. `where` (not `=>`) keeps the constraint keyword consistent with every
+# other Sprout constraint site (`class C a where Super a`, `fn f(x) where P a`).
+
+import stdlib.test (check_eq, run_suite)
+
+# --- Flagship: shared hidden state. One existential `s` spans all three fields;
+# each Widget closes over private state of its own type, touched only through the
+# shared interface. UNCONSTRAINED — no `where`. ---
+type Widget = | exists s. W s (s -> s) (s -> String)
+
+fn inc(n: Int) -> Int = n + 1
+fn show_int(n: Int) -> String = int_to_string(n)
+fn bang(str: String) -> String = str ++ "!"
+fn keep(str: String) -> String = str
+
+fn step_and_render(w: Widget) -> String =
+  match w with
+  | W st upd ren -> ren(upd(st))
+
+# --- Explicit single constraint (≡ the `any ToString` sugar, spelled out). ---
+type Shown = | exists a. Shown a where ToString a
+
+fn show_it(s: Shown) -> String =
+  match s with
+  | Shown x -> to_string(x)
+
+# --- Multiple constraints on ONE existential var. ---
+type Q = | exists a. Q a where ToString a, Eq a
+
+fn q_desc(q: Q) -> String =
+  match q with
+  | Q x -> if eq(x, x) then to_string(x) else "?"
+
+# --- Constrained var spanning multiple fields (bare + function-typed). ---
+type Cell = | exists s. Cell s (s -> String) where ToString s
+
+fn cell_desc(c: Cell) -> String =
+  match c with
+  | Cell st f -> `${to_string(st)}/${f(st)}`
+
+fn twice(n: Int) -> String = int_to_string(n + n)
+
+fn main() -> Unit !{IO} =
+  let counter = W(0, inc, show_int)
+  in let field = W("a", bang, keep)
+  in run_suite("existential_prefix", [
+    check_eq("shared-state widget (Int)", step_and_render(counter), "1"),
+    check_eq("shared-state widget (String)", step_and_render(field), "a!"),
+    check_eq("explicit single constraint (Int)", show_it(Shown(42)), "42"),
+    check_eq("explicit single constraint (String)", show_it(Shown("hi")), "hi"),
+    check_eq("two constraints on one var", q_desc(Q(7)), "7"),
+    check_eq("constrained var across fields", cell_desc(Cell(21, twice)), "21/42")
+  ])
