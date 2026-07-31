@@ -980,6 +980,32 @@ carries one instance constraint per type parameter, e.g. `instance Eq (Box a)
 where Eq a { ... }`.  This is conservative — phantom type parameters get a
 constraint they don't need; refining this is a future improvement.
 
+**Records** support `deriving (Eq, Ord, ToString)`.  The clause is **trailing**,
+after the field list (a record's `= (fields)` right-hand side is a self-contained
+parenthesised expression, unlike an ADT where `deriving` precedes `=`):
+
+```sprout
+type Point = (x: Int, y: Int) deriving (Eq, Ord, ToString)
+type Box a = (val: a, tag: String) deriving (Eq, Ord, ToString)
+```
+
+A record is a single product (no sum, no tag), so the synthesized bodies are the
+ADT same-constructor logic accessing fields by name:
+
+- `Eq` — conjunction of per-field `eq` in declaration order (`true` for a
+  field-less record).
+- `Ord` — lexicographic per-field `compare` in declaration order (`0` for a
+  field-less record).
+- `ToString` — `"Name(f0 = v0, f1 = v1, ...)"`, mirroring record construction
+  syntax so the output is (modulo unquoted `String` fields) valid source.
+
+`Enum` cannot be derived for a record — it requires a nullary-constructor ADT
+(the ordinal↔constructor bijection), and a record is a single field-bearing
+product.  `deriving (Enum)` on a record is an eager error at the deriving site.
+Parametric records gain the same per-type-parameter constraints as parametric
+ADTs (`type Box a = (val: a, ...) deriving (Eq)` → `instance Eq (Box a) where Eq
+a`).
+
 Serialization (`Serialize`/`Deserialize`) and hashing (`Hash`) are intentionally
 **not** in v1.  Both require design decisions the language hasn't made yet —
 serialization needs a format-agnostic visitor abstraction (serde-style) rather
@@ -990,8 +1016,8 @@ dicts.  Both are tracked in `BACKLOG.md`.
 
 - Multiple `deriving (...)` clauses on the same type declaration are not
   supported (use one clause with all classes: `deriving (Eq, Ord, ToString)`).
-- Records (`record`) do not support `deriving`; v1 targets `type` declarations
-  only.
+- Records support `deriving (Eq, Ord, ToString)` but **not** `Enum` (a record is
+  a single product, not an enumeration — see Records below).
 
 ### Error conditions
 

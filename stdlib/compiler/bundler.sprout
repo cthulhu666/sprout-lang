@@ -565,7 +565,7 @@ fn add_decl_to_symbols(mod_name: String, exported: List String, ctor_types: List
       add_value_to_symbols(mod_name, name, str_list_member(name, exported), acc)
   | ast.TypeDecl name _ ctors _ _ ->
       add_type_to_symbols(mod_name, name, ctors, exported, ctor_types, acc)
-  | ast.RecordDecl name _ _ _ ->
+  | ast.RecordDecl name _ _ _ _ ->
       add_record_to_symbols(mod_name, name, str_list_member(name, exported), acc)
   | ast.ClassDecl name _ methods _ _ ->
       add_class_to_symbols(mod_name, name, methods, str_list_member(name, exported), acc)
@@ -1007,11 +1007,12 @@ fn qualify_decl(ctx: ResolveCtx, decl: ast.Decl) -> ast.Decl =
         qualify_ctor_args(ctx, ctors),
         deriving_classes,
         pos)
-  | ast.RecordDecl name type_params fields pos ->
+  | ast.RecordDecl name type_params fields deriving_classes pos ->
       ast.RecordDecl(
         dict_get_or(name, ctx_type_locals(ctx), name),
         type_params,
         qualify_record_field_decls(ctx, fields),
+        deriving_classes,
         pos)
   | ast.LetDecl name body anno pos ->
       ast.LetDecl(
@@ -1129,7 +1130,7 @@ fn decl_orig_name(decl: ast.Decl) -> String =
   match decl with
   | ast.FnDecl name _ _ _ _ _ _ -> name
   | ast.TypeDecl name _ _ _ _ -> name
-  | ast.RecordDecl name _ _ _ -> name
+  | ast.RecordDecl name _ _ _ _ -> name
   | ast.LetDecl name _ _ _ -> name
   | ast.ClassDecl name _ _ _ _ -> name
   | ast.InstanceDecl constraint _ _ _ ->

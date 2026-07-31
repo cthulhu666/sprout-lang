@@ -1,0 +1,45 @@
+import stdlib.test (check_true, check_eq, run_suite)
+
+# Regression: a HAND-WRITTEN parametric record instance must forward its
+# constraint dict. Before the fix, record field access typed `left.val` as a
+# fresh var decoupled from the instance's `a` (infer.sprout used `instantiate`,
+# which renamed `Box.a` so the type-arg substitution could no longer reach it),
+# so `eq(left.val, right.val)` dispatched through a null `Eq a` dict at runtime.
+# This exercises the inference fix DIRECTLY — no `deriving` involved — so a
+# future change to the deriving synthesizer cannot mask a reintroduced bug.
+# See docs/deriving-records-v0.md §Root-cause fix.
+
+type Box a = (val: a, tag: String)
+
+instance Eq (Box a) where Eq a {
+  fn eq(left: Box a, right: Box a) -> Bool =
+    eq(left.val, right.val) && eq(left.tag, right.tag)
+}
+
+instance Ord (Box a) where Ord a {
+  fn compare(left: Box a, right: Box a) -> Int =
+    match compare(left.val, right.val) with
+    | 0 -> compare(left.tag, right.tag)
+    | c -> c
+}
+
+instance ToString (Box a) where ToString a {
+  fn to_string(value: Box a) -> String =
+    "Box(val = " ++ to_string(value.val) ++ ", tag = " ++ value.tag ++ ")"
+}
+
+fn not(b: Bool) -> Bool = if b then false else true
+
+fn main() -> Unit !{IO} =
+  run_suite("record_parametric_instance", [
+    # Eq: dict for `Eq a` (a = Int) must forward to the inner field compare.
+    check_true("eq self", eq(Box(val = 5, tag = "a"), Box(val = 5, tag = "a"))),
+    check_true("neq on val", not(eq(Box(val = 5, tag = "a"), Box(val = 6, tag = "a")))),
+    check_true("neq on tag", not(eq(Box(val = 5, tag = "a"), Box(val = 5, tag = "b")))),
+    # Ord: same forwarding through `Ord a`.
+    check_eq("compare self is 0", compare(Box(val = 5, tag = "a"), Box(val = 5, tag = "a")), 0),
+    check_true("compare val dominates", compare(Box(val = 1, tag = "z"), Box(val = 2, tag = "a")) < 0),
+    check_true("compare tag breaks tie", compare(Box(val = 5, tag = "a"), Box(val = 5, tag = "b")) < 0),
+    # ToString: `ToString a` forwarded to the inner value render.
+    check_eq("to_string", to_string(Box(val = 7, tag = "hi")), "Box(val = 7, tag = hi)")
+  ])

@@ -1,0 +1,70 @@
+import stdlib.test (check_eq, check_true, run_suite)
+
+# End-to-end test for `deriving (Eq, Ord, ToString)` on record declarations.
+# A record is a single product (no sum), so the synthesized instances are the
+# ADT same-constructor logic standalone, accessing fields by name:
+#   Eq       -> conjunction of per-field `eq`, in declaration order
+#   Ord      -> lexicographic per-field `compare` (Int), in declaration order
+#   ToString -> "Name(f0 = v0, f1 = v1, ...)" — mirrors construction syntax
+# `deriving` sits trailing, after the field list: `... ) deriving (Eq, ...)`.
+
+type Point = (x: Int, y: Int) deriving (Eq, Ord, ToString)
+
+# Single-field record: exercises the fold terminal cases — Eq with no `&&`,
+# ToString with no `, ` separator, Ord with no nesting.
+type Wrap = (v: Int) deriving (Eq, Ord, ToString)
+
+# Nested derived record: `eq`/`compare`/`to_string` on a `Point` field must
+# dispatch to Point's OWN synthesized instance (declaration-order dependent).
+type Line = (from: Point, to: Point) deriving (Eq, Ord, ToString)
+
+# Parametric record: each derived instance gains a per-type-param constraint
+# (`instance Eq (Box a) where Eq a`, etc.), mirroring the ADT parametric path.
+type Box a = (val: a, tag: String) deriving (Eq, Ord, ToString)
+
+fn not(b: Bool) -> Bool = if b then false else true
+
+fn main() -> Unit !{IO} =
+  run_suite("deriving_records", [
+    # --- Eq: structural, field-by-field ---
+    check_true("Point eq self", eq(Point(x = 1, y = 2), Point(x = 1, y = 2))),
+    check_true("Point neq on x", not(eq(Point(x = 1, y = 2), Point(x = 9, y = 2)))),
+    check_true("Point neq on y", not(eq(Point(x = 1, y = 2), Point(x = 1, y = 9)))),
+
+    # --- Ord: lexicographic, declaration order (x dominates, y breaks ties) ---
+    check_eq("Point compare self is 0", compare(Point(x = 1, y = 2), Point(x = 1, y = 2)), 0),
+    check_true("Point x dominates", compare(Point(x = 1, y = 9), Point(x = 2, y = 0)) < 0),
+    check_true("Point y breaks tie lt", compare(Point(x = 1, y = 1), Point(x = 1, y = 2)) < 0),
+    check_true("Point y breaks tie gt", compare(Point(x = 1, y = 3), Point(x = 1, y = 2)) > 0),
+
+    # --- ToString: named fields, mirrors construction syntax ---
+    check_eq("Point to_string", to_string(Point(x = 3, y = 4)), "Point(x = 3, y = 4)"),
+
+    # --- Single-field record: fold terminal cases ---
+    check_true("Wrap eq self", eq(Wrap(v = 7), Wrap(v = 7))),
+    check_true("Wrap neq", not(eq(Wrap(v = 7), Wrap(v = 8)))),
+    check_true("Wrap compare lt", compare(Wrap(v = 1), Wrap(v = 2)) < 0),
+    check_eq("Wrap compare self is 0", compare(Wrap(v = 5), Wrap(v = 5)), 0),
+    check_eq("Wrap to_string (no separator)", to_string(Wrap(v = 9)), "Wrap(v = 9)"),
+
+    # --- Nested derived record: dispatches to Point's synthesized instance ---
+    check_true("Line eq self",
+      eq(Line(from = Point(x = 1, y = 2), to = Point(x = 3, y = 4)),
+         Line(from = Point(x = 1, y = 2), to = Point(x = 3, y = 4)))),
+    check_true("Line neq on nested field",
+      not(eq(Line(from = Point(x = 1, y = 2), to = Point(x = 3, y = 4)),
+             Line(from = Point(x = 1, y = 2), to = Point(x = 3, y = 9))))),
+    check_true("Line compare nested first-field dominates",
+      compare(Line(from = Point(x = 1, y = 9), to = Point(x = 0, y = 0)),
+              Line(from = Point(x = 2, y = 0), to = Point(x = 0, y = 0))) < 0),
+    check_eq("Line to_string (nested round-trip)",
+      to_string(Line(from = Point(x = 1, y = 2), to = Point(x = 3, y = 4))),
+      "Line(from = Point(x = 1, y = 2), to = Point(x = 3, y = 4))"),
+
+    # --- Parametric record: Eq/Ord/ToString all thread the field-class constraint ---
+    check_true("Box eq self", eq(Box(val = 5, tag = "a"), Box(val = 5, tag = "a"))),
+    check_true("Box neq on val", not(eq(Box(val = 5, tag = "a"), Box(val = 6, tag = "a")))),
+    check_true("Box neq on tag", not(eq(Box(val = 5, tag = "a"), Box(val = 5, tag = "b")))),
+    check_true("Box compare val dominates", compare(Box(val = 1, tag = "z"), Box(val = 2, tag = "a")) < 0),
+    check_eq("Box to_string (string field unquoted)", to_string(Box(val = 5, tag = "hi")), "Box(val = 5, tag = hi)")
+  ])
