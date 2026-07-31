@@ -1,0 +1,67 @@
+module tests.existential_superclass_module
+
+# Regression: a SUPERCLASS constrained existential in a file WITH a `module`
+# header. This is the untested intersection of two features:
+#   - test_existential_superclass.spr covers superclasses but is bare-file (no
+#     qualification).
+#   - test_existential_module_qualified.spr covers a module-qualified class but it
+#     is multi-method with NO superclass.
+# Here both apply: `Labeled a where Tag a` in a module, so the class/super names are
+# module-qualified. The witness-slot count (ast_to_ir) rebuilds class_order/super_map
+# from the retained ClassDecls; class_with_transitive_supers looks up super_map VALUES
+# (qualified via bundler.qualify_constraints -> qualify_type_name) in class_order KEYS
+# (qualified via ctx_class_locals). If those two qualifiers disagreed for a local
+# superclass, the inherited `tag` slot would be missing -> ctor-arity mismatch. This
+# guards that they agree on the existential path.
+
+import stdlib.test (check_eq, run_suite)
+
+class Tag a {
+  fn tag(v: a) -> String
+}
+
+class Labeled a where Tag a {
+  fn label(v: a) -> String
+}
+
+instance Tag Int {
+  fn tag(v: Int) -> String = "n"
+}
+
+instance Labeled Int {
+  fn label(v: Int) -> String = "num"
+}
+
+instance Tag String {
+  fn tag(v: String) -> String = "s"
+}
+
+instance Labeled String {
+  fn label(v: String) -> String = "str"
+}
+
+type LBox = | LBox (any Labeled)
+
+fn lbox_label(b: LBox) -> String =
+  match b with
+  | LBox x -> label(x)
+
+fn lbox_tag(b: LBox) -> String =
+  match b with
+  | LBox x -> tag(x)
+
+# Direct method AND inherited superclass method on ONE unpacked value — exercises
+# repeated qualified-key `@fwd` lookups across two effective classes on one skolem.
+fn lbox_both(b: LBox) -> String =
+  match b with
+  | LBox x -> `${label(x)}/${tag(x)}`
+
+fn main() -> Unit !{IO} =
+  run_suite("existential_superclass_module", [
+    check_eq("direct method label in module (int)", lbox_label(LBox(42)), "num"),
+    check_eq("superclass method tag in module (int)", lbox_tag(LBox(42)), "n"),
+    check_eq("direct method label in module (string)", lbox_label(LBox("x")), "str"),
+    check_eq("superclass method tag in module (string)", lbox_tag(LBox("x")), "s"),
+    check_eq("direct + superclass on one value in module (int)", lbox_both(LBox(42)), "num/n"),
+    check_eq("direct + superclass on one value in module (string)", lbox_both(LBox("x")), "str/s")
+  ])
