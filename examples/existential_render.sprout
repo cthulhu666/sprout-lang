@@ -9,6 +9,10 @@ module examples.existential_render
 # user-defined type side by side — each rendered through its OWN packed witness.
 # Neither a closed sum nor a struct-of-arrays can express this: the element types
 # differ and the set is open to any future `ToString` instance.
+#
+# `(any C)` is sugar for the explicit constrained prefix — this line is exactly
+# `| exists a. Cell a where ToString a`. Reach for the prefix when the hidden type
+# must span several fields or carry several constraints (see existential_widget).
 
 type Cell = | Cell (any ToString)
 

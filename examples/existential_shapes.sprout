@@ -9,6 +9,8 @@ module examples.existential_shapes
 # a rectangle, and a square side by side — and each dispatches BOTH methods through
 # its own packed witnesses. A single-method box (e.g. `any ToString`) could not
 # express this; the box carries the whole interface, not one function.
+#
+# `Drawable (any Shape)` below is sugar for `| exists a. Drawable a where Shape a`.
 
 class Shape a {
   fn area(s: a) -> Int

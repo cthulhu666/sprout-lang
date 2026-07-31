@@ -54,7 +54,9 @@ Running with `USER="  Ada  "` prints `Hello, Ada`. More in [`examples/`](./examp
 
 **Experimental slices** (implemented, not yet normative v0): the module system,
 typeclasses, records (`type User = { name: String }`), integer ranges (`a..b`),
-`Char`/Unicode text, `stdlib.regex`, `do` notation for `Maybe`/`Result`/`IO`, and
+`Char`/Unicode text, `stdlib.regex`, `do` notation for `Maybe`/`Result`/`IO`,
+existential constructors (`| exists a. Cell a where ToString a`, and its `(any C)`
+sugar — trait objects / heterogeneous collections), and
 `#@unstable`/`#@wip`-style declaration annotations. See the design drafts below.
 
 ## Documentation

@@ -234,6 +234,27 @@ wrap StdlibRoot = String
 fn compile(path: FilePath, root: StdlibRoot) -> ...   # the arguments can't be swapped
 ```
 
+## Hide a type behind an interface with existentials
+
+When a collection must hold values of *different* types touched only through a
+shared interface — a heterogeneous "render these" list, a registry of handlers, an
+interface value that closes over private state — box them with an existential.
+`(any C)` hides one value that has a `C` instance; the explicit `exists … where`
+prefix generalizes it to a hidden type that spans several fields or carries several
+constraints. Unpacking dispatches through the witness packed at construction, so
+each element behaves as its own concrete type would.
+
+```sprout
+type Cell   = | Cell (any ToString)                # ≡ | exists a. Cell a where ToString a
+let row     = [Cell(42), Cell("hi"), Cell(true)]   # one flat list, mixed element types
+type Widget = | exists s. Widget s (s -> s) (s -> String)  # one hidden `s` across fields
+```
+
+Reach for this only when the types genuinely differ, cannot be restructured into
+per-type columns (struct-of-arrays), and the set is open to new instances. See
+`examples/existential_render.sprout` and `examples/existential_widget.sprout`.
+(Experimental — spec §5.6, design in `docs/gadts-v0.md`.)
+
 ## Keep effects at the edges
 
 Leave the functional core pure; carry `!{IO}` only where a function actually does
