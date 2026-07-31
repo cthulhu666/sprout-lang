@@ -30,8 +30,9 @@ tuple-returning function and immediately destructure — is pervasive: **14** tu
 in `stdlib`+`loam`, **123** in the self-hosted compiler (the `translate_*` passes thread
 `(blocks, lbl, ops, val, idx)` tuples and match them everywhere), so this optimization speeds up
 Sprout compiling *anything*, bootstrap included. The clinching evidence it is not demo-specific is in
-`loam/hydrology.sprout`: `dir_delta(d) -> (Int, Int)` exists but the drainage solve **cannot use it in
-its hot loop** — its own comment records that returning "a fresh `(Int, Int)` tuple there allocated
+`loam/hydrology.sprout` (the rivers/loam engine has since been extracted to the uncharted-suns
+project — the benchmark lives there now): `dir_delta(d) -> (Int, Int)` exists but the drainage
+solve **cannot use it in its hot loop** — its own comment records that returning "a fresh `(Int, Int)` tuple there allocated
 ~tens of millions of pairs per run (a GC firestorm)," so it was **hand-split into scalar `dir_dr` /
 `dir_dc`**, duplicating the whole 8-direction table. That hand-unboxing is exactly the workaround this
 optimization removes the *need* for — the demo is the measurement, not the scope.
@@ -258,8 +259,9 @@ no alloc/loads; boxed `@main.swap_pair` wrapper retained.
    slots for a heap tuple, extend if it only roots `val`.
 
 **Verify, in order:** (a) `--emit-ir 07_tuple_cpr.spr` → `use_pair` has the worker call + `extractvalue`
-and no `alloc_tuple_blob`; wrapper still boxes. (b) run → `7`. (c) `just test` + `just test-loam` green
-(semantics-neutral, no expectation edits). (d) reseed: `rm build/compile_driver_bin_stage1 && just
+and no `alloc_tuple_blob`; wrapper still boxes. (b) run → `7`. (c) `just test` green
+(semantics-neutral, no expectation edits; the loam/rivers benchmark this targets now lives in
+uncharted-suns — validate it via `just test-loam` there). (d) reseed: `rm build/compile_driver_bin_stage1 && just
 refresh-seed` (compiler uses tuples → real seed change, **not** `seed-fp-ack`) + `verify-bootstrap-
 fixed-point`. (e) `SPROUT_GC_STRESS=1 just test` (unboxing correctness gate). (f) compiler-source DoD:
 smoke-shapes, bundle-smoke, example canary. Then the heap-field + width-3 increments per §4.

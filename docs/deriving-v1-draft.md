@@ -5,7 +5,8 @@
 
 **Post-v1 addition (2026-07-24): `Enum`.** A fourth derivable class, greenfield
 (never part of the reverted Serialize/Deserialize scope), added to kill
-hand-written constructor↔Int tag boilerplate (surfaced by `loam.terrain`).
+hand-written constructor↔Int tag boilerplate (surfaced by `loam.terrain`, since
+extracted to the uncharted-suns project).
 Restricted to nullary-only ADTs; synthesizes `ordinal : a -> Int` and
 `from_ordinal : Int -> Maybe a` with declaration order as the source of truth.
 `from_ordinal` is return-type-dispatched (the class variable is only in the
