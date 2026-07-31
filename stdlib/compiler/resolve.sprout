@@ -194,8 +194,9 @@ fn dict_has(key: String, d: Dict Bool) -> Bool =
 # Resolve one constraint into the Evidence tree lowering will consume.  A single
 # TDict lowers to one witness block per *effective class* — the constraint's class
 # followed by its transitive superclasses — so produce_evidence expands supers the
-# same way lowering's resolve_tdict does (class_with_transitive_supers, verbatim
-# order + dedup) and wraps the per-class blocks in EvClasses.  Each block mirrors
+# same way lowering's resolve_tdict does, via the shared
+# types.class_with_transitive_supers (one source of order + dedup), and wraps the
+# per-class blocks in EvClasses.  Each block mirrors
 # lowering's resolve_tdict_with_key decision order exactly:
 #   * key in fwd_keys           → EvForward key   (the enclosing function forwards
 #                                  this exact constraint as a hidden param — checked
@@ -222,7 +223,7 @@ fn produce_evidence(c: ast.TypeConstraint, fwd_keys: Dict Bool, tables: Tables) 
           typed_ast.EvClasses(
             list_map(
               \eff_class -> produce_one_class(eff_class, head_arg, type_args, fwd_keys, tables),
-              class_with_transitive_supers(class_name, tables_super(tables))))
+              types.class_with_transitive_supers(class_name, tables_super(tables))))
 
 # One effective-class block. The key is computed exactly as lowering's
 # resolve_tdict_for_classes does: constraint_key_str(after_last_dot(eff_class), args).
@@ -290,7 +291,7 @@ fn add_fwd_keys(constraints: List ast.TypeConstraint, super_map: Dict (List Stri
       match c with
       | ast.TypeConstraint class_name type_args ->
           add_fwd_keys(rest, super_map,
-            add_eff_keys(class_with_transitive_supers(class_name, super_map), type_args, acc))
+            add_eff_keys(types.class_with_transitive_supers(class_name, super_map), type_args, acc))
 
 fn add_eff_keys(effs: List String, type_args: List ast.TypeExpr, acc: Dict Bool) -> Dict Bool =
   match effs with
@@ -344,32 +345,11 @@ fn add_class_param(class_name: String, params: List String, acc: Dict String) ->
   | Nil -> acc
   | [p | _] -> dict_set(class_name, p, acc)
 
-# Class itself followed by all transitive superclasses in DFS order, deduplicated.
-fn class_with_transitive_supers(class_name: String, super_map: Dict (List String)) -> List String =
-  list_reverse(collect_supers_dfs(Cons(class_name, Nil), super_map, Nil))
-
-fn collect_supers_dfs(stack: List String, super_map: Dict (List String), visited: List String) -> List String =
-  match stack with
-  | Nil -> visited
-  | Cons name rest ->
-      if list_str_member(name, visited)
-      then collect_supers_dfs(rest, super_map, visited)
-      else collect_supers_dfs(prepend_supers(name, super_map, rest), super_map, Cons(name, visited))
-
-fn prepend_supers(name: String, super_map: Dict (List String), rest: List String) -> List String =
-  match dict_get(name, super_map) with
-  | Nothing -> rest
-  | Just supers -> append_str_list(supers, rest)
-
-fn append_str_list(xs: List String, ys: List String) -> List String =
-  match xs with
-  | Nil -> ys
-  | Cons h t -> Cons(h, append_str_list(t, ys))
-
-fn list_str_member(x: String, xs: List String) -> Bool =
-  match xs with
-  | Nil -> false
-  | Cons h t -> if h == x then true else list_str_member(x, t)
+# Transitive-superclass DFS order now comes from the single shared source
+# types.class_with_transitive_supers (the same one ast_to_ir's existential
+# witness-slot count and lowering's unpack use), so resolve's PACK order and that
+# UNPACK order cannot drift apart — a divergence would mismap packed witnesses to
+# the wrong methods. See docs/gadts-v0.md §5b.
 
 # ---------------------------------------------------------------------------
 # Value-position class-method head derivation (ported from lowering.sprout so the

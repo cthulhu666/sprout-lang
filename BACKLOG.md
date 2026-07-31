@@ -159,12 +159,30 @@ Legend:
         exercised defines the boxed class in the SAME module. A boxed imported class routes through the
         same `qualify_constraints`/alias tables as an imported `where` constraint, so it likely works,
         but add a cross-module test to confirm.
-      - [ ] `P4` **Unify resolve's traversal copy.** `resolve.sprout` keeps its own byte-identical
-        `class_with_transitive_supers`/`collect_super_map` (the PACK authority for evidence order).
-        `types.witness_slots_for_class` (count + unpack) mirrors it exactly, so pack/unpack agree
-        today, but it is a residual drift surface (pre-existing: lowering + resolve already had two
-        copies before this landed). Re-point resolve to `types.class_with_transitive_supers` for a
-        true single source.
+      - [x] `P4` **Unify resolve's traversal copy. LANDED 2026-07-31.** `resolve.sprout` kept its own
+        byte-identical `class_with_transitive_supers` (the PACK authority for evidence order) while
+        `types` owned the count+unpack copy — a silent-drift surface whose failure mode is a
+        wrong-method dispatch, not a loud error. Both PACK call sites now use the shared
+        `types.class_with_transitive_supers`; the local copy + its `collect_supers_dfs`/`prepend_supers`/
+        `append_str_list`/`list_str_member` helpers were deleted. Behavior-preserving (the two copies
+        differed only in `list_str_member` vs generic `list_member` over a `String` list). Added
+        `tests/stdlib/test_existential_superclass_module.spr` — the previously-uncovered intersection of
+        superclass + `module`-qualification — which passed on master (coverage gap, not a bug) and now
+        guards the qualifier agreement. (`collect_super_map` is the map BUILDER, not the traversal, and
+        stays local per its consumer comment.)
+      - [ ] `P4` **`validate_ctor_where` only checks the FIRST constraint arg.** `parser.constraint_var_name`
+        matches `TypeConstraint _ [TypeName v | _]` and validates only `v`, so a where-clause like
+        `where Convert a b` with `b` unbound by the `exists` prefix is accepted (only `a` is checked).
+        Latent today (multi-parameter classes are unsupported, so such a constraint fails elsewhere), but
+        the validator's stated contract — every constraint applies a class to an `exists`-bound variable —
+        is not upheld for the 2nd+ argument. Fix: validate every `TypeName` argument of the constraint is
+        exists-bound (reject non-`TypeName` args as today). Add a `parse_error` fixture. Surfaced by the
+        retroactive `/code-review` of PR #3.
+      - [ ] `P4` **`check_existential_constraints` is a dead no-op hook.** PR #2 emptied its body to
+        `Nothing` (the multi-method/superclass guard it enforced is now supported), but it is still
+        called from `infer.sprout` — a pass that can never return an error. Either wire a real future
+        existential-declaration check here or drop the call and keep the comment as the home marker.
+        Cosmetic; surfaced by the retroactive `/code-review` of PR #2.
     - [x] `P3` **Explicit constrained-prefix form + constraint keyword. LANDED 2026-07-31.**
       Constraint keyword decided: **`where`** (not `=>`), matching every other Sprout constraint site.
       Syntax `| exists a. Shown a where ToString a` (multiple constraints comma-separated). Parser:
