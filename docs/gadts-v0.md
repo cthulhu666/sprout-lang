@@ -303,8 +303,9 @@ deprecated DatatypeContexts).
 - **Syntax / AST.** `TypeConstructor String (List TypeExpr)` (`ast.sprout:99`)
   gains an optional existential-binder payload: the bound variables
   `(List String)` and their constraints `(List TypeConstraint)` (empty for
-  Stage 0a). The parser accepts the `exists <vars>. [<constraints> =>]` prefix
-  in constructor position and desugars a field-position `any C` into it.
+  Stage 0a). The parser accepts the `exists <vars>. <Ctor> <fields> [where
+  <constraints>]` prefix in constructor position (the constraint keyword is
+  `where`, not `=>`) and desugars a field-position `any C` into it.
 - **Construction (pack).** `Shown(v)` checks `v` against the bound variable
   instantiated to a fresh unification unknown; if constrained, the resolved
   dictionary for that type is captured into the constructor. The hidden variable

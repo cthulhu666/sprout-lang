@@ -39,7 +39,8 @@ Running with `USER="  Ada  "` prints `Hello, Ada`. More in [`examples/`](./examp
 
 - **Full type inference** — Hindley–Milner; most code needs no annotations.
 - **Functional core** — algebraic data types, exhaustive pattern matching,
-  immutable values, `Maybe`/`Result` for optionality and failure.
+  immutable values, `Int`/`Double` numerics, `Maybe`/`Result` for optionality
+  and failure.
 - **Typeclasses** — dictionary-passing (`Eq`, `Ord`, `ToString`, `Semigroup`,
   `Monoid`, …), including return-type dispatch.
 - **Effects in types** — pure functions are unannotated; effectful ones carry
@@ -53,7 +54,8 @@ Running with `USER="  Ada  "` prints `Hello, Ada`. More in [`examples/`](./examp
   unknown-name and missing-instance reporting.
 
 **Experimental slices** (implemented, not yet normative v0): the module system,
-typeclasses, records (`type User = { name: String }`), integer ranges (`a..b`),
+typeclasses, records (`type User = (name: String)` — parametric, with `p.x` access
+and `p with (name = …)` update), integer ranges (`a..b`),
 `Char`/Unicode text, `stdlib.regex`, `do` notation for `Maybe`/`Result`/`IO`,
 existential constructors (`| exists a. Cell a where ToString a`, and its `(any C)`
 sugar — trait objects / heterogeneous collections), and

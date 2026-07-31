@@ -53,10 +53,14 @@ calls.
 Built-in types:
 
 - `Int`
+- `Double`
 - `Bool`
 - `String`
 - `Unit`
 
+`Int` is a machine word integer; `Double` is an IEEE 754 double-precision float.
+`Double` has literal syntax (`3.14`), a `ToString` instance (`to_string`/
+`double_to_string`), and arithmetic; `to_double` converts an `Int` to a `Double`.
 A `String` value is always valid UTF-8 and contains no NUL byte. Builtins that
 construct a `String` from raw external bytes (e.g. `read_file`) validate the
 input and report malformed content through their error channel rather than
@@ -399,8 +403,8 @@ Every type name referenced in a constructor field, record field, or type alias
 RHS must be either:
 
 - A locally-declared type (in the same module bundle).
-- A built-in primitive type (`Int`, `Bool`, `String`, `Char`, `Unit`, `Bytes`,
-  `IntRange`).
+- A built-in primitive type (`Int`, `Double`, `Bool`, `String`, `Char`, `Unit`,
+  `Bytes`, `IntRange`).
 - A lowercase type variable (e.g. `a`, `b`) bound by the enclosing type
   declaration's parameter list.
 
