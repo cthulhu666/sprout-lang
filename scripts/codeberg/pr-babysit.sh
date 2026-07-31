@@ -11,6 +11,10 @@
 #   2. CI gate: merge ONLY when the authoritative combined commit status is
 #      `success` (ci_is_green) — not the Actions-run heuristic. A `failure`
 #      signal escalates; anything not-yet-green just waits.
+#   2b. Stacked-PR retarget: if the PR still targets a base branch that has
+#      already landed in master (origin/base is-ancestor origin/master), an
+#      ff-merge would advance that orphaned base, not master — so retarget the
+#      base to master first (PATCH). A non-landed base is left stacked.
 #   3. Merge: POST a fast-forward-only merge with the FULL head SHA. On success,
 #      stop scanning this cycle and re-evaluate the rest against the moved master
 #      (serialized merges — the ff-only cascade resolves in order, not by thrash).
@@ -98,6 +102,41 @@ while active_left; do
         echo "ESCALATION: PR#$pr CI failed at ${P_HEAD_SHA}"; st[$pr]=escalated; esc_n=$((esc_n+1)); continue
       fi
       log "PR#$pr CI ${ci} @ ${P_HEAD_SHA:0:10} — waiting"; continue
+    fi
+
+    # ---- Stacked-PR base retarget. If this PR still targets a base branch that
+    # has ALREADY landed in master, an ff-only merge would advance that now-
+    # orphaned base branch by one commit — stranding this PR's commits one step
+    # AHEAD of master instead of ON master (the #314/#315 incident). Retarget the
+    # PR's base to master first, so the ff-merge below lands on master.
+    #
+    # Trigger: origin/<base> is an ancestor of origin/master  <=>  every commit
+    # on the base is already in master  <=>  the base PR has landed. This is
+    # sound BECAUSE this workflow is fast-forward-only; under squash-merge the
+    # base's SHAs would not appear in master and the test would never fire —
+    # which is fine, we never squash. A base that has NOT landed fails the test
+    # and is left stacked, exactly as before.
+    #
+    # Fail-safe by construction: any non-2xx PATCH escalates and HALTS this PR;
+    # it never falls through to a merge into the stale base. Worst case is "back
+    # to manual", never silent stranding — so the mechanism needs no version
+    # probe (ChangeTargetBranch predates the Forgejo fork; Gitea >=1.12).
+    if [ "${P_BASE_REF:-master}" != "master" ]; then
+      git fetch origin master "${P_BASE_REF}" >/dev/null 2>&1 || true
+      if ref_is_ancestor "origin/${P_BASE_REF}" origin/master; then
+        if [ "$DRY" = "1" ]; then
+          log "[dry-run] PR#$pr base '${P_BASE_REF}' already in master — would retarget base->master"
+        else
+          log "PR#$pr base '${P_BASE_REF}' already in master — retargeting base->master"
+          RT=$(codeberg_curl PATCH "/pulls/$pr" -o "/tmp/cm_retarget_$pr.out" -w "%{http_code}" \
+                 -H "Content-Type: application/json" -d '{"base":"master"}')
+          if [ "$RT" != "200" ] && [ "$RT" != "201" ]; then
+            echo "ESCALATION: PR#$pr base-retarget to master failed HTTP=$RT (body: $(head -c 200 "/tmp/cm_retarget_$pr.out" 2>/dev/null))"
+            st[$pr]=escalated; esc_n=$((esc_n+1)); continue
+          fi
+          eval "$(pr_snapshot "$pr" P_)"   # refresh: base.ref is now master
+        fi
+      fi
     fi
 
     if [ "$DRY" = "1" ]; then

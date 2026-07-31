@@ -148,6 +148,15 @@ is_merge_success() {
   [ "${1:-}" = "200" ] || [ "${1:-}" = "201" ]
 }
 
+# Pure git: succeeds (0) iff <maybe-ancestor> is an ancestor of (or equal to)
+# <descendant>. Both must be locally-available refs. Wraps the single git
+# predicate the stacked-PR base-retarget decision turns on (see pr-babysit.sh),
+# so that decision is regression-testable against a throwaway repo without any
+# network/API — see pr-babysit-test.sh.
+ref_is_ancestor() {
+  git merge-base --is-ancestor "$1" "$2" 2>/dev/null
+}
+
 # Build one pr-monitor event line. Args: <pr> <state> <merged> <ci> <sha>.
 # Emits the FULL <sha> unchanged: the caller feeds this line's sha= field into
 # the ff-merge POST's head_commit_id, which requires the full 40-char SHA — a
