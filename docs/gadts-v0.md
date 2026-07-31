@@ -174,22 +174,26 @@ strictly smaller, self-contained feature. So:
   the nominal-skolem representation of §7 (a rigid `TConst`, not a marked
   `TVar`), so the escape check is a diagnostic rather than soundness code. Spec
   §5.6 (experimental).
-- **Stage 0b — constrained existentials via `any C`. ✅ IMPLEMENTED (2026-07-30),
-  scoped to single-method, superclass-free classes.** A field `(any ToString)`
+- **Stage 0b — constrained existentials via `any C`. ✅ IMPLEMENTED (2026-07-30;
+  multi-method + superclass generalization 2026-07-31).** A field `(any ToString)`
   desugars to a fresh existential var + a `ToString` constraint; constructing
   `Shown(v)` resolves and **packs the dictionary** (the class's method
-  function-pointers) as a hidden `'p'` heap field, and matching `Shown x` restores
-  it so `to_string(x)` dispatches through the packed witness — a Rust trait object /
+  function-pointers) as hidden `'p'` heap fields, and matching `Shown x` restores
+  them so `to_string(x)` dispatches through the packed witness — a Rust trait object /
   GHC hidden dict field, built by redirecting the existing per-method-pointer
-  dict-passing path into a ctor field (no new runtime). This is the *useful* form —
-  heterogeneous render/log lists. **Scope:** only the `any C` sugar landed (the
-  explicit `exists a. <constraint> Shown a` prefix and its constraint keyword are
-  deferred — see BACKLOG); and only classes contributing exactly **one** dictionary
-  method (single method, no superclasses) are supported — the crude one-slot-per-
-  constraint packing is exact there and a richer class is rejected with a located
-  error pending the shared witness-slot enumerator (BACKLOG). Missing-instance
-  construction (`Shown(NoShow)`) is rejected at the construction site with the
-  standard "No instance" diagnostic (§8). Spec §5.6 (experimental).
+  dict-passing path into ctor fields (no new runtime). This is the *useful* form —
+  heterogeneous render/log lists. A **multi-method** class packs one witness field
+  per method, and a class **with superclasses** packs its transitive-superclass
+  methods too (an inherited method dispatches on the unpacked value). The witness
+  count, the packed fields, and the unpack forwarding all derive from one shared
+  enumerator (`types.witness_slots_for_class` = `class_with_transitive_supers` ×
+  `class_methods_for`) so they cannot drift; lowering seeds a `ctx_fwd` block per
+  effective class under its own key, and infer seeds `@fwd` givens for the direct
+  class and each superclass. **Scope:** only the `any C` sugar landed (the explicit
+  `exists a. <constraint> Shown a` prefix and its constraint keyword remain deferred
+  — see BACKLOG). Missing-instance construction (`Shown(NoShow)`) is rejected at the
+  construction site with the standard "No instance" diagnostic (§8). Spec §5.6
+  (experimental).
 - **Stage 1 — index refinement (full GADTs).** Deferred behind the
   local-annotations gate; needs the OutsideIn-style local-equality solver and
   constraint-aware exhaustiveness. **XL, out of scope for v0/v1.**
@@ -359,7 +363,7 @@ forms share one implementation.
 | Scope | Size | Rationale |
 |---|---|---|
 | Stage 0a (unconstrained) | **M** | Parser/AST + pack + unpack + **escape check** (the one new mechanism); no runtime change. |
-| Stage 0b (constrained, `any C`) | **M** (actual) | Estimated L for a "reified dictionary that doesn't exist"; in practice **no struct was needed** — the per-method hidden-param pointers are the dictionary, redirected into a ctor field. Real work was the pack obligation (reused the `where C a` dict-injection path), the unpack forwarding contract (skolem-keyed given marker + a stable `$ex_<var>` forwarding identity shared by infer and lowering), and the ctor arity/fks bookkeeping. Scoped to single-method classes; multi-method awaits the witness-slot enumerator. |
+| Stage 0b (constrained, `any C`) | **M** (actual) | Estimated L for a "reified dictionary that doesn't exist"; in practice **no struct was needed** — the per-method hidden-param pointers are the dictionary, redirected into a ctor field. Real work was the pack obligation (reused the `where C a` dict-injection path), the unpack forwarding contract (skolem-keyed given marker + a stable `$ex_<var>` forwarding identity shared by infer and lowering), and the ctor arity/fks bookkeeping. Generalized 2026-07-31 to multi-method and superclass classes via the shared witness-slot enumerator (`types.witness_slots_for_class`). |
 | Stage 1 (index refinement) | **XL** | Local-equality solver + bidirectional checking + mandatory signatures + constraint-aware exhaustiveness; blocked on the local-annotations gate. Out of scope. |
 
 **Recommended path:** ship **0a as a spike** to validate the skolem-escape

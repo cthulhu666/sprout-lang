@@ -137,13 +137,34 @@ Legend:
     construction rejected at the site ("No instance…"). Spec §5.6; example
     `examples/existential_render.sprout`; tests `tests/stdlib/test_existential_0b.spr`,
     `tests/conformance/type_error/existential_missing_instance.spr`.
-    - [ ] `P3` **Multi-method / superclass existentials (witness-slot enumerator).** The crude
-      one-witness-slot-per-constraint count (`ast_to_ir.witness_slot_count`) is exact only for a
-      single-method superclass-free class; a richer class is currently rejected with a located error
-      (`infer.check_existential_constraints`). Generalize by extracting ONE
-      `witness_slots(exist_constraints, class_order, super_map)` enumerator (transitive-super method
-      expansion, matching lowering's dict expansion) and calling it from BOTH the lowering witness
-      expansion and the ctor-table count so they cannot drift — then drop the guard.
+    - [x] `P3` **Multi-method / superclass existentials (witness-slot enumerator). LANDED
+      2026-07-31.** The crude one-witness-slot-per-constraint count was exact only for a single-method
+      superclass-free class. Generalized via ONE shared enumerator `types.witness_slots_for_class`
+      (`class_with_transitive_supers` × `class_methods_for`, matching resolve's dict expansion),
+      called from BOTH `ast_to_ir.witness_slot_count` (ctor-field count) and lowering's unpack, so
+      count/pack/unpack cannot drift. Lowering now binds one `$wtns_<var>_<class>_<method>` per slot
+      and seeds a `ctx_fwd` block per effective class under its own key; `infer.seed_from_skolem`
+      seeds `@fwd` givens for the direct class AND each superclass (via `seed_superclass_fwd_markers`)
+      so an inherited method forwards. Enabler: `lowering.lower_decl` now RETAINS `ClassDecl`s in the
+      lowered stream (inert — byte-identical IR for all non-existential programs) so `build_ctor_table`
+      can rebuild `class_order`/`super_map` post-lowering. Guard (`check_existential_constraints`)
+      dropped. Tests: `tests/stdlib/test_existential_{multimethod,superclass,module_qualified}.spr`.
+      Also closed a documented pre-existing gap this surfaced: `bundler.qualify_ctor_args` was
+      passing a ctor's `exist_constraints` through UNQUALIFIED (its own comment said "Stage 0b must
+      qualify their class names here"), so an `any UserClass` in a file with a `module` header kept a
+      bare class name while instances/class-markers were qualified — construction and unpacked-value
+      dispatch then missed (`@inst`/`@fwd`). Now qualified via `qualify_constraints`; inert for
+      non-existential programs (byte-identical) and for the seed (the compiler sources use no `any C`).
+      - [ ] `P4` **Imported-class existential (`any some_import.Renderable`) untested.** Every case
+        exercised defines the boxed class in the SAME module. A boxed imported class routes through the
+        same `qualify_constraints`/alias tables as an imported `where` constraint, so it likely works,
+        but add a cross-module test to confirm.
+      - [ ] `P4` **Unify resolve's traversal copy.** `resolve.sprout` keeps its own byte-identical
+        `class_with_transitive_supers`/`collect_super_map` (the PACK authority for evidence order).
+        `types.witness_slots_for_class` (count + unpack) mirrors it exactly, so pack/unpack agree
+        today, but it is a residual drift surface (pre-existing: lowering + resolve already had two
+        copies before this landed). Re-point resolve to `types.class_with_transitive_supers` for a
+        true single source.
     - [ ] `P3` **Explicit constrained-prefix form + constraint keyword.** Only the `any C` sugar
       landed. The explicit `| exists a. <constraint> Shown a` (needed for the multi-field
       shared-hidden-state `Widget` case, `docs/gadts-v0.md §5.1`) is deferred, along with its

@@ -1,0 +1,45 @@
+module tests.existential_module_qualified
+
+# Regression: a constrained existential over a USER-DEFINED class in a file WITH a
+# `module` header. The class/instance names are module-qualified (e.g.
+# `tests...Paint`), so the `any Paint` constraint's class name must be qualified to
+# the same form — otherwise its `@inst` (construction) and `@fwd` (unpacked-value
+# dispatch) lookups miss and construction fails "No instance of Paint for T".
+# Fixed by bundler.qualify_ctor_args qualifying exist_constraints. The bare-file
+# existential tests never exercise this (no module → no qualification).
+
+import stdlib.test (check_eq, run_suite)
+
+class Paint a {
+  fn hue(v: a) -> String
+  fn coats(v: a) -> Int
+}
+
+type Wall = | Wall Int
+type Trim = | Trim String
+
+instance Paint Wall {
+  fn hue(v: Wall) -> String = match v with | Wall _ -> "white"
+  fn coats(v: Wall) -> Int = match v with | Wall n -> n
+}
+
+instance Paint Trim {
+  fn hue(v: Trim) -> String = match v with | Trim c -> c
+  fn coats(v: Trim) -> Int = match v with | Trim _ -> 2
+}
+
+type Coated = | Coated (any Paint)
+
+# Both methods on one unpacked value (also guards the repeated-lookup path).
+fn summary(c: Coated) -> String =
+  match c with
+  | Coated p -> `${hue(p)} x${int_to_string(coats(p))}`
+
+fn main() -> Unit !{IO} =
+  run_suite("existential_module_qualified", [
+    check_eq("construct + dispatch a user-class box in a module (wall)", summary(Coated (Wall(3))), "white x3"),
+    check_eq("construct + dispatch a user-class box in a module (trim)", summary(Coated (Trim("oak"))), "oak x2"),
+    check_eq("heterogeneous module-qualified boxes",
+      string_concat_many(list_map(summary, [Coated (Wall(1)), Coated (Trim("ash"))])),
+      "white x1ash x2")
+  ])

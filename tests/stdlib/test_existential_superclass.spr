@@ -1,0 +1,65 @@
+# TDD — Stage 0b generalization: SUPERCLASS constrained existentials.
+# (docs/gadts-v0.md §5, BACKLOG "Multi-method / superclass existentials".)
+#
+# `Labeled a where Tag a` — boxing a value as `any Labeled` must pack a witness
+# for BOTH `label` (the direct method) AND `tag` (the inherited superclass
+# method), because a `Labeled` dictionary transitively contains a `Tag` one.
+#
+# This is the sharpest discriminator: calling the SUPERCLASS method `tag(x)` on
+# the unpacked value exercises (a) that the super class contributes a witness
+# slot at all, and (b) that its forwarding block is seeded under `Tag`'s key, not
+# `Labeled`'s — so a naive "direct-class methods only" generalization still fails
+# here.
+
+import stdlib.test (check_eq, run_suite)
+
+class Tag a {
+  fn tag(v: a) -> String
+}
+
+class Labeled a where Tag a {
+  fn label(v: a) -> String
+}
+
+instance Tag Int {
+  fn tag(v: Int) -> String = "n"
+}
+
+instance Labeled Int {
+  fn label(v: Int) -> String = "num"
+}
+
+instance Tag String {
+  fn tag(v: String) -> String = "s"
+}
+
+instance Labeled String {
+  fn label(v: String) -> String = "str"
+}
+
+type LBox = | LBox (any Labeled)
+
+fn lbox_label(b: LBox) -> String =
+  match b with
+  | LBox x -> label(x)
+
+fn lbox_tag(b: LBox) -> String =
+  match b with
+  | LBox x -> tag(x)
+
+# Regression: a direct method AND an inherited superclass method on ONE unpacked
+# value in the same scope — exercises repeated `@fwd:sk:class` lookups across two
+# different effective classes on the same skolem.
+fn lbox_both(b: LBox) -> String =
+  match b with
+  | LBox x -> `${label(x)}/${tag(x)}`
+
+fn main() -> Unit !{IO} =
+  run_suite("existential_superclass", [
+    check_eq("direct method label (int)", lbox_label(LBox(42)), "num"),
+    check_eq("superclass method tag (int)", lbox_tag(LBox(42)), "n"),
+    check_eq("direct method label (string)", lbox_label(LBox("x")), "str"),
+    check_eq("superclass method tag (string)", lbox_tag(LBox("x")), "s"),
+    check_eq("direct + superclass method on one value (int)", lbox_both(LBox(42)), "num/n"),
+    check_eq("direct + superclass method on one value (string)", lbox_both(LBox("x")), "str/s")
+  ])
