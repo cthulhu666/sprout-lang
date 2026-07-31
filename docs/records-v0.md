@@ -1,10 +1,18 @@
 # Records in Sprout (v0 design)
 
-**Status:** experimental language design. Non-normative — `docs/spec-v0.md` is
-the normative source of truth and is unchanged by this document until the surface
-below is implemented and promoted. This doc fixes the **surface syntax and
-semantics** for nominal record types and supersedes the ad-hoc experimental
-record surface currently in the compiler (brace literals + `get p x` access).
+**Status:** IMPLEMENTED (2026-07). The surface designed here has shipped and is
+normatively documented in **`docs/spec-v0.md` §5.6.3** — declaration
+`type Point = (x: Int, y: Int)`, construction `Point(x = 3, y = 4)`, dot access
+`p.x`, functional update `p with (x = v)`, **parametric records**
+(`type Box s = (val: s, label: String)`, construction infers `Box Int`), and
+**inline calls of function-typed fields** (`v.render(x)`). Records are same-module
+only for now (imported records are a known open gap, `BACKLOG.md` item 5).
+
+This document is the design **rationale and history**. Where its "Problem
+statement" (§1) and migration table (§9) describe a `{ }`-literal / `get p x`
+**prototype** as "current," that prototype has since been replaced by the design
+below — read those passages as the historical motivation for the shipped surface,
+not a description of current behavior.
 
 This is the "dedicated records draft/spec" called for in `BACKLOG.md` item 5.
 
@@ -106,8 +114,8 @@ existing `RecordDecl` type-parameter slot.
 
 The label distinguishes a record type `(x: Int, y: Int)` from a tuple type
 `(Int, Int)`: any parenthesised list whose entries are `label: Type` is a record;
-entries that are bare types form a tuple. (Parser detail: `is_record_scan`
-currently keys on `{`; it moves to "a `(` immediately followed by `ident :`".)
+entries that are bare types form a tuple. (Parser detail: `is_record_scan` keys on
+"a `(` immediately followed by `ident :`".)
 
 ### 4.2 Construction
 
@@ -243,19 +251,20 @@ does not interact with records. It is out of scope here; see §12.
 
 ## 9. Compatibility / migration
 
-The prototype surface is experimental and not in the normative spec, so this is a
-replacement, not a breaking change to stable syntax. Concrete migrations:
+The prototype surface was experimental and not in the normative spec, so this was
+a replacement, not a breaking change to stable syntax. The migration that was
+applied (the right-hand column is what shipped):
 
-| Prototype (current) | v0 design |
+| Prototype (historical) | v0 design (shipped) |
 |---|---|
 | `type Point = { x: Int, y: Int }` | `type Point = (x: Int, y: Int)` |
 | `Point { x = a, y = b }` | `Point(x = a, y = b)` |
 | `get p x` | `p.x` |
 | (no update) | `p with (x = v)` |
 
-`tests/conformance/run/record_types.spr` and any example using the prototype
-surface are updated in the same change. The `get` contextual form is removed from
-the parser and `get` reverts to an ordinary identifier.
+`tests/conformance/run/record_types.spr` was migrated to the shipped surface, the
+`get` contextual form removed from the parser, and `get` reverted to an ordinary
+identifier.
 
 ## 10. Implementation overview (for approval before editing)
 
@@ -311,9 +320,11 @@ existing GC object model). Any deviation requires up-front approval per
 ## 13. Spec/docs status
 
 **Implementation status.** PR1 landed **declaration, construction, and
-dot-access**; PR2 landed **functional update `with`** (§4.4) — both end-to-end on
-the active IR codegen path (branch `feat/records-v0`). `docs/spec-v0.md` §5.6.3 is
-the normative record section, and this doc is now rationale for it. Still to land
-(PR3): §8 error-message fixtures, **parametric-record construction type-arg
-inference**, and record-vs-tuple / record-vs-call / shadowing parser tests.
-`BACKLOG.md` item 5 tracks the remaining work.
+dot-access**; PR2 landed **functional update `with`** (§4.4). Since then,
+**parametric records** (construction infers the type arguments, e.g. `Box Int`)
+and **inline calls of function-typed fields** (`v.render(x)`) have landed.
+`docs/spec-v0.md` §5.6.3 is the normative record section, and this doc is now
+rationale for it. Still to land: §8 error-message fixtures, imported
+(cross-module) records (blocked on the `@rec:` name-identity bug), and
+record-vs-tuple / record-vs-call / shadowing parser tests. `BACKLOG.md` item 5
+tracks the remaining work.
