@@ -165,6 +165,24 @@ See [README.md §Not Yet Supported](./README.md#not-yet-supported-common-gotchas
 
 The remote is **GitHub** (`github.com/cthulhu666/sprout-lang`). Land work via a feature branch + PR to `master`.
 
-- **Open a PR with `gh pr create --base master`** (install `gh` and run `gh auth login` first if it is absent), or via the GitHub web UI. Sprout is developed in git worktrees; `gh` reads the repo through the git CLI, so it works from a worktree (unlike the former Gitea `tea` client).
+**`master` is branch-protected — every change goes through a PR, including docs.** Direct pushes to `master` are rejected for everyone (the rules are enforced for admins, and all pushers authenticate as the repo owner). The protection is:
+
+- Require a PR before merging (0 required approvals, so you can self-merge your own PR).
+- Require the `test` status check (the CI `test` job) to pass.
+- Require the branch to be up to date with `master` before merging (strict).
+- Require linear history; merges are **rebase-only** (merge-commit and squash are disabled).
+- Force-pushes and branch deletion on `master` are blocked.
+
+The standard loop:
+
+```
+git switch -c my-change
+# ... edit, commit ...
+git push -u origin my-change
+gh pr create --base master --fill
+gh pr merge --auto --rebase        # lands automatically when CI is green + up-to-date
+```
+
+- **`gh` is managed by mise** (`gh` in `mise.toml`); run `gh auth login` once if unauthenticated. Sprout is developed in git worktrees; `gh` reads the repo through the git CLI, so it works from a worktree (unlike the former Gitea `tea` client). Auto-merge is enabled and merged branches are auto-deleted.
 - **CI runs on GitHub-hosted runners** (`.github/workflows/ci.yml`, `runs-on: ubuntu-latest`) — there is no self-hosted worker to provision or dispatch. Releases (`.github/workflows/release.yml`) build linux x86_64 + aarch64 artifacts on tag push and publish via `softprops/action-gh-release`.
-- The seed-staleness merge cascade (master moved → rebase → regenerate `bootstrap/compile_driver.ll` → requeue) still applies on rebase; handle it the same way, just against the GitHub remote.
+- **Seed-staleness merge cascade.** Because the branch must be up to date before merging, when `master` moves under an open PR that touches `stdlib/compiler/` you must rebase onto the new `master` **and** regenerate `bootstrap/compile_driver.ll` (`just refresh-seed`) before the merge unblocks — the up-to-date rule turns this into a pre-merge gate rather than a post-merge surprise.
