@@ -22,7 +22,11 @@ set -euo pipefail
 
 # --- Config (sourced from the env file by the systemd unit) ----------------
 : "${CODEBERG_OWNER:?set CODEBERG_OWNER}"
-: "${CODEBERG_REPO:?set CODEBERG_REPO}"
+# Repos to watch (all under CODEBERG_OWNER): space-separated CODEBERG_REPOS is
+# canonical; the legacy single CODEBERG_REPO is accepted as a fallback. The one
+# shared worker boots if ANY watched repo has active runs. One read-scoped token
+# for the owner reads every repo's runs list.
+CODEBERG_REPOS="${CODEBERG_REPOS:-${CODEBERG_REPO:?set CODEBERG_REPOS (or legacy CODEBERG_REPO)}}"
 : "${CODEBERG_TOKEN:?set CODEBERG_TOKEN}"          # read-scoped Codeberg token
 : "${GCP_PROJECT:?set GCP_PROJECT}"
 : "${GCP_ZONE:?set GCP_ZONE}"
@@ -38,24 +42,36 @@ mkdir -p "$STATE_DIR"
 
 log() { printf '%s dispatcher: %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$*"; }
 
-# --- 1. Count non-terminal workflow runs -----------------------------------
+# --- 1. Count non-terminal workflow runs, summed over all watched repos -----
 # Terminal statuses are a denylist: anything NOT in this set counts as "work
 # present", so an unknown/new status fails safe toward keeping the worker up.
-runs_url="$API_BASE/repos/$CODEBERG_OWNER/$CODEBERG_REPO/actions/runs?limit=50"
-runs_json="$(curl -fsS --max-time 20 -H "Authorization: token $CODEBERG_TOKEN" "$runs_url")"
-
+#
 # Forgejo may serialize `status` as a string ("success") or its DB enum int
 # (1=success,2=failure,3=cancelled,4=skipped). Treat BOTH encodings as terminal
 # so a representation surprise can't silently match nothing (which would leave
 # the worker running forever). Everything else (waiting/running/blocked/unknown)
 # counts as active.
-active="$(printf '%s' "$runs_json" | jq '
-  [ (.workflow_runs // [])[]
-    | (.status) as $s
-    | ( (($s | type) == "string" and (["success","failure","cancelled","skipped"] | index($s)) != null)
-        or (($s | type) == "number" and ([1,2,3,4] | index($s)) != null) ) as $terminal
-    | select($terminal | not) ]
-  | length')"
+count_active_runs() {  # $1 = repo name (under CODEBERG_OWNER)
+  local runs_url runs_json
+  runs_url="$API_BASE/repos/$CODEBERG_OWNER/$1/actions/runs?limit=50"
+  runs_json="$(curl -fsS --max-time 20 -H "Authorization: token $CODEBERG_TOKEN" "$runs_url")"
+  printf '%s' "$runs_json" | jq '
+    [ (.workflow_runs // [])[]
+      | (.status) as $s
+      | ( (($s | type) == "string" and (["success","failure","cancelled","skipped"] | index($s)) != null)
+          or (($s | type) == "number" and ([1,2,3,4] | index($s)) != null) ) as $terminal
+      | select($terminal | not) ]
+    | length'
+}
+
+# Boot if ANY watched repo has active work. A curl/jq failure aborts the tick
+# (set -e) leaving the worker as-is — never a spurious stop mid-job.
+active=0
+for repo in $CODEBERG_REPOS; do
+  n="$(count_active_runs "$repo")"
+  [ "$n" -gt 0 ] && log "repo=$repo active_runs=$n"
+  active=$((active + n))
+done
 
 # --- 2. Worker power state --------------------------------------------------
 state="$(gcloud compute instances describe "$WORKER_INSTANCE" \
