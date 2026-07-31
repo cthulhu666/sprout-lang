@@ -1,0 +1,46 @@
+# Parametric records — a record type with a type parameter (BACKLOG item 5, the
+# "parametric-record construction type-arg inference" follow-up). Declaration,
+# access, and update already handle params; construction inference under-applied
+# the result type to a bare `TConst`, so a `Box Int`-annotated use was rejected.
+
+import stdlib.test (check_eq, run_suite)
+
+type Box s = (val: s, label: String)
+
+# The discriminator: an explicit `Box Int` annotation. Construction must produce
+# `Box Int` (a TApp), not a bare `Box`, for this to type-check.
+fn box_label(b: Box Int) -> String = b.label
+fn box_val(b: Box Int) -> Int = b.val
+
+# A parametric record inside an EXISTENTIAL — the motivating case. The record names
+# the fields (state/step/render) while `exists s` hides the state type, so a counter
+# (s = Int) and a text buffer (s = String) share one interface. This composition
+# only works once construction produces `WidgetView s` as a TApp.
+type WidgetView s = (state: s, step: s -> s, render: s -> String)
+type Widget = | exists s. Widget (WidgetView s)
+
+fn count_up(n: Int) -> Int = n + 1
+fn show_count(n: Int) -> String = int_to_string(n)
+fn add_dot(b: String) -> String = b ++ "."
+fn show_buf(b: String) -> String = `"${b}"`
+
+fn step_and_render(w: Widget) -> String =
+  match w with
+  | Widget v ->
+      let step = v.step
+      in let render = v.render
+      in render(step(v.state))
+
+fn main() -> Unit !{IO} =
+  let bi = Box(val = 5, label = "int")
+  in let bs = Box(val = "hi", label = "str")
+  in let counter = Widget(WidgetView(state = 0, step = count_up, render = show_count))
+  in let field = Widget(WidgetView(state = "", step = add_dot, render = show_buf))
+  in run_suite("parametric_records", [
+    check_eq("Int box val via annotated fn", box_val(bi), 5),
+    check_eq("Int box label via annotated fn", box_label(bi), "int"),
+    check_eq("String box val (param instantiated to String)", bs.val, "hi"),
+    check_eq("String box label", bs.label, "str"),
+    check_eq("parametric record in existential (Int state)", step_and_render(counter), "1"),
+    check_eq("parametric record in existential (String state)", step_and_render(field), "\".\"")
+  ])
