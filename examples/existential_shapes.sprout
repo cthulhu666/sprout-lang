@@ -13,36 +13,39 @@ module examples.existential_shapes
 # `Drawable (any Shape)` below is sugar for `| exists a. Drawable a where Shape a`.
 
 class Shape a {
-  fn area(s: a) -> Int
+  fn area(s: a) -> Double
   fn name(s: a) -> String
 }
+
+fn pi() -> Double = 3.14159265358979
 
 type Circle = | Circle Int  # radius
 type Rect = | Rect Int Int  # width, height
 type Square = | Square Int  # side
 
 instance Shape Circle {
-  fn area(s: Circle) -> Int = match s with | Circle r -> 3 * r * r  # ~pi r^2
+  fn area(s: Circle) -> Double = match s with | Circle r -> pi() * to_double(r) * to_double(r)
   fn name(s: Circle) -> String = "circle"
 }
 
 instance Shape Rect {
-  fn area(s: Rect) -> Int = match s with | Rect w h -> w * h
+  fn area(s: Rect) -> Double = match s with | Rect w h -> to_double(w) * to_double(h)
   fn name(s: Rect) -> String = "rect"
 }
 
 instance Shape Square {
-  fn area(s: Square) -> Int = match s with | Square side -> side * side
+  fn area(s: Square) -> Double = match s with | Square side -> to_double(side) * to_double(side)
   fn name(s: Square) -> String = "square"
 }
 
 type Drawable = | Drawable (any Shape)
 
 # Unpacking binds the hidden value at a rigid, abstract type; BOTH `name` and
-# `area` dispatch on the witnesses packed at construction.
+# `area` dispatch on the witnesses packed at construction. `area` returns a real
+# number (`Double`) — a circle's area is π·r², not an integer.
 fn describe(d: Drawable) -> String =
   match d with
-  | Drawable s -> `${name(s)}: ${int_to_string(area(s))}`
+  | Drawable s -> `${name(s)}: ${to_string(area(s))}`
 
 fn scene() -> List Drawable =
   [Drawable (Circle(2)), Drawable (Rect(3, 4)), Drawable (Square(5))]
