@@ -1,0 +1,30 @@
+import stdlib.test (check_eq, check_true, run_suite)
+
+# Regression: a function with a HEADLESS (compound-head) constraint like
+# `where ToString (Box a)` resolves its dict by scanning the arguments. That
+# scan (inject_constrained_fn_dicts_via_field's `#none` branch) must use the
+# post-argument substitution s3, not the stale pre-argument subst. An INLINE
+# parametric-record argument carries its `a -> Int` binding only in s3; the
+# stale subst left it `Box $free`, so the constraint dict was poisoned as an
+# unresolved thunk (runtime null-dict crash). This is the same class as the
+# check_instance_for_marker stale-subst fix, on the constrained-fn path.
+# See BACKLOG §deriving-records-follow-ups.
+
+type Box a = (val: a, tag: String) deriving (Eq, ToString)
+
+# Headless constraint head `Box a` (a type application, not a bare var) → #none.
+fn describe(b: Box a) -> String where ToString (Box a) =
+  to_string(b)
+
+fn eq_boxes(x: Box a, y: Box a) -> Bool where Eq (Box a) =
+  eq(x, y)
+
+fn not(b: Bool) -> Bool = if b then false else true
+
+fn main() -> Unit !{IO} =
+  run_suite("compound_constraint_inline_record", [
+    # Inline record argument → the #none scan must see Box Int (via s3), not Box $free.
+    check_eq("describe inline record", describe(Box(val = 5, tag = "a")), "Box(val = 5, tag = a)"),
+    check_true("eq inline records", eq_boxes(Box(val = 1, tag = "z"), Box(val = 1, tag = "z"))),
+    check_true("neq inline records", not(eq_boxes(Box(val = 1, tag = "z"), Box(val = 2, tag = "z"))))
+  ])
