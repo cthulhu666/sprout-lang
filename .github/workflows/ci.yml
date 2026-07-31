@@ -111,7 +111,7 @@ jobs:
             echo "run_compiler=true" >> "$GITHUB_OUTPUT"; exit 0
           fi
           BASE="${{ github.base_ref }}"
-          # Shallow checkout has no base commit; fetch just its tip (depth 1). A plain
+          # Shallow checkout has no base commit; fetch only its tip (depth 1). A plain
           # two-dot tree diff (origin/BASE HEAD) needs no common ancestor and OVER-reports
           # if base moved — safe direction (never under-reports a change).
           if [ -z "$BASE" ] || ! git fetch --depth=1 origin "$BASE" 2>/dev/null; then

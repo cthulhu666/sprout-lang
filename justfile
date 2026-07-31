@@ -1653,9 +1653,17 @@ gate-audit:
   #!/usr/bin/env bash
   set -euo pipefail
   CI_WORKFLOW=".github/workflows/ci.yml"
-  # CI tasks gate intentionally omits: bootstrap/build deps (auto-run) and the
-  # mutate-then-check seed path (gate covers it via verify-bootstrap-fixed-point).
-  EXCLUDE="bootstrap-from-seed build-fmt-from-seed refresh-seed"
+  # CI tasks gate covers under a DIFFERENT recipe name (the audit name-matches, so
+  # it can't see equivalent coverage) or intentionally omits:
+  #   bootstrap-from-seed / build-fmt-from-seed — auto-run build deps.
+  #   refresh-seed — mutate-then-check seed path; gate covers it via verify-bootstrap-fixed-point.
+  #   ci-fast-gates — the aggregate CI invokes; gate runs each constituent by name instead
+  #     (smoke-shapes, bundle-smoke, fmt-check, check-approved-builtins, the *-smoke
+  #     regression gates), plus gc-safety-check (from gate's body) and test (which covers
+  #     the type/parse/executable/conformance error suites ci-fast-gates also runs).
+  #   test-stdlib-core-stage1 / test-stdlib-compiler-stage1 — the split suite CI runs; gate
+  #     covers both via test → test-stdlib-stage1 (the combined core+compiler suite).
+  EXCLUDE="bootstrap-from-seed build-fmt-from-seed refresh-seed ci-fast-gates test-stdlib-core-stage1 test-stdlib-compiler-stage1"
   # Tasks gate runs from its BODY (not reachable via --show dependency expansion).
   BODY="gc-safety-check"
   expand() {  # print a recipe name and, recursively, its dependency recipe names
