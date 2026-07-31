@@ -478,19 +478,38 @@ for `T`" error (§8). Matching binds the value at the abstract existential type
 dispatches through the packed witness — each element renders as its own concrete
 type would. A **multi-method** class packs one witness per method, and a class
 **with superclasses** packs its transitive-superclass methods too, so an inherited
-(superclass) method also dispatches on the unpacked value. **Scope:** only the
-`any C` sugar is provided (no explicit constrained-prefix form yet).
+(superclass) method also dispatches on the unpacked value.
+
+**Explicit `exists … where` prefix.** The same feature is also spelled with an
+explicit constructor-level `exists` prefix and a trailing **`where`** constraint
+clause; `(any C)` is single-field sugar for it:
+
+```sprout
+type Shown  = | exists a. Shown a where ToString a     # ≡ Shown (any ToString)
+type Q      = | exists a. Q a where ToString a, Eq a   # several constraints on one var
+type Bag    = | exists a. Bag (List a) where Describe a # hidden var nested in a field
+```
+
+The prefix scopes over **all** the constructor's fields, so it additionally
+expresses a hidden variable spanning several fields (shared hidden state) and a
+constrained variable that appears only nested inside a compound field. The `where`
+keyword matches every other constraint site in the language; `=>` is not used. A
+`where` clause is valid only on an existential: each constraint must apply a class
+to a variable bound by the `exists` prefix — otherwise it is a parse error (it must
+not constrain a head parameter).
 
 **Runtime.** The packed dictionary is the class's method function-pointer(s)
 stored as hidden constructor fields (traced by the GC); a method call on the
 unpacked value forwards them. No new runtime mechanism — the existing
 dictionary-passing path is redirected into the heap value.
 
-**Status (experimental).** Stage 0a (unconstrained) and Stage 0b (`any C`, scope
-above) are implemented. The explicit constrained-prefix form
-(`| exists a. <constraint> Shown a`), multi-method / superclass existentials, and
-full GADTs (index refinement) are out of scope for now. Design and staging:
-`docs/gadts-v0.md`.
+**Status (experimental).** Stage 0a (unconstrained), Stage 0b (`any C` and the
+explicit `exists … where` prefix, including multi-method / superclass classes and
+a hidden var nested in a compound field) are implemented. An *ambiguous*
+existential construction whose type is undetermined (e.g. `Bag([])` — an empty
+container) is currently reported as an opaque constructor-arity mismatch rather
+than a located "ambiguous" error. Full GADTs (index refinement) are out of scope.
+Design and staging: `docs/gadts-v0.md`.
 
 ### 5.6.1 `wrap` declaration
 

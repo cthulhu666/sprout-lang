@@ -1788,19 +1788,18 @@ fn eff_method_witness_map(eff: String, methods: List String, vname: String, acc:
   | Nil -> acc
   | Cons m rest -> eff_method_witness_map(eff, rest, vname, dict_set(m, witness_slot_var(vname, eff, m), acc))
 
-# The pattern variable bound to the field whose scheme type is the existential var
-# `existv`, or Nothing when that field is a wildcard (or absent).
+# The pattern variable bound to the first field whose scheme type MENTIONS the
+# existential var `existv`, or Nothing when that field is a wildcard (or absent).
+# Uses the shared `types.ftv` predicate so this and infer's field_and_declared_for_var
+# select the identical field — the `$ex_<vname>` forwarding head (and thus the
+# witness binders below) must agree across the two passes. A constrained var may sit
+# bare, function-typed, or nested in a compound field (`Bag (List a)`).
 fn field_var_for_constraint(existv: String, param_types: List types.Type, fields: List ast.Pattern) -> Maybe String =
   match (param_types, fields) with
   | (Cons pt pts, Cons f fs) ->
-      if lowering_type_is_var_named(pt, existv) then pattern_var_name(f)
+      if list_member(existv, types.ftv(pt)) then pattern_var_name(f)
       else field_var_for_constraint(existv, pts, fs)
   | _ -> Nothing
-
-fn lowering_type_is_var_named(t: types.Type, var: String) -> Bool =
-  match t with
-  | types.TVar n -> types.tyvar_identity(n) == var
-  | _ -> false
 
 fn pattern_var_name(p: ast.Pattern) -> Maybe String =
   match p with

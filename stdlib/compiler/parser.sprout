@@ -1465,10 +1465,51 @@ fn parse_type_constructor_def(tokens: Vec token.Token, i: Int) -> Result ParseEr
     (exist_vars, i0) <- parse_exists_prefix(tokens, i)
     (t, i2) <- expected_ident("constructor name", tokens, i0)
     (fields, any_vars, any_cons, i3) <- collect_ctor_fields(tokens, i2, Nil, Nil, Nil, 0)
+    # A trailing `where <constraints>` clause carries the explicit constrained-
+    # existential form `| exists a. Shown a where ToString a` (docs/gadts-v0.md §6),
+    # `where` (not `=>`) matching every other Sprout constraint site. It is validated
+    # against the `exists`-prefix vars below.
+    (where_cons, i4) <- parse_ctor_where_clause(tokens, i3)
+    _ <- validate_ctor_where(exist_vars, where_cons, tokens, i3)
     # The `any C` sugar hoists a fresh existential var + constraint per occurrence;
     # they extend any explicit `exists`-prefix vars. Stage 0b (docs/gadts-v0.md §6).
     Ok((ast.TypeConstructor(token.token_text(t), fields,
-                            list_append(exist_vars, any_vars), any_cons), i3))
+                            list_append(exist_vars, any_vars),
+                            list_append(any_cons, where_cons)), i4))
+
+# Parse an optional trailing `where <constraints>` clause on a constructor. Reuses
+# collect_constraints (comma-separated, terminating at `|` or a non-type token).
+# `where` is a reserved keyword, so collect_ctor_fields already halts before it.
+fn parse_ctor_where_clause(tokens: Vec token.Token, i: Int) -> Result ParseError (List ast.TypeConstraint, Int) =
+  match match_keyword(tokens, i, "where") with
+  | Nothing -> Ok((Nil, i))
+  | Just (_, i2) ->
+      do
+        (cons, i3) <- collect_constraints(tokens, i2, Nil)
+        Ok((list_reverse(cons), i3))
+
+# A constructor `where` clause is only meaningful for an existential: each
+# constraint must apply a class to a variable bound by the `exists` prefix.
+# Rejecting the no-prefix / free-variable cases keeps this from becoming a class
+# constraint on a head parameter (Haskell's deprecated DatatypeContexts).
+fn validate_ctor_where(exist_vars: List String, where_cons: List ast.TypeConstraint, tokens: Vec token.Token, i: Int) -> Result ParseError Unit =
+  match where_cons with
+  | Nil -> Ok(())
+  | Cons c rest ->
+      match constraint_var_name(c) with
+      | Nothing ->
+          Err(ParseError("a constructor `where` constraint must apply a class to a single `exists`-bound variable", cur_pos(tokens, i)))
+      | Just v ->
+          if list_member(v, exist_vars)
+          then validate_ctor_where(exist_vars, rest, tokens, i)
+          else Err(ParseError(string_concat_many(
+                 ["constructor `where` constraint references `", v,
+                  "`, which is not bound by an `exists` prefix"]), cur_pos(tokens, i)))
+
+fn constraint_var_name(c: ast.TypeConstraint) -> Maybe String =
+  match c with
+  | ast.TypeConstraint _ [ast.TypeName v | _] -> Just(v)
+  | ast.TypeConstraint _ _ -> Nothing
 
 # Collect constructor fields, recognizing the `any C` sugar (docs/gadts-v0.md §6)
 # in field position. A field `(any ToString)` (or bare `any ToString`) desugars
