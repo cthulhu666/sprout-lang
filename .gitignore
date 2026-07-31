@@ -14,8 +14,3 @@ sprout_shot.png
 # path at runtime; the compile-examples gate never loads it, so it is kept out
 # of git history. Drop the file here manually to see the ship scene.
 assets/models/rusty_spaceship.glb
-
-# Local Codeberg workflow config (see .codeberg.config.example).
-# Contains your repo coordinates and tea config path — not secret, but
-# host-/user-specific. Token itself stays in the tea config file.
-.codeberg.config

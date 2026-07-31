@@ -274,7 +274,7 @@ and decode-rejection for malformed input.  All pass; no suite regressions.
 
 ## References
 
-- Existing CI cache pattern: `.forgejo/workflows/ci.yml` `Cache stage-1 binary`
+- Existing CI cache pattern: `.github/workflows/ci.yml` `Cache stage-1 binary`
   step (commit `ae082e3`).
 - Memory: `feedback_build_artifacts_not_versioned.md` — artifacts go in
   `build/`, cached on CI, never in `bootstrap/` for new types of artifact.

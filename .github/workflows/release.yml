@@ -5,19 +5,28 @@ on:
     tags:
       - 'v*.*.*'
 
+# softprops/action-gh-release creates the GitHub release with the default
+# GITHUB_TOKEN, which needs contents:write.
+permissions:
+  contents: write
+
 jobs:
   build-linux-x86_64:
-    runs-on: [self-hosted, linux-x86_64]
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
-      - name: Add mise shims to PATH
-        run: echo "$HOME/.local/share/mise/shims" >> $GITHUB_PATH
+      - name: Install mise toolchain (just 1.39.0, from mise.toml)
+        uses: jdx/mise-action@v2
 
-      - name: Install Clang / LLVM
+      - name: Install LLVM/Clang, expose bare clang/opt on PATH
+        # See .github/workflows/ci.yml for the rationale (opaque-ptr IR needs
+        # LLVM >= 16; recipes call bare clang/opt from the versioned bindir).
         run: |
-          sudo apt-get install -y clang-16 llvm-16
-          echo "/usr/lib/llvm-16/bin" >> $GITHUB_PATH
+          sudo apt-get update
+          sudo apt-get install -y llvm clang
+          LLVM_BINDIR="$(ls -d /usr/lib/llvm-*/bin | sort -V | tail -n1)"
+          echo "$LLVM_BINDIR" >> "$GITHUB_PATH"
 
       - name: Bootstrap stage-1 from committed IR seed
         run: just bootstrap-from-seed
@@ -26,7 +35,7 @@ jobs:
         run: just compile-examples-stage1
 
       - name: Stage release binary
-        run: cp compile_driver_bin_stage1 sprout-linux-x86_64
+        run: cp build/compile_driver_bin_stage1 sprout-linux-x86_64
 
       - uses: actions/upload-artifact@v4
         with:
@@ -34,15 +43,20 @@ jobs:
           path: sprout-linux-x86_64
 
   build-linux-aarch64:
-    runs-on: [self-hosted, linux-aarch64]
+    # GitHub-hosted arm64 runner (free on public repos).
+    runs-on: ubuntu-24.04-arm
     steps:
       - uses: actions/checkout@v4
 
-      - name: Add mise shims to PATH
-        run: echo "$HOME/.local/share/mise/shims" >> $GITHUB_PATH
+      - name: Install mise toolchain (just 1.39.0, from mise.toml)
+        uses: jdx/mise-action@v2
 
-      - name: Install Clang / LLVM
-        run: sudo apt-get install -y clang llvm
+      - name: Install LLVM/Clang, expose bare clang/opt on PATH
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y llvm clang
+          LLVM_BINDIR="$(ls -d /usr/lib/llvm-*/bin | sort -V | tail -n1)"
+          echo "$LLVM_BINDIR" >> "$GITHUB_PATH"
 
       - name: Bootstrap stage-1 from committed IR seed
         run: just bootstrap-from-seed
@@ -51,7 +65,7 @@ jobs:
         run: just compile-examples-stage1
 
       - name: Stage release binary
-        run: cp compile_driver_bin_stage1 sprout-linux-aarch64
+        run: cp build/compile_driver_bin_stage1 sprout-linux-aarch64
 
       - uses: actions/upload-artifact@v4
         with:
@@ -59,7 +73,7 @@ jobs:
           path: sprout-linux-aarch64
 
   publish-release:
-    runs-on: [self-hosted, linux-x86_64]
+    runs-on: ubuntu-latest
     needs: [build-linux-x86_64, build-linux-aarch64]
     steps:
       - uses: actions/checkout@v4
@@ -72,9 +86,7 @@ jobs:
         with:
           name: sprout-linux-aarch64
 
-      - name: Create Forgejo release
-        # softprops/action-gh-release reads GITHUB_API_URL, which Forgejo Actions
-        # injects as https://codeberg.org/api/v1 — works with Forgejo transparently.
+      - name: Create GitHub release
         # macOS users build from source via `just bootstrap-from-seed`.
         uses: softprops/action-gh-release@v2
         with:

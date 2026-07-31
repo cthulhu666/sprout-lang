@@ -1,0 +1,148 @@
+name: CI
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+  schedule:
+    # Nightly run of the typed-codegen gate (required on PRs + master too).
+    # 03:00 UTC = low-traffic window.
+    - cron: '0 3 * * *'
+  workflow_dispatch:
+
+# Cancel a superseded run of the same ref so a fresh push (or a rebase/force-push
+# on a PR) reclaims a runner immediately instead of queuing behind the stale run.
+# The ref-scoped group keeps PRs from cancelling each other or master.
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    # Turn the runtime's invariant enforcers ON for every binary this job runs.
+    # These are runtime-read env vars (see sprout_runtime.c), so a single job-level
+    # declaration covers bootstrap, fixed-point verify, ci-fast-gates (incl. the
+    # example canary), the stdlib/compiler test suites, compile-examples, and
+    # test-stress — no duplicated pass, near-zero added CI time.
+    #   SPROUT_GC_HDRCHECK=1 — strlen-checks every CSTR header's aux byte-length at
+    #     str_byte_len and at GC sweep, and abort()s on mismatch. This is the
+    #     enforcer for the "every Sprout String is headered" invariant that lets
+    #     str_byte_len read payload-8 with no arena-membership check (see
+    #     docs/runtime-invariant-confidence-v0.md). Off by default; a bare-string
+    #     producer slipping in is a ~1/256 SILENT wrong length in prod but a
+    #     guaranteed loud abort here. Reproduce locally: SPROUT_GC_HDRCHECK=1 just test
+    env:
+      SPROUT_GC_HDRCHECK: "1"
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install mise toolchain (just 1.39.0, from mise.toml)
+        # Installs and activates the tools pinned in mise.toml and puts their shims
+        # on PATH for subsequent steps, so `just` resolves to the pinned version —
+        # matching the `mise exec -- just` path used locally and in AGENTS.md.
+        uses: jdx/mise-action@v2
+
+      - name: Install LLVM/Clang + ripgrep, expose bare clang/opt on PATH
+        # Sprout IR uses opaque pointer type → requires LLVM >= 16. The build recipes
+        # call BARE `clang` and `opt` (the IR verifier, via `opt --passes=verify`)
+        # from PATH; only the versioned LLVM bindir (/usr/lib/llvm-N/bin) carries the
+        # unversioned `clang`+`opt`. ubuntu-latest ships a newer LLVM (>= 16); pick
+        # the highest installed bindir rather than pinning a version that may not be
+        # apt-installable on a future runner image.
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y llvm clang ripgrep
+          LLVM_BINDIR="$(ls -d /usr/lib/llvm-*/bin | sort -V | tail -n1)"
+          echo "LLVM_BINDIR=$LLVM_BINDIR"
+          echo "$LLVM_BINDIR" >> "$GITHUB_PATH"
+          "$LLVM_BINDIR/clang" --version
+          "$LLVM_BINDIR/opt" --version
+
+      - name: Cache stage-1 binary
+        # Key on seed IR + runtime source. When unchanged, restore the linked
+        # stage-1 binary across CI runs — skips bootstrap-from-seed's
+        # `opt --passes=verify` + `clang -O2 ~298k LLVM IR lines`. The
+        # bootstrap-from-seed recipe has a guard that no-ops when
+        # build/compile_driver_bin_stage1 is newer than the seed, so restore order
+        # matters: cache runs AFTER checkout so the restored binary's mtime > the
+        # freshly-checked-out seed's mtime.
+        uses: actions/cache@v4
+        with:
+          path: build/compile_driver_bin_stage1
+          key: stage1-${{ runner.os }}-${{ hashFiles('bootstrap/compile_driver.ll', 'runtime/sprout_runtime.c') }}
+
+      - name: Bootstrap stage-1 from committed IR seed
+        run: just bootstrap-from-seed
+
+      - name: Verify bootstrap seed is a fixed point
+        # stage-1 (built from bootstrap/compile_driver.ll) must re-emit
+        # byte-identical IR for the current driver source. If this fails, someone
+        # changed compiler source without refreshing the seed via `just refresh-seed`.
+        run: just verify-bootstrap-fixed-point
+
+      - name: CI fast gates (parallel)
+        # 16 single-threaded gates fanned out JOBS-wide by `just ci-fast-gates`.
+        # Covers: APPROVED_BUILTINS guard, smoke shapes, bundle smoke, fmt-check,
+        # negative type/parse conformance, golden-stdout conformance, example canary,
+        # GC safety (--strict), and the regression smokes (argv / div-by-zero /
+        # stack-overflow / task-io / tco-runtime / trace-dispatch / verify-dispatch).
+        run: just ci-fast-gates
+
+      - name: Detect compiler-affecting changes
+        # The tests/stdlib/compiler/ suites each re-bundle the whole self-hosted
+        # compiler (~260k IR lines, ~15s emit) — the bulk of the stdlib-test CPU. They
+        # only need to run when something they depend on changed. This step decides
+        # whether to run them on THIS event; the next step is gated on its output.
+        #
+        # FAIL OPEN: on any non-pull_request event (push to master, nightly, dispatch)
+        # OR on any detection error, run the compiler tests. A wrong "skip" would hide
+        # a real breakage; a wrong "run" only costs time — uncertainty always runs.
+        #
+        # Dependency surface (conservative): the compiler is written in Sprout, pulls
+        # in the prelude/stdlib, is built from the seed, and links the C runtime — so a
+        # change to ANY of stdlib/ runtime/ bootstrap/ tests/stdlib/compiler/ justfile
+        # .github/ triggers a run. Only docs/examples/gfx-only PRs skip.
+        id: detect
+        run: |
+          set -u
+          if [ "${{ github.event_name }}" != "pull_request" ]; then
+            echo "non-PR event (${{ github.event_name }}) — running compiler tests"
+            echo "run_compiler=true" >> "$GITHUB_OUTPUT"; exit 0
+          fi
+          BASE="${{ github.base_ref }}"
+          # Shallow checkout has no base commit; fetch just its tip (depth 1). A plain
+          # two-dot tree diff (origin/BASE HEAD) needs no common ancestor and OVER-reports
+          # if base moved — safe direction (never under-reports a change).
+          if [ -z "$BASE" ] || ! git fetch --depth=1 origin "$BASE" 2>/dev/null; then
+            echo "could not resolve/fetch base '$BASE' — running compiler tests (fail open)"
+            echo "run_compiler=true" >> "$GITHUB_OUTPUT"; exit 0
+          fi
+          CHANGED=$(git diff --name-only "origin/$BASE" HEAD) || {
+            echo "git diff failed — running compiler tests (fail open)"
+            echo "run_compiler=true" >> "$GITHUB_OUTPUT"; exit 0; }
+          if printf '%s\n' "$CHANGED" | grep -qE '^(stdlib/|runtime/|bootstrap/|tests/stdlib/compiler/|justfile|\.github/)'; then
+            echo "compiler-affecting paths changed — running compiler tests"
+            echo "run_compiler=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "no compiler-affecting paths changed — SKIPPING compiler tests (still run on master + nightly)"
+            printf 'changed files:\n%s\n' "$CHANGED"
+            echo "run_compiler=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Run stdlib core tests (stage-1)
+        # tests/stdlib/* excluding the compiler/ subdir — always runs.
+        run: just test-stdlib-core-stage1
+
+      - name: Run compiler tests (stage-1)
+        # tests/stdlib/compiler/* — gated by the detect step above.
+        if: steps.detect.outputs.run_compiler == 'true'
+        run: just test-stdlib-compiler-stage1
+
+      - name: Verify examples compile (stage-1)
+        run: just compile-examples-stage1
+
+      - name: GC-stress pass (typed-codegen rooting guard, parallel)
+        # Curated rooting tests under SPROUT_GC_STRESS=1 (collect on every alloc).
+        # Default-threshold greens hide use-after-free rooting bugs; fails loudly.
+        run: just test-stress

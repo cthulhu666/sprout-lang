@@ -42,7 +42,7 @@ corruption into a loud, local signal.*
 
 ## What would raise confidence further (ranked by leverage)
 
-1. **✅ DONE — HDRCHECK on in CI.** The `test` job in `.forgejo/workflows/ci.yml` declares
+1. **✅ DONE — HDRCHECK on in CI.** The `test` job in `.github/workflows/ci.yml` declares
    `SPROUT_GC_HDRCHECK=1` at job level, so every binary it runs (bootstrap, fixed-point verify,
    `ci-fast-gates` incl. the example canary, the stdlib + compiler suites, `compile-examples`,
    `test-stress`) executes under the enforcer — one declaration, near-zero added CI time. A

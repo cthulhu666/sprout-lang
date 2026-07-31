@@ -418,7 +418,7 @@ test-stdlib-stage1: (_test-stdlib "build/compile_driver_bin_stage1")
 
 # Stage-1, core only (tests/stdlib/*, excluding the tests/stdlib/compiler/ subdir).
 # CI runs this on every PR; the compiler subdir is gated on compiler-affecting paths
-# (see .forgejo/workflows/ci.yml "Detect compiler-affecting changes"). The glob in
+# (see .github/workflows/ci.yml "Detect compiler-affecting changes"). The glob in
 # _test-stdlib is non-recursive, so "tests/stdlib" does NOT pull in the compiler subdir.
 [group('test')]
 test-stdlib-core-stage1: (_test-stdlib "build/compile_driver_bin_stage1" "tests/stdlib")
@@ -1618,7 +1618,7 @@ build-sproutd: bootstrap-from-seed
 # a silent reformat.
 #
 #   just gate-quick   fast edit->commit loop  (fmt-check, test, examples, 2 smokes)
-#   just gate         full CI parity          (mirrors .forgejo/workflows/ci.yml)
+#   just gate         full CI parity          (mirrors .github/workflows/ci.yml)
 #   just gate-audit   guard: fails if CI runs a `just` task `gate` does not cover
 #
 # `gate` is a superset of `gate-quick`; a green `gate` means CI will not surprise
@@ -1652,7 +1652,7 @@ gate: fmt-check smoke-shapes bundle-smoke loud-fail-smoke argv-smoke trace-dispa
 gate-audit:
   #!/usr/bin/env bash
   set -euo pipefail
-  CI_WORKFLOW=".forgejo/workflows/ci.yml"
+  CI_WORKFLOW=".github/workflows/ci.yml"
   # CI tasks gate intentionally omits: bootstrap/build deps (auto-run) and the
   # mutate-then-check seed path (gate covers it via verify-bootstrap-fixed-point).
   EXCLUDE="bootstrap-from-seed build-fmt-from-seed refresh-seed"
