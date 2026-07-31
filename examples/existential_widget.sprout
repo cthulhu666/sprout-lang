@@ -3,18 +3,21 @@ module examples.existential_widget
 # Shared hidden state via the explicit `exists` prefix (docs/gadts-v0.md §5.1,
 # spec §5.6) — the flagship existential shape the `any C` sugar CANNOT express.
 #
-# One `exists s.` binds a hidden STATE type `s` that spans SEVERAL fields: the
-# step function `s -> s` and the render function `s -> String`. So each Widget is
-# a little state machine closed over private state of its OWN type — and no caller
-# can see or unify that `s`. A counter (s = Int) and a text buffer (s = String)
-# sit side by side in one flat `List Widget`, each stepped and rendered through the
-# shared interface. Neither a closed sum (the set is open to new widget types) nor
-# a struct-of-arrays (the state types differ and are private) can express this.
+# A `WidgetView s` is a little state machine over some state type `s`: the current
+# `state`, a `step` that advances it, and a `render` that displays it. The
+# existential `exists s.` HIDES that state type behind the box, so a counter
+# (s = Int) and a text buffer (s = String) sit side by side in one flat
+# `List Widget`, each stepped and rendered through the shared interface — and no
+# caller can see or unify the private `s`. Neither a closed sum (the set is open to
+# new widget types) nor a struct-of-arrays (the state types differ and are private)
+# can express this.
 #
-# The prefix is what lets one hidden variable scope over MORE THAN ONE field —
-# `any C` is single-field sugar and could only hide a lone value.
+# The record NAMES the parts (`v.state` / `v.step` / `v.render`); the `exists`
+# prefix is what lets one hidden variable span them all — `any C` is single-field
+# sugar and could only hide a lone value.
 
-type Widget = | exists s. Widget s (s -> s)(s -> String)
+type WidgetView s = (state: s, step: s -> s, render: s -> String)
+type Widget = | exists s. Widget (WidgetView s)
 
 # A counter widget: private state is an Int; stepping increments it.
 fn count_up(n: Int) -> Int = n + 1
@@ -28,13 +31,14 @@ fn show_buf(buf: String) -> String = `buf="${buf}"`
 # the shared interface, without ever naming the hidden state type.
 fn run(w: Widget, n: Int) -> String =
   match w with
-  | Widget st step render -> render(step_n(step, st, n))
+  | Widget v -> v.render(step_n(v.step, v.state, n))
 
 fn step_n(step: s -> s, st: s, n: Int) -> s =
   if n <= 0 then st else step_n(step, step(st), n - 1)
 
 fn widgets() -> List Widget =
-  [Widget(0, count_up, show_count), Widget("", add_dot, show_buf)]
+  [Widget (WidgetView(state = 0, step = count_up, render = show_count)),
+   Widget(WidgetView(state = "", step = add_dot, render = show_buf))]
 
 fn main() -> Unit !{IO} =
   list_each(\w -> print(run(w, 3)), widgets())

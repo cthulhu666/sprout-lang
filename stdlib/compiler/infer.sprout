@@ -712,14 +712,45 @@ fn infer_call(
       if name == "print" then
         infer_print_call(state, env, subst, eff_subst, callee, cpos, args, pos)
       else
-        infer_call_var(state, env, subst, eff_subst, callee, name, cpos, args, pos)
-  | _ ->
-      do
-        cr <- infer_expr(state, env, subst, eff_subst, callee)
-        match cr with
-        | InferErr pos e -> InferErr(pos, e)
-        | InferOk typed_callee s1 es1 callee_eff ->
-            infer_call_inner(state, env, s1, es1, callee, typed_callee, callee_eff, dict_empty(), args, pos)
+        # `v.render(x)` — a call whose callee is a record field access on an
+        # in-scope value, not a bare/module-qualified function name. Rewrite the
+        # dotted callee to a GetFieldExpr chain and infer it as a general (higher-
+        # order) callee, mirroring infer_var_or_field's head-first dot rule (a local
+        # value wins over a same-named module). A module-qualified callee (head not
+        # in scope) falls through to infer_call_var unchanged.
+        match dotted_field_callee(name, env, cpos) with
+        | Just field_callee -> infer_call_general(state, env, subst, eff_subst, field_callee, args, pos)
+        | Nothing -> infer_call_var(state, env, subst, eff_subst, callee, name, cpos, args, pos)
+  | _ -> infer_call_general(state, env, subst, eff_subst, callee, args, pos)
+
+# If `name` is a dotted access whose head is an in-scope value (not a module),
+# return the GetFieldExpr chain for it; else Nothing (a plain or module-qualified
+# call). Same head-first, value-wins rule as infer_var_or_field.
+fn dotted_field_callee(name: String, env: Dict types.Scheme, pos: source.SourcePos) -> Maybe ast.Expr =
+  match string.split_once(name, ".") with
+  | Nothing -> Nothing
+  | Just (head, rest) ->
+      match dict_get(head, env) with
+      | Nothing -> Nothing
+      | Just _ -> Just(build_field_chain(ast.VarExpr(head, pos), rest, pos))
+
+# Infer a call whose callee is an arbitrary expression (not a bare function name):
+# infer the callee, then apply the arguments.
+fn infer_call_general(
+  state: unifier.InferState,
+  env: Dict types.Scheme,
+  subst: Dict types.Type,
+  eff_subst: Dict types.Effect,
+  callee: ast.Expr,
+  args: List ast.Expr,
+  pos: source.SourcePos
+) -> InferResult !{IO} =
+  do
+    cr <- infer_expr(state, env, subst, eff_subst, callee)
+    match cr with
+    | InferErr pos e -> InferErr(pos, e)
+    | InferOk typed_callee s1 es1 callee_eff ->
+        infer_call_inner(state, env, s1, es1, callee, typed_callee, callee_eff, dict_empty(), args, pos)
 
 # Package C-b part 2 (n-ary): a top-level function's declared parameter count is
 # stored as an "@arity:{name}" env marker (see pre_scan_fn_decls). A call that

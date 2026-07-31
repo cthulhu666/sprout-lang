@@ -4866,7 +4866,27 @@ fn translate_call(callee: typed_ast.TypedExpr, args: List typed_ast.TypedExpr,
                   | (call_blocks, call_lbl, call_ops, call_result, idx2) ->
                       Ok((list_append(inner_blocks, call_blocks), call_lbl, call_ops,
                            call_result, idx2))
-  | typed_ast.TGetField _ _ _ _ -> Err("ast_to_ir: method/field call not yet supported")
+  | typed_ast.TGetField _ _ _ _ ->
+      # A call whose callee is a record field access (`v.render(x)`): load the
+      # field's closure value into an SSA, then apply the args to it via
+      # IRApplyClosure — the same shape as the chained-call (TCall) arm above.
+      match translate_expr(callee, params, ctors, idx, cur_label, cur_ops,
+                           captures, lifted_ref, top_level, let_names, fn_arities,
+                           lambda_ctr_ref, lifted_idx_ref, name_prefix) with
+      | Err msg -> Err(msg)
+      | Ok fr ->
+          match fr with
+          | (field_blocks, field_lbl, field_ops, field_result, idx1) ->
+              match translate_closure_call(field_result, args, params, ctors, idx1,
+                                           field_lbl, field_ops,
+                                           captures, lifted_ref, top_level, let_names, fn_arities,
+                                           lambda_ctr_ref, lifted_idx_ref, name_prefix) with
+              | Err msg -> Err(msg)
+              | Ok cr ->
+                  match cr with
+                  | (call_blocks, call_lbl, call_ops, call_result, idx2) ->
+                      Ok((list_append(field_blocks, call_blocks), call_lbl, call_ops,
+                           call_result, idx2))
   | typed_ast.TDict _ _ _ _ -> Err("ast_to_ir: typeclass dispatch call not yet supported")
   | _ -> Err("ast_to_ir: indirect call not yet supported")
 

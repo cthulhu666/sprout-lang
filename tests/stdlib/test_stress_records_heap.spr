@@ -11,6 +11,14 @@ import stdlib.test (check_eq, check_true, run_suite)
 type Inner = (n: Int, tag: String)
 type Rec = (label: String, box: Inner, count: Int)
 
+# A record with a FUNCTION-typed field, for the inline field-call rooting path:
+# `ops.transform(arg)` loads the closure from the field, then evaluates `arg`
+# (which allocates) before applying — the loaded closure must stay rooted across
+# that allocation or it is swept (UAF under stress).
+type Ops = (transform: String -> String, base: String)
+
+fn shout(s: String) -> String = s ++ "!"
+
 # Each call allocates two CSTRs (int_to_string + concat) and drops them, forcing
 # the sweeper to run repeatedly between anchor assertions.
 fn churn(n: Int, acc: Int) -> Int =
@@ -59,4 +67,12 @@ fn main() -> Unit !{IO} =
       # The base is unchanged (immutability under GC).
       c11 = check_true("base label unchanged after update + churn", r.label == "lbl-7")
 
-  in run_suite("stress_records_heap", [c1, c2, c3, c4, c5, c6, c7, c8, c9, c10, c11])
+      # Inline function-field call whose ARGUMENT allocates AFTER the closure is
+      # loaded from the field — the field-loaded closure must survive the arg's
+      # collection. Churn first for maximum GC pressure around it.
+      ops = Ops(transform = shout, base = "hi")
+      _b6 = churn(3000, 0)
+      c12 = check_true("field-loaded closure rooted across allocating arg",
+                       ops.transform("x" ++ int_to_string(9)) == "x9!")
+
+  in run_suite("stress_records_heap", [c1, c2, c3, c4, c5, c6, c7, c8, c9, c10, c11, c12])
