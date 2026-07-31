@@ -1,0 +1,61 @@
+# TDD — Stage 0b generalization: MULTI-METHOD constrained existentials.
+# (docs/gadts-v0.md §5, BACKLOG "Multi-method / superclass existentials".)
+#
+# The `any C` box must pack the FULL method table, not just one function.
+# `Describe` has two methods; boxing a value as `any Describe` must let BOTH
+# `dname` and `dsize` dispatch through the unpacked value's own witness.
+#
+# This is the mis-order discriminator: the two methods have DISTINCT return
+# types (String vs Int), so if the two witness slots are packed and unpacked in
+# the wrong order, `dname(x)` dispatches through `dsize`'s pointer and the output
+# is wrong (or the program crashes) rather than "int"/"str".
+
+import stdlib.test (check_eq, run_suite)
+
+class Describe a {
+  fn dname(v: a) -> String
+  fn dsize(v: a) -> Int
+}
+
+instance Describe Int {
+  fn dname(v: Int) -> String = "int"
+  fn dsize(v: Int) -> Int = v
+}
+
+instance Describe String {
+  fn dname(v: String) -> String = "str"
+  fn dsize(v: String) -> Int = str_len(v)
+}
+
+type Box = | Box (any Describe)
+
+fn box_name(b: Box) -> String =
+  match b with
+  | Box x -> dname(x)
+
+fn box_size(b: Box) -> Int =
+  match b with
+  | Box x -> dsize(x)
+
+# Regression: BOTH methods called on ONE unpacked value in the same scope. The
+# earlier per-method helpers each unpack separately, so they never exercised a
+# second class-method call on the same skolem — where the `@fwd:sk:class` given
+# lookup used the qualified class name while the given was seeded bare.
+fn box_both(b: Box) -> String =
+  match b with
+  | Box x -> `${dname(x)}=${int_to_string(dsize(x))}`
+
+fn main() -> Unit !{IO} =
+  run_suite("existential_multimethod", [
+    check_eq("int name via first slot", box_name(Box(42)), "int"),
+    check_eq("int size via second slot", box_size(Box(42)), 42),
+    check_eq("string name via first slot", box_name(Box("hello")), "str"),
+    check_eq("string size via second slot", box_size(Box("hello")), 5),
+    check_eq(
+      "heterogeneous list dispatches both methods per element",
+      string_concat_many(list_map(box_name, [Box(42), Box("hello")])),
+      "intstr"
+    ),
+    check_eq("both methods on one unpacked value (int)", box_both(Box(42)), "int=42"),
+    check_eq("both methods on one unpacked value (string)", box_both(Box("hello")), "str=5")
+  ])

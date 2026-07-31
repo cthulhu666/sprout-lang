@@ -3108,8 +3108,18 @@ fn seed_one_given(var: String, class_name: String, param_types: List types.Type,
 # types.existential_fwd_head.
 fn seed_from_skolem(class_name: String, vname: String, t: types.Type, env: Dict types.Scheme) -> Dict types.Scheme =
   match skolem_name_of_type(t) with
-  | Just sk -> dict_set("@fwd:" ++ sk ++ ":" ++ class_name,
-                        types.mono(types.TConst(types.type_id(types.existential_fwd_head(vname)))), env)
+  | Just sk ->
+      # Seed the direct `@fwd:sk:class` given, then layer superclass givens
+      # (`@fwd:sk:super` for each `@super:class:*`) — a multi-method/superclass
+      # existential must forward its inherited methods too, exactly as a
+      # `where C a` function does via seed_fwd_with_supers. The stable
+      # `$ex_<var>` head is passed as the marker value so lowering's ctx_fwd,
+      # keyed by the same head, agrees for every effective class. class_name is
+      # already qualified (bundler.qualify_ctor_args qualifies exist_constraints),
+      # so it matches resolve_skolem_given's lookup off the class marker.
+      seed_superclass_fwd_markers(class_name, sk, types.existential_fwd_head(vname),
+        dict_set("@fwd:" ++ sk ++ ":" ++ class_name,
+                 types.mono(types.TConst(types.type_id(types.existential_fwd_head(vname)))), env))
   | Nothing -> env
 
 # Walk the ctor's param types alongside the pattern fields, returning the field
@@ -3969,78 +3979,16 @@ fn check_overlapping_instances(decls: List ast.Decl, seen: Dict Bool) -> Maybe(s
 # superclass may constrain a SUBSET of the class variables, so the required instance
 # is `Sup A`, not `Sup A B`. Do NOT generalize this to "all type args": that would
 # encode the wrong assumption. When multi-parameter classes land, revisit here.
-# Stage 0b guard (docs/gadts-v0.md §5b/§10): the crude one-witness-slot-per-
-# constraint packing (ast_to_ir.register_ctor_one) is EXACT only when the
-# constrained class contributes exactly one dictionary method — a single-method
-# class with no superclasses (e.g. ToString). Reject `any C` on a richer class with
-# a clear, located message rather than let it surface as a downstream ctor-arity
-# mismatch. Multi-method / superclass existentials await the shared witness-slot
-# enumerator (BACKLOG). Skips any C that is not a known class here — a separate
-# check reports an unknown class.
-fn check_existential_constraints(decls: List ast.Decl) -> Maybe(source.SourcePos, String) =
-  check_exist_ctors_go(decls, build_class_methods_map(decls, dict_empty()), build_class_super_map(decls, dict_empty()))
-
-fn check_exist_ctors_go(decls: List ast.Decl, methods_map: Dict (List String), super_map: Dict (List String)) -> Maybe(source.SourcePos, String) =
-  match decls with
-  | Nil -> Nothing
-  | Cons decl rest ->
-      match decl with
-      | ast.TypeDecl _ _ ctors _ _ ->
-          match check_exist_ctors_list(ctors, ast.decl_pos(decl), methods_map, super_map) with
-          | Just err -> Just(err)
-          | Nothing -> check_exist_ctors_go(rest, methods_map, super_map)
-      | _ -> check_exist_ctors_go(rest, methods_map, super_map)
-
-fn check_exist_ctors_list(ctors: List ast.TypeConstructor, pos: source.SourcePos, methods_map: Dict (List String), super_map: Dict (List String)) -> Maybe(source.SourcePos, String) =
-  match ctors with
-  | Nil -> Nothing
-  | Cons ctor rest ->
-      match ctor with
-      | ast.TypeConstructor _ _ _ exist_constraints ->
-          match check_exist_constraint_list(exist_constraints, pos, methods_map, super_map) with
-          | Just err -> Just(err)
-          | Nothing -> check_exist_ctors_list(rest, pos, methods_map, super_map)
-
-fn check_exist_constraint_list(cs: List ast.TypeConstraint, pos: source.SourcePos, methods_map: Dict (List String), super_map: Dict (List String)) -> Maybe(source.SourcePos, String) =
-  match cs with
-  | Nil -> Nothing
-  | Cons c rest ->
-      match check_one_exist_constraint(c, pos, methods_map, super_map) with
-      | Just err -> Just(err)
-      | Nothing -> check_exist_constraint_list(rest, pos, methods_map, super_map)
-
-fn check_one_exist_constraint(c: ast.TypeConstraint, pos: source.SourcePos, methods_map: Dict (List String), super_map: Dict (List String)) -> Maybe(source.SourcePos, String) =
-  match c with
-  | ast.TypeConstraint class_name _ ->
-      match dict_get(string.after_last_dot(class_name), methods_map) with
-      | Nothing -> Nothing
-      | Just methods ->
-          if list_length(methods) != 1 then
-            Just((pos, "existential `any " ++ class_name ++ "` is only supported for single-method classes (Stage 0b); " ++ class_name ++ " has " ++ int_to_string(list_length(methods)) ++ " methods"))
-          else if exist_class_has_supers(string.after_last_dot(class_name), super_map) then
-            Just((pos, "existential `any " ++ class_name ++ "` is not yet supported for classes with superclasses (Stage 0b)"))
-          else Nothing
-
-fn exist_class_has_supers(class_name: String, super_map: Dict (List String)) -> Bool =
-  match dict_get(class_name, super_map) with
-  | Just (Cons _ _) -> true
-  | _ -> false
-
-fn build_class_methods_map(decls: List ast.Decl, acc: Dict (List String)) -> Dict (List String) =
-  match decls with
-  | Nil -> acc
-  | Cons decl rest ->
-      match decl with
-      | ast.ClassDecl name _ methods _ _ ->
-          build_class_methods_map(rest, dict_set(string.after_last_dot(name), class_method_names(methods), acc))
-      | _ -> build_class_methods_map(rest, acc)
-
-fn class_method_names(methods: List ast.ClassMethodSig) -> List String =
-  match methods with
-  | Nil -> Nil
-  | Cons m rest ->
-      match m with
-      | ast.ClassMethodSig mname _ _ _ -> Cons(mname, class_method_names(rest))
+# Stage 0b generalization (docs/gadts-v0.md §5b): multi-method and superclass
+# constrained existentials are now supported. The witness-slot enumerator
+# (types.witness_slots_for_class) sizes the packed dictionary to one field per
+# method across each constraint's class AND its transitive superclasses, and
+# lowering forwards a ctx_fwd block per effective class — so the former
+# single-method / superclass-free restriction is lifted. No existential-specific
+# declaration rejection remains; this hook is retained (always Nothing) as the
+# home for any future existential validation.
+fn check_existential_constraints(_decls: List ast.Decl) -> Maybe(source.SourcePos, String) =
+  Nothing
 
 fn check_missing_superclass_instances(decls: List ast.Decl) -> Maybe(source.SourcePos, String) =
   check_inst_supers_go(decls, build_class_super_map(decls, dict_empty()), build_inst_key_set(decls, dict_empty()))

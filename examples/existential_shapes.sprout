@@ -1,0 +1,49 @@
+module examples.existential_shapes
+
+# Multi-method constrained existentials — a user-defined interface as a trait
+# object (docs/gadts-v0.md §5b, spec §5.6).
+#
+# `Shape` is an interface with TWO methods: every shape can report its `area` and
+# its `name`. A `Drawable` box hides a value of ANY type that implements `Shape`,
+# packing BOTH method witnesses inside. So one flat `List Drawable` holds a circle,
+# a rectangle, and a square side by side — and each dispatches BOTH methods through
+# its own packed witnesses. A single-method box (e.g. `any ToString`) could not
+# express this; the box carries the whole interface, not one function.
+
+class Shape a {
+  fn area(s: a) -> Int
+  fn name(s: a) -> String
+}
+
+type Circle = | Circle Int  # radius
+type Rect = | Rect Int Int  # width, height
+type Square = | Square Int  # side
+
+instance Shape Circle {
+  fn area(s: Circle) -> Int = match s with | Circle r -> 3 * r * r  # ~pi r^2
+  fn name(s: Circle) -> String = "circle"
+}
+
+instance Shape Rect {
+  fn area(s: Rect) -> Int = match s with | Rect w h -> w * h
+  fn name(s: Rect) -> String = "rect"
+}
+
+instance Shape Square {
+  fn area(s: Square) -> Int = match s with | Square side -> side * side
+  fn name(s: Square) -> String = "square"
+}
+
+type Drawable = | Drawable (any Shape)
+
+# Unpacking binds the hidden value at a rigid, abstract type; BOTH `name` and
+# `area` dispatch on the witnesses packed at construction.
+fn describe(d: Drawable) -> String =
+  match d with
+  | Drawable s -> `${name(s)}: ${int_to_string(area(s))}`
+
+fn scene() -> List Drawable =
+  [Drawable (Circle(2)), Drawable (Rect(3, 4)), Drawable (Square(5))]
+
+fn main() -> Unit !{IO} =
+  list_each(\d -> print(describe(d)), scene())

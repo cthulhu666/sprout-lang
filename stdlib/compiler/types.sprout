@@ -97,6 +97,67 @@ fn any_mentions_skolem(items: List Type) -> Bool =
   | Nil -> false
   | Cons h t -> if type_mentions_skolem(h) then true else any_mentions_skolem(t)
 
+# ── Class graph traversal + existential witness-slot enumeration ──────────────
+# Shared home (this leaf is imported by both lowering and ast_to_ir) for the
+# transitive-superclass dictionary layout. The normal dict-passing path
+# (lowering), the constrained-existential witness-field COUNT (ast_to_ir), and
+# its UNPACK (lowering) all derive slot layout from here, so they cannot drift
+# (docs/gadts-v0.md §5b; BACKLOG "Multi-method / superclass existentials").
+
+# The class itself followed by all transitive superclasses in DFS order, deduped.
+# Keyed by the bare (post-`after_last_dot`) class name, matching class_order and
+# super_map, which collect_class_order/collect_super_map build from ClassDecls.
+export fn class_with_transitive_supers(class_name: String, super_map: Dict (List String)) -> List String =
+  list_reverse(collect_supers_dfs(Cons(class_name, Nil), super_map, Nil))
+
+fn collect_supers_dfs(stack: List String, super_map: Dict (List String), visited: List String) -> List String =
+  match stack with
+  | Nil -> visited
+  | Cons name rest ->
+      if list_member(name, visited)
+      then collect_supers_dfs(rest, super_map, visited)
+      else collect_supers_dfs(prepend_supers(name, super_map, rest), super_map, Cons(name, visited))
+
+fn prepend_supers(name: String, super_map: Dict (List String), rest: List String) -> List String =
+  match dict_get(name, super_map) with
+  | Nothing -> rest
+  | Just supers -> append_str_list(supers, rest)
+
+fn append_str_list(xs: List String, ys: List String) -> List String =
+  match xs with
+  | Nil -> ys
+  | Cons h t -> Cons(h, append_str_list(t, ys))
+
+export fn class_methods_for(class_name: String, class_order: Dict (List String)) -> List String =
+  match dict_get(class_name, class_order) with
+  | Nothing -> Nil
+  | Just ms -> ms
+
+# Ordered witness slots for ONE existential constraint's class: one (eff_class,
+# method) pair per method across the class and its transitive superclasses, in
+# the SAME order the dict-lowering path (build_hidden_for_constraints /
+# consume_blocks) lays down dictionary arguments. The slot COUNT is the length;
+# slot i corresponds to the i-th packed `'p'` witness field, so unpack binds
+# field i and dispatches its method through it.
+# class_name is used AS-IS to key class_order/super_map: after bundler qualifies
+# exist_constraints, all three (constraint, ClassDecl-derived class_order/super_map
+# keys, and their transitive-super values) share the same qualified form, so no
+# after_last_dot normalization is applied here (that would strip to a bare key the
+# maps don't hold for a user class in a module).
+export fn witness_slots_for_class(class_name: String, class_order: Dict (List String), super_map: Dict (List String)) -> List (String, String) =
+  witness_slots_flatten(class_with_transitive_supers(class_name, super_map), class_order)
+
+fn witness_slots_flatten(classes: List String, class_order: Dict (List String)) -> List (String, String) =
+  match classes with
+  | Nil -> Nil
+  | Cons eff rest ->
+      append_eff_methods(eff, class_methods_for(eff, class_order), witness_slots_flatten(rest, class_order))
+
+fn append_eff_methods(eff: String, methods: List String, tail: List (String, String)) -> List (String, String) =
+  match methods with
+  | Nil -> tail
+  | Cons m rest -> Cons((eff, m), append_eff_methods(eff, rest, tail))
+
 # Display form: the short (last-segment) name, for diagnostics.
 export fn type_id_display(id: TypeId) -> String =
   string.after_last_dot(type_id_name(id))

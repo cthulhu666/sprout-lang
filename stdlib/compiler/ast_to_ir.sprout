@@ -479,26 +479,70 @@ fn build_load_env_ops_go(frees: List String, kinds: List sprout_ir.IRType, base_
 # and the flat CtorReg list (with field_kinds) used by ir_lowering for
 # @sprout_register_ctor emission.  Every ctor is registered — both boxed and
 # CPR-eligible — so the runtime's find_ctor(tag) never returns NULL.
+# class_order / super_map builders. Declaration-order extraction only (no
+# ordering heuristic that could diverge); the drift-prone traversal lives once in
+# types.witness_slots_for_class. Twins of lowering.collect_class_order /
+# collect_super_map — kept local to avoid a cross-pass import; both faithfully
+# extract the same (class → names-in-decl-order) content.
+fn ai_collect_class_order(decls: List typed_ast.TypedDecl, acc: Dict (List String)) -> Dict (List String) =
+  match decls with
+  | Nil -> acc
+  | Cons d rest ->
+      match d with
+      | typed_ast.TPassThrough (ast.ClassDecl class_name _ methods _ _) ->
+          ai_collect_class_order(rest, dict_set(class_name, ai_method_names(methods, Nil), acc))
+      | _ -> ai_collect_class_order(rest, acc)
+
+fn ai_method_names(methods: List ast.ClassMethodSig, acc: List String) -> List String =
+  match methods with
+  | Nil -> list_reverse(acc)
+  | Cons sig rest ->
+      match sig with
+      | ast.ClassMethodSig name _ _ _ -> ai_method_names(rest, Cons(name, acc))
+
+fn ai_collect_super_map(decls: List typed_ast.TypedDecl, acc: Dict (List String)) -> Dict (List String) =
+  match decls with
+  | Nil -> acc
+  | Cons d rest ->
+      match d with
+      | typed_ast.TPassThrough (ast.ClassDecl class_name _ _ supers _) ->
+          ai_collect_super_map(rest, dict_set(class_name, ai_super_names(supers, Nil), acc))
+      | _ -> ai_collect_super_map(rest, acc)
+
+fn ai_super_names(supers: List ast.TypeConstraint, acc: List String) -> List String =
+  match supers with
+  | Nil -> list_reverse(acc)
+  | Cons c rest ->
+      match c with
+      | ast.TypeConstraint super_name _ -> ai_super_names(rest, Cons(super_name, acc))
+
+# cenv = (class_order, super_map): class→methods and class→direct-supers, in
+# declaration order. Threaded so register_ctor_entries can size a constrained
+# existential's packed witness fields via types.witness_slots_for_class (the SAME
+# transitive-super method expansion the dict-lowering path uses), matching the
+# per-method witness args construction packs.
 export fn build_ctor_table(decls: List typed_ast.TypedDecl) -> (Dict sprout_ir.CtorInfo, List sprout_ir.CtorReg) =
-  build_ctor_table_acc(decls, 0, dict_empty(), Nil)
+  build_ctor_table_acc(decls, 0, dict_empty(), Nil,
+                       (ai_collect_class_order(decls, dict_empty()), ai_collect_super_map(decls, dict_empty())))
 
 fn build_ctor_table_acc(decls: List typed_ast.TypedDecl, next_tag: Int,
                         acc: Dict sprout_ir.CtorInfo,
-                        regs: List sprout_ir.CtorReg) -> (Dict sprout_ir.CtorInfo, List sprout_ir.CtorReg) =
+                        regs: List sprout_ir.CtorReg,
+                        cenv: (Dict (List String), Dict (List String))) -> (Dict sprout_ir.CtorInfo, List sprout_ir.CtorReg) =
   match decls with
   | Nil -> (acc, list_reverse(regs))
   | Cons decl rest ->
       match decl with
       | typed_ast.TPassThrough (ast.TypeDecl _ _ ctors _ _) ->
-          match register_ctor_entries(ctors, next_tag, max_arity_of(ctors, 0), acc, regs) with
-          | (acc1, new_tag, regs1) -> build_ctor_table_acc(rest, new_tag, acc1, regs1)
+          match register_ctor_entries(ctors, next_tag, max_arity_of(ctors, 0), acc, regs, cenv) with
+          | (acc1, new_tag, regs1) -> build_ctor_table_acc(rest, new_tag, acc1, regs1, cenv)
       # Wrap types: synthetic ctor with tag sentinel -1 (mirrors codegen.sprout wrap_tag() = -1).
       # Not added to regs — wrap types have no runtime allocation or tag.
       # next_tag is not incremented: wrap consumes no numeric tag slot.
       | typed_ast.TPassThrough (ast.WrapDecl type_name inner _) ->
           build_ctor_table_acc(rest, next_tag,
             dict_set(type_name, sprout_ir.CtorInfo(-1, 1, 1, fk.ctor_field_kinds_string(Cons(inner, Nil)), ""), acc),
-            regs)
+            regs, cenv)
       # Records: a single-constructor product keyed by the type name.  It carries
       # a real tag/arity (it allocates a boxed object via IRMakeCtor, unlike wrap)
       # plus declaration-order field names so codegen can resolve `.field` offsets
@@ -511,8 +555,8 @@ fn build_ctor_table_acc(decls: List typed_ast.TypedDecl, next_tag: Int,
                                  fk.ctor_field_kinds_string(record_field_types(fields)),
                                  record_field_names_csv(fields)),
               acc),
-            regs)
-      | _ -> build_ctor_table_acc(rest, next_tag, acc, regs)
+            regs, cenv)
+      | _ -> build_ctor_table_acc(rest, next_tag, acc, regs, cenv)
 
 # Declaration-order field TypeExprs of a record, for field-kind computation.
 fn record_field_types(fields: List ast.RecordFieldDecl) -> List ast.TypeExpr =
@@ -547,20 +591,22 @@ fn max_arity_of(ctors: List ast.TypeConstructor, m: Int) -> Int =
 
 fn register_ctor_entries(ctors: List ast.TypeConstructor, next_tag: Int,
                          max_ar: Int, acc: Dict sprout_ir.CtorInfo,
-                         regs: List sprout_ir.CtorReg) -> (Dict sprout_ir.CtorInfo, Int, List sprout_ir.CtorReg) =
+                         regs: List sprout_ir.CtorReg,
+                         cenv: (Dict (List String), Dict (List String))) -> (Dict sprout_ir.CtorInfo, Int, List sprout_ir.CtorReg) =
   match ctors with
   | Nil -> (acc, next_tag, regs)
   | Cons tc rest ->
       match tc with
       | ast.TypeConstructor ctor_name ctor_args _ exist_constraints ->
           # Stage 0b: a constrained existential packs one hidden dictionary field
-          # per constraint (docs/gadts-v0.md §5b). These extra `'p'` (heap) fields
-          # are PHYSICAL — invisible to the user-facing ctor and never serialized
-          # (CtorInfo is codegen-only, unlike the iface-visible scheme). The witness
-          # count must equal what lowering's dict expansion emits; both derive it
-          # from witness_slot_count so they cannot drift.
-          register_ctor_one(ctor_name, ctor_args, witness_slot_count(exist_constraints),
-                            rest, next_tag, max_ar, acc, regs)
+          # per witness slot — one per method across each constraint's class AND
+          # its transitive superclasses (docs/gadts-v0.md §5b). These extra `'p'`
+          # (heap) fields are PHYSICAL — invisible to the user-facing ctor and never
+          # serialized (CtorInfo is codegen-only, unlike the iface-visible scheme).
+          # The count must equal what construction's dict expansion emits; both
+          # derive from types.witness_slots_for_class so they cannot drift.
+          register_ctor_one(ctor_name, ctor_args, witness_slot_count(exist_constraints, cenv),
+                            rest, next_tag, max_ar, acc, regs, cenv)
 
 # /code-review fix #9: helper that computes arity and fks ONCE per ctor.
 # Without this, register_ctor_entries called list_length(ctor_args) and
@@ -572,21 +618,30 @@ fn register_ctor_entries(ctors: List ast.TypeConstructor, next_tag: Int,
 fn register_ctor_one(ctor_name: String, ctor_args: List ast.TypeExpr, witness_slots: Int,
                      rest: List ast.TypeConstructor, next_tag: Int, max_ar: Int,
                      acc: Dict sprout_ir.CtorInfo,
-                     regs: List sprout_ir.CtorReg) ->
+                     regs: List sprout_ir.CtorReg,
+                     cenv: (Dict (List String), Dict (List String))) ->
     (Dict sprout_ir.CtorInfo, Int, List sprout_ir.CtorReg) =
   register_ctor_entries(rest, next_tag + 1, max_ar,
                         dict_set(ctor_name, sprout_ir.CtorInfo(next_tag, arity, max_ar, fks, ""), acc),
-                        Cons(sprout_ir.CtorReg(ctor_name, next_tag, arity, fks), regs))
+                        Cons(sprout_ir.CtorReg(ctor_name, next_tag, arity, fks), regs), cenv)
   where arity = list_length(ctor_args) + witness_slots
         fks = fk.ctor_field_kinds_string(ctor_args) ++ witness_field_kinds(witness_slots)
 
 # Stage 0b: physical heap-field slots a constrained existential's packed
-# dictionaries occupy. Crude single-slot-per-constraint count — EXACT for a
-# single-method, superclass-free class (e.g. ToString), the `any C` common case.
-# TODO(multi-method/superclass): replace with the shared witness-slot enumerator
-# so the count equals lowering's transitive-super method expansion.
-fn witness_slot_count(exist_constraints: List ast.TypeConstraint) -> Int =
-  list_length(exist_constraints)
+# dictionaries occupy = the total number of dictionary methods across each
+# constraint's class and its transitive superclasses, via the shared enumerator
+# so the count equals construction's per-method dict expansion (cannot drift).
+fn witness_slot_count(exist_constraints: List ast.TypeConstraint,
+                      cenv: (Dict (List String), Dict (List String))) -> Int =
+  match cenv with
+  | (class_order, super_map) ->
+      match exist_constraints with
+      | Nil -> 0
+      | Cons c rest ->
+          match c with
+          | ast.TypeConstraint class_name _ ->
+              list_length(types.witness_slots_for_class(class_name, class_order, super_map))
+                + witness_slot_count(rest, cenv)
 
 # `'p'` (traced heap pointer) per witness slot — a packed dictionary is a
 # function-pointer/closure value, so the GC must trace it.

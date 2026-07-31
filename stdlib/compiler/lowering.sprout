@@ -229,34 +229,9 @@ fn extract_super_names(supers: List ast.TypeConstraint, acc: List String) -> Lis
       | ast.TypeConstraint super_name _ ->
           extract_super_names(rest, Cons(super_name, acc))
 
-# Returns the class itself followed by all transitive superclasses in DFS order,
-# deduplicated.  Used to compute the ordered list of class names whose method
-# slots a constraint instance dictionary must populate.
-fn class_with_transitive_supers(class_name: String, super_map: Dict (List String)) -> List String =
-  list_reverse(collect_supers_dfs(Cons(class_name, Nil), super_map, Nil))
-
-fn collect_supers_dfs(stack: List String, super_map: Dict (List String), visited: List String) -> List String =
-  match stack with
-  | Nil -> visited
-  | Cons name rest ->
-      if list_str_member(name, visited)
-      then collect_supers_dfs(rest, super_map, visited)
-      else collect_supers_dfs(prepend_supers(name, super_map, rest), super_map, Cons(name, visited))
-
-fn prepend_supers(name: String, super_map: Dict (List String), rest: List String) -> List String =
-  match dict_get(name, super_map) with
-  | Nothing -> rest
-  | Just supers -> append_str_list(supers, rest)
-
-fn append_str_list(xs: List String, ys: List String) -> List String =
-  match xs with
-  | Nil -> ys
-  | Cons h t -> Cons(h, append_str_list(t, ys))
-
-fn list_str_member(x: String, xs: List String) -> Bool =
-  match xs with
-  | Nil -> false
-  | Cons h rest -> if h == x then true else list_str_member(x, rest)
+# class_with_transitive_supers / class_methods_for moved to types.sprout (the
+# shared leaf) so the existential witness-slot count/unpack and this dict path
+# derive layout from ONE traversal and cannot drift.
 
 # ---------------------------------------------------------------------------
 # Pass 1 – collect instance_table
@@ -358,9 +333,15 @@ fn lower_one_decl(
   match d with
   | typed_ast.TPassThrough inner ->
       match inner with
-      # Generate class method dispatch wrappers; drop ClassDecl from output.
+      # Generate class method dispatch wrappers, and RETAIN the ClassDecl in the
+      # output. It carries no runtime code (every downstream decl pass extracts
+      # specific decl kinds and skips it), but ast_to_ir.build_ctor_table rebuilds
+      # class_order/super_map from it to size a constrained existential's packed
+      # witness fields (types.witness_slots_for_class) — that metadata is gone
+      # otherwise, since lowering is where ClassDecls would be dropped. Do NOT
+      # re-drop it: the existential witness count needs it post-lowering.
       | ast.ClassDecl class_name _ methods _ _ ->
-          (user_rev,
+          (Cons(typed_ast.TPassThrough(inner), user_rev),
            prepend_decls(generate_class_wrappers(class_name, methods, env_class_order(env), env_super_map(env), env_scheme_env(env)), wrapper_rev),
            inst_rev)
       # Drop InstanceDecl — replaced by generated instance fns.
@@ -406,7 +387,7 @@ fn generate_class_wrappers(
   scheme_env: Dict types.Scheme
 ) -> List typed_ast.TypedDecl =
   generate_class_wrappers_acc(class_name, methods, hidden_params_for_classes(
-                                                     class_with_transitive_supers(class_name, super_map),
+                                                     types.class_with_transitive_supers(class_name, super_map),
                                                      0, class_order, Nil), scheme_env, Nil)
 
 fn generate_class_wrappers_acc(
@@ -434,7 +415,7 @@ fn hidden_params_for_classes(
   | Nil -> list_reverse(acc)
   | Cons c rest ->
       hidden_params_for_classes(rest, idx, class_order,
-        prepend_class_hidden_params(c, idx, class_methods_for(c, class_order), acc))
+        prepend_class_hidden_params(c, idx, types.class_methods_for(c, class_order), acc))
 
 fn prepend_class_hidden_params(
   class_name: String,
@@ -578,7 +559,7 @@ fn build_hidden_acc(
       | ast.TypeConstraint class_name type_args ->
           match build_hidden_for_constraint_with_supers(
                   class_name, type_args, idx,
-                  class_with_transitive_supers(class_name, super_map),
+                  types.class_with_transitive_supers(class_name, super_map),
                   class_order, param_rev, map_acc) with
           | (param_rev2, map_acc2) ->
               build_hidden_acc(rest, class_order, super_map, idx + 1, param_rev2, map_acc2)
@@ -600,7 +581,7 @@ fn build_hidden_for_constraint_with_supers(
   match classes with
   | Nil -> (param_rev, map_acc)
   | Cons eff_class rest ->
-      match build_hidden_for_one(eff_class, idx, class_methods_for(eff_class, class_order)) with
+      match build_hidden_for_one(eff_class, idx, types.class_methods_for(eff_class, class_order)) with
       | (new_params, method_map) ->
           build_hidden_for_constraint_with_supers(direct_class, type_args, idx, rest, class_order,
             prepend_params(new_params, param_rev),
@@ -647,11 +628,6 @@ fn tc_slot_name(class_name: String, idx: Int, method_name: String) -> String =
 # translate_direct_call keys on "__cm_Semigroup_append").
 fn classmethod_dispatch_name(class_name: String, method_name: String) -> String =
   string_concat_many(["__cm_", string.after_last_dot(class_name), "_", string.after_last_dot(method_name)])
-
-fn class_methods_for(class_name: String, class_order: Dict (List String)) -> List String =
-  match dict_get(class_name, class_order) with
-  | Nothing -> Nil
-  | Just ms -> ms
 
 # ---------------------------------------------------------------------------
 # Constraint key helpers
@@ -1426,7 +1402,7 @@ fn evidence_unresolved_witnesses(
   ctx: LowerCtx
 ) -> List typed_ast.TypedExpr =
   unresolved_witnesses_for_classes(
-    class_with_transitive_supers(class_name, ctx_super_map(ctx)), type_args, pos, ctx)
+    types.class_with_transitive_supers(class_name, ctx_super_map(ctx)), type_args, pos, ctx)
 
 fn unresolved_witnesses_for_classes(
   classes: List String,
@@ -1442,7 +1418,7 @@ fn unresolved_witnesses_for_classes(
           \_ -> typed_ast.TVar(
             "__unresolved_" ++ constraint_key_str(string.after_last_dot(eff_class), type_args),
             types.TVar(types.tyvar_id("?gen")), pos),
-          class_methods_for(eff_class, ctx_class_order(ctx))),
+          types.class_methods_for(eff_class, ctx_class_order(ctx))),
         unresolved_witnesses_for_classes(rest, type_args, pos, ctx))
 
 fn evidence_fully_resolved(ev: typed_ast.Evidence) -> Bool =
@@ -1483,16 +1459,16 @@ fn consume_block(ev: typed_ast.Evidence, pos: source.SourcePos, ctx: LowerCtx) -
       match dict_get(key, ctx_fwd(ctx)) with
       | Just method_map ->
           list_map(\m -> resolve_method_var(m, method_map, key, pos, ctx_scheme_env(ctx)),
-                   class_methods_for(class_name, ctx_class_order(ctx)))
+                   types.class_methods_for(class_name, ctx_class_order(ctx)))
       | Nothing ->
           list_map(\_ -> typed_ast.TVar("__unresolved_" ++ key, types.TVar(types.tyvar_id("?gen")), pos),
-                   class_methods_for(class_name, ctx_class_order(ctx)))
+                   types.class_methods_for(class_name, ctx_class_order(ctx)))
   | typed_ast.EvInstance class_name key children ->
       match dict_get(key, ctx_inst(ctx)) with
       | Just method_map ->
           resolve_tdict_apply_inner_dicts(
             key, pos, method_map,
-            class_methods_for(class_name, ctx_class_order(ctx)),
+            types.class_methods_for(class_name, ctx_class_order(ctx)),
             evidence_inst_arities(key, ctx),
             consume_inner_dicts(children, pos, ctx),
             ctx_scheme_env(ctx))
@@ -1735,52 +1711,82 @@ fn existential_branch_build(name: String, fields: List ast.Pattern, ppos: source
       match scheme_param_types(types.scheme_type(scheme)) with
       | param_types ->
           (ast.ConstructorPattern(name,
-             list_append(fields, witness_patterns_for(cons, param_types, fields, ppos)), ppos),
-           ctx_with_fwd(seed_fwd_for_cons(cons, param_types, fields, ctx_fwd(ctx), ctx_class_order(ctx)), ctx))
+             list_append(fields, witness_patterns_for(cons, param_types, fields, ppos, ctx_class_order(ctx), ctx_super_map(ctx))), ppos),
+           ctx_with_fwd(seed_fwd_for_cons(cons, param_types, fields, ctx_fwd(ctx), ctx_class_order(ctx), ctx_super_map(ctx)), ctx))
 
-# One appended witness pattern per constraint (constraint order == the physical
-# witness-field order register_ctor_one lays down). A var-bound existential field
-# gets a `$wtns_<var>` binder; a wildcard/other field gets a wildcard (witness
-# packed but unused — nothing can call a method on it).
-fn witness_patterns_for(cons: List (String, String), param_types: List types.Type, fields: List ast.Pattern, ppos: source.SourcePos) -> List ast.Pattern =
+# One appended witness pattern PER SLOT — per method across the constraint's class
+# and its transitive superclasses, in types.witness_slots_for_class order, which
+# equals the physical field order construction packs and register_ctor_one counts.
+# A var-bound existential field gets `$wtns_<var>_<class>_<method>` binders (one per
+# slot); a wildcard field gets wildcards (witnesses packed but unused).
+fn witness_patterns_for(cons: List (String, String), param_types: List types.Type, fields: List ast.Pattern, ppos: source.SourcePos, class_order: Dict (List String), super_map: Dict (List String)) -> List ast.Pattern =
   match cons with
   | Nil -> Nil
   | Cons entry rest ->
       match entry with
-      | (existv, _) ->
-          Cons(witness_pattern_for(field_var_for_constraint(existv, param_types, fields), ppos),
-               witness_patterns_for(rest, param_types, fields, ppos))
+      | (existv, class_name) ->
+          list_append(
+            slot_patterns_for(field_var_for_constraint(existv, param_types, fields),
+                              types.witness_slots_for_class(class_name, class_order, super_map), ppos),
+            witness_patterns_for(rest, param_types, fields, ppos, class_order, super_map))
 
-fn witness_pattern_for(field_var: Maybe String, ppos: source.SourcePos) -> ast.Pattern =
+fn slot_patterns_for(field_var: Maybe String, slots: List (String, String), ppos: source.SourcePos) -> List ast.Pattern =
+  match slots with
+  | Nil -> Nil
+  | Cons (eff, method) rest ->
+      Cons(slot_pattern_for(field_var, eff, method, ppos), slot_patterns_for(field_var, rest, ppos))
+
+fn slot_pattern_for(field_var: Maybe String, eff: String, method: String, ppos: source.SourcePos) -> ast.Pattern =
   match field_var with
-  | Just vname -> ast.VarPattern(witness_var_name(vname), ppos)
+  | Just vname -> ast.VarPattern(witness_slot_var(vname, eff, method), ppos)
   | Nothing -> ast.WildcardPattern(ppos)
 
-fn witness_var_name(vname: String) -> String =
-  "$wtns_" ++ vname
+# Per-slot witness binder. Distinct per (existential var, effective class, method)
+# so a multi-method / superclass box binds one variable per packed dictionary
+# pointer. Both the pattern binder and the ctx_fwd method map derive the name from
+# here, so they agree by construction.
+fn witness_slot_var(vname: String, eff: String, method: String) -> String =
+  string_concat_many(["$wtns_", vname, "_", string.after_last_dot(eff), "_", string.after_last_dot(method)])
 
-fn seed_fwd_for_cons(cons: List (String, String), param_types: List types.Type, fields: List ast.Pattern, fwd: Dict (Dict String), class_order: Dict (List String)) -> Dict (Dict String) =
+fn seed_fwd_for_cons(cons: List (String, String), param_types: List types.Type, fields: List ast.Pattern, fwd: Dict (Dict String), class_order: Dict (List String), super_map: Dict (List String)) -> Dict (Dict String) =
   match cons with
   | Nil -> fwd
   | Cons entry rest ->
       match entry with
       | (existv, class_name) ->
           seed_fwd_for_cons(rest, param_types, fields,
-            seed_one_fwd(existv, class_name, param_types, fields, fwd, class_order), class_order)
+            seed_one_fwd(existv, class_name, param_types, fields, fwd, class_order, super_map), class_order, super_map)
 
-fn seed_one_fwd(existv: String, class_name: String, param_types: List types.Type, fields: List ast.Pattern, fwd: Dict (Dict String), class_order: Dict (List String)) -> Dict (Dict String) =
+# Seed ONE ctx_fwd block per effective class (the constraint's class + its
+# transitive superclasses) so a superclass method call on the unpacked value —
+# which resolve emits as EvForward under the SUPER's key — finds its packed
+# witness. Each block maps that class's methods to their per-slot binders, keyed
+# by constraint_key_str(<eff>, [$ex_<var>]) so it matches resolve's EvForward key
+# and consume_block's lookup.
+fn seed_one_fwd(existv: String, class_name: String, param_types: List types.Type, fields: List ast.Pattern, fwd: Dict (Dict String), class_order: Dict (List String), super_map: Dict (List String)) -> Dict (Dict String) =
   match field_var_for_constraint(existv, param_types, fields) with
   | Just vname ->
-      dict_set(constraint_key_str(string.after_last_dot(class_name),
-                                  Cons(ast.TypeName(types.existential_fwd_head(vname)), Nil)),
-               method_map_to_witness(class_methods_for(string.after_last_dot(class_name), class_order), witness_var_name(vname), dict_empty()),
-               fwd)
+      # class_name AS-IS (qualified after the bundler fix) to match super_map's keys
+      # and the effective classes witness_slots_for_class enumerates; the per-block
+      # constraint_key_str below strips to the bare name resolve's EvForward key uses.
+      seed_eff_fwd_blocks(types.class_with_transitive_supers(class_name, super_map),
+                          vname, class_order, fwd)
   | Nothing -> fwd
 
-fn method_map_to_witness(methods: List String, witness_name: String, acc: Dict String) -> Dict String =
+fn seed_eff_fwd_blocks(effs: List String, vname: String, class_order: Dict (List String), fwd: Dict (Dict String)) -> Dict (Dict String) =
+  match effs with
+  | Nil -> fwd
+  | Cons eff rest ->
+      seed_eff_fwd_blocks(rest, vname, class_order,
+        dict_set(constraint_key_str(string.after_last_dot(eff),
+                                    Cons(ast.TypeName(types.existential_fwd_head(vname)), Nil)),
+                 eff_method_witness_map(eff, types.class_methods_for(eff, class_order), vname, dict_empty()),
+                 fwd))
+
+fn eff_method_witness_map(eff: String, methods: List String, vname: String, acc: Dict String) -> Dict String =
   match methods with
   | Nil -> acc
-  | Cons m rest -> method_map_to_witness(rest, witness_name, dict_set(m, witness_name, acc))
+  | Cons m rest -> eff_method_witness_map(eff, rest, vname, dict_set(m, witness_slot_var(vname, eff, m), acc))
 
 # The pattern variable bound to the field whose scheme type is the existential var
 # `existv`, or Nothing when that field is a wildcard (or absent).

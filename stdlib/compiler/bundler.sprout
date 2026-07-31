@@ -970,10 +970,14 @@ fn qualify_ctor_args(ctx: ResolveCtx, ctors: List ast.TypeConstructor) -> List a
   | Cons ctor rest ->
       match ctor with
       # exist_vars are locally-bound type variables (not qualified). exist_constraints
-      # pass through unchanged — always Nil in Stage 0a; Stage 0b must qualify their
-      # class names + type args here.
+      # DO get qualified (Stage 0b): a constrained existential `any C` must resolve its
+      # class name to the same qualified form instance registration and the class marker
+      # use, or its instance/witness lookups (@inst / @fwd) miss for a user-defined class
+      # in a module. qualify_constraints qualifies the class name; the existential var arg
+      # is a local tyvar and passes through unchanged (like any where-constraint var).
       | ast.TypeConstructor name args exist_vars exist_constraints ->
-          Cons(ast.TypeConstructor(qualify_value_name(ctx, Nil, name), qualify_type_list(ctx, args), exist_vars, exist_constraints),
+          Cons(ast.TypeConstructor(qualify_value_name(ctx, Nil, name), qualify_type_list(ctx, args), exist_vars,
+                                   qualify_constraints(ctx, exist_constraints)),
                qualify_ctor_args(ctx, rest))
 
 fn qualify_record_field_decls(ctx: ResolveCtx, fields: List ast.RecordFieldDecl) -> List ast.RecordFieldDecl =

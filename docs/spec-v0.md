@@ -457,7 +457,7 @@ constructor; the hidden type is erased.
 
 **Constrained existentials via `any C` (experimental — Stage 0b).** A
 constructor field written `(any C)` hides a value of any type that has an instance
-of the single-method class `C`, and makes that instance available on the unpacked
+of the class `C`, and makes that instance available on the unpacked
 value:
 
 ```sprout
@@ -476,9 +476,10 @@ instance is rejected at the construction site with the usual "No instance of `C`
 for `T`" error (§8). Matching binds the value at the abstract existential type
 (as above), but the packed dictionary is in scope, so a call to a `C` method on it
 dispatches through the packed witness — each element renders as its own concrete
-type would. **Scope:** only the `any C` sugar is provided (no explicit
-constrained-prefix form yet), and only classes with **exactly one method and no
-superclasses** are supported; a richer class is rejected with a located error.
+type would. A **multi-method** class packs one witness per method, and a class
+**with superclasses** packs its transitive-superclass methods too, so an inherited
+(superclass) method also dispatches on the unpacked value. **Scope:** only the
+`any C` sugar is provided (no explicit constrained-prefix form yet).
 
 **Runtime.** The packed dictionary is the class's method function-pointer(s)
 stored as hidden constructor fields (traced by the GC); a method call on the
