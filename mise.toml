@@ -1,6 +1,7 @@
 [tools]
 python = "3.12"
 just = "1.39.0"
+gh = "2.97.0"
 
 [env]
 _.path = ["/opt/homebrew/opt/llvm/bin"]
