@@ -452,13 +452,14 @@ no useful intermediate state for bisecting).
    sketched) because the hand-written `String` Serialize/Deserialize instances
    in phase 2 are the first users of the convention — phases 4-8 inherit the
    choice.
-4. **Records.** v1 syntax targets `type` declarations (sums-of-products).
-   `record` declarations are a separate decl form and are out of scope for v1.
-   Verified `stdlib/compiler/*.sprout` (the iface PR's target modules)
-   contain zero `record` declarations, so the v1 restriction does not block
-   the iface PR. Adding deriving to records is a follow-up if a downstream
-   consumer needs it; noted in the spec section to avoid the assumption that
-   it works.
+4. **Records.** v1 originally targeted `type` declarations (sums-of-products)
+   only, treating `record` declarations as out of scope. **Records now support
+   `deriving (Eq, Ord, ToString)`** (not `Enum`) — see
+   `docs/deriving-records-v0.md` for the design and the two record-instance
+   dispatch-soundness fixes that landed with it. The clause is trailing on a
+   record (`... ) deriving (Eq, ...)`); a record is a single product, so the
+   synthesized bodies are the ADT same-constructor logic accessing fields by
+   name via `GetFieldExpr`.
 5. **`Serialize`/`Deserialize` instances for primitive and stdlib types.** The
    PR must ship hand-written instances for `Int`, `Bool`, `String`, `Char`,
    `List a where Serialize a`, `Maybe a where Serialize a`, `Vec a where

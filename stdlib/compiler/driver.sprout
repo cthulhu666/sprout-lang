@@ -269,7 +269,7 @@ fn dump_decl(d: ast.Decl) -> String =
       sexp("fn", [q(name), dump_params(params), dump_maybe_ret(maybe_ret), dump_maybe_effects(maybe_effs), sexp("constraints", dump_constraints(constraints)), dump_expr(body)])
   | ast.TypeDecl name type_params ctors _ _ ->
       sexp("type", Cons(q(name), Cons(sexp("type-params", q_list(type_params)), dump_ctors(ctors))))
-  | ast.RecordDecl name type_params fields _ ->
+  | ast.RecordDecl name type_params fields _ _ ->
       sexp("record", Cons(q(name), Cons(sexp("type-params", q_list(type_params)), dump_field_decls(fields))))
   | ast.LetDecl name body _ _ ->
       sexp("let", [q(name), dump_expr(body)])
@@ -310,17 +310,11 @@ fn parse_err_msg(e: parser.ParseError) -> String =
 # Entry point
 
 fn run_file(path: String) -> Unit !{IO} =
-  match read_file(path) with
-  | Err msg -> panic("read_file: " ++ path ++ ": " ++ msg)
-  | Ok src ->
-      match lexer.tokenize(source.strip_headers(src)) with
-      | Err e -> print(lex_err_msg(e))
-      | Ok tokens ->
-          match parser.parse_program(tokens) with
-          | Err e -> print(parse_err_msg(e))
-          | Ok prog ->
-              match prog with
-              | ast.Program decls _ -> dump_decls(decls)
+  let Ok src = read_file(path) else Err msg -> panic("read_file: " ++ path ++ ": " ++ msg)
+      Ok tokens = lexer.tokenize(source.strip_headers(src)) else Err e -> print(lex_err_msg(e))
+      Ok prog = parser.parse_program(tokens) else Err e -> print(parse_err_msg(e))
+      ast.Program decls _ = prog
+  in dump_decls(decls)
 
 fn main() -> Unit !{IO} =
   match argv_get(0) with

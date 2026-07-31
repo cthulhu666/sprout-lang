@@ -1006,9 +1006,19 @@ fn check_instance_for_marker(
             # concrete arg of an unrelated type (e.g. a String `tag`) hijacks the
             # dict (fundamentals review W4 / probe sr_dispatch). head_str and the
             # TDict TypeExpr are both derived from that one arg so they agree.
-            let Just cv_arg = class_var_arg_or_fallback(method_name, class_vars, typed_args, subst, env)
+            # Resolve the dispatch arg's type with s3 — the substitution AFTER
+            # argument inference and callee-param unification — not the stale
+            # pre-argument `subst`. An inline parametric-record arg (`Box(val=5)`)
+            # has node type `Box $a` whose `$a -> Int` binding lives only in s3;
+            # resolving with the stale `subst` leaves it `Box $free`, so the
+            # instance's `where` constraint dict is left unresolved (a runtime
+            # null-dict crash). Input-position dispatch resolves eagerly here and
+            # the post-pass only rewrites return-position calls, so s3 is the last
+            # chance to see the concrete type. (ADTs dodge this: a constructor
+            # application node is already concretely typed.)
+            let Just cv_arg = class_var_arg_or_fallback(method_name, class_vars, typed_args, s3, env)
                   else check_instance_fwd(types.type_id_name(class_name), typed_callee, typed_args, env, ret_t, s3, es3, call_eff, pos)
-                Just head_str = concrete_type_str(unifier.apply_subst(subst, typed_ast.typed_expr_type(cv_arg)))
+                Just head_str = concrete_type_str(unifier.apply_subst(s3, typed_ast.typed_expr_type(cv_arg)))
                   else check_instance_fwd(types.type_id_name(class_name), typed_callee, typed_args, env, ret_t, s3, es3, call_eff, pos)
             in
               if types.is_skolem_name(head_str) then
@@ -1025,7 +1035,7 @@ fn check_instance_for_marker(
                   InferOk(
                     typed_ast.TCall(typed_callee,
                       Cons(typed_ast.TDict(
-                        ast.TypeConstraint(types.type_id_name(class_name), Cons(type_to_typeexpr_with_prog_vars(unifier.apply_subst(subst, typed_ast.typed_expr_type(cv_arg)), types.type_id_name(class_name), env), Nil)),
+                        ast.TypeConstraint(types.type_id_name(class_name), Cons(type_to_typeexpr_with_prog_vars(unifier.apply_subst(s3, typed_ast.typed_expr_type(cv_arg)), types.type_id_name(class_name), env), Nil)),
                         types.TConst(class_name), pos, typed_ast.EvUnresolved),
                         typed_args),
                       ret_t, pos),
@@ -1812,21 +1822,35 @@ fn resolve_obligation(
               | Just fwd_tdict -> (Just(fwd_tdict), "scan_fwd_markers")
               | Nothing -> (resolve_one_constraint_tdict(class_name, user_args, s3, env, pos, excluded), "first_concrete_arg(guess)")
           | fwd -> (fwd, "fwd_for_prog_var")
-  | Just fresh_t ->
-      match concrete_type_str(unifier.apply_subst(s3, fresh_t)) with
-      | Just head_str ->
-          # prog_to_fresh maps this prog_var precisely — trust it even if head_str is
-          # in excluded (that means two distinct prog_vars legitimately map to the same
-          # concrete type; they need the same dict, not a different one).
-          match dict_get("@inst:" ++ class_name ++ ":" ++ head_str, env) with
-          | Just _ ->
-              (Just(typed_ast.TDict(
-                ast.TypeConstraint(class_name, Cons(type_to_typeexpr_with_prog_vars(unifier.apply_subst(s3, fresh_t), class_name, env), Nil)),
-                types.TConst(types.type_id(class_name)), pos, typed_ast.EvUnresolved)), "precise-just")
-          | Nothing ->
-              (resolve_via_fwd_or_scan(class_name, user_args, s3, env, pos), "precise_no_inst->fwd_or_scan")
+  | Just fresh_t -> resolve_precise_head(class_name, fresh_t, s3, user_args, env, pos)
+
+# The `Just fresh_t` arm of resolve_obligation, extracted so resolve_obligation's
+# top match stays a flat 2-branch dispatch rather than a nested staircase.
+# prog_to_fresh maps this prog_var precisely to fresh_t: if it resolves to a
+# concrete head with a bundled @inst, emit that dict; otherwise forward/scan.
+fn resolve_precise_head(
+  class_name: String,
+  fresh_t: types.Type,
+  s3: Dict types.Type,
+  user_args: List typed_ast.TypedExpr,
+  env: Dict types.Scheme,
+  pos: source.SourcePos
+) -> (Maybe typed_ast.TypedExpr, String) =
+  match concrete_type_str(unifier.apply_subst(s3, fresh_t)) with
+  | Just head_str ->
+      # Trust the precise mapping even if head_str is in excluded — two distinct
+      # prog_vars can legitimately map to the same concrete type; same dict.
+      match dict_get("@inst:" ++ class_name ++ ":" ++ head_str, env) with
+      | Just _ ->
+          (Just(typed_ast.TDict(
+            ast.TypeConstraint(class_name, Cons(type_to_typeexpr_with_prog_vars(unifier.apply_subst(s3, fresh_t), class_name, env), Nil)),
+            types.TConst(types.type_id(class_name)), pos, typed_ast.EvUnresolved)), "precise-just")
       | Nothing ->
-          (resolve_via_fwd_or_scan(class_name, user_args, s3, env, pos), "precise_tyvar->fwd_or_scan")
+          (resolve_via_fwd_or_scan(class_name, user_args, s3, env, pos), "precise_no_inst->fwd_or_scan")
+  | Nothing ->
+      # Resolved to a bare type variable, not a concrete head — forward/scan
+      # instead of a bogus @inst lookup.
+      (resolve_via_fwd_or_scan(class_name, user_args, s3, env, pos), "precise_tyvar->fwd_or_scan")
 
 # Decode a positional constraint-var token ("#pos:<k>", written by
 # canonicalize_constrained_constraints) back to the callee's live generalized-scheme
@@ -3463,7 +3487,7 @@ fn infer_record_expr(
         # Instantiate the record's type params ONCE so every field's declared type
         # AND the result type share the same fresh vars. Construction then yields a
         # `Box Int` (a TApp), not a bare `Box` — which is what field access/update
-        # (`apply_type_args_to_field`, `concrete_field_type`) already expect. A
+        # (`record_field_access_type`, `concrete_field_type`) already expect. A
         # monomorphic record has no qvars, so param_subst is empty and the result is
         # a bare TConst exactly as before (byte-identical).
         (param_subst, param_vars) <- instantiate_record_params(state, type_name, fields, env)
@@ -3619,21 +3643,31 @@ fn lookup_record_field_typed(
         InferOk(typed_ast.TGetField(typed_rec, field_name, types.TVar(types.tyvar_id(v)), pos), subst, eff_subst, rec_eff)
   | Just field_scheme ->
       do
-        field_t <- unifier.instantiate(state, field_scheme)
-        InferOk(
-          typed_ast.TGetField(typed_rec, field_name,
-            apply_type_args_to_field(field_t, field_scheme, rec_name, type_args), pos),
+        field_t <- record_field_access_type(state, field_scheme, type_args)
+        InferOk(typed_ast.TGetField(typed_rec, field_name, field_t, pos),
           subst, eff_subst, rec_eff)
 
-fn apply_type_args_to_field(
-  field_t: types.Type,
-  field_scheme: types.Scheme,
-  rec_name: String,
-  type_args: List types.Type
-) -> types.Type =
+# Type of an accessed field with the record's type params bound to the accessed
+# value's ACTUAL type args. When the args line up with the record's params, bind
+# them DIRECTLY (as concrete_field_type / record-update do) so a field of type
+# `a` on `Box a` stays identified with the caller's `a`. This identity is
+# load-bearing inside a parametric instance (`instance Eq (Box a) where Eq a`):
+# losing it decouples `left.val` from `a`, so `eq(left.val, ..)` dispatches
+# through a null `Eq a` dict at runtime. `instantiate` (the old path) renamed the
+# params to fresh vars the arg substitution could no longer reach — the exact
+# trap concrete_field_type documents. Fall back to `instantiate` only when the
+# args don't match the params (an as-yet-unapplied record type), so unbound
+# params become fresh vars instead of leaking their `Rec.param` names — the
+# length guard matters because build_tvar_subst truncates on mismatch rather than
+# failing. Monomorphic records have no params, so this is byte-identical to the
+# old path for them.
+fn record_field_access_type(state: unifier.InferState, field_scheme: types.Scheme, type_args: List types.Type) -> types.Type !{IO} =
   match field_scheme with
   | types.Scheme qvars _ _ _ _ ->
-      unifier.apply_subst(build_tvar_subst(qvars, type_args, dict_empty()), field_t)
+      if list_length(qvars) == list_length(type_args) then
+        concrete_field_type(field_scheme, type_args)
+      else
+        unifier.instantiate(state, field_scheme)
 
 fn build_tvar_subst(vars: List String, args: List types.Type, acc: Dict types.Type) -> Dict types.Type =
   match (vars, args) with
@@ -3705,9 +3739,10 @@ fn extract_record_type_args(t: types.Type) -> List types.Type =
 # Declared type of a record field with the base record's type arguments applied:
 # substitute the record's type parameters (the scheme's quantified vars) by the
 # base's type args directly in the field scheme body.  For a monomorphic record
-# (no quantified vars) this is the field body unchanged.  Unlike instantiate +
-# apply_type_args_to_field, this actually binds the params — instantiate would
-# rename them to fresh vars that the arg substitution can no longer reach.
+# (no quantified vars) this is the field body unchanged.  Binds the params
+# directly rather than via `instantiate`, which would rename them to fresh vars
+# the arg substitution can no longer reach (see record_field_access_type, which
+# shares this direct-bind approach for field access).
 fn concrete_field_type(field_scheme: types.Scheme, type_args: List types.Type) -> types.Type =
   match field_scheme with
   | types.Scheme qvars _ body _ _ ->
@@ -3881,7 +3916,7 @@ fn collect_declared_type_names(decls: List ast.Decl, acc: List String) -> List S
       match decl with
       | ast.TypeDecl name _ _ _ _ ->
           collect_declared_type_names(rest, Cons(string.after_last_dot(name), acc))
-      | ast.RecordDecl name _ _ _ ->
+      | ast.RecordDecl name _ _ _ _ ->
           collect_declared_type_names(rest, Cons(string.after_last_dot(name), acc))
       | ast.AliasDecl name _ _ _ ->
           collect_declared_type_names(rest, Cons(string.after_last_dot(name), acc))
@@ -3949,7 +3984,7 @@ fn validate_decl(decl: ast.Decl, declared: List String) -> Maybe String =
   match decl with
   | ast.TypeDecl name _ ctors _ _ ->
       validate_ctors(ctors, name, declared)
-  | ast.RecordDecl name _ fields _ ->
+  | ast.RecordDecl name _ fields _ _ ->
       validate_record_fields(fields, name, declared)
   | ast.AliasDecl name _ rhs _ ->
       validate_te(rhs, name, declared)
@@ -4271,7 +4306,7 @@ fn typecheck_decl(
   | ast.WrapDecl _ _ _ ->
       # WrapDecl uses the same single-ctor-synthesizing path as TypeDecl.
       TypedDeclOk(typed_ast.TPassThrough(decl), register_type_decl(decl, env), env_ftv)
-  | ast.RecordDecl rec_name type_params fields _ ->
+  | ast.RecordDecl rec_name type_params fields _ _ ->
       TypedDeclOk(typed_ast.TPassThrough(decl),
         GlobalEnv(register_record_fields(rec_name, type_params, fields, global_env_dict(env))),
         env_ftv)

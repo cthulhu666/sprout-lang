@@ -1748,7 +1748,10 @@ fn parse_record_type_decl(tokens: Vec token.Token, i: Int) -> Result ParseError 
     (_, i6) <- expected_symbol("(", tokens, i5)
     (fields, i7) <- collect_record_field_decls(tokens, i6, Nil)
     (_, i8) <- expected_symbol(")", tokens, i7)
-    Ok((ast.RecordDecl(token.token_text(name_tok), list_reverse(params), fields, cur_pos(tokens, i)), i8))
+    # `deriving (...)` is trailing on records (the `= (fields)` RHS is a
+    # self-contained parenthesised list), unlike ADTs where it precedes `=`.
+    (deriving_classes, i9) <- parse_deriving_clause(tokens, i8)
+    Ok((ast.RecordDecl(token.token_text(name_tok), list_reverse(params), fields, deriving_classes, cur_pos(tokens, i)), i9))
 
 fn parse_class_method_sig(tokens: Vec token.Token, i: Int) -> Result ParseError (ast.ClassMethodSig, Int) =
   do

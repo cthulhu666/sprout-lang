@@ -439,12 +439,160 @@ fn derive_instances_for_classes(name: String, type_params: List String, ctors: L
       | Nothing -> derive_instances_for_classes(name, type_params, ctors, pos, rest)
       | Just inst -> Cons(inst, derive_instances_for_classes(name, type_params, ctors, pos, rest))
 
+# --- Record emitters ---------------------------------------------------------
+#
+# A record is a single product: no sum, no tag, no constructor to match on. So
+# these bodies are the ADT same-constructor logic standalone, reading each field
+# by NAME via GetFieldExpr (`value.field`) rather than binding positional
+# pattern variables. Eq/Ord fold over the fields in declaration order; ToString
+# renders `Name(f0 = v0, f1 = v1, ...)`, mirroring record construction syntax.
+# The instance scaffolding (head, per-type-param constraints) is shared with the
+# ADT path via instance_head_typeexpr / instance_constraints_for.
+
+fn record_field_name(f: ast.RecordFieldDecl) -> String =
+  match f with
+  | ast.RecordFieldDecl fname _ -> fname
+
+# `<param>.<field>` — read one field off a named parameter (left/right/value).
+fn record_field_get(param: String, fname: String, pos: source.SourcePos) -> ast.Expr =
+  ast.GetFieldExpr(ast.VarExpr(param, pos), fname, pos)
+
+# --- Record Eq: `eq(left.f0, right.f0) && ...`, `true` when field-less. --------
+
+fn record_field_eq_call(fname: String, pos: source.SourcePos) -> ast.Expr =
+  ast.CallExpr(ast.VarExpr("eq", pos),
+    [record_field_get("left", fname, pos), record_field_get("right", fname, pos)], pos)
+
+fn build_record_eq_body(fields: List ast.RecordFieldDecl, pos: source.SourcePos) -> ast.Expr =
+  match fields with
+  | Nil -> ast.BoolExpr(true, pos)
+  | Cons f rest -> build_record_eq_acc(rest, record_field_eq_call(record_field_name(f), pos), pos)
+
+fn build_record_eq_acc(fields: List ast.RecordFieldDecl, acc: ast.Expr, pos: source.SourcePos) -> ast.Expr =
+  match fields with
+  | Nil -> acc
+  | Cons f rest ->
+      build_record_eq_acc(rest,
+        ast.BinaryExpr("&&", acc, record_field_eq_call(record_field_name(f), pos), pos), pos)
+
+fn emit_record_eq_instance(name: String, type_params: List String, fields: List ast.RecordFieldDecl, pos: source.SourcePos) -> ast.Decl =
+  ast.InstanceDecl(
+    ast.TypeConstraint("Eq", [instance_head_typeexpr(name, type_params)]),
+    instance_constraints_for("Eq", type_params),
+    [ast.InstanceMethodImpl(
+       "eq",
+       [ast.Param("left", Just(instance_head_typeexpr(name, type_params))),
+        ast.Param("right", Just(instance_head_typeexpr(name, type_params)))],
+       Just(ast.TypeName("Bool")),
+       Nothing,
+       build_record_eq_body(fields, pos))],
+    pos)
+
+# --- Record ToString: `"Name(" ++ "f0 = " ++ to_string(value.f0) ++ ", " ...` --
+
+# `"fname = " ++ to_string(value.fname)` for one field.
+fn record_field_to_string_part(fname: String, pos: source.SourcePos) -> ast.Expr =
+  ast.BinaryExpr("++",
+    ast.StringExpr(fname ++ " = ", pos),
+    ast.CallExpr(ast.VarExpr("to_string", pos), [record_field_get("value", fname, pos)], pos),
+    pos)
+
+fn build_record_to_string_fields(fields: List ast.RecordFieldDecl, pos: source.SourcePos) -> ast.Expr =
+  match fields with
+  | Nil -> ast.StringExpr("", pos)
+  | Cons f rest -> build_record_to_string_acc(rest, record_field_to_string_part(record_field_name(f), pos), pos)
+
+fn build_record_to_string_acc(fields: List ast.RecordFieldDecl, acc: ast.Expr, pos: source.SourcePos) -> ast.Expr =
+  match fields with
+  | Nil -> acc
+  | Cons f rest ->
+      build_record_to_string_acc(rest,
+        ast.BinaryExpr("++", acc,
+          ast.BinaryExpr("++", ast.StringExpr(", ", pos),
+            record_field_to_string_part(record_field_name(f), pos), pos), pos), pos)
+
+fn build_record_to_string_body(name: String, fields: List ast.RecordFieldDecl, pos: source.SourcePos) -> ast.Expr =
+  ast.BinaryExpr("++",
+    ast.BinaryExpr("++", ast.StringExpr(name ++ "(", pos), build_record_to_string_fields(fields, pos), pos),
+    ast.StringExpr(")", pos),
+    pos)
+
+fn emit_record_to_string_instance(name: String, type_params: List String, fields: List ast.RecordFieldDecl, pos: source.SourcePos) -> ast.Decl =
+  ast.InstanceDecl(
+    ast.TypeConstraint("ToString", [instance_head_typeexpr(name, type_params)]),
+    instance_constraints_for("ToString", type_params),
+    [ast.InstanceMethodImpl(
+       "to_string",
+       [ast.Param("value", Just(instance_head_typeexpr(name, type_params)))],
+       Just(ast.TypeName("String")),
+       Nothing,
+       build_record_to_string_body(name, fields, pos))],
+    pos)
+
+# --- Record Ord: lexicographic per-field `compare` (Int), `0` when field-less. -
+
+fn record_field_compare_call(fname: String, pos: source.SourcePos) -> ast.Expr =
+  ast.CallExpr(ast.VarExpr("compare", pos),
+    [record_field_get("left", fname, pos), record_field_get("right", fname, pos)], pos)
+
+# `match compare(left.f0, right.f0) with | 0 -> <rest> | c -> c`; the final field
+# is a bare compare; no fields → `0`. A fresh `__d_c_i` binds each tie level.
+fn build_record_ord_chain(fields: List ast.RecordFieldDecl, i: Int, pos: source.SourcePos) -> ast.Expr =
+  match fields with
+  | Nil -> ast.IntExpr(0, pos)
+  | Cons f rest ->
+      match rest with
+      | Nil -> record_field_compare_call(record_field_name(f), pos)
+      | _ ->
+          ast.MatchExpr(
+            record_field_compare_call(record_field_name(f), pos),
+            [ast.MatchBranch(ast.IntPattern(0, pos), build_record_ord_chain(rest, i + 1, pos)),
+             ast.MatchBranch(ast.VarPattern("__d_c_" ++ int_to_string(i), pos),
+                             ast.VarExpr("__d_c_" ++ int_to_string(i), pos))],
+            pos)
+
+fn emit_record_ord_instance(name: String, type_params: List String, fields: List ast.RecordFieldDecl, pos: source.SourcePos) -> ast.Decl =
+  ast.InstanceDecl(
+    ast.TypeConstraint("Ord", [instance_head_typeexpr(name, type_params)]),
+    instance_constraints_for("Ord", type_params),
+    [ast.InstanceMethodImpl(
+       "compare",
+       [ast.Param("left", Just(instance_head_typeexpr(name, type_params))),
+        ast.Param("right", Just(instance_head_typeexpr(name, type_params)))],
+       Just(ast.TypeName("Int")),
+       Nothing,
+       build_record_ord_chain(fields, 0, pos))],
+    pos)
+
+# Dispatch a parsed class to its record emitter. DcEnum yields Nothing: a record
+# is a single product, never an enumeration (validate_one_record_deriving_class
+# rejects it eagerly up-front, so this arm is defensive only).
+fn derive_record_instance_for(dc: DerivableClass, name: String, type_params: List String, fields: List ast.RecordFieldDecl, pos: source.SourcePos) -> Maybe ast.Decl =
+  match dc with
+  | DcEq -> Just(emit_record_eq_instance(name, type_params, fields, pos))
+  | DcToString -> Just(emit_record_to_string_instance(name, type_params, fields, pos))
+  | DcOrd -> Just(emit_record_ord_instance(name, type_params, fields, pos))
+  | DcEnum -> Nothing
+
+fn derive_record_instance(class_name: String, name: String, type_params: List String, fields: List ast.RecordFieldDecl, pos: source.SourcePos) -> Maybe ast.Decl =
+  match parse_derivable_class(class_name) with
+  | Nothing -> Nothing
+  | Just dc -> derive_record_instance_for(dc, name, type_params, fields, pos)
+
+fn derive_record_instances_for_classes(name: String, type_params: List String, fields: List ast.RecordFieldDecl, pos: source.SourcePos, classes: List String) -> List ast.Decl =
+  match classes with
+  | Nil -> Nil
+  | Cons class_name rest ->
+      match derive_record_instance(class_name, name, type_params, fields, pos) with
+      | Nothing -> derive_record_instances_for_classes(name, type_params, fields, pos, rest)
+      | Just inst -> Cons(inst, derive_record_instances_for_classes(name, type_params, fields, pos, rest))
+
 # --- Top-level expansion -----------------------------------------------------
 
-# Walk a list of program decls. For each TypeDecl with a non-empty deriving
-# list, append synthesized InstanceDecls AFTER the TypeDecl. Declaration order
-# matters: instance lookup walks the env, and the synthesized instance body
-# references the type's constructors that the TypeDecl just registered.
+# Walk a list of program decls. For each TypeDecl/RecordDecl with a non-empty
+# deriving list, append synthesized InstanceDecls AFTER the decl. Declaration
+# order matters: instance lookup walks the env, and the synthesized instance
+# body references the type's fields/constructors that the decl just registered.
 export fn expand_deriving_decls(decls: List ast.Decl) -> List ast.Decl =
   match decls with
   | Nil -> Nil
@@ -455,6 +603,12 @@ export fn expand_deriving_decls(decls: List ast.Decl) -> List ast.Decl =
           | Nil -> Cons(d, expand_deriving_decls(rest))
           | _ -> Cons(d, list_append(
                           derive_instances_for_classes(name, type_params, ctors, pos, deriving_classes),
+                          expand_deriving_decls(rest)))
+      | ast.RecordDecl name type_params fields deriving_classes pos ->
+          match deriving_classes with
+          | Nil -> Cons(d, expand_deriving_decls(rest))
+          | _ -> Cons(d, list_append(
+                          derive_record_instances_for_classes(name, type_params, fields, pos, deriving_classes),
                           expand_deriving_decls(rest)))
       | _ -> Cons(d, expand_deriving_decls(rest))
 
@@ -480,7 +634,27 @@ fn validate_one_deriving_decl(d: ast.Decl) -> Maybe String =
   match d with
   | ast.TypeDecl name _ ctors deriving_classes _ ->
       validate_deriving_classes_list(name, ctors, deriving_classes)
+  | ast.RecordDecl name _ _ deriving_classes _ ->
+      validate_record_deriving_classes_list(name, deriving_classes)
   | _ -> Nothing
+
+# Records derive Eq/Ord/ToString only; Enum is ill-defined (a record is one
+# product, not an enumeration). Unknown classes are rejected as for ADTs.
+fn validate_record_deriving_classes_list(name: String, classes: List String) -> Maybe String =
+  match classes with
+  | Nil -> Nothing
+  | Cons class_name rest ->
+      match validate_one_record_deriving_class(name, class_name) with
+      | Just err -> Just(err)
+      | Nothing -> validate_record_deriving_classes_list(name, rest)
+
+fn validate_one_record_deriving_class(name: String, class_name: String) -> Maybe String =
+  match parse_derivable_class(class_name) with
+  | Nothing ->
+      Just("unknown class in deriving clause for `" ++ name ++ "`: `" ++ class_name ++ "` (v1 supports Eq, Ord, ToString, Enum)")
+  | Just DcEnum ->
+      Just("cannot derive `Enum` for `" ++ name ++ "`: a record is a single product, not an enumeration; Enum requires an ADT whose constructors are all nullary")
+  | Just _ -> Nothing
 
 fn validate_deriving_classes_list(name: String, ctors: List ast.TypeConstructor, classes: List String) -> Maybe String =
   match classes with

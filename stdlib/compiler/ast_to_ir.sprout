@@ -548,7 +548,7 @@ fn build_ctor_table_acc(decls: List typed_ast.TypedDecl, next_tag: Int,
       # plus declaration-order field names so codegen can resolve `.field` offsets
       # and reorder literal fields.  Not added to regs — GC tracing is header-driven
       # (arity in the object header), so no runtime ctor registration is needed.
-      | typed_ast.TPassThrough (ast.RecordDecl type_name _params fields _) ->
+      | typed_ast.TPassThrough (ast.RecordDecl type_name _params fields _ _) ->
           build_ctor_table_acc(rest, next_tag + 1,
             dict_set(type_name,
               sprout_ir.CtorInfo(next_tag, record_field_count(fields), record_field_count(fields),

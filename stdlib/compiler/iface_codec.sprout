@@ -1276,8 +1276,8 @@ export fn encode_ast_decl(d: ast.Decl) -> String =
       string_concat_many(["(ExternFnDecl ", encode_quoted_str(name), " ", encode_ast_param_list(params), " ", encode_maybe_typeexpr(ret), " ", encode_maybe_str_list(effects), " ", encode_ast_pos(p), ")"])
   | ast.TypeDecl name type_params ctors deriving_classes p ->
       string_concat_many(["(TypeDecl ", encode_quoted_str(name), " ", encode_str_list(type_params), " ", encode_ast_type_constructor_list(ctors), " ", encode_str_list(deriving_classes), " ", encode_ast_pos(p), ")"])
-  | ast.RecordDecl name type_params fields p ->
-      string_concat_many(["(RecordDecl ", encode_quoted_str(name), " ", encode_str_list(type_params), " ", encode_ast_record_field_decl_list(fields), " ", encode_ast_pos(p), ")"])
+  | ast.RecordDecl name type_params fields deriving_classes p ->
+      string_concat_many(["(RecordDecl ", encode_quoted_str(name), " ", encode_str_list(type_params), " ", encode_ast_record_field_decl_list(fields), " ", encode_str_list(deriving_classes), " ", encode_ast_pos(p), ")"])
   | ast.LetDecl name body _ p ->
       # The `let x : T = e` annotation is definition-local (only used to check the
       # RHS at its definition site); importers need only the inferred scheme, so it
@@ -2127,9 +2127,10 @@ fn decode_record_decl_body(s: String, bytes: Bytes, i: Int, total: Int) -> Maybe
   let Just(name, j) = decode_quoted_str_at(s, bytes, skip_ws(s, bytes, i, total), total) else Nothing
       Just(type_params, k) = decode_str_list_at(s, bytes, skip_ws(s, bytes, j, total), total) else Nothing
       Just(fields, m) = decode_ast_record_field_decl_list_at(s, bytes, skip_ws(s, bytes, k, total), total) else Nothing
-      Just(pos, n) = decode_pos_at(s, bytes, skip_ws(s, bytes, m, total), total) else Nothing
-      Just end = expect_char(s, bytes, skip_ws(s, bytes, n, total), total, ')') else Nothing
-  in Just((ast.RecordDecl(name, type_params, fields, pos), end))
+      Just(deriving_classes, n) = decode_str_list_at(s, bytes, skip_ws(s, bytes, m, total), total) else Nothing
+      Just(pos, p) = decode_pos_at(s, bytes, skip_ws(s, bytes, n, total), total) else Nothing
+      Just end = expect_char(s, bytes, skip_ws(s, bytes, p, total), total, ')') else Nothing
+  in Just((ast.RecordDecl(name, type_params, fields, deriving_classes, pos), end))
 
 fn decode_let_decl_body(s: String, bytes: Bytes, i: Int, total: Int) -> Maybe(ast.Decl, Int) =
   let Just(name, j) = decode_quoted_str_at(s, bytes, skip_ws(s, bytes, i, total), total) else Nothing

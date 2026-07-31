@@ -275,6 +275,7 @@ fn main() -> Unit !{IO} =
         Nil,
         Cons(ast.RecordFieldDecl("x", ast.TypeName("Int")),
           Cons(ast.RecordFieldDecl("y", ast.TypeName("Int")), Nil)),
+        Cons("Eq", Cons("Ord", Nil)),
         pos0())))
 
     assert_true(state, "LetDecl roundtrip",
