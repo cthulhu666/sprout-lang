@@ -247,7 +247,8 @@ each element behaves as its own concrete type would.
 ```sprout
 type Cell   = | Cell (any ToString)                # ≡ | exists a. Cell a where ToString a
 let row     = [Cell(42), Cell("hi"), Cell(true)]   # one flat list, mixed element types
-type Widget = | exists s. Widget s (s -> s) (s -> String)  # one hidden `s` across fields
+type View s = (state: s, step: s -> s, render: s -> String)  # a parametric record names the parts
+type Widget = | exists s. Widget (View s)                    # `exists s` hides the state type
 ```
 
 Reach for this only when the types genuinely differ, cannot be restructured into

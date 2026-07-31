@@ -619,6 +619,10 @@ same-named module in head position. Access is **total** — `p.x` always yields 
 field's value (no `Maybe`), in contrast to `dict_get`. In v0 the head must be a
 bare variable; access on a compound expression uses an intermediate `let`.
 
+A **function-typed field may be called inline** — `p.render(x)` loads the closure
+from the field and applies it, using the same head-first resolution (`p` an
+in-scope value ⇒ field-call; otherwise a module-qualified function call).
+
 **Semantics.** Records are nominal (two records with identical fields but
 different names are distinct types), immutable, and strict (field values are
 evaluated eagerly at construction). Field scoping is per-record: a field `x` of

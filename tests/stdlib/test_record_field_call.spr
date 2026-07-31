@@ -1,0 +1,25 @@
+# A function-typed record field can be CALLED inline: `o.double(21)`. Previously
+# this parsed the callee `o.double` as a whole (qualified) name and failed with
+# "Unknown variable: o.double"; a call callee that is a dotted field access on an
+# in-scope value now resolves like any other field access.
+
+import stdlib.test (check_eq, run_suite)
+
+type Ops = (double: Int -> Int, greet: String -> String)
+
+fn dbl(n: Int) -> Int = n * 2
+fn hi(s: String) -> String = `hi ${s}`
+
+fn twice(o: Ops) -> Int = o.double(21)
+fn greeting(o: Ops) -> String = o.greet("bob")
+
+# Nested: a record field-call whose argument is itself a record field-call.
+fn chained(o: Ops) -> Int = o.double(o.double(3))
+
+fn main() -> Unit !{IO} =
+  let ops = Ops(double = dbl, greet = hi)
+  in run_suite("record_field_call", [
+    check_eq("inline field-call (Int)", twice(ops), 42),
+    check_eq("inline field-call (String)", greeting(ops), "hi bob"),
+    check_eq("nested field-calls", chained(ops), 12)
+  ])
