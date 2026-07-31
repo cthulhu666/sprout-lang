@@ -3428,7 +3428,48 @@ fn infer_record_expr(
   match first_dup_field(fields) with
   | Just dup -> InferErr(pos, "field `" ++ dup ++ "` supplied twice for record " ++ type_name)
   | Nothing ->
-      infer_record_fields(state, env, subst, eff_subst, type_name, fields, Nil, types.EffectPure, pos)
+      do
+        # Instantiate the record's type params ONCE so every field's declared type
+        # AND the result type share the same fresh vars. Construction then yields a
+        # `Box Int` (a TApp), not a bare `Box` — which is what field access/update
+        # (`apply_type_args_to_field`, `concrete_field_type`) already expect. A
+        # monomorphic record has no qvars, so param_subst is empty and the result is
+        # a bare TConst exactly as before (byte-identical).
+        (param_subst, param_vars) <- instantiate_record_params(state, type_name, fields, env)
+        infer_record_fields(state, env, subst, eff_subst, type_name, fields, Nil, types.EffectPure,
+                            pos, param_subst,
+                            apply_type_args(types.TConst(types.type_id(type_name)), param_vars))
+
+# Recover the record's declared type params (every field scheme is generalized
+# over the full ordered param list, so any field's qvars give them) and mint one
+# fresh var per param. Returns (qvar->fresh subst, ordered fresh param vars).
+fn instantiate_record_params(state: unifier.InferState, type_name: String, fields: List ast.RecordField, env: Dict types.Scheme) -> (Dict types.Type, List types.Type) !{IO} =
+  match record_type_qvars(type_name, fields, env) with
+  | Nil -> (dict_empty(), Nil)
+  | qvars ->
+      do
+        param_vars <- mint_fresh_tvars(state, list_length(qvars))
+        (build_tvar_subst(qvars, param_vars, dict_empty()), param_vars)
+
+fn record_type_qvars(type_name: String, fields: List ast.RecordField, env: Dict types.Scheme) -> List String =
+  match fields with
+  | Nil -> Nil
+  | [ast.RecordField fname _ | _] ->
+      match dict_get(str_concat("@rec:", str_concat(type_name, str_concat(":", fname))), env) with
+      | Just scheme -> types.scheme_vars(scheme)
+      | Nothing -> Nil
+
+fn mint_fresh_tvars(state: unifier.InferState, n: Int) -> List types.Type !{IO} =
+  if n <= 0 then Nil
+  else do
+    v <- unifier.fresh(state)
+    rest <- mint_fresh_tvars(state, n - 1)
+    Cons(types.TVar(types.tyvar_id(v)), rest)
+
+fn apply_type_args(base: types.Type, args: List types.Type) -> types.Type =
+  match args with
+  | Nil -> base
+  | Cons a rest -> apply_type_args(types.TApp(base, a), rest)
 
 fn infer_record_fields(
   state: unifier.InferState,
@@ -3439,14 +3480,16 @@ fn infer_record_fields(
   fields: List ast.RecordField,
   acc_fields: List typed_ast.TypedRecordField,
   acc_eff: types.Effect,
-  pos: source.SourcePos
+  pos: source.SourcePos,
+  param_subst: Dict types.Type,
+  result_type: types.Type
 ) -> InferResult !{IO} =
   match fields with
   | Nil ->
       InferOk(
         typed_ast.TRecord(type_name,
                           typed_record_field_list_reverse(acc_fields),
-                          types.TConst(types.type_id(type_name)), pos),
+                          result_type, pos),
         subst, eff_subst, acc_eff)
   | Cons field rest_fields ->
       match field with
@@ -3459,14 +3502,17 @@ fn infer_record_fields(
                 match dict_get(str_concat("@rec:", str_concat(type_name, str_concat(":", fname))), env) with
                 | Nothing -> InferErr(pos, "Unknown record type or field: " ++ type_name ++ "." ++ fname)
                 | Just field_scheme ->
-                    do
-                      field_t <- unifier.instantiate(state, field_scheme)
-                      match unifier.unify_types(s1, typed_ast.typed_expr_type(typed_val), field_t) with
-                      | Err e -> InferErr(pos, "Record field type mismatch: " ++ e)
-                      | Ok s2 ->
-                          infer_record_fields(state, env, s2, es1, type_name, rest_fields,
-                            Cons(typed_ast.TypedRecordField(fname, typed_val), acc_fields),
-                            merge_effects(acc_eff, val_eff), pos)
+                    # Substitute the SHARED param vars into the field's declared type
+                    # (not a per-field fresh instantiate) so all fields and the result
+                    # agree on each param. Field schemes carry no effect/constraint
+                    # vars, so a plain subst suffices.
+                    let field_t = unifier.apply_subst(param_subst, types.scheme_type(field_scheme))
+                    in match unifier.unify_types(s1, typed_ast.typed_expr_type(typed_val), field_t) with
+                       | Err e -> InferErr(pos, "Record field type mismatch: " ++ e)
+                       | Ok s2 ->
+                           infer_record_fields(state, env, s2, es1, type_name, rest_fields,
+                             Cons(typed_ast.TypedRecordField(fname, typed_val), acc_fields),
+                             merge_effects(acc_eff, val_eff), pos, param_subst, result_type)
 
 fn infer_get_field(
   state: unifier.InferState,

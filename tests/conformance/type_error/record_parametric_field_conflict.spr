@@ -1,0 +1,9 @@
+# A parametric record's type variable is shared across its fields, so two fields
+# declared `a` must receive the SAME type. `fst = 1` forces `a = Int` and
+# `snd = "x"` forces `a = String` — a conflict that must be rejected at
+# construction. (Before parametric-record construction inference was fixed, the
+# record typed as a bare `Pair` and each field instantiated independently, so this
+# unsound program was wrongly accepted.)
+type Pair a = (fst: a, snd: a)
+
+fn bad() -> Pair Int = Pair(fst = 1, snd = "x")

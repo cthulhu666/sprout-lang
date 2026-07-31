@@ -586,10 +586,13 @@ set of named, heterogeneously-typed fields known at compile time. Records join
 the parenthesis family (`(a, b)`, `f(a)`, `Just(x)`); the `label: Type` form uses
 `:` because a field is a **type annotation**, the same `:` as a function
 parameter. A parenthesised list distinguishes a record type from a tuple type by
-its labels: `(x: Int, y: Int)` is a record, `(Int, Int)` is a tuple. The v0
-implemented subset is **monomorphic** records; parametric records (`type Boxed a
-= (value: a, tag: String)`) are a planned follow-up (construction does not yet
-infer the type arguments).
+its labels: `(x: Int, y: Int)` is a record, `(Int, Int)` is a tuple. Records may be
+**parametric** (`type Boxed a = (value: a, tag: String)`); construction infers the
+type arguments (`Boxed(value = 5, tag = "n")` has type `Boxed Int`) and a field
+declared `a` reads back at the record's instantiated argument. A parametric record's
+type variable is shared across its fields, so two fields declared `a` must receive
+the same type. Records are currently **same-module only** (imported records are a
+known gap).
 
 **Construction** is tag-prefixed, with `=` (a value binding, the same `=` as
 `let`):
