@@ -1,8 +1,8 @@
 import stdlib.test (check_true, run_suite)
 import stdlib.math (pi, fabs, floor, sqrt, sin, cos, tan, radians, fclamp, lerp, nan, is_nan, atan, atan2)
 
-# TDD — the Double math primitives that back the M2 vector/matrix layer
-# (docs/graphics-v0.md §M2). All implemented in PURE Sprout — no C builtins:
+# TDD — the Double math primitives that back the M2 vector/matrix layer.
+# All implemented in PURE Sprout — no C builtins:
 # sqrt via Newton-Raphson, sin/cos via range reduction + Taylor series, floor
 # via the 2^52 magic-number trick. RED until the real implementations land.
 

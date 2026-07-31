@@ -353,7 +353,7 @@ Legend:
 
 - [ ] `P3` Wire `opt` optimization passes into the build pipeline: after `opt --passes=verify` is stable in CI, add `opt --passes=mem2reg,instcombine,simplifycfg` before the clang step in `_build-stage` to pre-optimize IR. This decouples Sprout's IR quality from clang's optimizer settings and makes it easier to inspect what survives optimization (e.g. whether CPR unboxed `extractvalue` paths survive, or whether `sprout_field` calls reappear). Also enables `opt --passes=O2 "$TMP_LL" -S | grep -c sprout_field` as a benchmark signal for CPR effectiveness.
 
-- [~] `P1` Execute the staged self-hosting plan in [docs/self-hosting-eliminate-python-backlog.md](./docs/self-hosting-eliminate-python-backlog.md), with the end goal that compiler/tooling ownership moves from Python into Sprout and the Python path becomes compatibility-only before removal.
+- [~] `P1` Execute the staged self-hosting plan below (the standalone `self-hosting-eliminate-python-backlog.md` was retired into this canonical BACKLOG in `beda51e`), with the end goal that compiler/tooling ownership moves from Python into Sprout and the Python path becomes compatibility-only before removal.
   - bootstrap lexer (`stdlib/compiler/source`, `token`, `lexer`) is at Python tokenizer parity
   - bootstrap parser AST types and parser exist in `stdlib/compiler/ast`, `parser`
   - bootstrap HM typechecker stack exists in `stdlib/compiler/types`, `unifier`, `infer`

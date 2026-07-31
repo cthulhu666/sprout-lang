@@ -8,7 +8,7 @@ operations, falling back to the Codeberg/Forgejo REST API directly when
 
 For autonomous monitoring + ff-merging + the standard "master moved →
 rebase + seed regen → requeue" cycle, the
-[`codeberg-merge` skill](../.claude/skills/codeberg-merge.md) is a thin
+[`codeberg-merge` skill](../.claude/skills/codeberg-merge/SKILL.md) is a thin
 orchestrator over the recipes below.
 
 ## Setup (one-time, per machine)

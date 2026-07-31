@@ -1,7 +1,7 @@
 # Handoff: dict-dispatch soundness arc (2026-07-13)
 
 Status: **handoff** — non-normative. Continuation notes for the retro follow-ups in
-[retro-dict-dispatch-soundness-2026-07-13.md](retro-dict-dispatch-soundness-2026-07-13.md).
+[retro-dict-dispatch-soundness-2026-07-13.md](../retro-dict-dispatch-soundness-2026-07-13.md).
 Backlog items live under `BACKLOG.md` → "Compiler Internals Follow-Ups → Dispatch
 Soundness & Diagnostics" (items 1–4).
 

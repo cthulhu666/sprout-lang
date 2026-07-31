@@ -1,8 +1,8 @@
 # GC Rooting — Model C Plan (typed Sprout-IR + linear types)
 
 **Date:** 2026-06-02
-**Status:** In execution. **Milestones 1–2 complete; Milestone 3 substantially complete.** Supersedes the linter+defer path in [`gc-rooting-fix-plan-2026-06-01.md`](gc-rooting-fix-plan-2026-06-01.md). See the **Status — 2026-07-29** section below for the current, verified state (which is well ahead of the milestone tables that follow).
-**Companion:** [`gc-rooting-fix-plan-2026-06-01.md`](gc-rooting-fix-plan-2026-06-01.md) — original Problem A / Problem B framing and stress-mode verification context.
+**Status:** In execution. **Milestones 1–2 complete; Milestone 3 substantially complete.** Supersedes the linter+defer path in [`gc-rooting-fix-plan-2026-06-01.md`](archive/gc-rooting-fix-plan-2026-06-01.md). See the **Status — 2026-07-29** section below for the current, verified state (which is well ahead of the milestone tables that follow).
+**Companion:** [`gc-rooting-fix-plan-2026-06-01.md`](archive/gc-rooting-fix-plan-2026-06-01.md) — original Problem A / Problem B framing and stress-mode verification context.
 
 ---
 
@@ -156,7 +156,7 @@ M1 (scalars) ────┐
 - **Linter + `defer`.** Per the project decision to pursue Model C directly, these pragmatic mid-term solutions are skipped.
 - **Optimizations in Sprout-IR.** Peephole, inlining, constant-folding are tempting because the typed IR invites them. Out of scope until post-M5.
 - **Higher-order linearity.** PR 4.4 punts on linear function arguments past trivial cases. Full higher-order linearity is known-hard (Linear Haskell shipped it incomplete). First-order linearity is enough for Sprout-IR's needs.
-- **Moving GC / generational GC interaction.** Touched by [`generational-gc-v1-draft.md`](generational-gc-v1-draft.md). The Model C plan assumes non-moving GC throughout; generational write barriers introduce new GC-trigger sites that the dataflow pass (M2) and the linear types (M5) must learn about. Sequence: generational GC lands after Model C, not before.
+- **Moving GC / generational GC interaction.** Touched by [`generational-gc-v1-draft.md`](archive/generational-gc-v1-draft.md). The Model C plan assumes non-moving GC throughout; generational write barriers introduce new GC-trigger sites that the dataflow pass (M2) and the linear types (M5) must learn about. Sequence: generational GC lands after Model C, not before.
 
 ---
 
@@ -176,7 +176,7 @@ M1 (scalars) ────┐
 
 - **Shadow stack** — the existing GC root mechanism. Codegen emits `sprout_gc_push_i64_root` / `sprout_gc_pop_roots` calls; the runtime walks pushed slots during collection.
 - **Heap-typed value** — an SSA value whose source is `str_*`, `sprout_make*`, `sprout_alloc_*`, or an `inttoptr` from one of those. Lives on the GC heap.
-- **GC trigger** — any runtime function that may call `sprout_gc_maybe_collect_threshold`. See [`gc-rooting-fix-plan-2026-06-01.md`](gc-rooting-fix-plan-2026-06-01.md) for the full list.
+- **GC trigger** — any runtime function that may call `sprout_gc_maybe_collect_threshold`. See [`gc-rooting-fix-plan-2026-06-01.md`](archive/gc-rooting-fix-plan-2026-06-01.md) for the full list.
 - **`Heap τ` (IR type)** — pointer to heap-allocated value of type `τ`, NOT registered on the shadow stack. Linear.
 - **`Rooted τ` (IR type)** — pointer to heap-allocated value of type `τ`, currently registered on the shadow stack. Linear.
 - **Dataflow rooting** — automatic insertion of `IRRoot`/`IRUnroot` ops by analyzing IR liveness across GC-trigger ops. M2's approach.

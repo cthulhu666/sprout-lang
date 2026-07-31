@@ -199,7 +199,7 @@ fn finalize_lines(xs: List String) -> List String =
 
 # O(n): str_split_lines is one C-side pass; finalize_lines is one more pass with O(line) CR strips.
 # (The previous pure-Sprout version was O(n^2) — char_at/slice per codepoint index — which made a
-# ~650 KB input grind for many seconds; see docs/galaxy-map-demo-v0.md for where that bit.)
+# ~650 KB input grind for many seconds.)
 export fn string_lines(raw: String) -> Vec String =
   vec_from_list(finalize_lines(str_split_lines(raw)))
 

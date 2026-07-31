@@ -223,10 +223,10 @@ fixes the element type, so inference alone suffices. See §6 for how existential
 values are introduced given that limitation.)
 
 **A deliberate counter-example — the ECS.** One might expect Sprout's scene/ECS
-("N heterogeneous things, each with its own type," `ecs-v0.md:12`) to want
+("N heterogeneous things, each with its own type") to want
 existentials. It does not: the ECS uses **Struct-of-Arrays** — `Scene` is a
 record of fixed, *homogeneous* `MutVec` columns, one typed array per component,
-every entity occupying a slot across all of them (`ecs-v0.md` §10.2). SoA
+every entity occupying a slot across all of them. SoA
 *removes* the heterogeneity instead of storing it. Existentials pay off only when
 values of differing types must be stored *together* **and** cannot be
 restructured into per-type columns **and** the type set is open. That is a
@@ -404,8 +404,8 @@ specified here.
   not perturb.
 - `docs/devirtualization-v0.md` — the arc whose residual dictionary Stage 0b is
   the natural home for.
-- `docs/ecs-v0.md` §10.2 — the SoA design that is the instructive *non*-use of
-  existentials.
+- The ECS/SoA design (since extracted to the uncharted-suns project) — the
+  instructive *non*-use of existentials.
 
 ## Primary sources
 

@@ -1,6 +1,6 @@
 module stdlib.linalg
 
-# Linear algebra for graphics (docs/graphics-v0.md §M2b). Vec3/Vec4/Mat4/Quat
+# Linear algebra for graphics. Vec3/Vec4/Mat4/Quat
 # are `wrap` types over the tested flat-buffer foundation in stdlib.mutable, so
 # they are distinct + type-safe at compile time yet zero-cost at runtime (a Vec3
 # is represented exactly as its backing MutVec Double). Element math routes

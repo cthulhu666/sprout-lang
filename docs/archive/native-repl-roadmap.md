@@ -17,7 +17,7 @@
 > Remaining incremental REPL work — full LSP coverage, generational tab
 > completion, in-Sprout interpreter for eval — is tracked in `BACKLOG.md`
 > (§"Phase 9", §"M2–M4 sproutd" entries) and
-> [repl-self-hosting-v1-draft.md](./repl-self-hosting-v1-draft.md). The
+> [repl-self-hosting-v1-draft.md](../repl-self-hosting-v1-draft.md). The
 > staging text below is retained for historical context.
 
 This document outlines a pragmatic path from the current hosted Python REPL to
@@ -25,7 +25,7 @@ a future Sprout-native REPL binary.
 
 For the longer-term self-hosting direction where the REPL session engine itself
 becomes Sprout-owned rather than host-backed, see
-[repl-self-hosting-v1-draft.md](./repl-self-hosting-v1-draft.md).
+[repl-self-hosting-v1-draft.md](../repl-self-hosting-v1-draft.md).
 
 It is an implementation/tooling roadmap, not a normative language spec.
 

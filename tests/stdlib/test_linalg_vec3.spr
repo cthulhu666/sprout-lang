@@ -3,7 +3,7 @@ import stdlib.math (fabs)
 import stdlib.linalg
 
 # TDD — Vec3 on `wrap Vec3 = MutVec Double` over the tested stdlib.mutable
-# foundation (docs/graphics-v0.md §M2b). RED until the real impls land.
+# foundation. RED until the real impls land.
 #
 # Components are checked inline (not via a Vec3-typed helper): a `wrap` type used
 # in a user annotation across modules does not currently canonicalize, so Vec3

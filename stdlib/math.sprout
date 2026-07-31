@@ -74,11 +74,11 @@ export fn is_even(value: Int) -> Bool =
 export fn is_odd(value: Int) -> Bool =
   is_even(value) == false
 
-# --- Double primitives (M2 math layer; docs/graphics-v0.md) ---
+# --- Double primitives (M2 math layer) ---
 # All pure Sprout, no C builtins. Accuracy ~1e-8; slower than libm (fine for the
 # transform-scale math this layer serves). If a measured hot path ever demands
 # it, the right escalation is lowering to an LLVM intrinsic (e.g. llvm.sqrt.f64),
-# not a runtime builtin — see docs/graphics-v0.md §M2.
+# not a runtime builtin.
 
 export let pi = 3.141592653589793
 
