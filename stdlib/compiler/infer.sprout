@@ -1898,7 +1898,13 @@ fn inject_constrained_fn_dicts_via_field(
       match entry with
       | (head_token, class_name) ->
           if head_token == "#none" then
-            match resolve_one_constraint_tdict(class_name, user_typed_args(typed_args), subst, env, pos, collect_injected_heads_for_class(class_name, typed_args)) with
+            # Resolve with s3 (post-argument-inference), not the stale pre-argument
+            # `subst`. A headless (compound-head) constraint like `where ToString
+            # (Box a)` scans the args for a concrete instance; an inline
+            # parametric-record arg carries its `a -> Int` binding only in s3, so
+            # the stale subst would leave it `Box $free` and poison the dict
+            # (unresolved-thunk crash). Mirrors the check_instance_for_marker fix.
+            match resolve_one_constraint_tdict(class_name, user_typed_args(typed_args), s3, env, pos, collect_injected_heads_for_class(class_name, typed_args)) with
             | Nothing ->
                 inject_constrained_fn_dicts_via_field(name, rest, prog_to_fresh, env, typed_callee, typed_args, subst, ret_t, s3, es3, call_eff, pos)
             | Just tdict ->
