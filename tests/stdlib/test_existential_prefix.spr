@@ -11,7 +11,7 @@ import stdlib.test (check_eq, run_suite)
 # --- Flagship: shared hidden state. One existential `s` spans all three fields;
 # each Widget closes over private state of its own type, touched only through the
 # shared interface. UNCONSTRAINED — no `where`. ---
-type Widget = | exists s. W s (s -> s) (s -> String)
+type Widget = | exists s. W s (s -> s)(s -> String)
 
 fn inc(n: Int) -> Int = n + 1
 fn show_int(n: Int) -> String = int_to_string(n)
