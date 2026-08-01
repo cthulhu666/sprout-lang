@@ -690,7 +690,7 @@ fn collect_ctor_infos_from_decls(decls: List typed_ast.TypedDecl, prefix: String
       match d with
       | typed_ast.TPassThrough inner_decl ->
           match inner_decl with
-          | ast.TypeDecl name type_params ctors _ _ ->
+          | ast.TypeDecl name type_params ctors _ _ _ ->
               if str_starts_with(name, prefix) then
                 collect_ctor_infos_from_decls(rest, prefix,
                   collect_ctors_for_type(ctors, name, make_local_vars(type_params), acc))
@@ -1274,10 +1274,10 @@ export fn encode_ast_decl(d: ast.Decl) -> String =
       string_concat_many(["(FnDecl ", encode_quoted_str(name), " ", encode_ast_param_list(params), " ", encode_maybe_typeexpr(ret), " ", encode_maybe_str_list(effects), " ", encode_ast_type_constraint_list(constraints), " ", encode_ast_expr(body), " ", encode_ast_pos(p), ")"])
   | ast.ExternFnDecl name params ret effects p ->
       string_concat_many(["(ExternFnDecl ", encode_quoted_str(name), " ", encode_ast_param_list(params), " ", encode_maybe_typeexpr(ret), " ", encode_maybe_str_list(effects), " ", encode_ast_pos(p), ")"])
-  | ast.TypeDecl name type_params ctors deriving_classes p ->
-      string_concat_many(["(TypeDecl ", encode_quoted_str(name), " ", encode_str_list(type_params), " ", encode_ast_type_constructor_list(ctors), " ", encode_str_list(deriving_classes), " ", encode_ast_pos(p), ")"])
-  | ast.RecordDecl name type_params fields deriving_classes p ->
-      string_concat_many(["(RecordDecl ", encode_quoted_str(name), " ", encode_str_list(type_params), " ", encode_ast_record_field_decl_list(fields), " ", encode_str_list(deriving_classes), " ", encode_ast_pos(p), ")"])
+  | ast.TypeDecl name type_params ctors deriving_classes mult p ->
+      string_concat_many(["(TypeDecl ", encode_quoted_str(name), " ", encode_str_list(type_params), " ", encode_ast_type_constructor_list(ctors), " ", encode_str_list(deriving_classes), " ", encode_multiplicity(mult), " ", encode_ast_pos(p), ")"])
+  | ast.RecordDecl name type_params fields deriving_classes mult p ->
+      string_concat_many(["(RecordDecl ", encode_quoted_str(name), " ", encode_str_list(type_params), " ", encode_ast_record_field_decl_list(fields), " ", encode_str_list(deriving_classes), " ", encode_multiplicity(mult), " ", encode_ast_pos(p), ")"])
   | ast.LetDecl name body _ p ->
       # The `let x : T = e` annotation is definition-local (only used to check the
       # RHS at its definition site); importers need only the inferred scheme, so it
@@ -2114,23 +2114,36 @@ fn decode_extern_fn_decl_body(s: String, bytes: Bytes, i: Int, total: Int) -> Ma
       Just end = expect_char(s, bytes, skip_ws(s, bytes, p, total), total, ')') else Nothing
   in Just((ast.ExternFnDecl(name, params, ret, effects, pos), end))
 
+# Multiplicity is serialized as a quoted tag between deriving_classes and pos,
+# reusing the quoted-string primitive (no new decode primitive). Encode/decode
+# must agree on this position. See docs/linear-types-m4-scoping-2026-08-01.md.
+fn encode_multiplicity(m: ast.Multiplicity) -> String =
+  match m with
+  | ast.Linear -> encode_quoted_str("Linear")
+  | ast.Unrestricted -> encode_quoted_str("Unrestricted")
+
+fn multiplicity_from_str(s: String) -> ast.Multiplicity =
+  if s == "Linear" then ast.Linear else ast.Unrestricted
+
 fn decode_type_decl_body(s: String, bytes: Bytes, i: Int, total: Int) -> Maybe(ast.Decl, Int) =
   let Just(name, j) = decode_quoted_str_at(s, bytes, skip_ws(s, bytes, i, total), total) else Nothing
       Just(type_params, k) = decode_str_list_at(s, bytes, skip_ws(s, bytes, j, total), total) else Nothing
       Just(ctors, m) = decode_ast_type_constructor_list_at(s, bytes, skip_ws(s, bytes, k, total), total) else Nothing
       Just(deriving_classes, n) = decode_str_list_at(s, bytes, skip_ws(s, bytes, m, total), total) else Nothing
-      Just(pos, p) = decode_pos_at(s, bytes, skip_ws(s, bytes, n, total), total) else Nothing
+      Just(mult_str, mp) = decode_quoted_str_at(s, bytes, skip_ws(s, bytes, n, total), total) else Nothing
+      Just(pos, p) = decode_pos_at(s, bytes, skip_ws(s, bytes, mp, total), total) else Nothing
       Just end = expect_char(s, bytes, skip_ws(s, bytes, p, total), total, ')') else Nothing
-  in Just((ast.TypeDecl(name, type_params, ctors, deriving_classes, pos), end))
+  in Just((ast.TypeDecl(name, type_params, ctors, deriving_classes, multiplicity_from_str(mult_str), pos), end))
 
 fn decode_record_decl_body(s: String, bytes: Bytes, i: Int, total: Int) -> Maybe(ast.Decl, Int) =
   let Just(name, j) = decode_quoted_str_at(s, bytes, skip_ws(s, bytes, i, total), total) else Nothing
       Just(type_params, k) = decode_str_list_at(s, bytes, skip_ws(s, bytes, j, total), total) else Nothing
       Just(fields, m) = decode_ast_record_field_decl_list_at(s, bytes, skip_ws(s, bytes, k, total), total) else Nothing
       Just(deriving_classes, n) = decode_str_list_at(s, bytes, skip_ws(s, bytes, m, total), total) else Nothing
-      Just(pos, p) = decode_pos_at(s, bytes, skip_ws(s, bytes, n, total), total) else Nothing
+      Just(mult_str, mp) = decode_quoted_str_at(s, bytes, skip_ws(s, bytes, n, total), total) else Nothing
+      Just(pos, p) = decode_pos_at(s, bytes, skip_ws(s, bytes, mp, total), total) else Nothing
       Just end = expect_char(s, bytes, skip_ws(s, bytes, p, total), total, ')') else Nothing
-  in Just((ast.RecordDecl(name, type_params, fields, deriving_classes, pos), end))
+  in Just((ast.RecordDecl(name, type_params, fields, deriving_classes, multiplicity_from_str(mult_str), pos), end))
 
 fn decode_let_decl_body(s: String, bytes: Bytes, i: Int, total: Int) -> Maybe(ast.Decl, Int) =
   let Just(name, j) = decode_quoted_str_at(s, bytes, skip_ws(s, bytes, i, total), total) else Nothing

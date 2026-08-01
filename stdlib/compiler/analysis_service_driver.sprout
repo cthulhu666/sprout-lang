@@ -128,9 +128,9 @@ fn collect_decl_names(decls: List ast.Decl, acc: List String) -> List String =
       match d with
       | ast.FnDecl name _ _ _ _ _ _ ->
           collect_decl_names(rest, Cons(name, acc))
-      | ast.TypeDecl name _ ctors _ _ ->
+      | ast.TypeDecl name _ ctors _ _ _ ->
           collect_decl_names(rest, ctor_names(ctors, Cons(name, acc)))
-      | ast.RecordDecl name _ _ _ _ ->
+      | ast.RecordDecl name _ _ _ _ _ ->
           collect_decl_names(rest, Cons(name, acc))
       | ast.LetDecl name _ _ _ ->
           collect_decl_names(rest, Cons(name, acc))
@@ -176,12 +176,12 @@ fn collect_decl_locations(
             Cons("fn", categories), Cons(name, names),
             Cons(source.position_line(pos) + line_offset, lines),
             Cons(source.position_column(pos), cols))
-      | ast.TypeDecl name _ _ _ pos ->
+      | ast.TypeDecl name _ _ _ _ pos ->
           collect_decl_locations(rest, line_offset,
             Cons("type", categories), Cons(name, names),
             Cons(source.position_line(pos) + line_offset, lines),
             Cons(source.position_column(pos), cols))
-      | ast.RecordDecl name _ _ _ pos ->
+      | ast.RecordDecl name _ _ _ _ pos ->
           collect_decl_locations(rest, line_offset,
             Cons("type", categories), Cons(name, names),
             Cons(source.position_line(pos) + line_offset, lines),

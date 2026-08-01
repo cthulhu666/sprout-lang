@@ -1580,10 +1580,26 @@ fn collect_type_constructors(tokens: Vec token.Token, i: Int, acc: List ast.Type
 # ---------------------------------------------------------------------------
 # Declaration parsing
 
+# An optional per-declaration `linear` marker sits between `type` and the type
+# name (e.g. `type linear File = ...`), mirroring the contextual `type alias`
+# shape — `linear` is not a reserved word, only special in this position. Split
+# into two single-value helpers (a do-block `let` accepts only simple-var
+# bindings, not a tuple destructure). M4.1 parses + records; use-once enforcement
+# is M4.2. See docs/linear-types-m4-scoping-2026-08-01.md.
+fn at_linear_marker(tokens: Vec token.Token, i: Int) -> Bool =
+  tok_is_ident(tok_at(tokens, i)) && token.token_text(tok_at(tokens, i)) == "linear"
+
+fn linear_marker_mult(tokens: Vec token.Token, i: Int) -> ast.Multiplicity =
+  if at_linear_marker(tokens, i) then ast.Linear else ast.Unrestricted
+
+fn skip_linear_marker(tokens: Vec token.Token, i: Int) -> Int =
+  if at_linear_marker(tokens, i) then i + 1 else i
+
 fn parse_type_decl(tokens: Vec token.Token, i: Int) -> Result ParseError (ast.Decl, Int) =
   do
     (_, i2) <- expected_keyword("type", tokens, i)
-    (name_tok, i3) <- expected_ident("type name", tokens, i2)
+    let mult = linear_marker_mult(tokens, i2)
+    (name_tok, i3) <- expected_ident("type name", tokens, skip_linear_marker(tokens, i2))
     (params, i4) <- collect_ident_list(tokens, i3, Nil)
     let i4a = skip_visibility(tokens, i4)
     (deriving_classes, i4b) <- parse_deriving_clause(tokens, i4a)
@@ -1591,7 +1607,7 @@ fn parse_type_decl(tokens: Vec token.Token, i: Int) -> Result ParseError (ast.De
     let i5b = skip_optional_bar(tokens, i5)
     (first_ctor, i6) <- parse_type_constructor_def(tokens, i5b)
     (ctors, i7) <- collect_type_constructors(tokens, i6, Cons(first_ctor, Nil))
-    Ok((ast.TypeDecl(token.token_text(name_tok), params, list_reverse(ctors), deriving_classes, cur_pos(tokens, i)), i7))
+    Ok((ast.TypeDecl(token.token_text(name_tok), params, list_reverse(ctors), deriving_classes, mult, cur_pos(tokens, i)), i7))
 
 # Parses an optional `deriving (ClassName, ClassName, ...)` clause.
 # Returns Nil if no `deriving` keyword is at the current position.
@@ -1742,7 +1758,8 @@ fn collect_record_field_decls(tokens: Vec token.Token, i: Int, acc: List ast.Rec
 fn parse_record_type_decl(tokens: Vec token.Token, i: Int) -> Result ParseError (ast.Decl, Int) =
   do
     (_, i2) <- expected_keyword("type", tokens, i)
-    (name_tok, i3) <- expected_ident("type name", tokens, i2)
+    let mult = linear_marker_mult(tokens, i2)
+    (name_tok, i3) <- expected_ident("type name", tokens, skip_linear_marker(tokens, i2))
     (params, i4) <- collect_ident_list(tokens, i3, Nil)
     (_, i5) <- expected_symbol("=", tokens, skip_visibility(tokens, i4))
     (_, i6) <- expected_symbol("(", tokens, i5)
@@ -1751,7 +1768,7 @@ fn parse_record_type_decl(tokens: Vec token.Token, i: Int) -> Result ParseError 
     # `deriving (...)` is trailing on records (the `= (fields)` RHS is a
     # self-contained parenthesised list), unlike ADTs where it precedes `=`.
     (deriving_classes, i9) <- parse_deriving_clause(tokens, i8)
-    Ok((ast.RecordDecl(token.token_text(name_tok), list_reverse(params), fields, deriving_classes, cur_pos(tokens, i)), i9))
+    Ok((ast.RecordDecl(token.token_text(name_tok), list_reverse(params), fields, deriving_classes, mult, cur_pos(tokens, i)), i9))
 
 fn parse_class_method_sig(tokens: Vec token.Token, i: Int) -> Result ParseError (ast.ClassMethodSig, Int) =
   do

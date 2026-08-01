@@ -267,9 +267,9 @@ fn dump_decl(d: ast.Decl) -> String =
   match d with
   | ast.FnDecl name params maybe_ret maybe_effs constraints body _ ->
       sexp("fn", [q(name), dump_params(params), dump_maybe_ret(maybe_ret), dump_maybe_effects(maybe_effs), sexp("constraints", dump_constraints(constraints)), dump_expr(body)])
-  | ast.TypeDecl name type_params ctors _ _ ->
+  | ast.TypeDecl name type_params ctors _ _ _ ->
       sexp("type", Cons(q(name), Cons(sexp("type-params", q_list(type_params)), dump_ctors(ctors))))
-  | ast.RecordDecl name type_params fields _ _ ->
+  | ast.RecordDecl name type_params fields _ _ _ ->
       sexp("record", Cons(q(name), Cons(sexp("type-params", q_list(type_params)), dump_field_decls(fields))))
   | ast.LetDecl name body _ _ ->
       sexp("let", [q(name), dump_expr(body)])

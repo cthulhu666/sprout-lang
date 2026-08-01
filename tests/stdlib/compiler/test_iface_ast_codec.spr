@@ -1,4 +1,4 @@
-import stdlib.test (TestState, new_state, assert_true, summary)
+import stdlib.test (TestState, new_state, assert_true, assert_false, summary)
 import stdlib.compiler.ast as ast
 import stdlib.compiler.source as source
 import stdlib.compiler.iface_codec as iface_codec
@@ -33,6 +33,24 @@ fn rt_decl(d: ast.Decl) -> Bool =
   match iface_codec.decode_ast_decl(iface_codec.encode_ast_decl(d)) with
   | Nothing -> false
   | Just d2 -> iface_codec.encode_ast_decl(d2) == iface_codec.encode_ast_decl(d)
+
+# Encode->decode a decl and return the multiplicity actually present on the DECODED
+# node. A direct structural check (not encode-string equality) so it catches an
+# encoder that drops the bit as well as a decoder that ignores it — the M4.1
+# "linearity survives a module boundary" contract. See linear-types-m4-scoping doc.
+fn decoded_mult_is_linear(d: ast.Decl) -> Bool =
+  match iface_codec.decode_ast_decl(iface_codec.encode_ast_decl(d)) with
+  | Nothing -> false
+  | Just d2 ->
+      match d2 with
+      | ast.TypeDecl _ _ _ _ mult _ -> mult_is_linear(mult)
+      | ast.RecordDecl _ _ _ _ mult _ -> mult_is_linear(mult)
+      | _ -> false
+
+fn mult_is_linear(m: ast.Multiplicity) -> Bool =
+  match m with
+  | ast.Linear -> true
+  | ast.Unrestricted -> false
 
 fn rt_program(prog: ast.Program) -> Bool =
   match iface_codec.decode_ast_program(iface_codec.encode_ast_program(prog)) with
@@ -268,6 +286,7 @@ fn main() -> Unit !{IO} =
         Cons(ast.TypeConstructor("Just", Cons(ast.TypeName("a"), Nil), Nil, Nil),
           Cons(ast.TypeConstructor("Nothing", Nil, Nil, Nil), Nil)),
         Cons("Eq", Cons("ToString", Nil)),
+        ast.Unrestricted,
         pos0())))
 
     assert_true(state, "RecordDecl roundtrip",
@@ -276,7 +295,22 @@ fn main() -> Unit !{IO} =
         Cons(ast.RecordFieldDecl("x", ast.TypeName("Int")),
           Cons(ast.RecordFieldDecl("y", ast.TypeName("Int")), Nil)),
         Cons("Eq", Cons("Ord", Nil)),
+        ast.Unrestricted,
         pos0())))
+
+    # Linearity must SURVIVE the codec, not just default to Unrestricted (M4.1).
+    assert_true(state, "Linear TypeDecl survives codec",
+      decoded_mult_is_linear(ast.TypeDecl("LinFile", Nil,
+        Cons(ast.TypeConstructor("LinFile", Cons(ast.TypeName("Int"), Nil), Nil, Nil), Nil),
+        Nil, ast.Linear, pos0())))
+    assert_true(state, "Linear RecordDecl survives codec",
+      decoded_mult_is_linear(ast.RecordDecl("LinPos", Nil,
+        Cons(ast.RecordFieldDecl("x", ast.TypeName("Int")), Nil),
+        Nil, ast.Linear, pos0())))
+    assert_false(state, "Unrestricted stays unrestricted through codec",
+      decoded_mult_is_linear(ast.TypeDecl("PlainFile", Nil,
+        Cons(ast.TypeConstructor("PlainFile", Cons(ast.TypeName("Int"), Nil), Nil, Nil), Nil),
+        Nil, ast.Unrestricted, pos0())))
 
     assert_true(state, "LetDecl roundtrip",
       rt_decl(ast.LetDecl("pi", ast.IntExpr(3, pos0()), Nothing, pos0())))
@@ -360,6 +394,7 @@ fn main() -> Unit !{IO} =
                 Cons(ast.TypeConstructor("Green", Nil, Nil, Nil),
                   Cons(ast.TypeConstructor("Blue", Nil, Nil, Nil), Nil))),
               Nil,
+              ast.Unrestricted,
               pos0()),
             Nil))),
       pos0())

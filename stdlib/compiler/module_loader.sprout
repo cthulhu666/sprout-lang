@@ -266,7 +266,7 @@ fn decl_value_names(decl: ast.Decl, acc: List String) -> List String =
   match decl with
   | ast.FnDecl name _ _ _ _ _ _ -> Cons(name, acc)
   | ast.ExternFnDecl name _ _ _ _ -> Cons(name, acc)
-  | ast.TypeDecl _ _ ctors _ _ -> ctor_value_names(ctors, acc)
+  | ast.TypeDecl _ _ ctors _ _ _ -> ctor_value_names(ctors, acc)
   | ast.LetDecl name _ _ _ -> Cons(name, acc)
   | ast.ClassDecl _ _ methods _ _ -> class_method_names_acc(methods, acc)
   # WrapDecl: the synthetic constructor is a value with the same name as the type.

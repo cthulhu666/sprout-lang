@@ -315,8 +315,9 @@ export fn register_type_decl(decl: ast.Decl, env: GlobalEnv) -> GlobalEnv =
 # unwrapped (e.g. inside check_fn_body for body-scope auxiliaries).
 fn register_type_decl_raw(decl: ast.Decl, env: Dict types.Scheme) -> Dict types.Scheme =
   match decl with
-  | ast.TypeDecl name params ctors _ _ ->
-      register_ctors_for_type(name, params, build_local_params(params, dict_empty()), ctors, env)
+  | ast.TypeDecl name params ctors _ mult _ ->
+      mark_type_multiplicity(name, mult,
+        register_ctors_for_type(name, params, build_local_params(params, dict_empty()), ctors, env))
   # WrapDecl: synthesize a single-constructor type with the same name as the
   # wrap. The constructor's argument type is the wrap's inner type. This gives
   # the typechecker a scheme `inner -> Foo` for Foo(x), and a destructor entry
@@ -419,7 +420,7 @@ fn build_ctor_map(decls: List ast.Decl, acc: Dict (List String)) -> Dict (List S
       # Key by the bare type name: scrutinee types resolve to bare names via
       # lookup_type_var (TConst(after_last_dot(...))), so the ctor map must agree
       # or lookups for own-module ADTs (keyed `main.C`, looked up as `C`) miss.
-      | ast.TypeDecl name _ ctors _ _ ->
+      | ast.TypeDecl name _ ctors _ _ _ ->
           build_ctor_map(rest, dict_set(name, collect_ctor_names(ctors, Nil), acc))
       # WrapDecl: a single synthetic constructor with the same name as the type.
       | ast.WrapDecl name _ _ ->
@@ -770,6 +771,22 @@ fn infer_call_general(
 # `_`-placeholder partials (spec §5.3) are the n-ary way to partially apply.
 fn arity_marker(n: Int) -> types.Scheme =
   types.mono(types.TConst(types.type_id(int_to_string(n))))
+
+# Per-declaration linearity is recorded as a sentinel env entry, mirroring the
+# @arity: marker idiom above: "@linear:<TypeName>" present ⇒ the type constructor
+# was declared `type linear`. Keyed by the type name (a type's head TypeId name),
+# so linearity is a lookup, never inferred/unified. M4.1 records it here; use-once
+# enforcement is M4.2. See docs/linear-types-m4-scoping-2026-08-01.md.
+fn mark_type_multiplicity(name: String, mult: ast.Multiplicity, env: Dict types.Scheme) -> Dict types.Scheme =
+  match mult with
+  | ast.Linear -> dict_set("@linear:" ++ name, types.mono(types.TConst(types.type_id("linear"))), env)
+  | ast.Unrestricted -> env
+
+# True when the named type constructor was declared linear (see mark_type_multiplicity).
+fn type_name_is_linear(name: String, env: Dict types.Scheme) -> Bool =
+  match dict_get("@linear:" ++ name, env) with
+  | Just _ -> true
+  | Nothing -> false
 
 fn fn_declared_arity(name: String, env: Dict types.Scheme) -> Maybe Int =
   match dict_get("@arity:" ++ name, env) with
@@ -4135,9 +4152,9 @@ fn collect_declared_type_names(decls: List ast.Decl, acc: List String) -> List S
   | Nil -> acc
   | Cons decl rest ->
       match decl with
-      | ast.TypeDecl name _ _ _ _ ->
+      | ast.TypeDecl name _ _ _ _ _ ->
           collect_declared_type_names(rest, Cons(string.after_last_dot(name), acc))
-      | ast.RecordDecl name _ _ _ _ ->
+      | ast.RecordDecl name _ _ _ _ _ ->
           collect_declared_type_names(rest, Cons(string.after_last_dot(name), acc))
       | ast.AliasDecl name _ _ _ ->
           collect_declared_type_names(rest, Cons(string.after_last_dot(name), acc))
@@ -4203,9 +4220,9 @@ fn validate_record_fields(
 
 fn validate_decl(decl: ast.Decl, declared: List String) -> Maybe String =
   match decl with
-  | ast.TypeDecl name _ ctors _ _ ->
+  | ast.TypeDecl name _ ctors _ _ _ ->
       validate_ctors(ctors, name, declared)
-  | ast.RecordDecl name _ fields _ _ ->
+  | ast.RecordDecl name _ fields _ _ _ ->
       validate_record_fields(fields, name, declared)
   | ast.AliasDecl name _ rhs _ ->
       validate_te(rhs, name, declared)
@@ -4616,7 +4633,7 @@ fn pre_scan_fn_decls(decls: List ast.Decl, env: Dict types.Scheme, alias_env: Di
             dict_set(name, type_from_ast(rhs_te, dict_empty()), alias_env))
       | ast.AliasDecl name [param] rhs_te _ ->
           pre_scan_fn_decls(rest, env, register_single_param_alias(name, param, rhs_te, alias_env))
-      | ast.TypeDecl _ _ _ _ _ ->
+      | ast.TypeDecl _ _ _ _ _ _ ->
           pre_scan_fn_decls(rest, register_type_decl_raw(decl, env), alias_env)
       | ast.WrapDecl _ _ _ ->
           pre_scan_fn_decls(rest, register_type_decl_raw(decl, env), alias_env)
@@ -4671,14 +4688,15 @@ fn typecheck_decl(
   # dict_get/set) all work on raw Dict.  GlobalEnv is reconstructed at the
   # TypedDeclOk boundary.
   match decl with
-  | ast.TypeDecl _ _ _ _ _ ->
+  | ast.TypeDecl _ _ _ _ _ _ ->
       TypedDeclOk(typed_ast.TPassThrough(decl), register_type_decl(decl, env), env_ftv)
   | ast.WrapDecl _ _ _ ->
       # WrapDecl uses the same single-ctor-synthesizing path as TypeDecl.
       TypedDeclOk(typed_ast.TPassThrough(decl), register_type_decl(decl, env), env_ftv)
-  | ast.RecordDecl rec_name type_params fields _ _ ->
+  | ast.RecordDecl rec_name type_params fields _ mult _ ->
       TypedDeclOk(typed_ast.TPassThrough(decl),
-        GlobalEnv(register_record_fields(rec_name, type_params, fields, global_env_dict(env))),
+        GlobalEnv(mark_type_multiplicity(rec_name, mult,
+          register_record_fields(rec_name, type_params, fields, global_env_dict(env)))),
         env_ftv)
   | ast.FnDecl name params ret_type_maybe effects_maybe constraints _ _ ->
       do

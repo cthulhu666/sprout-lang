@@ -563,9 +563,9 @@ fn add_decl_to_symbols(mod_name: String, exported: List String, ctor_types: List
       add_value_to_symbols(mod_name, name, str_list_member(name, exported), acc)
   | ast.LetDecl name _ _ _ ->
       add_value_to_symbols(mod_name, name, str_list_member(name, exported), acc)
-  | ast.TypeDecl name _ ctors _ _ ->
+  | ast.TypeDecl name _ ctors _ _ _ ->
       add_type_to_symbols(mod_name, name, ctors, exported, ctor_types, acc)
-  | ast.RecordDecl name _ _ _ _ ->
+  | ast.RecordDecl name _ _ _ _ _ ->
       add_record_to_symbols(mod_name, name, str_list_member(name, exported), acc)
   | ast.ClassDecl name _ methods _ _ ->
       add_class_to_symbols(mod_name, name, methods, str_list_member(name, exported), acc)
@@ -1000,19 +1000,21 @@ fn qualify_decl(ctx: ResolveCtx, decl: ast.Decl) -> ast.Decl =
         qualify_constraints(ctx, constraints),
         qualify_expr(ctx, param_names(params), body),
         pos)
-  | ast.TypeDecl name type_params ctors deriving_classes pos ->
+  | ast.TypeDecl name type_params ctors deriving_classes mult pos ->
       ast.TypeDecl(
         dict_get_or(name, ctx_type_locals(ctx), name),
         type_params,
         qualify_ctor_args(ctx, ctors),
         deriving_classes,
+        mult,
         pos)
-  | ast.RecordDecl name type_params fields deriving_classes pos ->
+  | ast.RecordDecl name type_params fields deriving_classes mult pos ->
       ast.RecordDecl(
         dict_get_or(name, ctx_type_locals(ctx), name),
         type_params,
         qualify_record_field_decls(ctx, fields),
         deriving_classes,
+        mult,
         pos)
   | ast.LetDecl name body anno pos ->
       ast.LetDecl(
@@ -1075,7 +1077,7 @@ fn validate_qualified_decl(decl: ast.Decl) -> Maybe String =
   | ast.FnDecl name _ _ _ _ _ _ ->
       if str_starts_with(name, ".") then Just("FnDecl name starts with '.': " ++ name)
       else Nothing
-  | ast.TypeDecl name _ _ _ _ ->
+  | ast.TypeDecl name _ _ _ _ _ ->
       if str_starts_with(name, ".") then Just("TypeDecl name starts with '.': " ++ name)
       else Nothing
   | ast.LetDecl name _ _ _ ->
@@ -1129,8 +1131,8 @@ export fn bundle_file_with_roots(path: source.FilePath, stdlib_root: source.Stdl
 fn decl_orig_name(decl: ast.Decl) -> String =
   match decl with
   | ast.FnDecl name _ _ _ _ _ _ -> name
-  | ast.TypeDecl name _ _ _ _ -> name
-  | ast.RecordDecl name _ _ _ _ -> name
+  | ast.TypeDecl name _ _ _ _ _ -> name
+  | ast.RecordDecl name _ _ _ _ _ -> name
   | ast.LetDecl name _ _ _ -> name
   | ast.ClassDecl name _ _ _ _ -> name
   | ast.InstanceDecl constraint _ _ _ ->

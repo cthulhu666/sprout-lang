@@ -598,13 +598,13 @@ export fn expand_deriving_decls(decls: List ast.Decl) -> List ast.Decl =
   | Nil -> Nil
   | Cons d rest ->
       match d with
-      | ast.TypeDecl name type_params ctors deriving_classes pos ->
+      | ast.TypeDecl name type_params ctors deriving_classes _ pos ->
           match deriving_classes with
           | Nil -> Cons(d, expand_deriving_decls(rest))
           | _ -> Cons(d, list_append(
                           derive_instances_for_classes(name, type_params, ctors, pos, deriving_classes),
                           expand_deriving_decls(rest)))
-      | ast.RecordDecl name type_params fields deriving_classes pos ->
+      | ast.RecordDecl name type_params fields deriving_classes _ pos ->
           match deriving_classes with
           | Nil -> Cons(d, expand_deriving_decls(rest))
           | _ -> Cons(d, list_append(
@@ -632,9 +632,9 @@ export fn validate_deriving_decls(decls: List ast.Decl) -> Maybe(source.SourcePo
 
 fn validate_one_deriving_decl(d: ast.Decl) -> Maybe String =
   match d with
-  | ast.TypeDecl name _ ctors deriving_classes _ ->
+  | ast.TypeDecl name _ ctors deriving_classes _ _ ->
       validate_deriving_classes_list(name, ctors, deriving_classes)
-  | ast.RecordDecl name _ _ deriving_classes _ ->
+  | ast.RecordDecl name _ _ deriving_classes _ _ ->
       validate_record_deriving_classes_list(name, deriving_classes)
   | _ -> Nothing
 

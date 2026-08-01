@@ -25,7 +25,7 @@ fn box_decl() -> typed_ast.TypedDecl =
     ast.TypeDecl("Box", Cons("a", Nil),
       Cons(ast.TypeConstructor("Empty", Nil, Nil, Nil),
         Cons(ast.TypeConstructor("Full", Cons(ast.TypeName("a"), Nil), Nil, Nil), Nil)),
-      Nil, no_pos()))
+      Nil, ast.Unrestricted, no_pos()))
 
 # fn bget(i) = if i < 0 then Empty else Full(i)
 fn bget_decl() -> typed_ast.TypedDecl =
