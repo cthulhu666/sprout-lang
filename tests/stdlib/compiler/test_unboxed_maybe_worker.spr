@@ -26,7 +26,7 @@ fn maybe_decl() -> typed_ast.TypedDecl =
     ast.TypeDecl("Maybe", Cons("a", Nil),
       Cons(ast.TypeConstructor("Just", Cons(ast.TypeName("a"), Nil), Nil, Nil),
         Cons(ast.TypeConstructor("Nothing", Nil, Nil, Nil), Nil)),
-      Nil, no_pos()))
+      Nil, ast.Unrestricted, no_pos()))
 
 # fn mvget(v, i) = vector_get(v, i)        -- Maybe-returning Sprout wrapper
 fn mvget_decl() -> typed_ast.TypedDecl =

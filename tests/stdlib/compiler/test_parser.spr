@@ -85,7 +85,7 @@ fn first_is_type_decl(src: String) -> Bool =
               | Nil -> false
               | Cons d _ ->
                   match d with
-                  | ast.TypeDecl _ _ _ _ _ -> true
+                  | ast.TypeDecl _ _ _ _ _ _ -> true
                   | _ -> false
 
 fn first_typedecl_deriving(src: String) -> List String =
@@ -101,8 +101,34 @@ fn first_typedecl_deriving(src: String) -> List String =
               | Nil -> Nil
               | Cons d _ ->
                   match d with
-                  | ast.TypeDecl _ _ _ deriving_classes _ -> deriving_classes
+                  | ast.TypeDecl _ _ _ deriving_classes _ _ -> deriving_classes
                   | _ -> Nil
+
+# True when the first decl is a `type linear ...` (multiplicity recorded as Linear).
+# This is the test that would catch a Linear->Unrestricted drop-the-bit regression:
+# it asserts the multiplicity the parser actually stored on the TypeDecl, not just
+# that the marker parsed. See docs/linear-types-m4-scoping-2026-08-01.md (M4.1).
+fn first_typedecl_is_linear(src: String) -> Bool =
+  match lexer.tokenize(src) with
+  | Err _ -> false
+  | Ok toks ->
+      match parser.parse_program(toks) with
+      | Err _ -> false
+      | Ok prog ->
+          match prog with
+          | ast.Program decls _ ->
+              match decls with
+              | Nil -> false
+              | Cons d _ ->
+                  match d with
+                  | ast.TypeDecl _ _ _ _ mult _ -> mult_is_linear(mult)
+                  | ast.RecordDecl _ _ _ _ mult _ -> mult_is_linear(mult)
+                  | _ -> false
+
+fn mult_is_linear(m: ast.Multiplicity) -> Bool =
+  match m with
+  | ast.Linear -> true
+  | ast.Unrestricted -> false
 
 fn main() -> Unit !{IO} =
   do
@@ -138,6 +164,12 @@ fn main() -> Unit !{IO} =
 
     assert_true(state, "type decl identified", first_is_type_decl("type Color = Red | Green"))
     assert_false(state, "fn decl not type decl", first_is_type_decl("fn val() -> Int = 1"))
+
+    # Linear marker (M4.1): the parser must RECORD the multiplicity, not just skip
+    # the token. `type linear` -> Linear; a plain `type` -> Unrestricted.
+    assert_true(state, "linear marker recorded", first_typedecl_is_linear("type linear Color = Red | Green"))
+    assert_false(state, "unmarked type is unrestricted", first_typedecl_is_linear("type Color = Red | Green"))
+    assert_true(state, "linear record recorded", first_typedecl_is_linear("type linear Pos = (x: Int, y: Int)"))
 
     # List pattern syntax — desugars to ConstructorPattern "Cons"/"Nil" chains
     # (ast.list_ctor_cons / ast.list_ctor_nil); parse_ok below exercises both

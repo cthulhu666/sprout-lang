@@ -118,8 +118,8 @@ export type InstanceMethodImpl (..) =
 # --- Top-level declarations ---
 #
 # FnDecl name params return_type effects constraints body pos
-# TypeDecl name type_params constructors deriving_classes pos
-# RecordDecl name type_params fields deriving_classes pos
+# TypeDecl name type_params constructors deriving_classes multiplicity pos
+# RecordDecl name type_params fields deriving_classes multiplicity pos
 # LetDecl name body type_annotation pos
 # ClassDecl name type_params methods superclasses pos
 # InstanceDecl constraint instance_constraints methods pos
@@ -131,16 +131,30 @@ export type InstanceMethodImpl (..) =
 # clause was present. On records the clause is trailing (after the field list).
 # See docs/deriving-v1-draft.md and docs/deriving-records-v0.md.
 #
+# multiplicity (the Multiplicity before pos): how values of this type must be
+# used. `type Name = ...` is Unrestricted; `type linear Name = ...` is Linear
+# (per-declaration marker, M4.1). M4.1 parses + records it but does not yet enforce
+# use-once (that is M4.2). See docs/linear-types-m4-scoping-2026-08-01.md.
+#
 # WrapDecl is a zero-cost distinct type. `wrap Foo = T` declares Foo with a
 # single constructor Foo(x: T) -> Foo. Construction Foo(x) and destruction
 # `match | Foo x ->` are identity at the LLVM IR level (no alloc, no field
 # read).
 
+# Usage discipline for a declared type. A multiplicity, not a boolean: the concept
+# is inherently non-binary (cf. Idris 2 QTT 0/1/ω, Linear Haskell One/Many). M4.1
+# seeds the two cases it can act on; Affine (at-most-once), Relevant (at-least-once)
+# and Erased (compile-time-only) are the natural future additions. Matches that
+# ignore the field with `_` are unaffected when a case is added.
+export type Multiplicity (..) =
+  | Unrestricted  # default — use any number of times (ω)
+  | Linear  # must be used exactly once (=1)
+
 export type Decl (..) =
   | FnDecl String (List Param) (Maybe TypeExpr) (Maybe (List String)) (List TypeConstraint) Expr source.SourcePos
   | ExternFnDecl String (List Param) (Maybe TypeExpr) (Maybe (List String)) source.SourcePos
-  | TypeDecl String (List String) (List TypeConstructor) (List String) source.SourcePos
-  | RecordDecl String (List String) (List RecordFieldDecl) (List String) source.SourcePos
+  | TypeDecl String (List String) (List TypeConstructor) (List String) Multiplicity source.SourcePos
+  | RecordDecl String (List String) (List RecordFieldDecl) (List String) Multiplicity source.SourcePos
   | LetDecl String Expr (Maybe TypeExpr) source.SourcePos
   | ClassDecl String (List String) (List ClassMethodSig) (List TypeConstraint) source.SourcePos
   | InstanceDecl TypeConstraint (List TypeConstraint) (List InstanceMethodImpl) source.SourcePos
@@ -154,8 +168,8 @@ export fn decl_pos(d: Decl) -> source.SourcePos =
   match d with
   | FnDecl _ _ _ _ _ _ p -> p
   | ExternFnDecl _ _ _ _ p -> p
-  | TypeDecl _ _ _ _ p -> p
-  | RecordDecl _ _ _ _ p -> p
+  | TypeDecl _ _ _ _ _ p -> p
+  | RecordDecl _ _ _ _ _ p -> p
   | LetDecl _ _ _ p -> p
   | ClassDecl _ _ _ _ p -> p
   | InstanceDecl _ _ _ p -> p
