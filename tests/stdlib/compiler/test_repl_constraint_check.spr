@@ -1,0 +1,40 @@
+module main
+import stdlib.test (TestState, new_state, assert_true, summary)
+import stdlib.compiler.compiler as compiler
+import stdlib.compiler.module_loader as module_loader
+import stdlib.compiler.source as source
+
+# Regression: constraint-class validation must see PRELUDE classes on the REPL /
+# analysis-service path (compile_source_with_cache), where the prelude arrives as
+# env schemes (@class: markers), not ClassDecl nodes. Scanning only the session's
+# own decls left the class set empty, so a correct `where ToString a` was wrongly
+# rejected as "`ToString` is not a class". This exercises the exact path the REPL
+# uses (checker.check_program_with_env via compile_source_with_cache); the
+# file-bundling path (--phase check) does not reproduce the bug.
+
+fn is_compile_ok(r: compiler.CompileResult) -> Bool =
+  match r with
+  | compiler.CompileOk _ -> true
+  | compiler.CompileFail _ -> false
+
+fn main() -> Unit !{IO} =
+  do
+    state <- new_state()
+    match env_get("SPROUT_STDLIB_ROOT") with
+    | Nothing -> ()
+    | Just stdlib_root ->
+        do
+          cache <- module_loader.new_cache()
+          # Correct form using a prelude class must be ACCEPTED.
+          let good = "module app.session\n\nfn tostr(x: a) -> String where ToString a = to_string(x)\n"
+          r_good <- compiler.compile_source_with_cache(good, source.StdlibRoot(stdlib_root), cache)
+          assert_true(state, "REPL: `where ToString a` (prelude class) accepted", is_compile_ok(r_good))
+          # The genuine order-swap must still be REJECTED on this path.
+          let bad = "module app.session\n\nfn tostr(x: a) -> String where a ToString = to_string(x)\n"
+          r_bad <- compiler.compile_source_with_cache(bad, source.StdlibRoot(stdlib_root), cache)
+          assert_true(state, "REPL: `where a ToString` (swap) still rejected", is_compile_ok(r_bad) == false)
+          # A phantom constraint variable must still be REJECTED on this path.
+          let phantom = "module app.session\n\nfn tostr(x) -> String where ToString x = to_string(x)\n"
+          r_phantom <- compiler.compile_source_with_cache(phantom, source.StdlibRoot(stdlib_root), cache)
+          assert_true(state, "REPL: phantom constraint tyvar still rejected", is_compile_ok(r_phantom) == false)
+    summary(state)

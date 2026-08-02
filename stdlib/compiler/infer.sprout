@@ -3853,7 +3853,7 @@ export fn typecheck_decls(
     match validate_all_decls(decls, declared_types) with
     | Just (pos, err_msg) -> typed_ast.TypedErr(pos, err_msg)
     | Nothing ->
-      match validate_constraints_all(decls, collect_declared_class_names(decls, Nil)) with
+      match validate_constraints_all(decls, collect_declared_class_names(decls, class_names_from_env(env, Nil))) with
       | Just (pos, err_msg) -> typed_ast.TypedErr(pos, err_msg)
       | Nothing ->
         match check_overlapping_instances(decls, dict_empty()) with
@@ -4032,6 +4032,25 @@ fn collect_declared_class_names(decls: List ast.Decl, acc: List String) -> List 
       | ast.ClassDecl name _ _ _ _ ->
           collect_declared_class_names(rest, Cons(string.after_last_dot(name), acc))
       | _ -> collect_declared_class_names(rest, acc)
+
+# Class names recoverable from the type environment's `@class:{method}` markers.
+# Each marker's scheme body is `TConst(class_name)` (register_class_method_markers).
+# The analysis-service / REPL path (check_program_with_env) supplies imported and
+# prelude classes as env schemes rather than ClassDecl nodes, so scanning decls
+# alone leaves the class set empty and every `where ToString a` reads as unknown.
+fn class_names_from_env(env: Dict types.Scheme, acc: List String) -> List String =
+  class_names_from_entries(vec_to_list(dict_entries(env)), acc)
+
+fn class_names_from_entries(entries: List (String, types.Scheme), acc: List String) -> List String =
+  match entries with
+  | [] -> acc
+  | [(key, scheme) | rest] ->
+      if str_starts_with(key, "@class:") then
+        match scheme with
+        | types.Scheme _ _ (types.TConst id) _ _ ->
+            class_names_from_entries(rest, list_add_unique(string.after_last_dot(types.type_id_name(id)), acc))
+        | _ -> class_names_from_entries(rest, acc)
+      else class_names_from_entries(rest, acc)
 
 # The first constraint argument that is itself a known class name — the tell of a
 # variable-first swap like `where a ToString` (arg `ToString` is the real class),
