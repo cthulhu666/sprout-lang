@@ -1,0 +1,45 @@
+import stdlib.test (TestState, new_state, assert_true, summary, TestCase, check_approx, check_approx2)
+import stdlib.string (contains)
+
+# stdlib.test.check_approx / check_approx2 — the float-tolerance assertion builders.
+#
+# check_eq is a SILENT no-op on Double (generic Eq/ToString dictionary dispatch does
+# nothing for Double in this compiler), so approximate numeric checks had no first-class
+# assertion — every caller rolled its own `fabs(a - b) < eps` behind check_true, losing
+# the expected/got diagnostic. check_approx restores it: it compares with the `-`/`<`
+# operators directly (never the eq typeclass) and renders the message via the monomorphic
+# ToString Double instance. check_approx2 is the (x, z) tuple sibling for 2D positions.
+#
+# This suite tests the BUILDERS by inspecting the TestCase they return (pass flag + detail),
+# using the effectful assert_* API so it never depends on the thing under test.
+
+fn passed(c: TestCase) -> Bool =
+  match c with
+  | TestCase _ p _ -> p
+
+fn detail(c: TestCase) -> String =
+  match c with
+  | TestCase _ _ d -> d
+
+fn main() -> Unit !{IO} =
+  do
+    state <- new_state()
+
+    # --- check_approx: pass/fail on |actual - expected| < eps -----------------------------------
+    assert_true(state, "within eps passes", passed(check_approx("x", 1.0, 1.00005, 0.0001)))
+    assert_true(state, "outside eps fails",! passed (check_approx("x", 1.0, 1.5, 0.0001)))
+    # Boundary is strict: exactly eps apart is NOT within.
+    assert_true(state, "exactly eps apart fails (strict <)",! passed (check_approx("x", 1.0, 1.1, 0.1)))
+    # Sign-symmetric: actual below expected is treated the same as above.
+    assert_true(state, "symmetric for a negative difference", passed(check_approx("x", 2.0, 1.99999, 0.0001)))
+    # A passing case carries no detail; a failing case names the expected value.
+    assert_true(state, "a pass has empty detail", detail(check_approx("x", 1.0, 1.0, 0.0001)) == "")
+    assert_true(state, "a fail's detail reports the expected value", contains(detail(check_approx("x", 1.0, 2.0, 0.0001)), "2.0"))
+    assert_true(state, "a fail's detail reports the actual value", contains(detail(check_approx("x", 1.0, 2.0, 0.0001)), "1.0"))
+
+    # --- check_approx2: both components must be within eps --------------------------------------
+    assert_true(state, "both components within passes", passed(check_approx2("p", (1.0, 2.0), 1.00005, 2.00005, 0.0001)))
+    assert_true(state, "x component off fails",! passed (check_approx2("p", (1.5, 2.0), 1.0, 2.0, 0.0001)))
+    assert_true(state, "z component off fails",! passed (check_approx2("p", (1.0, 2.5), 1.0, 2.0, 0.0001)))
+
+    summary(state)
