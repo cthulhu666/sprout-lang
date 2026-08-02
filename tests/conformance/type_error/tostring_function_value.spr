@@ -1,0 +1,12 @@
+module main
+
+# A function type can never satisfy `ToString` — instance heads key on a type
+# constructor, and no `instance ToString (a -> b)` is representable. So applying a
+# class method to a function value is unsatisfiable and must be rejected at compile
+# time, not routed through the polymorphic-forward fallback that emits a dict-less
+# `@to_string` call (an undefined-symbol link failure). Regression: the direct
+# class-method path (`check_instance_fwd` final sink).
+
+fn ident(x: Int) -> Int = x
+
+fn main() -> Unit !{IO} = print(to_string(ident))
