@@ -1,0 +1,18 @@
+module main
+
+# `deriving (Eq)` synthesizes an `eq` that compares each field. A function-typed
+# field has no `Eq` instance (no `instance C (a -> b)` is representable), so the
+# derived method's obligation `Eq (Int -> Int)` is unsatisfiable and must be
+# rejected at the derived instance — the same class-agnostic rejection the direct
+# `to_string(f)` / `f == f` paths get, reached here through deriving synthesis.
+# Regression: guards the derived-instance path against a dispatch refactor silently
+# reintroducing the dropped-dict / wrong-default-dict miscompile.
+
+type FnBox = (run: Int -> Int) deriving (Eq)
+
+fn f(n: Int) -> Int = n
+
+fn main() -> Unit !{IO} =
+  let a = FnBox(run = f)
+      b = FnBox(run = f)
+  in print(to_string(a == b))
