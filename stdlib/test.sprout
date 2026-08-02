@@ -1,5 +1,7 @@
 module stdlib.test
 
+import stdlib.math (fabs)
+
 # ---------------------------------------------------------------------------
 # Minimal unit test framework for Sprout stdlib.
 #
@@ -89,20 +91,25 @@ export fn summary(state: TestState) -> Unit !{IO} =
 # `Vec TestCase`. `run_suite` folds it purely and prints once — no `TestState`
 # threaded through every call, no `do`, no per-assertion IO.
 #
-#   import stdlib.test (check_eq, check_true, run_suite)
+#   import stdlib.test (check_eq, check_true, check_approx, run_suite)
 #
 #   fn main() -> Unit !{IO} =
 #     run_suite("math", [
 #       check_eq("abs(-3)", abs(-3), 3),
 #       check_true("is_even 4", is_even(4)),
+#       check_approx("sqrt(2)", sqrt(2.0), 1.41421, 0.0001),
 #     ])
+#
+# `check_eq` is a silent no-op on `Double` (generic `Eq`/`ToString` dispatch does
+# nothing for it), so use `check_approx` / `check_approx2` for floating-point and 2D
+# `(x, z)` checks — they compare with `-`/`<` directly and carry a real diagnostic.
 #
 # Use the effectful TestState API above only when producing the actual value
 # needs IO (e.g. a Ref-backed capture sink, channels) — those cases can't be a
 # pure `TestCase`.
 # ---------------------------------------------------------------------------
 
-export type TestCase =
+export type TestCase (..) =
   | TestCase String Bool String
   # TestCase label passed detail
 
@@ -117,6 +124,28 @@ export fn check_true(label: String, condition: Bool) -> TestCase =
 
 export fn check_false(label: String, condition: Bool) -> TestCase =
   TestCase(label, condition == false, "expected false, got true")
+
+# Float sibling of check_eq: passes when |actual - expected| < eps. check_eq is a silent
+# no-op on Double (generic Eq/ToString dictionary dispatch does nothing for Double), so an
+# approximate check needs its own builder. It compares with the `-`/`<` operators directly
+# (never the eq typeclass) and renders the message via the monomorphic ToString Double
+# instance. eps is explicit at the call site — the visible tolerance is part of the test.
+export fn check_approx(label: String, actual: Double, expected: Double, eps: Double) -> TestCase =
+  if fabs(actual - expected) < eps then TestCase(label, true, "")
+  else TestCase(label, false,
+    "expected " ++ to_string(expected) ++ " +/- " ++ to_string(eps) ++ ", got " ++ to_string(actual))
+
+# 2D (x, z) sibling of check_approx for position assertions: both components must be within
+# eps. Scoped to 2-tuples (the system-view plane); a 3D need should add a check_approx3 rather
+# than nest tuples here. Exists because a flat `[...]` suite can't destructure a tuple result
+# mid-literal to split it into two scalar check_approx rows.
+export fn check_approx2(label: String, actual: (Double, Double), ex: Double, ez: Double, eps: Double) -> TestCase =
+  match actual with
+  | (ax, az) ->
+      if (fabs(ax - ex) < eps) && (fabs(az - ez) < eps) then TestCase(label, true, "")
+      else TestCase(label, false,
+        "expected (" ++ to_string(ex) ++ ", " ++ to_string(ez) ++ ") +/- " ++ to_string(eps)
+          ++ ", got (" ++ to_string(ax) ++ ", " ++ to_string(az) ++ ")")
 
 # Fold helpers (private): build the per-case report and count failures.
 fn case_report(acc: String, c: TestCase) -> String =
