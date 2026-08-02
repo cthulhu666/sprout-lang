@@ -1,0 +1,11 @@
+module main
+
+# Well-ordered constraint (class first) but the type variable `x` is a value
+# parameter, not a signature type variable — so the constraint binds nothing and
+# would otherwise lower to an undefined class-method call that only fails at link
+# time. Must be rejected at check time.
+
+fn tostr(x) where ToString x = to_string(x)
+
+fn main() -> Unit !{IO} =
+  print(tostr(5))

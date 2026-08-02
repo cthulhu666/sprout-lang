@@ -818,11 +818,18 @@ automatically available without an explicit import.  They are experimental in v0
 
 **Constraint syntax.**  A `where` clause names the **class first, then the
 constrained type variable(s)**: `where ToString a`, `where Applicative f`,
-`where Eq a, Ord b`.  A variable-first ordering (`where a ToString`) is a compile
-error reported at check time — the head token is read as the class name, so `a`
-is diagnosed as "not a class" with a hint suggesting the corrected order.  This
-prevents a silently-dropped constraint from lowering to an undefined class-method
-call that would otherwise only fail at link time.
+`where Eq a, Ord b`.  Two well-formedness rules are enforced at check time, both
+preventing a silently-dropped constraint from lowering to an undefined class-method
+call that would otherwise only fail at link time:
+
+- A variable-first ordering (`where a ToString`) is rejected — the head token is
+  read as the class name, so `a` is diagnosed as "not a class", with a hint
+  suggesting the corrected order.
+- The constrained type variable must **appear in the function's signature**
+  (a parameter annotation or the return type).  A constraint on a variable that
+  does not — e.g. `where ToString x` where `x` is an *unannotated value
+  parameter*, or `where Eq b` where only `a` is annotated — is rejected as
+  ambiguous, since no call site could ever determine the type to dispatch on.
 
 ### `ToString` instances
 
