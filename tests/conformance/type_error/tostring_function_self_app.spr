@@ -1,0 +1,13 @@
+module main
+
+# `describe` has type `a -> String` with `where ToString a`. Applying it to itself
+# demands `ToString (b -> String)` — a function-typed head with no instance. It must
+# be rejected at the call site. Before the fix this constraint slipped past
+# inference: the REPL dropped the dict (codegen under-application panic) and the
+# file path let a later pass mint a wrong `ToString String` dict (a silent
+# miscompile that reads a closure via the String instance). Regression: the
+# constrained-function dict-injection path (`concrete_missing_inst`).
+
+fn describe(x: a) where ToString a = to_string(x)
+
+fn main() -> Unit !{IO} = print(describe(describe))

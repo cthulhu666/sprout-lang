@@ -1075,7 +1075,15 @@ fn check_instance_fwd(
       | Just tdict ->
           InferOk(typed_ast.TCall(typed_callee, Cons(tdict, typed_args), ret_t, pos), s3, es3, call_eff)
       | Nothing ->
-          InferOk(typed_ast.TCall(typed_callee, typed_args, ret_t, pos), s3, es3, call_eff)
+          # No @fwd marker resolved this class method, so it is not a legitimate
+          # polymorphic forward. If a dispatch argument is function-typed, the
+          # obligation is `C (a -> b)` — unsatisfiable (no function instance) — so
+          # reject rather than emit a dict-less call (`to_string(f)` would lower to an
+          # undefined `@to_string`). A genuine tyvar-headed forward found its marker
+          # above; only a rigid function head reaches here unresolved.
+          if any_function_typed_arg(typed_args, s3)
+          then InferErr(pos, "No instance of " ++ class_name ++ " for a function type")
+          else InferOk(typed_ast.TCall(typed_callee, typed_args, ret_t, pos), s3, es3, call_eff)
 
 # Stage 0b: resolve a class-method call whose dispatch value is an unpacked
 # existential skolem. The witness was packed into the box and seeded as
@@ -1106,6 +1114,17 @@ fn resolve_skolem_given(
           InferErr(pos, "internal: existential dict marker malformed for " ++ class_name)
   | Nothing ->
       InferErr(pos, "No instance of " ++ class_name ++ " for the unpacked existential value")
+
+# True when some argument's type resolves (under s3) to a function type. A
+# function-typed argument can never host a typeclass instance, so its presence at
+# the unresolved dispatch sink means the obligation is unsatisfiable.
+fn any_function_typed_arg(args: List typed_ast.TypedExpr, subst: Dict types.Type) -> Bool =
+  match args with
+  | Nil -> false
+  | Cons a rest ->
+      match unifier.apply_subst(subst, typed_ast.typed_expr_type(a)) with
+      | types.TFunc _ _ _ -> true
+      | _ -> any_function_typed_arg(rest, subst)
 
 # Walk each arg looking for one whose raw TVar head maps to a @fwd marker.
 fn find_fwd_tdict_in_args(class_name: String, args: List typed_ast.TypedExpr, env: Dict types.Scheme, pos: source.SourcePos) -> Maybe typed_ast.TypedExpr =
@@ -1948,7 +1967,18 @@ fn concrete_missing_inst(class_name: String, t: types.Type, env: Dict types.Sche
       else match dict_get("@inst:" ++ class_name ++ ":" ++ head_str, env) with
            | Just _ -> Nothing
            | Nothing -> Just(head_str)
-  | Nothing -> Nothing
+  | Nothing ->
+      # `concrete_type_str` returns Nothing for BOTH a bare type variable
+      # (forwardable — the legitimate no-dict-here case) AND a function type. A
+      # function type can never satisfy a class: instance heads key on a type
+      # constructor, so no `instance C (a -> b)` is representable or lookupable.
+      # Split them here — a function-typed head is a hard, rigid miss, so report it
+      # as unsatisfiable and reject loudly at the call site rather than dropping the
+      # dict (→ codegen under-application) or letting a later pass mint a wrong
+      # default dict (→ silent miscompile: a closure read via the wrong instance).
+      match t with
+      | types.TFunc _ _ _ -> Just("a function type")
+      | _ -> Nothing
 
 # Resolve one field constraint's dict from its head_token. A CONCRETE-ctor head
 # (a plain type name with an `@inst:{class}:{head}` instance) resolves DIRECTLY by

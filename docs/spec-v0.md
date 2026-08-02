@@ -852,6 +852,19 @@ Tuple instances format nested tuples recursively.  A 6-tuple or larger has no
 `ToString` instance in the current prelude; adding one requires an explicit
 instance declaration.
 
+**Function types have no instances.**  No class instance is provided — or
+representable — for a function type `a -> b`: instance heads dispatch on a type
+*constructor*, and there is no `instance C (a -> b)` form.  Requiring `C` on a
+function value is therefore unsatisfiable and is rejected at the call site with
+`No instance of C for a function type`.  This covers both a direct class-method
+call on a function (`to_string(f)`) and a constrained regular function whose
+argument forces a function-typed head — e.g. `describe(describe)` where
+`describe : a -> String where ToString a` demands `ToString (b -> String)`.  The
+rejection is a type error, consistent with the constraint well-formedness rules
+above: it prevents the obligation from being silently dropped (a codegen
+under-application) or resolved to a wrong default dictionary (a silent
+miscompile that reads a closure through an unrelated instance).
+
 ### `Applicative` class and `mapN` helpers
 
 ```
