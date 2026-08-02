@@ -147,7 +147,9 @@ capability layers.
 Sprout should own an explicit session value that tracks:
 
 1. accumulated imports,
-2. accumulated declarations,
+2. accumulated declarations (a redefinition **replaces** the prior declaration of
+   the same top-level name rather than appending a duplicate — two `define` blocks
+   for one name would fail to link at eval time),
 3. generated temporary names,
 4. command-local scratch state such as pending completion context.
 

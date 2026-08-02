@@ -183,6 +183,21 @@ Legend:
         called from `infer.sprout` — a pass that can never return an error. Either wire a real future
         existential-declaration check here or drop the call and keep the comment as the home marker.
         Cosmetic; surfaced by the retroactive `/code-review` of PR #2.
+      - [ ] `P4` **Extend constraint-head class validation to instance/class positions.**
+        `infer.validate_constraints_all` now rejects a variable-first `where a ToString` on a
+        **`FnDecl`** (head must be a declared class; swap-aware hint). The same swap on an
+        `InstanceDecl` context-constraint or a `ClassDecl` superclass (`class Ord a where a Eq`)
+        is not yet validated and would silently drop the constraint. Reuse
+        `collect_declared_class_names` + `validate_fn_constraint` over those positions.
+      - [ ] `P3` **Reject a `where` constraint whose type variable is not in the signature.**
+        `fn tostr(x) where ToString x` (well-ordered, but `x` is a *value* parameter, not a
+        signature type variable) passes `--phase check` yet lowers to an undefined
+        `@to_string` call — the same silent-drop → link-failure the order-swap fix targets,
+        reached via a phantom constraint var. `validate_fn_constraint` already computes
+        `fn_sig_tyvars`; extend it to also reject a constraint whose sole/every argument tyvar
+        is absent from that set (the diagnostic can point to annotating the parameter). The
+        current fix's signature-aware *hint* already steers users away from this, but the
+        constraint is not yet rejected outright.
     - [x] `P3` **Explicit constrained-prefix form + constraint keyword. LANDED 2026-07-31.**
       Constraint keyword decided: **`where`** (not `=>`), matching every other Sprout constraint site.
       Syntax `| exists a. Shown a where ToString a` (multiple constraints comma-separated). Parser:

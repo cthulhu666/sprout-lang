@@ -1,0 +1,11 @@
+module main
+
+# Variable-first swap on an UNANNOTATED parameter. `x` is a value parameter, not
+# a signature type variable, so `where ToString x` would still be a vacuous
+# constraint that lowers to an undefined class-method call. The diagnostic must
+# steer toward annotating the parameter rather than blindly suggesting the swap.
+
+fn tostr(x) where x ToString = to_string(x)
+
+fn main() -> Unit !{IO} =
+  print(tostr(5))

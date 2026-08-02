@@ -21,6 +21,20 @@ fn main() -> Unit !{IO} =
        svc.session_add_line(empty_session(), "import", "import stdlib.string as string"),
        "import", "import stdlib.math as math")
   in let src_two = svc.rebuild_session_source(s_two_imp)
+  # Redefining a top-level name replaces the prior declaration instead of
+  # appending a duplicate (which would make the rebuilt source emit two
+  # `define @app.session.foo` blocks and fail to link).
+  in let s_redef = svc.session_add_line(
+       svc.session_add_line(empty_session(), "declaration", "fn foo() -> Int = 1"),
+       "declaration", "fn foo() -> Int = 2")
+  in let src_redef = svc.rebuild_session_source(s_redef)
+  # Redefining `foo` must not disturb an unrelated `bar` already in the session.
+  in let s_mixed = svc.session_add_line(
+       svc.session_add_line(
+         svc.session_add_line(empty_session(), "declaration", "fn foo() -> Int = 1"),
+         "declaration", "fn bar() -> Int = 9"),
+       "declaration", "fn foo() -> Int = 2")
+  in let src_mixed = svc.rebuild_session_source(s_mixed)
   in run_suite("session_state", [
     # session_add_line — import kind
     check_true("add import: source contains import line",
@@ -50,5 +64,14 @@ fn main() -> Unit !{IO} =
 
     # Multiple imports accumulate
     check_true("two imports: first present", string.contains(src_two, "import stdlib.string")),
-    check_true("two imports: second present", string.contains(src_two, "import stdlib.math"))
+    check_true("two imports: second present", string.contains(src_two, "import stdlib.math")),
+
+    # Redefinition replaces by name
+    check_true("redef foo: new body kept", string.contains(src_redef, "= 2")),
+    check_true("redef foo: old body dropped", string.contains(src_redef, "= 1") == false),
+
+    # Redefinition leaves unrelated decls intact
+    check_true("mixed redef: bar preserved", string.contains(src_mixed, "fn bar()")),
+    check_true("mixed redef: foo new body kept", string.contains(src_mixed, "= 2")),
+    check_true("mixed redef: foo old body dropped", string.contains(src_mixed, "= 1") == false)
   ])
