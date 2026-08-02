@@ -28,7 +28,22 @@ export fn session_add_line(sess: SessionState, kind: String, line: String) -> Se
   match sess with
   | SessionState imports declarations ->
       if kind == "import" then SessionState(vec_append(line, imports), declarations)
-      else SessionState(imports, vec_append(line, declarations))
+      else
+        # Redefining a top-level name REPLACES the prior declaration instead of
+        # appending a duplicate: two declarations of the same name would emit two
+        # `define @app.session.<name>` blocks and fail to link at eval time. Drop
+        # any stored declaration whose names overlap the incoming line's, then
+        # append. An unparseable line yields no names → nothing dropped (append).
+        let new_names = parse_decl_names(line)
+        in SessionState(imports,
+             vec_append(line,
+               vec_filter(\d -> decl_names_disjoint(parse_decl_names(d), new_names), declarations)))
+
+# True when two declaration-name lists share no name.
+fn decl_names_disjoint(a: List String, b: List String) -> Bool =
+  match a with
+  | Nil -> true
+  | Cons x rest -> if list_member(x, b) then false else decl_names_disjoint(rest, b)
 
 fn build_source_parts(header: String, imports: Vec String, declarations: Vec String) -> String =
   if vec_length(declarations) == 0 then with_imports

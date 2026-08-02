@@ -816,6 +816,14 @@ The following typeclass instances are provided by `stdlib/prelude.sprout` and ar
 automatically available without an explicit import.  They are experimental in v0
 (consistent with the module/typeclass extension status noted in §1).
 
+**Constraint syntax.**  A `where` clause names the **class first, then the
+constrained type variable(s)**: `where ToString a`, `where Applicative f`,
+`where Eq a, Ord b`.  A variable-first ordering (`where a ToString`) is a compile
+error reported at check time — the head token is read as the class name, so `a`
+is diagnosed as "not a class" with a hint suggesting the corrected order.  This
+prevents a silently-dropped constraint from lowering to an undefined class-method
+call that would otherwise only fail at link time.
+
 ### `ToString` instances
 
 `to_string` is defined for the following types:

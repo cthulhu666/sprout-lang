@@ -1,0 +1,12 @@
+module main
+
+# The constraint is written variable-first (`a ToString`) instead of the
+# required class-first order (`ToString a`). The head `a` is not a declared
+# class, so the compiler must reject this at check time with a swap-aware hint
+# — rather than silently dropping the constraint and emitting an undefined
+# `@to_string` call that only detonates at link time.
+
+fn tostr(x: a) -> String where a ToString = to_string(x)
+
+fn main() -> Unit !{IO} =
+  print(tostr(5))

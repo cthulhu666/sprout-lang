@@ -3853,6 +3853,9 @@ export fn typecheck_decls(
     match validate_all_decls(decls, declared_types) with
     | Just (pos, err_msg) -> typed_ast.TypedErr(pos, err_msg)
     | Nothing ->
+      match validate_constraints_all(decls, collect_declared_class_names(decls, Nil)) with
+      | Just (pos, err_msg) -> typed_ast.TypedErr(pos, err_msg)
+      | Nothing ->
         match check_overlapping_instances(decls, dict_empty()) with
         | Just (pos, err_msg) -> typed_ast.TypedErr(pos, err_msg)
         | Nothing ->
@@ -4005,6 +4008,111 @@ fn validate_all_decls(decls: List ast.Decl, declared: List String) -> Maybe(sour
       match validate_decl(decl, declared) with
       | Just e -> Just((ast.decl_pos(decl), e))
       | Nothing -> validate_all_decls(rest, declared)
+
+# ---------------------------------------------------------------------------
+# Constraint class-name validation
+# ---------------------------------------------------------------------------
+#
+# A `where` clause names the CLASS first, then the constrained type variable(s):
+# `where ToString a`. A variable-first swap (`where a ToString`) parses as a
+# constraint on a class literally named `a`, silently constrains nothing, and
+# lowers to an undefined class-method call that only fails at link time. Reject
+# it here: every FnDecl constraint head must be a declared class. Mirrors the
+# type-name pass above, closing the FnDecl follow-up it notes.
+#
+# Class parameters are always lowercase and are never constraint heads, so the
+# declared-class set (short names, prefix-stripped) is the whole vocabulary.
+
+# Short names (prefix-stripped) of every declared class.
+fn collect_declared_class_names(decls: List ast.Decl, acc: List String) -> List String =
+  match decls with
+  | Nil -> acc
+  | Cons decl rest ->
+      match decl with
+      | ast.ClassDecl name _ _ _ _ ->
+          collect_declared_class_names(rest, Cons(string.after_last_dot(name), acc))
+      | _ -> collect_declared_class_names(rest, acc)
+
+# The first constraint argument that is itself a known class name — the tell of a
+# variable-first swap like `where a ToString` (arg `ToString` is the real class),
+# used to offer a precise "did you mean" hint.
+fn first_known_class_arg(args: List ast.TypeExpr, classes: List String) -> Maybe String =
+  match args with
+  | Nil -> Nothing
+  | Cons te rest ->
+      match te with
+      | ast.TypeName name ->
+          if types.list_member(string.after_last_dot(name), classes)
+          then Just(string.after_last_dot(name))
+          else first_known_class_arg(rest, classes)
+      | _ -> first_known_class_arg(rest, classes)
+
+# Real type variables that appear in a function's parameter annotations and
+# return type — the variables a `where` constraint may legitimately mention.
+# Unannotated parameters contribute none (their type is an unnamed fresh var).
+fn fn_sig_tyvars(params: List ast.Param, ret_maybe: Maybe ast.TypeExpr) -> List String =
+  fn_sig_tyvars_ret(ret_maybe, fn_sig_tyvars_params(params, Nil))
+
+fn fn_sig_tyvars_params(params: List ast.Param, acc: List String) -> List String =
+  match params with
+  | Nil -> acc
+  | Cons p rest ->
+      match p with
+      | ast.Param _ (Just te) -> fn_sig_tyvars_params(rest, collect_te_vars(te, acc))
+      | ast.Param _ Nothing -> fn_sig_tyvars_params(rest, acc)
+
+fn fn_sig_tyvars_ret(ret_maybe: Maybe ast.TypeExpr, acc: List String) -> List String =
+  match ret_maybe with
+  | Just te -> collect_te_vars(te, acc)
+  | Nothing -> acc
+
+# The "did you mean" tail for a swapped `where`. A constraint only binds when its
+# type variable appears in the signature, so suggest one that actually does; when
+# none does (an unannotated parameter), point to annotating one — `where <Class>
+# <head>` on a value parameter would be a vacuous constraint that still fails at
+# link time (the exact trap this whole pass exists to catch).
+fn order_hint_tail(cls: String, decl_name: String, head: String, sig_tyvars: List String) -> String =
+  if types.list_member(head, sig_tyvars) then
+    "did you mean `where " ++ cls ++ " " ++ head ++ "`? (the class name comes first, the type variable second)"
+  else
+    match sig_tyvars with
+    | [v | _] -> "did you mean `where " ++ cls ++ " " ++ v ++ "`? (the class name comes first, then a type variable from the signature)"
+    | [] -> "a constraint applies a class to a type variable — annotate a parameter and constrain it, e.g. `fn " ++
+            string.after_last_dot(decl_name) ++ "(x: a) ... where " ++ cls ++ " a`"
+
+fn swapped_order_hint(head: String, decl_name: String, cls: String, sig_tyvars: List String) -> String =
+  "constraint-validation: `" ++ head ++ "` is not a class in the `where` clause of `" ++
+  string.after_last_dot(decl_name) ++ "`; " ++ order_hint_tail(cls, decl_name, head, sig_tyvars)
+
+fn validate_fn_constraint(c: ast.TypeConstraint, decl_name: String, classes: List String, sig_tyvars: List String) -> Maybe String =
+  match c with
+  | ast.TypeConstraint head args ->
+      if types.list_member(string.after_last_dot(head), classes) then Nothing
+      else
+        match first_known_class_arg(args, classes) with
+        | Just cls -> Just(swapped_order_hint(head, decl_name, cls, sig_tyvars))
+        | Nothing ->
+            Just("constraint-validation: `" ++ string.after_last_dot(head) ++
+                 "` is not a class in the `where` clause of `" ++ string.after_last_dot(decl_name) ++ "`")
+
+fn validate_fn_constraints(cs: List ast.TypeConstraint, decl_name: String, classes: List String, sig_tyvars: List String) -> Maybe String =
+  match cs with
+  | Nil -> Nothing
+  | Cons c rest ->
+      match validate_fn_constraint(c, decl_name, classes, sig_tyvars) with
+      | Just e -> Just(e)
+      | Nothing -> validate_fn_constraints(rest, decl_name, classes, sig_tyvars)
+
+fn validate_constraints_all(decls: List ast.Decl, classes: List String) -> Maybe(source.SourcePos, String) =
+  match decls with
+  | Nil -> Nothing
+  | Cons decl rest ->
+      match decl with
+      | ast.FnDecl name params ret _ constraints _ _ ->
+          match validate_fn_constraints(constraints, name, classes, fn_sig_tyvars(params, ret)) with
+          | Just e -> Just((ast.decl_pos(decl), e))
+          | Nothing -> validate_constraints_all(rest, classes)
+      | _ -> validate_constraints_all(rest, classes)
 
 # ---------------------------------------------------------------------------
 # Executable entrypoint validation
