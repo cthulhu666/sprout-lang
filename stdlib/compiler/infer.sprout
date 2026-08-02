@@ -4084,10 +4084,35 @@ fn swapped_order_hint(head: String, decl_name: String, cls: String, sig_tyvars: 
   "constraint-validation: `" ++ head ++ "` is not a class in the `where` clause of `" ++
   string.after_last_dot(decl_name) ++ "`; " ++ order_hint_tail(cls, decl_name, head, sig_tyvars)
 
+# The first type variable in `vs` that is not among the signature's type
+# variables, or Nothing when all are present.
+fn first_absent_tyvar(vs: List String, sig_tyvars: List String) -> Maybe String =
+  match vs with
+  | [] -> Nothing
+  | [v | rest] ->
+      if types.list_member(v, sig_tyvars) then first_absent_tyvar(rest, sig_tyvars)
+      else Just(v)
+
+# A well-ordered constraint (`where <Class> <var>`) still binds nothing when its
+# type variable is not one the signature introduces — e.g. `where ToString x`
+# where `x` is a value parameter, or `where Eq b` where only `a` is annotated.
+# Such a constraint lowers to an undefined class-method call that fails at link
+# time, so reject it here and point to annotating the parameter.
+fn check_constraint_tyvars_in_sig(cls: String, args: List ast.TypeExpr, decl_name: String, sig_tyvars: List String) -> Maybe String =
+  match first_absent_tyvar(collect_te_vars_list(args, Nil), sig_tyvars) with
+  | Nothing -> Nothing
+  | Just v ->
+      Just("constraint-validation: constraint `" ++ string.after_last_dot(cls) ++ " " ++ v ++
+           "` mentions type variable `" ++ v ++ "`, which does not appear in the signature of `" ++
+           string.after_last_dot(decl_name) ++
+           "`; a `where` constraint applies a class to a type variable from the signature — annotate a parameter, e.g. `fn " ++
+           string.after_last_dot(decl_name) ++ "(x: a) ... where " ++ string.after_last_dot(cls) ++ " a`")
+
 fn validate_fn_constraint(c: ast.TypeConstraint, decl_name: String, classes: List String, sig_tyvars: List String) -> Maybe String =
   match c with
   | ast.TypeConstraint head args ->
-      if types.list_member(string.after_last_dot(head), classes) then Nothing
+      if types.list_member(string.after_last_dot(head), classes)
+      then check_constraint_tyvars_in_sig(head, args, decl_name, sig_tyvars)
       else
         match first_known_class_arg(args, classes) with
         | Just cls -> Just(swapped_order_hint(head, decl_name, cls, sig_tyvars))

@@ -343,7 +343,9 @@ fn main() -> Unit !{IO} =
     # Prefix scan always picks the alphabetically-first slot ("MyShow_a", idx 0) regardless
     # of which type the method value is inferred for.  When myshow appears in value position
     # typed as (b -> String), the correct slot is __tc_MyShow_1_myshow (idx 1 = b).
-    r_eta_two_same_class <- run_lower("class MyShow a {\n  fn myshow(x: a) -> String\n}\nfn test_b(fb: (b -> String) -> String) -> String where MyShow a, MyShow b = fb(myshow)")
+    # (`xa: a` gives the `MyShow a` constraint a real signature type variable to bind — a
+    # constraint on a variable absent from the signature is now rejected as ambiguous.)
+    r_eta_two_same_class <- run_lower("class MyShow a {\n  fn myshow(x: a) -> String\n}\nfn test_b(fb: (b -> String) -> String, xa: a) -> String where MyShow a, MyShow b = fb(myshow)")
     assert_true(state, "same-class two-vars fwd: lowers ok", is_lower_ok(r_eta_two_same_class))
     assert_true(state, "same-class two-vars fwd: picks b-slot (__tc_MyShow_1) not a-slot",
       str_starts_with(lowered_fn_lambda_inner_callee(r_eta_two_same_class, "test_b"), "__tc_MyShow_1_"))
