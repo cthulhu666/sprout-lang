@@ -1,0 +1,34 @@
+module examples.named_args_cli
+import stdlib.args (Args, parse_argv, arg_int, arg_str, arg_flag)
+
+# Named CLI arguments in place of load-bearing positional slots.
+#
+# Run (compile natively, then pass named args to the binary):
+#   mise exec -- just compile-native examples/named_args_cli.sprout /tmp/boot
+#   /tmp/boot --system=648402 --ap=flip-burn --sim-days=1 --sc-boot
+#
+# Each knob is self-documenting, order-free, and collision-proof: adding one
+# never shifts the others, and every argument reads through a default, so a
+# bare `/tmp/boot` still boots. Contrast a positional argv read by index, where
+# order is load-bearing and a new flag means appending yet another slot.
+
+type BootConfig (..) =
+  | BootConfig Int String Int Bool
+
+fn boot_config(a: Args) -> BootConfig =
+  BootConfig(
+    arg_int(a, "system", 0),
+    arg_str(a, "ap", "none"),
+    arg_int(a, "sim-days", 1),
+    arg_flag(a, "sc-boot"))
+
+fn describe(c: BootConfig) -> String =
+  match c with
+  | BootConfig system ap sim_days sc_boot ->
+      `system=${int_to_string(system)} ap=${ap} `
+        ++ `sim-days=${int_to_string(sim_days)} sc-boot=${to_string(sc_boot)}`
+
+fn main() -> Unit !{IO} =
+  do
+    a <- parse_argv()
+    print(describe(boot_config(a)))
