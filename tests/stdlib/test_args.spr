@@ -1,0 +1,57 @@
+import stdlib.test (check_eq, check_true, check_false, run_suite)
+import stdlib.args (Args, parse, arg_get, arg_str, arg_int, arg_flag, positionals)
+import stdlib.string as string
+
+# Pure `--key=value` argv parser. All coverage runs against `parse` (the pure
+# core); the IO wrapper `parse_argv` is a one-line `parse(argv_all())` with
+# nothing testable in this harness.
+
+# A representative boot-config invocation, mirroring the uncharted-suns rationale:
+# named knobs replacing ~18 positional slots.
+fn boot() -> Args =
+  parse([
+    "--system=648402",
+    "--sc-boot",
+    "--ap=flip-burn",
+    "--sim-days=1",
+    "level.json"
+  ])
+
+# split_once on the FIRST '=', so a value may itself contain '='.
+fn eqval() -> Args =
+  parse(["--ap=flip=burn"])
+
+# Last-wins on a duplicated key (left-to-right dict_set fold).
+fn dup() -> Args =
+  parse(["--system=1", "--system=2"])
+
+fn main() -> Unit !{IO} =
+  run_suite("args", [
+    # --- typed value accessors ---
+    check_eq("arg_int reads a named int", arg_int(boot(), "sim-days", 0), 1),
+    check_eq("arg_int falls back when absent", arg_int(boot(), "missing", 42), 42),
+    check_eq("arg_int falls back on non-int value", arg_int(boot(), "ap", 7), 7),
+    check_eq("arg_str reads a named string", arg_str(boot(), "ap", "def"), "flip-burn"),
+    check_eq("arg_str falls back when absent", arg_str(boot(), "missing", "def"), "def"),
+    check_eq("arg_int on a big system id", arg_int(boot(), "system", 0), 648402),
+
+    # --- bare flags ---
+    check_true("arg_flag true when bare flag present", arg_flag(boot(), "sc-boot")),
+    check_false("arg_flag false when absent", arg_flag(boot(), "nope")),
+    check_true("arg_flag true for a valued option too (presence)", arg_flag(boot(), "system")),
+
+    # --- raw access ---
+    check_eq("arg_get present", arg_str(boot(), "system", "x"), "648402"),
+
+    # --- first-'=' split ---
+    check_eq("value may contain '='", arg_str(eqval(), "ap", "def"), "flip=burn"),
+
+    # --- last-wins duplicate ---
+    check_eq("duplicate key: last wins", arg_int(dup(), "system", 0), 2),
+
+    # --- positionals (non---- tokens), order preserved ---
+    check_eq("positionals collected in order",
+             string.join(",", positionals(boot())), "level.json"),
+    check_eq("no positionals -> empty join",
+             string.join(",", positionals(dup())), "")
+  ])

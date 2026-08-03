@@ -1,0 +1,69 @@
+module stdlib.args
+
+import stdlib.string as string
+
+# A small, pure `--key=value` argv parser — named CLI arguments in place of
+# load-bearing positional slots. Parse once with `parse` (pure, headless-
+# testable) or `parse_argv` (reads process argv), then read typed knobs with
+# the `arg_*` accessors, each supplied a default so absence is total.
+#
+# Token grammar (each token from argv, program name already dropped):
+#   --key=value   an option:  key ↦ value  (split on the FIRST '=', so a value
+#                             may itself contain '=', e.g. --ap=flip=burn)
+#   --key         a bare flag: present, value ""
+#   anything else a positional, order preserved
+#
+# Duplicate keys: last wins (left-to-right). Non-goals (kept simple on purpose):
+# space-separated `--key value`, short `-k` flags (read as positionals), and the
+# `--` end-of-options terminator (a lone `--`, or an empty key, is ignored).
+
+export type Args (..) =
+  | Args (Dict String) (List String)
+
+export fn parse(tokens: List String) -> Args =
+  parse_go(tokens, dict_empty(), Nil)
+
+fn parse_go(tokens: List String, opts: Dict String, pos_rev: List String) -> Args =
+  match tokens with
+  | Nil -> Args(opts, list_reverse(pos_rev))
+  | [tok | rest] ->
+      match string.strip_prefix(tok, "--") with
+      | Nothing -> parse_go(rest, opts, Cons(tok, pos_rev))
+      | Just body ->
+          match string.split_once(body, "=") with
+          | Just (key, value) ->
+              if string.is_empty(key) then parse_go(rest, opts, pos_rev)
+              else parse_go(rest, dict_set(key, value, opts), pos_rev)
+          | Nothing ->
+              if string.is_empty(body) then parse_go(rest, opts, pos_rev)
+              else parse_go(rest, dict_set(body, "", opts), pos_rev)
+
+export fn parse_argv() -> Args !{IO} =
+  parse(argv_all())
+
+# Raw value of an option/flag key, if the key was present (a bare flag reads "").
+export fn arg_get(a: Args, key: String) -> Maybe String =
+  match a with
+  | Args opts _ -> dict_get(key, opts)
+
+# Value of a named option, or `dflt` when the key is absent.
+export fn arg_str(a: Args, key: String, dflt: String) -> String =
+  let Just value = arg_get(a, key) else dflt
+  in value
+
+# Value of a named option parsed as Int, or `dflt` when absent or non-integer.
+export fn arg_int(a: Args, key: String, dflt: Int) -> Int =
+  let Just value = arg_get(a, key) else dflt
+      Just n = parse_int(value) else dflt
+  in n
+
+# Whether a key was present at all (true for bare flags and valued options).
+export fn arg_flag(a: Args, key: String) -> Bool =
+  match arg_get(a, key) with
+  | Just _ -> true
+  | Nothing -> false
+
+# Non-option tokens, in the order they appeared.
+export fn positionals(a: Args) -> List String =
+  match a with
+  | Args _ pos -> pos
