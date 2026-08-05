@@ -11,7 +11,7 @@
 # Implementation in ast_to_ir.sprout's translate_do_bind_maybe helper:
 #   - emit IRCall to sprout_tag(scrut) → tag
 #   - icmp eq tag, <nothing-tag> → is_nothing
-#   - br i1 → short branch (build Nothing of result-ty via sprout_make0)
+#   - br i1 → short branch (build Nothing of result-ty via IRMakeCtor)
 #   - cont: IRGetField(scrut, 0) → payload, bind, recurse
 #   - phi the two branches into final do result
 #

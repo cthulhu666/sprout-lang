@@ -18,17 +18,7 @@ declare void @sprout_abort_match() noreturn
 declare i64 @panic(i64)
 declare ptr @llvm.stacksave()
 declare void @llvm.stackrestore(ptr)
-declare i64 @sprout_make0(i64)
-declare i64 @sprout_make1(i64, i64)
-declare i64 @sprout_make2(i64, i64, i64)
-declare i64 @sprout_make3(i64, i64, i64, i64)
-declare i64 @sprout_make4(i64, i64, i64, i64, i64)
-declare i64 @sprout_make5(i64, i64, i64, i64, i64, i64)
-declare i64 @sprout_make6(i64, i64, i64, i64, i64, i64, i64)
-declare i64 @sprout_make7(i64, i64, i64, i64, i64, i64, i64, i64)
-declare i64 @sprout_make8(i64, i64, i64, i64, i64, i64, i64, i64, i64)
-declare i64 @sprout_make9(i64, i64, i64, i64, i64, i64, i64, i64, i64, i64)
-declare i64 @sprout_make10(i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64)
+declare i64 @sprout_alloc_obj(i64, i64)
 declare { i64, i64 } @vector_get_unboxed(i64, i64)
 declare { i64, i64 } @map_get_unboxed(i64, i64)
 declare { i64, i64 } @map_nth_key_unboxed(i64, i64)
@@ -198,7 +188,12 @@ divok_13:
   %t$16 = sdiv i64 %t$11, %t$12
   %t$17 = call i64 @pow10(i64 %t$16)
   %t$18 = call i64 @modn(i64 %n, i64 %t$17)
-  %t$19 = call i64 @sprout_make2(i64 3, i64 %t$10, i64 %t$18)
+  %t$19 = call i64 @sprout_alloc_obj(i64 3, i64 2)
+  %t$19$ptr = inttoptr i64 %t$19 to ptr
+  %t$19$f0 = getelementptr i64, ptr %t$19$ptr, i64 0
+  store i64 %t$10, ptr %t$19$f0
+  %t$19$f1 = getelementptr i64, ptr %t$19$ptr, i64 1
+  store i64 %t$18, ptr %t$19$f1
   ret i64 %t$19
 }
 
@@ -532,7 +527,12 @@ entry:
   %t$16 = call i64 @sprout_gc_push_i64_root(ptr %t$15)
   %t$5 = call i64 @sum_ranges(i64 %t$3, i64 %t$4)
   %t$17 = call i64 @sprout_gc_pop_roots(i64 2)
-  %t$6 = call i64 @sprout_make2(i64 4, i64 %t$2, i64 %t$5)
+  %t$6 = call i64 @sprout_alloc_obj(i64 4, i64 2)
+  %t$6$ptr = inttoptr i64 %t$6 to ptr
+  %t$6$f0 = getelementptr i64, ptr %t$6$ptr, i64 0
+  store i64 %t$2, ptr %t$6$f0
+  %t$6$f1 = getelementptr i64, ptr %t$6$ptr, i64 1
+  store i64 %t$5, ptr %t$6$f1
   %t$18 = alloca i64
   store i64 %t$6, ptr %t$18
   %t$19 = call i64 @sprout_gc_push_i64_root(ptr %t$18)
@@ -545,125 +545,235 @@ define void @__sprout_init_globals() {
 entry:
   %t$0 = add i64 0, 2121212118
   %t$1 = add i64 0, 2121212124
-  %t$2 = call i64 @sprout_make2(i64 2, i64 %t$0, i64 %t$1)
+  %t$2 = call i64 @sprout_alloc_obj(i64 2, i64 2)
+  %t$2$ptr = inttoptr i64 %t$2 to ptr
+  %t$2$f0 = getelementptr i64, ptr %t$2$ptr, i64 0
+  store i64 %t$0, ptr %t$2$f0
+  %t$2$f1 = getelementptr i64, ptr %t$2$ptr, i64 1
+  store i64 %t$1, ptr %t$2$f1
   %t$55 = alloca i64
   store i64 %t$2, ptr %t$55
   %t$56 = call i64 @sprout_gc_push_i64_root(ptr %t$55)
-  %t$3 = call i64 @sprout_make0(i64 1)
+  %t$3 = call i64 @sprout_alloc_obj(i64 1, i64 0)
   %t$57 = alloca i64
   store i64 %t$3, ptr %t$57
   %t$58 = call i64 @sprout_gc_push_i64_root(ptr %t$57)
-  %t$4 = call i64 @sprout_make2(i64 0, i64 %t$2, i64 %t$3)
+  %t$4 = call i64 @sprout_alloc_obj(i64 0, i64 2)
+  %t$4$ptr = inttoptr i64 %t$4 to ptr
+  %t$4$f0 = getelementptr i64, ptr %t$4$ptr, i64 0
+  store i64 %t$2, ptr %t$4$f0
+  %t$4$f1 = getelementptr i64, ptr %t$4$ptr, i64 1
+  store i64 %t$3, ptr %t$4$f1
   %t$59 = call i64 @sprout_gc_pop_roots(i64 2)
   store i64 %t$4, ptr @r11
   call i64 @sprout_gc_register_i64_root(ptr @r11)
   %t$5 = add i64 0, 824824821
   %t$6 = add i64 0, 824824827
-  %t$7 = call i64 @sprout_make2(i64 2, i64 %t$5, i64 %t$6)
+  %t$7 = call i64 @sprout_alloc_obj(i64 2, i64 2)
+  %t$7$ptr = inttoptr i64 %t$7 to ptr
+  %t$7$f0 = getelementptr i64, ptr %t$7$ptr, i64 0
+  store i64 %t$5, ptr %t$7$f0
+  %t$7$f1 = getelementptr i64, ptr %t$7$ptr, i64 1
+  store i64 %t$6, ptr %t$7$f1
   %t$8 = load i64, ptr @r11
   %t$60 = alloca i64
   store i64 %t$7, ptr %t$60
   %t$61 = call i64 @sprout_gc_push_i64_root(ptr %t$60)
-  %t$9 = call i64 @sprout_make2(i64 0, i64 %t$7, i64 %t$8)
+  %t$9 = call i64 @sprout_alloc_obj(i64 0, i64 2)
+  %t$9$ptr = inttoptr i64 %t$9 to ptr
+  %t$9$f0 = getelementptr i64, ptr %t$9$ptr, i64 0
+  store i64 %t$7, ptr %t$9$f0
+  %t$9$f1 = getelementptr i64, ptr %t$9$ptr, i64 1
+  store i64 %t$8, ptr %t$9$f1
   %t$62 = call i64 @sprout_gc_pop_roots(i64 1)
   store i64 %t$9, ptr @r10
   call i64 @sprout_gc_register_i64_root(ptr @r10)
   %t$10 = add i64 0, 565653
   %t$11 = add i64 0, 565659
-  %t$12 = call i64 @sprout_make2(i64 2, i64 %t$10, i64 %t$11)
+  %t$12 = call i64 @sprout_alloc_obj(i64 2, i64 2)
+  %t$12$ptr = inttoptr i64 %t$12 to ptr
+  %t$12$f0 = getelementptr i64, ptr %t$12$ptr, i64 0
+  store i64 %t$10, ptr %t$12$f0
+  %t$12$f1 = getelementptr i64, ptr %t$12$ptr, i64 1
+  store i64 %t$11, ptr %t$12$f1
   %t$13 = load i64, ptr @r10
   %t$63 = alloca i64
   store i64 %t$12, ptr %t$63
   %t$64 = call i64 @sprout_gc_push_i64_root(ptr %t$63)
-  %t$14 = call i64 @sprout_make2(i64 0, i64 %t$12, i64 %t$13)
+  %t$14 = call i64 @sprout_alloc_obj(i64 0, i64 2)
+  %t$14$ptr = inttoptr i64 %t$14 to ptr
+  %t$14$f0 = getelementptr i64, ptr %t$14$ptr, i64 0
+  store i64 %t$12, ptr %t$14$f0
+  %t$14$f1 = getelementptr i64, ptr %t$14$ptr, i64 1
+  store i64 %t$13, ptr %t$14$f1
   %t$65 = call i64 @sprout_gc_pop_roots(i64 1)
   store i64 %t$14, ptr @r9
   call i64 @sprout_gc_register_i64_root(ptr @r9)
   %t$15 = add i64 0, 38593856
   %t$16 = add i64 0, 38593862
-  %t$17 = call i64 @sprout_make2(i64 2, i64 %t$15, i64 %t$16)
+  %t$17 = call i64 @sprout_alloc_obj(i64 2, i64 2)
+  %t$17$ptr = inttoptr i64 %t$17 to ptr
+  %t$17$f0 = getelementptr i64, ptr %t$17$ptr, i64 0
+  store i64 %t$15, ptr %t$17$f0
+  %t$17$f1 = getelementptr i64, ptr %t$17$ptr, i64 1
+  store i64 %t$16, ptr %t$17$f1
   %t$18 = load i64, ptr @r9
   %t$66 = alloca i64
   store i64 %t$17, ptr %t$66
   %t$67 = call i64 @sprout_gc_push_i64_root(ptr %t$66)
-  %t$19 = call i64 @sprout_make2(i64 0, i64 %t$17, i64 %t$18)
+  %t$19 = call i64 @sprout_alloc_obj(i64 0, i64 2)
+  %t$19$ptr = inttoptr i64 %t$19 to ptr
+  %t$19$f0 = getelementptr i64, ptr %t$19$ptr, i64 0
+  store i64 %t$17, ptr %t$19$f0
+  %t$19$f1 = getelementptr i64, ptr %t$19$ptr, i64 1
+  store i64 %t$18, ptr %t$19$f1
   %t$68 = call i64 @sprout_gc_pop_roots(i64 1)
   store i64 %t$19, ptr @r8
   call i64 @sprout_gc_register_i64_root(ptr @r8)
   %t$20 = add i64 0, 446443
   %t$21 = add i64 0, 446449
-  %t$22 = call i64 @sprout_make2(i64 2, i64 %t$20, i64 %t$21)
+  %t$22 = call i64 @sprout_alloc_obj(i64 2, i64 2)
+  %t$22$ptr = inttoptr i64 %t$22 to ptr
+  %t$22$f0 = getelementptr i64, ptr %t$22$ptr, i64 0
+  store i64 %t$20, ptr %t$22$f0
+  %t$22$f1 = getelementptr i64, ptr %t$22$ptr, i64 1
+  store i64 %t$21, ptr %t$22$f1
   %t$23 = load i64, ptr @r8
   %t$69 = alloca i64
   store i64 %t$22, ptr %t$69
   %t$70 = call i64 @sprout_gc_push_i64_root(ptr %t$69)
-  %t$24 = call i64 @sprout_make2(i64 0, i64 %t$22, i64 %t$23)
+  %t$24 = call i64 @sprout_alloc_obj(i64 0, i64 2)
+  %t$24$ptr = inttoptr i64 %t$24 to ptr
+  %t$24$f0 = getelementptr i64, ptr %t$24$ptr, i64 0
+  store i64 %t$22, ptr %t$24$f0
+  %t$24$f1 = getelementptr i64, ptr %t$24$ptr, i64 1
+  store i64 %t$23, ptr %t$24$f1
   %t$71 = call i64 @sprout_gc_pop_roots(i64 1)
   store i64 %t$24, ptr @r7
   call i64 @sprout_gc_register_i64_root(ptr @r7)
   %t$25 = add i64 0, 1698522
   %t$26 = add i64 0, 1698528
-  %t$27 = call i64 @sprout_make2(i64 2, i64 %t$25, i64 %t$26)
+  %t$27 = call i64 @sprout_alloc_obj(i64 2, i64 2)
+  %t$27$ptr = inttoptr i64 %t$27 to ptr
+  %t$27$f0 = getelementptr i64, ptr %t$27$ptr, i64 0
+  store i64 %t$25, ptr %t$27$f0
+  %t$27$f1 = getelementptr i64, ptr %t$27$ptr, i64 1
+  store i64 %t$26, ptr %t$27$f1
   %t$28 = load i64, ptr @r7
   %t$72 = alloca i64
   store i64 %t$27, ptr %t$72
   %t$73 = call i64 @sprout_gc_push_i64_root(ptr %t$72)
-  %t$29 = call i64 @sprout_make2(i64 0, i64 %t$27, i64 %t$28)
+  %t$29 = call i64 @sprout_alloc_obj(i64 0, i64 2)
+  %t$29$ptr = inttoptr i64 %t$29 to ptr
+  %t$29$f0 = getelementptr i64, ptr %t$29$ptr, i64 0
+  store i64 %t$27, ptr %t$29$f0
+  %t$29$f1 = getelementptr i64, ptr %t$29$ptr, i64 1
+  store i64 %t$28, ptr %t$29$f1
   %t$74 = call i64 @sprout_gc_pop_roots(i64 1)
   store i64 %t$29, ptr @r6
   call i64 @sprout_gc_register_i64_root(ptr @r6)
   %t$30 = add i64 0, 222220
   %t$31 = add i64 0, 222224
-  %t$32 = call i64 @sprout_make2(i64 2, i64 %t$30, i64 %t$31)
+  %t$32 = call i64 @sprout_alloc_obj(i64 2, i64 2)
+  %t$32$ptr = inttoptr i64 %t$32 to ptr
+  %t$32$f0 = getelementptr i64, ptr %t$32$ptr, i64 0
+  store i64 %t$30, ptr %t$32$f0
+  %t$32$f1 = getelementptr i64, ptr %t$32$ptr, i64 1
+  store i64 %t$31, ptr %t$32$f1
   %t$33 = load i64, ptr @r6
   %t$75 = alloca i64
   store i64 %t$32, ptr %t$75
   %t$76 = call i64 @sprout_gc_push_i64_root(ptr %t$75)
-  %t$34 = call i64 @sprout_make2(i64 0, i64 %t$32, i64 %t$33)
+  %t$34 = call i64 @sprout_alloc_obj(i64 0, i64 2)
+  %t$34$ptr = inttoptr i64 %t$34 to ptr
+  %t$34$f0 = getelementptr i64, ptr %t$34$ptr, i64 0
+  store i64 %t$32, ptr %t$34$f0
+  %t$34$f1 = getelementptr i64, ptr %t$34$ptr, i64 1
+  store i64 %t$33, ptr %t$34$f1
   %t$77 = call i64 @sprout_gc_pop_roots(i64 1)
   store i64 %t$34, ptr @r5
   call i64 @sprout_gc_register_i64_root(ptr @r5)
   %t$35 = add i64 0, 1188511880
   %t$36 = add i64 0, 1188511890
-  %t$37 = call i64 @sprout_make2(i64 2, i64 %t$35, i64 %t$36)
+  %t$37 = call i64 @sprout_alloc_obj(i64 2, i64 2)
+  %t$37$ptr = inttoptr i64 %t$37 to ptr
+  %t$37$f0 = getelementptr i64, ptr %t$37$ptr, i64 0
+  store i64 %t$35, ptr %t$37$f0
+  %t$37$f1 = getelementptr i64, ptr %t$37$ptr, i64 1
+  store i64 %t$36, ptr %t$37$f1
   %t$38 = load i64, ptr @r5
   %t$78 = alloca i64
   store i64 %t$37, ptr %t$78
   %t$79 = call i64 @sprout_gc_push_i64_root(ptr %t$78)
-  %t$39 = call i64 @sprout_make2(i64 0, i64 %t$37, i64 %t$38)
+  %t$39 = call i64 @sprout_alloc_obj(i64 0, i64 2)
+  %t$39$ptr = inttoptr i64 %t$39 to ptr
+  %t$39$f0 = getelementptr i64, ptr %t$39$ptr, i64 0
+  store i64 %t$37, ptr %t$39$f0
+  %t$39$f1 = getelementptr i64, ptr %t$39$ptr, i64 1
+  store i64 %t$38, ptr %t$39$f1
   %t$80 = call i64 @sprout_gc_pop_roots(i64 1)
   store i64 %t$39, ptr @r4
   call i64 @sprout_gc_register_i64_root(ptr @r4)
   %t$40 = add i64 0, 998
   %t$41 = add i64 0, 1012
-  %t$42 = call i64 @sprout_make2(i64 2, i64 %t$40, i64 %t$41)
+  %t$42 = call i64 @sprout_alloc_obj(i64 2, i64 2)
+  %t$42$ptr = inttoptr i64 %t$42 to ptr
+  %t$42$f0 = getelementptr i64, ptr %t$42$ptr, i64 0
+  store i64 %t$40, ptr %t$42$f0
+  %t$42$f1 = getelementptr i64, ptr %t$42$ptr, i64 1
+  store i64 %t$41, ptr %t$42$f1
   %t$43 = load i64, ptr @r4
   %t$81 = alloca i64
   store i64 %t$42, ptr %t$81
   %t$82 = call i64 @sprout_gc_push_i64_root(ptr %t$81)
-  %t$44 = call i64 @sprout_make2(i64 0, i64 %t$42, i64 %t$43)
+  %t$44 = call i64 @sprout_alloc_obj(i64 0, i64 2)
+  %t$44$ptr = inttoptr i64 %t$44 to ptr
+  %t$44$f0 = getelementptr i64, ptr %t$44$ptr, i64 0
+  store i64 %t$42, ptr %t$44$f0
+  %t$44$f1 = getelementptr i64, ptr %t$44$ptr, i64 1
+  store i64 %t$43, ptr %t$44$f1
   %t$83 = call i64 @sprout_gc_pop_roots(i64 1)
   store i64 %t$44, ptr @r3
   call i64 @sprout_gc_register_i64_root(ptr @r3)
   %t$45 = add i64 0, 95
   %t$46 = add i64 0, 115
-  %t$47 = call i64 @sprout_make2(i64 2, i64 %t$45, i64 %t$46)
+  %t$47 = call i64 @sprout_alloc_obj(i64 2, i64 2)
+  %t$47$ptr = inttoptr i64 %t$47 to ptr
+  %t$47$f0 = getelementptr i64, ptr %t$47$ptr, i64 0
+  store i64 %t$45, ptr %t$47$f0
+  %t$47$f1 = getelementptr i64, ptr %t$47$ptr, i64 1
+  store i64 %t$46, ptr %t$47$f1
   %t$48 = load i64, ptr @r3
   %t$84 = alloca i64
   store i64 %t$47, ptr %t$84
   %t$85 = call i64 @sprout_gc_push_i64_root(ptr %t$84)
-  %t$49 = call i64 @sprout_make2(i64 0, i64 %t$47, i64 %t$48)
+  %t$49 = call i64 @sprout_alloc_obj(i64 0, i64 2)
+  %t$49$ptr = inttoptr i64 %t$49 to ptr
+  %t$49$f0 = getelementptr i64, ptr %t$49$ptr, i64 0
+  store i64 %t$47, ptr %t$49$f0
+  %t$49$f1 = getelementptr i64, ptr %t$49$ptr, i64 1
+  store i64 %t$48, ptr %t$49$f1
   %t$86 = call i64 @sprout_gc_pop_roots(i64 1)
   store i64 %t$49, ptr @r2
   call i64 @sprout_gc_register_i64_root(ptr @r2)
   %t$50 = add i64 0, 11
   %t$51 = add i64 0, 22
-  %t$52 = call i64 @sprout_make2(i64 2, i64 %t$50, i64 %t$51)
+  %t$52 = call i64 @sprout_alloc_obj(i64 2, i64 2)
+  %t$52$ptr = inttoptr i64 %t$52 to ptr
+  %t$52$f0 = getelementptr i64, ptr %t$52$ptr, i64 0
+  store i64 %t$50, ptr %t$52$f0
+  %t$52$f1 = getelementptr i64, ptr %t$52$ptr, i64 1
+  store i64 %t$51, ptr %t$52$f1
   %t$53 = load i64, ptr @r2
   %t$87 = alloca i64
   store i64 %t$52, ptr %t$87
   %t$88 = call i64 @sprout_gc_push_i64_root(ptr %t$87)
-  %t$54 = call i64 @sprout_make2(i64 0, i64 %t$52, i64 %t$53)
+  %t$54 = call i64 @sprout_alloc_obj(i64 0, i64 2)
+  %t$54$ptr = inttoptr i64 %t$54 to ptr
+  %t$54$f0 = getelementptr i64, ptr %t$54$ptr, i64 0
+  store i64 %t$52, ptr %t$54$f0
+  %t$54$f1 = getelementptr i64, ptr %t$54$ptr, i64 1
+  store i64 %t$53, ptr %t$54$f1
   %t$89 = call i64 @sprout_gc_pop_roots(i64 1)
   store i64 %t$54, ptr @r1
   call i64 @sprout_gc_register_i64_root(ptr @r1)

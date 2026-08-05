@@ -1,0 +1,53 @@
+# A 16-field record crosses two former limits at once: codegen picked a callee
+# from the sprout_make0..sprout_make10 set, and the object header stored ctor
+# arity in a 4-bit nibble (max 15) that the GC reads for object size and child
+# count.  Allocating heavily while the record stays live forces a collection
+# that must size and scan a 16-slot object correctly — a wrong arity there
+# desyncs the sweep's slot walk rather than failing loudly.
+
+type Wide16 = (f0: Int, f1: Int, f2: Int, f3: Int, f4: Int, f5: Int, f6: Int, f7: Int,
+               f8: Int, f9: Int, f10: Int, f11: Int, f12: Int, f13: Int, f14: Int, f15: Int)
+
+type IntList = Cons Int IntList | Nil
+
+fn mk(n: Int) -> Wide16 =
+  Wide16(f0 = n, f1 = n + 1, f2 = n + 2, f3 = n + 3, f4 = n + 4, f5 = n + 5,
+         f6 = n + 6, f7 = n + 7, f8 = n + 8, f9 = n + 9, f10 = n + 10,
+         f11 = n + 11, f12 = n + 12, f13 = n + 13, f14 = n + 14, f15 = n + 15)
+
+fn build(n: Int, acc: IntList) -> IntList =
+  if n <= 0 then acc else build(n - 1, Cons(n, acc))
+
+fn total(xs: IntList, acc: Int) -> Int =
+  match xs with
+  | Nil -> acc
+  | Cons v rest -> total(rest, acc + v)
+
+# Allocate enough garbage to trigger at least one collection.
+fn churn(rounds: Int, acc: Int) -> Int =
+  if rounds <= 0 then acc else churn(rounds - 1, acc + total(build(400, Nil), 0))
+
+# Sum every field, so a mis-sized object shows up as a wrong total rather than
+# only a wrong last field.
+fn sum_all(w: Wide16) -> Int =
+  w.f0 + w.f1 + w.f2 + w.f3 + w.f4 + w.f5 + w.f6 + w.f7 +
+  w.f8 + w.f9 + w.f10 + w.f11 + w.f12 + w.f13 + w.f14 + w.f15
+
+# `w` is read only after churn returns, so it stays live across the collection.
+fn sum_after_gc(w: Wide16) -> Int =
+  let burned = churn(60, 0)
+  in if burned > 0 then sum_all(w) else 0 - 1
+
+fn zero_two(w: Wide16) -> Wide16 = w with (f15 = 0, f10 = 0)
+
+fn field15(w: Wide16) -> Int = w.f15
+
+fn field9(w: Wide16) -> Int = w.f9
+
+fn main() -> Unit !{IO} =
+  do
+    print(sum_all(mk(100)))
+    print(field15(mk(100)))
+    print(sum_after_gc(mk(100)))
+    print(sum_all(zero_two(mk(100))))
+    print(field9(zero_two(mk(100))))

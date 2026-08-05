@@ -167,7 +167,7 @@ fn test5_program() -> sprout_ir.IRProgram =
 #   %r = IRMakeCtor "Box" 1 [%a]   ← trigger; %a is an operand, dead afterward
 #   ret %r
 #
-# @sprout_makeN allocates (a GC point) BEFORE storing its operand registers,
+# @sprout_alloc_obj allocates (a GC point) BEFORE its operands are stored,
 # and — unlike @str_concat — does NOT SPROUT_HANDLE them.  So %a must be rooted
 # across the make even though it is not live after it.  Expected: 1 root.
 fn test6_program() -> sprout_ir.IRProgram =
@@ -211,7 +211,7 @@ fn test7_program() -> sprout_ir.IRProgram =
 #
 # @sprout_alloc_tuple_blob calls sprout_gc_maybe_collect_threshold() then
 # allocates then stores the fields — so a tuple build is a GC trigger and its
-# operands are exposed, exactly like @sprout_makeN.  %a must be rooted.
+# operands are exposed, exactly like @sprout_alloc_obj.  %a must be rooted.
 fn test8_program() -> sprout_ir.IRProgram =
   sprout_ir.IRProgram(Cons(
     sprout_ir.IRFunction("tuple_operand", Nil, "i64", Cons(
@@ -305,7 +305,7 @@ fn test10_program() -> sprout_ir.IRProgram =
 #
 # @ref_new calls sprout_gc_maybe_collect_threshold() and allocates the RefVal
 # BEFORE `r->value = value` — so it can collect before consuming its operand,
-# exactly like @sprout_makeN.  %a is NOT live after the call, so live_across
+# exactly like @sprout_alloc_obj.  %a is NOT live after the call, so live_across
 # alone misses it; the operand must be rooted because IRCall exposes operands.
 # Pre-fix (IRCall not exposing operands): 0 roots → this test FAILS.
 # Post-fix: exactly 1 root.  Distinct from T5, where %s is live-AFTER the call.
@@ -682,7 +682,7 @@ fn main() -> Unit !{IO} =
 
     # --- Test 5: heap param %s seeded into heap_origin (S2 regression).
     # %s is live across IRCall bar(%s) → 1 root there.  %s is ALSO an operand of
-    # the following IRMakeCtor, and @sprout_makeN allocates before storing its
+    # the following IRMakeCtor, and @sprout_alloc_obj allocates before storing its
     # operands without SPROUT_HANDLE-protecting them, so %s must be rooted across
     # the make too → a second root.  (Both roots are pop_roots(i64 1).)
     check_eq("T5: one push_i64_root (heap param rooted once across call AND make)",
@@ -691,7 +691,7 @@ fn main() -> Unit !{IO} =
               count(lower(test5_program()), "@sprout_gc_pop_roots(i64 1)"), 1),
 
     # --- Test 6: IRMakeCtor operand rooted across the make (PR-A regression).
-    # %a is dead after the make but must be rooted because @sprout_makeN
+    # %a is dead after the make but must be rooted because @sprout_alloc_obj
     # allocates before storing operands and does not handle-protect them.
     check_eq("T6: exactly one push_i64_root for IRMakeCtor operand",
               count(lower(test6_program()), "call i64 @sprout_gc_push_i64_root"), 1),

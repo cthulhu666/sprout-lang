@@ -72,8 +72,9 @@ fn lower_call_args(args: List String) -> String =
   | [a] -> "i64 " ++ a
   | Cons a rest -> "i64 " ++ a ++ ", " ++ lower_call_args(rest)
 
-# Render the ", i64 %a, i64 %b, ..." suffix appended after a leading "i64 <tag>"
-# in an `@sprout_makeN` call.  Returns "" for 0-arity ctors (no extra args).
+# Render the ", i64 %a, i64 %b, ..." suffix appended after a leading operand.
+# Used by IRApplyClosure, whose first argument is the environment pointer.
+# Returns "" when there are no further arguments.
 fn make_ctor_args_tail(args: List String) -> String =
   match args with
   | Nil -> ""
@@ -252,13 +253,23 @@ fn lower_op(op: sprout_ir.IROp, ret_ty: String, str_table: Dict (String, Int)) -
   | sprout_ir.IRStrFromInt r n ->
       "  " ++ r ++ " = call i64 @int_to_string(i64 " ++ n ++ ")"
   | sprout_ir.IRMakeCtor r _ tag args ->
-      # Mirrors codegen.sprout's boxed-ctor lowering:
-      #   %r = call i64 @sprout_makeN(i64 <tag>, i64 %a0, i64 %a1, ...)
+      # Allocate once, then store each field at its fixed offset — the same
+      # shape IRMakeTuple uses against @sprout_alloc_tuple_blob.  One entry
+      # point covers every arity, so there is no per-arity callee to declare
+      # and no ceiling beyond the header's arity field.
+      # SYNC WITH runtime/sprout_runtime.c sprout_alloc_obj: the returned
+      # slots are uninitialized until these stores run, so nothing that can
+      # allocate may be emitted between the call and the last store.
       # The ctor-name field is intentionally not emitted — the tag is the
       # only thing the runtime sees.  CPR-eligible ctors are rejected in
       # ast_to_ir; this op is BOXED ADTs only.
-      "  " ++ r ++ " = call i64 @sprout_make" ++ int_to_string(list_length(args)) ++
-        "(i64 " ++ int_to_string(tag) ++ make_ctor_args_tail(args) ++ ")"
+      (if args == Nil
+       then "  " ++ r ++ " = call i64 @sprout_alloc_obj(i64 " ++ int_to_string(tag) ++ ", i64 0)"
+       else
+         "  " ++ r ++ " = call i64 @sprout_alloc_obj(i64 " ++ int_to_string(tag) ++
+           ", i64 " ++ int_to_string(list_length(args)) ++ ")\n" ++
+         "  " ++ r ++ "$ptr = inttoptr i64 " ++ r ++ " to ptr\n" ++
+         lower_ctor_stores(r, args, 0))
   | sprout_ir.IRMkClosure r code_fn caps ->
       # sz = (num_captures + 1) * 8 bytes; slot 0 holds the code pointer.
       # r is the i64 closure handle — directly the return of sprout_alloc_closure_env.
@@ -374,6 +385,17 @@ fn lower_tco_back_stores(stores: List (String, String, String)) -> String =
       "  store " ++ ty ++ " " ++ newv ++ ", ptr " ++ slot ++ "\n" ++
       lower_tco_back_stores(rest)
 
+# Emit per-field store instructions for an IRMakeCtor expansion.  Field `idx`
+# lands at word offset `idx`, matching the fixed offsets IRGetField reads back.
+fn lower_ctor_stores(obj_result: String, args: List String, idx: Int) -> String =
+  match args with
+  | Nil -> ""
+  | Cons a rest ->
+      "  " ++ obj_result ++ "$f" ++ int_to_string(idx) ++ " = getelementptr i64, ptr " ++ obj_result ++ "$ptr, i64 " ++ int_to_string(idx) ++ "\n" ++
+      "  store i64 " ++ a ++ ", ptr " ++ obj_result ++ "$f" ++ int_to_string(idx) ++
+      (if rest == Nil then "" else "\n") ++
+      lower_ctor_stores(obj_result, rest, idx + 1)
+
 # Emit per-element store instructions for an IRMakeTuple expansion.
 fn lower_tuple_stores(blob_result: String, args: List String, idx: Int) -> String =
   match args with
@@ -454,22 +476,11 @@ export fn ir_header() -> String =
   # Stack save/restore intrinsics for TCO loops (reset per-iteration root allocas).
   "declare ptr @llvm.stacksave()\n" ++
   "declare void @llvm.stackrestore(ptr)\n" ++
-  # Boxed-ADT constructors.  Mirrors the sprout_make0..sprout_make10 set in
-  # codegen.sprout (compiler intrinsic table).  All arities are declared
-  # unconditionally — only the ones actually called are linked.
-  # NOTE: this declare set is mirrored by ast_to_ir.sprout's max_boxed_arity().
-  # If you add entries here, raise that constant to match.
-  "declare i64 @sprout_make0(i64)\n" ++
-  "declare i64 @sprout_make1(i64, i64)\n" ++
-  "declare i64 @sprout_make2(i64, i64, i64)\n" ++
-  "declare i64 @sprout_make3(i64, i64, i64, i64)\n" ++
-  "declare i64 @sprout_make4(i64, i64, i64, i64, i64)\n" ++
-  "declare i64 @sprout_make5(i64, i64, i64, i64, i64, i64)\n" ++
-  "declare i64 @sprout_make6(i64, i64, i64, i64, i64, i64, i64)\n" ++
-  "declare i64 @sprout_make7(i64, i64, i64, i64, i64, i64, i64, i64)\n" ++
-  "declare i64 @sprout_make8(i64, i64, i64, i64, i64, i64, i64, i64, i64)\n" ++
-  "declare i64 @sprout_make9(i64, i64, i64, i64, i64, i64, i64, i64, i64, i64)\n" ++
-  "declare i64 @sprout_make10(i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64)\n" ++
+  # Boxed-ADT constructors.  One arity-generic entry point replaces the former
+  # sprout_make0..sprout_make10 set: IRMakeCtor lowers to a call plus one store
+  # per field, so no arity needs its own declaration and the only remaining
+  # limit is the runtime header's arity field (ast_to_ir's max_boxed_arity()).
+  "declare i64 @sprout_alloc_obj(i64, i64)\n" ++
   # Tier-1 CPR peephole: unboxed { i64, i64 } (SproutUnboxed2) variants of the
   # Maybe-returning externs.  Emitted by IRCallUnboxed2 when a `match` scrutinizes
   # one of these directly.  Arg signatures mirror the boxed externs' uniform-i64
@@ -570,10 +581,7 @@ fn is_hardcoded_intrinsic(name: String) -> Bool =
   name == "sprout_alloc_closure_env" || name == "sprout_alloc_tuple_blob" ||
   name == "sprout_register_ctor" || name == "sprout_tag" || name == "sprout_field" ||
   name == "sprout_abort_match" || name == "panic" ||
-  name == "sprout_make0" || name == "sprout_make1" || name == "sprout_make2" ||
-  name == "sprout_make3" || name == "sprout_make4" || name == "sprout_make5" ||
-  name == "sprout_make6" || name == "sprout_make7" || name == "sprout_make8" ||
-  name == "sprout_make9" ||
+  name == "sprout_alloc_obj" ||
   name == "print" || name == "eprint" || name == "argv_get" ||
   name == "print_str" || name == "print_value" || name == "eprint_str" ||
   name == "append" ||

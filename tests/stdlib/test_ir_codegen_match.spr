@@ -40,6 +40,15 @@ import testsupport.ir_verify (clang_verifies_ir)
 fn contains(haystack: String, needle: String) -> Bool =
   str_find(haystack, needle) != -1
 
+fn count_substrs(haystack: String, needle: String, acc: Int) -> Int =
+  if pos == -1 then acc
+  else count_substrs(str_slice(haystack, pos + str_len(needle), str_len(haystack)),
+                     needle, acc + 1)
+  where pos = str_find(haystack, needle)
+
+fn count(haystack: String, needle: String) -> Int =
+  count_substrs(haystack, needle, 0)
+
 # Pipeline: insert_roots then lower.  Same shape as test_ir_rooting.spr.
 fn lower_with_roots(prog: sprout_ir.IRProgram) -> String =
   ir_lowering.lower_program(ir_rooting.insert_roots(prog, dict_empty()))
@@ -228,14 +237,18 @@ fn main() -> Unit !{IO} =
                 contains(lower_with_roots(field_program_heap()),
                          "call i64 @sprout_gc_pop_roots"))
     # Negative control: the SCALAR IRGetField result %n must NOT be rooted —
-    # scalar fields are i64 values (Int), not GC handles.  (The trailing
-    # IRMakeCtor's heap operand %marker IS rooted now — @sprout_makeN exposes
-    # its operands — so we check specifically that %n is never stored into a
-    # root slot, not that no root exists at all.)  This exercises the
+    # scalar fields are i64 values (Int), not GC handles.  The trailing
+    # IRMakeCtor's heap operand %marker IS rooted (the allocation exposes its
+    # operands), so exactly one root push is expected; a second would mean %n
+    # was rooted too.  Counting pushes rather than matching a store keeps this
+    # honest: IRMakeCtor now lowers to an allocation plus a per-field
+    # `store i64 <arg>, ptr <obj>$fK`, which is a FIELD store, not a root store,
+    # and root slots share the `%t$N` namespace with ordinary temps so the
+    # destination alone cannot tell them apart.  This exercises the
     # heap-vs-scalar discrimination in op_produces_simple_heap.
-    assert_false(state, "rooting: scalar IRGetField result %n is NOT rooted",
-                 contains(lower_with_roots(field_program_scalar_across_trigger()),
-                          "store i64 %n, ptr"))
+    assert_eq(state, "rooting: scalar IRGetField result %n is NOT rooted (only %marker is)",
+              count(lower_with_roots(field_program_scalar_across_trigger()),
+                    "call i64 @sprout_gc_push_i64_root"), 1)
 
     # =================================================================
     # Phase 2 — translator-driven tests for ast_to_ir.translate_match.
