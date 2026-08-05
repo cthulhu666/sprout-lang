@@ -8,12 +8,14 @@ declare i64 @int_to_string(i64)
 declare i64 @char_to_string(i64)
 declare i64 @sprout_gc_push_i64_root(ptr)
 declare i64 @sprout_gc_pop_roots(i64)
+declare i64 @sprout_gc_register_i64_root(ptr)
 declare i64 @sprout_alloc_closure_env(i64)
 declare i64 @sprout_alloc_tuple_blob(i64)
 declare i64 @sprout_register_ctor(i64, ptr, i64, ptr)
 declare i64 @sprout_tag(i64)
 declare i64 @sprout_field(i64, i64)
 declare void @sprout_abort_match() noreturn
+declare i64 @panic(i64)
 declare ptr @llvm.stacksave()
 declare void @llvm.stackrestore(ptr)
 declare i64 @sprout_make0(i64)
@@ -26,6 +28,17 @@ declare i64 @sprout_make6(i64, i64, i64, i64, i64, i64, i64)
 declare i64 @sprout_make7(i64, i64, i64, i64, i64, i64, i64, i64)
 declare i64 @sprout_make8(i64, i64, i64, i64, i64, i64, i64, i64, i64)
 declare i64 @sprout_make9(i64, i64, i64, i64, i64, i64, i64, i64, i64, i64)
+declare i64 @sprout_make10(i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64)
+declare { i64, i64 } @vector_get_unboxed(i64, i64)
+declare { i64, i64 } @map_get_unboxed(i64, i64)
+declare { i64, i64 } @map_nth_key_unboxed(i64, i64)
+declare { i64, i64 } @map_nth_value_unboxed(i64, i64)
+declare { i64, i64 } @bytes_get_unboxed(i64, i64)
+declare { i64, i64 } @str_char_at_unboxed(i64, i64)
+declare { i64, i64 } @regex_find_range_unboxed(i64, i64)
+declare { i64, i64 } @argv_get_unboxed(i64)
+declare { i64, i64 } @env_get_unboxed(i64)
+declare { i64, i64 } @term_read_line_unboxed()
 declare i64 @print_str(ptr)
 declare i64 @print_value(i64)
 declare i64 @eprint_str(ptr)
@@ -43,6 +56,8 @@ declare i64 @analysis_eval_expr_in_source(ptr, ptr)
 declare i64 @analysis_instances_in_source(ptr, ptr)
 declare i64 @analysis_complete_in_state(ptr, ptr, ptr)
 
+@.str.0 = private unnamed_addr constant { i64, [17 x i8] } { i64 262154, [17 x i8] c"division by zero\00" }
+@.str.1 = private unnamed_addr constant { i64, [17 x i8] } { i64 262154, [17 x i8] c"division by zero\00" }
 @.cname.0 = private unnamed_addr constant [5 x i8] c"Cons\00"
 @.cfkinds.0 = private unnamed_addr constant [3 x i8] c"_p\00"
 @.cname.1 = private unnamed_addr constant [4 x i8] c"Nil\00"
@@ -67,11 +82,19 @@ declare i64 @analysis_complete_in_state(ptr, ptr, ptr)
 define i64 @mod100(i64 %n) {
 entry:
   %t$0 = add i64 0, 100
-  %t$1 = sdiv i64 %n, %t$0
-  %t$2 = add i64 0, 100
-  %t$3 = mul i64 %t$1, %t$2
-  %t$4 = sub i64 %n, %t$3
-  ret i64 %t$4
+  %t$1 = icmp eq i64 %t$0, 0
+  br i1 %t$1, label %divpanic_1, label %divok_1
+divpanic_1:
+  %t$2 = getelementptr inbounds { i64, [17 x i8] }, ptr @.str.0, i64 0, i32 1, i64 0
+  %t$3 = ptrtoint ptr %t$2 to i64
+  call i64 @panic(i64 %t$3)
+  unreachable
+divok_1:
+  %t$4 = sdiv i64 %n, %t$0
+  %t$5 = add i64 0, 100
+  %t$6 = mul i64 %t$4, %t$5
+  %t$7 = sub i64 %n, %t$6
+  ret i64 %t$7
 }
 
 define i64 @dial_after(i64 %dial, i64 %rot) {
@@ -131,43 +154,20 @@ arm_1_1:
 body_1_1:
   %t$8 = call i64 @sprout_field(i64 %rots, i64 0)
   %t$9 = call i64 @sprout_field(i64 %rots, i64 1)
-  %t$26 = alloca i64
-  store i64 %t$8, ptr %t$26
-  %t$27 = call i64 @sprout_gc_push_i64_root(ptr %t$26)
-  %t$28 = alloca i64
-  store i64 %t$9, ptr %t$28
-  %t$29 = call i64 @sprout_gc_push_i64_root(ptr %t$28)
   %t$10 = call i64 @dial_after(i64 %dial, i64 %t$8)
   %t$11 = add i64 0, 0
   %t$12 = icmp eq i64 %t$10, %t$11
   %t$13 = zext i1 %t$12 to i64
   %t$22 = trunc i64 %t$13 to i1
-  %t$30 = call i64 @sprout_gc_pop_roots(i64 2)
   br i1 %t$22, label %then_14, label %else_14
 then_14:
   %t$16 = add i64 0, 1
-  %t$31 = alloca i64
-  store i64 %t$9, ptr %t$31
-  %t$32 = call i64 @sprout_gc_push_i64_root(ptr %t$31)
-  %t$33 = alloca i64
-  store i64 %t$8, ptr %t$33
-  %t$34 = call i64 @sprout_gc_push_i64_root(ptr %t$33)
   %t$17 = call i64 @dial_after(i64 %dial, i64 %t$8)
-  %t$35 = call i64 @sprout_gc_pop_roots(i64 1)
   %t$18 = call i64 @count_hits(i64 %t$9, i64 %t$17)
-  %t$36 = call i64 @sprout_gc_pop_roots(i64 1)
   %t$19 = add i64 %t$16, %t$18
   br label %join_14
 else_14:
-  %t$37 = alloca i64
-  store i64 %t$9, ptr %t$37
-  %t$38 = call i64 @sprout_gc_push_i64_root(ptr %t$37)
-  %t$39 = alloca i64
-  store i64 %t$8, ptr %t$39
-  %t$40 = call i64 @sprout_gc_push_i64_root(ptr %t$39)
   %t$20 = call i64 @dial_after(i64 %dial, i64 %t$8)
-  %t$41 = call i64 @sprout_gc_pop_roots(i64 1)
-  %t$42 = call i64 @sprout_gc_pop_roots(i64 1)
   store i64 %t$9, ptr %t$23
   store i64 %t$20, ptr %t$24
   call void @llvm.stackrestore(ptr %t$25)
@@ -261,34 +261,34 @@ join_1:
 
 define i64 @passes_in_rotation(i64 %dial, i64 %rot) {
 entry:
-  %t$15 = alloca i64
-  store i64 %rot, ptr %t$15
-  %t$16 = call i64 @sprout_gc_push_i64_root(ptr %t$15)
   %t$0 = call i64 @rotation_clicks(i64 %rot)
   %t$1 = call i64 @clicks_to_zero(i64 %dial, i64 %rot)
   %t$2 = icmp slt i64 %t$0, %t$1
   %t$3 = zext i1 %t$2 to i64
-  %t$14 = trunc i64 %t$3 to i1
-  %t$17 = call i64 @sprout_gc_pop_roots(i64 1)
-  br i1 %t$14, label %then_4, label %else_4
+  %t$17 = trunc i64 %t$3 to i1
+  br i1 %t$17, label %then_4, label %else_4
 then_4:
   %t$6 = add i64 0, 0
   br label %join_4
 else_4:
   %t$7 = add i64 0, 1
-  %t$18 = alloca i64
-  store i64 %rot, ptr %t$18
-  %t$19 = call i64 @sprout_gc_push_i64_root(ptr %t$18)
   %t$8 = call i64 @rotation_clicks(i64 %rot)
   %t$9 = call i64 @clicks_to_zero(i64 %dial, i64 %rot)
-  %t$20 = call i64 @sprout_gc_pop_roots(i64 1)
   %t$10 = sub i64 %t$8, %t$9
   %t$11 = add i64 0, 100
-  %t$12 = sdiv i64 %t$10, %t$11
-  %t$13 = add i64 %t$7, %t$12
+  %t$12 = icmp eq i64 %t$11, 0
+  br i1 %t$12, label %divpanic_12, label %divok_12
+divpanic_12:
+  %t$13 = getelementptr inbounds { i64, [17 x i8] }, ptr @.str.1, i64 0, i32 1, i64 0
+  %t$14 = ptrtoint ptr %t$13 to i64
+  call i64 @panic(i64 %t$14)
+  unreachable
+divok_12:
+  %t$15 = sdiv i64 %t$10, %t$11
+  %t$16 = add i64 %t$7, %t$15
   br label %join_4
 join_4:
-  %t$5 = phi i64 [%t$6, %then_4], [%t$13, %else_4]
+  %t$5 = phi i64 [%t$6, %then_4], [%t$16, %divok_12]
   ret i64 %t$5
 }
 
@@ -310,16 +310,9 @@ arm_1_1:
 body_1_1:
   %t$8 = call i64 @sprout_field(i64 %rots, i64 0)
   %t$9 = call i64 @sprout_field(i64 %rots, i64 1)
-  %t$14 = alloca i64
-  store i64 %t$8, ptr %t$14
-  %t$15 = call i64 @sprout_gc_push_i64_root(ptr %t$14)
-  %t$16 = alloca i64
-  store i64 %t$9, ptr %t$16
-  %t$17 = call i64 @sprout_gc_push_i64_root(ptr %t$16)
   %t$10 = call i64 @passes_in_rotation(i64 %dial, i64 %t$8)
   %t$11 = call i64 @dial_after(i64 %dial, i64 %t$8)
   %t$12 = call i64 @count_passes(i64 %t$9, i64 %t$11)
-  %t$18 = call i64 @sprout_gc_pop_roots(i64 2)
   %t$13 = add i64 %t$10, %t$12
   br label %join_1
 arm_2_1:
@@ -340,24 +333,16 @@ define i64 @__sprout_user_main() {
 entry:
   %t$0 = call i64 @sample_rotations()
   %t$1 = add i64 0, 50
-  %t$8 = alloca i64
-  store i64 %t$0, ptr %t$8
-  %t$9 = call i64 @sprout_gc_push_i64_root(ptr %t$8)
   %t$2 = call i64 @count_hits(i64 %t$0, i64 %t$1)
-  %t$10 = call i64 @sprout_gc_pop_roots(i64 1)
   %t$3 = call i64 @sample_rotations()
   %t$4 = add i64 0, 50
-  %t$11 = alloca i64
-  store i64 %t$3, ptr %t$11
-  %t$12 = call i64 @sprout_gc_push_i64_root(ptr %t$11)
   %t$5 = call i64 @count_passes(i64 %t$3, i64 %t$4)
-  %t$13 = call i64 @sprout_gc_pop_roots(i64 1)
   %t$6 = call i64 @sprout_make2(i64 4, i64 %t$2, i64 %t$5)
-  %t$14 = alloca i64
-  store i64 %t$6, ptr %t$14
-  %t$15 = call i64 @sprout_gc_push_i64_root(ptr %t$14)
+  %t$8 = alloca i64
+  store i64 %t$6, ptr %t$8
+  %t$9 = call i64 @sprout_gc_push_i64_root(ptr %t$8)
   %t$7 = call i64 @print_value(i64 %t$6)
-  %t$16 = call i64 @sprout_gc_pop_roots(i64 1)
+  %t$10 = call i64 @sprout_gc_pop_roots(i64 1)
   ret i64 %t$7
 }
 
@@ -375,6 +360,7 @@ entry:
   %t$3 = call i64 @sprout_make2(i64 0, i64 %t$1, i64 %t$2)
   %t$44 = call i64 @sprout_gc_pop_roots(i64 2)
   store i64 %t$3, ptr @r10
+  call i64 @sprout_gc_register_i64_root(ptr @r10)
   %t$4 = add i64 0, 14
   %t$5 = call i64 @sprout_make1(i64 3, i64 %t$4)
   %t$6 = load i64, ptr @r10
@@ -384,6 +370,7 @@ entry:
   %t$7 = call i64 @sprout_make2(i64 0, i64 %t$5, i64 %t$6)
   %t$47 = call i64 @sprout_gc_pop_roots(i64 1)
   store i64 %t$7, ptr @r9
+  call i64 @sprout_gc_register_i64_root(ptr @r9)
   %t$8 = add i64 0, 99
   %t$9 = call i64 @sprout_make1(i64 2, i64 %t$8)
   %t$10 = load i64, ptr @r9
@@ -393,6 +380,7 @@ entry:
   %t$11 = call i64 @sprout_make2(i64 0, i64 %t$9, i64 %t$10)
   %t$50 = call i64 @sprout_gc_pop_roots(i64 1)
   store i64 %t$11, ptr @r8
+  call i64 @sprout_gc_register_i64_root(ptr @r8)
   %t$12 = add i64 0, 1
   %t$13 = call i64 @sprout_make1(i64 2, i64 %t$12)
   %t$14 = load i64, ptr @r8
@@ -402,6 +390,7 @@ entry:
   %t$15 = call i64 @sprout_make2(i64 0, i64 %t$13, i64 %t$14)
   %t$53 = call i64 @sprout_gc_pop_roots(i64 1)
   store i64 %t$15, ptr @r7
+  call i64 @sprout_gc_register_i64_root(ptr @r7)
   %t$16 = add i64 0, 55
   %t$17 = call i64 @sprout_make1(i64 2, i64 %t$16)
   %t$18 = load i64, ptr @r7
@@ -411,6 +400,7 @@ entry:
   %t$19 = call i64 @sprout_make2(i64 0, i64 %t$17, i64 %t$18)
   %t$56 = call i64 @sprout_gc_pop_roots(i64 1)
   store i64 %t$19, ptr @r6
+  call i64 @sprout_gc_register_i64_root(ptr @r6)
   %t$20 = add i64 0, 60
   %t$21 = call i64 @sprout_make1(i64 3, i64 %t$20)
   %t$22 = load i64, ptr @r6
@@ -420,6 +410,7 @@ entry:
   %t$23 = call i64 @sprout_make2(i64 0, i64 %t$21, i64 %t$22)
   %t$59 = call i64 @sprout_gc_pop_roots(i64 1)
   store i64 %t$23, ptr @r5
+  call i64 @sprout_gc_register_i64_root(ptr @r5)
   %t$24 = add i64 0, 5
   %t$25 = call i64 @sprout_make1(i64 2, i64 %t$24)
   %t$26 = load i64, ptr @r5
@@ -429,6 +420,7 @@ entry:
   %t$27 = call i64 @sprout_make2(i64 0, i64 %t$25, i64 %t$26)
   %t$62 = call i64 @sprout_gc_pop_roots(i64 1)
   store i64 %t$27, ptr @r4
+  call i64 @sprout_gc_register_i64_root(ptr @r4)
   %t$28 = add i64 0, 48
   %t$29 = call i64 @sprout_make1(i64 3, i64 %t$28)
   %t$30 = load i64, ptr @r4
@@ -438,6 +430,7 @@ entry:
   %t$31 = call i64 @sprout_make2(i64 0, i64 %t$29, i64 %t$30)
   %t$65 = call i64 @sprout_gc_pop_roots(i64 1)
   store i64 %t$31, ptr @r3
+  call i64 @sprout_gc_register_i64_root(ptr @r3)
   %t$32 = add i64 0, 30
   %t$33 = call i64 @sprout_make1(i64 2, i64 %t$32)
   %t$34 = load i64, ptr @r3
@@ -447,6 +440,7 @@ entry:
   %t$35 = call i64 @sprout_make2(i64 0, i64 %t$33, i64 %t$34)
   %t$68 = call i64 @sprout_gc_pop_roots(i64 1)
   store i64 %t$35, ptr @r2
+  call i64 @sprout_gc_register_i64_root(ptr @r2)
   %t$36 = add i64 0, 68
   %t$37 = call i64 @sprout_make1(i64 2, i64 %t$36)
   %t$38 = load i64, ptr @r2
@@ -456,6 +450,7 @@ entry:
   %t$39 = call i64 @sprout_make2(i64 0, i64 %t$37, i64 %t$38)
   %t$71 = call i64 @sprout_gc_pop_roots(i64 1)
   store i64 %t$39, ptr @r1
+  call i64 @sprout_gc_register_i64_root(ptr @r1)
   ret void
 }
 

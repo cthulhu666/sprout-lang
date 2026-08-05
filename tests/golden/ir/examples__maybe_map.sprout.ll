@@ -8,12 +8,14 @@ declare i64 @int_to_string(i64)
 declare i64 @char_to_string(i64)
 declare i64 @sprout_gc_push_i64_root(ptr)
 declare i64 @sprout_gc_pop_roots(i64)
+declare i64 @sprout_gc_register_i64_root(ptr)
 declare i64 @sprout_alloc_closure_env(i64)
 declare i64 @sprout_alloc_tuple_blob(i64)
 declare i64 @sprout_register_ctor(i64, ptr, i64, ptr)
 declare i64 @sprout_tag(i64)
 declare i64 @sprout_field(i64, i64)
 declare void @sprout_abort_match() noreturn
+declare i64 @panic(i64)
 declare ptr @llvm.stacksave()
 declare void @llvm.stackrestore(ptr)
 declare i64 @sprout_make0(i64)
@@ -26,6 +28,17 @@ declare i64 @sprout_make6(i64, i64, i64, i64, i64, i64, i64)
 declare i64 @sprout_make7(i64, i64, i64, i64, i64, i64, i64, i64)
 declare i64 @sprout_make8(i64, i64, i64, i64, i64, i64, i64, i64, i64)
 declare i64 @sprout_make9(i64, i64, i64, i64, i64, i64, i64, i64, i64, i64)
+declare i64 @sprout_make10(i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64)
+declare { i64, i64 } @vector_get_unboxed(i64, i64)
+declare { i64, i64 } @map_get_unboxed(i64, i64)
+declare { i64, i64 } @map_nth_key_unboxed(i64, i64)
+declare { i64, i64 } @map_nth_value_unboxed(i64, i64)
+declare { i64, i64 } @bytes_get_unboxed(i64, i64)
+declare { i64, i64 } @str_char_at_unboxed(i64, i64)
+declare { i64, i64 } @regex_find_range_unboxed(i64, i64)
+declare { i64, i64 } @argv_get_unboxed(i64)
+declare { i64, i64 } @env_get_unboxed(i64)
+declare { i64, i64 } @term_read_line_unboxed()
 declare i64 @print_str(ptr)
 declare i64 @print_value(i64)
 declare i64 @eprint_str(ptr)
@@ -91,11 +104,7 @@ entry:
 
 define i64 @__sprout_ir_eta_inc_0(i64 %env$, i64 %a0) {
 entry:
-  %t$0 = alloca i64
-  store i64 %a0, ptr %t$0
-  %t$1 = call i64 @sprout_gc_push_i64_root(ptr %t$0)
   %ret = call i64 @inc(i64 %a0)
-  %t$2 = call i64 @sprout_gc_pop_roots(i64 1)
   ret i64 %ret
 }
 
