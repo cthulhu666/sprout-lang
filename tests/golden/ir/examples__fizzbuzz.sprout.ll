@@ -8,12 +8,14 @@ declare i64 @int_to_string(i64)
 declare i64 @char_to_string(i64)
 declare i64 @sprout_gc_push_i64_root(ptr)
 declare i64 @sprout_gc_pop_roots(i64)
+declare i64 @sprout_gc_register_i64_root(ptr)
 declare i64 @sprout_alloc_closure_env(i64)
 declare i64 @sprout_alloc_tuple_blob(i64)
 declare i64 @sprout_register_ctor(i64, ptr, i64, ptr)
 declare i64 @sprout_tag(i64)
 declare i64 @sprout_field(i64, i64)
 declare void @sprout_abort_match() noreturn
+declare i64 @panic(i64)
 declare ptr @llvm.stacksave()
 declare void @llvm.stackrestore(ptr)
 declare i64 @sprout_make0(i64)
@@ -26,6 +28,17 @@ declare i64 @sprout_make6(i64, i64, i64, i64, i64, i64, i64)
 declare i64 @sprout_make7(i64, i64, i64, i64, i64, i64, i64, i64)
 declare i64 @sprout_make8(i64, i64, i64, i64, i64, i64, i64, i64, i64)
 declare i64 @sprout_make9(i64, i64, i64, i64, i64, i64, i64, i64, i64, i64)
+declare i64 @sprout_make10(i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64)
+declare { i64, i64 } @vector_get_unboxed(i64, i64)
+declare { i64, i64 } @map_get_unboxed(i64, i64)
+declare { i64, i64 } @map_nth_key_unboxed(i64, i64)
+declare { i64, i64 } @map_nth_value_unboxed(i64, i64)
+declare { i64, i64 } @bytes_get_unboxed(i64, i64)
+declare { i64, i64 } @str_char_at_unboxed(i64, i64)
+declare { i64, i64 } @regex_find_range_unboxed(i64, i64)
+declare { i64, i64 } @argv_get_unboxed(i64)
+declare { i64, i64 } @env_get_unboxed(i64)
+declare { i64, i64 } @term_read_line_unboxed()
 declare i64 @print_str(ptr)
 declare i64 @print_value(i64)
 declare i64 @eprint_str(ptr)
@@ -43,17 +56,26 @@ declare i64 @analysis_eval_expr_in_source(ptr, ptr)
 declare i64 @analysis_instances_in_source(ptr, ptr)
 declare i64 @analysis_complete_in_state(ptr, ptr, ptr)
 
-@.str.0 = private unnamed_addr constant [9 x i8] c"FizzBuzz\00"
-@.str.1 = private unnamed_addr constant [5 x i8] c"Fizz\00"
-@.str.2 = private unnamed_addr constant [5 x i8] c"Buzz\00"
-@.str.3 = private unnamed_addr constant [7 x i8] c"Number\00"
+@.str.0 = private unnamed_addr constant { i64, [17 x i8] } { i64 262154, [17 x i8] c"division by zero\00" }
+@.str.1 = private unnamed_addr constant { i64, [9 x i8] } { i64 131082, [9 x i8] c"FizzBuzz\00" }
+@.str.2 = private unnamed_addr constant { i64, [5 x i8] } { i64 65546, [5 x i8] c"Fizz\00" }
+@.str.3 = private unnamed_addr constant { i64, [5 x i8] } { i64 65546, [5 x i8] c"Buzz\00" }
+@.str.4 = private unnamed_addr constant { i64, [7 x i8] } { i64 98314, [7 x i8] c"Number\00" }
 
 define i64 @rem(i64 %n, i64 %m) {
 entry:
-  %t$0 = sdiv i64 %n, %m
-  %t$1 = mul i64 %t$0, %m
-  %t$2 = sub i64 %n, %t$1
-  ret i64 %t$2
+  %t$0 = icmp eq i64 %m, 0
+  br i1 %t$0, label %divpanic_0, label %divok_0
+divpanic_0:
+  %t$1 = getelementptr inbounds { i64, [17 x i8] }, ptr @.str.0, i64 0, i32 1, i64 0
+  %t$2 = ptrtoint ptr %t$1 to i64
+  call i64 @panic(i64 %t$2)
+  unreachable
+divok_0:
+  %t$3 = sdiv i64 %n, %m
+  %t$4 = mul i64 %t$3, %m
+  %t$5 = sub i64 %n, %t$4
+  ret i64 %t$5
 }
 
 define i64 @fizzbuzz(i64 %n) {
@@ -66,7 +88,7 @@ entry:
   %t$31 = trunc i64 %t$4 to i1
   br i1 %t$31, label %then_5, label %else_5
 then_5:
-  %t$7 = getelementptr inbounds [9 x i8], ptr @.str.0, i64 0, i64 0
+  %t$7 = getelementptr inbounds { i64, [9 x i8] }, ptr @.str.1, i64 0, i32 1, i64 0
   %t$8 = ptrtoint ptr %t$7 to i64
   br label %join_5
 else_5:
@@ -78,7 +100,7 @@ else_5:
   %t$30 = trunc i64 %t$13 to i1
   br i1 %t$30, label %then_14, label %else_14
 then_14:
-  %t$16 = getelementptr inbounds [5 x i8], ptr @.str.1, i64 0, i64 0
+  %t$16 = getelementptr inbounds { i64, [5 x i8] }, ptr @.str.2, i64 0, i32 1, i64 0
   %t$17 = ptrtoint ptr %t$16 to i64
   br label %join_14
 else_14:
@@ -90,11 +112,11 @@ else_14:
   %t$29 = trunc i64 %t$22 to i1
   br i1 %t$29, label %then_23, label %else_23
 then_23:
-  %t$25 = getelementptr inbounds [5 x i8], ptr @.str.2, i64 0, i64 0
+  %t$25 = getelementptr inbounds { i64, [5 x i8] }, ptr @.str.3, i64 0, i32 1, i64 0
   %t$26 = ptrtoint ptr %t$25 to i64
   br label %join_23
 else_23:
-  %t$27 = getelementptr inbounds [7 x i8], ptr @.str.3, i64 0, i64 0
+  %t$27 = getelementptr inbounds { i64, [7 x i8] }, ptr @.str.4, i64 0, i32 1, i64 0
   %t$28 = ptrtoint ptr %t$27 to i64
   br label %join_23
 join_23:
