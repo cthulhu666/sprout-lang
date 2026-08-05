@@ -88,6 +88,17 @@ type InferArgsResult =
   | ArgsOk (List typed_ast.TypedExpr) (Dict types.Type) (Dict types.Effect) types.Effect
   | ArgsErr source.SourcePos String
 
+# One call argument during two-pass argument inference (see infer_call_args).
+# A lambda is held back with the fresh variable standing in for its parameter
+# slot, so the slot can be resolved before its body is inferred.
+type ArgSlot =
+  | ArgDone typed_ast.TypedExpr types.Effect
+  | ArgLambda (List ast.Param) ast.Expr types.Type source.SourcePos
+
+type ArgSlotsResult =
+  | SlotsOk (List ArgSlot) (Dict types.Type) (Dict types.Effect)
+  | SlotsErr source.SourcePos String
+
 type CallResult =
   | CallOk types.Type (Dict types.Type) (Dict types.Effect) types.Effect
   | CallErr source.SourcePos String
@@ -870,7 +881,8 @@ fn infer_call_inner(
   pos: source.SourcePos
 ) -> InferResult !{IO} =
   do
-    ar <- infer_args_acc(state, env, subst, eff_subst, args, Nil, types.EffectPure)
+    ar <- infer_call_args(state, env, subst, eff_subst,
+            typed_ast.typed_expr_type(typed_callee), args)
     match ar with
     | ArgsErr pos e -> InferErr(pos, e)
     | ArgsOk typed_args s2 es2 args_eff ->
@@ -2145,6 +2157,127 @@ fn infer_args_acc(
         | InferErr pos e -> ArgsErr(pos, e)
         | InferOk typed_arg s1 es1 arg_eff ->
             infer_args_acc(state, env, s1, es1, rest, Cons(typed_arg, acc), merge_effects(acc_eff, arg_eff))
+
+# Two-pass argument inference, for CALL arguments only (infer_tuple keeps the
+# single-pass infer_args_acc: a tuple has no callee to resolve slots against).
+#
+# A lambda argument's parameter types are pinned by the callee's parameter slot,
+# and that slot is usually fixed by a LATER argument -- `list_fold(step, seed, xs)`
+# fixes the accumulator from `seed` and the element from `xs`.  Inferring every
+# argument in source order left a lambda's parameters as unconstrained variables
+# while its body was inferred, so a field access on one had no record type to
+# resolve against (get_field_from_resolved falls back to a fresh variable, which
+# check_arith then defaults to Int) and a class method on one had no instance to
+# dispatch to (leaving an undefined direct call in the IR).
+#
+# Pass 1 infers the non-lambda arguments and unifies the resulting call shape
+# against the callee's type; pass 2 infers each lambda with its parameter types
+# read off the substituted slot.  Rust (`check_argument_types` loops
+# `for check_closures in [false, true]`), C# (second-phase output type inference)
+# and Kotlin (lambda bodies analysed only after the other arguments' constraints
+# are in the constraint system) all order argument checking this way.
+fn infer_call_args(
+  state: unifier.InferState,
+  env: Dict types.Scheme,
+  subst: Dict types.Type,
+  eff_subst: Dict types.Effect,
+  callee_type: types.Type,
+  args: List ast.Expr
+) -> InferArgsResult !{IO} =
+  do
+    p1 <- infer_arg_slots(state, env, subst, eff_subst, args, Nil)
+    match p1 with
+    | SlotsErr pos e -> ArgsErr(pos, e)
+    | SlotsOk slots s1 es1 ->
+        do
+          ret <- unifier.fresh(state)
+          infer_lambda_slots(state, env,
+            push_down_arg_slots(s1, callee_type, slots, types.TVar(types.tyvar_id(ret))),
+            es1, slots, Nil, types.EffectPure)
+
+# Pass 1: infer every non-lambda argument in source order, holding each lambda
+# back behind a fresh slot variable.
+fn infer_arg_slots(
+  state: unifier.InferState,
+  env: Dict types.Scheme,
+  subst: Dict types.Type,
+  eff_subst: Dict types.Effect,
+  args: List ast.Expr,
+  acc: List ArgSlot
+) -> ArgSlotsResult !{IO} =
+  match args with
+  | Nil -> SlotsOk(arg_slot_list_reverse(acc), subst, eff_subst)
+  | Cons arg rest ->
+      match arg with
+      | ast.LambdaExpr params body lpos ->
+          do
+            v <- unifier.fresh(state)
+            infer_arg_slots(state, env, subst, eff_subst, rest,
+              Cons(ArgLambda(params, body, types.TVar(types.tyvar_id(v)), lpos), acc))
+      | _ ->
+          do
+            r <- infer_expr(state, env, subst, eff_subst, arg)
+            match r with
+            | InferErr pos e -> SlotsErr(pos, e)
+            | InferOk typed_arg s1 es1 arg_eff ->
+                infer_arg_slots(state, env, s1, es1, rest, Cons (ArgDone(typed_arg, arg_eff), acc))
+
+# Resolve the lambda slots against the callee's type.  A genuine argument/callee
+# mismatch is left for infer_call_resolve to report, so this keeps the existing
+# "Call type mismatch" wording rather than surfacing a speculative failure.
+fn push_down_arg_slots(
+  subst: Dict types.Type,
+  callee_type: types.Type,
+  slots: List ArgSlot,
+  ret: types.Type
+) -> Dict types.Type =
+  match unifier.unify_types(subst, callee_type, build_fn_type(arg_slot_types(slots), ret)) with
+  | Err _ -> subst
+  | Ok s -> s
+
+fn arg_slot_types(slots: List ArgSlot) -> List types.Type =
+  match slots with
+  | Nil -> Nil
+  | Cons slot rest ->
+      match slot with
+      | ArgDone typed_arg _ -> Cons(typed_ast.typed_expr_type(typed_arg), arg_slot_types(rest))
+      | ArgLambda _ _ v _ -> Cons(v, arg_slot_types(rest))
+
+# Pass 2: walk the slots in SOURCE order, inferring each held-back lambda against
+# its now-resolved slot.  Source order matters for the effect merge -- merge_effects
+# keeps its left operand when neither side is EffectPure or EffectIO.
+fn infer_lambda_slots(
+  state: unifier.InferState,
+  env: Dict types.Scheme,
+  subst: Dict types.Type,
+  eff_subst: Dict types.Effect,
+  slots: List ArgSlot,
+  acc: List typed_ast.TypedExpr,
+  acc_eff: types.Effect
+) -> InferArgsResult !{IO} =
+  match slots with
+  | Nil -> ArgsOk(typed_expr_list_reverse(acc), subst, eff_subst, acc_eff)
+  | Cons slot rest ->
+      match slot with
+      | ArgDone typed_arg arg_eff ->
+          infer_lambda_slots(state, env, subst, eff_subst, rest,
+            Cons(typed_arg, acc), merge_effects(acc_eff, arg_eff))
+      | ArgLambda params body v lpos ->
+          do
+            r <- infer_lambda_expected(state, env, subst, eff_subst, params, body,
+                   Just(unifier.apply_subst(subst, v)), lpos)
+            match r with
+            | InferErr pos e -> ArgsErr(pos, e)
+            | InferOk typed_lam s1 es1 lam_eff ->
+                infer_lambda_slots(state, env, s1, es1, rest,
+                  Cons(typed_lam, acc), merge_effects(acc_eff, lam_eff))
+
+fn arg_slot_list_reverse(xs: List ArgSlot) -> List ArgSlot = arg_slot_rev_acc(xs, Nil)
+
+fn arg_slot_rev_acc(xs: List ArgSlot, acc: List ArgSlot) -> List ArgSlot =
+  match xs with
+  | Nil -> acc
+  | Cons h t -> arg_slot_rev_acc(t, Cons(h, acc))
 
 # --- Tuple ---
 
@@ -3435,17 +3568,51 @@ fn infer_lambda(
   body: ast.Expr,
   pos: source.SourcePos
 ) -> InferResult !{IO} =
+  infer_lambda_expected(state, env, subst, eff_subst, params, body, Nothing, pos)
+
+# `expected` is the callee parameter slot this lambda fills, when there is one
+# (infer_call_args supplies it; a lambda in any other position passes Nothing).
+# Seeding the parameters from it lets the body see their types -- and seeding
+# them with the slot's own variables, not copies, keeps the two linked when the
+# slot is only resolved later.
+fn infer_lambda_expected(
+  state: unifier.InferState,
+  env: Dict types.Scheme,
+  subst: Dict types.Type,
+  eff_subst: Dict types.Effect,
+  params: List ast.Param,
+  body: ast.Expr,
+  expected: Maybe types.Type,
+  pos: source.SourcePos
+) -> InferResult !{IO} =
   do
     fresh_params <- make_fresh_param_types(state, params)
-    let env2 = extend_env_with_params(params, fresh_params, env)
+    let param_types = seed_param_types(fresh_params, expected)
+    let env2 = extend_env_with_params(params, param_types, env)
     br <- infer_expr(state, env2, subst, eff_subst, body)
     match br with
     | InferErr pos e -> InferErr(pos, e)
     | InferOk typed_body s1 es1 body_eff ->
         InferOk(
           typed_ast.TLambda(params, typed_body,
-            build_fn_type(fresh_params, typed_ast.typed_expr_type(typed_body)), pos),
+            build_fn_type(param_types, typed_ast.typed_expr_type(typed_body)), pos),
           s1, es1, body_eff)
+
+fn seed_param_types(fresh: List types.Type, expected: Maybe types.Type) -> List types.Type =
+  match expected with
+  | Nothing -> fresh
+  | Just t -> seed_from_arrow(fresh, t)
+
+# Walk the expected arrow spine alongside the parameters.  If it runs out early
+# -- a parameter-count mismatch, or a slot still unresolved -- the remaining
+# parameters keep their fresh variables, which is exactly the old behaviour.
+fn seed_from_arrow(fresh: List types.Type, expected: types.Type) -> List types.Type =
+  match fresh with
+  | Nil -> Nil
+  | Cons f rest ->
+      match expected with
+      | types.TFunc p r _ -> Cons(p, seed_from_arrow(rest, r))
+      | _ -> Cons(f, rest)
 
 fn make_fresh_param_types(state: unifier.InferState, params: List ast.Param) -> List types.Type !{IO} =
   match params with
