@@ -87,7 +87,10 @@ call arguments only:
    threading the substitution. Each lambda is held back as
    `ArgLambda params body v pos`, where `v` is a fresh variable standing in for
    its parameter slot.
-2. **Push-down** — `push_down_arg_slots` unifies the callee's type against
+2. **Push-down** — skipped outright when no slot is an `ArgLambda`
+   (`has_lambda_slot`), since it would then unify exactly what
+   `infer_call_resolve` unifies moments later. Otherwise
+   `push_down_arg_slots` unifies the callee's type against
    `build_fn_type(slot_types, fresh_ret)`. On failure it returns the substitution
    unchanged: a genuine mismatch is left for `infer_call_resolve` so the existing
    `Call type mismatch` wording is preserved.
@@ -108,8 +111,11 @@ variables, which is exactly the pre-change behaviour.
 
 ## 5. Compatibility
 
-Strictly more programs typecheck; none stop compiling. The change only makes
-argument types *more* resolved at the point the lambda body is inferred.
+The change only makes argument types *more* resolved at the point a lambda body
+is inferred, and a call with **no** lambda argument skips the slot resolution
+entirely (`has_lambda_slot`), threading the same substitution and the same typed
+arguments as before. So the blast radius is calls that pass a lambda. No gate in
+the repo regressed — see §6.
 
 The one behavioural risk is dispatch: `check_call_constraint` branches on how
 resolved an argument's head type is when choosing between forwarding an in-scope

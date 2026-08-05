@@ -2189,11 +2189,26 @@ fn infer_call_args(
     match p1 with
     | SlotsErr pos e -> ArgsErr(pos, e)
     | SlotsOk slots s1 es1 ->
-        do
-          ret <- unifier.fresh(state)
-          infer_lambda_slots(state, env,
-            push_down_arg_slots(s1, callee_type, slots, types.TVar(types.tyvar_id(ret))),
-            es1, slots, Nil, types.EffectPure)
+        # With no lambda argument there is no slot to resolve, and the push-down
+        # would unify exactly what infer_call_resolve unifies moments later.  Skip
+        # it, so such a call threads the same substitution and the same typed
+        # arguments it did before two-pass inference.
+        if ! has_lambda_slot (slots) then
+          infer_lambda_slots(state, env, s1, es1, slots, Nil, types.EffectPure)
+        else
+          do
+            ret <- unifier.fresh(state)
+            infer_lambda_slots(state, env,
+              push_down_arg_slots(s1, callee_type, slots, types.TVar(types.tyvar_id(ret))),
+              es1, slots, Nil, types.EffectPure)
+
+fn has_lambda_slot(slots: List ArgSlot) -> Bool =
+  match slots with
+  | Nil -> false
+  | Cons slot rest ->
+      match slot with
+      | ArgLambda _ _ _ _ -> true
+      | ArgDone _ _ -> has_lambda_slot(rest)
 
 # Pass 1: infer every non-lambda argument in source order, holding each lambda
 # back behind a fresh slot variable.

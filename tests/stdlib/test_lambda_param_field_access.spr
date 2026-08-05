@@ -59,6 +59,20 @@ fn total_load(l: Loadout) -> Double = list_fold(\ (t, b) -> t + b.max_load_t, 0.
 fn show_doubles(xs: List Double) -> String =
   list_fold(\ (s, x) -> `${s}|${to_string(x)}`, "", xs)
 
+# The callee is a function-typed PARAMETER, so its type is a variable and no
+# parameter slot can be peeled from it.  Both the lambda argument (which falls
+# back to fresh parameter variables) and the plain argument (which skips the
+# slot resolution entirely) must still infer.
+fn apply_to_bay(f: CargoBay -> Double, b: CargoBay) -> Double = f(b)
+
+fn volume_via_lambda(b: CargoBay) -> Double = apply_to_bay(\c -> c.volume_m3, b)
+
+fn bay_load(b: CargoBay) -> Double = b.max_load_t
+
+fn load_via_named(b: CargoBay) -> Double = apply_to_bay(bay_load, b)
+
+fn first_bay() -> CargoBay = CargoBay(name = "BAY-C1", volume_m3 = 240.0, max_load_t = 200.0)
+
 fn main() -> Unit !{IO} =
   run_suite("lambda_param_field_access", [
     check_eq("named step", show_hold(derive_hold_named(demo_loadout())), "vol=250.0 load=205.0"),
@@ -69,5 +83,11 @@ fn main() -> Unit !{IO} =
     check_eq("field read is the whole lambda body",
              show_doubles(bay_volumes(demo_loadout())), "|240.0|10.0"),
     check_eq("field read fixes the arithmetic type",
-             to_string(total_load(demo_loadout())), "205.0")
+             to_string(total_load(demo_loadout())), "205.0"),
+
+    # Callee type is a variable -- nothing to peel, so both paths fall back.
+    check_eq("lambda through a function-typed parameter",
+             to_string(volume_via_lambda(first_bay())), "240.0"),
+    check_eq("named fn through a function-typed parameter",
+             to_string(load_via_named(first_bay())), "200.0")
   ])
