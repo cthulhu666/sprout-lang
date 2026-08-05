@@ -1,0 +1,72 @@
+import stdlib.test (check_eq, check_true, run_suite)
+
+# Dictionary forwarding through a call that also takes a lambda argument.
+#
+# Two-pass argument inference resolves the non-lambda arguments before the
+# lambda's body, so a constrained call site sees MORE resolved argument types
+# than it used to.  That is exactly the input `check_call_constraint` branches
+# on when it decides between forwarding an in-scope dictionary and devirtualizing
+# a concrete instance, so both paths need coverage here.
+#
+# Concrete instances devirtualize the dictionary away, so only a function that is
+# polymorphic over the class -- `where Label a` -- exercises forwarding.
+
+class Label a {
+  fn label(x: a) -> String
+}
+
+instance Label Int {
+  fn label(x: Int) -> String = `i${to_string(x)}`
+}
+
+instance Label Bool {
+  fn label(x: Bool) -> String = if x then "T" else "F"
+}
+
+type Tagged a = (tag: String, item: a)
+
+instance Label (Tagged a) where Label a {
+  fn label(x: Tagged a) -> String = `${x.tag}:${label(x.item)}`
+}
+
+# Polymorphic over the class AND handed a lambda: the dictionary for `a` must be
+# forwarded into the call while the lambda's parameter type is resolved from the
+# list argument.
+fn label_all(xs: List a) -> List String where Label a = list_map(\x -> label(x), xs)
+
+# The lambda's parameter is read by field and its type is fixed by the list --
+# the field access and the forwarded dictionary have to resolve together.
+fn label_items(xs: List (Tagged a)) -> List String where Label a =
+  list_map(\t -> label(t.item), xs)
+
+# Forwarding through a fold, where the seed pins the accumulator type and the
+# list pins the constrained element type.
+fn join_labels(xs: List a) -> String where Label a =
+  list_fold(\ (acc, x) -> `${acc}|${label(x)}`, "", xs)
+
+fn concat_strings(xs: List String) -> String = list_fold(\ (acc, s) -> `${acc}|${s}`, "", xs)
+
+fn no_ints() -> List Int = []
+
+fn main() -> Unit !{IO} =
+  run_suite("lambda_arg_constrained_dispatch", [
+    # Forwarded dictionary, concrete element type at the call site.
+    check_eq("forwarded dict, Int elements", concat_strings(label_all([1, 2])), "|i1|i2"),
+    check_eq("forwarded dict, Bool elements", concat_strings(label_all([true, false])), "|T|F"),
+
+    # Devirtualized concrete instance, called directly rather than through a
+    # `where`-constrained function.
+    check_eq("concrete instance through a lambda",
+             concat_strings(list_map(\x -> label(x), [3, 4])), "|i3|i4"),
+
+    # A forwarded dictionary nested inside a concrete container instance.
+    check_eq("nested forwarded dict via field access",
+             concat_strings(label_items([Tagged(tag = "a", item = 1),
+                                         Tagged(tag = "b", item = 2)])), "|i1|i2"),
+    check_eq("container instance forwards its element dict",
+             concat_strings(label_all([Tagged(tag = "a", item = true)])), "|a:T"),
+
+    # Fold: seed and list fix different type variables of the same call.
+    check_eq("forwarded dict through a fold", join_labels([5, 6]), "|i5|i6"),
+    check_true("forwarded dict survives an empty list", join_labels(no_ints()) == "")
+  ])

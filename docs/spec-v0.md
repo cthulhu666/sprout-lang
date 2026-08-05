@@ -259,8 +259,24 @@ Lambda expressions are anonymous functions.
 - Single-parameter shorthand: `\x -> expression` and `\x: T -> expression`
 - The parenthesized parameter list must contain at least one parameter.
 - Parameter annotations are optional and follow the same rules as named functions.
+  *(Not yet enforced: inference currently ignores a lambda parameter's annotation.
+  In argument position the parameter type comes from the callee's parameter slot,
+  so the annotation is redundant there; elsewhere the parameter stays unconstrained
+  — see `BACKLOG.md`.)*
 - Lambdas capture surrounding lexical bindings by value.
 - A lambda with parameters `x, y` has function type `tx -> ty -> tr`.
+- **In argument position a lambda's parameter types come from the callee.** The
+  checker resolves a call's non-lambda arguments before inferring any lambda body,
+  so a slot fixed by a *later* argument is still known in time:
+
+  ```sprout
+  # `acc` is fixed by the seed, `b` by the list element -- both before the body
+  # is inferred, so `.volume_m3` resolves and `+` picks Double rather than Int.
+  list_fold(\(acc, b) -> Hold(volume_m3 = acc.volume_m3 + b.volume_m3), no_hold, bays)
+  ```
+
+  A lambda in any other position (a `let` initializer, a record field) has no such
+  slot, and its parameters are inferred solely from its body.
 - Function application is **n-ary**: a call saturates its callee. **Under-application
   of a known function** — supplying fewer arguments than its declared arity — is a
   **compile error** (`'f' expects N arguments, got M`); use a `_`-placeholder partial
@@ -752,7 +768,14 @@ Effect note for v0:
 1. Every expression has exactly one type after inference/checking.
 2. `if` condition must be `Bool`.
 3. Function application requires argument types to unify with parameter types.
-4. Lambda expressions introduce parameter bindings for their body and infer a function type from parameters to body result.
+   Arguments are checked in **two passes**: the non-lambda arguments are inferred
+   and unified against their parameter slots first, then each lambda argument is
+   inferred with its parameter types taken from the (now-resolved) slot. Argument
+   *evaluation* order is unaffected; only the order in which the checker visits
+   them differs. See §5.3.
+4. Lambda expressions introduce parameter bindings for their body and infer a
+   function type from parameters to body result. In argument position the
+   parameter types come from the callee's parameter slot (rule 3).
 5. `match` branches must have a unified result type.
 6. Pattern-bound variables are scoped to their branch.
 7. ADT constructors produce values of their declared type.

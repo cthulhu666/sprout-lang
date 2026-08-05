@@ -1,0 +1,73 @@
+import stdlib.test (check_eq, run_suite)
+
+# Field access on a lambda parameter whose type is left to inference.
+#
+# A call infers its arguments before unifying them against the callee's
+# parameter slots, so a lambda argument used to have its parameters typed as
+# unconstrained variables while its body was inferred.  A field access on such a
+# parameter had no record type to resolve against, and `+` then defaulted the
+# unknown operand type to Int -- rejecting a correct program with a misleading
+# "Type mismatch: Int vs Double".
+#
+# Two-pass argument inference resolves the non-lambda arguments first, so the
+# lambda's parameter types are known before its body is inferred.
+#
+# `Hold` and `CargoBay` deliberately share field NAMES while differing in layout
+# and in the type of the field at index 0, so a receiver resolved to the wrong
+# record type cannot go unnoticed.
+
+type Hold = (volume_m3: Double, max_load_t: Double)
+
+type CargoBay = (name: String, volume_m3: Double, max_load_t: Double)
+
+type Loadout = (bays: List CargoBay)
+
+let no_hold = Hold(volume_m3 = 0.0, max_load_t = 0.0)
+
+fn demo_loadout() -> Loadout =
+  Loadout(bays = [CargoBay(name = "BAY-C1", volume_m3 = 240.0, max_load_t = 200.0),
+                  CargoBay(name = "BAY-C2", volume_m3 = 10.0, max_load_t = 5.0)])
+
+fn show_hold(h: Hold) -> String =
+  `vol=${to_string(h.volume_m3)} load=${to_string(h.max_load_t)}`
+
+# Control: an explicitly-typed named step needs no inference at the field access.
+fn bay_add(acc: Hold, b: CargoBay) -> Hold =
+  Hold(volume_m3 = acc.volume_m3 + b.volume_m3, max_load_t = acc.max_load_t + b.max_load_t)
+
+fn derive_hold_named(l: Loadout) -> Hold = list_fold(bay_add, no_hold, l.bays)
+
+# Control: a lambda that only forwards to the named step has no field access on
+# its own parameters.
+fn derive_hold_forwarding(l: Loadout) -> Hold =
+  list_fold(\ (acc, b) -> bay_add(acc, b), no_hold, l.bays)
+
+# The regression: both lambda parameters are read by field, and both records
+# carry Double fields.  `acc` resolves from the seed, `b` from the list element.
+fn derive_hold_inline(l: Loadout) -> Hold =
+  list_fold(\ (acc, b) -> Hold(volume_m3 = acc.volume_m3 + b.volume_m3,
+                               max_load_t = acc.max_load_t + b.max_load_t), no_hold, l.bays)
+
+# The element type reaches the lambda through a later argument, and the field
+# read is the lambda's whole body.
+fn bay_volumes(l: Loadout) -> List Double = list_map(\b -> b.volume_m3, l.bays)
+
+# A field of the lambda parameter picks the arithmetic type with no seed to
+# lean on -- `b` is fixed only by the list argument.
+fn total_load(l: Loadout) -> Double = list_fold(\ (t, b) -> t + b.max_load_t, 0.0, l.bays)
+
+fn show_doubles(xs: List Double) -> String =
+  list_fold(\ (s, x) -> `${s}|${to_string(x)}`, "", xs)
+
+fn main() -> Unit !{IO} =
+  run_suite("lambda_param_field_access", [
+    check_eq("named step", show_hold(derive_hold_named(demo_loadout())), "vol=250.0 load=205.0"),
+    check_eq("lambda forwarding to a named step",
+             show_hold(derive_hold_forwarding(demo_loadout())), "vol=250.0 load=205.0"),
+    check_eq("inline lambda reads Double fields of both parameters",
+             show_hold(derive_hold_inline(demo_loadout())), "vol=250.0 load=205.0"),
+    check_eq("field read is the whole lambda body",
+             show_doubles(bay_volumes(demo_loadout())), "|240.0|10.0"),
+    check_eq("field read fixes the arithmetic type",
+             to_string(total_load(demo_loadout())), "205.0")
+  ])
