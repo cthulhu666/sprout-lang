@@ -29,8 +29,12 @@ Sprout's GC is **non-moving mark-sweep**.  Every heap object occupies a 16-byte-
 bits  0– 7  kind   (SproutHeapKind: FREE=0, OBJ=1, CLOSURE=2, …, CSTR=10; POISON=0xFF)
 bit   8      color  (mark bit, toggled during the mark phase)
 bits  9–13  (reserved)
-bits 14–63  aux    (OBJ: (tag<<4)|arity; CSTR: byte length; CLOSURE: n_caps; TUPLE: word count; FREE/POISON: slot_bytes)
+bits 14–63  aux    (OBJ: (tag<<8)|arity; CSTR: byte length; CLOSURE: n_caps; TUPLE: word count; FREE/POISON: slot_bytes)
 ```
+
+**OBJ arity is an ABI invariant.** The low 8 bits of an OBJ's aux (`SPROUT_OBJ_ARITY_MASK`, max `SPROUT_MAX_OBJ_ARITY` = 255) are the GC's *only* record of that object's payload size: `slot_bytes` sizes the slot from it and `sprout_heap_child_count_payload` scans exactly that many words. A wrong value there desyncs the sweep's slot walk instead of failing loudly, so every OBJ allocation must write its true field count. The split is single-sourced through `SPROUT_OBJ_ARITY_BITS`/`_MASK`/`SPROUT_MAX_OBJ_ARITY`; widening the arity field narrows the tag (aux is 50 bits, so 8 arity bits leave 42 for the tag). `ast_to_ir.max_boxed_arity()` mirrors the ceiling and rejects wider products at compile time.
+
+**Boxed products are allocated arity-generically.** `IRMakeCtor` lowers to one `@sprout_alloc_obj(tag, nfields)` call followed by a `getelementptr`/`store` pair per field — the same shape `IRMakeTuple` uses against `@sprout_alloc_tuple_blob`. The returned slots are **uninitialized** while the header already advertises `nfields`, so a collection in that window would scan garbage. It cannot happen: collections trigger only from an allocation, and codegen emits nothing but stores between the call and the last field write. **Do not introduce an allocating call into that window.**
 
 Per-region 1-bit slotmaps track live slot starts; `sprout_heap_lookup` does a binary search over the region table, verifies the slotmap bit, and rejects FREE-kind headers — giving exact membership in O(log region_count).  Large objects (slot > 4096 bytes) are stored as single-slot dedicated `malloc` blocks registered in the region table with `is_large=1`.
 

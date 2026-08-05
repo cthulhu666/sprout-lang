@@ -308,17 +308,10 @@ __attribute__((noreturn)) static void tcp_fail(const char* msg);
  * sources (files, stdin, processes, network) are validated at ingestion. */
 static int utf8_validate(const unsigned char* data, size_t len, const char** reason);
 __attribute__((noreturn)) void sprout_abort_match(void);
-long long sprout_make0(long long tag);
-long long sprout_make1(long long tag, long long a0);
-long long sprout_make2(long long tag, long long a0, long long a1);
-long long sprout_make3(long long tag, long long a0, long long a1, long long a2);
-long long sprout_make4(long long tag, long long a0, long long a1, long long a2, long long a3);
-long long sprout_make5(long long tag, long long a0, long long a1, long long a2, long long a3, long long a4);
-long long sprout_make6(long long tag, long long a0, long long a1, long long a2, long long a3, long long a4, long long a5);
-long long sprout_make7(long long tag, long long a0, long long a1, long long a2, long long a3, long long a4, long long a5, long long a6);
-long long sprout_make8(long long tag, long long a0, long long a1, long long a2, long long a3, long long a4, long long a5, long long a6, long long a7);
-long long sprout_make9(long long tag, long long a0, long long a1, long long a2, long long a3, long long a4, long long a5, long long a6, long long a7, long long a8);
-long long sprout_make10(long long tag, long long a0, long long a1, long long a2, long long a3, long long a4, long long a5, long long a6, long long a7, long long a8, long long a9);
+static long long sprout_make0(long long tag);
+static long long sprout_make1(long long tag, long long a0);
+static long long sprout_make2(long long tag, long long a0, long long a1);
+static long long sprout_make3(long long tag, long long a0, long long a1, long long a2);
 long long sprout_rebox2(long long tag, long long f0);
 long long sprout_rebox3(long long tag, long long f0, long long f1);
 long long sprout_tag(long long h);
@@ -569,12 +562,21 @@ static int sprout_gc_hdrcheck_on(void) {
  *         bits 8-9  = GC color (unused in this phase, written as 0)
  *         bits 10-13 = reserved GC bits (written as 0)
  *         bits 14-63 = aux (50 bits); interpretation per kind:
- *           OBJ:     (tag << 4) | arity  — low 4 bits = ctor arity (0..15)
+ *           OBJ:     (tag << 8) | arity  — low 8 bits = ctor arity (0..255)
  *           CLOSURE: n_caps
  *           TUPLE:   width in words
  *           others:  0
  * SPROUT_GC_POISON (0xFF) written to kind bits marks a lineage-mode corpse. */
 #define SPROUT_GC_POISON ((uint64_t)0xFF)
+
+/* OBJ aux packing: low SPROUT_OBJ_ARITY_BITS hold the ctor field count, the
+ * rest hold the tag.  Every read and write of an OBJ header goes through these
+ * three names — changing the split is a one-line edit here.  Widening the arity
+ * field narrows the tag; aux is 50 bits, so 8 arity bits leave 42 for the tag
+ * (~4e12 constructors), far beyond any program. */
+#define SPROUT_OBJ_ARITY_BITS 8
+#define SPROUT_OBJ_ARITY_MASK ((unsigned long long)0xFFu)
+#define SPROUT_MAX_OBJ_ARITY  255
 
 static inline uint64_t sprout_hdr_make(SproutHeapKind kind, unsigned long long aux) {
   return (uint64_t)(kind & 0xFF) | ((uint64_t)aux << 14);
@@ -595,18 +597,25 @@ static inline void sprout_hdr_write(void* payload, SproutHeapKind kind, unsigned
   memcpy((char*)payload - 8, &h, 8);
 }
 
-/* Write tag into OBJ header keeping the arity nibble intact.
+/* Write tag into OBJ header keeping the arity byte intact.
  * Must be called before first use of sprout_tag on this payload.
- * Arity must fit in 4 bits (0..15); checked in debug mode. Current max ctor
- * arity is 10 (sprout_make0..sprout_make10), well within the nibble. */
+ * Arity must fit in 8 bits (0..255); checked in debug mode.
+ *
+ * ABI INVARIANT: the arity byte is the GC's only record of an OBJ's payload
+ * size — slot_bytes() sizes the slot from it and sprout_heap_child_count_payload
+ * scans that many words.  A wrong value there desyncs the sweep's slot walk
+ * rather than failing loudly, so every OBJ allocation must write its true field
+ * count here.  aux is 50 bits, leaving 42 for the tag. */
 static inline void sprout_obj_write_tag(void* payload, long long tag, int arity) {
-  /* Debug arity-range check: 4-bit nibble physically holds 0..15. */
-  if (sprout_gc_hdrcheck_on() && (arity < 0 || arity > 15)) {
-    fprintf(stderr, "[sprout] sprout_obj_write_tag: arity %d out of 0..15 range\n", arity);
+  /* Debug arity-range check: the 8-bit field physically holds 0..255. */
+  if (sprout_gc_hdrcheck_on() && (arity < 0 || arity > SPROUT_MAX_OBJ_ARITY)) {
+    fprintf(stderr, "[sprout] sprout_obj_write_tag: arity %d out of 0..%d range\n",
+            arity, SPROUT_MAX_OBJ_ARITY);
     abort();
   }
   sprout_hdr_write(payload, SPROUT_HEAP_OBJ,
-                   ((unsigned long long)tag << 4) | (unsigned long long)(unsigned int)arity);
+                   ((unsigned long long)tag << SPROUT_OBJ_ARITY_BITS) |
+                   ((unsigned long long)(unsigned int)arity & SPROUT_OBJ_ARITY_MASK));
 }
 
 /* ── Region-based arena allocator ─────────────────────────────────────────
@@ -659,7 +668,7 @@ static size_t slot_bytes(SproutHeapKind kind, unsigned long long aux) {
     case SPROUT_HEAP_OBJ:
       /* aux low nibble = ctor arity; alloc pads to sprout_obj_alloc_arity in
        * lineage mode, so mirror that here to stay slot-consistent. */
-      payload = (size_t)sprout_obj_alloc_arity((int)(aux & 0xF)) * 8;
+      payload = (size_t)sprout_obj_alloc_arity((int)(aux & SPROUT_OBJ_ARITY_MASK)) * 8;
       break;
     case SPROUT_HEAP_CLOSURE: payload = ((size_t)aux + 1) * 8;   break; /* n_caps+1 slots (slot0=code) */
     case SPROUT_HEAP_VECTOR:  payload = sizeof(VectorVal);       break;
@@ -992,13 +1001,42 @@ static void* sprout_alloc_obj_raw(int arity, const char* ctx) {
   int aa = sprout_obj_alloc_arity(arity);
   /* payload_bytes = aa (padded) fields; tag moves into the header (not payload).
    * aux uses ctor arity (not padded aa) so sprout_hdr_aux gives the real arity.
-   * sprout_obj_write_tag overwrites this header with the final (tag<<4)|arity. */
+   * sprout_obj_write_tag overwrites this header with the final packed aux. */
   void* payload = sprout_gc_alloc_block(SPROUT_HEAP_OBJ, (unsigned long long)arity,
                                         (size_t)aa * 8, ctx);
   if (g_debug_alloc_enabled) g_debug_alloc_sprout_obj++;
   /* Zero padding slots (lineage only: aa > arity); no-op in normal builds. */
   for (int i = arity; i < aa; i++) ((long long*)payload)[i] = 0;
   return payload;
+}
+
+/* Arity-generic boxed-product allocation — the codegen entry point for every
+ * ADT constructor, record literal and record functional update.
+ *
+ * SYNC WITH stdlib/compiler/ir_lowering.sprout IRMakeCtor lowering: the caller
+ * emits this call and then stores each field with a getelementptr/store pair,
+ * exactly as IRMakeTuple does against sprout_alloc_tuple_blob.
+ *
+ * The returned payload's field slots are UNINITIALIZED, and its header already
+ * advertises `nfields`, so a collection in that window would scan garbage.  It
+ * cannot happen: collections are triggered only from an allocation, and codegen
+ * emits nothing but stores between this call and the last field write.  Do not
+ * insert an allocating call into that window.
+ *
+ * nfields == 0 delegates to sprout_make0 to keep its nullary-ctor singleton
+ * cache (Nothing and the IRType cluster, constructed constantly during IR
+ * codegen); allocating a fresh object per nullary construction would regress
+ * the self-hosted compiler's allocation rate. */
+long long sprout_alloc_obj(long long tag, long long nfields) {
+  if (nfields < 0 || nfields > SPROUT_MAX_OBJ_ARITY) {
+    fprintf(stderr, "[sprout] sprout_alloc_obj: arity %lld out of 0..%d range\n",
+            nfields, SPROUT_MAX_OBJ_ARITY);
+    abort();
+  }
+  if (nfields == 0) return sprout_make0(tag);
+  void* payload = sprout_alloc_obj_raw((int)nfields, "sprout_alloc_obj: out of memory");
+  sprout_obj_write_tag(payload, tag, (int)nfields);
+  return box_ptr(payload);
 }
 
 static long long sprout_make_registered_obj(int arity, long long tag, long long a0, long long a1, long long a2, const char* ctx) {
@@ -1372,7 +1410,7 @@ static size_t sprout_heap_child_count_payload(void* payload) {
   SproutHeapKind kind = sprout_hdr_kind(h);
   unsigned long long aux = sprout_hdr_aux(h);
   switch (kind) {
-    case SPROUT_HEAP_OBJ:     return (size_t)(aux & 0xF);        /* arity */
+    case SPROUT_HEAP_OBJ:     return (size_t)(aux & SPROUT_OBJ_ARITY_MASK);  /* arity */
     case SPROUT_HEAP_CLOSURE: return (size_t)aux;                /* n_caps (slot 0 skipped) */
     case SPROUT_HEAP_VECTOR:  return (size_t)((VectorVal*)payload)->len;
     case SPROUT_HEAP_MAP:     return 3;
@@ -3926,7 +3964,7 @@ static long long get_or_make_singleton(void** slot, long long tag) {
   return box_ptr(*slot);
 }
 
-long long sprout_make0(long long tag) {
+static long long sprout_make0(long long tag) {
   CtorMeta* meta = find_ctor(tag);
   if (meta != NULL) {
     /* Singleton-eligible nullary ctors.  Each name-match avoids one
@@ -3949,7 +3987,7 @@ long long sprout_make0(long long tag) {
   }
   return sprout_make_registered_obj(0, tag, 0, 0, 0, "sprout_make0: out of memory");
 }
-long long sprout_make1(long long tag, long long a0) {
+static long long sprout_make1(long long tag, long long a0) {
   return sprout_make_registered_obj(1, tag, a0, 0, 0, "sprout_make1: out of memory");
 }
 /* L0.9 channels: build a `stdlib.chan.Recv a` value on the scheduler's behalf. The scheduler TU
@@ -3976,7 +4014,7 @@ long long sprout_chan_make_selected(long long index, long long recv_boxed) {
   SPROUT_GC_POP_LOCALS(1);
   return obj;
 }
-long long sprout_make2(long long tag, long long a0, long long a1) {
+static long long sprout_make2(long long tag, long long a0, long long a1) {
   return sprout_make_registered_obj(2, tag, a0, a1, 0, "sprout_make2: out of memory");
 }
 long long sprout_rebox2(long long tag, long long f0) {
@@ -3990,7 +4028,7 @@ long long sprout_rebox3(long long tag, long long f0, long long f1) {
   if (m != NULL && m->arity == 1) return sprout_make1(tag, f0);
   return sprout_make2(tag, f0, f1);
 }
-long long sprout_make3(long long tag, long long a0, long long a1, long long a2) {
+static long long sprout_make3(long long tag, long long a0, long long a1, long long a2) {
   return sprout_make_registered_obj(3, tag, a0, a1, a2, "sprout_make3: out of memory");
 }
 long long sprout_tag(long long h) {
@@ -4026,65 +4064,11 @@ long long sprout_tag(long long h) {
     }
     abort();
   }
-  /* Tag is in the upper bits of aux: aux = (tag << 4) | arity. */
-  return (long long)(sprout_hdr_aux(hdr) >> 4);
+  /* Tag is in the upper bits of aux: aux = (tag << SPROUT_OBJ_ARITY_BITS) | arity. */
+  return (long long)(sprout_hdr_aux(hdr) >> SPROUT_OBJ_ARITY_BITS);
 }
 long long sprout_field(long long h, long long idx) {
   return ((long long*)(uintptr_t)h)[idx];
-}
-long long sprout_make4(long long tag, long long a0, long long a1, long long a2, long long a3) {
-  void* obj = sprout_alloc_obj_raw(4, "sprout_make4: out of memory");
-  sprout_obj_write_tag(obj, tag, 4);
-  ((long long*)obj)[0] = a0; ((long long*)obj)[1] = a1;
-  ((long long*)obj)[2] = a2; ((long long*)obj)[3] = a3;
-  return box_ptr(obj);
-}
-long long sprout_make5(long long tag, long long a0, long long a1, long long a2, long long a3, long long a4) {
-  void* obj = sprout_alloc_obj_raw(5, "sprout_make5: out of memory");
-  sprout_obj_write_tag(obj, tag, 5);
-  ((long long*)obj)[0] = a0; ((long long*)obj)[1] = a1; ((long long*)obj)[2] = a2;
-  ((long long*)obj)[3] = a3; ((long long*)obj)[4] = a4;
-  return box_ptr(obj);
-}
-long long sprout_make6(long long tag, long long a0, long long a1, long long a2, long long a3, long long a4, long long a5) {
-  void* obj = sprout_alloc_obj_raw(6, "sprout_make6: out of memory");
-  sprout_obj_write_tag(obj, tag, 6);
-  ((long long*)obj)[0] = a0; ((long long*)obj)[1] = a1; ((long long*)obj)[2] = a2;
-  ((long long*)obj)[3] = a3; ((long long*)obj)[4] = a4; ((long long*)obj)[5] = a5;
-  return box_ptr(obj);
-}
-long long sprout_make7(long long tag, long long a0, long long a1, long long a2, long long a3, long long a4, long long a5, long long a6) {
-  void* obj = sprout_alloc_obj_raw(7, "sprout_make7: out of memory");
-  sprout_obj_write_tag(obj, tag, 7);
-  ((long long*)obj)[0] = a0; ((long long*)obj)[1] = a1; ((long long*)obj)[2] = a2;
-  ((long long*)obj)[3] = a3; ((long long*)obj)[4] = a4; ((long long*)obj)[5] = a5;
-  ((long long*)obj)[6] = a6;
-  return box_ptr(obj);
-}
-long long sprout_make8(long long tag, long long a0, long long a1, long long a2, long long a3, long long a4, long long a5, long long a6, long long a7) {
-  void* obj = sprout_alloc_obj_raw(8, "sprout_make8: out of memory");
-  sprout_obj_write_tag(obj, tag, 8);
-  ((long long*)obj)[0] = a0; ((long long*)obj)[1] = a1; ((long long*)obj)[2] = a2;
-  ((long long*)obj)[3] = a3; ((long long*)obj)[4] = a4; ((long long*)obj)[5] = a5;
-  ((long long*)obj)[6] = a6; ((long long*)obj)[7] = a7;
-  return box_ptr(obj);
-}
-long long sprout_make9(long long tag, long long a0, long long a1, long long a2, long long a3, long long a4, long long a5, long long a6, long long a7, long long a8) {
-  void* obj = sprout_alloc_obj_raw(9, "sprout_make9: out of memory");
-  sprout_obj_write_tag(obj, tag, 9);
-  ((long long*)obj)[0] = a0; ((long long*)obj)[1] = a1; ((long long*)obj)[2] = a2;
-  ((long long*)obj)[3] = a3; ((long long*)obj)[4] = a4; ((long long*)obj)[5] = a5;
-  ((long long*)obj)[6] = a6; ((long long*)obj)[7] = a7; ((long long*)obj)[8] = a8;
-  return box_ptr(obj);
-}
-long long sprout_make10(long long tag, long long a0, long long a1, long long a2, long long a3, long long a4, long long a5, long long a6, long long a7, long long a8, long long a9) {
-  void* obj = sprout_alloc_obj_raw(10, "sprout_make10: out of memory");
-  sprout_obj_write_tag(obj, tag, 10);
-  ((long long*)obj)[0] = a0; ((long long*)obj)[1] = a1; ((long long*)obj)[2] = a2;
-  ((long long*)obj)[3] = a3; ((long long*)obj)[4] = a4; ((long long*)obj)[5] = a5;
-  ((long long*)obj)[6] = a6; ((long long*)obj)[7] = a7; ((long long*)obj)[8] = a8;
-  ((long long*)obj)[9] = a9;
-  return box_ptr(obj);
 }
 
 __attribute__((noreturn)) void sprout_abort_match(void) {

@@ -115,6 +115,7 @@ repl_type_of
 repl_type_of_in_source
 split_words
 sprout_abort_match
+sprout_alloc_obj  # arity-generic boxed-product allocation; replaces the former sprout_make0..sprout_make10 set (codegen now emits one call plus a store per field, as IRMakeTuple already did). Allocation writes the GC object header, so it cannot live in Sprout
 sprout_alloc_closure_env
 sprout_alloc_tuple_blob
 sprout_field
@@ -125,17 +126,6 @@ sprout_gc_push_scan_root
 sprout_gc_register_i64_root
 sprout_gc_register_ptr_root
 sprout_gc_register_scan_root
-sprout_make0
-sprout_make1
-sprout_make2
-sprout_make3
-sprout_make4
-sprout_make5
-sprout_make6
-sprout_make7
-sprout_make8
-sprout_make9
-sprout_make10  # boxed-ADT constructor for a 10-field record (HydroParams); codegen emits @sprout_makeN and the runtime must define each arity — pure allocation, cannot live in Sprout
 sprout_nothing
 sprout_rebox2  # CPR wrapper helper: boxes { tag, f0 } struct back to i64 heap pointer; needs C-level ctor-arity dispatch that Sprout stdlib cannot call directly
 sprout_rebox3  # CPR wrapper helper: boxes { tag, f0, f1 } struct back to i64 heap pointer; same rationale as sprout_rebox2

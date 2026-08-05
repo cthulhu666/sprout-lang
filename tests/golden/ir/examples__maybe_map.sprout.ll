@@ -18,17 +18,7 @@ declare void @sprout_abort_match() noreturn
 declare i64 @panic(i64)
 declare ptr @llvm.stacksave()
 declare void @llvm.stackrestore(ptr)
-declare i64 @sprout_make0(i64)
-declare i64 @sprout_make1(i64, i64)
-declare i64 @sprout_make2(i64, i64, i64)
-declare i64 @sprout_make3(i64, i64, i64, i64)
-declare i64 @sprout_make4(i64, i64, i64, i64, i64)
-declare i64 @sprout_make5(i64, i64, i64, i64, i64, i64)
-declare i64 @sprout_make6(i64, i64, i64, i64, i64, i64, i64)
-declare i64 @sprout_make7(i64, i64, i64, i64, i64, i64, i64, i64)
-declare i64 @sprout_make8(i64, i64, i64, i64, i64, i64, i64, i64, i64)
-declare i64 @sprout_make9(i64, i64, i64, i64, i64, i64, i64, i64, i64, i64)
-declare i64 @sprout_make10(i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64)
+declare i64 @sprout_alloc_obj(i64, i64)
 declare { i64, i64 } @vector_get_unboxed(i64, i64)
 declare { i64, i64 } @map_get_unboxed(i64, i64)
 declare { i64, i64 } @map_nth_key_unboxed(i64, i64)
@@ -77,7 +67,10 @@ body_0_1:
   %t$11 = alloca i64
   store i64 %t$6, ptr %t$11
   %t$12 = call i64 @sprout_gc_push_i64_root(ptr %t$11)
-  %t$7 = call i64 @sprout_make1(i64 0, i64 %t$6)
+  %t$7 = call i64 @sprout_alloc_obj(i64 0, i64 1)
+  %t$7$ptr = inttoptr i64 %t$7 to ptr
+  %t$7$f0 = getelementptr i64, ptr %t$7$ptr, i64 0
+  store i64 %t$6, ptr %t$7$f0
   %t$13 = call i64 @sprout_gc_pop_roots(i64 1)
   br label %join_1
 arm_1_1:
@@ -85,7 +78,7 @@ arm_1_1:
   %t$9 = icmp eq i64 %t$0, %t$8
   br i1 %t$9, label %body_1_1, label %arm_2_1
 body_1_1:
-  %t$10 = call i64 @sprout_make0(i64 1)
+  %t$10 = call i64 @sprout_alloc_obj(i64 1, i64 0)
   br label %join_1
 arm_2_1:
   call void @sprout_abort_match()
@@ -117,7 +110,10 @@ entry:
   %t$5 = alloca i64
   store i64 %t$0, ptr %t$5
   %t$6 = call i64 @sprout_gc_push_i64_root(ptr %t$5)
-  %t$2 = call i64 @sprout_make1(i64 0, i64 %t$1)
+  %t$2 = call i64 @sprout_alloc_obj(i64 0, i64 1)
+  %t$2$ptr = inttoptr i64 %t$2 to ptr
+  %t$2$f0 = getelementptr i64, ptr %t$2$ptr, i64 0
+  store i64 %t$1, ptr %t$2$f0
   %t$7 = alloca i64
   store i64 %t$2, ptr %t$7
   %t$8 = call i64 @sprout_gc_push_i64_root(ptr %t$7)

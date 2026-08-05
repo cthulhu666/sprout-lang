@@ -5,13 +5,13 @@
 # ctors with max-arity 1 or 2 (e.g. Just/Nothing, Cons/Nil, Wrap/Empty) get
 # unboxed struct returns + sret ABI for width=3.  The IR-typed codegen path
 # does NOT yet have this optimization — but PR 2 routes CPR-eligible ctors
-# through the same boxed allocation path as non-CPR ctors (`@sprout_makeN`).
+# through the same boxed allocation path as non-CPR ctors (`@sprout_alloc_obj`).
 # Programs compile correctly; the unboxing perf win lands in PR 2b.
 #
 # This file uses CPR-eligible ctors without IO or do-blocks, so it can be
 # compiled via --use-ir-codegen end-to-end.  Before the PR 2 fix it fails
 # with `ERROR: ast_to_ir: CPR ctor lowering deferred to follow-up PR`.
-# After: lowers cleanly to LLVM IR with @sprout_make2 / @sprout_make1 calls.
+# After: lowers cleanly to LLVM IR with @sprout_alloc_obj calls.
 #
 # Direct codegen has always handled this; this file is the IR-path coverage.
 

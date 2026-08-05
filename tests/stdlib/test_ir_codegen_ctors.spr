@@ -13,9 +13,9 @@ import testsupport.ir_verify (clang_verifies_ir)
 # Tests for Milestone 2, PR 2.3: constructor allocation (boxed ADTs only).
 # See docs/gc-rooting-model-c-plan-2026-06-02.md.
 #
-# Hand-built IRPrograms exercise IRMakeCtor (boxed sprout_makeN lowering).
+# Hand-built IRPrograms exercise IRMakeCtor (boxed sprout_alloc_obj lowering).
 # M3 PR 2: CPR-eligible ctors (max_arity = 1 or 2) ALSO lower through
-# IRMakeCtor / @sprout_makeN; the unboxing sret optimization lands in PR 2b.
+# IRMakeCtor / @sprout_alloc_obj; the unboxing sret optimization lands in PR 2b.
 # Hand-built IR bypasses the translator and lowers any tag/name pair as boxed.
 
 fn contains(haystack: String, needle: String) -> Bool =
@@ -80,7 +80,25 @@ fn translated_ok_ir_contains(src: String, needle: String) -> Bool !{IO} =
   | Ok ir -> str_find(ir, needle) != -1
   | Err _ -> false
 
-# T1: 0-arity boxed ctor (Nil-style) -> @sprout_make0 with tag literal.
+# Field declarations "f0: Int, f1: Int, ..." for a record of width `n`.
+fn wide_field_decls(i: Int, n: Int) -> String =
+  if i >= n then ""
+  else (if i > 0 then ", " else "") ++ "f" ++ int_to_string(i) ++ ": Int" ++
+       wide_field_decls(i + 1, n)
+
+# Matching construction arguments "f0 = 0, f1 = 1, ...".
+fn wide_field_inits(i: Int, n: Int) -> String =
+  if i >= n then ""
+  else (if i > 0 then ", " else "") ++ "f" ++ int_to_string(i) ++ " = " ++ int_to_string(i) ++
+       wide_field_inits(i + 1, n)
+
+# A complete program declaring and constructing an `n`-field record.  Generated
+# rather than written out so the 255-field header boundary stays testable.
+fn wide_record_source(n: Int) -> String =
+  "type W = (" ++ wide_field_decls(0, n) ++ ")\nfn mk() -> W = W(" ++
+  wide_field_inits(0, n) ++ ")"
+
+# T1: 0-arity boxed ctor (Nil-style) -> @sprout_alloc_obj with field count 0.
 fn t1_program() -> sprout_ir.IRProgram =
   sprout_ir.IRProgram(Cons(
     sprout_ir.IRFunction("t1", Nil, "i64", Cons(
@@ -103,7 +121,7 @@ fn t2_program() -> sprout_ir.IRProgram =
       Nil)),
     Nil), Nil, Nil, Nil)
 
-# T3: 2-arity boxed ctor with two heap-typed String args.  @sprout_make2
+# T3: 2-arity boxed ctor with two heap-typed String args.  @sprout_alloc_obj
 # allocates before storing its operands without handle-protecting them, so both
 # heap operands must be rooted across the make.  Verifies the heap-arg ctor
 # lowers cleanly and roots its operands.
@@ -174,37 +192,47 @@ fn main() -> Unit !{IO} =
     assert_true(state, "pretty: tag literal appears in pretty output",
                 contains(sprout_ir.print_ir_program(t2_program()), "tag=7"))
 
-    # Header declares the boxed-ctor runtime intrinsics.
-    assert_true(state, "header declares @sprout_make0",
+    # Header declares one arity-generic boxed-ctor entry point; the former
+    # per-arity @sprout_make0..@sprout_make10 declares are gone.
+    assert_true(state, "header declares @sprout_alloc_obj",
                 contains(ir_lowering.lower_program(t1_program()),
-                         "declare i64 @sprout_make0(i64)"))
-    assert_true(state, "header declares @sprout_make2",
-                contains(ir_lowering.lower_program(t1_program()),
-                         "declare i64 @sprout_make2(i64, i64, i64)"))
-    assert_true(state, "header declares @sprout_make9 (max arity)",
-                contains(ir_lowering.lower_program(t1_program()),
-                         "declare i64 @sprout_make9(i64, i64, i64, i64, i64, i64, i64, i64, i64, i64)"))
+                         "declare i64 @sprout_alloc_obj(i64, i64)"))
+    assert_false(state, "header declares no per-arity @sprout_makeN",
+                 contains(ir_lowering.lower_program(t1_program()),
+                          "declare i64 @sprout_make"))
 
-    # T1: 0-arity boxed ctor lowers to @sprout_make0 with the tag literal.
-    assert_true(state, "T1: emits @sprout_make0 call with tag literal",
+    # T1: a 0-arity boxed ctor needs no stores, so it lowers to the bare call.
+    # The runtime routes field count 0 back to its nullary-ctor singleton cache.
+    assert_true(state, "T1: emits @sprout_alloc_obj call with tag literal and count 0",
                 contains(lower_with_roots(t1_program()),
-                         "%t0 = call i64 @sprout_make0(i64 0)"))
+                         "%t0 = call i64 @sprout_alloc_obj(i64 0, i64 0)"))
+    assert_false(state, "T1: nullary ctor emits no field stores",
+                 contains(lower_with_roots(t1_program()), "%t0$ptr"))
 
     # T2: 2-arity ctor with Int args lowers without rooting.
-    assert_true(state, "T2: emits @sprout_make2 call with tag and args",
+    assert_true(state, "T2: emits @sprout_alloc_obj with tag and field count",
                 contains(lower_with_roots(t2_program()),
-                         "%t2 = call i64 @sprout_make2(i64 7, i64 %t0, i64 %t1)"))
+                         "%t2 = call i64 @sprout_alloc_obj(i64 7, i64 2)"))
+    assert_true(state, "T2: stores arg 0 at field offset 0",
+                contains(lower_with_roots(t2_program()),
+                         "store i64 %t0, ptr %t2$f0"))
+    assert_true(state, "T2: stores arg 1 at field offset 1",
+                contains(lower_with_roots(t2_program()),
+                         "store i64 %t1, ptr %t2$f1"))
     assert_false(state, "T2: no push_i64_root call site",
                  contains(lower_with_roots(t2_program()), "call i64 @sprout_gc_push_i64_root"))
     assert_false(state, "T2: no pop_roots call site",
                  contains(lower_with_roots(t2_program()), "call i64 @sprout_gc_pop_roots"))
 
-    # T3: heap-arg ctor lowers cleanly.  @sprout_make2 allocates before storing
-    # its operands and does not handle-protect them, so both heap args (%sa,
-    # %sb) must be rooted across the make even though they are dead afterward.
-    assert_true(state, "T3: emits @sprout_make2 with heap args",
+    # T3: heap-arg ctor lowers cleanly.  @sprout_alloc_obj allocates before the
+    # operands are stored and does not handle-protect them, so both heap args
+    # (%sa, %sb) must be rooted across it even though they die right after.
+    assert_true(state, "T3: emits @sprout_alloc_obj for the heap-arg ctor",
                 contains(lower_with_roots(t3_program()),
-                         "%r = call i64 @sprout_make2(i64 7, i64 %sa, i64 %sb)"))
+                         "%r = call i64 @sprout_alloc_obj(i64 7, i64 2)"))
+    assert_true(state, "T3: stores both heap args after the allocation",
+                contains(lower_with_roots(t3_program()), "store i64 %sa, ptr %r$f0") &&
+                contains(lower_with_roots(t3_program()), "store i64 %sb, ptr %r$f1"))
     assert_eq(state, "T3: two push_i64_root for the two heap operands",
               count(lower_with_roots(t3_program()), "call i64 @sprout_gc_push_i64_root"), 2)
     assert_eq(state, "T3: one pop_roots(i64 2) around the make",
@@ -221,21 +249,21 @@ fn main() -> Unit !{IO} =
               count(lower_with_roots(t4_program()), "@sprout_gc_pop_roots(i64 1)"), 0)
     assert_eq(state, "T4: one pop_roots(i64 2) (%first + %second at WrapPair)",
               count(lower_with_roots(t4_program()), "@sprout_gc_pop_roots(i64 2)"), 1)
-    assert_eq(state, "T4: two @sprout_make1 calls (SinglePtr)",
-              count(lower_with_roots(t4_program()), "call i64 @sprout_make1(i64 11"), 2)
-    assert_true(state, "T4: WrapPair lowers with tag=12",
+    assert_eq(state, "T4: two 1-field @sprout_alloc_obj calls (SinglePtr)",
+              count(lower_with_roots(t4_program()), "call i64 @sprout_alloc_obj(i64 11, i64 1)"), 2)
+    assert_true(state, "T4: WrapPair lowers with tag=12 and field count 2",
                 contains(lower_with_roots(t4_program()),
-                         "%r = call i64 @sprout_make2(i64 12, i64 %first, i64 %second)"))
+                         "%r = call i64 @sprout_alloc_obj(i64 12, i64 2)"))
 
     # T5: three IRMakeCtor - InnerSingle then OuterPair - compose correctly.
     assert_true(state, "T5: InnerSingle lowers",
                 contains(lower_with_roots(t5_program()),
-                         "%i = call i64 @sprout_make1(i64 20, i64 %sx)"))
+                         "%i = call i64 @sprout_alloc_obj(i64 20, i64 1)"))
     assert_true(state, "T5: OuterPair lowers",
                 contains(lower_with_roots(t5_program()),
-                         "%o = call i64 @sprout_make2(i64 21, i64 %sy, i64 %i)"))
+                         "%o = call i64 @sprout_alloc_obj(i64 21, i64 2)"))
     # %sx rooted across InnerSingle (1); then %sy and %i rooted across OuterPair
-    # (operand-exposure, 2) = 3 total.  @sprout_makeN stores operands after the
+    # (operand-exposure, 2) = 3 total.  Codegen stores operands after the
     # allocating GC point, so its heap operands must be rooted across the make.
     assert_eq(state, "T5: three push_i64_root for ctor operands",
               count(lower_with_roots(t5_program()), "call i64 @sprout_gc_push_i64_root"), 3)
@@ -246,43 +274,43 @@ fn main() -> Unit !{IO} =
     # TVar / TCall ctor dispatch.
     #
     # M3 PR 2: CPR-eligible ctors lower through the same boxed allocation
-    # path as non-CPR ctors (@sprout_makeN).  The unboxing sret optimization
+    # path as non-CPR ctors (@sprout_alloc_obj).  The unboxing sret optimization
     # lands in PR 2b; this milestone verifies the boxed path works for
     # CPR-eligible ADTs.
 
     # CPR-eligible 0-arity ctor (A of `X = A | B Int`, max_arity = 1).
-    # Lowers via translate_zero_arity_ctor -> @sprout_make0.
+    # Lowers via translate_zero_arity_ctor -> @sprout_alloc_obj, field count 0.
     cpr_a <- translated_ok_ir_contains("type X = A | B Int\nfn make() -> X = A",
-                                       "call i64 @sprout_make0(i64 0)")
+                                       "call i64 @sprout_alloc_obj(i64 0, i64 0)")
     assert_true(state,
-                "translate_program: 0-arity CPR ctor (A of `X = A | B Int`) lowers to @sprout_make0",
+                "translate_program: 0-arity CPR ctor (A of `X = A | B Int`) lowers with field count 0",
                 cpr_a)
 
     # CPR-eligible n-arity ctor (B of `X = A | B Int`, max_arity = 1).
-    # Lowers via translate_boxed_ctor_call -> @sprout_make1.  Tag = 1 (B is
+    # Lowers via translate_boxed_ctor_call, field count 1.  Tag = 1 (B is
     # the second ctor in source order).
     cpr_b <- translated_ok_ir_contains("type X = A | B Int\nfn make() -> X = B(7)",
-                                       "call i64 @sprout_make1(i64 1")
+                                       "call i64 @sprout_alloc_obj(i64 1, i64 1)")
     assert_true(state,
-                "translate_program: 1-arity CPR ctor (B(7)) lowers to @sprout_make1",
+                "translate_program: 1-arity CPR ctor (B(7)) lowers with field count 1",
                 cpr_b)
 
     # CPR-eligible max_arity = 2 (a Pair-shaped ADT).  Lowers via
-    # translate_boxed_ctor_call -> @sprout_make2.  Tag = 0 (P is the only
+    # translate_boxed_ctor_call, field count 2.  Tag = 0 (P is the only
     # ctor in source order).
     cpr_p <- translated_ok_ir_contains("type P = P Int Int\nfn mk() -> P = P(1, 2)",
-                                       "call i64 @sprout_make2(i64 0")
+                                       "call i64 @sprout_alloc_obj(i64 0, i64 2)")
     assert_true(state,
-                "translate_program: 2-arity CPR ctor (P(1, 2)) lowers to @sprout_make2",
+                "translate_program: 2-arity CPR ctor (P(1, 2)) lowers with field count 2",
                 cpr_p)
 
     # Boxed lowering - max_arity = 3 makes the ADT boxed; ctor goes through
-    # IRMakeCtor -> @sprout_make3.  Tag = 0 (first ctor in the source).
+    # IRMakeCtor -> @sprout_alloc_obj, field count 3.  Tag = 0 (first ctor).
     boxed3 <- translated_ok_ir_contains(
       "type T3 = T3 Int Int Int\nfn mk() -> T3 = T3(1, 2, 3)",
-      "call i64 @sprout_make3(i64 0")
+      "call i64 @sprout_alloc_obj(i64 0, i64 3)")
     assert_true(state,
-                "translate_program: 3-arity boxed ctor lowers to @sprout_make3",
+                "translate_program: 3-arity boxed ctor lowers with field count 3",
                 boxed3)
 
     # Boxed lowering - mixed ADT where a later ctor's tag is sequential.
@@ -290,7 +318,7 @@ fn main() -> Unit !{IO} =
     # max_arity = 3 -> boxed.  Tags: Z=0, One=1, Two=2, Three=3.
     boxed_mid <- translated_ok_ir_contains(
       "type E = Z | One Int | Two Int Int | Three Int Int Int\nfn mk() -> E = Two(4, 5)",
-      "call i64 @sprout_make2(i64 2, i64")
+      "call i64 @sprout_alloc_obj(i64 2, i64 2)")
     assert_true(state,
                 "translate_program: boxed n-arity ctor uses sequential tag (Two -> tag=2)",
                 boxed_mid)
@@ -298,9 +326,9 @@ fn main() -> Unit !{IO} =
     # Boxed lowering - 0-arity boxed ctor (Z) via bare TVar reference.
     boxed_zero <- translated_ok_ir_contains(
       "type E = Z | One Int | Two Int Int | Three Int Int Int\nfn mk() -> E = Z",
-      "call i64 @sprout_make0(i64 0)")
+      "call i64 @sprout_alloc_obj(i64 0, i64 0)")
     assert_true(state,
-                "translate_program: 0-arity boxed ctor (Z via bare TVar) lowers to @sprout_make0",
+                "translate_program: 0-arity boxed ctor (Z via bare TVar) lowers with field count 0",
                 boxed_zero)
 
     # ---------------------------------------------------------------------------
@@ -319,7 +347,7 @@ fn main() -> Unit !{IO} =
     # applies for IRCall sites.
     fix_c <- translated_ok_ir_contains(
       "type InnerT = InnerT Int Int Int\ntype HolderBoxed = HolderBoxed InnerT Int Int\nfn mk() -> HolderBoxed = HolderBoxed(InnerT(1, 2, 3), 0, 0)",
-      "call i64 @sprout_make3")
+      "call i64 @sprout_alloc_obj(i64 0, i64 3)")
     assert_true(state,
                 "Fix C: ctor with ADT-typed field lowers successfully via translate_args_ctor",
                 fix_c)
@@ -370,45 +398,53 @@ fn main() -> Unit !{IO} =
                 m2_arity)
 
     # ---------------------------------------------------------------------------
-    # S3 test: the boxed-ctor arity ceiling is 10 (runtime sprout_make0..make10).
-    # A 10-arity ctor now compiles and emits @sprout_make10 (added for a
-    # 10-field HydroParams ctor); an 11-arity ctor still hits the guard in
-    # translate_boxed_ctor_call (@sprout_make11 is undeclared in ir_header).
+    # S3 test: boxed-ctor lowering is arity-generic — one @sprout_alloc_obj call
+    # carrying the field count, then one store per field.  There is no per-arity
+    # callee any more, so an 11-field ctor (which formerly needed a nonexistent
+    # @sprout_make11) compiles like any other.
     s3_ok <- translated_ok_ir_contains(
       "type BigCtor = BigCtor Int Int Int Int Int Int Int Int Int Int\nfn mk() -> BigCtor = BigCtor(1,2,3,4,5,6,7,8,9,10)",
-      "@sprout_make10")
-    assert_true(state, "S3: 10-arity ctor now compiles and emits @sprout_make10", s3_ok)
-    s3_err <- translated_err_contains(
+      "@sprout_alloc_obj(i64 0, i64 10)")
+    assert_true(state, "S3: 10-arity ctor emits @sprout_alloc_obj with field count 10", s3_ok)
+    s3_11 <- translated_ok_ir_contains(
       "type BigCtor = BigCtor Int Int Int Int Int Int Int Int Int Int Int\nfn mk() -> BigCtor = BigCtor(1,2,3,4,5,6,7,8,9,10,11)",
-      "arity exceeds 10")
-    assert_true(state, "S3: 11-arity ctor yields Err \"arity exceeds 10\"",
-                s3_err)
+      "@sprout_alloc_obj(i64 0, i64 11)")
+    assert_true(state, "S3: 11-arity ctor now compiles (was Err \"arity exceeds 10\")",
+                s3_11)
+    # The former sprout_makeN set must be gone from the emitted IR entirely.
+    s3_no_make <- translated_ok_ir_contains(
+      "type BigCtor = BigCtor Int Int Int\nfn mk() -> BigCtor = BigCtor(1,2,3)",
+      "@sprout_make")
+    assert_true(state, "S3: no @sprout_makeN remains in emitted IR",! s3_no_make)
 
     # ---------------------------------------------------------------------------
-    # S4 test: a record literal is subject to the same ceiling as an ADT ctor.
-    # Record construction lowers through translate_record_literal, a path that
-    # does NOT share translate_boxed_ctor_call's guard; without its own check an
-    # over-wide record emits @sprout_makeN for an N that ir_header never declares,
-    # which surfaces as an opaque LLVM "use of undefined value" instead of a
-    # compiler diagnostic.
+    # S4 test: a record literal lowers through translate_record_literal, a path
+    # that does not share translate_boxed_ctor_call's guard.  Both now funnel
+    # through finish_make_ctor, so an 11-field record — formerly an opaque LLVM
+    # "use of undefined value" for @sprout_make11 — compiles like any other.
     s4_ok <- translated_ok_ir_contains(
-      "type Wide10 = (a: Int, b: Int, c: Int, d: Int, e: Int, f: Int, g: Int, h: Int, i: Int, j: Int)\nfn mk() -> Wide10 = Wide10(a = 1, b = 2, c = 3, d = 4, e = 5, f = 6, g = 7, h = 8, i = 9, j = 10)",
-      "@sprout_make10")
-    assert_true(state, "S4: 10-field record compiles and emits @sprout_make10", s4_ok)
-    s4_err <- translated_err_contains(
       "type Wide11 = (a: Int, b: Int, c: Int, d: Int, e: Int, f: Int, g: Int, h: Int, i: Int, j: Int, k: Int)\nfn mk() -> Wide11 = Wide11(a = 1, b = 2, c = 3, d = 4, e = 5, f = 6, g = 7, h = 8, i = 9, j = 10, k = 11)",
-      "arity exceeds 10")
-    assert_true(state, "S4: 11-field record yields Err \"arity exceeds 10\"",
+      "@sprout_alloc_obj(i64 0, i64 11)")
+    assert_true(state, "S4: 11-field record compiles and emits field count 11", s4_ok)
+    # 256 fields exceeds the runtime header's 8-bit arity field — the one
+    # remaining limit, and the only thing max_boxed_arity() now guards.
+    s4_err <- translated_err_contains(
+      wide_record_source(256),
+      "exceeding the limit of 255")
+    assert_true(state, "S4: 256-field record yields Err naming the 255 limit",
                 s4_err)
+    s4_255 <- translated_ok_ir_contains(
+      wide_record_source(255),
+      "@sprout_alloc_obj(i64 0, i64 255)")
+    assert_true(state, "S4: 255-field record compiles at the header's boundary", s4_255)
 
     # S5: record functional update is the third IRMakeCtor emission path (via
-    # build_update_args) and shares finish_make_ctor's ceiling check.  Pin the
-    # boundary: a 10-field `with` update still lowers to @sprout_make10, so the
-    # shared choke point did not narrow the update path.
+    # build_update_args) and shares finish_make_ctor's exit.  Pin that it is
+    # arity-generic too, past the former 10-field ceiling.
     s5_ok <- translated_ok_ir_contains(
-      "type Wide10 = (a: Int, b: Int, c: Int, d: Int, e: Int, f: Int, g: Int, h: Int, i: Int, j: Int)\nfn mk() -> Wide10 = Wide10(a = 1, b = 2, c = 3, d = 4, e = 5, f = 6, g = 7, h = 8, i = 9, j = 10)\nfn bump(w: Wide10) -> Wide10 = w with (j = 99)",
-      "@sprout_make10")
-    assert_true(state, "S5: 10-field record `with` update emits @sprout_make10", s5_ok)
+      "type Wide11 = (a: Int, b: Int, c: Int, d: Int, e: Int, f: Int, g: Int, h: Int, i: Int, j: Int, k: Int)\nfn mk() -> Wide11 = Wide11(a = 1, b = 2, c = 3, d = 4, e = 5, f = 6, g = 7, h = 8, i = 9, j = 10, k = 11)\nfn bump(w: Wide11) -> Wide11 = w with (k = 99)",
+      "@sprout_alloc_obj(i64 0, i64 11)")
+    assert_true(state, "S5: 11-field record `with` update is arity-generic", s5_ok)
 
     # ---------------------------------------------------------------------------
     # M3 PR 15a: Bool ctor fields are now accepted (IRZextI1ToI64 wiring done).
@@ -424,7 +460,7 @@ fn main() -> Unit !{IO} =
     # `type W2 = W2 Bool Int Int; fn f(b: Bool) -> W2 = W2(b, 0, 0)`
     bool_param_ctor <- translated_ok_ir_contains(
       "type W2 = W2 Bool Int Int\nfn f(b: Bool) -> W2 = W2(b, 0, 0)",
-      "sprout_make3")
+      "sprout_alloc_obj(i64 0, i64 3)")
     assert_true(state,
                 "Regression 3b92d2c: Bool param as ctor field yields Err (not silent ABI mismatch)",
                 bool_param_ctor)
@@ -442,9 +478,9 @@ fn main() -> Unit !{IO} =
     # arm produces IRConst(name, 0); no Err is raised.  (M3 PR 15e)
     unit_field_ctor <- translated_ok_ir_contains(
       "type WU = WU Unit Int Int\nfn f() -> WU = WU((), 0, 0)",
-      "sprout_make3")
+      "sprout_alloc_obj(i64 0, i64 3)")
     assert_true(state,
-                "Unit ctor field emits @sprout_make3 with i64 0 sentinel (M3 PR 15e)",
+                "Unit ctor field emits @sprout_alloc_obj with i64 0 sentinel (M3 PR 15e)",
                 unit_field_ctor)
 
     # Whole-module verification: substring checks are blind to whole-module

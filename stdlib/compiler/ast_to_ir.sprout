@@ -581,28 +581,30 @@ fn record_field_names_csv(fields: List ast.RecordFieldDecl) -> String =
           | _ -> nm ++ "," ++ record_field_names_csv(rest)
 
 # Field-count ceiling for a boxed product — an ADT constructor or a record.
-# Mirrors @sprout_make0..@sprout_make10, declared in ir_lowering.sprout's
-# ir_header() and defined in runtime/sprout_runtime.c.  The runtime object
-# header stores arity in a 4-bit nibble, so 15 is the structural ceiling.
-fn max_boxed_arity() -> Int = 10
+# Mirrors SPROUT_MAX_OBJ_ARITY in runtime/sprout_runtime.c: the object header
+# packs aux as (tag << 8) | arity, so the arity field holds 0..255 and the GC
+# reads it for object size and child count.  Lowering is arity-generic
+# (@sprout_alloc_obj + one store per field), so this header field is the only
+# remaining limit.  Raising it means widening that field, which narrows the tag.
+fn max_boxed_arity() -> Int = 255
 
 # Nothing when `ar` fits the ceiling, Just an error message when it does not.
-# Every field-carrying IRMakeCtor site must consult this: ir_lowering picks the
-# callee @sprout_make<N> from the argument count, so an unchecked over-wide
-# product emits a call to a symbol ir_header never declared.  That surfaces as
-# an opaque LLVM "use of undefined value" at link time rather than a diagnostic.
-# `what` names the construct ("constructor", "record") for the message.
+# Every field-carrying IRMakeCtor site must consult this: a product wider than
+# the header's arity field would be allocated with a truncated field count, and
+# the GC would then size and scan it short — silent heap corruption rather than
+# a loud failure.  `what` names the construct ("constructor", "record").
 fn boxed_arity_error(what: String, name: String, ar: Int) -> Maybe String =
   if ar > max_boxed_arity()
-  then Just("ast_to_ir: " ++ what ++ " '" ++ name ++ "' arity exceeds " ++
-            int_to_string(max_boxed_arity()) ++ " (got " ++ int_to_string(ar) ++
-            "); add a runtime sprout_makeN entry point and lift this check")
+  then Just("ast_to_ir: " ++ what ++ " '" ++ name ++ "' has " ++ int_to_string(ar) ++
+            " fields, exceeding the limit of " ++ int_to_string(max_boxed_arity()) ++
+            "; the runtime object header stores a field count of at most " ++
+            int_to_string(max_boxed_arity()))
   else Nothing
 
 # Terminating IRMakeCtor for a boxed product, or Err when the field count
-# exceeds the ceiling.  The single choke point the three field-carrying paths
-# route through — ADT constructor application, record literal, record functional
-# update — so the arity check cannot be forgotten at a new call site.
+# exceeds max_boxed_arity().  The single choke point the three field-carrying
+# paths route through — ADT constructor application, record literal, record
+# functional update — so the arity check cannot be forgotten at a new call site.
 # translate_zero_arity_ctor builds its 0-field product directly; a nullary ctor
 # cannot exceed the ceiling, so it needs no check.
 fn finish_make_ctor(what: String, name: String, tag: Int, arg_names: List String,
@@ -910,7 +912,7 @@ fn translate_expr(expr: typed_ast.TypedExpr, params: List String,
                 match entry with
                 | sprout_ir.CtorInfo tag actual_ar _max_ar _fks _ ->
                     # M3 PR 2: CPR-eligible ctors route through the same boxed
-                    # allocation path as non-CPR ctors (@sprout_makeN).
+                    # allocation path as non-CPR ctors (@sprout_alloc_obj).
                     # The unboxing sret optimization lands in PR 2b.
                     if actual_ar == 0
                     then translate_zero_arity_ctor(name, tag, idx, cur_label, cur_ops, name_prefix)
@@ -1515,8 +1517,7 @@ fn find_err_tag_ir(ctors: Dict sprout_ir.CtorInfo) -> Int =
 #     %is_n = icmp eq i64 %tag, i64 %nt
 #     br i1 %is_n, label %do_short_K, label %do_cont_K
 #   do_short_K:
-#     %nc = const <nothing_tag>
-#     %nv = call i64 @sprout_make0(i64 %nc)
+#     %nv = call i64 @sprout_alloc_obj(i64 <nothing_tag>, i64 0)
 #     br label %do_done_K
 #   do_cont_K:
 #     %p = call i64 @sprout_field(i64 %e, i64 0)
@@ -1654,13 +1655,10 @@ fn translate_do_bind_maybe_finish(pat: ast.Pattern, rest: List typed_ast.TypedDo
                          Cons(sprout_ir.IRConst(const_name, nothing_tag),
                          Cons(sprout_ir.IRICmp(cmp_name, "eq", tag_name, const_name),
                          Cons(sprout_ir.IRCondBr(cmp_name, short_lbl, cont_lbl), Nil))))))
-        nothing_const_name = fresh_name(name_prefix, eidx + 3)
         nothing_val_name = fresh_name(name_prefix, eidx + 4)
         short_block = sprout_ir.IRBlock(short_lbl,
-                        Cons(sprout_ir.IRConst(nothing_const_name, nothing_tag),
-                        Cons(sprout_ir.IRCall(nothing_val_name, sprout_ir.IRTHeap, "sprout_make0",
-                                              Cons(nothing_const_name, Nil)),
-                        Cons(sprout_ir.IRBr(done_lbl), Nil))))
+                        Cons(sprout_ir.IRMakeCtor(nothing_val_name, "Nothing", nothing_tag, Nil),
+                        Cons(sprout_ir.IRBr(done_lbl), Nil)))
         payload_name = fresh_name(name_prefix, eidx + 5)
         payload_op = sprout_ir.IRGetField(payload_name, ename, 0, sprout_ir.IRTUnknown)
 
@@ -1714,13 +1712,10 @@ fn translate_do_bind_maybe_finish_unboxed(pat: ast.Pattern, rest: List typed_ast
                          Cons(sprout_ir.IRConst(const_name, nothing_tag),
                          Cons(sprout_ir.IRICmp(cmp_name, "eq", tag_ssa, const_name),
                          Cons(sprout_ir.IRCondBr(cmp_name, short_lbl, cont_lbl), Nil)))))
-        nothing_const_name = fresh_name(name_prefix, eidx + 2)
         nothing_val_name = fresh_name(name_prefix, eidx + 3)
         short_block = sprout_ir.IRBlock(short_lbl,
-                        Cons(sprout_ir.IRConst(nothing_const_name, nothing_tag),
-                        Cons(sprout_ir.IRCall(nothing_val_name, sprout_ir.IRTHeap, "sprout_make0",
-                                              Cons(nothing_const_name, Nil)),
-                        Cons(sprout_ir.IRBr(done_lbl), Nil))))
+                        Cons(sprout_ir.IRMakeCtor(nothing_val_name, "Nothing", nothing_tag, Nil),
+                        Cons(sprout_ir.IRBr(done_lbl), Nil)))
 
 # Lower `pat <- f()` where f returns `Result E a` (optionally `!{IO}`).
 # Mirrors translate_do_bind_maybe but short-circuits on Err instead of Nothing.
@@ -1853,12 +1848,9 @@ fn translate_do_bind_result_finish_unboxed(pat: ast.Pattern, rest: List typed_as
                          [sprout_ir.IRConst(const_name, err_tag),
                           sprout_ir.IRICmp(cmp_name, "eq", tag_ssa, const_name),
                           sprout_ir.IRCondBr(cmp_name, short_lbl, cont_lbl)]))
-        err_const_name = fresh_name(name_prefix, eidx + 2)
         err_val_name = fresh_name(name_prefix, eidx + 3)
         short_block = sprout_ir.IRBlock(short_lbl,
-                        [sprout_ir.IRConst(err_const_name, err_tag),
-                         sprout_ir.IRCall(err_val_name, sprout_ir.IRTHeap, "sprout_make1",
-                                          [err_const_name, val_ssa]),
+                        [sprout_ir.IRMakeCtor(err_val_name, "Err", err_tag, [val_ssa]),
                          sprout_ir.IRBr(done_lbl)])
 
 fn translate_do_bind_result_finish(pat: ast.Pattern, rest: List typed_ast.TypedDoStep,
