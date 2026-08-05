@@ -415,6 +415,10 @@ type Maybe a =
   | Just a
 ```
 
+A constructor carries at most **10 fields**; exceeding it is a compile error
+naming the constructor. Records share the ceiling (§5.6.3). This is an
+implementation limit of the boxed-product allocation path, not a design rule.
+
 Every type name referenced in a constructor field, record field, or type alias
 RHS must be either:
 
@@ -671,6 +675,10 @@ subtyping, no field punning or defaults, and no `deriving`. The initial
 implementation supports records used **within their defining module**; using a
 record imported from another module is a known gap (the field markers are not yet
 canonicalized across the module boundary).
+
+A record carries at most **10 fields**, the same ceiling an ADT constructor's
+field list has (§5.6); exceeding it is a compile error naming the record. This is
+an implementation limit of the boxed-product allocation path, not a design rule.
 
 ### 5.7 Template literals (Experimental)
 
