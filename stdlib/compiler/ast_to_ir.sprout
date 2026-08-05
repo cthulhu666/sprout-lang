@@ -580,6 +580,43 @@ fn record_field_names_csv(fields: List ast.RecordFieldDecl) -> String =
           | Nil -> nm
           | _ -> nm ++ "," ++ record_field_names_csv(rest)
 
+# Field-count ceiling for a boxed product — an ADT constructor or a record.
+# Mirrors @sprout_make0..@sprout_make10, declared in ir_lowering.sprout's
+# ir_header() and defined in runtime/sprout_runtime.c.  The runtime object
+# header stores arity in a 4-bit nibble, so 15 is the structural ceiling.
+fn max_boxed_arity() -> Int = 10
+
+# Nothing when `ar` fits the ceiling, Just an error message when it does not.
+# Every field-carrying IRMakeCtor site must consult this: ir_lowering picks the
+# callee @sprout_make<N> from the argument count, so an unchecked over-wide
+# product emits a call to a symbol ir_header never declared.  That surfaces as
+# an opaque LLVM "use of undefined value" at link time rather than a diagnostic.
+# `what` names the construct ("constructor", "record") for the message.
+fn boxed_arity_error(what: String, name: String, ar: Int) -> Maybe String =
+  if ar > max_boxed_arity()
+  then Just("ast_to_ir: " ++ what ++ " '" ++ name ++ "' arity exceeds " ++
+            int_to_string(max_boxed_arity()) ++ " (got " ++ int_to_string(ar) ++
+            "); add a runtime sprout_makeN entry point and lift this check")
+  else Nothing
+
+# Terminating IRMakeCtor for a boxed product, or Err when the field count
+# exceeds the ceiling.  The single choke point the three field-carrying paths
+# route through — ADT constructor application, record literal, record functional
+# update — so the arity check cannot be forgotten at a new call site.
+# translate_zero_arity_ctor builds its 0-field product directly; a nullary ctor
+# cannot exceed the ceiling, so it needs no check.
+fn finish_make_ctor(what: String, name: String, tag: Int, arg_names: List String,
+                    blocks: List sprout_ir.IRBlock, cur_label: String,
+                    cur_ops: List sprout_ir.IROp, idx: Int, prefix: String) ->
+    Result String (List sprout_ir.IRBlock, String, List sprout_ir.IROp, String, Int) =
+  match boxed_arity_error(what, name, list_length(arg_names)) with
+  | Just msg -> Err(msg)
+  | Nothing ->
+      Ok((blocks, cur_label,
+           list_append(cur_ops,
+             Cons(sprout_ir.IRMakeCtor(fresh_name(prefix, idx), name, tag, arg_names), Nil)),
+           fresh_name(prefix, idx), idx + 1))
+
 fn max_arity_of(ctors: List ast.TypeConstructor, m: Int) -> Int =
   match ctors with
   | Nil -> m
@@ -1071,10 +1108,8 @@ fn translate_expr(expr: typed_ast.TypedExpr, params: List String,
                   | Ok r ->
                       match r with
                       | (arg_blocks, arg_cur_lbl, arg_cur_ops, arg_names, idx1) ->
-                          Ok((arg_blocks, arg_cur_lbl,
-                               list_append(arg_cur_ops,
-                                 Cons(sprout_ir.IRMakeCtor(fresh_name(name_prefix, idx1), type_name, tag, arg_names), Nil)),
-                               fresh_name(name_prefix, idx1), idx1 + 1))
+                          finish_make_ctor("record", type_name, tag, arg_names,
+                                           arg_blocks, arg_cur_lbl, arg_cur_ops, idx1, name_prefix)
   # Field access: resolve the field name to its declaration offset and emit a
   # single IRGetField (an offset load), reusing the ADT field-projection op.
   | typed_ast.TGetField rec_expr field_name _ _ ->
@@ -4958,12 +4993,9 @@ fn translate_boxed_ctor_call(name: String, tag: Int, actual_ar: Int,
             | [inner_ssa] -> Ok((arg_blocks, arg_cur_lbl, arg_cur_ops, inner_ssa, idx1))
             | _ -> Err("ast_to_ir: wrap ctor must have exactly one field")
   else
-  # NOTE: cap of 10 mirrors @sprout_make0..@sprout_make10 declared in
-  # ir_lowering.sprout's ir_header(). If you lift this, also extend
-  # ir_header's declares AND add the matching sprout_makeN to the runtime.
-  if actual_ar >= 11
-  then Err("ast_to_ir: ctor arity exceeds 10 (got " ++ int_to_string(actual_ar) ++ "); add a runtime sprout_makeN entry point and lift this check")
-  else if list_length(args) != actual_ar
+  # The field-count ceiling is enforced by finish_make_ctor below, the single
+  # exit every construction path shares; an over-wide ctor errors there.
+  if list_length(args) != actual_ar
   then Err("ast_to_ir: ctor application has wrong arity (got " ++ int_to_string(list_length(args)) ++ ", expected " ++ int_to_string(actual_ar) ++ ")")
   else
     match translate_args_ctor(args, params, ctors, idx, cur_label, cur_ops, Nil, Nil,
@@ -4973,10 +5005,8 @@ fn translate_boxed_ctor_call(name: String, tag: Int, actual_ar: Int,
     | Ok r ->
         match r with
         | (arg_blocks, arg_cur_lbl, arg_cur_ops, arg_names, idx1) ->
-            Ok((arg_blocks, arg_cur_lbl,
-                 list_append(arg_cur_ops,
-                   Cons(sprout_ir.IRMakeCtor(fresh_name(name_prefix, idx1), name, tag, arg_names), Nil)),
-                 fresh_name(name_prefix, idx1), idx1 + 1))
+            finish_make_ctor("constructor", name, tag, arg_names,
+                             arg_blocks, arg_cur_lbl, arg_cur_ops, idx1, name_prefix)
 
 type StringBuiltin (..) =
   | SBStrConcat
@@ -5466,10 +5496,8 @@ fn build_update_args(decl_names: List String, field_pos: Int,
     Result String (List sprout_ir.IRBlock, String, List sprout_ir.IROp, String, Int) !{IO} =
   match decl_names with
   | Nil ->
-      Ok((acc_blocks, cur_label,
-           list_append(cur_ops,
-             Cons(sprout_ir.IRMakeCtor(fresh_name(name_prefix, idx), rname, tag, list_reverse(acc_names)), Nil)),
-           fresh_name(name_prefix, idx), idx + 1))
+      finish_make_ctor("record", rname, tag, list_reverse(acc_names),
+                       acc_blocks, cur_label, cur_ops, idx, name_prefix)
   | Cons nm rest ->
       match typed_field_expr_for(nm, update_fields) with
       | Just fexpr ->

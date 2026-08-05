@@ -457,8 +457,8 @@ export fn ir_header() -> String =
   # Boxed-ADT constructors.  Mirrors the sprout_make0..sprout_make10 set in
   # codegen.sprout (compiler intrinsic table).  All arities are declared
   # unconditionally — only the ones actually called are linked.
-  # NOTE: arity cap of 9 mirrored in ast_to_ir.sprout's translate_boxed_ctor_call.
-  # If you add more entries here, also lift the cap there.
+  # NOTE: this declare set is mirrored by ast_to_ir.sprout's max_boxed_arity().
+  # If you add entries here, raise that constant to match.
   "declare i64 @sprout_make0(i64)\n" ++
   "declare i64 @sprout_make1(i64, i64)\n" ++
   "declare i64 @sprout_make2(i64, i64, i64)\n" ++

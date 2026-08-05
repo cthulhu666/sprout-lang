@@ -385,6 +385,32 @@ fn main() -> Unit !{IO} =
                 s3_err)
 
     # ---------------------------------------------------------------------------
+    # S4 test: a record literal is subject to the same ceiling as an ADT ctor.
+    # Record construction lowers through translate_record_literal, a path that
+    # does NOT share translate_boxed_ctor_call's guard; without its own check an
+    # over-wide record emits @sprout_makeN for an N that ir_header never declares,
+    # which surfaces as an opaque LLVM "use of undefined value" instead of a
+    # compiler diagnostic.
+    s4_ok <- translated_ok_ir_contains(
+      "type Wide10 = (a: Int, b: Int, c: Int, d: Int, e: Int, f: Int, g: Int, h: Int, i: Int, j: Int)\nfn mk() -> Wide10 = Wide10(a = 1, b = 2, c = 3, d = 4, e = 5, f = 6, g = 7, h = 8, i = 9, j = 10)",
+      "@sprout_make10")
+    assert_true(state, "S4: 10-field record compiles and emits @sprout_make10", s4_ok)
+    s4_err <- translated_err_contains(
+      "type Wide11 = (a: Int, b: Int, c: Int, d: Int, e: Int, f: Int, g: Int, h: Int, i: Int, j: Int, k: Int)\nfn mk() -> Wide11 = Wide11(a = 1, b = 2, c = 3, d = 4, e = 5, f = 6, g = 7, h = 8, i = 9, j = 10, k = 11)",
+      "arity exceeds 10")
+    assert_true(state, "S4: 11-field record yields Err \"arity exceeds 10\"",
+                s4_err)
+
+    # S5: record functional update is the third IRMakeCtor emission path (via
+    # build_update_args) and shares finish_make_ctor's ceiling check.  Pin the
+    # boundary: a 10-field `with` update still lowers to @sprout_make10, so the
+    # shared choke point did not narrow the update path.
+    s5_ok <- translated_ok_ir_contains(
+      "type Wide10 = (a: Int, b: Int, c: Int, d: Int, e: Int, f: Int, g: Int, h: Int, i: Int, j: Int)\nfn mk() -> Wide10 = Wide10(a = 1, b = 2, c = 3, d = 4, e = 5, f = 6, g = 7, h = 8, i = 9, j = 10)\nfn bump(w: Wide10) -> Wide10 = w with (j = 99)",
+      "@sprout_make10")
+    assert_true(state, "S5: 10-field record `with` update emits @sprout_make10", s5_ok)
+
+    # ---------------------------------------------------------------------------
     # M3 PR 15a: Bool ctor fields are now accepted (IRZextI1ToI64 wiring done).
     #
     # All Bool-valued translate_expr results are i64-uniform:
