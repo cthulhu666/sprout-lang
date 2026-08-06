@@ -221,6 +221,32 @@ fn main() -> Unit !{IO} =
     # exp exactly at its guard boundary: 709.78 is representable, 710 overflows.
     check_true("exp(709.78) is finite", exp(709.78) < inf),
     check_true("exp(710) overflows", exp(710.1) == inf),
+    # INFINITE exponents. These fall out of the guards rather than being handled
+    # explicitly, so they are pinned here: `is_small_int(inf)` is false (the magnitude
+    # test fails), so they route to exp(y * ln x), and for a negative base
+    # `is_odd_int(inf)` evaluates inf - 2*inf = NaN, which compares false and so reads
+    # as even — which happens to be what C99 wants, since the sign of the base is
+    # irrelevant for an infinite exponent.
+    check_true("pow(2,+inf) == +inf", pow(2.0, inf) == inf),
+    check_true("pow(2,-inf) == 0", pow(2.0, neg_inf) == 0.0),
+    check_true("pow(0.5,+inf) == 0", pow(0.5, inf) == 0.0),
+    check_true("pow(0.5,-inf) == +inf", pow(0.5, neg_inf) == inf),
+    check_true("pow(-2,+inf) == +inf (sign irrelevant)", pow(0.0 - 2.0, inf) == inf),
+    check_true("pow(-1,+inf) == 1 (C99)", pow(0.0 - 1.0, inf) == 1.0),
+    # Infinite BASE.
+    check_true("pow(+inf,2) == +inf", pow(inf, 2.0) == inf),
+    check_true("pow(+inf,-2) == 0", pow(inf, 0.0 - 2.0) == 0.0),
+    # Signed zero base under an integer exponent, per IEEE.
+    check_true("pow(-0.0,3) keeps -0.0", 1.0 / pow(-0.0, 3.0) == neg_inf),
+    check_true("pow(-0.0,2) is +0.0", 1.0 / pow(-0.0, 2.0) == inf),
+    check_true("pow(-0.0,0.5) is +0.0", 1.0 / pow(-0.0, 0.5) == inf),
+    # cbrt on a subnormal drives its octave reduction ~357 steps; every step multiplies
+    # by 8, which is exact even in the subnormal range.
+    check_true("cbrt of a subnormal is positive", cbrt(halves(1070)) > 0.0),
+    check_true("cbrt(2^-1070)^3 round-trips",
+      close(cube(cbrt(halves(1070))), halves(1070))),
+    check_true("cbrt(2^-1071) == 2^-357 exactly (1071 = 3*357)",
+      close(cbrt(halves(1071)), halves(357))),
 
     # ------------------------------------------------------- applications -----
     # Tsiolkovsky rocket equation, dv = Isp * g0 * ln(mass ratio) — the model that
