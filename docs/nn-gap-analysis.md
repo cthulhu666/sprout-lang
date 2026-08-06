@@ -14,7 +14,8 @@ that would fill the primary gap), [`spec-v0.md`](spec-v0.md) §numeric.
 A neural network decomposes into four capability layers:
 
 1. **Number system** — to hold weights, learning rate, activations, gradients.
-2. **Elementary math** — the activation function (sigmoid/tanh need `exp`).
+2. **Elementary math** — the activation function (sigmoid/tanh need `exp`; shipped
+   2026-08-06 in pure Sprout, see §3.2's correction).
 3. **Collections + iteration** — vectors/matrices and the training loop.
 4. **I/O** — printing results, loading a dataset.
 
@@ -54,6 +55,12 @@ local change — **not** the numeric draft's full typeclass-dispatch milestone
 
 ### 2.2 No elementary / transcendental math
 
+> **Resolved 2026-08-06 — this section describes the state before the `Double` math
+> layer landed.** `stdlib.math` now provides `sqrt`, `cbrt`, `exp`, `ln`, `log2`,
+> `log10`, `log(x, base)`, real `pow`, and trig, all pure Sprout with no builtin; the
+> Int surface moved to `stdlib.math.int`. Only `tanh` is still absent, and it is one
+> line over `exp`. See `docs/math-transcendental-v0.md`.
+
 No `exp`, `log`, `sqrt`, `pow` (real), `tanh`, `sin`. `stdlib/math.sprout` is
 entirely **Int-valued** (`abs`, `min`, `max`, `clamp`, `sign`, integer `pow`,
 `gcd`, `lcm`). The runtime's `double` usages
@@ -66,11 +73,18 @@ activation function:
 | Activation | Needs | Status |
 |---|---|---|
 | **ReLU** `max(0, x)` + MSE loss | only `+ - * /` and comparison | unblocked once §2.1 lands — *no math builtin at all* |
-| **Sigmoid** `1/(1+e^-x)` / tanh / softmax | `exp` | needs one C extern (`exp`) + `APPROVED_BUILTINS` entry |
+| **Sigmoid** `1/(1+e^-x)` / tanh / softmax | `exp` | **UNBLOCKED 2026-08-06** — `math.exp` shipped in pure Sprout, no extern |
 
 A 2-hidden-unit ReLU network trains XOR — a genuinely rudimentary, genuinely
-trainable net — with zero transcendental functions. Sigmoid is the classic
-tutorial activation but drags in `exp`.
+trainable net — with zero transcendental functions.
+
+**Correction (2026-08-06):** the sigmoid row above originally read "needs one C extern
+(`exp`) + `APPROVED_BUILTINS` entry". That was wrong. `exp` is implementable in pure
+Sprout by range reduction plus a Taylor series — `stdlib.math` now exports `exp`, `ln`,
+`log2`, `log10`, `log`, `cbrt` and a `Double` `pow`, all with **no C builtin** and
+`runtime/APPROVED_BUILTINS` untouched, at 8e-14 relative accuracy and ~9ns per `exp`
+call. `1.0 / (1.0 + exp(0.0 - x))` is ordinary Sprout today, so sigmoid, tanh and
+softmax are no longer blocked on anything. See `docs/math-transcendental-v0.md`.
 
 ---
 
@@ -143,7 +157,7 @@ The structural half of a network is well-covered:
 | # | Missing capability | Severity | Needed for |
 |---|---|---|---|
 | 1 | **Real-number type (`Double`)** + type-aware `+ - * /` + printing | **Hard blocker** | Everything |
-| 2 | **`exp` math builtin** | Blocker **only for sigmoid**; ReLU needs nothing | Classic activation |
+| 2 | ~~**`exp` math builtin**~~ | **DONE 2026-08-06 — and not a builtin.** `stdlib.math.exp` is pure Sprout | Classic activation |
 | 3 | **Seedable PRNG / uniform random** | Friction | Reproducible weight init |
 | 4 | **`Double`↔string parse/format** | Friction | Loading datasets, logging |
 | 5 | **`vec_zip_with` (+ optional `Matrix` type)** | Ergonomic | Clean dot-products / layers |
@@ -240,9 +254,13 @@ example canary. Non-trivial but well-bounded.
   always `Double`. Milestones: **N1** (typeclass dispatch — "only load-bearing"),
   **N2** (`Double` + `Real`, blocked on "C runtime float support"), **N4**
   (`Float` f32). Status: draft, no implementation.
-- [`spec-v0.md`](spec-v0.md) §8 (`:420`, `:434-435`) — normative: v0 has no
-  fractional/floating-point arithmetic by design. The `stdlib.math` surface is
-  Int-only.
+- [`spec-v0.md`](spec-v0.md) §8 — normative for the **`stdlib.math.int`** surface.
+  `Double` arithmetic has since landed as an experimental extension, and `stdlib.math`
+  is now the `Double` layer; the modules are split by numeric type because Sprout has
+  no overloading. (This entry previously read "the `stdlib.math` surface is Int-only",
+  which was true when written.)
+- [`math-transcendental-v0.md`](math-transcendental-v0.md) — the `Double` elementary
+  function suite that closed §2.2, and why it needed no builtin.
 - [`haskell-lessons-learned.md`](haskell-lessons-learned.md) §11 — rationale for
   the draft's minimalist class count (avoid Haskell's `Num`/`Fractional`/…
   thicket).

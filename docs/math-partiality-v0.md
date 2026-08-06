@@ -14,9 +14,12 @@ one handled that case a different way:
 | function | true domain | old behavior | strategy |
 |---|---|---|---|
 | `mod(v, m)` | `m > 0` | `Nothing` | `Maybe` |
-| `pow(b, e)` | `e >= 0` | `Nothing` | `Maybe` |
+| `pow(b, e)` (Int) | `e >= 0` | `Nothing` | `Maybe` |
 | `sqrt(x)` | `x >= 0` | returned **`0.0`** | silent in-band lie |
 | `tan(x)` | `x != pi/2 + k*pi` | `+-inf` (IEEE) | IEEE sentinel |
+
+Functions added later under the same convention (§8): `ln`, `log2`, `log10`,
+`log(x, base)` and `Double` `pow` all follow Rule 2.
 
 Four functions, three incompatible strategies — and one of them (`sqrt`) returned
 a *silent wrong answer*: `sqrt(-4.0) == 0.0` is indistinguishable from a real
@@ -27,11 +30,13 @@ was written down, and `sqrt` violated the only sensible one.
 
 A partial `math` function follows exactly one rule, chosen by its result type:
 
-- **Rule 1 — Int out-of-domain returns `Maybe`.** `mod`, `pow`. `Int` has no
-  spare bottom value (every bit pattern is a valid integer), so an out-of-domain
-  result must be surfaced explicitly. This is **interim**: see §5.
+- **Rule 1 — Int out-of-domain returns `Maybe`.** `mod`, `pow` — now in
+  `stdlib.math.int` (see §8). `Int` has no spare bottom value (every bit pattern is a
+  valid integer), so an out-of-domain result must be surfaced explicitly. This is
+  **interim**: see §5.
 - **Rule 2 — Double out-of-domain returns IEEE-style `NaN` / `±inf`.** `sqrt`,
-  `tan`. `Double` *has* a bottom value, and IEEE NaN self-propagates through
+  `tan`, and since 2026-08-06 also `ln`, `log2`, `log10`, `log` and `Double` `pow`
+  (see §8). `Double` *has* a bottom value, and IEEE NaN self-propagates through
   downstream arithmetic, so a numeric pipeline can check once at the end (with
   `math.is_nan`). This is **terminal** — it matches every mainstream language and
   will not migrate. Two caveats: (a) the Double layer is pure-Sprout (~1e-8
@@ -157,3 +162,47 @@ checked against these:
 - MDN `Math.sqrt` (NaN for negative): https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Math/sqrt
 - Haskell `Prelude` `(^)` (negative exponent errors): https://hackage.haskell.org/package/base/docs/Prelude.html
 - Ada `Positive` subtype / range checks (`Constraint_Error`): http://www.ada-auth.org/standards/aarm12_w_tc1/html/AA-3-5-4.html
+
+## 8. Follow-up: the module split and the new Rule-2 members (2026-08-06)
+
+The convention above was written when one module, `stdlib.math`, held both numeric
+types. It now holds only the `Double` layer; the `Int` surface moved to
+`stdlib.math.int`. The rules did not change — but they now line up exactly with the
+module boundary, which is a happier arrangement than it sounds:
+
+- **Rule 1 governs `stdlib.math.int` entirely.** `mod` and `pow` there return `Maybe`.
+- **Rule 2 governs `stdlib.math` entirely.** `sqrt` and `tan` were joined by `ln`,
+  `log2`, `log10`, `log(x, base)` and a `Double` `pow`.
+
+So "which rule applies?" is now answerable from the import line alone, rather than from
+the return type of the individual function. Rationale for the split itself is in
+`docs/math-transcendental-v0.md` §4.
+
+New Rule-2 domains:
+
+| call | result |
+|---|---|
+| `ln(x)` for `x < 0` | `NaN` |
+| `ln(0.0)` | `-inf` (the pole, not an error) |
+| `log2`/`log10`/`log` of a negative | `NaN`, inherited from `ln` |
+| `log(x, 1.0)` | `±inf` — base 1 has no logarithm |
+| `pow(x, y)` for `x < 0` with fractional `y` | `NaN` — no real value exists |
+
+Two notes on how this interacts with §2's caveats.
+
+**`cbrt` is not a Rule-2 function**, despite looking like `sqrt`'s sibling. A negative
+argument is *in* domain (`cbrt(-8.0) == -2.0`), because the real cube root is defined on
+the whole line. It is listed here only to forestall the natural assumption that it
+mirrors `sqrt`.
+
+**`Double` `pow` follows C99/IEEE F.9.4.4 rather than Python**, which matters for two
+edges §2 does not cover: `pow(0.0, -1.0)` is `+inf` (Python raises `ValueError`), and
+`pow(x, ±0)` / `pow(1.0, y)` are `1.0` even when the other operand is `NaN`. The latter
+means those two cases must be tested *before* any NaN check — a NaN operand does not
+poison them. This is a deliberate widening of §2's "NaN self-propagates" framing: it
+propagates, except where IEEE says a total answer exists.
+
+**Unresolved tension, recorded not settled.** `docs/numeric-types-v1-draft.md` §6.2
+declares `Integer.mod` and `Real.pow` as **total** (`-> a`), which contradicts §5 above,
+where the `Maybe`-returning signatures are a standing commitment. Whoever implements
+those classes has to reconcile the two documents; nothing in this change picks a side.

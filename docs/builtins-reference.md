@@ -285,9 +285,17 @@ This `where` form is intentionally small in v0:
 - bindings may use either a single name or tuple destructuring with names / `_`
 - bindings are non-recursive and may use only function parameters and earlier local bindings
 
-Math module (in `stdlib/math.sprout`):
+Math modules — split by numeric type, since Sprout has no overloading and a single
+name cannot serve both. Each module therefore uses plain, unprefixed names:
 
-- Int-only helper surface; this does not add `Float`, `Decimal`, or fixed-width integer types to v0
+| module | file | type |
+|---|---|---|
+| `stdlib.math.int` | `stdlib/math/int.sprout` | `Int` |
+| `stdlib.math` | `stdlib/math.sprout` | `Double` |
+
+Integer math (`stdlib.math.int`) — this does not add `Float`, `Decimal`, or fixed-width
+integer types to v0:
+
 - `abs(x) -> Int`
 - `min(x, y) -> Int`
 - `max(x, y) -> Int`
@@ -300,7 +308,7 @@ Math module (in `stdlib/math.sprout`):
 - `is_even(x) -> Bool`
 - `is_odd(x) -> Bool`
 
-Math semantics:
+Integer math semantics:
 
 - `mod(x, n)` is Euclidean modulo
 - when `n > 0`, `mod(x, n)` returns `Just r` with `0 <= r < n`
@@ -310,9 +318,40 @@ Math semantics:
 - the current native backend still lowers `Int` to `i64`, so overflow-sensitive results for `abs`, `pow`, `gcd`, and `lcm` are not yet backend-independent outside the backend's current representable range
 - this is a v0 implementation limitation, not the intended long-term meaning of `Int`
 
+Double math (`stdlib.math`) — all pure Sprout, **no C builtins**; `Double` is an
+experimental extension rather than normative v0:
+
+- `pi -> Double`, `nan -> Double`, `is_nan(x) -> Bool`
+- `abs(x) -> Double`, `clamp(x, lo, hi) -> Double`, `lerp(a, b, t) -> Double`
+- `floor(x) -> Double`
+- `sqrt(x) -> Double`, `cbrt(x) -> Double`
+- `exp(x) -> Double`, `ln(x) -> Double`
+- `log2(x) -> Double`, `log10(x) -> Double`, `log(x, base) -> Double`
+- `pow(x, y) -> Double`
+- `sin(x)`, `cos(x)`, `tan(x)`, `atan(x)`, `atan2(y, x)`, `radians(deg)` — all `-> Double`
+
+Double math semantics:
+
+- Out-of-domain arguments give IEEE `NaN` / `±inf` rather than `Maybe` (Rule 2 of
+  `docs/math-partiality-v0.md`), detected with `is_nan`. So `sqrt(-4.0)` and `ln(-1.0)`
+  are `NaN`, `ln(0.0)` is `-inf`, and a negative `pow` base with a fractional exponent
+  is `NaN`.
+- `cbrt` is defined on the whole real line — a negative argument is **in** domain
+  (`cbrt(-8.0) == -2.0`), unlike `sqrt`.
+- `pow(x, y)` follows C99/IEEE F.9.4.4, which differs from Python: `pow(0.0, -1.0)` is
+  `+inf` rather than an error, and `pow(x, 0.0)` / `pow(1.0, y)` are `1.0` even when the
+  other operand is `NaN`.
+- `pow` with an integer exponent is computed by exact binary exponentiation, so
+  `pow(t, 4.0)` equals `t*t*t*t` bit for bit.
+- Measured accuracy is ~1e-13 relative or better across the full exponent range; see
+  `docs/math-transcendental-v0.md` for the per-function figures and
+  `bench/results-2026-08-06-math-transcendental.md` for speed against libm.
+- `log(x, base)` takes the argument first, matching the `log2`/`log10` shape:
+  `log(8.0, 2.0) == 3.0`. Base 1 has no logarithm, so `log(x, 1.0)` is `±inf`.
+
 For module code, prefer:
-`import stdlib.math as math`
-then call helpers like `math.mod(...)` and `math.gcd(...)`.
+`import stdlib.math as math` and/or `import stdlib.math.int as imath`,
+then call helpers like `imath.mod(...)`, `imath.gcd(...)`, `math.exp(...)`.
 
 Example usage:
 
