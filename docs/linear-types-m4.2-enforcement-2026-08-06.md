@@ -19,12 +19,24 @@ makes that an error.
 ## 2. Goals / non-goals
 
 **Goals**
-- Enforce consume-exactly-once for linear-typed **function parameters** and **do-block `let`
-  bindings**, across all control flow (`if`, `match`) with full **convergence** checking.
+- Enforce consume-exactly-once for **every** binder that can hold a linear value: function
+  parameters, do-block `let`, **match-arm pattern variables** (a var pattern aliases the whole
+  linear scrutinee; a constructor/tuple sub-pattern binds a linear field — the "viral" case),
+  and **`<-` do-bind** variables. Across all control flow (`if`, `match`) with full
+  **convergence** checking.
+- Enforce it at **every body-bearing declaration**: `fn`, top-level `let`, and instance methods.
 - Precise diagnostics: reuse (used twice), leak (used zero times), branch divergence (consumed
   on one path but not another).
 - Keep linearity **out of type inference** — the analysis is a post-pass over the typed AST,
   not new machinery in `infer_expr`.
+
+> **Correction (2026-08-06).** The first cut of this milestone tracked only function-param and
+> do-`let` binders and ran only on `fn` bodies. An adversarial code review found that a linear
+> value aliased through a match var-pattern (`let g = f in …`, which desugars to one), a do-bind,
+> or a lambda param — or misused in a top-level `let`/instance-method body — silently bypassed
+> the check. The scope above (all binders, all bodies) is the corrected, sound version. Binder
+> types are recovered by structurally matching the pattern against the value type
+> (`linear_check.pattern_linear_binders`). Lesson: test *aliased* misuse, not just direct.
 
 **Non-goals (deferred, stated plainly)**
 - **Higher-order linearity.** A linear-typed **lambda parameter** and a linear binding

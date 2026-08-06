@@ -1,0 +1,14 @@
+module main
+
+# M4.2: a linear lambda PARAMETER is loud-rejected (higher-order linearity is
+# deferred — a closure may run 0..n times, so its linear params can't yet be
+# tracked). Even a single use is rejected: the point is the deferred feature, not
+# the use count.
+
+type linear File = File Int
+
+fn use_file(f: File) -> Int = match f with | File n -> n
+
+fn via() -> Int = (\g -> use_file(g)) (File(7))
+
+fn main() -> Unit !{IO} = print(to_string(via()))

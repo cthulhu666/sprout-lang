@@ -1009,17 +1009,17 @@ and `docs/linear-types-m4.2-enforcement-2026-08-06.md`. Deferred, in the order t
   0..n times and its call count is untracked. Lift this: track linear captures against closure
   arity/call-count, or adopt a borrowing form (see **Borrowing** below). Known-hard (Linear Haskell
   shipped it incomplete).
-- [ ] `P2` **Pattern-bound linear vars (viral consumption).** M4.2 tracks function-param and
-  do-`let` linear bindings, but not linear vars introduced by a pattern (`match h with | Handle f
-  -> …` where `f`'s type is itself `linear`). Under per-declaration non-viral linearity this is
-  rare (a linear type usually wraps a non-linear payload), but a linear-wrapping-linear type
-  leaves `f` unenforced. Fix: resolve constructor field types at the match arm and extend
-  `linvars` with linear pattern binders (`linear_check.arm_consumed`).
-- [ ] `P2` **Enforcement skips instance-method bodies.** The M4.2 check is wired into
-  `check_fn_body`'s `ast.FnDecl` arm only; typeclass instance-method bodies are checked on a
-  separate path (`TypedInstanceMethod`) and bypass linear enforcement. A linear-typed parameter
-  or do-`let` inside an instance method is currently unchecked. Wire `linear_check.check_fn_linear`
-  into the instance-method checking path too.
+- [x] **Pattern-bound linear vars (match var-pattern alias + viral field) — DONE** (2026-08-06,
+  post-review soundness fix). `linear_check.pattern_linear_binders` recovers each pattern-bound
+  variable's type (structurally matching the pattern against the value type) and tracks the linear
+  ones exactly-once per arm; covers the `let..in` alias, `match | g ->`, and the linear-field case.
+- [x] **`<-` do-bind of a linear payload — DONE** (2026-08-06). `linear_check.lin_do_bind` tracks
+  linear do-bind variables. *Known over-strict edge:* the bound var's type is taken as the last
+  type-argument of the RHS (monad kind is not recoverable in the post-pass), so an effectful bind
+  of a non-linear container of a linear (`x <- getBox()` where `Box File` is non-linear) is
+  conservatively rejected. Sound; relax when do-block monad info is threaded to the pass.
+- [x] **Enforcement at top-level `let` and instance-method bodies — DONE** (2026-08-06). Wired via
+  `letdecl_linear_gate` (LetDecl) and `fn_linear_gate` in `check_instance_method`.
 - [ ] `P3` **Containment virality.** Linearity is per-declaration: a record that merely *contains*
   a linear field is not itself linear (contrast Austral, which computes linearity by containment).
   Decide whether to adopt virality; if so, compute a type's linearity from its fields' universes

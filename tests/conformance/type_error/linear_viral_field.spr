@@ -1,0 +1,16 @@
+module main
+
+# M4.2 soundness (viral): a linear type whose field is ITSELF linear. Destructuring
+# `w` consumes `w` once (fine), but the extracted field `f : File` is also linear
+# and must be tracked — here it is used twice.
+
+type linear File = File Int
+type linear Wrap = Wrap File
+
+fn use_file(f: File) -> Int = match f with | File n -> n
+
+fn dup(w: Wrap) -> Int =
+  match w with
+  | Wrap f -> use_file(f) + use_file(f)
+
+fn main() -> Unit !{IO} = print(to_string(dup(Wrap (File(7)))))

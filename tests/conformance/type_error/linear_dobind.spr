@@ -1,0 +1,18 @@
+module main
+
+# M4.2 soundness: a `<-` do-bind whose payload is linear binds a linear variable.
+# `x : File` (the payload of `Maybe File`) must be tracked; here it is used twice.
+
+type linear File = File Int
+
+fn use_file(f: File) -> Int = match f with | File n -> n
+
+fn dup_do(m: Maybe File) -> Maybe Int =
+  do
+    x <- m
+    Just(use_file(x) + use_file(x))
+
+fn main() -> Unit !{IO} =
+  match dup_do(Just (File(7))) with
+  | Just n -> print(to_string(n))
+  | Nothing -> print("none")
