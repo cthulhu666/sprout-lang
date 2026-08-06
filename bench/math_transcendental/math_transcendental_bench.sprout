@@ -1,0 +1,104 @@
+module main
+
+# Microbenchmark for the pure-Sprout Double transcendental layer in stdlib/math.sprout
+# (exp, ln, log10, cbrt, pow), measured against the C libm reference in
+# libm_reference.c over the SAME iteration count and the SAME argument sweep.
+#
+# Two things make the numbers meaningful:
+#
+# 1. Each loop is declared `!{IO}` even though its body is pure arithmetic, so the
+#    do-block below sequences it strictly between the two time_now_micros() reads.
+#    With a pure signature the call would be free to float outside the timed window.
+#
+# 2. The `baseline` row runs the identical loop and identical argument arithmetic with
+#    NO math call. Subtract it to get the per-call cost of the function itself rather
+#    than of the harness — at 200k iterations the loop is not free.
+#
+# The accumulator is printed as a checksum so no call can be optimised away, and so a
+# divergence between the Sprout and C runs is visible rather than silent.
+
+import stdlib.math (exp, ln, log10, cbrt, pow)
+
+let reps = 2000000
+let step = 0.000005
+
+# Shared argument sweep, mirrored exactly in libm_reference.c: i*step over
+# [0, 10) for 200k reps. Wide enough that the range reductions do real work
+# (exp's k spans 0..14, ln's spans the whole mantissa range) rather than
+# repeatedly hitting one cached path.
+fn arg(i: Int) -> Double =
+  to_double(i) * step
+
+fn loop_baseline(i: Int, acc: Double) -> Double !{IO} =
+  if i >= reps then acc
+  else loop_baseline(i + 1, acc + arg(i))
+
+fn loop_exp(i: Int, acc: Double) -> Double !{IO} =
+  if i >= reps then acc
+  else loop_exp(i + 1, acc + exp(arg(i)))
+
+# ln and cbrt need a strictly positive argument, so the sweep is offset by 0.001.
+fn loop_ln(i: Int, acc: Double) -> Double !{IO} =
+  if i >= reps then acc
+  else loop_ln(i + 1, acc + ln(arg(i) + 0.001))
+
+fn loop_log10(i: Int, acc: Double) -> Double !{IO} =
+  if i >= reps then acc
+  else loop_log10(i + 1, acc + log10(arg(i) + 0.001))
+
+fn loop_cbrt(i: Int, acc: Double) -> Double !{IO} =
+  if i >= reps then acc
+  else loop_cbrt(i + 1, acc + cbrt(arg(i) + 0.001))
+
+# Fractional exponent — routes through exp(y * ln x), the slow path.
+fn loop_pow_frac(i: Int, acc: Double) -> Double !{IO} =
+  if i >= reps then acc
+  else loop_pow_frac(i + 1, acc + pow(arg(i) + 1.0, 2.5))
+
+# Integer exponent — routes through exact binary exponentiation. This is the
+# Stefan-Boltzmann shape (T^4), and the row that should be FASTER than libm, since
+# libm's pow has no reason to special-case a small integer exponent.
+fn loop_pow_int(i: Int, acc: Double) -> Double !{IO} =
+  if i >= reps then acc
+  else loop_pow_int(i + 1, acc + pow(arg(i) + 1.0, 4.0))
+
+# One line per row, built as a single string. Two traps this avoids: `print` appends
+# its own newline on every call, so a print-per-field emits a field-per-line; and
+# polymorphic `print` on a Double emits the raw i64 bit pattern, not the number
+# (999995.0 comes out as 4696837103735013376). `to_string` routes through the
+# ToString Double instance and formats properly.
+fn report(label: String, us: Int, checksum: Double) -> Unit !{IO} =
+  print(string_concat_many([label, " us=", int_to_string(us),
+                            " checksum=", to_string(checksum)]))
+
+fn main() -> Unit !{IO} =
+  do
+    print(string_concat_many(["reps=", int_to_string(reps)]))
+    t0 <- time_now_micros()
+    s_base <- loop_baseline(0, 0.0)
+    t1 <- time_now_micros()
+    _ <- report("baseline", t1 - t0, s_base)
+    t2 <- time_now_micros()
+    s_exp <- loop_exp(0, 0.0)
+    t3 <- time_now_micros()
+    _ <- report("exp", t3 - t2, s_exp)
+    t4 <- time_now_micros()
+    s_ln <- loop_ln(0, 0.0)
+    t5 <- time_now_micros()
+    _ <- report("ln", t5 - t4, s_ln)
+    t6 <- time_now_micros()
+    s_log10 <- loop_log10(0, 0.0)
+    t7 <- time_now_micros()
+    _ <- report("log10", t7 - t6, s_log10)
+    t8 <- time_now_micros()
+    s_cbrt <- loop_cbrt(0, 0.0)
+    t9 <- time_now_micros()
+    _ <- report("cbrt", t9 - t8, s_cbrt)
+    t10 <- time_now_micros()
+    s_powf <- loop_pow_frac(0, 0.0)
+    t11 <- time_now_micros()
+    _ <- report("pow_frac", t11 - t10, s_powf)
+    t12 <- time_now_micros()
+    s_powi <- loop_pow_int(0, 0.0)
+    t13 <- time_now_micros()
+    report("pow_int", t13 - t12, s_powi)
