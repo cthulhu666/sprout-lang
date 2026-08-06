@@ -406,7 +406,15 @@ now pins both halves — the identity holding at 5772 *and* failing to hold in g
 
 The module split invalidated `tests/golden/ir/examples__astar.sprout.ll`, which still
 referenced `@stdlib.math.fabs` and `@stdlib.math.int_abs`. This escaped CI because
-`scripts/ir_golden_diff.sh` is wired into **no** `just` target and no workflow, so
-`just test` and `gate-quick` were both green over a stale corpus. Snapshots regenerated;
-the gap in the gating is filed in `BACKLOG.md`, since a corpus nothing checks will rot
-again.
+`scripts/ir_golden_diff.sh` was wired into **no** `just` target and no workflow, so
+`just test` and `gate-quick` were both green over a stale corpus. Snapshots were
+regenerated as part of this work.
+
+**Resolved 2026-08-06** (same day, separate change): the gating gap itself is closed.
+`just ir-golden-diff` now runs in `gate` and `ci-fast-gates`, so CI blocks a stale
+golden. The interesting part was the second-order finding — the corpus, both scripts,
+and 57 goldens had all been *built*, and the `BACKLOG.md` item requesting them was
+still open, because nobody had wired the last step. So `gate-audit` gained assertion B:
+every `scripts/*.sh` must be reachable from the justfile or a `.claude` hook, or be
+allowlisted with a stated reason. Two further dormant gates surfaced immediately
+(`ir_byte_identical_check.sh`, and `gate-audit` itself, which CI had never run).

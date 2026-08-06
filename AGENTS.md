@@ -38,8 +38,9 @@ For coding tasks, work is done only when **all applicable** items below are true
 9. **Compiler-source changes** (any edit under `stdlib/compiler/`) — bootstrap seed: run `just refresh-seed` and stage the updated `bootstrap/compile_driver.ll`. CI's `just verify-bootstrap-fixed-point` gates on this; a stale seed blocks all CI gates. Use the 2-step bootstrap if the committed seed predates a parser change (see [docs/debugging.md §2-Step Bootstrap Protocol](docs/debugging.md#2-step-bootstrap-protocol)).
 10. **Runtime changes** (any edit to `runtime/sprout_runtime.c`) — APPROVED_BUILTINS: every newly-added `long long <name>(…)` function is also listed in `runtime/APPROVED_BUILTINS` with an inline justification explaining why the operation cannot be done in Sprout. Per "Builtin vs Stdlib" rules 4–6.
 11. **Bootstrap/runtime changes** (any edit under `bootstrap/` or to `runtime/sprout_runtime.c`) — example canary: `examples/tuples.sprout`, `examples/factorial.sprout`, `examples/maybe_map.sprout`, `examples/typeclass_collections_demo.sprout`, `examples/fizzbuzz.sprout` each compile *and run* to completion without crash. (`just compile-examples-stage1` only covers compile; running these is currently a manual gate until CI covers it.)
-12. The changes are committed.
-13. A self-review has been performed before handoff.
+12. **Codegen-affecting changes** (any edit that can alter emitted IR — `stdlib/compiler/`, `stdlib/`, the prelude, or a module's public name surface) — golden IR: `just ir-golden-diff` passes. If it reports diffs, **read them before regenerating**: confirm each shift is the change you intended, then run `just ir-golden-snapshot` and stage `tests/golden/ir/`. Regenerating an unread diff launders a regression into an "expected" snapshot, which is the one way this gate can be defeated.
+13. The changes are committed.
+14. A self-review has been performed before handoff.
 
 **Verification notes:**
 - During implementation, run individual test files for fast feedback (see "Code and Testing" §How to run tests); `mise exec -- just test` is the full gate required for #5.
