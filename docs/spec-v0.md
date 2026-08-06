@@ -751,8 +751,11 @@ identifier everywhere else (no reserved word).
 **Semantics — consume exactly once.** A value of a linear type must be used
 *exactly once* in a function body: not zero times (a leaked resource), and not
 more than once (use-after-consume). "Use" means any reference to the binding,
-including as the base of a field access (`p.x` uses `p`). Enforcement covers
-**function parameters** and **do-block `let` bindings** of a linear type, and is
+including as the base of a field access (`p.x` uses `p`). Enforcement covers every
+binder that can hold a linear value — **function parameters**, **do-block `let`**,
+**match-arm pattern variables** (a variable pattern aliases the whole linear
+scrutinee; a constructor/tuple sub-pattern binds a linear field), and **`<-`
+do-bind** variables — in `fn`, top-level `let`, and instance-method bodies, and is
 checked on every control-flow path:
 
 - **Reuse** — a linear binding referenced more than once along a path is rejected.

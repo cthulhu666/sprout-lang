@@ -780,7 +780,11 @@ fn arity_marker(n: Int) -> types.Scheme =
 # enforcement is M4.2. See docs/linear-types-m4-scoping-2026-08-01.md.
 fn mark_type_multiplicity(name: String, mult: ast.Multiplicity, env: Dict types.Scheme) -> Dict types.Scheme =
   match mult with
-  | ast.Linear -> dict_set("@linear:" ++ name, types.mono(types.TConst(types.type_id("linear"))), env)
+  # Also set a single @any_linear gate so a linear-free program skips the whole
+  # M4.2 check (and its full-body substitution) cheaply. See linear_check.
+  | ast.Linear ->
+      dict_set("@any_linear", types.mono(types.TConst(types.type_id("linear"))),
+        dict_set("@linear:" ++ name, types.mono(types.TConst(types.type_id("linear"))), env))
   | ast.Unrestricted -> env
 
 # True when the named type constructor was declared linear (see mark_type_multiplicity).
@@ -4747,33 +4751,7 @@ fn typecheck_decl(
             # inferred RHS type before generalization, narrowing the scheme.
             match apply_let_annotation(anno, s1raw, typed_ast.typed_expr_type(typed_expr), alias_env, name) with
             | Err msg -> TypedDeclErr(let_pos, msg)
-            | Ok s1 ->
-                # Value restriction (W3/F-VALRESTR): a syntactic value generalizes;
-                # a non-value (function call, if/match/do, ...) does not. A non-value
-                # whose type still has free type variables is ambiguous — it can be
-                # neither generalized (unsound: `mutvec_new(1, Nil)` written at Int and
-                # read at String) nor pinned to one type (no whole-program substitution
-                # threads across decls) — so it is rejected, as SML rejects
-                # ungeneralizable top-level type variables.
-                if is_syntactic_value(expr) then
-                  TypedDeclOk(
-                    typed_ast.TLetDecl(name, typed_expr),
-                    GlobalEnv(dict_set(name,
-                      unifier.generalize(env_ftv, s1, eff_subst,
-                        typed_ast.typed_expr_type(typed_expr), types.EffectPure),
-                      global_env_dict(env))),
-                    env_ftv)
-                else
-                  match types.list_diff(types.ftv(unifier.apply_subst(s1, typed_ast.typed_expr_type(typed_expr))), env_ftv) with
-                  | [_ | _] ->
-                      TypedDeclErr(let_pos, "value restriction: non-value binding '" ++ name ++ "' has an ambiguous polymorphic type " ++ types.type_to_string(unifier.apply_subst(s1, typed_ast.typed_expr_type(typed_expr))) ++ "; bind a value or add a concrete type annotation")
-                  | Nil ->
-                      TypedDeclOk(
-                        typed_ast.TLetDecl(name, typed_expr),
-                        GlobalEnv(dict_set(name,
-                          types.mono(unifier.apply_subst(s1, typed_ast.typed_expr_type(typed_expr))),
-                          global_env_dict(env))),
-                        env_ftv)
+            | Ok s1 -> finish_let_decl(name, expr, typed_expr, s1, let_pos, env, env_ftv, eff_subst)
   | ast.AliasDecl _ _ _ _ ->
       TypedDeclOk(typed_ast.TPassThrough(decl), env, env_ftv)
   | ast.ClassDecl class_name type_params methods superclasses _ ->
@@ -5360,6 +5338,58 @@ fn tuple_has_const(items: List types.Type) -> Bool =
   | Nil -> false
   | Cons h t -> if type_has_const(h) then true else tuple_has_const(t)
 
+# M4.2 linear check, gated on the program declaring any linear type. When it does
+# not, skip the check AND the full-body substitution copy (evaluated only inside
+# the `if`), so linear-free compilation pays nothing.
+fn fn_linear_gate(params: List ast.Param, s2: Dict types.Type, inst_type: types.Type,
+                  typed_body: typed_ast.TypedExpr, fn_pos: source.SourcePos,
+                  env: Dict types.Scheme) -> linear_check.LinCheck =
+  if linear_check.program_has_linear(env) then
+    linear_check.check_fn_linear(params, unifier.apply_subst(s2, inst_type),
+      apply_subst_typed_expr(s2, typed_body), fn_pos, env)
+  else linear_check.LinPass
+
+# Same gate for a top-level `let` body (no params to leak-check).
+fn letdecl_linear_gate(s1: Dict types.Type, typed_expr: typed_ast.TypedExpr,
+                       env: GlobalEnv) -> linear_check.LinCheck =
+  if linear_check.program_has_linear(global_env_dict(env)) then
+    linear_check.check_body_linear(apply_subst_typed_expr(s1, typed_expr), global_env_dict(env))
+  else linear_check.LinPass
+
+# The M4.2 linear gate + value-restriction generalization for a top-level `let`,
+# extracted so the LetDecl arm body is a plain call (keeps its match chain shallow).
+fn finish_let_decl(name: String, expr: ast.Expr, typed_expr: typed_ast.TypedExpr,
+                   s1: Dict types.Type, let_pos: source.SourcePos, env: GlobalEnv,
+                   env_ftv: List String, eff_subst: Dict types.Effect) -> TypedDeclResult =
+  match letdecl_linear_gate(s1, typed_expr, env) with
+  | linear_check.LinFail lp lm -> TypedDeclErr(lp, lm)
+  | linear_check.LinPass ->
+      # Value restriction (W3/F-VALRESTR): a syntactic value generalizes; a
+      # non-value (function call, if/match/do, ...) does not. A non-value whose
+      # type still has free type variables is ambiguous — neither generalizable
+      # (unsound: `mutvec_new(1, Nil)` written at Int and read at String) nor
+      # pinnable to one type — so it is rejected, as SML rejects ungeneralizable
+      # top-level type variables.
+      if is_syntactic_value(expr) then
+        TypedDeclOk(
+          typed_ast.TLetDecl(name, typed_expr),
+          GlobalEnv(dict_set(name,
+            unifier.generalize(env_ftv, s1, eff_subst,
+              typed_ast.typed_expr_type(typed_expr), types.EffectPure),
+            global_env_dict(env))),
+          env_ftv)
+      else
+        match types.list_diff(types.ftv(unifier.apply_subst(s1, typed_ast.typed_expr_type(typed_expr))), env_ftv) with
+        | [_ | _] ->
+            TypedDeclErr(let_pos, "value restriction: non-value binding '" ++ name ++ "' has an ambiguous polymorphic type " ++ types.type_to_string(unifier.apply_subst(s1, typed_ast.typed_expr_type(typed_expr))) ++ "; bind a value or add a concrete type annotation")
+        | Nil ->
+            TypedDeclOk(
+              typed_ast.TLetDecl(name, typed_expr),
+              GlobalEnv(dict_set(name,
+                types.mono(unifier.apply_subst(s1, typed_ast.typed_expr_type(typed_expr))),
+                global_env_dict(env))),
+              env_ftv)
+
 fn check_fn_body(
   state: unifier.InferState,
   decl: ast.Decl,
@@ -5389,8 +5419,9 @@ fn check_fn_body(
         | Nothing ->
             # M4.2: enforce consume-exactly-once for linear-typed bindings, on the
             # fully-substituted body/type. A violation becomes a BodyErr, surfacing
-            # through the same path as any type error. See linear_check.sprout.
-            match linear_check.check_fn_linear(params, unifier.apply_subst(s2, inst_type), apply_subst_typed_expr(s2, typed_body), fn_pos, env) with
+            # through the same path as any type error. Gated so a linear-free
+            # program skips the check and its substitution copy. See linear_check.
+            match fn_linear_gate(params, s2, inst_type, typed_body, fn_pos, env) with
             | linear_check.LinFail lp lm -> (typed_ast.BodyErr(lp, lm), dict_empty(), Nil)
             | linear_check.LinPass ->
                 (typed_ast.BodyOk(resolve_dispatch_typed_expr(fwd_env, s2, typed_body), unifier.apply_subst(s2, inst_type)),
@@ -5667,12 +5698,22 @@ fn check_instance_method(
         | InferOk typed_body s1 _ _ ->
             match unifier.unify_types(s1, typed_ast.typed_expr_type(typed_body), fn_return_type(inst_type, list_length(params))) with
             | Err e -> InstanceMethodErr(typed_ast.typed_expr_pos(typed_body), "Return type mismatch in instance method " ++ name ++ ": " ++ e)
-            | Ok s2 ->
-                InstanceMethodOk(
-                  typed_ast.TypedInstanceMethod(name, params, ret_maybe, eff_maybe, resolve_dispatch_typed_expr(body_env, s2, typed_body)))
+            | Ok s2 -> finish_instance_method(name, params, ret_maybe, eff_maybe, body_env, s2, inst_type, typed_body, env)
 
 fn instance_method_err(name: String, pos: source.SourcePos, msg: String) -> InstanceMethodResult =
   # Previously: lenient short-circuit that returned a `dummy_unit()`-bodied
   # method on Unknown-variable / Unknown-constructor errors. Now hard error,
   # matching the change to `fn_body_err`.
   InstanceMethodErr(pos, msg ++ " in instance method " ++ name)
+
+# M4.2 gate + result construction for an instance method, extracted so the arm
+# body is a plain call (keeps the enclosing match chain shallow).
+fn finish_instance_method(name: String, params: List ast.Param, ret_maybe: Maybe ast.TypeExpr,
+                          eff_maybe: Maybe (List String), body_env: Dict types.Scheme,
+                          s2: Dict types.Type, inst_type: types.Type,
+                          typed_body: typed_ast.TypedExpr, env: Dict types.Scheme) -> InstanceMethodResult =
+  match fn_linear_gate(params, s2, inst_type, typed_body, typed_ast.typed_expr_pos(typed_body), env) with
+  | linear_check.LinFail lp lm -> InstanceMethodErr(lp, lm)
+  | linear_check.LinPass ->
+      InstanceMethodOk(
+        typed_ast.TypedInstanceMethod(name, params, ret_maybe, eff_maybe, resolve_dispatch_typed_expr(body_env, s2, typed_body)))

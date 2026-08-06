@@ -1,0 +1,40 @@
+import stdlib.test (check_eq, run_suite)
+
+# M4.2 tracks linear values through ALL binder forms (post-review soundness fix).
+# This file exercises the VALID single-use shapes for each; the reuse/leak
+# counterparts live in tests/conformance/type_error/linear_alias_*, linear_dobind,
+# linear_viral_field. See docs/linear-types-m4.2-enforcement-2026-08-06.md.
+
+type linear File = File Int
+type linear Wrap = Wrap File
+
+fn use_file(f: File) -> Int = match f with | File n -> n
+
+# let..in alias, used once.
+fn via_let(f: File) -> Int =
+  let g = f
+  in use_file(g)
+
+# match variable pattern, used once.
+fn via_match(f: File) -> Int =
+  match f with
+  | g -> use_file(g)
+
+# viral: destructure a linear field, used once.
+fn via_field(w: Wrap) -> Int =
+  match w with
+  | Wrap f -> use_file(f)
+
+# do-bind a linear payload, used once.
+fn via_dobind(m: Maybe File) -> Maybe Int =
+  do
+    x <- m
+    Just(use_file(x))
+
+fn main() -> Unit !{IO} =
+  run_suite("linear_binders", [
+    check_eq("let..in alias once", via_let(File(1)), 1),
+    check_eq("match var once", via_match(File(2)), 2),
+    check_eq("viral field once", via_field(Wrap (File(3))), 3),
+    check_eq("do-bind once", via_dobind(Just (File(4))), Just(4))
+  ])

@@ -23,11 +23,13 @@ import stdlib.compiler.source as source
 # Consume-exactly-once on every control-flow path follows: disjointness bounds a
 # path at <=1, scope-membership forces >=1, convergence makes all paths agree.
 #
-# Scope (M4.2): function parameters and do-block `let` bindings of a linear type.
-# Deferred (loud-rejected, never silently accepted): a linear binding captured by
-# a lambda (higher-order linearity, M4.4). Pattern-bound linear vars (the viral
-# case) are out of scope; per-declaration linearity is non-viral, so a linear
-# type wrapping a non-linear payload binds non-linear pattern vars.
+# Scope (M4.2): EVERY binder that can hold a linear value — function parameters,
+# do-block `let`, match-arm pattern variables (a var pattern aliases the whole
+# linear scrutinee; a constructor/tuple sub-pattern binds a linear field, resolved
+# by `pattern_linear_binders`), and `<-` do-bind vars — in `fn`, top-level `let`,
+# and instance-method bodies. Deferred (loud-rejected, never silently accepted):
+# a linear lambda parameter and a linear binding captured by a lambda body
+# (higher-order linearity, M4.4 — a closure may run 0..n times).
 
 # A consumed linear binding: its name, and where it was consumed.
 export type LinUse (..) = LinUse String source.SourcePos
@@ -94,6 +96,138 @@ fn type_is_linear(t: types.Type, env: Dict types.Scheme) -> Bool =
   | Just _ -> true
   | Nothing -> false
 
+# True when the program declares any linear type (a cheap gate that lets a
+# linear-free compilation skip the whole pass — set alongside @linear:<name>).
+export fn program_has_linear(env: Dict types.Scheme) -> Bool =
+  match dict_get("@any_linear", env) with
+  | Just _ -> true
+  | Nothing -> false
+
+# --- resolving the types of pattern-bound variables (for linear tracking) ---
+#
+# A pattern that binds a variable to a linear value (or a linear field of one)
+# introduces a NEW linear binding that must itself be consumed exactly once — a
+# plain `VarPattern` aliases the WHOLE scrutinee; a constructor sub-pattern binds
+# a field. We recover each bound variable's type by matching the pattern against
+# the (already fully-substituted) value type, and report the linear ones.
+
+fn ctor_result_ty(t: types.Type) -> types.Type =
+  match t with
+  | types.TFunc _ ret _ -> ctor_result_ty(ret)
+  | _ -> t
+
+fn ctor_param_tys(t: types.Type) -> List types.Type =
+  match t with
+  | types.TFunc p rest _ -> Cons(p, ctor_param_tys(rest))
+  | _ -> Nil
+
+# Read off the constructor's tyvar instantiation by structurally aligning its
+# declared result type with the concrete scrutinee type. No unifier needed: the
+# scrutinee is already concrete, so each tyvar maps to the aligned subtree.
+fn struct_match(decl: types.Type, concrete: types.Type, acc: Dict types.Type) -> Dict types.Type =
+  match decl with
+  | types.TVar name -> dict_set(types.tyvar_identity(name), concrete, acc)
+  | types.TApp f x ->
+      match concrete with
+      | types.TApp g y -> struct_match(x, y, struct_match(f, g, acc))
+      | _ -> acc
+  | types.TFunc a b _ ->
+      match concrete with
+      | types.TFunc c d _ -> struct_match(b, d, struct_match(a, c, acc))
+      | _ -> acc
+  | types.TTuple items ->
+      match concrete with
+      | types.TTuple citems -> struct_match_list(items, citems, acc)
+      | _ -> acc
+  | _ -> acc
+
+fn struct_match_list(ds: List types.Type, cs: List types.Type, acc: Dict types.Type) -> Dict types.Type =
+  match (ds, cs) with
+  | (Cons d drest, Cons c crest) -> struct_match_list(drest, crest, struct_match(d, c, acc))
+  | _ -> acc
+
+fn apply_tvar_subst(sub: Dict types.Type, t: types.Type) -> types.Type =
+  match t with
+  | types.TVar name ->
+      match dict_get(types.tyvar_identity(name), sub) with
+      | Just concrete -> concrete
+      | Nothing -> t
+  | types.TApp f x -> types.TApp(apply_tvar_subst(sub, f), apply_tvar_subst(sub, x))
+  | types.TFunc a b e -> types.TFunc(apply_tvar_subst(sub, a), apply_tvar_subst(sub, b), e)
+  | types.TTuple items -> types.TTuple(list_map(\i -> apply_tvar_subst(sub, i), items))
+  | _ -> t
+
+# The field types of constructor `ctor` when its result equals `value_type`.
+fn ctor_field_types_at(ctor: String, value_type: types.Type, env: Dict types.Scheme) -> Maybe (List types.Type) =
+  match dict_get(ctor, env) with
+  | Nothing -> Nothing
+  | Just scheme ->
+      match scheme with
+      | types.Scheme _ _ body _ _ ->
+          Just(list_map(\ft -> apply_tvar_subst(struct_match(ctor_result_ty(body), value_type, dict_empty()), ft),
+                        ctor_param_tys(body)))
+
+# The linear-typed variables a pattern binds when matched against `value_type`.
+fn pattern_linear_binders(pat: ast.Pattern, value_type: types.Type, env: Dict types.Scheme) -> List String =
+  match pat with
+  | ast.VarPattern name _ -> if type_is_linear(value_type, env) then Cons(name, Nil) else Nil
+  | ast.WildcardPattern _ -> Nil
+  | ast.IntPattern _ _ -> Nil
+  | ast.BoolPattern _ _ -> Nil
+  | ast.StringPattern _ _ -> Nil
+  | ast.CharPattern _ _ -> Nil
+  | ast.UnitPattern _ -> Nil
+  | ast.TuplePattern pats _ ->
+      match value_type with
+      | types.TTuple items -> pattern_binders_list(pats, items, env)
+      | _ -> Nil
+  | ast.ConstructorPattern ctor subpats _ ->
+      match ctor_field_types_at(ctor, value_type, env) with
+      | Just field_tys -> pattern_binders_list(subpats, field_tys, env)
+      | Nothing -> Nil
+
+fn pattern_binders_list(pats: List ast.Pattern, tys: List types.Type, env: Dict types.Scheme) -> List String =
+  match (pats, tys) with
+  | (Cons p prest, Cons t trest) ->
+      app_names(pattern_linear_binders(p, t, env), pattern_binders_list(prest, trest, env))
+  | _ -> Nil
+
+# In a `x <- m` do-bind the bound variable's type is m's payload. The monad kind
+# (Maybe/Result unwrap vs effectful no-unwrap) isn't recoverable here, so we take
+# the last type argument: sound (catches every linear payload), only over-strict
+# on the rare effectful bind of a non-linear container of a linear.
+fn payload_type(t: types.Type) -> types.Type =
+  match t with
+  | types.TApp _ arg -> arg
+  | _ -> t
+
+fn app_names(a: List String, b: List String) -> List String =
+  match a with
+  | Nil -> b
+  | Cons x rest -> Cons(x, app_names(rest, b))
+
+# Each name in `binders` must appear in `consumed` (else it leaked); returns the
+# first unconsumed one.
+fn unconsumed_binder(binders: List String, consumed: List LinUse) -> Maybe String =
+  match binders with
+  | Nil -> Nothing
+  | Cons b rest -> if luse_member(b, consumed) then unconsumed_binder(rest, consumed) else Just(b)
+
+fn remove_all(names: List String, us: List LinUse) -> List LinUse =
+  match names with
+  | Nil -> us
+  | Cons n rest -> remove_all(rest, luse_remove(n, us))
+
+fn first_linear_param(params: List ast.Param, lam_type: types.Type, env: Dict types.Scheme) -> Maybe String =
+  match params with
+  | Nil -> Nothing
+  | Cons prm rest ->
+      match lam_type with
+      | types.TFunc a b _ ->
+          if type_is_linear(a, env) then Just(param_name(prm))
+          else first_linear_param(rest, b, env)
+      | _ -> Nothing
+
 # --- consumed-set composition ---
 
 fn reuse_msg(name: String) -> String =
@@ -149,7 +283,7 @@ fn lin_consumed(e: typed_ast.TypedExpr, linvars: List String, env: Dict types.Sc
   | typed_ast.TIf c a b _ p -> lin_if(c, a, b, p, linvars, env)
   | typed_ast.TMatch scrut arms _ p -> lin_match(scrut, arms, p, linvars, env)
   | typed_ast.TDo steps _ _ -> lin_do(steps, linvars, env)
-  | typed_ast.TLambda _ body _ p -> lin_lambda(body, p, linvars, env)
+  | typed_ast.TLambda params body lam_type p -> lin_lambda(params, body, lam_type, p, linvars, env)
 
 fn record_field_exprs(fields: List typed_ast.TypedRecordField) -> List typed_ast.TypedExpr =
   match fields with
@@ -183,27 +317,45 @@ fn lin_match(scrut: typed_ast.TypedExpr, arms: List typed_ast.TypedMatchBranch,
   match lin_consumed(scrut, linvars, env) with
   | LinErr ep m -> LinErr(ep, m)
   | LinOk ss ->
-      match arm_sets(arms, linvars, env) with
+      match arm_sets(arms, linvars, typed_ast.typed_expr_type(scrut), env) with
       | LinErr ep m -> LinErr(ep, m)
       | LinOk arm -> seq2(ss, arm)
 
-# All arm bodies must converge to the identical consumed set. Pattern-bound linear
-# vars are out of scope (see module header), so arms are checked under `linvars`.
-fn arm_sets(arms: List typed_ast.TypedMatchBranch, linvars: List String, env: Dict types.Scheme) -> LinRes =
+# All arm bodies must converge to the identical consumed set of OUTER linear
+# bindings. An arm's own pattern-bound linear vars (a var pattern aliasing the
+# whole linear scrutinee, or a linear field) are arm-local: each must be consumed
+# exactly once inside the arm, then removed before the convergence comparison.
+fn arm_sets(arms: List typed_ast.TypedMatchBranch, linvars: List String,
+            scrut_type: types.Type, env: Dict types.Scheme) -> LinRes =
   match arms with
   | Nil -> LinOk(Nil)
-  | [br] -> arm_consumed(br, linvars, env)
+  | [br] -> arm_consumed(br, linvars, scrut_type, env)
   | Cons br rest ->
-      match arm_consumed(br, linvars, env) with
+      match arm_consumed(br, linvars, scrut_type, env) with
       | LinErr p m -> LinErr(p, m)
       | LinOk a ->
-          match arm_sets(rest, linvars, env) with
+          match arm_sets(rest, linvars, scrut_type, env) with
           | LinErr p m -> LinErr(p, m)
           | LinOk b -> alt_converge(a, b, arm_pos(br))
 
-fn arm_consumed(br: typed_ast.TypedMatchBranch, linvars: List String, env: Dict types.Scheme) -> LinRes =
+fn arm_consumed(br: typed_ast.TypedMatchBranch, linvars: List String,
+                scrut_type: types.Type, env: Dict types.Scheme) -> LinRes =
   match br with
-  | typed_ast.TypedMatchBranch _ body -> lin_consumed(body, linvars, env)
+  | typed_ast.TypedMatchBranch pat body ->
+      scope_consumed(pattern_linear_binders(pat, scrut_type, env), body,
+                     typed_ast.typed_expr_pos(body), linvars, env)
+
+# Check `body` with `binders` added to scope: each binder must be consumed exactly
+# once inside (reuse is caught by seq2; a leftover binder is a leak), then removed
+# from the set reported to the enclosing scope.
+fn scope_consumed(binders: List String, body: typed_ast.TypedExpr, leak_pos: source.SourcePos,
+                  linvars: List String, env: Dict types.Scheme) -> LinRes =
+  match lin_consumed(body, app_names(binders, linvars), env) with
+  | LinErr p m -> LinErr(p, m)
+  | LinOk consumed ->
+      match unconsumed_binder(binders, consumed) with
+      | Just leaked -> LinErr(leak_pos, leak_msg(leaked))
+      | Nothing -> LinOk(remove_all(binders, consumed))
 
 fn arm_pos(br: typed_ast.TypedMatchBranch) -> source.SourcePos =
   match br with
@@ -216,7 +368,28 @@ fn lin_do(steps: List typed_ast.TypedDoStep, linvars: List String, env: Dict typ
       match step with
       | typed_ast.TDoLetStep name rhs -> lin_do_let(name, rhs, rest, linvars, env)
       | typed_ast.TDoExprStep e -> lin_do_seq(e, rest, linvars, env)
-      | typed_ast.TDoBindStep _ e -> lin_do_seq(e, rest, linvars, env)
+      | typed_ast.TDoBindStep pat e -> lin_do_bind(pat, e, rest, linvars, env)
+
+# A `<-` do-bind: its pattern binds variables (possibly linear — the payload of a
+# linear-carrying monad) scoped to the remaining steps, each consumed exactly once
+# there. The RHS `e` is sequential-before the rest.
+fn lin_do_bind(pat: ast.Pattern, e: typed_ast.TypedExpr, rest: List typed_ast.TypedDoStep,
+               linvars: List String, env: Dict types.Scheme) -> LinRes =
+  match lin_consumed(e, linvars, env) with
+  | LinErr p m -> LinErr(p, m)
+  | LinOk ec ->
+      lin_do_bind_rest(pattern_linear_binders(pat, payload_type(typed_ast.typed_expr_type(e)), env),
+                       ec, e, rest, linvars, env)
+
+fn lin_do_bind_rest(binders: List String, ec: List LinUse, e: typed_ast.TypedExpr,
+                    rest: List typed_ast.TypedDoStep, linvars: List String,
+                    env: Dict types.Scheme) -> LinRes =
+  match lin_do(rest, app_names(binders, linvars), env) with
+  | LinErr p m -> LinErr(p, m)
+  | LinOk restc ->
+      match unconsumed_binder(binders, restc) with
+      | Just leaked -> LinErr(typed_ast.typed_expr_pos(e), leak_msg(leaked))
+      | Nothing -> seq2(ec, remove_all(binders, restc))
 
 # A do-step whose RHS `e` is sequential-before the remaining steps.
 fn lin_do_seq(e: typed_ast.TypedExpr, rest: List typed_ast.TypedDoStep,
@@ -252,18 +425,24 @@ fn lin_do_let_body(name: String, rhs: typed_ast.TypedExpr, rc: List LinUse,
 fn extend_linvars(is_lin: Bool, name: String, linvars: List String) -> List String =
   if is_lin then Cons(name, linvars) else linvars
 
-# A lambda may run zero or many times, so it must not consume any outer linear
-# binding. Its own linear parameters are deferred (higher-order, M4.4).
-fn lin_lambda(body: typed_ast.TypedExpr, p: source.SourcePos,
-              linvars: List String, env: Dict types.Scheme) -> LinRes =
-  match lin_consumed(body, linvars, env) with
-  | LinErr ep m -> LinErr(ep, m)
-  | LinOk bc ->
-      match bc with
-      | Nil -> LinOk(Nil)
-      | [u | _] ->
-          LinErr(p, "linear value '" ++ luse_name(u)
-            ++ "' captured by a lambda is not yet supported (higher-order linearity is deferred)")
+# A lambda may run zero or many times, so (higher-order linearity, M4.4, deferred)
+# it must neither take a linear parameter nor capture an outer linear binding —
+# both are loud-rejected, never silently accepted.
+fn lin_lambda(params: List ast.Param, body: typed_ast.TypedExpr, lam_type: types.Type,
+              p: source.SourcePos, linvars: List String, env: Dict types.Scheme) -> LinRes =
+  match first_linear_param(params, lam_type, env) with
+  | Just pname ->
+      LinErr(p, "linear lambda parameter '" ++ pname
+        ++ "' is not yet supported (higher-order linearity is deferred)")
+  | Nothing ->
+      match lin_consumed(body, linvars, env) with
+      | LinErr ep m -> LinErr(ep, m)
+      | LinOk bc ->
+          match bc with
+          | Nil -> LinOk(Nil)
+          | [u | _] ->
+              LinErr(p, "linear value '" ++ luse_name(u)
+                ++ "' captured by a lambda is not yet supported (higher-order linearity is deferred)")
 
 # --- entry point ---
 
@@ -274,6 +453,14 @@ export fn check_fn_linear(params: List ast.Param, fn_type: types.Type,
                           body: typed_ast.TypedExpr, fn_pos: source.SourcePos,
                           env: Dict types.Scheme) -> LinCheck =
   linear_result(linear_param_names(params, fn_type, env), body, fn_pos, env)
+
+# Check a body with no parameters (a top-level `let` declaration): there are no
+# linear params to leak, but do-`let`/pattern/lambda binders inside are still
+# enforced by the walk.
+export fn check_body_linear(body: typed_ast.TypedExpr, env: Dict types.Scheme) -> LinCheck =
+  match lin_consumed(body, Nil, env) with
+  | LinErr p m -> LinFail(p, m)
+  | LinOk _ -> LinPass
 
 fn linear_result(linear_params: List String, body: typed_ast.TypedExpr,
                  fn_pos: source.SourcePos, env: Dict types.Scheme) -> LinCheck =

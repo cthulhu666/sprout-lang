@@ -1,0 +1,15 @@
+module main
+
+# M4.2 soundness: aliasing a linear value through `let..in` (which desugars to a
+# match var-pattern) must not defeat consume-exactly-once. `g` binds the whole
+# linear `f`, then is used twice.
+
+type linear File = File Int
+
+fn use_file(f: File) -> Int = match f with | File n -> n
+
+fn dup(f: File) -> Int =
+  let g = f
+  in use_file(g) + use_file(g)
+
+fn main() -> Unit !{IO} = print(to_string(dup(File(7))))

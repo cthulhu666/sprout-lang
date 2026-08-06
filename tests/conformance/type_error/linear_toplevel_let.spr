@@ -1,0 +1,16 @@
+module main
+
+# M4.2 soundness: enforcement must run on top-level `let` binding bodies too, not
+# just `fn` bodies. `f` is a linear do-`let` here, used twice.
+
+type linear File = File Int
+
+fn use_file(f: File) -> Int = match f with | File n -> n
+fn make() -> File = File(7)
+
+let bad =
+  do
+    let f = make()
+    use_file(f) + use_file(f)
+
+fn main() -> Unit !{IO} = print(to_string(bad))
