@@ -1,5 +1,5 @@
 import stdlib.test (check_true, run_suite)
-import stdlib.math (pi, fabs, floor, sqrt, sin, cos, tan, radians, fclamp, lerp, nan, is_nan, atan, atan2)
+import stdlib.math (pi, abs, floor, sqrt, sin, cos, tan, radians, clamp, lerp, nan, is_nan, atan, atan2)
 
 # TDD — the Double math primitives that back the M2 vector/matrix layer.
 # All implemented in PURE Sprout — no C builtins:
@@ -12,9 +12,9 @@ fn close(a: Double, b: Double) -> Bool = dabs(a - b) < 0.000001
 
 fn main() -> Unit !{IO} =
   run_suite("math_double", [
-    # --- fabs ---
-    check_true("fabs(-2.5) == 2.5", fabs(-2.5) == 2.5),
-    check_true("fabs(2.5) == 2.5", fabs(2.5) == 2.5),
+    # --- abs (the Double abs; the Int one is stdlib.math.int.abs) ---
+    check_true("abs(-2.5) == 2.5", abs(-2.5) == 2.5),
+    check_true("abs(2.5) == 2.5", abs(2.5) == 2.5),
     # --- floor (incl. negatives, where round-toward-zero would differ) ---
     check_true("floor(3.7) == 3.0", floor(3.7) == 3.0),
     check_true("floor(5.0) == 5.0", floor(5.0) == 5.0),
@@ -66,13 +66,13 @@ fn main() -> Unit !{IO} =
     check_true("tan(radians(45)) == 1", close(tan(radians(45.0)), 1.0)),
     # Rule 2: tan blows up at the pole (odd multiples of pi/2). Pins the
     # documented out-of-domain behavior so a sin/cos change can't silently break it.
-    check_true("tan(pi/2) blows up (pole)", fabs(tan(pi / 2.0)) > 1000.0),
-    # --- fclamp (Double clamp; mirrors the Int `clamp`, `fabs`-style f-prefix) ---
-    check_true("fclamp below -> lo", fclamp(-1.0, 0.0, 10.0) == 0.0),
-    check_true("fclamp within -> x", fclamp(5.0, 0.0, 10.0) == 5.0),
-    check_true("fclamp above -> hi", fclamp(12.5, 0.0, 10.0) == 10.0),
-    check_true("fclamp at lo edge", fclamp(0.0, 0.0, 10.0) == 0.0),
-    check_true("fclamp at hi edge", fclamp(10.0, 0.0, 10.0) == 10.0),
+    check_true("tan(pi/2) blows up (pole)", abs(tan(pi / 2.0)) > 1000.0),
+    # --- clamp (the Double clamp; the Int one is stdlib.math.int.clamp) ---
+    check_true("clamp below -> lo", clamp(-1.0, 0.0, 10.0) == 0.0),
+    check_true("clamp within -> x", clamp(5.0, 0.0, 10.0) == 5.0),
+    check_true("clamp above -> hi", clamp(12.5, 0.0, 10.0) == 10.0),
+    check_true("clamp at lo edge", clamp(0.0, 0.0, 10.0) == 0.0),
+    check_true("clamp at hi edge", clamp(10.0, 0.0, 10.0) == 10.0),
     # --- lerp (Double-only; exact at these binary-representable points) ---
     check_true("lerp t=0 -> a", lerp(2.0, 8.0, 0.0) == 2.0),
     check_true("lerp t=1 -> b", lerp(2.0, 8.0, 1.0) == 8.0),

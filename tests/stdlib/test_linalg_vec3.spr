@@ -1,5 +1,5 @@
 import stdlib.test (TestState, new_state, assert_true, summary)
-import stdlib.math (fabs)
+import stdlib.math (abs)
 import stdlib.linalg
 
 # TDD — Vec3 on `wrap Vec3 = MutVec Double` over the tested stdlib.mutable
@@ -9,7 +9,7 @@ import stdlib.linalg
 # in a user annotation across modules does not currently canonicalize, so Vec3
 # values only flow into stdlib.linalg's own functions here.
 
-fn close(a: Double, b: Double) -> Bool = fabs(a - b) < 0.000001
+fn close(a: Double, b: Double) -> Bool = abs(a - b) < 0.000001
 
 fn main() -> Unit !{IO} =
   do

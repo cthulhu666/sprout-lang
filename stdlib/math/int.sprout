@@ -1,0 +1,81 @@
+module stdlib.math.int
+import stdlib.collections (Maybe)
+
+# The Int arithmetic layer, split out of `stdlib.math` so the Double layer there can
+# carry the plain names (`abs`, `clamp`, `pow`). Sprout has no overloading, so one name
+# cannot serve both types; the split gives each type unprefixed names in its own module
+# instead of C-style `fabs`/`fclamp` collision markers. Import qualified:
+#
+#   import stdlib.math.int as imath
+#   imath.pow(2, 10)     # Just 1024
+#
+# Partiality convention (docs/math-partiality-v0.md), Rule 1 — an Int out-of-domain
+# argument returns `Maybe` (`mod`, `pow`). `Int` has no spare bottom value: every bit
+# pattern is a valid integer, so a failure cannot be smuggled back as a sentinel without
+# becoming a silent in-band lie. Interim only in the sense of §5: when the Exn effect
+# lands, effectful variants are added *alongside* these, never replacing them — the
+# signatures below are permanent. Rule 2 (IEEE NaN/±inf) governs the Double layer.
+
+fn int_abs(value: Int) -> Int =
+  if value < 0 then 0 - value
+  else value
+
+fn trunc_remainder(value: Int, divisor: Int) -> Int =
+  value - (value / divisor) * divisor
+
+fn euclidean_remainder(value: Int, modulus: Int) -> Int =
+  if r < 0 then r + modulus
+  else r
+  where r = trunc_remainder(value, modulus)
+
+export fn abs(value: Int) -> Int =
+  int_abs(value)
+
+export fn min(left: Int, right: Int) -> Int =
+  if left <= right then left
+  else right
+
+export fn max(left: Int, right: Int) -> Int =
+  if left >= right then left
+  else right
+
+export fn clamp(value: Int, lo: Int, hi: Int) -> Int =
+  max(lo, min(value, hi))
+
+export fn sign(value: Int) -> Int =
+  if value < 0 then -1
+  else if value > 0 then 1
+  else 0
+
+export fn mod(value: Int, modulus: Int) -> Maybe Int =
+  if modulus <= 0 then Nothing
+  else Just(euclidean_remainder(value, modulus))
+
+fn pow_loop(base: Int, exp: Int, acc: Int) -> Int =
+  if exp == 0 then acc
+  else pow_loop(base, exp - 1, acc * base)
+
+export fn pow(base: Int, exp: Int) -> Maybe Int =
+  if exp < 0 then Nothing
+  else Just(pow_loop(base, exp, 1))
+
+# `right` is guarded nonzero and non-negative (int_abs), so the modulus is
+# positive: call the total helper directly instead of matching mod's Maybe.
+fn gcd_loop(left: Int, right: Int) -> Int =
+  if right == 0 then left
+  else gcd_loop(right, euclidean_remainder(left, right))
+
+export fn gcd(left: Int, right: Int) -> Int =
+  gcd_loop(int_abs(left), int_abs(right))
+
+export fn lcm(left: Int, right: Int) -> Int =
+  if left == 0 || right == 0 then 0
+  else int_abs((left / gcd(left, right)) * right)
+
+# The modulus 2 is a positive literal, so the total helper applies directly —
+# no need to match mod's Maybe for a case that cannot occur.
+export fn is_even(value: Int) -> Bool =
+  euclidean_remainder(value, 2) == 0
+
+export fn is_odd(value: Int) -> Bool =
+  is_even(value) == false

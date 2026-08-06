@@ -1,5 +1,5 @@
 module examples.astar
-import stdlib.math (abs)
+import stdlib.math.int (abs)
 import stdlib.mutable (MutVec, mutvec_new, mutvec_get, mutvec_set)
 
 # A* shortest-path on a 100×100 grid.

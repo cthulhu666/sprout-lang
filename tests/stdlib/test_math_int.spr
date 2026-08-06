@@ -1,8 +1,8 @@
 import stdlib.test (check_eq, check_true, check_false, run_suite)
-import stdlib.math (abs, min, max, clamp, sign, mod, pow, gcd, lcm, is_even, is_odd)
+import stdlib.math.int (abs, min, max, clamp, sign, mod, pow, gcd, lcm, is_even, is_odd)
 
 fn main() -> Unit !{IO} =
-  run_suite("math", [
+  run_suite("math_int", [
     check_eq("abs positive", abs(5), 5),
     check_eq("abs negative", abs(-3), 3),
     check_eq("abs zero", abs(0), 0),
@@ -19,12 +19,30 @@ fn main() -> Unit !{IO} =
     check_eq("mod basic", mod(10, 3), Just(1)),
     check_eq("mod exact", mod(9, 3), Just(0)),
     check_eq("mod zero divisor", mod(10, 0), Nothing),
+    # Euclidean, not truncating: the result is always in [0, modulus), so a negative
+    # dividend wraps up rather than staying negative (truncating `%` would give -1).
+    # This is the normative property in spec-v0.md §8 and was previously untested.
+    check_eq("mod negative dividend is non-negative", mod(-1, 3), Just(2)),
+    check_eq("mod negative dividend exact", mod(-9, 3), Just(0)),
+    check_eq("mod negative dividend large", mod(-10, 3), Just(2)),
+    check_eq("mod negative modulus", mod(10, -3), Nothing),
     check_eq("pow positive exp", pow(2, 10), Just(1024)),
     check_eq("pow zero exp", pow(5, 0), Just(1)),
     check_eq("pow negative exp", pow(2, -1), Nothing),
+    check_eq("pow zero base zero exp", pow(0, 0), Just(1)),
+    check_eq("pow negative base odd exp", pow(-2, 3), Just(-8)),
+    check_eq("pow negative base even exp", pow(-2, 2), Just(4)),
     check_eq("gcd basic", gcd(12, 8), 4),
     check_eq("gcd coprime", gcd(7, 13), 1),
+    # gcd/lcm identity and sign edges: gcd is defined on magnitudes, and gcd(0,n) = n.
+    check_eq("gcd with zero", gcd(0, 5), 5),
+    check_eq("gcd both zero", gcd(0, 0), 0),
+    check_eq("gcd negative operands", gcd(-12, 8), 4),
     check_eq("lcm basic", lcm(4, 6), 12),
+    check_eq("lcm with zero", lcm(0, 5), 0),
+    check_eq("lcm negative operands", lcm(-4, 6), 12),
+    check_true("is_even negative", is_even(-4)),
+    check_true("is_odd negative", is_odd(-7)),
     check_true("is_even 0", is_even(0)),
     check_true("is_even 4", is_even(4)),
     check_false("is_even 3", is_even(3)),

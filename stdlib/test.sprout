@@ -1,6 +1,6 @@
 module stdlib.test
 
-import stdlib.math (fabs)
+import stdlib.math (abs)
 
 # ---------------------------------------------------------------------------
 # Minimal unit test framework for Sprout stdlib.
@@ -136,7 +136,7 @@ export fn check_false(label: String, condition: Bool) -> TestCase =
 # renders the message via the monomorphic ToString Double instance. eps is explicit at the
 # call site — the visible tolerance is part of the test.
 export fn check_approx(label: String, actual: Double, expected: Double, eps: Double) -> TestCase =
-  if fabs(actual - expected) < eps then TestCase(label, true, "")
+  if abs(actual - expected) < eps then TestCase(label, true, "")
   else TestCase(label, false,
     "expected " ++ to_string(expected) ++ " +/- " ++ to_string(eps) ++ ", got " ++ to_string(actual))
 
@@ -147,7 +147,7 @@ export fn check_approx(label: String, actual: Double, expected: Double, eps: Dou
 export fn check_approx2(label: String, actual: (Double, Double), ex: Double, ez: Double, eps: Double) -> TestCase =
   match actual with
   | (ax, az) ->
-      if (fabs(ax - ex) < eps) && (fabs(az - ez) < eps) then TestCase(label, true, "")
+      if (abs(ax - ex) < eps) && (abs(az - ez) < eps) then TestCase(label, true, "")
       else TestCase(label, false,
         "expected (" ++ to_string(ex) ++ ", " ++ to_string(ez) ++ ") +/- " ++ to_string(eps)
           ++ ", got (" ++ to_string(ax) ++ ", " ++ to_string(az) ++ ")")
