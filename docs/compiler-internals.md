@@ -4,20 +4,22 @@ Invariants and design constraints to know **before editing** `stdlib/compiler/` 
 
 ## GC ABI Invariants
 
-### Strings and chars travel as `i64` (GC Option C)
+### Strings travel as `i64` (GC Option C)
 
 **Intentional design — do not "correct" it.**
 
-Throughout the IR pipeline (`ast_to_ir.sprout` → `ir_lowering.sprout`), String and Char values are represented as `i64` at the LLVM IR level — a raw pointer cast to an integer. The GC root-tracking table stores all heap roots as `i64`; making strings travel as `i64` throughout IR means every string slot is automatically compatible with the root table without `ptrtoint`/`inttoptr` casts at each GC-safe point.
+Throughout the IR pipeline (`ast_to_ir.sprout` → `ir_lowering.sprout`), String values are represented as `i64` at the LLVM IR level — a raw pointer cast to an integer. The GC root-tracking table stores all heap roots as `i64`; making strings travel as `i64` throughout IR means every string slot is automatically compatible with the root table without `ptrtoint`/`inttoptr` casts at each GC-safe point.
+
+`Char` is `i64` too, but for the opposite reason: it is an **immediate Unicode codepoint**, not a pointer — `'x'` lowers to `add i64 0, 120` via `IRConst`, exactly like `TInt`. Both types being `i64` is what makes this easy to get wrong; the distinction is load-bearing for every rooting decision below.
 
 Implications for IR-pipeline edits:
-- `type_kind.type_is_non_heap_scalar` classifies `Int`/`Bool`/`Char` as scalars; String is heap, so a String SSA value is an `i64` heap handle that must be rooted across GC-triggering ops.
-- String/Char literals lower to a `str_ptr` global coerced to `i64`.
+- `type_kind.type_is_non_heap_scalar` classifies `Int`/`Bool`/`Char`/`Double` as scalars; String is heap, so a String SSA value is an `i64` heap handle that must be rooted across GC-triggering ops.
+- String literals lower to a `str_ptr` global coerced to `i64`. Char literals do **not** — see above.
 - String comparisons must coerce both operands back to `ptr` before calling `str_eq`/`str_compare` (see the `emit_ptr_comparison` lowering in `ir_lowering.sprout`).
 - `str_concat`, `str_slice`, etc.: called with `i64` args, return `i64`.
 - String globals size the LLVM array with `str_byte_len(s) + 1` — not `str_len`, which counts Unicode codepoints rather than UTF-8 bytes.
 
-If you see `ll_ptr()` for String/Char in emitted IR, that is a regression. Canonical form is `ll_i64()`.
+If you see `ll_ptr()` for a String in emitted IR, that is a regression. Canonical form is `ll_i64()`.
 
 ### Non-moving GC (mark-sweep)
 
@@ -69,7 +71,9 @@ Type-aware rooting gave a measured **1.5–2.7× speedup** (N=12: ~1.5 s → 928
 
 **Invariant:** when no source-level type is available, root conservatively (treat the value as heap). A spurious extra root is harmless; a missing root corrupts the heap. Do not treat `TVar` as non-heap — it may resolve to a heap type in monomorphized code.
 
-Regression tests: `tests/stdlib/compiler/test_codegen.spr` — "Int args to call must NOT emit gc_push_i64_root", "Vec arg to call MUST emit gc_push_i64_root", "mixed call: Vec arg rooted".
+**The same policy applies to top-level `let` globals.** A runtime-computed `let` gets its storage slot registered as a *permanent* root in `@__sprout_init_globals` (`IRRegisterGlobalRoot`), and `ast_to_ir.global_root_ops` gates that registration on `type_is_non_heap_scalar` of the initializer's type. This gate was added later than the SSA-value one: the global path previously registered **every** `let` unconditionally, so the invariant above held for SSA values and silently did not hold for globals — `stdlib/math.sprout` alone contributed 33 permanent roots, every one an arithmetic `Double`. A permanent root is worse than a transient one: it is walked on every collection for the life of the process, and it feeds raw arithmetic bit patterns to a conservative scan. Const-eligible lets (`eval_const_expr_ir`: `TInt`/`TBool`/`TUnit` literals) never had this problem — they become `private constant` and are never stored to.
+
+Regression tests: `tests/stdlib/compiler/test_scalar_global_no_root.spr` (globals — the four scalar types unrooted, a boxed ctor still rooted, and per-let discrimination in a mixed module); `tests/stdlib/compiler/test_ir_call_result_rooting.spr` and `test_ir_tuple_result_rooting.spr` (SSA values).
 
 ### GC safety linter
 
