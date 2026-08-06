@@ -1,0 +1,11 @@
+module main
+
+# M4.2: a linear value must be used exactly once — using it ZERO times leaks it.
+# `f` is a linear parameter never consumed in the body.
+
+type linear File = File Int
+
+fn drop_it(f: File) -> Int = 0
+
+fn main() -> Unit !{IO} =
+  print(to_string(drop_it(File(1))))

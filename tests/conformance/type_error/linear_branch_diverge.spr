@@ -1,0 +1,17 @@
+module main
+
+# M4.2 branch convergence: a linear value must be used exactly once on EVERY
+# branch. Here `f` is consumed in the `then` branch but not the `else` branch —
+# a leak on one path.
+
+type linear File = File Int
+
+fn unwrap(f: File) -> Int =
+  match f with
+  | File n -> n
+
+fn pick(c: Bool, f: File) -> Int =
+  if c then unwrap(f) else 0
+
+fn main() -> Unit !{IO} =
+  print(to_string(pick(true, File(2))))

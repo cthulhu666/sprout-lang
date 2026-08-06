@@ -998,6 +998,58 @@ plan" item under "Design Roadmap → Current Priorities".
 - [ ] `P2` Closure-call arity check is unreachable through Sprout source (2026-06-06): the IR translator's IIFE arity check in `translate_call` (Err with "closure arity mismatch") cannot be triggered by any source the typechecker accepts. Sprout's lambdas are 1-arg (with optional tuple destructure) and the typechecker rejects over-application before the IR layer sees it. The check lives as defense-in-depth. T17 (arity-check regression) deferred until Sprout adds either multi-arg lambdas or a typechecker mode that permits over-application past a closure boundary.
 - [ ] `P3` **Re-run the B3 SIMD checkpoint now that B1-Double has landed.** The last B3 checkpoint (2026-07-12, run against B2-only, B1 not yet landed) disassembled the digit recognizer's row kernels (`row_dot_go`/`row_sub_scaled_go`/`row_add_scaled_into_go`) at `clang -O2`/`-O3` and found zero `.2d`/vector-lane ops anywhere in the binary, with `clang -Rpass-analysis=loop-vectorize` naming the blocker in its own words as "call instruction cannot be vectorized" (reproduced on the isolated kernel). That negative result was gated entirely on B1 (the per-element `vector_get_direct`/`vector_mutset` calls) not yet being inlined — it corrected an earlier assumption that the `tco_loop`/`stacksave` shape blocks LLVM's loop recognition; O2 asm showed SROA already promotes the alloca'd loop state to registers and forms a clean counted loop, the only residue being a per-iteration `mov sp` (stackrestore). B1-Double (inlining monomorphic `Vector Double` reads/writes as typed IR ops, landed 2026-07-12) removes those calls. Re-run the checkpoint — disassemble the three row kernels at `-O2`/`-O3`, re-check `-Rpass-analysis=loop-vectorize` — to get a definitive B3 verdict. If still blocked, the next suspect is the bounds-check panic branch B1 introduced (post-B1 checkpoint already saw the blocker shift from "call instruction" to "Incorrect number of successors from early exiting block"), which would need hoisting out of the loop. Note `row_dot_go` is a reduction and cannot SIMD-reassociate without perturbing the golden training output (139/150 accuracy) — only the independent-write kernels (`row_sub_scaled`/`row_add_scaled_into`) can vectorize bit-identically; `row_dot`'s SIMD path is separately gated regardless of this checkpoint's outcome. Design doc: `docs/phase-d-numeric-fastpath-design-2026-07-11.md` §B3.
 
+### Linear types (Model C Milestone 4) follow-ups
+
+M4.1 (parse + record `type linear`) and M4.2 (consume-exactly-once enforcement, with
+M4.3 branch convergence merged) have landed. See `docs/linear-types-m4-scoping-2026-08-01.md`
+and `docs/linear-types-m4.2-enforcement-2026-08-06.md`. Deferred, in the order they matter:
+
+- [ ] `P2` **Higher-order linearity (M4.4).** M4.2 loud-rejects a linear binding captured by a
+  lambda and any linear lambda parameter (`linear_check.lin_lambda`), because a closure may run
+  0..n times and its call count is untracked. Lift this: track linear captures against closure
+  arity/call-count, or adopt a borrowing form (see **Borrowing** below). Known-hard (Linear Haskell
+  shipped it incomplete).
+- [ ] `P2` **Pattern-bound linear vars (viral consumption).** M4.2 tracks function-param and
+  do-`let` linear bindings, but not linear vars introduced by a pattern (`match h with | Handle f
+  -> …` where `f`'s type is itself `linear`). Under per-declaration non-viral linearity this is
+  rare (a linear type usually wraps a non-linear payload), but a linear-wrapping-linear type
+  leaves `f` unenforced. Fix: resolve constructor field types at the match arm and extend
+  `linvars` with linear pattern binders (`linear_check.arm_consumed`).
+- [ ] `P2` **Enforcement skips instance-method bodies.** The M4.2 check is wired into
+  `check_fn_body`'s `ast.FnDecl` arm only; typeclass instance-method bodies are checked on a
+  separate path (`TypedInstanceMethod`) and bypass linear enforcement. A linear-typed parameter
+  or do-`let` inside an instance method is currently unchecked. Wire `linear_check.check_fn_linear`
+  into the instance-method checking path too.
+- [ ] `P3` **Containment virality.** Linearity is per-declaration: a record that merely *contains*
+  a linear field is not itself linear (contrast Austral, which computes linearity by containment).
+  Decide whether to adopt virality; if so, compute a type's linearity from its fields' universes
+  rather than only its own `@linear:` marker.
+- [ ] `P3` **Cross-module linear-reject conformance coverage.** The `type_error` harness invokes
+  `--phase check` without `--package-root`, so a cross-module *misuse* of an imported `type linear`
+  cannot be expressed as a conformance fixture. Cross-module enforcement is verified manually and
+  by the positive `tests/stdlib/test_linear_cross_module.spr`; add a package-root-aware reject
+  harness (or extend `_test-reject` with an optional `--package-root`) to automate the negative.
+- [ ] `P3` **Linear-record ergonomics.** A linear record can only be read one field or passed once
+  (`p.x + p.y` is a reuse — records have no destructuring pattern). Record patterns or a field-read
+  borrow (see **Borrowing** below) would lift this. Blocked on either a `RecordPattern` in the
+  language or the borrowing mechanism.
+- [ ] `P2` **Borrowing (read-without-consume) — the shared enabler.** The single mechanism that
+  unblocks linear-record ergonomics (P3 above) and partly the higher-order item (P2 above); both
+  name it as their lifter. Introduce a second category of *use* — a **borrow** (a read that does
+  not count against the once-only budget), distinct from a **consume** (transfers ownership, happens
+  once). Motivation: linearity guards against double-*free* / use-after-*consume* of a resource; a
+  pure field read is neither, but M4.2's single-category analysis can't tell reads from consumes and
+  so conservatively rejects them. Two granularities:
+  - **Narrow (field-read borrow)** — smallest useful step: `p.x` (a `TGetField` whose base is a
+    linear binding) *borrows* `p` rather than consuming it; `p` is consumed only when it appears as
+    a bare value (argument / return / bind). Makes `p.x + p.y` legal. Requires, beyond M4.2's flat
+    consumed-set: a borrow-vs-consume distinction, a relaxed leak rule (a borrow-only lifetime is not
+    a leak), and use-after-consume ordering (no borrow after the consume). Localized to
+    `linear_check`.
+  - **General (ownership / borrow regions)** — full read/mutable borrows over delineated scopes
+    (Austral borrow regions; Rust `&` / `&mut`). Large; warrants its own design doc when picked up.
+  Prior art: Austral borrowing, Rust references.
+
 ### Native REPL & Analysis Service
 
 - [ ] `P1` Implement `complete_in_state` in `analysis_service_driver.sprout` (2026-05-18, updated 2026-07-17): `eval_expr_in_source` (compile-and-run) and `instances_in_source` are now implemented. `instances_in_source` (landed 2026-07-17) bundles the session source (prelude + transitive imports inlined), resolves the query in session naming context via a probe signature, and unification-matches instance heads (reusing `infer.type_from_ast` + `unifier.unify_types`), with a base-constructor fallback so `:i Maybe a` also surfaces `Functor Maybe`; see `stdlib/compiler/analysis_service_driver.sprout` (`resolve_instances` / `instance_match_names_for_type`) and `tests/stdlib/compiler/test_instances_in_source.spr`. Remaining stub: `complete_in_state` (tab completion, returns "not yet implemented"). Approach: reuse `type_of_in_source` machinery; filter by prefix from a gathered list of visible names from imports + declared names.

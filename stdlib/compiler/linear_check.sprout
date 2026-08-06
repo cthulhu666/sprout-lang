@@ -1,0 +1,308 @@
+module stdlib.compiler.linear_check
+
+import stdlib.compiler.ast as ast
+import stdlib.compiler.types as types
+import stdlib.compiler.typed_ast as typed_ast
+import stdlib.compiler.source as source
+
+# ---------------------------------------------------------------------------
+# Linear-types M4.2 — consume-exactly-once enforcement.
+# ---------------------------------------------------------------------------
+#
+# A value of a `type linear` type must be used exactly once in a function body:
+# not zero times (a leaked resource), not twice (use-after-consume). This is a
+# post-pass over the fully-substituted typed AST — inference is untouched
+# (linearity is looked up from the `@linear:<TypeName>` env sentinel M4.1 records,
+# never inferred). See docs/linear-types-m4.2-enforcement-2026-08-06.md.
+#
+# The analysis computes, per subexpression, the SET of linear bindings it
+# consumes, under three composition rules:
+#   - sequential siblings must be DISJOINT (a binding used twice -> reuse error);
+#   - `if`/`match` arms must consume the IDENTICAL set (branch convergence);
+#   - each linear binding must appear in its scope's set exactly once (0 -> leak).
+# Consume-exactly-once on every control-flow path follows: disjointness bounds a
+# path at <=1, scope-membership forces >=1, convergence makes all paths agree.
+#
+# Scope (M4.2): function parameters and do-block `let` bindings of a linear type.
+# Deferred (loud-rejected, never silently accepted): a linear binding captured by
+# a lambda (higher-order linearity, M4.4). Pattern-bound linear vars (the viral
+# case) are out of scope; per-declaration linearity is non-viral, so a linear
+# type wrapping a non-linear payload binds non-linear pattern vars.
+
+# A consumed linear binding: its name, and where it was consumed.
+export type LinUse (..) = LinUse String source.SourcePos
+
+# Result of a consumed-set computation: the set of linear bindings consumed
+# (each at most once along any path), or a diagnostic.
+export type LinRes (..) =
+  | LinOk (List LinUse)
+  | LinErr source.SourcePos String
+
+# Result of checking a whole function body.
+export type LinCheck (..) =
+  | LinPass
+  | LinFail source.SourcePos String
+
+# --- small set helpers over List LinUse / List String ---
+
+fn luse_name(u: LinUse) -> String =
+  match u with
+  | LinUse n _ -> n
+
+fn luse_pos(u: LinUse) -> source.SourcePos =
+  match u with
+  | LinUse _ p -> p
+
+fn luse_member(name: String, us: List LinUse) -> Bool =
+  match us with
+  | Nil -> false
+  | Cons u rest -> if luse_name(u) == name then true else luse_member(name, rest)
+
+fn luse_remove(name: String, us: List LinUse) -> List LinUse =
+  match us with
+  | Nil -> Nil
+  | Cons u rest ->
+      if luse_name(u) == name then luse_remove(name, rest)
+      else Cons(u, luse_remove(name, rest))
+
+fn str_member(x: String, xs: List String) -> Bool =
+  match xs with
+  | Nil -> false
+  | Cons y rest -> if y == x then true else str_member(x, rest)
+
+# A name present in `a` but absent from `b`, if any (drives divergence errors).
+fn first_missing(a: List LinUse, b: List LinUse) -> Maybe String =
+  match a with
+  | Nil -> Nothing
+  | Cons u rest ->
+      if luse_member(luse_name(u), b) then first_missing(rest, b)
+      else Just(luse_name(u))
+
+# --- linearity of a type head (mirrors infer.type_head_str / type_name_is_linear;
+#     reimplemented here to avoid an infer <-> linear_check import cycle) ---
+
+fn head_type_name(t: types.Type) -> String =
+  match t with
+  | types.TConst name -> types.type_id_name(name)
+  | types.TApp base _ -> head_type_name(base)
+  | types.TVar name -> types.tyvar_identity(name)
+  | types.TTuple items -> "Tuple" ++ int_to_string(list_length(items))
+  | _ -> types.type_to_string(t)
+
+fn type_is_linear(t: types.Type, env: Dict types.Scheme) -> Bool =
+  match dict_get("@linear:" ++ head_type_name(t), env) with
+  | Just _ -> true
+  | Nothing -> false
+
+# --- consumed-set composition ---
+
+fn reuse_msg(name: String) -> String =
+  "linear value '" ++ name ++ "' is used more than once (linear values must be used exactly once)"
+
+fn leak_msg(name: String) -> String =
+  "linear value '" ++ name ++ "' is never used (linear values must be used exactly once)"
+
+fn diverge_msg(name: String) -> String =
+  "linear value '" ++ name ++ "' is used in some branches but not others (every branch must use it exactly once)"
+
+# Disjoint union: fold `b` into `a`, erroring on any shared name (a reuse).
+fn seq2(a: List LinUse, b: List LinUse) -> LinRes =
+  match b with
+  | Nil -> LinOk(a)
+  | Cons u rest ->
+      if luse_member(luse_name(u), a) then LinErr(luse_pos(u), reuse_msg(luse_name(u)))
+      else seq2(Cons(u, a), rest)
+
+# Two alternative-branch sets must be equal (convergence).
+fn alt_converge(a: List LinUse, b: List LinUse, at: source.SourcePos) -> LinRes =
+  match first_missing(a, b) with
+  | Just n -> LinErr(at, diverge_msg(n))
+  | Nothing ->
+      match first_missing(b, a) with
+      | Just n -> LinErr(at, diverge_msg(n))
+      | Nothing -> LinOk(a)
+
+# --- the recursive walk ---
+
+fn lin_consumed(e: typed_ast.TypedExpr, linvars: List String, env: Dict types.Scheme) -> LinRes =
+  match e with
+  | typed_ast.TVar name _ p ->
+      if str_member(name, linvars) then LinOk(Cons (LinUse(name, p), Nil)) else LinOk(Nil)
+  | typed_ast.TInt _ _ _ -> LinOk(Nil)
+  | typed_ast.TFloat _ _ _ -> LinOk(Nil)
+  | typed_ast.TBool _ _ _ -> LinOk(Nil)
+  | typed_ast.TString _ _ _ -> LinOk(Nil)
+  | typed_ast.TChar _ _ _ -> LinOk(Nil)
+  | typed_ast.TUnit _ _ -> LinOk(Nil)
+  | typed_ast.TDict _ _ _ _ -> LinOk(Nil)
+  | typed_ast.TMethodRef _ _ _ _ _ -> LinOk(Nil)
+  # A field read `p.x` is `TGetField (TVar p) "x"`: the base is a use of `p`.
+  | typed_ast.TGetField base _ _ _ -> lin_consumed(base, linvars, env)
+  | typed_ast.TUnary _ inner _ _ -> lin_consumed(inner, linvars, env)
+  | typed_ast.TTuple items _ _ -> seq_list(items, linvars, env)
+  | typed_ast.TCall callee args _ _ -> seq_list(Cons(callee, args), linvars, env)
+  | typed_ast.TBinary _ l r _ _ -> seq_list(Cons(l, Cons(r, Nil)), linvars, env)
+  | typed_ast.TRange lo hi _ _ -> seq_list(Cons(lo, Cons(hi, Nil)), linvars, env)
+  | typed_ast.TRecord _ fields _ _ -> seq_list(record_field_exprs(fields), linvars, env)
+  | typed_ast.TRecordUpdate base fields _ _ ->
+      seq_list(Cons(base, record_field_exprs(fields)), linvars, env)
+  | typed_ast.TIf c a b _ p -> lin_if(c, a, b, p, linvars, env)
+  | typed_ast.TMatch scrut arms _ p -> lin_match(scrut, arms, p, linvars, env)
+  | typed_ast.TDo steps _ _ -> lin_do(steps, linvars, env)
+  | typed_ast.TLambda _ body _ p -> lin_lambda(body, p, linvars, env)
+
+fn record_field_exprs(fields: List typed_ast.TypedRecordField) -> List typed_ast.TypedExpr =
+  match fields with
+  | Nil -> Nil
+  | Cons f rest ->
+      match f with
+      | typed_ast.TypedRecordField _ v -> Cons(v, record_field_exprs(rest))
+
+# Sequentially combine the consumed sets of a list of subexpressions (disjoint).
+fn seq_list(exprs: List typed_ast.TypedExpr, linvars: List String, env: Dict types.Scheme) -> LinRes =
+  match exprs with
+  | Nil -> LinOk(Nil)
+  | Cons e rest ->
+      match lin_consumed(e, linvars, env) with
+      | LinErr p m -> LinErr(p, m)
+      | LinOk a ->
+          match seq_list(rest, linvars, env) with
+          | LinErr p m -> LinErr(p, m)
+          | LinOk b -> seq2(a, b)
+
+fn lin_if(c: typed_ast.TypedExpr, a: typed_ast.TypedExpr, b: typed_ast.TypedExpr,
+          p: source.SourcePos, linvars: List String, env: Dict types.Scheme) -> LinRes =
+  let LinOk cs = lin_consumed(c, linvars, env) else LinErr ep m -> LinErr(ep, m)
+      LinOk as_ = lin_consumed(a, linvars, env) else LinErr ep m -> LinErr(ep, m)
+      LinOk bs = lin_consumed(b, linvars, env) else LinErr ep m -> LinErr(ep, m)
+      LinOk arm = alt_converge(as_, bs, p) else LinErr ep m -> LinErr(ep, m)
+  in seq2(cs, arm)
+
+fn lin_match(scrut: typed_ast.TypedExpr, arms: List typed_ast.TypedMatchBranch,
+             p: source.SourcePos, linvars: List String, env: Dict types.Scheme) -> LinRes =
+  match lin_consumed(scrut, linvars, env) with
+  | LinErr ep m -> LinErr(ep, m)
+  | LinOk ss ->
+      match arm_sets(arms, linvars, env) with
+      | LinErr ep m -> LinErr(ep, m)
+      | LinOk arm -> seq2(ss, arm)
+
+# All arm bodies must converge to the identical consumed set. Pattern-bound linear
+# vars are out of scope (see module header), so arms are checked under `linvars`.
+fn arm_sets(arms: List typed_ast.TypedMatchBranch, linvars: List String, env: Dict types.Scheme) -> LinRes =
+  match arms with
+  | Nil -> LinOk(Nil)
+  | [br] -> arm_consumed(br, linvars, env)
+  | Cons br rest ->
+      match arm_consumed(br, linvars, env) with
+      | LinErr p m -> LinErr(p, m)
+      | LinOk a ->
+          match arm_sets(rest, linvars, env) with
+          | LinErr p m -> LinErr(p, m)
+          | LinOk b -> alt_converge(a, b, arm_pos(br))
+
+fn arm_consumed(br: typed_ast.TypedMatchBranch, linvars: List String, env: Dict types.Scheme) -> LinRes =
+  match br with
+  | typed_ast.TypedMatchBranch _ body -> lin_consumed(body, linvars, env)
+
+fn arm_pos(br: typed_ast.TypedMatchBranch) -> source.SourcePos =
+  match br with
+  | typed_ast.TypedMatchBranch _ body -> typed_ast.typed_expr_pos(body)
+
+fn lin_do(steps: List typed_ast.TypedDoStep, linvars: List String, env: Dict types.Scheme) -> LinRes =
+  match steps with
+  | Nil -> LinOk(Nil)
+  | Cons step rest ->
+      match step with
+      | typed_ast.TDoLetStep name rhs -> lin_do_let(name, rhs, rest, linvars, env)
+      | typed_ast.TDoExprStep e -> lin_do_seq(e, rest, linvars, env)
+      | typed_ast.TDoBindStep _ e -> lin_do_seq(e, rest, linvars, env)
+
+# A do-step whose RHS `e` is sequential-before the remaining steps.
+fn lin_do_seq(e: typed_ast.TypedExpr, rest: List typed_ast.TypedDoStep,
+              linvars: List String, env: Dict types.Scheme) -> LinRes =
+  match lin_consumed(e, linvars, env) with
+  | LinErr p m -> LinErr(p, m)
+  | LinOk ec ->
+      match lin_do(rest, linvars, env) with
+      | LinErr p m -> LinErr(p, m)
+      | LinOk restc -> seq2(ec, restc)
+
+fn lin_do_let(name: String, rhs: typed_ast.TypedExpr, rest: List typed_ast.TypedDoStep,
+              linvars: List String, env: Dict types.Scheme) -> LinRes =
+  match lin_consumed(rhs, linvars, env) with
+  | LinErr p m -> LinErr(p, m)
+  | LinOk rc ->
+      lin_do_let_body(name, rhs, rc, rest, linvars, env,
+                      type_is_linear(typed_ast.typed_expr_type(rhs), env))
+
+# A linear do-let binding is scoped to `rest` and must be consumed exactly once
+# there (removed from the set the do-block reports to its outer scope).
+fn lin_do_let_body(name: String, rhs: typed_ast.TypedExpr, rc: List LinUse,
+                   rest: List typed_ast.TypedDoStep, linvars: List String,
+                   env: Dict types.Scheme, is_lin: Bool) -> LinRes =
+  match lin_do(rest, extend_linvars(is_lin, name, linvars), env) with
+  | LinErr p m -> LinErr(p, m)
+  | LinOk restc ->
+      if is_lin then
+        (if luse_member(name, restc) then seq2(rc, luse_remove(name, restc))
+         else LinErr(typed_ast.typed_expr_pos(rhs), leak_msg(name)))
+      else seq2(rc, restc)
+
+fn extend_linvars(is_lin: Bool, name: String, linvars: List String) -> List String =
+  if is_lin then Cons(name, linvars) else linvars
+
+# A lambda may run zero or many times, so it must not consume any outer linear
+# binding. Its own linear parameters are deferred (higher-order, M4.4).
+fn lin_lambda(body: typed_ast.TypedExpr, p: source.SourcePos,
+              linvars: List String, env: Dict types.Scheme) -> LinRes =
+  match lin_consumed(body, linvars, env) with
+  | LinErr ep m -> LinErr(ep, m)
+  | LinOk bc ->
+      match bc with
+      | Nil -> LinOk(Nil)
+      | [u | _] ->
+          LinErr(p, "linear value '" ++ luse_name(u)
+            ++ "' captured by a lambda is not yet supported (higher-order linearity is deferred)")
+
+# --- entry point ---
+
+# Check a function body for linear-use violations. `fn_type` is the function's
+# fully-substituted type (its param types drive linearity of the parameters);
+# `body` is the fully-substituted typed body; `env` carries the `@linear:` markers.
+export fn check_fn_linear(params: List ast.Param, fn_type: types.Type,
+                          body: typed_ast.TypedExpr, fn_pos: source.SourcePos,
+                          env: Dict types.Scheme) -> LinCheck =
+  linear_result(linear_param_names(params, fn_type, env), body, fn_pos, env)
+
+fn linear_result(linear_params: List String, body: typed_ast.TypedExpr,
+                 fn_pos: source.SourcePos, env: Dict types.Scheme) -> LinCheck =
+  match lin_consumed(body, linear_params, env) with
+  | LinErr p m -> LinFail(p, m)
+  | LinOk consumed -> unused_linear_param(linear_params, consumed, fn_pos)
+
+# Each linear parameter must appear in the body's consumed set (else it leaked).
+fn unused_linear_param(linear_params: List String, consumed: List LinUse,
+                       fn_pos: source.SourcePos) -> LinCheck =
+  match linear_params with
+  | Nil -> LinPass
+  | Cons nm rest ->
+      if luse_member(nm, consumed) then unused_linear_param(rest, consumed, fn_pos)
+      else LinFail(fn_pos, leak_msg(nm))
+
+fn linear_param_names(params: List ast.Param, fn_type: types.Type, env: Dict types.Scheme) -> List String =
+  match params with
+  | Nil -> Nil
+  | Cons prm rest ->
+      match fn_type with
+      | types.TFunc a b _ ->
+          linear_param_cons(type_is_linear(a, env), param_name(prm),
+                            linear_param_names(rest, b, env))
+      | _ -> Nil
+
+fn linear_param_cons(is_lin: Bool, nm: String, tail: List String) -> List String =
+  if is_lin then Cons(nm, tail) else tail
+
+fn param_name(p: ast.Param) -> String =
+  match p with
+  | ast.Param name _ -> name
