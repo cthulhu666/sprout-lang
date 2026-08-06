@@ -1,0 +1,18 @@
+module main
+
+# M4.2 branch convergence over `match`: `f` is consumed in one arm but not the
+# other. Every arm must use a linear binding exactly once (or none must).
+
+type linear File = File Int
+
+fn unwrap(f: File) -> Int =
+  match f with
+  | File n -> n
+
+fn choose(c: Bool, f: File) -> Int =
+  match c with
+  | true -> unwrap(f)
+  | false -> 0
+
+fn main() -> Unit !{IO} =
+  print(to_string(choose(false, File(3))))

@@ -1,0 +1,16 @@
+import stdlib.test (check_eq, run_suite)
+import testsupport.linear_res (open_handle, read_handle)
+
+# A linear type imported from another module retains its linearity through the
+# interface round-trip (M4.1 iface_codec) and M4.2 enforcement accepts correct
+# cross-module use: `h` is inferred as the imported linear `Handle` and consumed
+# exactly once. The reuse/leak counterparts are verified against stage-2 in the
+# M4.2 work (the type_error harness has no --package-root, so cross-module
+# rejection is not expressible as a conformance fixture yet).
+
+fn consume(h) -> Int = read_handle(h)
+
+fn main() -> Unit !{IO} =
+  run_suite("linear_cross_module", [
+    check_eq("imported linear used once", consume(open_handle(42)), 42)
+  ])

@@ -729,6 +729,51 @@ inference-driven contexts are unaffected. This parallels the `StringTemplate`
 lowering above (both are context-directed literal lowerings). Rationale and
 prior art: `docs/coercions-and-literals-v1-draft.md` (Case A).
 
+### 5.8 Linear types (Experimental)
+
+> **Experimental** — not part of normative v0. Syntax stabilized in Milestone 4.1;
+> consume-exactly-once enforcement in Milestone 4.2. Design rationale and the
+> deferred items live in `docs/linear-types-m4-scoping-2026-08-01.md` and
+> `docs/linear-types-m4.2-enforcement-2026-08-06.md`.
+
+A type declaration may carry the contextual modifier `linear`, written between
+`type` and the type name (mirroring `type alias`). It applies to ADT and record
+declarations:
+
+```
+type linear File = File Int
+type linear Pos = (x: Int, y: Int)
+```
+
+`linear` is recognized only in that one position; it remains an ordinary
+identifier everywhere else (no reserved word).
+
+**Semantics — consume exactly once.** A value of a linear type must be used
+*exactly once* in a function body: not zero times (a leaked resource), and not
+more than once (use-after-consume). "Use" means any reference to the binding,
+including as the base of a field access (`p.x` uses `p`). Enforcement covers
+**function parameters** and **do-block `let` bindings** of a linear type, and is
+checked on every control-flow path:
+
+- **Reuse** — a linear binding referenced more than once along a path is rejected.
+- **Leak** — a linear binding referenced zero times in its scope is rejected.
+- **Branch convergence** — in an `if`/`match`, a linear binding defined outside it
+  must be used either zero times in the whole construct, or exactly once in *every*
+  branch; using it in some branches but not others is rejected.
+
+A linear ADT is consumed once by matching it (`match f with | File n -> …`) or by
+passing it to a function. A linear record is read via field access, which consumes
+it — so a linear record supports reading a single field or being passed once;
+reading two fields (`p.x + p.y`) is a reuse (records have no destructuring
+pattern). For a value meant to be read freely, do not declare it `linear`.
+
+**Deferred (rejected with a diagnostic, never silently accepted):**
+
+- Higher-order linearity — a linear binding captured by a lambda, and linear
+  lambda parameters, are not yet supported.
+- Containment virality — linearity is *per-declaration*: a record that merely
+  contains a linear field is not itself linear (contrast Austral).
+
 ## 6. Evaluation Semantics (Strict)
 
 1. Function application: evaluate callee, then args left-to-right.

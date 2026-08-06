@@ -4,6 +4,7 @@ import stdlib.compiler.types as types
 import stdlib.compiler.unifier as unifier
 import stdlib.compiler.typed_ast as typed_ast
 import stdlib.compiler.source as source
+import stdlib.compiler.linear_check as linear_check
 import stdlib.string as string
 
 # ---------------------------------------------------------------------------
@@ -5386,8 +5387,14 @@ fn check_fn_body(
         | Just bad ->
             (typed_ast.BodyErr(fn_pos, "Signature too general for its body in " ++ name ++ ": type variable " ++ bad), dict_empty(), Nil)
         | Nothing ->
-            (typed_ast.BodyOk(resolve_dispatch_typed_expr(fwd_env, s2, typed_body), unifier.apply_subst(s2, inst_type)),
-             fwd_markers, canonicalize_constrained_constraints(constraints, prog_to_fresh, s2, inst_type, env_ftv))
+            # M4.2: enforce consume-exactly-once for linear-typed bindings, on the
+            # fully-substituted body/type. A violation becomes a BodyErr, surfacing
+            # through the same path as any type error. See linear_check.sprout.
+            match linear_check.check_fn_linear(params, unifier.apply_subst(s2, inst_type), apply_subst_typed_expr(s2, typed_body), fn_pos, env) with
+            | linear_check.LinFail lp lm -> (typed_ast.BodyErr(lp, lm), dict_empty(), Nil)
+            | linear_check.LinPass ->
+                (typed_ast.BodyOk(resolve_dispatch_typed_expr(fwd_env, s2, typed_body), unifier.apply_subst(s2, inst_type)),
+                 fwd_markers, canonicalize_constrained_constraints(constraints, prog_to_fresh, s2, inst_type, env_ftv))
   | _ -> (typed_ast.BodyOk(dummy_unit(), types.TConst(types.type_id("Unit"))), dict_empty(), Nil)
 
 # --- Positional constraint-var identity helpers (canonical-identity Stage 3) ---

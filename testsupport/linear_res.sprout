@@ -1,0 +1,14 @@
+module testsupport.linear_res
+
+# A linear resource type shared across modules, to exercise that `type linear`
+# retains its linearity through the interface round-trip (iface_codec) and that
+# M4.2 enforcement sees the imported `@linear:` marker.
+
+export type linear Handle = Handle Int
+
+export fn open_handle(n: Int) -> Handle = Handle(n)
+
+# Consumes the handle exactly once (the match scrutinee).
+export fn read_handle(h: Handle) -> Int =
+  match h with
+  | Handle n -> n

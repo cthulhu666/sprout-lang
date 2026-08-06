@@ -1,30 +1,31 @@
 import stdlib.test (check_eq, run_suite)
 
-# Linear types — M4.1 (syntax + accept, no enforcement yet).
+# Linear types — M4.1 (syntax) + M4.2 (consume-exactly-once enforcement).
 # Per-declaration attachment: `linear` is a contextual marker between `type` and
-# the type name, mirroring the existing `type alias Name = ...` shape. It reserves
-# `linear` only in that one position (no lexer keyword), so existing identifiers
-# are unaffected. See docs/linear-types-m4-scoping-2026-08-01.md.
-#
-# RED on the unfixed compiler: `type linear File = File Int` parses `linear` as the
-# TYPE NAME and `File` as a type parameter, so the constructor `File` is undefined
-# and every use below fails to compile. GREEN once the marker is recognized: the
-# type is correctly named `File` / `Pos`, and (M4.1) the checker ACCEPTS linear
-# values used any number of times — enforcement of consume-once is M4.2.
+# the type name. Every value of a linear type must be used EXACTLY ONCE in a
+# function body (M4.2). This file exercises the VALID single-use shapes; the
+# reuse/leak/divergence errors live in tests/conformance/type_error/linear_*.
+# See docs/linear-types-m4.2-enforcement-2026-08-06.md.
 
 type linear File = File Int
 type linear Pos = (x: Int, y: Int)
 
+# `f` is consumed exactly once — as the match scrutinee.
 fn fd(f: File) -> Int =
   match f with
   | File n -> n
 
-# M4.1 accepts (does not yet enforce) — `p` is read twice here on purpose, which a
-# later milestone will reject; for now it must type-check and run.
-fn manhattan(p: Pos) -> Int = p.x + p.y
+# `p` is consumed exactly once — a single field read. (Reading a second field
+# would consume `p` twice: records have no destructuring pattern. See the doc.)
+fn get_x(p: Pos) -> Int = p.x
+
+# `f` is consumed exactly once on EVERY branch — branch convergence holds.
+fn choose(c: Bool, f: File) -> Int =
+  if c then fd(f) else fd(f)
 
 fn main() -> Unit !{IO} =
   run_suite("linear_type_decl", [
-    check_eq("linear ADT field", fd(File(7)), 7),
-    check_eq("linear record fields", manhattan(Pos(x = 3, y = 4)), 7)
+    check_eq("linear ADT single-use", fd(File(7)), 7),
+    check_eq("linear record single field", get_x(Pos(x = 3, y = 4)), 3),
+    check_eq("linear convergent branches", choose(true, File(9)), 9)
   ])

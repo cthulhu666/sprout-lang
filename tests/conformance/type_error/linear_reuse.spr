@@ -1,0 +1,13 @@
+module main
+
+# M4.2 enforcement: a value of a `type linear` type must be used exactly once.
+# `p` is a linear record read twice (`p.x` and `p.y`), which consumes it twice.
+# Records have no destructuring pattern, so multi-field reads ARE a reuse under
+# the consumed-set discipline. See docs/linear-types-m4.2-enforcement-2026-08-06.md.
+
+type linear Pos = (x: Int, y: Int)
+
+fn manhattan(p: Pos) -> Int = p.x + p.y
+
+fn main() -> Unit !{IO} =
+  print(to_string(manhattan(Pos(x = 3, y = 4))))
