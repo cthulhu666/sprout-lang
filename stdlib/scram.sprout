@@ -122,10 +122,18 @@ fn hi_loop(password: Bytes, previous: Bytes, remaining: Int, acc: Bytes) -> Scra
   else hi_step(password, previous, remaining, acc)
 
 # PBKDF2 "Hi": hi_loop <-> hi_step is a same-prototype mutual tail-recursion cycle
-# (4096 iters). `current` binds via `where`; arc (b) inlines immediately-applied
-# lambdas, so this `where` no longer desugars to a closure + indirect apply — the
-# hi_step -> hi_loop tail call stays direct, mutual-TCO (musttail) fires, and the
-# loop runs on O(1) GC roots even inside a green task. (docs/mutual-tco-v0.md.)
+# (4096 iters). `current` binds via `where`, which desugars to a single-arm match on
+# the bound value, so the hi_step -> hi_loop call stays in tail position of a match
+# arm: mutual-TCO (musttail) fires and the loop runs on O(1) GC roots even inside a
+# green task. (docs/mutual-tco-v0.md.)
+#
+# This is load-bearing and NOT obvious — `tests/stdlib/test_scram_pbkdf2_green.spr`
+# exists solely to catch it, and it fails by exhausting the GC root pool rather than
+# by a wrong answer. Historically this `where` desugared to an immediately-applied
+# lambda, whose heap closure + indirect apply `musttail` cannot cross; that broke the
+# cycle and forced a do-`let` workaround here until arc (b) beta-reduced such lambdas
+# inline. The match desugaring makes the tail position structural instead of
+# depending on that optimization firing.
 fn hi_step(password: Bytes, previous: Bytes, remaining: Int, acc: Bytes) -> ScramResult Bytes =
   match crypto.bytes_xor(acc, current) with
   | Err err -> Err(ScramBytesError(bytes_error_message(err)))

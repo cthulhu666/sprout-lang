@@ -8584,19 +8584,27 @@ divok_0:
 define i64 @stdlib.math.int.euclidean_remainder(i64 %value, i64 %modulus) {
 entry:
   %t$0 = call i64 @stdlib.math.int.trunc_remainder(i64 %value, i64 %modulus)
-  %t$1 = add i64 0, 0
-  %t$2 = icmp slt i64 %t$0, %t$1
-  %t$3 = zext i1 %t$2 to i64
-  %t$7 = trunc i64 %t$3 to i1
-  br i1 %t$7, label %then_4, label %else_4
-then_4:
-  %t$6 = add i64 %t$0, %modulus
-  br label %join_4
-else_4:
-  br label %join_4
-join_4:
-  %t$5 = phi i64 [%t$6, %then_4], [%t$0, %else_4]
-  ret i64 %t$5
+  br label %arm_0_1
+arm_0_1:
+  %t$3 = add i64 0, 0
+  %t$4 = icmp slt i64 %t$0, %t$3
+  %t$5 = zext i1 %t$4 to i64
+  %t$9 = trunc i64 %t$5 to i1
+  br i1 %t$9, label %then_6, label %else_6
+then_6:
+  %t$8 = add i64 %t$0, %modulus
+  br label %join_6
+else_6:
+  br label %join_6
+join_6:
+  %t$7 = phi i64 [%t$8, %then_6], [%t$0, %else_6]
+  br label %join_1
+arm_1_1:
+  call void @sprout_abort_match()
+  unreachable
+join_1:
+  %t$2 = phi i64 [%t$7, %join_6]
+  ret i64 %t$2
 }
 
 define i64 @stdlib.math.int.abs(i64 %value) {

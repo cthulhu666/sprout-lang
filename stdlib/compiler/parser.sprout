@@ -1237,174 +1237,6 @@ fn desugar_where_step(body: ast.Expr, bindings: List (ast.Pattern, ast.Expr)) ->
       | (pattern, value) ->
           desugar_where_step(wrap_where_binding(body, (pattern, value)), rest)
 
-fn params_names(params: List ast.Param) -> List String =
-  match params with
-  | Nil -> Nil
-  | Cons param rest ->
-      match param with
-      | ast.Param name _ -> Cons(name, params_names(rest))
-
-fn exprs_names(exprs: List ast.Expr) -> List String =
-  match exprs with
-  | Nil -> Nil
-  | Cons expr rest -> list_append(expr_names(expr), exprs_names(rest))
-
-fn template_parts_names(parts: List ast.TemplateExprPart) -> List String =
-  match parts with
-  | Nil -> Nil
-  | Cons part rest ->
-      match part with
-      | ast.LitPart _ -> template_parts_names(rest)
-      | ast.InterpPart expr -> list_append(expr_names(expr), template_parts_names(rest))
-
-fn match_branches_names(branches: List ast.MatchBranch) -> List String =
-  match branches with
-  | Nil -> Nil
-  | Cons branch rest ->
-      match branch with
-      | ast.MatchBranch _ value -> list_append(expr_names(value), match_branches_names(rest))
-
-fn do_steps_names(steps: List ast.DoStep) -> List String =
-  match steps with
-  | Nil -> Nil
-  | Cons step rest ->
-      match step with
-      | ast.DoBindStep _ value -> list_append(expr_names(value), do_steps_names(rest))
-      | ast.DoLetStep _ value -> list_append(expr_names(value), do_steps_names(rest))
-      | ast.DoExprStep value -> list_append(expr_names(value), do_steps_names(rest))
-
-fn record_fields_names(fields: List ast.RecordField) -> List String =
-  match fields with
-  | Nil -> Nil
-  | Cons field rest ->
-      match field with
-      | ast.RecordField _ value -> list_append(expr_names(value), record_fields_names(rest))
-
-fn expr_names(expr: ast.Expr) -> List String =
-  match expr with
-  | ast.VarExpr name _ -> Cons(name, Nil)
-  | ast.IntExpr _ _ -> Nil
-  | ast.FloatExpr _ _ -> Nil
-  | ast.BoolExpr _ _ -> Nil
-  | ast.StringExpr _ _ -> Nil
-  | ast.StringTemplateExpr parts _ -> template_parts_names(parts)
-  | ast.CharExpr _ _ -> Nil
-  | ast.UnitExpr _ -> Nil
-  | ast.TupleExpr items _ -> exprs_names(items)
-  | ast.IfExpr cond then_expr else_expr _ ->
-      list_append(expr_names(cond), list_append(expr_names(then_expr), expr_names(else_expr)))
-  | ast.MatchExpr scrutinee branches _ ->
-      list_append(expr_names(scrutinee), match_branches_names(branches))
-  | ast.CallExpr callee args _ ->
-      list_append(expr_names(callee), exprs_names(args))
-  | ast.LambdaExpr params body _ ->
-      list_append(params_names(params), expr_names(body))
-  | ast.BinaryExpr _ left right _ ->
-      list_append(expr_names(left), expr_names(right))
-  | ast.UnaryExpr _ operand _ -> expr_names(operand)
-  | ast.IntRangeExpr start end _ ->
-      list_append(expr_names(start), expr_names(end))
-  | ast.DoExpr steps _ -> do_steps_names(steps)
-  | ast.RecordExpr _ fields _ -> record_fields_names(fields)
-  | ast.GetFieldExpr target _ _ -> expr_names(target)
-  | ast.RecordUpdateExpr base fields _ -> list_append(expr_names(base), record_fields_names(fields))
-
-fn exprs_mention_name(exprs: List ast.Expr, name: String) -> Bool =
-  match exprs with
-  | Nil -> false
-  | Cons expr rest -> expr_mentions_name(expr, name) || exprs_mention_name(rest, name)
-
-fn template_parts_mention_name(parts: List ast.TemplateExprPart, name: String) -> Bool =
-  match parts with
-  | Nil -> false
-  | Cons part rest ->
-      match part with
-      | ast.LitPart _ -> template_parts_mention_name(rest, name)
-      | ast.InterpPart expr -> expr_mentions_name(expr, name) || template_parts_mention_name(rest, name)
-
-fn match_branches_mention_name(branches: List ast.MatchBranch, name: String) -> Bool =
-  match branches with
-  | Nil -> false
-  | Cons branch rest ->
-      match branch with
-      | ast.MatchBranch _ value -> expr_mentions_name(value, name) || match_branches_mention_name(rest, name)
-
-fn do_steps_mention_name(steps: List ast.DoStep, name: String) -> Bool =
-  match steps with
-  | Nil -> false
-  | Cons step rest ->
-      match step with
-      | ast.DoBindStep _ value -> expr_mentions_name(value, name) || do_steps_mention_name(rest, name)
-      | ast.DoLetStep step_name value -> step_name == name || expr_mentions_name(value, name) || do_steps_mention_name(rest, name)
-      | ast.DoExprStep value -> expr_mentions_name(value, name) || do_steps_mention_name(rest, name)
-
-fn record_fields_mention_name(fields: List ast.RecordField, name: String) -> Bool =
-  match fields with
-  | Nil -> false
-  | Cons field rest ->
-      match field with
-      | ast.RecordField _ value -> expr_mentions_name(value, name) || record_fields_mention_name(rest, name)
-
-fn params_mention_name(params: List ast.Param, name: String) -> Bool =
-  match params with
-  | Nil -> false
-  | Cons param rest ->
-      match param with
-      | ast.Param param_name _ -> param_name == name || params_mention_name(rest, name)
-
-fn expr_mentions_name(expr: ast.Expr, name: String) -> Bool =
-  match expr with
-  | ast.VarExpr var_name _ -> var_name == name
-  | ast.IntExpr _ _ -> false
-  | ast.FloatExpr _ _ -> false
-  | ast.BoolExpr _ _ -> false
-  | ast.StringExpr _ _ -> false
-  | ast.StringTemplateExpr parts _ -> template_parts_mention_name(parts, name)
-  | ast.CharExpr _ _ -> false
-  | ast.UnitExpr _ -> false
-  | ast.TupleExpr items _ -> exprs_mention_name(items, name)
-  | ast.IfExpr cond then_expr else_expr _ ->
-      expr_mentions_name(cond, name) || expr_mentions_name(then_expr, name) || expr_mentions_name(else_expr, name)
-  | ast.MatchExpr scrutinee branches _ ->
-      expr_mentions_name(scrutinee, name) || match_branches_mention_name(branches, name)
-  | ast.CallExpr callee args _ ->
-      expr_mentions_name(callee, name) || exprs_mention_name(args, name)
-  | ast.LambdaExpr params body _ ->
-      params_mention_name(params, name) || expr_mentions_name(body, name)
-  | ast.BinaryExpr _ left right _ ->
-      expr_mentions_name(left, name) || expr_mentions_name(right, name)
-  | ast.UnaryExpr _ operand _ -> expr_mentions_name(operand, name)
-  | ast.IntRangeExpr start end _ ->
-      expr_mentions_name(start, name) || expr_mentions_name(end, name)
-  | ast.DoExpr steps _ -> do_steps_mention_name(steps, name)
-  | ast.RecordExpr _ fields _ -> record_fields_mention_name(fields, name)
-  | ast.GetFieldExpr target _ _ -> expr_mentions_name(target, name)
-  | ast.RecordUpdateExpr base fields _ -> expr_mentions_name(base, name) || record_fields_mention_name(fields, name)
-
-fn fresh_where_tmp_name(body: ast.Expr, value: ast.Expr) -> String =
-  fresh_where_tmp_name_from_exprs(body, value, 0)
-
-fn fresh_where_tmp_name_from_exprs(body: ast.Expr, value: ast.Expr, index: Int) -> String =
-  if expr_mentions_name(body, name) || expr_mentions_name(value, name) then
-    fresh_where_tmp_name_from_exprs(body, value, index + 1)
-  else name
-  where
-    name = "__sprout_where_" ++ int_to_string(index)
-
-fn fresh_where_tmp_name_from(used: List String, index: Int) -> String =
-  if list_member(name, used) then fresh_where_tmp_name_from(used, index + 1)
-  else name
-  where
-    name = "__sprout_where_" ++ int_to_string(index)
-
-fn wrap_tuple_where_binding(inner: ast.Expr, value: ast.Expr, pattern: ast.Pattern, pos: source.SourcePos, tmp_name: String) -> ast.Expr =
-  ast.CallExpr(
-    ast.LambdaExpr(Cons(ast.Param(tmp_name, Nothing), Nil),
-      ast.MatchExpr(ast.VarExpr(tmp_name, pos),
-        Cons(ast.MatchBranch(pattern, inner), Nil), pos),
-      pos),
-    Cons(value, Nil), pos)
-
 # Span of a pattern (every Pattern variant carries its SourcePos last).
 fn pattern_pos(p: ast.Pattern) -> source.SourcePos =
   match p with
@@ -1418,14 +1250,30 @@ fn pattern_pos(p: ast.Pattern) -> source.SourcePos =
   | ast.TuplePattern _ pos -> pos
   | ast.ConstructorPattern _ _ pos -> pos
 
+# `where <pat> = <value>` desugars to the SAME node `let <pat> = <value> in <body>`
+# builds (build_let_binding_match): a single-arm match on the value.  The two forms
+# are the same binding construct with different syntax, so they must not have
+# different desugarings — that divergence was a real bug, not a stylistic wart.
+#
+# It used to build an immediately-applied lambda with an UNANNOTATED parameter:
+#   where a = v   ==>   (\a -> <body>)(v)
+# `infer_call_general` infers the callee before the arguments, so the body was
+# typed while `a` was still an unconstrained variable; `check_arith` defaulted it
+# to `Int`, and only then did the call unify `Int` against `v`'s real type.  Every
+# `where`-bound `Double` whose type the body did not independently pin failed with
+# `Call type mismatch: Type mismatch: Int vs Double` — even `where a = 2.5`.
+# Information flowed body -> binding, i.e. backwards.
+#
+# A match infers its SCRUTINEE first, so the type now flows value -> binding, and
+# a tuple pattern distributes the value's element types positionally.  This also
+# retires the whole fresh-tmp-name apparatus: the lambda form needed a synthetic
+# parameter (`__sprout_where_N`) for a non-variable pattern, and therefore a
+# capture-avoidance scan over the body; a match arm binds the pattern directly, so
+# there is no synthetic name and nothing to capture.
 fn wrap_where_binding(inner: ast.Expr, binding: (ast.Pattern, ast.Expr)) -> ast.Expr =
   match binding with
   | (pattern, value) ->
-      match pattern with
-      | ast.VarPattern name pos ->
-          ast.CallExpr(ast.LambdaExpr(Cons(ast.Param(name, Nothing), Nil), inner, pos), Cons(value, Nil), pos)
-      | _ ->
-          wrap_tuple_where_binding(inner, value, pattern, pattern_pos(pattern), fresh_where_tmp_name(inner, value))
+      ast.MatchExpr(value, Cons(ast.MatchBranch(pattern, inner), Nil), pattern_pos(pattern))
 
 # ---------------------------------------------------------------------------
 # Type constructor parsing

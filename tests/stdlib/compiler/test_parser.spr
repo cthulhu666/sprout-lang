@@ -12,18 +12,52 @@ type BodyLineError deriving (Eq, ToString) =
   | ParseError
   | NoDecls
   | FirstNotFn
-  | BodyNotCall
+  | BodyNotMatch
 
-# W9/X5: line of the first fn's desugared body (a where-binding lowers to a
-# CallExpr wrapping a lambda). Each step bails to its own reason, so a failure
-# says which stage stopped it — lex, parse, empty, non-fn, or non-call body.
+# W9/X5: line of the first fn's desugared body. A where-binding lowers to a
+# single-arm `MatchExpr` on the bound value — the SAME node `let … in` builds
+# (parser.wrap_where_binding / build_let_binding_match). It used to lower to a
+# CallExpr wrapping an unannotated lambda, which typed the body before the bound
+# value and so defaulted `where`-bound Doubles to Int; that is why the node shape
+# here is a MatchExpr and not a CallExpr.
+#
+# Each step bails to its own reason, so a failure says which stage stopped it —
+# lex, parse, empty, non-fn, or non-match body.
 fn first_fn_body_line(src: String) -> Result BodyLineError Int =
   let Ok toks = lexer.tokenize(src) else Err(LexError)
       Ok prog = parser.parse_program(toks) else Err(ParseError)
-      ast.Program(Cons d _) _ = prog else Err(NoDecls)
+      ast.Program([d | _]) _ = prog else Err(NoDecls)
       ast.FnDecl _ _ _ _ _ body _ = d else Err(FirstNotFn)
-      ast.CallExpr _ _ pos = body else Err(BodyNotCall)
+      ast.MatchExpr _ _ pos = body else Err(BodyNotMatch)
   in Ok(source.position_line(pos))
+
+# The desugared body's node shape, so a test can assert that `where` and the
+# equivalent `let … in` lower to the SAME constructor. Two desugarings for one
+# binding construct is what allowed them to type differently.
+fn first_fn_body_shape(src: String) -> String =
+  match lexer.tokenize(src) with
+  | Err _ -> "lex-error"
+  | Ok toks ->
+      match parser.parse_program(toks) with
+      | Err _ -> "parse-error"
+      | Ok prog ->
+          match prog with
+          | ast.Program decls _ ->
+              match decls with
+              | [] -> "no-decls"
+              | [d | _] ->
+                  match d with
+                  | ast.FnDecl _ _ _ _ _ body _ -> expr_shape(body)
+                  | _ -> "not-fn"
+
+fn expr_shape(e: ast.Expr) -> String =
+  match e with
+  | ast.MatchExpr _ _ _ -> "match"
+  | ast.CallExpr _ _ _ -> "call"
+  | ast.LambdaExpr _ _ _ -> "lambda"
+  | ast.IntExpr _ _ -> "int"
+  | ast.VarExpr _ _ -> "var"
+  | _ -> "other"
 
 fn parse_ok(src: String) -> Bool =
   match lexer.tokenize(src) with
@@ -43,7 +77,7 @@ fn parse_fails(src: String) -> Bool =
 
 fn count_list(lst: List a) -> Int =
   match lst with
-  | Nil -> 0
+  | [] -> 0
   | Cons _ rest -> 1 + count_list(rest)
 
 fn decl_count(src: String) -> Int =
@@ -66,8 +100,8 @@ fn first_fn_name(src: String) -> String =
           match prog with
           | ast.Program decls _ ->
               match decls with
-              | Nil -> ""
-              | Cons d _ ->
+              | [] -> ""
+              | [d | _] ->
                   match d with
                   | ast.FnDecl name _ _ _ _ _ _ -> name
                   | _ -> ""
@@ -82,8 +116,8 @@ fn first_is_type_decl(src: String) -> Bool =
           match prog with
           | ast.Program decls _ ->
               match decls with
-              | Nil -> false
-              | Cons d _ ->
+              | [] -> false
+              | [d | _] ->
                   match d with
                   | ast.TypeDecl _ _ _ _ _ _ -> true
                   | _ -> false
@@ -98,8 +132,8 @@ fn first_typedecl_deriving(src: String) -> List String =
           match prog with
           | ast.Program decls _ ->
               match decls with
-              | Nil -> Nil
-              | Cons d _ ->
+              | [] -> Nil
+              | [d | _] ->
                   match d with
                   | ast.TypeDecl _ _ _ deriving_classes _ _ -> deriving_classes
                   | _ -> Nil
@@ -118,8 +152,8 @@ fn first_typedecl_is_linear(src: String) -> Bool =
           match prog with
           | ast.Program decls _ ->
               match decls with
-              | Nil -> false
-              | Cons d _ ->
+              | [] -> false
+              | [d | _] ->
                   match d with
                   | ast.TypeDecl _ _ _ _ mult _ -> mult_is_linear(mult)
                   | ast.RecordDecl _ _ _ _ mult _ -> mult_is_linear(mult)
@@ -244,7 +278,23 @@ fn main() -> Unit !{IO} =
       first_fn_body_line(""), Err (NoDecls))
     assert_eq(state, "bail: first decl not a fn",
       first_fn_body_line("type Color = Red | Green"), Err (FirstNotFn))
-    assert_eq(state, "bail: body not a call",
-      first_fn_body_line("fn f() -> Int = 42"), Err (BodyNotCall))
+    assert_eq(state, "bail: body not a match",
+      first_fn_body_line("fn f() -> Int = 42"), Err (BodyNotMatch))
+
+    # `where` and the equivalent `let … in` must desugar to the SAME node. They are
+    # one binding construct with two syntaxes; when they had two desugarings they
+    # also typed differently — `where` inferred the binding from the BODY (an
+    # applied lambda with an unannotated param, so `where a = 2.5` defaulted to Int
+    # and failed), while `let` inferred it from the value. This pins the shared shape
+    # so the two cannot silently diverge again.
+    assert_eq(state, "where desugars to a match",
+      first_fn_body_shape("fn f() -> Int = x where x = 5"), "match")
+    assert_eq(state, "let..in desugars to a match",
+      first_fn_body_shape("fn f() -> Int =\n  let x = 5\n  in x"), "match")
+    assert_eq(state, "where and let..in agree on node shape",
+      first_fn_body_shape("fn f() -> Int = x where x = 5"),
+      first_fn_body_shape("fn f() -> Int =\n  let x = 5\n  in x"))
+    assert_eq(state, "tuple where desugars to a match too",
+      first_fn_body_shape("fn f() -> Int = a where (a, b) = (1, 2)"), "match")
 
     summary(state)
