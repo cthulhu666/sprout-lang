@@ -122,17 +122,30 @@ A language constraint shaped all of them: **there is no `Double → Int` convers
 integer. This is a feature rather than a workaround — `×2` and `÷2` are exact in binary
 floating point.
 
+Every reduction climbs a **coarse stride ladder** rather than moving one factor at a time,
+bounding the step count at ~20 instead of ~1070 (§11.3 for why that matters and what it
+cost). The strides are nested behind one cheap test and ordered by increasing magnitude, so
+the common near-1 caller exits after a single comparison.
+
 - **`exp(x)`** — `k = round(x/ln2)`, `r = x − k·ln2` so `|r| ≤ ln2/2`; Taylor through
-  `r¹²`, Horner-nested; scale by `2^k` with exact doublings.
-- **`ln(x)`** — halve or double into `[1/√2, √2)`, accumulating `±ln2`; then the atanh
-  series `2(s + s³/3 + …)` through `s¹⁵` with `s = (m−1)/(m+1)`. Centring on `√2` rather
-  than `[1,2)` caps `|s|` at 0.172 instead of 1/3 — half the terms for equal accuracy.
+  `r¹²`, Horner-nested; scale by `2^k` with exact doublings (strides 512/64/8/1).
+- **`ln(x)`** — halve or double into `[1/√2, √2)` (strides 512/64/8/1) while **counting**
+  the powers of two, then `k·ln2` once plus the atanh series `2(s + s³/3 + …)` through
+  `s¹⁵` with `s = (m−1)/(m+1)`. Counting rather than accumulating `ln2` per step is what
+  makes `ln(2^k)` exact (§11.4). Centring on `√2` rather than `[1,2)` caps `|s|` at 0.172
+  instead of 1/3 — half the terms for equal accuracy.
 - **`log2`/`log10`/`log`** — `ln` divided by a constant, or by `ln(base)`.
-- **`cbrt(x)`** — odd symmetry on the sign; reduce by exact factors of 8 into `[1,8)`;
-  Newton `g' = (2g + x/g²)/3`. Deliberately **not** `exp(ln(x)/3)`, so `cbrt` neither
-  inherits `exp`/`ln` truncation error nor depends on them.
-- **`pow(x, y)`** — C99/IEEE edge cases (§6), then exact binary exponentiation for an
-  integer `|y| ≤ 1024`, else `exp(y·ln x)`.
+- **`sqrt(x)`** — reduce into `[1,4)` by exact powers of **four** (strides 512/64/8/4, all
+  even powers of two so each has an exact square root), then Newton. The reduction is what
+  keeps Newton's seed within a factor of two of the root; without it the iteration cap was
+  reached first and large arguments returned silently wrong answers (§11.1).
+- **`cbrt(x)`** — odd symmetry on the sign; reduce by exact factors of **eight** into
+  `[1,8)` (strides 384/48/12/3 — the powers of two divisible by three, so each has an
+  exact cube root); Newton `g' = (2g + x/g²)/3`. Deliberately **not** `exp(ln(x)/3)`, so
+  `cbrt` neither inherits `exp`/`ln` truncation error nor depends on them.
+- **`pow(x, y)`** — C99/IEEE edge cases (§6), then binary exponentiation for an integer
+  `|y| ≤ 1024` (exact when every intermediate product is — **not** unconditionally, §11.5),
+  else `exp(y·ln x)`.
 
 ### 5.1 Two non-obvious details
 
@@ -155,13 +168,19 @@ Prototyped against libm before implementation, then re-verified by
 | `exp` | 8.0e-14 | `[-708, 709]` |
 | `exp` | 5.9e-12 | subnormal tail `[-745, -708]` |
 | `ln` | 1.9e-14 | `1e-300 … 1e300` |
-| `ln` | 5.6e-17 absolute | near `1.0` |
+| `ln` | 0.0 absolute | at exact powers of two (see §11) |
+| `sqrt` | ~1e-16 | whole range, after the §11 reduction fix |
 | `cbrt` | 1.3e-14 | `1e-300 … 1e300`; exact on perfect cubes |
-| `pow` | **exact** | integer exponents |
-| `pow` | 1.1e-13 | fractional exponents |
+| `pow`, integer exponent | exact when every intermediate product is | see §11 — **not** unconditionally bit-exact |
+| `pow`, fractional exponent | ~6.4e-14 | after the §11 `ln` fix |
 
-That is ~5 orders better than the `~1e-8` the module previously advertised, so the
-header contract was tightened to `~1e-13`.
+**Accuracy is not uniform across `stdlib.math`, and the header must not be read as if it
+were.** The figures above cover the functions this document adds. The pre-existing
+**trigonometric** functions in the same module are ~1e-8 — five orders looser, because
+their Taylor series are truncated for transform-scale use. A caller sizing a tolerance
+must take it from the right group. This is stated in the module header and repeated here
+because a first version of this document tightened the header to a single `~1e-13` figure
+that was true only of the new functions (§11).
 
 ## 6. Semantics and error behaviour
 
@@ -219,11 +238,20 @@ Pro, 2M iterations, harness baseline subtracted:
 | function | Sprout | libm | ratio |
 |---|---:|---:|---:|
 | `exp` | 9.2 ns | 1.1 ns | 8.4x |
-| `ln` | 2.6 ns | 1.6 ns | 1.6x |
-| `log10` | 2.7 ns | 1.7 ns | 1.6x |
-| `cbrt` | 22.2 ns | 1.2 ns | 18.5x |
-| `pow` fractional | 36.5 ns | 5.6 ns | 6.5x |
-| `pow` integer | 6.5 ns | 5.6 ns | 1.2x |
+| `ln` | 5.0 ns | 1.7 ns | 2.9x |
+| `log10` | 5.1 ns | 1.8 ns | 2.8x |
+| `cbrt` | 11.9 ns | 1.2 ns | 9.9x |
+| `pow` fractional | 39.7 ns | 5.9 ns | 6.7x |
+| `pow` integer | 7.8 ns | 6.0 ns | 1.3x |
+| `exp`, x ≈ 688 | 21.7 ns | 1.1 ns | ~20x |
+| `ln`, x = 1e-300 | 20.9 ns | 1.6 ns | ~13x |
+| `sqrt`, x = 1e300 | 21.5 ns | hardware `fsqrt` | — |
+
+The last three rows exist because their absence was a defect: the original sweep ran only
+over `[0, 10)`, so it never exercised the range reductions' step count and reported the
+best case as the cost. Before §11's ladder fix, `exp` near x=688 actually cost **1099
+ns/call** against the 9.2 ns published. `sqrt` has no meaningful ratio row because libm's
+is a single hardware instruction.
 
 **Conclusion: no new builtin, and `runtime/APPROVED_BUILTINS` is untouched.**
 `AGENTS.md` "Builtin vs Stdlib" rule 6 requires a concrete measured bottleneck, and a
@@ -285,3 +313,100 @@ Primary references for §3; each row was checked against these.
 - In-repo: `docs/math-partiality-v0.md` (Rules 1 and 2),
   `docs/numeric-types-v1-draft.md` §6.2/§7.1/§8 (the class design and its open
   questions), `docs/spec-v0.md` §8 (normative Int surface).
+
+## 11. Post-merge review corrections (2026-08-06)
+
+A high-effort adversarial review ran *after* the original PR merged and found ten
+confirmed defects. All were fixed in the follow-up PR; recorded here because several were
+wrong *claims* in this document, and a design doc that quietly edits away its own errors
+is worse than one that shows them.
+
+### 11.1 Two silent wrong-answer bugs
+
+**`sqrt` was grossly wrong above ~1e35 — pre-existing, and this document made it worse.**
+Newton was seeded with `x` itself. For a guess far above the root the Heron step only
+roughly *halves* it, so reaching the right order of magnitude alone took ~log2(x) steps:
+past ~1e35 the 60-iteration ceiling was hit first and the unconverged guess was returned.
+`sqrt(1e40)` gave `8.674e21` instead of `1e20`, with no NaN and no error — the exact
+"silent in-band lie" the module header forbids, which meant `linalg`'s vec3 length was
+~130 orders out at astronomical scales. The original PR did not cause this, but it renamed
+the function's neighbourhood and tightened the block header to vouch for `~1e-13` across
+the full exponent range, so it newly *certified* the bug.
+
+Fixed with an exact power-of-four range reduction (stride 4 because `sqrt(4) = 2` is
+representable, which keeps the scale-back error-free), mirroring what `cbrt` already did.
+Newton now starts within a factor of two of the root for every input. Round-trip error at
+1e300 is ~1e-16.
+
+**`pow` returned `+0.0` where C99 requires `-0.0`.** The odd-integer negative-base arm
+negated with `0.0 - v`, and `0.0 - 0.0` is `+0.0` — negation of zero needs unary `-`,
+which lowers to `fneg` and flips the sign bit. So `pow(-2.0, -1075.0)` came back `+0.0`,
+and a caller recovering the sign of an underflowed result via `1.0 / result` read `+inf`
+and inferred the wrong direction.
+
+### 11.2 Two C99 conformance gaps
+
+`pow(-inf, non-integer)` returned `NaN`. C99 F.9.4.4 confines the negative-base-NaN rule
+to **finite** `x < 0`; for an infinite base the magnitude saturates and the result is
+`±inf` or `±0` by the exponent's sign and parity. Infinite bases now have their own arm,
+placed after the `x == 0.0` test because `x * 0.5 == x` is also true of both zeros.
+
+`abs(-0.0)` returned `-0.0` and `floor(-0.0)` returned `+0.0` — both pre-existing, both
+inverted from IEEE. The cause is that `-0.0 < 0.0` is **false** (IEEE compares the zeros
+equal), so a `x < 0.0` guard never sees negative zero. Both now special-case zero.
+
+### 11.3 A ~110x per-call cost cliff the benchmark never sampled
+
+`exp_scale`, `ln_reduce` and `cbrt_reduce` moved one power of two (or eight) per recursive
+step, so cost was linear in the argument's binary exponent — up to 1076 steps. Measured:
+`exp` near x=688 cost **1099 ns/call** against the 9.2 ns this document published, and
+`ln(1e-300)` cost 673 ns against 2.6 ns. The published figures were not wrong for the
+sweep used; the sweep was wrong, because `[0, 10)` never leaves the cheap region.
+
+Fixed with coarse stride ladders (512 / 64 / 8 / 1, and 384 / 48 / 12 / 3 for `cbrt`),
+bounding every reduction at ~20 steps: `exp` at 688 is now 21.7 ns, `ln(1e-300)` 20.9 ns.
+The benchmark grew `exp_wide` / `ln_wide` / `sqrt_wide` rows so the far end of the exponent
+range is sampled from now on.
+
+**Two ordering lessons from doing this, both measured:** listing the coarse strides *ahead*
+of the common case cost 4 extra comparisons and 4 module-global loads per call and made
+`ln`'s hot path 2.6x slower; nesting them behind one cheap test and then ordering them by
+*increasing* magnitude (so the common case exits after a single comparison) recovered
+almost all of it. `exp` is back to 9.2 ns. `ln` settles at 5.0 ns against 3.1 ns for the
+old flat loop — a genuine ~1.6x hot-path cost, accepted for a 25x improvement at the
+extremes plus the exactness win below.
+
+### 11.4 `ln` was less accurate than claimed — and fixing it fixed `pow` too
+
+`ln_reduce` added or subtracted one `ln2` per step, accumulating one rounding each time:
+1.7e-11 absolute error at `ln(2^-1070)` where the comment claimed ~1e-13, which made
+`floor(log2(x))` return the wrong integer for roughly half of all exact powers of two.
+Counting the steps and computing `k * ln2` once is a single rounding regardless of distance
+travelled — strictly more accurate *and* ~1070 fewer operations. Absolute error at
+`ln(2^±1070)` is now **0.0**.
+
+This turned out to dominate `pow`'s fractional path as well, exactly as the review
+predicted: `ln`'s relative error at `|ln x| ≈ 700` is an *absolute* error in `exp`'s
+argument, and `exp` converts that into relative error in the result. `pow(1e300, 0.5)²`
+deviated 1.29e-11 before and 5.2e-14 after — a 250x improvement from a change made for
+accuracy in a different function.
+
+### 11.5 The exactness claim that was simply false
+
+This document's accuracy table read "`pow` | **exact** | integer exponents", and the
+claim was repeated in the normative spec, the builtins reference and the benchmark results.
+It is not true. Binary exponentiation computes `pow(T,4)` as `(T*T)*(T*T)` — two roundings
+— where `T*T*T*T` is `((T*T)*T)*T` — three. `pow(T,4.0) == T*T*T*T` is **false** for
+T=6726.387968863355, and a correctly-rounded libm `pow` differs from both. The original
+test passed only because `5772^4` happens to be exactly representable: a special case was
+verified and written up as a general guarantee. Corrected everywhere, and the test suite
+now pins both halves — the identity holding at 5772 *and* failing to hold in general.
+
+### 11.6 Stale golden IR
+
+The module split invalidated `tests/golden/ir/examples__astar.sprout.ll`, which still
+referenced `@stdlib.math.fabs` and `@stdlib.math.int_abs`. This escaped CI because
+`scripts/ir_golden_diff.sh` is wired into **no** `just` target and no workflow, so
+`just test` and `gate-quick` were both green over a stale corpus. Snapshots regenerated;
+the gap in the gating is filed in `BACKLOG.md`, since a corpus nothing checks will rot
+again.

@@ -248,6 +248,59 @@ fn main() -> Unit !{IO} =
     check_true("cbrt(2^-1071) == 2^-357 exactly (1071 = 3*357)",
       close(cbrt(halves(1071)), halves(357))),
 
+    # ----------------------------------- C99 F.9.4.4 conformance (regressions) ---
+    # An INFINITE negative base was falling into the "negative base, non-integer
+    # exponent -> NaN" arm. F.9.4.4 restricts that case to *finite* x < 0; for x = -inf
+    # the magnitude dominates and the result is +-inf or +-0 by the exponent's sign and
+    # parity. Expected values taken from libm.
+    check_true("pow(-inf,0.5) == +inf", pow(neg_inf, 0.5) == inf),
+    check_true("pow(-inf,2.5) == +inf", pow(neg_inf, 2.5) == inf),
+    check_true("pow(-inf,-0.5) == +0", pow(neg_inf, 0.0 - 0.5) == 0.0),
+    check_true("pow(-inf,3) == -inf (odd int)", pow(neg_inf, 3.0) == neg_inf),
+    check_true("pow(-inf,2) == +inf (even int)", pow(neg_inf, 2.0) == inf),
+    # pow(-inf, odd negative int) is -0.0, sign included.
+    check_true("pow(-inf,-3) is -0.0", 1.0 / pow(neg_inf, 0.0 - 3.0) == neg_inf),
+    check_true("pow(-inf,-2) is +0.0", 1.0 / pow(neg_inf, 0.0 - 2.0) == inf),
+    check_true("pow(+inf,-2) == +0", pow(inf, 0.0 - 2.0) == 0.0),
+    # REGRESSION: negating with `0.0 - v` produces +0.0 when v is +0.0 — `0.0 - 0.0` is
+    # +0.0, not -0.0. So an underflowing odd negative power lost its sign. Unary `-`
+    # lowers to fneg and flips the sign bit correctly.
+    check_true("pow(-2,-1075) is -0.0, not +0.0",
+      1.0 / pow(0.0 - 2.0, 0.0 - 1075.0) == neg_inf),
+    check_true("pow(-2,-1075) magnitude is 0", pow(0.0 - 2.0, 0.0 - 1075.0) == 0.0),
+
+    # ------------------------------- integer exponents: what is actually true ---
+    # NOT bit-exact in general, and previously documented as if it were. `ipow` uses
+    # binary exponentiation, so pow(T,4) computes (T*T)*(T*T) — two roundings — while
+    # T*T*T*T is ((T*T)*T)*T — three. They differ whenever an intermediate is inexact,
+    # and libm's correctly-rounded pow differs from both. These pin the real contract:
+    # exact when every intermediate product is exactly representable, close otherwise.
+    check_true("pow(T,4) == T*T*T*T when intermediates are exact (5772)",
+      pow(5772.0, 4.0) == 5772.0 * 5772.0 * 5772.0 * 5772.0),
+    check_true("pow(T,4) may differ from T*T*T*T by an ulp otherwise",
+      close(pow(6726.387968863355, 4.0),
+            6726.387968863355 * 6726.387968863355
+              * 6726.387968863355 * 6726.387968863355)),
+    check_true("small exact powers are still exact", pow(2.0, 10.0) == 1024.0),
+
+    # -------------------------------------- ln: ABSOLUTE accuracy at extremes ---
+    # ln accumulated one ln2 addition per reduction step (up to 1070 of them), giving
+    # 1.7e-11 absolute error where the comment claimed ~1e-13. Counting the steps and
+    # multiplying by ln2 once is both exact and cheaper. 2^k is exact, so ln(2^k) must
+    # equal k*ln2 to within the series error alone.
+    check_true("ln(2^-1070) absolute error < 1e-12",
+      abs(ln(halves(1070)) + 741.6674831991414) < 0.000000000001),
+    check_true("ln(2^-1024) == -1024*ln2",
+      abs(ln(halves(1024)) + 709.782712893384) < 0.000000000001),
+    check_true("ln(2^1023) == 1023*ln2",
+      abs(ln(1.0 / halves(1023)) - 709.0895657128241) < 0.000000000001),
+    # log2(2^k) must land on k. The accumulated drift made floor(log2(x)) — the natural
+    # way to extract a binary exponent — return k-1 for roughly half of exact powers.
+    check_true("log2(2^-1070) == -1070",
+      abs(log2(halves(1070)) + 1070.0) < 0.000000000001),
+    check_true("log2(2^300) == 300", abs(log2(1.0 / halves(300)) - 300.0) < 0.000000000001),
+    check_true("log2(2^-300) == -300", abs(log2(halves(300)) + 300.0) < 0.000000000001),
+
     # ------------------------------------------------------- applications -----
     # Tsiolkovsky rocket equation, dv = Isp * g0 * ln(mass ratio) — the model that
     # was previously inexpressible for want of ln.

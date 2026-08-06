@@ -21,6 +21,8 @@
 
 #define REPS 2000000
 #define STEP 0.000005
+#define HUGE_VAL_1E300 1e300
+#define TINY 1e-300
 
 static long long now_us(void) {
   struct timeval tv;
@@ -44,6 +46,12 @@ static void row(const char *label, int which) {
       case 4: acc = acc + cbrt(x + 0.001);      break;
       case 5: acc = acc + pow(x + 1.0, 2.5);    break; /* pow_frac  */
       case 6: acc = acc + pow(x + 1.0, 4.0);    break; /* pow_int   */
+      /* Wide-exponent rows: these exist because the [0,10) sweep never exercises the
+       * range reductions' step count, which is how an earlier version of this harness
+       * reported exp at 9.2 ns/call while exp near 688 actually cost 1099 ns/call. */
+      case 7: acc = acc + exp(688.0 + x * 0.0001);   break; /* exp_wide  */
+      case 8: acc = acc + log(TINY + x * TINY);      break; /* ln_wide   */
+      case 9: acc = acc + sqrt(HUGE_VAL_1E300 + x);  break; /* sqrt_wide */
       default: break;
     }
   }
@@ -60,5 +68,8 @@ int main(void) {
   row("cbrt", 4);
   row("pow_frac", 5);
   row("pow_int", 6);
+  row("exp_wide", 7);
+  row("ln_wide", 8);
+  row("sqrt_wide", 9);
   return 0;
 }

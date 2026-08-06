@@ -8,48 +8,86 @@ identical argument sweep).
 **Machine:** Apple M3 Pro, macOS 15 (Darwin 24.6.0), Homebrew clang 22.1.6, both sides
 `-O2`. 2,000,000 iterations per row, argument sweep `i * 5e-6` over `[0, 10)`.
 
+> **REVISED same day, after a post-merge review.** The table below is the current one.
+> The original run is kept as §"Superseded first run" at the end, because two of its
+> figures were misleading in a way worth recording: the sweep ran only over `[0, 10)`, so
+> it never exercised the range reductions and reported `exp` at 9.2 ns while `exp` near
+> x=688 actually cost **1099 ns/call**; and `ln` measured 2.6 ns for a version that was
+> less accurate than documented. See `docs/math-transcendental-v0.md` §11.
+
 ## Results
 
 Per-call cost with the harness baseline (same loop, same argument arithmetic, no math
-call) subtracted. Figures are the **minimum** across 7 runs after a discarded warm-up.
+call) subtracted. Figures are the **minimum** across runs after a discarded warm-up.
 
-| function   | Sprout ns/call | libm ns/call | ratio  |
-|------------|---------------:|-------------:|-------:|
-| `exp`      |            9.2 |          1.1 |   8.4x |
-| `ln`       |            2.6 |          1.6 |   1.6x |
-| `log10`    |            2.7 |          1.7 |   1.6x |
-| `cbrt`     |           22.2 |          1.2 |  18.5x |
-| `pow` frac |           36.5 |          5.6 |   6.5x |
-| `pow` int  |            6.5 |          5.6 |   1.2x |
+| function     | Sprout ns/call | libm ns/call | ratio  |
+|--------------|---------------:|-------------:|-------:|
+| `exp`        |            9.2 |          1.1 |   8.4x |
+| `ln`         |            5.0 |          1.7 |   2.9x |
+| `log10`      |            5.1 |          1.8 |   2.8x |
+| `cbrt`       |           11.9 |          1.2 |   9.9x |
+| `pow` frac   |           39.7 |          5.9 |   6.7x |
+| `pow` int    |            7.8 |          6.0 |   1.3x |
+| `exp_wide`   |           21.7 |          1.1 |  ~20x  |
+| `ln_wide`    |           20.9 |          1.6 |  ~13x  |
+| `sqrt_wide`  |           21.5 |   `fsqrt` hw |    —   |
+
+The `*_wide` rows sample the far end of the exponent range (`exp` near 688, `ln(1e-300)`,
+`sqrt(1e300)`). They exist because their absence was itself the defect — a sweep confined
+to small arguments cannot see a reduction that is linear in the binary exponent. `sqrt` has
+no ratio row: libm's is a single hardware instruction, so baseline subtraction leaves ~0.
+
+**Changes against the first run, all from the review fixes:**
+
+- `cbrt` 22.2 → 11.9 ns and the wide rows 20–50x faster, from replacing one-factor-at-a-time
+  reductions with coarse stride ladders.
+- `ln` 2.6 → 5.0 ns — a real ~1.6x hot-path regression, accepted deliberately. Counting
+  reduction steps and multiplying by `ln2` once (instead of accumulating it per step) makes
+  `ln(2^k)` **exactly** correct where it previously carried 1.7e-11 absolute error, and it
+  improved `pow`'s fractional accuracy 250x as a side effect. Measured A/B on the identical
+  sweep: old flat loop 3.0–3.9 ns, new ladder 5.0–6.5 ns.
+- `exp` unchanged at 9.2 ns. Getting there required ordering the ladder correctly: coarse
+  strides listed *ahead* of the common case cost 4 extra comparisons plus 4 module-global
+  loads per call and made `ln` 2.6x slower, so they are nested behind one cheap test and
+  ordered by increasing magnitude.
 
 Raw baseline: Sprout 1495 µs, libm 1568 µs over 2M iterations — i.e. the harness loop
 itself costs the two languages the same, so the deltas above are the math.
 
 **On using the minimum.** Per-run spread reaches 40–170% on a loaded laptop, but the
 minimum is reproducible to within ~5% across every run of the session (`exp` landed at
-9.2/9.3, `cbrt` at 22.2/22.5/23.4). The minimum estimates the cost; the mean estimates
-the background load. `bench.sh` prints the spread alongside each row so a reader can see
-when a figure should not be trusted to two significant figures.
+9.1/9.2/9.5, `ln` at 5.0/5.2/5.4). The minimum estimates the cost; the mean estimates the
+background load. `bench.sh` prints the spread alongside each row so a reader can see when a
+figure should not be trusted to two significant figures. The `ln` and `exp` figures here
+were additionally cross-checked with a standalone A/B binary holding both the old and new
+implementations, so the hot-path regression is a measured delta rather than a run-to-run
+difference.
 
 ## Interpretation
 
-- **`ln` and `log10` are effectively at parity** (1.6x). The reduction is exact halving
-  and the atanh series has one real division, so there is little left to win.
-- **`pow` with an integer exponent beats libm on accuracy at equal speed** (1.2x, and
-  *bit-exact*). libm's `pow` has no reason to special-case a small integer exponent, so
-  it pays the full `exp(y·ln x)` cost and returns an approximation where Sprout's binary
-  exponentiation returns the exact value. `pow(T, 4.0) == T*T*T*T` exactly, which is the
-  Stefan-Boltzmann case.
-- **`cbrt` is the slowest row** (18.5x, ~22ns). It is 7 Newton passes, each carrying one
-  unavoidable `x / (guess * guess)` division. A linear initial guess was implemented and
-  measured: it reduces the worst case from 7 passes to 6, which did not justify the code,
-  so it was dropped.
-- **`pow` with a fractional exponent (36.5ns) costs more than `exp` + `ln` (11.8ns)**
+- **`ln` and `log10` are the closest to libm** (2.8–2.9x). The reduction is exact scaling
+  and the atanh series has one real division, so there is little left to win — and what
+  remains is deliberate: ~2 ns of the 5.0 ns buys exactness at powers of two.
+- **`pow` with an integer exponent is at near-parity and more accurate on the cases that
+  matter** (1.3x). libm's `pow` has no reason to special-case a small integer exponent, so
+  it pays the full `exp(y·ln x)` cost; Sprout multiplies instead and avoids that path's
+  truncation error entirely. It is **not** unconditionally bit-exact and must not be
+  described that way — see `docs/math-transcendental-v0.md` §11.5.
+- **`cbrt` halved** (22.2 → 11.9 ns) once its reduction used coarse strides. It is still
+  ~10x libm because it is 7 Newton passes each carrying one unavoidable
+  `x / (guess * guess)` division. A linear initial guess was implemented and measured:
+  it reduces the worst case from 7 passes to 6, which did not justify the code.
+- **`pow` with a fractional exponent (39.7 ns) costs more than `exp` + `ln` (14.2 ns)**
   because the two are *serially dependent* — `exp` cannot start until `ln` finishes — so
   the row pays full latency, whereas the standalone `exp` row has an independent argument
   stream and pipelines across iterations. This is a property of the measurement, not a
   defect: both languages are measured the same way, and libm's `pow` shows the same
-  effect (5.6ns against 1.1ns for `exp` alone).
+  effect (5.9 ns against 1.1 ns for `exp` alone).
+- **The `*_wide` rows are the ones to watch in future.** They are 13–20x libm, which is the
+  honest cost of doing range reduction in Sprout rather than reading an exponent field —
+  something the language cannot express, since there is no `Double → Int` conversion and no
+  bit-level access to a `Double`. That, not the series arithmetic, is the remaining
+  structural gap against libm.
 
 ## A hypothesis that did not survive measurement
 
@@ -77,8 +115,8 @@ untouched.** Per `AGENTS.md` "Builtin vs Stdlib" rule 6, performance justifies a
 only against a *concrete, measured bottleneck*. A ratio against libm is not one:
 
 - The two rows a caller is most likely to hit in bulk — `ln` and integer `pow` — are at
-  1.2–1.6x, and integer `pow` is *more accurate* than libm.
-- At 9–37ns, a single call is dwarfed by any surrounding allocation or I/O in the
+  1.3–2.9x, and integer `pow` avoids the exp/ln truncation error libm pays.
+- At 5–40ns (up to ~24ns at the exponent extremes), a single call is dwarfed by any surrounding allocation or I/O in the
   transform-scale and physical-modelling work this layer exists for. A Tsiolkovsky Δv or
   Stefan-Boltzmann evaluation is one or two calls, not millions.
 - Should a real workload ever prove bottlenecked, `stdlib/math.sprout` already names the
@@ -90,7 +128,7 @@ only against a *concrete, measured bottleneck*. A ratio against libm is not one:
 - **Checksum comparison is weak.** Both binaries print an accumulator so no call can be
   optimised away, but Sprout's `to_string` for `Double` emits ~6 significant figures, so
   the printed checksums only confirm agreement to that precision. Accuracy is verified
-  properly by `tests/stdlib/test_math_transcendental.spr` (115 assertions against
+  properly by `tests/stdlib/test_math_transcendental.spr` (148 assertions against
   libm-computed constants at 1e-12 relative), not by these checksums.
 - **Two earlier versions of this harness produced invalid numbers.** Recorded so they are
   not reintroduced: (1) a `volatile double` accumulator in the C reference created a
@@ -100,3 +138,30 @@ only against a *concrete, measured bottleneck*. A ratio against libm is not one:
 - Each Sprout loop is declared `!{IO}` although its body is pure, so the do-block
   sequences it strictly between the two `time_now_micros()` reads. A pure signature would
   let the call float outside the timed window.
+
+## Superseded first run (kept for the record)
+
+The original table, measured before the post-merge review fixes. Preserved because two of
+its rows illustrate measurement traps rather than results:
+
+| function   | Sprout ns/call | libm ns/call | ratio  |
+|------------|---------------:|-------------:|-------:|
+| `exp`      |            9.2 |          1.1 |   8.4x |
+| `ln`       |            2.6 |          1.6 |   1.6x |
+| `log10`    |            2.7 |          1.7 |   1.6x |
+| `cbrt`     |           22.2 |          1.2 |  18.5x |
+| `pow` frac |           36.5 |          5.6 |   6.5x |
+| `pow` int  |            6.5 |          5.6 |   1.2x |
+
+- **`exp` at 9.2 ns was the best case reported as the cost.** The `[0, 10)` sweep never
+  reaches a large binary exponent, and `exp_scale` then moved one power of two per step, so
+  `exp` near x=688 cost 1099 ns/call — 111x the published figure. The lesson is not "the
+  measurement was noisy"; it is that a sweep is part of the claim, and a benchmark that
+  samples only the cheap region will confidently report the wrong number. Hence the
+  `*_wide` rows above.
+- **`ln` at 2.6 ns was faster because it was wrong.** It accumulated `ln2` once per
+  reduction step, which is cheaper per step than the correct `k * ln2` only in the sense
+  that it did less bookkeeping — and it carried 1.7e-11 absolute error at the extremes
+  against a documented ~1e-13. The current 5.0 ns buys exactness.
+- `pow` int at 6.5 ns was also labelled "bit-exact" in the surrounding text. It is not; see
+  `docs/math-transcendental-v0.md` §11.5.

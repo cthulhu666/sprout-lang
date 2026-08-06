@@ -69,7 +69,7 @@ awk -v reps="$REPS" '
   END {
     # Subtract the harness baseline from every row so the figure is the call itself.
     sb = s["baseline"]; lb = l["baseline"]
-    n = split("exp ln log10 cbrt pow_frac pow_int", order, " ")
+    n = split("exp ln log10 cbrt pow_frac pow_int exp_wide ln_wide sqrt_wide", order, " ")
     for (i = 1; i <= n; i++) {
       f = order[i]
       sn  = (s[f] - sb) * 1000.0 / reps
