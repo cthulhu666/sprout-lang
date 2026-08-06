@@ -110,12 +110,22 @@ let inf = 1.0 / 0.0
 let two54 = 18014398509481984.0
 
 # exp on the reduced |r| <= ln2/2, as Horner-nested Taylor terms through r^12
-# (truncation ~1e-16 at the worst case). Nested as acc_k = 1 + r*acc_(k+1)/k so each
-# coefficient is a division by a small integer — no table of 1/k! constants needed.
+# (truncation ~1e-16 at the worst case). Nested as acc_k = 1 + r*acc_(k+1)/k so the
+# factorial denominators stay visible — no table of 1/k! decimal constants to mistype.
+#
+# Written `r * (1.0 / k)` rather than `r / k` deliberately. `1.0 / k` is literal over
+# literal, so LLVM folds it to a constant and each term costs one multiply. The `r / k`
+# form divides a runtime value, and clang can only rewrite the divisors that are exact
+# powers of two (2, 4, 8) — the arm64 -O2 output keeps 8 real fdiv instructions where
+# this form has none. Measured worth ~20% of the series cost, about 0.8ns per exp call
+# (bench/results-2026-08-06-math-transcendental.md); the earlier guess that it would be
+# several times faster did not survive measurement. The extra rounding from an inexact
+# reciprocal is invisible: max relative error is 7.98e-14 with either form.
 fn exp_series(r: Double) -> Double =
-  1.0 + r * (1.0 + r / 2.0 * (1.0 + r / 3.0 * (1.0 + r / 4.0 * (1.0 + r / 5.0
-    * (1.0 + r / 6.0 * (1.0 + r / 7.0 * (1.0 + r / 8.0 * (1.0 + r / 9.0
-    * (1.0 + r / 10.0 * (1.0 + r / 11.0 * (1.0 + r / 12.0)))))))))))
+  1.0 + r * (1.0 + r * (1.0 / 2.0) * (1.0 + r * (1.0 / 3.0) * (1.0 + r * (1.0 / 4.0)
+    * (1.0 + r * (1.0 / 5.0) * (1.0 + r * (1.0 / 6.0) * (1.0 + r * (1.0 / 7.0)
+    * (1.0 + r * (1.0 / 8.0) * (1.0 + r * (1.0 / 9.0) * (1.0 + r * (1.0 / 10.0)
+    * (1.0 + r * (1.0 / 11.0) * (1.0 + r * (1.0 / 12.0))))))))))))
 
 # Multiply y by 2^k for a Double-valued integer k. Every step is an exact binary
 # scaling, so while the result stays normal this is error-free.
@@ -185,14 +195,21 @@ export fn log10(x: Double) -> Double =
 export fn log(x: Double, base: Double) -> Double =
   ln(x) / ln(base)
 
-# Newton for the cube root: g' = (2g + x/g^2)/3. Cubic-convergent from a guess in the
-# right octave, so the relative-error guard trips long before the 60-step ceiling.
+# Newton for the cube root: g' = (2g + x/g^2)/3. Quadratically convergent, and from a
+# guess in the right octave it takes at most 7 passes, so the 60-step ceiling only
+# bounds pathological inputs. `* (1.0 / 3.0)` is a folded constant multiply rather than
+# a division, for the reason given on exp_series; x / (guess * guess) divides by a
+# runtime value and stays a real division — which is why cbrt remains the slowest row in
+# the benchmark at ~22ns: 7 passes each carrying an unavoidable division.
+#
+# A linear initial guess (1 + (m-1)/7 across the reduced [1,8)) was measured and
+# rejected: it cuts the worst case from 7 passes to 6, which does not pay for the code.
 fn cbrt_iter(x: Double, guess: Double, i: Int) -> Double =
   if i >= 60 then guess
   else if abs(next - guess) < 0.000000000000001 * guess then next
   else cbrt_iter(x, next, i + 1)
 where
-  next = (2.0 * guess + x / (guess * guess)) / 3.0
+  next = (2.0 * guess + x / (guess * guess)) * (1.0 / 3.0)
 
 # Reduce the magnitude into [1, 8) by exact factors of 8, tracking the cube root of
 # the extracted factor — a power of two, so also exact. 8 is the right stride because
@@ -236,6 +253,18 @@ fn ipow(base: Double, e: Double, acc: Double) -> Double =
 where
   h = floor(e * 0.5)
 
+# x^(-e) for a positive integer e. NOT simply 1.0 / ipow(x, e): x^e can overflow to
+# +inf while x^-e is perfectly representable — 2^1024 overflows, so the reciprocal
+# collapses to 0.0 where the true 2^-1024 is 5.56e-309. When x^e overflows, recompute as
+# (1/x)^e, which cannot overflow for e in this range. That reciprocal is inexact for a
+# base that is not a power of two, but an inexact answer beats a wrong zero, and this
+# path is only reached when the direct route has already failed.
+fn ipow_recip(x: Double, e: Double) -> Double =
+  if p * 0.5 == p then ipow(1.0 / x, e, 1.0)
+  else 1.0 / p
+where
+  p = ipow(x, e, 1.0)
+
 # pow(x, y). The edge cases follow C99/IEEE (F.9.4.4), which differs from Python:
 # pow(0.0, -1.0) is +inf here, where Python raises. Ordered so the two total cases win
 # before any NaN test, because C99 makes them total even for a NaN operand:
@@ -262,7 +291,7 @@ export fn pow(x: Double, y: Double) -> Double =
     else nan
   else if is_small_int(y) then
     if y > 0.0 then ipow(x, y, 1.0)
-    else 1.0 / ipow(x, 0.0 - y, 1.0)
+    else ipow_recip(x, 0.0 - y)
   else exp(y * ln(x))
 
 # Reduce an angle into [-pi, pi] so the Taylor series stays accurate.
