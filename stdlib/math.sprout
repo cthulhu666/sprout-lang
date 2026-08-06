@@ -89,6 +89,182 @@ export fn sqrt(x: Double) -> Double =
   else if x * 0.5 == x then x
   else sqrt_iter(x, x, 0)
 
+# --- Exponential, logarithm, cube root, power ---
+# Each is range reduction into a narrow interval + a series (or Newton) there. The
+# reductions all move by exact powers of two, so they contribute no rounding error;
+# the residual error is the series truncation alone. Measured bounds are in
+# docs/math-transcendental-v0.md.
+
+let ln2 = 0.6931471805599453
+let ln10 = 2.302585092994046
+# 1/ln2 — lets exp's reduction multiply instead of divide.
+let inv_ln2 = 1.4426950408889634
+let sqrt2 = 1.4142135623730951
+let inv_sqrt2 = 0.7071067811865476
+# The positive IEEE infinity. Double `/` lowers to an unguarded fdiv (only integer
+# `/` traps), so this is a genuine +inf rather than a trap, exactly like `nan` above.
+let inf = 1.0 / 0.0
+# 2^54, exactly representable — so 1.0 / two54 is exact too. Used by exp's
+# subnormal path; written as a division rather than a literal because Sprout has no
+# exponent literals (`2e-17` is a parse error).
+let two54 = 18014398509481984.0
+
+# exp on the reduced |r| <= ln2/2, as Horner-nested Taylor terms through r^12
+# (truncation ~1e-16 at the worst case). Nested as acc_k = 1 + r*acc_(k+1)/k so each
+# coefficient is a division by a small integer — no table of 1/k! constants needed.
+fn exp_series(r: Double) -> Double =
+  1.0 + r * (1.0 + r / 2.0 * (1.0 + r / 3.0 * (1.0 + r / 4.0 * (1.0 + r / 5.0
+    * (1.0 + r / 6.0 * (1.0 + r / 7.0 * (1.0 + r / 8.0 * (1.0 + r / 9.0
+    * (1.0 + r / 10.0 * (1.0 + r / 11.0 * (1.0 + r / 12.0)))))))))))
+
+# Multiply y by 2^k for a Double-valued integer k. Every step is an exact binary
+# scaling, so while the result stays normal this is error-free.
+fn exp_scale(y: Double, k: Double) -> Double =
+  if k >= 1.0 then exp_scale(y * 2.0, k - 1.0)
+  else if k <= -1.0 then exp_scale(y * 0.5, k + 1.0)
+  else y
+
+# exp(x) = 2^k * exp(r) where x = k*ln2 + r and |r| <= ln2/2.
+#
+# The overflow/underflow guards are not just IEEE etiquette — they are what makes
+# exp_scale terminate. Without them a +-inf argument yields k = +-inf and the scaling
+# loop would spin forever, since inf-1.0 == inf.
+#
+# Below k = -1021 the result is subnormal, and halving one step at a time re-rounds a
+# subnormal on every step: 54 successive round-to-even cascades flush exp(-745) to 0.0
+# instead of ~5e-324. Scaling to 54 places above the target and dividing by 2^54 once
+# collapses those 54 roundings into one.
+export fn exp(x: Double) -> Double =
+  if is_nan(x) then x
+  else if x > 710.0 then inf
+  else if x < -746.0 then 0.0
+  else if k < -1021.0 then exp_scale(exp_series(r), k + 54.0) / two54
+  else exp_scale(exp_series(r), k)
+where
+  k = round_nearest(x * inv_ln2)
+  r = x - k * ln2
+
+# ln on the reduced m in [1/sqrt2, sqrt2) via the atanh series: with
+# s = (m-1)/(m+1), ln(m) = 2*(s + s^3/3 + s^5/5 + ...), Horner-nested on s^2 through
+# s^15. Centering the reduction on sqrt2 instead of [1,2) caps |s| at 0.172 rather
+# than 1/3, which halves the terms needed for the same accuracy.
+fn ln_series(m: Double) -> Double =
+  2.0 * s * (1.0 + s2 * (1.0 / 3.0 + s2 * (1.0 / 5.0 + s2 * (1.0 / 7.0 + s2
+    * (1.0 / 9.0 + s2 * (1.0 / 11.0 + s2 * (1.0 / 13.0 + s2 * (1.0 / 15.0))))))))
+where
+  s = (m - 1.0) / (m + 1.0)
+  s2 = s * s
+
+# Halve or double into [1/sqrt2, sqrt2), adding or subtracting one ln2 per step. The
+# scaling is exact; only the repeated ln2 additions accumulate, and at ~1000 steps
+# (the 1e+-308 extremes) that is ~1e-13 absolute against a result of ~700.
+fn ln_reduce(x: Double, acc: Double) -> Double =
+  if x >= sqrt2 then ln_reduce(x * 0.5, acc + ln2)
+  else if x < inv_sqrt2 then ln_reduce(x * 2.0, acc - ln2)
+  else acc + ln_series(x)
+
+# Domain: x >= 0 (Rule 2 — a negative argument is NaN, not a clamped 0). ln(0) is the
+# pole at -inf. +inf must be short-circuited or the halving loop would never exit;
+# among positive x only +inf satisfies `x * 0.5 == x`, the same test sqrt uses.
+export fn ln(x: Double) -> Double =
+  if is_nan(x) then x
+  else if x < 0.0 then nan
+  else if x == 0.0 then 0.0 - inf
+  else if x * 0.5 == x then x
+  else ln_reduce(x, 0.0)
+
+# Every logarithm is ln scaled by a constant. NaN and +-inf propagate from ln, so the
+# Rule-2 domain behaviour is inherited rather than re-implemented three times.
+export fn log2(x: Double) -> Double =
+  ln(x) / ln2
+
+export fn log10(x: Double) -> Double =
+  ln(x) / ln10
+
+# General base, argument first to match the `log2`/`log10` shape: log(8.0, 2.0) == 3.0.
+export fn log(x: Double, base: Double) -> Double =
+  ln(x) / ln(base)
+
+# Newton for the cube root: g' = (2g + x/g^2)/3. Cubic-convergent from a guess in the
+# right octave, so the relative-error guard trips long before the 60-step ceiling.
+fn cbrt_iter(x: Double, guess: Double, i: Int) -> Double =
+  if i >= 60 then guess
+  else if abs(next - guess) < 0.000000000000001 * guess then next
+  else cbrt_iter(x, next, i + 1)
+where
+  next = (2.0 * guess + x / (guess * guess)) / 3.0
+
+# Reduce the magnitude into [1, 8) by exact factors of 8, tracking the cube root of
+# the extracted factor — a power of two, so also exact. 8 is the right stride because
+# cbrt(8) == 2 is representable; that is what keeps the scale-back error-free.
+fn cbrt_reduce(x: Double, scale: Double) -> Double =
+  if x >= 8.0 then cbrt_reduce(x * 0.125, scale * 2.0)
+  else if x < 1.0 then cbrt_reduce(x * 8.0, scale * 0.5)
+  else scale * cbrt_iter(x, 2.0, 0)
+
+# cbrt is defined on the WHOLE real line — unlike sqrt, a negative argument is in
+# domain (cbrt(-8) == -2), so it is odd symmetry, not Rule 2. Both zeros pass through
+# with their sign; +-inf is its own cube root.
+#
+# Deliberately not exp(ln(x)/3): the octave reduction above is exact, so cbrt neither
+# inherits exp/ln's truncation error nor depends on them.
+export fn cbrt(x: Double) -> Double =
+  if is_nan(x) then x
+  else if x == 0.0 then x
+  else if x < 0.0 then 0.0 - cbrt(0.0 - x)
+  else if x * 0.5 == x then x
+  else cbrt_reduce(x, 1.0)
+
+# Is y an odd integer? Computed entirely in Double (no fptosi exists): floor(y*0.5)
+# doubles back to y exactly when y is even. Correct for negative y too — y = -3 gives
+# floor(-1.5) = -2 and -3 - 2*(-2) == 1. For |y| >= 2^53 every Double is an even
+# integer, and this reports even, which is the truth.
+fn is_odd_int(y: Double) -> Bool =
+  (floor(y) == y) && (y - 2.0 * floor(y * 0.5) == 1.0)
+
+# An integer exponent small enough to be worth the exact path below.
+fn is_small_int(y: Double) -> Bool =
+  (floor(y) == y) && (abs(y) <= 1024.0)
+
+# Binary exponentiation for a positive Double-valued integer exponent. Multiplications
+# only, so an integer power of an exactly-representable base is BIT-exact — this is
+# what makes pow(T, 4.0) equal T*T*T*T rather than merely approximate it.
+fn ipow(base: Double, e: Double, acc: Double) -> Double =
+  if e < 1.0 then acc
+  else if e - 2.0 * h == 1.0 then ipow(base * base, h, acc * base)
+  else ipow(base * base, h, acc)
+where
+  h = floor(e * 0.5)
+
+# pow(x, y). The edge cases follow C99/IEEE (F.9.4.4), which differs from Python:
+# pow(0.0, -1.0) is +inf here, where Python raises. Ordered so the two total cases win
+# before any NaN test, because C99 makes them total even for a NaN operand:
+#   pow(x, +-0) == 1 for every x, NaN included
+#   pow(1, y)   == 1 for every y, NaN included
+# A negative base is in domain only for an integer exponent (otherwise the result is
+# genuinely not real -> NaN, Rule 2); the sign then follows the exponent's parity.
+export fn pow(x: Double, y: Double) -> Double =
+  if y == 0.0 then 1.0
+  else if x == 1.0 then 1.0
+  else if is_nan(x) || is_nan(y) then nan
+  else if x == 0.0 then
+    # The pole. IEEE keeps the sign of a -0.0 base under an odd integer exponent, so
+    # returning `x` for y > 0 propagates -0.0, and the y < 0 branch gives -inf.
+    if y > 0.0 then
+      if is_odd_int(y) then x
+      else 0.0
+    else if is_odd_int(y) && (1.0 / x < 0.0) then 0.0 - inf
+    else inf
+  else if x < 0.0 then
+    if floor(y) == y then
+      if is_odd_int(y) then 0.0 - pow(0.0 - x, y)
+      else pow(0.0 - x, y)
+    else nan
+  else if is_small_int(y) then
+    if y > 0.0 then ipow(x, y, 1.0)
+    else 1.0 / ipow(x, 0.0 - y, 1.0)
+  else exp(y * ln(x))
+
 # Reduce an angle into [-pi, pi] so the Taylor series stays accurate.
 fn reduce(x: Double) -> Double =
   x - two_pi * floor((x + pi) / two_pi)

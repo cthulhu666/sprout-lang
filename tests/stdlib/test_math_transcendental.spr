@@ -1,0 +1,193 @@
+import stdlib.test (check_true, run_suite)
+import stdlib.math (exp, ln, log2, log10, log, cbrt, pow, sqrt, abs, is_nan, nan)
+
+# TDD — the Double transcendental layer: exp, ln, log2, log10, log, cbrt, pow.
+# All pure Sprout (range reduction + series / Newton), no C builtins. Expected
+# values are libm-computed reference constants; see docs/math-transcendental-v0.md
+# for the measured error bounds these tolerances are drawn from.
+#
+# Comparisons are RELATIVE, not absolute: these functions span the whole exponent
+# range, so an absolute epsilon that is meaningful at exp(1) is meaningless at
+# exp(709) ~ 8.2e307. `check_approx` takes an absolute eps, so it is not used here.
+
+let inf = 1.0 / 0.0
+let neg_inf = 0.0 - 1.0 / 0.0
+
+fn rel_err(actual: Double, expected: Double) -> Double =
+  abs(actual - expected) / abs(expected)
+
+# Tolerance 1e-12 rather than the measured ~1e-13, to leave headroom for the
+# reference constants themselves: Sprout has no exponent literals (`1e300` is a
+# parse error), so wide-range expectations are built with `p10` below, whose
+# repeated *10.0 is inexact and accumulates ~n * 1.1e-16 of relative error.
+fn close(actual: Double, expected: Double) -> Bool =
+  rel_err(actual, expected) < 0.000000000001
+
+# 10^n as a Double, for magnitudes no literal can express.
+fn p10(n: Int) -> Double =
+  if n <= 0 then 1.0
+  else 10.0 * p10(n - 1)
+
+fn cube(x: Double) -> Double = x * x * x
+
+fn main() -> Unit !{IO} =
+  run_suite("math_transcendental", [
+    # ---------------------------------------------------------------- exp -----
+    # exp(0) is exactly 1: the reduction picks k=0, r=0, and the series' leading
+    # term is 1.0, so no rounding can intrude.
+    check_true("exp(0) == 1 exactly", exp(0.0) == 1.0),
+    check_true("exp(1) == e", close(exp(1.0), 2.718281828459045)),
+    check_true("exp(-1) == 1/e", close(exp(-1.0), 0.36787944117144233)),
+    check_true("exp(0.5)", close(exp(0.5), 1.6487212707001282)),
+    check_true("exp(10)", close(exp(10.0), 22026.465794806718)),
+    check_true("exp(-10)", close(exp(-10.0), 4.5399929762484854 / p10(5))),
+    check_true("exp(20)", close(exp(20.0), 485165195.4097903)),
+    # Near the overflow boundary — exercises the largest in-range k (~1023).
+    check_true("exp(709) near max Double", close(exp(709.0), 8.218407461554972 * p10(307))),
+    check_true("exp(-700)", close(exp(-700.0), 9.85967654375977 / p10(305))),
+    # Rule 2 / IEEE saturation. The guards that produce these also bound the
+    # scaling loop: without them k would be +-inf and the loop would not terminate.
+    check_true("exp overflows to +inf", exp(800.0) == inf),
+    check_true("exp underflows to 0", exp(-800.0) == 0.0),
+    check_true("exp(+inf) == +inf", exp(inf) == inf),
+    check_true("exp(-inf) == 0", exp(neg_inf) == 0.0),
+    check_true("exp(NaN) is NaN", is_nan(exp(nan))),
+    # REGRESSION: subnormal results must not flush to zero. Scaling by halving 1075
+    # times re-rounds a subnormal on every step and cascades to 0.0; the two-step
+    # scale (finish the last 54 halvings at once) keeps exp(-745) ~ 5e-324 alive.
+    check_true("exp(-745) stays subnormal, not 0", exp(-745.0) > 0.0),
+    check_true("exp(-745) is tiny", exp(-745.0) < 1.0 / p10(300)),
+    # Homomorphism: exp(a+b) == exp(a)*exp(b) links independent reductions.
+    check_true("exp(a+b) == exp(a)exp(b)",
+      close(exp(2.3 + 1.7), exp(2.3) * exp(1.7))),
+
+    # ----------------------------------------------------------------- ln -----
+    check_true("ln(1) == 0 exactly", ln(1.0) == 0.0),
+    check_true("ln(2)", close(ln(2.0), 0.6931471805599453)),
+    check_true("ln(10)", close(ln(10.0), 2.302585092994046)),
+    check_true("ln(0.5) == -ln(2)", close(ln(0.5), 0.0 - 0.6931471805599453)),
+    check_true("ln(3)", close(ln(3.0), 1.0986122886681098)),
+    check_true("ln(1.5)", close(ln(1.5), 0.4054651081081644)),
+    check_true("ln(0.1)", close(ln(0.1), 0.0 - 2.3025850929940455)),
+    # Wide range: the binary reduction runs ~1000 halvings/doublings at these
+    # magnitudes, so these pin that the accumulated k*ln2 stays accurate.
+    check_true("ln(1e300)", close(ln(p10(300)), 690.7755278982137)),
+    check_true("ln(1e-300)", close(ln(1.0 / p10(300)), 0.0 - 690.7755278982137)),
+    # Rule 2: negative is out of the real domain -> NaN, never a silent value.
+    check_true("ln(-1) is NaN", is_nan(ln(0.0 - 1.0))),
+    check_true("ln(-0.001) is NaN", is_nan(ln(0.0 - 0.001))),
+    check_true("ln(NaN) is NaN", is_nan(ln(nan))),
+    # IEEE in-domain edges: ln(0) is the pole, ln(+inf) diverges.
+    check_true("ln(0) == -inf", ln(0.0) == neg_inf),
+    check_true("ln(+inf) == +inf", ln(inf) == inf),
+    # Round trips both ways — each catches reduction bugs the other can hide.
+    check_true("ln(exp(x)) == x", close(ln(exp(3.7)), 3.7)),
+    check_true("exp(ln(x)) == x", close(exp(ln(12345.678)), 12345.678)),
+
+    # ------------------------------------------------- log2 / log10 / log -----
+    check_true("log2(1) == 0", log2(1.0) == 0.0),
+    check_true("log2(1024) == 10", close(log2(1024.0), 10.0)),
+    check_true("log2(0.25) == -2", close(log2(0.25), 0.0 - 2.0)),
+    check_true("log2(1e10)", close(log2(p10(10)), 33.219280948873624)),
+    check_true("log10(1) == 0", log10(1.0) == 0.0),
+    check_true("log10(1000) == 3", close(log10(1000.0), 3.0)),
+    check_true("log10(2)", close(log10(2.0), 0.3010299956639812)),
+    check_true("log10(1e300) == 300", close(log10(p10(300)), 300.0)),
+    # General base: log(x, base) == ln x / ln base.
+    check_true("log(8, 2) == 3", close(log(8.0, 2.0), 3.0)),
+    check_true("log(81, 3) == 4", close(log(81.0, 3.0), 4.0)),
+    check_true("log(x, 10) agrees with log10", close(log(7.3, 10.0), log10(7.3))),
+    check_true("log(x, 2) agrees with log2", close(log(7.3, 2.0), log2(7.3))),
+    # NaN propagates out of the numerator (Rule 2 inherited from ln).
+    check_true("log2(-1) is NaN", is_nan(log2(0.0 - 1.0))),
+    check_true("log10(-1) is NaN", is_nan(log10(0.0 - 1.0))),
+    check_true("log(-1, 2) is NaN", is_nan(log(0.0 - 1.0, 2.0))),
+
+    # --------------------------------------------------------------- cbrt -----
+    check_true("cbrt(0) == 0", cbrt(0.0) == 0.0),
+    # Sign of zero survives, as in sqrt (1.0 / -0.0 == -inf < 0).
+    check_true("cbrt(-0.0) keeps the sign", 1.0 / cbrt(-0.0) < 0.0),
+    check_true("cbrt(1) == 1", cbrt(1.0) == 1.0),
+    # Perfect cubes should land exactly: the octave reduction is exact and Newton
+    # converges onto the representable root.
+    check_true("cbrt(8) == 2", close(cbrt(8.0), 2.0)),
+    check_true("cbrt(27) == 3", close(cbrt(27.0), 3.0)),
+    check_true("cbrt(1000) == 10", close(cbrt(1000.0), 10.0)),
+    # Unlike sqrt, cbrt is defined on negatives — it is an ODD function, not
+    # out-of-domain. A NaN here would be the bug.
+    check_true("cbrt(-8) == -2", close(cbrt(0.0 - 8.0), 0.0 - 2.0)),
+    check_true("cbrt(-27) == -3", close(cbrt(0.0 - 27.0), 0.0 - 3.0)),
+    check_true("cbrt(-8) is not NaN", is_nan(cbrt(0.0 - 8.0)) == false),
+    check_true("cbrt odd symmetry", close(cbrt(0.0 - 5.3), 0.0 - cbrt(5.3))),
+    check_true("cbrt(2)", close(cbrt(2.0), 1.2599210498948732)),
+    check_true("cbrt(10)", close(cbrt(10.0), 2.154434690031884)),
+    check_true("cbrt(0.001) == 0.1", close(cbrt(0.001), 0.1)),
+    check_true("cbrt(1e300) == 1e100", close(cbrt(p10(300)), p10(100))),
+    check_true("cbrt(+inf) == +inf", cbrt(inf) == inf),
+    check_true("cbrt(NaN) is NaN", is_nan(cbrt(nan))),
+    # Inverse identity at an arbitrary point.
+    check_true("cbrt(x)^3 == x", close(cube(cbrt(7.77)), 7.77)),
+
+    # ---------------------------------------------------------------- pow -----
+    # Integer exponents take the exact binary-exponentiation path, so these are
+    # BIT-exact, not approximate. Asserted with `==` deliberately.
+    check_true("pow(2,10) == 1024 exactly", pow(2.0, 10.0) == 1024.0),
+    check_true("pow(2,-3) == 0.125 exactly", pow(2.0, 0.0 - 3.0) == 0.125),
+    check_true("pow(2.5,3) == 15.625 exactly", pow(2.5, 3.0) == 15.625),
+    check_true("pow(10,3) == 1000 exactly", pow(10.0, 3.0) == 1000.0),
+    # Stefan-Boltzmann is T^4: the headline case for the exact integer path.
+    check_true("pow(T,4) is exactly T*T*T*T",
+      pow(5772.0, 4.0) == 5772.0 * 5772.0 * 5772.0 * 5772.0),
+    check_true("pow(x,2) == x*x exactly", pow(3.7, 2.0) == 3.7 * 3.7),
+    # C99: pow(x, +-0) is 1 for EVERY x, including 0 and NaN.
+    check_true("pow(5,0) == 1", pow(5.0, 0.0) == 1.0),
+    check_true("pow(0,0) == 1", pow(0.0, 0.0) == 1.0),
+    check_true("pow(-3,0) == 1", pow(0.0 - 3.0, 0.0) == 1.0),
+    check_true("pow(NaN,0) == 1 (C99)", pow(nan, 0.0) == 1.0),
+    # C99: pow(1, y) is 1 for every y, including NaN.
+    check_true("pow(1,NaN) == 1 (C99)", pow(1.0, nan) == 1.0),
+    check_true("pow(1,inf) == 1", pow(1.0, inf) == 1.0),
+    # Zero base: 0^positive is 0, 0^negative is the pole.
+    check_true("pow(0,2) == 0", pow(0.0, 2.0) == 0.0),
+    check_true("pow(0,-1) == +inf", pow(0.0, 0.0 - 1.0) == inf),
+    # -0.0 base with an odd negative integer exponent keeps IEEE's sign.
+    check_true("pow(-0.0,-3) == -inf", pow(-0.0, 0.0 - 3.0) == neg_inf),
+    check_true("pow(-0.0,-2) == +inf", pow(-0.0, 0.0 - 2.0) == inf),
+    # Negative base: defined only for integer exponents, with sign by parity.
+    check_true("pow(-2,3) == -8", pow(0.0 - 2.0, 3.0) == 0.0 - 8.0),
+    check_true("pow(-2,2) == 4", pow(0.0 - 2.0, 2.0) == 4.0),
+    check_true("pow(-2,-3) == -0.125", pow(0.0 - 2.0, 0.0 - 3.0) == 0.0 - 0.125),
+    # Rule 2: a negative base with a fractional exponent has no real value.
+    check_true("pow(-2,0.5) is NaN", is_nan(pow(0.0 - 2.0, 0.5))),
+    check_true("pow(-2,1.5) is NaN", is_nan(pow(0.0 - 2.0, 1.5))),
+    check_true("pow(NaN,2) is NaN", is_nan(pow(nan, 2.0))),
+    check_true("pow(2,NaN) is NaN", is_nan(pow(2.0, nan))),
+    # Fractional exponents route through exp(y * ln x).
+    check_true("pow(2,0.5) == sqrt 2", close(pow(2.0, 0.5), 1.4142135623730951)),
+    check_true("pow(9,0.5) == 3", close(pow(9.0, 0.5), 3.0)),
+    check_true("pow(1.5,2.5)", close(pow(1.5, 2.5), 2.7556759606310752)),
+    check_true("pow(1e30,0.25)", close(pow(p10(30), 0.25), 31622776.60168379)),
+    check_true("pow agrees with sqrt", close(pow(7.3, 0.5), sqrt(7.3))),
+    check_true("pow agrees with cbrt", close(pow(7.3, 1.0 / 3.0), cbrt(7.3))),
+    # Overflow past the exact integer path.
+    check_true("pow(2,5000) == +inf", pow(2.0, 5000.0) == inf),
+    check_true("pow(2,-5000) == 0", pow(2.0, 0.0 - 5000.0) == 0.0),
+
+    # ------------------------------------------------------- applications -----
+    # Tsiolkovsky rocket equation, dv = Isp * g0 * ln(mass ratio) — the model that
+    # was previously inexpressible for want of ln.
+    check_true("Tsiolkovsky dv, Isp=450 g0=9.80665 ratio=3",
+      close(450.0 * 9.80665 * ln(3.0), 4848.167790300203)),
+    # Stefan-Boltzmann radiant emittance, j = sigma * T^4, and its inverse. The
+    # forward direction was already expressible (three multiplies); the point here
+    # is that pow's exact integer path gives the identical answer.
+    check_true("Stefan-Boltzmann j = sigma T^4",
+      close(5.670374419 / p10(8) * pow(5772.0, 4.0), 62938592.46828887)),
+    check_true("Stefan-Boltzmann inverse round-trips",
+      close(sqrt(sqrt(pow(300.0, 4.0))), 300.0)),
+    # Logistic sigmoid, 1/(1+exp(-x)) — the activation docs/nn-gap-analysis.md
+    # listed as blocked on a C `exp` extern.
+    check_true("sigmoid(2) == 0.8807970779778823",
+      close(1.0 / (1.0 + exp(0.0 - 2.0)), 0.8807970779778823)),
+    check_true("sigmoid(0) == 0.5", close(1.0 / (1.0 + exp(0.0)), 0.5))
+  ])
