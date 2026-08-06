@@ -108,6 +108,55 @@ and the remaining divisions pipeline well in a throughput-bound loop. The change
 — it is free, and accuracy is identical at 7.98e-14 either way — but the comment in
 `stdlib/math.sprout` now states the measured 20% rather than the guessed multiple.
 
+## A refactor that did not survive measurement (added 2026-08-06)
+
+The three range reductions (`sqrt_reduce`, `ln_reduce`, `cbrt_reduce`) thread the extracted
+factor as a parameter and combine it with the series at the base case. The more legible
+alternative returns the decomposition and lets the caller destructure it:
+
+```sprout
+fn ln_split(x: Double, k: Double) -> (Double, Double) = ... else (x, k)
+fn ln_reduce(x: Double) -> Double = k * ln2 + ln_series(m) where (m, k) = ln_split(x, 0.0)
+```
+
+This was originally avoided only because a `where`-bound tuple did not type-check — `where`
+bindings took their type from body usage rather than the right-hand side. That bug was fixed
+on 2026-08-06, so the accumulator looked like a leftover workaround worth removing.
+
+Measured A/B, both forms in one binary over the same 2M-call sweep
+(`bench/math_transcendental/accumulator_vs_tuple_bench.sprout`):
+
+| form                                   | 2M calls  | per call    | vs accumulator |
+|----------------------------------------|-----------|-------------|----------------|
+| baseline (loop + argument arithmetic)  | ~1.5 ms   | —           | —              |
+| **A** accumulator-threaded (ships today) | ~10.2 ms  | **4.3 ns**  | —              |
+| **B** tuple-returning, warm heap       | ~26.2 ms  | **12.4 ns** | **2.8x**       |
+| **B** tuple-returning, cold heap       | ~60.5 ms  | ~29.5 ns    | ~6.8x          |
+
+Checksums are **bit-identical** in every run (`3.27537e+06`), so this is purely a cost
+difference — there is no accuracy argument in either direction.
+
+Do not read row A against the 5.0 ns `ln` row in the main table above: this harness sweeps
+`[1, 11)` rather than `[0, 10)`, and holds two `ln` implementations in one binary, so the
+absolute numbers are not comparable across the two benchmarks. The **ratio** between A and B
+is the result here, and both arms share the sweep, the binary and the series.
+
+The cause is not tuples but a missing case in tuple-return CPR
+(`docs/scalar-replacement-v0.md`). CPR *does* fire on the outer call: the `where`-destructuring
+caller receives `{i64, i64}` by value with no allocation. It does **not** fire on the
+function's own recursive edge, so each step round-trips through the boxed wrapper —
+`sprout_alloc_tuple_blob(16)`, two loads to unpack, an `insertvalue` pair to repack. At ~20
+steps per call that is ~20 heap allocations against zero, and the self-tail-call that TCO
+would fold into a loop is lost too. The cold/warm gap for B (29.5 → 12.4 ns) is that GC cost
+becoming visible; B also carries visibly higher run-to-run spread (~23% on one warm run,
+against ~13% for A) for the same reason.
+
+So the accumulator shape is kept, and `stdlib/math.sprout` now documents it as a measured
+decision rather than a workaround. The CPR gap is filed in `BACKLOG.md` under *Sprout-IR /
+Model-C Codegen*; both halves of the codegen behaviour are pinned by
+`tests/stdlib/compiler/test_tuple_return_cpr.spr`, whose "KNOWN GAP" assertion is written to
+fail loudly when the gap is closed, so this file and that comment get revisited.
+
 ## Conclusion: no new builtin
 
 **No C builtin is justified by these numbers, and `runtime/APPROVED_BUILTINS` is

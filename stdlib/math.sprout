@@ -86,6 +86,38 @@ let inv_two256 = 1.0 / two256
 let inv_two384 = 1.0 / two384
 let inv_two512 = 1.0 / two512
 
+# --- Why the reductions thread an accumulator ---
+# `sqrt_reduce`, `ln_reduce` and `cbrt_reduce` each carry the extracted factor along as a
+# parameter and combine it with the series result at the base case. The tidier-looking
+# alternative is to return the decomposition and let the caller put it together:
+#
+#   fn ln_split(x: Double, k: Double) -> (Double, Double) = ... else (x, k)
+#   fn ln_reduce(x: Double) -> Double = k * ln2 + ln_series(m) where (m, k) = ln_split(x, 0.0)
+#
+# That was measured, not assumed. Both forms in one binary over the same 2M-call sweep give
+# BIT-IDENTICAL results, and the tuple form costs 12.4 ns/call against 4.3 — 2.8x slower warm,
+# and ~29.5 ns/call on a cold heap, the extra being GC. Re-run it with
+# bench/math_transcendental/accumulator_vs_tuple_bench.sprout; numbers in
+# bench/results-2026-08-06-math-transcendental.md.
+#
+# The cause is a missing case in tuple-return CPR (docs/scalar-replacement-v0.md), not
+# anything inherent to tuples. CPR *does* fire on the outer call: a `where`-destructuring
+# caller gets `{i64, i64}` returned by value, with no heap tuple at all. It does NOT fire on
+# the SELF-RECURSIVE edge, so every reduction step round-trips through the boxed wrapper —
+# `sprout_alloc_tuple_blob(16)`, two loads to unpack, an insertvalue pair to repack. At ~20
+# steps per call that is ~20 allocations where the accumulator form has zero, and the
+# self-tail-call that TCO would turn into a loop is lost as well. Both halves of this are
+# pinned by `tests/stdlib/compiler/test_tuple_return_cpr.spr`.
+#
+# So this shape is deliberate. It is NOT a leftover workaround for the `where`-binding
+# inference bug (bindings took their type from body usage instead of the right-hand side;
+# fixed 2026-08-06). That bug did make the tuple form fail to compile while this code was
+# first written, which is how it came to be recorded as the reason — but the form compiles
+# fine now and is still the slower choice, so the accumulator stands on its own merits.
+#
+# Revisit only if the CPR gap closes; it is filed in BACKLOG.md under Sprout-IR / Model-C
+# Codegen with these measurements.
+
 # The IEEE quiet NaN — the out-of-domain Double result (Rule 2). Double `/` lowers
 # to an unguarded fdiv (only integer `/` traps), so 0.0/0.0 is a genuine NaN.
 export let nan = 0.0 / 0.0
@@ -146,6 +178,9 @@ fn sqrt_iter(x: Double, guess: Double, i: Int) -> Double =
 # instead of 1e20, silently, which is exactly the in-band lie this module's header
 # forbids. Reduced into [1,4) the seed is within a factor of two of the root, so Newton
 # converges in a handful of steps for every representable input.
+#
+# `scale` is threaded rather than returned as `(mantissa, scale)` for a measured reason —
+# see "Why the reductions thread an accumulator" above.
 fn sqrt_reduce(x: Double, scale: Double) -> Double =
   if x >= 4.0 then
     if x < two8 then sqrt_reduce(x * 0.25, scale * 2.0)
@@ -279,6 +314,10 @@ where
 # far the reduction travelled — strictly more accurate AND ~1070 fewer operations.
 #
 # Strides descend 512 -> 64 -> 8 -> 1, as in exp_scale, bounding the loop at ~20 steps.
+#
+# `k` is threaded rather than returned as `(mantissa, k)` for a measured reason — see "Why
+# the reductions thread an accumulator" above. This function is the one the 4.25 vs 12.5
+# ns/call comparison there was taken on.
 fn ln_reduce(x: Double, k: Double) -> Double =
   if x >= sqrt2 then
     if x < two8 then ln_reduce(x * 0.5, k + 1.0)
@@ -337,6 +376,9 @@ where
 # The coarse strides are the powers of two divisible by three (2^384, 2^48, 2^12, 2^3), so
 # each has an exact cube root (2^128, 2^16, 2^4, 2). Same motive as exp_scale and
 # ln_reduce: one-factor-at-a-time took 357 steps at 1e-300 and measured 392 ns/call.
+#
+# `scale` is threaded rather than returned as `(mantissa, scale)` for a measured reason —
+# see "Why the reductions thread an accumulator" above.
 fn cbrt_reduce(x: Double, scale: Double) -> Double =
   if x >= 8.0 then
     if x < two12 then cbrt_reduce(x * 0.125, scale * 2.0)
