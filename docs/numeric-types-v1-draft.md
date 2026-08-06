@@ -3,6 +3,37 @@
 Status: **draft**. No implementation yet. This document exists to align on
 goals and surface design decisions before writing any code.
 
+> **Update 2026-08-06 — what shipped in the meantime, and two conflicts to resolve.**
+>
+> `Double` has landed (N2's prerequisite, "C runtime float support", is met), along with
+> a pure-Sprout elementary-function suite: `sqrt`, `cbrt`, `exp`, `ln`, `log2`, `log10`,
+> `log(x, base)`, `pow`, and trig. These are ordinary module functions, **not** class
+> methods — N1 remains unimplemented, so there is still no `Numeric`/`Integer`/`Real`.
+> Because one name cannot serve two types without overloading, the math surface was split
+> by type instead: `stdlib.math` is the `Double` layer, `stdlib.math.int` the `Int` layer,
+> both using the plain names. That was chosen partly to be forward-compatible with this
+> draft — `stdlib.math` already uses the exact names §6.2's `Real` methods have, so the
+> migration moves definitions into an instance rather than renaming call sites. Rationale:
+> `docs/math-transcendental-v0.md` §4 and §7.
+>
+> **Conflict 1 — total vs `Maybe`.** §6.2 declares `Integer.mod` and `Real.pow` total
+> (`-> a`). But the shipped `stdlib.math.int` returns `Maybe Int` from both, and
+> `docs/math-partiality-v0.md` §5 commits to those signatures as *permanent* (the
+> forward-compatibility promise is that an Exn-effect variant is added *alongside*, never
+> replacing). Implementing §6.2 as written would break that promise. Needs a decision:
+> either the class methods take different names (`div`/`rem`/`quot` already differ from
+> `mod`), or the partiality doc's commitment is renegotiated. Note this is not merely a
+> signature quibble — `Real.pow` returning `a` and `Integer.pow` returning `Maybe a`
+> cannot both be one class method without associated types, which Sprout lacks.
+>
+> **Conflict 2 — §7.1 is now overdue, not pending.** §7.1 says the NaN/`Ord` decision is
+> "needed before `Double` ships". `Double` shipped without it, so `Double` today has
+> exactly one instance in the whole stdlib (`ToString`, `prelude.sprout:814`) — no `Eq`,
+> no `Ord`. Two live consequences: `check_eq` does not type-check on `Double`
+> (`stdlib/test.sprout` carries `check_approx` to work around it), and `stdlib.math`
+> deliberately ships **no** `Double` `min`/`max`/`sign`, because they would force the
+> decision. Tracked in `BACKLOG.md`.
+
 ---
 
 ## 1. Problem Statement

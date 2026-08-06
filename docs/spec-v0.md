@@ -802,10 +802,29 @@ Effect note for v0:
 14. Function-local `where` bindings may destructure tuples, but constructor, literal,
     and general pattern bindings are not part of v0.
 
-## 8. Standard Library Math Module
+## 8. Standard Library Math Modules
 
-Sprout v0 includes a normative integer-only standard library math module:
-`stdlib.math`.
+Sprout splits its math surface by numeric type, one module each, so that both can
+use plain unprefixed names:
+
+- **`stdlib.math.int`** — the normative integer math module. Its exports and
+  semantics are specified below.
+- **`stdlib.math`** — the `Double` (real-valued) layer. `Double` itself is an
+  experimental extension rather than part of the normative v0 core (see §8.6), so
+  that module's surface is documented in `docs/builtins-reference.md` and
+  `docs/math-transcendental-v0.md` rather than fixed here.
+
+Sprout has no overloading, so a single name cannot serve both types. The split is
+what lets `abs`, `clamp` and `pow` mean the obvious thing in each module instead of
+one of them carrying a C-style marker prefix (`fabs`, `fclamp`). Import qualified
+when a module needs both:
+
+```sprout
+import stdlib.math as math
+import stdlib.math.int as imath
+```
+
+### 8.1 `stdlib.math.int`
 
 Exports:
 
@@ -823,7 +842,7 @@ Exports:
 
 Semantics:
 
-- `stdlib.math` does not introduce additional numeric types in v0.
+- `stdlib.math.int` does not introduce additional numeric types.
 - `mod(x, n)` uses Euclidean modulo.
 - If `n > 0`, `mod(x, n)` returns `Just r` where `0 <= r < n`.
 - If `n <= 0`, `mod(x, n)` returns `Nothing`.
@@ -837,11 +856,21 @@ Semantics:
   backend's current representable range.
 - This backend range limitation is a temporary implementation constraint in v0,
   not the intended long-term meaning of `Int`.
-- The presence of `pow` and `mod` in `stdlib.math` does not imply implicit
+- The presence of `pow` and `mod` in `stdlib.math.int` does not imply implicit
   numeric coercions or fractional arithmetic for `Int`. A separate `Double`
   type with floating-point arithmetic has since landed as an experimental
   extension; `Int` and `Double` never implicitly coerce — conversion is
   explicit (`to_double`).
+
+### 8.2 Partiality
+
+`stdlib.math.int` follows Rule 1 of the partiality convention: an out-of-domain
+`Int` argument returns `Maybe` (`mod`, `pow`), because `Int` has no spare bottom
+value. `stdlib.math` follows Rule 2: an out-of-domain `Double` argument returns an
+IEEE `NaN` or `±inf`, detected with `math.is_nan`. The rules, the rationale, and
+the prior-art survey behind them are in `docs/math-partiality-v0.md`; Rule 1's
+`Maybe`-returning signatures are a standing commitment and will not be narrowed to
+total functions.
 
 ## 8.5 Standard Prelude Typeclass Instances (Experimental)
 
@@ -1262,11 +1291,31 @@ fn bad(m: Maybe Int) -> Int =
 
 The compiler rejects the final branch as an unreachable match branch (see §5.5).
 
-### 10.13 Using `stdlib.math`
+### 10.13 Using the math modules
+
+Integer math comes from `stdlib.math.int`:
+
+```sprout
+import stdlib.math.int as imath
+
+fn wrap_index(idx: Int, size: Int) -> Maybe Int =
+  imath.mod(idx, size)
+```
+
+(The function is named `wrap_index`, not `wrap`: `wrap` is a reserved keyword — see §5.)
+
+`Double` math comes from `stdlib.math`, which uses the same plain names for the
+`Double` versions. A module needing both imports both under distinct aliases:
 
 ```sprout
 import stdlib.math as math
+import stdlib.math.int as imath
 
-fn wrap(idx: Int, size: Int) -> Maybe Int =
-  math.mod(idx, size)
+# Stefan-Boltzmann radiant emittance, j = sigma * T^4. `pow` with an integer
+# exponent is exact, so this equals sigma * T*T*T*T bit for bit.
+fn emittance(kelvin: Double) -> Double =
+  0.00000005670374419 * math.pow(kelvin, 4.0)
+
+fn even_bucket(idx: Int) -> Bool =
+  imath.is_even(idx)
 ```
