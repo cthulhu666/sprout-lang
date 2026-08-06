@@ -281,11 +281,18 @@ only against a *concrete, measured bottleneck*. A ratio against libm is not one:
 
 ## Harness caveats, for whoever runs this next
 
-- **Checksum comparison is weak.** Both binaries print an accumulator so no call can be
-  optimised away, but Sprout's `to_string` for `Double` emits ~6 significant figures, so
-  the printed checksums only confirm agreement to that precision. Accuracy is verified
-  properly by `tests/stdlib/test_math_transcendental.spr` (148 assertions against
-  libm-computed constants at 1e-12 relative), not by these checksums.
+- **Checksum comparison used to be weak, and is no longer.** Both binaries print an
+  accumulator so no call can be optimised away. Every checksum recorded in *this* file was
+  captured while Sprout's `to_string` for `Double` emitted only **~6 significant figures**
+  (plain `snprintf("%g")`), so the agreements quoted above confirm agreement to about that
+  precision and no further. That formatting bug was found while investigating this work and
+  fixed the same day — `to_string` now renders at the shortest precision that reads back
+  bit-identically — so a re-run of any of these harnesses will print far more digits and
+  the checksums will *look* different without anything having changed numerically. Do not
+  read that as a regression; re-baseline instead. Accuracy is in any case verified properly
+  by `tests/stdlib/test_math_transcendental.spr` (148 assertions against libm-computed
+  constants at 1e-12 relative) and `tests/stdlib/test_math_root_accuracy.spr`, not by these
+  checksums.
 - **Two earlier versions of this harness produced invalid numbers.** Recorded so they are
   not reintroduced: (1) a `volatile double` accumulator in the C reference created a
   store/load latency chain that the libm call hid inside, making `exp` measure 0.03ns per

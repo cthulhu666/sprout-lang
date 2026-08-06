@@ -962,7 +962,7 @@ call that would otherwise only fail at link time:
 | Type | Result |
 |---|---|
 | `Int` | decimal string, e.g. `"42"` |
-| `Double` | decimal string via `%g`; a `.0` is appended when the value is integral so it never reads as an `Int`, e.g. `"3.14"`, `"1.0"` |
+| `Double` | decimal string at the **shortest precision that reads back bit-identically** — the first of `%.15g` / `%.16g` / `%.17g` whose text parses back to the same `Double`. 17 significant digits always suffice for an IEEE-754 double, so the rendering is never lossy; starting at 15 keeps tidy values tidy. A `.0` is appended when the value is integral so it never reads as an `Int`. E.g. `"3.14"`, `"1.0"`, `"0.1"`, and `to_string(0.1 + 0.2) == "0.30000000000000004"` |
 | `Bool` | `"true"` or `"false"` |
 | `String` | identity |
 | `(a, b)` | `"(s_a, s_b)"` where `s_x = to_string(x)` — requires `ToString a`, `ToString b` |

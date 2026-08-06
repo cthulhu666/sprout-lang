@@ -103,8 +103,9 @@ A small `rand`/`srand` or a pure LCG in stdlib would close this.
 
 **Partly closed.** `to_double(Int) -> Double` now exists (a compiler intrinsic
 lowering to inline `sitofp`, no runtime builtin), and `double_to_string` +
-`instance ToString Double` render a `Double` as decimal text (`%g`, `.0`
-appended for integrals). Also `==`/`!=` now work on `Double`. Still missing:
+`instance ToString Double` render a `Double` as decimal text (shortest
+round-tripping precision, `.0` appended for integrals — it was `%g`, i.e. 6
+significant digits and therefore lossy, until 2026-08-06). Also `==`/`!=` now work on `Double`. Still missing:
 `from_int`'s inverse `to_int` (`fptosi`). **string→float parsing** is now covered
 by the pure-Sprout `parse_double` (prelude), so loading a dataset from text/CSV works.
 
