@@ -320,6 +320,37 @@ test-conformance-run: bootstrap-from-seed
 b1-gate: bootstrap-from-seed
   bash scripts/b1_gate.sh
 
+# Byte-diff --use-ir-codegen output for the whole example + smoke-shape corpus
+# against the committed goldens in tests/golden/ir/ (57 files, ~55s serial).
+#
+# This is a CHANGE DETECTOR, not a correctness oracle: it answers "did this edit
+# alter the IR of any real program, and is that what you intended?".  That makes
+# the golden diff review signal as much as a gate — the diff shows precisely what
+# a codegen change did to shipping code.
+#
+# It also fails on MISSING GOLDEN, so an example that newly becomes IR-compilable
+# must be snapshotted rather than silently sitting outside the corpus.
+#
+# When a diff is INTENTIONAL: run `just ir-golden-snapshot` and stage the result.
+# Read the diff first — regenerating without reading it is how a real regression
+# gets laundered into an "expected" snapshot.
+#
+# Wired into `gate` and `ci-fast-gates` deliberately, NOT into `gate-quick`: at
+# ~55s it is the single slowest fast-gate, and gate-quick exists for the seconds-
+# scale edit loop.  The tradeoff is that a stale golden survives a green
+# gate-quick and is caught by CI instead — which is the arrangement that let two
+# stale snapshots reach master before this recipe existed, so the mitigation is
+# that CI now blocks it, not that the local quick loop catches it.
+[group('test')]
+ir-golden-diff: bootstrap-from-seed
+  bash scripts/ir_golden_diff.sh
+
+# Regenerate tests/golden/ir/ from the CURRENT compiler.  Run only after reading
+# the `just ir-golden-diff` output and confirming every change is intended.
+[group('dev')]
+ir-golden-snapshot: bootstrap-from-seed
+  bash scripts/ir_golden_snapshot.sh
+
 [private]
 _test-stdlib stage dirs="tests/stdlib tests/stdlib/compiler":
   #!/usr/bin/env bash
@@ -1533,6 +1564,8 @@ ci-fast-gates: bootstrap-from-seed build-fmt-from-seed
     "tco-runtime-smoke|tco-runtime-smoke"
     "trace-dispatch-smoke|trace-dispatch-smoke"
     "verify-dispatch-smoke|verify-dispatch-smoke"
+    "ir-golden-diff|ir-golden-diff"
+    "gate-audit|gate-audit"
   )
   declare -a pids=() labels=()
   idx=0; active=0
@@ -1619,7 +1652,8 @@ build-sproutd: bootstrap-from-seed
 #
 #   just gate-quick   fast edit->commit loop  (fmt-check, test, examples, 2 smokes)
 #   just gate         full CI parity          (mirrors .github/workflows/ci.yml)
-#   just gate-audit   guard: fails if CI runs a `just` task `gate` does not cover
+#   just gate-audit   guard: fails if CI runs a task `gate` misses, or if a
+#                     scripts/ gate is invoked by nothing at all
 #
 # `gate` is a superset of `gate-quick`; a green `gate` means CI will not surprise
 # you.  It is slow (~15-25 min: test-stress + task-io-smoke dominate) — use
@@ -1636,18 +1670,30 @@ gate-quick: fmt-check test compile-examples-stage1 smoke-shapes bundle-smoke
 # advisory), so it runs in the body rather than as an arg-less dependency.
 # Full CI-parity battery (slow, ~15-25m); a green run means CI will not surprise you.
 [group('gate')]
-gate: fmt-check smoke-shapes bundle-smoke loud-fail-smoke argv-smoke trace-dispatch-smoke verify-dispatch-smoke div-by-zero-smoke stack-overflow-smoke flush-on-crash-smoke tco-runtime-smoke check-approved-builtins verify-bootstrap-fixed-point compile-examples-stage1 run-example-canary test task-io-smoke test-stress
+gate: fmt-check smoke-shapes bundle-smoke loud-fail-smoke argv-smoke trace-dispatch-smoke verify-dispatch-smoke div-by-zero-smoke stack-overflow-smoke flush-on-crash-smoke tco-runtime-smoke check-approved-builtins verify-bootstrap-fixed-point ir-golden-diff compile-examples-stage1 run-example-canary test task-io-smoke test-stress
   #!/usr/bin/env bash
   set -euo pipefail
   echo "==> gate: gc-safety-check --strict..."
   just gc-safety-check --strict
   echo "==> gate ✓ — full CI-parity battery passed; CI will not surprise you."
 
-# Drift guard: assert every `just` task CI runs is covered by `gate`.  Computes
-# gate's coverage LIVE by recursively expanding its dependencies via `just --show`
-# (so `test` gaining a child needs no edit here), then diffs against the tasks
-# grepped out of the CI workflow.  Run this after touching ci.yml or the gate list.
-# Assert `just gate` covers every task CI runs (drift guard).
+# Drift guard, two independent assertions:
+#
+#   A. Every `just` task CI runs is covered by `gate`.  Computes gate's coverage
+#      LIVE by recursively expanding its dependencies via `just --show` (so `test`
+#      gaining a child needs no edit here), then diffs against the tasks grepped
+#      out of the CI workflow.
+#
+#   B. Every gate script under scripts/ is REACHABLE — referenced by the justfile,
+#      by a .claude hook, or explicitly allowlisted with a reason.  Assertion A
+#      only checks the CI->gate direction, so it is blind to a script that no
+#      recipe invokes at all: that rots silently while still LOOKING like
+#      coverage, which is exactly how two stale tests/golden/ir/ snapshots reached
+#      master while scripts/ir_golden_diff.sh was wired to nothing.  A corpus
+#      nothing checks is worse than no corpus, because it reads as verified.
+#
+# Run after touching ci.yml, the gate list, or scripts/.
+# Assert every CI task is gated and every gate script is reachable (drift guard).
 [group('gate')]
 gate-audit:
   #!/usr/bin/env bash
@@ -1658,9 +1704,11 @@ gate-audit:
   #   bootstrap-from-seed / build-fmt-from-seed — auto-run build deps.
   #   refresh-seed — mutate-then-check seed path; gate covers it via verify-bootstrap-fixed-point.
   #   ci-fast-gates — the aggregate CI invokes; gate runs each constituent by name instead
-  #     (smoke-shapes, bundle-smoke, fmt-check, check-approved-builtins, the *-smoke
-  #     regression gates), plus gc-safety-check (from gate's body) and test (which covers
-  #     the type/parse/executable/conformance error suites ci-fast-gates also runs).
+  #     (smoke-shapes, bundle-smoke, fmt-check, check-approved-builtins, ir-golden-diff,
+  #     the *-smoke regression gates), plus gc-safety-check (from gate's body) and test
+  #     (which covers the type/parse/executable/conformance error suites ci-fast-gates
+  #     also runs).  gate-audit itself is a ci-fast-gates member and needs no gate entry:
+  #     it is a meta-guard over the gate list, so `gate` depending on it would be circular.
   #   test-stdlib-core-stage1 / test-stdlib-compiler-stage1 — the split suite CI runs; gate
   #     covers both via test → test-stdlib-stage1 (the combined core+compiler suite).
   EXCLUDE="bootstrap-from-seed build-fmt-from-seed refresh-seed ci-fast-gates test-stdlib-core-stage1 test-stdlib-compiler-stage1"
@@ -1686,7 +1734,41 @@ gate-audit:
     echo "   Add each to the 'gate' recipe, or to EXCLUDE if it is intentionally CI-only." >&2
     exit 1
   fi
-  echo "==> gate-audit ✓ — gate covers every CI gate task."
+
+  # ── Assertion B: every scripts/ gate is reachable ───────────────────────────
+  # Scripts that are deliberately NOT invoked from the justfile, each with the
+  # reason it is unreachable BY DESIGN.  Adding a name here is a decision, not a
+  # formality: it asserts "nothing should run this automatically".
+  #   seed_gate.sh          — PreToolUse Bash hook (.claude/settings.json); intercepts
+  #                           `git commit`, so a justfile recipe would be the wrong home.
+  #   guidelines_reminder.sh — .claude hook; agent-facing prompt, not a build step.
+  #   memwatch.sh           — interactive RSS observer for a running process; attaches
+  #                           to a PID, so it has no non-interactive gate form.
+  #   ir_byte_identical_check.sh — SITUATIONAL: asserts stage1 and stage2 emit
+  #                           byte-identical IR, which holds only for a refactor
+  #                           claimed behavior-preserving.  It fails BY DESIGN on any
+  #                           intentional codegen change, so gating it would invert
+  #                           its meaning.  Run it by hand to substantiate such a claim.
+  SCRIPTS_EXCLUDE="seed_gate.sh guidelines_reminder.sh memwatch.sh ir_byte_identical_check.sh"
+  unreachable=""
+  shopt -s nullglob
+  for s in scripts/*.sh; do
+    b="$(basename "$s")"
+    grep -qw "$b" <<<"$SCRIPTS_EXCLUDE" && continue
+    # Reachable if the justfile invokes it, or a .claude hook wires it.
+    grep -q "$b" justfile && continue
+    grep -rq "$b" .claude/ 2>/dev/null && continue
+    unreachable="$unreachable $b"
+  done
+  shopt -u nullglob
+  if [[ -n "$unreachable" ]]; then
+    echo "gate-audit ✗ — these scripts/ gates are invoked by NOTHING (they rot while looking like coverage):" >&2
+    printf '   %s\n' $unreachable >&2
+    echo "   Wire each into a just recipe (and into 'gate'/'ci-fast-gates' if it is a gate)," >&2
+    echo "   delete it, or add it to SCRIPTS_EXCLUDE with the reason it must stay manual." >&2
+    exit 1
+  fi
+  echo "==> gate-audit ✓ — gate covers every CI gate task; every scripts/ gate is reachable."
 
 # Refresh the bootstrap seed from a GUARANTEED-clean stage-1, then verify the
 # fixed point.  Use after any compiler-source edit under stdlib/compiler/.
