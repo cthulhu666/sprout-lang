@@ -1,0 +1,90 @@
+import stdlib.test (TestState, new_state, assert_true, summary)
+import stdlib.math (sqrt, cbrt, abs)
+
+# Residual SWEEPS for the two Newton-iterated roots, across the whole interval their
+# range reduction targets — plus the exponent extremes that exercise the reduction itself.
+#
+# The coverage gap this closes. `tests/stdlib/test_math_transcendental.spr` checks sqrt and
+# cbrt only at hand-picked points against hardcoded constants (`cbrt(27) == 3`,
+# `cbrt(1e300) == 1e100`, …). Those points say nothing about the *interior* of the reduced
+# interval, which is where a Newton iteration is at its worst: the error peaks at the end
+# of the interval furthest from the seed, not at the tidy cube/square numbers. A wrong
+# iteration count that happens to be exact at 8, 27 and 1000 would pass the entire existing
+# suite. This file sweeps the interval instead.
+#
+# The metric is the relative residual |f(r) - x| / x — reference-free, so it needs no libm
+# binding, and it is the property callers actually depend on.
+#
+# Why the bounds are what they are. Both iterations run a FIXED pass count rather than a
+# per-pass convergence check (`stdlib/math.sprout`, "Why the root iterations run a fixed
+# pass count"). The bounds below are the measured worst case over 400k samples with a small
+# margin — tight enough that dropping a pass fails loudly (at 5 passes sqrt degrades to
+# 9.3e-08 and cbrt to 3.7e-08, five orders out), and stable enough not to be brittle.
+
+let sqrt_bound = 0.0000000000000005  # 5e-16;  measured worst 4.39e-16 over [1,4)
+let cbrt_bound = 0.00000000000000095  # 9.5e-16; measured worst 9.38e-16 over [1,8)
+
+fn sqrt_resid(x: Double) -> Double = abs(r * r - x) / x
+where r = sqrt(x)
+
+fn cbrt_resid(x: Double) -> Double = abs(r * r * r - x) / x
+where r = cbrt(x)
+
+# 400k samples * 7.5e-6 = 3.0 -> sweeps [1,4), exactly sqrt_reduce's target interval.
+#
+# SAMPLE DENSITY IS PART OF THE ASSERTION, not a free parameter. At a 10x coarser 40k
+# sweep the same interval reports cbrt's worst residual as 9.30e-16 rather than the true
+# 1.005e-15 — it simply steps over the peak. A bound calibrated on the fine sweep then
+# passes on the coarse one for no better reason than luck of sampling, which is a test that
+# looks like a bound and is not one. Do not thin these sweeps to make the suite faster;
+# they cost a few milliseconds.
+fn worst_sqrt(i: Int, n: Int, acc: Double) -> Double =
+  if i >= n then acc
+  else worst_sqrt(i + 1, n, if e > acc then e else acc)
+where
+  e = sqrt_resid(1.0 + to_double(i) * 0.0000075)
+
+# 400k samples * 1.75e-5 = 7.0 -> sweeps [1,8), exactly cbrt_reduce's target interval.
+fn worst_cbrt(i: Int, n: Int, acc: Double) -> Double =
+  if i >= n then acc
+  else worst_cbrt(i + 1, n, if e > acc then e else acc)
+where
+  e = cbrt_resid(1.0 + to_double(i) * 0.0000175)
+
+# Walk the exponent range by exact powers of two, so the RANGE REDUCTION is what is under
+# test rather than the iteration. Powers of two are exact in binary floating point, so a
+# failure here is the reduction's, not the sweep's.
+fn worst_scaled(i: Int, n: Int, x: Double, mul: Double, use_cbrt: Bool, acc: Double) -> Double =
+  if i >= n then acc
+  else worst_scaled(i + 1, n, x * mul, mul, use_cbrt, if e > acc then e else acc)
+where
+  e = if use_cbrt then cbrt_resid(x) else sqrt_resid(x)
+
+fn main() -> Unit !{IO} =
+  do
+    state <- new_state()
+
+    let ws = worst_sqrt(0, 400000, 0.0)
+    let wc = worst_cbrt(0, 400000, 0.0)
+
+    # Sanity: a zero worst-case would mean the sweep never ran, which would make every
+    # bound below pass trivially. The residual is genuinely nonzero somewhere on both.
+    assert_true(state, "sqrt sweep produced a nonzero residual somewhere", ws > 0.0)
+    assert_true(state, "cbrt sweep produced a nonzero residual somewhere", wc > 0.0)
+
+    assert_true(state, "sqrt residual within bound across all of [1,4)", ws < sqrt_bound)
+    assert_true(state, "cbrt residual within bound across all of [1,8)", wc < cbrt_bound)
+
+    # Reduction coverage: 200 doublings from 1.0 reaches ~1.6e60; 200 halvings ~6e-61.
+    # This is the path where seeding Newton with `x` itself once returned 8.674e21 for
+    # sqrt(1e40) — see the REGRESSION GUARD note on sqrt_reduce.
+    assert_true(state, "sqrt residual within bound climbing to ~1e60",
+      worst_scaled(0, 200, 1.0, 2.0, false, 0.0) < sqrt_bound)
+    assert_true(state, "sqrt residual within bound descending to ~1e-60",
+      worst_scaled(0, 200, 1.0, 0.5, false, 0.0) < sqrt_bound)
+    assert_true(state, "cbrt residual within bound climbing to ~1e60",
+      worst_scaled(0, 200, 1.0, 2.0, true, 0.0) < cbrt_bound)
+    assert_true(state, "cbrt residual within bound descending to ~1e-60",
+      worst_scaled(0, 200, 1.0, 0.5, true, 0.0) < cbrt_bound)
+
+    summary(state)

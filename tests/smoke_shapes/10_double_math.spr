@@ -1,0 +1,38 @@
+module main
+import stdlib.math (sqrt, cbrt, exp, ln, pow)
+
+# Double math layer shape — the golden-IR corpus had NO coverage of it.
+#
+# Why this file exists. `scripts/ir_golden_snapshot.sh` builds the corpus from
+# examples/*.sprout + tests/smoke_shapes/*.spr, and before this file no member imported the
+# Double `stdlib.math`: the sole `stdlib.math` reference in all 57 goldens was
+# examples/astar.sprout, which imports `stdlib.math.int (abs)` — the Int module. So
+# `just ir-golden-diff`, the codegen change-detector wired into CI, was structurally blind to
+# sqrt / cbrt / exp / ln / pow. Rewriting both Newton iterations from a convergence guard to a
+# fixed pass count changed every one of their emitted loops and moved 0 of 57 goldens.
+#
+# What it pins. The five reduce-then-series functions, each reached both on a normal magnitude
+# and at an exponent extreme, so the goldens capture the range-reduction ladders as well as the
+# iteration bodies. Any change to the pass counts, the stride ladders, or the series
+# coefficients now shows up as a golden diff instead of passing silently.
+#
+# Keep this all-scalar and allocation-free: Double is a non-heap scalar, so there is no
+# GC-rooting hazard to entangle with the arithmetic being pinned.
+
+fn roots(x: Double) -> Double = sqrt(x) + cbrt(x)
+
+fn logs_and_exps(x: Double) -> Double = ln(x) + exp(x) + pow(x, 4.0)
+
+# Exponent extremes: these take the long path through the stride ladders, which is where the
+# reduction cost lives and where the seeding regression (sqrt(1e40) -> 8.674e21) once hid.
+#
+# The scale factors are built with `pow` rather than written as literals because Sprout's
+# lexer has no scientific-notation Double literal — `1.0e300` is a parse error, and the
+# plain-decimal form overflows the integer part. See BACKLOG, "No scientific-notation Double
+# literal in the lexer".
+fn wide(x: Double) -> Double =
+  sqrt(x * pow(10.0, 300.0)) + cbrt(x * pow(10.0, 0.0 - 300.0))
+
+fn total(x: Double) -> Double = roots(x) + logs_and_exps(x) + wide(x)
+
+fn main() -> Unit !{IO} = print(to_string(total(2.5)))

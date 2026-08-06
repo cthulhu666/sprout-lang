@@ -217,6 +217,53 @@ arithmetic `Double`s → now 0. That is a correctness-and-consistency fix, not a
 counts across examples and the compiler itself are unchanged (6 → 6, all genuinely heap), so
 **no wall-clock improvement is claimed for it either.**
 
+## The root iterations: a real win, from the branch and not the arithmetic (added 2026-08-06)
+
+`sqrt_iter` and `cbrt_iter` ran up to 60 Newton passes, exiting early on
+`abs(next - guess) < 1e-15 * guess`. Replacing that guard with an unconditional **6 passes**:
+
+| function | before | after | speedup | output vs before |
+|---|---:|---:|---:|---|
+| `sqrt`, normal magnitudes | 8.16 ns | **2.75 ns** | **2.97x** | **bit-identical**, 0 of 400k samples differ |
+| `cbrt` (bench `cbrt` row) | 9.82 ns | **4.44 ns** | **2.21x** | ~1 ULP on 3.5% of inputs; residual *improves* |
+| `sqrt_wide` (`sqrt(1e300)`) | 19.00 ns | 19.09 ns | **1.00x** | unchanged |
+
+Baselines matched within 0.3% across the paired runs (1348 vs 1352 µs; 1322 vs 1318 µs), so
+these are not the load artifacts that spoiled earlier measurements in this file.
+
+**The cost was the branch, not the division.** Isolated on the reduced interval the guard was
+worth 3.86x on `sqrt` (7.17 -> 1.86 ns) and 2.50x on `cbrt` (7.99 -> 3.20 ns), while the
+inlined `fdiv` count barely moved (13 -> 11 for sqrt). The guard makes the trip count
+input-dependent, so the loop-exit branch mispredicts on nearly every call (~15-20 cycles,
+~5 ns at 3.5 GHz). A fixed count makes it statically known and lets LLVM fully unroll: arm64
+`-O2` emits `fcmp=0` and no per-pass branch, against `fcmp=2` and 8 conditional branches for
+the guarded form. Both arms were confirmed fully inlined before the ratio was quoted — the
+check that the earlier globals A/B failed.
+
+**Why 6.** The guarded version took up to 7 passes. Six unconditional passes match or beat its
+accuracy everywhere; five does not — `sqrt` degrades to 9.3e-08 and `cbrt` to 3.7e-08, five
+orders outside the module contract. Worst relative residual over 400k samples: `sqrt` 4.39e-16
+across [1,4), `cbrt` 9.38e-16 across [1,8) (down from 1.005e-15).
+
+**`sqrt_wide` not moving is the useful negative result.** At `sqrt(1e300)` the ~500-stride
+range reduction dominates so completely that a 3x faster iteration is invisible. That is
+direct evidence that the remaining `*_wide` gap is the reduction, not the series — the
+structural limit discussed under "Interpretation" above, and the one thing here that cannot be
+fixed without a new language capability.
+
+**A division-free alternative was measured and rejected.** Iterating the inverse cube root
+(`r' = r*(4 - x*r^3)/3`) uses only multiplies, but the five serially-dependent `fmul`s form a
+*longer* latency chain than the single `fdiv` they replace: 5.41 ns/call against 3.20 for the
+plain fixed-count division form. Removing a division is not automatically a win when the
+replacement is a dependency chain.
+
+**Corpus gap this exposed.** The change rewrote both Newton loops and moved **0 of 57** golden
+IR files, because no corpus member imported the Double `stdlib.math` — the only
+`stdlib.math` reference in all 57 was `examples/astar.sprout`, which imports
+`stdlib.math.int`. `tests/smoke_shapes/10_double_math.spr` was added to close it; the corpus is
+now 58 files and the gate was confirmed to **fire** (1 difference on a single pass-count
+change), not merely to pass.
+
 ## Conclusion: no new builtin
 
 **No C builtin is justified by these numbers, and `runtime/APPROVED_BUILTINS` is
