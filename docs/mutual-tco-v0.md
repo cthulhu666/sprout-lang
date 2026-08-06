@@ -35,9 +35,27 @@ references an outer IIFE-bound var); the scram-`where` RED→GREEN experiment is
 as the cause (identical source, pre-arc-(b) compiler exhausts roots, arc-(b) compiler passes);
 seed re-refreshed to a fixed point.
 
+> **Superseded 2026-08-06 — `where`/`let..in` no longer desugar to a lambda at all.**
+> Both now lower to a **single-arm `MatchExpr` on the bound value**
+> (`parser.wrap_where_binding` / `build_let_binding_match`), so the tail position in
+> `hi_step` is structural — a match arm — rather than something arc (b)'s
+> beta-reduction has to recover. `musttail` count on
+> `test_scram_pbkdf2_green.spr` is unchanged (2), and the test still passes.
+>
+> The change was driven by typing, not TCO: an applied lambda with an *unannotated*
+> parameter had its body inferred before its argument, so `check_arith` defaulted
+> `where`-bound `Double`s to `Int` and even `where a = 2.5` failed to compile.
+> `let … in` was already a match and never had the bug. Arc (b) remains live and
+> still matters for user-written higher-order code; it is simply no longer what keeps
+> `where` closure-free. The section below is retained as the historical record of why
+> the lambda desugaring was a problem — read it in past tense.
+
 ### Key discovery during implementation — `where`/`let..in` allocate a closure
 
-There is no `TLet` expression node: `let x = e in body` and `where` desugar to
+*(Historical: accurate for the lambda desugaring described above, which both forms
+have since replaced with a single-arm match.)*
+
+There is no `TLet` expression node: `let x = e in body` and `where` desugared to
 `TCall(TLambda([x], body), [e])`, which lifts to a **heap closure + an indirect apply**.
 `musttail` cannot cross an indirect call, so a recursive call sitting under a `where` (e.g.
 scram's original `hi_step`) is closure-mediated and breaks the same-prototype cycle — the

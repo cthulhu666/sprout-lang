@@ -130,6 +130,15 @@ Local `where` bindings in v0 follow these rules:
 - Multiple bindings are allowed and are evaluated in source order.
 - Each binding may use function parameters and earlier local bindings.
 - Self-reference, mutual recursion, and forward reference are not part of v0.
+- **A binding's type is determined by its right-hand side**, not by how the body
+  uses it. For a tuple pattern the right-hand side's element types are distributed
+  positionally. `where` and `let … in` (§5.2.1) are the same binding construct and
+  are specified to type identically: both desugar to a single-arm `match` on the
+  bound value, so a `where`-bound `Double` needs no help from the body to be a
+  `Double`. (This is normative because the reverse direction is a real hazard: an
+  earlier implementation desugared `where` to an applied lambda with an inferred
+  parameter, so a binding whose body use was ambiguous defaulted to `Int` and
+  `where a = 2.5` failed to type-check.)
 
 ### 5.2 Let binding
 
@@ -847,8 +856,13 @@ Effect note for v0:
 12. Tuple expressions and tuple patterns use structural, exact-arity typing.
 13. In a function-local `where` block, each binding is checked in order using the
     function parameters and earlier local bindings; later bindings are not in scope.
+    Each binding's type comes from its right-hand side and is then available to the
+    body — information flows right-hand-side to binding, never body to binding
+    (§5.1). `where` and `let … in` are required to type identically.
 14. Function-local `where` bindings may destructure tuples, but constructor, literal,
-    and general pattern bindings are not part of v0.
+    and general pattern bindings are not part of v0. A tuple pattern binds the
+    right-hand side's element types positionally; the elements are not unified with
+    one another, so `(a, n) = (x * 1.5, 4)` binds `a : Double` and `n : Int`.
 
 ## 8. Standard Library Math Modules
 

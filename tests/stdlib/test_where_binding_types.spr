@@ -1,0 +1,125 @@
+import stdlib.test (check_true, run_suite)
+
+# REGRESSION: a `where` binding must take its type from its RIGHT-HAND SIDE.
+#
+# `where` used to desugar to an immediately-applied lambda with an UNANNOTATED
+# parameter — `where a = v` became `(fn(a) = <body>)(v)`. `infer_call_general`
+# infers the callee before the arguments, so the lambda body was typed while `a`
+# was still an unconstrained type variable; `check_arith` then defaulted it to
+# `Int`, and only afterwards did the call try to unify `Int` against the RHS's
+# real type. Every case below failed to COMPILE with
+#   `Call type mismatch: Type mismatch: Int vs Double`
+# whenever the body did not independently pin the type.
+#
+# `let pat = rhs in body` never had the bug: it desugars to
+# `MatchExpr(rhs, [pat -> body])`, and a match infers its scrutinee first, so the
+# type flows RHS -> binding. `where` now desugars to that same node.
+#
+# The failures are compile-time, so the RED state of this file is "the whole file
+# does not compile" — not a failing assertion.
+
+# --- Double via a call (the original report) ---
+fn split(x: Double) -> (Double, Double) = (x * 2.0, x * 3.0)
+
+fn tuple_from_call(x: Double) -> Double =
+  a + b
+where
+  (a, b) = split(x)
+
+fn scalar_from_call(x: Double) -> Double =
+  a + a
+where
+  a = x * 2.0
+
+# --- Double from a literal RHS: no call is involved at all, which shows the
+# fault was never specific to call-argument ordering ---
+fn scalar_from_literal() -> Double =
+  a + a
+where
+  a = 2.5
+
+fn tuple_from_literal() -> Double =
+  a + b
+where
+  (a, b) = (1.5, 2.25)
+
+# --- Mixed element types: the tuple pattern must distribute the RHS's element
+# types positionally, not unify them with each other ---
+fn mixed(x: Double) -> Double =
+  a + to_double(n)
+where
+  (a, n) = (x * 1.5, 4)
+
+fn mixed_string(x: Double) -> Bool =
+  s == "k" && d + d == x * 4.0
+where
+  (s, d) = ("k", x * 2.0)
+
+# --- Several bindings, and one referring to an earlier one (bindings nest
+# outward-in, so `b` must see `a`) ---
+fn chained(x: Double) -> Double =
+  a + b
+where
+  a = x * 2.0
+  b = a * 3.0
+
+# --- Nested tuple pattern ---
+fn nested(x: Double) -> Double =
+  a + b + c
+where
+  (a, (b, c)) = (x, (x * 2.0, x * 3.0))
+
+# --- A `where` whose body is a lambda, so the body's own inference is deferred:
+# the binding type must still come from the RHS ---
+fn where_under_lambda(x: Double) -> Double =
+  f(1.0)
+where
+  k = x * 2.0
+  f = \ (y: Double) -> y + k
+
+# --- Int must keep working: the old defaulting made these pass by coincidence,
+# so they are the guard against "fix Double by breaking Int" ---
+fn int_scalar(x: Int) -> Int =
+  a + a
+where
+  a = x * 2
+
+fn int_tuple(x: Int) -> Int =
+  a + b
+where
+  (a, b) = (x * 2, x * 3)
+
+# --- Bool / String bindings: no numeric defaulting to hide behind ---
+fn bool_binding(x: Bool) -> Bool =
+  a && a
+where
+  a = ! x
+
+fn string_binding() -> Bool =
+  s == "ab"
+where
+  s = "a" ++ "b"
+
+# --- Shadowing: the inner `where` binding must win over the outer parameter ---
+fn shadowing(a: Int) -> Double =
+  a + a
+where
+  a = 1.25
+
+fn main() -> Unit !{IO} =
+  run_suite("where_binding_types", [
+    check_true("tuple from call", tuple_from_call(1.0) == 5.0),
+    check_true("scalar from call", scalar_from_call(1.0) == 4.0),
+    check_true("scalar from literal", scalar_from_literal() == 5.0),
+    check_true("tuple from literal", tuple_from_literal() == 3.75),
+    check_true("mixed Double/Int tuple", mixed(2.0) == 7.0),
+    check_true("mixed String/Double tuple", mixed_string(1.0)),
+    check_true("chained bindings", chained(1.0) == 8.0),
+    check_true("nested tuple pattern", nested(1.0) == 6.0),
+    check_true("where under a lambda body", where_under_lambda(2.0) == 5.0),
+    check_true("Int scalar still works", int_scalar(3) == 12),
+    check_true("Int tuple still works", int_tuple(2) == 10),
+    check_true("Bool binding", bool_binding(false)),
+    check_true("String binding", string_binding()),
+    check_true("where shadows a parameter", shadowing(9) == 2.5)
+  ])
