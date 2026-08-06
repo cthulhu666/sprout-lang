@@ -2002,8 +2002,34 @@ long long double_to_string(long long bits) {
   double d;
   memcpy(&d, &bits, sizeof(d));
   char buf[64];
-  int written = snprintf(buf, sizeof(buf), "%g", d);
-  if (written < 0) tcp_fail("double_to_string: formatting failed");
+  /* Format at the SHORTEST precision that reads back bit-identical.
+   *
+   * Plain "%g" defaults to 6 significant digits, which silently destroyed precision:
+   * pi printed as "3.14159", and 123456789.123456789 as "1.23457e+08" — losing the
+   * integer part outright. A Double could not survive a round trip through text, which
+   * corrupts JSON output, config round-trips and logged values alike.
+   *
+   * 17 significant digits always suffice to represent an IEEE-754 double exactly, so this
+   * loop always terminates with a faithful rendering. Starting at 15 keeps tidy values
+   * tidy: 0.1 stays "0.1" rather than becoming "0.10000000000000001" as a blanket "%.17g"
+   * would render it.
+   *
+   * NaN never compares equal to itself, so a NaN falls through every attempt and exits at
+   * precision 17 — which prints "nan" correctly anyway, so the fallthrough is harmless
+   * rather than a special case. Infinities do round-trip through strtod and exit at 15.
+   *
+   * Pinned by tests/stdlib/test_double_to_string_precision.spr, which asserts exact output
+   * strings — Sprout cannot express the round-trip assertion itself, because parse_double
+   * is pure Sprout and explicitly not a bit-exact strtod. */
+  int written = -1;
+  for (int prec = 15; prec <= 17; prec++) {
+    written = snprintf(buf, sizeof(buf), "%.*g", prec, d);
+    if (written < 0) tcp_fail("double_to_string: formatting failed");
+    if (written >= (int)sizeof(buf)) tcp_fail("double_to_string: formatted value too long");
+    char* end = NULL;
+    double back = strtod(buf, &end);
+    if (end != buf && *end == '\0' && back == d) break;
+  }
   int is_bare_int = 1;
   for (int i = 0; i < written; i++) {
     char c = buf[i];

@@ -56,7 +56,7 @@ crypto_bytes_xor
 crypto_hmac_sha256
 crypto_random_bytes
 crypto_sha256
-double_to_string  # formats a Double to decimal text (snprintf "%g" + ".0" for integrals). Correct float->decimal formatting (inf/nan, scientific notation, rounding) is impractical to reproduce faithfully in Sprout — a correctness requirement, not performance. See AGENTS.md Builtin vs Stdlib 4-6.
+double_to_string  # formats a Double to decimal text (snprintf at the shortest of %.15g/%.16g/%.17g that strtod's back bit-equal, + ".0" for integrals). Justified under rule 4 (IMPOSSIBLE in Sprout), not the weaker "impractical" — re-evaluated 2026-08-06 rather than assumed. Expressiveness is NOT the blocker: a float->decimal converter is writable in pure Sprout, and needs no Double->Int conversion (a digit is recoverable with ten comparisons). ACCURACY is: 10 is not a power of two, so every *10 / /10 scaling step rounds, and a ~45-line pure-Sprout attempt round-tripped only 5 of 7 sampled values. Guaranteed shortest-round-trip conversion (Ryu/Grisu/Dragon4) needs exact WIDE-integer arithmetic (128-bit or bignum), which Sprout does not have. NB the missing prerequisite is wide integers, NOT Double bit access. Pinned by tests/stdlib/test_double_to_string_precision.spr. See AGENTS.md Builtin vs Stdlib 4-6.
 eprint  # stderr write bridge for old stage-1 codegen that emits @eprint(i64); takes raw i64 heap pointer — ABI compat layer, cannot express fprintf(stderr) from Sprout
 eprint_str  # writes C string to stderr; Sprout has no stderr output primitive (print/print_str target stdout only)
 env_get

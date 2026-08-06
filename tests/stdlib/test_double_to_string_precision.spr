@@ -1,0 +1,95 @@
+import stdlib.test (TestState, new_state, assert_eq, summary)
+import stdlib.math (pi)
+
+# `to_string` on a Double must not silently drop precision.
+#
+# The defect. `double_to_string` (runtime/sprout_runtime.c) formatted with plain `"%g"`,
+# whose default precision is **6 significant digits**. So a Double could not survive a
+# round trip through text at all:
+#
+#     pi                   printed "3.14159"      (true 3.141592653589793)
+#     sqrt(2.0)            printed "1.41421"      (true 1.4142135623730951)
+#     123456789.123456789  printed "1.23457e+08"  — the integer part is simply gone
+#
+# That silently corrupts anything that serialises a Double: JSON output, config
+# round-trips, logged values, and every benchmark checksum in bench/.
+#
+# The fix formats at the shortest precision that reads back bit-equal — `%.15g`, then
+# `%.16g`, then `%.17g`, taking the first whose `strtod` equals the input. 17 significant
+# digits always suffice for an IEEE double, so the loop always terminates with an exact
+# representation, and starting at 15 keeps tidy values tidy: `0.1` stays `"0.1"` rather
+# than becoming `"0.10000000000000001"` as a blanket `%.17g` would give.
+#
+# WHY THIS IS PINNED BY EXACT STRINGS rather than by a round trip. Sprout cannot express
+# the round-trip assertion: `parse_double` is pure Sprout and its own contract says it is
+# "NOT a bit-exact strtod round-trip" — it accumulates `intpart + frac/10^len` in Double
+# arithmetic, so it is inexact in the same way and for the same reason. Pinning the exact
+# output string is therefore both the only available check and the stronger one: it
+# constrains the format, not merely the value.
+#
+# WHY THE FORMATTING STAYS A C BUILTIN. Re-evaluated 2026-08-06 rather than taken on
+# faith, and `runtime/APPROVED_BUILTINS` was corrected as a result. Expressiveness is NOT
+# the blocker: a float->decimal converter is perfectly writable in pure Sprout — no
+# `Double -> Int` conversion is needed, since a decimal digit is recoverable with ten
+# comparisons. **Accuracy** is the blocker. 10 is not a power of two, so every `*10` /
+# `/10` scaling step rounds; a ~45-line pure-Sprout implementation produced correct-looking
+# digits that round-tripped only 5 of 7 sampled values (`1.0/7.0` and
+# `123456789.123456789` both failed). Guaranteed shortest-round-trip conversion
+# (Ryu / Grisu / Dragon4) needs exact WIDE-integer arithmetic — 128-bit or arbitrary
+# precision — and Sprout has only `i64`, with no bignum and no `i128`. So this is rule 4
+# ("impossible with the current language surface"), not the weaker "impractical" the
+# ledger used to claim. Note the missing prerequisite is wide integers, NOT `Double` bit
+# access — a bitcast primitive would not enable a Sprout-side printer.
+#
+# ONLY IEEE-DETERMINISTIC INPUTS BELONG IN THIS FILE. Every case uses a literal or `+ - * /`,
+# which IEEE-754 defines as exactly rounded and therefore bit-identical everywhere. The first
+# draft of this test asserted `to_string(sqrt(2.0)) == "1.4142135623730951"` and failed —
+# because that string is libm's `sqrt(2)`, while Sprout's pure-Sprout `sqrt` returns
+# 0x3ff6a09e667f3bcc, exactly **1 ULP** below it. That is inside the module's documented
+# accuracy and is free to move (the root iterations were rewritten the same day). So pinning
+# a transcendental's printed form couples a FORMATTING test to a transcendental's ACCURACY,
+# and the coupling breaks on legitimate changes to either. Accuracy belongs in
+# test_math_root_accuracy.spr; this file tests only the formatter.
+
+fn main() -> Unit !{IO} =
+  do
+    state <- new_state()
+
+    # --- the defect: values needing more than 6 significant digits ---
+    assert_eq(state, "1.0/3.0 keeps full precision",
+      to_string(1.0 / 3.0), "0.3333333333333333")
+    assert_eq(state, "pi keeps full precision",
+      to_string(pi), "3.141592653589793")
+    # 0.1 + 0.2 is the canonical floating-point surprise, and the old 6-digit format was
+    # actively HIDING it: this printed "0.3", which is not the value.
+    assert_eq(state, "0.1 + 0.2 shows all 17 digits, not a tidied 0.3",
+      to_string(0.1 + 0.2), "0.30000000000000004")
+    assert_eq(state, "2.0/3.0 needs 16 digits",
+      to_string(2.0 / 3.0), "0.6666666666666666")
+    # An exactly-representable binary fraction needs no extra digits at all — it exits the
+    # precision loop on the first attempt.
+    assert_eq(state, "an exact binary fraction stays exact and short",
+      to_string(1.0 / 1024.0), "0.0009765625")
+    assert_eq(state, "1.0/7.0 needs all 17 significant digits",
+      to_string(1.0 / 7.0), "0.14285714285714285")
+    # The worst case of the old behaviour: "%g" turned this into "1.23457e+08",
+    # discarding the integer part entirely.
+    assert_eq(state, "a large value keeps its integer part",
+      to_string(123456789.123456789), "123456789.12345679")
+
+    # --- regression guards: tidy values must STAY tidy ---
+    # These are why the fix starts at %.15g instead of using a blanket %.17g, which
+    # would render 0.1 as "0.10000000000000001".
+    assert_eq(state, "0.1 stays short", to_string(0.1), "0.1")
+    assert_eq(state, "1.5 stays short", to_string(1.5), "1.5")
+    assert_eq(state, "100.0 stays short", to_string(100.0), "100.0")
+
+    # --- the bare-integer ".0" suffix rule must survive the precision change ---
+    # Without it an integral Double renders as "2", which would read back as an Int.
+    assert_eq(state, "integral Double keeps its .0", to_string(2.0), "2.0")
+    assert_eq(state, "zero keeps its .0", to_string(0.0), "0.0")
+    # Signed zero: -0.0 must not normalise to 0.0 (IEEE compares them equal, so only the
+    # printed form distinguishes them).
+    assert_eq(state, "negative zero keeps its sign", to_string(-0.0), "-0.0")
+
+    summary(state)
