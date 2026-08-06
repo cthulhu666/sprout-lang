@@ -20,11 +20,23 @@ module stdlib.math
 # Callers detect a Rule-2 NaN with `is_nan`.
 
 # --- Double primitives (M2 math layer) ---
-# All pure Sprout, no C builtins. Measured accuracy ~1e-13 relative or better across
-# the full exponent range (per-function figures in docs/math-transcendental-v0.md);
-# slower than libm, which is fine for the transform-scale math this layer serves. If a
-# measured hot path ever demands it, the right escalation is lowering to an LLVM
-# intrinsic (e.g. llvm.sqrt.f64), not a runtime builtin.
+# All pure Sprout, no C builtins. Slower than libm, which is fine for the transform-scale
+# math this layer serves; if a measured hot path ever demands it, the right escalation is
+# lowering to an LLVM intrinsic (e.g. llvm.sqrt.f64), not a runtime builtin.
+#
+# ACCURACY IS NOT UNIFORM ACROSS THIS BLOCK — do not size a tolerance from one figure:
+#
+#   sqrt, cbrt, exp, ln, log2, log10, log   ~1e-14 relative, whole exponent range
+#   pow, integer exponent                   exact when every intermediate product is
+#                                           (see `ipow`); ~1e-14 otherwise
+#   pow, fractional exponent                ~1e-13 (it composes exp and ln, so it
+#                                           inherits both errors)
+#   sin, cos, tan, atan, atan2              ~1e-8 ONLY — the Taylor series here are
+#                                           truncated for the transform-scale use they
+#                                           were written for, five orders looser than
+#                                           everything above
+#
+# Per-function measurements and method: docs/math-transcendental-v0.md.
 #
 # Note there is no Double -> Int conversion in the language (only `to_double`, an
 # `sitofp`), so every range-reduction counter below is a Double-valued integer. That is
@@ -39,6 +51,41 @@ let half_pi = 1.5707963267948966
 # it snaps the fractional bits away — the classic branch-free round-to-integer.
 let two52 = 4503599627370496.0
 
+# --- Exact power-of-two ladder ---
+# Every range reduction below strips or applies powers of two. Moving one factor at a
+# time costs O(|binary exponent|) steps — up to 1070 for a subnormal, which measured
+# ~110x the small-argument cost (exp near x=688 was 1099 ns/call against 9.9 ns on
+# [0,10)). These strides let each loop take the exponent apart in chunks, bounding it at
+# ~20 steps instead. Every constant is an exact power of two whose reciprocal is also
+# exact and finite (2^-512 is still a normal Double), so no step introduces rounding.
+#
+# The strides are grouped by what each consumer needs an exact root of: sqrt reduces by
+# powers of FOUR (sqrt(4) = 2 is representable), cbrt by powers of EIGHT, exp and ln by
+# any power of two.
+fn sq(v: Double) -> Double = v * v
+
+let two8 = 256.0
+let two12 = 4096.0
+let two16 = sq(two8)
+let two32 = sq(two16)
+let two48 = two32 * two16
+let two64 = sq(two32)
+let two128 = sq(two64)
+let two256 = sq(two128)
+let two384 = two256 * two128
+let two512 = sq(two256)
+
+let inv_two8 = 1.0 / two8
+let inv_two12 = 1.0 / two12
+let inv_two16 = 1.0 / two16
+let inv_two32 = 1.0 / two32
+let inv_two48 = 1.0 / two48
+let inv_two64 = 1.0 / two64
+let inv_two128 = 1.0 / two128
+let inv_two256 = 1.0 / two256
+let inv_two384 = 1.0 / two384
+let inv_two512 = 1.0 / two512
+
 # The IEEE quiet NaN — the out-of-domain Double result (Rule 2). Double `/` lowers
 # to an unguarded fdiv (only integer `/` traps), so 0.0/0.0 is a genuine NaN.
 export let nan = 0.0 / 0.0
@@ -46,8 +93,14 @@ export let nan = 0.0 / 0.0
 # Detect a Rule-2 NaN: NaN is the only Double not equal to itself (ordered `==`).
 export fn is_nan(x: Double) -> Bool = ! (x == x)
 
+# The zero case is not redundant: `-0.0 < 0.0` is FALSE (IEEE compares the two zeros
+# equal), so a plain `if x < 0.0` returned -0.0 unchanged and abs kept the sign it exists
+# to remove. IEEE-754 abs, and C `fabs` whose name this now carries, clear the sign bit
+# unconditionally. Returning the literal `0.0` normalises both zeros to +0.0; NaN falls
+# through both tests and propagates.
 export fn abs(x: Double) -> Double =
   if x < 0.0 then -x
+  else if x == 0.0 then 0.0
   else x
 
 # Round to nearest integer (ties to even) with no Int conversion. Only exact for
@@ -65,8 +118,12 @@ fn round_nearest(x: Double) -> Double =
   if x < 0.0 then 0.0 - round_nearest_pos(0.0 - x)
   else round_nearest_pos(x)
 
+# The zero short-circuit is the mirror image of the one in `abs`: round_nearest sends
+# -0.0 down its positive branch, so (-0.0 + 2^52) - 2^52 came back as +0.0. IEEE requires
+# floor to preserve the sign of a zero argument, so pass both zeros through untouched.
 export fn floor(x: Double) -> Double =
-  if r > x then r - 1.0
+  if x == 0.0 then x
+  else if r > x then r - 1.0
   else r
   where r = round_nearest(x)
 
@@ -78,6 +135,30 @@ fn sqrt_iter(x: Double, guess: Double, i: Int) -> Double =
   else sqrt_iter(x, next, i + 1)
   where next = 0.5 * (guess + x / guess)
 
+# Reduce the magnitude into [1, 4) by exact powers of four, tracking the square root of
+# the extracted factor — a power of two, so also exact. Four is the right stride because
+# sqrt(4) = 2 is representable, which is what keeps the scale-back error-free.
+#
+# REGRESSION GUARD. Newton used to be seeded with `x` itself. For a guess far above the
+# root the Heron step only roughly HALVES it, so reaching the right order of magnitude
+# alone took ~log2(x) iterations: above ~1e35 the 60-step ceiling was hit first and
+# sqrt_iter returned its unconverged guess as the answer — sqrt(1e40) gave 8.674e21
+# instead of 1e20, silently, which is exactly the in-band lie this module's header
+# forbids. Reduced into [1,4) the seed is within a factor of two of the root, so Newton
+# converges in a handful of steps for every representable input.
+fn sqrt_reduce(x: Double, scale: Double) -> Double =
+  if x >= 4.0 then
+    if x < two8 then sqrt_reduce(x * 0.25, scale * 2.0)
+    else if x < two64 then sqrt_reduce(x * inv_two8, scale * 16.0)
+    else if x < two512 then sqrt_reduce(x * inv_two64, scale * two32)
+    else sqrt_reduce(x * inv_two512, scale * two256)
+  else if x < 1.0 then
+    if x >= inv_two8 then sqrt_reduce(x * 4.0, scale * 0.5)
+    else if x >= inv_two64 then sqrt_reduce(x * two8, scale * 0.0625)
+    else if x >= inv_two512 then sqrt_reduce(x * two64, scale * inv_two32)
+    else sqrt_reduce(x * two512, scale * inv_two256)
+  else scale * sqrt_iter(x, x, 0)
+
 # Domain: x >= 0. A negative argument is outside the real domain -> NaN (Rule 2),
 # not the old silent 0.0. Both zeros return x unchanged (preserving -0.0, per IEEE)
 # and skip the Newton step, whose first guess would divide 0/0. +inf is its own
@@ -87,7 +168,7 @@ export fn sqrt(x: Double) -> Double =
   if x < 0.0 then nan
   else if x == 0.0 then x
   else if x * 0.5 == x then x
-  else sqrt_iter(x, x, 0)
+  else sqrt_reduce(x, 1.0)
 
 # --- Exponential, logarithm, cube root, power ---
 # Each is range reduction into a narrow interval + a series (or Newton) there. The
@@ -104,6 +185,9 @@ let inv_sqrt2 = 0.7071067811865476
 # The positive IEEE infinity. Double `/` lowers to an unguarded fdiv (only integer
 # `/` traps), so this is a genuine +inf rather than a trap, exactly like `nan` above.
 let inf = 1.0 / 0.0
+# IEEE negative zero. Written with unary `-` (which lowers to fneg, flipping the sign bit);
+# `0.0 - 0.0` would give +0.0. Needed as a return value where C99 distinguishes the zeros.
+let neg_zero = -0.0
 # 2^54, exactly representable — so 1.0 / two54 is exact too. Used by exp's
 # subnormal path; written as a division rather than a literal because Sprout has no
 # exponent literals (`2e-17` is a parse error).
@@ -127,11 +211,30 @@ fn exp_series(r: Double) -> Double =
     * (1.0 + r * (1.0 / 8.0) * (1.0 + r * (1.0 / 9.0) * (1.0 + r * (1.0 / 10.0)
     * (1.0 + r * (1.0 / 11.0) * (1.0 + r * (1.0 / 12.0))))))))))))
 
-# Multiply y by 2^k for a Double-valued integer k. Every step is an exact binary
-# scaling, so while the result stays normal this is error-free.
+# Multiply y by 2^k for a Double-valued integer k. Every step is an exact binary scaling,
+# so while the result stays normal this is error-free.
+#
+# Strides descend 512 -> 64 -> 8 -> 1 so the step count is O(log |k|): ~20 rather than the
+# 1076 a one-at-a-time loop needed, which is what made exp cost 1099 ns/call near x=688
+# against 9.9 ns on small arguments. Safe against intermediate underflow because y shrinks
+# monotonically toward its final value, so if the result is normal every intermediate was
+# too — and exp's caller routes the subnormal case through the two-step path below.
+# The coarse strides are NESTED behind the `|k| >= 1` tests rather than listed ahead of
+# them. A flat chain that checks 512/64/8 first costs the common small-k caller four extra
+# comparisons and four module-global loads on every call — measured as a 2.6x slowdown on
+# ln's hot path when this was first written flat. Nested, the common path pays two
+# comparisons and never touches the ladder constants.
 fn exp_scale(y: Double, k: Double) -> Double =
-  if k >= 1.0 then exp_scale(y * 2.0, k - 1.0)
-  else if k <= -1.0 then exp_scale(y * 0.5, k + 1.0)
+  if k >= 1.0 then
+    if k < 8.0 then exp_scale(y * 2.0, k - 1.0)
+    else if k < 64.0 then exp_scale(y * two8, k - 8.0)
+    else if k < 512.0 then exp_scale(y * two64, k - 64.0)
+    else exp_scale(y * two512, k - 512.0)
+  else if k <= -1.0 then
+    if k > -8.0 then exp_scale(y * 0.5, k + 1.0)
+    else if k > -64.0 then exp_scale(y * inv_two8, k + 8.0)
+    else if k > -512.0 then exp_scale(y * inv_two64, k + 64.0)
+    else exp_scale(y * inv_two512, k + 512.0)
   else y
 
 # exp(x) = 2^k * exp(r) where x = k*ln2 + r and |r| <= ln2/2.
@@ -165,13 +268,29 @@ where
   s = (m - 1.0) / (m + 1.0)
   s2 = s * s
 
-# Halve or double into [1/sqrt2, sqrt2), adding or subtracting one ln2 per step. The
-# scaling is exact; only the repeated ln2 additions accumulate, and at ~1000 steps
-# (the 1e+-308 extremes) that is ~1e-13 absolute against a result of ~700.
-fn ln_reduce(x: Double, acc: Double) -> Double =
-  if x >= sqrt2 then ln_reduce(x * 0.5, acc + ln2)
-  else if x < inv_sqrt2 then ln_reduce(x * 2.0, acc - ln2)
-  else acc + ln_series(x)
+# Halve or double into [1/sqrt2, sqrt2), COUNTING the powers of two rather than
+# accumulating ln2 per step, then multiplying once at the end.
+#
+# The count matters for accuracy, not just speed. Adding ln2 on every step accumulated one
+# rounding per step — 1070 of them for a subnormal — giving 1.7e-11 absolute error at
+# ln(2^-1070) where the code claimed ~1e-13, and making floor(log2(x)) return the wrong
+# integer for roughly half of all exact powers of two. `k` here is an exact integer (every
+# integer up to 2^53 is representable), so `k * ln2` is a single rounding regardless of how
+# far the reduction travelled — strictly more accurate AND ~1070 fewer operations.
+#
+# Strides descend 512 -> 64 -> 8 -> 1, as in exp_scale, bounding the loop at ~20 steps.
+fn ln_reduce(x: Double, k: Double) -> Double =
+  if x >= sqrt2 then
+    if x < two8 then ln_reduce(x * 0.5, k + 1.0)
+    else if x < two64 then ln_reduce(x * inv_two8, k + 8.0)
+    else if x < two512 then ln_reduce(x * inv_two64, k + 64.0)
+    else ln_reduce(x * inv_two512, k + 512.0)
+  else if x < inv_sqrt2 then
+    if x >= inv_two8 then ln_reduce(x * 2.0, k - 1.0)
+    else if x >= inv_two64 then ln_reduce(x * two8, k - 8.0)
+    else if x >= inv_two512 then ln_reduce(x * two64, k - 64.0)
+    else ln_reduce(x * two512, k - 512.0)
+  else k * ln2 + ln_series(x)
 
 # Domain: x >= 0 (Rule 2 — a negative argument is NaN, not a clamped 0). ln(0) is the
 # pole at -inf. +inf must be short-circuited or the halving loop would never exit;
@@ -211,12 +330,24 @@ fn cbrt_iter(x: Double, guess: Double, i: Int) -> Double =
 where
   next = (2.0 * guess + x / (guess * guess)) * (1.0 / 3.0)
 
-# Reduce the magnitude into [1, 8) by exact factors of 8, tracking the cube root of
-# the extracted factor — a power of two, so also exact. 8 is the right stride because
+# Reduce the magnitude into [1, 8) by exact factors of 8, tracking the cube root of the
+# extracted factor — a power of two, so also exact. 8 is the right stride because
 # cbrt(8) == 2 is representable; that is what keeps the scale-back error-free.
+#
+# The coarse strides are the powers of two divisible by three (2^384, 2^48, 2^12, 2^3), so
+# each has an exact cube root (2^128, 2^16, 2^4, 2). Same motive as exp_scale and
+# ln_reduce: one-factor-at-a-time took 357 steps at 1e-300 and measured 392 ns/call.
 fn cbrt_reduce(x: Double, scale: Double) -> Double =
-  if x >= 8.0 then cbrt_reduce(x * 0.125, scale * 2.0)
-  else if x < 1.0 then cbrt_reduce(x * 8.0, scale * 0.5)
+  if x >= 8.0 then
+    if x < two12 then cbrt_reduce(x * 0.125, scale * 2.0)
+    else if x < two48 then cbrt_reduce(x * inv_two12, scale * 16.0)
+    else if x < two384 then cbrt_reduce(x * inv_two48, scale * two16)
+    else cbrt_reduce(x * inv_two384, scale * two128)
+  else if x < 1.0 then
+    if x >= inv_two12 then cbrt_reduce(x * 8.0, scale * 0.5)
+    else if x >= inv_two48 then cbrt_reduce(x * two12, scale * 0.0625)
+    else if x >= inv_two384 then cbrt_reduce(x * two48, scale * inv_two16)
+    else cbrt_reduce(x * two384, scale * inv_two128)
   else scale * cbrt_iter(x, 2.0, 0)
 
 # cbrt is defined on the WHOLE real line — unlike sqrt, a negative argument is in
@@ -243,9 +374,18 @@ fn is_odd_int(y: Double) -> Bool =
 fn is_small_int(y: Double) -> Bool =
   (floor(y) == y) && (abs(y) <= 1024.0)
 
-# Binary exponentiation for a positive Double-valued integer exponent. Multiplications
-# only, so an integer power of an exactly-representable base is BIT-exact — this is
-# what makes pow(T, 4.0) equal T*T*T*T rather than merely approximate it.
+# Binary exponentiation for a positive Double-valued integer exponent — multiplications
+# only, no exp/ln round trip, so it is markedly more accurate than the general path and
+# carries none of its truncation error.
+#
+# It is NOT unconditionally bit-exact, and an earlier version of this comment claimed it
+# was. Binary exponentiation computes pow(T,4) as (T*T)*(T*T) — two roundings — whereas
+# left-to-right T*T*T*T is ((T*T)*T)*T — three. They agree only when no intermediate
+# product needs rounding: they do agree for T=5772 (5772^4 is exactly representable) and
+# disagree for T=6726.387968863355, where a correctly-rounded libm pow differs from both.
+# The honest contract is: exact when every intermediate product is exactly representable,
+# otherwise within about an ulp — never a promise of equality with any particular
+# multiplication order.
 fn ipow(base: Double, e: Double, acc: Double) -> Double =
   if e < 1.0 then acc
   else if e - 2.0 * h == 1.0 then ipow(base * base, h, acc * base)
@@ -276,18 +416,40 @@ export fn pow(x: Double, y: Double) -> Double =
   if y == 0.0 then 1.0
   else if x == 1.0 then 1.0
   else if is_nan(x) || is_nan(y) then nan
+  # INFINITE EXPONENT. Only |x| against 1 decides the result; the base's SIGN is
+  # irrelevant, because an infinite exponent is even in the limit. pow(-1, +-inf) is 1
+  # (C99 makes it total, since |-1| is exactly 1 and neither limit dominates).
+  else if y * 0.5 == y then
+    if abs(x) == 1.0 then 1.0
+    else if (abs(x) > 1.0) == (y > 0.0) then inf
+    else 0.0
   else if x == 0.0 then
     # The pole. IEEE keeps the sign of a -0.0 base under an odd integer exponent, so
     # returning `x` for y > 0 propagates -0.0, and the y < 0 branch gives -inf.
     if y > 0.0 then
       if is_odd_int(y) then x
       else 0.0
-    else if is_odd_int(y) && (1.0 / x < 0.0) then 0.0 - inf
+    else if is_odd_int(y) && (1.0 / x < 0.0) then -inf
     else inf
+  # INFINITE BASE, finite nonzero exponent. Tested after the x == 0.0 arm above, because
+  # `x * 0.5 == x` is also true of both zeros. The magnitude saturates, so only the
+  # exponent's sign picks inf vs 0; a negative base additionally carries its sign through
+  # an odd integer exponent. This arm is why the negative-base NaN rule below is correct
+  # only for a FINITE base: C99 F.9.4.4 confines that rule to finite x < 0, and routing
+  # -inf into it returned NaN where the standard requires +-inf or +-0.
+  else if x * 0.5 == x then
+    if y > 0.0 then
+      if (x < 0.0) && is_odd_int(y) then -inf
+      else inf
+    else if (x < 0.0) && is_odd_int(y) then neg_zero
+    else 0.0
   else if x < 0.0 then
     if floor(y) == y then
-      if is_odd_int(y) then 0.0 - pow(0.0 - x, y)
-      else pow(0.0 - x, y)
+      # Negate with unary `-`, which lowers to fneg and flips the sign bit. `0.0 - v`
+      # looks equivalent but is not: when v is +0.0 (an underflowed magnitude) it yields
+      # +0.0, losing the sign that C99 requires for an odd negative exponent.
+      if is_odd_int(y) then -pow(-x, y)
+      else pow(-x, y)
     else nan
   else if is_small_int(y) then
     if y > 0.0 then ipow(x, y, 1.0)

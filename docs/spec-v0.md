@@ -1360,7 +1360,9 @@ import stdlib.math as math
 import stdlib.math.int as imath
 
 # Stefan-Boltzmann radiant emittance, j = sigma * T^4. `pow` with an integer
-# exponent is exact, so this equals sigma * T*T*T*T bit for bit.
+# exponent multiplies rather than going through exp/ln, so it avoids that path's
+# truncation error (it is exact when every intermediate product is exactly
+# representable, and within about an ulp otherwise).
 fn emittance(kelvin: Double) -> Double =
   0.00000005670374419 * math.pow(kelvin, 4.0)
 

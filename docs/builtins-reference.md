@@ -341,11 +341,19 @@ Double math semantics:
 - `pow(x, y)` follows C99/IEEE F.9.4.4, which differs from Python: `pow(0.0, -1.0)` is
   `+inf` rather than an error, and `pow(x, 0.0)` / `pow(1.0, y)` are `1.0` even when the
   other operand is `NaN`.
-- `pow` with an integer exponent is computed by exact binary exponentiation, so
-  `pow(t, 4.0)` equals `t*t*t*t` bit for bit.
-- Measured accuracy is ~1e-13 relative or better across the full exponent range; see
-  `docs/math-transcendental-v0.md` for the per-function figures and
-  `bench/results-2026-08-06-math-transcendental.md` for speed against libm.
+- `pow` with an integer exponent is computed by binary exponentiation rather than through
+  `exp`/`ln`, so it avoids that path's truncation error. It is *exact* when every
+  intermediate product is exactly representable (e.g. `pow(5772.0, 4.0)`), and within
+  about an ulp otherwise — it is **not** a guarantee of equality with `t*t*t*t`, whose
+  left-to-right multiplication order rounds a different number of times.
+- **Accuracy is not uniform.** `sqrt`, `cbrt`, `exp`, `ln`, `log2`, `log10` and `log` are
+  ~1e-14 relative across the whole exponent range; `pow` with a fractional exponent is
+  ~1e-13 (it composes `exp` and `ln`, inheriting both); the **trigonometric** functions
+  (`sin`, `cos`, `tan`, `atan`, `atan2`) are ~1e-8 only — five orders looser, because
+  their series are truncated for transform-scale use. Do not size a tolerance for one
+  group from another's figure. Per-function measurements:
+  `docs/math-transcendental-v0.md`; speed against libm:
+  `bench/results-2026-08-06-math-transcendental.md`.
 - `log(x, base)` takes the argument first, matching the `log2`/`log10` shape:
   `log(8.0, 2.0) == 3.0`. Base 1 has no logarithm, so `log(x, 1.0)` is `±inf`.
 

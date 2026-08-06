@@ -39,10 +39,14 @@ A partial `math` function follows exactly one rule, chosen by its result type:
   (see §8). `Double` *has* a bottom value, and IEEE NaN self-propagates through
   downstream arithmetic, so a numeric pipeline can check once at the end (with
   `math.is_nan`). This is **terminal** — it matches every mainstream language and
-  will not migrate. Two caveats: (a) the Double layer is pure-Sprout (~1e-8
-  accuracy), so it is IEEE *in spirit*, not bit-exact — the in-domain edges that
-  matter (`sqrt(+inf) = +inf`, `sqrt(-0.0) = -0.0`, `sqrt(NaN) = NaN`) are handled
-  explicitly, but general rounding is not IEEE-guaranteed; (b) the functions are
+  will not migrate. Two caveats: (a) the Double layer is pure-Sprout, so it is IEEE
+  *in spirit*, not bit-exact — the in-domain edges that matter
+  (`sqrt(+inf) = +inf`, `sqrt(-0.0) = -0.0`, `sqrt(NaN) = NaN`) are handled
+  explicitly, but general rounding is not IEEE-guaranteed. Accuracy is **not
+  uniform**: `sqrt`/`cbrt`/`exp`/`ln`/`log*` are ~1e-14 relative and `pow` ~1e-13,
+  while the trigonometric functions are ~1e-8 — so take a tolerance from the right
+  group (figures in `docs/math-transcendental-v0.md`, module header in
+  `stdlib/math.sprout`); (b) the functions are
   **strict** — there is no roundoff tolerance, so a caller that may produce a
   slightly-negative value (a discriminant, `sqrt(a - b)`) gets `NaN`, and must
   clamp at the call site if it wants `0`. Clamping inside `sqrt` is deliberately

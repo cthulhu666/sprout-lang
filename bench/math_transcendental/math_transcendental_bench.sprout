@@ -17,10 +17,16 @@ module main
 # The accumulator is printed as a checksum so no call can be optimised away, and so a
 # divergence between the Sprout and C runs is visible rather than silent.
 
-import stdlib.math (exp, ln, log10, cbrt, pow)
+import stdlib.math (exp, ln, log10, cbrt, pow, sqrt)
 
 let reps = 2000000
 let step = 0.000005
+
+# 1e300 and 1e-300, for the wide-exponent rows. Built by multiplication because Sprout has
+# no exponent literals.
+fn p10(n: Int) -> Double = if n <= 0 then 1.0 else 10.0 * p10(n - 1)
+let huge = p10(300)
+let tiny = 1.0 / huge
 
 # Shared argument sweep, mirrored exactly in libm_reference.c: i*step over
 # [0, 10) for 200k reps. Wide enough that the range reductions do real work
@@ -62,6 +68,23 @@ fn loop_pow_int(i: Int, acc: Double) -> Double !{IO} =
   if i >= reps then acc
   else loop_pow_int(i + 1, acc + pow(arg(i) + 1.0, 4.0))
 
+# WIDE-EXPONENT rows. The [0,10) sweep above only exercises small binary exponents, so it
+# never touched the range reductions' step count — which is exactly how an earlier version
+# of this harness reported 9.2 ns/call for exp while exp near x=688 actually cost 1099
+# ns/call. These rows sample the far end of the exponent range so any regression in the
+# reduction ladders shows up here instead of hiding behind a favourable sweep.
+fn loop_exp_wide(i: Int, acc: Double) -> Double !{IO} =
+  if i >= reps then acc
+  else loop_exp_wide(i + 1, acc + exp(688.0 + arg(i) * 0.0001))
+
+fn loop_ln_wide(i: Int, acc: Double) -> Double !{IO} =
+  if i >= reps then acc
+  else loop_ln_wide(i + 1, acc + ln(tiny + arg(i) * tiny))
+
+fn loop_sqrt_wide(i: Int, acc: Double) -> Double !{IO} =
+  if i >= reps then acc
+  else loop_sqrt_wide(i + 1, acc + sqrt(huge + arg(i)))
+
 # One line per row, built as a single string. Two traps this avoids: `print` appends
 # its own newline on every call, so a print-per-field emits a field-per-line; and
 # polymorphic `print` on a Double emits the raw i64 bit pattern, not the number
@@ -101,4 +124,16 @@ fn main() -> Unit !{IO} =
     t12 <- time_now_micros()
     s_powi <- loop_pow_int(0, 0.0)
     t13 <- time_now_micros()
-    report("pow_int", t13 - t12, s_powi)
+    _ <- report("pow_int", t13 - t12, s_powi)
+    t14 <- time_now_micros()
+    s_expw <- loop_exp_wide(0, 0.0)
+    t15 <- time_now_micros()
+    _ <- report("exp_wide", t15 - t14, s_expw)
+    t16 <- time_now_micros()
+    s_lnw <- loop_ln_wide(0, 0.0)
+    t17 <- time_now_micros()
+    _ <- report("ln_wide", t17 - t16, s_lnw)
+    t18 <- time_now_micros()
+    s_sqw <- loop_sqrt_wide(0, 0.0)
+    t19 <- time_now_micros()
+    report("sqrt_wide", t19 - t18, s_sqw)
