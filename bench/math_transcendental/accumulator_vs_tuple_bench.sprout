@@ -1,0 +1,140 @@
+module main
+
+# A/B microbenchmark: accumulator-threading range reduction vs the tuple-returning
+# `(mantissa, exponent)` form, for `ln`.
+#
+# Why this exists. stdlib/math.sprout's `sqrt_reduce` / `ln_reduce` / `cbrt_reduce` thread the
+# extracted factor as a parameter and combine at the base case. The obvious alternative is to
+# return the decomposition and let the caller destructure it, which reads better and separates
+# reduction from combination. It was originally avoided because a `where`-bound tuple did not
+# type-check (bindings took their type from body usage rather than the right-hand side; fixed
+# 2026-08-06), so once that bug was fixed the accumulator looked like a leftover workaround.
+#
+# It is not. This benchmark is the evidence: the tuple form is ~2.9x slower, because
+# tuple-return CPR does not fire on the SELF-RECURSIVE edge, so every reduction step
+# heap-allocates a tuple and immediately tears it down. See BACKLOG.md, "Tuple-return CPR does
+# not fire on a SELF-RECURSIVE call", and tests/stdlib/compiler/test_tuple_return_cpr.spr,
+# which pins both the win (outer call, by-value `{i64,i64}`) and the gap.
+#
+# Two properties make the comparison fair:
+#
+# 1. Both forms are in ONE binary over the SAME sweep, so there is no cross-run or
+#    cross-binary variance to explain away. The checksums must come out bit-identical — that
+#    is the correctness half of the claim, and if they ever diverge the timing is meaningless.
+# 2. Each form runs TWICE. The first `B_tuple` run pays heap growth that the rerun does not;
+#    quoting only one number would either hide the GC cost or overstate it. Both are reported.
+#
+# The reduction is deliberately NOT hoisted into stdlib — the two `ln_*` implementations are
+# duplicated here so the benchmark keeps working when stdlib/math.sprout changes shape.
+#
+# Run:  build/compile_driver_bin_stage1 --emit-ir stdlib \
+#         bench/math_transcendental/accumulator_vs_tuple_bench.sprout > /tmp/ab.ll
+#       clang /tmp/ab.ll runtime/*.c -O2 -o /tmp/ab   # + platform flags, see bench.sh
+#       /tmp/ab
+
+let reps = 2000000
+let step = 0.000005
+
+fn sq(v: Double) -> Double = v * v
+let two8 = 256.0
+let two16 = sq(two8)
+let two32 = sq(two16)
+let two64 = sq(two32)
+let two128 = sq(two64)
+let two256 = sq(two128)
+let two512 = sq(two256)
+let inv_two8 = 1.0 / two8
+let inv_two64 = 1.0 / two64
+let inv_two512 = 1.0 / two512
+let ln2 = 0.6931471805599453
+let sqrt2 = 1.4142135623730951
+let inv_sqrt2 = 1.0 / sqrt2
+
+# Identical in both arms, so it cancels out of the comparison.
+fn ln_series(m: Double) -> Double =
+  2.0 * s * (1.0 + s2 * (1.0 / 3.0 + s2 * (1.0 / 5.0 + s2 * (1.0 / 7.0 + s2
+    * (1.0 / 9.0 + s2 * (1.0 / 11.0 + s2 * (1.0 / 13.0 + s2 * (1.0 / 15.0))))))))
+where
+  s = (m - 1.0) / (m + 1.0)
+  s2 = s * s
+
+# --- A: accumulator threading (the shape stdlib/math.sprout ships) ---
+# Self-tail-recursive, so TCO turns it into a loop: no allocation, no stack growth.
+fn ln_reduce_acc(x: Double, k: Double) -> Double =
+  if x >= sqrt2 then
+    if x < two8 then ln_reduce_acc(x * 0.5, k + 1.0)
+    else if x < two64 then ln_reduce_acc(x * inv_two8, k + 8.0)
+    else if x < two512 then ln_reduce_acc(x * inv_two64, k + 64.0)
+    else ln_reduce_acc(x * inv_two512, k + 512.0)
+  else if x < inv_sqrt2 then
+    if x >= inv_two8 then ln_reduce_acc(x * 2.0, k - 1.0)
+    else if x >= inv_two64 then ln_reduce_acc(x * two8, k - 8.0)
+    else if x >= inv_two512 then ln_reduce_acc(x * two64, k - 64.0)
+    else ln_reduce_acc(x * two512, k - 512.0)
+  else k * ln2 + ln_series(x)
+
+fn ln_acc(x: Double) -> Double = ln_reduce_acc(x, 0.0)
+
+# --- B: tuple-returning split, combined by the caller via a `where` destructure ---
+# Same arithmetic, same step count. The only difference is that the base case hands back
+# `(mantissa, k)` instead of finishing the job — which is what triggers the per-step box.
+fn ln_split(x: Double, k: Double) -> (Double, Double) =
+  if x >= sqrt2 then
+    if x < two8 then ln_split(x * 0.5, k + 1.0)
+    else if x < two64 then ln_split(x * inv_two8, k + 8.0)
+    else if x < two512 then ln_split(x * inv_two64, k + 64.0)
+    else ln_split(x * inv_two512, k + 512.0)
+  else if x < inv_sqrt2 then
+    if x >= inv_two8 then ln_split(x * 2.0, k - 1.0)
+    else if x >= inv_two64 then ln_split(x * two8, k - 8.0)
+    else if x >= inv_two512 then ln_split(x * two64, k - 64.0)
+    else ln_split(x * two512, k - 512.0)
+  else (x, k)
+
+fn ln_tup(x: Double) -> Double =
+  k * ln2 + ln_series(m)
+where
+  (m, k) = ln_split(x, 0.0)
+
+fn arg(i: Int) -> Double = to_double(i) * step
+
+# Each loop is `!{IO}` so the do-block below sequences it strictly between the two
+# time_now_micros() reads; a pure signature would let it float outside the timed window.
+fn loop_baseline(i: Int, acc: Double) -> Double !{IO} =
+  if i >= reps then acc else loop_baseline(i + 1, acc + arg(i))
+
+fn loop_acc(i: Int, acc: Double) -> Double !{IO} =
+  if i >= reps then acc else loop_acc(i + 1, acc + ln_acc(arg(i) + 1.0))
+
+fn loop_tup(i: Int, acc: Double) -> Double !{IO} =
+  if i >= reps then acc else loop_tup(i + 1, acc + ln_tup(arg(i) + 1.0))
+
+# `to_string`, not `print`, on the Double: polymorphic print emits the raw i64 bit pattern.
+fn report(label: String, us: Int, checksum: Double) -> Unit !{IO} =
+  print(string_concat_many([label, " us=", int_to_string(us),
+                            " checksum=", to_string(checksum)]))
+
+fn main() -> Unit !{IO} =
+  do
+    print(string_concat_many(["reps=", int_to_string(reps),
+      "  (subtract the baseline row to get per-call cost)"]))
+    t0 <- time_now_micros()
+    s_b <- loop_baseline(0, 0.0)
+    t1 <- time_now_micros()
+    _ <- report("baseline", t1 - t0, s_b)
+    t2 <- time_now_micros()
+    s_a <- loop_acc(0, 0.0)
+    t3 <- time_now_micros()
+    _ <- report("A_accumulator", t3 - t2, s_a)
+    t4 <- time_now_micros()
+    s_t <- loop_tup(0, 0.0)
+    t5 <- time_now_micros()
+    _ <- report("B_tuple_cold", t5 - t4, s_t)
+    t6 <- time_now_micros()
+    s_a2 <- loop_acc(0, 0.0)
+    t7 <- time_now_micros()
+    _ <- report("A_accumulator_rerun", t7 - t6, s_a2)
+    t8 <- time_now_micros()
+    s_t2 <- loop_tup(0, 0.0)
+    t9 <- time_now_micros()
+    report("B_tuple_warm", t9 - t8, s_t2)

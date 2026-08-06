@@ -1,0 +1,107 @@
+module main
+import stdlib.test (TestState, new_state, assert_true, assert_false, summary)
+import stdlib.compiler.compiler as compiler
+import stdlib.compiler.source as source
+
+# IR-level tests pinning where tuple-return CPR (docs/scalar-replacement-v0.md) does and
+# does NOT fire. Both facts are load-bearing for a decision recorded in stdlib/math.sprout:
+# `sqrt_reduce` / `ln_reduce` / `cbrt_reduce` thread an accumulator rather than returning
+# (mantissa, exponent), because the tuple form measured 2.9x slower for `ln` (12.5 ns/call
+# vs 4.25, bit-identical results). If either fact here changes, that comment and the
+# BACKLOG item are stale — which is the point of pinning them.
+#
+# Fact 1 (the win): CPR fires on the OUTER call. A caller that destructures a top-level
+# tuple-returning fn gets `{i64, i64}` back by value — no heap tuple.
+#
+# Fact 2 (the gap): CPR does NOT fire on the SELF-RECURSIVE edge. Each recursive step
+# round-trips through the boxed wrapper and calls @sprout_alloc_tuple_blob, so a reduction
+# loop pays one allocation per step. This asserts a KNOWN LIMITATION, not desired
+# behaviour: when the gap is closed this assertion must flip to assert_false.
+
+fn contains(haystack: String, needle: String) -> Bool =
+  str_find(haystack, needle) != -1
+
+# A self-recursive tuple-returning reduction, destructured by the caller via `where`.
+# Shaped exactly like ln_reduce's rejected alternative.
+let tuple_src =
+  "fn split(x: Int, k: Int) -> (Int, Int) =\n" ++
+  "  if x >= 2 then split(x / 2, k + 1)\n" ++
+  "  else (x, k)\n" ++
+  "fn combine(x: Int) -> Int =\n" ++
+  "  m + k\n" ++
+  "where\n" ++
+  "  (m, k) = split(x, 0)\n" ++
+  "fn main() -> Int !{IO} = combine(64)\n"
+
+# The accumulator-threading control: identical work, no tuple anywhere.
+let acc_src =
+  "fn reduce_acc(x: Int, k: Int) -> Int =\n" ++
+  "  if x >= 2 then reduce_acc(x / 2, k + 1)\n" ++
+  "  else x + k\n" ++
+  "fn main() -> Int !{IO} = reduce_acc(64, 0)\n"
+
+fn ir_ok(r: compiler.IrFullResult) -> Bool =
+  match r with
+  | compiler.IrFullOk _ -> true
+  | compiler.IrFullFail _ -> false
+
+fn ir_text(r: compiler.IrFullResult) -> String =
+  match r with
+  | compiler.IrFullOk ir -> ir
+  | compiler.IrFullFail _ -> ""
+
+# A by-value struct return from the CPR worker — the shape that costs nothing.
+fn calls_worker_by_value(ir: String) -> Bool =
+  contains(ir, "call { i64, i64 } @split_worker")
+
+# A CALL to the tuple allocator, not the always-present declare.
+fn allocates_tuple(ir: String) -> Bool =
+  contains(ir, "call i64 @sprout_alloc_tuple_blob")
+
+fn main() -> Unit !{IO} =
+  do
+    state <- new_state()
+    match env_get("SPROUT_STDLIB_ROOT") with
+    | Nothing -> ()
+    | Just stdlib_root ->
+        do
+          let tuple_path = "/tmp/sprout_test_tuple_cpr_tuple.sprout"
+          let acc_path = "/tmp/sprout_test_tuple_cpr_acc.sprout"
+          _ <- write_file(tuple_path, tuple_src)
+          _ <- write_file(acc_path, acc_src)
+
+          r_tup <- compiler.compile_full_ir(source.FilePath(tuple_path), source.StdlibRoot(stdlib_root))
+          r_acc <- compiler.compile_full_ir(source.FilePath(acc_path), source.StdlibRoot(stdlib_root))
+
+          assert_true(state, "tuple-returning source compiles", ir_ok(r_tup))
+          assert_true(state, "accumulator source compiles", ir_ok(r_acc))
+
+          let tup_ir = ir_text(r_tup)
+          let acc_ir = ir_text(r_acc)
+
+          # Structural sanity before any absence proof: an empty string would make every
+          # assert_false below pass trivially (the trap test_wrap_codegen.spr calls out).
+          assert_true(state, "tuple IR contains the CPR worker definition",
+            contains(tup_ir, "define { i64, i64 } @split_worker"))
+          assert_true(state, "accumulator IR contains @reduce_acc definition",
+            contains(acc_ir, "define i64 @reduce_acc"))
+
+          # Fact 1 — CPR fires on the outer call: the `where`-destructuring caller takes
+          # the worker's by-value struct return rather than a boxed tuple.
+          assert_true(state, "where-destructured call takes the by-value {i64,i64} return",
+            calls_worker_by_value(tup_ir))
+
+          # Control — the accumulator form never builds a tuple at all. This is the
+          # measured-faster shape stdlib/math.sprout deliberately keeps.
+          assert_false(state, "accumulator form allocates no tuple",
+            allocates_tuple(acc_ir))
+
+          # Fact 2 — THE GAP, pinned as current behaviour, not as an aspiration. The
+          # self-recursive edge still boxes: one @sprout_alloc_tuple_blob per step, which
+          # is the entire 2.9x. When CPR learns to fire on self-recursion this flips to
+          # assert_false — and stdlib/math.sprout's "Why the reductions thread an
+          # accumulator" note plus the BACKLOG item must be revisited in the same change.
+          assert_true(state, "KNOWN GAP: self-recursive tuple return still boxes per step",
+            allocates_tuple(tup_ir))
+
+    summary(state)
