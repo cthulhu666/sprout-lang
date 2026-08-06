@@ -1,0 +1,145 @@
+import stdlib.test (TestState, new_state, assert_true, assert_false, assert_eq, summary)
+import stdlib.compiler.lexer as lexer
+import stdlib.compiler.parser as parser
+import stdlib.compiler.checker as checker
+import stdlib.compiler.lowering as lowering
+import stdlib.compiler.ir_pipeline as ir_pipeline
+import stdlib.compiler.typed_ast as typed_ast
+
+# A runtime-computed top-level `let` whose type is a NON-HEAP SCALAR must not be
+# registered as a permanent GC root.
+#
+# This closes a gap between the two rooting paths. `ir_rooting` has been type-aware since
+# the pass was introduced — docs/compiler-internals.md states it as an invariant,
+# "Intentional design — do not root non-heap scalars", and profiling N-queens showed 67%
+# of CPU time in root calls with ~50% pure waste from Int args. The GLOBAL path never got
+# the same treatment: `synthesize_init_body_loop` emitted IRStoreGlobal +
+# IRRegisterGlobalRoot unconditionally for every runtime-computed let, with no type check
+# at all. So the invariant held for SSA values and silently did not hold for globals.
+#
+# Two independent costs. Every GC cycle walks the root table, so each useless entry is
+# scanned for the life of the process — stdlib/math.sprout alone contributed 33 of them,
+# every one an arithmetic Double. And the collector is handed raw Double/Int bit patterns
+# as pointer candidates, which is exactly the input a conservative scan should not get.
+#
+# Safety argument, and why `Char` is included. `type_kind.type_is_non_heap_scalar` covers
+# Int / Bool / Char / Double and returns FALSE for everything else — including `TVar` — so
+# the gate is conservative by construction, per the companion invariant "when no
+# source-level type is available, root conservatively". Char is safe despite
+# docs/compiler-internals.md claiming "String/Char literals lower to a `str_ptr` global":
+# that line is stale for Char. ast_to_ir lowers TChar to an IRConst holding the codepoint
+# (`'x'` becomes `add i64 0, 120`), identically to TInt — never a pointer. The doc line is
+# corrected in this change.
+#
+# HARNESS NOTE: `checker.typecheck_typed(prog, Nil)` compiles each snippet with NO prelude,
+# so these sources may only use primitives. That is why the heap control is a user-defined
+# constructor rather than the more obvious `"a" ++ "b"` — String `++` needs the prelude's
+# Semigroup instance and fails to check here ("No Semigroup instance for String"). A boxed
+# ctor is the better control regardless: it is unambiguously a heap handle.
+
+fn contains(haystack: String, needle: String) -> Bool =
+  str_find(haystack, needle) != -1
+
+fn count_from(haystack: String, needle: String, acc: Int) -> Int =
+  if pos == -1 then acc
+  else count_from(str_slice(haystack, pos + str_len(needle),
+                            str_len(haystack) - pos - str_len(needle)), needle, acc + 1)
+  where pos = str_find(haystack, needle)
+
+fn count(haystack: String, needle: String) -> Int =
+  count_from(haystack, needle, 0)
+
+fn translate_source(src: String) -> Result String String !{IO} =
+  match lexer.tokenize(src) with
+  | Err _ -> Err("lex error")
+  | Ok toks ->
+      match parser.parse_program(toks) with
+      | Err _ -> Err("parse error")
+      | Ok prog ->
+          do
+            tc <- checker.typecheck_typed(prog, Nil)
+            match tc with
+            | typed_ast.TypedErr _ msg -> Err("check: " ++ msg)
+            | typed_ast.TypedOk typed_prog env ->
+                ir_pipeline.compile_program_streaming(lowering.lower_program(typed_prog, env))
+
+fn get_ir_or_msg(src: String) -> String !{IO} =
+  do
+    match translate_source(src) with
+    | Ok ir -> ir
+    | Err msg -> "ERROR: " ++ msg
+
+# One runtime-computed let per scalar type. Every initializer is a binary op or a call —
+# never a literal — so all four take the runtime-init path and each emitted a root
+# registration before this change.
+let scalar_src =
+  "let d_val = 1.0 / 256.0\n" ++
+  "let i_val = 100 + 200\n" ++
+  "let b_val = 99 > 50\n" ++
+  "fn pick(n: Int) -> Char = if n > 0 then 'a' else 'b'\n" ++
+  "let c_val = pick(1)\n" ++
+  "fn use_num() -> Double = if b_val then d_val else 0.0\n" ++
+  "fn use_int() -> Int = i_val\n" ++
+  "fn use_char() -> Char = c_val\n" ++
+  "fn main() -> Unit !{IO} = ()\n"
+
+# Control: a runtime-computed BOXED CTOR is a real heap handle and MUST stay rooted.
+let heap_src =
+  "type Box = Box(Int)\n" ++
+  "fn mk(n: Int) -> Box = Box(n)\n" ++
+  "let bx_val = mk(7)\n" ++
+  "fn use_box() -> Box = bx_val\n" ++
+  "fn main() -> Unit !{IO} = ()\n"
+
+# Control: scalar and heap globals in ONE module — the gate is per-let, so exactly the
+# boxed value must be rooted and neither scalar may be.
+let mixed_src =
+  "type Box = Box(Int)\n" ++
+  "fn mk(n: Int) -> Box = Box(n)\n" ++
+  "let d_val = 1.0 / 256.0\n" ++
+  "let bx_val = mk(7)\n" ++
+  "let i_val = 100 + 200\n" ++
+  "fn use_box() -> Box = bx_val\n" ++
+  "fn use_num() -> Double = d_val\n" ++
+  "fn use_int() -> Int = i_val\n" ++
+  "fn main() -> Unit !{IO} = ()\n"
+
+fn main() -> Unit !{IO} =
+  do
+    state <- new_state()
+    scalar_ir <- get_ir_or_msg(scalar_src)
+    heap_ir <- get_ir_or_msg(heap_src)
+    mixed_ir <- get_ir_or_msg(mixed_src)
+
+    # Structural sanity BEFORE any absence proof — an "ERROR: …" string would make every
+    # assert_false and every zero count below pass trivially.
+    assert_false(state, "scalar source compiles", contains(scalar_ir, "ERROR:"))
+    assert_false(state, "heap source compiles", contains(heap_ir, "ERROR:"))
+    assert_false(state, "mixed source compiles", contains(mixed_ir, "ERROR:"))
+    assert_true(state, "scalar IR still initializes its globals at startup",
+      contains(scalar_ir, "define void @__sprout_init_globals"))
+    assert_true(state, "scalar IR still stores each computed value",
+      contains(scalar_ir, "store i64 "))
+
+    # THE FIX. Note the `call i64 @` prefix on every needle: `declare i64
+    # @sprout_gc_register_i64_root(ptr)` is emitted in EVERY module header, so the bare
+    # symbol name matches unconditionally and would make these assertions vacuous.
+    assert_eq(state, "no root registration for any of the 4 scalar globals",
+      count(scalar_ir, "call i64 @sprout_gc_register_i64_root"), 0)
+
+    # Control — a boxed-ctor global keeps its root. This is the assertion that catches an
+    # over-broad gate, which is the only way this change could corrupt the heap.
+    assert_eq(state, "the boxed global keeps exactly one root registration",
+      count(heap_ir, "call i64 @sprout_gc_register_i64_root"), 1)
+
+    # Control — per-let discrimination inside one module: 3 globals, exactly 1 rooted.
+    assert_eq(state, "mixed module roots the box and neither scalar",
+      count(mixed_ir, "call i64 @sprout_gc_register_i64_root"), 1)
+    assert_true(state, "mixed module roots the box specifically",
+      contains(mixed_ir, "call i64 @sprout_gc_register_i64_root(ptr @bx_val)"))
+    assert_false(state, "mixed module does not root the Double",
+      contains(mixed_ir, "call i64 @sprout_gc_register_i64_root(ptr @d_val)"))
+    assert_false(state, "mixed module does not root the Int",
+      contains(mixed_ir, "call i64 @sprout_gc_register_i64_root(ptr @i_val)"))
+
+    summary(state)

@@ -157,6 +157,66 @@ Model-C Codegen*; both halves of the codegen behaviour are pinned by
 `tests/stdlib/compiler/test_tuple_return_cpr.spr`, whose "KNOWN GAP" assertion is written to
 fail loudly when the gap is closed, so this file and that comment get revisited.
 
+## A third measurement that did not survive scrutiny — this one my own A/B (added 2026-08-06)
+
+Recorded because the *wrong* number was quoted before it was checked, and the check is the
+lesson. Claim made: module-level `let` constants cost `ln` ~39% of its hot path, measured at
+**4.31 → 2.65 ns/call (1.63x)** by an A/B that replaced them with inline literals.
+
+**The claim was wrong.** The two arms did not get the same inlining:
+
+```
+_main.loop_g: 371 asm lines   ... bl _main.ln_reduce_g     ← outlined call
+_main.loop_l: 325 asm lines   ... (no call to ln_reduce_l) ← fully inlined
+```
+
+The global-loading arm was larger (940 vs 759 asm lines) and crossed LLVM's inline
+threshold; the literal arm did not. So the 1.63x measured an inlining difference and was
+attributed to constant folding. **Two arms in one binary over one sweep is necessary but not
+sufficient — they must also be structurally equivalent after optimisation.** Check the
+emitted asm for call-vs-inline before quoting a ratio; that check is what the
+accumulator-vs-tuple comparison above passes and this one did not.
+
+The mechanism behind the claim is real and verifiable: a module-level `let` becomes a
+*mutable* `global i64 zeroinitializer` written by `@__sprout_init_globals`, and its address
+escapes to `@sprout_gc_register_i64_root`, so LLVM cannot fold it and keeps a real
+`adrp`/`ldr` at every use. Routing Double literals to the existing `private constant` path
+(`eval_const_expr_ir`) was implemented, and it did exactly that — `ln_reduce`'s `adrp` 65→26,
+`ldr` 86→41. It still lost:
+
+| function | `adrp`+`ldr` | `mov`+`movk` | net instrs |
+|---|---|---|---|
+| `ln_reduce` | 151 → 67 | 181 → **358** | **+163** |
+| `exp_scale` | 198 → 99 | 262 → **455** | +94 |
+| `cbrt_reduce` | 103 → 33 | 134 → **255** | +51 |
+| `ipow` | 69 → 10 | 121 → **229** | +49 |
+
+The cause is the **i64-uniform value ABI**. `bitcast (double 0.693… to i64)` makes LLVM see
+an *integer* constant, and materialising an arbitrary 64-bit integer immediate on arm64
+costs `mov` + 3× `movk` = 4 instructions, against `adrp` + `ldr` = 2 plus an L1 hit. Powers
+of two are cheap (`0x4070…` is one shifted MOVZ); `ln2`, `sqrt2`, `pi` are not. Wall clock
+agreed as far as a loaded machine allowed — paired over 14 interleaved rounds, `ln` median
+ratio 1.12 (slower); paired user CPU over 10 rounds, median 1.017, **never once faster**.
+Load average was 7.27 with 40–269% spreads, so no confident regression figure is claimed;
+the static instruction count is the deterministic part. **The change was reverted.**
+
+Two dead ends ruled out for anyone revisiting this:
+
+- **LLVM removed floating-point constant expressions** — `@g = private constant i64 bitcast
+  (double fdiv (double 1.0, double 2.56e2) to i64)` is a hard parse error, `fdiv constexprs
+  are no longer supported`. So `1.0 / two8` has no constexpr form.
+- **Folding it in the compiler is blocked too** — it would mean printing a computed Double
+  back as a decimal literal, and `double_to_string` is not round-trip exact (~6 significant
+  figures), so it would silently corrupt the constant.
+
+What survived is a different, type-directed fix that the investigation surfaced: the global
+path registered **every** top-level `let` as a permanent GC root with no type check,
+contradicting `docs/compiler-internals.md`'s "do not root non-heap scalars" invariant that
+`ir_rooting` honours for SSA values. `stdlib/math.sprout` contributed 33 such roots, all
+arithmetic `Double`s → now 0. That is a correctness-and-consistency fix, not a speed one:
+counts across examples and the compiler itself are unchanged (6 → 6, all genuinely heap), so
+**no wall-clock improvement is claimed for it either.**
+
 ## Conclusion: no new builtin
 
 **No C builtin is justified by these numbers, and `runtime/APPROVED_BUILTINS` is

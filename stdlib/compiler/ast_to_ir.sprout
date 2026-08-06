@@ -6918,6 +6918,29 @@ export fn synthesize_init_globals_fn(runtime_lets: List (source.GlobalName, type
                                          Nil))),
                    list_reverse(lifted), next_idx))
 
+# The root-registration op for a top-level let's storage slot — or Nil when the global
+# holds a non-heap scalar.
+#
+# Type-aware global rooting.  Only a global that can hold a heap value needs a permanent
+# entry in the GC root table.  Int / Bool / Char / Double are immediate i64 values, never
+# pointers, so registering them is pure cost: the root table is walked on every collection
+# for the life of the process, and a conservative scan is handed raw arithmetic bit
+# patterns as pointer candidates.  `stdlib/math.sprout` alone contributed 33 such entries,
+# every one an arithmetic Double.
+#
+# This mirrors the policy `ir_rooting` already applies to SSA values — "Intentional design
+# — do not root non-heap scalars" (docs/compiler-internals.md), where type-aware rooting
+# measured 1.5-2.7x on N-queens — which the global path did not previously honour: the
+# registration was emitted unconditionally, with no type check.
+#
+# Conservative by construction, per the companion invariant "when no source-level type is
+# available, root conservatively": type_is_non_heap_scalar returns false for everything
+# that is not one of those four TConsts, TVar included, so an unknown type is still rooted.
+# A spurious root is harmless; a missing root corrupts the heap.
+fn global_root_ops(gname: String, t: types.Type) -> List sprout_ir.IROp =
+  if type_kind.type_is_non_heap_scalar(t) then Nil
+  else Cons(sprout_ir.IRRegisterGlobalRoot(gname), Nil)
+
 fn synthesize_init_body_loop(runtime_lets: List (source.GlobalName, typed_ast.TypedExpr),
                               ctors: Dict sprout_ir.CtorInfo,
                               cur_label: String,
@@ -6943,12 +6966,14 @@ fn synthesize_init_body_loop(runtime_lets: List (source.GlobalName, typed_ast.Ty
               match body_r with
               | (body_blocks, body_lbl, body_ops, body_result, next_idx) ->
                   # Store the initializer, then register the global's slot as a
-                  # permanent GC root (rationale on IRRegisterGlobalRoot itself).
-                  # IRStoreGlobal/IRRegisterGlobalRoot take the raw @name string.
+                  # permanent GC root — but only if it can hold a heap value; see
+                  # global_root_ops.  IRStoreGlobal/IRRegisterGlobalRoot take the
+                  # raw @name string.
                   synthesize_init_body_loop(rest, ctors, body_lbl,
                     list_append(body_ops,
                       Cons(sprout_ir.IRStoreGlobal(source.global_name_str(gname), body_result),
-                        Cons(sprout_ir.IRRegisterGlobalRoot(source.global_name_str(gname)), Nil))),
+                        global_root_ops(source.global_name_str(gname),
+                                        typed_ast.typed_expr_type(body)))),
                     list_append(blocks, body_blocks), next_idx,
                     lifted_ref, top_level, let_names, fn_arities,
                     lambda_ctr_ref, lifted_idx_ref)
