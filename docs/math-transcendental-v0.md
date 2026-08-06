@@ -240,12 +240,19 @@ Pro, 2M iterations, harness baseline subtracted:
 | `exp` | 9.2 ns | 1.1 ns | 8.4x |
 | `ln` | 5.0 ns | 1.7 ns | 2.9x |
 | `log10` | 5.1 ns | 1.8 ns | 2.8x |
-| `cbrt` | 11.9 ns | 1.2 ns | 9.9x |
+| `cbrt` | 4.4 ns | 1.2 ns | 3.7x |
 | `pow` fractional | 39.7 ns | 5.9 ns | 6.7x |
 | `pow` integer | 7.8 ns | 6.0 ns | 1.3x |
+| `sqrt`, normal magnitude | 2.8 ns | hardware `fsqrt` | — |
 | `exp`, x ≈ 688 | 21.7 ns | 1.1 ns | ~20x |
 | `ln`, x = 1e-300 | 20.9 ns | 1.6 ns | ~13x |
-| `sqrt`, x = 1e300 | 21.5 ns | hardware `fsqrt` | — |
+| `sqrt`, x = 1e300 | 19.1 ns | hardware `fsqrt` | — |
+
+`cbrt` 11.9 → 4.4 ns and `sqrt` 8.2 → 2.8 ns come from §12: both Newton iterations now run
+a fixed 6 passes instead of testing for convergence each pass. Note that `sqrt` at **1e300**
+did not move at all (19.0 → 19.1 ns) — at that magnitude the ~500-stride range reduction
+dominates so completely that a 3x faster iteration is invisible, which is the sharpest
+evidence available that the remaining `*_wide` gap is reduction cost and not series cost.
 
 The last three rows exist because their absence was a defect: the original sweep ran only
 over `[0, 10)`, so it never exercised the range reductions' step count and reported the
@@ -255,11 +262,14 @@ is a single hardware instruction.
 
 **Conclusion: no new builtin, and `runtime/APPROVED_BUILTINS` is untouched.**
 `AGENTS.md` "Builtin vs Stdlib" rule 6 requires a concrete measured bottleneck, and a
-ratio against hand-tuned libm is not one. `ln` and integer `pow` — the rows bulk callers
-hit — are at 1.2–1.6x, and integer `pow` is *more accurate* than libm's (bit-exact,
-where libm pays the full `exp(y·ln x)`). At 9–37ns a call is dwarfed by any surrounding
-allocation or I/O in the work this layer serves; a Δv or emittance evaluation is one or
-two calls. Should a workload ever prove bottlenecked, the escalation named in
+ratio against hand-tuned libm is not one. The rows bulk callers hit are the closest to
+parity: `sqrt` 2.8 ns, integer `pow` 1.3x, `ln` 2.9x, `cbrt` 3.7x. Integer `pow` is also
+*more accurate* than libm's on the cases that matter, because libm has no reason to
+special-case a small integer exponent and pays the full `exp(y·ln x)` — but it is **not**
+unconditionally bit-exact and must not be described that way; see §11.5. At 3–40ns a call is
+dwarfed by any surrounding allocation or I/O in the work this layer serves; a Δv or emittance
+evaluation is one or two calls. Should a workload ever prove bottlenecked, the escalation
+named in
 `stdlib/math.sprout` is an **LLVM intrinsic** (`llvm.exp.f64`) — a codegen change, which
 leaves `APPROVED_BUILTINS` alone even then.
 
@@ -272,6 +282,17 @@ Two negative results worth keeping, both from measuring rather than reasoning:
   the source comment states the measured figure.
 - A linear initial guess for `cbrt`'s Newton iteration cuts the worst case from 7 passes
   to 6. Not kept — it does not pay for the code.
+- A **division-free** cube-root iteration — Newton on the inverse cube root,
+  `r' = r*(4 - x*r³)/3`, recovering the root as `x*r²` — removes every `fdiv` from the loop
+  and is *slower*: 5.41 ns/call against 3.20 for the plain fixed-count division form. The five
+  multiplies are serially dependent, so they form a longer latency chain than the single
+  division they replace. Removing a division is not automatically a win.
+- Const-folding `stdlib/math.sprout`'s module-level `Double` constants into LLVM
+  `private constant`s, so LLVM can fold them instead of reloading a mutable global, was
+  implemented and **reverted**: net +163 instructions in `ln_reduce`, because the i64-uniform
+  value ABI makes LLVM treat them as *integer* constants and an arbitrary 64-bit integer
+  immediate on arm64 costs `mov` + 3× `movk` against `adrp` + `ldr`. See
+  `bench/results-2026-08-06-math-transcendental.md`.
 
 ## 9. Compatibility and migration
 
@@ -418,3 +439,56 @@ still open, because nobody had wired the last step. So `gate-audit` gained asser
 every `scripts/*.sh` must be reachable from the justfile or a `.claude` hook, or be
 allowlisted with a stated reason. Two further dormant gates surfaced immediately
 (`ir_byte_identical_check.sh`, and `gate-audit` itself, which CI had never run).
+
+## 12. The root iterations run a fixed pass count (2026-08-06)
+
+`sqrt_iter` and `cbrt_iter` originally ran up to 60 Newton passes, exiting early once
+`abs(next - guess) < 1e-15 * guess`. That guard has been replaced with an unconditional
+**6 passes** in both.
+
+**It was a 3x cost, and the cost was the branch.** Measured on the reduced interval, dropping
+the guard is worth 3.86x on `sqrt` (7.17 → 1.86 ns/call) and 2.50x on `cbrt` (7.99 → 3.20);
+end to end on the benchmark's own sweeps, `sqrt` at normal magnitudes goes 8.16 → 2.75 ns
+(2.97x) and the `cbrt` row 9.82 → 4.44 ns (2.21x). The inlined `fdiv` count barely changes
+(13 → 11 for `sqrt`), so the arithmetic was never the issue: the guard makes the trip count
+depend on the input, so the loop-exit branch is unpredictable and mispredicts on nearly every
+call — ~15–20 cycles, ~5 ns at 3.5 GHz. A fixed count makes it statically known, which also
+lets LLVM fully unroll. arm64 `-O2` emits `fcmp=0` and no per-pass branch for the fixed form,
+against `fcmp=2` and 8 conditional branches for the guarded one.
+
+**Why 6, and not 5 or 7.** The guarded version took at most 7 passes over the reduced
+interval. Six unconditional passes match or beat its accuracy everywhere; five does not, and
+fails loudly rather than subtly — `sqrt` degrades to 9.3e-08 and `cbrt` to 3.7e-08, five
+orders outside this module's contract. Worst relative residual over 400k samples: `sqrt`
+4.39e-16 across `[1,4)`, `cbrt` 9.38e-16 across `[1,8)`.
+
+**Compatibility, and the one place it is not bit-clean.** `sqrt` is bit-identical to the
+guarded version at every one of 400k samples — it had already converged before the guard
+fired, so this is a pure cost removal. `cbrt` is **not**: its guard fired at different pass
+counts for different inputs (3 passes near x=8, 7 elsewhere), so no fixed count can reproduce
+it, and ~1 ULP moves on about 3.5% of inputs. `cbrt`'s worst-case residual *improves*
+(1.005e-15 → 9.38e-16) and every existing assertion passes (`test_math_transcendental.spr`
+compares via `check_approx` at 1e-12 relative), but a caller comparing exact `cbrt` bit
+patterns against pre-2026-08-06 output will see a difference. This was an explicit choice, not
+an oversight.
+
+**Tests.** `tests/stdlib/test_math_root_accuracy.spr` — residual *sweeps* across each
+function's reduced interval plus 200 doublings and 200 halvings to exercise the reduction. The
+gap it closes: existing coverage checked only hand-picked points against hardcoded constants
+(`cbrt(27) == 3`), and a Newton error peaks in the interval's interior, not at tidy cubes — a
+wrong pass count exact at 8, 27 and 1000 would have passed the whole suite. Sample density is
+part of the assertion: a 10x coarser sweep reports `cbrt`'s worst residual as 9.30e-16 instead
+of the true 1.005e-15, simply stepping over the peak.
+
+**A corpus gap this exposed.** Rewriting both Newton loops moved **0 of 57** golden IR files.
+No corpus member imported the Double `stdlib.math`: the only `stdlib.math` reference across
+all 57 goldens was `examples/astar.sprout`, which imports `stdlib.math.int`. So the
+change-detector wired into CI in §11 was structurally blind to `sqrt`/`cbrt`/`exp`/`ln`/`pow`.
+`tests/smoke_shapes/10_double_math.spr` closes it — the corpus is now 58 files, and the gate
+was confirmed to **fire** (1 difference on a single pass-count change) rather than merely to
+pass.
+
+**Rejected alternative.** A division-free cube root — Newton on the inverse cube root,
+`r' = r*(4 - x*r³)/3`, recovering the root as `x*r²` — removes every `fdiv` from the loop and
+measured *slower*, 5.41 ns/call against 3.20. The five multiplies are serially dependent and
+form a longer latency chain than the single division they replace.

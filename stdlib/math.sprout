@@ -159,13 +159,46 @@ export fn floor(x: Double) -> Double =
   else r
   where r = round_nearest(x)
 
-# Newton-Raphson (Heron): quadratic convergence, so the relative-error guard trips
-# in well under the 60-step ceiling; the ceiling only bounds pathological inputs.
+# --- Why the root iterations run a fixed pass count ---
+# `sqrt_iter` and `cbrt_iter` below run an UNCONDITIONAL 6 Newton passes. Neither tests
+# whether it has converged, which looks wasteful and is the opposite: the test cost more
+# than the passes it saved.
+#
+# Both used to run up to 60 passes, exiting early on `abs(next - guess) < 1e-15 * guess`.
+# Measured on a 2M-call sweep across the reduced interval, dropping that guard is
+# **3.86x on sqrt** (7.17 -> 1.86 ns/call) and **2.50x on cbrt** (7.99 -> 3.20 ns/call).
+#
+# The cost was never the arithmetic — the inlined `fdiv` count is essentially unchanged
+# (13 vs 11 for sqrt). It was the BRANCH. The guard makes the trip count depend on the
+# input, so the loop-exit branch is unpredictable and mispredicts on nearly every call
+# (~15-20 cycles, ~5 ns at 3.5 GHz). A fixed count makes it statically known, which also
+# lets LLVM fully unroll: arm64 `-O2` emits `fcmp=0` and no per-pass branch at all, against
+# `fcmp=2` / 8 conditional branches for the guarded form.
+#
+# 6 is not a guess. The guarded version took up to 7 passes; 6 unconditional passes match
+# or beat its accuracy everywhere, and 5 does not — sqrt degrades to 9.3e-08 and cbrt to
+# 3.7e-08, five orders outside this module's contract. Worst relative residual over 400k
+# samples: sqrt 4.39e-16 across [1,4), cbrt 9.38e-16 across [1,8), both pinned by
+# `tests/stdlib/test_math_root_accuracy.spr`.
+#
+# NOT bit-compatible for cbrt. `sqrt` is bit-identical to the guarded version at every one
+# of 400k samples, because it had already converged before the guard fired. `cbrt` differs
+# by ~1 ULP on about 3.5% of inputs: its guard fired at different pass counts for different
+# inputs (3 near x=8, 7 elsewhere), so no fixed count can reproduce it. cbrt's worst-case
+# residual IMPROVES, 1.005e-15 -> 9.38e-16, and callers comparing exact cbrt bit patterns
+# against pre-2026-08-06 output will see a difference.
+#
+# The obvious alternative was measured and rejected: iterating the inverse cube root
+# (`r' = r*(4 - x*r^3)/3`) is division-free, but the five serially-dependent multiplies form
+# a LONGER latency chain than the single fdiv they replace — 5.41 ns/call against 3.20.
+#
+# Full write-up: bench/results-2026-08-06-math-transcendental.md.
+
+# Newton-Raphson (Heron), quadratic convergence. Seeded from a value reduced into [1,4),
+# so the seed is within a factor of two of the root (see sqrt_reduce).
 fn sqrt_iter(x: Double, guess: Double, i: Int) -> Double =
-  if i >= 60 then guess
-  else if abs(next - guess) < 0.000000000000001 * guess then next
-  else sqrt_iter(x, next, i + 1)
-  where next = 0.5 * (guess + x / guess)
+  if i >= 6 then guess
+  else sqrt_iter(x, 0.5 * (guess + x / guess), i + 1)
 
 # Reduce the magnitude into [1, 4) by exact powers of four, tracking the square root of
 # the extracted factor — a power of two, so also exact. Four is the right stride because
@@ -362,12 +395,11 @@ export fn log(x: Double, base: Double) -> Double =
 #
 # A linear initial guess (1 + (m-1)/7 across the reduced [1,8)) was measured and
 # rejected: it cuts the worst case from 7 passes to 6, which does not pay for the code.
+# Newton on g^3 = x, seeded at 2.0 from a value reduced into [1,8) (see cbrt_reduce).
+# Fixed 6 passes; rationale and measurements on sqrt_iter above.
 fn cbrt_iter(x: Double, guess: Double, i: Int) -> Double =
-  if i >= 60 then guess
-  else if abs(next - guess) < 0.000000000000001 * guess then next
-  else cbrt_iter(x, next, i + 1)
-where
-  next = (2.0 * guess + x / (guess * guess)) * (1.0 / 3.0)
+  if i >= 6 then guess
+  else cbrt_iter(x, (2.0 * guess + x / (guess * guess)) * (1.0 / 3.0), i + 1)
 
 # Reduce the magnitude into [1, 8) by exact factors of 8, tracking the cube root of the
 # extracted factor — a power of two, so also exact. 8 is the right stride because
