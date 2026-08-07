@@ -250,9 +250,12 @@ test-package-resolution: bootstrap-from-seed
 # byte. tests/conformance/run/XFAIL quarantines known-broken fixtures WITHOUT
 # silently skipping them: a quarantined fixture that starts passing again turns
 # the gate RED (so quarantine self-heals), as does an orphan .out with no .spr.
-# NOTE: --emit-ir exits 0 even on a source error (writes "ERROR: ..." where IR
-# should go — the byte-identity blind spot), so a compile failure is detected by
-# grepping the emitted output, not by exit status.
+# NOTE: --emit-ir now reports source errors on stderr and exits NONZERO, but this
+# gate still matches on OUTPUT CONTENT rather than exit status, and deliberately
+# greps BOTH streams. Reason: the fixtures distinguish "compile failed" from "link
+# failed" from "wrong output" in the `why` label, and content is what names which.
+# Grepping both streams also means the gate does not silently change meaning if a
+# diagnostic moves between streams again.
 [group('test')]
 test-conformance-run: bootstrap-from-seed
   #!/usr/bin/env bash
@@ -520,20 +523,27 @@ _build-stage in_bin out_bin:
     echo "ERROR: {{in_bin}} not found" >&2; exit 1
   fi
   TMP_LL="/tmp/sprout_build_$$.ll"
+  TMP_ERR="/tmp/sprout_build_$$.err"
   TMP_BIN="{{out_bin}}.$$.tmp"
-  trap 'rm -f "$TMP_LL" "$TMP_BIN"' EXIT
+  trap 'rm -f "$TMP_LL" "$TMP_ERR" "$TMP_BIN"' EXIT
   echo "==> Emitting LLVM IR via {{in_bin}}..."
-  # --emit-ir exits 0 even on a source error, writing "ERROR: ..." into the output
-  # instead of IR (the byte-identity blind spot). Detect that here and fail loudly
-  # with the actual source error, rather than letting `opt` fail later with a
-  # cryptic "expected top-level entity" that hides the real cause.
-  ./{{in_bin}} --emit-ir "{{stdlib_root}}" "{{driver}}" > "$TMP_LL"
+  # A source error now sets a NONZERO exit and reports on stderr, so the exit
+  # status is the primary signal. `{{in_bin}}` may still be an OLD stage built
+  # before that change, which reported on stdout and exited 0 — so both streams
+  # are checked and the status is captured rather than allowed to abort under
+  # `set -e`. That keeps this recipe able to bootstrap from either generation of
+  # compiler, which matters because it is the recipe the seed bootstrap runs
+  # through. Without it, refreshing the seed across this change would need a
+  # hand-built compiler.
+  emit_status=0
+  ./{{in_bin}} --emit-ir "{{stdlib_root}}" "{{driver}}" > "$TMP_LL" 2>"$TMP_ERR" || emit_status=$?
+  cat "$TMP_ERR" >&2 || true
   # Diagnostics are "ERROR: bundle: ..." (parse) or "<line>:<col>: ERROR: check: ..."
   # (typecheck) — both anchored at line start. The prefix guards against matching
   # "ERROR:" inside emitted IR string constants (which begin with @.str).
-  if grep -qE "^([0-9]+:[0-9]+: )?ERROR:" "$TMP_LL"; then
-    echo "ERROR: compile failed while emitting IR via {{in_bin}} — source error:" >&2
-    grep -E "^([0-9]+:[0-9]+: )?ERROR:" "$TMP_LL" | head -8 >&2
+  if [[ "$emit_status" -ne 0 ]] || grep -qE "^([0-9]+:[0-9]+: )?ERROR:" "$TMP_LL" "$TMP_ERR"; then
+    echo "ERROR: compile failed while emitting IR via {{in_bin}} (exit $emit_status) — source error:" >&2
+    grep -hE "^([0-9]+:[0-9]+: )?ERROR:" "$TMP_LL" "$TMP_ERR" 2>/dev/null | head -8 >&2
     exit 1
   fi
   echo "==> Validating IR..."
@@ -668,9 +678,12 @@ compile-examples-stage1: (_compile-examples "build/compile_driver_bin_stage1" ""
 # Negative-diagnostic conformance: each tests/conformance/<dir>/<n>.spr must be
 # rejected by `--phase check` with output containing the substring in <n>.err.
 # Covers both parse-phase and type-phase rejections — `--phase check` runs the
-# bundler (parse) first, so a parse error surfaces here too. (`--phase check`
-# exits 0 even on a source error — the byte-identity blind spot — so matching is
-# by output content, never exit status.) <noun> labels the summary; xfail =
+# bundler (parse) first, so a parse error surfaces here too. (Matching is by
+# output CONTENT, not exit status: these fixtures assert a specific DIAGNOSTIC, and
+# a nonzero status alone cannot distinguish the expected diagnostic from a
+# different rejection. `--phase check` does now exit nonzero on a source error —
+# it previously exited 0 — so `|| true` below is what keeps `set -e` from aborting
+# on the very rejection each fixture is asserting.) <noun> labels the summary; xfail =
 # fixtures whose expected diagnostic is not yet produced (tracked TODO).
 [private]
 _test-reject stage dir noun xfail="":
@@ -1005,6 +1018,93 @@ loud-fail-smoke: bootstrap-from-seed
     exit 1
   fi
   echo "==> loud-fail-smoke ✓ (undefined callee diagnosed, no IR emitted, control emits IR)"
+
+# Diagnostic-stream guard.  A source error must go to STDERR and set a NONZERO
+# exit status; stdout carries the artifact (IR / iface / status lines) and
+# nothing else.
+#
+# Why this is a gate and not a style preference.  `--emit-ir` is used as
+# `compile_driver --emit-ir <root> f.spr > f.ll` — the documented dev loop in
+# AGENTS.md pipes it straight into clang.  When a diagnostic goes to stdout it
+# physically BECOMES the .ll file, so a Sprout type error surfaces as a clang
+# parse error quoting the Sprout error text:
+#
+#     error: expected top-level entity
+#         1 | 1:1: ERROR: check: Executable entrypoint `main` must declare …
+#
+# compile_driver.sprout already states this rule for --emit-iface ("Errors go to
+# stderr so they don't pollute the iface artifact when stdout is redirected to a
+# file"); --emit-ir has the identical requirement and used to violate it.
+#
+# The exit status matters independently: with errors on stdout AND exit 0, no
+# caller could detect failure at all, which is how `loud-fail-smoke` came to be
+# structurally incapable of firing.  Note the whole negative-test suite is
+# exit-status-blind by construction (`_test-reject` runs `2>&1 || true` and greps
+# text), so nothing else in the tree covers this.
+[group('smoke')]
+diagnostic-stream-smoke: bootstrap-from-seed
+  #!/usr/bin/env bash
+  set -euo pipefail
+  TMPD=$(mktemp -d /tmp/sprout_dss_XXXXXX)
+  trap 'rm -rf "$TMPD"' EXIT
+  DRIVER="{{build_dir}}/compile_driver_bin_stage1"
+  FIX="tests/diagnostic_stream"
+  failed=0
+  for f in unknown_variable parse_error valid; do
+    [[ -f "$FIX/$f.spr" ]] || { echo "diagnostic-stream-smoke: missing fixture $FIX/$f.spr" >&2; exit 1; }
+  done
+
+  # A plain check error (unknown variable) — the most common diagnostic.
+  status=0
+  "$DRIVER" --emit-ir "{{stdlib_root}}" "$FIX/unknown_variable.spr" > "$TMPD/bad.out" 2>"$TMPD/bad.err" || status=$?
+
+  if ! grep -qs "ERROR: check: Unknown variable" "$TMPD/bad.err"; then
+    echo "diagnostic-stream-smoke: diagnostic did NOT reach stderr." >&2
+    echo "  --- stdout (should hold IR only) ---" >&2; head -5 "$TMPD/bad.out" >&2
+    echo "  --- stderr (should hold the error) ---" >&2; head -5 "$TMPD/bad.err" >&2
+    failed=1
+  fi
+  if grep -qsE "^([0-9]+:[0-9]+: )?ERROR:" "$TMPD/bad.out"; then
+    echo "diagnostic-stream-smoke: diagnostic leaked into STDOUT — it would become the .ll file:" >&2
+    grep -sE "^([0-9]+:[0-9]+: )?ERROR:" "$TMPD/bad.out" | head -3 >&2
+    failed=1
+  fi
+  if [[ "$status" -eq 0 ]]; then
+    echo "diagnostic-stream-smoke: a rejected program exited 0 — callers cannot detect failure." >&2
+    failed=1
+  fi
+
+  # Parse errors take a different path (bundler, not checker) — cover it too.
+  pstatus=0
+  "$DRIVER" --emit-ir "{{stdlib_root}}" "$FIX/parse_error.spr" > "$TMPD/p.out" 2>"$TMPD/p.err" || pstatus=$?
+  if ! grep -qs "ERROR: bundle:" "$TMPD/p.err"; then
+    echo "diagnostic-stream-smoke: parse diagnostic did not reach stderr:" >&2
+    head -5 "$TMPD/p.out" "$TMPD/p.err" >&2; failed=1
+  fi
+  if [[ "$pstatus" -eq 0 ]]; then
+    echo "diagnostic-stream-smoke: a parse error exited 0." >&2; failed=1
+  fi
+
+  # Positive control — a VALID program must exit 0, put IR on stdout, and keep
+  # stderr free of diagnostics.  Without this the checks above would also pass
+  # on a compiler that rejected everything.
+  okstatus=0
+  "$DRIVER" --emit-ir "{{stdlib_root}}" "$FIX/valid.spr" > "$TMPD/ok.out" 2>"$TMPD/ok.err" || okstatus=$?
+  if [[ "$okstatus" -ne 0 ]]; then
+    echo "diagnostic-stream-smoke: POSITIVE CONTROL — a valid program exited $okstatus:" >&2
+    head -10 "$TMPD/ok.err" >&2; failed=1
+  fi
+  if ! grep -qs "^define " "$TMPD/ok.out"; then
+    echo "diagnostic-stream-smoke: POSITIVE CONTROL — a valid program emitted no IR on stdout." >&2
+    failed=1
+  fi
+  if grep -qsE "^([0-9]+:[0-9]+: )?ERROR:" "$TMPD/ok.err"; then
+    echo "diagnostic-stream-smoke: POSITIVE CONTROL — a valid program wrote a diagnostic to stderr:" >&2
+    grep -sE "^([0-9]+:[0-9]+: )?ERROR:" "$TMPD/ok.err" | head -3 >&2; failed=1
+  fi
+
+  if (( failed > 0 )); then exit 1; fi
+  echo "==> diagnostic-stream-smoke ✓ (errors on stderr, nonzero exit, stdout artifact-only)"
 
 # Dispatch-trace guard.  SPROUT_TRACE_DISPATCH=1 must emit a `[dispatch] ...` line
 # per constrained call site, and a projection sort (`vec_sort_by` with key type !=
@@ -1613,6 +1713,7 @@ ci-fast-gates: bootstrap-from-seed build-fmt-from-seed
     "trace-dispatch-smoke|trace-dispatch-smoke"
     "verify-dispatch-smoke|verify-dispatch-smoke"
     "loud-fail-smoke|loud-fail-smoke"
+    "diagnostic-stream-smoke|diagnostic-stream-smoke"
     "ir-golden-diff|ir-golden-diff"
     "gate-audit|gate-audit"
   )
@@ -1719,7 +1820,7 @@ gate-quick: fmt-check test compile-examples-stage1 smoke-shapes bundle-smoke
 # advisory), so it runs in the body rather than as an arg-less dependency.
 # Full CI-parity battery (slow, ~15-25m); a green run means CI will not surprise you.
 [group('gate')]
-gate: fmt-check smoke-shapes bundle-smoke loud-fail-smoke argv-smoke trace-dispatch-smoke verify-dispatch-smoke div-by-zero-smoke stack-overflow-smoke flush-on-crash-smoke tco-runtime-smoke check-approved-builtins verify-bootstrap-fixed-point ir-golden-diff compile-examples-stage1 run-example-canary test task-io-smoke test-stress
+gate: fmt-check smoke-shapes bundle-smoke loud-fail-smoke diagnostic-stream-smoke argv-smoke trace-dispatch-smoke verify-dispatch-smoke div-by-zero-smoke stack-overflow-smoke flush-on-crash-smoke tco-runtime-smoke check-approved-builtins verify-bootstrap-fixed-point ir-golden-diff compile-examples-stage1 run-example-canary test task-io-smoke test-stress
   #!/usr/bin/env bash
   set -euo pipefail
   echo "==> gate: gc-safety-check --strict..."

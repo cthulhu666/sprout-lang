@@ -30,25 +30,55 @@ fn format_pos(pos: source.SourcePos) -> String =
 # Header stripping is source.strip_headers (line-preserving, shared authority).
 
 # ---------------------------------------------------------------------------
-# Diagnostic printing
+# Diagnostic reporting
+#
+# TWO INVARIANTS, both load-bearing. `just diagnostic-stream-smoke` guards them.
+#
+#   1. Diagnostics go to STDERR. stdout carries the ARTIFACT — LLVM IR, an encoded
+#      iface, status lines — and callers redirect it to a file. A diagnostic on
+#      stdout does not merely look untidy, it BECOMES the artifact: with
+#      `compile_driver --emit-ir root f.spr > f.ll` (the dev loop AGENTS.md
+#      documents, piped straight into clang) the error text was written into f.ll,
+#      so a Sprout type error resurfaced later as
+#      `clang: error: expected top-level entity` quoting the Sprout error back at
+#      you. The rule was already stated for --emit-iface below; --emit-ir, --phase
+#      and the default path had simply never followed it.
+#
+#   2. A failed run exits NONZERO. Every run_* returns Unit, so the status is
+#      carried by a `Ref Int` flag threaded from main and read as main's result.
+#      Before this the driver exited 0 on every error — which is why
+#      `just loud-fail-smoke` was structurally incapable of firing, and why the
+#      negative-test harness has to grep text (`2>&1 || true`) rather than trust
+#      the status.
+#
+# `failed` is write-1-only; no path ever clears it. So "an error happened somewhere
+# in this batch" survives to main however many files follow the failing one.
 
-fn print_diags(diags: List compiler.Diagnostic) -> Unit !{IO} =
+# report_error: the single funnel for an error diagnostic — stderr, and mark the
+# run failed. Prefer this over a bare eprint so neither half can be forgotten.
+fn report_error(failed: Ref Int, msg: String) -> Unit !{IO} =
+  do
+    eprint(msg)
+    ref_write(failed, 1)
+
+fn print_diags(diags: List compiler.Diagnostic, failed: Ref Int) -> Unit !{IO} =
   match diags with
   | Nil -> ()
   | Cons d rest ->
       do
         match d with
-        | compiler.DiagError pos msg -> print(format_pos(pos) ++ "ERROR: " ++ msg)
-        | compiler.DiagWarning pos msg -> print(format_pos(pos) ++ "WARNING: " ++ msg)
-        print_diags(rest)
+        | compiler.DiagError pos msg -> report_error(failed, format_pos(pos) ++ "ERROR: " ++ msg)
+        # A warning is a diagnostic but not a failure: stderr, no flag.
+        | compiler.DiagWarning pos msg -> eprint(format_pos(pos) ++ "WARNING: " ++ msg)
+        print_diags(rest, failed)
 
 # ---------------------------------------------------------------------------
 # Entry point (default phase: source-level typecheck with import resolution)
 
-fn run_file(path: String, stdlib_root: String) -> Unit !{IO} =
+fn run_file(path: String, stdlib_root: String, failed: Ref Int) -> Unit !{IO} =
   match read_file(path) with
   | Err msg -> panic("read_file: " ++ path ++ ": " ++ msg)
-  | Ok raw -> run_with_src(raw, stdlib_root)
+  | Ok raw -> run_with_src(raw, stdlib_root, failed)
 
 fn parse_for_decls(src: String) -> Maybe (List ast.Decl) =
   match lexer.tokenize(src) with
@@ -60,11 +90,11 @@ fn parse_for_decls(src: String) -> Maybe (List ast.Decl) =
           match prog with
           | ast.Program decls _ -> Just(decls)
 
-fn run_with_src(src: String, stdlib_root: String) -> Unit !{IO} =
+fn run_with_src(src: String, stdlib_root: String, failed: Ref Int) -> Unit !{IO} =
   do
     result <- compiler.compile_source_with_root(src, source.StdlibRoot(stdlib_root))
     match result with
-    | compiler.CompileFail diags -> print_diags(diags)
+    | compiler.CompileFail diags -> print_diags(diags, failed)
     | compiler.CompileOk env ->
         do
           print("OK")
@@ -86,11 +116,11 @@ fn dump_ast_decl_names(decls: List ast.Decl) -> Unit !{IO} =
         | _ -> ()
         dump_ast_decl_names(rest)
 
-fn run_file_bundle(path: String, stdlib_root: String, extra_roots: List String) -> Unit !{IO} =
+fn run_file_bundle(path: String, stdlib_root: String, extra_roots: List String, failed: Ref Int) -> Unit !{IO} =
   do
     result <- compiler.compile_phase_bundle_with_roots(source.FilePath(path), source.StdlibRoot(stdlib_root), extra_roots)
     match result with
-    | bundler.BundleErr _ msg -> print("ERROR: bundle: " ++ msg)
+    | bundler.BundleErr _ msg -> report_error(failed, "ERROR: bundle: " ++ msg)
     | bundler.BundleOk prog ->
         do
           print("OK")
@@ -100,11 +130,11 @@ fn run_file_bundle(path: String, stdlib_root: String, extra_roots: List String) 
 # ---------------------------------------------------------------------------
 # Phase: check — bundle + HM typecheck, produces typed IR
 
-fn run_file_check(path: String, stdlib_root: String, extra_roots: List String) -> Unit !{IO} =
+fn run_file_check(path: String, stdlib_root: String, extra_roots: List String, failed: Ref Int) -> Unit !{IO} =
   do
     result <- compiler.compile_phase_check_with_roots(source.FilePath(path), source.StdlibRoot(stdlib_root), extra_roots)
     match result with
-    | typed_ast.TypedErr pos msg -> print(format_pos(pos) ++ "ERROR: " ++ msg)
+    | typed_ast.TypedErr pos msg -> report_error(failed, format_pos(pos) ++ "ERROR: " ++ msg)
     | typed_ast.TypedOk typed_prog env ->
         do
           print("OK")
@@ -113,11 +143,11 @@ fn run_file_check(path: String, stdlib_root: String, extra_roots: List String) -
 # ---------------------------------------------------------------------------
 # Phase: lower — typeclass dictionary-passing lowering
 
-fn run_file_lower(path: String, stdlib_root: String, extra_roots: List String) -> Unit !{IO} =
+fn run_file_lower(path: String, stdlib_root: String, extra_roots: List String, failed: Ref Int) -> Unit !{IO} =
   do
     result <- compiler.compile_phase_lower_with_roots(source.FilePath(path), source.StdlibRoot(stdlib_root), extra_roots)
     match result with
-    | typed_ast.TypedErr pos msg -> print(format_pos(pos) ++ "ERROR: " ++ msg)
+    | typed_ast.TypedErr pos msg -> report_error(failed, format_pos(pos) ++ "ERROR: " ++ msg)
     | typed_ast.TypedOk typed_prog env ->
         do
           print("OK")
@@ -126,11 +156,11 @@ fn run_file_lower(path: String, stdlib_root: String, extra_roots: List String) -
 # ---------------------------------------------------------------------------
 # Phase: recheck — re-typecheck the lowered AST so typed nodes carry resolved types
 
-fn run_file_recheck(path: String, stdlib_root: String, extra_roots: List String) -> Unit !{IO} =
+fn run_file_recheck(path: String, stdlib_root: String, extra_roots: List String, failed: Ref Int) -> Unit !{IO} =
   do
     result <- compiler.compile_phase_recheck_with_roots(source.FilePath(path), source.StdlibRoot(stdlib_root), extra_roots)
     match result with
-    | typed_ast.TypedErr pos msg -> print(format_pos(pos) ++ "ERROR: " ++ msg)
+    | typed_ast.TypedErr pos msg -> report_error(failed, format_pos(pos) ++ "ERROR: " ++ msg)
     | typed_ast.TypedOk typed_prog env ->
         do
           print("OK")
@@ -147,11 +177,11 @@ fn run_file_recheck(path: String, stdlib_root: String, extra_roots: List String)
 #
 # Usage: compile-driver --emit-iface <stdlib-root> <module-name> <path> > out.iface
 
-fn run_file_emit_iface(module_name: String, path: String, stdlib_root: String) -> Unit !{IO} =
+fn run_file_emit_iface(module_name: String, path: String, stdlib_root: String, failed: Ref Int) -> Unit !{IO} =
   do
     result <- compiler.compile_phase_check(source.FilePath(path), source.StdlibRoot(stdlib_root))
     match result with
-    | typed_ast.TypedErr pos msg -> eprint(format_pos(pos) ++ "ERROR: " ++ msg)
+    | typed_ast.TypedErr pos msg -> report_error(failed, format_pos(pos) ++ "ERROR: " ++ msg)
     | typed_ast.TypedOk typed_prog env ->
         do
           let schemes = iface_codec.extract_named_schemes(env, module_name)
@@ -172,14 +202,24 @@ fn run_file_emit_iface(module_name: String, path: String, stdlib_root: String) -
 #   OK: <path> (version <N>, <K> schemes)         on success
 #   INVALID: <path>                                on decode failure
 #
-# Exit-code-driven gating belongs in the calling recipe; this driver just
-# prints status lines.
+# Both lines stay on STDOUT: unlike a diagnostic they are this mode's ARTIFACT —
+# the documented, greppable output contract that `just check-iface-all` consumes
+# (`--check-iface "$f" 2>&1 | grep -q "^OK:"`). An INVALID decode does now also
+# set a nonzero exit status, so a caller can gate on the status instead of
+# scraping text; the previous note here said exit-code gating "belongs in the
+# calling recipe", which was a description of a driver that had no working exit
+# status at all rather than a reason to keep it that way. check-iface-all is
+# unaffected either way — its driver call sits in an `if` condition, so the
+# grep, not the status, still decides.
 
-fn run_check_iface(path: String) -> Unit !{IO} =
+fn run_check_iface(path: String, failed: Ref Int) -> Unit !{IO} =
   do
     contents <- read_file(path)
     match iface_codec.decode_iface_file(contents) with
-    | Nothing -> print("INVALID: " ++ path)
+    | Nothing ->
+        do
+          print("INVALID: " ++ path)
+          ref_write(failed, 1)
     | Just iface ->
         match iface with
         | iface_codec.IfaceFile version mod schemes ctors classes instances ->
@@ -207,14 +247,14 @@ fn print_lines(lines: List String) -> Unit !{IO} =
 # Reuses compile_phase_recheck to get the typed AST (no LLVM is produced by
 # that phase), then delegates to ast_to_ir + ir_lowering.
 
-fn run_file_use_ir_codegen(path: String, stdlib_root: String, extra_roots: List String) -> Unit !{IO} =
+fn run_file_use_ir_codegen(path: String, stdlib_root: String, extra_roots: List String, failed: Ref Int) -> Unit !{IO} =
   do
     recheck_result <- compiler.compile_phase_recheck_with_roots(source.FilePath(path), source.StdlibRoot(stdlib_root), extra_roots)
     match recheck_result with
-    | typed_ast.TypedErr pos msg -> print(format_pos(pos) ++ "ERROR: " ++ msg)
+    | typed_ast.TypedErr pos msg -> report_error(failed, format_pos(pos) ++ "ERROR: " ++ msg)
     | typed_ast.TypedOk typed_prog _ ->
         match ir_pipeline.compile_program_streaming(typed_prog) with
-        | Err msg -> print("ERROR: " ++ msg)
+        | Err msg -> report_error(failed, "ERROR: " ++ msg)
         | Ok ir_text -> print(ir_text)
 
 # ---------------------------------------------------------------------------
@@ -256,66 +296,79 @@ fn run_file_dump_qualify(path: String, stdlib_root: String) -> Unit !{IO} =
 # phase: "" = default source check,
 #        "bundle"|"check"|"lower"|"recheck"|"ir-typed"|"scan-info"|"dump-qualify"
 
-fn run_batch(stdlib_root: String, idx: Int, phase: String, extra_roots: List String) -> Unit !{IO} =
+fn run_batch(stdlib_root: String, idx: Int, phase: String, extra_roots: List String, failed: Ref Int) -> Unit !{IO} =
   match argv_get(idx) with
   | Nothing -> ()
   | Just path ->
       do
         if phase == "ir-typed" then ()
         else print("=== " ++ path ++ " ===")
-        if phase == "bundle" then run_file_bundle(path, stdlib_root, extra_roots)
-        else if phase == "check" then run_file_check(path, stdlib_root, extra_roots)
-        else if phase == "lower" then run_file_lower(path, stdlib_root, extra_roots)
-        else if phase == "recheck" then run_file_recheck(path, stdlib_root, extra_roots)
-        else if phase == "ir-typed" then run_file_use_ir_codegen(path, stdlib_root, extra_roots)
+        if phase == "bundle" then run_file_bundle(path, stdlib_root, extra_roots, failed)
+        else if phase == "check" then run_file_check(path, stdlib_root, extra_roots, failed)
+        else if phase == "lower" then run_file_lower(path, stdlib_root, extra_roots, failed)
+        else if phase == "recheck" then run_file_recheck(path, stdlib_root, extra_roots, failed)
+        else if phase == "ir-typed" then run_file_use_ir_codegen(path, stdlib_root, extra_roots, failed)
+        # scan-info and dump-qualify have no diagnostic path of their own — they
+        # panic on a read failure — so they take no flag.
         else if phase == "scan-info" then run_file_scan_info(path, stdlib_root)
         else if phase == "dump-qualify" then run_file_dump_qualify(path, stdlib_root)
-        else run_file(path, stdlib_root)
-        run_batch(stdlib_root, idx + 1, phase, extra_roots)
+        else run_file(path, stdlib_root, failed)
+        # Keep going after a failure: a batch reports every bad file, and `failed`
+        # is write-1-only so the status survives the remaining files.
+        run_batch(stdlib_root, idx + 1, phase, extra_roots, failed)
 
-fn main() -> Unit !{IO} =
+# Exit status: 0 when nothing reported an error, 1 otherwise. `failed` is created
+# here, threaded down, and read back as main's result — see the "Diagnostic
+# reporting" header for why a Ref rather than a return value (every run_* is Unit,
+# and run_batch recurses, so a Ref avoids restructuring the recursion into a fold).
+# A usage error is a failure too: it exits 1, so a mistyped invocation in a script
+# stops the script instead of looking like a successful no-op.
+fn main() -> Int !{IO} =
   do
+    failed <- ref_new(0)
     args <- argv_all()
     match args with
     | ["--emit-ir", "--debug", stdlib_root | _] ->
-        run_batch(stdlib_root, 3, "ir-typed", Nil)
+        run_batch(stdlib_root, 3, "ir-typed", Nil, failed)
     | ["--emit-ir", "--debug" | _] ->
-        print("ERROR: usage: compile-driver --emit-ir --debug <stdlib-root> <file>...")
+        report_error(failed, "ERROR: usage: compile-driver --emit-ir --debug <stdlib-root> <file>...")
     # One extra package root, fixed right after <stdlib-root>: dotted non-stdlib
     # imports (e.g. postgres.*) resolve under <pkg-root> (docs/packaging-v0.md §10
     # phase 2). Single root, fixed position — the walking-skeleton surface.
     | ["--emit-ir", stdlib_root, "--package-root", dir | _] ->
-        run_batch(stdlib_root, 4, "ir-typed", Cons(dir, Nil))
+        run_batch(stdlib_root, 4, "ir-typed", Cons(dir, Nil), failed)
     | ["--emit-ir", stdlib_root | _] ->
-        run_batch(stdlib_root, 2, "ir-typed", Nil)
+        run_batch(stdlib_root, 2, "ir-typed", Nil, failed)
     | ["--emit-ir" | _] ->
-        print("ERROR: usage: compile-driver --emit-ir [--debug] <stdlib-root> [--package-root <dir>] <file>...")
+        report_error(failed, "ERROR: usage: compile-driver --emit-ir [--debug] <stdlib-root> [--package-root <dir>] <file>...")
     | ["--phase", phase, stdlib_root, "--package-root", dir | _] ->
-        run_batch(stdlib_root, 5, phase, Cons(dir, Nil))
+        run_batch(stdlib_root, 5, phase, Cons(dir, Nil), failed)
     | ["--phase", phase, stdlib_root | _] ->
-        run_batch(stdlib_root, 3, phase, Nil)
+        run_batch(stdlib_root, 3, phase, Nil, failed)
     | ["--phase", _ | _] ->
-        print("ERROR: usage: compile-driver --phase <phase> <stdlib-root> [--package-root <dir>] <file>...")
+        report_error(failed, "ERROR: usage: compile-driver --phase <phase> <stdlib-root> [--package-root <dir>] <file>...")
     | ["--phase" | _] ->
-        print("ERROR: --phase requires an argument: bundle|check|lower|recheck|scan-info|dump-qualify")
+        report_error(failed, "ERROR: --phase requires an argument: bundle|check|lower|recheck|scan-info|dump-qualify")
     # --package-root before the bare form: the general arm would otherwise bind
     # path to the literal "--package-root". Mirrors the --emit-ir surface so the
     # typed-codegen path resolves dotted non-stdlib imports (e.g. testsupport.*).
     | ["--use-ir-codegen", stdlib_root, "--package-root", dir, path | _] ->
-        run_file_use_ir_codegen(path, stdlib_root, Cons(dir, Nil))
+        run_file_use_ir_codegen(path, stdlib_root, Cons(dir, Nil), failed)
     | ["--use-ir-codegen", stdlib_root, path | _] ->
-        run_file_use_ir_codegen(path, stdlib_root, Nil)
+        run_file_use_ir_codegen(path, stdlib_root, Nil, failed)
     | ["--use-ir-codegen" | _] ->
-        print("ERROR: usage: compile-driver --use-ir-codegen <stdlib-root> [--package-root <dir>] <file>")
+        report_error(failed, "ERROR: usage: compile-driver --use-ir-codegen <stdlib-root> [--package-root <dir>] <file>")
     | ["--emit-iface", stdlib_root, module_name, path | _] ->
-        run_file_emit_iface(module_name, path, stdlib_root)
+        run_file_emit_iface(module_name, path, stdlib_root, failed)
     | ["--emit-iface" | _] ->
-        print("ERROR: usage: compile-driver --emit-iface <stdlib-root> <module-name> <file>")
+        report_error(failed, "ERROR: usage: compile-driver --emit-iface <stdlib-root> <module-name> <file>")
     | ["--check-iface", path | _] ->
-        run_check_iface(path)
+        run_check_iface(path, failed)
     | ["--check-iface" | _] ->
-        print("ERROR: usage: compile-driver --check-iface <iface-file>")
+        report_error(failed, "ERROR: usage: compile-driver --check-iface <iface-file>")
     | [stdlib_root | _] ->
-        run_batch(stdlib_root, 1, "", Nil)
+        run_batch(stdlib_root, 1, "", Nil, failed)
     | _ ->
-        print("ERROR: usage: compile-driver [--phase bundle|check|lower|recheck|scan-info|dump-qualify | --emit-ir [--debug] | --use-ir-codegen | --emit-iface <module-name> | --check-iface <iface-file>] <stdlib-root> <file>...")
+        report_error(failed, "ERROR: usage: compile-driver [--phase bundle|check|lower|recheck|scan-info|dump-qualify | --emit-ir [--debug] | --use-ir-codegen | --emit-iface <module-name> | --check-iface <iface-file>] <stdlib-root> <file>...")
+    code <- ref_read(failed)
+    code

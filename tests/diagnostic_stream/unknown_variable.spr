@@ -1,0 +1,10 @@
+# Fixture for `just diagnostic-stream-smoke`: a callee that resolves to nothing.
+#
+# `sprout_dss_undefined` is deliberately neither a runtime builtin nor a compiler
+# intrinsic. That distinction is the whole point — `int_to_string` and `print`
+# ARE resolvable importlessly (ir_header emits their declares unconditionally),
+# which is why the old loud-fail-smoke probe could never fail.
+#
+# Expected: `ERROR: check: Unknown variable` on stderr, nonzero exit, no IR.
+fn main() -> Unit !{IO} =
+  print(int_to_string(sprout_dss_undefined(5)))
