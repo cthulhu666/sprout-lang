@@ -442,3 +442,60 @@ And `stdlib.net.tcp_connect` is now **exported**, completing the raw-handle fami
 express — handing a socket to a *spawned* task, i.e. capture by an escaping closure (M4.4) — must
 still be able to speak TCP. `stdlib/http_server.sprout` and
 `tests/task_io_smoke/concurrent_read.spr` both sit on that path and get no release enforcement.
+
+## 17. Post-merge review: what M4.5 shipped broken (2026-08-07)
+
+A high-effort adversarial review of the merged change found **ten** defects, six of them
+soundness holes that let a linear value be consumed twice or leaked with no diagnostic. All are
+fixed in the follow-up; each has a regression fixture. Recording them because the *pattern* is more
+instructive than any individual bug.
+
+**The dominant root cause: the mode lives in a name-keyed side table, not in the type.**
+`@parammode:<name>` is only consultable when the callee is a literal top-level name. Every other
+callee shape loses the mode and silently reads as *consuming*, which **discharges the caller's
+obligation while the real callee only borrows** — so the resource leaks and nothing is reported.
+Two reachable instances:
+
+- a `borrowing` function passed as a first-class value (`apply(peek, f)`);
+- a `borrowing` parameter on an **instance method**, since a call dispatches through the class
+  signature, which carries no modifier.
+
+Both are now rejected outright, which is the honest v0 answer: the real fix is to put the mode in
+the function type, and that is a type-system change (it must survive unification, generalization
+and the iface codec). Note this class was *unreachable before M4.5* — pre-borrowing, every
+`(File) -> Int` had to consume its argument.
+
+**Second cause: `LinScope` appended instead of shadowing.** A non-linear binder shadowing a linear
+one left the stale entry, so a use of the *shadow* was credited as a consume of the shadowed
+resource: `fn shadow(c: File) -> Int = do { let c = 5; c + 1 }` type-checked with `c` never
+released. Fixed by making every binder introduction shadow — do-`let`, pattern binders (all of
+them, not only the linear ones) and lambda parameters.
+
+**Third: the field-access half of "borrowed contents" was never closed.** M4.5 found this hole
+during implementation, wrote `borrow_field_of_borrow.spr` for the `match` form, fixed that path —
+and left the field form open, because the fixture used `match`. `release(w.inner)` on a
+`borrowing Wrap` was a double consume and `fn take(w: borrowing Wrap) -> File = w.inner` laundered
+an owned value out of a borrow. A fix verified only by the test that motivated it is not verified.
+
+**Fourth: do-blocks were assumed unconditional.** A `Maybe`/`Result` block short-circuits on the
+first failing `<-` (§11), so a trailing `close` counted as executed does not run on the error
+path. This is exactly the session shape M4.5 makes idiomatic. The block's own type discriminates:
+`Result … !{IO}` short-circuits, `Unit !{IO}` does not.
+
+**Fifth, and the cheapest lesson: `mask_is_borrow` used `str_slice(mask, k, k + 1)`.** str_slice's
+third argument is a **length**, not an end index, so it read one character only when `k` was the
+first or last parameter; every middle `borrowing` position degraded to consuming. Every borrowing
+parameter in `stdlib/net.sprout` sits at index 0, so the entire M4.5 suite passed over a broken
+mask reader — **the tests were shaped by the implementation rather than by the spec.**
+
+Also fixed: `extern fn` modifiers were never validated (the guard only runs over function
+*bodies*, and an extern has none); a module-level linear `let` at a borrowing position was
+rejected with "must be a variable reference", which contradicted the source; and the
+type-variable rejection reused the non-linear-parameter message, telling authors to make `a`
+linear when that is not expressible.
+
+**One review finding did not reproduce.** A local shadowing a `borrowing` function was reported as
+inheriting its `@parammode:` mask. It does not: the bundler qualifies top-level names
+(`main.peek`), so a local can never collide — the claimed discriminator behaves identically either
+way. The latent case is a local shadowing a *prelude* borrowing function, since the prelude owns
+unqualified names; there are none today, and the shadowing fix above closes it regardless.

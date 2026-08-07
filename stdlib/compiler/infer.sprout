@@ -4766,15 +4766,14 @@ fn typecheck_decl(
                     decl_constraints),
                   global_env_dict(env)))),
               new_env_ftv)
-  | ast.ExternFnDecl name params ret_type_maybe effects_maybe _ ->
-      match dict_get(name, global_env_dict(env)) with
-      | Just _ ->
-          TypedDeclOk(typed_ast.TExternFnDecl(name, params, ret_type_maybe, effects_maybe), env, env_ftv)
-      | Nothing ->
-          TypedDeclOk(
-            typed_ast.TExternFnDecl(name, params, ret_type_maybe, effects_maybe),
-            GlobalEnv(dict_set(name, scheme_from_fn_parts(params, ret_type_maybe, effects_maybe, alias_env), global_env_dict(env))),
-            env_ftv)
+  | ast.ExternFnDecl name params ret_type_maybe effects_maybe ext_pos ->
+      # An extern has no BODY, so `fn_linear_gate` (and with it the
+      # "modifier only on a linear parameter" guard) never ran on one: an FFI
+      # author could write `borrowing` on a non-linear extern parameter, see it
+      # compile, and read it as an ownership guarantee the compiler was not
+      # making. Validate the modifiers here, where the param types resolve.
+      # Regression: tests/conformance/type_error/borrow_extern_non_linear.
+      extern_decl_result(name, params, ret_type_maybe, effects_maybe, ext_pos, alias_env, env, env_ftv)
   | ast.LetDecl name expr anno let_pos ->
       do
         r <- typecheck_expr(state, global_env_dict(env), subst, eff_subst, expr)
@@ -5380,6 +5379,30 @@ fn tuple_has_const(items: List types.Type) -> Bool =
 # still REJECT `borrowing`/`consuming` written on a non-linear parameter, and such
 # a program never trips program_has_linear. The extra test walks a handful of
 # params and is only reached when the first disjunct already failed.
+# An extern's declared parameter types, built the same way its scheme is, so the
+# modifier guard sees exactly the types callers will see.
+fn extern_decl_result(name: String, params: List ast.Param, ret_type_maybe: Maybe ast.TypeExpr,
+                      effects_maybe: Maybe (List String), ext_pos: source.SourcePos,
+                      alias_env: Dict types.Type, env: GlobalEnv,
+                      env_ftv: List String) -> TypedDeclResult =
+  match linear_check.check_signature_modes(params,
+          types.scheme_type(scheme_from_fn_parts(params, ret_type_maybe, effects_maybe, alias_env)),
+          ext_pos, global_env_dict(env)) with
+  | linear_check.LinFail lp lm -> TypedDeclErr(lp, lm)
+  | linear_check.LinPass -> extern_decl_ok(name, params, ret_type_maybe, effects_maybe, alias_env, env, env_ftv)
+
+fn extern_decl_ok(name: String, params: List ast.Param, ret_type_maybe: Maybe ast.TypeExpr,
+                  effects_maybe: Maybe (List String), alias_env: Dict types.Type,
+                  env: GlobalEnv, env_ftv: List String) -> TypedDeclResult =
+  match dict_get(name, global_env_dict(env)) with
+  | Just _ ->
+      TypedDeclOk(typed_ast.TExternFnDecl(name, params, ret_type_maybe, effects_maybe), env, env_ftv)
+  | Nothing ->
+      TypedDeclOk(
+        typed_ast.TExternFnDecl(name, params, ret_type_maybe, effects_maybe),
+        GlobalEnv(dict_set(name, scheme_from_fn_parts(params, ret_type_maybe, effects_maybe, alias_env), global_env_dict(env))),
+        env_ftv)
+
 fn fn_linear_gate(params: List ast.Param, s2: Dict types.Type, inst_type: types.Type,
                   typed_body: typed_ast.TypedExpr, fn_pos: source.SourcePos,
                   env: Dict types.Scheme) -> linear_check.LinCheck =
@@ -5751,6 +5774,16 @@ fn finish_instance_method(name: String, params: List ast.Param, ret_maybe: Maybe
                           eff_maybe: Maybe (List String), body_env: Dict types.Scheme,
                           s2: Dict types.Type, inst_type: types.Type,
                           typed_body: typed_ast.TypedExpr, env: Dict types.Scheme) -> InstanceMethodResult =
+  match linear_check.method_modifier_error(params) with
+  | Just bad ->
+      InstanceMethodErr(typed_ast.typed_expr_pos(typed_body), linear_check.method_modifier_message(bad))
+  | Nothing ->
+      finish_instance_method_checked(name, params, ret_maybe, eff_maybe, body_env, s2, inst_type, typed_body, env)
+
+fn finish_instance_method_checked(name: String, params: List ast.Param, ret_maybe: Maybe ast.TypeExpr,
+                                  eff_maybe: Maybe (List String), body_env: Dict types.Scheme,
+                                  s2: Dict types.Type, inst_type: types.Type,
+                                  typed_body: typed_ast.TypedExpr, env: Dict types.Scheme) -> InstanceMethodResult =
   match fn_linear_gate(params, s2, inst_type, typed_body, typed_ast.typed_expr_pos(typed_body), env) with
   | linear_check.LinFail lp lm -> InstanceMethodErr(lp, lm)
   | linear_check.LinPass ->

@@ -1,0 +1,11 @@
+module main
+
+# REVIEW FINDING. `first_bad_modifier` is reachable only from `check_fn_linear`,
+# which runs over function BODIES -- an extern has none, so its modifiers were
+# never validated. An FFI author could write `borrowing` on a non-linear extern
+# parameter, see it compile, and read it as an ownership guarantee the compiler
+# was not making.
+
+extern fn probe_len(s: borrowing String) -> Int
+
+fn main() -> Unit !{IO} = print(to_string(probe_len("hi")))

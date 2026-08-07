@@ -829,15 +829,32 @@ a field access or as a `match` scrutinee. Every other reference consumes. So
   order and is fine. Evaluation order is the one fixed in §6.
 - **Branch convergence** applies to consumes only; arms need not agree on borrows.
 - **Borrowed contents** — destructuring a borrowed value binds its linear fields
-  as borrowed too, so they cannot be consumed out from under the owner.
+  as borrowed too, so they cannot be consumed out from under the owner. For the
+  same reason a **linear field may not be read out of a borrowed value**
+  (`w.inner` where `w: borrowing Wrap` and `inner` is linear): the result would be
+  an owned value its real owner will still release. A non-linear field reads
+  freely.
+- **A consume may not follow a fallible bind.** In a block whose type is `Maybe`
+  or `Result`, a `<-` bind short-circuits (§11), so steps after it are
+  conditional. Consuming a binding from outside the block there would be skipped
+  on the failure path and the value leaked, so it is rejected; consume before the
+  first `<-`, or branch explicitly with `match`. Effectful blocks (`!{IO}`) run
+  every step and are unaffected.
 - A `borrowing` parameter may not be consumed or returned.
 - An argument at a `borrowing` position must be a **variable reference**; a
   freshly-built linear value there would never be consumed.
+- **A function with a `borrowing` parameter may not be used as a value.** The mode
+  is not part of the function type, so it would be lost at an indirect call and
+  the argument would silently read as consuming. Call such a function directly.
+- **Modifiers are not supported on class or instance methods**, since a call
+  dispatches through the class signature, which carries no modifier.
 - The modifiers are **erased**: they reach no IR pass and emitted code is
   byte-identical with and without them.
 
 **A modifier on a non-linear parameter is an error**, as is one on a
-type-variable parameter. This diverges deliberately from Swift, whose
+type-variable parameter (reported distinctly: linearity is per-declaration, so
+whether a type variable's argument is linear is not knowable at the declaration).
+`extern fn` signatures are checked the same way even though they have no body. This diverges deliberately from Swift, whose
 `borrowing`/`consuming` apply to any parameter because under ARC they still change
 retain/release traffic. Sprout has a tracing GC and erases the modifiers, so on a
 non-linear parameter they would carry no meaning at all; rejecting them keeps them

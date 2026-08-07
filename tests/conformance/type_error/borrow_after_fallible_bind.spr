@@ -1,0 +1,27 @@
+module main
+
+# REVIEW FINDING. A do-block whose type is Result/Maybe SHORT-CIRCUITS on the
+# first failing `<-` (spec-v0.md 6, left-biased fail-fast), but the analysis
+# treated every step as unconditionally sequential -- so it counted the trailing
+# `close` as executed when on the error path it never runs. The socket leaks for
+# the lifetime of the process, in exactly the shape M4.5 makes idiomatic.
+#
+# A consume of a binding introduced OUTSIDE the block cannot sit after a fallible
+# bind. Consume before the first fallible bind, or branch explicitly with `match`.
+
+type linear File = File Int
+
+fn release(f: consuming File) -> Int = match f with | File n -> n
+fn step(f: borrowing File) -> Result Int Int = Ok(1)
+
+fn talk(f: File) -> Result Int Int =
+  do
+    a <- step(f)
+    b <- step(f)
+    let _ = release(f)
+    Ok(a + b)
+
+fn main() -> Unit !{IO} =
+  match talk(File(1)) with
+  | Ok n -> print(to_string(n))
+  | Err _ -> print("err")

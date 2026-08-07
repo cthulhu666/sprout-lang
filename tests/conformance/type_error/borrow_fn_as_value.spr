@@ -1,0 +1,21 @@
+module main
+
+# REVIEW FINDING. `borrowing` lived in a name-keyed side table rather than in the
+# function TYPE, so passing a borrowing function as a first-class value erased
+# the mode: at the indirect call `callee_mask` found nothing, the argument was
+# treated as CONSUMED, the obligation was discharged -- and `peek` never releases
+# anything, so the resource leaked with no diagnostic.
+#
+# v0 cannot express "a function that borrows" as a type, so it rejects using such
+# a function as a value. Call it directly instead.
+
+type linear File = File Int
+
+fn peek(f: borrowing File) -> Int = 0
+fn release(f: consuming File) -> Int = match f with | File n -> n
+
+fn apply(g: (File) -> Int, f: File) -> Int = g(f)
+
+fn use_it(f: File) -> Int = apply(peek, f)
+
+fn main() -> Unit !{IO} = print(to_string(use_it(File(1))))

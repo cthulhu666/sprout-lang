@@ -1,0 +1,25 @@
+module main
+
+# REVIEW FINDING (M4.5 post-merge). Reading a LINEAR field out of a `borrowing`
+# value yields an OWNED linear value, so the borrower can release something its
+# caller still owns and will release again -- a double consume.
+#
+# borrow_field_of_borrow.spr pins the `match` form of this; the M4.5 fix covered
+# only that path (`expr_is_borrowed_binding` is consulted for a match scrutinee
+# and nowhere else), so the field-access form stayed open. Extracting a linear
+# field through a borrow needs the FIELD itself to be a borrow, which v0 cannot
+# express -- so v0 rejects the extraction.
+
+type linear File = File Int
+type linear Wrap = (inner: File, tag: Int)
+
+fn release(f: consuming File) -> Int = match f with | File n -> n
+fn release_wrap(w: consuming Wrap) -> Int = release(w.inner)
+
+fn steal(w: borrowing Wrap) -> Int = release(w.inner)
+
+fn main() -> Unit !{IO} =
+  do
+    let w = Wrap(inner = File(1), tag = 2)
+    let a = steal(w)
+    print(to_string(a + release_wrap(w)))
