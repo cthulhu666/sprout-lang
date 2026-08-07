@@ -1021,9 +1021,21 @@ and `docs/linear-types-m4.2-enforcement-2026-08-06.md`. Deferred, in the order t
 
 - [ ] `P2` **Higher-order linearity (M4.4).** M4.2 loud-rejects a linear binding captured by a
   lambda and any linear lambda parameter (`linear_check.lin_lambda`), because a closure may run
-  0..n times and its call count is untracked. Lift this: track linear captures against closure
-  arity/call-count, or adopt a borrowing form (see **Borrowing** below). Known-hard (Linear Haskell
-  shipped it incomplete).
+  0..n times and its call count is untracked. M4.5 borrowing did **not** lift this and extends the
+  same rejection to borrowed values: whether a captured borrow is sound depends on whether the
+  closure escapes and outlives the consume, and Sprout has no escaping/non-escaping distinction.
+  Lift this by tracking linear captures against closure arity/call-count, or by adding a
+  non-escaping-closure notion. Known-hard (Linear Haskell shipped it incomplete).
+
+  Everything below is gated on this one item, so it is filed once here rather than four times:
+  - **`stdlib/http_server.sprout`** cannot use the linear `TcpConnection`. Its accept loop
+    (`:476`, `:493`) does `task_spawn(scope, \_ -> handle_connection(conn, handler))`, and
+    `handle_connection` calls `tcp_close(conn)` — an ownership *transfer into a closure*, which is
+    not a borrow and is unreachable under either design option. It stays on raw `Int` handles with
+    no release enforcement, as does `tests/task_io_smoke/concurrent_read.spr`.
+  - **The combinator-over-a-borrow form**, `list_each(xs, \x -> write(conn, x))`.
+  - **A linear `Scope`** — a `Scope` only ever arrives as a lambda parameter, so it is the captured
+    case on top of the multiple-use case (`docs/linear-borrowing-v0.md` §2).
 - [x] **Pattern-bound linear vars (match var-pattern alias + viral field) — DONE** (2026-08-06,
   post-review soundness fix). `linear_check.pattern_linear_binders` recovers each pattern-bound
   variable's type (structurally matching the pattern against the value type) and tracks the linear
@@ -1048,11 +1060,19 @@ and `docs/linear-types-m4.2-enforcement-2026-08-06.md`. Deferred, in the order t
   so it silently escapes consume-once (surfaced landing linear `Task`; `test_task_result.drop_unawaited`
   uses explicit `detach` rather than relying on this). Fix: in `lin_do`/`scope_consumed`, treat a
   `TDoExprStep`/trailing expression whose *type* is linear as an unconsumed obligation.
-- [ ] `P3` **Imported linear-type annotation resolution wart.** Annotating a user param with an
-  imported linear type's bare name (`fn f(t: Task a)` after `import stdlib.task (Task)`) fails with
-  `Type mismatch: stdlib.task.Task vs Task` — inference of the same type works, so linear `Task` users
-  must currently leave handle params unannotated. Pre-existing (affects any imported ADT annotation,
-  not linearity-specific); surfaced while writing linear `Task` tests.
+- [x] **Imported linear-type annotation resolution wart — DONE** (2026-08-07, with M4.5 borrowing).
+  Annotating a user param with an imported linear type's bare name failed with
+  `Type mismatch: stdlib.task.Task vs Task`. **The old diagnosis here was wrong on both counts:** it
+  is *not* a general imported-ADT problem (a non-linear imported ADT annotation always worked) and it
+  was linearity-specific. Root cause: `bundler.process_line` had a prefix branch for
+  `"export type alias "` but none for `"export type linear "`, so `export type linear Foo` fell into
+  the plain `"export type "` branch and `read_ident_at(src, i + 12)` read the contextual marker word
+  **`linear`** as the type's name. Every module declaring a linear type therefore exported a phantom
+  type called `linear` and never exported the real one, so `is_type_exported` was false and no
+  annotation naming it could be qualified to its canonical form. This was a hard blocker for
+  borrowing, not a wart: a modifier requires an annotation, so `fn f(c: borrowing TcpConnection)` was
+  unwritable outside the defining module. Regression:
+  `tests/stdlib/test_linear_cross_module.spr` `consume_annotated`.
 - [x] **Enforcement at top-level `let` and instance-method bodies — DONE** (2026-08-06). Wired via
   `letdecl_linear_gate` (LetDecl) and `fn_linear_gate` in `check_instance_method`.
 - [ ] `P3` **Containment virality.** Linearity is per-declaration: a record that merely *contains*
@@ -1064,26 +1084,34 @@ and `docs/linear-types-m4.2-enforcement-2026-08-06.md`. Deferred, in the order t
   cannot be expressed as a conformance fixture. Cross-module enforcement is verified manually and
   by the positive `tests/stdlib/test_linear_cross_module.spr`; add a package-root-aware reject
   harness (or extend `_test-reject` with an optional `--package-root`) to automate the negative.
-- [ ] `P3` **Linear-record ergonomics.** A linear record can only be read one field or passed once
-  (`p.x + p.y` is a reuse — records have no destructuring pattern). Record patterns or a field-read
-  borrow (see **Borrowing** below) would lift this. Blocked on either a `RecordPattern` in the
-  language or the borrowing mechanism.
-- [ ] `P2` **Borrowing (read-without-consume) — the shared enabler.** The single mechanism that
-  unblocks linear-record ergonomics (P3 above) and partly the higher-order item (P2 above); both
-  name it as their lifter. Introduce a second category of *use* — a **borrow** (a read that does
-  not count against the once-only budget), distinct from a **consume** (transfers ownership, happens
-  once). Motivation: linearity guards against double-*free* / use-after-*consume* of a resource; a
-  pure field read is neither, but M4.2's single-category analysis can't tell reads from consumes and
-  so conservatively rejects them. Two granularities:
-  - **Narrow (field-read borrow)** — smallest useful step: `p.x` (a `TGetField` whose base is a
-    linear binding) *borrows* `p` rather than consuming it; `p` is consumed only when it appears as
-    a bare value (argument / return / bind). Makes `p.x + p.y` legal. Requires, beyond M4.2's flat
-    consumed-set: a borrow-vs-consume distinction, a relaxed leak rule (a borrow-only lifetime is not
-    a leak), and use-after-consume ordering (no borrow after the consume). Localized to
-    `linear_check`.
-  - **General (ownership / borrow regions)** — full read/mutable borrows over delineated scopes
-    (Austral borrow regions; Rust `&` / `&mut`). Large; warrants its own design doc when picked up.
-  Prior art: Austral borrowing, Rust references.
+- [x] **Borrowing (read-without-consume) — DONE as M4.5** (2026-08-07). Swift-style
+  `borrowing`/`consuming` parameter modifiers (design note Option D) plus the field-read borrow.
+  Design + the five implementation deltas: `docs/linear-borrowing-v0.md` (§16 is authoritative where
+  it conflicts with the pre-approval sections); normative text in `docs/spec-v0.md` §5.8.
+  `stdlib.net.TcpConnection`/`TcpListener` are now `type linear`: reads/writes borrow, `close`
+  consumes, and omitting `close` is a compile error. Migrating the five `tests/task_io_smoke` users
+  found that four of them were **leaking their connections outright**.
+
+  Beyond the note's plan, this required (a) a **borrowed set alongside the consumed set plus
+  sequential ordering** — M4.2's order-insensitive disjointness check could not see
+  `close(conn); write(conn, …)`, since the borrow records no consume; and (b) treating a
+  destructured **borrowed value's linear fields as borrowed**, closing a double-consume hole the
+  note did not consider. `stdlib.net.tcp_connect` was exported to complete the raw-handle escape
+  hatch for shapes borrowing cannot express.
+
+  **Still open, split out below:** the owned-record case (P3), and everything gated on M4.4.
+
+- [ ] `P3` **Linear-record ergonomics for OWNED records.** M4.5 lifted this only for `borrowing`
+  parameters: `p.x + p.y` is legal for `p: borrowing Pos` and remains a reuse for an owned `p`. The
+  field-read borrow is keyed on the binding's mode, not on `TGetField` syntax, and deliberately so —
+  making every field read a borrow breaks `fn get_x(p: Pos) = p.x` (a passing positive test), because
+  a field read *is* an owned record's only consume, and relaxing the leak rule to compensate would
+  stop an unclosed socket being a leak, which is the entire point of the feature. The owned case
+  therefore needs a real consuming exit: a `RecordPattern` in the language. Blocked on that.
+
+- [ ] `P3` **`&`/`&mut` (shared-XOR-mutable) split.** v0 ships borrow-vs-consume only; a
+  read-vs-write refinement is a later increment. `docs/linear-borrowing-v0.md` §2, §13.
+
 
 ### Linear-typed Sprout-IR (Model C Milestone 5) — DEFERRED (2026-08-07)
 

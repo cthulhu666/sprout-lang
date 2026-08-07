@@ -52,6 +52,39 @@ fn mult_is_linear(m: ast.Multiplicity) -> Bool =
   | ast.Linear -> true
   | ast.Unrestricted -> false
 
+# The ParamMode actually present on the DECODED node's first parameter (M4.5).
+# Structural, not encode-string equality, for the same reason as the multiplicity
+# check above. This is the cross-module contract for borrowing: FnDecl serializes
+# its whole param list, so an imported `stdlib.net.write_all` must arrive with its
+# `borrowing` intact or every caller outside net.sprout silently reverts to
+# consuming semantics. See docs/linear-borrowing-v0.md.
+fn decoded_first_param_mode(d: ast.Decl) -> String =
+  match iface_codec.decode_ast_decl(iface_codec.encode_ast_decl(d)) with
+  | Nothing -> "decode-failed"
+  | Just d2 ->
+      match d2 with
+      | ast.FnDecl _ params _ _ _ _ _ -> first_mode_tag(params)
+      | ast.ExternFnDecl _ params _ _ _ -> first_mode_tag(params)
+      | _ -> "not-fn"
+
+fn first_mode_tag(params: List ast.Param) -> String =
+  match params with
+  | [] -> "no-param"
+  | [p | _] ->
+      match p with
+      | ast.Param _ _ mode -> mode_tag(mode)
+
+fn mode_tag(m: ast.ParamMode) -> String =
+  match m with
+  | ast.ModeDefault -> "default"
+  | ast.ModeBorrowing -> "borrowing"
+  | ast.ModeConsuming -> "consuming"
+
+fn linear_fn_decl(mode: ast.ParamMode) -> ast.Decl =
+  ast.FnDecl("useConn",
+    Cons(ast.Param("conn", Just(ast.TypeName("TcpConnection")), mode), Nil),
+    Just(ast.TypeName("Int")), Nothing, Nil, ast.IntExpr(0, pos0()), pos0())
+
 fn rt_program(prog: ast.Program) -> Bool =
   match iface_codec.decode_ast_program(iface_codec.encode_ast_program(prog)) with
   | Nothing -> false
@@ -147,13 +180,13 @@ fn main() -> Unit !{IO} =
 
     assert_true(state, "LambdaExpr roundtrip",
       rt_expr(ast.LambdaExpr(
-        Cons(ast.Param("x", Nothing), Nil),
+        Cons(ast.Param("x", Nothing, ast.ModeDefault), Nil),
         ast.VarExpr("x", pos0()),
         pos0())))
 
     assert_true(state, "LambdaExpr with type annotation roundtrip",
       rt_expr(ast.LambdaExpr(
-        Cons(ast.Param("x", Just(ast.TypeName("Int"))), Nil),
+        Cons(ast.Param("x", Just(ast.TypeName("Int")), ast.ModeDefault), Nil),
         ast.BinaryExpr("+", ast.VarExpr("x", pos0()), ast.IntExpr(1, pos0()), pos0()),
         pos0())))
 
@@ -257,7 +290,7 @@ fn main() -> Unit !{IO} =
 
     assert_true(state, "FnDecl roundtrip",
       rt_decl(ast.FnDecl("myFn",
-        Cons(ast.Param("x", Just(ast.TypeName("Int"))), Nil),
+        Cons(ast.Param("x", Just(ast.TypeName("Int")), ast.ModeDefault), Nil),
         Just(ast.TypeName("Int")),
         Nothing,
         Nil,
@@ -266,7 +299,7 @@ fn main() -> Unit !{IO} =
 
     assert_true(state, "FnDecl with effects roundtrip",
       rt_decl(ast.FnDecl("printSomething",
-        Cons(ast.Param("s", Just(ast.TypeName("String"))), Nil),
+        Cons(ast.Param("s", Just(ast.TypeName("String")), ast.ModeDefault), Nil),
         Just(ast.TypeName("Unit")),
         Just(Cons("IO", Nil)),
         Nil,
@@ -275,7 +308,7 @@ fn main() -> Unit !{IO} =
 
     assert_true(state, "ExternFnDecl roundtrip",
       rt_decl(ast.ExternFnDecl("myExtern",
-        Cons(ast.Param("x", Just(ast.TypeName("Int"))), Nil),
+        Cons(ast.Param("x", Just(ast.TypeName("Int")), ast.ModeDefault), Nil),
         Just(ast.TypeName("Int")),
         Nothing,
         pos0())))
@@ -312,6 +345,17 @@ fn main() -> Unit !{IO} =
         Cons(ast.TypeConstructor("PlainFile", Cons(ast.TypeName("Int"), Nil), Nil, Nil), Nil),
         Nil, ast.Unrestricted, pos0())))
 
+    # Parameter ownership modes must SURVIVE the codec too (M4.5). Without this,
+    # `borrowing` would hold inside net.sprout and silently revert to consuming
+    # for every importer — the failure would look like a spurious reuse error at
+    # the call site, far from the cause.
+    assert_true(state, "borrowing param mode survives codec",
+      decoded_first_param_mode(linear_fn_decl(ast.ModeBorrowing)) == "borrowing")
+    assert_true(state, "consuming param mode survives codec",
+      decoded_first_param_mode(linear_fn_decl(ast.ModeConsuming)) == "consuming")
+    assert_true(state, "unmodified param stays default through codec",
+      decoded_first_param_mode(linear_fn_decl(ast.ModeDefault)) == "default")
+
     assert_true(state, "LetDecl roundtrip",
       rt_decl(ast.LetDecl("pi", ast.IntExpr(3, pos0()), Nothing, pos0())))
 
@@ -319,8 +363,8 @@ fn main() -> Unit !{IO} =
       rt_decl(ast.ClassDecl("Eq",
         Cons("a", Nil),
         Cons(ast.ClassMethodSig("eq",
-          Cons(ast.Param("x", Just(ast.TypeName("a"))),
-            Cons(ast.Param("y", Just(ast.TypeName("a"))), Nil)),
+          Cons(ast.Param("x", Just(ast.TypeName("a")), ast.ModeDefault),
+            Cons(ast.Param("y", Just(ast.TypeName("a")), ast.ModeDefault), Nil)),
           ast.TypeName("Bool"),
           Nothing), Nil),
         Nil,
@@ -331,7 +375,7 @@ fn main() -> Unit !{IO} =
         ast.TypeConstraint("Eq", Cons(ast.TypeName("Int"), Nil)),
         Nil,
         Cons(ast.InstanceMethodImpl("eq",
-          Cons(ast.Param("x", Nothing), Cons(ast.Param("y", Nothing), Nil)),
+          Cons(ast.Param("x", Nothing, ast.ModeDefault), Cons(ast.Param("y", Nothing, ast.ModeDefault), Nil)),
           Nothing,
           Nothing,
           ast.BinaryExpr("==", ast.VarExpr("x", pos0()), ast.VarExpr("y", pos0()), pos0())),
@@ -381,7 +425,7 @@ fn main() -> Unit !{IO} =
         ast.LetDecl("answer", ast.IntExpr(42, pos0()), Nothing, pos0()),
         Cons(
           ast.FnDecl("double",
-            Cons(ast.Param("x", Just(ast.TypeName("Int"))), Nil),
+            Cons(ast.Param("x", Just(ast.TypeName("Int")), ast.ModeDefault), Nil),
             Just(ast.TypeName("Int")),
             Nothing,
             Nil,

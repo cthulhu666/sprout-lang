@@ -31,7 +31,7 @@ fn maybe_decl() -> typed_ast.TypedDecl =
 # fn mvget(v, i) = vector_get(v, i)        -- Maybe-returning Sprout wrapper
 fn mvget_decl() -> typed_ast.TypedDecl =
   typed_ast.TFnDecl("mvget",
-    Cons(ast.Param("v", Nothing), Cons(ast.Param("i", Nothing), Nil)),
+    Cons(ast.Param("v", Nothing, ast.ModeDefault), Cons(ast.Param("i", Nothing, ast.ModeDefault), Nil)),
     Nothing, Nothing, Nil,
     typed_ast.TCall(
       typed_ast.TVar("vector_get", types.TConst(types.type_id("Int")), no_pos()),
@@ -45,7 +45,7 @@ fn mvget_decl() -> typed_ast.TypedDecl =
 #   | Nothing -> 0
 fn probe_decl() -> typed_ast.TypedDecl =
   typed_ast.TFnDecl("probe",
-    Cons(ast.Param("v", Nothing), Cons(ast.Param("i", Nothing), Nil)),
+    Cons(ast.Param("v", Nothing, ast.ModeDefault), Cons(ast.Param("i", Nothing, ast.ModeDefault), Nil)),
     Nothing, Nothing, Nil,
     typed_ast.TMatch(
       typed_ast.TCall(

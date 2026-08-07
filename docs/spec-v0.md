@@ -741,9 +741,11 @@ prior art: `docs/coercions-and-literals-v1-draft.md` (Case A).
 ### 5.8 Linear types (Experimental)
 
 > **Experimental** — not part of normative v0. Syntax stabilized in Milestone 4.1;
-> consume-exactly-once enforcement in Milestone 4.2. Design rationale and the
-> deferred items live in `docs/linear-types-m4-scoping-2026-08-01.md` and
-> `docs/linear-types-m4.2-enforcement-2026-08-06.md`.
+> consume-exactly-once enforcement in Milestone 4.2; borrowing in Milestone 4.5.
+> Design rationale and the deferred items live in
+> `docs/linear-types-m4-scoping-2026-08-01.md`,
+> `docs/linear-types-m4.2-enforcement-2026-08-06.md` and
+> `docs/linear-borrowing-v0.md`.
 
 A type declaration may carry the contextual modifier `linear`, written between
 `type` and the type name (mirroring `type alias`). It applies to ADT and record
@@ -775,14 +777,80 @@ checked on every control-flow path:
 
 A linear ADT is consumed once by matching it (`match f with | File n -> …`) or by
 passing it to a function. A linear record is read via field access, which consumes
-it — so a linear record supports reading a single field or being passed once;
-reading two fields (`p.x + p.y`) is a reuse (records have no destructuring
-pattern). For a value meant to be read freely, do not declare it `linear`.
+it — so an *owned* linear record supports reading a single field or being passed
+once; reading two fields (`p.x + p.y`) is a reuse (records have no destructuring
+pattern). A `borrowing` parameter lifts that restriction (see below). For a value
+meant to be read freely, do not declare it `linear`.
+
+#### Borrowing (Milestone 4.5)
+
+A resource is often **acquire → use N times → release once**; a socket is read and
+written repeatedly, then closed. Strict use-exactly-once cannot express that at
+all — the first use would consume it. A **borrow** is a use that does *not* claim
+the value's one consuming use.
+
+A parameter whose type is linear may carry an ownership modifier between the `:`
+and the type:
+
+```
+export fn write(conn: borrowing TcpConnection, b: Bytes) -> Result … !{IO} = …
+export fn close(conn: consuming TcpConnection)          -> Unit       !{IO} = …
+
+conn <- connect(host, port)
+_    <- write(conn, request)   # borrows; conn stays live and still owes its use
+line <- read(conn, 128)        # borrows again
+close(conn)                    # the single consuming use
+```
+
+- `borrowing` — a non-consuming use. The consume obligation stays with the
+  **caller**, so the parameter may be used zero or many times inside the function
+  and must **not** be consumed there.
+- `consuming` — the explicit spelling of the default. An unmodified linear
+  parameter is already consuming, so this is redundant, but it documents the
+  contract at an API boundary. No existing program changes meaning.
+
+Both are **contextual keywords**: `borrowing` and `consuming` remain ordinary
+identifiers everywhere else, including as type names (`x: borrowing` is the type
+named `borrowing`, since no type follows the word).
+
+**Where a use is a borrow.** A reference to a linear binding is a borrow when it
+sits at a `borrowing` parameter position, or when the binding it names is itself a
+`borrowing` parameter and the reference merely *reads through* it — as the base of
+a field access or as a `match` scrutinee. Every other reference consumes. So
+`p.x + p.y` is legal for `p: borrowing Pos` and remains a reuse for an owned `p`.
+
+**Rules.**
+
+- **Leak is unchanged and strict** — a borrow never discharges the once-only
+  obligation, so an omitted `close` is still rejected. That is the point of the
+  feature.
+- **Use after consume** — a borrow may not follow the consume along a path
+  (`close(conn); write(conn, …)` is rejected). Borrow-then-consume is the normal
+  order and is fine. Evaluation order is the one fixed in §6.
+- **Branch convergence** applies to consumes only; arms need not agree on borrows.
+- **Borrowed contents** — destructuring a borrowed value binds its linear fields
+  as borrowed too, so they cannot be consumed out from under the owner.
+- A `borrowing` parameter may not be consumed or returned.
+- An argument at a `borrowing` position must be a **variable reference**; a
+  freshly-built linear value there would never be consumed.
+- The modifiers are **erased**: they reach no IR pass and emitted code is
+  byte-identical with and without them.
+
+**A modifier on a non-linear parameter is an error**, as is one on a
+type-variable parameter. This diverges deliberately from Swift, whose
+`borrowing`/`consuming` apply to any parameter because under ARC they still change
+retain/release traffic. Sprout has a tracing GC and erases the modifiers, so on a
+non-linear parameter they would carry no meaning at all; rejecting them keeps them
+from reading as enforcement that is not there.
 
 **Deferred (rejected with a diagnostic, never silently accepted):**
 
 - Higher-order linearity — a linear binding captured by a lambda, and linear
-  lambda parameters, are not yet supported.
+  lambda parameters, are not yet supported. A **borrowed** value likewise may not
+  be captured by any lambda: soundness would depend on whether the closure escapes
+  and outlives the consume, and Sprout has no escaping/non-escaping distinction.
+  This is why the combinator form (`list_each(xs, \x -> write(conn, x))`) and the
+  spawn-a-handler server shape are still out of reach.
 - Containment virality — linearity is *per-declaration*: a record that merely
   contains a linear field is not itself linear (contrast Austral).
 

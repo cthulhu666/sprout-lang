@@ -280,6 +280,21 @@ fn process_line(src: String, bytes: Bytes, i: Int, nl: Int, mod_name: String, ex
     match read_ident_at(src, bytes, i + 18) with
     | ("", _) -> (mod_name, exported, ctor_types)
     | (name, _) -> (mod_name, Cons(name, exported), ctor_types)
+  # `export type linear Foo = ...` must be checked BEFORE the plain
+  # `export type ` prefix, exactly as `export type alias ` is. Without this the
+  # generic branch reads the contextual marker word `linear` as the type's name,
+  # so the module exports a phantom type called `linear` and never exports `Foo`
+  # at all — which silently disables qualification of every annotation naming it
+  # (`Type mismatch: mod.Foo vs Foo`) and misroutes its constructor exports.
+  # Regression: tests/stdlib/test_linear_cross_module.spr `consume_annotated`.
+  else if str_starts_with_at_byte(src, i, "export type linear ") then
+    match read_ident_at(src, bytes, i + 19) with
+    | ("", _) -> (mod_name, exported, ctor_types)
+    | (name, i2) ->
+        if has_ctor_export(src, bytes, skip_type_params(src, bytes, i2)) then
+          (mod_name, Cons(name, exported), Cons(name, ctor_types))
+        else
+          (mod_name, Cons(name, exported), ctor_types)
   else if str_starts_with_at_byte(src, i, "export type ") then
     match read_ident_at(src, bytes, i + 12) with
     | ("", _) -> (mod_name, exported, ctor_types)
@@ -743,7 +758,7 @@ fn param_names(params: List ast.Param) -> List String =
   | Nil -> Nil
   | Cons p rest ->
       match p with
-      | ast.Param name _ -> Cons(name, param_names(rest))
+      | ast.Param name _ _ -> Cons(name, param_names(rest))
 
 fn pattern_bindings(p: ast.Pattern) -> List String =
   match p with
@@ -762,8 +777,11 @@ fn qualify_params(ctx: ResolveCtx, params: List ast.Param) -> List ast.Param =
   | Nil -> Nil
   | Cons p rest ->
       match p with
-      | ast.Param name Nothing -> Cons(ast.Param(name, Nothing), qualify_params(ctx, rest))
-      | ast.Param name (Just t) -> Cons(ast.Param(name, Just(qualify_type_expr(ctx, t))), qualify_params(ctx, rest))
+      # Qualification rewrites the TYPE only — `mode` must be carried through, or
+      # `borrowing`/`consuming` would be silently dropped for every bundled module
+      # (the compiler self-compiles through this path).
+      | ast.Param name Nothing mode -> Cons(ast.Param(name, Nothing, mode), qualify_params(ctx, rest))
+      | ast.Param name (Just t) mode -> Cons(ast.Param(name, Just(qualify_type_expr(ctx, t)), mode), qualify_params(ctx, rest))
 
 fn qualify_constraints(ctx: ResolveCtx, cs: List ast.TypeConstraint) -> List ast.TypeConstraint =
   match cs with

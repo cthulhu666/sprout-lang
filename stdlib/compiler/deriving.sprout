@@ -144,8 +144,8 @@ fn emit_eq_instance(name: String, type_params: List String, ctors: List ast.Type
     instance_constraints_for("Eq", type_params),
     [ast.InstanceMethodImpl(
        "eq",
-       [ast.Param("left", Just(instance_head_typeexpr(name, type_params))),
-        ast.Param("right", Just(instance_head_typeexpr(name, type_params)))],
+       [ast.Param("left", Just(instance_head_typeexpr(name, type_params)), ast.ModeDefault),
+        ast.Param("right", Just(instance_head_typeexpr(name, type_params)), ast.ModeDefault)],
        Just(ast.TypeName("Bool")),
        Nothing,
        build_eq_match_body(ctors, pos))],
@@ -212,7 +212,7 @@ fn emit_to_string_instance(name: String, type_params: List String, ctors: List a
     instance_constraints_for("ToString", type_params),
     [ast.InstanceMethodImpl(
        "to_string",
-       [ast.Param("value", Just(instance_head_typeexpr(name, type_params)))],
+       [ast.Param("value", Just(instance_head_typeexpr(name, type_params)), ast.ModeDefault)],
        Just(ast.TypeName("String")),
        Nothing,
        build_to_string_match_body(ctors, pos))],
@@ -317,8 +317,8 @@ fn emit_ord_instance(name: String, type_params: List String, ctors: List ast.Typ
     instance_constraints_for("Ord", type_params),
     [ast.InstanceMethodImpl(
        "compare",
-       [ast.Param("left", Just(instance_head_typeexpr(name, type_params))),
-        ast.Param("right", Just(instance_head_typeexpr(name, type_params)))],
+       [ast.Param("left", Just(instance_head_typeexpr(name, type_params)), ast.ModeDefault),
+        ast.Param("right", Just(instance_head_typeexpr(name, type_params)), ast.ModeDefault)],
        Just(ast.TypeName("Int")),
        Nothing,
        build_ord_match_body(ctors, pos))],
@@ -379,13 +379,13 @@ fn emit_enum_instance(name: String, type_params: List String, ctors: List ast.Ty
     Nil,
     [ast.InstanceMethodImpl(
        "ordinal",
-       [ast.Param("v", Just(instance_head_typeexpr(name, type_params)))],
+       [ast.Param("v", Just(instance_head_typeexpr(name, type_params)), ast.ModeDefault)],
        Just(ast.TypeName("Int")),
        Nothing,
        build_ordinal_body(ctors, pos)),
      ast.InstanceMethodImpl(
        "from_ordinal",
-       [ast.Param("n", Just(ast.TypeName("Int")))],
+       [ast.Param("n", Just(ast.TypeName("Int")), ast.ModeDefault)],
        Just(maybe_of(instance_head_typeexpr(name, type_params))),
        Nothing,
        build_from_ordinal_ladder(ctors, 0, pos))],
@@ -481,8 +481,8 @@ fn emit_record_eq_instance(name: String, type_params: List String, fields: List 
     instance_constraints_for("Eq", type_params),
     [ast.InstanceMethodImpl(
        "eq",
-       [ast.Param("left", Just(instance_head_typeexpr(name, type_params))),
-        ast.Param("right", Just(instance_head_typeexpr(name, type_params)))],
+       [ast.Param("left", Just(instance_head_typeexpr(name, type_params)), ast.ModeDefault),
+        ast.Param("right", Just(instance_head_typeexpr(name, type_params)), ast.ModeDefault)],
        Just(ast.TypeName("Bool")),
        Nothing,
        build_record_eq_body(fields, pos))],
@@ -523,7 +523,7 @@ fn emit_record_to_string_instance(name: String, type_params: List String, fields
     instance_constraints_for("ToString", type_params),
     [ast.InstanceMethodImpl(
        "to_string",
-       [ast.Param("value", Just(instance_head_typeexpr(name, type_params)))],
+       [ast.Param("value", Just(instance_head_typeexpr(name, type_params)), ast.ModeDefault)],
        Just(ast.TypeName("String")),
        Nothing,
        build_record_to_string_body(name, fields, pos))],
@@ -557,8 +557,8 @@ fn emit_record_ord_instance(name: String, type_params: List String, fields: List
     instance_constraints_for("Ord", type_params),
     [ast.InstanceMethodImpl(
        "compare",
-       [ast.Param("left", Just(instance_head_typeexpr(name, type_params))),
-        ast.Param("right", Just(instance_head_typeexpr(name, type_params)))],
+       [ast.Param("left", Just(instance_head_typeexpr(name, type_params)), ast.ModeDefault),
+        ast.Param("right", Just(instance_head_typeexpr(name, type_params)), ast.ModeDefault)],
        Just(ast.TypeName("Int")),
        Nothing,
        build_record_ord_chain(fields, 0, pos))],

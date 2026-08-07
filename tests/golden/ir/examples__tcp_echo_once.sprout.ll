@@ -9286,9 +9286,22 @@ entry:
 
 define i64 @stdlib.net.close(i64 %conn) {
 entry:
-  %t$0 = call i64 @stdlib.net.tcp_connection_handle(i64 %conn)
-  %t$1 = call i64 @tcp_close(i64 %t$0)
-  ret i64 %t$1
+  %t$0 = call i64 @sprout_tag(i64 %conn)
+  br label %arm_0_1
+arm_0_1:
+  %t$3 = add i64 0, 20
+  %t$4 = icmp eq i64 %t$0, %t$3
+  br i1 %t$4, label %body_0_1, label %arm_1_1
+body_0_1:
+  %t$5 = call i64 @sprout_field(i64 %conn, i64 0)
+  %t$6 = call i64 @tcp_close(i64 %t$5)
+  br label %join_1
+arm_1_1:
+  call void @sprout_abort_match()
+  unreachable
+join_1:
+  %t$2 = phi i64 [%t$6, %body_0_1]
+  ret i64 %t$2
 }
 
 define i64 @stdlib.net.listen_local(i64 %port) {
@@ -9314,9 +9327,22 @@ entry:
 
 define i64 @stdlib.net.close_listener(i64 %listener) {
 entry:
-  %t$0 = call i64 @stdlib.net.tcp_listener_handle(i64 %listener)
-  %t$1 = call i64 @tcp_close_listener(i64 %t$0)
-  ret i64 %t$1
+  %t$0 = call i64 @sprout_tag(i64 %listener)
+  br label %arm_0_1
+arm_0_1:
+  %t$3 = add i64 0, 21
+  %t$4 = icmp eq i64 %t$0, %t$3
+  br i1 %t$4, label %body_0_1, label %arm_1_1
+body_0_1:
+  %t$5 = call i64 @sprout_field(i64 %listener, i64 0)
+  %t$6 = call i64 @tcp_close_listener(i64 %t$5)
+  br label %join_1
+arm_1_1:
+  call void @sprout_abort_match()
+  unreachable
+join_1:
+  %t$2 = phi i64 [%t$6, %body_0_1]
+  ret i64 %t$2
 }
 
 define i64 @stdlib.net.utf8_error_message(i64 %err) {

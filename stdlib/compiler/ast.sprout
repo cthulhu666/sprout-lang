@@ -41,8 +41,23 @@ export fn pattern_pos(p: Pattern) -> source.SourcePos =
 
 # --- Function parameters ---
 
+# How a parameter takes ownership of a LINEAR argument (M4.5 borrowing). An enum
+# rather than a Bool for the same reason as `Multiplicity` below: the concept is
+# not binary, and an `inout`/mutable-borrow case is the natural future addition.
+#
+# ModeDefault and ModeConsuming mean the same thing to the linear checker — passing
+# a linear value IS a consume, so an unmodified parameter is already consuming. They
+# stay distinct because only ModeConsuming was WRITTEN by the author, and that
+# difference is what lets "modifier on a non-linear parameter" be an error without
+# firing on every ordinary unmodified parameter in the tree.
+# See docs/linear-borrowing-v0.md.
+export type ParamMode (..) =
+  | ModeDefault  # no modifier written — consuming, and silent on non-linear types
+  | ModeBorrowing  # `borrowing` — a non-consuming use; the caller keeps the obligation
+  | ModeConsuming  # `consuming` — explicit spelling of the default, documents the API
+
 export type Param (..) =
-  | Param String (Maybe TypeExpr)
+  | Param String (Maybe TypeExpr) ParamMode
 
 # --- Match branches and do steps (forward-reference Expr defined below) ---
 

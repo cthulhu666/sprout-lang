@@ -37,7 +37,7 @@ fn crash_client(port: Int, ready: Chan Int) -> Unit !{IO} =
 
 # Send a full request, close immediately (no read), THEN release the good client — so
 # the crashing connection is first in the accept queue and its write faults first.
-fn crash_after_send(conn: TcpConnection, ready: Chan Int) -> Unit !{IO} =
+fn crash_after_send(conn: consuming TcpConnection, ready: Chan Int) -> Unit !{IO} =
   do
     _ <- write_all_utf8(conn, "GET /crash HTTP/1.1\r\nHost: x\r\n\r\n")
     close(conn)
@@ -53,12 +53,13 @@ fn good_connect(port: Int) -> Unit !{IO} =
   | Ok conn -> good_send_and_report(conn)
   | Err _ -> term_write("good connect failed\n")
 
-fn good_send_and_report(conn: TcpConnection) -> Unit !{IO} =
+fn good_send_and_report(conn: consuming TcpConnection) -> Unit !{IO} =
   do
     _ <- write_all_utf8(conn, "GET /ok HTTP/1.1\r\nHost: x\r\n\r\n")
     good_report(conn)
+    close(conn)
 
-fn good_report(conn: TcpConnection) -> Unit !{IO} =
+fn good_report(conn: borrowing TcpConnection) -> Unit !{IO} =
   match read_exact_utf8(conn, 12) with
   | Ok line ->
       if line == "HTTP/1.1 200" then term_write("good served\n")

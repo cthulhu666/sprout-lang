@@ -15,13 +15,27 @@ import stdlib.compiler.source as source
 # (linearity is looked up from the `@linear:<TypeName>` env sentinel M4.1 records,
 # never inferred). See docs/linear-types-m4.2-enforcement-2026-08-06.md.
 #
-# The analysis computes, per subexpression, the SET of linear bindings it
-# consumes, under three composition rules:
-#   - sequential siblings must be DISJOINT (a binding used twice -> reuse error);
-#   - `if`/`match` arms must consume the IDENTICAL set (branch convergence);
-#   - each linear binding must appear in its scope's set exactly once (0 -> leak).
+# The analysis computes, per subexpression, TWO sets of linear bindings: the ones
+# it CONSUMES and the ones it merely BORROWS (M4.5). Composition rules:
+#   - sequential siblings' consumed sets must be DISJOINT (twice -> reuse error);
+#   - a later sibling may not BORROW what an earlier one CONSUMED (use-after-
+#     consume); the reverse order — borrow then consume — is the normal session
+#     shape and is fine;
+#   - `if`/`match` arms must consume the IDENTICAL set (branch convergence), but
+#     their borrowed sets merely union: a borrow carries no obligation;
+#   - each OWNED linear binding must appear in its scope's consumed set exactly
+#     once (0 -> leak). A borrow never discharges that obligation.
 # Consume-exactly-once on every control-flow path follows: disjointness bounds a
 # path at <=1, scope-membership forces >=1, convergence makes all paths agree.
+#
+# M4.5 BORROWING. A parameter declared `borrowing` is used without claiming the
+# value's one consuming use, so an acquire -> use N times -> release once resource
+# (a socket) becomes expressible. A reference is a borrow iff it sits at a
+# `borrowing` parameter position of the callee, or the binding it names is itself
+# a `borrowing` parameter — the latter is what makes a field read `p.x` borrow on
+# a borrowed binding while still consuming on an owned one, with no rule about
+# field syntax at all. Modifiers are erased before lowering and reach no IR pass.
+# See docs/linear-borrowing-v0.md.
 #
 # Scope (M4.2): EVERY binder that can hold a linear value — function parameters,
 # do-block `let`, match-arm pattern variables (a var pattern aliases the whole
@@ -34,10 +48,13 @@ import stdlib.compiler.source as source
 # A consumed linear binding: its name, and where it was consumed.
 export type LinUse (..) = LinUse String source.SourcePos
 
-# Result of a consumed-set computation: the set of linear bindings consumed
-# (each at most once along any path), or a diagnostic.
+# Result of a use-set computation: the linear bindings CONSUMED (each at most once
+# along any path) and those merely BORROWED, or a diagnostic. Two sets, not one:
+# a borrow neither discharges the once-only obligation nor collides with another
+# use, so it cannot be folded into the consumed set — but it must still be ordered
+# against consumes, which is what the second list makes possible.
 export type LinRes (..) =
-  | LinOk (List LinUse)
+  | LinOk (List LinUse) (List LinUse)
   | LinErr source.SourcePos String
 
 # Result of checking a whole function body.
@@ -238,7 +255,7 @@ fn first_linear_param(params: List ast.Param, lam_type: types.Type, env: Dict ty
           else first_linear_param(rest, b, env)
       | _ -> Nothing
 
-# --- consumed-set composition ---
+# --- borrow-vs-consume composition (M4.5) ---
 
 fn reuse_msg(name: String) -> String =
   "linear value '" ++ name ++ "' is used more than once (linear values must be used exactly once)"
@@ -249,51 +266,228 @@ fn leak_msg(name: String) -> String =
 fn diverge_msg(name: String) -> String =
   "linear value '" ++ name ++ "' is used in some branches but not others (every branch must use it exactly once)"
 
-# Disjoint union: fold `b` into `a`, erroring on any shared name (a reuse).
-fn seq2(a: List LinUse, b: List LinUse) -> LinRes =
-  match b with
-  | Nil -> LinOk(a)
-  | Cons u rest ->
-      if luse_member(luse_name(u), a) then LinErr(luse_pos(u), reuse_msg(luse_name(u)))
-      else seq2(Cons(u, a), rest)
+fn after_consume_msg(name: String) -> String =
+  "linear value '" ++ name ++ "' is used after it was consumed"
 
-# Two alternative-branch sets must be equal (convergence).
-fn alt_converge(a: List LinUse, b: List LinUse, at: source.SourcePos) -> LinRes =
-  match first_missing(a, b) with
+fn consumed_borrow_msg(name: String) -> String =
+  "'" ++ name ++ "' is a borrowing parameter and cannot be consumed; take it `consuming` if this function should release it"
+
+fn borrowed_binder_msg(name: String) -> String =
+  "linear value '" ++ name ++ "' is borrowed and cannot be consumed (it was destructured from a borrowed value, which its owner will still release)"
+
+fn nonvar_borrow_msg() -> String =
+  "a borrowing argument must be a variable reference (a freshly-built linear value here would never be consumed)"
+
+fn bad_modifier_msg(name: String) -> String =
+  "`borrowing`/`consuming` is only allowed on a parameter of a linear type (parameter '" ++ name ++ "')"
+
+fn app_uses(a: List LinUse, b: List LinUse) -> List LinUse =
+  match a with
+  | Nil -> b
+  | Cons x rest -> Cons(x, app_uses(rest, b))
+
+# The first use in `us` whose name also appears in `other`.
+fn first_shared(us: List LinUse, other: List LinUse) -> Maybe LinUse =
+  match us with
+  | Nil -> Nothing
+  | Cons u rest -> if luse_member(luse_name(u), other) then Just(u) else first_shared(rest, other)
+
+# Sequential composition of two subexpressions, `a` strictly BEFORE `b`. The
+# order is real, not assumed: spec-v0.md §6 fixes evaluation left-to-right for
+# application arguments, binary operands, and constructor/tuple fields, and every
+# caller below folds in that order. Three rules:
+#
+#   - consume in `a` AND consume in `b`  -> reuse (the M4.2 rule, unchanged);
+#   - consume in `a` AND borrow  in `b`  -> USE AFTER CONSUME. This is the hole a
+#     set-only analysis cannot see: `close(conn); write(conn, x)` records one
+#     consume and zero consumes, so the sets stay disjoint and M4.2 would accept
+#     a write to a closed socket;
+#   - borrow  in `a` AND consume in `b`  -> the normal session order (`write`
+#     then `close`). Always fine.
+#
+# Errors report the position of the LATER use, which is the offending one.
+fn seq2(ac: List LinUse, ab: List LinUse, bc: List LinUse, bb: List LinUse) -> LinRes =
+  match first_shared(bc, ac) with
+  | Just u -> LinErr(luse_pos(u), reuse_msg(luse_name(u)))
+  | Nothing -> seq2_after_reuse(ac, ab, bc, bb)
+
+fn seq2_after_reuse(ac: List LinUse, ab: List LinUse, bc: List LinUse, bb: List LinUse) -> LinRes =
+  match first_shared(bb, ac) with
+  | Just u -> LinErr(luse_pos(u), after_consume_msg(luse_name(u)))
+  | Nothing -> LinOk(app_uses(ac, bc), app_uses(ab, bb))
+
+# Two alternative branches. Consumed sets must be EQUAL (an obligation discharged
+# on one path must be discharged on all). Borrowed sets merely UNION: a borrow
+# carries no obligation, so borrowing in one arm and not the other is harmless.
+fn alt_converge(ac: List LinUse, ab: List LinUse, bc: List LinUse, bb: List LinUse,
+                at: source.SourcePos) -> LinRes =
+  match first_missing(ac, bc) with
   | Just n -> LinErr(at, diverge_msg(n))
-  | Nothing ->
-      match first_missing(b, a) with
-      | Just n -> LinErr(at, diverge_msg(n))
-      | Nothing -> LinOk(a)
+  | Nothing -> alt_converge_rev(ac, ab, bc, bb, at)
+
+fn alt_converge_rev(ac: List LinUse, ab: List LinUse, bc: List LinUse, bb: List LinUse,
+                    at: source.SourcePos) -> LinRes =
+  match first_missing(bc, ac) with
+  | Just n -> LinErr(at, diverge_msg(n))
+  | Nothing -> LinOk(ac, app_uses(ab, bb))
+
+# --- the linear bindings in scope, split by mode ---
+#
+# `owned` must each be consumed exactly once (a parameter with no modifier or
+# with `consuming`, a do-`let`, a `<-` bind, a pattern binder). `borrowed` is a
+# `borrowing` parameter: it carries NO consume obligation here — that stayed with
+# the caller — and must not be consumed at all.
+export type LinScope (..) = LinScope(List String) (List String)
+
+fn scope_owned(sc: LinScope) -> List String =
+  match sc with
+  | LinScope o _ -> o
+
+fn scope_borrowed(sc: LinScope) -> List String =
+  match sc with
+  | LinScope _ b -> b
+
+fn scope_is_owned(name: String, sc: LinScope) -> Bool = str_member(name, scope_owned(sc))
+
+fn scope_is_borrowed(name: String, sc: LinScope) -> Bool = str_member(name, scope_borrowed(sc))
+
+fn scope_is_linear(name: String, sc: LinScope) -> Bool =
+  scope_is_owned(name, sc) || scope_is_borrowed(name, sc)
+
+fn scope_add_owned(names: List String, sc: LinScope) -> LinScope =
+  LinScope(app_names(names, scope_owned(sc)), scope_borrowed(sc))
 
 # --- the recursive walk ---
 
-fn lin_consumed(e: typed_ast.TypedExpr, linvars: List String, env: Dict types.Scheme) -> LinRes =
+fn lin_consumed(e: typed_ast.TypedExpr, sc: LinScope, env: Dict types.Scheme) -> LinRes =
   match e with
-  | typed_ast.TVar name _ p ->
-      if str_member(name, linvars) then LinOk(Cons (LinUse(name, p), Nil)) else LinOk(Nil)
-  | typed_ast.TInt _ _ _ -> LinOk(Nil)
-  | typed_ast.TFloat _ _ _ -> LinOk(Nil)
-  | typed_ast.TBool _ _ _ -> LinOk(Nil)
-  | typed_ast.TString _ _ _ -> LinOk(Nil)
-  | typed_ast.TChar _ _ _ -> LinOk(Nil)
-  | typed_ast.TUnit _ _ -> LinOk(Nil)
-  | typed_ast.TDict _ _ _ _ -> LinOk(Nil)
-  | typed_ast.TMethodRef _ _ _ _ _ -> LinOk(Nil)
-  # A field read `p.x` is `TGetField (TVar p) "x"`: the base is a use of `p`.
-  | typed_ast.TGetField base _ _ _ -> lin_consumed(base, linvars, env)
-  | typed_ast.TUnary _ inner _ _ -> lin_consumed(inner, linvars, env)
-  | typed_ast.TTuple items _ _ -> seq_list(items, linvars, env)
-  | typed_ast.TCall callee args _ _ -> seq_list(Cons(callee, args), linvars, env)
-  | typed_ast.TBinary _ l r _ _ -> seq_list(Cons(l, Cons(r, Nil)), linvars, env)
-  | typed_ast.TRange lo hi _ _ -> seq_list(Cons(lo, Cons(hi, Nil)), linvars, env)
-  | typed_ast.TRecord _ fields _ _ -> seq_list(record_field_exprs(fields), linvars, env)
+  | typed_ast.TVar name _ p -> lin_var(name, p, sc)
+  | typed_ast.TInt _ _ _ -> LinOk(Nil, Nil)
+  | typed_ast.TFloat _ _ _ -> LinOk(Nil, Nil)
+  | typed_ast.TBool _ _ _ -> LinOk(Nil, Nil)
+  | typed_ast.TString _ _ _ -> LinOk(Nil, Nil)
+  | typed_ast.TChar _ _ _ -> LinOk(Nil, Nil)
+  | typed_ast.TUnit _ _ -> LinOk(Nil, Nil)
+  | typed_ast.TDict _ _ _ _ -> LinOk(Nil, Nil)
+  | typed_ast.TMethodRef _ _ _ _ _ -> LinOk(Nil, Nil)
+  | typed_ast.TGetField base _ _ _ -> lin_read(base, sc, env)
+  | typed_ast.TUnary _ inner _ _ -> lin_consumed(inner, sc, env)
+  | typed_ast.TTuple items _ _ -> seq_list(items, sc, env)
+  | typed_ast.TCall callee args _ _ -> lin_call(callee, args, sc, env)
+  | typed_ast.TBinary _ l r _ _ -> seq_list(Cons(l, Cons(r, Nil)), sc, env)
+  | typed_ast.TRange lo hi _ _ -> seq_list(Cons(lo, Cons(hi, Nil)), sc, env)
+  | typed_ast.TRecord _ fields _ _ -> seq_list(record_field_exprs(fields), sc, env)
   | typed_ast.TRecordUpdate base fields _ _ ->
-      seq_list(Cons(base, record_field_exprs(fields)), linvars, env)
-  | typed_ast.TIf c a b _ p -> lin_if(c, a, b, p, linvars, env)
-  | typed_ast.TMatch scrut arms _ p -> lin_match(scrut, arms, p, linvars, env)
-  | typed_ast.TDo steps _ _ -> lin_do(steps, linvars, env)
-  | typed_ast.TLambda params body lam_type p -> lin_lambda(params, body, lam_type, p, linvars, env)
+      seq_list(Cons(base, record_field_exprs(fields)), sc, env)
+  | typed_ast.TIf c a b _ p -> lin_if(c, a, b, p, sc, env)
+  | typed_ast.TMatch scrut arms _ p -> lin_match(scrut, arms, p, sc, env)
+  | typed_ast.TDo steps _ _ -> lin_do(steps, sc, env)
+  | typed_ast.TLambda params body lam_type p -> lin_lambda(params, body, lam_type, p, sc, env)
+
+# A bare reference in a CONSUMING position: a `consuming`/unmodified argument, a
+# do-`let` or `<-` right-hand side, or return position. This consumes whatever
+# mode the binding has — deliberately, including a BORROWED one, because that is
+# how the two escape rules are caught with no separate machinery: consuming or
+# returning a `borrowing` parameter puts it in the consumed set, and
+# `param_obligations` rejects any borrowed name found there. Recording it as a
+# borrow instead would make the violation unrepresentable.
+fn lin_var(name: String, p: source.SourcePos, sc: LinScope) -> LinRes =
+  if scope_is_linear(name, sc) then LinOk(Cons (LinUse(name, p), Nil), Nil)
+  else LinOk(Nil, Nil)
+
+# A use in a READING position — the base of a field access, or a match scrutinee.
+# These look INTO the value without taking it, so on a BORROWED binding they are
+# borrows: that is what makes `p.x + p.y` legal for `p: borrowing Pos`, and what
+# lets `tcp_connection_handle(conn: borrowing TcpConnection)` do `match conn with`
+# to reach the handle. On an OWNED binding a read still consumes, exactly as M4.2
+# and spec-v0.md §5.8 define — which is why `get_x(p: Pos) = p.x` stays accepted
+# and `manhattan(p: Pos) = p.x + p.y` stays a reuse.
+fn lin_read(e: typed_ast.TypedExpr, sc: LinScope, env: Dict types.Scheme) -> LinRes =
+  match e with
+  | typed_ast.TVar name _ p -> lin_read_var(name, p, sc, e, env)
+  | _ -> lin_consumed(e, sc, env)
+
+fn lin_read_var(name: String, p: source.SourcePos, sc: LinScope,
+                e: typed_ast.TypedExpr, env: Dict types.Scheme) -> LinRes =
+  if scope_is_borrowed(name, sc) then LinOk(Nil, Cons (LinUse(name, p), Nil))
+  else lin_consumed(e, sc, env)
+
+# --- calls: classify each argument position by the callee's declared modes ---
+
+# The `@parammode:<name>` mask infer records for a top-level function: one
+# character per parameter, 'b' for `borrowing`. A call through a value (a lambda,
+# a function-typed parameter, a typeclass method) has no mask, and an absent or
+# short mask reads as "consuming" — the pre-M4.5 behaviour, and the safe default.
+fn callee_mask(callee: typed_ast.TypedExpr, env: Dict types.Scheme) -> String =
+  match callee with
+  | typed_ast.TVar name _ _ -> param_mode_mask_of(name, env)
+  | _ -> ""
+
+fn param_mode_mask_of(name: String, env: Dict types.Scheme) -> String =
+  match dict_get("@parammode:" ++ name, env) with
+  | Nothing -> ""
+  | Just scheme ->
+      match scheme with
+      | types.Scheme _ _ body _ _ -> mask_of_type(body)
+
+fn mask_of_type(t: types.Type) -> String =
+  match t with
+  | types.TConst id -> types.type_id_name(id)
+  | _ -> ""
+
+fn mask_is_borrow(mask: String, k: Int) -> Bool =
+  if k < 0 || k + 1 > str_len(mask) then false
+  else str_slice(mask, k, k + 1) == "b"
+
+fn lin_call(callee: typed_ast.TypedExpr, args: List typed_ast.TypedExpr,
+            sc: LinScope, env: Dict types.Scheme) -> LinRes =
+  match lin_consumed(callee, sc, env) with
+  | LinErr p m -> LinErr(p, m)
+  | LinOk cc cb -> lin_call_args(args, callee_mask(callee, env), 0, cc, cb, sc, env)
+
+# Arguments fold left-to-right (spec-v0.md §6.1), so `seq2` sees them in real
+# evaluation order and the borrow-after-consume rule is exact rather than
+# approximate.
+fn lin_call_args(args: List typed_ast.TypedExpr, mask: String, k: Int,
+                 ac: List LinUse, ab: List LinUse,
+                 sc: LinScope, env: Dict types.Scheme) -> LinRes =
+  match args with
+  | Nil -> LinOk(ac, ab)
+  | Cons a rest ->
+      match lin_arg(a, mask_is_borrow(mask, k), sc, env) with
+      | LinErr p m -> LinErr(p, m)
+      | LinOk c b -> lin_call_args_rest(rest, mask, k, ac, ab, c, b, sc, env)
+
+fn lin_call_args_rest(rest: List typed_ast.TypedExpr, mask: String, k: Int,
+                      ac: List LinUse, ab: List LinUse, c: List LinUse, b: List LinUse,
+                      sc: LinScope, env: Dict types.Scheme) -> LinRes =
+  match seq2(ac, ab, c, b) with
+  | LinErr p m -> LinErr(p, m)
+  | LinOk nc nb -> lin_call_args(rest, mask, k + 1, nc, nb, sc, env)
+
+# One argument. At a `borrowing` position a LINEAR argument must be a bare
+# variable: a freshly-built linear value there would be borrowed and then dropped,
+# with nothing left to consume it and no binder for the leak check to find — the
+# analysis tracks binders only (BACKLOG "discarded linear expression result").
+# A non-linear argument at a borrowing position is walked normally; the position
+# is simply irrelevant to it.
+fn lin_arg(a: typed_ast.TypedExpr, is_borrow: Bool, sc: LinScope, env: Dict types.Scheme) -> LinRes =
+  if ! is_borrow then lin_consumed(a, sc, env) else lin_borrow_arg(a, sc, env)
+
+fn lin_borrow_arg(a: typed_ast.TypedExpr, sc: LinScope, env: Dict types.Scheme) -> LinRes =
+  match a with
+  | typed_ast.TVar name _ p -> lin_borrow_var(name, p, sc, a, env)
+  | _ -> lin_nonvar_borrow(a, sc, env)
+
+fn lin_borrow_var(name: String, p: source.SourcePos, sc: LinScope,
+                  a: typed_ast.TypedExpr, env: Dict types.Scheme) -> LinRes =
+  if scope_is_linear(name, sc) then LinOk(Nil, Cons (LinUse(name, p), Nil))
+  else lin_nonvar_borrow(a, sc, env)
+
+fn lin_nonvar_borrow(a: typed_ast.TypedExpr, sc: LinScope, env: Dict types.Scheme) -> LinRes =
+  if type_is_linear(typed_ast.typed_expr_type(a), env)
+  then LinErr(typed_ast.typed_expr_pos(a), nonvar_borrow_msg())
+  else lin_consumed(a, sc, env)
 
 fn record_field_exprs(fields: List typed_ast.TypedRecordField) -> List typed_ast.TypedExpr =
   match fields with
@@ -302,204 +496,336 @@ fn record_field_exprs(fields: List typed_ast.TypedRecordField) -> List typed_ast
       match f with
       | typed_ast.TypedRecordField _ v -> Cons(v, record_field_exprs(rest))
 
-# Sequentially combine the consumed sets of a list of subexpressions (disjoint).
-fn seq_list(exprs: List typed_ast.TypedExpr, linvars: List String, env: Dict types.Scheme) -> LinRes =
+# Sequentially combine a list of subexpressions, left to right.
+fn seq_list(exprs: List typed_ast.TypedExpr, sc: LinScope, env: Dict types.Scheme) -> LinRes =
   match exprs with
-  | Nil -> LinOk(Nil)
+  | Nil -> LinOk(Nil, Nil)
   | Cons e rest ->
-      match lin_consumed(e, linvars, env) with
+      match lin_consumed(e, sc, env) with
       | LinErr p m -> LinErr(p, m)
-      | LinOk a ->
-          match seq_list(rest, linvars, env) with
-          | LinErr p m -> LinErr(p, m)
-          | LinOk b -> seq2(a, b)
+      | LinOk ac ab -> seq_list_rest(rest, ac, ab, sc, env)
+
+fn seq_list_rest(rest: List typed_ast.TypedExpr, ac: List LinUse, ab: List LinUse,
+                 sc: LinScope, env: Dict types.Scheme) -> LinRes =
+  match seq_list(rest, sc, env) with
+  | LinErr p m -> LinErr(p, m)
+  | LinOk bc bb -> seq2(ac, ab, bc, bb)
 
 fn lin_if(c: typed_ast.TypedExpr, a: typed_ast.TypedExpr, b: typed_ast.TypedExpr,
-          p: source.SourcePos, linvars: List String, env: Dict types.Scheme) -> LinRes =
-  let LinOk cs = lin_consumed(c, linvars, env) else LinErr ep m -> LinErr(ep, m)
-      LinOk as_ = lin_consumed(a, linvars, env) else LinErr ep m -> LinErr(ep, m)
-      LinOk bs = lin_consumed(b, linvars, env) else LinErr ep m -> LinErr(ep, m)
-      LinOk arm = alt_converge(as_, bs, p) else LinErr ep m -> LinErr(ep, m)
-  in seq2(cs, arm)
+          p: source.SourcePos, sc: LinScope, env: Dict types.Scheme) -> LinRes =
+  let LinOk cc cb = lin_consumed(c, sc, env) else LinErr ep m -> LinErr(ep, m)
+      LinOk ac ab = lin_consumed(a, sc, env) else LinErr ep m -> LinErr(ep, m)
+      LinOk bc bb = lin_consumed(b, sc, env) else LinErr ep m -> LinErr(ep, m)
+      LinOk mc mb = alt_converge(ac, ab, bc, bb, p) else LinErr ep m -> LinErr(ep, m)
+  in seq2(cc, cb, mc, mb)
 
 fn lin_match(scrut: typed_ast.TypedExpr, arms: List typed_ast.TypedMatchBranch,
-             p: source.SourcePos, linvars: List String, env: Dict types.Scheme) -> LinRes =
-  match lin_consumed(scrut, linvars, env) with
+             p: source.SourcePos, sc: LinScope, env: Dict types.Scheme) -> LinRes =
+  match lin_read(scrut, sc, env) with
   | LinErr ep m -> LinErr(ep, m)
-  | LinOk ss ->
-      match arm_sets(arms, linvars, typed_ast.typed_expr_type(scrut), env) with
-      | LinErr ep m -> LinErr(ep, m)
-      | LinOk arm -> seq2(ss, arm)
+  | LinOk sc_c sc_b -> lin_match_arms(scrut, arms, sc_c, sc_b, sc, env)
 
-# All arm bodies must converge to the identical consumed set of OUTER linear
-# bindings. An arm's own pattern-bound linear vars (a var pattern aliasing the
-# whole linear scrutinee, or a linear field) are arm-local: each must be consumed
-# exactly once inside the arm, then removed before the convergence comparison.
-fn arm_sets(arms: List typed_ast.TypedMatchBranch, linvars: List String,
-            scrut_type: types.Type, env: Dict types.Scheme) -> LinRes =
+fn lin_match_arms(scrut: typed_ast.TypedExpr, arms: List typed_ast.TypedMatchBranch,
+                  sc_c: List LinUse, sc_b: List LinUse,
+                  sc: LinScope, env: Dict types.Scheme) -> LinRes =
+  match arm_sets(arms, sc, typed_ast.typed_expr_type(scrut),
+                 expr_is_borrowed_binding(scrut, sc), env) with
+  | LinErr ep m -> LinErr(ep, m)
+  | LinOk mc mb -> seq2(sc_c, sc_b, mc, mb)
+
+# CONTAINMENT: destructuring a BORROWED value yields BORROWED fields. Without
+# this, `match w with | Wrap f -> release(f)` inside a `borrowing Wrap` function
+# would consume the inner linear field while the caller still owns the Wrap and
+# will release it again — a double consume laundered through a pattern match.
+# Reads through a borrow are borrows all the way down.
+fn expr_is_borrowed_binding(e: typed_ast.TypedExpr, sc: LinScope) -> Bool =
+  match e with
+  | typed_ast.TVar name _ _ -> scope_is_borrowed(name, sc)
+  | _ -> false
+
+# All arm bodies must converge to the identical CONSUMED set of outer linear
+# bindings. An arm's own pattern-bound linear vars are arm-local: owned (consumed
+# exactly once inside the arm) when the scrutinee is owned, borrowed (never
+# consumed) when it came from a borrow. Either way they are removed before the
+# convergence comparison.
+fn arm_sets(arms: List typed_ast.TypedMatchBranch, sc: LinScope, scrut_type: types.Type,
+            from_borrow: Bool, env: Dict types.Scheme) -> LinRes =
   match arms with
-  | Nil -> LinOk(Nil)
-  | [br] -> arm_consumed(br, linvars, scrut_type, env)
+  | Nil -> LinOk(Nil, Nil)
+  | [br] -> arm_consumed(br, sc, scrut_type, from_borrow, env)
   | Cons br rest ->
-      match arm_consumed(br, linvars, scrut_type, env) with
+      match arm_consumed(br, sc, scrut_type, from_borrow, env) with
       | LinErr p m -> LinErr(p, m)
-      | LinOk a ->
-          match arm_sets(rest, linvars, scrut_type, env) with
-          | LinErr p m -> LinErr(p, m)
-          | LinOk b -> alt_converge(a, b, arm_pos(br))
+      | LinOk ac ab -> arm_sets_rest(rest, ac, ab, arm_pos(br), sc, scrut_type, from_borrow, env)
 
-fn arm_consumed(br: typed_ast.TypedMatchBranch, linvars: List String,
-                scrut_type: types.Type, env: Dict types.Scheme) -> LinRes =
+fn arm_sets_rest(rest: List typed_ast.TypedMatchBranch, ac: List LinUse, ab: List LinUse,
+                 at: source.SourcePos, sc: LinScope, scrut_type: types.Type,
+                 from_borrow: Bool, env: Dict types.Scheme) -> LinRes =
+  match arm_sets(rest, sc, scrut_type, from_borrow, env) with
+  | LinErr p m -> LinErr(p, m)
+  | LinOk bc bb -> alt_converge(ac, ab, bc, bb, at)
+
+fn arm_consumed(br: typed_ast.TypedMatchBranch, sc: LinScope, scrut_type: types.Type,
+                from_borrow: Bool, env: Dict types.Scheme) -> LinRes =
   match br with
   | typed_ast.TypedMatchBranch pat body ->
-      scope_consumed(pattern_linear_binders(pat, scrut_type, env), body,
-                     typed_ast.typed_expr_pos(body), linvars, env)
+      scope_consumed(pattern_linear_binders(pat, scrut_type, env), from_borrow, body,
+                     typed_ast.typed_expr_pos(body), sc, env)
 
-# Check `body` with `binders` added to scope: each binder must be consumed exactly
-# once inside (reuse is caught by seq2; a leftover binder is a leak), then removed
-# from the set reported to the enclosing scope.
-fn scope_consumed(binders: List String, body: typed_ast.TypedExpr, leak_pos: source.SourcePos,
-                  linvars: List String, env: Dict types.Scheme) -> LinRes =
-  match lin_consumed(body, app_names(binders, linvars), env) with
+# Check `body` with `binders` in scope. Owned binders must each be consumed
+# exactly once inside (reuse is caught by seq2; a leftover binder is a leak);
+# borrowed binders must NOT be consumed at all. Either way they are removed from
+# both sets reported to the enclosing scope.
+fn scope_consumed(binders: List String, from_borrow: Bool, body: typed_ast.TypedExpr,
+                  leak_pos: source.SourcePos, sc: LinScope, env: Dict types.Scheme) -> LinRes =
+  match lin_consumed(body, scope_add(binders, from_borrow, sc), env) with
   | LinErr p m -> LinErr(p, m)
-  | LinOk consumed ->
-      match unconsumed_binder(binders, consumed) with
-      | Just leaked -> LinErr(leak_pos, leak_msg(leaked))
-      | Nothing -> LinOk(remove_all(binders, consumed))
+  | LinOk consumed borrowed -> scope_close(binders, from_borrow, consumed, borrowed, leak_pos)
+
+fn scope_add(names: List String, from_borrow: Bool, sc: LinScope) -> LinScope =
+  if from_borrow then LinScope(scope_owned(sc), app_names(names, scope_borrowed(sc)))
+  else scope_add_owned(names, sc)
+
+fn scope_close(binders: List String, from_borrow: Bool, consumed: List LinUse,
+               borrowed: List LinUse, leak_pos: source.SourcePos) -> LinRes =
+  if from_borrow then scope_close_borrowed(binders, consumed, borrowed)
+  else scope_close_owned(binders, consumed, borrowed, leak_pos)
+
+fn scope_close_borrowed(binders: List String, consumed: List LinUse,
+                        borrowed: List LinUse) -> LinRes =
+  match first_consumed_borrow(binders, consumed) with
+  | Just u -> LinErr(luse_pos(u), borrowed_binder_msg(luse_name(u)))
+  | Nothing -> LinOk(remove_all(binders, consumed), remove_all(binders, borrowed))
+
+fn scope_close_owned(binders: List String, consumed: List LinUse, borrowed: List LinUse,
+                     leak_pos: source.SourcePos) -> LinRes =
+  match unconsumed_binder(binders, consumed) with
+  | Just leaked -> LinErr(leak_pos, leak_msg(leaked))
+  | Nothing -> LinOk(remove_all(binders, consumed), remove_all(binders, borrowed))
 
 fn arm_pos(br: typed_ast.TypedMatchBranch) -> source.SourcePos =
   match br with
   | typed_ast.TypedMatchBranch _ body -> typed_ast.typed_expr_pos(body)
 
-fn lin_do(steps: List typed_ast.TypedDoStep, linvars: List String, env: Dict types.Scheme) -> LinRes =
+fn lin_do(steps: List typed_ast.TypedDoStep, sc: LinScope, env: Dict types.Scheme) -> LinRes =
   match steps with
-  | Nil -> LinOk(Nil)
+  | Nil -> LinOk(Nil, Nil)
   | Cons step rest ->
       match step with
-      | typed_ast.TDoLetStep name rhs -> lin_do_let(name, rhs, rest, linvars, env)
-      | typed_ast.TDoExprStep e -> lin_do_seq(e, rest, linvars, env)
-      | typed_ast.TDoBindStep pat e -> lin_do_bind(pat, e, rest, linvars, env)
+      | typed_ast.TDoLetStep name rhs -> lin_do_let(name, rhs, rest, sc, env)
+      | typed_ast.TDoExprStep e -> lin_do_seq(e, rest, sc, env)
+      | typed_ast.TDoBindStep pat e -> lin_do_bind(pat, e, rest, sc, env)
 
-# A `<-` do-bind: its pattern binds variables (possibly linear — the payload of a
-# linear-carrying monad) scoped to the remaining steps, each consumed exactly once
-# there. The RHS `e` is sequential-before the rest.
+# A `<-` do-bind: its pattern binds variables (possibly linear) scoped to the
+# remaining steps, each consumed exactly once there. The RHS is sequential-before
+# the rest — which is what makes `close(conn)` followed by a later `write(conn,…)`
+# in a do-block a use-after-consume rather than an unordered set collision.
 fn lin_do_bind(pat: ast.Pattern, e: typed_ast.TypedExpr, rest: List typed_ast.TypedDoStep,
-               linvars: List String, env: Dict types.Scheme) -> LinRes =
-  match lin_consumed(e, linvars, env) with
+               sc: LinScope, env: Dict types.Scheme) -> LinRes =
+  match lin_consumed(e, sc, env) with
   | LinErr p m -> LinErr(p, m)
-  | LinOk ec ->
+  | LinOk ec eb ->
       lin_do_bind_rest(pattern_linear_binders(pat, do_bind_type(typed_ast.typed_expr_type(e), env), env),
-                       ec, e, rest, linvars, env)
+                       ec, eb, e, rest, sc, env)
 
-fn lin_do_bind_rest(binders: List String, ec: List LinUse, e: typed_ast.TypedExpr,
-                    rest: List typed_ast.TypedDoStep, linvars: List String,
-                    env: Dict types.Scheme) -> LinRes =
-  match lin_do(rest, app_names(binders, linvars), env) with
+fn lin_do_bind_rest(binders: List String, ec: List LinUse, eb: List LinUse,
+                    e: typed_ast.TypedExpr, rest: List typed_ast.TypedDoStep,
+                    sc: LinScope, env: Dict types.Scheme) -> LinRes =
+  match lin_do(rest, scope_add_owned(binders, sc), env) with
   | LinErr p m -> LinErr(p, m)
-  | LinOk restc ->
-      match unconsumed_binder(binders, restc) with
-      | Just leaked -> LinErr(typed_ast.typed_expr_pos(e), leak_msg(leaked))
-      | Nothing -> seq2(ec, remove_all(binders, restc))
+  | LinOk restc restb -> lin_do_bind_close(binders, ec, eb, restc, restb, e)
 
-# A do-step whose RHS `e` is sequential-before the remaining steps.
+fn lin_do_bind_close(binders: List String, ec: List LinUse, eb: List LinUse,
+                     restc: List LinUse, restb: List LinUse, e: typed_ast.TypedExpr) -> LinRes =
+  match unconsumed_binder(binders, restc) with
+  | Just leaked -> LinErr(typed_ast.typed_expr_pos(e), leak_msg(leaked))
+  | Nothing -> seq2(ec, eb, remove_all(binders, restc), remove_all(binders, restb))
+
 fn lin_do_seq(e: typed_ast.TypedExpr, rest: List typed_ast.TypedDoStep,
-              linvars: List String, env: Dict types.Scheme) -> LinRes =
-  match lin_consumed(e, linvars, env) with
+              sc: LinScope, env: Dict types.Scheme) -> LinRes =
+  match lin_consumed(e, sc, env) with
   | LinErr p m -> LinErr(p, m)
-  | LinOk ec ->
-      match lin_do(rest, linvars, env) with
-      | LinErr p m -> LinErr(p, m)
-      | LinOk restc -> seq2(ec, restc)
+  | LinOk ec eb -> lin_do_seq_rest(rest, ec, eb, sc, env)
+
+fn lin_do_seq_rest(rest: List typed_ast.TypedDoStep, ec: List LinUse, eb: List LinUse,
+                   sc: LinScope, env: Dict types.Scheme) -> LinRes =
+  match lin_do(rest, sc, env) with
+  | LinErr p m -> LinErr(p, m)
+  | LinOk restc restb -> seq2(ec, eb, restc, restb)
 
 fn lin_do_let(name: String, rhs: typed_ast.TypedExpr, rest: List typed_ast.TypedDoStep,
-              linvars: List String, env: Dict types.Scheme) -> LinRes =
-  match lin_consumed(rhs, linvars, env) with
+              sc: LinScope, env: Dict types.Scheme) -> LinRes =
+  match lin_consumed(rhs, sc, env) with
   | LinErr p m -> LinErr(p, m)
-  | LinOk rc ->
-      lin_do_let_body(name, rhs, rc, rest, linvars, env,
+  | LinOk rc rb ->
+      lin_do_let_body(name, rhs, rc, rb, rest, sc, env,
                       type_is_linear(typed_ast.typed_expr_type(rhs), env))
 
-# A linear do-let binding is scoped to `rest` and must be consumed exactly once
-# there (removed from the set the do-block reports to its outer scope).
-fn lin_do_let_body(name: String, rhs: typed_ast.TypedExpr, rc: List LinUse,
-                   rest: List typed_ast.TypedDoStep, linvars: List String,
+# A linear do-let binding is OWNED, scoped to `rest`, consumed exactly once there.
+fn lin_do_let_body(name: String, rhs: typed_ast.TypedExpr, rc: List LinUse, rb: List LinUse,
+                   rest: List typed_ast.TypedDoStep, sc: LinScope,
                    env: Dict types.Scheme, is_lin: Bool) -> LinRes =
-  match lin_do(rest, extend_linvars(is_lin, name, linvars), env) with
+  match lin_do(rest, extend_scope(is_lin, name, sc), env) with
   | LinErr p m -> LinErr(p, m)
-  | LinOk restc ->
-      if is_lin then
-        (if luse_member(name, restc) then seq2(rc, luse_remove(name, restc))
-         else LinErr(typed_ast.typed_expr_pos(rhs), leak_msg(name)))
-      else seq2(rc, restc)
+  | LinOk restc restb -> lin_do_let_close(name, rhs, rc, rb, restc, restb, is_lin)
 
-fn extend_linvars(is_lin: Bool, name: String, linvars: List String) -> List String =
-  if is_lin then Cons(name, linvars) else linvars
+fn lin_do_let_close(name: String, rhs: typed_ast.TypedExpr, rc: List LinUse, rb: List LinUse,
+                    restc: List LinUse, restb: List LinUse, is_lin: Bool) -> LinRes =
+  if ! is_lin then seq2(rc, rb, restc, restb)
+  else if luse_member(name, restc) then
+    seq2(rc, rb, luse_remove(name, restc), luse_remove(name, restb))
+  else LinErr(typed_ast.typed_expr_pos(rhs), leak_msg(name))
+
+fn extend_scope(is_lin: Bool, name: String, sc: LinScope) -> LinScope =
+  if is_lin then scope_add_owned(Cons(name, Nil), sc) else sc
 
 # A lambda may run zero or many times, so (higher-order linearity, M4.4, deferred)
-# it must neither take a linear parameter nor capture an outer linear binding —
-# both are loud-rejected, never silently accepted.
+# it must neither take a linear parameter nor capture an outer linear binding.
+# BORROWS count as captures here too: the v0 borrowing rule (design note §7) is
+# that a borrowed value may not be captured at all, because soundness would turn
+# on whether the closure escapes and outlives the consume, and Sprout has no
+# escaping/non-escaping distinction. Both are loud-rejected, never silently taken.
 fn lin_lambda(params: List ast.Param, body: typed_ast.TypedExpr, lam_type: types.Type,
-              p: source.SourcePos, linvars: List String, env: Dict types.Scheme) -> LinRes =
+              p: source.SourcePos, sc: LinScope, env: Dict types.Scheme) -> LinRes =
   match first_linear_param(params, lam_type, env) with
   | Just pname ->
       LinErr(p, "linear lambda parameter '" ++ pname
         ++ "' is not yet supported (higher-order linearity is deferred)")
-  | Nothing ->
-      match lin_consumed(body, linvars, env) with
-      | LinErr ep m -> LinErr(ep, m)
-      | LinOk bc ->
-          match bc with
-          | Nil -> LinOk(Nil)
-          | [u | _] ->
-              LinErr(p, "linear value '" ++ luse_name(u)
-                ++ "' captured by a lambda is not yet supported (higher-order linearity is deferred)")
+  | Nothing -> lin_lambda_body(body, p, sc, env)
 
-# --- entry point ---
+fn lin_lambda_body(body: typed_ast.TypedExpr, p: source.SourcePos,
+                   sc: LinScope, env: Dict types.Scheme) -> LinRes =
+  match lin_consumed(body, sc, env) with
+  | LinErr ep m -> LinErr(ep, m)
+  | LinOk bc bb -> lin_lambda_captures(app_uses(bc, bb), p)
 
-# Check a function body for linear-use violations. `fn_type` is the function's
-# fully-substituted type (its param types drive linearity of the parameters);
-# `body` is the fully-substituted typed body; `env` carries the `@linear:` markers.
-export fn check_fn_linear(params: List ast.Param, fn_type: types.Type,
-                          body: typed_ast.TypedExpr, fn_pos: source.SourcePos,
-                          env: Dict types.Scheme) -> LinCheck =
-  linear_result(linear_param_names(params, fn_type, env), body, fn_pos, env)
+fn lin_lambda_captures(uses: List LinUse, p: source.SourcePos) -> LinRes =
+  match uses with
+  | Nil -> LinOk(Nil, Nil)
+  | [u | _] ->
+      LinErr(p, "linear value '" ++ luse_name(u)
+        ++ "' captured by a lambda is not yet supported (higher-order linearity is deferred)")
 
-# Check a body with no parameters (a top-level `let` declaration): there are no
-# linear params to leak, but do-`let`/pattern/lambda binders inside are still
-# enforced by the walk.
-export fn check_body_linear(body: typed_ast.TypedExpr, env: Dict types.Scheme) -> LinCheck =
-  match lin_consumed(body, Nil, env) with
-  | LinErr p m -> LinFail(p, m)
-  | LinOk _ -> LinPass
+# --- parameter modes ---
 
-fn linear_result(linear_params: List String, body: typed_ast.TypedExpr,
-                 fn_pos: source.SourcePos, env: Dict types.Scheme) -> LinCheck =
-  match lin_consumed(body, linear_params, env) with
-  | LinErr p m -> LinFail(p, m)
-  | LinOk consumed -> unused_linear_param(linear_params, consumed, fn_pos)
+fn param_mode(p: ast.Param) -> ast.ParamMode =
+  match p with
+  | ast.Param _ _ m -> m
 
-# Each linear parameter must appear in the body's consumed set (else it leaked).
-fn unused_linear_param(linear_params: List String, consumed: List LinUse,
-                       fn_pos: source.SourcePos) -> LinCheck =
-  match linear_params with
-  | Nil -> LinPass
-  | Cons nm rest ->
-      if luse_member(nm, consumed) then unused_linear_param(rest, consumed, fn_pos)
-      else LinFail(fn_pos, leak_msg(nm))
+fn mode_is_written(m: ast.ParamMode) -> Bool =
+  match m with
+  | ast.ModeDefault -> false
+  | _ -> true
 
-fn linear_param_names(params: List ast.Param, fn_type: types.Type, env: Dict types.Scheme) -> List String =
+fn mode_is_borrowing(m: ast.ParamMode) -> Bool =
+  match m with
+  | ast.ModeBorrowing -> true
+  | _ -> false
+
+# True when any parameter carries a written modifier. Used to widen the M4.2
+# gate: a program with NO linear type at all must still reject a modifier on a
+# non-linear parameter, and that program never trips `program_has_linear`.
+export fn any_param_mode_written(params: List ast.Param) -> Bool =
+  match params with
+  | Nil -> false
+  | Cons prm rest -> if mode_is_written(param_mode(prm)) then true else any_param_mode_written(rest)
+
+# A modifier is only meaningful on a linear parameter. Sprout erases the modifiers
+# before IR and the GC owns memory, so on a non-linear parameter they would carry
+# no meaning whatsoever — a deliberate divergence from Swift SE-0377, where they
+# still affect ARC traffic and are therefore allowed everywhere. A type-variable
+# parameter is rejected too: per-declaration linearity cannot decide it, and
+# polymorphism over linear types is an M4.2 non-goal.
+fn first_bad_modifier(params: List ast.Param, fn_type: types.Type,
+                      env: Dict types.Scheme) -> Maybe String =
+  match params with
+  | Nil -> Nothing
+  | Cons prm rest ->
+      match fn_type with
+      | types.TFunc a b _ ->
+          if mode_is_written(param_mode(prm)) && ! type_is_linear (a, env) then Just(param_name(prm))
+          else first_bad_modifier(rest, b, env)
+      | _ -> Nothing
+
+# The linear parameters that own their argument (no modifier, or `consuming`).
+fn owned_param_names(params: List ast.Param, fn_type: types.Type,
+                     env: Dict types.Scheme) -> List String =
   match params with
   | Nil -> Nil
   | Cons prm rest ->
       match fn_type with
       | types.TFunc a b _ ->
-          linear_param_cons(type_is_linear(a, env), param_name(prm),
-                            linear_param_names(rest, b, env))
+          linear_param_cons(type_is_linear(a, env) && ! mode_is_borrowing (param_mode(prm)),
+                            param_name(prm), owned_param_names(rest, b, env))
       | _ -> Nil
 
-fn linear_param_cons(is_lin: Bool, nm: String, tail: List String) -> List String =
-  if is_lin then Cons(nm, tail) else tail
+# The linear parameters declared `borrowing`.
+fn borrowed_param_names(params: List ast.Param, fn_type: types.Type,
+                        env: Dict types.Scheme) -> List String =
+  match params with
+  | Nil -> Nil
+  | Cons prm rest ->
+      match fn_type with
+      | types.TFunc a b _ ->
+          linear_param_cons(type_is_linear(a, env) && mode_is_borrowing(param_mode(prm)),
+                            param_name(prm), borrowed_param_names(rest, b, env))
+      | _ -> Nil
+
+fn linear_param_cons(keep: Bool, nm: String, tail: List String) -> List String =
+  if keep then Cons(nm, tail) else tail
 
 fn param_name(p: ast.Param) -> String =
   match p with
-  | ast.Param name _ -> name
+  | ast.Param name _ _ -> name
+
+# --- entry points ---
+
+# Check a function body for linear-use violations. `fn_type` is the function's
+# fully-substituted type (its param types drive linearity of the parameters);
+# `body` is the fully-substituted typed body; `env` carries the `@linear:` markers
+# and the `@parammode:` masks.
+export fn check_fn_linear(params: List ast.Param, fn_type: types.Type,
+                          body: typed_ast.TypedExpr, fn_pos: source.SourcePos,
+                          env: Dict types.Scheme) -> LinCheck =
+  match first_bad_modifier(params, fn_type, env) with
+  | Just nm -> LinFail(fn_pos, bad_modifier_msg(nm))
+  | Nothing ->
+      linear_result(owned_param_names(params, fn_type, env),
+                    borrowed_param_names(params, fn_type, env), body, fn_pos, env)
+
+# Check a body with no parameters (a top-level `let` declaration): there are no
+# linear params to leak, but do-`let`/pattern/lambda binders inside are still
+# enforced by the walk.
+export fn check_body_linear(body: typed_ast.TypedExpr, env: Dict types.Scheme) -> LinCheck =
+  match lin_consumed(body, LinScope (Nil, Nil), env) with
+  | LinErr p m -> LinFail(p, m)
+  | LinOk _ _ -> LinPass
+
+fn linear_result(owned: List String, borrowed: List String, body: typed_ast.TypedExpr,
+                 fn_pos: source.SourcePos, env: Dict types.Scheme) -> LinCheck =
+  match lin_consumed(body, LinScope(owned, borrowed), env) with
+  | LinErr p m -> LinFail(p, m)
+  | LinOk consumed _ -> param_obligations(owned, borrowed, consumed, fn_pos)
+
+# Two opposite obligations. An OWNED linear parameter must appear in the consumed
+# set (else it leaked). A BORROWED one must NOT: consuming it spends a use that
+# belongs to the caller. Returning a borrowed parameter lands here too — a bare
+# reference in return position is a consume — so no separate escape rule is needed.
+fn param_obligations(owned: List String, borrowed: List String,
+                     consumed: List LinUse, fn_pos: source.SourcePos) -> LinCheck =
+  match first_consumed_borrow(borrowed, consumed) with
+  | Just u -> LinFail(luse_pos(u), consumed_borrow_msg(luse_name(u)))
+  | Nothing -> unused_linear_param(owned, consumed, fn_pos)
+
+fn first_consumed_borrow(borrowed: List String, consumed: List LinUse) -> Maybe LinUse =
+  match consumed with
+  | Nil -> Nothing
+  | Cons u rest -> if str_member(luse_name(u), borrowed) then Just(u) else first_consumed_borrow(borrowed, rest)
+
+fn unused_linear_param(owned: List String, consumed: List LinUse,
+                       fn_pos: source.SourcePos) -> LinCheck =
+  match owned with
+  | Nil -> LinPass
+  | Cons nm rest ->
+      if luse_member(nm, consumed) then unused_linear_param(rest, consumed, fn_pos)
+      else LinFail(fn_pos, leak_msg(nm))

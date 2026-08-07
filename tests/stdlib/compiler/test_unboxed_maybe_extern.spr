@@ -37,7 +37,7 @@ fn probe_program() -> typed_ast.TypedProgram =
     Cons(maybe_decl(),
     Cons(
       typed_ast.TFnDecl("probe",
-        Cons(ast.Param("v", Nothing), Cons(ast.Param("i", Nothing), Nil)),
+        Cons(ast.Param("v", Nothing, ast.ModeDefault), Cons(ast.Param("i", Nothing, ast.ModeDefault), Nil)),
         Nothing, Nothing, Nil,
         typed_ast.TMatch(
           typed_ast.TCall(

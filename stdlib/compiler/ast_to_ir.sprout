@@ -96,7 +96,7 @@ fn fv_param_names(params: List ast.Param) -> List String =
   | Nil -> Nil
   | Cons p rest ->
       match p with
-      | ast.Param n _ -> Cons(n, fv_param_names(rest))
+      | ast.Param n _ _ -> Cons(n, fv_param_names(rest))
 
 # Bind lambda param names (in order) to their argument SSA values in `captures` —
 # the beta-reduction substitution for an inlined immediately-applied lambda (arc (b),
@@ -334,7 +334,7 @@ fn ast_params_to_irtype_pairs(params: List ast.Param, names: List String) -> Lis
   match (params, names) with
   | (Nil, _) -> Nil
   | (_, Nil) -> Nil
-  | (Cons(ast.Param _ ann) rest_p, Cons n rest_n) ->
+  | (Cons(ast.Param _ ann _) rest_p, Cons n rest_n) ->
       Cons((n, ann_to_irtype(ann)), ast_params_to_irtype_pairs(rest_p, rest_n))
 
 # Build the IRLoadEnvSlot ops for the lifted lambda entry block.
@@ -5656,7 +5656,7 @@ fn param_names(params: List ast.Param) -> List String =
   | Nil -> Nil
   | Cons p rest ->
       match p with
-      | ast.Param n _ -> Cons(n, param_names(rest))
+      | ast.Param n _ _ -> Cons(n, param_names(rest))
 
 # Build an IRFunction from a (name, params, ret-type, blocks) tuple.
 # `params` carries per-param IRType for ir_rooting's heap-origin seeding
@@ -6501,7 +6501,7 @@ fn pb_index_scc(members: List (String, Int), m: Int, mset: Set, acc: Dict (Int, 
 # `count` synthetic ignored params, uniquely named with a lexer-reserved `$`.
 fn pb_pad_params(start: Int, count: Int) -> List ast.Param =
   if count <= 0 then Nil
-  else Cons(ast.Param("pbpad$" ++ int_to_string(start), Nothing), pb_pad_params(start + 1, count - 1))
+  else Cons(ast.Param("pbpad$" ++ int_to_string(start), Nothing, ast.ModeDefault), pb_pad_params(start + 1, count - 1))
 
 fn pb_zeros(count: Int, pos: source.SourcePos) -> List typed_ast.TypedExpr =
   if count <= 0 then Nil
@@ -6513,7 +6513,7 @@ fn pb_var_args(params: List ast.Param, pos: source.SourcePos) -> List typed_ast.
   | Nil -> Nil
   | Cons p rest ->
       match p with
-      | ast.Param n _ -> Cons(typed_ast.TVar(n, pb_int_ty(), pos), pb_var_args(rest, pos))
+      | ast.Param n _ _ -> Cons(typed_ast.TVar(n, pb_int_ty(), pos), pb_var_args(rest, pos))
 
 # Pad a call-arg list to length m with 0s.
 fn pb_pad_to(args: List typed_ast.TypedExpr, m: Int, pos: source.SourcePos) -> List typed_ast.TypedExpr =
@@ -7842,7 +7842,7 @@ fn synth_param_vars(params: List ast.Param) -> List typed_ast.TypedExpr =
   | Nil -> Nil
   | Cons p rest ->
       match p with
-      | ast.Param pname _ ->
+      | ast.Param pname _ _ ->
           Cons(typed_ast.TVar(pname, types.TConst(types.type_id("Unit")), source.SourcePos(0, 0, 0)),
                synth_param_vars(rest))
 

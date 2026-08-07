@@ -3,12 +3,15 @@ module main
 # M4.5: the leak rule stays STRICT — a borrow never discharges the consume
 # obligation. This is the whole point of the feature: a socket that is written
 # to but never closed must still be a leak.
+#
+# The binder is named `sock` and the .err pins that name, so this fixture cannot
+# pass by flagging the (legal) zero-use `borrowing` parameter inside `peek`.
 
 type linear File = File Int
 
-fn peek(f: borrowing File) -> Int = 0
+fn peek(h: borrowing File) -> Int = 0
 
-fn forgets_to_release(f: File) -> Int = peek(f)
+fn forgets_to_release(sock: File) -> Int = peek(sock)
 
 fn main() -> Unit !{IO} =
   print(to_string(forgets_to_release(File(1))))

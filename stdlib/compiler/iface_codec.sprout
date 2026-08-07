@@ -657,7 +657,7 @@ fn effect_from_maybe_labels(labels: Maybe (List String)) -> types.Effect =
 fn params_to_func_type(params: List ast.Param, ret: types.Type, local_vars: Dict types.Type) -> types.Type =
   match params with
   | Nil -> ret
-  | Cons (ast.Param _ maybe_te) rest ->
+  | Cons (ast.Param _ maybe_te _) rest ->
       types.TFunc(param_type_from_maybe(maybe_te, local_vars),
                   params_to_func_type(rest, ret, local_vars),
                   types.EffectPure)
@@ -1026,8 +1026,25 @@ fn join_ast_typeexprs(xs: List ast.TypeExpr) -> String =
 
 fn encode_ast_param(p: ast.Param) -> String =
   match p with
-  | ast.Param name maybe_te ->
-      string_concat_many(["(Param ", encode_quoted_str(name), " ", encode_maybe_typeexpr(maybe_te), ")"])
+  | ast.Param name maybe_te mode ->
+      string_concat_many(["(Param ", encode_quoted_str(name), " ", encode_maybe_typeexpr(maybe_te), " ", encode_param_mode(mode), ")"])
+
+# ParamMode rides as a quoted tag after the type expr — the same shape and reason
+# as Multiplicity below (reuses the quoted-string primitive, no new decode
+# primitive). Encode/decode must agree on this position. This is what carries
+# `borrowing`/`consuming` ACROSS MODULE BOUNDARIES: FnDecl/ExternFnDecl serialize
+# their full param list, so an imported `stdlib.net.write_all` keeps its modifiers
+# and the caller-side borrow check works cross-module.
+fn encode_param_mode(m: ast.ParamMode) -> String =
+  match m with
+  | ast.ModeBorrowing -> encode_quoted_str("Borrowing")
+  | ast.ModeConsuming -> encode_quoted_str("Consuming")
+  | ast.ModeDefault -> encode_quoted_str("Default")
+
+fn param_mode_from_str(s: String) -> ast.ParamMode =
+  if s == "Borrowing" then ast.ModeBorrowing
+  else if s == "Consuming" then ast.ModeConsuming
+  else ast.ModeDefault
 
 fn encode_ast_param_list(xs: List ast.Param) -> String =
   string_concat_many(["(", join_ast_params(xs), ")"])
@@ -1533,8 +1550,9 @@ fn decode_ast_param_at(s: String, bytes: Bytes, i: Int, total: Int) -> Maybe(ast
 fn decode_param_body(s: String, bytes: Bytes, i: Int, total: Int) -> Maybe(ast.Param, Int) =
   let Just(name, j) = decode_quoted_str_at(s, bytes, skip_ws(s, bytes, i, total), total) else Nothing
       Just(maybe_te, k) = decode_maybe_typeexpr_at(s, bytes, skip_ws(s, bytes, j, total), total) else Nothing
-      Just end = expect_char(s, bytes, skip_ws(s, bytes, k, total), total, ')') else Nothing
-  in Just((ast.Param(name, maybe_te), end))
+      Just(mode_str, mp) = decode_quoted_str_at(s, bytes, skip_ws(s, bytes, k, total), total) else Nothing
+      Just end = expect_char(s, bytes, skip_ws(s, bytes, mp, total), total, ')') else Nothing
+  in Just((ast.Param(name, maybe_te, param_mode_from_str(mode_str)), end))
 
 fn decode_ast_param_list_at(s: String, bytes: Bytes, i: Int, total: Int) -> Maybe (List ast.Param, Int) =
   match expect_char(s, bytes, i, total, '(') with

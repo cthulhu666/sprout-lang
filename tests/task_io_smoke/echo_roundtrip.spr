@@ -1,5 +1,5 @@
 import stdlib.task (Scope, with_scope, task_spawn)
-import stdlib.net (TcpConnection, connect, write_all_utf8, read_exact_utf8, tcp_listen, tcp_accept, tcp_read, tcp_write)
+import stdlib.net (TcpConnection, connect, close, write_all_utf8, read_exact_utf8, tcp_listen, tcp_accept, tcp_read, tcp_write)
 import stdlib.string as string
 
 # L0.3 I/O parking — exercises the poller paths a single read-park does NOT:
@@ -25,6 +25,11 @@ fn server(listener: Int) -> Unit !{IO} =
 
 # Connect from within the task (after `server` has parked on accept), so the
 # accept genuinely parks rather than finding a pre-filled backlog.
+#
+# M4.5: `conn` is used FOUR times and released once — the acquire/use-N/release
+# shape that strict consume-exactly-once cannot express. The four ops take it
+# `borrowing`; `close` is the single consuming use. Before borrowing this test
+# leaked the connection outright and nothing noticed.
 fn client(port: Int) -> Unit !{IO} =
   match connect("127.0.0.1", port) with
   | Ok conn ->
@@ -33,14 +38,15 @@ fn client(port: Int) -> Unit !{IO} =
         read_ack(conn, "client round1 ")
         send_or_fail(conn, "ping2")
         read_ack(conn, "client round2 ")
+        close(conn)
   | Err e -> term_write("client connect failed\n")
 
-fn send_or_fail(conn: TcpConnection, msg: String) -> Unit !{IO} =
+fn send_or_fail(conn: borrowing TcpConnection, msg: String) -> Unit !{IO} =
   match write_all_utf8(conn, msg) with
   | Ok _ -> term_write("")
   | Err _ -> term_write("client write failed\n")
 
-fn read_ack(conn: TcpConnection, label: String) -> Unit !{IO} =
+fn read_ack(conn: borrowing TcpConnection, label: String) -> Unit !{IO} =
   match read_exact_utf8(conn, 4) with
   | Ok a ->
       do

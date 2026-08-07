@@ -1,0 +1,107 @@
+module main
+import stdlib.test (TestState, new_state, assert_true, assert_false, summary)
+import stdlib.compiler.compiler as compiler
+import stdlib.compiler.source as source
+
+# M4.5 ERASURE. `borrowing`/`consuming` are a type-checker feature: they must
+# reach no IR pass and change no emitted instruction.
+#
+# This matters beyond tidiness. docs/linear-ir-m5-feasibility-2026-08-07.md found
+# that the historical GC-use-after-free bugs were all CLASSIFICATION-COMPLETENESS
+# failures — a lowering pass meeting a shape it does not handle. A modifier that
+# never influences lowering cannot introduce that failure mode: ir_lowering and
+# ir_rooting see exactly the TcpConnection handle they saw before.
+#
+# The guarantee is enforced as "lowering never READS the mode", not "the mode is
+# absent from the AST" — ast_to_ir.ast_params_to_irtype_pairs destructures
+# `ast.Param _ ann _`, discarding it. Note this is weaker than the wording in
+# docs/linear-borrowing-v0.md §9 ("stripped before lowering"): the field is still
+# present on the node, it is simply never consulted. The testable form of that is
+# byte-identical IR, which is what the first assertion below pins.
+#
+# `consuming` vs unmodified is the exact pair to compare: ParamMode.ModeConsuming
+# and ModeDefault mean the same thing to the checker (passing a linear value IS a
+# consume), so the two sources below differ in EXACTLY one token and must emit
+# byte-identical IR. `just ir-golden-diff` is the standing whole-corpus version of
+# this same guard.
+
+fn contains(haystack: String, needle: String) -> Bool =
+  str_find(haystack, needle) != -1
+
+let unmodified_src =
+  "type linear File = File Int\n" ++
+  "fn release(f: File) -> Int = match f with | File n -> n\n" ++
+  "fn main() -> Int !{IO} = release(File(42))\n"
+
+let consuming_src =
+  "type linear File = File Int\n" ++
+  "fn release(f: consuming File) -> Int = match f with | File n -> n\n" ++
+  "fn main() -> Int !{IO} = release(File(42))\n"
+
+# Exercises a real borrow: `peek` borrows, `release` consumes.
+let borrowing_src =
+  "type linear File = File Int\n" ++
+  "fn peek(f: borrowing File) -> Int = 1\n" ++
+  "fn release(f: consuming File) -> Int = match f with | File n -> n\n" ++
+  "fn use_it(f: File) -> Int =\n" ++
+  "  do\n" ++
+  "    let a = peek(f)\n" ++
+  "    a + release(f)\n" ++
+  "fn main() -> Int !{IO} = use_it(File(42))\n"
+
+fn ir_ok(r: compiler.IrFullResult) -> Bool =
+  match r with
+  | compiler.IrFullOk _ -> true
+  | compiler.IrFullFail _ -> false
+
+fn ir_text(r: compiler.IrFullResult) -> String =
+  match r with
+  | compiler.IrFullOk ir -> ir
+  | compiler.IrFullFail _ -> ""
+
+fn main() -> Unit !{IO} =
+  do
+    state <- new_state()
+    match env_get("SPROUT_STDLIB_ROOT") with
+    | Nothing -> ()
+    | Just stdlib_root ->
+        do
+          let unmod_path = "/tmp/sprout_test_borrow_erasure_unmod.sprout"
+          let consuming_path = "/tmp/sprout_test_borrow_erasure_consuming.sprout"
+          let borrowing_path = "/tmp/sprout_test_borrow_erasure_borrowing.sprout"
+          _ <- write_file(unmod_path, unmodified_src)
+          _ <- write_file(consuming_path, consuming_src)
+          _ <- write_file(borrowing_path, borrowing_src)
+
+          r_unmod <- compiler.compile_full_ir(source.FilePath(unmod_path), source.StdlibRoot(stdlib_root))
+          r_consuming <- compiler.compile_full_ir(source.FilePath(consuming_path), source.StdlibRoot(stdlib_root))
+          r_borrowing <- compiler.compile_full_ir(source.FilePath(borrowing_path), source.StdlibRoot(stdlib_root))
+
+          assert_true(state, "unmodified linear param compiles", ir_ok(r_unmod))
+          assert_true(state, "consuming linear param compiles", ir_ok(r_consuming))
+          assert_true(state, "borrowing linear param compiles", ir_ok(r_borrowing))
+
+          let unmod_ir = ir_text(r_unmod)
+          let consuming_ir = ir_text(r_consuming)
+          let borrowing_ir = ir_text(r_borrowing)
+
+          # Guard the absence proofs below: if compilation had failed, the IR
+          # would be "" and every `assert_false(contains(...))` would pass for
+          # the wrong reason.
+          assert_true(state, "unmodified IR contains @release definition",
+            contains(unmod_ir, "define i64 @release"))
+          assert_true(state, "borrowing IR contains @peek definition",
+            contains(borrowing_ir, "define i64 @peek"))
+
+          # THE erasure assertion: one token of source difference, zero bytes of
+          # IR difference.
+          assert_true(state, "consuming emits byte-identical IR to unmodified",
+            consuming_ir == unmod_ir)
+
+          # No modifier text leaks into a symbol name, type name or comment.
+          assert_false(state, "no 'borrowing' token survives into IR",
+            contains(borrowing_ir, "borrowing"))
+          assert_false(state, "no 'consuming' token survives into IR",
+            contains(consuming_ir, "consuming"))
+
+    summary(state)

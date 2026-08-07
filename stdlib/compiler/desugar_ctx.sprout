@@ -51,7 +51,7 @@ fn extract_param_type_names(params: List ast.Param) -> List (Maybe String) =
   | Nil -> Nil
   | Cons p rest ->
       match p with
-      | ast.Param _ mtype ->
+      | ast.Param _ mtype _ ->
           Cons(type_expr_bare_name(mtype), extract_param_type_names(rest))
 
 # Dispatch desugar for a list of call args against the callee's param type list.

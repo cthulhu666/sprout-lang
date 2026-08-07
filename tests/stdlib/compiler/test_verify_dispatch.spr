@@ -77,7 +77,7 @@ fn main() -> Unit !{IO} =
     # a constrained callee with an injected dict. This exercises arg-splitting,
     # dict-head extraction, and the signature table end to end. ---
     let callee_decl = typed_ast.TFnDecl("vec_sort_by",
-      [ast.Param("f", Just(te_proj())), ast.Param("v", Just(te_vec_a()))],
+      [ast.Param("f", Just(te_proj()), ast.ModeDefault), ast.Param("v", Just(te_vec_a()), ast.ModeDefault)],
       Nothing, Nothing, [ord_k()],
       typed_ast.TUnit(t_int(), dpos()))
     # value args, typed concretely: f : (Int,Int)->Int, v : Vec (Int,Int)
@@ -108,7 +108,7 @@ fn main() -> Unit !{IO} =
     # return is `Maybe Int` the truth is a = Int, and a CORRECT injected `Read Int`
     # dict matches -> verifies clean (Nothing). Phase 1 skipped this; phase 2a pins it. ---
     let read_decl = typed_ast.TFnDecl("read_as",
-      [ast.Param("s", Just(ast.TypeName("String")))],
+      [ast.Param("s", Just(ast.TypeName("String")), ast.ModeDefault)],
       Just(ast.TypeApply(ast.TypeName("Maybe"), ast.TypeName("a"))),
       Nothing, [ast.TypeConstraint("Read", [ast.TypeName("a")])],
       typed_ast.TUnit(t_int(), dpos()))

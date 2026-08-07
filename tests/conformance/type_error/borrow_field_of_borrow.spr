@@ -1,0 +1,23 @@
+module main
+
+# M4.5 containment: destructuring a BORROWED value yields BORROWED fields. If the
+# linear field bound here could be consumed, `steal` would release the inner File
+# while the caller still owns the Wrap and will release it again -- a double
+# consume laundered through a pattern match. Reads through a borrow are borrows,
+# all the way down.
+
+type linear File = File Int
+type linear Wrap = Wrap File
+
+fn release(f: consuming File) -> Int = match f with | File n -> n
+fn release_wrap(w: consuming Wrap) -> Int = match w with | Wrap f -> release(f)
+
+fn steal(w: borrowing Wrap) -> Int =
+  match w with
+  | Wrap f -> release(f)
+
+fn main() -> Unit !{IO} =
+  do
+    let w = Wrap(File(1))
+    let a = steal(w)
+    print(to_string(a + release_wrap(w)))

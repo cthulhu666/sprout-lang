@@ -327,11 +327,11 @@ fn all_annotated(params: List ast.Param) -> Maybe (List ast.TypeExpr) =
   | Nil -> Just(Nil)
   | Cons p rest ->
       match p with
-      | ast.Param _ (Just te) ->
+      | ast.Param _ (Just te) _ ->
           match all_annotated(rest) with
           | Just tes -> Just(Cons(te, tes))
           | Nothing -> Nothing
-      | ast.Param _ Nothing -> Nothing
+      | ast.Param _ Nothing _ -> Nothing
 
 fn collect_decls(decls: List typed_ast.TypedDecl, sigs: Dict (List ast.TypeExpr, Maybe ast.TypeExpr, List ast.TypeConstraint)) -> List VerifyOutcome =
   match decls with

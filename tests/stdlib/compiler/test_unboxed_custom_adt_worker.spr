@@ -30,7 +30,7 @@ fn box_decl() -> typed_ast.TypedDecl =
 # fn bget(i) = if i < 0 then Empty else Full(i)
 fn bget_decl() -> typed_ast.TypedDecl =
   typed_ast.TFnDecl("bget",
-    Cons(ast.Param("i", Nothing), Nil),
+    Cons(ast.Param("i", Nothing, ast.ModeDefault), Nil),
     Nothing, Nothing, Nil,
     typed_ast.TIf(
       typed_ast.TBinary("<",
@@ -50,7 +50,7 @@ fn bget_decl() -> typed_ast.TypedDecl =
 #   | Empty  -> 0
 fn probe2_decl() -> typed_ast.TypedDecl =
   typed_ast.TFnDecl("probe2",
-    Cons(ast.Param("i", Nothing), Nil),
+    Cons(ast.Param("i", Nothing, ast.ModeDefault), Nil),
     Nothing, Nothing, Nil,
     typed_ast.TMatch(
       typed_ast.TCall(

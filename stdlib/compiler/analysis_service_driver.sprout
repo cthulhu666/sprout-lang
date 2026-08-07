@@ -530,7 +530,7 @@ fn augment_probe_source(src: String, query: String) -> String =
 fn first_param_type(params: List ast.Param) -> Maybe ast.TypeExpr =
   match params with
   | Nil -> Nothing
-  | [p | _] -> match p with | ast.Param _ mty -> mty
+  | [p | _] -> match p with | ast.Param _ mty _ -> mty
 
 fn find_probe_query_type(decls: List ast.Decl) -> Maybe ast.TypeExpr =
   match decls with

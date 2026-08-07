@@ -74,7 +74,7 @@ fn all_pure_fields(fields: List typed_ast.TypedRecordField) -> Bool =
 
 fn param_binds(name: String, p: ast.Param) -> Bool =
   match p with
-  | ast.Param n _ -> n == name
+  | ast.Param n _ _ -> n == name
 
 fn params_bind(name: String, ps: List ast.Param) -> Bool =
   match ps with
