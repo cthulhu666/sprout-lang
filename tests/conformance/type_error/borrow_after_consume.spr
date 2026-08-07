@@ -1,0 +1,22 @@
+module main
+
+# M4.5 ORDERING: the M4.2 consumed-set analysis is order-insensitive (it only
+# checks sibling disjointness), so adding a non-consuming use category opens a
+# use-after-free hole: the borrow below records no consume, and the consume
+# above records one, so a set-only analysis sees no conflict. Sequential
+# composition must reject a borrow that follows the consume.
+# Evaluation order is fixed left-to-right by docs/spec-v0.md 6.1.
+
+type linear File = File Int
+
+fn release(f: consuming File) -> Int = match f with | File n -> n
+fn peek(f: borrowing File) -> Int = 0
+
+fn use_after(f: File) -> Int =
+  do
+    let a = release(f)
+    let b = peek(f)
+    a + b
+
+fn main() -> Unit !{IO} =
+  print(to_string(use_after(File(1))))

@@ -1,0 +1,9 @@
+module main
+
+# M4.5: linearity is per-declaration, so a type-variable parameter's linearity
+# is not decidable here; polymorphism over linear types is an M4.2 non-goal.
+
+fn bad(x: borrowing a) -> Int = 0
+
+fn main() -> Unit !{IO} =
+  print(to_string(bad(1)))

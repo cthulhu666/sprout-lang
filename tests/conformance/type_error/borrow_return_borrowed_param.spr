@@ -1,0 +1,16 @@
+module main
+
+# M4.5: returning a `borrowing` parameter would let the borrow outlive the call
+# and escape the caller's ownership. A bare reference in return position is a
+# consume, so this is caught by the same borrowing-param rule.
+
+type linear File = File Int
+
+fn release(f: consuming File) -> Int = match f with | File n -> n
+
+fn escape(f: borrowing File) -> File = f
+
+fn main() -> Unit !{IO} =
+  do
+    let f = File(1)
+    print(to_string(release(escape(f))))

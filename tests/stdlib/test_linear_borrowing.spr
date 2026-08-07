@@ -1,0 +1,89 @@
+import stdlib.test (check_eq, run_suite)
+
+# M4.5 borrowing: a `borrowing` parameter is used WITHOUT claiming the value's one
+# consuming use, so an acquire -> use N times -> release once resource (a socket)
+# becomes expressible under linearity. The rejection counterparts live in
+# tests/conformance/type_error/borrow_*. See docs/linear-borrowing-v0.md.
+#
+# Note every call below binds the linear value FIRST and consumes it explicitly.
+# Passing a freshly-constructed linear value straight into a borrowing position
+# (`dist_sq(Pos(x = 3, y = 4))`) is rejected: nothing would ever consume it.
+# See tests/conformance/type_error/borrow_arg_not_variable.
+
+type linear File = File Int
+type linear Pos = (x: Int, y: Int)
+
+# The consuming exits. A linear ADT is consumed by matching it; an OWNED linear
+# record is consumed by a field read (unchanged from M4.2 — spec-v0.md 5.8).
+fn release(f: consuming File) -> Int = match f with | File n -> n
+fn release_pos(p: consuming Pos) -> Int = p.x
+
+# --- borrowing parameters: 0..n non-consuming uses, no consume obligation ---
+
+# Borrowed zero times. Legal: the obligation belongs to the CALLER, not here.
+fn ignore(f: borrowing File) -> Int = 0
+
+# Borrowed once, as the base of a field read (rule (b): every use of a Borrowed
+# binding is a borrow, including a field-access base).
+fn get_x(p: borrowing Pos) -> Int = p.x
+
+# Borrowed MORE THAN ONCE. This is the shape strict M4.2 could not express at all,
+# and the reason `TcpConnection` could never be `type linear`. Under M4.2 this
+# same body with an owned `p` is a reuse (tests/conformance/type_error/linear_reuse).
+fn dist_sq(p: borrowing Pos) -> Int = p.x * p.x + p.y * p.y
+
+# A borrowing param passed onward to another borrowing position stays a borrow.
+fn forward(p: borrowing Pos) -> Int = get_x(p) + dist_sq(p)
+
+# --- the session shape: borrow N times, then consume exactly once ---
+
+# Straight-line: two borrows followed by the single consume, in that order.
+fn session(f: File) -> Int =
+  do
+    let a = ignore(f)
+    let b = ignore(f)
+    a + b + release(f)
+
+# Recursive: each call borrows, no consume in the loop; the caller consumes after.
+fn drain(f: borrowing File, n: Int) -> Int =
+  if n <= 0 then 0 else ignore(f) + drain(f, n - 1)
+
+fn drain_then_close(f: File) -> Int =
+  do
+    let d = drain(f, 3)
+    d + release(f)
+
+# Branch convergence is unchanged for consumes, but borrows need NOT converge:
+# a borrow carries no obligation, so one arm may borrow and the other not.
+fn borrow_one_arm(c: Bool, f: File) -> Int =
+  if c then ignore(f) + release(f) else release(f)
+
+# Owning wrappers for the record cases: bind, borrow, then consume.
+fn owned_get_x() -> Int =
+  do
+    let p = Pos(x = 3, y = 4)
+    let v = get_x(p)
+    v + release_pos(p) - 3
+
+fn owned_dist_sq() -> Int =
+  do
+    let p = Pos(x = 3, y = 4)
+    let v = dist_sq(p)
+    v + release_pos(p) - 3
+
+fn owned_forward() -> Int =
+  do
+    let p = Pos(x = 3, y = 4)
+    let v = forward(p)
+    v + release_pos(p) - 3
+
+fn main() -> Unit !{IO} =
+  run_suite("linear_borrowing", [
+    check_eq("borrowed field read", owned_get_x(), 3),
+    check_eq("borrowed twice", owned_dist_sq(), 25),
+    check_eq("borrow passed onward", owned_forward(), 28),
+    check_eq("borrow then consume", session(File(7)), 7),
+    check_eq("recursive borrow then consume", drain_then_close(File(9)), 9),
+    check_eq("borrow in one arm only", borrow_one_arm(true, File(5)), 5),
+    check_eq("borrow in neither arm", borrow_one_arm(false, File(5)), 5)
+  ])

@@ -1,0 +1,14 @@
+module main
+
+# M4.5: an argument at a `borrowing` position must be a variable reference. A
+# freshly-constructed linear value there is borrowed and then dropped on the
+# floor -- nothing would ever consume it, and the M4.2 analysis tracks binders
+# only, so it would escape the leak check entirely (BACKLOG P3 "discarded
+# linear expression result").
+
+type linear File = File Int
+
+fn peek(f: borrowing File) -> Int = 0
+
+fn main() -> Unit !{IO} =
+  print(to_string(peek(File(1))))
