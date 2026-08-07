@@ -127,23 +127,55 @@ let exp_bias = 1023
 fn raw_biased_exp(x: Double) -> Int =
   double_to_bits(x) / exp_field_unit
 
-# NOTE for whoever converts sqrt_reduce / cbrt_reduce to this technique: general
-# `binary_exponent` / `mantissa_of` / `two_pow` helpers were written and then
-# REMOVED before landing, because `ln_reduce` below inlines the decomposition (one
-# division instead of two, which is measurable) and that left the helpers with no
-# callers. A private function with no callers is still emitted into the IR of every
-# module that imports this one, so they were bloat, not convenience. Reintroduce
-# whichever the sqrt/cbrt conversion actually calls — and if it also inlines, do not
-# add them back at all.
+# 2^n as an exact Double, for n in the NORMAL exponent range [-1022, 1023]. Outside
+# that the true value is subnormal or infinite and this formula silently produces
+# garbage, so a caller that can reach further must split the scaling — exp_scale does.
+fn two_pow(n: Int) -> Double =
+  double_from_bits((n + exp_bias) * exp_field_unit)
+
+# --- Floor-dividing the exponent, branchlessly ---
 #
-# Two things that cost time to discover and are worth reusing:
-#   * bind the biased exponent ONCE in a `where`. Recomputing it per branch made
-#     normal-magnitude `ln` go 5 -> 7 ns, giving back at the common case what the
-#     change won at the extremes.
-#   * fold any subnormal-lift correction into the exponent BEFORE the multiply by a
-#     constant like ln2, never as a separate subtraction afterwards — see
-#     ln_reduce_norm for why (it is a single-rounding property, and the wide-reduction
-#     test catches getting it wrong).
+# The root reductions need floor(e/2) and floor(e/3), but Sprout's `/` truncates
+# toward ZERO, which is not floor for a negative numerator: `-1 / 2` is 0 where
+# floor(-0.5) is -1. The difference is not cosmetic — at x = 0.5 the exponent is -1,
+# so floor gives j = -1 and a mantissa of 2.0 (inside [1,4)), while truncation gives
+# j = 0 and a mantissa of 0.5, OUTSIDE the interval Newton is seeded for. Every
+# negative odd exponent hits it: half of all inputs below 1.0.
+#
+# Rather than correct after the fact (`if a < 0 && q*n != a then q-1`, which needs a
+# branch and, having no `%` operator, a multiply to test the remainder), the
+# numerator is BIASED non-negative first. A binary64 exponent is never below -1074,
+# and 1074 is divisible by both 2 and 3, so
+#
+#     floor(e/n)  ==  (e + 1074) / n  -  1074/n        for every e >= -1074
+#
+# because (e + 1074) is non-negative, where truncation and floor coincide, and the
+# constant shift comes back out exactly. Verified exhaustively over the whole
+# domain e in [-1074, 1023] for both divisors.
+#
+# This is not micro-optimisation for its own sake: the branchy version cost `cbrt`
+# ~10% at normal magnitudes (7.41 vs 6.66 ns), which is exactly the "gave back at
+# the common case what it won at the extremes" trap that `ln` hit earlier.
+let exp_floor_bias = 1074
+
+fn floor_div_2(e: Int) -> Int = (e + exp_floor_bias) / 2 - 537
+
+fn floor_div_3(e: Int) -> Int = (e + exp_floor_bias) / 3 - 358
+
+# A general `binary_exponent(x)` helper has now been written and deleted TWICE —
+# once for `ln`, once for sqrt/cbrt/exp. Each reduction ends up inlining the
+# decomposition in its own `where` block, because it already has the bit pattern in
+# hand and wants ONE division rather than two, so the general helper never acquires
+# a caller. A private function with no callers is still emitted into the IR of every
+# module that imports this one. If you reach for it a third time, check whether your
+# caller can inline it first.
+
+# Divide a positive finite x by 2^n exactly, by subtracting n from its exponent
+# field. Exact and rounding-free — the mantissa bits are carried over untouched.
+# Requires the result to be normal, which every caller here guarantees by
+# construction (they divide by the value's own exponent, landing in [1, 2^k)).
+fn scale_down_pow2(x: Double, n: Int) -> Double =
+  double_from_bits(double_to_bits(x) - n * exp_field_unit)
 
 # --- Why the reductions thread an accumulator ---
 # `sqrt_reduce`, `ln_reduce` and `cbrt_reduce` each carry the extracted factor along as a
@@ -273,17 +305,49 @@ fn sqrt_iter(x: Double, guess: Double, i: Int) -> Double =
 #
 # `scale` is threaded rather than returned as `(mantissa, scale)` for a measured reason —
 # see "Why the reductions thread an accumulator" above.
-fn sqrt_reduce(x: Double, scale: Double) -> Double =
+# O(1) since 2026-08-07 — the exponent comes out of the bit pattern rather than
+# being walked in strides. `sqrt_reduce_strided` below is the retained oracle.
+#
+# sqrt(x) = sqrt(m) * 2^j where x = m * 2^(2j). The exponent must be split into an
+# EVEN part (which halves exactly) and a remainder that stays with the mantissa, so
+# j = floor(e/2) and m lands in [1, 4) — the interval sqrt_iter is seeded for.
+#
+# floor, not truncation: see floor_div_pos. At x = 0.5 (e = -1) floor gives j = -1
+# and m = 2.0; truncation would give j = 0 and m = 0.5, seeding Newton outside its
+# interval. That is half of all inputs below 1.0, not a corner case.
+#
+# Both the division by 2^(2j) and the multiply by 2^j are exact powers of two, so
+# the reduction contributes zero rounding error — the same property the stride
+# ladder had, and why the two agree bit-for-bit.
+fn sqrt_reduce(x: Double) -> Double =
+  if raw_biased_exp(x) == 0 then sqrt_reduce_norm(x * two54, 0 - 54)
+  else sqrt_reduce_norm(x, 0)
+
+# `adj` is the exponent correction owed by a subnormal lifted by 2^54. It is folded
+# into the exponent BEFORE the split, never applied to the result afterwards — the
+# same single-rounding discipline ln_reduce_norm documents.
+fn sqrt_reduce_norm(x: Double, adj: Int) -> Double =
+  two_pow(j) * sqrt_iter(m, m, 0)
+where
+  e = raw_biased_exp(x) - exp_bias + adj
+  j = floor_div_2(e)
+  m = scale_down_pow2(x, 2 * j - adj)
+
+# The pre-2026-08-07 stride ladder, retained as the accuracy oracle for the O(1)
+# form (tests/stdlib/test_math_wide_reduction.spr cross-checks them). It is an
+# independently-derived implementation of the same split, which is what makes it
+# worth keeping — a test comparing a function against itself proves nothing.
+fn sqrt_reduce_strided(x: Double, scale: Double) -> Double =
   if x >= 4.0 then
-    if x < two8 then sqrt_reduce(x * 0.25, scale * 2.0)
-    else if x < two64 then sqrt_reduce(x * inv_two8, scale * 16.0)
-    else if x < two512 then sqrt_reduce(x * inv_two64, scale * two32)
-    else sqrt_reduce(x * inv_two512, scale * two256)
+    if x < two8 then sqrt_reduce_strided(x * 0.25, scale * 2.0)
+    else if x < two64 then sqrt_reduce_strided(x * inv_two8, scale * 16.0)
+    else if x < two512 then sqrt_reduce_strided(x * inv_two64, scale * two32)
+    else sqrt_reduce_strided(x * inv_two512, scale * two256)
   else if x < 1.0 then
-    if x >= inv_two8 then sqrt_reduce(x * 4.0, scale * 0.5)
-    else if x >= inv_two64 then sqrt_reduce(x * two8, scale * 0.0625)
-    else if x >= inv_two512 then sqrt_reduce(x * two64, scale * inv_two32)
-    else sqrt_reduce(x * two512, scale * inv_two256)
+    if x >= inv_two8 then sqrt_reduce_strided(x * 4.0, scale * 0.5)
+    else if x >= inv_two64 then sqrt_reduce_strided(x * two8, scale * 0.0625)
+    else if x >= inv_two512 then sqrt_reduce_strided(x * two64, scale * inv_two32)
+    else sqrt_reduce_strided(x * two512, scale * inv_two256)
   else scale * sqrt_iter(x, x, 0)
 
 # Domain: x >= 0. A negative argument is outside the real domain -> NaN (Rule 2),
@@ -295,7 +359,15 @@ export fn sqrt(x: Double) -> Double =
   if x < 0.0 then nan
   else if x == 0.0 then x
   else if x * 0.5 == x then x
-  else sqrt_reduce(x, 1.0)
+  else sqrt_reduce(x)
+
+# sqrt via the reference stride ladder. Exported for the cross-check test only —
+# the production path is `sqrt`.
+export fn sqrt_strided(x: Double) -> Double =
+  if x < 0.0 then nan
+  else if x == 0.0 then x
+  else if x * 0.5 == x then x
+  else sqrt_reduce_strided(x, 1.0)
 
 # --- Exponential, logarithm, cube root, power ---
 # Each is range reduction into a narrow interval + a series (or Newton) there. The
@@ -350,17 +422,69 @@ fn exp_series(r: Double) -> Double =
 # comparisons and four module-global loads on every call — measured as a 2.6x slowdown on
 # ln's hot path when this was first written flat. Nested, the common path pays two
 # comparisons and never touches the ladder constants.
+# --- Double -> Int for an integral Double, via the magic-number trick ---
+#
+# Sprout has no Double -> Int conversion (`to_double` only goes the other way), and
+# exp's scale factor `k` is a Double-valued integer while `two_pow` needs an Int.
+# Bit access supplies one: for integral d in [0, 2^52), `d + 2^52` has exponent
+# field exactly 52+1023 and its MANTISSA bits are d, so subtracting the bit pattern
+# of 2^52 leaves d exactly. Verified against the full sampled range up to 2^52-1.
+#
+# Deliberately PRIVATE. A general `Double -> Int` is new public surface — it needs a
+# rounding-mode decision (truncate? round-half-even?) and a story for out-of-range
+# and non-integral inputs, none of which this internal use requires. Filed as a
+# follow-up rather than smuggled in.
+#
+# Bits of 2^52: exponent field 52+1023 = 1075, mantissa 0 -> 1075 * 2^52.
+# `two52` itself is defined with the other powers of two near the top of the file.
+let two52_bits = 4841369599423283200
+
+fn int_of_integral_pos(d: Double) -> Int =
+  double_to_bits(d + two52) - two52_bits
+
+fn int_of_integral(d: Double) -> Int =
+  if d < 0.0 then 0 - int_of_integral_pos(0.0 - d)
+  else int_of_integral_pos(d)
+
+# O(1) since 2026-08-07: build 2^k directly instead of walking k in strides.
+#
+# Range. exp's guards bound x to [-746, 710], so k = round(x/ln2) lands in
+# [-1076, 1025], and exp's own `k < -1021` branch shifts the subnormal tail up by
+# 54 before calling here — so `ki` arrives in [-1022, 1025]. `two_pow` is exact on
+# [-1022, 1023]; past 1023 the exponent field would overflow into the sign bit and
+# silently yield a NEGATIVE number, so ki > 1023 is split into two exact factors.
+#
+# Splitting rather than short-circuiting to inf, because k = 1024 does NOT mean the
+# result overflows: y is exp_series(r) with |r| <= ln2/2, so y is in [0.707, 1.415],
+# and y * 2^1024 is finite whenever y < ~1.34. exp(709.78) is exactly that case —
+# k = 1024 with a finite result of ~1.79e308, just under DBL_MAX. A first version
+# returned inf there and `test_math_transcendental`'s "exp(709.78) is finite"
+# caught it; the wide-reduction sweep did NOT, because its 0.37 step from -745
+# stopped at 698 and never reached the overflow boundary. The sweep now runs past
+# 710 as well.
+#
+# y * 2^1023 cannot itself overflow (1.415 * 8.99e307 = 1.27e308 < DBL_MAX), so the
+# split is safe, and the trailing multiply overflows to +inf exactly when it should.
+#
+# One multiply means ONE rounding, where the stride ladder rounded at every step.
 fn exp_scale(y: Double, k: Double) -> Double =
+  if ki > 1023 then y * two_pow(1023) * two_pow(ki - 1023)
+  else y * two_pow(ki)
+where
+  ki = int_of_integral(k)
+
+# The pre-2026-08-07 stride ladder, retained as the accuracy oracle.
+fn exp_scale_strided(y: Double, k: Double) -> Double =
   if k >= 1.0 then
-    if k < 8.0 then exp_scale(y * 2.0, k - 1.0)
-    else if k < 64.0 then exp_scale(y * two8, k - 8.0)
-    else if k < 512.0 then exp_scale(y * two64, k - 64.0)
-    else exp_scale(y * two512, k - 512.0)
+    if k < 8.0 then exp_scale_strided(y * 2.0, k - 1.0)
+    else if k < 64.0 then exp_scale_strided(y * two8, k - 8.0)
+    else if k < 512.0 then exp_scale_strided(y * two64, k - 64.0)
+    else exp_scale_strided(y * two512, k - 512.0)
   else if k <= -1.0 then
-    if k > -8.0 then exp_scale(y * 0.5, k + 1.0)
-    else if k > -64.0 then exp_scale(y * inv_two8, k + 8.0)
-    else if k > -512.0 then exp_scale(y * inv_two64, k + 64.0)
-    else exp_scale(y * inv_two512, k + 512.0)
+    if k > -8.0 then exp_scale_strided(y * 0.5, k + 1.0)
+    else if k > -64.0 then exp_scale_strided(y * inv_two8, k + 8.0)
+    else if k > -512.0 then exp_scale_strided(y * inv_two64, k + 64.0)
+    else exp_scale_strided(y * inv_two512, k + 512.0)
   else y
 
 # exp(x) = 2^k * exp(r) where x = k*ln2 + r and |r| <= ln2/2.
@@ -379,6 +503,18 @@ export fn exp(x: Double) -> Double =
   else if x < -746.0 then 0.0
   else if k < -1021.0 then exp_scale(exp_series(r), k + 54.0) / two54
   else exp_scale(exp_series(r), k)
+where
+  k = round_nearest(x * inv_ln2)
+  r = x - k * ln2
+
+# exp via the reference stride ladder. Exported for the cross-check test only —
+# the production path is `exp`.
+export fn exp_strided(x: Double) -> Double =
+  if is_nan(x) then x
+  else if x > 710.0 then inf
+  else if x < -746.0 then 0.0
+  else if k < -1021.0 then exp_scale_strided(exp_series(r), k + 54.0) / two54
+  else exp_scale_strided(exp_series(r), k)
 where
   k = round_nearest(x * inv_ln2)
   r = x - k * ln2
@@ -524,17 +660,37 @@ fn cbrt_iter(x: Double, guess: Double, i: Int) -> Double =
 #
 # `scale` is threaded rather than returned as `(mantissa, scale)` for a measured reason —
 # see "Why the reductions thread an accumulator" above.
-fn cbrt_reduce(x: Double, scale: Double) -> Double =
+# O(1) since 2026-08-07, same shape as sqrt_reduce but splitting the exponent into
+# thirds: cbrt(x) = cbrt(m) * 2^j where x = m * 2^(3j), j = floor(e/3), m in [1, 8)
+# — the interval cbrt_iter's seed of 2.0 is chosen for.
+#
+# floor again, not truncation, and the mod-3 case is stricter than sqrt's mod-2:
+# TWO of every three negative exponents disagree between floor and truncation
+# rather than one of two.
+fn cbrt_reduce(x: Double) -> Double =
+  if raw_biased_exp(x) == 0 then cbrt_reduce_norm(x * two54, 0 - 54)
+  else cbrt_reduce_norm(x, 0)
+
+fn cbrt_reduce_norm(x: Double, adj: Int) -> Double =
+  two_pow(j) * cbrt_iter(m, 2.0, 0)
+where
+  e = raw_biased_exp(x) - exp_bias + adj
+  j = floor_div_3(e)
+  m = scale_down_pow2(x, 3 * j - adj)
+
+# The pre-2026-08-07 stride ladder, retained as the accuracy oracle. See
+# sqrt_reduce_strided for why an independently-derived implementation is kept.
+fn cbrt_reduce_strided(x: Double, scale: Double) -> Double =
   if x >= 8.0 then
-    if x < two12 then cbrt_reduce(x * 0.125, scale * 2.0)
-    else if x < two48 then cbrt_reduce(x * inv_two12, scale * 16.0)
-    else if x < two384 then cbrt_reduce(x * inv_two48, scale * two16)
-    else cbrt_reduce(x * inv_two384, scale * two128)
+    if x < two12 then cbrt_reduce_strided(x * 0.125, scale * 2.0)
+    else if x < two48 then cbrt_reduce_strided(x * inv_two12, scale * 16.0)
+    else if x < two384 then cbrt_reduce_strided(x * inv_two48, scale * two16)
+    else cbrt_reduce_strided(x * inv_two384, scale * two128)
   else if x < 1.0 then
-    if x >= inv_two12 then cbrt_reduce(x * 8.0, scale * 0.5)
-    else if x >= inv_two48 then cbrt_reduce(x * two12, scale * 0.0625)
-    else if x >= inv_two384 then cbrt_reduce(x * two48, scale * inv_two16)
-    else cbrt_reduce(x * two384, scale * inv_two128)
+    if x >= inv_two12 then cbrt_reduce_strided(x * 8.0, scale * 0.5)
+    else if x >= inv_two48 then cbrt_reduce_strided(x * two12, scale * 0.0625)
+    else if x >= inv_two384 then cbrt_reduce_strided(x * two48, scale * inv_two16)
+    else cbrt_reduce_strided(x * two384, scale * inv_two128)
   else scale * cbrt_iter(x, 2.0, 0)
 
 # cbrt is defined on the WHOLE real line — unlike sqrt, a negative argument is in
@@ -548,7 +704,15 @@ export fn cbrt(x: Double) -> Double =
   else if x == 0.0 then x
   else if x < 0.0 then 0.0 - cbrt(0.0 - x)
   else if x * 0.5 == x then x
-  else cbrt_reduce(x, 1.0)
+  else cbrt_reduce(x)
+
+# cbrt via the reference stride ladder. Exported for the cross-check test only.
+export fn cbrt_strided(x: Double) -> Double =
+  if is_nan(x) then x
+  else if x == 0.0 then x
+  else if x < 0.0 then 0.0 - cbrt_strided(0.0 - x)
+  else if x * 0.5 == x then x
+  else cbrt_reduce_strided(x, 1.0)
 
 # Is y an odd integer? Computed entirely in Double (no fptosi exists): floor(y*0.5)
 # doubles back to y exactly when y is even. Correct for negative y too — y = -3 gives
