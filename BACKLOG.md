@@ -1116,6 +1116,15 @@ and `docs/linear-types-m4.2-enforcement-2026-08-06.md`. Deferred, in the order t
   **Still open, split out below:** the owned-record case (P3), the mode-in-the-type work (P2), and
   everything gated on M4.4.
 
+- [ ] `P3` **Prelude has no `head` / safe list-destructure.** There is no
+  `List a -> Maybe a` in `stdlib/prelude.sprout` at all, so every "look at the first element
+  without committing to a non-empty list" site open-codes `match xs with | [] -> Nothing |
+  [x | _] -> Just(x)`. Spotted while reviewing `linear_check.conditional_consume`, currently the
+  only site in the compiler with that exact shape — which is why it was not worth adding inside a
+  soundness-fix PR (the prelude is bundled into the compiler, so any change forces a full reseed).
+  Add `head : List a -> Maybe a`, and consider `tail`/`uncons` alongside it; then simplify the
+  call site above. Check the wider tree for open-coded instances before settling the name.
+
 - [ ] `P2` **Put the parameter mode in the function TYPE.** Today `borrowing` is an env sentinel
   keyed by declaration name (`@parammode:<name>`), consultable only when the callee is a literal
   top-level name. v0 therefore *rejects* the two shapes where the mode would be lost — a borrowing
