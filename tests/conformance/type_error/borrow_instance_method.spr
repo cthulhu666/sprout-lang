@@ -1,0 +1,27 @@
+module main
+
+# REVIEW FINDING. A `borrowing` parameter on an INSTANCE method was honoured
+# inside the body but invisible at every call site: the @parammode: mask is
+# recorded only for FnDecl/ExternFnDecl, and a method call dispatches through the
+# CLASS signature, which has no modifier. So the argument counted as CONSUMED at
+# the call and was merely BORROWED in the body -- the once-only obligation was
+# discharged by nobody and the resource leaked with no diagnostic.
+#
+# v0 has no way to put the mode on a class signature, so it rejects the modifier
+# there rather than honouring it in one place and dropping it in the other.
+
+type linear Res = Res Int
+
+class Peekable a {
+  fn peek(r: a) -> Int
+}
+
+instance Peekable Res {
+  fn peek(r: borrowing Res) -> Int =
+    match r with
+    | Res n -> n
+}
+
+fn go(r: Res) -> Int = peek(r)
+
+fn main() -> Unit !{IO} = print(to_string(go(Res(1))))

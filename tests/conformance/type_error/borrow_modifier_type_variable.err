@@ -1,1 +1,1 @@
-only allowed on a parameter of a linear type
+cannot be used on a type variable

@@ -1,0 +1,19 @@
+module main
+
+# Same root cause as borrow_field_extract, via RETURN rather than a consume:
+# handing a linear field out of a borrow launders an owned linear value to a
+# caller that never acquired it.
+
+type linear File = File Int
+type linear Wrap = (inner: File, tag: Int)
+
+fn release(f: consuming File) -> Int = match f with | File n -> n
+fn release_wrap(w: consuming Wrap) -> Int = release(w.inner)
+
+fn take(w: borrowing Wrap) -> File = w.inner
+
+fn main() -> Unit !{IO} =
+  do
+    let w = Wrap(inner = File(1), tag = 2)
+    let f = take(w)
+    print(to_string(release(f) + release_wrap(w)))

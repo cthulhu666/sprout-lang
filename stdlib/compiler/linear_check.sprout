@@ -266,17 +266,43 @@ fn leak_msg(name: String) -> String =
 fn diverge_msg(name: String) -> String =
   "linear value '" ++ name ++ "' is used in some branches but not others (every branch must use it exactly once)"
 
+fn after_fallible_msg(name: String) -> String =
+  "linear value '" ++ name ++ "' is consumed after a fallible bind in this block; the bind can short-circuit, so the consume would be skipped and the value leaked — consume it before the first `<-`, or branch with `match`"
+
 fn after_consume_msg(name: String) -> String =
   "linear value '" ++ name ++ "' is used after it was consumed"
 
 fn consumed_borrow_msg(name: String) -> String =
   "'" ++ name ++ "' is a borrowing parameter and cannot be consumed; take it `consuming` if this function should release it"
 
+fn fn_as_value_msg(name: String) -> String =
+  "'" ++ name ++ "' takes a borrowing parameter and cannot be used as a value (the borrow would be lost at the indirect call); call it directly instead"
+
+fn method_modifier_msg(name: String) -> String =
+  "`borrowing`/`consuming` is not supported on a class or instance method (parameter '" ++ name ++ "'): a call dispatches through the class signature, which carries no modifier"
+
+fn borrowed_field_read_msg() -> String =
+  "a linear field cannot be read out of a borrowed value (its owner will still release it); take the parameter `consuming` if this function should own it"
+
 fn borrowed_binder_msg(name: String) -> String =
   "linear value '" ++ name ++ "' is borrowed and cannot be consumed (it was destructured from a borrowed value, which its owner will still release)"
 
 fn nonvar_borrow_msg() -> String =
   "a borrowing argument must be a variable reference (a freshly-built linear value here would never be consumed)"
+
+# Which of the two reasons a modifier was rejected. They need different messages:
+# telling the author of `fn f(x: borrowing a)` that `a` "is not a linear type"
+# invites them to make `a` linear, which is not expressible — the real reason is
+# that linearity is per-declaration and cannot be decided for a type variable.
+type BadModifier (..) = BadModifier String Bool
+
+fn bad_modifier_message(b: BadModifier) -> String =
+  match b with
+  | BadModifier name on_tyvar ->
+      if on_tyvar then tyvar_modifier_msg(name) else bad_modifier_msg(name)
+
+fn tyvar_modifier_msg(name: String) -> String =
+  "`borrowing`/`consuming` cannot be used on a type variable (parameter '" ++ name ++ "'): linearity is per-declaration, so whether the argument is linear is not known here"
 
 fn bad_modifier_msg(name: String) -> String =
   "`borrowing`/`consuming` is only allowed on a parameter of a linear type (parameter '" ++ name ++ "')"
@@ -354,14 +380,40 @@ fn scope_is_borrowed(name: String, sc: LinScope) -> Bool = str_member(name, scop
 fn scope_is_linear(name: String, sc: LinScope) -> Bool =
   scope_is_owned(name, sc) || scope_is_borrowed(name, sc)
 
+# Drop every entry for `names` from BOTH lists. A new binder SHADOWS whatever the
+# name meant before, so its old tracking must go — otherwise a non-linear binder
+# shadowing a linear one leaves the stale entry behind, and a use of the shadow
+# is credited as a consume of the shadowed resource. That satisfied the leak
+# check while nothing was ever released:
+#
+#     fn shadow(c: File) -> Int = do { let c = 5; c + 1 }   # accepted, c leaked
+#
+# The lists model an environment, so every introduction must shadow, not append.
+# Regression: tests/conformance/type_error/borrow_shadowed_linear_binder.
+fn scope_shadow(names: List String, sc: LinScope) -> LinScope =
+  LinScope(str_remove_all(names, scope_owned(sc)), str_remove_all(names, scope_borrowed(sc)))
+
+fn str_remove_all(names: List String, xs: List String) -> List String =
+  match names with
+  | Nil -> xs
+  | Cons n rest -> str_remove_all(rest, str_remove(n, xs))
+
+fn str_remove(name: String, xs: List String) -> List String =
+  match xs with
+  | Nil -> Nil
+  | Cons y rest -> if y == name then str_remove(name, rest) else Cons(y, str_remove(name, rest))
+
 fn scope_add_owned(names: List String, sc: LinScope) -> LinScope =
+  scope_add_owned_after(names, scope_shadow(names, sc))
+
+fn scope_add_owned_after(names: List String, sc: LinScope) -> LinScope =
   LinScope(app_names(names, scope_owned(sc)), scope_borrowed(sc))
 
 # --- the recursive walk ---
 
 fn lin_consumed(e: typed_ast.TypedExpr, sc: LinScope, env: Dict types.Scheme) -> LinRes =
   match e with
-  | typed_ast.TVar name _ p -> lin_var(name, p, sc)
+  | typed_ast.TVar name _ p -> lin_var_or_fn_value(name, p, sc, env)
   | typed_ast.TInt _ _ _ -> LinOk(Nil, Nil)
   | typed_ast.TFloat _ _ _ -> LinOk(Nil, Nil)
   | typed_ast.TBool _ _ _ -> LinOk(Nil, Nil)
@@ -370,7 +422,7 @@ fn lin_consumed(e: typed_ast.TypedExpr, sc: LinScope, env: Dict types.Scheme) ->
   | typed_ast.TUnit _ _ -> LinOk(Nil, Nil)
   | typed_ast.TDict _ _ _ _ -> LinOk(Nil, Nil)
   | typed_ast.TMethodRef _ _ _ _ _ -> LinOk(Nil, Nil)
-  | typed_ast.TGetField base _ _ _ -> lin_read(base, sc, env)
+  | typed_ast.TGetField base _ fty fp -> lin_getfield(base, fty, fp, sc, env)
   | typed_ast.TUnary _ inner _ _ -> lin_consumed(inner, sc, env)
   | typed_ast.TTuple items _ _ -> seq_list(items, sc, env)
   | typed_ast.TCall callee args _ _ -> lin_call(callee, args, sc, env)
@@ -381,7 +433,7 @@ fn lin_consumed(e: typed_ast.TypedExpr, sc: LinScope, env: Dict types.Scheme) ->
       seq_list(Cons(base, record_field_exprs(fields)), sc, env)
   | typed_ast.TIf c a b _ p -> lin_if(c, a, b, p, sc, env)
   | typed_ast.TMatch scrut arms _ p -> lin_match(scrut, arms, p, sc, env)
-  | typed_ast.TDo steps _ _ -> lin_do(steps, sc, env)
+  | typed_ast.TDo steps dty _ -> lin_do(steps, block_short_circuits(dty), sc, env)
   | typed_ast.TLambda params body lam_type p -> lin_lambda(params, body, lam_type, p, sc, env)
 
 # A bare reference in a CONSUMING position: a `consuming`/unmodified argument, a
@@ -391,6 +443,29 @@ fn lin_consumed(e: typed_ast.TypedExpr, sc: LinScope, env: Dict types.Scheme) ->
 # returning a `borrowing` parameter puts it in the consumed set, and
 # `param_obligations` rejects any borrowed name found there. Recording it as a
 # borrow instead would make the violation unrepresentable.
+# The mode lives in a name-keyed side table, NOT in the function type, so it is
+# lost the moment a `borrowing` function stops being called by name: at an
+# indirect call `callee_mask` finds nothing and every argument reads as consuming,
+# which DISCHARGES the caller's obligation while the real callee only borrows —
+# the resource then leaks with no diagnostic. Pre-M4.5 this was unreachable,
+# because every `(File) -> Int` had to consume its argument.
+#
+# Putting the mode in the type is the real fix and is a type-system change (it has
+# to survive unification, generalization and the iface codec). Until then v0
+# refuses to let such a function become a value.
+# Regression: tests/conformance/type_error/borrow_fn_as_value.
+fn lin_var_or_fn_value(name: String, p: source.SourcePos, sc: LinScope,
+                       env: Dict types.Scheme) -> LinRes =
+  if mask_has_borrow(param_mode_mask_of(name, env)) then LinErr(p, fn_as_value_msg(name))
+  else lin_var(name, p, sc)
+
+fn mask_has_borrow(mask: String) -> Bool = mask_has_borrow_at(mask, 0)
+
+fn mask_has_borrow_at(mask: String, k: Int) -> Bool =
+  if k >= str_len(mask) then false
+  else if str_slice(mask, k, 1) == "b" then true
+  else mask_has_borrow_at(mask, k + 1)
+
 fn lin_var(name: String, p: source.SourcePos, sc: LinScope) -> LinRes =
   if scope_is_linear(name, sc) then LinOk(Cons (LinUse(name, p), Nil), Nil)
   else LinOk(Nil, Nil)
@@ -402,6 +477,25 @@ fn lin_var(name: String, p: source.SourcePos, sc: LinScope) -> LinRes =
 # to reach the handle. On an OWNED binding a read still consumes, exactly as M4.2
 # and spec-v0.md §5.8 define — which is why `get_x(p: Pos) = p.x` stays accepted
 # and `manhattan(p: Pos) = p.x + p.y` stays a reuse.
+# Reading a field of a BORROWED value borrows the base — that is what makes
+# `p.x + p.y` legal for `p: borrowing Pos`. But only when the FIELD ITSELF is
+# non-linear. A LINEAR field read out of a borrow yields an OWNED linear value
+# that the caller still owns and will release, so
+#
+#     fn steal(w: borrowing Wrap) -> Int  = release(w.inner)   # double consume
+#     fn take (w: borrowing Wrap) -> File = w.inner            # launders it out
+#
+# both had to be rejected. Expressing this properly needs the extracted field to
+# be a borrow too, and v0 has no type for a borrow — so v0 rejects the read.
+# The `match` form of this hole is handled by `from_borrow` in arm_consumed; this
+# is the field-access form, which that path never reached.
+# Regressions: tests/conformance/type_error/borrow_field_{extract,escape}.
+fn lin_getfield(base: typed_ast.TypedExpr, field_ty: types.Type, p: source.SourcePos,
+                sc: LinScope, env: Dict types.Scheme) -> LinRes =
+  if expr_is_borrowed_binding(base, sc) && type_is_linear(field_ty, env)
+  then LinErr(p, borrowed_field_read_msg())
+  else lin_read(base, sc, env)
+
 fn lin_read(e: typed_ast.TypedExpr, sc: LinScope, env: Dict types.Scheme) -> LinRes =
   match e with
   | typed_ast.TVar name _ p -> lin_read_var(name, p, sc, e, env)
@@ -435,12 +529,30 @@ fn mask_of_type(t: types.Type) -> String =
   | types.TConst id -> types.type_id_name(id)
   | _ -> ""
 
+# str_slice's third argument is a LENGTH, not an end index
+# (runtime/sprout_runtime.c: `str_slice(s_i, start, length)`), so reading one
+# character at k is `str_slice(mask, k, 1)`. This was `k + 1`, which took k+1
+# characters and so returned a single character only when k was the FIRST or the
+# LAST parameter — every middle `borrowing` position silently degraded to
+# consuming. Every borrowing parameter in stdlib/net.sprout sits at index 0,
+# which is why the original test suite passed over a broken mask reader.
+# Regression: tests/stdlib/test_linear_borrowing.spr `borrow_in_middle_position`.
 fn mask_is_borrow(mask: String, k: Int) -> Bool =
-  if k < 0 || k + 1 > str_len(mask) then false
-  else str_slice(mask, k, k + 1) == "b"
+  if k < 0 || k >= str_len(mask) then false
+  else str_slice(mask, k, 1) == "b"
 
+# A bare-name callee is a CALL of that function, not a use of it as a value, so
+# it is not walked as an expression — that is what lets the TVar arm reject a
+# `borrowing` function used as a value without also rejecting every call to one.
+# Any other callee shape (a lambda, a field, a call result) is walked normally.
 fn lin_call(callee: typed_ast.TypedExpr, args: List typed_ast.TypedExpr,
             sc: LinScope, env: Dict types.Scheme) -> LinRes =
+  match callee with
+  | typed_ast.TVar _ _ _ -> lin_call_args(args, callee_mask(callee, env), 0, Nil, Nil, sc, env)
+  | _ -> lin_call_walked(callee, args, sc, env)
+
+fn lin_call_walked(callee: typed_ast.TypedExpr, args: List typed_ast.TypedExpr,
+                   sc: LinScope, env: Dict types.Scheme) -> LinRes =
   match lin_consumed(callee, sc, env) with
   | LinErr p m -> LinErr(p, m)
   | LinOk cc cb -> lin_call_args(args, callee_mask(callee, env), 0, cc, cb, sc, env)
@@ -479,10 +591,16 @@ fn lin_borrow_arg(a: typed_ast.TypedExpr, sc: LinScope, env: Dict types.Scheme) 
   | typed_ast.TVar name _ p -> lin_borrow_var(name, p, sc, a, env)
   | _ -> lin_nonvar_borrow(a, sc, env)
 
+# An untracked name (a module-level linear `let`, say) is still a VARIABLE, so it
+# must not fall into the "must be a variable reference" rejection — that message
+# contradicted the source and named a cause ("a freshly-built linear value") that
+# was false for the program. Walk it as an ordinary reference instead; that also
+# routes it through the borrowing-function-as-value check.
+# Regression: tests/stdlib/test_linear_borrowing.spr `borrow_module_level`.
 fn lin_borrow_var(name: String, p: source.SourcePos, sc: LinScope,
                   a: typed_ast.TypedExpr, env: Dict types.Scheme) -> LinRes =
   if scope_is_linear(name, sc) then LinOk(Nil, Cons (LinUse(name, p), Nil))
-  else lin_nonvar_borrow(a, sc, env)
+  else lin_consumed(a, sc, env)
 
 fn lin_nonvar_borrow(a: typed_ast.TypedExpr, sc: LinScope, env: Dict types.Scheme) -> LinRes =
   if type_is_linear(typed_ast.typed_expr_type(a), env)
@@ -570,7 +688,28 @@ fn arm_consumed(br: typed_ast.TypedMatchBranch, sc: LinScope, scrut_type: types.
   match br with
   | typed_ast.TypedMatchBranch pat body ->
       scope_consumed(pattern_linear_binders(pat, scrut_type, env), from_borrow, body,
-                     typed_ast.typed_expr_pos(body), sc, env)
+                     typed_ast.typed_expr_pos(body),
+                     scope_shadow(pattern_all_binders(pat), sc), env)
+
+# EVERY name a pattern binds, linear or not. `pattern_linear_binders` reports only
+# the linear ones (they carry obligations); this reports all of them, because a
+# NON-linear pattern variable must still shadow a linear binding of the same name.
+fn pattern_all_binders(pat: ast.Pattern) -> List String =
+  match pat with
+  | ast.VarPattern name _ -> Cons(name, Nil)
+  | ast.WildcardPattern _ -> Nil
+  | ast.IntPattern _ _ -> Nil
+  | ast.BoolPattern _ _ -> Nil
+  | ast.StringPattern _ _ -> Nil
+  | ast.CharPattern _ _ -> Nil
+  | ast.UnitPattern _ -> Nil
+  | ast.TuplePattern pats _ -> pattern_all_binders_list(pats)
+  | ast.ConstructorPattern _ subpats _ -> pattern_all_binders_list(subpats)
+
+fn pattern_all_binders_list(pats: List ast.Pattern) -> List String =
+  match pats with
+  | Nil -> Nil
+  | Cons p rest -> app_names(pattern_all_binders(p), pattern_all_binders_list(rest))
 
 # Check `body` with `binders` in scope. Owned binders must each be consumed
 # exactly once inside (reuse is caught by seq2; a leftover binder is a leak);
@@ -583,8 +722,11 @@ fn scope_consumed(binders: List String, from_borrow: Bool, body: typed_ast.Typed
   | LinOk consumed borrowed -> scope_close(binders, from_borrow, consumed, borrowed, leak_pos)
 
 fn scope_add(names: List String, from_borrow: Bool, sc: LinScope) -> LinScope =
-  if from_borrow then LinScope(scope_owned(sc), app_names(names, scope_borrowed(sc)))
+  if from_borrow then scope_add_borrowed(names, scope_shadow(names, sc))
   else scope_add_owned(names, sc)
+
+fn scope_add_borrowed(names: List String, sc: LinScope) -> LinScope =
+  LinScope(scope_owned(sc), app_names(names, scope_borrowed(sc)))
 
 fn scope_close(binders: List String, from_borrow: Bool, consumed: List LinUse,
                borrowed: List LinUse, leak_pos: source.SourcePos) -> LinRes =
@@ -607,65 +749,104 @@ fn arm_pos(br: typed_ast.TypedMatchBranch) -> source.SourcePos =
   match br with
   | typed_ast.TypedMatchBranch _ body -> typed_ast.typed_expr_pos(body)
 
-fn lin_do(steps: List typed_ast.TypedDoStep, sc: LinScope, env: Dict types.Scheme) -> LinRes =
+# Does a `<-` bind in THIS block short-circuit? `Maybe` short-circuits on Nothing
+# and `Result e` is left-biased on the first Err (spec-v0.md §11), so in such a
+# block the steps AFTER a bind are conditional. An effectful block (`Unit !{IO}`)
+# runs every step, so its binds are unconditional. The block's own type is the
+# discriminator; effect rows live on TFunc, so the head is unaffected by `!{IO}`.
+fn block_short_circuits(block_ty: types.Type) -> Bool =
+  short_circuit_head(after_last_dot(head_type_name(block_ty)))
+
+fn short_circuit_head(h: String) -> Bool = h == "Maybe" || h == "Result"
+
+fn after_last_dot(name: String) -> String =
+  if str_find(name, ".") == -1 then name else after_last_dot(str_slice(name, str_find(name, ".") + 1, str_len(name)))
+
+fn lin_do(steps: List typed_ast.TypedDoStep, sc_block: Bool, sc: LinScope,
+          env: Dict types.Scheme) -> LinRes =
   match steps with
   | Nil -> LinOk(Nil, Nil)
   | Cons step rest ->
       match step with
-      | typed_ast.TDoLetStep name rhs -> lin_do_let(name, rhs, rest, sc, env)
-      | typed_ast.TDoExprStep e -> lin_do_seq(e, rest, sc, env)
-      | typed_ast.TDoBindStep pat e -> lin_do_bind(pat, e, rest, sc, env)
+      | typed_ast.TDoLetStep name rhs -> lin_do_let(name, rhs, rest, sc_block, sc, env)
+      | typed_ast.TDoExprStep e -> lin_do_seq(e, rest, sc_block, sc, env)
+      | typed_ast.TDoBindStep pat e -> lin_do_bind(pat, e, rest, sc_block, sc, env)
 
 # A `<-` do-bind: its pattern binds variables (possibly linear) scoped to the
 # remaining steps, each consumed exactly once there. The RHS is sequential-before
 # the rest — which is what makes `close(conn)` followed by a later `write(conn,…)`
 # in a do-block a use-after-consume rather than an unordered set collision.
 fn lin_do_bind(pat: ast.Pattern, e: typed_ast.TypedExpr, rest: List typed_ast.TypedDoStep,
-               sc: LinScope, env: Dict types.Scheme) -> LinRes =
+               sc_block: Bool, sc: LinScope, env: Dict types.Scheme) -> LinRes =
   match lin_consumed(e, sc, env) with
   | LinErr p m -> LinErr(p, m)
   | LinOk ec eb ->
       lin_do_bind_rest(pattern_linear_binders(pat, do_bind_type(typed_ast.typed_expr_type(e), env), env),
-                       ec, eb, e, rest, sc, env)
+                       ec, eb, e, rest, sc_block, sc, env)
 
 fn lin_do_bind_rest(binders: List String, ec: List LinUse, eb: List LinUse,
                     e: typed_ast.TypedExpr, rest: List typed_ast.TypedDoStep,
-                    sc: LinScope, env: Dict types.Scheme) -> LinRes =
-  match lin_do(rest, scope_add_owned(binders, sc), env) with
+                    sc_block: Bool, sc: LinScope, env: Dict types.Scheme) -> LinRes =
+  match lin_do(rest, sc_block, scope_add_owned(binders, sc), env) with
   | LinErr p m -> LinErr(p, m)
-  | LinOk restc restb -> lin_do_bind_close(binders, ec, eb, restc, restb, e)
+  | LinOk restc restb -> lin_do_bind_close(binders, ec, eb, restc, restb, e, sc_block)
 
 fn lin_do_bind_close(binders: List String, ec: List LinUse, eb: List LinUse,
-                     restc: List LinUse, restb: List LinUse, e: typed_ast.TypedExpr) -> LinRes =
+                     restc: List LinUse, restb: List LinUse, e: typed_ast.TypedExpr,
+                     sc_block: Bool) -> LinRes =
   match unconsumed_binder(binders, restc) with
   | Just leaked -> LinErr(typed_ast.typed_expr_pos(e), leak_msg(leaked))
+  | Nothing -> lin_do_bind_after(binders, ec, eb, restc, restb, e, sc_block)
+
+# In a SHORT-CIRCUITING block the steps after this bind are conditional, so a
+# consume of a binding introduced OUTSIDE the block is not guaranteed to run:
+#
+#     do { _ <- write(c); reply <- read(c); let _ = close(c); Ok(reply) }
+#
+# was accepted with `close` counted as executed, yet on any Err the block returns
+# early and the socket leaks for the process lifetime — the very shape M4.5 makes
+# idiomatic. The bind's OWN binders are exempt: they do not exist on the
+# short-circuit path, so they owe nothing there.
+# Regression: tests/conformance/type_error/borrow_after_fallible_bind.
+fn lin_do_bind_after(binders: List String, ec: List LinUse, eb: List LinUse,
+                     restc: List LinUse, restb: List LinUse, e: typed_ast.TypedExpr,
+                     sc_block: Bool) -> LinRes =
+  match conditional_consume(sc_block, remove_all(binders, restc)) with
+  | Just u -> LinErr(luse_pos(u), after_fallible_msg(luse_name(u)))
   | Nothing -> seq2(ec, eb, remove_all(binders, restc), remove_all(binders, restb))
 
+fn conditional_consume(sc_block: Bool, outer: List LinUse) -> Maybe LinUse =
+  if ! sc_block then Nothing
+  else
+    match outer with
+    | [] -> Nothing
+    | [u | _] -> Just(u)
+
 fn lin_do_seq(e: typed_ast.TypedExpr, rest: List typed_ast.TypedDoStep,
-              sc: LinScope, env: Dict types.Scheme) -> LinRes =
+              sc_block: Bool, sc: LinScope, env: Dict types.Scheme) -> LinRes =
   match lin_consumed(e, sc, env) with
   | LinErr p m -> LinErr(p, m)
-  | LinOk ec eb -> lin_do_seq_rest(rest, ec, eb, sc, env)
+  | LinOk ec eb -> lin_do_seq_rest(rest, ec, eb, sc_block, sc, env)
 
 fn lin_do_seq_rest(rest: List typed_ast.TypedDoStep, ec: List LinUse, eb: List LinUse,
-                   sc: LinScope, env: Dict types.Scheme) -> LinRes =
-  match lin_do(rest, sc, env) with
+                   sc_block: Bool, sc: LinScope, env: Dict types.Scheme) -> LinRes =
+  match lin_do(rest, sc_block, sc, env) with
   | LinErr p m -> LinErr(p, m)
   | LinOk restc restb -> seq2(ec, eb, restc, restb)
 
 fn lin_do_let(name: String, rhs: typed_ast.TypedExpr, rest: List typed_ast.TypedDoStep,
-              sc: LinScope, env: Dict types.Scheme) -> LinRes =
+              sc_block: Bool, sc: LinScope, env: Dict types.Scheme) -> LinRes =
   match lin_consumed(rhs, sc, env) with
   | LinErr p m -> LinErr(p, m)
   | LinOk rc rb ->
-      lin_do_let_body(name, rhs, rc, rb, rest, sc, env,
+      lin_do_let_body(name, rhs, rc, rb, rest, sc_block, sc, env,
                       type_is_linear(typed_ast.typed_expr_type(rhs), env))
 
 # A linear do-let binding is OWNED, scoped to `rest`, consumed exactly once there.
 fn lin_do_let_body(name: String, rhs: typed_ast.TypedExpr, rc: List LinUse, rb: List LinUse,
-                   rest: List typed_ast.TypedDoStep, sc: LinScope,
+                   rest: List typed_ast.TypedDoStep, sc_block: Bool, sc: LinScope,
                    env: Dict types.Scheme, is_lin: Bool) -> LinRes =
-  match lin_do(rest, extend_scope(is_lin, name, sc), env) with
+  match lin_do(rest, sc_block, extend_scope(is_lin, name, sc), env) with
   | LinErr p m -> LinErr(p, m)
   | LinOk restc restb -> lin_do_let_close(name, rhs, rc, rb, restc, restb, is_lin)
 
@@ -676,8 +857,11 @@ fn lin_do_let_close(name: String, rhs: typed_ast.TypedExpr, rc: List LinUse, rb:
     seq2(rc, rb, luse_remove(name, restc), luse_remove(name, restb))
   else LinErr(typed_ast.typed_expr_pos(rhs), leak_msg(name))
 
+# A non-linear do-`let` must SHADOW, not be ignored: `let c = 5` over a linear
+# `c` has to drop the old entry, or `c + 1` is credited as consuming the resource.
 fn extend_scope(is_lin: Bool, name: String, sc: LinScope) -> LinScope =
-  if is_lin then scope_add_owned(Cons(name, Nil), sc) else sc
+  if is_lin then scope_add_owned(Cons(name, Nil), sc)
+  else scope_shadow(Cons(name, Nil), sc)
 
 # A lambda may run zero or many times, so (higher-order linearity, M4.4, deferred)
 # it must neither take a linear parameter nor capture an outer linear binding.
@@ -691,7 +875,12 @@ fn lin_lambda(params: List ast.Param, body: typed_ast.TypedExpr, lam_type: types
   | Just pname ->
       LinErr(p, "linear lambda parameter '" ++ pname
         ++ "' is not yet supported (higher-order linearity is deferred)")
-  | Nothing -> lin_lambda_body(body, p, sc, env)
+  | Nothing -> lin_lambda_body(body, p, scope_shadow(lambda_param_names(params), sc), env)
+
+fn lambda_param_names(params: List ast.Param) -> List String =
+  match params with
+  | Nil -> Nil
+  | Cons prm rest -> Cons(param_name(prm), lambda_param_names(rest))
 
 fn lin_lambda_body(body: typed_ast.TypedExpr, p: source.SourcePos,
                    sc: LinScope, env: Dict types.Scheme) -> LinRes =
@@ -730,6 +919,30 @@ export fn any_param_mode_written(params: List ast.Param) -> Bool =
   | Nil -> false
   | Cons prm rest -> if mode_is_written(param_mode(prm)) then true else any_param_mode_written(rest)
 
+# A class or instance method may not carry an ownership modifier. The `@parammode:`
+# mask is recorded only for FnDecl/ExternFnDecl and a method call dispatches through
+# the CLASS signature, which has no modifier — so a `borrowing` instance-method
+# parameter was honoured inside the body and invisible at every call site: the
+# argument counted as consumed at the call, was merely borrowed in the body, and
+# the once-only obligation was discharged by nobody.
+# Regression: tests/conformance/type_error/borrow_instance_method.
+export fn method_modifier_error(params: List ast.Param) -> Maybe String =
+  match params with
+  | Nil -> Nothing
+  | Cons prm rest ->
+      if mode_is_written(param_mode(prm)) then Just(param_name(prm))
+      else method_modifier_error(rest)
+
+export fn method_modifier_message(name: String) -> String = method_modifier_msg(name)
+
+# Validate modifiers against a signature ALONE, with no body to walk. Used for
+# `extern fn`, which has no body and so never reaches check_fn_linear.
+export fn check_signature_modes(params: List ast.Param, fn_type: types.Type,
+                                pos: source.SourcePos, env: Dict types.Scheme) -> LinCheck =
+  match first_bad_modifier(params, fn_type, env) with
+  | Just bad -> LinFail(pos, bad_modifier_message(bad))
+  | Nothing -> LinPass
+
 # A modifier is only meaningful on a linear parameter. Sprout erases the modifiers
 # before IR and the GC owns memory, so on a non-linear parameter they would carry
 # no meaning whatsoever — a deliberate divergence from Swift SE-0377, where they
@@ -737,15 +950,25 @@ export fn any_param_mode_written(params: List ast.Param) -> Bool =
 # parameter is rejected too: per-declaration linearity cannot decide it, and
 # polymorphism over linear types is an M4.2 non-goal.
 fn first_bad_modifier(params: List ast.Param, fn_type: types.Type,
-                      env: Dict types.Scheme) -> Maybe String =
+                      env: Dict types.Scheme) -> Maybe BadModifier =
   match params with
   | Nil -> Nothing
   | Cons prm rest ->
       match fn_type with
-      | types.TFunc a b _ ->
-          if mode_is_written(param_mode(prm)) && ! type_is_linear (a, env) then Just(param_name(prm))
-          else first_bad_modifier(rest, b, env)
+      | types.TFunc a b _ -> bad_modifier_here(prm, a, rest, b, env)
       | _ -> Nothing
+
+fn bad_modifier_here(prm: ast.Param, a: types.Type, rest: List ast.Param,
+                     b: types.Type, env: Dict types.Scheme) -> Maybe BadModifier =
+  if ! mode_is_written (param_mode(prm)) then first_bad_modifier(rest, b, env)
+  else if type_is_tyvar(a) then Just(BadModifier(param_name(prm), true))
+  else if ! type_is_linear (a, env) then Just(BadModifier(param_name(prm), false))
+  else first_bad_modifier(rest, b, env)
+
+fn type_is_tyvar(t: types.Type) -> Bool =
+  match t with
+  | types.TVar _ -> true
+  | _ -> false
 
 # The linear parameters that own their argument (no modifier, or `consuming`).
 fn owned_param_names(params: List ast.Param, fn_type: types.Type,
@@ -788,7 +1011,7 @@ export fn check_fn_linear(params: List ast.Param, fn_type: types.Type,
                           body: typed_ast.TypedExpr, fn_pos: source.SourcePos,
                           env: Dict types.Scheme) -> LinCheck =
   match first_bad_modifier(params, fn_type, env) with
-  | Just nm -> LinFail(fn_pos, bad_modifier_msg(nm))
+  | Just bad -> LinFail(fn_pos, bad_modifier_message(bad))
   | Nothing ->
       linear_result(owned_param_names(params, fn_type, env),
                     borrowed_param_names(params, fn_type, env), body, fn_pos, env)

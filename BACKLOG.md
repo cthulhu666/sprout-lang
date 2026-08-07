@@ -1099,7 +1099,32 @@ and `docs/linear-types-m4.2-enforcement-2026-08-06.md`. Deferred, in the order t
   note did not consider. `stdlib.net.tcp_connect` was exported to complete the raw-handle escape
   hatch for shapes borrowing cannot express.
 
-  **Still open, split out below:** the owned-record case (P3), and everything gated on M4.4.
+  **Post-merge review (2026-08-07):** a high-effort adversarial review found **ten** defects in
+  what landed, six of them soundness holes (double consume or silent leak). All fixed in the
+  follow-up, each with a regression fixture; full write-up in `docs/linear-borrowing-v0.md` §17.
+  The dominant cause was that the mode lives in a name-keyed side table rather than in the function
+  type, so it is lost at any callee that is not a literal top-level name — a `borrowing` function
+  used as a value, and a `borrowing` instance-method parameter, both silently read as consuming and
+  discharged the caller's obligation. Both are now rejected; see the P2 below for the real fix.
+  Also: `LinScope` appended instead of shadowing; the field-access half of "borrowed contents" was
+  never closed (the fixture that motivated the M4.5 fix used `match`, so the field form went
+  untested); `Maybe`/`Result` do-blocks short-circuit, so a trailing consume does not run on the
+  error path; and `mask_is_borrow` passed an end index where `str_slice` takes a length, so every
+  MIDDLE borrowing position degraded to consuming — undetected because every borrowing parameter in
+  `stdlib/net.sprout` sits at index 0.
+
+  **Still open, split out below:** the owned-record case (P3), the mode-in-the-type work (P2), and
+  everything gated on M4.4.
+
+- [ ] `P2` **Put the parameter mode in the function TYPE.** Today `borrowing` is an env sentinel
+  keyed by declaration name (`@parammode:<name>`), consultable only when the callee is a literal
+  top-level name. v0 therefore *rejects* the two shapes where the mode would be lost — a borrowing
+  function used as a first-class value, and a modifier on a class/instance method — rather than
+  silently miscounting them. Lifting both restrictions means carrying the mode on the parameter
+  position of `types.TFunc` so it survives unification, generalization, instantiation and the iface
+  codec, and deciding whether `(borrowing T) -> U` is a subtype of `(T) -> U` (it is not:
+  substituting one for the other loses the caller's obligation). Prior art: Swift SE-0377 makes the
+  convention part of the function type for noncopyable parameters for exactly this reason.
 
 - [ ] `P3` **Linear-record ergonomics for OWNED records.** M4.5 lifted this only for `borrowing`
   parameters: `p.x + p.y` is legal for `p: borrowing Pos` and remains a reuse for an owned `p`. The

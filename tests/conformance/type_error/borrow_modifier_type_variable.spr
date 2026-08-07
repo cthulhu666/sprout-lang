@@ -2,6 +2,11 @@ module main
 
 # M4.5: linearity is per-declaration, so a type-variable parameter's linearity
 # is not decidable here; polymorphism over linear types is an M4.2 non-goal.
+#
+# REVIEW FINDING: this reused the non-linear-parameter message verbatim, which
+# contradicts the program -- the author's `a` may well be instantiated at a
+# linear type. Reading that message, a user tries to make `a` linear (not
+# expressible) instead of learning the modifier needs a concrete type.
 
 fn bad(x: borrowing a) -> Int = 0
 

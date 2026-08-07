@@ -1,0 +1,17 @@
+module main
+
+# REVIEW FINDING. LinScope only ever APPENDED, so a non-linear binder shadowing
+# a linear one left the stale entry in scope_owned: every use of the SHADOW was
+# credited as a consume of the shadowed resource, and the leak check passed
+# while nothing was ever released.
+
+type linear File = File Int
+
+fn release(f: consuming File) -> Int = match f with | File n -> n
+
+fn shadow(c: File) -> Int =
+  do
+    let c = 5
+    c + 1
+
+fn main() -> Unit !{IO} = print(to_string(shadow(File(1))))

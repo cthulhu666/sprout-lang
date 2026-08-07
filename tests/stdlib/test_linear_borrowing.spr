@@ -77,6 +77,37 @@ fn owned_forward() -> Int =
     let v = forward(p)
     v + release_pos(p) - 3
 
+# REVIEW FINDING (mask indexing). `mask_is_borrow` read the positional mask with
+# `str_slice(mask, k, k + 1)`, but str_slice's third argument is a LENGTH, not an
+# end index, so it took k+1 characters from k and returned a single character
+# only when k was the FIRST or LAST parameter. Every middle `borrowing` position
+# silently degraded to consuming, making this shape a spurious reuse error.
+# Every borrowing parameter in stdlib/net.sprout sits at index 0, which is why
+# the original suite passed over a broken mask reader.
+fn mid(a: Int, f: borrowing File, b: Int) -> Int = a + b
+
+fn borrow_in_middle_position(f: File) -> Int =
+  do
+    let x = mid(10, f, 20)
+    x + release(f)
+
+# A borrow at the LAST position clamps by accident, so it worked even when the
+# middle case did not; kept so the pair is checked together.
+fn last(a: Int, f: borrowing File) -> Int = a
+
+fn borrow_in_last_position(f: File) -> Int =
+  do
+    let x = last(5, f)
+    x + release(f)
+
+# REVIEW FINDING (diagnostic). A module-level linear `let` is not carried in the
+# checker's scope, and the borrow path used to route any untracked name into the
+# "a borrowing argument must be a variable reference" rejection -- a message that
+# contradicted the source, since `top_level_file` plainly IS a variable.
+let top_level_file = File(99)
+
+fn borrow_module_level() -> Int = ignore(top_level_file)
+
 fn main() -> Unit !{IO} =
   run_suite("linear_borrowing", [
     check_eq("borrowed field read", owned_get_x(), 3),
@@ -85,5 +116,8 @@ fn main() -> Unit !{IO} =
     check_eq("borrow then consume", session(File(7)), 7),
     check_eq("recursive borrow then consume", drain_then_close(File(9)), 9),
     check_eq("borrow in one arm only", borrow_one_arm(true, File(5)), 5),
-    check_eq("borrow in neither arm", borrow_one_arm(false, File(5)), 5)
+    check_eq("borrow in neither arm", borrow_one_arm(false, File(5)), 5),
+    check_eq("borrow at a middle parameter position", borrow_in_middle_position(File(7)), 37),
+    check_eq("borrow at the last parameter position", borrow_in_last_position(File(7)), 12),
+    check_eq("borrow a module-level linear let", borrow_module_level(), 0)
   ])
