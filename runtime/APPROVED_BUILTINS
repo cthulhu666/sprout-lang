@@ -14,6 +14,15 @@
 # predate this policy.  New additions MUST include an inline comment.
 #
 # Format:  <function_name>  [# <justification for new entries>]
+#
+# DELIBERATELY ABSENT, so the omission does not read as an oversight:
+#   double_to_bits / double_from_bits — raw IEEE 754 bit access, added 2026-08-07.
+#     They are COMPILER INTRINSICS, not runtime functions: there is no
+#     @double_to_bits symbol to allowlist. Under the i64-uniform value ABI a
+#     Double and an Int are already the same LLVM type, so the bitcast lowers to
+#     nothing at all — ast_to_ir returns the argument's SSA name unchanged. Same
+#     arrangement as `to_double` and `print`, neither of which is listed here
+#     either. See docs/double-bit-access-v0.md.
 
 analysis_check_source
 analysis_complete_in_state

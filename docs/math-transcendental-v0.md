@@ -245,8 +245,18 @@ Pro, 2M iterations, harness baseline subtracted:
 | `pow` integer | 7.8 ns | 6.0 ns | 1.3x |
 | `sqrt`, normal magnitude | 2.8 ns | hardware `fsqrt` | — |
 | `exp`, x ≈ 688 | 21.7 ns | 1.1 ns | ~20x |
-| `ln`, x = 1e-300 | 20.9 ns | 1.6 ns | ~13x |
+| `ln`, x = 1e-300 | **3.7 ns** (was 20.9) | 1.6 ns | ~2.3x |
+| `ln`, x = 1e300 | **3.9 ns** (was 22.3) | 1.6 ns | ~2.4x |
 | `sqrt`, x = 1e300 | 19.1 ns | hardware `fsqrt` | — |
+
+**`ln` is no longer magnitude-dependent** (§13, 2026-08-07). Its range reduction now
+extracts the binary exponent from the IEEE bit pattern in O(1) via `double_to_bits`
+instead of walking it in power-of-two strides, so it measures **3.6–4.0 ns across the
+entire exponent range** rather than 4 ns at normal magnitudes and 22 ns at the extremes.
+Results are **bit-identical** to the stride ladder at every sample tested, which is the
+bar the cross-check test enforces — both forms are exact, so any difference at all would
+mean one is wrong. `exp`, `sqrt` and `cbrt` still use the stride ladder and keep their
+`*_wide` costs; converting them is tracked in `BACKLOG.md`.
 
 `cbrt` 11.9 → 4.4 ns and `sqrt` 8.2 → 2.8 ns come from §12: both Newton iterations now run
 a fixed 6 passes instead of testing for convergence each pass. Note that `sqrt` at **1e300**
@@ -492,3 +502,53 @@ pass.
 `r' = r*(4 - x*r³)/3`, recovering the root as `x*r²` — removes every `fdiv` from the loop and
 measured *slower*, 5.41 ns/call against 3.20. The five multiplies are serially dependent and
 form a longer latency chain than the single division they replace.
+
+## 13. O(1) range reduction for `ln` (2026-08-07)
+
+`ln_reduce` walked the binary exponent in power-of-two strides (512 → 64 → 8 → 1),
+~20 compare-multiply-branch steps. That was the whole of the `*_wide` gap: making the
+Newton iteration ~3x faster in §12 moved `sqrt(1e300)` from 19.0 to 19.1 ns — i.e. not
+at all — while normal-magnitude `sqrt` went 8.16 → 2.75 ns.
+
+It now reads the exponent straight out of the IEEE bit pattern, in constant time, using
+the `double_to_bits`/`double_from_bits` intrinsics (`docs/double-bit-access-v0.md`).
+Those lower to **nothing** — under the i64-uniform ABI a `Double` and an `Int` are
+already the same LLVM type — so this adds no runtime symbol, no `APPROVED_BUILTINS`
+entry, and no libm dependency. Keeping `stdlib.math` libm-free is why the obvious
+alternative was rejected: `llvm.frexp` does not lower to inline instructions on arm64,
+it lowers to a call to libm's `frexp`.
+
+Measured over 2M-call warm sweeps, averaged across 3 runs, A/B in one binary against
+the retained stride ladder:
+
+| input | O(1) | stride ladder | speedup |
+|---|---|---|---|
+| `ln(2.0)` | 3.73 ns | 4.02 ns | 1.1x |
+| `ln(pi)` | 4.04 ns | 4.51 ns | 1.1x |
+| `ln(1e-300)` | 3.65 ns | 22.48 ns | **6.2x** |
+| `ln(1e300)` | 3.86 ns | 22.26 ns | **5.8x** |
+
+The headline is the **flatness**, not the peak speedup: cost is now independent of
+magnitude, and normal magnitudes got slightly faster too, so there is no trade.
+
+### Two things that cost time to get right
+
+**Bind the biased exponent once.** The first version called the extraction helper per
+branch. Each call is a signed division that LLVM lowers to `add/cmp/csel/asr` — five
+instructions — and recomputing it made normal-magnitude `ln` go 5 → 7 ns, giving back at
+the common case exactly what the change won at the extremes. A `where` binding fixed it.
+
+**Fold the subnormal lift into the exponent, not into the result.** Subnormals are
+scaled by 2^54 into the normal range and the 54 taken back off. Doing that as
+`ln_reduce(x * two54) - 54.0 * ln2` *after the fact* introduces a second rounding, where
+the stride ladder does a single `k * ln2`. `tests/stdlib/test_math_wide_reduction.spr`
+caught it — 5 subnormal samples disagreed with the oracle. Threading the correction into
+`k` before the multiply (`ln_reduce_norm`'s `adj` parameter) restores the single-rounding
+property and bit-identity.
+
+### Why the old ladder is still in the tree
+
+`ln_reduce_strided` / `ln_strided` are retained and exported, as the accuracy oracle for
+the cross-check test. They are an independently-derived implementation of the same
+mathematical split, which is what makes them worth keeping rather than deleting — a
+test that compares a function against itself proves nothing.

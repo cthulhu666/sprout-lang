@@ -69,6 +69,12 @@ let two12 = 4096.0
 let two16 = sq(two8)
 let two32 = sq(two16)
 let two48 = two32 * two16
+# 2^54, exactly representable — so 1.0 / two54 is exact too. Written as a plain
+# literal: Sprout has no exponent literals (`2e-17` is a parse error), but 2^54 has
+# only 17 integer digits, well inside the 2^63 the lexer accepts. Used by exp's
+# subnormal path and by the O(1) exponent decomposition, which scales a subnormal up
+# by this before extracting its exponent.
+let two54 = 18014398509481984.0
 let two64 = sq(two32)
 let two128 = sq(two64)
 let two256 = sq(two128)
@@ -85,6 +91,59 @@ let inv_two128 = 1.0 / two128
 let inv_two256 = 1.0 / two256
 let inv_two384 = 1.0 / two384
 let inv_two512 = 1.0 / two512
+
+# --- O(1) exponent decomposition via IEEE bit access ---
+#
+# The reductions below split a positive Double into `mantissa * 2^exponent` in
+# CONSTANT time, using `double_to_bits` / `double_from_bits` (compiler intrinsics
+# that lower to nothing — see stdlib/prelude.sprout and
+# docs/double-bit-access-v0.md). Before this, reduction walked the exponent in
+# power-of-two strides: ~20 compare-multiply-branch steps, which is exactly why
+# `ln(1e-300)` and `sqrt(1e300)` were 13-20x libm while normal magnitudes were 1-2x.
+#
+# NO BIT MASKS ARE NEEDED, and that is a precondition rather than a coincidence.
+# For x > 0 the sign bit is 0, so the value is below 2^63 and integer division by
+# 2^52 leaves exactly the 11 exponent bits. Every caller here guarantees x > 0:
+# `sqrt` rejects negatives, `ln` rejects negatives and zero, `cbrt` takes the
+# magnitude and re-applies the sign. Sprout has no bitwise operators at all — `>>`
+# and `<<` are function composition — so this is what makes the technique available
+# without adding any.
+#
+# The mantissa comes out by SUBTRACTION, not masking: forcing the exponent field to
+# the bias yields m in [1, 2) with the mantissa bits untouched, so the split is
+# exact and contributes zero rounding error — the same property the old
+# power-of-two ladder had, and the reason accuracy is unchanged.
+
+# One unit in the binary64 exponent field, and the exponent bias.
+let exp_field_unit = 4503599627370496
+let exp_bias = 1023
+
+# `two54` (2^54) is defined further down for exp's subnormal path and reused here to
+# lift a subnormal into the normal range, so one code path covers the whole domain.
+
+# The raw biased exponent field of a positive finite x. O(1). A result of 0 means
+# x is SUBNORMAL, where the decomposition below does not hold — callers must route
+# through `binary_exponent`/`mantissa_of`, which handle that case.
+fn raw_biased_exp(x: Double) -> Int =
+  double_to_bits(x) / exp_field_unit
+
+# NOTE for whoever converts sqrt_reduce / cbrt_reduce to this technique: general
+# `binary_exponent` / `mantissa_of` / `two_pow` helpers were written and then
+# REMOVED before landing, because `ln_reduce` below inlines the decomposition (one
+# division instead of two, which is measurable) and that left the helpers with no
+# callers. A private function with no callers is still emitted into the IR of every
+# module that imports this one, so they were bloat, not convenience. Reintroduce
+# whichever the sqrt/cbrt conversion actually calls — and if it also inlines, do not
+# add them back at all.
+#
+# Two things that cost time to discover and are worth reusing:
+#   * bind the biased exponent ONCE in a `where`. Recomputing it per branch made
+#     normal-magnitude `ln` go 5 -> 7 ns, giving back at the common case what the
+#     change won at the extremes.
+#   * fold any subnormal-lift correction into the exponent BEFORE the multiply by a
+#     constant like ln2, never as a separate subtraction afterwards — see
+#     ln_reduce_norm for why (it is a single-rounding property, and the wide-reduction
+#     test catches getting it wrong).
 
 # --- Why the reductions thread an accumulator ---
 # `sqrt_reduce`, `ln_reduce` and `cbrt_reduce` each carry the extracted factor along as a
@@ -256,10 +315,9 @@ let inf = 1.0 / 0.0
 # IEEE negative zero. Written with unary `-` (which lowers to fneg, flipping the sign bit);
 # `0.0 - 0.0` would give +0.0. Needed as a return value where C99 distinguishes the zeros.
 let neg_zero = -0.0
-# 2^54, exactly representable — so 1.0 / two54 is exact too. Used by exp's
-# subnormal path; written as a division rather than a literal because Sprout has no
-# exponent literals (`2e-17` is a parse error).
-let two54 = 18014398509481984.0
+# `two54` is defined with the other powers of two near the top of the file — it is
+# needed by the O(1) exponent decomposition, which appears above this point, and a
+# module-level `let` must be defined before use.
 
 # exp on the reduced |r| <= ln2/2, as Horner-nested Taylor terms through r^12
 # (truncation ~1e-16 at the worst case). Nested as acc_k = 1 + r*acc_(k+1)/k so the
@@ -351,18 +409,73 @@ where
 # `k` is threaded rather than returned as `(mantissa, k)` for a measured reason — see "Why
 # the reductions thread an accumulator" above. This function is the one the 4.25 vs 12.5
 # ns/call comparison there was taken on.
-fn ln_reduce(x: Double, k: Double) -> Double =
+# O(1) since 2026-08-07: the exponent comes straight out of the bit pattern instead
+# of being walked in strides. The stride ladder this replaces is preserved in
+# `ln_reduce_strided` below, which the accuracy tests cross-check against.
+#
+# The series wants its argument in [1/sqrt2, sqrt2), but `mantissa_of` yields
+# [1, 2). One conditional halving covers the gap: for m >= sqrt2, use m/2 and
+# carry the extra power of two in k. Halving is exact, so this costs no accuracy.
+#
+# k stays a Double and is combined as `k * ln2` in ONE multiply, exactly as the
+# strided version did — every integer up to 2^53 is exactly representable, so a
+# single rounding regardless of how large the exponent is. See the comment above on
+# why the decomposition is not returned as a tuple.
+# The decomposition is written out here rather than calling `binary_exponent` and
+# `mantissa_of`: those are the readable general-purpose helpers, but each performs
+# its own signed division, and this is the hot path where one division is worth
+# having. `b` and `biased` are bound once and shared by both halves.
+#
+# Subnormals recurse ONCE through the 2^54 lift, using ln(x) = ln(x*2^54) - 54*ln2.
+fn ln_reduce(x: Double) -> Double =
+  if raw_biased_exp(x) == 0 then ln_reduce_norm(x * two54, 0.0 - 54.0)
+  else ln_reduce_norm(x, 0.0)
+
+# `adj` is the exponent correction owed by a subnormal that was lifted by 2^54.
+#
+# It is threaded in and folded into `k` BEFORE the multiply, rather than the caller
+# subtracting `54.0 * ln2` afterwards. That is not a stylistic choice — the first
+# version did subtract afterwards and `tests/stdlib/test_math_wide_reduction.spr`
+# caught it: 5 subnormal samples disagreed with the stride-ladder oracle, because
+# `54.0 * ln2` is one rounding and the subtraction a second, where the ladder does a
+# single `k * ln2`. `k + adj` is exact (both are small integers, and every integer
+# up to 2^53 is representable), so this restores the single-rounding property and
+# the two forms agree bit-for-bit again.
+fn ln_reduce_norm(x: Double, adj: Double) -> Double =
+  if m >= sqrt2 then (k + adj + 1.0) * ln2 + ln_series(m * 0.5)
+  else (k + adj) * ln2 + ln_series(m)
+where
+  b = double_to_bits(x)
+  biased = b / exp_field_unit
+  k = to_double(biased - exp_bias)
+  m = double_from_bits(b - (biased - exp_bias) * exp_field_unit)
+
+# The pre-2026-08-07 stride ladder, kept as the accuracy reference for the O(1)
+# form above (tests/stdlib/test_math_wide_reduction.spr cross-checks them). Not
+# dead code in the "forgot to delete it" sense: it is an independent
+# implementation of the same mathematical split, arrived at differently, which is
+# what makes it worth something as an oracle. Strides descend 512 -> 64 -> 8 -> 1.
+fn ln_reduce_strided(x: Double, k: Double) -> Double =
   if x >= sqrt2 then
-    if x < two8 then ln_reduce(x * 0.5, k + 1.0)
-    else if x < two64 then ln_reduce(x * inv_two8, k + 8.0)
-    else if x < two512 then ln_reduce(x * inv_two64, k + 64.0)
-    else ln_reduce(x * inv_two512, k + 512.0)
+    if x < two8 then ln_reduce_strided(x * 0.5, k + 1.0)
+    else if x < two64 then ln_reduce_strided(x * inv_two8, k + 8.0)
+    else if x < two512 then ln_reduce_strided(x * inv_two64, k + 64.0)
+    else ln_reduce_strided(x * inv_two512, k + 512.0)
   else if x < inv_sqrt2 then
-    if x >= inv_two8 then ln_reduce(x * 2.0, k - 1.0)
-    else if x >= inv_two64 then ln_reduce(x * two8, k - 8.0)
-    else if x >= inv_two512 then ln_reduce(x * two64, k - 64.0)
-    else ln_reduce(x * two512, k - 512.0)
+    if x >= inv_two8 then ln_reduce_strided(x * 2.0, k - 1.0)
+    else if x >= inv_two64 then ln_reduce_strided(x * two8, k - 8.0)
+    else if x >= inv_two512 then ln_reduce_strided(x * two64, k - 64.0)
+    else ln_reduce_strided(x * two512, k - 512.0)
   else k * ln2 + ln_series(x)
+
+# ln via the reference stride ladder. Exported for the cross-check test only — the
+# production path is `ln`.
+export fn ln_strided(x: Double) -> Double =
+  if is_nan(x) then x
+  else if x < 0.0 then nan
+  else if x == 0.0 then 0.0 - inf
+  else if x * 0.5 == x then x
+  else ln_reduce_strided(x, 0.0)
 
 # Domain: x >= 0 (Rule 2 — a negative argument is NaN, not a clamped 0). ln(0) is the
 # pole at -inf. +inf must be short-circuited or the halving loop would never exit;
@@ -372,7 +485,7 @@ export fn ln(x: Double) -> Double =
   else if x < 0.0 then nan
   else if x == 0.0 then 0.0 - inf
   else if x * 0.5 == x then x
-  else ln_reduce(x, 0.0)
+  else ln_reduce(x)
 
 # Every logarithm is ln scaled by a constant. NaN and +-inf propagate from ln, so the
 # Rule-2 domain behaviour is inherited rather than re-implemented three times.
