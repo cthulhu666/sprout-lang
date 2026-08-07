@@ -1065,6 +1065,38 @@ and `docs/linear-types-m4.2-enforcement-2026-08-06.md`. Deferred, in the order t
     (Austral borrow regions; Rust `&` / `&mut`). Large; warrants its own design doc when picked up.
   Prior art: Austral borrowing, Rust references.
 
+### Linear-typed Sprout-IR (Model C Milestone 5) — DEFERRED (2026-08-07)
+
+M5 (make the IR's heap types linear so GC-rooting is a type-checker theorem) is **deferred**. Full
+analysis, options, and the decision rationale: `docs/linear-ir-m5-feasibility-2026-08-07.md`. Short
+version: M5 as planned is not executable against the IR that was actually built (no `Heap τ`/`Rooted τ`
+type — the IR uses a coarse `IRType` tag + the `ir_rooting.sprout` dataflow pass; the M4 linear checker
+is over `TypedExpr`, not `IROp`). A replay of the four historical GC-UAF bugs (`BACKLOG.md:248–251`)
+found they are all classification-completeness (A) or sub-op alloc-ordering (B) bugs — never the
+"forgot to root a correctly-classified value" (C) class that linearity catches for free. So full M5's
+headline benefit is unsupported by bug history, at months-scale cost, and it deepens the non-moving-GC
+coupling. The rooting invariant stays enforced by `ir_rooting.sprout` plus the exhaustive no-catch-all
+op-classification already in place.
+
+- [ ] `P2` **IR classification-consistency verifier (possible next task; the M5 "Option 2").** A
+  greenfield `stdlib/compiler/ir_verify.sprout` pass, wired into `ir_pipeline.compile_program_streaming`
+  after `ir_rooting.insert_roots`, run as a CI/debug gate; on failure emits a loud, located
+  compiler-internal error. **Not linear types** — it targets the same bug class via classification
+  *consistency*, not a consume-once discipline (see the feasibility doc §"how it relates to linear
+  types": for GC rooting the safety-critical half is *totality/coverage*, not *no-reuse*; heap SSA
+  values are naturally multiply-read, so value-level exactly-once would be wrong). **Teeth (family 1):**
+  for every heap-producing op whose kind derives from a type, re-derive the expected kind from an
+  *independent* structural source (`type_kind.type_is_non_heap_scalar` for `IRCall` return kinds via
+  the callee signature; `field_kinds` for `IRGetField`/`IRLoadEnvSlot`/`IRGetTupleField`) and assert
+  the two agree — `IRTUnknown` treated as "either acceptable," never a mismatch (no false positives).
+  This catches bug 248's exact shape (`IRCall` with absent/wrong heap kind → mismatch → build error)
+  without touching the 447 KB translator. **Family 2 (deferred within the task):** re-verify the
+  post-rooting IR directly (every heap value live across a trigger sits in an `IRRoot`/`IRUnroot`
+  bracket) — but only with an *independent* liveness/trigger derivation, else it's circular; costs
+  more for less historical payoff (catches pass bugs, not classification bugs). Ship family 1 first.
+  Weeks, not months; additive; a genuine evidence-gathering down-payment on full M5 (Option 1) should
+  that later prove justified.
+
 ### Native REPL & Analysis Service
 
 - [ ] `P1` Implement `complete_in_state` in `analysis_service_driver.sprout` (2026-05-18, updated 2026-07-17): `eval_expr_in_source` (compile-and-run) and `instances_in_source` are now implemented. `instances_in_source` (landed 2026-07-17) bundles the session source (prelude + transitive imports inlined), resolves the query in session naming context via a probe signature, and unification-matches instance heads (reusing `infer.type_from_ast` + `unifier.unify_types`), with a base-constructor fallback so `:i Maybe a` also surfaces `Functor Maybe`; see `stdlib/compiler/analysis_service_driver.sprout` (`resolve_instances` / `instance_match_names_for_type`) and `tests/stdlib/compiler/test_instances_in_source.spr`. Remaining stub: `complete_in_state` (tab completion, returns "not yet implemented"). Approach: reuse `type_of_in_source` machinery; filter by prefix from a gathered list of visible names from imports + declared names.

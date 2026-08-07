@@ -117,6 +117,17 @@ Add linear types as a *user-facing* language feature, validated on small synthet
 
 ## Milestone 5 — Apply linearity to Sprout-IR (the Model C switch)
 
+> **STATUS: DEFERRED (2026-08-07).** M5 as written below is **not executable against the IR that was
+> actually built** — there is no `Heap τ`/`Rooted τ` type (the IR uses a coarse `IRType` tag plus a
+> dataflow rooting pass), and the M4 linear checker operates over `TypedExpr`, not `IROp`. A
+> feasibility replay of the four historical GC-UAF bugs (`BACKLOG.md:248–251`) found they are all
+> classification-completeness (A) or sub-op alloc-ordering (B) bugs; the "forgot to root a
+> correctly-classified value" class (C) that linearity catches for free has **never occurred**. So
+> full M5's headline benefit is unsupported by bug history, at months-scale cost. Deferred by Kuba;
+> the invariant stays enforced by `ir_rooting.sprout` + the exhaustive no-catch-all op-classification
+> already in place. A lighter classification-consistency **verifier** is filed as a possible next
+> task. Full analysis + options: [`linear-ir-m5-feasibility-2026-08-07.md`](linear-ir-m5-feasibility-2026-08-07.md).
+
 The payoff. Sprout-IR's `Heap τ` and `Rooted τ` become linear; the AST→IR translator is type-checked against the linear discipline; the dataflow analysis becomes redundant and is removed.
 
 | # | PR | What | Risk |
