@@ -17,15 +17,17 @@ module stdlib.task
 # siblings (see docs/concurrency-layer0-io-park-design.md and the exploration
 # doc §4.A). Fail-fast cancellation is a later increment.
 #
-# Forward-compat note: when linear types land (roadmap "Model C M4"), `Task a`
-# becomes linear — task_await/detach consume it exactly once, task_spawn is
-# recovered as fork-then-detach, and the two spawns collapse into one primitive
-# with no call-site churn.
+# Linear (Model C M4, landed): `Task a` is a `type linear` — a forked handle must
+# be consumed exactly once, by `task_await` (retrieve the value) or `detach`
+# (relinquish it; the scope reclaims a never-awaited result). Double-await and a
+# dropped handle are compile errors. See docs/linear-task-v0.md. (task_spawn stays
+# a distinct fire-and-forget primitive; collapsing it into fork+detach is a
+# deferred follow-up.)
 
 export type Scope =
   | Scope Int
 
-export type Task a =
+export type linear Task a =
   | Task Int
 
 # The outcome of a timed operation (L0.7). `Completed a` carries the body's result; `Expired`
@@ -95,11 +97,21 @@ export fn task_fork(scope: Scope, work: Unit -> a !{IO}) -> Task a !{IO} =
   | Scope id -> Task(__task_fork(id, work))
 
 # Block until `task` has finished, then return its value RAW (no unwrapping).
-# Awaiting a given Task more than once is unsupported (a future linear `Task`
-# will reject it statically).
+# `task` is consumed here; awaiting the same handle twice is a compile error
+# (linear reuse). To discard a handle without awaiting, use `detach`.
 export fn task_await(task: Task a) -> a !{IO} =
   match task with
   | Task id -> __task_await(id)
+
+# Relinquish a task handle without awaiting its result — the linear consume for
+# the "I will not await this" path (a timeout's expired branch, or a conditional
+# fork). No runtime action: a never-awaited fork is already reclaimed when the
+# scope closes, so `detach` exists only so the discard is an explicit linear
+# consume rather than a leak. Mirrors C++ std::thread::detach / dropping a Rust
+# JoinHandle.
+export fn detach(task: Task a) -> Unit =
+  match task with
+  | Task _ -> ()
 
 # Request cancellation of every still-running task in `scope` (L0.5, EXPERIMENTAL).
 # Owner-only: may be called only by the task that opened `scope` (the `with_scope`
@@ -168,23 +180,27 @@ fn run_with_deadline(scope: Scope, body: Unit -> a !{IO}, ms: Int) -> TimeoutRes
       handle <- task_fork(scope, body)
       await_and_finish(sid, handle, ms)
 
+# `handle` is consumed by the match that extracts its task id (`tid`), which arms the deadline; the
+# id — not the linear handle — then drives the finish. Inspecting the handle exactly once (no
+# peek-then-forward) keeps this linear-clean: `tid` is a plain Int, so both outcomes below consume
+# zero further linear values and branch convergence holds trivially.
 fn await_and_finish(sid: Int, handle: Task a, ms: Int) -> TimeoutResult a !{IO} =
   match handle with
   | Task tid ->
     do
       completed <- __await_deadline(sid, tid, ms)
-      finish_timeout(handle, completed)
+      finish_by_id(tid, completed)
 
-# On `completed`, the child is already done, so `task_await` returns immediately with its result.
-# On the `Expired` path the child was force-dropped, so `task_await` is NOT called on it (which
+# On `completed`, the child is already done, so `__task_await` returns immediately with its result.
+# On the `Expired` path the child was force-dropped, so `__task_await` is NOT called on it (which
 # would loud-fail on a dropped task).
-fn finish_timeout(handle: Task a, completed: Bool) -> TimeoutResult a !{IO} =
+fn finish_by_id(tid: Int, completed: Bool) -> TimeoutResult a !{IO} =
   if completed then
-    complete_with(handle)
+    complete_by_id(tid)
   else
     Expired
 
-fn complete_with(handle: Task a) -> TimeoutResult a !{IO} =
+fn complete_by_id(tid: Int) -> TimeoutResult a !{IO} =
   do
-    v <- task_await(handle)
+    v <- __task_await(tid)
     Completed(v)

@@ -1,4 +1,4 @@
-import stdlib.task (Scope, with_scope, task_fork, task_spawn, task_yield, scope_cancel)
+import stdlib.task (Scope, with_scope, task_fork, detach, task_spawn, task_yield, scope_cancel)
 import stdlib.net (tcp_listen, tcp_accept, tcp_read)
 import stdlib.string as string
 
@@ -29,7 +29,7 @@ fn accept_forever_unit(listener: Int) -> Unit !{IO} =
 
 fn body(s: Scope, la: Int, lb: Int) -> Unit !{IO} =
   do
-    _fork <- task_fork(s, \_ -> accept_forever(la))  # awaitable, parks on la
+    detach(task_fork(s, \_ -> accept_forever(la)))  # awaitable, parks on la; detach relinquishes (cancel force-drops it)
     task_spawn(s, \_ -> accept_forever_unit(lb))  # fire-and-forget, parks on lb
     task_yield()  # let both reach accept and park
     scope_cancel(s)  # force-drop both parked tasks

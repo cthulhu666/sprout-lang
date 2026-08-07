@@ -201,6 +201,16 @@ fn payload_type(t: types.Type) -> types.Type =
   | types.TApp _ arg -> arg
   | _ -> t
 
+# The type a `<-` bind introduces. For a monadic bind the pattern binds the container's PAYLOAD
+# (`x <- (m: Maybe File)` binds `x: File`), recovered by `payload_type`. For an effect bind
+# (`h <- (io: Task a !{IO})`) the pattern binds the FULL result type — `<-` does not unwrap an
+# effect — so an effect-bound linear value must be tracked whole. The post-pass cannot see the
+# monad kind, so decide structurally: if the full type is itself linear it is an effect-bound
+# linear (use it whole); otherwise fall back to the payload (the monadic case, and the existing
+# conservative over-strict edge where a non-linear container holds a linear).
+fn do_bind_type(t: types.Type, env: Dict types.Scheme) -> types.Type =
+  if type_is_linear(t, env) then t else payload_type(t)
+
 fn app_names(a: List String, b: List String) -> List String =
   match a with
   | Nil -> b
@@ -378,7 +388,7 @@ fn lin_do_bind(pat: ast.Pattern, e: typed_ast.TypedExpr, rest: List typed_ast.Ty
   match lin_consumed(e, linvars, env) with
   | LinErr p m -> LinErr(p, m)
   | LinOk ec ->
-      lin_do_bind_rest(pattern_linear_binders(pat, payload_type(typed_ast.typed_expr_type(e)), env),
+      lin_do_bind_rest(pattern_linear_binders(pat, do_bind_type(typed_ast.typed_expr_type(e), env), env),
                        ec, e, rest, linvars, env)
 
 fn lin_do_bind_rest(binders: List String, ec: List LinUse, e: typed_ast.TypedExpr,

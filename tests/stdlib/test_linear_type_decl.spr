@@ -10,6 +10,12 @@ import stdlib.test (check_eq, run_suite)
 type linear File = File Int
 type linear Pos = (x: Int, y: Int)
 
+# A PARAMETRIC linear type with a phantom parameter (`a` is not stored). Linearity
+# keys on the head (`head_type_name` strips the application), so `Box a` is enforced
+# exactly like a non-parametric linear type — verified by the reuse/leak fixtures in
+# tests/conformance/type_error/linear_task_* (the imported parametric `Task a`).
+type linear Box a = Box Int
+
 # `f` is consumed exactly once — as the match scrutinee.
 fn fd(f: File) -> Int =
   match f with
@@ -23,9 +29,15 @@ fn get_x(p: Pos) -> Int = p.x
 fn choose(c: Bool, f: File) -> Int =
   if c then fd(f) else fd(f)
 
+# `b` (a parametric linear value) is consumed exactly once — the match scrutinee.
+fn unbox(b: Box a) -> Int =
+  match b with
+  | Box n -> n
+
 fn main() -> Unit !{IO} =
   run_suite("linear_type_decl", [
     check_eq("linear ADT single-use", fd(File(7)), 7),
     check_eq("linear record single field", get_x(Pos(x = 3, y = 4)), 3),
-    check_eq("linear convergent branches", choose(true, File(9)), 9)
+    check_eq("linear convergent branches", choose(true, File(9)), 9),
+    check_eq("parametric linear single-use", unbox(Box(5)), 5)
   ])

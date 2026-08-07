@@ -1,4 +1,4 @@
-import stdlib.task (Scope, with_scope, task_fork, task_spawn, task_yield, scope_cancel)
+import stdlib.task (Scope, with_scope, task_fork, detach, task_spawn, task_yield, scope_cancel)
 import stdlib.chan (Chan, chan_new, chan_send)
 
 # Rendezvous send-park drop (L0.10, EXPERIMENTAL). On a cap-0 channel a sender with no ready
@@ -18,7 +18,7 @@ fn send_forever(ch: Chan String) -> Unit !{IO} =
 fn body(s: Scope) -> Unit !{IO} =
   do
     ch <- chan_new(s, 0)
-    _fork <- task_fork(s, \_ -> send_forever(ch))  # awaitable, send-parks
+    detach(task_fork(s, \_ -> send_forever(ch)))  # awaitable, send-parks; detach relinquishes (cancel force-drops it)
     task_spawn(s, \_ -> send_forever(ch))  # fire-and-forget, send-parks
     task_yield()  # let both reach chan_send and park
     scope_cancel(s)  # force-drop both send-parked tasks
