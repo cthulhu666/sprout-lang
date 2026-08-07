@@ -936,27 +936,75 @@ bundle-smoke: bootstrap-from-seed
   fi
   echo "==> bundle-smoke ✓"
 
-# Loud-fail guard.  A self-contained (importless) file that calls a
-# non-intrinsic prelude name must FAIL to compile with a clear "unresolved
-# call" error, NOT silently emit zero_val (`ret i64 0`).  Regression for the
-# codegen.emit_named_call silent fallback that disguised bundler/iface gaps as
+# Loud-fail guard.  A call to a callee that resolves to NOTHING must be
+# DIAGNOSED, never silently zero-filled into `ret i64 0`.  This is the
+# regression guard for the strictness that replaced direct codegen's
+# `zero_val` fallback, which used to disguise bundler/iface gaps as
 # GC/typeclass/print bugs.
+#
+# REWRITTEN 2026-08-07 — the original probe had rotted in three independent
+# ways, and each one alone was enough to make the gate meaningless:
+#
+#   1. It grepped for "unresolved call".  That string was a `panic` in
+#      `emit_named_call` at codegen.sprout:2601, and that FILE was deleted when
+#      direct codegen was retired.  The string now exists nowhere in the tree
+#      except, formerly, this recipe's own body.
+#   2. Its probe was an importless `print(int_to_string(5))`, asserted to fail.
+#      But `int_to_string` is a runtime builtin whose `declare i64
+#      @int_to_string(i64)` ir_header emits unconditionally, and `print` is a
+#      compiler intrinsic — so an importless call to either is resolvable BY
+#      DESIGN.  That program compiles, links, and correctly prints 5.
+#   3. It detected failure via exit status and read the message from stderr.
+#      Before the ERROR-stream fix in this same PR, the driver reported source
+#      errors on STDOUT and exited 0, so `if <compile>; then fail` could never
+#      fire and `grep <stderr>` could never match — independent of 1 and 2.
+#
+# So the probe now uses a name that is neither a builtin nor an intrinsic, and
+# reads BOTH streams.  Reading both is deliberate rather than lazy: it keeps the
+# assertion about the DIAGNOSTIC, not about which stream carries it, so this gate
+# stays honest whether or not a future change moves diagnostics between streams.
+# The exit-status and stderr-specific assertions live in `diagnostic-stream-smoke`,
+# which is where a stream regression belongs.
+#
+# The final check is a POSITIVE CONTROL.  Without it, "no IR was emitted" would
+# pass vacuously if the compiler ever stopped emitting IR at all — a gate that
+# cannot distinguish "correctly rejected" from "totally broken" is not a gate.
 [group('smoke')]
 loud-fail-smoke: bootstrap-from-seed
   #!/usr/bin/env bash
   set -euo pipefail
   TMPD=$(mktemp -d /tmp/sprout_lfs_XXXXXX)
   trap 'rm -rf "$TMPD"' EXIT
-  printf 'fn main() -> Unit !{IO} =\n  print(int_to_string(5))\n' > "$TMPD/unresolved.spr"
-  if "{{build_dir}}/compile_driver_bin_stage1" --emit-ir "{{stdlib_root}}" "$TMPD/unresolved.spr" > "$TMPD/out.ll" 2>"$TMPD/err"; then
-    echo "loud-fail-smoke: importless int_to_string call compiled silently (expected a hard 'unresolved call' error)" >&2
+  DRIVER="{{build_dir}}/compile_driver_bin_stage1"
+  # Neither a runtime builtin nor a compiler intrinsic, and deliberately
+  # unmistakable in a diff so nobody "helpfully" defines it later.
+  printf 'fn main() -> Unit !{IO} =\n  print(int_to_string(sprout_lfs_undefined_callee(5)))\n' > "$TMPD/unresolved.spr"
+  "$DRIVER" --emit-ir "{{stdlib_root}}" "$TMPD/unresolved.spr" > "$TMPD/out.ll" 2>"$TMPD/err" || true
+
+  if ! grep -qs "ERROR: check: Unknown variable" "$TMPD/out.ll" "$TMPD/err"; then
+    echo "loud-fail-smoke: an undefined callee was NOT diagnosed." >&2
+    echo "  expected 'ERROR: check: Unknown variable' on either stream; got:" >&2
+    echo "  --- stdout ---" >&2; head -20 "$TMPD/out.ll" >&2
+    echo "  --- stderr ---" >&2; head -20 "$TMPD/err" >&2
     exit 1
   fi
-  if ! grep -q "unresolved call" "$TMPD/err"; then
-    echo "loud-fail-smoke: compile failed but without the expected 'unresolved call' message:" >&2
-    cat "$TMPD/err" >&2; exit 1
+  # The zero-fill regression itself: a rejected program must yield NO code.
+  if grep -qs "^define " "$TMPD/out.ll"; then
+    echo "loud-fail-smoke: rejected program still emitted IR (silent zero-fill regression):" >&2
+    grep -s "^define " "$TMPD/out.ll" | head -5 >&2
+    exit 1
   fi
-  echo "==> loud-fail-smoke ✓"
+
+  # Positive control — the same shape WITHOUT the undefined callee must emit IR.
+  printf 'fn main() -> Unit !{IO} =\n  print(int_to_string(5))\n' > "$TMPD/ok.spr"
+  "$DRIVER" --emit-ir "{{stdlib_root}}" "$TMPD/ok.spr" > "$TMPD/ok.ll" 2>"$TMPD/ok.err" || true
+  if ! grep -qs "^define " "$TMPD/ok.ll"; then
+    echo "loud-fail-smoke: POSITIVE CONTROL failed — a resolvable program emitted no IR," >&2
+    echo "  so the 'no IR' assertion above proves nothing.  Compiler or stdlib_root is broken:" >&2
+    head -20 "$TMPD/ok.err" >&2; head -5 "$TMPD/ok.ll" >&2
+    exit 1
+  fi
+  echo "==> loud-fail-smoke ✓ (undefined callee diagnosed, no IR emitted, control emits IR)"
 
 # Dispatch-trace guard.  SPROUT_TRACE_DISPATCH=1 must emit a `[dispatch] ...` line
 # per constrained call site, and a projection sort (`vec_sort_by` with key type !=
@@ -1564,6 +1612,7 @@ ci-fast-gates: bootstrap-from-seed build-fmt-from-seed
     "tco-runtime-smoke|tco-runtime-smoke"
     "trace-dispatch-smoke|trace-dispatch-smoke"
     "verify-dispatch-smoke|verify-dispatch-smoke"
+    "loud-fail-smoke|loud-fail-smoke"
     "ir-golden-diff|ir-golden-diff"
     "gate-audit|gate-audit"
   )
@@ -1692,6 +1741,18 @@ gate: fmt-check smoke-shapes bundle-smoke loud-fail-smoke argv-smoke trace-dispa
 #      master while scripts/ir_golden_diff.sh was wired to nothing.  A corpus
 #      nothing checks is worse than no corpus, because it reads as verified.
 #
+#   C. The CONVERSE of A: every task `gate` runs is also exercised in CI.  A and B
+#      together still left a hole, and `loud-fail-smoke` fell straight through it:
+#      it was listed in `gate` but absent from ci-fast-gates and the workflow, so
+#      CI never ran it — and it sat RED on master for weeks with nothing to signal
+#      that.  A cannot catch this (it only walks CI->gate) and B cannot either (it
+#      guards orphaned scripts/*.sh, and this is a justfile recipe).  Note the
+#      failure is worse than an un-run gate: `gate` aborts at the first failure, so
+#      a gate-only recipe going red silently truncates the whole LOCAL battery
+#      after it — here, everything past loud-fail-smoke, which is most of it.
+#      Comparison is by dependency CLOSURE, not by name, because CI runs umbrella
+#      recipes (`test`, `ci-fast-gates`) whose children it never names.
+#
 # Run after touching ci.yml, the gate list, or scripts/.
 # Assert every CI task is gated and every gate script is reachable (drift guard).
 [group('gate')]
@@ -1768,7 +1829,38 @@ gate-audit:
     echo "   delete it, or add it to SCRIPTS_EXCLUDE with the reason it must stay manual." >&2
     exit 1
   fi
-  echo "==> gate-audit ✓ — gate covers every CI gate task; every scripts/ gate is reachable."
+
+  # ── Assertion C: every gate task is exercised in CI (the converse of A) ──────
+  # Built from the dependency CLOSURE of everything CI invokes — both the tasks
+  # named in ci.yml and the members of ci-fast-gates' own GATES array — so an
+  # umbrella recipe covers its children without naming them.
+  #
+  # Recipes that are legitimately LOCAL-ONLY, each with the reason:
+  #   gate — the battery itself.  CI deliberately runs the constituents in
+  #          parallel via ci-fast-gates rather than `gate` sequentially, so `gate`
+  #          appearing in its own closure is self-reference, not a gap.
+  GATE_ONLY_EXCLUDE="gate"
+  gates_arr=$(sed -n '/^  GATES=(/,/^  )/p' justfile \
+                | grep -oE '"[^"]+"' | tr -d '"' | cut -d'|' -f2 | awk '{print $1}' | sort -u)
+  if [[ -z "$gates_arr" ]]; then
+    echo "gate-audit ✗ — could not parse ci-fast-gates' GATES array; assertion C would pass vacuously." >&2
+    exit 1
+  fi
+  ci_closure=$(for t in $ci_tasks $gates_arr; do expand "$t"; done | sort -u)
+  ungated=""
+  for t in $gate_set; do
+    grep -qw "$t" <<<"$GATE_ONLY_EXCLUDE" && continue
+    grep -qx "$t" <<<"$ci_closure" || ungated="$ungated $t"
+  done
+  if [[ -n "$ungated" ]]; then
+    echo "gate-audit ✗ — 'just gate' runs these tasks that CI never exercises:" >&2
+    printf '   %s\n' $ungated >&2
+    echo "   A gate CI never runs can go red unnoticed AND truncates the local battery" >&2
+    echo "   after it (gate stops at the first failure). Add each to ci-fast-gates' GATES" >&2
+    echo "   array or to the workflow, or to GATE_ONLY_EXCLUDE with the reason." >&2
+    exit 1
+  fi
+  echo "==> gate-audit ✓ — gate covers every CI task; CI exercises every gate task; every scripts/ gate is reachable."
 
 # Refresh the bootstrap seed from a GUARANTEED-clean stage-1, then verify the
 # fixed point.  Use after any compiler-source edit under stdlib/compiler/.
