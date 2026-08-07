@@ -924,6 +924,29 @@ Semantics:
   extension; `Int` and `Double` never implicitly coerce — conversion is
   explicit (`to_double`).
 
+### 8.1.1 Double bit access (Experimental)
+
+Two prelude functions expose the raw IEEE 754 binary64 encoding of a `Double`:
+
+```sprout
+double_to_bits(x: Double) -> Int
+double_from_bits(bits: Int) -> Double
+```
+
+Both are **total** and are **reinterpretations, not conversions**:
+`double_to_bits(1.0)` is `4607182418800017408`, not `1`. `to_double` remains the
+numeric bridge. The round trip is exact in both directions for every bit pattern,
+including both zeros — bit access is the only way to distinguish `-0.0` from `0.0`,
+since IEEE compares them equal — and every NaN payload, which is never
+canonicalised.
+
+Like `print` and `to_double`, both are compiler intrinsics rather than runtime
+functions and therefore **cannot be used as first-class values**; passing one to a
+higher-order function (`map(double_to_bits, xs)`) fails at link time.
+
+Status: experimental. Rationale, the prior-art survey, and the rejected
+alternatives are in `docs/double-bit-access-v0.md`.
+
 ### 8.2 Partiality
 
 `stdlib.math.int` follows Rule 1 of the partiality convention: an out-of-domain

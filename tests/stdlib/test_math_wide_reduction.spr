@@ -1,0 +1,84 @@
+import stdlib.test (TestState, new_state, assert_eq, assert_true, summary)
+import stdlib.math (ln, ln_strided, exp, pi, is_nan)
+
+# O(1) range reduction must be BIT-IDENTICAL to the stride ladder it replaced.
+#
+# `ln_reduce` used to walk the binary exponent in power-of-two strides (512 -> 64 ->
+# 8 -> 1), ~20 compare-multiply-branch steps, which is why `ln(1e-300)` measured
+# 20.9 ns against 1-2 ns for normal magnitudes — 13-20x libm purely from the
+# reduction. It now extracts the exponent from the IEEE bit pattern in O(1) via
+# `double_to_bits` (docs/double-bit-access-v0.md).
+#
+# WHY BIT-IDENTICAL IS THE RIGHT BAR, not "within tolerance". Both forms compute the
+# same mathematical split and both are EXACT: the stride ladder multiplies by exact
+# powers of two, and the bit form rewrites the exponent field while carrying the
+# mantissa bits over untouched. Neither introduces rounding, so any difference at
+# all would mean one of them is wrong. A tolerance-based check here would hide
+# exactly the bug this test exists to catch.
+#
+# `ln_strided` is kept exported in stdlib/math.sprout purely as this oracle. It is
+# an independently-derived implementation of the same split, which is what makes it
+# worth keeping rather than deleting.
+#
+# Measured after this change (2M-call sweeps, warm, averaged over 3 runs):
+#   ln(2.0)     3.73 ns  vs strided 4.02 ns
+#   ln(pi)      4.04 ns  vs strided 4.51 ns
+#   ln(1e-300)  3.65 ns  vs strided 22.48 ns   6.2x
+#   ln(1e300)   3.86 ns  vs strided 22.26 ns   5.8x
+# The point is not the peak speedup but that the O(1) form is FLAT across the whole
+# exponent range where the ladder was magnitude-dependent.
+
+fn bits(x: Double) -> Int = double_to_bits(x)
+
+# Walk x by repeated multiplication so every sample is an exact power-of-two
+# multiple of the seed — no literal parsing, and no accumulated error in the sweep.
+fn sweep_same(x: Double, step: Double, i: Int, mismatches: Int) -> Int =
+  if i <= 0 then mismatches
+  else if bits(ln(x)) == bits(ln_strided(x)) then sweep_same(x * step, step, i - 1, mismatches)
+  else sweep_same(x * step, step, i - 1, mismatches + 1)
+
+fn p10(k: Int, acc: Double) -> Double = if k <= 0 then acc else p10(k - 1, acc * 10.0)
+
+fn main() -> Unit !{IO} =
+  do
+    state <- new_state()
+
+    # --- the two reductions agree bit-for-bit across the full exponent range ---
+    # Doubling from the smallest normal upward covers every binary exponent from
+    # -1022 to +1023: 2046 samples, each an exact power of two.
+    assert_eq(state, "ln == ln_strided for every power of two across the range",
+      sweep_same(double_from_bits(4503599627370496), 2.0, 2046, 0), 0)
+    # Halving from 1.0 walks down into the subnormals, which the O(1) form handles
+    # by a 2^54 lift rather than by more strides — the path most likely to diverge.
+    assert_eq(state, "ln == ln_strided down through the subnormals",
+      sweep_same(1.0, 0.5, 1074, 0), 0)
+    # A non-power-of-two stride so mantissas other than 1.0 are exercised too.
+    assert_eq(state, "ln == ln_strided on a 3x sweep (non-trivial mantissas)",
+      sweep_same(1.0, 3.0, 640, 0), 0)
+    assert_eq(state, "ln == ln_strided on a 1/3 sweep",
+      sweep_same(1.0, 1.0 / 3.0, 640, 0), 0)
+
+    # --- specific magnitudes named in the original defect report ---
+    assert_eq(state, "ln(1e300) agrees", bits(ln(p10(300, 1.0))), bits(ln_strided(p10(300, 1.0))))
+    assert_eq(state, "ln(1e-300) agrees",
+      bits(ln(1.0 / p10(300, 1.0))), bits(ln_strided(1.0 / p10(300, 1.0))))
+    assert_eq(state, "ln(pi) agrees", bits(ln(pi)), bits(ln_strided(pi)))
+
+    # --- edge cases must not regress with the new code path ---
+    # ln(1.0) is exactly 0.0: mantissa 1.0, exponent 0, so both terms vanish.
+    assert_eq(state, "ln(1.0) is exactly +0.0", bits(ln(1.0)), bits(0.0))
+    assert_true(state, "ln(0.0) is -inf", ln(0.0) < 0.0 - p10(300, 1.0))
+    assert_true(state, "ln of a negative is NaN", is_nan(ln(0.0 - 1.0)))
+    assert_true(state, "ln(NaN) is NaN", is_nan(ln(0.0 / 0.0)))
+    assert_true(state, "ln(+inf) is +inf", ln(1.0 / 0.0) > p10(300, 1.0))
+    # The smallest positive subnormal must reduce, not loop or return garbage.
+    # ln(2^-1074) = -1074 * ln2 ~= -744.44.
+    assert_true(state, "ln of the smallest subnormal is finite and near -744.4",
+      ln(double_from_bits(1)) < 0.0 - 744.0 && ln(double_from_bits(1)) > 0.0 - 745.0)
+
+    # --- round trip through exp, which has its own reduction ---
+    assert_true(state, "exp(ln(x)) recovers x for a large magnitude",
+      exp(ln(p10(300, 1.0))) > 0.9 * p10(300, 1.0)
+        && exp(ln(p10(300, 1.0))) < 1.1 * p10(300, 1.0))
+
+    summary(state)

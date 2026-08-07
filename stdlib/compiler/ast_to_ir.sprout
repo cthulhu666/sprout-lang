@@ -4756,6 +4756,37 @@ fn translate_to_double_call(args: List typed_ast.TypedExpr,
                    fresh_name(name_prefix, idx1), idx1 + 1))
   | Nil -> Err("ast_to_ir: to_double expects 1 argument, got 0")
 
+# double_to_bits / double_from_bits — raw IEEE 754 bit reinterpretation.
+#
+# Emits NO IR op. Under the i64-uniform value ABI a Double and an Int are already
+# the same LLVM type (both `i64`; a Double travels as its raw bit pattern with no
+# tag and no box), so there is nothing to convert: the result IS the argument's
+# SSA value. Contrast translate_to_double_call above, which must emit an IRSIToF
+# because `to_double` is a NUMERIC conversion and genuinely changes the bits.
+#
+# So this returns translate_expr's result untouched — not as a shortcut, but
+# because any emitted op would be a no-op that only obstructs LLVM. The `fname`
+# parameter exists solely to name the right function in the arity diagnostic;
+# both directions are the same identity.
+#
+# See docs/double-bit-access-v0.md and the prelude declarations for why this is a
+# compiler intrinsic rather than a runtime builtin (there is no symbol to call).
+fn translate_double_bits_call(fname: String, args: List typed_ast.TypedExpr,
+                              params: List String, ctors: Dict sprout_ir.CtorInfo, idx: Int,
+                              cur_label: String, cur_ops: List sprout_ir.IROp,
+                              captures: Dict String,
+                              lifted_ref: Ref (List sprout_ir.IRFunction),
+                              top_level: Set, let_names: Set, fn_arities: Dict Int,
+                              lambda_ctr_ref: Ref Int, lifted_idx_ref: Ref (Dict Int),
+                              name_prefix: String) ->
+    Result String (List sprout_ir.IRBlock, String, List sprout_ir.IROp, String, Int) !{IO} =
+  match args with
+  | [arg | _] ->
+      translate_expr(arg, params, ctors, idx, cur_label, cur_ops,
+                     captures, lifted_ref, top_level, let_names, fn_arities, lambda_ctr_ref, lifted_idx_ref,
+                     name_prefix)
+  | Nil -> Err("ast_to_ir: " ++ fname ++ " expects 1 argument, got 0")
+
 fn translate_call(callee: typed_ast.TypedExpr, args: List typed_ast.TypedExpr,
                   call_ty: types.Type, params: List String,
                   ctors: Dict sprout_ir.CtorInfo, idx: Int,
@@ -4792,6 +4823,10 @@ fn translate_call(callee: typed_ast.TypedExpr, args: List typed_ast.TypedExpr,
           then translate_to_double_call(args, params, ctors, idx,
                                         cur_label, cur_ops, captures, lifted_ref, top_level, let_names, fn_arities,
                                         lambda_ctr_ref, lifted_idx_ref, name_prefix)
+          else if fname == "double_to_bits" || fname == "double_from_bits"
+          then translate_double_bits_call(fname, args, params, ctors, idx,
+                                          cur_label, cur_ops, captures, lifted_ref, top_level, let_names, fn_arities,
+                                          lambda_ctr_ref, lifted_idx_ref, name_prefix)
           else if param_known(fname, params)
           then
             # Trust the typechecker: any param reached here was accepted as

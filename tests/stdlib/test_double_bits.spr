@@ -1,0 +1,112 @@
+import stdlib.test (TestState, new_state, assert_eq, assert_true, summary)
+
+# `double_to_bits` / `double_from_bits` — raw IEEE 754 binary64 reinterpretation.
+#
+# WHY THESE EXIST. `stdlib.math`'s range reduction was 13-20x libm at the exponent
+# extremes because libm gets a double's binary exponent with one shift+mask (O(1))
+# while Sprout had to walk the exponent in strides (~20 compare-multiply-branch
+# steps). These two intrinsics make the exponent obtainable in O(1) from pure
+# Sprout, so the reduction can be O(1) too WITHOUT linking libm. Rationale,
+# prior-art survey and the rejected alternatives: docs/double-bit-access-v0.md.
+#
+# THEY COST ZERO INSTRUCTIONS. Under the i64-uniform value ABI a `Double` and an
+# `Int` are already the same LLVM type (`define i64 @f(i64 %x)` for both), so a
+# bitcast is not a cheap operation — it is NO operation. Both are compiler
+# intrinsics intercepted in ast_to_ir, emitting no IR op at all and returning the
+# argument's SSA name unchanged. No runtime symbol, no APPROVED_BUILTINS entry.
+#
+# NOT A NUMERIC CONVERSION. `double_to_bits(1.0)` is 4607182418800017408, not 1.
+# `to_double` remains the numeric bridge. Every constant below is from the IEEE
+# 754 binary64 encoding and is therefore exact on every conforming platform.
+
+# 2^52 — the value of one unit in the exponent field. Division by it extracts the
+# biased exponent for a POSITIVE double (sign bit 0, so no mask is needed);
+# multiplication by it moves a value into the exponent field.
+let exp_unit = 4503599627370496
+
+# Double-valued results are compared BY BITS, not with check_approx. Two reasons:
+# `Double` has no `Eq` instance (docs/numeric-types-v1-draft.md §7.1 — the NaN
+# ordering question is unresolved), so `assert_eq` on Doubles does not compile; and
+# bit equality is the STRONGER assertion anyway. Every identity here is claimed to
+# be exact, so an approximate comparison would be the wrong test — and only bit
+# equality can distinguish -0.0 from 0.0, which is one of the things being pinned.
+fn bits(x: Double) -> Int = double_to_bits(x)
+
+fn main() -> Unit !{IO} =
+  do
+    state <- new_state()
+
+    # --- known encodings, straight from the IEEE 754 spec ---
+    assert_eq(state, "1.0 encodes as 0x3FF0000000000000",
+      double_to_bits(1.0), 4607182418800017408)
+    assert_eq(state, "2.0 encodes as 0x4000000000000000",
+      double_to_bits(2.0), 4611686018427387904)
+    assert_eq(state, "0.0 encodes as all zero bits",
+      double_to_bits(0.0), 0)
+    # The sign bit alone. This is the ONLY way to tell the two zeros apart:
+    # IEEE says -0.0 == 0.0, so no comparison can distinguish them.
+    assert_eq(state, "-0.0 is the sign bit alone, distinct from +0.0",
+      double_to_bits(-0.0), -9223372036854775808)
+    assert_eq(state, "0.5 encodes as 0x3FE0000000000000",
+      double_to_bits(0.5), 4602678819172646912)
+
+    # --- round-trip, both directions ---
+    assert_eq(state, "from_bits inverts to_bits for 1.0",
+      bits(double_from_bits(double_to_bits(1.0))), bits(1.0))
+    assert_eq(state, "from_bits inverts to_bits for a value needing all 17 digits",
+      bits(double_from_bits(double_to_bits(0.1 + 0.2))), bits(0.1 + 0.2))
+    assert_eq(state, "to_bits inverts from_bits for an arbitrary bit pattern",
+      double_to_bits(double_from_bits(1234605616436508552)), 1234605616436508552)
+    # -0.0 must survive the round trip AS -0.0, not normalise to +0.0.
+    assert_eq(state, "-0.0 round-trips as -0.0, not +0.0",
+      double_to_bits(double_from_bits(-9223372036854775808)), -9223372036854775808)
+
+    # --- it is a REINTERPRETATION, not a conversion ---
+    # If these were numeric casts, to_bits(1.0) would be 1 and the whole point
+    # would be lost. This guards against someone "simplifying" it to a sitofp.
+    assert_true(state, "to_bits is not a numeric cast",
+      ! (double_to_bits(1.0) == 1))
+    assert_true(state, "from_bits is not a numeric cast",
+      ! (bits(double_from_bits(1)) == bits(1.0)))
+
+    # --- the exponent-extraction identities the reduction depends on ---
+    # biased exponent of a positive double = bits / 2^52, exact, no mask needed
+    # because the sign bit is 0. Bias is 1023, so 1.0 has biased exponent 1023.
+    assert_eq(state, "biased exponent of 1.0 is 1023",
+      double_to_bits(1.0) / exp_unit, 1023)
+    assert_eq(state, "biased exponent of 2.0 is 1024",
+      double_to_bits(2.0) / exp_unit, 1024)
+    assert_eq(state, "biased exponent of 0.5 is 1022",
+      double_to_bits(0.5) / exp_unit, 1022)
+    # Reconstructing a power of two by putting a biased exponent in place.
+    assert_eq(state, "2^0 rebuilt from its exponent field",
+      bits(double_from_bits((0 + 1023) * exp_unit)), bits(1.0))
+    assert_eq(state, "2^10 rebuilt from its exponent field",
+      bits(double_from_bits((10 + 1023) * exp_unit)), bits(1024.0))
+    assert_eq(state, "2^-10 rebuilt from its exponent field",
+      bits(double_from_bits((0 - 10 + 1023) * exp_unit)), bits(1.0 / 1024.0))
+    # Forcing the exponent field to 1023 yields the mantissa in [1, 2) exactly.
+    # 1.5 already has exponent 0, so it is its own mantissa.
+    assert_eq(state, "mantissa of 1.5 is 1.5",
+      bits(double_from_bits(double_to_bits(1.5)
+        -(double_to_bits(1.5) / exp_unit - 1023) * exp_unit)), bits(1.5))
+    # 12.0 = 1.5 * 2^3 — exponent 3, mantissa 1.5. Exact: no division involved.
+    assert_eq(state, "12.0 decomposes to mantissa 1.5",
+      bits(double_from_bits(double_to_bits(12.0)
+        -(double_to_bits(12.0) / exp_unit - 1023) * exp_unit)), bits(1.5))
+    assert_eq(state, "12.0 has biased exponent 1026 (unbiased 3)",
+      double_to_bits(12.0) / exp_unit, 1026)
+
+    # --- subnormals: biased exponent 0 is the guard condition ---
+    # The formula above is WRONG for subnormals, so callers must detect them. The
+    # detection itself must work, which is what this pins. 2^-1074 is the smallest
+    # positive subnormal; its bit pattern is 1.
+    assert_eq(state, "the smallest positive subnormal is bit pattern 1",
+      double_to_bits(double_from_bits(1)), 1)
+    assert_eq(state, "smallest subnormal's biased exponent field is 0",
+      double_to_bits(double_from_bits(1)) / exp_unit, 0)
+    # The smallest NORMAL double, 2^-1022, is the boundary: biased exponent 1.
+    assert_eq(state, "smallest normal double has biased exponent 1",
+      double_to_bits(double_from_bits(exp_unit)) / exp_unit, 1)
+
+    summary(state)
