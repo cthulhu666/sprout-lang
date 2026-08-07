@@ -410,7 +410,7 @@ fn find_list_shape_in_instance_methods(methods: List ast.InstanceMethodImpl) -> 
 # separate, parallel walk — see walk_expr's own header comment on why every
 # variant is covered explicitly). Pattern positions only exist at match
 # branches and do-binds (ast.MatchBranch/ast.DoBindStep) — function/lambda
-# params are bare names (ast.Param String (Maybe TypeExpr)), no patterns.
+# params are bare names (ast.Param String (Maybe TypeExpr) ParamMode), no patterns.
 fn find_list_shape_in_expr(e: ast.Expr) -> List source.SourcePos =
   match e with
   | ast.MatchExpr scrut branches _ ->

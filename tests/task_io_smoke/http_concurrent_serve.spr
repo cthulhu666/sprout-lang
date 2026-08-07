@@ -1,6 +1,6 @@
 import stdlib.task (Scope, with_scope, task_spawn, task_sleep)
 import stdlib.chan (Chan, chan_new, chan_send, chan_recv)
-import stdlib.net (TcpConnection, connect, write_all_utf8, read_exact_utf8)
+import stdlib.net (TcpConnection, connect, close, write_all_utf8, read_exact_utf8)
 import stdlib.http_server (HttpRequest, HttpServerResponse, ok, request_path, serve_n)
 
 # L0.3+ concurrency behaviour of stdlib.http_server.serve_n: a per-connection
@@ -24,12 +24,12 @@ import stdlib.http_server (HttpRequest, HttpServerResponse, ok, request_path, se
 fn handle(req: HttpRequest) -> HttpServerResponse =
   ok(request_path(req))
 
-fn send_or_fail(conn: TcpConnection, msg: String) -> Unit !{IO} =
+fn send_or_fail(conn: borrowing TcpConnection, msg: String) -> Unit !{IO} =
   match write_all_utf8(conn, msg) with
   | Ok _ -> term_write("")
   | Err _ -> term_write("write failed\n")
 
-fn report(conn: TcpConnection, label: String) -> Unit !{IO} =
+fn report(conn: borrowing TcpConnection, label: String) -> Unit !{IO} =
   match read_exact_utf8(conn, 12) with
   | Ok line ->
       if line == "HTTP/1.1 200" then term_write(`${label} served\n`)
@@ -47,6 +47,7 @@ fn slow_client(port: Int, ready: Chan Int) -> Unit !{IO} =
         task_sleep(500)
         send_or_fail(conn, "\r\n")
         report(conn, "client1")
+        close(conn)
   | Err _ -> term_write("client1 connect failed\n")
 
 # Connects only after client1 (waits on `ready`), so client1 is at the accept-queue
@@ -62,6 +63,7 @@ fn connect_and_report(port: Int) -> Unit !{IO} =
       do
         send_or_fail(conn, "GET /two HTTP/1.1\r\nHost: x\r\n\r\n")
         report(conn, "client2")
+        close(conn)
   | Err _ -> term_write("client2 connect failed\n")
 
 fn run(s: Scope, port: Int, ready: Chan Int) -> Unit !{IO} =

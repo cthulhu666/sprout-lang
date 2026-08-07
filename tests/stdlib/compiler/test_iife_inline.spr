@@ -27,7 +27,7 @@ fn tint(n: Int) -> typed_ast.TypedExpr = typed_ast.TInt(n, int_t(), no_pos())
 fn plus(l: typed_ast.TypedExpr, r: typed_ast.TypedExpr) -> typed_ast.TypedExpr =
   typed_ast.TBinary("+", l, r, int_t(), no_pos())
 fn lam1(p: String, body: typed_ast.TypedExpr) -> typed_ast.TypedExpr =
-  typed_ast.TLambda(Cons(ast.Param(p, Nothing), Nil), body,
+  typed_ast.TLambda(Cons(ast.Param(p, Nothing, ast.ModeDefault), Nil), body,
     types.TFunc(int_t(), int_t(), types.EffectPure), no_pos())
 fn app1(f: typed_ast.TypedExpr, arg: typed_ast.TypedExpr) -> typed_ast.TypedExpr =
   typed_ast.TCall(f, Cons(arg, Nil), int_t(), no_pos())
@@ -35,7 +35,7 @@ fn app1(f: typed_ast.TypedExpr, arg: typed_ast.TypedExpr) -> typed_ast.TypedExpr
 # fn f(n) = x + n  where x = n + 1
 # desugared: (\x -> x + n)(n + 1) — the IIFE body captures the OUTER param `n`.
 fn iife_capturing_outer() -> typed_ast.TypedDecl =
-  typed_ast.TFnDecl("f", Cons(ast.Param("n", Nothing), Nil), Nothing, Nothing, Nil,
+  typed_ast.TFnDecl("f", Cons(ast.Param("n", Nothing, ast.ModeDefault), Nil), Nothing, Nothing, Nil,
     app1(lam1("x", plus(tvar("x"), tvar("n"))), plus(tvar("n"), tint(1))))
 
 # fn g(n) = (\y -> y + x)(7)  where x = n + 1
@@ -44,7 +44,7 @@ fn iife_capturing_outer() -> typed_ast.TypedDecl =
 # on: after inlining the outer IIFE, `x` lives in `captures`, and the inner IIFE inlines
 # too, resolving `x` from there. Both must inline (no lift, no closure).
 fn nested_iife() -> typed_ast.TypedDecl =
-  typed_ast.TFnDecl("g", Cons(ast.Param("n", Nothing), Nil), Nothing, Nothing, Nil,
+  typed_ast.TFnDecl("g", Cons(ast.Param("n", Nothing, ast.ModeDefault), Nil), Nothing, Nothing, Nil,
     app1(lam1("x", app1(lam1("y", plus(tvar("y"), tvar("x"))), tint(7))),
          plus(tvar("n"), tint(1))))
 

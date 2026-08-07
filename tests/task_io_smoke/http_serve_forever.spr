@@ -1,6 +1,6 @@
 import stdlib.task (Scope, with_scope, task_spawn, scope_cancel)
 import stdlib.chan (Chan, chan_new, chan_send, chan_recv)
-import stdlib.net (TcpConnection, connect, write_all_utf8, read_exact_utf8)
+import stdlib.net (TcpConnection, connect, close, write_all_utf8, read_exact_utf8)
 import stdlib.http_server (HttpRequest, HttpServerResponse, ok, request_path, serve)
 
 # stdlib.http_server.serve is the UNBOUNDED accept loop: unlike serve_n it never
@@ -22,12 +22,12 @@ import stdlib.http_server (HttpRequest, HttpServerResponse, ok, request_path, se
 fn handle(req: HttpRequest) -> HttpServerResponse =
   ok(request_path(req))
 
-fn send_or_fail(conn: TcpConnection, msg: String) -> Unit !{IO} =
+fn send_or_fail(conn: borrowing TcpConnection, msg: String) -> Unit !{IO} =
   match write_all_utf8(conn, msg) with
   | Ok _ -> term_write("")
   | Err _ -> term_write("write failed\n")
 
-fn report(conn: TcpConnection, label: String) -> Unit !{IO} =
+fn report(conn: borrowing TcpConnection, label: String) -> Unit !{IO} =
   match read_exact_utf8(conn, 12) with
   | Ok line ->
       if line == "HTTP/1.1 200" then term_write(`${label} ok\n`)
@@ -40,6 +40,7 @@ fn one_request(port: Int, label: String, req: String) -> Unit !{IO} =
       do
         send_or_fail(conn, req)
         report(conn, label)
+        close(conn)
   | Err _ -> term_write(`${label} connect failed\n`)
 
 # Three sequential connections; each is a fresh accept -> fresh handler for serve.

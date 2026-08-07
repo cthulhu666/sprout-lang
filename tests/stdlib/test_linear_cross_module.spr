@@ -1,5 +1,5 @@
 import stdlib.test (check_eq, run_suite)
-import testsupport.linear_res (open_handle, read_handle)
+import testsupport.linear_res (Handle, open_handle, read_handle)
 
 # A linear type imported from another module retains its linearity through the
 # interface round-trip (M4.1 iface_codec) and M4.2 enforcement accepts correct
@@ -10,7 +10,22 @@ import testsupport.linear_res (open_handle, read_handle)
 
 fn consume(h) -> Int = read_handle(h)
 
+# REGRESSION (M4.5): the same thing with the parameter ANNOTATED by the imported
+# linear type's name. This failed from M4.1 until the fix in this change, with
+# `Type mismatch: testsupport.linear_res.Handle vs Handle`, because
+# bundler.process_line had a branch for "export type alias " but none for
+# "export type linear " — so `export type linear Handle` fell into the plain
+# "export type " branch, which read the marker word `linear` as the type's name.
+# The module then exported a phantom type `linear` and never exported `Handle`,
+# so no annotation naming it could ever be qualified to its canonical form.
+#
+# This is not cosmetic: a modifier requires an annotation, so until this was
+# fixed `fn f(h: borrowing Handle)` was unwritable in any module but the
+# defining one — i.e. borrowing was unusable across module boundaries.
+fn consume_annotated(h: Handle) -> Int = read_handle(h)
+
 fn main() -> Unit !{IO} =
   run_suite("linear_cross_module", [
-    check_eq("imported linear used once", consume(open_handle(42)), 42)
+    check_eq("imported linear used once", consume(open_handle(42)), 42),
+    check_eq("imported linear annotated by name", consume_annotated(open_handle(7)), 7)
   ])

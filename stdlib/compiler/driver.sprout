@@ -112,7 +112,7 @@ fn dump_pats(items: List ast.Pattern) -> List String =
 
 fn dump_param(p: ast.Param) -> String =
   match p with
-  | ast.Param name maybe_type ->
+  | ast.Param name maybe_type _ ->
       match maybe_type with
       | Nothing -> sexp("param", Cons(q(name), Nil))
       | Just t -> sexp("param", [q(name), dump_type(t)])

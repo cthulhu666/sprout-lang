@@ -11,7 +11,15 @@ export extern fn tcp_write(conn: Int, data: String) -> Unit !{IO}
 # family — tcp_read_exact blocks for an exact count, so it cannot read a header block of unknown
 # length. Lets a server drop one failing connection rather than exit(1).
 export extern fn tcp_read_avail(conn: Int) -> Result TcpError String !{IO}
-extern fn tcp_connect(host: String, port: Int) -> Result TcpError Int !{IO}
+# Raw connect. Exported for the same reason tcp_listen/tcp_accept/tcp_read/
+# tcp_write/tcp_close are: code whose shape the linear TcpConnection API cannot
+# yet express must still be able to speak TCP. Concretely that is the
+# accept-or-connect -> hand the socket to a SPAWNED task shape, where the handle
+# is captured by an escaping closure — higher-order linearity (M4.4), which
+# borrowing does not unblock. stdlib.http_server and tests/task_io_smoke/
+# concurrent_read.spr both sit on raw handles for exactly this reason. Callers
+# on this path get no release enforcement; prefer `connect` where the shape allows.
+export extern fn tcp_connect(host: String, port: Int) -> Result TcpError Int !{IO}
 extern fn tcp_read_exact(conn: Int, count: Int) -> Result TcpError Bytes !{IO}
 extern fn tcp_write_all(conn: Int, data: Bytes) -> Result TcpError Int !{IO}
 export extern fn tcp_close(conn: Int) -> Unit !{IO}
@@ -26,10 +34,16 @@ export type TcpError (..) =
   | TcpWriteFailed String
   | TcpEndOfStream
 
-export type TcpConnection =
+# LINEAR (M4.5). A connection is acquire -> use N times -> release once: reads and
+# writes `borrow` it, `close` consumes it. Linearity turns the release discipline
+# from a convention into a compile error — omit `close` and the caller is rejected
+# with a leak. This shape is only expressible because of borrowing; under strict
+# M4.2 consume-exactly-once the first `write_all` would consume the connection and
+# every later use would be a reuse. See docs/linear-borrowing-v0.md.
+export type linear TcpConnection =
   | TcpConnection Int
 
-export type TcpListener =
+export type linear TcpListener =
   | TcpListener Int
 
 export fn tcp_error_message(err: TcpError) -> String =
@@ -41,11 +55,13 @@ export fn tcp_error_message(err: TcpError) -> String =
   | TcpWriteFailed msg -> msg
   | TcpEndOfStream -> "end of stream"
 
-fn tcp_connection_handle(conn: TcpConnection) -> Int =
+# Reads the handle out without taking the connection: `match` on a borrowed
+# binding is a read, not a consume, so this composes into every borrowing op below.
+fn tcp_connection_handle(conn: borrowing TcpConnection) -> Int =
   match conn with
   | TcpConnection handle -> handle
 
-fn tcp_listener_handle(listener: TcpListener) -> Int =
+fn tcp_listener_handle(listener: borrowing TcpListener) -> Int =
   match listener with
   | TcpListener handle -> handle
 
@@ -56,11 +72,11 @@ export fn connect(host: String, port: Int) -> Result TcpError TcpConnection !{IO
     Ok(TcpConnection(handle))
 
 # O(count) once bytes arrive: fills a fresh buffer of the requested size.
-export fn read_exact(conn: TcpConnection, count: Int) -> Result TcpError Bytes !{IO} =
+export fn read_exact(conn: borrowing TcpConnection, count: Int) -> Result TcpError Bytes !{IO} =
   tcp_read_exact(tcp_connection_handle(conn), count)
 
 # O(|payload|): writes the full payload, retrying partial sends as needed.
-export fn write_all(conn: TcpConnection, payload: Bytes) -> Result TcpError Int !{IO} =
+export fn write_all(conn: borrowing TcpConnection, payload: Bytes) -> Result TcpError Int !{IO} =
   tcp_write_all(tcp_connection_handle(conn), payload)
 
 # Recoverable string write over a raw connection handle (for callers that hold an Int handle
@@ -70,7 +86,7 @@ export fn tcp_write_string(conn: Int, data: String) -> Result TcpError Int !{IO}
   tcp_write_all(conn, from_string(data))
 
 # O(count): reads bytes, then validates and copies the UTF-8 payload.
-export fn read_exact_utf8(conn: TcpConnection, count: Int) -> Result TcpError String !{IO} =
+export fn read_exact_utf8(conn: borrowing TcpConnection, count: Int) -> Result TcpError String !{IO} =
   do
     payload <- read_exact(conn, count)
     match to_string(payload) with
@@ -78,20 +94,24 @@ export fn read_exact_utf8(conn: TcpConnection, count: Int) -> Result TcpError St
     | Err utf8_err -> Err(TcpReadFailed(utf8_error_message(utf8_err)))
 
 # O(|payload|): UTF-8 encoding copy plus the full network write.
-export fn write_all_utf8(conn: TcpConnection, payload: String) -> Result TcpError Int !{IO} =
+export fn write_all_utf8(conn: borrowing TcpConnection, payload: String) -> Result TcpError Int !{IO} =
   write_all(conn, from_string(payload))
 
-export fn close(conn: TcpConnection) -> Unit !{IO} =
-  tcp_close(tcp_connection_handle(conn))
+# The single consuming use. Every acquired connection must reach exactly one of
+# these, on every control-flow path, or the program does not compile.
+export fn close(conn: consuming TcpConnection) -> Unit !{IO} =
+  match conn with
+  | TcpConnection handle -> tcp_close(handle)
 
 export fn listen_local(port: Int) -> TcpListener !{IO} =
   TcpListener(tcp_listen(port))
 
-export fn accept(listener: TcpListener) -> TcpConnection !{IO} =
+export fn accept(listener: borrowing TcpListener) -> TcpConnection !{IO} =
   TcpConnection(tcp_accept(tcp_listener_handle(listener)))
 
-export fn close_listener(listener: TcpListener) -> Unit !{IO} =
-  tcp_close_listener(tcp_listener_handle(listener))
+export fn close_listener(listener: consuming TcpListener) -> Unit !{IO} =
+  match listener with
+  | TcpListener handle -> tcp_close_listener(handle)
 
 type alias TcpResult a = Result TcpError a
 

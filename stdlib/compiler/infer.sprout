@@ -183,7 +183,7 @@ fn collect_param_type_vars(params: List ast.Param, acc: List String) -> List Str
   | Nil -> acc
   | Cons p rest ->
       match p with
-      | ast.Param name maybe_type ->
+      | ast.Param name maybe_type _ ->
           match maybe_type with
           | Nothing -> collect_param_type_vars(rest, list_add_unique("_unann_" ++ name, acc))
           | Just te -> collect_param_type_vars(rest, collect_te_vars(te, acc))
@@ -290,7 +290,7 @@ fn param_types_from_decl(params: List ast.Param, local_vars: Dict types.Type) ->
   | Nil -> Nil
   | Cons p rest ->
       match p with
-      | ast.Param name maybe_type ->
+      | ast.Param name maybe_type _ ->
           match maybe_type with
           | Nothing -> Cons(types.TVar(types.tyvar_id("_unann_" ++ name)), param_types_from_decl(rest, local_vars))
           | Just te -> Cons(type_from_ast(te, local_vars), param_types_from_decl(rest, local_vars))
@@ -787,6 +787,34 @@ fn mark_type_multiplicity(name: String, mult: ast.Multiplicity, env: Dict types.
         dict_set("@linear:" ++ name, types.mono(types.TConst(types.type_id("linear"))), env))
   | ast.Unrestricted -> env
 
+# A function's parameter ownership modes are recorded as a "@parammode:<name>"
+# sentinel, mirroring the @arity: idiom above: the scheme body is a TConst whose
+# NAME is a positional mask, one character per parameter ('b' = `borrowing`,
+# 'c' = `consuming`, '.' = unmodified). linear_check reads it at a CALL SITE to
+# decide whether an argument position borrows; the callee-side rules read the
+# ast.Param list directly and need no mask.
+#
+# Only recorded when a modifier was actually written, so a modifier-free program
+# (i.e. all of today's code) adds no env entries and pays nothing. An absent mask
+# reads as "every position consumes" — the pre-M4.5 behaviour, and the safe default.
+fn mark_param_modes(name: String, params: List ast.Param, env: Dict types.Scheme) -> Dict types.Scheme =
+  if ! linear_check.any_param_mode_written (params) then env
+  else dict_set("@parammode:" ++ name,
+         types.mono(types.TConst(types.type_id(param_mode_mask(params)))), env)
+
+fn param_mode_mask(params: List ast.Param) -> String =
+  match params with
+  | Nil -> ""
+  | Cons p rest ->
+      match p with
+      | ast.Param _ _ mode -> param_mode_char(mode) ++ param_mode_mask(rest)
+
+fn param_mode_char(m: ast.ParamMode) -> String =
+  match m with
+  | ast.ModeBorrowing -> "b"
+  | ast.ModeConsuming -> "c"
+  | ast.ModeDefault -> "."
+
 # True when the named type constructor was declared linear (see mark_type_multiplicity).
 fn type_name_is_linear(name: String, env: Dict types.Scheme) -> Bool =
   match dict_get("@linear:" ++ name, env) with
@@ -815,8 +843,12 @@ fn call_arity_error(name: String, got: Int, want: Int) -> String =
 # `let add3 = \a -> \b -> \c -> ... in add3(1)(2)(3)` — with a spurious
 # "'add3' expects 3 arguments" error once inference resolves the local's arrow
 # type. See under_application_error and tests/stdlib/test_shadow_underapp_compiles.spr.
+# The `@parammode:` mask is dropped for the same reason and by the same argument:
+# the name now denotes a VALUE, and a call through it has no declared parameter
+# modes. Leaving the shadowed function's mask in place would make an argument
+# position borrow when calling something else entirely.
 fn bind_local_scheme(name: String, scheme: types.Scheme, env: Dict types.Scheme) -> Dict types.Scheme =
-  dict_set(name, scheme, dict_remove("@arity:" ++ name, env))
+  dict_set(name, scheme, dict_remove("@parammode:" ++ name, dict_remove("@arity:" ++ name, env)))
 
 # Nothing if the call is saturated or the callee has no declared arity — a
 # function-typed value (Approach A's job) or a LOCAL binding shadowing a top-level
@@ -3666,7 +3698,7 @@ fn extend_env_with_params(params: List ast.Param, param_types: List types.Type, 
   | (_, Nil) -> env
   | (Cons p rest_p, Cons t rest_t) ->
       match p with
-      | ast.Param name _ -> extend_env_with_params(rest_p, rest_t, bind_local_scheme(name, types.mono(t), env))
+      | ast.Param name _ _ -> extend_env_with_params(rest_p, rest_t, bind_local_scheme(name, types.mono(t), env))
 
 # ---------------------------------------------------------------------------
 # Record inference
@@ -4311,8 +4343,8 @@ fn fn_sig_tyvars_params(params: List ast.Param, acc: List String) -> List String
   | Nil -> acc
   | Cons p rest ->
       match p with
-      | ast.Param _ (Just te) -> fn_sig_tyvars_params(rest, collect_te_vars(te, acc))
-      | ast.Param _ Nothing -> fn_sig_tyvars_params(rest, acc)
+      | ast.Param _ (Just te) _ -> fn_sig_tyvars_params(rest, collect_te_vars(te, acc))
+      | ast.Param _ Nothing _ -> fn_sig_tyvars_params(rest, acc)
 
 fn fn_sig_tyvars_ret(ret_maybe: Maybe ast.TypeExpr, acc: List String) -> List String =
   match ret_maybe with
@@ -4622,16 +4654,18 @@ fn pre_scan_fn_decls(decls: List ast.Decl, env: Dict types.Scheme, alias_env: Di
       match decl with
       | ast.FnDecl name params ret_type_maybe effects_maybe constraints _ _ ->
           pre_scan_fn_decls(rest,
-            dict_set("@arity:" ++ name, arity_marker(list_length(params)),
-              register_fn_decl_scheme(name, params, ret_type_maybe, effects_maybe, constraints, alias_env, env)),
+            mark_param_modes(name, params,
+              dict_set("@arity:" ++ name, arity_marker(list_length(params)),
+                register_fn_decl_scheme(name, params, ret_type_maybe, effects_maybe, constraints, alias_env, env))),
             alias_env)
       | ast.ExternFnDecl name params ret_type_maybe effects_maybe _ ->
           match dict_get(name, env) with
           | Just _ -> pre_scan_fn_decls(rest, env, alias_env)
           | Nothing ->
               pre_scan_fn_decls(rest,
-                dict_set("@arity:" ++ name, arity_marker(list_length(params)),
-                  dict_set(name, scheme_from_fn_parts(params, ret_type_maybe, effects_maybe, alias_env), env)),
+                mark_param_modes(name, params,
+                  dict_set("@arity:" ++ name, arity_marker(list_length(params)),
+                    dict_set(name, scheme_from_fn_parts(params, ret_type_maybe, effects_maybe, alias_env), env))),
                 alias_env)
       | ast.AliasDecl name [] rhs_te _ ->
           pre_scan_fn_decls(rest, env,
@@ -5341,10 +5375,15 @@ fn tuple_has_const(items: List types.Type) -> Bool =
 # M4.2 linear check, gated on the program declaring any linear type. When it does
 # not, skip the check AND the full-body substitution copy (evaluated only inside
 # the `if`), so linear-free compilation pays nothing.
+#
+# M4.5 widens the gate by one cheap disjunct: a program with NO linear type must
+# still REJECT `borrowing`/`consuming` written on a non-linear parameter, and such
+# a program never trips program_has_linear. The extra test walks a handful of
+# params and is only reached when the first disjunct already failed.
 fn fn_linear_gate(params: List ast.Param, s2: Dict types.Type, inst_type: types.Type,
                   typed_body: typed_ast.TypedExpr, fn_pos: source.SourcePos,
                   env: Dict types.Scheme) -> linear_check.LinCheck =
-  if linear_check.program_has_linear(env) then
+  if linear_check.program_has_linear(env) || linear_check.any_param_mode_written(params) then
     linear_check.check_fn_linear(params, unifier.apply_subst(s2, inst_type),
       apply_subst_typed_expr(s2, typed_body), fn_pos, env)
   else linear_check.LinPass

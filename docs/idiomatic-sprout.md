@@ -262,6 +262,45 @@ Leave the functional core pure; carry `!{IO}` only where a function actually doe
 IO, and push that to the drivers at the edge of the call graph. A pure transform
 returns a value; its already-in-IO caller does the printing.
 
+## Let the compiler enforce "release it exactly once"
+
+A resource with an explicit release — a socket, a file handle — is
+**acquire → use N times → release once**. Declare the handle `type linear`, take
+it `borrowing` in the operations that only read or write it, and `consuming` in
+the one that releases it. Then forgetting the release is a compile error rather
+than a leak found in production.
+
+```sprout
+# stdlib.net, the shipped example:
+export fn write_all(conn: borrowing TcpConnection, payload: Bytes) -> … !{IO} = …
+export fn close(conn: consuming TcpConnection) -> Unit !{IO} =
+  match conn with
+  | TcpConnection handle -> tcp_close(handle)
+```
+
+A session then reads like ordinary code — no block, no reference type:
+
+```sprout
+fn fetch(host: String, port: Int) -> Unit !{IO} =
+  match connect(host, port) with
+  | Ok conn ->
+      do
+        send_or_fail(conn, request)   # borrows
+        report(conn, "response")      # borrows again
+        close(conn)                   # the single consuming use
+  | Err _ -> term_write("connect failed\n")
+```
+
+Two things to know when writing the operations themselves. A **`consuming`
+function must destructure the value** — calling a `borrowing` accessor on it only
+borrows, leaving nothing consumed, and the compiler will say so. And an argument
+in a `borrowing` position must be a **variable**: `report(connect(…), …)` is
+rejected, because that connection would never be released.
+
+Reach for this when a type has a release operation. For plain data with no
+release, `linear` only gets in the way — see
+[spec-v0.md §5.8](./spec-v0.md).
+
 ---
 
 For the reasoning behind totality, `wrap`, effects, and data-last, see

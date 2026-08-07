@@ -120,7 +120,7 @@ fn no_pos() -> source.SourcePos = source.SourcePos(0, 0, 0)
 fn param_names_from_list(ps: List ast.Param) -> List String =
   match ps with
   | Nil -> Nil
-  | Cons (ast.Param name _) rest -> Cons(name, param_names_from_list(rest))
+  | Cons (ast.Param name _ _) rest -> Cons(name, param_names_from_list(rest))
 
 # ---------------------------------------------------------------------------
 # Type helpers for generated nodes
@@ -145,7 +145,7 @@ fn tfunc_result_type(t: types.Type) -> types.Type =
 fn generate_typed_param_vars(params: List ast.Param, method_type: types.Type, pos: source.SourcePos) -> List typed_ast.TypedExpr =
   match params with
   | Nil -> Nil
-  | Cons (ast.Param pname _) rest ->
+  | Cons (ast.Param pname _ _) rest ->
       match method_type with
       | types.TFunc arg_t ret_t _ ->
           Cons(typed_ast.TVar(pname, arg_t, pos),
@@ -427,7 +427,7 @@ fn prepend_class_hidden_params(
   | Nil -> acc
   | Cons m rest ->
       prepend_class_hidden_params(class_name, idx, rest,
-        Cons(ast.Param(tc_slot_name(class_name, idx, m), Nothing), acc))
+        Cons(ast.Param(tc_slot_name(class_name, idx, m), Nothing, ast.ModeDefault), acc))
 
 fn generate_one_class_wrapper(
   class_name: String,
@@ -607,7 +607,7 @@ fn build_hidden_one_acc(
       match tc_slot_name(class_name, idx, method_name) with
       | slot ->
           build_hidden_one_acc(class_name, idx, rest,
-            Cons(ast.Param(slot, Nothing), param_rev),
+            Cons(ast.Param(slot, Nothing, ast.ModeDefault), param_rev),
             dict_set(method_name, slot, map_acc))
 
 fn prepend_params(new_params: List ast.Param, acc: List ast.Param) -> List ast.Param =
@@ -859,7 +859,7 @@ fn count_method_params(t: types.Type) -> Int =
 
 fn make_eta_params_list(n: Int, i: Int) -> List ast.Param =
   if i >= n then Nil
-  else Cons(ast.Param(eta_param_name(i), Nothing), make_eta_params_list(n, i + 1))
+  else Cons(ast.Param(eta_param_name(i), Nothing, ast.ModeDefault), make_eta_params_list(n, i + 1))
 
 fn make_eta_arg_tvars(t: types.Type, i: Int, n: Int, pos: source.SourcePos) -> List typed_ast.TypedExpr =
   if i >= n then Nil
@@ -1632,7 +1632,7 @@ fn build_lambda_helper(
   pos: source.SourcePos
 ) -> typed_ast.TypedExpr =
   typed_ast.TLambda(
-    list_map(\nm -> ast.Param(nm, Nothing), lp_names),
+    list_map(\nm -> ast.Param(nm, Nothing, ast.ModeDefault), lp_names),
     typed_ast.TCall(
       typed_ast.TVar(fn_name, types.TVar(types.tyvar_id("?lambda")), pos),
       list_append(list_map(\nm -> typed_ast.TVar(nm, types.TVar(types.tyvar_id("?lambda")), pos), lp_names), inner_dicts),

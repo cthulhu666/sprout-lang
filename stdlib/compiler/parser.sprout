@@ -941,7 +941,7 @@ fn hole_params(args: List ast.Expr, next: Int) -> List ast.Param =
   | Nil -> Nil
   | Cons a rest ->
       if arg_is_hole(a) then
-        Cons(ast.Param(ph_param_name(next), Nothing), hole_params(rest, next + 1))
+        Cons(ast.Param(ph_param_name(next), Nothing, ast.ModeDefault), hole_params(rest, next + 1))
       else
         hole_params(rest, next)
 
@@ -1041,7 +1041,7 @@ fn parse_lambda_params(tokens: Vec token.Token, i: Int) -> Result ParseError (Li
   | Nothing ->
       do
         (t, i2) <- expected_ident("lambda parameter", tokens, i)
-        Ok((Cons(ast.Param(token.token_text(t), Nothing), Nil), i2))
+        Ok((Cons(ast.Param(token.token_text(t), Nothing, ast.ModeDefault), Nil), i2))
 
 fn parse_list_literal(tokens: Vec token.Token, i: Int) -> Result ParseError (ast.Expr, Int) =
   do
@@ -1164,13 +1164,37 @@ fn parse_param(tokens: Vec token.Token, i: Int) -> Result ParseError (ast.Param,
     (t, i2) <- expected_ident("parameter name", tokens, i)
     parse_param_cont(tokens, i2, token.token_text(t))
 
+# An optional ownership modifier sits between a parameter's `:` and its type
+# (`conn: borrowing TcpConnection`), mirroring the contextual `linear` marker
+# above — neither word is reserved, both are special only in this one position.
+#
+# DISAMBIGUATION: a bare `x: borrowing` is the TYPE named `borrowing`, not a
+# modifier with a missing type. `borrowing`/`consuming` are ordinary identifiers
+# and could legitimately name a type, so the modifier reading requires a type
+# atom to follow. Without this guard the modifier would be a reserved word in
+# all but name. See docs/linear-borrowing-v0.md §8.
+fn param_mode_at(tokens: Vec token.Token, i: Int) -> ast.ParamMode =
+  if ! (tok_is_ident(tok_at(tokens, i)) && starts_type_atom(tokens, i + 1)) then ast.ModeDefault
+  else param_mode_of_text(token.token_text(tok_at(tokens, i)))
+
+fn param_mode_of_text(text: String) -> ast.ParamMode =
+  if text == "borrowing" then ast.ModeBorrowing
+  else if text == "consuming" then ast.ModeConsuming
+  else ast.ModeDefault
+
+fn skip_param_mode(tokens: Vec token.Token, i: Int) -> Int =
+  match param_mode_at(tokens, i) with
+  | ast.ModeDefault -> i
+  | _ -> i + 1
+
 fn parse_param_cont(tokens: Vec token.Token, i: Int, name: String) -> Result ParseError (ast.Param, Int) =
   match match_symbol(tokens, i, ":") with
-  | Nothing -> Ok((ast.Param(name, Nothing), i))
+  | Nothing -> Ok((ast.Param(name, Nothing, ast.ModeDefault), i))
   | Just (_, i2) ->
       do
-        (ty, i3) <- parse_type_expr(tokens, i2)
-        Ok((ast.Param(name, Just(ty)), i3))
+        let mode = param_mode_at(tokens, i2)
+        (ty, i3) <- parse_type_expr(tokens, skip_param_mode(tokens, i2))
+        Ok((ast.Param(name, Just(ty), mode), i3))
 
 fn collect_params(tokens: Vec token.Token, i: Int, acc: List ast.Param) -> Result ParseError (List ast.Param, Int) =
   if tok_is_symbol(tok_at(tokens, i), ")") then Ok((acc, i))

@@ -1,6 +1,12 @@
 # Borrowing for linear types — design note (v0)
 
-Status: **design note, pre-approval.** Written 2026-08-07. Proposes adding **borrowing** to Sprout's
+Status: **APPROVED and IMPLEMENTED** as M4.5 (2026-08-07). The user chose **Option D + the
+field-read borrow** (§6, §15) and scoped v0 to `stdlib/net.sprout`, with all of
+`stdlib/http_server.sprout` deferred. §16 below records what implementation changed relative to
+this note — read it before treating any section here as a description of the shipped behaviour.
+The normative description is `docs/spec-v0.md` §5.8.
+
+Original status line: *design note, pre-approval.* Written 2026-08-07. Proposes adding **borrowing** to Sprout's
 linear type system (M4, landed in PR #22/#23), so a `type linear` value can be *used without being
 consumed*. This is the feature standing between linearity and the stdlib's real resources:
 `TcpConnection` (and `TcpListener`) are **acquire → use N times → release once**, a shape strict
@@ -361,3 +367,78 @@ above already establishes it is rank-1-feasible (§5, §6) — it is a scope dec
 
 Whichever is chosen, scope v0 to **`TcpConnection` first**, **borrow-vs-consume only** (defer the
 `&`/`&mut` split), with `TcpListener` following the same shape and **`Scope` gated on M4.4** (§2).
+
+## 16. What implementation changed (added 2026-08-07, post-landing)
+
+The design above was written before the code existed. Five things turned out differently; the
+sections above are left as written, and this section is authoritative where they conflict.
+
+**1. §9 understated the checker work: borrowing forces ORDERING, not just a second category.**
+M4.2's analysis was an order-*insensitive* set analysis — `seq2` only checked that sibling
+consumed-sets were disjoint. Adding a non-consuming use opens a hole a set-only check cannot see:
+
+```
+close(conn)           # records one consume
+write(conn, payload)  # records NO consume -> sets stay disjoint -> accepted
+```
+
+That is a write to a closed socket. `LinRes` therefore carries **two** sets (consumed, borrowed)
+and sequential composition rejects a borrow that *follows* a consume. This is sound rather than
+approximate because `docs/spec-v0.md` §6 already fixes evaluation order left-to-right for
+application arguments, binary operands and constructor/tuple fields, and the walk folds in that
+same order. Fixture: `tests/conformance/type_error/borrow_after_consume`.
+
+**2. The field-read borrow is keyed on the BINDING's mode, not on `TGetField` syntax.** The
+obvious rule — "a field read borrows" — breaks accepted code: `fn get_x(p: Pos) = p.x` is a
+passing positive test (`tests/stdlib/test_linear_type_decl.spr`) precisely because the field read
+*is* the consume (spec §5.8), and an owned linear record has no other way to be consumed. Relaxing
+the leak rule to compensate would destroy the socket case, which is the whole feature. The shipped
+rule instead splits by **position**: reading positions (field-access base, `match` scrutinee)
+borrow *when the binding is a `borrowing` parameter* and still consume otherwise. Consequences:
+`p.x + p.y` is legal for `p: borrowing Pos`, unchanged (a reuse) for an owned `p`, and
+`BACKLOG.md`'s linear-record-ergonomics item is only *partly* closed — the owned case still needs
+a `RecordPattern`.
+
+**3. A soundness hole this note did not consider: borrowed CONTENTS.** Destructuring a borrowed
+value was binding its linear fields as *owned*, so
+`fn steal(w: borrowing Wrap) = match w with | Wrap f -> release(f)` consumed the inner resource
+while the caller still owned the `Wrap` and would release it again — a double consume laundered
+through a pattern match. Reads through a borrow are now borrows all the way down. Fixture:
+`tests/conformance/type_error/borrow_field_of_borrow`.
+
+**4. §11's migration claims were wrong, and the real blocker was elsewhere.**
+`stdlib/http_client.sprout` is **not** a `stdlib.net` caller — it calls a C builtin
+`http_request`. The `TcpConnection` ADT's only in-repo users were `tests/task_io_smoke/*`;
+`http_server.sprout` and `examples/tcp_echo_once.sprout` use the raw `Int` handles and were
+untouched by the migration. Four of the five smoke tests turned out to be **leaking their
+connections outright** — the migration's first act was for the compiler to report that.
+
+More seriously, `bundler.process_line` had a branch for `"export type alias "` but none for
+`"export type linear "`, so `export type linear Foo` fell into the plain `"export type "` branch
+and read the marker word **`linear`** as the type's name. Every module with a linear type has
+therefore been exporting a phantom type called `linear` and **never exporting the real one** since
+M4.1 — which meant no annotation naming it could be qualified (`Type mismatch: mod.Foo vs Foo`).
+Because a modifier *requires* an annotation, this made `fn f(c: borrowing TcpConnection)`
+unwritable in any module but the defining one; borrowing would have shipped unusable across module
+boundaries. Fixed here; regression: `tests/stdlib/test_linear_cross_module.spr`
+`consume_annotated`. `BACKLOG.md`'s entry for this claimed it was "not linearity-specific" — it
+is: a non-linear imported ADT annotation always worked.
+
+**5. §9's erasure wording is stronger than what is enforced.** The modifiers are *not* "stripped
+before lowering" — they stay on `ast.Param` and lowering simply never reads them
+(`ast_to_ir.ast_params_to_irtype_pairs` destructures `ast.Param _ ann _`). An assertion that no
+modifier survives into `ast_to_ir` would fail. The testable form of the guarantee is
+byte-identical IR, pinned by `tests/stdlib/compiler/test_borrow_erasure.spr`: `consuming` and
+unmodified mean the same thing to the checker, so those two sources differ by one token and must
+emit identical IR. `just ir-golden-diff` is the standing whole-corpus version of the same guard.
+
+**Also worth recording:** a `consuming` function must genuinely *destructure* the value. `close`
+was first written as `tcp_close(tcp_connection_handle(conn))`, but that accessor is `borrowing`,
+so `conn` was only borrowed and the checker correctly reported that `close` never disposed of what
+it was handed. `match conn with | TcpConnection handle -> …` is the consuming form.
+
+And `stdlib.net.tcp_connect` is now **exported**, completing the raw-handle family alongside
+`tcp_listen`/`tcp_accept`/`tcp_read`/`tcp_write`/`tcp_close`. Code whose shape borrowing cannot
+express — handing a socket to a *spawned* task, i.e. capture by an escaping closure (M4.4) — must
+still be able to speak TCP. `stdlib/http_server.sprout` and
+`tests/task_io_smoke/concurrent_read.spr` both sit on that path and get no release enforcement.

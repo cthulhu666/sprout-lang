@@ -1,5 +1,5 @@
 import stdlib.task (Scope, with_scope, task_spawn)
-import stdlib.net (TcpConnection, connect, write_all_utf8, tcp_listen, tcp_accept, tcp_read)
+import stdlib.net (tcp_connect, tcp_write_string, tcp_listen, tcp_accept, tcp_read, tcp_close)
 import stdlib.string as string
 
 # L0.3 I/O parking smoke. Two green tasks share one loopback connection pair:
@@ -10,20 +10,25 @@ import stdlib.string as string
 #   reader got ping
 # With the BLOCKING baseline, reader's tcp_read freezes the OS thread and writer
 # never runs -> the program HANGS (the RED signal, caught by a timeout wrapper).
+#
+# Uses RAW Int handles on both sides, not the linear TcpConnection. The socket is
+# handed to a SPAWNED task, i.e. captured by an escaping closure, which is
+# higher-order linearity (M4.4) and is NOT unblocked by borrowing — the same
+# reason stdlib.http_server stays on raw handles. Revisit when M4.4 lands.
 fn reader(server: Int) -> Unit !{IO} =
   do
     data <- tcp_read(server)
     term_write(string.concat("reader got ", data))
     term_write("\n")
 
-fn writer(client: TcpConnection) -> Unit !{IO} =
+fn writer(client: Int) -> Unit !{IO} =
   do
     term_write("writer sent\n")
-    match write_all_utf8(client, "ping") with
+    match tcp_write_string(client, "ping") with
     | Ok _ -> term_write("")
     | Err _ -> term_write("writer: write failed\n")
 
-fn run(s: Scope, server: Int, client: TcpConnection) -> Unit !{IO} =
+fn run(s: Scope, server: Int, client: Int) -> Unit !{IO} =
   do
     task_spawn(s, \_ -> reader(server))
     task_spawn(s, \_ -> writer(client))
@@ -31,9 +36,10 @@ fn run(s: Scope, server: Int, client: TcpConnection) -> Unit !{IO} =
 fn main() -> Unit !{IO} =
   do
     listener <- tcp_listen(28999)
-    match connect("127.0.0.1", 28999) with
+    match tcp_connect("127.0.0.1", 28999) with
     | Ok conn ->
         do
           server <- tcp_accept(listener)
           with_scope(\s -> run(s, server, conn))
+          tcp_close(conn)
     | Err e -> term_write("connect failed\n")
