@@ -38,10 +38,17 @@ module stdlib.math
 #
 # Per-function measurements and method: docs/math-transcendental-v0.md.
 #
-# Note there is no Double -> Int conversion in the language (only `to_double`, an
-# `sitofp`), so every range-reduction counter below is a Double-valued integer. That is
-# a feature rather than a workaround: multiplying or dividing by 2 is exact in binary
-# floating point, so the reductions contribute no rounding error of their own.
+# The LANGUAGE still has no Double -> Int conversion (only `to_double`, an `sitofp`),
+# but this module now has a private one — `round_to_int`, built on the
+# `double_to_bits` intrinsic — because the O(1) reductions need the binary exponent as
+# an actual `Int`. See the note above it for why it stays private.
+#
+# The invariant the old "counters are Double-valued integers" note existed to justify
+# still holds, and is what matters: EVERY REDUCTION MOVES ONLY BY EXACT POWERS OF TWO,
+# so none of them contributes rounding error of its own. The stride ladders got that by
+# multiplying by exact power-of-two constants; the bit-pattern forms get it by rewriting
+# the exponent field while carrying the mantissa bits over untouched. Either way the
+# residual is series truncation alone, which is what the accuracy figures above measure.
 
 export let pi = 3.141592653589793
 
@@ -121,9 +128,15 @@ let exp_bias = 1023
 # `two54` (2^54) is defined further down for exp's subnormal path and reused here to
 # lift a subnormal into the normal range, so one code path covers the whole domain.
 
-# The raw biased exponent field of a positive finite x. O(1). A result of 0 means
-# x is SUBNORMAL, where the decomposition below does not hold — callers must route
-# through `binary_exponent`/`mantissa_of`, which handle that case.
+# The raw biased exponent field of a positive finite x. O(1).
+#
+# TWO results are out-of-band and every caller must handle them:
+#   0     — x is SUBNORMAL. The decomposition does not hold; each `*_reduce` below
+#           lifts by 2^54 and threads an `adj` correction (see sqrt_reduce).
+#   2047  — x is NaN or infinity. NOT a real exponent, though it decodes as one:
+#           this is what made `sqrt(NaN)` return 1.64e154 before `sqrt` gained its
+#           `is_nan` guard. Callers must reject non-finite inputs BEFORE reducing;
+#           all four entry points now do.
 fn raw_biased_exp(x: Double) -> Int =
   double_to_bits(x) / exp_field_unit
 
@@ -312,7 +325,7 @@ fn sqrt_iter(x: Double, guess: Double, i: Int) -> Double =
 # EVEN part (which halves exactly) and a remainder that stays with the mantissa, so
 # j = floor(e/2) and m lands in [1, 4) — the interval sqrt_iter is seeded for.
 #
-# floor, not truncation: see floor_div_pos. At x = 0.5 (e = -1) floor gives j = -1
+# floor, not truncation: see floor_div_2 above. At x = 0.5 (e = -1) floor gives j = -1
 # and m = 2.0; truncation would give j = 0 and m = 0.5, seeding Newton outside its
 # interval. That is half of all inputs below 1.0, not a corner case.
 #
@@ -336,7 +349,27 @@ where
 # The pre-2026-08-07 stride ladder, retained as the accuracy oracle for the O(1)
 # form (tests/stdlib/test_math_wide_reduction.spr cross-checks them). It is an
 # independently-derived implementation of the same split, which is what makes it
-# worth keeping — a test comparing a function against itself proves nothing.
+# worth keeping — a test comparing a function against itself proves nothing. It
+# earned that keep immediately: it is what showed `sqrt(NaN)` had regressed.
+#
+# THE COST, measured rather than hand-waved. Exporting the oracles means they are
+# emitted into the IR of any module that imports `stdlib.math`, even under a
+# selective import list — `tests/smoke_shapes/10_double_math.spr` imports exactly
+# `(sqrt, cbrt, exp, ln, pow)` and still carries 1136 lines of oracle IR, ~7% of the
+# file. Today that is the ONLY affected file in the tree (no shipped example imports
+# `stdlib.math`; `astar` imports `stdlib.math.int`), so the present cost is close to
+# nil, but it grows with every future consumer.
+#
+# Kept anyway, deliberately. Moving the ladders into the test file would mean
+# duplicating `sqrt_iter`/`cbrt_iter`/`exp_series`/`ln_series` there too, since they
+# are private — and that makes the oracle WORSE, not just noisier: a legitimate
+# change to a series would then show up as a reduction divergence, which is a false
+# alarm in exactly the test meant to be trusted. Sharing the series and varying only
+# the reduction is the whole point.
+#
+# The real gap is that Sprout has no test-only visibility (no `#[cfg(test)]`, no
+# friend modules), so "exported" is the only way a test can reach this. Filed in
+# BACKLOG; when that lands, drop the `export` on the four `*_strided` entry points.
 fn sqrt_reduce_strided(x: Double, scale: Double) -> Double =
   if x >= 4.0 then
     if x < two8 then sqrt_reduce_strided(x * 0.25, scale * 2.0)
@@ -355,8 +388,21 @@ fn sqrt_reduce_strided(x: Double, scale: Double) -> Double =
 # and skip the Newton step, whose first guess would divide 0/0. +inf is its own
 # root, but Newton would compute inf/inf = NaN, so short-circuit it — only +inf
 # satisfies `x * 0.5 == x` among positive x.
+# The `is_nan` guard is REQUIRED, not defensive, and its absence was a shipped bug.
+#
+# Under the old stride ladder `sqrt` needed no NaN guard and had none: every one of
+# the ladder's comparisons (`x >= 4.0`, `x < 1.0`, …) is false against NaN, so NaN
+# fell straight through to the base case and `sqrt_iter` propagated it. The O(1)
+# reduction instead reads the EXPONENT FIELD, and NaN's field is 2047 — an entirely
+# ordinary-looking exponent. It decoded NaN as 1.5 * 2^1024 and returned
+# 1.6421143998800672e+154, and pushed e = 1024 into floor_div_2, outside the
+# [-1074, 1023] domain that helper is verified for.
+#
+# `ln`, `exp` and `cbrt` all already guarded; `sqrt` was the only one that did not,
+# precisely because it was the only one that had never needed to.
 export fn sqrt(x: Double) -> Double =
-  if x < 0.0 then nan
+  if is_nan(x) then x
+  else if x < 0.0 then nan
   else if x == 0.0 then x
   else if x * 0.5 == x then x
   else sqrt_reduce(x)
@@ -422,29 +468,40 @@ fn exp_series(r: Double) -> Double =
 # comparisons and four module-global loads on every call — measured as a 2.6x slowdown on
 # ln's hot path when this was first written flat. Nested, the common path pays two
 # comparisons and never touches the ladder constants.
-# --- Double -> Int for an integral Double, via the magic-number trick ---
+# --- Round-to-nearest AND Double -> Int, in one add (the magic-number trick) ---
 #
-# Sprout has no Double -> Int conversion (`to_double` only goes the other way), and
-# exp's scale factor `k` is a Double-valued integer while `two_pow` needs an Int.
-# Bit access supplies one: for integral d in [0, 2^52), `d + 2^52` has exponent
-# field exactly 52+1023 and its MANTISSA bits are d, so subtracting the bit pattern
-# of 2^52 leaves d exactly. Verified against the full sampled range up to 2^52-1.
+# Sprout has no Double -> Int conversion (`to_double` only goes the other way), but
+# exp's scale factor has to exist as BOTH: as a Double for the reduction
+# `r = x - k*ln2`, and as an Int for `two_pow` to build 2^k.
 #
-# Deliberately PRIVATE. A general `Double -> Int` is new public surface — it needs a
-# rounding-mode decision (truncate? round-half-even?) and a story for out-of-range
-# and non-integral inputs, none of which this internal use requires. Filed as a
-# follow-up rather than smuggled in.
+# One operation serves both. At magnitude 2^52 a Double's ULP is exactly 1, so
+# `v + 2^52` snaps the fractional bits away — that is the branch-free round-to-integer
+# `round_nearest` already used. The integer it snaps to also lands in the MANTISSA
+# field, so subtracting the bit pattern of 2^52 reads it straight back out as an Int.
+# Rounding and conversion are the same add.
+#
+# An earlier version did them separately (`round_nearest` then a distinct
+# `int_of_integral`), adding and subtracting 2^52 twice on exp's hot path for what is
+# one operation. The Double side is now recovered with `to_double`, a bare sitofp.
+#
+# Domain: |v| < 2^52. exp's k is bounded by its own guards to [-1076, 1025], so the
+# only caller is far inside it.
+#
+# Deliberately PRIVATE. A general public `Double -> Int` needs a rounding-mode
+# decision (truncate? floor? round-half-even?) and a defined answer for non-integral,
+# out-of-range and NaN inputs — none of which this internal use requires. Filed in
+# BACKLOG rather than smuggled in under a name that only promises one of them.
 #
 # Bits of 2^52: exponent field 52+1023 = 1075, mantissa 0 -> 1075 * 2^52.
 # `two52` itself is defined with the other powers of two near the top of the file.
 let two52_bits = 4841369599423283200
 
-fn int_of_integral_pos(d: Double) -> Int =
-  double_to_bits(d + two52) - two52_bits
+fn round_to_int_pos(v: Double) -> Int =
+  double_to_bits(v + two52) - two52_bits
 
-fn int_of_integral(d: Double) -> Int =
-  if d < 0.0 then 0 - int_of_integral_pos(0.0 - d)
-  else int_of_integral_pos(d)
+fn round_to_int(v: Double) -> Int =
+  if v < 0.0 then 0 - round_to_int_pos(0.0 - v)
+  else round_to_int_pos(v)
 
 # O(1) since 2026-08-07: build 2^k directly instead of walking k in strides.
 #
@@ -456,7 +513,12 @@ fn int_of_integral(d: Double) -> Int =
 #
 # Splitting rather than short-circuiting to inf, because k = 1024 does NOT mean the
 # result overflows: y is exp_series(r) with |r| <= ln2/2, so y is in [0.707, 1.415],
-# and y * 2^1024 is finite whenever y < ~1.34. exp(709.78) is exactly that case —
+# and y * 2^1024 is finite whenever y <= 1 - 2^-53 — i.e. just under 1.0. (DBL_MAX is
+# (2 - 2^-52) * 2^1023, so the bound is (2 - 2^-52)/2. An earlier draft of this
+# comment said "~1.34", which is wrong and dangerous in this specific spot: it is the
+# stated justification for the split, so anyone trusting it could widen the guard and
+# reintroduce the very overflow bug the split exists to prevent.)
+# exp(709.78) is exactly that case —
 # k = 1024 with a finite result of ~1.79e308, just under DBL_MAX. A first version
 # returned inf there and `test_math_transcendental`'s "exp(709.78) is finite"
 # caught it; the wide-reduction sweep did NOT, because its 0.37 step from -745
@@ -467,11 +529,9 @@ fn int_of_integral(d: Double) -> Int =
 # split is safe, and the trailing multiply overflows to +inf exactly when it should.
 #
 # One multiply means ONE rounding, where the stride ladder rounded at every step.
-fn exp_scale(y: Double, k: Double) -> Double =
+fn exp_scale(y: Double, ki: Int) -> Double =
   if ki > 1023 then y * two_pow(1023) * two_pow(ki - 1023)
   else y * two_pow(ki)
-where
-  ki = int_of_integral(k)
 
 # The pre-2026-08-07 stride ladder, retained as the accuracy oracle.
 fn exp_scale_strided(y: Double, k: Double) -> Double =
@@ -497,14 +557,20 @@ fn exp_scale_strided(y: Double, k: Double) -> Double =
 # subnormal on every step: 54 successive round-to-even cascades flush exp(-745) to 0.0
 # instead of ~5e-324. Scaling to 54 places above the target and dividing by 2^54 once
 # collapses those 54 roundings into one.
+# `ki` is produced by ONE rounding step, not two. The scale factor is needed both as
+# an Int (to build 2^k) and as a Double (for the reduction `r = x - k*ln2`), and an
+# earlier version got each from its own add-and-subtract of 2^52 — the same operation
+# performed twice. `round_to_int` does the rounding and the conversion in one add, and
+# `to_double` recovers the Double side with a bare sitofp.
 export fn exp(x: Double) -> Double =
   if is_nan(x) then x
   else if x > 710.0 then inf
   else if x < -746.0 then 0.0
-  else if k < -1021.0 then exp_scale(exp_series(r), k + 54.0) / two54
-  else exp_scale(exp_series(r), k)
+  else if ki < -1021 then exp_scale(exp_series(r), ki + 54) / two54
+  else exp_scale(exp_series(r), ki)
 where
-  k = round_nearest(x * inv_ln2)
+  ki = round_to_int(x * inv_ln2)
+  k = to_double(ki)
   r = x - k * ln2
 
 # exp via the reference stride ladder. Exported for the cross-check test only —
@@ -549,7 +615,7 @@ where
 # of being walked in strides. The stride ladder this replaces is preserved in
 # `ln_reduce_strided` below, which the accuracy tests cross-check against.
 #
-# The series wants its argument in [1/sqrt2, sqrt2), but `mantissa_of` yields
+# The series wants its argument in [1/sqrt2, sqrt2), but the decomposition yields
 # [1, 2). One conditional halving covers the gap: for m >= sqrt2, use m/2 and
 # carry the extra power of two in k. Halving is exact, so this costs no accuracy.
 #
@@ -557,10 +623,11 @@ where
 # strided version did — every integer up to 2^53 is exactly representable, so a
 # single rounding regardless of how large the exponent is. See the comment above on
 # why the decomposition is not returned as a tuple.
-# The decomposition is written out here rather than calling `binary_exponent` and
-# `mantissa_of`: those are the readable general-purpose helpers, but each performs
-# its own signed division, and this is the hot path where one division is worth
-# having. `b` and `biased` are bound once and shared by both halves.
+# The decomposition is written out inline rather than factored into general
+# exponent/mantissa helpers: each such helper performs its own signed division, and
+# this is the hot path where one division is worth having. `b` and `biased` are
+# bound once and shared by both halves. (Those helpers were written and deleted
+# twice — see the note above raw_biased_exp's callers.)
 #
 # Subnormals recurse ONCE through the 2^54 lift, using ln(x) = ln(x*2^54) - 54*ln2.
 fn ln_reduce(x: Double) -> Double =

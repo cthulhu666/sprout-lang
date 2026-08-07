@@ -30,18 +30,13 @@ import stdlib.math (ln, ln_strided, exp, exp_strided, sqrt, sqrt_strided, cbrt, 
 
 fn bits(x: Double) -> Int = double_to_bits(x)
 
-# Walk x by repeated multiplication so every sample is an exact power-of-two
-# multiple of the seed — no literal parsing, and no accumulated error in the sweep.
-fn sweep_same(x: Double, step: Double, i: Int, mismatches: Int) -> Int =
-  if i <= 0 then mismatches
-  else if bits(ln(x)) == bits(ln_strided(x)) then sweep_same(x * step, step, i - 1, mismatches)
-  else sweep_same(x * step, step, i - 1, mismatches + 1)
-
 fn p10(k: Int, acc: Double) -> Double = if k <= 0 then acc else p10(k - 1, acc * 10.0)
 
-# The same sweep, parameterised over the pair being compared. `sqrt`/`cbrt`/`exp`
-# are ordinary Sprout functions (unlike the `double_to_bits` intrinsic, which
-# cannot be passed as a value), so they can be handed in directly.
+# Walk x by repeated multiplication so every sample is an exact power-of-two
+# multiple of the seed — no literal parsing, and no accumulated error in the sweep.
+# `sqrt`/`cbrt`/`exp`/`ln` are ordinary Sprout functions (unlike the
+# `double_to_bits` intrinsic, which cannot be passed as a value), so the pair under
+# comparison is a parameter rather than hardcoded.
 fn sweep_same_f(f: Double -> Double, g: Double -> Double,
                 x: Double, step: Double, i: Int, mismatches: Int) -> Int =
   if i <= 0 then mismatches
@@ -64,16 +59,16 @@ fn main() -> Unit !{IO} =
     # Doubling from the smallest normal upward covers every binary exponent from
     # -1022 to +1023: 2046 samples, each an exact power of two.
     assert_eq(state, "ln == ln_strided for every power of two across the range",
-      sweep_same(double_from_bits(4503599627370496), 2.0, 2046, 0), 0)
+      sweep_same_f(ln, ln_strided, double_from_bits(4503599627370496), 2.0, 2046, 0), 0)
     # Halving from 1.0 walks down into the subnormals, which the O(1) form handles
     # by a 2^54 lift rather than by more strides — the path most likely to diverge.
     assert_eq(state, "ln == ln_strided down through the subnormals",
-      sweep_same(1.0, 0.5, 1074, 0), 0)
+      sweep_same_f(ln, ln_strided, 1.0, 0.5, 1075, 0), 0)
     # A non-power-of-two stride so mantissas other than 1.0 are exercised too.
     assert_eq(state, "ln == ln_strided on a 3x sweep (non-trivial mantissas)",
-      sweep_same(1.0, 3.0, 640, 0), 0)
+      sweep_same_f(ln, ln_strided, 1.0, 3.0, 640, 0), 0)
     assert_eq(state, "ln == ln_strided on a 1/3 sweep",
-      sweep_same(1.0, 1.0 / 3.0, 640, 0), 0)
+      sweep_same_f(ln, ln_strided, 1.0, 1.0 / 3.0, 640, 0), 0)
 
     # --- specific magnitudes named in the original defect report ---
     assert_eq(state, "ln(1e300) agrees", bits(ln(p10(300, 1.0))), bits(ln_strided(p10(300, 1.0))))
@@ -110,7 +105,7 @@ fn main() -> Unit !{IO} =
     assert_eq(state, "sqrt == sqrt_strided across the whole exponent range",
       sweep_same_f(sqrt, sqrt_strided, double_from_bits(4503599627370496), 2.0, 2046, 0), 0)
     assert_eq(state, "sqrt == sqrt_strided down through the subnormals",
-      sweep_same_f(sqrt, sqrt_strided, 1.0, 0.5, 1074, 0), 0)
+      sweep_same_f(sqrt, sqrt_strided, 1.0, 0.5, 1075, 0), 0)
     assert_eq(state, "sqrt == sqrt_strided on a 3x sweep (odd exponents, non-trivial mantissas)",
       sweep_same_f(sqrt, sqrt_strided, 1.0, 3.0, 640, 0), 0)
     assert_eq(state, "sqrt == sqrt_strided on a 1/3 sweep (negative odd exponents)",
@@ -119,7 +114,7 @@ fn main() -> Unit !{IO} =
     assert_eq(state, "cbrt == cbrt_strided across the whole exponent range",
       sweep_same_f(cbrt, cbrt_strided, double_from_bits(4503599627370496), 2.0, 2046, 0), 0)
     assert_eq(state, "cbrt == cbrt_strided down through the subnormals",
-      sweep_same_f(cbrt, cbrt_strided, 1.0, 0.5, 1074, 0), 0)
+      sweep_same_f(cbrt, cbrt_strided, 1.0, 0.5, 1075, 0), 0)
     assert_eq(state, "cbrt == cbrt_strided on a 3x sweep",
       sweep_same_f(cbrt, cbrt_strided, 1.0, 3.0, 640, 0), 0)
     assert_eq(state, "cbrt == cbrt_strided on a 1/3 sweep",
@@ -141,13 +136,56 @@ fn main() -> Unit !{IO} =
       exp_sweep(0.0 - 745.0, 0.37, 4000, 0), 0)
     assert_true(state, "exp(709.78) is finite — k = 1024 does not imply overflow",
       exp(709.78) < 1.0 / 0.0 && exp(709.78) > 1.0)
-    assert_true(state, "exp(710) does overflow", exp(710.0) > p10(300, 1.0) * 1000.0)
+    # Compared against +inf itself, not against a large finite threshold: a
+    # regression returning 1e308 instead of inf would satisfy `> 1e303` and pass.
+    assert_eq(state, "exp(710) overflows to exactly +inf", bits(exp(710.0)), bits(1.0 / 0.0))
 
     # sqrt/cbrt edge cases must survive the new path.
     assert_eq(state, "sqrt(0.0) is +0.0", bits(sqrt(0.0)), bits(0.0))
     assert_eq(state, "sqrt(1.0) is exactly 1.0", bits(sqrt(1.0)), bits(1.0))
     assert_eq(state, "sqrt(4.0) is exactly 2.0", bits(sqrt(4.0)), bits(2.0))
     assert_true(state, "sqrt of a negative is NaN", is_nan(sqrt(0.0 - 1.0)))
+    # --- NON-FINITE INPUTS. This block exists because its absence shipped a bug. ---
+    #
+    # The O(1) reductions read the EXPONENT FIELD, and NaN's field is 2047 — a
+    # perfectly ordinary-looking exponent. The stride ladders were accidentally
+    # immune: every one of their comparisons (`x >= 4.0`, `x < 1.0`, …) is false
+    # against NaN, so NaN fell straight through to the base case. `sqrt` was the only
+    # entry point without an `is_nan` guard, having never needed one, and the new
+    # path duly decoded NaN as 1.5 * 2^1024 and returned 1.6421143998800672e+154.
+    #
+    # It also fed e = 1024 into floor_div_2, outside the [-1074, 1023] domain that
+    # helper is verified for — so the "no caller can leave the domain" argument was
+    # false too, for the same reason.
+    #
+    # The sweeps above could never have caught this: they step over finite values
+    # only, so the single input class where the two implementations disagree was
+    # exactly the class never fed to them. A sweep's DOMAIN is part of its assertion,
+    # not an incidental detail — the same lesson the exp sweep's 698 cutoff taught,
+    # now applied to every function rather than the one that happened to fail.
+    #
+    # Every function is checked against BOTH oracles for NaN and both infinities.
+    assert_true(state, "sqrt(NaN) is NaN", is_nan(sqrt(0.0 / 0.0)))
+    assert_true(state, "sqrt_strided(NaN) is NaN (oracle agrees)", is_nan(sqrt_strided(0.0 / 0.0)))
+    assert_true(state, "cbrt(NaN) is NaN", is_nan(cbrt(0.0 / 0.0)))
+    assert_true(state, "cbrt_strided(NaN) is NaN (oracle agrees)", is_nan(cbrt_strided(0.0 / 0.0)))
+    assert_true(state, "exp(NaN) is NaN", is_nan(exp(0.0 / 0.0)))
+    assert_true(state, "exp_strided(NaN) is NaN (oracle agrees)", is_nan(exp_strided(0.0 / 0.0)))
+    assert_true(state, "ln_strided(NaN) is NaN (oracle agrees)", is_nan(ln_strided(0.0 / 0.0)))
+
+    assert_eq(state, "sqrt(+inf) is +inf", bits(sqrt(1.0 / 0.0)), bits(1.0 / 0.0))
+    assert_eq(state, "sqrt(+inf) matches the oracle",
+      bits(sqrt(1.0 / 0.0)), bits(sqrt_strided(1.0 / 0.0)))
+    assert_eq(state, "cbrt(+inf) is +inf", bits(cbrt(1.0 / 0.0)), bits(1.0 / 0.0))
+    assert_eq(state, "cbrt(-inf) is -inf", bits(cbrt(0.0 - 1.0 / 0.0)), bits(0.0 - 1.0 / 0.0))
+    assert_eq(state, "cbrt(+inf) matches the oracle",
+      bits(cbrt(1.0 / 0.0)), bits(cbrt_strided(1.0 / 0.0)))
+    assert_eq(state, "ln(+inf) matches the oracle",
+      bits(ln(1.0 / 0.0)), bits(ln_strided(1.0 / 0.0)))
+    # sqrt of a negative is NaN (Rule 2), and -inf is just a very negative input.
+    assert_true(state, "sqrt(-inf) is NaN", is_nan(sqrt(0.0 - 1.0 / 0.0)))
+    assert_true(state, "sqrt(-inf) matches the oracle", is_nan(sqrt_strided(0.0 - 1.0 / 0.0)))
+
     assert_eq(state, "cbrt(0.0) is +0.0", bits(cbrt(0.0)), bits(0.0))
     assert_eq(state, "cbrt(1.0) is exactly 1.0", bits(cbrt(1.0)), bits(1.0))
     assert_eq(state, "cbrt(-8.0) is exactly -2.0", bits(cbrt(0.0 - 8.0)), bits(0.0 - 2.0))
