@@ -244,19 +244,25 @@ Pro, 2M iterations, harness baseline subtracted:
 | `pow` fractional | 39.7 ns | 5.9 ns | 6.7x |
 | `pow` integer | 7.8 ns | 6.0 ns | 1.3x |
 | `sqrt`, normal magnitude | 2.8 ns | hardware `fsqrt` | — |
-| `exp`, x ≈ 688 | 21.7 ns | 1.1 ns | ~20x |
-| `ln`, x = 1e-300 | **3.7 ns** (was 20.9) | 1.6 ns | ~2.3x |
-| `ln`, x = 1e300 | **3.9 ns** (was 22.3) | 1.6 ns | ~2.4x |
-| `sqrt`, x = 1e300 | 19.1 ns | hardware `fsqrt` | — |
+**No function in this layer is magnitude-dependent any more** (§13, 2026-08-07). Every
+range reduction now extracts or applies the binary exponent through the IEEE bit pattern
+in O(1) via `double_to_bits`, instead of walking it in power-of-two strides. The old
+`*_wide` rows are gone because the distinction they measured no longer exists — the
+cost at 1e±300 is the cost at 2.0.
 
-**`ln` is no longer magnitude-dependent** (§13, 2026-08-07). Its range reduction now
-extracts the binary exponent from the IEEE bit pattern in O(1) via `double_to_bits`
-instead of walking it in power-of-two strides, so it measures **3.6–4.0 ns across the
-entire exponent range** rather than 4 ns at normal magnitudes and 22 ns at the extremes.
+| function | wide-input cost before | after |
+|---|---|---|
+| `ln`, x = 1e-300 | 22.5 ns | **3.7 ns** |
+| `sqrt`, x = 1e300 | 25.1 ns | **5.9 ns** |
+| `sqrt`, x = 1e-300 | 27.0 ns | **5.8 ns** |
+| `cbrt`, x = 1e300 | 20.7 ns | **8.0 ns** |
+| `exp`, x ≈ 688 | 21.5 ns | **9.3 ns** |
+| `exp`, x = -700 | 26.6 ns | **9.6 ns** |
+
 Results are **bit-identical** to the stride ladder at every sample tested, which is the
 bar the cross-check test enforces — both forms are exact, so any difference at all would
-mean one is wrong. `exp`, `sqrt` and `cbrt` still use the stride ladder and keep their
-`*_wide` costs; converting them is tracked in `BACKLOG.md`.
+mean one of them is wrong. Normal magnitudes are unchanged to within noise (`sqrt(2.0)`
+1.00x, `cbrt(2.0)` 1.03x, `exp(1.0)` 1.04x), so there is no trade.
 
 `cbrt` 11.9 → 4.4 ns and `sqrt` 8.2 → 2.8 ns come from §12: both Newton iterations now run
 a fixed 6 passes instead of testing for convergence each pass. Note that `sqrt` at **1e300**
@@ -552,3 +558,75 @@ property and bit-identity.
 the cross-check test. They are an independently-derived implementation of the same
 mathematical split, which is what makes them worth keeping rather than deleting — a
 test that compares a function against itself proves nothing.
+
+## 14. O(1) reduction for `sqrt`, `cbrt` and `exp` (2026-08-07)
+
+§13 converted `ln`. This completes the layer. All results stay **bit-identical** to the
+retained stride ladders (`sqrt_strided`, `cbrt_strided`, `exp_strided`, exported solely
+as oracles for `tests/stdlib/test_math_wide_reduction.spr`).
+
+| input | O(1) | stride ladder | |
+|---|---|---|---|
+| `sqrt(2.0)` | 5.77 ns | 5.75 ns | 1.00x |
+| `sqrt(1e300)` | 5.94 ns | 25.12 ns | **4.2x** |
+| `sqrt(1e-300)` | 5.77 ns | 26.98 ns | **4.7x** |
+| `cbrt(2.0)` | 7.20 ns | 7.45 ns | 1.03x |
+| `cbrt(1e300)` | 8.04 ns | 20.72 ns | **2.6x** |
+| `exp(1.0)` | 9.03 ns | 9.41 ns | 1.04x |
+| `exp(688)` | 9.34 ns | 21.46 ns | **2.3x** |
+| `exp(-700)` | 9.56 ns | 26.61 ns | **2.8x** |
+
+(Absolute figures are inflated relative to §13's: this harness passes the functions as
+first-class values to A/B them in one binary, which blocks inlining. Both arms pay it
+equally, so the ratios are sound.)
+
+### The roots: floor division, and why it is branchless
+
+`sqrt(x) = sqrt(m)·2^j` with `x = m·2^(2j)`, and `cbrt` likewise with `2^(3j)`. The
+exponent must split into a part divisible by 2 (or 3) plus a remainder that stays with
+the mantissa, so **`j = floor(e/2)`** — and Sprout's `/` truncates toward **zero**, which
+is not floor for negative numerators.
+
+This is not a corner case. At `x = 0.5` the exponent is −1: floor gives `j = −1` and
+`m = 2.0`, inside `[1,4)`; truncation gives `j = 0` and `m = 0.5`, **outside** the
+interval Newton is seeded for. Every negative odd exponent hits it — half of all inputs
+below 1.0, and for `cbrt`'s mod-3 split, two in every three.
+
+The obvious correction (`if a < 0 && q*n != a then q-1`) needs a branch and, with no `%`
+operator, a multiply to test the remainder. It measured: `cbrt` at normal magnitude went
+**7.41 ns against the ladder's 6.66** — a 10% regression, precisely the "gave back at the
+common case what it won at the extremes" trap §13 records for `ln`. The fix biases the
+numerator non-negative first, where truncation *is* floor:
+
+```
+floor(e/n)  ==  (e + 1074) / n  -  1074/n        for every e >= -1074
+```
+
+A binary64 exponent never goes below −1074, and 1074 is divisible by both 2 and 3, so the
+shift comes back out exactly. Verified exhaustively over `e ∈ [-1074, 1023]` for both
+divisors. That restored `cbrt(2.0)` to 1.03x.
+
+### `exp`: the inverse direction, and a Double→Int conversion
+
+`exp` needs the opposite operation — build `2^k` from an integer `k` rather than extract
+`k` from a double. That exposed a gap: `k` is a **Double**-valued integer (the language
+has no `Double → Int`), while the exponent-field construction needs an `Int`.
+
+Bit access supplies one, via the classic magic-number trick: for integral `d` in
+`[0, 2^52)`, `d + 2^52` has exponent field exactly `52+1023` and its *mantissa* bits are
+`d`, so subtracting the bit pattern of `2^52` leaves `d` exactly. It is kept **private** to
+`stdlib.math` — a general `Double → Int` is public surface needing a rounding-mode
+decision and an out-of-range story, neither of which this use requires.
+
+### The overflow boundary, which the sweep missed
+
+A first version short-circuited `k > 1023` to `+inf`, reasoning that the exponent field
+cannot hold more. Wrong: `y = exp_series(r)` lies in `[0.707, 1.415]`, so `y·2^1024` is
+finite whenever `y < ~1.34`. **`exp(709.78)` is exactly that case** — `k = 1024`, result
+~1.79e308, just under `DBL_MAX`.
+
+`test_math_transcendental`'s "exp(709.78) is finite" caught it. The new wide-reduction
+sweep did **not**, because its 0.37 step from −745 stopped at 698 and never reached the
+overflow boundary — a reminder that a sweep's bound is part of its assertion. The sweep
+now runs past 710, and the scaling splits into two exact factors (`2^1023 · 2^(k-1023)`)
+so the trailing multiply overflows to `+inf` exactly when it should.
