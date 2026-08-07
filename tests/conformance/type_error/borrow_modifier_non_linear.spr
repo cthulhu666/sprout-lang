@@ -1,0 +1,11 @@
+module main
+
+# M4.5: `borrowing`/`consuming` are only meaningful on a parameter of a linear
+# type. Sprout erases them before IR and the GC owns memory, so on a non-linear
+# parameter they would carry no meaning at all -- a deliberate divergence from
+# Swift SE-0377, where they still affect ARC traffic. Rejected, not ignored.
+
+fn bad(n: borrowing Int) -> Int = n
+
+fn main() -> Unit !{IO} =
+  print(to_string(bad(1)))

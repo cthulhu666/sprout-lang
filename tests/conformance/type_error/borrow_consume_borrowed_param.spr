@@ -1,0 +1,16 @@
+module main
+
+# M4.5: a `borrowing` parameter is used non-consumingly; the consume obligation
+# stays with the CALLER. Passing it to a consuming position inside the callee
+# would spend a use that is not this function's to spend.
+
+type linear File = File Int
+
+fn release(f: consuming File) -> Int = match f with | File n -> n
+
+fn bad(f: borrowing File) -> Int = release(f)
+
+fn main() -> Unit !{IO} =
+  do
+    let f = File(1)
+    print(to_string(bad(f) + release(f)))
