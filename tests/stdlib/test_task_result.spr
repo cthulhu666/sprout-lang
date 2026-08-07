@@ -1,5 +1,5 @@
 import stdlib.test (TestState, new_state, assert_eq, summary)
-import stdlib.task (Scope, Task, with_scope, task_fork, task_await, task_yield)
+import stdlib.task (Scope, Task, with_scope, task_fork, task_await, detach, task_yield)
 import stdlib.string as string
 
 # L0.4 result-carrying tasks (EXPERIMENTAL). `task_fork` returns a `Task a`;
@@ -77,15 +77,15 @@ fn await_after_churn(s: Scope) -> String !{IO} =
     let greeting = task_await(t)
     string.concat(greeting, int_to_string(string.length(noise)))
 
-# --- backstop: a fork that is NEVER awaited must still be reclaimed cleanly when
+# --- backstop: a forked-but-not-awaited task must still be reclaimed cleanly when
 # the scope closes (this exercises __scope_join's fork sweep, not a pattern to
 # emulate — task_spawn is the right tool for fire-and-forget). Fork a heap task,
-# discard the handle, churn under stress; the scope closing must free the task's
-# record + result without crash or leak. Under a future linear `Task` this dropped
-# handle is exactly what the type checker would reject. ---
+# `detach` the handle (the linear consume for "won't await"), churn under stress;
+# the scope closing must free the task's record + result without crash or leak.
+# With linear `Task`, `detach` is what makes relinquishing the handle legal. ---
 fn drop_unawaited(s: Scope) -> Int !{IO} =
   do
-    task_fork(s, \_ -> make_greeting("ghost"))
+    detach(task_fork(s, \_ -> make_greeting("ghost")))
     task_yield()
     let noise = churn(150, "")
     string.length(noise)

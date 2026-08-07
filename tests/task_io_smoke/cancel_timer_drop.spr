@@ -1,4 +1,4 @@
-import stdlib.task (Scope, with_scope, task_fork, task_sleep, task_yield, scope_cancel)
+import stdlib.task (Scope, with_scope, task_fork, detach, task_sleep, task_yield, scope_cancel)
 import stdlib.string as string
 
 # L0.6 fired-timer-drop safety (the task_sleep design §5.1 blocker). Timers fire on the
@@ -25,7 +25,7 @@ fn spin(n: Int, acc: Int) -> Int =
 
 fn inner(s2: Scope, seed: Int) -> Unit !{IO} =
   do
-    _child <- task_fork(s2, \_ -> task_sleep(2))  # 2ms sleeper
+    detach(task_fork(s2, \_ -> task_sleep(2)))  # 2ms sleeper; detach relinquishes (cancel force-drops it)
     task_yield()  # let the child actually PARK on its timer
     let burned = spin(40000000, seed)  # >> 2ms: its timer fires while undrained
     print(string.concat("burned ", int_to_string(burned)))  # observably uses `burned`
@@ -38,7 +38,7 @@ fn keeper() -> Unit !{IO} =
 
 fn body(s1: Scope, seed: Int) -> Unit !{IO} =
   do
-    _k <- task_fork(s1, \_ -> keeper())
+    detach(task_fork(s1, \_ -> keeper()))
     with_scope(\s2 -> inner(s2, seed))  # nested drop of the fired-timer child
     print("ok")
 

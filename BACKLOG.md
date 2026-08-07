@@ -1028,11 +1028,31 @@ and `docs/linear-types-m4.2-enforcement-2026-08-06.md`. Deferred, in the order t
   post-review soundness fix). `linear_check.pattern_linear_binders` recovers each pattern-bound
   variable's type (structurally matching the pattern against the value type) and tracks the linear
   ones exactly-once per arm; covers the `let..in` alias, `match | g ->`, and the linear-field case.
-- [x] **`<-` do-bind of a linear payload — DONE** (2026-08-06). `linear_check.lin_do_bind` tracks
-  linear do-bind variables. *Known over-strict edge:* the bound var's type is taken as the last
-  type-argument of the RHS (monad kind is not recoverable in the post-pass), so an effectful bind
-  of a non-linear container of a linear (`x <- getBox()` where `Box File` is non-linear) is
-  conservatively rejected. Sound; relax when do-block monad info is threaded to the pass.
+- [x] **`<-` do-bind of a linear payload — DONE** (2026-08-06, hardened 2026-08-07).
+  `linear_check.lin_do_bind` tracks linear do-bind variables. **2026-08-07 soundness fix
+  (`do_bind_type`):** the original always took the RHS's last type-argument as the binder type
+  (`payload_type`) — right for a *monadic* bind (`x <- (m: Maybe File)` binds `x: File`) but **wrong
+  for an effect bind** (`h <- (io: Task a !{IO})` binds the FULL `Task a`, not `a`), so a linear value
+  bound with `<-` in an `!{IO}` do-block silently escaped consume-once (found while landing linear
+  `Task`). Now: use the full type when it is itself linear, else fall back to `payload_type`.
+  Regression: `tests/conformance/type_error/linear_task_double_await.spr`. *Remaining over-strict edge
+  (unchanged):* an effect bind of a non-linear container of a linear (`x <- getBox()`, `Box File`
+  non-linear) is still conservatively rejected via the payload fallback.
+- [x] **Linear `Task a` — DONE** (2026-08-07). `stdlib.task.Task` is a `type linear`; consumed by
+  `task_await` or the new `detach`. `with_timeout` internals refactored to inspect the handle once
+  (no borrow). Design + prior art: `docs/linear-task-v0.md`. Parametric-`type linear` coverage added
+  (`test_parser.spr`, `test_linear_type_decl.spr`) — closes the gap the spike exposed.
+- [ ] `P3` **Discarded linear expression result escapes leak detection.** The consumed-set analysis
+  tracks *binders* (params, do-`let`, `<-`, pattern vars); a linear value produced by a bare
+  expression-statement and never bound — `do task_fork(s, w); ...` (result dropped) — is not leak-checked,
+  so it silently escapes consume-once (surfaced landing linear `Task`; `test_task_result.drop_unawaited`
+  uses explicit `detach` rather than relying on this). Fix: in `lin_do`/`scope_consumed`, treat a
+  `TDoExprStep`/trailing expression whose *type* is linear as an unconsumed obligation.
+- [ ] `P3` **Imported linear-type annotation resolution wart.** Annotating a user param with an
+  imported linear type's bare name (`fn f(t: Task a)` after `import stdlib.task (Task)`) fails with
+  `Type mismatch: stdlib.task.Task vs Task` — inference of the same type works, so linear `Task` users
+  must currently leave handle params unannotated. Pre-existing (affects any imported ADT annotation,
+  not linearity-specific); surfaced while writing linear `Task` tests.
 - [x] **Enforcement at top-level `let` and instance-method bodies — DONE** (2026-08-06). Wired via
   `letdecl_linear_gate` (LetDecl) and `fn_linear_gate` in `check_instance_method`.
 - [ ] `P3` **Containment virality.** Linearity is per-declaration: a record that merely *contains*

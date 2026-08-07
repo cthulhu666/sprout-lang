@@ -204,6 +204,9 @@ fn main() -> Unit !{IO} =
     assert_true(state, "linear marker recorded", first_typedecl_is_linear("type linear Color = Red | Green"))
     assert_false(state, "unmarked type is unrestricted", first_typedecl_is_linear("type Color = Red | Green"))
     assert_true(state, "linear record recorded", first_typedecl_is_linear("type linear Pos = (x: Int, y: Int)"))
+    # Parametric linear type (phantom parameter): `type linear Task a` must record
+    # Linear too — the type parameter does not defeat the marker (used by stdlib.task).
+    assert_true(state, "parametric linear recorded", first_typedecl_is_linear("type linear Task a = Task Int"))
 
     # List pattern syntax — desugars to ConstructorPattern "Cons"/"Nil" chains
     # (ast.list_ctor_cons / ast.list_ctor_nil); parse_ok below exercises both

@@ -1,0 +1,12 @@
+import stdlib.task (Scope, with_scope, task_fork)
+
+# M4 linear `Task a`: a forked handle must be consumed exactly once (awaited or
+# detached). Forking and then dropping the handle leaks a linear value — a
+# compile error. See docs/linear-task-v0.md.
+fn body(s: Scope) -> Int !{IO} =
+  do
+    h <- task_fork(s, \_ -> 42)
+    99
+
+fn main() -> Unit !{IO} =
+  print(to_string(with_scope(body)))

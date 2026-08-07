@@ -1,4 +1,4 @@
-import stdlib.task (Scope, with_scope, task_fork, task_spawn, task_yield, scope_cancel)
+import stdlib.task (Scope, with_scope, task_fork, detach, task_spawn, task_yield, scope_cancel)
 import stdlib.chan (Chan, Recv, Got, Closed, chan_new, chan_select)
 
 # L0.11 select-drop cancellation (EXPERIMENTAL). A task parked in chan_select is registered on
@@ -34,7 +34,7 @@ fn run(s: Scope) -> Unit !{IO} =
   do
     a <- chan_new(s, 1)
     b <- chan_new(s, 1)
-    _fork <- task_fork(s, \_ -> select_forever(a, b))  # awaitable, select-parks on [a, b]
+    detach(task_fork(s, \_ -> select_forever(a, b)))  # awaitable, select-parks on [a, b]; detach relinquishes (cancel force-drops it)
     task_spawn(s, \_ -> select_forever_unit(a, b))  # fire-and-forget, select-parks on [a, b]
     task_yield()  # let both reach chan_select and register on both channels
     scope_cancel(s)  # force-drop both, unlinking each from BOTH a and b

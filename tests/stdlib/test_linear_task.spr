@@ -1,0 +1,48 @@
+import stdlib.test (TestState, new_state, assert_eq, summary)
+import stdlib.task (Scope, with_scope, task_fork, task_await, detach)
+
+# Linear `Task a` (M4): a forked handle is consumed exactly once — awaited
+# (retrieve the value) or detached (relinquish it; the scope reclaims it). This
+# file exercises the ACCEPTED shapes; the reuse (double-await) and leak (dropped
+# handle) rejections live in tests/conformance/type_error/linear_task_*.
+# See docs/linear-task-v0.md.
+
+# fork + await: the ordinary consume.
+fn forked_value(s: Scope) -> Int !{IO} =
+  do
+    h <- task_fork(s, \_ -> 21)
+    v <- task_await(h)
+    v + v
+
+# fork + detach: relinquish the handle without awaiting; the scope reclaims the
+# never-awaited result at close. `detach` is the linear consume for this path.
+fn forked_detached(s: Scope) -> Int !{IO} =
+  do
+    detach(task_fork(s, \_ -> 99))
+    7
+
+# branch convergence: each arm consumes the handle exactly once — awaited on one
+# branch, detached on the other — so linearity accepts it (this is the shape the
+# `with_timeout` Completed/Expired split relies on).
+fn conditional(s: Scope, take: Bool) -> Int !{IO} =
+  do
+    h <- task_fork(s, \_ -> 5)
+    if take then task_await(h) else finish_detached(h)
+
+fn finish_detached(h) -> Int !{IO} =
+  do
+    detach(h)
+    0
+
+fn main() -> Unit !{IO} =
+  do
+    state <- new_state()
+    a <- with_scope(\s -> forked_value(s))
+    assert_eq(state, "fork + await consumes once, returns value", a, 42)
+    b <- with_scope(\s -> forked_detached(s))
+    assert_eq(state, "fork + detach relinquishes; scope reclaims", b, 7)
+    c <- with_scope(\s -> conditional(s, true))
+    assert_eq(state, "conditional await branch", c, 5)
+    d <- with_scope(\s -> conditional(s, false))
+    assert_eq(state, "conditional detach branch", d, 0)
+    summary(state)

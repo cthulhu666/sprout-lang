@@ -12405,6 +12405,25 @@ join_1:
   ret i64 %t$2
 }
 
+define i64 @stdlib.task.detach(i64 %task) {
+entry:
+  %t$0 = call i64 @sprout_tag(i64 %task)
+  br label %arm_0_1
+arm_0_1:
+  %t$3 = add i64 0, 32
+  %t$4 = icmp eq i64 %t$0, %t$3
+  br i1 %t$4, label %body_0_1, label %arm_1_1
+body_0_1:
+  %t$5 = add i64 0, 0
+  br label %join_1
+arm_1_1:
+  call void @sprout_abort_match()
+  unreachable
+join_1:
+  %t$2 = phi i64 [%t$5, %body_0_1]
+  ret i64 %t$2
+}
+
 define i64 @stdlib.task.scope_cancel(i64 %scope) {
 entry:
   %t$0 = call i64 @sprout_tag(i64 %scope)
@@ -12575,12 +12594,8 @@ arm_0_1:
   br i1 %t$4, label %body_0_1, label %arm_1_1
 body_0_1:
   %t$5 = call i64 @sprout_field(i64 %handle, i64 0)
-  %t$8 = alloca i64
-  store i64 %handle, ptr %t$8
-  %t$9 = call i64 @sprout_gc_push_i64_root(ptr %t$8)
   %t$6 = call i64 @__await_deadline(i64 %sid, i64 %t$5, i64 %ms)
-  %t$7 = call i64 @stdlib.task.finish_timeout(i64 %handle, i64 %t$6)
-  %t$10 = call i64 @sprout_gc_pop_roots(i64 1)
+  %t$7 = call i64 @stdlib.task.finish_by_id(i64 %t$5, i64 %t$6)
   br label %join_1
 arm_1_1:
   call void @sprout_abort_match()
@@ -12590,16 +12605,12 @@ join_1:
   ret i64 %t$2
 }
 
-define i64 @stdlib.task.finish_timeout(i64 %handle, i64 %completed) {
+define i64 @stdlib.task.finish_by_id(i64 %tid, i64 %completed) {
 entry:
   %t$4 = trunc i64 %completed to i1
   br i1 %t$4, label %then_0, label %else_0
 then_0:
-  %t$5 = alloca i64
-  store i64 %handle, ptr %t$5
-  %t$6 = call i64 @sprout_gc_push_i64_root(ptr %t$5)
-  %t$2 = call i64 @stdlib.task.complete_with(i64 %handle)
-  %t$7 = call i64 @sprout_gc_pop_roots(i64 1)
+  %t$2 = call i64 @stdlib.task.complete_by_id(i64 %tid)
   br label %join_0
 else_0:
   %t$3 = call i64 @sprout_alloc_obj(i64 34, i64 0)
@@ -12609,21 +12620,17 @@ join_0:
   ret i64 %t$1
 }
 
-define i64 @stdlib.task.complete_with(i64 %handle) {
+define i64 @stdlib.task.complete_by_id(i64 %tid) {
 entry:
+  %t$0 = call i64 @__task_await(i64 %tid)
   %t$2 = alloca i64
-  store i64 %handle, ptr %t$2
+  store i64 %t$0, ptr %t$2
   %t$3 = call i64 @sprout_gc_push_i64_root(ptr %t$2)
-  %t$0 = call i64 @stdlib.task.task_await(i64 %handle)
-  %t$4 = call i64 @sprout_gc_pop_roots(i64 1)
-  %t$5 = alloca i64
-  store i64 %t$0, ptr %t$5
-  %t$6 = call i64 @sprout_gc_push_i64_root(ptr %t$5)
   %t$1 = call i64 @sprout_alloc_obj(i64 33, i64 1)
   %t$1$ptr = inttoptr i64 %t$1 to ptr
   %t$1$f0 = getelementptr i64, ptr %t$1$ptr, i64 0
   store i64 %t$0, ptr %t$1$f0
-  %t$7 = call i64 @sprout_gc_pop_roots(i64 1)
+  %t$4 = call i64 @sprout_gc_pop_roots(i64 1)
   ret i64 %t$1
 }
 
