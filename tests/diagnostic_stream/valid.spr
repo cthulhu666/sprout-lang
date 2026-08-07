@@ -1,0 +1,15 @@
+# Fixture for `just diagnostic-stream-smoke`: the POSITIVE CONTROL.
+#
+# Must compile cleanly — exit 0, LLVM IR on stdout, nothing on stderr.
+#
+# This fixture is what makes the gate meaningful. The other two assert that bad
+# input is rejected; without a good input that is accepted, every assertion would
+# also hold for a compiler that rejected literally everything. A gate that cannot
+# tell "correctly rejected" from "completely broken" is not a gate.
+#
+# `int_to_string` and `print` are used ON PURPOSE despite needing no import: they
+# resolve importlessly by design (ir_header emits `declare i64 @int_to_string(i64)`
+# unconditionally, and `print` is a compiler intrinsic), which keeps this fixture
+# independent of the prelude and stdlib.
+fn main() -> Unit !{IO} =
+  print(int_to_string(5))

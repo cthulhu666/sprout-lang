@@ -1,0 +1,16 @@
+# Fixture for `just diagnostic-stream-smoke`: an `if` with no `else`.
+#
+# Parse errors surface through the BUNDLER, not the checker, so they take a
+# different reporting path than unknown_variable.spr and need their own fixture:
+# `ERROR: bundle: ...` vs `ERROR: check: ...`. Covering only one path would leave
+# the other free to regress.
+#
+# WHY THIS SHAPE. The obvious probe — a malformed parameter list, `fn main( -> Unit`
+# — is not FORMATTER-STABLE: `fmt_bin` rewrites it to `fn main(-> Unit` and repo-wide
+# `just fmt-check` then fails on the fixture itself. A missing `else` is a parse error
+# the token-based formatter leaves untouched, which is why the existing
+# tests/conformance/parse_error/missing_else.spr uses it too.
+#
+# Expected: `ERROR: bundle:` on stderr, nonzero exit.
+fn unreachable(x: Int) -> Int =
+  if x > 0 then 1

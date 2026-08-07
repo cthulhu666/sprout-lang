@@ -172,3 +172,53 @@ Design + status: `docs/devirtualization-v0.md` (LANDED). A related but distinct 
 - **Composes with CPR.** The retargeted callee is a real top-level fn, so the match-site Maybe/tuple
   CPR routes it to that fn's `_worker` — the returned `Maybe`/tuple stays unboxed. This is what makes
   the rivers-demo `bake_tile` fully allocation-free (tuple SRA + devirt).
+
+## Driver diagnostic contract: stderr + nonzero exit
+
+Anything in `stdlib/compiler/*_driver.sprout` that reports a problem must obey two
+rules. Both are gated by `just diagnostic-stream-smoke` (fixtures in
+`tests/diagnostic_stream/`).
+
+**1. Diagnostics go to stderr; stdout is the artifact.** stdout carries LLVM IR
+(`--emit-ir`, `--use-ir-codegen`), an encoded iface (`--emit-iface`), or documented
+status lines (`--check-iface`). Callers redirect it to a file. A diagnostic on
+stdout therefore does not merely look untidy — it *becomes* the artifact. Until
+2026-08-07, `compile_driver` reported source errors via `print`, so the documented
+dev loop in AGENTS.md
+
+```
+compile_driver_bin_stage1 --emit-ir stdlib f.spr | clang - runtime/sprout_runtime.c
+```
+
+turned a Sprout type error into a *clang* error quoting the Sprout error back:
+
+```
+error: expected top-level entity
+    1 | 10:23: ERROR: check: Unknown variable: sprout_dss_undefined in function main
+```
+
+Use `report_error` (in `compile_driver.sprout`), never a bare `print`, for an error.
+Bare `eprint` is correct only for a warning, which is a diagnostic but not a failure.
+
+**2. A failed run exits nonzero.** Every `run_*` returns `Unit`, so the status is
+carried by a write-1-only `Ref Int` threaded from `main` and returned as `main`'s
+result — hence `fn main() -> Int !{IO}`. A `Ref` rather than a return value avoids
+restructuring `run_batch`'s recursion into a fold, and write-1-only means a batch
+keeps reporting every bad file while the status still survives to `main`.
+
+**Why this went unnoticed for so long, which is the more useful lesson.** The whole
+negative-test surface is *exit-status-blind by construction*: `_test-reject` runs the
+driver as `2>&1 || true` and greps the combined text, because a fixture asserts a
+specific *diagnostic*, and a bare nonzero status cannot distinguish the expected
+rejection from a different one. That is the right design for those fixtures — but it
+means 244 passing suites said nothing whatsoever about exit status, and
+`just loud-fail-smoke` (which *did* check status) was structurally incapable of
+firing and sat red on master unnoticed. When a signal is deliberately ignored
+everywhere, add a gate that checks it *specifically*; do not assume broad coverage
+implies it.
+
+**Editing an older stage.** `_build-stage` checks both streams and captures the exit
+status rather than letting `set -e` abort, so the seed bootstrap still works when
+`in_bin` is a pre-2026-08-07 stage that reported on stdout and exited 0. Keep that
+property if you touch it — it is what lets the seed be refreshed *across* a change
+to the diagnostic contract without hand-building a compiler.
