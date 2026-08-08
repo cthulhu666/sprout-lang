@@ -776,6 +776,12 @@ checked on every control-flow path:
 - **Branch convergence** — in an `if`/`match`, a linear binding defined outside it
   must be used either zero times in the whole construct, or exactly once in *every*
   branch; using it in some branches but not others is rejected.
+- **Discarded result** — a `do`-block statement in non-final position whose *value*
+  is linear is rejected. The three rules above are keyed on binders, so a linear
+  value that is never bound carries no obligation for them to find unfulfilled:
+  `do { task_fork(s, w); 7 }` would otherwise drop the handle in silence. The
+  **final** statement is exempt — it is the block's result, so the obligation
+  passes to the caller.
 
 A linear ADT is consumed once by matching it (`match f with | File n -> …`) or by
 passing it to a function. A linear record is read via field access, which consumes

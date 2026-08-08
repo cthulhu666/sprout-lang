@@ -1,0 +1,13 @@
+import stdlib.task (Scope, with_scope, task_fork)
+
+# The real-world shape of the discarded-linear-result hole: forking without
+# binding the handle. `linear_task_leak` covers the BOUND-and-dropped case
+# (`h <- task_fork(...)`, `h` never used); this is the never-bound one, which
+# the binder-keyed analysis cannot see at all. Both leak the `Task`.
+fn body(s: Scope) -> Int !{IO} =
+  do
+    task_fork(s, \_ -> 41)
+    7
+
+fn main() -> Unit !{IO} =
+  print(to_string(with_scope(body)))

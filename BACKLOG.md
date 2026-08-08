@@ -1056,12 +1056,43 @@ and `docs/linear-types-m4.2-enforcement-2026-08-06.md`. Deferred, in the order t
   `task_await` or the new `detach`. `with_timeout` internals refactored to inspect the handle once
   (no borrow). Design + prior art: `docs/linear-task-v0.md`. Parametric-`type linear` coverage added
   (`test_parser.spr`, `test_linear_type_decl.spr`) — closes the gap the spike exposed.
-- [ ] `P3` **Discarded linear expression result escapes leak detection.** The consumed-set analysis
-  tracks *binders* (params, do-`let`, `<-`, pattern vars); a linear value produced by a bare
-  expression-statement and never bound — `do task_fork(s, w); ...` (result dropped) — is not leak-checked,
-  so it silently escapes consume-once (surfaced landing linear `Task`; `test_task_result.drop_unawaited`
-  uses explicit `detach` rather than relying on this). Fix: in `lin_do`/`scope_consumed`, treat a
-  `TDoExprStep`/trailing expression whose *type* is linear as an unconsumed obligation.
+- [x] **Discarded linear expression result escapes leak detection — DONE** (2026-08-08). The
+  consumed-set analysis tracks *binders* (params, do-`let`, `<-`, pattern vars): every rule asks
+  whether the obligation attached to a NAME was discharged, so a linear value produced by a bare
+  do-step and never bound had no obligation attached and no rule could find it unfulfilled —
+  `do { task_fork(s, w); 7 }` typechecked clean and dropped the handle. `linear_check.lin_do_seq`
+  now rejects a **non-final** do-step whose type is linear; the final step is exempt, being the
+  block's result, whose obligation passes to the caller (`rest == []` is exactly that test).
+  Fixtures: `linear_discarded_do_step` (hermetic), `linear_discarded_fork` (the real `task_fork`
+  shape — `linear_task_leak` already covered the bound-and-dropped case, this is the never-bound
+  one); positive `test_linear_task.via_trailing`. Normative text: `docs/spec-v0.md` §5.8, fourth
+  enforcement bullet.
+
+- [ ] `P2` **Decide whether a wildcard pattern over a linear value is a consume or a leak.** A
+  *semantics* question the discarded-do-step fix surfaced but deliberately did not answer, because
+  answering it either way changes the language rather than fixing a bug. Three shapes, all
+  accepted today:
+  1. `fn drop_param(f: File) -> Int = match f with | _ -> 0` — a linear **parameter** dropped by a
+     wildcard arm.
+  2. `match mk(n) with | _ -> 0` — the same over an unbound linear **scrutinee**.
+  3. `match w with | Wrap _ -> 0` where `type linear Wrap = Wrap File` — a destructure that drops a
+     linear **field**. `linear_viral_field` covers only the double-use direction of viral fields;
+     this is the zero-use direction.
+
+  **Position A (what ships today).** "Use" is syntactic, per `docs/spec-v0.md` §5.8: *"'Use' means
+  any reference to the binding"*. The scrutinee IS referenced once in 1 and 2, so both satisfy the
+  rule; 3 never names the field at all, so nothing is tracked. This is the inherent "a consume need
+  not do anything useful" limit — `match f with | File n -> 0` discards the extracted handle and is
+  equally uncatchable, and Rust has the same property minus `Drop`, which Sprout lacks.
+
+  **Position B.** A consume should mean the value is destructured *or* passed on, making all three
+  leaks. Stronger guarantee; costs a rule that says which patterns count as a real consume, and 3
+  is the least debatable of the three (the enclosing `Wrap` being consumed says nothing about the
+  `File` inside it).
+
+  The cost of A is that `type linear Wrap = Wrap TcpConnection` + `Wrap _` silently leaks an fd and
+  looks deliberate. Needs a call before any code; prior art to survey first (Rust `let _ =` vs
+  `let _x =` binding semantics, Austral's linear-field rules).
 - [x] **Imported linear-type annotation resolution wart — DONE** (2026-08-07, with M4.5 borrowing).
   Annotating a user param with an imported linear type's bare name failed with
   `Type mismatch: stdlib.task.Task vs Task`. **The old diagnosis here was wrong on both counts:** it
