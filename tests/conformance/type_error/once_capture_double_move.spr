@@ -1,0 +1,25 @@
+module main
+
+# M4.4a: a moved capture is consumed AT THE CALL, so moving the same value into
+# two `once` closures is an ordinary reuse. Nothing new is needed to catch it —
+# the move is credited to the caller's consumed set, and the caller's existing
+# exactly-once rule does the rest.
+#
+# Runtime consequence if it were allowed: two spawned tasks would each close the
+# same file descriptor, and the second close would hit a number the OS may have
+# already handed to an unrelated open — a double-free with a socket instead of a
+# pointer.
+
+type linear File = File Int
+
+fn release(f: consuming File) -> Int = match f with | File n -> n
+
+fn run_once(work: once Unit -> Int) -> Int = work(())
+
+fn moves_twice(f: File) -> Int =
+  do
+    let a = run_once(\_ -> release(f))
+    let b = run_once(\_ -> release(f))
+    a + b
+
+fn main() -> Unit !{IO} = print(to_string(moves_twice(File(1))))

@@ -1019,23 +1019,25 @@ M4.1 (parse + record `type linear`) and M4.2 (consume-exactly-once enforcement, 
 M4.3 branch convergence merged) have landed. See `docs/linear-types-m4-scoping-2026-08-01.md`
 and `docs/linear-types-m4.2-enforcement-2026-08-06.md`. Deferred, in the order they matter:
 
-- [ ] `P2` **Higher-order linearity (M4.4).** M4.2 loud-rejects a linear binding captured by a
-  lambda and any linear lambda parameter (`linear_check.lin_lambda`), because a closure may run
-  0..n times and its call count is untracked. M4.5 borrowing did **not** lift this and extends the
-  same rejection to borrowed values: whether a captured borrow is sound depends on whether the
-  closure escapes and outlives the consume, and Sprout has no escaping/non-escaping distinction.
-  Lift this by tracking linear captures against closure arity/call-count, or by adding a
-  non-escaping-closure notion. Known-hard (Linear Haskell shipped it incomplete).
+- [ ] `P2` **Higher-order linearity (M4.4) — the general case.** M4.2 loud-rejects a linear binding
+  captured by a lambda and any linear lambda parameter (`linear_check.lin_lambda`), because a
+  closure may run 0..n times and its call count is untracked. M4.5 borrowing did **not** lift this
+  and extends the same rejection to borrowed values: whether a captured borrow is sound depends on
+  whether the closure escapes and outlives the consume, and Sprout has no escaping/non-escaping
+  distinction. Lift this by tracking linear captures against closure arity/call-count, or by adding
+  a non-escaping-closure notion. Known-hard (Linear Haskell shipped it incomplete, and its own
+  guide still lists "no support for multiplicity annotations on function arguments").
 
-  Everything below is gated on this one item, so it is filed once here rather than four times:
-  - **`stdlib/http_server.sprout`** cannot use the linear `TcpConnection`. Its accept loop
-    (`:476`, `:493`) does `task_spawn(scope, \_ -> handle_connection(conn, handler))`, and
-    `handle_connection` calls `tcp_close(conn)` — an ownership *transfer into a closure*, which is
-    not a borrow and is unreachable under either design option. It stays on raw `Int` handles with
-    no release enforcement, as does `tests/task_io_smoke/concurrent_read.spr`.
-  - **The combinator-over-a-borrow form**, `list_each(xs, \x -> write(conn, x))`.
-  - **A linear `Scope`** — a `Scope` only ever arrives as a lambda parameter, so it is the captured
-    case on top of the multiple-use case (`docs/linear-borrowing-v0.md` §2).
+  **The move-into-a-one-shot-closure slice landed separately as M4.4a — see below.** What is left
+  here, with its consumers:
+  - **A linear value captured at an UNANNOTATED parameter** (the true 0..n case). Includes the
+    combinator-over-a-borrow form, `list_each(xs, \x -> write(conn, x))` — the borrow half of
+    which needs an escape/lifetime notion, not just a call-count bound.
+  - **Linear lambda *parameters***, `\c -> close(c)`. Orthogonal to `once`: that bounds how often a
+    closure runs, not what may be handed to it on each run. Needs the lambda's own parameter types
+    to carry ownership.
+  - **A linear `Scope`** — a `Scope` only ever arrives as a lambda parameter, so it is the linear-
+    lambda-parameter case on top of the multiple-use case (`docs/linear-borrowing-v0.md` §2).
 - [x] **Pattern-bound linear vars (match var-pattern alias + viral field) — DONE** (2026-08-06,
   post-review soundness fix). `linear_check.pattern_linear_binders` recovers each pattern-bound
   variable's type (structurally matching the pattern against the value type) and tracks the linear
@@ -1140,6 +1142,77 @@ and `docs/linear-types-m4.2-enforcement-2026-08-06.md`. Deferred, in the order t
   methods (with the instance required to match its class). `IfaceFile` v4 → v5. Golden IR: additions
   only, zero changed lines. Full write-up: `docs/linear-borrowing-v0.md` §18; normative text in
   `docs/spec-v0.md` §5.8. The two things it deliberately did NOT do are filed directly below.
+
+- [x] **One-shot closure parameters — DONE as M4.4a** (2026-08-08). A parameter may be declared
+  `once` (`fn task_spawn(scope: Scope, work: once Unit -> Unit !{IO})`), meaning the callee invokes
+  it **at most once** and does not store it. That licenses a lambda passed there to **move** linear
+  captures into itself: the move is consumed at the call, and must be consumed exactly once inside
+  the body. `types.Ownership` gained `OwnOnce` — no new `TFunc` field, so none of M4.6's ~85-site
+  fan-out — and `ast.ParamMode` gained `ModeOnce`; the parser change is one arm in
+  `param_mode_of_text`, `once` staying contextual under the existing "a type atom must follow"
+  guard. `IfaceFile` v5 → v6. Golden IR unchanged (erased, like `borrowing`).
+  **The point of it:** `stdlib/http_server.sprout` and `tests/task_io_smoke/concurrent_read.spr`
+  now run on the linear `net.TcpConnection`/`TcpListener` throughout, where before they sat on raw
+  `Int` handles with no release enforcement — `net.sprout` had shipped a complete linear socket API
+  since M4.5 with no consumer at all. `net.read_avail` was added (a Sprout wrapper over the
+  existing `tcp_read_avail` extern, not a new builtin) because a header block ends at a delimiter,
+  not a byte count. Still rejected, deliberately: captured **borrows** (Rust forbids the same thing
+  with `'static` on `thread::spawn`), linear lambda parameters, and captures at unannotated
+  parameters. Prior art and the full rule set: `docs/one-shot-closures-v0.md`; normative text in
+  `docs/spec-v0.md` §5.8.
+
+- [ ] `P3` **Resources moved into a cancelled task's closure are never released.** M4.4a's
+  compile-time guarantee is **at most once** — as are Rust's `FnOnce` and OxCaml's `once`, both
+  verified. Rust can afford the weaker bound because a never-called `FnOnce` still runs `Drop`;
+  Sprout has no destructors, so leak-freedom for a moved value depends on the callee's runtime
+  contract that the closure *does* run. `stdlib/task.sprout:79`'s `with_scope` binds its body with
+  `let` rather than `<-` precisely so `__scope_join` is unconditional, which supplies that half —
+  except on the cancellation path: `runtime/sprout_scheduler.c:671` `__scope_cancel` walks parked
+  tasks and force-drops them (freeing roots), and a spawned task does not start until the current
+  task yields, so its closure can run zero times and a moved-in socket is never closed. This is a
+  *runtime* leak on the experimental L0.5 cancellation path, not a checker soundness hole, and it
+  was equally true of the raw `Int` handles that preceded M4.4a — adopting linear types did not
+  introduce it. Fix belongs with cancellation-time resource release (a drop/cleanup hook run on
+  force-drop), not with the type system. Spec states the limit: "leak-freedom for moved values
+  holds absent scope cancellation" (`docs/spec-v0.md` §5.8).
+
+- [ ] `P3` **A linear `TcpConnection` costs an allocation and a GC root per connection; `wrap` +
+  `linear` would not.** Surfaced by M4.4a's golden-IR diff, read rather than regenerated:
+  migrating `stdlib/http_server.sprout` from raw `Int` handles to `net.TcpConnection` turned
+  `pop_roots(i64 1)` into `pop_roots(i64 2)` in the read loop, because a connection went from an
+  unboxed integer to a boxed single-constructor ADT that must be rooted across the recursive call.
+  Correct, and the price of the compile-time release guarantee — but not *inherent*:
+  `type linear TcpConnection = | TcpConnection Int` is exactly the single-field shape `wrap`
+  already unboxes (`examples/wrap_typed_money.sprout`, `test_wrap_codegen.spr` assert no
+  `sprout_alloc_obj` / no `sprout_field` for it). If `wrap` and `linear` composed, the linear
+  socket API would be free at runtime rather than merely cheap. Scope: find out whether the
+  restriction is deliberate or simply unimplemented (`ast.WrapDecl` vs `ast.Linearity`), then
+  either lift it or record why it cannot be lifted. Measure before assuming it matters — a server
+  doing per-connection syscalls will not notice one allocation, so this is a tidiness / "no hidden
+  cost" argument, not a demonstrated bottleneck.
+
+- [ ] `P3` **Export the current `.iface` version as a constant; stop hardcoding it in tests that
+  do not care.** Every `IfaceFile` version bump (three so far: v3→v4, v4→v5, v5→v6) costs a sweep
+  through test files that pin the literal. That is correct and wanted in
+  `tests/stdlib/compiler/test_iface_file_roundtrip.spr`, where the version gate *is* the subject —
+  it asserts each retired version is rejected. It is pure friction in
+  `test_iface_extraction.spr`, which only needs *a* decodable iface to check that extracted ctor /
+  class / instance tables survive a round trip, and whose two failures on the M4.4a bump said
+  nothing about extraction. Add `iface_codec.current_iface_version` (or have
+  `encode_iface_file` stamp it and drop the field from the constructor) and use it wherever the
+  version is incidental. Small, and it removes a recurring false failure that trains the reader to
+  bump-and-move-on — which is the habit that would let a real decode regression through.
+
+- [ ] `P3` **Rename `types.Ownership` → `types.ParamConv`.** Once `OwnOnce` lands (M4.4a, one-shot
+  closures) the type carries two different things: how the parameter is *taken* (`OwnConsume` /
+  `OwnBorrow`) and a bound on how often the callee may *invoke* it (`OwnOnce`). "Ownership" is a
+  misnomer for the second. The accurate name is a parameter *convention* — Swift SE-0377's own
+  term — so `ParamConv` with `ConvConsume` / `ConvBorrow` / `ConvOnce`. Deferred purely to avoid
+  churning every M4.6 site plus the `.iface` wire format weeks after they landed; the widened
+  meaning is documented at the declaration in `types.sprout` in the meantime. Pure rename, no
+  behaviour change, but it does touch the wire tag names (`encode_ownership`), so it costs an
+  `IfaceFile` version bump — worth batching with the next change that needs one rather than
+  spending a bump on cosmetics.
 
 - [ ] `P2` **`borrowing` inside arrow-type syntax.** `fn apply(g: (borrowing File) -> Int, f: File)`
   cannot be written: arrow types have no ownership slot, so an annotated arrow means *consuming* and

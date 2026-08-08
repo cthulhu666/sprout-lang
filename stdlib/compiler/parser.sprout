@@ -1169,10 +1169,10 @@ fn parse_param(tokens: Vec token.Token, i: Int) -> Result ParseError (ast.Param,
 # above — neither word is reserved, both are special only in this one position.
 #
 # DISAMBIGUATION: a bare `x: borrowing` is the TYPE named `borrowing`, not a
-# modifier with a missing type. `borrowing`/`consuming` are ordinary identifiers
-# and could legitimately name a type, so the modifier reading requires a type
-# atom to follow. Without this guard the modifier would be a reserved word in
-# all but name. See docs/linear-borrowing-v0.md §8.
+# modifier with a missing type. `borrowing`/`consuming`/`once` are ordinary
+# identifiers and could legitimately name a type, so the modifier reading
+# requires a type atom to follow. Without this guard the modifier would be a
+# reserved word in all but name. See docs/linear-borrowing-v0.md §8.
 fn param_mode_at(tokens: Vec token.Token, i: Int) -> ast.ParamMode =
   if ! (tok_is_ident(tok_at(tokens, i)) && starts_type_atom(tokens, i + 1)) then ast.ModeDefault
   else param_mode_of_text(token.token_text(tok_at(tokens, i)))
@@ -1180,6 +1180,7 @@ fn param_mode_at(tokens: Vec token.Token, i: Int) -> ast.ParamMode =
 fn param_mode_of_text(text: String) -> ast.ParamMode =
   if text == "borrowing" then ast.ModeBorrowing
   else if text == "consuming" then ast.ModeConsuming
+  else if text == "once" then ast.ModeOnce
   else ast.ModeDefault
 
 fn skip_param_mode(tokens: Vec token.Token, i: Int) -> Int =

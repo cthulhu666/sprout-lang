@@ -314,14 +314,18 @@ fn build_fn_type(params: List types.Type, ret: types.Type) -> types.Type =
   | Cons p rest -> types.TFunc(p, build_fn_type(rest, ret), types.EffectPure, types.OwnConsume)
 
 # DECLARATION side (M4.6): one ownership per declared parameter. This one call is
-# what puts `borrowing` into the type of every top-level fn, extern fn, class
-# method and instance method — they all reach TFunc through here.
+# what puts `borrowing` (and, since M4.4a, `once`) into the type of every
+# top-level fn, extern fn, class method and instance method — they all reach
+# TFunc through here.
 fn build_fn_type_modes(params: List types.Type, modes: List ast.ParamMode, ret: types.Type) -> types.Type =
   match params with
   | Nil -> ret
   | Cons p rest ->
       types.TFunc(p, build_fn_type_modes(rest, mode_list_tail(modes), ret), types.EffectPure,
-        types.ownership_of_borrow(ast.mode_is_borrowing(mode_list_head(modes))))
+        own_of_mode(mode_list_head(modes)))
+
+fn own_of_mode(m: ast.ParamMode) -> types.Ownership =
+  types.ownership_of_mode(ast.mode_is_borrowing(m), ast.mode_is_once(m))
 
 fn mode_list_head(modes: List ast.ParamMode) -> ast.ParamMode =
   match modes with

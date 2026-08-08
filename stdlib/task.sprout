@@ -76,7 +76,7 @@ export fn scope_handle(scope: Scope) -> Int =
 # and return the body's result. `body`'s result is bound with `let` (not `<-`)
 # so an `Err` value cannot short-circuit past `__scope_join` — the join is
 # unconditional, which is what prevents spawned tasks from leaking past the scope.
-export fn with_scope(body: Scope -> a !{IO}) -> a !{IO} =
+export fn with_scope(body: once Scope -> a !{IO}) -> a !{IO} =
   do
     id <- __scope_open()
     let result = body(Scope(id))
@@ -85,14 +85,21 @@ export fn with_scope(body: Scope -> a !{IO}) -> a !{IO} =
 
 # Spawn `work` as a fire-and-forget green task belonging to `scope`. It becomes
 # runnable but does not start until the current task yields or the scope joins.
-export fn task_spawn(scope: Scope, work: Unit -> Unit !{IO}) -> Unit !{IO} =
+#
+# `once` (M4.4a) is the promise that makes this usable with resources: the
+# scheduler invokes the thunk at most once and user code never holds it, so a
+# caller may MOVE a linear value into the closure — which is how http_server hands
+# an accepted TcpConnection to its handler. Note the bound is at-MOST-once; that a
+# spawned task actually runs is `with_scope`'s unconditional join, not the type.
+# Scope cancellation force-drops unstarted tasks and so breaks that half (BACKLOG).
+export fn task_spawn(scope: Scope, work: once Unit -> Unit !{IO}) -> Unit !{IO} =
   match scope with
   | Scope id -> __scope_spawn(id, work)
 
 # Fork `work` as an awaitable green task belonging to `scope`, returning a handle
 # whose value is retrieved with task_await. The task's result is kept alive until
 # it is awaited (or the scope closes, which reclaims any never-awaited forks).
-export fn task_fork(scope: Scope, work: Unit -> a !{IO}) -> Task a !{IO} =
+export fn task_fork(scope: Scope, work: once Unit -> a !{IO}) -> Task a !{IO} =
   match scope with
   | Scope id -> Task(__task_fork(id, work))
 

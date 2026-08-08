@@ -742,11 +742,12 @@ prior art: `docs/coercions-and-literals-v1-draft.md` (Case A).
 
 > **Experimental** — not part of normative v0. Syntax stabilized in Milestone 4.1;
 > consume-exactly-once enforcement in Milestone 4.2; borrowing in Milestone 4.5;
-> parameter ownership moved into the function type in Milestone 4.6.
+> parameter ownership moved into the function type in Milestone 4.6; one-shot
+> (`once`) closure parameters in Milestone 4.4a.
 > Design rationale and the deferred items live in
 > `docs/linear-types-m4-scoping-2026-08-01.md`,
-> `docs/linear-types-m4.2-enforcement-2026-08-06.md` and
-> `docs/linear-borrowing-v0.md`.
+> `docs/linear-types-m4.2-enforcement-2026-08-06.md`,
+> `docs/linear-borrowing-v0.md` and `docs/one-shot-closures-v0.md`.
 
 A type declaration may carry the contextual modifier `linear`, written between
 `type` and the type name (mirroring `type alias`). It applies to ADT and record
@@ -810,9 +811,13 @@ close(conn)                    # the single consuming use
   parameter is already consuming, so this is redundant, but it documents the
   contract at an API boundary. No existing program changes meaning.
 
-Both are **contextual keywords**: `borrowing` and `consuming` remain ordinary
-identifiers everywhere else, including as type names (`x: borrowing` is the type
-named `borrowing`, since no type follows the word).
+- `once` — see **One-shot closure parameters** below. It sits in the same slot but
+  constrains a different thing: not how the parameter is taken, but how often the
+  callee may invoke it.
+
+All three are **contextual keywords**: `borrowing`, `consuming` and `once` remain
+ordinary identifiers everywhere else, including as type names (`x: borrowing` is
+the type named `borrowing`, since no type follows the word).
 
 **Where a use is a borrow.** A reference to a linear binding is a borrow when it
 sits at a `borrowing` parameter position, or when the binding it names is itself a
@@ -888,14 +893,54 @@ retain/release traffic. Sprout has a tracing GC and erases the modifiers, so on 
 non-linear parameter they would carry no meaning at all; rejecting them keeps them
 from reading as enforcement that is not there.
 
+**One-shot closure parameters (`once`, Milestone 4.4a).** A parameter may be
+declared `once`:
+
+```
+export fn task_spawn(scope: Scope, work: once Unit -> Unit !{IO}) -> Unit !{IO} = …
+```
+
+This is a promise by the **callee**: it invokes `work` **at most once**, and does
+not store or return it. `once` is only meaningful on a function-typed parameter;
+elsewhere it is an error.
+
+The promise licenses one thing at the **caller**: a lambda passed at a `once`
+position may **move** linear values into itself. A moved capture is consumed *at
+the call*, so it is discharged there and any later use is a reuse:
+
+```
+conn <- accept(listener)
+task_spawn(scope, \_ -> handle(conn))   # conn is MOVED into the closure
+                                         # any use of conn after this is rejected
+```
+
+- Each moved value must be consumed **exactly once inside the closure body**, on
+  every path. The body is checked by the ordinary rules, so branch convergence and
+  reuse detection apply unchanged within it.
+- A **borrowed** value may still not be captured, at a `once` parameter or
+  anywhere else. The closure may run after the owner has consumed the value, and
+  Sprout has no escaping/non-escaping or lifetime distinction to rule that out.
+- A **linear lambda parameter** is still rejected: `once` bounds how often the
+  closure runs, not what may be handed to it on each run.
+- `once` is **erased**, like the ownership modifiers, and is part of the function
+  type, so it is compared invariantly at unification.
+
+**At most once, not exactly once.** The type system bounds invocations from above
+only — matching Rust's `FnOnce` and OxCaml's `once`, both of which are also
+at-most-once. Leak-freedom for a moved value therefore also depends on the
+callee's runtime contract that the closure *does* run: for `stdlib.task` that is
+`with_scope`'s unconditional join. Cancelling a scope force-drops tasks that have
+not started, so a value moved into a cancelled task's closure is not released.
+**Leak-freedom for moved values holds absent scope cancellation.**
+
 **Deferred (rejected with a diagnostic, never silently accepted):**
 
-- Higher-order linearity — a linear binding captured by a lambda, and linear
-  lambda parameters, are not yet supported. A **borrowed** value likewise may not
-  be captured by any lambda: soundness would depend on whether the closure escapes
-  and outlives the consume, and Sprout has no escaping/non-escaping distinction.
-  This is why the combinator form (`list_each(xs, \x -> write(conn, x))`) and the
-  spawn-a-handler server shape are still out of reach.
+- Higher-order linearity beyond the `once` case — a linear binding captured by a
+  lambda at an **unannotated** parameter, and linear lambda parameters, are not yet
+  supported, nor is capturing a **borrowed** value anywhere. This is why the
+  combinator form (`list_each(xs, \x -> write(conn, x))`) is still out of reach.
+  The spawn-a-handler server shape is no longer: it is a move into a one-shot
+  closure, and `stdlib.http_server` now runs on the linear socket API throughout.
 - Containment virality — linearity is *per-declaration*: a record that merely
   contains a linear field is not itself linear (contrast Austral).
 - `borrowing` inside an **arrow type**, and a modifier on a **type-variable**

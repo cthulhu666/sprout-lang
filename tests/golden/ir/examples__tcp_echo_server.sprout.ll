@@ -9188,6 +9188,13 @@ entry:
   ret i64 %t$1
 }
 
+define i64 @stdlib.net.read_avail(i64 %conn) {
+entry:
+  %t$0 = call i64 @stdlib.net.tcp_connection_handle(i64 %conn)
+  %t$1 = call i64 @tcp_read_avail(i64 %t$0)
+  ret i64 %t$1
+}
+
 define i64 @stdlib.net.read_exact_utf8(i64 %conn, i64 %count) {
 entry:
   %t$19 = alloca i64

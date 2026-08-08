@@ -1,0 +1,26 @@
+module main
+
+# M4.4a: once a value is moved into a `once` closure it is gone from the caller,
+# so touching it afterwards is a use-after-move. Distinct shape from
+# once_capture_double_move (closure-then-direct rather than closure-twice); both
+# must be caught by the caller's consumed set, without a rule of their own.
+#
+# The direct use here is a BORROW (`peek`), which makes this the sharper case:
+# the caller is not trying to release the file twice, only to read it — and it
+# must still be refused, because the closure now owns it and may already have
+# closed it.
+
+type linear File = File Int
+
+fn peek(f: borrowing File) -> Int = 0
+
+fn release(f: consuming File) -> Int = match f with | File n -> n
+
+fn run_once(work: once Unit -> Int) -> Int = work(())
+
+fn reads_after_move(f: File) -> Int =
+  do
+    let a = run_once(\_ -> release(f))
+    a + peek(f)
+
+fn main() -> Unit !{IO} = print(to_string(reads_after_move(File(1))))

@@ -55,17 +55,28 @@ export type ParamMode (..) =
   | ModeDefault  # no modifier written — consuming, and silent on non-linear types
   | ModeBorrowing  # `borrowing` — a non-consuming use; the caller keeps the obligation
   | ModeConsuming  # `consuming` — explicit spelling of the default, documents the API
+  | ModeOnce  # `once` — the callee invokes this closure AT MOST ONCE (M4.4a)
 
 export type Param (..) =
   | Param String (Maybe TypeExpr) ParamMode
 
-# The only distinction that survives into the TYPE (M4.6): `types.Ownership` is
-# two-valued, since ModeDefault and ModeConsuming are the same ownership. Kept
-# here, returning a Bool, so `ast` need not depend on `types` — the consumer
-# pairs it with `types.ownership_of_borrow`.
+# The distinctions that survive into the TYPE: `types.Ownership` is three-valued
+# (M4.4a), collapsing only ModeDefault and ModeConsuming, which are the same
+# ownership. Both predicates return Bool so `ast` need not depend on `types` —
+# neither module imports the other — and the consumer pairs them with
+# `types.ownership_of_mode`.
 export fn mode_is_borrowing(m: ParamMode) -> Bool =
   match m with
   | ModeBorrowing -> true
+  | _ -> false
+
+# `once` is orthogonal to borrow-vs-consume: it bounds how often the callee may
+# INVOKE the parameter, not how the parameter is taken. It shares the modifier
+# slot (and hence `Ownership`) because no parameter needs both — a one-shot
+# closure is passed by value like any other consuming argument.
+export fn mode_is_once(m: ParamMode) -> Bool =
+  match m with
+  | ModeOnce -> true
   | _ -> false
 
 export fn param_mode_of(p: Param) -> ParamMode =

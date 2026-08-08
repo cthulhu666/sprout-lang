@@ -1,0 +1,22 @@
+module main
+
+# M4.4a: a value moved into a `once` closure must be consumed exactly once
+# INSIDE the body, on every path. Here the `else` arm drops it, so the file is
+# closed on one branch and leaked on the other.
+#
+# This is the test that pins that the lift did not weaken the body walk: the
+# `once` rule changes only what happens to the body's RESULT (moved captures are
+# credited to the call instead of rejected), so M4.3 branch convergence still
+# applies unchanged inside the closure. If the lift had special-cased the body
+# instead, this program would be accepted.
+
+type linear File = File Int
+
+fn release(f: consuming File) -> Int = match f with | File n -> n
+
+fn run_once(work: once Unit -> Int) -> Int = work(())
+
+fn leaks_on_one_branch(c: Bool, f: File) -> Int =
+  run_once(\_ -> if c then release(f) else 0)
+
+fn main() -> Unit !{IO} = print(to_string(leaks_on_one_branch(true, File(1))))

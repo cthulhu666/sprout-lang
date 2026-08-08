@@ -571,3 +571,24 @@ and `decode_tfunc_at` rejects a tagless `TFunc` independently.
 lines**. The two added `define` blocks are the `ast.mode_is_borrowing` / `ast.param_mode_of`
 helpers, and they appear only in `repl_hosted.sprout`, the one golden program that bundles the
 compiler itself. No pre-existing function's body moved by an instruction.
+
+---
+
+## 19. Superseded: the spawn-a-handler shape (M4.4a, 2026-08-08)
+
+Several sections above (§2, §7, §13, and the `net.sprout` note in §14) record that handing a socket
+to a *spawned* task is unreachable, and file it under M4.4. **That half is no longer true**, and the
+sections are left as written because they are an accurate record of the M4.5 decision, not because
+they still describe the language.
+
+`docs/one-shot-closures-v0.md` (M4.4a) added the `once` parameter modifier: a callee that promises
+to invoke a closure at most once licenses the caller to **move** linear captures into it. That is
+exactly the accept → `task_spawn` handoff, so `stdlib/http_server.sprout` and
+`tests/task_io_smoke/concurrent_read.spr` now run on the linear `TcpConnection`/`TcpListener`
+throughout.
+
+What §7's reasoning still holds for, unchanged: a **borrowed** value may not be captured by any
+closure, `once` or not. Whether that is sound turns on whether the closure outlives the consume, and
+Sprout still has no escaping/non-escaping distinction — `with_scope` joins *after* its body, so a
+spawned closure really can run against a value the body already released. Rust draws the same line
+(`thread::spawn`'s `'static` bound). Linear lambda *parameters* are likewise still rejected.

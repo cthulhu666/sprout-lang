@@ -1,0 +1,32 @@
+module main
+
+# M4.4a: a `once` parameter licenses MOVING a linear value into the closure, but
+# never BORROWING one into it. The counterexample is short and is why the line is
+# drawn here: `with_scope` joins AFTER its body, so a spawned closure can run
+# against a value the body already consumed.
+#
+#   run_once(\_ -> peek(f))   # borrow captured
+#   release(f)                # the consume runs first
+#                             # ...then the closure reads a released value
+#
+# Sprout has no escaping/non-escaping or lifetime distinction that could rule
+# this out. Rust draws exactly this line: std::thread::spawn requires
+# `F: FnOnce() -> T + Send + 'static`, and the `'static` bound is what forbids a
+# captured borrow. A move is safe because the value is gone from the caller.
+#
+# See docs/one-shot-closures-v0.md §6.3.
+
+type linear File = File Int
+
+fn peek(f: borrowing File) -> Int = 0
+
+fn release(f: consuming File) -> Int = match f with | File n -> n
+
+fn run_once(work: once Unit -> Int) -> Int = work(())
+
+fn borrow_escapes(f: File) -> Int =
+  do
+    let a = run_once(\_ -> peek(f))
+    a + release(f)
+
+fn main() -> Unit !{IO} = print(to_string(borrow_escapes(File(1))))

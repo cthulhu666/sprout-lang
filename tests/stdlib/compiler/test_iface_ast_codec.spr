@@ -79,6 +79,7 @@ fn mode_tag(m: ast.ParamMode) -> String =
   | ast.ModeDefault -> "default"
   | ast.ModeBorrowing -> "borrowing"
   | ast.ModeConsuming -> "consuming"
+  | ast.ModeOnce -> "once"
 
 fn linear_fn_decl(mode: ast.ParamMode) -> ast.Decl =
   ast.FnDecl("useConn",
@@ -355,6 +356,12 @@ fn main() -> Unit !{IO} =
       decoded_first_param_mode(linear_fn_decl(ast.ModeConsuming)) == "consuming")
     assert_true(state, "unmodified param stays default through codec",
       decoded_first_param_mode(linear_fn_decl(ast.ModeDefault)) == "default")
+    # `once` (M4.4a) has the sharper cross-module failure of the four: task_spawn
+    # lives in stdlib.task and every caller is an importer, so if the mode were lost
+    # here NO caller would ever see the licence and moving a linear value into a
+    # spawned closure would be rejected everywhere except inside stdlib.task itself.
+    assert_true(state, "once param mode survives codec",
+      decoded_first_param_mode(linear_fn_decl(ast.ModeOnce)) == "once")
 
     assert_true(state, "LetDecl roundtrip",
       rt_decl(ast.LetDecl("pi", ast.IntExpr(3, pos0()), Nothing, pos0())))
