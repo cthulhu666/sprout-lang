@@ -388,10 +388,10 @@ fn mr_eta_class_type_from_scheme(class_param: String, scheme_type: types.Type, a
 
 fn mr_eta_actual_type_for_scheme_match(scheme_type: types.Type, actual_type: types.Type) -> types.Type =
   match scheme_type with
-  | types.TFunc _ _ _ -> actual_type
+  | types.TFunc _ _ _ _ -> actual_type
   | _ ->
       match actual_type with
-      | types.TFunc param ret _ ->
+      | types.TFunc param ret _ _ ->
           # Zero-arg methods are inferred as their result type, but can appear
           # in value position as Unit -> result.
           if type_is_unit(param) then ret else actual_type
@@ -410,9 +410,9 @@ fn match_type_vars(pattern: types.Type, actual: types.Type, acc: Dict types.Type
       match actual with
       | types.TApp abase aarg -> match_type_vars(parg, aarg, match_type_vars(pbase, abase, acc))
       | _ -> acc
-  | types.TFunc pparam pret _ ->
+  | types.TFunc pparam pret _ _ ->
       match actual with
-      | types.TFunc aparam aret _ -> match_type_vars(pret, aret, match_type_vars(pparam, aparam, acc))
+      | types.TFunc aparam aret _ _ -> match_type_vars(pret, aret, match_type_vars(pparam, aparam, acc))
       | _ -> acc
   | types.TTuple pitems ->
       match actual with

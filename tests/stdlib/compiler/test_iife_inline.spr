@@ -28,7 +28,7 @@ fn plus(l: typed_ast.TypedExpr, r: typed_ast.TypedExpr) -> typed_ast.TypedExpr =
   typed_ast.TBinary("+", l, r, int_t(), no_pos())
 fn lam1(p: String, body: typed_ast.TypedExpr) -> typed_ast.TypedExpr =
   typed_ast.TLambda(Cons(ast.Param(p, Nothing, ast.ModeDefault), Nil), body,
-    types.TFunc(int_t(), int_t(), types.EffectPure), no_pos())
+    types.TFunc(int_t(), int_t(), types.EffectPure, types.OwnConsume), no_pos())
 fn app1(f: typed_ast.TypedExpr, arg: typed_ast.TypedExpr) -> typed_ast.TypedExpr =
   typed_ast.TCall(f, Cons(arg, Nil), int_t(), no_pos())
 

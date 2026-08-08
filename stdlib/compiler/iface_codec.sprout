@@ -18,8 +18,9 @@ import stdlib.compiler.source as source
 #   <type>    := ( TVar <atom> )
 #              | ( TConst <atom> )
 #              | ( TApp <type> <type> )
-#              | ( TFunc <type> <type> <effect> )
+#              | ( TFunc <type> <type> <effect> <own> )
 #              | ( TTuple <types> )
+#   <own>     := borrow | consume        # M4.6 parameter ownership
 #   <effect>  := ( EffectPure )
 #              | ( EffectIO )
 #              | ( EffectRow <strs> )
@@ -64,8 +65,9 @@ export fn encode_type(t: types.Type) -> String =
   | types.TConst n -> string_concat_many(["(TConst ", types.type_id_name(n), ")"])
   | types.TApp a b ->
       string_concat_many(["(TApp ", encode_type(a), " ", encode_type(b), ")"])
-  | types.TFunc a b e ->
-      string_concat_many(["(TFunc ", encode_type(a), " ", encode_type(b), " ", encode_effect(e), ")"])
+  | types.TFunc a b e o ->
+      string_concat_many(["(TFunc ", encode_type(a), " ", encode_type(b), " ", encode_effect(e),
+                          " ", encode_ownership(o), ")"])
   | types.TTuple ts ->
       string_concat_many(["(TTuple ", encode_type_list(ts), ")"])
 
@@ -243,8 +245,19 @@ fn decode_tfunc_at(s: String, bytes: Bytes, i: Int, total: Int) -> Maybe(types.T
   let Just(t1, j) = decode_type_at(s, bytes, skip_ws(s, bytes, i, total), total) else Nothing
       Just(t2, k) = decode_type_at(s, bytes, skip_ws(s, bytes, j, total), total) else Nothing
       Just(e, m) = decode_effect_at(s, bytes, skip_ws(s, bytes, k, total), total) else Nothing
-      Just end = expect_char(s, bytes, skip_ws(s, bytes, m, total), total, ')') else Nothing
-  in Just((types.TFunc(t1, t2, e), end))
+      Just(own_atom, n) = read_atom(s, bytes, skip_ws(s, bytes, m, total), total) else Nothing
+      Just end = expect_char(s, bytes, skip_ws(s, bytes, n, total), total, ')') else Nothing
+  in Just((types.TFunc(t1, t2, e, ownership_from_str(own_atom)), end))
+
+# The ownership tag on the wire. This is what carries `borrowing` ACROSS a module
+# boundary for a type that reaches the importer as a Scheme rather than as a
+# re-parsed declaration — the other path (ast.Param -> params_to_func_type)
+# carries it too, and the two must agree.
+fn encode_ownership(o: types.Ownership) -> String =
+  if types.ownership_is_borrow(o) then "borrow" else "consume"
+
+fn ownership_from_str(s: String) -> types.Ownership =
+  types.ownership_of_borrow(s == "borrow")
 
 fn decode_ttuple_at(s: String, bytes: Bytes, i: Int, total: Int) -> Maybe(types.Type, Int) =
   let Just(ts, j) = decode_type_list_at(s, bytes, skip_ws(s, bytes, i, total), total) else Nothing
@@ -338,6 +351,7 @@ fn collect_types(s: String, bytes: Bytes, i: Int, total: Int, acc: List types.Ty
 #
 # `version` is encoded as a bare atom and checked by string equality. When
 # v2 lands, decoder gets an if-chain or a parsed-int conversion.
+# (Current version is 5 — see decode_iface_version for the change log.)
 
 export type NamedScheme (..) =
   | NamedScheme String types.Scheme
@@ -505,10 +519,12 @@ fn decode_iface_v2_tail(s: String, bytes: Bytes, i: Int, total: Int, version: In
 # string equality (rather than parse_int) avoids parse_int's partial behaviour
 # on non-digit input. v1 (schemes-only) retired when metadata tables were added;
 # v2→v3 added the Scheme constraint field; v3→v4 changed the constraint pair wire
-# form from (position, class) to (head_token, class). Old ifaces are rejected
-# loudly (the Scheme wire format changed).
+# form from (position, class) to (head_token, class); v4→v5 added the M4.6
+# parameter-ownership tag to TFunc. Old ifaces are rejected loudly (the Scheme
+# wire format changed) — for v5 that matters doubly, since a v4 iface decoded
+# leniently would silently read every borrowing parameter as consuming.
 fn decode_iface_version(s: String) -> Maybe Int =
-  if s == "4" then Just(4) else Nothing
+  if s == "5" then Just(5) else Nothing
 
 fn decode_named_scheme_list_at(s: String, bytes: Bytes, i: Int, total: Int) -> Maybe (List NamedScheme, Int) =
   match expect_char(s, bytes, i, total, '(') with
@@ -606,7 +622,8 @@ fn typeexpr_to_type_with_vars(te: ast.TypeExpr, local_vars: Dict types.Type) -> 
   | ast.TypeArrow param ret _ ->
       types.TFunc(typeexpr_to_type_with_vars(param, local_vars),
                   typeexpr_to_type_with_vars(ret, local_vars),
-                  types.EffectPure)
+                  types.EffectPure,
+                  types.OwnConsume)
   | ast.TypeEffect inner _ -> typeexpr_to_type_with_vars(inner, local_vars)
   | ast.TupleType parts ->
       types.TTuple(typeexpr_list_to_types(parts, local_vars))
@@ -657,10 +674,11 @@ fn effect_from_maybe_labels(labels: Maybe (List String)) -> types.Effect =
 fn params_to_func_type(params: List ast.Param, ret: types.Type, local_vars: Dict types.Type) -> types.Type =
   match params with
   | Nil -> ret
-  | Cons (ast.Param _ maybe_te _) rest ->
+  | Cons (ast.Param _ maybe_te mode) rest ->
       types.TFunc(param_type_from_maybe(maybe_te, local_vars),
                   params_to_func_type(rest, ret, local_vars),
-                  types.EffectPure)
+                  types.EffectPure,
+                  types.ownership_of_borrow(ast.mode_is_borrowing(mode)))
 
 fn param_type_from_maybe(maybe_te: Maybe ast.TypeExpr, local_vars: Dict types.Type) -> types.Type =
   match maybe_te with

@@ -16,7 +16,7 @@ import stdlib.compiler.ast as ast
 
 fn is_pure_callee_type(t: types.Type) -> Bool =
   match t with
-  | types.TFunc _ _ eff -> match eff with
+  | types.TFunc _ _ eff _ -> match eff with
       | types.EffectPure -> true
       | _ -> false
   | _ -> false

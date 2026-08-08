@@ -66,8 +66,8 @@ export fn apply_subst(subst: Dict types.Type, t: types.Type) -> types.Type =
   | types.TConst _ -> t
   | types.TApp base arg ->
       types.TApp(apply_subst(subst, base), apply_subst(subst, arg))
-  | types.TFunc param ret eff ->
-      types.TFunc(apply_subst(subst, param), apply_subst(subst, ret), eff)
+  | types.TFunc param ret eff own ->
+      types.TFunc(apply_subst(subst, param), apply_subst(subst, ret), eff, own)
   | types.TTuple items ->
       types.TTuple(apply_subst_list(subst, items))
 
@@ -102,11 +102,12 @@ export fn apply_full_subst(subst: Dict types.Type, eff_subst: Dict types.Effect,
   | types.TConst _ -> t
   | types.TApp base arg ->
       types.TApp(apply_full_subst(subst, eff_subst, base), apply_full_subst(subst, eff_subst, arg))
-  | types.TFunc param ret eff ->
+  | types.TFunc param ret eff own ->
       types.TFunc(
         apply_full_subst(subst, eff_subst, param),
         apply_full_subst(subst, eff_subst, ret),
-        apply_effect_subst(eff_subst, eff)
+        apply_effect_subst(eff_subst, eff),
+        own
       )
   | types.TTuple items ->
       types.TTuple(apply_full_subst_list(subst, eff_subst, items))
@@ -125,7 +126,7 @@ fn occurs(name: String, subst: Dict types.Type, t: types.Type) -> Bool =
   | types.TVar n -> types.tyvar_identity(n) == name
   | types.TConst _ -> false
   | types.TApp base arg -> occurs(name, subst, base) || occurs(name, subst, arg)
-  | types.TFunc param ret _ -> occurs(name, subst, param) || occurs(name, subst, ret)
+  | types.TFunc param ret _ _ -> occurs(name, subst, param) || occurs(name, subst, ret)
   | types.TTuple items -> occurs_list(name, subst, items)
 
 fn occurs_list(name: String, subst: Dict types.Type, items: List types.Type) -> Bool =
@@ -173,6 +174,27 @@ fn unify_tfunc(subst: Dict types.Type, p1: types.Type, r1: types.Type, p2: types
   | Err e -> Err(e)
   | Ok s1 -> unify_applied(s1, apply_subst(s1, r1), apply_subst(s1, r2))
 
+# Parameter ownership is INVARIANT (M4.6): the two conventions are different
+# types and neither substitutes for the other. Both directions are unsound —
+# supplying a consuming function where a borrowing one is expected means the
+# argument is released by a call the caller still owns the value after (double
+# consume); supplying a borrowing one where consuming is expected discharges the
+# caller's obligation via a call that releases nothing (leak). Swift SE-0377
+# reaches the same rule for a noncopyable parameter: "the convention must match
+# exactly".
+#
+# Effects are deliberately still ignored above; ownership is not, because an
+# ownership mismatch is a soundness bug rather than a conservatism knob.
+fn unify_tfunc_owned(subst: Dict types.Type, l: types.Type, r: types.Type,
+                     p1: types.Type, r1: types.Type, o1: types.Ownership,
+                     p2: types.Type, r2: types.Type, o2: types.Ownership) -> Result String (Dict types.Type) =
+  if types.ownership_eq(o1, o2) then unify_tfunc(subst, p1, r1, p2, r2)
+  else Err(ownership_mismatch_error(l, r))
+
+fn ownership_mismatch_error(l: types.Type, r: types.Type) -> String =
+  "ownership mismatch: " ++ types.type_to_string(l) ++ " vs " ++ types.type_to_string(r)
+    ++ " — these differ only in how the parameter is taken, and a `borrowing` parameter's convention must match exactly; note that an arrow type cannot yet be written with `borrowing`"
+
 # A unification mismatch. If either side is (or mentions) a skolem, the real
 # fault is an existential type leaking out of its match branch — rephrase rather
 # than surface the internal "$sk3" name. See docs/gadts-v0.md §7/§8.
@@ -202,7 +224,8 @@ fn unify_applied(
       # equal identity means equal name; the prelude's canonical form is unqualified.
       if types.type_id_eq(a, b) then Ok(subst) else Err(type_mismatch_error(l, r))
   | (types.TApp bl al, types.TApp br ar) -> unify_tapp(subst, bl, al, br, ar)
-  | (types.TFunc p1 r1 _, types.TFunc p2 r2 _) -> unify_tfunc(subst, p1, r1, p2, r2)
+  | (types.TFunc p1 r1 _ o1, types.TFunc p2 r2 _ o2) ->
+      unify_tfunc_owned(subst, l, r, p1, r1, o1, p2, r2, o2)
   | (types.TTuple xs, types.TTuple ys) -> unify_list(subst, xs, ys)
   | _ ->
       Err(type_mismatch_error(l, r))
@@ -294,7 +317,7 @@ export fn instantiate_ctor_pattern(state: InferState, scheme: types.Scheme) -> t
 
 fn ctor_result_of(t: types.Type) -> types.Type =
   match t with
-  | types.TFunc _ ret _ -> ctor_result_of(ret)
+  | types.TFunc _ ret _ _ -> ctor_result_of(ret)
   | _ -> t
 
 fn build_ctor_pattern_repl(state: InferState, vars: List String, result_ftv: List String, acc: Dict types.Type) -> Dict types.Type !{IO} =

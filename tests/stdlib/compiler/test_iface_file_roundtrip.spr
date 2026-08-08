@@ -39,12 +39,12 @@ fn sample_poly_scheme() -> types.Scheme =
   # forall a. (List a) -> Int
   types.Scheme(
     Cons("a", Nil), Nil,
-    types.TFunc(types.TApp(types.TConst(types.type_id("List")), types.TVar(types.tyvar_id("a"))), types.TConst(types.type_id("Int")), types.EffectPure),
+    types.TFunc(types.TApp(types.TConst(types.type_id("List")), types.TVar(types.tyvar_id("a"))), types.TConst(types.type_id("Int")), types.EffectPure, types.OwnConsume),
     types.EffectPure, Nil)
 
 fn sample_io_scheme() -> types.Scheme =
   # String -> Unit !{IO}
-  types.mono(types.TFunc(types.TConst(types.type_id("String")), types.TConst(types.type_id("Unit")), types.EffectIO))
+  types.mono(types.TFunc(types.TConst(types.type_id("String")), types.TConst(types.type_id("Unit")), types.EffectIO, types.OwnConsume))
 
 fn main() -> Unit !{IO} =
   do
@@ -52,17 +52,17 @@ fn main() -> Unit !{IO} =
 
     # --- Empty iface (module with no exports) ---
     assert_true(state, "empty schemes roundtrip",
-      roundtrip_eq(iface_codec.IfaceFile(4, "stdlib.compiler.empty", Nil, Nil, Nil, Nil)))
+      roundtrip_eq(iface_codec.IfaceFile(5, "stdlib.compiler.empty", Nil, Nil, Nil, Nil)))
 
     # --- Single-scheme iface ---
     assert_true(state, "single scheme roundtrip",
-      roundtrip_eq(iface_codec.IfaceFile(4, "stdlib.foo",
+      roundtrip_eq(iface_codec.IfaceFile(5, "stdlib.foo",
         Cons(iface_codec.NamedScheme("stdlib.foo.bar", sample_const_scheme("Int")), Nil),
         Nil, Nil, Nil)))
 
     # --- Multi-scheme iface mirroring a real module shape ---
     assert_true(state, "multi-scheme roundtrip",
-      roundtrip_eq(iface_codec.IfaceFile(4, "stdlib.compiler.types",
+      roundtrip_eq(iface_codec.IfaceFile(5, "stdlib.compiler.types",
         Cons(iface_codec.NamedScheme("stdlib.compiler.types.type_int", sample_const_scheme("Int")),
           Cons(iface_codec.NamedScheme("stdlib.compiler.types.type_bool", sample_const_scheme("Bool")),
             Cons(iface_codec.NamedScheme("stdlib.compiler.types.list_length", sample_poly_scheme()),
@@ -71,20 +71,20 @@ fn main() -> Unit !{IO} =
 
     # --- Qualified module names with dots ---
     assert_true(state, "qualified module name",
-      roundtrip_eq(iface_codec.IfaceFile(4, "stdlib.compiler.iface_codec",
+      roundtrip_eq(iface_codec.IfaceFile(5, "stdlib.compiler.iface_codec",
         Cons(iface_codec.NamedScheme("stdlib.compiler.iface_codec.encode_scheme", sample_io_scheme()), Nil),
         Nil, Nil, Nil)))
 
     # --- v2 with non-empty metadata tables ---
     # CtorInfo: simulates `type Maybe a = Just a | Nothing` registered metadata
     assert_true(state, "iface with ctors roundtrip",
-      roundtrip_eq(iface_codec.IfaceFile(4, "stdlib.foo", Nil,
+      roundtrip_eq(iface_codec.IfaceFile(5, "stdlib.foo", Nil,
         Cons(iface_codec.CtorInfo("Just", "Maybe", Cons(types.TVar(types.tyvar_id("a")), Nil)),
           Cons(iface_codec.CtorInfo("Nothing", "Maybe", Nil), Nil)),
         Nil, Nil)))
     # ClassInfo: simulates `class Eq a where Ord a { fn eq(...) }`
     assert_true(state, "iface with class roundtrip",
-      roundtrip_eq(iface_codec.IfaceFile(4, "stdlib.foo", Nil, Nil,
+      roundtrip_eq(iface_codec.IfaceFile(5, "stdlib.foo", Nil, Nil,
         Cons(iface_codec.ClassInfo("Eq",
           Cons("a", Nil),
           Cons("Ord", Nil),
@@ -92,7 +92,7 @@ fn main() -> Unit !{IO} =
         Nil)))
     # InstanceInfo: simulates `instance Eq Int = int_eq_inst`
     assert_true(state, "iface with instances roundtrip",
-      roundtrip_eq(iface_codec.IfaceFile(4, "stdlib.foo", Nil, Nil, Nil,
+      roundtrip_eq(iface_codec.IfaceFile(5, "stdlib.foo", Nil, Nil, Nil,
         Cons(iface_codec.InstanceInfo("Eq", types.TConst(types.type_id("Int")), "stdlib.prelude.int_eq_inst"), Nil))))
 
     # --- Malformed input rejection (v2 wire format) ---
@@ -111,10 +111,16 @@ fn main() -> Unit !{IO} =
       match iface_codec.decode_iface_file("(IfaceFile 2 foo () () () ())") with | Nothing -> true | _ -> false)
     assert_true(state, "decode v3 rejected (retired by v4)",
       match iface_codec.decode_iface_file("(IfaceFile 3 foo () () () ())") with | Nothing -> true | _ -> false)
+    # v4 is retired by v5 (M4.6: TFunc grew the parameter-ownership tag). A v4
+    # iface decoded leniently would read every `borrowing` parameter as
+    # consuming, which is precisely the silent-erasure failure M4.6 removes — so
+    # the version gate must reject it rather than fall back.
+    assert_true(state, "decode v4 rejected (retired by v5)",
+      match iface_codec.decode_iface_file("(IfaceFile 4 foo () () () ())") with | Nothing -> true | _ -> false)
     assert_true(state, "decode trailing chars rejected",
-      match iface_codec.decode_iface_file("(IfaceFile 4 foo () () () ()) garbage") with | Nothing -> true | _ -> false)
+      match iface_codec.decode_iface_file("(IfaceFile 5 foo () () () ()) garbage") with | Nothing -> true | _ -> false)
     assert_true(state, "decode well-formed accepted",
-      match iface_codec.decode_iface_file("(IfaceFile 4 foo () () () ())") with | Just _ -> true | _ -> false)
+      match iface_codec.decode_iface_file("(IfaceFile 5 foo () () () ())") with | Just _ -> true | _ -> false)
 
     # --- extract_named_schemes: env-filtering helper ---
     # Build a Dict simulating a post-typecheck env with entries from two
@@ -136,11 +142,11 @@ fn main() -> Unit !{IO} =
     # around decode_iface_file. These assertions pin the contract the CLI
     # relies on: well-formed input decodes, truncated input fails.
     assert_true(state, "check-iface contract: well-formed minimal accepted",
-      match iface_codec.decode_iface_file("(IfaceFile 4 foo () () () ())") with
+      match iface_codec.decode_iface_file("(IfaceFile 5 foo () () () ())") with
       | Just _ -> true
       | Nothing -> false)
     assert_true(state, "check-iface contract: missing trailing paren rejected",
-      match iface_codec.decode_iface_file("(IfaceFile 4 foo () () () ()") with
+      match iface_codec.decode_iface_file("(IfaceFile 5 foo () () () ()") with
       | Nothing -> true
       | _ -> false)
 

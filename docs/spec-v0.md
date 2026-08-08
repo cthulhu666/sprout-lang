@@ -741,7 +741,8 @@ prior art: `docs/coercions-and-literals-v1-draft.md` (Case A).
 ### 5.8 Linear types (Experimental)
 
 > **Experimental** — not part of normative v0. Syntax stabilized in Milestone 4.1;
-> consume-exactly-once enforcement in Milestone 4.2; borrowing in Milestone 4.5.
+> consume-exactly-once enforcement in Milestone 4.2; borrowing in Milestone 4.5;
+> parameter ownership moved into the function type in Milestone 4.6.
 > Design rationale and the deferred items live in
 > `docs/linear-types-m4-scoping-2026-08-01.md`,
 > `docs/linear-types-m4.2-enforcement-2026-08-06.md` and
@@ -843,17 +844,44 @@ a field access or as a `match` scrutinee. Every other reference consumes. So
 - A `borrowing` parameter may not be consumed or returned.
 - An argument at a `borrowing` position must be a **variable reference**; a
   freshly-built linear value there would never be consumed.
-- **A function with a `borrowing` parameter may not be used as a value.** The mode
-  is not part of the function type, so it would be lost at an indirect call and
-  the argument would silently read as consuming. Call such a function directly.
-- **Modifiers are not supported on class or instance methods**, since a call
-  dispatches through the class signature, which carries no modifier.
 - The modifiers are **erased**: they reach no IR pass and emitted code is
   byte-identical with and without them.
 
+**Ownership is part of the function type (Milestone 4.6).** `(borrowing T) -> U`
+and `T -> U` are **different types**, and the ownership is carried on the arrow
+alongside the effect row. A `borrowing` function may therefore be bound, passed
+and called as a value, and class and instance methods may carry modifiers — the
+mode is readable wherever the type is.
+
+The two conventions are **invariant**: neither substitutes for the other, in
+either direction. Supplying a consuming function where a borrowing one is expected
+means the value is released by a call whose caller still owns it (double consume);
+supplying a borrowing one where consuming is expected discharges the caller's
+obligation through a call that releases nothing (leak). A mismatch is a type
+error where the mismatch occurs.
+
+Two consequences follow:
+
+- **An instance method's modifiers must match its class declaration's.** A call
+  dispatches through the class signature, so an instance that borrows where the
+  class consumes would leak. Compared as *ownership*, not as written text:
+  `consuming` on the instance against an unmodified class parameter agrees, since
+  both consume.
+- **An arrow type written in an annotation means consuming.** Arrow-type syntax
+  cannot yet spell `borrowing`, so passing a borrowing function to a parameter
+  annotated `(T) -> U` is an ownership mismatch. This is a syntax gap, not a
+  semantic one, and the diagnostic says so.
+
 **A modifier on a non-linear parameter is an error**, as is one on a
-type-variable parameter (reported distinctly: linearity is per-declaration, so
-whether a type variable's argument is linear is not knowable at the declaration).
+type-variable parameter (reported distinctly). The type-variable case is not a
+representation limit — ownership sits in the type and would survive
+instantiation — but a *universe* one: admitting `borrowing a` without a linearity
+bound on `a` would make `borrowing Int` an error while `borrowing a` instantiated
+at `Int` silently was not. Lifting it therefore requires polymorphism over linear
+types, which is a non-goal here. Both state-of-the-art designs bound the parameter
+first: Swift SE-0427 makes generic parameters `Copyable` by default and requires
+`<T: ~Copyable>` to opt out, and Austral annotates every type parameter with a
+universe (`Free`, `Linear`, or `Type`).
 `extern fn` signatures are checked the same way even though they have no body. This diverges deliberately from Swift, whose
 `borrowing`/`consuming` apply to any parameter because under ARC they still change
 retain/release traffic. Sprout has a tracing GC and erases the modifiers, so on a
@@ -870,6 +898,9 @@ from reading as enforcement that is not there.
   spawn-a-handler server shape are still out of reach.
 - Containment virality — linearity is *per-declaration*: a record that merely
   contains a linear field is not itself linear (contrast Austral).
+- `borrowing` inside an **arrow type**, and a modifier on a **type-variable**
+  parameter. Both are described above; both need work this milestone deliberately
+  did not take on (a parser change, and a linearity bound on type parameters).
 
 ## 6. Evaluation Semantics (Strict)
 

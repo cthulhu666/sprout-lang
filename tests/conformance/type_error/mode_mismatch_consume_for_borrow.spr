@@ -1,0 +1,23 @@
+module main
+
+# M4.6: the ownership mode is part of the function TYPE, so two function values
+# with different modes have different types and cannot unify. This is the
+# CONSUMING-supplied-where-BORROWING-expected direction: if it were allowed, the
+# `peek` branch would leave `f` unconsumed while the `release` branch consumed
+# it, and the checker could no longer say which happened.
+#
+# Per Swift SE-0377, for a noncopyable parameter "the convention must match
+# exactly" — invariance, no subtyping in either direction. The converse
+# direction is tests/conformance/type_error/borrow_fn_as_value.
+
+type linear File = File Int
+
+fn peek(f: borrowing File) -> Int = 0
+fn release(f: consuming File) -> Int = match f with | File n -> n
+
+fn choose(c: Bool, f: File) -> Int =
+  do
+    let g = if c then peek else release
+    g(f)
+
+fn main() -> Unit !{IO} = print(to_string(choose(true, File(1))))

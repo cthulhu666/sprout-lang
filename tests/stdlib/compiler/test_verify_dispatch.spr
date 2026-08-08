@@ -17,7 +17,7 @@ fn dpos() -> source.SourcePos = source.SourcePos(0, 1, 1)
 fn t_int() -> types.Type = types.TConst(types.type_id("Int"))
 fn t_pair_ii() -> types.Type = types.TTuple([t_int(), t_int()])
 # (Int,Int) -> Int  — the concrete type of the projection arg `fst`
-fn t_fst_fn() -> types.Type = types.TFunc(t_pair_ii(), t_int(), types.EffectPure)
+fn t_fst_fn() -> types.Type = types.TFunc(t_pair_ii(), t_int(), types.EffectPure, types.OwnConsume)
 # Vec (Int,Int) — the concrete type of the vec arg
 fn t_vec_pair() -> types.Type = types.TApp(types.TConst(types.type_id("Vec")), t_pair_ii())
 

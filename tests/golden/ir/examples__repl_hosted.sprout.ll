@@ -14355,6 +14355,47 @@ join_1:
   ret i64 %t$2
 }
 
+define i64 @stdlib.compiler.ast.mode_is_borrowing(i64 %m) {
+entry:
+  %t$0 = call i64 @sprout_tag(i64 %m)
+  br label %arm_0_1
+arm_0_1:
+  %t$3 = add i64 0, 52
+  %t$4 = icmp eq i64 %t$0, %t$3
+  br i1 %t$4, label %body_0_1, label %arm_1_1
+body_0_1:
+  %t$5 = add i64 0, 1
+  br label %join_1
+arm_1_1:
+  %t$6 = add i64 0, 0
+  br label %join_1
+arm_2_1:
+  call void @sprout_abort_match()
+  unreachable
+join_1:
+  %t$2 = phi i64 [%t$5, %body_0_1], [%t$6, %arm_1_1]
+  ret i64 %t$2
+}
+
+define i64 @stdlib.compiler.ast.param_mode_of(i64 %p) {
+entry:
+  %t$0 = call i64 @sprout_tag(i64 %p)
+  br label %arm_0_1
+arm_0_1:
+  %t$3 = add i64 0, 54
+  %t$4 = icmp eq i64 %t$0, %t$3
+  br i1 %t$4, label %body_0_1, label %arm_1_1
+body_0_1:
+  %t$5 = call i64 @sprout_field(i64 %p, i64 2)
+  br label %join_1
+arm_1_1:
+  call void @sprout_abort_match()
+  unreachable
+join_1:
+  %t$2 = phi i64 [%t$5, %body_0_1]
+  ret i64 %t$2
+}
+
 define i64 @stdlib.compiler.ast.decl_pos(i64 %d) {
 entry:
   %t$0 = call i64 @sprout_tag(i64 %d)

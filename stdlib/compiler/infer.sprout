@@ -126,7 +126,12 @@ export fn type_from_ast(te: ast.TypeExpr, local_vars: Dict types.Type) -> types.
   | ast.TypeApply base arg ->
       types.TApp(type_from_ast(base, local_vars), type_from_ast(arg, local_vars))
   | ast.TypeArrow param ret _ ->
-      types.TFunc(type_from_ast(param, local_vars), type_from_ast(ret, local_vars), types.EffectPure)
+      # An ANNOTATED arrow type means consuming: arrow-type syntax cannot yet
+      # spell `borrowing` (deferred — see BACKLOG "modifiers in arrow types"), so
+      # there is nothing here to read. Passing a borrowing function to such an
+      # annotation is therefore a mode mismatch, and its message says so.
+      types.TFunc(type_from_ast(param, local_vars), type_from_ast(ret, local_vars),
+        types.EffectPure, types.OwnConsume)
   | ast.TypeEffect inner _ -> type_from_ast(inner, local_vars)
   | ast.TupleType parts -> types.TTuple(type_list_from_ast(parts, local_vars))
 
@@ -279,7 +284,8 @@ fn scheme_from_fn_parts_inner(
   types.Scheme(
     type_params,
     Nil,
-    build_fn_type(param_types_from_decl(params, local_vars), ret_from_maybe_with_vars(ret_type_maybe, local_vars)),
+    build_fn_type_modes(param_types_from_decl(params, local_vars), param_modes(params),
+      ret_from_maybe_with_vars(ret_type_maybe, local_vars)),
     effect_from_maybe_labels(effects_maybe),
     Nil
   )
@@ -300,10 +306,62 @@ fn ret_from_maybe_with_vars(maybe_te: Maybe ast.TypeExpr, local_vars: Dict types
   | Nothing -> types.TVar(types.tyvar_id("_unann"))
   | Just te -> type_from_ast(te, local_vars)
 
+# An arrow chain whose every parameter CONSUMES. Used where no declaration is in
+# reach to say otherwise.
 fn build_fn_type(params: List types.Type, ret: types.Type) -> types.Type =
   match params with
   | Nil -> ret
-  | Cons p rest -> types.TFunc(p, build_fn_type(rest, ret), types.EffectPure)
+  | Cons p rest -> types.TFunc(p, build_fn_type(rest, ret), types.EffectPure, types.OwnConsume)
+
+# DECLARATION side (M4.6): one ownership per declared parameter. This one call is
+# what puts `borrowing` into the type of every top-level fn, extern fn, class
+# method and instance method — they all reach TFunc through here.
+fn build_fn_type_modes(params: List types.Type, modes: List ast.ParamMode, ret: types.Type) -> types.Type =
+  match params with
+  | Nil -> ret
+  | Cons p rest ->
+      types.TFunc(p, build_fn_type_modes(rest, mode_list_tail(modes), ret), types.EffectPure,
+        types.ownership_of_borrow(ast.mode_is_borrowing(mode_list_head(modes))))
+
+fn mode_list_head(modes: List ast.ParamMode) -> ast.ParamMode =
+  match modes with
+  | [] -> ast.ModeDefault
+  | [m | _] -> m
+
+fn mode_list_tail(modes: List ast.ParamMode) -> List ast.ParamMode =
+  match modes with
+  | Nil -> Nil
+  | Cons _ rest -> rest
+
+export fn param_modes(params: List ast.Param) -> List ast.ParamMode =
+  match params with
+  | Nil -> Nil
+  | Cons p rest -> Cons(ast.param_mode_of(p), param_modes(rest))
+
+# CALL side (M4.6): the arrow synthesized from the argument types, to unify
+# against the callee. Its ownership must be COPIED from the callee's own spine —
+# a fixed OwnConsume here would make every call to a borrowing function a
+# mismatch, and invariant unification would then reject the feature's own tests.
+# When the callee type is not (yet) an arrow — an unannotated higher-order
+# parameter, say — there is nothing to copy and OwnConsume is the conservative
+# reading: the tyvar binds to a consuming arrow, so a caller later supplying a
+# borrowing function gets a mismatch at ITS call site rather than a silent leak.
+fn build_fn_type_like(params: List types.Type, template: types.Type, ret: types.Type) -> types.Type =
+  match params with
+  | Nil -> ret
+  | Cons p rest ->
+      types.TFunc(p, build_fn_type_like(rest, template_ret(template), ret), types.EffectPure,
+        template_own(template))
+
+fn template_own(t: types.Type) -> types.Ownership =
+  match t with
+  | types.TFunc _ _ _ own -> own
+  | _ -> types.OwnConsume
+
+fn template_ret(t: types.Type) -> types.Type =
+  match t with
+  | types.TFunc _ ret _ _ -> ret
+  | _ -> t
 
 # ---------------------------------------------------------------------------
 # Constructor registration
@@ -411,7 +469,8 @@ fn ctor_fn_type(fields: List ast.TypeExpr, local_vars: Dict types.Type, result: 
   match fields with
   | Nil -> result
   | Cons f rest ->
-      types.TFunc(type_from_ast(f, local_vars), ctor_fn_type(rest, local_vars, result), types.EffectPure)
+      types.TFunc(type_from_ast(f, local_vars), ctor_fn_type(rest, local_vars, result),
+        types.EffectPure, types.OwnConsume)
 
 fn build_ctor_map(decls: List ast.Decl, acc: Dict (List String)) -> Dict (List String) =
   match decls with
@@ -787,33 +846,12 @@ fn mark_type_multiplicity(name: String, mult: ast.Multiplicity, env: Dict types.
         dict_set("@linear:" ++ name, types.mono(types.TConst(types.type_id("linear"))), env))
   | ast.Unrestricted -> env
 
-# A function's parameter ownership modes are recorded as a "@parammode:<name>"
-# sentinel, mirroring the @arity: idiom above: the scheme body is a TConst whose
-# NAME is a positional mask, one character per parameter ('b' = `borrowing`,
-# 'c' = `consuming`, '.' = unmodified). linear_check reads it at a CALL SITE to
-# decide whether an argument position borrows; the callee-side rules read the
-# ast.Param list directly and need no mask.
-#
-# Only recorded when a modifier was actually written, so a modifier-free program
-# (i.e. all of today's code) adds no env entries and pays nothing. An absent mask
-# reads as "every position consumes" — the pre-M4.5 behaviour, and the safe default.
-fn mark_param_modes(name: String, params: List ast.Param, env: Dict types.Scheme) -> Dict types.Scheme =
-  if ! linear_check.any_param_mode_written (params) then env
-  else dict_set("@parammode:" ++ name,
-         types.mono(types.TConst(types.type_id(param_mode_mask(params)))), env)
-
-fn param_mode_mask(params: List ast.Param) -> String =
-  match params with
-  | Nil -> ""
-  | Cons p rest ->
-      match p with
-      | ast.Param _ _ mode -> param_mode_char(mode) ++ param_mode_mask(rest)
-
-fn param_mode_char(m: ast.ParamMode) -> String =
-  match m with
-  | ast.ModeBorrowing -> "b"
-  | ast.ModeConsuming -> "c"
-  | ast.ModeDefault -> "."
+# M4.6 removed the "@parammode:<name>" sentinel that used to live here. Parameter
+# ownership is now a field on `types.TFunc` (build_fn_type_modes), so it survives
+# instantiation, substitution, generalization and the interface codec, and is
+# readable at EVERY callee shape rather than only at a literal top-level name.
+# The side table was consultable nowhere else, which silently discharged the
+# caller's consume obligation at an indirect call. See docs/linear-borrowing-v0.md §18.
 
 # True when the named type constructor was declared linear (see mark_type_multiplicity).
 fn type_name_is_linear(name: String, env: Dict types.Scheme) -> Bool =
@@ -843,12 +881,10 @@ fn call_arity_error(name: String, got: Int, want: Int) -> String =
 # `let add3 = \a -> \b -> \c -> ... in add3(1)(2)(3)` — with a spurious
 # "'add3' expects 3 arguments" error once inference resolves the local's arrow
 # type. See under_application_error and tests/stdlib/test_shadow_underapp_compiles.spr.
-# The `@parammode:` mask is dropped for the same reason and by the same argument:
-# the name now denotes a VALUE, and a call through it has no declared parameter
-# modes. Leaving the shadowed function's mask in place would make an argument
-# position borrow when calling something else entirely.
+# M4.6: no ownership mask to drop alongside it any more — the local's own TYPE
+# carries its ownership, so a shadowed function's modes cannot leak onto it.
 fn bind_local_scheme(name: String, scheme: types.Scheme, env: Dict types.Scheme) -> Dict types.Scheme =
-  dict_set(name, scheme, dict_remove("@parammode:" ++ name, dict_remove("@arity:" ++ name, env)))
+  dict_set(name, scheme, dict_remove("@arity:" ++ name, env))
 
 # Nothing if the call is saturated or the callee has no declared arity — a
 # function-typed value (Approach A's job) or a LOCAL binding shadowing a top-level
@@ -973,13 +1009,14 @@ fn infer_call_resolve(
   match arg_types with
   | Nil ->
       match unifier.apply_subst(subst, callee_type) with
-      | types.TFunc _ _ _ -> CallErr(pos, callee_display ++ " requires arguments but was called with none")
+      | types.TFunc _ _ _ _ -> CallErr(pos, callee_display ++ " requires arguments but was called with none")
       | resolved ->
           match unifier.unify_types(subst, resolved, ret_type) with
           | Err e -> CallErr(pos, "Call type mismatch: " ++ e)
           | Ok s3 -> CallOk(unifier.apply_subst(s3, ret_type), s3, eff_subst, eff)
   | _ ->
-      match unifier.unify_types(subst, callee_type, build_fn_type(arg_types, ret_type)) with
+      match unifier.unify_types(subst, callee_type,
+              build_fn_type_like(arg_types, unifier.apply_subst(subst, callee_type), ret_type)) with
       | Err e -> CallErr(pos, "Call type mismatch: " ++ e)
       | Ok s3 -> CallOk(unifier.apply_subst(s3, ret_type), s3, eff_subst, eff)
 
@@ -1189,7 +1226,7 @@ fn any_function_typed_arg(args: List typed_ast.TypedExpr, subst: Dict types.Type
   | Nil -> false
   | Cons a rest ->
       match unifier.apply_subst(subst, typed_ast.typed_expr_type(a)) with
-      | types.TFunc _ _ _ -> true
+      | types.TFunc _ _ _ _ -> true
       | _ -> any_function_typed_arg(rest, subst)
 
 # Walk each arg looking for one whose raw TVar head maps to a @fwd marker.
@@ -1231,7 +1268,7 @@ fn class_var_arg(
   subst: Dict types.Type
 ) -> Maybe typed_ast.TypedExpr =
   match method_type with
-  | types.TFunc param ret _ ->
+  | types.TFunc param ret _ _ ->
       match typed_args with
       | Nil -> Nothing
       | Cons arg rest ->
@@ -1459,9 +1496,9 @@ fn find_class_var_in_type(orig: types.Type, inst: types.Type, class_var: String)
           | Just r -> Just(r)
           | Nothing -> find_class_var_in_type(oa, ia, class_var)
       | _ -> Nothing
-  | types.TFunc op orr _ ->
+  | types.TFunc op orr _ _ ->
       match inst with
-      | types.TFunc ip ir _ ->
+      | types.TFunc ip ir _ _ ->
           match find_class_var_in_type(op, ip, class_var) with
           | Just r -> Just(r)
           | Nothing -> find_class_var_in_type(orr, ir, class_var)
@@ -1492,7 +1529,7 @@ fn dispatch_type_walk(
   class_var: String
 ) -> Maybe types.Type =
   match scheme_type with
-  | types.TFunc param ret _ ->
+  | types.TFunc param ret _ _ ->
       match typed_args with
       | Cons first_arg rest_args ->
           match find_class_var_in_type(param, unifier.apply_subst(subst, typed_ast.typed_expr_type(first_arg)), class_var) with
@@ -1527,7 +1564,7 @@ fn type_contains_var(t: types.Type, names: List String) -> Bool =
   | types.TVar n -> contains_str(names, types.tyvar_identity(n))
   | types.TConst _ -> false
   | types.TApp a b -> if type_contains_var(a, names) then true else type_contains_var(b, names)
-  | types.TFunc p r _ -> if type_contains_var(p, names) then true else type_contains_var(r, names)
+  | types.TFunc p r _ _ -> if type_contains_var(p, names) then true else type_contains_var(r, names)
   | types.TTuple items -> tuple_contains_var(items, names)
 
 fn tuple_contains_var(items: List types.Type, names: List String) -> Bool =
@@ -1539,7 +1576,7 @@ fn tuple_contains_var(items: List types.Type, names: List String) -> Bool =
 # Used to skip rewriting input-position dispatch (already correct at inference time).
 fn class_var_in_args(method_type: types.Type, class_vars: List String) -> Bool =
   match method_type with
-  | types.TFunc param ret _ ->
+  | types.TFunc param ret _ _ ->
       if type_contains_var(param, class_vars) then true
       else class_var_in_args(ret, class_vars)
   | _ -> false
@@ -2043,7 +2080,7 @@ fn concrete_missing_inst(class_name: String, t: types.Type, env: Dict types.Sche
       # dict (→ codegen under-application) or letting a later pass mint a wrong
       # default dict (→ silent miscompile: a closure read via the wrong instance).
       match t with
-      | types.TFunc _ _ _ -> Just("a function type")
+      | types.TFunc _ _ _ _ -> Just("a function type")
       | _ -> Nothing
 
 # Resolve one field constraint's dict from its head_token. A CONCRETE-ctor head
@@ -2300,7 +2337,8 @@ fn push_down_arg_slots(
   slots: List ArgSlot,
   ret: types.Type
 ) -> Dict types.Type =
-  match unifier.unify_types(subst, callee_type, build_fn_type(arg_slot_types(slots), ret)) with
+  match unifier.unify_types(subst, callee_type,
+          build_fn_type_like(arg_slot_types(slots), unifier.apply_subst(subst, callee_type), ret)) with
   | Err _ -> subst
   | Ok s -> s
 
@@ -3307,7 +3345,7 @@ fn infer_ctor_pattern_typed(
 
 fn ctor_result_type(t: types.Type) -> types.Type =
   match t with
-  | types.TFunc _ ret _ -> ctor_result_type(ret)
+  | types.TFunc _ ret _ _ -> ctor_result_type(ret)
   | _ -> t
 
 # Declared return type of a function with `n_params` parameters: strip exactly
@@ -3316,12 +3354,12 @@ fn ctor_result_type(t: types.Type) -> types.Type =
 fn fn_return_type(t: types.Type, n_params: Int) -> types.Type =
   if n_params <= 0 then t
   else match t with
-    | types.TFunc _ ret _ -> fn_return_type(ret, n_params - 1)
+    | types.TFunc _ ret _ _ -> fn_return_type(ret, n_params - 1)
     | _ -> t
 
 fn ctor_param_types(t: types.Type) -> List types.Type =
   match t with
-  | types.TFunc p rest _ -> Cons(p, ctor_param_types(rest))
+  | types.TFunc p rest _ _ -> Cons(p, ctor_param_types(rest))
   | _ -> Nil
 
 # ---------------------------------------------------------------------------
@@ -3441,7 +3479,7 @@ fn skolem_for_var_in(declared: types.Type, actual: types.Type, var: String) -> M
       match skolem_for_var_in(d1, a1, var) with
       | Just sk -> Just(sk)
       | Nothing -> skolem_for_var_in(d2, a2, var)
-  | (types.TFunc d1 dr _, types.TFunc a1 ar _) ->
+  | (types.TFunc d1 dr _ _, types.TFunc a1 ar _ _) ->
       match skolem_for_var_in(d1, a1, var) with
       | Just sk -> Just(sk)
       | Nothing -> skolem_for_var_in(dr, ar, var)
@@ -3664,7 +3702,8 @@ fn infer_lambda_expected(
     | InferOk typed_body s1 es1 body_eff ->
         InferOk(
           typed_ast.TLambda(params, typed_body,
-            build_fn_type(param_types, typed_ast.typed_expr_type(typed_body)), pos),
+            build_fn_type_modes(param_types, param_modes(params),
+              typed_ast.typed_expr_type(typed_body)), pos),
           s1, es1, body_eff)
 
 fn seed_param_types(fresh: List types.Type, expected: Maybe types.Type) -> List types.Type =
@@ -3680,7 +3719,7 @@ fn seed_from_arrow(fresh: List types.Type, expected: types.Type) -> List types.T
   | Nil -> Nil
   | Cons f rest ->
       match expected with
-      | types.TFunc p r _ -> Cons(p, seed_from_arrow(rest, r))
+      | types.TFunc p r _ _ -> Cons(p, seed_from_arrow(rest, r))
       | _ -> Cons(f, rest)
 
 fn make_fresh_param_types(state: unifier.InferState, params: List ast.Param) -> List types.Type !{IO} =
@@ -4654,18 +4693,16 @@ fn pre_scan_fn_decls(decls: List ast.Decl, env: Dict types.Scheme, alias_env: Di
       match decl with
       | ast.FnDecl name params ret_type_maybe effects_maybe constraints _ _ ->
           pre_scan_fn_decls(rest,
-            mark_param_modes(name, params,
-              dict_set("@arity:" ++ name, arity_marker(list_length(params)),
-                register_fn_decl_scheme(name, params, ret_type_maybe, effects_maybe, constraints, alias_env, env))),
+            dict_set("@arity:" ++ name, arity_marker(list_length(params)),
+              register_fn_decl_scheme(name, params, ret_type_maybe, effects_maybe, constraints, alias_env, env)),
             alias_env)
       | ast.ExternFnDecl name params ret_type_maybe effects_maybe _ ->
           match dict_get(name, env) with
           | Just _ -> pre_scan_fn_decls(rest, env, alias_env)
           | Nothing ->
               pre_scan_fn_decls(rest,
-                mark_param_modes(name, params,
-                  dict_set("@arity:" ++ name, arity_marker(list_length(params)),
-                    dict_set(name, scheme_from_fn_parts(params, ret_type_maybe, effects_maybe, alias_env), env))),
+                dict_set("@arity:" ++ name, arity_marker(list_length(params)),
+                  dict_set(name, scheme_from_fn_parts(params, ret_type_maybe, effects_maybe, alias_env), env)),
                 alias_env)
       | ast.AliasDecl name [] rhs_te _ ->
           pre_scan_fn_decls(rest, env,
@@ -5211,7 +5248,7 @@ fn has_unresolved_tvar_in_type(t: types.Type) -> Bool =
   | types.TVar _ -> true
   | types.TConst _ -> false
   | types.TApp base arg -> has_unresolved_tvar_in_type(base) || has_unresolved_tvar_in_type(arg)
-  | types.TFunc param ret _ -> has_unresolved_tvar_in_type(param) || has_unresolved_tvar_in_type(ret)
+  | types.TFunc param ret _ _ -> has_unresolved_tvar_in_type(param) || has_unresolved_tvar_in_type(ret)
   | types.TTuple items -> has_unresolved_tvar_in_type_list(items)
 
 fn has_unresolved_tvar_in_type_list(items: List types.Type) -> Bool =
@@ -5363,7 +5400,7 @@ fn type_has_const(t: types.Type) -> Bool =
   | types.TVar _ -> false
   | types.TConst _ -> true
   | types.TApp a b -> if type_has_const(a) then true else type_has_const(b)
-  | types.TFunc p r _ -> if type_has_const(p) then true else type_has_const(r)
+  | types.TFunc p r _ _ -> if type_has_const(p) then true else type_has_const(r)
   | types.TTuple items -> tuple_has_const(items)
 
 fn tuple_has_const(items: List types.Type) -> Bool =
@@ -5774,11 +5811,32 @@ fn finish_instance_method(name: String, params: List ast.Param, ret_maybe: Maybe
                           eff_maybe: Maybe (List String), body_env: Dict types.Scheme,
                           s2: Dict types.Type, inst_type: types.Type,
                           typed_body: typed_ast.TypedExpr, env: Dict types.Scheme) -> InstanceMethodResult =
-  match linear_check.method_modifier_error(params) with
+  match class_method_mode_error(name, params, env) with
   | Just bad ->
-      InstanceMethodErr(typed_ast.typed_expr_pos(typed_body), linear_check.method_modifier_message(bad))
+      InstanceMethodErr(typed_ast.typed_expr_pos(typed_body),
+        linear_check.method_mode_mismatch_message(bad))
   | Nothing ->
       finish_instance_method_checked(name, params, ret_maybe, eff_maybe, body_env, s2, inst_type, typed_body, env)
+
+# M4.6: an instance method's ownership modifiers must agree with the class
+# declaration's, because a call dispatches through the CLASS signature — the
+# instance's own modifiers are invisible there. Gated on the `@class:` marker so
+# a plain top-level function that happens to share the name is never the
+# comparison target; only `register_class_method` binds a class method under its
+# bare name, so the scheme fetched here is the class's.
+fn class_method_mode_error(name: String, params: List ast.Param,
+                           env: Dict types.Scheme) -> Maybe String =
+  match dict_get("@class:" ++ name, env) with
+  | Nothing -> Nothing
+  | Just _ -> class_method_mode_error_at(name, params, env)
+
+fn class_method_mode_error_at(name: String, params: List ast.Param,
+                              env: Dict types.Scheme) -> Maybe String =
+  match dict_get(name, env) with
+  | Nothing -> Nothing
+  | Just scheme ->
+      match scheme with
+      | types.Scheme _ _ body _ _ -> linear_check.method_mode_mismatch(params, body)
 
 fn finish_instance_method_checked(name: String, params: List ast.Param, ret_maybe: Maybe ast.TypeExpr,
                                   eff_maybe: Maybe (List String), body_env: Dict types.Scheme,

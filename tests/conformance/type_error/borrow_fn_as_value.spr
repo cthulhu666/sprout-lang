@@ -1,13 +1,18 @@
 module main
 
-# REVIEW FINDING. `borrowing` lived in a name-keyed side table rather than in the
-# function TYPE, so passing a borrowing function as a first-class value erased
-# the mode: at the indirect call `callee_mask` found nothing, the argument was
-# treated as CONSUMED, the obligation was discharged -- and `peek` never releases
-# anything, so the resource leaked with no diagnostic.
+# M4.6: the ownership mode is part of the function TYPE, so `peek` no longer
+# needs a blanket "cannot be used as a value" rejection — it is now a plain type
+# mismatch, reported where the mismatch actually is.
 #
-# v0 cannot express "a function that borrows" as a type, so it rejects using such
-# a function as a value. Call it directly instead.
+# `apply` annotates its parameter as `(File) -> Int`. Arrow-type syntax cannot
+# yet spell `borrowing` (deferred; see BACKLOG), so an annotated arrow means
+# CONSUMING, and `peek` — which only borrows — has a different type. Allowing
+# the substitution would discharge the caller's obligation via a call that
+# releases nothing, and `f` would leak with no diagnostic. Per Swift SE-0377,
+# for a noncopyable parameter "the convention must match exactly".
+#
+# The converse direction is
+# tests/conformance/type_error/mode_mismatch_consume_for_borrow.
 
 type linear File = File Int
 

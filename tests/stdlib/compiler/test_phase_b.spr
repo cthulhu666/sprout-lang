@@ -27,7 +27,7 @@ fn tdo(steps: List typed_ast.TypedDoStep) -> typed_ast.TypedExpr =
   typed_ast.TDo(steps, int_t(), no_pos())
 fn lam(p: String, body: typed_ast.TypedExpr) -> typed_ast.TypedExpr =
   typed_ast.TLambda(Cons(ast.Param(p, Nothing, ast.ModeDefault), Nil), body,
-    types.TFunc(int_t(), int_t(), types.EffectPure), no_pos())
+    types.TFunc(int_t(), int_t(), types.EffectPure, types.OwnConsume), no_pos())
 
 fn has(s: Set, name: String) -> Bool = set_member(name, s)
 

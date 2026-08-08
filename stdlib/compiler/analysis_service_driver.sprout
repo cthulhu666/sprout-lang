@@ -834,7 +834,7 @@ fn compile_and_run_eval(src: String, state: StartupState) -> json.Json !{IO} =
 
 export fn is_function_scheme(s: types.Scheme) -> Bool =
   match types.scheme_type(s) with
-  | types.TFunc _ _ _ -> true
+  | types.TFunc _ _ _ _ -> true
   | _ -> false
 
 export fn is_polymorphic_scheme(s: types.Scheme) -> Bool =

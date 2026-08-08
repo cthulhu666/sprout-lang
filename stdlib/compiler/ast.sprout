@@ -59,6 +59,19 @@ export type ParamMode (..) =
 export type Param (..) =
   | Param String (Maybe TypeExpr) ParamMode
 
+# The only distinction that survives into the TYPE (M4.6): `types.Ownership` is
+# two-valued, since ModeDefault and ModeConsuming are the same ownership. Kept
+# here, returning a Bool, so `ast` need not depend on `types` — the consumer
+# pairs it with `types.ownership_of_borrow`.
+export fn mode_is_borrowing(m: ParamMode) -> Bool =
+  match m with
+  | ModeBorrowing -> true
+  | _ -> false
+
+export fn param_mode_of(p: Param) -> ParamMode =
+  match p with
+  | Param _ _ m -> m
+
 # --- Match branches and do steps (forward-reference Expr defined below) ---
 
 export type MatchBranch (..) =

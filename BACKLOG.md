@@ -1113,8 +1113,9 @@ and `docs/linear-types-m4.2-enforcement-2026-08-06.md`. Deferred, in the order t
   MIDDLE borrowing position degraded to consuming — undetected because every borrowing parameter in
   `stdlib/net.sprout` sits at index 0.
 
-  **Still open, split out below:** the owned-record case (P3), the mode-in-the-type work (P2), and
-  everything gated on M4.4.
+  **Follow-up:** the mode-in-the-type work landed as M4.6 (below), which removed the side table and
+  with it both blanket rejections. Still open: the owned-record case (P3), arrow-type modifier
+  syntax and the linearity bound (both below), and everything gated on M4.4.
 
 - [ ] `P3` **Prelude has no `head` / safe list-destructure.** There is no
   `List a -> Maybe a` in `stdlib/prelude.sprout` at all, so every "look at the first element
@@ -1125,15 +1126,49 @@ and `docs/linear-types-m4.2-enforcement-2026-08-06.md`. Deferred, in the order t
   Add `head : List a -> Maybe a`, and consider `tail`/`uncons` alongside it; then simplify the
   call site above. Check the wider tree for open-coded instances before settling the name.
 
-- [ ] `P2` **Put the parameter mode in the function TYPE.** Today `borrowing` is an env sentinel
-  keyed by declaration name (`@parammode:<name>`), consultable only when the callee is a literal
-  top-level name. v0 therefore *rejects* the two shapes where the mode would be lost — a borrowing
-  function used as a first-class value, and a modifier on a class/instance method — rather than
-  silently miscounting them. Lifting both restrictions means carrying the mode on the parameter
-  position of `types.TFunc` so it survives unification, generalization, instantiation and the iface
-  codec, and deciding whether `(borrowing T) -> U` is a subtype of `(T) -> U` (it is not:
-  substituting one for the other loses the caller's obligation). Prior art: Swift SE-0377 makes the
-  convention part of the function type for noncopyable parameters for exactly this reason.
+- [x] **Put the parameter mode in the function TYPE — DONE as M4.6** (2026-08-08).
+  `types.TFunc` carries a fourth field, `types.Ownership` (`OwnConsume` | `OwnBorrow`), beside the
+  effect row; the `@parammode:<name>` sentinel is deleted, not supplemented. `linear_check` reads
+  each argument position off the callee's type spine, so a lambda, a `let`-bound function, a
+  function-typed parameter and a typeclass method are all classified — the side table saw none of
+  them and silently read every argument as consuming. Unification compares the tags and rejects a
+  mismatch **invariantly** (both directions are unsound: double consume one way, leak the other),
+  per Swift SE-0377's "the convention must match exactly" for a noncopyable parameter. That is the
+  property worth having: every type flow already goes through `unify`, so coverage is structural
+  rather than an enumerated list of sites — and under-covering such a list is what produced M4.5's
+  ten defects. Lifted: a borrowing function used as a value, and modifiers on class/instance
+  methods (with the instance required to match its class). `IfaceFile` v4 → v5. Golden IR: additions
+  only, zero changed lines. Full write-up: `docs/linear-borrowing-v0.md` §18; normative text in
+  `docs/spec-v0.md` §5.8. The two things it deliberately did NOT do are filed directly below.
+
+- [ ] `P2` **`borrowing` inside arrow-type syntax.** `fn apply(g: (borrowing File) -> Int, f: File)`
+  cannot be written: arrow types have no ownership slot, so an annotated arrow means *consuming* and
+  passing a borrowing function to one is an ownership mismatch. The gap is **real and not blocked by
+  M4.4** — `lin_lambda` rejects lambdas, but a function-typed *parameter* over a linear value
+  (`fn apply(g: (File) -> Int, f: File) = g(f)`) typechecks today; an early M4.6 plan draft claimed
+  otherwise and was wrong. Deferred for cost, not doubt: it needs a parser change (hence the 2-step
+  bootstrap), an ownership field on `ast.TypeExpr`'s arrow with its own fan-out, plus formatter and
+  TypeExpr-codec work — and mixing a parser change into a type-system change is what
+  `AGENTS.md` rule 2 warns against. Purely additive: it reuses M4.6's `types.Ownership` tag, so
+  nothing gets re-migrated. The mismatch diagnostic already tells the author the syntax does not
+  exist yet, so this is a known dead end rather than a confusing one.
+  Fixture: `tests/conformance/type_error/borrow_fn_as_value`.
+
+- [ ] `P3` **Linearity bound on a type parameter (enabler for `borrowing a`).** A modifier on a
+  type-variable parameter stays rejected (`linear_check.bad_modifier_here`), which also blocks the
+  receiver-borrowing class shape `class Peekable a { fn peek(r: borrowing a) -> Int }` — so M4.6's
+  method lift reaches only a method's *concrete* linear parameters
+  (`fn send(p: a, c: borrowing TcpConnection)`). This is **not** a representation limit: ownership
+  now sits in the type and survives instantiation. It is a *universe* limit — without a bound on
+  `a`, `borrowing Int` is an error while `borrowing a` instantiated at `Int` silently is not, and
+  that inconsistency is the tell that this is polymorphism over linear types (an explicit M4.2
+  non-goal). Prior art, both verified against the primary sources: **Swift SE-0427** makes generic
+  parameters `Copyable` by default — *"generic parameters now conform to `Copyable` by default, so
+  the following generic function can only be called with `Copyable` types"* — requiring
+  `<T: ~Copyable>` to opt out; **Austral** annotates every type parameter with a universe
+  (`Free`/`Linear`/`Type`), so a generic accepting either is written `Pair<L: Type, R: Type>`.
+  Scope: pick a spelling, thread the bound through class/fn type parameters, enforce it at
+  instantiation, then delete the `type_is_tyvar` rejection.
 
 - [ ] `P3` **Linear-record ergonomics for OWNED records.** M4.5 lifted this only for `borrowing`
   parameters: `p.x + p.y` is legal for `p: borrowing Pos` and remains a reuse for an owned `p`. The
