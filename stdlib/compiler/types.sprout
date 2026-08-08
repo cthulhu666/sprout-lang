@@ -28,32 +28,53 @@ export type Effect (..) =
 # name, silently discharging the caller's consume obligation. See
 # docs/linear-borrowing-v0.md §18.
 #
-# Two-valued, though `ast.ParamMode` has three: at the type level an unmodified
+# Three-valued, though `ast.ParamMode` has four: at the type level an unmodified
 # parameter and a `consuming` one are the same thing. The written `consuming`
 # documents the contract at an API boundary and is kept in the AST for
 # diagnostics, but making it a distinct TYPE would mean `consuming File -> Int`
 # and `File -> Int` failed to unify, which is nonsense.
 #
+# NAMING. "Ownership" is a slight stretch once `OwnOnce` (M4.4a) is in: that case
+# bounds how often the callee may INVOKE the parameter rather than how it is
+# taken. Read this type as "how the parameter is RECEIVED". The accurate name is
+# a parameter *convention* (Swift SE-0377's own term); the rename is filed in
+# BACKLOG.md rather than spent here, since it churns every M4.6 site plus the
+# `.iface` wire tags for zero behaviour change.
+#
 # Prior art: Swift SE-0377 makes the ownership convention part of the function
 # type for exactly this reason, and requires it to "match exactly" at a
 # noncopyable parameter — invariance, no subtyping (see unifier.unify_applied).
+# For OwnOnce the reference is Rust's `FnOnce` (`std::thread::spawn` takes
+# `F: FnOnce() -> T + Send + 'static`) and OxCaml's `once` mode.
 export type Ownership (..) =
   | OwnConsume
   | OwnBorrow
+  | OwnOnce
 
 export fn ownership_eq(a: Ownership, b: Ownership) -> Bool =
   match (a, b) with
   | (OwnConsume, OwnConsume) -> true
   | (OwnBorrow, OwnBorrow) -> true
+  | (OwnOnce, OwnOnce) -> true
   | _ -> false
 
-export fn ownership_of_borrow(is_borrow: Bool) -> Ownership =
-  if is_borrow then OwnBorrow else OwnConsume
+# Paired with `ast.mode_is_borrowing` / `ast.mode_is_once` at each call site:
+# `types` and `ast` do not import each other, so the collapse from ParamMode to
+# Ownership is spelled as two Bools rather than as a direct mapping.
+export fn ownership_of_mode(is_borrow: Bool, is_once: Bool) -> Ownership =
+  if is_borrow then OwnBorrow
+  else if is_once then OwnOnce
+  else OwnConsume
 
 export fn ownership_is_borrow(o: Ownership) -> Bool =
   match o with
   | OwnBorrow -> true
-  | OwnConsume -> false
+  | _ -> false
+
+export fn ownership_is_once(o: Ownership) -> Bool =
+  match o with
+  | OwnOnce -> true
+  | _ -> false
 
 # ---------------------------------------------------------------------------
 # Types
@@ -438,6 +459,7 @@ fn func_to_string(param: Type, ret: Type, eff: Effect, own: Ownership) -> String
 fn ownership_prefix(own: Ownership) -> String =
   match own with
   | OwnBorrow -> "borrowing "
+  | OwnOnce -> "once "
   | OwnConsume -> ""
 
 fn join_types(items: List Type) -> String =

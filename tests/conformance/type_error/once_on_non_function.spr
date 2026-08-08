@@ -1,0 +1,10 @@
+module main
+
+# M4.4a: `once` bounds how many times the callee may INVOKE a parameter, so it
+# is meaningful only on a function-typed one. Written anywhere else it would
+# silently mean nothing, which is worse than being refused — the same call M4.5
+# made for `borrowing` on a non-linear type.
+
+fn counts(n: once Int) -> Int = n + 1
+
+fn main() -> Unit !{IO} = print(to_string(counts(1)))

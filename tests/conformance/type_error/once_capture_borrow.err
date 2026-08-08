@@ -1,0 +1,1 @@
+borrowed value 'f' cannot be captured by a closure passed to a `once` parameter

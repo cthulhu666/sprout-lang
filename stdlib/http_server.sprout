@@ -1,7 +1,7 @@
 module stdlib.http_server
 
 import stdlib.http (HttpStatusError, RequestLine, RequestPathVersion, http_response, parse_request_line, status_line)
-import stdlib.net (tcp_listen, tcp_accept, tcp_read_avail, tcp_write_string, tcp_close, tcp_close_listener)
+import stdlib.net (TcpConnection, TcpListener, accept, close, close_listener, listen_local, read_avail, write_all_utf8)
 import stdlib.string as string
 import stdlib.task (Scope, with_scope, task_spawn)
 import stdlib.url (parse_query)
@@ -148,39 +148,42 @@ fn err_or_request(req: RequestLine, headers: Dict String, content_length: Int, r
       else
         Ok(build_request(req, headers, string.take(string.drop(raw, body_start), content_length)))
 
-# Reads use tcp_read_avail (recoverable): a socket failure becomes an Err in the
+# Reads use net.read_avail (recoverable): a socket failure becomes an Err in the
 # ServerResult, not an exit(1), so one client's connection reset drops just that
 # connection. `Ok("")` (peer closed cleanly) is still the unexpected-end-of-stream case.
-fn read_until_headers(conn: Int, acc: String) -> ServerResult String !{IO} =
+fn read_until_headers(conn: borrowing TcpConnection, acc: String) -> ServerResult String !{IO} =
   match find_headers_end(acc) with
   | Just _ -> Ok(acc)
   | Nothing ->
-      match tcp_read_avail(conn) with
+      match read_avail(conn) with
       | Err _ -> Err(HttpInvalidRequest("connection error"))
       | Ok chunk ->
           if string.is_empty(chunk) then Err(HttpInvalidRequest("unexpected end of stream"))
           else read_until_headers(conn, string.concat(acc, chunk))
 
-fn read_remaining_body(conn: Int, acc: String, remaining: Int) -> ServerResult String !{IO} =
+fn read_remaining_body(conn: borrowing TcpConnection, acc: String, remaining: Int) -> ServerResult String !{IO} =
   if remaining <= 0 then Ok(acc)
   else
-    match tcp_read_avail(conn) with
+    match read_avail(conn) with
     | Err _ -> Err(HttpInvalidRequest("connection error"))
     | Ok chunk ->
         if string.is_empty(chunk) then Err(HttpInvalidRequest("unexpected end of stream"))
         else read_remaining_body(conn, string.concat(acc, chunk), remaining - string.length(chunk))
 
-fn read_request(conn: Int) -> ServerResult HttpRequest !{IO} =
+# Every read path BORROWS the connection: a request is read over many syscalls,
+# and under strict consume-exactly-once the first read would take the socket and
+# every later one would be a reuse. `handle_connection` holds the single consume.
+fn read_request(conn: borrowing TcpConnection) -> ServerResult HttpRequest !{IO} =
   do
     raw <- read_until_headers(conn, "")
     read_request_from_prefix(conn, raw)
 
-fn read_request_from_prefix(conn: Int, raw: String) -> ServerResult HttpRequest !{IO} =
+fn read_request_from_prefix(conn: borrowing TcpConnection, raw: String) -> ServerResult HttpRequest !{IO} =
   do
     prefix <- parse_request_prefix(raw)
     continue_read_request(conn, raw, prefix)
 
-fn continue_read_request(conn: Int, raw: String, prefix: (RequestLine, Dict String, Int)) -> ServerResult HttpRequest !{IO} =
+fn continue_read_request(conn: borrowing TcpConnection, raw: String, prefix: (RequestLine, Dict String, Int)) -> ServerResult HttpRequest !{IO} =
   if string.length(body) >= content_length then parse(raw)
   else
     do
@@ -437,12 +440,17 @@ export fn render(resp: HttpServerResponse) -> ServerResult String =
 # Recoverable write: a send to a peer that has vanished (reset/EPIPE) fails as an Err
 # rather than aborting the process. The connection is ALWAYS closed afterwards — on the
 # error path too — so a failed write never leaks the fd.
-fn write_and_close(conn: Int, payload: String) -> Unit !{IO} =
-  match tcp_write_string(conn, payload) with
-  | Ok _ -> tcp_close(conn)
-  | Err _ -> tcp_close(conn)
+#
+# That "always" is no longer a promise in a comment: `conn` is consumed here, and
+# omitting `close` on either arm is a compile error (M4.3 branch convergence). The
+# write borrows first, so the borrow-then-consume order is what makes the shape
+# expressible at all.
+fn write_and_close(conn: consuming TcpConnection, payload: String) -> Unit !{IO} =
+  match write_all_utf8(conn, payload) with
+  | Ok _ -> close(conn)
+  | Err _ -> close(conn)
 
-fn handle_connection(conn: Int, handler: HttpRequest -> HttpServerResponse !{IO}) -> Unit !{IO} =
+fn handle_connection(conn: consuming TcpConnection, handler: HttpRequest -> HttpServerResponse !{IO}) -> Unit !{IO} =
   match read_request(conn) with
   | Err _ -> write_and_close(conn, bad_request("bad request") |> render_response_or_fallback)
   | Ok req ->
@@ -468,28 +476,35 @@ fn render_response_or_fallback(resp: HttpServerResponse) -> String =
 # ACCEPTED, not fully served — the enclosing scope join is what waits for the last
 # spawned handler to finish. Handlers therefore complete in I/O-ready order, not
 # accept order.
-fn serve_loop(scope: Scope, listener: Int, remaining: Int, handler: HttpRequest -> HttpServerResponse !{IO}) -> Unit !{IO} =
-  if remaining == 0 then tcp_close_listener(listener)
+#
+# `conn` is MOVED into the spawned closure (M4.4a): `task_spawn`'s `work` parameter
+# is declared `once`, so ownership transfers at the call and the handler holds the
+# sole consume. `listener` is consumed exactly once on every path — by
+# `close_listener` on the terminating branch, and by the recursive call itself on
+# the looping one.
+fn serve_loop(scope: Scope, listener: consuming TcpListener, remaining: Int, handler: HttpRequest -> HttpServerResponse !{IO}) -> Unit !{IO} =
+  if remaining == 0 then close_listener(listener)
   else
     do
-      conn <- tcp_accept(listener)
+      conn <- accept(listener)
       task_spawn(scope, \_ -> handle_connection(conn, handler))
       serve_loop(scope, listener, remaining - 1, handler)
 
 # `with_scope` does not return until every spawned handler has finished, so no
 # connection outlives the call (structured concurrency — no orphaned handlers).
 export fn serve_n(port: Int, max_connections: Int, handler: HttpRequest -> HttpServerResponse !{IO}) -> Unit !{IO} =
-  with_scope(\s -> serve_loop(s, tcp_listen(port), max_connections, handler))
+  with_scope(\s -> serve_loop(s, listen_local(port), max_connections, handler))
 
 # Unbounded counterpart of `serve_loop`: the same accept-and-spawn body with no
 # terminating branch, so it keeps accepting connections forever. Each handler is
 # a fire-and-forget green task reclaimed on completion (see stdlib.task), so the
 # server does not accumulate finished handlers even though the enclosing scope
 # never joins. The listener is never closed — the loop owns it for the process's
-# lifetime.
-fn serve_forever_loop(scope: Scope, listener: Int, handler: HttpRequest -> HttpServerResponse !{IO}) -> Unit !{IO} =
+# lifetime — and yet this is NOT a linear leak: the tail call consumes it, which
+# is the accurate reading, since the next iteration really does own it.
+fn serve_forever_loop(scope: Scope, listener: consuming TcpListener, handler: HttpRequest -> HttpServerResponse !{IO}) -> Unit !{IO} =
   do
-    conn <- tcp_accept(listener)
+    conn <- accept(listener)
     task_spawn(scope, \_ -> handle_connection(conn, handler))
     serve_forever_loop(scope, listener, handler)
 
@@ -498,4 +513,4 @@ fn serve_forever_loop(scope: Scope, listener: Int, handler: HttpRequest -> HttpS
 # what an always-on server wants. Reach for `serve_n` when a bounded, terminating
 # run is needed (e.g. tests/CI).
 export fn serve(port: Int, handler: HttpRequest -> HttpServerResponse !{IO}) -> Unit !{IO} =
-  with_scope(\s -> serve_forever_loop(s, tcp_listen(port), handler))
+  with_scope(\s -> serve_forever_loop(s, listen_local(port), handler))

@@ -1,0 +1,97 @@
+import stdlib.test (check_eq, run_suite)
+
+# M4.4a: a parameter declared `once` promises the callee invokes the closure it
+# receives AT MOST ONCE and does not store it. That licenses the caller to MOVE
+# linear values into the lambda it passes — each moved capture is consumed at the
+# call site, and must be consumed exactly once inside the body.
+#
+# Without it, `linear_check.lin_lambda` rejects every linear capture outright
+# (a closure may run 0..n times and Sprout tracks no call count), which is what
+# kept stdlib/http_server.sprout on raw `Int` handles instead of the linear
+# `net.TcpConnection` that has existed since M4.5.
+#
+# Rejection counterparts: tests/conformance/type_error/{once_capture_borrow,
+# once_capture_branch_leak,once_capture_double_move,once_use_after_move,
+# once_on_non_function,lambda_capture_still_rejected}.
+# See docs/one-shot-closures-v0.md.
+
+type linear File = File Int
+
+fn release(f: consuming File) -> Int = match f with | File n -> n
+
+fn peek(f: borrowing File) -> Int = 0
+
+# The `once` contract is the CALLEE's assertion; the compiler checks callers
+# against it, not this body's honesty (`once` is erased before lowering, exactly
+# as `borrowing` is). Sprout's real `once` positions — task_spawn, task_fork,
+# with_scope — are all thin wrappers over scheduler builtins where the single
+# invocation is the runtime's.
+fn run_once(work: once Unit -> Int) -> Int = work(())
+
+# --- 1. move a linear value into a `once` closure --------------------------
+# `f` is captured and consumed inside the closure. The move is credited at the
+# CALL, so `f` is discharged here and needs no further consume — and a second
+# use would be a reuse (see once_use_after_move).
+fn move_in(f: File) -> Int = run_once(\_ -> release(f))
+
+# --- 2. `once` at a non-leading parameter position -------------------------
+# SPINE GUARD: the ownership tag hangs on the enclosing TFunc node, one node per
+# parameter, so reading it requires walking the callee's curried spine in step
+# with the argument list. With `once` at position 1 rather than 0, an off-by-one
+# in that walk reads `work` as an ordinary consuming parameter and the capture is
+# rejected. Every `once` parameter in stdlib.task sits at position 1, so this is
+# the shape that actually ships — cf. the M4.5 defect where every borrowing
+# parameter in net.sprout sat at index 0 and the middle-position bug survived.
+fn run_once_tagged(tag: Int, work: once Unit -> Int) -> Int = tag + work(())
+
+fn move_in_second_position(f: File) -> Int = run_once_tagged(100, \_ -> release(f))
+
+# --- 3. a NAMED function at a `once` position ------------------------------
+# Nothing is captured, so there is nothing to license; this must keep working
+# unchanged. It also pins that `once` is compared invariantly at unification
+# without breaking ordinary application: infer copies the ownership tag from the
+# callee's spine, so the synthesized arrow carries `once` too and unifies.
+fn always_seven(u: Unit) -> Int = 7
+
+fn named_at_once() -> Int = run_once(always_seven)
+
+# --- 4. a NON-LINEAR capture at a `once` position --------------------------
+# `n` is an Int, so no linear rule applies to it in either direction. The lift
+# must not have made ordinary closures special.
+fn nonlinear_capture(n: Int) -> Int = run_once(\_ -> n + 1)
+
+# --- 5. a `once` parameter on a CLASS method -------------------------------
+# ALIGNMENT GUARD: infer prepends a TDict evidence node per class constraint to a
+# constrained call's argument list, while the callee's TYPE spine has no
+# dictionary parameter. `work` is therefore parameter 1 in the source but
+# argument 2 at check time; without linear_check.drop_leading_dicts the zip
+# shifts by the dictionary count, `work` reads as an ordinary consuming position,
+# and the move is rejected as a plain capture.
+class Runner a {
+  fn run_it(s: a, work: once Unit -> Int) -> Int
+}
+
+instance Runner Int {
+  fn run_it(s: Int, work: once Unit -> Int) -> Int = s + work(())
+}
+
+fn move_in_class_method(f: File) -> Int = run_it(1000, \_ -> release(f))
+
+# --- 6. borrow first, THEN move --------------------------------------------
+# Reading `f` before moving it is fine: the borrow is over by the time the move
+# happens. (The converse — a borrow captured BY the closure — is unsound and
+# stays rejected; see once_capture_borrow.)
+fn borrow_then_move(f: File) -> Int =
+  do
+    let seen = peek(f)
+    seen + run_once(\_ -> release(f))
+
+fn main() -> Unit !{IO} =
+  run_suite("once_closures", [
+    check_eq("linear value moved into a once closure", move_in(File(9)), 9),
+    check_eq("once parameter at a non-leading position", move_in_second_position(File(5)), 105),
+    check_eq("named function at a once parameter", named_at_once(), 7),
+    check_eq("non-linear capture at a once parameter", nonlinear_capture(41), 42),
+    check_eq("once parameter on a class method", move_in_class_method(File(7)), 1007),
+    check_eq("borrow before the move", borrow_then_move(File(3)), 3)
+  ])

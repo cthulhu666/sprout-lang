@@ -192,6 +192,10 @@ resource discipline is discoverable. Optional; not required for correctness.
   high-value resource use stays blocked on those two deferred features. This note is the *small,
   ready* proof-point, deliberately not the big one.
 
+  **Both have since landed** (2026-08-08): borrowing as M4.5, and the handoff as M4.4a's `once`
+  parameters, which make `task_spawn`'s thunk a one-shot closure a linear value may be MOVED into.
+  `stdlib/http_server.sprout` runs on `net.TcpConnection` today. See `docs/one-shot-closures-v0.md`.
+
 ## 9. Tests
 
 - **Positive (run):** fork→await once; fork→detach (no await); `if …/match …` where every arm

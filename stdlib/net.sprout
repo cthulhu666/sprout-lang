@@ -13,12 +13,15 @@ export extern fn tcp_write(conn: Int, data: String) -> Unit !{IO}
 export extern fn tcp_read_avail(conn: Int) -> Result TcpError String !{IO}
 # Raw connect. Exported for the same reason tcp_listen/tcp_accept/tcp_read/
 # tcp_write/tcp_close are: code whose shape the linear TcpConnection API cannot
-# yet express must still be able to speak TCP. Concretely that is the
-# accept-or-connect -> hand the socket to a SPAWNED task shape, where the handle
-# is captured by an escaping closure — higher-order linearity (M4.4), which
-# borrowing does not unblock. stdlib.http_server and tests/task_io_smoke/
-# concurrent_read.spr both sit on raw handles for exactly this reason. Callers
-# on this path get no release enforcement; prefer `connect` where the shape allows.
+# yet express must still be able to speak TCP. Callers on this path get no
+# release enforcement; prefer `connect` where the shape allows.
+#
+# The accept -> hand the socket to a SPAWNED task shape used to be on that list.
+# It no longer is: M4.4a's `once` parameters let a linear value be MOVED into a
+# closure the callee invokes at most once, and stdlib.http_server now runs on
+# TcpConnection/TcpListener throughout. What remains unexpressible is a closure
+# that BORROWS across a spawn, and a linear value captured by a lambda at an
+# unannotated parameter — the rest of M4.4.
 export extern fn tcp_connect(host: String, port: Int) -> Result TcpError Int !{IO}
 extern fn tcp_read_exact(conn: Int, count: Int) -> Result TcpError Bytes !{IO}
 extern fn tcp_write_all(conn: Int, data: Bytes) -> Result TcpError Int !{IO}
@@ -84,6 +87,14 @@ export fn write_all(conn: borrowing TcpConnection, payload: Bytes) -> Result Tcp
 # failure instead of aborting — the write counterpart to tcp_read_avail.
 export fn tcp_write_string(conn: Int, data: String) -> Result TcpError Int !{IO} =
   tcp_write_all(conn, from_string(data))
+
+# Read whatever has arrived, without taking the connection. The unknown-length
+# counterpart to read_exact: an HTTP header block ends at a delimiter, not at a
+# byte count, so a server cannot ask for an exact size. Err on socket failure,
+# Ok("") on a clean peer EOF — so one client's reset drops one connection rather
+# than aborting the process.
+export fn read_avail(conn: borrowing TcpConnection) -> Result TcpError String !{IO} =
+  tcp_read_avail(tcp_connection_handle(conn))
 
 # O(count): reads bytes, then validates and copies the UTF-8 payload.
 export fn read_exact_utf8(conn: borrowing TcpConnection, count: Int) -> Result TcpError String !{IO} =

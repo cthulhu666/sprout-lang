@@ -254,10 +254,12 @@ fn decode_tfunc_at(s: String, bytes: Bytes, i: Int, total: Int) -> Maybe(types.T
 # re-parsed declaration — the other path (ast.Param -> params_to_func_type)
 # carries it too, and the two must agree.
 fn encode_ownership(o: types.Ownership) -> String =
-  if types.ownership_is_borrow(o) then "borrow" else "consume"
+  if types.ownership_is_borrow(o) then "borrow"
+  else if types.ownership_is_once(o) then "once"
+  else "consume"
 
 fn ownership_from_str(s: String) -> types.Ownership =
-  types.ownership_of_borrow(s == "borrow")
+  types.ownership_of_mode(s == "borrow", s == "once")
 
 fn decode_ttuple_at(s: String, bytes: Bytes, i: Int, total: Int) -> Maybe(types.Type, Int) =
   let Just(ts, j) = decode_type_list_at(s, bytes, skip_ws(s, bytes, i, total), total) else Nothing
@@ -351,7 +353,7 @@ fn collect_types(s: String, bytes: Bytes, i: Int, total: Int, acc: List types.Ty
 #
 # `version` is encoded as a bare atom and checked by string equality. When
 # v2 lands, decoder gets an if-chain or a parsed-int conversion.
-# (Current version is 5 — see decode_iface_version for the change log.)
+# (Current version is 6 — see decode_iface_version for the change log.)
 
 export type NamedScheme (..) =
   | NamedScheme String types.Scheme
@@ -520,11 +522,13 @@ fn decode_iface_v2_tail(s: String, bytes: Bytes, i: Int, total: Int, version: In
 # on non-digit input. v1 (schemes-only) retired when metadata tables were added;
 # v2→v3 added the Scheme constraint field; v3→v4 changed the constraint pair wire
 # form from (position, class) to (head_token, class); v4→v5 added the M4.6
-# parameter-ownership tag to TFunc. Old ifaces are rejected loudly (the Scheme
-# wire format changed) — for v5 that matters doubly, since a v4 iface decoded
-# leniently would silently read every borrowing parameter as consuming.
+# parameter-ownership tag to TFunc; v5→v6 added the M4.4a `once` case to that tag
+# and to ParamMode. Old ifaces are rejected loudly (the Scheme wire format
+# changed) — from v5 on that matters doubly, since an older iface decoded
+# leniently would silently read every `borrowing`/`once` parameter as consuming,
+# which is the exact silent erasure both milestones exist to remove.
 fn decode_iface_version(s: String) -> Maybe Int =
-  if s == "5" then Just(5) else Nothing
+  if s == "6" then Just(6) else Nothing
 
 fn decode_named_scheme_list_at(s: String, bytes: Bytes, i: Int, total: Int) -> Maybe (List NamedScheme, Int) =
   match expect_char(s, bytes, i, total, '(') with
@@ -678,7 +682,7 @@ fn params_to_func_type(params: List ast.Param, ret: types.Type, local_vars: Dict
       types.TFunc(param_type_from_maybe(maybe_te, local_vars),
                   params_to_func_type(rest, ret, local_vars),
                   types.EffectPure,
-                  types.ownership_of_borrow(ast.mode_is_borrowing(mode)))
+                  types.ownership_of_mode(ast.mode_is_borrowing(mode), ast.mode_is_once(mode)))
 
 fn param_type_from_maybe(maybe_te: Maybe ast.TypeExpr, local_vars: Dict types.Type) -> types.Type =
   match maybe_te with
@@ -1057,11 +1061,13 @@ fn encode_param_mode(m: ast.ParamMode) -> String =
   match m with
   | ast.ModeBorrowing -> encode_quoted_str("Borrowing")
   | ast.ModeConsuming -> encode_quoted_str("Consuming")
+  | ast.ModeOnce -> encode_quoted_str("Once")
   | ast.ModeDefault -> encode_quoted_str("Default")
 
 fn param_mode_from_str(s: String) -> ast.ParamMode =
   if s == "Borrowing" then ast.ModeBorrowing
   else if s == "Consuming" then ast.ModeConsuming
+  else if s == "Once" then ast.ModeOnce
   else ast.ModeDefault
 
 fn encode_ast_param_list(xs: List ast.Param) -> String =

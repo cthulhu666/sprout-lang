@@ -196,6 +196,7 @@ fn mode_tag(m: ast.ParamMode) -> String =
   | ast.ModeDefault -> "default"
   | ast.ModeBorrowing -> "borrowing"
   | ast.ModeConsuming -> "consuming"
+  | ast.ModeOnce -> "once"
 
 fn main() -> Unit !{IO} =
   do
@@ -249,6 +250,12 @@ fn main() -> Unit !{IO} =
       first_param_mode("fn f(x: consuming File) -> Int = 0"), "consuming")
     assert_eq(state, "unmodified param is default",
       first_param_mode("fn f(x: File) -> Int = 0"), "default")
+    # `once` (M4.4a) shares the slot but constrains invocation count, not ownership.
+    # Its type is an unparenthesized arrow, so this also pins that the modifier binds
+    # to the PARAMETER and the whole `Unit -> Int` is the type — not `once Unit`
+    # applied to something, which is how the pre-M4.4a parser read this text.
+    assert_eq(state, "once modifier recorded",
+      first_param_mode("fn f(work: once Unit -> Int) -> Int = 0"), "once")
     # Both modifiers are CONTEXTUAL keywords (as `linear` is): they stay ordinary
     # identifiers everywhere else, so no existing program can be broken by them.
     # The bare-type cases pin the disambiguation — a modifier is only a modifier
@@ -257,6 +264,9 @@ fn main() -> Unit !{IO} =
     assert_true(state, "consuming still a param name", parse_ok("fn f(consuming: Int) -> Int = consuming"))
     assert_eq(state, "bare borrowing is a type, not a modifier",
       first_param_mode("fn f(x: borrowing) -> Int = 0"), "default")
+    assert_eq(state, "bare once is a type, not a modifier",
+      first_param_mode("fn f(x: once) -> Int = 0"), "default")
+    assert_true(state, "once still a param name", parse_ok("fn f(once: Int) -> Int = once"))
 
     # List pattern syntax — desugars to ConstructorPattern "Cons"/"Nil" chains
     # (ast.list_ctor_cons / ast.list_ctor_nil); parse_ok below exercises both

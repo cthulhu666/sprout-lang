@@ -1,0 +1,19 @@
+module main
+
+# M4.4a GUARD: this is the test that proves the lift did not become a blanket
+# lift. `run_twice`'s parameter is NOT declared `once` — and it really does
+# invoke the closure twice — so the linear capture must still be rejected with
+# M4.2's message, now carrying a pointer at the modifier that would license it.
+#
+# Delete this fixture and the difference between "moves into a one-shot closure
+# are allowed" and "captures are allowed" stops being tested at all.
+
+type linear File = File Int
+
+fn release(f: consuming File) -> Int = match f with | File n -> n
+
+fn run_twice(work: Unit -> Int) -> Int = work(()) + work(())
+
+fn double_release(f: File) -> Int = run_twice(\_ -> release(f))
+
+fn main() -> Unit !{IO} = print(to_string(double_release(File(1))))

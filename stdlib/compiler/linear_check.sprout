@@ -287,22 +287,43 @@ fn borrowed_binder_msg(name: String) -> String =
 fn nonvar_borrow_msg() -> String =
   "a borrowing argument must be a variable reference (a freshly-built linear value here would never be consumed)"
 
-# Which of the two reasons a modifier was rejected. They need different messages:
-# telling the author of `fn f(x: borrowing a)` that `a` "is not a linear type"
-# invites them to make `a` linear, which is not expressible — the real reason is
-# that linearity is per-declaration and cannot be decided for a type variable.
-type BadModifier (..) = BadModifier String Bool
+# Which of the three reasons a modifier was rejected. They need different
+# messages: telling the author of `fn f(x: borrowing a)` that `a` "is not a
+# linear type" invites them to make `a` linear, which is not expressible — the
+# real reason is that linearity is per-declaration and cannot be decided for a
+# type variable. `once` fails for a reason of its own (M4.4a): it constrains how
+# often the parameter is INVOKED, so it needs a function to invoke.
+type BadModifier (..) =
+  | BadOnTyvar String
+  | BadNonLinear String
+  | BadOnceNonFunction String
 
 fn bad_modifier_message(b: BadModifier) -> String =
   match b with
-  | BadModifier name on_tyvar ->
-      if on_tyvar then tyvar_modifier_msg(name) else bad_modifier_msg(name)
+  | BadOnTyvar name -> tyvar_modifier_msg(name)
+  | BadNonLinear name -> bad_modifier_msg(name)
+  | BadOnceNonFunction name -> once_modifier_msg(name)
 
 fn tyvar_modifier_msg(name: String) -> String =
   "`borrowing`/`consuming` cannot be used on a type variable (parameter '" ++ name ++ "'): linearity is per-declaration, so whether the argument is linear is not known here"
 
 fn bad_modifier_msg(name: String) -> String =
   "`borrowing`/`consuming` is only allowed on a parameter of a linear type (parameter '" ++ name ++ "')"
+
+fn once_modifier_msg(name: String) -> String =
+  "`once` applies only to a function-typed parameter (parameter '" ++ name ++ "'): it bounds how many times the callee may invoke it"
+
+fn once_borrow_capture_msg(name: String) -> String =
+  "borrowed value '" ++ name ++ "' cannot be captured by a closure passed to a `once` parameter: the closure may run after the value is consumed. Move it instead — pass ownership in and consume it inside the closure"
+
+# The lambda restrictions M4.4a did NOT lift. Both name `once` so the wall has a
+# door in it: an author whose callee really does invoke the closure at most once
+# is told which modifier says so, rather than being left at a dead end.
+fn linear_lambda_param_msg(name: String) -> String =
+  "linear lambda parameter '" ++ name ++ "' is not yet supported (higher-order linearity is deferred; `once` bounds how often a closure RUNS, not what may be passed to it on each run)"
+
+fn lambda_capture_msg(name: String) -> String =
+  "linear value '" ++ name ++ "' captured by a lambda is not yet supported (higher-order linearity is deferred; if the callee invokes this closure at most once, declare that parameter `once`)"
 
 fn app_uses(a: List LinUse, b: List LinUse) -> List LinUse =
   match a with
@@ -495,10 +516,13 @@ fn lin_read_var(name: String, p: source.SourcePos, sc: LinScope,
 #
 # A spine shorter than the argument list (an unresolved callee type, over-
 # application) yields OwnConsume, which is the conservative reading.
-fn spine_is_borrow(t: types.Type) -> Bool =
+fn spine_own(t: types.Type) -> types.Ownership =
   match t with
-  | types.TFunc _ _ _ own -> types.ownership_is_borrow(own)
-  | _ -> false
+  | types.TFunc _ _ _ own -> own
+  | _ -> types.OwnConsume
+
+fn spine_is_borrow(t: types.Type) -> Bool =
+  types.ownership_is_borrow(spine_own(t))
 
 fn spine_rest(t: types.Type) -> types.Type =
   match t with
@@ -538,7 +562,7 @@ fn lin_call_args(args: List typed_ast.TypedExpr, spine: types.Type,
   match args with
   | Nil -> LinOk(ac, ab)
   | Cons a rest ->
-      match lin_arg(a, spine_is_borrow(spine), sc, env) with
+      match lin_arg(a, spine_own(spine), sc, env) with
       | LinErr p m -> LinErr(p, m)
       | LinOk c b -> lin_call_args_rest(rest, spine, ac, ab, c, b, sc, env)
 
@@ -549,14 +573,62 @@ fn lin_call_args_rest(rest: List typed_ast.TypedExpr, spine: types.Type,
   | LinErr p m -> LinErr(p, m)
   | LinOk nc nb -> lin_call_args(rest, spine_rest(spine), nc, nb, sc, env)
 
-# One argument. At a `borrowing` position a LINEAR argument must be a bare
-# variable: a freshly-built linear value there would be borrowed and then dropped,
-# with nothing left to consume it and no binder for the leak check to find — the
-# analysis tracks binders only (BACKLOG "discarded linear expression result").
-# A non-linear argument at a borrowing position is walked normally; the position
-# is simply irrelevant to it.
-fn lin_arg(a: typed_ast.TypedExpr, is_borrow: Bool, sc: LinScope, env: Dict types.Scheme) -> LinRes =
-  if ! is_borrow then lin_consumed(a, sc, env) else lin_borrow_arg(a, sc, env)
+# One argument, dispatched on how the callee's type says that parameter is
+# received. At a `borrowing` position a LINEAR argument must be a bare variable: a
+# freshly-built linear value there would be borrowed and then dropped, with nothing
+# left to consume it and no binder for the leak check to find — the analysis tracks
+# binders only (BACKLOG "discarded linear expression result"). A non-linear
+# argument at a borrowing position is walked normally; the position is simply
+# irrelevant to it.
+fn lin_arg(a: typed_ast.TypedExpr, own: types.Ownership, sc: LinScope, env: Dict types.Scheme) -> LinRes =
+  match own with
+  | types.OwnBorrow -> lin_borrow_arg(a, sc, env)
+  | types.OwnOnce -> lin_once_arg(a, sc, env)
+  | types.OwnConsume -> lin_consumed(a, sc, env)
+
+# M4.4a. At a `once` position the callee promises to invoke this closure at most
+# once and not to store it, which makes a lambda's linear captures MOVES: the
+# value is transferred into the closure, so it is consumed HERE, at the call.
+#
+# Only a literal lambda gets the licence. Anything else — a named function, a
+# `let`-bound one — captures nothing by construction, so there is nothing to
+# transfer and the ordinary consuming walk is exactly right.
+fn lin_once_arg(a: typed_ast.TypedExpr, sc: LinScope, env: Dict types.Scheme) -> LinRes =
+  match a with
+  | typed_ast.TLambda params body lam_type p -> lin_once_lambda(params, body, lam_type, p, sc, env)
+  | _ -> lin_consumed(a, sc, env)
+
+# The body is walked by the SAME code as any other lambda body — the licence
+# changes only what happens to the result. That is what keeps the rest of the
+# checker in force inside a one-shot closure: a capture consumed twice is caught
+# by the body walk's own seq2, and one consumed on only some branches is caught by
+# M4.3 branch convergence (tests/conformance/type_error/once_capture_branch_leak).
+#
+# A linear PARAMETER stays rejected: `once` bounds how often the closure runs, and
+# says nothing about a value handed to it on each run. That is the rest of M4.4.
+fn lin_once_lambda(params: List ast.Param, body: typed_ast.TypedExpr, lam_type: types.Type,
+                   p: source.SourcePos, sc: LinScope, env: Dict types.Scheme) -> LinRes =
+  match first_linear_param(params, lam_type, env) with
+  | Just pname -> LinErr(p, linear_lambda_param_msg(pname))
+  | Nothing ->
+      lin_once_captures(lin_consumed(body, scope_shadow(lambda_param_names(params), sc), env), p)
+
+# Consumed captures become the call's consumed set — the move. BORROWED captures
+# are refused: `with_scope` joins AFTER its body, so a spawned closure can run
+# against a value the body already released, and Sprout has no escaping /
+# non-escaping or lifetime distinction that could rule it out. Rust draws the same
+# line — `std::thread::spawn` takes `F: FnOnce() -> T + Send + 'static`, and the
+# `'static` bound is precisely what forbids a captured borrow.
+# Regression: tests/conformance/type_error/once_capture_borrow.
+fn lin_once_captures(res: LinRes, p: source.SourcePos) -> LinRes =
+  match res with
+  | LinErr ep m -> LinErr(ep, m)
+  | LinOk bc bb -> lin_once_no_borrows(bc, bb, p)
+
+fn lin_once_no_borrows(bc: List LinUse, bb: List LinUse, p: source.SourcePos) -> LinRes =
+  match bb with
+  | Nil -> LinOk(bc, Nil)
+  | [u | _] -> LinErr(p, once_borrow_capture_msg(luse_name(u)))
 
 fn lin_borrow_arg(a: typed_ast.TypedExpr, sc: LinScope, env: Dict types.Scheme) -> LinRes =
   match a with
@@ -835,18 +907,22 @@ fn extend_scope(is_lin: Bool, name: String, sc: LinScope) -> LinScope =
   if is_lin then scope_add_owned(Cons(name, Nil), sc)
   else scope_shadow(Cons(name, Nil), sc)
 
-# A lambda may run zero or many times, so (higher-order linearity, M4.4, deferred)
-# it must neither take a linear parameter nor capture an outer linear binding.
-# BORROWS count as captures here too: the v0 borrowing rule (design note §7) is
-# that a borrowed value may not be captured at all, because soundness would turn
-# on whether the closure escapes and outlives the consume, and Sprout has no
-# escaping/non-escaping distinction. Both are loud-rejected, never silently taken.
+# A lambda at an UNANNOTATED parameter may run zero or many times, so (higher-order
+# linearity, M4.4, deferred) it must neither take a linear parameter nor capture an
+# outer linear binding. BORROWS count as captures here too: the v0 borrowing rule
+# (design note §7) is that a borrowed value may not be captured at all, because
+# soundness would turn on whether the closure escapes and outlives the consume, and
+# Sprout has no escaping/non-escaping distinction. Both are loud-rejected, never
+# silently taken.
+#
+# M4.4a narrows the scope of this arm rather than weakening it: a lambda that is
+# the ARGUMENT at a `once` parameter is routed to lin_once_lambda before it gets
+# here, so what remains is exactly the 0..n case this rejection was written for.
+# Regression: tests/conformance/type_error/lambda_capture_still_rejected.
 fn lin_lambda(params: List ast.Param, body: typed_ast.TypedExpr, lam_type: types.Type,
               p: source.SourcePos, sc: LinScope, env: Dict types.Scheme) -> LinRes =
   match first_linear_param(params, lam_type, env) with
-  | Just pname ->
-      LinErr(p, "linear lambda parameter '" ++ pname
-        ++ "' is not yet supported (higher-order linearity is deferred)")
+  | Just pname -> LinErr(p, linear_lambda_param_msg(pname))
   | Nothing -> lin_lambda_body(body, p, scope_shadow(lambda_param_names(params), sc), env)
 
 fn lambda_param_names(params: List ast.Param) -> List String =
@@ -863,9 +939,7 @@ fn lin_lambda_body(body: typed_ast.TypedExpr, p: source.SourcePos,
 fn lin_lambda_captures(uses: List LinUse, p: source.SourcePos) -> LinRes =
   match uses with
   | Nil -> LinOk(Nil, Nil)
-  | [u | _] ->
-      LinErr(p, "linear value '" ++ luse_name(u)
-        ++ "' captured by a lambda is not yet supported (higher-order linearity is deferred)")
+  | [u | _] -> LinErr(p, lambda_capture_msg(luse_name(u)))
 
 # --- parameter modes ---
 
@@ -882,6 +956,14 @@ fn mode_is_borrowing(m: ast.ParamMode) -> Bool =
   match m with
   | ast.ModeBorrowing -> true
   | _ -> false
+
+fn mode_is_once(m: ast.ParamMode) -> Bool =
+  match m with
+  | ast.ModeOnce -> true
+  | _ -> false
+
+fn mode_ownership(m: ast.ParamMode) -> types.Ownership =
+  types.ownership_of_mode(mode_is_borrowing(m), mode_is_once(m))
 
 # True when any parameter carries a written modifier. Used to widen the M4.2
 # gate: a program with NO linear type at all must still reject a modifier on a
@@ -914,7 +996,7 @@ export fn method_mode_mismatch(params: List ast.Param, class_type: types.Type) -
       else Just(param_name(prm))
 
 fn ownership_agrees(m: ast.ParamMode, class_type: types.Type) -> Bool =
-  mode_is_borrowing(m) == spine_is_borrow(class_type)
+  types.ownership_eq(mode_ownership(m), spine_own(class_type))
 
 export fn method_mode_mismatch_message(name: String) -> String = method_mismatch_msg(name)
 
@@ -926,12 +1008,17 @@ export fn check_signature_modes(params: List ast.Param, fn_type: types.Type,
   | Just bad -> LinFail(pos, bad_modifier_message(bad))
   | Nothing -> LinPass
 
-# A modifier is only meaningful on a linear parameter. Sprout erases the modifiers
-# before IR and the GC owns memory, so on a non-linear parameter they would carry
-# no meaning whatsoever — a deliberate divergence from Swift SE-0377, where they
-# still affect ARC traffic and are therefore allowed everywhere. A type-variable
-# parameter is rejected too: per-declaration linearity cannot decide it, and
-# polymorphism over linear types is an M4.2 non-goal.
+# `borrowing`/`consuming` are only meaningful on a linear parameter. Sprout erases
+# the modifiers before IR and the GC owns memory, so on a non-linear parameter they
+# would carry no meaning whatsoever — a deliberate divergence from Swift SE-0377,
+# where they still affect ARC traffic and are therefore allowed everywhere. A
+# type-variable parameter is rejected too: per-declaration linearity cannot decide
+# it, and polymorphism over linear types is an M4.2 non-goal.
+#
+# `once` (M4.4a) is validated on a different axis — it says the callee invokes the
+# parameter at most once, so the parameter must be a FUNCTION; its argument type is
+# irrelevant and typically non-linear (`Unit -> Unit`). Routing it through the
+# linear check would reject every legitimate use.
 fn first_bad_modifier(params: List ast.Param, fn_type: types.Type,
                       env: Dict types.Scheme) -> Maybe BadModifier =
   match params with
@@ -943,14 +1030,30 @@ fn first_bad_modifier(params: List ast.Param, fn_type: types.Type,
 
 fn bad_modifier_here(prm: ast.Param, a: types.Type, rest: List ast.Param,
                      b: types.Type, env: Dict types.Scheme) -> Maybe BadModifier =
-  if ! mode_is_written (param_mode(prm)) then first_bad_modifier(rest, b, env)
-  else if type_is_tyvar(a) then Just(BadModifier(param_name(prm), true))
-  else if ! type_is_linear (a, env) then Just(BadModifier(param_name(prm), false))
+  if mode_is_once(param_mode(prm)) then bad_once_here(prm, a, rest, b, env)
+  else if ! mode_is_written (param_mode(prm)) then first_bad_modifier(rest, b, env)
+  else if type_is_tyvar(a) then Just(BadOnTyvar(param_name(prm)))
+  else if ! type_is_linear (a, env) then Just(BadNonLinear(param_name(prm)))
   else first_bad_modifier(rest, b, env)
+
+# A type variable is accepted here, unlike for `borrowing`: `once` needs no
+# linearity judgement, so `fn run(f: once a)` is merely useless rather than
+# unsound — and rejecting it would need the same universe machinery that
+# `borrowing a` is blocked on. It is refused only when the type is known and is
+# demonstrably not a function.
+fn bad_once_here(prm: ast.Param, a: types.Type, rest: List ast.Param,
+                 b: types.Type, env: Dict types.Scheme) -> Maybe BadModifier =
+  if type_is_func(a) || type_is_tyvar(a) then first_bad_modifier(rest, b, env)
+  else Just(BadOnceNonFunction(param_name(prm)))
 
 fn type_is_tyvar(t: types.Type) -> Bool =
   match t with
   | types.TVar _ -> true
+  | _ -> false
+
+fn type_is_func(t: types.Type) -> Bool =
+  match t with
+  | types.TFunc _ _ _ _ -> true
   | _ -> false
 
 # The linear parameters that own their argument (no modifier, or `consuming`).

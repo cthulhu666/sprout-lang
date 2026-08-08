@@ -38,6 +38,42 @@ let consuming_src =
   "fn release(f: consuming File) -> Int = match f with | File n -> n\n" ++
   "fn main() -> Int !{IO} = release(File(42))\n"
 
+# M4.4a. The same one-token comparison for `once`, and it is the ONLY direct proof
+# of its erasure: `just ir-golden-diff` cannot serve as the standing guard here the
+# way it does for `borrowing`, because the corpus programs that exercise `once`
+# (http_echo_server, http_web_server) migrated from raw `Int` handles to the boxed
+# linear TcpConnection in the same change, so their IR legitimately moved. Two
+# sources differing in exactly the `once` token, with the shape it exists for — a
+# linear value MOVED into a one-shot closure — must emit byte-identical IR.
+#
+# Every identifier here deliberately avoids the substring "once" — a helper named
+# `run_once` would satisfy the "no 'once' token survives" assertion from its own
+# symbol name and prove nothing.
+let once_src =
+  "type linear File = File Int\n" ++
+  "fn release(f: consuming File) -> Int = match f with | File n -> n\n" ++
+  "fn handoff(work: once Unit -> Int) -> Int = work(())\n" ++
+  "fn move_in(f: File) -> Int = handoff(\\_ -> release(f))\n" ++
+  "fn main() -> Int !{IO} = move_in(File(42))\n"
+
+# The counterpart WITHOUT the modifier. It does not typecheck (the capture is
+# rejected — that is lambda_capture_still_rejected), so it cannot be compiled for
+# a byte comparison; the pair below instead varies `once` against `consuming` on a
+# NON-capturing call, where both are accepted and mean the same thing to lowering.
+let once_plain_src =
+  "type linear File = File Int\n" ++
+  "fn release(f: consuming File) -> Int = match f with | File n -> n\n" ++
+  "fn run_once(work: once Unit -> Int) -> Int = work(())\n" ++
+  "fn zero(u: Unit) -> Int = 0\n" ++
+  "fn main() -> Int !{IO} = run_once(zero) + release(File(42))\n"
+
+let once_absent_src =
+  "type linear File = File Int\n" ++
+  "fn release(f: consuming File) -> Int = match f with | File n -> n\n" ++
+  "fn run_once(work: Unit -> Int) -> Int = work(())\n" ++
+  "fn zero(u: Unit) -> Int = 0\n" ++
+  "fn main() -> Int !{IO} = run_once(zero) + release(File(42))\n"
+
 # Exercises a real borrow: `peek` borrows, `release` consumes.
 let borrowing_src =
   "type linear File = File Int\n" ++
@@ -69,17 +105,27 @@ fn main() -> Unit !{IO} =
           let unmod_path = "/tmp/sprout_test_borrow_erasure_unmod.sprout"
           let consuming_path = "/tmp/sprout_test_borrow_erasure_consuming.sprout"
           let borrowing_path = "/tmp/sprout_test_borrow_erasure_borrowing.sprout"
+          let once_path = "/tmp/sprout_test_borrow_erasure_once.sprout"
+          let once_plain_path = "/tmp/sprout_test_borrow_erasure_once_plain.sprout"
+          let once_absent_path = "/tmp/sprout_test_borrow_erasure_once_absent.sprout"
           _ <- write_file(unmod_path, unmodified_src)
           _ <- write_file(consuming_path, consuming_src)
           _ <- write_file(borrowing_path, borrowing_src)
+          _ <- write_file(once_path, once_src)
+          _ <- write_file(once_plain_path, once_plain_src)
+          _ <- write_file(once_absent_path, once_absent_src)
 
           r_unmod <- compiler.compile_full_ir(source.FilePath(unmod_path), source.StdlibRoot(stdlib_root))
           r_consuming <- compiler.compile_full_ir(source.FilePath(consuming_path), source.StdlibRoot(stdlib_root))
           r_borrowing <- compiler.compile_full_ir(source.FilePath(borrowing_path), source.StdlibRoot(stdlib_root))
+          r_once <- compiler.compile_full_ir(source.FilePath(once_path), source.StdlibRoot(stdlib_root))
+          r_once_plain <- compiler.compile_full_ir(source.FilePath(once_plain_path), source.StdlibRoot(stdlib_root))
+          r_once_absent <- compiler.compile_full_ir(source.FilePath(once_absent_path), source.StdlibRoot(stdlib_root))
 
           assert_true(state, "unmodified linear param compiles", ir_ok(r_unmod))
           assert_true(state, "consuming linear param compiles", ir_ok(r_consuming))
           assert_true(state, "borrowing linear param compiles", ir_ok(r_borrowing))
+          assert_true(state, "linear value moved into a once closure compiles", ir_ok(r_once))
 
           let unmod_ir = ir_text(r_unmod)
           let consuming_ir = ir_text(r_consuming)
@@ -103,5 +149,12 @@ fn main() -> Unit !{IO} =
             contains(borrowing_ir, "borrowing"))
           assert_false(state, "no 'consuming' token survives into IR",
             contains(consuming_ir, "consuming"))
+
+          # M4.4a erasure. Same one-token comparison: `once` on a parameter versus
+          # no modifier on it, everything else byte-for-byte the same source.
+          assert_true(state, "once emits byte-identical IR to an unannotated parameter",
+            ir_text(r_once_plain) == ir_text(r_once_absent))
+          assert_false(state, "no 'once' token survives into IR",
+            contains(ir_text(r_once), "once"))
 
     summary(state)
