@@ -325,7 +325,7 @@ fn build_fn_type_modes(params: List types.Type, modes: List ast.ParamMode, ret: 
         own_of_mode(mode_list_head(modes)))
 
 fn own_of_mode(m: ast.ParamMode) -> types.Ownership =
-  types.ownership_of_mode(ast.mode_is_borrowing(m), ast.mode_is_once(m))
+  linear_check.ownership_of_param_mode(m)
 
 fn mode_list_head(modes: List ast.ParamMode) -> ast.ParamMode =
   match modes with
@@ -5817,8 +5817,7 @@ fn finish_instance_method(name: String, params: List ast.Param, ret_maybe: Maybe
                           typed_body: typed_ast.TypedExpr, env: Dict types.Scheme) -> InstanceMethodResult =
   match class_method_mode_error(name, params, env) with
   | Just bad ->
-      InstanceMethodErr(typed_ast.typed_expr_pos(typed_body),
-        linear_check.method_mode_mismatch_message(bad))
+      InstanceMethodErr(typed_ast.typed_expr_pos(typed_body), bad)
   | Nothing ->
       finish_instance_method_checked(name, params, ret_maybe, eff_maybe, body_env, s2, inst_type, typed_body, env)
 

@@ -3,6 +3,7 @@ import stdlib.compiler.types as types
 import stdlib.compiler.ast as ast
 import stdlib.compiler.typed_ast as typed_ast
 import stdlib.compiler.source as source
+import stdlib.compiler.linear_check as linear_check
 
 # ============================================================================
 # Iface codec — hand-written serialize/deserialize for types.Scheme and its
@@ -682,7 +683,7 @@ fn params_to_func_type(params: List ast.Param, ret: types.Type, local_vars: Dict
       types.TFunc(param_type_from_maybe(maybe_te, local_vars),
                   params_to_func_type(rest, ret, local_vars),
                   types.EffectPure,
-                  types.ownership_of_mode(ast.mode_is_borrowing(mode), ast.mode_is_once(mode)))
+                  linear_check.ownership_of_param_mode(mode))
 
 fn param_type_from_maybe(maybe_te: Maybe ast.TypeExpr, local_vars: Dict types.Type) -> types.Type =
   match maybe_te with

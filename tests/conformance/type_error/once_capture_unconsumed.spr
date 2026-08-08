@@ -1,0 +1,22 @@
+module main
+
+# M4.4a: a value MOVED into a one-shot closure must actually be consumed inside
+# it. Here the closure ignores `f` entirely, so nothing releases it and the leak
+# must still be reported at the caller.
+#
+# This is the fixture docs/one-shot-closures-v0.md §10 claimed to ship and did
+# not. The behaviour was already correct; it was simply unguarded, and the guard
+# matters because the failure it prevents is silent: an edit to lin_once_captures
+# that credited a capture without requiring the body to consume it would leak
+# every moved-in socket in stdlib/http_server.sprout with the conformance suite
+# still green.
+
+type linear File = File Int
+
+fn release(f: consuming File) -> Int = match f with | File n -> n
+
+fn run_once(work: once Unit -> Int) -> Int = work(())
+
+fn drops_it(f: File) -> Int = run_once(\_ -> 0)
+
+fn main() -> Unit !{IO} = print(to_string(drops_it(File(1))))

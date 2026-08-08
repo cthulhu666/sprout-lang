@@ -126,6 +126,20 @@ export fn detach(task: Task a) -> Unit =
 # ready/yield-parked task stops by observing `task_cancelled`; a task blocked on I/O
 # is dropped by the scheduler. No siblings are auto-cancelled on failure yet; the body
 # drives fail-fast (match a result, then `scope_cancel`). See the cancellation design.
+#
+# !! RESOURCE WARNING. A dropped task never runs its closure, so anything MOVED into
+# that closure is never released — a `TcpConnection` moved in via `task_spawn`'s
+# `once` parameter leaks its fd, and the compiler will have reported the program
+# consume-exactly-once clean, because `once` bounds invocations from above only
+# (at most once, per Rust's FnOnce). The exactly-once half comes from `with_scope`'s
+# unconditional join, and cancelling is precisely how that half is skipped. The same
+# path is reached by every `with_timeout` expiry, not just an explicit cancel.
+#
+# Sprout has no destructors, so this cannot be closed by the type system or by this
+# module; it needs cancellation-time resource release in the scheduler. Until then:
+# do not move a linear resource into a task in a scope you may cancel — acquire it
+# inside the task, or keep ownership outside and pass a borrow-free handle. Tracked
+# in BACKLOG.md; stated normatively in docs/spec-v0.md §5.8.
 export fn scope_cancel(scope: Scope) -> Unit !{IO} =
   match scope with
   | Scope id -> __scope_cancel(id)

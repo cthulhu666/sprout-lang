@@ -77,7 +77,33 @@ instance Runner Int {
 
 fn move_in_class_method(f: File) -> Int = run_it(1000, \_ -> release(f))
 
-# --- 6. borrow first, THEN move --------------------------------------------
+# --- 6. borrow AND consume INSIDE the closure ------------------------------
+# The shape the whole milestone exists to enable, written inline: use the
+# resource, then release it, both inside the spawned closure. Post-review fix —
+# this was rejected, because `lin_borrow_var` files an owned binding under
+# BORROWED whenever it appears at a `borrowing` parameter position, and the later
+# consume did not clear it, so the body handed back a non-empty borrowed set and
+# `lin_once_no_borrows` refused it. The diagnostic then told the author to "move
+# it instead and consume it inside the closure" — which is exactly what this code
+# does, so the advice was a no-op.
+#
+# It shipped undetected because every migrated call site routes through a named
+# `consuming` helper (http_server.handle_connection, concurrent_read.reader), and
+# case 7 below borrows OUTSIDE the closure. Nothing exercised the inline form.
+fn borrow_and_move_inside(f: File) -> Int = run_once(\_ -> peek(f) + release(f))
+
+# --- 7. a callee that DECLINES to invoke -----------------------------------
+# `once` bounds invocations from ABOVE — at most once, per Rust's FnOnce and
+# OxCaml's `once`. A callee may therefore not invoke at all, and the callee-side
+# honesty check must allow zero uses (it is a reuse rule, not the linear
+# exactly-once rule). The moved value then leaks at RUNTIME with no diagnostic,
+# which is the documented at-most-once gap: leak-freedom needs the callee's
+# contract that the closure runs, and here it deliberately does not.
+fn never_runs(work: once Unit -> Int) -> Int = 5
+
+fn declines_to_run() -> Int = never_runs(\_ -> 99)
+
+# --- 8. borrow first, THEN move --------------------------------------------
 # Reading `f` before moving it is fine: the borrow is over by the time the move
 # happens. (The converse — a borrow captured BY the closure — is unsound and
 # stays rejected; see once_capture_borrow.)
@@ -93,5 +119,7 @@ fn main() -> Unit !{IO} =
     check_eq("named function at a once parameter", named_at_once(), 7),
     check_eq("non-linear capture at a once parameter", nonlinear_capture(41), 42),
     check_eq("once parameter on a class method", move_in_class_method(File(7)), 1007),
+    check_eq("borrow and consume inside the closure", borrow_and_move_inside(File(4)), 4),
+    check_eq("callee may decline to invoke a once parameter", declines_to_run(), 5),
     check_eq("borrow before the move", borrow_then_move(File(3)), 3)
   ])

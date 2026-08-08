@@ -189,11 +189,26 @@ fn unify_tfunc_owned(subst: Dict types.Type, l: types.Type, r: types.Type,
                      p1: types.Type, r1: types.Type, o1: types.Ownership,
                      p2: types.Type, r2: types.Type, o2: types.Ownership) -> Result String (Dict types.Type) =
   if types.ownership_eq(o1, o2) then unify_tfunc(subst, p1, r1, p2, r2)
-  else Err(ownership_mismatch_error(l, r))
+  else Err(ownership_mismatch_error(l, r, o1, o2))
 
-fn ownership_mismatch_error(l: types.Type, r: types.Type) -> String =
+# The explanation branches on WHICH pair actually mismatched. It used to be a
+# single sentence about `borrowing`, written when Ownership had two values; once
+# `once` was added that text named the wrong modifier and offered a workaround
+# about a modifier the program did not use.
+fn ownership_mismatch_error(l: types.Type, r: types.Type,
+                            o1: types.Ownership, o2: types.Ownership) -> String =
   "ownership mismatch: " ++ types.type_to_string(l) ++ " vs " ++ types.type_to_string(r)
-    ++ " — these differ only in how the parameter is taken, and a `borrowing` parameter's convention must match exactly; note that an arrow type cannot yet be written with `borrowing`"
+    ++ " — " ++ ownership_mismatch_reason(o1, o2)
+
+fn ownership_mismatch_reason(o1: types.Ownership, o2: types.Ownership) -> String =
+  if types.ownership_is_once(o1) || types.ownership_is_once(o2) then once_mismatch_reason()
+  else borrow_mismatch_reason()
+
+fn once_mismatch_reason() -> String =
+  "these differ only in whether the parameter is `once`, and that must match exactly: `once` promises the callee invokes it at most once, which is what licenses a caller to move a linear value into the closure it passes — a function without the promise cannot stand in for one with it"
+
+fn borrow_mismatch_reason() -> String =
+  "these differ only in how the parameter is taken, and a `borrowing` parameter's convention must match exactly; note that an arrow type cannot yet be written with `borrowing`"
 
 # A unification mismatch. If either side is (or mentions) a skolem, the real
 # fault is an existential type leaking out of its match branch — rephrase rather

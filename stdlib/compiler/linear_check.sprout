@@ -275,6 +275,9 @@ fn after_consume_msg(name: String) -> String =
 fn consumed_borrow_msg(name: String) -> String =
   "'" ++ name ++ "' is a borrowing parameter and cannot be consumed; take it `consuming` if this function should release it"
 
+fn method_once_mismatch_msg(name: String) -> String =
+  "instance method parameter '" ++ name ++ "' must match the class declaration on `once`: a call dispatches through the CLASS signature, so callers move linear values into the closure they pass on the strength of the class's promise, and an instance free to invoke it repeatedly would consume those values more than once"
+
 fn method_mismatch_msg(name: String) -> String =
   "instance method parameter '" ++ name ++ "' must match the class declaration's ownership: a call dispatches through the CLASS signature, so an instance that only borrows where the class consumes discharges the caller's obligation and leaks the value"
 
@@ -297,12 +300,14 @@ type BadModifier (..) =
   | BadOnTyvar String
   | BadNonLinear String
   | BadOnceNonFunction String
+  | BadOnceOnTyvar String
 
 fn bad_modifier_message(b: BadModifier) -> String =
   match b with
   | BadOnTyvar name -> tyvar_modifier_msg(name)
   | BadNonLinear name -> bad_modifier_msg(name)
   | BadOnceNonFunction name -> once_modifier_msg(name)
+  | BadOnceOnTyvar name -> once_tyvar_msg(name)
 
 fn tyvar_modifier_msg(name: String) -> String =
   "`borrowing`/`consuming` cannot be used on a type variable (parameter '" ++ name ++ "'): linearity is per-declaration, so whether the argument is linear is not known here"
@@ -312,6 +317,12 @@ fn bad_modifier_msg(name: String) -> String =
 
 fn once_modifier_msg(name: String) -> String =
   "`once` applies only to a function-typed parameter (parameter '" ++ name ++ "'): it bounds how many times the callee may invoke it"
+
+fn once_tyvar_msg(name: String) -> String =
+  "`once` cannot be used on a type variable (parameter '" ++ name ++ "'): the promise is that the callee INVOKES this parameter at most once, which it cannot do when the type is not known to be a function — while a caller could still move a linear value in and get it back out"
+
+fn once_reuse_msg(name: String) -> String =
+  "`once` parameter '" ++ name ++ "' is used more than once: declaring it `once` promises callers this function invokes it AT MOST once, and that promise is what licenses them to move a linear value into the closure they pass"
 
 fn once_borrow_capture_msg(name: String) -> String =
   "borrowed value '" ++ name ++ "' cannot be captured by a closure passed to a `once` parameter: the closure may run after the value is consumed. Move it instead — pass ownership in and consume it inside the closure"
@@ -521,9 +532,6 @@ fn spine_own(t: types.Type) -> types.Ownership =
   | types.TFunc _ _ _ own -> own
   | _ -> types.OwnConsume
 
-fn spine_is_borrow(t: types.Type) -> Bool =
-  types.ownership_is_borrow(spine_own(t))
-
 fn spine_rest(t: types.Type) -> types.Type =
   match t with
   | types.TFunc _ ret _ _ -> ret
@@ -613,22 +621,44 @@ fn lin_once_lambda(params: List ast.Param, body: typed_ast.TypedExpr, lam_type: 
   | Nothing ->
       lin_once_captures(lin_consumed(body, scope_shadow(lambda_param_names(params), sc), env), p)
 
-# Consumed captures become the call's consumed set — the move. BORROWED captures
-# are refused: `with_scope` joins AFTER its body, so a spawned closure can run
-# against a value the body already released, and Sprout has no escaping /
+# Consumed captures become the call's consumed set — the move. A capture that is
+# only BORROWED is refused: `with_scope` joins AFTER its body, so a spawned closure
+# can run against a value the body already released, and Sprout has no escaping /
 # non-escaping or lifetime distinction that could rule it out. Rust draws the same
 # line — `std::thread::spawn` takes `F: FnOnce() -> T + Send + 'static`, and the
 # `'static` bound is precisely what forbids a captured borrow.
-# Regression: tests/conformance/type_error/once_capture_borrow.
+#
+# A capture that is borrowed AND consumed in the same body is a MOVE, not a borrow,
+# and must be allowed — `\_ -> do { write(c, x); close(c) }` is the shape the whole
+# milestone exists to enable. `lin_borrow_var` files an owned binding under BORROWED
+# whenever it appears at a `borrowing` parameter position, and `seq2` keeps it there
+# after the later consume, so the raw borrowed set over-reports; subtracting the
+# consumed set is what distinguishes "read someone else's value" from "used my own
+# before releasing it". Use-after-consume inside the body is unaffected — the body
+# walk's own ordering rule catches that before this point.
+# Regression: tests/conformance/type_error/once_capture_borrow (borrow only) and
+# tests/stdlib/test_once_closures.spr `borrow_and_move_inside` (borrow + consume).
 fn lin_once_captures(res: LinRes, p: source.SourcePos) -> LinRes =
   match res with
   | LinErr ep m -> LinErr(ep, m)
-  | LinOk bc bb -> lin_once_no_borrows(bc, bb, p)
+  | LinOk bc bb -> lin_once_no_borrows(bc, luse_remove_all(names_of(bc), bb), p)
 
 fn lin_once_no_borrows(bc: List LinUse, bb: List LinUse, p: source.SourcePos) -> LinRes =
   match bb with
   | Nil -> LinOk(bc, Nil)
   | [u | _] -> LinErr(p, once_borrow_capture_msg(luse_name(u)))
+
+fn names_of(uses: List LinUse) -> List String =
+  match uses with
+  | Nil -> Nil
+  | Cons u rest -> Cons(luse_name(u), names_of(rest))
+
+fn luse_remove_all(names: List String, uses: List LinUse) -> List LinUse =
+  match uses with
+  | Nil -> Nil
+  | Cons u rest ->
+      if str_member(luse_name(u), names) then luse_remove_all(names, rest)
+      else Cons(u, luse_remove_all(names, rest))
 
 fn lin_borrow_arg(a: typed_ast.TypedExpr, sc: LinScope, env: Dict types.Scheme) -> LinRes =
   match a with
@@ -962,8 +992,18 @@ fn mode_is_once(m: ast.ParamMode) -> Bool =
   | ast.ModeOnce -> true
   | _ -> false
 
-fn mode_ownership(m: ast.ParamMode) -> types.Ownership =
+# THE single ParamMode -> Ownership collapse. It lived in three copies (infer,
+# iface_codec, here) and `iface_codec` documents that the declaration path and the
+# wire path "must agree" — an invariant that three identically-typed copies upheld
+# only by luck. Missing one when a mode is added fails SILENTLY: the mode would be
+# right in a same-module call and wrong across an `.iface` boundary, which shows up
+# as legal callers being rejected far from the cause, not as a compile error.
+# This module is the home because it owns what a mode MEANS, and both other callers
+# can import it without a cycle.
+export fn ownership_of_param_mode(m: ast.ParamMode) -> types.Ownership =
   types.ownership_of_mode(mode_is_borrowing(m), mode_is_once(m))
+
+fn mode_ownership(m: ast.ParamMode) -> types.Ownership = ownership_of_param_mode(m)
 
 # True when any parameter carries a written modifier. Used to widen the M4.2
 # gate: a program with NO linear type at all must still reject a modifier on a
@@ -987,18 +1027,27 @@ export fn any_param_mode_written(params: List ast.Param) -> Bool =
 # convention "must match exactly", protocol conformances included.
 # Regression: tests/conformance/type_error/borrow_instance_method,
 # tests/stdlib/test_linear_borrow_in_type.spr `via_consuming`.
+# Returns the MESSAGE, not just the offending parameter name: which of the three
+# ownership values disagreed decides what to say, and only this walk knows that.
+# The single leak-flavoured sentence it used to return was written when Ownership
+# had two values, and described a leak even when the actual disagreement was about
+# `once`, whose failure is an unbounded invocation count.
 export fn method_mode_mismatch(params: List ast.Param, class_type: types.Type) -> Maybe String =
   match params with
   | Nil -> Nothing
   | Cons prm rest ->
       if ownership_agrees(param_mode(prm), class_type)
       then method_mode_mismatch(rest, spine_rest(class_type))
-      else Just(param_name(prm))
+      else Just(method_mismatch_for(param_name(prm), mode_ownership(param_mode(prm)),
+                                    spine_own(class_type)))
 
 fn ownership_agrees(m: ast.ParamMode, class_type: types.Type) -> Bool =
   types.ownership_eq(mode_ownership(m), spine_own(class_type))
 
-export fn method_mode_mismatch_message(name: String) -> String = method_mismatch_msg(name)
+fn method_mismatch_for(name: String, inst: types.Ownership, cls: types.Ownership) -> String =
+  if types.ownership_is_once(inst) || types.ownership_is_once(cls)
+  then method_once_mismatch_msg(name)
+  else method_mismatch_msg(name)
 
 # Validate modifiers against a signature ALONE, with no body to walk. Used for
 # `extern fn`, which has no body and so never reaches check_fn_linear.
@@ -1036,14 +1085,23 @@ fn bad_modifier_here(prm: ast.Param, a: types.Type, rest: List ast.Param,
   else if ! type_is_linear (a, env) then Just(BadNonLinear(param_name(prm)))
   else first_bad_modifier(rest, b, env)
 
-# A type variable is accepted here, unlike for `borrowing`: `once` needs no
-# linearity judgement, so `fn run(f: once a)` is merely useless rather than
-# unsound — and rejecting it would need the same universe machinery that
-# `borrowing a` is blocked on. It is refused only when the type is known and is
-# demonstrably not a function.
+# A type variable is REJECTED, like it is for `borrowing` — though for a different
+# reason, and post-review: an earlier version accepted it, reasoning that `once`
+# needs no linearity judgement about the argument so `fn run(f: once a)` was
+# "merely useless rather than unsound". That was backwards, and the counterexample
+# is tests/conformance/type_error/once_on_type_variable: `fn keep(work: once a) -> a
+# = work` lets the caller move a linear value in and get it back out, then call it
+# twice — a verified double release.
+#
+# The licence does not rest on the argument's linearity; it rests on the callee
+# being able to INVOKE the parameter at most once. At `once a` the callee cannot
+# invoke it at all (the type is not known to be a function), so the promise is
+# vacuous, while the value stays freely returnable and duplicable. `once a` is
+# therefore strictly worse than a dishonestly-annotated concrete parameter.
 fn bad_once_here(prm: ast.Param, a: types.Type, rest: List ast.Param,
                  b: types.Type, env: Dict types.Scheme) -> Maybe BadModifier =
-  if type_is_func(a) || type_is_tyvar(a) then first_bad_modifier(rest, b, env)
+  if type_is_tyvar(a) then Just(BadOnceOnTyvar(param_name(prm)))
+  else if type_is_func(a) then first_bad_modifier(rest, b, env)
   else Just(BadOnceNonFunction(param_name(prm)))
 
 fn type_is_tyvar(t: types.Type) -> Bool =
@@ -1100,7 +1158,19 @@ export fn check_fn_linear(params: List ast.Param, fn_type: types.Type,
   | Just bad -> LinFail(fn_pos, bad_modifier_message(bad))
   | Nothing ->
       linear_result(owned_param_names(params, fn_type, env),
-                    borrowed_param_names(params, fn_type, env), body, fn_pos, env)
+                    borrowed_param_names(params, fn_type, env),
+                    once_param_names(params), body, fn_pos, env)
+
+# The parameters declared `once`. Selected by MODE alone, not by type: `once` is
+# already restricted to a function-typed parameter by first_bad_modifier, and the
+# function type is never `type linear`, so the linearity-based filters above see
+# none of these.
+fn once_param_names(params: List ast.Param) -> List String =
+  match params with
+  | Nil -> Nil
+  | Cons prm rest ->
+      linear_param_cons(mode_is_once(param_mode(prm)), param_name(prm),
+                        once_param_names(rest))
 
 # Check a body with no parameters (a top-level `let` declaration): there are no
 # linear params to leak, but do-`let`/pattern/lambda binders inside are still
@@ -1110,11 +1180,47 @@ export fn check_body_linear(body: typed_ast.TypedExpr, env: Dict types.Scheme) -
   | LinErr p m -> LinFail(p, m)
   | LinOk _ _ -> LinPass
 
-fn linear_result(owned: List String, borrowed: List String, body: typed_ast.TypedExpr,
-                 fn_pos: source.SourcePos, env: Dict types.Scheme) -> LinCheck =
+fn linear_result(owned: List String, borrowed: List String, once_names: List String,
+                 body: typed_ast.TypedExpr, fn_pos: source.SourcePos,
+                 env: Dict types.Scheme) -> LinCheck =
   match lin_consumed(body, LinScope(owned, borrowed), env) with
   | LinErr p m -> LinFail(p, m)
-  | LinOk consumed _ -> param_obligations(owned, borrowed, consumed, fn_pos)
+  | LinOk consumed _ ->
+      once_honesty_after(param_obligations(owned, borrowed, consumed, fn_pos),
+                         once_names, body, env)
+
+# CALLEE-SIDE HONESTY (post-review). `once` is a promise the callee makes, and the
+# caller's whole licence to move a linear value into the closure rests on it — so
+# it is checked rather than taken on trust. Without this,
+# `fn run_twice(work: once Unit -> Int) = work(()) + work(())` compiles and the
+# caller's moved-in value is released twice, verified.
+#
+# Reuses the ordinary walk with ONLY this parameter in scope, which buys exact
+# branch-aware counting for free: `if c then work(()) else work(())` is one
+# invocation per path and stays legal, where a syntactic occurrence count would
+# reject it. Run strictly AFTER the main walk has passed, which is what makes the
+# attribution sound — with no other name tracked, any error this walk reports can
+# only be about this parameter.
+#
+# ZERO uses stay legal. `once` bounds invocations from ABOVE ("at most once", per
+# Rust's FnOnce and OxCaml's `once`), so a callee may decline to invoke; that is
+# also why this is a reuse rule and not the linear exactly-once rule.
+# Regression: tests/conformance/type_error/once_callee_invokes_twice, and
+# tests/stdlib/test_once_closures.spr `declines_to_run` for the zero-use side.
+fn once_honesty_after(prior: LinCheck, once_names: List String,
+                      body: typed_ast.TypedExpr, env: Dict types.Scheme) -> LinCheck =
+  match prior with
+  | LinFail p m -> LinFail(p, m)
+  | LinPass -> once_honesty(once_names, body, env)
+
+fn once_honesty(names: List String, body: typed_ast.TypedExpr,
+                env: Dict types.Scheme) -> LinCheck =
+  match names with
+  | Nil -> LinPass
+  | Cons n rest ->
+      match lin_consumed(body, LinScope (Cons(n, Nil), Nil), env) with
+      | LinErr p _ -> LinFail(p, once_reuse_msg(n))
+      | LinOk _ _ -> once_honesty(rest, body, env)
 
 # Two opposite obligations. An OWNED linear parameter must appear in the consumed
 # set (else it leaked). A BORROWED one must NOT: consuming it spends a use that

@@ -1,0 +1,20 @@
+module main
+
+# M4.4a DIAGNOSTIC. When two function types differ only in `once`, the mismatch
+# must be explained in terms of `once`.
+#
+# The explanation used to be a single sentence written when `types.Ownership` had
+# two values: it asserted "a `borrowing` parameter's convention must match
+# exactly" and suggested a workaround about arrow types not being able to spell
+# `borrowing`. Against this program the word `borrowing` appears nowhere in the
+# source and the suggested workaround concerns a modifier the author never used —
+# a diagnostic that sends the reader to the wrong feature.
+#
+# `.err` pins the `once` wording; it would match the old text nowhere.
+
+import stdlib.task (Scope, with_scope, task_spawn)
+
+fn apply_spawner(g: Scope -> (Unit -> Unit !{IO}) -> Unit !{IO}, s: Scope) -> Unit !{IO} =
+  g(s)(\_ -> term_write("hi\n"))
+
+fn main() -> Unit !{IO} = with_scope(\s -> apply_spawner(task_spawn, s))

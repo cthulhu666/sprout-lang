@@ -1,0 +1,26 @@
+module main
+
+# M4.4a: `once` is a promise the CALLEE makes, and the callee must keep it. A
+# function declaring `once work` may use that parameter at most once along any
+# path — invoking it twice hands the caller a licence to move a linear value in
+# and then consumes that value twice.
+#
+# The violation is visible in the callee's own declaration, and the checker
+# already walks that body, so there is no reason to take the annotation on trust:
+#
+#   fn run_twice(work: once Unit -> Int) -> Int = work(()) + work(())
+#   run_twice(\_ -> release(f))     # release runs twice
+#
+# ZERO uses stay legal: `once` bounds invocations from above ("at most once"), so
+# a callee may decline to invoke. That is why this is a reuse rule and not the
+# ordinary linear exactly-once rule — see test_once_closures.spr `declines_to_run`.
+
+type linear File = File Int
+
+fn release(f: consuming File) -> Int = match f with | File n -> n
+
+fn run_twice(work: once Unit -> Int) -> Int = work(()) + work(())
+
+fn oops(f: File) -> Int = run_twice(\_ -> release(f))
+
+fn main() -> Unit !{IO} = print(to_string(oops(File(1))))

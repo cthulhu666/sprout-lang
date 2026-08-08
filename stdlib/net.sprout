@@ -82,9 +82,14 @@ export fn read_exact(conn: borrowing TcpConnection, count: Int) -> Result TcpErr
 export fn write_all(conn: borrowing TcpConnection, payload: Bytes) -> Result TcpError Int !{IO} =
   tcp_write_all(tcp_connection_handle(conn), payload)
 
-# Recoverable string write over a raw connection handle (for callers that hold an Int handle
-# rather than the opaque TcpConnection, e.g. stdlib.http_server). Returns Err on a socket
-# failure instead of aborting — the write counterpart to tcp_read_avail.
+# Recoverable string write over a raw connection handle, for callers holding an Int rather
+# than the opaque TcpConnection. Returns Err on a socket failure instead of aborting — the
+# write counterpart to tcp_read_avail.
+#
+# It has NO caller in-tree since stdlib.http_server moved to the linear API (M4.4a); it names
+# no consumer here for that reason. Kept as an exported escape hatch alongside the raw
+# tcp_* externs above, for code whose shape the linear API still cannot express — retire it
+# with them, not before, so the raw-handle path stays complete rather than half-usable.
 export fn tcp_write_string(conn: Int, data: String) -> Result TcpError Int !{IO} =
   tcp_write_all(conn, from_string(data))
 
