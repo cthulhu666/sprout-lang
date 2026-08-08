@@ -1,0 +1,126 @@
+import stdlib.test (TestState, new_state, assert_true, assert_false, assert_eq, summary)
+import stdlib.string as string
+
+# Pins the DEFINING property of the two byte-offset string builtins: their cost
+# must not depend on the length of the string being scanned.
+#
+# `str_slice_bytes` and `str_starts_with_at_byte` exist for exactly one reason —
+# to let a byte-cursor scanner (the lexer via `source.match_string`, the JSON
+# parser via its `byte1`/peek helpers) walk a large input in one linear pass.
+# `stdlib/json.sprout` states that contract in a comment ("both are O(1)/O(len)
+# at a byte OFFSET, so one left-to-right pass"), and `str_starts_with_at_byte`'s
+# own doc comment claims "O(|prefix|)". Neither was true: both implementations
+# opened with `strlen(s)` over the WHOLE string just to bounds-check the offset,
+# so every call was O(|s|) and every scanner built on them was O(n^2).
+#
+# That is invisible to a correctness test — the answers were always right, only
+# the cost was wrong — so the guard has to be a cost measurement.
+#
+# WHY THIS IS NOT A FLAKY TIMING TEST. The call COUNT is fixed and only the
+# string LENGTH varies (1 KiB vs 1 MiB, a 1024x ratio). So:
+#   - length-independent (correct): both probes cost the same, ratio ~1x
+#   - length-proportional (the bug): ratio ~250x (measured 1 KiB ~= 0.1 us/call
+#     against 1 MiB ~= 30 us/call)
+# The assertion allows 8x. That is two orders of magnitude of headroom on both
+# sides, so no scheduler hiccup or machine-speed difference can flip it. Taking
+# the MINIMUM of several rounds removes the one residual risk (a stall inflating
+# the long-string measurement on a loaded CI runner).
+
+let iterations = 20000
+let rounds = 3
+# Floor for the short-string baseline, so a sub-microsecond baseline cannot
+# collapse the budget to zero on a very fast machine.
+let baseline_floor_us = 200
+let allowed_ratio = 8
+
+# Builds a string of 2^k * |s| bytes by doubling: O(total), unlike
+# `string.repeat`, which is itself quadratic (`s ++ repeat(s, n - 1)`).
+fn grow(s: String, k: Int) -> String =
+  if k <= 0 then s else grow(s ++ s, k - 1)
+
+# Fixed iteration count, always probing byte offset 0, so elapsed time reflects
+# per-call cost alone. Returns the hit count so the loop cannot be discarded.
+fn probe_starts_with(s: String, n: Int, hits: Int) -> Int =
+  if n <= 0 then hits
+  else probe_starts_with(s, n - 1, if str_starts_with_at_byte(s, 0, "ab") then hits + 1 else hits)
+
+fn probe_slice(s: String, n: Int, acc: Int) -> Int =
+  if n <= 0 then acc
+  else probe_slice(s, n - 1, acc + string.byte_length(str_slice_bytes(s, 0, 2)))
+
+# Minimum elapsed microseconds over `rounds` runs. A probe that returns the wrong
+# total is folded into the timing as a large penalty, so a probe that silently
+# stopped doing work fails the assertion instead of reporting a fast time.
+fn min_starts_with_us(s: String, remaining: Int, best: Int) -> Int !{IO} =
+  if remaining <= 0 then best
+  else
+    do
+      t0 <- time_now_micros()
+      let hits = probe_starts_with(s, iterations, 0)
+      t1 <- time_now_micros()
+      let elapsed = if hits == iterations then t1 - t0 else t1 - t0 + 1000000
+      min_starts_with_us(s, remaining - 1, if elapsed < best then elapsed else best)
+
+fn min_slice_us(s: String, remaining: Int, best: Int) -> Int !{IO} =
+  if remaining <= 0 then best
+  else
+    do
+      t0 <- time_now_micros()
+      let total = probe_slice(s, iterations, 0)
+      t1 <- time_now_micros()
+      let elapsed = if total == iterations * 2 then t1 - t0 else t1 - t0 + 1000000
+      min_slice_us(s, remaining - 1, if elapsed < best then elapsed else best)
+
+fn budget_us(baseline: Int) -> Int =
+  (if baseline < baseline_floor_us then baseline_floor_us else baseline) * allowed_ratio
+
+fn main() -> Unit !{IO} =
+  do
+    state <- new_state()
+
+    # 2^9 * 2 = 1 KiB and 2^19 * 2 = 1 MiB, both starting with "ab".
+    let short_s = grow("ab", 9)
+    let long_s = grow("ab", 19)
+
+    assert_eq(state, "short is 1 KiB", string.byte_length(short_s), 1024)
+    assert_eq(state, "long is 1 MiB", string.byte_length(long_s), 1048576)
+
+    # --- The cost assertions ---
+    short_starts <- min_starts_with_us(short_s, rounds, 1000000000)
+    long_starts <- min_starts_with_us(long_s, rounds, 1000000000)
+    assert_true(state, "str_starts_with_at_byte cost is independent of string length",
+      long_starts <= budget_us(short_starts))
+
+    short_slice <- min_slice_us(short_s, rounds, 1000000000)
+    long_slice <- min_slice_us(long_s, rounds, 1000000000)
+    assert_true(state, "str_slice_bytes cost is independent of string length",
+      long_slice <= budget_us(short_slice))
+
+    # --- Bounds-branch correctness for str_starts_with_at_byte ---
+    # The offset bounds check is the code the cost fix rewrites, so pin every
+    # branch of it: before / inside / exactly at / past the end, and negative.
+    assert_true(state, "match at offset 0", str_starts_with_at_byte("hello", 0, "he"))
+    assert_false(state, "no match at offset 0", str_starts_with_at_byte("hello", 0, "el"))
+    assert_true(state, "match at interior offset", str_starts_with_at_byte("hello", 1, "el"))
+    assert_true(state, "empty prefix always matches", str_starts_with_at_byte("hello", 2, ""))
+    assert_true(state, "empty prefix at exact end", str_starts_with_at_byte("hello", 5, ""))
+    assert_false(state, "non-empty prefix at exact end", str_starts_with_at_byte("hello", 5, "x"))
+    assert_false(state, "offset past end", str_starts_with_at_byte("hello", 6, ""))
+    assert_false(state, "offset far past end", str_starts_with_at_byte("hello", 99, "h"))
+    assert_false(state, "negative offset", str_starts_with_at_byte("hello", -1, "h"))
+    assert_false(state, "prefix longer than remainder",
+      str_starts_with_at_byte("hello", 3, "loooong"))
+    assert_true(state, "empty string, empty prefix", str_starts_with_at_byte("", 0, ""))
+    assert_false(state, "empty string, non-empty prefix", str_starts_with_at_byte("", 0, "a"))
+
+    # Multi-byte: offsets are BYTES, so 3 is the start of "ś" in "Cześć".
+    assert_true(state, "utf8 match at byte offset", str_starts_with_at_byte("Cześć", 3, "ś"))
+    assert_false(state, "utf8 no match at byte offset", str_starts_with_at_byte("Cześć", 3, "ć"))
+
+    # A GC-managed (concatenated) string, not a static literal — the two carry
+    # their length header differently, and only the managed case is exercised by
+    # the cost probes above.
+    assert_true(state, "match in a managed string",
+      str_starts_with_at_byte("he" ++ "llo", 2, "ll"))
+
+    summary(state)
