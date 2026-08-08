@@ -31,10 +31,35 @@ fn via_dobind(m: Maybe File) -> Maybe Int =
     x <- m
     Just(use_file(x))
 
+# A SHORT-CIRCUITING block's trailing step may produce a linear value: it is the
+# block's result, so the obligation passes to the caller, who binds and consumes
+# it. Every step of a Maybe/Result block has type `Maybe X`/`Result E X`, so the
+# discard rule must look through the container to work here at all — the
+# non-trailing counterpart is tests/conformance/type_error/linear_discarded_result_block.
+fn open_maybe(n: Int) -> Maybe File =
+  do
+    k <- Just(n)
+    Just(File(k))
+
+fn via_trailing_maybe(n: Int) -> Maybe Int =
+  do
+    f <- open_maybe(n)
+    Just(use_file(f))
+
+# `_ <-` is rejected only when the payload is (or may be) linear. The ordinary
+# non-linear wildcard bind — "run this step for its effect, ignore the value" —
+# stays legal; breaking it would break most existing do-blocks.
+fn wildcard_non_linear(n: Int) -> Maybe Int =
+  do
+    _ <- Just(n)
+    Just(n + 1)
+
 fn main() -> Unit !{IO} =
   run_suite("linear_binders", [
     check_eq("let..in alias once", via_let(File(1)), 1),
     check_eq("match var once", via_match(File(2)), 2),
     check_eq("viral field once", via_field(Wrap (File(3))), 3),
-    check_eq("do-bind once", via_dobind(Just (File(4))), Just(4))
+    check_eq("do-bind once", via_dobind(Just (File(4))), Just(4)),
+    check_eq("trailing linear in a Maybe block", via_trailing_maybe(5), Just(5)),
+    check_eq("non-linear `_ <-` still legal", wildcard_non_linear(6), Just(7))
   ])

@@ -36,8 +36,7 @@ fn finish_detached(h) -> Int !{IO} =
 
 # The TRAILING do-step is the block's RESULT, not a discard: a linear value
 # produced there hands the obligation to the CALLER, who must consume it. Here
-# the handle is forked in trailing position (behind a non-trailing `let`, which
-# is non-linear and must stay unflagged), returned, and awaited by the caller.
+# the handle is forked in trailing position, returned, and awaited by the caller.
 # The counterpart — a linear value in a NON-trailing step, dropped with no
 # binder to attach the obligation to — is
 # tests/conformance/type_error/linear_discarded_fork.

@@ -764,7 +764,9 @@ identifier everywhere else (no reserved word).
 **Semantics — consume exactly once.** A value of a linear type must be used
 *exactly once* in a function body: not zero times (a leaked resource), and not
 more than once (use-after-consume). "Use" means any reference to the binding,
-including as the base of a field access (`p.x` uses `p`). Enforcement covers every
+including as the base of a field access (`p.x` uses `p`) — except a bare reference
+in non-final `do`-statement position, which does nothing with the value and is
+rejected as a discard (see **Discarded result** below). Enforcement covers every
 binder that can hold a linear value — **function parameters**, **do-block `let`**,
 **match-arm pattern variables** (a variable pattern aliases the whole linear
 scrutinee; a constructor/tuple sub-pattern binds a linear field), and **`<-`
@@ -776,12 +778,26 @@ checked on every control-flow path:
 - **Branch convergence** — in an `if`/`match`, a linear binding defined outside it
   must be used either zero times in the whole construct, or exactly once in *every*
   branch; using it in some branches but not others is rejected.
-- **Discarded result** — a `do`-block statement in non-final position whose *value*
-  is linear is rejected. The three rules above are keyed on binders, so a linear
-  value that is never bound carries no obligation for them to find unfulfilled:
-  `do { task_fork(s, w); 7 }` would otherwise drop the handle in silence. The
-  **final** statement is exempt — it is the block's result, so the obligation
-  passes to the caller.
+- **Discarded result** — a `do`-block statement in non-final position is rejected
+  when its value is linear, *contains* a linear value as a type argument or tuple
+  component (`Maybe File`), or has a bare type-variable type. So is a wildcard bind
+  (`_ <- e`) of such a value. The three rules above are keyed on binders, so a
+  linear value that is never bound carries no obligation for them to find
+  unfulfilled: `do { task_fork(s, w); 7 }` would otherwise drop the handle in
+  silence. The **final** statement is exempt — it is the block's result, so the
+  obligation passes to the caller.
+
+  Containment is checked because in a `Maybe`/`Result` block *every* statement has
+  type `Maybe X`/`Result E X`; a rule reading only the type's head could never fire
+  in a short-circuiting block. A bare type variable is rejected conservatively —
+  the body is checked with the variable rigid, and a caller may instantiate it at
+  a linear type — which can refuse a program that only ever instantiates it at a
+  non-linear type. Sprout has no linearity bound on a type parameter with which to
+  state the difference; a type variable *nested* in a container (`Maybe a`) is
+  therefore not checked. Two shapes remain accepted and are **not** guaranteed
+  leak-free: a wildcard `match` arm over a linear value (`match f with | _ -> 0`,
+  which does reference `f` exactly once) and a constructor pattern that drops a
+  linear field (`Wrap _`).
 
 A linear ADT is consumed once by matching it (`match f with | File n -> …`) or by
 passing it to a function. A linear record is read via field access, which consumes

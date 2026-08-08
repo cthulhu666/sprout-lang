@@ -1,0 +1,15 @@
+import stdlib.task (Scope, with_scope, task_fork)
+
+# The discarded step's type is the rigid type variable `a`. The body is checked
+# with `a` opaque, so a head-only test sees no linear type and lets it through —
+# then the caller instantiates `a := Task Int` and the handle leaks. Sprout has
+# no linearity bound on a type parameter to state "a is never linear", so a bare
+# type variable in discard position is conservatively rejected.
+fn run_it(f: Int -> a !{IO}) -> Int !{IO} =
+  do
+    f(1)
+    7
+
+fn body(s: Scope) -> Int !{IO} = run_it(\x -> task_fork(s, \_ -> x))
+
+fn main() -> Unit !{IO} = print(to_string(with_scope(body)))
