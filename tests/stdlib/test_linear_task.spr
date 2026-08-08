@@ -1,5 +1,5 @@
 import stdlib.test (TestState, new_state, assert_eq, summary)
-import stdlib.task (Scope, with_scope, task_fork, task_await, detach)
+import stdlib.task (Scope, Task, with_scope, task_fork, task_await, detach)
 
 # Linear `Task a` (M4): a forked handle is consumed exactly once — awaited
 # (retrieve the value) or detached (relinquish it; the scope reclaims it). This
@@ -34,6 +34,23 @@ fn finish_detached(h) -> Int !{IO} =
     detach(h)
     0
 
+# The TRAILING do-step is the block's RESULT, not a discard: a linear value
+# produced there hands the obligation to the CALLER, who must consume it. Here
+# the handle is forked in trailing position (behind a non-trailing `let`, which
+# is non-linear and must stay unflagged), returned, and awaited by the caller.
+# The counterpart — a linear value in a NON-trailing step, dropped with no
+# binder to attach the obligation to — is
+# tests/conformance/type_error/linear_discarded_fork.
+fn fork_in_trailing(s: Scope) -> Task Int !{IO} =
+  do
+    let n = 3
+    task_fork(s, \_ -> n * 4)
+
+fn via_trailing(s: Scope) -> Int !{IO} =
+  do
+    h <- fork_in_trailing(s)
+    task_await(h)
+
 fn main() -> Unit !{IO} =
   do
     state <- new_state()
@@ -45,4 +62,6 @@ fn main() -> Unit !{IO} =
     assert_eq(state, "conditional await branch", c, 5)
     d <- with_scope(\s -> conditional(s, false))
     assert_eq(state, "conditional detach branch", d, 0)
+    e <- with_scope(\s -> via_trailing(s))
+    assert_eq(state, "trailing do-step returns the handle, not a discard", e, 12)
     summary(state)

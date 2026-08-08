@@ -900,7 +900,36 @@ fn lin_do_seq(e: typed_ast.TypedExpr, rest: List typed_ast.TypedDoStep,
               sc_block: Bool, sc: LinScope, env: Dict types.Scheme) -> LinRes =
   match lin_consumed(e, sc, env) with
   | LinErr p m -> LinErr(p, m)
-  | LinOk ec eb -> lin_do_seq_rest(rest, ec, eb, sc_block, sc, env)
+  | LinOk ec eb -> lin_do_seq_checked(e, rest, ec, eb, sc_block, sc, env)
+
+# The consumed-set analysis is keyed on BINDERS (params, `let`, `<-`, pattern
+# vars): every rule asks whether the obligation attached to a NAME was
+# discharged. A linear value produced by a bare do-step and never bound has no
+# name, so no obligation is attached to it and no leak rule can find it
+# unfulfilled — `do { task_fork(s, w); 7 }` silently drops the handle. It has to
+# be caught at the step itself.
+#
+# The TRAILING step is exempt: it is the block's RESULT, returned to the caller,
+# whose obligation it becomes there (the caller's binder picks it up, or the
+# caller's own trailing position passes it on again). `rest` being empty is
+# exactly that test. Errors inside `e` are reported first, so a use-after-consume
+# within the discarded expression still wins the diagnostic.
+fn lin_do_seq_checked(e: typed_ast.TypedExpr, rest: List typed_ast.TypedDoStep,
+                      ec: List LinUse, eb: List LinUse, sc_block: Bool,
+                      sc: LinScope, env: Dict types.Scheme) -> LinRes =
+  if step_discards_linear(e, rest, env) then
+    LinErr(typed_ast.typed_expr_pos(e), discarded_step_msg())
+  else
+    lin_do_seq_rest(rest, ec, eb, sc_block, sc, env)
+
+fn step_discards_linear(e: typed_ast.TypedExpr, rest: List typed_ast.TypedDoStep,
+                        env: Dict types.Scheme) -> Bool =
+  match rest with
+  | [] -> false
+  | [_ | _] -> type_is_linear(typed_ast.typed_expr_type(e), env)
+
+fn discarded_step_msg() -> String =
+  "this step discards a linear value (linear values must be used exactly once); bind its result with `<-` or `let` and consume the binding"
 
 fn lin_do_seq_rest(rest: List typed_ast.TypedDoStep, ec: List LinUse, eb: List LinUse,
                    sc_block: Bool, sc: LinScope, env: Dict types.Scheme) -> LinRes =
