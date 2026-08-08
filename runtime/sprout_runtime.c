@@ -2450,8 +2450,12 @@ long long stdin_read_bytes(long long n_val) {
   SPROUT_HANDLE(h_buf, (long long)(uintptr_t)buf);
   return sprout_make1(find_ctor_tag_by_name("Just"), sprout_handle_get(h_buf));
 }
-_Bool term_is_interactive(void) {
-  return isatty(fileno(stdin)) && isatty(fileno(stdout));
+/* Returns long long, NOT _Bool — see "Bool-returning builtins return long long"
+ * below (near str_starts_with_at_byte). `extern fn … -> Bool` lowers to
+ * `declare i64`, and a _Bool definition would leave the upper 56 bits of the
+ * return register undefined on x86-64. */
+long long term_is_interactive(void) {
+  return (isatty(fileno(stdin)) && isatty(fileno(stdout))) ? 1 : 0;
 }
 long long term_clear(void) {
   fputs("[2J[H", stdout);
@@ -4662,7 +4666,28 @@ long long str_byte_len(long long s_val) {
  * per candidate operator at every token position by lexer.try_ops, so an O(|s|)
  * bounds check here is what made lexing quadratic in file size. Guarded by
  * tests/stdlib/test_byte_offset_cost.spr. */
-_Bool str_starts_with_at_byte(long long s_val, long long byte_pos, long long prefix_val) {
+/* ── Bool-returning builtins return `long long`, never `_Bool` ───────────────
+ *
+ * ABI INVARIANT. A Sprout `extern fn … -> Bool` lowers to `declare i64 @f(…)`,
+ * so the caller reads the FULL 64-bit return register and treats any nonzero
+ * value as true. A `_Bool` definition does not satisfy that contract: on x86-64
+ * SysV, `_Bool` is returned in AL with the upper 56 bits of RAX UNDEFINED, so
+ * clang emits `sete %al` and leaves whatever the last call returned in the high
+ * bytes. `false` then reads back as a nonzero i64 — i.e. as TRUE.
+ *
+ * This bit x86-64 Linux only; on arm64 the callee happened to leave the register
+ * clean, which is why it stayed latent (and why a macOS-only run cannot catch
+ * it). It also only bites on the paths that fall through to a comparison —
+ * an early `return 0` compiles to `xorl %eax, %eax`, which zeroes all of RAX,
+ * so the bug reproduces on some inputs and not others.
+ *
+ * `str_eq` is the one legitimate `_Bool` in this file: it is lowered specially
+ * as `declare i1 @str_eq(ptr, ptr)` + `zext` (see ir_lowering IRStrEq), so its
+ * declaration matches its definition. Everything reached through a plain
+ * `extern fn … -> Bool` must return `long long` 0/1. Guarded by
+ * tests/stdlib/test_bool_extern_abi.spr.
+ * ─────────────────────────────────────────────────────────────────────────── */
+long long str_starts_with_at_byte(long long s_val, long long byte_pos, long long prefix_val) {
   const char* s = (const char*)s_val;
   const char* prefix = (const char*)prefix_val;
   if (s == NULL || prefix == NULL) tcp_fail("str_starts_with_at_byte: null input");
@@ -4670,7 +4695,7 @@ _Bool str_starts_with_at_byte(long long s_val, long long byte_pos, long long pre
   size_t len = sprout_cstr_byte_len(s);
   size_t pos = (size_t)byte_pos;
   if (pos > len) return 0;
-  return strncmp(s + pos, prefix, sprout_cstr_byte_len(prefix)) == 0;
+  return strncmp(s + pos, prefix, sprout_cstr_byte_len(prefix)) == 0 ? 1 : 0;
 }
 
 long long str_find(long long haystack_val, long long needle_val) {
@@ -4689,12 +4714,13 @@ long long str_find(long long haystack_val, long long needle_val) {
   return (long long)count;
 }
 
-_Bool str_starts_with(long long s_val, long long prefix_val) {
+/* long long, not _Bool — see the ABI invariant above. */
+long long str_starts_with(long long s_val, long long prefix_val) {
   const char* s = (const char*)s_val;
   const char* prefix = (const char*)prefix_val;
   if (s == NULL || prefix == NULL) tcp_fail("str_starts_with: null input");
-  size_t prefix_len = strlen(prefix);
-  return strncmp(s, prefix, prefix_len) == 0;
+  size_t prefix_len = sprout_cstr_byte_len(prefix);
+  return strncmp(s, prefix, prefix_len) == 0 ? 1 : 0;
 }
 
 long long str_compare(long long left_val, long long right_val) {
@@ -4720,7 +4746,8 @@ long long regex_validate(const char* pattern) {
   return sprout_make1(find_ctor_tag_by_name("Ok"), 0);
 }
 
-_Bool regex_is_match(const char* pattern, const char* text) {
+/* long long, not _Bool — see the ABI invariant near str_starts_with_at_byte. */
+long long regex_is_match(const char* pattern, const char* text) {
   if (pattern == NULL || text == NULL) tcp_fail("regex_is_match: null input");
   regex_t compiled;
   char* error = NULL;
@@ -4730,7 +4757,7 @@ _Bool regex_is_match(const char* pattern, const char* text) {
   regmatch_t match;
   int status = regexec(&compiled, text, 1, &match, 0);
   regfree(&compiled);
-  return status == 0;
+  return status == 0 ? 1 : 0;
 }
 
 long long regex_find_range(const char* pattern, const char* text) {

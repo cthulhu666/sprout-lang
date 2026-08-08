@@ -104,6 +104,7 @@ ref_read
 ref_write
 regex_escape
 regex_find_range
+regex_is_match  # Pre-existing builtin, not new. Absent until 2026-08-08 only because it was DEFINED `_Bool` while declared `i64`; the gate greps `long long <name>(`, so the ABI mismatch also hid it from this allowlist. Cannot be Sprout: wraps POSIX regcomp/regexec.
 regex_replace_all_literal
 regex_validate
 repl_add_declaration
@@ -156,6 +157,8 @@ str_find
 str_len
 str_slice
 str_slice_bytes  # byte-indexed substring; required to avoid two O(N) codepoint->byte conversions per call inside hot compiler loops (codegen.dbg_count_header_lines pattern). Caller responsible for UTF-8 codepoint boundary alignment; runtime panics on mid-codepoint split.
+str_starts_with  # Pre-existing builtin, not new. Absent until 2026-08-08 only because it was DEFINED `_Bool` while declared `i64`; the gate greps `long long <name>(`, so the ABI mismatch also hid it from this allowlist. Cannot be Sprout: byte-level prefix compare (strncmp) over the raw UTF-8 buffer.
+str_starts_with_at_byte  # Pre-existing builtin, not new. Absent until 2026-08-08 only because it was DEFINED `_Bool` while declared `i64`; the gate greps `long long <name>(`, so the ABI mismatch also hid it from this allowlist. Cannot be Sprout: byte-offset prefix compare; the whole point is to avoid the O(N) remaining-text slice a Sprout implementation would need.
 str_split_lines
 string_concat_many
 string_join_newlines
@@ -187,6 +190,7 @@ __chan_close  # L0.9: close a channel (end-of-stream signal); wakes recv-parked 
 __chan_select  # L0.11: wait on several channels at once (recv), returning which became ready first and its Recv outcome. Registers the current task on every channel's select wait-queue and parks (context switch) until one fires; unregisters from the rest atomically. Drives the cooperative scheduler across N channels — not expressible in Sprout.
 term_clear
 term_hide_cursor
+term_is_interactive  # Pre-existing builtin, not new. Absent until 2026-08-08 only because it was DEFINED `_Bool` while declared `i64`; the gate greps `long long <name>(`, so the ABI mismatch also hid it from this allowlist. Cannot be Sprout: isatty(2) on stdin/stdout.
 term_move
 term_read_key
 term_read_line

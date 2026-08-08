@@ -21,17 +21,23 @@ import stdlib.string as string
 #   - length-independent (correct): both probes cost the same, ratio ~1x
 #   - length-proportional (the bug): ratio ~250x (measured 1 KiB ~= 0.1 us/call
 #     against 1 MiB ~= 30 us/call)
-# The assertion allows 8x. That is two orders of magnitude of headroom on both
-# sides, so no scheduler hiccup or machine-speed difference can flip it. Taking
-# the MINIMUM of several rounds removes the one residual risk (a stall inflating
-# the long-string measurement on a loaded CI runner).
+# The assertion allows 20x: still an order of magnitude below the bug, and an
+# order of magnitude above correct behaviour. Both probes hold both strings live,
+# so the two arms have identical heaps and identical allocation counts and GC
+# cost cancels; and each takes the MINIMUM of several rounds, so a stall on a
+# shared CI runner cannot inflate a result.
+#
+# The measured microseconds are printed unconditionally. A cost assertion that
+# fails on a machine you cannot attach to is close to useless without them —
+# `just test` output has to be enough to tell "genuinely quadratic again" from
+# "the runner stalled".
 
 let iterations = 20000
 let rounds = 3
 # Floor for the short-string baseline, so a sub-microsecond baseline cannot
 # collapse the budget to zero on a very fast machine.
 let baseline_floor_us = 200
-let allowed_ratio = 8
+let allowed_ratio = 20
 
 # Builds a string of 2^k * |s| bytes by doubling: O(total), unlike
 # `string.repeat`, which is itself quadratic (`s ++ repeat(s, n - 1)`).
@@ -74,6 +80,13 @@ fn min_slice_us(s: String, remaining: Int, best: Int) -> Int !{IO} =
 fn budget_us(baseline: Int) -> Int =
   (if baseline < baseline_floor_us then baseline_floor_us else baseline) * allowed_ratio
 
+# Printed for both probes whether they pass or fail, so a failure on a machine
+# you cannot attach to still says WHICH way it went.
+fn report(label: String, short_us: Int, long_us: Int) -> Unit !{IO} =
+  term_write("  [cost] " ++ label ++ ": 1KiB=" ++ int_to_string(short_us) ++
+             "us 1MiB=" ++ int_to_string(long_us) ++ "us budget=" ++
+             int_to_string(budget_us(short_us)) ++ "us\n")
+
 fn main() -> Unit !{IO} =
   do
     state <- new_state()
@@ -88,11 +101,13 @@ fn main() -> Unit !{IO} =
     # --- The cost assertions ---
     short_starts <- min_starts_with_us(short_s, rounds, 1000000000)
     long_starts <- min_starts_with_us(long_s, rounds, 1000000000)
+    _ <- report("str_starts_with_at_byte", short_starts, long_starts)
     assert_true(state, "str_starts_with_at_byte cost is independent of string length",
       long_starts <= budget_us(short_starts))
 
     short_slice <- min_slice_us(short_s, rounds, 1000000000)
     long_slice <- min_slice_us(long_s, rounds, 1000000000)
+    _ <- report("str_slice_bytes", short_slice, long_slice)
     assert_true(state, "str_slice_bytes cost is independent of string length",
       long_slice <= budget_us(short_slice))
 

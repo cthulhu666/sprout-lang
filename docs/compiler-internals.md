@@ -126,6 +126,24 @@ non-empty set silently returned `Nil` until the sret branch was added.
 - Do not add sret to the width=2 path — it works today via direct return; adding
   sret there is unnecessary and risks regressing the working case.
 
+## Bool-returning externs must be defined `long long`, never `_Bool`
+
+**ABI invariant — sibling of the CPR width mismatch above, and silent the same way.**
+
+`extern fn f(…) -> Bool` lowers to `declare i64 @f(…)`. The caller therefore reads the **full 64-bit** return register and treats any nonzero value as `true` (Sprout's `Bool` is an `i64`; `b == true` lowers to `icmp eq i64 %b, 1`). A C definition returning `_Bool` does **not** satisfy that contract: on x86-64 SysV, `_Bool` is returned in `AL` with the upper 56 bits of `RAX` **undefined**. Clang emits `sete %al` and leaves whatever the previous call returned in the high bytes, so `false` reads back as a nonzero `i64` — as `true`.
+
+**So: any function reached through `extern fn … -> Bool` returns `long long` 0/1.** `str_eq` is the one legitimate `_Bool` in the runtime, because it is lowered specially (`declare i1 @str_eq(ptr, ptr)` + `zext`, see `IRStrEq` in `ir_lowering.sprout`) and its declaration matches its definition.
+
+**Why this class of bug hides so well.** Four builtins (`str_starts_with_at_byte`, `str_starts_with`, `regex_is_match`, `term_is_interactive`) were `_Bool` for their entire history:
+
+- **Platform-conditional.** arm64 leaves the register clean in practice, so no macOS run can catch it. It is live only on x86-64 — which is what CI and the release artifacts build.
+- **Input-conditional.** It bites only where the function falls through to a comparison. An early `return 0` compiles to `xorl %eax, %eax`, which zeroes all of `RAX`, so the *same function* is correct for some inputs and wrong for others.
+- **It hid itself from the audit gate.** `scripts/check_approved_builtins.sh` greps for `long long <name>(`, so a `_Bool` definition was invisible to `runtime/APPROVED_BUILTINS` too — the ABI mismatch and the missing allowlist entry had one cause.
+
+It surfaced only when a new test called `str_starts_with_at_byte` with the first inputs in the repo's history that returned false via the comparison path.
+
+**How to apply:** when adding a builtin used as `extern fn … -> Bool`, write `long long` and return `? 1 : 0`. `tests/stdlib/test_bool_extern_abi.spr` asserts every such builtin returns a *canonical* Bool (`b == true || b == false`), which detects a dirty register regardless of which code path produced it — add new Bool externs there.
+
 ## Tuple-CPR and intra-function tuple SRA (scalar replacement)
 
 Design + status: `docs/scalar-replacement-v0.md` (Appendix B, LANDED). Distinct from the

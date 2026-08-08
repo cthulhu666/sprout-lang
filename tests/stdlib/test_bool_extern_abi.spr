@@ -1,0 +1,97 @@
+import stdlib.test (TestState, new_state, assert_true, assert_false, summary)
+import stdlib.regex as regex
+
+# ABI guard for every builtin reached through `extern fn … -> Bool`.
+#
+# THE BUG THIS PINS. `extern fn … -> Bool` lowers to `declare i64 @f(…)`, so the
+# caller reads the full 64-bit return register and treats any nonzero value as
+# true. Four builtins were DEFINED as `_Bool` instead of `long long`:
+# str_starts_with_at_byte, str_starts_with, regex_is_match, term_is_interactive.
+# On x86-64 SysV a `_Bool` return lives in AL with the upper 56 bits of RAX
+# UNDEFINED — clang emits `sete %al` and leaves the previous call's return value
+# in the high bytes — so `false` read back as a nonzero i64, i.e. as TRUE.
+#
+# Why it stayed hidden. It is x86-64-only (arm64 left the register clean), so no
+# macOS run could catch it; and it only bites where the function falls through to
+# a comparison, because an early `return 0` compiles to `xorl %eax, %eax`, which
+# zeroes all of RAX. So it reproduced on SOME inputs and not others, on ONE
+# platform — the worst possible shape for a latent bug. It was found when a new
+# test happened to call str_starts_with_at_byte with the first inputs in the
+# repo's history that returned false via the comparison path.
+#
+# HOW THIS TEST CATCHES IT DIRECTLY, not incidentally. `b == true` lowers to
+# `icmp eq i64 %b, 1` and `b == false` to `icmp eq i64 %b, 0`, so a register
+# carrying garbage compares unequal to BOTH. `is_canonical` therefore detects a
+# non-0/1 Bool regardless of which code path produced it — it does not depend on
+# guessing which inputs leave the high bytes dirty, which is what made the
+# original failure look intermittent.
+#
+# Any new `extern fn … -> Bool` belongs here, and its C definition must return
+# `long long` 0/1. `str_eq` is deliberately absent: it is lowered specially as
+# `declare i1 @str_eq(ptr, ptr)` + `zext`, so its declaration already matches its
+# `_Bool` definition.
+
+fn is_canonical(b: Bool) -> Bool =
+  b == true || b == false
+
+# `regex.is_match` takes a compiled Regex. A compile failure must NOT collapse to
+# `false`, or the assertions below would pass vacuously — it returns a distinct
+# non-canonical-looking sentinel instead, so `is_canonical` still holds but the
+# behavioural assertion fails loudly.
+fn compiled_ok(pattern: String) -> Bool =
+  match regex.compile(pattern) with
+  | Ok _ -> true
+  | Err _ -> false
+
+fn matches(pattern: String, text: String) -> Bool =
+  match regex.compile(pattern) with
+  | Ok re -> regex.is_match(re, text)
+  | Err _ -> false
+
+fn main() -> Unit !{IO} =
+  do
+    state <- new_state()
+
+    # --- str_starts_with_at_byte ---
+    # Both a true and a false result, and critically the false results that
+    # return via strncmp rather than via an early `return 0`.
+    assert_true(state, "swab true is canonical",
+      is_canonical(str_starts_with_at_byte("hello", 0, "he")))
+    assert_true(state, "swab false-by-compare is canonical",
+      is_canonical(str_starts_with_at_byte("hello", 0, "xy")))
+    assert_true(state, "swab false-past-end is canonical",
+      is_canonical(str_starts_with_at_byte("hello", 5, "x")))
+    assert_true(state, "swab early-return-0 is canonical",
+      is_canonical(str_starts_with_at_byte("hello", 99, "h")))
+    assert_false(state, "swab false-by-compare is false",
+      str_starts_with_at_byte("hello", 0, "xy"))
+    assert_false(state, "swab prefix past end is false",
+      str_starts_with_at_byte("hello", 5, "x"))
+
+    # --- str_starts_with ---
+    assert_true(state, "starts_with true is canonical",
+      is_canonical(str_starts_with("hello", "he")))
+    assert_true(state, "starts_with false is canonical",
+      is_canonical(str_starts_with("hello", "xy")))
+    assert_true(state, "starts_with true", str_starts_with("hello", "he"))
+    assert_false(state, "starts_with false", str_starts_with("hello", "xy"))
+    assert_false(state, "starts_with longer-than-haystack",
+      str_starts_with("hi", "hello"))
+
+    # --- regex_is_match ---
+    # Guard the guard: if the pattern failed to compile, `matches` returns false
+    # for both cases and the non-match assertion would pass for the wrong reason.
+    assert_true(state, "regex pattern compiles", compiled_ok("^a+$"))
+    assert_true(state, "regex match is canonical", is_canonical(matches("^a+$", "aaa")))
+    assert_true(state, "regex non-match is canonical", is_canonical(matches("^a+$", "b")))
+    assert_true(state, "regex match", matches("^a+$", "aaa"))
+    assert_false(state, "regex non-match", matches("^a+$", "b"))
+
+    # --- term_is_interactive ---
+    # The VALUE depends on whether stdout is a tty (false under the test harness,
+    # true in a terminal), so only canonicality is assertable — which is exactly
+    # the property that was broken.
+    interactive <- term_is_interactive()
+    assert_true(state, "term_is_interactive is canonical", is_canonical(interactive))
+
+    summary(state)
