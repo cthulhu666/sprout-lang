@@ -554,7 +554,13 @@ static int sprout_gc_lineage_on(void) {
 static int g_gc_hdrcheck = -1;
 static int sprout_gc_hdrcheck_on(void) {
   if (g_gc_hdrcheck < 0) { const char* e = getenv("SPROUT_GC_HDRCHECK"); g_gc_hdrcheck = (e && e[0] == '1') ? 1 : 0; }
-  return g_gc_hdrcheck || g_gc_lineage;
+  /* Must go through sprout_gc_lineage_on(), NOT the raw g_gc_lineage: that global
+     is the -1 "not yet read" sentinel until its first query, and -1 is TRUTHY, so
+     reading it directly reported HDRCHECK as ON in ordinary runs whenever lineage
+     mode had not been queried first. That silently enabled an O(|s|) strlen assert
+     on hot paths, and did so ORDER-DEPENDENTLY (on whether a collection had run
+     yet), which is why it never looked like a consistent slowdown. */
+  return g_gc_hdrcheck || sprout_gc_lineage_on();
 }
 
 /* ── Inline heap header (64-bit word at payload_ptr - 8) ────────────────────
@@ -4342,23 +4348,24 @@ long long str_slice(long long s_i, long long start, long long length) {
  * str_starts_with_at_byte both opened with strlen(), making the lexer quadratic
  * in file size — see tests/stdlib/test_byte_offset_cost.spr).
  *
- * The strlen fallback is defensive (unreachable given the invariant);
- * SPROUT_GC_HDRCHECK=1 asserts aux == strlen so a violation aborts loudly
- * instead of silently returning a wrong length. */
+ * The strlen fallback is defensive (unreachable given the invariant).
+ *
+ * DELIBERATELY NOT HDRCHECK-ASSERTED, and this is load-bearing. The
+ * SPROUT_GC_HDRCHECK=1 assertion for this invariant lives in `str_byte_len`
+ * (below), NOT here. The assertion is a `strlen` — it is O(|s|) by construction —
+ * so putting it in a function called once per token would make HDRCHECK mode
+ * quadratic in file size, which is exactly the bug this helper exists to remove.
+ * CI runs the whole test job with SPROUT_GC_HDRCHECK=1, so that is not a
+ * hypothetical cost: an earlier revision of this helper carried the assertion and
+ * the cost test failed on CI at a 389x length ratio while passing locally without
+ * the flag. Coverage is unchanged from before this helper existed — `str_byte_len`
+ * / `string.byte_length` is the checked entry point, and it is the one every
+ * headered-string producer is exercised through. Keep O(n) assertions out of O(1)
+ * hot paths. */
 static size_t sprout_cstr_byte_len(const char* s) {
   uint64_t h;
   memcpy(&h, s - 8, 8);
-  if ((h & 0xFF) == SPROUT_HEAP_CSTR) {
-    size_t len = (size_t)(h >> 14);
-    if (sprout_gc_hdrcheck_on()) {
-      size_t actual = strlen(s);
-      if (len != actual) {
-        fprintf(stderr, "[sprout] HDRCHECK: cstr_byte_len aux=%zu strlen=%zu\n", len, actual);
-        abort();
-      }
-    }
-    return len;
-  }
+  if ((h & 0xFF) == SPROUT_HEAP_CSTR) return (size_t)(h >> 14);
   return strlen(s);
 }
 
@@ -4651,11 +4658,31 @@ SproutUnboxed2 bytes_get_unboxed(long long bytes_h, long long index) {
  * total decode_char_at over Bytes in stdlib.compiler.source (review F3). */
 
 /* str_byte_len: the Sprout-visible builtin over sprout_cstr_byte_len (see that
- * helper for the header invariant and the HDRCHECK assertion). Kept as a thin
- * wrapper so the header read has exactly one implementation. */
+ * helper for the header invariant).
+ *
+ * This is where the SPROUT_GC_HDRCHECK=1 assertion lives — `aux == strlen`, so any
+ * producer that registers a string with a wrong header length aborts loudly rather
+ * than silently returning a wrong length. It belongs HERE and not in the shared
+ * helper because the assertion is itself a `strlen`: the helper is called once per
+ * token by the byte-offset builtins, so asserting there makes HDRCHECK mode
+ * quadratic in file size. This entry point is called once per query, and every
+ * headered-string producer is exercised through it (tests/stdlib/test_byte_length.spr
+ * covers arena, literal, and interned strings), so invariant coverage is unaffected. */
 long long str_byte_len(long long s_val) {
   const char* s = (const char*)s_val;
   if (s == NULL) tcp_fail("str_byte_len: null input");
+  if (sprout_gc_hdrcheck_on()) {
+    uint64_t h;
+    memcpy(&h, s - 8, 8);
+    if ((h & 0xFF) == SPROUT_HEAP_CSTR) {
+      size_t aux = (size_t)(h >> 14);
+      size_t actual = strlen(s);
+      if (aux != actual) {
+        fprintf(stderr, "[sprout] HDRCHECK: str_byte_len aux=%zu strlen=%zu\n", aux, actual);
+        abort();
+      }
+    }
+  }
   return (long long)sprout_cstr_byte_len(s);
 }
 
