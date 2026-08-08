@@ -362,8 +362,7 @@ _test-stdlib stage dirs="tests/stdlib tests/stdlib/compiler":
   if [[ ! -x "./$STAGE" ]]; then
     echo "ERROR: $STAGE not found" >&2; exit 1
   fi
-  NCPU=$(nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 4)
-  JOBS=$(( NCPU > 8 ? 8 : NCPU ))
+  JOBS=$(bash scripts/test_jobs.sh)
   TMPD=$(mktemp -d /tmp/sprout_tests_XXXXXX)
   trap 'rm -rf "$TMPD"' EXIT
   # Pre-compile the runtime once (each source -> its own .o); tests link the set.
@@ -597,8 +596,7 @@ _compile-examples stage xfail="":
   if [[ ! -x "./$STAGE" ]]; then
     echo "ERROR: $STAGE not found" >&2; exit 1
   fi
-  NCPU=$(nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 4)
-  JOBS=$(( NCPU > 8 ? 8 : NCPU ))
+  JOBS=$(bash scripts/test_jobs.sh)
   TMPD="/tmp/sprout_ex_$$"
   mkdir -p "$TMPD"
   trap 'rm -rf "$TMPD"' EXIT
@@ -694,27 +692,69 @@ _test-reject stage dir noun xfail="":
   if [[ ! -x "./$STAGE" ]]; then
     echo "ERROR: $STAGE not found" >&2; exit 1
   fi
-  total_failed=0
-  total_xfail=0
+  # Fan out JOBS-wide. Each fixture is an independent `--phase check` process, so
+  # this loop was pure serial latency: 99 type-error fixtures cost ~58s on ONE core
+  # while _test-stdlib right next door ran JOBS-wide. Per-fixture output goes to its
+  # own file and is replayed in fixture order at the end, so parallelism does not
+  # interleave or reorder the report.
+  JOBS=$(bash scripts/test_jobs.sh)
+  TMPD=$(mktemp -d /tmp/sprout_reject_XXXXXX)
+  trap 'rm -rf "$TMPD"' EXIT
+  declare -a fixtures=()
   for spr in tests/conformance/{{dir}}/*.spr; do
     [ -f "$spr" ] || continue
-    name="$(basename "${spr%.spr}")"
-    err="tests/conformance/{{dir}}/$name.err"
-    if [[ ! -f "$err" ]]; then
-      echo "==> $name"; echo "  MISSING .err"; total_failed=$((total_failed + 1)); continue
+    fixtures+=("$spr")
+  done
+  declare -a pids=()
+  idx=0
+  active=0
+  for spr in "${fixtures[@]}"; do
+    (
+      set +e
+      name="$(basename "${spr%.spr}")"
+      err="tests/conformance/{{dir}}/$name.err"
+      echo "==> $name" > "$TMPD/$idx.out"
+      if [[ ! -f "$err" ]]; then
+        echo "  MISSING .err" >> "$TMPD/$idx.out"; echo fail > "$TMPD/$idx.st"; exit 0
+      fi
+      is_xfail=0
+      for xf in $XFAIL; do [[ "$name" == "$xf" ]] && is_xfail=1 && break; done
+      expected="$(cat "$err")"
+      out="$("./$STAGE" --phase check "{{stdlib_root}}" "$spr" 2>&1)"
+      if echo "$out" | grep -qF -- "$expected"; then
+        if [[ $is_xfail -eq 1 ]]; then
+          echo "  UNEXPECTED MATCH (remove from xfail)" >> "$TMPD/$idx.out"; echo fail > "$TMPD/$idx.st"
+        else
+          echo "  OK (rejected)" >> "$TMPD/$idx.out"; echo ok > "$TMPD/$idx.st"
+        fi
+      else
+        if [[ $is_xfail -eq 1 ]]; then
+          echo "  xfail (expected diagnostic not yet produced)" >> "$TMPD/$idx.out"; echo xfail > "$TMPD/$idx.st"
+        else
+          echo "  FAILED: expected output to contain: $expected" >> "$TMPD/$idx.out"; echo fail > "$TMPD/$idx.st"
+        fi
+      fi
+    ) &
+    pids+=($!)
+    idx=$((idx + 1))
+    active=$((active + 1))
+    if (( active >= JOBS )); then
+      wait -n 2>/dev/null || wait "${pids[idx - active]}" || true
+      active=$((active - 1))
     fi
-    is_xfail=0
-    for xf in $XFAIL; do [[ "$name" == "$xf" ]] && is_xfail=1 && break; done
-    expected="$(cat "$err")"
-    out="$("./$STAGE" --phase check "{{stdlib_root}}" "$spr" 2>&1 || true)"
-    echo "==> $name"
-    if echo "$out" | grep -qF -- "$expected"; then
-      if [[ $is_xfail -eq 1 ]]; then echo "  UNEXPECTED MATCH (remove from xfail)"; total_failed=$((total_failed + 1))
-      else echo "  OK (rejected)"; fi
-    else
-      if [[ $is_xfail -eq 1 ]]; then echo "  xfail (expected diagnostic not yet produced)"; total_xfail=$((total_xfail + 1))
-      else echo "  FAILED: expected output to contain: $expected"; total_failed=$((total_failed + 1)); fi
-    fi
+  done
+  for pid in "${pids[@]}"; do wait "$pid" || true; done
+  total_failed=0
+  total_xfail=0
+  for (( i = 0; i < idx; i++ )); do
+    cat "$TMPD/$i.out" 2>/dev/null || true
+    # A missing verdict means the subshell died before writing one — count it as a
+    # failure rather than silently passing.
+    case "$(cat "$TMPD/$i.st" 2>/dev/null || echo fail)" in
+      ok) ;;
+      xfail) total_xfail=$((total_xfail + 1)) ;;
+      *) total_failed=$((total_failed + 1)) ;;
+    esac
   done
   echo ""
   [[ $total_xfail -gt 0 ]] && echo "==> $total_xfail {{noun}} fixture(s) xfail (expected)"
@@ -1621,8 +1661,7 @@ test-stress: bootstrap-from-seed
   # STRESS_FILES as each is fixed (an UNEXPECTED PASS flags that it's ready).
   STRESS_XFAIL=""
   failed=0
-  NCPU=$(nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 4)
-  JOBS=$(( NCPU > 8 ? 8 : NCPU ))
+  JOBS=$(bash scripts/test_jobs.sh)
   run_one() {  # prints "ok" or "fail"; never exits.  Per-file err file avoids the
                # shared-$TMPD/err race when invoked concurrently.
     local f="$1" name ll bin out err
@@ -1690,8 +1729,7 @@ ci-fast-gates: bootstrap-from-seed build-fmt-from-seed
   set -uo pipefail
   JUST="{{just_executable()}}"
   TMPD=$(mktemp -d /tmp/sprout_gates_XXXXXX); trap 'rm -rf "$TMPD"' EXIT
-  NCPU=$(nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 4)
-  JOBS=$(( NCPU > 8 ? 8 : NCPU ))
+  JOBS=$(bash scripts/test_jobs.sh)
   # "<label>|<gate-command>"; labels are filesystem-safe (result/output filenames).
   GATES=(
     "approved-builtins|check-approved-builtins"
