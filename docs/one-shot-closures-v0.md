@@ -120,10 +120,15 @@ where it belongs, and this change needs no arrow-type grammar.
 **Meaning.** `once p: F` is a promise by the callee: it will invoke `p` **at most once**, and will
 not store or return it. It licenses the caller to move linear values into the closure it passes.
 
-**Not a runtime check.** Like `borrowing`, `once` is erased before lowering. It is a contract the
-callee's author asserts; the compiler checks callers against it, not the callee's honesty. Sprout's
-three `once` positions (`task_spawn`, `task_fork`, `with_scope`) are all thin wrappers over
-scheduler builtins where the invocation is the runtime's, not Sprout's.
+**Checked on both sides.** The caller is checked against the promise (§6.1), and the callee is
+checked to keep it (§6.5) — an earlier draft left the callee on trust, which review showed made the
+annotation a bare assertion a two-call body could contradict. What is *not* checked is the runtime
+half: that the closure runs at all (§9).
+
+**Not a runtime construct.** Like `borrowing`, `once` is erased before lowering. Sprout's three
+`once` positions (`task_spawn`, `task_fork`, `with_scope`) are thin wrappers over scheduler
+builtins, so the parameter is *passed on* rather than applied — which the at-most-once rule counts
+as its one use.
 
 ## 5. Type-system impact
 
@@ -151,7 +156,7 @@ document the widened meaning as "how the parameter is received" in `types.sprout
 ## 6. Checking rules
 
 All three live in `linear_check`. `lin_arg`'s `is_borrow: Bool` becomes the `Ownership` value, and
-`spine_is_borrow` is joined by a `spine_own`.
+`spine_is_borrow` is replaced by a `spine_own`.
 
 ### 6.1 A lambda at a `once` position
 
@@ -159,7 +164,14 @@ Check the body exactly as `lin_lambda_body` does today, obtaining its consumed s
 set `bb`. Then, instead of `lin_lambda_captures`'s blanket rejection:
 
 - **`bc` (moved captures)** — propagate as the *call's* consumed set. The move happens at the call.
-- **`bb` (borrowed captures)** — reject (§6.3).
+- **`bb` minus `bc` (captures the closure only READ)** — reject (§6.3). Subtracting the consumed
+  set matters: `lin_borrow_var` files an owned binding under BORROWED whenever it appears at a
+  `borrowing` parameter position, and `seq2` keeps it there after the later consume, so the raw
+  borrowed set over-reports. Without the subtraction the inline shape
+  `\_ -> do { write(c, x); close(c) }` — the one this milestone exists to enable — is refused, with
+  a message telling the author to move ownership in and consume it inside the closure, which is
+  exactly what that code already does. Caught in review; it survived because every migrated call
+  site routes through a named `consuming` helper.
 
 Everything else falls out of machinery that already exists, which is the main evidence the scope is
 right:
@@ -207,6 +219,40 @@ caller; borrows are not.
 
 Rejected elsewhere, mirroring "`borrowing` only on a linear type" — and for the same reason, that a
 modifier which silently means nothing is worse than one that is refused.
+
+**Including on a type variable, corrected post-review.** The first version of this note argued that
+`once a` needed no linearity judgement and so was "merely useless rather than unsound", and the
+implementation accepted it. That was wrong, and the counterexample is short:
+
+```
+fn keep(work: once a) -> a = work
+fn oops(f: File) -> Int =
+  do
+    let g = keep(\_ -> release(f))
+    g(()) + g(())            # verified: released twice
+```
+
+The licence does not rest on the argument's linearity — it rests on the callee being able to
+**invoke** the parameter at most once. At `once a` the callee cannot invoke it at all, so the
+promise is vacuous, while the value stays freely returnable and duplicable. `once a` is therefore
+*strictly worse* than a concrete parameter whose promise is simply dishonest, and it is rejected.
+Fixture: `once_on_type_variable`.
+
+### 6.5 The callee must keep its promise
+
+A function declaring `once p` may use `p` **at most once along any path**. Without this the
+annotation is a bare assertion, and `fn run_twice(work: once Unit -> Int) = work(()) + work(())`
+consumes a caller's moved-in value twice — verified, before the check existed.
+
+Implemented by re-running the ordinary body walk with *only* that parameter in scope, which buys
+exact branch-aware counting for free (`if c then p(x) else p(x)` is one invocation per path and
+stays legal, where a syntactic occurrence count would reject it). It runs strictly after the main
+walk has passed, and that ordering is what makes the attribution sound: with no other name tracked,
+any error the second walk reports can only be about this parameter.
+
+**Zero uses stay legal** — the bound is from above, so a callee may decline to invoke. That is why
+this is a reuse rule rather than the linear exactly-once rule, and it is also precisely the gap §9
+describes.
 
 ## 7. Error-message impact
 
@@ -296,6 +342,10 @@ TDD — each RED against the pre-change tree first.
 **Negative** (`tests/conformance/type_error/`)
 - `once_capture_borrow` — §6.3's counterexample;
 - `once_capture_unconsumed` — moved in, never consumed inside the body → leak still reported;
+- `once_on_type_variable` — §6.4's verified double release;
+- `once_callee_invokes_twice` — §6.5's dishonest callee;
+- `once_mismatch_names_once` / `once_instance_omits_class_once` — the two ownership-mismatch
+  diagnostics must explain themselves in terms of `once`, not `borrowing`;
 - `once_capture_double_move` — the same value moved into two closures;
 - `once_use_after_move` — moved in, then used at the caller;
 - `once_on_non_function` — §6.4;

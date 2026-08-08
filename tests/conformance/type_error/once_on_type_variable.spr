@@ -1,0 +1,35 @@
+module main
+
+# M4.4a SOUNDNESS. `once` on a TYPE-VARIABLE parameter must be rejected.
+#
+# An early version of `bad_once_here` accepted it, reasoning that `once` needs no
+# linearity judgement about the argument, so `fn run(f: once a)` was "merely
+# useless rather than unsound". That reasoning is backwards, and this file is the
+# counterexample it missed:
+#
+#   fn keep(work: once a) -> a = work
+#   fn oops(f: File) -> Int =
+#     do
+#       let g = keep(\_ -> release(f))
+#       g(()) + g(())            # released TWICE — printed 42 for File(21)
+#
+# `once`'s licence does not rest on the argument's linearity; it rests on the
+# callee being able to invoke the parameter AT MOST ONCE. At `once a` the callee
+# cannot invoke it at all (the type is not known to be a function), so the promise
+# is vacuous — while the value stays freely returnable and duplicable. A `once a`
+# parameter is therefore strictly worse than a dishonestly-annotated concrete one.
+# With a socket this is a double `tcp_close` on a descriptor the OS may already
+# have re-handed out.
+
+type linear File = File Int
+
+fn release(f: consuming File) -> Int = match f with | File n -> n
+
+fn keep(work: once a) -> a = work
+
+fn oops(f: File) -> Int =
+  do
+    let g = keep(\_ -> release(f))
+    g(()) + g(())
+
+fn main() -> Unit !{IO} = print(to_string(oops(File(21))))

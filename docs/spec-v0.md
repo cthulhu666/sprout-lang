@@ -901,8 +901,18 @@ export fn task_spawn(scope: Scope, work: once Unit -> Unit !{IO}) -> Unit !{IO} 
 ```
 
 This is a promise by the **callee**: it invokes `work` **at most once**, and does
-not store or return it. `once` is only meaningful on a function-typed parameter;
-elsewhere it is an error.
+not store or return it. The promise is **checked, not assumed** — a function
+declaring `once p` may use `p` at most once along any path, counted per
+control-flow path, so `if c then p(x) else p(x)` is one invocation and is legal
+while `p(x) + p(x)` is not. Zero uses are legal: the bound is from above.
+
+`once` is only meaningful on a **function-typed** parameter; elsewhere it is an
+error. In particular it is rejected on a **type-variable** parameter, and for a
+reason of its own — not the universe argument that rejects `borrowing a`. The
+licence `once` grants rests on the callee being able to *invoke* the parameter,
+which it cannot do when the type is not known to be a function, while the value
+would remain freely returnable and duplicable. `once a` is therefore strictly
+worse than a concrete parameter whose promise is merely wrong.
 
 The promise licenses one thing at the **caller**: a lambda passed at a `once`
 position may **move** linear values into itself. A moved capture is consumed *at
@@ -916,10 +926,13 @@ task_spawn(scope, \_ -> handle(conn))   # conn is MOVED into the closure
 
 - Each moved value must be consumed **exactly once inside the closure body**, on
   every path. The body is checked by the ordinary rules, so branch convergence and
-  reuse detection apply unchanged within it.
-- A **borrowed** value may still not be captured, at a `once` parameter or
-  anywhere else. The closure may run after the owner has consumed the value, and
-  Sprout has no escaping/non-escaping or lifetime distinction to rule that out.
+  reuse detection apply unchanged within it. Reading the moved value before
+  consuming it inside the same closure is a normal borrow-then-consume and is
+  allowed — `\_ -> do { write(c, x); close(c) }` is the intended shape.
+- A value the closure only **borrows** — reads without consuming — may still not
+  be captured, at a `once` parameter or anywhere else. The closure may run after
+  the owner has consumed the value, and Sprout has no escaping/non-escaping or
+  lifetime distinction to rule that out.
 - A **linear lambda parameter** is still rejected: `once` bounds how often the
   closure runs, not what may be handed to it on each run.
 - `once` is **erased**, like the ownership modifiers, and is part of the function
@@ -929,9 +942,16 @@ task_spawn(scope, \_ -> handle(conn))   # conn is MOVED into the closure
 only — matching Rust's `FnOnce` and OxCaml's `once`, both of which are also
 at-most-once. Leak-freedom for a moved value therefore also depends on the
 callee's runtime contract that the closure *does* run: for `stdlib.task` that is
-`with_scope`'s unconditional join. Cancelling a scope force-drops tasks that have
-not started, so a value moved into a cancelled task's closure is not released.
-**Leak-freedom for moved values holds absent scope cancellation.**
+`with_scope`'s unconditional join.
+
+**Leak-freedom for moved values holds absent scope cancellation.** Cancelling a
+scope force-drops tasks that have not started, and every `with_timeout` expiry
+reaches the same path, so a value moved into such a task's closure is never
+released — while the program still type-checks as consume-exactly-once clean.
+Sprout has no destructors, so closing this requires cancellation-time resource
+release in the scheduler rather than a typing rule. Until it exists, do not move a
+linear resource into a task in a scope that may be cancelled or timed out: acquire
+it inside the task instead.
 
 **Deferred (rejected with a diagnostic, never silently accepted):**
 

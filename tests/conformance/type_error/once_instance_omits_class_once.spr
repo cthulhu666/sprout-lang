@@ -1,0 +1,22 @@
+module main
+
+# M4.4a DIAGNOSTIC, class/instance side. A call dispatches through the CLASS
+# signature, so callers move linear values into the closure they pass on the
+# strength of the class's `once`. An instance free to invoke it repeatedly would
+# consume those values more than once, so the modifiers must agree — and the
+# message must say so.
+#
+# The M4.6 message this replaces described a LEAK ("an instance that only borrows
+# where the class consumes discharges the caller's obligation and leaks the
+# value"), which is the wrong failure for this pair: nothing here leaks, the
+# defect is an unbounded invocation count.
+
+class Runner a {
+  fn run_it(s: a, work: once Unit -> Int) -> Int
+}
+
+instance Runner Int {
+  fn run_it(s: Int, work: Unit -> Int) -> Int = s + work(()) + work(())
+}
+
+fn main() -> Unit !{IO} = print(to_string(run_it(1, \_ -> 2)))
