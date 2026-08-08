@@ -1,0 +1,24 @@
+module main
+
+# M4.6 REGRESSION for the bug this milestone fixes at the root. Calling through
+# a BOUND borrowing function must not discharge the caller's consume obligation.
+#
+# Under M4.5's name-keyed `@parammode:` table the mode was found only when the
+# callee was a literal top-level name; `g` is a local, so the lookup missed, the
+# argument read as CONSUMED, and this program would have been accepted with the
+# socket silently leaked. (M4.5 shipped a blanket "cannot be used as a value"
+# rejection precisely because it could not tell this case from a legal one.)
+#
+# The binder is named `sock` and the .err pins that name, so this cannot pass by
+# flagging the legal zero-use `borrowing` parameter inside `peek`.
+
+type linear File = File Int
+
+fn peek(f: borrowing File) -> Int = 0
+
+fn forgets_to_release(sock: File) -> Int =
+  do
+    let g = peek
+    g(sock)
+
+fn main() -> Unit !{IO} = print(to_string(forgets_to_release(File(1))))

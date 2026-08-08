@@ -131,7 +131,7 @@ fn main() -> Unit !{IO} =
     assert_true(state, "extract_ctor_infos: round-trips via iface encode/decode",
       match iface_codec.decode_iface_file(
         iface_codec.encode_iface_file(
-          iface_codec.IfaceFile(4, "mymod", Nil, ctors_mymod, Nil, Nil))) with
+          iface_codec.IfaceFile(5, "mymod", Nil, ctors_mymod, Nil, Nil))) with
       | Nothing -> false
       | Just _ -> true)
 
@@ -172,7 +172,7 @@ fn main() -> Unit !{IO} =
 
     # --- round-trip: full IfaceFile with populated tables ---
 
-    let full_iface = iface_codec.IfaceFile(4, "mymod", Nil,
+    let full_iface = iface_codec.IfaceFile(5, "mymod", Nil,
       iface_codec.extract_ctor_infos(prog, "mymod"),
       iface_codec.extract_class_infos(prog, "mymod"),
       iface_codec.extract_instance_infos(prog, "mymod"))

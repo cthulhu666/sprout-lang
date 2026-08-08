@@ -8,8 +8,8 @@ fn main() -> Unit !{IO} =
   # REPL produced garbage output because the eval path wrapped it in
   # `print(to_string(...))` despite there being no ToString instance for
   # function types.  The fix adds is_function_scheme + fn_display_type_str.
-  let fn_int_str = types.mono(types.TFunc(types.type_int(), types.type_string(), types.effect_pure()))
-      fn_int_int = types.mono(types.TFunc(types.type_int(), types.type_int(), types.effect_pure()))
+  let fn_int_str = types.mono(types.TFunc(types.type_int(), types.type_string(), types.effect_pure(), types.OwnConsume))
+      fn_int_int = types.mono(types.TFunc(types.type_int(), types.type_int(), types.effect_pure(), types.OwnConsume))
       int_scheme = types.mono(types.type_int())
       list_scheme = types.mono(types.type_list(types.type_int()))
       poly_vec = types.Scheme(Cons("a", Nil), Nil, types.type_list(types.TVar(types.tyvar_id("a"))), types.effect_pure(), Nil)

@@ -188,7 +188,7 @@ fn run_file_emit_iface(module_name: String, path: String, stdlib_root: String, f
           let ctors = iface_codec.extract_ctor_infos(typed_prog, module_name)
           let classes = iface_codec.extract_class_infos(typed_prog, module_name)
           let instances = iface_codec.extract_instance_infos(typed_prog, module_name)
-          let iface = iface_codec.IfaceFile(4, module_name, schemes, ctors, classes, instances)
+          let iface = iface_codec.IfaceFile(5, module_name, schemes, ctors, classes, instances)
           print(iface_codec.encode_iface_file(iface))
 
 # ---------------------------------------------------------------------------

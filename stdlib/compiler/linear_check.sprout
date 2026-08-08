@@ -130,12 +130,12 @@ export fn program_has_linear(env: Dict types.Scheme) -> Bool =
 
 fn ctor_result_ty(t: types.Type) -> types.Type =
   match t with
-  | types.TFunc _ ret _ -> ctor_result_ty(ret)
+  | types.TFunc _ ret _ _ -> ctor_result_ty(ret)
   | _ -> t
 
 fn ctor_param_tys(t: types.Type) -> List types.Type =
   match t with
-  | types.TFunc p rest _ -> Cons(p, ctor_param_tys(rest))
+  | types.TFunc p rest _ _ -> Cons(p, ctor_param_tys(rest))
   | _ -> Nil
 
 # Read off the constructor's tyvar instantiation by structurally aligning its
@@ -148,9 +148,9 @@ fn struct_match(decl: types.Type, concrete: types.Type, acc: Dict types.Type) ->
       match concrete with
       | types.TApp g y -> struct_match(x, y, struct_match(f, g, acc))
       | _ -> acc
-  | types.TFunc a b _ ->
+  | types.TFunc a b _ _ ->
       match concrete with
-      | types.TFunc c d _ -> struct_match(b, d, struct_match(a, c, acc))
+      | types.TFunc c d _ _ -> struct_match(b, d, struct_match(a, c, acc))
       | _ -> acc
   | types.TTuple items ->
       match concrete with
@@ -170,7 +170,7 @@ fn apply_tvar_subst(sub: Dict types.Type, t: types.Type) -> types.Type =
       | Just concrete -> concrete
       | Nothing -> t
   | types.TApp f x -> types.TApp(apply_tvar_subst(sub, f), apply_tvar_subst(sub, x))
-  | types.TFunc a b e -> types.TFunc(apply_tvar_subst(sub, a), apply_tvar_subst(sub, b), e)
+  | types.TFunc a b e o -> types.TFunc(apply_tvar_subst(sub, a), apply_tvar_subst(sub, b), e, o)
   | types.TTuple items -> types.TTuple(list_map(\i -> apply_tvar_subst(sub, i), items))
   | _ -> t
 
@@ -250,7 +250,7 @@ fn first_linear_param(params: List ast.Param, lam_type: types.Type, env: Dict ty
   | Nil -> Nothing
   | Cons prm rest ->
       match lam_type with
-      | types.TFunc a b _ ->
+      | types.TFunc a b _ _ ->
           if type_is_linear(a, env) then Just(param_name(prm))
           else first_linear_param(rest, b, env)
       | _ -> Nothing
@@ -275,11 +275,8 @@ fn after_consume_msg(name: String) -> String =
 fn consumed_borrow_msg(name: String) -> String =
   "'" ++ name ++ "' is a borrowing parameter and cannot be consumed; take it `consuming` if this function should release it"
 
-fn fn_as_value_msg(name: String) -> String =
-  "'" ++ name ++ "' takes a borrowing parameter and cannot be used as a value (the borrow would be lost at the indirect call); call it directly instead"
-
-fn method_modifier_msg(name: String) -> String =
-  "`borrowing`/`consuming` is not supported on a class or instance method (parameter '" ++ name ++ "'): a call dispatches through the class signature, which carries no modifier"
+fn method_mismatch_msg(name: String) -> String =
+  "instance method parameter '" ++ name ++ "' must match the class declaration's ownership: a call dispatches through the CLASS signature, so an instance that only borrows where the class consumes discharges the caller's obligation and leaks the value"
 
 fn borrowed_field_read_msg() -> String =
   "a linear field cannot be read out of a borrowed value (its owner will still release it); take the parameter `consuming` if this function should own it"
@@ -413,7 +410,7 @@ fn scope_add_owned_after(names: List String, sc: LinScope) -> LinScope =
 
 fn lin_consumed(e: typed_ast.TypedExpr, sc: LinScope, env: Dict types.Scheme) -> LinRes =
   match e with
-  | typed_ast.TVar name _ p -> lin_var_or_fn_value(name, p, sc, env)
+  | typed_ast.TVar name _ p -> lin_var(name, p, sc)
   | typed_ast.TInt _ _ _ -> LinOk(Nil, Nil)
   | typed_ast.TFloat _ _ _ -> LinOk(Nil, Nil)
   | typed_ast.TBool _ _ _ -> LinOk(Nil, Nil)
@@ -443,29 +440,10 @@ fn lin_consumed(e: typed_ast.TypedExpr, sc: LinScope, env: Dict types.Scheme) ->
 # returning a `borrowing` parameter puts it in the consumed set, and
 # `param_obligations` rejects any borrowed name found there. Recording it as a
 # borrow instead would make the violation unrepresentable.
-# The mode lives in a name-keyed side table, NOT in the function type, so it is
-# lost the moment a `borrowing` function stops being called by name: at an
-# indirect call `callee_mask` finds nothing and every argument reads as consuming,
-# which DISCHARGES the caller's obligation while the real callee only borrows —
-# the resource then leaks with no diagnostic. Pre-M4.5 this was unreachable,
-# because every `(File) -> Int` had to consume its argument.
-#
-# Putting the mode in the type is the real fix and is a type-system change (it has
-# to survive unification, generalization and the iface codec). Until then v0
-# refuses to let such a function become a value.
-# Regression: tests/conformance/type_error/borrow_fn_as_value.
-fn lin_var_or_fn_value(name: String, p: source.SourcePos, sc: LinScope,
-                       env: Dict types.Scheme) -> LinRes =
-  if mask_has_borrow(param_mode_mask_of(name, env)) then LinErr(p, fn_as_value_msg(name))
-  else lin_var(name, p, sc)
-
-fn mask_has_borrow(mask: String) -> Bool = mask_has_borrow_at(mask, 0)
-
-fn mask_has_borrow_at(mask: String, k: Int) -> Bool =
-  if k >= str_len(mask) then false
-  else if str_slice(mask, k, 1) == "b" then true
-  else mask_has_borrow_at(mask, k + 1)
-
+# M4.6: the mode now rides on the function TYPE, so a `borrowing` function used
+# as a VALUE keeps its mode and no longer needs the blanket rejection M4.5 had
+# here. A function-typed binding is never itself linear, so walking one as an
+# ordinary reference records nothing.
 fn lin_var(name: String, p: source.SourcePos, sc: LinScope) -> LinRes =
   if scope_is_linear(name, sc) then LinOk(Cons (LinUse(name, p), Nil), Nil)
   else LinOk(Nil, Nil)
@@ -508,74 +486,68 @@ fn lin_read_var(name: String, p: source.SourcePos, sc: LinScope,
 
 # --- calls: classify each argument position by the callee's declared modes ---
 
-# The `@parammode:<name>` mask infer records for a top-level function: one
-# character per parameter, 'b' for `borrowing`. A call through a value (a lambda,
-# a function-typed parameter, a typeclass method) has no mask, and an absent or
-# short mask reads as "consuming" — the pre-M4.5 behaviour, and the safe default.
-fn callee_mask(callee: typed_ast.TypedExpr, env: Dict types.Scheme) -> String =
-  match callee with
-  | typed_ast.TVar name _ _ -> param_mode_mask_of(name, env)
-  | _ -> ""
-
-fn param_mode_mask_of(name: String, env: Dict types.Scheme) -> String =
-  match dict_get("@parammode:" ++ name, env) with
-  | Nothing -> ""
-  | Just scheme ->
-      match scheme with
-      | types.Scheme _ _ body _ _ -> mask_of_type(body)
-
-fn mask_of_type(t: types.Type) -> String =
+# M4.6: each argument position is classified from the CALLEE'S TYPE — one
+# `types.Ownership` per `TFunc` node of its spine — rather than from a mask keyed
+# by the callee's declaration name. The type is present on every callee shape, so
+# a lambda, a function-typed parameter, a `let`-bound function and a typeclass
+# method are all classified correctly; the name-keyed table saw none of them and
+# silently read every argument as consuming, discharging the caller's obligation.
+#
+# A spine shorter than the argument list (an unresolved callee type, over-
+# application) yields OwnConsume, which is the conservative reading.
+fn spine_is_borrow(t: types.Type) -> Bool =
   match t with
-  | types.TConst id -> types.type_id_name(id)
-  | _ -> ""
+  | types.TFunc _ _ _ own -> types.ownership_is_borrow(own)
+  | _ -> false
 
-# str_slice's third argument is a LENGTH, not an end index
-# (runtime/sprout_runtime.c: `str_slice(s_i, start, length)`), so reading one
-# character at k is `str_slice(mask, k, 1)`. This was `k + 1`, which took k+1
-# characters and so returned a single character only when k was the FIRST or the
-# LAST parameter — every middle `borrowing` position silently degraded to
-# consuming. Every borrowing parameter in stdlib/net.sprout sits at index 0,
-# which is why the original test suite passed over a broken mask reader.
-# Regression: tests/stdlib/test_linear_borrowing.spr `borrow_in_middle_position`.
-fn mask_is_borrow(mask: String, k: Int) -> Bool =
-  if k < 0 || k >= str_len(mask) then false
-  else str_slice(mask, k, 1) == "b"
+fn spine_rest(t: types.Type) -> types.Type =
+  match t with
+  | types.TFunc _ ret _ _ -> ret
+  | _ -> t
 
-# A bare-name callee is a CALL of that function, not a use of it as a value, so
-# it is not walked as an expression — that is what lets the TVar arm reject a
-# `borrowing` function used as a value without also rejecting every call to one.
-# Any other callee shape (a lambda, a field, a call result) is walked normally.
+# ALIGNMENT. infer prepends a TDict evidence node per class constraint to a
+# constrained call's argument list (maybe_rewrite_class_method_call), but the
+# callee's TYPE spine has no dictionary parameter — those are added later, by
+# lowering.append_hidden_param_types. Zipping the two naively therefore shifts
+# every mode by the number of dictionaries, so a `borrowing` parameter on a class
+# method reads as consuming and the value is double-counted. A TDict carries no
+# linear use of its own (lin_consumed's TDict arm is LinOk(Nil, Nil)), so
+# dropping the leading run before the zip is both necessary and complete.
+# Regression: tests/stdlib/test_linear_borrow_in_type.spr `via_class`.
+fn drop_leading_dicts(args: List typed_ast.TypedExpr) -> List typed_ast.TypedExpr =
+  match args with
+  | Nil -> Nil
+  | Cons a rest ->
+      match a with
+      | typed_ast.TDict _ _ _ _ -> drop_leading_dicts(rest)
+      | _ -> args
+
 fn lin_call(callee: typed_ast.TypedExpr, args: List typed_ast.TypedExpr,
             sc: LinScope, env: Dict types.Scheme) -> LinRes =
-  match callee with
-  | typed_ast.TVar _ _ _ -> lin_call_args(args, callee_mask(callee, env), 0, Nil, Nil, sc, env)
-  | _ -> lin_call_walked(callee, args, sc, env)
-
-fn lin_call_walked(callee: typed_ast.TypedExpr, args: List typed_ast.TypedExpr,
-                   sc: LinScope, env: Dict types.Scheme) -> LinRes =
   match lin_consumed(callee, sc, env) with
   | LinErr p m -> LinErr(p, m)
-  | LinOk cc cb -> lin_call_args(args, callee_mask(callee, env), 0, cc, cb, sc, env)
+  | LinOk cc cb ->
+      lin_call_args(drop_leading_dicts(args), typed_ast.typed_expr_type(callee), cc, cb, sc, env)
 
 # Arguments fold left-to-right (spec-v0.md §6.1), so `seq2` sees them in real
 # evaluation order and the borrow-after-consume rule is exact rather than
 # approximate.
-fn lin_call_args(args: List typed_ast.TypedExpr, mask: String, k: Int,
+fn lin_call_args(args: List typed_ast.TypedExpr, spine: types.Type,
                  ac: List LinUse, ab: List LinUse,
                  sc: LinScope, env: Dict types.Scheme) -> LinRes =
   match args with
   | Nil -> LinOk(ac, ab)
   | Cons a rest ->
-      match lin_arg(a, mask_is_borrow(mask, k), sc, env) with
+      match lin_arg(a, spine_is_borrow(spine), sc, env) with
       | LinErr p m -> LinErr(p, m)
-      | LinOk c b -> lin_call_args_rest(rest, mask, k, ac, ab, c, b, sc, env)
+      | LinOk c b -> lin_call_args_rest(rest, spine, ac, ab, c, b, sc, env)
 
-fn lin_call_args_rest(rest: List typed_ast.TypedExpr, mask: String, k: Int,
+fn lin_call_args_rest(rest: List typed_ast.TypedExpr, spine: types.Type,
                       ac: List LinUse, ab: List LinUse, c: List LinUse, b: List LinUse,
                       sc: LinScope, env: Dict types.Scheme) -> LinRes =
   match seq2(ac, ab, c, b) with
   | LinErr p m -> LinErr(p, m)
-  | LinOk nc nb -> lin_call_args(rest, mask, k + 1, nc, nb, sc, env)
+  | LinOk nc nb -> lin_call_args(rest, spine_rest(spine), nc, nb, sc, env)
 
 # One argument. At a `borrowing` position a LINEAR argument must be a bare
 # variable: a freshly-built linear value there would be borrowed and then dropped,
@@ -919,21 +891,32 @@ export fn any_param_mode_written(params: List ast.Param) -> Bool =
   | Nil -> false
   | Cons prm rest -> if mode_is_written(param_mode(prm)) then true else any_param_mode_written(rest)
 
-# A class or instance method may not carry an ownership modifier. The `@parammode:`
-# mask is recorded only for FnDecl/ExternFnDecl and a method call dispatches through
-# the CLASS signature, which has no modifier — so a `borrowing` instance-method
-# parameter was honoured inside the body and invisible at every call site: the
-# argument counted as consumed at the call, was merely borrowed in the body, and
-# the once-only obligation was discharged by nobody.
-# Regression: tests/conformance/type_error/borrow_instance_method.
-export fn method_modifier_error(params: List ast.Param) -> Maybe String =
+# M4.6: an instance method MAY carry an ownership modifier — the mode is on the
+# method's type now, so a call site can see it — but it must AGREE with the class
+# declaration. A call dispatches through the CLASS signature, so if the class says
+# the parameter is consumed and the instance only borrows it, the caller's
+# obligation is discharged by a body that releases nothing and the value leaks.
+# That is the exact defect M4.5 rejected the whole feature to avoid; here it is
+# reported precisely instead.
+#
+# Compared as OWNERSHIP, not as written modifiers: `consuming` on the instance
+# against an unmodified class parameter is agreement, since both consume.
+# Swift SE-0377 reaches the same rule — for a noncopyable parameter the
+# convention "must match exactly", protocol conformances included.
+# Regression: tests/conformance/type_error/borrow_instance_method,
+# tests/stdlib/test_linear_borrow_in_type.spr `via_consuming`.
+export fn method_mode_mismatch(params: List ast.Param, class_type: types.Type) -> Maybe String =
   match params with
   | Nil -> Nothing
   | Cons prm rest ->
-      if mode_is_written(param_mode(prm)) then Just(param_name(prm))
-      else method_modifier_error(rest)
+      if ownership_agrees(param_mode(prm), class_type)
+      then method_mode_mismatch(rest, spine_rest(class_type))
+      else Just(param_name(prm))
 
-export fn method_modifier_message(name: String) -> String = method_modifier_msg(name)
+fn ownership_agrees(m: ast.ParamMode, class_type: types.Type) -> Bool =
+  mode_is_borrowing(m) == spine_is_borrow(class_type)
+
+export fn method_mode_mismatch_message(name: String) -> String = method_mismatch_msg(name)
 
 # Validate modifiers against a signature ALONE, with no body to walk. Used for
 # `extern fn`, which has no body and so never reaches check_fn_linear.
@@ -955,7 +938,7 @@ fn first_bad_modifier(params: List ast.Param, fn_type: types.Type,
   | Nil -> Nothing
   | Cons prm rest ->
       match fn_type with
-      | types.TFunc a b _ -> bad_modifier_here(prm, a, rest, b, env)
+      | types.TFunc a b _ _ -> bad_modifier_here(prm, a, rest, b, env)
       | _ -> Nothing
 
 fn bad_modifier_here(prm: ast.Param, a: types.Type, rest: List ast.Param,
@@ -977,7 +960,7 @@ fn owned_param_names(params: List ast.Param, fn_type: types.Type,
   | Nil -> Nil
   | Cons prm rest ->
       match fn_type with
-      | types.TFunc a b _ ->
+      | types.TFunc a b _ _ ->
           linear_param_cons(type_is_linear(a, env) && ! mode_is_borrowing (param_mode(prm)),
                             param_name(prm), owned_param_names(rest, b, env))
       | _ -> Nil
@@ -989,7 +972,7 @@ fn borrowed_param_names(params: List ast.Param, fn_type: types.Type,
   | Nil -> Nil
   | Cons prm rest ->
       match fn_type with
-      | types.TFunc a b _ ->
+      | types.TFunc a b _ _ ->
           linear_param_cons(type_is_linear(a, env) && mode_is_borrowing(param_mode(prm)),
                             param_name(prm), borrowed_param_names(rest, b, env))
       | _ -> Nil

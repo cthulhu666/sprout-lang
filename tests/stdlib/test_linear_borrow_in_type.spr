@@ -1,0 +1,73 @@
+import stdlib.test (check_eq, run_suite)
+
+# M4.6: the parameter ownership mode lives in the function TYPE (types.TFunc's
+# Ownership tag), not in a name-keyed `@parammode:` side table. The table was
+# consultable only when the callee was a literal top-level name, so at any other
+# callee shape every argument read as CONSUMING — which discharged the caller's
+# obligation while the callee only borrowed, and the resource leaked with no
+# diagnostic. M4.5 rejected those shapes rather than miscount them; with the mode
+# in the type they are checkable, so the rejections are gone.
+#
+# Rejection counterparts: tests/conformance/type_error/{borrow_fn_as_value,
+# borrow_instance_method,mode_mismatch_consume_for_borrow,borrow_value_still_leaks}.
+# See docs/linear-borrowing-v0.md §18.
+
+type linear File = File Int
+
+fn peek(f: borrowing File) -> Int = 0
+fn release(f: consuming File) -> Int = match f with | File n -> n
+
+# --- 1. a borrowing function used as a VALUE -------------------------------
+# `g` is a local binding, so there is no declaration name to key a side table
+# by; the mode survives only because it rides on `peek`'s type. Two calls
+# through `g` must BORROW (not reuse), and the consume obligation must still be
+# outstanding afterwards — `release` is what discharges it.
+fn via_value(f: File) -> Int =
+  do
+    let g = peek
+    let a = g(f)
+    let b = g(f)
+    a + b + release(f)
+
+# --- 2. a borrowing parameter on a CLASS method ----------------------------
+# A class-method call dispatches through the class signature, so M4.5 could not
+# see the modifier at the call site at all and rejected it outright.
+#
+# ALIGNMENT GUARD: infer prepends a TDict evidence node to a constrained call's
+# argument list (infer.maybe_rewrite_class_method_call), while the callee's TYPE
+# spine has no dictionary parameter. `c` is therefore parameter 1 in the source
+# but argument 2 at check time — zipping the two naively shifts every mode by
+# the number of dictionaries and this case reads as a reuse of `f`.
+class Sink a {
+  fn send(s: a, c: borrowing File) -> Int
+}
+
+instance Sink Int {
+  fn send(s: Int, c: borrowing File) -> Int = s
+}
+
+fn via_class(f: File) -> Int =
+  do
+    let a = send(7, f)
+    a + release(f)
+
+# --- 3. `consuming` written where the class omits it -----------------------
+# ModeDefault and ModeConsuming are the SAME ownership at the type level (both
+# consume), so this is agreement, not a mismatch. The instance body must then
+# discharge the obligation itself.
+class Closer a {
+  fn shut(s: a, c: File) -> Int
+}
+
+instance Closer Int {
+  fn shut(s: Int, c: consuming File) -> Int = s + release(c)
+}
+
+fn via_consuming(f: File) -> Int = shut(5, f)
+
+fn main() -> Unit !{IO} =
+  run_suite("linear_borrow_in_type", [
+    check_eq("borrowing function used as a value", via_value(File(9)), 9),
+    check_eq("borrowing parameter on a class method", via_class(File(4)), 11),
+    check_eq("consuming on an instance, default on the class", via_consuming(File(6)), 11)
+  ])

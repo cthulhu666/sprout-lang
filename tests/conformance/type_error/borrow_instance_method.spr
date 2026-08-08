@@ -1,14 +1,19 @@
 module main
 
-# REVIEW FINDING. A `borrowing` parameter on an INSTANCE method was honoured
-# inside the body but invisible at every call site: the @parammode: mask is
-# recorded only for FnDecl/ExternFnDecl, and a method call dispatches through the
-# CLASS signature, which has no modifier. So the argument counted as CONSUMED at
-# the call and was merely BORROWED in the body -- the once-only obligation was
-# discharged by nobody and the resource leaked with no diagnostic.
+# M4.6: a modifier on an instance method is now allowed — the mode rides on the
+# method's type, so a call site can see it. What is NOT allowed is an instance
+# DISAGREEING with the class it implements: a call dispatches through the class
+# signature, so if the class says the parameter is consumed and the instance
+# only borrows it, the obligation is discharged by nobody and the resource
+# leaks. That is the exact defect M4.5 rejected the whole feature to avoid.
 #
-# v0 has no way to put the mode on a class signature, so it rejects the modifier
-# there rather than honouring it in one place and dropping it in the other.
+# The modifiers must therefore match exactly, which is also Swift SE-0377's rule
+# for protocol conformances at a noncopyable parameter. Writing `consuming`
+# where the class omits the modifier is NOT a disagreement — both consume; see
+# tests/stdlib/test_linear_borrow_in_type.spr.
+#
+# The class here declares `r: a`, an unmodified (consuming) parameter; the
+# instance declares `borrowing Res`.
 
 type linear Res = Res Int
 

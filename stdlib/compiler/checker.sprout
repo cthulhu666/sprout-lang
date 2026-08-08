@@ -173,9 +173,9 @@ fn bt_result(e: types.Type, a: types.Type) -> types.Type =
   types.TApp(types.TApp(types.TConst(types.type_id("Result")), e), a)
 
 fn bt_fn(a: types.Type, b: types.Type) -> types.Type =
-  types.TFunc(a, b, types.EffectPure)
+  types.TFunc(a, b, types.EffectPure, types.OwnConsume)
 fn bt_io(a: types.Type, b: types.Type) -> types.Type =
-  types.TFunc(a, b, types.EffectIO)
+  types.TFunc(a, b, types.EffectIO, types.OwnConsume)
 
 fn bt_mono(t: types.Type) -> types.Scheme =
   types.Scheme(Nil, Nil, t, types.EffectPure, Nil)

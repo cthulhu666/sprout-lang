@@ -18,6 +18,44 @@ export type Effect (..) =
   | EffectVar String
 
 # ---------------------------------------------------------------------------
+# Parameter ownership (M4.6)
+# ---------------------------------------------------------------------------
+#
+# Whether a function's parameter CONSUMES its argument (the default) or merely
+# BORROWS it. This is a property of the function TYPE, not of the declaration:
+# M4.5 kept it in an env sentinel keyed by declaration name (`@parammode:<name>`)
+# and it was therefore lost at every callee that was not a literal top-level
+# name, silently discharging the caller's consume obligation. See
+# docs/linear-borrowing-v0.md §18.
+#
+# Two-valued, though `ast.ParamMode` has three: at the type level an unmodified
+# parameter and a `consuming` one are the same thing. The written `consuming`
+# documents the contract at an API boundary and is kept in the AST for
+# diagnostics, but making it a distinct TYPE would mean `consuming File -> Int`
+# and `File -> Int` failed to unify, which is nonsense.
+#
+# Prior art: Swift SE-0377 makes the ownership convention part of the function
+# type for exactly this reason, and requires it to "match exactly" at a
+# noncopyable parameter — invariance, no subtyping (see unifier.unify_applied).
+export type Ownership (..) =
+  | OwnConsume
+  | OwnBorrow
+
+export fn ownership_eq(a: Ownership, b: Ownership) -> Bool =
+  match (a, b) with
+  | (OwnConsume, OwnConsume) -> true
+  | (OwnBorrow, OwnBorrow) -> true
+  | _ -> false
+
+export fn ownership_of_borrow(is_borrow: Bool) -> Ownership =
+  if is_borrow then OwnBorrow else OwnConsume
+
+export fn ownership_is_borrow(o: Ownership) -> Bool =
+  match o with
+  | OwnBorrow -> true
+  | OwnConsume -> false
+
+# ---------------------------------------------------------------------------
 # Types
 # ---------------------------------------------------------------------------
 #
@@ -25,7 +63,7 @@ export type Effect (..) =
 #   TVar  — an inference variable, identified by a generated name ("t0", "t1"…)
 #   TConst — a type constant ("Int", "Bool", "Maybe", …)
 #   TApp  — type application: TApp (TConst "Maybe") (TConst "Int") = Maybe Int
-#   TFunc — function type with associated effect row
+#   TFunc — function type with associated effect row and parameter ownership
 #   TTuple — tuple type (Int, Bool, …)
 
 # ---------------------------------------------------------------------------
@@ -50,7 +88,7 @@ export type Type (..) =
   | TVar TyVarId
   | TConst TypeId
   | TApp Type Type
-  | TFunc Type Type Effect
+  | TFunc Type Type Effect Ownership
   | TTuple (List Type)
 
 # Mint a TypeId from a canonical (already-resolved) name. The bundler/resolver is the
@@ -89,7 +127,7 @@ export fn type_mentions_skolem(t: Type) -> Bool =
   | TVar _ -> false
   | TConst id -> is_skolem_name(type_id_name(id))
   | TApp base arg -> type_mentions_skolem(base) || type_mentions_skolem(arg)
-  | TFunc p r _ -> type_mentions_skolem(p) || type_mentions_skolem(r)
+  | TFunc p r _ _ -> type_mentions_skolem(p) || type_mentions_skolem(r)
   | TTuple items -> any_mentions_skolem(items)
 
 fn any_mentions_skolem(items: List Type) -> Bool =
@@ -293,7 +331,7 @@ fn ftv_acc(t: Type, acc: List String) -> List String =
   | TVar name -> Cons(tyvar_identity(name), acc)
   | TConst _ -> acc
   | TApp base arg -> ftv_acc(base, ftv_acc(arg, acc))
-  | TFunc param ret _ -> ftv_acc(param, ftv_acc(ret, acc))
+  | TFunc param ret _ _ -> ftv_acc(param, ftv_acc(ret, acc))
   | TTuple items -> ftv_list_acc(items, acc)
 
 fn ftv_list_acc(items: List Type, acc: List String) -> List String =
@@ -384,11 +422,23 @@ fn type_to_string_aux(t: Type, as_arg: Bool) -> String =
   | TConst name -> type_id_name(name)
   | TApp base arg ->
       type_to_string_aux(base, false) ++ " " ++ type_to_string_aux(arg, true)
-  | TFunc param ret eff ->
+  | TFunc param ret eff own ->
       if as_arg
-      then wrap_parens(type_to_string_aux(param, true) ++ " -> " ++ type_to_string_aux(ret, false) ++ effect_suffix(eff))
-      else type_to_string_aux(param, true) ++ " -> " ++ type_to_string_aux(ret, false) ++ effect_suffix(eff)
+      then wrap_parens(func_to_string(param, ret, eff, own))
+      else func_to_string(param, ret, eff, own)
   | TTuple items -> "(" ++ join_types(items) ++ ")"
+
+# The ownership tag is printed as a prefix on the parameter, matching the
+# declaration syntax (`fn f(c: borrowing File)`). It is what makes an ownership
+# mismatch legible: without it the two sides of the error read identically.
+fn func_to_string(param: Type, ret: Type, eff: Effect, own: Ownership) -> String =
+  ownership_prefix(own) ++ type_to_string_aux(param, true) ++ " -> "
+    ++ type_to_string_aux(ret, false) ++ effect_suffix(eff)
+
+fn ownership_prefix(own: Ownership) -> String =
+  match own with
+  | OwnBorrow -> "borrowing "
+  | OwnConsume -> ""
 
 fn join_types(items: List Type) -> String =
   match items with
@@ -437,7 +487,8 @@ fn apply_rename_type(rename: Dict String, t: Type) -> Type =
       | Nothing -> TVar(name)
   | TConst _ -> t
   | TApp base arg -> TApp(apply_rename_type(rename, base), apply_rename_type(rename, arg))
-  | TFunc param ret eff -> TFunc(apply_rename_type(rename, param), apply_rename_type(rename, ret), eff)
+  | TFunc param ret eff own ->
+      TFunc(apply_rename_type(rename, param), apply_rename_type(rename, ret), eff, own)
   | TTuple items -> TTuple(apply_rename_type_list(rename, items))
 
 fn apply_rename_type_list(rename: Dict String, ts: List Type) -> List Type =
@@ -489,8 +540,8 @@ fn type_eq(left: Type, right: Type) -> Bool =
   | TVar s -> match right with | TVar t -> tyvar_eq(s, t) | _ -> false
   | TConst s -> match right with | TConst t -> type_id_eq(s, t) | _ -> false
   | TApp f a -> match right with | TApp g b -> type_eq(f, g) && type_eq(a, b) | _ -> false
-  | TFunc p r e -> match right with
-      | TFunc q s f -> type_eq(p, q) && type_eq(r, s) && effect_eq(e, f)
+  | TFunc p r e o -> match right with
+      | TFunc q s f w -> type_eq(p, q) && type_eq(r, s) && effect_eq(e, f) && ownership_eq(o, w)
       | _ -> false
   | TTuple ts -> match right with | TTuple us -> types_eq(ts, us) | _ -> false
 

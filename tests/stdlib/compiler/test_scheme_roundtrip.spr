@@ -57,19 +57,19 @@ fn main() -> Unit !{IO} =
 
     # --- TFunc with various effects ---
     assert_eq(state, "tfunc pure",
-              roundtrip(types.mono(types.TFunc(types.TConst(types.type_id("Int")), types.TConst(types.type_id("Int")), types.EffectPure))),
-              Just(types.mono(types.TFunc(types.TConst(types.type_id("Int")), types.TConst(types.type_id("Int")), types.EffectPure))))
+              roundtrip(types.mono(types.TFunc(types.TConst(types.type_id("Int")), types.TConst(types.type_id("Int")), types.EffectPure, types.OwnConsume))),
+              Just(types.mono(types.TFunc(types.TConst(types.type_id("Int")), types.TConst(types.type_id("Int")), types.EffectPure, types.OwnConsume))))
     assert_eq(state, "tfunc io",
-              roundtrip(types.mono(types.TFunc(types.TConst(types.type_id("String")), types.TConst(types.type_id("Unit")), types.EffectIO))),
-              Just(types.mono(types.TFunc(types.TConst(types.type_id("String")), types.TConst(types.type_id("Unit")), types.EffectIO))))
+              roundtrip(types.mono(types.TFunc(types.TConst(types.type_id("String")), types.TConst(types.type_id("Unit")), types.EffectIO, types.OwnConsume))),
+              Just(types.mono(types.TFunc(types.TConst(types.type_id("String")), types.TConst(types.type_id("Unit")), types.EffectIO, types.OwnConsume))))
     assert_eq(state, "tfunc polymorphic",
               roundtrip(sch(
                 Cons("a", Cons("b", Nil)), Nil,
-                types.TFunc(types.TVar(types.tyvar_id("a")), types.TVar(types.tyvar_id("b")), types.EffectPure),
+                types.TFunc(types.TVar(types.tyvar_id("a")), types.TVar(types.tyvar_id("b")), types.EffectPure, types.OwnConsume),
                 types.EffectPure)),
               Just(sch(
                 Cons("a", Cons("b", Nil)), Nil,
-                types.TFunc(types.TVar(types.tyvar_id("a")), types.TVar(types.tyvar_id("b")), types.EffectPure),
+                types.TFunc(types.TVar(types.tyvar_id("a")), types.TVar(types.tyvar_id("b")), types.EffectPure, types.OwnConsume),
                 types.EffectPure)))
 
     # --- TTuple variants ---
@@ -92,24 +92,24 @@ fn main() -> Unit !{IO} =
               Just(sch(Nil, Nil, types.TConst(types.type_id("Int")), types.EffectIO)))
     assert_eq(state, "effect var",
               roundtrip(sch(Nil, Cons("e", Nil),
-                            types.TFunc(types.TConst(types.type_id("Int")), types.TConst(types.type_id("Int")), types.EffectVar("e")),
+                            types.TFunc(types.TConst(types.type_id("Int")), types.TConst(types.type_id("Int")), types.EffectVar("e"), types.OwnConsume),
                             types.EffectPure)),
               Just(sch(Nil, Cons("e", Nil),
-                       types.TFunc(types.TConst(types.type_id("Int")), types.TConst(types.type_id("Int")), types.EffectVar("e")),
+                       types.TFunc(types.TConst(types.type_id("Int")), types.TConst(types.type_id("Int")), types.EffectVar("e"), types.OwnConsume),
                        types.EffectPure)))
     assert_eq(state, "effect row multi",
               roundtrip(sch(Nil, Nil,
-                            types.TFunc(types.TConst(types.type_id("Int")), types.TConst(types.type_id("Int")), types.EffectRow(Cons("IO", Cons("Async", Nil)))),
+                            types.TFunc(types.TConst(types.type_id("Int")), types.TConst(types.type_id("Int")), types.EffectRow(Cons("IO", Cons("Async", Nil))), types.OwnConsume),
                             types.EffectPure)),
               Just(sch(Nil, Nil,
-                       types.TFunc(types.TConst(types.type_id("Int")), types.TConst(types.type_id("Int")), types.EffectRow(Cons("IO", Cons("Async", Nil)))),
+                       types.TFunc(types.TConst(types.type_id("Int")), types.TConst(types.type_id("Int")), types.EffectRow(Cons("IO", Cons("Async", Nil))), types.OwnConsume),
                        types.EffectPure)))
     assert_eq(state, "effect row empty",
               roundtrip(sch(Nil, Nil,
-                            types.TFunc(types.TConst(types.type_id("Int")), types.TConst(types.type_id("Int")), types.EffectRow(Nil)),
+                            types.TFunc(types.TConst(types.type_id("Int")), types.TConst(types.type_id("Int")), types.EffectRow(Nil), types.OwnConsume),
                             types.EffectPure)),
               Just(sch(Nil, Nil,
-                       types.TFunc(types.TConst(types.type_id("Int")), types.TConst(types.type_id("Int")), types.EffectRow(Nil)),
+                       types.TFunc(types.TConst(types.type_id("Int")), types.TConst(types.type_id("Int")), types.EffectRow(Nil), types.OwnConsume),
                        types.EffectPure)))
 
     # --- Combined: realistic compiler-style schemes ---
@@ -117,21 +117,21 @@ fn main() -> Unit !{IO} =
     assert_eq(state, "list_length scheme",
               roundtrip(sch(
                 Cons("a", Nil), Nil,
-                types.TFunc(types.TApp(types.TConst(types.type_id("List")), types.TVar(types.tyvar_id("a"))), types.TConst(types.type_id("Int")), types.EffectPure),
+                types.TFunc(types.TApp(types.TConst(types.type_id("List")), types.TVar(types.tyvar_id("a"))), types.TConst(types.type_id("Int")), types.EffectPure, types.OwnConsume),
                 types.EffectPure)),
               Just(sch(
                 Cons("a", Nil), Nil,
-                types.TFunc(types.TApp(types.TConst(types.type_id("List")), types.TVar(types.tyvar_id("a"))), types.TConst(types.type_id("Int")), types.EffectPure),
+                types.TFunc(types.TApp(types.TConst(types.type_id("List")), types.TVar(types.tyvar_id("a"))), types.TConst(types.type_id("Int")), types.EffectPure, types.OwnConsume),
                 types.EffectPure)))
     # `forall a b. a -> b -> (a, b)` — pair-construction style
     assert_eq(state, "make_pair scheme",
               roundtrip(sch(
                 Cons("a", Cons("b", Nil)), Nil,
-                types.TFunc(types.TVar(types.tyvar_id("a")), types.TFunc(types.TVar(types.tyvar_id("b")), types.TTuple(Cons(types.TVar(types.tyvar_id("a")), Cons(types.TVar(types.tyvar_id("b")), Nil))), types.EffectPure), types.EffectPure),
+                types.TFunc(types.TVar(types.tyvar_id("a")), types.TFunc(types.TVar(types.tyvar_id("b")), types.TTuple(Cons(types.TVar(types.tyvar_id("a")), Cons(types.TVar(types.tyvar_id("b")), Nil))), types.EffectPure, types.OwnConsume), types.EffectPure, types.OwnConsume),
                 types.EffectPure)),
               Just(sch(
                 Cons("a", Cons("b", Nil)), Nil,
-                types.TFunc(types.TVar(types.tyvar_id("a")), types.TFunc(types.TVar(types.tyvar_id("b")), types.TTuple(Cons(types.TVar(types.tyvar_id("a")), Cons(types.TVar(types.tyvar_id("b")), Nil))), types.EffectPure), types.EffectPure),
+                types.TFunc(types.TVar(types.tyvar_id("a")), types.TFunc(types.TVar(types.tyvar_id("b")), types.TTuple(Cons(types.TVar(types.tyvar_id("a")), Cons(types.TVar(types.tyvar_id("b")), Nil))), types.EffectPure, types.OwnConsume), types.EffectPure, types.OwnConsume),
                 types.EffectPure)))
 
     # --- Constrained schemes (§13.3(B): constraints carried in the Scheme) ---
@@ -139,12 +139,12 @@ fn main() -> Unit !{IO} =
     assert_eq(state, "one constraint roundtrip",
               roundtrip(types.Scheme(
                 Cons("a", Nil), Nil,
-                types.TFunc(types.TVar(types.tyvar_id("a")), types.TConst(types.type_id("String")), types.EffectPure),
+                types.TFunc(types.TVar(types.tyvar_id("a")), types.TConst(types.type_id("String")), types.EffectPure, types.OwnConsume),
                 types.EffectPure,
                 Cons(("#pos:0", "Semigroup"), Nil))),
               Just(types.Scheme(
                 Cons("a", Nil), Nil,
-                types.TFunc(types.TVar(types.tyvar_id("a")), types.TConst(types.type_id("String")), types.EffectPure),
+                types.TFunc(types.TVar(types.tyvar_id("a")), types.TConst(types.type_id("String")), types.EffectPure, types.OwnConsume),
                 types.EffectPure,
                 Cons(("#pos:0", "Semigroup"), Nil))))
     # Mixed head tokens: a positional tyvar, a concrete-ctor name, and a headless
@@ -152,12 +152,12 @@ fn main() -> Unit !{IO} =
     assert_eq(state, "multi constraint roundtrip",
               roundtrip(types.Scheme(
                 Cons("a", Cons("b", Nil)), Nil,
-                types.TFunc(types.TVar(types.tyvar_id("a")), types.TFunc(types.TVar(types.tyvar_id("b")), types.TConst(types.type_id("String")), types.EffectPure), types.EffectPure),
+                types.TFunc(types.TVar(types.tyvar_id("a")), types.TFunc(types.TVar(types.tyvar_id("b")), types.TConst(types.type_id("String")), types.EffectPure, types.OwnConsume), types.EffectPure, types.OwnConsume),
                 types.EffectPure,
                 Cons(("#pos:0", "Show"), Cons(("List", "Foldable"), Cons(("#none", "Default"), Nil))))),
               Just(types.Scheme(
                 Cons("a", Cons("b", Nil)), Nil,
-                types.TFunc(types.TVar(types.tyvar_id("a")), types.TFunc(types.TVar(types.tyvar_id("b")), types.TConst(types.type_id("String")), types.EffectPure), types.EffectPure),
+                types.TFunc(types.TVar(types.tyvar_id("a")), types.TFunc(types.TVar(types.tyvar_id("b")), types.TConst(types.type_id("String")), types.EffectPure, types.OwnConsume), types.EffectPure, types.OwnConsume),
                 types.EffectPure,
                 Cons(("#pos:0", "Show"), Cons(("List", "Foldable"), Cons(("#none", "Default"), Nil))))))
     # A wrong constraint must NOT compare equal (guards scheme_eq actually checks constraints).
@@ -197,5 +197,17 @@ fn main() -> Unit !{IO} =
     assert_eq(state, "tfunc malformed effect rejected",
               iface_codec.decode_scheme("(Scheme () () (TFunc (TConst Int) (TConst Int) (NotAnEffect)) (EffectPure))"),
               Nothing)
+
+    # M4.6: TFunc grew a fourth field, the parameter ownership tag. A v4-shaped
+    # TFunc (no tag) must be REJECTED rather than read leniently — decoding it as
+    # consuming would silently erase `borrowing` from every imported signature,
+    # which is the exact class of failure this milestone exists to remove. The
+    # IfaceFile version gate (v5) is the first line of defence; this is the second.
+    assert_eq(state, "tfunc missing ownership tag rejected",
+              iface_codec.decode_scheme("(Scheme () () (TFunc (TConst Int) (TConst Int) (EffectPure)) (EffectPure))"),
+              Nothing)
+    assert_eq(state, "tfunc borrow ownership round-trips",
+              iface_codec.decode_scheme("(Scheme () () (TFunc (TConst Int) (TConst Int) (EffectPure) borrow) (EffectPure) ())"),
+              Just(types.mono(types.TFunc(types.TConst(types.type_id("Int")), types.TConst(types.type_id("Int")), types.EffectPure, types.OwnBorrow))))
 
     summary(state)

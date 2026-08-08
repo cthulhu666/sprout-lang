@@ -137,7 +137,7 @@ fn lookup_scheme_type(name: String, env: Dict types.Scheme) -> types.Type =
 # e.g. TFunc a (TFunc a Bool) -> Bool
 fn tfunc_result_type(t: types.Type) -> types.Type =
   match t with
-  | types.TFunc _ ret _ -> tfunc_result_type(ret)
+  | types.TFunc _ ret _ _ -> tfunc_result_type(ret)
   | _ -> t
 
 # generate_typed_param_vars: build TVar nodes for each user param, assigning
@@ -147,7 +147,7 @@ fn generate_typed_param_vars(params: List ast.Param, method_type: types.Type, po
   | Nil -> Nil
   | Cons (ast.Param pname _ _) rest ->
       match method_type with
-      | types.TFunc arg_t ret_t _ ->
+      | types.TFunc arg_t ret_t _ _ ->
           Cons(typed_ast.TVar(pname, arg_t, pos),
                generate_typed_param_vars(rest, ret_t, pos))
       | _ ->
@@ -773,10 +773,10 @@ fn eta_class_type_from_scheme(class_param: String, scheme_type: types.Type, actu
 
 fn eta_actual_type_for_scheme_match(scheme_type: types.Type, actual_type: types.Type) -> types.Type =
   match scheme_type with
-  | types.TFunc _ _ _ -> actual_type
+  | types.TFunc _ _ _ _ -> actual_type
   | _ ->
       match actual_type with
-      | types.TFunc param ret _ ->
+      | types.TFunc param ret _ _ ->
           # Zero-arg methods are inferred as their result type, but can appear
           # in value position as Unit -> result.
           if type_is_unit(param) then ret else actual_type
@@ -795,9 +795,9 @@ fn match_type_vars(pattern: types.Type, actual: types.Type, acc: Dict types.Type
       match actual with
       | types.TApp abase aarg -> match_type_vars(parg, aarg, match_type_vars(pbase, abase, acc))
       | _ -> acc
-  | types.TFunc pparam pret _ ->
+  | types.TFunc pparam pret _ _ ->
       match actual with
-      | types.TFunc aparam aret _ -> match_type_vars(pret, aret, match_type_vars(pparam, aparam, acc))
+      | types.TFunc aparam aret _ _ -> match_type_vars(pret, aret, match_type_vars(pparam, aparam, acc))
       | _ -> acc
   | types.TTuple pitems ->
       match actual with
@@ -854,7 +854,7 @@ fn eta_param_name(i: Int) -> String =
 
 fn count_method_params(t: types.Type) -> Int =
   match t with
-  | types.TFunc _ ret _ -> 1 + count_method_params(ret)
+  | types.TFunc _ ret _ _ -> 1 + count_method_params(ret)
   | _ -> 0
 
 fn make_eta_params_list(n: Int, i: Int) -> List ast.Param =
@@ -865,7 +865,7 @@ fn make_eta_arg_tvars(t: types.Type, i: Int, n: Int, pos: source.SourcePos) -> L
   if i >= n then Nil
   else
     match t with
-    | types.TFunc param ret _ ->
+    | types.TFunc param ret _ _ ->
         Cons(typed_ast.TVar(eta_param_name(i), param, pos),
              make_eta_arg_tvars(ret, i + 1, n, pos))
     | _ ->
@@ -911,13 +911,15 @@ fn typed_expr_types(args: List typed_ast.TypedExpr) -> List types.Type =
 
 fn append_hidden_param_types(t: types.Type, hidden_params: List types.Type) -> types.Type =
   match t with
-  | types.TFunc param ret eff -> types.TFunc(param, append_hidden_param_types(ret, hidden_params), eff)
+  | types.TFunc param ret eff own ->
+      types.TFunc(param, append_hidden_param_types(ret, hidden_params), eff, own)
   | _ -> prepend_func_params(hidden_params, t)
 
 fn prepend_func_params(params: List types.Type, ret: types.Type) -> types.Type =
   match params with
   | Nil -> ret
-  | Cons param rest -> types.TFunc(param, prepend_func_params(rest, ret), types.EffectPure)
+  | Cons param rest ->
+      types.TFunc(param, prepend_func_params(rest, ret), types.EffectPure, types.OwnConsume)
 
 fn collect_slots_from_method_map(methods: List String, method_map: Dict String, pos: source.SourcePos) -> List typed_ast.TypedExpr =
   match methods with
@@ -934,7 +936,7 @@ fn type_to_eta_typeexpr(t: types.Type) -> ast.TypeExpr =
   | types.TConst name -> ast.TypeName(types.type_id_name(name))
   | types.TVar name -> ast.TypeName(types.tyvar_identity(name))
   | types.TApp base arg -> ast.TypeApply(type_to_eta_typeexpr(base), type_to_eta_typeexpr(arg))
-  | types.TFunc param ret _ ->
+  | types.TFunc param ret _ _ ->
       ast.TypeArrow(type_to_eta_typeexpr(param), type_to_eta_typeexpr(ret), Nothing)
   | types.TTuple items -> ast.TupleType(list_map(\item -> type_to_eta_typeexpr(item), items))
 
@@ -991,7 +993,7 @@ fn resolve_eta_fwd_type_name_dict(class_name: String, tvar_name: String, pos: so
       | _ -> Nothing
 
 fn try_eta_forwarded_without_class(name: String, t: types.Type, ctx: LowerCtx) -> Maybe typed_ast.TypedExpr =
-  let types.TFunc param _ _ = t else Nothing
+  let types.TFunc param _ _ _ = t else Nothing
       Just impl_name = eta_forwarded_impl(name, param, vec_to_list(dict_entries(ctx_fwd(ctx)))) else Nothing
   in Just(make_eta_lambda(impl_name, t, no_pos()))
 
@@ -1040,7 +1042,7 @@ fn lookup_class_marker_scheme(method_name: String, scheme_env: Dict types.Scheme
   | Nothing -> dict_get("@class:" ++ string.after_last_dot(method_name), scheme_env)
 
 fn try_eta_in_class(class_name: String, name: String, t: types.Type, ctx: LowerCtx) -> Maybe typed_ast.TypedExpr =
-  let types.TFunc param _ _ = t else Nothing
+  let types.TFunc param _ _ _ = t else Nothing
   in eta_in_class_by_head(class_name, name, t, eta_class_type(class_name, name, t, param, ctx), ctx)
 
 # Split on whether the class type has a concrete head: a concrete head resolves to an instance
@@ -1808,7 +1810,7 @@ fn pattern_var_name(p: ast.Pattern) -> Maybe String =
 
 fn scheme_param_types(t: types.Type) -> List types.Type =
   match t with
-  | types.TFunc p rest _ -> Cons(p, scheme_param_types(rest))
+  | types.TFunc p rest _ _ -> Cons(p, scheme_param_types(rest))
   | _ -> Nil
 
 fn ctx_with_fwd(fwd: Dict (Dict String), ctx: LowerCtx) -> LowerCtx =

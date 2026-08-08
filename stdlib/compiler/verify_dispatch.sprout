@@ -86,7 +86,7 @@ export fn match_te(pattern: ast.TypeExpr, concrete: types.Type, theta: Dict type
       | _ -> Nothing
   | ast.TypeArrow pp pr _ ->
       match concrete with
-      | types.TFunc cp cr _ ->
+      | types.TFunc cp cr _ _ ->
           match match_te(pp, cp, theta) with
           | Nothing -> Nothing
           | Just theta1 -> match_te(pr, cr, theta1)
@@ -121,7 +121,7 @@ export fn type_head_str(t: types.Type) -> Maybe String =
   | types.TApp base _ -> type_head_str(base)
   | types.TTuple items -> Just("Tuple" ++ int_to_string(list_length(items)))
   | types.TVar _ -> Nothing
-  | types.TFunc _ _ _ -> Nothing
+  | types.TFunc _ _ _ _ -> Nothing
 
 fn type_head_str_eq(a: types.Type, b: types.Type) -> Bool =
   match type_head_str(a) with

@@ -499,3 +499,75 @@ inheriting its `@parammode:` mask. It does not: the bundler qualifies top-level 
 (`main.peek`), so a local can never collide — the claimed discriminator behaves identically either
 way. The latent case is a local shadowing a *prelude* borrowing function, since the prelude owns
 unqualified names; there are none today, and the shadowing fix above closes it regardless.
+
+## 18. M4.6 — parameter ownership moved into the function type (2026-08-08)
+
+§17 named the dominant root cause of M4.5's ten defects: the mode lived in an env sentinel keyed
+by declaration name (`@parammode:<name>`), consultable only when the callee was a literal
+top-level name. Everywhere else `callee_mask` returned `""` and every argument read as
+**consuming** — which discharges the caller's obligation via a call that only borrows, leaking the
+resource with no diagnostic. M4.5's answer was to *reject* the two shapes where the mode was lost.
+M4.6 removes the side table instead.
+
+**Representation.** `types.TFunc` gains a fourth field, `types.Ownership` (`OwnConsume` |
+`OwnBorrow`), alongside the effect row it already carried — the same kind of annotation on the
+arrow, and since `TFunc` is curried, one tag per node is exactly one tag per parameter. The tag is
+**two-valued** though `ast.ParamMode` has three: at the type level an unmodified parameter and a
+`consuming` one are the same thing, and making them distinct types would mean `consuming File ->
+Int` failed to unify with `File -> Int`.
+
+**Producers.** Every declaration form — top-level `fn`, `extern fn`, class method, instance method
+— reaches `TFunc` through `infer.scheme_from_fn_parts_inner`, so one new builder
+(`build_fn_type_modes`) puts `borrowing` into all four. Imported signatures get it from
+`iface_codec.params_to_func_type` and from the wire tag; annotated arrow types are `OwnConsume`.
+
+**Why call sites copy rather than default.** The arrow synthesized from the argument types at a
+call (`infer.build_fn_type_like`) takes its ownership from the *callee's own spine*. A fixed
+`OwnConsume` there would make every call to a borrowing function a mismatch under invariant
+unification — the feature's own tests would fail. Where the callee type is still a type variable
+there is nothing to copy and `OwnConsume` is the conservative reading: the tyvar binds to a
+consuming arrow, so a caller later supplying a borrowing function gets a mismatch at *its* call
+site rather than a silent leak.
+
+**Invariance, not subtyping.** `unifier.unify_applied` compares the tags and rejects a mismatch.
+Both directions are unsound (double consume one way, leak the other), matching Swift SE-0377's
+rule that a noncopyable parameter's convention "must match exactly". Effects are still ignored
+there; ownership is not, because an ownership mismatch is a soundness bug rather than a
+conservatism knob. **This is the property worth having**: every type flow already goes through
+`unify`, so coverage is structural instead of a list of sites someone has to remember — and
+under-coverage of an enumerated list is exactly what produced §17.
+
+**The alignment hazard, and how it was verified.** `infer.maybe_rewrite_class_method_call`
+prepends a `TDict` evidence node per constraint to a constrained call's argument list, while the
+callee's type spine has no dictionary parameter (those arrive later, in
+`lowering.append_hidden_param_types`). Zipping args against the spine naively shifts every mode by
+the number of dictionaries. The fix drops the leading `TDict` run. It was verified by *removing*
+it and confirming the new class-method test fails ("linear value 'f' is used more than once") —
+§17's lesson was that a fix verified only by the test that motivated it is not verified, so here
+the test was checked to actually motivate the fix.
+
+**What lifted, and what did not.**
+
+- A `borrowing` function may now be bound and called as a value (`let g = peek`).
+- Class and instance methods may carry modifiers, with the instance required to **match** the
+  class — compared as ownership, so `consuming` against an unmodified class parameter agrees.
+- **Not lifted: `borrowing` in arrow-type syntax.** `fn apply(g: (File) -> Int, f: File) = g(f)`
+  typechecks today, so this gap is real — an earlier draft of the plan wrongly claimed M4.4 blocks
+  its only users; M4.4 blocks *lambdas*, not function-typed parameters. Deferred for cost: it needs
+  a parser change (and so the 2-step bootstrap), a mode field on `ast.TypeExpr`'s arrow, formatter
+  and codec work. Purely additive afterwards — it reuses this tag. The mismatch diagnostic says
+  explicitly that an arrow type cannot yet be written with `borrowing`.
+- **Not lifted: a modifier on a type-variable parameter.** Not a representation limit (ownership
+  survives instantiation) but a universe one: without a linearity bound on `a`, `borrowing Int`
+  would be an error while `borrowing a` at `Int` silently was not. That is polymorphism over linear
+  types. Prior art bounds the parameter first — Swift SE-0427 (`<T: ~Copyable>` to opt out of the
+  default `Copyable`), Austral (every type parameter annotated `Free`/`Linear`/`Type`).
+
+**Interface format.** `IfaceFile` v4 → v5. A v4 iface decoded leniently would read every borrowing
+parameter as consuming — the very erasure this milestone removes — so the version gate rejects it,
+and `decode_tfunc_at` rejects a tagless `TFunc` independently.
+
+**Erasure held.** `just ir-golden-diff` across 58 files: **additions only, zero changed or removed
+lines**. The two added `define` blocks are the `ast.mode_is_borrowing` / `ast.param_mode_of`
+helpers, and they appear only in `repl_hosted.sprout`, the one golden program that bundles the
+compiler itself. No pre-existing function's body moved by an instruction.
