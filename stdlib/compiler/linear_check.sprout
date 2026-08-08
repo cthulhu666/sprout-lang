@@ -854,9 +854,38 @@ fn lin_do_bind(pat: ast.Pattern, e: typed_ast.TypedExpr, rest: List typed_ast.Ty
                sc_block: Bool, sc: LinScope, env: Dict types.Scheme) -> LinRes =
   match lin_consumed(e, sc, env) with
   | LinErr p m -> LinErr(p, m)
-  | LinOk ec eb ->
-      lin_do_bind_rest(pattern_linear_binders(pat, do_bind_type(typed_ast.typed_expr_type(e), env), env),
-                       ec, eb, e, rest, sc_block, sc, env)
+  | LinOk ec eb -> lin_do_bind_checked(pat, do_bind_type(typed_ast.typed_expr_type(e), env),
+                                       ec, eb, e, rest, sc_block, sc, env)
+
+# `_ <- e` binds no name, so `pattern_linear_binders` yields nothing and the
+# binder-keyed rules attach no obligation — the payload is dropped exactly as a
+# bare step would drop it. Rejecting it is not optional politeness: the
+# discarded-step diagnostic tells the author to "bind its result with `<-`", and
+# `_ <-` is the shape that advice most directly produces. `_h <- e` is already
+# caught (a named binder that is never used is a leak), so this closes a
+# one-character gap between two spellings of the same mistake.
+#
+# Only a WILDCARD is treated this way. A constructor pattern that drops a linear
+# FIELD (`Wrap _ <- …`) is the separate open question of whether destructuring
+# discharges the obligation for what it does not bind — filed in BACKLOG, not
+# decided here.
+fn lin_do_bind_checked(pat: ast.Pattern, bind_type: types.Type, ec: List LinUse,
+                       eb: List LinUse, e: typed_ast.TypedExpr,
+                       rest: List typed_ast.TypedDoStep, sc_block: Bool,
+                       sc: LinScope, env: Dict types.Scheme) -> LinRes =
+  if wildcard_discards_linear(pat, bind_type, env) then
+    LinErr(typed_ast.typed_expr_pos(e), wildcard_bind_msg())
+  else
+    lin_do_bind_rest(pattern_linear_binders(pat, bind_type, env),
+                     ec, eb, e, rest, sc_block, sc, env)
+
+fn wildcard_discards_linear(pat: ast.Pattern, t: types.Type, env: Dict types.Scheme) -> Bool =
+  match pat with
+  | ast.WildcardPattern _ -> discardable_type(t, env)
+  | _ -> false
+
+fn wildcard_bind_msg() -> String =
+  "`_ <-` discards a linear value: a wildcard binds no name, so nothing can consume it (linear values must be used exactly once); bind a name and consume it"
 
 fn lin_do_bind_rest(binders: List String, ec: List LinUse, eb: List LinUse,
                     e: typed_ast.TypedExpr, rest: List typed_ast.TypedDoStep,
@@ -912,13 +941,19 @@ fn lin_do_seq(e: typed_ast.TypedExpr, rest: List typed_ast.TypedDoStep,
 # The TRAILING step is exempt: it is the block's RESULT, returned to the caller,
 # whose obligation it becomes there (the caller's binder picks it up, or the
 # caller's own trailing position passes it on again). `rest` being empty is
-# exactly that test. Errors inside `e` are reported first, so a use-after-consume
-# within the discarded expression still wins the diagnostic.
+# exactly that test.
+#
+# Diagnostic precedence: an error inside `e` wins, since `lin_consumed(e, …)` runs
+# first. This error can in turn mask an ENCLOSING binder leak reported at an
+# earlier line, because `lin_do_bind_rest` abandons its own leak check as soon as
+# the rest of the block errors. That is the pass's pre-existing one-error-at-a-time,
+# innermost-first behaviour — an inner reuse already masks an outer leak the same
+# way — not something this rule introduces.
 fn lin_do_seq_checked(e: typed_ast.TypedExpr, rest: List typed_ast.TypedDoStep,
                       ec: List LinUse, eb: List LinUse, sc_block: Bool,
                       sc: LinScope, env: Dict types.Scheme) -> LinRes =
   if step_discards_linear(e, rest, env) then
-    LinErr(typed_ast.typed_expr_pos(e), discarded_step_msg())
+    LinErr(typed_ast.typed_expr_pos(e), discarded_step_msg(e, env))
   else
     lin_do_seq_rest(rest, ec, eb, sc_block, sc, env)
 
@@ -926,10 +961,64 @@ fn step_discards_linear(e: typed_ast.TypedExpr, rest: List typed_ast.TypedDoStep
                         env: Dict types.Scheme) -> Bool =
   match rest with
   | [] -> false
-  | [_ | _] -> type_is_linear(typed_ast.typed_expr_type(e), env)
+  | [_ | _] -> discardable_type(typed_ast.typed_expr_type(e), env)
 
-fn discarded_step_msg() -> String =
-  "this step discards a linear value (linear values must be used exactly once); bind its result with `<-` or `let` and consume the binding"
+# A discarded value is an unmet obligation when it IS or CONTAINS a linear
+# resource, or when it MIGHT be one.
+#
+# The "might" arm is a bare type variable. Inside a polymorphic function the body
+# is checked with the variable rigid, so `do { f(1); 7 }` with `f : Int -> a`
+# would otherwise escape entirely — and then a caller instantiating `a` at a
+# linear type leaks. Sprout has no linearity bound on a type parameter with which
+# to say "`a` is never linear" (the same universe gap that blocks `borrowing a`;
+# see BACKLOG), so the conservative answer is the only sound one available. A
+# tyvar NESTED in a container (`Maybe a`) is deliberately NOT counted: that needs
+# the bound to be usable at all, and counting it would reject most polymorphic
+# do-blocks over `Maybe`/`Result`.
+fn discardable_type(t: types.Type, env: Dict types.Scheme) -> Bool =
+  if type_is_tyvar(t) then true
+  else type_mentions_linear(t, env)
+
+# True when `t` is a linear type or carries one as a type argument or tuple
+# component. Containment is not optional here: in a Maybe/Result do-block EVERY
+# step has type `Maybe X` / `Result E X`, so a head-only test could never fire in
+# a short-circuiting block at all. This matches `do_bind_type`/`payload_type`
+# above, which unwrap for the same reason and are documented as sound-because-
+# over-strict.
+#
+# Does NOT descend into a function type: `Unit -> File` is a recipe for a
+# resource, not a resource, and discarding one leaks nothing.
+fn type_mentions_linear(t: types.Type, env: Dict types.Scheme) -> Bool =
+  if type_is_linear(t, env) then true
+  else
+    match t with
+    | types.TApp base arg ->
+        if type_mentions_linear(base, env) then true else type_mentions_linear(arg, env)
+    | types.TTuple items -> any_mentions_linear(items, env)
+    | _ -> false
+
+fn any_mentions_linear(ts: List types.Type, env: Dict types.Scheme) -> Bool =
+  match ts with
+  | Nil -> false
+  | Cons t rest -> if type_mentions_linear(t, env) then true else any_mentions_linear(rest, env)
+
+# A bare reference (`do { x; 0 }`) needs its own wording: `x` IS referenced
+# exactly once, so telling the author to "bind its result" describes a rule the
+# program does not break and advice they cannot act on. What is wrong is that a
+# reference in statement position does nothing with the value.
+fn discarded_step_msg(e: typed_ast.TypedExpr, env: Dict types.Scheme) -> String =
+  match e with
+  | typed_ast.TVar name _ _ -> discarded_ref_msg(name)
+  | _ -> discarded_value_msg(typed_ast.typed_expr_type(e), env)
+
+fn discarded_ref_msg(name: String) -> String =
+  "linear value '" ++ name ++ "' is referenced as a statement, which discards it — a bare reference does not consume it; pass it to a consuming function, or destructure it with `match`"
+
+fn discarded_value_msg(t: types.Type, env: Dict types.Scheme) -> String =
+  if type_mentions_linear(t, env) then
+    "this step discards a linear value (linear values must be used exactly once); bind its result with `<-` or `let` and consume the binding"
+  else
+    "this step discards a value that may be linear: its type is a type variable, which a caller may instantiate at a linear type (Sprout cannot yet declare a type parameter non-linear); bind its result with `<-` or `let` and consume the binding"
 
 fn lin_do_seq_rest(rest: List typed_ast.TypedDoStep, ec: List LinUse, eb: List LinUse,
                    sc_block: Bool, sc: LinScope, env: Dict types.Scheme) -> LinRes =

@@ -1,0 +1,20 @@
+module main
+
+# In a short-circuiting block EVERY step has type `Result E X` / `Maybe X`, so a
+# head-only linearity test could never fire there at all. `acquire(1)`'s payload
+# is a linear `File` that is created and dropped.
+
+type linear File = File Int
+
+fn acquire(n: Int) -> Result String File = Ok(File(n))
+
+fn close(f: File) -> Int =
+  match f with
+  | File n -> n
+
+fn go(n: Int) -> Result String Int =
+  do
+    acquire(1)
+    Ok(n)
+
+fn main() -> Unit !{IO} = print(to_string(go(2)))

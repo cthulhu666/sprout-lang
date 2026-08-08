@@ -1,0 +1,22 @@
+module main
+
+# A linear value inside a NON-linear container: the step's type head is `Maybe`,
+# which is not linear, but the `File` it carries is created and dropped.
+
+type linear File = File Int
+
+fn find(n: Int) -> Maybe File !{IO} =
+  do
+    let m = n
+    Just(File(m))
+
+fn close(f: File) -> Int =
+  match f with
+  | File n -> n
+
+fn go() -> Int !{IO} =
+  do
+    find(1)
+    7
+
+fn main() -> Unit !{IO} = print(to_string(go()))

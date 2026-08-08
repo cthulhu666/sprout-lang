@@ -1061,12 +1061,34 @@ and `docs/linear-types-m4.2-enforcement-2026-08-06.md`. Deferred, in the order t
   whether the obligation attached to a NAME was discharged, so a linear value produced by a bare
   do-step and never bound had no obligation attached and no rule could find it unfulfilled —
   `do { task_fork(s, w); 7 }` typechecked clean and dropped the handle. `linear_check.lin_do_seq`
-  now rejects a **non-final** do-step whose type is linear; the final step is exempt, being the
-  block's result, whose obligation passes to the caller (`rest == []` is exactly that test).
+  now rejects a **non-final** do-step, and a wildcard bind `_ <- e`, whose value is linear,
+  *contains* a linear (`Maybe File`, a tuple), or has a bare type-variable type; the final step is
+  exempt, being the block's result, whose obligation passes to the caller (`rest == []` is exactly
+  that test). Containment is load-bearing rather than thorough-for-its-own-sake: in a
+  `Maybe`/`Result` block every step has type `Maybe X`/`Result E X`, so a head-only test could
+  never fire in a short-circuiting block at all — the same reason `do_bind_type`/`payload_type`
+  unwrap. A bare linear reference in statement position gets its own diagnostic, because it *is*
+  referenced exactly once and telling the author to bind a result they already hold describes a
+  rule they have not broken.
+
+  **Post-review (2026-08-08).** A high-effort review found the first cut covered only a head-linear
+  type in an effectful block: `_ <- task_fork(…)` — the exact shape the new diagnostic's own advice
+  produces — a discard in any `Maybe`/`Result` block, a linear inside a container, and a
+  type-variable-typed step all still leaked, while the spec bullet and this entry claimed the class
+  was sealed. All fixed above; the docs now state the limits instead of the aspiration.
+
   Fixtures: `linear_discarded_do_step` (hermetic), `linear_discarded_fork` (the real `task_fork`
   shape — `linear_task_leak` already covered the bound-and-dropped case, this is the never-bound
-  one); positive `test_linear_task.via_trailing`. Normative text: `docs/spec-v0.md` §5.8, fourth
-  enforcement bullet.
+  one), `linear_discarded_wildcard_bind`, `linear_discarded_result_block`,
+  `linear_discarded_container`, `linear_discarded_tyvar_step`, `linear_discarded_bare_ref`;
+  positives `test_linear_task.via_trailing`, `test_linear_binders.via_trailing_maybe` and
+  `wildcard_non_linear`. Normative text: `docs/spec-v0.md` §5.8, fourth enforcement bullet.
+
+  **Known limits, stated in the spec rather than left implied.** A type variable NESTED in a
+  container (`Maybe a`) is not checked — that needs the linearity bound below, and checking it
+  would reject most polymorphic `Maybe`/`Result` do-blocks. The bare-tyvar arm is conservative in
+  the other direction: it refuses a discard in a polymorphic function that no caller ever
+  instantiates at a linear type. Both dissolve once a type parameter can be declared non-linear.
 
 - [ ] `P2` **Decide whether a wildcard pattern over a linear value is a consume or a leak.** A
   *semantics* question the discarded-do-step fix surfaced but deliberately did not answer, because

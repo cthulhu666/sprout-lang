@@ -1,0 +1,15 @@
+module main
+
+# A bare reference to a linear binding as a statement. The reference itself
+# satisfies "used exactly once" syntactically, but nothing is done with the
+# value — it is simply dropped. The diagnostic must say that rather than tell
+# the author to bind a result they already hold.
+
+type linear File = File Int
+
+fn go(x: File) -> Int !{IO} =
+  do
+    x
+    0
+
+fn main() -> Unit !{IO} = print(to_string(go(File(1))))

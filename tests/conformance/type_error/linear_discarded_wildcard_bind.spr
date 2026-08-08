@@ -1,0 +1,12 @@
+import stdlib.task (Scope, with_scope, task_fork)
+
+# `_ <-` binds nothing, so the binder-keyed rules attach no obligation to the
+# forked handle and it leaks. This is the shape a user reaches by following the
+# discarded-step diagnostic's own advice to "bind its result with `<-`", so it
+# must be rejected too. The named form `_h <- …` is already caught as a leak.
+fn body(s: Scope) -> Int !{IO} =
+  do
+    _ <- task_fork(s, \_ -> 41)
+    7
+
+fn main() -> Unit !{IO} = print(to_string(with_scope(body)))
