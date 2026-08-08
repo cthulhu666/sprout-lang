@@ -4322,7 +4322,43 @@ long long str_slice(long long s_i, long long start, long long length) {
   out[take] = '\0';  return (long long)(uintptr_t)out;
 }
 
-/* str_slice_bytes: O(strlen + L) byte-indexed substring.
+/* sprout_cstr_byte_len: O(1) byte length of a Sprout String.
+ *
+ * THE reason the byte-offset string builtins are O(1) in the string's length.
+ * Every Sprout String is a headered CSTR block with its byte length in the
+ * header word at payload-8 — arena strings (alloc_cstr / adopt_cstr),
+ * header-prefixed static literals (ir_lowering.emit_str_global) and interned
+ * strings (intern_string, covering env/argv/map-key/term-key) all carry it — so
+ * the length never needs a scan, and no arena-membership check is required.
+ *
+ * Any function that walks a string from a caller-supplied byte OFFSET must use
+ * this rather than strlen(). A single strlen() for a bounds check silently makes
+ * the call O(|s|), and a scanner that calls it once per position O(|s|^2); that
+ * is precisely the defect this helper was extracted to fix (str_slice_bytes and
+ * str_starts_with_at_byte both opened with strlen(), making the lexer quadratic
+ * in file size — see tests/stdlib/test_byte_offset_cost.spr).
+ *
+ * The strlen fallback is defensive (unreachable given the invariant);
+ * SPROUT_GC_HDRCHECK=1 asserts aux == strlen so a violation aborts loudly
+ * instead of silently returning a wrong length. */
+static size_t sprout_cstr_byte_len(const char* s) {
+  uint64_t h;
+  memcpy(&h, s - 8, 8);
+  if ((h & 0xFF) == SPROUT_HEAP_CSTR) {
+    size_t len = (size_t)(h >> 14);
+    if (sprout_gc_hdrcheck_on()) {
+      size_t actual = strlen(s);
+      if (len != actual) {
+        fprintf(stderr, "[sprout] HDRCHECK: cstr_byte_len aux=%zu strlen=%zu\n", len, actual);
+        abort();
+      }
+    }
+    return len;
+  }
+  return strlen(s);
+}
+
+/* str_slice_bytes: O(L) byte-indexed substring (L = byte_len).
  *
  * Why this exists alongside str_slice: str_slice converts codepoint indices
  * to byte offsets via two O(N) walks (sprout_utf8_byte_offset, called twice),
@@ -4344,7 +4380,7 @@ long long str_slice_bytes(long long s_i, long long byte_start, long long byte_le
   if (s == NULL) tcp_fail("str_slice_bytes: null input");
   if (byte_start < 0 || byte_len < 0) tcp_fail("str_slice_bytes: byte_start/byte_len must be >= 0");
   SPROUT_HANDLE(h_s, s_i);
-  size_t total = strlen(s);
+  size_t total = sprout_cstr_byte_len(s);
   size_t bs = (size_t)byte_start;
   size_t bl = (size_t)byte_len;
   if (bs > total) bs = total;
@@ -4610,45 +4646,31 @@ SproutUnboxed2 bytes_get_unboxed(long long bytes_h, long long index) {
 /* str_char_at_byte / str_char_width_at_byte removed: replaced by the safe,
  * total decode_char_at over Bytes in stdlib.compiler.source (review F3). */
 
-/* str_byte_len: O(1) byte length read from the CSTR header at payload-8.
- * Every Sprout String is a headered CSTR block — arena strings (alloc_cstr /
- * adopt_cstr), header-prefixed static literals (ir_lowering.emit_str_global),
- * and interned strings (intern_string, covering env/argv/map-key/term-key) all
- * carry the header immediately before the payload — so the header is read
- * directly, with no arena-membership check. The strlen fallback is defensive
- * (should be unreachable given the invariant); SPROUT_GC_HDRCHECK=1 asserts
- * aux == strlen on every call, turning any invariant violation into a loud
- * abort rather than a wrong length. */
+/* str_byte_len: the Sprout-visible builtin over sprout_cstr_byte_len (see that
+ * helper for the header invariant and the HDRCHECK assertion). Kept as a thin
+ * wrapper so the header read has exactly one implementation. */
 long long str_byte_len(long long s_val) {
   const char* s = (const char*)s_val;
   if (s == NULL) tcp_fail("str_byte_len: null input");
-  uint64_t h;
-  memcpy(&h, s - 8, 8);
-  if ((h & 0xFF) == SPROUT_HEAP_CSTR) {
-    unsigned long long len = (unsigned long long)(h >> 14);
-    if (sprout_gc_hdrcheck_on()) {
-      size_t actual = strlen(s);
-      if (len != (unsigned long long)actual) {
-        fprintf(stderr, "[sprout] HDRCHECK: str_byte_len aux=%llu strlen=%zu\n", len, actual);
-        abort();
-      }
-    }
-    return (long long)len;
-  }
-  return (long long)strlen(s);
+  return (long long)sprout_cstr_byte_len(s);
 }
 
 /* str_starts_with_at_byte: O(|prefix|) starts-with check from a byte offset.
- * Avoids the O(N) remaining-text allocation of match_string's old approach. */
+ * Avoids the O(N) remaining-text allocation of match_string's old approach.
+ *
+ * Both lengths come from the O(1) header read, NOT strlen: this is called once
+ * per candidate operator at every token position by lexer.try_ops, so an O(|s|)
+ * bounds check here is what made lexing quadratic in file size. Guarded by
+ * tests/stdlib/test_byte_offset_cost.spr. */
 _Bool str_starts_with_at_byte(long long s_val, long long byte_pos, long long prefix_val) {
   const char* s = (const char*)s_val;
   const char* prefix = (const char*)prefix_val;
   if (s == NULL || prefix == NULL) tcp_fail("str_starts_with_at_byte: null input");
   if (byte_pos < 0) return 0;
-  size_t len = strlen(s);
+  size_t len = sprout_cstr_byte_len(s);
   size_t pos = (size_t)byte_pos;
   if (pos > len) return 0;
-  return strncmp(s + pos, prefix, strlen(prefix)) == 0;
+  return strncmp(s + pos, prefix, sprout_cstr_byte_len(prefix)) == 0;
 }
 
 long long str_find(long long haystack_val, long long needle_val) {
