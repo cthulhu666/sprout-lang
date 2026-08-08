@@ -1,0 +1,22 @@
+module main
+
+# M4: the consumed-set analysis tracks BINDERS (params, `let`, `<-`, pattern
+# vars). A linear value produced by a bare do-step and never bound has no
+# binder, so no leak rule could find it unfulfilled — it must be rejected at
+# the step itself. Here `open(1)` yields a `File` that is silently dropped.
+
+type linear File = File Int
+
+fn open(n: Int) -> File !{IO} =
+  do
+    print("open")
+    File(n)
+
+fn close(f: File) -> Int =
+  match f with
+  | File n -> n
+
+fn main() -> Unit !{IO} =
+  do
+    open(1)
+    print("done")
