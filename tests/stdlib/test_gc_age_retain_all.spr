@@ -1,0 +1,63 @@
+import stdlib.test (check_eq, check_true, run_suite)
+
+# Calibration workload for the object-age instrument (`SPROUT_GC_AGEPROF=1`).
+#
+# Shape: a large structure that is retained across MANY collections, plus churn
+# that keeps triggering them. Every collection therefore re-marks the retained
+# chain, so almost all mark work is on objects that already survived a previous
+# cycle. This is the self-hosted compiler's profile in miniature (85% of its live
+# heap is immortal AST/IR, re-traced on all 483 collections).
+#
+# KNOWN ANSWER — this file exists to make the instrument falsifiable:
+#   marked_age_ge1 / marked_total  must be HIGH  (the retained chain dominates)
+#   freed_age0     / freed_total   must be HIGH  (the churn dies immediately)
+# Its twin, `test_gc_age_retain_none.spr`, must show a LOW marked_age_ge1 ratio.
+# An instrument that cannot separate these two files is measuring nothing, so
+# `just gc-ageprof-check` asserts the separation rather than either number alone.
+#
+# As with the other GC workloads (`test_gc_freelist_reuse.spr`,
+# `test_gc_region_release.spr`), the assertions below only confirm the workload
+# ran and its data survived — object age is not observable from Sprout. The
+# measurement lives entirely in the runtime counters.
+
+type Chain (..) =
+  | End
+  | Link Int Chain
+
+# Tail-recursive so a long chain does not need a deep stack.
+fn build(n: Int, acc: Chain) -> Chain =
+  if n <= 0 then acc
+  else build(n - 1, Link(n, acc))
+
+fn chain_len(c: Chain, acc: Int) -> Int =
+  match c with
+  | Link _ rest -> chain_len(rest, acc + 1)
+  | End -> acc
+
+fn chain_head(c: Chain) -> Int =
+  match c with
+  | Link v _ -> v
+  | End -> 0
+
+# Short-lived garbage: each round builds an 8-link chain, walks it, and drops it.
+# The accumulator is an Int, so nothing heap-allocated accumulates here — every
+# collection this triggers finds only the retained chain plus a handful of young
+# nodes.
+fn churn(n: Int, acc: Int) -> Int =
+  if n <= 0 then acc
+  else churn(n - 1, acc + chain_len(build(8, End), 0))
+
+fn main() -> Unit !{IO} =
+  let kept = build(150000, End)
+      kept_len = chain_len(kept, 0)
+      # Drives many collections while `kept` stays reachable.
+      churned = churn(30000, 0)
+      # Forces `kept` to stay live across all of the churn above.
+      kept_len_after = chain_len(kept, 0)
+  in
+  run_suite("gc_age_retain_all", [
+    check_eq("retained chain built", kept_len, 150000),
+    check_eq("retained chain intact after churn", kept_len_after, 150000),
+    check_eq("retained chain head intact", chain_head(kept), 1),
+    check_eq("churn walked every round", churned, 240000)
+  ])

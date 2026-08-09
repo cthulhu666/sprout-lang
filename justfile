@@ -1783,6 +1783,67 @@ test-freelist-verify: bootstrap-from-seed
   fi
   echo "==> test-freelist-verify ✓"
 
+# Calibration gate for the object-age instrument (SPROUT_GC_AGEPROF=1), which
+# measures how much of each collection's mark work is spent on objects that
+# already survived a previous cycle — i.e. the ceiling on what a generational
+# nursery could skip.  A counter is only evidence if it can come out DIFFERENT on
+# inputs whose answer is known, so this runs two workloads that differ only in
+# whether a large structure is held live across collections and asserts the gap:
+#   retain_all  -> marked_age_ge1 ratio HIGH  (retained chain re-marked every cycle)
+#   retain_none -> marked_age_ge1 ratio LOW   (nothing survives a cycle)
+# A stuck, inverted, or live-vs-marked-confused counter fails here.  The runtime
+# separately aborts on internal inconsistency (histogram vs totals), so this gate
+# only has to check the separation.
+[group('test')]
+gc-ageprof-check: bootstrap-from-seed
+  #!/usr/bin/env bash
+  set -uo pipefail
+  TMPD=$(mktemp -d /tmp/sprout_ageprof_XXXXXX); trap 'rm -rf "$TMPD"' EXIT
+  mkdir -p "$TMPD/rtobj"
+  for rtsrc in {{runtime_src}}; do
+    clang -c "$rtsrc" -O2 {{clang_extra}} -o "$TMPD/rtobj/$(basename "$rtsrc" .c).o" 2>"$TMPD/rt.err" \
+      || { echo "gc-ageprof-check: runtime compile failed ($rtsrc)" >&2; cat "$TMPD/rt.err" >&2; exit 1; }
+  done
+  # Emits "<name> <marked_ratio> <died_young_ratio>" or exits non-zero.
+  run_one() {
+    local name="$1" f="tests/stdlib/$1.spr"
+    [ -f "$f" ] || { echo "gc-ageprof-check: missing $f" >&2; return 1; }
+    "{{build_dir}}/compile_driver_bin_stage1" --emit-ir "{{stdlib_root}}" --package-root "{{justfile_directory()}}" "$f" > "$TMPD/$name.ll" 2>"$TMPD/$name.err" \
+      || { echo "gc-ageprof-check: compile failed: $f" >&2; cat "$TMPD/$name.err" >&2; return 1; }
+    clang "$TMPD/$name.ll" "$TMPD/rtobj"/*.o {{clang_extra}} -o "$TMPD/$name.bin" 2>"$TMPD/$name.err" \
+      || { echo "gc-ageprof-check: link failed: $f" >&2; cat "$TMPD/$name.err" >&2; return 1; }
+    SPROUT_GC_AGEPROF=1 "$TMPD/$name.bin" > "$TMPD/$name.out" 2>"$TMPD/$name.prof" \
+      || { echo "gc-ageprof-check: $f aborted under SPROUT_GC_AGEPROF=1" >&2; tail -5 "$TMPD/$name.prof" >&2; return 1; }
+    grep -q "SUITE PASSED" "$TMPD/$name.out" \
+      || { echo "gc-ageprof-check: $f workload did not pass" >&2; tail -5 "$TMPD/$name.out" >&2; return 1; }
+    local line
+    line=$(grep -m1 "ageprof.*marked_total=" "$TMPD/$name.prof") \
+      || { echo "gc-ageprof-check: $f emitted no ageprof summary (is SPROUT_GC_AGEPROF wired up?)" >&2; return 1; }
+    awk -v n="$name" '{
+      for (i = 1; i <= NF; i++) { split($i, kv, "="); v[kv[1]] = kv[2] + 0 }
+      if (v["marked_total"] <= 0) { print "gc-ageprof-check: " n ": marked_total=0, workload drove no marking" > "/dev/stderr"; exit 1 }
+      if (v["freed_total"]  <= 0) { print "gc-ageprof-check: " n ": freed_total=0, workload freed nothing"    > "/dev/stderr"; exit 1 }
+      printf "%s %d %d\n", n, (100 * v["marked_age_ge1"]) / v["marked_total"], (100 * v["freed_age0"]) / v["freed_total"]
+    }' <<< "$line"
+  }
+  ALL=$(run_one test_gc_age_retain_all)   || exit 1
+  NONE=$(run_one test_gc_age_retain_none) || exit 1
+  all_marked=$(awk '{print $2}' <<< "$ALL");  all_young=$(awk '{print $3}' <<< "$ALL")
+  none_marked=$(awk '{print $2}' <<< "$NONE"); none_young=$(awk '{print $3}' <<< "$NONE")
+  echo "  retain_all : marked_age_ge1=${all_marked}%  died_young=${all_young}%"
+  echo "  retain_none: marked_age_ge1=${none_marked}%  died_young=${none_young}%"
+  failed=0
+  # Thresholds are deliberately loose — this gate checks that the instrument
+  # DISCRIMINATES, not that a workload hits a precise number.  The separation
+  # bound is the load-bearing one; a stuck counter passes the two one-sided
+  # bounds only if it happens to sit inside both, which it cannot.
+  (( all_marked >= 70 ))                  || { echo "gc-ageprof-check: retain_all marked_age_ge1 ${all_marked}% < 70% — retained chain is not dominating mark work" >&2; failed=1; }
+  (( none_marked <= 15 ))                 || { echo "gc-ageprof-check: retain_none marked_age_ge1 ${none_marked}% > 15% — objects are surviving cycles that should not" >&2; failed=1; }
+  (( all_marked - none_marked >= 40 ))    || { echo "gc-ageprof-check: separation $(( all_marked - none_marked ))pp < 40pp — the counter does not discriminate" >&2; failed=1; }
+  (( none_young >= 90 ))                  || { echo "gc-ageprof-check: retain_none died_young ${none_young}% < 90% — weak generational hypothesis not reproduced on pure churn" >&2; failed=1; }
+  (( failed == 0 )) || exit 1
+  echo "==> gc-ageprof-check ✓"
+
 # Run the independent, single-threaded CI gates concurrently (JOBS-wide) instead
 # of as a sequential chain of `just` steps.  On the 4-vCPU CI worker each of these
 # gates used only 1 core, leaving 3 idle for the duration; fanning them out fills
@@ -1811,6 +1872,7 @@ ci-fast-gates: bootstrap-from-seed build-fmt-from-seed
     "example-canary|run-example-canary"
     "gc-safety|gc-safety-check --strict"
     "freelist-verify|test-freelist-verify"
+    "gc-ageprof|gc-ageprof-check"
     "argv-smoke|argv-smoke"
     "div-by-zero-smoke|div-by-zero-smoke"
     "stack-overflow-smoke|stack-overflow-smoke"

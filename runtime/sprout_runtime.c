@@ -638,6 +638,125 @@ static inline void sprout_obj_write_tag(void* payload, long long tag, int arity)
 #define SPROUT_GC_COLOR_BIT     ((uint64_t)0x100)  /* bit 8 = mark color */
 #define SPROUT_FREELIST_CLASSES 257                 /* classes 1..256 + sentinel */
 
+/* Object age — header bits 9..13, the gap between the color bit and aux (which
+ * sprout_hdr_make shifts to bit 14).  A saturating count of collections this
+ * object has survived: 0 = allocated since the last sweep.  Written only by the
+ * sweep's live branch, and reset to 0 whenever a slot is (re)initialised, since
+ * sprout_hdr_write / the FREE and POISON headers rewrite the whole word.
+ *
+ * Read by SPROUT_GC_AGEPROF (measurement only, see sprout_gc_ageprof_on).  These
+ * are the same bits a generational collector would use for age/remembered state,
+ * so the instrument doubles as a dry run of that mechanism — but nothing in the
+ * collector's behaviour depends on the value today. */
+#define SPROUT_GC_AGE_SHIFT 9
+#define SPROUT_GC_AGE_MAX   31                      /* 5 bits: 0..31, saturating */
+#define SPROUT_GC_AGE_MASK  ((uint64_t)SPROUT_GC_AGE_MAX << SPROUT_GC_AGE_SHIFT)
+
+static inline unsigned sprout_hdr_age(uint64_t h) {
+  return (unsigned)((h & SPROUT_GC_AGE_MASK) >> SPROUT_GC_AGE_SHIFT);
+}
+/* Saturating: an object that reaches SPROUT_GC_AGE_MAX stops churning its header. */
+static inline uint64_t sprout_hdr_age_bump(uint64_t h) {
+  unsigned age = sprout_hdr_age(h);
+  if (age >= SPROUT_GC_AGE_MAX) return h;
+  return (h & ~SPROUT_GC_AGE_MASK) | ((uint64_t)(age + 1) << SPROUT_GC_AGE_SHIFT);
+}
+
+/* ── SPROUT_GC_AGEPROF=1 — how much of a collection is re-work? ───────────────
+ *
+ * Bounds what a generational nursery could save, BEFORE building one.  Two
+ * published results argue against taking that saving on faith:
+ *
+ *   - Immix (PLDI 2008) §5.3 measures exactly the design Sprout is forced into
+ *     (in-place, sticky-mark-bit, because non-moving is load-bearing here) and
+ *     finds "G|MS-MS does not improve sufficiently over MS to justify its use";
+ *     the technique only pays on a mark-REGION base.  Sprout's base is MS.
+ *   - Go rejected generational outright: "the young objects live and die young on
+ *     the stack".  That reason does not transfer (Sprout heap-allocates
+ *     everything), but its other one does — barrier cost is per-write and
+ *     constant while marking cost falls as the heap grows.
+ *
+ * So this measures both sides: `marked_age_ge1 / marked_total` is the ceiling on
+ * mark work a minor collection would skip, and `old_to_young / ptr_stores` is the
+ * remembered-set traffic a barrier would have to carry.  Counters only — no
+ * collector behaviour depends on them.
+ *
+ * NOT the same thing as -DSPROUT_GC_PROFILE, which needs a special build and
+ * over-reports GC by ~2.3x (its counters fire per lookup/edge/slot).  This works
+ * in an ordinary build and adds nothing when the env var is unset. */
+static int g_ageprof = -1;
+static int sprout_gc_ageprof_on(void) {
+  if (g_ageprof < 0) {
+    const char* e = getenv("SPROUT_GC_AGEPROF");
+    g_ageprof = (e && e[0] == '1') ? 1 : 0;
+  }
+  return g_ageprof;
+}
+
+static long long g_ap_cycles = 0;
+static long long g_ap_marked_total = 0;
+static long long g_ap_freed_total = 0;
+static long long g_ap_freed_age0 = 0;
+static long long g_ap_mut_calls = 0;       /* mutation-primitive calls seen */
+static long long g_ap_ptr_stores = 0;      /* ...of which stored a heap pointer */
+static long long g_ap_old_to_young = 0;    /* ...of which a barrier would record */
+static long long g_ap_marked_by_age[SPROUT_GC_AGE_MAX + 1];
+static long long g_ap_live_by_age[SPROUT_GC_AGE_MAX + 1];
+
+/* Price a pointer store into an already-allocated object.  Called from the
+ * mutation primitives (ref_write, vector_mutset) — the candidate barrier sites.
+ * A value that is not a heap pointer needs no barrier, so it is not counted in
+ * the denominator either. */
+static void sprout_ap_note_ptr_store(long long target, long long value) {
+  /* Counted before the lookups so a zero ptr_stores can be told apart from a hook
+   * that never ran — "a barrier would be free here" and "we did not measure this"
+   * are very different conclusions. */
+  g_ap_mut_calls++;
+  void* thdr = sprout_heap_lookup((void*)(uintptr_t)target);
+  if (thdr == NULL) return;
+  void* vhdr = sprout_heap_lookup((void*)(uintptr_t)value);
+  if (vhdr == NULL) return;   /* scalar value (unboxed Int/Double): no barrier */
+  uint64_t th, vh;
+  memcpy(&th, thdr, 8);
+  memcpy(&vh, vhdr, 8);
+  g_ap_ptr_stores++;
+  if (sprout_hdr_age(th) >= 1 && sprout_hdr_age(vh) == 0) g_ap_old_to_young++;
+}
+
+/* Runs after the atexit full collect (destructors follow atexit handlers), so
+ * the totals include every cycle.  Aborts rather than reports on an internal
+ * inconsistency: a histogram that disagrees with its own total means the
+ * instrument is miscounting, and a wrong number here would be acted on. */
+__attribute__((destructor)) static void sprout_ap_report(void) {
+  if (!sprout_gc_ageprof_on()) return;
+  long long hist_sum = 0, marked_ge1 = 0, marked_ge2 = 0, live_sum = 0;
+  for (int a = 0; a <= SPROUT_GC_AGE_MAX; a++) {
+    hist_sum += g_ap_marked_by_age[a];
+    live_sum += g_ap_live_by_age[a];
+    if (a >= 1) marked_ge1 += g_ap_marked_by_age[a];
+    if (a >= 2) marked_ge2 += g_ap_marked_by_age[a];
+  }
+  if (hist_sum != g_ap_marked_total) {
+    fprintf(stderr, "[sprout ageprof] INCONSISTENT: marked_by_age sums to %lld, marked_total=%lld\n",
+            hist_sum, g_ap_marked_total);
+    abort();
+  }
+  fprintf(stderr,
+          "[sprout ageprof] cycles=%lld marked_total=%lld marked_age_ge1=%lld "
+          "marked_age_ge2=%lld freed_total=%lld freed_age0=%lld "
+          "mut_calls=%lld ptr_stores=%lld old_to_young=%lld live_final=%lld\n",
+          g_ap_cycles, g_ap_marked_total, marked_ge1, marked_ge2,
+          g_ap_freed_total, g_ap_freed_age0,
+          g_ap_mut_calls, g_ap_ptr_stores, g_ap_old_to_young, live_sum);
+  fprintf(stderr, "[sprout ageprof] marked_by_age:");
+  for (int a = 0; a <= SPROUT_GC_AGE_MAX; a++)
+    if (g_ap_marked_by_age[a]) fprintf(stderr, " %d=%lld", a, g_ap_marked_by_age[a]);
+  fprintf(stderr, "\n[sprout ageprof] live_by_age (last cycle):");
+  for (int a = 0; a <= SPROUT_GC_AGE_MAX; a++)
+    if (g_ap_live_by_age[a]) fprintf(stderr, " %d=%lld", a, g_ap_live_by_age[a]);
+  fprintf(stderr, "\n");
+}
+
 typedef struct {
   char*     base;         /* malloc'd 1-MiB block (or single large object block) */
   size_t    cap;          /* bytes in block (SPROUT_REGION_SIZE or slot_bytes) */
@@ -1401,6 +1520,10 @@ long long ref_read(long long ref) {
 long long ref_write(long long ref, long long value) {
   if (sprout_heap_kind_at((void*)(uintptr_t)ref) != SPROUT_HEAP_REF)
     tcp_fail("ref_write: not a Ref");
+  /* Candidate write-barrier site: a pointer store into an already-allocated
+   * object.  Measured under SPROUT_GC_AGEPROF to price a barrier before one
+   * exists (see sprout_ap_note_ptr_store). */
+  if (sprout_gc_ageprof_on()) sprout_ap_note_ptr_store(ref, value);
   ((RefVal*)(uintptr_t)ref)->value = value;
   return 0;
 }
@@ -1487,6 +1610,13 @@ static void gc_mark_enqueue(void* payload) {
   void* hdr_ptr = (char*)payload - 8;
   uint64_t h; memcpy(&h, hdr_ptr, 8);
   if (h & SPROUT_GC_COLOR_BIT) return;  /* already marked */
+  /* Age is read BEFORE the color bit is set, and this is the one choke point for
+   * marking, so every marked object is counted exactly once — which is what makes
+   * marked_by_age comparable against marked_total. */
+  if (sprout_gc_ageprof_on()) {
+    g_ap_marked_by_age[sprout_hdr_age(h)]++;
+    g_ap_marked_total++;
+  }
   h |= SPROUT_GC_COLOR_BIT;
   memcpy(hdr_ptr, &h, 8);
   g_gc_marked_count++;
@@ -1861,6 +1991,13 @@ static void sprout_gc_sweep(void) {
   g_gc_live_cstr = g_gc_live_cstr_bytes = 0;
 
   int lineage_on = sprout_gc_lineage_on();
+  int ageprof_on = sprout_gc_ageprof_on();
+  if (ageprof_on) {
+    /* live_by_age describes the CURRENT cycle only, so it resets here; the
+     * marked/freed totals accumulate across the whole run. */
+    memset(g_ap_live_by_age, 0, sizeof(g_ap_live_by_age));
+    g_ap_cycles++;
+  }
 
   /* Pass 1: process all slots in all regions. */
   for (size_t ri = 0; ri < g_region_count; ri++) {
@@ -1872,9 +2009,15 @@ static void sprout_gc_sweep(void) {
       uint64_t h; memcpy(&h, r->base, 8);
       if (h & SPROUT_GC_COLOR_BIT) {
         h &= ~SPROUT_GC_COLOR_BIT;
+        h = sprout_hdr_age_bump(h);
         memcpy(r->base, &h, 8);
         r->live_count = 1;
+        if (ageprof_on) g_ap_live_by_age[sprout_hdr_age(h)]++;
       } else {
+        if (ageprof_on) {
+          g_ap_freed_total++;
+          if (sprout_hdr_age(h) == 0) g_ap_freed_age0++;
+        }
         SproutHeapKind kind = sprout_hdr_kind(h);
         sprout_gc_invalidate_singletons(payload);
         if (g_gc_stress == 1 || lineage_on) sprout_gc_trace_free(payload);
@@ -1914,8 +2057,12 @@ static void sprout_gc_sweep(void) {
       void* payload = r->base + off + 8;
       if (h & SPROUT_GC_COLOR_BIT) {
         h &= ~SPROUT_GC_COLOR_BIT;
+        /* Survived a collection: bump the age in the same store that clears the
+         * color bit, so this costs no extra traversal or write. */
+        h = sprout_hdr_age_bump(h);
         memcpy(r->base + off, &h, 8);
         region_live++;
+        if (ageprof_on) g_ap_live_by_age[sprout_hdr_age(h)]++;
         if (g_debug_gc_enabled) {
           switch (kind) {
             case SPROUT_HEAP_OBJ:     g_gc_live_obj++;     break;
@@ -1936,6 +2083,12 @@ static void sprout_gc_sweep(void) {
         }
       } else {
         /* Dead slot. */
+        if (ageprof_on) {
+          /* age == 0 means "allocated since the last sweep": the weak
+           * generational hypothesis, counted rather than assumed. */
+          g_ap_freed_total++;
+          if (sprout_hdr_age(h) == 0) g_ap_freed_age0++;
+        }
         sprout_gc_invalidate_singletons(payload);
 
         if (sprout_gc_hdrcheck_on() && kind == SPROUT_HEAP_CSTR) {
@@ -1983,6 +2136,23 @@ static void sprout_gc_sweep(void) {
        drop this region's staged entries in precisely that case. */
     if (region_live == 0 && region_poison == 0) fl_region_rollback();
     else                                        fl_region_commit();
+  }
+
+  if (ageprof_on) {
+    /* Independent cross-check: the age histogram is built per-object in the live
+     * branch, while g_managed_heap_count is the collector's own running tally
+     * (decremented once per dead slot).  They are computed by different code from
+     * different state, so a disagreement means the instrument is miscounting —
+     * abort rather than report a number that would be acted on. */
+    long long live_sum = 0;
+    for (int a = 0; a <= SPROUT_GC_AGE_MAX; a++) live_sum += g_ap_live_by_age[a];
+    if (live_sum != (long long)g_managed_heap_count) {
+      fprintf(stderr,
+              "[sprout ageprof] INCONSISTENT at cycle=%lld: live_by_age sums to %lld, "
+              "g_managed_heap_count=%lld\n",
+              g_ap_cycles, live_sum, (long long)g_managed_heap_count);
+      abort();
+    }
   }
 
   /* Pass 2: release EVERY region with no live and no poison.
@@ -6700,6 +6870,10 @@ long long vector_mutset(long long vec, long long index, long long value) {
   VectorVal* v = (VectorVal*)(uintptr_t)vec;
   if (v == NULL) tcp_fail("vector_mutset: null vector");
   if (index < 0 || index >= v->len) tcp_fail("vector_mutset: index out of bounds");
+  /* The other candidate write-barrier site — see ref_write.  Note the store is
+   * into v->data, a plain malloc'd array owned by the VectorVal, so a real
+   * barrier here must record the OWNING object, which is what is priced. */
+  if (sprout_gc_ageprof_on()) sprout_ap_note_ptr_store(vec, value);
   v->data[index] = value;
   return 0;
 }
