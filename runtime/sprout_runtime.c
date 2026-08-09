@@ -193,8 +193,20 @@ static long long g_gc_live_obj = 0, g_gc_live_closure = 0, g_gc_live_vec = 0;
 static long long g_gc_live_map = 0, g_gc_live_bytes = 0, g_gc_live_builder = 0;
 static long long g_gc_live_tuple = 0, g_gc_live_range = 0, g_gc_live_ref = 0;
 static long long g_gc_live_cstr = 0, g_gc_live_cstr_bytes = 0;
-static double g_gc_adapt_ratio = 0.2;   /* fraction of heap swept below which threshold grows; 0 disables */
-static double g_gc_adapt_factor = 2.0;  /* multiplier applied to threshold when adapting */
+/* Adaptive-threshold enable switch.  NOT a ratio any more: since the policy became
+   `threshold = live * factor` (see sprout_gc_collect_with_reason) the swept fraction
+   is never consulted, so the only thing this value's magnitude does is compare > 0.
+   Kept as a double, and kept named _ratio, for env-var compatibility. */
+static double g_gc_adapt_ratio = 0.2;
+/* Garbage budget: the heap may grow to `live * factor` before the next collection,
+   i.e. (factor - 1) x live objects of garbage are tolerated.  Total collector work
+   ~ collections x cost-per-collection, so raising this trades RSS for time.  3.0 is
+   the measured knee on self-hosted compilation (-19% wall / +18% RSS vs 2.0; F=4 is
+   -29%/+38%, a worse-than-1:1 trade).  The win is sublinear because sweep pass 1
+   walks every SLOT: fewer collections, but each sweeps a larger heap.  Programs whose
+   live set is under g_gc_threshold_base/factor are floor-pinned and unaffected —
+   `just gc-adapt-check` asserts both properties. */
+static double g_gc_adapt_factor = 3.0;
 static long long g_gc_adapt_cap = 0;    /* uncapped; BST map is O(1) unmanaged payload per node */
 /* Livelock detection: track consecutive cycles that sweep almost nothing. */
 static long long g_gc_consecutive_bad_cycles = 0;
@@ -407,9 +419,12 @@ static void sprout_gc_threshold_maybe_enable(void) {
 }
 
 static void sprout_gc_adapt_maybe_enable(void) {
-  /* SPROUT_GC_ADAPT_RATIO: swept/heap fraction below which threshold is grown.
-     Default is 0.2 (grow when less than 20%% of the heap was freed).
-     Set to 0 to disable adaptive GC entirely. */
+  /* SPROUT_GC_ADAPT_RATIO: adaptive-GC on/off switch.  Any value > 0 enables the
+     adaptive threshold; 0 disables it, freezing the threshold at its initial value.
+     Historically this was the swept/heap fraction below which the threshold grew,
+     but the policy is now `threshold = live * factor` and no swept fraction is
+     consulted, so intermediate values are accepted (for compatibility) yet behave
+     identically to the 0.2 default. */
   const char* ratio_raw = getenv("SPROUT_GC_ADAPT_RATIO");
   if (ratio_raw != NULL && ratio_raw[0] != '\0') {
     char* end = NULL;
@@ -418,8 +433,8 @@ static void sprout_gc_adapt_maybe_enable(void) {
       tcp_fail("SPROUT_GC_ADAPT_RATIO: expected float in [0, 1]");
     g_gc_adapt_ratio = parsed;
   }
-  /* SPROUT_GC_ADAPT_FACTOR: factor by which threshold is multiplied when the
-     swept fraction is below SPROUT_GC_ADAPT_RATIO. Must be > 1. Default 2.0. */
+  /* SPROUT_GC_ADAPT_FACTOR: multiplier on the live set that sets the next
+     threshold. Must be > 1. Default 3.0 (see g_gc_adapt_factor for the rationale). */
   const char* factor_raw = getenv("SPROUT_GC_ADAPT_FACTOR");
   if (factor_raw != NULL && factor_raw[0] != '\0') {
     char* end = NULL;
@@ -2240,7 +2255,9 @@ static void sprout_gc_collect_with_reason(const char* reason) {
      MB of output).  Targeting live*factor self-tunes: it rises for genuinely
      live-heavy heaps (avoiding GC thrash) and falls again when the working set
      shrinks, bounding peak RSS to ~factor x the live set.  g_gc_threshold_base
-     is the floor for small programs; the optional cap still applies. */
+     is the floor for small programs; the optional cap still applies.
+     NOTE: adapt_ratio survives only as the on/off switch below — the swept fraction
+     it used to name is no longer part of the decision. */
   if (g_gc_adapt_ratio > 0.0) {
     long long target = (long long)((double)g_managed_heap_count * g_gc_adapt_factor);
     if (target < g_gc_threshold_base) target = g_gc_threshold_base;

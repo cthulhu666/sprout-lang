@@ -54,12 +54,20 @@ All variables are read at program startup; invalid values abort with a message.
 | `SPROUT_GC_THRESHOLD` | `4096` | Managed heap node count that triggers a mid-execution collection. Positive integer to override; `off` or `0` to collect only at exit. |
 | `SPROUT_DEBUG_GC` | off | Set to `1` / `true` / `yes` to log each GC cycle to stderr: `[sprout gc] cycle=N reason=X threshold=N heap_before=N heap_after=N live=N roots=N marked=N alloc_since_gc=N swept=N elapsed_us=N`. |
 
-**Adaptive threshold** — grows the threshold after low-yield cycles to prevent GC thrash when the working set is large. Set `SPROUT_GC_ADAPT_RATIO=0` to disable.
+**Adaptive threshold** — after each collection the trigger is re-based on the *live* set:
+`threshold = max(live × SPROUT_GC_ADAPT_FACTOR, SPROUT_GC_THRESHOLD)`, capped by
+`SPROUT_GC_ADAPT_CAP`. This keeps the heap (hence RSS) proportional to live data: it rises for
+genuinely live-heavy heaps, avoiding GC thrash, and falls again when the working set shrinks.
+Set `SPROUT_GC_ADAPT_RATIO=0` to disable and freeze the threshold.
+
+Read the factor as a **garbage budget**: `(factor − 1) × live` objects of garbage are tolerated
+before the next collection. Raising it trades RSS for time, and only for programs whose live set
+exceeds `SPROUT_GC_THRESHOLD / factor` — smaller programs sit on the floor and are unaffected.
 
 | Variable | Default | Description |
 |---|---|---|
-| `SPROUT_GC_ADAPT_RATIO` | `0.2` | Float in `[0, 1]`. If the fraction of heap freed is below this, multiply the threshold by `SPROUT_GC_ADAPT_FACTOR`. |
-| `SPROUT_GC_ADAPT_FACTOR` | `2.0` | Float > 1. Threshold growth multiplier. |
+| `SPROUT_GC_ADAPT_RATIO` | `0.2` | On/off switch: any value > 0 enables the adaptive threshold, `0` disables it. **No longer a ratio** — it named the swept fraction under the old only-ever-grow policy, which no longer exists; intermediate values are accepted for compatibility but behave like the default. |
+| `SPROUT_GC_ADAPT_FACTOR` | `3.0` | Float > 1. Multiplier on the live set. `3.0` is the measured knee on self-hosted compilation (−14% to −19% wall for +13% to +18% peak RSS vs `2.0`); `4.0` gives −29%/+38%, a worse-than-1:1 trade. Lower it toward `2.0` for memory-constrained workloads. |
 | `SPROUT_GC_ADAPT_CAP` | `0` (no cap) | Non-negative integer. Maximum threshold value; `0` = unbounded. **Set a cap for long-lived or memory-constrained workloads** to prevent unbounded RSS growth. |
 
 **Livelock detection** — warns or aborts when consecutive GC cycles free almost nothing (working set fills the heap).
