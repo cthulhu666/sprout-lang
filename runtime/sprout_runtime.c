@@ -1613,11 +1613,200 @@ static inline size_t sprout_slot_step(uint64_t h) {
   return slot_bytes((SproutHeapKind)kind_bits, h >> 14);
 }
 
+/* ── Free lists are built DURING the sweep's classifying walk ───────────────
+ *
+ * The freelists must end up holding every FREE slot in every SURVIVING region.
+ * The obvious way to get that — walk the whole heap again once the dead slots
+ * have been marked FREE and the empty regions released — costs a second full
+ * traversal of the heap per collection, which measured at ~27% of collector
+ * time and ~17% of total self-hosted compile time (a 452 KB compiler source
+ * emitted 97M slot-steps in the classifying pass and 97M more in the rebuild).
+ *
+ * So the lists are built in the classifying pass instead. The one thing that
+ * made that unsafe is region release: a slot pushed for a region that is then
+ * handed back to the OS would leave the freelist pointing into memory this
+ * process no longer owns.  Staging solves it without a second walk.  While a
+ * region is being walked, every class it pushes to has its PRE-REGION head
+ * saved once; every entry pushed while walking region R is therefore chained on
+ * top of that saved head, so restoring the saved heads drops exactly R's
+ * entries and nothing else.  Cost is O(classes touched), paid only for a region
+ * that is about to be released anyway.
+ *
+ * Two things are easy to get wrong here, and both corrupt the freelist quietly
+ * rather than crashing — see tests/stdlib/test_gc_freelist_reuse.spr:
+ *   - Slots freed in an EARLIER cycle are still FREE now and must be re-listed;
+ *     listing only this cycle's newly-freed slots leaks capacity permanently.
+ *   - The rollback is load-bearing.  Skipping it survived 422 collections of a
+ *     real compile before producing a dangling entry, so "it passed a test run"
+ *     is not evidence.  SPROUT_FL_VERIFY=1 exists to make it evidence. */
+static void*  g_fl_saved[SPROUT_FREELIST_CLASSES];
+static int    g_fl_touched[SPROUT_FREELIST_CLASSES];
+static size_t g_fl_touched_list[SPROUT_FREELIST_CLASSES];
+static size_t g_fl_touched_n;
+
+/* Push a FREE slot onto its class list, saving the class head on first touch of
+ * that class within the current region.  cls == slot_bytes/16; out-of-range
+ * classes are ignored exactly as the old rebuild ignored them. */
+static inline void fl_push_staged(size_t cls, void* payload) {
+  if (cls < 1 || cls >= SPROUT_FREELIST_CLASSES) return;
+  if (!g_fl_touched[cls]) {
+    g_fl_touched[cls] = 1;
+    g_fl_saved[cls] = g_freelist[cls];
+    g_fl_touched_list[g_fl_touched_n++] = cls;
+  }
+  memcpy(payload, &g_freelist[cls], sizeof(void*));  /* next-ptr in payload word 0 */
+  g_freelist[cls] = payload;
+}
+
+static inline void fl_region_begin(void) { g_fl_touched_n = 0; }
+
+/* Keep this region's entries (the region survives Pass 2). */
+static inline void fl_region_commit(void) {
+  for (size_t i = 0; i < g_fl_touched_n; i++) g_fl_touched[g_fl_touched_list[i]] = 0;
+  g_fl_touched_n = 0;
+}
+
+/* Drop this region's entries (Pass 2 is about to release its memory). */
+static inline void fl_region_rollback(void) {
+  for (size_t i = 0; i < g_fl_touched_n; i++) {
+    size_t cls = g_fl_touched_list[i];
+    g_freelist[cls] = g_fl_saved[cls];
+    g_fl_touched[cls] = 0;
+  }
+  g_fl_touched_n = 0;
+}
+
+/* SPROUT_FL_VERIFY=1 — oracle check for the staged freelist build.
+ *
+ * Recomputes the answer a full post-release heap walk would give (every FREE
+ * slot of every surviving region) and compares it against the staged freelists
+ * as a sorted (class, payload) multiset, aborting on the first disagreement.
+ * That catches a slot the staged build missed, a slot listed twice, and an
+ * entry pointing into a region Pass 2 released.
+ *
+ * O(heap) per collection with two sorts on top, so this is strictly a checking
+ * mode — never enable it in a timing run.  It does NOT prove the freelist is
+ * correct in the abstract, only that it agrees with the full-walk definition. */
+typedef struct { unsigned int cls; void* p; } SproutFlEntry;
+
+static int sprout_fl_entry_cmp(const void* a, const void* b) {
+  const SproutFlEntry* x = (const SproutFlEntry*)a;
+  const SproutFlEntry* y = (const SproutFlEntry*)b;
+  if (x->cls != y->cls) return x->cls < y->cls ? -1 : 1;
+  if (x->p   != y->p)   return (uintptr_t)x->p < (uintptr_t)y->p ? -1 : 1;
+  return 0;
+}
+
+static int g_fl_verify = -1;
+static int sprout_fl_verify_on(void) {
+  if (g_fl_verify < 0) {
+    const char* e = getenv("SPROUT_FL_VERIFY");
+    g_fl_verify = (e && e[0] == '1') ? 1 : 0;
+  }
+  return g_fl_verify;
+}
+
+static void sprout_fl_verify_against_full_walk(void) {
+  if (!sprout_fl_verify_on()) return;
+
+  /* B (the oracle) is built FIRST: every FREE slot of every surviving region.
+     Its size then bounds how far the staged chains may legitimately be walked,
+     which keeps a dangling or cyclic next-pointer from looping forever — that
+     failure has to report, not hang. */
+  size_t bcap = 1024, bn = 0;
+  SproutFlEntry* B = (SproutFlEntry*)malloc(bcap * sizeof(SproutFlEntry));
+  if (B == NULL) tcp_fail("SPROUT_FL_VERIFY: out of memory");
+  for (size_t ri = 0; ri < g_region_count; ri++) {
+    SproutRegion* r = &g_regions[ri];
+    if (r->is_large) continue;
+    size_t off = 0;
+    while (off < r->bump) {
+      uint64_t h;
+      memcpy(&h, r->base + off, 8);
+      size_t ssize = sprout_slot_step(h);
+      if ((h & 0xFF) == SPROUT_HEAP_FREE) {
+        size_t cls = ssize / SPROUT_SLOT_GRAN;
+        if (cls >= 1 && cls < SPROUT_FREELIST_CLASSES) {
+          if (bn == bcap) {
+            bcap *= 2;
+            SproutFlEntry* t = (SproutFlEntry*)realloc(B, bcap * sizeof(SproutFlEntry));
+            if (t == NULL) { free(B); tcp_fail("SPROUT_FL_VERIFY: out of memory"); }
+            B = t;
+          }
+          B[bn].cls = (unsigned int)cls;
+          B[bn].p = r->base + off + 8;
+          bn++;
+        }
+      }
+      off += ssize;
+    }
+  }
+
+  /* A: what the staged build produced — walk each class chain, capped. */
+  size_t acap = 1024, an = 0;
+  SproutFlEntry* A = (SproutFlEntry*)malloc(acap * sizeof(SproutFlEntry));
+  if (A == NULL) { free(B); tcp_fail("SPROUT_FL_VERIFY: out of memory"); }
+  for (size_t cls = 1; cls < SPROUT_FREELIST_CLASSES; cls++) {
+    void* p = g_freelist[cls];
+    while (p != NULL) {
+      if (an > bn) {
+        fprintf(stderr,
+                "[sprout] FL_VERIFY cycle=%lld staged chains exceed %zu entries "
+                "(cycle or dangling next-ptr in class %zu)\n",
+                g_gc_cycle_count, bn, cls);
+        free(A); free(B);
+        abort();
+      }
+      if (an == acap) {
+        acap *= 2;
+        SproutFlEntry* t = (SproutFlEntry*)realloc(A, acap * sizeof(SproutFlEntry));
+        if (t == NULL) { free(A); free(B); tcp_fail("SPROUT_FL_VERIFY: out of memory"); }
+        A = t;
+      }
+      A[an].cls = (unsigned int)cls;
+      A[an].p = p;
+      an++;
+      void* next;
+      memcpy(&next, p, sizeof(void*));
+      p = next;
+    }
+  }
+
+  qsort(A, an, sizeof(SproutFlEntry), sprout_fl_entry_cmp);
+  qsort(B, bn, sizeof(SproutFlEntry), sprout_fl_entry_cmp);
+
+  int bad = 0;
+  if (an != bn) {
+    fprintf(stderr, "[sprout] FL_VERIFY cycle=%lld count mismatch: staged=%zu full_walk=%zu\n",
+            g_gc_cycle_count, an, bn);
+    bad = 1;
+  }
+  size_t n = an < bn ? an : bn;
+  for (size_t i = 0; i < n; i++) {
+    if (A[i].cls != B[i].cls || A[i].p != B[i].p) {
+      fprintf(stderr,
+              "[sprout] FL_VERIFY cycle=%lld entry mismatch at %zu: staged=(cls%u,%p) full_walk=(cls%u,%p)\n",
+              g_gc_cycle_count, i, A[i].cls, A[i].p, B[i].cls, B[i].p);
+      bad = 1;
+      break;
+    }
+  }
+  free(A);
+  free(B);
+  if (bad) abort();
+}
+
 /* Region-walking mark-sweep collector.  Pass 1: process every slot in every
  * region (live → clear color; dead → release extras + write FREE header + clear
- * slotmap, OR poison in lineage mode).  Pass 2: release regions with no live and
- * no poison.  Pass 3: rebuild the per-class freelists from surviving FREE slots. */
+ * slotmap, OR poison in lineage mode) while staging that region's FREE slots
+ * onto the per-class freelists.  Pass 2: release regions with no live and no
+ * poison, dropping their staged freelist entries.  Pass 3: a rare fixup, see
+ * its comment — the freelists are already built by the time it runs. */
 static void sprout_gc_sweep(void) {
+  /* Rebuilt from scratch every cycle, as the old separate rebuild pass did.
+     Safe here because nothing between this point and the end of the sweep
+     allocates a managed object: Pass 1/2 only free(), malloc() and realloc(). */
+  memset(g_freelist, 0, sizeof(g_freelist));
   g_gc_live_obj = g_gc_live_closure = g_gc_live_vec = 0;
   g_gc_live_map = g_gc_live_bytes = g_gc_live_builder = 0;
   g_gc_live_tuple = g_gc_live_range = g_gc_live_ref = 0;
@@ -1655,11 +1844,15 @@ static void sprout_gc_sweep(void) {
     long long region_live = 0;
     long long region_poison = 0;
     size_t off = 0;
+    fl_region_begin();
     while (off < r->bump) {
       uint64_t h; memcpy(&h, r->base + off, 8);
       size_t ssize = sprout_slot_step(h);
       uint64_t kind_bits = h & 0xFF;
       if (kind_bits == SPROUT_HEAP_FREE) {
+        /* Freed in an EARLIER cycle and never reused: still belongs on the
+           freelist, which is rebuilt from scratch each sweep. */
+        fl_push_staged(ssize / SPROUT_SLOT_GRAN, r->base + off + 8);
         off += ssize;
         continue;
       }
@@ -1728,6 +1921,7 @@ static void sprout_gc_sweep(void) {
           sprout_release_payload_extras(payload, kind);
           uint64_t free_hdr = (uint64_t)SPROUT_HEAP_FREE | ((uint64_t)ssize << 14);
           memcpy(r->base + off, &free_hdr, 8);
+          fl_push_staged(ssize / SPROUT_SLOT_GRAN, payload);
           g_managed_heap_count--;
           g_debug_gc_swept++;
         }
@@ -1737,6 +1931,10 @@ static void sprout_gc_sweep(void) {
     }
     r->live_count = region_live;
     r->poison_count = region_poison;
+    /* Pass 2 releases a region exactly when it has no live and no poison, so
+       drop this region's staged entries in precisely that case. */
+    if (region_live == 0 && region_poison == 0) fl_region_rollback();
+    else                                        fl_region_commit();
   }
 
   /* Pass 2: release empty regions (no live, no poison). Keep >= 1 normal region. */
@@ -1768,26 +1966,34 @@ static void sprout_gc_sweep(void) {
     open_new_region();
   }
 
-  /* Pass 3: rebuild class freelists from surviving regions. */
-  memset(g_freelist, 0, sizeof(g_freelist));
+  /* Pass 3 (RARE fixup): Pass 1 already built the freelists.  The one gap is a
+     region that ended Pass 1 with nothing live — so its staged entries were
+     rolled back — but that Pass 2 kept anyway to honour "retain at least one
+     normal region".  Pass 2 only stops releasing once a single normal region is
+     left, so this happens only when EVERY normal region is empty (the whole
+     heap died), plus the freshly opened region in the zero-region case, whose
+     bump is 0 and whose walk is therefore free.  Without this those slots would
+     be neither on a freelist nor above the bump pointer: unreachable capacity.
+     Regions with anything live or poisoned were committed and must be skipped,
+     or their entries would be listed a second time. */
   for (size_t ri2 = 0; ri2 < g_region_count; ri2++) {
     SproutRegion* r = &g_regions[ri2];
     if (r->is_large) continue;
+    if (r->live_count != 0 || r->poison_count != 0) continue;
+    fl_region_begin();
     size_t off = 0;
     while (off < r->bump) {
       uint64_t h; memcpy(&h, r->base + off, 8);
       size_t ssize = sprout_slot_step(h);
       if ((h & 0xFF) == SPROUT_HEAP_FREE) {
-        size_t cls = ssize / SPROUT_SLOT_GRAN;
-        if (cls < SPROUT_FREELIST_CLASSES) {
-          void* payload = r->base + off + 8;
-          memcpy(payload, &g_freelist[cls], sizeof(void*));
-          g_freelist[cls] = payload;
-        }
+        fl_push_staged(ssize / SPROUT_SLOT_GRAN, r->base + off + 8);
       }
       off += ssize;
     }
+    fl_region_commit();
   }
+
+  sprout_fl_verify_against_full_walk();
 }
 
 static void sprout_gc_collect(void) {

@@ -1,0 +1,87 @@
+import stdlib.test (check_eq, check_true, run_suite)
+
+# Regression net for the per-class free lists the sweep hands to the allocator.
+#
+# The sweep builds those lists while it classifies slots, staging each region's
+# entries so they can be dropped again if that region turns out to have nothing
+# live and gets released. Two cases pinned down here, both of which produce a
+# WRONG free list rather than an obvious crash:
+#
+#   1. A slot freed in an EARLIER cycle is still free in this one and must be
+#      re-listed. Missing it silently shrinks the free list, so the allocator
+#      stops reusing memory the process already owns.
+#   2. Entries staged for a region that is then released must be dropped, or the
+#      free list points into memory that has been handed back.
+#
+# Neither is observable from Sprout as a wrong value, so this file's job is to
+# DRIVE those states: the anchors keep regions non-empty across collections
+# (so their staged entries must be kept, not dropped), two churn rounds leave
+# slots free across a cycle boundary, and every size class is then re-allocated
+# and checked. Run under SPROUT_FL_VERIFY=1 — as CI does — to make the runtime
+# compare its free list against a full-heap walk on every single cycle.
+#
+# The value assertions below still earn their place: they catch a mis-linked
+# chain, which hands the same slot out twice and corrupts fields.
+
+type Shape (..) =
+  | S0
+  | S1 Int
+  | S3 Int Int Int
+  | S7 Int Int Int Int Int Int Int
+
+fn shape_sum(s: Shape) -> Int =
+  match s with
+  | S7 a b c d e f g -> a + b + c + d + e + f + g
+  | S3 a b c -> a + b + c
+  | S1 a -> a
+  | S0 -> 0
+
+# One round of garbage spread over four OBJ slot classes and two CSTR classes,
+# so several free lists fill at once rather than just one.
+fn churn(n: Int, acc: Int) -> Int =
+  if n <= 0 then acc
+  else churn(n - 1,
+    acc
+      + shape_sum(S0)
+      + shape_sum(S1(1))
+      + shape_sum(S3(1, 1, 1))
+      + shape_sum(S7(1, 1, 1, 1, 1, 1, 1))
+      + str_len("k" ++ int_to_string(n))
+      + str_len("longer-key-" ++ int_to_string(n)))
+
+fn main() -> Unit !{IO} =
+  # Allocated before any churn, and live to the end: these keep their regions
+  # from being released, so the sweep must COMMIT those regions' staged entries.
+  let anchor0 = S0
+      anchor1 = S1(11)
+      anchor3 = S3(1, 2, 3)
+      anchor7 = S7(1, 2, 3, 4, 5, 6, 7)
+      anchor_s = "anchor-" ++ int_to_string(99)
+      # Round 1 leaves free slots in every class it touched.
+      round1 = churn(4000, 0)
+      # Round 2 runs with round 1's slots ALREADY free: a sweep that only lists
+      # the slots it frees this cycle loses them permanently.
+      round2 = churn(4000, 0)
+      # Fresh allocations must come back out of those reused slots intact.
+      fresh0 = S0
+      fresh1 = S1(77)
+      fresh3 = S3(10, 20, 30)
+      fresh7 = S7(7, 7, 7, 7, 7, 7, 7)
+      fresh_s = "fresh-" ++ int_to_string(5)
+  in
+  run_suite("gc_freelist_reuse", [
+    check_true("round 1 churn ran", round1 > 0),
+    check_eq("both churn rounds agree", round1, round2),
+
+    check_eq("anchor S0 survives both rounds", shape_sum(anchor0), 0),
+    check_eq("anchor S1 survives both rounds", shape_sum(anchor1), 11),
+    check_eq("anchor S3 survives both rounds", shape_sum(anchor3), 6),
+    check_eq("anchor S7 survives both rounds", shape_sum(anchor7), 28),
+    check_eq("anchor string survives both rounds", anchor_s, "anchor-99"),
+
+    check_eq("S0 reused from freelist", shape_sum(fresh0), 0),
+    check_eq("S1 reused from freelist", shape_sum(fresh1), 77),
+    check_eq("S3 reused from freelist", shape_sum(fresh3), 60),
+    check_eq("S7 reused from freelist", shape_sum(fresh7), 49),
+    check_eq("CSTR reused from freelist", fresh_s, "fresh-5")
+  ])
