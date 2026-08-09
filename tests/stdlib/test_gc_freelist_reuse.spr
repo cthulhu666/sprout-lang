@@ -14,14 +14,24 @@ import stdlib.test (check_eq, check_true, run_suite)
 #      free list points into memory that has been handed back.
 #
 # Neither is observable from Sprout as a wrong value, so this file's job is to
-# DRIVE those states: the anchors keep regions non-empty across collections
-# (so their staged entries must be kept, not dropped), two churn rounds leave
-# slots free across a cycle boundary, and every size class is then re-allocated
-# and checked. Run under SPROUT_FL_VERIFY=1 — as CI does — to make the runtime
-# compare its free list against a full-heap walk on every single cycle.
+# DRIVE those states, not to assert on them: the anchors keep regions non-empty
+# across collections (so their staged entries must be kept, not dropped), two
+# churn rounds leave slots free across a cycle boundary, and every size class is
+# then re-allocated. The invariant itself is checked by the runtime, under
+# SPROUT_FL_VERIFY=1.
 #
-# The value assertions below still earn their place: they catch a mis-linked
-# chain, which hands the same slot out twice and corrupts fields.
+# BE CLEAR ABOUT WHAT THE ASSERTIONS BELOW ARE WORTH: they were mutation-tested
+# against three broken sweeps (drop the earlier-cycle re-list; never roll back;
+# mis-scope the release fixup) and ALL THREE still printed "12 passed". They
+# confirm the churn ran and values round-tripped; they detect no freelist bug.
+# Without SPROUT_FL_VERIFY=1 this file is a workload, not a test — which is why
+# `just test-stress` sets that flag, and why plain `just test` does not gate it.
+#
+# This file deliberately keeps a SMALL heap so it can run under
+# SPROUT_GC_STRESS=1 (collect on every allocation) where the number of sweeps is
+# maximal. The consequence is that Pass 2 barely releases any region here, so the
+# rollback hazard above is only weakly covered — `test_gc_region_release.spr`
+# exists to drive that case with a multi-region heap at the default threshold.
 
 type Shape (..) =
   | S0

@@ -1,0 +1,64 @@
+import stdlib.test (check_eq, check_true, run_suite)
+
+# Drives the sweep state that `test_gc_freelist_reuse.spr` cannot reach: Pass 2
+# actually RELEASING regions, which is the case the freelist staging exists for.
+#
+# When a region ends the sweep with nothing live it is handed back to the OS, and
+# any freelist entry staged for it must have been rolled back — otherwise the
+# allocator later pops a slot inside a free()d 1 MiB block and writes a header
+# into memory this process no longer owns.
+#
+# Reaching that state needs a heap SPANNING SEVERAL REGIONS that then dies
+# wholesale, which is why this is a separate file: it wants a large heap at the
+# default threshold, whereas the reuse test wants a small heap under
+# SPROUT_GC_STRESS=1 (collect-on-every-allocation), and a large heap under stress
+# is quadratic. Verified to produce region releases rather than assumed to —
+# see `just test-freelist-verify`, which runs this under SPROUT_FL_VERIFY=1.
+#
+# As with the reuse test, a wrong freelist is not observable from Sprout as a
+# wrong value, so the assertions below only confirm the workload ran and its data
+# survived; the freelist invariant itself is checked by the runtime oracle.
+
+type Chain (..) =
+  | End
+  | Link Int Chain
+
+# Tail-recursive so a long chain does not need a deep stack.
+fn build(n: Int, acc: Chain) -> Chain =
+  if n <= 0 then acc
+  else build(n - 1, Link(n, acc))
+
+fn chain_len(c: Chain, acc: Int) -> Int =
+  match c with
+  | Link _ rest -> chain_len(rest, acc + 1)
+  | End -> acc
+
+fn chain_head(c: Chain) -> Int =
+  match c with
+  | Link v _ -> v
+  | End -> 0
+
+# Each round builds a multi-region chain, consumes it, and drops it. The next
+# round's allocations then collect it, leaving whole regions with nothing live
+# for Pass 2 to release.
+fn build_and_drop(rounds: Int, n: Int, acc: Int) -> Int =
+  if rounds <= 0 then acc
+  else build_and_drop(rounds - 1, n, acc + chain_len(build(n, End), 0))
+
+fn main() -> Unit !{IO} =
+  # Anchors in an early region, live throughout: they keep their own region from
+  # being released, so the run exercises release and retention side by side.
+  let anchor = build(24, End)
+      anchor_len = chain_len(anchor, 0)
+      # 6 rounds x 120k links: each round is several 1 MiB regions of garbage.
+      total = build_and_drop(6, 120000, 0)
+      # Allocated after all that releasing, out of whatever the freelist holds.
+      fresh = build(48, End)
+  in
+  run_suite("gc_region_release", [
+    check_eq("each round walked its whole chain", total, 720000),
+    check_true("anchor survived the release rounds", anchor_len == 24),
+    check_eq("anchor head intact", chain_head(anchor), 1),
+    check_eq("fresh chain built after releases", chain_len(fresh, 0), 48),
+    check_eq("fresh chain head intact", chain_head(fresh), 1)
+  ])

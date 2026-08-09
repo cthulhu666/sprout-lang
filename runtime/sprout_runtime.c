@@ -1638,15 +1638,24 @@ static inline size_t sprout_slot_step(uint64_t h) {
  *     listing only this cycle's newly-freed slots leaks capacity permanently.
  *   - The rollback is load-bearing.  Skipping it survived 422 collections of a
  *     real compile before producing a dangling entry, so "it passed a test run"
- *     is not evidence.  SPROUT_FL_VERIFY=1 exists to make it evidence. */
+ *     is not evidence.  SPROUT_FL_VERIFY=1 exists to make it evidence.
+ *
+ * Note the coupling this creates: the rollback condition below must match the
+ * condition on which Pass 2 releases a region.  Pass 2 releases every region
+ * with no live and no poison — unconditionally, with no force-keep — precisely
+ * so that this stays a single shared predicate rather than three that have to be
+ * kept in agreement by hand. */
 static void*  g_fl_saved[SPROUT_FREELIST_CLASSES];
 static int    g_fl_touched[SPROUT_FREELIST_CLASSES];
 static size_t g_fl_touched_list[SPROUT_FREELIST_CLASSES];
 static size_t g_fl_touched_n;
 
 /* Push a FREE slot onto its class list, saving the class head on first touch of
- * that class within the current region.  cls == slot_bytes/16; out-of-range
- * classes are ignored exactly as the old rebuild ignored them. */
+ * that class within the current region.  cls == slot_bytes/16.  Class 0 is
+ * rejected outright; the superseded rebuild pass bounded only the top end, so it
+ * would have pushed a 0 onto the "index 0 unused" g_freelist[0].  Neither is
+ * reachable today — sprout_slot_step floors a slot at 16 bytes — so this is a
+ * belt-and-braces bound, not a behaviour the allocator depends on. */
 static inline void fl_push_staged(size_t cls, void* payload) {
   if (cls < 1 || cls >= SPROUT_FREELIST_CLASSES) return;
   if (!g_fl_touched[cls]) {
@@ -1697,6 +1706,13 @@ static int sprout_fl_entry_cmp(const void* a, const void* b) {
   return 0;
 }
 
+/* Grow-only scratch for the two sides of the comparison; see the buffer note in
+ * sprout_fl_verify_against_full_walk.  Only ever touched under FL_VERIFY. */
+static SproutFlEntry* g_fl_va = NULL;
+static size_t         g_fl_va_cap = 0;
+static SproutFlEntry* g_fl_vb = NULL;
+static size_t         g_fl_vb_cap = 0;
+
 static int g_fl_verify = -1;
 static int sprout_fl_verify_on(void) {
   if (g_fl_verify < 0) {
@@ -1712,10 +1728,19 @@ static void sprout_fl_verify_against_full_walk(void) {
   /* B (the oracle) is built FIRST: every FREE slot of every surviving region.
      Its size then bounds how far the staged chains may legitimately be walked,
      which keeps a dangling or cyclic next-pointer from looping forever — that
-     failure has to report, not hang. */
-  size_t bcap = 1024, bn = 0;
-  SproutFlEntry* B = (SproutFlEntry*)malloc(bcap * sizeof(SproutFlEntry));
-  if (B == NULL) tcp_fail("SPROUT_FL_VERIFY: out of memory");
+     failure has to report, not hang.
+
+     Both buffers are file-static and grow-only: this runs on EVERY collection,
+     and under SPROUT_GC_STRESS=1 that means every allocation, so malloc/free
+     churn per cycle would dwarf the check itself. */
+  size_t bn = 0;
+  if (g_fl_vb == NULL) {
+    g_fl_vb_cap = 1024;
+    g_fl_vb = (SproutFlEntry*)malloc(g_fl_vb_cap * sizeof(SproutFlEntry));
+    if (g_fl_vb == NULL) tcp_fail("SPROUT_FL_VERIFY: out of memory");
+  }
+  SproutFlEntry* B = g_fl_vb;
+  size_t bcap = g_fl_vb_cap;
   for (size_t ri = 0; ri < g_region_count; ri++) {
     SproutRegion* r = &g_regions[ri];
     if (r->is_large) continue;
@@ -1730,7 +1755,7 @@ static void sprout_fl_verify_against_full_walk(void) {
           if (bn == bcap) {
             bcap *= 2;
             SproutFlEntry* t = (SproutFlEntry*)realloc(B, bcap * sizeof(SproutFlEntry));
-            if (t == NULL) { free(B); tcp_fail("SPROUT_FL_VERIFY: out of memory"); }
+            if (t == NULL) tcp_fail("SPROUT_FL_VERIFY: out of memory");
             B = t;
           }
           B[bn].cls = (unsigned int)cls;
@@ -1742,25 +1767,47 @@ static void sprout_fl_verify_against_full_walk(void) {
     }
   }
 
-  /* A: what the staged build produced — walk each class chain, capped. */
-  size_t acap = 1024, an = 0;
-  SproutFlEntry* A = (SproutFlEntry*)malloc(acap * sizeof(SproutFlEntry));
-  if (A == NULL) { free(B); tcp_fail("SPROUT_FL_VERIFY: out of memory"); }
+  /* A: what the staged build produced — walk each class chain.
+   *
+   * Each entry is validated BEFORE it is dereferenced.  A dangling entry (one
+   * pointing into a region Pass 2 released) is the headline failure this check
+   * exists to catch, and reading its next-pointer to discover that would be the
+   * very use-after-free being hunted: on a heap where the 1 MiB block has been
+   * returned to the OS that faults, killing the process with no diagnostic and
+   * a signal indistinguishable from a rooting bug.  So: region_find first, and
+   * report the bad pointer itself.  The entry count is also capped by the full
+   * walk's size, which bounds a cycle among otherwise-valid slots. */
+  size_t an = 0;
+  if (g_fl_va == NULL) {
+    g_fl_va_cap = 1024;
+    g_fl_va = (SproutFlEntry*)malloc(g_fl_va_cap * sizeof(SproutFlEntry));
+    if (g_fl_va == NULL) tcp_fail("SPROUT_FL_VERIFY: out of memory");
+  }
+  SproutFlEntry* A = g_fl_va;
+  size_t acap = g_fl_va_cap;
   for (size_t cls = 1; cls < SPROUT_FREELIST_CLASSES; cls++) {
     void* p = g_freelist[cls];
     while (p != NULL) {
+      if (region_find(p) == NULL) {
+        fprintf(stderr,
+                "[sprout] FL_VERIFY cycle=%lld class %zu entry %p is in NO live region "
+                "(dangling: staged for a region Pass 2 released)\n",
+                g_gc_cycle_count, cls, p);
+        g_fl_va = A; g_fl_va_cap = acap;
+        abort();
+      }
       if (an > bn) {
         fprintf(stderr,
                 "[sprout] FL_VERIFY cycle=%lld staged chains exceed %zu entries "
-                "(cycle or dangling next-ptr in class %zu)\n",
+                "(cycle in class %zu)\n",
                 g_gc_cycle_count, bn, cls);
-        free(A); free(B);
+        g_fl_va = A; g_fl_va_cap = acap;
         abort();
       }
       if (an == acap) {
         acap *= 2;
         SproutFlEntry* t = (SproutFlEntry*)realloc(A, acap * sizeof(SproutFlEntry));
-        if (t == NULL) { free(A); free(B); tcp_fail("SPROUT_FL_VERIFY: out of memory"); }
+        if (t == NULL) tcp_fail("SPROUT_FL_VERIFY: out of memory");
         A = t;
       }
       A[an].cls = (unsigned int)cls;
@@ -1791,17 +1838,18 @@ static void sprout_fl_verify_against_full_walk(void) {
       break;
     }
   }
-  free(A);
-  free(B);
+  /* Retained for the next cycle — capacities only ever grow. */
+  g_fl_va = A; g_fl_va_cap = acap;
+  g_fl_vb = B; g_fl_vb_cap = bcap;
   if (bad) abort();
 }
 
 /* Region-walking mark-sweep collector.  Pass 1: process every slot in every
  * region (live → clear color; dead → release extras + write FREE header + clear
  * slotmap, OR poison in lineage mode) while staging that region's FREE slots
- * onto the per-class freelists.  Pass 2: release regions with no live and no
- * poison, dropping their staged freelist entries.  Pass 3: a rare fixup, see
- * its comment — the freelists are already built by the time it runs. */
+ * onto the per-class freelists.  Pass 2: release every region with no live and
+ * no poison, dropping its staged freelist entries.  There is no third pass —
+ * the freelists are complete when Pass 1 ends. */
 static void sprout_gc_sweep(void) {
   /* Rebuilt from scratch every cycle, as the old separate rebuild pass did.
      Safe here because nothing between this point and the end of the sweep
@@ -1937,7 +1985,18 @@ static void sprout_gc_sweep(void) {
     else                                        fl_region_commit();
   }
 
-  /* Pass 2: release empty regions (no live, no poison). Keep >= 1 normal region. */
+  /* Pass 2: release EVERY region with no live and no poison.
+   *
+   * This deliberately does not force-keep the last normal region.  Doing so
+   * used to leave one region whose staged freelist entries Pass 1 had already
+   * rolled back — slots that were then neither on a freelist nor above the bump
+   * pointer, i.e. unreachable capacity — which needed a third pass to walk that
+   * region and relist it.  That third pass carried a standing hazard: its skip
+   * condition had to mirror Pass 1's commit decision exactly, or a slot got
+   * listed twice and handed to two live objects.  Releasing unconditionally and
+   * letting the `kept_normal == 0` fallback below reopen a region removes the
+   * whole special case; the cost is one 1 MiB free+malloc plus an 8 KiB slotmap
+   * calloc, and only on a cycle where every normal region came out empty. */
   int kept_normal = 0;
   for (size_t ri = 0; ri < g_region_count; ri++) {
     if (!g_regions[ri].is_large && g_regions[ri].base != NULL) kept_normal++;
@@ -1953,7 +2012,7 @@ static void sprout_gc_sweep(void) {
       }
       continue;
     }
-    if (r->live_count == 0 && r->poison_count == 0 && kept_normal > 1) {
+    if (r->live_count == 0 && r->poison_count == 0) {
       free(r->base);
       free(r->slotmap);
       kept_normal--;
@@ -1961,36 +2020,10 @@ static void sprout_gc_sweep(void) {
     }
   }
 
-  /* Ensure at least one normal region exists for the bump path. */
+  /* Ensure at least one normal region exists for the bump path.  Its bump is 0,
+     so it contributes nothing to the freelists and needs no relisting. */
   if (kept_normal == 0) {
     open_new_region();
-  }
-
-  /* Pass 3 (RARE fixup): Pass 1 already built the freelists.  The one gap is a
-     region that ended Pass 1 with nothing live — so its staged entries were
-     rolled back — but that Pass 2 kept anyway to honour "retain at least one
-     normal region".  Pass 2 only stops releasing once a single normal region is
-     left, so this happens only when EVERY normal region is empty (the whole
-     heap died), plus the freshly opened region in the zero-region case, whose
-     bump is 0 and whose walk is therefore free.  Without this those slots would
-     be neither on a freelist nor above the bump pointer: unreachable capacity.
-     Regions with anything live or poisoned were committed and must be skipped,
-     or their entries would be listed a second time. */
-  for (size_t ri2 = 0; ri2 < g_region_count; ri2++) {
-    SproutRegion* r = &g_regions[ri2];
-    if (r->is_large) continue;
-    if (r->live_count != 0 || r->poison_count != 0) continue;
-    fl_region_begin();
-    size_t off = 0;
-    while (off < r->bump) {
-      uint64_t h; memcpy(&h, r->base + off, 8);
-      size_t ssize = sprout_slot_step(h);
-      if ((h & 0xFF) == SPROUT_HEAP_FREE) {
-        fl_push_staged(ssize / SPROUT_SLOT_GRAN, r->base + off + 8);
-      }
-      off += ssize;
-    }
-    fl_region_commit();
   }
 
   sprout_fl_verify_against_full_walk();
