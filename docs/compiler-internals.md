@@ -68,6 +68,18 @@ Implications for codegen / IR design:
 - The "push the alloca holding an `i64` heap-address; never reload" pattern (used by `IRRoot` in `stdlib/compiler/ir_rooting.sprout`) is correct: the `i64` stored at the alloca remains a valid heap pointer for the entire function lifetime.
 - If GC ever becomes moving (copying, compacting, generational), every root push must be paired with a re-load *after* its trigger op, and every heap-typed SSA use after a trigger must source from the reload — a sweeping rewrite affecting `ast_to_ir.sprout`, `ir_lowering.sprout`, and `ir_rooting.sprout`. This is not currently planned.
 
+### Region arena and address→region lookup
+
+Regions are carved from a contiguous **reservation** of address space (`mmap(PROT_NONE)`, default 4 GiB via `SPROUT_GC_ARENA_MB`), with each 1-MiB chunk committed by `mprotect` on first use. A reservation costs no physical memory; RSS still tracks committed chunks only. This makes `region_find` a shift plus one array load instead of a binary search over the sorted region table — worth ~5–7% on a self-hosted compile, where 47 live regions made the search ~5.6 iterations deep.
+
+Three properties are load-bearing if you touch `region_find` or `sprout_heap_lookup` in `runtime/sprout_runtime.c`:
+
+- **Keep the inlined footprint small.** `sprout_heap_lookup` is inlined into the mark loop and the root scan *only while it stays small*. Putting the arena fast path and the binary search in one function pushed it past the inliner's threshold and cost more than the O(1) lookup saved (astar +7%, and the compiler's win cut from ~14% to 4–6%). The search lives out of line in `region_find_slow` for this reason.
+- **The arena is an optimisation, never a correctness dependency.** `region_find_slow` searches a table that contains arena regions too, so *either* branch answers correctly for any address. Large objects (`slot_bytes > SPROUT_LARGE_THRESHOLD`, possibly several MiB, so not indexable by one shift) and any region opened when the arena is unavailable or exhausted stay `malloc`'d and take the search. `SPROUT_GC_ARENA_MB=0` disables the arena outright, which is how `just gc-arena-check` exercises the fallback.
+- **An arena chunk must never reach `free()`.** Release paths test `arena_contains(base)` and recycle the chunk (with `madvise`, so RSS still falls) instead.
+
+`just gc-arena-check` asserts the fast path is actually taken (`arena_regions > 1`, `overflow_regions == 0`), that disabling works, and that a deliberately undersized arena produces a *mixed* state where both lookup paths are live at once. That gate exists because a failed or mis-sized reservation silently reverts to the search while every other test still passes. Rationale, measurements, and the regressions found while building it: [gc-arena-lookup-v0.md](gc-arena-lookup-v0.md) §12.
+
 ### Type-aware GC rooting — the `ir_rooting` pass
 
 **Intentional design — do not root non-heap scalars.**

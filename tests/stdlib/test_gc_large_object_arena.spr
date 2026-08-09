@@ -1,0 +1,69 @@
+import stdlib.test (check_eq, check_true, run_suite)
+
+# Objects LARGER THAN ONE REGION, held live across collections.
+#
+# The GC arena (docs/gc-arena-lookup-v0.md) resolves an address to its region by
+# shifting off the low 20 bits: chunk index = (addr - arena_base) >> 20. That works
+# only because every arena region is exactly one 1-MiB chunk. An object whose slot
+# exceeds SPROUT_LARGE_THRESHOLD (4096 bytes) is instead given a dedicated malloc
+# block of arbitrary size — possibly several MiB — which CANNOT be indexed by a
+# single shift, and so must stay outside the arena and be found by the original
+# binary search.
+#
+# This file builds strings well past 1 MiB by repeated doubling, keeps them
+# reachable across many collections, and then reads them back. It is the case a
+# naive "mask the address to a 1-MiB boundary and read metadata there" design gets
+# wrong: the tail of a multi-MiB object masks to a chunk that either holds an
+# unrelated region or none at all.
+#
+# What the assertions can and cannot see: region residency is not observable from
+# Sprout, so correctness here means the bytes survive intact. `just gc-arena-check`
+# is what asserts on residency, via the arena_regions/overflow_regions counters.
+
+# Doubling rather than appending: n concatenations give 2^n length, so a handful of
+# steps clears a megabyte without a long allocation loop.
+fn double_n(s: String, n: Int) -> String =
+  if n <= 0 then s
+  else double_n(str_concat(s, s), n - 1)
+
+# Churn to force collections while the large strings stay reachable. Allocates only
+# short-lived small objects, so every collection it triggers must trace the large
+# ones without reclaiming them.
+type Chain (..) =
+  | End
+  | Link Int Chain
+
+fn build(n: Int, acc: Chain) -> Chain =
+  if n <= 0 then acc
+  else build(n - 1, Link(n, acc))
+
+fn chain_len(c: Chain, acc: Int) -> Int =
+  match c with
+  | Link _ rest -> chain_len(rest, acc + 1)
+  | End -> acc
+
+fn churn(n: Int, acc: Int) -> Int =
+  if n <= 0 then acc
+  else churn(n - 1, acc + chain_len(build(8, End), 0))
+
+fn main() -> Unit !{IO} =
+  # 2 bytes doubled 21 times = 4 MiB: four chunks' worth in a single object.
+  let big = double_n("ab", 21)
+      big_len = str_len(big)
+      # A second large object, so the overflow table holds more than one entry and
+      # its binary search is actually exercised rather than trivially hitting.
+      other = double_n("xyz", 19)
+      other_len = str_len(other)
+      churned = churn(20000, 0)
+      # Re-read AFTER the churn: these lengths prove both objects were traced and
+      # kept, not reclaimed or corrupted, across every collection the churn drove.
+      big_len_after = str_len(big)
+      other_len_after = str_len(other)
+  in
+  run_suite("gc_large_object_arena", [
+    check_eq("4 MiB string built", big_len, 4194304),
+    check_eq("4 MiB string intact after churn", big_len_after, 4194304),
+    check_eq("1.5 MiB string built", other_len, 1572864),
+    check_eq("1.5 MiB string intact after churn", other_len_after, 1572864),
+    check_true("churn drove collections", churned > 0)
+  ])

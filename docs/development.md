@@ -52,7 +52,18 @@ All variables are read at program startup; invalid values abort with a message.
 | Variable | Default | Description |
 |---|---|---|
 | `SPROUT_GC_THRESHOLD` | `4096` | Managed heap node count that triggers a mid-execution collection. Positive integer to override; `off` or `0` to collect only at exit. |
-| `SPROUT_DEBUG_GC` | off | Set to `1` / `true` / `yes` to log each GC cycle to stderr: `[sprout gc] cycle=N reason=X threshold=N heap_before=N heap_after=N live=N roots=N marked=N alloc_since_gc=N swept=N elapsed_us=N`. |
+| `SPROUT_DEBUG_GC` | off | Set to `1` / `true` / `yes` to log each GC cycle to stderr: `[sprout gc] cycle=N reason=X threshold=N heap_before=N heap_after=N live=N roots=N marked=N alloc_since_gc=N swept=N elapsed_us=N arena_regions=N overflow_regions=N`. The last two report how many live regions sit inside the reserved arena versus outside it (see below). |
+
+**Region arena** — 1-MiB regions are carved from a contiguous `mmap(PROT_NONE)` *reservation* of
+address space (not memory; pages are committed per chunk with `mprotect` on first use). This makes
+address→region resolution a shift instead of a binary search, worth ~5–7% on self-hosted
+compilation. Objects larger than one region, and any region opened when the arena is unavailable or
+exhausted, fall back to `malloc` and the original search — correctness never depends on the arena.
+Full rationale and measurements in [gc-arena-lookup-v0.md](gc-arena-lookup-v0.md).
+
+| Variable | Default | Description |
+|---|---|---|
+| `SPROUT_GC_ARENA_MB` | `4096` | Reserved address space in MiB. Costs no physical memory — RSS is driven by committed chunks, not by this number. Halves on `mmap` failure down to 1 MiB. Set `0` to disable the arena entirely and send every region to `malloc` (the pre-arena behaviour). |
 
 **Adaptive threshold** — after each collection the trigger is re-based on the *live* set:
 `threshold = max(live × SPROUT_GC_ADAPT_FACTOR, SPROUT_GC_THRESHOLD)`, capped by

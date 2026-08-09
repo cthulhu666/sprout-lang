@@ -22,6 +22,7 @@
 #include <execinfo.h>
 #include <pthread.h>
 #include <sys/resource.h>
+#include <sys/mman.h>   /* GC arena: reserve address space (PROT_NONE), commit per chunk */
 #include "sprout_scheduler.h"
 #ifdef __APPLE__
 #pragma clang diagnostic push
@@ -516,6 +517,12 @@ long long wall_time_micros(void) {
   return sprout_now_micros();
 }
 
+/* Arena occupancy, refreshed by arena_recount_regions() before each logged cycle.
+ * Defined here rather than beside the rest of the arena state because the cycle
+ * logger below is the consumer and is declared earlier in the file. */
+static long long g_arena_region_count    = 0;  /* live regions inside the arena */
+static long long g_overflow_region_count = 0;  /* live regions outside it */
+
 static void sprout_gc_log_cycle(
   const char* reason,
   long long heap_before,
@@ -529,7 +536,7 @@ static void sprout_gc_log_cycle(
   if (!g_debug_gc_enabled) return;
   fprintf(
     stderr,
-    "[sprout gc] cycle=%lld reason=%s threshold=%lld heap_before=%lld heap_after=%lld live=%lld roots=%lld marked=%lld alloc_since_gc=%lld swept=%lld elapsed_us=%lld\n",
+    "[sprout gc] cycle=%lld reason=%s threshold=%lld heap_before=%lld heap_after=%lld live=%lld roots=%lld marked=%lld alloc_since_gc=%lld swept=%lld elapsed_us=%lld arena_regions=%lld overflow_regions=%lld\n",
     g_gc_cycle_count,
     reason,
     g_gc_threshold,
@@ -540,7 +547,9 @@ static void sprout_gc_log_cycle(
     marked_count,
     alloc_since_gc,
     swept_delta,
-    elapsed_us
+    elapsed_us,
+    g_arena_region_count,
+    g_overflow_region_count
   );
   fprintf(
     stderr,
@@ -785,6 +794,213 @@ typedef struct {
 static SproutRegion* g_regions = NULL;  /* sorted by base address */
 static size_t        g_region_count = 0;
 static size_t        g_region_cap   = 0;
+
+/* ── Reserved arena: O(1) address → region ─────────────────────────────────
+ * region_find was measured at ~14% of self-hosted compile time as a binary
+ * search (docs/gc-arena-lookup-v0.md §1).  A one-entry hint recovered none of
+ * it — marking walks the object graph, not address order, so consecutive
+ * lookups hit effectively random regions and no cache helps.
+ *
+ * So: reserve a contiguous span of ADDRESS SPACE up front (PROT_NONE, costing
+ * no physical memory and no swap), commit 1-MiB chunks with mprotect as they
+ * are opened, and resolve an address by shifting.  Membership becomes one
+ * subtract plus one unsigned compare with NO memory access, which matters
+ * because sprout_heap_lookup is asked about arbitrary non-pointer words far
+ * more often than about real payloads — "no" is the common answer and this is
+ * the only scheme that answers it without a load.
+ *
+ * g_chunk_ri maps chunk index → index into g_regions.  It is repaired in full
+ * on every table insert/remove (which shift g_regions indices).  That is
+ * deliberate: inserts happen once per MiB allocated (~110 times on a compiler
+ * emit) while region_find runs tens of millions of times, so an O(regions)
+ * cold path buys an O(1) hot path and leaves the sorted table, the sweep
+ * iteration order, and the release logic untouched.
+ *
+ * Anything that does not fit — large objects (arbitrary size, may exceed a
+ * chunk), or any region opened after the arena is exhausted or when no
+ * reservation could be obtained — stays malloc'd and is found by the original
+ * binary search over the same table.  Correctness never depends on the arena. */
+#define SPROUT_REGION_SHIFT 20                 /* log2(SPROUT_REGION_SIZE) */
+#define SPROUT_ARENA_MB_DEFAULT 4096           /* reserved address space, not memory */
+/* Fixed placement hint.  A predictable base lets tests construct integers that
+ * land inside the arena on purpose, which is the only way to adversarially probe
+ * membership exactness from Sprout.  Just a hint: mmap may ignore it, and the
+ * kernel's choice is then used instead.  Same idea as MMTk's fixed heap_start. */
+#define SPROUT_ARENA_HINT ((void*)(uintptr_t)0x0000200000000000ULL)
+
+/* Conservative bounds over EVERY region, arena or malloc'd: no managed payload can
+ * lie outside [g_heap_lo, g_heap_lo + g_heap_span).  Grown on insert and never
+ * shrunk — a stale-wide span only costs a fall-through to the search, which then
+ * answers correctly, whereas a too-narrow span would reject a real pointer.
+ *
+ * This exists because the question sprout_heap_lookup is asked most often is not
+ * "which region owns this pointer" but "this is not a pointer at all": the rooting
+ * protocol hands it every scalar in every root slot, and small Ints dominate.  One
+ * unsigned compare rejects those inline, where previously each one walked the whole
+ * binary search. */
+static uintptr_t g_heap_lo   = (uintptr_t)-1;
+static uintptr_t g_heap_span = 0;
+
+static char*     g_arena_base      = NULL;  /* reservation start, NULL = no arena */
+static size_t    g_arena_bytes     = 0;     /* reserved size (chunk-aligned) */
+static size_t    g_arena_chunks    = 0;     /* g_arena_bytes >> SPROUT_REGION_SHIFT */
+static size_t    g_arena_next      = 0;     /* bump: next never-committed chunk */
+static uint32_t* g_chunk_ri        = NULL;  /* chunk → g_regions index, or NONE */
+static uint8_t*  g_chunk_committed = NULL;  /* 1 = mprotect already applied */
+static size_t*   g_chunk_free      = NULL;  /* stack of recycled chunk indices */
+static size_t    g_chunk_free_len  = 0;
+#define SPROUT_CHUNK_RI_NONE ((uint32_t)0xFFFFFFFFu)
+
+/* True when p lies within the reservation — the entire fast-path test.
+ *
+ * Deliberately has NO "is there an arena?" branch.  When there is none,
+ * g_arena_bytes is 0 and the unsigned compare is false for every p, so the
+ * disabled state falls out of the same two operations.  Measured: the earlier
+ * version, which tested g_arena_base != NULL first, cost astar ~3.5% *even with
+ * the arena disabled* — a workload with few regions has an already-shallow binary
+ * search, so an extra load and branch per lookup is pure loss there.
+ *
+ * Arithmetic is on uintptr_t rather than pointers because g_arena_base is NULL
+ * when disabled, and pointer arithmetic on NULL is undefined; integer wraparound
+ * is well defined for unsigned types and gives exactly the range test wanted. */
+static inline int arena_contains(const void* p) {
+  return (uintptr_t)p - (uintptr_t)g_arena_base < (uintptr_t)g_arena_bytes;
+}
+
+/* Reserve address space for the arena.  Called once, lazily, before the first
+ * region is opened.  Every failure path here leaves g_arena_base == NULL, which
+ * disables the fast path and sends all regions to malloc — degraded, never wrong.
+ * SPROUT_GC_ARENA_MB=0 disables the arena outright (used by gc-arena-check to
+ * exercise the fallback, and available as an escape hatch). */
+static void arena_init_once(void) {
+  static int tried = 0;
+  if (tried) return;
+  tried = 1;
+  size_t mb = SPROUT_ARENA_MB_DEFAULT;
+  const char* raw = getenv("SPROUT_GC_ARENA_MB");
+  if (raw != NULL && raw[0] != '\0') {
+    char* end = NULL;
+    long long parsed = strtoll(raw, &end, 10);
+    if (end == raw || *end != '\0' || parsed < 0)
+      tcp_fail("SPROUT_GC_ARENA_MB: expected non-negative integer (0 disables the arena)");
+    if (parsed == 0) return;   /* explicitly disabled */
+    mb = (size_t)parsed;
+  }
+  /* Halve on failure: a machine or ulimit that cannot honour 4 GiB of *reservation*
+   * can usually honour less, and a smaller arena is better than none.  The floor is
+   * 1 MiB (one chunk), not a larger round number, so that an explicitly requested
+   * small arena means a small arena — gc-arena-check relies on being able to ask
+   * for one too small for the workload in order to exercise the mixed
+   * arena+overflow state, which is the configuration where both lookup paths are
+   * live at once. */
+  for (; mb >= 1; mb /= 2) {
+    size_t want = mb << 20;
+    void* p = mmap(SPROUT_ARENA_HINT, want, PROT_NONE,
+                   MAP_PRIVATE | MAP_ANON, -1, 0);
+    if (p == MAP_FAILED) continue;
+    size_t chunks = want >> SPROUT_REGION_SHIFT;
+    uint32_t* ri  = (uint32_t*)malloc(chunks * sizeof(uint32_t));
+    uint8_t*  com = (uint8_t*)calloc(chunks, 1);
+    size_t*   fl  = (size_t*)malloc(chunks * sizeof(size_t));
+    if (ri == NULL || com == NULL || fl == NULL) {
+      free(ri); free(com); free(fl);
+      munmap(p, want);
+      continue;
+    }
+    for (size_t i = 0; i < chunks; i++) ri[i] = SPROUT_CHUNK_RI_NONE;
+    g_arena_base      = (char*)p;
+    g_arena_bytes     = want;
+    g_arena_chunks    = chunks;
+    g_arena_next      = 0;
+    g_chunk_ri        = ri;
+    g_chunk_committed = com;
+    g_chunk_free      = fl;
+    g_chunk_free_len  = 0;
+    return;
+  }
+  /* No reservation: g_arena_base stays NULL and everything overflows to malloc. */
+}
+
+/* Take a 1-MiB chunk from the arena, committing it on first use.  Returns NULL
+ * when there is no arena or it is exhausted; the caller then falls back to malloc. */
+static char* arena_chunk_alloc(void) {
+  arena_init_once();
+  if (g_arena_base == NULL) return NULL;
+  size_t idx;
+  if (g_chunk_free_len > 0) {
+    idx = g_chunk_free[--g_chunk_free_len];
+  } else if (g_arena_next < g_arena_chunks) {
+    idx = g_arena_next++;
+  } else {
+    return NULL;   /* exhausted */
+  }
+  char* base = g_arena_base + (idx << SPROUT_REGION_SHIFT);
+  if (!g_chunk_committed[idx]) {
+    if (mprotect(base, SPROUT_REGION_SIZE, PROT_READ | PROT_WRITE) != 0) {
+      /* Cannot commit: drop the chunk (do not recycle it) and fall back. */
+      return NULL;
+    }
+    g_chunk_committed[idx] = 1;
+  }
+  return base;
+}
+
+/* Return a chunk to the arena.  The pages stay committed but are handed back to
+ * the kernel so RSS still falls when the heap shrinks; the chunk is reusable
+ * without another mprotect.  MADV_FREE is the darwin spelling, MADV_DONTNEED the
+ * linux one — both discard contents, which is safe because open_new_region resets
+ * bump to 0 and installs a freshly zeroed slotmap, so no stale byte is ever read
+ * back as an object. */
+static void arena_chunk_release(char* base) {
+  size_t idx = (size_t)(base - g_arena_base) >> SPROUT_REGION_SHIFT;
+#if defined(MADV_FREE)
+  (void)madvise(base, SPROUT_REGION_SIZE, MADV_FREE);
+#elif defined(MADV_DONTNEED)
+  (void)madvise(base, SPROUT_REGION_SIZE, MADV_DONTNEED);
+#endif
+  g_chunk_ri[idx] = SPROUT_CHUNK_RI_NONE;
+  if (g_chunk_free_len < g_arena_chunks) g_chunk_free[g_chunk_free_len++] = idx;
+}
+
+/* Repair chunk → region-index after an insert or removal at table position
+ * `start`, which shifted every index at or above it.
+ *
+ * Deliberately does NOT clear the map first.  Clearing costs O(arena_chunks) —
+ * 4096 stores at the default reservation — and region churn makes that a hot cost:
+ * nqueens releases and reopens regions on nearly every one of its 8,279
+ * collections, so a full clear per insert *and* per remove ran to tens of millions
+ * of stores, the same order as the lookups this whole mechanism exists to avoid.
+ * Measured as a 1.6-6.9% REGRESSION across nqueens/astar/digit_recognizer before
+ * this was narrowed.
+ *
+ * Clearing is unnecessary because the map only ever goes stale where indices
+ * shifted: a chunk handed to a new region is fixed by the walk below (the new entry
+ * sits at `start`), a released chunk is set to NONE by arena_chunk_release, and a
+ * never-used chunk holds NONE from arena_init_once.  Every chunk below `start` is
+ * already correct and must be left alone. */
+static void arena_reindex_from(size_t start) {
+  if (g_arena_base == NULL) return;
+  for (size_t i = start; i < g_region_count; i++) {
+    char* b = g_regions[i].base;
+    if (b == NULL || g_regions[i].is_large) continue;
+    if (!arena_contains(b)) continue;
+    g_chunk_ri[(size_t)(b - g_arena_base) >> SPROUT_REGION_SHIFT] = (uint32_t)i;
+  }
+}
+
+/* Recount arena vs overflow regions for the SPROUT_DEBUG_GC line.  These counters
+ * are what gc-arena-check asserts on: without them, a failed reservation would
+ * silently revert region_find to the binary search and every test would still pass. */
+static void arena_recount_regions(void) {
+  long long in_arena = 0, outside = 0;
+  for (size_t i = 0; i < g_region_count; i++) {
+    if (g_regions[i].base == NULL) continue;
+    if (!g_regions[i].is_large && arena_contains(g_regions[i].base)) in_arena++;
+    else outside++;
+  }
+  g_arena_region_count = in_arena;
+  g_overflow_region_count = outside;
+}
 /* Hint index of a normal region with bump room; validated before use and
  * refreshed on miss — table inserts/removals may shift it. */
 static size_t        g_open_region_hint = 0;
@@ -843,20 +1059,42 @@ static void region_table_insert(SproutRegion r) {
   memmove(&g_regions[lo + 1], &g_regions[lo], (g_region_count - lo) * sizeof(SproutRegion));
   g_regions[lo] = r;
   g_region_count++;
+  arena_reindex_from(lo);   /* indices at and above `lo` just shifted up by one */
+  /* Widen the global bounds to cover this region.  Single choke point: both the
+   * normal and large-object paths reach the table through here. */
+  if (r.base != NULL) {
+    uintptr_t rlo = (uintptr_t)r.base;
+    uintptr_t rhi = rlo + r.cap;
+    uintptr_t cur_hi = (g_heap_span == 0) ? 0 : g_heap_lo + g_heap_span;
+    if (g_heap_span == 0) { g_heap_lo = rlo; g_heap_span = r.cap; }
+    else {
+      if (rlo < g_heap_lo) g_heap_lo = rlo;
+      if (rhi > cur_hi) cur_hi = rhi;
+      g_heap_span = cur_hi - g_heap_lo;
+    }
+  }
 }
 
 /* Remove region at index i; region's base/slotmap already freed by caller. */
 static void region_table_remove(size_t i) {
   memmove(&g_regions[i], &g_regions[i + 1], (g_region_count - i - 1) * sizeof(SproutRegion));
   g_region_count--;
+  arena_reindex_from(i);   /* indices above `i` just shifted down by one */
 }
 
 /* Open a fresh 1-MiB region and append it to the table. */
 static SproutRegion* open_new_region(void) {
-  char* base = (char*)malloc(SPROUT_REGION_SIZE);
+  /* Prefer an arena chunk so lookups into this region take the O(1) path; fall
+   * back to malloc when there is no arena or it is exhausted. */
+  char* base = arena_chunk_alloc();
+  if (base == NULL) base = (char*)malloc(SPROUT_REGION_SIZE);
   if (base == NULL) tcp_fail("open_new_region: out of memory");
   uint8_t* slotmap = (uint8_t*)calloc(SPROUT_SLOTMAP_BYTES, 1);
-  if (slotmap == NULL) { free(base); tcp_fail("open_new_region: out of memory for slotmap"); }
+  /* base may be an arena chunk, which must NOT be passed to free(). */
+  if (slotmap == NULL) {
+    if (arena_contains(base)) arena_chunk_release(base); else free(base);
+    tcp_fail("open_new_region: out of memory for slotmap");
+  }
   SproutRegion r;
   r.base = base;
   r.cap = SPROUT_REGION_SIZE;
@@ -877,9 +1115,30 @@ static SproutRegion* open_new_region(void) {
   return &g_regions[lo];
 }
 
-/* Find the region whose base <= p < base+cap, or NULL. Binary search. */
-static SproutRegion* region_find(void* p) {
-  uintptr_t addr = (uintptr_t)p;
+/* Address → region, in two parts.
+ *
+ * The split is load-bearing, not stylistic.  sprout_heap_lookup is inlined into
+ * the mark loop and the root scan, and only while it stays small.  An earlier
+ * version of this file put the arena fast path and the binary search together in
+ * one function; that pushed sprout_heap_lookup past the inliner's size threshold
+ * — it appeared in `nm` as a real symbol where the original had none — and the
+ * lost inlining cost more than the O(1) lookup saved: astar +7%, and the
+ * compiler's win cut from the ~14% bound to 4-6%.  Keeping the search out of line
+ * makes the inlined footprint SMALLER than the original, not larger.
+ *
+ * Anything added here in future must preserve that property; check with
+ * `nm <obj> | grep heap_lookup` returning nothing.
+ *
+ * Slow path: large objects, and any region opened while the arena was unavailable
+ * or exhausted.  Unchanged binary search over the same sorted table.
+ *
+ * Fast path: if p is inside the reservation, its chunk index is a shift and the
+ * region is one array load — no search.  A chunk holding no live region maps to
+ * NONE, so an unused or stale address inside the reservation is rejected without
+ * touching that chunk's memory.  There is deliberately no bounds test after the
+ * lookup: arena regions always have cap == SPROUT_REGION_SIZE, so "p is in chunk
+ * i" and "p is in the region occupying chunk i" are the same statement. */
+static SproutRegion* region_find_slow(uintptr_t addr) {
   size_t lo = 0, hi = g_region_count;
   while (lo < hi) {
     size_t mid = lo + (hi - lo) / 2;
@@ -889,6 +1148,31 @@ static SproutRegion* region_find(void* p) {
     else return &g_regions[mid];
   }
   return NULL;
+}
+
+/* Below this many regions the binary search is already ~O(1) — with one region it
+ * is a single iteration — and the arena path's fixed cost (its range test plus the
+ * chunk-map load) is pure loss.  Measured: astar holds exactly ONE region for its
+ * whole run and regressed 2-3% when it took the arena path unconditionally, while
+ * the compiler holds 47 (~5.6 search iterations) and gains 4-6%.  The win scales
+ * with log2(region_count); the cost does not, so it has to be gated.
+ *
+ * Correctness does not depend on the threshold: region_find_slow searches the same
+ * table that holds arena regions too, so either branch answers correctly for any
+ * address.  Only speed depends on it. */
+#define SPROUT_ARENA_MIN_REGIONS 8
+
+static inline SproutRegion* region_find(void* p) {
+  /* g_region_count is loaded by the slow path anyway, so gating on it is ~free. */
+  if (g_region_count > SPROUT_ARENA_MIN_REGIONS && arena_contains(p)) {
+    uint32_t ri = g_chunk_ri[(size_t)((uintptr_t)p - (uintptr_t)g_arena_base) >> SPROUT_REGION_SHIFT];
+    if (ri == SPROUT_CHUNK_RI_NONE) return NULL;
+    return &g_regions[ri];
+  }
+  /* Then reject non-pointers inline, without a call.  This is the dominant case
+   * (every scalar in every root slot) and it used to run the full search. */
+  if ((uintptr_t)p - g_heap_lo >= g_heap_span) return NULL;
+  return region_find_slow((uintptr_t)p);
 }
 
 /* ── GC profiling instrumentation (opt-in, off by default) ────────────────
@@ -2198,7 +2482,10 @@ static void sprout_gc_sweep(void) {
       continue;
     }
     if (r->live_count == 0 && r->poison_count == 0) {
-      free(r->base);
+      /* An arena chunk is recycled, not freed: free() on a non-malloc pointer is
+       * undefined.  madvise inside arena_chunk_release still drops the physical
+       * pages, so RSS falls exactly as it did when regions were malloc'd. */
+      if (arena_contains(r->base)) arena_chunk_release(r->base); else free(r->base);
       free(r->slotmap);
       kept_normal--;
       region_table_remove(ri);
@@ -2244,6 +2531,8 @@ static void sprout_gc_collect_with_reason(const char* reason) {
   long long elapsed_us = 0;
   if (finished_us >= started_us) elapsed_us = finished_us - started_us;
   SPROUT_PROF_COLD(g_prof_gc_us += (unsigned long long)elapsed_us);
+  /* O(regions); only pay for it when the line is actually printed. */
+  if (g_debug_gc_enabled) arena_recount_regions();
   sprout_gc_log_cycle(reason, heap_before, g_managed_heap_count, root_count, g_gc_marked_count, alloc_since_gc, g_debug_gc_swept - swept_before, elapsed_us);
   /* Adaptive threshold: re-base on the LIVE set after each collection so the heap
      (hence RSS) stays proportional to live data instead of ratcheting upward
