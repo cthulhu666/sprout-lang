@@ -1723,6 +1723,55 @@ test-stress: bootstrap-from-seed
   fi
   echo "==> test-stress ✓"
 
+# Freelist oracle at the DEFAULT threshold (SPROUT_FL_VERIFY=1, no GC stress).
+#
+# `test-stress` already runs the oracle, but only under SPROUT_GC_STRESS=1, which
+# forces small heaps — and a small heap barely makes Pass 2 release any region,
+# which is the case the sweep's freelist staging exists to handle. These files
+# carry multi-region heaps that die wholesale, so they need the default threshold
+# to stay affordable. Both halves are needed: measured with a release counter,
+# test_gc_region_release drives 14 region releases against the reuse test's 1.
+#
+# Mutation-tested: dropping the earlier-cycle re-list is caught at cycle 7, and
+# omitting fl_region_rollback is caught at cycle 6 as a named dangling entry.
+[group('test')]
+test-freelist-verify: bootstrap-from-seed
+  #!/usr/bin/env bash
+  set -uo pipefail
+  TMPD=$(mktemp -d /tmp/sprout_flverify_XXXXXX); trap 'rm -rf "$TMPD"' EXIT
+  mkdir -p "$TMPD/rtobj"
+  for rtsrc in {{runtime_src}}; do
+    clang -c "$rtsrc" -O2 {{clang_extra}} -o "$TMPD/rtobj/$(basename "$rtsrc" .c).o" 2>"$TMPD/rt.err" \
+      || { echo "test-freelist-verify: runtime compile failed ($rtsrc)" >&2; cat "$TMPD/rt.err" >&2; exit 1; }
+  done
+  FILES="tests/stdlib/test_gc_region_release.spr tests/stdlib/test_gc_freelist_reuse.spr"
+  failed=0
+  for f in $FILES; do
+    [ -f "$f" ] || { echo "test-freelist-verify: missing $f" >&2; failed=$((failed + 1)); continue; }
+    name=$(basename "$f" .spr)
+    if ! "{{build_dir}}/compile_driver_bin_stage1" --emit-ir "{{stdlib_root}}" --package-root "{{justfile_directory()}}" "$f" > "$TMPD/$name.ll" 2>"$TMPD/$name.err"; then
+      echo "test-freelist-verify: compile failed: $f" >&2; cat "$TMPD/$name.err" >&2; failed=$((failed + 1)); continue
+    fi
+    if ! clang "$TMPD/$name.ll" "$TMPD/rtobj"/*.o {{clang_extra}} -o "$TMPD/$name.bin" 2>"$TMPD/$name.err"; then
+      echo "test-freelist-verify: link failed: $f" >&2; cat "$TMPD/$name.err" >&2; failed=$((failed + 1)); continue
+    fi
+    if out=$(SPROUT_FL_VERIFY=1 SPROUT_STDLIB_ROOT="{{stdlib_root}}" "$TMPD/$name.bin" 2>&1); then
+      if echo "$out" | grep -q "SUITE FAILED"; then
+        echo "test-freelist-verify: $f FAILED" >&2; echo "$out" >&2; failed=$((failed + 1))
+      else
+        echo "  PASS (fl-verify): $f"
+      fi
+    else
+      echo "test-freelist-verify: $f aborted under SPROUT_FL_VERIFY=1" >&2
+      echo "$out" | grep FL_VERIFY >&2 || echo "$out" | tail -5 >&2
+      failed=$((failed + 1))
+    fi
+  done
+  if (( failed > 0 )); then
+    echo "test-freelist-verify: $failed file(s) failed" >&2; exit 1
+  fi
+  echo "==> test-freelist-verify ✓"
+
 # Run the independent, single-threaded CI gates concurrently (JOBS-wide) instead
 # of as a sequential chain of `just` steps.  On the 4-vCPU CI worker each of these
 # gates used only 1 core, leaving 3 idle for the duration; fanning them out fills
@@ -1750,6 +1799,7 @@ ci-fast-gates: bootstrap-from-seed build-fmt-from-seed
     "conformance-run|test-conformance-run"
     "example-canary|run-example-canary"
     "gc-safety|gc-safety-check --strict"
+    "freelist-verify|test-freelist-verify"
     "argv-smoke|argv-smoke"
     "div-by-zero-smoke|div-by-zero-smoke"
     "stack-overflow-smoke|stack-overflow-smoke"
