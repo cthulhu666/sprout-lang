@@ -1,8 +1,8 @@
 # O(1) address→region lookup via a reserved arena
 
-Status: **design, not implemented.** No code changes accompany this document. The
-measurement in §1 is reproducible today; everything from §4 onward is a proposal awaiting
-approval.
+Status: **implemented.** §1–§11 are the original design; **§12 records what actually
+happened when it was built**, including three ways the first implementation was slower than
+the code it replaced. Read §12 before changing anything here.
 
 ## 1. Problem
 
@@ -237,3 +237,92 @@ result here in §1.
 - `hboehm.info/gc/gcdescr.html` — two-level page table for candidate pointers.
 - `openjdk/jdk` `src/hotspot/share/oops/compressedOops.hpp` — checked; documents base+shift
   encoding modes but not a contiguity rationale, so not cited as support above.
+
+## 12. Measured outcome
+
+The design works, but **the first three implementations of it were slower than the binary
+search they replaced.** Every regression came from a fixed cost added to a hot inlined path,
+not from the algorithm. Each is recorded here because none of them is visible in a
+correctness test, and a future edit can reintroduce any of them.
+
+### 12.1 Results
+
+Interleaved before/after, same session, `min` over repetitions (medians agree in direction).
+"Before" and "after" are the *same emitted IR* linked against the two runtimes, so nothing
+but the runtime differs.
+
+| workload | regions | before | after | delta | after-wins |
+|---|---|---|---|---|---|
+| **compiler emit** (`ast_to_ir.sprout`) | **47** | 2096 ms | **1985 ms** | **−5.3% (med −7.3%)** | **97%** |
+| `digit_recognizer` | — | 516 ms | 515 ms | −0.2% | — |
+| `math_transcendental` | — | 164.5 ms | 163.6 ms | −0.6% | — |
+| `http_log_middleware` | — | 4853 ms | 4876 ms | +0.5% | — |
+| `nqueens` | — | 2304 ms | 2309 ms | +0.2% (med +0.5%) | 39% |
+| `retain_none` | — | 10.91 ms | 10.83 ms | −0.8% | 33% |
+| **`astar`** | **1** | 25.24 ms | 25.64 ms | **+1.6% (med +1.3%)** | 22% |
+
+"after-wins" is the share of all before/after pairings in which the arena build was faster;
+50% means no effect. The compiler's 97% and astar's 22% are both real signals — the middle
+rows are noise-dominated and should be read as "no change".
+
+**The −5.3% is well short of §1's ~14% bound, exactly as §1 predicted**: the bound covered
+every caller of `region_find`, and the arena removes only the search, not the `is_large`
+test, slotmap probe, or header read that follow it.
+
+**astar's +1.6% is a real, accepted cost.** It holds exactly *one* region for its entire run
+(100 logged cycles), so its "binary search" was a single iteration — already O(1). No
+arena can beat that, and the region-count gate (§12.4) only reduces the residual to the two
+inline gate tests. Single-region programs pay ~1.3%; programs with a heap large enough for
+GC to matter gain 5–7%.
+
+### 12.2 Lost inlining cost more than the algorithm gained
+
+`sprout_heap_lookup` is inlined into the mark loop and the root scan, and only while it
+stays small. Putting the arena fast path and the binary search in one function pushed it
+past the inliner's threshold — it appeared in `nm` output where the original had no symbol
+at all — and that alone cost **astar +7% and cut the compiler's win from ~14% to 4–6%**.
+
+Fixed by moving the search into an out-of-line `region_find_slow`, so the inlined footprint
+is *smaller* than the original rather than larger. **Any future edit here must preserve
+that**; `nm <obj> | grep heap_lookup` finding a symbol is the warning sign, though note it
+is a weak signal in both directions — one cold caller can keep an out-of-line copy alive
+while the hot sites are still inlined. Trust the A/B, not the symbol table.
+
+### 12.3 The reindex was O(arena_chunks), not O(regions)
+
+`arena_reindex` initially cleared the whole chunk→index map (4096 entries at the default
+reservation) before rebuilding. Region churn makes that hot: nqueens releases and reopens
+regions on nearly every one of its 8,279 collections, so the clear ran to tens of millions
+of stores — the same order as the lookups the arena exists to remove. Measured as a
+1.6–6.9% regression across nqueens/astar/digit_recognizer.
+
+Fixed by `arena_reindex_from(start)`, which repairs only entries at or above the shifted
+position and never clears: a chunk given to a new region is fixed by that walk, a released
+chunk is set to NONE by `arena_chunk_release`, and an unused chunk holds NONE from init.
+
+### 12.4 The win scales with log2(regions); the cost does not
+
+Hence `SPROUT_ARENA_MIN_REGIONS` (8): below it, the search is already ~O(1) and the arena's
+range test plus chunk-map load is pure loss. Correctness is independent of the threshold —
+`region_find_slow` searches the table that holds arena regions too, so either branch answers
+correctly for any address. Only speed depends on it.
+
+### 12.5 The dominant query is "this is not a pointer at all"
+
+The rooting protocol hands `sprout_heap_lookup` every scalar in every root slot, and small
+`Int`s dominate. Those used to walk the entire binary search before returning NULL. A
+conservative global `[g_heap_lo, g_heap_lo + g_heap_span)` bound now rejects them with one
+unsigned compare, inline, with no call — worth astar +6.9% → +2.7% on its own. The bound is
+grown on insert and never shrunk: a stale-wide span merely falls through to the search,
+which then answers correctly, whereas a too-narrow one would reject a real pointer.
+
+### 12.6 What was measured wrong along the way
+
+Two methodology errors, both caught, both worth avoiding next time:
+
+- **Linking `.ll` without `-O2`.** `just compile-native` passes `-O2` alongside the IR, so it
+  optimises the *Sprout* code too. Linking pre-built runtime objects against an
+  unoptimised `.ll` made `digit_recognizer` 10× slower (5.21 s vs 0.53 s) and shifted GC's
+  share of runtime, producing a fabricated −12.9% "win".
+- **Non-interleaved repetitions.** A first pass attributed +2.1% to `madvise` on nqueens;
+  interleaved runs put all four variants within ±0.5%. `madvise` was never the cost.

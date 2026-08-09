@@ -1919,6 +1919,76 @@ gc-adapt-check: bootstrap-from-seed
   (( failed == 0 )) || exit 1
   echo "==> gc-adapt-check ✓"
 
+# Prove the O(1) arena lookup path is actually TAKEN, and that its fallback works.
+# This gate exists because the optimisation is invisible to every other test: if the
+# reservation fails or is mis-sized, `region_find` silently reverts to the binary
+# search and the whole change becomes a no-op that still passes the full suite.
+# (Same failure shape as the PR #48 freelist oracle — an instrument that never
+# reaches its state looks identical to one that works.)
+#
+# Asserts both directions:
+#   1. Default: normal regions live in the arena (arena_regions > 0) and NOTHING
+#      overflowed (overflow_regions == 0), so lookups take the shift path.
+#   2. SPROUT_GC_ARENA_MB=0: the arena is disabled, everything overflows, and the
+#      workload still passes — the graceful-degradation path is executed, not assumed.
+[group('test')]
+gc-arena-check: bootstrap-from-seed
+  #!/usr/bin/env bash
+  set -uo pipefail
+  TMPD=$(mktemp -d /tmp/sprout_arena_XXXXXX); trap 'rm -rf "$TMPD"' EXIT
+  mkdir -p "$TMPD/rtobj"
+  for rtsrc in {{runtime_src}}; do
+    clang -c "$rtsrc" -O2 {{clang_extra}} -o "$TMPD/rtobj/$(basename "$rtsrc" .c).o" 2>"$TMPD/rt.err" \
+      || { echo "gc-arena-check: runtime compile failed ($rtsrc)" >&2; cat "$TMPD/rt.err" >&2; exit 1; }
+  done
+  NAME=test_gc_age_retain_all   # allocates a 150k-node chain: many normal regions
+  "{{build_dir}}/compile_driver_bin_stage1" --emit-ir "{{stdlib_root}}" --package-root "{{justfile_directory()}}" "tests/stdlib/$NAME.spr" > "$TMPD/w.ll" 2>"$TMPD/w.err" \
+    || { echo "gc-arena-check: compile failed" >&2; cat "$TMPD/w.err" >&2; exit 1; }
+  clang "$TMPD/w.ll" "$TMPD/rtobj"/*.o {{clang_extra}} -o "$TMPD/w.bin" 2>"$TMPD/w.err" \
+    || { echo "gc-arena-check: link failed" >&2; cat "$TMPD/w.err" >&2; exit 1; }
+  # Emits "<max arena_regions> <max overflow_regions>" over ALL logged cycles.
+  # Maxima, not the last cycle: the final collection can run after the workload's
+  # data is already dead, so the last line understates occupancy — and a maximum
+  # of 0 overflow is a stronger claim than 0 at one arbitrary instant.
+  probe() {
+    local label="$1"; shift
+    env "$@" SPROUT_DEBUG_GC=1 "$TMPD/w.bin" > "$TMPD/$label.out" 2>"$TMPD/$label.err" \
+      || { echo "gc-arena-check: workload failed under $label" >&2; tail -5 "$TMPD/$label.err" >&2; return 1; }
+    grep -q "SUITE PASSED" "$TMPD/$label.out" \
+      || { echo "gc-arena-check: workload did not pass under $label" >&2; tail -5 "$TMPD/$label.out" >&2; return 1; }
+    grep -q "arena_regions=" "$TMPD/$label.err" \
+      || { echo "gc-arena-check: no arena_regions field in SPROUT_DEBUG_GC output under $label — is the arena instrumented?" >&2; return 1; }
+    awk '/arena_regions=/ {
+           for (i = 1; i <= NF; i++) { split($i, kv, "="); v[kv[1]] = kv[2] + 0 }
+           if (v["arena_regions"]    > a) a = v["arena_regions"]
+           if (v["overflow_regions"] > o) o = v["overflow_regions"]
+         } END { printf "%d %d\n", a, o }' "$TMPD/$label.err"
+  }
+  failed=0
+  read -r on_arena on_overflow < <(probe default) || exit 1
+  echo "  default            : max arena_regions=${on_arena} max overflow_regions=${on_overflow}"
+  # > 1, not > 0: one region could be an artefact of the always-open bump region,
+  # whereas several proves the arena is genuinely serving the allocation path.
+  (( on_arena > 1 )) \
+    || { echo "gc-arena-check: max arena_regions=${on_arena} with the arena enabled — the O(1) path is NOT being taken, so this optimisation is inert" >&2; failed=1; }
+  (( on_overflow == 0 )) \
+    || { echo "gc-arena-check: overflow_regions=${on_overflow} on a workload that should fit the reservation — lookups for those regions still binary-search" >&2; failed=1; }
+  read -r off_arena off_overflow < <(probe disabled SPROUT_GC_ARENA_MB=0) || exit 1
+  echo "  SPROUT_GC_ARENA_MB=0: max arena_regions=${off_arena} max overflow_regions=${off_overflow}"
+  (( off_arena == 0 )) \
+    || { echo "gc-arena-check: arena_regions=${off_arena} with the arena disabled — SPROUT_GC_ARENA_MB=0 is not honoured" >&2; failed=1; }
+  (( off_overflow > 0 )) \
+    || { echo "gc-arena-check: overflow_regions=0 with the arena disabled — the fallback path was never exercised" >&2; failed=1; }
+  # 3. Deliberately undersized arena: BOTH paths live at once.  This is the riskiest
+  #    configuration — every lookup picks between the shift path and the binary
+  #    search on the same heap — and no other gate reaches it.
+  read -r mix_arena mix_overflow < <(probe mixed SPROUT_GC_ARENA_MB=2) || exit 1
+  echo "  SPROUT_GC_ARENA_MB=2: max arena_regions=${mix_arena} max overflow_regions=${mix_overflow}"
+  (( mix_arena > 0 && mix_overflow > 0 )) \
+    || { echo "gc-arena-check: undersized arena did not produce a mixed state (arena=${mix_arena} overflow=${mix_overflow}) — the both-paths-live configuration is untested" >&2; failed=1; }
+  (( failed == 0 )) || exit 1
+  echo "==> gc-arena-check ✓"
+
 # Run the independent, single-threaded CI gates concurrently (JOBS-wide) instead
 # of as a sequential chain of `just` steps.  On the 4-vCPU CI worker each of these
 # gates used only 1 core, leaving 3 idle for the duration; fanning them out fills
@@ -1949,6 +2019,7 @@ ci-fast-gates: bootstrap-from-seed build-fmt-from-seed
     "freelist-verify|test-freelist-verify"
     "gc-ageprof|gc-ageprof-check"
     "gc-adapt|gc-adapt-check"
+    "gc-arena|gc-arena-check"
     "argv-smoke|argv-smoke"
     "div-by-zero-smoke|div-by-zero-smoke"
     "stack-overflow-smoke|stack-overflow-smoke"
