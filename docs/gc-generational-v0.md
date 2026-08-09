@@ -132,9 +132,73 @@ Two checks, both negative:
   6 MB → 970 MB. Reusing hot memory beats allocating fresh pages, so GC's whole
   contribution there is at or below zero.
 
-The adaptive threshold explains the shape: it is `max(4096, live × 2)`, and with ~23–60
-objects live it sits at the floor forever — maximum collection frequency, minimum work
-per collection. That is cheap, not expensive.
+The adaptive threshold explains the shape: it is `max(4096, live × adapt_factor)`, and with
+~23–60 objects live it sits at the floor forever — maximum collection frequency, minimum work
+per collection. That is cheap, not expensive. (The factor default was 2.0 when this table was
+measured and is 3.0 as of the follow-up below; these workloads are floor-pinned either way, so
+none of the numbers above move.)
+
+### 5.3 What the measurement *did* justify: the adapt-factor default
+
+The same data that ruled the nursery out for these workloads argued for a one-line change.
+Because the threshold is floored at `SPROUT_GC_THRESHOLD` (4096), the factor is inert for any
+program whose live set is under ~2048 objects — i.e. four of the seven workloads above. Only the
+compiler (66,955 objects live per collection, from `marked_total / cycles`), `digit_recognizer`
+(4,492) and `astar` (2,809) are affected at all.
+
+Measured before raising the default from 2.0 to 3.0:
+
+| workload | time | peak RSS |
+|---|---|---|
+| compiler emit (`ast_to_ir.sprout`, 3 reps interleaved) | 2.19s → **1.88s** (−14%) | 90 → 101 MB (+13%) |
+| compiler-test emit (recorded earlier, BACKLOG) | **−19%** | +18% |
+| `digit_recognizer` | 0.53s → 0.53s (**flat**) | 6.15 → 7.55 MB (+1.3 MB) |
+| `astar` | 0.03s → 0.02s (timer floor) | 4.4 → 4.4 MB |
+| floor-pinned (nqueens, http ×2, math) | unchanged by construction | unchanged |
+
+The predicted risk was that raising the factor would amplify the byte-blind trigger
+(BACKLOG:1380) on `MutVec`-heavy code, retaining megabytes of `malloc`'d backing arrays invisible
+to `g_managed_heap_count`. **It did not**: `digit_recognizer` pays +1.3 MB. Its 64→24→10 model
+routes 10.6M scalar stores through a *handful* of long-lived small matrices, so its 4,492 live
+objects are small ADT nodes, not big buffers. The amplifier needs many large *retained* vectors,
+which no current workload has — it remains a live concern for future large-buffer churn.
+
+The mechanism, isolated on `test_gc_age_retain_all` (150k-node live chain):
+
+| factor | cycles | marked_total | freed_total |
+|---|---|---|---|
+| 2.0 | 9 | 558,057 | 420,043 |
+| 3.0 | 6 | 313,843 | **420,043** |
+| 4.0 | 5 | 236,020 | **420,043** |
+
+`freed_total` is identical while marking drops 44%. Sweeping is driven by how much garbage
+*exists* (a workload property); marking by how *often* you look (a policy property). The factor
+touches only the second, so nothing is deferred — only batched. The win is sublinear (F=4 gives
+−29% for +38% RSS, worse than 1:1) because sweep pass 1 walks every slot: fewer collections, but
+each sweeps a larger heap. 3.0 is the knee; `just gc-adapt-check` pins both the default and the
+floor-inertness property.
+
+#### The knob ate half the nursery's upside
+
+Raising the factor and building a nursery attack **the same waste**, so they do not compose
+additively. Re-measuring the compiler emit at both factors:
+
+| factor | cycles | marked_total | age ≥ 1 |
+|---|---|---|---|
+| 2.0 | 482 | 32,272,682 | 96.7% |
+| 3.0 | 252 | **16,199,233** | 94.1% |
+
+The *ratio* is nearly unchanged — §5's 97% headline stands — but the absolute pool a minor
+collection could skip fell from **31.2M re-marks to 15.2M**. Halving the collection count halves
+the re-marking, because re-marking *is* per-collection work. So the one-line default change
+captured roughly half of what the nursery was being proposed to capture, at none of the cost, and
+the remaining prize is correspondingly smaller. This makes §8's recommendation stronger, not
+weaker: measure again before building, and price the nursery against the 15.2M figure.
+
+The same effect recalibrated the instrument's own gate (`retain_all` fell 73% → 52%), so
+`gc-ageprof-check` now pins `SPROUT_GC_ADAPT_FACTOR=2` — it validates the counter, while
+`gc-adapt-check` validates the policy. Any future factor change should re-read this section:
+**re-mark ratios are only comparable at equal collection frequency.**
 
 **So the "GC is 59%" finding is a property of the self-hosted compiler**, whose live
 set is 85% immortal AST/IR, and it does not generalise. BACKLOG:283's "primary target:

@@ -1812,7 +1812,15 @@ gc-ageprof-check: bootstrap-from-seed
       || { echo "gc-ageprof-check: compile failed: $f" >&2; cat "$TMPD/$name.err" >&2; return 1; }
     clang "$TMPD/$name.ll" "$TMPD/rtobj"/*.o {{clang_extra}} -o "$TMPD/$name.bin" 2>"$TMPD/$name.err" \
       || { echo "gc-ageprof-check: link failed: $f" >&2; cat "$TMPD/$name.err" >&2; return 1; }
-    SPROUT_GC_AGEPROF=1 "$TMPD/$name.bin" > "$TMPD/$name.out" 2>"$TMPD/$name.prof" \
+    # SPROUT_GC_ADAPT_FACTOR is PINNED, not left at the default, because the measured
+    # re-mark ratio is a function of collection frequency: fewer collections mean each
+    # object's first (age-0) mark is a larger share of a smaller total, so raising the
+    # factor lowers the ratio without anything being wrong.  (Raising the default 2.0
+    # -> 3.0 moved retain_all from 73% to 52% and broke this gate's 70% bound.)  This
+    # gate validates the age COUNTER; `gc-adapt-check` covers the threshold POLICY.
+    # Keeping them separate means a future factor change cannot silently recalibrate
+    # the instrument's own correctness check.
+    SPROUT_GC_AGEPROF=1 SPROUT_GC_ADAPT_FACTOR=2 "$TMPD/$name.bin" > "$TMPD/$name.out" 2>"$TMPD/$name.prof" \
       || { echo "gc-ageprof-check: $f aborted under SPROUT_GC_AGEPROF=1" >&2; tail -5 "$TMPD/$name.prof" >&2; return 1; }
     grep -q "SUITE PASSED" "$TMPD/$name.out" \
       || { echo "gc-ageprof-check: $f workload did not pass" >&2; tail -5 "$TMPD/$name.out" >&2; return 1; }
@@ -1844,6 +1852,73 @@ gc-ageprof-check: bootstrap-from-seed
   (( failed == 0 )) || exit 1
   echo "==> gc-ageprof-check ✓"
 
+# Pin the adaptive-threshold policy (`threshold = max(live x adapt_factor, floor)`).
+# Two properties, both load-bearing for the `adapt_factor` default:
+#   1. The DEFAULT collects as sparsely as an explicit F=3, and strictly less often
+#      than the old F=2 default.  This is what makes the default a policy and not an
+#      accident — an accidental revert to 2.0 fails here.
+#   2. On a workload whose live set is below the threshold floor, the factor is
+#      PROVABLY INERT: cycles/marked/freed are bit-identical at F=2 and F=4.  This is
+#      the safety argument for raising the default at all (small programs cannot pay
+#      RSS for it), so it is asserted rather than assumed.
+# Reuses the age-instrument workloads: retain_all holds a 150k-node chain live (live
+# set >> floor, so the factor binds), retain_none retains nothing (floor-pinned).
+# Cycle counts come from SPROUT_GC_AGEPROF and are deterministic run to run, so the
+# assertions can be exact rather than ranged.
+[group('test')]
+gc-adapt-check: bootstrap-from-seed
+  #!/usr/bin/env bash
+  set -uo pipefail
+  TMPD=$(mktemp -d /tmp/sprout_adapt_XXXXXX); trap 'rm -rf "$TMPD"' EXIT
+  mkdir -p "$TMPD/rtobj"
+  for rtsrc in {{runtime_src}}; do
+    clang -c "$rtsrc" -O2 {{clang_extra}} -o "$TMPD/rtobj/$(basename "$rtsrc" .c).o" 2>"$TMPD/rt.err" \
+      || { echo "gc-adapt-check: runtime compile failed ($rtsrc)" >&2; cat "$TMPD/rt.err" >&2; exit 1; }
+  done
+  build_one() {
+    local name="$1" f="tests/stdlib/$1.spr"
+    [ -f "$f" ] || { echo "gc-adapt-check: missing $f" >&2; return 1; }
+    "{{build_dir}}/compile_driver_bin_stage1" --emit-ir "{{stdlib_root}}" --package-root "{{justfile_directory()}}" "$f" > "$TMPD/$name.ll" 2>"$TMPD/$name.err" \
+      || { echo "gc-adapt-check: compile failed: $f" >&2; cat "$TMPD/$name.err" >&2; return 1; }
+    clang "$TMPD/$name.ll" "$TMPD/rtobj"/*.o {{clang_extra}} -o "$TMPD/$name.bin" 2>"$TMPD/$name.err" \
+      || { echo "gc-adapt-check: link failed: $f" >&2; cat "$TMPD/$name.err" >&2; return 1; }
+  }
+  # Emits "<cycles> <marked_total> <freed_total>" for one binary at one factor.
+  # An empty SPROUT_GC_ADAPT_FACTOR means "use the compiled-in default".
+  probe() {
+    local name="$1" factor="$2" line
+    if [ -n "$factor" ]; then export SPROUT_GC_ADAPT_FACTOR="$factor"; else unset SPROUT_GC_ADAPT_FACTOR; fi
+    line=$(SPROUT_GC_AGEPROF=1 "$TMPD/$name.bin" 2>"$TMPD/$name.prof" >"$TMPD/$name.out"; grep -m1 "ageprof.*cycles=" "$TMPD/$name.prof") \
+      || { echo "gc-adapt-check: $name emitted no ageprof summary at factor='${factor:-default}'" >&2; return 1; }
+    grep -q "SUITE PASSED" "$TMPD/$name.out" \
+      || { echo "gc-adapt-check: $name did not pass at factor='${factor:-default}'" >&2; tail -5 "$TMPD/$name.out" >&2; return 1; }
+    awk '{ for (i = 1; i <= NF; i++) { split($i, kv, "="); v[kv[1]] = kv[2] + 0 }
+           printf "%d %d %d\n", v["cycles"], v["marked_total"], v["freed_total"] }' <<< "$line"
+  }
+  build_one test_gc_age_retain_all  || exit 1
+  build_one test_gc_age_retain_none || exit 1
+  failed=0
+  # --- Property 1: the default is the loose factor, not the old 2.0 -------------
+  read -r def_cyc def_marked _   < <(probe test_gc_age_retain_all "")  || exit 1
+  read -r f2_cyc  f2_marked  _   < <(probe test_gc_age_retain_all 2)   || exit 1
+  read -r f3_cyc  f3_marked  _   < <(probe test_gc_age_retain_all 3)   || exit 1
+  echo "  retain_all: default cycles=${def_cyc} marked=${def_marked} | F=2 cycles=${f2_cyc} marked=${f2_marked} | F=3 cycles=${f3_cyc} marked=${f3_marked}"
+  (( def_cyc == f3_cyc && def_marked == f3_marked )) \
+    || { echo "gc-adapt-check: default (cycles=${def_cyc}) does not match F=3 (cycles=${f3_cyc}) — SPROUT_GC_ADAPT_FACTOR default is not 3.0" >&2; failed=1; }
+  (( def_cyc < f2_cyc )) \
+    || { echo "gc-adapt-check: default collects as often as F=2 (${def_cyc} vs ${f2_cyc}) — the adaptive factor is not taking effect" >&2; failed=1; }
+  # Marking is the whole point of the knob: fewer passes over the same live set.
+  (( f3_marked * 100 < f2_marked * 70 )) \
+    || { echo "gc-adapt-check: F=3 mark work ${f3_marked} is not <70% of F=2's ${f2_marked} — no mark-work reduction" >&2; failed=1; }
+  # --- Property 2: below the floor, the factor is inert -------------------------
+  none_f2=$(probe test_gc_age_retain_none 2) || exit 1
+  none_f4=$(probe test_gc_age_retain_none 4) || exit 1
+  echo "  retain_none (floor-pinned): F=2 '${none_f2}' | F=4 '${none_f4}'  (cycles marked freed)"
+  [ "$none_f2" = "$none_f4" ] \
+    || { echo "gc-adapt-check: floor-pinned workload changed with the factor ('${none_f2}' vs '${none_f4}') — raising the default is NOT free for small-live-set programs" >&2; failed=1; }
+  (( failed == 0 )) || exit 1
+  echo "==> gc-adapt-check ✓"
+
 # Run the independent, single-threaded CI gates concurrently (JOBS-wide) instead
 # of as a sequential chain of `just` steps.  On the 4-vCPU CI worker each of these
 # gates used only 1 core, leaving 3 idle for the duration; fanning them out fills
@@ -1873,6 +1948,7 @@ ci-fast-gates: bootstrap-from-seed build-fmt-from-seed
     "gc-safety|gc-safety-check --strict"
     "freelist-verify|test-freelist-verify"
     "gc-ageprof|gc-ageprof-check"
+    "gc-adapt|gc-adapt-check"
     "argv-smoke|argv-smoke"
     "div-by-zero-smoke|div-by-zero-smoke"
     "stack-overflow-smoke|stack-overflow-smoke"
