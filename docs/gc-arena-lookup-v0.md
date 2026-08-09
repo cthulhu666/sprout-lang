@@ -326,3 +326,55 @@ Two methodology errors, both caught, both worth avoiding next time:
   share of runtime, producing a fabricated −12.9% "win".
 - **Non-interleaved repetitions.** A first pass attributed +2.1% to `madvise` on nqueens;
   interleaved runs put all four variants within ±0.5%. `madvise` was never the cost.
+
+### 12.7 Scaling with heap size
+
+The win grows with region count, because it replaces an O(log₂ regions) search with an O(1)
+index. Measured on a retained-chain workload at four live-heap sizes (`Link Int Chain`,
+32 bytes/node), regions counted at collection time:
+
+| live nodes | regions | before | after | delta | after-wins |
+|---|---|---|---|---|---|
+| 150 k | 4 | 10.8 ms | 10.4 ms | −3.6% | 78% |
+| 1 M | 31 | 47.7 ms | 37.5 ms | **−21.4%** | **100%** |
+| 3 M | 92 | 150.1 ms | 105.1 ms | **−30.0%** | **100%** |
+| 6 M | 92 | 217.5 ms | 165.8 ms | −23.7% | 92% |
+
+These exceed the compiler's −5.3% because they are lookup-dominated: a large retained
+structure is re-traced every cycle, so nearly all their work *is* `region_find`. The
+compiler spends proportionally more time in the mutator. astar's +1.3% (§12.1) is the
+left-hand end of this same curve, not a counterexample — with one region there is nothing
+to win.
+
+**Past the reservation, degradation is proportional rather than a cliff.** Forcing the 3 M
+workload (~92 regions) into a 32-chunk arena leaves 60 regions overflowed to `malloc`:
+
+| configuration | time | vs before |
+|---|---|---|
+| before | 140.1 ms | — |
+| arena 4 GiB — all regions fit | 98.0 ms | −30.0% |
+| arena 32 MiB — 32 in arena, 60 spill | 108.4 ms | −22.6% |
+| arena disabled entirely | 124.3 ms | **−11.3%** |
+
+**The last row is the notable one: with no arena at all, the new code is still 11.3%
+faster.** That is §12.5's inline non-pointer rejection acting alone — scalars rejected by one
+compare instead of a full search. So this change is really *two* independent wins: ~11% from
+the bounds check, which needs no reservation, and a further ~19% from O(1) resolution. A
+future edit that removes the arena should keep the bounds check.
+
+**Known limits at large heap sizes**, none of them currently reachable in practice:
+
+- **The reservation is a soft ceiling.** Past `SPROUT_GC_ARENA_MB` (default 4 GiB, i.e. 4096
+  chunks) new regions overflow to `malloc` and take the search; the table then holds both
+  kinds, so depth returns toward the pre-arena baseline. Raising the default is not free:
+  the chunk maps cost ~13 bytes per chunk (index 4 + committed 1 + free-list slot 8), so
+  4 GiB costs ~53 KB but 64 GiB would cost ~850 KB of fixed overhead for every process,
+  including trivial ones. Growing the maps on demand, or chaining a second reservation, is
+  the right fix if a >4 GiB heap ever matters.
+- **`region_table_insert` is O(regions)** — a pre-existing `memmove` of the sorted table, to
+  which `arena_reindex_from` adds a second pass of the same order. Inserts happen once per
+  MiB allocated, and arena chunks are handed out at ascending addresses so they normally land
+  at the table's end (O(1) in practice); a *recycled* chunk from the free list can land
+  mid-table and cost O(regions). No effect is visible at 92 regions, but at several thousand
+  this becomes the next thing to fix — likely by giving arena regions chunk-indexed storage
+  rather than a position in the sorted table.
