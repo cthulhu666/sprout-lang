@@ -1,0 +1,46 @@
+import stdlib.test (check_eq, check_true, run_suite)
+
+# The twin of `test_gc_age_retain_all.spr`: same allocation volume, nothing
+# retained. Each round builds a short chain, walks it, and drops it, and the only
+# thing carried between rounds is an Int — so at any collection point the
+# reachable heap is just the round currently in flight.
+#
+# KNOWN ANSWER:
+#   marked_age_ge1 / marked_total  must be LOW   (almost nothing survives a cycle)
+#   freed_age0     / freed_total   must be HIGH  (everything dies young)
+#
+# The LOW ratio here against the HIGH ratio in the retain-all twin is what makes
+# the age instrument falsifiable: a counter stuck at a constant, or one that
+# confuses "marked" with "live", cannot produce both. `just gc-ageprof-check`
+# asserts the gap.
+#
+# Object age is not observable from Sprout, so the assertions below only confirm
+# the workload ran; the measurement is entirely in the runtime counters.
+
+type Chain (..) =
+  | End
+  | Link Int Chain
+
+fn build(n: Int, acc: Chain) -> Chain =
+  if n <= 0 then acc
+  else build(n - 1, Link(n, acc))
+
+fn chain_len(c: Chain, acc: Int) -> Int =
+  match c with
+  | Link _ rest -> chain_len(rest, acc + 1)
+  | End -> acc
+
+# Deliberately identical to the retain-all twin's churn, so the two files differ
+# ONLY in whether a large structure is held live across the collections.
+fn churn(n: Int, acc: Int) -> Int =
+  if n <= 0 then acc
+  else churn(n - 1, acc + chain_len(build(8, End), 0))
+
+fn main() -> Unit !{IO} =
+  # 60000 rounds x 8 links = 480000 allocations, none of which outlive its round.
+  let churned = churn(60000, 0)
+  in
+  run_suite("gc_age_retain_none", [
+    check_eq("churn walked every round", churned, 480000),
+    check_true("churn produced allocation", churned > 0)
+  ])
