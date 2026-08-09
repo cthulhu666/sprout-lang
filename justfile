@@ -1657,8 +1657,9 @@ test-stress: bootstrap-from-seed
   # SPROUT_FL_VERIFY is set alongside the stress flag below: it checks the sweep's
   # staged per-class freelists against a full-heap walk on EVERY collection, and
   # collect-on-every-allocation is the setting that maximises the number of those
-  # checks. Cheap here (worst file +0.4s) because these heaps are small; do NOT
-  # enable it job-wide, as it triples a compile-heavy run.
+  # checks. It costs O(heap) + two sorts per collection, so it is NOT enabled job-
+  # wide (that triples a compile-heavy run) and is skipped per-file below where the
+  # combination is disproportionate.
   # test_gc_freelist_reuse: drives the freelist cases that produce a wrong list
   # rather than a crash — slots free across a cycle boundary, and regions whose
   # staged entries must be kept or dropped depending on whether Pass 2 releases them.
@@ -1668,15 +1669,25 @@ test-stress: bootstrap-from-seed
   # SPROUT_GC_DISABLE).  Tracked in BACKLOG.md; warn-only here.  Promote to
   # STRESS_FILES as each is fixed (an UNEXPECTED PASS flags that it's ready).
   STRESS_XFAIL=""
+  # Files that run under stress but WITHOUT the freelist oracle, because the two
+  # together are disproportionate.  test_ir_codegen_ctors is the serial critical
+  # path of this whole recipe: measured locally (5 jobs) it runs 180s under stress
+  # alone and 434s with the oracle, while all 15 other files finish in under 2s
+  # each either way — so the oracle on that one file is +254s (CI: 300s -> 883s for
+  # the step) for heap shapes `just test-freelist-verify` already walks at the
+  # default threshold.  Keep this list minimal and justify each entry with a
+  # measurement; the oracle is ON by default so new stress files are covered.
+  FL_VERIFY_SKIP=" test_ir_codegen_ctors "
   failed=0
   JOBS=$(bash scripts/test_jobs.sh)
   run_one() {  # prints "ok" or "fail"; never exits.  Per-file err file avoids the
                # shared-$TMPD/err race when invoked concurrently.
-    local f="$1" name ll bin out err
+    local f="$1" name ll bin out err fv=1
     name=$(basename "$f" .spr); ll="$TMPD/$name.ll"; bin="$TMPD/$name.bin"; err="$TMPD/$name.err"
+    case "$FL_VERIFY_SKIP" in *" $name "*) fv=0 ;; esac
     "{{build_dir}}/compile_driver_bin_stage1" --use-ir-codegen "{{stdlib_root}}" --package-root "{{justfile_directory()}}" "$f" > "$ll" 2>"$err" || { echo fail; return; }
     clang "$ll" "$TMPD/rtobj"/*.o {{clang_extra}} -o "$bin" 2>"$err" || { echo fail; return; }
-    if out=$(SPROUT_GC_STRESS=1 SPROUT_FL_VERIFY=1 "$bin" 2>&1); then
+    if out=$(SPROUT_GC_STRESS=1 SPROUT_FL_VERIFY=$fv "$bin" 2>&1); then
       echo "$out" | grep -q "SUITE FAILED" && echo fail || echo ok
     else
       echo fail
