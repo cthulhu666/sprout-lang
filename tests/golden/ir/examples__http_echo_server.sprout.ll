@@ -483,8 +483,6 @@ declare i64 @task_yield()
 @.cfkinds.44 = private unnamed_addr constant [1 x i8] c"\00"
 @.cname.45 = private unnamed_addr constant [39 x i8] c"stdlib.http_server.HttpHeadersTooLarge\00"
 @.cfkinds.45 = private unnamed_addr constant [1 x i8] c"\00"
-@.cname.46 = private unnamed_addr constant [32 x i8] c"stdlib.http_server.ServerConfig\00"
-@.cfkinds.46 = private unnamed_addr constant [5 x i8] c"iiii\00"
 @.cname.47 = private unnamed_addr constant [25 x i8] c"stdlib.http_server.Route\00"
 @.cfkinds.47 = private unnamed_addr constant [4 x i8] c"ssp\00"
 
@@ -13686,97 +13684,6 @@ entry:
   ret i64 %t$4
 }
 
-define i64 @stdlib.http_server.server_config(i64 %header_ms, i64 %body_ms, i64 %max_header_bytes, i64 %write_ms) {
-entry:
-  %t$0 = call i64 @sprout_alloc_obj(i64 46, i64 4)
-  %t$0$ptr = inttoptr i64 %t$0 to ptr
-  %t$0$f0 = getelementptr i64, ptr %t$0$ptr, i64 0
-  store i64 %header_ms, ptr %t$0$f0
-  %t$0$f1 = getelementptr i64, ptr %t$0$ptr, i64 1
-  store i64 %body_ms, ptr %t$0$f1
-  %t$0$f2 = getelementptr i64, ptr %t$0$ptr, i64 2
-  store i64 %max_header_bytes, ptr %t$0$f2
-  %t$0$f3 = getelementptr i64, ptr %t$0$ptr, i64 3
-  store i64 %write_ms, ptr %t$0$f3
-  ret i64 %t$0
-}
-
-define i64 @stdlib.http_server.config_header_ms(i64 %config) {
-entry:
-  %t$0 = call i64 @sprout_tag(i64 %config)
-  br label %arm_0_1
-arm_0_1:
-  %t$3 = add i64 0, 46
-  %t$4 = icmp eq i64 %t$0, %t$3
-  br i1 %t$4, label %body_0_1, label %arm_1_1
-body_0_1:
-  %t$5 = call i64 @sprout_field(i64 %config, i64 0)
-  br label %join_1
-arm_1_1:
-  call void @sprout_abort_match()
-  unreachable
-join_1:
-  %t$2 = phi i64 [%t$5, %body_0_1]
-  ret i64 %t$2
-}
-
-define i64 @stdlib.http_server.config_body_ms(i64 %config) {
-entry:
-  %t$0 = call i64 @sprout_tag(i64 %config)
-  br label %arm_0_1
-arm_0_1:
-  %t$3 = add i64 0, 46
-  %t$4 = icmp eq i64 %t$0, %t$3
-  br i1 %t$4, label %body_0_1, label %arm_1_1
-body_0_1:
-  %t$5 = call i64 @sprout_field(i64 %config, i64 1)
-  br label %join_1
-arm_1_1:
-  call void @sprout_abort_match()
-  unreachable
-join_1:
-  %t$2 = phi i64 [%t$5, %body_0_1]
-  ret i64 %t$2
-}
-
-define i64 @stdlib.http_server.config_max_header_bytes(i64 %config) {
-entry:
-  %t$0 = call i64 @sprout_tag(i64 %config)
-  br label %arm_0_1
-arm_0_1:
-  %t$3 = add i64 0, 46
-  %t$4 = icmp eq i64 %t$0, %t$3
-  br i1 %t$4, label %body_0_1, label %arm_1_1
-body_0_1:
-  %t$5 = call i64 @sprout_field(i64 %config, i64 2)
-  br label %join_1
-arm_1_1:
-  call void @sprout_abort_match()
-  unreachable
-join_1:
-  %t$2 = phi i64 [%t$5, %body_0_1]
-  ret i64 %t$2
-}
-
-define i64 @stdlib.http_server.config_write_ms(i64 %config) {
-entry:
-  %t$0 = call i64 @sprout_tag(i64 %config)
-  br label %arm_0_1
-arm_0_1:
-  %t$3 = add i64 0, 46
-  %t$4 = icmp eq i64 %t$0, %t$3
-  br i1 %t$4, label %body_0_1, label %arm_1_1
-body_0_1:
-  %t$5 = call i64 @sprout_field(i64 %config, i64 3)
-  br label %join_1
-arm_1_1:
-  call void @sprout_abort_match()
-  unreachable
-join_1:
-  %t$2 = phi i64 [%t$5, %body_0_1]
-  ret i64 %t$2
-}
-
 define i64 @stdlib.http_server.deadline_in(i64 %ms) {
 entry:
   %t$0 = call i64 @time_now_micros()
@@ -15702,7 +15609,7 @@ join_3:
 
 define i64 @stdlib.http_server.read_request(i64 %conn, i64 %config) {
 entry:
-  %t$0 = call i64 @stdlib.http_server.config_header_ms(i64 %config)
+  %t$0 = call i64 @sprout_field(i64 %config, i64 0)
   %t$13 = alloca i64
   store i64 %conn, ptr %t$13
   %t$14 = call i64 @sprout_gc_push_i64_root(ptr %t$13)
@@ -15712,7 +15619,7 @@ entry:
   %t$1 = call i64 @stdlib.http_server.deadline_in(i64 %t$0)
   %t$2 = getelementptr inbounds { i64, [1 x i8] }, ptr @.str.113, i64 0, i32 1, i64 0
   %t$3 = ptrtoint ptr %t$2 to i64
-  %t$4 = call i64 @stdlib.http_server.config_max_header_bytes(i64 %config)
+  %t$4 = call i64 @sprout_field(i64 %config, i64 2)
   %t$17 = alloca i64
   store i64 %t$3, ptr %t$17
   %t$18 = call i64 @sprout_gc_push_i64_root(ptr %t$17)
@@ -15877,7 +15784,7 @@ then_16:
   %t$64 = call i64 @sprout_gc_pop_roots(i64 1)
   br label %join_16
 else_16:
-  %t$19 = call i64 @stdlib.http_server.config_body_ms(i64 %config)
+  %t$19 = call i64 @sprout_field(i64 %config, i64 1)
   %t$65 = alloca i64
   store i64 %t$4, ptr %t$65
   %t$66 = call i64 @sprout_gc_push_i64_root(ptr %t$65)
@@ -15896,7 +15803,7 @@ else_16:
   %t$20 = call i64 @stdlib.http_server.deadline_in(i64 %t$19)
   %t$21 = call i64 @stdlib.string.length(i64 %t$10)
   %t$22 = sub i64 %t$4, %t$21
-  %t$23 = call i64 @stdlib.http_server.config_body_ms(i64 %config)
+  %t$23 = call i64 @sprout_field(i64 %config, i64 1)
   %t$24$st = call { i64, i64 } @stdlib.http_server.read_remaining_body_worker(i64 %conn, i64 %raw, i64 %t$22, i64 %t$20, i64 %t$23)
   %t$24 = extractvalue { i64, i64 } %t$24$st, 0
   %t$25 = extractvalue { i64, i64 } %t$24$st, 1
@@ -17590,7 +17497,7 @@ body_0_2:
   %t$30 = call i64 @sprout_gc_push_i64_root(ptr %t$29)
   %t$7 = call i64 @stdlib.http_server.render_response_or_fallback(i64 %t$6)
   %t$31 = call i64 @sprout_gc_pop_roots(i64 1)
-  %t$8 = call i64 @stdlib.http_server.config_write_ms(i64 %config)
+  %t$8 = call i64 @sprout_field(i64 %config, i64 3)
   %t$32 = alloca i64
   store i64 %t$7, ptr %t$32
   %t$33 = call i64 @sprout_gc_push_i64_root(ptr %t$32)
@@ -17616,7 +17523,7 @@ body_1_2:
   %t$40 = call i64 @sprout_gc_push_i64_root(ptr %t$39)
   %t$13 = call i64 @stdlib.http_server.render_response_or_fallback(i64 %t$12)
   %t$41 = call i64 @sprout_gc_pop_roots(i64 1)
-  %t$14 = call i64 @stdlib.http_server.config_write_ms(i64 %config)
+  %t$14 = call i64 @sprout_field(i64 %config, i64 3)
   %t$42 = alloca i64
   store i64 %t$13, ptr %t$42
   %t$43 = call i64 @sprout_gc_push_i64_root(ptr %t$42)
@@ -23300,7 +23207,7 @@ wrepack_next_53:
 
 define { i64, i64 } @stdlib.http_server.read_request_worker(i64 %conn, i64 %config) {
 entry:
-  %t$0 = call i64 @stdlib.http_server.config_header_ms(i64 %config)
+  %t$0 = call i64 @sprout_field(i64 %config, i64 0)
   %t$22 = alloca i64
   store i64 %conn, ptr %t$22
   %t$23 = call i64 @sprout_gc_push_i64_root(ptr %t$22)
@@ -23310,7 +23217,7 @@ entry:
   %t$1 = call i64 @stdlib.http_server.deadline_in(i64 %t$0)
   %t$2 = getelementptr inbounds { i64, [1 x i8] }, ptr @.str.233, i64 0, i32 1, i64 0
   %t$3 = ptrtoint ptr %t$2 to i64
-  %t$4 = call i64 @stdlib.http_server.config_max_header_bytes(i64 %config)
+  %t$4 = call i64 @sprout_field(i64 %config, i64 2)
   %t$26 = alloca i64
   store i64 %t$3, ptr %t$26
   %t$27 = call i64 @sprout_gc_push_i64_root(ptr %t$26)
@@ -24739,9 +24646,6 @@ entry:
   %cname_ptr_45 = getelementptr inbounds [39 x i8], ptr @.cname.45, i64 0, i64 0
   %cfkinds_ptr_45 = getelementptr inbounds [1 x i8], ptr @.cfkinds.45, i64 0, i64 0
   %creg_45 = call i64 @sprout_register_ctor(i64 45, ptr %cname_ptr_45, i64 0, ptr %cfkinds_ptr_45)
-  %cname_ptr_46 = getelementptr inbounds [32 x i8], ptr @.cname.46, i64 0, i64 0
-  %cfkinds_ptr_46 = getelementptr inbounds [5 x i8], ptr @.cfkinds.46, i64 0, i64 0
-  %creg_46 = call i64 @sprout_register_ctor(i64 46, ptr %cname_ptr_46, i64 4, ptr %cfkinds_ptr_46)
   %cname_ptr_47 = getelementptr inbounds [25 x i8], ptr @.cname.47, i64 0, i64 0
   %cfkinds_ptr_47 = getelementptr inbounds [4 x i8], ptr @.cfkinds.47, i64 0, i64 0
   %creg_47 = call i64 @sprout_register_ctor(i64 47, ptr %cname_ptr_47, i64 3, ptr %cfkinds_ptr_47)

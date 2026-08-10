@@ -1,0 +1,46 @@
+import stdlib.test (check_eq, run_suite)
+import stdlib.http_server (ServerConfig, default_config)
+
+# `ServerConfig`'s four bounds are all `Int`, so transposing any two of them is
+# invisible to the typechecker and invisible to any assertion that checks a total
+# rather than a position. Nothing covered them before: the accessors were private,
+# so no test outside http_server could read a config back at all, and the four
+# `tests/task_io_smoke` suites each exercise a single bound end-to-end without
+# ever naming which field carries it.
+#
+# Each check therefore pins one field to a value distinct from the other three.
+
+fn header_ms(c: ServerConfig) -> Int = c.header_ms
+fn body_ms(c: ServerConfig) -> Int = c.body_ms
+fn max_header_bytes(c: ServerConfig) -> Int = c.max_header_bytes
+fn write_ms(c: ServerConfig) -> Int = c.write_ms
+
+# Four values that are pairwise distinct and not multiples of each other, so a
+# swap cannot produce a coincidentally-correct read.
+fn sample() -> ServerConfig =
+  ServerConfig(header_ms = 11, body_ms = 22, max_header_bytes = 33, write_ms = 44)
+
+# Only the named field changes; the rest are copied from the base.
+fn slower_body(c: ServerConfig) -> ServerConfig = c with (body_ms = 99)
+
+fn main() -> Unit !{IO} =
+  run_suite("http_server_config", [
+    # The documented defaults: header 10 s total, body 30 s idle, 64 KiB of
+    # headers, response writes 30 s idle.
+    check_eq("default header_ms", header_ms(default_config()), 10000),
+    check_eq("default body_ms", body_ms(default_config()), 30000),
+    check_eq("default max_header_bytes", max_header_bytes(default_config()), 65536),
+    check_eq("default write_ms", write_ms(default_config()), 30000),
+
+    # Named construction: each field lands where its label says it does.
+    check_eq("constructed header_ms", header_ms(sample()), 11),
+    check_eq("constructed body_ms", body_ms(sample()), 22),
+    check_eq("constructed max_header_bytes", max_header_bytes(sample()), 33),
+    check_eq("constructed write_ms", write_ms(sample()), 44),
+
+    # Functional update touches one field and leaves the neighbours alone.
+    check_eq("update replaces the named field", body_ms(slower_body(sample())), 99),
+    check_eq("update keeps header_ms", header_ms(slower_body(sample())), 11),
+    check_eq("update keeps max_header_bytes", max_header_bytes(slower_body(sample())), 33),
+    check_eq("update keeps write_ms", write_ms(slower_body(sample())), 44)
+  ])

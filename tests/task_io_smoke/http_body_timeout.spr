@@ -84,7 +84,7 @@ fn dribble_then_expect(conn: borrowing TcpConnection) -> Unit !{IO} =
 # body_ms is 300: long enough that a 200 ms gap is fine, short enough that a stall is caught fast.
 fn run(s: Scope, port: Int) -> Unit !{IO} =
   do
-    task_spawn(s, \_ -> serve_n_with(ServerConfig(2000, 300, 65536, 2000), port, 2, handle))
+    task_spawn(s, \_ -> serve_n_with(ServerConfig(header_ms = 2000, body_ms = 300, max_header_bytes = 65536, write_ms = 2000), port, 2, handle))
     task_spawn(s, \_ -> stalled_body_client(port))
     task_spawn(s, \_ -> dribbling_client(port))
 
