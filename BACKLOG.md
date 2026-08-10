@@ -397,7 +397,15 @@ Legend:
   `content_length` instead — the loop only asks for the bytes the request promised — which is why it
   needs no size cap of its own the way the header loop does. Regression:
   `tests/task_io_smoke/http_body_timeout.spr` (four 5-byte chunks 200 ms apart against a 300 ms
-  budget), verified RED against the total deadline. Still open and distinct: a max body size (413).
+  budget), verified RED against the total deadline. **SUPERSEDED 2026-08-10 — the idle body deadline
+  is gone.** It bounded a peer that STOPS but not one that merely crawls: a byte per interval re-armed
+  it forever, so handler occupancy had no upper limit, which blocked the bounded worker pool
+  (docs/green-task-pool-v0.md §5.2). The body deadline is now TOTAL but scaled by the announced size
+  — `body_ms + content_length / min_rate_bps` — which is Apache's `RequestReadTimeout body,MinRate`
+  in closed form, HTTP stating the length up front. The max body size (413) landed with it, and had
+  to: a size cap bounds BYTES not TIME (1 MiB at a byte per interval stays under any cap forever),
+  and a rate floor without a cap has no finite quantity to divide. Regression:
+  `tests/task_io_smoke/http_body_bounds.spr`.
 - [ ] `P2` **A timed read costs a timerfd per park on Linux** (code review of PR #56, 2026-08-10).
   **The fatal half is FIXED 2026-08-10; the cost remains.** `sprout_poll_add_timer` calls
   `timerfd_create` per registration, so every bounded read/write park allocates a descriptor,
@@ -506,6 +514,17 @@ Legend:
   loop re-slices `Bytes` per chunk and goes quadratic; and `read_exact`'s accumulate loop moves from one
   in-place C buffer fill to per-chunk allocation in Sprout, which must be **measured**, not assumed.
   When this lands, delete every `tcp_*_timeout` twin and its `APPROVED_BUILTINS` entry.
+  **STARTED 2026-08-10: the two primitives now exist.** Bounding the response write needed exactly
+  this split — `tcp_write_all_timeout` re-arms its idle bound in C on every accepted byte, so a peer
+  taking one byte per interval held a handler forever and no deadline computed in Sprout could
+  intervene. Rather than add the fourth twin this entry warned about, `tcp_wait(conn, interest, ms)`
+  (readiness, moves no data) and `tcp_write_some(conn, data, offset)` (transfer, never parks, reports
+  `Err TcpWouldBlock`) went in, with the retry-and-deadline loop in `stdlib/net.sprout` as
+  `write_all_by`. `offset` is there for the quadratic-reslicing reason predicted above. **Remaining:**
+  migrate `tcp_read_avail_timeout` and `tcp_write_all_timeout` onto `tcp_wait` and delete them, plus
+  the `tcp_read_exact_timeout` / `tcp_connect_timeout` twins this makes unnecessary. The read side is
+  unmigrated only because it was already expressible — `read_avail_timeout` returns per chunk, so
+  http_server could compute its own deadlines around it.
 - [ ] `P1` **http_server accept-failure isolation (concurrency review C3, remaining half).**
   `tcp_accept` is still the FATAL variant: `accept` failing with EMFILE/ENFILE — the same descriptor
   exhaustion the timeout above now makes far harder to reach, but not impossible — calls `tcp_fail`

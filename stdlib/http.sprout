@@ -64,6 +64,10 @@ fn http_status_info(status: Int) -> Maybe HttpStatusInfo =
   | 408 -> Just(HttpStatusInfo("408", "Request Timeout"))
   | 409 -> Just(HttpStatusInfo("409", "Conflict"))
   | 410 -> Just(HttpStatusInfo("410", "Gone"))
+  # RFC 9110 §15.5.14 renamed 413 from "Payload Too Large" (RFC 7231) to "Content Too Large"; the
+  # newer phrase is used here. The reason phrase is advisory — clients switch on the code — so the
+  # rename is safe, and nginx still reports the older name for the same status.
+  | 413 -> Just(HttpStatusInfo("413", "Content Too Large"))
   | 422 -> Just(HttpStatusInfo("422", "Unprocessable Content"))
   | 429 -> Just(HttpStatusInfo("429", "Too Many Requests"))
   | 431 -> Just(HttpStatusInfo("431", "Request Header Fields Too Large"))

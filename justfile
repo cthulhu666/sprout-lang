@@ -1598,14 +1598,25 @@ task-io-smoke: bootstrap-from-seed
   run_once "http-body-timeout" "stalled-body-408"
   run_once "http-body-timeout/idle" "dribbled-body-200"
   SPROUT_GC_STRESS=1 run_once "http-body-timeout/stress" "dribbled-body-200"
-  # (23) read_avail_timeout's two contract ends, both previously untested: `timeout_ms <= 0` polls
+  # (23) The two bounds that make handler occupancy finite, and so unblock a bounded worker pool: an
+  # over-large Content-Length refused 413 on the announcement, and a body crawling BELOW min_rate_bps
+  # cut off at 408. The third marker is the control that matters more than either: a client above the
+  # floor must still be served, because the failure mode of a rate floor is killing legitimate slow
+  # uploads. RED as a 200 for the oversized body, a hang for the crawler (the old idle deadline was
+  # re-armed forever by its steady trickle), or a 408 for the prompt client.
+  build tests/task_io_smoke/http_body_bounds.spr
+  run_once "http-body-bounds" "huge-body-413"
+  run_once "http-body-bounds/rate" "below-rate-408"
+  run_once "http-body-bounds/control" "above-rate-200"
+  SPROUT_GC_STRESS=1 run_once "http-body-bounds/stress" "huge-body-413"
+  # (24) read_avail_timeout's two contract ends, both previously untested: `timeout_ms <= 0` polls
   # ONCE and reports a timeout without parking (what makes http_server's total header budget
   # composable — it passes the remaining slice), and a live budget still delivers data that arrives
   # inside it (which is what catches a fix that just always reports a timeout).
   build tests/task_io_smoke/read_timeout_poll_once.spr
   run_once "read-poll-once" "poll-once-timed-out"
   run_once "read-poll-once/data" "bounded-read-got-data"
-  echo "==> task-io-smoke ✓ (read-park, accept-park, re-arm, http-serve-concurrency, http-conn-error-isolation, tcp-read-avail-error, write, cancel-drop, await-guard, timer-drop, timeout-drop, timeout-nested-guard, chan-cancel-drop, chan-timeout-drop, chan-negative-cap-guard, rendezvous-send-drop, send-on-closed-guard, double-close-guard, send-parked-close-guard, select-cancel-drop, select-timeout-drop, connect-park, http-idle-timeout, http-header-flood, http-write-timeout, http-body-timeout, read-poll-once; interleaved; stress-clean)"
+  echo "==> task-io-smoke ✓ (read-park, accept-park, re-arm, http-serve-concurrency, http-conn-error-isolation, tcp-read-avail-error, write, cancel-drop, await-guard, timer-drop, timeout-drop, timeout-nested-guard, chan-cancel-drop, chan-timeout-drop, chan-negative-cap-guard, rendezvous-send-drop, send-on-closed-guard, double-close-guard, send-parked-close-guard, select-cancel-drop, select-timeout-drop, connect-park, http-idle-timeout, http-header-flood, http-write-timeout, http-body-timeout, http-body-bounds, read-poll-once; interleaved; stress-clean)"
 
 # Division-by-zero guard regression (CI gate). The fixture divides by a RUNTIME
 # zero (`10 / list_length(argv)` with no args), which neither the compiler nor

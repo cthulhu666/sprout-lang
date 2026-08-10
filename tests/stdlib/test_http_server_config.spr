@@ -14,11 +14,14 @@ fn header_ms(c: ServerConfig) -> Int = c.header_ms
 fn body_ms(c: ServerConfig) -> Int = c.body_ms
 fn max_header_bytes(c: ServerConfig) -> Int = c.max_header_bytes
 fn write_ms(c: ServerConfig) -> Int = c.write_ms
+fn max_body_bytes(c: ServerConfig) -> Int = c.max_body_bytes
+fn min_rate_bps(c: ServerConfig) -> Int = c.min_rate_bps
 
-# Four values that are pairwise distinct and not multiples of each other, so a
-# swap cannot produce a coincidentally-correct read.
+# Values that are pairwise distinct and not multiples of each other, so a swap
+# cannot produce a coincidentally-correct read.
 fn sample() -> ServerConfig =
-  ServerConfig(header_ms = 11, body_ms = 22, max_header_bytes = 33, write_ms = 44)
+  ServerConfig(header_ms = 11, body_ms = 22, max_header_bytes = 33, write_ms = 44,
+               max_body_bytes = 55, min_rate_bps = 66)
 
 # Only the named field changes; the rest are copied from the base.
 fn slower_body(c: ServerConfig) -> ServerConfig = c with (body_ms = 99)
@@ -31,12 +34,18 @@ fn main() -> Unit !{IO} =
     check_eq("default body_ms", body_ms(default_config()), 30000),
     check_eq("default max_header_bytes", max_header_bytes(default_config()), 65536),
     check_eq("default write_ms", write_ms(default_config()), 30000),
+    # 1 MiB, following nginx's client_max_body_size default of 1m.
+    check_eq("default max_body_bytes", max_body_bytes(default_config()), 1048576),
+    # Bytes/second below which a peer is not considered to be making progress.
+    check_eq("default min_rate_bps", min_rate_bps(default_config()), 1024),
 
     # Named construction: each field lands where its label says it does.
     check_eq("constructed header_ms", header_ms(sample()), 11),
     check_eq("constructed body_ms", body_ms(sample()), 22),
     check_eq("constructed max_header_bytes", max_header_bytes(sample()), 33),
     check_eq("constructed write_ms", write_ms(sample()), 44),
+    check_eq("constructed max_body_bytes", max_body_bytes(sample()), 55),
+    check_eq("constructed min_rate_bps", min_rate_bps(sample()), 66),
 
     # Functional update touches one field and leaves the neighbours alone.
     check_eq("update replaces the named field", body_ms(slower_body(sample())), 99),

@@ -66,7 +66,8 @@ fn prompt_client(port: Int) -> Unit !{IO} =
 # client task runs — the same startup ordering the other http fixtures rely on.
 fn run(s: Scope, port: Int) -> Unit !{IO} =
   do
-    task_spawn(s, \_ -> serve_n_with(ServerConfig(header_ms = 300, body_ms = 300, max_header_bytes = 65536, write_ms = 2000), port, 2, handle))
+    task_spawn(s, \_ -> serve_n_with(ServerConfig(header_ms = 300, body_ms = 300, max_header_bytes = 65536, write_ms = 2000,
+                                       max_body_bytes = 65536, min_rate_bps = 1000000), port, 2, handle))
     task_spawn(s, \_ -> silent_client(port))
     task_spawn(s, \_ -> prompt_client(port))
 

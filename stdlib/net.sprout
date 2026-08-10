@@ -1,6 +1,6 @@
 module stdlib.net
 
-import stdlib.bytes (Utf8Error, from_string, to_string)
+import stdlib.bytes (Utf8Error, from_string, to_string, length)
 
 export extern fn tcp_listen(port: Int) -> Int !{IO}
 export extern fn tcp_accept(listener: Int) -> Int !{IO}
@@ -29,6 +29,16 @@ export extern fn tcp_read_avail_timeout(conn: Int, timeout_ms: Int) -> Result Tc
 # that BORROWS across a spawn, and a linear value captured by a lambda at an
 # unannotated parameter — the rest of M4.4.
 export extern fn tcp_connect(host: String, port: Int) -> Result TcpError Int !{IO}
+# Readiness, moving no data: parks until the connection is ready for `interest` or `ms` elapses.
+# Ok(1) = ready, Ok(0) = the deadline passed; `ms <= 0` answers 0 without parking. One primitive for
+# read, write, connect and accept — the park is scheduler-internal, so it must be a builtin, but
+# every policy above it (a total budget, a minimum data rate, a size cap) is ordinary Sprout.
+extern fn tcp_wait(conn: Int, interest: Int, ms: Int) -> Result TcpError Int !{IO}
+# Transfer, never parking: one send from `offset`. Ok(n > 0) on progress, Err(TcpWouldBlock) when the
+# kernel took nothing, Ok(0) only for an exhausted payload. `offset` rather than a re-sliced tail so
+# a caller's loop stays linear instead of going quadratic in the payload length.
+extern fn tcp_write_some(conn: Int, data: Bytes, offset: Int) -> Result TcpError Int !{IO}
+
 extern fn tcp_read_exact(conn: Int, count: Int) -> Result TcpError Bytes !{IO}
 extern fn tcp_write_all(conn: Int, data: Bytes) -> Result TcpError Int !{IO}
 # Idle-bounded write: no single stall may exceed `idle_ms`, and any byte the kernel accepts re-arms
@@ -52,6 +62,10 @@ export type TcpError (..) =
   # because it is not a fault: the connection is still valid, so the caller may retry with a fresh
   # budget or run its normal close path.
   | TcpTimeout
+  # The kernel accepted no bytes right now. Also not a fault, and distinct from TcpTimeout: nothing
+  # has expired, the caller simply has to wait for readiness before retrying. Reported only by the
+  # non-parking transfer primitives, whose whole purpose is to hand that decision back to Sprout.
+  | TcpWouldBlock
 
 # LINEAR (M4.5). A connection is acquire -> use N times -> release once: reads and
 # writes `borrow` it, `close` consumes it. Linearity turns the release discipline
@@ -74,6 +88,7 @@ export fn tcp_error_message(err: TcpError) -> String =
   | TcpWriteFailed msg -> msg
   | TcpEndOfStream -> "end of stream"
   | TcpTimeout -> "timed out"
+  | TcpWouldBlock -> "would block"
 
 # Reads the handle out without taking the connection: `match` on a borrowed
 # binding is a read, not a consume, so this composes into every borrowing op below.
@@ -108,6 +123,45 @@ export fn write_all(conn: borrowing TcpConnection, payload: Bytes) -> Result Tcp
 # connection handle is never returned to the table. See stdlib.http_server.
 export fn write_all_timeout(conn: borrowing TcpConnection, payload: Bytes, idle_ms: Int) -> Result TcpError Int !{IO} =
   tcp_write_all_timeout(tcp_connection_handle(conn), payload, idle_ms)
+
+# `write_all` bounded by an ABSOLUTE deadline (monotonic microseconds, as from time_now_micros).
+#
+# This is the shape `write_all_timeout` cannot have. Its bound is idle and re-armed inside C on every
+# accepted byte, so a peer taking one byte per interval holds the call forever and no deadline
+# computed here can intervene — the caller never regains control mid-payload. Written as a Sprout
+# loop over the non-parking `tcp_write_some` plus `tcp_wait`, the deadline is checked on every
+# iteration, so the TOTAL is bounded no matter how the peer paces its reads.
+#
+# "Attempt the transfer, then wait" is the only shape this loop can take, because tcp_write_some
+# never parks: the ordering that a hand-written C retry loop keeps getting wrong is structural here.
+# `offset` advances instead of the payload being re-sliced, so an n-byte write stays O(n).
+# Mirrors SPROUT_POLL_WRITE in runtime/sprout_scheduler.h.
+let poll_write = 2
+
+fn write_all_by_wait(handle: Int, payload: Bytes, deadline_us: Int, offset: Int, total: Int) -> Result TcpError Int !{IO} =
+  do
+    now <- time_now_micros()
+    # A `remaining <= 0` makes tcp_wait answer "not ready" without parking, so an already-spent
+    # budget needs no special case here.
+    ready <- tcp_wait(handle, poll_write, (deadline_us - now) / 1000)
+    if ready == 1 then write_all_by_go(handle, payload, deadline_us, offset, total)
+    else Err(TcpTimeout)
+
+fn write_all_by_go(handle: Int, payload: Bytes, deadline_us: Int, offset: Int, total: Int) -> Result TcpError Int !{IO} =
+  if offset >= total then Ok(total)
+  else
+    match tcp_write_some(handle, payload, offset) with
+    | Ok sent ->
+        if sent <= 0 then Ok(total)
+        else write_all_by_go(handle, payload, deadline_us, offset + sent, total)
+    | Err TcpWouldBlock -> write_all_by_wait(handle, payload, deadline_us, offset, total)
+    | Err err -> Err(err)
+
+export fn write_all_by(conn: borrowing TcpConnection, payload: Bytes, deadline_us: Int) -> Result TcpError Int !{IO} =
+  write_all_by_go(tcp_connection_handle(conn), payload, deadline_us, 0, length(payload))
+
+export fn write_all_utf8_by(conn: borrowing TcpConnection, payload: String, deadline_us: Int) -> Result TcpError Int !{IO} =
+  write_all_by(conn, from_string(payload), deadline_us)
 
 # Recoverable string write over a raw connection handle, for callers holding an Int rather
 # than the opaque TcpConnection. Returns Err on a socket failure instead of aborting — the
