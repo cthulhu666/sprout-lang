@@ -1,0 +1,47 @@
+import stdlib.task (Scope, with_scope, task_spawn, task_yield)
+import stdlib.chan (Chan, Recv, Got, Closed, chan_new, chan_send, chan_recv)
+import stdlib.net (TcpListener, TcpConnection, listen_local, accept, close, close_listener, read_avail, write_all_utf8)
+
+# Identical in both variants, so the ONLY difference measured is the concurrency
+# model: task-per-connection vs a fixed worker pool fed by a channel.
+let response = "HTTP/1.1 200 OK\r\nconnection: close\r\ncontent-length: 15\r\ncontent-type: application/json\r\n\r\n{\"status\":\"ok\"}"
+
+# `read_avail`/`write_all_utf8` BORROW the connection; `close` consumes it, so the
+# exactly-once obligation is discharged exactly here on every path.
+fn handle(conn: consuming TcpConnection) -> Unit !{IO} =
+  do
+    _ <- read_avail(conn)
+    _ <- write_all_utf8(conn, response)
+    close(conn)
+
+# A worker never returns, so its context is built ONCE by makecontext and its stack
+# and root pool are never freed. `Got conn` binds an OWNED connection; `handle`
+# consumes it. This is the whole optimisation, expressed in Sprout.
+fn worker(ch: Chan TcpConnection) -> Unit !{IO} =
+  match chan_recv(ch) with
+  | Got conn ->
+      do
+        handle(conn)
+        worker(ch)
+  | Closed -> task_yield()
+
+fn spawn_workers(s: Scope, ch: Chan TcpConnection, n: Int) -> Unit !{IO} =
+  if n <= 0 then task_yield()
+  else
+    do
+      task_spawn(s, \_ -> worker(ch))
+      spawn_workers(s, ch, n - 1)
+
+# The accept loop owns the listener and MOVES each connection into the channel.
+fn accept_loop(ch: Chan TcpConnection, listener: consuming TcpListener) -> Unit !{IO} =
+  do
+    conn <- accept(listener)
+    chan_send(ch, conn)
+    accept_loop(ch, listener)
+
+fn run(s: Scope, ch: Chan TcpConnection) -> Unit !{IO} =
+  do
+    spawn_workers(s, ch, 64)
+    accept_loop(ch, listen_local(8099))
+
+fn main() -> Unit !{IO} = with_scope(\s -> run(s, chan_new(s, 256)))
