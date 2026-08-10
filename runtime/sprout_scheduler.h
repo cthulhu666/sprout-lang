@@ -91,5 +91,10 @@ int  sprout_poll_wait(void** out_tokens, int max);
 /* Suspend the current green task until `fd` is ready for `interest` (READ|WRITE),
  * then resume it. Called from the retrofitted tcp_* builtins on EAGAIN. */
 void scheduler_park_on_fd(int fd, int interest);
+/* Same, for an fd that no handle table owns yet — an in-flight connect(). If this task is
+ * force-dropped while parked (with_timeout / scope_cancel), the drop CLOSES `fd`, since the
+ * parked frame it frees held the only reference. Use scheduler_park_on_fd for any fd a
+ * handle already owns; closing that one on drop would be a double-close. */
+void scheduler_park_on_unowned_fd(int fd, int interest);
 
 #endif /* SPROUT_SCHEDULER_H */

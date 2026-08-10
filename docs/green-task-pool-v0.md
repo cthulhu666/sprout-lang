@@ -576,21 +576,23 @@ To be filed in `BACKLOG.md`:
 6. **The 1 MiB default is 512× Go's initial stack** (§3.1) and was never measured against real
    handler depth. Measure what depth handlers actually use.
 7. **A generic `Pool a`** (§7.5) — unblocked; defer until a real consumer (DB connections) exists.
-8. **`connect()` is blocking, and that stalls the whole scheduler.**
-   `runtime/sprout_runtime.c:8407` says so deliberately — "connect() stays BLOCKING… loopback/
-   typical connects complete promptly". True until the peer's accept queue is full or the peer is
-   slow, at which point **one client connect freezes every green task in the process**: the pump
-   never runs, so no timer fires and `with_timeout` cannot bound it. Verified while trying to write
-   a backlog regression test — the test hung instead of failing, and wrapping the dial loop in
-   `with_timeout` did not help. The fix is the one the comment itself names: non-blocking connect
-   plus a write-readiness park. This is a **liveness bug in any client-side Sprout code**, not just
-   a testing obstacle.
+8. ~~**`connect()` is blocking, and that stalls the whole scheduler.**~~ **FIXED 2026-08-10.**
+   `tcp_connect` went non-blocking before `connect()` and now parks on write-readiness, reading the
+   outcome from `SO_ERROR`; regression in `tests/task_io_smoke/connect_park.spr`. The bug was found
+   while trying to write a backlog regression test — that test *hung* instead of failing, and
+   wrapping the dial loop in `with_timeout` did not help, because a blocking connect froze the pump
+   so no timer could fire. Measured freeze: **~7.5 s per stalled connect** on macOS. Two hazards the
+   fix had to handle, both worth remembering for any future park site: the in-flight socket is a bare
+   fd no handle table owns (so a cancel-drop is its last reference → `scheduler_park_on_unowned_fd`),
+   and `force_drop_task` frees only the green stack (so `getaddrinfo`'s malloc'd list had to be
+   copied onto the stack and released before the first park). **Anything held across a park must live
+   on the task stack.**
 9. **`listen(fd, 16)`** — a 16-deep accept backlog, well below every convention (`SOMAXCONN`,
    nginx's 511). **Measured NOT to affect this workload's p99** (§5.3), so it is hardening rather
-   than a fix, and it has **no hermetic regression test available**: a too-small backlog manifests
-   as an unbounded park (dropped SYN, no error), and follow-up 8 means no in-process timeout can
-   convert that park into a failure. A test becomes possible either after follow-up 8, or via an
-   out-of-process dialer the Sprout scheduler cannot block.
+   than a fix, and it still has **no hermetic regression test available**: a too-small backlog
+   manifests as an unbounded park — the kernel drops the SYN and no error reaches either side, so
+   there is nothing to assert on. Follow-up 8's fix removes the *second* blocker (a park can now be
+   timed out), but a timeout still cannot distinguish "backlog too small" from "peer slow".
 10. **The accept loop is the next bottleneck** (§5.3): worker count is irrelevant from w=2 to
     w=256, so once task creation is off the per-request path the single accept task is the limit.
     Any further server work should start there, not at the handler.

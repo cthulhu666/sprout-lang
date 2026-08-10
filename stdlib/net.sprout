@@ -68,7 +68,9 @@ fn tcp_listener_handle(listener: borrowing TcpListener) -> Int =
   match listener with
   | TcpListener handle -> handle
 
-# Cost is dominated by the underlying network connect attempt.
+# Cost is dominated by the underlying network connect attempt. A connect that cannot complete at
+# once PARKS the calling task rather than blocking the scheduler, so siblings keep running and a
+# `with_timeout` around it works — a stalled peer costs this task, not the process.
 export fn connect(host: String, port: Int) -> Result TcpError TcpConnection !{IO} =
   do
     handle <- tcp_connect(host, port)

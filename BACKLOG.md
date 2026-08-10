@@ -1460,25 +1460,37 @@ op-classification already in place.
   2048`) — and Sprout cannot follow Go's answer of growing small stacks, because growth needs
   `copystack`'s "adjusts all pointers to reference the new location" and Sprout's rooting is
   non-moving by design. Independent of which pooling design lands. `docs/green-task-pool-v0.md` §3.1.
-- [ ] `P1` **`connect()` is blocking, so one stalled connect freezes every green task in the
-  process** (`runtime/sprout_runtime.c:8407`, found 2026-08-10). The comment is deliberate — "connect()
-  stays BLOCKING (set O_NONBLOCK only after it succeeds) … loopback/typical connects complete
-  promptly" — and holds until the peer's accept queue is full or the peer is slow. Then the syscall
-  blocks the single OS thread: the pump never runs, no timer fires, and **`with_timeout` cannot bound
-  it** (verified: a dial loop wrapped in `with_timeout` still hung indefinitely). This is a liveness
-  bug in any client-side Sprout code, not merely a testing obstacle — and it is what makes the
-  backlog below untestable in-process. Fix is the one the comment names: non-blocking connect plus a
-  write-readiness park (`scheduler_park_on_fd` with `SPROUT_POLL_WRITE`), mirroring what
-  `tcp_write`/`tcp_accept` already do.
+- [x] `P1` **`connect()` was blocking, so one stalled connect froze every green task in the
+  process** (found 2026-08-10, fixed 2026-08-10). `tcp_connect` now goes non-blocking *before*
+  `connect()`, parks on write-readiness for `EINPROGRESS`/`EINTR`, and reads the outcome from
+  `SO_ERROR`. Measured cost of the bug: **~7.5 s of fully frozen scheduler per stalled connect** on
+  macOS (minutes on Linux's SYN-retry ladder), during which no timer could fire, so `with_timeout`
+  could not bound a connect at all. Regression: `tests/task_io_smoke/connect_park.spr`.
+  Two things the fix had to get right, both easy to miss:
+  - The in-flight socket is a **bare fd no handle table owns**, so a `with_timeout` force-drop was
+    the only thing that could close it → new `scheduler_park_on_unowned_fd` + `Task.park_close_fd`,
+    which `force_drop_task` closes. Verified by negative control (disabling the close exhausts a
+    64-descriptor cap mid-test and surfaces as `Too many open files`).
+  - `getaddrinfo`'s list is **malloc'd, and `force_drop_task` frees only the green stack** — so the
+    candidates are now copied onto the stack and the list released *before* any park can happen.
+    General rule for any new park site: whatever is held across a park must live on the task stack.
+- [ ] `P2` **`http_request`'s connect is blocking too, and `SO_SNDTIMEO` does not bound it**
+  (`runtime/sprout_runtime.c` ~6792 and ~7016, measured 2026-08-10). Both HTTP-client paths (plain
+  and TLS) set `SO_RCVTIMEO`/`SO_SNDTIMEO` and then call `connect()` on a **blocking** socket. On
+  macOS that timeout does **not** apply to `connect`: measured **7.85 s to complete a 1 s-timeout
+  connect** against a full accept queue, all of it with the scheduler frozen. So the whole
+  synchronous HTTP client — not just its connect — is a liveness hazard for any concurrent program.
+  Larger than the `tcp_connect` fix above: those paths do a blocking read/write handshake as well,
+  so making them park means restructuring the client, not adding one park site.
 - [ ] `P3` **`listen(fd, 16)` — a 16-deep accept backlog** (`runtime/sprout_runtime.c:8341`), well
   below every convention (`SOMAXCONN` = 128 on macOS, nginx's 511). **Downgraded from P2 and from
   "sole cause of the p99 tail": measured NOT to matter here.** Raising it to `SOMAXCONN` left p99
   unchanged (74–120 ms before and after, 3 interleaved rounds), so this is hardening, not a fix.
   Recorded because it was a plausible-looking diagnosis that measurement killed. No hermetic
-  regression test is available: a too-small backlog manifests as an unbounded park (the kernel drops
-  the SYN — no error reaches either side), and the blocking-`connect` bug above means no in-process
-  timeout can turn that park into a failure. Testable after that fix, or via an out-of-process
-  dialer the scheduler cannot block.
+  regression test is available: a too-small backlog manifests as an unbounded park — the kernel drops
+  the SYN and no error reaches either side, so there is nothing for a test to assert on. (The
+  blocking-`connect` bug above used to be a second blocker; that one is fixed, so a test *can* now
+  at least time the park out — it still cannot distinguish "backlog too small" from "peer slow".)
 - [ ] `P2` **HTTP keep-alive: without it, no high-throughput measurement here is server-bound.**
   `Connection: close` means one TCP connection per request; this machine has **16,384 ephemeral
   ports**, so a 4 s run at ~32k req/s opens ~131k connections — 8× the range — and the client stalls

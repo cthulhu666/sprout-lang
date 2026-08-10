@@ -178,7 +178,29 @@ retry:  n = read(fd, ...);
 `connect`:** setting `O_NONBLOCK` before `connect()` makes it return `EINPROGRESS`, which
 would need a write-readiness park. First cut keeps `tcp_connect`'s `connect()` **blocking**
 (loopback connect is immediate) and sets `O_NONBLOCK` *after* it succeeds — only the
-read/accept/write steady-state parks. (Non-blocking connect is a later refinement.) **No new
+read/accept/write steady-state parks. (Non-blocking connect is a later refinement.)
+
+> **Update 2026-08-10 — the deferral was wrong, and the refinement has landed.** "Loopback
+> connect is immediate" holds only while the peer's accept queue has room. Once it is full the
+> kernel silently drops the SYN and the *blocking* connect stalls for its full timeout —
+> measured **~7.5 s on macOS**, minutes on Linux — with the OS thread frozen, so no timer could
+> fire and `with_timeout` could not bound a connect at all. `tcp_connect` now goes non-blocking
+> before `connect()`, parks on `SPROUT_POLL_WRITE` for `EINPROGRESS`/`EINTR`, and reads the
+> outcome from `SO_ERROR` (a ready fd signals success and failure alike). Regression:
+> `tests/task_io_smoke/connect_park.spr`.
+>
+> Two consequences that generalize to **any** future park site, and both bit here:
+> 1. **An fd no handle table owns needs `scheduler_park_on_unowned_fd`.** Every pre-existing park
+>    is on an fd reachable from a handle, so a cancel-drop can leave it open and its owner still
+>    closes it. An in-flight connect's socket is reachable *only* from the parked frame that
+>    `force_drop_task` frees — so the drop is its last chance to be closed, via the new
+>    `Task.park_close_fd`. Without it, every timed-out connect leaked a descriptor.
+> 2. **Whatever is held across a park must live on the green stack.** `force_drop_task` reclaims
+>    the stack and the root context; it knows nothing about C heap allocations. `getaddrinfo`'s
+>    list was held across the park, so it is now copied into a stack array and freed *before* the
+>    connect loop.
+
+ **No new
 Sprout-visible builtin is required** for I/O parking — the new capability is internal
 runtime plumbing; the Sprout-visible change is only that the existing `tcp_*` builtins now
 *park* rather than *block*. (Builtin-vs-stdlib rule 6: this is a correctness/behavior change
