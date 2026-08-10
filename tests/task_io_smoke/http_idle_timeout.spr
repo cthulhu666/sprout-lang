@@ -27,14 +27,20 @@ import stdlib.http_server (HttpRequest, HttpServerResponse, ServerConfig, ok, re
 fn handle(req: HttpRequest) -> HttpServerResponse =
   ok(request_path(req))
 
+# The success marker is the ONLY place `label` may appear: the recipe asserts by `grep -q <label>`,
+# so a failure message containing the label would make the gate pass on the very regression it
+# exists to catch. (It did — the first version of this file printed `UNEXPECTED ${label} got ...`,
+# which matched the grep, so an over-eager timeout answering the prompt client 408 reported GREEN.
+# Found by review, not by the gate, which is exactly the problem.) Failure output therefore reports
+# only what was received, never what was wanted.
 fn expect_status(conn: borrowing TcpConnection, want: String, label: String) -> Unit !{IO} =
   match read_exact_utf8(conn, 12) with
   | Ok line ->
     if line == want then
       term_write(`${label}\n`)
     else
-      term_write(`UNEXPECTED ${label} got ${line}\n`)
-  | Err _ -> term_write(`FAILED ${label}: read failed\n`)
+      term_write(`MISMATCH: got ${line}\n`)
+  | Err _ -> term_write("MISMATCH: read failed\n")
 
 # Connects, then goes silent. The server must give up on its own and say 408.
 fn silent_client(port: Int) -> Unit !{IO} =
@@ -60,7 +66,7 @@ fn prompt_client(port: Int) -> Unit !{IO} =
 # client task runs — the same startup ordering the other http fixtures rely on.
 fn run(s: Scope, port: Int) -> Unit !{IO} =
   do
-    task_spawn(s, \_ -> serve_n_with(ServerConfig(300, 300), port, 2, handle))
+    task_spawn(s, \_ -> serve_n_with(ServerConfig(300, 300, 65536), port, 2, handle))
     task_spawn(s, \_ -> silent_client(port))
     task_spawn(s, \_ -> prompt_client(port))
 

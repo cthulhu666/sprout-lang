@@ -1570,7 +1570,15 @@ task-io-smoke: bootstrap-from-seed
   run_once "http-idle-timeout" "silent-got-408"
   run_once "http-idle-timeout/served" "prompt-got-200"
   SPROUT_GC_STRESS=1 run_once "http-idle-timeout/stress" "silent-got-408"
-  echo "==> task-io-smoke ✓ (read-park, accept-park, re-arm, http-serve-concurrency, http-conn-error-isolation, tcp-read-avail-error, write, cancel-drop, await-guard, timer-drop, timeout-drop, timeout-nested-guard, chan-cancel-drop, chan-timeout-drop, chan-negative-cap-guard, rendezvous-send-drop, send-on-closed-guard, double-close-guard, send-parked-close-guard, select-cancel-drop, select-timeout-drop, connect-park, http-idle-timeout; interleaved; stress-clean)"
+  # (20) http_server header-flood bound: a peer that streams bytes with no "\r\n\r\n" keeps every
+  # read succeeding, so NO deadline can fire — (19)'s timeout does not bound it and the header
+  # accumulator grew for the whole budget. max_header_bytes must reject it while it is still
+  # flooding, and the server must keep serving afterwards. Verified RED against the pre-cap
+  # http_server ("server accepted an unbounded header block").
+  build tests/task_io_smoke/http_header_flood.spr
+  run_once "http-header-flood" "flood-bounded"
+  SPROUT_GC_STRESS=1 run_once "http-header-flood/stress" "flood-bounded"
+  echo "==> task-io-smoke ✓ (read-park, accept-park, re-arm, http-serve-concurrency, http-conn-error-isolation, tcp-read-avail-error, write, cancel-drop, await-guard, timer-drop, timeout-drop, timeout-nested-guard, chan-cancel-drop, chan-timeout-drop, chan-negative-cap-guard, rendezvous-send-drop, send-on-closed-guard, double-close-guard, send-parked-close-guard, select-cancel-drop, select-timeout-drop, connect-park, http-idle-timeout, http-header-flood; interleaved; stress-clean)"
 
 # Division-by-zero guard regression (CI gate). The fixture divides by a RUNTIME
 # zero (`10 / list_length(argv)` with no args), which neither the compiler nor
