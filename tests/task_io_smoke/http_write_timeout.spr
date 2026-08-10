@@ -80,7 +80,7 @@ fn deaf_client(port: Int) -> Unit !{IO} =
 # task runs — the startup ordering every fixture in this directory relies on.
 fn run(s: Scope, port: Int) -> Unit !{IO} =
   do
-    task_spawn(s, \_ -> serve_n_with(ServerConfig(2000, 2000, 65536, 300), port, 1, handle))
+    task_spawn(s, \_ -> serve_n_with(ServerConfig(header_ms = 2000, body_ms = 2000, max_header_bytes = 65536, write_ms = 300), port, 1, handle))
     task_spawn(s, \_ -> deaf_client(port))
 
 fn main() -> Unit !{IO} =

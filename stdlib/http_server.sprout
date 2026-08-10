@@ -59,37 +59,23 @@ type alias ServerResult a = Result HttpServerError a
 # Bounding size is what makes the phase bounded against a FLOODING peer rather than only an idle one.
 # Analogue: Go's Server.MaxHeaderBytes (DefaultMaxHeaderBytes = 1 << 20, "the maximum permitted size
 # of the headers in an HTTP request"); the 431 status is RFC 6585's.
-export type ServerConfig (..) =
-  | ServerConfig Int Int Int Int
+# A record, not a four-field constructor: every field is `Int`, so under positional construction a
+# caller could transpose any two of them and neither the typechecker nor an assertion on a total
+# would notice. Naming the fields at the call site is the only place that distinction is visible —
+# `ServerConfig(2000, 300, 65536, 2000)` and `ServerConfig(2000, 2000, 2048, 2000)` say nothing
+# about which bound each test is exercising, while the named form says it outright.
+#
+# `header_ms` bounds reading the request line + headers (total); `body_ms` bounds the gap between two
+# body reads (idle); `max_header_bytes` caps the accumulated header block; `write_ms` bounds the gap
+# between two response writes (idle).
+export type ServerConfig = (header_ms: Int, body_ms: Int, max_header_bytes: Int, write_ms: Int)
 
 # header 10 s total / body 30 s idle / 64 KiB of headers / response writes 30 s idle. Chosen well
 # above any legitimate client (headers normally arrive in the first segment) and well below the
 # ~forever that the unbounded reads and writes allowed. nginx defaults its three timeouts to 60 s;
 # Go's http.Server defaults to none at all, which is the hazard this replaces.
 export fn default_config() -> ServerConfig =
-  ServerConfig(10000, 30000, 65536, 30000)
-
-# `header_ms` bounds reading the request line + headers (total); `body_ms` bounds the gap between two
-# body reads (idle); `max_header_bytes` caps the accumulated header block; `write_ms` bounds the gap
-# between two response writes (idle).
-export fn server_config(header_ms: Int, body_ms: Int, max_header_bytes: Int, write_ms: Int) -> ServerConfig =
-  ServerConfig(header_ms, body_ms, max_header_bytes, write_ms)
-
-fn config_header_ms(config: ServerConfig) -> Int =
-  match config with
-  | ServerConfig header_ms _ _ _ -> header_ms
-
-fn config_body_ms(config: ServerConfig) -> Int =
-  match config with
-  | ServerConfig _ body_ms _ _ -> body_ms
-
-fn config_max_header_bytes(config: ServerConfig) -> Int =
-  match config with
-  | ServerConfig _ _ max_header_bytes _ -> max_header_bytes
-
-fn config_write_ms(config: ServerConfig) -> Int =
-  match config with
-  | ServerConfig _ _ _ write_ms -> write_ms
+  ServerConfig(header_ms = 10000, body_ms = 30000, max_header_bytes = 65536, write_ms = 30000)
 
 # An absolute monotonic-microsecond instant `ms` from now. Monotonic (time_now_micros), so an NTP
 # step mid-request cannot make a deadline fire early or never.
@@ -304,8 +290,8 @@ fn read_remaining_body(conn: borrowing TcpConnection, acc: String, remaining: In
 # every later one would be a reuse. `handle_connection` holds the single consume.
 fn read_request(conn: borrowing TcpConnection, config: ServerConfig) -> ServerResult HttpRequest !{IO} =
   do
-    header_deadline <- deadline_in(config_header_ms(config))
-    raw <- read_until_headers(conn, "", header_deadline, config_max_header_bytes(config))
+    header_deadline <- deadline_in(config.header_ms)
+    raw <- read_until_headers(conn, "", header_deadline, config.max_header_bytes)
     read_request_from_prefix(conn, raw, config)
 
 fn read_request_from_prefix(conn: borrowing TcpConnection, raw: String, config: ServerConfig) -> ServerResult HttpRequest !{IO} =
@@ -321,8 +307,8 @@ fn continue_read_request(conn: borrowing TcpConnection, raw: String, prefix: (Re
   if string.length(body) >= content_length then parse(raw)
   else
     do
-      body_deadline <- deadline_in(config_body_ms(config))
-      full <- read_remaining_body(conn, raw, content_length - string.length(body), body_deadline, config_body_ms(config))
+      body_deadline <- deadline_in(config.body_ms)
+      full <- read_remaining_body(conn, raw, content_length - string.length(body), body_deadline, config.body_ms)
       parse(full)
 where
   (_req, _headers, content_length) = prefix
@@ -609,11 +595,11 @@ fn read_error_response(err: HttpServerError) -> HttpServerResponse =
 
 fn handle_connection(config: ServerConfig, conn: consuming TcpConnection, handler: HttpRequest -> HttpServerResponse !{IO}) -> Unit !{IO} =
   match read_request(conn, config) with
-  | Err err -> write_and_close(conn, read_error_response(err) |> render_response_or_fallback, config_write_ms(config))
+  | Err err -> write_and_close(conn, read_error_response(err) |> render_response_or_fallback, config.write_ms)
   | Ok req ->
       do
         resp <- handler(req)
-        write_and_close(conn, render_response_or_fallback(resp), config_write_ms(config))
+        write_and_close(conn, render_response_or_fallback(resp), config.write_ms)
 
 # The 500 fallback (reachable only when a handler returns a status outside the
 # supported table) still uses http_response's fixed format — no Content-Length, its own
