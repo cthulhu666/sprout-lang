@@ -81,10 +81,16 @@ fn dribble_then_expect(conn: borrowing TcpConnection) -> Unit !{IO} =
     else
       term_write("MISMATCH: server hung up on a body that was still making progress\n")
 
-# body_ms is 300: long enough that a 200 ms gap is fine, short enough that a stall is caught fast.
+# body_ms is 2000 and min_rate_bps is effectively unlimited, so the body deadline here is ~2 s of
+# flat grace: long enough that the dribbler's 800 ms of 200 ms gaps completes, short enough that a
+# fully stalled client is caught fast. The dribbler runs at 25 B/s, which is BELOW any realistic
+# min_rate_bps — it is kept alive here by the grace term, not by a rate allowance, because this
+# fixture exists to prove the body deadline is enforced at all. Rate-floor enforcement and the size
+# cap are covered separately in http_body_bounds.spr.
 fn run(s: Scope, port: Int) -> Unit !{IO} =
   do
-    task_spawn(s, \_ -> serve_n_with(ServerConfig(header_ms = 2000, body_ms = 300, max_header_bytes = 65536, write_ms = 2000), port, 2, handle))
+    task_spawn(s, \_ -> serve_n_with(ServerConfig(header_ms = 2000, body_ms = 2000, max_header_bytes = 65536, write_ms = 2000,
+                                       max_body_bytes = 65536, min_rate_bps = 1000000), port, 2, handle))
     task_spawn(s, \_ -> stalled_body_client(port))
     task_spawn(s, \_ -> dribbling_client(port))
 

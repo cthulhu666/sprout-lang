@@ -104,7 +104,8 @@ fn serve_check(port: Int, first: Int) -> Unit !{IO} =
 
 fn run(s: Scope, port: Int, done: Chan Int) -> Unit !{IO} =
   do
-    task_spawn(s, \_ -> serve_n_with(ServerConfig(header_ms = 2000, body_ms = 2000, max_header_bytes = 2048, write_ms = 2000), port, 2, handle))
+    task_spawn(s, \_ -> serve_n_with(ServerConfig(header_ms = 2000, body_ms = 2000, max_header_bytes = 2048, write_ms = 2000,
+                                       max_body_bytes = 65536, min_rate_bps = 1000000), port, 2, handle))
     task_spawn(s, \_ -> flooding_client(port, done))
     task_spawn(s, \_ -> prompt_client(port, done))
 

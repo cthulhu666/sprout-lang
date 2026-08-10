@@ -8767,6 +8767,52 @@ long long tcp_write_all_timeout(long long conn, long long payload_h, long long i
   return tcp_net_ok((long long)payload->len);
 }
 
+/* READINESS, separated from transfer — the first half of the decomposition BACKLOG:483 scoped.
+ *
+ * Parks the calling task until `conn` is ready for `interest` (SPROUT_POLL_READ / SPROUT_POLL_WRITE)
+ * or `ms` elapses, and moves NO data: Ok(true) = ready, Ok(false) = the deadline passed. Parking is
+ * scheduler-internal and genuinely inexpressible in Sprout (it needs one task registered on an fd
+ * and a timer simultaneously), so this is the part that has to be a builtin — and being interest-
+ * parameterised, it is the *only* park primitive read, write, connect and accept ever need.
+ *
+ * Everything above it is policy — a minimum data rate, a total budget, a size cap — and policy now
+ * lives in Sprout, where the typechecker and the test suite can see it. That is the whole point of
+ * the split: the existing tcp_*_timeout twins each weld timeout policy to syscall retry inside C,
+ * which is why the same park/retry dance keeps being re-cloned per operation.
+ *
+ * `ms <= 0` reports "not ready" without parking, so a caller enforcing a TOTAL budget can pass the
+ * remaining slice and get an immediate answer when it is spent — matching tcp_read_avail_timeout. */
+long long tcp_wait(long long conn, long long interest, long long ms) {
+  if (conn <= 0 || conn >= 2048 || !g_conn_used[conn]) return tcp_net_err0("stdlib.net.TcpInvalidHandle");
+  if (interest != SPROUT_POLL_READ && interest != SPROUT_POLL_WRITE)
+    return tcp_net_err1("stdlib.net.TcpInvalidArgument", (long long)(uintptr_t)"tcp_wait: interest must be read or write");
+  if (ms <= 0) return tcp_net_ok(0);   /* budget already spent: "not ready", never a park on 0 */
+  if (!scheduler_park_on_fd_timeout(g_conn_fd[conn], (int)interest, ms)) return tcp_net_ok(0);
+  return tcp_net_ok(1);
+}
+
+/* TRANSFER, separated from readiness — the other half. One send from `offset`, and NEVER a park:
+ * Ok(n) when the kernel took n > 0 bytes, Err(TcpWouldBlock) when it took none. The caller pairs
+ * this with tcp_wait and owns the loop, so "attempt the transfer, then wait" becomes the only shape
+ * the loop can have — the ordering bug class that recurred across the cloned C loops.
+ *
+ * `offset` is what keeps a Sprout-side write loop linear: the caller advances an index instead of
+ * allocating a fresh tail per chunk, which would make writing an n-byte response O(n^2). Ok(0) is
+ * returned only for an already-exhausted payload, never as "would block". */
+long long tcp_write_some(long long conn, long long payload_h, long long offset) {
+  if (conn <= 0 || conn >= 2048 || !g_conn_used[conn]) return tcp_net_err0("stdlib.net.TcpInvalidHandle");
+  BytesVal* payload = (BytesVal*)(uintptr_t)payload_h;
+  if (payload == NULL) tcp_fail("tcp_write_some: null payload");
+  if (offset < 0 || (size_t)offset > payload->len) tcp_fail("tcp_write_some: offset out of range");
+  size_t len = payload->len - (size_t)offset;
+  if (len == 0) return tcp_net_ok(0);   /* nothing left to send: not would-block, not an error */
+
+  ssize_t n = send(g_conn_fd[conn], payload->data + (size_t)offset, len, 0);
+  if (n > 0) return tcp_net_ok((long long)n);
+  if (n < 0 && (errno == EAGAIN || errno == EWOULDBLOCK)) return tcp_net_err0("stdlib.net.TcpWouldBlock");
+  return tcp_net_err1("stdlib.net.TcpWriteFailed", (long long)(uintptr_t)strerror(errno));
+}
+
 long long tcp_close(long long conn) {
   if (conn <= 0 || conn >= 2048 || !g_conn_used[conn]) tcp_fail("tcp_close: unknown connection handle");
   close(g_conn_fd[conn]);

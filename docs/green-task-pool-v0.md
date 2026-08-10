@@ -202,8 +202,20 @@ correctness into C invariants the checker cannot see (§6, G5/G10).
 
 ### 5.2 The cost: bounded concurrency — needs a decision
 
-N workers means at most N concurrent in-flight requests. `stdlib/http_server.sprout:474`
-currently promises the opposite: "a slow connection (one dribbling its request) cannot block
+> **Update 2026-08-10 — the prerequisite has landed.** This section was written before the
+> http_server read/write bounds, and its analysis was incomplete in a way that mattered. The case it
+> names — a peer *dribbling its request* — is now the safe one: the header phase is bounded TOTAL by
+> `header_ms`, so such a peer cannot hold a pooled worker. The live risk was the pair this section
+> does not separate out: the body and response phases were bounded only by IDLE deadlines, re-armed
+> by any byte that moved, so a peer crawling instead of stopping held a handler indefinitely. Under
+> unbounded concurrency that costs 1.5 MiB and blocks nobody; under N workers, N such peers wedge the
+> whole server — bounded concurrency converts a memory cost into an availability one. Both phases are
+> now bounded by size-scaled totals (`body_ms + content_length / min_rate_bps`, and the same shape for
+> the response), with an over-large `Content-Length` refused 413, so worst-case occupancy is finite
+> and computable. `serve_pooled` is unblocked.
+
+N workers means at most N concurrent in-flight requests. `stdlib/http_server.sprout` currently
+promises the opposite: "a slow connection (one dribbling its request) cannot block
 others". With N workers and N slow connections, connection N+1 waits.
 
 Three sub-options, in preference order:

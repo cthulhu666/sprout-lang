@@ -1,0 +1,93 @@
+import stdlib.task (Scope, with_scope, task_spawn, task_sleep)
+import stdlib.net (TcpConnection, connect, close, write_all_utf8, read_exact_utf8)
+import stdlib.http_server (HttpRequest, HttpServerResponse, ServerConfig, ok, serve_n_with)
+
+# The two bounds that make handler occupancy FINITE, which is the prerequisite for a bounded worker
+# pool (docs/green-task-pool-v0.md §5.2): a size cap answered 413, and a minimum data rate.
+#
+# Why both are needed, and why neither alone is enough — the trap this fixture exists to pin:
+#
+#  * A size cap alone bounds BYTES, not TIME. Under the old idle deadline a peer could send one byte
+#    per interval forever and never exceed the cap, so the cap would have been satisfied while the
+#    handler was held indefinitely. `slow_body_client` is that peer.
+#  * A rate floor alone bounds nothing, because without a cap there is no finite quantity to divide
+#    by the rate. `huge_body_client` is that peer.
+#
+# Together they give `body_ms + max_body_bytes / min_rate_bps`. This fixture asserts each half fires,
+# and — importantly — that a client ABOVE the floor is still served, since the failure mode of a rate
+# floor is cutting off legitimate slow uploads.
+
+fn handle(_req: HttpRequest) -> HttpServerResponse !{IO} = ok("served")
+
+fn expect_status(conn: borrowing TcpConnection, want: String, marker: String) -> Unit !{IO} =
+  match read_exact_utf8(conn, 12) with
+  | Ok reply ->
+      if reply == want then term_write(`${marker}\n`)
+      else term_write(`MISMATCH: ${marker} got ${reply}\n`)
+  | Err _ -> term_write(`MISMATCH: ${marker} read failed\n`)
+
+# Announces more than max_body_bytes. Must be refused on the ANNOUNCEMENT — before any of the body is
+# read — so an oversized upload costs one response rather than the whole transfer. A server that only
+# checked while accumulating would still read every byte first, which is the bug this catches.
+fn huge_body_client(port: Int) -> Unit !{IO} =
+  match connect("127.0.0.1", port) with
+  | Ok conn ->
+    do
+      match write_all_utf8(conn, "POST /huge HTTP/1.1\r\nHost: x\r\nContent-Length: 100000\r\n\r\n") with
+      | Ok _ -> expect_status(conn, "HTTP/1.1 413", "huge-body-413")
+      | Err _ -> term_write("MISMATCH: huge-body client could not send its headers\n")
+      close(conn)
+  | Err _ -> term_write("MISMATCH: huge-body client could not connect\n")
+
+# 40 bytes at ~13 B/s — under the 100 B/s floor. It never stalls, so every idle deadline would be
+# re-armed forever; only the size-scaled TOTAL cuts it off. Answered 408: it is not malformed, it
+# simply did not finish in the time its announced size bought.
+fn crawl(conn: borrowing TcpConnection, rounds: Int) -> Bool !{IO} =
+  if rounds <= 0 then true
+  else
+    do
+      task_sleep(300)
+      match write_all_utf8(conn, "abcd") with
+      | Ok _ -> crawl(conn, rounds - 1)
+      | Err _ -> false
+
+fn slow_body_client(port: Int) -> Unit !{IO} =
+  match connect("127.0.0.1", port) with
+  | Ok conn ->
+    do
+      match write_all_utf8(conn, "POST /slow HTTP/1.1\r\nHost: x\r\nContent-Length: 40\r\n\r\n") with
+      | Ok _ ->
+          do
+            _sent <- crawl(conn, 10)
+            expect_status(conn, "HTTP/1.1 408", "below-rate-408")
+      | Err _ -> term_write("MISMATCH: slow-body client could not send its headers\n")
+      close(conn)
+  | Err _ -> term_write("MISMATCH: slow-body client could not connect\n")
+
+# The control, and the reason a rate floor is risky: 40 bytes sent in one go is far above the floor,
+# so it must be served normally. A floor that cut this off would be worse than no floor at all.
+fn prompt_body_client(port: Int) -> Unit !{IO} =
+  match connect("127.0.0.1", port) with
+  | Ok conn ->
+    do
+      match write_all_utf8(conn, "POST /ok HTTP/1.1\r\nHost: x\r\nContent-Length: 40\r\n\r\n0123456789012345678901234567890123456789") with
+      | Ok _ -> expect_status(conn, "HTTP/1.1 200", "above-rate-200")
+      | Err _ -> term_write("MISMATCH: prompt-body client could not send\n")
+      close(conn)
+  | Err _ -> term_write("MISMATCH: prompt-body client could not connect\n")
+
+# max_body_bytes 65536 refuses the 100000-byte announcement. min_rate_bps 100 with body_ms 200 gives
+# the 40-byte crawler 200 + 40*1000/100 = 600 ms, well short of the 3 s it takes — while the prompt
+# client finishes inside the same budget.
+fn run(s: Scope, port: Int) -> Unit !{IO} =
+  do
+    task_spawn(s, \_ -> serve_n_with(ServerConfig(header_ms = 2000, body_ms = 200, max_header_bytes = 65536, write_ms = 2000,
+                                       max_body_bytes = 65536, min_rate_bps = 100), port, 3, handle))
+    task_spawn(s, \_ -> huge_body_client(port))
+    task_spawn(s, \_ -> slow_body_client(port))
+    task_spawn(s, \_ -> prompt_body_client(port))
+
+fn main() -> Unit !{IO} =
+  do
+    with_scope(\s -> run(s, 28991))
+    term_write("done\n")

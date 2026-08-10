@@ -35,6 +35,10 @@ import stdlib.string as string
 fn grow(s: String, target: Int) -> String =
   if string.byte_length(s) >= target then s else grow(string.concat(s, s), target)
 
+# min_rate_bps is 100 MB/s here, so the 8 MiB response earns only ~84 ms of rate allowance on top of
+# write_ms — the deadline stays ~384 ms and this fixture keeps testing what it was written to test:
+# that the response write is bounded at all. A realistic floor (1 KiB/s) would grant this body over
+# two hours, which is correct for a real deployment and useless for a smoke test.
 # 8 MiB, built by doubling. NOT string.repeat, which is `s ++ repeat(s, n - 1)` — quadratic in the
 # total length, so a multi-megabyte body would dominate the whole smoke suite's runtime.
 fn big_body() -> String =
@@ -80,7 +84,8 @@ fn deaf_client(port: Int) -> Unit !{IO} =
 # task runs — the startup ordering every fixture in this directory relies on.
 fn run(s: Scope, port: Int) -> Unit !{IO} =
   do
-    task_spawn(s, \_ -> serve_n_with(ServerConfig(header_ms = 2000, body_ms = 2000, max_header_bytes = 65536, write_ms = 300), port, 1, handle))
+    task_spawn(s, \_ -> serve_n_with(ServerConfig(header_ms = 2000, body_ms = 2000, max_header_bytes = 65536, write_ms = 300,
+                                       max_body_bytes = 65536, min_rate_bps = 100000000), port, 1, handle))
     task_spawn(s, \_ -> deaf_client(port))
 
 fn main() -> Unit !{IO} =

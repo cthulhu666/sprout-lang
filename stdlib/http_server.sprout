@@ -1,7 +1,7 @@
 module stdlib.http_server
 
 import stdlib.http (HttpStatusError, RequestLine, RequestPathVersion, http_response, parse_request_line, status_line)
-import stdlib.net (TcpConnection, TcpListener, TcpTimeout, accept, close, close_listener, listen_local, read_avail_timeout, write_all_utf8_timeout)
+import stdlib.net (TcpConnection, TcpListener, TcpTimeout, accept, close, close_listener, listen_local, read_avail_timeout, write_all_utf8_by)
 import stdlib.string as string
 import stdlib.task (Scope, with_scope, task_spawn)
 import stdlib.url (parse_query)
@@ -25,6 +25,9 @@ export type HttpServerError (..) =
   # The header block exceeded its size cap. Distinct from HttpRequestTimeout because a flooding peer
   # is not slow — it is the opposite — and the two need different statuses (431 vs 408).
   | HttpHeadersTooLarge
+  # The request announced a body larger than `max_body_bytes`. Refused on the announcement, before a
+  # byte of it is read, so an oversized upload costs one response rather than the whole transfer.
+  | HttpBodyTooLarge
 
 type alias ServerResult a = Result HttpServerError a
 
@@ -36,21 +39,27 @@ type alias ServerResult a = Result HttpServerError a
 #    transmit the entire header within this time, the request is terminated"). Total is essential
 #    here — a per-read timer is renewed forever by a peer dribbling one byte per interval, which is
 #    exactly what a slowloris does, and headers have no legitimate reason to arrive slowly.
-#  * `body_ms` is IDLE: it bounds the gap between two successive reads, and any chunk that delivers
-#    bytes re-arms it (nginx `client_body_timeout`: "the timeout is set only for a period between two
-#    successive read operations, not for the transmission of the whole request body"). A total body
-#    deadline would reject every legitimate large upload over a slow link — a 100 MB POST at
-#    3 Mbit/s needs ~280 s. A maximum body size (413) is the separate knob for bounding the total,
-#    and is not implemented yet.
-#  * `write_ms` is IDLE, for the response (nginx `send_timeout`: "the timeout is set only between two
-#    successive write operations, not for the transmission of the whole response"). Without it a
-#    client that requests a large response and then stops reading parks its handler in send()
-#    forever, and the connection handle is never returned to the table — the same exhaustion the read
-#    budgets prevent, reached from the write side.
+#  * `body_ms` and `write_ms` are the GRACE halves of size-scaled TOTAL deadlines: the body gets
+#    `body_ms + content_length / min_rate_bps`, the response `write_ms + len / min_rate_bps`. Both
+#    were idle bounds, re-armed by any byte that moved — nginx's `client_body_timeout` and
+#    `send_timeout` semantics. That bounds a peer which STOPS but not one which merely crawls, and a
+#    crawling peer is the worse case: a byte per interval re-arms the bound forever, so a handler's
+#    occupancy had no upper limit. A flat total is equally wrong the other way — it rejects any
+#    legitimately slow transfer, a 100 MB POST at 3 Mbit/s needing ~280 s.
 #
-# On read expiry the server answers 408 and closes; on write expiry it just closes, there being no
-# way left to tell the client anything. Either way one connection costs a bounded amount of time
-# instead of a handler task forever.
+#    Scaling the total by the size satisfies both, and is Apache's `RequestReadTimeout
+#    body=20,MinRate=500` ("whenever data is received, the timeout value is increased according to
+#    the specified minimum data rate"). Apache accumulates the extension per chunk; here it is closed
+#    form, because HTTP states both sizes up front — `Content-Length` for the body, and the response
+#    is fully rendered before the first byte goes out.
+#
+# On read expiry the server answers 408 and closes; an over-large `Content-Length` is refused 413 on
+# the announcement, before a byte of the body is read; on write expiry it just closes, there being no
+# way left to tell the client anything. Worst-case handler occupancy is therefore
+# `header_ms + body_ms + write_ms + (max_body_bytes + response_len) / min_rate_bps` — finite, and
+# computable by an operator. That is the property a bounded worker pool needs, since with N workers
+# an unbounded occupancy on any one phase lets N peers wedge the whole server
+# (docs/green-task-pool-v0.md §5.2).
 #
 # `max_header_bytes` is the third bound, and it is NOT redundant with the deadline. A deadline only
 # bites when the peer goes quiet: a peer that streams bytes continuously without ever sending the
@@ -65,17 +74,37 @@ type alias ServerResult a = Result HttpServerError a
 # `ServerConfig(2000, 300, 65536, 2000)` and `ServerConfig(2000, 2000, 2048, 2000)` say nothing
 # about which bound each test is exercising, while the named form says it outright.
 #
-# `header_ms` bounds reading the request line + headers (total); `body_ms` bounds the gap between two
-# body reads (idle); `max_header_bytes` caps the accumulated header block; `write_ms` bounds the gap
-# between two response writes (idle).
-export type ServerConfig = (header_ms: Int, body_ms: Int, max_header_bytes: Int, write_ms: Int)
+# `header_ms` bounds reading the request line + headers (total); `body_ms` is the grace half of the
+# body's size-scaled total; `max_header_bytes` caps the accumulated header block; `write_ms` is the
+# grace half of the response's size-scaled total.
+#
+# `max_body_bytes` and `min_rate_bps` are what make worker occupancy FINITE rather than merely
+# "bounded when the peer stops". A size cap alone does not do it — 1 MiB delivered a byte at a time
+# under an idle deadline stays inside the cap and holds a handler forever — and a rate floor alone
+# does not either, since without a cap the bound has nothing to multiply. Together they give
+# `body_ms + max_body_bytes / min_rate_bps`, a number the operator can compute.
+export type ServerConfig = (header_ms: Int, body_ms: Int, max_header_bytes: Int, write_ms: Int,
+                            max_body_bytes: Int, min_rate_bps: Int)
 
 # header 10 s total / body 30 s idle / 64 KiB of headers / response writes 30 s idle. Chosen well
 # above any legitimate client (headers normally arrive in the first segment) and well below the
 # ~forever that the unbounded reads and writes allowed. nginx defaults its three timeouts to 60 s;
 # Go's http.Server defaults to none at all, which is the hazard this replaces.
+#
+# `max_body_bytes` is 1 MiB, nginx's `client_max_body_size` default. `min_rate_bps` is 1024 B/s —
+# Apache's `MinRate` default is 500, but 500 against a 1 MiB cap yields a ~35-minute worst case,
+# which is finite but useless as a bound; 1024 halves it, and any deployment running a bounded
+# worker pool should raise it further. The two defaults are chosen together, because it is their
+# quotient, not either one, that an operator has to live with.
 export fn default_config() -> ServerConfig =
-  ServerConfig(header_ms = 10000, body_ms = 30000, max_header_bytes = 65536, write_ms = 30000)
+  ServerConfig(header_ms = 10000, body_ms = 30000, max_header_bytes = 65536, write_ms = 30000,
+               max_body_bytes = 1048576, min_rate_bps = 1024)
+
+# Milliseconds it takes to move `bytes` at `rate_bps` bytes/second — the size-scaled half of every
+# deadline here. A non-positive rate disables the scaling rather than dividing by zero, leaving the
+# flat budget in force, so a misconfigured rate cannot abort the server.
+fn rate_ms(bytes: Int, rate_bps: Int) -> Int =
+  if rate_bps <= 0 then 0 else bytes * 1000 / rate_bps
 
 # An absolute monotonic-microsecond instant `ms` from now. Monotonic (time_now_micros), so an NTP
 # step mid-request cannot make a deadline fire early or never.
@@ -258,16 +287,27 @@ fn read_until_headers(conn: borrowing TcpConnection, acc: String, deadline: Int,
                 if string.is_empty(chunk) then Err(HttpInvalidRequest("unexpected end of stream"))
                 else read_until_headers(conn, string.concat(acc, chunk), deadline, max_bytes)
 
-# The body deadline is IDLE, so `deadline` is re-armed from `idle_ms` by every chunk that actually
-# delivered bytes; only a genuine stall walks it down to zero. That is nginx's `client_body_timeout`
-# ("only for a period between two successive read operations, not for the transmission of the whole
-# request body") and it is what lets a large upload over a slow link finish: a total deadline here
-# rejected every POST needing longer than one budget's worth of wire time, discarding the partial body
-# it had already accepted.
+# The body deadline is TOTAL and never re-armed here — `deadline` is computed once by the caller as
+# `body_ms + content_length / min_rate_bps`, so it already contains enough time to receive the whole
+# promised body at the configured minimum rate.
 #
-# A flooding peer is bounded by `content_length` instead — the caller only asks for the bytes the
-# request promised — which is why this loop needs no size cap of its own the way the header loop does.
-fn read_remaining_body(conn: borrowing TcpConnection, acc: String, remaining: Int, deadline: Int, idle_ms: Int) -> ServerResult String !{IO} =
+# It was idle before, re-armed by every chunk that delivered bytes (nginx's `client_body_timeout`
+# semantics). That bounded a peer which STOPPED, but not one which merely crawls: a byte per interval
+# re-arms the bound forever, so a handler's occupancy had no upper limit at all. A plain total
+# deadline is the other obvious answer and is equally wrong in the opposite direction — it rejects any
+# legitimately slow upload, a 100 MB POST at 3 Mbit/s needing ~280 s.
+#
+# Scaling the total by the promised size is what satisfies both. It is Apache's `RequestReadTimeout
+# body=20,MinRate=500` ("whenever data is received, the timeout value is increased according to the
+# specified minimum data rate"), expressed in closed form rather than incrementally: HTTP states the
+# body length up front, so the whole extension can be computed before the first read instead of
+# accumulated per chunk. Worst-case occupancy becomes `body_ms + max_body_bytes / min_rate_bps` — a
+# number an operator can compute, which is the property a bounded worker pool needs and the reason
+# this had to land before pooling (docs/green-task-pool-v0.md §5.2).
+#
+# A flooding peer is bounded by `content_length` — the caller asks only for the bytes the request
+# promised — and an over-large `content_length` is refused with 413 before this loop is entered.
+fn read_remaining_body(conn: borrowing TcpConnection, acc: String, remaining: Int, deadline: Int) -> ServerResult String !{IO} =
   if remaining <= 0 then Ok(acc)
   else
     do
@@ -280,10 +320,7 @@ fn read_remaining_body(conn: borrowing TcpConnection, acc: String, remaining: In
         | Err _ -> Err(HttpInvalidRequest("connection error"))
         | Ok chunk ->
             if string.is_empty(chunk) then Err(HttpInvalidRequest("unexpected end of stream"))
-            else
-              do
-                progressed <- deadline_in(idle_ms)
-                read_remaining_body(conn, string.concat(acc, chunk), remaining - string.length(chunk), progressed, idle_ms)
+            else read_remaining_body(conn, string.concat(acc, chunk), remaining - string.length(chunk), deadline)
 
 # Every read path BORROWS the connection: a request is read over many syscalls,
 # and under strict consume-exactly-once the first read would take the socket and
@@ -304,11 +341,14 @@ fn read_request_from_prefix(conn: borrowing TcpConnection, raw: String, config: 
 # be cut off. Unlike the header budget this one is idle-based, so what is armed here is only the
 # FIRST gap; read_remaining_body re-arms it on every chunk that made progress.
 fn continue_read_request(conn: borrowing TcpConnection, raw: String, prefix: (RequestLine, Dict String, Int), config: ServerConfig) -> ServerResult HttpRequest !{IO} =
-  if string.length(body) >= content_length then parse(raw)
+  if content_length > config.max_body_bytes then Err(HttpBodyTooLarge)
+  else if string.length(body) >= content_length then parse(raw)
   else
     do
-      body_deadline <- deadline_in(config.body_ms)
-      full <- read_remaining_body(conn, raw, content_length - string.length(body), body_deadline, config.body_ms)
+      # Total, scaled by the promised size: enough time to receive `content_length` bytes at
+      # `min_rate_bps`, plus `body_ms` of grace. Never re-armed, so occupancy is bounded.
+      body_deadline <- deadline_in(config.body_ms + rate_ms(content_length, config.min_rate_bps))
+      full <- read_remaining_body(conn, raw, content_length - string.length(body), body_deadline)
       parse(full)
 where
   (_req, _headers, content_length) = prefix
@@ -383,6 +423,11 @@ export fn request_timeout(body: String) -> HttpServerResponse =
 # 431 (RFC 6585), the answer to a header block that exceeded `max_header_bytes`.
 export fn headers_too_large(body: String) -> HttpServerResponse =
   response(431, body)
+
+# 413, the answer to a `Content-Length` above `max_body_bytes`. RFC 9110 §15.5.14 renamed the reason
+# phrase to "Content Too Large"; nginx still reports the RFC 7231 name for the same code.
+export fn body_too_large(body: String) -> HttpServerResponse =
+  response(413, body)
 
 # A 303 See Other redirect to `location`, with an empty body. This is the Post/
 # Redirect/Get pattern: a form handler mutates state on POST, then returns this so the
@@ -566,23 +611,31 @@ export fn render(resp: HttpServerResponse) -> ServerResult String =
         )
         Ok(assemble_response(line, response_headers(headers, body), body))
 
-# Recoverable, BOUNDED write: a send to a peer that has vanished (reset/EPIPE) fails as an Err rather
-# than aborting the process, and a peer that simply stops reading can hold the write for at most
-# `idle_ms` per stall rather than forever. The connection is ALWAYS closed afterwards — on both error
-# paths too — so neither a failed nor a timed-out write leaks the fd.
+# Recoverable, TOTALLY bounded write: a send to a peer that has vanished (reset/EPIPE) fails as an
+# Err rather than aborting the process, and a peer that stops reading — or reads too slowly to count
+# — is cut off at a deadline fixed before the first byte goes out. The connection is ALWAYS closed
+# afterwards, on both error paths too, so neither a failed nor a timed-out write leaks the fd.
 #
-# That "always" is no longer a promise in a comment: `conn` is consumed here, and
-# omitting `close` on any arm is a compile error (M4.3 branch convergence). The
-# write borrows first, so the borrow-then-consume order is what makes the shape
-# expressible at all.
+# The deadline mirrors the body's: `write_ms` of grace plus the time this response needs at
+# `min_rate_bps`. It has to be total for the same reason. `write_all_utf8_timeout`'s bound is idle
+# and re-armed inside C on every accepted byte, so a peer taking one byte per interval held the write
+# forever — and unlike the read side, no deadline computed here could intervene, because the caller
+# never regained control mid-payload. `write_all_utf8_by` loops in Sprout over a non-parking send, so
+# the deadline is re-checked on every iteration.
 #
-# The bound matters most on the paths that are easiest to overlook: every 408/431/500 error response
-# is written through here too, so an unbounded write would have made the timeout replies themselves a
+# That "always closed" is not a promise in a comment: `conn` is consumed here, and omitting `close`
+# on any arm is a compile error (M4.3 branch convergence). The write borrows first, so the
+# borrow-then-consume order is what makes the shape expressible at all.
+#
+# The bound matters most on the paths easiest to overlook: every 408/413/431/500 error response is
+# written through here too, so an unbounded write would have made the timeout replies themselves a
 # way to wedge a handler.
-fn write_and_close(conn: consuming TcpConnection, payload: String, idle_ms: Int) -> Unit !{IO} =
-  match write_all_utf8_timeout(conn, payload, idle_ms) with
-  | Ok _ -> close(conn)
-  | Err _ -> close(conn)
+fn write_and_close(conn: consuming TcpConnection, payload: String, config: ServerConfig) -> Unit !{IO} =
+  do
+    deadline <- deadline_in(config.write_ms + rate_ms(string.length(payload), config.min_rate_bps))
+    match write_all_utf8_by(conn, payload, deadline) with
+    | Ok _ -> close(conn)
+    | Err _ -> close(conn)
 
 # A read that ran out of budget answers 408 rather than 400: the request was not malformed, it was
 # not finished. Either way the connection is consumed exactly once, so no path leaks it.
@@ -590,16 +643,17 @@ fn read_error_response(err: HttpServerError) -> HttpServerResponse =
   match err with
   | HttpRequestTimeout -> request_timeout("request timeout")
   | HttpHeadersTooLarge -> headers_too_large("request header fields too large")
+  | HttpBodyTooLarge -> body_too_large("request body too large")
   | HttpInvalidRequest _ -> bad_request("bad request")
   | HttpServerUnsupportedStatus _ -> bad_request("bad request")
 
 fn handle_connection(config: ServerConfig, conn: consuming TcpConnection, handler: HttpRequest -> HttpServerResponse !{IO}) -> Unit !{IO} =
   match read_request(conn, config) with
-  | Err err -> write_and_close(conn, read_error_response(err) |> render_response_or_fallback, config.write_ms)
+  | Err err -> write_and_close(conn, read_error_response(err) |> render_response_or_fallback, config)
   | Ok req ->
       do
         resp <- handler(req)
-        write_and_close(conn, render_response_or_fallback(resp), config.write_ms)
+        write_and_close(conn, render_response_or_fallback(resp), config)
 
 # The 500 fallback (reachable only when a handler returns a status outside the
 # supported table) still uses http_response's fixed format — no Content-Length, its own
