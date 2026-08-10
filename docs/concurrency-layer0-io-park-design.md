@@ -218,6 +218,36 @@ read/accept/write steady-state parks. (Non-blocking connect is a later refinemen
 >    the stack and the root context; it knows nothing about C heap allocations. `getaddrinfo`'s
 >    list was held across the park, so it is now copied into a stack array and freed *before* the
 >    connect loop.
+>
+> **Update 2026-08-10 (c) — `PARK_FD_TIMER` generalized to writes, and arming a timer may now
+> fail.** Follow-ups from the code review of the bounded read.
+>
+> * **The write side needed the same bound.** `tcp_write_all_timeout` reuses `PARK_FD_TIMER` with
+>   `SPROUT_POLL_WRITE`. A client that requests a response larger than the socket buffers and then
+>   stops reading — *without* closing — parked its handler in `send()` forever, so the linear `close`
+>   never ran and the connection handle was never returned to the table. Bounding only the read left
+>   the identical exhaustion reachable from the other direction, including via the 408/431 replies,
+>   which travel the same write path. Read and write budgets are **not** symmetric, though: the header
+>   read is bounded *totally* (nginx `client_header_timeout`) because a per-read timer is renewed
+>   forever by a dribbling peer, while the body read and the response write are bounded on **idle**
+>   gaps (`client_body_timeout` / `send_timeout`), because a total bound there cuts off legitimately
+>   slow large transfers.
+> * **`sprout_poll_add_timer` now returns success/failure instead of aborting.** On Linux each timer
+>   costs a `timerfd`, so a per-connection bounded read allocates a descriptor every time it blocks
+>   and arming is the first thing to fail under `ulimit -n` pressure. Aborting there dropped every
+>   in-flight connection to punish the one that could not be armed. The **caller** now decides, and
+>   the split is by whether an honest degradation exists: `scheduler_park_on_fd_timeout` returns
+>   "timed out", so the server sheds that one connection with a 408 and frees descriptors, while
+>   `task_sleep` and `with_timeout` still fail loudly — there is no answer to give, and returning
+>   early would silently break the only guarantee either one makes. It also arms the timer *first*,
+>   before the fd, so a failure needs no unwind.
+> * **The remaining cost is structural, not a bug**: one descriptor per parked bounded read on Linux,
+>   invisible on kqueue (`EVFILT_TIMER` uses none). Removing it means a timerfd-free backend — one
+>   shared timerfd plus a deadline heap, what a production reactor does — which would also delete the
+>   `park_timer_dead` exactly-once dance above, since that invariant exists *only* because a timerfd
+>   close must happen exactly once. Tracked in `BACKLOG.md`; deliberately not bundled with the review
+>   fixes, because it rewrites timer semantics for `task_sleep`, `with_timeout` and `select` across
+>   both backends at once.
 
  **No new
 Sprout-visible builtin is required** for I/O parking — the new capability is internal

@@ -8507,24 +8507,80 @@ long long tcp_accept(long long listener) {
   return h;
 }
 
-long long tcp_read(long long conn) {
-  if (conn <= 0 || conn >= 2048 || !g_conn_used[conn]) tcp_fail("tcp_read: unknown connection handle");
+/* ── the read-available core, shared by the whole tcp_read* family ──────────────────────────
+ * tcp_read, tcp_read_avail and tcp_read_avail_timeout used to carry three near-verbatim copies of
+ * this GC-sensitive sequence (threshold collect, malloc(65537), recv, park on EAGAIN, NUL-terminate,
+ * adopt, errno captured before free) and differed only in the park call and the error convention.
+ * Every fix to it had to be made three times, and the copies had already drifted — tcp_read aborted
+ * the process where tcp_read_avail returned Err. One core, three thin entry points.
+ *
+ * The buffer is plain malloc, NOT a GC object, so nothing needs rooting across the park; on
+ * TCP_RECV_OK the caller owns it and must adopt (or free) it, and on every other outcome it is
+ * already freed. */
+typedef enum {
+  TCP_RECV_OK = 0,       /* *out_buf holds *out_n bytes, NUL-terminated; caller adopts it */
+  TCP_RECV_ERRNO = 1,    /* the socket failed; *out_errno says how */
+  TCP_RECV_TIMEOUT = 2   /* the deadline won, and the socket was consulted after it did */
+} TcpRecvOutcome;
+
+/* TCP_WAIT_FOREVER parks with no deadline (the historic tcp_read / tcp_read_avail behaviour).
+ * TCP_WAIT_DEADLINE bounds the whole call by `timeout_ms`; `timeout_ms <= 0` polls exactly once
+ * without parking, which is what makes a caller-side TOTAL budget composable — pass the remaining
+ * slice and an expired budget needs no special case at the call site. */
+typedef enum { TCP_WAIT_FOREVER, TCP_WAIT_DEADLINE } TcpWaitMode;
+
+static TcpRecvOutcome tcp_recv_avail(long long conn, TcpWaitMode mode, long long timeout_ms,
+                                     const char* oom_msg,
+                                     char** out_buf, size_t* out_n, int* out_errno) {
   sprout_gc_maybe_collect_threshold();
   char* buf = (char*)malloc(65537);
-  if (buf == NULL) tcp_fail("tcp_read: out of memory");
-  ssize_t n;
+  if (buf == NULL) tcp_fail(oom_msg);
+  /* One deadline for the whole call, re-derived into a slice on every park. Parking with the FULL
+   * timeout_ms each round would let a peer that can trigger readiness without delivering bytes hold
+   * this call — and so its handler — past the budget it was given. */
+  long long deadline_us = time_now_micros() + (timeout_ms > 0 ? timeout_ms * 1000LL : 0LL);
+  int deadline_expired = 0;
   for (;;) {
-    n = recv(g_conn_fd[conn], buf, 65536, 0);
-    if (n >= 0) break;
-    if (errno == EAGAIN || errno == EWOULDBLOCK) {   /* no unrooted GC temp held */
+    ssize_t n = recv(g_conn_fd[conn], buf, 65536, 0);
+    if (n >= 0) {
+      buf[n] = '\0';
+      *out_buf = buf;
+      *out_n = (size_t)n;
+      return TCP_RECV_OK;
+    }
+    if (errno != EAGAIN && errno != EWOULDBLOCK) {
+      *out_errno = errno;   /* capture before free(), which may clobber errno */
+      free(buf);            /* plain malloc buffer, free is correct */
+      return TCP_RECV_ERRNO;
+    }
+    /* Nothing available right now. Every return below this point has therefore consulted the
+     * socket first: a timeout can never be reported while a complete request sits in the buffer,
+     * which is the readiness-and-timer-in-one-poll-batch race. Go's SetReadDeadline behaves the
+     * same way — it attempts the syscall and prefers buffered data to the deadline error. */
+    if (deadline_expired) { free(buf); return TCP_RECV_TIMEOUT; }
+    if (mode == TCP_WAIT_FOREVER) {   /* no unrooted GC temp held */
       scheduler_park_on_fd(g_conn_fd[conn], SPROUT_POLL_READ);
       continue;
     }
-    free(buf);  /* plain malloc buffer, free is correct */
-    tcp_fail("tcp_read: recv failed");
+    long long now_us = time_now_micros();
+    if (now_us >= deadline_us) { free(buf); return TCP_RECV_TIMEOUT; }
+    long long remaining_ms = (deadline_us - now_us) / 1000LL;
+    if (remaining_ms <= 0) remaining_ms = 1;   /* sub-millisecond left: round up, never park on 0 */
+    if (!scheduler_park_on_fd_timeout(g_conn_fd[conn], SPROUT_POLL_READ, remaining_ms))
+      deadline_expired = 1;   /* the loop's next recv decides between data and TCP_RECV_TIMEOUT */
+    continue;
   }
-  buf[n] = '\0';
-  char* head = sprout_gc_adopt_cstr(buf, (size_t)n, "tcp_read: out of memory");  return (long long)(uintptr_t)head;
+}
+
+long long tcp_read(long long conn) {
+  if (conn <= 0 || conn >= 2048 || !g_conn_used[conn]) tcp_fail("tcp_read: unknown connection handle");
+  char* buf = NULL;
+  size_t n = 0;
+  int err = 0;
+  if (tcp_recv_avail(conn, TCP_WAIT_FOREVER, 0, "tcp_read: out of memory", &buf, &n, &err) != TCP_RECV_OK)
+    tcp_fail("tcp_read: recv failed");   /* TCP_WAIT_FOREVER never yields TCP_RECV_TIMEOUT */
+  char* head = sprout_gc_adopt_cstr(buf, n, "tcp_read: out of memory");
+  return (long long)(uintptr_t)head;
 }
 
 /* Recoverable sibling of tcp_read: read whatever is available (up to 64 KiB) and return it as
@@ -8536,25 +8592,14 @@ long long tcp_read(long long conn) {
 long long tcp_read_avail(long long conn) {
   if (conn <= 0 || conn >= 2048 || !g_conn_used[conn])
     return tcp_net_err0("stdlib.net.TcpInvalidHandle");
-  sprout_gc_maybe_collect_threshold();
-  char* buf = (char*)malloc(65537);
-  if (buf == NULL) tcp_fail("tcp_read_avail: out of memory");
-  ssize_t n;
-  for (;;) {
-    n = recv(g_conn_fd[conn], buf, 65536, 0);
-    if (n >= 0) break;
-    if (errno == EAGAIN || errno == EWOULDBLOCK) {   /* no unrooted GC temp held */
-      scheduler_park_on_fd(g_conn_fd[conn], SPROUT_POLL_READ);
-      continue;
-    }
-    int saved_errno = errno;   /* capture before free(), which may clobber errno */
-    free(buf);                 /* plain malloc buffer, free is correct */
-    return tcp_net_err1("stdlib.net.TcpReadFailed", (long long)(uintptr_t)strerror(saved_errno));
-  }
-  buf[n] = '\0';
+  char* buf = NULL;
+  size_t n = 0;
+  int err = 0;
+  if (tcp_recv_avail(conn, TCP_WAIT_FOREVER, 0, "tcp_read_avail: out of memory", &buf, &n, &err) != TCP_RECV_OK)
+    return tcp_net_err1("stdlib.net.TcpReadFailed", (long long)(uintptr_t)strerror(err));
   /* adopt then wrap: no allocation between the adopt and tcp_net_ok, which roots the payload
    * across its own Ok-box allocation. */
-  char* head = sprout_gc_adopt_cstr(buf, (size_t)n, "tcp_read_avail: out of memory");
+  char* head = sprout_gc_adopt_cstr(buf, n, "tcp_read_avail: out of memory");
   return tcp_net_ok((long long)(uintptr_t)head);
 }
 
@@ -8576,34 +8621,19 @@ long long tcp_read_avail(long long conn) {
 long long tcp_read_avail_timeout(long long conn, long long timeout_ms) {
   if (conn <= 0 || conn >= 2048 || !g_conn_used[conn])
     return tcp_net_err0("stdlib.net.TcpInvalidHandle");
-  sprout_gc_maybe_collect_threshold();
-  char* buf = (char*)malloc(65537);
-  if (buf == NULL) tcp_fail("tcp_read_avail_timeout: out of memory");
-  ssize_t n;
-  for (;;) {
-    n = recv(g_conn_fd[conn], buf, 65536, 0);
-    if (n >= 0) break;
-    if (errno == EAGAIN || errno == EWOULDBLOCK) {   /* no unrooted GC temp held */
-      if (timeout_ms <= 0) {                         /* budget spent: report, do not park */
-        free(buf);
-        return tcp_net_err0("stdlib.net.TcpTimeout");
-      }
-      if (!scheduler_park_on_fd_timeout(g_conn_fd[conn], SPROUT_POLL_READ, timeout_ms)) {
-        free(buf);
-        return tcp_net_err0("stdlib.net.TcpTimeout");
-      }
-      /* Spurious readiness (readable, then EAGAIN) re-parks with the full remaining `timeout_ms`,
-       * so a single call is bounded only best-effort — the same ">= ms" guarantee with_timeout
-       * gives. A caller enforcing a TOTAL budget re-derives the slice from the clock each round,
-       * which bounds the whole phase regardless. */
-      continue;   /* the fd reported readable; retry the read */
-    }
-    int saved_errno = errno;   /* capture before free(), which may clobber errno */
-    free(buf);                 /* plain malloc buffer, free is correct */
-    return tcp_net_err1("stdlib.net.TcpReadFailed", (long long)(uintptr_t)strerror(saved_errno));
+  char* buf = NULL;
+  size_t n = 0;
+  int err = 0;
+  switch (tcp_recv_avail(conn, TCP_WAIT_DEADLINE, timeout_ms,
+                         "tcp_read_avail_timeout: out of memory", &buf, &n, &err)) {
+    case TCP_RECV_TIMEOUT:
+      return tcp_net_err0("stdlib.net.TcpTimeout");
+    case TCP_RECV_ERRNO:
+      return tcp_net_err1("stdlib.net.TcpReadFailed", (long long)(uintptr_t)strerror(err));
+    case TCP_RECV_OK:
+      break;
   }
-  buf[n] = '\0';
-  char* head = sprout_gc_adopt_cstr(buf, (size_t)n, "tcp_read_avail_timeout: out of memory");
+  char* head = sprout_gc_adopt_cstr(buf, n, "tcp_read_avail_timeout: out of memory");
   return tcp_net_ok((long long)(uintptr_t)head);
 }
 
@@ -8641,24 +8671,61 @@ long long tcp_read_exact(long long conn, long long count) {
   return result;
 }
 
+/* ── the send-everything core, shared by the whole tcp_write* family ────────────────────────
+ * Same reasoning as tcp_recv_avail above: one partial-send retry loop instead of one per entry
+ * point, so the timed variant is not a third copy of it.
+ *
+ * TCP_WAIT_DEADLINE here is an IDLE bound, not a total one: `idle_ms` limits how long a single
+ * stall may last, and any byte accepted by the kernel re-arms it. That is nginx's `send_timeout`
+ * — "the timeout is set only between two successive write operations, not for the transmission of
+ * the whole response" — and it is the bound that matters for handle exhaustion, since the failure
+ * mode being closed is a client that stops reading altogether. Note what it deliberately does NOT
+ * bound: a peer that keeps reading a trickle holds the connection for as long as it likes. nginx
+ * accepts the same exposure; a total cap would also cut off a legitimately slow large download.
+ *
+ * `p` points INTO a GC object across the park. That is safe only because the collector is
+ * non-moving (docs/compiler-internals.md makes that load-bearing) and the payload stays reachable
+ * from the caller's roots. */
+typedef enum { TCP_SEND_OK = 0, TCP_SEND_ERRNO = 1, TCP_SEND_TIMEOUT = 2 } TcpSendOutcome;
+
+static TcpSendOutcome tcp_send_all(long long conn, const unsigned char* p, size_t len,
+                                   TcpWaitMode mode, long long idle_ms, int* out_errno) {
+  long long idle_deadline_us = time_now_micros() + (idle_ms > 0 ? idle_ms * 1000LL : 0LL);
+  int deadline_expired = 0;
+  while (len > 0) {
+    ssize_t n = send(g_conn_fd[conn], p, len, 0);
+    if (n > 0) {
+      p += n;
+      len -= (size_t)n;
+      deadline_expired = 0;   /* progress: re-arm the idle bound */
+      idle_deadline_us = time_now_micros() + (idle_ms > 0 ? idle_ms * 1000LL : 0LL);
+      continue;
+    }
+    if (n == 0) { *out_errno = errno; return TCP_SEND_ERRNO; }
+    if (errno != EAGAIN && errno != EWOULDBLOCK) { *out_errno = errno; return TCP_SEND_ERRNO; }
+    /* The kernel took nothing. Every return below has therefore attempted the send first, so a
+     * timeout is never reported while the socket would in fact have accepted bytes. */
+    if (deadline_expired) { *out_errno = ETIMEDOUT; return TCP_SEND_TIMEOUT; }
+    if (mode == TCP_WAIT_FOREVER) {
+      scheduler_park_on_fd(g_conn_fd[conn], SPROUT_POLL_WRITE);
+      continue;
+    }
+    long long now_us = time_now_micros();
+    if (now_us >= idle_deadline_us) { *out_errno = ETIMEDOUT; return TCP_SEND_TIMEOUT; }
+    long long remaining_ms = (idle_deadline_us - now_us) / 1000LL;
+    if (remaining_ms <= 0) remaining_ms = 1;   /* sub-millisecond left: round up, never park on 0 */
+    if (!scheduler_park_on_fd_timeout(g_conn_fd[conn], SPROUT_POLL_WRITE, remaining_ms))
+      deadline_expired = 1;   /* the loop's next send decides between progress and a timeout */
+  }
+  return TCP_SEND_OK;
+}
+
 long long tcp_write(long long conn, const char* payload) {
   if (conn <= 0 || conn >= 2048 || !g_conn_used[conn]) tcp_fail("tcp_write: unknown connection handle");
   if (payload == NULL) tcp_fail("tcp_write: null payload");
-  size_t len = strlen(payload);
-  const char* p = payload;
-  while (len > 0) {
-    ssize_t n = send(g_conn_fd[conn], p, len, 0);
-    if (n < 0) {
-      if (errno == EAGAIN || errno == EWOULDBLOCK) {
-        scheduler_park_on_fd(g_conn_fd[conn], SPROUT_POLL_WRITE);
-        continue;
-      }
-      tcp_fail("tcp_write: send failed");
-    }
-    if (n == 0) tcp_fail("tcp_write: send failed");
-    p += n;
-    len -= (size_t)n;
-  }
+  int err = 0;
+  if (tcp_send_all(conn, (const unsigned char*)payload, strlen(payload), TCP_WAIT_FOREVER, 0, &err) != TCP_SEND_OK)
+    tcp_fail("tcp_write: send failed");   /* TCP_WAIT_FOREVER never yields TCP_SEND_TIMEOUT */
   return 0;
 }
 
@@ -8666,22 +8733,36 @@ long long tcp_write_all(long long conn, long long payload_h) {
   if (conn <= 0 || conn >= 2048 || !g_conn_used[conn]) return tcp_net_err0("stdlib.net.TcpInvalidHandle");
   BytesVal* payload = (BytesVal*)(uintptr_t)payload_h;
   if (payload == NULL) tcp_fail("tcp_write_all: null payload");
-  size_t len = payload->len;
-  const unsigned char* p = payload->data;
-  while (len > 0) {
-    ssize_t n = send(g_conn_fd[conn], p, len, 0);
-    if (n < 0) {
-      if (errno == EAGAIN || errno == EWOULDBLOCK) {   /* payload reachable via caller roots */
-        scheduler_park_on_fd(g_conn_fd[conn], SPROUT_POLL_WRITE);
-        continue;
-      }
-      return tcp_net_err1("stdlib.net.TcpWriteFailed", (long long)(uintptr_t)strerror(errno));
-    }
-    if (n == 0) {
-      return tcp_net_err1("stdlib.net.TcpWriteFailed", (long long)(uintptr_t)strerror(errno));
-    }
-    p += n;
-    len -= (size_t)n;
+  int err = 0;
+  if (tcp_send_all(conn, payload->data, payload->len, TCP_WAIT_FOREVER, 0, &err) != TCP_SEND_OK)
+    return tcp_net_err1("stdlib.net.TcpWriteFailed", (long long)(uintptr_t)strerror(err));
+  return tcp_net_ok((long long)payload->len);
+}
+
+/* tcp_write_all bounded by an IDLE deadline: no single stall may exceed `idle_ms`, after which the
+ * write reports Err(TcpTimeout) with the connection still valid, so the caller runs its normal
+ * linear close path.
+ *
+ * Without this, a client that requests a response larger than the socket send buffer and then stops
+ * reading — without closing — parks its handler in send() forever: the task never finishes, `close`
+ * never runs, and the connection handle is never returned to the 2048-entry table. That is the same
+ * handle exhaustion the read deadline closed, reached from the write side, and it applies to the
+ * 408/431 error responses too since they travel the same path.
+ *
+ * `idle_ms <= 0` polls once and reports a timeout rather than blocking, matching
+ * tcp_read_avail_timeout so a caller can pass an already-spent budget without a special case. */
+long long tcp_write_all_timeout(long long conn, long long payload_h, long long idle_ms) {
+  if (conn <= 0 || conn >= 2048 || !g_conn_used[conn]) return tcp_net_err0("stdlib.net.TcpInvalidHandle");
+  BytesVal* payload = (BytesVal*)(uintptr_t)payload_h;
+  if (payload == NULL) tcp_fail("tcp_write_all_timeout: null payload");
+  int err = 0;
+  switch (tcp_send_all(conn, payload->data, payload->len, TCP_WAIT_DEADLINE, idle_ms, &err)) {
+    case TCP_SEND_TIMEOUT:
+      return tcp_net_err0("stdlib.net.TcpTimeout");
+    case TCP_SEND_ERRNO:
+      return tcp_net_err1("stdlib.net.TcpWriteFailed", (long long)(uintptr_t)strerror(err));
+    case TCP_SEND_OK:
+      break;
   }
   return tcp_net_ok((long long)payload->len);
 }

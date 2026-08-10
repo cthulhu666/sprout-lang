@@ -50,7 +50,7 @@ void sprout_poll_remove(int fd, int interest) {
     sprout_fail("sprout_poll_remove: kevent EV_DELETE failed");
 }
 
-void sprout_poll_add_timer(long long ms, void* token, long long* out_id) {
+int sprout_poll_add_timer(long long ms, void* token, long long* out_id) {
   /* ident = the parked Task* — a task sleeps on at most one timer, so it is unique, and
    * EVFILT_TIMER's ident namespace is disjoint from the EVFILT_READ/WRITE fd filters. */
   uintptr_t ident = (uintptr_t)token;
@@ -58,9 +58,9 @@ void sprout_poll_add_timer(long long ms, void* token, long long* out_id) {
   /* fflags = 0: the default EVFILT_TIMER unit is milliseconds (per sys/event.h; this SDK
    * has no NOTE_MSECONDS). EV_ONESHOT fires once then removes the knote. */
   EV_SET(&ev, ident, EVFILT_TIMER, EV_ADD | EV_ONESHOT, 0, ms, token);
-  if (kevent(g_kq, &ev, 1, NULL, 0, NULL) < 0)
-    sprout_fail("sprout_poll_add_timer: kevent EVFILT_TIMER add failed");
+  if (kevent(g_kq, &ev, 1, NULL, 0, NULL) < 0) return 0;   /* caller decides; see the header */
   *out_id = (long long)ident;
+  return 1;
 }
 
 void sprout_poll_remove_timer(long long timer_id) {
@@ -128,17 +128,20 @@ void sprout_poll_remove(int fd, int interest) {
     sprout_fail("sprout_poll_remove: epoll_ctl DEL failed");
 }
 
-void sprout_poll_add_timer(long long ms, void* token, long long* out_id) {
-  /* One timerfd per sleeper (the epoll cost the design notes as the scaling boundary). */
+int sprout_poll_add_timer(long long ms, void* token, long long* out_id) {
+  /* One timerfd per sleeper (the epoll cost the design notes as the scaling boundary). Under
+   * descriptor pressure this is the FIRST allocation to fail, and it must not be fatal: with
+   * ~500 concurrently parked bounded reads and `ulimit -n 1024`, aborting here would drop every
+   * in-flight connection instead of shedding the one that could not be armed. */
   int tfd = timerfd_create(CLOCK_MONOTONIC, TFD_CLOEXEC);
-  if (tfd < 0) sprout_fail("sprout_poll_add_timer: timerfd_create failed");
+  if (tfd < 0) return 0;
   struct itimerspec its;
   memset(&its, 0, sizeof(its));                 /* it_interval = 0 -> one-shot */
   its.it_value.tv_sec  = (time_t)(ms / 1000);
   its.it_value.tv_nsec = (long)((ms % 1000) * 1000000L);
   if (timerfd_settime(tfd, 0, &its, NULL) < 0) {
     close(tfd);
-    sprout_fail("sprout_poll_add_timer: timerfd_settime failed");
+    return 0;
   }
   struct epoll_event ev;
   memset(&ev, 0, sizeof(ev));
@@ -153,9 +156,10 @@ void sprout_poll_add_timer(long long ms, void* token, long long* out_id) {
   ev.data.ptr = (void*)((uintptr_t)token | 1u);
   if (epoll_ctl(g_ep, EPOLL_CTL_ADD, tfd, &ev) < 0) {
     close(tfd);
-    sprout_fail("sprout_poll_add_timer: epoll_ctl ADD failed");
+    return 0;
   }
   *out_id = (long long)tfd;
+  return 1;
 }
 
 void sprout_poll_remove_timer(long long timer_id) {
