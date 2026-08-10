@@ -138,6 +138,7 @@ declare i64 @tcp_read_avail_timeout(i64, i64)
 declare i64 @tcp_connect(i64, i64)
 declare i64 @tcp_read_exact(i64, i64)
 declare i64 @tcp_write_all(i64, i64)
+declare i64 @tcp_write_all_timeout(i64, i64, i64)
 declare i64 @tcp_close(i64)
 declare i64 @tcp_close_listener(i64)
 declare i64 @tcp_echo_serve(i64, i64)
@@ -158,7 +159,7 @@ declare i64 @tcp_echo_serve(i64, i64)
 @.str.14 = private unnamed_addr constant { i64, [17 x i8] } { i64 262154, [17 x i8] c"division by zero\00" }
 @.str.15 = private unnamed_addr constant { i64, [15 x i8] } { i64 229386, [15 x i8] c"invalid handle\00" }
 @.str.16 = private unnamed_addr constant { i64, [14 x i8] } { i64 213002, [14 x i8] c"end of stream\00" }
-@.str.17 = private unnamed_addr constant { i64, [15 x i8] } { i64 229386, [15 x i8] c"read timed out\00" }
+@.str.17 = private unnamed_addr constant { i64, [10 x i8] } { i64 147466, [10 x i8] c"timed out\00" }
 @.str.18 = private unnamed_addr constant { i64, [5 x i8] } { i64 65546, [5 x i8] c"true\00" }
 @.str.19 = private unnamed_addr constant { i64, [6 x i8] } { i64 81930, [6 x i8] c"false\00" }
 @.str.20 = private unnamed_addr constant { i64, [10 x i8] } { i64 147466, [10 x i8] c"IntRange(\00" }
@@ -9073,7 +9074,7 @@ arm_6_1:
   %t$24 = icmp eq i64 %t$0, %t$23
   br i1 %t$24, label %body_6_1, label %arm_7_1
 body_6_1:
-  %t$25 = getelementptr inbounds { i64, [15 x i8] }, ptr @.str.17, i64 0, i32 1, i64 0
+  %t$25 = getelementptr inbounds { i64, [10 x i8] }, ptr @.str.17, i64 0, i32 1, i64 0
   %t$26 = ptrtoint ptr %t$25 to i64
   br label %join_1
 arm_7_1:
@@ -9181,6 +9182,17 @@ entry:
   store i64 %payload, ptr %t$2
   %t$3 = call i64 @sprout_gc_push_i64_root(ptr %t$2)
   %t$1 = call i64 @tcp_write_all(i64 %t$0, i64 %payload)
+  %t$4 = call i64 @sprout_gc_pop_roots(i64 1)
+  ret i64 %t$1
+}
+
+define i64 @stdlib.net.write_all_timeout(i64 %conn, i64 %payload, i64 %idle_ms) {
+entry:
+  %t$0 = call i64 @stdlib.net.tcp_connection_handle(i64 %conn)
+  %t$2 = alloca i64
+  store i64 %payload, ptr %t$2
+  %t$3 = call i64 @sprout_gc_push_i64_root(ptr %t$2)
+  %t$1 = call i64 @tcp_write_all_timeout(i64 %t$0, i64 %payload, i64 %idle_ms)
   %t$4 = call i64 @sprout_gc_pop_roots(i64 1)
   ret i64 %t$1
 }
@@ -9306,6 +9318,23 @@ entry:
   store i64 %t$0, ptr %t$6
   %t$7 = call i64 @sprout_gc_push_i64_root(ptr %t$6)
   %t$1 = call i64 @stdlib.net.write_all(i64 %conn, i64 %t$0)
+  %t$8 = call i64 @sprout_gc_pop_roots(i64 3)
+  ret i64 %t$1
+}
+
+define i64 @stdlib.net.write_all_utf8_timeout(i64 %conn, i64 %payload, i64 %idle_ms) {
+entry:
+  %t$2 = alloca i64
+  store i64 %payload, ptr %t$2
+  %t$3 = call i64 @sprout_gc_push_i64_root(ptr %t$2)
+  %t$4 = alloca i64
+  store i64 %conn, ptr %t$4
+  %t$5 = call i64 @sprout_gc_push_i64_root(ptr %t$4)
+  %t$0 = call i64 @stdlib.bytes.from_string(i64 %payload)
+  %t$6 = alloca i64
+  store i64 %t$0, ptr %t$6
+  %t$7 = call i64 @sprout_gc_push_i64_root(ptr %t$6)
+  %t$1 = call i64 @stdlib.net.write_all_timeout(i64 %conn, i64 %t$0, i64 %idle_ms)
   %t$8 = call i64 @sprout_gc_pop_roots(i64 3)
   ret i64 %t$1
 }

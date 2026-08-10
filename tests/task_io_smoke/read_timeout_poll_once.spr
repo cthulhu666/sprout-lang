@@ -1,0 +1,70 @@
+import stdlib.task (Scope, with_scope, task_spawn, task_sleep)
+import stdlib.net (TcpConnection, TcpListener, TcpTimeout, connect, accept, listen_local, close, close_listener, read_avail_timeout, write_all_utf8)
+
+# The two ends of `read_avail_timeout`'s contract, neither of which had any coverage.
+#
+#  * `timeout_ms <= 0` is the POLL-ONCE branch: attempt one non-blocking read and report a timeout
+#    rather than parking. It is not a curiosity — it is what makes a caller-side TOTAL budget
+#    composable, because `stdlib.http_server` passes the remaining slice of its deadline and an
+#    already-spent budget must then need no special case at the call site. A regression turning it
+#    into an unbounded park would deadlock every expired-budget read, and nothing would have caught
+#    it.
+#  * A budget that has NOT expired must still deliver data that arrives inside it. This is the half
+#    that catches an over-eager timeout: a "fix" that reported TcpTimeout unconditionally would
+#    satisfy the first assertion perfectly.
+#
+# The second assertion also exercises the path that used to answer a timeout without consulting the
+# socket. The builtin now attempts one more non-blocking recv before reporting expiry, so data that
+# lands in the same instant as the deadline is returned rather than discarded — Go's SetReadDeadline
+# behaves the same way, preferring buffered data to the deadline error.
+
+fn serve_late(listener: consuming TcpListener) -> Unit !{IO} =
+  do
+    conn <- accept(listener)
+    # Late enough that the client's poll-once has certainly already run and found nothing.
+    task_sleep(200)
+    match write_all_utf8(conn, "late") with
+    | Ok _ -> close(conn)
+    | Err _ -> report_and_close(conn, "MISMATCH: server could not send\n")
+    close_listener(listener)
+
+fn report_and_close(conn: consuming TcpConnection, line: String) -> Unit !{IO} =
+  do
+    term_write(line)
+    close(conn)
+
+# Marker discipline: `poll-once-timed-out` / `bounded-read-got-data` appear on their success paths
+# only, never in a failure message the recipe's `grep -q` would then match.
+fn check_poll_once(conn: borrowing TcpConnection) -> Unit !{IO} =
+  match read_avail_timeout(conn, 0) with
+  | Err TcpTimeout -> term_write("poll-once-timed-out\n")
+  | Err _ -> term_write("MISMATCH: poll-once reported a socket error\n")
+  | Ok chunk -> term_write(`MISMATCH: poll-once returned ${chunk}\n`)
+
+fn check_bounded_read(conn: borrowing TcpConnection) -> Unit !{IO} =
+  match read_avail_timeout(conn, 5000) with
+  | Ok chunk ->
+    if chunk == "late" then
+      term_write("bounded-read-got-data\n")
+    else
+      term_write(`MISMATCH: bounded read returned ${chunk}\n`)
+  | Err _ -> term_write("MISMATCH: bounded read failed inside its budget\n")
+
+fn client(port: Int) -> Unit !{IO} =
+  match connect("127.0.0.1", port) with
+  | Ok conn ->
+    do
+      check_poll_once(conn)
+      check_bounded_read(conn)
+      close(conn)
+  | Err _ -> term_write("MISMATCH: client could not connect\n")
+
+fn run(s: Scope, port: Int) -> Unit !{IO} =
+  do
+    task_spawn(s, \_ -> serve_late(listen_local(port)))
+    task_spawn(s, \_ -> client(port))
+
+fn main() -> Unit !{IO} =
+  do
+    with_scope(\s -> run(s, 28987))
+    term_write("done\n")

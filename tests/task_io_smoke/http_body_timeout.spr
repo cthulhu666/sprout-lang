@@ -1,0 +1,94 @@
+import stdlib.task (Scope, with_scope, task_spawn, task_sleep)
+import stdlib.net (TcpConnection, connect, close, write_all_utf8, read_exact_utf8)
+import stdlib.http_server (HttpRequest, HttpServerResponse, ServerConfig, ok, request_path, serve_n_with)
+
+# http_server BODY-phase timeout, and the total-vs-idle distinction (review follow-ups to C3).
+#
+# Two gaps this closes. First, coverage: every fixture in this directory drove `read_until_headers`
+# only, so nothing exercised `continue_read_request` -> `read_remaining_body` at all. A regression
+# dropping the deadline from the body loop, or mis-mapping its timeout to 400, would have shipped
+# green — and the body phase carries the LONGER default budget, so its failure mode is the
+# longest-lived handler leak of the two.
+#
+# Second, semantics. The body deadline used to be TOTAL wall-clock for the whole body, which the doc
+# comment justified by nginx's split. That was a misreading: nginx's `client_header_timeout` is
+# indeed total ("if a client does not transmit the entire header within this time, the request is
+# terminated"), but `client_body_timeout` is explicitly idle — "the timeout is set only for a period
+# between two successive read operations, NOT for the transmission of the whole request body". A
+# total body deadline rejects every legitimate large upload over a slow link: a 100 MB POST at
+# 3 Mbit/s needs ~280 s and died at 30 s, discarding the partial body.
+#
+# `dribbling_client` is what tells the two apart, and its timings are the whole point:
+#   * four gaps of 200 ms, each SHORTER than the 300 ms body budget  -> idle deadline: served, 200;
+#   * ~800 ms in total, far LONGER than that budget                 -> total deadline: 408.
+# `stalled_body_client` covers the case both models must reject: headers complete, body promised,
+# then silence.
+
+fn handle(req: HttpRequest) -> HttpServerResponse =
+  ok(request_path(req))
+
+# Marker discipline: a label appears on the success path ONLY. Failure output reports what was
+# received and never what was wanted, because the recipe asserts by `grep -q <label>` and an earlier
+# fixture here passed on real regressions by embedding its own marker in its failure text.
+fn expect_status(conn: borrowing TcpConnection, want: String, label: String) -> Unit !{IO} =
+  match read_exact_utf8(conn, 12) with
+  | Ok line ->
+    if line == want then
+      term_write(`${label}\n`)
+    else
+      term_write(`MISMATCH: got ${line}\n`)
+  | Err _ -> term_write("MISMATCH: status read failed\n")
+
+# Promises 10 body bytes and sends none. Both a total and an idle deadline must answer 408; without
+# any body deadline the handler parks forever and the program hangs on the recipe's perl `alarm`.
+fn stalled_body_client(port: Int) -> Unit !{IO} =
+  match connect("127.0.0.1", port) with
+  | Ok conn ->
+    do
+      match write_all_utf8(conn, "POST /stalled HTTP/1.1\r\nHost: x\r\nContent-Length: 10\r\n\r\n") with
+      | Ok _ -> expect_status(conn, "HTTP/1.1 408", "stalled-body-408")
+      | Err _ -> term_write("MISMATCH: stalled-body client could not send its headers\n")
+      close(conn)
+  | Err _ -> term_write("MISMATCH: stalled-body client could not connect\n")
+
+# Four 5-byte chunks, 200 ms apart. Progress before each gap expires, so an idle deadline never
+# fires; the run outlasts the budget several times over, so a total one fires every time.
+fn dribble(conn: borrowing TcpConnection, rounds: Int) -> Bool !{IO} =
+  if rounds <= 0 then
+    true
+  else
+    do
+      task_sleep(200)
+      match write_all_utf8(conn, "abcde") with
+      | Ok _ -> dribble(conn, rounds - 1)
+      | Err _ -> false
+
+fn dribbling_client(port: Int) -> Unit !{IO} =
+  match connect("127.0.0.1", port) with
+  | Ok conn ->
+    do
+      match write_all_utf8(conn, "POST /dribble HTTP/1.1\r\nHost: x\r\nContent-Length: 20\r\n\r\n") with
+      | Ok _ -> dribble_then_expect(conn)
+      | Err _ -> term_write("MISMATCH: dribbling client could not send its headers\n")
+      close(conn)
+  | Err _ -> term_write("MISMATCH: dribbling client could not connect\n")
+
+fn dribble_then_expect(conn: borrowing TcpConnection) -> Unit !{IO} =
+  do
+    sent <- dribble(conn, 4)
+    if sent then
+      expect_status(conn, "HTTP/1.1 200", "dribbled-body-200")
+    else
+      term_write("MISMATCH: server hung up on a body that was still making progress\n")
+
+# body_ms is 300: long enough that a 200 ms gap is fine, short enough that a stall is caught fast.
+fn run(s: Scope, port: Int) -> Unit !{IO} =
+  do
+    task_spawn(s, \_ -> serve_n_with(ServerConfig(2000, 300, 65536, 2000), port, 2, handle))
+    task_spawn(s, \_ -> stalled_body_client(port))
+    task_spawn(s, \_ -> dribbling_client(port))
+
+fn main() -> Unit !{IO} =
+  do
+    with_scope(\s -> run(s, 28988))
+    term_write("done\n")

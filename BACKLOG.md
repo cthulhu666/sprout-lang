@@ -367,52 +367,74 @@ Legend:
   `tests/task_io_smoke/http_header_flood.spr`, verified RED against the pre-cap server. The same
   review found that the fixture for the original fix could not fail — its failure text embedded the
   marker the recipe greps for — which is fixed and negative-control-checked.
-- [ ] `P1` **http_server: the response WRITE is still an unbounded park** (code review of PR #56,
-  2026-08-10). `write_and_close` -> `write_all_utf8` -> `tcp_write_all` parks via
-  `scheduler_park_on_fd` with no deadline. A client that sends a valid request for a response larger
-  than the socket send buffer and then stops reading without closing wedges its handler forever: the
-  task never finishes, `close(conn)` never runs, the `g_conn_used` slot is never freed. 2048 such
-  clients and `tcp_accept` serves nobody — **the same handle exhaustion the read deadline closed,
-  still reachable from the write side**, and the 408/431 error paths use the same `write_and_close`.
-  Fix: a write counterpart to `tcp_read_avail_timeout` (the `PARK_FD_TIMER` machinery already
-  exists; this is `SPROUT_POLL_WRITE` plus a deadline), and a `ServerConfig` write budget. Bounding
-  the read alone was an incomplete fix, so this is the direct sibling of that work, not a nice-to-have.
-- [ ] `P2` **http_server body deadline is total wall-clock; nginx's `client_body_timeout` is
-  idle-based** (code review of PR #56, 2026-08-10). `continue_read_request` arms
-  `now + config_body_ms` for the whole body, so a legitimate slow upload is cut off mid-transfer: a
-  100 MB POST over a 3 Mbit/s uplink needs ~280 s and dies at 30 s with a 408, discarding the partial
-  body. Every large upload over a link slower than ~27 Mbit/s is rejected. The doc comment claims to
-  follow nginx's split, and for the header phase it does (`client_header_timeout` **is** total:
-  *"If a client does not transmit the entire header within this time, the request is terminated"*),
-  but `client_body_timeout` is explicitly *"set only for a period between two successive read
-  operations, not for the transmission of the whole request body"* — verified against the nginx
-  reference. Fix: reset the body deadline on each chunk that made progress (idle timeout), keeping a
-  separate total cap if a hard ceiling is wanted; a max body size (413) is a related but distinct knob.
-- [ ] `P2` **A timed read costs a timerfd per park on Linux, and exhaustion is FATAL** (code review
-  of PR #56, 2026-08-10). `sprout_poll_add_timer` calls `timerfd_create` per registration, so every
-  bounded read park now allocates a descriptor — doubling the per-connection fd cost — and failure is
-  `sprout_fail`, i.e. the whole server dies. With `ulimit -n 1024`, ~500 concurrently parked reads
-  exhaust the table and the next read aborts the process, dropping every in-flight connection; before
-  the timeout work a read park allocated nothing, so the same load was served. A slowloris now
-  crashes the process at roughly half the previous concurrency instead of being answered 408.
-  Options: a timerfd-free timeout path (one shared timerfd plus a deadline heap — what a real
-  reactor does), or at minimum make `timerfd_create` failure recoverable so the read reports an
-  error instead of aborting. kqueue is unaffected (`EVFILT_TIMER` uses no descriptor), so this is
-  Linux-only and invisible in local macOS testing.
-- [ ] `P2` **A timed-out read can report 408 with a complete request sitting in the socket buffer**
-  (code review of PR #56, 2026-08-10). `tcp_read_avail_timeout` returns `Err TcpTimeout` on the
-  timeout path *without* a final non-blocking `recv`. If the readiness event and the timer event land
-  in the same poll batch and the timer is drained first, `scheduler_park_on_fd_timeout` returns 0 and
-  the server answers 408 to a client whose valid request arrived well inside its budget. Go's
+- [x] `P1` **http_server: the response WRITE was an unbounded park. FIXED 2026-08-10.**
+  `write_and_close` -> `write_all_utf8` -> `tcp_write_all` parked via `scheduler_park_on_fd` with no
+  deadline. A client that sent a valid request for a response larger than the socket send buffer and
+  then stopped reading without closing wedged its handler forever: the task never finished,
+  `close(conn)` never ran, the `g_conn_used` slot was never freed. 2048 such clients and `tcp_accept`
+  served nobody — the same handle exhaustion the read deadline closed, reached from the write side,
+  and the 408/431 error paths travel the same `write_and_close`. New builtin
+  `tcp_write_all_timeout` reusing `PARK_FD_TIMER` with `SPROUT_POLL_WRITE`, `net.write_all_timeout` /
+  `write_all_utf8_timeout`, and a fourth `ServerConfig` field `write_ms` (30 s default) threaded
+  through `write_and_close`. Bound is **idle**, not total: nginx `send_timeout` is "set only between
+  two successive write operations, not for the transmission of the whole response" (verified), so any
+  accepted byte re-arms it and a slow-but-reading client is never cut off. Regression:
+  `tests/task_io_smoke/http_write_timeout.spr`, which asserts on **truncation** rather than
+  termination — a client that merely slept and closed would let the unfixed server finish too, since
+  its close resets the connection. Verified RED against the unbounded write (whole 8388697-byte body
+  delivered). What this deliberately does **not** bound, matching nginx: a peer that keeps reading a
+  trickle holds its connection as long as it likes.
+- [x] `P2` **http_server body deadline was total wall-clock. FIXED 2026-08-10 (now idle).**
+  `continue_read_request` armed `now + config_body_ms` for the whole body, so a legitimate slow upload
+  was cut off mid-transfer: a 100 MB POST over a 3 Mbit/s uplink needs ~280 s and died at 30 s with a
+  408, discarding the partial body — every large upload over a link slower than ~27 Mbit/s. The doc
+  comment claimed to follow nginx's split, and for the header phase it did (`client_header_timeout`
+  **is** total: *"If a client does not transmit the entire header within this time, the request is
+  terminated"*), but `client_body_timeout` is explicitly *"set only for a period between two successive
+  read operations, not for the transmission of the whole request body"*. `read_remaining_body` now
+  re-arms its deadline from `body_ms` on every chunk that delivered bytes; the header phase stays
+  total, which is the bound a dribbling slowloris cannot renew. A flooding body peer is bounded by
+  `content_length` instead — the loop only asks for the bytes the request promised — which is why it
+  needs no size cap of its own the way the header loop does. Regression:
+  `tests/task_io_smoke/http_body_timeout.spr` (four 5-byte chunks 200 ms apart against a 300 ms
+  budget), verified RED against the total deadline. Still open and distinct: a max body size (413).
+- [ ] `P2` **A timed read costs a timerfd per park on Linux** (code review of PR #56, 2026-08-10).
+  **The fatal half is FIXED 2026-08-10; the cost remains.** `sprout_poll_add_timer` calls
+  `timerfd_create` per registration, so every bounded read/write park allocates a descriptor,
+  doubling the per-connection fd cost. Arming failure used to be `sprout_fail`: with `ulimit -n 1024`,
+  ~500 concurrently parked reads exhausted the table and the next read aborted the process, dropping
+  every in-flight connection — a slowloris crashed the server at roughly half the previous
+  concurrency instead of being answered 408. `sprout_poll_add_timer` now returns success/failure and
+  the caller decides, split by whether an honest degradation exists:
+  `scheduler_park_on_fd_timeout` reports a timeout (the server sheds that one connection and frees
+  descriptors), while `task_sleep` / `with_timeout` still fail loudly, because there is no answer to
+  give and returning early would silently break the only guarantee either makes.
+  **Remaining work — the timerfd-free backend**: one shared timerfd plus a deadline heap (or simply
+  the `epoll_wait`/`kevent` timeout argument driven by a min-heap of deadlines), which is what a
+  production reactor does. It removes the per-park descriptor entirely on both backends and would
+  also **delete the `Task.park_timer_dead` exactly-once dance**, which exists *only* because a
+  timerfd close must happen exactly once. Deliberately not bundled with the review fixes: it rewrites
+  timer semantics for `task_sleep`, `with_timeout` and `select` across kqueue and epoll at once, and
+  kqueue (`EVFILT_TIMER`, no descriptor) cannot exercise the regression locally.
+- [x] `P2` **A timed-out read could report 408 with a complete request sitting in the socket buffer.
+  FIXED 2026-08-10.** `tcp_read_avail_timeout` returned `Err TcpTimeout` on the timeout path *without*
+  a final non-blocking `recv`. If the readiness event and the timer event landed in the same poll
+  batch and the timer was drained first, `scheduler_park_on_fd_timeout` returned 0 and the server
+  answered 408 to a client whose valid request had arrived well inside its budget. Go's
   `SetReadDeadline`, the cited model, attempts the syscall first and prefers buffered data to the
-  deadline error. Fix: one more non-blocking `recv` before reporting the timeout — restoring the
-  invariant that this family never answers without consulting the socket.
-- [ ] `P3` **`tcp_read_avail_timeout`'s spurious-readiness retry re-parks with the FULL budget**
-  (code review of PR #56, 2026-08-10). On readable-then-EAGAIN the loop re-parks for another whole
-  `timeout_ms` instead of a re-derived remaining slice, so one call is bounded only best-effort and
-  the caller cannot preempt it. Documented as such in the code, but it means a peer that can trigger
-  readiness without delivering bytes holds a handler past its phase budget. Fix: track the deadline
-  inside the builtin and pass the remaining slice on re-park.
+  deadline error. Fixed structurally rather than by adding a second `recv` call: the collapsed core
+  (below) carries a `deadline_expired` flag and `continue`s, so **every** return path passes through
+  the loop's `recv` first. Same treatment on the write side (`tcp_send_all` always attempts the
+  `send` before reporting a stall).
+- [x] `P3` **`tcp_read_avail_timeout`'s spurious-readiness retry re-parked with the FULL budget.
+  FIXED 2026-08-10.** On readable-then-EAGAIN the loop re-parked for another whole `timeout_ms`
+  instead of a re-derived remaining slice, so one call was bounded only best-effort and a peer able to
+  trigger readiness without delivering bytes could hold a handler past its phase budget. The collapsed
+  core now computes one `deadline_us` at entry from `time_now_micros()` and parks with the remaining
+  slice each round (rounding a sub-millisecond remainder up to 1 ms, so it never parks on 0). This
+  also subsumed the old special-cased `timeout_ms <= 0` poll-once branch: an already-expired deadline
+  simply fails the remaining check after the first `recv`. Covered by
+  `tests/task_io_smoke/read_timeout_poll_once.spr`.
 - [ ] `P3` **A force-dropped handler still leaks its connection** (code review of PR #56,
   2026-08-10; PRE-EXISTING, not introduced by that PR). `scope_cancel` / an enclosing `with_timeout`
   force-drops a handler parked in a socket read; `force_drop_task` tears down the poller
@@ -422,20 +444,68 @@ Legend:
   The linear `close` cannot help — an out-of-band drop runs no Sprout code. Fix direction: let a
   parked task register a cleanup for a table-owned handle (a generalization of `park_close_fd`), or
   have the scope own connection handles so join-time reclaim covers them.
-- [ ] `P3` **Body-phase timeout and the poll-once budget path are untested** (code review of PR #56,
-  2026-08-10). The smoke fixtures drive `read_until_headers` only. Nothing covers a client that
-  completes its headers with a `Content-Length` then stalls (`continue_read_request` ->
-  `read_remaining_body` -> `Err TcpTimeout`), nor the `timeout_ms <= 0` poll-once branch in the
-  builtin. A regression dropping the deadline from `read_remaining_body`, or mis-mapping its timeout
-  to 400, ships green — and the body phase carries the longer default, so its failure mode is the
-  longest-lived handler leak.
-- [ ] `P3` **Three near-verbatim clones of the recv/park/adopt loop** (code review of PR #56,
-  2026-08-10). `tcp_read`, `tcp_read_avail` and `tcp_read_avail_timeout` duplicate the same
-  GC-sensitive sequence (`maybe_collect_threshold`, `malloc(65537)`, `recv`, park on EAGAIN,
-  `buf[n]='\0'`, `adopt_cstr`, errno captured before `free`), differing only in the park call and the
-  error convention. Every fix to that sequence — e.g. the missing final `recv` above — must be made
-  three times, and the existing pair already shows drift (`tcp_read` aborts where `tcp_read_avail`
-  returns `Err`). Collapse to one static helper with thin entry points.
+  **Investigated 2026-08-10 while fixing the other seven findings from that review; deliberately NOT
+  implemented, because the obvious fix is worse than the leak.** Extending `park_close_fd` to also
+  clear `g_conn_used[conn]` converts a leak into a **handle-reuse hazard**: the slot is immediately
+  reallocatable, so any surviving Sprout `TcpConnection` value naming it now denotes a *different*
+  peer's connection, and a later `close` on it either shuts down an unrelated live connection or —
+  if the slot is momentarily free — hits `tcp_close`'s unknown-handle path, which is `tcp_fail`, i.e.
+  process death. A leaked slot is bounded and silent; a reused one is a cross-connection data-integrity
+  bug. The runtime cannot tell the two apart on its own: it would have to know the Sprout-level owner,
+  and force-drop by construction runs no Sprout code. Linearity *nearly* supplies the missing
+  guarantee — a borrow cannot cross `task_spawn`, so within the linear API a parked conn is owned by
+  the parked task — but the raw-`Int` `tcp_*` escape hatch that `stdlib/net.sprout` documents ("callers
+  on this path get no release enforcement") is exactly where the assumption fails, and that hatch is
+  the shape most likely to hold a handle across tasks. So the finding's **second** option is the real
+  one: make the scope own connection handles, so join-time reclaim covers the value *and* the slot
+  together and no stale name survives. That is a design task, not a patch. Cheap safe subset available
+  meanwhile if this ever bites: free the parked 64 KiB `recv` buffer on drop (a plain `malloc` scratch
+  buffer nothing else references), which needs no ownership reasoning at all.
+- [x] `P3` **Body-phase timeout and the poll-once budget path were untested. FIXED 2026-08-10.** The
+  smoke fixtures drove `read_until_headers` only. Nothing covered a client that completes its headers
+  with a `Content-Length` then stalls (`continue_read_request` -> `read_remaining_body` ->
+  `Err TcpTimeout`), nor the `timeout_ms <= 0` poll-once branch — and the body phase carries the longer
+  default, so its failure mode is the longest-lived handler leak. Added
+  `tests/task_io_smoke/http_body_timeout.spr` (stalled body -> 408, plus the dribbling client that
+  distinguishes idle from total) and `tests/task_io_smoke/read_timeout_poll_once.spr` (poll-once
+  reports a timeout without parking; a live budget still delivers data that arrives inside it — the
+  half that catches a "fix" reporting `TcpTimeout` unconditionally).
+- [x] `P3` **Three near-verbatim clones of the recv/park/adopt loop. FIXED 2026-08-10.** `tcp_read`,
+  `tcp_read_avail` and `tcp_read_avail_timeout` duplicated the same GC-sensitive sequence
+  (`maybe_collect_threshold`, `malloc(65537)`, `recv`, park on EAGAIN, `buf[n]='\0'`, `adopt_cstr`,
+  errno captured before `free`), differing only in the park call and the error convention — and the
+  copies had already drifted (`tcp_read` aborted where `tcp_read_avail` returned `Err`). Collapsed to
+  one static `tcp_recv_avail` core (a `TcpWaitMode` selects untimed-vs-deadline; the outcome is a
+  three-way enum) with three thin entry points. Doing this **first** is what made the two behavioural
+  fixes above one-line changes instead of three-way edits, and it is why the missing-final-`recv` fix
+  came out structural. The write pair got the same treatment (`tcp_send_all`), so the new
+  `tcp_write_all_timeout` did not arrive as a fourth clone of what was just deduplicated.
+- [ ] `P2` **Decompose the timed `tcp_*` builtins into ONE readiness primitive plus Sprout-level
+  loops.** Raised and scoped 2026-08-10, when `tcp_write_all_timeout` was approved as the *interim*
+  fix for the unbounded response write. The current design adds **one timed twin per operation**, and
+  the queue is already visible: `tcp_read_exact_timeout` is required by the body-framed-by-bytes item
+  below (the body phase is deadline-bounded and must move to `tcp_read_exact`), and
+  `tcp_connect_timeout` by the http_client blocking-connect item. Each twin is ~25 lines of C
+  duplicating the park/retry dance — i.e. the clone problem just deduplicated above, regenerating
+  faster than it can be collapsed.
+  **Shape:** separate *readiness* from *transfer*, as every reactor does.
+  `tcp_wait(conn, interest, ms) -> Result TcpError Bool` parks until ready or the deadline and moves
+  no data — one builtin, covering read, write, connect and accept forever. The transfer primitives
+  stop parking internally and report `Err TcpWouldBlock`; the retry-and-deadline loops move into
+  `stdlib/net.sprout`, written once. Aligns with "Builtin vs Stdlib" rules 4-6: keep in C only what
+  cannot be expressed in Sprout (parking is scheduler-internal), and put every composable policy above
+  it in the language.
+  **It dissolves three of the eight PR #56 review findings rather than fixing them**: the cloned
+  recv/park loops become one Sprout loop; the remaining-slice arithmetic becomes testable Sprout
+  instead of an invariant buried in C; and "attempt the transfer, then wait" becomes the loop's only
+  possible shape, so the missing-final-`recv` class cannot recur. The reason those were three separate
+  C bugs is that timeout policy and syscall retry are welded together inside each builtin.
+  **Costs to design around:** it is a breaking change to the `tcp_*` extern surface, which
+  `stdlib/net.sprout` documents as an escape hatch for shapes the linear API cannot express;
+  `tcp_write_all` needs an offset (`tcp_write_some(conn, data, offset)`) or the Sprout-side partial-write
+  loop re-slices `Bytes` per chunk and goes quadratic; and `read_exact`'s accumulate loop moves from one
+  in-place C buffer fill to per-chunk allocation in Sprout, which must be **measured**, not assumed.
+  When this lands, delete every `tcp_*_timeout` twin and its `APPROVED_BUILTINS` entry.
 - [ ] `P1` **http_server accept-failure isolation (concurrency review C3, remaining half).**
   `tcp_accept` is still the FATAL variant: `accept` failing with EMFILE/ENFILE — the same descriptor
   exhaustion the timeout above now makes far harder to reach, but not impossible — calls `tcp_fail`
