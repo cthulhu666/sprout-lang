@@ -77,9 +77,16 @@ void sprout_poll_remove(int fd, int interest);
 /* Arm a one-shot timer for `ms` (> 0) milliseconds; the fired event carries `token` back
  * from sprout_poll_wait like a ready fd (L0.6 task_sleep). Writes into `*out_id` an opaque
  * handle used to tear the timer down (kqueue: the EVFILT_TIMER ident; epoll: the timerfd).
- * (Returns void by out-param, not long long, so it is not mistaken for a Sprout builtin —
- * it is internal C called only from the scheduler.) */
-void sprout_poll_add_timer(long long ms, void* token, long long* out_id);
+ *
+ * Returns 1 on success and 0 if the timer could NOT be armed, leaving *out_id untouched. The
+ * failure is not hypothetical: the epoll backend spends one timerfd per registration, so under
+ * `ulimit -n` pressure arming is the first thing to fail — and a per-connection bounded read arms
+ * one every time it blocks. Aborting there would drop every in-flight connection to punish the one
+ * that could not be armed, so the caller decides: a bounded read reports its timeout and sheds that
+ * connection, while task_sleep / with_timeout have no honest degradation and still fail loudly.
+ * (Returns int, not long long, so it is not mistaken for a Sprout builtin — it is internal C
+ * called only from the scheduler.) */
+int sprout_poll_add_timer(long long ms, void* token, long long* out_id);
 /* Tear down a timer created by sprout_poll_add_timer. MUST discard even an already-fired,
  * not-yet-retrieved event (timers fire asynchronously to the pump) so a dropped sleeping
  * task cannot be resumed by a stale token. Idempotent (ENOENT ignored). */
@@ -100,7 +107,10 @@ void scheduler_park_on_fd(int fd, int interest);
  * NOT dropped on expiry — it resumes normally and its caller decides what a timeout means — which
  * is what lets a timed read report `Err` while leaving the connection valid and its linear
  * release path intact (cf. Go's SetReadDeadline / Java's SO_TIMEOUT, as opposed to cancelling
- * the task). `ms` must be > 0; callers wanting "don't wait at all" should skip the park. */
+ * the task). `ms` must be > 0; callers wanting "don't wait at all" should skip the park.
+ * May also return 0 WITHOUT having waited, when the timer could not be armed at all (see
+ * sprout_poll_add_timer) — a caller must therefore treat 0 as "the deadline is not honourable
+ * right now", which for every current caller is the same action as a real expiry. */
 int  scheduler_park_on_fd_timeout(int fd, int interest, long long ms);
 /* Same, for an fd that no handle table owns yet — an in-flight connect(). If this task is
  * force-dropped while parked (with_timeout / scope_cancel), the drop CLOSES `fd`, since the

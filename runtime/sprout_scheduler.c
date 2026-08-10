@@ -807,7 +807,11 @@ long long __await_deadline(long long scope_handle, long long task_handle, long l
    * (g_io_head) and as the child's awaiter; whichever fires first wakes it exactly once (the
    * trampoline/harvest dedup, §5.3). */
   long long tid;
-  sprout_poll_add_timer(ms, owner, &tid);
+  /* Same reasoning as scheduler_park_on_timer: a deadline that cannot be armed cannot be honoured,
+   * and awaiting the child unbounded would break with_timeout's one guarantee. Fatal, and reachable
+   * only under descriptor exhaustion on Linux. */
+  if (!sprout_poll_add_timer(ms, owner, &tid))
+    sprout_fail("with_timeout: could not arm the deadline timer (descriptor exhaustion?)");
   owner->park_kind        = PARK_TIMER;
   owner->park_timer_id    = tid;
   owner->park_timer_dead  = 0;          /* fresh registration */
@@ -954,8 +958,15 @@ void scheduler_park_on_fd(int fd, int interest) {
 int scheduler_park_on_fd_timeout(int fd, int interest, long long ms) {
   Task* t = g_current_task;
   long long tid;
+  /* Arm the TIMER FIRST, because it is the registration that can fail: the Linux backend spends a
+   * timerfd per park, so under descriptor pressure this is where exhaustion lands. Reporting the
+   * timeout is the graceful degradation — the caller sheds THIS connection (a server answers 408
+   * and closes, freeing descriptors) instead of the process dying and dropping every in-flight
+   * connection with it. Parking unbounded would be the worse alternative: it reinstates exactly the
+   * unbounded park this call exists to prevent. Ordering the timer first also means there is no
+   * fd registration to unwind on failure. */
+  if (!sprout_poll_add_timer(ms, t, &tid)) return 0;
   sprout_poll_add(fd, interest, t);
-  sprout_poll_add_timer(ms, t, &tid);
   t->park_kind          = PARK_FD_TIMER;
   t->park_fd            = fd;
   t->park_interest      = interest;
@@ -995,7 +1006,13 @@ void scheduler_park_on_unowned_fd(int fd, int interest) {
  * (a zero-value timerfd disarms on Linux → would hang; design §5.2). */
 static void scheduler_park_on_timer(long long ms) {
   long long tid;
-  sprout_poll_add_timer(ms, g_current_task, &tid);
+  /* Unlike the bounded read, a sleep has no graceful degradation: there is no answer to give and
+   * returning early would silently break `task_sleep(ms)`'s only contract. This stays fatal, and
+   * it stays reachable only under descriptor exhaustion on Linux. Removing the last fatal timer
+   * path needs the timerfd-free backend (one shared timerfd + a deadline heap), not a different
+   * choice here — see BACKLOG. */
+  if (!sprout_poll_add_timer(ms, g_current_task, &tid))
+    sprout_fail("task_sleep: could not arm a timer (descriptor exhaustion?)");
   g_current_task->park_kind       = PARK_TIMER;
   g_current_task->park_timer_id   = tid;
   g_current_task->park_timer_dead = 0;   /* fresh registration */
