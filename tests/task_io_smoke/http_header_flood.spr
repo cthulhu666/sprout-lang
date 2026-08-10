@@ -1,0 +1,119 @@
+import stdlib.task (Scope, with_scope, task_spawn)
+import stdlib.net (TcpConnection, connect, close, write_all_utf8, read_exact_utf8)
+import stdlib.http_server (HttpRequest, HttpServerResponse, ServerConfig, ok, request_path, serve_n_with)
+import stdlib.chan (Chan, Got, Closed, chan_new, chan_send, chan_recv)
+import stdlib.string as string
+
+# http_server header-flood bound (review follow-up to the C3 timeout fix).
+#
+# The timeout fix bounded an IDLE peer. It did not bound a FLOODING one: a client that streams bytes
+# continuously without ever sending the "\r\n\r\n" terminator keeps every read succeeding, so
+# `recv` never returns EAGAIN, so `tcp_read_avail_timeout` never consults its deadline and
+# `read_until_headers` never sees `Err TcpTimeout`. The header phase grew its accumulator for the
+# whole budget — gigabytes on a fast link, with quadratic `string.concat` copying — and answered
+# nothing. One connection could exhaust the heap and take the process down, which is strictly worse
+# than the slowloris the deadline was added to stop.
+#
+# Two bounds now cover it, and this fixture drives the size one (the only one a flood can reach):
+# `max_header_bytes`, checked on the accumulated block, plus a budget check in the loop itself rather
+# than inferred from the builtin's timeout.
+#
+# The assertion is deliberately NOT "the client reads a 431". Answering an unread flood requires a
+# lingering close — closing a socket with unread inbound data sends RST, which can discard the
+# queued response — so demanding the status back would make this test flaky for reasons unrelated to
+# the bound. What matters, and what is asserted, is:
+#
+#   * the flooding connection is TERMINATED (a 431 read back, or the read failing — either way the
+#     server let go of it), and
+#   * the server is still serving afterwards, proven by a second client getting its 200.
+#
+# Unfixed, the flooder is never terminated: its read never returns and the fixture hangs on the
+# recipe's perl `alarm`.
+#
+# Marker discipline: `flood-bounded` appears on the success path only. A failure message must never
+# contain it — the recipe asserts by `grep -q`, and an earlier fixture in this suite silently passed
+# on real regressions because its failure text embedded the marker it was grepped for.
+
+fn handle(req: HttpRequest) -> HttpServerResponse =
+  ok(request_path(req))
+
+# 1 KiB of header-ish bytes with no terminator anywhere in it.
+fn chunk() -> String =
+  string.repeat("x-pad: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\r\n", 13)
+
+# Write `rounds` chunks, stopping early once the server hangs up on us (an Err here is the bound
+# working, not a failure). With a 2 KiB cap, the server should give up after the first round or two.
+fn flood(conn: borrowing TcpConnection, rounds: Int) -> Bool !{IO} =
+  if rounds <= 0 then
+    false  # never rejected: the server accepted an unbounded header block
+  else
+    match write_all_utf8(conn, chunk()) with
+    | Ok _ -> flood(conn, rounds - 1)
+    | Err _ -> true  # connection gone => terminated
+
+# Terminated either way: an explicit 431, or the socket already torn down.
+fn drained(conn: borrowing TcpConnection) -> Bool !{IO} =
+  match read_exact_utf8(conn, 12) with
+  | Ok line -> line == "HTTP/1.1 431"
+  | Err _ -> true
+
+fn flooding_client(port: Int, done: Chan Int) -> Unit !{IO} =
+  match connect("127.0.0.1", port) with
+  | Ok conn ->
+    do
+      hung_up <- flood(conn, 64)
+      terminated <- drained(conn)
+      close(conn)
+      if hung_up || terminated then
+        chan_send(done, 1)
+      else
+        do
+          term_write("MISMATCH: server accepted an unbounded header block\n")
+          chan_send(done, 0)
+  | Err _ ->
+    do
+      term_write("MISMATCH: flooding client could not connect\n")
+      chan_send(done, 0)
+
+# Runs after the flooder is done, so its 200 proves the server survived the flood.
+fn prompt_client(port: Int, done: Chan Int) -> Unit !{IO} =
+  match chan_recv(done) with
+  | Closed -> term_write("MISMATCH: flood result channel closed\n")
+  | Got verdict -> serve_check(port, verdict)
+
+fn serve_check(port: Int, first: Int) -> Unit !{IO} =
+  do
+    match connect("127.0.0.1", port) with
+    | Ok conn ->
+      do
+        match write_all_utf8(conn, "GET /ok HTTP/1.1\r\nHost: x\r\n\r\n") with
+        | Ok _ ->
+          match read_exact_utf8(conn, 12) with
+          | Ok line ->
+            if line == "HTTP/1.1 200" then
+              if first == 1 then
+                term_write("flood-bounded\n")
+              else
+                term_write("MISMATCH: served, but the flood was not bounded\n")
+            else
+              term_write(`MISMATCH: second client got ${line}\n`)
+          | Err _ -> term_write("MISMATCH: second client could not read\n")
+        | Err _ -> term_write("MISMATCH: second client could not write\n")
+        close(conn)
+    | Err _ -> term_write("MISMATCH: server stopped accepting after the flood\n")
+
+fn run(s: Scope, port: Int, done: Chan Int) -> Unit !{IO} =
+  do
+    task_spawn(s, \_ -> serve_n_with(ServerConfig(2000, 2000, 2048), port, 2, handle))
+    task_spawn(s, \_ -> flooding_client(port, done))
+    task_spawn(s, \_ -> prompt_client(port, done))
+
+fn body(s: Scope) -> Unit !{IO} =
+  do
+    done <- chan_new(s, 1)
+    run(s, 28991, done)
+
+fn main() -> Unit !{IO} =
+  do
+    with_scope(\s -> body(s))
+    term_write("done\n")

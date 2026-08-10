@@ -66,6 +66,7 @@ fn http_status_info(status: Int) -> Maybe HttpStatusInfo =
   | 410 -> Just(HttpStatusInfo("410", "Gone"))
   | 422 -> Just(HttpStatusInfo("422", "Unprocessable Content"))
   | 429 -> Just(HttpStatusInfo("429", "Too Many Requests"))
+  | 431 -> Just(HttpStatusInfo("431", "Request Header Fields Too Large"))
   | 500 -> Just(HttpStatusInfo("500", "Internal Server Error"))
   | 501 -> Just(HttpStatusInfo("501", "Not Implemented"))
   | 502 -> Just(HttpStatusInfo("502", "Bad Gateway"))

@@ -22,6 +22,9 @@ export type HttpServerError (..) =
   # it maps to a different status (408, not 400) and because it is not the client's request being
   # malformed — there simply was not one yet.
   | HttpRequestTimeout
+  # The header block exceeded its size cap. Distinct from HttpRequestTimeout because a flooding peer
+  # is not slow — it is the opposite — and the two need different statuses (431 vs 408).
+  | HttpHeadersTooLarge
 
 type alias ServerResult a = Result HttpServerError a
 
@@ -33,26 +36,39 @@ type alias ServerResult a = Result HttpServerError a
 # Shape follows nginx's split (client_header_timeout / client_body_timeout) rather than a single
 # request deadline: header and body have different legitimate profiles — headers arrive in one or
 # two segments, a large upload legitimately takes longer.
+#
+# `max_header_bytes` is the third bound, and it is NOT redundant with the deadline. A deadline only
+# bites when the peer goes quiet: a peer that streams bytes continuously without ever sending the
+# "\r\n\r\n" terminator keeps every read succeeding, so the header phase would grow the accumulator
+# for the whole budget — gigabytes on a fast link, with quadratic copying — without a single timeout.
+# Bounding size is what makes the phase bounded against a FLOODING peer rather than only an idle one.
+# Analogue: Go's Server.MaxHeaderBytes (DefaultMaxHeaderBytes = 1 << 20, "the maximum permitted size
+# of the headers in an HTTP request"); the 431 status is RFC 6585's.
 export type ServerConfig (..) =
-  | ServerConfig Int Int
+  | ServerConfig Int Int Int
 
 # header 10 s / body 30 s. Chosen well above any legitimate client (headers normally arrive in the
 # first segment) and well below the ~forever that the unbounded read allowed. nginx defaults both to
 # 60 s; Go's http.Server defaults to none at all, which is the hazard this replaces.
 export fn default_config() -> ServerConfig =
-  ServerConfig(10000, 30000)
+  ServerConfig(10000, 30000, 65536)
 
-# `header_ms` bounds reading the request line + headers; `body_ms` bounds reading the body.
-export fn server_config(header_ms: Int, body_ms: Int) -> ServerConfig =
-  ServerConfig(header_ms, body_ms)
+# `header_ms` bounds reading the request line + headers; `body_ms` bounds reading the body;
+# `max_header_bytes` caps the accumulated header block.
+export fn server_config(header_ms: Int, body_ms: Int, max_header_bytes: Int) -> ServerConfig =
+  ServerConfig(header_ms, body_ms, max_header_bytes)
 
 fn config_header_ms(config: ServerConfig) -> Int =
   match config with
-  | ServerConfig header_ms _ -> header_ms
+  | ServerConfig header_ms _ _ -> header_ms
 
 fn config_body_ms(config: ServerConfig) -> Int =
   match config with
-  | ServerConfig _ body_ms -> body_ms
+  | ServerConfig _ body_ms _ -> body_ms
+
+fn config_max_header_bytes(config: ServerConfig) -> Int =
+  match config with
+  | ServerConfig _ _ max_header_bytes -> max_header_bytes
 
 # An absolute monotonic-microsecond instant `ms` from now. Monotonic (time_now_micros), so an NTP
 # step mid-request cannot make a deadline fire early or never.
@@ -204,30 +220,51 @@ fn err_or_request(req: RequestLine, headers: Dict String, content_length: Int, r
 #
 # TcpTimeout is kept distinct from a socket error all the way up, because the two produce different
 # statuses (408 vs 400) and only one of them means the client did something wrong.
-fn read_until_headers(conn: borrowing TcpConnection, acc: String, deadline: Int) -> ServerResult String !{IO} =
+# Three independent bounds, and each closes a hole the others do not:
+#
+#  * the SIZE cap stops a peer that floods bytes without ever sending the terminator. Such a peer
+#    keeps every read succeeding, so it never trips a timeout of any kind;
+#  * the budget is checked HERE, before reading, not merely inferred from `Err TcpTimeout`. The
+#    builtin only consults its deadline when the socket would block, so a continuously-readable
+#    peer never reaches that check — the phase bound has to be enforced by the loop that owns it;
+#  * `Err TcpTimeout` covers the ordinary idle peer.
+#
+# The size check runs on the ACCUMULATED block before the next read, so the cap can be overshot by
+# at most one chunk (64 KiB). Capping also removes the quadratic `string.concat` growth: at most a
+# couple of rounds now fit under the cap.
+fn read_until_headers(conn: borrowing TcpConnection, acc: String, deadline: Int, max_bytes: Int) -> ServerResult String !{IO} =
   match find_headers_end(acc) with
   | Just _ -> Ok(acc)
   | Nothing ->
-      do
-        budget <- remaining_ms(deadline)
-        match read_avail_timeout(conn, budget) with
-        | Err TcpTimeout -> Err(HttpRequestTimeout)
-        | Err _ -> Err(HttpInvalidRequest("connection error"))
-        | Ok chunk ->
-            if string.is_empty(chunk) then Err(HttpInvalidRequest("unexpected end of stream"))
-            else read_until_headers(conn, string.concat(acc, chunk), deadline)
+      if string.byte_length(acc) > max_bytes then
+        Err(HttpHeadersTooLarge)
+      else
+        do
+          budget <- remaining_ms(deadline)
+          if budget <= 0 then
+            Err(HttpRequestTimeout)
+          else
+            match read_avail_timeout(conn, budget) with
+            | Err TcpTimeout -> Err(HttpRequestTimeout)
+            | Err _ -> Err(HttpInvalidRequest("connection error"))
+            | Ok chunk ->
+                if string.is_empty(chunk) then Err(HttpInvalidRequest("unexpected end of stream"))
+                else read_until_headers(conn, string.concat(acc, chunk), deadline, max_bytes)
 
 fn read_remaining_body(conn: borrowing TcpConnection, acc: String, remaining: Int, deadline: Int) -> ServerResult String !{IO} =
   if remaining <= 0 then Ok(acc)
   else
     do
       budget <- remaining_ms(deadline)
-      match read_avail_timeout(conn, budget) with
-      | Err TcpTimeout -> Err(HttpRequestTimeout)
-      | Err _ -> Err(HttpInvalidRequest("connection error"))
-      | Ok chunk ->
-          if string.is_empty(chunk) then Err(HttpInvalidRequest("unexpected end of stream"))
-          else read_remaining_body(conn, string.concat(acc, chunk), remaining - string.length(chunk), deadline)
+      if budget <= 0 then
+        Err(HttpRequestTimeout)  # enforced here, not only inferred from Err TcpTimeout (see above)
+      else
+        match read_avail_timeout(conn, budget) with
+        | Err TcpTimeout -> Err(HttpRequestTimeout)
+        | Err _ -> Err(HttpInvalidRequest("connection error"))
+        | Ok chunk ->
+            if string.is_empty(chunk) then Err(HttpInvalidRequest("unexpected end of stream"))
+            else read_remaining_body(conn, string.concat(acc, chunk), remaining - string.length(chunk), deadline)
 
 # Every read path BORROWS the connection: a request is read over many syscalls,
 # and under strict consume-exactly-once the first read would take the socket and
@@ -235,7 +272,7 @@ fn read_remaining_body(conn: borrowing TcpConnection, acc: String, remaining: In
 fn read_request(conn: borrowing TcpConnection, config: ServerConfig) -> ServerResult HttpRequest !{IO} =
   do
     header_deadline <- deadline_in(config_header_ms(config))
-    raw <- read_until_headers(conn, "", header_deadline)
+    raw <- read_until_headers(conn, "", header_deadline, config_max_header_bytes(config))
     read_request_from_prefix(conn, raw, config)
 
 fn read_request_from_prefix(conn: borrowing TcpConnection, raw: String, config: ServerConfig) -> ServerResult HttpRequest !{IO} =
@@ -322,6 +359,10 @@ export fn not_found(body: String) -> HttpServerResponse =
 # 408, the answer to a client that connected but did not finish its request in time.
 export fn request_timeout(body: String) -> HttpServerResponse =
   response(408, body)
+
+# 431 (RFC 6585), the answer to a header block that exceeded `max_header_bytes`.
+export fn headers_too_large(body: String) -> HttpServerResponse =
+  response(431, body)
 
 # A 303 See Other redirect to `location`, with an empty body. This is the Post/
 # Redirect/Get pattern: a form handler mutates state on POST, then returns this so the
@@ -523,6 +564,7 @@ fn write_and_close(conn: consuming TcpConnection, payload: String) -> Unit !{IO}
 fn read_error_response(err: HttpServerError) -> HttpServerResponse =
   match err with
   | HttpRequestTimeout -> request_timeout("request timeout")
+  | HttpHeadersTooLarge -> headers_too_large("request header fields too large")
   | HttpInvalidRequest _ -> bad_request("bad request")
   | HttpServerUnsupportedStatus _ -> bad_request("bad request")
 
