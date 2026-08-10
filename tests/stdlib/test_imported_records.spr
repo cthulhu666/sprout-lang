@@ -1,0 +1,99 @@
+import stdlib.test (check_eq, check_true, run_suite)
+import stdlib.string as string
+import testsupport.rec_fixture (Cfg, Point, Box, Line, Ops, Other, Holder, Empty, Tok, default_cfg, cfg_sum, mk_box, hold, mk_tok)
+import testsupport.rec_fixture_mid (double_sum, bump_header)
+
+# Records used across a module boundary (spec §5.6.3). Every shape here was once
+# believed broken end-to-end; the failure mode was a name-identity mismatch, so
+# the coverage is organised by which name the compiler has to canonicalise —
+# construction, access, update, instance resolution, and ADT-field keying each
+# reach the record's identity by a different path.
+#
+# The declarations live in `testsupport/rec_fixture.sprout`; only a separate
+# module can exercise any of this.
+
+fn dbl(n: Int) -> Int = n * 2
+fn hi(s: String) -> String = `hi ${s}`
+
+fn a_cfg() -> Cfg = Cfg(header_ms = 1, body_ms = 2, max_header_bytes = 3, write_ms = 4)
+fn a_line() -> Line = Line(from = Point(x = 1, y = 2), to = Point(x = 3, y = 4))
+fn an_ops() -> Ops = Ops(double = dbl, greet = hi)
+
+# Reads each field into its own decimal place: all four fields are `Int`, so a
+# field-offset mixup is type-silent and a checksum-style assertion would miss a
+# swap. 1234 pins the order, not just the contents.
+fn cfg_digits(c: Cfg) -> Int =
+  c.header_ms * 1000 + c.body_ms * 100 + c.max_header_bytes * 10 + c.write_ms
+
+fn nested(l: Line) -> Int = l.from.x + l.to.y
+
+fn box_int_val(b: Box Int) -> Int = b.val
+fn box_str_val(b: Box String) -> String = b.val
+
+fn sum_xs(ps: List Point) -> Int = list_fold(\ (acc, x) -> acc + x, 0, list_map(\p -> p.x, ps))
+
+# A field-access head must be a bare variable in v0, so every shape that would
+# read a field off a call result goes through a parameter instead.
+fn upd_local(c: Cfg) -> Int = cfg_sum(c with (header_ms = 11))
+fn upd_chained(c: Cfg) -> Int = cfg_sum(c with (header_ms = 11) with (write_ms = 14))
+fn upd_self_ref(c: Cfg) -> Int = cfg_sum(c with (body_ms = c.body_ms + 8))
+fn call_dbl(o: Ops) -> Int = o.double(21)
+fn call_greet(o: Ops) -> String = o.greet("bob")
+fn other_header(o: Other) -> String = o.header_ms
+
+fn unwrap_sum(h: Holder) -> Int =
+  match h with
+  | Holder c -> cfg_sum(c)
+  | Empty -> 0
+
+# One field read is exactly one consumption of an owned linear record.
+fn tok_id(t: consuming Tok) -> Int = t.id
+
+# `to_string` of an imported derived record currently prefixes the declaring
+# module (`testsupport.rec_fixture.Point(x = 1, y = 2)`) while a same-module one
+# does not. That inconsistency is an open decision, not settled behaviour, so
+# this asserts the field rendering and deliberately leaves the name convention
+# unpinned — pinning it here would bake in whichever side the decision goes
+# against. See BACKLOG "derived ToString: qualified or bare".
+fn derived_fields(p: Point) -> Bool = string.ends_with(to_string(p), "(x = 1, y = 2)")
+
+fn main() -> Unit !{IO} =
+  run_suite("imported_records", [
+    # --- construction and access ---
+    check_eq("construct at use site, read every field", cfg_digits(a_cfg()), 1234),
+    check_eq("record value built by the declaring module", cfg_digits(default_cfg()), 12340),
+    check_eq("consumer-built record passed into an imported fn", cfg_sum(a_cfg()), 10),
+    check_eq("nested imported records", nested(a_line()), 5),
+    check_eq("per-record field scoping", other_header(Other(header_ms = "x")), "x"),
+
+    # --- three-module identity chain ---
+    check_eq("declared in A, threaded through B, built in C", double_sum(a_cfg()), 20),
+    check_eq("with-update applied in B, read in C", cfg_sum(bump_header(a_cfg())), 11),
+
+    # --- functional update at the use site ---
+    check_eq("with-update", upd_local(a_cfg()), 20),
+    check_eq("chained with-update", upd_chained(a_cfg()), 30),
+    check_eq("self-referencing with-update", upd_self_ref(a_cfg()), 18),
+
+    # --- parametric, at two different type arguments ---
+    check_eq("parametric record at Int", box_int_val(mk_box(7)), 7),
+    check_eq("parametric record at String", box_str_val(Box(val = "s", label = "str")), "s"),
+
+    # --- function-typed fields ---
+    check_eq("inline field-call", call_dbl(an_ops()), 42),
+    check_eq("inline field-call returning String", call_greet(an_ops()), "hi bob"),
+
+    # --- containers and ADT fields ---
+    check_eq("records in a List", sum_xs([Point(x = 1, y = 0), Point(x = 4, y = 0)]), 5),
+    check_eq("record in an ADT ctor built by the declaring module", unwrap_sum(hold(a_cfg())), 10),
+    check_eq("record in an ADT ctor built by the consumer", unwrap_sum(Holder(a_cfg())), 10),
+    check_eq("other ADT arm", unwrap_sum(Empty), 0),
+
+    # --- derived instances resolving at the use site ---
+    check_true("derived Eq", eq(Point(x = 1, y = 2), Point(x = 1, y = 2))),
+    check_true("derived Ord", compare(Point(x = 1, y = 2), Point(x = 1, y = 3)) < 0),
+    check_true("derived ToString renders fields", derived_fields(Point(x = 1, y = 2))),
+
+    # --- linearity survives the boundary ---
+    check_eq("single field read consumes a linear record", tok_id(mk_tok(5)), 5)
+  ])

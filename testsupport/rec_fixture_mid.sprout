@@ -1,0 +1,15 @@
+module testsupport.rec_fixture_mid
+
+import testsupport.rec_fixture (Cfg, cfg_sum)
+
+# The middle link of a three-module chain: `Cfg` is declared in
+# testsupport.rec_fixture, flows through here, and is constructed in the test
+# file. Two modules only prove a name survives one qualification step; three
+# prove the qualified name is a stable identity rather than a coincidence between
+# a declaration site and its single importer.
+
+export fn double_sum(c: Cfg) -> Int = cfg_sum(c) * 2
+
+# A `with` update on a first-module record performed in a second module, read
+# back by a third.
+export fn bump_header(c: Cfg) -> Cfg = c with (header_ms = c.header_ms + 1)
