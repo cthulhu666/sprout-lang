@@ -1,0 +1,94 @@
+import stdlib.task (Scope, with_scope, task_spawn, task_sleep)
+import stdlib.net (TcpConnection, connect, close, write_all_utf8, read_exact_utf8)
+import stdlib.http_server (HttpRequest, HttpServerResponse, ServerConfig, request_body, response, serve_n_with)
+
+# `Content-Length` counts BYTES; the body path used to measure and cut in CODEPOINTS (concurrency
+# review C5). `café` is 5 bytes and 4 codepoints, so it separates the two index spaces — an ASCII
+# body cannot, which is why every earlier fixture missed this.
+#
+# tests/stdlib/test_http_server_parse.spr covers the pure `parse` side. What only a socket can reach
+# is `read_remaining_body`, whose per-chunk subtraction is where the codepoint count did the damage:
+# with `remaining - string.length(chunk)` a complete 5-byte body still looked one byte short, so the
+# loop waited for a byte the client had already sent and the request died on the body deadline. That
+# is the shape this fixture exists for — and note the failure it produced was a **408**, blaming a
+# well-behaved client for a timeout, which is harder to diagnose than an outright hang.
+
+# The status alone carries the body assertion: the handler answers 200 only if the decoded body is
+# byte-for-byte what the client sent. A server that framed the body one byte short (or one byte long)
+# reaches the handler with the wrong string and gets 500, so a mis-framing cannot pass as a 200.
+fn handle(req: HttpRequest) -> HttpServerResponse !{IO} =
+  if request_body(req) == "café" then response(200, "ok")
+  else response(500, `wrong body: ${request_body(req)}`)
+
+fn expect_status(conn: borrowing TcpConnection, want: String, marker: String) -> Unit !{IO} =
+  match read_exact_utf8(conn, 12) with
+  | Ok reply ->
+      if reply == want then term_write(`${marker}\n`)
+      else term_write(`MISMATCH: ${marker} got ${reply}\n`)
+  | Err _ -> term_write(`MISMATCH: ${marker} read failed\n`)
+
+# The read-loop case. Headers first, then the body in a SEPARATE write after a pause, so the body
+# cannot arrive with the header block and `read_remaining_body` must run at least one round. This is
+# the only client here that exercises the per-chunk byte subtraction.
+fn split_client(port: Int) -> Unit !{IO} =
+  match connect("127.0.0.1", port) with
+  | Ok conn ->
+    do
+      match write_all_utf8(conn, "POST /split HTTP/1.1\r\nHost: x\r\nContent-Length: 5\r\n\r\n") with
+      | Ok _ ->
+          do
+            task_sleep(100)
+            match write_all_utf8(conn, "café") with
+            | Ok _ -> expect_status(conn, "HTTP/1.1 200", "split-multibyte-200")
+            | Err _ -> term_write("MISMATCH: split client could not send its body\n")
+      | Err _ -> term_write("MISMATCH: split client could not send its headers\n")
+      close(conn)
+  | Err _ -> term_write("MISMATCH: split client could not connect\n")
+
+# The fast path: headers and body in one write, so `continue_read_request` satisfies the length from
+# what is already buffered and never enters the read loop. Same body, different code path — the two
+# used different length calls, so one being right did not make the other right.
+fn inline_client(port: Int) -> Unit !{IO} =
+  match connect("127.0.0.1", port) with
+  | Ok conn ->
+    do
+      match write_all_utf8(conn, "POST /inline HTTP/1.1\r\nHost: x\r\nContent-Length: 5\r\n\r\ncafé") with
+      | Ok _ -> expect_status(conn, "HTTP/1.1 200", "inline-multibyte-200")
+      | Err _ -> term_write("MISMATCH: inline client could not send\n")
+      close(conn)
+  | Err _ -> term_write("MISMATCH: inline client could not connect\n")
+
+# A byte count landing INSIDE a multi-byte sequence: 4 announced bytes of a 5-byte character. Byte-
+# exact framing makes this reachable, and it must be a clean 400.
+#
+# This is also the case that rules out the seemingly-obvious implementation. `str_slice_bytes` is the
+# byte-indexed slice builtin and it calls `tcp_fail` ("byte_start+byte_len splits a UTF-8 codepoint")
+# — the process-fatal path — so framing the body with it would let this single request kill the whole
+# server, and under `serve_pooled` every worker with it. Going through `bytes.slice` + `bytes.to_string`
+# costs two allocations and yields a `Result` instead. The marker below is therefore a liveness
+# assertion as much as a status one: reaching it at all proves the server is still running.
+fn split_codepoint_client(port: Int) -> Unit !{IO} =
+  match connect("127.0.0.1", port) with
+  | Ok conn ->
+    do
+      match write_all_utf8(conn, "POST /cut HTTP/1.1\r\nHost: x\r\nContent-Length: 4\r\n\r\ncafé") with
+      | Ok _ -> expect_status(conn, "HTTP/1.1 400", "split-codepoint-400")
+      | Err _ -> term_write("MISMATCH: split-codepoint client could not send\n")
+      close(conn)
+  | Err _ -> term_write("MISMATCH: split-codepoint client could not connect\n")
+
+# The bounds are generous on purpose: nothing here is testing a timeout, and a body deadline tight
+# enough to be interesting would make a 408 ambiguous between "mis-framed" and "too slow" — which is
+# exactly the confusion the bug produced.
+fn run(s: Scope, port: Int) -> Unit !{IO} =
+  do
+    task_spawn(s, \_ -> serve_n_with(ServerConfig(header_ms = 4000, body_ms = 4000, max_header_bytes = 65536,
+                                       write_ms = 4000, max_body_bytes = 65536, min_rate_bps = 1024), port, 3, handle))
+    task_spawn(s, \_ -> split_client(port))
+    task_spawn(s, \_ -> inline_client(port))
+    task_spawn(s, \_ -> split_codepoint_client(port))
+
+fn main() -> Unit !{IO} =
+  do
+    with_scope(\s -> run(s, 28994))
+    term_write("done\n")

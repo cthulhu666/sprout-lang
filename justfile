@@ -1625,7 +1625,21 @@ task-io-smoke: bootstrap-from-seed
   build tests/task_io_smoke/read_timeout_poll_once.spr
   run_once "read-poll-once" "poll-once-timed-out"
   run_once "read-poll-once/data" "bounded-read-got-data"
-  echo "==> task-io-smoke ✓ (read-park, accept-park, re-arm, http-serve-concurrency, http-conn-error-isolation, tcp-read-avail-error, write, cancel-drop, await-guard, timer-drop, timeout-drop, timeout-nested-guard, chan-cancel-drop, chan-timeout-drop, chan-negative-cap-guard, rendezvous-send-drop, send-on-closed-guard, double-close-guard, send-parked-close-guard, select-cancel-drop, select-timeout-drop, connect-park, http-idle-timeout, http-header-flood, http-write-timeout, http-body-timeout, http-body-bounds, http-pooled-serve, read-poll-once; interleaved; stress-clean)"
+  # (25) Content-Length is denominated in BYTES while the body path measured and cut in CODEPOINTS
+  # (concurrency review C5). `café` is 5 bytes / 4 codepoints and separates the two; an ASCII body
+  # cannot, which is why the fixtures above all missed it. Three paths, because they used different
+  # length calls: the read loop (body in a second write), the already-buffered fast path (one write),
+  # and a byte count cutting INSIDE a character. The last is a liveness check too — the obvious
+  # implementation (`str_slice_bytes`) calls tcp_fail on a split codepoint, so it would let that one
+  # request kill the server. RED as a 408 for the split client (a complete body looked one byte short,
+  # so the loop waited for a byte already sent), a 500 for either (handler saw a mis-framed body), or
+  # no output at all for the cut client (process aborted).
+  build tests/task_io_smoke/http_utf8_body.spr
+  run_once "http-utf8-body" "split-multibyte-200"
+  run_once "http-utf8-body/inline" "inline-multibyte-200"
+  run_once "http-utf8-body/cut" "split-codepoint-400"
+  SPROUT_GC_STRESS=1 run_once "http-utf8-body/stress" "split-multibyte-200"
+  echo "==> task-io-smoke ✓ (read-park, accept-park, re-arm, http-serve-concurrency, http-conn-error-isolation, tcp-read-avail-error, write, cancel-drop, await-guard, timer-drop, timeout-drop, timeout-nested-guard, chan-cancel-drop, chan-timeout-drop, chan-negative-cap-guard, rendezvous-send-drop, send-on-closed-guard, double-close-guard, send-parked-close-guard, select-cancel-drop, select-timeout-drop, connect-park, http-idle-timeout, http-header-flood, http-write-timeout, http-body-timeout, http-body-bounds, http-pooled-serve, read-poll-once, http-utf8-body; interleaved; stress-clean)"
 
 # Division-by-zero guard regression (CI gate). The fixture divides by a RUNTIME
 # zero (`10 / list_length(argv)` with no args), which neither the compiler nor
