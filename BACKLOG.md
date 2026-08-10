@@ -533,7 +533,81 @@ Legend:
   builtin**: retry on `ECONNABORTED`/`EINTR`, and on EMFILE/ENFILE back off on a short timer and
   retry (what nginx does) instead of aborting. Testable hermetically under `ulimit -n`, in the style
   of `tests/task_io_smoke/connect_park.spr`. Sibling of the C1 recoverable-I/O fix.
-- [ ] `P1` **http_server frames request bodies by codepoint count, not bytes (concurrency review C5).** `err_or_request` / `continue_read_request` / `read_remaining_body` (`stdlib/http_server.sprout`) compare `string.length` (UTF-8 codepoint count) against the byte-denominated `Content-Length` header, while the response side correctly uses `string.byte_length`. A body with any multi-byte character (e.g. `café`, `Content-Length: 5`, 4 codepoints) is mis-framed: the read loop blocks waiting for bytes the client already sent (hang), or `parse` returns 400 "request body shorter than Content-Length". Fix: frame the body on bytes — read exactly `content_length` bytes via `tcp_read_exact` (returns `Bytes`), then UTF-8-decode — instead of codepoint-counting a `String`. Every UTF-8 form submission with an accented value is currently broken.
+- [x] `P1` **http_server framed request bodies by codepoint count, not bytes (concurrency review C5).
+  FIXED 2026-08-10.** `err_or_request` / `continue_read_request` / `read_remaining_body`
+  (`stdlib/http_server.sprout`) compared `string.length` (UTF-8 codepoint count) against the
+  byte-denominated `Content-Length` header, while the response side correctly used
+  `string.byte_length`. A body with any multi-byte character (`café`, `Content-Length: 5`, 4
+  codepoints) was mis-framed in BOTH directions: declared short, or over-read by a byte that on a
+  pipelined connection belongs to the next request. Body framing is now byte-exact
+  (`bytes.slice` over `bytes.from_string(raw)`, offset derived via `byte_length` of the header
+  prefix so a non-ASCII header value cannot shift it), and the read loop subtracts
+  `string.byte_length(chunk)`. The write deadline's rate allowance was denominated in codepoints
+  too and is now bytes. Tests: 4 checks in `tests/stdlib/test_http_server_parse.spr` (under-read,
+  over-read, split codepoint, non-ASCII header value) + `tests/task_io_smoke/http_utf8_body.spr`
+  (read-loop path, already-buffered path, split-codepoint liveness).
+  - **The prescribed fix in this entry was wrong, and the reason is worth keeping.** It said to read
+    exactly `content_length` bytes via `tcp_read_exact`. That builtin has **no deadline** — it loops
+    on `recv` and calls `scheduler_park_on_fd` on `EAGAIN` with no timer (`runtime/sprout_runtime.c`
+    `tcp_read_exact`) — so following it would have fixed the framing by reinstating unbounded handler
+    occupancy, the exact thing that had to land before `serve_pooled`. This entry predates the
+    occupancy work and was never reconciled with it. The fix keeps the deadline-bounded
+    `read_avail_timeout` loop and changes only the arithmetic.
+  - **`str_slice_bytes` is NOT usable here, and the reason generalises:** it is the byte-indexed
+    slice builtin, but on a cut that splits a UTF-8 codepoint it calls `tcp_fail` — the
+    process-fatal path — rather than returning an `Err`. A client announcing 4 bytes of a 5-byte
+    character would have killed the whole server, and under `serve_pooled` every worker with it.
+    `bytes.slice` clamps and `bytes.to_string` validates into a `Result`, at the cost of two
+    allocations. See the `json.parse` entry below for the same guard firing as a live remote abort.
+- [ ] `P1` **`json.parse` ABORTS THE PROCESS on any non-ASCII input.** Verified repro:
+  `json.parse("{\"a\":\"café\"}")` prints `runtime error: builtin str_slice_bytes:
+  byte_start+byte_len splits a UTF-8 codepoint` and exits 1. Cause: `stdlib/json.sprout` `byte1(s, i)
+  = str_slice_bytes(s, i, 1)` slices a single byte for character dispatch; when `i` is the LEAD byte
+  of a multi-byte sequence, `bs` passes the builtin's continuation-byte check but `bs + bl` lands on
+  a continuation byte, so the guard fires `tcp_fail`. Reachable from
+  `stdlib/compiler/lsp_driver.sprout:362` (`json.parse(body)` — opening a Sprout file containing any
+  non-ASCII string literal kills the LSP server), `stdlib/compiler/analysis_service_driver.sprout:1047`,
+  and any HTTP server parsing a JSON request body — an unauthenticated remote process kill, which
+  under `serve_pooled` takes down every worker rather than one connection. **Fix candidates:** `bytes.get`
+  (`Maybe Int`, already exists, no new builtin) or widening the `str_starts_with_at_byte` comparisons;
+  `json.sprout`'s header comment justifies the byte cursor on O(n) grounds, so the hot dispatch loop
+  needs measuring rather than assuming. Consider also whether `str_slice_bytes` should return a
+  `Result` instead of aborting — a process-fatal on attacker-controlled offsets is the wrong default
+  for a string builtin, and this is the second place it bit (see C5 above).
+- [ ] `P1` **Sweep every text-indexing module for the byte-vs-codepoint blind spot.** C5 and the
+  `json.parse` abort above are two symptoms of ONE missing test axis, and there is a third on record:
+  the bundler's `strip_headers_b` had the identical confusion ("byte offset was used as codepoint
+  index in `str_slice`, causing parse failures on files with multi-byte characters in comment
+  headers"). Byte and codepoint index spaces AGREE on ASCII, and the suites are all-ASCII —
+  `tests/stdlib/test_json.spr` has **zero** non-ASCII bytes across 133 lines — so an all-ASCII suite
+  cannot distinguish a byte-correct parser from a codepoint-confused one. **Method:** `LC_ALL=C grep
+  '[^ -~]' tests/stdlib/*.spr` to find suites with no non-ASCII coverage; then per module audit (a)
+  `string.length` compared against or mixed with a byte count, and (b) calls to text builtins that
+  are process-fatal rather than `Result`-returning (`str_slice_bytes`). **Targets:** `url`,
+  `template`, `regex`, `http`, `scram`, `string` itself, and `stdlib/compiler/lexer.sprout:11` (the
+  third `str_slice_bytes` caller — its offsets come from the tokenizer and are *probably*
+  boundary-aligned, which is not the same as verified). Add a non-ASCII case to each suite that lacks
+  one. Likely multi-PR.
+- [ ] `P2` **`request_body` is typed `String`, so HTTP bodies can never be binary.** Byte-exact
+  framing (C5) fixes the *arithmetic* but not the *ceiling*: `bytes_from_utf8` measures with
+  `strlen`, so a Sprout `String` is NUL-terminated and a body containing `0x00` is **truncated**, not
+  merely mangled. File uploads, `multipart/form-data`, protobuf and image `POST`s are therefore
+  structurally unrepresentable through `request_body`, and no amount of correct byte counting changes
+  that. C5's byte-exact framing now returns a clean 400 for a body that is not valid UTF-8, which is
+  the honest answer for a `String`-typed field but is a *rejection* of a legitimate request rather
+  than support for it. **Design decision needed** (public API change, hence its own item): does
+  `request_body` return `Bytes` with a `request_body_utf8` convenience, or does a second accessor
+  expose the raw bytes alongside it? Prior art to survey: Go's `http.Request.Body` is an
+  `io.ReadCloser` of bytes with decoding left to the caller; Rust's `hyper` uses a `Body` of `Bytes`
+  chunks. Raised 2026-08-10 while fixing C5.
+- [ ] `P3` **`bytes_slice`'s extern declaration has misleading parameter names.**
+  `stdlib/prelude.sprout` and `stdlib/bytes.sprout` declare `bytes_slice(b: Bytes, from: Int, to: Int)`,
+  but the C implementation takes `(start, count)` and clamps `count` — `bytes.slice`'s wrapper gets it
+  right (`start, count`) while the extern it calls is named as if it were a half-open range. Anyone
+  reading the extern will compute `to` and silently get a shorter slice than intended. Rename the
+  extern's parameters to `start`/`count`. Trivial, but it touches the prelude, so it needs the
+  seed-refresh path rather than riding along with an unrelated change. Noticed 2026-08-10 while
+  fixing C5 (I nearly mis-called the semantics from the declaration alone).
 - [ ] `P2` **Task-boundary panic isolation ("let it crash" at task granularity).** Today a panic in any green task — e.g. an http_server handler raising or hitting a bug — reaches `runtime`'s process-fatal path (`tcp_fail`/`exit(1)`/`_exit(127)`), so one bad request kills the whole server. Give the scheduler a per-task panic boundary: a panic unwinds to the spawning `with_scope`/`task_spawn` frame, marks that task failed, reclaims it, and lets siblings continue; a supervisor (the accept loop) observes the failure and responds (500 + loud log) instead of dying. This also fills the gap `task.sprout` flags ("no siblings auto-cancelled on failure yet; Sprout has no exceptions to inject"). It is the runtime half of an abortive `Exn` effect handler at task granularity, buildable without any type-system work, and it de-risks the eventual `Exn`-effect unwinding (see `docs/effect-system-handlers-draft.md` and `docs/math-partiality-v0.md` §4). **Caveats to design around:** (1) GC type-aware rooting must be settled on unwound frames or the heap corrupts (`docs/compiler-internals.md`); (2) green tasks share the GC heap/channels, so a task that panics mid-mutation of shared state can leave it inconsistent — the safe contract is *terminate + notify supervisor*, never resume-in-place, and steer shared state toward message-passing. Distinct from C3 (that item is `tcp_accept`/EMFILE isolation; this is *handler-body* panic isolation). Raised 2026-07-30 during the math-partiality design discussion.
 - [ ] `P2` **`tcp_echo_serve` is a serial accept→read→write→close loop (concurrency review C4).** `tcp_echo_serve` (`runtime/sprout_runtime.c`) handles one connection to completion before accepting the next, so `examples/tcp_echo_server.sprout` still has the head-of-line blocking that the green-task HTTP `serve` removed — one idle client freezes all others. Either migrate the example to a Sprout-level accept-and-spawn loop over `tcp_accept` + `task_spawn` (like `http_server.serve`) and retire the `tcp_echo_serve` builtin, or document the example as intentionally serial.
 - [ ] `P2` **Template engine phase 2 — filter pipeline + `loop.index`.** Follow-up to the phase-1 Jinja-flavored HTML template engine (`stdlib/template.sprout`, PR #203, built on top of the http_server routing/render work). Add a filter pipeline (`upper`/`lower`/`default`/`length`; the parser already special-cases `{{ path | safe }}`, so generalizing to a `{{ path | filter }}` chain is the natural next step), `loop.index` inside `{% for %}` bodies, and a web-server example that renders an HTML page from a template beyond the existing `/users` route. Design doc + full roadmap: `docs/template-engine-v0.md`.
