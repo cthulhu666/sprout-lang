@@ -562,6 +562,16 @@ SPROUT_GC_HDRCHECK=1` green.
 
 ## 12. Status
 
+**LANDED 2026-08-10 as opt-in `serve_pooled`** (Design A, Sprout-level, no scheduler change).
+`serve`/`serve_n` keep their unbounded-concurrency semantics; the pool is a separate entry point a
+caller opts into, defaulting to 8 workers on a 64-deep bounded channel. §5.2's decision resolved as
+"bound occupancy first, then pool": the body and response phases were given size-scaled total
+deadlines and a 413 size cap before any pooling landed, because bounded concurrency turns an
+unbounded per-connection occupancy from a memory cost into a total-availability one. Regression:
+`tests/task_io_smoke/http_pooled_serve.spr`. Gotcha A3 remains open and is filed in `BACKLOG.md` —
+a panicking handler still kills its worker, which a pool cannot contain the way spawn-per-connection
+did.
+
 **Experimental.** L0 concurrency is not part of normative v0, so neither design changes normative
 text. §7.4's hole *does* touch `docs/spec-v0.md` §5.8's enforcement bullets, which state the
 limits of discard checking — that wording needs review against the §7.4 table independently of
