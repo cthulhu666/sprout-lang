@@ -391,6 +391,17 @@ static void pump_loop(void) {
         int n = sprout_poll_wait(toks, 64);   /* blocks in kqueue/epoll */
         for (int i = 0; i < n; i++) {         /* each ready fd / fired timer wakes its task */
           Task* w = (Task*)toks[i];
+          /* A harvested TIMER is spent, and the pump is the only party that knows it fired — so
+           * the pump owns its teardown. On kqueue a fired one-shot is already gone and EV_DELETE
+           * is a no-op, which is why skipping this was invisible there; on Linux the timerfd stays
+           * OPEN until removed, so every fired deadline leaked a descriptor. `with_timeout` hit
+           * this on all four of its expiry paths (__await_deadline returns without tearing the
+           * timer down), and the pre-existing timeout fixtures each expire only one or two timers
+           * per process, so it never showed. Teardown must be EXACTLY once — the Linux backend
+           * close()s the fd, so a second call would close a reused descriptor — and the two other
+           * sites (trampoline, force_drop_task) both run only while the timer is still LIVE, i.e.
+           * mutually exclusive with this one. */
+          if (w->park_kind == PARK_TIMER) sprout_poll_remove_timer(w->park_timer_id);
           io_list_remove(w);                  /* no longer poller-parked */
           w->park_kind = PARK_NONE;
           w->park_fd = -1;
@@ -915,11 +926,11 @@ static void scheduler_park_on_timer(long long ms) {
   g_current_task->park_timer_id = tid;
   io_list_push(g_current_task);
   park_to_pump();
-  /* Resumed after the timer fired and the pump drained it. Tear the timer down (kqueue:
-   * ENOENT no-op, one-shot already gone; epoll: EPOLL_CTL_DEL + close the timerfd). The
-   * cancel-drop path is mutually exclusive with this one (a dropped task never resumes),
-   * so the timer is torn down exactly once. */
-  sprout_poll_remove_timer(tid);
+  /* Resumed after the timer fired, which means the PUMP already tore it down on harvest (it is
+   * the single owner of a fired timer's teardown — see pump_loop). Tearing it down again here
+   * would close a reused descriptor on Linux. The cancel-drop path is mutually exclusive with
+   * this one either way: a dropped task never resumes. */
+  (void)tid;
 }
 
 /* task_sleep(ms) with ms > 0 (the wrapper handles ms <= 0). Returns Unit (0). */
