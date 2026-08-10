@@ -1474,6 +1474,18 @@ op-classification already in place.
   - `getaddrinfo`'s list is **malloc'd, and `force_drop_task` frees only the green stack** — so the
     candidates are now copied onto the stack and the list released *before* any park can happen.
     General rule for any new park site: whatever is held across a park must live on the task stack.
+- [x] `P1` **`with_timeout` leaked a timerfd per expiry on Linux** (found + fixed 2026-08-10). When a
+  deadline FIRED, `__await_deadline` returned on all four of its post-expiry paths without tearing
+  the timer down, and `scheduler_park_on_timer` only tore its own down. Invisible on macOS —
+  kqueue's `EVFILT_TIMER` consumes no descriptor — and every pre-existing timeout fixture expires
+  only one or two deadlines per process, so nothing caught it. Fixed by making the **pump** the
+  single owner of a fired timer's teardown (it is the only party that knows the timer fired);
+  teardown must stay exactly-once because the Linux backend `close()`s the fd, and the other two
+  sites (trampoline, `force_drop_task`) run only while the timer is still *live*, so they are
+  mutually exclusive with the harvest path. Caught by `connect_park.spr`'s descriptor-budget
+  assertion (80 expiries under `ulimit -n 64`) — on Linux CI, not locally. Generalizable lesson:
+  **a per-iteration descriptor leak is only visible under a descriptor cap plus enough iterations**,
+  and the two poller backends differ in whether timers cost an fd at all.
 - [ ] `P2` **`http_request`'s connect is blocking too, and `SO_SNDTIMEO` does not bound it**
   (`runtime/sprout_runtime.c` ~6792 and ~7016, measured 2026-08-10). Both HTTP-client paths (plain
   and TLS) set `SO_RCVTIMEO`/`SO_SNDTIMEO` and then call `connect()` on a **blocking** socket. On

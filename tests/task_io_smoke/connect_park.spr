@@ -1,5 +1,5 @@
 import stdlib.task as task
-import stdlib.net (tcp_listen, tcp_close_listener, tcp_connect, tcp_error_message)
+import stdlib.net (tcp_listen, tcp_close_listener, tcp_connect, tcp_close, tcp_error_message)
 
 # L0.3 connect-park (regression). `tcp_connect` used to run connect() on a BLOCKING socket, so a
 # connect that could not complete promptly froze the whole OS thread: the pump never ran, no timer
@@ -26,8 +26,11 @@ import stdlib.net (tcp_listen, tcp_close_listener, tcp_connect, tcp_error_messag
 #     part-way through the 80 attempts and socket() starts failing; that surfaces here as `Err
 #     Too many open files`, which is reported verbatim instead of the success marker.
 #
-# The queued (successful) client sockets are deliberately never closed: closing one would not free
-# an accept-queue slot, and the fixture is a one-shot process.
+# Assertion 2 is a descriptor-budget assertion, so it catches ANY per-timeout descriptor leak on the
+# path, not only the connect socket. It found a second one: on Linux, `with_timeout` never closed
+# its timerfd when the deadline FIRED (kqueue timers use no descriptor, so macOS could not see it,
+# and every other timeout fixture expires only one or two deadlines per process). 80 expiries under
+# a 64-descriptor cap is what made it visible.
 
 fn port() -> Int = 28994
 
@@ -58,7 +61,15 @@ fn attempts(remaining: Int, expired: Int) -> Int !{IO} =
     | task.Expired -> attempts(remaining - 1, expired + 1)
     | task.Completed r ->
       match r with
-      | Ok (_) -> attempts(remaining - 1, expired)  # queued: the accept queue still had room
+      | Ok h ->
+        # Queued: the accept queue still had room. Close our end right away — the connection stays
+        # in the server's accept queue regardless (nothing ever accepts it), so the fill persists,
+        # but the fixture stops holding a descriptor per queued connection. That keeps the
+        # descriptor budget independent of how many connects a given kernel lets through, so the
+        # cap below can only be exhausted by an actual leak.
+        do
+          tcp_close(h)
+          attempts(remaining - 1, expired)
       | Err e ->
         do
           term_write("FAILED: connect errored instead of parking: ")
