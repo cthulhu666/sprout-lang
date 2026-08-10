@@ -559,7 +559,28 @@ Legend:
     character would have killed the whole server, and under `serve_pooled` every worker with it.
     `bytes.slice` clamps and `bytes.to_string` validates into a `Result`, at the cost of two
     allocations. See the `json.parse` entry below for the same guard firing as a live remote abort.
-- [ ] `P1` **`json.parse` ABORTS THE PROCESS on any non-ASCII input.** Verified repro:
+- [x] `P1` **`json.parse` ABORTED THE PROCESS on any non-ASCII input. FIXED 2026-08-10.** Every
+  dispatch read in `stdlib/json.sprout` is now a byte COMPARISON at an offset
+  (`str_starts_with_at_byte`, reads in place, cannot abort) rather than a one-byte slice: `byte1`,
+  `in_set`, `is_digit_byte` and `hexval` are gone, replaced by `at_end`, `is_digit_at`,
+  `is_num_byte_at` and `hex_at`. The remaining `str_slice_bytes` calls take TOKEN spans, and each is
+  codepoint-aligned at both ends by construction — a run stops at an ASCII delimiter or end-of-input
+  and starts where the previous stopped — so the abort class is gone from the module rather than
+  patched at the sites that happened to be found. `str_char_at` was rejected as the alternative: it is
+  codepoint-indexed and O(n) per call, which would make the parser quadratic.
+  **Measured, since the module justifies its byte cursor on O(n) grounds:** 20 parses of a
+  29,609-byte numbers-heavy document (numbers-heavy because `num_end` was the hottest `byte1` site)
+  ran ~106 ms steady-state both before and after — **neutral, not faster.** The prediction was that
+  removing an allocation per inspected byte would win; it did not show up, plausibly because a 1-byte
+  string allocation is an arena bump and ~15 short-circuiting calls cost about what one
+  alloc-plus-`str_find` did. Recorded because this module already has a history of asserting
+  unmeasured complexity (see the `str_slice_bytes` entry below).
+  Tests: 9 checks in `tests/stdlib/test_json.spr` — 2-, 3- and 4-byte characters, non-ASCII in an
+  object KEY, before a comma, at top level, through a stringify round trip, and two that assert the
+  decoded value byte-for-byte so a parser that skipped the bytes cannot pass. On the unfixed parser
+  the suite binary dies before printing anything (`run_suite` builds its list eagerly), so the result
+  count is itself the signal.
+  Original report: Verified repro:
   `json.parse("{\"a\":\"café\"}")` prints `runtime error: builtin str_slice_bytes:
   byte_start+byte_len splits a UTF-8 codepoint` and exits 1. Cause: `stdlib/json.sprout` `byte1(s, i)
   = str_slice_bytes(s, i, 1)` slices a single byte for character dispatch; when `i` is the LEAD byte
