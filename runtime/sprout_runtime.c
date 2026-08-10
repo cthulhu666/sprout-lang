@@ -8558,6 +8558,55 @@ long long tcp_read_avail(long long conn) {
   return tcp_net_ok((long long)(uintptr_t)head);
 }
 
+/* tcp_read_avail bounded by a deadline: wait at most `timeout_ms` for data to arrive, then return
+ * Err(TcpTimeout). The connection stays VALID and usable — a timeout is an outcome, not a fault —
+ * which is what lets a server answer 408 and run its normal close path.
+ *
+ * `timeout_ms <= 0` means "do not wait at all": one non-blocking attempt, then Err(TcpTimeout) if
+ * nothing had arrived. That is what makes a TOTAL deadline composable — a caller tracking a
+ * budget with time_now_micros can pass the remaining slice and get an immediate timeout once the
+ * budget is spent, with no special case at the call site.
+ *
+ * A total deadline is the point: bounding each individual read is not enough, because a slowloris
+ * sends one byte per interval and would reset a per-read timer forever.
+ *
+ * This is the Go/Java/Erlang read-deadline model (SetReadDeadline / SO_TIMEOUT / gen_tcp:recv
+ * Timeout), chosen over cancelling the reading task: a force-dropped task never runs its linear
+ * `close`, and cancellation would cost an extra green stack per connection. */
+long long tcp_read_avail_timeout(long long conn, long long timeout_ms) {
+  if (conn <= 0 || conn >= 2048 || !g_conn_used[conn])
+    return tcp_net_err0("stdlib.net.TcpInvalidHandle");
+  sprout_gc_maybe_collect_threshold();
+  char* buf = (char*)malloc(65537);
+  if (buf == NULL) tcp_fail("tcp_read_avail_timeout: out of memory");
+  ssize_t n;
+  for (;;) {
+    n = recv(g_conn_fd[conn], buf, 65536, 0);
+    if (n >= 0) break;
+    if (errno == EAGAIN || errno == EWOULDBLOCK) {   /* no unrooted GC temp held */
+      if (timeout_ms <= 0) {                         /* budget spent: report, do not park */
+        free(buf);
+        return tcp_net_err0("stdlib.net.TcpTimeout");
+      }
+      if (!scheduler_park_on_fd_timeout(g_conn_fd[conn], SPROUT_POLL_READ, timeout_ms)) {
+        free(buf);
+        return tcp_net_err0("stdlib.net.TcpTimeout");
+      }
+      /* Spurious readiness (readable, then EAGAIN) re-parks with the full remaining `timeout_ms`,
+       * so a single call is bounded only best-effort — the same ">= ms" guarantee with_timeout
+       * gives. A caller enforcing a TOTAL budget re-derives the slice from the clock each round,
+       * which bounds the whole phase regardless. */
+      continue;   /* the fd reported readable; retry the read */
+    }
+    int saved_errno = errno;   /* capture before free(), which may clobber errno */
+    free(buf);                 /* plain malloc buffer, free is correct */
+    return tcp_net_err1("stdlib.net.TcpReadFailed", (long long)(uintptr_t)strerror(saved_errno));
+  }
+  buf[n] = '\0';
+  char* head = sprout_gc_adopt_cstr(buf, (size_t)n, "tcp_read_avail_timeout: out of memory");
+  return tcp_net_ok((long long)(uintptr_t)head);
+}
+
 long long tcp_read_exact(long long conn, long long count) {
   if (conn <= 0 || conn >= 2048 || !g_conn_used[conn]) return tcp_net_err0("stdlib.net.TcpInvalidHandle");
   if (count < 0) {

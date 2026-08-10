@@ -61,6 +61,7 @@ fn http_status_info(status: Int) -> Maybe HttpStatusInfo =
   | 403 -> Just(HttpStatusInfo("403", "Forbidden"))
   | 404 -> Just(HttpStatusInfo("404", "Not Found"))
   | 405 -> Just(HttpStatusInfo("405", "Method Not Allowed"))
+  | 408 -> Just(HttpStatusInfo("408", "Request Timeout"))
   | 409 -> Just(HttpStatusInfo("409", "Conflict"))
   | 410 -> Just(HttpStatusInfo("410", "Gone"))
   | 422 -> Just(HttpStatusInfo("422", "Unprocessable Content"))

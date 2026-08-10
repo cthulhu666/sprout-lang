@@ -73,12 +73,16 @@ void sprout_poll_remove_timer(long long timer_id) {
     sprout_fail("sprout_poll_remove_timer: kevent EV_DELETE failed");
 }
 
-int sprout_poll_wait(void** out_tokens, int max) {
+int sprout_poll_wait(void** out_tokens, int* out_is_timer, int max) {
   struct kevent evs[64];
   int want = (max < 64) ? max : 64;
   int n = kevent(g_kq, NULL, 0, evs, want, NULL);   /* NULL timeout = block */
   if (n < 0) sprout_fail("sprout_poll_wait: kevent wait failed");
-  for (int i = 0; i < n; i++) out_tokens[i] = evs[i].udata;
+  for (int i = 0; i < n; i++) {
+    out_tokens[i]   = evs[i].udata;
+    /* kqueue reports the filter, so the fd-vs-timer question answers itself here. */
+    out_is_timer[i] = (evs[i].filter == EVFILT_TIMER) ? 1 : 0;
+  }
   return n;
 }
 
@@ -139,7 +143,14 @@ void sprout_poll_add_timer(long long ms, void* token, long long* out_id) {
   struct epoll_event ev;
   memset(&ev, 0, sizeof(ev));
   ev.events = EPOLLIN | EPOLLONESHOT;
-  ev.data.ptr = token;
+  /* TAG the timer's token in bit 0 so sprout_poll_wait can report fd-vs-timer, which the
+   * combined fd-or-timer park needs (it has one task registered on BOTH, and must tear down
+   * the loser — while the timer backend's teardown close()s an fd, so it has to happen exactly
+   * once). kqueue gets this for free from evs[i].filter; epoll_event.data is a union carrying
+   * only the token, so the distinction has to be encoded IN the token. Task pointers come from
+   * malloc and are at least 8-byte aligned, so bit 0 is always free. Tag/untag stays private to
+   * this file — the scheduler only ever sees the untagged token plus the is_timer flag. */
+  ev.data.ptr = (void*)((uintptr_t)token | 1u);
   if (epoll_ctl(g_ep, EPOLL_CTL_ADD, tfd, &ev) < 0) {
     close(tfd);
     sprout_fail("sprout_poll_add_timer: epoll_ctl ADD failed");
@@ -156,12 +167,16 @@ void sprout_poll_remove_timer(long long timer_id) {
   close(tfd);
 }
 
-int sprout_poll_wait(void** out_tokens, int max) {
+int sprout_poll_wait(void** out_tokens, int* out_is_timer, int max) {
   struct epoll_event evs[64];
   int want = (max < 64) ? max : 64;
   int n = epoll_wait(g_ep, evs, want, -1);   /* -1 = block */
   if (n < 0) sprout_fail("sprout_poll_wait: epoll_wait failed");
-  for (int i = 0; i < n; i++) out_tokens[i] = evs[i].data.ptr;
+  for (int i = 0; i < n; i++) {
+    uintptr_t raw = (uintptr_t)evs[i].data.ptr;   /* bit 0 set == a timer (see add_timer) */
+    out_is_timer[i] = (int)(raw & 1u);
+    out_tokens[i]   = (void*)(raw & ~(uintptr_t)1u);
+  }
   return n;
 }
 

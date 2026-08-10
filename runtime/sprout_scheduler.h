@@ -84,13 +84,24 @@ void sprout_poll_add_timer(long long ms, void* token, long long* out_id);
  * not-yet-retrieved event (timers fire asynchronously to the pump) so a dropped sleeping
  * task cannot be resumed by a stale token. Idempotent (ENOENT ignored). */
 void sprout_poll_remove_timer(long long timer_id);
-/* Block until ≥1 registered fd is ready; fill `out_tokens` (up to `max`) with
- * the ready fds' tokens and return the count. */
-int  sprout_poll_wait(void** out_tokens, int max);
+/* Block until ≥1 registration is ready; fill `out_tokens` (up to `max`) with the ready
+ * tokens and return the count. `out_is_timer[i]` is 1 when event i came from a TIMER
+ * registration rather than an fd — the combined fd-or-timer park needs it, since it has one
+ * task registered on both and must tear down whichever did NOT fire, and the timer teardown
+ * close()s a descriptor on Linux so it must run exactly once. Both arrays must have room
+ * for `max` entries. */
+int  sprout_poll_wait(void** out_tokens, int* out_is_timer, int max);
 
 /* Suspend the current green task until `fd` is ready for `interest` (READ|WRITE),
  * then resume it. Called from the retrofitted tcp_* builtins on EAGAIN. */
 void scheduler_park_on_fd(int fd, int interest);
+/* Suspend the current task until `fd` is ready for `interest` OR `ms` milliseconds elapse,
+ * whichever comes first. Returns 1 if the fd became ready, 0 if the deadline won. The task is
+ * NOT dropped on expiry — it resumes normally and its caller decides what a timeout means — which
+ * is what lets a timed read report `Err` while leaving the connection valid and its linear
+ * release path intact (cf. Go's SetReadDeadline / Java's SO_TIMEOUT, as opposed to cancelling
+ * the task). `ms` must be > 0; callers wanting "don't wait at all" should skip the park. */
+int  scheduler_park_on_fd_timeout(int fd, int interest, long long ms);
 /* Same, for an fd that no handle table owns yet — an in-flight connect(). If this task is
  * force-dropped while parked (with_timeout / scope_cancel), the drop CLOSES `fd`, since the
  * parked frame it frees held the only reference. Use scheduler_park_on_fd for any fd a

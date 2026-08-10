@@ -42,6 +42,8 @@ Builtin effect convention:
 - `tcp_read(conn: Int) -> String !{IO}`
 - `tcp_write(conn: Int, payload: String) -> Unit !{IO}`
 - `tcp_connect(host: String, port: Int) -> Result stdlib.net.TcpError Int !{IO}`
+- `tcp_read_avail(conn: Int) -> Result stdlib.net.TcpError String !{IO}`
+- `tcp_read_avail_timeout(conn: Int, timeout_ms: Int) -> Result stdlib.net.TcpError String !{IO}` — `tcp_read_avail` bounded by a deadline: `Err TcpTimeout` if nothing arrives in time, with the connection **still valid** (Go `SetReadDeadline` / Java `SO_TIMEOUT` semantics, not cancellation). `timeout_ms <= 0` polls once without waiting, which is what lets a caller enforce a *total* budget by passing the remaining slice each round.
 - `tcp_read_exact(conn: Int, count: Int) -> Result stdlib.net.TcpError Bytes !{IO}`
 - `tcp_write_all(conn: Int, payload: Bytes) -> Result stdlib.net.TcpError Int !{IO}`
 - `tcp_close(conn: Int) -> Unit !{IO}`

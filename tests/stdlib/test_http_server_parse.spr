@@ -16,6 +16,10 @@ fn describe_err(e: HttpServerError) -> String =
   match e with
   | HttpInvalidRequest msg -> `Err ${msg}`
   | HttpServerUnsupportedStatus code -> `Err status ${int_to_string(code)}`
+  # `parse` works on an already-read String, so it can never produce this — a timeout can only come
+  # from the read path (see tests/task_io_smoke/http_idle_timeout.spr). Named anyway: the
+  # exhaustiveness checker is what made this file the first thing to notice the new variant.
+  | HttpRequestTimeout -> "Err request timeout"
 
 fn main() -> Unit !{IO} =
   run_suite("http_server_parse", [

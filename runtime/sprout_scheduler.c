@@ -91,6 +91,14 @@ typedef struct Task {
                                * bare socket that no handle table owns yet, so a cancel-drop is
                                * the socket's last reference — see that function. */
   long long    park_timer_id; /* opaque timer handle when park_kind == PARK_TIMER (L0.6) */
+  int          park_timer_dead; /* 1 once THIS park's timer registration has been torn down.
+                                 * The Linux backend close()s the timerfd, so a second teardown
+                                 * would close a reused descriptor — every site that tears a
+                                 * task's own timer down checks and sets this, making
+                                 * exactly-once an explicit invariant rather than one derived
+                                 * from which paths happen to be mutually exclusive. */
+  int          park_woke_by_timer; /* set by the pump on wake: 1 = the timer fired, 0 = the fd
+                                    * became ready. Only meaningful for PARK_FD_TIMER. */
   struct Task* io_next;    /* g_io_head list link (only while parked on I/O or a timer) */
   struct Task* io_prev;
   int          on_io_list; /* 1 iff currently linked on g_io_head (robust membership signal,
@@ -121,7 +129,10 @@ typedef struct Task {
 
 /* How a task is suspended, so force-drop tears down the right registration (poller fd/timer, a
  * channel wait-queue, or — for select — every channel it registered on) when it drops the task. */
-enum { PARK_NONE = 0, PARK_FD = 1, PARK_TIMER = 2, PARK_CHAN = 3, PARK_SELECT = 4 };
+enum { PARK_NONE = 0, PARK_FD = 1, PARK_TIMER = 2, PARK_CHAN = 3, PARK_SELECT = 4,
+       /* Registered on an fd AND a timer at once (a bounded read): whichever fires first wakes
+        * the task, and the loser's registration is torn down on resume or on force-drop. */
+       PARK_FD_TIMER = 5 };
 
 /* L0.8 channel: a bounded buffered FIFO ring shared between tasks. Non-moving malloc; the
  * pointer IS the Int the Sprout `Chan a` value wraps. Owns a SproutRoots context that roots
@@ -388,7 +399,8 @@ static void pump_loop(void) {
     if (t == NULL) {
       if (g_io_head != NULL) {
         void* toks[64];
-        int n = sprout_poll_wait(toks, 64);   /* blocks in kqueue/epoll */
+        int   is_timer[64];
+        int n = sprout_poll_wait(toks, is_timer, 64);   /* blocks in kqueue/epoll */
         for (int i = 0; i < n; i++) {         /* each ready fd / fired timer wakes its task */
           Task* w = (Task*)toks[i];
           /* A harvested TIMER is spent, and the pump is the only party that knows it fired — so
@@ -397,11 +409,18 @@ static void pump_loop(void) {
            * OPEN until removed, so every fired deadline leaked a descriptor. `with_timeout` hit
            * this on all four of its expiry paths (__await_deadline returns without tearing the
            * timer down), and the pre-existing timeout fixtures each expire only one or two timers
-           * per process, so it never showed. Teardown must be EXACTLY once — the Linux backend
-           * close()s the fd, so a second call would close a reused descriptor — and the two other
-           * sites (trampoline, force_drop_task) both run only while the timer is still LIVE, i.e.
-           * mutually exclusive with this one. */
-          if (w->park_kind == PARK_TIMER) sprout_poll_remove_timer(w->park_timer_id);
+           * per process, so it never showed. */
+          if (is_timer[i] && !w->park_timer_dead) {
+            sprout_poll_remove_timer(w->park_timer_id);
+            w->park_timer_dead = 1;
+          }
+          /* A PARK_FD_TIMER task has TWO registrations, so both can be reported in one batch. The
+           * first event wakes and unlinks it; the second must still be accounted for above (a
+           * fired timerfd has to be closed) but must NOT wake it a second time — a double
+           * rq_push would self-cycle the ready queue. Membership on g_io_head is the signal.
+           * Every other park kind has a single registration and so cannot appear twice. */
+          if (!w->on_io_list) continue;
+          w->park_woke_by_timer = is_timer[i];
           io_list_remove(w);                  /* no longer poller-parked */
           w->park_kind = PARK_NONE;
           w->park_fd = -1;
@@ -458,7 +477,10 @@ static void task_trampoline(void) {
      *    enqueued it -> do NOT push again.
      *  - ordinary task_await awaiter (deadline_child == NULL, never on the io list) -> push. */
     if (aw->on_io_list) {
-      sprout_poll_remove_timer(aw->park_timer_id);
+      if (!aw->park_timer_dead) {           /* still linked => the timer never fired => live */
+        sprout_poll_remove_timer(aw->park_timer_id);
+        aw->park_timer_dead = 1;
+      }
       io_list_remove(aw);
       aw->park_kind = PARK_NONE;
       rq_push(aw);
@@ -493,6 +515,8 @@ static void sprout_scheduler_init(void) {
   g_task0.park_fd = -1;
   g_task0.park_close_fd = -1;
   g_task0.park_timer_id = 0;
+  g_task0.park_timer_dead = 0;
+  g_task0.park_woke_by_timer = 0;
   g_task0.io_next = NULL;
   g_task0.io_prev = NULL;
   g_task0.on_io_list = 0;
@@ -551,6 +575,8 @@ static Task* task_create(Scope* s, long long work, int awaitable) {
   t->park_interest = 0;
   t->park_close_fd = -1;   /* set only while parked on an fd no handle table owns */
   t->park_timer_id = 0;
+  t->park_timer_dead = 0;
+  t->park_woke_by_timer = 0;
   t->io_next    = NULL;
   t->io_prev    = NULL;
   t->on_io_list = 0;
@@ -667,8 +693,14 @@ static void force_drop_task(Task* t) {
     else                   chan_q_remove(&ch->recv_head, &ch->recv_tail, t);
     t->park_chan = NULL;
   } else {
-    if (t->park_kind == PARK_TIMER) sprout_poll_remove_timer(t->park_timer_id);
-    else                            sprout_poll_remove(t->park_fd, t->park_interest);
+    /* PARK_FD_TIMER holds BOTH registrations, so a force-drop has to tear down both. */
+    if (t->park_kind == PARK_TIMER || t->park_kind == PARK_FD_TIMER) {
+      if (!t->park_timer_dead) {
+        sprout_poll_remove_timer(t->park_timer_id);
+        t->park_timer_dead = 1;
+      }
+    }
+    if (t->park_kind != PARK_TIMER) sprout_poll_remove(t->park_fd, t->park_interest);
     io_list_remove(t);
     /* An unowned-fd park (in-flight connect) leaves the socket referenced ONLY by the parked
      * frame we are about to free — no handle table entry, so nothing else can ever close it.
@@ -776,9 +808,10 @@ long long __await_deadline(long long scope_handle, long long task_handle, long l
    * trampoline/harvest dedup, §5.3). */
   long long tid;
   sprout_poll_add_timer(ms, owner, &tid);
-  owner->park_kind      = PARK_TIMER;
-  owner->park_timer_id  = tid;
-  owner->deadline_child = child;
+  owner->park_kind        = PARK_TIMER;
+  owner->park_timer_id    = tid;
+  owner->park_timer_dead  = 0;          /* fresh registration */
+  owner->deadline_child   = child;
   io_list_push(owner);
   child->awaiter = owner;
   park_to_pump();
@@ -789,7 +822,13 @@ long long __await_deadline(long long scope_handle, long long task_handle, long l
     /* Completed within the deadline. The child-first trampoline path already tore our timer
      * down and unlinked us; if instead the timer harvested us and the child then finished, the
      * timer is already consumed. If we are somehow still linked, tear it down. */
-    if (owner->on_io_list) { sprout_poll_remove_timer(owner->park_timer_id); io_list_remove(owner); }
+    if (owner->on_io_list) {
+      if (!owner->park_timer_dead) {
+        sprout_poll_remove_timer(owner->park_timer_id);
+        owner->park_timer_dead = 1;
+      }
+      io_list_remove(owner);
+    }
     child->awaiter = NULL;
     return 1;
   }
@@ -900,6 +939,41 @@ void scheduler_park_on_fd(int fd, int interest) {
   /* resumed by the pump after the poller reported readiness */
 }
 
+/* Park until `fd` is ready for `interest` OR `ms` elapse. Returns 1 = fd ready, 0 = timed out.
+ *
+ * The task is NOT dropped when the deadline wins — it resumes and its caller reports a timeout,
+ * leaving the socket valid and every linear release path intact. That is the Go/Java/Erlang model
+ * (SetReadDeadline / SO_TIMEOUT / gen_tcp:recv Timeout) rather than the cancel-the-task model of
+ * `with_timeout`, and it is the only one that composes with linearity here: a force-dropped task
+ * never runs its `close`, and a per-connection deadline in the cancel model would also cost an
+ * extra green stack per connection.
+ *
+ * Both registrations carry this task as their token, so BOTH can be reported in a single poll
+ * batch; the pump handles that (it wakes the task once and still accounts for a fired timer), and
+ * `park_timer_dead` keeps the timer's teardown exactly-once across the pump and this function. */
+int scheduler_park_on_fd_timeout(int fd, int interest, long long ms) {
+  Task* t = g_current_task;
+  long long tid;
+  sprout_poll_add(fd, interest, t);
+  sprout_poll_add_timer(ms, t, &tid);
+  t->park_kind          = PARK_FD_TIMER;
+  t->park_fd            = fd;
+  t->park_interest      = interest;
+  t->park_timer_id      = tid;
+  t->park_timer_dead    = 0;
+  t->park_woke_by_timer = 0;
+  io_list_push(t);
+  park_to_pump();
+  /* Resumed. Retire the loser: poll_remove is documented idempotent, so it is safe whether or not
+   * the fd fired; the timer needs the flag because its teardown closes a descriptor. */
+  sprout_poll_remove(fd, interest);
+  if (!t->park_timer_dead) {
+    sprout_poll_remove_timer(tid);
+    t->park_timer_dead = 1;
+  }
+  return t->park_woke_by_timer ? 0 : 1;
+}
+
 /* scheduler_park_on_fd for an fd that NO handle table owns yet — currently only tcp_connect's
  * in-flight connect, which parks on writability of a bare socket() result.
  *
@@ -922,8 +996,9 @@ void scheduler_park_on_unowned_fd(int fd, int interest) {
 static void scheduler_park_on_timer(long long ms) {
   long long tid;
   sprout_poll_add_timer(ms, g_current_task, &tid);
-  g_current_task->park_kind     = PARK_TIMER;
-  g_current_task->park_timer_id = tid;
+  g_current_task->park_kind       = PARK_TIMER;
+  g_current_task->park_timer_id   = tid;
+  g_current_task->park_timer_dead = 0;   /* fresh registration */
   io_list_push(g_current_task);
   park_to_pump();
   /* Resumed after the timer fired, which means the PUMP already tore it down on harvest (it is

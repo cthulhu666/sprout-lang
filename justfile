@@ -1562,7 +1562,15 @@ task-io-smoke: bootstrap-from-seed
   build tests/task_io_smoke/connect_park.spr
   ( ulimit -n 64; run_once "connect-park" "connect-park-ok" )
   ( ulimit -n 64; SPROUT_GC_STRESS=1 run_once "connect-park/stress" "connect-park-ok" )
-  echo "==> task-io-smoke ✓ (read-park, accept-park, re-arm, http-serve-concurrency, http-conn-error-isolation, tcp-read-avail-error, write, cancel-drop, await-guard, timer-drop, timeout-drop, timeout-nested-guard, chan-cancel-drop, chan-timeout-drop, chan-negative-cap-guard, rendezvous-send-drop, send-on-closed-guard, double-close-guard, send-parked-close-guard, select-cancel-drop, select-timeout-drop, connect-park; interleaved; stress-clean)"
+  # (19) http_server idle-connection timeout (C3): a peer that connects and sends NOTHING must be
+  # answered 408 and closed on a TOTAL header deadline, instead of parking its handler forever and
+  # leaking the connection handle (slowloris). The same fixture's prompt client must still get 200,
+  # so an over-eager timeout is RED too. Unfixed, the silent client's read never returns -> HANG.
+  build tests/task_io_smoke/http_idle_timeout.spr
+  run_once "http-idle-timeout" "silent-got-408"
+  run_once "http-idle-timeout/served" "prompt-got-200"
+  SPROUT_GC_STRESS=1 run_once "http-idle-timeout/stress" "silent-got-408"
+  echo "==> task-io-smoke ✓ (read-park, accept-park, re-arm, http-serve-concurrency, http-conn-error-isolation, tcp-read-avail-error, write, cancel-drop, await-guard, timer-drop, timeout-drop, timeout-nested-guard, chan-cancel-drop, chan-timeout-drop, chan-negative-cap-guard, rendezvous-send-drop, send-on-closed-guard, double-close-guard, send-parked-close-guard, select-cancel-drop, select-timeout-drop, connect-park, http-idle-timeout; interleaved; stress-clean)"
 
 # Division-by-zero guard regression (CI gate). The fixture divides by a RUNTIME
 # zero (`10 / list_length(argv)` with no args), which neither the compiler nor

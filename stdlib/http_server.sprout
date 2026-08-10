@@ -1,7 +1,7 @@
 module stdlib.http_server
 
 import stdlib.http (HttpStatusError, RequestLine, RequestPathVersion, http_response, parse_request_line, status_line)
-import stdlib.net (TcpConnection, TcpListener, accept, close, close_listener, listen_local, read_avail, write_all_utf8)
+import stdlib.net (TcpConnection, TcpListener, TcpTimeout, accept, close, close_listener, listen_local, read_avail_timeout, write_all_utf8)
 import stdlib.string as string
 import stdlib.task (Scope, with_scope, task_spawn)
 import stdlib.url (parse_query)
@@ -18,8 +18,55 @@ export type HttpServerResponse =
 export type HttpServerError (..) =
   | HttpInvalidRequest String
   | HttpServerUnsupportedStatus Int
+  # The client did not finish sending within its budget. Separate from HttpInvalidRequest because
+  # it maps to a different status (408, not 400) and because it is not the client's request being
+  # malformed — there simply was not one yet.
+  | HttpRequestTimeout
 
 type alias ServerResult a = Result HttpServerError a
+
+# Per-connection read budgets, in milliseconds. Both are TOTAL for their phase, not per-read: a
+# per-read timeout is defeated by a peer that dribbles one byte per interval, which is exactly what
+# a slowloris does. On expiry the server answers 408 and closes, so a silent or crawling client
+# costs one connection for a bounded time instead of a handler task forever.
+#
+# Shape follows nginx's split (client_header_timeout / client_body_timeout) rather than a single
+# request deadline: header and body have different legitimate profiles — headers arrive in one or
+# two segments, a large upload legitimately takes longer.
+export type ServerConfig (..) =
+  | ServerConfig Int Int
+
+# header 10 s / body 30 s. Chosen well above any legitimate client (headers normally arrive in the
+# first segment) and well below the ~forever that the unbounded read allowed. nginx defaults both to
+# 60 s; Go's http.Server defaults to none at all, which is the hazard this replaces.
+export fn default_config() -> ServerConfig =
+  ServerConfig(10000, 30000)
+
+# `header_ms` bounds reading the request line + headers; `body_ms` bounds reading the body.
+export fn server_config(header_ms: Int, body_ms: Int) -> ServerConfig =
+  ServerConfig(header_ms, body_ms)
+
+fn config_header_ms(config: ServerConfig) -> Int =
+  match config with
+  | ServerConfig header_ms _ -> header_ms
+
+fn config_body_ms(config: ServerConfig) -> Int =
+  match config with
+  | ServerConfig _ body_ms -> body_ms
+
+# An absolute monotonic-microsecond instant `ms` from now. Monotonic (time_now_micros), so an NTP
+# step mid-request cannot make a deadline fire early or never.
+fn deadline_in(ms: Int) -> Int !{IO} =
+  do
+    now <- time_now_micros()
+    now + ms * 1000
+
+# Milliseconds left until `deadline`, floored at 0. A budget of 0 makes read_avail_timeout poll once
+# and report a timeout, so an already-expired deadline needs no special case at the call site.
+fn remaining_ms(deadline: Int) -> Int !{IO} =
+  do
+    now <- time_now_micros()
+    if now >= deadline then 0 else (deadline - now) / 1000
 
 fn find_headers_end(raw: String) -> Maybe Int =
   string.find(raw, "\r\n\r\n")
@@ -148,46 +195,63 @@ fn err_or_request(req: RequestLine, headers: Dict String, content_length: Int, r
       else
         Ok(build_request(req, headers, string.take(string.drop(raw, body_start), content_length)))
 
-# Reads use net.read_avail (recoverable): a socket failure becomes an Err in the
+# Reads use net.read_avail_timeout (recoverable AND bounded): a socket failure becomes an Err in the
 # ServerResult, not an exit(1), so one client's connection reset drops just that
 # connection. `Ok("")` (peer closed cleanly) is still the unexpected-end-of-stream case.
-fn read_until_headers(conn: borrowing TcpConnection, acc: String) -> ServerResult String !{IO} =
+# Each round re-derives its budget from the clock, so `deadline` bounds the WHOLE phase however many
+# reads it takes. That is what makes it a defence: a client sending one byte per interval renews a
+# per-read timer forever, but cannot renew this one.
+#
+# TcpTimeout is kept distinct from a socket error all the way up, because the two produce different
+# statuses (408 vs 400) and only one of them means the client did something wrong.
+fn read_until_headers(conn: borrowing TcpConnection, acc: String, deadline: Int) -> ServerResult String !{IO} =
   match find_headers_end(acc) with
   | Just _ -> Ok(acc)
   | Nothing ->
-      match read_avail(conn) with
+      do
+        budget <- remaining_ms(deadline)
+        match read_avail_timeout(conn, budget) with
+        | Err TcpTimeout -> Err(HttpRequestTimeout)
+        | Err _ -> Err(HttpInvalidRequest("connection error"))
+        | Ok chunk ->
+            if string.is_empty(chunk) then Err(HttpInvalidRequest("unexpected end of stream"))
+            else read_until_headers(conn, string.concat(acc, chunk), deadline)
+
+fn read_remaining_body(conn: borrowing TcpConnection, acc: String, remaining: Int, deadline: Int) -> ServerResult String !{IO} =
+  if remaining <= 0 then Ok(acc)
+  else
+    do
+      budget <- remaining_ms(deadline)
+      match read_avail_timeout(conn, budget) with
+      | Err TcpTimeout -> Err(HttpRequestTimeout)
       | Err _ -> Err(HttpInvalidRequest("connection error"))
       | Ok chunk ->
           if string.is_empty(chunk) then Err(HttpInvalidRequest("unexpected end of stream"))
-          else read_until_headers(conn, string.concat(acc, chunk))
-
-fn read_remaining_body(conn: borrowing TcpConnection, acc: String, remaining: Int) -> ServerResult String !{IO} =
-  if remaining <= 0 then Ok(acc)
-  else
-    match read_avail(conn) with
-    | Err _ -> Err(HttpInvalidRequest("connection error"))
-    | Ok chunk ->
-        if string.is_empty(chunk) then Err(HttpInvalidRequest("unexpected end of stream"))
-        else read_remaining_body(conn, string.concat(acc, chunk), remaining - string.length(chunk))
+          else read_remaining_body(conn, string.concat(acc, chunk), remaining - string.length(chunk), deadline)
 
 # Every read path BORROWS the connection: a request is read over many syscalls,
 # and under strict consume-exactly-once the first read would take the socket and
 # every later one would be a reuse. `handle_connection` holds the single consume.
-fn read_request(conn: borrowing TcpConnection) -> ServerResult HttpRequest !{IO} =
+fn read_request(conn: borrowing TcpConnection, config: ServerConfig) -> ServerResult HttpRequest !{IO} =
   do
-    raw <- read_until_headers(conn, "")
-    read_request_from_prefix(conn, raw)
+    header_deadline <- deadline_in(config_header_ms(config))
+    raw <- read_until_headers(conn, "", header_deadline)
+    read_request_from_prefix(conn, raw, config)
 
-fn read_request_from_prefix(conn: borrowing TcpConnection, raw: String) -> ServerResult HttpRequest !{IO} =
+fn read_request_from_prefix(conn: borrowing TcpConnection, raw: String, config: ServerConfig) -> ServerResult HttpRequest !{IO} =
   do
     prefix <- parse_request_prefix(raw)
-    continue_read_request(conn, raw, prefix)
+    continue_read_request(conn, raw, prefix, config)
 
-fn continue_read_request(conn: borrowing TcpConnection, raw: String, prefix: (RequestLine, Dict String, Int)) -> ServerResult HttpRequest !{IO} =
+# The body gets its OWN budget, starting when the headers are complete — a slow upload must not be
+# charged for however long the headers took, and a client that stalls after its headers must still
+# be cut off.
+fn continue_read_request(conn: borrowing TcpConnection, raw: String, prefix: (RequestLine, Dict String, Int), config: ServerConfig) -> ServerResult HttpRequest !{IO} =
   if string.length(body) >= content_length then parse(raw)
   else
     do
-      full <- read_remaining_body(conn, raw, content_length - string.length(body))
+      body_deadline <- deadline_in(config_body_ms(config))
+      full <- read_remaining_body(conn, raw, content_length - string.length(body), body_deadline)
       parse(full)
 where
   (_req, _headers, content_length) = prefix
@@ -254,6 +318,10 @@ export fn bad_request(body: String) -> HttpServerResponse =
 
 export fn not_found(body: String) -> HttpServerResponse =
   response(404, body)
+
+# 408, the answer to a client that connected but did not finish its request in time.
+export fn request_timeout(body: String) -> HttpServerResponse =
+  response(408, body)
 
 # A 303 See Other redirect to `location`, with an empty body. This is the Post/
 # Redirect/Get pattern: a form handler mutates state on POST, then returns this so the
@@ -450,9 +518,17 @@ fn write_and_close(conn: consuming TcpConnection, payload: String) -> Unit !{IO}
   | Ok _ -> close(conn)
   | Err _ -> close(conn)
 
-fn handle_connection(conn: consuming TcpConnection, handler: HttpRequest -> HttpServerResponse !{IO}) -> Unit !{IO} =
-  match read_request(conn) with
-  | Err _ -> write_and_close(conn, bad_request("bad request") |> render_response_or_fallback)
+# A read that ran out of budget answers 408 rather than 400: the request was not malformed, it was
+# not finished. Either way the connection is consumed exactly once, so no path leaks it.
+fn read_error_response(err: HttpServerError) -> HttpServerResponse =
+  match err with
+  | HttpRequestTimeout -> request_timeout("request timeout")
+  | HttpInvalidRequest _ -> bad_request("bad request")
+  | HttpServerUnsupportedStatus _ -> bad_request("bad request")
+
+fn handle_connection(config: ServerConfig, conn: consuming TcpConnection, handler: HttpRequest -> HttpServerResponse !{IO}) -> Unit !{IO} =
+  match read_request(conn, config) with
+  | Err err -> write_and_close(conn, read_error_response(err) |> render_response_or_fallback)
   | Ok req ->
       do
         resp <- handler(req)
@@ -482,18 +558,24 @@ fn render_response_or_fallback(resp: HttpServerResponse) -> String =
 # sole consume. `listener` is consumed exactly once on every path — by
 # `close_listener` on the terminating branch, and by the recursive call itself on
 # the looping one.
-fn serve_loop(scope: Scope, listener: consuming TcpListener, remaining: Int, handler: HttpRequest -> HttpServerResponse !{IO}) -> Unit !{IO} =
+fn serve_loop(scope: Scope, listener: consuming TcpListener, remaining: Int, config: ServerConfig, handler: HttpRequest -> HttpServerResponse !{IO}) -> Unit !{IO} =
   if remaining == 0 then close_listener(listener)
   else
     do
       conn <- accept(listener)
-      task_spawn(scope, \_ -> handle_connection(conn, handler))
-      serve_loop(scope, listener, remaining - 1, handler)
+      task_spawn(scope, \_ -> handle_connection(config, conn, handler))
+      serve_loop(scope, listener, remaining - 1, config, handler)
 
 # `with_scope` does not return until every spawned handler has finished, so no
 # connection outlives the call (structured concurrency — no orphaned handlers).
 export fn serve_n(port: Int, max_connections: Int, handler: HttpRequest -> HttpServerResponse !{IO}) -> Unit !{IO} =
-  with_scope(\s -> serve_loop(s, listen_local(port), max_connections, handler))
+  serve_n_with(default_config(), port, max_connections, handler)
+
+# `serve_n` with explicit read budgets. Exported mainly so the timeouts are testable at all — a
+# hard-coded 10 s header budget would make a regression test either slow or impossible — but it is
+# also the knob a deployment behind a slow link needs.
+export fn serve_n_with(config: ServerConfig, port: Int, max_connections: Int, handler: HttpRequest -> HttpServerResponse !{IO}) -> Unit !{IO} =
+  with_scope(\s -> serve_loop(s, listen_local(port), max_connections, config, handler))
 
 # Unbounded counterpart of `serve_loop`: the same accept-and-spawn body with no
 # terminating branch, so it keeps accepting connections forever. Each handler is
@@ -502,15 +584,19 @@ export fn serve_n(port: Int, max_connections: Int, handler: HttpRequest -> HttpS
 # never joins. The listener is never closed — the loop owns it for the process's
 # lifetime — and yet this is NOT a linear leak: the tail call consumes it, which
 # is the accurate reading, since the next iteration really does own it.
-fn serve_forever_loop(scope: Scope, listener: consuming TcpListener, handler: HttpRequest -> HttpServerResponse !{IO}) -> Unit !{IO} =
+fn serve_forever_loop(scope: Scope, listener: consuming TcpListener, config: ServerConfig, handler: HttpRequest -> HttpServerResponse !{IO}) -> Unit !{IO} =
   do
     conn <- accept(listener)
-    task_spawn(scope, \_ -> handle_connection(conn, handler))
-    serve_forever_loop(scope, listener, handler)
+    task_spawn(scope, \_ -> handle_connection(config, conn, handler))
+    serve_forever_loop(scope, listener, config, handler)
 
 # Serve requests forever. Unlike `serve_n`, this never returns under normal
 # operation — the enclosing `with_scope` join is unreachable, which is exactly
 # what an always-on server wants. Reach for `serve_n` when a bounded, terminating
 # run is needed (e.g. tests/CI).
 export fn serve(port: Int, handler: HttpRequest -> HttpServerResponse !{IO}) -> Unit !{IO} =
-  with_scope(\s -> serve_forever_loop(s, listen_local(port), handler))
+  serve_with(default_config(), port, handler)
+
+# `serve` with explicit read budgets (see serve_n_with).
+export fn serve_with(config: ServerConfig, port: Int, handler: HttpRequest -> HttpServerResponse !{IO}) -> Unit !{IO} =
+  with_scope(\s -> serve_forever_loop(s, listen_local(port), config, handler))
