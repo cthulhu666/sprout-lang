@@ -53,8 +53,26 @@ extern fn json_stringify(value: Json) -> String
 # Element loops (arrays/objects) recurse in tail position, so TCO keeps large inputs stack-safe;
 # only nesting depth uses the stack.
 
-# The 1 byte at offset `i` as a String ("" at/after end) — for single-char dispatch.
-fn byte1(s: String, i: Int) -> String = str_slice_bytes(s, i, 1)
+# DISPATCH READS MUST NOT SLICE THE INPUT. `str_slice_bytes` calls `tcp_fail` — the process-fatal
+# path — when a cut splits a UTF-8 codepoint, so the former `byte1(s, i) = str_slice_bytes(s, i, 1)`
+# aborted the whole program whenever the cursor reached the LEAD byte of a multi-byte character:
+# `json.parse("{\"a\":\"café\"}")` did not return `Err`, it killed the process. Reachable from the LSP
+# server and from any HTTP server parsing a JSON body, i.e. an unauthenticated remote process kill.
+#
+# So every dispatch below is a byte COMPARISON at an offset (`str_starts_with_at_byte`), which reads
+# in place and cannot abort. Verbose, but it is the idiom `is_ws_at` already used here, and it also
+# removed an allocation per inspected byte — `byte1` built a GC-managed 1-byte String for every byte
+# the scanner looked at and then searched a set for it, which `num_end` did once per byte of every
+# numeric literal.
+#
+# `str_char_at` is not an option: it is codepoint-indexed and O(n) per call, which would make the
+# parser quadratic — the trap this module's byte cursor exists to avoid.
+#
+# The remaining `str_slice_bytes` calls take TOKEN spans, not dispatch bytes, and every one is
+# provably codepoint-aligned at both ends: a run stops at an ASCII delimiter or at end-of-input, and
+# starts where the previous one stopped. Slicing an ASCII-delimited span is safe; probing an
+# attacker-chosen offset was not.
+fn at_end(s: String, i: Int) -> Bool = i >= str_byte_len(s)
 
 fn is_ws_at(s: String, i: Int) -> Bool =
   str_starts_with_at_byte(s, i, " ") || str_starts_with_at_byte(s, i, "\t")
@@ -63,18 +81,28 @@ fn is_ws_at(s: String, i: Int) -> Bool =
 fn skip_ws(s: String, i: Int) -> Int =
   if is_ws_at(s, i) then skip_ws(s, i + 1) else i
 
-fn in_set(c: String, set: String) -> Bool = (str_len(c) == 1) && (str_find(set, c) >= 0)
+fn is_digit_at(s: String, i: Int) -> Bool =
+  str_starts_with_at_byte(s, i, "0") || str_starts_with_at_byte(s, i, "1")
+    || str_starts_with_at_byte(s, i, "2") || str_starts_with_at_byte(s, i, "3")
+    || str_starts_with_at_byte(s, i, "4") || str_starts_with_at_byte(s, i, "5")
+    || str_starts_with_at_byte(s, i, "6") || str_starts_with_at_byte(s, i, "7")
+    || str_starts_with_at_byte(s, i, "8") || str_starts_with_at_byte(s, i, "9")
 
-fn is_digit_byte(c: String) -> Bool = in_set(c, "0123456789")
+# Digits first: they dominate a numeric literal, so the short-circuit usually stops early.
+fn is_num_byte_at(s: String, i: Int) -> Bool =
+  is_digit_at(s, i)
+    || str_starts_with_at_byte(s, i, "-") || str_starts_with_at_byte(s, i, "+")
+    || str_starts_with_at_byte(s, i, ".") || str_starts_with_at_byte(s, i, "e")
+    || str_starts_with_at_byte(s, i, "E")
 
 fn is_num_start(s: String, i: Int) -> Bool =
-  str_starts_with_at_byte(s, i, "-") || is_digit_byte(byte1(s, i))
+  str_starts_with_at_byte(s, i, "-") || is_digit_at(s, i)
 
 # --- number ---------------------------------------------------------------------------------
 # Consume the maximal run of number characters, then let parse_int/parse_double validate it: any
 # structurally bad literal (e.g. "1.2.3", "1e") is rejected there. A '.'/'e'/'E' selects JsonFloat.
 fn num_end(s: String, i: Int) -> Int =
-  if in_set(byte1(s, i), "0123456789+-.eE") then num_end(s, i + 1) else i
+  if is_num_byte_at(s, i) then num_end(s, i + 1) else i
 
 fn p_number(s: String, i: Int) -> Maybe (Json, Int) =
   let j = num_end(s, i)
@@ -89,24 +117,47 @@ fn p_number(s: String, i: Int) -> Maybe (Json, Int) =
                | Just n -> Just((JsonInt(n), j))
 
 # --- string (with escapes, incl. \uXXXX and surrogate pairs) --------------------------------
-fn hexval(c: String) -> Int =
-  if str_len(c) != 1 then 0 - 1
-  else
-    let lo = str_find("0123456789abcdef", c)
-        hi = str_find("ABCDEF", c)
-    in if lo >= 0 then lo else if hi >= 0 then hi + 10 else 0 - 1
+# The value of the hex digit at byte `i`, or -1 if that byte is not a hex digit. A non-ASCII byte
+# here means malformed input (a \u escape is always four ASCII hex digits), so it must yield -1 and
+# a clean Nothing — which is precisely what the old `hexval(byte1(...))` could not do, because it
+# aborted before it could judge the byte. The linear probe costs up to 22 comparisons, which is
+# irrelevant: \u escapes are rare, and the hot path is plain_end.
+fn hex_at(s: String, i: Int) -> Int =
+  if str_starts_with_at_byte(s, i, "0") then 0
+  else if str_starts_with_at_byte(s, i, "1") then 1
+  else if str_starts_with_at_byte(s, i, "2") then 2
+  else if str_starts_with_at_byte(s, i, "3") then 3
+  else if str_starts_with_at_byte(s, i, "4") then 4
+  else if str_starts_with_at_byte(s, i, "5") then 5
+  else if str_starts_with_at_byte(s, i, "6") then 6
+  else if str_starts_with_at_byte(s, i, "7") then 7
+  else if str_starts_with_at_byte(s, i, "8") then 8
+  else if str_starts_with_at_byte(s, i, "9") then 9
+  else if str_starts_with_at_byte(s, i, "a") || str_starts_with_at_byte(s, i, "A") then 10
+  else if str_starts_with_at_byte(s, i, "b") || str_starts_with_at_byte(s, i, "B") then 11
+  else if str_starts_with_at_byte(s, i, "c") || str_starts_with_at_byte(s, i, "C") then 12
+  else if str_starts_with_at_byte(s, i, "d") || str_starts_with_at_byte(s, i, "D") then 13
+  else if str_starts_with_at_byte(s, i, "e") || str_starts_with_at_byte(s, i, "E") then 14
+  else if str_starts_with_at_byte(s, i, "f") || str_starts_with_at_byte(s, i, "F") then 15
+  else 0 - 1
 
 fn hex4(s: String, i: Int) -> Int =
-  let a = hexval(byte1(s, i))
-      b = hexval(byte1(s, i + 1))
-      c = hexval(byte1(s, i + 2))
-      d = hexval(byte1(s, i + 3))
+  let a = hex_at(s, i)
+      b = hex_at(s, i + 1)
+      c = hex_at(s, i + 2)
+      d = hex_at(s, i + 3)
   in if (a < 0) || (b < 0) || (c < 0) || (d < 0) then 0 - 1
      else (a * 4096) + (b * 256) + (c * 16) + d
 
 # End of a run of "plain" string bytes (stops at '"', '\', or end).
+#
+# This walks multi-byte characters ONE BYTE AT A TIME and that is correct, not a bug: a UTF-8
+# continuation byte is never 0x22 or 0x5C, so no byte inside a multi-byte sequence can be mistaken
+# for the closing quote or an escape. The run therefore ends on an ASCII delimiter or at end-of-input,
+# which is what makes the caller's token slice codepoint-aligned and the character bytes pass through
+# verbatim.
 fn plain_end(s: String, i: Int) -> Int =
-  if str_len(byte1(s, i)) <= 0 then i
+  if at_end(s, i) then i
   else if str_starts_with_at_byte(s, i, "\"") || str_starts_with_at_byte(s, i, "\\") then i
   else plain_end(s, i + 1)
 
@@ -137,7 +188,7 @@ fn p_escape(s: String, i: Int, acc: String) -> Maybe (String, Int) =
 
 # i points into the string body (after the opening quote). Returns (decoded, indexAfterCloseQuote).
 fn p_string_run(s: String, i: Int, acc: String) -> Maybe (String, Int) =
-  if str_len(byte1(s, i)) <= 0 then Nothing
+  if at_end(s, i) then Nothing
   else if str_starts_with_at_byte(s, i, "\"") then Just((acc, i + 1))
   else if str_starts_with_at_byte(s, i, "\\") then p_escape(s, i + 1, acc)
   else

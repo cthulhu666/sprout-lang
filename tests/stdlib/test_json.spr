@@ -50,6 +50,14 @@ fn field_float_approx(input: String, key: String, target: Double, eps: Double) -
       Just x = json.json_get_float(fv) else false
   in abs_d(x - target) < eps
 
+# Asserts the DECODED value, not just parse success: a parser that dropped or truncated multi-byte
+# bytes could still report Ok.
+fn field_string_is(input: String, key: String, want: String) -> Bool =
+  let Ok v = json.parse(input) else false
+      Just fv = json.json_get_field(v, key) else false
+      Just s = json.json_get_string(fv) else false
+  in s == want
+
 fn int_on_float_is_nothing(input: String) -> Bool =
   match json.parse(input) with
   | Err _ -> false
@@ -165,5 +173,43 @@ fn main() -> Unit !{IO} =
     # --- json_get_bool (accessor for the JsonBool variant) ---
     check_true("json_get_bool on true", is_just_true(bool_of("true"))),
     check_false("json_get_bool on false", is_just_true(bool_of("false"))),
-    check_true("json_get_bool on a non-bool returns Nothing", is_nothing_bool(bool_of("42")))
+    check_true("json_get_bool on a non-bool returns Nothing", is_nothing_bool(bool_of("42"))),
+
+    # --- non-ASCII input (regression: this ABORTED the process) ---
+    # `byte1(s, i) = str_slice_bytes(s, i, 1)` sliced one byte for character dispatch. On the LEAD
+    # byte of a multi-byte sequence the builtin's end-offset check saw a continuation byte and called
+    # `tcp_fail` — the process-fatal path — so ANY non-ASCII character anywhere in the input killed
+    # the program instead of parsing or returning Err. Reachable from the LSP server (a Sprout file
+    # with a non-ASCII literal) and from any HTTP server parsing a JSON body, where it is an
+    # unauthenticated remote process kill.
+    #
+    # These checks were impossible to fail before because there were none: this suite had ZERO
+    # non-ASCII bytes in 133 lines, which is the same blind spot that hid the http_server body
+    # framing bug — byte and codepoint index spaces agree on ASCII, so an all-ASCII corpus cannot
+    # tell a byte-correct parser from a codepoint-confused one.
+    #
+    # Every check here is also a liveness assertion: on the unfixed parser the suite binary dies at
+    # the first one and reports nothing, so the *count* of results is itself the signal.
+    check_true("string value with a multi-byte character parses",
+      is_ok(json.parse("{\"a\": \"café\"}"))),
+    check_true("multi-byte character in an object KEY parses",
+      is_ok(json.parse("{\"café\": 1}"))),
+    check_true("multi-byte character survives a stringify round trip",
+      stringify_round_trip_ok("{\"a\": \"café\"}")),
+    # A 3-byte sequence (CJK) and a 4-byte one (emoji, a surrogate pair in UTF-16 terms) exercise
+    # continuation-byte runs longer than é's single one.
+    check_true("3-byte character parses", is_ok(json.parse("{\"a\": \"日本語\"}"))),
+    check_true("4-byte character parses", is_ok(json.parse("{\"a\": \"🌱\"}"))),
+    # Non-ASCII adjacent to the structural positions the scanner dispatches on, where a byte-at-cursor
+    # read is most likely to land on a lead byte.
+    check_true("multi-byte character before a comma parses",
+      is_ok(json.parse("[\"café\", 1]"))),
+    check_true("bare multi-byte string at top level parses",
+      is_ok(json.parse("\"café\""))),
+    # The decoded value must be correct, not merely non-fatal: a parser that skipped or truncated
+    # the multi-byte bytes could return Ok with a mangled string.
+    check_true("multi-byte string value decodes byte-for-byte",
+      field_string_is("{\"a\": \"café\"}", "a", "café")),
+    check_true("3-byte string value decodes byte-for-byte",
+      field_string_is("{\"a\": \"日本語\"}", "a", "日本語"))
   ])
