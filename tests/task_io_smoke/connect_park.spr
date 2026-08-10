@@ -1,0 +1,80 @@
+import stdlib.task as task
+import stdlib.net (tcp_listen, tcp_close_listener, tcp_connect, tcp_error_message)
+
+# L0.3 connect-park (regression). `tcp_connect` used to run connect() on a BLOCKING socket, so a
+# connect that could not complete promptly froze the whole OS thread: the pump never ran, no timer
+# ever fired, and `with_timeout` could NOT bound it. Measured on the unfixed runtime, one such
+# connect froze the entire scheduler for ~7.5 s before returning ETIMEDOUT (macOS); on Linux the
+# SYN-retry ladder makes it minutes. That is unrecoverable and un-cancellable — the scheduler
+# equivalent of a deadlock, for every client-side stall.
+#
+# The stall is produced HERMETICALLY, over loopback, with no external network and no timing luck:
+# a listener that never accepts fills its accept queue after `backlog` completed handshakes, after
+# which the kernel silently drops further SYNs. Verified on macOS: with the runtime's backlog the
+# first 16 connects complete and attempt #17 onward never complete. Linux drops SYNs on a full
+# queue the same way.
+#
+# The fixture asserts THREE things, and prints its success marker only if all hold:
+#
+#  0. A connect to a port with nothing listening still reports `Err` (see `refused_is_reported`).
+#  1. A stalled connect PARKS, so its `with_timeout` deadline fires and force-drops it (`Expired`).
+#     Unfixed, every post-fill attempt instead blocks the thread and eventually returns `Err`, so
+#     the marker is never printed — and on Linux the run exceeds the recipe's perl `alarm` (a hang).
+#  2. Force-dropping a connect-parked task CLOSES its in-progress socket. That fd is bare — not yet
+#     in the handle table — so nothing else can ever close it, and a leak costs one descriptor per
+#     timed-out connect. The recipe runs this under `ulimit -n 64`, so a leak exhausts the table
+#     part-way through the 80 attempts and socket() starts failing; that surfaces here as `Err
+#     Too many open files`, which is reported verbatim instead of the success marker.
+#
+# The queued (successful) client sockets are deliberately never closed: closing one would not free
+# an accept-queue slot, and the fixture is a one-shot process.
+
+fn port() -> Int = 28994
+
+# A port with nothing listening: bound and immediately released, so it is deterministically free
+# (no connection was ever accepted on it, hence no TIME_WAIT holding it).
+fn dead_port() -> Int = 28993
+
+# The REFUSED path, which the non-blocking rework changes shape: a refused connect may now report
+# through SO_ERROR after a writability wake rather than through connect()'s own errno. It must still
+# come back as `Err`, promptly — silently succeeding, or parking forever on a socket that will never
+# connect, are the two ways this could regress.
+fn refused_is_reported() -> Bool !{IO} =
+  do
+    l <- tcp_listen(dead_port())
+    tcp_close_listener(l)
+    match tcp_connect("127.0.0.1", dead_port()) with
+    | Ok (_) -> false
+    | Err (_) -> true
+
+# Make `remaining` deadline-bounded connects, counting how many PARKED long enough to be dropped.
+# Past the fill point an `Err` can only mean socket() failed, i.e. assertion 2 broke — so report the
+# message verbatim (it names the cause: "Too many open files") and end the run.
+fn attempts(remaining: Int, expired: Int) -> Int !{IO} =
+  if remaining <= 0 then
+    expired
+  else
+    match task.with_timeout(20, \_ -> tcp_connect("127.0.0.1", port())) with
+    | task.Expired -> attempts(remaining - 1, expired + 1)
+    | task.Completed r ->
+      match r with
+      | Ok (_) -> attempts(remaining - 1, expired)  # queued: the accept queue still had room
+      | Err e ->
+        do
+          term_write("FAILED: connect errored instead of parking: ")
+          term_write(tcp_error_message(e))
+          term_write("\n")
+          0
+
+fn main() -> Unit !{IO} =
+  do
+    refused <- refused_is_reported()
+    _ <- tcp_listen(port())  # never accepted: the accept queue fills and stays full
+    let stalled = attempts(80, 0)
+    if refused then
+      if stalled > 0 then
+        term_write("connect-park-ok\n")
+      else
+        term_write("FAILED: no connect ever parked past its deadline\n")
+    else
+      term_write("FAILED: connect to a dead port did not report an error\n")

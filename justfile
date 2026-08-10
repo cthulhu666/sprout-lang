@@ -1552,7 +1552,17 @@ task-io-smoke: bootstrap-from-seed
   build tests/task_io_smoke/timeout_select_drop.spr
   run_once "select-timeout-drop" "done"
   SPROUT_GC_STRESS=1 run_once "select-timeout-drop/stress" "done"
-  echo "==> task-io-smoke ✓ (read-park, accept-park, re-arm, http-serve-concurrency, http-conn-error-isolation, tcp-read-avail-error, write, cancel-drop, await-guard, timer-drop, timeout-drop, timeout-nested-guard, chan-cancel-drop, chan-timeout-drop, chan-negative-cap-guard, rendezvous-send-drop, send-on-closed-guard, double-close-guard, send-parked-close-guard, select-cancel-drop, select-timeout-drop; interleaved; stress-clean)"
+  # (18) connect-park (L0.3 regression): `tcp_connect` must park on an in-flight connect rather than
+  # blocking the OS thread, so a `with_timeout` deadline can fire and force-drop it — and that drop
+  # must CLOSE the in-flight socket (it is not in the handle table, so nothing else ever will).
+  # Run under a 64-descriptor cap: that is what gives the no-leak half of the fixture teeth, since
+  # a leak then exhausts the table mid-loop and connect reports "Too many open files" (verified as a
+  # negative control by disabling the close). Unfixed, the blocking connect burns ~7.5 s of frozen
+  # scheduler per attempt on macOS and minutes on Linux — RED as a missing marker or as a hang.
+  build tests/task_io_smoke/connect_park.spr
+  ( ulimit -n 64; run_once "connect-park" "connect-park-ok" )
+  ( ulimit -n 64; SPROUT_GC_STRESS=1 run_once "connect-park/stress" "connect-park-ok" )
+  echo "==> task-io-smoke ✓ (read-park, accept-park, re-arm, http-serve-concurrency, http-conn-error-isolation, tcp-read-avail-error, write, cancel-drop, await-guard, timer-drop, timeout-drop, timeout-nested-guard, chan-cancel-drop, chan-timeout-drop, chan-negative-cap-guard, rendezvous-send-drop, send-on-closed-guard, double-close-guard, send-parked-close-guard, select-cancel-drop, select-timeout-drop, connect-park; interleaved; stress-clean)"
 
 # Division-by-zero guard regression (CI gate). The fixture divides by a RUNTIME
 # zero (`10 / list_length(argv)` with no args), which neither the compiler nor

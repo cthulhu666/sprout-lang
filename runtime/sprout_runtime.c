@@ -8310,7 +8310,8 @@ long long crypto_random_bytes(long long count) {
 }
 
 /* L0.3 I/O parking: sockets are made non-blocking so a would-block read/write/
- * accept returns EAGAIN, at which point the tcp_* builtins park the current green
+ * accept returns EAGAIN — and a connect that cannot complete at once returns
+ * EINPROGRESS — at which point the tcp_* builtins park the current green
  * task (scheduler_park_on_fd) and let siblings run instead of freezing the OS thread.
  * A single-task program (no with_scope) parks into the always-ready pump, which
  * blocks in the poller — behaviorally identical to a blocking call. */
@@ -8399,24 +8400,73 @@ long long tcp_connect(const char* host, long long port) {
     return tcp_net_err1("stdlib.net.TcpConnectFailed", (long long)(uintptr_t)gai_strerror(gai));
   }
 
+  /* Materialize the candidate list onto THIS TASK'S STACK, then release the addrinfo before any
+   * connect can park. Rationale: an in-flight connect parks, and a parked task can be force-
+   * dropped (with_timeout / scope_cancel); force_drop_task frees the task's green stack but knows
+   * nothing about a malloc'd addrinfo list, so anything held across the park must live on the
+   * stack or it leaks on every timed-out connect. A dual-stack host returns 2-4 candidates; 8
+   * covers every realistic name, and a connect that has failed 8 addresses will fail the 9th. */
+  struct connect_cand {
+    struct sockaddr_storage addr;
+    socklen_t len;
+    int family, socktype, protocol;
+  } cand[8];
+  int ncand = 0;
+  for (struct addrinfo* it = resolved; it != NULL && ncand < 8; it = it->ai_next) {
+    if (it->ai_addrlen > sizeof(cand[ncand].addr)) continue;
+    memcpy(&cand[ncand].addr, it->ai_addr, it->ai_addrlen);
+    cand[ncand].len      = it->ai_addrlen;
+    cand[ncand].family   = it->ai_family;
+    cand[ncand].socktype = it->ai_socktype;
+    cand[ncand].protocol = it->ai_protocol;
+    ncand++;
+  }
+  freeaddrinfo(resolved);
+
   int fd = -1;
   const char* error_msg = "connect failed";
-  for (struct addrinfo* it = resolved; it != NULL; it = it->ai_next) {
-    fd = socket(it->ai_family, it->ai_socktype, it->ai_protocol);
-    if (fd < 0) continue;
-    /* connect() stays BLOCKING (set O_NONBLOCK only after it succeeds): a
-     * non-blocking connect returns EINPROGRESS and would need a write-readiness
-     * park; loopback/typical connects complete promptly. */
-    if (connect(fd, it->ai_addr, it->ai_addrlen) == 0) {
+  for (int i = 0; i < ncand; i++) {
+    fd = socket(cand[i].family, cand[i].socktype, cand[i].protocol);
+    if (fd < 0) {
+      error_msg = strerror(errno);   /* e.g. EMFILE — report it rather than "connect failed" */
+      continue;
+    }
+    /* NON-BLOCKING from the start, so a connect that cannot complete promptly PARKS the green
+     * task instead of freezing the OS thread. It used to stay blocking, which stalled the whole
+     * scheduler for the kernel's entire connect timeout (measured ~7.5 s on macOS to a loopback
+     * peer with a full accept queue; minutes on Linux's SYN-retry ladder) with no timer able to
+     * fire, so `with_timeout` could not bound a connect at all.
+     * tests/task_io_smoke/connect_park.spr is the regression. */
+    tcp_set_nonblocking(fd);
+    if (connect(fd, (struct sockaddr*)&cand[i].addr, cand[i].len) == 0) {
       error_msg = NULL;
       break;
     }
-    error_msg = strerror(errno);
+    if (errno == EINPROGRESS || errno == EINTR) {
+      /* The handshake started. POSIX: after either of these the connect completes asynchronously
+       * and must be awaited via WRITABILITY — calling connect() again would report EALREADY (or
+       * EADDRINUSE / EISCONN) instead of retrying. The outcome then comes from SO_ERROR, not
+       * errno, because the fd is merely "ready", success and failure alike.
+       *
+       * Parks via the UNOWNED-fd entry point: the socket is not in g_conn_fd yet, so if the
+       * deadline fires here the drop is the only thing that can close it. */
+      scheduler_park_on_unowned_fd(fd, SPROUT_POLL_WRITE);
+      int soerr = 0;
+      socklen_t soerr_len = (socklen_t)sizeof(soerr);
+      if (getsockopt(fd, SOL_SOCKET, SO_ERROR, &soerr, &soerr_len) < 0) soerr = errno;
+      if (soerr == 0) {
+        error_msg = NULL;
+        break;
+      }
+      error_msg = strerror(soerr);
+    } else {
+      error_msg = strerror(errno);
+    }
     close(fd);
     fd = -1;
   }
-  freeaddrinfo(resolved);
-  if (fd >= 0) tcp_set_nonblocking(fd);   /* steady-state read/write parks on EAGAIN */
+  /* The fd is already non-blocking (set above, before connect), which is also what the steady-
+   * state read/write parks on EAGAIN require — no post-connect fcntl needed. */
 
   if (fd < 0) {
     return tcp_net_err1("stdlib.net.TcpConnectFailed", (long long)(uintptr_t)error_msg);

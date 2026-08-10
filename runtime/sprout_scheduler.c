@@ -28,6 +28,7 @@
 #include <stdlib.h>
 #include <stdint.h>
 #include <ucontext.h>
+#include <unistd.h>   /* close() — force-dropping an unowned-fd park closes the socket */
 #include "sprout_scheduler.h"
 
 /* macOS marks makecontext/swapcontext deprecated; we knowingly use them. */
@@ -85,6 +86,10 @@ typedef struct Task {
   int          park_kind;  /* PARK_* — what this task is suspended on (routes cancel-drop) */
   int          park_fd;    /* fd this task is suspended-in-the-poller on, or -1 (L0.5) */
   int          park_interest; /* SPROUT_POLL_READ|WRITE it parked with (for poll_remove) */
+  int          park_close_fd; /* fd force_drop_task must CLOSE, or -1. Set only by
+                               * scheduler_park_on_unowned_fd: an in-flight connect parks on a
+                               * bare socket that no handle table owns yet, so a cancel-drop is
+                               * the socket's last reference — see that function. */
   long long    park_timer_id; /* opaque timer handle when park_kind == PARK_TIMER (L0.6) */
   struct Task* io_next;    /* g_io_head list link (only while parked on I/O or a timer) */
   struct Task* io_prev;
@@ -389,6 +394,7 @@ static void pump_loop(void) {
           io_list_remove(w);                  /* no longer poller-parked */
           w->park_kind = PARK_NONE;
           w->park_fd = -1;
+          w->park_close_fd = -1;   /* woken, not dropped: the parker owns the fd again */
           rq_push(w);
         }
         continue;
@@ -474,6 +480,7 @@ static void sprout_scheduler_init(void) {
   g_task0.next  = NULL;
   g_task0.park_kind = PARK_NONE;         /* task-0 parks on I/O / timers like any task */
   g_task0.park_fd = -1;
+  g_task0.park_close_fd = -1;
   g_task0.park_timer_id = 0;
   g_task0.io_next = NULL;
   g_task0.io_prev = NULL;
@@ -531,6 +538,7 @@ static Task* task_create(Scope* s, long long work, int awaitable) {
   t->park_kind  = PARK_NONE;
   t->park_fd    = -1;      /* not I/O-parked until scheduler_park_on_fd runs */
   t->park_interest = 0;
+  t->park_close_fd = -1;   /* set only while parked on an fd no handle table owns */
   t->park_timer_id = 0;
   t->io_next    = NULL;
   t->io_prev    = NULL;
@@ -651,6 +659,13 @@ static void force_drop_task(Task* t) {
     if (t->park_kind == PARK_TIMER) sprout_poll_remove_timer(t->park_timer_id);
     else                            sprout_poll_remove(t->park_fd, t->park_interest);
     io_list_remove(t);
+    /* An unowned-fd park (in-flight connect) leaves the socket referenced ONLY by the parked
+     * frame we are about to free — no handle table entry, so nothing else can ever close it.
+     * Without this, each timed-out connect would leak a descriptor. */
+    if (t->park_close_fd >= 0) {
+      close(t->park_close_fd);
+      t->park_close_fd = -1;
+    }
   }
   /* Free roots first (unregisters the context so no later collection scans it), then the
    * stack; no allocation between (design §7). */
@@ -872,6 +887,20 @@ void scheduler_park_on_fd(int fd, int interest) {
   sprout_poll_add(fd, interest, g_current_task);
   park_to_pump();
   /* resumed by the pump after the poller reported readiness */
+}
+
+/* scheduler_park_on_fd for an fd that NO handle table owns yet — currently only tcp_connect's
+ * in-flight connect, which parks on writability of a bare socket() result.
+ *
+ * Every other park is on an fd reachable from a handle (a listener, or a connection), so a
+ * cancel-drop can leave it open and the handle's owner still closes it. A connect-in-progress fd
+ * is reachable only from the parked frame, which force_drop_task frees — so the drop is the last
+ * chance to close it, and it does so via park_close_fd. On a normal wake the pump clears the
+ * field: the resumed caller owns the fd again and closes it (or installs it in the table). */
+void scheduler_park_on_unowned_fd(int fd, int interest) {
+  g_current_task->park_close_fd = fd;
+  scheduler_park_on_fd(fd, interest);
+  g_current_task->park_close_fd = -1;   /* belt-and-braces; the pump already cleared it on wake */
 }
 
 /* Suspend the current task on a one-shot timer for `ms` (> 0) milliseconds; the pump runs
