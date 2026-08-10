@@ -31,6 +31,12 @@ export extern fn tcp_read_avail_timeout(conn: Int, timeout_ms: Int) -> Result Tc
 export extern fn tcp_connect(host: String, port: Int) -> Result TcpError Int !{IO}
 extern fn tcp_read_exact(conn: Int, count: Int) -> Result TcpError Bytes !{IO}
 extern fn tcp_write_all(conn: Int, data: Bytes) -> Result TcpError Int !{IO}
+# Idle-bounded write: no single stall may exceed `idle_ms`, and any byte the kernel accepts re-arms
+# the bound. These are nginx's send_timeout semantics — "the timeout is set only between two
+# successive write operations, not for the transmission of the whole response" — so a slow but
+# reading client is never cut off, while one that stops reading entirely is. `idle_ms <= 0` attempts
+# the write once without parking, matching tcp_read_avail_timeout.
+extern fn tcp_write_all_timeout(conn: Int, data: Bytes, idle_ms: Int) -> Result TcpError Int !{IO}
 export extern fn tcp_close(conn: Int) -> Unit !{IO}
 export extern fn tcp_close_listener(listener: Int) -> Unit !{IO}
 extern fn tcp_echo_serve(port: Int, max_connections: Int) -> Unit !{IO}
@@ -42,8 +48,9 @@ export type TcpError (..) =
   | TcpReadFailed String
   | TcpWriteFailed String
   | TcpEndOfStream
-  # A deadline-bounded read found no data in time. Distinct from TcpReadFailed because it is not a
-  # fault: the connection is still valid and the caller may read again with a fresh budget.
+  # A deadline-bounded read or write ran out of time. Distinct from TcpReadFailed/TcpWriteFailed
+  # because it is not a fault: the connection is still valid, so the caller may retry with a fresh
+  # budget or run its normal close path.
   | TcpTimeout
 
 # LINEAR (M4.5). A connection is acquire -> use N times -> release once: reads and
@@ -66,7 +73,7 @@ export fn tcp_error_message(err: TcpError) -> String =
   | TcpReadFailed msg -> msg
   | TcpWriteFailed msg -> msg
   | TcpEndOfStream -> "end of stream"
-  | TcpTimeout -> "read timed out"
+  | TcpTimeout -> "timed out"
 
 # Reads the handle out without taking the connection: `match` on a borrowed
 # binding is a read, not a consume, so this composes into every borrowing op below.
@@ -93,6 +100,14 @@ export fn read_exact(conn: borrowing TcpConnection, count: Int) -> Result TcpErr
 # O(|payload|): writes the full payload, retrying partial sends as needed.
 export fn write_all(conn: borrowing TcpConnection, payload: Bytes) -> Result TcpError Int !{IO} =
   tcp_write_all(tcp_connection_handle(conn), payload)
+
+# `write_all` with an idle bound: `Err TcpTimeout` once a single stall exceeds `idle_ms`, with the
+# connection still valid so the caller closes it normally. Any accepted byte re-arms the bound, so
+# this bounds a peer that STOPPED reading without penalising one that reads slowly. A server needs it
+# for the same reason it needs a read deadline: an unbounded write parks the handler forever and its
+# connection handle is never returned to the table. See stdlib.http_server.
+export fn write_all_timeout(conn: borrowing TcpConnection, payload: Bytes, idle_ms: Int) -> Result TcpError Int !{IO} =
+  tcp_write_all_timeout(tcp_connection_handle(conn), payload, idle_ms)
 
 # Recoverable string write over a raw connection handle, for callers holding an Int rather
 # than the opaque TcpConnection. Returns Err on a socket failure instead of aborting — the
@@ -130,6 +145,10 @@ export fn read_exact_utf8(conn: borrowing TcpConnection, count: Int) -> Result T
 # O(|payload|): UTF-8 encoding copy plus the full network write.
 export fn write_all_utf8(conn: borrowing TcpConnection, payload: String) -> Result TcpError Int !{IO} =
   write_all(conn, from_string(payload))
+
+# O(|payload|): `write_all_utf8` under `write_all_timeout`'s idle bound.
+export fn write_all_utf8_timeout(conn: borrowing TcpConnection, payload: String, idle_ms: Int) -> Result TcpError Int !{IO} =
+  write_all_timeout(conn, from_string(payload), idle_ms)
 
 # The single consuming use. Every acquired connection must reach exactly one of
 # these, on every control-flow path, or the program does not compile.

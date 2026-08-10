@@ -1578,7 +1578,34 @@ task-io-smoke: bootstrap-from-seed
   build tests/task_io_smoke/http_header_flood.spr
   run_once "http-header-flood" "flood-bounded"
   SPROUT_GC_STRESS=1 run_once "http-header-flood/stress" "flood-bounded"
-  echo "==> task-io-smoke ✓ (read-park, accept-park, re-arm, http-serve-concurrency, http-conn-error-isolation, tcp-read-avail-error, write, cancel-drop, await-guard, timer-drop, timeout-drop, timeout-nested-guard, chan-cancel-drop, chan-timeout-drop, chan-negative-cap-guard, rendezvous-send-drop, send-on-closed-guard, double-close-guard, send-parked-close-guard, select-cancel-drop, select-timeout-drop, connect-park, http-idle-timeout, http-header-flood; interleaved; stress-clean)"
+  # (21) http_server response-WRITE bound: bounding the read left the same handle exhaustion
+  # reachable from the write side — a client that requests a large response and then stops reading
+  # (without closing) parked its handler in send() forever. The fixture asserts on TRUNCATION, not
+  # on termination: a client that merely slept and closed would let the unfixed server finish too
+  # (its close resets the connection), so the discriminator is that the bounded server delivers only
+  # what the kernel had buffered while the unfixed one delivers the whole 8 MiB body once the client
+  # finally drains. Verified RED against the unbounded write ("delivered 8388697 bytes").
+  build tests/task_io_smoke/http_write_timeout.spr
+  run_once "http-write-timeout" "write-bounded"
+  SPROUT_GC_STRESS=1 run_once "http-write-timeout/stress" "write-bounded"
+  # (22) http_server BODY-phase timeout, and total-vs-idle. Nothing previously drove
+  # continue_read_request -> read_remaining_body at all. Two clients: one completes its headers,
+  # promises a body and sends none (must get 408 — the coverage half), one dribbles 5 bytes every
+  # 200 ms for ~800 ms with a 300 ms body budget (must get 200 — the semantics half, since nginx's
+  # client_body_timeout is idle-based, not total). Verified RED against a total body deadline
+  # ("server hung up on a body that was still making progress").
+  build tests/task_io_smoke/http_body_timeout.spr
+  run_once "http-body-timeout" "stalled-body-408"
+  run_once "http-body-timeout/idle" "dribbled-body-200"
+  SPROUT_GC_STRESS=1 run_once "http-body-timeout/stress" "dribbled-body-200"
+  # (23) read_avail_timeout's two contract ends, both previously untested: `timeout_ms <= 0` polls
+  # ONCE and reports a timeout without parking (what makes http_server's total header budget
+  # composable — it passes the remaining slice), and a live budget still delivers data that arrives
+  # inside it (which is what catches a fix that just always reports a timeout).
+  build tests/task_io_smoke/read_timeout_poll_once.spr
+  run_once "read-poll-once" "poll-once-timed-out"
+  run_once "read-poll-once/data" "bounded-read-got-data"
+  echo "==> task-io-smoke ✓ (read-park, accept-park, re-arm, http-serve-concurrency, http-conn-error-isolation, tcp-read-avail-error, write, cancel-drop, await-guard, timer-drop, timeout-drop, timeout-nested-guard, chan-cancel-drop, chan-timeout-drop, chan-negative-cap-guard, rendezvous-send-drop, send-on-closed-guard, double-close-guard, send-parked-close-guard, select-cancel-drop, select-timeout-drop, connect-park, http-idle-timeout, http-header-flood, http-write-timeout, http-body-timeout, read-poll-once; interleaved; stress-clean)"
 
 # Division-by-zero guard regression (CI gate). The fixture divides by a RUNTIME
 # zero (`10 / list_length(argv)` with no args), which neither the compiler nor

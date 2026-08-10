@@ -1,0 +1,89 @@
+import stdlib.task (Scope, with_scope, task_spawn, task_sleep)
+import stdlib.net (TcpConnection, connect, close, write_all_utf8, read_avail_timeout)
+import stdlib.http_server (HttpRequest, HttpServerResponse, ServerConfig, ok, serve_n_with)
+import stdlib.string as string
+
+# http_server response-WRITE bound (review follow-up to the C3 read-timeout work).
+#
+# Bounding the read closed slowloris from the read side and left the write side wide open. A client
+# that sends a perfectly valid request for a response larger than the socket buffers and then stops
+# reading — WITHOUT closing — parked its handler in send() forever: the task never finished, `close`
+# never ran, and the connection's slot in the 2048-entry handle table was never returned. 2048 such
+# clients and `tcp_accept` serves nobody. Exactly the exhaustion the read deadline was added to
+# prevent, reached from the other direction, and the 408/431 error responses travel the same path.
+#
+# The write is now bounded by an IDLE deadline (`ServerConfig`'s write_ms): no single stall may
+# exceed it, and any byte the kernel accepts re-arms it. Idle rather than total is nginx's
+# `send_timeout` semantics — "the timeout is set only between two successive write operations, not
+# for the transmission of the whole response" — so a slow-but-reading client is never cut off, while
+# one that stops reading altogether is.
+#
+# How this fixture discriminates fixed from unfixed, which is subtler than it looks. A client that
+# simply slept and then closed would let the UNFIXED server finish too: the close sends RST, the
+# blocked send fails, and the handler completes. The observable difference is not whether the handler
+# finishes but WHETHER THE RESPONSE WAS TRUNCATED:
+#
+#   * fixed   — the server gives up ~write_ms into the stall and closes, so the client drains only
+#               what the kernel had already buffered (a few hundred KB) and then sees EOF;
+#   * unfixed — the server is still parked in send when the client finally starts reading, so
+#               draining unblocks it and the client receives the WHOLE multi-megabyte body.
+#
+# Hence the byte count, not the exit status, is the assertion. The body must exceed the combined
+# socket buffers or the write never stalls at all and there is nothing to bound; 8 MiB is well clear
+# of both platforms' autotuned maxima for a peer that is not reading.
+
+fn grow(s: String, target: Int) -> String =
+  if string.byte_length(s) >= target then s else grow(string.concat(s, s), target)
+
+# 8 MiB, built by doubling. NOT string.repeat, which is `s ++ repeat(s, n - 1)` — quadratic in the
+# total length, so a multi-megabyte body would dominate the whole smoke suite's runtime.
+fn big_body() -> String =
+  grow("0123456789abcdef", 8000000)
+
+fn handle(req: HttpRequest) -> HttpServerResponse =
+  ok(big_body())
+
+# Read until the server hangs up (or stops sending), counting bytes and keeping none of them: the
+# unfixed path delivers 8 MiB and accumulating that as a String would only add GC noise.
+fn drain(conn: borrowing TcpConnection, total: Int) -> Int !{IO} =
+  match read_avail_timeout(conn, 3000) with
+  | Ok chunk ->
+      if string.is_empty(chunk) then total
+      else drain(conn, total + string.byte_length(chunk))
+  | Err _ -> total
+
+# Sleep past the write budget while refusing to read, then see how much the server managed to
+# deliver. `write-bounded` is the ONLY place the marker may appear: the recipe asserts by
+# `grep -q write-bounded`, so a failure message containing it would make the gate pass on the very
+# regression it exists to catch (which is how the first version of the idle-timeout fixture in this
+# directory silently passed — see http_idle_timeout.spr).
+fn stall_then_check(conn: borrowing TcpConnection) -> Unit !{IO} =
+  do
+    task_sleep(1200)
+    received <- drain(conn, 0)
+    if received < 4000000 then
+      term_write("write-bounded\n")
+    else
+      term_write(`MISMATCH: server delivered ${int_to_string(received)} bytes of a stalled response\n`)
+
+fn deaf_client(port: Int) -> Unit !{IO} =
+  match connect("127.0.0.1", port) with
+  | Ok conn ->
+    do
+      match write_all_utf8(conn, "GET /big HTTP/1.1\r\nHost: x\r\n\r\n") with
+      | Ok _ -> stall_then_check(conn)
+      | Err _ -> term_write("MISMATCH: deaf client could not send its request\n")
+      close(conn)
+  | Err _ -> term_write("MISMATCH: deaf client could not connect\n")
+
+# The server task is spawned first so it reaches `tcp_listen` (and parks in accept) before the client
+# task runs — the startup ordering every fixture in this directory relies on.
+fn run(s: Scope, port: Int) -> Unit !{IO} =
+  do
+    task_spawn(s, \_ -> serve_n_with(ServerConfig(2000, 2000, 65536, 300), port, 1, handle))
+    task_spawn(s, \_ -> deaf_client(port))
+
+fn main() -> Unit !{IO} =
+  do
+    with_scope(\s -> run(s, 28989))
+    term_write("done\n")
