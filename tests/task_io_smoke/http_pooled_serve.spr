@@ -1,0 +1,70 @@
+import stdlib.task (Scope, with_scope, task_spawn)
+import stdlib.net (TcpConnection, connect, close, write_all_utf8, read_exact_utf8)
+import stdlib.http_server (HttpRequest, HttpServerResponse, ServerConfig, ok, response, request_path, serve_pooled_n_with)
+
+# `serve_pooled`: a FIXED pool of long-lived workers pulling owned connections off a channel, instead
+# of one fire-and-forget task per connection. The win is that `makecontext` runs once per worker
+# rather than once per request (measured 3.5-5.4x throughput, 202 MB -> 8 MB RSS in
+# bench/http_worker_pool), and the risk is that a pool has failure modes a spawn-per-connection
+# server structurally cannot have. This fixture pins the two that would be silent.
+#
+#  * REUSE. Two workers must serve five connections. If a worker did not loop back to `chan_recv`
+#    after serving one — the single easiest way to write this wrong — the first two connections
+#    would be answered and the remaining three would hang forever with no error anywhere. That is
+#    why this asserts on connection five and not on connection one: a broken pool passes any test
+#    that only serves as many connections as it has workers.
+#  * CAPACITY SURVIVES A BAD HANDLER. A worker that exits its loop permanently removes capacity, so
+#    a server degrades to zero workers and hangs rather than failing visibly. Connection three asks
+#    for a status outside the supported table, driving the 500 fallback, and connections four and
+#    five must still be served afterwards by the same two workers.
+
+fn handle(req: HttpRequest) -> HttpServerResponse !{IO} =
+  # 599 is outside the status table, so `render` fails and the handler drives the 500 fallback —
+  # the closest thing to a misbehaving handler that can be provoked without a panic.
+  if request_path(req) == "/bad" then response(599, "unsupported")
+  else ok("served")
+
+fn expect_status(conn: borrowing TcpConnection, want: String, marker: String) -> Unit !{IO} =
+  match read_exact_utf8(conn, 12) with
+  | Ok reply ->
+      if reply == want then term_write(`${marker}\n`)
+      else term_write(`MISMATCH: ${marker} got ${reply}\n`)
+  | Err _ -> term_write(`MISMATCH: ${marker} read failed\n`)
+
+fn one_request(port: Int, path: String, want: String, marker: String) -> Unit !{IO} =
+  match connect("127.0.0.1", port) with
+  | Ok conn ->
+    do
+      match write_all_utf8(conn, "GET " ++ path ++ " HTTP/1.1\r\nHost: x\r\n\r\n") with
+      | Ok _ -> expect_status(conn, want, marker)
+      | Err _ -> term_write(`MISMATCH: ${marker} could not send\n`)
+      close(conn)
+  | Err _ -> term_write(`MISMATCH: ${marker} could not connect\n`)
+
+# Sequential on purpose: with two workers and five connections issued one at a time, every
+# connection after the second can only be served by a worker that came back for more work.
+fn clients(port: Int) -> Unit !{IO} =
+  do
+    one_request(port, "/one", "HTTP/1.1 200", "pooled-1-200")
+    one_request(port, "/two", "HTTP/1.1 200", "pooled-2-200")
+    one_request(port, "/bad", "HTTP/1.1 500", "pooled-3-500")
+    one_request(port, "/four", "HTTP/1.1 200", "pooled-4-200")
+    one_request(port, "/five", "HTTP/1.1 200", "pooled-5-200")
+
+# Two workers, queue depth two, five connections — deliberately fewer workers than connections and a
+# queue shallower than the run, so the accept loop must also block and resume on `chan_send`.
+fn run(s: Scope, port: Int) -> Unit !{IO} =
+  do
+    task_spawn(s, \_ -> serve_pooled_n_with(
+      ServerConfig(header_ms = 2000, body_ms = 2000, max_header_bytes = 65536, write_ms = 2000,
+                   max_body_bytes = 65536, min_rate_bps = 1000),
+      port, 2, 2, 5, handle))
+    # Spawned, not called: a direct call runs the first client before the server task has been
+    # scheduled at all, so it connects before `listen_local` has bound and the run then hangs waiting
+    # for a connection that was never made.
+    task_spawn(s, \_ -> clients(port))
+
+fn main() -> Unit !{IO} =
+  do
+    with_scope(\s -> run(s, 28993))
+    term_write("done\n")

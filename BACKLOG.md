@@ -1613,8 +1613,24 @@ op-classification already in place.
 - [ ] `P2` **GC trigger is object-count-blind, not byte-aware** (`runtime/sprout_runtime.c` `sprout_gc_maybe_collect_threshold`, ~line 879): the collector fires when `g_managed_heap_count >= g_gc_threshold` (default 4096 objects, adaptive ×2 up to an optional cap), and `g_managed_heap_count` increments by exactly 1 per managed object regardless of size — a `VectorVal`'s backing `data` array is allocated via plain `malloc`, invisible to the trigger. Consequence (measured on a 20k-append benchmark, `SPROUT_DEBUG_GC=1`): many-small allocs over-collect (the old list-based `Semigroup (Vec a)` round-trip spewed ~3000 cons cells per append → **40,002 collections**, low peak RSS ~12 MB but ~2s pure GC overhead); few-but-large allocs under-collect (the `vector_concat` builtin allocates 1 managed object per append → only **11 collections**, but ~4096 dead 16 KB result vectors pile up between cycles → ~64–95 MB transient peak, ~40× faster but higher peak). Not a leak — reclaimed next cycle — but higher peak RSS can be the direct flip side of an allocation-count speedup, and will resurface with `MutVec`/large-buffer churn. Fix: make the trigger byte-aware (count bytes, not objects) so large payloads count proportionally toward the threshold. Tunable today without touching data structures via `SPROUT_GC_THRESHOLD`. Surfaced 2026-07-12 landing the `vector_concat`/`Semigroup (Vec a)` dispatch fix (§5 above); see also `docs/gc-profile-findings-2026-07-03.md`.
   - **Now amplified by the `adapt_factor` default of 3.0** (`:1371`): the garbage budget between collections is `(factor − 1) × live` *objects*, so a workload retaining large invisible payloads now tolerates 2× as many of them as it did at 2.0. Measured harmless on today's workloads (`digit_recognizer` +1.3 MB — its live set is small ADT nodes, not big buffers), but this raises the cost of the byte-blindness bug for any future large-buffer churn. If a workload shows unexpected peak RSS, try `SPROUT_GC_ADAPT_FACTOR=2` before assuming a leak.
 
-- [ ] `P1` **Green-task setup is 75% of HTTP-server CPU; a worker pool is measured at 3.5–5.4× —
-  design + prototype in `docs/green-task-pool-v0.md`** (2026-08-10). Every accepted connection
+- [x] `P1` **Green-task setup is 75% of HTTP-server CPU; a worker pool is measured at 3.5–5.4× —
+  design + prototype in `docs/green-task-pool-v0.md`. `serve_pooled` LANDED 2026-08-10** (Design A,
+  Sprout-level, no scheduler change). `serve`/`serve_n` are untouched and the pool is opt-in:
+  `serve_pooled` / `serve_pooled_with` / `serve_pooled_n_with`, defaulting to 8 workers on a
+  64-deep bounded channel. The §5.2 bounded-concurrency objection was answered by bounding handler
+  occupancy FIRST (see the http_server occupancy entry): with a finite worst case per connection,
+  N workers can no longer be wedged permanently by N crawling peers, which is what made pooling
+  unsafe before. Regression: `tests/task_io_smoke/http_pooled_serve.spr` — two workers serve five
+  connections, so reuse is asserted by connections 3–5 rather than by a counter, and a handler
+  driven into the 500 fallback must not cost the pool capacity.
+  - [ ] `P2` **A panicking handler kills its worker, and Sprout cannot catch it.** With
+    spawn-per-connection a panic killed one connection; in a pool it permanently removes capacity,
+    and a server that loses all workers stops answering with nothing logged. `handle_connection`
+    consumes the connection on every path and returns `Unit`, so ordinary client misbehaviour
+    (malformed requests, timeouts, resets) is already contained — this is strictly about a `panic`
+    in user handler code. Both honest fixes are language-level: catchable failures, or a supervisor
+    that observes worker exit and respawns. Gotcha A3 in `docs/green-task-pool-v0.md` §5.4.
+  - Remaining from the original entry: Every accepted connection
   spawns a fire-and-forget task that `malloc`s ~1.5 MiB (1 MiB `SPROUT_TASK_STACK_BYTES` + 512 KiB
   root pool = 16384 × 32-byte `RootNode`) and frees it. `sample` under `wrk -t2 -c40`: **`madvise`
   2779 samples** (`pump_loop → sprout_roots_free → free_medium`) + **`__bzero` 2009**

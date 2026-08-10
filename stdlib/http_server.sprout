@@ -3,7 +3,8 @@ module stdlib.http_server
 import stdlib.http (HttpStatusError, RequestLine, RequestPathVersion, http_response, parse_request_line, status_line)
 import stdlib.net (TcpConnection, TcpListener, TcpTimeout, accept, close, close_listener, listen_local, read_avail_timeout, write_all_utf8_by)
 import stdlib.string as string
-import stdlib.task (Scope, with_scope, task_spawn)
+import stdlib.chan (Chan, Recv, Got, Closed, chan_new, chan_send, chan_recv, chan_close)
+import stdlib.task (Scope, with_scope, task_spawn, task_yield)
 import stdlib.url (parse_query)
 
 export type HttpRequest =
@@ -86,7 +87,7 @@ type alias ServerResult a = Result HttpServerError a
 export type ServerConfig = (header_ms: Int, body_ms: Int, max_header_bytes: Int, write_ms: Int,
                             max_body_bytes: Int, min_rate_bps: Int)
 
-# header 10 s total / body 30 s idle / 64 KiB of headers / response writes 30 s idle. Chosen well
+# header 10 s total / body 30 s grace / 64 KiB of headers / response writes 30 s grace. Chosen well
 # above any legitimate client (headers normally arrive in the first segment) and well below the
 # ~forever that the unbounded reads and writes allowed. nginx defaults its three timeouts to 60 s;
 # Go's http.Server defaults to none at all, which is the hazard this replaces.
@@ -721,3 +722,112 @@ export fn serve(port: Int, handler: HttpRequest -> HttpServerResponse !{IO}) -> 
 # `serve` with explicit read budgets (see serve_n_with).
 export fn serve_with(config: ServerConfig, port: Int, handler: HttpRequest -> HttpServerResponse !{IO}) -> Unit !{IO} =
   with_scope(\s -> serve_forever_loop(s, listen_local(port), config, handler))
+
+# ---------------------------------------------------------------------------
+# Pooled serving (opt-in)
+# ---------------------------------------------------------------------------
+#
+# A FIXED set of long-lived workers pulling owned connections off a channel, instead of one
+# fire-and-forget task per connection. `serve`/`serve_n` are untouched: this is additive, and the
+# caller opts in.
+#
+# Why it is worth a second entry point: a spawned task costs ~1.5 MiB — a 1 MiB green stack plus a
+# 512 KiB root pool — and `makecontext` ZEROES the whole stack, so every page of every per-request
+# task becomes resident. Task setup measured 75% of this server's CPU. A worker pays that once
+# instead of once per request, and touches only the few KB its handler uses. Measured on two servers
+# with byte-identical request handling (bench/http_worker_pool): 3.5-5.4x throughput, 202 MB -> 8 MB
+# RSS, p50 1.41 ms -> 297 us. Full design and the 17-hazard analysis of the rejected runtime-level
+# alternative: docs/green-task-pool-v0.md.
+#
+# The handoff is expressed THROUGH linearity rather than around it: `chan_send` consumes the
+# connection, a received `Got conn` carries the sole obligation to consume it, and dropping or
+# double-sending one is a compile error. That is why the pool lives here and not in the scheduler —
+# a C-level pool moves lifetime correctness one layer below where the checker can see it.
+#
+# WHAT YOU GIVE UP: at most `workers` requests are in flight at once, against `serve`'s promise that
+# a slow connection cannot block others. That cost is now small and bounded, because handler
+# occupancy is finite by construction (see ServerConfig): a peer can hold a worker for at most
+# `header_ms + body_ms + write_ms + (max_body_bytes + response) / min_rate_bps`, not forever. It was
+# NOT safe to pool before those bounds existed — `workers` crawling peers would have wedged the
+# server permanently. Throughput barely notices the bound: measured w=2, 8, 64 and 256 all land at
+# 23k-32k req/s, because each request is ~4 us of work and the server is accept-bound.
+
+# The worker loop. Returns to `chan_recv` after every connection, which is the whole optimisation —
+# a worker that fell out of this loop would silently reduce pool capacity until the server had no
+# workers left and stopped answering, with nothing logged and no error anywhere.
+#
+# `handle_connection` consumes the connection on every path including its error paths, so ordinary
+# client misbehaviour — malformed requests, timeouts, resets — cannot end a worker. A `panic` inside
+# a user handler still kills its worker, and Sprout has no way to catch it; with spawn-per-connection
+# that killed one connection instead. That asymmetry is real and is filed in BACKLOG rather than
+# papered over, since the honest mitigations (a supervisor that respawns, or catchable failures) are
+# both language-level work.
+fn pool_worker(ch: Chan TcpConnection, config: ServerConfig, handler: HttpRequest -> HttpServerResponse !{IO}) -> Unit !{IO} =
+  match chan_recv(ch) with
+  | Got conn ->
+      do
+        handle_connection(config, conn, handler)
+        pool_worker(ch, config, handler)
+  # The channel closed: the accept loop is done, so the worker exits cleanly. This arm binds no
+  # connection, so it discharges no obligation — which is what makes shutdown expressible at all.
+  | Closed -> task_yield()
+
+fn spawn_pool(scope: Scope, ch: Chan TcpConnection, config: ServerConfig, handler: HttpRequest -> HttpServerResponse !{IO}, remaining: Int) -> Unit !{IO} =
+  if remaining <= 0 then task_yield()
+  else
+    do
+      task_spawn(scope, \_ -> pool_worker(ch, config, handler))
+      spawn_pool(scope, ch, config, handler, remaining - 1)
+
+# The accept loop owns the listener and MOVES each connection into the channel. A bounded channel is
+# what turns "more load than the pool can serve" into backpressure rather than unbounded growth:
+# `chan_send` parks this loop once the queue is full, so the server stops accepting instead of
+# accumulating connections it has no worker for.
+#
+# `remaining < 0` means "forever" — the same body serves both the bounded and unbounded entry points,
+# since the only difference is whether the counter is ever allowed to reach zero.
+fn pooled_accept_loop(ch: Chan TcpConnection, listener: consuming TcpListener, remaining: Int) -> Unit !{IO} =
+  if remaining == 0 then
+    do
+      # Closing the channel is what lets the workers exit, and it must happen BEFORE the scope join:
+      # a worker parked in `chan_recv` on a channel nobody will close is a task that never finishes,
+      # and `with_scope` would wait for it forever.
+      chan_close(ch)
+      close_listener(listener)
+  else
+    do
+      conn <- accept(listener)
+      chan_send(ch, conn)
+      pooled_accept_loop(ch, listener, remaining - 1)
+
+# The channel is threaded as a PARAMETER rather than bound with `ch <- chan_new(scope, depth)`.
+# That is not a style choice: a do-bind of a container holding a linear payload is rejected by the
+# known over-strict edge at BACKLOG:1059, so the bind form does not compile. Do not "simplify" this
+# into a bind until that edge is fixed.
+#
+# The listener arrives as an ALREADY-BOUND argument rather than being created in the body, and that
+# ordering is load-bearing: `spawn_pool` runs first, so binding inside the body would leave the
+# socket unbound across every worker spawn, and a client connecting in that window is refused. The
+# unpooled `serve_n_with` gets this for free by passing `listen_local(port)` as an argument, where
+# strict evaluation binds it before the loop begins; the pooled path has to do it deliberately.
+fn pooled_run(scope: Scope, ch: Chan TcpConnection, config: ServerConfig, listener: consuming TcpListener, workers: Int, remaining: Int, handler: HttpRequest -> HttpServerResponse !{IO}) -> Unit !{IO} =
+  do
+    spawn_pool(scope, ch, config, handler, workers)
+    pooled_accept_loop(ch, listener, remaining)
+
+# 8 workers and a queue 64 deep. Worker count is a CAPACITY decision the deployment owns: throughput
+# is flat from 2 to 256 (the server is accept-bound), so 8 is chosen for headroom against handlers
+# doing real work rather than for throughput, and a deployment whose handlers block on a database
+# should raise it. The queue depth bounds how many accepted-but-unserved connections may be held.
+export fn serve_pooled(port: Int, handler: HttpRequest -> HttpServerResponse !{IO}) -> Unit !{IO} =
+  serve_pooled_with(default_config(), port, 8, 64, handler)
+
+# `serve_pooled` with explicit budgets, worker count and queue depth.
+export fn serve_pooled_with(config: ServerConfig, port: Int, workers: Int, queue_depth: Int, handler: HttpRequest -> HttpServerResponse !{IO}) -> Unit !{IO} =
+  with_scope(\s -> pooled_run(s, chan_new(s, queue_depth), config, listen_local(port), workers, -1, handler))
+
+# Bounded counterpart, for tests and bounded runs: serves exactly `max_connections` and returns.
+# `max_connections` counts connections ACCEPTED, not fully served; the scope join waits for the
+# workers, which the channel close releases.
+export fn serve_pooled_n_with(config: ServerConfig, port: Int, workers: Int, queue_depth: Int, max_connections: Int, handler: HttpRequest -> HttpServerResponse !{IO}) -> Unit !{IO} =
+  with_scope(\s -> pooled_run(s, chan_new(s, queue_depth), config, listen_local(port), workers, max_connections, handler))
