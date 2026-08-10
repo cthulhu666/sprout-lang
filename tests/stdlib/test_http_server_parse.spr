@@ -68,5 +68,18 @@ fn main() -> Unit !{IO} =
     # must be derived in bytes too — not just the body length.
     check_eq("multi-byte header value does not shift the body offset",
       describe(parse("POST /x HTTP/1.1\r\nX-Note: café\r\nContent-Length: 3\r\n\r\nabc")),
-      "POST /x body=abc")
+      "POST /x body=abc"),
+    # The REQUEST LINE goes through http.parse_request_line, which pairs `str_find` with `str_slice`.
+    # Both are codepoint-indexed (str_find converts its byte offset to a codepoint count before
+    # returning), so the pairing is consistent — this pins that, since on an ASCII path the two index
+    # spaces are indistinguishable. A raw UTF-8 path is what a browser sends before percent-encoding.
+    check_eq("multi-byte path parses and does not shift the version",
+      describe(parse("GET /café HTTP/1.1\r\n\r\n")), "GET /café body="),
+    # The sharpest test of the body-offset derivation: a multi-byte PATH makes the header region's
+    # codepoint and byte indices genuinely diverge (`/日本` is 3 codepoints and 7 bytes), so the body
+    # offset can only be right if it is derived as `byte_length(take(raw, body_start))` rather than by
+    # assuming `body_start` is already a byte count. `café` is 5 bytes.
+    check_eq("multi-byte path with a body keeps both intact",
+      describe(parse("POST /日本 HTTP/1.1\r\nContent-Length: 5\r\n\r\ncafé")),
+      "POST /日本 body=café")
   ])

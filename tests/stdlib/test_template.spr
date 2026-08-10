@@ -117,5 +117,24 @@ fn main() -> Unit !{IO} =
     check_eq("missing endif is an error",
       r("{% if x %}a", empty_ctx()), "<<ERR>>"),
     check_eq("unknown statement keyword is an error",
-      r("{% wat %}", empty_ctx()), "<<ERR>>")
+      r("{% wat %}", empty_ctx()), "<<ERR>>"),
+
+    # --- non-ASCII in the DATA, not just the template ---
+    # The one existing non-ASCII check puts é in the template source. The realistic case is
+    # non-ASCII in the *context*: user-supplied text rendered into HTML. escape_html is five chained
+    # replace_all passes, and the scanner does `string.drop` per tag candidate — both codepoint-
+    # indexed, so a multi-byte value must pass through untouched and must not shift a later tag.
+    check_eq("non-ASCII context value renders verbatim",
+      r("{{ name }}", object_from_pairs([("name", "café")])), "café"),
+    check_eq("4-byte context value renders verbatim",
+      r("{{ name }}", object_from_pairs([("name", "🌱")])), "🌱"),
+    # escape_html must escape the ASCII metacharacters and leave the rest byte-for-byte.
+    check_eq("non-ASCII survives HTML escaping alongside a metacharacter",
+      r("{{ name }}", object_from_pairs([("name", "café & 日本")])), "café &amp; 日本"),
+    # A multi-byte value BEFORE a second tag: if the scanner mixed index spaces, the offset carried
+    # past the first interpolation would land mid-character and corrupt or misplace the second.
+    check_eq("a multi-byte value does not shift a later tag",
+      r("{{ a }}-{{ b }}", object_from_pairs([("a", "café"), ("b", "ok")])), "café-ok"),
+    check_eq("multi-byte literal text between two tags",
+      r("{{ a }}日本{{ b }}", object_from_pairs([("a", "x"), ("b", "y")])), "x日本y")
   ])

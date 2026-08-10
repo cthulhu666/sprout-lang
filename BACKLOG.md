@@ -595,8 +595,56 @@ Legend:
   needs measuring rather than assuming. Consider also whether `str_slice_bytes` should return a
   `Result` instead of aborting — a process-fatal on attacker-controlled offsets is the wrong default
   for a string builtin, and this is the second place it bit (see C5 above).
-- [ ] `P1` **Sweep every text-indexing module for the byte-vs-codepoint blind spot.** C5 and the
-  `json.parse` abort above are two symptoms of ONE missing test axis, and there is a third on record:
+- [x] `P1` **Swept every text-indexing module for the byte-vs-codepoint blind spot. DONE 2026-08-10 —
+  the headline is a NEGATIVE result: no third live bug.** The two fixed above were the only ones in
+  `stdlib/`. What the sweep did produce is coverage, which is the part that keeps the axis closed.
+  - **Fatal-builtin axis.** Of the ~30 `tcp_fail` sites in text builtins, almost all are null-input or
+    OOM guards — unreachable from Sprout, where a `String` is never null. Only **three** are
+    data-dependent, i.e. reachable with valid-but-unlucky input:
+    1. `str_slice_bytes` split-codepoint (`runtime/sprout_runtime.c:5118`/`:5120`) — `json` FIXED;
+       `stdlib/compiler/lexer.sprout:11` is the only other caller and was **verified clean by probe**
+       (2-, 3- and 4-byte literals, mixed widths, `Char` literals, and interpolation with non-ASCII on
+       both sides of `${}` — `source.cursor_byte_offset` is codepoint-boundary-aligned, so its token
+       slices cannot split).
+    2. `str_utf8` invalid/truncated UTF-8 (`:4943`/`:4963`) — **unreachable from Sprout**: there is no
+       `extern fn` declaration for it, only `char_to_string`/`char_to_str`.
+    3. `term_read_key` non-ASCII byte (`:3278`) — live, deliberate, and was unfiled; see below.
+  - **Mixing axis.** The load-bearing fact, verified in the runtime rather than assumed: **`str_find`
+    returns a CODEPOINT count**, converting its byte offset via `sprout_utf8_step` before returning
+    (`:5449`-`:5456`). That is what makes the `str_find` + `str_slice`/`take`/`drop` pairing used
+    throughout `http`, `template`, `scram` and `string` internally consistent, so those modules are
+    correct for non-ASCII rather than accidentally so. Two more results worth recording:
+    - `regex` looked like a repeat of C5 — POSIX `regexec` reports `rm_so`/`rm_eo` as BYTE offsets and
+      `split_first` feeds them to codepoint-indexed `str_slice` — but the runtime **already bridges**
+      them with `sprout_utf8_codepoint_prefix_count` (`:5522`). Correct, and now pinned by tests that
+      assert the exact codepoint offset instead of merely "it worked".
+    - `url` is the model the others should follow: it operates on `Bytes` throughout and decodes UTF-8
+      exactly once at the end (`bytes.to_string`), which its header comment calls "the only correct
+      level". It already had non-ASCII coverage including a byte-length assertion.
+  - **Coverage added** (the durable half — the bugs are fixed, but only tests stop the axis reopening):
+    `test_regex.spr` +8 (it had **zero**, and one asserts a match offset as a *number*, 5 not 6, so a
+    byte/codepoint regression is a wrong integer rather than a silent pass); `test_template.spr` +5 on
+    the **data** side, since the one pre-existing check put é in the template *source* while the
+    realistic case is user text rendered into HTML; `test_http_server_parse.spr` +2 for the request
+    line, including a multi-byte PATH with a multi-byte BODY — the sharpest test of the body-offset
+    derivation, because `/日本` is 3 codepoints and 7 bytes, so the offset is only right if derived as
+    `byte_length(take(raw, body_start))` rather than assuming `body_start` is already a byte count.
+  - **Method, for re-running it:** `for f in tests/stdlib/*.spr; do sed 's/#.*//' "$f" | LC_ALL=C grep
+    -c '[^ -~\t]'; done` — stripping comments first is essential, since em dashes and `✓` in prose
+    make a naive grep match nearly every file and report ~260 suites as covered when only 17 have
+    non-ASCII test *data*.
+- [ ] `P3` **`term_read_key` panics on a non-ASCII keypress.** `runtime/sprout_runtime.c:3278`:
+  a single `read()` byte `>= 0x80` is at most the lead of a multi-byte sequence, so returning it would
+  mint an invalid `String`; the builtin calls `tcp_fail` instead. That is a *deliberate* choice with a
+  written rationale (review W2/R4, "assembling a full multibyte key is a separate deferred feature"),
+  but the rationale lived only in a C comment and the gap was recorded nowhere — filed now so it is not
+  rediscovered. Consequence: typing any accented or non-Latin character in the REPL kills the session
+  and loses its state. Fix is to assemble the continuation bytes into a complete codepoint before
+  returning (the byte count is determined by the lead byte). Local/interactive only — no remote
+  reachability, hence `P3` rather than the `P1` the `json` sibling warranted. Found 2026-08-10 by the
+  text-indexing sweep above.
+- [ ] ~~`P1` Sweep every text-indexing module~~ — original scoping notes, retained for the method:
+  C5 and the `json.parse` abort above are two symptoms of ONE missing test axis, and there is a third on record:
   the bundler's `strip_headers_b` had the identical confusion ("byte offset was used as codepoint
   index in `str_slice`, causing parse failures on files with multi-byte characters in comment
   headers"). Byte and codepoint index spaces AGREE on ASCII, and the suites are all-ASCII —

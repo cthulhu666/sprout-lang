@@ -1,5 +1,7 @@
 import stdlib.test (check_eq, check_true, check_false, run_suite)
 import stdlib.regex as regex
+# The Match constructor is needed unqualified to destructure find_first's result in a pattern.
+import stdlib.regex (Match)
 
 fn compile_ok(pattern: String) -> Bool =
   match regex.compile(pattern) with
@@ -18,6 +20,39 @@ fn find_some(pattern: String, text: String) -> Bool =
       | Just _ -> true
       | Nothing -> false
   | Err _ -> false
+
+# -1 rather than a Maybe so a missing match is a visibly wrong number in the failure message.
+fn match_start(pattern: String, text: String) -> Int =
+  match regex.compile(pattern) with
+  | Ok re ->
+      match regex.find_first(re, text) with
+      | Just (Match start _) -> start
+      | Nothing -> 0 - 1
+  | Err _ -> 0 - 2
+
+fn match_end(pattern: String, text: String) -> Int =
+  match regex.compile(pattern) with
+  | Ok re ->
+      match regex.find_first(re, text) with
+      | Just (Match _ end) -> end
+      | Nothing -> 0 - 1
+  | Err _ -> 0 - 2
+
+fn split_before(pattern: String, text: String) -> String =
+  match regex.compile(pattern) with
+  | Ok re ->
+      match regex.split_first(re, text) with
+      | Just (before, _) -> before
+      | Nothing -> "no-match"
+  | Err _ -> "compile-error"
+
+fn split_after(pattern: String, text: String) -> String =
+  match regex.compile(pattern) with
+  | Ok re ->
+      match regex.split_first(re, text) with
+      | Just (_, after) -> after
+      | Nothing -> "no-match"
+  | Err _ -> "compile-error"
 
 fn replace(pattern: String, replacement: String, text: String) -> String =
   match regex.compile(pattern) with
@@ -43,5 +78,30 @@ fn main() -> Unit !{IO} =
     check_eq("replace_all no match", replace("[0-9]+", "NUM", "no digits"), "no digits"),
 
     check_eq("escape literal chars", regex.escape("[A-Z]+"), "\\[A\\-Z\\]\\+"),
-    check_eq("escape plain string unchanged", regex.escape("hello"), "hello")
+    check_eq("escape plain string unchanged", regex.escape("hello"), "hello"),
+
+    # --- non-ASCII text (this suite had no non-ASCII coverage at all) ---
+    # The native engine is POSIX regexec, which reports rm_so/rm_eo as BYTE offsets, while
+    # `split_first` feeds them to `str_slice`, which is CODEPOINT-indexed. The runtime bridges the two
+    # with sprout_utf8_codepoint_prefix_count; these checks are what pin that conversion, because on
+    # ASCII text the two offsets are identical and nothing here could tell them apart.
+    #
+    # `café ` is 5 codepoints and 6 bytes, so the match offset differs between the two spaces by
+    # exactly one — asserted as a number rather than as "it worked".
+    check_eq("match start is a codepoint offset, not a byte offset",
+      match_start("[0-9]+", "café 42"), 5),
+    check_eq("match end is a codepoint offset", match_end("[0-9]+", "café 42"), 7),
+    # split_first is where a byte/codepoint mix-up would corrupt output rather than just shift a
+    # number: the prefix would keep a stray continuation byte and the suffix would lose one.
+    check_eq("split_first prefix keeps the multi-byte character whole",
+      split_before("[0-9]+", "café 42 tail"), "café "),
+    check_eq("split_first suffix starts after the match",
+      split_after("[0-9]+", "café 42 tail"), " tail"),
+    # A 4-byte character (3 bytes of drift) before the match, so an off-by-one bridge would not pass.
+    check_eq("match start after a 4-byte character", match_start("[0-9]+", "🌱 7"), 2),
+    # Matching and replacing must leave non-ASCII text byte-for-byte intact.
+    check_true("is_match over non-ASCII text", is_match("caf", "café")),
+    check_eq("replace_all preserves surrounding non-ASCII",
+      replace("[0-9]+", "N", "日本 42 語"), "日本 N 語"),
+    check_eq("escape leaves non-ASCII unchanged", regex.escape("café"), "café")
   ])
