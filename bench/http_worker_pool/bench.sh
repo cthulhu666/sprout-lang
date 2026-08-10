@@ -8,6 +8,15 @@
 # few 4s runs at ~30k req/s leave >10k sockets in TIME_WAIT. Without draining between runs
 # the port table -- not Sprout -- dominates, and the baseline reads ~2x low. This barrier
 # is load-bearing; do not remove it to "speed up" the benchmark.
+#
+# READ p99 WITH CARE -- at these rates it measures the CLIENT, not the server. There are
+# only 16384 ephemeral ports (net.inet.ip.portrange 49152-65535), and a 4s run at ~32k req/s
+# opens ~131k connections: 8x the range, so the client stalls on TIME_WAIT recycling and p99
+# blows out to tens of ms while p50 stays in the hundreds of us. Drained, and kept inside the
+# port range (`DUR=1s CONNS=2`), the same pooled server measures p50=35us / p99=243us. So a
+# long run's p99 is not a server property. Both a small backlog and GC were tested as causes
+# and both ruled out -- see docs/green-task-pool-v0.md §5.3. Throughput and p50/p90 are the
+# figures to compare here; fixing the tail properly needs server-side keep-alive.
 set -uo pipefail
 DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO="$(cd "$DIR/../.." && pwd)"
@@ -55,7 +64,7 @@ run_one() {
 }
 
 echo "==> Interleaved A/B, $ROUNDS rounds, -c$CONNS -d$DUR"
-echo "    (p99 is dominated by the 16-deep listen() backlog, not by pooling -- see doc §5.3)"
+echo "    (compare rps/p50/p90; p99 at this rate measures client port exhaustion -- see doc 5.3)"
 for r in $(seq 1 "$ROUNDS"); do
   echo "--- round $r ---"
   run_one "spawn" "$DIR/spawn_server"
