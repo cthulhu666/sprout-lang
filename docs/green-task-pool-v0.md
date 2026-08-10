@@ -255,13 +255,34 @@ touches only the few KB its handler actually uses. The stack zeroing is not just
 is the memory cost too. G11's concern survives only for design B's *grow-on-demand* pool; design A's
 fixed worker count bounds memory by construction.
 
-**The p99 tail is a pre-existing bug, not a property of pooling.** It appears at *every* worker
-count including w=2, and varies 18–108 ms run to run. It is not GC (`SPROUT_DEBUG_GC` shows max
-pause 6.9 ms, 21 ms total across 6 s). The cause is `runtime/sprout_runtime.c:8341` —
-`listen(fd, 16)`, a hardcoded backlog of **16**. At ~28,000 accepts/s a 16-deep backlog overflows
-whenever the accept loop is briefly descheduled, and dropped SYNs cost the client a retransmit.
-Pooling did not introduce this; it made the server fast enough to reach it. The task-per-connection
-server never hits it because task creation throttles it to ~6k req/s first. Filed as follow-up 8.
+**The p99 tail is a benchmark-client artifact, not a server property.** It appears at *every* worker
+count including w=2, and varies 18–120 ms run to run. Two hypotheses were tested and **both
+rejected**:
+
+- *Not GC.* `SPROUT_DEBUG_GC` shows max pause 6.9 ms, 21 ms total across 6 s — an order of
+  magnitude short of the tail.
+- *Not the listen backlog.* `runtime/sprout_runtime.c:8341` hardcodes `listen(fd, 16)`, which looked
+  like an obvious culprit at ~30k accepts/s. Raising it to `SOMAXCONN` (128 here) changed p99 **not
+  at all** (74–120 ms before and after, 3 interleaved rounds). Hypothesis discarded — recorded
+  because it is a plausible-looking diagnosis that measurement killed, and the backlog is not the
+  thing to go fix.
+
+The actual cause is **client-side ephemeral-port exhaustion**. `Connection: close` means one TCP
+connection per request; this machine has **16,384 ephemeral ports** (`net.inet.ip.portrange`
+49152–65535), and a 4 s run at ~32k req/s opens **131,712** connections — eight times the port
+range — so the client stalls waiting for `TIME_WAIT` to recycle. Isolated by varying only the
+connection volume against a drained port table:
+
+| run | connections | p50 | p99 |
+|---|---|---|---|
+| `-t1 -c2 -d1s`, drained | 25,035 | **35 µs** | **243 µs** |
+| `-t2 -c40 -d4s`, table loaded | 131,712 | 536 µs | 66 ms |
+
+With the client not port-starved there is **no tail at all**, and the pooled server's true p50 is
+**35 µs**. So the §5.3 table's p99 column measures `wrk` plus the kernel, not Sprout — and the
+protocol constraint is now documented in `bench/http_worker_pool/bench.sh`: **p99 is only meaningful
+for runs that stay inside the ephemeral-port range.** The task-per-connection server never shows the
+tail simply because task creation throttles it to ~7k req/s, so it never opens enough connections.
 
 ### 5.4 Gotchas for design A
 
@@ -555,13 +576,29 @@ To be filed in `BACKLOG.md`:
 6. **The 1 MiB default is 512× Go's initial stack** (§3.1) and was never measured against real
    handler depth. Measure what depth handlers actually use.
 7. **A generic `Pool a`** (§7.5) — unblocked; defer until a real consumer (DB connections) exists.
-8. **`listen(fd, 16)`** — `runtime/sprout_runtime.c:8341` hardcodes a 16-deep accept backlog. This
-   is the entire cause of §5.3's p99 tail, and it is a **pre-existing bug** that only becomes
-   reachable once the server is fast enough to saturate accept. Conventional values are 128 /
-   `SOMAXCONN`. Cheap fix, large tail-latency effect, independent of everything else here.
-9. **The accept loop is the next bottleneck** (§5.3): worker count is irrelevant from w=2 to
-   w=256, so once task creation is off the per-request path the single accept task is the limit.
-   Any further server work should start there, not at the handler.
+8. **`connect()` is blocking, and that stalls the whole scheduler.**
+   `runtime/sprout_runtime.c:8407` says so deliberately — "connect() stays BLOCKING… loopback/
+   typical connects complete promptly". True until the peer's accept queue is full or the peer is
+   slow, at which point **one client connect freezes every green task in the process**: the pump
+   never runs, so no timer fires and `with_timeout` cannot bound it. Verified while trying to write
+   a backlog regression test — the test hung instead of failing, and wrapping the dial loop in
+   `with_timeout` did not help. The fix is the one the comment itself names: non-blocking connect
+   plus a write-readiness park. This is a **liveness bug in any client-side Sprout code**, not just
+   a testing obstacle.
+9. **`listen(fd, 16)`** — a 16-deep accept backlog, well below every convention (`SOMAXCONN`,
+   nginx's 511). **Measured NOT to affect this workload's p99** (§5.3), so it is hardening rather
+   than a fix, and it has **no hermetic regression test available**: a too-small backlog manifests
+   as an unbounded park (dropped SYN, no error), and follow-up 8 means no in-process timeout can
+   convert that park into a failure. A test becomes possible either after follow-up 8, or via an
+   out-of-process dialer the Sprout scheduler cannot block.
+10. **The accept loop is the next bottleneck** (§5.3): worker count is irrelevant from w=2 to
+    w=256, so once task creation is off the per-request path the single accept task is the limit.
+    Any further server work should start there, not at the handler.
+11. **`Connection: close` makes any high-throughput HTTP measurement here port-bound.** 16,384
+    ephemeral ports against ~32k req/s is about half a second of headroom, after which the client
+    stalls on `TIME_WAIT` recycling — §5.3's p99 column. Server-side **keep-alive** would remove the
+    constraint and is what would make tail numbers meaningful at all; until then read only
+    throughput and p50/p90 from long runs.
 
 ## 14. Sources
 
