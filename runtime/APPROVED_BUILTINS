@@ -169,6 +169,7 @@ tcp_connect
 tcp_echo_serve
 tcp_listen
 tcp_read
+tcp_read_avail_timeout  # tcp_read_avail bounded by a deadline: waits at most timeout_ms for data, then returns Err(TcpTimeout) with the connection still valid. Correctness, not performance: an unbounded read is a remote liveness hazard (a peer that connects and says nothing parks its handler forever — slowloris), and the bound CANNOT be expressed in Sprout. with_timeout is the only Sprout-level alternative and is unusable here on two counts: it force-drops the reading task, so the linear `close` never runs and the connection handle leaks, and it forks a task, costing a green stack per connection. The primitive needs the scheduler to register one task on an fd AND a timer at once (scheduler_park_on_fd_timeout) — inaccessible from Sprout. Model matches Go SetReadDeadline / Java SO_TIMEOUT / Erlang gen_tcp:recv Timeout. timeout_ms <= 0 = poll once without waiting, which is what makes a TOTAL deadline composable in stdlib
 tcp_read_avail  # recoverable read-available: reads up to 64 KiB and returns Result TcpError String (Ok("") on EOF) instead of exit(1) on a socket error. Raw non-blocking recv + scheduler park on EAGAIN — the same OS-socket/scheduler interaction as tcp_read, which cannot be expressed in Sprout; tcp_read_exact (Result-returning) blocks for an exact count and so cannot read an unknown-length header block.
 tcp_read_exact
 tcp_write

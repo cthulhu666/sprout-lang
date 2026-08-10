@@ -189,6 +189,25 @@ read/accept/write steady-state parks. (Non-blocking connect is a later refinemen
 > outcome from `SO_ERROR` (a ready fd signals success and failure alike). Regression:
 > `tests/task_io_smoke/connect_park.spr`.
 >
+> **Update 2026-08-10 (b) — `PARK_FD_TIMER`, a park on an fd OR a deadline.** Added for
+> `tcp_read_avail_timeout`, which bounds a read so a server survives a peer that connects and then
+> says nothing. The task registers on the fd *and* a timer, and `scheduler_park_on_fd_timeout`
+> reports which one won; on expiry the task **resumes normally** and its caller returns
+> `Err TcpTimeout` — it is *not* dropped. That distinction is the whole reason this exists rather
+> than reusing `with_timeout`: a force-dropped task never runs its linear `close`, so the
+> cancel-the-task model leaks the connection handle it was supposed to protect, and it would also
+> cost an extra green stack per connection. Same split as Go `SetReadDeadline` / Java `SO_TIMEOUT` /
+> Erlang `gen_tcp:recv` timeout versus Tokio's `timeout`.
+>
+> Two new invariants come with it:
+> 1. **Both registrations can fire in one poll batch**, so the pump must wake the task at most once
+>    (it checks `on_io_list`, which the first event clears) while still accounting for the loser.
+> 2. **Timer teardown is exactly-once, tracked explicitly** via `Task.park_timer_dead`, because the
+>    Linux backend `close()`s the timerfd and a second teardown would close a reused descriptor.
+>    `sprout_poll_wait` therefore reports fd-vs-timer per event: kqueue reads it off
+>    `evs[i].filter`, epoll (whose `epoll_event.data` carries only the token) gets it from a tag in
+>    the token's low bit, set when the timer is registered. The tagging stays inside `sprout_poll.c`.
+>
 > Two consequences that generalize to **any** future park site, and both bit here:
 > 1. **An fd no handle table owns needs `scheduler_park_on_unowned_fd`.** Every pre-existing park
 >    is on an fd reachable from a handle, so a cancel-drop can leave it open and its owner still

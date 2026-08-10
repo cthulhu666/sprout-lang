@@ -1,0 +1,70 @@
+import stdlib.task (Scope, with_scope, task_spawn)
+import stdlib.net (TcpConnection, connect, close, write_all_utf8, read_exact_utf8)
+import stdlib.http_server (HttpRequest, HttpServerResponse, ServerConfig, ok, request_path, serve_n_with)
+
+# http_server idle-connection timeout (concurrency review C3 regression).
+#
+# A connection that is accepted but never sends anything used to park its handler in
+# `read_until_headers` FOREVER: the handler task never finished and `conn` was never closed, so a
+# client holding silent sockets exhausted the runtime's 2048-entry connection-handle table until
+# `tcp_accept` could serve nobody — slowloris, with no code needed beyond `connect` and `sleep`.
+#
+# The header read is now bounded by a TOTAL deadline (`ServerConfig`'s header_ms), not merely a
+# per-read one: a per-read timeout alone would be defeated by a client that dribbles one byte per
+# interval, which is exactly what the classic attack does. On expiry the server answers 408 and
+# closes, so the fix is directly observable from the client side rather than only as an absence.
+#
+# Two clients, one process:
+#  * `silent_client` connects and says NOTHING. It must read back `HTTP/1.1 408`. Unfixed, its read
+#    parks forever and the whole program hangs — RED via the recipe's perl `alarm`.
+#  * `prompt_client` sends a complete request and must still get its 200. This is the half that
+#    catches an over-eager timeout: a fix that simply closed connections early would pass the first
+#    assertion and fail this one.
+#
+# The deadline is 300 ms here (the shipped default is minutes), which is why `serve_n_with` exists —
+# a hard-coded timeout would make this test either slow or untestable.
+
+fn handle(req: HttpRequest) -> HttpServerResponse =
+  ok(request_path(req))
+
+fn expect_status(conn: borrowing TcpConnection, want: String, label: String) -> Unit !{IO} =
+  match read_exact_utf8(conn, 12) with
+  | Ok line ->
+    if line == want then
+      term_write(`${label}\n`)
+    else
+      term_write(`UNEXPECTED ${label} got ${line}\n`)
+  | Err _ -> term_write(`FAILED ${label}: read failed\n`)
+
+# Connects, then goes silent. The server must give up on its own and say 408.
+fn silent_client(port: Int) -> Unit !{IO} =
+  match connect("127.0.0.1", port) with
+  | Ok conn ->
+    do
+      expect_status(conn, "HTTP/1.1 408", "silent-got-408")
+      close(conn)
+  | Err _ -> term_write("FAILED silent client could not connect\n")
+
+# Sends a full request immediately; must be served normally.
+fn prompt_client(port: Int) -> Unit !{IO} =
+  match connect("127.0.0.1", port) with
+  | Ok conn ->
+    do
+      match write_all_utf8(conn, "GET /ok HTTP/1.1\r\nHost: x\r\n\r\n") with
+      | Ok _ -> expect_status(conn, "HTTP/1.1 200", "prompt-got-200")
+      | Err _ -> term_write("FAILED prompt client write failed\n")
+      close(conn)
+  | Err _ -> term_write("FAILED prompt client could not connect\n")
+
+# The server task is spawned first, so it reaches `tcp_listen` (and parks in accept) before either
+# client task runs — the same startup ordering the other http fixtures rely on.
+fn run(s: Scope, port: Int) -> Unit !{IO} =
+  do
+    task_spawn(s, \_ -> serve_n_with(ServerConfig(300, 300), port, 2, handle))
+    task_spawn(s, \_ -> silent_client(port))
+    task_spawn(s, \_ -> prompt_client(port))
+
+fn main() -> Unit !{IO} =
+  do
+    with_scope(\s -> run(s, 28992))
+    term_write("done\n")
