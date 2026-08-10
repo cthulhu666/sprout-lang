@@ -5,8 +5,10 @@ normatively documented in **`docs/spec-v0.md` §5.6.3** — declaration
 `type Point = (x: Int, y: Int)`, construction `Point(x = 3, y = 4)`, dot access
 `p.x`, functional update `p with (x = v)`, **parametric records**
 (`type Box s = (val: s, label: String)`, construction infers `Box Int`), and
-**inline calls of function-typed fields** (`v.render(x)`). Records are same-module
-only for now (imported records are a known open gap, `BACKLOG.md` item 5).
+**inline calls of function-typed fields** (`v.render(x)`). Records also work
+**across module boundaries** — verified 2026-08-10 by
+`tests/stdlib/test_imported_records.spr` after the `@rec:` name-identity gap that
+once blocked them was closed.
 
 This document is the design **rationale and history**. Where its "Problem
 statement" (§1) and migration table (§9) describe a `{ }`-literal / `get p x`
@@ -324,7 +326,12 @@ dot-access**; PR2 landed **functional update `with`** (§4.4). Since then,
 **parametric records** (construction infers the type arguments, e.g. `Box Int`)
 and **inline calls of function-typed fields** (`v.render(x)`) have landed.
 `docs/spec-v0.md` §5.6.3 is the normative record section, and this doc is now
-rationale for it. Still to land: §8 error-message fixtures, imported
-(cross-module) records (blocked on the `@rec:` name-identity bug), and
-record-vs-tuple / record-vs-call / shadowing parser tests. `BACKLOG.md` item 5
-tracks the remaining work.
+rationale for it. **Imported (cross-module) records also work** — the `@rec:`
+name-identity bug that blocked them is gone, verified 2026-08-10 across 22 shapes
+in `tests/stdlib/test_imported_records.spr`.
+
+Still to land: §8 error-message fixtures, and record-vs-tuple / record-vs-call /
+shadowing parser tests. Two open items found while verifying the above — unknown
+field access and missing-field construction escaping the typechecker, and the
+unsettled qualified-vs-bare name in derived `ToString` — are tracked in
+`BACKLOG.md`.

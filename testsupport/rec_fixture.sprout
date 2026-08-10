@@ -1,0 +1,60 @@
+module testsupport.rec_fixture
+
+# Fixture for tests/stdlib/test_imported_records.spr — record types declared HERE
+# and used from another module, which is the only way to exercise cross-module
+# record identity.
+#
+# Why this file exists: imported records were recorded as broken end-to-end (the
+# `@rec:<name>:<field>` markers were registered under a decl's bundled-qualified
+# name but looked up under the bare name at the use site). They work now, and the
+# bug went stale-but-open for a year because it was believed untestable — a
+# cross-module fixture was assumed to require a module in `stdlib/`, polluting
+# every build. It does not: every test runner already passes
+# `--package-root <repo-root>`, so a fixture module under `testsupport/` is
+# importable from any test and costs the stdlib bundle nothing. `testsupport/` is
+# outside the runner's glob (`tests/stdlib tests/stdlib/compiler`), so this file
+# is never itself run as a suite.
+
+# Four same-typed fields — the shape where a field-offset mixup is invisible to
+# the typechecker, so the test reads each field into its own decimal place rather
+# than checking a sum that a swap would preserve.
+export type Cfg = (header_ms: Int, body_ms: Int, max_header_bytes: Int, write_ms: Int)
+
+# Derived instances must resolve at an importing use site, not just here.
+export type Point = (x: Int, y: Int) deriving (Eq, Ord, ToString)
+
+# Parametric: the consumer instantiates this at two different type arguments.
+export type Box s = (val: s, label: String)
+
+# A record field whose type is another exported record, for nested access
+# (`l.from.x`) across the boundary.
+export type Line = (from: Point, to: Point)
+
+# Function-typed fields, called inline at the use site (`o.double(21)`).
+export type Ops = (double: Int -> Int, greet: String -> String)
+
+# `header_ms` again, at a different type in a different record. Field scoping is
+# per-record, so this must not collide with `Cfg`'s field of the same name.
+export type Other = (header_ms: String)
+
+# An imported record as an ADT constructor's field — the codegen `ctors`-dict
+# keying path, which is distinct from the record-marker path.
+export type Holder (..) = | Holder Cfg | Empty
+
+# Reading one field of an owned linear record consumes it, so a two-field read is
+# a reuse. The rule must survive the module boundary.
+export type linear Tok = (id: Int, tag: String)
+
+export fn default_cfg() -> Cfg =
+  Cfg(header_ms = 10, body_ms = 20, max_header_bytes = 30, write_ms = 40)
+
+# Receives a record the CONSUMER constructed — the opposite direction from
+# `default_cfg`, and the one a stdlib entry point like `serve_n_with` relies on.
+export fn cfg_sum(c: Cfg) -> Int =
+  c.header_ms + c.body_ms + c.max_header_bytes + c.write_ms
+
+export fn mk_box(n: Int) -> Box Int = Box(val = n, label = "int")
+
+export fn hold(c: Cfg) -> Holder = Holder(c)
+
+export fn mk_tok(n: Int) -> Tok = Tok(id = n, tag = "t")

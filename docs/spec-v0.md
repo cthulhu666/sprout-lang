@@ -625,8 +625,8 @@ its labels: `(x: Int, y: Int)` is a record, `(Int, Int)` is a tuple. Records may
 type arguments (`Boxed(value = 5, tag = "n")` has type `Boxed Int`) and a field
 declared `a` reads back at the record's instantiated argument. A parametric record's
 type variable is shared across its fields, so two fields declared `a` must receive
-the same type. Records are currently **same-module only** (imported records are a
-known gap).
+the same type. Records may be **used across module boundaries**: an imported
+record supports construction, field access, and `with` update at the use site.
 
 **Construction** is tag-prefixed, with `=` (a value binding, the same `=` as
 `let`):
@@ -681,10 +681,14 @@ fn shift_right(p: Point) -> Point = p with (x = p.x + 1)
 ```
 
 Restrictions (v0): no row polymorphism or extensible records, no structural
-subtyping, no field punning or defaults, and no `deriving`. The initial
-implementation supports records used **within their defining module**; using a
-record imported from another module is a known gap (the field markers are not yet
-canonicalized across the module boundary).
+subtyping, and no field punning or defaults. (Records *do* support `deriving` —
+see §12.)
+
+Records work across module boundaries. Construction, field access, `with`
+update, parametric instantiation at differing type arguments, nested records,
+function-typed fields, use as an ADT constructor's field, and derived-instance
+resolution all hold for an imported record, as does the linear-record
+consumption rule; `tests/stdlib/test_imported_records.spr` covers each.
 
 A record carries at most **255 fields**, the same ceiling an ADT constructor's
 field list has (§5.6); exceeding it is a compile error naming the record. The
@@ -1376,6 +1380,15 @@ ADT same-constructor logic accessing fields by name:
   field-less record).
 - `ToString` — `"Name(f0 = v0, f1 = v1, ...)"`, mirroring record construction
   syntax so the output is (modulo unquoted `String` fields) valid source.
+
+> **Unsettled:** `Name` is the *declaring module's qualified* name when the type
+> is imported (`app.models.Point(x = 1, y = 2)`) and the bare name when it is
+> declared in the entry file. Both forms are valid source, so both satisfy the
+> round-trip goal above, but the split is an artifact of deriving expansion
+> running after name qualification rather than a decision — and it means moving a
+> declaration into a module changes program output. Which convention wins is
+> tracked in `BACKLOG.md`; until it is settled, do not depend on the prefix.
+> The same split applies to ADT constructor names.
 
 `Enum` cannot be derived for a record — it requires a nullary-constructor ADT
 (the ordinal↔constructor bijection), and a record is a single field-bearing
