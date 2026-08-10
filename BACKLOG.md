@@ -1314,6 +1314,38 @@ and `docs/linear-types-m4.2-enforcement-2026-08-06.md`. Deferred, in the order t
 - [ ] `P3` **`&`/`&mut` (shared-XOR-mutable) split.** v0 ships borrow-vs-consume only; a
   read-vs-write refinement is a later increment. `docs/linear-borrowing-v0.md` §2, §13.
 
+- [ ] `P1` **A linear value dropped *inside a container* is not caught — `let..in` binder path**
+  (found 2026-08-10 while designing the green-task pool, `docs/green-task-pool-v0.md` §7.4). A bare
+  drop is caught; wrapping the value in anything hides it:
+
+  | shape | result |
+  |---|---|
+  | `let r = Res(1) in 7` | **caught** — "linear value 'r' is never used" |
+  | `let xs = [Res(1)] in 7` | silently dropped |
+  | `let p = (Res(1), 2) in 7` | silently dropped |
+  | `let b = Box(Res(1)) in 7` (user ADT) | silently dropped |
+  | `let m = Just(Res(1)) in 7` | silently dropped |
+
+  Distinct from the DONE discarded-do-step work at `:1066`, which added a *containment* test for
+  `_ <- e` / non-final do-steps. This is the **pure `let..in` binder**: no obligation attaches to
+  `xs` because `List Res` is not itself linear, so no rule ever asks about the `Res(1)` inside.
+  Also adjacent to the open Position A/B call at `:1100` (constructor-field discard) — the same
+  question of what counts as a real consume. Probes in `docs/green-task-pool-v0.md` §7.4 are
+  ready-made fixtures. **Ranked P1 because it is soundness, not ergonomics:** the practical
+  consequence is that a resource pool protects its *contents* (each acquired resource must be
+  consumed exactly once — verified) but dropping the pool itself with resources inside is silent.
+
+- [ ] `P2` **Raise priority: the over-strict effect-bind fallback now has a concrete consumer.**
+  The "*Remaining over-strict edge*" recorded at `:1059` — `x <- e` where `e : Container Linear
+  !{IO}` types `x` as the payload, so a non-linear container of a linear is conservatively rejected
+  — is what forces `ch <- chan_new(s, cap)` to be written as a threaded parameter instead in the
+  worker-pool server (`bench/http_worker_pool/pool_server.sprout`). Verified 2026-08-10 that this,
+  **not** linearity propagating from a type argument, is the whole obstacle: `Chan Res` used twice
+  as a *parameter* typechecks, `List Res` used twice typechecks, and `borrowing Holder Res` is
+  rejected with "only allowed on a parameter of a linear type" — i.e. a user ADT applied to a
+  linear argument is not itself linear. Fixing the fallback removes a real shape constraint from
+  stdlib code rather than a hypothetical one.
+
 
 ### Linear-typed Sprout-IR (Model C Milestone 5) — DEFERRED (2026-08-07)
 
@@ -1385,6 +1417,61 @@ op-classification already in place.
   - **Follow-on, and a prerequisite for the nursery:** the freelists are still wiped and rebuilt from *all* regions every sweep. A minor collection that marks only young objects but still rebuilds the whole heap's freelist is not proportional to the young set, which defeats the nursery. Making the lists generation-scoped — stop wiping, remove/re-add only the swept regions' entries — is the natural next increment, and the per-region touched-class bookkeeping it needs already exists (`fl_region_commit`/`fl_region_rollback`).
 - [ ] `P2` **GC trigger is object-count-blind, not byte-aware** (`runtime/sprout_runtime.c` `sprout_gc_maybe_collect_threshold`, ~line 879): the collector fires when `g_managed_heap_count >= g_gc_threshold` (default 4096 objects, adaptive ×2 up to an optional cap), and `g_managed_heap_count` increments by exactly 1 per managed object regardless of size — a `VectorVal`'s backing `data` array is allocated via plain `malloc`, invisible to the trigger. Consequence (measured on a 20k-append benchmark, `SPROUT_DEBUG_GC=1`): many-small allocs over-collect (the old list-based `Semigroup (Vec a)` round-trip spewed ~3000 cons cells per append → **40,002 collections**, low peak RSS ~12 MB but ~2s pure GC overhead); few-but-large allocs under-collect (the `vector_concat` builtin allocates 1 managed object per append → only **11 collections**, but ~4096 dead 16 KB result vectors pile up between cycles → ~64–95 MB transient peak, ~40× faster but higher peak). Not a leak — reclaimed next cycle — but higher peak RSS can be the direct flip side of an allocation-count speedup, and will resurface with `MutVec`/large-buffer churn. Fix: make the trigger byte-aware (count bytes, not objects) so large payloads count proportionally toward the threshold. Tunable today without touching data structures via `SPROUT_GC_THRESHOLD`. Surfaced 2026-07-12 landing the `vector_concat`/`Semigroup (Vec a)` dispatch fix (§5 above); see also `docs/gc-profile-findings-2026-07-03.md`.
   - **Now amplified by the `adapt_factor` default of 3.0** (`:1371`): the garbage budget between collections is `(factor − 1) × live` *objects*, so a workload retaining large invisible payloads now tolerates 2× as many of them as it did at 2.0. Measured harmless on today's workloads (`digit_recognizer` +1.3 MB — its live set is small ADT nodes, not big buffers), but this raises the cost of the byte-blindness bug for any future large-buffer churn. If a workload shows unexpected peak RSS, try `SPROUT_GC_ADAPT_FACTOR=2` before assuming a leak.
+
+- [ ] `P1` **Green-task setup is 75% of HTTP-server CPU; a worker pool is measured at 3.5–5.4× —
+  design + prototype in `docs/green-task-pool-v0.md`** (2026-08-10). Every accepted connection
+  spawns a fire-and-forget task that `malloc`s ~1.5 MiB (1 MiB `SPROUT_TASK_STACK_BYTES` + 512 KiB
+  root pool = 16384 × 32-byte `RootNode`) and frees it. `sample` under `wrk -t2 -c40`: **`madvise`
+  2779 samples** (`pump_loop → sprout_roots_free → free_medium`) + **`__bzero` 2009**
+  (`task_create → makecontext`) of 6,384 main-thread samples, while the handler self-reports
+  `dur_us=3..6`. `makecontext` cost is **linear in `ss_size`** (415 ns at 4 KiB → 5,993 ns at
+  1 MiB). Shrinking both constants gives **3.9×** (8,344 → 32,951 req/s) but costs recursion depth,
+  so it is a knob, not the fix.
+  - **Prototype measured (`bench/http_worker_pool/`, two servers with byte-identical handling):
+    3.5–5.4× throughput and 25–40× less RSS** — 8,942 → 31,306 req/s, **202 MB → 8 MB**, p50
+    1.41 ms → 297 µs, p90 2.88 ms → 440 µs. Written **entirely in Sprout**: N long-lived workers
+    pull owned `TcpConnection`s off a `Chan TcpConnection`. No runtime change.
+  - **The RSS direction was predicted backwards and the correction is the useful part:** pooling was
+    expected to *raise* steady-state RSS (retaining peak). It lowers it ~30×, because
+    `makecontext` zeroes the whole 1 MiB stack and therefore makes **every page of every per-request
+    stack resident**. The zeroing is the memory cost as much as the CPU cost. A *grow-on-demand*
+    pool would still need a trim policy; a fixed worker count bounds memory by construction.
+  - **Linearity governs the handoff and is verified sound** — `chan_send` consumes (send-then-use
+    and send-twice both rejected), a received `Got conn` must be consumed (drop rejected), and a
+    3-value round trip compiles and runs. This is why the Sprout-level design beat the
+    runtime-level one originally proposed: the C pool re-created stale-reference and
+    use-after-release hazards (doc §6.1 G5/G10) one layer below where the checker can see them.
+  - **Open decision: bounded concurrency.** N workers means at most N in-flight requests, against
+    `stdlib/http_server.sprout:474`'s promise that a slow connection "cannot block others". Cost is
+    smaller than feared — **w=2 already reaches full throughput** (w=2/8/64/256 all 23k–32k), since
+    the server is accept-bound. Recommend bounded workers + bounded channel (backpressure), landed
+    as `serve_pooled` first so nothing existing changes. Doc §5.2.
+  - Design B (pool `Task` records inside the scheduler) is analysed with 17 hazards in doc §6 and
+    **not** recommended; it is the only option for `task_spawn` workloads not written as a pool.
+- [ ] `P2` **`serve` is a client-driven memory exposure** (measured 2026-08-10): ~1.5 MiB of stack
+  per concurrent connection, fully resident because `makecontext` zeroes it. 40 `wrk` connections
+  hold **130–237 MB**; the shape scales with client-chosen concurrency. Sprout copied Go's
+  goroutine-per-connection model while paying **512× Go's per-task cost** (1 MiB vs `stackMin =
+  2048`) — and Sprout cannot follow Go's answer of growing small stacks, because growth needs
+  `copystack`'s "adjusts all pointers to reference the new location" and Sprout's rooting is
+  non-moving by design. Independent of which pooling design lands. `docs/green-task-pool-v0.md` §3.1.
+- [ ] `P2` **`listen(fd, 16)` — a 16-deep accept backlog** (`runtime/sprout_runtime.c:8341`). Sole
+  cause of the worker-pool prototype's p99 tail (18–162 ms at *every* worker count including w=2;
+  **not** GC — `SPROUT_DEBUG_GC` shows max pause 6.9 ms, 21 ms total over 6 s). At ~30k accepts/s a
+  16-deep backlog overflows whenever the accept loop is briefly descheduled, and dropped SYNs cost
+  the client a retransmit. Pre-existing; only *reachable* once the server is fast enough to saturate
+  accept, which is why today's ~9k req/s server never shows it. Conventional value is 128 /
+  `SOMAXCONN`. Cheap fix, large tail-latency effect.
+- [ ] `P3` **The accept loop is the next server bottleneck.** Worker count is irrelevant from w=2 to
+  w=256 (doc §5.3), so once task creation leaves the per-request path the single accept task is the
+  limit. Any further HTTP-server work should start there, not at the handler.
+- [ ] `P3` **`chan_select` allocates per call** — `malloc(n * sizeof(Chan*))` on every call (freed on
+  every exit path) plus `malloc(n * sizeof(SelectWaiter))` on the parking path. A select loop pays
+  the first every iteration; unmeasured. Candidate second consumer for a runtime object pool
+  (`docs/green-task-pool-v0.md` §7.1, alongside `Chan` and `Scope`, both per-object malloc/free).
+- [ ] `P3` **Make `SPROUT_TASK_STACK_BYTES` an env knob** (compile-time `#define` today). Worth 3×
+  on the HTTP server for a recursion-depth tradeoff the deployment should own. Also: the 1 MiB
+  default has never been measured against real handler depth — measure what depth handlers use.
 
 ### Compiler / Stdlib Misc
 

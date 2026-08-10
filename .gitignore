@@ -10,6 +10,12 @@ retros/
 # Dev screenshots from the graphics backend (SPROUT_GFX_SCREENSHOT).
 sprout_shot.png
 
+# Benchmark binaries: each bench/<name>/bench.sh compiles its .sprout sources into
+# the bench directory next to them, so the artifacts share a name with the source.
+bench/*/spawn_server
+bench/*/pool_server
+bench/*/http_log_middleware_bench
+
 # Large demo model for the galaxy-map ship scene (44 MB). Loaded by relative
 # path at runtime; the compile-examples gate never loads it, so it is kept out
 # of git history. Drop the file here manually to see the ship scene.
