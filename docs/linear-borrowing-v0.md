@@ -438,10 +438,14 @@ so `conn` was only borrowed and the checker correctly reported that `close` neve
 it was handed. `match conn with | TcpConnection handle -> …` is the consuming form.
 
 And `stdlib.net.tcp_connect` is now **exported**, completing the raw-handle family alongside
-`tcp_listen`/`tcp_accept`/`tcp_read`/`tcp_write`/`tcp_close`. Code whose shape borrowing cannot
-express — handing a socket to a *spawned* task, i.e. capture by an escaping closure (M4.4) — must
-still be able to speak TCP. `stdlib/http_server.sprout` and
-`tests/task_io_smoke/concurrent_read.spr` both sit on that path and get no release enforcement.
+`tcp_listen`/`tcp_accept`/`tcp_read_some`/`tcp_write`/`tcp_close`. Code whose shape borrowing cannot
+express must still be able to speak TCP, and gets no release enforcement in exchange.
+
+*(Updated: the family's read is `tcp_read_some`. `tcp_read` returned a String built from unvalidated
+socket bytes and is gone; see `stdlib/net.sprout`. `http_server.sprout` and `concurrent_read.spr`
+have both since moved to the linear API, so what keeps the raw family alive is narrower than it was:
+a task force-dropped by `scope_cancel`/`with_timeout` never runs its linear `close`, so the
+cancellation fixtures cannot hold a `TcpConnection` at all.)*
 
 ## 17. Post-merge review: what M4.5 shipped broken (2026-08-07)
 

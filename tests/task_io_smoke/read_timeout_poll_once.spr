@@ -1,5 +1,6 @@
 import stdlib.task (Scope, with_scope, task_spawn, task_sleep)
 import stdlib.net (TcpConnection, TcpListener, TcpTimeout, connect, accept, listen_local, close, close_listener, read_avail_timeout, write_all_utf8)
+import stdlib.bytes as bytes
 
 # The two ends of `read_avail_timeout`'s contract, neither of which had any coverage.
 #
@@ -14,9 +15,13 @@ import stdlib.net (TcpConnection, TcpListener, TcpTimeout, connect, accept, list
 #    satisfy the first assertion perfectly.
 #
 # The second assertion also exercises the path that used to answer a timeout without consulting the
-# socket. The builtin now attempts one more non-blocking recv before reporting expiry, so data that
-# lands in the same instant as the deadline is returned rather than discarded — Go's SetReadDeadline
-# behaves the same way, preferring buffered data to the deadline error.
+# socket. The read attempts one more non-blocking recv before reporting expiry, so data that lands in
+# the same instant as the deadline is returned rather than discarded — Go's SetReadDeadline behaves
+# the same way, preferring buffered data to the deadline error. That ordering is now visible in
+# Sprout rather than buried in C: `read_avail_go` recvs first and only then consults `tcp_wait`.
+#
+# The payload is BYTES, so the comparison decodes explicitly. A read that handed back a String would
+# be assuming what this decode checks.
 
 fn serve_late(listener: consuming TcpListener) -> Unit !{IO} =
   do
@@ -39,15 +44,18 @@ fn check_poll_once(conn: borrowing TcpConnection) -> Unit !{IO} =
   match read_avail_timeout(conn, 0) with
   | Err TcpTimeout -> term_write("poll-once-timed-out\n")
   | Err _ -> term_write("MISMATCH: poll-once reported a socket error\n")
-  | Ok chunk -> term_write(`MISMATCH: poll-once returned ${chunk}\n`)
+  | Ok chunk -> term_write(`MISMATCH: poll-once returned ${int_to_string(bytes.length(chunk))} bytes\n`)
 
 fn check_bounded_read(conn: borrowing TcpConnection) -> Unit !{IO} =
   match read_avail_timeout(conn, 5000) with
   | Ok chunk ->
-    if chunk == "late" then
-      term_write("bounded-read-got-data\n")
-    else
-      term_write(`MISMATCH: bounded read returned ${chunk}\n`)
+    match bytes.to_string(chunk) with
+    | Ok text ->
+        if text == "late" then
+          term_write("bounded-read-got-data\n")
+        else
+          term_write(`MISMATCH: bounded read returned ${text}\n`)
+    | Err _ -> term_write("MISMATCH: bounded read payload was not text\n")
   | Err _ -> term_write("MISMATCH: bounded read failed inside its budget\n")
 
 fn client(port: Int) -> Unit !{IO} =

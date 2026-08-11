@@ -1,0 +1,67 @@
+import stdlib.test (check_eq, run_suite)
+import stdlib.bytes as bytes
+
+# `bytes.find` exists because a byte-exact delimiter search is the one thing the String-based
+# search cannot do. `str_find` works on a NUL-free, valid-UTF-8 String by construction
+# (docs/spec-v0.md:64), so locating HTTP's "\r\n\r\n" in a buffer that has just come off a socket
+# had to go through a String — and minting that String is precisely the W2 R2 defect this replaces.
+# Everything below is therefore expressed over Bytes, including the cases a String literally cannot
+# hold.
+
+fn describe(m: Maybe Int) -> String =
+  match m with
+  | Just i -> int_to_string(i)
+  | Nothing -> "none"
+
+fn of(raw: String) -> Bytes =
+  bytes.from_string(raw)
+
+# A haystack no String can represent: `a`, NUL, `b`, NUL, `c`. The NUL is a legal byte and an
+# illegal String character, so a search that ever detoured through String would stop at index 1.
+fn nul_haystack() -> Bytes =
+  bytes.append(
+    bytes.append(bytes.append(of("a"), bytes.singleton(0)), of("b")),
+    bytes.append(bytes.singleton(0), of("c"))
+  )
+
+fn nul_needle() -> Bytes =
+  bytes.append(bytes.singleton(0), of("c"))
+
+fn main() -> Unit !{IO} =
+  run_suite("bytes_find", [
+    # The three ordinary positions.
+    check_eq("needle at the start", describe(bytes.find(of("abcdef"), of("abc"))), "0"),
+    check_eq("needle in the middle", describe(bytes.find(of("abcdef"), of("cd"))), "2"),
+    check_eq("needle at the end", describe(bytes.find(of("abcdef"), of("ef"))), "4"),
+
+    # Absence, and the two degenerate shapes.
+    check_eq("absent needle", describe(bytes.find(of("abcdef"), of("xy"))), "none"),
+    check_eq("needle longer than haystack", describe(bytes.find(of("ab"), of("abc"))), "none"),
+    check_eq("empty needle matches at 0", describe(bytes.find(of("abc"), bytes.empty())), "0"),
+    check_eq("empty haystack, non-empty needle", describe(bytes.find(bytes.empty(), of("a"))), "none"),
+
+    # The single byte at the last index — the off-by-one that an inclusive/exclusive slip produces.
+    check_eq("single trailing byte", describe(bytes.find(of("abc"), of("c"))), "2"),
+
+    # A failed partial match must not consume the bytes it tried. `aab` / `ab`: position 0 matches
+    # `a` then fails on `a` vs `b`, and the scan has to resume at 1, not at 2.
+    check_eq("a failed partial match resumes at the next byte",
+      describe(bytes.find(of("aab"), of("ab"))), "1"),
+
+    # The HTTP terminator, which is what this function is for.
+    check_eq("header terminator after a request line",
+      describe(bytes.find(of("GET / HTTP/1.1\r\n\r\n"), of("\r\n\r\n"))), "14"),
+    # A near-miss that must NOT match: \r\n\r\r\n\n contains no \r\n\r\n. Getting this wrong turns a
+    # malformed request into one that parses, so it is a correctness case, not a curiosity.
+    check_eq("crlf near-miss does not match",
+      describe(bytes.find(of("\r\n\r\r\n\n"), of("\r\n\r\n"))), "none"),
+    # Straddling: the terminator does not start at 0, which is the shape a chunked read produces.
+    check_eq("terminator not at the start",
+      describe(bytes.find(of("X\r\n\r\nY"), of("\r\n\r\n"))), "1"),
+
+    # The cases that justify the function's existence.
+    check_eq("needle containing a NUL byte",
+      describe(bytes.find(nul_haystack(), nul_needle())), "3"),
+    check_eq("a NUL in the haystack does not terminate the scan",
+      describe(bytes.find(nul_haystack(), of("c"))), "4")
+  ])

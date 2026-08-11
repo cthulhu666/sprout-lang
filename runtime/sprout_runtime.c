@@ -7768,15 +7768,27 @@ long long bytes_singleton(long long value) {
   return (long long)(uintptr_t)out;
 }
 
-/* Length from the CSTR HEADER, not strlen. A Sprout String is a byte sequence that may contain an
- * interior NUL — sprout_gc_adopt_cstr copies an explicit length, so tcp_read_avail and proc_run both
- * mint such Strings from arbitrary input — and strlen stopped at the first one. That made three
- * length notions disagree on one value: for a String holding "a\0b", str_byte_len said 3 (header)
- * while bytes_from_utf8 said 1 (strlen), so bytes.from_string silently DROPPED payload. Reading the
- * header restores the invariant bytes.length(bytes.from_string(s)) == string.byte_length(s), which is
- * what makes a byte-exact HTTP body possible at all: every read chunk arrives as a String and has to
- * become Bytes without loss. Safe universally because every String is headered — arena, literal and
- * interned alike — an invariant enforced by SPROUT_GC_HDRCHECK=1. */
+/* Length from the CSTR HEADER, not strlen — as DEFENCE, not as licence.
+ *
+ * A well-formed Sprout String contains no NUL byte (docs/spec-v0.md:64, normative). This function
+ * originally used strlen, which agrees with the header for every legal String, so the change here is
+ * observable only on an ILLEGAL one. Such Strings exist because sprout_gc_adopt_cstr copies an
+ * explicit length and does not reject an interior NUL, so any producer handing it unvalidated input
+ * mints one: the socket readers used to (fixed — see tcp_read_some), and proc_run still does (W2 R2's
+ * remaining half, filed in BACKLOG).
+ *
+ * On such a value three length notions disagreed: for "a\0b", str_byte_len said 3 (header) while this
+ * said 1 (strlen), so bytes.from_string silently DROPPED payload. Reading the header makes
+ * bytes.length(bytes.from_string(s)) == string.byte_length(s) hold unconditionally, which turns a
+ * silent truncation into a value that bytes.to_string can then REJECT — the choke point of decision
+ * D4, which refuses a NUL as well as invalid UTF-8.
+ *
+ * What this is not: permission to keep minting such Strings. An earlier revision of this comment
+ * asserted the opposite of the spec ("a byte sequence that may contain an interior NUL") and treated
+ * the header read as making that safe. It does not — every strlen-based operation in the runtime
+ * still truncates — and SPROUT_GC_HDRCHECK=1 aborts on the value, which is how that error surfaced.
+ *
+ * Safe universally because every String is headered — arena, literal and interned alike. */
 long long bytes_from_utf8(long long raw_val) {
   const char* raw = (const char*)raw_val;
   if (raw == NULL) tcp_fail("bytes_from_utf8: null input");
@@ -8610,135 +8622,17 @@ long long tcp_accept(long long listener) {
   return h;
 }
 
-/* ── the read-available core, shared by the whole tcp_read* family ──────────────────────────
- * tcp_read, tcp_read_avail and tcp_read_avail_timeout used to carry three near-verbatim copies of
- * this GC-sensitive sequence (threshold collect, malloc(65537), recv, park on EAGAIN, NUL-terminate,
- * adopt, errno captured before free) and differed only in the park call and the error convention.
- * Every fix to it had to be made three times, and the copies had already drifted — tcp_read aborted
- * the process where tcp_read_avail returned Err. One core, three thin entry points.
+/* TCP_WAIT_FOREVER parks with no deadline; TCP_WAIT_DEADLINE bounds the whole call by its
+ * `timeout_ms`, where `timeout_ms <= 0` attempts the syscall exactly once without parking — which
+ * is what makes a caller-side TOTAL budget composable, since passing the remaining slice needs no
+ * special case once the budget is spent.
  *
- * The buffer is plain malloc, NOT a GC object, so nothing needs rooting across the park; on
- * TCP_RECV_OK the caller owns it and must adopt (or free) it, and on every other outcome it is
- * already freed. */
-typedef enum {
-  TCP_RECV_OK = 0,       /* *out_buf holds *out_n bytes, NUL-terminated; caller adopts it */
-  TCP_RECV_ERRNO = 1,    /* the socket failed; *out_errno says how */
-  TCP_RECV_TIMEOUT = 2   /* the deadline won, and the socket was consulted after it did */
-} TcpRecvOutcome;
-
-/* TCP_WAIT_FOREVER parks with no deadline (the historic tcp_read / tcp_read_avail behaviour).
- * TCP_WAIT_DEADLINE bounds the whole call by `timeout_ms`; `timeout_ms <= 0` polls exactly once
- * without parking, which is what makes a caller-side TOTAL budget composable — pass the remaining
- * slice and an expired budget needs no special case at the call site. */
+ * Only the send core still uses this. The read side used to have a mirror-image core (tcp_recv_avail)
+ * with three thin entry points over it — tcp_read, tcp_read_avail, tcp_read_avail_timeout — and all
+ * three are gone: they welded timeout policy to syscall retry inside C, and each ended by adopting
+ * the received bytes as a String, which is the W2 R2 invariant violation documented on
+ * tcp_read_some. The read path is now tcp_wait + tcp_read_some with the loop in Sprout. */
 typedef enum { TCP_WAIT_FOREVER, TCP_WAIT_DEADLINE } TcpWaitMode;
-
-static TcpRecvOutcome tcp_recv_avail(long long conn, TcpWaitMode mode, long long timeout_ms,
-                                     const char* oom_msg,
-                                     char** out_buf, size_t* out_n, int* out_errno) {
-  sprout_gc_maybe_collect_threshold();
-  char* buf = (char*)malloc(65537);
-  if (buf == NULL) tcp_fail(oom_msg);
-  /* One deadline for the whole call, re-derived into a slice on every park. Parking with the FULL
-   * timeout_ms each round would let a peer that can trigger readiness without delivering bytes hold
-   * this call — and so its handler — past the budget it was given. */
-  long long deadline_us = time_now_micros() + (timeout_ms > 0 ? timeout_ms * 1000LL : 0LL);
-  int deadline_expired = 0;
-  for (;;) {
-    ssize_t n = recv(g_conn_fd[conn], buf, 65536, 0);
-    if (n >= 0) {
-      buf[n] = '\0';
-      *out_buf = buf;
-      *out_n = (size_t)n;
-      return TCP_RECV_OK;
-    }
-    if (errno != EAGAIN && errno != EWOULDBLOCK) {
-      *out_errno = errno;   /* capture before free(), which may clobber errno */
-      free(buf);            /* plain malloc buffer, free is correct */
-      return TCP_RECV_ERRNO;
-    }
-    /* Nothing available right now. Every return below this point has therefore consulted the
-     * socket first: a timeout can never be reported while a complete request sits in the buffer,
-     * which is the readiness-and-timer-in-one-poll-batch race. Go's SetReadDeadline behaves the
-     * same way — it attempts the syscall and prefers buffered data to the deadline error. */
-    if (deadline_expired) { free(buf); return TCP_RECV_TIMEOUT; }
-    if (mode == TCP_WAIT_FOREVER) {   /* no unrooted GC temp held */
-      scheduler_park_on_fd(g_conn_fd[conn], SPROUT_POLL_READ);
-      continue;
-    }
-    long long now_us = time_now_micros();
-    if (now_us >= deadline_us) { free(buf); return TCP_RECV_TIMEOUT; }
-    long long remaining_ms = (deadline_us - now_us) / 1000LL;
-    if (remaining_ms <= 0) remaining_ms = 1;   /* sub-millisecond left: round up, never park on 0 */
-    if (!scheduler_park_on_fd_timeout(g_conn_fd[conn], SPROUT_POLL_READ, remaining_ms))
-      deadline_expired = 1;   /* the loop's next recv decides between data and TCP_RECV_TIMEOUT */
-    continue;
-  }
-}
-
-long long tcp_read(long long conn) {
-  if (conn <= 0 || conn >= 2048 || !g_conn_used[conn]) tcp_fail("tcp_read: unknown connection handle");
-  char* buf = NULL;
-  size_t n = 0;
-  int err = 0;
-  if (tcp_recv_avail(conn, TCP_WAIT_FOREVER, 0, "tcp_read: out of memory", &buf, &n, &err) != TCP_RECV_OK)
-    tcp_fail("tcp_read: recv failed");   /* TCP_WAIT_FOREVER never yields TCP_RECV_TIMEOUT */
-  char* head = sprout_gc_adopt_cstr(buf, n, "tcp_read: out of memory");
-  return (long long)(uintptr_t)head;
-}
-
-/* Recoverable sibling of tcp_read: read whatever is available (up to 64 KiB) and return it as
- * Ok(String) — Ok("") on a peer EOF — or Err(TcpError) on a socket failure, NEVER exit(1). The
- * recoverable socket family (tcp_connect / tcp_read_exact / tcp_write_all) had no
- * read-WHATEVER'S-AVAILABLE member: tcp_read_exact blocks for an exact byte count, unusable for
- * reading an HTTP header block whose length is unknown until "\r\n\r\n" is seen. A server needs
- * this so one client's connection reset drops that connection, not the whole process. */
-long long tcp_read_avail(long long conn) {
-  if (conn <= 0 || conn >= 2048 || !g_conn_used[conn])
-    return tcp_net_err0("stdlib.net.TcpInvalidHandle");
-  char* buf = NULL;
-  size_t n = 0;
-  int err = 0;
-  if (tcp_recv_avail(conn, TCP_WAIT_FOREVER, 0, "tcp_read_avail: out of memory", &buf, &n, &err) != TCP_RECV_OK)
-    return tcp_net_err1("stdlib.net.TcpReadFailed", (long long)(uintptr_t)strerror(err));
-  /* adopt then wrap: no allocation between the adopt and tcp_net_ok, which roots the payload
-   * across its own Ok-box allocation. */
-  char* head = sprout_gc_adopt_cstr(buf, n, "tcp_read_avail: out of memory");
-  return tcp_net_ok((long long)(uintptr_t)head);
-}
-
-/* tcp_read_avail bounded by a deadline: wait at most `timeout_ms` for data to arrive, then return
- * Err(TcpTimeout). The connection stays VALID and usable — a timeout is an outcome, not a fault —
- * which is what lets a server answer 408 and run its normal close path.
- *
- * `timeout_ms <= 0` means "do not wait at all": one non-blocking attempt, then Err(TcpTimeout) if
- * nothing had arrived. That is what makes a TOTAL deadline composable — a caller tracking a
- * budget with time_now_micros can pass the remaining slice and get an immediate timeout once the
- * budget is spent, with no special case at the call site.
- *
- * A total deadline is the point: bounding each individual read is not enough, because a slowloris
- * sends one byte per interval and would reset a per-read timer forever.
- *
- * This is the Go/Java/Erlang read-deadline model (SetReadDeadline / SO_TIMEOUT / gen_tcp:recv
- * Timeout), chosen over cancelling the reading task: a force-dropped task never runs its linear
- * `close`, and cancellation would cost an extra green stack per connection. */
-long long tcp_read_avail_timeout(long long conn, long long timeout_ms) {
-  if (conn <= 0 || conn >= 2048 || !g_conn_used[conn])
-    return tcp_net_err0("stdlib.net.TcpInvalidHandle");
-  char* buf = NULL;
-  size_t n = 0;
-  int err = 0;
-  switch (tcp_recv_avail(conn, TCP_WAIT_DEADLINE, timeout_ms,
-                         "tcp_read_avail_timeout: out of memory", &buf, &n, &err)) {
-    case TCP_RECV_TIMEOUT:
-      return tcp_net_err0("stdlib.net.TcpTimeout");
-    case TCP_RECV_ERRNO:
-      return tcp_net_err1("stdlib.net.TcpReadFailed", (long long)(uintptr_t)strerror(err));
-    case TCP_RECV_OK:
-      break;
-  }
-  char* head = sprout_gc_adopt_cstr(buf, n, "tcp_read_avail_timeout: out of memory");
-  return tcp_net_ok((long long)(uintptr_t)head);
-}
 
 long long tcp_read_exact(long long conn, long long count) {
   if (conn <= 0 || conn >= 2048 || !g_conn_used[conn]) return tcp_net_err0("stdlib.net.TcpInvalidHandle");
@@ -8775,8 +8669,9 @@ long long tcp_read_exact(long long conn, long long count) {
 }
 
 /* ── the send-everything core, shared by the whole tcp_write* family ────────────────────────
- * Same reasoning as tcp_recv_avail above: one partial-send retry loop instead of one per entry
- * point, so the timed variant is not a third copy of it.
+ * One partial-send retry loop instead of one per entry point, so the timed variant is not a second
+ * copy of it. The read side had the same arrangement and no longer needs it: with tcp_wait +
+ * tcp_read_some the retry loop lives in Sprout, which is where this one is headed too.
  *
  * TCP_WAIT_DEADLINE here is an IDLE bound, not a total one: `idle_ms` limits how long a single
  * stall may last, and any byte accepted by the kernel re-arms it. That is nginx's `send_timeout`
@@ -8853,7 +8748,7 @@ long long tcp_write_all(long long conn, long long payload_h) {
  * 408/431 error responses too since they travel the same path.
  *
  * `idle_ms <= 0` polls once and reports a timeout rather than blocking, matching
- * tcp_read_avail_timeout so a caller can pass an already-spent budget without a special case. */
+ * tcp_read_some/tcp_wait so a caller can pass an already-spent budget without a special case. */
 long long tcp_write_all_timeout(long long conn, long long payload_h, long long idle_ms) {
   if (conn <= 0 || conn >= 2048 || !g_conn_used[conn]) return tcp_net_err0("stdlib.net.TcpInvalidHandle");
   BytesVal* payload = (BytesVal*)(uintptr_t)payload_h;
@@ -8884,7 +8779,8 @@ long long tcp_write_all_timeout(long long conn, long long payload_h, long long i
  * which is why the same park/retry dance keeps being re-cloned per operation.
  *
  * `ms <= 0` reports "not ready" without parking, so a caller enforcing a TOTAL budget can pass the
- * remaining slice and get an immediate answer when it is spent — matching tcp_read_avail_timeout. */
+ * remaining slice and get an immediate answer when it is spent — the convention every non-parking
+ * primitive here shares. */
 long long tcp_wait(long long conn, long long interest, long long ms) {
   if (conn <= 0 || conn >= 2048 || !g_conn_used[conn]) return tcp_net_err0("stdlib.net.TcpInvalidHandle");
   if (interest != SPROUT_POLL_READ && interest != SPROUT_POLL_WRITE)
@@ -8916,6 +8812,55 @@ long long tcp_write_some(long long conn, long long payload_h, long long offset) 
   return tcp_net_err1("stdlib.net.TcpWriteFailed", (long long)(uintptr_t)strerror(errno));
 }
 
+/* TRANSFER, the read half — and the piece that closes W2 R2 for `net`.
+ *
+ * One recv, never a park: Ok(Bytes) with at least one byte when the kernel had data,
+ * Err(TcpWouldBlock) when it had none, Err(TcpEndOfStream) on a clean peer close. The caller pairs
+ * this with tcp_wait and owns the loop, so "attempt the transfer, then wait" is the only shape that
+ * loop can take — which is what the three deleted C loops (tcp_read, tcp_read_avail,
+ * tcp_read_avail_timeout) each re-derived, and drifted while doing so.
+ *
+ * Returning BYTES rather than a String is the whole point, not an incidental type change. Those
+ * three all ended in `sprout_gc_adopt_cstr(buf, n, …)`, which stamps the byte count into the CSTR
+ * header and hands back a String — so any payload containing 0x00 produced a value violating the
+ * String invariant of docs/spec-v0.md:64 ("always valid UTF-8, contains no NUL byte"). The damage was
+ * silent: byte_length read the header and was right, while every strlen-based operation
+ * (string.length, str_concat, is_empty) stopped at the NUL. There is no validation to add here —
+ * bytes.to_string is the choke point (decision D4), and it already rejects both a NUL and invalid
+ * UTF-8 — so the fix is simply to stop minting the String at the socket.
+ *
+ * EOF is reported as Err(TcpEndOfStream), matching tcp_read_exact, rather than as an empty Ok. An
+ * empty-means-EOF sentinel is the same in-band-signalling mistake as NUL-terminating a byte string,
+ * and it read as "no data yet" at exactly the call sites that most needed to tell the two apart.
+ *
+ * The scratch buffer is static and that is safe precisely because this function never parks: no
+ * other green task can run between the recv and the copy out (the scheduler is cooperative and
+ * single-threaded), and the only thing that can intervene — a GC collection inside
+ * bytes_from_chunk_bytes — runs no Sprout code and so cannot re-enter here. Add a park to this
+ * function and the buffer must become per-call again. */
+static unsigned char g_tcp_read_scratch[65536];
+
+long long tcp_read_some(long long conn, long long max_bytes) {
+  if (conn <= 0 || conn >= 2048 || !g_conn_used[conn]) return tcp_net_err0("stdlib.net.TcpInvalidHandle");
+  if (max_bytes <= 0)
+    return tcp_net_err1("stdlib.net.TcpInvalidArgument",
+                        (long long)(uintptr_t)"tcp_read_some: max_bytes must be > 0");
+  size_t want = (size_t)max_bytes;
+  if (want > sizeof(g_tcp_read_scratch)) want = sizeof(g_tcp_read_scratch);
+
+  ssize_t n = recv(g_conn_fd[conn], g_tcp_read_scratch, want, 0);
+  if (n < 0) {
+    if (errno == EAGAIN || errno == EWOULDBLOCK) return tcp_net_err0("stdlib.net.TcpWouldBlock");
+    return tcp_net_err1("stdlib.net.TcpReadFailed", (long long)(uintptr_t)strerror(errno));
+  }
+  if (n == 0) return tcp_net_err0("stdlib.net.TcpEndOfStream");
+  /* Exact-sized: the result is retained by the caller's accumulator, so handing back a 64 KiB
+   * block holding 12 received bytes would make a chunked read retain the slack for every chunk.
+   * No allocation between this and tcp_net_ok, which roots the payload across its own Ok box. */
+  BytesVal* out = bytes_from_chunk_bytes(g_tcp_read_scratch, (size_t)n, "tcp_read_some: out of memory");
+  return tcp_net_ok((long long)(uintptr_t)out);
+}
+
 long long tcp_close(long long conn) {
   if (conn <= 0 || conn >= 2048 || !g_conn_used[conn]) tcp_fail("tcp_close: unknown connection handle");
   close(g_conn_fd[conn]);
@@ -8931,22 +8876,6 @@ long long tcp_close_listener(long long listener) {
   close(g_listener_fd[listener]);
   g_listener_used[listener] = 0;
   g_listener_fd[listener] = -1;
-  return 0;
-}
-
-long long tcp_echo_serve(long long port, long long max_connections) {
-  if (max_connections < 1) tcp_fail("tcp_echo_serve: max_connections must be >= 1");
-  long long listener = tcp_listen(port);
-  long long served = 0;
-  while (served < max_connections) {
-    long long conn = tcp_accept(listener);
-    long long payload_i = tcp_read(conn);
-    const char* payload = (const char*)(uintptr_t)payload_i;
-    tcp_write(conn, payload);
-    tcp_close(conn);
-    served++;
-  }
-  tcp_close_listener(listener);
   return 0;
 }
 

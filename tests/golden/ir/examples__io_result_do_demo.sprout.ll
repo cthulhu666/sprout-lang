@@ -110,7 +110,6 @@ declare i64 @regex_is_match(i64, i64)
 declare i64 @regex_find_range(i64, i64)
 declare i64 @regex_replace_all_literal(i64, i64, i64)
 declare i64 @regex_escape(i64)
-declare i64 @tcp_read(i64)
 declare i64 @term_clear()
 declare i64 @term_move(i64, i64)
 declare i64 @term_hide_cursor()
@@ -8908,6 +8907,177 @@ do_done_10:
 do_done_3:
   %t$41 = phi i64 [%t$6, %do_short_3], [%t$40, %do_done_10]
   ret i64 %t$41
+}
+
+define i64 @stdlib.bytes.byte_at(i64 %value, i64 %index) {
+entry:
+  %t$0 = add i64 0, 1
+  %t$1 = sub i64 0, %t$0
+  %t$4 = alloca i64
+  store i64 %value, ptr %t$4
+  %t$5 = call i64 @sprout_gc_push_i64_root(ptr %t$4)
+  %t$2 = call i64 @stdlib.bytes.get(i64 %value, i64 %index)
+  %t$6 = call i64 @sprout_gc_pop_roots(i64 1)
+  %t$3 = call i64 @maybe_with_default(i64 %t$1, i64 %t$2)
+  ret i64 %t$3
+}
+
+define i64 @stdlib.bytes.matches_at(i64 %haystack$in, i64 %needle$in, i64 %at$in, i64 %index$in, i64 %needle_len$in) {
+entry:
+  %t$18 = alloca i64
+  store i64 %haystack$in, ptr %t$18
+  %t$19 = alloca i64
+  store i64 %needle$in, ptr %t$19
+  %t$20 = alloca i64
+  store i64 %at$in, ptr %t$20
+  %t$21 = alloca i64
+  store i64 %index$in, ptr %t$21
+  %t$22 = alloca i64
+  store i64 %needle_len$in, ptr %t$22
+  %t$23 = call ptr @llvm.stacksave()
+  br label %tco_loop
+tco_loop:
+  %haystack = load i64, ptr %t$18
+  %needle = load i64, ptr %t$19
+  %at = load i64, ptr %t$20
+  %index = load i64, ptr %t$21
+  %needle_len = load i64, ptr %t$22
+  %t$0 = icmp sge i64 %index, %needle_len
+  %t$1 = zext i1 %t$0 to i64
+  %t$17 = trunc i64 %t$1 to i1
+  br i1 %t$17, label %then_2, label %else_2
+then_2:
+  %t$4 = add i64 0, 1
+  br label %join_2
+else_2:
+  %t$5 = add i64 %at, %index
+  %t$24 = alloca i64
+  store i64 %needle, ptr %t$24
+  %t$25 = call i64 @sprout_gc_push_i64_root(ptr %t$24)
+  %t$26 = alloca i64
+  store i64 %haystack, ptr %t$26
+  %t$27 = call i64 @sprout_gc_push_i64_root(ptr %t$26)
+  %t$6 = call i64 @stdlib.bytes.byte_at(i64 %haystack, i64 %t$5)
+  %t$7 = call i64 @stdlib.bytes.byte_at(i64 %needle, i64 %index)
+  %t$8 = icmp eq i64 %t$6, %t$7
+  %t$9 = zext i1 %t$8 to i64
+  %t$16 = trunc i64 %t$9 to i1
+  %t$28 = call i64 @sprout_gc_pop_roots(i64 2)
+  br i1 %t$16, label %then_10, label %else_10
+then_10:
+  %t$12 = add i64 0, 1
+  %t$13 = add i64 %index, %t$12
+  store i64 %haystack, ptr %t$18
+  store i64 %needle, ptr %t$19
+  store i64 %at, ptr %t$20
+  store i64 %t$13, ptr %t$21
+  store i64 %needle_len, ptr %t$22
+  call void @llvm.stackrestore(ptr %t$23)
+  br label %tco_loop
+else_10:
+  %t$15 = add i64 0, 0
+  br label %join_10
+join_10:
+  %t$11 = phi i64 [%t$15, %else_10]
+  br label %join_2
+join_2:
+  %t$3 = phi i64 [%t$4, %then_2], [%t$11, %join_10]
+  ret i64 %t$3
+}
+
+define i64 @stdlib.bytes.find_from(i64 %haystack$in, i64 %needle$in, i64 %start$in, i64 %last$in, i64 %needle_len$in) {
+entry:
+  %t$15 = alloca i64
+  store i64 %haystack$in, ptr %t$15
+  %t$16 = alloca i64
+  store i64 %needle$in, ptr %t$16
+  %t$17 = alloca i64
+  store i64 %start$in, ptr %t$17
+  %t$18 = alloca i64
+  store i64 %last$in, ptr %t$18
+  %t$19 = alloca i64
+  store i64 %needle_len$in, ptr %t$19
+  %t$20 = call ptr @llvm.stacksave()
+  br label %tco_loop
+tco_loop:
+  %haystack = load i64, ptr %t$15
+  %needle = load i64, ptr %t$16
+  %start = load i64, ptr %t$17
+  %last = load i64, ptr %t$18
+  %needle_len = load i64, ptr %t$19
+  %t$0 = icmp sgt i64 %start, %last
+  %t$1 = zext i1 %t$0 to i64
+  %t$14 = trunc i64 %t$1 to i1
+  br i1 %t$14, label %then_2, label %else_2
+then_2:
+  %t$4 = call i64 @sprout_alloc_obj(i64 0, i64 0)
+  br label %join_2
+else_2:
+  %t$5 = add i64 0, 0
+  %t$21 = alloca i64
+  store i64 %needle, ptr %t$21
+  %t$22 = call i64 @sprout_gc_push_i64_root(ptr %t$21)
+  %t$23 = alloca i64
+  store i64 %haystack, ptr %t$23
+  %t$24 = call i64 @sprout_gc_push_i64_root(ptr %t$23)
+  %t$6 = call i64 @stdlib.bytes.matches_at(i64 %haystack, i64 %needle, i64 %start, i64 %t$5, i64 %needle_len)
+  %t$13 = trunc i64 %t$6 to i1
+  %t$25 = call i64 @sprout_gc_pop_roots(i64 2)
+  br i1 %t$13, label %then_7, label %else_7
+then_7:
+  %t$9 = call i64 @sprout_alloc_obj(i64 1, i64 1)
+  %t$9$ptr = inttoptr i64 %t$9 to ptr
+  %t$9$f0 = getelementptr i64, ptr %t$9$ptr, i64 0
+  store i64 %start, ptr %t$9$f0
+  br label %join_7
+else_7:
+  %t$10 = add i64 0, 1
+  %t$11 = add i64 %start, %t$10
+  store i64 %haystack, ptr %t$15
+  store i64 %needle, ptr %t$16
+  store i64 %t$11, ptr %t$17
+  store i64 %last, ptr %t$18
+  store i64 %needle_len, ptr %t$19
+  call void @llvm.stackrestore(ptr %t$20)
+  br label %tco_loop
+join_7:
+  %t$8 = phi i64 [%t$9, %then_7]
+  br label %join_2
+join_2:
+  %t$3 = phi i64 [%t$4, %then_2], [%t$8, %join_7]
+  ret i64 %t$3
+}
+
+define i64 @stdlib.bytes.find(i64 %haystack, i64 %needle) {
+entry:
+  %t$7 = alloca i64
+  store i64 %needle, ptr %t$7
+  %t$8 = call i64 @sprout_gc_push_i64_root(ptr %t$7)
+  %t$9 = alloca i64
+  store i64 %haystack, ptr %t$9
+  %t$10 = call i64 @sprout_gc_push_i64_root(ptr %t$9)
+  %t$0 = call i64 @stdlib.bytes.length(i64 %needle)
+  %t$11 = call i64 @sprout_gc_pop_roots(i64 2)
+  br label %arm_0_1
+arm_0_1:
+  %t$3 = add i64 0, 0
+  %t$12 = alloca i64
+  store i64 %needle, ptr %t$12
+  %t$13 = call i64 @sprout_gc_push_i64_root(ptr %t$12)
+  %t$14 = alloca i64
+  store i64 %haystack, ptr %t$14
+  %t$15 = call i64 @sprout_gc_push_i64_root(ptr %t$14)
+  %t$4 = call i64 @stdlib.bytes.length(i64 %haystack)
+  %t$5 = sub i64 %t$4, %t$0
+  %t$6 = call i64 @stdlib.bytes.find_from(i64 %haystack, i64 %needle, i64 %t$3, i64 %t$5, i64 %t$0)
+  %t$16 = call i64 @sprout_gc_pop_roots(i64 2)
+  br label %join_1
+arm_1_1:
+  call void @sprout_abort_match()
+  unreachable
+join_1:
+  %t$2 = phi i64 [%t$6, %arm_0_1]
+  ret i64 %t$2
 }
 
 define i64 @stdlib.bytes.c_string_len_from(i64 %value$in, i64 %index$in, i64 %total$in) {

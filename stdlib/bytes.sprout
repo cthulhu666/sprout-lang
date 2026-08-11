@@ -103,6 +103,43 @@ export fn read_u32_be(value: Bytes) -> Maybe Int =
     b3 <- get(value, 3)
     Just(b0 * 16777216 + b1 * 65536 + b2 * 256 + b3)
 
+# O(1) indexed read defaulting to -1, so a scan can compare Ints instead of `Maybe Int`s. -1 is
+# outside the 0..255 byte range, so an out-of-bounds read can never compare equal to a real byte.
+fn byte_at(value: Bytes, index: Int) -> Int =
+  maybe_with_default(-1, get(value, index))
+
+fn matches_at(haystack: Bytes, needle: Bytes, at: Int, index: Int, needle_len: Int) -> Bool =
+  if index >= needle_len then true
+  else if byte_at(haystack, at + index) == byte_at(needle, index) then
+    matches_at(haystack, needle, at, index + 1, needle_len)
+  else false
+
+fn find_from(haystack: Bytes, needle: Bytes, start: Int, last: Int, needle_len: Int) -> Maybe Int =
+  if start > last then Nothing
+  else if matches_at(haystack, needle, start, 0, needle_len) then Just(start)
+  else find_from(haystack, needle, start + 1, last, needle_len)
+
+# Byte-exact substring search: the index of the first occurrence of `needle`, or Nothing.
+#
+# This is the search `str_find` cannot perform. A String is NUL-free and valid UTF-8 by construction
+# (docs/spec-v0.md:64), so locating a delimiter in bytes that have just arrived from a socket had to
+# either mint a String that violates that invariant — the W2 R2 defect — or work on Bytes. This is
+# the Bytes half.
+#
+# O(|haystack| * |needle|): a plain scan with no skip table. That is deliberate. The delimiters this
+# exists for are 1-4 bytes (HTTP's "\r\n\r\n"), where Boyer-Moore's preprocessing costs more than it
+# saves, and a caller searching a GROWING buffer must not re-scan from 0 each round anyway — the
+# quadratic blowup that matters lives in the caller's loop, not here. stdlib.http_server bounds it by
+# searching only a 3-byte overlap plus the new chunk per read, which is O(total) across the whole
+# header phase; a caller that instead rescans the accumulated block per chunk is quadratic no matter
+# how fast this function is.
+#
+# An empty needle matches at 0, following str_find and the same convention as C's strstr.
+export fn find(haystack: Bytes, needle: Bytes) -> Maybe Int =
+  find_from(haystack, needle, 0, length(haystack) - needle_len, needle_len)
+where
+  needle_len = length(needle)
+
 fn c_string_len_from(value: Bytes, index: Int, total: Int) -> Int =
   if index >= total then total
   else

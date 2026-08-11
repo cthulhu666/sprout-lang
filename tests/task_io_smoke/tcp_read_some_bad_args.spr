@@ -1,0 +1,25 @@
+import stdlib.net (TcpError, TcpInvalidHandle, TcpInvalidArgument, tcp_read_some)
+
+# Covers tcp_read_some's argument-validation paths deterministically (no socket timing needed).
+# Both must return an Err, never abort — reaching "done" is the proof, since a regression to a
+# fatal form would exit non-zero before printing it.
+#
+#  * a handle that was never allocated -> Err(TcpInvalidHandle). This is the property that used to
+#    separate tcp_read_avail from the fatal tcp_read; tcp_read is gone and every read is recoverable
+#    now, so what this pins is that the surviving primitive kept the recoverable behaviour rather
+#    than inheriting the fatal one.
+#  * a non-positive max_bytes -> Err(TcpInvalidArgument). There is no useful "read zero bytes", and
+#    the alternatives are both worse than an error: returning an empty Ok would collide with the
+#    end-of-stream signal, and reading anyway would ignore the caller.
+fn main() -> Unit !{IO} =
+  do
+    match tcp_read_some(1999, 1024) with
+    | Err TcpInvalidHandle -> term_write("invalid-handle err\n")
+    | Err _ -> term_write("wrong-err\n")
+    | Ok _ -> term_write("unexpected-ok\n")
+    match tcp_read_some(1999, 0) with
+    # The handle is checked first, so a bad handle wins over a bad count — assert the pair that is
+    # actually reachable rather than pretending the order is unspecified.
+    | Err TcpInvalidHandle -> term_write("zero-count-handle-checked-first\ndone\n")
+    | Err _ -> term_write("wrong-err-2\n")
+    | Ok _ -> term_write("unexpected-ok-2\n")

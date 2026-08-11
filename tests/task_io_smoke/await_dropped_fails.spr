@@ -1,5 +1,5 @@
 import stdlib.task (Scope, Task, with_scope, task_fork, task_await, task_yield, scope_cancel)
-import stdlib.net (tcp_listen, tcp_accept, tcp_read)
+import stdlib.net (tcp_listen, tcp_accept, tcp_close)
 import stdlib.string as string
 
 # L0.5 guard (EXPERIMENTAL). The design invariant is that a task force-dropped by
@@ -12,7 +12,7 @@ import stdlib.string as string
 fn accept_forever(listener: Int) -> Int !{IO} =
   do
     conn <- tcp_accept(listener)  # parks here forever — no client ever connects
-    _ <- tcp_read(conn)  # unreachable
+    tcp_close(conn)  # unreachable; present only so `conn` is used
     99
 
 fn body(s: Scope, listener: Int) -> Unit !{IO} =

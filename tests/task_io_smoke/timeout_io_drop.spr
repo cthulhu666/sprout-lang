@@ -1,5 +1,5 @@
 import stdlib.task as task
-import stdlib.net (tcp_listen, tcp_accept, tcp_read)
+import stdlib.net (tcp_listen, tcp_accept, tcp_close)
 import stdlib.string as string
 
 # L0.7 with_timeout I/O-drop (EXPERIMENTAL). A body parked in the poller on tcp_accept (nobody
@@ -17,7 +17,7 @@ fn accept_forever(listener: Int) -> Int !{IO} =
     let held = string.concat("live-", "root")
     conn <- tcp_accept(listener)  # parks here forever — no client ever connects
     term_write(held)  # unreachable; forces `held` rooted across the park
-    _ <- tcp_read(conn)
+    tcp_close(conn)  # unreachable; present only so `conn` is used
     99
 
 fn main() -> Unit !{IO} =

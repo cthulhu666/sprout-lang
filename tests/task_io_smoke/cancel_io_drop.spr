@@ -1,5 +1,5 @@
 import stdlib.task (Scope, with_scope, task_fork, detach, task_spawn, task_yield, scope_cancel)
-import stdlib.net (tcp_listen, tcp_accept, tcp_read)
+import stdlib.net (tcp_listen, tcp_accept, tcp_close)
 import stdlib.string as string
 
 # L0.5 I/O-drop cancellation (EXPERIMENTAL). A task suspended in the poller (here on
@@ -19,7 +19,7 @@ fn accept_forever(listener: Int) -> Int !{IO} =
     let held = string.concat("live-", "root")
     conn <- tcp_accept(listener)  # parks here forever — no client ever connects
     term_write(held)  # unreachable; forces `held` rooted across the park
-    _ <- tcp_read(conn)
+    tcp_close(conn)  # unreachable; present only so `conn` is used
     99
 
 fn accept_forever_unit(listener: Int) -> Unit !{IO} =

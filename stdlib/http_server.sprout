@@ -1,7 +1,7 @@
 module stdlib.http_server
 
 import stdlib.http (HttpStatusError, RequestLine, RequestPathVersion, http_response, parse_request_line, status_line)
-import stdlib.net (TcpConnection, TcpListener, TcpTimeout, accept, close, close_listener, listen_local, read_avail_timeout, write_all_utf8_by)
+import stdlib.net (TcpConnection, TcpListener, TcpTimeout, TcpEndOfStream, accept, close, close_listener, listen_local, read_avail_timeout, write_all_utf8_by)
 import stdlib.string as string
 import stdlib.bytes as bytes
 import stdlib.chan (Chan, Recv, Got, Closed, chan_new, chan_send, chan_recv, chan_close)
@@ -296,57 +296,122 @@ where
   header_bytes = string.byte_length(string.take(raw, body_start))
 
 # Reads use net.read_avail_timeout (recoverable AND bounded): a socket failure becomes an Err in the
-# ServerResult, not an exit(1), so one client's connection reset drops just that
-# connection. `Ok("")` (peer closed cleanly) is still the unexpected-end-of-stream case.
+# ServerResult, not an exit(1), so one client's connection reset drops just that connection.
+#
+# It hands back BYTES. That is the change that made this whole region simpler rather than harder: a
+# socket carries bytes, a Sprout String may not hold an arbitrary byte (docs/spec-v0.md:64), and the
+# three deleted read builtins papered over the gap by minting Strings that violated the invariant.
+# Reading bytes means nothing in the read path needs to pretend, and every byte/codepoint conversion
+# that used to be needed here is gone — `str_concat` is strlen-based and `string.length` is
+# codepoint-denominated, and neither is now involved in framing a request.
+#
 # Each round re-derives its budget from the clock, so `deadline` bounds the WHOLE phase however many
 # reads it takes. That is what makes it a defence: a client sending one byte per interval renews a
 # per-read timer forever, but cannot renew this one.
 #
 # TcpTimeout is kept distinct from a socket error all the way up, because the two produce different
-# statuses (408 vs 400) and only one of them means the client did something wrong.
+# statuses (408 vs 400) and only one of them means the client did something wrong. TcpEndOfStream is
+# now its own variant too, rather than the empty-read sentinel it used to be — the read returning
+# "zero bytes" and the peer having closed were previously the same observation, and telling them
+# apart mattered most for a body whose first byte is 0x00.
+#
 # Three independent bounds, and each closes a hole the others do not:
 #
 #  * the SIZE cap stops a peer that floods bytes without ever sending the terminator. Such a peer
 #    keeps every read succeeding, so it never trips a timeout of any kind;
-#  * the budget is checked HERE, before reading, not merely inferred from `Err TcpTimeout`. The
-#    builtin only consults its deadline when the socket would block, so a continuously-readable
-#    peer never reaches that check — the phase bound has to be enforced by the loop that owns it;
+#  * the budget is checked HERE, before reading, not merely inferred from `Err TcpTimeout`. The read
+#    only consults its deadline when the socket would block, so a continuously-readable peer never
+#    reaches that check — the phase bound has to be enforced by the loop that owns it. Moving the
+#    retry loop into Sprout did not change this: `read_avail_go` returns as soon as a recv delivers
+#    data, without looking at the clock;
 #  * `Err TcpTimeout` covers the ordinary idle peer.
 #
 # The size check runs on the ACCUMULATED block before the next read, so the cap can be overshot by
-# at most one chunk (64 KiB). Capping also removes the quadratic `string.concat` growth: at most a
-# couple of rounds now fit under the cap.
-# TWO accumulators, and the split is the point. `text` exists only to locate the "\r\n\r\n"
-# terminator, which `str_find` does with a native substring search; `raw` is the authoritative
-# payload. They are needed separately because `str_concat` is strlen-based, so `text` silently stops
-# at the first 0x00 — which is fine for finding an ASCII terminator (a NUL before it means malformed
-# headers) but would DESTROY a binary body that arrived in the same TCP segment as the headers. The
-# bytes accumulator is a Builder rather than repeated `bytes.append`: append copies the whole buffer
+# at most one chunk (64 KiB).
+#
+# ONE accumulator now (a Builder), where there used to be two. The second existed only because the
+# terminator search needed a String, and it is gone: `bytes.find` searches the bytes directly. The
+# accumulator is a Builder rather than repeated `bytes.append` because append copies the whole buffer
 # per chunk (quadratic in bytes, ~8 MiB for a 1 MiB body in 64 KiB chunks), while a Builder
-# concatenates chunk TABLES and flattens once — quadratic only in chunk COUNT, i.e. 16 entries.
-fn read_until_headers(conn: borrowing TcpConnection, text: String, raw: Builder, deadline: Int, max_bytes: Int) -> ServerResult (String, Bytes) !{IO} =
-  match find_headers_end(text) with
-  | Just _ -> Ok((text, bytes.builder_build(raw)))
-  | Nothing ->
-      if string.byte_length(text) > max_bytes then
-        Err(HttpHeadersTooLarge)
+# concatenates chunk TABLES and flattens once — quadratic only in chunk COUNT.
+#
+# `overlap` is what keeps the SEARCH linear, and it is the part worth reading twice. Re-scanning the
+# accumulated block every round would be quadratic in bytes — and reachable on purpose, because the
+# size cap bounds total bytes, not rounds: a peer sending one byte per round under a 64 KiB cap
+# forces 65536 scans of up to 64 KiB each. So each round searches only `overlap ++ chunk`, where
+# `overlap` is the last 3 bytes already seen. Three is exactly right and not a guess: the terminator
+# is 4 bytes, so an occurrence straddling the boundary has between 1 and 3 bytes on the old side.
+# A match therefore always extends into the new chunk, which is also why it can never be found twice.
+#
+# Returns the block read so far together with the BYTE offset just past the terminator. That offset is
+# where the body starts, and it is a byte count by construction — the old code derived it from a
+# codepoint index via `string.byte_length(string.take(text, body_start))`, which was correct but only
+# because that conversion was got right.
+fn crlf_crlf() -> Bytes =
+  bytes.from_string("\r\n\r\n")
+
+fn read_until_headers(conn: borrowing TcpConnection, acc: Builder, total: Int, overlap: Bytes,
+                      deadline: Int, max_bytes: Int) -> ServerResult (Bytes, Int) !{IO} =
+  if total > max_bytes then Err(HttpHeadersTooLarge)
+  else
+    do
+      budget <- remaining_ms(deadline)
+      if budget <= 0 then
+        Err(HttpRequestTimeout)
       else
-        do
-          budget <- remaining_ms(deadline)
-          if budget <= 0 then
-            Err(HttpRequestTimeout)
-          else
-            match read_avail_timeout(conn, budget) with
-            | Err TcpTimeout -> Err(HttpRequestTimeout)
-            | Err _ -> Err(HttpInvalidRequest("connection error"))
-            | Ok chunk ->
-                # byte_length, not is_empty: `is_empty` is strlen-based, so a chunk whose FIRST byte
-                # is 0x00 — the opening byte of a binary body arriving with the headers — would read
-                # as empty and be reported as a closed connection.
-                if string.byte_length(chunk) <= 0 then Err(HttpInvalidRequest("unexpected end of stream"))
-                else read_until_headers(conn, string.concat(text, chunk),
-                                        bytes.builder_append(raw, bytes.builder_bytes(bytes.from_string(chunk))),
-                                        deadline, max_bytes)
+        match read_avail_timeout(conn, budget) with
+        | Err TcpTimeout -> Err(HttpRequestTimeout)
+        | Err TcpEndOfStream -> Err(HttpInvalidRequest("unexpected end of stream"))
+        | Err _ -> Err(HttpInvalidRequest("connection error"))
+        | Ok chunk -> scan_for_terminator(conn, acc, total, overlap, chunk, deadline, max_bytes)
+
+# Split out because the `where` bindings below are shared by both arms of the search, and because a
+# `match` inside the `do` above cannot carry them.
+fn scan_for_terminator(conn: borrowing TcpConnection, acc: Builder, total: Int, overlap: Bytes,
+                       chunk: Bytes, deadline: Int, max_bytes: Int) -> ServerResult (Bytes, Int) !{IO} =
+  match bytes.find(probe, crlf_crlf()) with
+  # `probe` index 0 sits at absolute byte `total - |overlap|`, so the terminator ends 4 bytes past the
+  # match in that frame of reference.
+  | Just at -> Ok((bytes.builder_build(grown), total - bytes.length(overlap) + at + 4))
+  | Nothing ->
+      read_until_headers(conn, grown, total + bytes.length(chunk), next_overlap, deadline, max_bytes)
+where
+  probe = bytes.append(overlap, chunk)
+  grown = bytes.builder_append(acc, bytes.builder_bytes(chunk))
+  keep = if bytes.length(probe) < 3 then bytes.length(probe) else 3
+  next_overlap = bytes.slice(probe, bytes.length(probe) - keep, keep)
+
+# Every read path BORROWS the connection: a request is read over many syscalls,
+# and under strict consume-exactly-once the first read would take the socket and
+# every later one would be a reuse. `handle_connection` holds the single consume.
+fn read_request(conn: borrowing TcpConnection, config: ServerConfig) -> ServerResult HttpRequest !{IO} =
+  do
+    header_deadline <- deadline_in(config.header_ms)
+    block <- read_until_headers(conn, bytes.builder_empty(), 0, bytes.empty(),
+                                header_deadline, config.max_header_bytes)
+    read_request_from_block(conn, block, config)
+
+fn read_request_from_block(conn: borrowing TcpConnection, block: (Bytes, Int), config: ServerConfig) -> ServerResult HttpRequest !{IO} =
+  do
+    header_text <- decode_header_block(bytes.slice(raw, 0, body_start))
+    prefix <- parse_request_prefix(header_text)
+    continue_read_request(conn, raw, body_start, prefix, config)
+where
+  (raw, body_start) = block
+
+# The header block is the first thing that has to BE text, and this is where that is decided instead
+# of assumed. A request line and header names/values are parsed with codepoint-indexed String
+# operations, so the block must be valid UTF-8 and NUL-free before any of them run — which is exactly
+# what `bytes.to_string` checks (decision D4's choke point; it rejects a NUL as well as a bad
+# sequence). A peer sending a NUL or a broken UTF-8 sequence in its headers now gets a clean 400.
+#
+# Note what is NOT validated: the body. It stays Bytes and is decoded only if a handler asks for text
+# via `request_body`, which returns a Result. Headers must be text to be parsed at all; a body need
+# not be text at all.
+fn decode_header_block(block: Bytes) -> ServerResult String =
+  match bytes.to_string(block) with
+  | Ok text -> Ok(text)
+  | Err _ -> Err(HttpInvalidRequest("request headers are not valid UTF-8"))
 
 # The body deadline is TOTAL and never re-armed here — `deadline` is computed once by the caller as
 # `body_ms + content_length / min_rate_bps`, so it already contains enough time to receive the whole
@@ -368,6 +433,13 @@ fn read_until_headers(conn: borrowing TcpConnection, text: String, raw: Builder,
 #
 # A flooding peer is bounded by `content_length` — the caller asks only for the bytes the request
 # promised — and an over-large `content_length` is refused with 413 before this loop is entered.
+#
+# Every count here is a byte count, with nothing to convert: `remaining` comes from Content-Length,
+# which is denominated in bytes, and `bytes.length` measures the same thing. The previous version had
+# to reach for `string.byte_length` on each chunk and carried a comment explaining why neither
+# `string.length` nor `is_empty` could be used — both are strlen-based, so a chunk containing 0x00 was
+# under-counted and one starting with 0x00 looked like a closed connection. Reading bytes retires the
+# whole hazard rather than documenting it.
 fn read_remaining_body(conn: borrowing TcpConnection, acc: Builder, remaining: Int, deadline: Int) -> ServerResult Bytes !{IO} =
   if remaining <= 0 then Ok(bytes.builder_build(acc))
   else
@@ -378,37 +450,17 @@ fn read_remaining_body(conn: borrowing TcpConnection, acc: Builder, remaining: I
       else
         match read_avail_timeout(conn, budget) with
         | Err TcpTimeout -> Err(HttpRequestTimeout)
+        | Err TcpEndOfStream -> Err(HttpInvalidRequest("unexpected end of stream"))
         | Err _ -> Err(HttpInvalidRequest("connection error"))
         | Ok chunk ->
-            # byte_length throughout, never `length` or `is_empty`: `remaining` is a byte count from
-            # Content-Length, and both of those are strlen-based — so a chunk beginning with 0x00
-            # would look like a closed connection, and a chunk containing one would be under-counted.
-            # byte_length reads the CSTR header, so it is exact for any byte sequence.
-            if string.byte_length(chunk) <= 0 then Err(HttpInvalidRequest("unexpected end of stream"))
-            else read_remaining_body(conn, bytes.builder_append(acc, bytes.builder_bytes(bytes.from_string(chunk))),
-                                     remaining - string.byte_length(chunk), deadline)
-
-# Every read path BORROWS the connection: a request is read over many syscalls,
-# and under strict consume-exactly-once the first read would take the socket and
-# every later one would be a reuse. `handle_connection` holds the single consume.
-fn read_request(conn: borrowing TcpConnection, config: ServerConfig) -> ServerResult HttpRequest !{IO} =
-  do
-    header_deadline <- deadline_in(config.header_ms)
-    prefix_pair <- read_until_headers(conn, "", bytes.builder_empty(), header_deadline, config.max_header_bytes)
-    read_request_from_prefix(conn, prefix_pair, config)
-
-fn read_request_from_prefix(conn: borrowing TcpConnection, prefix_pair: (String, Bytes), config: ServerConfig) -> ServerResult HttpRequest !{IO} =
-  do
-    prefix <- parse_request_prefix(text)
-    continue_read_request(conn, text, raw, prefix, config)
-where
-  (text, raw) = prefix_pair
+            read_remaining_body(conn, bytes.builder_append(acc, bytes.builder_bytes(chunk)),
+                                remaining - bytes.length(chunk), deadline)
 
 # The body gets its OWN budget, starting when the headers are complete — a slow upload must not be
 # charged for however long the headers took, and a client that stalls after its headers must still
-# be cut off. Unlike the header budget this one is idle-based, so what is armed here is only the
-# FIRST gap; read_remaining_body re-arms it on every chunk that made progress.
-fn continue_read_request(conn: borrowing TcpConnection, text: String, raw: Bytes, prefix: (RequestLine, Dict String, Int), config: ServerConfig) -> ServerResult HttpRequest !{IO} =
+# be cut off.
+fn continue_read_request(conn: borrowing TcpConnection, raw: Bytes, body_start: Int,
+                         prefix: (RequestLine, Dict String, Int), config: ServerConfig) -> ServerResult HttpRequest !{IO} =
   if content_length > config.max_body_bytes then Err(HttpBodyTooLarge)
   else if bytes.length(body) >= content_length then
     Ok(build_request(req, headers, bytes.slice(body, 0, content_length)))
@@ -423,11 +475,9 @@ fn continue_read_request(conn: borrowing TcpConnection, text: String, raw: Bytes
       Ok(build_request(req, headers, bytes.slice(full, 0, content_length)))
 where
   (req, headers, content_length) = prefix
-  # The offset is derived in BYTES from the codepoint-indexed `body_start` (find_headers_end returns a
-  # codepoint index), so a non-ASCII header value cannot shift where the body begins.
-  body_start = maybe_with_default(0, request_body_start(text))
-  header_bytes = string.byte_length(string.take(text, body_start))
-  body = bytes.slice(raw, header_bytes, bytes.length(raw) - header_bytes)
+  # `body_start` is already a byte offset — see read_until_headers. No conversion, and so no place
+  # for a codepoint index to be mistaken for a byte one.
+  body = bytes.slice(raw, body_start, bytes.length(raw) - body_start)
 
 fn headers_to_lines(keys: Vec String, headers: Dict String, index: Int, total: Int, acc: String) -> String =
   if index >= total then acc

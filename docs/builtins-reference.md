@@ -39,17 +39,16 @@ Builtin effect convention:
 - `int_range_end(r: IntRange) -> Int`
 - `tcp_listen(port: Int) -> Int !{IO}`
 - `tcp_accept(listener: Int) -> Int !{IO}`
-- `tcp_read(conn: Int) -> String !{IO}`
 - `tcp_write(conn: Int, payload: String) -> Unit !{IO}`
 - `tcp_connect(host: String, port: Int) -> Result stdlib.net.TcpError Int !{IO}`
-- `tcp_read_avail(conn: Int) -> Result stdlib.net.TcpError String !{IO}`
-- `tcp_read_avail_timeout(conn: Int, timeout_ms: Int) -> Result stdlib.net.TcpError String !{IO}` — `tcp_read_avail` bounded by a deadline: `Err TcpTimeout` if nothing arrives in time, with the connection **still valid** (Go `SetReadDeadline` / Java `SO_TIMEOUT` semantics, not cancellation). `timeout_ms <= 0` polls once without waiting, which is what lets a caller enforce a *total* budget by passing the remaining slice each round.
+- `tcp_wait(conn: Int, interest: Int, ms: Int) -> Result stdlib.net.TcpError Int !{IO}` — **readiness only, moving no data.** Parks the calling task until the connection is ready for `interest` (1 = read, 2 = write, mirroring `SPROUT_POLL_READ`/`SPROUT_POLL_WRITE`) or `ms` elapses: `Ok(1)` = ready, `Ok(0)` = the deadline passed. `ms <= 0` reports "not ready" without parking, so a caller enforcing a *total* budget can pass the remaining slice and needs no special case once it is spent. Being interest-parameterised, this is the only park primitive read, write, connect and accept need.
+- `tcp_read_some(conn: Int, max_bytes: Int) -> Result stdlib.net.TcpError Bytes !{IO}` — **transfer only, never parking.** One `recv` of at most `max_bytes` (clamped to 64 KiB): `Ok(chunk)` holds at least one byte, `Err TcpWouldBlock` means the kernel had none, `Err TcpEndOfStream` means the peer closed cleanly. Returns **Bytes**, not String: a socket carries arbitrary bytes and a Sprout String may not (see [spec-v0.md](./spec-v0.md) — always valid UTF-8, contains no NUL byte), so decoding is the caller's decision and goes through `bytes.to_string`, which returns a `Result`. Paired with `tcp_wait` by a loop in `stdlib.net`, which is where the timeout, size and rate policies now live.
+- `tcp_write_some(conn: Int, payload: Bytes, offset: Int) -> Result stdlib.net.TcpError Int !{IO}` — the write-side twin: one `send` from `offset`, never parking. `Ok(n > 0)` on progress, `Err TcpWouldBlock` when the kernel took nothing, `Ok(0)` only for an already-exhausted payload. `offset` rather than a re-sliced tail is what keeps a Sprout-side write loop linear instead of O(n²) in the payload length.
 - `tcp_read_exact(conn: Int, count: Int) -> Result stdlib.net.TcpError Bytes !{IO}`
 - `tcp_write_all(conn: Int, payload: Bytes) -> Result stdlib.net.TcpError Int !{IO}`
 - `tcp_write_all_timeout(conn: Int, payload: Bytes, idle_ms: Int) -> Result stdlib.net.TcpError Int !{IO}` — `tcp_write_all` bounded by an **idle** deadline: no single stall may exceed `idle_ms`, and any byte the kernel accepts re-arms it, after which it returns `Err TcpTimeout` with the connection **still valid**. Idle rather than total follows nginx `send_timeout` ("the timeout is set only between two successive write operations, not for the transmission of the whole response"), so a slow-but-reading client is never cut off while one that stops reading entirely is. Without it, a client that requests a response larger than the socket buffers and then stops reading parks its handler in `send()` forever and never returns its connection handle — the write-side twin of the unbounded read. `idle_ms <= 0` attempts the write once without parking.
 - `tcp_close(conn: Int) -> Unit !{IO}`
 - `tcp_close_listener(listener: Int) -> Unit !{IO}`
-- `tcp_echo_serve(port: Int, max_connections: Int) -> Unit !{IO}`
 - `http_request(method: String, url: String, headers: String, body: String, timeout_ms: Int) -> Result HttpError HttpResponse !{IO}`
 - `crypto_random_bytes(count: Int) -> Result stdlib.crypto.CryptoError Bytes !{IO}`
 - `term_clear() -> Unit !{IO}`

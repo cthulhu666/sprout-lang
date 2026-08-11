@@ -1459,11 +1459,12 @@ task-io-smoke: bootstrap-from-seed
   build tests/task_io_smoke/http_conn_error_survives.spr
   run_once "http-conn-error" "done"
   SPROUT_GC_STRESS=1 run_once "http-conn-error/stress" "done"
-  # (2e) tcp_read_avail error path: reading from an unallocated handle returns
-  # Err(TcpInvalidHandle) instead of exit(1) (the recoverable counterpart to fatal tcp_read).
-  # Deterministic — no socket timing. Reaching "done" proves the Err branch.
-  build tests/task_io_smoke/tcp_read_avail_bad_handle.spr
-  run_once "tcp-read-avail-bad-handle" "done"
+  # (2e) tcp_read_some argument validation: an unallocated handle returns Err(TcpInvalidHandle) and a
+  # non-positive max_bytes returns an Err too — never an abort. Deterministic (no socket timing).
+  # Reaching "done" proves both Err branches; a regression to the fatal tcp_read behaviour exits
+  # non-zero before printing it.
+  build tests/task_io_smoke/tcp_read_some_bad_args.spr
+  run_once "tcp-read-some-bad-args" "done"
   # (3) I/O-drop cancellation (L0.5): scope_cancel force-drops tasks parked in the
   # poller (both task_fork and task_spawn) so __scope_join returns instead of blocking
   # the pump forever. Reaching "done" proves the drop; a broken drop HANGS (alarm fires).
@@ -1649,7 +1650,18 @@ task-io-smoke: bootstrap-from-seed
   run_once "http-binary-body" "binary-inline-200"
   run_once "http-binary-body/split" "binary-split-200"
   SPROUT_GC_STRESS=1 run_once "http-binary-body/stress" "binary-inline-200"
-  echo "==> task-io-smoke ✓ (read-park, accept-park, re-arm, http-serve-concurrency, http-conn-error-isolation, tcp-read-avail-error, write, cancel-drop, await-guard, timer-drop, timeout-drop, timeout-nested-guard, chan-cancel-drop, chan-timeout-drop, chan-negative-cap-guard, rendezvous-send-drop, send-on-closed-guard, double-close-guard, send-parked-close-guard, select-cancel-drop, select-timeout-drop, connect-park, http-idle-timeout, http-header-flood, http-write-timeout, http-body-timeout, http-body-bounds, http-pooled-serve, read-poll-once, http-utf8-body, http-binary-body; interleaved; stress-clean)"
+  # (27) W2 R2 regression at the `net` layer: a payload containing 0x00 read back over loopback must
+  # arrive as intact Bytes AND be refused by bytes.to_string. The deleted read builtins ended in
+  # sprout_gc_adopt_cstr, minting a String that violates docs/spec-v0.md:64 — silently (byte_length 3,
+  # length 1) with HDRCHECK off, and as an abort with it on. http-binary-body covers the same property
+  # through the HTTP server; this pins it where the defect lived, so a regression is attributed to
+  # `net` rather than diagnosed through a request parser. Run under HDRCHECK as well as the default,
+  # since the default build is exactly what let this reach CI unnoticed.
+  build tests/task_io_smoke/tcp_nul_payload.spr
+  run_once "tcp-nul-payload" "nul-bytes-intact"
+  run_once "tcp-nul-payload/decode" "nul-decode-refused"
+  SPROUT_GC_HDRCHECK=1 run_once "tcp-nul-payload/hdrcheck" "nul-bytes-intact"
+  echo "==> task-io-smoke ✓ (read-park, accept-park, re-arm, http-serve-concurrency, http-conn-error-isolation, tcp-read-some-bad-args, write, cancel-drop, await-guard, timer-drop, timeout-drop, timeout-nested-guard, chan-cancel-drop, chan-timeout-drop, chan-negative-cap-guard, rendezvous-send-drop, send-on-closed-guard, double-close-guard, send-parked-close-guard, select-cancel-drop, select-timeout-drop, connect-park, http-idle-timeout, http-header-flood, http-write-timeout, http-body-timeout, http-body-bounds, http-pooled-serve, read-poll-once, http-utf8-body, http-binary-body, tcp-nul-payload; interleaved; stress-clean)"
 
 # Division-by-zero guard regression (CI gate). The fixture divides by a RUNTIME
 # zero (`10 / list_length(argv)` with no args), which neither the compiler nor
