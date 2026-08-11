@@ -462,7 +462,7 @@ fn lin_consumed(e: typed_ast.TypedExpr, sc: LinScope, env: Dict types.Scheme) ->
       seq_list(Cons(base, record_field_exprs(fields)), sc, env)
   | typed_ast.TIf c a b _ p -> lin_if(c, a, b, p, sc, env)
   | typed_ast.TMatch scrut arms _ p -> lin_match(scrut, arms, p, sc, env)
-  | typed_ast.TDo steps dty _ -> lin_do(steps, block_short_circuits(dty), sc, env)
+  | typed_ast.TDo steps _ _ -> lin_do(steps, sc, env)
   | typed_ast.TLambda params body lam_type p -> lin_lambda(params, body, lam_type, p, sc, env)
 
 # A bare reference in a CONSUMING position: a `consuming`/unmodified argument, a
@@ -823,39 +823,51 @@ fn arm_pos(br: typed_ast.TypedMatchBranch) -> source.SourcePos =
   match br with
   | typed_ast.TypedMatchBranch _ body -> typed_ast.typed_expr_pos(body)
 
-# Does a `<-` bind in THIS block short-circuit? `Maybe` short-circuits on Nothing
-# and `Result e` is left-biased on the first Err (spec-v0.md §11), so in such a
-# block the steps AFTER a bind are conditional. An effectful block (`Unit !{IO}`)
-# runs every step, so its binds are unconditional. The block's own type is the
-# discriminator; effect rows live on TFunc, so the head is unaffected by `!{IO}`.
-fn block_short_circuits(block_ty: types.Type) -> Bool =
-  short_circuit_head(after_last_dot(head_type_name(block_ty)))
+# Does THIS bind short-circuit? `Maybe` short-circuits on Nothing and `Result e`
+# is left-biased on the first Err (spec-v0.md §5.9), so the steps AFTER such a bind
+# are conditional: on failure the enclosing function returns and they never run.
+#
+# The discriminator is the BIND's right-hand-side type, not the block's. Keying it
+# on the block's type — which is what this did, following a spec sentence that also
+# claimed "Effectful blocks (`!{IO}`) run every step and are unaffected" — is wrong
+# in both directions. `!{IO}` is orthogonal to short-circuiting, so a `-> Unit !{IO}`
+# block containing a fallible bind switched the rule off entirely (the `P0` leak in
+# `bench/http_worker_pool/`, regression
+# `tests/conformance/type_error/consume_after_fallible_bind_effect_block`); and a
+# `Result`-typed block whose binds are all non-fallible had it switched on for steps
+# that in fact always run. Per-bind is both correct and strictly more precise.
+#
+# One fallible bind is enough to condemn every consume after it, so there is no need
+# to remember the flag across steps: the OUTERMOST fallible bind sees the whole
+# remainder of the block in its `restc` and reports there.
+fn bind_short_circuits(rhs_ty: types.Type) -> Bool =
+  short_circuit_head(after_last_dot(head_type_name(rhs_ty)))
 
 fn short_circuit_head(h: String) -> Bool = h == "Maybe" || h == "Result"
 
 fn after_last_dot(name: String) -> String =
   if str_find(name, ".") == -1 then name else after_last_dot(str_slice(name, str_find(name, ".") + 1, str_len(name)))
 
-fn lin_do(steps: List typed_ast.TypedDoStep, sc_block: Bool, sc: LinScope,
+fn lin_do(steps: List typed_ast.TypedDoStep, sc: LinScope,
           env: Dict types.Scheme) -> LinRes =
   match steps with
   | Nil -> LinOk(Nil, Nil)
   | Cons step rest ->
       match step with
-      | typed_ast.TDoLetStep name rhs -> lin_do_let(name, rhs, rest, sc_block, sc, env)
-      | typed_ast.TDoExprStep e -> lin_do_seq(e, rest, sc_block, sc, env)
-      | typed_ast.TDoBindStep pat e -> lin_do_bind(pat, e, rest, sc_block, sc, env)
+      | typed_ast.TDoLetStep name rhs -> lin_do_let(name, rhs, rest, sc, env)
+      | typed_ast.TDoExprStep e -> lin_do_seq(e, rest, sc, env)
+      | typed_ast.TDoBindStep pat e -> lin_do_bind(pat, e, rest, sc, env)
 
 # A `<-` do-bind: its pattern binds variables (possibly linear) scoped to the
 # remaining steps, each consumed exactly once there. The RHS is sequential-before
 # the rest — which is what makes `close(conn)` followed by a later `write(conn,…)`
 # in a do-block a use-after-consume rather than an unordered set collision.
 fn lin_do_bind(pat: ast.Pattern, e: typed_ast.TypedExpr, rest: List typed_ast.TypedDoStep,
-               sc_block: Bool, sc: LinScope, env: Dict types.Scheme) -> LinRes =
+               sc: LinScope, env: Dict types.Scheme) -> LinRes =
   match lin_consumed(e, sc, env) with
   | LinErr p m -> LinErr(p, m)
   | LinOk ec eb -> lin_do_bind_checked(pat, do_bind_type(typed_ast.typed_expr_type(e), env),
-                                       ec, eb, e, rest, sc_block, sc, env)
+                                       ec, eb, e, rest, sc, env)
 
 # `_ <- e` binds no name, so `pattern_linear_binders` yields nothing and the
 # binder-keyed rules attach no obligation — the payload is dropped exactly as a
@@ -871,13 +883,13 @@ fn lin_do_bind(pat: ast.Pattern, e: typed_ast.TypedExpr, rest: List typed_ast.Ty
 # decided here.
 fn lin_do_bind_checked(pat: ast.Pattern, bind_type: types.Type, ec: List LinUse,
                        eb: List LinUse, e: typed_ast.TypedExpr,
-                       rest: List typed_ast.TypedDoStep, sc_block: Bool,
+                       rest: List typed_ast.TypedDoStep,
                        sc: LinScope, env: Dict types.Scheme) -> LinRes =
   if wildcard_discards_linear(pat, bind_type, env) then
     LinErr(typed_ast.typed_expr_pos(e), wildcard_bind_msg())
   else
     lin_do_bind_rest(pattern_linear_binders(pat, bind_type, env),
-                     ec, eb, e, rest, sc_block, sc, env)
+                     ec, eb, e, rest, sc, env)
 
 fn wildcard_discards_linear(pat: ast.Pattern, t: types.Type, env: Dict types.Scheme) -> Bool =
   match pat with
@@ -889,20 +901,20 @@ fn wildcard_bind_msg() -> String =
 
 fn lin_do_bind_rest(binders: List String, ec: List LinUse, eb: List LinUse,
                     e: typed_ast.TypedExpr, rest: List typed_ast.TypedDoStep,
-                    sc_block: Bool, sc: LinScope, env: Dict types.Scheme) -> LinRes =
-  match lin_do(rest, sc_block, scope_add_owned(binders, sc), env) with
+                    sc: LinScope, env: Dict types.Scheme) -> LinRes =
+  match lin_do(rest, scope_add_owned(binders, sc), env) with
   | LinErr p m -> LinErr(p, m)
-  | LinOk restc restb -> lin_do_bind_close(binders, ec, eb, restc, restb, e, sc_block)
+  | LinOk restc restb -> lin_do_bind_close(binders, ec, eb, restc, restb, e)
 
 fn lin_do_bind_close(binders: List String, ec: List LinUse, eb: List LinUse,
-                     restc: List LinUse, restb: List LinUse, e: typed_ast.TypedExpr,
-                     sc_block: Bool) -> LinRes =
+                     restc: List LinUse, restb: List LinUse,
+                     e: typed_ast.TypedExpr) -> LinRes =
   match unconsumed_binder(binders, restc) with
   | Just leaked -> LinErr(typed_ast.typed_expr_pos(e), leak_msg(leaked))
-  | Nothing -> lin_do_bind_after(binders, ec, eb, restc, restb, e, sc_block)
+  | Nothing -> lin_do_bind_after(binders, ec, eb, restc, restb, e)
 
-# In a SHORT-CIRCUITING block the steps after this bind are conditional, so a
-# consume of a binding introduced OUTSIDE the block is not guaranteed to run:
+# When THIS bind is fallible the steps after it are conditional, so a consume of a
+# binding introduced OUTSIDE the block is not guaranteed to run:
 #
 #     do { _ <- write(c); reply <- read(c); let _ = close(c); Ok(reply) }
 #
@@ -910,26 +922,30 @@ fn lin_do_bind_close(binders: List String, ec: List LinUse, eb: List LinUse,
 # early and the socket leaks for the process lifetime — the very shape M4.5 makes
 # idiomatic. The bind's OWN binders are exempt: they do not exist on the
 # short-circuit path, so they owe nothing there.
-# Regression: tests/conformance/type_error/borrow_after_fallible_bind.
+#
+# Regressions: tests/conformance/type_error/borrow_after_fallible_bind (a `Result`
+# block) and .../consume_after_fallible_bind_effect_block (a `Unit !{IO}` block,
+# which the old block-type keying missed entirely — see `bind_short_circuits`).
 fn lin_do_bind_after(binders: List String, ec: List LinUse, eb: List LinUse,
-                     restc: List LinUse, restb: List LinUse, e: typed_ast.TypedExpr,
-                     sc_block: Bool) -> LinRes =
-  match conditional_consume(sc_block, remove_all(binders, restc)) with
+                     restc: List LinUse, restb: List LinUse,
+                     e: typed_ast.TypedExpr) -> LinRes =
+  match conditional_consume(bind_short_circuits(typed_ast.typed_expr_type(e)),
+                            remove_all(binders, restc)) with
   | Just u -> LinErr(luse_pos(u), after_fallible_msg(luse_name(u)))
   | Nothing -> seq2(ec, eb, remove_all(binders, restc), remove_all(binders, restb))
 
-fn conditional_consume(sc_block: Bool, outer: List LinUse) -> Maybe LinUse =
-  if ! sc_block then Nothing
+fn conditional_consume(sc_bind: Bool, outer: List LinUse) -> Maybe LinUse =
+  if ! sc_bind then Nothing
   else
     match outer with
     | [] -> Nothing
     | [u | _] -> Just(u)
 
 fn lin_do_seq(e: typed_ast.TypedExpr, rest: List typed_ast.TypedDoStep,
-              sc_block: Bool, sc: LinScope, env: Dict types.Scheme) -> LinRes =
+              sc: LinScope, env: Dict types.Scheme) -> LinRes =
   match lin_consumed(e, sc, env) with
   | LinErr p m -> LinErr(p, m)
-  | LinOk ec eb -> lin_do_seq_checked(e, rest, ec, eb, sc_block, sc, env)
+  | LinOk ec eb -> lin_do_seq_checked(e, rest, ec, eb, sc, env)
 
 # The consumed-set analysis is keyed on BINDERS (params, `let`, `<-`, pattern
 # vars): every rule asks whether the obligation attached to a NAME was
@@ -950,12 +966,12 @@ fn lin_do_seq(e: typed_ast.TypedExpr, rest: List typed_ast.TypedDoStep,
 # innermost-first behaviour — an inner reuse already masks an outer leak the same
 # way — not something this rule introduces.
 fn lin_do_seq_checked(e: typed_ast.TypedExpr, rest: List typed_ast.TypedDoStep,
-                      ec: List LinUse, eb: List LinUse, sc_block: Bool,
+                      ec: List LinUse, eb: List LinUse,
                       sc: LinScope, env: Dict types.Scheme) -> LinRes =
   if step_discards_linear(e, rest, env) then
     LinErr(typed_ast.typed_expr_pos(e), discarded_step_msg(e, env))
   else
-    lin_do_seq_rest(rest, ec, eb, sc_block, sc, env)
+    lin_do_seq_rest(rest, ec, eb, sc, env)
 
 fn step_discards_linear(e: typed_ast.TypedExpr, rest: List typed_ast.TypedDoStep,
                         env: Dict types.Scheme) -> Bool =
@@ -1021,24 +1037,24 @@ fn discarded_value_msg(t: types.Type, env: Dict types.Scheme) -> String =
     "this step discards a value that may be linear: its type is a type variable, which a caller may instantiate at a linear type (Sprout cannot yet declare a type parameter non-linear); bind its result with `<-` or `let` and consume the binding"
 
 fn lin_do_seq_rest(rest: List typed_ast.TypedDoStep, ec: List LinUse, eb: List LinUse,
-                   sc_block: Bool, sc: LinScope, env: Dict types.Scheme) -> LinRes =
-  match lin_do(rest, sc_block, sc, env) with
+                   sc: LinScope, env: Dict types.Scheme) -> LinRes =
+  match lin_do(rest, sc, env) with
   | LinErr p m -> LinErr(p, m)
   | LinOk restc restb -> seq2(ec, eb, restc, restb)
 
 fn lin_do_let(name: String, rhs: typed_ast.TypedExpr, rest: List typed_ast.TypedDoStep,
-              sc_block: Bool, sc: LinScope, env: Dict types.Scheme) -> LinRes =
+              sc: LinScope, env: Dict types.Scheme) -> LinRes =
   match lin_consumed(rhs, sc, env) with
   | LinErr p m -> LinErr(p, m)
   | LinOk rc rb ->
-      lin_do_let_body(name, rhs, rc, rb, rest, sc_block, sc, env,
+      lin_do_let_body(name, rhs, rc, rb, rest, sc, env,
                       type_is_linear(typed_ast.typed_expr_type(rhs), env))
 
 # A linear do-let binding is OWNED, scoped to `rest`, consumed exactly once there.
 fn lin_do_let_body(name: String, rhs: typed_ast.TypedExpr, rc: List LinUse, rb: List LinUse,
-                   rest: List typed_ast.TypedDoStep, sc_block: Bool, sc: LinScope,
+                   rest: List typed_ast.TypedDoStep, sc: LinScope,
                    env: Dict types.Scheme, is_lin: Bool) -> LinRes =
-  match lin_do(rest, sc_block, extend_scope(is_lin, name, sc), env) with
+  match lin_do(rest, extend_scope(is_lin, name, sc), env) with
   | LinErr p m -> LinErr(p, m)
   | LinOk restc restb -> lin_do_let_close(name, rhs, rc, rb, restc, restb, is_lin)
 

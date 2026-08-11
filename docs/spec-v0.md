@@ -866,12 +866,15 @@ a field access or as a `match` scrutinee. Every other reference consumes. So
   (`w.inner` where `w: borrowing Wrap` and `inner` is linear): the result would be
   an owned value its real owner will still release. A non-linear field reads
   freely.
-- **A consume may not follow a fallible bind.** In a block whose type is `Maybe`
-  or `Result`, a `<-` bind short-circuits (§11), so steps after it are
-  conditional. Consuming a binding from outside the block there would be skipped
-  on the failure path and the value leaked, so it is rejected; consume before the
-  first `<-`, or branch explicitly with `match`. Effectful blocks (`!{IO}`) run
-  every step and are unaffected.
+- **A consume may not follow a fallible bind.** A `<-` bind whose right-hand side is
+  `Maybe` or `Result` short-circuits (§5.9), so the steps after it are conditional.
+  Consuming a binding from outside the block there would be skipped on the failure
+  path and the value leaked, so it is rejected; consume before the first fallible
+  `<-`, or branch explicitly with `match`. The condition is the **bind's** type, not
+  the block's, and `!{IO}` does not exempt it: an effect row and a short-circuit are
+  orthogonal, so an `!{IO}` block containing a fallible bind does *not* run every
+  step. A block whose own type is `Maybe`/`Result` but whose binds are all
+  non-fallible is likewise unaffected — nothing in it can return early.
 - A `borrowing` parameter may not be consumed or returned.
 - An argument at a `borrowing` position must be a **variable reference**; a
   freshly-built linear value there would never be consumed.
@@ -992,6 +995,52 @@ it inside the task instead.
 - `borrowing` inside an **arrow type**, and a modifier on a **type-variable**
   parameter. Both are described above; both need work this milestone deliberately
   did not take on (a parser change, and a linearity bound on type parameters).
+
+### 5.9 The fallible `<-` bind
+
+Inside a `do` block, `<pat> <- <e>` is an **effectful bind** when `e`'s type is
+anything other than `Maybe`/`Result`, and a **fallible bind** when it is one of those
+two. `Maybe` and `Result` are the only short-circuiting families; the behaviour is
+not user-extensible.
+
+A fallible bind `x <- e` where `e : Result E A` binds `x : A` on success. On failure
+it **returns from the enclosing function**, carrying the failure — it does not merely
+end the block. `Maybe` behaves the same way with `Nothing` in place of `Err`.
+
+Because the failure leaves through the function's return, it must be a value that
+function can return. A fallible bind is therefore well-typed only where the block's
+type can carry the failure:
+
+| Right-hand side | Block's type must be | On failure |
+| --- | --- | --- |
+| `Result E A` | `Result E B` — same error type `E` | returns `Err e` unchanged |
+| `Maybe A` | `Maybe B` | returns `Nothing` |
+
+Anything else is a **type error**, including a non-fallible block type (`Int`,
+`String`, `Unit`, …), the other family, and the same family with a different error
+type. Convert at the bind with `map_error` to change `E`, or handle the failure in
+place — see the discard form below — rather than propagating it.
+
+The binder does not affect propagation: `_ <- e` short-circuits exactly as `x <- e`
+does, and is subject to the same rule. To run a fallible expression and **continue**
+regardless, use it as a bare statement, which discards the whole `Maybe`/`Result`:
+
+```sprout
+do
+  x <- may_fail(a)       # want the value; failure propagates (block must be fallible)
+  _ <- may_fail(b)       # ignore the value; failure still propagates
+  may_fail(c)            # run it, discard the Result, CONTINUE
+  done(x)
+```
+
+Only one family may short-circuit within a single block; mixing `Maybe` and `Result`
+binds is rejected. The block's own type is the type of its **last** step and is not
+implicitly wrapped: a `Result`-returning function whose `do` block ends in a bare `A`
+is a type error, not an implicit `Ok`.
+
+Effects are orthogonal. `!{IO}` describes *what a step may do*, not whether the block
+can exit early, so an `!{IO}` block containing a fallible bind still short-circuits
+and its later steps are still conditional (see §5.8's consume rule).
 
 ## 6. Evaluation Semantics (Strict)
 
