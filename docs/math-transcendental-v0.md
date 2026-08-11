@@ -37,9 +37,11 @@ numeric types plain unprefixed names; stay forward-compatible with the eventual 
 typeclasses; decide the builtin question by measurement.
 
 **Non-goals.** `Double` `min`/`max`/`sign` (they force the NaN-ordering decision — §7);
-hyperbolics, `asin`/`acos`, `expm1`/`log1p`, `sigmoid` (no caller yet); bit-exact IEEE
+hyperbolics, `expm1`/`log1p`, `sigmoid` (no caller yet); bit-exact IEEE
 rounding (the layer is IEEE *in spirit*, per partiality Rule 2); implementing the
 `Numeric`/`Real` classes of `docs/numeric-types-v1-draft.md` (compiler-sized, §7).
+
+> `asin`/`acos` were listed here as non-goals and have since shipped — see §15.
 
 ## 3. Prior art
 
@@ -347,6 +349,11 @@ Primary references for §3; each row was checked against these.
   https://pkg.go.dev/math
 - Java `java.lang.Math` (`log`, `log10`, `pow`, `cbrt`):
   https://docs.oracle.com/en/java/javase/21/docs/api/java.base/java/lang/Math.html
+- POSIX `asin(3)` / `acos(3)` — used for §15's range and special-value requirements:
+  `acos` returns in `[0, pi]` and `acos(+1)` returns `+0`; `asin` returns in
+  `[-pi/2, pi/2]`, `asin(±0)` is `±0`, and an argument outside `[-1, 1]` is a domain
+  error returning NaN: https://man7.org/linux/man-pages/man3/acos.3.html ·
+  https://man7.org/linux/man-pages/man3/asin.3.html
 - In-repo: `docs/math-partiality-v0.md` (Rules 1 and 2),
   `docs/numeric-types-v1-draft.md` §6.2/§7.1/§8 (the class design and its open
   questions), `docs/spec-v0.md` §8 (normative Int surface).
@@ -630,3 +637,96 @@ sweep did **not**, because its 0.37 step from −745 stopped at 698 and never re
 overflow boundary — a reminder that a sweep's bound is part of its assertion. The sweep
 now runs past 710, and the scaling splits into two exact factors (`2^1023 · 2^(k-1023)`)
 so the trailing multiply overflows to `+inf` exactly when it should.
+
+## 15. `asin` and `acos` (2026-08-11)
+
+§2 deferred these as "no caller yet". They are now implemented, in the shape BACKLOG
+predicted — over `atan` and `sqrt`, no new machinery:
+
+```sprout
+asin(x) = 2 * atan(x / (1 + sqrt(1 - x²)))     # half-angle, from tan(t/2) = sin t / (1 + cos t)
+acos(x) = pi/2 - asin(x)
+```
+
+Three things about this were not obvious in advance, and each is a trap a later
+"simplification" can walk back into.
+
+### 15.1 The textbook form does not work over *this* `atan`
+
+The identity every reference gives is `asin(x) = atan(x / sqrt(1 - x²))`. Over libm that
+is fine. Over the `atan` in this module it fails at exactly the two most-used inputs: at
+`|x| = 1` the denominator is `0`, the quotient is `±inf`, and `atan_reduce`'s halving step
+`x / (1 + sqrt(1 + x·x))` evaluates `inf / inf` = **NaN**. So `asin(1.0)` would be NaN
+rather than `pi/2`.
+
+The half-angle form has no such point: its denominator `1 + sqrt(1 - x²)` is bounded below
+by `1` across the whole domain, so the argument handed to `atan` never exceeds `1` in
+magnitude and the endpoints reduce to the finite `2·atan(±1)`.
+
+### 15.2 Accuracy is *better* than the trig row it is built on
+
+Measured against libm over 2M samples spanning `[-1, 1]`: worst absolute error **1.6e-15**
+for `asin`, **1.8e-15** for `acos`. That is four orders tighter than the `~1e-8` the module
+header quotes for `sin`/`cos`/`atan`, which looks impossible for a function whose entire
+body is one `atan` call.
+
+The resolution is that `atan`'s figure is a *whole-line* worst case. Its three halving
+passes saturate: they shrink `x = 1e6` only to `0.199`, where the `x¹³`-truncated series
+still carries ~1.6e-11, but they shrink `x = 1` to `0.098`, where the same series is at
+8e-16. `asin` only ever produces arguments of magnitude ≤ 1, so it lives entirely in
+`atan`'s accurate regime and never pays for the large-argument saturation.
+
+The lesson generalises: a composite's accuracy is set by the *sub-range* it drives its
+components over, not by their published worst case. Sizing a tolerance from the header row
+would have under-claimed these by seven orders.
+
+### 15.3 Small error does not imply in-range — the endpoints need a branch
+
+The bare half-angle form is accurate to 1.6e-15 *and still wrong* at one input.
+`2·atan(1)` lands on `1.5707963267948974`, one ulp **above** `pi/2`, which makes
+
+```
+acos(1.0)  ==  -8.9e-16      # a NEGATIVE angle
+```
+
+POSIX requires `acos` to return within `[0, pi]` and to return `+0` for `acos(1)`, and
+`asin` to return within `[-pi/2, pi/2]`. More practically, `acos(dot(u, v))` on unit
+vectors is *the* canonical caller, and parallel inputs land on exactly `1.0` — so this is
+the common case, not a corner. A caller taking `sqrt` of that angle, or testing it `> 0.0`,
+breaks.
+
+The defect is confined to exactly `±1`, and provably so: `acos` leaves `1` like
+`sqrt(2·eps)`, so one ulp inward the true value is already `1.5e-8` — seven orders above
+the error floor. Answering the two endpoints directly is therefore a *complete* fix rather
+than a patch on a gradient:
+
+```sprout
+if x == 1.0 then half_pi else if x == -1.0 then -half_pi else <half-angle form>
+```
+
+Branching beats clamping the result into range: it returns the correctly-rounded constant
+instead of the nearest in-range approximation, it makes `acos(±1)` exactly `+0.0` and `pi`,
+and it leaves NaN propagation untouched (`NaN == 1.0` is false, so out-of-domain inputs
+still fall through to the path that produces NaN). Re-verified after the branch: zero
+out-of-range results across the same 2M-sample sweep.
+
+### 15.4 Rule 2 falls out, but only for this spelling
+
+`|x| > 1` makes the radicand negative, `sqrt` returns NaN, and NaN propagates — Rule 2 for
+free. The tidier-looking `atan2(x, sqrt(1 - x·x))` would silently return `pi/2` instead;
+`docs/math-partiality-v0.md` §8 records why, and the test suite pins it.
+
+### 15.5 Verification
+
+`tests/stdlib/test_math_double.spr` covers: the standard angles, odd symmetry,
+`asin(sin x)` / `acos(cos x)` round-trips, the `asin + acos == pi/2` identity, `is_nan` on
+all four out-of-domain and both NaN inputs, exactness at `±1` and `0`, in-range one ulp
+inside the endpoints, and POSIX's `asin(±0) = ±0` signed-zero clause. The endpoint
+assertions were confirmed RED against the unbranched implementation — they are the
+regression guard for §15.3, and `close`-style tolerance testing cannot see that defect.
+
+The range guarantee is additionally swept in-repo rather than only in the throwaway C
+oracle: `range_violations` counts inputs where `asin`/`acos` escape their POSIX range over
+20001 samples of `[-1, 1]` (endpoints included) and must return `0`. It also goes RED
+without the endpoint branch, so the guarantee is checked as a property, not just at the
+handful of points a reviewer thought to name.

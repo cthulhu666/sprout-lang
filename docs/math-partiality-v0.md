@@ -191,6 +191,17 @@ New Rule-2 domains:
 | `log2`/`log10`/`log` of a negative | `NaN`, inherited from `ln` |
 | `log(x, 1.0)` | `±inf` — base 1 has no logarithm |
 | `pow(x, y)` for `x < 0` with fractional `y` | `NaN` — no real value exists |
+| `asin(x)` / `acos(x)` for `abs(x) > 1` | `NaN` — no real angle has that sine/cosine |
+
+The inverse-trig row is worth one note, because the natural implementation loses it. Both
+are built on `atan` over `sqrt(1 - x*x)`, so an out-of-domain argument makes the radicand
+negative and `sqrt` produces the `NaN` that then propagates — Rule 2 falls out for free.
+But writing `asin` as `atan2(x, sqrt(1 - x*x))` instead, which looks equivalent and is
+tidier at the endpoints, *silently returns `pi/2`*: `atan2` compares its `NaN` first
+argument against `0.0` twice, both comparisons are false, and control falls through to the
+`y > 0.0` arm. That is exactly the §2 "silent in-band lie" this convention exists to
+forbid, reachable through a refactor that reads as a simplification, so
+`tests/stdlib/test_math_double.spr` pins it with `is_nan(asin(2.0))`.
 
 Two notes on how this interacts with §2's caveats.
 

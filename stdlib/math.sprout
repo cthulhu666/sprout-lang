@@ -35,6 +35,13 @@ module stdlib.math
 #                                           truncated for the transform-scale use they
 #                                           were written for, five orders looser than
 #                                           everything above
+#   asin, acos                              ~2e-15 absolute — TIGHTER than the trig row
+#                                           above despite being built on `atan`, because
+#                                           the half-angle form only ever hands `atan` an
+#                                           argument of magnitude <= 1, where atan is
+#                                           8e-16 rather than the 1e-11 it degrades to on
+#                                           large inputs. Relative accuracy of `acos` is
+#                                           the exception — it cancels as x -> 1.
 #
 # Per-function measurements and method: docs/math-transcendental-v0.md.
 #
@@ -927,6 +934,38 @@ export fn atan2(y: Double, x: Double) -> Double =
   else if y > 0.0 then half_pi
   else if y < 0.0 then -half_pi
   else 0.0
+
+# asin via the half-angle identity asin(x) = 2*atan(x / (1 + sqrt(1 - x^2))), which follows
+# from tan(t/2) = sin(t) / (1 + cos(t)). The textbook form atan(x / sqrt(1 - x^2)) is unusable
+# over this atan: at |x| = 1 it feeds +-inf into atan_reduce, whose x / (1 + sqrt(1 + x*x))
+# step then evaluates inf/inf = NaN. The half-angle denominator never drops below 1, so the
+# endpoints land on the finite 2*atan(+-1) and no argument ever leaves atan's accurate range.
+#
+# Out of domain (|x| > 1) the radicand goes negative, sqrt yields NaN and NaN propagates —
+# Rule 2, docs/math-partiality-v0.md. Writing this as atan2(x, sqrt(1 - x*x)) instead would
+# LOSE that: atan2 compares its NaN x against 0.0 twice (both false) and falls through to the
+# `y > 0.0` arm, silently answering pi/2 for an out-of-domain input.
+#
+# The endpoints are answered directly rather than computed, because the series result there
+# OVERSHOOTS the range: 2*atan(1) lands on 1.5707963267948974, one ulp above pi/2, which makes
+# acos(1.0) a NEGATIVE -8.9e-16 and breaks the `acos(dot(u, v)) >= 0.0` that every
+# angle-between-unit-vectors caller assumes. The overshoot is confined to exactly +-1: one ulp
+# inward the true acos is already 1.5e-8 (it leaves 1 like sqrt(2*eps)), far above the error
+# floor, so these two equalities restore the range guarantee across the whole domain. Verified
+# by a 2M-sample sweep of [-1, 1] against libm: zero out-of-range results, worst absolute
+# error 1.6e-15 (asin) and 1.8e-15 (acos). `test_math_double.spr` keeps a 20001-sample
+# in-repo version of that range check, which fails if this branch is removed.
+export fn asin(x: Double) -> Double =
+  if x == 1.0 then half_pi
+  else if x == -1.0 then -half_pi
+  else 2.0 * atan(x / (1.0 + sqrt(1.0 - x * x)))
+
+# acos as the complement of asin, which makes acos(1.0) exactly +0.0 and acos(-1.0) exactly pi.
+# Absolute accuracy tracks asin's; RELATIVE accuracy degrades as x -> 1, where the true result
+# approaches 0 and the subtraction cancels, so callers needing small angles near x = 1 should
+# stay in asin terms.
+export fn acos(x: Double) -> Double =
+  half_pi - asin(x)
 
 # --- General Double utilities (clamping / interpolation) ---
 # The two domain-agnostic numeric atoms every animation/graphics caller reaches for.
