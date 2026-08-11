@@ -149,6 +149,11 @@ jobs:
       - name: Verify examples compile (stage-1)
         run: just compile-examples-stage1
 
+      - name: Verify benches compile (stage-1)
+        # bench/ was gated by nothing until 2026-08-11 and rotted silently: it held
+        # the P0 linear leak, and needed migrating for the fallible-bind rule.
+        run: just compile-bench
+
       - name: GC-stress pass (typed-codegen rooting guard, parallel)
         # Curated rooting tests under SPROUT_GC_STRESS=1 (collect on every alloc).
         # Default-threshold greens hide use-after-free rooting bugs; fails loudly.

@@ -3618,7 +3618,7 @@ fn do_block_carries(
         | Ok s -> CarryOk(s)
         | Err _ ->
             CarryErr(fallible_bind_msg(do_family_name(fam), do_family_type(fam),
-                                       unifier.apply_subst(subst, block_ty)),
+                                       "the block", unifier.apply_subst(subst, block_ty)),
                      do_family_pos(fam))
 
 # The `E` of a `Result E A`. Falls back to the whole type for anything else, which
@@ -3633,26 +3633,78 @@ fn result_error_slot(t: types.Type) -> types.Type =
 
 # One tailored message per mismatch shape, as Rust does for `?`, rather than one
 # generic message: which of the three went wrong determines what the author should do.
-fn fallible_bind_msg(fam: String, sc_ty: types.Type, block_ty: types.Type) -> String =
-  match short_circuit_family(block_ty) with
+# `target_desc` names WHAT the failure has to fit into: "the block" when the mismatch
+# is caught inside infer_do_steps, or "`<fn>`" when it only surfaces later, against the
+# declared return type (see return_mismatch_msg).
+fn fallible_bind_msg(fam: String, sc_ty: types.Type, target_desc: String, target_ty: types.Type) -> String =
+  match short_circuit_family(target_ty) with
   | Nothing ->
       string_concat_many([
         "this `<-` bind propagates a ", fam, " failure (", types.type_to_string(sc_ty),
-        "), but the block returns ", types.type_to_string(block_ty),
+        "), but ", target_desc, " returns ", types.type_to_string(target_ty),
         ", which cannot carry it. Handle the failure here instead — use the value as a bare statement to discard it, or `with_default`/a total accessor to supply one — or make this function return ",
         fam, "."])
   | Just other ->
       if other == fam then
         string_concat_many([
           "this `<-` bind fails with ", types.type_to_string(result_error_slot(sc_ty)),
-          ", but the block returns ", types.type_to_string(block_ty),
+          ", but ", target_desc, " returns ", types.type_to_string(target_ty),
           ". Convert the error at the bind with `map_error`."])
       else
         string_concat_many([
-          "a `", fam, "` bind needs a `", fam, "`-returning block, but this one returns ",
-          types.type_to_string(block_ty),
+          "a `", fam, "` bind needs a `", fam, "`-returning block, but ", target_desc, " returns ",
+          types.type_to_string(target_ty),
           ". The two do not share a failure representation, so the short-circuit would return a ",
           fam, " value as a ", other, "."])
+
+# ---------------------------------------------------------------------------
+# Re-blaming a return-type mismatch on the fallible bind that caused it
+# ---------------------------------------------------------------------------
+#
+# `do_block_carries` constrains the block against `Result E ?a` / `Maybe ?a`, which is
+# enough for SOUNDNESS but not always enough to REPORT well: two shapes satisfy that
+# constraint and only conflict once `check_fn_body` unifies the block against the
+# DECLARED return type —
+#
+#   * same family, different error type (`Result String Int` bound in `-> Result Int Int`),
+#     because the block's error slot was free and the bind filled it in;
+#   * wrong family reached through a type-VARIABLE tail (`panic : a`), where the tyvar
+#     absorbs the block constraint and the signature is what disagrees.
+#
+# Both produced "Return type mismatch in <fn>: Type mismatch: String vs Int", which names
+# the function and neither the bind nor the fix. So when that unification fails and the
+# body is a `do` block containing a fallible bind, blame the bind. Strictly a diagnostic
+# improvement — the same programs were already rejected, at the same phase.
+fn first_fallible_bind(body: typed_ast.TypedExpr, subst: Dict types.Type) -> Maybe DoFamily =
+  match body with
+  | typed_ast.TDo steps _ _ -> first_fallible_step(steps, subst)
+  | _ -> Nothing
+
+fn first_fallible_step(steps: List typed_ast.TypedDoStep, subst: Dict types.Type) -> Maybe DoFamily =
+  match steps with
+  | Nil -> Nothing
+  | Cons step rest ->
+      match step with
+      | typed_ast.TDoBindStep _ e ->
+          match short_circuit_family(unifier.apply_subst(subst, typed_ast.typed_expr_type(e))) with
+          | Just fam ->
+              Just(DoFamily(fam, unifier.apply_subst(subst, typed_ast.typed_expr_type(e)),
+                            typed_ast.typed_expr_pos(e)))
+          | Nothing -> first_fallible_step(rest, subst)
+      | _ -> first_fallible_step(rest, subst)
+
+# The message + position for a return-type mismatch, re-blamed on the fallible bind when
+# there is one. Falls back to the original generic wording otherwise, so every other cause
+# of a return-type mismatch reads exactly as it did before.
+fn return_mismatch_body_err(name: String, body: typed_ast.TypedExpr, ret_ty: types.Type,
+                            subst: Dict types.Type, generic: String) -> typed_ast.BodyResult =
+  match first_fallible_bind(body, subst) with
+  | Nothing -> typed_ast.BodyErr(typed_ast.typed_expr_pos(body), generic)
+  | Just fam ->
+      typed_ast.BodyErr(
+        do_family_pos(fam),
+        fallible_bind_msg(do_family_name(fam), do_family_type(fam),
+                          "`" ++ name ++ "`", unifier.apply_subst(subst, ret_ty)))
 
 fn infer_do(
   state: unifier.InferState,
@@ -5620,7 +5672,7 @@ fn check_fn_body(
         # (fn_body_env), so recursive self-calls inject dicts from the Scheme —
         # no @constrained_N self markers to seed. fwd_env holds only @fwd/@eta_fwd.
         InferOk typed_body s1 _ _ <- typecheck_expr(state, fn_body_env(name, params, inst_type, constraint_source_tokens(constraints), fwd_env), subst, eff_subst, body) else InferErr pos msg -> (fn_body_err(name, pos, msg), dict_empty(), Nil)
-        let Ok s2 = unifier.unify_types(s1, typed_ast.typed_expr_type(typed_body), fn_return_type(inst_type, list_length(params))) else Err e -> (typed_ast.BodyErr(typed_ast.typed_expr_pos(typed_body), "Return type mismatch in " ++ name ++ ": " ++ e), dict_empty(), Nil)
+        let Ok s2 = unifier.unify_types(s1, typed_ast.typed_expr_type(typed_body), fn_return_type(inst_type, list_length(params))) else Err e -> (return_mismatch_body_err(name, typed_body, fn_return_type(inst_type, list_length(params)), s1, "Return type mismatch in " ++ name ++ ": " ++ e), dict_empty(), Nil)
         match rigidity_violation(prog_to_fresh, s2, types.scheme_vars(decl_scheme)) with
         | Just bad ->
             (typed_ast.BodyErr(fn_pos, "Signature too general for its body in " ++ name ++ ": type variable " ++ bad), dict_empty(), Nil)

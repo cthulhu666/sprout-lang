@@ -38,10 +38,11 @@ Legend:
   (`probe_ir -> String`, four `tcp_accept` fixtures). Codegen bonus: `mutvec_get_worker` is now DCE'd
   out of `astar` and `neural_network_train_xor` — the unboxed worker existed only for the `<-`
   short-circuit, so the migration removes a `Maybe` allocation per read in those hot loops.
-  **Known gap (follow-up filed below):** three of the nine negative fixtures are rejected by
-  `check_fn_body`'s generic `Return type mismatch` rather than the tailored diagnostic, because the
-  conflict surfaces against the *signature* after the block-level unification succeeds. Sound, but
-  the message points at the function rather than the bind.
+  **Diagnostics: complete.** Three of the nine negative fixtures initially landed on `check_fn_body`'s
+  generic `Return type mismatch` rather than the tailored diagnostic, because their conflict surfaces
+  against the *signature* after the block-level unification succeeds. Closed the same day by the `P2`
+  below (`return_mismatch_body_err`); all nine now name the bind, and `bench/` gained a gate so the
+  directory the leak lived in cannot rot again.
   <details><summary>Original report (kept for the measurements)</summary>
 
   Found 2026-08-11 while measuring the blast radius of a proposed
@@ -177,18 +178,22 @@ Legend:
   (`run_check_iface`) is fixed. Needs: spec wording for the typing rule, positive/negative checker
   tests, and a decision on whether the `Unit` case is permitted explicitly or also rejected.
   </details>
-- [ ] `P2` **Point the fallible-bind diagnostic at the bind when the conflict is with the SIGNATURE.**
-  Follow-up to the `P0` above. `do_block_carries` (`infer.sprout`) unifies the block's type against
-  `Result E ?a` / `Maybe ?a`, which is enough for soundness, but two shapes only conflict once
-  `check_fn_body` unifies the block against the *declared return type* — a same-family different-error
-  bind (`Result String Int` bound in `-> Result Int Int`) and the wrong-family-via-tyvar-tail case.
-  Those get `Return type mismatch in <fn>: Type mismatch: String vs Int`, which names the function
-  rather than the bind and does not suggest `map_error`. Pinned as-is by
-  `tests/conformance/type_error/{fallible_bind_error_type_mismatch,maybe_bind_in_result_fn,result_bind_in_maybe_fn}`.
-  The tailored messages already exist in `fallible_bind_msg`; what is missing is the declared return
-  type at the bind, which the current design deliberately does not thread (see
-  `docs/fallible-bind-typing-v0.md` §4). Cheapest fix is probably for `check_fn_body` to special-case a
-  `TDo` body containing a fallible bind when its own unification fails, rather than threading.
+- [x] `P2` **Point the fallible-bind diagnostic at the bind when the conflict is with the SIGNATURE.
+  FIXED 2026-08-11**, same day as the `P0` it followed. `do_block_carries` constrains the block against
+  `Result E ?a` / `Maybe ?a`, which is enough for soundness but leaves two shapes to be caught later, by
+  `check_fn_body`'s unification against the declared return type: a same-family different-error bind
+  (the block's error slot was free, so the bind filled it in) and the wrong-family-via-tyvar-tail case
+  (the tyvar absorbs the block constraint, so only the signature disagrees). Both reported
+  `Return type mismatch in <fn>: Type mismatch: String vs Int` — naming the function, and neither the
+  bind nor the fix.
+  **Fix:** when that unification fails and the body is a `do` block containing a fallible bind,
+  `return_mismatch_body_err` re-blames the bind, reusing `fallible_bind_msg` with the *declared return
+  type* as its target. No threading was needed after all — `check_fn_body` already has the typed body
+  and the return type in scope, so it can look for the cause rather than be told about it.
+  `fallible_bind_msg` gained a `target_desc` parameter so the same three messages read correctly whether
+  the thing that cannot carry the failure is "the block" or "`<fn>`". All three now point at the `<-`
+  line. The generic wording is preserved for every other cause of a return-type mismatch (verified with
+  a `do`-body and a non-`do`-body probe), so this is strictly additive.
 - [ ] `P2` **`merge_effects` drops one variable side (`infer.sprout` ~340-346)** (fundamentals review, static finding — masked today by effect enforcement being off, cf. D2/W6 below). When merging two effect rows where at least one side is a variable, `merge_effects` only propagates one of the two variable sides instead of unifying/merging both — a latent effect-inference bug currently invisible because the effect system isn't enforced (a pure function calling `!{IO}` code passes the checker regardless, per the fundamentals review's item 1). Revisit once the deferred effect-system design pass (D2/W6) lands and effects actually gate compilation — fixing this before enforcement exists has no observable payoff and no test would catch a regression today. Full findings: `docs/fundamentals-code-review-handoff-2026-07-03.md`.
 - [ ] `P2` Move `stdlib.compiler` to a dedicated tooling/compiler namespace once the non-stdlib tooling-package model is settled.
 - [ ] `P2` Add syntactic sugar for `Ref` operations in do-notation: `:=` for `ref_write`, `<~` for a ref-read bind step, and `var x = expr` as `x <- ref_new(expr)`.
@@ -2507,8 +2512,18 @@ op-classification already in place.
   - **[LANDED 2026-08-08] The single biggest cause was a quadratic `strlen` in the runtime, not test-corpus growth.** `str_starts_with_at_byte` and `str_slice_bytes` each opened with `strlen(s)` over the whole string just to bounds-check the caller's byte offset, so every call was O(|s|) and every byte-cursor scanner built on them was O(|s|²). `lexer.try_ops` probes 13 multi-char operators at *every token position*, so lexing `ast_to_ir.sprout` (452 KB) scanned ~4e11 bytes; `sample` put **86% of a `--phase bundle` run in `_platform_strlen`**. Fixed by reading the O(1) CSTR-header length (`sprout_cstr_byte_len`) that `str_byte_len` already used. Measured on one harness, 271/271 passing before and after: **1664s → 1051s CPU (−37%), 301.7s → 226.4s wall (−25%)**; whole `just test` ~460s/~1840s → 322s/1192s. Bundling `ast_to_ir.sprout` 6.99s → 0.72s. **Correction to this item's numbers:** the "emit scales ~linearly, exponent 1.12 — not a quadratic" note above measured scaling *across files of differing size*, where every compiler test bundles the same whole compiler and the per-file cost is therefore near-constant; it did not measure scaling *within* a growing file, which was ~n^1.9 (8000 synthetic decls: 8.08s → 0.69s after the fix). The 846s compiler-suite figure should be re-measured before it is used to size any further work. Guarded by `tests/stdlib/test_byte_offset_cost.spr`, which asserts cost is independent of string length rather than checking a wall-clock budget.
   - **[FOLLOW-UP] Straggler heavy bundlers still on every PR.** Directory gating misses the ~10 `tests/stdlib/test_ir_*` suites that ALSO bundle the whole compiler (e.g. `test_ir_codegen_string_pattern.spr` = 222k IR lines / ~17s emit) but live in the flat `tests/stdlib/`, not `compiler/`. Either move them under `tests/stdlib/compiler/` (or a `tests/stdlib/ir/` gated the same way), or gate by an explicit file list. Also open: LPT (largest-first) dispatch in `_test-stdlib`/`_compile-examples`/`ci-fast-gates` to stop a 50s pole stranding idle lanes; and folding the serial `verify-bootstrap-fixed-point` (~23s) into the `ci-fast-gates` fan-out to overlap it.
 
-- [ ] `P3` **`bench/*.sprout` is compiled by NOTHING — not `compile-examples-stage1`, not `gate`, not
-  CI.** The justfile does not mention `bench/` at all; each `bench/<name>/bench.sh` builds its own
+- [x] `P3` **`bench/*.sprout` is compiled by NOTHING — not `compile-examples-stage1`, not `gate`, not
+  CI. FIXED 2026-08-11** as `just compile-bench`, wired into `gate` and into CI as its own step. Rather
+  than duplicate the pipeline, `_compile-examples` grew `srcs`/`label` parameters, so bench files get
+  the identical emit-IR → `opt --passes=verify` → link treatment examples get; benches are compiled and
+  linked but **not run** (they are deliberately long-running, and the value is that they keep
+  type-checking as the language moves). All 7 pass. Two costs this had already imposed, both found by
+  hand: the `P0` descriptor leak lived here, and `bench/unboxed_read` needed migrating for the
+  fallible-bind rule. The recipe now also **fails on an empty glob** — a stale path would otherwise
+  report "All 0 compiled OK", which is the same silence in a new costume. `gate-audit` still passes.
+  <details><summary>Original report</summary>
+
+  The justfile does not mention `bench/` at all; each `bench/<name>/bench.sh` builds its own
   sources when a human runs it. Found 2026-08-11: the descriptor leak in
   `bench/http_worker_pool/{pool,spawn}_server.sprout` (BACKLOG `P0`, the linearity facet) sat there
   because nothing type-checks or runs that code in the normal loop. Unlike the `c-runtime-test` /
@@ -2517,9 +2532,23 @@ op-classification already in place.
   Cheapest fix: extend the `_compile-examples` corpus (or add a sibling recipe) to emit-IR every
   `bench/**/*.sprout`, which is compile-only and costs seconds. Running them is a separate question and
   probably not worth CI time.
+  </details>
 - [x] `P2` **No local gate could run Linux, so the poll backend CI uses was never exercised before push. LANDED 2026-08-11** as `just linux-smoke` — runs `task-io-smoke` inside a pinned Linux container against the working tree, under CI's `SPROUT_GC_HDRCHECK=1`. Filed and fixed the same day two Linux-only failures reached CI hours apart: (1) `task_sleep` arms a **timerfd** on Linux — a file descriptor — but an `EVFILT_TIMER` on the already-open kqueue on macOS, so a descriptor-exhaustion back-off written with `task_sleep` needed the very resource it was recovering from, and its arming failure is deliberately process-fatal (`BACKLOG:409`); (2) `accept(2)` on Linux passes already-pending network errors (`ENETDOWN`, `EPROTO`, `EHOSTUNREACH`, …) through to the caller while BSD does not, so the branch handling them is unreachable on macOS. Both were green on every local gate. **Verified red, not assumed:** the shipped recipe reproduces the failed CI run at `4dcfad79` verbatim (`runtime error: builtin task_sleep: could not arm a timer (descriptor exhaustion?)`, exit 1) and is green at `681a9fe8`, which fixed it. Cost ~2m10s cold vs a ~13min CI round-trip. Image is `ubuntu:24.04` + apt `llvm clang` — deliberately mirroring the CI step rather than pinning a third-party clang image, so it drifts *with* `ubuntu-latest` (measured identical: clang 18.1.3, glibc 2.39); a version-locked image would eventually certify a toolchain CI no longer uses, which is the exact failure mode the gate exists to prevent. Three mechanics are load-bearing and documented at the recipe: `--set build_dir /tmp/build` (a container writing into the shared `build/` leaves a **Linux ELF that the host's mtime-only staleness guard reports as up to date** — every host gate then fails to exec a binary the guard refuses to rebuild; CI dodges the same trap by keying its stage-1 cache on `runner.os`), `--tmpfs /tmp:rw,exec` (docker's `--tmpfs` defaults to `noexec`, breaking both just's shebang recipes and every compiled fixture), and a `:ro` repo mount so no container-root file can land in the tree. Not wired into `gate`/`ci-fast-gates`: CI is already Linux, and a container runtime is not a required contributor dependency.
 
 - [ ] `P3` **`linux-smoke` covers OS asymmetry but not ISA asymmetry.** The container is the host's architecture (aarch64 on an Apple-silicon Mac) while CI is x86_64, so the gate certifies the epoll/timerfd backend, Linux errno semantics and glibc — the axis that has actually broken twice — and says nothing about ISA-dependent behaviour (alignment, `long double`, atomics, any codegen difference). Forcing `--platform linux/amd64` is deliberately *not* done: it routes every compile through QEMU, and a gate slow enough to skip is a gate that does not run. If ISA divergence ever bites, the cheap increment is an opt-in `just linux-smoke-amd64` accepting the emulation cost, run before release tags rather than per-push — note `.github/workflows/release.yml` already builds an aarch64 artifact, so both arches ship and only one is smoke-tested locally.
+  **CORRECTION (2026-08-11): the framing above is backwards, and the real gap is in CI, not here.**
+  `linux-smoke` adds no OS coverage over CI at all — `ci.yml` is `runs-on: ubuntu-latest` with
+  `SPROUT_GC_HDRCHECK: "1"`, and `ci-fast-gates`' GATES array already contains `task-io-smoke`, so CI
+  runs the identical recipe on the identical OS under the identical env. `linux-smoke`'s whole value is
+  **pre-push latency** (~2m local vs a ~13min round-trip), exactly as the entry above it says. What it
+  covers that CI does *not* is the **architecture**: the container is aarch64, CI is x86_64. So the
+  scheduler, epoll/timerfd and GC are smoke-tested on arm64 Linux **only on a contributor's Mac, by an
+  opt-in gate** — while `release.yml` publishes `sprout-linux-aarch64` from a `ubuntu-24.04-arm` runner
+  that builds the binary and never runs `task-io-smoke` on it. Fix is cheap and does not need QEMU:
+  GitHub's `ubuntu-24.04-arm` runner is free on public repos and already in use by `release.yml`, so add
+  an arm64 job (or a `runs-on` matrix) to `ci.yml` — or at minimum run `task-io-smoke` in
+  `release.yml`'s existing aarch64 job before uploading the artifact. `just linux-smoke-amd64` under
+  QEMU is then unnecessary: the arch CI lacks is the one the local gate already provides.
 
 - [x] `P3` **`loud-fail-smoke` is stale and not CI-gated. DUPLICATE — collapsed into the two `P1` entries above, both fixed 2026-08-07.** Filed 2026-07-23 during records PR1; the same defect was independently re-diagnosed a fortnight later and filed again as a `P1`, which is itself the useful signal: a correct diagnosis sat in the backlog at `P3` for two weeks while the gate stayed red, so the priority, not the analysis, was the failure. This copy had also gone stale in a way that would have mis-scoped the fix — it cites `.forgejo/workflows/ci.yml` as the CI config, from before the move to GitHub Actions (`.github/workflows/ci.yml`), so anyone working from it would have looked in a file that no longer exists. It did get one thing right that the `P1` copy missed: that `gate` aborts the local battery before `test`/`compile-examples`/`test-stress` run, which is why a gate CI never runs is worse than merely un-run. Both observations are now folded into the `P1` entries.
 

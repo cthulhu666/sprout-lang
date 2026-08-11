@@ -19,8 +19,21 @@ measurement located this one.
   typing rule now rejects the `Unit`-block shape first. What step 3 still buys is a false-positive
   removal — the old block-keyed predicate wrongly rejected a *non-fallible* bind followed by a
   consume in a `Result`-typed block. Both directions are pinned by tests.
-- §7's three tailored diagnostics: two of them do not fire where expected, because the conflict
-  only surfaces against the signature. Filed as a `P2` follow-up; see the `P0`'s "Known gap".
+- §7's three tailored diagnostics: two initially did not fire, because their conflict only surfaces
+  against the signature, after the block-level unification has already succeeded. Fixed the same day
+  (`return_mismatch_body_err`): when `check_fn_body`'s unification fails and the body is a `do` block
+  containing a fallible bind, it re-blames the bind. §4's claim that the declared return type "does
+  not have to be threaded" held after all — `check_fn_body` already has both the typed body and the
+  return type, so it can look for the cause rather than be told about it.
+
+Also landed alongside: `just compile-bench`, because `bench/` was compiled by nothing and that is
+where the `P0`'s linear leak lived (`BACKLOG.md` `P3`). And `just linux-smoke` was run for this work —
+34 task-io scenarios on epoll+timerfd with `SPROUT_GC_HDRCHECK=1`, green. That is **pre-push latency,
+not extra coverage**: CI is `ubuntu-latest` with `SPROUT_GC_HDRCHECK: "1"` and `ci-fast-gates` already
+runs `task-io-smoke`, so it exercises the same recipe on the same OS under the same env — including the
+`accept(2)` `Err` arm the four restructured `tcp_accept` fixtures gained. The only thing local
+`linux-smoke` covers that CI does not is the **architecture**: the container is aarch64 and CI is
+x86_64 (see the arm64 `P3` in `BACKLOG.md`).
 
 Every claim below about another language was verified by running that language's compiler locally;
 versions and verbatim diagnostics are in §3. Every claim about Sprout's current behaviour was

@@ -598,7 +598,7 @@ compile-examples: compile-examples-stage1
 compile-examples-all: compile-examples-stage1 compile-examples-stage2 compile-examples-stage3
 
 [private]
-_compile-examples stage xfail="":
+_compile-examples stage xfail="" srcs="examples/*.sprout examples/*/*.sprout" label="example":
   #!/usr/bin/env bash
   set -euo pipefail
   STAGE="{{stage}}"
@@ -620,7 +620,7 @@ _compile-examples stage xfail="":
   declare -a stats=()
   idx=0
   active=0
-  for f in examples/*.sprout examples/*/*.sprout; do
+  for f in {{srcs}}; do
     [ -f "$f" ] || continue
     outs+=("$TMPD/$idx.out")
     stats+=("$TMPD/$idx.st")
@@ -670,18 +670,37 @@ _compile-examples stage xfail="":
     esac
   done
   echo ""
-  [[ $total_xfail -gt 0 ]] && echo "==> $total_xfail example(s) xfail (expected)"
+  [[ $total_xfail -gt 0 ]] && echo "==> $total_xfail {{label}}(s) xfail (expected)"
   if [ "$total_failed" -gt 0 ]; then
-    echo "==> $total_failed example(s) FAILED"
+    echo "==> $total_failed {{label}}(s) FAILED"
     exit 1
   fi
-  echo "==> All examples compiled OK"
+  if [ "$idx" -eq 0 ]; then
+    echo "==> ERROR: no {{label}} sources matched — the glob is stale, not the tree empty"
+    exit 1
+  fi
+  echo "==> All ${idx} {{label}}s compiled OK"
 
 # Stage-1: emit IR → clang link for each example. (This lane registers the repo as
 # a package root, so examples importing examples.* — e.g. sentry_issue_browser —
 # resolve and compile.)
 [group('examples')]
 compile-examples-stage1: (_compile-examples "build/compile_driver_bin_stage1" "")
+
+# Same pipeline over bench/. Until 2026-08-11 NOTHING compiled bench/ — not this
+# file, not `gate`, not CI — so it rotted silently while looking maintained. Two
+# concrete costs, both found by hand rather than by a gate:
+#
+#   * `bench/http_worker_pool/{pool,spawn}_server.sprout` leaked a TcpConnection on
+#     every read timeout (the `P0` linear facet), with a comment above it asserting
+#     the obligation was discharged "on every path". It was discharged on one of three.
+#   * `bench/unboxed_read` needed migrating for the `P0` fallible-bind rule and would
+#     have broken the build the moment anyone ran it.
+#
+# Benches are compiled and linked, NOT run: they are deliberately long-running, so
+# their value here is that they keep type-checking and lowering as the language moves.
+[group('examples')]
+compile-bench: (_compile-examples "build/compile_driver_bin_stage1" "" "bench/*.sprout bench/*/*.sprout" "bench file")
 
 # Negative-diagnostic conformance: each tests/conformance/<dir>/<n>.spr must be
 # rejected by `--phase check` with output containing the substring in <n>.err.
@@ -2447,7 +2466,7 @@ gate-quick: fmt-check test compile-examples-stage1 smoke-shapes bundle-smoke
 # advisory), so it runs in the body rather than as an arg-less dependency.
 # Full CI-parity battery (slow, ~15-25m); a green run means CI will not surprise you.
 [group('gate')]
-gate: fmt-check smoke-shapes bundle-smoke loud-fail-smoke diagnostic-stream-smoke argv-smoke trace-dispatch-smoke verify-dispatch-smoke div-by-zero-smoke stack-overflow-smoke flush-on-crash-smoke tco-runtime-smoke c-runtime-test b1-gate check-approved-builtins verify-bootstrap-fixed-point ir-golden-diff compile-examples-stage1 run-example-canary test task-io-smoke test-stress
+gate: fmt-check smoke-shapes bundle-smoke loud-fail-smoke diagnostic-stream-smoke argv-smoke trace-dispatch-smoke verify-dispatch-smoke div-by-zero-smoke stack-overflow-smoke flush-on-crash-smoke tco-runtime-smoke c-runtime-test b1-gate check-approved-builtins verify-bootstrap-fixed-point ir-golden-diff compile-examples-stage1 compile-bench run-example-canary test task-io-smoke test-stress
   #!/usr/bin/env bash
   set -euo pipefail
   echo "==> gate: gc-safety-check --strict..."
