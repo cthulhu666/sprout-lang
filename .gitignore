@@ -16,6 +16,11 @@ bench/*/spawn_server
 bench/*/pool_server
 bench/*/http_log_middleware_bench
 
+# Host-side tool cache for the container-backed Linux gate (`just linux-smoke`):
+# the pinned static-musl `just` binary it runs inside the container. Fetched and
+# checksum-verified on demand, so it is reproducible rather than tracked.
+.cache/
+
 # Large demo model for the galaxy-map ship scene (44 MB). Loaded by relative
 # path at runtime; the compile-examples gate never loads it, so it is kept out
 # of git history. Drop the file here manually to see the ship scene.
