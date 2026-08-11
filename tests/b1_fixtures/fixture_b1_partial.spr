@@ -4,6 +4,13 @@ module main
 # `Vector Double` must still reach translate_partial_application and build a
 # closure — the B1 gate only intercepts the fully-applied call. Pre-fix the gate
 # fired on arg0 alone and hard-Err'd here ("expects 2 arguments"). This fixture
-# must COMPILE.
+# must COMPILE, and must NOT emit the inlined read.
+#
+# The missing argument is written `_` because Sprout is n-ary: a bare
+# `vector_get_direct(v)` is not partial application but an arity error, rejected with
+# "expects 2 arguments, got 1 (Sprout is n-ary; use `_` for partial application)".
+# This fixture predates that syntax and sat RED on master for as long as it took
+# someone to run `just b1-gate` by hand — which is the same rot the c-runtime-test
+# and gate-audit work in this change addresses.
 fn get_at(v: Vector Double) -> (Int -> Double !{IO}) =
-  vector_get_direct(v)
+  vector_get_direct(v, _)

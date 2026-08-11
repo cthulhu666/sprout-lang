@@ -43,16 +43,23 @@ jobs:
         # matching the `mise exec -- just` path used locally and in AGENTS.md.
         uses: jdx/mise-action@v2
 
-      - name: Install LLVM/Clang + ripgrep, expose bare clang/opt on PATH
+      - name: Install LLVM/Clang + sanitizer runtime + ripgrep, expose bare clang/opt on PATH
         # Sprout IR uses opaque pointer type → requires LLVM >= 16. The build recipes
         # call BARE `clang` and `opt` (the IR verifier, via `opt --passes=verify`)
         # from PATH; only the versioned LLVM bindir (/usr/lib/llvm-N/bin) carries the
         # unversioned `clang`+`opt`. ubuntu-latest ships a newer LLVM (>= 16); pick
         # the highest installed bindir rather than pinning a version that may not be
         # apt-installable on a future runner image.
+        #
+        # libclang-rt-dev carries the ASan/UBSan runtime. `clang` does NOT pull it in on
+        # Ubuntu, and without it `-fsanitize=address,undefined` fails to LINK — which
+        # tests/c_runtime/run.sh absorbs by falling back to an unsanitized build and still
+        # passing, so two of its ten assertions were silently unsanitized. Added when
+        # c-runtime-test was wired into ci-fast-gates. Unversioned name so it tracks the
+        # distro's default clang alongside the bindir rule below.
         run: |
           sudo apt-get update
-          sudo apt-get install -y llvm clang ripgrep
+          sudo apt-get install -y llvm clang libclang-rt-dev ripgrep
           LLVM_BINDIR="$(ls -d /usr/lib/llvm-*/bin | sort -V | tail -n1)"
           echo "LLVM_BINDIR=$LLVM_BINDIR"
           echo "$LLVM_BINDIR" >> "$GITHUB_PATH"

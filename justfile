@@ -331,7 +331,7 @@ test-conformance-run: bootstrap-from-seed
 # still allows partial application, and traps on out-of-bounds. See scripts/b1_gate.sh.
 [group('test')]
 b1-gate: bootstrap-from-seed
-  bash scripts/b1_gate.sh
+  SPROUT_STAGE1="{{build_dir}}/compile_driver_bin_stage1" bash scripts/b1_gate.sh
 
 # Byte-diff --use-ir-codegen output for the whole example + smoke-shape corpus
 # against the committed goldens in tests/golden/ir/ (57 files, ~55s serial).
@@ -2310,6 +2310,13 @@ ci-fast-gates: bootstrap-from-seed build-fmt-from-seed
     "diagnostic-stream-smoke|diagnostic-stream-smoke"
     "ir-golden-diff|ir-golden-diff"
     "gate-audit|gate-audit"
+    # Added when Assertion D landed: both had names that CLAIM verification while nothing
+    # ran them. c-runtime-test's ten C-level assertions were unrunnable for however long it
+    # took someone to try (the runtime split into sprout_scheduler.c/sprout_poll.c broke its
+    # link line and nothing noticed); b1-gate sat RED on master behind a fixture that
+    # predated the explicit-`_` partial-application syntax.
+    "c-runtime-test|c-runtime-test"
+    "b1-gate|b1-gate"
   )
   declare -a pids=() labels=()
   idx=0; active=0
@@ -2414,7 +2421,7 @@ gate-quick: fmt-check test compile-examples-stage1 smoke-shapes bundle-smoke
 # advisory), so it runs in the body rather than as an arg-less dependency.
 # Full CI-parity battery (slow, ~15-25m); a green run means CI will not surprise you.
 [group('gate')]
-gate: fmt-check smoke-shapes bundle-smoke loud-fail-smoke diagnostic-stream-smoke argv-smoke trace-dispatch-smoke verify-dispatch-smoke div-by-zero-smoke stack-overflow-smoke flush-on-crash-smoke tco-runtime-smoke check-approved-builtins verify-bootstrap-fixed-point ir-golden-diff compile-examples-stage1 run-example-canary test task-io-smoke test-stress
+gate: fmt-check smoke-shapes bundle-smoke loud-fail-smoke diagnostic-stream-smoke argv-smoke trace-dispatch-smoke verify-dispatch-smoke div-by-zero-smoke stack-overflow-smoke flush-on-crash-smoke tco-runtime-smoke c-runtime-test b1-gate check-approved-builtins verify-bootstrap-fixed-point ir-golden-diff compile-examples-stage1 run-example-canary test task-io-smoke test-stress
   #!/usr/bin/env bash
   set -euo pipefail
   echo "==> gate: gc-safety-check --strict..."
@@ -2447,6 +2454,13 @@ gate: fmt-check smoke-shapes bundle-smoke loud-fail-smoke diagnostic-stream-smok
 #      after it — here, everything past loud-fail-smoke, which is most of it.
 #      Comparison is by dependency CLOSURE, not by name, because CI runs umbrella
 #      recipes (`test`, `ci-fast-gates`) whose children it never names.
+#
+#   D. Every recipe whose NAME claims verification is reachable from `gate` or CI.
+#      A, B and C all start from something that already runs, so none of them can
+#      see a recipe nothing runs at all — the hole `c-runtime-test` and `b1-gate`
+#      fell through. B even made it worse by validating a single hop:
+#      scripts/b1_gate.sh passed as "reachable" because the `b1-gate` recipe named
+#      it, while nothing ran that recipe.  D starts from the recipe LIST instead.
 #
 # Run after touching ci.yml, the gate list, or scripts/.
 # Assert every CI task is gated and every gate script is reachable (drift guard).
@@ -2555,7 +2569,65 @@ gate-audit:
     echo "   array or to the workflow, or to GATE_ONLY_EXCLUDE with the reason." >&2
     exit 1
   fi
-  echo "==> gate-audit ✓ — gate covers every CI task; CI exercises every gate task; every scripts/ gate is reachable."
+
+  # ── Assertion D: every recipe that CLAIMS to verify is reachable ─────────────
+  # A, B and C all start from something that already runs: A and C walk gate<->CI, B walks
+  # scripts/. None of them can see a recipe that nothing runs at all. That is the hole
+  # `c-runtime-test` and `b1-gate` fell through — and B made it worse by validating only ONE
+  # hop: scripts/b1_gate.sh counted as "reachable" because the b1-gate recipe named it, while
+  # nothing ran that recipe. A *_gate.sh was rotting behind the very assertion whose comment
+  # says scripts "rot while looking like coverage".
+  #
+  # So D starts from the recipe LIST instead: any recipe whose name claims verification must
+  # be reachable from `gate` or CI, or be excluded with a stated reason. Name-based is a
+  # heuristic and deliberately so — a recipe called `foo-check` that nothing runs is a lie
+  # whatever its body does, and the classifier costs nothing to widen.
+  #
+  # Measured when this landed (2026-08-11): 42 of 75 recipes were reachable from neither gate
+  # nor CI. Most are legitimately manual (repl, run, build-*, llvm-where, gc-profile) and do
+  # not claim verification. Of the seven that did, all were executed by hand: four were green,
+  # check-iface-all needed a precondition, and the two wired in above were broken — one
+  # totally (c-runtime-test could not link), one red (b1-gate's stale fixture).
+  VERIFY_RE='(^|-)(test|tests|check|verify|gate|audit|smoke|lint)($|-)|-(diff|verify|check|gate|test|smoke|audit)$'
+  # Exclusions are matched as WHOLE LINES (grep -qxF), not with -w: a hyphen is a non-word
+  # character, so `grep -w test` would also match `test-file` and silently excuse it.
+  # (printf rather than a heredoc: a heredoc's terminator must sit at column 0, and a
+  # column-0 line ends a just recipe body.)
+  VERIFY_EXCLUDE=$(printf '%s\n' gate gate-quick check lint test-file fmt-check-file \
+                                 lint-file check-iface-all test-stdlib-stage2 linux-smoke)
+  #   gate, gate-quick — the batteries themselves; C already covers gate's membership, and
+  #     gate-quick is the deliberately-partial local subset (its point is being faster than CI).
+  #   check, lint, test-file, fmt-check-file, lint-file — single-FILE / interactive developer
+  #     entry points taking a path argument. There is no whole-repo form to gate, and the
+  #     repo-wide equivalents (fmt-check, gc-safety-check, test) are all gated.
+  #   check-iface-all — requires `just refresh-iface` first, so gating it as-is would fail on a
+  #     missing precondition rather than a real defect. The .iface speedup wiring it belongs to
+  #     is unbuilt (BACKLOG, iface-precompiled-modules); gate it together with that work.
+  #   test-stdlib-stage2 — stage-2 suite. CI builds and tests stage-1 from the committed seed;
+  #     stage-2 is the bootstrap's next hop, exercised by verify-bootstrap-fixed-point instead.
+  #   linux-smoke — needs a container runtime, and CI already RUNS on Linux, so gating it there
+  #     is pure waste. Its whole purpose is covering a platform CI has and developers do not.
+  all_recipes=$(just --summary 2>/dev/null | tr ' ' '\n' | sort -u)
+  if [[ -z "$all_recipes" ]]; then
+    echo "gate-audit ✗ — could not enumerate recipes; assertion D would pass vacuously." >&2
+    exit 1
+  fi
+  reachable=$(printf '%s\n%s\n' "$gate_set" "$ci_closure" | sort -u)
+  orphan_gates=""
+  for t in $all_recipes; do
+    grep -qE "$VERIFY_RE" <<<"$t" || continue
+    grep -qxF "$t" <<<"$VERIFY_EXCLUDE" && continue
+    grep -qxF "$t" <<<"$reachable" || orphan_gates="$orphan_gates $t"
+  done
+  if [[ -n "$orphan_gates" ]]; then
+    echo "gate-audit ✗ — these recipes CLAIM to verify something but nothing runs them:" >&2
+    printf '   %s\n' $orphan_gates >&2
+    echo "   A gate nobody runs is worse than no gate, because it reads as coverage." >&2
+    echo "   Wire each into ci-fast-gates' GATES array (and 'gate'), or add it to" >&2
+    echo "   VERIFY_EXCLUDE with the reason it must stay manual." >&2
+    exit 1
+  fi
+  echo "==> gate-audit ✓ — gate covers every CI task; CI exercises every gate task; every scripts/ gate is reachable; every verification recipe is run."
 
 # Refresh the bootstrap seed from a GUARANTEED-clean stage-1, then verify the
 # fixed point.  Use after any compiler-source edit under stdlib/compiler/.
