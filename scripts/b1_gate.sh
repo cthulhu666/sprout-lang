@@ -16,12 +16,27 @@
 # Run: mise exec -- just b1-gate   (needs build/compile_driver_bin_stage1)
 set -uo pipefail
 
-STAGE1="build/compile_driver_bin_stage1"
+# Honour the justfile's build_dir (the b1-gate recipe passes it) rather than hardcoding
+# build/. Without this the gate cannot run under `just linux-run b1-gate`, which overrides
+# build_dir so a Linux container never writes a Linux ELF into the host's build/ — it would
+# have tried to exec the host's Mach-O binary instead.
+STAGE1="${SPROUT_STAGE1:-build/compile_driver_bin_stage1}"
 TESTS="tests/stdlib"          # runnable behaviour test (also scanned by `just test`)
 FIX="tests/b1_fixtures"       # compile-only fixtures (NOT scanned by `just test`)
 TMP="$(mktemp -d /tmp/sprout_b1gate_XXXXXX)"
 trap 'rm -rf "$TMP"' EXIT
 fail=0
+
+# The ④b case LINKS and RUNS a binary, so it needs the platform's link flags. These were
+# hardcoded to macOS frameworks while this gate was unreachable from `gate` and CI (see
+# BACKLOG, "gates that claim verification but nothing runs"); wiring it into CI without
+# this would have failed to link on the Linux runner. Same conditional as
+# tests/c_runtime/run.sh, and the same reason: Security/CoreFoundation exist only on Darwin.
+if [[ "$(uname)" == "Darwin" ]]; then
+  CLANG_EXTRA=(-framework Security -framework CoreFoundation)
+else
+  CLANG_EXTRA=()
+fi
 
 emit() { "$STAGE1" --emit-ir stdlib "$1" 2>/dev/null; }
 
@@ -46,9 +61,24 @@ else
   echo "  FAIL: B1 fired on a Vector Int — only scalar-Double is inlinable today"; fail=1
 fi
 
-# ② — under-applied vector_get_direct on Vector Double still compiles.
-if emit "$FIX/fixture_b1_partial.spr" >/dev/null 2>&1; then
-  echo "  ok: partial application compiles"
+# ② — under-applied vector_get_direct on Vector Double compiles AND actually builds a
+# closure. "Compiles" alone was the original assertion and is weaker than the property
+# ② names: it would also pass if the call were silently fully applied or erased.
+#
+# NOTE, verified 2026-08-11 — do NOT "fix" this by asserting B1 does not fire. It DOES
+# fire here, and correctly: the emitted IR contains
+#     define i64 @__sprout_ir_lambda_N(i64 %env$, i64 %__sprout_ph_0)
+# whose body bounds-checks (`icmp uge` → panic) and then does the inlined load indexed
+# by %__sprout_ph_0 — the placeholder bound as the CLOSURE'S PARAMETER. That is the
+# inline happening inside the closure body at call time, which is both safe (a
+# `Vector Double` element is a scalar, so no unrooted heap pointer — the ① hazard does
+# not apply) and desirable. What ② forbids is the arity hard-Err, not the inline.
+if b1_partial_ir="$(emit "$FIX/fixture_b1_partial.spr" 2>/dev/null)" && [ -n "$b1_partial_ir" ]; then
+  if grep -qEe '^define .*@__sprout_ir_lambda_[0-9]+\(.*%__sprout_ph_0' <<<"$b1_partial_ir"; then
+    echo "  ok: partial application compiles and builds a placeholder closure"
+  else
+    echo "  FAIL: under-applied vector_get_direct compiled but built NO placeholder closure"; fail=1
+  fi
 else
   echo "  FAIL: under-applied vector_get_direct on Vector Double no longer compiles"; fail=1
 fi
@@ -56,7 +86,7 @@ fi
 # ④b — out-of-bounds Vector Double read traps at the inline guard.
 if emit "$FIX/fixture_b1_oob.spr" > "$TMP/oob.ll" 2>/dev/null \
    && clang "$TMP/oob.ll" runtime/*.c -O2 \
-        -framework Security -framework CoreFoundation -o "$TMP/oob" 2>/dev/null; then
+        "${CLANG_EXTRA[@]}" -o "$TMP/oob" 2>/dev/null; then
   if "$TMP/oob" > "$TMP/oob.out" 2>&1; then
     echo "  FAIL: out-of-bounds Vector Double read did NOT trap"; fail=1
   elif grep -qi "index out of bounds" "$TMP/oob.out"; then

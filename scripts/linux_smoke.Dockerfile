@@ -21,9 +21,15 @@ FROM ubuntu:24.04
 # package-resolution) are reachable through `just linux-run` without a rebuild.
 # ca-certificates lets the pinned-`just` download run from inside the container if the
 # host ever needs it to.
+#
+# libclang-rt-dev carries the ASan/UBSan runtime libraries. `clang` alone does NOT pull it
+# in on Ubuntu, and without it `-fsanitize=address,undefined` fails to LINK — which
+# tests/c_runtime/run.sh handles by falling back to an unsanitized build and still passing
+# green, so two of its ten assertions silently stop being sanitized. The unversioned package
+# name tracks the distro's default clang, so this does not need bumping when it moves.
 RUN apt-get update \
  && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
-      llvm clang ripgrep ca-certificates \
+      llvm clang libclang-rt-dev ripgrep ca-certificates \
  && rm -rf /var/lib/apt/lists/*
 
 # The recipes invoke BARE `clang` and `opt` from PATH, and only the versioned LLVM

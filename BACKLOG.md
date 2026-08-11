@@ -836,14 +836,52 @@ Legend:
   than kept as gap cover: it has zero callers, the shape it names is circular (the only source of a raw
   `Int` is `tcp_connection_handle` on a connection already held linearly), and its own comment says
   "retire it with them, not before" — which the R2 reduction above triggers.
-- [ ] `P3` **`just b1-gate` is RED on master, but it is a STALE FIXTURE, not a regression.** Verified
+- [x] `P3` **`just b1-gate` is RED on master, but it is a STALE FIXTURE, not a regression. FIXED
+  2026-08-11.** Fixture rewritten as `vector_get_direct(v, _)`; gate now green and wired into
+  `ci-fast-gates` + `gate`, so it cannot go stale unnoticed again. Three things the fix turned up that
+  the original entry did not anticipate:
+  (a) **The assertion was weaker than the property it named** — it only checked that the fixture
+  *compiles*, which would also pass if the call were silently fully applied or erased. It now asserts a
+  placeholder closure was actually built (`define … @__sprout_ir_lambda_N(i64 %env$, i64 %__sprout_ph_0)`).
+  (b) **B1 *does* fire here, and correctly** — so do not "fix" this by asserting it does not. The
+  closure body bounds-checks (`icmp uge` → panic) and then inlines the load indexed by
+  `%__sprout_ph_0`, the placeholder bound as the closure's own parameter: the inline happens at call
+  time, inside the closure. It is safe because a `Vector Double` element is a scalar, so finding ①'s
+  unrooted-heap-pointer hazard does not apply. What ② forbids is the arity hard-Err, not the inline.
+  (c) **`scripts/b1_gate.sh` hardcoded `-framework Security -framework CoreFoundation`**, so wiring it
+  into CI as-is would have failed to link on the Linux runner. Now conditional on `uname`, the same way
+  `tests/c_runtime/run.sh` already did it. It also hardcoded `build/compile_driver_bin_stage1`, so it
+  could not run under `just linux-run b1-gate` (which overrides `build_dir`); it now honours
+  `SPROUT_STAGE1`, and both gates were verified green **on Linux** before the wiring was pushed.
+- [ ] ~~`P3` `just b1-gate` is RED~~ — original report, retained for the diagnosis: Verified
   2026-08-11: `tests/b1_fixtures/fixture_b1_partial.spr` writes an under-applied call as
   `vector_get_direct(v)`, which the language now rejects — *"expects 2 arguments, got 1 (Sprout is
   n-ary; use `_` for partial application)"*. The property finding ② guards still HOLDS: rewritten as
   `vector_get_direct(v, _)` it compiles and emits no `vec_get_d`, i.e. it reaches partial application
   and B1 correctly does not fire. Fix is the one-line fixture update. The fixture predates the
   explicit-`_` syntax and nothing caught the drift because this recipe is unreferenced (see below).
-- [ ] `P2` **`just c-runtime-test` is an ORPHAN GATE and had rotted completely.** Found 2026-08-11
+- [x] `P2` **`just c-runtime-test` is an ORPHAN GATE and had rotted completely. CLOSED 2026-08-11** —
+  the remaining work (wiring it in so it cannot rot again) is done, together with the `gate-audit`
+  Assertion D this entry asked for. `c-runtime-test` and `b1-gate` are now members of
+  `ci-fast-gates`' GATES array and of `gate`. Assertion D inverts the audit's direction: A, B and C all
+  start from something that already runs, so none could see a recipe nothing runs — D starts from the
+  recipe LIST and fails on any recipe whose name claims verification (`-check`, `-gate`, `-smoke`,
+  `test-*`, `verify-*`, `-audit`, `-diff`) that is unreachable from `gate` or CI, with a
+  whole-line-matched exclusion list carrying a stated reason per entry (batteries, single-file
+  developer entry points, `check-iface-all`'s missing precondition, `test-stdlib-stage2`, and
+  `linux-smoke` which needs a container runtime CI does not need). **Discrimination verified in both
+  directions**, not just green: a throwaway `probe-nothing-check` recipe was flagged, then removed and
+  the audit re-confirmed green. Note the exclusion list uses `grep -qxF`, because the pre-existing
+  `grep -qw` idiom would match `test` inside `test-file` and silently excuse it.
+  **One more silent degradation found while wiring it in:** two of the ten cases build with
+  `-fsanitize=address,undefined`, and `run.sh` falls back to an *unsanitized* build and still passes
+  green when that fails to link — which it did, because `clang` on Ubuntu does not pull in
+  `libclang-rt-dev`. So those two assertions would have been silently unsanitized in CI from the moment
+  this gate landed there. `libclang-rt-dev` added to CI's apt line and to the `linux-smoke` image;
+  verified the fallback message is gone. Related open work: the broader ASan/UBSan-suite item below is
+  unaffected — this only restores the sanitizer for the ten C-level cases.
+- [ ] ~~`P2` `just c-runtime-test` is an ORPHAN GATE~~ — original report, retained for the method and
+  the recipe audit it records: Found 2026-08-11
   while fixing `term_read_key`. The harness's `compile()` linked only `runtime/sprout_runtime.c`; when
   the runtime was split into `sprout_scheduler.c` + `sprout_poll.c`, **every** case in
   `tests/c_runtime/` stopped linking (`symbol(s) not found: _scheduler_park_on_fd` …) and nothing
