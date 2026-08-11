@@ -309,6 +309,41 @@ tests under `SPROUT_GC_STRESS=1` (wired into CI); `ir_rooting.op_triggers_gc` /
 classified — this prevents the silent-default class of rooting bug that hid
 earlier gaps.
 
+## String-invariant oracle (`SPROUT_GC_HDRCHECK`) — and why local green ≠ CI green
+
+`SPROUT_GC_HDRCHECK=1` asserts, on every `str_byte_len` call, that a CSTR header's
+recorded byte length equals `strlen` of the payload (`runtime/sprout_runtime.c`
+`str_byte_len`). Since the header stores an explicit length, the two can only differ when
+a String contains an **interior NUL** — so this is the executable form of the
+`docs/spec-v0.md` invariant *"A `String` value is always valid UTF-8 and contains no NUL
+byte"*. A violation aborts with, e.g.:
+
+```
+[sprout] HDRCHECK: str_byte_len aux=53 strlen=50
+```
+
+**It is OFF by default and ON in CI.** That asymmetry has already produced one wasted
+review cycle: a fully green local run — `just test`, `task-io-smoke`, `c-runtime-test`,
+`gc-safety-check`, examples, canary, golden IR, fixed point — followed by a red CI on this
+assertion alone (PR #66, 2026-08-11). **Any change that alters what a `String` may hold, or
+that routes external bytes through one, must be run locally under
+`SPROUT_GC_HDRCHECK=1` before pushing.**
+
+Reading it as a diagnosis rather than a flake: the abort names a producer, not a consumer.
+`aux > strlen` means some builtin built a String from raw bytes without validating —
+the W2 R2 class (`tcp_read*`, `proc_run`, `term_read_line`, `env_get`, `argv_get`,
+`stdin_read_bytes`; see BACKLOG). The fix belongs at the producer, which per decision D4
+means returning `Bytes` and letting `bytes_to_utf8` be the single validating choke point —
+*not* making the downstream consumer tolerate the invalid value, which merely moves the
+violation out of sight.
+
+Minimal repro needing no sockets:
+
+```
+proc_run(["printf", "a\000b"])   # byte_length 3, bytes.length(from_string ..) 1
+SPROUT_GC_HDRCHECK=1 ./prog      # HDRCHECK: str_byte_len aux=3 strlen=1
+```
+
 ## Debugging self-hosted compiler-source miscompiles
 
 Applies when the **stage-1 compiler compiling `stdlib/compiler/` source itself**
