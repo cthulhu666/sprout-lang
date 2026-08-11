@@ -8,6 +8,16 @@ build_dir   := justfile_directory() / "build"
 # sprout_runtime.c into more files (scheduler, GC, net, …) needs zero build edits.
 # Used UNQUOTED in recipes so bash expands it; every runtime .c is compiled+linked.
 runtime_src := "runtime/*.c"
+# Container-backed Linux gate — see the "Linux gate" section near `task-io-smoke`.
+linux_image := "sprout-linux-smoke:ubuntu-24.04"
+# Host-side cache for the container's `just` binary. Outside build_dir on purpose: it
+# is a tool, not a build artifact, and must survive `just clean`.
+linux_cache := justfile_directory() / ".cache" / "linux-smoke"
+# MUST track the `just` pin in mise.toml. The checksums below are version-specific, so
+# bumping this means bumping both of them (from casey/just's release SHA256SUMS).
+linux_just_version := "1.39.0"
+linux_just_sha_aarch64 := "f1b9acdb4374983539c765d60374350932527df807b25975e05abb152c9021e7"
+linux_just_sha_x86_64  := "1c53fa85a8c021ce7b19814e1a5e1dc0aa10c04bddca75196f7ab6db6130d2cd"
 
 default:
   @just --list
@@ -1675,6 +1685,152 @@ task-io-smoke: bootstrap-from-seed
   run_once "tcp-nul-payload/decode" "nul-decode-refused"
   SPROUT_GC_HDRCHECK=1 run_once "tcp-nul-payload/hdrcheck" "nul-bytes-intact"
   echo "==> task-io-smoke ✓ (read-park, accept-park, re-arm, http-serve-concurrency, http-conn-error-isolation, tcp-read-some-bad-args, write, cancel-drop, await-guard, timer-drop, timeout-drop, timeout-nested-guard, chan-cancel-drop, chan-timeout-drop, chan-negative-cap-guard, rendezvous-send-drop, send-on-closed-guard, double-close-guard, send-parked-close-guard, select-cancel-drop, select-timeout-drop, connect-park, http-idle-timeout, http-header-flood, http-write-timeout, http-body-timeout, http-body-bounds, http-pooled-serve, read-poll-once, http-utf8-body, http-binary-body, tcp-accept-bad-handle, http-accept-exhaustion, tcp-nul-payload; interleaved; stress-clean)"
+
+# ── Linux gate (local, container-backed) ──────────────────────────────────────
+#
+# WHY THIS EXISTS. Sprout's I/O layer has two poll backends and a developer Mac can
+# only run one of them: kqueue on macOS, epoll + timerfd on Linux. Every other local
+# gate therefore certifies the backend CI does NOT use. That divergence is not
+# cosmetic — both of these landed as red CI runs on branches that were green on every
+# local gate:
+#
+#   * `task_sleep` arms a TIMERFD on Linux — a file DESCRIPTOR — but an EVFILT_TIMER on
+#     the already-open kqueue on macOS, needing no descriptor. So a descriptor-
+#     exhaustion back-off written with `task_sleep` required the very resource it was
+#     recovering from, on Linux only. See tests/task_io_smoke/http_accept_exhaustion.spr.
+#   * accept(2) on Linux passes ALREADY-PENDING network errors (ENETDOWN, EPROTO,
+#     EHOSTUNREACH, …) through to the caller; BSD does not. A macOS run cannot reach
+#     the branch that handles them at all.
+#
+# `just linux-smoke` closes the hole: it runs `task-io-smoke` — the gate that covers the
+# whole park/timer/socket surface — inside a Linux container against the working tree,
+# under CI's SPROUT_GC_HDRCHECK=1.
+#
+# PROVEN RED SIGNAL. This is not a decorative gate. At commit 4dcfad79, whose CI run
+# failed, it reproduces that failure verbatim:
+#     task-io-smoke [http-accept-exhaustion]: did not complete (exit 1) …
+#     runtime error: builtin `task_sleep`: could not arm a timer (descriptor exhaustion?)
+# and it is green at 681a9fe8, the commit that fixed it. Cost: ~14s to link stage-1 from
+# the seed plus ~1m45s for the 34 fixtures, against a ~13min CI round-trip.
+#
+# WHAT IT DOES NOT COVER. The container is the host's architecture, while CI is x86_64.
+# This catches OPERATING-SYSTEM asymmetry — the epoll/timerfd backend, Linux errno
+# semantics, glibc — which is what has actually bitten us twice. It does NOT catch ISA
+# asymmetry. Tracked in BACKLOG. Forcing --platform linux/amd64 is deliberately NOT done
+# here: it would silently route every compile through QEMU emulation, and a gate slow
+# enough to skip is a gate that does not run.
+#
+# NOT wired into `gate` or `ci-fast-gates`, deliberately: CI already runs on Linux, so a
+# container there is pure waste, and a container runtime is not a required contributor
+# dependency. This is opt-in, before pushing changes to runtime/, the scheduler, or the
+# net/http_server stack.
+
+# Build the pinned Linux toolchain image if it is absent (one-off, ~1 GB, ~1min).
+[group('smoke')]
+linux-image:
+  #!/usr/bin/env bash
+  set -euo pipefail
+  if ! docker info >/dev/null 2>&1; then
+    echo "ERROR: linux-image needs a running Linux container runtime; \`docker info\` failed." >&2
+    echo "  colima users: colima start" >&2
+    exit 1
+  fi
+  if docker image inspect "{{linux_image}}" >/dev/null 2>&1; then exit 0; fi
+  LOG=$(mktemp /tmp/sprout_linux_image_XXXXXX.log)
+  trap 'rm -f "$LOG"' EXIT
+  echo "==> Building {{linux_image}} (one-off, ~880MB)..."
+  # Dockerfile on stdin => EMPTY build context, so the repo is never uploaded to the
+  # daemon across colima's sshfs mount.
+  if ! docker build -t "{{linux_image}}" - < scripts/linux_smoke.Dockerfile 2>&1 | tee "$LOG"; then
+    if grep -q "No space left on device" "$LOG"; then
+      echo "" >&2
+      echo "ERROR: the container VM's disk is full — the image is ~880MB plus transient apt space." >&2
+      echo "  Inspect first (some 'reclaimable' volumes are real databases):" >&2
+      echo "      docker system df -v" >&2
+      echo "  Non-destructive fix — colima grows its disk in place on restart (>= v0.5.3):" >&2
+      echo "      colima stop && colima start --disk <bigger-GiB>" >&2
+    fi
+    exit 1
+  fi
+  echo "==> Built {{linux_image}}."
+
+# Fetch the pinned `just` as a static musl binary matching the container's architecture,
+# verified against the official release checksum. The host's `just` is a macOS binary and
+# cannot run in the container, and the container image deliberately has no just.
+_linux-just: linux-image
+  #!/usr/bin/env bash
+  set -euo pipefail
+  DEST="{{linux_cache}}/just-{{linux_just_version}}"
+  if [[ -x "$DEST" ]]; then exit 0; fi
+  # Ask the IMAGE for its architecture rather than querying the daemon with a Go
+  # --format template: uname is the value that actually decides which binary can
+  # execute, and a Go template's doubled braces are read as just interpolation —
+  # inside a shebang recipe even a COMMENT containing them is a parse error.
+  ARCH="$(docker run --rm "{{linux_image}}" uname -m)"
+  case "$ARCH" in
+    aarch64) SHA="{{linux_just_sha_aarch64}}"; TRIPLE="aarch64-unknown-linux-musl" ;;
+    x86_64)  SHA="{{linux_just_sha_x86_64}}";  TRIPLE="x86_64-unknown-linux-musl" ;;
+    *) echo "ERROR: no pinned \`just\` checksum for container arch '$ARCH'." >&2; exit 1 ;;
+  esac
+  TMPD=$(mktemp -d /tmp/sprout_linuxjust_XXXXXX)
+  trap 'rm -rf "$TMPD"' EXIT
+  URL="https://github.com/casey/just/releases/download/{{linux_just_version}}/just-{{linux_just_version}}-${TRIPLE}.tar.gz"
+  echo "==> Fetching just {{linux_just_version}} ($TRIPLE)..."
+  curl -sSfL -o "$TMPD/just.tgz" "$URL"
+  GOT="$(shasum -a 256 "$TMPD/just.tgz" | cut -d' ' -f1)"
+  if [[ "$GOT" != "$SHA" ]]; then
+    echo "ERROR: checksum mismatch for $URL" >&2
+    echo "  expected $SHA" >&2
+    echo "  got      $GOT" >&2
+    exit 1
+  fi
+  tar xzf "$TMPD/just.tgz" -C "$TMPD" just
+  mkdir -p "{{linux_cache}}"
+  mv "$TMPD/just" "$DEST"
+  chmod +x "$DEST"
+  echo "==> Cached $DEST"
+
+# Run an arbitrary just recipe inside the Linux container: `just linux-run test-stdlib-core-stage1`.
+[group('smoke')]
+linux-run *ARGS: _linux-just
+  #!/usr/bin/env bash
+  set -euo pipefail
+  REPO="{{justfile_directory()}}"
+  # The container sees the repo through the VM's $HOME mount. A repo outside $HOME
+  # silently appears as an EMPTY directory rather than failing, which presents as a
+  # baffling "file not found" from the compiler — so refuse up front.
+  if [[ "$REPO" != "$HOME"/* ]]; then
+    echo "ERROR: linux-run needs the repo under \$HOME ($HOME); it is at $REPO." >&2
+    echo "  The container runtime only exposes \$HOME to the VM, so any other path mounts empty." >&2
+    exit 1
+  fi
+  # Three of the flags below are load-bearing, not tuning:
+  #
+  #  :ro on the repo — the container physically cannot mutate the working tree, so no
+  #    root-owned files can appear in it. Recipes that must write are out of scope.
+  #
+  #  --set build_dir /tmp/build — MANDATORY. build/compile_driver_bin_stage1 is a NATIVE
+  #    binary and bootstrap-from-seed's no-op guard is a bare mtime test
+  #    (`[[ "$OUT" -nt "$SEED" ]]`). A container writing into the shared build/ would
+  #    leave a Linux ELF that the host then considers UP TO DATE: every host gate fails
+  #    to exec it while the guard insists no rebuild is needed. CI avoids the same trap
+  #    by keying its stage-1 cache on runner.os as well as the file hashes.
+  #
+  #  --tmpfs /tmp:rw,exec — docker's --tmpfs defaults to NOEXEC, which breaks both just's
+  #    shebang recipes and every fixture binary the gate compiles and runs.
+  docker run --rm \
+    -v "$REPO":/work:ro \
+    -v "{{linux_cache}}":/opt/sprout-just:ro \
+    --tmpfs /tmp:rw,exec,size=3g \
+    -w /work \
+    -e SPROUT_GC_HDRCHECK=1 \
+    "{{linux_image}}" \
+    "/opt/sprout-just/just-{{linux_just_version}}" --set build_dir /tmp/build {{ARGS}}
+
+# The curated Linux gate: the park/timer/socket surface, on the backend CI uses.
+[group('smoke')]
+linux-smoke: (linux-run "task-io-smoke")
+  @echo "==> linux-smoke ✓ (task-io-smoke on Linux, epoll+timerfd backend, HDRCHECK on)"
 
 # Division-by-zero guard regression (CI gate). The fixture divides by a RUNTIME
 # zero (`10 / list_length(argv)` with no args), which neither the compiler nor

@@ -44,6 +44,7 @@ For coding tasks, work is done only when **all applicable** items below are true
 
 **Verification notes:**
 - During implementation, run individual test files for fast feedback (see "Code and Testing" §How to run tests); `mise exec -- just test` is the full gate required for #5.
+- **Changes to `runtime/`, the scheduler, or `stdlib/net.sprout` / `stdlib/http_server.sprout`: run `mise exec -- just linux-smoke` before pushing.** Every other local gate runs the kqueue backend; CI runs epoll + timerfd, and the two diverge in ways that are *unreachable* on macOS — `task_sleep` needs a descriptor on Linux and none on macOS, and `accept(2)` passes already-pending network errors through on Linux only. Two such failures reached CI on locally-green branches on 2026-08-11. This is a recommendation, not a Definition of Done item, because it needs a container runtime; the gate is opt-in for that reason. Requires the repo to live under `$HOME` (the container sees it through the VM's `$HOME` mount).
 - Docs/examples-only changes may skip the full suite when they do not modify `stdlib/`, test expectations, or the normative spec, but must still be verified in a way that matches the change.
 
 ## Commit Guidance
