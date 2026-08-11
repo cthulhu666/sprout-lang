@@ -26,6 +26,7 @@ fn echo(conn: consuming TcpConnection) -> Unit !{IO} =
 fn main() -> Unit !{IO} =
   do
     listener <- listen_local(8081)
-    conn <- accept(listener)
-    echo(conn)
+    match accept(listener) with
+    | Ok conn -> echo(conn)
+    | Err err -> term_write(`accept failed: ${tcp_error_message(err)}\n`)
     close_listener(listener)

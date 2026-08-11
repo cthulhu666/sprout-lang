@@ -24,14 +24,19 @@ import stdlib.bytes as bytes
 # be assuming what this decode checks.
 
 fn serve_late(listener: consuming TcpListener) -> Unit !{IO} =
-  do
-    conn <- accept(listener)
-    # Late enough that the client's poll-once has certainly already run and found nothing.
-    task_sleep(200)
-    match write_all_utf8(conn, "late") with
-    | Ok _ -> close(conn)
-    | Err _ -> report_and_close(conn, "MISMATCH: server could not send\n")
-    close_listener(listener)
+  match accept(listener) with
+  | Ok conn ->
+      do
+        # Late enough that the client's poll-once has certainly already run and found nothing.
+        task_sleep(200)
+        match write_all_utf8(conn, "late") with
+        | Ok _ -> close(conn)
+        | Err _ -> report_and_close(conn, "MISMATCH: server could not send\n")
+        close_listener(listener)
+  | Err _ ->
+      do
+        close_listener(listener)
+        term_write("MISMATCH: server could not accept\n")
 
 fn report_and_close(conn: consuming TcpConnection, line: String) -> Unit !{IO} =
   do

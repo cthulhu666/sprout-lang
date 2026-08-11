@@ -1,0 +1,113 @@
+import stdlib.task (Scope, with_scope, task_spawn, scope_cancel)
+import stdlib.chan (Chan, chan_new, chan_send, chan_recv)
+import stdlib.net (TcpConnection, connect, close, write_all_utf8, read_exact_utf8)
+import stdlib.http_server (HttpRequest, HttpServerResponse, ServerConfig, ok, request_path, serve_with)
+
+# REGRESSION (concurrency review C3): descriptor exhaustion must shed LOAD, not the process.
+#
+# `tcp_accept` used to call `tcp_fail` on any errno that was not EAGAIN, so `accept` returning
+# EMFILE — the per-process descriptor limit, which a busy server reaches — killed the whole server
+# along with every connection it was already handling. It is now `Err TcpAcceptExhausted`, and
+# `http_server` answers it the way nginx does: wait a little, then retry, indefinitely and without
+# counting it as a served connection. The condition is transient by construction, because slots free
+# as open connections close.
+#
+# WHAT THIS DOES AND DOES NOT ASSERT — read before trusting it as EMFILE coverage.
+#
+# It asserts, robustly: a server under heavy descriptor pressure SURVIVES and still answers an
+# ordinary request afterwards. On the unfixed runtime `served-after-descriptor-pressure` is
+# unreachable whenever the pressure is enough to make `accept` fail — the process aborts inside
+# `tcp_fail`, so the fixture prints nothing and exits non-zero.
+#
+# It does NOT guarantee that `accept` returned EMFILE on this run, and the window is narrower than it
+# looks. Measured on macOS with the runtime instrumented to report the branch, flooding 64
+# connections:
+#
+#   ulimit -n     accept EMFILE hits
+#   unconstrained 0   (nothing exhausts — the correct baseline)
+#   64            0   (limit too high to reach)
+#   40            1
+#   32            1
+#   24            0   (the CONNECT side runs out first, so the server never accumulates
+#                      enough accepted sockets for accept itself to fail)
+#
+# So the branch is reached only in a narrow band, and Linux accounts for descriptors differently than
+# macOS. The recipe runs this at 32, but a run that fails to reach EMFILE still passes — which is why
+# the claim above is scoped to survival rather than to the errno. The deterministic coverage of the
+# recoverable-accept CONTRACT is tests/task_io_smoke/tcp_accept_bad_handle.spr, which needs no timing
+# at all; this fixture is the end-to-end liveness half.
+#
+# Client and server share the one process and so the one limit. That is deliberate: each loopback
+# connection costs two descriptors, so the pressure arrives from the accept and the connect side at
+# once.
+#
+# Shape: hold many connections open at once, then release them and make one ordinary request.
+
+fn handle(req: HttpRequest) -> HttpServerResponse =
+  ok(request_path(req))
+
+# Deliberately slow to give up on a silent client: the point is for the server to ACCUMULATE accepted
+# connections while the flood is in progress, which is what drives it into EMFILE. A short header
+# deadline would let each handler 408 and free its descriptor before the next connection arrives, and
+# the exhaustion this exists to test would never happen.
+fn flood_config() -> ServerConfig =
+  ServerConfig(header_ms = 2500, body_ms = 2500, max_header_bytes = 65536,
+               write_ms = 2500, max_body_bytes = 65536, min_rate_bps = 1024)
+
+# Opens `n` connections and holds them ALL open simultaneously, one per stack frame, closing them on
+# the way back out. A `Vec TcpConnection` would be the obvious shape and is not available: a container
+# of linear payloads runs into the over-strict bind edge at BACKLOG:1059. Recursion gives the same
+# "all open at the deepest point" property and keeps each `close` on every path, which is what the
+# linear checker requires.
+#
+# A failed `connect` is EXPECTED and must not stop the flood: once descriptors run out, this side hits
+# the limit too. Either way the server saw the pressure, which is the point.
+fn hold_open(port: Int, n: Int) -> Unit !{IO} =
+  if n <= 0 then term_write("")
+  else
+    match connect("127.0.0.1", port) with
+    | Ok conn ->
+        do
+          hold_open(port, n - 1)
+          close(conn)
+    | Err _ -> hold_open(port, n - 1)
+
+# The assertion. By the time this runs the flood's descriptors are released, but the server may still
+# be holding its accepted ones until their header deadlines expire — so this can require the server to
+# have backed off and retried before it succeeds. That is exactly the behaviour under test, and it is
+# why the read bound here is generous.
+fn final_request(port: Int) -> Unit !{IO} =
+  match connect("127.0.0.1", port) with
+  | Ok conn ->
+      do
+        match write_all_utf8(conn, "GET /after HTTP/1.1\r\nHost: x\r\n\r\n") with
+        | Ok _ ->
+            match read_exact_utf8(conn, 12) with
+            | Ok line ->
+                if line == "HTTP/1.1 200" then term_write("served-after-descriptor-pressure\n")
+                else term_write(`MISMATCH: final request got ${line}\n`)
+            | Err _ -> term_write("MISMATCH: final request read failed\n")
+        | Err _ -> term_write("MISMATCH: final request write failed\n")
+        close(conn)
+  | Err _ -> term_write("MISMATCH: final request could not connect\n")
+
+fn client(port: Int, done: Chan Int) -> Unit !{IO} =
+  do
+    hold_open(port, 64)
+    final_request(port)
+    chan_send(done, 1)
+
+fn body(s: Scope, port: Int) -> Unit !{IO} =
+  do
+    done <- chan_new(s, 1)
+    task_spawn(s, \_ -> serve_with(flood_config(), port, handle))
+    task_spawn(s, \_ -> client(port, done))
+    _ <- chan_recv(done)
+    # `serve_with` never returns on its own, so the owner force-drops it once the assertion is in.
+    scope_cancel(s)
+    term_write("shutdown\n")
+
+fn main() -> Unit !{IO} =
+  do
+    with_scope(\s -> body(s, 28984))
+    term_write("done\n")

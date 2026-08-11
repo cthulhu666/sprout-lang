@@ -3,7 +3,10 @@ module stdlib.net
 import stdlib.bytes (Utf8Error, from_string, to_string, length)
 
 export extern fn tcp_listen(port: Int) -> Int !{IO}
-export extern fn tcp_accept(listener: Int) -> Int !{IO}
+# Recoverable since the C3 fix: `Err TcpAcceptExhausted` when no connection slot is available
+# (EMFILE/ENFILE or a full handle table), `Err TcpAcceptFailed` for a broken listener. EAGAIN parks,
+# and EINTR/ECONNABORTED retry inside the builtin — neither is an event a caller could act on.
+export extern fn tcp_accept(listener: Int) -> Result TcpError Int !{IO}
 export extern fn tcp_write(conn: Int, data: String) -> Unit !{IO}
 # Raw connect. Exported for the same reason tcp_listen/tcp_accept/tcp_write/tcp_close are: code whose
 # shape the linear TcpConnection API cannot yet express must still be able to speak TCP. Callers on
@@ -75,6 +78,15 @@ export type TcpError (..) =
   # has expired, the caller simply has to wait for readiness before retrying. Reported only by the
   # non-parking transfer primitives, whose whole purpose is to hand that decision back to Sprout.
   | TcpWouldBlock
+  # No connection slot is available: the process is out of file descriptors (EMFILE/ENFILE) or the
+  # 2048-entry handle table is full. Not a fault either — the listener is fine and the condition is
+  # transient, since it clears as open connections close. The remedy is to back off and retry, which
+  # is what nginx does (`ngx_disable_accept_events` plus an `accept_mutex_delay` timer) rather than
+  # failing. Kept distinct from TcpAcceptFailed because only this one is worth retrying.
+  | TcpAcceptExhausted
+  # The accept itself failed for a reason that is not transient and not a resource limit — a closed or
+  # broken listener, or a bug. Retrying will not help, so a server should stop rather than spin.
+  | TcpAcceptFailed String
 
 # LINEAR (M4.5). A connection is acquire -> use N times -> release once: reads and
 # writes `borrow` it, `close` consumes it. Linearity turns the release discipline
@@ -98,6 +110,8 @@ export fn tcp_error_message(err: TcpError) -> String =
   | TcpEndOfStream -> "end of stream"
   | TcpTimeout -> "timed out"
   | TcpWouldBlock -> "would block"
+  | TcpAcceptExhausted -> "no connection slot available"
+  | TcpAcceptFailed msg -> msg
 
 # Reads the handle out without taking the connection: `match` on a borrowed
 # binding is a read, not a consume, so this composes into every borrowing op below.
@@ -265,8 +279,16 @@ export fn close(conn: consuming TcpConnection) -> Unit !{IO} =
 export fn listen_local(port: Int) -> TcpListener !{IO} =
   TcpListener(tcp_listen(port))
 
-export fn accept(listener: borrowing TcpListener) -> TcpConnection !{IO} =
-  TcpConnection(tcp_accept(tcp_listener_handle(listener)))
+# Recoverable, unlike the shape this had before: a failed accept is an Err rather than an exit(1).
+#
+# There is deliberately NO deadline parameter. An accept loop wants to wait indefinitely for the next
+# connection — that is its whole job — so the argument that made every read need a bound does not
+# apply here. What it needs instead is to survive a failure, which is what the Result provides. The
+# park on "no connection yet" stays inside the builtin for the same reason.
+export fn accept(listener: borrowing TcpListener) -> Result TcpError TcpConnection !{IO} =
+  do
+    handle <- tcp_accept(tcp_listener_handle(listener))
+    Ok(TcpConnection(handle))
 
 export fn close_listener(listener: consuming TcpListener) -> Unit !{IO} =
   match listener with

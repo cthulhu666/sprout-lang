@@ -59,10 +59,16 @@ fn main() -> Unit !{IO} =
     listener <- listen_local(28999)
     match connect("127.0.0.1", 28999) with
     | Ok conn ->
-        do
-          server <- accept(listener)
-          close_listener(listener)
-          with_scope(\s -> run(s, server, conn))
+        match accept(listener) with
+        | Ok server ->
+            do
+              close_listener(listener)
+              with_scope(\s -> run(s, server, conn))
+        | Err _ ->
+            do
+              close_listener(listener)
+              close(conn)
+              term_write("accept failed\n")
     | Err e ->
         do
           close_listener(listener)

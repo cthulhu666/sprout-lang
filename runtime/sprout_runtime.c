@@ -8597,10 +8597,75 @@ long long tcp_connect(const char* host, long long port) {
   return tcp_net_ok(h);
 }
 
-long long tcp_accept(long long listener) {
-  if (listener <= 0 || listener >= 2048 || !g_listener_used[listener]) {
-    tcp_fail("tcp_accept: unknown listener handle");
+/* Accept failures that are not events and must be retried rather than reported.
+ *
+ * EINTR is a signal interrupting the syscall. ECONNABORTED is a queued connection that died before we
+ * took it — Go's internal/poll (*FD).Accept retries it with the comment "it's a silly error, so try
+ * again", and nginx's ngx_event_accept continues likewise.
+ *
+ * The other eight are NOT obvious and are the reason this list is a function rather than two ||s.
+ * accept(2), ERRORS: "Linux accept() (and accept4()) passes already-pending network errors on the new
+ * socket as an error code from accept(). This behavior differs from other BSD socket implementations.
+ * For reliable operation the application should detect the network errors defined for the protocol
+ * after accept() and treat them like EAGAIN by retrying. In the case of TCP/IP, these are ENETDOWN,
+ * EPROTO, ENOPROTOOPT, EHOSTDOWN, ENONET, EHOSTUNREACH, EOPNOTSUPP, and ENETUNREACH."
+ *
+ * So on Linux a peer whose route disappeared between SYN and accept surfaces here — and before this
+ * fix that was `tcp_fail`, i.e. an ordinary network condition killed the server. Note the platform
+ * asymmetry the man page calls out: this does not happen on BSD/macOS, which is where local gates run
+ * and where the failure is therefore invisible. ENONET is Linux-only and needs the guard.
+ *
+ * Retrying cannot spin: each of these consumes the one queued connection it was attached to, so the
+ * backlog drains and the next accept either succeeds or reports EAGAIN, which parks. */
+static int tcp_accept_errno_is_retryable(int err) {
+  switch (err) {
+    case EINTR:
+    case ECONNABORTED:
+    case ENETDOWN:
+    case EPROTO:
+    case ENOPROTOOPT:
+    case EHOSTDOWN:
+    case EHOSTUNREACH:
+    case EOPNOTSUPP:
+    case ENETUNREACH:
+#ifdef ENONET
+    case ENONET:
+#endif
+      return 1;
+    default:
+      return 0;
   }
+}
+
+/* RECOVERABLE accept (concurrency review C3). Two of the paths below used to be `tcp_fail`, so a
+ * server died rather than shedding one connection — and one of them was reachable by ordinary
+ * traffic: `ECONNABORTED` means a peer reset between SYN and accept, which any public listener sees.
+ *
+ * The three-way split is what Go and nginx both do, and it is a split by WHO CAN DECIDE:
+ *
+ *  * EAGAIN parks; EINTR, ECONNABORTED and the eight pending-network errnos retry — see
+ *    tcp_accept_errno_is_retryable above. Nothing happened that a caller could act on, so surfacing
+ *    them would only make every caller write this loop.
+ *  * EMFILE / ENFILE, and our own connection table being full — a real decision: shed load, back off,
+ *    log. Reported as `TcpAcceptExhausted`, which the caller answers with a delay-and-retry (nginx
+ *    disables accept events and re-arms on `accept_mutex_delay`; it never aborts). Erlang names this
+ *    case distinctly too — `gen_tcp:accept` documents `Reason :: closed | timeout | system_limit |
+ *    inet:posix()`, with `system_limit` separate from the POSIX errors.
+ *  * anything else — EBADF, EINVAL, ENOTSOCK: a closed listener or a programming error, none of
+ *    which heal. `TcpAcceptFailed`, carrying strerror. Deliberately NOT retried with a counter: once
+ *    the retryable set above is handled, nothing left in this bucket becomes true later.
+ *
+ * Named cases rather than one error plus a "retryable?" predicate, deliberately: Go deprecated
+ * net.Error.Temporary() with the note that "Temporary errors are not well-defined. Most 'temporary'
+ * errors are timeouts, and the few exceptions are surprising. Do not use this method." The two
+ * outcomes here want genuinely different handling, so the type says which one happened.
+ *
+ * Table-full is folded into TcpAcceptExhausted rather than given its own variant: it means the same
+ * thing to a caller (no connection slot is available right now) and has the same remedy. The
+ * distinction between an OS descriptor and one of our 2048 handles is not one a server can act on. */
+long long tcp_accept(long long listener) {
+  if (listener <= 0 || listener >= 2048 || !g_listener_used[listener])
+    return tcp_net_err0("stdlib.net.TcpInvalidHandle");
   int fd;
   for (;;) {
     fd = accept(g_listener_fd[listener], NULL, NULL);
@@ -8609,17 +8674,21 @@ long long tcp_accept(long long listener) {
       scheduler_park_on_fd(g_listener_fd[listener], SPROUT_POLL_READ);
       continue;
     }
-    tcp_fail("tcp_accept: accept failed");
+    if (tcp_accept_errno_is_retryable(errno)) continue;
+    if (errno == EMFILE || errno == ENFILE) return tcp_net_err0("stdlib.net.TcpAcceptExhausted");
+    return tcp_net_err1("stdlib.net.TcpAcceptFailed", (long long)(uintptr_t)strerror(errno));
   }
   tcp_set_nonblocking(fd);   /* accepted conn parks on EAGAIN */
   long long h = alloc_conn_handle();
   if (h < 0) {
+    /* The socket is accepted but unrepresentable, so it must be closed here — returning an Err
+     * without this would leak the descriptor and make the exhaustion permanent. */
     close(fd);
-    tcp_fail("tcp_accept: connection table full");
+    return tcp_net_err0("stdlib.net.TcpAcceptExhausted");
   }
   g_conn_fd[h] = fd;
   g_conn_used[h] = 1;
-  return h;
+  return tcp_net_ok(h);
 }
 
 /* TCP_WAIT_FOREVER parks with no deadline; TCP_WAIT_DEADLINE bounds the whole call by its

@@ -1657,11 +1657,24 @@ task-io-smoke: bootstrap-from-seed
   # through the HTTP server; this pins it where the defect lived, so a regression is attributed to
   # `net` rather than diagnosed through a request parser. Run under HDRCHECK as well as the default,
   # since the default build is exactly what let this reach CI unnoticed.
+  # (28) C3: tcp_accept is RECOVERABLE. Accepting on a listener handle that was never allocated must
+  # return Err(TcpInvalidHandle), not abort. Deterministic — no socket timing — and this is the load-
+  # bearing coverage of the contract; the exhaustion fixture below is the end-to-end half.
+  build tests/task_io_smoke/tcp_accept_bad_handle.spr
+  run_once "tcp-accept-bad-handle" "done"
+  # (29) C3, end-to-end: a server under descriptor pressure must SURVIVE and still serve afterwards.
+  # `ulimit -n` has to be imposed before the process starts, hence the subshell. Read the fixture's
+  # header before treating this as EMFILE coverage: the branch is only reached in a narrow band of
+  # limits (measured: hit at 32-40 on macOS, missed at 24 and at 64), so a run that does not reach it
+  # still passes. What is asserted unconditionally is survival — on the unfixed runtime any accept
+  # failure aborted the process, so the marker was unreachable.
+  build tests/task_io_smoke/http_accept_exhaustion.spr
+  ( ulimit -n 32; run_once "http-accept-exhaustion" "served-after-descriptor-pressure" )
   build tests/task_io_smoke/tcp_nul_payload.spr
   run_once "tcp-nul-payload" "nul-bytes-intact"
   run_once "tcp-nul-payload/decode" "nul-decode-refused"
   SPROUT_GC_HDRCHECK=1 run_once "tcp-nul-payload/hdrcheck" "nul-bytes-intact"
-  echo "==> task-io-smoke ✓ (read-park, accept-park, re-arm, http-serve-concurrency, http-conn-error-isolation, tcp-read-some-bad-args, write, cancel-drop, await-guard, timer-drop, timeout-drop, timeout-nested-guard, chan-cancel-drop, chan-timeout-drop, chan-negative-cap-guard, rendezvous-send-drop, send-on-closed-guard, double-close-guard, send-parked-close-guard, select-cancel-drop, select-timeout-drop, connect-park, http-idle-timeout, http-header-flood, http-write-timeout, http-body-timeout, http-body-bounds, http-pooled-serve, read-poll-once, http-utf8-body, http-binary-body, tcp-nul-payload; interleaved; stress-clean)"
+  echo "==> task-io-smoke ✓ (read-park, accept-park, re-arm, http-serve-concurrency, http-conn-error-isolation, tcp-read-some-bad-args, write, cancel-drop, await-guard, timer-drop, timeout-drop, timeout-nested-guard, chan-cancel-drop, chan-timeout-drop, chan-negative-cap-guard, rendezvous-send-drop, send-on-closed-guard, double-close-guard, send-parked-close-guard, select-cancel-drop, select-timeout-drop, connect-park, http-idle-timeout, http-header-flood, http-write-timeout, http-body-timeout, http-body-bounds, http-pooled-serve, read-poll-once, http-utf8-body, http-binary-body, tcp-accept-bad-handle, http-accept-exhaustion, tcp-nul-payload; interleaved; stress-clean)"
 
 # Division-by-zero guard regression (CI gate). The fixture divides by a RUNTIME
 # zero (`10 / list_length(argv)` with no args), which neither the compiler nor

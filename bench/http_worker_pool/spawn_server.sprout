@@ -18,10 +18,12 @@ fn handle(conn: consuming TcpConnection) -> Unit !{IO} =
 # One fire-and-forget task per accepted connection: 1 MiB stack + 512 KiB root
 # pool malloc'd and freed per request, plus makecontext zeroing the stack.
 fn serve_loop(scope: Scope, listener: consuming TcpListener) -> Unit !{IO} =
-  do
-    conn <- accept(listener)
-    task_spawn(scope, \_ -> handle(conn))
-    serve_loop(scope, listener)
+  match accept(listener) with
+  | Ok conn ->
+      do
+        task_spawn(scope, \_ -> handle(conn))
+        serve_loop(scope, listener)
+  | Err _ -> close_listener(listener)
 
 fn main() -> Unit !{IO} =
   with_scope(\s -> serve_loop(s, listen_local(8099)))

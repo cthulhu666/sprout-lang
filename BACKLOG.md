@@ -553,14 +553,53 @@ Legend:
     externs, not before). The raw family now blocks on exactly one thing: a task force-dropped by
     `scope_cancel`/`with_timeout` never runs its linear `close`, so the cancellation fixtures cannot
     hold a `TcpConnection`. That is the `P2` entry below, which is therefore this family's blocker.
-- [ ] `P1` **http_server accept-failure isolation (concurrency review C3, remaining half).**
-  `tcp_accept` is still the FATAL variant: `accept` failing with EMFILE/ENFILE — the same descriptor
-  exhaustion the timeout above now makes far harder to reach, but not impossible — calls `tcp_fail`
-  and `exit(1)`, aborting the whole server rather than shedding one connection. `ECONNABORTED` (a
-  peer that resets between SYN and accept, entirely normal) is fatal too. Fix needs **no new
-  builtin**: retry on `ECONNABORTED`/`EINTR`, and on EMFILE/ENFILE back off on a short timer and
-  retry (what nginx does) instead of aborting. Testable hermetically under `ulimit -n`, in the style
-  of `tests/task_io_smoke/connect_park.spr`. Sibling of the C1 recoverable-I/O fix.
+- [x] `P1` **http_server accept-failure isolation (concurrency review C3, remaining half).
+  FIXED 2026-08-11.** `tcp_accept` had two `tcp_fail` paths — any errno other than EAGAIN, and a full
+  connection table — and both `exit(1)`. It now returns `Result TcpError Int`. No new builtin, and no
+  change to the C prototype or the emitted `declare` (a `Result` is an i64 heap box under the
+  i64-uniform ABI, so `-> Int` and `-> Result TcpError Int` are the same at the LLVM boundary).
+  **The classification is wider than this entry predicted, and that is the substantive finding.** It
+  named `ECONNABORTED`/`EINTR` as the retryable pair. accept(2) documents **eight more**: *"Linux
+  accept() (and accept4()) passes already-pending network errors on the new socket as an error code
+  from accept(). This behavior differs from other BSD socket implementations. For reliable operation
+  the application should detect the network errors defined for the protocol after accept() and treat
+  them like EAGAIN by retrying. In the case of TCP/IP, these are ENETDOWN, EPROTO, ENOPROTOOPT,
+  EHOSTDOWN, ENONET, EHOSTUNREACH, EOPNOTSUPP, and ENETUNREACH."* So on Linux a peer whose route
+  disappeared between SYN and accept was killing the server — and the man page flags this as
+  Linux-specific, i.e. **invisible on macOS, where every local gate runs**. ENONET is Linux-only and
+  is `#ifdef`-guarded.
+  Once those retry, the remaining error bucket is `EBADF`/`EINVAL`/`ENOTSOCK` — none of which heal —
+  so the "back off and retry N times" shape this entry proposed for them was dropped as pointless.
+  Final split: retry (EAGAIN parks, EINTR/ECONNABORTED/the eight continue) → `Err
+  TcpAcceptExhausted` (EMFILE/ENFILE/table-full; caller backs off and retries **indefinitely**,
+  nginx's `accept_mutex_delay` model, never fatal) → `Err TcpAcceptFailed` (report at once).
+  Prior art verified against primary sources before choosing: Go's `internal/poll.(*FD).Accept`
+  retries EINTR/ECONNABORTED in-loop ("it's a silly error, so try again") and returns EMFILE to the
+  caller; nginx's `ngx_event_accept` continues on ECONNABORTED and disables accept events on EMFILE;
+  Erlang's `gen_tcp:accept` names exhaustion distinctly (`Reason :: closed | timeout | system_limit |
+  inet:posix()`). Named variants rather than one error plus a retryable predicate, because Go
+  **deprecated** `net.Error.Temporary()` with the note that *"Temporary errors are not well-defined."*
+  **A trap worth knowing, and the reason all three loops use an explicit `match`:** in a `Unit !{IO}`
+  function a bare `conn <- accept(listener)` of an `Err` **silently returns early and discards it** —
+  verified. Left as-is, an EMFILE would have ended the accept loop quietly and exited **0**: a server
+  that stops serving and reports success, harder to diagnose than the `exit(1)` being replaced. The
+  typechecker accepts the bare bind, so nothing but convention prevents it. See the `P2` below.
+  Tests: `tests/task_io_smoke/tcp_accept_bad_handle.spr` (deterministic, no timing — the load-bearing
+  coverage) and `http_accept_exhaustion.spr` (end-to-end survival under descriptor pressure at
+  `ulimit -n 32`). The second is honestly scoped in its own header: the EMFILE branch is only reached
+  in a narrow band of limits (measured hits at 32-40 on macOS, misses at 24 and 64), so a run that
+  does not reach it still passes, and what it asserts unconditionally is survival.
+- [ ] `P2` **A bare `<-` bind of a `Result` in a `Unit`-returning function silently discards the
+  `Err`.** Found 2026-08-11 while making `accept` recoverable. `fn f() -> Unit !{IO} = do { x <-
+  returns_a_result(); ... }` type-checks, and on `Err` it returns early from `f` with the error
+  dropped — no diagnostic, and the caller continues as if nothing happened. That is defensible
+  do-notation semantics, but it is invisible at the call site and it converts a newly-recoverable API
+  into a silently-swallowing one: the whole benefit of returning a `Result` is lost precisely where a
+  loop must react to it. It is also undetectable by the typechecker as things stand, so the only
+  defence today is a comment. **Wanted:** a warning (or error) when a `<-` bind's `Err` is discarded
+  in a non-`Result` context, of the shape "this bind can fail and the failure is unused — `match` it,
+  or make the function return a `Result`". Cheap version: warn whenever the bound expression's type is
+  `Result _ _` and the enclosing function's return type is not.
 - [x] `P1` **http_server framed request bodies by codepoint count, not bytes (concurrency review C5).
   FIXED 2026-08-10.** `err_or_request` / `continue_read_request` / `read_remaining_body`
   (`stdlib/http_server.sprout`) compared `string.length` (UTF-8 codepoint count) against the

@@ -76,10 +76,16 @@ fn main() -> Unit !{IO} =
     listener <- listen_local(28986)
     match connect("127.0.0.1", 28986) with
     | Ok client ->
-        do
-          server <- accept(listener)
-          close_listener(listener)
-          with_scope(\s -> run(s, server, client))
+        match accept(listener) with
+        | Ok server ->
+            do
+              close_listener(listener)
+              with_scope(\s -> run(s, server, client))
+        | Err _ ->
+            do
+              close_listener(listener)
+              close(client)
+              term_write("MISMATCH: could not accept\n")
     | Err _ ->
         do
           close_listener(listener)

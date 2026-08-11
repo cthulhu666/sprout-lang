@@ -1,5 +1,5 @@
 import stdlib.task (Scope, with_scope, task_spawn, task_yield)
-import stdlib.chan (Chan, Recv, Got, Closed, chan_new, chan_send, chan_recv)
+import stdlib.chan (Chan, Recv, Got, Closed, chan_new, chan_send, chan_recv, chan_close)
 import stdlib.net (TcpListener, TcpConnection, listen_local, accept, close, close_listener, read_avail_timeout, write_all_utf8)
 
 # Identical in both variants, so the ONLY difference measured is the concurrency
@@ -35,11 +35,20 @@ fn spawn_workers(s: Scope, ch: Chan TcpConnection, n: Int) -> Unit !{IO} =
       spawn_workers(s, ch, n - 1)
 
 # The accept loop owns the listener and MOVES each connection into the channel.
+# An explicit match, not `conn <- accept(listener)`: a bare bind of an Err in a Unit function returns
+# early and discards it, which here would stop the bench silently and look like a clean finish.
 fn accept_loop(ch: Chan TcpConnection, listener: consuming TcpListener) -> Unit !{IO} =
-  do
-    conn <- accept(listener)
-    chan_send(ch, conn)
-    accept_loop(ch, listener)
+  match accept(listener) with
+  | Ok conn ->
+      do
+        chan_send(ch, conn)
+        accept_loop(ch, listener)
+  | Err _ ->
+      do
+        # The channel must close before the scope join, or every worker parked in chan_recv is a task
+        # that never finishes and `with_scope` waits for it forever.
+        chan_close(ch)
+        close_listener(listener)
 
 fn run(s: Scope, ch: Chan TcpConnection) -> Unit !{IO} =
   do
