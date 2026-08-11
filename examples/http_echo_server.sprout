@@ -12,8 +12,17 @@ import stdlib.http_server (HttpRequest, HttpServerResponse, ok, request_body, re
 # Then (repeat as many times as you like — the server keeps serving):
 #   curl -i http://127.0.0.1:8081/hello
 
+# `request_body` returns `Result Utf8Error String`, because an HTTP body is a byte sequence and
+# nothing guarantees it is text. An echo server has to answer something either way, so it reports the
+# undecodable case rather than pretending — a handler that genuinely wants the raw bytes (a file
+# upload, a protobuf endpoint) uses `request_body_bytes` instead.
 fn handle(req: HttpRequest) -> HttpServerResponse =
-  with_header("X-Sprout-Path", request_path(req), ok(request_body(req)))
+  with_header("X-Sprout-Path", request_path(req), ok(echo_text(req)))
+
+fn echo_text(req: HttpRequest) -> String =
+  match request_body(req) with
+  | Ok text -> text
+  | Err _ -> "<body is not valid UTF-8>"
 
 fn main() -> Unit !{IO} =
   serve(8081, handle)

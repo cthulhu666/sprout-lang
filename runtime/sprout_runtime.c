@@ -7768,10 +7768,19 @@ long long bytes_singleton(long long value) {
   return (long long)(uintptr_t)out;
 }
 
+/* Length from the CSTR HEADER, not strlen. A Sprout String is a byte sequence that may contain an
+ * interior NUL — sprout_gc_adopt_cstr copies an explicit length, so tcp_read_avail and proc_run both
+ * mint such Strings from arbitrary input — and strlen stopped at the first one. That made three
+ * length notions disagree on one value: for a String holding "a\0b", str_byte_len said 3 (header)
+ * while bytes_from_utf8 said 1 (strlen), so bytes.from_string silently DROPPED payload. Reading the
+ * header restores the invariant bytes.length(bytes.from_string(s)) == string.byte_length(s), which is
+ * what makes a byte-exact HTTP body possible at all: every read chunk arrives as a String and has to
+ * become Bytes without loss. Safe universally because every String is headered — arena, literal and
+ * interned alike — an invariant enforced by SPROUT_GC_HDRCHECK=1. */
 long long bytes_from_utf8(long long raw_val) {
   const char* raw = (const char*)raw_val;
   if (raw == NULL) tcp_fail("bytes_from_utf8: null input");
-  size_t len = strlen(raw);
+  size_t len = sprout_cstr_byte_len(raw);
   BytesVal* out = sprout_alloc_bytes_val("bytes_from_utf8: out of memory");
   out->len = len;
   out->data = sprout_alloc_bytes_data(len, "bytes_from_utf8: out of memory");

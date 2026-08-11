@@ -1639,7 +1639,17 @@ task-io-smoke: bootstrap-from-seed
   run_once "http-utf8-body/inline" "inline-multibyte-200"
   run_once "http-utf8-body/cut" "split-codepoint-400"
   SPROUT_GC_STRESS=1 run_once "http-utf8-body/stress" "split-multibyte-200"
-  echo "==> task-io-smoke ✓ (read-park, accept-park, re-arm, http-serve-concurrency, http-conn-error-isolation, tcp-read-avail-error, write, cancel-drop, await-guard, timer-drop, timeout-drop, timeout-nested-guard, chan-cancel-drop, chan-timeout-drop, chan-negative-cap-guard, rendezvous-send-drop, send-on-closed-guard, double-close-guard, send-parked-close-guard, select-cancel-drop, select-timeout-drop, connect-park, http-idle-timeout, http-header-flood, http-write-timeout, http-body-timeout, http-body-bounds, http-pooled-serve, read-poll-once, http-utf8-body; interleaved; stress-clean)"
+  # (26) Binary request bodies, now that the body is Bytes rather than String. The payload is
+  # 0x00 0xFF 0x41 so each old failure mode is separately fatal: a strlen-based accumulator stops at
+  # the NUL, a UTF-8 validator rejects the 0xFF, and the trailing 'A' is missing if anything truncated.
+  # Both paths are covered because they used different code: headers+body in one write (already
+  # buffered) and body in a second write (the read loop). RED as a 400 (validator still on the read
+  # path), a 500 (handler saw a corrupted body), or a hang.
+  build tests/task_io_smoke/http_binary_body.spr
+  run_once "http-binary-body" "binary-inline-200"
+  run_once "http-binary-body/split" "binary-split-200"
+  SPROUT_GC_STRESS=1 run_once "http-binary-body/stress" "binary-inline-200"
+  echo "==> task-io-smoke ✓ (read-park, accept-park, re-arm, http-serve-concurrency, http-conn-error-isolation, tcp-read-avail-error, write, cancel-drop, await-guard, timer-drop, timeout-drop, timeout-nested-guard, chan-cancel-drop, chan-timeout-drop, chan-negative-cap-guard, rendezvous-send-drop, send-on-closed-guard, double-close-guard, send-parked-close-guard, select-cancel-drop, select-timeout-drop, connect-park, http-idle-timeout, http-header-flood, http-write-timeout, http-body-timeout, http-body-bounds, http-pooled-serve, read-poll-once, http-utf8-body, http-binary-body; interleaved; stress-clean)"
 
 # Division-by-zero guard regression (CI gate). The fixture divides by a RUNTIME
 # zero (`10 / list_length(argv)` with no args), which neither the compiler nor
