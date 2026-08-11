@@ -633,7 +633,46 @@ Legend:
     -c '[^ -~\t]'; done` — stripping comments first is essential, since em dashes and `✓` in prose
     make a naive grep match nearly every file and report ~260 suites as covered when only 17 have
     non-ASCII test *data*.
-- [ ] `P3` **`term_read_key` panics on a non-ASCII keypress.** `runtime/sprout_runtime.c:3278`:
+- [x] `P3` **`term_read_key` panicked on a non-ASCII keypress. FIXED 2026-08-11.** It now assembles
+  the continuation bytes into a complete character and substitutes **U+FFFD** when the sequence is
+  truncated or invalid, instead of aborting. Typing an accented or non-Latin character in the REPL no
+  longer kills the session.
+  - **Why U+FFFD rather than an error channel** — the opposite of the choice made for
+    `bytes.to_string` / `read_file` / the http_server body, all of which reject: those return a
+    `Result` to a caller that can act on it, and `term_read_key` returns a bare `String` to a REPL
+    with no meaningful recovery for "that keypress was malformed". Verified prior art: the **WHATWG
+    Encoding Standard** ("The constraints in the UTF-8 decoder above match 'Best Practices for Using
+    U+FFFD' from the Unicode standard"; "No other behavior is permitted per the Encoding Standard")
+    and **Rust's `String::from_utf8_lossy`** ("will replace any invalid UTF-8 sequences with `U+FFFD
+    REPLACEMENT CHARACTER`").
+  - The invariant the abort protected — every returned `String` is valid UTF-8 — still holds, now by
+    construction: assembled bytes go through the existing `utf8_validate`, which stays the single
+    authority (catching overlongs, surrogates and out-of-range, which a length check alone would not).
+    C0/C1 and F5..FF are rejected before assembly so their "maximal subpart" is the single bad byte
+    and a following good byte is not dragged into the error.
+  - Two details easy to get wrong, both pinned by tests: assembly must happen **inside raw mode**,
+    because by the time the token dispatch runs `tcsetattr` has restored canonical mode where `read()`
+    blocks for a newline (VMIN=0/VTIME=1 bounds the wait, as the arrow-key path already did); and an
+    invalid continuation byte must be **pushed back**, since it is the next keystroke — swallowing it
+    loses a key, which no test of the malformed key alone would catch.
+  - Tests: `tests/c_runtime/term_read_key_safety.c` gains `multibyte` (2-byte) and `wide` (3- then
+    4-byte, so the continuation count comes from the lead byte), rewrites `badbyte` from "must abort"
+    to "must return U+FFFD", and adds `badcont` asserting the following byte survives. All confirmed to
+    fail against `origin/master`'s runtime.
+- [ ] `P2` **`just c-runtime-test` is an ORPHAN GATE and had rotted completely.** Found 2026-08-11
+  while fixing `term_read_key`. The harness's `compile()` linked only `runtime/sprout_runtime.c`; when
+  the runtime was split into `sprout_scheduler.c` + `sprout_poll.c`, **every** case in
+  `tests/c_runtime/` stopped linking (`symbol(s) not found: _scheduler_park_on_fd` …) and nothing
+  noticed, because `c-runtime-test` is referenced by **no aggregate recipe and no CI job** — not
+  `test`, not `gate`, not `.github/workflows/ci.yml`. Ten C-level regression assertions were silently
+  unrunnable, including the one documenting `term_read_key`'s abort contract: that contract was
+  "guarded" by a test which could not compile. The link line is fixed here (`runtime/*.c`) and all ten
+  cases pass. **Remaining, and it is the actual fix: wire it into a gate so it cannot rot again** — the
+  rot was caused by nothing running it, not by the link line. Also worth auditing whether any other
+  `justfile` recipe is similarly unreferenced. A gate nobody runs is worse than no gate, because it
+  reads as coverage.
+- [ ] ~~`P3` `term_read_key` panics~~ — original report, retained for the rationale:
+  `runtime/sprout_runtime.c:3278`:
   a single `read()` byte `>= 0x80` is at most the lead of a multi-byte sequence, so returning it would
   mint an invalid `String`; the builtin calls `tcp_fail` instead. That is a *deliberate* choice with a
   written rationale (review W2/R4, "assembling a full multibyte key is a separate deferred feature"),
