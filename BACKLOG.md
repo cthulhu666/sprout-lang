@@ -417,9 +417,17 @@ Legend:
   `scheduler_park_on_fd_timeout` reports a timeout (the server sheds that one connection and frees
   descriptors), while `task_sleep` / `with_timeout` still fail loudly, because there is no answer to
   give and returning early would silently break the only guarantee either makes.
+  **Second consequence, found 2026-08-11 during the C3 accept fix:** because `task_sleep` is fatal when
+  it cannot arm, *no Sprout code can back off while descriptors are exhausted* — which is exactly when
+  a server most wants to. The C3 retry therefore had to live in C, parking on the listener fd. A
+  bounded, Sprout-side accept policy wants a **listener readiness primitive**
+  (`tcp_listener_wait(listener, ms)` over `scheduler_park_on_fd_timeout`, which already degrades to
+  "not ready" instead of dying when the timer cannot be armed) — `tcp_wait` only accepts *connection*
+  handles, so listeners have no readiness primitive at all today. That is a new builtin and needs
+  approval; it would also let the accept retry be bounded rather than indefinite.
   **Remaining work — the timerfd-free backend**: one shared timerfd plus a deadline heap (or simply
   the `epoll_wait`/`kevent` timeout argument driven by a min-heap of deadlines), which is what a
-  production reactor does. It removes the per-park descriptor entirely on both backends and would
+  production reactor does. It would make `task_sleep` descriptor-free and dissolve the problem above. It removes the per-park descriptor entirely on both backends and would
   also **delete the `Task.park_timer_dead` exactly-once dance**, which exists *only* because a
   timerfd close must happen exactly once. Deliberately not bundled with the review fixes: it rewrites
   timer semantics for `task_sleep`, `with_timeout` and `select` across kqueue and epoll at once, and
@@ -570,9 +578,28 @@ Legend:
   is `#ifdef`-guarded.
   Once those retry, the remaining error bucket is `EBADF`/`EINVAL`/`ENOTSOCK` — none of which heal —
   so the "back off and retry N times" shape this entry proposed for them was dropped as pointless.
-  Final split: retry (EAGAIN parks, EINTR/ECONNABORTED/the eight continue) → `Err
-  TcpAcceptExhausted` (EMFILE/ENFILE/table-full; caller backs off and retries **indefinitely**,
-  nginx's `accept_mutex_delay` model, never fatal) → `Err TcpAcceptFailed` (report at once).
+  Final split: **everything transient is absorbed inside the builtin** — EAGAIN parks;
+  EINTR/ECONNABORTED/the eight continue; EMFILE/ENFILE **and** a full handle table park on the
+  listener fd and retry. Only `Err TcpAcceptFailed` reaches Sprout, and it is reported at once.
+  **The exhaustion retry had to be in C, and CI is what established that.** The first revision put a
+  back-off in Sprout with `task_sleep(100)`, which passed every local gate and failed on CI:
+  `runtime error: builtin task_sleep: could not arm a timer (descriptor exhaustion?)`. `task_sleep`
+  arms a **timerfd** on Linux, so the recovery path needed the very descriptor that had just run out,
+  and its arming failure is deliberately process-fatal (see the timerfd entry above — "there is no
+  answer to give"). macOS arms kqueue timers on the existing kqueue and needs no descriptor, so it was
+  invisible locally — the same platform asymmetry as accept(2)'s pending-network errnos, twice in one
+  change.
+  `task_yield` is not an alternative either: `pump_loop` polls **only when `rq_pop()` returns NULL**, so
+  a yield loop keeps the accept task runnable forever and the handlers whose completion frees
+  descriptors never wake — a livelock, worse than the abort being replaced. The wait must be on the
+  listener fd, and no Sprout-visible primitive registers one (`tcp_wait` takes a *connection* handle).
+  So this is not a policy-in-C regression from the read-side reduction: for reads Sprout **could**
+  express the wait, here it cannot. Parking costs no descriptor and converges — both backends are
+  level-triggered one-shot, so the park returns immediately while connections are pending (draining the
+  backlog) and becomes a real wait once drained, while the accepted connections' bounded reads shed on
+  their own because `scheduler_park_on_fd_timeout` degrades to reporting a timeout.
+  `TcpAcceptExhausted` was therefore **removed** rather than kept: no producer can return it, and a
+  variant nothing returns is worse than none.
   Prior art verified against primary sources before choosing: Go's `internal/poll.(*FD).Accept`
   retries EINTR/ECONNABORTED in-loop ("it's a silly error, so try again") and returns EMFILE to the
   caller; nginx's `ngx_event_accept` continues on ECONNABORTED and disables accept events on EMFILE;
@@ -585,10 +612,10 @@ Legend:
   that stops serving and reports success, harder to diagnose than the `exit(1)` being replaced. The
   typechecker accepts the bare bind, so nothing but convention prevents it. See the `P2` below.
   Tests: `tests/task_io_smoke/tcp_accept_bad_handle.spr` (deterministic, no timing — the load-bearing
-  coverage) and `http_accept_exhaustion.spr` (end-to-end survival under descriptor pressure at
-  `ulimit -n 32`). The second is honestly scoped in its own header: the EMFILE branch is only reached
-  in a narrow band of limits (measured hits at 32-40 on macOS, misses at 24 and 64), so a run that
-  does not reach it still passes, and what it asserts unconditionally is survival.
+  coverage of the contract) and `http_accept_exhaustion.spr` (end-to-end survival under descriptor
+  pressure at `ulimit -n 32`). The second is what caught the `task_sleep` mistake, and the redesign
+  also made it robust: with the retry in C it passes across `ulimit -n` **16-64**, where the Sprout
+  back-off version only reached the exhaustion path in a narrow 32-40 band on macOS.
 - [ ] `P2` **A bare `<-` bind of a `Result` in a `Unit`-returning function silently discards the
   `Err`.** Found 2026-08-11 while making `accept` recoverable. `fn f() -> Unit !{IO} = do { x <-
   returns_a_result(); ... }` type-checks, and on `Err` it returns early from `f` with the error

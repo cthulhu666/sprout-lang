@@ -8667,6 +8667,7 @@ long long tcp_accept(long long listener) {
   if (listener <= 0 || listener >= 2048 || !g_listener_used[listener])
     return tcp_net_err0("stdlib.net.TcpInvalidHandle");
   int fd;
+retry:
   for (;;) {
     fd = accept(g_listener_fd[listener], NULL, NULL);
     if (fd >= 0) break;
@@ -8675,16 +8676,40 @@ long long tcp_accept(long long listener) {
       continue;
     }
     if (tcp_accept_errno_is_retryable(errno)) continue;
-    if (errno == EMFILE || errno == ENFILE) return tcp_net_err0("stdlib.net.TcpAcceptExhausted");
+    /* Descriptor exhaustion. Park on the listener and retry rather than reporting it, because THIS IS
+     * THE ONLY LAYER THAT CAN WAIT for it. The wait has to be on the listener fd, and Sprout has no
+     * way to register one: tcp_wait takes a connection handle, and task_sleep needs a timerfd on Linux
+     * — which is precisely the descriptor that does not exist here, and whose arming failure is
+     * deliberately fatal (BACKLOG: "there is no answer to give"). task_yield is no use either: the
+     * pump only polls when NOTHING is runnable, so a yield loop would keep this task runnable forever
+     * and the handlers whose completion frees descriptors would never wake. That is a livelock, which
+     * is worse than the abort this replaces.
+     *
+     * Parking costs no descriptor (epoll_ctl/kevent on an fd we already hold) and converges: both
+     * backends are level-triggered one-shot, so while connections are pending the park returns at once
+     * and this drains the backlog, and once drained the listener is no longer readable and the park
+     * becomes a real wait. Meanwhile the accepted connections' bounded reads shed on their own —
+     * scheduler_park_on_fd_timeout reports a timeout when IT cannot arm a timerfd — so slots free.
+     *
+     * A bounded, Sprout-side policy would still be preferable to retrying forever here. It needs a
+     * listener readiness primitive that does not exist yet; filed in BACKLOG. */
+    if (errno == EMFILE || errno == ENFILE) {
+      scheduler_park_on_fd(g_listener_fd[listener], SPROUT_POLL_READ);
+      continue;
+    }
     return tcp_net_err1("stdlib.net.TcpAcceptFailed", (long long)(uintptr_t)strerror(errno));
   }
   tcp_set_nonblocking(fd);   /* accepted conn parks on EAGAIN */
   long long h = alloc_conn_handle();
   if (h < 0) {
-    /* The socket is accepted but unrepresentable, so it must be closed here — returning an Err
-     * without this would leak the descriptor and make the exhaustion permanent. */
+    /* Accepted but unrepresentable: all 2048 handles are live. The socket must be closed here or the
+     * descriptor leaks and the exhaustion becomes permanent, which means this connection is SHED.
+     * That is the right answer at 2048 live connections — the server is saturated — and it converges
+     * for the same reason as the EMFILE path above: shedding drains the backlog, after which the park
+     * is a real wait rather than an immediate return. */
     close(fd);
-    return tcp_net_err0("stdlib.net.TcpAcceptExhausted");
+    scheduler_park_on_fd(g_listener_fd[listener], SPROUT_POLL_READ);
+    goto retry;
   }
   g_conn_fd[h] = fd;
   g_conn_used[h] = 1;
