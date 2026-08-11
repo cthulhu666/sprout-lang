@@ -31,9 +31,15 @@ export fn mutvec_len(v: MutVec a) -> Int =
 export fn mutvec_get(v: MutVec a, i: Int) -> Maybe a !{IO} =
   vector_get(mutvec_raw(v), i)
 
-# O(1) unchecked read for fixed-layout callers (e.g. Vec3/Mat4) that know i is
-# in range. Routes through the unboxed vector_get_direct fast path, avoiding the
-# Maybe of mutvec_get. Panics if i is out of range — callers must guarantee it.
+# O(1) read for callers that know i is in range (e.g. Vec3/Mat4, or any indexed
+# numeric kernel). Routes through the unboxed vector_get_direct fast path, so it
+# allocates no Maybe per read — that is the whole point, and in a hot loop the
+# per-read Just dominates via GC pressure.
+#
+# It is still BOUNDS-CHECKED: vector_get_direct fails loudly out of range
+# ("vector_get_direct: index out of bounds"). "Direct" means no Maybe box, not no
+# check. Prefer this over `mutvec_get` wherever the index is known good, and
+# `vec_get_or`/`mutmatrix_at_or` where a fallback is wanted instead.
 export fn mutvec_at(v: MutVec a, i: Int) -> a !{IO} =
   vector_get_direct(mutvec_raw(v), i)
 
@@ -127,6 +133,21 @@ export fn mutmatrix_at_or(m: MutMatrix a, r: Int, c: Int, dflt: a) -> a !{IO} =
   match m with
   | MutMatrix rows cols data ->
       if r < 0 || r >= rows || c < 0 || c >= cols then dflt
+      else vector_get_direct(mutvec_raw(data), r * cols + c)
+
+# O(1) read for callers that know (r, c) is in range: the MutMatrix counterpart of `mutvec_at`.
+# Allocates no `Maybe`, and FAILS LOUDLY out of range rather than returning a neighbour.
+#
+# The row/column bounds are checked here rather than left to `vector_get_direct`'s flat check,
+# because the two are not the same test: an out-of-range COLUMN can still land inside the backing
+# vector (c = cols reads row r+1 column 0), so the flat check alone would silently return the wrong
+# cell. Only a fully out-of-range flat index would be caught, which is the minority of the mistakes
+# this accessor can make.
+export fn mutmatrix_at(m: MutMatrix a, r: Int, c: Int) -> a !{IO} =
+  match m with
+  | MutMatrix rows cols data ->
+      if r < 0 || r >= rows || c < 0 || c >= cols then
+        panic(`mutmatrix_at: (${int_to_string(r)}, ${int_to_string(c)}) out of range for ${int_to_string(rows)}x${int_to_string(cols)}`)
       else vector_get_direct(mutvec_raw(data), r * cols + c)
 
 # O(1). No-op when (r, c) is out of range.
