@@ -425,6 +425,28 @@ Legend:
   "not ready" instead of dying when the timer cannot be armed) — `tcp_wait` only accepts *connection*
   handles, so listeners have no readiness primitive at all today. That is a new builtin and needs
   approval; it would also let the accept retry be bounded rather than indefinite.
+  **DEFERRED after scoping it 2026-08-11 — do not build this as one small builtin, the sketch above
+  does not close.** Three findings, in order of how much they change the plan:
+  1. **It needs TWO builtins, not one.** `tcp_listener_wait` itself is trivial (~7 lines mirroring
+     `tcp_wait`, which is just a handle check plus `scheduler_park_on_fd_timeout`). But the obvious
+     consumer — `accept_timeout` = wait-for-readiness, then accept — is *not* bounded, because
+     `tcp_accept` PARKS INDEFINITELY on EAGAIN by design (that is the C3 fix). If another task wins
+     the race between the readiness signal and the accept, the "bounded" call parks forever, so the
+     API would be lying about its only guarantee. A genuinely bounded version also needs a
+     non-parking accept (`Err TcpWouldBlock` instead of a park), the way `tcp_read_some` relates to
+     the parking read. Two new pieces of host surface, not one.
+  2. **The motivating case is already solved, in C.** This item's own stated driver was backing off
+     under descriptor exhaustion, and `tcp_accept` now absorbs that by parking on the listener fd and
+     retrying. So the primitive would ship with NO consumer — and "keep host-side builtins minimal"
+     (AGENTS.md, Builtin vs Stdlib rule 4) is exactly the rule against that. A shutdown-polling use
+     case does not motivate it either: `scope_cancel` already force-drops a parked `serve_forever`
+     (`tests/task_io_smoke/http_serve_forever.spr` covers it).
+  3. **Its full value is gated on the timerfd-free backend below anyway.** Until that lands, every
+     bounded wait costs a descriptor on Linux, which is precisely the resource an exhaustion back-off
+     does not have — the reason the C3 retry had to live in C in the first place.
+  **What would make it worth building:** a concrete caller that must give up on accepting (a
+  supervisor rebinding a listener, a drain-then-rebind reload), and the timerfd-free backend so the
+  wait is descriptor-free. Then do both builtins together with that caller in the same change.
   **Remaining work — the timerfd-free backend**: one shared timerfd plus a deadline heap (or simply
   the `epoll_wait`/`kevent` timeout argument driven by a min-heap of deadlines), which is what a
   production reactor does. It would make `task_sleep` descriptor-free and dissolve the problem above. It removes the per-park descriptor entirely on both backends and would
@@ -627,6 +649,36 @@ Legend:
   in a non-`Result` context, of the shape "this bind can fail and the failure is unused — `match` it,
   or make the function return a `Result`". Cheap version: warn whenever the bound expression's type is
   `Result _ _` and the enclosing function's return type is not.
+  **SCOPED 2026-08-11 — the "cheap version" is not cheap, because the WARNING CHANNEL DOES NOT
+  EXIST.** Findings, so the next attempt does not re-derive them:
+  - `compiler.Diagnostic` already has a `DiagWarning source.SourcePos String` arm, and four drivers
+    already render it (`compile_driver` prints `WARNING:` to stderr without setting the failure flag;
+    `full_driver`, `lsp_driver` — as LSP severity 2 — and `analysis_service_driver` all handle it).
+    It looks ready. **It is constructed NOWHERE.** Every one of those is a consumer of a producer that
+    has never existed, so the rendering path is unexercised scaffolding, not working infrastructure.
+  - Worse, there is no channel for a warning on a *successful* compile: `CompileResult` is
+    `CompileOk (Dict types.Scheme) | CompileFail (List Diagnostic)`, so warnings can only be
+    delivered by FAILING. Emitting one from `infer` therefore means adding a diagnostics list to
+    `CompileOk` and threading it up through `checker.CheckOk` and `InferResult` — a change to the
+    compiler's core result type touching ~10 pattern sites across four drivers, plus inference.
+  - **A much smaller complete design exists: lint in the DRIVER, not in `infer`.** After a successful
+    check, `compile_driver` holds the typed env (`CompileOk (Dict types.Scheme)`) and can already
+    recover the AST (`parse_for_decls`). A standalone pass — walk each `FnDecl` body for `do` bind
+    steps, resolve the bound expression's callee in the env, warn when its return type is `Result _ _`
+    and the enclosing `fn`'s declared return type is not — needs NO change to `CompileResult`, no
+    threading through inference, and finally gives `DiagWarning` its first producer. It only handles
+    binds whose RHS is a named call, which is the reported shape; other RHS forms are a known gap
+    rather than a wrong answer.
+  - **Two decisions must be made before implementing, and they are the real blockers, not the code.**
+    (a) *Warn or error?* The construct is legal do-notation, so an error breaks working code.
+    (b) *What about the existing hits?* Nobody knows how many stdlib/compiler sites the rule would
+    flag, and each needs triage: some deliberately ignore a failure, and a rule that fires dozens of
+    times on landing gets suppressed rather than fixed. Measure the hit count with a throwaway pass
+    BEFORE choosing (a).
+    Per AGENTS.md a new diagnostic is a language change and goes through the Design Change Process —
+    including a prior-art survey of how comparable languages treat a discarded fallible bind (Rust's
+    `#[must_use]`/`let _ =`, Haskell's `-Wunused-do-bind`, Swift's `@discardableResult`, Go's errcheck
+    linters) — so it needs an approved design, not just an implementation.
 - [x] `P1` **http_server framed request bodies by codepoint count, not bytes (concurrency review C5).
   FIXED 2026-08-10.** `err_or_request` / `continue_read_request` / `read_remaining_body`
   (`stdlib/http_server.sprout`) compared `string.length` (UTF-8 codepoint count) against the
