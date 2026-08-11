@@ -65,13 +65,34 @@ Legend:
   **2 `-> List (Int, Int, Int, Int)` in the shipped `examples/astar.sprout`** — the
   exhaustiveness-defeating shape, latent only because the indices happen to be in range. Callee
   distribution is dominated by `mutvec_get` / `mutmatrix_get`.
-  **The `Maybe` migration is NOT a one-token deletion, unlike the `Result` one.** These sites *want*
-  the value — e.g. `examples/neural_network_train_xor.sprout:50`,
-  `w1_0 <- mutvec_get(w, idx_w1(j, 0))` in `fn hidden_out(...) -> Double`, where the author knows the
-  index is in range; dropping the bind loses `w1_0`. Each site needs a per-site choice
-  (`let x = with_default(e, d)`, a `let..else`, or a total accessor such as `mutvec_get_or`), so the
-  ergonomic escape should land *with* the rule, not after it. This is the cost driver for the whole
-  `P0` and the reason it is not a small change.
+  **The `Maybe` migration is a rename, not a one-token deletion.** These sites *want* the value —
+  e.g. `examples/neural_network_train_xor.sprout:50`, `w1_0 <- mutvec_get(w, idx_w1(j, 0))` in
+  `fn hidden_out(...) -> Double`, where the author knows the index is in range, so dropping the bind
+  loses `w1_0`. But all 87 are just **two callees** — `mutvec_get` (68) and `mutmatrix_get` (19) — and
+  the replacement mostly exists already: **`mutvec_at`** (`mutable.sprout:37`, exported) routes through
+  `vector_get_direct`, which IS bounds-checked (`sprout_runtime.c:7312`, `tcp_fail("vector_get_direct:
+  index out of bounds")`) — "unchecked read" in its comment means "no `Maybe` box", not "no bounds
+  check". So 68 sites are a one-identifier rename that also *removes* a `Maybe` allocation per read in
+  hot numeric loops, and the only new API needed is `mutmatrix_at` (~4 lines mirroring `mutvec_at`;
+  today only `mutmatrix_at_or` exists). Callers wanting a default already have `vec_get_or`,
+  `mutmatrix_at_or`, `maybe_with_default`, `result_with_default`.
+  **The spec's linear rule is a WRONG NORMATIVE SENTENCE, which is what switched the checker off.**
+  §5.8 already says "A consume may not follow a fallible bind", but keys it on "a block whose type is
+  `Maybe` or `Result`" and adds "Effectful blocks (`!{IO}`) run every step and are unaffected". Both
+  are wrong: the condition should be *the presence of a fallible bind*, and `!{IO}` is orthogonal to
+  short-circuiting. `linear_check.sprout:465` implements the sentence literally
+  (`lin_do(steps, block_short_circuits(dty), …)` on the block's tail type), so `handle`'s `Unit` block
+  type made `sc_block = false` and `conditional_consume` bailed at `:922` before looking at anything.
+  The diagnostic itself (`:269-270`) is already correctly worded — only its trigger is wrong. Also
+  `(§11)` at `spec-v0.md:870` is a dangling cross-reference: `§11` occurs once and no such section
+  exists, because the plain fallible `<-` bind has **no normative section at all** (§5.2.2 covers only
+  the refutable `else` form).
+  **Design: `docs/fallible-bind-typing-v0.md`** — full proposal with a survey verified by running
+  rustc 1.75.0 / GHC 9.10.1 / swiftc 6.2.4 / ocamlc 5.1.0 (4 of 4 reject; none warns), the root cause
+  (`infer_do_steps` types a block as its LAST step at `infer.sprout:3584-3587`, and `check_fn_body:5518`
+  unifies exactly that — so the tail IS checked and the short-circuit is not), and a fix that needs one
+  unification rather than new plumbing (`short_circuit_family` and the per-block `family` accumulator
+  already exist and already reject *mixed* families). Awaiting approval.
   **3. THE WORST CONSEQUENCE, and the reason this is `P0` rather than `P1`: the short-circuit's
   control-flow edges are invisible to the LINEARITY CHECKER, so a `consuming` value's exactly-once
   obligation can be silently skipped.** The type confusion above produces a wrong *value*; this breaks
