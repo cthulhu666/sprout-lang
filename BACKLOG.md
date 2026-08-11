@@ -808,9 +808,31 @@ Legend:
   **Regression:** `tests/task_io_smoke/tcp_nul_payload.spr` pins it at the `net` layer (bytes intact
   AND decoding refused), run under `SPROUT_GC_HDRCHECK=1` as well as the default — a default-build
   green run is exactly what let this reach CI. `tests/stdlib/test_bytes_find.spr` covers the search.
-  **Still open — `proc_run` is the remaining R2 site**, and the `proc_run` repro above still
-  reproduces. It is the same one-line shape (`sprout_gc_adopt_cstr` on unvalidated bytes) and the same
-  fix (return `Bytes`, decode through the choke point).
+  **`proc_run` DONE 2026-08-11.** Same one-line shape (`sprout_gc_adopt_cstr` on unvalidated bytes)
+  and the same fix: `ProcResult Int Bytes Bytes`, decoded through `bytes.to_string`. Both defects
+  measured before the change — `printf 'a\000b'` gave `byte_length 3, length 1` (silent truncation)
+  and aborted under `SPROUT_GC_HDRCHECK=1` which CI has ON; `printf 'a\377b'` exited 1 with
+  `builtin str_utf8: invalid UTF-8 lead byte` **when a walker touched the value, not at ingestion**,
+  so binary subprocess output was unusable and died at an arbitrary later point. API: `proc_stdout` /
+  `proc_stderr` are DELETED rather than retyped, so all 25 call sites had to be revisited instead of
+  silently changing meaning; replaced by `proc_stdout_bytes` / `proc_stderr_bytes` (lossless),
+  `proc_stdout_text` / `proc_stderr_text` (`Result Utf8Error String`, the choke point), and
+  `proc_stdout_or` / `proc_stderr_or` (fallback named at the call site — deliberately not a lossy
+  U+FFFD decoder, so a substitution stays visible where it happens). Regression:
+  `tests/stdlib/test_process_bytes.spr`, 21 assertions covering NUL and invalid-UTF-8 on both stdout
+  and stderr, each asserting bytes-intact AND decode-refused, plus valid text still decoding.
+  **One real reachability this closed, beyond the filed one:** `analysis_service_driver`'s
+  `collect_eval_output` fed the *evaluated program's* stdout — user-controlled — straight into a
+  String, so an expression printing a NUL or a bad sequence took down the whole analysis service.
+  **Ownership note for the runtime:** `bytes_from_chunk_bytes` COPIES, where `sprout_gc_adopt_cstr`
+  adopted, so `sprout_make_proc_result` now `free()`s both GrowBufs. It is the single hand-off point
+  for every early-return path in `sprout_proc_run_impl`, so the free belongs there and nowhere else.
+  **Remaining R2 producers:** `term_read_line`, `env_get`, `argv_get`. Note none of them has a cheap
+  NUL repro any more — the OS NUL-delimits env and argv so the byte cannot arrive, and
+  `term_read_line` truncates at the NUL on read (measured `byte_length 1` for `a\0b\n`): data loss,
+  not an inconsistent header. They can still mint **invalid-UTF-8** Strings, which HDRCHECK is blind
+  to (it compares `aux` against `strlen`, and a bad lead byte leaves those equal). See
+  docs/debugging.md, which now records this asymmetry.
 - [ ] `P2` **Full-duplex on one socket is inexpressible, and the restriction is CONSERVATIVE rather
   than fundamental.** Verified 2026-08-11 while deciding whether `net`'s raw-handle "escape hatch" was
   worth keeping. **Promoted in consequence 2026-08-11:** this is now the sole blocker on retiring the

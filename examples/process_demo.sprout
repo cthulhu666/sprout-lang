@@ -1,5 +1,5 @@
 module examples.process_demo
-import stdlib.process (ProcResult, proc_run, proc_run_stdin, proc_ok, proc_stdout, proc_stderr, proc_exit)
+import stdlib.process (ProcResult, proc_run, proc_run_stdin, proc_ok, proc_stdout_or, proc_exit)
 
 # Demonstrates stdlib.process: running subprocesses and capturing their output.
 #
@@ -12,7 +12,9 @@ fn status_line(ok: Bool) -> String =
 fn show_result(label: String, r: ProcResult) -> Unit !{IO} =
   do
     print(label ++ " [" ++ status_line(proc_ok(r)) ++ "] exit=" ++ to_string(proc_exit(r)))
-    print("  stdout: " ++ proc_stdout(r))
+    # A child chooses its own output bytes, so decoding can fail; the fallback is named at the
+    # call site rather than hidden in a lossy decoder.
+    print("  stdout: " ++ proc_stdout_or(r, "<not valid UTF-8>"))
 
 fn main() -> Unit !{IO} =
   do

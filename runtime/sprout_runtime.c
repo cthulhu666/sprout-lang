@@ -2971,12 +2971,40 @@ static void sprout_growbuf_append(GrowBuf* b, const char* p, size_t n) {
   b->data[b->len] = '\0';
 }
 
-// Build a Sprout ProcResult(Int, String, String) ADT value: (exit_code, stdout, stderr).
-// Takes GC ownership of out->data and err->data (both must be plain malloc'd buffers).
+// Build a Sprout ProcResult(Int, Bytes, Bytes) ADT value: (exit_code, stdout, stderr).
+// COPIES out->data and err->data into GC memory and frees the malloc'd originals. This is the
+// single ownership hand-off for both buffers — every early-return path in
+// sprout_proc_run_impl routes through here — so the free belongs here and nowhere else.
+//
+// W2 R2 (unvalidated ingestion). These used to be handed to sprout_gc_adopt_cstr, which stamps
+// the byte count into a CSTR header and returns a String. But a Sprout String is normatively
+// "always valid UTF-8, contains no NUL byte" (docs/spec-v0.md §strings), and a child process's
+// output is neither, by construction. Measured before this fix:
+//   proc_run(["printf", "a\000b"]) default build  -> byte_length 3, length 1: SILENT truncation
+//                                                    at the NUL, direction-dependent.
+//   the same under SPROUT_GC_HDRCHECK=1           -> abort in str_byte_len (aux=3 strlen=1),
+//                                                    and CI runs with HDRCHECK ON.
+//   proc_run(["printf", "a\377b"])                -> `runtime error: builtin str_utf8: invalid
+//                                                    UTF-8 lead byte`, exit 1, the moment any
+//                                                    walker touches it. Binary output from a
+//                                                    subprocess was therefore unusable outright.
+// Bytes carries an explicit length and imposes no encoding, so no illegal value is constructed
+// and NO validation is added here. Decoding is the caller's explicit step through
+// bytes.to_string — decision D4's single choke point, which rejects a NUL as well as bad UTF-8.
 static long long sprout_make_proc_result(int exit_code, GrowBuf* out, GrowBuf* err) {
-  out->data = sprout_gc_adopt_cstr(out->data, out->len, "proc_run: out of memory");  long long rooted_out = (long long)(uintptr_t)out->data;
+  sprout_gc_maybe_collect_threshold();
+  // Root each Bytes before the next allocation can collect. Use the ROOTED SLOT afterwards, not
+  // the returned pointer: a collection during the second allocation may move the first value,
+  // and only the slot is updated.
+  long long rooted_out =
+    (long long)(uintptr_t)bytes_from_chunk_bytes((const unsigned char*)out->data, out->len,
+                                                 "proc_run: out of memory");
+  free(out->data); out->data = NULL;
   SPROUT_GC_PUSH_I64_LOCAL(rooted_out);
-  err->data = sprout_gc_adopt_cstr(err->data, err->len, "proc_run: out of memory");  long long rooted_err = (long long)(uintptr_t)err->data;
+  long long rooted_err =
+    (long long)(uintptr_t)bytes_from_chunk_bytes((const unsigned char*)err->data, err->len,
+                                                 "proc_run: out of memory");
+  free(err->data); err->data = NULL;
   SPROUT_GC_PUSH_I64_LOCAL(rooted_err);
   long long tag = find_ctor_tag_by_name("stdlib.process.ProcResult");
   long long obj = sprout_make_registered_obj(3, tag, (long long)exit_code,

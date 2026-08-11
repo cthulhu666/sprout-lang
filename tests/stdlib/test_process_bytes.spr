@@ -1,0 +1,99 @@
+# native-only: proc_run_vec has no stage-0 interpreter binding
+#
+# REGRESSION (W2 R2, `proc_run` half). A child process's output must not become a Sprout String.
+#
+# The defect, reproduced before the fix — `sprout_make_proc_result` ended in
+# `sprout_gc_adopt_cstr(buf, len, …)`, which stamps the byte count into the CSTR header and hands
+# back a String. But a String is normatively "always valid UTF-8, contains no NUL byte"
+# (docs/spec-v0.md §strings), and a child chooses its own output bytes, so the value was illegal.
+# Measured, both cases, before the fix:
+#
+#   proc_run(["printf", "a\000b"])  default build       -> byte_length 3, length 1. The header was
+#     right and every strlen-based operation stopped at the NUL, so the corruption was SILENT and
+#     direction-dependent.
+#   the same under SPROUT_GC_HDRCHECK=1                 -> [sprout] HDRCHECK: str_byte_len aux=3
+#     strlen=1, then SIGABRT. CI runs with HDRCHECK ON, so this was a latent CI abort waiting for
+#     the first test to exercise it.
+#   proc_run(["printf", "a\377b"])                      -> runtime error: builtin `str_utf8`:
+#     invalid UTF-8 lead byte, exit 1 — note this fired when a WALKER touched the value, not at
+#     ingestion, so the process died at an arbitrary later point. Binary output from a subprocess
+#     was unusable outright.
+#
+# No validation was added anywhere to fix this. The payloads are `Bytes`, so no illegal String is
+# ever constructed, and `bytes.to_string` is the one place bytes become text — decision D4's choke
+# point, which rejects a NUL as well as invalid UTF-8. Both halves are asserted below for each
+# case: the bytes survive intact, AND decoding them is refused.
+#
+# tests/task_io_smoke/tcp_nul_payload.spr is the sibling for the `net` half of the same reduction.
+import stdlib.test (TestState, new_state, assert_eq, assert_true, assert_false, summary)
+import stdlib.process (ProcResult, proc_run, proc_run_stdin, proc_exit, proc_ok, proc_stdout_bytes, proc_stderr_bytes, proc_stdout_text, proc_stdout_or, proc_stderr_or)
+import stdlib.bytes as bytes
+
+fn byte_at(value: Bytes, index: Int) -> Int =
+  maybe_with_default(-1, bytes.get(value, index))
+
+# Local rather than a `Result`-shaped assert helper, so the test never has to name Utf8Error.
+fn stdout_decodes(r: ProcResult) -> Bool =
+  match proc_stdout_text(r) with
+  | Ok _ -> true
+  | Err _ -> false
+
+fn stdout_text_or_marker(r: ProcResult) -> String =
+  proc_stdout_or(r, "<not-utf8>")
+
+fn main() -> Unit !{IO} =
+  do
+    state <- new_state()
+
+    # ── A NUL byte in the middle of stdout ────────────────────────────────────────
+    # `printf` interprets \000 itself, so the child writes three bytes: 'a', 0x00, 'b'.
+    r_nul <- proc_run(["printf", "a\\000b"])
+    let out_nul = proc_stdout_bytes(r_nul)
+    # Length 3 is the whole point: a value truncated at the NUL has length 1. The trailing 'b' is
+    # what proves nothing DOWNSTREAM of the NUL was dropped either.
+    assert_eq(state, "nul stdout length", bytes.length(out_nul), 3)
+    assert_eq(state, "nul stdout byte 0", byte_at(out_nul, 0), 97)
+    assert_eq(state, "nul stdout byte 1", byte_at(out_nul, 1), 0)
+    assert_eq(state, "nul stdout byte 2", byte_at(out_nul, 2), 98)
+    # The choke point. Delivering these bytes is correct; calling them text is not.
+    assert_false(state, "nul stdout decode refused", stdout_decodes(r_nul))
+    assert_eq(state, "nul stdout falls back", stdout_text_or_marker(r_nul), "<not-utf8>")
+
+    # ── An invalid UTF-8 sequence in stdout ──────────────────────────────────────
+    # 0xFF is not a legal UTF-8 lead byte in any position. This is the case that used to KILL the
+    # process rather than merely corrupt a value.
+    r_bad <- proc_run(["printf", "a\\377b"])
+    let out_bad = proc_stdout_bytes(r_bad)
+    assert_eq(state, "bad-utf8 stdout length", bytes.length(out_bad), 3)
+    assert_eq(state, "bad-utf8 stdout byte 0", byte_at(out_bad, 0), 97)
+    assert_eq(state, "bad-utf8 stdout byte 1", byte_at(out_bad, 1), 255)
+    assert_eq(state, "bad-utf8 stdout byte 2", byte_at(out_bad, 2), 98)
+    assert_false(state, "bad-utf8 stdout decode refused", stdout_decodes(r_bad))
+
+    # ── The same on stderr, which is a separate buffer and a separate conversion ──
+    r_err <- proc_run(["sh", "-c", "printf 'x\\377y' >&2"])
+    let err_bad = proc_stderr_bytes(r_err)
+    assert_eq(state, "bad-utf8 stderr length", bytes.length(err_bad), 3)
+    assert_eq(state, "bad-utf8 stderr byte 1", byte_at(err_bad, 1), 255)
+    assert_eq(state, "bad-utf8 stderr falls back", proc_stderr_or(r_err, "<not-utf8>"), "<not-utf8>")
+
+    # ── Ordinary text still decodes, so the fix is not "refuse everything" ───────
+    r_ok <- proc_run(["echo", "hello world"])
+    assert_true(state, "text stdout decodes", stdout_decodes(r_ok))
+    assert_eq(state, "text stdout value", stdout_text_or_marker(r_ok), "hello world\n")
+    # An empty stderr must decode to "" rather than being refused — 0 bytes is valid UTF-8.
+    assert_eq(state, "empty stderr decodes", proc_stderr_or(r_ok, "<not-utf8>"), "")
+
+    # ── Binary round-trip through stdin, the path with a second buffer in play ────
+    # `cat` echoes stdin verbatim; the payload is text here because stdin_data is still a String
+    # (the input side of W2 R2 is a separate, unstarted item), but it confirms the output side of
+    # proc_run_stdin routes through the same Bytes conversion.
+    r_cat <- proc_run_stdin(["cat"], "round trip\n")
+    assert_true(state, "stdin round-trip ok", proc_ok(r_cat))
+    assert_eq(state, "stdin round-trip stdout", stdout_text_or_marker(r_cat), "round trip\n")
+
+    # ── A NUL-containing payload must not disturb the exit code or stderr split ───
+    assert_eq(state, "nul case exit code", proc_exit(r_nul), 0)
+    assert_eq(state, "nul case stderr empty", bytes.length(proc_stderr_bytes(r_nul)), 0)
+
+    summary(state)

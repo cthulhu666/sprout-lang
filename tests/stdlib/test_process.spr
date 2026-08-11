@@ -1,6 +1,15 @@
 # native-only: proc_run_vec/proc_run_stdin_vec have no stage-0 interpreter binding
 import stdlib.test (TestState, new_state, assert_eq, assert_true, assert_false, summary)
-import stdlib.process (ProcResult, proc_run, proc_run_stdin, proc_exit, proc_stdout, proc_stderr, proc_ok)
+import stdlib.process (ProcResult, proc_run, proc_run_stdin, proc_exit, proc_stdout_or, proc_stderr_or, proc_ok)
+
+# These cases all run children with known TEXT output, so they decode through the choke point with a
+# marker fallback: if the Bytes→String step ever regressed, the assertion fails showing the marker
+# rather than passing on a silently mangled value. The binary cases live in test_process_bytes.spr.
+fn out(r: ProcResult) -> String =
+  proc_stdout_or(r, "<not-utf8>")
+
+fn err(r: ProcResult) -> String =
+  proc_stderr_or(r, "<not-utf8>")
 
 fn main() -> Unit !{IO} =
   do
@@ -10,8 +19,8 @@ fn main() -> Unit !{IO} =
     r_echo <- proc_run(["echo", "hello world"])
     assert_true(state, "echo ok", proc_ok(r_echo))
     assert_eq(state, "echo exit", proc_exit(r_echo), 0)
-    assert_eq(state, "echo stdout", proc_stdout(r_echo), "hello world\n")
-    assert_eq(state, "echo stderr", proc_stderr(r_echo), "")
+    assert_eq(state, "echo stdout", out(r_echo), "hello world\n")
+    assert_eq(state, "echo stderr", err(r_echo), "")
 
     # false returns exit 1
     r_false <- proc_run(["false"])
@@ -21,17 +30,17 @@ fn main() -> Unit !{IO} =
     # cat with stdin data round-trips the input
     r_cat <- proc_run_stdin(["cat"], "hello from stdin\n")
     assert_true(state, "cat stdin ok", proc_ok(r_cat))
-    assert_eq(state, "cat stdin stdout", proc_stdout(r_cat), "hello from stdin\n")
+    assert_eq(state, "cat stdin stdout", out(r_cat), "hello from stdin\n")
 
     # stderr is captured separately from stdout
     r_err <- proc_run(["sh", "-c", "echo err >&2; echo out"])
     assert_true(state, "stderr capture ok", proc_ok(r_err))
-    assert_eq(state, "stderr stdout line", proc_stdout(r_err), "out\n")
-    assert_eq(state, "stderr stderr line", proc_stderr(r_err), "err\n")
+    assert_eq(state, "stderr stdout line", out(r_err), "out\n")
+    assert_eq(state, "stderr stderr line", err(r_err), "err\n")
 
     # multi-word argv is passed correctly (no shell splitting)
     r_argv <- proc_run(["echo", "one", "two", "three"])
-    assert_eq(state, "argv words", proc_stdout(r_argv), "one two three\n")
+    assert_eq(state, "argv words", out(r_argv), "one two three\n")
 
     # argv_all collects all argv as a List String without crashing
     let _ = argv_all()
@@ -39,12 +48,12 @@ fn main() -> Unit !{IO} =
     # empty stdin string must not deadlock — child sees EOF immediately
     r_empty_stdin <- proc_run_stdin(["cat"], "")
     assert_true(state, "empty stdin ok", proc_ok(r_empty_stdin))
-    assert_eq(state, "empty stdin stdout", proc_stdout(r_empty_stdin), "")
+    assert_eq(state, "empty stdin stdout", out(r_empty_stdin), "")
 
     # EPIPE regression: child exits after reading 1 byte; writing more must not crash
     r_epipe <- proc_run_stdin(["head", "-c", "1"], "hello world")
     assert_true(state, "epipe ok", proc_ok(r_epipe))
-    assert_eq(state, "epipe stdout", proc_stdout(r_epipe), "h")
+    assert_eq(state, "epipe stdout", out(r_epipe), "h")
 
     # empty argv must return an error result, not crash or UB
     r_empty <- proc_run([])
