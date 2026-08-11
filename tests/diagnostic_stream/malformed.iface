@@ -1,0 +1,4 @@
+this file is not a valid .iface at all
+it exists and is readable, which is the point: `--check-iface` must report INVALID and
+exit nonzero for a file it CAN read but cannot decode, and it must do the same for a
+file it cannot read at all. The second case used to be silent — see the smoke gate.

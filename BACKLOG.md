@@ -14,6 +14,55 @@ Legend:
 - [x] `P0` Define runtime error conventions for effectful builtins (no silent exits).
 - [x] `P1` Add ergonomic helpers for control flow (`when_ok`, `when_error`, optional pipeline helpers).
 - [x] `P1` Decide how builtins participate in effect tracking; host-implemented builtins now follow the same effect-typing rule as ordinary functions, with runtime/external interaction tracked via `!{IO}` and value-level `Maybe`/`Result` shapes kept separate from effectfulness.
+- [ ] `P0` **UNSOUND: a `do` block's `Result` short-circuit is never type-checked against the
+  enclosing function's return type.** Found 2026-08-11 while measuring the blast radius of a proposed
+  "discarded fallible bind" lint (`docs/fallible-bind-diagnostic-v0.md`) — the lint was aimed at a
+  style problem and the underlying defect turned out to be **type confusion**, which is why it is
+  filed here at `P0` rather than as a diagnostics nicety.
+  **Mechanism, read off the emitted IR.** For `x <- e` where `e : Result E A`, codegen emits a
+  short-circuit that allocates a *fresh `Err` box* and returns it from the enclosing function, and the
+  `phi` merging it with the success value is typed `i64` — so nothing ever checks that the enclosing
+  function can carry an error, or carry *that* error:
+  ```llvm
+  do_short_2:                                        ; Err path, in `fn returns_int() -> Int !{IO}`
+    %t$5 = call i64 @sprout_alloc_obj(i64 8, i64 1)  ; a new Err box
+    store i64 %t$1, ptr %t$5$f0
+  do_cont_2:
+    %t$6 = add i64 0, 999
+  do_done_2:
+    %t$7 = phi i64 [%t$5, %do_short_2], [%t$6, %do_cont_2]
+    ret i64 %t$7                                     ; an Err BOX or an Int, from `-> Int`
+  ```
+  **Two observable consequences, both measured, both compile clean today:**
+  1. *Enclosing return type is not a `Result`.* The `Err` box is returned as that type.
+     `fn returns_int() -> Int !{IO}` binding a failing `Result String Int` returned
+     **35184372088840** (`0x200000000008` — a heap pointer printed as an `Int`). The same shape at
+     `-> String !{IO}` returned a pointer *interpreted as a CSTR*, printing `H\xef\xbf\xbdn` — i.e.
+     reading arbitrary heap bytes as text, exactly the class `SPROUT_GC_HDRCHECK` exists to catch.
+  2. *Enclosing return type is a `Result` with a DIFFERENT error type.* The error types are not
+     unified: `fn mismatched() -> Result Int Int` binding a `Result String Int` compiles, and the
+     `"boom"` String arrives as `Err e` with `e : Int` (printed **4377984392**, the string pointer).
+  **Boundaries, so the fix is not mis-scoped.** Not IO-specific — a wholly pure
+  `fn pure_bind() -> Int` binding a pure `Result String Int` is equally accepted and equally wrong.
+  Not affected by the binder: `_ <- e` emits the identical short-circuit, so `_ <-` is **not** a
+  soundness opt-out, only a silenced name. `Unit`-returning functions are the sole *unobservable*
+  case, because the returned `Err` box is discarded by convention — the type lie is the same, it
+  simply has no witness.
+  **Fix direction.** One missing unification explains both consequences: the short-circuit's type must
+  be required to match the enclosing function's declared return type — i.e. `x <- (e : Result E A)` is
+  well-typed only in a function returning `Result E' A'` with `E ~ E'`. That is a type ERROR, not a
+  warning. Haskell gets this free because a `do` block's monad is fixed by its type; Sprout's `do` is
+  overloaded across `!{IO}` sequencing and `Result` short-circuiting, so the rule has to be stated
+  explicitly. Note the consequence for the lint proposal: its prior-art survey (Rust
+  `unused_must_use`, Swift SE-0047, GHC `-Wunused-do-bind`) is about *discarding a value*, a style
+  concern where "warn, never error" is the right answer — importing that consensus here would leave
+  memory-unsafe code compiling with a warning. Different problem, different severity.
+  **Known affected sites** (latent, not live — see the measurement in the doc): `probe_ir -> String`
+  in `tests/stdlib/test_unresolved_dict_poison.spr` is the dangerous shape; `accept_forever -> Int` in
+  three `tests/task_io_smoke/` fixtures is the `Int` shape, and cannot currently fire because
+  `tcp_accept` parks rather than returning `Err` there. The one `Unit` site in production
+  (`run_check_iface`) is fixed. Needs: spec wording for the typing rule, positive/negative checker
+  tests, and a decision on whether the `Unit` case is permitted explicitly or also rejected.
 - [ ] `P2` **`merge_effects` drops one variable side (`infer.sprout` ~340-346)** (fundamentals review, static finding — masked today by effect enforcement being off, cf. D2/W6 below). When merging two effect rows where at least one side is a variable, `merge_effects` only propagates one of the two variable sides instead of unifying/merging both — a latent effect-inference bug currently invisible because the effect system isn't enforced (a pure function calling `!{IO}` code passes the checker regardless, per the fundamentals review's item 1). Revisit once the deferred effect-system design pass (D2/W6) lands and effects actually gate compilation — fixing this before enforcement exists has no observable payoff and no test would catch a regression today. Full findings: `docs/fundamentals-code-review-handoff-2026-07-03.md`.
 - [ ] `P2` Move `stdlib.compiler` to a dedicated tooling/compiler namespace once the non-stdlib tooling-package model is settled.
 - [ ] `P2` Add syntactic sugar for `Ref` operations in do-notation: `:=` for `ref_write`, `<~` for a ref-read bind step, and `var x = expr` as `x <- ref_new(expr)`.
@@ -649,8 +698,20 @@ Legend:
   in a non-`Result` context, of the shape "this bind can fail and the failure is unused — `match` it,
   or make the function return a `Result`". Cheap version: warn whenever the bound expression's type is
   `Result _ _` and the enclosing function's return type is not.
-  **SCOPED 2026-08-11 — the "cheap version" is not cheap, because the WARNING CHANNEL DOES NOT
-  EXIST.** Findings, so the next attempt does not re-derive them:
+  **DESIGNED 2026-08-11 — awaiting a call on severity. Full proposal, measurement and verified
+  prior-art survey: [docs/fallible-bind-diagnostic-v0.md](./docs/fallible-bind-diagnostic-v0.md).**
+  Headline numbers: of **1539** `<-` binds in the tree, **21** discarded fallible binds use `_ <-`
+  (deliberate — and `_ <-` is exactly how GHC suppresses its equivalent warning) and only **5** use a
+  named binder, of which **1** was production code. That one was a live defect and is **fixed**:
+  `run_check_iface` discarded `read_file`'s `Err`, so `--check-iface` printed nothing and exited 0 for
+  a file it never read, defeating the exit-status contract documented directly above it; regression in
+  `just diagnostic-stream-smoke`. Survey (each row verified against a primary source) is unanimous
+  that this is a **warning, never an error**, with an underscore call-site opt-out: Rust
+  `unused_must_use` warn-by-default + `let _ =`; GHC `-Wunused-do-bind` off-by-default + `_ <-`;
+  Swift SE-0047 warn-by-default + `_ =`. Recommended implementation is a **driver-side lint pass**,
+  not an `infer` change — see the doc for why the obvious route costs a change to the compiler's core
+  result type. Remaining blockers are decisions, not code: warn vs error, and whether CI gates on it.
+  Findings kept below, since they are the reason the doc exists:
   - `compiler.Diagnostic` already has a `DiagWarning source.SourcePos String` arm, and four drivers
     already render it (`compile_driver` prints `WARNING:` to stderr without setting the failure flag;
     `full_driver`, `lsp_driver` — as LSP severity 2 — and `analysis_service_driver` all handle it).

@@ -1153,8 +1153,34 @@ diagnostic-stream-smoke: bootstrap-from-seed
     grep -sE "^([0-9]+:[0-9]+: )?ERROR:" "$TMPD/ok.err" | head -3 >&2; failed=1
   fi
 
+  # --check-iface must never SUCCEED SILENTLY. Its own contract (compile_driver.sprout) promises a
+  # caller can gate on the exit status "instead of scraping text", and an unreadable path defeated
+  # that completely: `contents <- read_file(path)` discarded the Err and returned early, so the
+  # driver printed NOTHING and exited 0 for a file it never read. Found 2026-08-11 by the
+  # discarded-fallible-bind measurement (docs/fallible-bind-diagnostic-v0.md) — it was the only
+  # production hit in the whole tree.
+  #
+  # Two cases, because they take different paths: readable-but-undecodable, and unreadable.
+  for case in "$FIX/malformed.iface" "$TMPD/definitely-not-here.iface"; do
+    istatus=0
+    "$DRIVER" --check-iface "$case" > "$TMPD/i.out" 2>"$TMPD/i.err" || istatus=$?
+    if [[ "$istatus" -eq 0 ]]; then
+      echo "diagnostic-stream-smoke: --check-iface '$case' exited 0 — a status-gating caller sees SUCCESS." >&2
+      failed=1
+    fi
+    if ! grep -qs "^INVALID: " "$TMPD/i.out"; then
+      echo "diagnostic-stream-smoke: --check-iface '$case' printed no INVALID line:" >&2
+      head -3 "$TMPD/i.out" "$TMPD/i.err" >&2; failed=1
+    fi
+    # The greppable contract `just check-iface-all` consumes is `^OK:`; it must be absent here.
+    if grep -qs "^OK: " "$TMPD/i.out"; then
+      echo "diagnostic-stream-smoke: --check-iface '$case' claimed OK:" >&2
+      head -3 "$TMPD/i.out" >&2; failed=1
+    fi
+  done
+
   if (( failed > 0 )); then exit 1; fi
-  echo "==> diagnostic-stream-smoke ✓ (errors on stderr, nonzero exit, stdout artifact-only)"
+  echo "==> diagnostic-stream-smoke ✓ (errors on stderr, nonzero exit, stdout artifact-only, check-iface never silently OK)"
 
 # Dispatch-trace guard.  SPROUT_TRACE_DISPATCH=1 must emit a `[dispatch] ...` line
 # per constrained call site, and a projection sort (`vec_sort_by` with key type !=
