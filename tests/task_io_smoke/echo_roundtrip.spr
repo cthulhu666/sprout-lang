@@ -27,10 +27,15 @@ import stdlib.bytes as bytes
 # The listener is MOVED into the spawned task (task_spawn's work parameter is `once`), so the accept
 # still happens after the spawn and still parks.
 fn server(listener: consuming TcpListener) -> Unit !{IO} =
-  do
-    conn <- accept(listener)
-    close_listener(listener)
-    serve_rounds(conn)
+  match accept(listener) with
+  | Ok conn ->
+      do
+        close_listener(listener)
+        serve_rounds(conn)
+  | Err _ ->
+      do
+        close_listener(listener)
+        term_write("server accept failed\n")
 
 fn serve_rounds(conn: consuming TcpConnection) -> Unit !{IO} =
   do

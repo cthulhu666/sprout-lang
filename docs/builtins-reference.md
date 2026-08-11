@@ -38,7 +38,7 @@ Builtin effect convention:
 - `int_range_start(r: IntRange) -> Int`
 - `int_range_end(r: IntRange) -> Int`
 - `tcp_listen(port: Int) -> Int !{IO}`
-- `tcp_accept(listener: Int) -> Int !{IO}`
+- `tcp_accept(listener: Int) -> Result stdlib.net.TcpError Int !{IO}` — **recoverable**, not fatal. `EAGAIN` parks; `EINTR`, `ECONNABORTED` and the eight pending-network errnos [accept(2)](https://man7.org/linux/man-pages/man2/accept.2.html) says to *"treat like EAGAIN by retrying"* (`ENETDOWN`, `EPROTO`, `ENOPROTOOPT`, `EHOSTDOWN`, `ENONET`, `EHOSTUNREACH`, `EOPNOTSUPP`, `ENETUNREACH`) are retried inside the builtin, since none is an event a caller could act on. `EMFILE`/`ENFILE` and a full connection table become `Err TcpAcceptExhausted`, which a caller answers by backing off and retrying — the condition is transient, so this must never be fatal. Everything else (`EBADF`, `EINVAL`, `ENOTSOCK`) becomes `Err TcpAcceptFailed`, which does not heal and should stop the loop.
 - `tcp_write(conn: Int, payload: String) -> Unit !{IO}`
 - `tcp_connect(host: String, port: Int) -> Result stdlib.net.TcpError Int !{IO}`
 - `tcp_wait(conn: Int, interest: Int, ms: Int) -> Result stdlib.net.TcpError Int !{IO}` — **readiness only, moving no data.** Parks the calling task until the connection is ready for `interest` (1 = read, 2 = write, mirroring `SPROUT_POLL_READ`/`SPROUT_POLL_WRITE`) or `ms` elapses: `Ok(1)` = ready, `Ok(0)` = the deadline passed. `ms <= 0` reports "not ready" without parking, so a caller enforcing a *total* budget can pass the remaining slice and needs no special case once it is spent. Being interest-parameterised, this is the only park primitive read, write, connect and accept need.

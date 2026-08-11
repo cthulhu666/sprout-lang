@@ -1,11 +1,11 @@
 module stdlib.http_server
 
 import stdlib.http (HttpStatusError, RequestLine, RequestPathVersion, http_response, parse_request_line, status_line)
-import stdlib.net (TcpConnection, TcpListener, TcpTimeout, TcpEndOfStream, accept, close, close_listener, listen_local, read_avail_timeout, write_all_utf8_by)
+import stdlib.net (TcpConnection, TcpListener, TcpTimeout, TcpEndOfStream, TcpAcceptExhausted, TcpError, accept, close, close_listener, listen_local, read_avail_timeout, tcp_error_message, write_all_utf8_by)
 import stdlib.string as string
 import stdlib.bytes as bytes
 import stdlib.chan (Chan, Recv, Got, Closed, chan_new, chan_send, chan_recv, chan_close)
-import stdlib.task (Scope, with_scope, task_spawn, task_yield)
+import stdlib.task (Scope, with_scope, task_spawn, task_yield, task_sleep)
 import stdlib.url (parse_query)
 
 export type HttpRequest =
@@ -824,13 +824,59 @@ fn render_response_or_fallback(resp: HttpServerResponse) -> String =
 # sole consume. `listener` is consumed exactly once on every path — by
 # `close_listener` on the terminating branch, and by the recursive call itself on
 # the looping one.
+# How long to wait before retrying an accept that found no connection slot. nginx's equivalent knob is
+# `accept_mutex_delay` (default 500ms); this is shorter because a Sprout handler frees its slot as soon
+# as its connection closes, so the condition clears faster. Not in `ServerConfig` on purpose: adding a
+# field there breaks every existing construction, and no caller has asked to tune this yet.
+let accept_backoff_ms = 100
+
+# The accept policy, in ONE place so the three loops below cannot drift apart on it — which is exactly
+# how the read path ended up with three subtly different copies of its own retry loop.
+#
+# `Err TcpAcceptExhausted` is retried indefinitely, never counted, never fatal. That is the whole
+# point of C3: descriptor exhaustion is transient by construction (slots free as connections close),
+# so the answer is to wait, which is what nginx does — disable accept events, re-arm on a timer —
+# rather than to fail. A server that dies because it was momentarily busy is the bug.
+#
+# `Err TcpAcceptFailed` is returned immediately with no retry. Once the runtime's retryable set is
+# handled (EINTR, ECONNABORTED and the eight pending-network errnos accept(2) says to treat like
+# EAGAIN), what remains is EBADF/EINVAL/ENOTSOCK — a closed listener or a bug. None of those become
+# true later, so a counter would only delay the report.
+#
+# NOTE the shape: an explicit `match`, never `conn <- accept(listener)`. In a `Unit !{IO}` function a
+# bare bind of an `Err` silently RETURNS EARLY and discards it, so the loop would just stop and the
+# process would exit 0 — a server that stops serving and reports success, which is harder to diagnose
+# than the exit(1) this replaces. The typechecker accepts the bare bind, so this is a convention the
+# comment has to carry.
+fn accept_persistently(listener: borrowing TcpListener) -> Result TcpError TcpConnection !{IO} =
+  match accept(listener) with
+  | Ok conn -> Ok(conn)
+  | Err TcpAcceptExhausted ->
+      do
+        task_sleep(accept_backoff_ms)
+        accept_persistently(listener)
+  | Err err -> Err(err)
+
+# Reached only when the listener itself is unusable, so there is nothing left to serve. Loud on
+# purpose: `http_server` has no logging of its own, and the alternative — returning quietly — turns an
+# unserviceable server into one that looks like a clean shutdown.
+fn accept_fatal(err: TcpError) -> a !{IO} =
+  panic(`http_server: accept failed on the listener: ${tcp_error_message(err)}`)
+
 fn serve_loop(scope: Scope, listener: consuming TcpListener, remaining: Int, config: ServerConfig, handler: HttpRequest -> HttpServerResponse !{IO}) -> Unit !{IO} =
   if remaining == 0 then close_listener(listener)
   else
-    do
-      conn <- accept(listener)
-      task_spawn(scope, \_ -> handle_connection(config, conn, handler))
-      serve_loop(scope, listener, remaining - 1, config, handler)
+    match accept_persistently(listener) with
+    # `remaining` decrements only here. A failed accept served no connection, so counting it would let
+    # a burst of accept failures end a bounded run early — and this is the path CI's serve_n uses.
+    | Ok conn ->
+        do
+          task_spawn(scope, \_ -> handle_connection(config, conn, handler))
+          serve_loop(scope, listener, remaining - 1, config, handler)
+    | Err err ->
+        do
+          close_listener(listener)
+          accept_fatal(err)
 
 # `with_scope` does not return until every spawned handler has finished, so no
 # connection outlives the call (structured concurrency — no orphaned handlers).
@@ -851,10 +897,15 @@ export fn serve_n_with(config: ServerConfig, port: Int, max_connections: Int, ha
 # lifetime — and yet this is NOT a linear leak: the tail call consumes it, which
 # is the accurate reading, since the next iteration really does own it.
 fn serve_forever_loop(scope: Scope, listener: consuming TcpListener, config: ServerConfig, handler: HttpRequest -> HttpServerResponse !{IO}) -> Unit !{IO} =
-  do
-    conn <- accept(listener)
-    task_spawn(scope, \_ -> handle_connection(config, conn, handler))
-    serve_forever_loop(scope, listener, config, handler)
+  match accept_persistently(listener) with
+  | Ok conn ->
+      do
+        task_spawn(scope, \_ -> handle_connection(config, conn, handler))
+        serve_forever_loop(scope, listener, config, handler)
+  | Err err ->
+      do
+        close_listener(listener)
+        accept_fatal(err)
 
 # Serve requests forever. Unlike `serve_n`, this never returns under normal
 # operation — the enclosing `with_scope` join is unreachable, which is exactly
@@ -939,10 +990,18 @@ fn pooled_accept_loop(ch: Chan TcpConnection, listener: consuming TcpListener, r
       chan_close(ch)
       close_listener(listener)
   else
-    do
-      conn <- accept(listener)
-      chan_send(ch, conn)
-      pooled_accept_loop(ch, listener, remaining - 1)
+    match accept_persistently(listener) with
+    | Ok conn ->
+        do
+          chan_send(ch, conn)
+          pooled_accept_loop(ch, listener, remaining - 1)
+    | Err err ->
+        do
+          # Same ordering constraint as the clean-shutdown path above: the channel must be closed
+          # before the scope join, or every worker parked in `chan_recv` is a task that never finishes.
+          chan_close(ch)
+          close_listener(listener)
+          accept_fatal(err)
 
 # The channel is threaded as a PARAMETER rather than bound with `ch <- chan_new(scope, depth)`.
 # That is not a style choice: a do-bind of a container holding a linear payload is rejected by the

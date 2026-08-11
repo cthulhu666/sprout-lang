@@ -31,10 +31,15 @@ fn echo(conn: consuming TcpConnection) -> Unit !{IO} =
 fn serve_loop(listener: borrowing TcpListener, remaining: Int) -> Unit !{IO} =
   if remaining <= 0 then term_write("connection budget exhausted\n")
   else
-    do
-      conn <- accept(listener)
-      echo(conn)
-      serve_loop(listener, remaining - 1)
+    match accept(listener) with
+    | Ok conn ->
+        do
+          echo(conn)
+          serve_loop(listener, remaining - 1)
+    # Recoverable since the C3 fix: before it, any accept error killed the process. Note this stops the
+    # loop rather than retrying — `stdlib.http_server` is where the retry-and-back-off policy lives,
+    # and duplicating it here would make a minimal example less minimal.
+    | Err err -> term_write(`accept failed: ${tcp_error_message(err)}\n`)
 
 fn main() -> Unit !{IO} =
   do
