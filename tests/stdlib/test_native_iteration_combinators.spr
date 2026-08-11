@@ -1,13 +1,13 @@
 import stdlib.test (TestState, new_state, assert_eq, summary)
-import stdlib.mutable (MutVec, mutvec_new, mutvec_get, mutvec_set)
+import stdlib.mutable (MutVec, mutvec_new, mutvec_at, mutvec_set)
 
 # Named helper steps (B1: multi-statement lambda bodies must be lifted to named fns).
 # Single-expression lambdas at call sites may still close over locals (e.g. `v`).
 
 fn dot_step(a: MutVec Int, b: MutVec Int, acc: Int, i: Int) -> Int !{IO} =
   do
-    ai <- mutvec_get(a, i)
-    bi <- mutvec_get(b, i)
+    ai <- mutvec_at(a, i)
+    bi <- mutvec_at(b, i)
     acc + ai * bi
 
 fn add_step(acc: Int, x: Int) -> Int = acc + x
@@ -29,7 +29,7 @@ fn main() -> Unit !{IO} =
     #    range(0, 3) writes indices 0..3; v[i] = i*i, so v[3] = 9.
     v <- mutvec_new(4, 0)
     _ <- range_each(\i -> mutvec_set(v, i, i * i), range(0, 3))
-    v3 <- mutvec_get(v, 3)
+    v3 <- mutvec_at(v, 3)
     assert_eq(state, "range_each fills v[3] = 3*3", v3, 9)
 
     # 3. range_fold, EFFECTFUL step: dot product of two length-4 vectors.
@@ -48,7 +48,7 @@ fn main() -> Unit !{IO} =
     # 4. list_each, effectful step: sum a list into a cell.
     cell <- mutvec_new(1, 0)
     _ <- list_each(\x -> add_into(cell, x), Cons(10, Cons(20, Cons(30, Nil))))
-    total <- mutvec_get(cell, 0)
+    total <- mutvec_at(cell, 0)
     assert_eq(state, "list_each accumulates into cell", total, 60)
 
     # 5. list_fold, PURE step, data-last.
@@ -65,5 +65,5 @@ fn main() -> Unit !{IO} =
 # so it is invoked via a single-expression lambda at the call site).
 fn add_into(cell: MutVec Int, x: Int) -> Unit !{IO} =
   do
-    cur <- mutvec_get(cell, 0)
+    cur <- mutvec_at(cell, 0)
     mutvec_set(cell, 0, cur + x)

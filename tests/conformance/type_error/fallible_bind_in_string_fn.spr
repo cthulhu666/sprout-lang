@@ -1,0 +1,15 @@
+module main
+
+# The `-> String` shape is the dangerous one: the returned `Err` box is a pointer
+# read as a CSTR, printing arbitrary heap bytes as text.
+
+fn may_fail(x: Int) -> Result String Int =
+  if x > 0 then Ok(x) else Err("boom")
+
+fn returns_string() -> String =
+  do
+    v <- may_fail(0)
+    "got " ++ int_to_string(v)
+
+fn main() -> Unit !{IO} =
+  print(returns_string())

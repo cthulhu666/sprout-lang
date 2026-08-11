@@ -40,14 +40,17 @@ fn probe_program() -> typed_ast.TypedProgram =
                           source.SourcePos(0, 0, 0))),
     Nil))
 
-# Lower the probe to LLVM text.  `<-` on translate_program's `Result … !{IO}`
-# binds the success value (the (IRProgram, Dict Int) tuple), so this helper
-# returns a plain `String !{IO}` — never `<-`-bound as a Result by main.
+# Lower the probe to LLVM text. This used to `<-`-bind translate_program's
+# `Result String (IRProgram, Dict Int)` and return a plain `String`, on the
+# reasoning that binding the success value made the error irrelevant. It did not:
+# the bind SHORT-CIRCUITS by returning the `Err` box out of `probe_ir`, where it
+# would have been read as a `String` — a pointer printed as text, the exact shape
+# `SPROUT_GC_HDRCHECK` exists to catch. Rejected by §5.9 now; the failure is
+# handled here instead, where the error message is still a `String` worth showing.
 fn probe_ir() -> String !{IO} =
-  do
-    pair <- ast_to_ir.translate_program(probe_program())
-    match pair with
-    | (ir_prog, _) -> ir_lowering.lower_program(ir_prog)
+  match ast_to_ir.translate_program(probe_program()) with
+  | Err e -> panic("probe_ir: translate_program failed: " ++ e)
+  | Ok (ir_prog, _) -> ir_lowering.lower_program(ir_prog)
 
 fn main() -> Unit !{IO} =
   do

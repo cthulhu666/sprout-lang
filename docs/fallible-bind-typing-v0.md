@@ -1,10 +1,26 @@
 # Typing the fallible `do` bind (v0)
 
-**Status: PROPOSAL, NOT APPROVED, NOT IMPLEMENTED.** Written for the approval gate in
-`AGENTS.md` §Design Change Process. Fixes the `P0` in `BACKLOG.md` §1 ("a `do` block's `Result`
-short-circuit is never type-checked against the enclosing function's return type"). Supersedes the
-severity question left open in `docs/fallible-bind-diagnostic-v0.md`, which is a lint proposal for a
-different problem and whose measurement located this one.
+**Status: APPROVED AND IMPLEMENTED (2026-08-11).** The rule is normative in `docs/spec-v0.md` §5.9.
+Fixed the `P0` in `BACKLOG.md` §1 ("a `do` block's `Result` short-circuit is never type-checked
+against the enclosing function's return type"). Supersedes the severity question left open in
+`docs/fallible-bind-diagnostic-v0.md`, which is a lint proposal for a different problem and whose
+measurement located this one.
+
+**What changed from this proposal during implementation** — three things, all recorded in the
+`P0`'s closing note in `BACKLOG.md`:
+
+- §1.2(2) claimed wrong-family binds were plainly accepted. With any *concrete* tail they are not:
+  one of two pre-existing checks already fires. The case is reachable only through a tail whose
+  type is a fresh tyvar (`panic : a`), which slips past both — verified, and it produced a
+  `Nothing` box matching neither `Ok` nor `Err`. That is also why §4's "implementation risk" turned
+  out to be the load-bearing detail: the check unifies against a *constructed* `Result E ?a` /
+  `Maybe ?a` rather than comparing head names, which closes the tyvar hole by construction.
+- §4's step 3 (the linearity predicate) is **not** made redundant by steps 1–2, but nearly: the
+  typing rule now rejects the `Unit`-block shape first. What step 3 still buys is a false-positive
+  removal — the old block-keyed predicate wrongly rejected a *non-fallible* bind followed by a
+  consume in a `Result`-typed block. Both directions are pinned by tests.
+- §7's three tailored diagnostics: two of them do not fire where expected, because the conflict
+  only surfaces against the signature. Filed as a `P2` follow-up; see the `P0`'s "Known gap".
 
 Every claim below about another language was verified by running that language's compiler locally;
 versions and verbatim diagnostics are in §3. Every claim about Sprout's current behaviour was

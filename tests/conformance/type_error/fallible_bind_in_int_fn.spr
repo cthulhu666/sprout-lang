@@ -1,0 +1,16 @@
+module main
+
+# `P0`: a `Result` bind short-circuits by RETURNING the `Err` from the enclosing
+# function, so a function returning `Int` cannot host one -- it would return a heap
+# `Err` box read as an `Int` (measured: 35184372088840). See spec-v0.md §5.9.
+
+fn may_fail(x: Int) -> Result String Int =
+  if x > 0 then Ok(x) else Err("boom")
+
+fn returns_int() -> Int =
+  do
+    v <- may_fail(0)
+    v + 999
+
+fn main() -> Unit !{IO} =
+  print(int_to_string(returns_int()))

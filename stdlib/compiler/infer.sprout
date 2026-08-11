@@ -3526,6 +3526,15 @@ fn short_circuit_family(t: types.Type) -> Maybe String =
       | _ -> Nothing
   | _ -> Nothing
 
+# What a `<-` bind fixed about its block: the family name, the bind's right-hand-side
+# TYPE (so `Result`'s error slot can be unified, not merely matched by name), and the
+# bind's position (so the diagnostic points at the bind rather than the block).
+type DoFamily = DoFamily String types.Type source.SourcePos
+
+fn do_family_name(f: DoFamily) -> String = match f with | DoFamily n _ _ -> n
+fn do_family_type(f: DoFamily) -> types.Type = match f with | DoFamily _ t _ -> t
+fn do_family_pos(f: DoFamily) -> source.SourcePos = match f with | DoFamily _ _ p -> p
+
 # A do block may sequence exactly one short-circuit family.  A `<-` bind fixes
 # the family; a later bind or the final expression in a different family is an
 # error.  Returns Ok(updated-family) or Err(diagnostic).  IO/pure steps and
@@ -3534,28 +3543,116 @@ fn do_family_update(
   step: ast.DoStep,
   is_last: Bool,
   step_type: types.Type,
+  step_pos: source.SourcePos,
   subst: Dict types.Type,
-  family: Maybe String
-) -> Result String (Maybe String) =
+  family: Maybe DoFamily
+) -> Result String (Maybe DoFamily) =
   match short_circuit_family(unifier.apply_subst(subst, step_type)) with
   | Nothing -> Ok(family)
   | Just cur ->
       match step with
       | ast.DoBindStep _ _ ->
           match family with
-          | Nothing -> Ok(Just(cur))
+          | Nothing -> Ok(Just (DoFamily(cur, unifier.apply_subst(subst, step_type), step_pos)))
           | Just est ->
-              if est == cur then Ok(family)
-              else Err(string_concat_many(["This do block started with ", est, " bindings, but this step returns ", cur, ". Keep one short-circuit family per do block."]))
+              if do_family_name(est) == cur then Ok(family)
+              else Err(string_concat_many(["This do block started with ", do_family_name(est), " bindings, but this step returns ", cur, ". Keep one short-circuit family per do block."]))
       | ast.DoExprStep _ ->
           if is_last then
             match family with
             | Nothing -> Ok(family)
             | Just est ->
-                if est == cur then Ok(family)
-                else Err(string_concat_many(["do block started with ", est, " bindings, but its final expression returns ", cur]))
+                if do_family_name(est) == cur then Ok(family)
+                else Err(string_concat_many(["do block started with ", do_family_name(est), " bindings, but its final expression returns ", cur]))
           else Ok(family)
       | ast.DoLetStep _ _ -> Ok(family)
+
+# THE FALLIBLE-BIND RULE (spec-v0.md §5.9).
+#
+# `x <- e` with `e : Result E A` does not merely end the block on `Err` — it RETURNS
+# from the enclosing function carrying the failure. So the failure has to be a value
+# that function can return, and until this check existed nothing said so: a do block
+# is typed as its LAST step (see infer_do_steps' Nil arm) and `check_fn_body` unifies
+# exactly that against the declared return type, so the TAIL was checked and the
+# short-circuit path was not. A `-> Int` function binding a failing `Result` returned
+# a heap `Err` box read as an `Int`.
+#
+# The check is one unification against a CONSTRUCTED `Result E ?a` / `Maybe ?a`, not a
+# head-name comparison, and that matters in both directions:
+#
+#   - it unifies `Result`'s ERROR slot, which is the facet a name check would miss
+#     (`-> Result Int Int` binding a `Result String Int` compiled, and the String
+#     arrived as an `Int`);
+#   - it handles a block type that is still an unresolved TYPE VARIABLE, which is the
+#     only way the wrong-FAMILY case is reachable at all. With any concrete tail one
+#     of two pre-existing checks already fires, but a tyvar tail (`panic : a`) slips
+#     past both and then unifies with whatever the signature says — measured: a
+#     `Maybe` bind in a `-> Result String Int` compiled, and the `Nothing` box matched
+#     neither `Ok` nor `Err` at runtime. Unifying with `Maybe ?a` binds the tyvar
+#     instead, and `check_fn_body` then rejects `Maybe ?a` vs `Result String Int`.
+#
+# Because the block's type flows to the signature through that existing unification,
+# nothing has to be threaded down from the enclosing declaration.
+# Its own result type rather than a `Result`, for the reason this whole rule exists:
+# `carried <- do_block_carries(…)` on a `Result`-returning callee would be a FALLIBLE
+# BIND and would unwrap it, so the `match` below could never see an `Err`. (Written
+# with `Result` first, and the compiler — carrying the fix — rejected it.) The
+# codebase already uses this shape for the same reason: `InferResult`, `LinRes`.
+type BlockCarry = CarryOk(Dict types.Type) | CarryErr String source.SourcePos
+
+fn do_block_carries(
+  state: unifier.InferState,
+  family: Maybe DoFamily,
+  block_ty: types.Type,
+  subst: Dict types.Type
+) -> BlockCarry !{IO} =
+  match family with
+  | Nothing -> CarryOk(subst)
+  | Just fam ->
+      do
+        tv <- unifier.fresh(state)
+        let want =
+          if do_family_name(fam) == "Maybe" then types.type_maybe(types.TVar(types.tyvar_id(tv)))
+          else types.type_result(result_error_slot(do_family_type(fam)), types.TVar(types.tyvar_id(tv)))
+        match unifier.unify_types(subst, block_ty, want) with
+        | Ok s -> CarryOk(s)
+        | Err _ ->
+            CarryErr(fallible_bind_msg(do_family_name(fam), do_family_type(fam),
+                                       unifier.apply_subst(subst, block_ty)),
+                     do_family_pos(fam))
+
+# The `E` of a `Result E A`. Falls back to the whole type for anything else, which
+# cannot happen: the caller only reaches this having classified it as `Result`.
+fn result_error_slot(t: types.Type) -> types.Type =
+  match t with
+  | types.TApp outer _ ->
+      match outer with
+      | types.TApp _ e -> e
+      | _ -> t
+  | _ -> t
+
+# One tailored message per mismatch shape, as Rust does for `?`, rather than one
+# generic message: which of the three went wrong determines what the author should do.
+fn fallible_bind_msg(fam: String, sc_ty: types.Type, block_ty: types.Type) -> String =
+  match short_circuit_family(block_ty) with
+  | Nothing ->
+      string_concat_many([
+        "this `<-` bind propagates a ", fam, " failure (", types.type_to_string(sc_ty),
+        "), but the block returns ", types.type_to_string(block_ty),
+        ", which cannot carry it. Handle the failure here instead — use the value as a bare statement to discard it, or `with_default`/a total accessor to supply one — or make this function return ",
+        fam, "."])
+  | Just other ->
+      if other == fam then
+        string_concat_many([
+          "this `<-` bind fails with ", types.type_to_string(result_error_slot(sc_ty)),
+          ", but the block returns ", types.type_to_string(block_ty),
+          ". Convert the error at the bind with `map_error`."])
+      else
+        string_concat_many([
+          "a `", fam, "` bind needs a `", fam, "`-returning block, but this one returns ",
+          types.type_to_string(block_ty),
+          ". The two do not share a failure representation, so the short-circuit would return a ",
+          fam, " value as a ", other, "."])
 
 fn infer_do(
   state: unifier.InferState,
@@ -3576,22 +3673,30 @@ fn infer_do_steps(
   last_typed: typed_ast.TypedExpr,
   acc_steps: List typed_ast.TypedDoStep,
   acc_eff: types.Effect,
-  family: Maybe String,
+  family: Maybe DoFamily,
   pos: source.SourcePos
 ) -> InferResult !{IO} =
   match steps with
   | Nil ->
-      InferOk(
-        typed_ast.TDo(typed_do_step_list_reverse(acc_steps),
-                      typed_ast.typed_expr_type(last_typed), pos),
-        subst, eff_subst, acc_eff)
+      # The block is complete, so its type is known and the fallible-bind rule can be
+      # discharged against it (see do_block_carries).
+      do
+        carried <- do_block_carries(state, family, typed_ast.typed_expr_type(last_typed), subst)
+        match carried with
+        | CarryErr msg bind_pos -> InferErr(bind_pos, msg)
+        | CarryOk s ->
+            InferOk(
+              typed_ast.TDo(typed_do_step_list_reverse(acc_steps),
+                            unifier.apply_subst(s, typed_ast.typed_expr_type(last_typed)), pos),
+              s, eff_subst, acc_eff)
   | Cons step rest ->
       do
         sr <- infer_do_step(state, env, subst, eff_subst, step)
         match sr with
         | InferErr pos e -> InferErr(pos, e)
         | InferOk typed_step_expr s1 es1 step_eff ->
-            match do_family_update(step, is_nil_steps(rest), typed_ast.typed_expr_type(typed_step_expr), s1, family) with
+            match do_family_update(step, is_nil_steps(rest), typed_ast.typed_expr_type(typed_step_expr),
+                                   typed_ast.typed_expr_pos(typed_step_expr), s1, family) with
             | Err msg -> InferErr(pos, msg)
             | Ok new_family ->
                 infer_do_steps(

@@ -7,7 +7,7 @@ module main
 # pattern that is root-bound on the unboxed read.  Isolates the win that heavier
 # loops (A*) dilute.  Prints a checksum and the wall time in microseconds.
 
-import stdlib.mutable (MutVec, mutvec_new, mutvec_get, mutvec_set)
+import stdlib.mutable (MutVec, mutvec_new, mutvec_at, mutvec_set)
 
 # v[i] = i, so the per-pass sum is 0 + 1 + … + (n-1).
 fn fill(v: MutVec Int, i: Int, n: Int) -> Unit !{IO} =
@@ -21,7 +21,7 @@ fn sum_go(v: MutVec Int, i: Int, n: Int, acc: Int) -> Int !{IO} =
   if i >= n then acc
   else
     do
-      x <- mutvec_get(v, i)
+      x <- mutvec_at(v, i)
       sum_go(v, i + 1, n, acc + x)
 
 fn repeat_sum(v: MutVec Int, n: Int, reps: Int, acc: Int) -> Int !{IO} =

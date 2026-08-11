@@ -10452,163 +10452,75 @@ define i64 @examples.neural_network_train_xor.hidden_out(i64 %w, i64 %j, i64 %x1
 entry:
   %t$0 = add i64 0, 0
   %t$1 = call i64 @examples.neural_network_train_xor.idx_w1(i64 %j, i64 %t$0)
-  %t$2$st = call { i64, i64 } @stdlib.mutable.mutvec_get_worker(i64 %w, i64 %t$1)
-  %t$2 = extractvalue { i64, i64 } %t$2$st, 0
-  %t$3 = extractvalue { i64, i64 } %t$2$st, 1
-  %t$4 = add i64 0, 0
-  %t$5 = icmp eq i64 %t$2, %t$4
-  br i1 %t$5, label %do_short_4, label %do_cont_4
-do_short_4:
-  %t$7 = call i64 @sprout_alloc_obj(i64 0, i64 0)
-  br label %do_done_4
-do_cont_4:
-  %t$8 = add i64 0, 1
-  %t$9 = call i64 @examples.neural_network_train_xor.idx_w1(i64 %j, i64 %t$8)
-  %t$10$st = call { i64, i64 } @stdlib.mutable.mutvec_get_worker(i64 %w, i64 %t$9)
-  %t$10 = extractvalue { i64, i64 } %t$10$st, 0
-  %t$11 = extractvalue { i64, i64 } %t$10$st, 1
-  %t$12 = add i64 0, 0
-  %t$13 = icmp eq i64 %t$10, %t$12
-  br i1 %t$13, label %do_short_12, label %do_cont_12
-do_short_12:
-  %t$15 = call i64 @sprout_alloc_obj(i64 0, i64 0)
-  br label %do_done_12
-do_cont_12:
-  %t$16 = call i64 @examples.neural_network_train_xor.idx_b1(i64 %j)
-  %t$17$st = call { i64, i64 } @stdlib.mutable.mutvec_get_worker(i64 %w, i64 %t$16)
-  %t$17 = extractvalue { i64, i64 } %t$17$st, 0
-  %t$18 = extractvalue { i64, i64 } %t$17$st, 1
-  %t$19 = add i64 0, 0
-  %t$20 = icmp eq i64 %t$17, %t$19
-  br i1 %t$20, label %do_short_19, label %do_cont_19
-do_short_19:
-  %t$22 = call i64 @sprout_alloc_obj(i64 0, i64 0)
-  br label %do_done_19
-do_cont_19:
-  %t$23$la = bitcast i64 %t$3 to double
-  %t$23$lb = bitcast i64 %x1 to double
-  %t$23$fr = fmul double %t$23$la, %t$23$lb
-  %t$23 = bitcast double %t$23$fr to i64
-  %t$24$la = bitcast i64 %t$11 to double
-  %t$24$lb = bitcast i64 %x2 to double
-  %t$24$fr = fmul double %t$24$la, %t$24$lb
-  %t$24 = bitcast double %t$24$fr to i64
-  %t$25$la = bitcast i64 %t$23 to double
-  %t$25$lb = bitcast i64 %t$24 to double
-  %t$25$fr = fadd double %t$25$la, %t$25$lb
-  %t$25 = bitcast double %t$25$fr to i64
-  %t$26$la = bitcast i64 %t$25 to double
-  %t$26$lb = bitcast i64 %t$18 to double
-  %t$26$fr = fadd double %t$26$la, %t$26$lb
-  %t$26 = bitcast double %t$26$fr to i64
-  %t$27 = call i64 @examples.neural_network_train_xor.softsign(i64 %t$26)
-  br label %do_done_19
-do_done_19:
-  %t$28 = phi i64 [%t$22, %do_short_19], [%t$27, %do_cont_19]
-  br label %do_done_12
-do_done_12:
-  %t$29 = phi i64 [%t$15, %do_short_12], [%t$28, %do_done_19]
-  br label %do_done_4
-do_done_4:
-  %t$30 = phi i64 [%t$7, %do_short_4], [%t$29, %do_done_12]
-  ret i64 %t$30
+  %t$2 = call i64 @stdlib.mutable.mutvec_at(i64 %w, i64 %t$1)
+  %t$3 = add i64 0, 1
+  %t$4 = call i64 @examples.neural_network_train_xor.idx_w1(i64 %j, i64 %t$3)
+  %t$5 = call i64 @stdlib.mutable.mutvec_at(i64 %w, i64 %t$4)
+  %t$6 = call i64 @examples.neural_network_train_xor.idx_b1(i64 %j)
+  %t$7 = call i64 @stdlib.mutable.mutvec_at(i64 %w, i64 %t$6)
+  %t$8$la = bitcast i64 %t$2 to double
+  %t$8$lb = bitcast i64 %x1 to double
+  %t$8$fr = fmul double %t$8$la, %t$8$lb
+  %t$8 = bitcast double %t$8$fr to i64
+  %t$9$la = bitcast i64 %t$5 to double
+  %t$9$lb = bitcast i64 %x2 to double
+  %t$9$fr = fmul double %t$9$la, %t$9$lb
+  %t$9 = bitcast double %t$9$fr to i64
+  %t$10$la = bitcast i64 %t$8 to double
+  %t$10$lb = bitcast i64 %t$9 to double
+  %t$10$fr = fadd double %t$10$la, %t$10$lb
+  %t$10 = bitcast double %t$10$fr to i64
+  %t$11$la = bitcast i64 %t$10 to double
+  %t$11$lb = bitcast i64 %t$7 to double
+  %t$11$fr = fadd double %t$11$la, %t$11$lb
+  %t$11 = bitcast double %t$11$fr to i64
+  %t$12 = call i64 @examples.neural_network_train_xor.softsign(i64 %t$11)
+  ret i64 %t$12
 }
 
 define i64 @examples.neural_network_train_xor.forward(i64 %w, i64 %x1, i64 %x2) {
 entry:
   %t$0 = add i64 0, 0
-  %t$34 = alloca i64
-  store i64 %w, ptr %t$34
-  %t$35 = call i64 @sprout_gc_push_i64_root(ptr %t$34)
   %t$1 = call i64 @examples.neural_network_train_xor.hidden_out(i64 %w, i64 %t$0, i64 %x1, i64 %x2)
   %t$2 = add i64 0, 1
   %t$3 = call i64 @examples.neural_network_train_xor.hidden_out(i64 %w, i64 %t$2, i64 %x1, i64 %x2)
   %t$4 = add i64 0, 0
   %t$5 = call i64 @examples.neural_network_train_xor.idx_w2(i64 %t$4)
-  %t$6$st = call { i64, i64 } @stdlib.mutable.mutvec_get_worker(i64 %w, i64 %t$5)
-  %t$6 = extractvalue { i64, i64 } %t$6$st, 0
-  %t$7 = extractvalue { i64, i64 } %t$6$st, 1
-  %t$8 = add i64 0, 0
-  %t$9 = icmp eq i64 %t$6, %t$8
-  %t$36 = call i64 @sprout_gc_pop_roots(i64 1)
-  br i1 %t$9, label %do_short_8, label %do_cont_8
-do_short_8:
-  %t$11 = call i64 @sprout_alloc_obj(i64 0, i64 0)
-  br label %do_done_8
-do_cont_8:
-  %t$12 = add i64 0, 1
-  %t$13 = call i64 @examples.neural_network_train_xor.idx_w2(i64 %t$12)
-  %t$14$st = call { i64, i64 } @stdlib.mutable.mutvec_get_worker(i64 %w, i64 %t$13)
-  %t$14 = extractvalue { i64, i64 } %t$14$st, 0
-  %t$15 = extractvalue { i64, i64 } %t$14$st, 1
-  %t$16 = add i64 0, 0
-  %t$17 = icmp eq i64 %t$14, %t$16
-  br i1 %t$17, label %do_short_16, label %do_cont_16
-do_short_16:
-  %t$19 = call i64 @sprout_alloc_obj(i64 0, i64 0)
-  br label %do_done_16
-do_cont_16:
-  %t$20 = call i64 @examples.neural_network_train_xor.idx_b2()
-  %t$21$st = call { i64, i64 } @stdlib.mutable.mutvec_get_worker(i64 %w, i64 %t$20)
-  %t$21 = extractvalue { i64, i64 } %t$21$st, 0
-  %t$22 = extractvalue { i64, i64 } %t$21$st, 1
-  %t$23 = add i64 0, 0
-  %t$24 = icmp eq i64 %t$21, %t$23
-  br i1 %t$24, label %do_short_23, label %do_cont_23
-do_short_23:
-  %t$26 = call i64 @sprout_alloc_obj(i64 0, i64 0)
-  br label %do_done_23
-do_cont_23:
-  %t$27$la = bitcast i64 %t$7 to double
-  %t$27$lb = bitcast i64 %t$1 to double
-  %t$27$fr = fmul double %t$27$la, %t$27$lb
-  %t$27 = bitcast double %t$27$fr to i64
-  %t$28$la = bitcast i64 %t$15 to double
-  %t$28$lb = bitcast i64 %t$3 to double
-  %t$28$fr = fmul double %t$28$la, %t$28$lb
-  %t$28 = bitcast double %t$28$fr to i64
-  %t$29$la = bitcast i64 %t$27 to double
-  %t$29$lb = bitcast i64 %t$28 to double
-  %t$29$fr = fadd double %t$29$la, %t$29$lb
-  %t$29 = bitcast double %t$29$fr to i64
-  %t$30$la = bitcast i64 %t$29 to double
-  %t$30$lb = bitcast i64 %t$22 to double
-  %t$30$fr = fadd double %t$30$la, %t$30$lb
-  %t$30 = bitcast double %t$30$fr to i64
-  br label %do_done_23
-do_done_23:
-  %t$31 = phi i64 [%t$26, %do_short_23], [%t$30, %do_cont_23]
-  br label %do_done_16
-do_done_16:
-  %t$32 = phi i64 [%t$19, %do_short_16], [%t$31, %do_done_23]
-  br label %do_done_8
-do_done_8:
-  %t$33 = phi i64 [%t$11, %do_short_8], [%t$32, %do_done_16]
-  ret i64 %t$33
+  %t$6 = call i64 @stdlib.mutable.mutvec_at(i64 %w, i64 %t$5)
+  %t$7 = add i64 0, 1
+  %t$8 = call i64 @examples.neural_network_train_xor.idx_w2(i64 %t$7)
+  %t$9 = call i64 @stdlib.mutable.mutvec_at(i64 %w, i64 %t$8)
+  %t$10 = call i64 @examples.neural_network_train_xor.idx_b2()
+  %t$11 = call i64 @stdlib.mutable.mutvec_at(i64 %w, i64 %t$10)
+  %t$12$la = bitcast i64 %t$6 to double
+  %t$12$lb = bitcast i64 %t$1 to double
+  %t$12$fr = fmul double %t$12$la, %t$12$lb
+  %t$12 = bitcast double %t$12$fr to i64
+  %t$13$la = bitcast i64 %t$9 to double
+  %t$13$lb = bitcast i64 %t$3 to double
+  %t$13$fr = fmul double %t$13$la, %t$13$lb
+  %t$13 = bitcast double %t$13$fr to i64
+  %t$14$la = bitcast i64 %t$12 to double
+  %t$14$lb = bitcast i64 %t$13 to double
+  %t$14$fr = fadd double %t$14$la, %t$14$lb
+  %t$14 = bitcast double %t$14$fr to i64
+  %t$15$la = bitcast i64 %t$14 to double
+  %t$15$lb = bitcast i64 %t$11 to double
+  %t$15$fr = fadd double %t$15$la, %t$15$lb
+  %t$15 = bitcast double %t$15$fr to i64
+  ret i64 %t$15
 }
 
 define i64 @examples.neural_network_train_xor.accum(i64 %g, i64 %i, i64 %delta) {
 entry:
-  %t$0$st = call { i64, i64 } @stdlib.mutable.mutvec_get_worker(i64 %g, i64 %i)
-  %t$0 = extractvalue { i64, i64 } %t$0$st, 0
-  %t$1 = extractvalue { i64, i64 } %t$0$st, 1
-  %t$2 = add i64 0, 0
-  %t$3 = icmp eq i64 %t$0, %t$2
-  br i1 %t$3, label %do_short_2, label %do_cont_2
-do_short_2:
-  %t$5 = call i64 @sprout_alloc_obj(i64 0, i64 0)
-  br label %do_done_2
-do_cont_2:
-  %t$6$la = bitcast i64 %t$1 to double
-  %t$6$lb = bitcast i64 %delta to double
-  %t$6$fr = fadd double %t$6$la, %t$6$lb
-  %t$6 = bitcast double %t$6$fr to i64
-  %t$7 = call i64 @stdlib.mutable.mutvec_set(i64 %g, i64 %i, i64 %t$6)
-  %t$8 = add i64 0, 0
-  br label %do_done_2
-do_done_2:
-  %t$9 = phi i64 [%t$5, %do_short_2], [%t$8, %do_cont_2]
-  ret i64 %t$9
+  %t$0 = call i64 @stdlib.mutable.mutvec_at(i64 %g, i64 %i)
+  %t$1$la = bitcast i64 %t$0 to double
+  %t$1$lb = bitcast i64 %delta to double
+  %t$1$fr = fadd double %t$1$la, %t$1$lb
+  %t$1 = bitcast double %t$1$fr to i64
+  %t$2 = call i64 @stdlib.mutable.mutvec_set(i64 %g, i64 %i, i64 %t$1)
+  %t$3 = add i64 0, 0
+  ret i64 %t$3
 }
 
 define i64 @examples.neural_network_train_xor.accum_hidden(i64 %w, i64 %g, i64 %j, i64 %w2_j, i64 %h_j, i64 %d, i64 %x1, i64 %x2) {
@@ -10628,9 +10540,6 @@ entry:
   %t$5$lb = bitcast i64 %x1 to double
   %t$5$fr = fmul double %t$5$la, %t$5$lb
   %t$5 = bitcast double %t$5$fr to i64
-  %t$14 = alloca i64
-  store i64 %g, ptr %t$14
-  %t$15 = call i64 @sprout_gc_push_i64_root(ptr %t$14)
   %t$6 = call i64 @examples.neural_network_train_xor.accum(i64 %g, i64 %t$4, i64 %t$5)
   %t$7 = add i64 0, 1
   %t$8 = call i64 @examples.neural_network_train_xor.idx_w1(i64 %j, i64 %t$7)
@@ -10641,7 +10550,6 @@ entry:
   %t$10 = call i64 @examples.neural_network_train_xor.accum(i64 %g, i64 %t$8, i64 %t$9)
   %t$11 = call i64 @examples.neural_network_train_xor.idx_b1(i64 %j)
   %t$12 = call i64 @examples.neural_network_train_xor.accum(i64 %g, i64 %t$11, i64 %t$2)
-  %t$16 = call i64 @sprout_gc_pop_roots(i64 1)
   %t$13 = add i64 0, 0
   ret i64 %t$13
 }
@@ -10649,12 +10557,6 @@ entry:
 define i64 @examples.neural_network_train_xor.accum_sample_grad(i64 %w, i64 %g, i64 %x1, i64 %x2, i64 %target) {
 entry:
   %t$0 = add i64 0, 0
-  %t$41 = alloca i64
-  store i64 %w, ptr %t$41
-  %t$42 = call i64 @sprout_gc_push_i64_root(ptr %t$41)
-  %t$43 = alloca i64
-  store i64 %g, ptr %t$43
-  %t$44 = call i64 @sprout_gc_push_i64_root(ptr %t$43)
   %t$1 = call i64 @examples.neural_network_train_xor.hidden_out(i64 %w, i64 %t$0, i64 %x1, i64 %x2)
   %t$2 = add i64 0, 1
   %t$3 = call i64 @examples.neural_network_train_xor.hidden_out(i64 %w, i64 %t$2, i64 %x1, i64 %x2)
@@ -10686,54 +10588,16 @@ entry:
   %t$17 = call i64 @examples.neural_network_train_xor.accum(i64 %g, i64 %t$16, i64 %t$7)
   %t$18 = add i64 0, 0
   %t$19 = call i64 @examples.neural_network_train_xor.idx_w2(i64 %t$18)
-  %t$20$st = call { i64, i64 } @stdlib.mutable.mutvec_get_worker(i64 %w, i64 %t$19)
-  %t$20 = extractvalue { i64, i64 } %t$20$st, 0
-  %t$21 = extractvalue { i64, i64 } %t$20$st, 1
-  %t$22 = add i64 0, 0
-  %t$23 = icmp eq i64 %t$20, %t$22
-  %t$45 = call i64 @sprout_gc_pop_roots(i64 2)
-  br i1 %t$23, label %do_short_22, label %do_cont_22
-do_short_22:
-  %t$25 = call i64 @sprout_alloc_obj(i64 0, i64 0)
-  br label %do_done_22
-do_cont_22:
+  %t$20 = call i64 @stdlib.mutable.mutvec_at(i64 %w, i64 %t$19)
+  %t$21 = add i64 0, 1
+  %t$22 = call i64 @examples.neural_network_train_xor.idx_w2(i64 %t$21)
+  %t$23 = call i64 @stdlib.mutable.mutvec_at(i64 %w, i64 %t$22)
+  %t$24 = add i64 0, 0
+  %t$25 = call i64 @examples.neural_network_train_xor.accum_hidden(i64 %w, i64 %g, i64 %t$24, i64 %t$20, i64 %t$1, i64 %t$7, i64 %x1, i64 %x2)
   %t$26 = add i64 0, 1
-  %t$27 = call i64 @examples.neural_network_train_xor.idx_w2(i64 %t$26)
-  %t$28$st = call { i64, i64 } @stdlib.mutable.mutvec_get_worker(i64 %w, i64 %t$27)
-  %t$28 = extractvalue { i64, i64 } %t$28$st, 0
-  %t$29 = extractvalue { i64, i64 } %t$28$st, 1
-  %t$30 = add i64 0, 0
-  %t$31 = icmp eq i64 %t$28, %t$30
-  br i1 %t$31, label %do_short_30, label %do_cont_30
-do_short_30:
-  %t$33 = call i64 @sprout_alloc_obj(i64 0, i64 0)
-  br label %do_done_30
-do_cont_30:
-  %t$34 = add i64 0, 0
-  %t$46 = alloca i64
-  store i64 %w, ptr %t$46
-  %t$47 = call i64 @sprout_gc_push_i64_root(ptr %t$46)
-  %t$48 = alloca i64
-  store i64 %t$29, ptr %t$48
-  %t$49 = call i64 @sprout_gc_push_i64_root(ptr %t$48)
-  %t$50 = alloca i64
-  store i64 %t$21, ptr %t$50
-  %t$51 = call i64 @sprout_gc_push_i64_root(ptr %t$50)
-  %t$52 = alloca i64
-  store i64 %g, ptr %t$52
-  %t$53 = call i64 @sprout_gc_push_i64_root(ptr %t$52)
-  %t$35 = call i64 @examples.neural_network_train_xor.accum_hidden(i64 %w, i64 %g, i64 %t$34, i64 %t$21, i64 %t$1, i64 %t$7, i64 %x1, i64 %x2)
-  %t$36 = add i64 0, 1
-  %t$37 = call i64 @examples.neural_network_train_xor.accum_hidden(i64 %w, i64 %g, i64 %t$36, i64 %t$29, i64 %t$3, i64 %t$7, i64 %x1, i64 %x2)
-  %t$54 = call i64 @sprout_gc_pop_roots(i64 4)
-  %t$38 = add i64 0, 0
-  br label %do_done_30
-do_done_30:
-  %t$39 = phi i64 [%t$33, %do_short_30], [%t$38, %do_cont_30]
-  br label %do_done_22
-do_done_22:
-  %t$40 = phi i64 [%t$25, %do_short_22], [%t$39, %do_done_30]
-  ret i64 %t$40
+  %t$27 = call i64 @examples.neural_network_train_xor.accum_hidden(i64 %w, i64 %g, i64 %t$26, i64 %t$23, i64 %t$3, i64 %t$7, i64 %x1, i64 %x2)
+  %t$28 = add i64 0, 0
+  ret i64 %t$28
 }
 
 define i64 @examples.neural_network_train_xor.zero_grads(i64 %g$in, i64 %i$in) {
@@ -10771,85 +10635,57 @@ join_3:
 
 define i64 @examples.neural_network_train_xor.apply_update(i64 %w$in, i64 %g$in, i64 %lr$in, i64 %i$in) {
 entry:
-  %t$27 = alloca i64
-  store i64 %w$in, ptr %t$27
-  %t$28 = alloca i64
-  store i64 %g$in, ptr %t$28
-  %t$29 = alloca i64
-  store i64 %lr$in, ptr %t$29
-  %t$30 = alloca i64
-  store i64 %i$in, ptr %t$30
-  %t$31 = call ptr @llvm.stacksave()
+  %t$15 = alloca i64
+  store i64 %w$in, ptr %t$15
+  %t$16 = alloca i64
+  store i64 %g$in, ptr %t$16
+  %t$17 = alloca i64
+  store i64 %lr$in, ptr %t$17
+  %t$18 = alloca i64
+  store i64 %i$in, ptr %t$18
+  %t$19 = call ptr @llvm.stacksave()
   br label %tco_loop
 tco_loop:
-  %w = load i64, ptr %t$27
-  %g = load i64, ptr %t$28
-  %lr = load i64, ptr %t$29
-  %i = load i64, ptr %t$30
+  %w = load i64, ptr %t$15
+  %g = load i64, ptr %t$16
+  %lr = load i64, ptr %t$17
+  %i = load i64, ptr %t$18
   %t$0 = add i64 0, 9
   %t$1 = icmp sge i64 %i, %t$0
   %t$2 = zext i1 %t$1 to i64
-  %t$26 = trunc i64 %t$2 to i1
-  br i1 %t$26, label %then_3, label %else_3
+  %t$14 = trunc i64 %t$2 to i1
+  br i1 %t$14, label %then_3, label %else_3
 then_3:
   %t$5 = add i64 0, 0
   br label %join_3
 else_3:
-  %t$6$st = call { i64, i64 } @stdlib.mutable.mutvec_get_worker(i64 %w, i64 %i)
-  %t$6 = extractvalue { i64, i64 } %t$6$st, 0
-  %t$7 = extractvalue { i64, i64 } %t$6$st, 1
-  %t$8 = add i64 0, 0
-  %t$9 = icmp eq i64 %t$6, %t$8
-  br i1 %t$9, label %do_short_8, label %do_cont_8
-do_short_8:
-  %t$11 = call i64 @sprout_alloc_obj(i64 0, i64 0)
-  br label %do_done_8
-do_cont_8:
-  %t$12$st = call { i64, i64 } @stdlib.mutable.mutvec_get_worker(i64 %g, i64 %i)
-  %t$12 = extractvalue { i64, i64 } %t$12$st, 0
-  %t$13 = extractvalue { i64, i64 } %t$12$st, 1
-  %t$14 = add i64 0, 0
-  %t$15 = icmp eq i64 %t$12, %t$14
-  br i1 %t$15, label %do_short_14, label %do_cont_14
-do_short_14:
-  %t$17 = call i64 @sprout_alloc_obj(i64 0, i64 0)
-  br label %do_done_14
-do_cont_14:
-  %t$18$la = bitcast i64 %lr to double
-  %t$18$lb = bitcast i64 %t$13 to double
-  %t$18$fr = fmul double %t$18$la, %t$18$lb
-  %t$18 = bitcast double %t$18$fr to i64
-  %t$19$la = bitcast i64 %t$7 to double
-  %t$19$lb = bitcast i64 %t$18 to double
-  %t$19$fr = fsub double %t$19$la, %t$19$lb
-  %t$19 = bitcast double %t$19$fr to i64
-  %t$20 = call i64 @stdlib.mutable.mutvec_set(i64 %w, i64 %i, i64 %t$19)
-  %t$21 = add i64 0, 1
-  %t$22 = add i64 %i, %t$21
-  store i64 %w, ptr %t$27
-  store i64 %g, ptr %t$28
-  store i64 %lr, ptr %t$29
-  store i64 %t$22, ptr %t$30
-  call void @llvm.stackrestore(ptr %t$31)
+  %t$6 = call i64 @stdlib.mutable.mutvec_at(i64 %w, i64 %i)
+  %t$7 = call i64 @stdlib.mutable.mutvec_at(i64 %g, i64 %i)
+  %t$8$la = bitcast i64 %lr to double
+  %t$8$lb = bitcast i64 %t$7 to double
+  %t$8$fr = fmul double %t$8$la, %t$8$lb
+  %t$8 = bitcast double %t$8$fr to i64
+  %t$9$la = bitcast i64 %t$6 to double
+  %t$9$lb = bitcast i64 %t$8 to double
+  %t$9$fr = fsub double %t$9$la, %t$9$lb
+  %t$9 = bitcast double %t$9$fr to i64
+  %t$10 = call i64 @stdlib.mutable.mutvec_set(i64 %w, i64 %i, i64 %t$9)
+  %t$11 = add i64 0, 1
+  %t$12 = add i64 %i, %t$11
+  store i64 %w, ptr %t$15
+  store i64 %g, ptr %t$16
+  store i64 %lr, ptr %t$17
+  store i64 %t$12, ptr %t$18
+  call void @llvm.stackrestore(ptr %t$19)
   br label %tco_loop
-do_done_14:
-  %t$24 = phi i64 [%t$17, %do_short_14]
-  br label %do_done_8
-do_done_8:
-  %t$25 = phi i64 [%t$11, %do_short_8], [%t$24, %do_done_14]
-  br label %join_3
 join_3:
-  %t$4 = phi i64 [%t$5, %then_3], [%t$25, %do_done_8]
+  %t$4 = phi i64 [%t$5, %then_3]
   ret i64 %t$4
 }
 
 define i64 @examples.neural_network_train_xor.sq_err(i64 %w, i64 %x1, i64 %x2, i64 %target) {
 entry:
-  %t$4 = alloca i64
-  store i64 %w, ptr %t$4
-  %t$5 = call i64 @sprout_gc_push_i64_root(ptr %t$4)
   %t$0 = call i64 @examples.neural_network_train_xor.forward(i64 %w, i64 %x1, i64 %x2)
-  %t$6 = call i64 @sprout_gc_pop_roots(i64 1)
   %t$1$la = bitcast i64 %t$0 to double
   %t$1$lb = bitcast i64 %target to double
   %t$1$fr = fsub double %t$1$la, %t$1$lb
@@ -10870,9 +10706,6 @@ entry:
   %t$0 = bitcast double 0.0 to i64
   %t$1 = bitcast double 0.0 to i64
   %t$2 = bitcast double 0.0 to i64
-  %t$21 = alloca i64
-  store i64 %w, ptr %t$21
-  %t$22 = call i64 @sprout_gc_push_i64_root(ptr %t$21)
   %t$3 = call i64 @examples.neural_network_train_xor.sq_err(i64 %w, i64 %t$0, i64 %t$1, i64 %t$2)
   %t$4 = bitcast double 0.0 to i64
   %t$5 = bitcast double 1.0 to i64
@@ -10886,7 +10719,6 @@ entry:
   %t$13 = bitcast double 1.0 to i64
   %t$14 = bitcast double 0.0 to i64
   %t$15 = call i64 @examples.neural_network_train_xor.sq_err(i64 %w, i64 %t$12, i64 %t$13, i64 %t$14)
-  %t$23 = call i64 @sprout_gc_pop_roots(i64 1)
   %t$16$la = bitcast i64 %t$3 to double
   %t$16$lb = bitcast i64 %t$7 to double
   %t$16$fr = fadd double %t$16$la, %t$16$lb
@@ -10914,12 +10746,6 @@ entry:
   %t$2 = bitcast double 0.0 to i64
   %t$3 = bitcast double 0.0 to i64
   %t$4 = bitcast double 0.0 to i64
-  %t$20 = alloca i64
-  store i64 %w, ptr %t$20
-  %t$21 = call i64 @sprout_gc_push_i64_root(ptr %t$20)
-  %t$22 = alloca i64
-  store i64 %g, ptr %t$22
-  %t$23 = call i64 @sprout_gc_push_i64_root(ptr %t$22)
   %t$5 = call i64 @examples.neural_network_train_xor.accum_sample_grad(i64 %w, i64 %g, i64 %t$2, i64 %t$3, i64 %t$4)
   %t$6 = bitcast double 0.0 to i64
   %t$7 = bitcast double 1.0 to i64
@@ -10935,7 +10761,6 @@ entry:
   %t$17 = call i64 @examples.neural_network_train_xor.accum_sample_grad(i64 %w, i64 %g, i64 %t$14, i64 %t$15, i64 %t$16)
   %t$18 = add i64 0, 0
   %t$19 = call i64 @examples.neural_network_train_xor.apply_update(i64 %w, i64 %g, i64 %lr, i64 %t$18)
-  %t$24 = call i64 @sprout_gc_pop_roots(i64 2)
   ret i64 %t$19
 }
 
@@ -11003,41 +10828,37 @@ entry:
   %t$19 = trunc i64 %t$3 to i1
   br i1 %t$19, label %then_4, label %else_4
 then_4:
-  %t$20 = alloca i64
-  store i64 %w, ptr %t$20
-  %t$21 = call i64 @sprout_gc_push_i64_root(ptr %t$20)
   %t$6 = call i64 @examples.neural_network_train_xor.mse(i64 %w)
-  %t$22 = call i64 @sprout_gc_pop_roots(i64 1)
   %t$7 = getelementptr inbounds { i64, [7 x i8] }, ptr @.str.24, i64 0, i32 1, i64 0
   %t$8 = ptrtoint ptr %t$7 to i64
-  %t$23 = alloca i64
-  store i64 %t$8, ptr %t$23
-  %t$24 = call i64 @sprout_gc_push_i64_root(ptr %t$23)
+  %t$20 = alloca i64
+  store i64 %t$8, ptr %t$20
+  %t$21 = call i64 @sprout_gc_push_i64_root(ptr %t$20)
   %t$9 = call i64 @__tc_ToString_Int_to_string(i64 %epoch)
-  %t$25 = alloca i64
-  store i64 %t$9, ptr %t$25
-  %t$26 = call i64 @sprout_gc_push_i64_root(ptr %t$25)
+  %t$22 = alloca i64
+  store i64 %t$9, ptr %t$22
+  %t$23 = call i64 @sprout_gc_push_i64_root(ptr %t$22)
   %t$10 = call i64 @__tc_Semigroup_String_append(i64 %t$8, i64 %t$9)
-  %t$27 = call i64 @sprout_gc_pop_roots(i64 2)
+  %t$24 = call i64 @sprout_gc_pop_roots(i64 2)
   %t$11 = getelementptr inbounds { i64, [7 x i8] }, ptr @.str.25, i64 0, i32 1, i64 0
   %t$12 = ptrtoint ptr %t$11 to i64
-  %t$28 = alloca i64
-  store i64 %t$10, ptr %t$28
-  %t$29 = call i64 @sprout_gc_push_i64_root(ptr %t$28)
-  %t$30 = alloca i64
-  store i64 %t$12, ptr %t$30
-  %t$31 = call i64 @sprout_gc_push_i64_root(ptr %t$30)
+  %t$25 = alloca i64
+  store i64 %t$10, ptr %t$25
+  %t$26 = call i64 @sprout_gc_push_i64_root(ptr %t$25)
+  %t$27 = alloca i64
+  store i64 %t$12, ptr %t$27
+  %t$28 = call i64 @sprout_gc_push_i64_root(ptr %t$27)
   %t$13 = call i64 @__tc_Semigroup_String_append(i64 %t$10, i64 %t$12)
-  %t$32 = call i64 @sprout_gc_pop_roots(i64 2)
-  %t$33 = alloca i64
-  store i64 %t$13, ptr %t$33
-  %t$34 = call i64 @sprout_gc_push_i64_root(ptr %t$33)
+  %t$29 = call i64 @sprout_gc_pop_roots(i64 2)
+  %t$30 = alloca i64
+  store i64 %t$13, ptr %t$30
+  %t$31 = call i64 @sprout_gc_push_i64_root(ptr %t$30)
   %t$14 = call i64 @__tc_ToString_Double_to_string(i64 %t$6)
-  %t$35 = alloca i64
-  store i64 %t$14, ptr %t$35
-  %t$36 = call i64 @sprout_gc_push_i64_root(ptr %t$35)
+  %t$32 = alloca i64
+  store i64 %t$14, ptr %t$32
+  %t$33 = call i64 @sprout_gc_push_i64_root(ptr %t$32)
   %t$15 = call i64 @__tc_Semigroup_String_append(i64 %t$13, i64 %t$14)
-  %t$37 = call i64 @sprout_gc_pop_roots(i64 2)
+  %t$34 = call i64 @sprout_gc_pop_roots(i64 2)
   %t$16$ptr = inttoptr i64 %t$15 to ptr
   %t$16 = call i64 @print_str(ptr %t$16$ptr)
   %t$17 = add i64 0, 0
@@ -11090,11 +10911,7 @@ join_3:
 
 define i64 @examples.neural_network_train_xor.predict(i64 %w, i64 %x1, i64 %x2) {
 entry:
-  %t$9 = alloca i64
-  store i64 %w, ptr %t$9
-  %t$10 = call i64 @sprout_gc_push_i64_root(ptr %t$9)
   %t$0 = call i64 @examples.neural_network_train_xor.forward(i64 %w, i64 %x1, i64 %x2)
-  %t$11 = call i64 @sprout_gc_pop_roots(i64 1)
   %t$1 = bitcast double 0.5 to i64
   %t$2$fa = bitcast i64 %t$0 to double
   %t$2$fb = bitcast i64 %t$1 to double
@@ -11155,8 +10972,8 @@ entry:
   %t$29 = bitcast double 1.0 to i64
   %t$30 = bitcast double 1.0 to i64
   %t$31 = call i64 @examples.neural_network_train_xor.predict(i64 %t$2, i64 %t$29, i64 %t$30)
-  %t$38 = call i64 @sprout_gc_pop_roots(i64 1)
   %t$32 = call i64 @print_value(i64 %t$31)
+  %t$38 = call i64 @sprout_gc_pop_roots(i64 1)
   ret i64 %t$32
 }
 
@@ -14842,17 +14659,6 @@ wrepack_hit_23:
 wrepack_next_23:
   call void @sprout_abort_match()
   unreachable
-}
-
-define { i64, i64 } @stdlib.mutable.mutvec_get_worker(i64 %v, i64 %i) {
-entry:
-  %t$0 = call i64 @stdlib.mutable.mutvec_raw(i64 %v)
-  %t$1$st = call { i64, i64 } @vector_get_unboxed(i64 %t$0, i64 %i)
-  %t$1 = extractvalue { i64, i64 } %t$1$st, 0
-  %t$2 = extractvalue { i64, i64 } %t$1$st, 1
-  %t$3$r0 = insertvalue { i64, i64 } undef, i64 %t$1, 0
-  %t$3$r1 = insertvalue { i64, i64 } %t$3$r0, i64 %t$2, 1
-  ret { i64, i64 } %t$3$r1
 }
 
 define { i64, i64 } @vec_get_worker(i64 %index, i64 %vec) {

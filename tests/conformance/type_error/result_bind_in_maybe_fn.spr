@@ -1,0 +1,18 @@
+module main
+
+# Wrong FAMILY, the other direction: the `Err` box returned as a `Maybe`, so it
+# matches neither `Just` nor `Nothing`. Same tyvar-tail shape as the sibling
+# fixture, for the same reason.
+
+fn may_fail(x: Int) -> Result String Int =
+  if x > 0 then Ok(x) else Err("boom")
+
+fn wrong_family(x: Int) -> Maybe Int !{IO} =
+  do
+    v <- may_fail(x)
+    panic("unreachable " ++ int_to_string(v))
+
+fn main() -> Unit !{IO} =
+  match wrong_family(0) with
+  | Just n -> print(int_to_string(n))
+  | Nothing -> print("none")

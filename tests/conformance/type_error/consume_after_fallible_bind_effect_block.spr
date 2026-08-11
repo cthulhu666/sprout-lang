@@ -1,33 +1,30 @@
 module main
 
-# REGRESSION for the `P0` linearity facet. The sibling fixture
-# `borrow_after_fallible_bind` pins the same rule for a block whose OWN type is
-# `Result`. This one pins it for a block whose type is `Unit !{IO}`, which was the
-# hole: `linear_check` keyed the rule on the block's tail type
-# (`block_short_circuits(dty)`), following a spec sentence that also claimed
-# "Effectful blocks (`!{IO}`) run every step and are unaffected". Both were wrong.
-# `!{IO}` is orthogonal to short-circuiting: a fallible `<-` inside an effectful
-# block still returns early, so the steps after it are still conditional.
+# The linear rule of spec-v0.md §5.8 must still fire inside an EFFECTFUL block. The spec used to
+# claim the opposite -- "Effectful blocks (`!{IO}`) run every step and are unaffected" -- and
+# `linear_check` implemented that literally, which is how `bench/http_worker_pool` leaked a
+# connection on every read timeout with the checker silent.
 #
-# Found live in `bench/http_worker_pool/{pool,spawn}_server.sprout`, where `handle`
-# had exactly this shape and the emitted IR called `close` from only one of three
-# blocks. A read timeout leaked the descriptor and the checker raised nothing.
+# This fixture is deliberately the case the §5.9 TYPING rule does NOT catch: the function returns
+# `Result`, so the fallible bind is perfectly well-typed and propagates legally. Only the linearity
+# check can see that `release` is skipped on the failure path. Without it, this compiles clean.
 #
-# The fix keys the rule on THIS BIND's right-hand-side type instead of the block's,
-# which is both the correct granularity and strictly more precise.
+# Keep it that way. If someone concludes the typing rule made §5.8's consume rule redundant, this is
+# the counter-example: well-typed, effectful, and still a leak.
 
 type linear File = File Int
 
 fn release(f: consuming File) -> Int = match f with | File n -> n
-fn step(f: borrowing File) -> Result Int Int = Ok(1)
+fn step(f: borrowing File) -> Result Int Int !{IO} = Ok(1)
 
-# `-> Unit !{IO}`, not `-> Result`: the block's own type carries no failure, yet
-# `step` short-circuits out of the whole function on `Err`, skipping `release`.
-fn talk(f: File) -> Unit !{IO} =
+fn talk(f: File) -> Result Int Unit !{IO} =
   do
     a <- step(f)
     let _ = release(f)
     print(to_string(a))
+    Ok(())
 
 fn main() -> Unit !{IO} =
-  talk(File(1))
+  match talk(File(1)) with
+  | Ok _ -> print("ok")
+  | Err _ -> print("err")

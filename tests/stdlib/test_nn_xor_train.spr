@@ -1,5 +1,5 @@
 import stdlib.test (TestState, new_state, assert_eq, assert_true, summary)
-import stdlib.mutable (MutVec, mutvec_new, mutvec_get, mutvec_set)
+import stdlib.mutable (MutVec, mutvec_new, mutvec_at, mutvec_set)
 
 # Regression test: a 2-2-1 neural network LEARNS XOR from scratch via backprop.
 #
@@ -49,18 +49,18 @@ fn lcg_to_weight(state: Int) -> Double =
 # --- Forward pass: returns the network output for one input pair ---
 fn hidden_out(w: MutVec Double, j: Int, x1: Double, x2: Double) -> Double !{IO} =
   do
-    w1_0 <- mutvec_get(w, idx_w1(j, 0))
-    w1_1 <- mutvec_get(w, idx_w1(j, 1))
-    b1 <- mutvec_get(w, idx_b1(j))
+    w1_0 <- mutvec_at(w, idx_w1(j, 0))
+    w1_1 <- mutvec_at(w, idx_w1(j, 1))
+    b1 <- mutvec_at(w, idx_b1(j))
     softsign(w1_0 * x1 + w1_1 * x2 + b1)
 
 fn forward(w: MutVec Double, x1: Double, x2: Double) -> Double !{IO} =
   do
     h0 <- hidden_out(w, 0, x1, x2)
     h1 <- hidden_out(w, 1, x1, x2)
-    w2_0 <- mutvec_get(w, idx_w2(0))
-    w2_1 <- mutvec_get(w, idx_w2(1))
-    b2 <- mutvec_get(w, idx_b2())
+    w2_0 <- mutvec_at(w, idx_w2(0))
+    w2_1 <- mutvec_at(w, idx_w2(1))
+    b2 <- mutvec_at(w, idx_b2())
     w2_0 * h0 + w2_1 * h1 + b2
 
 # --- Accumulate the gradient of one sample's squared error into `g` ---
@@ -76,8 +76,8 @@ fn accum_sample_grad(w: MutVec Double, g: MutVec Double, x1: Double, x2: Double,
     _ <- accum(g, idx_w2(1), d * h1)
     _ <- accum(g, idx_b2(), d)
     # hidden layer grads (dz_j = dh_j * s'(z_j), dh_j = d * w2_j)
-    w2_0 <- mutvec_get(w, idx_w2(0))
-    w2_1 <- mutvec_get(w, idx_w2(1))
+    w2_0 <- mutvec_at(w, idx_w2(0))
+    w2_1 <- mutvec_at(w, idx_w2(1))
     _ <- accum_hidden(w, g, 0, w2_0, h0, d, x1, x2)
     _ <- accum_hidden(w, g, 1, w2_1, h1, d, x1, x2)
     0
@@ -93,7 +93,7 @@ fn accum_hidden(w: MutVec Double, g: MutVec Double, j: Int, w2_j: Double, h_j: D
 # Add `delta` to gradient slot `i`.
 fn accum(g: MutVec Double, i: Int, delta: Double) -> Int !{IO} =
   do
-    cur <- mutvec_get(g, i)
+    cur <- mutvec_at(g, i)
     mutvec_set(g, i, cur + delta)
     0
 
@@ -110,8 +110,8 @@ fn apply_update(w: MutVec Double, g: MutVec Double, lr: Double, i: Int) -> Int !
   if i >= 9 then 0
   else
     do
-      wi <- mutvec_get(w, i)
-      gi <- mutvec_get(g, i)
+      wi <- mutvec_at(w, i)
+      gi <- mutvec_at(g, i)
       mutvec_set(w, i, wi - lr * gi)
       apply_update(w, g, lr, i + 1)
 

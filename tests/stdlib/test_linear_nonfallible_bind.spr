@@ -1,0 +1,58 @@
+import stdlib.test (TestState, new_state, assert_eq, summary)
+
+# REGRESSION (positive) for the §5.8 consume rule's PRECISION. The rule fires on a fallible `<-`,
+# and the old implementation keyed it on the enclosing block's type instead -- so a `Result`-typed
+# block whose binds are all NON-fallible had it switched on for steps that in fact always run, and
+# a legal consume was rejected. Verified against the pre-fix compiler, which reported
+# "linear value 'f' is consumed after a fallible bind" for exactly the function below.
+#
+# The rejection half lives in tests/conformance/type_error/{borrow,consume}_after_fallible_bind*;
+# this is the half that has to keep COMPILING, and a rule that only ever rejects has no test that
+# would notice it becoming too strong.
+
+type linear File = File Int
+
+fn release(f: consuming File) -> Int = match f with | File n -> n
+
+# Not fallible: an ordinary effectful bind. Every step runs, so `release` is unconditional even
+# though the block's own type is `Result`.
+fn tick() -> Int !{IO} = 7
+
+fn plain_bind_then_consume(f: File) -> Result Int Int !{IO} =
+  do
+    a <- tick()
+    let _ = release(f)
+    Ok(a)
+
+# Consuming BEFORE a fallible bind is the documented way out, and must stay legal.
+fn consume_before_fallible(f: File) -> Result Int Int !{IO} =
+  do
+    let n = release(f)
+    a <- may_fail(n)
+    Ok(a)
+
+fn may_fail(x: Int) -> Result Int Int !{IO} =
+  if x > 0 then Ok(x) else Err(0 - 1)
+
+fn show(r: Result Int Int) -> String =
+  match r with
+  | Ok n -> "Ok " ++ int_to_string(n)
+  | Err e -> "Err " ++ int_to_string(e)
+
+fn main() -> Unit !{IO} =
+  do
+    state <- new_state()
+
+    # Called inline rather than bound: `main` returns `Unit`, so `r <- plain_bind_then_consume(…)`
+    # would be a fallible bind in a block that cannot carry the failure — rejected by §5.9, which is
+    # the rule working. Handling the `Result` where it is produced is the point.
+    assert_eq(state, "non-fallible bind then consume is legal",
+              show(plain_bind_then_consume(File(1))), "Ok 7")
+
+    assert_eq(state, "consume before a fallible bind, Ok path",
+              show(consume_before_fallible(File(5))), "Ok 5")
+
+    assert_eq(state, "consume before a fallible bind, Err path",
+              show(consume_before_fallible(File(0))), "Err -1")
+
+    summary(state)

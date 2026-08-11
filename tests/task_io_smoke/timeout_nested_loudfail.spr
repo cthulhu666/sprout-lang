@@ -10,7 +10,7 @@ import stdlib.net (tcp_listen, tcp_accept)
 # join — exactly the unsupported shape.
 fn worker(listener: Int) -> Unit !{IO} =
   do
-    _ <- tcp_accept(listener)  # parks forever — no client connects
+    tcp_accept(listener)  # parks forever — no client connects
     term_write("")
 
 fn fork_and_join(s: task.Scope, listener: Int) -> Int !{IO} =

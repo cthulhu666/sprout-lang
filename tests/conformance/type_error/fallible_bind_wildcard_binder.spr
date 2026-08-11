@@ -1,0 +1,15 @@
+module main
+
+# `_ <-` is NOT a soundness opt-out -- it emits the identical short-circuit and is
+# subject to the identical rule. Only a BARE statement discards and continues.
+
+fn may_fail(x: Int) -> Result String Int =
+  if x > 0 then Ok(x) else Err("boom")
+
+fn returns_int() -> Int =
+  do
+    _ <- may_fail(0)
+    999
+
+fn main() -> Unit !{IO} =
+  print(int_to_string(returns_int()))

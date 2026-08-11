@@ -1,0 +1,15 @@
+module main
+
+# NOT effect-gated: a wholly pure function is equally wrong, and equally rejected.
+# `!{IO}` describes what a step may do, not whether the block can exit early.
+
+fn may_fail(x: Int) -> Result String Int =
+  if x > 0 then Ok(x) else Err("boom")
+
+fn pure_bind() -> Int =
+  do
+    v <- may_fail(0)
+    v + 1
+
+fn main() -> Unit !{IO} =
+  print(int_to_string(pure_bind()))

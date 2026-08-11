@@ -36,8 +36,10 @@ fn main() -> Unit !{IO} =
     assert_eq(state, "mutmatrix_at (1,1)", a11, 21)
     assert_eq(state, "mutmatrix_at (1,2)", a12, 22)
 
-    # `mutmatrix_at` must agree with `mutmatrix_get` wherever the latter yields a value.
-    g11 <- mutmatrix_get(m, 1, 1)
+    # `mutmatrix_at` must agree with `mutmatrix_get` wherever the latter yields a value. `get` is
+    # consumed with `match`, not `<-`: binding it here would be a fallible bind in a `Unit` block and
+    # is now rejected (§5.9), which is exactly why the 19 sites moved to `at` in the first place.
+    g11 <- mutmatrix_get(m, 1, 1) |> maybe_with_default(0 - 1)
     assert_eq(state, "at agrees with get", a11, g11)
 
     # COVERAGE GAP (mutmatrix_at_or's out-of-range branch, previously untested): column 3 does not

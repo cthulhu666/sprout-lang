@@ -55,18 +55,18 @@ fn main() -> Unit !{IO} =
           cache <- module_loader.new_cache()
 
           let ok_path = "/tmp/sprout_test_repl_eval_typed_ok.sprout"
-          _ <- write_file(ok_path, "fn answer() -> Int = 42\n")
+          write_file(ok_path, "fn answer() -> Int = 42\n")
           r <- compiler.compile_full_ir_with_cache(source.FilePath(ok_path), source.StdlibRoot(stdlib_root), cache)
           assert_true(state, "compile_full_ir_with_cache returns Ok for trivial input", is_ir_ok(r))
           assert_true(state, "typed eval path emits a `define ` block", ir_has_define(r))
 
           let bad_path = "/tmp/sprout_test_repl_eval_typed_bad.sprout"
-          _ <- write_file(bad_path, "fn broken() -> Int = undefined_name_xyz_99887766\n")
+          write_file(bad_path, "fn broken() -> Int = undefined_name_xyz_99887766\n")
           r_bad <- compiler.compile_full_ir_with_cache(source.FilePath(bad_path), source.StdlibRoot(stdlib_root), cache)
           assert_true(state, "compile_full_ir_with_cache returns Fail for unresolved name", is_ir_fail(r_bad))
 
           let type_err_path = "/tmp/sprout_test_repl_eval_typed_type_err.sprout"
-          _ <- write_file(type_err_path, "fn bad_type() -> String = 42\n")
+          write_file(type_err_path, "fn bad_type() -> String = 42\n")
           r_type_err <- compiler.compile_full_ir_with_cache(source.FilePath(type_err_path), source.StdlibRoot(stdlib_root), cache)
           assert_true(state, "compile_full_ir_with_cache returns Fail for type error", is_ir_fail(r_type_err))
           assert_true(state, "type-error diagnostic starts with 'check: '",
