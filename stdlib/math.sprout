@@ -31,17 +31,32 @@ module stdlib.math
 #                                           (see `ipow`); ~1e-14 otherwise
 #   pow, fractional exponent                ~1e-13 (it composes exp and ln, so it
 #                                           inherits both errors)
-#   sin, cos, tan, atan, atan2              ~1e-8 ONLY — the Taylor series here are
-#                                           truncated for the transform-scale use they
-#                                           were written for, five orders looser than
-#                                           everything above
-#   asin, acos                              ~2e-15 absolute — TIGHTER than the trig row
-#                                           above despite being built on `atan`, because
-#                                           the half-angle form only ever hands `atan` an
-#                                           argument of magnitude <= 1, where atan is
-#                                           8e-16 rather than the 1e-11 it degrades to on
-#                                           large inputs. Relative accuracy of `acos` is
-#                                           the exception — it cancels as x -> 1.
+#   sin, cos                                ~2e-8 absolute ONLY — the Taylor series here
+#                                           are truncated for the transform-scale use they
+#                                           were written for, six orders looser than the
+#                                           rows above
+#   tan                                     NO SINGLE FIGURE — see the warning below. It
+#                                           is sin/cos, so cos's ~2e-8 ABSOLUTE error
+#                                           becomes an unbounded RELATIVE one as cos -> 0
+#   atan, atan2                             1.6e-11 absolute worst case over the whole
+#                                           line, but 8e-16 on [-1, 1] — the large-argument
+#                                           figure is set by the halving reduction
+#                                           saturating, not by the series
+#   asin, acos                              ~2e-15 absolute, ~5e-16 relative — TIGHTER than
+#                                           the trig rows despite being built on `atan`,
+#                                           because they only ever hand it an argument of
+#                                           magnitude <= 1, where it is at its best
+#
+# THE `tan` WARNING, because a single number would be a lie. Accuracy degrades continuously
+# as x approaches an odd multiple of pi/2 — this is not a point singularity at the pole.
+# Measured relative error against libm, by distance from pi/2:
+#
+#   0.5 away    1.7e-9        5e-6 away   4.5e-3
+#   5e-2 away   3.3e-7        5e-8 away   3.1e-1   (31% wrong)
+#   5e-4 away   4.5e-5        5e-10 away  9.8e-1   (the answer is noise)
+#
+# So `tan` near a pole returns a large, plausible-looking, arbitrarily wrong number. Callers
+# working near pi/2 must bound their distance from it, not merely avoid the pole exactly.
 #
 # Per-function measurements and method: docs/math-transcendental-v0.md.
 #
@@ -901,8 +916,12 @@ export fn cos(x: Double) -> Double =
 export fn radians(deg: Double) -> Double =
   deg * pi / 180.0
 
-# tan = sin/cos. Undefined (division by IEEE 0 -> inf) at odd multiples of pi/2;
-# callers in that domain must guard.
+# tan = sin/cos. Undefined (division by IEEE 0 -> inf) at odd multiples of pi/2 — but the
+# pole is the least of it, and guarding only against the exact pole is not enough. cos
+# carries ~2e-8 of ABSOLUTE error, so as cos(x) -> 0 that becomes an unbounded RELATIVE
+# error in the quotient: 4.5e-5 at 5e-4 from pi/2, 0.31 at 5e-8, 0.98 at 5e-10. The result
+# stays large and finite and plausible the whole way down, so nothing signals the loss.
+# Callers near pi/2 must bound their DISTANCE from it; see the tan warning in the header.
 export fn tan(x: Double) -> Double =
   sin(x) / cos(x)
 
@@ -915,7 +934,10 @@ fn atan_series(x: Double) -> Double =
 
 # Halving reduction: atan(x) = 2*atan(x / (1 + sqrt(1 + x^2))), applied `depth` times before the
 # series. Each pass shrinks the argument toward 0 (and SATURATES — even huge x collapses to ~1 on the
-# first pass, ~0.2 by the third), so a fixed depth of 3 covers the whole real line to ~1e-9.
+# first pass, ~0.2 by the third), so a fixed depth of 3 covers the whole real line. Measured
+# worst absolute error 1.6e-11, and that figure is set entirely by the saturation: an argument
+# of magnitude <= 1 reduces to 0.098 where the series is good to 8e-16, while a huge one only
+# reaches 0.199 where the x^13 truncation is ~2e-12, doubled three times back up to 1.6e-11.
 fn atan_reduce(x: Double, depth: Int) -> Double =
   if depth <= 0 then atan_series(x)
   else 2.0 * atan_reduce(x / (1.0 + sqrt(1.0 + x * x)), depth - 1)
@@ -960,12 +982,31 @@ export fn asin(x: Double) -> Double =
   else if x == -1.0 then -half_pi
   else 2.0 * atan(x / (1.0 + sqrt(1.0 - x * x)))
 
-# acos as the complement of asin, which makes acos(1.0) exactly +0.0 and acos(-1.0) exactly pi.
-# Absolute accuracy tracks asin's; RELATIVE accuracy degrades as x -> 1, where the true result
-# approaches 0 and the subtraction cancels, so callers needing small angles near x = 1 should
-# stay in asin terms.
+# acos in two arms, split at 0.5 — and the split point is forced, not tuned.
+#
+# The complement `half_pi - asin(x)` is correct everywhere but loses RELATIVE accuracy as
+# x -> 1: there asin(x) -> pi/2, so the subtraction cancels two nearly-equal numbers and
+# asin's ~1.6e-15 absolute error lands on a result of ~2e-8. Measured, that is a relative
+# error of 2.8e-8 at x = 1 - 2^-52 — eight significant digits gone, on the arm every
+# angle-between-unit-vectors caller uses most.
+#
+# The half-angle arm has no cancellation at all, because `1.0 - x` is EXACT: Sterbenz's
+# lemma makes a - b exact whenever b/2 <= a <= 2b, which holds for every x in [0.5, 2].
+# That is why the threshold is 0.5 — it is the Sterbenz boundary, so below it the identity
+# would start rounding and buy nothing, and above it the subtraction is free of error.
+# Halving is exact too (a power of two), so sqrt receives an exactly-representable argument.
+#
+# Measured over x = 1 - 2^-k for k = 1..52: worst relative error 2.8e-8 -> 4.7e-16. Nothing
+# else moves — whole-domain worst absolute error stays 1.8e-15 with zero out-of-range
+# results, and the exact values survive: acos(1.0) is +0.0 (now from 2*asin(sqrt(0.0)),
+# independent of asin's endpoint branch), acos(-1.0) is pi, acos(0.0) is pi/2.
+#
+# Rule 2 survives both arms. NaN and any x > 1 fail `x > 0.5` into the complement arm only
+# when NaN (NaN > 0.5 is false) and reach asin, which is NaN-propagating; a real x > 1 takes
+# the half-angle arm, where 1.0 - x is negative and sqrt yields NaN.
 export fn acos(x: Double) -> Double =
-  half_pi - asin(x)
+  if x > 0.5 then 2.0 * asin(sqrt((1.0 - x) * 0.5))
+  else half_pi - asin(x)
 
 # --- General Double utilities (clamping / interpolation) ---
 # The two domain-agnostic numeric atoms every animation/graphics caller reaches for.
