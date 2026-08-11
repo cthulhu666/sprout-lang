@@ -40,6 +40,6 @@ export fn clang_verifies_ir(ir: String) -> Bool !{IO} =
           | false ->
               do
                 term_write("[clang_verifies_ir] clang rejected IR — stderr:\n")
-                term_write(process.proc_stderr(result))
+                term_write(process.proc_stderr_or(result, "<clang stderr was not valid UTF-8>"))
                 term_write("\n")
                 false

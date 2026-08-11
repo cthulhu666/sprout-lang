@@ -1,21 +1,58 @@
 module stdlib.process
 
+import stdlib.bytes (Utf8Error, to_string)
+
+# A child process's output is BYTES, not text. The child chooses those bytes, so they can contain a
+# NUL or any invalid UTF-8 sequence, and a Sprout String is normatively neither (docs/spec-v0.md
+# §strings). Holding it as `String` was W2 R2's `proc_run` site: `printf 'a\000b'` produced a value
+# reporting byte_length 3 and length 1 — silently truncated at the NUL — and `printf 'a\377b'` killed
+# the process with "builtin `str_utf8`: invalid UTF-8 lead byte" as soon as anything walked it, which
+# made binary subprocess output unusable outright. See tests/stdlib/test_process_bytes.spr.
+#
+# So the payloads are `Bytes` and decoding is an explicit step through `bytes.to_string` — decision
+# D4's single choke point, which rejects a NUL as well as bad UTF-8. Nothing validates at ingestion,
+# because nothing needs to: no illegal value is constructed in the first place.
 export type ProcResult (..) =
-  | ProcResult Int String String
+  | ProcResult Int Bytes Bytes
 
 export fn proc_exit(r: ProcResult) -> Int =
   match r with | ProcResult c _ _ -> c
 
-export fn proc_stdout(r: ProcResult) -> String =
-  match r with | ProcResult _ o _ -> o
-
-export fn proc_stderr(r: ProcResult) -> String =
-  match r with | ProcResult _ _ e -> e
-
 export fn proc_ok(r: ProcResult) -> Bool =
   proc_exit(r) == 0
 
-# C ABI bridge: takes Vec String (native array representation)
+# The lossless accessors. Prefer these whenever the output is, or may be, binary.
+export fn proc_stdout_bytes(r: ProcResult) -> Bytes =
+  match r with | ProcResult _ o _ -> o
+
+export fn proc_stderr_bytes(r: ProcResult) -> Bytes =
+  match r with | ProcResult _ _ e -> e
+
+# The choke point. `Err` means the child emitted something that is not text — a fact about the
+# child, not a fault in the caller, so it is reported rather than fatal.
+export fn proc_stdout_text(r: ProcResult) -> Result Utf8Error String =
+  to_string(proc_stdout_bytes(r))
+
+export fn proc_stderr_text(r: ProcResult) -> Result Utf8Error String =
+  to_string(proc_stderr_bytes(r))
+
+# Convenience for the common diagnostic case: printing a child's output inside a message, where a
+# non-UTF-8 child is worth naming but not worth branching over. The fallback is supplied at the CALL
+# SITE deliberately — the substitution stays visible where it happens, instead of being hidden
+# inside a lossy decoder that quietly replaces bytes with U+FFFD.
+export fn proc_stdout_or(r: ProcResult, fallback: String) -> String =
+  match proc_stdout_text(r) with
+  | Ok text -> text
+  | Err _ -> fallback
+
+export fn proc_stderr_or(r: ProcResult, fallback: String) -> String =
+  match proc_stderr_text(r) with
+  | Ok text -> text
+  | Err _ -> fallback
+
+# C ABI bridge: takes Vec String (native array representation). These signatures are UNCHANGED by
+# the Bytes migration — a ProcResult is a heap ADT returned in the same i64 slot either way, so only
+# the types of two of its fields moved and the LLVM boundary cannot see the difference.
 extern fn proc_run_vec(argv: Vec String) -> ProcResult !{IO}
 extern fn proc_run_stdin_vec(argv: Vec String, stdin_data: String) -> ProcResult !{IO}
 

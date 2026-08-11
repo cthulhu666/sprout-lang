@@ -27,7 +27,8 @@ fn clang_available() -> Bool !{IO} =
 fn is_darwin() -> Bool !{IO} =
   do
     r <- process.proc_run(["uname"])
-    string.trim(process.proc_stdout(r)) == "Darwin"
+    # `uname` output is ASCII; a child that somehow emitted non-UTF-8 is simply not Darwin.
+    string.trim(process.proc_stdout_or(r, "")) == "Darwin"
 
 fn main() -> Unit !{IO} =
   do

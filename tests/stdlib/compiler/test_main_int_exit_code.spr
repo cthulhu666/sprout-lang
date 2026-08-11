@@ -24,7 +24,8 @@ fn clang_available() -> Bool !{IO} =
 fn is_darwin() -> Bool !{IO} =
   do
     r <- process.proc_run(["uname"])
-    string.trim(process.proc_stdout(r)) == "Darwin"
+    # `uname` output is ASCII; a child that somehow emitted non-UTF-8 is simply not Darwin.
+    string.trim(process.proc_stdout_or(r, "")) == "Darwin"
 
 fn runtime_sources() -> List String =
   ["runtime/sprout_poll.c", "runtime/sprout_runtime.c", "runtime/sprout_scheduler.c"]
@@ -33,6 +34,18 @@ fn link_argv(ll_path: String, bin_path: String, use_darwin: Bool) -> List String
   let base = [ll_path] ++ runtime_sources() ++ ["-o", bin_path]
       extra = if use_darwin then ["-framework", "Security", "-framework", "CoreFoundation"] else []
   in ["clang"] ++ base ++ extra
+
+# The emitted IR is ASCII in practice, but the decode can fail in principle and writing a fallback
+# string would surface as a baffling LINK error rather than a clear one — so the failure is named
+# here. Folding the decode and the write into one Bool also keeps the caller a level FLATTER than the
+# two nested matches it replaces.
+fn write_emitted_ir(ll_path: String, compiled: process.ProcResult) -> Bool !{IO} =
+  match process.proc_stdout_text(compiled) with
+  | Err _ -> false
+  | Ok ir_text ->
+      match write_file(ll_path, ir_text) with
+      | Err _ -> false
+      | Ok _ -> true
 
 fn main() -> Unit !{IO} =
   do
@@ -59,20 +72,21 @@ fn main() -> Unit !{IO} =
                 | false ->
                     do
                       term_write("[test_main_int_exit_code] compile failed:\n")
-                      term_write(process.proc_stderr(compiled))
+                      term_write(process.proc_stderr_or(compiled, "<compiler stderr was not valid UTF-8>"))
                       term_write("\n")
                       assert_true(state, "fixture compiles", false)
                 | true ->
-                    match write_file(ll_path, process.proc_stdout(compiled)) with
-                    | Err _ -> assert_true(state, "write emitted IR", false)
-                    | Ok _ ->
+                    do
+                      wrote <- write_emitted_ir(ll_path, compiled)
+                      if ! wrote then assert_true(state, "write emitted IR", false)
+                      else
                         do
                           linked <- process.proc_run(link_argv(ll_path, bin_path, use_darwin))
                           match process.proc_ok(linked) with
                           | false ->
                               do
                                 term_write("[test_main_int_exit_code] link failed:\n")
-                                term_write(process.proc_stderr(linked))
+                                term_write(process.proc_stderr_or(linked, "<linker stderr was not valid UTF-8>"))
                                 term_write("\n")
                                 assert_true(state, "fixture links", false)
                           | true ->

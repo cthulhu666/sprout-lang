@@ -337,12 +337,30 @@ means returning `Bytes` and letting `bytes_to_utf8` be the single validating cho
 *not* making the downstream consumer tolerate the invalid value, which merely moves the
 violation out of sight.
 
-Minimal repro needing no sockets:
+Minimal repro needing no sockets — **this one no longer reproduces, and that is the point:**
 
 ```
-proc_run(["printf", "a\000b"])   # byte_length 3, bytes.length(from_string ..) 1
-SPROUT_GC_HDRCHECK=1 ./prog      # HDRCHECK: str_byte_len aux=3 strlen=1
+proc_run(["printf", "a\000b"])   # was: byte_length 3, length 1
+SPROUT_GC_HDRCHECK=1 ./prog      # was: HDRCHECK: str_byte_len aux=3 strlen=1
 ```
+
+`proc_run` returns `Bytes` since the R2 reduction landed (2026-08-11), so this aborts nothing.
+Kept here because the *shape* is the lesson, and because what replaced it is worth knowing:
+**there is no longer a cheap NUL-bearing repro among the remaining producers**, so do not go
+looking for one and conclude the class is closed.
+
+- `env_get` / `argv_get` cannot carry a NUL at all — the OS delimits both with NUL, so the byte
+  cannot reach the builtin. They can still mint a String from **invalid UTF-8**, which HDRCHECK
+  does *not* catch: it compares the header's `aux` against `strlen`, and a bad lead byte leaves
+  those equal. That case surfaces later as `builtin str_utf8: invalid UTF-8 lead byte` from
+  whichever walker touches the value first, arbitrarily far from the producer.
+- `term_read_line` truncates at the NUL when it reads (measured: input `a\0b\n` yields
+  `byte_length 1`), so it loses data rather than producing an inconsistent header. Silent data
+  loss, no abort.
+
+So HDRCHECK's coverage of this class is narrower than it looks: it is a reliable detector of the
+NUL half and blind to the invalid-UTF-8 half. Treat `str_utf8` panics from unexpected places as
+the same diagnosis with a different signal.
 
 ## Debugging self-hosted compiler-source miscompiles
 

@@ -729,7 +729,7 @@ fn compile_runtime_objs(rt_dir: String, objs_ref: Ref String) -> Result String S
     result <- process.proc_run(["sh", "-c", runtime_compile_cmd(rt_dir, objs_dir)])
     if process.proc_ok(result)
     then write_objs_and_ok(objs_dir, objs_ref)
-    else Err("runtime compile failed: " ++ process.proc_stderr(result))
+    else Err("runtime compile failed: " ++ process.proc_stderr_or(result, "<stderr was not valid UTF-8>"))
 
 fn ensure_runtime_objs(rt_dir: String, objs_ref: Ref String) -> Result String String !{IO} =
   do
@@ -751,7 +751,7 @@ export fn compile_runtime_and_link_eval(
         result <- process.proc_run(["sh", "-c", eval_link_cmd(ir_path, objs_dir, bin_path, use_darwin)])
         if process.proc_ok(result)
         then Ok(bin_path)
-        else Err("clang link failed: " ++ process.proc_stderr(result))
+        else Err("clang link failed: " ++ process.proc_stderr_or(result, "<stderr was not valid UTF-8>"))
 
 fn make_eval_source(src: String, expr: String, type_str: String) -> Maybe String =
   if string.ends_with(type_str, " !{IO}") then
@@ -772,9 +772,12 @@ fn eval_output_lines(output: String) -> Vec String =
 
 fn collect_eval_output(run_result: process.ProcResult) -> json.Json !{IO} =
   if process.proc_ok(run_result) == false then
-    error_response("eval_expr_in_source: runtime error (exit " ++ int_to_string(process.proc_exit(run_result)) ++ "): " ++ process.proc_stderr(run_result))
+    error_response("eval_expr_in_source: runtime error (exit " ++ int_to_string(process.proc_exit(run_result)) ++ "): " ++ process.proc_stderr_or(run_result, "<stderr was not valid UTF-8>"))
   else
-    ok_response(vec_strings_to_json_array(eval_output_lines(string.trim_right(process.proc_stdout(run_result)))))
+    # The evaluated program's stdout is USER-CONTROLLED, so it can legitimately not be text. It used
+    # to be minted as a String, which took the whole analysis service down when a walker touched it;
+    # now a non-text result is REPORTED as output instead of being fatal.
+    ok_response(vec_strings_to_json_array(eval_output_lines(string.trim_right(process.proc_stdout_or(run_result, "<eval output was not valid UTF-8>")))))
 
 fn run_eval_binary() -> json.Json !{IO} =
   do
@@ -789,7 +792,8 @@ fn env_forces_frameworks() -> Bool !{IO} =
 fn uname_is_darwin() -> Bool !{IO} =
   do
     r <- process.proc_run(["uname"])
-    string.trim(process.proc_stdout(r)) == "Darwin"
+    # `uname` output is ASCII; a child that somehow emitted non-UTF-8 is simply not Darwin.
+    string.trim(process.proc_stdout_or(r, "")) == "Darwin"
 
 # True when the eval binary must link the macOS Security/CoreFoundation
 # frameworks (the runtime's TLS/net code needs them).  Detect the platform at
