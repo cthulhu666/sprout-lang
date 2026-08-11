@@ -525,6 +525,21 @@ Legend:
   the `tcp_read_exact_timeout` / `tcp_connect_timeout` twins this makes unnecessary. The read side is
   unmigrated only because it was already expressible — `read_avail_timeout` returns per chunk, so
   http_server could compute its own deadlines around it.
+  **2026-08-11: the motivation is now much stronger than duplication, and the plan is concrete.** The
+  String-returning reads are a **soundness** defect, not just clone debt: they violate the `String`
+  invariant from `docs/spec-v0.md` (valid UTF-8, no NUL byte) via
+  `sprout_gc_adopt_cstr(buf, n, …)`, which is W2 R2 — see the `P1` entry above, and note this
+  reduction IS the execution of decision D4 ("Bytes-primary via the `bytes_to_utf8` choke point") for
+  `net`. Target surface, measured against actual callers:
+  | Keep | Add | Delete |
+  |---|---|---|
+  | `tcp_wait` (readiness), `tcp_write_some` (transfer) | `tcp_read_some` — non-parking, `Err TcpWouldBlock`, mirroring `tcp_write_some` | `tcp_read`, `tcp_read_avail`, `tcp_read_avail_timeout`, `tcp_read_exact`, `tcp_write_string` |
+  Five read builtins are not five capabilities — they are one capability with four policy combinations
+  hard-coded in C (*park forever vs. deadline* × *whatever's available vs. exact count*). `http_server`,
+  the only production consumer, uses **exactly one** of them. Sprout-side `read_avail`,
+  `read_avail_timeout`, `read_exact` and `read_exact_utf8` keep their names as loops over the two
+  primitives, so `read_exact_utf8`'s 12 fixture uses do not move and `read_exact` (zero callers) simply
+  goes; only `tcp_read` (5 fixtures + `examples/tcp_echo_once.sprout`) needs caller migration.
 - [ ] `P1` **http_server accept-failure isolation (concurrency review C3, remaining half).**
   `tcp_accept` is still the FATAL variant: `accept` failing with EMFILE/ENFILE — the same descriptor
   exhaustion the timeout above now makes far harder to reach, but not impossible — calls `tcp_fail`
@@ -659,6 +674,63 @@ Legend:
     4-byte, so the continuation count comes from the lead byte), rewrites `badbyte` from "must abort"
     to "must return U+FFFD", and adds `badcont` asserting the following byte survives. All confirmed to
     fail against `origin/master`'s runtime.
+- [ ] `P1` **W2 R2, the `net` half: socket reads mint Strings that violate the `String` invariant.**
+  `docs/spec-v0.md` §"A `String` value is always valid UTF-8 and contains no NUL byte. Builtins that
+  construct a `String` from raw external bytes (e.g. `read_file`) validate the input and report
+  malformed content through their error channel rather than producing an invalid `String`."
+  `tcp_read` / `tcp_read_avail` / `tcp_read_avail_timeout` do not: they wrap the recv buffer with
+  `sprout_gc_adopt_cstr(buf, n, …)`, which copies an explicit `n` that may contain interior NULs. That
+  one call is the whole defect — the shared `tcp_recv_avail` core already returns an explicit byte
+  count, so the String-ness lives entirely in the wrapper.
+  **This is not a new finding.** It is W2 R2 from
+  `docs/fundamentals-code-review-handoff-2026-07-03.md` (which names `tcp_read` explicitly, "also
+  silently truncates at embedded NUL", alongside `proc_run`, `term_read_line`, `env_get`, `argv_get`,
+  `stdin_read_bytes`), it is listed under "Remaining unblocked correctness work" in the fundamentals
+  entry below, and decision **D4** already chose the fix on 2026-07-04: *"reject invalid UTF-8,
+  Bytes-primary via the `bytes_to_utf8` choke point."* It was simply never executed for `net`.
+  **Verified repro requiring no HTTP at all** (`proc_run`, the sibling R2 site):
+  `proc_run(["printf", "a\\000b"])` yields a String reporting `string.byte_length` **3**,
+  `bytes.length(bytes.from_string(…))` **1** and `string.length` **1** — three disagreeing lengths on
+  one value — and under `SPROUT_GC_HDRCHECK=1` it aborts: `HDRCHECK: str_byte_len aux=3 strlen=1`.
+  **It is live in CI now:** PR #66 (`Bytes` request bodies) is red on exactly this, because sending a
+  binary body routes those bytes through a String. Note the local/CI asymmetry that hid it —
+  HDRCHECK is **off by default and on in CI**, so a green `just test` locally proves nothing about
+  string-representation changes.
+  **Fix = execute D4 for `net`, which is the `BACKLOG:483` reduction:** add `tcp_read_some` (non-parking
+  byte transfer reporting `Err TcpWouldBlock`, mirroring the landed `tcp_write_some`), rebuild
+  `read_avail` / `read_avail_timeout` / `read_exact` / `read_exact_utf8` as Sprout loops over
+  `tcp_wait` + `tcp_read_some`, and **delete** the four String-returning read builtins plus
+  `tcp_write_string`. Deleting rather than adding is the point: if no builtin returns a `String` from a
+  socket, the invalid state becomes unconstructible from I/O. Measured blast radius: `read_exact_utf8`
+  keeps its signature so its 12 fixture uses do not move; `read_exact` has zero callers; only
+  `tcp_read` (5 fixtures + `examples/tcp_echo_once.sprout`) needs caller migration.
+- [ ] `P2` **Full-duplex on one socket is inexpressible, and the restriction is CONSERVATIVE rather
+  than fundamental.** Verified 2026-08-11 while deciding whether `net`'s raw-handle "escape hatch" was
+  worth keeping. Moving a connection into ONE spawned task compiles; two tasks borrowing it
+  concurrently (one reading, one writing — a proxy, WebSocket, or HTTP/2) is rejected:
+  *"borrowed value 'conn' cannot be captured by a closure passed to a `once` parameter: the closure may
+  run after the value is consumed. Move it instead."*
+  **But the stated reason does not hold for this case.** `stdlib/task.sprout` `with_scope` "blocks
+  until all tasks spawned into it finish… the join is **unconditional**", so the owner regains access —
+  and therefore can only consume — after every borrower has finished. Structured concurrency already
+  enforces the exact lifetime discipline that would make the borrow sound; the checker just does not
+  model scope-bounded borrow lifetimes. The rule is right in general (a `once` closure could be stored
+  and run later) and wrong for `task_spawn` inside `with_scope` specifically.
+  **Two candidate fixes:** teach the checker that a borrow captured by a `task_spawn` closure is
+  bounded by the scope's join; or add a `split` returning two linear halves with disjoint operations
+  (Rust's `TcpStream::split`, and the more explicit option).
+  **Not solved by a raw-`Int` escape hatch** — that discards consume-exactly-once instead of splitting
+  it, so both halves could `close` or neither would. That is why `tcp_write_string` is deleted rather
+  than kept as gap cover: it has zero callers, the shape it names is circular (the only source of a raw
+  `Int` is `tcp_connection_handle` on a connection already held linearly), and its own comment says
+  "retire it with them, not before" — which the R2 reduction above triggers.
+- [ ] `P3` **`just b1-gate` is RED on master, but it is a STALE FIXTURE, not a regression.** Verified
+  2026-08-11: `tests/b1_fixtures/fixture_b1_partial.spr` writes an under-applied call as
+  `vector_get_direct(v)`, which the language now rejects — *"expects 2 arguments, got 1 (Sprout is
+  n-ary; use `_` for partial application)"*. The property finding ② guards still HOLDS: rewritten as
+  `vector_get_direct(v, _)` it compiles and emits no `vec_get_d`, i.e. it reaches partial application
+  and B1 correctly does not fire. Fix is the one-line fixture update. The fixture predates the
+  explicit-`_` syntax and nothing caught the drift because this recipe is unreferenced (see below).
 - [ ] `P2` **`just c-runtime-test` is an ORPHAN GATE and had rotted completely.** Found 2026-08-11
   while fixing `term_read_key`. The harness's `compile()` linked only `runtime/sprout_runtime.c`; when
   the runtime was split into `sprout_scheduler.c` + `sprout_poll.c`, **every** case in
@@ -668,8 +740,29 @@ Legend:
   unrunnable, including the one documenting `term_read_key`'s abort contract: that contract was
   "guarded" by a test which could not compile. The link line is fixed here (`runtime/*.c`) and all ten
   cases pass. **Remaining, and it is the actual fix: wire it into a gate so it cannot rot again** — the
-  rot was caused by nothing running it, not by the link line. Also worth auditing whether any other
-  `justfile` recipe is similarly unreferenced. A gate nobody runs is worse than no gate, because it
+  rot was caused by nothing running it, not by the link line.
+  - **The audit of other unreferenced recipes is DONE (2026-08-11); results below, so this is no longer
+    an unknown.** Measured: **42 of 75** recipes are reachable from neither `gate` nor CI. Most are
+    legitimately manual (`repl`, `run`, `build-*`, `test-file`, `llvm-where`, `gc-profile`). The seven
+    whose names claim verification were each executed:
+    | Recipe | Result |
+    |---|---|
+    | `test-freelist-verify`, `gc-arena-check`, `gc-adapt-check`, `gc-ageprof-check` | green |
+    | `check-iface-all` | needs `just refresh-iface` first — a precondition, not rot |
+    | `b1-gate` | **red**, but a stale fixture, not a regression (own entry above) |
+    | `c-runtime-test` | was 100% broken; fixed |
+    So no live regressions were hiding behind them — 2 of 7 broken, both benign once diagnosed.
+  - **`gate-audit` cannot catch this class, and that is the real gap.** It passes green today. Assertion
+    A checks CI → `gate` (so a recipe absent from CI is never examined); Assertion B checks that each
+    `scripts/*.sh` is *mentioned* in the justfile. `tests/c_runtime/run.sh` is not under `scripts/`, so B
+    never scanned it. Worse, B validates only one hop: `scripts/b1_gate.sh` counts as "reachable"
+    because the `b1-gate` recipe names it — while nothing runs that recipe. A script named `*_gate.sh`
+    was rotting behind an assertion whose own comment says scripts "rot while looking like coverage".
+    **Needs an Assertion C:** every recipe that claims to verify something must be reachable from
+    `gate` or CI, with an explicit justified exclusion list — the same discipline B already applies to
+    scripts, where adding a name "is a decision, not a formality". Caveats: wiring the six in may turn
+    `gate` red, and `gate` is already ~15–25 min, so some belong in an explicit manual list instead.
+  A gate nobody runs is worse than no gate, because it
   reads as coverage.
 - [ ] ~~`P3` `term_read_key` panics~~ — original report, retained for the rationale:
   `runtime/sprout_runtime.c:3278`:
