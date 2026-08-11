@@ -42,6 +42,13 @@ export type HttpServerError (..) =
   # The request announced a body larger than `max_body_bytes`. Refused on the announcement, before a
   # byte of it is read, so an oversized upload costs one response rather than the whole transfer.
   | HttpBodyTooLarge
+  # The request carried a `Transfer-Encoding`, and this server implements no transfer coding. Its own
+  # variant rather than an `HttpInvalidRequest` because the request is not malformed — it is
+  # well-formed and asks for something unimplemented, which is 501, not 400 (RFC 9112 §6.1: "A server
+  # that receives a request message with a transfer coding it does not understand SHOULD respond with
+  # 501 (Not Implemented)"). Distinguishing them matters to the client: 400 says "do not send this
+  # again", 501 says "this server cannot, another might".
+  | HttpUnsupportedTransferCoding
 
 type alias ServerResult a = Result HttpServerError a
 
@@ -165,14 +172,46 @@ fn lower_ascii_from(raw: String, index: Int, total: Int, acc: String) -> String 
 fn lower_ascii(raw: String) -> String =
   lower_ascii_from(raw, 0, string.length(raw), "")
 
-fn split_lines_from(raw: String, index: Int, total: Int, acc: Vec String, current: String) -> Vec String =
-  if index >= total then vec_append(current, acc)
-  else if char_at(raw, index) == '\r' then split_lines_from(raw, index + 1, total, acc, current)
-  else if char_at(raw, index) == '\n' then split_lines_from(raw, index + 1, total, vec_append(current, acc), "")
-  else split_lines_from(raw, index + 1, total, acc, string.concat(current, string.string_from_char(char_at(raw, index))))
+# Cut the header block into lines on CRLF, STRICTLY — a bare CR or bare LF left inside a line is a
+# rejection, not a separator and not something to delete.
+#
+# The strictness is forced by `find_headers_end`, which locates the end of the block with a literal
+# "\r\n\r\n". A splitter that also treated a lone LF as a line terminator therefore disagreed with the
+# block terminator about what ends a line, and that disagreement is the whole of the smuggling
+# primitive: given `X-Note: hi\nContent-Length: 9\r\n`, a strictly-CRLF intermediary in front reads
+# ONE header whose value happens to contain an invalid bare LF and forwards no body, while this
+# server read a SECOND header line out of that same value and framed 9 bytes. The two ends then
+# disagree about where this request stops and the next begins (RFC 9112 §11.2).
+#
+# RFC 9112 §2.2 does permit the lenient reading on its own — "a recipient MAY recognize a single LF
+# as a line terminator and ignore any preceding CR" — so leniency is not the defect; the split
+# between a lenient splitter and a strict terminator search is. Both halves could have been made
+# lenient instead. Rejecting is the option that does not leave two parsers to keep in agreement.
+#
+# The bare-CR arm is not a choice at all: §2.2 requires a recipient to "consider that element to be
+# invalid or replace each bare CR with SP", and the previous splitter did neither — it silently
+# DELETED the CR, so `X-Sig: a\rb` was handed to the handler as the different value `ab`.
+#
+# Cutting on the separator with str_find (a strstr) rather than walking codepoints also retires the
+# per-character `char_at_or`, which is O(index) and so was quadratic across the 64 KiB the header cap
+# admits. NB that is not the whole of that quadratic — `lower_ascii` and `trim` still rebuild a
+# String per character, and remain quadratic in the length of a SINGLE header line (BACKLOG).
+fn split_header_lines(raw: String, acc: Vec String) -> ServerResult (Vec String) =
+  match string.find(raw, "\r\n") with
+  | Nothing ->
+      do
+        line <- checked_line(raw)
+        Ok(vec_append(line, acc))
+  | Just pos ->
+      do
+        line <- checked_line(string.take(raw, pos))
+        split_header_lines(string.drop(raw, pos + 2), vec_append(line, acc))
 
-fn split_lines(raw: String) -> Vec String =
-  split_lines_from(raw, 0, string.length(raw), vec_empty(), "")
+# A segment already cut at its CRLF, so any CR or LF still in it is by definition bare.
+fn checked_line(line: String) -> ServerResult String =
+  if string.contains(line, "\r") || string.contains(line, "\n") then
+    Err(HttpInvalidRequest("malformed header line terminator"))
+  else Ok(line)
 
 fn parse_header_pair(pair: (String, String)) -> Maybe (String, String) =
   match pair with
@@ -198,13 +237,64 @@ fn parse_header_lines(lines: Vec String, index: Int, total: Int, headers: Dict S
         else
           do
             pair <- result_from_maybe(HttpInvalidRequest("invalid header line"), parse_header_line(line))
-            match pair with
-            | (name, value) -> parse_header_lines(lines, index + 1, total, dict_set(name, value, headers))
+            folded <- fold_header(pair, headers)
+            parse_header_lines(lines, index + 1, total, folded)
+
+# Fold one parsed header into the accumulated set. Repeats stay last-wins for every field EXCEPT the
+# two where a silent fold is what lets this server and the box in front of it disagree — which is the
+# same desynchronisation the strict CRLF split closes, arriving by a different route:
+#
+#   * `content-length` — differing repeats are invalid framing. `Content-Length: 5` followed by
+#     `Content-Length: 40` framed 40 bytes here while a first-value front end framed 5, so the two
+#     ends disagree about where the request ends. Repeats that AGREE are explicitly foldable (RFC
+#     9112 §6.3), so those are kept: refusing them would reject requests that are not ambiguous.
+#   * `host` — RFC 9112 §3.2: "A server MUST respond with a 400 (Bad Request) status code to any
+#     HTTP/1.1 request message that ... contains more than one Host header field line". No
+#     agreeing-repeats exemption is offered for Host, and routing/virtual hosting read it, so ANY
+#     repeat is refused rather than only a conflicting one.
+#
+# Every other field keeps the last-wins fold, and that IS lossy — `Cookie` may legitimately be sent
+# more than once (RFC 6265) and this collapses it to the last. That is pre-existing behaviour and not
+# a framing hazard; fixing it needs a list-valued header API, which is filed rather than smuggled in
+# here (BACKLOG §2).
+fn fold_header(pair: (String, String), headers: Dict String) -> ServerResult (Dict String) =
+  match pair with
+  | (name, value) ->
+      match dict_get(name, headers) with
+      | Nothing -> Ok(dict_set(name, value, headers))
+      | Just prior -> fold_repeat(name, value, prior, headers)
+
+fn fold_repeat(name: String, value: String, prior: String, headers: Dict String) -> ServerResult (Dict String) =
+  if name == "host" then Err(HttpInvalidRequest("duplicate Host header"))
+  else if name == "content-length" && prior != value then
+    Err(HttpInvalidRequest("conflicting Content-Length"))
+  else Ok(dict_set(name, value, headers))
 
 fn parse_headers(raw: String) -> ServerResult (Dict String) =
-  parse_header_lines(lines, 0, vec_length(lines), dict_empty())
-where
-  lines = split_lines(raw)
+  do
+    lines <- split_header_lines(raw, vec_empty())
+    parse_header_lines(lines, 0, vec_length(lines), dict_empty())
+
+# How many bytes of body this message has, or why it cannot be framed at all. ONE place decides it,
+# and `Transfer-Encoding` is consulted FIRST — that ordering is RFC 9112 §6.3's ("the Transfer-Encoding
+# overrides the Content-Length"), and it is why a request carrying both cannot quietly fall back to
+# the Content-Length. That combination is the classic CL.TE smuggling shape, which §6.3 says "might
+# indicate an attempt to perform request smuggling ... and ought to be handled as an error".
+#
+# This server implements NO transfer coding, so every `Transfer-Encoding` is refused. Previously the
+# header was not read at all, and a chunked request — which by definition carries no Content-Length —
+# fell through to `Ok(0)` and was framed as an EMPTY body: the handler got a request whose entire
+# payload had been dropped, and answered 200. Silent data loss, and the failure mode a client cannot
+# detect. 501 makes it loud.
+#
+# Refusing rather than decoding is a real capability limit, not a claim that chunked is exotic — any
+# client that cannot know its length up front (a generator body, `curl -T -`, a streamed upload) uses
+# it. Decoding needs an incremental read path rather than the size-bounded buffer this file frames
+# against, so it is filed as its own change (BACKLOG §2) instead of being approximated here.
+fn parse_body_framing(headers: Dict String) -> ServerResult Int =
+  match dict_get("transfer-encoding", headers) with
+  | Just _ -> Err(HttpUnsupportedTransferCoding)
+  | Nothing -> parse_content_length(headers)
 
 # W8/P1: parse_int is now total (Maybe Int), so the all_digits predicate is
 # redundant. Still reject negatives (the old digits check excluded '-').
@@ -243,7 +333,7 @@ fn parse_request_prefix(raw: String) -> ServerResult (RequestLine, Dict String, 
           do
             req <- result_from_maybe(HttpInvalidRequest("invalid request line"), parse_request_line(string.take(raw, line_end)))
             headers <- parse_headers(header_block(raw, line_end, headers_end))
-            content_length <- parse_content_length(headers)
+            content_length <- parse_body_framing(headers)
             Ok((req, headers, content_length))
 
 fn build_request(req: RequestLine, headers: Dict String, body: Bytes) -> HttpRequest =
@@ -493,8 +583,32 @@ fn headers_to_lines(keys: Vec String, headers: Dict String, index: Int, total: I
               headers,
               index + 1,
               total,
-              string.concat(acc, string.concat(key, string.concat(": ", string.concat(value, "\r\n"))))
+              string.concat(acc, string.concat(sanitize_field(key), string.concat(": ", string.concat(sanitize_field(value), "\r\n"))))
             )
+
+# CR and LF are the response's STRUCTURE — one ends a header line, two end the header block — so a
+# name or value carrying either does not merely look odd on the wire, it changes what the message is.
+# One CRLF in a value appends a header of the sender's choosing (a `Set-Cookie`, a
+# `Content-Length` that reframes the response); two end the header block early and make everything
+# after them a body the sender wrote. That is HTTP response splitting.
+#
+# Neither is reachable from the headers `render` supplies itself. Both are reachable from any handler
+# that puts request-derived text into a header, which is ordinary code — `with_header("x-lang",
+# query_param_or("lang", req), ok(page))`, or `see_other(next)` with `next` from the query string —
+# and `stdlib.url.query_decode` resolves `%0d%0a` into real CR LF, so no exotic client is needed.
+#
+# Replaced with SP rather than rejected, which is Go's answer (`headerNewlineToSpace`, applied by
+# `net/http.Header.writeSubset`). Rejecting would be the stricter choice and is what Rust's `http`
+# crate does at `HeaderValue` construction, but it does not fit this API: `with_header` returns an
+# `HttpServerResponse`, not a `Result`, so it has no arm on which to report a refusal, and
+# `see_other` — which builds `location` straight from caller input — would have to grow one too.
+#
+# SP specifically, not deletion: deleting the bytes splices the surrounding text together into a
+# value the caller never wrote (`en\r\nde` would become the single token `ende`), so it destroys the
+# structure by silently forging data. Replacing keeps every character the caller passed and leaves
+# only the framing inert.
+fn sanitize_field(raw: String) -> String =
+  string.replace_all("\n", " ", string.replace_all("\r", " ", raw))
 
 fn render_extra_headers(headers: Dict String) -> String =
   headers_to_lines(keys, headers, 0, vec_length(keys), "")
@@ -552,6 +666,12 @@ export fn headers_too_large(body: String) -> HttpServerResponse =
 # phrase to "Content Too Large"; nginx still reports the RFC 7231 name for the same code.
 export fn body_too_large(body: String) -> HttpServerResponse =
   response(413, body)
+
+# 501, the answer to a request asking for something this server does not implement — today only a
+# `Transfer-Encoding`. Deliberately NOT 400: the request is well formed, so telling the client it is
+# malformed would send it looking for a defect it does not have (RFC 9112 §6.1).
+export fn not_implemented(body: String) -> HttpServerResponse =
+  response(501, body)
 
 # A 303 See Other redirect to `location`, with an empty body. This is the Post/
 # Redirect/Get pattern: a form handler mutates state on POST, then returns this so the
@@ -789,6 +909,11 @@ fn read_error_response(err: HttpServerError) -> HttpServerResponse =
   | HttpRequestTimeout -> request_timeout("request timeout")
   | HttpHeadersTooLarge -> headers_too_large("request header fields too large")
   | HttpBodyTooLarge -> body_too_large("request body too large")
+  # 501, not 400: nothing is wrong with the request, this server just cannot decode its framing. The
+  # connection is closed afterwards like every other error path here, which is also what makes the
+  # refusal safe — an undecoded chunked body is still in the socket buffer, and reusing the
+  # connection would read it as the next request (RFC 9112 §6.3's unrecoverable-framing case).
+  | HttpUnsupportedTransferCoding -> not_implemented("unsupported transfer coding")
   | HttpInvalidRequest _ -> bad_request("bad request")
   | HttpServerUnsupportedStatus _ -> bad_request("bad request")
 

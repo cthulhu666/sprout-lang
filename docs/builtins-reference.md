@@ -453,6 +453,34 @@ Current experimental scope:
 - no keep-alive, chunked transfer encoding for server responses, TLS server support, or concurrent connection handling yet
 - no path/route params (e.g. `/users/:id`) yet — routing matches exact paths
 
+Request framing is strict, because a parser that disagrees with the proxy in front of it is a
+request-smuggling primitive rather than a lenient convenience. Four rules, each answering 400 (or 501
+where noted) instead of guessing:
+
+- **CRLF only.** Header lines are split on `\r\n`. A bare LF or bare CR left inside a line is
+  rejected. RFC 9112 §2.2 permits a recipient to accept a lone LF, but the block terminator is
+  matched strictly as `\r\n\r\n`, so accepting it in one place and not the other would let this
+  server and an intermediary frame different requests from the same bytes. §2.2's bare-CR rule is a
+  MUST ("consider that element to be invalid or replace each bare CR with SP") — silently dropping
+  the CR, which is what an earlier version did, is neither.
+- **`Content-Length` repeats must agree.** Differing values are invalid framing (RFC 9112 §6.3);
+  identical repeats are folded, which the RFC explicitly allows.
+- **One `Host`.** RFC 9112 §3.2 requires 400 for more than one `Host` field line.
+- **`Transfer-Encoding` is refused with 501.** No transfer coding is implemented, and consulting it
+  *before* `Content-Length` is what stops a `chunked` request from silently framing as an empty body
+  (and a CL+TE request from falling back to the `Content-Length`). RFC 9112 §6.1. Decoding needs the
+  streaming read path filed in `BACKLOG.md` §2.
+
+Every other repeated header still folds last-wins, so `Cookie` sent as several lines collapses to the
+last one. That is a known limitation awaiting a list-valued header API, not a framing hazard.
+
+On the response side, CR and LF in a header **name or value** are replaced with spaces before the
+header reaches the wire (Go's `headerNewlineToSpace`). Without it, a handler putting request-derived
+text into a header — `with_header("x-lang", query_param_or("lang", req), ok(page))`, with
+`url.query_decode` resolving `%0d%0a` into real CR LF — lets the client inject headers or terminate
+the header block early and supply its own body. Values are preserved, only flattened: replacing keeps
+the caller's text, whereas deleting would splice `en\r\nde` into the token `ende`.
+
 URL helpers (in `stdlib/url.sprout`) — percent/query decoding, decoding at the byte level so multi-byte escapes (`%C3%A9` -> `é`) join correctly and validate as UTF-8 once:
 
 - `percent_decode(s) -> Result Utf8Error String` — resolve `%XX` escapes only (path-segment semantics; `+` left literal)

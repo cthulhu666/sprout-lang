@@ -43,5 +43,33 @@ fn main() -> Unit !{IO} =
     check_true("override drops the default text/plain",
       ! contains (rendered(with_header("content-type", "text/html", ok("<h1>hi</h1>"))), "text/plain")),
     check_eq("exactly one media type on override",
-      count_from(rendered(with_header("content-type", "text/html", ok("<h1>hi</h1>"))), "text/", 0), 1)
+      count_from(rendered(with_header("content-type", "text/html", ok("<h1>hi</h1>"))), "text/", 0), 1),
+
+    # --- HTTP response splitting (code review, finding 1) --------------------------------------
+    # Header values reached the wire verbatim, so a handler echoing request-derived text into one
+    # could inject headers or a whole second response. This is not a hypothetical route into the
+    # value: `stdlib.url.query_decode` turns `%0d%0a` into real CR LF, so
+    # `with_header("x-lang", query_param_or("lang", req), ok(page))` is enough.
+    #
+    # The fix follows Go's `headerNewlineToSpace` (used by `Header.writeSubset`): CR and LF in a
+    # header name or value become spaces. Sanitising rather than rejecting keeps `with_header`
+    # total — it returns an `HttpServerResponse`, not a `Result`, and `see_other` builds on it.
+    #
+    # So the assertion cannot be "the payload text is absent" (it survives, harmlessly, as part of
+    # the value). It is that the payload no longer STARTS A LINE: nothing may follow a CRLF except
+    # a header this server chose to emit.
+    check_true("a CRLF in a header value cannot start a new header line",
+      ! contains (rendered(with_header("x-lang", "en\r\nset-cookie: evil=1", ok("hi"))), "\r\nset-cookie")),
+    # The sharper half: two CRLFs would end the header block early and make the remainder a BODY
+    # the attacker controls. Exactly one blank-line separator may appear in a rendered response.
+    check_eq("an injected blank line cannot terminate the header block early",
+      count_from(rendered(with_header("x-lang", "en\r\n\r\n<script>x</script>", ok("hi"))), "\r\n\r\n", 0), 1),
+    # The value is preserved, just flattened — the sanitiser must not truncate at the CR (which
+    # would silently drop data) nor delete it (which would splice `en` onto the payload).
+    check_true("the sanitised value keeps its text, with CR/LF turned into spaces",
+      contains(rendered(with_header("x-lang", "en\r\nde", ok("hi"))), "x-lang: en  de\r\n")),
+    # Header NAMES go through the same wire path and the same injection: `lower_ascii` lowercases a
+    # name but has never removed anything from it.
+    check_true("a CRLF in a header name cannot start a new header line",
+      ! contains (rendered(with_header("x-a\r\nset-cookie", "evil=1", ok("hi"))), "\r\nset-cookie"))
   ])

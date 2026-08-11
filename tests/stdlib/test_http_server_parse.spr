@@ -30,6 +30,9 @@ fn describe_err(e: HttpServerError) -> String =
   | HttpRequestTimeout -> "Err request timeout"
   | HttpHeadersTooLarge -> "Err headers too large"
   | HttpBodyTooLarge -> "Err body too large"
+  # Reachable from `parse` (unlike the three above) — the framing decision reads Transfer-Encoding
+  # before Content-Length. Exercised in tests/stdlib/test_http_framing.spr.
+  | HttpUnsupportedTransferCoding -> "Err unsupported transfer coding"
 
 fn main() -> Unit !{IO} =
   run_suite("http_server_parse", [

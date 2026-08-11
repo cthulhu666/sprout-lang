@@ -1263,6 +1263,36 @@ Legend:
   expose the raw bytes alongside it? Prior art to survey: Go's `http.Request.Body` is an
   `io.ReadCloser` of bytes with decoding left to the caller; Rust's `hyper` uses a `Body` of `Bytes`
   chunks. Raised 2026-08-10 while fixing C5.
+- [ ] `P1` **Decode `Transfer-Encoding: chunked` request bodies.** Today every `Transfer-Encoding` is
+  refused with 501 (`stdlib/http_server.sprout`, `parse_body_framing`), which is conformant — RFC 9112
+  §6.1 says a server receiving a transfer coding it does not understand SHOULD respond 501 — but it is
+  a real capability gap, not an exotic one: any client that cannot know its body length up front uses
+  chunked (a generator body in Python `requests`, `curl -T -`, Java's
+  `BodyPublishers.ofInputStream`, any Go client with unknown `ContentLength`). Before 2026-08-11 the
+  header was not read at all and such a request framed as an EMPTY body, so the handler answered 200
+  having silently discarded the entire payload; the 501 converts that into a loud failure, which is
+  the improvement, not the fix. **Scope:** chunk-size line parsing (`<hex>[;ext]\r\n`), the read loop
+  wired into `read_remaining_body`, `max_body_bytes` enforced against the RUNNING total rather than an
+  announced one, the trailer section consumed, and CL+TE still refused as the smuggling shape RFC 9112
+  §6.3 calls out. **Depends on** the streaming item above: chunked has no `Content-Length`, so the
+  size-bounded buffer this file frames against cannot express it — which is why these two land
+  together. Raised 2026-08-11 by the http-subsystem code review (finding 4).
+- [ ] `P2` **List-valued request headers.** `parse_header_lines` folds repeats into a `Dict String`
+  last-wins. The two cases where that fold is a *framing* hazard are now refused outright
+  (`content-length` with differing values, any repeated `host`), but the general fold remains, and
+  `Cookie` legitimately arrives as several field lines (RFC 6265) — those collapse to the last one.
+  Needs an accessor returning all values for a name (Go's `Header` is `map[string][]string`; Rust's
+  `HeaderMap` is multi-map) alongside the existing single-value `request_header`. Raised 2026-08-11
+  by the http-subsystem code review (finding 3), which found the framing half.
+- [ ] `P2` **Header parsing is still quadratic in a single header line's length.** The 2026-08-11 fix
+  retired the worst term — `split_header_lines` now cuts on `\r\n` with `str_find` instead of walking
+  the block with `char_at_or`, which is O(index) per read and so was ~6e9 steps over the 64 KiB
+  `max_header_bytes` admits (measured by the code review's verifier at ~23 ms for 50 headers rising
+  superlinearly). What remains: `lower_ascii` and `string.trim` rebuild a `String` per character, so
+  one 64 KiB header LINE is still quadratic, and the parse has no yield point — on the single-threaded
+  cooperative scheduler a CPU-bound parse freezes the accept loop and every in-flight handler, with no
+  I/O to park on. Wants either byte-oriented in-place casing/trimming or a `Builder`, plus a
+  `task_yield` at a line boundary. Raised 2026-08-11 by the http-subsystem code review (finding 5).
 - [ ] `P3` **`bytes_slice`'s extern declaration has misleading parameter names.**
   `stdlib/prelude.sprout` and `stdlib/bytes.sprout` declare `bytes_slice(b: Bytes, from: Int, to: Int)`,
   but the C implementation takes `(start, count)` and clamps `count` — `bytes.slice`'s wrapper gets it
