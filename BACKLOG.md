@@ -48,10 +48,49 @@ Legend:
   soundness opt-out, only a silenced name. `Unit`-returning functions are the sole *unobservable*
   case, because the returned `Err` box is discarded by convention — the type lie is the same, it
   simply has no witness.
-  **Fix direction.** One missing unification explains both consequences: the short-circuit's type must
+  **3. THE WORST CONSEQUENCE, and the reason this is `P0` rather than `P1`: the short-circuit's
+  control-flow edges are invisible to the LINEARITY CHECKER, so a `consuming` value's exactly-once
+  obligation can be silently skipped.** The type confusion above produces a wrong *value*; this breaks
+  a *guarantee* the language advertises. Found in `bench/http_worker_pool/{pool,spawn}_server.sprout`:
+  ```sprout
+  fn handle(conn: consuming TcpConnection) -> Unit !{IO} =
+    do
+      _ <- read_avail_timeout(conn, 5000)   # Err -> returns early
+      _ <- write_all_utf8(conn, response)   # Err -> returns early
+      close(conn)                            # the ONLY consume, on ONE of three paths
+  ```
+  The emitted IR called `stdlib.net.close` only from `do_cont_10`; both `do_short_*` blocks allocated
+  an `Err` box and branched straight to the return. So a read timeout — routine under benchmark load —
+  leaked the descriptor, and **the checker raised nothing**. The comment directly above that code
+  asserted the obligation was "discharged exactly here on every path"; it was discharged on one of
+  three. The same shape was present in `tests/task_io_smoke/http_conn_error_survives.spr`
+  (`crash_after_send`, `good_send_and_report`), where the skip would additionally have bypassed
+  `chan_send(ready, 1)` and hung the peer. All six sites are fixed (2026-08-11) by using a BARE
+  STATEMENT instead of `_ <-`; `handle` is now branch-free, `entry -> close -> ret`.
+  Generalisation to take seriously: **every `consuming` proof in the codebase is only as strong as the
+  absence of a fallible bind before the consume**, because the checker is reasoning about a
+  control-flow graph that is not the one being compiled. The fix must therefore cover the checker, not
+  only the typing rule.
+  **Fix direction.** One missing unification explains both type-level consequences: the short-circuit's type must
   be required to match the enclosing function's declared return type — i.e. `x <- (e : Result E A)` is
   well-typed only in a function returning `Result E' A'` with `E ~ E'`. That is a type ERROR, not a
-  warning. Haskell gets this free because a `do` block's monad is fixed by its type; Sprout's `do` is
+  warning.
+  **The migration needs no new syntax and no new API, because the discard form already exists and is
+  already sound.** A BARE `Result`-valued statement in a `do` block runs the call, discards the whole
+  `Result`, and CONTINUES — verified: `fn bare_stmt() -> Int !{IO}` with a bare failing call returns a
+  well-typed `999`, and a `Unit` version continues past the failure. So the three forms are:
+  | Form | Meaning |
+  | --- | --- |
+  | `x <- e` | want the value; the failure propagates (must type-check against the enclosing return type) |
+  | `_ <- e` | do not want the value; the failure still propagates |
+  | `e` (bare statement) | run it, discard the `Result`, continue |
+  The trap today is that `_ <- e` *reads* as the third row and *behaves* as the second. Measured
+  distribution: `_ <-` appears in a `Result`-returning function exactly **once** in the whole tree
+  (`parser.sprout:1346`, `_ <- validate_ctor_where(...)`, whose only purpose is to fail — legitimate,
+  and unaffected by this rule), versus 21 times in non-`Result` functions where the author meant the
+  bare-statement semantics. So `_ <-` should KEEP its meaning; the 21 sites are one-token deletions.
+  Do NOT "fix" this by redefining `_ <-` to stop propagating: whether an error propagates should not
+  depend on whether the success value was named, and it would silently break that parser site. Haskell gets this free because a `do` block's monad is fixed by its type; Sprout's `do` is
   overloaded across `!{IO}` sequencing and `Result` short-circuiting, so the rule has to be stated
   explicitly. Note the consequence for the lint proposal: its prior-art survey (Rust
   `unused_must_use`, Swift SE-0047, GHC `-Wunused-do-bind`) is about *discarding a value*, a style
@@ -2381,6 +2420,16 @@ op-classification already in place.
   - **[LANDED 2026-08-08] The single biggest cause was a quadratic `strlen` in the runtime, not test-corpus growth.** `str_starts_with_at_byte` and `str_slice_bytes` each opened with `strlen(s)` over the whole string just to bounds-check the caller's byte offset, so every call was O(|s|) and every byte-cursor scanner built on them was O(|s|²). `lexer.try_ops` probes 13 multi-char operators at *every token position*, so lexing `ast_to_ir.sprout` (452 KB) scanned ~4e11 bytes; `sample` put **86% of a `--phase bundle` run in `_platform_strlen`**. Fixed by reading the O(1) CSTR-header length (`sprout_cstr_byte_len`) that `str_byte_len` already used. Measured on one harness, 271/271 passing before and after: **1664s → 1051s CPU (−37%), 301.7s → 226.4s wall (−25%)**; whole `just test` ~460s/~1840s → 322s/1192s. Bundling `ast_to_ir.sprout` 6.99s → 0.72s. **Correction to this item's numbers:** the "emit scales ~linearly, exponent 1.12 — not a quadratic" note above measured scaling *across files of differing size*, where every compiler test bundles the same whole compiler and the per-file cost is therefore near-constant; it did not measure scaling *within* a growing file, which was ~n^1.9 (8000 synthetic decls: 8.08s → 0.69s after the fix). The 846s compiler-suite figure should be re-measured before it is used to size any further work. Guarded by `tests/stdlib/test_byte_offset_cost.spr`, which asserts cost is independent of string length rather than checking a wall-clock budget.
   - **[FOLLOW-UP] Straggler heavy bundlers still on every PR.** Directory gating misses the ~10 `tests/stdlib/test_ir_*` suites that ALSO bundle the whole compiler (e.g. `test_ir_codegen_string_pattern.spr` = 222k IR lines / ~17s emit) but live in the flat `tests/stdlib/`, not `compiler/`. Either move them under `tests/stdlib/compiler/` (or a `tests/stdlib/ir/` gated the same way), or gate by an explicit file list. Also open: LPT (largest-first) dispatch in `_test-stdlib`/`_compile-examples`/`ci-fast-gates` to stop a 50s pole stranding idle lanes; and folding the serial `verify-bootstrap-fixed-point` (~23s) into the `ci-fast-gates` fan-out to overlap it.
 
+- [ ] `P3` **`bench/*.sprout` is compiled by NOTHING — not `compile-examples-stage1`, not `gate`, not
+  CI.** The justfile does not mention `bench/` at all; each `bench/<name>/bench.sh` builds its own
+  sources when a human runs it. Found 2026-08-11: the descriptor leak in
+  `bench/http_worker_pool/{pool,spawn}_server.sprout` (BACKLOG `P0`, the linearity facet) sat there
+  because nothing type-checks or runs that code in the normal loop. Unlike the `c-runtime-test` /
+  `b1-gate` orphans, this is not a gate claiming coverage it lacks, so `gate-audit` Assertion D
+  correctly does not flag it — bench code makes no verification claim. It is still code that rots.
+  Cheapest fix: extend the `_compile-examples` corpus (or add a sibling recipe) to emit-IR every
+  `bench/**/*.sprout`, which is compile-only and costs seconds. Running them is a separate question and
+  probably not worth CI time.
 - [x] `P2` **No local gate could run Linux, so the poll backend CI uses was never exercised before push. LANDED 2026-08-11** as `just linux-smoke` — runs `task-io-smoke` inside a pinned Linux container against the working tree, under CI's `SPROUT_GC_HDRCHECK=1`. Filed and fixed the same day two Linux-only failures reached CI hours apart: (1) `task_sleep` arms a **timerfd** on Linux — a file descriptor — but an `EVFILT_TIMER` on the already-open kqueue on macOS, so a descriptor-exhaustion back-off written with `task_sleep` needed the very resource it was recovering from, and its arming failure is deliberately process-fatal (`BACKLOG:409`); (2) `accept(2)` on Linux passes already-pending network errors (`ENETDOWN`, `EPROTO`, `EHOSTUNREACH`, …) through to the caller while BSD does not, so the branch handling them is unreachable on macOS. Both were green on every local gate. **Verified red, not assumed:** the shipped recipe reproduces the failed CI run at `4dcfad79` verbatim (`runtime error: builtin task_sleep: could not arm a timer (descriptor exhaustion?)`, exit 1) and is green at `681a9fe8`, which fixed it. Cost ~2m10s cold vs a ~13min CI round-trip. Image is `ubuntu:24.04` + apt `llvm clang` — deliberately mirroring the CI step rather than pinning a third-party clang image, so it drifts *with* `ubuntu-latest` (measured identical: clang 18.1.3, glibc 2.39); a version-locked image would eventually certify a toolchain CI no longer uses, which is the exact failure mode the gate exists to prevent. Three mechanics are load-bearing and documented at the recipe: `--set build_dir /tmp/build` (a container writing into the shared `build/` leaves a **Linux ELF that the host's mtime-only staleness guard reports as up to date** — every host gate then fails to exec a binary the guard refuses to rebuild; CI dodges the same trap by keying its stage-1 cache on `runner.os`), `--tmpfs /tmp:rw,exec` (docker's `--tmpfs` defaults to `noexec`, breaking both just's shebang recipes and every compiled fixture), and a `:ro` repo mount so no container-root file can land in the tree. Not wired into `gate`/`ci-fast-gates`: CI is already Linux, and a container runtime is not a required contributor dependency.
 
 - [ ] `P3` **`linux-smoke` covers OS asymmetry but not ISA asymmetry.** The container is the host's architecture (aarch64 on an Apple-silicon Mac) while CI is x86_64, so the gate certifies the epoll/timerfd backend, Linux errno semantics and glibc — the axis that has actually broken twice — and says nothing about ISA-dependent behaviour (alignment, `long double`, atomics, any codegen difference). Forcing `--platform linux/amd64` is deliberately *not* done: it routes every compile through QEMU, and a gate slow enough to skip is a gate that does not run. If ISA divergence ever bites, the cheap increment is an opt-in `just linux-smoke-amd64` accepting the emulation cost, run before release tags rather than per-push — note `.github/workflows/release.yml` already builds an aarch64 artifact, so both arches ship and only one is smoke-tested locally.
