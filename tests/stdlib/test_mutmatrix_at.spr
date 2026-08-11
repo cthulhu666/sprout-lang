@@ -1,0 +1,58 @@
+import stdlib.test (TestState, new_state, assert_eq, summary)
+import stdlib.mutable (MutMatrix, mutmatrix_new, mutmatrix_set, mutmatrix_get, mutmatrix_at, mutmatrix_at_or)
+
+# `mutmatrix_at` is the MutMatrix counterpart of `mutvec_at`: a known-in-range read that skips the
+# `Maybe` box. It exists so the `P0` fallible-bind rule has somewhere to send the 19 `mutmatrix_get`
+# call sites that bind with `<-` in a non-`Maybe` function -- see docs/fallible-bind-typing-v0.md.
+#
+# The matrix here is deliberately NON-SQUARE (2x3). A wrong flat index (`r * rows + c` instead of
+# `r * cols + c`) is invisible on a square matrix, and so is the bounds hazard these tests exist for:
+# an out-of-range COLUMN still lands inside the flat backing vector, so a reader that only checks the
+# flat bound returns a neighbouring cell instead of failing.
+
+fn main() -> Unit !{IO} =
+  do
+    state <- new_state()
+
+    m <- mutmatrix_new(2, 3, 0)
+    mutmatrix_set(m, 0, 0, 10)
+    mutmatrix_set(m, 0, 1, 11)
+    mutmatrix_set(m, 0, 2, 12)
+    mutmatrix_set(m, 1, 0, 20)
+    mutmatrix_set(m, 1, 1, 21)
+    mutmatrix_set(m, 1, 2, 22)
+
+    # Every in-range cell, so a transposed flat index cannot pass.
+    a00 <- mutmatrix_at(m, 0, 0)
+    a01 <- mutmatrix_at(m, 0, 1)
+    a02 <- mutmatrix_at(m, 0, 2)
+    a10 <- mutmatrix_at(m, 1, 0)
+    a11 <- mutmatrix_at(m, 1, 1)
+    a12 <- mutmatrix_at(m, 1, 2)
+    assert_eq(state, "mutmatrix_at (0,0)", a00, 10)
+    assert_eq(state, "mutmatrix_at (0,1)", a01, 11)
+    assert_eq(state, "mutmatrix_at (0,2)", a02, 12)
+    assert_eq(state, "mutmatrix_at (1,0)", a10, 20)
+    assert_eq(state, "mutmatrix_at (1,1)", a11, 21)
+    assert_eq(state, "mutmatrix_at (1,2)", a12, 22)
+
+    # `mutmatrix_at` must agree with `mutmatrix_get` wherever the latter yields a value.
+    g11 <- mutmatrix_get(m, 1, 1)
+    assert_eq(state, "at agrees with get", a11, g11)
+
+    # COVERAGE GAP (mutmatrix_at_or's out-of-range branch, previously untested): column 3 does not
+    # exist in a 2x3 matrix, but flat index 0*3+3 = 3 IS a valid slot in the backing vector and holds
+    # cell (1,0) = 20. The fallback must win; returning 20 here is the aliasing bug.
+    oob_col <- mutmatrix_at_or(m, 0, 3, 0 - 1)
+    assert_eq(state, "at_or: out-of-range column is not row 1", oob_col, 0 - 1)
+
+    oob_row <- mutmatrix_at_or(m, 2, 0, 0 - 1)
+    assert_eq(state, "at_or: out-of-range row", oob_row, 0 - 1)
+
+    neg <- mutmatrix_at_or(m, 0 - 1, 0, 0 - 1)
+    assert_eq(state, "at_or: negative row", neg, 0 - 1)
+
+    neg_col <- mutmatrix_at_or(m, 0, 0 - 1, 0 - 1)
+    assert_eq(state, "at_or: negative column", neg_col, 0 - 1)
+
+    summary(state)
