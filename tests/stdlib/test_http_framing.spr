@@ -1,0 +1,93 @@
+import stdlib.test (check_eq, run_suite)
+import stdlib.http_server (HttpRequest, HttpServerError, HttpInvalidRequest, HttpServerUnsupportedStatus, HttpUnsupportedTransferCoding, parse, request_method, request_path, request_body)
+
+# Request-framing conformance (code review, findings 2-4). Every case here is a message that the
+# unfixed parser ACCEPTED, and accepted with a body different from what a conforming intermediary in
+# front of it would have framed — which is the definition of a request-smuggling primitive. The point
+# of each check is therefore the `Err`: a rejected request cannot be desynchronised.
+
+fn describe(r: Result HttpServerError HttpRequest) -> String =
+  match r with
+  | Ok req -> `${request_method(req)} ${request_path(req)} body=${body_text(req)}`
+  | Err e -> describe_err(e)
+
+fn body_text(req: HttpRequest) -> String =
+  match request_body(req) with
+  | Ok text -> text
+  | Err _ -> "<not-utf8>"
+
+fn describe_err(e: HttpServerError) -> String =
+  match e with
+  | HttpInvalidRequest msg -> `Err ${msg}`
+  | HttpServerUnsupportedStatus code -> `Err status ${int_to_string(code)}`
+  | HttpUnsupportedTransferCoding -> "Err unsupported transfer coding"
+  | HttpRequestTimeout -> "Err request timeout"
+  | HttpHeadersTooLarge -> "Err headers too large"
+  | HttpBodyTooLarge -> "Err body too large"
+
+fn main() -> Unit !{IO} =
+  run_suite("http_framing", [
+    # --- Bare LF / bare CR in the header block (finding 2) -------------------------------------
+    # The asymmetry that makes this a smuggling primitive: `find_headers_end` terminates the block
+    # only on "\r\n\r\n", while the line splitter treated a BARE LF as a line terminator. A
+    # conforming front end reads one header `X-Note` whose value happens to contain an invalid bare
+    # LF and forwards no body; this server read a second header line `Content-Length: 9` out of that
+    # same value and framed 9 bytes. RFC 9112 §2.2 permits a recipient to recognise a lone LF (MAY),
+    # but not while detecting the block terminator strictly — the two must agree.
+    check_eq("bare LF in a header value does not start a new header",
+      describe(parse("GET / HTTP/1.1\r\nX-Note: hi\nContent-Length: 9\r\nHost: a\r\n\r\nSMUGGLED!")),
+      "Err malformed header line terminator"),
+    # RFC 9112 §2.2 on a bare CR is a MUST, and the unfixed splitter obeyed neither arm of it: it
+    # SILENTLY DELETED the CR rather than treating the element as invalid or replacing it with SP,
+    # so `X-Sig: a\rb` reached the handler as the different value `ab`.
+    check_eq("bare CR inside a header value is rejected, not deleted",
+      describe(parse("GET / HTTP/1.1\r\nX-Sig: a\rb\r\n\r\n")),
+      "Err malformed header line terminator"),
+    # The contrast case: strict CRLF framing must still parse. This is what pins the fix as
+    # "reject the malformed shapes" rather than "reject anything with a control character".
+    check_eq("well-formed CRLF headers still parse",
+      describe(parse("POST /x HTTP/1.1\r\nHost: h\r\nX-Tag: v\r\nContent-Length: 3\r\n\r\nabc")),
+      "POST /x body=abc"),
+
+    # --- Duplicate Content-Length (finding 3) --------------------------------------------------
+    # `dict_set` folded repeats last-wins, so this framed 40 bytes while a first-value front end
+    # framed 5. RFC 9112 §6.3 requires 400 when Content-Length is repeated with differing values.
+    check_eq("conflicting Content-Length is refused",
+      describe(parse("POST /x HTTP/1.1\r\nContent-Length: 5\r\nContent-Length: 3\r\n\r\nabcde")),
+      "Err conflicting Content-Length"),
+    # Repeats that AGREE are not a framing conflict — RFC 9112 §6.3 allows folding them to one.
+    # Rejecting these too would be over-strict, so this pins the rule to the disagreement.
+    check_eq("repeated but identical Content-Length is accepted",
+      describe(parse("POST /x HTTP/1.1\r\nContent-Length: 3\r\nContent-Length: 3\r\n\r\nabc")),
+      "POST /x body=abc"),
+
+    # --- Duplicate Host (finding 3, same last-wins fold) ---------------------------------------
+    # RFC 9112 §3.2: "A server MUST respond with a 400 (Bad Request) status code to any HTTP/1.1
+    # request message that ... contains more than one Host header field line". Routing and virtual
+    # hosting read `host`, so a silent last-wins fold lets the two ends disagree about the target.
+    check_eq("more than one Host header is refused",
+      describe(parse("GET / HTTP/1.1\r\nHost: a\r\nHost: b\r\n\r\n")),
+      "Err duplicate Host header"),
+
+    # --- Transfer-Encoding (finding 4) ---------------------------------------------------------
+    # The silent-data-loss case: with no Content-Length, `parse_content_length` returned Ok(0), so a
+    # chunked POST was framed as an EMPTY body and the handler returned 200 having seen none of it.
+    # RFC 9112 §6.1: a server receiving a transfer coding it does not understand SHOULD respond 501.
+    # Sprout implements no transfer coding (decoding needs a streaming read path — see BACKLOG),
+    # so every Transfer-Encoding is refused rather than misframed.
+    check_eq("chunked Transfer-Encoding is refused, not framed as empty",
+      describe(parse("POST /x HTTP/1.1\r\nHost: h\r\nTransfer-Encoding: chunked\r\n\r\n5\r\nhello\r\n0\r\n\r\n")),
+      "Err unsupported transfer coding"),
+    # Transfer-Encoding together with Content-Length is the classic CL.TE smuggling shape (RFC 9112
+    # §6.3: "the Transfer-Encoding overrides the Content-Length ... ought to be handled as an
+    # error"). Refusing all Transfer-Encoding covers it, and this pins that the Content-Length does
+    # NOT quietly win instead.
+    check_eq("Transfer-Encoding plus Content-Length does not fall back to Content-Length",
+      describe(parse("POST /x HTTP/1.1\r\nContent-Length: 3\r\nTransfer-Encoding: chunked\r\n\r\nabc")),
+      "Err unsupported transfer coding"),
+    # Header names are case-insensitive, so the refusal cannot be keyed on the lowercase spelling
+    # alone — a smuggler would simply capitalise it.
+    check_eq("Transfer-Encoding is matched case-insensitively",
+      describe(parse("POST /x HTTP/1.1\r\nTRANSFER-ENCODING: Chunked\r\n\r\n")),
+      "Err unsupported transfer coding")
+  ])
