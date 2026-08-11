@@ -358,11 +358,15 @@ Double math semantics:
 - **Accuracy is not uniform.** `sqrt`, `cbrt`, `exp`, `ln`, `log2`, `log10` and `log` are
   ~1e-14 relative across the whole exponent range; `pow` with a fractional exponent is
   ~1e-13 (it composes `exp` and `ln`, inheriting both); the **trigonometric** functions
-  (`sin`, `cos`, `tan`, `atan`, `atan2`) are ~1e-8 only — five orders looser, because
-  their series are truncated for transform-scale use. `asin`/`acos` are the exception
-  *within* that group at ~2e-15 absolute, because they only ever drive `atan` over
-  `[-1, 1]`, where it is far more accurate than its whole-line worst case. Do not size a
-  tolerance for one group from another's figure. Per-function measurements:
+  functions are not one group. `sin` and `cos` are ~2e-8 absolute, their series being
+  truncated for transform-scale use. `atan`/`atan2` are 1.6e-11 over the whole line and
+  8e-16 on `[-1, 1]`. `asin`/`acos` are ~2e-15 absolute and ~5e-16 relative, because they
+  only ever drive `atan` over `[-1, 1]` where it is at its best. **`tan` has no single
+  figure**: it is `sin/cos`, so `cos`'s absolute error becomes an unbounded relative error
+  as `cos → 0` — measured 4.5e-5 relative at 5e-4 from `pi/2`, 0.31 at 5e-8, 0.98 at 5e-10.
+  Near a pole `tan` returns a large, plausible, arbitrarily wrong number with nothing to
+  signal it, so bound your *distance* from `pi/2` rather than just avoiding the pole
+  itself. Do not size a tolerance for one function from another's figure. Measurements:
   `docs/math-transcendental-v0.md`; speed against libm:
   `bench/results-2026-08-06-math-transcendental.md`.
 - `log(x, base)` takes the argument first, matching the `log2`/`log10` shape:

@@ -195,5 +195,15 @@ fn main() -> Unit !{IO} =
     check_true("asin(-0.0) is -0.0", 1.0 / asin(-0.0) == (0.0 - 1.0 / 0.0)),
     # The range guarantee as a sweep rather than a handful of points. 20001 samples of
     # [-1, 1], endpoints included; without the endpoint branch in asin this reports 1.
-    check_true("asin/acos stay in range across [-1,1]", range_violations(0, 20000, 0) == 0)
+    check_true("asin/acos stay in range across [-1,1]", range_violations(0, 20000, 0) == 0),
+    # RELATIVE accuracy as x -> 1, where acos(x) -> 0 and an absolute epsilon is blind.
+    # `pi/2 - asin(x)` subtracts two nearly-equal numbers, so its ~1.6e-15 absolute error
+    # lands on a result of ~2e-8: eight significant digits gone. The half-angle branch
+    # avoids the cancellation entirely — `1 - x` is EXACT for x in [0.5, 2] by Sterbenz,
+    # which is precisely why the branch threshold is 0.5 and not a tuned constant.
+    # Oracle is libm's acos(1 - 2^-52); Sprout has no exponent literals, hence `/ p10(8)`.
+    check_true("acos keeps relative accuracy as x -> 1",
+      rel_close(acos(1.0 - halves(52)), 2.1073424255447017 / p10(8))),
+    check_true("acos relative accuracy holds mid-way too",
+      rel_close(acos(1.0 - halves(40)), 1.3486991523487112 / p10(6)))
   ])

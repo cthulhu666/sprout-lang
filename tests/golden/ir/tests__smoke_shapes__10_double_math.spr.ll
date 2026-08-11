@@ -12151,13 +12151,43 @@ join_3:
 
 define i64 @stdlib.math.acos(i64 %x) {
 entry:
-  %t$0 = load i64, ptr @stdlib.math.half_pi
-  %t$1 = call i64 @stdlib.math.asin(i64 %x)
-  %t$2$la = bitcast i64 %t$0 to double
-  %t$2$lb = bitcast i64 %t$1 to double
-  %t$2$fr = fsub double %t$2$la, %t$2$lb
-  %t$2 = bitcast double %t$2$fr to i64
-  ret i64 %t$2
+  %t$0 = bitcast double 0.5 to i64
+  %t$1$fa = bitcast i64 %x to double
+  %t$1$fb = bitcast i64 %t$0 to double
+  %t$1 = fcmp ogt double %t$1$fa, %t$1$fb
+  %t$2 = zext i1 %t$1 to i64
+  %t$16 = trunc i64 %t$2 to i1
+  br i1 %t$16, label %then_3, label %else_3
+then_3:
+  %t$5 = bitcast double 2.0 to i64
+  %t$6 = bitcast double 1.0 to i64
+  %t$7$la = bitcast i64 %t$6 to double
+  %t$7$lb = bitcast i64 %x to double
+  %t$7$fr = fsub double %t$7$la, %t$7$lb
+  %t$7 = bitcast double %t$7$fr to i64
+  %t$8 = bitcast double 0.5 to i64
+  %t$9$la = bitcast i64 %t$7 to double
+  %t$9$lb = bitcast i64 %t$8 to double
+  %t$9$fr = fmul double %t$9$la, %t$9$lb
+  %t$9 = bitcast double %t$9$fr to i64
+  %t$10 = call i64 @stdlib.math.sqrt(i64 %t$9)
+  %t$11 = call i64 @stdlib.math.asin(i64 %t$10)
+  %t$12$la = bitcast i64 %t$5 to double
+  %t$12$lb = bitcast i64 %t$11 to double
+  %t$12$fr = fmul double %t$12$la, %t$12$lb
+  %t$12 = bitcast double %t$12$fr to i64
+  br label %join_3
+else_3:
+  %t$13 = load i64, ptr @stdlib.math.half_pi
+  %t$14 = call i64 @stdlib.math.asin(i64 %x)
+  %t$15$la = bitcast i64 %t$13 to double
+  %t$15$lb = bitcast i64 %t$14 to double
+  %t$15$fr = fsub double %t$15$la, %t$15$lb
+  %t$15 = bitcast double %t$15$fr to i64
+  br label %join_3
+join_3:
+  %t$4 = phi i64 [%t$12, %then_3], [%t$15, %else_3]
+  ret i64 %t$4
 }
 
 define i64 @stdlib.math.clamp(i64 %x, i64 %lo, i64 %hi) {

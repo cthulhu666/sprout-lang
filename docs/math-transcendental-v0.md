@@ -648,6 +648,10 @@ asin(x) = 2 * atan(x / (1 + sqrt(1 - x²)))     # half-angle, from tan(t/2) = si
 acos(x) = pi/2 - asin(x)
 ```
 
+> **Superseded in part by §16.** `acos` gained a second arm for `x > 0.5` shortly after,
+> to fix the relative-accuracy caveat §15.3 records below. The `asin` analysis in this
+> section stands unchanged.
+
 Three things about this were not obvious in advance, and each is a trap a later
 "simplification" can walk back into.
 
@@ -667,8 +671,9 @@ magnitude and the endpoints reduce to the finite `2·atan(±1)`.
 
 Measured against libm over 2M samples spanning `[-1, 1]`: worst absolute error **1.6e-15**
 for `asin`, **1.8e-15** for `acos`. That is four orders tighter than the `~1e-8` the module
-header quotes for `sin`/`cos`/`atan`, which looks impossible for a function whose entire
-body is one `atan` call.
+header quoted at the time for `sin`/`cos`/`atan` as one group, which looks impossible for a
+function whose entire body is one `atan` call. (That grouped row was itself wrong for
+`atan`, which this section's own reasoning should have flagged sooner — §16.2 corrects it.)
 
 The resolution is that `atan`'s figure is a *whole-line* worst case. Its three halving
 passes saturate: they shrink `x = 1e6` only to `0.199`, where the `x¹³`-truncated series
@@ -730,3 +735,80 @@ oracle: `range_violations` counts inputs where `asin`/`acos` escape their POSIX 
 20001 samples of `[-1, 1]` (endpoints included) and must return `0`. It also goes RED
 without the endpoint branch, so the guarantee is checked as a property, not just at the
 handful of points a reviewer thought to name.
+
+## 16. `acos` relative accuracy, and the accuracy table was wrong (2026-08-11)
+
+§15 shipped `acos` with a documented caveat rather than a fix: absolute accuracy 1.8e-15,
+but poor *relative* accuracy as `x -> 1`, where the result approaches 0 and the complement
+`pi/2 - asin(x)` cancels. Closing that turned into two changes, because measuring the
+accuracy table in order to correct one row showed a second row was wrong in a far more
+dangerous direction.
+
+### 16.1 The `acos` fix, and why the split point is not a tuning knob
+
+```sprout
+acos(x) = if x > 0.5 then 2 * asin(sqrt((1 - x) / 2)) else pi/2 - asin(x)
+```
+
+The half-angle identity comes from `sin(t/2) = sqrt((1 - cos t)/2)`. The obvious objection
+is that it just relocates the cancellation — `1 - x` looks every bit as bad as
+`pi/2 - asin(x)`. It is not, and the reason is **Sterbenz's lemma**: `a - b` is computed
+*exactly* in binary floating point whenever `b/2 <= a <= 2b`. For `x` in `[0.5, 1]` that
+condition holds, so `1 - x` carries **no** rounding error at all, and halving is exact
+besides (a power of two), so `sqrt` receives an exactly-representable argument.
+
+That is what fixes the threshold at `0.5`: it is the Sterbenz boundary. Below it the
+subtraction would begin to round and the identity would buy nothing; above it the identity
+is free. Verified rather than assumed — 0 of 52 sampled `1 - 2^-k` subtractions were
+inexact.
+
+Measured worst relative error over `x = 1 - 2^-k`, `k = 1..52`:
+
+| | `pi/2 - asin(x)` | half-angle arm |
+|---|---|---|
+| worst relative error | **2.8e-08** | **4.7e-16** |
+| at `k = 52` | 2.77e-08 | 0.0 |
+| at `k = 32` | 2.18e-11 | 3.1e-16 |
+
+Eight significant digits recovered, with no trade anywhere else: whole-domain worst
+absolute error stays 1.8e-15, zero out-of-range results, and every exact value survives —
+`acos(1.0)` is `+0.0`, `acos(-1.0)` is `pi`, `acos(0.0)` is `pi/2`, `acos(0.5)` is
+bit-identical to libm. Rule 2 survives both arms (§15.4's reasoning covers the complement
+arm; in the half-angle arm a real `x > 1` makes `1 - x` negative and `sqrt` yields NaN).
+
+One incidental gain: `acos(1.0)` now reaches `+0.0` through `2*asin(sqrt(0.0))`, so the
+range guarantee no longer depends solely on `asin`'s endpoint branch.
+
+### 16.2 The accuracy table said `~1e-8` for `tan`. It is up to 98% wrong.
+
+The module header bucketed `sin`, `cos`, `tan`, `atan` and `atan2` together at `~1e-8`.
+Measuring each row separately — which §15.2 should have prompted, since it had already
+found the bucket wrong for `asin`/`acos` — shows the grouping was hiding two errors.
+
+`atan`/`atan2` were over-stated: 1.6e-11 whole-line and 8e-16 on `[-1, 1]`, not 1e-8 (and
+`atan`'s own comment claimed ~1e-9). Harmless in direction, but it is what led the first
+draft of `asin` to be documented at seven orders worse than it measures.
+
+`tan` was **under**-stated, which is not harmless. It is `sin/cos`, so `cos`'s ~2.2e-8
+*absolute* error becomes an unbounded *relative* error as `cos -> 0`:
+
+| distance from `pi/2` | `tan(x)` | relative error |
+|---|---|---|
+| 5e-1 | 1.83e+00 | 1.7e-09 |
+| 5e-4 | 2.00e+03 | 4.5e-05 |
+| 5e-6 | 2.00e+05 | 4.5e-03 |
+| 5e-8 | 2.00e+07 | **3.1e-01** |
+| 5e-10 | 2.00e+09 | **9.8e-01** |
+
+The failure is quiet: the result stays large, finite and plausible the whole way down, so
+nothing distinguishes a good answer from a 98%-wrong one. The prior comment described the
+hazard as a point singularity — "undefined at odd multiples of pi/2; callers in that domain
+must guard" — which invites guarding against the *pole* when what is actually required is
+bounding one's *distance* from it. Both the header and `tan`'s comment now carry the table
+and say so.
+
+The general lesson, and the reason this section exists rather than a one-line figure edit:
+**a grouped accuracy row is a claim about every member, and it decays silently.** Nothing
+fails when a documented bound drifts from the truth — no test asserts a doc comment. The
+only way it surfaces is someone re-measuring, which happened here only because a *different*
+function's figure looked implausible.
