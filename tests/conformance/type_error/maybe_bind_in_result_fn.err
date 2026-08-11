@@ -1,1 +1,1 @@
-Return type mismatch in main.wrong_family: Type mismatch: Maybe vs Result String
+a `Maybe` bind needs a `Maybe`-returning block, but `main.wrong_family` returns Result String Int

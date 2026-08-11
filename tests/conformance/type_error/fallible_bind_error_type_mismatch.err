@@ -1,1 +1,1 @@
-Return type mismatch in main.mismatched: Type mismatch: String vs Int
+this `<-` bind fails with String, but `main.mismatched` returns Result Int Int. Convert the error at the bind with `map_error`.
