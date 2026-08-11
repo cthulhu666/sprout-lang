@@ -1,0 +1,33 @@
+module main
+
+# REGRESSION for the `P0` linearity facet. The sibling fixture
+# `borrow_after_fallible_bind` pins the same rule for a block whose OWN type is
+# `Result`. This one pins it for a block whose type is `Unit !{IO}`, which was the
+# hole: `linear_check` keyed the rule on the block's tail type
+# (`block_short_circuits(dty)`), following a spec sentence that also claimed
+# "Effectful blocks (`!{IO}`) run every step and are unaffected". Both were wrong.
+# `!{IO}` is orthogonal to short-circuiting: a fallible `<-` inside an effectful
+# block still returns early, so the steps after it are still conditional.
+#
+# Found live in `bench/http_worker_pool/{pool,spawn}_server.sprout`, where `handle`
+# had exactly this shape and the emitted IR called `close` from only one of three
+# blocks. A read timeout leaked the descriptor and the checker raised nothing.
+#
+# The fix keys the rule on THIS BIND's right-hand-side type instead of the block's,
+# which is both the correct granularity and strictly more precise.
+
+type linear File = File Int
+
+fn release(f: consuming File) -> Int = match f with | File n -> n
+fn step(f: borrowing File) -> Result Int Int = Ok(1)
+
+# `-> Unit !{IO}`, not `-> Result`: the block's own type carries no failure, yet
+# `step` short-circuits out of the whole function on `Err`, skipping `release`.
+fn talk(f: File) -> Unit !{IO} =
+  do
+    a <- step(f)
+    let _ = release(f)
+    print(to_string(a))
+
+fn main() -> Unit !{IO} =
+  talk(File(1))
