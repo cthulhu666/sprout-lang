@@ -212,9 +212,25 @@ fn run_file_emit_iface(module_name: String, path: String, stdlib_root: String, f
 # unaffected either way — its driver call sits in an `if` condition, so the
 # grep, not the status, still decides.
 
+# An UNREADABLE file is INVALID, not silence. This used to open `contents <- read_file(path)`
+# inside the `do`, which discards the `Err` and returns early from a `Unit`-returning function —
+# so the driver printed nothing at all and exited 0 for a file it never read, defeating the exit-status
+# contract promised directly above. `match read_file` makes the failure a case, the same shape
+# `run_file` and the emit-iface path already use.
+#
+# Found 2026-08-11 by the discarded-fallible-bind measurement in
+# docs/fallible-bind-diagnostic-v0.md: of 1539 binds in the tree this was the ONLY hit in production
+# code, which is the measurement's central result and the reason a diagnostic for the shape is worth
+# having. Regression: the --check-iface cases in `just diagnostic-stream-smoke`.
 fn run_check_iface(path: String, failed: Ref Int) -> Unit !{IO} =
-  do
-    contents <- read_file(path)
+  match read_file(path) with
+  | Err msg ->
+      do
+        print("INVALID: " ++ path ++ " (unreadable: " ++ msg ++ ")")
+        ref_write(failed, 1)
+  | Ok contents -> run_check_iface_contents(path, contents, failed)
+
+fn run_check_iface_contents(path: String, contents: String, failed: Ref Int) -> Unit !{IO} =
     match iface_codec.decode_iface_file(contents) with
     | Nothing ->
         do
