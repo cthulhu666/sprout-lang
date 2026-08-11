@@ -237,7 +237,7 @@ release.** This is the one genuine decision in this document.
 
 ### 5.3 Prototype results
 
-Two minimal servers, **byte-identical request handling** (`read_avail` → fixed 200 response →
+Two minimal servers, **byte-identical request handling** (`read_avail_timeout` → fixed 200 response →
 `close`), differing only in the concurrency model. Sources:
 `spawn_server.sprout` (mirrors `serve_forever_loop`) and `pool_server.sprout`. Same drain-barrier
 protocol as §1.1, `wrk -t2 -c40`.

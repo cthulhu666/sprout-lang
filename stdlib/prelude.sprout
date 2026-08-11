@@ -1528,8 +1528,9 @@ extern fn regex_find_range(pattern: String, text: String) -> Maybe IntRange
 extern fn regex_replace_all_literal(s: String, pattern: String, replacement: String) -> String
 extern fn regex_escape(s: String) -> String
 
-# Network
-extern fn tcp_read(conn: Int) -> String !{IO}
+# Network primitives are NOT declared here. They live in stdlib.net, which must be imported
+# explicitly — a socket read is not something a program should be able to reach by accident. The one
+# exception used to be `tcp_read`, whose String return type is exactly why it is gone.
 
 # Terminal
 extern fn term_clear() -> Unit !{IO}

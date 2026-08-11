@@ -1,0 +1,87 @@
+import stdlib.task (Scope, with_scope, task_spawn)
+import stdlib.net (TcpConnection, accept, close, close_listener, connect, listen_local, read_avail_timeout, write_all)
+import stdlib.bytes as bytes
+
+# REGRESSION (W2 R2, `net` half). A socket read must not produce a Sprout String.
+#
+# The defect, reproduced before the fix: `a`, 0x00, `b` sent over loopback and read back with
+# `read_avail_timeout` returned a String, because tcp_read_avail_timeout ended in
+# `sprout_gc_adopt_cstr(buf, n, ...)`. That stamps the byte count into the CSTR header and hands back
+# a String — but a String is normatively "always valid UTF-8, contains no NUL byte"
+# (docs/spec-v0.md:64), so the value was illegal. It failed in two distinguishable ways:
+#
+#   without SPROUT_GC_HDRCHECK: byte_length=3, length=1. The header was right and every strlen-based
+#     operation stopped at the NUL, so the corruption was SILENT and direction-dependent.
+#   with SPROUT_GC_HDRCHECK=1:   [sprout] HDRCHECK: str_byte_len aux=3 strlen=1, then SIGABRT.
+#
+# The second is how this was found — as a CI failure on a PR that was green on every local gate,
+# because HDRCHECK is off by default. See docs/debugging.md.
+#
+# There is no validation added anywhere to fix this. The read returns Bytes, so no illegal String is
+# ever constructed, and `bytes.to_string` is the one place bytes become text — decision D4's choke
+# point, which rejects a NUL as well as invalid UTF-8. Both halves are asserted below: the bytes
+# survive intact, AND decoding them is refused.
+#
+# tests/task_io_smoke/http_binary_body.spr covers the same property end-to-end through the HTTP
+# server. This one pins it at the layer the defect actually lived at, so a regression is attributed to
+# `net` rather than diagnosed through a request parser.
+
+fn payload() -> Bytes =
+  bytes.append(bytes.append(bytes.from_string("a"), bytes.singleton(0)), bytes.from_string("b"))
+
+fn byte_at(b: Bytes, i: Int) -> Int =
+  maybe_with_default(-1, bytes.get(b, i))
+
+# A single 3-byte write on loopback arrives in one segment, but asserting that would be testing the
+# kernel rather than the read. Accumulate until the expected length is in hand or the read stops
+# producing, so a split delivery is handled rather than reported as corruption.
+fn read_all(conn: borrowing TcpConnection, acc: Bytes, want: Int) -> Bytes !{IO} =
+  if bytes.length(acc) >= want then acc
+  else
+    match read_avail_timeout(conn, 5000) with
+    | Ok chunk -> read_all(conn, bytes.append(acc, chunk), want)
+    | Err _ -> acc
+
+fn reader(server: consuming TcpConnection) -> Unit !{IO} =
+  do
+    let got = read_all(server, bytes.empty(), 3)
+    # Every byte, including the NUL, and including the one AFTER it — a value truncated at the NUL
+    # has length 1, so the length check alone would catch it, but the trailing `b` is what proves
+    # nothing downstream of the NUL was dropped.
+    if (bytes.length(got) == 3) && (byte_at(got, 0) == 97) && (byte_at(got, 1) == 0) && (byte_at(got, 2) == 98) then
+      term_write("nul-bytes-intact\n")
+    else
+      term_write(`MISMATCH: got ${int_to_string(bytes.length(got))} bytes\n`)
+    # The choke point. Delivering these bytes is correct; calling them text is not, and the refusal
+    # is what stops the illegal String from being reconstructed one layer up.
+    match bytes.to_string(got) with
+    | Ok _ -> term_write("MISMATCH: to_string accepted a NUL byte\n")
+    | Err _ -> term_write("nul-decode-refused\n")
+    close(server)
+
+fn writer(client: consuming TcpConnection) -> Unit !{IO} =
+  do
+    match write_all(client, payload()) with
+    | Ok _ -> term_write("")
+    | Err _ -> term_write("MISMATCH: writer could not send\n")
+    close(client)
+
+fn run(s: Scope, server: consuming TcpConnection, client: consuming TcpConnection) -> Unit !{IO} =
+  do
+    task_spawn(s, \_ -> reader(server))
+    task_spawn(s, \_ -> writer(client))
+
+fn main() -> Unit !{IO} =
+  do
+    listener <- listen_local(28986)
+    match connect("127.0.0.1", 28986) with
+    | Ok client ->
+        do
+          server <- accept(listener)
+          close_listener(listener)
+          with_scope(\s -> run(s, server, client))
+    | Err _ ->
+        do
+          close_listener(listener)
+          term_write("MISMATCH: could not connect\n")
+    term_write("done\n")

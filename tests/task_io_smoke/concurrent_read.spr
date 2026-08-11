@@ -1,6 +1,7 @@
 import stdlib.task (Scope, with_scope, task_spawn)
-import stdlib.net (TcpConnection, close, close_listener, connect, accept, listen_local, read_avail, write_all_utf8)
+import stdlib.net (TcpConnection, close, close_listener, connect, accept, listen_local, read_avail_timeout, write_all_utf8)
 import stdlib.string as string
+import stdlib.bytes as bytes
 
 # L0.3 I/O parking smoke. Two green tasks share one loopback connection pair:
 # `reader` reads before any data exists, `writer` then sends. With I/O parking,
@@ -17,9 +18,21 @@ import stdlib.string as string
 # into reader/writer. Before M4.4a this shape needed raw Int handles and got no
 # release enforcement at all; both sockets and the listener are now closed on
 # every path because omitting one would not compile.
+# This is the fixture that covers the PARK inside the new read loop. `read_avail_timeout` is Sprout
+# now — tcp_read_some returns Err(TcpWouldBlock) because no data exists yet, and the loop calls
+# tcp_wait, which is what suspends the reader so the writer can run. If that loop ever stopped
+# parking (say by spinning on WouldBlock), this test would not fail loudly; it would spin until the
+# recipe's timeout and report a HANG, the same RED signal as the blocking baseline it was written for.
+#
+# The bound is generous because nothing here is testing a deadline. Before, this read had no bound at
+# all — `read_avail` has been deleted, since an unbounded socket read is the hazard this series has
+# spent its time removing.
 fn reader(server: consuming TcpConnection) -> Unit !{IO} =
-  match read_avail(server) with
-  | Ok data -> report_and_close(server, string.concat("reader got ", data))
+  match read_avail_timeout(server, 5000) with
+  | Ok data ->
+      match bytes.to_string(data) with
+      | Ok text -> report_and_close(server, string.concat("reader got ", text))
+      | Err _ -> report_and_close(server, "reader: payload was not text")
   | Err _ -> report_and_close(server, "reader: read failed")
 
 fn writer(client: consuming TcpConnection) -> Unit !{IO} =

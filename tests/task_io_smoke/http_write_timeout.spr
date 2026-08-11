@@ -1,5 +1,6 @@
 import stdlib.task (Scope, with_scope, task_spawn, task_sleep)
 import stdlib.net (TcpConnection, connect, close, write_all_utf8, read_avail_timeout)
+import stdlib.bytes as bytes
 import stdlib.http_server (HttpRequest, HttpServerResponse, ServerConfig, ok, serve_n_with)
 import stdlib.string as string
 
@@ -48,12 +49,15 @@ fn handle(req: HttpRequest) -> HttpServerResponse =
   ok(big_body())
 
 # Read until the server hangs up (or stops sending), counting bytes and keeping none of them: the
-# unfixed path delivers 8 MiB and accumulating that as a String would only add GC noise.
+# unfixed path delivers 8 MiB and accumulating it would only add GC noise.
+#
+# Counting is now unambiguous. It used to test `string.is_empty` for end-of-stream and measure with
+# `string.byte_length` — two different length notions on one value, because the read returned a
+# String built from raw socket bytes. A clean close is `Err TcpEndOfStream`, a distinct outcome from
+# a short read, and `bytes.length` is the only measurement involved.
 fn drain(conn: borrowing TcpConnection, total: Int) -> Int !{IO} =
   match read_avail_timeout(conn, 3000) with
-  | Ok chunk ->
-      if string.is_empty(chunk) then total
-      else drain(conn, total + string.byte_length(chunk))
+  | Ok chunk -> drain(conn, total + bytes.length(chunk))
   | Err _ -> total
 
 # Sleep past the write budget while refusing to read, then see how much the server managed to

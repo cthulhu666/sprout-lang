@@ -1,9 +1,10 @@
 import stdlib.task (Scope, with_scope, task_spawn)
-import stdlib.net (TcpConnection, connect, close, write_all_utf8, read_exact_utf8, tcp_listen, tcp_accept, tcp_read, tcp_write)
+import stdlib.net (TcpConnection, TcpListener, accept, close, close_listener, connect, listen_local, read_avail_timeout, read_exact_utf8, write_all_utf8)
 import stdlib.string as string
+import stdlib.bytes as bytes
 
 # L0.3 I/O parking — exercises the poller paths a single read-park does NOT:
-#  * accept-parking: `server` is spawned before anyone connects, so tcp_accept
+#  * accept-parking: `server` is spawned before anyone connects, so accept
 #    parks on the listener fd.
 #  * re-arm (park -> wake -> park AGAIN on the same fd): `client` parks reading
 #    ack1, then parks again reading ack2 on the same connection — the epoll
@@ -11,17 +12,47 @@ import stdlib.string as string
 #  * the write side runs on both ends.
 # A two-round request/ack handshake keeps it deterministic; completion under a
 # timeout is the signal (a broken re-arm would hang on the second read).
-fn server(listener: Int) -> Unit !{IO} =
+#
+# The server half used to run on RAW Int handles with `tcp_read`, and both are gone from it. That is
+# not a cosmetic migration — it moves what this fixture actually tests:
+#
+#  * `tcp_read` parked INSIDE C, so the park being exercised was a C loop's. The read is now
+#    `read_avail_timeout`, whose retry loop is ordinary Sprout over `tcp_wait` + `tcp_read_some`. The
+#    same poller paths are hit, but through the code every server now uses.
+#  * `tcp_read` returned a String assembled from unvalidated socket bytes. Decoding is explicit below,
+#    and its Result is checked.
+#  * `tcp_read` aborted the process on a socket error. In a fixture whose RED signal is a hang, an
+#    abort and a park were the two outcomes hardest to tell apart.
+#
+# The listener is MOVED into the spawned task (task_spawn's work parameter is `once`), so the accept
+# still happens after the spawn and still parks.
+fn server(listener: consuming TcpListener) -> Unit !{IO} =
   do
-    conn <- tcp_accept(listener)
-    m1 <- tcp_read(conn)
-    term_write(string.concat("server round1 ", m1))
-    term_write("\n")
-    tcp_write(conn, "ack1")
-    m2 <- tcp_read(conn)
-    term_write(string.concat("server round2 ", m2))
-    term_write("\n")
-    tcp_write(conn, "ack2")
+    conn <- accept(listener)
+    close_listener(listener)
+    serve_rounds(conn)
+
+fn serve_rounds(conn: consuming TcpConnection) -> Unit !{IO} =
+  do
+    read_round(conn, "server round1 ")
+    send_or_fail(conn, "ack1")
+    read_round(conn, "server round2 ")
+    send_or_fail(conn, "ack2")
+    close(conn)
+
+# Bytes off the wire, `bytes.to_string` to make them text, a Result to say whether they were. The
+# bound is generous on purpose: nothing here is testing a deadline, and a tight one would make a
+# timeout ambiguous with the hang that is the actual failure signal.
+fn read_round(conn: borrowing TcpConnection, label: String) -> Unit !{IO} =
+  match read_avail_timeout(conn, 5000) with
+  | Ok payload ->
+      match bytes.to_string(payload) with
+      | Ok text ->
+          do
+            term_write(string.concat(label, text))
+            term_write("\n")
+      | Err _ -> term_write("server: payload was not text\n")
+  | Err _ -> term_write("server read failed\n")
 
 # Connect from within the task (after `server` has parked on accept), so the
 # accept genuinely parks rather than finding a pre-filled backlog.
@@ -44,7 +75,7 @@ fn client(port: Int) -> Unit !{IO} =
 fn send_or_fail(conn: borrowing TcpConnection, msg: String) -> Unit !{IO} =
   match write_all_utf8(conn, msg) with
   | Ok _ -> term_write("")
-  | Err _ -> term_write("client write failed\n")
+  | Err _ -> term_write("write failed\n")
 
 fn read_ack(conn: borrowing TcpConnection, label: String) -> Unit !{IO} =
   match read_exact_utf8(conn, 4) with
@@ -54,12 +85,12 @@ fn read_ack(conn: borrowing TcpConnection, label: String) -> Unit !{IO} =
         term_write("\n")
   | Err _ -> term_write("client read failed\n")
 
-fn run(s: Scope, listener: Int, port: Int) -> Unit !{IO} =
+fn run(s: Scope, listener: consuming TcpListener, port: Int) -> Unit !{IO} =
   do
     task_spawn(s, \_ -> server(listener))
     task_spawn(s, \_ -> client(port))
 
 fn main() -> Unit !{IO} =
   do
-    listener <- tcp_listen(28998)
+    listener <- listen_local(28998)
     with_scope(\s -> run(s, listener, 28998))

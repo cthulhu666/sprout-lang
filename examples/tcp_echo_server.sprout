@@ -1,10 +1,43 @@
 module examples.tcp_echo_server
-import stdlib.net (tcp_echo_serve)
+import stdlib.net (TcpConnection, TcpListener, accept, close, close_listener, listen_local, read_avail_timeout, tcp_error_message, write_all)
 
-# Multi-connection TCP echo server using stdlib.net.
+# Multi-connection TCP echo server.
 #
 # Run:
 #   mise exec -- just run examples/tcp_echo_server.sprout
+#
+# This was a single call to `tcp_echo_serve`, a builtin that implemented the entire accept/read/write/
+# close loop in C. That builtin is gone, and its removal is the point of this file: a server loop is
+# exactly the kind of thing AGENTS.md "Builtin vs Stdlib" says must live in Sprout, since nothing
+# about it needs host capabilities that `stdlib.net` does not already expose. Keeping it in C also
+# meant it could not be read, tested, or bounded — it had no read deadline at all, so one silent
+# client parked the loop forever and no further connection was ever served.
+#
+# One connection at a time, as the C version was. `stdlib.http_server` is where the concurrent shapes
+# live (`serve`, `serve_pooled`); this stays sequential so it remains a minimal illustration.
+
+fn echo(conn: consuming TcpConnection) -> Unit !{IO} =
+  do
+    match read_avail_timeout(conn, 30000) with
+    | Ok payload ->
+        match write_all(conn, payload) with
+        | Ok _ -> term_write("echoed\n")
+        | Err err -> term_write(`write failed: ${tcp_error_message(err)}\n`)
+    # A read error — including the 30s deadline expiring, and including a client that simply reset —
+    # drops THIS connection and returns to the accept loop. The old C loop aborted the process.
+    | Err err -> term_write(`read failed: ${tcp_error_message(err)}\n`)
+    close(conn)
+
+fn serve_loop(listener: borrowing TcpListener, remaining: Int) -> Unit !{IO} =
+  if remaining <= 0 then term_write("connection budget exhausted\n")
+  else
+    do
+      conn <- accept(listener)
+      echo(conn)
+      serve_loop(listener, remaining - 1)
 
 fn main() -> Unit !{IO} =
-  tcp_echo_serve(8081, 1000000)
+  do
+    listener <- listen_local(8081)
+    serve_loop(listener, 1000000)
+    close_listener(listener)

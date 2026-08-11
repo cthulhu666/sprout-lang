@@ -4,23 +4,10 @@ import stdlib.bytes (Utf8Error, from_string, to_string, length)
 
 export extern fn tcp_listen(port: Int) -> Int !{IO}
 export extern fn tcp_accept(listener: Int) -> Int !{IO}
-export extern fn tcp_read(conn: Int) -> String !{IO}
 export extern fn tcp_write(conn: Int, data: String) -> Unit !{IO}
-# Recoverable read-available: like tcp_read, but returns Err on a socket failure instead of
-# aborting the process (Ok("") on peer EOF). The missing member of the Result-returning socket
-# family — tcp_read_exact blocks for an exact count, so it cannot read a header block of unknown
-# length. Lets a server drop one failing connection rather than exit(1).
-export extern fn tcp_read_avail(conn: Int) -> Result TcpError String !{IO}
-# Deadline-bounded read-available: waits at most `timeout_ms` for data, then `Err TcpTimeout` with
-# the connection STILL VALID (Go's SetReadDeadline / Java's SO_TIMEOUT semantics, not cancellation).
-# `timeout_ms <= 0` polls once without waiting, so a caller enforcing a TOTAL budget can pass the
-# remaining slice and get an immediate timeout when it is spent — see stdlib.http_server, which
-# needs a total bound because a per-read one is defeated by a peer dribbling a byte per interval.
-export extern fn tcp_read_avail_timeout(conn: Int, timeout_ms: Int) -> Result TcpError String !{IO}
-# Raw connect. Exported for the same reason tcp_listen/tcp_accept/tcp_read/
-# tcp_write/tcp_close are: code whose shape the linear TcpConnection API cannot
-# yet express must still be able to speak TCP. Callers on this path get no
-# release enforcement; prefer `connect` where the shape allows.
+# Raw connect. Exported for the same reason tcp_listen/tcp_accept/tcp_write/tcp_close are: code whose
+# shape the linear TcpConnection API cannot yet express must still be able to speak TCP. Callers on
+# this path get no release enforcement; prefer `connect` where the shape allows.
 #
 # The accept -> hand the socket to a SPAWNED task shape used to be on that list.
 # It no longer is: M4.4a's `once` parameters let a linear value be MOVED into a
@@ -38,6 +25,29 @@ extern fn tcp_wait(conn: Int, interest: Int, ms: Int) -> Result TcpError Int !{I
 # kernel took nothing, Ok(0) only for an exhausted payload. `offset` rather than a re-sliced tail so
 # a caller's loop stays linear instead of going quadratic in the payload length.
 extern fn tcp_write_some(conn: Int, data: Bytes, offset: Int) -> Result TcpError Int !{IO}
+# The read-side twin: one recv of at most `max_bytes` (clamped to 64 KiB), never parking. Ok(chunk)
+# holds at least one byte; Err(TcpWouldBlock) means the kernel had none; Err(TcpEndOfStream) means the
+# peer closed cleanly.
+#
+# BYTES, not String, and that is the substantive part. This replaced tcp_read, tcp_read_avail and
+# tcp_read_avail_timeout, all three of which adopted the received bytes as a String — so a payload
+# containing 0x00 produced a value violating the String invariant ("always valid UTF-8, contains no
+# NUL byte", docs/spec-v0.md:64). Nothing validated it, and the corruption was silent: byte_length
+# read the length header and was right while every strlen-based operation stopped at the NUL. There is
+# no validation to add here; bytes.to_string is the one choke point and it rejects a NUL as well as
+# invalid UTF-8, so every String derived from a socket now passes through a Result.
+#
+# EOF is a distinct error rather than an empty Ok. `Ok("")`-means-EOF was an in-band sentinel of
+# exactly the kind this whole change removes, and it read as "nothing yet" at the call sites that
+# most needed to distinguish the two.
+#
+# Exported, unlike its write-side twin, because it is now the ONLY read on the raw-handle path. That
+# path cannot be retired yet: a task force-dropped by `scope_cancel` or `with_timeout` never runs its
+# linear `close`, so the fixtures that deliberately park a connection and have it dropped
+# (tests/task_io_smoke/cancel_io_drop.spr and friends) cannot hold a TcpConnection at all. Deleting
+# tcp_read without exporting this would have left the family able to accept and write but not read —
+# half-usable, which is worse than either keeping it whole or retiring it outright. See BACKLOG.
+export extern fn tcp_read_some(conn: Int, max_bytes: Int) -> Result TcpError Bytes !{IO}
 
 extern fn tcp_read_exact(conn: Int, count: Int) -> Result TcpError Bytes !{IO}
 extern fn tcp_write_all(conn: Int, data: Bytes) -> Result TcpError Int !{IO}
@@ -45,11 +55,10 @@ extern fn tcp_write_all(conn: Int, data: Bytes) -> Result TcpError Int !{IO}
 # the bound. These are nginx's send_timeout semantics — "the timeout is set only between two
 # successive write operations, not for the transmission of the whole response" — so a slow but
 # reading client is never cut off, while one that stops reading entirely is. `idle_ms <= 0` attempts
-# the write once without parking, matching tcp_read_avail_timeout.
+# the write once without parking, the convention every non-parking primitive here shares.
 extern fn tcp_write_all_timeout(conn: Int, data: Bytes, idle_ms: Int) -> Result TcpError Int !{IO}
 export extern fn tcp_close(conn: Int) -> Unit !{IO}
 export extern fn tcp_close_listener(listener: Int) -> Unit !{IO}
-extern fn tcp_echo_serve(port: Int, max_connections: Int) -> Unit !{IO}
 
 export type TcpError (..) =
   | TcpInvalidArgument String
@@ -163,30 +172,73 @@ export fn write_all_by(conn: borrowing TcpConnection, payload: Bytes, deadline_u
 export fn write_all_utf8_by(conn: borrowing TcpConnection, payload: String, deadline_us: Int) -> Result TcpError Int !{IO} =
   write_all_by(conn, from_string(payload), deadline_us)
 
-# Recoverable string write over a raw connection handle, for callers holding an Int rather
-# than the opaque TcpConnection. Returns Err on a socket failure instead of aborting — the
-# write counterpart to tcp_read_avail.
+# Recoverable string write over a raw connection handle, for callers holding an Int rather than the
+# opaque TcpConnection. Returns Err on a socket failure instead of aborting, where the raw `tcp_write`
+# is fatal — so it is the write-side partner of the exported `tcp_read_some`.
 #
-# It has NO caller in-tree since stdlib.http_server moved to the linear API (M4.4a); it names
-# no consumer here for that reason. Kept as an exported escape hatch alongside the raw
-# tcp_* externs above, for code whose shape the linear API still cannot express — retire it
-# with them, not before, so the raw-handle path stays complete rather than half-usable.
+# It has NO caller in-tree since stdlib.http_server moved to the linear API (M4.4a); it names no
+# consumer here for that reason. Its stated retirement condition — go when the raw tcp_* externs go,
+# not before, so the raw-handle path stays complete rather than half-usable — still holds, and that
+# condition is now pinned to something concrete: the family survives because a force-dropped task
+# cannot run a linear `close`. See the note on tcp_read_some.
+#
+# `from_string` cannot lose data here: a String is valid UTF-8 and NUL-free by construction
+# (docs/spec-v0.md:64), so the byte encoding is total in this direction. It is the other direction —
+# bytes to String — that needs a Result, which is why the read returns Bytes.
 export fn tcp_write_string(conn: Int, data: String) -> Result TcpError Int !{IO} =
   tcp_write_all(conn, from_string(data))
 
-# Read whatever has arrived, without taking the connection. The unknown-length
-# counterpart to read_exact: an HTTP header block ends at a delimiter, not at a
-# byte count, so a server cannot ask for an exact size. Err on socket failure,
-# Ok("") on a clean peer EOF — so one client's reset drops one connection rather
-# than aborting the process.
-export fn read_avail(conn: borrowing TcpConnection) -> Result TcpError String !{IO} =
-  tcp_read_avail(tcp_connection_handle(conn))
+# Mirrors SPROUT_POLL_READ in runtime/sprout_scheduler.h.
+let poll_read = 1
 
-# `read_avail` with a deadline: `Err TcpTimeout` if no data arrives within `timeout_ms`, leaving the
-# connection valid to read again. `timeout_ms <= 0` polls once without waiting. Bounding a read is
-# how a server survives a peer that connects and then says nothing; see stdlib.http_server.
-export fn read_avail_timeout(conn: borrowing TcpConnection, timeout_ms: Int) -> Result TcpError String !{IO} =
-  tcp_read_avail_timeout(tcp_connection_handle(conn), timeout_ms)
+# One recv's worth. tcp_read_some clamps to the same figure, so asking for more cannot return more;
+# naming it here keeps the request honest about what a single round can deliver.
+let read_chunk = 65536
+
+# `read_avail_timeout`'s loop, and the read-side mirror of write_all_by_go/write_all_by_wait.
+#
+# "Attempt the transfer, then wait" is the only shape it can take, because tcp_read_some never parks.
+# That ordering is not a style choice: it guarantees a timeout can never be reported while data is
+# already sitting in the socket buffer, since every path to `Err TcpTimeout` has performed a recv
+# first. The three deleted C loops each had to get that right independently, and Go's SetReadDeadline
+# makes the same guarantee for the same reason.
+fn read_avail_go(handle: Int, deadline_us: Int) -> Result TcpError Bytes !{IO} =
+  match tcp_read_some(handle, read_chunk) with
+  | Ok chunk -> Ok(chunk)
+  | Err TcpWouldBlock -> read_avail_wait(handle, deadline_us)
+  | Err err -> Err(err)
+
+fn read_avail_wait(handle: Int, deadline_us: Int) -> Result TcpError Bytes !{IO} =
+  do
+    now <- time_now_micros()
+    # A non-positive remainder makes tcp_wait answer "not ready" without parking, so a spent budget
+    # needs no special case — and the recv above has already run, so buffered data still wins.
+    ready <- tcp_wait(handle, poll_read, (deadline_us - now) / 1000)
+    if ready == 1 then read_avail_go(handle, deadline_us)
+    else Err(TcpTimeout)
+
+# Read whatever has arrived, bounded by `timeout_ms`, without taking the connection.
+#
+# The unknown-length counterpart to read_exact: an HTTP header block ends at a delimiter, not at a
+# byte count, so a server cannot ask for an exact size. Returns BYTES — a socket carries bytes, and a
+# String may not hold an arbitrary one (docs/spec-v0.md:64), so decoding is the caller's decision and
+# goes through `bytes.to_string`, which returns a Result. `Err TcpEndOfStream` on a clean peer close,
+# `Err TcpTimeout` when the budget runs out with the connection still valid, and `Err TcpReadFailed`
+# on a socket fault — so one client's reset drops one connection rather than aborting the process.
+#
+# `timeout_ms <= 0` polls once without waiting, which is what makes a caller-side TOTAL budget
+# composable: pass the remaining slice and an expired budget needs no special case. A total bound is
+# the one that matters, because a peer dribbling one byte per interval renews a per-read timer forever
+# — see stdlib.http_server, which owns that policy now that it is expressible in Sprout.
+#
+# The bound is enforced by the Sprout loop above, not inside C. Note what that does NOT give you: the
+# deadline is only consulted when the socket would block, so a peer that keeps the socket continuously
+# readable never reaches it. A caller enforcing a phase budget across many reads must check the clock
+# in its own loop as well; http_server does.
+export fn read_avail_timeout(conn: borrowing TcpConnection, timeout_ms: Int) -> Result TcpError Bytes !{IO} =
+  do
+    now <- time_now_micros()
+    read_avail_go(tcp_connection_handle(conn), now + timeout_ms * 1000)
 
 # O(count): reads bytes, then validates and copies the UTF-8 payload.
 export fn read_exact_utf8(conn: borrowing TcpConnection, count: Int) -> Result TcpError String !{IO} =

@@ -39,12 +39,16 @@ fn main() -> Unit !{IO} =
 
     # --- bytes.from_string must agree with byte_length ---
     # `bytes_from_utf8` measured with strlen while `str_byte_len` reads the CSTR header, so the two
-    # DISAGREED on any String containing an interior 0x00 — and such Strings are ordinary: both
-    # `tcp_read_avail` and `proc_run` build them via sprout_gc_adopt_cstr, which copies an explicit
-    # length. Measured before the fix, a String holding "a\0b" reported byte_length 3 and
-    # bytes.length(from_string(...)) 1, so bytes.from_string SILENTLY DROPPED payload. That made a
-    # byte-exact HTTP body impossible, since every read chunk arrives as a String and must become
-    # Bytes without loss.
+    # DISAGREED on any String containing an interior 0x00. Such a String is ILLEGAL — a String is
+    # valid UTF-8 and NUL-free (docs/spec-v0.md:64) — but it was constructible, because
+    # sprout_gc_adopt_cstr copies an explicit length without rejecting a NUL, and anything handing it
+    # unvalidated input minted one. The socket readers used to; `proc_run` still does (W2 R2's
+    # remaining half, filed in BACKLOG). Measured before the fix, a String holding "a\0b" reported
+    # byte_length 3 and bytes.length(from_string(...)) 1, so bytes.from_string SILENTLY DROPPED
+    # payload — turning an illegal value into a wrong one instead of a rejected one.
+    #
+    # Agreement is what makes rejection possible: bytes.to_string is the single choke point and it
+    # refuses a NUL as well as invalid UTF-8, but only sees the payload if from_string preserved it.
     #
     # These literals cannot contain a NUL (source strings are validated UTF-8, which excludes it), so
     # they pin the invariant on every case expressible here; the interior-NUL case is covered

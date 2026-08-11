@@ -1,20 +1,31 @@
 module examples.tcp_echo_once
-import stdlib.net (tcp_listen, tcp_accept, tcp_read, tcp_write, tcp_close, tcp_close_listener)
+import stdlib.net (TcpConnection, TcpListener, accept, close, close_listener, listen_local, read_avail_timeout, tcp_error_message, write_all)
 
-# One-shot TCP echo server using raw stdlib.net handles.
-# Run and connect once to localhost:8081.
+# One-shot TCP echo server. Run and connect once to localhost:8081.
+#
+# Previously written on raw Int handles and `tcp_read`, both of which this example now avoids for
+# reasons worth stating, since an example is read as a recommendation:
+#
+#  * `tcp_read` is gone. It returned a String assembled from unvalidated socket bytes, which a String
+#    may not hold (docs/spec-v0.md:64), and it aborted the process on any socket error — so the
+#    smallest possible server could be killed by one client resetting a connection.
+#  * echoing needs no String at all. The payload goes straight back out, so Bytes in, Bytes out.
+#  * the linear TcpConnection/TcpListener API makes the release discipline a compile error rather than
+#    a convention: omit either `close` and this file does not compile.
 
-fn then_io(effect: Unit !{IO}, value: a) -> a !{IO} =
-  value
-
-fn handle_conn(conn: Int) -> Unit !{IO} =
-  then_io(tcp_write(conn, tcp_read(conn)), tcp_close(conn))
-
-fn serve_once(listener: Int) -> Unit !{IO} =
-  handle_conn(tcp_accept(listener))
-
-fn close_after_serve(listener: Int) -> Unit !{IO} =
-  then_io(serve_once(listener), tcp_close_listener(listener))
+fn echo(conn: consuming TcpConnection) -> Unit !{IO} =
+  do
+    match read_avail_timeout(conn, 30000) with
+    | Ok payload ->
+        match write_all(conn, payload) with
+        | Ok sent -> term_write(`echoed ${int_to_string(sent)} bytes\n`)
+        | Err err -> term_write(`write failed: ${tcp_error_message(err)}\n`)
+    | Err err -> term_write(`read failed: ${tcp_error_message(err)}\n`)
+    close(conn)
 
 fn main() -> Unit !{IO} =
-  close_after_serve(tcp_listen(8081))
+  do
+    listener <- listen_local(8081)
+    conn <- accept(listener)
+    echo(conn)
+    close_listener(listener)
