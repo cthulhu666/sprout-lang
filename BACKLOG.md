@@ -14,8 +14,37 @@ Legend:
 - [x] `P0` Define runtime error conventions for effectful builtins (no silent exits).
 - [x] `P1` Add ergonomic helpers for control flow (`when_ok`, `when_error`, optional pipeline helpers).
 - [x] `P1` Decide how builtins participate in effect tracking; host-implemented builtins now follow the same effect-typing rule as ordinary functions, with runtime/external interaction tracked via `!{IO}` and value-level `Maybe`/`Result` shapes kept separate from effectfulness.
-- [ ] `P0` **UNSOUND: a `do` block's `Result` short-circuit is never type-checked against the
-  enclosing function's return type.** Found 2026-08-11 while measuring the blast radius of a proposed
+- [x] `P0` **FIXED 2026-08-11. UNSOUND: a `do` block's `Result` short-circuit is never type-checked
+  against the enclosing function's return type.**
+  **Resolution.** Design: `docs/fallible-bind-typing-v0.md`. Normative rule: `docs/spec-v0.md` §5.9,
+  written from scratch (the plain fallible `<-` bind had no section at all, and §5.8's `(§11)`
+  cross-reference was dangling). Landed in three parts:
+  1. *Linearity predicate* (`linear_check.sprout`) — re-keyed from the block's tail type to the
+     bind's own RHS type, so `!{IO}` no longer exempts the rule. Verified against the pre-fix
+     compiler in **both** directions: it accepted the reverted `bench/http_worker_pool` leak with 0
+     errors, and it wrongly *rejected* a non-fallible bind followed by a consume in a `Result` block.
+     `sc_block` came out of eleven signatures — one fallible bind condemns everything after it, so
+     the outermost one already sees the whole remainder and no flag needs threading.
+  2. *`mutmatrix_at`* (`stdlib/mutable.sprout`) — the migration target, mirroring `mutvec_at`. Bounds
+     are checked on `(r, c)` and not left to the flat check, because an out-of-range COLUMN lands
+     inside the backing vector (measured: reading `(0,3)` of a 2×3 returned cell `(1,0)`).
+  3. *The typing rule* (`infer.sprout`) — one unification of the block's type against a constructed
+     `Result E ?a` / `Maybe ?a` in `infer_do_steps`' `Nil` arm, plus a `DoFamily` accumulator
+     carrying the bind's type and position. Constructed rather than head-compared, which is what
+     closes the unresolved-tyvar hole: a tyvar tail (`panic : a`) was the ONLY way to reach the
+     wrong-family case, and it compiled — the `Nothing` box matched neither `Ok` nor `Err`.
+  **Migration: 110 sites, no deprecations.** 68 `mutvec_get` → `mutvec_at`, 19 `mutmatrix_get` →
+  `mutmatrix_at`, 14 `_ <- write_file(…)` → bare statement, and 9 hand-migrated `Result` sites
+  (`probe_ir -> String`, four `tcp_accept` fixtures). Codegen bonus: `mutvec_get_worker` is now DCE'd
+  out of `astar` and `neural_network_train_xor` — the unboxed worker existed only for the `<-`
+  short-circuit, so the migration removes a `Maybe` allocation per read in those hot loops.
+  **Known gap (follow-up filed below):** three of the nine negative fixtures are rejected by
+  `check_fn_body`'s generic `Return type mismatch` rather than the tailored diagnostic, because the
+  conflict surfaces against the *signature* after the block-level unification succeeds. Sound, but
+  the message points at the function rather than the bind.
+  <details><summary>Original report (kept for the measurements)</summary>
+
+  Found 2026-08-11 while measuring the blast radius of a proposed
   "discarded fallible bind" lint (`docs/fallible-bind-diagnostic-v0.md`) — the lint was aimed at a
   style problem and the underlying defect turned out to be **type confusion**, which is why it is
   filed here at `P0` rather than as a diagnostics nicety.
@@ -147,6 +176,19 @@ Legend:
   `tcp_accept` parks rather than returning `Err` there. The one `Unit` site in production
   (`run_check_iface`) is fixed. Needs: spec wording for the typing rule, positive/negative checker
   tests, and a decision on whether the `Unit` case is permitted explicitly or also rejected.
+  </details>
+- [ ] `P2` **Point the fallible-bind diagnostic at the bind when the conflict is with the SIGNATURE.**
+  Follow-up to the `P0` above. `do_block_carries` (`infer.sprout`) unifies the block's type against
+  `Result E ?a` / `Maybe ?a`, which is enough for soundness, but two shapes only conflict once
+  `check_fn_body` unifies the block against the *declared return type* — a same-family different-error
+  bind (`Result String Int` bound in `-> Result Int Int`) and the wrong-family-via-tyvar-tail case.
+  Those get `Return type mismatch in <fn>: Type mismatch: String vs Int`, which names the function
+  rather than the bind and does not suggest `map_error`. Pinned as-is by
+  `tests/conformance/type_error/{fallible_bind_error_type_mismatch,maybe_bind_in_result_fn,result_bind_in_maybe_fn}`.
+  The tailored messages already exist in `fallible_bind_msg`; what is missing is the declared return
+  type at the bind, which the current design deliberately does not thread (see
+  `docs/fallible-bind-typing-v0.md` §4). Cheapest fix is probably for `check_fn_body` to special-case a
+  `TDo` body containing a fallible bind when its own unification fails, rather than threading.
 - [ ] `P2` **`merge_effects` drops one variable side (`infer.sprout` ~340-346)** (fundamentals review, static finding — masked today by effect enforcement being off, cf. D2/W6 below). When merging two effect rows where at least one side is a variable, `merge_effects` only propagates one of the two variable sides instead of unifying/merging both — a latent effect-inference bug currently invisible because the effect system isn't enforced (a pure function calling `!{IO}` code passes the checker regardless, per the fundamentals review's item 1). Revisit once the deferred effect-system design pass (D2/W6) lands and effects actually gate compilation — fixing this before enforcement exists has no observable payoff and no test would catch a regression today. Full findings: `docs/fundamentals-code-review-handoff-2026-07-03.md`.
 - [ ] `P2` Move `stdlib.compiler` to a dedicated tooling/compiler namespace once the non-stdlib tooling-package model is settled.
 - [ ] `P2` Add syntactic sugar for `Ref` operations in do-notation: `:=` for `ref_write`, `<~` for a ref-read bind step, and `var x = expr` as `x <- ref_new(expr)`.

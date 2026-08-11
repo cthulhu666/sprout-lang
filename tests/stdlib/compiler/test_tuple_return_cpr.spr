@@ -67,8 +67,8 @@ fn main() -> Unit !{IO} =
         do
           let tuple_path = "/tmp/sprout_test_tuple_cpr_tuple.sprout"
           let acc_path = "/tmp/sprout_test_tuple_cpr_acc.sprout"
-          _ <- write_file(tuple_path, tuple_src)
-          _ <- write_file(acc_path, acc_src)
+          write_file(tuple_path, tuple_src)
+          write_file(acc_path, acc_src)
 
           r_tup <- compiler.compile_full_ir(source.FilePath(tuple_path), source.StdlibRoot(stdlib_root))
           r_acc <- compiler.compile_full_ir(source.FilePath(acc_path), source.StdlibRoot(stdlib_root))

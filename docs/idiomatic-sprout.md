@@ -146,6 +146,43 @@ match find(key) with
 | Nothing -> fallback()
 ```
 
+## Pick the accessor that matches what you know
+
+A `<-` bind on a `Maybe`/`Result` **propagates the failure out of the enclosing
+function**, so it is only legal where that function returns the same shape
+(spec §5.9). In a function that returns a plain value, say what you actually mean:
+
+```sprout
+# You know the index is in range (fixed layout, freshly sized buffer, loop bound).
+x <- mutvec_at(v, i)                 # no Maybe box; fails loudly if you were wrong
+
+# You have a sensible fallback.
+let x = vec_get_or(i, 0.0, v)
+let c = mutmatrix_at_or(m, r, col, 0.0)
+
+# You want to handle both cases here.
+match mutvec_get(v, i) with
+| Just x  -> use(x)
+| Nothing -> recover()
+
+# You want the failure to propagate — only in a Maybe/Result-returning function.
+x <- mutvec_get(v, i)
+```
+
+Reaching for `mutvec_get` and binding it was the common shape, and in a
+`-> Double` numeric kernel it was silently wrong: on `Nothing` the function
+returned the `Nothing` box read as a `Double`. `mutvec_at` is also faster — it
+allocates no `Maybe` per read, which dominates in a hot loop.
+
+To run a fallible call for its effect and **continue** regardless, use it as a bare
+statement; `_ <- e` does *not* mean that, it still propagates:
+
+```sprout
+do
+  write_file(path, contents)   # run it, discard the Result, continue
+  _ <- write_file(path, more)  # propagates on Err — needs a Result-returning fn
+```
+
 ## Match lists by shape with `[…]` patterns
 
 `List` is an ordinary ADT (`Nil` / `Cons head tail`), but match it with list

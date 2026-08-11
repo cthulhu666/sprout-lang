@@ -1,5 +1,5 @@
 module examples.digit_recognizer.recognizer
-import stdlib.mutable (MutVec, mutvec_new, mutvec_get, mutvec_set, mutvec_map_inplace, MutMatrix, mutmatrix_new, mutmatrix_set, mutmatrix_cols, mutmatrix_rows, mutmatrix_row_dot, mutmatrix_row_sub_scaled_inplace, mutmatrix_row_add_scaled_into)
+import stdlib.mutable (MutVec, mutvec_new, mutvec_at, mutvec_set, mutvec_map_inplace, MutMatrix, mutmatrix_new, mutmatrix_set, mutmatrix_cols, mutmatrix_rows, mutmatrix_row_dot, mutmatrix_row_sub_scaled_inplace, mutmatrix_row_add_scaled_into)
 
 # Handwritten-digit recognition trained on real public data.
 #
@@ -163,11 +163,11 @@ fn forward(ctx: Ctx, x: MutVec Double) -> Unit !{IO} =
   | Ctx (Net w1 b1 w2 b2) hidden out _ ->
       do
         let hidden_unit = \h -> do
-              b <- mutvec_get(b1, h)
+              b <- mutvec_at(b1, h)
               z <- mutmatrix_row_dot(w1, h, x, b)
               mutvec_set(hidden, h, softsign(z))
         let output_unit = \o -> do
-              b <- mutvec_get(b2, o)
+              b <- mutvec_at(b2, o)
               z <- mutmatrix_row_dot(w2, o, hidden, b)
               mutvec_set(out, o, z)
         range_each(hidden_unit, upto(n_hid))
@@ -177,7 +177,7 @@ fn forward(ctx: Ctx, x: MutVec Double) -> Unit !{IO} =
 fn predict(out: MutVec Double) -> Int !{IO} =
   do
     let step = \ (acc, o) -> do
-          v <- mutvec_get(out, o)
+          v <- mutvec_at(out, o)
           match acc with
           | (best_i, best_v) -> if v > best_v then (o, v) else (best_i, best_v)
     result <- range_fold(step, (0, -1000000.0), upto(n_out))
@@ -195,20 +195,20 @@ fn backprop(ctx: Ctx, x: MutVec Double, label: Int, lr: Double) -> Unit !{IO} =
       do
         # Output o: fold row o into dhidden (uses OLD W2[o]), then update W2[o] and B2[o].
         let update_output = \o -> do
-              oo <- mutvec_get(out, o)
+              oo <- mutvec_at(out, o)
               let dout_o = 2.0 * (oo - target_of(o, label))
               # dhidden[h] += dout_o * W2[o][h], ascending h — fused kernel, reads old row.
               mutmatrix_row_add_scaled_into(dhidden, w2, o, dout_o)
               _ <- mutmatrix_row_sub_scaled_inplace(w2, o, hidden, lr * dout_o)
-              bo <- mutvec_get(b2, o)
+              bo <- mutvec_at(b2, o)
               mutvec_set(b2, o, bo - lr * dout_o)
         # Update W1[h][i] and B1[h] toward the gradient for hidden unit h.
         let update_hidden = \h -> do
-              hh <- mutvec_get(hidden, h)
-              dh <- mutvec_get(dhidden, h)
+              hh <- mutvec_at(hidden, h)
+              dh <- mutvec_at(dhidden, h)
               let dz = dh * softsign_deriv_from_out(hh)
               _ <- mutmatrix_row_sub_scaled_inplace(w1, h, x, lr * dz)
-              bh <- mutvec_get(b1, h)
+              bh <- mutvec_at(b1, h)
               mutvec_set(b1, h, bh - lr * dz)
         mutvec_map_inplace(\_ -> 0.0, dhidden)
         range_each(update_output, upto(n_out))

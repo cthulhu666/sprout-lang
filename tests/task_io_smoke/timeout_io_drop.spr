@@ -15,10 +15,16 @@ import stdlib.string as string
 fn accept_forever(listener: Int) -> Int !{IO} =
   do
     let held = string.concat("live-", "root")
-    conn <- tcp_accept(listener)  # parks here forever — no client ever connects
-    term_write(held)  # unreachable; forces `held` rooted across the park
-    tcp_close(conn)  # unreachable; present only so `conn` is used
-    99
+    # `match` rather than `conn <- tcp_accept(…)`: a fallible bind in an `Int`-returning function is
+    # rejected by §5.9 (on `Err` it would return the `Err` box as an `Int`). `held` is still read on
+    # the `Ok` arm, so it is still rooted across the park, which is what this fixture measures.
+    match tcp_accept(listener) with  # parks here forever — no client ever connects
+    | Err _ -> panic("accept_forever: accept returned instead of parking")
+    | Ok conn ->
+        do
+          term_write(held)  # unreachable; forces `held` rooted across the park
+          tcp_close(conn)  # unreachable; present only so `conn` is used
+          99
 
 fn main() -> Unit !{IO} =
   do

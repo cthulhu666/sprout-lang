@@ -1,0 +1,18 @@
+module main
+
+# Same family, DIFFERENT error type. The error types were never unified, so the
+# `"boom"` String arrived as `Err e` with `e : Int` (measured: 4377984392, the
+# string pointer).
+
+fn may_fail(x: Int) -> Result String Int =
+  if x > 0 then Ok(x) else Err("boom")
+
+fn mismatched(x: Int) -> Result Int Int =
+  do
+    v <- may_fail(x)
+    Ok(v + 1)
+
+fn main() -> Unit !{IO} =
+  match mismatched(0) with
+  | Ok n -> print(int_to_string(n))
+  | Err e -> print(int_to_string(e))

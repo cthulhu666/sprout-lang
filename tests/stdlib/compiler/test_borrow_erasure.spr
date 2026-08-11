@@ -108,12 +108,12 @@ fn main() -> Unit !{IO} =
           let once_path = "/tmp/sprout_test_borrow_erasure_once.sprout"
           let once_plain_path = "/tmp/sprout_test_borrow_erasure_once_plain.sprout"
           let once_absent_path = "/tmp/sprout_test_borrow_erasure_once_absent.sprout"
-          _ <- write_file(unmod_path, unmodified_src)
-          _ <- write_file(consuming_path, consuming_src)
-          _ <- write_file(borrowing_path, borrowing_src)
-          _ <- write_file(once_path, once_src)
-          _ <- write_file(once_plain_path, once_plain_src)
-          _ <- write_file(once_absent_path, once_absent_src)
+          write_file(unmod_path, unmodified_src)
+          write_file(consuming_path, consuming_src)
+          write_file(borrowing_path, borrowing_src)
+          write_file(once_path, once_src)
+          write_file(once_plain_path, once_plain_src)
+          write_file(once_absent_path, once_absent_src)
 
           r_unmod <- compiler.compile_full_ir(source.FilePath(unmod_path), source.StdlibRoot(stdlib_root))
           r_consuming <- compiler.compile_full_ir(source.FilePath(consuming_path), source.StdlibRoot(stdlib_root))

@@ -1,6 +1,6 @@
 module examples.astar
 import stdlib.math.int (abs)
-import stdlib.mutable (MutVec, mutvec_new, mutvec_get, mutvec_set)
+import stdlib.mutable (MutVec, mutvec_new, mutvec_at, mutvec_set)
 
 # A* shortest-path on a 100×100 grid.
 #
@@ -56,7 +56,7 @@ fn relax_and_insert(nx: Int, ny: Int, ng: Int, g_score: MutVec Int, open: List (
 # Check g_score[nidx] and relax if ng is cheaper.
 fn try_relax_open(nx: Int, ny: Int, ng: Int, g_score: MutVec Int, open: List (Int, Int, Int, Int)) -> List (Int, Int, Int, Int) !{IO} =
   do
-    cur_g <- mutvec_get(g_score, cell_idx(nx, ny))
+    cur_g <- mutvec_at(g_score, cell_idx(nx, ny))
     if ng < cur_g then relax_and_insert(nx, ny, ng, g_score, open)
     else open
 
@@ -65,7 +65,7 @@ fn try_relax(nx: Int, ny: Int, ng: Int, closed: MutVec Int, g_score: MutVec Int,
   if in_bounds(nx, ny) == false then open
   else if is_wall(nx, ny) then open
   else do
-    cl <- mutvec_get(closed, cell_idx(nx, ny))
+    cl <- mutvec_at(closed, cell_idx(nx, ny))
     if cl == 1 then open
     else try_relax_open(nx, ny, ng, g_score, open)
 
@@ -90,7 +90,7 @@ fn astar_loop(open: List (Int, Int, Int, Int), g_score: MutVec Int, closed: MutV
       | (_, g, x, y) ->
           if x == 99 && y == 99 then Just(g)
           else do
-            cl <- mutvec_get(closed, cell_idx(x, y))
+            cl <- mutvec_at(closed, cell_idx(x, y))
             if cl == 1 then astar_loop(rest, g_score, closed)
             else astar_expand(x, y, g, rest, g_score, closed)
 

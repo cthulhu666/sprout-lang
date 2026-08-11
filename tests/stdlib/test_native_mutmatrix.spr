@@ -1,5 +1,5 @@
 import stdlib.test (TestState, new_state, assert_eq, assert_true, summary)
-import stdlib.mutable (MutVec, MutMatrix, mutvec_new, mutvec_get, mutvec_set, mutmatrix_new, mutmatrix_get, mutmatrix_at_or, mutmatrix_set, mutmatrix_rows, mutmatrix_cols, mutmatrix_fold, mutmatrix_fill, mutmatrix_row_zip_fold, mutmatrix_row_zip_update, mutmatrix_row_dot, mutmatrix_row_sub_scaled_inplace, mutmatrix_row_add_scaled_into)
+import stdlib.mutable (MutVec, MutMatrix, mutvec_new, mutvec_at, mutvec_set, mutmatrix_new, mutmatrix_get, mutmatrix_at, mutmatrix_at_or, mutmatrix_set, mutmatrix_rows, mutmatrix_cols, mutmatrix_fold, mutmatrix_fill, mutmatrix_row_zip_fold, mutmatrix_row_zip_update, mutmatrix_row_dot, mutmatrix_row_sub_scaled_inplace, mutmatrix_row_add_scaled_into)
 
 fn main() -> Unit !{IO} =
   do
@@ -11,14 +11,14 @@ fn main() -> Unit !{IO} =
 
     # set/get roundtrip at (1, 2)
     _ <- mutmatrix_set(m, 1, 2, 42)
-    got <- mutmatrix_get(m, 1, 2)
+    got <- mutmatrix_at(m, 1, 2)
     assert_eq(state, "set/get roundtrip", got, 42)
 
     # distinct cells addressed independently (row-major)
     _ <- mutmatrix_set(m, 0, 0, 7)
     _ <- mutmatrix_set(m, 1, 0, 9)
-    a <- mutmatrix_get(m, 0, 0)
-    b <- mutmatrix_get(m, 1, 0)
+    a <- mutmatrix_at(m, 0, 0)
+    b <- mutmatrix_at(m, 1, 0)
     assert_eq(state, "independent cell (0,0)", a, 7)
     assert_eq(state, "independent cell (1,0)", b, 9)
 
@@ -33,10 +33,10 @@ fn main() -> Unit !{IO} =
     assert_eq(state, "mutmatrix_fold visits row-major", folded, 700942)
 
     _ <- mutmatrix_fill(\ (r, c) -> r * 10 + c, m)
-    f00 <- mutmatrix_get(m, 0, 0)
-    f02 <- mutmatrix_get(m, 0, 2)
-    f10 <- mutmatrix_get(m, 1, 0)
-    f12 <- mutmatrix_get(m, 1, 2)
+    f00 <- mutmatrix_at(m, 0, 0)
+    f02 <- mutmatrix_at(m, 0, 2)
+    f10 <- mutmatrix_at(m, 1, 0)
+    f12 <- mutmatrix_at(m, 1, 2)
     assert_eq(state, "mutmatrix_fill writes (0,0)", f00, 0)
     assert_eq(state, "mutmatrix_fill writes (0,2)", f02, 2)
     assert_eq(state, "mutmatrix_fill writes (1,0)", f10, 10)
@@ -54,15 +54,15 @@ fn main() -> Unit !{IO} =
     assert_eq(state, "mutmatrix_row_zip_fold invalid row returns init", bad_row_dot, 99)
 
     _ <- mutmatrix_row_zip_update(\ (cell, x) -> cell + x, m, 0, v)
-    u00 <- mutmatrix_get(m, 0, 0)
-    u01 <- mutmatrix_get(m, 0, 1)
-    u02 <- mutmatrix_get(m, 0, 2)
+    u00 <- mutmatrix_at(m, 0, 0)
+    u01 <- mutmatrix_at(m, 0, 1)
+    u02 <- mutmatrix_at(m, 0, 2)
     assert_eq(state, "mutmatrix_row_zip_update updates first cell", u00, 2)
     assert_eq(state, "mutmatrix_row_zip_update updates middle cell", u01, 4)
     assert_eq(state, "mutmatrix_row_zip_update updates last row-width cell", u02, 7)
 
     _ <- mutmatrix_row_zip_update(\ (cell, x) -> cell + x, m, -1, v)
-    still00 <- mutmatrix_get(m, 0, 0)
+    still00 <- mutmatrix_at(m, 0, 0)
     assert_eq(state, "mutmatrix_row_zip_update invalid row is no-op", still00, 2)
 
     empty <- mutmatrix_new(0, 3, 0)
@@ -78,7 +78,7 @@ fn main() -> Unit !{IO} =
     assert_eq(state, "mutmatrix_fold negative dimensions returns init", invalid_fold, 41)
     fill_counter <- mutvec_new(1, 0)
     _ <- mutmatrix_fill(\ (r, c) -> mark_invalid_fill(fill_counter, r, c), invalid)
-    fill_count <- mutvec_get(fill_counter, 0)
+    fill_count <- mutvec_at(fill_counter, 0)
     assert_eq(state, "mutmatrix_fill negative dimensions is no-op", fill_count, 0)
     invalid_row <- mutmatrix_row_zip_fold(\ (acc, cell, x) -> acc + cell * x, 43, invalid, 0, v)
     assert_eq(state, "mutmatrix_row_zip_fold negative dimensions returns init", invalid_row, 43)
@@ -111,24 +111,24 @@ fn main() -> Unit !{IO} =
     # mutmatrix_row_sub_scaled_inplace: m[r][i] -= scale * v[i] (ascending i, in place).
     # dm row 0 is [1,2,3]; subtracting scale=2.0 * dv[0..2]=[4,5,6] -> [1-8, 2-10, 3-12].
     _ <- mutmatrix_row_sub_scaled_inplace(dm, 0, dv, 2.0)
-    s00 <- mutmatrix_get(dm, 0, 0)
-    s01 <- mutmatrix_get(dm, 0, 1)
-    s02 <- mutmatrix_get(dm, 0, 2)
+    s00 <- mutmatrix_at(dm, 0, 0)
+    s01 <- mutmatrix_at(dm, 0, 1)
+    s02 <- mutmatrix_at(dm, 0, 2)
     assert_true(state, "row_sub_scaled cell (0,0)", s00 == 0.0 - 7.0)
     assert_true(state, "row_sub_scaled cell (0,1)", s01 == 0.0 - 8.0)
     assert_true(state, "row_sub_scaled cell (0,2)", s02 == 0.0 - 9.0)
     # row 1 untouched (still [10,20,30]).
-    s10 <- mutmatrix_get(dm, 1, 0)
+    s10 <- mutmatrix_at(dm, 1, 0)
     assert_true(state, "row_sub_scaled leaves other rows", s10 == 10.0)
     # invalid row is a no-op.
     _ <- mutmatrix_row_sub_scaled_inplace(dm, 9, dv, 2.0)
-    again10 <- mutmatrix_get(dm, 1, 0)
+    again10 <- mutmatrix_at(dm, 1, 0)
     assert_true(state, "row_sub_scaled invalid row no-op", again10 == 10.0)
     # stops at shorter vector: only cols 0,1 of row 1 updated by 'short'=[4,5].
     _ <- mutmatrix_row_sub_scaled_inplace(dm, 1, short, 1.0)
-    t10 <- mutmatrix_get(dm, 1, 0)
-    t11 <- mutmatrix_get(dm, 1, 1)
-    t12 <- mutmatrix_get(dm, 1, 2)
+    t10 <- mutmatrix_at(dm, 1, 0)
+    t11 <- mutmatrix_at(dm, 1, 1)
+    t12 <- mutmatrix_at(dm, 1, 2)
     assert_true(state, "row_sub_scaled shorter updates col 0", t10 == 6.0)
     assert_true(state, "row_sub_scaled shorter updates col 1", t11 == 15.0)
     assert_true(state, "row_sub_scaled shorter leaves col 2", t12 == 30.0)
@@ -147,21 +147,21 @@ fn main() -> Unit !{IO} =
     # dst[i] += 2.0 * m[0][i] -> [100+2, 100+4, 100+6]. do-bind strips the Maybe, so the
     # bound value is the unwrapped Double; compare with == (assert_eq is a no-op on Double).
     _ <- mutmatrix_row_add_scaled_into(kdst, km, 0, 2.0)
-    k0 <- mutvec_get(kdst, 0)
-    k1 <- mutvec_get(kdst, 1)
-    k2 <- mutvec_get(kdst, 2)
+    k0 <- mutvec_at(kdst, 0)
+    k1 <- mutvec_at(kdst, 1)
+    k2 <- mutvec_at(kdst, 2)
     assert_true(state, "row_add_scaled_into cell 0", k0 == 102.0)
     assert_true(state, "row_add_scaled_into cell 1", k1 == 104.0)
     assert_true(state, "row_add_scaled_into cell 2", k2 == 106.0)
     # invalid row is a no-op (dst unchanged).
     _ <- mutmatrix_row_add_scaled_into(kdst, km, 9, 5.0)
-    k0b <- mutvec_get(kdst, 0)
+    k0b <- mutvec_at(kdst, 0)
     assert_true(state, "row_add_scaled_into invalid row no-op", k0b == 102.0)
     # stops at shorter dst: dst len 2 vs cols 3 -> only i=0,1 accumulate from row 1.
     kshort <- mutvec_new(2, 0.0)
     _ <- mutmatrix_row_add_scaled_into(kshort, km, 1, 1.0)
-    ks0 <- mutvec_get(kshort, 0)
-    ks1 <- mutvec_get(kshort, 1)
+    ks0 <- mutvec_at(kshort, 0)
+    ks1 <- mutvec_at(kshort, 1)
     assert_true(state, "row_add_scaled_into shorter dst col 0", ks0 == 10.0)
     assert_true(state, "row_add_scaled_into shorter dst col 1", ks1 == 20.0)
 
@@ -193,6 +193,6 @@ fn main() -> Unit !{IO} =
 
 fn mark_invalid_fill(counter: MutVec Int, r: Int, c: Int) -> Int !{IO} =
   do
-    cur <- mutvec_get(counter, 0)
+    cur <- mutvec_at(counter, 0)
     _ <- mutvec_set(counter, 0, cur + 1)
     r + c

@@ -304,6 +304,7 @@ export fn type_string() -> Type = TConst(type_id("String"))
 export fn type_char() -> Type = TConst(type_id("Char"))
 export fn type_list(a: Type) -> Type = TApp(TConst(type_id("List")), a)
 export fn type_maybe(a: Type) -> Type = TApp(TConst(type_id("Maybe")), a)
+export fn type_result(e: Type, a: Type) -> Type = TApp(TApp (TConst(type_id("Result")), e), a)
 
 export fn effect_pure() -> Effect = EffectPure
 export fn effect_io() -> Effect = EffectIO

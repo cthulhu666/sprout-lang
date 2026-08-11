@@ -1,5 +1,5 @@
 import stdlib.test (TestState, new_state, assert_true, summary)
-import stdlib.mutable (MutVec, mutvec_new, mutvec_get, mutvec_set)
+import stdlib.mutable (MutVec, mutvec_new, mutvec_at, mutvec_set)
 
 # Step 4 GC-safety test for the Double feature (docs/nn-gap-analysis.md §7.1).
 #
@@ -24,9 +24,9 @@ fn main() -> Unit !{IO} =
     mutvec_set(v, 1, 2.71)
     mutvec_set(v, 2, 1.41)
     assert_true(state, "gc churn before read", churn(80) >= 0)
-    a <- mutvec_get(v, 0)
-    b <- mutvec_get(v, 1)
-    c <- mutvec_get(v, 2)
+    a <- mutvec_at(v, 0)
+    b <- mutvec_at(v, 1)
+    c <- mutvec_at(v, 2)
     assert_true(state, "gc churn after read", churn(80) >= 0)
     assert_true(state, "MutVec Double slot0 (3.14) > slot1 (2.71) survives GC", a > b)
     assert_true(state, "MutVec Double slot1 (2.71) > slot2 (1.41) survives GC", b > c)
@@ -40,8 +40,8 @@ fn main() -> Unit !{IO} =
     mutvec_set(w, 0, to_double(5))
     mutvec_set(w, 1, to_double(3))
     assert_true(state, "gc churn with live to_double values", churn(80) >= 0)
-    d0 <- mutvec_get(w, 0)
-    d1 <- mutvec_get(w, 1)
+    d0 <- mutvec_at(w, 0)
+    d1 <- mutvec_at(w, 1)
     assert_true(state, "MutVec to_double(5)=5.0 > to_double(3)=3.0 survives GC", d0 > d1)
     assert_true(state, "to_double(5) == 5.0 exactly after GC", d0 == 5.0)
 
