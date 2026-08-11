@@ -43,12 +43,16 @@ everything above applies unchanged to `Maybe`. Two additions matter:
   produces a value matching neither `Nil` nor `[h | t]`; a match spec §5.5 proves total dies at
   runtime with `runtime error: non-exhaustive match`. So exhaustiveness — like linearity in §0's
   facet 3 — is only sound in the absence of a fallible bind in a non-matching function.
-- **The migration is real work, unlike `Result`'s.** 87 sites (57 `Unit`, 30 observable, including 2
-  `-> List (Int, Int, Int, Int)` in `examples/astar.sprout`), dominated by `mutvec_get` /
-  `mutmatrix_get`, and they *want* the bound value — so a bare statement is not the answer and each
-  needs `with_default`, a `let..else`, or a total accessor. The rule should therefore land together
-  with that escape hatch. Measurement method as in §3, with the `is_result` predicate swapped for
-  `is_maybe`.
+- **The migration is a rename, not a deletion.** 87 sites (57 `Unit`, 30 observable, including 2
+  `-> List (Int, Int, Int, Int)` in `examples/astar.sprout`), and they *want* the bound value, so a
+  bare statement is not the answer. But all 87 are only **two callees** — `mutvec_get` (68) and
+  `mutmatrix_get` (19) — and `mutvec_at` already exists as the bounds-checked, allocation-free
+  replacement, so 68 are a one-identifier rename and only `mutmatrix_at` has to be added. Measurement
+  method as in §3, with the `is_result` predicate swapped for `is_maybe`.
+
+**The full proposal now lives in `docs/fallible-bind-typing-v0.md`** — typing rule, verified survey,
+implementation overview, migration, and tests. Read that for the decision; this document remains only
+as the measurement that located the bug.
 
 ## 1. Problem statement
 
