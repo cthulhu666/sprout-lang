@@ -331,6 +331,7 @@ experimental extension rather than normative v0:
 - `log2(x) -> Double`, `log10(x) -> Double`, `log(x, base) -> Double`
 - `pow(x, y) -> Double`
 - `sin(x)`, `cos(x)`, `tan(x)`, `atan(x)`, `atan2(y, x)`, `radians(deg)` — all `-> Double`
+- `asin(x) -> Double`, `acos(x) -> Double`
 
 Double math semantics:
 
@@ -340,6 +341,12 @@ Double math semantics:
   is `NaN`.
 - `cbrt` is defined on the whole real line — a negative argument is **in** domain
   (`cbrt(-8.0) == -2.0`), unlike `sqrt`.
+- `asin`/`acos` are the Rule-2 inverse trig pair: `abs(x) > 1` is out of domain and gives
+  `NaN`, never a clamped edge value. Both meet POSIX's range guarantee — `asin` returns
+  within `[-pi/2, pi/2]`, `acos` within `[0, pi]` — with the endpoints *exact*:
+  `acos(1.0)` is `+0.0`, `acos(-1.0)` is `pi`, `asin(±1.0)` is `±pi/2`, and `asin(±0.0)`
+  keeps the sign of its zero. This matters for the common `acos(dot(u, v))` on unit
+  vectors, where parallel inputs land on exactly `1.0`.
 - `pow(x, y)` follows C99/IEEE F.9.4.4, which differs from Python: `pow(0.0, -1.0)` is
   `+inf` rather than an error, and `pow(x, 0.0)` / `pow(1.0, y)` are `1.0` even when the
   other operand is `NaN`.
@@ -352,8 +359,10 @@ Double math semantics:
   ~1e-14 relative across the whole exponent range; `pow` with a fractional exponent is
   ~1e-13 (it composes `exp` and `ln`, inheriting both); the **trigonometric** functions
   (`sin`, `cos`, `tan`, `atan`, `atan2`) are ~1e-8 only — five orders looser, because
-  their series are truncated for transform-scale use. Do not size a tolerance for one
-  group from another's figure. Per-function measurements:
+  their series are truncated for transform-scale use. `asin`/`acos` are the exception
+  *within* that group at ~2e-15 absolute, because they only ever drive `atan` over
+  `[-1, 1]`, where it is far more accurate than its whole-line worst case. Do not size a
+  tolerance for one group from another's figure. Per-function measurements:
   `docs/math-transcendental-v0.md`; speed against libm:
   `bench/results-2026-08-06-math-transcendental.md`.
 - `log(x, base)` takes the argument first, matching the `log2`/`log10` shape:

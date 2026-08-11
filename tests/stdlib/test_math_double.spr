@@ -1,5 +1,5 @@
 import stdlib.test (check_true, run_suite)
-import stdlib.math (pi, abs, floor, sqrt, pow, sin, cos, tan, radians, clamp, lerp, nan, is_nan, atan, atan2)
+import stdlib.math (pi, abs, floor, sqrt, pow, sin, cos, tan, radians, clamp, lerp, nan, is_nan, atan, atan2, asin, acos)
 
 # TDD — the Double math primitives that back the M2 vector/matrix layer.
 # All implemented in PURE Sprout — no C builtins:
@@ -16,6 +16,20 @@ fn rel_close(a: Double, b: Double) -> Bool = dabs(a - b) / dabs(b) < 0.000000000
 # 10^n (valid to n = 308) and 2^-n (exact at every step, down to 2^-1074).
 fn p10(n: Int) -> Double = if n <= 0 then 1.0 else 10.0 * p10(n - 1)
 fn halves(n: Int) -> Double = if n <= 0 then 1.0 else 0.5 * halves(n - 1)
+
+# Counts inputs where asin/acos escape the range POSIX guarantees them — [-pi/2, pi/2] and
+# [0, pi]. The point assertions below cannot establish this, and the defect it exists to
+# catch was invisible to `close`: the unbranched half-angle form overshoots pi/2 by one ulp
+# at x = 1, which is a NEGATIVE acos. Sweeps i = 0..n over x = -1 + 2i/n, so both endpoints
+# are sampled exactly.
+fn range_violations(i: Int, n: Int, acc: Int) -> Int =
+  if i > n then acc
+  else range_violations(i + 1, n, acc + bad)
+where
+  x = 2.0 * to_double(i) / to_double(n) - 1.0
+  a = asin(x)
+  c = acos(x)
+  bad = if (a < 0.0 - pi / 2.0) || (a > pi / 2.0) || (c < 0.0) || (c > pi) then 1 else 0
 
 fn main() -> Unit !{IO} =
   run_suite("math_double", [
@@ -136,5 +150,50 @@ fn main() -> Unit !{IO} =
     check_true("atan2(-1,-1) == -3pi/4", close(atan2(0.0 - 1.0, 0.0 - 1.0), 0.0 - 3.0 * pi / 4.0)),
     check_true("atan2(-1,1) == -pi/4", close(atan2(0.0 - 1.0, 1.0), 0.0 - pi / 4.0)),
     check_true("atan2(0,0) == 0 (defined)", close(atan2(0.0, 0.0), 0.0)),
-    check_true("atan2 odd symmetry", close(atan2(0.0 - 0.7, 0.4), 0.0 - atan2(0.7, 0.4)))
+    check_true("atan2 odd symmetry", close(atan2(0.0 - 0.7, 0.4), 0.0 - atan2(0.7, 0.4))),
+    # --- asin / acos (half-angle form over atan; range [-pi/2,pi/2] and [0,pi]) ---
+    check_true("asin(0) == 0", close(asin(0.0), 0.0)),
+    check_true("asin(0.5) == pi/6", close(asin(0.5), pi / 6.0)),
+    check_true("asin(1) == pi/2", close(asin(1.0), pi / 2.0)),
+    check_true("asin(-1) == -pi/2", close(asin(0.0 - 1.0), 0.0 - pi / 2.0)),
+    check_true("asin odd symmetry", close(asin(0.0 - 0.3), 0.0 - asin(0.3))),
+    check_true("asin(sin(x)) == x on the principal branch", close(asin(sin(0.6)), 0.6)),
+    check_true("acos(1) == 0", close(acos(1.0), 0.0)),
+    check_true("acos(0) == pi/2", close(acos(0.0), pi / 2.0)),
+    check_true("acos(0.5) == pi/3", close(acos(0.5), pi / 3.0)),
+    check_true("acos(-1) == pi", close(acos(0.0 - 1.0), pi)),
+    check_true("acos(cos(x)) == x on the principal branch", close(acos(cos(2.0)), 2.0)),
+    check_true("asin + acos == pi/2", close(asin(0.42) + acos(0.42), pi / 2.0)),
+    # Rule 2 (docs/math-partiality-v0.md): |x| > 1 is out of domain -> NaN, never a
+    # clamped edge value. The naive `atan2(x, sqrt(1-x*x))` form would return pi/2 here:
+    # sqrt of a negative is NaN, and atan2's cascade falls through both NaN-false
+    # comparisons on x into its `y > 0.0` arm. Regression guard against that rewrite.
+    check_true("asin(2) is NaN", is_nan(asin(2.0))),
+    check_true("asin(-2) is NaN", is_nan(asin(0.0 - 2.0))),
+    check_true("acos(2) is NaN", is_nan(acos(2.0))),
+    check_true("acos(-2) is NaN", is_nan(acos(0.0 - 2.0))),
+    check_true("asin(NaN) is NaN", is_nan(asin(nan))),
+    check_true("acos(NaN) is NaN", is_nan(acos(nan))),
+    # RANGE GUARANTEE at the endpoints, where `close` is far too loose to see the defect.
+    # The bare half-angle form computes 2*atan(1) = 1.5707963267948974 — one ulp ABOVE pi/2 —
+    # so acos(1.0) came out as -8.9e-16, a negative angle. Every `acos(dot(u, v))` caller on
+    # unit vectors hits exactly 1.0 for parallel inputs, so this is the common case, not a
+    # corner. Exactness is asserted with `==`, and the sign of the zero via its reciprocal
+    # (-0.0 == 0.0 is true, so a plain comparison cannot distinguish them).
+    check_true("asin(1) is exactly pi/2", asin(1.0) == pi / 2.0),
+    check_true("asin(-1) is exactly -pi/2", asin(0.0 - 1.0) == 0.0 - pi / 2.0),
+    check_true("acos(1) is exactly +0.0", 1.0 / acos(1.0) == (1.0 / 0.0)),
+    check_true("acos(-1) is exactly pi", acos(0.0 - 1.0) == pi),
+    check_true("acos(0) is exactly pi/2", acos(0.0) == pi / 2.0),
+    # One ulp inside the domain the general path resumes, and must stay in range: acos leaves
+    # 1.0 like sqrt(2*eps), so the true value is ~1.5e-8 here, well clear of the error floor.
+    check_true("acos just inside 1 stays positive", acos(1.0 - 0.0000000000000002) > 0.0),
+    check_true("asin just inside 1 stays under pi/2", asin(1.0 - 0.0000000000000002) < pi / 2.0),
+    # POSIX asin(3): asin(+-0) is +-0, i.e. asin preserves the sign of a zero argument.
+    # Same reciprocal trick as the abs/floor signed-zero guards above.
+    check_true("asin(0.0) is +0.0", 1.0 / asin(0.0) == (1.0 / 0.0)),
+    check_true("asin(-0.0) is -0.0", 1.0 / asin(-0.0) == (0.0 - 1.0 / 0.0)),
+    # The range guarantee as a sweep rather than a handful of points. 20001 samples of
+    # [-1, 1], endpoints included; without the endpoint branch in asin this reports 1.
+    check_true("asin/acos stay in range across [-1,1]", range_violations(0, 20000, 0) == 0)
   ])
