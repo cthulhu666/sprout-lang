@@ -48,6 +48,30 @@ Legend:
   soundness opt-out, only a silenced name. `Unit`-returning functions are the sole *unobservable*
   case, because the returned `Err` box is discarded by convention — the type lie is the same, it
   simply has no witness.
+  **SCOPE — `Maybe` binds have the identical defect, and are where nearly all of the blast radius
+  is** (measured 2026-08-11, after the `Result` facets above). `infer.do_unwrap_type`
+  (`infer.sprout:3627`) peels `Maybe a -> a` for the binder exactly as it peels `Result e a -> a`, and
+  the same nothing relates the short-circuit to the enclosing return type. `fn returns_int() -> Int`
+  binding a `Maybe Int` emits `%t = call i64 @sprout_alloc_obj(i64 0, i64 0)` (a `Nothing` box) in
+  `do_short_*` and returns it — measured **35184372088840**, the same pointer-as-`Int`.
+  **It also defeats the EXHAUSTIVENESS CHECKER, which is worse than the `Result` facet.** A `Maybe`
+  short-circuit returned from `-> List Int` produces a value matching *neither* `Nil` *nor* `[h | t]`,
+  so a match the checker proved total (spec §5.5, the `P1` W5/F-EXH work below) dies at runtime with
+  `runtime error: non-exhaustive match`. A landed soundness feature is therefore only as sound as the
+  absence of a fallible bind in a non-matching function — the same generalisation as the linearity
+  facet below, now for a second checker.
+  **Measured blast radius: 87 `Maybe` sites** (vs 21 + 1 for `Result`), of which **57 are `Unit`**
+  (unobservable today) and **30 are observable**: 15 `-> Int`, 12 `-> Double`, 1 `-> String`, and
+  **2 `-> List (Int, Int, Int, Int)` in the shipped `examples/astar.sprout`** — the
+  exhaustiveness-defeating shape, latent only because the indices happen to be in range. Callee
+  distribution is dominated by `mutvec_get` / `mutmatrix_get`.
+  **The `Maybe` migration is NOT a one-token deletion, unlike the `Result` one.** These sites *want*
+  the value — e.g. `examples/neural_network_train_xor.sprout:50`,
+  `w1_0 <- mutvec_get(w, idx_w1(j, 0))` in `fn hidden_out(...) -> Double`, where the author knows the
+  index is in range; dropping the bind loses `w1_0`. Each site needs a per-site choice
+  (`let x = with_default(e, d)`, a `let..else`, or a total accessor such as `mutvec_get_or`), so the
+  ergonomic escape should land *with* the rule, not after it. This is the cost driver for the whole
+  `P0` and the reason it is not a small change.
   **3. THE WORST CONSEQUENCE, and the reason this is `P0` rather than `P1`: the short-circuit's
   control-flow edges are invisible to the LINEARITY CHECKER, so a `consuming` value's exactly-once
   obligation can be silently skipped.** The type confusion above produces a wrong *value*; this breaks
@@ -73,10 +97,10 @@ Legend:
   only the typing rule.
   **Fix direction.** One missing unification explains both type-level consequences: the short-circuit's type must
   be required to match the enclosing function's declared return type — i.e. `x <- (e : Result E A)` is
-  well-typed only in a function returning `Result E' A'` with `E ~ E'`. That is a type ERROR, not a
-  warning.
-  **The migration needs no new syntax and no new API, because the discard form already exists and is
-  already sound.** A BARE `Result`-valued statement in a `do` block runs the call, discards the whole
+  well-typed only in a function returning `Result E' A'` with `E ~ E'`, and dually `x <- (e : Maybe A)`
+  only in a function returning `Maybe A'`. That is a type ERROR, not a warning.
+  **The `Result` migration needs no new syntax and no new API, because the discard form already exists
+  and is already sound** (the `Maybe` migration does — see SCOPE above). A BARE `Result`-valued statement in a `do` block runs the call, discards the whole
   `Result`, and CONTINUES — verified: `fn bare_stmt() -> Int !{IO}` with a bare failing call returns a
   well-typed `999`, and a `Unit` version continues past the failure. So the three forms are:
   | Form | Meaning |

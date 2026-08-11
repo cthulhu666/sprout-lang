@@ -34,6 +34,22 @@ function's declared return type. Consequence for §4 — its consensus is about 
 style concern where "warn, never error" is right; this is *returning a value of the wrong type*, so
 that precedent does not transfer and a warning here would leave memory-unsafe code compiling.
 
+### 0.1 `Maybe` binds are the same bug, and hold nearly all of the blast radius
+
+`infer.do_unwrap_type` peels `Maybe a -> a` for the binder exactly as it peels `Result e a -> a`, so
+everything above applies unchanged to `Maybe`. Two additions matter:
+
+- **It defeats the exhaustiveness checker.** A `Maybe` short-circuit returned from `-> List Int`
+  produces a value matching neither `Nil` nor `[h | t]`; a match spec §5.5 proves total dies at
+  runtime with `runtime error: non-exhaustive match`. So exhaustiveness — like linearity in §0's
+  facet 3 — is only sound in the absence of a fallible bind in a non-matching function.
+- **The migration is real work, unlike `Result`'s.** 87 sites (57 `Unit`, 30 observable, including 2
+  `-> List (Int, Int, Int, Int)` in `examples/astar.sprout`), dominated by `mutvec_get` /
+  `mutmatrix_get`, and they *want* the bound value — so a bare statement is not the answer and each
+  needs `with_default`, a `let..else`, or a total accessor. The rule should therefore land together
+  with that escape hatch. Measurement method as in §3, with the `is_result` predicate swapped for
+  `is_maybe`.
+
 ## 1. Problem statement
 
 In a `do` block, binding a `Result` with `<-` sequences it: on `Err` the enclosing computation
