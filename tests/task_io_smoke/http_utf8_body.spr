@@ -17,8 +17,11 @@ import stdlib.http_server (HttpRequest, HttpServerResponse, ServerConfig, reques
 # byte-for-byte what the client sent. A server that framed the body one byte short (or one byte long)
 # reaches the handler with the wrong string and gets 500, so a mis-framing cannot pass as a 200.
 fn handle(req: HttpRequest) -> HttpServerResponse !{IO} =
-  if request_body(req) == "café" then response(200, "ok")
-  else response(500, `wrong body: ${request_body(req)}`)
+  match request_body(req) with
+  | Ok text -> if text == "café" then response(200, "ok") else response(500, `wrong body: ${text}`)
+  # Reached by the split-codepoint client: 4 announced bytes of a 5-byte character frame correctly but
+  # do not decode. 400 is what a text endpoint should answer; the bytes themselves were delivered.
+  | Err _ -> response(400, "body is not valid UTF-8")
 
 fn expect_status(conn: borrowing TcpConnection, want: String, marker: String) -> Unit !{IO} =
   match read_exact_utf8(conn, 12) with
@@ -58,15 +61,17 @@ fn inline_client(port: Int) -> Unit !{IO} =
       close(conn)
   | Err _ -> term_write("MISMATCH: inline client could not connect\n")
 
-# A byte count landing INSIDE a multi-byte sequence: 4 announced bytes of a 5-byte character. Byte-
-# exact framing makes this reachable, and it must be a clean 400.
+# A byte count landing INSIDE a multi-byte sequence: 4 announced bytes of a 5-byte character. Still a
+# 400, but note WHO answers it now. The body is `Bytes`, so the server frames the 4 bytes the client
+# asked for and delivers them; the 400 comes from THIS fixture's handler failing to decode. The status
+# is unchanged and the layering is not — a binary endpoint would take the same 4 bytes and succeed.
 #
 # This is also the case that rules out the seemingly-obvious implementation. `str_slice_bytes` is the
 # byte-indexed slice builtin and it calls `tcp_fail` ("byte_start+byte_len splits a UTF-8 codepoint")
 # — the process-fatal path — so framing the body with it would let this single request kill the whole
-# server, and under `serve_pooled` every worker with it. Going through `bytes.slice` + `bytes.to_string`
-# costs two allocations and yields a `Result` instead. The marker below is therefore a liveness
-# assertion as much as a status one: reaching it at all proves the server is still running.
+# server, and under `serve_pooled` every worker with it. `bytes.slice` clamps instead. The marker below
+# is therefore a liveness assertion as much as a status one: reaching it at all proves the server is
+# still running.
 fn split_codepoint_client(port: Int) -> Unit !{IO} =
   match connect("127.0.0.1", port) with
   | Ok conn ->

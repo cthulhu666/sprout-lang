@@ -416,7 +416,8 @@ Experimental HTTP server helpers (in `stdlib/http_server.sprout`):
 - `request_method(req) -> String`
 - `request_path(req) -> String`
 - `request_version(req) -> String`
-- `request_body(req) -> String`
+- `request_body_bytes(req) -> Bytes` — the body exactly as it arrived, byte for byte; total
+- `request_body(req) -> Result Utf8Error String` — the body decoded as UTF-8. A `Result` because an HTTP body is a byte sequence and nothing guarantees it is text (a PNG upload, a protobuf message, or a `Content-Length` cutting a character in half all reach a handler legitimately). Follows Go (`Body io.ReadCloser`), ASGI (`body` is a byte string) and Jakarta Servlet (`getInputStream` binary / `getReader` character) in treating bytes as the primitive. The body is fully **buffered** and capped by `max_body_bytes`, so binary payloads work up to that cap — not large file uploads, which need streaming
 - `request_header(name, req) -> Maybe String`
 - `serve_n(port, max_connections, handler) -> Unit !{IO}` — accepts up to `max_connections` connections, handling each in its own green task (a slow connection does not block others); joins all handlers before returning
 

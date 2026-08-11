@@ -1,0 +1,84 @@
+import stdlib.task (Scope, with_scope, task_spawn, task_sleep)
+import stdlib.net (TcpConnection, connect, close, write_all, write_all_utf8, read_exact_utf8)
+import stdlib.bytes as bytes
+import stdlib.http_server (HttpRequest, HttpServerResponse, ServerConfig, request_body_bytes, response, serve_n_with)
+
+# Binary request bodies. Before this, the body was typed String end to end, which could not carry
+# bytes for two independent reasons — both verified in the runtime, not assumed:
+#
+#   * `str_concat` (read_remaining_body's accumulator) measures with strlen, so a body containing
+#     0x00 was TRUNCATED there, before any accessor could see it. An accessor alone would have
+#     returned already-truncated bytes.
+#   * the body was UTF-8-validated on the way in, so a body containing 0xFF was refused with 400.
+#
+# The payload below is chosen so each failure mode is fatal to the test separately: 0x00 first (a
+# strlen-based accumulator stops here), 0xFF second (a UTF-8 validator rejects here), then 0x41 'A'
+# last — if anything truncated at the NUL, the trailing byte is missing and the length check fails.
+# A body that merely "looks binary" while being valid UTF-8 would pass on the old code.
+
+fn payload() -> Bytes =
+  bytes.append(bytes.append(bytes.singleton(0), bytes.singleton(255)), bytes.singleton(65))
+
+fn byte_at(b: Bytes, i: Int) -> Int =
+  match bytes.get(b, i) with
+  | Just v -> v
+  | Nothing -> 0 - 1
+
+# The status carries the assertion: 200 only if all three bytes arrived in order, so a truncated or
+# re-encoded body cannot pass as success.
+fn handle(req: HttpRequest) -> HttpServerResponse !{IO} =
+  if intact(request_body_bytes(req)) then response(200, "ok")
+  else response(500, "body corrupted")
+
+fn intact(b: Bytes) -> Bool =
+  (bytes.length(b) == 3) && (byte_at(b, 0) == 0) && (byte_at(b, 1) == 255) && (byte_at(b, 2) == 65)
+
+fn expect_status(conn: borrowing TcpConnection, want: String, marker: String) -> Unit !{IO} =
+  match read_exact_utf8(conn, 12) with
+  | Ok reply ->
+      if reply == want then term_write(`${marker}\n`)
+      else term_write(`MISMATCH: ${marker} got ${reply}\n`)
+  | Err _ -> term_write(`MISMATCH: ${marker} read failed\n`)
+
+fn headers() -> String = "POST /bin HTTP/1.1\r\nHost: x\r\nContent-Length: 3\r\n\r\n"
+
+# One write: headers and body arrive together, so continue_read_request satisfies the length from
+# what is already buffered and the read loop never runs.
+fn inline_client(port: Int) -> Unit !{IO} =
+  match connect("127.0.0.1", port) with
+  | Ok conn ->
+    do
+      match write_all(conn, bytes.append(bytes.from_string(headers()), payload())) with
+      | Ok _ -> expect_status(conn, "HTTP/1.1 200", "binary-inline-200")
+      | Err _ -> term_write("MISMATCH: inline client could not send\n")
+      close(conn)
+  | Err _ -> term_write("MISMATCH: inline client could not connect\n")
+
+# Body in a separate write after a pause, so read_remaining_body must run — the path where the
+# strlen-based accumulator did its damage.
+fn split_client(port: Int) -> Unit !{IO} =
+  match connect("127.0.0.1", port) with
+  | Ok conn ->
+    do
+      match write_all_utf8(conn, headers()) with
+      | Ok _ ->
+          do
+            task_sleep(100)
+            match write_all(conn, payload()) with
+            | Ok _ -> expect_status(conn, "HTTP/1.1 200", "binary-split-200")
+            | Err _ -> term_write("MISMATCH: split client could not send its body\n")
+      | Err _ -> term_write("MISMATCH: split client could not send its headers\n")
+      close(conn)
+  | Err _ -> term_write("MISMATCH: split client could not connect\n")
+
+fn run(s: Scope, port: Int) -> Unit !{IO} =
+  do
+    task_spawn(s, \_ -> serve_n_with(ServerConfig(header_ms = 4000, body_ms = 4000, max_header_bytes = 65536,
+                                       write_ms = 4000, max_body_bytes = 65536, min_rate_bps = 1024), port, 2, handle))
+    task_spawn(s, \_ -> inline_client(port))
+    task_spawn(s, \_ -> split_client(port))
+
+fn main() -> Unit !{IO} =
+  do
+    with_scope(\s -> run(s, 28995))
+    term_write("done\n")

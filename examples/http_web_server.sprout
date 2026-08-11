@@ -180,8 +180,13 @@ fn handle_delete(store: Ref Store, req: HttpRequest) -> HttpServerResponse !{IO}
 fn health(req: HttpRequest) -> HttpServerResponse =
   json("{\"status\":\"ok\"}")
 
+# `request_body` is a `Result`: an HTTP body is bytes, and a text endpoint has to say what it does
+# when they are not text. Answering 400 is the right move for an endpoint whose contract is text —
+# contrast `request_body_bytes`, which is total and is what a binary endpoint would use.
 fn echo(req: HttpRequest) -> HttpServerResponse =
-  ok(`${request_method(req)} ${request_path(req)}: ${request_body(req)}`)
+  match request_body(req) with
+  | Ok text -> ok(`${request_method(req)} ${request_path(req)}: ${text}`)
+  | Err _ -> bad_request("request body is not valid UTF-8")
 
 # `/search?q=...` reads a query parameter, already percent/`+`-decoded.
 fn search(req: HttpRequest) -> HttpServerResponse =

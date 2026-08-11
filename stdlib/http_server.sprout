@@ -11,8 +11,20 @@ import stdlib.url (parse_query)
 export type HttpRequest =
   | HttpRequest String String HttpRequestMeta
 
+# The body is Bytes, not String. HTTP bodies are byte sequences — a PNG, a protobuf message, a
+# multipart part — and a String cannot carry them: str_concat and bytes_from_utf8 were both
+# strlen-based, and the body was UTF-8-validated on the way in, so anything containing 0x00 was
+# truncated and anything not valid UTF-8 was refused with 400. Text handlers decode explicitly via
+# `request_body`, which returns a Result. This follows Go (`Body io.ReadCloser`), ASGI (`body` is a
+# byte string) and Jakarta Servlet (`getInputStream` binary / `getReader` character).
+#
+# NOTE the body is fully BUFFERED, capped by `max_body_bytes`, so this enables binary payloads up to
+# that cap — form posts, JSON, protobuf, small images — and NOT large file uploads. Those need
+# streaming, which is also the only way to support chunked transfer encoding (no Content-Length to
+# buffer against). Filed in BACKLOG; a streaming API would yield `Bytes` chunks, so this type is on
+# the path to it rather than in its way.
 type HttpRequestMeta =
-  | HttpRequestMeta String (Dict String) String
+  | HttpRequestMeta String (Dict String) Bytes
 
 export type HttpServerResponse =
   | HttpServerResponse Int (Dict String) String
@@ -75,10 +87,11 @@ type alias ServerResult a = Result HttpServerError a
 # `min_rate_bps` allowances — are BYTES. That has to be said explicitly because `stdlib.string` offers
 # two index spaces over the same value (`length` counts codepoints, `byte_length` counts bytes, and
 # both are `Int`, so the typechecker cannot tell them apart), and the body path was originally written
-# in the wrong one. The body is framed byte-exactly against `Content-Length` and then UTF-8-validated,
-# so a body that is not valid UTF-8 — including a `Content-Length` that cuts a character in half — is
-# answered 400 rather than delivered mangled. `request_body` is typed `String`, so bodies are
-# UTF-8-only by construction: binary uploads are out of scope until that type changes (BACKLOG).
+# in the wrong one. The body is framed byte-exactly against `Content-Length` and delivered as `Bytes`,
+# with no UTF-8 validation on the read path — so a binary payload reaches the handler instead of being
+# refused on its behalf. Text handlers call `request_body`, which returns `Result Utf8Error String`;
+# a `Content-Length` that cuts a character in half therefore parses (the bytes are what was announced)
+# and fails at decode, which is the honest place for it.
 # A record, not a four-field constructor: every field is `Int`, so under positional construction a
 # caller could transpose any two of them and neither the typechecker nor an assertion on a total
 # would notice. Naming the fields at the call site is the only place that distinction is visible —
@@ -233,7 +246,7 @@ fn parse_request_prefix(raw: String) -> ServerResult (RequestLine, Dict String, 
             content_length <- parse_content_length(headers)
             Ok((req, headers, content_length))
 
-fn build_request(req: RequestLine, headers: Dict String, body: String) -> HttpRequest =
+fn build_request(req: RequestLine, headers: Dict String, body: Bytes) -> HttpRequest =
   match req with
   | RequestLine method pv ->
       match pv with
@@ -265,18 +278,19 @@ fn err_or_request(req: RequestLine, headers: Dict String, content_length: Int, r
   | Nothing -> Err(HttpInvalidRequest("missing header terminator"))
   | Just body_start -> framed_body(req, headers, content_length, raw, body_start)
 
-# A cut at an arbitrary byte offset can land INSIDE a multi-byte sequence, which is exactly what a
-# client announcing 4 bytes of a 5-byte character asks for. Byte-exact framing makes that reachable,
-# and the honest answer is a 400: the body field is typed String, so there is no representation for
-# a fragment. This is also the only guard against a body that was never valid UTF-8 — unreachable
-# from `parse` on a source literal, but not from the socket read path.
+# No UTF-8 validation here any more, and that is the substantive change: the body is Bytes, so a
+# payload that is not text is DELIVERED rather than refused. The validation moved to `request_body`,
+# which returns a Result — so a text handler still cannot mistake bytes for a decoded String, but a
+# binary handler is no longer blocked by a decision made on its behalf during the read.
+#
+# A Content-Length that cuts a multi-byte character in half therefore parses successfully now (the
+# bytes are exactly what the client announced) and surfaces as `Err Utf8Error` from `request_body`,
+# which is the honest place for it: the framing was valid, the decoding is not.
 fn framed_body(req: RequestLine, headers: Dict String, content_length: Int, raw: String, body_start: Int) -> ServerResult HttpRequest =
   if bytes.length(raw_bytes) - header_bytes < content_length then
     Err(HttpInvalidRequest("request body shorter than Content-Length"))
   else
-    match bytes.to_string(bytes.slice(raw_bytes, header_bytes, content_length)) with
-    | Ok body -> Ok(build_request(req, headers, body))
-    | Err _ -> Err(HttpInvalidRequest("request body is not valid UTF-8"))
+    Ok(build_request(req, headers, bytes.slice(raw_bytes, header_bytes, content_length)))
 where
   raw_bytes = bytes.from_string(raw)
   header_bytes = string.byte_length(string.take(raw, body_start))
@@ -302,11 +316,19 @@ where
 # The size check runs on the ACCUMULATED block before the next read, so the cap can be overshot by
 # at most one chunk (64 KiB). Capping also removes the quadratic `string.concat` growth: at most a
 # couple of rounds now fit under the cap.
-fn read_until_headers(conn: borrowing TcpConnection, acc: String, deadline: Int, max_bytes: Int) -> ServerResult String !{IO} =
-  match find_headers_end(acc) with
-  | Just _ -> Ok(acc)
+# TWO accumulators, and the split is the point. `text` exists only to locate the "\r\n\r\n"
+# terminator, which `str_find` does with a native substring search; `raw` is the authoritative
+# payload. They are needed separately because `str_concat` is strlen-based, so `text` silently stops
+# at the first 0x00 — which is fine for finding an ASCII terminator (a NUL before it means malformed
+# headers) but would DESTROY a binary body that arrived in the same TCP segment as the headers. The
+# bytes accumulator is a Builder rather than repeated `bytes.append`: append copies the whole buffer
+# per chunk (quadratic in bytes, ~8 MiB for a 1 MiB body in 64 KiB chunks), while a Builder
+# concatenates chunk TABLES and flattens once — quadratic only in chunk COUNT, i.e. 16 entries.
+fn read_until_headers(conn: borrowing TcpConnection, text: String, raw: Builder, deadline: Int, max_bytes: Int) -> ServerResult (String, Bytes) !{IO} =
+  match find_headers_end(text) with
+  | Just _ -> Ok((text, bytes.builder_build(raw)))
   | Nothing ->
-      if string.byte_length(acc) > max_bytes then
+      if string.byte_length(text) > max_bytes then
         Err(HttpHeadersTooLarge)
       else
         do
@@ -318,8 +340,13 @@ fn read_until_headers(conn: borrowing TcpConnection, acc: String, deadline: Int,
             | Err TcpTimeout -> Err(HttpRequestTimeout)
             | Err _ -> Err(HttpInvalidRequest("connection error"))
             | Ok chunk ->
-                if string.is_empty(chunk) then Err(HttpInvalidRequest("unexpected end of stream"))
-                else read_until_headers(conn, string.concat(acc, chunk), deadline, max_bytes)
+                # byte_length, not is_empty: `is_empty` is strlen-based, so a chunk whose FIRST byte
+                # is 0x00 — the opening byte of a binary body arriving with the headers — would read
+                # as empty and be reported as a closed connection.
+                if string.byte_length(chunk) <= 0 then Err(HttpInvalidRequest("unexpected end of stream"))
+                else read_until_headers(conn, string.concat(text, chunk),
+                                        bytes.builder_append(raw, bytes.builder_bytes(bytes.from_string(chunk))),
+                                        deadline, max_bytes)
 
 # The body deadline is TOTAL and never re-armed here — `deadline` is computed once by the caller as
 # `body_ms + content_length / min_rate_bps`, so it already contains enough time to receive the whole
@@ -341,8 +368,8 @@ fn read_until_headers(conn: borrowing TcpConnection, acc: String, deadline: Int,
 #
 # A flooding peer is bounded by `content_length` — the caller asks only for the bytes the request
 # promised — and an over-large `content_length` is refused with 413 before this loop is entered.
-fn read_remaining_body(conn: borrowing TcpConnection, acc: String, remaining: Int, deadline: Int) -> ServerResult String !{IO} =
-  if remaining <= 0 then Ok(acc)
+fn read_remaining_body(conn: borrowing TcpConnection, acc: Builder, remaining: Int, deadline: Int) -> ServerResult Bytes !{IO} =
+  if remaining <= 0 then Ok(bytes.builder_build(acc))
   else
     do
       budget <- remaining_ms(deadline)
@@ -353,12 +380,13 @@ fn read_remaining_body(conn: borrowing TcpConnection, acc: String, remaining: In
         | Err TcpTimeout -> Err(HttpRequestTimeout)
         | Err _ -> Err(HttpInvalidRequest("connection error"))
         | Ok chunk ->
-            if string.is_empty(chunk) then Err(HttpInvalidRequest("unexpected end of stream"))
-            # byte_length, not length: `remaining` is a byte count derived from Content-Length, and a
-            # chunk boundary can even split a multi-byte sequence, so a codepoint count of one chunk
-            # is not merely a different unit — it can be wrong about a character that is not yet
-            # fully arrived. str_concat joins bytes, so the accumulator heals such a split.
-            else read_remaining_body(conn, string.concat(acc, chunk), remaining - string.byte_length(chunk), deadline)
+            # byte_length throughout, never `length` or `is_empty`: `remaining` is a byte count from
+            # Content-Length, and both of those are strlen-based — so a chunk beginning with 0x00
+            # would look like a closed connection, and a chunk containing one would be under-counted.
+            # byte_length reads the CSTR header, so it is exact for any byte sequence.
+            if string.byte_length(chunk) <= 0 then Err(HttpInvalidRequest("unexpected end of stream"))
+            else read_remaining_body(conn, bytes.builder_append(acc, bytes.builder_bytes(bytes.from_string(chunk))),
+                                     remaining - string.byte_length(chunk), deadline)
 
 # Every read path BORROWS the connection: a request is read over many syscalls,
 # and under strict consume-exactly-once the first read would take the socket and
@@ -366,32 +394,40 @@ fn read_remaining_body(conn: borrowing TcpConnection, acc: String, remaining: In
 fn read_request(conn: borrowing TcpConnection, config: ServerConfig) -> ServerResult HttpRequest !{IO} =
   do
     header_deadline <- deadline_in(config.header_ms)
-    raw <- read_until_headers(conn, "", header_deadline, config.max_header_bytes)
-    read_request_from_prefix(conn, raw, config)
+    prefix_pair <- read_until_headers(conn, "", bytes.builder_empty(), header_deadline, config.max_header_bytes)
+    read_request_from_prefix(conn, prefix_pair, config)
 
-fn read_request_from_prefix(conn: borrowing TcpConnection, raw: String, config: ServerConfig) -> ServerResult HttpRequest !{IO} =
+fn read_request_from_prefix(conn: borrowing TcpConnection, prefix_pair: (String, Bytes), config: ServerConfig) -> ServerResult HttpRequest !{IO} =
   do
-    prefix <- parse_request_prefix(raw)
-    continue_read_request(conn, raw, prefix, config)
+    prefix <- parse_request_prefix(text)
+    continue_read_request(conn, text, raw, prefix, config)
+where
+  (text, raw) = prefix_pair
 
 # The body gets its OWN budget, starting when the headers are complete — a slow upload must not be
 # charged for however long the headers took, and a client that stalls after its headers must still
 # be cut off. Unlike the header budget this one is idle-based, so what is armed here is only the
 # FIRST gap; read_remaining_body re-arms it on every chunk that made progress.
-fn continue_read_request(conn: borrowing TcpConnection, raw: String, prefix: (RequestLine, Dict String, Int), config: ServerConfig) -> ServerResult HttpRequest !{IO} =
+fn continue_read_request(conn: borrowing TcpConnection, text: String, raw: Bytes, prefix: (RequestLine, Dict String, Int), config: ServerConfig) -> ServerResult HttpRequest !{IO} =
   if content_length > config.max_body_bytes then Err(HttpBodyTooLarge)
-  else if string.byte_length(body) >= content_length then parse(raw)
+  else if bytes.length(body) >= content_length then
+    Ok(build_request(req, headers, bytes.slice(body, 0, content_length)))
   else
     do
       # Total, scaled by the promised size: enough time to receive `content_length` bytes at
       # `min_rate_bps`, plus `body_ms` of grace. Never re-armed, so occupancy is bounded.
       body_deadline <- deadline_in(config.body_ms + rate_ms(content_length, config.min_rate_bps))
-      full <- read_remaining_body(conn, raw, content_length - string.byte_length(body), body_deadline)
-      parse(full)
+      full <- read_remaining_body(conn, bytes.builder_bytes(body), content_length - bytes.length(body), body_deadline)
+      # Trim to exactly the promised length: the final chunk can overshoot, and on a pipelined
+      # connection those extra bytes are the next request rather than this body.
+      Ok(build_request(req, headers, bytes.slice(full, 0, content_length)))
 where
-  (_req, _headers, content_length) = prefix
-  body_start = maybe_with_default(0, request_body_start(raw))
-  body = string.drop(raw, body_start)
+  (req, headers, content_length) = prefix
+  # The offset is derived in BYTES from the codepoint-indexed `body_start` (find_headers_end returns a
+  # codepoint index), so a non-ASCII header value cannot shift where the body begins.
+  body_start = maybe_with_default(0, request_body_start(text))
+  header_bytes = string.byte_length(string.take(text, body_start))
+  body = bytes.slice(raw, header_bytes, bytes.length(raw) - header_bytes)
 
 fn headers_to_lines(keys: Vec String, headers: Dict String, index: Int, total: Int, acc: String) -> String =
   if index >= total then acc
@@ -539,11 +575,23 @@ export fn request_version(req: HttpRequest) -> String =
       match meta with
       | HttpRequestMeta version _ _ -> version
 
-export fn request_body(req: HttpRequest) -> String =
+# The body exactly as it arrived, byte for byte. Total: there is nothing to fail on.
+export fn request_body_bytes(req: HttpRequest) -> Bytes =
   match req with
   | HttpRequest _ _ meta ->
       match meta with
       | HttpRequestMeta _ _ body -> body
+
+# The body decoded as UTF-8. Returns a Result because a request body is a byte sequence and nothing
+# guarantees it is text — a PNG upload, a protobuf message, or a Content-Length that cuts a character
+# in half all reach here legitimately.
+#
+# This rejects rather than substituting U+FFFD, unlike `term_read_key`: there the value is a keypress
+# with no error channel and no possible recovery, while here the caller has both, and silently
+# mangling a body a handler may persist or forward is worse than making it decide. Consistent with
+# `bytes.to_string` and `read_file`, which also reject.
+export fn request_body(req: HttpRequest) -> Result bytes.Utf8Error String =
+  bytes.to_string(request_body_bytes(req))
 
 export fn request_header(name: String, req: HttpRequest) -> Maybe String =
   match req with
@@ -618,8 +666,14 @@ fn is_form_urlencoded(req: HttpRequest) -> Bool =
 # Body params as an ordered, decoded (key, value) list — but ONLY when the request
 # is application/x-www-form-urlencoded; any other content type yields no params
 # rather than misparsing an arbitrary body.
+# A body that is not valid UTF-8 yields no pairs rather than an error: `application/x-www-form-
+# urlencoded` is percent-encoded ASCII by definition, so a body that fails to decode is not a form,
+# and this accessor's contract is already "no pairs if this is not a form".
 export fn form_pairs(req: HttpRequest) -> Vec (String, String) =
-  if is_form_urlencoded(req) then parse_query(request_body(req))
+  if is_form_urlencoded(req) then
+    match request_body(req) with
+    | Ok text -> parse_query(text)
+    | Err _ -> vec_empty()
   else vec_empty()
 
 # First value for `name` in the form body, or Nothing.

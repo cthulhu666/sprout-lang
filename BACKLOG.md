@@ -789,14 +789,60 @@ Legend:
   third `str_slice_bytes` caller — its offsets come from the tokenizer and are *probably*
   boundary-aligned, which is not the same as verified). Add a non-ASCII case to each suite that lacks
   one. Likely multi-PR.
-- [ ] `P2` **`request_body` is typed `String`, so HTTP bodies can never be binary.** Byte-exact
+- [x] `P2` **HTTP request bodies are now `Bytes`, not `String`. DONE 2026-08-11.** `request_body_bytes`
+  returns the body byte-for-byte (total); `request_body` returns `Result Utf8Error String`. Verified
+  prior art: Go (`Body io.ReadCloser`), ASGI (`body` is a byte string), Jakarta Servlet
+  (`getInputStream` binary / `getReader` character — and explicitly mutually exclusive, "Either this
+  method or `getReader()` may be called to read the body, not both"). Sprout's body is buffered rather
+  than streamed, so both accessors can coexist without Servlet's exclusion rule.
+  - **Two corrections to the original entry below, both of which I wrote and both wrong.** (1) It said
+    a NUL body is "truncated, not merely mangled" — true before the C5 fix, but after it the body was
+    UTF-8-validated and such a request got a clean **400**, so this was a missing capability, not live
+    corruption. (2) It said this unblocks "file uploads". It does not: the body stays **buffered** and
+    capped by `max_body_bytes`, so what this enables is binary payloads up to that cap — form posts,
+    JSON, protobuf, small images. Large uploads need streaming (see below).
+  - **An accessor alone would NOT have worked, and only the runtime showed why:** `str_concat`
+    (`read_remaining_body`'s accumulator) measures with `strlen`, so a body containing `0x00` was
+    truncated *there*, before any accessor could see it. The representation had to change, not just the
+    surface. The header phase now keeps two accumulators — a `String` purely to locate the terminator
+    with the native substring search, and the authoritative bytes — because a binary body can arrive in
+    the same TCP segment as the headers.
+  - **Root cause fixed in the runtime:** `bytes_from_utf8` measured with `strlen` while `str_byte_len`
+    reads the CSTR header, so the two disagreed on any String with an interior NUL — measured, a String
+    holding `"a\0b"` gave `byte_length` 3 and `bytes.length(from_string(…))` 1, silently dropping
+    payload. It now reads the header, restoring
+    `bytes.length(bytes.from_string(s)) == string.byte_length(s)`. Safe universally because every
+    String is headered (`SPROUT_GC_HDRCHECK=1`). Side effect worth knowing: `net.write_all_utf8` no
+    longer truncates a NUL-containing payload mid-send.
+  - **Behaviour change:** an invalid-UTF-8 body used to be refused **400 on the read path**. It now
+    parses (the bytes are exactly what `Content-Length` announced) and surfaces as `Err` from
+    `request_body`, so a binary handler is no longer refused on a text assumption it never made. The
+    body accumulator also moved from `bytes.append`/`str_concat` to a `Builder`: quadratic in chunk
+    COUNT (16 table entries for a 1 MiB body) instead of in bytes (~8 MiB copied).
+  - Tests: `tests/task_io_smoke/http_binary_body.spr` (payload `0x00 0xFF 0x41`, chosen so each old
+    failure mode is separately fatal — a strlen accumulator stops at the NUL, a validator rejects the
+    0xFF, and the trailing byte is missing if anything truncated; both the buffered and read-loop
+    paths) and 5 checks in `test_byte_length.spr` pinning the `from_string`/`byte_length` invariant.
+- [ ] `P2` **Stream request bodies instead of buffering them.** Raised 2026-08-11 when the user asked
+  why Go, ASGI and Servlet all stream — the right question, and the honest answer is that buffering
+  forfeits everything streaming provides: memory is O(body) not O(chunk); **chunked transfer encoding
+  has no `Content-Length`, so "buffer it all" is unbounded by construction** and cannot be supported at
+  all; there is no backpressure; a proxy cannot forward incrementally; and a handler cannot abort
+  mid-body. The `Bytes` work above is a *prerequisite*, not a substitute — a stream yields `Bytes`
+  chunks, never `String` chunks, and the `bytes_from_utf8` header fix is exactly what lets each read
+  chunk become `Bytes` losslessly. What streaming replaces is the accumulator, not the element type;
+  `request_body_bytes` becomes the collect-it-all convenience every streaming API also offers (Go's
+  `io.ReadAll`, ASGI's `more_body` concatenation). **Design constraints:** it interacts with the
+  occupancy bound, which currently assumes the handler runs AFTER the whole body is read — streaming
+  makes them concurrent and changes that math; and it wants to land with or before chunked encoding,
+  since that is the case buffering cannot express.
+- [ ] ~~`P2` `request_body` is typed `String`~~ — original entry, retained for the survey notes and as
+  a record of the two claims corrected above: Byte-exact
   framing (C5) fixes the *arithmetic* but not the *ceiling*: `bytes_from_utf8` measures with
   `strlen`, so a Sprout `String` is NUL-terminated and a body containing `0x00` is **truncated**, not
   merely mangled. File uploads, `multipart/form-data`, protobuf and image `POST`s are therefore
   structurally unrepresentable through `request_body`, and no amount of correct byte counting changes
-  that. C5's byte-exact framing now returns a clean 400 for a body that is not valid UTF-8, which is
-  the honest answer for a `String`-typed field but is a *rejection* of a legitimate request rather
-  than support for it. **Design decision needed** (public API change, hence its own item): does
+  that. **Design decision needed** (public API change, hence its own item): does
   `request_body` return `Bytes` with a `request_body_utf8` convenience, or does a second accessor
   expose the raw bytes alongside it? Prior art to survey: Go's `http.Request.Body` is an
   `io.ReadCloser` of bytes with decoding left to the caller; Rust's `hyper` uses a `Body` of `Bytes`
