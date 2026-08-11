@@ -7,10 +7,17 @@ import stdlib.http_server (HttpRequest, HttpServerResponse, ServerConfig, ok, re
 #
 # `tcp_accept` used to call `tcp_fail` on any errno that was not EAGAIN, so `accept` returning
 # EMFILE — the per-process descriptor limit, which a busy server reaches — killed the whole server
-# along with every connection it was already handling. It is now `Err TcpAcceptExhausted`, and
-# `http_server` answers it the way nginx does: wait a little, then retry, indefinitely and without
-# counting it as a served connection. The condition is transient by construction, because slots free
-# as open connections close.
+# along with every connection it was already handling. It now parks on the listener and retries, the
+# same treatment EAGAIN gets; the condition is transient by construction, because slots free as open
+# connections close.
+#
+# This fixture has already earned its place once. An earlier revision of the fix put the back-off in
+# Sprout with `task_sleep`, which passed every local gate and failed on CI with
+# `runtime error: builtin task_sleep: could not arm a timer (descriptor exhaustion?)` — because
+# task_sleep arms a TIMERFD on Linux, so the recovery path needed the very descriptor that had just run
+# out, and its arming failure is deliberately process-fatal. macOS arms kqueue timers on the existing
+# kqueue and needs no descriptor, which is why it was invisible here. The wait has to live in C, on the
+# listener fd, since no Sprout-visible primitive can register one.
 #
 # WHAT THIS DOES AND DOES NOT ASSERT — read before trusting it as EMFILE coverage.
 #

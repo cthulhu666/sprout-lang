@@ -3,9 +3,10 @@ module stdlib.net
 import stdlib.bytes (Utf8Error, from_string, to_string, length)
 
 export extern fn tcp_listen(port: Int) -> Int !{IO}
-# Recoverable since the C3 fix: `Err TcpAcceptExhausted` when no connection slot is available
-# (EMFILE/ENFILE or a full handle table), `Err TcpAcceptFailed` for a broken listener. EAGAIN parks,
-# and EINTR/ECONNABORTED retry inside the builtin — neither is an event a caller could act on.
+# Recoverable since the C3 fix: `Err TcpAcceptFailed` for a listener that is broken rather than busy.
+# Everything transient is absorbed inside the builtin — EAGAIN parks; EINTR, ECONNABORTED and the eight
+# pending-network errnos accept(2) says to treat like EAGAIN retry; descriptor exhaustion and a full
+# handle table park on the listener and retry, since no Sprout-visible primitive can wait for those.
 export extern fn tcp_accept(listener: Int) -> Result TcpError Int !{IO}
 export extern fn tcp_write(conn: Int, data: String) -> Unit !{IO}
 # Raw connect. Exported for the same reason tcp_listen/tcp_accept/tcp_write/tcp_close are: code whose
@@ -78,14 +79,15 @@ export type TcpError (..) =
   # has expired, the caller simply has to wait for readiness before retrying. Reported only by the
   # non-parking transfer primitives, whose whole purpose is to hand that decision back to Sprout.
   | TcpWouldBlock
-  # No connection slot is available: the process is out of file descriptors (EMFILE/ENFILE) or the
-  # 2048-entry handle table is full. Not a fault either — the listener is fine and the condition is
-  # transient, since it clears as open connections close. The remedy is to back off and retry, which
-  # is what nginx does (`ngx_disable_accept_events` plus an `accept_mutex_delay` timer) rather than
-  # failing. Kept distinct from TcpAcceptFailed because only this one is worth retrying.
-  | TcpAcceptExhausted
-  # The accept itself failed for a reason that is not transient and not a resource limit — a closed or
-  # broken listener, or a bug. Retrying will not help, so a server should stop rather than spin.
+  # The accept itself failed for a reason that is neither transient nor a resource limit — a closed or
+  # broken listener, or a bug (EBADF/EINVAL/ENOTSOCK). Retrying will not help, so a server should stop
+  # rather than spin.
+  #
+  # There is deliberately no `TcpAcceptExhausted` beside this. Descriptor exhaustion and a full handle
+  # table are handled inside `tcp_accept`, which parks on the listener and retries, because that is the
+  # only layer that CAN wait for them: the wait must be on the listener fd, and Sprout has no primitive
+  # that registers one — `tcp_wait` takes a connection handle, and `task_sleep` needs the very
+  # descriptor that is missing. A variant no producer can return would be worse than none.
   | TcpAcceptFailed String
 
 # LINEAR (M4.5). A connection is acquire -> use N times -> release once: reads and
@@ -110,7 +112,6 @@ export fn tcp_error_message(err: TcpError) -> String =
   | TcpEndOfStream -> "end of stream"
   | TcpTimeout -> "timed out"
   | TcpWouldBlock -> "would block"
-  | TcpAcceptExhausted -> "no connection slot available"
   | TcpAcceptFailed msg -> msg
 
 # Reads the handle out without taking the connection: `match` on a borrowed
