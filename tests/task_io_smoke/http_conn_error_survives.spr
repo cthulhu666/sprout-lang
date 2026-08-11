@@ -37,9 +37,15 @@ fn crash_client(port: Int, ready: Chan Int) -> Unit !{IO} =
 
 # Send a full request, close immediately (no read), THEN release the good client — so
 # the crashing connection is first in the accept queue and its write faults first.
+# The write is a BARE STATEMENT, not `_ <- ...`: `_ <-` sequences the Result and returns early on
+# Err, which would skip BOTH `close(conn)` — leaking the descriptor and breaking the linear
+# exactly-once obligation the checker cannot see past the short-circuit (BACKLOG P0) — and
+# `chan_send(ready, 1)`, which would hang the good client waiting on `ready`. Discarding the Result
+# and continuing is what this fixture wants: it exercises the SERVER's reaction to a dead peer, so a
+# client-side write error is not interesting, but skipping the handoff would be fatal.
 fn crash_after_send(conn: consuming TcpConnection, ready: Chan Int) -> Unit !{IO} =
   do
-    _ <- write_all_utf8(conn, "GET /crash HTTP/1.1\r\nHost: x\r\n\r\n")
+    write_all_utf8(conn, "GET /crash HTTP/1.1\r\nHost: x\r\n\r\n")
     close(conn)
     chan_send(ready, 1)
 
@@ -53,9 +59,11 @@ fn good_connect(port: Int) -> Unit !{IO} =
   | Ok conn -> good_send_and_report(conn)
   | Err _ -> term_write("good connect failed\n")
 
+# Bare statement for the same reason as above: `_ <-` would skip `good_report` and `close` on a write
+# error, turning a diagnosable failure into a silent no-output pass plus a leaked connection.
 fn good_send_and_report(conn: consuming TcpConnection) -> Unit !{IO} =
   do
-    _ <- write_all_utf8(conn, "GET /ok HTTP/1.1\r\nHost: x\r\n\r\n")
+    write_all_utf8(conn, "GET /ok HTTP/1.1\r\nHost: x\r\n\r\n")
     good_report(conn)
     close(conn)
 

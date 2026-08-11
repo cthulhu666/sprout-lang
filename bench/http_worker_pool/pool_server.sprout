@@ -6,14 +6,23 @@ import stdlib.net (TcpListener, TcpConnection, listen_local, accept, close, clos
 # model: task-per-connection vs a fixed worker pool fed by a channel.
 let response = "HTTP/1.1 200 OK\r\nconnection: close\r\ncontent-length: 15\r\ncontent-type: application/json\r\n\r\n{\"status\":\"ok\"}"
 
-# `read_avail_timeout`/`write_all_utf8` BORROW the connection; `close` consumes it, so the
-# exactly-once obligation is discharged exactly here on every path.
+# `read_avail_timeout`/`write_all_utf8` BORROW the connection; `close` consumes it, discharging the
+# exactly-once obligation.
+#
+# The two calls are BARE STATEMENTS, not `_ <- ...`, and that is load-bearing rather than style.
+# `_ <-` still sequences the `Result`: on `Err` it returns early from this function, so a read timeout
+# — routine under benchmark load — SKIPPED `close(conn)` and leaked the descriptor. The linearity
+# checker did not object, because it does not model the control-flow edges that the short-circuit
+# introduces (BACKLOG P0, "a do block's Result short-circuit is never type-checked"). This comment
+# previously claimed the obligation was discharged "on every path"; it was discharged on one of three.
+# A bare statement runs the call, discards the Result, and CONTINUES, which is what a benchmark server
+# that does not care about a client I/O error actually wants.
 fn handle(conn: consuming TcpConnection) -> Unit !{IO} =
   do
     # A bound rather than an unbounded read: `read_avail` is gone, because a benchmark server
     # that a silent client can park forever measures the wrong thing.
-    _ <- read_avail_timeout(conn, 5000)
-    _ <- write_all_utf8(conn, response)
+    read_avail_timeout(conn, 5000)
+    write_all_utf8(conn, response)
     close(conn)
 
 # A worker never returns, so its context is built ONCE by makecontext and its stack
