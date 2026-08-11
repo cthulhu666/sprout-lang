@@ -10,11 +10,17 @@ if [[ "$(uname)" == "Darwin" ]]; then
   CLANG_EXTRA=(-framework Security -framework CoreFoundation)
 fi
 
+# Link EVERY runtime translation unit, not just sprout_runtime.c. When the runtime was
+# split (sprout_scheduler.c, sprout_poll.c) this harness was not updated, so every case
+# here failed to link — "symbol(s) not found: _scheduler_park_on_fd" and friends — and
+# nothing noticed, because `just c-runtime-test` is referenced by no aggregate recipe and
+# no CI job. Every assertion in this directory was silently unrunnable, including the one
+# that documented term_read_key's abort contract.
 compile() {
   local src="$1"
   local out="$2"
   shift 2
-  clang "$@" "$ROOT/runtime/sprout_runtime.c" "$ROOT/tests/c_runtime/$src" "${CLANG_EXTRA[@]}" -o "$out"
+  clang "$@" "$ROOT"/runtime/*.c "$ROOT/tests/c_runtime/$src" "${CLANG_EXTRA[@]}" -o "$out"
 }
 
 echo "==> c runtime: read_file keeps Ok payload alive under stress GC"
@@ -113,16 +119,23 @@ echo "==> c runtime: term_read_key returns fresh, validated Strings"
 compile term_read_key_safety.c "$TMP_DIR/term_read_key_safety" -O0 -g
 printf 'AB' | "$TMP_DIR/term_read_key_safety" alias > "$TMP_DIR/trk.out"
 test "$(cat "$TMP_DIR/trk.out")" = "term-read-key-distinct"
-if printf '\303' | "$TMP_DIR/term_read_key_safety" badbyte \
-     > "$TMP_DIR/trk_bad.out" 2> "$TMP_DIR/trk_bad.err"; then
-  echo "  term_read_key did not abort on a non-ASCII byte" >&2
-  cat "$TMP_DIR/trk_bad.out" >&2
-  exit 1
-fi
-grep -q "non-ASCII" "$TMP_DIR/trk_bad.err" || {
-  echo "  term_read_key aborted without the expected message:" >&2
-  cat "$TMP_DIR/trk_bad.err" >&2
-  exit 1
-}
+# A complete multi-byte keypress must arrive as one whole character. Before this,
+# term_read_key aborted on any byte >= 0x80, so typing an accented character killed
+# the REPL and lost the session.
+printf '\303\251' | "$TMP_DIR/term_read_key_safety" multibyte > "$TMP_DIR/trk_mb.out"
+test "$(cat "$TMP_DIR/trk_mb.out")" = "term-read-key-multibyte"
+# 3- and 4-byte sequences back to back: the continuation count must come from the
+# lead byte, not be assumed to be one.
+printf '\346\227\245\360\237\214\261' | "$TMP_DIR/term_read_key_safety" wide > "$TMP_DIR/trk_wide.out"
+test "$(cat "$TMP_DIR/trk_wide.out")" = "term-read-key-wide"
+# A truncated sequence (lead byte, then EOF) must yield U+FFFD, NOT abort and NOT an
+# invalid 1-byte String. Exit status is checked as well as output, since the previous
+# contract here was a non-zero exit.
+printf '\303' | "$TMP_DIR/term_read_key_safety" badbyte > "$TMP_DIR/trk_bad.out"
+test "$(cat "$TMP_DIR/trk_bad.out")" = "term-read-key-replacement"
+# An invalid continuation must also yield U+FFFD, and must not swallow the byte that
+# follows: that byte is the next keystroke.
+printf '\303A' | "$TMP_DIR/term_read_key_safety" badcont > "$TMP_DIR/trk_cont.out"
+test "$(cat "$TMP_DIR/trk_cont.out")" = "term-read-key-badcont-keeps-next"
 
 echo "==> c runtime tests passed"

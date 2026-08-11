@@ -3198,6 +3198,85 @@ long long term_show_cursor(void) {
   fflush(stdout);
   return 0;
 }
+/* ── term_read_key's UTF-8 assembly ──────────────────────────────────────────────
+ * A single read() of a lead byte cannot form a complete character, so this used to
+ * tcp_fail on any byte >= 0x80 — which meant every accented or non-Latin keypress
+ * killed the REPL and lost the session. The bytes are now assembled into a whole
+ * character, and an ill-formed sequence yields U+FFFD instead of aborting.
+ *
+ * U+FFFD rather than an error channel: term_read_key returns a bare String, and a
+ * REPL has no meaningful recovery to perform for a malformed keypress. It is also
+ * what the WHATWG Encoding Standard mandates for a UTF-8 decode error ("the
+ * constraints in the UTF-8 decoder above match 'Best Practices for Using U+FFFD'
+ * from the Unicode standard") and what Rust's from_utf8_lossy does.
+ *
+ * The invariant the abort protected — every returned String is valid UTF-8 — still
+ * holds, but by construction (utf8_validate on the assembled bytes) rather than by
+ * refusing to proceed. Note this is the OPPOSITE of the choice made for
+ * bytes_to_utf8 / read_file / the http_server body, which reject; those return a
+ * Result to a caller that can act on it, and this does not. */
+static int g_term_pending_byte = -1;
+
+/* One-byte pushback, shared by the tty and non-tty paths. A byte that turns out not
+ * to be a valid continuation belongs to the NEXT key, so it must be restored rather
+ * than swallowed — losing a keystroke would be invisible in any test that only
+ * checked the malformed key itself. WHATWG's decoder restores the byte the same way. */
+static int term_next_byte(int from_tty) {
+  if (g_term_pending_byte >= 0) {
+    int pending = g_term_pending_byte;
+    g_term_pending_byte = -1;
+    return pending;
+  }
+  if (!from_tty) {
+    int c = getchar();
+    return c == EOF ? -1 : (int)(unsigned char)c;
+  }
+  char b = '\0';
+  ssize_t n = read(STDIN_FILENO, &b, 1);
+  return n > 0 ? (int)(unsigned char)b : -1;
+}
+
+/* Continuation bytes implied by a lead byte, or 0 for a byte that cannot lead one.
+ * C0/C1 (always overlong) and F5..FF (beyond U+10FFFF) are rejected here rather than
+ * after assembly, so their "maximal subpart" is the single bad byte and a following
+ * good byte is not dragged into the error — Unicode's recommended granularity.
+ * Everything subtler (overlong E0 80 .., surrogates ED A0 .., F4 90 .. overflow) is
+ * left to utf8_validate, which stays the single authority on validity. */
+static size_t term_utf8_continuations(int lead) {
+  if (lead >= 0xC2 && lead <= 0xDF) return 1;
+  if (lead >= 0xE0 && lead <= 0xEF) return 2;
+  if (lead >= 0xF0 && lead <= 0xF4) return 3;
+  return 0;
+}
+
+static long long term_key_utf8(int lead, int from_tty) {
+  unsigned char buf[5];
+  size_t need = term_utf8_continuations(lead);
+  size_t len = 0;
+  buf[len++] = (unsigned char)lead;
+  int ok = need > 0;
+  for (size_t k = 0; ok && k < need; k++) {
+    int b = term_next_byte(from_tty);
+    if (b < 0) { ok = 0; break; }            /* truncated: nothing to push back */
+    if ((b & 0xC0) != 0x80) {                /* not a continuation byte */
+      g_term_pending_byte = b;               /* it starts the next key */
+      ok = 0;
+      break;
+    }
+    buf[len++] = (unsigned char)b;
+  }
+  const char* reason = NULL;
+  if (!ok || !utf8_validate(buf, len, &reason)) {
+    /* U+FFFD; interned like the key-name tokens, so it is headered and deduped. */
+    return (long long)(uintptr_t)intern_string("\357\277\275");
+  }
+  sprout_gc_maybe_collect_threshold();
+  char* out = sprout_gc_alloc_cstr(len, "term_read_key: out of memory");
+  memcpy(out, buf, len);
+  out[len] = '\0';
+  return (long long)(uintptr_t)out;
+}
+
 long long term_read_key(void) {
   static const char* token_ctrl_a = "ctrl-a";
   static const char* token_ctrl_b = "ctrl-b";
@@ -3215,23 +3294,39 @@ long long term_read_key(void) {
   static const char* token_up = "up";
   int ch = EOF;
   if (!isatty(STDIN_FILENO)) {
-    ch = getchar();
+    ch = term_next_byte(0);
+    if (ch < 0) ch = EOF;
   } else {
     struct termios oldt;
     if (tcgetattr(STDIN_FILENO, &oldt) != 0) {
-      ch = getchar();
+      ch = term_next_byte(0);
+      if (ch < 0) ch = EOF;
     } else {
       struct termios raw = oldt;
       raw.c_lflag &= (tcflag_t)~(ICANON | ECHO);
       raw.c_cc[VMIN] = 1;
       raw.c_cc[VTIME] = 0;
       if (tcsetattr(STDIN_FILENO, TCSANOW, &raw) != 0) {
-        ch = getchar();
+        ch = term_next_byte(0);
+        if (ch < 0) ch = EOF;
       } else {
-        char byte = '\0';
-        ssize_t count = read(STDIN_FILENO, &byte, 1);
-        if (count > 0) {
-          ch = (unsigned char)byte;
+        int first = term_next_byte(1);
+        if (first >= 0) {
+          ch = first;
+          /* Assemble here, INSIDE raw mode: by the time the dispatch below runs,
+           * tcsetattr has restored canonical mode, where a read() would block for a
+           * newline instead of handing over the continuation bytes already queued.
+           * VMIN=0/VTIME=1 bounds the wait so a truncated sequence yields U+FFFD
+           * rather than hanging — the same window the arrow-key path opens. */
+          if (ch >= 0x80) {
+            struct termios raw_more = raw;
+            raw_more.c_cc[VMIN] = 0;
+            raw_more.c_cc[VTIME] = 1;
+            tcsetattr(STDIN_FILENO, TCSANOW, &raw_more);
+            long long assembled = term_key_utf8(ch, 1);
+            tcsetattr(STDIN_FILENO, TCSANOW, &oldt);
+            return assembled;
+          }
           if (ch == 27) {
             struct termios raw_more = raw;
             raw_more.c_cc[VMIN] = 0;
@@ -3270,12 +3365,11 @@ long long term_read_key(void) {
   if (ch == 27) return (long long)(uintptr_t)intern_string(token_escape);
   if (ch == '\n' || ch == '\r') return (long long)(uintptr_t)intern_string(token_enter);
   if (ch == '\t') return (long long)(uintptr_t)intern_string(token_tab);
-  /* A single read() byte >= 0x80 is at most the lead of a multibyte sequence,
-   * never a complete UTF-8 char, so returning it would mint an invalid String.
-   * Reject with a clean panic, uniform with the other UTF-8 builtins (review
-   * W2/R4); assembling a full multibyte key is a separate deferred feature. */
-  if (ch >= 0x80)
-    tcp_fail("term_read_key: non-ASCII byte cannot form a complete UTF-8 char");
+  /* Reached only by the non-tty and termios-failure paths; the raw-mode path
+   * assembles and returns above, where it still holds raw mode. Continuation bytes
+   * come from getchar() here, which is correct precisely because these paths never
+   * entered raw mode. */
+  if (ch >= 0x80) return term_key_utf8(ch, 0);
   /* Heap-allocate a fresh String per keypress so a retained result never
    * mutates under the caller on the next call (the old static-buffer aliasing). */
   sprout_gc_maybe_collect_threshold();
