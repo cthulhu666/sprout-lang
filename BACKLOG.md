@@ -536,10 +536,23 @@ Legend:
   | `tcp_wait` (readiness), `tcp_write_some` (transfer) | `tcp_read_some` — non-parking, `Err TcpWouldBlock`, mirroring `tcp_write_some` | `tcp_read`, `tcp_read_avail`, `tcp_read_avail_timeout`, `tcp_read_exact`, `tcp_write_string` |
   Five read builtins are not five capabilities — they are one capability with four policy combinations
   hard-coded in C (*park forever vs. deadline* × *whatever's available vs. exact count*). `http_server`,
-  the only production consumer, uses **exactly one** of them. Sprout-side `read_avail`,
-  `read_avail_timeout`, `read_exact` and `read_exact_utf8` keep their names as loops over the two
-  primitives, so `read_exact_utf8`'s 12 fixture uses do not move and `read_exact` (zero callers) simply
-  goes; only `tcp_read` (5 fixtures + `examples/tcp_echo_once.sprout`) needs caller migration.
+  the only production consumer, uses **exactly one** of them.
+  **The READ half landed 2026-08-11** (see the `P1` W2 R2 entry above for the full account): added
+  `tcp_read_some`; deleted `tcp_read`, `tcp_read_avail`, `tcp_read_avail_timeout` and `tcp_echo_serve`;
+  `read_avail_timeout` is now a Sprout loop over `tcp_wait` + `tcp_read_some`, and `read_avail` was
+  deleted outright rather than rebuilt (`tcp_wait` takes a finite `ms`, and an unbounded socket read is
+  the hazard being removed). Net -4 builtins.
+  **Remaining, and deliberately deferred rather than forgotten:**
+  * `tcp_read_exact` — NOT a W2 R2 violator (`Bytes` in, `Bytes` out), so it was out of scope for the
+    soundness fix. Rebuilding it over `tcp_wait` is still worth doing, because it has **no deadline**:
+    it parks indefinitely, which is why the C5 body-framing fix could not use it. That change adds a
+    deadline parameter, so it is an API change and belongs in its own PR.
+  * `tcp_write_all_timeout` — the write-side twin, same argument as the reads: it re-arms its idle
+    bound inside C, so a caller can never impose a total bound. `write_all_by` already shows the shape.
+  * `tcp_write_string` — kept, per its own stated retirement condition (go with the raw `tcp_*`
+    externs, not before). The raw family now blocks on exactly one thing: a task force-dropped by
+    `scope_cancel`/`with_timeout` never runs its linear `close`, so the cancellation fixtures cannot
+    hold a `TcpConnection`. That is the `P2` entry below, which is therefore this family's blocker.
 - [ ] `P1` **http_server accept-failure isolation (concurrency review C3, remaining half).**
   `tcp_accept` is still the FATAL variant: `accept` failing with EMFILE/ENFILE — the same descriptor
   exhaustion the timeout above now makes far harder to reach, but not impossible — calls `tcp_fail`
@@ -674,7 +687,8 @@ Legend:
     4-byte, so the continuation count comes from the lead byte), rewrites `badbyte` from "must abort"
     to "must return U+FFFD", and adds `badcont` asserting the following byte survives. All confirmed to
     fail against `origin/master`'s runtime.
-- [ ] `P1` **W2 R2, the `net` half: socket reads mint Strings that violate the `String` invariant.**
+- [x] `P1` **W2 R2, the `net` half: socket reads mint Strings that violate the `String` invariant.
+  FIXED 2026-08-11.**
   `docs/spec-v0.md` §"A `String` value is always valid UTF-8 and contains no NUL byte. Builtins that
   construct a `String` from raw external bytes (e.g. `read_file`) validate the input and report
   malformed content through their error channel rather than producing an invalid `String`."
@@ -696,17 +710,49 @@ Legend:
   binary body routes those bytes through a String. Note the local/CI asymmetry that hid it —
   HDRCHECK is **off by default and on in CI**, so a green `just test` locally proves nothing about
   string-representation changes.
-  **Fix = execute D4 for `net`, which is the `BACKLOG:483` reduction:** add `tcp_read_some` (non-parking
-  byte transfer reporting `Err TcpWouldBlock`, mirroring the landed `tcp_write_some`), rebuild
-  `read_avail` / `read_avail_timeout` / `read_exact` / `read_exact_utf8` as Sprout loops over
-  `tcp_wait` + `tcp_read_some`, and **delete** the four String-returning read builtins plus
-  `tcp_write_string`. Deleting rather than adding is the point: if no builtin returns a `String` from a
-  socket, the invalid state becomes unconstructible from I/O. Measured blast radius: `read_exact_utf8`
-  keeps its signature so its 12 fixture uses do not move; `read_exact` has zero callers; only
-  `tcp_read` (5 fixtures + `examples/tcp_echo_once.sprout`) needs caller migration.
+  **Fixed by executing D4 for `net`.** Added `tcp_read_some` (one recv, never parks, returns `Bytes`,
+  `Err TcpWouldBlock` / `Err TcpEndOfStream`); deleted `tcp_read`, `tcp_read_avail`,
+  `tcp_read_avail_timeout` and — since it called `tcp_read` — `tcp_echo_serve`, an entire echo server
+  written in C, now `examples/tcp_echo_server.sprout`. Net **-4 builtins**. Deleting rather than adding
+  was the point: no builtin returns a `String` from a socket, so the invalid state is unconstructible
+  from I/O. No validation was added anywhere — `bytes.to_string` was already the choke point and was
+  verified to reject a NUL as well as invalid UTF-8.
+  **Deviations from the plan sketched here, and why:**
+  * `read_exact` / `read_exact_utf8` were **left alone**. They return `Bytes` already, so they are not
+    W2 R2 violators; rebuilding them over `tcp_wait` is a separate change (it would give `read_exact`
+    the deadline it lacks, which is an API change) and is left to the `BACKLOG:483` entry above.
+  * `read_avail` (unbounded) was **deleted** rather than rebuilt. `tcp_wait` takes a finite `ms`, so an
+    unbounded park would have needed a new sentinel encoding — and an unbounded socket read is the
+    hazard this series exists to remove. All three callers took a deadline without difficulty.
+  * `tcp_write_string` was **kept**. Its own retirement condition is "go when the raw `tcp_*` externs
+    go, not before, so the raw-handle path stays complete rather than half-usable", and the raw family
+    survives (see below), so retiring it alone would have violated the condition it states.
+  * `tcp_read_some` is **exported**, unlike its write-side twin, because it is now the raw family's
+    only read. That family cannot retire while a force-dropped task cannot run a linear `close` —
+    which is the `P2` full-duplex/cancellation gap below, now the single thing blocking it.
+  **Also required, and larger than the read swap itself:** `http_server`'s header loop had a `String`
+  accumulator purely to locate `"\r\n\r\n"` with `str_find`. It is gone, replaced by a new pure-Sprout
+  `bytes.find` scanning a 3-byte overlap plus each new chunk — the terminator is 4 bytes, so a
+  straddling occurrence has 1-3 bytes on the old side. The overlap is not an optimisation: rescanning
+  the accumulated block per round is quadratic and *reachable on purpose*, since the size cap bounds
+  total bytes rather than rounds (one byte per round under a 64 KiB cap forces 65536 scans of up to
+  64 KiB). The header block is now decoded exactly once through `bytes.to_string`, so a NUL or bad
+  UTF-8 in headers is a clean 400 rather than an illegal `String`, and every byte/codepoint conversion
+  in the read path is deleted rather than commented.
+  **Regression:** `tests/task_io_smoke/tcp_nul_payload.spr` pins it at the `net` layer (bytes intact
+  AND decoding refused), run under `SPROUT_GC_HDRCHECK=1` as well as the default — a default-build
+  green run is exactly what let this reach CI. `tests/stdlib/test_bytes_find.spr` covers the search.
+  **Still open — `proc_run` is the remaining R2 site**, and the `proc_run` repro above still
+  reproduces. It is the same one-line shape (`sprout_gc_adopt_cstr` on unvalidated bytes) and the same
+  fix (return `Bytes`, decode through the choke point).
 - [ ] `P2` **Full-duplex on one socket is inexpressible, and the restriction is CONSERVATIVE rather
   than fundamental.** Verified 2026-08-11 while deciding whether `net`'s raw-handle "escape hatch" was
-  worth keeping. Moving a connection into ONE spawned task compiles; two tasks borrowing it
+  worth keeping. **Promoted in consequence 2026-08-11:** this is now the sole blocker on retiring the
+  raw-handle `tcp_*` family (and with it `tcp_write_string`), because a task force-dropped by
+  `scope_cancel`/`with_timeout` never runs its linear `close` — so `cancel_io_drop.spr`,
+  `timeout_io_drop.spr` and `await_dropped_fails.spr` cannot hold a `TcpConnection` at all, and
+  `tcp_read_some` had to be exported to keep that path from being able to accept and write but not
+  read. Moving a connection into ONE spawned task compiles; two tasks borrowing it
   concurrently (one reading, one writing — a proxy, WebSocket, or HTTP/2) is rejected:
   *"borrowed value 'conn' cannot be captured by a closure passed to a `once` parameter: the closure may
   run after the value is consumed. Move it instead."*
