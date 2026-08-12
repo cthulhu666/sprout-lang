@@ -117,5 +117,21 @@ int  scheduler_park_on_fd_timeout(int fd, int interest, long long ms);
  * parked frame it frees held the only reference. Use scheduler_park_on_fd for any fd a
  * handle already owns; closing that one on drop would be a double-close. */
 void scheduler_park_on_unowned_fd(int fd, int interest);
+/* The bounded twin of the above: unowned-fd park with a deadline. Returns 1 = fd ready, 0 = the
+ * deadline won (or could not be armed), exactly as scheduler_park_on_fd_timeout. Used by the HTTP
+ * client, whose socket is unowned for the whole request AND must obey the caller's deadline at
+ * every park — connect, send and read alike. */
+int  scheduler_park_on_unowned_fd_timeout(int fd, int interest, long long ms);
+
+/* Register a cleanup for memory a builtin holds ACROSS a park, or clear it with fn == NULL.
+ * force_drop_task (with_timeout expiry / scope_cancel) frees a parked task's green stack without
+ * unwinding the C frame on it, so malloc'd memory reachable only from that frame leaks. The
+ * standing rule is to keep such state on the task stack instead (see tcp_connect); this exists for
+ * state that structurally cannot be, such as a response buffer that grows across many parks.
+ *
+ * The hook runs BEFORE the roots and stack are freed, so `arg` may point into the green stack. It
+ * must only free plain heap memory: no allocation, no GC interaction, no parking. Callers MUST
+ * clear it before returning, so it can never outlive the frame `arg` refers to. */
+void scheduler_set_park_cleanup(void (*fn)(void*), void* arg);
 
 #endif /* SPROUT_SCHEDULER_H */

@@ -1,0 +1,100 @@
+import stdlib.task (Scope, with_scope, task_spawn, task_sleep)
+import stdlib.http_client (http_get)
+import stdlib.net (TcpConnection, TcpListener, accept, close, close_listener, listen_local, read_avail_timeout, write_all_utf8)
+import stdlib.string as string
+import stdlib.bytes as bytes
+
+# `timeout_ms` on the HTTP CLIENT is a TOTAL request deadline: one budget spanning connect, send and
+# the entire body read. It is not an idle deadline that progress re-arms.
+#
+# This is a SEMANTICS GUARD, not a bug reproduction — the liveness bug itself is reproduced by
+# http_request_parks.spr. It is stated separately because the two implementations are
+# indistinguishable on every well-behaved peer: they differ only against a peer that makes SLOW
+# PROGRESS FOREVER, which is exactly what this fixture is. Under an idle deadline each drip re-arms
+# the budget and the request never returns; under a total deadline it returns at the deadline no
+# matter how much the peer drips. Verified to discriminate by negative control: re-stamping the
+# deadline on each successful read (i.e. idle semantics) makes this fixture report 3123 ms and fail,
+# against 400 ms when it passes.
+#
+# The choice follows Go's `http.Client.Timeout` ("the timeout includes connection time, any
+# redirects, and reading the response body") and reqwest's `timeout` ("a total request timeout ...
+# applied from when the request starts connecting until the response body has finished"), the two
+# established single-knob client APIs. The repo's own `tcp_write_all_timeout` is idle instead, on
+# nginx `send_timeout` prior art — deliberately different, because that one is a server-side
+# per-operation primitive where cutting off a slow-but-reading peer is the failure to avoid, whereas
+# this is a caller saying "give up after N ms".
+#
+# Both roles run as green tasks in ONE process, which is itself only possible once the client parks.
+
+# Announces a body far larger than it will ever send, then feeds it one byte at a time forever. The
+# Content-Length matters: it stops the client from treating a pause as end-of-message, so the read
+# stays outstanding and the deadline is the only thing that can end it.
+fn drip(conn: borrowing TcpConnection, remaining: Int) -> Unit !{IO} =
+  if remaining <= 0 then term_write("")
+  else
+    match write_all_utf8(conn, "x") with
+    # The peer going away is the EXPECTED end of this loop: the client hit its deadline and closed.
+    | Err _ -> term_write("")
+    | Ok _ ->
+        do
+          task_sleep(100)
+          drip(conn, remaining - 1)
+
+fn read_head(conn: borrowing TcpConnection, acc: String) -> String !{IO} =
+  if string.contains(acc, "\r\n\r\n") then acc
+  else
+    match read_avail_timeout(conn, 5000) with
+    | Err _ -> acc
+    | Ok chunk ->
+        match bytes.to_string(chunk) with
+        | Err _ -> acc
+        | Ok text -> read_head(conn, string.concat(acc, text))
+
+fn serve(conn: consuming TcpConnection) -> Unit !{IO} =
+  do
+    read_head(conn, "")
+    write_all_utf8(conn, "HTTP/1.1 200 OK\r\nContent-Length: 100000\r\n\r\n")
+    # 30 drips at 100 ms is 3 s of steady progress — 7.5x the client's 400 ms budget, so an idle
+    # deadline cannot be mistaken for a slow total one.
+    drip(conn, 30)
+    close(conn)
+
+# OWNS the listener rather than borrowing it. A `borrowing` listener cannot be captured by the
+# closure `task_spawn` takes, because that closure may still be running when the borrow's owner
+# consumes the value — so ownership moves in here and the close happens on this side. The sibling
+# fixture read_deadline_loses_to_data.spr avoids the question by accepting before the scope opens;
+# that is not available here, since the connection this accepts comes from a client that has not
+# been spawned yet.
+fn server(listener: consuming TcpListener) -> Unit !{IO} =
+  do
+    accept_and_serve(listener)
+    close_listener(listener)
+
+fn accept_and_serve(listener: borrowing TcpListener) -> Unit !{IO} =
+  match accept(listener) with
+  | Err _ -> term_write("server: accept failed\n")
+  | Ok conn -> serve(conn)
+
+fn client() -> Unit !{IO} =
+  do
+    t0 <- time_now_micros()
+    http_get("http://127.0.0.1:28985/", "", 400)
+    t1 <- time_now_micros()
+    report((t1 - t0) / 1000)
+
+# The window is wide on purpose. The lower bound only rejects an implementation that gives up before
+# its budget; the upper bound is 3.75x the deadline and still less than half the 3 s drip, so the
+# verdict never turns on scheduling jitter.
+fn report(elapsed_ms: Int) -> Unit !{IO} =
+  if elapsed_ms >= 300 && elapsed_ms <= 1500 then term_write("client honored its total deadline\n")
+  else term_write(string.concat("client OVERRAN its deadline: ", string.concat(int_to_string(elapsed_ms), " ms\n")))
+
+fn run(s: Scope, listener: consuming TcpListener) -> Unit !{IO} =
+  do
+    task_spawn(s, \_ -> server(listener))
+    task_spawn(s, \_ -> client())
+
+fn main() -> Unit !{IO} =
+  do
+    listener <- listen_local(28985)
+    with_scope(\s -> run(s, listener))

@@ -702,8 +702,11 @@ Legend:
   loops.** Raised and scoped 2026-08-10, when `tcp_write_all_timeout` was approved as the *interim*
   fix for the unbounded response write. The current design adds **one timed twin per operation**, and
   the queue is already visible: `tcp_read_exact_timeout` is required by the body-framed-by-bytes item
-  below (the body phase is deadline-bounded and must move to `tcp_read_exact`), and
-  `tcp_connect_timeout` by the http_client blocking-connect item. Each twin is ~25 lines of C
+  below (the body phase is deadline-bounded and must move to `tcp_read_exact`). The http_client
+  blocking-connect item no longer drives a `tcp_connect_timeout` twin — it was fixed (2026-08-12)
+  with an internal C helper plus one scheduler entry point, adding no Sprout-visible builtin — but
+  it did add a *third* private park/retry loop over the same dance, which is more evidence for this
+  decomposition, not less. Each twin is ~25 lines of C
   duplicating the park/retry dance — i.e. the clone problem just deduplicated above, regenerating
   faster than it can be collapsed.
   **Shape:** separate *readiness* from *transfer*, as every reactor does.
@@ -2502,14 +2505,70 @@ op-classification already in place.
   assertion (80 expiries under `ulimit -n 64`) — on Linux CI, not locally. Generalizable lesson:
   **a per-iteration descriptor leak is only visible under a descriptor cap plus enough iterations**,
   and the two poller backends differ in whether timers cost an fd at all.
-- [ ] `P2` **`http_request`'s connect is blocking too, and `SO_SNDTIMEO` does not bound it**
-  (`runtime/sprout_runtime.c` ~6792 and ~7016, measured 2026-08-10). Both HTTP-client paths (plain
-  and TLS) set `SO_RCVTIMEO`/`SO_SNDTIMEO` and then call `connect()` on a **blocking** socket. On
-  macOS that timeout does **not** apply to `connect`: measured **7.85 s to complete a 1 s-timeout
-  connect** against a full accept queue, all of it with the scheduler frozen. So the whole
-  synchronous HTTP client — not just its connect — is a liveness hazard for any concurrent program.
-  Larger than the `tcp_connect` fix above: those paths do a blocking read/write handshake as well,
-  so making them park means restructuring the client, not adding one park site.
+- [x] `P2` **The whole HTTP client was blocking, not just its connect** (found 2026-08-10, fixed
+  2026-08-12). Both client paths (plain and TLS) set `SO_RCVTIMEO`/`SO_SNDTIMEO` and then ran
+  `connect`/`send`/`recv` on a **blocking** socket, freezing the pump for the entire call: no
+  sibling task advanced and no timer fired. Measured: **2001 ms of frozen scheduler for a 2000 ms
+  request**, and **7.85 s to complete a nominally 1 s connect** (macOS does not apply `SO_SNDTIMEO`
+  to `connect` at all). Now non-blocking end to end, parking at every wait.
+  Regressions: `tests/task_io_smoke/http_request_parks.spr` (liveness),
+  `http_request_total_deadline.spr` (semantics), `http_request_cancel_drop.spr` (cancellation).
+  Four things the fix had to get right:
+  - **`timeout_ms` is now a TOTAL request deadline**, not the accidental per-syscall bound
+    `SO_RCVTIMEO` provided. Follows Go's `http.Client.Timeout` and reqwest's `timeout`; deliberately
+    unlike `tcp_write_all_timeout`, which stays idle on nginx `send_timeout` prior art (server-side
+    per-operation, where cutting off a slow-but-reading peer is the failure to avoid). The old
+    behaviour let a peer dripping one byte per timeout window hold a request open without bound.
+  - **Cancelling a request became possible, and therefore became a leak.** A blocking client never
+    parks, so it was never a `force_drop_task` candidate; parking made it one, and that function
+    frees the green stack without unwinding the C frame. The fd is handled by parking through the
+    *unowned*-fd entry point at every site (the client's socket is never in the handle table, so the
+    parked frame is its only reference); the buffers needed a new mechanism,
+    `scheduler_set_park_cleanup`, because a response buffer grows across arbitrarily many parks and
+    so cannot obey the standing "keep it on the task stack" rule. Both verified by negative control:
+    parking via the owned-fd entry point drops the descriptor budget test to 59 of 80, and the
+    cleanup hook is observed firing exactly 80 times.
+  - **On a non-blocking fd, SecureTransport's `errSSLWouldBlock` retry loops become hot spins.** The
+    old `continue` was only safe because the blocking `recv` underneath did the waiting. All three
+    loops (handshake, write, read) now park, on the direction the IO callback recorded — SSL itself
+    never says which way it blocked. macOS-only code, so **CI does not cover it**; verified locally.
+  - **`getaddrinfo` is still blocking** and deliberately out of scope — see the item below.
+- [ ] `P2` **`getaddrinfo` still freezes the scheduler for the duration of a DNS lookup**
+  (`runtime/sprout_runtime.c`, `http_resolve` and `tcp_connect`). Everything else in the HTTP client
+  now parks, so this is the last blocking call on the path: a slow or unreachable resolver stalls
+  every green task in the process, for as long as the platform resolver takes to give up. No
+  non-blocking POSIX resolver exists (`getaddrinfo_a` is a glibc extension and not available on
+  macOS), so the fix is a design decision, not a patch: either a resolver thread the green task
+  parks on via a pipe/eventfd, or a DNS client written in Sprout over the existing UDP-less socket
+  surface. Both need sign-off — the first adds a thread to a deliberately single-threaded runtime.
+- [ ] `P1` **CI runs one job on `ubuntu-latest`, so macOS is never tested — and the TLS client path
+  has NO automated coverage at all** (surfaced 2026-08-12 while making the client non-blocking).
+  Two holes, one fix:
+  - **The whole kqueue backend is unverified by CI.** `.github/workflows/ci.yml` has a single `test`
+    job on `ubuntu-latest`, so every gate CI runs exercises **epoll + timerfd only**. Every kqueue
+    assertion in the repo is validated solely by whoever runs `just` locally. AGENTS.md already
+    records two Linux-only failures reaching CI on locally-green branches; nothing at all guards
+    the reverse direction, and the two backends genuinely diverge (timers cost a descriptor on
+    Linux and none on macOS; `task_sleep` needs an fd on Linux; `accept(2)` passes pending network
+    errors through on Linux only).
+  - **`http_request_tls` is `#ifdef __APPLE__`, so CI cannot even compile it**, let alone run it.
+    `SPROUT_HTTP_CA_CERT` — the custom-anchor override that exists precisely to point the client at
+    a private CA — appears nowhere in `tests/`, `scripts/` or CI. The path was already uncovered
+    before the non-blocking rewrite; the rewrite (parking in all three SecureTransport loops) is
+    what makes the gap worth paying down now.
+  **Shape:** a hermetic TLS gate — self-signed cert (SAN `DNS:localhost`) served by `openssl
+  s_server`, with `SPROUT_HTTP_CA_CERT` pointed at it, so the gate is offline and deterministic
+  rather than depending on a public endpoint — run from a new `macos-latest` CI job that also runs
+  `task-io-smoke`. Cost is zero: the repo is public and *"use of the standard GitHub-hosted runners
+  is free and unlimited on public repositories"* (GitHub Actions runner reference), with
+  `macos-latest` (→ `macos-15` arm64) a standard runner, not one of the paid "larger runners".
+  Add the job as non-required first, since only `test` is a required check today.
+- [ ] `P3` **No idle/read timeout for the HTTP client, only the total one.** `timeout_ms` is now a
+  total deadline, which is right for the common case but cannot express "fail if the peer stalls for
+  N seconds" on a long transfer — a caller streaming a large body has to size one budget for the
+  whole thing. Both reference APIs ended up offering both knobs (reqwest has `timeout` *and*
+  `read_timeout`; Go pairs `Client.Timeout` with `Transport.ResponseHeaderTimeout`). Additive, so it
+  can wait for a caller that actually streams.
 - [ ] `P3` **`listen(fd, 16)` — a 16-deep accept backlog** (`runtime/sprout_runtime.c:8341`), well
   below every convention (`SOMAXCONN` = 128 on macOS, nginx's 511). **Downgraded from P2 and from
   "sole cause of the p99 tail": measured NOT to matter here.** Raising it to `SOMAXCONN` left p99

@@ -90,6 +90,16 @@ typedef struct Task {
                                * scheduler_park_on_unowned_fd: an in-flight connect parks on a
                                * bare socket that no handle table owns yet, so a cancel-drop is
                                * the socket's last reference — see that function. */
+  void       (*park_cleanup)(void*); /* run by force_drop_task BEFORE the green stack is freed, or
+                                      * NULL. force_drop_task frees the stack WITHOUT unwinding the
+                                      * C frame parked on it, so a builtin holding malloc'd memory
+                                      * across a park leaks it on every cancel. The standing rule
+                                      * (from the tcp_connect fix) is "whatever is held across a
+                                      * park must live on the task stack" — this hook exists for the
+                                      * cases that structurally cannot, e.g. the HTTP client's
+                                      * response buffer, which grows across many parks. */
+  void*        park_cleanup_arg;      /* passed to park_cleanup; points into the green stack, which
+                                       * is why the hook must run before that stack is freed. */
   long long    park_timer_id; /* opaque timer handle when park_kind == PARK_TIMER (L0.6) */
   int          park_timer_dead; /* 1 once THIS park's timer registration has been torn down.
                                  * The Linux backend close()s the timerfd, so a second teardown
@@ -514,6 +524,8 @@ static void sprout_scheduler_init(void) {
   g_task0.park_kind = PARK_NONE;         /* task-0 parks on I/O / timers like any task */
   g_task0.park_fd = -1;
   g_task0.park_close_fd = -1;
+  g_task0.park_cleanup = NULL;
+  g_task0.park_cleanup_arg = NULL;
   g_task0.park_timer_id = 0;
   g_task0.park_timer_dead = 0;
   g_task0.park_woke_by_timer = 0;
@@ -574,6 +586,8 @@ static Task* task_create(Scope* s, long long work, int awaitable) {
   t->park_fd    = -1;      /* not I/O-parked until scheduler_park_on_fd runs */
   t->park_interest = 0;
   t->park_close_fd = -1;   /* set only while parked on an fd no handle table owns */
+  t->park_cleanup = NULL;  /* set only while a builtin holds malloc'd memory across a park */
+  t->park_cleanup_arg = NULL;
   t->park_timer_id = 0;
   t->park_timer_dead = 0;
   t->park_woke_by_timer = 0;
@@ -709,6 +723,19 @@ static void force_drop_task(Task* t) {
       close(t->park_close_fd);
       t->park_close_fd = -1;
     }
+  }
+  /* Release whatever the parked builtin holds in MALLOC'D memory, before the stack it lives on
+   * goes away. Ordered here for two reasons: `park_cleanup_arg` points into the green stack, so
+   * this is the last moment it is readable; and the hook only frees plain heap memory, so it is
+   * safe ahead of the roots teardown below (it must not allocate or touch GC state, same rule the
+   * roots/stack ordering follows). Cleared first so a hook that somehow re-enters cannot run
+   * twice. */
+  if (t->park_cleanup != NULL) {
+    void (*cleanup)(void*) = t->park_cleanup;
+    void* cleanup_arg = t->park_cleanup_arg;
+    t->park_cleanup = NULL;
+    t->park_cleanup_arg = NULL;
+    cleanup(cleanup_arg);
   }
   /* Free roots first (unregisters the context so no later collection scans it), then the
    * stack; no allocation between (design §7). */
@@ -997,6 +1024,27 @@ void scheduler_park_on_unowned_fd(int fd, int interest) {
   g_current_task->park_close_fd = fd;
   scheduler_park_on_fd(fd, interest);
   g_current_task->park_close_fd = -1;   /* belt-and-braces; the pump already cleared it on wake */
+}
+
+/* The BOUNDED twin of scheduler_park_on_unowned_fd. Returns 1 = fd ready, 0 = timed out.
+ *
+ * The HTTP client needs both properties at once, which no existing entry point offers: its socket
+ * is unowned for the WHOLE request (it is never installed in g_conn_fd — only tcp_connect's
+ * handles are), so every one of its parks, not just the connect, is the socket's last reference
+ * under a cancel-drop; and every one of them must also be bounded by the request deadline. */
+int scheduler_park_on_unowned_fd_timeout(int fd, int interest, long long ms) {
+  g_current_task->park_close_fd = fd;
+  int ready = scheduler_park_on_fd_timeout(fd, interest, ms);
+  g_current_task->park_close_fd = -1;
+  return ready;
+}
+
+/* Register (fn != NULL) or clear (fn == NULL) the cleanup force_drop_task runs if THIS task is
+ * dropped while parked. Callers must clear it before returning, so the hook can never outlive the
+ * frame `arg` points into. */
+void scheduler_set_park_cleanup(void (*fn)(void*), void* arg) {
+  g_current_task->park_cleanup = fn;
+  g_current_task->park_cleanup_arg = arg;
 }
 
 /* Suspend the current task on a one-shot timer for `ms` (> 0) milliseconds; the pump runs

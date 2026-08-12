@@ -6736,6 +6736,230 @@ static long long http_response_result(char* response_data, size_t response_len) 
   return http_ok_response(status, headers, body_out, body_len);
 }
 
+/* ── HTTP client: parking, deadlines, and non-blocking connect ────────────────────────────────
+ *
+ * The client used to run on a BLOCKING socket bounded by SO_RCVTIMEO/SO_SNDTIMEO, which froze the
+ * whole OS thread for the duration of every call: no sibling green task advanced and no timer
+ * fired, so one slow HTTP request stopped every task in the process (measured: 2001 ms of frozen
+ * scheduler for a 2000 ms request, tests/task_io_smoke/http_request_parks.spr; and 7.85 s for a
+ * nominally 1 s connect, since SO_SNDTIMEO does not bound connect() on macOS at all). Everything
+ * below exists to make each of those waits a PARK instead.
+ *
+ * `tcp_set_nonblocking` is defined with the tcp_* builtins further down; forward-declared rather
+ * than moved, to keep this change out of that section. */
+static void tcp_set_nonblocking(int fd);
+
+/* A TOTAL request budget: one deadline stamped at entry and spanning connect, send and the entire
+ * body read — NOT an idle deadline that progress re-arms.
+ *
+ * Follows the two established single-knob client APIs: Go's http.Client.Timeout ("the timeout
+ * includes connection time, any redirects, and reading the response body") and reqwest's timeout
+ * ("a total request timeout ... applied from when the request starts connecting until the response
+ * body has finished"). Deliberately NOT the rule used by tcp_write_all_timeout above, which is idle
+ * on nginx `send_timeout` prior art: that one is a server-side per-operation primitive where
+ * cutting off a slow-but-reading peer is the failure to avoid, whereas this is a caller saying
+ * "give up after N ms". Total also closes a hole the old per-syscall behaviour left wide open — a
+ * peer dripping one byte per SO_RCVTIMEO window kept a request alive without bound.
+ * tests/task_io_smoke/http_request_total_deadline.spr is the guard. */
+typedef struct {
+  long long deadline_us;
+} HttpDeadline;
+
+static HttpDeadline http_deadline_start(long long timeout_ms) {
+  HttpDeadline d;
+  d.deadline_us = time_now_micros() + timeout_ms * 1000LL;
+  return d;
+}
+
+/* Milliseconds left, or 0 once the budget is spent. A sub-millisecond remainder rounds UP to 1:
+ * scheduler_park_on_fd_timeout requires ms > 0, and 0 is reserved here for "expired". */
+static long long http_remaining_ms(const HttpDeadline* d) {
+  long long left_us = d->deadline_us - time_now_micros();
+  if (left_us <= 0) return 0;
+  long long ms = left_us / 1000LL;
+  return ms > 0 ? ms : 1;
+}
+
+/* Everything the client holds in MALLOC'D memory across a park. A pointer to one of these is handed
+ * to the scheduler for the duration of each park, so a with_timeout expiry or scope_cancel that
+ * force-drops the task frees it instead of leaking it.
+ *
+ * This is exposure created BY making the client park, not a pre-existing bug: a task that never
+ * parks is never suspended in the poller and so is never a force_drop_task candidate. The response
+ * buffer is what makes a hook necessary at all rather than the standing "keep it on the task stack"
+ * rule — it grows across arbitrarily many parks and cannot live in a fixed stack slot.
+ *
+ * Fields are filled in as the request acquires them, and read only at drop time, so a NULL field
+ * simply means "not acquired yet". `request` is nulled by the caller once it hands the buffer back,
+ * which is what stops a later park from freeing it twice. */
+typedef struct {
+  ByteBuf* request;
+  ByteBuf* response;
+  HttpUrl* url;
+  /* SecureTransport context, or NULL. Typed void* because SSLContextRef exists only under
+   * __APPLE__ while this struct is shared by both paths. The TLS handshake parks across several
+   * round trips, so a cancel there must dispose the context as well as the buffers. */
+  void* tls_ctx;
+} HttpInFlight;
+
+static void http_release_in_flight(void* p) {
+  HttpInFlight* f = (HttpInFlight*)p;
+  if (f->request != NULL) free(f->request->data);
+  if (f->response != NULL) free(f->response->data);
+  if (f->url != NULL) free_http_url(f->url);
+#ifdef __APPLE__
+  if (f->tls_ctx != NULL) SSLDisposeContext((SSLContextRef)f->tls_ctx);
+#endif
+}
+
+/* Park until `fd` is ready for `interest`, bounded by what is left of the request budget.
+ * Returns 1 = ready, 0 = the budget is gone (or the poller could not arm the timer).
+ *
+ * Parks via the UNOWNED-fd entry point at every site, not just the connect: the client's socket is
+ * never installed in g_conn_fd, so from a cancel-drop's point of view the parked frame is its only
+ * reference for the whole request, exactly as it is for tcp_connect's in-flight handshake.
+ *
+ * The cancel hook is armed HERE, around the park itself, rather than once around the whole request.
+ * The two are equivalent — a task can only be force-dropped while parked — but this way there is no
+ * exit path that can forget to clear it, which matters because the TLS path alone returns from
+ * eight places. `f` may be NULL for a park with nothing to release. */
+static int http_park(int fd, int interest, const HttpDeadline* d, HttpInFlight* f) {
+  long long ms = http_remaining_ms(d);
+  if (ms <= 0) return 0;
+  if (f != NULL) scheduler_set_park_cleanup(http_release_in_flight, f);
+  int ready = scheduler_park_on_unowned_fd_timeout(fd, interest, ms);
+  if (f != NULL) scheduler_set_park_cleanup(NULL, NULL);
+  return ready;
+}
+
+/* Resolved addresses, copied out of getaddrinfo's MALLOC'D list.
+ *
+ * The copy is not tidiness: force_drop_task frees a parked task's green stack but knows nothing
+ * about an addrinfo list, so anything held across a park has to live on the task stack or it leaks
+ * on every cancelled request. Same reasoning and same bound as tcp_connect — a dual-stack host
+ * returns 2-4 candidates, and a connect that has failed 8 addresses will fail the 9th. */
+#define HTTP_MAX_CANDIDATES 8
+
+typedef struct {
+  struct sockaddr_storage addr;
+  socklen_t len;
+  int family, socktype, protocol;
+} HttpCandidate;
+
+/* Returns the candidate count (possibly 0), or -1 with *out_gai set to the getaddrinfo error.
+ *
+ * NOTE: getaddrinfo itself is still a BLOCKING call that freezes the scheduler for the duration of
+ * the lookup. That is a separate defect with its own fix (a resolver thread or an in-Sprout DNS
+ * client) and is tracked in BACKLOG.md; it is out of scope here, which is why this function
+ * resolves up front rather than pretending to be async. */
+static int http_resolve(const char* host, const char* port, HttpCandidate* out, int* out_gai) {
+  struct addrinfo hints;
+  memset(&hints, 0, sizeof(hints));
+  hints.ai_socktype = SOCK_STREAM;
+  hints.ai_family = AF_UNSPEC;
+  struct addrinfo* infos = NULL;
+  int gai = getaddrinfo(host, port, &hints, &infos);
+  if (gai != 0) {
+    *out_gai = gai;
+    return -1;
+  }
+  int n = 0;
+  for (struct addrinfo* it = infos; it != NULL && n < HTTP_MAX_CANDIDATES; it = it->ai_next) {
+    if (it->ai_addrlen > sizeof(out[n].addr)) continue;
+    memcpy(&out[n].addr, it->ai_addr, it->ai_addrlen);
+    out[n].len      = it->ai_addrlen;
+    out[n].family   = it->ai_family;
+    out[n].socktype = it->ai_socktype;
+    out[n].protocol = it->ai_protocol;
+    n++;
+  }
+  freeaddrinfo(infos);
+  *out_gai = 0;
+  return n;
+}
+
+typedef enum {
+  HTTP_CONNECT_OK = 0,
+  HTTP_CONNECT_FAILED = 1,
+  HTTP_CONNECT_TIMEOUT = 2
+} HttpConnectOutcome;
+
+/* Connect to the first candidate that answers, without ever blocking the OS thread.
+ *
+ * The socket goes non-blocking BEFORE connect (as tcp_connect does), so an unresponsive peer parks
+ * the green task instead of freezing the scheduler for the kernel's own connect timeout. After
+ * EINPROGRESS/EINTR the handshake completes asynchronously and must be awaited via WRITABILITY —
+ * calling connect() again would report EALREADY/EISCONN rather than retrying — and the outcome then
+ * comes from SO_ERROR, not errno, because the fd reads as "ready" for success and failure alike.
+ *
+ * Leaves the fd non-blocking on success: that is exactly what the send/recv parks below need. */
+static HttpConnectOutcome http_connect(const HttpCandidate* cand, int ncand, const HttpDeadline* d,
+                                       HttpInFlight* f, int* out_fd, const char** out_msg) {
+  const char* msg = ncand > 0 ? "connect failed" : "no addresses for host";
+  for (int i = 0; i < ncand; i++) {
+    int fd = socket(cand[i].family, cand[i].socktype, cand[i].protocol);
+    if (fd < 0) {
+      msg = strerror(errno);   /* e.g. EMFILE — report it rather than "connect failed" */
+      continue;
+    }
+    tcp_set_nonblocking(fd);
+    if (connect(fd, (const struct sockaddr*)&cand[i].addr, cand[i].len) == 0) {
+      *out_fd = fd;
+      return HTTP_CONNECT_OK;
+    }
+    if (errno == EINPROGRESS || errno == EINTR) {
+      if (!http_park(fd, SPROUT_POLL_WRITE, d, f)) {
+        /* The budget, not this address, is what ran out — trying the next candidate would have no
+         * time to succeed either, so report the timeout rather than burning through the list. */
+        close(fd);
+        *out_msg = "connect timed out";
+        return HTTP_CONNECT_TIMEOUT;
+      }
+      int soerr = 0;
+      socklen_t soerr_len = (socklen_t)sizeof(soerr);
+      if (getsockopt(fd, SOL_SOCKET, SO_ERROR, &soerr, &soerr_len) < 0) soerr = errno;
+      if (soerr == 0) {
+        *out_fd = fd;
+        return HTTP_CONNECT_OK;
+      }
+      msg = strerror(soerr);
+    } else {
+      msg = strerror(errno);
+    }
+    close(fd);
+  }
+  *out_msg = msg;
+  return HTTP_CONNECT_FAILED;
+}
+
+typedef enum {
+  HTTP_IO_OK = 0,
+  HTTP_IO_ERRNO = 1,
+  HTTP_IO_TIMEOUT = 2
+} HttpIoOutcome;
+
+/* Write the whole request, parking on write-readiness whenever the kernel takes nothing.
+ *
+ * Unlike tcp_send_all's idle bound there is no re-arming on progress: the budget is the total one,
+ * so once http_park reports it gone there is nothing left to retry with and the timeout is final. */
+static HttpIoOutcome http_send_all(int fd, const char* data, size_t len, const HttpDeadline* d,
+                                   HttpInFlight* f, int* out_errno) {
+  size_t offset = 0;
+  while (offset < len) {
+    ssize_t n = send(fd, data + offset, len - offset, 0);
+    if (n > 0) {
+      offset += (size_t)n;
+      continue;
+    }
+    if (n == 0) { *out_errno = errno; return HTTP_IO_ERRNO; }
+    if (errno == EINTR) continue;
+    if (errno != EAGAIN && errno != EWOULDBLOCK) { *out_errno = errno; return HTTP_IO_ERRNO; }
+    if (!http_park(fd, SPROUT_POLL_WRITE, d, f)) { *out_errno = ETIMEDOUT; return HTTP_IO_TIMEOUT; }
+  }
+  return HTTP_IO_OK;
+}
+
+
 #ifdef __APPLE__
 static unsigned char* read_binary_file(const char* path, size_t* out_len) {
   FILE* f = fopen(path, "rb");
@@ -6805,7 +7029,24 @@ static int tls_uses_custom_ca_anchor(void) {
 typedef struct {
   int fd;
   int last_errno;
+  /* Which direction the socket last refused, so a park waits on the right one. SecureTransport
+   * reports only "would block" and never says which way; the IO callbacks below are the only place
+   * that knows, so they record it. */
+  int last_interest;
+  const HttpDeadline* deadline;
+  int timed_out;              /* 1 once a park has consumed the whole request budget */
+  HttpInFlight* in_flight;    /* released if a cancel force-drops this task mid-handshake */
 } TlsConn;
+
+/* Wait for whichever direction SecureTransport last blocked on, bounded by the remaining budget.
+ * Returns 1 = retry the SSL call, 0 = the budget is gone (and records that, since the SSL call
+ * itself can only report the undifferentiated errSSLWouldBlock). */
+static int tls_park(TlsConn* conn) {
+  int interest = conn->last_interest != 0 ? conn->last_interest : SPROUT_POLL_READ;
+  if (http_park(conn->fd, interest, conn->deadline, conn->in_flight)) return 1;
+  conn->timed_out = 1;
+  return 0;
+}
 
 static OSStatus tls_read_func(SSLConnectionRef connection, void* data, size_t* dataLength) {
   TlsConn* conn = (TlsConn*)(uintptr_t)connection;
@@ -6822,7 +7063,10 @@ static OSStatus tls_read_func(SSLConnectionRef connection, void* data, size_t* d
     if (errno == EINTR) continue;
     conn->last_errno = errno;
     *dataLength = 0;
-    if (errno == EAGAIN || errno == EWOULDBLOCK) return errSSLWouldBlock;
+    if (errno == EAGAIN || errno == EWOULDBLOCK) {
+      conn->last_interest = SPROUT_POLL_READ;
+      return errSSLWouldBlock;
+    }
     return errSSLClosedAbort;
   }
   conn->last_errno = 0;
@@ -6850,7 +7094,10 @@ static OSStatus tls_write_func(SSLConnectionRef connection, const void* data, si
     if (errno == EINTR) continue;
     conn->last_errno = errno;
     *dataLength = 0;
-    if (errno == EAGAIN || errno == EWOULDBLOCK) return errSSLWouldBlock;
+    if (errno == EAGAIN || errno == EWOULDBLOCK) {
+      conn->last_interest = SPROUT_POLL_WRITE;
+      return errSSLWouldBlock;
+    }
     return errSSLClosedAbort;
   }
   conn->last_errno = 0;
@@ -6863,7 +7110,12 @@ static OSStatus tls_write_func(SSLConnectionRef connection, const void* data, si
   return noErr;
 }
 
-static int tls_status_timed_out(const TlsConn* conn) {
+/* EAGAIN from the socket. The predicate is unchanged but its MEANING has shifted with the socket:
+ * on the old blocking fd, EAGAIN could only mean "SO_RCVTIMEO expired", so it was a timeout; on a
+ * non-blocking fd it means "nothing available right now", so it is a signal to PARK. Renamed from
+ * `tls_status_timed_out` to keep that distinction visible — the timeout is now `conn->timed_out`,
+ * set only once a park has consumed the whole budget. */
+static int tls_status_would_block(const TlsConn* conn) {
   return conn != NULL && (conn->last_errno == EAGAIN || conn->last_errno == EWOULDBLOCK);
 }
 
@@ -6907,7 +7159,11 @@ static OSStatus tls_write_all(SSLContextRef ctx, TlsConn* conn, const char* data
     if (status == noErr) continue;
     if (tls_status_is_auth_event(status)) continue;
     if (status == errSSLWouldBlock) {
-      if (written == 0 && tls_status_timed_out(conn)) return status;
+      /* `written > 0` is progress: retry immediately. Only a call that moved NOTHING because the
+       * socket refused waits — and it waits by parking, where it used to spin (the old spin was
+       * harmless only because the blocking recv underneath did the waiting; on a non-blocking fd
+       * the same `continue` would burn a core). */
+      if (written == 0 && tls_status_would_block(conn) && !tls_park(conn)) return status;
       continue;
     }
     return status;
@@ -6931,56 +7187,51 @@ static OSStatus tls_read_append(SSLContextRef ctx, TlsConn* conn, ByteBuf* respo
       return response->len > 0 ? noErr : status;
     }
     if (status == errSSLWouldBlock) {
-      if (chunk_len == 0 && tls_status_timed_out(conn)) return status;
+      /* Same rule as the write side: bytes delivered means retry, nothing delivered means park. */
+      if (chunk_len == 0 && tls_status_would_block(conn) && !tls_park(conn)) return status;
       continue;
     }
     return status;
   }
 }
 
-static long long http_request_tls(HttpUrl* parsed, const char* request_data, size_t request_len, long long timeout_ms) {
-  struct addrinfo hints;
-  memset(&hints, 0, sizeof(hints));
-  hints.ai_socktype = SOCK_STREAM;
-  hints.ai_family = AF_UNSPEC;
-  struct addrinfo* infos = NULL;
-  int gai = getaddrinfo(parsed->host, parsed->port, &hints, &infos);
-  if (gai != 0) {
+/* `request` is borrowed, not owned: the caller frees it on return. It is listed in `in_flight` only
+ * so that a cancel WHILE PARKED — which never returns to the caller — still releases it. */
+static long long http_request_tls(HttpUrl* parsed, ByteBuf* request, const HttpDeadline* deadline) {
+  HttpCandidate cand[HTTP_MAX_CANDIDATES];
+  int gai = 0;
+  int ncand = http_resolve(parsed->host, parsed->port, cand, &gai);
+  if (ncand < 0) {
     return http_err_text("stdlib.http.HttpNetwork", gai_strerror(gai));
   }
 
+  /* `response` and `tls_ctx` are filled in below as they are acquired; until then they are NULL and
+   * the hook simply skips them. */
+  HttpInFlight in_flight = {request, NULL, parsed, NULL};
+
   int fd = -1;
-  int last_errno = 0;
-  for (struct addrinfo* it = infos; it != NULL; it = it->ai_next) {
-    fd = socket(it->ai_family, it->ai_socktype, it->ai_protocol);
-    if (fd < 0) {
-      last_errno = errno;
-      continue;
-    }
-    struct timeval tv;
-    tv.tv_sec = (time_t)(timeout_ms / 1000);
-    tv.tv_usec = (suseconds_t)((timeout_ms % 1000) * 1000);
-    setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
-    setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof(tv));
-    if (connect(fd, it->ai_addr, it->ai_addrlen) == 0) break;
-    last_errno = errno;
-    close(fd);
-    fd = -1;
-  }
-  freeaddrinfo(infos);
-  if (fd < 0) {
-    if (last_errno == EAGAIN || last_errno == EWOULDBLOCK) return http_err0("stdlib.http.HttpTimeout");
-    return http_err_text("stdlib.http.HttpNetwork", strerror(last_errno));
+  const char* connect_msg = NULL;
+  HttpConnectOutcome connected = http_connect(cand, ncand, deadline, &in_flight, &fd, &connect_msg);
+  if (connected != HTTP_CONNECT_OK) {
+    if (connected == HTTP_CONNECT_TIMEOUT) return http_err0("stdlib.http.HttpTimeout");
+    return http_err_text("stdlib.http.HttpNetwork", connect_msg);
   }
 
-  TlsConn tls = {.fd = fd, .last_errno = 0};
+  /* No SO_RCVTIMEO/SO_SNDTIMEO any more: the socket is non-blocking, so those options can never
+   * fire, and the whole request is bounded by `deadline` at every park instead. That is also the
+   * bug fix — the old options did not bound connect() on macOS at all. */
+  TlsConn tls = {.fd = fd, .last_errno = 0, .last_interest = 0, .deadline = deadline,
+                 .timed_out = 0, .in_flight = &in_flight};
   int use_custom_ca = tls_uses_custom_ca_anchor();
-  tls_debug_log("connect host=%s port=%s timeout_ms=%lld custom_ca=%s", parsed->host, parsed->port, timeout_ms, use_custom_ca ? "yes" : "no");
+  tls_debug_log("connect host=%s port=%s budget_ms=%lld custom_ca=%s", parsed->host, parsed->port, http_remaining_ms(deadline), use_custom_ca ? "yes" : "no");
   SSLContextRef ctx = SSLCreateContext(NULL, kSSLClientSide, kSSLStreamType);
   if (ctx == NULL) {
     close(fd);
     return http_err_text("stdlib.http.HttpNetwork", "tls context creation failed");
   }
+  /* From here on a cancel must dispose the context too. Every SSLDisposeContext below is
+   * immediately followed by a return, so no park can observe a disposed context. */
+  in_flight.tls_ctx = ctx;
   OSStatus status = SSLSetIOFuncs(ctx, tls_read_func, tls_write_func);
   tls_debug_log("manual_trust=%d", use_custom_ca ? 1 : 0);
   if (status == noErr && use_custom_ca) status = SSLSetSessionOption(ctx, kSSLSessionOptionBreakOnServerAuth, true);
@@ -6992,7 +7243,9 @@ static long long http_request_tls(HttpUrl* parsed, const char* request_data, siz
       status = SSLHandshake(ctx);
       if (status == noErr) break;
       if (status == errSSLWouldBlock) {
-        if (tls_status_timed_out(&tls)) {
+        /* The handshake is several round trips, so this is the loop that used to hold the OS
+         * thread longest against a slow or unreachable TLS peer. It now parks per round trip. */
+        if (tls_status_would_block(&tls) && !tls_park(&tls)) {
           SSLDisposeContext(ctx);
           close(fd);
           return http_err0("stdlib.http.HttpTimeout");
@@ -7033,8 +7286,8 @@ static long long http_request_tls(HttpUrl* parsed, const char* request_data, siz
     );
   }
 
-  status = tls_write_all(ctx, &tls, request_data, request_len);
-  if (status == errSSLWouldBlock && tls_status_timed_out(&tls)) {
+  status = tls_write_all(ctx, &tls, request->data, request->len);
+  if (status == errSSLWouldBlock && tls.timed_out) {
     SSLDisposeContext(ctx);
     close(fd);
     return http_err0("stdlib.http.HttpTimeout");
@@ -7050,10 +7303,11 @@ static long long http_request_tls(HttpUrl* parsed, const char* request_data, siz
 
   ByteBuf response;
   buf_init(&response);
+  in_flight.response = &response;   /* grows across every read park below */
   status = tls_read_append(ctx, &tls, &response);
   SSLDisposeContext(ctx);
   close(fd);
-  if (status == errSSLWouldBlock && tls_status_timed_out(&tls)) {
+  if (status == errSSLWouldBlock && tls.timed_out) {
     free(response.data);
     return http_err0("stdlib.http.HttpTimeout");
   }
@@ -7096,16 +7350,6 @@ static void append_header_block(ByteBuf* out, const char* raw) {
   }
 }
 
-static int send_all(int fd, const char* data, size_t len) {
-  while (len > 0) {
-    ssize_t wrote = send(fd, data, len, 0);
-    if (wrote <= 0) return 0;
-    data += wrote;
-    len -= (size_t)wrote;
-  }
-  return 1;
-}
-
 long long http_request(const char* method, const char* url, const char* headers_raw, const char* body, long long timeout_ms) {
   if (method == NULL) tcp_fail("http_request: null method");
   if (url == NULL) tcp_fail("http_request: null url");
@@ -7143,9 +7387,12 @@ long long http_request(const char* method, const char* url, const char* headers_
   free(method_upper);
   free(header_block.data);
 
+  /* One budget for the whole call, stamped before the first network operation. */
+  HttpDeadline deadline = http_deadline_start(timeout_ms);
+
 #ifdef __APPLE__
   if (parsed.use_tls) {
-    long long out = http_request_tls(&parsed, request.data, request.len, timeout_ms);
+    long long out = http_request_tls(&parsed, &request, &deadline);
     free(request.data);
     free_http_url(&parsed);
     return out;
@@ -7161,77 +7408,85 @@ long long http_request(const char* method, const char* url, const char* headers_
   }
 #endif
 
-  struct addrinfo hints;
-  memset(&hints, 0, sizeof(hints));
-  hints.ai_socktype = SOCK_STREAM;
-  hints.ai_family = AF_UNSPEC;
-  struct addrinfo* infos = NULL;
-  int gai = getaddrinfo(parsed.host, parsed.port, &hints, &infos);
-  if (gai != 0) {
+  HttpCandidate cand[HTTP_MAX_CANDIDATES];
+  int gai = 0;
+  int ncand = http_resolve(parsed.host, parsed.port, cand, &gai);
+  if (ncand < 0) {
     free(request.data);
     free_http_url(&parsed);
     return http_err_text("stdlib.http.HttpNetwork", gai_strerror(gai));
   }
 
-  int fd = -1;
-  int last_errno = 0;
-  for (struct addrinfo* it = infos; it != NULL; it = it->ai_next) {
-    fd = socket(it->ai_family, it->ai_socktype, it->ai_protocol);
-    if (fd < 0) {
-      last_errno = errno;
-      continue;
-    }
-    struct timeval tv;
-    tv.tv_sec = (time_t)(timeout_ms / 1000);
-    tv.tv_usec = (suseconds_t)((timeout_ms % 1000) * 1000);
-    setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
-    setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof(tv));
-    if (connect(fd, it->ai_addr, it->ai_addrlen) == 0) break;
-    last_errno = errno;
-    close(fd);
-    fd = -1;
-  }
-  freeaddrinfo(infos);
-  if (fd < 0) {
-    free(request.data);
-    free_http_url(&parsed);
-    if (last_errno == EAGAIN || last_errno == EWOULDBLOCK) return http_err0("stdlib.http.HttpTimeout");
-    return http_err_text("stdlib.http.HttpNetwork", strerror(last_errno));
-  }
-
-  if (!send_all(fd, request.data, request.len)) {
-    int send_errno = errno;
-    free(request.data);
-    close(fd);
-    free_http_url(&parsed);
-    if (send_errno == EAGAIN || send_errno == EWOULDBLOCK) return http_err0("stdlib.http.HttpTimeout");
-    return http_err_text("stdlib.http.HttpNetwork", strerror(send_errno));
-  }
-  free(request.data);
-
   ByteBuf response;
   buf_init(&response);
+  /* Handed to each park below, so a force-drop while suspended releases these instead of leaking
+   * them. Not armed here and cleared at every exit: http_park arms it around the park itself, which
+   * is the only window in which a drop can happen, and leaves no exit path able to forget it. */
+  HttpInFlight in_flight = {&request, &response, &parsed, NULL};
+
+  int fd = -1;
+  const char* connect_msg = NULL;
+  HttpConnectOutcome connected = http_connect(cand, ncand, &deadline, &in_flight, &fd, &connect_msg);
+  if (connected != HTTP_CONNECT_OK) {
+    free(request.data);
+    free_http_url(&parsed);
+    if (connected == HTTP_CONNECT_TIMEOUT) return http_err0("stdlib.http.HttpTimeout");
+    return http_err_text("stdlib.http.HttpNetwork", connect_msg);
+  }
+
+  int send_errno = 0;
+  HttpIoOutcome sent = http_send_all(fd, request.data, request.len, &deadline, &in_flight, &send_errno);
+  free(request.data);
+  /* Handed back to this frame: null it so a force-drop at one of the READ parks below does not free
+   * it a second time. This is the one field the hook cannot infer for itself. */
+  request.data = NULL;
+  request.len = 0;
+  in_flight.request = NULL;
+  if (sent != HTTP_IO_OK) {
+    close(fd);
+    free_http_url(&parsed);
+    if (sent == HTTP_IO_TIMEOUT) return http_err0("stdlib.http.HttpTimeout");
+    return http_err_text("stdlib.http.HttpNetwork", strerror(send_errno));
+  }
+
   while (1) {
     char chunk[4096];
     ssize_t n = recv(fd, chunk, sizeof(chunk), 0);
     if (n == 0) break;
-    if (n < 0) {
-      int recv_errno = errno;
-      int saw_no_response = response.len == 0;
+    if (n > 0) {
+      /* Deliberately NO re-arming of the deadline here. Re-stamping it on progress is what would
+       * make this an idle bound, and a peer that drips forever would then hold the request open
+       * forever. Confirmed by negative control: with a re-stamp on this line, a 400 ms request
+       * against a 3 s drip returns after 3123 ms. */
+      buf_append_bytes(&response, chunk, (size_t)n);
+      continue;
+    }
+    if (errno == EINTR) continue;
+    if (errno == EAGAIN || errno == EWOULDBLOCK) {
+      /* Nothing to read yet — park instead of returning. EAGAIN used to BE the timeout here,
+       * because SO_RCVTIMEO was the only thing that could produce it on a blocking socket; on a
+       * non-blocking socket it means "not yet", and only the exhausted budget ends the read. */
+      if (http_park(fd, SPROUT_POLL_READ, &deadline, &in_flight)) continue;
       free(response.data);
       close(fd);
       free_http_url(&parsed);
-      if (recv_errno == EAGAIN || recv_errno == EWOULDBLOCK) return http_err0("stdlib.http.HttpTimeout");
-      if (recv_errno == ECONNRESET && saw_no_response) {
-        return http_err_text(
-          "stdlib.http.HttpNetwork",
-          "remote closed connection without response"
-        );
-      }
-      return http_err_text("stdlib.http.HttpNetwork", strerror(recv_errno));
+      return http_err0("stdlib.http.HttpTimeout");
     }
-    buf_append_bytes(&response, chunk, (size_t)n);
+    int recv_errno = errno;
+    int saw_no_response = response.len == 0;
+    free(response.data);
+    close(fd);
+    free_http_url(&parsed);
+    if (recv_errno == ECONNRESET && saw_no_response) {
+      return http_err_text(
+        "stdlib.http.HttpNetwork",
+        "remote closed connection without response"
+      );
+    }
+    return http_err_text("stdlib.http.HttpNetwork", strerror(recv_errno));
   }
+  /* No hook to clear: http_park cleared it on the way out of the last park, and nothing below
+   * parks. http_response_result allocates GC objects and takes ownership of the response buffer. */
   close(fd);
   free_http_url(&parsed);
   return http_response_result(response.data, response.len);
