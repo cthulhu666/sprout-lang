@@ -1,0 +1,76 @@
+import stdlib.task (TimeoutResult, Completed, Expired, with_timeout, task_sleep)
+import stdlib.net (TcpConnection, connect, close)
+import stdlib.string as string
+
+# Cancelling a task mid-DNS-resolve must not hang, crash, or corrupt state — this is the first OS
+# thread in the runtime (finding 10), and cancellation is the delicate path: a force-drop closes the
+# pipe read end (Task.park_close_fd) and drops the task's refcount (dns_abandon park_cleanup) while a
+# detached resolver thread is STILL running and will independently write the pipe (EPIPE, ignored),
+# close its end, and drop its ref. A refcount bug would double-free or use-after-free the DnsRequest
+# (crash); a cancellation that failed to unpark would hang.
+#
+# WHAT THIS ASSERTS, AND WHAT IT DELIBERATELY DOES NOT. It drives many mid-resolve force-drops and
+# requires the process to COMPLETE them all without hanging (perl alarm in the recipe) or crashing
+# (non-zero exit / missing marker) — that is the coverage of the new thread + refcount + park_cleanup
+# machinery. It does NOT assert an exact force-drop count against a tight `ulimit`. An earlier revision
+# did, and flaked twice on CI macOS (77/80, then 39/40): the fix legitimately falls back to a
+# SYNCHRONOUS resolve when a pipe()/pthread_create transiently fails under a loaded runner's high fd
+# baseline, and a synchronous resolve blocks past the 10 ms deadline so the attempt reads `Completed`
+# instead of `Expired`. That fallback is correct behavior, not a bug, and cannot be suppressed on a
+# shared runner — so both outcomes are accepted here. The pipe-fd close on force-drop is the SAME
+# park_close_fd mechanism that tests/task_io_smoke/http_request_cancel_drop.spr already covers
+# deterministically (an unowned socket fd); this fixture is the DNS-thread-lifetime half.
+#
+# The `Expired` floor (>= two-thirds) still confirms the async cancellation path is actually exercised
+# — if async_resolve were broken into always-synchronous, nearly every attempt would be `Completed`
+# and the floor would catch it — while tolerating the handful of legitimate fallbacks a loaded runner
+# produces. Serialized (a drain sleep > the resolve delay) so at most one resolver thread is in flight.
+#
+# The connect target has nothing listening; the resolve is abandoned before the connect syscall is
+# reached. Hermetic — no peer, no network.
+fn port() -> Int = 28994
+
+fn resolve_once() -> Bool !{IO} =
+  match connect("localhost", port()) with
+  | Ok conn ->
+      do
+        close(conn)
+        true
+  | Err _ -> true
+
+# 10 ms deadline against a 40 ms resolve delay (4x margin): a healthy attempt parks and is force-
+# dropped `Expired`. `Completed` means the resolve ran synchronously (the resource-pressure fallback)
+# — accepted, but counted separately so the floor below can confirm cancellation is really happening.
+fn run_attempt() -> Int !{IO} =
+  match with_timeout(10, \_ -> resolve_once()) with
+  | Expired -> 1
+  | Completed _ -> 0
+
+fn attempts() -> Int = 60
+
+# Two-thirds of attempts must be genuine mid-resolve force-drops; the rest may be legitimate fallback.
+fn floor() -> Int = 40
+
+# Drain the detached resolver thread (task_sleep(50) > the 40 ms delay) before the next attempt, so at
+# most one thread is ever in flight.
+fn drive(remaining: Int, expired: Int) -> Int !{IO} =
+  if remaining <= 0 then expired
+  else
+    do
+      e <- run_attempt()
+      task_sleep(50)
+      drive(remaining - 1, expired + e)
+
+fn report(expired: Int) -> Unit !{IO} =
+  if expired >= floor() then term_write("dns-cancel-drop-ok\n")
+  else
+    term_write(
+      string.concat(
+        "dns-cancel-drop FAILED: only ",
+        string.concat(int_to_string(expired), string.concat(" of ", string.concat(int_to_string(attempts()), " attempts were force-dropped (async cancellation path may be broken)\n")))
+      )
+    )
+
+fn main() -> Unit !{IO} =
+  do
+    report(drive(attempts(), 0))

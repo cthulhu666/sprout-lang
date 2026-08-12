@@ -1772,7 +1772,26 @@ task-io-smoke: bootstrap-from-seed
   # clean), and this fixture's value is the liveness measurement, which stress does not sharpen.
   build tests/task_io_smoke/http_header_lower_parks.spr
   run_once "http-header-lower-parks" "scheduler stayed live"
-  echo "==> task-io-smoke ✓ (read-park, accept-park, re-arm, http-serve-concurrency, http-conn-error-isolation, tcp-read-some-bad-args, write, cancel-drop, await-guard, timer-drop, timeout-drop, timeout-nested-guard, chan-cancel-drop, chan-timeout-drop, chan-negative-cap-guard, rendezvous-send-drop, send-on-closed-guard, double-close-guard, send-parked-close-guard, select-cancel-drop, select-timeout-drop, connect-park, http-idle-timeout, http-header-flood, http-write-timeout, http-body-timeout, http-body-bounds, http-pooled-serve, read-poll-once, read-deadline-loses-to-data, http-utf8-body, http-binary-body, tcp-accept-bad-handle, http-accept-exhaustion, tcp-nul-payload, http-request-parks, http-request-total-deadline, http-cancel-drop, http-header-lower-parks; interleaved; stress-clean)"
+  # (32) finding 10: resolving a NAME must PARK, not block the OS thread. getaddrinfo is opaque
+  # blocking libc, so on the unfixed runtime a lookup freezes every green task. async_resolve runs it
+  # on a detached thread and parks the caller on a pipe. The probe is a sibling on a 50 ms timer while
+  # the main task resolves "localhost" with the resolve slowed 1000 ms via SPROUT_DNS_RESOLVE_DELAY_MS
+  # (a test seam honored on both the sync and threaded paths). RED = "scheduler FROZEN" (~1006 ms
+  # measured); one-sided, 500 ms threshold. Numeric-host connects across the other fixtures cover the
+  # Option C inet_pton fast path.
+  build tests/task_io_smoke/dns_resolve_parks.spr
+  SPROUT_DNS_RESOLVE_DELAY_MS=1000 run_once "dns-resolve-parks" "scheduler stayed live"
+  # (32b) Cancelling a task mid-resolve must not hang or crash — the delicate path, since this is the
+  # first OS thread in the runtime (a refcount bug would double-free/UAF the DnsRequest; a broken
+  # unpark would hang). delay=40 keeps the resolve parked when the 10 ms with_timeout force-drops it.
+  # NO tight ulimit and BOTH outcomes accepted: the synchronous fallback fires legitimately when a
+  # loaded runner's pipe()/pthread_create transiently fails, flipping Expired->Completed, and cannot
+  # be suppressed on a shared runner (earlier fd-budget versions flaked 77/80 then 39/40 on CI macOS).
+  # The pipe-fd close on drop is covered deterministically by http-cancel-drop; this is the DNS-thread-
+  # lifetime half — it requires completing all 60 force-drops with no hang/crash, floor >= 40 Expired.
+  build tests/task_io_smoke/dns_resolve_cancel_drop.spr
+  SPROUT_DNS_RESOLVE_DELAY_MS=40 run_once "dns-cancel-drop" "dns-cancel-drop-ok"
+  echo "==> task-io-smoke ✓ (read-park, accept-park, re-arm, http-serve-concurrency, http-conn-error-isolation, tcp-read-some-bad-args, write, cancel-drop, await-guard, timer-drop, timeout-drop, timeout-nested-guard, chan-cancel-drop, chan-timeout-drop, chan-negative-cap-guard, rendezvous-send-drop, send-on-closed-guard, double-close-guard, send-parked-close-guard, select-cancel-drop, select-timeout-drop, connect-park, http-idle-timeout, http-header-flood, http-write-timeout, http-body-timeout, http-body-bounds, http-pooled-serve, read-poll-once, read-deadline-loses-to-data, http-utf8-body, http-binary-body, tcp-accept-bad-handle, http-accept-exhaustion, tcp-nul-payload, http-request-parks, http-request-total-deadline, http-cancel-drop, http-header-lower-parks, dns-resolve-parks, dns-cancel-drop; interleaved; stress-clean)"
 
 # ── Linux gate (local, container-backed) ──────────────────────────────────────
 #
