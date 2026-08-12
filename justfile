@@ -1909,12 +1909,25 @@ linux-run *ARGS: _linux-just
 # the fix the runtime re-measured the body with strlen, so `AAAA\0BBBB...` arrived as 4 bytes and an
 # `Ok`, and the chunked path failed outright with "truncated chunk data".
 #
-# Its own recipe rather than a tests/task_io_smoke fixture because it needs a peer PROCESS: the
-# `http_request` builtin is blocking, so a Sprout server task and a Sprout client in one process
-# deadlock. Uses python3, which scripts/seed_gate.sh already assumes.
+# Its own recipe rather than a tests/task_io_smoke fixture because it drives the client from a peer
+# PROCESS with its own scheduler, so a body split across several kernel reads is a matter of real
+# socket timing. (That split was once forced — a blocking `http_request` deadlocked a Sprout server
+# task against a Sprout client in one process — and is now kept for the coverage it buys.) The peer
+# is the fixture itself, run in a second role by argv, so the gate has no external dependency.
 [group('test')]
 http-client-binary-gate: bootstrap-from-seed
   SPROUT_STAGE1="{{build_dir}}/compile_driver_bin_stage1" bash scripts/http_client_binary_gate.sh
+
+# The HTTPS client path, against a private CA served by `openssl s_server` — offline and
+# deterministic. macOS-only BY NATURE, not by choice: `http_request_tls` is `#ifdef __APPLE__`, so
+# the Linux CI job cannot even compile it and this was the one client path with no automated
+# coverage of any kind. The script SKIPS (exit 0) off Darwin, which is what makes it safe to list in
+# `gate`; the `macos` CI job is what actually runs it. Asserts the request succeeds, that the pump
+# stays live while the TLS handshake and read are in flight, and — the part that gives the gate its
+# teeth — that the same request FAILS without the anchor.
+[group('test')]
+http-tls-gate: bootstrap-from-seed
+  SPROUT_STAGE1="{{build_dir}}/compile_driver_bin_stage1" bash scripts/http_tls_gate.sh
 
 # The curated Linux gate: the park/timer/socket surface, on the backend CI uses.
 [group('smoke')]
@@ -2511,7 +2524,7 @@ gate-quick: fmt-check test compile-examples-stage1 smoke-shapes bundle-smoke
 # advisory), so it runs in the body rather than as an arg-less dependency.
 # Full CI-parity battery (slow, ~15-25m); a green run means CI will not surprise you.
 [group('gate')]
-gate: fmt-check smoke-shapes bundle-smoke loud-fail-smoke diagnostic-stream-smoke argv-smoke trace-dispatch-smoke verify-dispatch-smoke div-by-zero-smoke stack-overflow-smoke flush-on-crash-smoke tco-runtime-smoke c-runtime-test b1-gate check-approved-builtins verify-bootstrap-fixed-point ir-golden-diff compile-examples-stage1 compile-bench run-example-canary test task-io-smoke http-client-binary-gate test-stress
+gate: fmt-check smoke-shapes bundle-smoke loud-fail-smoke diagnostic-stream-smoke argv-smoke trace-dispatch-smoke verify-dispatch-smoke div-by-zero-smoke stack-overflow-smoke flush-on-crash-smoke tco-runtime-smoke c-runtime-test b1-gate check-approved-builtins verify-bootstrap-fixed-point ir-golden-diff compile-examples-stage1 compile-bench run-example-canary test task-io-smoke http-client-binary-gate http-tls-gate test-stress
   #!/usr/bin/env bash
   set -euo pipefail
   echo "==> gate: gc-safety-check --strict..."
