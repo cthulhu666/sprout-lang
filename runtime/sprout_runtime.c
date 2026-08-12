@@ -21,6 +21,7 @@
 #include <unistd.h>
 #include <execinfo.h>
 #include <pthread.h>
+#include <stdatomic.h>   /* async DNS: refcount + thread-inflight cap across the resolver thread */
 #include <sys/resource.h>
 #include <sys/mman.h>   /* GC arena: reserve address space (PROT_NONE), commit per chunk */
 #include "sprout_scheduler.h"
@@ -6864,7 +6865,27 @@ typedef struct {
  * the lookup. That is a separate defect with its own fix (a resolver thread or an in-Sprout DNS
  * client) and is tracked in BACKLOG.md; it is out of scope here, which is why this function
  * resolves up front rather than pretending to be async. */
-static int http_resolve(const char* host, const char* port, HttpCandidate* out, int* out_gai) {
+/* The blocking core of name resolution: getaddrinfo, copying the candidate list into `out`. Returns
+ * the count (>= 0), or -1 with *out_gai set to the getaddrinfo error. Shared by the synchronous and
+ * the threaded (async_resolve) paths, so both behave identically down to the copy bound.
+ *
+ * SPROUT_DNS_RESOLVE_DELAY_MS is a TEST SEAM (tests/task_io_smoke/dns_resolve_parks.spr): it makes a
+ * lookup measurably slow so a fixture can prove the scheduler stays live during a resolve. Honored on
+ * BOTH paths deliberately, so the fixture is a genuine RED on the synchronous runtime and GREEN once
+ * the delay runs on the resolver thread. Never set in production. */
+static int dns_blocking_resolve(const char* host, const char* port,
+                                HttpCandidate* out, int max, int* out_gai) {
+  const char* delay = getenv("SPROUT_DNS_RESOLVE_DELAY_MS");
+  if (delay != NULL) {
+    long ms = atol(delay);
+    if (ms > 0) {
+      /* Split so no single usleep exceeds the POSIX <1,000,000 us bound (a strict libc EINVALs a
+       * whole-second usleep, which would silently make the delay a no-op — the seam sets 1000 ms). */
+      if (ms >= 1000) sleep((unsigned)(ms / 1000));
+      useconds_t rem = (useconds_t)(ms % 1000) * 1000;
+      if (rem > 0) usleep(rem);
+    }
+  }
   struct addrinfo hints;
   memset(&hints, 0, sizeof(hints));
   hints.ai_socktype = SOCK_STREAM;
@@ -6876,7 +6897,7 @@ static int http_resolve(const char* host, const char* port, HttpCandidate* out, 
     return -1;
   }
   int n = 0;
-  for (struct addrinfo* it = infos; it != NULL && n < HTTP_MAX_CANDIDATES; it = it->ai_next) {
+  for (struct addrinfo* it = infos; it != NULL && n < max; it = it->ai_next) {
     if (it->ai_addrlen > sizeof(out[n].addr)) continue;
     memcpy(&out[n].addr, it->ai_addr, it->ai_addrlen);
     out[n].len      = it->ai_addrlen;
@@ -6888,6 +6909,165 @@ static int http_resolve(const char* host, const char* port, HttpCandidate* out, 
   freeaddrinfo(infos);
   *out_gai = 0;
   return n;
+}
+
+/* ---- Async DNS (finding 10). See docs/async-dns-v0.md. ------------------------------------------
+ * getaddrinfo is opaque blocking libc with no park point, so on the single scheduler thread it freezes
+ * every green task for the whole lookup. This runs it on a short-lived detached OS thread — the FIRST
+ * thread in an otherwise single-threaded runtime — and parks the green task on a pipe meanwhile. The
+ * resolver thread is a PURE-LIBC ISLAND: it touches only the malloc'd DnsRequest, never GC memory and
+ * never g_current_task, so the GC stays effectively single-threaded (a thread that never allocates is
+ * invisible to a cooperative collector). */
+
+#define SPROUT_DNS_THREAD_CAP 64   /* max concurrent resolver threads; past this, resolve synchronously */
+
+typedef struct {
+  char* host;                 /* malloc'd copy, freed on last decref */
+  char* port;
+  HttpCandidate addrs[HTTP_MAX_CANDIDATES];
+  int naddrs;                 /* count (>= 0), or -1 on getaddrinfo error */
+  int gai;                    /* getaddrinfo return when naddrs < 0 */
+  int write_fd;               /* pipe write end, resolver-thread-owned */
+  atomic_int ready;           /* release/acquire anchor: publishes addrs/naddrs/gai across the thread */
+  atomic_int refcount;        /* task + thread; last to reach 0 frees */
+} DnsRequest;
+
+static atomic_int g_dns_threads_inflight = 0;
+
+static void dns_request_decref(DnsRequest* req) {
+  if (atomic_fetch_sub(&req->refcount, 1) == 1) {
+    free(req->host);
+    free(req->port);
+    free(req);
+  }
+}
+
+/* Detached resolver thread. Never allocates GC memory, never touches g_current_task. */
+static void* dns_resolver_thread(void* arg) {
+  DnsRequest* req = (DnsRequest*)arg;
+  req->naddrs = dns_blocking_resolve(req->host, req->port, req->addrs, HTTP_MAX_CANDIDATES, &req->gai);
+  /* Publish the results (release) BEFORE signalling, so the acquiring task sees them. */
+  atomic_store_explicit(&req->ready, 1, memory_order_release);
+  /* Wake the parked green task. Ignore EPIPE: the task was force-dropped and closed the read end. */
+  ssize_t w;
+  do { w = write(req->write_fd, "1", 1); } while (w < 0 && errno == EINTR);
+  (void)w;
+  close(req->write_fd);
+  atomic_fetch_sub(&g_dns_threads_inflight, 1);
+  dns_request_decref(req);
+  return NULL;
+}
+
+/* park_cleanup hook: this task was force-dropped mid-resolve. Drops the task's ref. Must not allocate
+ * or touch GC — it only decrefs (freeing plain heap if last), satisfying the hook contract. The pipe
+ * read end is closed by force_drop_task via park_close_fd. */
+static void dns_abandon(void* arg) {
+  dns_request_decref((DnsRequest*)arg);
+}
+
+/* Option C: a numeric-literal host needs no DNS. Fill out[0] directly from inet_pton, no getaddrinfo
+ * and no thread. Returns 1 on success, -1 if `host` is not a numeric v4/v6 address. */
+static int dns_try_numeric(const char* host, const char* port, HttpCandidate* out, int max) {
+  if (max < 1) return -1;
+  int p = atoi(port);
+  if (p < 1 || p > 65535) return -1;
+  struct in_addr a4;
+  struct in6_addr a6;
+  if (inet_pton(AF_INET, host, &a4) == 1) {
+    struct sockaddr_in* sin = (struct sockaddr_in*)&out[0].addr;
+    memset(sin, 0, sizeof(*sin));
+    sin->sin_family = AF_INET;
+    sin->sin_addr = a4;
+    sin->sin_port = htons((unsigned short)p);
+    out[0].len = sizeof(*sin);
+    out[0].family = AF_INET; out[0].socktype = SOCK_STREAM; out[0].protocol = 0;
+    return 1;
+  }
+  if (inet_pton(AF_INET6, host, &a6) == 1) {
+    struct sockaddr_in6* sin6 = (struct sockaddr_in6*)&out[0].addr;
+    memset(sin6, 0, sizeof(*sin6));
+    sin6->sin6_family = AF_INET6;
+    sin6->sin6_addr = a6;
+    sin6->sin6_port = htons((unsigned short)p);
+    out[0].len = sizeof(*sin6);
+    out[0].family = AF_INET6; out[0].socktype = SOCK_STREAM; out[0].protocol = 0;
+    return 1;
+  }
+  return -1;
+}
+
+/* Resolve host:port into out[0..max), returning the count (>= 0) or -1 with *out_gai set. Runs
+ * getaddrinfo on a detached thread and parks this green task on a pipe meanwhile, so a slow lookup
+ * does not freeze the scheduler. Falls back to a SYNCHRONOUS lookup on this thread when the host is a
+ * numeric literal (no DNS needed), the thread cap is reached, or the pipe/thread cannot be created —
+ * the fallback never spawns a thread and is never worse than the pre-async behavior. */
+static int async_resolve(const char* host, const char* port,
+                         HttpCandidate* out, int max, int* out_gai) {
+  int numeric = dns_try_numeric(host, port, out, max);
+  if (numeric >= 0) { *out_gai = 0; return numeric; }
+
+  DnsRequest* req = (DnsRequest*)calloc(1, sizeof(DnsRequest));
+  if (req != NULL) {
+    req->host = strdup(host);
+    req->port = strdup(port);
+    req->write_fd = -1;
+    if (req->host != NULL && req->port != NULL &&
+        atomic_load(&g_dns_threads_inflight) < SPROUT_DNS_THREAD_CAP) {
+      int pipefds[2] = { -1, -1 };
+      if (pipe(pipefds) == 0) {
+        fcntl(pipefds[0], F_SETFD, FD_CLOEXEC);
+        fcntl(pipefds[1], F_SETFD, FD_CLOEXEC);
+        atomic_store(&req->refcount, 2);
+        req->write_fd = pipefds[1];
+        atomic_fetch_add(&g_dns_threads_inflight, 1);
+        pthread_t th;
+        pthread_attr_t attr;
+        pthread_attr_init(&attr);
+        pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_DETACHED);
+        int spawned = (pthread_create(&th, &attr, dns_resolver_thread, req) == 0);
+        pthread_attr_destroy(&attr);
+        if (spawned) {
+          /* Park on the read end; force_drop_task closes it (park_close_fd) and runs dns_abandon. */
+          scheduler_set_park_cleanup(dns_abandon, req);
+          scheduler_park_on_unowned_fd(pipefds[0], SPROUT_POLL_READ);
+          scheduler_set_park_cleanup(NULL, NULL);
+          /* Consume the resolver thread's completion byte. read() blocks until that write, so this is
+           * the actual completion signal — a spurious readability wake cannot make us proceed early,
+           * and no busy-wait is needed. The acquire-load then pairs with the thread's release store to
+           * order its result writes before the reads below (the byte guarantees ready is already 1). */
+          char done_byte;
+          ssize_t rd;
+          do { rd = read(pipefds[0], &done_byte, 1); } while (rd < 0 && errno == EINTR);
+          (void)rd;
+          (void)atomic_load_explicit(&req->ready, memory_order_acquire);
+          close(pipefds[0]);
+          int n = req->naddrs;           /* read into locals BEFORE decref, which may free req */
+          int g = req->gai;
+          if (n > 0) {
+            int copy = n < max ? n : max;
+            memcpy(out, req->addrs, (size_t)copy * sizeof(HttpCandidate));
+          }
+          dns_request_decref(req);       /* task's ref */
+          *out_gai = g;
+          return n;
+        }
+        /* pthread_create failed: undo the cap bump, close the pipe, fall through to synchronous. */
+        atomic_fetch_sub(&g_dns_threads_inflight, 1);
+        close(pipefds[0]);
+        close(pipefds[1]);
+        req->write_fd = -1;
+      }
+    }
+    free(req->host);
+    free(req->port);
+    free(req);
+  }
+  /* Fallback: resolve on this thread. Never spawns a thread; freezes only this one lookup. */
+  return dns_blocking_resolve(host, port, out, max, out_gai);
+}
+
+static int http_resolve(const char* host, const char* port, HttpCandidate* out, int* out_gai) {
+  return async_resolve(host, port, out, HTTP_MAX_CANDIDATES, out_gai);
 }
 
 typedef enum {
@@ -8853,38 +9033,18 @@ long long tcp_connect(const char* host, long long port) {
   }
   char port_buf[16];
   snprintf(port_buf, sizeof(port_buf), "%lld", port);
-  struct addrinfo hints;
-  memset(&hints, 0, sizeof(hints));
-  hints.ai_family = AF_UNSPEC;
-  hints.ai_socktype = SOCK_STREAM;
-  struct addrinfo* resolved = NULL;
-  int gai = getaddrinfo(host, port_buf, &hints, &resolved);
-  if (gai != 0) {
+  /* Resolve into a candidate list on THIS TASK'S STACK. async_resolve runs getaddrinfo on a detached
+   * thread and parks this task on a pipe meanwhile (so a slow lookup does not freeze the scheduler),
+   * falling back to a synchronous lookup past the thread cap. The list must live on the stack, not in
+   * a malloc'd addrinfo: a later connect parks, a parked task can be force-dropped, and force_drop_task
+   * frees the green stack but knows nothing about an addrinfo list. A dual-stack host returns 2-4
+   * candidates; 8 covers every realistic name, and a connect that failed 8 addresses will fail the 9th. */
+  HttpCandidate cand[HTTP_MAX_CANDIDATES];
+  int gai = 0;
+  int ncand = async_resolve(host, port_buf, cand, HTTP_MAX_CANDIDATES, &gai);
+  if (ncand < 0) {
     return tcp_net_err1("stdlib.net.TcpConnectFailed", (long long)(uintptr_t)gai_strerror(gai));
   }
-
-  /* Materialize the candidate list onto THIS TASK'S STACK, then release the addrinfo before any
-   * connect can park. Rationale: an in-flight connect parks, and a parked task can be force-
-   * dropped (with_timeout / scope_cancel); force_drop_task frees the task's green stack but knows
-   * nothing about a malloc'd addrinfo list, so anything held across the park must live on the
-   * stack or it leaks on every timed-out connect. A dual-stack host returns 2-4 candidates; 8
-   * covers every realistic name, and a connect that has failed 8 addresses will fail the 9th. */
-  struct connect_cand {
-    struct sockaddr_storage addr;
-    socklen_t len;
-    int family, socktype, protocol;
-  } cand[8];
-  int ncand = 0;
-  for (struct addrinfo* it = resolved; it != NULL && ncand < 8; it = it->ai_next) {
-    if (it->ai_addrlen > sizeof(cand[ncand].addr)) continue;
-    memcpy(&cand[ncand].addr, it->ai_addr, it->ai_addrlen);
-    cand[ncand].len      = it->ai_addrlen;
-    cand[ncand].family   = it->ai_family;
-    cand[ncand].socktype = it->ai_socktype;
-    cand[ncand].protocol = it->ai_protocol;
-    ncand++;
-  }
-  freeaddrinfo(resolved);
 
   int fd = -1;
   const char* error_msg = "connect failed";

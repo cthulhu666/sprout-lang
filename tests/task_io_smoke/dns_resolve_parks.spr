@@ -1,0 +1,47 @@
+import stdlib.task (Scope, with_scope, task_spawn, task_sleep)
+import stdlib.net (TcpConnection, connect, close)
+import stdlib.string as string
+
+# Regression (code review, finding 10): resolving a NAME must PARK the green task, never block the OS
+# thread. getaddrinfo(3) is opaque blocking libc with no park point inside it, so while it runs the
+# pump cannot advance any sibling task or fire any timer — one slow DNS lookup freezes every green
+# task in the process.
+#
+# Same one-sided probe as http_request_parks.spr. Spawn order carries the setup:
+#
+#   1. `probe` runs first, stamps t0, parks on a 50 ms timer — control returns to the pump.
+#   2. `caller` runs and connects to a NAME ("localhost", so it goes through getaddrinfo rather than
+#      the numeric-literal fast path), with the resolve deliberately slowed by 1000 ms via the
+#      SPROUT_DNS_RESOLVE_DELAY_MS test seam (honored by both the synchronous and threaded resolve
+#      paths, so this fixture is a genuine RED on the blocking runtime).
+#   3. The pump can only poll once `caller` yields. A blocking getaddrinfo never does, so the probe's
+#      50 ms timer is not serviced until the resolve finishes 1000 ms later.
+#
+# One-sided: a 50 ms sleep may overrun by a few ms, but it can only reach hundreds of ms if the pump
+# was unreachable. 500 ms threshold, 2x margin under the 1000 ms freeze the bug produces. The connect
+# itself is expected to fail (no listener) — the assertion is about the SCHEDULER during the resolve,
+# not about the connection.
+fn probe() -> Unit !{IO} =
+  do
+    t0 <- time_now_micros()
+    task_sleep(50)
+    t1 <- time_now_micros()
+    report((t1 - t0) / 1000)
+
+fn report(elapsed_ms: Int) -> Unit !{IO} =
+  if elapsed_ms < 500 then term_write("scheduler stayed live\n")
+  else term_write(string.concat("scheduler FROZEN for ", string.concat(int_to_string(elapsed_ms), " ms\n")))
+
+fn caller() -> Unit !{IO} =
+  match connect("localhost", 28991) with
+  | Ok conn -> close(conn)
+  | Err _ -> term_write("")
+
+fn run(s: Scope) -> Unit !{IO} =
+  do
+    task_spawn(s, \_ -> probe())
+    task_spawn(s, \_ -> caller())
+
+fn main() -> Unit !{IO} =
+  do
+    with_scope(\s -> run(s))

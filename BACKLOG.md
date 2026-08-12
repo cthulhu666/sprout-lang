@@ -2617,14 +2617,29 @@ op-classification already in place.
     loops (handshake, write, read) now park, on the direction the IO callback recorded — SSL itself
     never says which way it blocked. macOS-only code, so **CI does not cover it**; verified locally.
   - **`getaddrinfo` is still blocking** and deliberately out of scope — see the item below.
-- [ ] `P2` **`getaddrinfo` still freezes the scheduler for the duration of a DNS lookup**
-  (`runtime/sprout_runtime.c`, `http_resolve` and `tcp_connect`). Everything else in the HTTP client
-  now parks, so this is the last blocking call on the path: a slow or unreachable resolver stalls
-  every green task in the process, for as long as the platform resolver takes to give up. No
-  non-blocking POSIX resolver exists (`getaddrinfo_a` is a glibc extension and not available on
-  macOS), so the fix is a design decision, not a patch: either a resolver thread the green task
-  parks on via a pipe/eventfd, or a DNS client written in Sprout over the existing UDP-less socket
-  surface. Both need sign-off — the first adds a thread to a deliberately single-threaded runtime.
+- [x] `P2` **`getaddrinfo` froze the scheduler for the duration of a DNS lookup — FIXED 2026-08-12
+  (code review finding 10).** Everything else on the client path parks; this was the last blocking
+  call, so a slow/unreachable resolver stalled every green task. No non-blocking POSIX resolver
+  exists (`getaddrinfo_a` is glibc-only, absent on macOS/BSD), so this was a design decision — see
+  **`docs/async-dns-v0.md`** for the full writeup and the verified prior-art survey. **Chosen: Option
+  A (resolver thread)** over Option B (native in-Sprout DNS over UDP), because A preserves
+  system-resolver parity (`/etc/hosts`, mDNS, nsswitch — the parity Go can't close, which is why it
+  keeps a cgo fallback), is the smaller change, and matches the dominant single-event-loop precedent
+  (libuv/Tokio/curl defaults all offload `getaddrinfo` to threads). `async_resolve` runs `getaddrinfo`
+  on a **spawn-per-lookup detached thread** (the first OS thread in the runtime), the green task parks
+  on a per-request self-pipe; results published via an acquire/release atomic (the pipe is only the
+  wakeup). The thread is a **pure-libc island** — touches only a malloc'd `DnsRequest`, never GC nor
+  `g_current_task` — so the GC stays effectively single-threaded. Concurrency capped at 64 with a
+  synchronous fallback (never worse than before; cf. Go's 500 cap). Cancellation: force-drop closes
+  the pipe read end (`park_close_fd`) + drops the task refcount (`dns_abandon` park_cleanup); the
+  detached thread finishes in the background (getaddrinfo is uncancellable, as for libuv/curl), its
+  write hits EPIPE, last decref frees — no leak. **Option C** landed alongside: numeric-literal hosts
+  skip `getaddrinfo` via `inet_pton` (`dns_try_numeric`). Tests: `dns_resolve_parks.spr` (RED→GREEN
+  liveness, 1006 ms freeze measured on the blocking path, via the `SPROUT_DNS_RESOLVE_DELAY_MS` seam)
+  and `dns_resolve_cancel_drop.spr` (80 mid-resolve force-drops under `ulimit -n 64`, no fd leak).
+  **Follow-up (B):** a thread-free native resolver + UDP surface + in-process TTL cache, if
+  cancellable/cacheable resolution is ever wanted; and a shared eventfd/pipe to drop the per-lookup
+  2-fd cost. See `docs/async-dns-v0.md` §9.
 - [x] `P1` **CI ran one job on `ubuntu-latest`, so macOS was never tested — and the TLS client path
   had NO automated coverage at all** (surfaced 2026-08-12 while making the client non-blocking,
   fixed 2026-08-12). Two holes, one fix: a `macos-latest` CI job running `task-io-smoke` (CI's
