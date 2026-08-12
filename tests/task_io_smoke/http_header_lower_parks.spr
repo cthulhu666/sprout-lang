@@ -1,0 +1,98 @@
+import stdlib.task (Scope, with_scope, task_spawn, task_sleep)
+import stdlib.chan (Chan, chan_new, chan_send, chan_recv)
+import stdlib.net (TcpConnection, connect, close, write_all_utf8, read_exact_utf8)
+import stdlib.http_server (HttpRequest, HttpServerResponse, ok, serve_n)
+import stdlib.string as string
+
+# Regression (code review, finding 5): the header parser must not spend time QUADRATIC in the length
+# of a single header line. `parse_header_pair` lowercases the field-name with `lower_ascii` and trims
+# the value with `string.trim`; both rebuilt an immutable String one codepoint at a time, and every
+# rebuild copied the whole accumulator (Schlemiel-the-Painter). Neither yields, so the cost is not
+# merely wasted CPU — it is wall-clock the cooperative pump cannot reclaim, and one connection's
+# parse froze EVERY green task on the OS thread. Measured on the unfixed helpers at these sizes: a
+# ~1.05 s freeze (lower_ascii ≈ 0.35 s over the 30 000-byte name, trim ≈ 0.70 s over the 30 000-space
+# value). The 64 KiB `max_header_bytes` cap bounds it to seconds, but the header-phase read deadline
+# does NOT — the cost is spent in the parse, AFTER the block is fully read, where nothing yields.
+#
+# The probe is the same one-sided liveness measurement as http_request_parks.spr: a sibling already
+# parked on a 50 ms timer when the freeze begins is exactly what a stalled pump cannot serve. 500 ms
+# is the threshold — 10x over the 50 ms sleep that a live pump delivers, ~2x under the ~1 s freeze the
+# bug produces — so the verdict turns on the pump being unreachable, never on scheduling jitter.
+#
+# The header line is deliberately kept UNDER `max_header_bytes` (block ~60 KB < 64 KiB): a block that
+# exceeded the cap would be rejected by read_until_headers with 431 BEFORE parse_headers runs, so the
+# freeze would never be reached and the test would pass vacuously.
+
+fn probe() -> Unit !{IO} =
+  do
+    t0 <- time_now_micros()
+    task_sleep(50)
+    t1 <- time_now_micros()
+    report((t1 - t0) / 1000)
+
+fn report(elapsed_ms: Int) -> Unit !{IO} =
+  if elapsed_ms < 500 then term_write("scheduler stayed live\n")
+  else term_write(string.concat("scheduler FROZEN for ", string.concat(int_to_string(elapsed_ms), " ms\n")))
+
+# Grow `unit` by doubling until it reaches `target`, then cut to exactly `target` — so the harness
+# that builds the payload is itself linear, not part of what we are measuring.
+fn grow(target: Int, unit: String, acc: String) -> String =
+  if string.length(acc) >= target then string.take(acc, target)
+  else grow(target, unit, string.concat(acc, acc))
+
+fn handler(req: HttpRequest) -> HttpServerResponse =
+  ok("hi")
+
+# One request whose single header line stresses BOTH quadratic helpers at once: a 30 000-byte
+# field-NAME (all 'A', so lower_ascii rewrites every byte) and a 30 000-space field-VALUE (so trim
+# strips every leading byte). `ready` lets the client wait until serve_n has bound its listener.
+fn client(port: Int, ready: Chan Int) -> Unit !{IO} =
+  do
+    _ <- chan_recv(ready)
+    task_sleep(30)
+    send_request(port)
+
+# The 30 000-byte field-name (all 'A' -> lower_ascii rewrites every byte) and 30 000-space field-value
+# (-> trim strips every leading byte), assembled once as a pure String.
+fn big_request() -> String =
+  string.concat("GET / HTTP/1.1\r\n",
+    string.concat(grow(30000, "A", "A"),
+      string.concat(": ", string.concat(grow(30000, " ", " "), "x\r\n\r\n"))))
+
+fn send_request(port: Int) -> Unit !{IO} =
+  match connect("127.0.0.1", port) with
+  | Ok conn ->
+      do
+        write_all_utf8(conn, big_request())
+        drain(conn)
+        close(conn)
+  | Err _ -> term_write("client connect failed\n")
+
+# Read the status line so the request completes and serve_n(port, 1, ...) returns, letting the scope
+# join. Borrowing (the owner closes); the response is not asserted on — the assertion is entirely the
+# probe's liveness verdict.
+fn drain(conn: borrowing TcpConnection) -> Unit !{IO} =
+  match read_exact_utf8(conn, 12) with
+  | Ok _ -> term_write("")
+  | Err _ -> term_write("")
+
+# serve_n binds its listener before its first accept-park, so signalling `ready` at spawn time and
+# having the client wait on it orders the connect after the bind without a fixed sleep.
+fn run(s: Scope, port: Int, ready: Chan Int) -> Unit !{IO} =
+  do
+    task_spawn(s, \_ -> probe())
+    task_spawn(s, \_ -> serve_here(port, ready))
+    task_spawn(s, \_ -> client(port, ready))
+
+fn serve_here(port: Int, ready: Chan Int) -> Unit !{IO} =
+  do
+    chan_send(ready, 1)
+    serve_n(port, 1, handler)
+
+fn body(s: Scope) -> Unit !{IO} =
+  do
+    ready <- chan_new(s, 1)
+    run(s, 28986, ready)
+
+fn main() -> Unit !{IO} =
+  with_scope(\s -> body(s))
