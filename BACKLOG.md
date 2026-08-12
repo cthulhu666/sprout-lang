@@ -860,6 +860,27 @@ Legend:
   pressure at `ulimit -n 32`). The second is what caught the `task_sleep` mistake, and the redesign
   also made it robust: with the retry in C it passes across `ulimit -n` **16-64**, where the Sprout
   back-off version only reached the exhaustion path in a narrow 32-40 band on macOS.
+- [x] `P1` **EMFILE accept hot-spin — the convergence claim above was false (code review finding 9).
+  FIXED 2026-08-12.** The C3 entry's "parking converges because the park returns immediately while
+  connections are pending, *draining the backlog*" is true for the retryable errnos and the full-handle
+  path — each of those **consumes** its queued connection — but NOT for EMFILE/ENFILE: `accept()` under
+  descriptor exhaustion returns without dequeuing the pending connection (accept(2)). So the listener
+  stays readable, the level-triggered park returns at once, and `tcp_accept` spins at 100% CPU for as
+  long as descriptors are exhausted and any connection is pending. The convergence reasoning was copied
+  from paths where it holds to one where it does not. Fix: the classic libev **reserve-fd drain**. A
+  single process-global reserve descriptor (`g_accept_reserve_fd`, `open("/dev/null", O_CLOEXEC)`,
+  armed in `tcp_listen` while fds are plentiful — user-approved runtime addition). On EMFILE,
+  `accept_shed_backlog` closes the reserve to free one slot, then accept+close the whole backlog (each
+  accept reuses the freed slot, each close returns it, so one reserve drains the queue sequentially;
+  continues on the retryable/pending-network errnos so it drains fully in one pass on Linux too),
+  reopens the reserve, and only then parks — now a **real** wait because the queue is actually empty.
+  Shedding also gives the queued clients a prompt FIN instead of leaving them stalled behind an
+  exhausted server. **Lesson:** a "converges" claim is only valid on a path that consumes/sheds; before
+  reusing one, check the failure actually dequeues. Deterministic coverage:
+  `tests/c_runtime/emfile_accept_shed.c` (lowered `RLIMIT_NOFILE`, no scheduler — asserts the shed
+  drains to EAGAIN, sheds >0, and re-arms; verified RED by neutering the shed to a no-op). End-to-end
+  survival remains `http_accept_exhaustion.spr`. Gates: c-runtime-test, task-io-smoke, **linux-smoke**
+  (epoll+timerfd), canary, full `just test` — all green.
 - [ ] `P2` **A bare `<-` bind of a `Result` in a `Unit`-returning function silently discards the
   `Err`.** Found 2026-08-11 while making `accept` recoverable. `fn f() -> Unit !{IO} = do { x <-
   returns_a_result(); ... }` type-checks, and on `Err` it returns early from `f` with the error

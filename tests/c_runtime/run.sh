@@ -138,4 +138,19 @@ test "$(cat "$TMP_DIR/trk_bad.out")" = "term-read-key-replacement"
 printf '\303A' | "$TMP_DIR/term_read_key_safety" badcont > "$TMP_DIR/trk_cont.out"
 test "$(cat "$TMP_DIR/trk_cont.out")" = "term-read-key-badcont-keeps-next"
 
+echo "==> c runtime: EMFILE accept sheds the backlog instead of hot-spinning"
+# Deterministic coverage of finding 9. tcp_accept's EMFILE path used to park-and-retry without
+# draining — a 100% CPU spin, since accept() under EMFILE does not dequeue the pending connection.
+# This drives accept_shed_backlog directly under a lowered RLIMIT_NOFILE (no scheduler, no timing)
+# and asserts the shed drains the backlog and re-arms the reserve. It SKIPs cleanly (still exit 0,
+# marker "emfile-shed-skipped") if the sandbox does not enforce the rlimit; the assertion path prints
+# "emfile-shed-drained". The end-to-end survival half is tests/task_io_smoke/http_accept_exhaustion.spr.
+compile emfile_accept_shed.c "$TMP_DIR/emfile_accept_shed" -O0 -g
+"$TMP_DIR/emfile_accept_shed" > "$TMP_DIR/emfile_accept_shed.out"
+grep -Eq '^emfile-shed-(drained|skipped)$' "$TMP_DIR/emfile_accept_shed.out" || {
+  echo "emfile shed test did not reach a known outcome:" >&2
+  cat "$TMP_DIR/emfile_accept_shed.out" >&2
+  exit 1
+}
+
 echo "==> c runtime tests passed"

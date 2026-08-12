@@ -152,6 +152,13 @@ static int g_listener_used[2048];
 static int g_conn_fd[2048];
 static int g_conn_used[2048];
 
+/* Spare descriptor held in reserve so tcp_accept can drain the backlog under EMFILE/ENFILE — see
+ * accept_shed_backlog. -1 = unarmed. Non-static ONLY as a test seam (tests/c_runtime/emfile_accept_shed.c);
+ * tcp_accept parks in the scheduler and cannot be driven from a bare C test, so the shed logic is
+ * exercised directly. Process-global: descriptor exhaustion is process-wide, and one reserve serves
+ * every listener. */
+int g_accept_reserve_fd = -1;
+
 static long long alloc_listener_handle(void) {
   for (long long h = 1; h < 2048; h++) {
     if (!g_listener_used[h]) return h;
@@ -6749,6 +6756,11 @@ static long long http_response_result(char* response_data, size_t response_len) 
  * than moved, to keep this change out of that section. */
 static void tcp_set_nonblocking(int fd);
 
+/* Defined with the tcp_* builtins further down (near tcp_accept); forward-declared here because
+ * tcp_listen, which precedes them, arms the EMFILE reserve. Non-static test seam — see the definitions. */
+void accept_reserve_arm(void);
+int  accept_shed_backlog(int listener_fd);
+
 /* A TOTAL request budget: one deadline stamped at entry and spanning connect, send and the entire
  * body read — NOT an idle deadline that progress re-arms.
  *
@@ -8793,6 +8805,8 @@ long long tcp_listen(long long port) {
     tcp_fail("tcp_listen: listen failed");
   }
   tcp_set_nonblocking(fd);   /* so tcp_accept parks on EAGAIN rather than blocking */
+  /* Arm the EMFILE reserve now, while descriptors are plentiful — a no-op after the first listener. */
+  accept_reserve_arm();
   long long h = alloc_listener_handle();
   if (h < 0) {
     close(fd);
@@ -8971,6 +8985,54 @@ static int tcp_accept_errno_is_retryable(int err) {
   }
 }
 
+/* Arm the reserve descriptor if it is not already open. Called from tcp_listen, when descriptors are
+ * plentiful — never lazily under exhaustion, where open() would itself fail. Best-effort: if open
+ * fails the reserve stays unarmed and accept_shed_backlog degrades to park-only (still correct, just
+ * no longer able to shed). O_CLOEXEC so the reserve does not leak into processes we spawn. */
+void accept_reserve_arm(void) {
+  if (g_accept_reserve_fd < 0)
+    g_accept_reserve_fd = open("/dev/null", O_RDONLY | O_CLOEXEC);
+}
+
+/* Shed the listener's pending backlog under descriptor exhaustion, returning the count shed.
+ *
+ * accept() failing with EMFILE/ENFILE does NOT dequeue the pending connection — unlike the retryable
+ * network errnos, each of which consumes the one connection it was attached to. So a park-and-retry
+ * on EMFILE cannot drain anything: the listener stays readable, the level-triggered park returns at
+ * once, and the loop spins at 100% CPU until a descriptor frees elsewhere. This is the classic libev
+ * reserve-fd technique for that: close the one reserved descriptor to free a slot, then accept+close
+ * the whole backlog (each accept reuses the freed slot, each close returns it, so one reserve drains
+ * the entire queue sequentially), then reopen the reserve. Shedding sends the waiting clients a prompt
+ * FIN instead of leaving them queued behind an exhausted server, and — the point — empties the accept
+ * queue so the caller's subsequent park is a real wait rather than a spin.
+ *
+ * If the reserve is unarmed (open failed at listen time, or a prior reopen failed), returns 0 without
+ * shedding; the caller then parks park-only, the pre-fix behavior, which is degraded but not wrong.
+ *
+ * The loop closes each accepted fd immediately, so exactly one slot stays free throughout and accept
+ * never re-hits EMFILE mid-drain. It stops only on EAGAIN (queue empty). A pending-network errno —
+ * Linux's accept() surfacing a connection whose route died between SYN and accept — also DEQUEUES its
+ * connection, so it is treated like the retryable set in tcp_accept and the drain continues; breaking
+ * on it instead would leave the queue non-empty and reintroduce a (bounded) spin. Everything else
+ * (EBADF, EINVAL) means nothing more is drainable here, so stop. */
+int accept_shed_backlog(int listener_fd) {
+  if (g_accept_reserve_fd < 0) return 0;
+  close(g_accept_reserve_fd);
+  g_accept_reserve_fd = -1;
+  int shed = 0;
+  for (;;) {
+    int c = accept(listener_fd, NULL, NULL);
+    if (c >= 0) { close(c); shed++; continue; }        /* shed one; slot is free again for the next */
+    if (errno == EAGAIN || errno == EWOULDBLOCK) break; /* backlog drained: the real convergence */
+    if (tcp_accept_errno_is_retryable(errno)) continue; /* consumed a queued conn; keep draining */
+    break;                                              /* EBADF/EINVAL/etc: nothing left to shed */
+  }
+  /* Re-arm. The last accept returned without taking a slot, so one is free for the reserve. If open
+   * still fails, leave it unarmed — the next EMFILE degrades to park-only. */
+  g_accept_reserve_fd = open("/dev/null", O_RDONLY | O_CLOEXEC);
+  return shed;
+}
+
 /* RECOVERABLE accept (concurrency review C3). Two of the paths below used to be `tcp_fail`, so a
  * server died rather than shedding one connection — and one of them was reachable by ordinary
  * traffic: `ECONNABORTED` means a peer reset between SYN and accept, which any public listener sees.
@@ -9010,24 +9072,28 @@ retry:
       continue;
     }
     if (tcp_accept_errno_is_retryable(errno)) continue;
-    /* Descriptor exhaustion. Park on the listener and retry rather than reporting it, because THIS IS
-     * THE ONLY LAYER THAT CAN WAIT for it. The wait has to be on the listener fd, and Sprout has no
-     * way to register one: tcp_wait takes a connection handle, and task_sleep needs a timerfd on Linux
-     * — which is precisely the descriptor that does not exist here, and whose arming failure is
-     * deliberately fatal (BACKLOG: "there is no answer to give"). task_yield is no use either: the
-     * pump only polls when NOTHING is runnable, so a yield loop would keep this task runnable forever
-     * and the handlers whose completion frees descriptors would never wake. That is a livelock, which
-     * is worse than the abort this replaces.
+    /* Descriptor exhaustion. Handled here, not reported, because THIS IS THE ONLY LAYER THAT CAN WAIT
+     * for it. The wait has to be on the listener fd, and Sprout has no way to register one: tcp_wait
+     * takes a connection handle, and task_sleep needs a timerfd on Linux — precisely the descriptor
+     * that does not exist here, and whose arming failure is deliberately fatal (BACKLOG: "there is no
+     * answer to give"). task_yield is no use either: the pump only polls when NOTHING is runnable, so
+     * a yield loop would keep this task runnable forever and the handlers whose completion frees
+     * descriptors would never wake — a livelock, worse than the abort this replaces.
      *
-     * Parking costs no descriptor (epoll_ctl/kevent on an fd we already hold) and converges: both
-     * backends are level-triggered one-shot, so while connections are pending the park returns at once
-     * and this drains the backlog, and once drained the listener is no longer readable and the park
-     * becomes a real wait. Meanwhile the accepted connections' bounded reads shed on their own —
-     * scheduler_park_on_fd_timeout reports a timeout when IT cannot arm a timerfd — so slots free.
+     * But parking ALONE spins here. accept() under EMFILE does not dequeue the pending connection (an
+     * important asymmetry with tcp_accept_errno_is_retryable, where each retry consumes its queued
+     * connection). So the listener stays readable, the level-triggered park returns immediately, and
+     * this retries into EMFILE again at 100% CPU until a descriptor happens to free elsewhere. An
+     * earlier revision's comment claimed this "drains the backlog and converges" — it does not; that
+     * reasoning was valid only for the errno paths above and the handle-full path below, both of which
+     * actually shed a connection.
      *
-     * A bounded, Sprout-side policy would still be preferable to retrying forever here. It needs a
-     * listener readiness primitive that does not exist yet; filed in BACKLOG. */
+     * accept_shed_backlog makes the convergence real: it spends the reserve descriptor to accept+close
+     * the whole backlog, emptying the accept queue so the park below is a genuine wait rather than a
+     * spin, and giving the queued clients a prompt FIN. Then we park; when a new connection arrives the
+     * listener becomes readable and we resume. */
     if (errno == EMFILE || errno == ENFILE) {
+      accept_shed_backlog(g_listener_fd[listener]);
       scheduler_park_on_fd(g_listener_fd[listener], SPROUT_POLL_READ);
       continue;
     }
