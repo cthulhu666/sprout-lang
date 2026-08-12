@@ -124,7 +124,10 @@ fn main() -> Unit !{IO} =
     # 6. Eligibility logic: a 2-cycle a<->b (arity 2, i64) yields both edges.
     let raw = Cons(("a", (false, set_insert("b", set_empty()))),
               Cons(("b", (false, set_insert("a", set_empty()))), Nil))
-    let arities = dict_set("a", 2, dict_set("b", 2, dict_empty()))
+    # mutual-TCO eligibility reads only the arity column of FnInfo; `cpr_result`
+    # belongs to the CPR router gate and is not consulted on this path.
+    let arities = dict_set("a", ast_to_ir.fn_info(2, false),
+                    dict_set("b", ast_to_ir.fn_info(2, false), dict_empty()))
     let rets = dict_set("a", true, dict_set("b", true, dict_empty()))
     let elig = ast_to_ir.mutual_build_eligible(raw, arities, rets)
     assert_true(state, "eligible: a<->b cycle gives a a target", list_length(ast_to_ir.mutual_eligible_for("a", elig)) == 1)

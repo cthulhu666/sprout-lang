@@ -310,6 +310,37 @@ been eliminated by **concrete-instance devirtualization** (`docs/devirtualizatio
 now calls `@__tc_Enum_…_from_ordinal_worker` directly with no dictionary. Net: `bake_tile` is
 **allocation-free** — the full GC-suppressed floor, not half.
 
+### Precondition: the callee's result representation must be KNOWN (added 2026-08-12)
+
+CPR chooses a *representation* for the returned value, so it may only fire where that
+representation is known at compile time. Two conventions exist and they are not compatible:
+
+| result | unboxed convention |
+|---|---|
+| width-2 ADT | `{ tag, field0 }` — tag from the header, payload from field 0 |
+| scalar tuple | `{ f0, f1 }` — the fields themselves, no tag |
+
+The call-site routers pick a convention from the *instantiated* type at the call site, while the
+worker is emitted once per callee from its *declared* result type. For a monomorphic callee those
+agree by construction. For a callee whose declared result is a **type variable** they need not: the
+same `@f_worker` symbol would have to serve an ADT instantiation at one call site and a tuple
+instantiation at another, and without monomorphization both can occur in one program.
+
+So every router gates on `cpr_result_known` (`ast_to_ir.sprout`), which reads the `cpr_result` flag
+that `build_fn_arities` computes per fn from the same oracle the emitter uses
+(`adt_ctors_of_type` non-empty, or `scalar_tuple_width` present). There are four gated sites — the
+Tier-2 ADT router, the tuple router, the do-bind router, and `collect_worker_callees` (which must
+agree, because `translate_tail_chain` chains worker-to-worker through the collected set). The
+`translate_tail_catchall` fallback now hard-errors instead of assuming "no ctor list ⇒ tuple", so a
+future convention gap is a compile error rather than silent mis-lowering.
+
+Before this gate, a polymorphic callee got the tuple convention while its ADT call site read slot 0
+as a tag: silent wrong answers whenever a payload happened to equal a valid ctor tag, an abort
+otherwise, and an out-of-bounds load in every case. Full analysis:
+`docs/bug-adt-through-generic-param-2026-08-12.md`. Restoring CPR for generic callees — by
+specializing the worker symbol on the instantiated result type — is filed `P1` in BACKLOG
+§Sprout-IR / Model-C Codegen.
+
 ### Follow-ups (see BACKLOG)
 
 - **Devirt beyond the clean case — DONE** (`docs/devirtualization-v0.md`, increment 2): superclass

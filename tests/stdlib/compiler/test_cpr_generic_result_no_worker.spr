@@ -1,0 +1,103 @@
+module main
+import stdlib.test (check_true, run_suite)
+import stdlib.compiler.ast_to_ir as ast_to_ir
+import stdlib.compiler.ir_rooting as ir_rooting
+import stdlib.compiler.ir_lowering as ir_lowering
+import stdlib.compiler.typed_ast as typed_ast
+import stdlib.compiler.types as types
+import stdlib.compiler.ast as ast
+import stdlib.compiler.source as source
+
+# CPR is a REPRESENTATION decision, so it may only be made where the
+# representation is known. A fn whose declared result is a type variable has no
+# known representation: one `@f_worker` symbol cannot serve both an ADT
+# instantiation ({ tag, field0 }) and a tuple one ({ f0, f1 }). Routing such a
+# callee is what produced the ABI mismatch in
+# docs/bug-adt-through-generic-param-2026-08-12.md.
+#
+# This test pins BOTH directions in one program, so a fix cannot pass by
+# disabling Tier-2 CPR wholesale:
+#   bget   : concrete `Box Int` result -> MUST still workerize
+#   gident : type-variable result      -> MUST NOT workerize
+
+fn no_pos() -> source.SourcePos = source.SourcePos(0, 0, 0)
+
+fn box_int() -> types.Type =
+  types.TApp(types.TConst(types.type_id("Box")), types.TConst(types.type_id("Int")))
+
+fn int_ty() -> types.Type = types.TConst(types.type_id("Int"))
+
+# type Box a = Empty | Full a
+fn box_decl() -> typed_ast.TypedDecl =
+  typed_ast.TPassThrough(
+    ast.TypeDecl("Box", Cons("a", Nil),
+      Cons(ast.TypeConstructor("Empty", Nil, Nil, Nil),
+        Cons(ast.TypeConstructor("Full", Cons(ast.TypeName("a"), Nil), Nil, Nil), Nil)),
+      Nil, ast.Unrestricted, no_pos()))
+
+# fn bget(i) = Full(i)              -- concrete result: the positive control
+fn bget_decl() -> typed_ast.TypedDecl =
+  typed_ast.TFnDecl("bget",
+    Cons(ast.Param("i", Nothing, ast.ModeDefault), Nil),
+    Nothing, Nothing, Nil,
+    typed_ast.TCall(
+      typed_ast.TVar("Full", box_int(), no_pos()),
+      Cons(typed_ast.TVar("i", int_ty(), no_pos()), Nil),
+      box_int(), no_pos()))
+
+# fn gident(x) = x                  -- body type is the type variable `a`
+fn gident_decl() -> typed_ast.TypedDecl =
+  typed_ast.TFnDecl("gident",
+    Cons(ast.Param("x", Nothing, ast.ModeDefault), Nil),
+    Nothing, Nothing, Nil,
+    typed_ast.TVar("x", types.TVar(types.tyvar_id("a")), no_pos()))
+
+# match <callee>(i) with | Full x -> x | Empty -> 0
+fn match_on(callee: String) -> typed_ast.TypedExpr =
+  typed_ast.TMatch(
+    typed_ast.TCall(
+      typed_ast.TVar(callee, int_ty(), no_pos()),
+      Cons(typed_ast.TVar("i", int_ty(), no_pos()), Nil),
+      box_int(), no_pos()),
+    Cons(
+      typed_ast.TypedMatchBranch(
+        ast.ConstructorPattern("Full", Cons(ast.VarPattern("x", no_pos()), Nil), no_pos()),
+        typed_ast.TVar("x", int_ty(), no_pos())),
+      Cons(
+        typed_ast.TypedMatchBranch(
+          ast.ConstructorPattern("Empty", Nil, no_pos()),
+          typed_ast.TInt(0, int_ty(), no_pos())),
+        Nil)),
+    int_ty(), no_pos())
+
+fn probe_decl(name: String, callee: String) -> typed_ast.TypedDecl =
+  typed_ast.TFnDecl(name,
+    Cons(ast.Param("i", Nothing, ast.ModeDefault), Nil),
+    Nothing, Nothing, Nil, match_on(callee))
+
+fn probe_program() -> typed_ast.TypedProgram =
+  typed_ast.TypedProgram(
+    Cons(box_decl(),
+    Cons(bget_decl(),
+    Cons(gident_decl(),
+    Cons(probe_decl("probe_concrete", "bget"),
+    Cons(probe_decl("probe_generic", "gident"), Nil))))))
+
+fn main() -> Unit !{IO} =
+  run_suite("cpr_generic_result_no_worker",
+    match ast_to_ir.translate_program(probe_program()) with
+    | Err msg -> [check_true("translate should succeed (got Err: " ++ msg ++ ")", false)]
+    | Ok pair ->
+        match pair with
+        | (ir_prog, idx_map) ->
+            let ir = ir_lowering.lower_program(ir_rooting.insert_roots(ir_prog, idx_map))
+            in [
+              check_true("concrete-result callee still emits a worker",
+                str_find(ir, "define { i64, i64 } @bget_worker(") >= 0),
+              check_true("concrete-result call site still routes to it",
+                str_find(ir, "call { i64, i64 } @bget_worker(") >= 0),
+              check_true("tyvar-result callee emits NO worker",
+                str_find(ir, "@gident_worker") < 0),
+              check_true("tyvar-result call site stays boxed",
+                str_find(ir, "call i64 @gident(") >= 0)
+            ])
