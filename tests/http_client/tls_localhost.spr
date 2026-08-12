@@ -1,0 +1,81 @@
+import stdlib.task (Scope, with_scope, task_spawn, task_sleep)
+import stdlib.http_client (http_get)
+import stdlib.http (HttpResponse, HttpError, HttpTimeout, HttpNetwork, HttpBadStatus, HttpDecode, http_response_body)
+import stdlib.bytes as bytes
+import stdlib.string as string
+
+# The HTTPS client path, end to end, against a local TLS server.
+#
+# WHY THIS EXISTS. `http_request_tls` is `#ifdef __APPLE__`, so the Linux CI job cannot compile it,
+# let alone run it — the entire TLS client was without automated coverage of any kind, before and
+# after it was made non-blocking. `scripts/http_tls_gate.sh` drives this fixture from a `macos`
+# CI job to close that hole.
+#
+# WHAT IT ASSERTS, in one run, because both properties are about the same request:
+#
+#   * the request SUCCEEDS — SecureTransport's handshake, write and read loops were rewritten to
+#     park on the socket rather than spin on errSSLWouldBlock, so a regression there shows up as a
+#     failed request, a hang, or a pegged core;
+#   * the SCHEDULER STAYS LIVE while it is in flight. The probe is a sibling already parked on a
+#     50 ms timer when the request begins, which is precisely what a blocked OS thread cannot
+#     serve. This is the TLS twin of tests/task_io_smoke/http_request_parks.spr, and it matters
+#     more here: the TLS path has THREE separate park sites (handshake, write, read) against the
+#     plain path's two, and the handshake is several round trips.
+#
+# The peer is `openssl s_server` with a private CA, so the gate is offline and deterministic — no
+# public endpoint, no DNS, no dependence on anyone else's certificate lifetime. The gate also runs
+# this fixture a second time WITHOUT `SPROUT_HTTP_CA_CERT` and requires it to fail: without that
+# negative control a broken trust evaluation that accepted everything would pass silently.
+#
+# The URL comes from argv so the gate can pick a port and so the same binary serves both runs.
+
+fn probe() -> Unit !{IO} =
+  do
+    t0 <- time_now_micros()
+    task_sleep(50)
+    t1 <- time_now_micros()
+    report((t1 - t0) / 1000)
+
+# 500 ms against a 50 ms sleep: a one-sided bound with 10x headroom, so the verdict never turns on
+# scheduling jitter — only on the pump being unreachable.
+fn report(elapsed_ms: Int) -> Unit !{IO} =
+  if elapsed_ms < 500 then term_write("tls-scheduler-live\n")
+  else term_write(string.concat("tls-scheduler-FROZEN ", string.concat(int_to_string(elapsed_ms), " ms\n")))
+
+fn caller(url: String) -> Unit !{IO} =
+  match http_get(url, "", 5000) with
+  # The message is printed, not swallowed: the negative-control run asserts on the FAILURE, and a
+  # certificate rejection ("tls handshake failed (status=-9807)") has to be distinguishable from a
+  # connection that never happened.
+  | Err e -> term_write(string.concat("tls-request-FAILED: ", string.concat(err_text(e), "\n")))
+  | Ok resp -> emit(bytes.length(http_response_body(resp)))
+
+fn err_text(e: HttpError) -> String =
+  match e with
+  | HttpTimeout -> "timeout"
+  | HttpNetwork msg -> string.concat("network: ", msg)
+  | HttpBadStatus code -> string.concat("bad status ", int_to_string(code))
+  | HttpDecode msg -> string.concat("decode: ", msg)
+
+# A zero-length body would mean the read loop returned without delivering anything, which an
+# `Ok` alone would not distinguish from success.
+fn emit(n: Int) -> Unit !{IO} =
+  if n > 0 then term_write(string.concat("tls-body-bytes ", string.concat(int_to_string(n), "\n")))
+  else term_write("tls-body-EMPTY\n")
+
+# Spawn order matters: `probe` must reach its timer park before the request starts, so the timer is
+# already outstanding when the TLS handshake begins.
+fn run(s: Scope, url: String) -> Unit !{IO} =
+  do
+    task_spawn(s, \_ -> probe())
+    task_spawn(s, \_ -> caller(url))
+
+# `argv_get(0)` is passed as a value rather than bound with `<-`: a `<-` on a `Maybe` SHORT-CIRCUITS
+# it, so a missing argument would abandon a block that returns Unit and cannot carry the absence.
+fn main() -> Unit !{IO} =
+  with_scope(\s -> run(s, url_or(argv_get(0))))
+
+fn url_or(raw: Maybe String) -> String =
+  match raw with
+  | Nothing -> "https://localhost:28444/"
+  | Just text -> text

@@ -158,3 +158,58 @@ jobs:
         # Curated rooting tests under SPROUT_GC_STRESS=1 (collect on every alloc).
         # Default-threshold greens hide use-after-free rooting bugs; fails loudly.
         run: just test-stress
+
+  # Everything above runs on Linux, so until this job existed CI exercised the epoll+timerfd
+  # poller ONLY and never compiled a line of the macOS-specific TLS client. Two consequences,
+  # both of which this job is here to remove:
+  #
+  #   * the kqueue backend was validated solely by whoever ran `just` locally. The two backends
+  #     genuinely diverge — a timed park costs a timerfd on Linux and nothing on macOS,
+  #     `task_sleep` needs a descriptor on Linux, and `accept(2)` passes pending network errors
+  #     through on Linux only — so a green Linux run says little about the other half.
+  #   * `http_request_tls` is `#ifdef __APPLE__`. Linux CI could not compile it, let alone run
+  #     it, so the HTTPS client had no automated coverage of any kind.
+  #
+  # Free: the repo is public, and standard GitHub-hosted runners (macos-latest included) are
+  # free and unlimited on public repositories. This is a STANDARD runner, not one of the paid
+  # "larger runners".
+  #
+  # Deliberately NOT the whole suite: `test` on Linux stays the required check and the broad
+  # gate. This job is the platform-divergence half — the poller surface and the TLS path — which
+  # is what Linux structurally cannot cover.
+  macos:
+    runs-on: macos-latest
+    env:
+      # Same invariant enforcers the Linux job turns on, for the same reason: a default-threshold
+      # green can hide a rooting bug, and this job runs the park/timer surface hardest.
+      SPROUT_GC_HDRCHECK: '1'
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install LLVM (provides `opt`)
+        # NOT optional and not merely a faster clang. The build recipes call bare `opt
+        # --passes=verify` to validate emitted IR — `bootstrap-from-seed` does it to the committed
+        # seed before linking — and Xcode's toolchain ships `clang` WITHOUT `opt`, so the job
+        # would die on its first step. Homebrew puts it at /opt/homebrew/opt/llvm/bin, which is
+        # exactly the path mise.toml prepends, so no PATH handling is needed here beyond the
+        # install: the mise step below picks it up.
+        run: brew install llvm
+
+      - name: Install mise toolchain (just 1.39.0, from mise.toml)
+        uses: jdx/mise-action@v2
+
+      - name: Bootstrap stage-1 from committed IR seed
+        run: just bootstrap-from-seed
+
+      - name: Task/IO smoke (kqueue backend)
+        # The same battery the Linux job's ci-fast-gates runs, on the OTHER poller. Covers the
+        # park/re-arm/cancel-drop surface plus the three HTTP-client fixtures added when the
+        # client was made non-blocking.
+        run: just task-io-smoke
+
+      - name: HTTPS client gate (private CA, offline)
+        # The only automated coverage of http_request_tls anywhere. Hermetic: an `openssl
+        # s_server` holding a leaf from a CA generated and discarded by the gate, so there is no
+        # public endpoint or certificate lifetime to depend on. Includes its own negative
+        # control — the same request must FAIL without the trust anchor.
+        run: just http-tls-gate

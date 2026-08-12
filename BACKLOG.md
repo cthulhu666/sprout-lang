@@ -2541,28 +2541,27 @@ op-classification already in place.
   macOS), so the fix is a design decision, not a patch: either a resolver thread the green task
   parks on via a pipe/eventfd, or a DNS client written in Sprout over the existing UDP-less socket
   surface. Both need sign-off — the first adds a thread to a deliberately single-threaded runtime.
-- [ ] `P1` **CI runs one job on `ubuntu-latest`, so macOS is never tested — and the TLS client path
-  has NO automated coverage at all** (surfaced 2026-08-12 while making the client non-blocking).
-  Two holes, one fix:
-  - **The whole kqueue backend is unverified by CI.** `.github/workflows/ci.yml` has a single `test`
-    job on `ubuntu-latest`, so every gate CI runs exercises **epoll + timerfd only**. Every kqueue
-    assertion in the repo is validated solely by whoever runs `just` locally. AGENTS.md already
-    records two Linux-only failures reaching CI on locally-green branches; nothing at all guards
-    the reverse direction, and the two backends genuinely diverge (timers cost a descriptor on
-    Linux and none on macOS; `task_sleep` needs an fd on Linux; `accept(2)` passes pending network
-    errors through on Linux only).
-  - **`http_request_tls` is `#ifdef __APPLE__`, so CI cannot even compile it**, let alone run it.
-    `SPROUT_HTTP_CA_CERT` — the custom-anchor override that exists precisely to point the client at
-    a private CA — appears nowhere in `tests/`, `scripts/` or CI. The path was already uncovered
-    before the non-blocking rewrite; the rewrite (parking in all three SecureTransport loops) is
-    what makes the gap worth paying down now.
-  **Shape:** a hermetic TLS gate — self-signed cert (SAN `DNS:localhost`) served by `openssl
-  s_server`, with `SPROUT_HTTP_CA_CERT` pointed at it, so the gate is offline and deterministic
-  rather than depending on a public endpoint — run from a new `macos-latest` CI job that also runs
-  `task-io-smoke`. Cost is zero: the repo is public and *"use of the standard GitHub-hosted runners
-  is free and unlimited on public repositories"* (GitHub Actions runner reference), with
-  `macos-latest` (→ `macos-15` arm64) a standard runner, not one of the paid "larger runners".
-  Add the job as non-required first, since only `test` is a required check today.
+- [x] `P1` **CI ran one job on `ubuntu-latest`, so macOS was never tested — and the TLS client path
+  had NO automated coverage at all** (surfaced 2026-08-12 while making the client non-blocking,
+  fixed 2026-08-12). Two holes, one fix: a `macos-latest` CI job running `task-io-smoke` (CI's
+  first kqueue coverage) plus a new `just http-tls-gate` (the first coverage of `http_request_tls`
+  in any form). The gate is hermetic — `openssl s_server` holding a leaf from a CA it generates and
+  discards, with `SPROUT_HTTP_CA_CERT` as the anchor — so it needs no network and no public
+  certificate. Free: standard GitHub-hosted runners, `macos-latest` included, are free and
+  unlimited on public repositories.
+  Three things the gate had to get right, each found by measurement because the error text is
+  identical for all of them (`tls certificate verification failed`):
+  - **A single self-signed certificate used as both leaf and anchor is REJECTED.** macOS requires a
+    TLS server certificate to carry `extendedKeyUsage=serverAuth`, which `openssl req -x509` does
+    not add, so the gate builds a real two-level chain.
+  - **A CN alone is not enough** — the leaf needs a `subjectAltName`.
+  - **The anchor must be DER**; `SecCertificateCreateWithData` rejects PEM.
+  The negative control is what gives the gate teeth: the same request must FAIL without the anchor
+  (measured `-9807`, `errSSLXCertChainInvalid`). Without it, a trust evaluation that accepted
+  everything would pass the success case silently.
+  Note `opt` is a hard dependency of `bootstrap-from-seed` (it verifies the committed seed) and
+  Xcode ships `clang` WITHOUT `opt`, so the job installs Homebrew LLVM — at exactly the path
+  `mise.toml` already prepends.
 - [ ] `P3` **No idle/read timeout for the HTTP client, only the total one.** `timeout_ms` is now a
   total deadline, which is right for the common case but cannot express "fail if the peer stalls for
   N seconds" on a long transfer — a caller streaming a large body has to size one budget for the
