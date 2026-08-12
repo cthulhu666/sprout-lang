@@ -261,9 +261,17 @@ facts and should not pretend to.
 only when `scalar_tuple_width` confirms a tuple and hard-errors otherwise, so a future router/emitter
 disagreement is a compile error rather than an out-of-bounds load.
 
-Cost, measured: generic combinators are boxed again — one allocation per call, ~16 ns at `-O2`. Zero
-call sites that currently work are affected (a census of `bootstrap/compile_driver.ll` found 279
-workers, none mis-lowered). Restoring CPR for generics is BACKLOG `P1`.
+Cost: zero call sites that currently work are affected (a census of `bootstrap/compile_driver.ll`
+found 279 workers, none mis-lowered).
+
+The gate declines **bare type variables only** — this is not "CPR off for generics". A callee
+declared `-> Maybe b` or `-> Box b` resolves its head through `type_head_name` and still workerizes
+with the constructor fully fused; `fn known_head(x: b) -> Maybe b = Just(x)` emits two `insertvalue`s
+and a `ret`, no allocation. Only `-> a` is declined, and that residue is unrecoverable by any ABI
+change: by parametricity a `-> a` body cannot construct its result, while Tier-2 CPR's win comes
+solely from fusing a tail constructor into the unboxed return. So the gate is the permanent correct
+behaviour here, not a provisional restriction to be lifted. Analysis and surviving alternatives are
+filed `P3` in BACKLOG §Sprout-IR / Model-C Codegen.
 
 ## Definition of done
 
