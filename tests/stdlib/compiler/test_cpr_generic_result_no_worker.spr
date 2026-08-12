@@ -15,10 +15,14 @@ import stdlib.compiler.source as source
 # callee is what produced the ABI mismatch in
 # docs/bug-adt-through-generic-param-2026-08-12.md.
 #
-# This test pins BOTH directions in one program, so a fix cannot pass by
-# disabling Tier-2 CPR wholesale:
-#   bget   : concrete `Box Int` result -> MUST still workerize
-#   gident : type-variable result      -> MUST NOT workerize
+# The gate declines a BARE type variable only. A generic whose result head is
+# known (`Box b`) resolves through `type_head_name`, so its representation is
+# fixed for every instantiation and it must still workerize. That distinction is
+# what keeps the gate narrow, so all three directions are pinned in one program
+# and a fix cannot pass by disabling Tier-2 CPR wholesale:
+#   bget   : concrete `Box Int` result   -> MUST still workerize
+#   gbox   : generic `Box b` result      -> MUST still workerize
+#   gident : bare type-variable result   -> MUST NOT workerize
 
 fn no_pos() -> source.SourcePos = source.SourcePos(0, 0, 0)
 
@@ -26,6 +30,11 @@ fn box_int() -> types.Type =
   types.TApp(types.TConst(types.type_id("Box")), types.TConst(types.type_id("Int")))
 
 fn int_ty() -> types.Type = types.TConst(types.type_id("Int"))
+
+# `Box b` — known head, type-variable payload. The head fixes the unboxed
+# convention ({ tag, field0 }) for every instantiation, so this is CPR-eligible.
+fn box_tyvar() -> types.Type =
+  types.TApp(types.TConst(types.type_id("Box")), types.TVar(types.tyvar_id("b")))
 
 # type Box a = Empty | Full a
 fn box_decl() -> typed_ast.TypedDecl =
@@ -44,6 +53,16 @@ fn bget_decl() -> typed_ast.TypedDecl =
       typed_ast.TVar("Full", box_int(), no_pos()),
       Cons(typed_ast.TVar("i", int_ty(), no_pos()), Nil),
       box_int(), no_pos()))
+
+# fn gbox(x) = Full(x)              -- generic, but the result HEAD is known
+fn gbox_decl() -> typed_ast.TypedDecl =
+  typed_ast.TFnDecl("gbox",
+    Cons(ast.Param("x", Nothing, ast.ModeDefault), Nil),
+    Nothing, Nothing, Nil,
+    typed_ast.TCall(
+      typed_ast.TVar("Full", box_tyvar(), no_pos()),
+      Cons(typed_ast.TVar("x", types.TVar(types.tyvar_id("b")), no_pos()), Nil),
+      box_tyvar(), no_pos()))
 
 # fn gident(x) = x                  -- body type is the type variable `a`
 fn gident_decl() -> typed_ast.TypedDecl =
@@ -79,9 +98,11 @@ fn probe_program() -> typed_ast.TypedProgram =
   typed_ast.TypedProgram(
     Cons(box_decl(),
     Cons(bget_decl(),
+    Cons(gbox_decl(),
     Cons(gident_decl(),
     Cons(probe_decl("probe_concrete", "bget"),
-    Cons(probe_decl("probe_generic", "gident"), Nil))))))
+    Cons(probe_decl("probe_known_head", "gbox"),
+    Cons(probe_decl("probe_generic", "gident"), Nil))))))))
 
 fn main() -> Unit !{IO} =
   run_suite("cpr_generic_result_no_worker",
@@ -96,6 +117,10 @@ fn main() -> Unit !{IO} =
                 str_find(ir, "define { i64, i64 } @bget_worker(") >= 0),
               check_true("concrete-result call site still routes to it",
                 str_find(ir, "call { i64, i64 } @bget_worker(") >= 0),
+              check_true("known-head generic result still emits a worker",
+                str_find(ir, "define { i64, i64 } @gbox_worker(") >= 0),
+              check_true("known-head generic call site still routes to it",
+                str_find(ir, "call { i64, i64 } @gbox_worker(") >= 0),
               check_true("tyvar-result callee emits NO worker",
                 str_find(ir, "@gident_worker") < 0),
               check_true("tyvar-result call site stays boxed",

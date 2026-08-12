@@ -337,9 +337,19 @@ future convention gap is a compile error rather than silent mis-lowering.
 Before this gate, a polymorphic callee got the tuple convention while its ADT call site read slot 0
 as a tag: silent wrong answers whenever a payload happened to equal a valid ctor tag, an abort
 otherwise, and an out-of-bounds load in every case. Full analysis:
-`docs/bug-adt-through-generic-param-2026-08-12.md`. Restoring CPR for generic callees — by
-specializing the worker symbol on the instantiated result type — is filed `P1` in BACKLOG
-§Sprout-IR / Model-C Codegen.
+`docs/bug-adt-through-generic-param-2026-08-12.md`.
+
+The gate costs less than it appears to, because it declines **bare type variables only**. A generic
+callee declared `-> Maybe b` or `-> Box b` resolves its head through `type_head_name`, so it still
+workerizes with the constructor fully fused — `fn known_head(x: b) -> Maybe b = Just(x)` emits a
+worker of two `insertvalue`s and a `ret`, with no allocation. Only `-> a` is declined.
+
+That residue cannot be recovered by a better ABI, and the gate is therefore permanent rather than
+provisional. By parametricity a function declared `-> a` cannot construct its result, and Tier-2
+CPR's allocation win comes exclusively from fusing a tail constructor into the unboxed return; the
+pass-through path boxes the value and then reads its tag back. A per-instantiation worker symbol
+would relocate two loads and remove no allocation. Analysis and the surviving alternatives (inlining
+before the router; allocator attributes) are filed `P3` in BACKLOG §Sprout-IR / Model-C Codegen.
 
 ### Follow-ups (see BACKLOG)
 
