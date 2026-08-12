@@ -1,10 +1,26 @@
 module stdlib.http
 
+import stdlib.bytes (Utf8Error)
+import stdlib.bytes as bytes
+
 # Sprout HTTP helpers (v0)
 # Minimal helpers for request-line parsing and response formatting.
 
+# status, raw header block, body.
+#
+# The body is Bytes, not String, for the same reason `stdlib.http_server`'s request body is: an HTTP
+# body is a byte sequence — a PNG, a gzip stream, a protobuf message — and a Sprout String cannot
+# carry one, being valid UTF-8 and NUL-free by construction (docs/spec-v0.md:64). While this was a
+# String the runtime measured the received body with `strlen`, so a body containing 0x00 was
+# SILENTLY truncated at it and returned as `Ok` — fetching a PNG yielded a handful of bytes and no
+# error — and non-UTF-8 bytes were admitted into a String unvalidated, which the spec names as the
+# obligation such a builtin has to meet.
+#
+# Text callers decode explicitly with `http_response_text`, which returns a `Result`: the failure is
+# reported where it can be handled rather than being decided on the caller's behalf during the read.
+# Follows Go (`http.Response.Body` is an `io.ReadCloser` of bytes) and hyper (a `Body` of `Bytes`).
 export type HttpResponse (..) =
-  | HttpResponse Int String String
+  | HttpResponse Int String Bytes
 
 export type HttpError (..) =
   | HttpTimeout
@@ -125,6 +141,13 @@ export fn http_echo_response(raw_request: String) -> String =
   | Nothing -> http_bad_request()
   | Just req -> http_ok(request_line_to_string(req))
 
-export fn http_response_body(resp: HttpResponse) -> String =
+export fn http_response_body(resp: HttpResponse) -> Bytes =
   match resp with
   | HttpResponse _ _ body -> body
+
+# The body decoded as text. Separate from `http_response_body` and returning a `Result` because
+# decoding is where a non-text response must be allowed to fail: the framing succeeded (these are
+# exactly the bytes the server sent), the decoding did not. A caller wanting a PNG uses
+# `http_response_body` and is no longer refused on a text assumption it never made.
+export fn http_response_text(resp: HttpResponse) -> Result Utf8Error String =
+  bytes.to_string(http_response_body(resp))

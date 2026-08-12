@@ -1681,6 +1681,14 @@ task-io-smoke: bootstrap-from-seed
   build tests/task_io_smoke/read_timeout_poll_once.spr
   run_once "read-poll-once" "poll-once-timed-out"
   run_once "read-poll-once/data" "bounded-read-got-data"
+  # (24b) A read must not report a timeout while its data is already buffered. Forces the fd-ready
+  # event and the expired deadline into ONE poll batch (write at t=0, deadline at t=50ms, a
+  # CPU-bound sibling delaying the poll to t=200ms), which is the case where pump_loop must pick
+  # the fd over the timer. Both backends harvest in activation order today, so the data event is
+  # first and this passes; it is pinned because that ordering is an undocumented property of the
+  # epoll/kqueue ready list, not a contract, and this is the assertion that would catch it changing.
+  build tests/task_io_smoke/read_deadline_loses_to_data.spr
+  run_once "read-deadline-loses-to-data" "reader got ping"
   # (25) Content-Length is denominated in BYTES while the body path measured and cut in CODEPOINTS
   # (concurrency review C5). `café` is 5 bytes / 4 codepoints and separates the two; an ASCII body
   # cannot, which is why the fixtures above all missed it. Three paths, because they used different
@@ -1729,7 +1737,7 @@ task-io-smoke: bootstrap-from-seed
   run_once "tcp-nul-payload" "nul-bytes-intact"
   run_once "tcp-nul-payload/decode" "nul-decode-refused"
   SPROUT_GC_HDRCHECK=1 run_once "tcp-nul-payload/hdrcheck" "nul-bytes-intact"
-  echo "==> task-io-smoke ✓ (read-park, accept-park, re-arm, http-serve-concurrency, http-conn-error-isolation, tcp-read-some-bad-args, write, cancel-drop, await-guard, timer-drop, timeout-drop, timeout-nested-guard, chan-cancel-drop, chan-timeout-drop, chan-negative-cap-guard, rendezvous-send-drop, send-on-closed-guard, double-close-guard, send-parked-close-guard, select-cancel-drop, select-timeout-drop, connect-park, http-idle-timeout, http-header-flood, http-write-timeout, http-body-timeout, http-body-bounds, http-pooled-serve, read-poll-once, http-utf8-body, http-binary-body, tcp-accept-bad-handle, http-accept-exhaustion, tcp-nul-payload; interleaved; stress-clean)"
+  echo "==> task-io-smoke ✓ (read-park, accept-park, re-arm, http-serve-concurrency, http-conn-error-isolation, tcp-read-some-bad-args, write, cancel-drop, await-guard, timer-drop, timeout-drop, timeout-nested-guard, chan-cancel-drop, chan-timeout-drop, chan-negative-cap-guard, rendezvous-send-drop, send-on-closed-guard, double-close-guard, send-parked-close-guard, select-cancel-drop, select-timeout-drop, connect-park, http-idle-timeout, http-header-flood, http-write-timeout, http-body-timeout, http-body-bounds, http-pooled-serve, read-poll-once, read-deadline-loses-to-data, http-utf8-body, http-binary-body, tcp-accept-bad-handle, http-accept-exhaustion, tcp-nul-payload; interleaved; stress-clean)"
 
 # ── Linux gate (local, container-backed) ──────────────────────────────────────
 #
@@ -1871,6 +1879,18 @@ linux-run *ARGS: _linux-just
     -e SPROUT_GC_HDRCHECK=1 \
     "{{linux_image}}" \
     "/opt/sprout-just/just-{{linux_just_version}}" --set build_dir /tmp/build {{ARGS}}
+
+# HTTP CLIENT binary-body regression (code review finding 8): a response body containing 0x00 or
+# non-UTF-8 bytes must arrive byte-for-byte on BOTH body paths (Content-Length and chunked). Before
+# the fix the runtime re-measured the body with strlen, so `AAAA\0BBBB...` arrived as 4 bytes and an
+# `Ok`, and the chunked path failed outright with "truncated chunk data".
+#
+# Its own recipe rather than a tests/task_io_smoke fixture because it needs a peer PROCESS: the
+# `http_request` builtin is blocking, so a Sprout server task and a Sprout client in one process
+# deadlock. Uses python3, which scripts/seed_gate.sh already assumes.
+[group('test')]
+http-client-binary-gate: bootstrap-from-seed
+  SPROUT_STAGE1="{{build_dir}}/compile_driver_bin_stage1" bash scripts/http_client_binary_gate.sh
 
 # The curated Linux gate: the park/timer/socket surface, on the backend CI uses.
 [group('smoke')]
@@ -2466,7 +2486,7 @@ gate-quick: fmt-check test compile-examples-stage1 smoke-shapes bundle-smoke
 # advisory), so it runs in the body rather than as an arg-less dependency.
 # Full CI-parity battery (slow, ~15-25m); a green run means CI will not surprise you.
 [group('gate')]
-gate: fmt-check smoke-shapes bundle-smoke loud-fail-smoke diagnostic-stream-smoke argv-smoke trace-dispatch-smoke verify-dispatch-smoke div-by-zero-smoke stack-overflow-smoke flush-on-crash-smoke tco-runtime-smoke c-runtime-test b1-gate check-approved-builtins verify-bootstrap-fixed-point ir-golden-diff compile-examples-stage1 compile-bench run-example-canary test task-io-smoke test-stress
+gate: fmt-check smoke-shapes bundle-smoke loud-fail-smoke diagnostic-stream-smoke argv-smoke trace-dispatch-smoke verify-dispatch-smoke div-by-zero-smoke stack-overflow-smoke flush-on-crash-smoke tco-runtime-smoke c-runtime-test b1-gate check-approved-builtins verify-bootstrap-fixed-point ir-golden-diff compile-examples-stage1 compile-bench run-example-canary test task-io-smoke http-client-binary-gate test-stress
   #!/usr/bin/env bash
   set -euo pipefail
   echo "==> gate: gc-safety-check --strict..."

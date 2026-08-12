@@ -403,12 +403,24 @@ Runnable demo (compile to native then pass args directly):
 HTTP stdlib helpers (in `stdlib/http.sprout`):
 
 - uses foundational prelude `Maybe` and `Result`
-- `HttpResponse(status, headers, body)`
+- `HttpResponse(status, headers, body)` — `body` is **`Bytes`**, not `String`
 - `HttpError` variants (`HttpTimeout`, `HttpNetwork`, `HttpBadStatus`, `HttpDecode`)
 - `HttpStatusError` variants (`HttpUnsupportedStatus`)
 - `parse_request_line(raw) -> Maybe RequestLine`
 - `http_response(status, body) -> Result HttpStatusError String`
-- `http_response_body(resp: HttpResponse) -> String`
+- `http_response_body(resp: HttpResponse) -> Bytes`
+- `http_response_text(resp: HttpResponse) -> Result Utf8Error String`
+
+A response body is `Bytes` for the same reason a request body is on the server side: an HTTP body is
+a byte sequence — a PNG, a gzip stream, a protobuf message — and a Sprout `String` cannot hold one,
+being valid UTF-8 and NUL-free by construction ([spec-v0.md](./spec-v0.md)). While it was a `String`
+the runtime re-measured the received body with `strlen`, so a body containing `0x00` was **silently
+truncated at it and returned as `Ok`** — a fetched PNG arrived as a handful of bytes with no error —
+and non-UTF-8 bytes were admitted into a `String` unvalidated, which is precisely the obligation the
+spec puts on a builtin constructing a `String` from raw external bytes. Text callers use
+`http_response_text`, which returns a `Result`, so the decode failure surfaces where it can be
+handled rather than being decided during the read. Follows Go (`http.Response.Body` is an
+`io.ReadCloser`) and hyper (a `Body` of `Bytes`).
 - `http_ok(body) -> String`
 - `http_bad_request() -> String`
 - `http_echo_response(raw_request) -> String`

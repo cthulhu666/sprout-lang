@@ -1,0 +1,42 @@
+import stdlib.http_client (http_get)
+import stdlib.http (HttpResponse, http_response_body)
+import stdlib.bytes as bytes
+
+# Regression (code review, finding 8): the HTTP CLIENT must deliver a response body byte-for-byte,
+# including 0x00 and bytes that are not valid UTF-8.
+#
+# `http_request` accumulates into a ByteBuf that tracks an exact `len` (buf_append_bytes memcpy's, so
+# NULs survive the read). The length was then DROPPED at the `http_response_result(response.data)`
+# call boundary, leaving the function with only a `char*` — so the body had to be re-measured with
+# `dup_cstr`, i.e. `strlen`, which stops at the first NUL. Everything after it was freed with the
+# response buffer. Nothing reported an error: the caller got `Ok` and a short body.
+#
+# The payload is served by scripts/http_client_binary_gate.sh and is deliberately hostile in three
+# ways at once, so that no single half-fix passes:
+#
+#   "AAAA" 0x00 "BBBB" 0xFF "CCCCCCCCCC"   = 20 bytes
+#
+#   * the 0x00 at offset 4 truncates a strlen-measured body to 4 bytes;
+#   * the 0xFF at offset 9 is not valid UTF-8, so a body that is minted as a String without
+#     validation violates docs/spec-v0.md:64 even when nothing is truncated — this is what pins the
+#     body's type as Bytes rather than "String, but measured properly";
+#   * the trailing run makes a partial copy visibly short rather than off by one.
+#
+# The chunked case matters separately: `http_decode_chunked_body` walked the body with `*cursor !=
+# '\0'` and measured chunk data with `strlen`, so a NUL inside chunk data discarded every chunk after
+# it — the same defect one layer down, reached only when Transfer-Encoding is present.
+fn report(label: String, url: String) -> Unit !{IO} =
+  match http_get(url, "", 5000) with
+  | Err _ -> term_write(`${label}: REQUEST FAILED\n`)
+  | Ok resp -> term_write(`${label}: ${int_to_string(bytes.length(http_response_body(resp)))}\n`)
+
+fn main() -> Unit !{IO} =
+  do
+    port <- result_or_default("28771", argv_get(0))
+    report("content-length", `http://127.0.0.1:${port}/binary`)
+    report("chunked", `http://127.0.0.1:${port}/chunked`)
+
+fn result_or_default(fallback: String, m: Maybe String) -> String !{IO} =
+  match m with
+  | Nothing -> fallback
+  | Just v -> v

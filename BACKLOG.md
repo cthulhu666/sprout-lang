@@ -1277,6 +1277,20 @@ Legend:
   §6.3 calls out. **Depends on** the streaming item above: chunked has no `Content-Length`, so the
   size-bounded buffer this file frames against cannot express it — which is why these two land
   together. Raised 2026-08-11 by the http-subsystem code review (finding 4).
+- [x] `P1` **HTTP CLIENT response bodies are `Bytes`. RESOLVED 2026-08-12.** `HttpResponse`'s third
+  field was `String`, and `http_response_result` took only a `char*` — the recv accumulator's exact
+  `len` was dropped at that call boundary, so the body had to be re-measured with `dup_cstr`
+  (`strlen`). A body containing `0x00` was silently truncated at it and returned as `Ok`: a 20-byte
+  payload `AAAA\0BBBB\xffCCCCCCCCCC` arrived as **4 bytes**, measured live before the fix. Nothing
+  validated UTF-8 on that path either, so non-text bytes were minted into a `String` unchecked —
+  a direct violation of spec-v0.md's rule that a builtin constructing a `String` from external bytes
+  validates and reports through its error channel. `http_decode_chunked_body` had the same defect one
+  layer down (`*cursor != '\0'` bounds, `strlen(cursor) < chunk_size`), where it surfaced as a
+  spurious "truncated chunk data" `HttpDecode` on a perfectly well-formed response. Now: length
+  threaded through, body copied into a `BytesVal`, chunked decoder bounded by `body_len`,
+  `http_response_body -> Bytes` plus `http_response_text -> Result Utf8Error String`. Mirrors the
+  server-side request-body decision. Gate: `just http-client-binary-gate` (both body paths).
+  Raised by the http-subsystem code review (finding 8).
 - [ ] `P2` **List-valued request headers.** `parse_header_lines` folds repeats into a `Dict String`
   last-wins. The two cases where that fold is a *framing* hazard are now refused outright
   (`content-length` with differing values, any repeated `host`), but the general fold remains, and
