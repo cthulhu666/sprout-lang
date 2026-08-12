@@ -109,7 +109,7 @@ fn emit_lifted_then_fn(lifted: List sprout_ir.IRFunction,
 # Main streaming loop over all decls.
 fn stream_decls(decls: List typed_ast.TypedDecl,
                 ctors: Dict sprout_ir.CtorInfo,
-                top_level: Set, let_names: Set, fn_arities: Dict Int,
+                top_level: Set, let_names: Set, fn_arities: Dict ast_to_ir.FnInfo,
                 lambda_ctr_ref: Ref Int, lifted_idx_ref: Ref (Dict Int),
                 state: StreamState) ->
     Result String StreamState !{IO} =
@@ -145,7 +145,7 @@ fn stream_decls(decls: List typed_ast.TypedDecl,
 # Each worker is rooted + lowered through emit_one_fn like any other fn.
 fn stream_workers(names: List String, worker_set: Set, decls: List typed_ast.TypedDecl,
                   ctors: Dict sprout_ir.CtorInfo, top_level: Set, let_names: Set,
-                  fn_arities: Dict Int, adt_index: Dict (List (Int, Int)),
+                  fn_arities: Dict ast_to_ir.FnInfo, adt_index: Dict (List (Int, Int)),
                   lambda_ctr_ref: Ref Int, lifted_idx_ref: Ref (Dict Int),
                   state: StreamState) -> Result String StreamState !{IO} =
   match names with
@@ -200,7 +200,7 @@ fn summarize_lifted_then_fn(lifted: List sprout_ir.IRFunction, f: sprout_ir.IRFu
 
 fn summarize_decls(decls: List typed_ast.TypedDecl,
                    ctors: Dict sprout_ir.CtorInfo,
-                   top_level: Set, let_names: Set, fn_arities: Dict Int,
+                   top_level: Set, let_names: Set, fn_arities: Dict ast_to_ir.FnInfo,
                    lambda_ctr_ref: Ref Int, lifted_idx_ref: Ref (Dict Int),
                    acc: List (String, (Bool, Set))) ->
     Result String (List (String, (Bool, Set))) !{IO} =
@@ -224,7 +224,7 @@ fn summarize_decls(decls: List typed_ast.TypedDecl,
 
 fn summarize_workers(names: List String, worker_set: Set, decls: List typed_ast.TypedDecl,
                      ctors: Dict sprout_ir.CtorInfo, top_level: Set, let_names: Set,
-                     fn_arities: Dict Int, adt_index: Dict (List (Int, Int)),
+                     fn_arities: Dict ast_to_ir.FnInfo, adt_index: Dict (List (Int, Int)),
                      lambda_ctr_ref: Ref Int, lifted_idx_ref: Ref (Dict Int),
                      acc: List (String, (Bool, Set))) ->
     Result String (List (String, (Bool, Set))) !{IO} =
@@ -250,13 +250,14 @@ fn summarize_workers(names: List String, worker_set: Set, decls: List typed_ast.
 # does not perturb the emit pass's lambda/index state.
 # Combine the raw per-fn summary list into BOTH the may-trigger-GC summary and the
 # mutual-TCO eligible-edge map (same call graph, two consumers).
-fn finalize_summaries(raw: List (String, (Bool, Set)), arities: Dict Int, ret_i64: Dict Bool) ->
+fn finalize_summaries(raw: List (String, (Bool, Set)), arities: Dict ast_to_ir.FnInfo,
+                      ret_i64: Dict Bool) ->
     (Dict Bool, Dict (List (String, Int))) =
   (ir_rooting.summary_from_raw(raw), ast_to_ir.mutual_build_eligible(raw, arities, ret_i64))
 
 fn build_alloc_summary(decls: List typed_ast.TypedDecl,
                        ctors: Dict sprout_ir.CtorInfo,
-                       top_level: Set, let_names: Set, fn_arities: Dict Int,
+                       top_level: Set, let_names: Set, fn_arities: Dict ast_to_ir.FnInfo,
                        ret_i64: Dict Bool,
                        runtime_lets: List (source.GlobalName, typed_ast.TypedExpr)) ->
     Result String (Dict Bool, Dict (List (String, Int))) !{IO} =
@@ -267,7 +268,7 @@ fn build_alloc_summary(decls: List typed_ast.TypedDecl,
                           pp_lambda_ref, pp_lifted_ref, Nil) with
     | Err msg -> Err(msg)
     | Ok after_decls ->
-        match ast_to_ir.collect_worker_callees(decls, top_level, ctors) with
+        match ast_to_ir.collect_worker_callees(decls, top_level, ctors, fn_arities) with
         | wset ->
             match summarize_workers(set_to_list(wset), wset, decls, ctors, top_level, let_names,
                                     fn_arities, ast_to_ir.build_adt_ctor_index(decls, ctors),
@@ -299,7 +300,7 @@ fn build_alloc_summary(decls: List typed_ast.TypedDecl,
 # swallows no real diagnostics.
 fn alloc_summary_or_empty(decls: List typed_ast.TypedDecl,
                           ctors: Dict sprout_ir.CtorInfo,
-                          top_level: Set, let_names: Set, fn_arities: Dict Int,
+                          top_level: Set, let_names: Set, fn_arities: Dict ast_to_ir.FnInfo,
                           ret_i64: Dict Bool,
                           runtime_lets: List (source.GlobalName, typed_ast.TypedExpr)) ->
     (Dict Bool, Dict (List (String, Int))) !{IO} =
@@ -336,7 +337,8 @@ export fn compile_program_streaming(prog: typed_ast.TypedProgram) ->
                 lifted_idx_ref <- ref_new(dict_empty())
                 let let_names = ast_to_ir.build_top_level_let_names(decls)
                 let top_level_set = ast_to_ir.build_top_level_set(decls, ctors)
-                let fn_arities = ast_to_ir.build_fn_arities(decls)
+                let fn_arities = ast_to_ir.build_fn_arities(decls,
+                                   ast_to_ir.build_adt_ctor_index(decls, ctors))
                 let ret_i64 = ast_to_ir.build_ret_i64(decls)
                 let classified = ast_to_ir.classify_let_decls_ir(decls)
                 let externs = ast_to_ir.collect_extern_decls(decls)
@@ -358,7 +360,8 @@ export fn compile_program_streaming(prog: typed_ast.TypedProgram) ->
                                          lambda_ctr_ref, lifted_idx_ref, init_state) with
                       | Err msg -> Err(msg)
                       | Ok after_decls ->
-                        match ast_to_ir.collect_worker_callees(decls, top_level_set, ctors) with
+                        match ast_to_ir.collect_worker_callees(decls, top_level_set, ctors,
+                                                               fn_arities) with
                         | wset ->
                         match stream_workers(
                                 set_to_list(wset), wset,

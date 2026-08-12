@@ -1,0 +1,35 @@
+import stdlib.test (check_eq, run_suite)
+
+# The CPR worker ABI must hold for the prelude's generic combinators, which is
+# where this bug reaches real code: `list_fold` is declared `-> b`, so matching
+# directly on a call to it used to route to a worker that returned
+# { payload, out-of-bounds } where the call site expected { tag, field0 }.
+# See docs/bug-adt-through-generic-param-2026-08-12.md.
+
+fn keep_first(acc: Maybe Int, x: Int, k: Int) -> Maybe Int =
+  match acc with
+  | Just v -> Just(v)
+  | Nothing -> if x > k then Just(x) else Nothing
+
+# The scrutinee is a DIRECT call to a generic combinator — the shape that routes.
+fn first_gt(xs: List Int, k: Int) -> Int =
+  match list_fold(\ (acc, x) -> keep_first(acc, x, k), Nothing, xs) with
+  | Just v -> v
+  | Nothing -> 0
+
+# A user-declared generic fn, matched directly on its call.
+fn ident(x: a) -> a = x
+
+fn through_ident(m: Maybe Int) -> Int =
+  match ident(m) with
+  | Just v -> v
+  | Nothing -> 0
+
+fn main() -> Unit !{IO} =
+  run_suite("cpr_generic_result", [
+    check_eq("fold finding nothing returns the Nothing arm", first_gt([1, 2, 3], 99), 0),
+    check_eq("fold finding a payload returns it", first_gt([1, 5, 3], 4), 5),
+    check_eq("payload equal to a ctor tag is not misread", first_gt([1, 5, 3], 0), 1),
+    check_eq("Just through a generic identity", through_ident(Just(7)), 7),
+    check_eq("Nothing through a generic identity", through_ident(Nothing), 0)
+  ])

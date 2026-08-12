@@ -1,0 +1,27 @@
+# Regression: an ADT value passed through a POLYMORPHIC parameter is corrupted.
+#
+# `ident` does nothing but return its argument, yet matching its result fails at
+# runtime with "non-exhaustive match" while matching the SAME value directly
+# succeeds. See docs/bug-adt-through-generic-param-2026-08-12.md.
+#
+# Expected stdout is "7\n7\n" — both lines. Today the first prints and the second
+# aborts, so the fixture is quarantined in XFAIL until the bug is fixed.
+
+type Box = Full Int | Empty
+
+fn ident(x: a) -> a = x
+
+fn direct() -> Int =
+  match Full(7) with
+  | Full v -> v
+  | Empty -> 0
+
+fn through_generic() -> Int =
+  match ident(Full(7)) with
+  | Full v -> v
+  | Empty -> 0
+
+fn main() -> Unit !{IO} =
+  do
+    print(direct())
+    print(through_generic())

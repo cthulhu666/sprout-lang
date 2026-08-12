@@ -1,0 +1,58 @@
+# Regression: the CPR worker ABI must agree with the call site for EVERY shape
+# that routes through a polymorphic result. See
+# docs/bug-adt-through-generic-param-2026-08-12.md.
+#
+# Constructor tags are numbered across the whole program: Full=0, Empty=1,
+# Two=2, Only=3. That matters for `tag_collision` below.
+#
+# Before the fix, A and B returned silently WRONG answers (no crash) and C
+# aborted; D and E were already correct and guard against over-correcting.
+
+type Box = Full Int | Empty
+type Pair = Two Int Int
+type One = Only Int
+
+fn ident(x: a) -> a = x
+
+# A. A nullary ctor through the generic, matched directly. The mis-lowered
+#    worker read two words off the end of a 0-field object and picked the wrong
+#    arm — it returned 0, not 999.
+fn nullary_through() -> Int =
+  match ident(Empty) with
+  | Full v -> v
+  | Empty -> 999
+
+# B. A payload whose VALUE equals a valid ctor tag (Empty = 1). Reading the
+#    payload as the tag took the `Empty` arm and returned 111 silently.
+fn tag_collision() -> Int =
+  match ident(Full(1)) with
+  | Full v -> v
+  | Empty -> 111
+
+# C. Single constructor with a payload: proves this was never about
+#    exhaustiveness. Aborted with "non-exhaustive match" before the fix.
+fn single_ctor() -> Int =
+  match ident(Only(5)) with
+  | Only v -> v
+
+# D. Arity-2 ctor: too wide for the width-2 router, so it was never routed.
+fn two_field() -> Int =
+  match ident(Two(3, 4)) with
+  | Two a b -> a * 10 + b
+
+# E. Let-bound scrutinee: the boxed path, correct throughout.
+fn let_bound() -> Int =
+  let
+    y = ident(Full(7))
+  in
+  match y with
+  | Full v -> v
+  | Empty -> 222
+
+fn main() -> Unit !{IO} =
+  do
+    print(nullary_through())
+    print(tag_collision())
+    print(single_ctor())
+    print(two_field())
+    print(let_bound())
