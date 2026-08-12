@@ -2368,6 +2368,7 @@ ci-fast-gates: bootstrap-from-seed build-fmt-from-seed
     "stack-overflow-smoke|stack-overflow-smoke"
     "flush-on-crash-smoke|flush-on-crash-smoke"
     "task-io-smoke|task-io-smoke"
+    "http-client-binary|http-client-binary-gate"
     "tco-runtime-smoke|tco-runtime-smoke"
     "trace-dispatch-smoke|trace-dispatch-smoke"
     "verify-dispatch-smoke|verify-dispatch-smoke"
