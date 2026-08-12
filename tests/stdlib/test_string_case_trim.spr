@@ -1,0 +1,45 @@
+import stdlib.test (check_eq, run_suite)
+import stdlib.string as string
+
+# Correctness of the O(n) rewrites of `string.to_lower_ascii` (new) and `string.trim`
+# (code review finding 5). The previous implementations rebuilt an immutable String one codepoint at
+# a time — Θ(n²) per header line — and were replaced with byte-scan / bulk-join versions. Both must
+# preserve the exact old semantics AND leave multibyte UTF-8 untouched, which is the property a
+# byte-level rewrite most risks getting wrong.
+
+fn main() -> Unit !{IO} =
+  run_suite("string case + trim", [
+    # ── to_lower_ascii ──────────────────────────────────────────────────────────────────────────
+    check_eq("lower all-upper", string.to_lower_ascii("ABC"), "abc"),
+    check_eq("lower mixed + digits", string.to_lower_ascii("aBcD123"), "abcd123"),
+    check_eq("lower empty", string.to_lower_ascii(""), ""),
+    check_eq("lower already-lower", string.to_lower_ascii("already lower"), "already lower"),
+    check_eq("lower header name", string.to_lower_ascii("X-Forwarded-For"), "x-forwarded-for"),
+    check_eq("lower underscores/dots", string.to_lower_ascii("MiXeD.Name_A"), "mixed.name_a"),
+    # Boundary bytes around A..Z must be untouched: '@' is 0x40 (just below 'A'), '[' is 0x5B (just
+    # above 'Z'). A wrong range check (>= '@' or <= '[') would corrupt these.
+    check_eq("lower boundary @AZ[", string.to_lower_ascii("@AZ["), "@az["),
+    # UTF-8 safety: only ASCII A..Z change. É (U+00C9, an uppercase non-ASCII letter, 2 bytes) must
+    # pass through byte-for-byte, and an ASCII 'B' adjacent to it must still lowercase.
+    check_eq("lower keeps É, lowers ASCII", string.to_lower_ascii("aÉB"), "aÉb"),
+    check_eq("lower all-nonascii unchanged", string.to_lower_ascii("café"), "café"),
+
+    # ── trim ────────────────────────────────────────────────────────────────────────────────────
+    check_eq("trim both sides", string.trim("  hi  "), "hi"),
+    check_eq("trim mixed ws", string.trim("\t\n hi \r\n"), "hi"),
+    check_eq("trim empty", string.trim(""), ""),
+    check_eq("trim all-ws to empty", string.trim("   "), ""),
+    check_eq("trim no-op", string.trim("no-trim"), "no-trim"),
+    check_eq("trim leading only", string.trim("   leading"), "leading"),
+    check_eq("trim trailing only", string.trim("trailing   "), "trailing"),
+    # Interior whitespace is preserved; only the ends are stripped.
+    check_eq("trim keeps interior ws", string.trim("  a b  c  "), "a b  c"),
+    # UTF-8 body preserved when trimming ASCII whitespace off the ends.
+    check_eq("trim keeps utf8 body", string.trim("  café  "), "café"),
+
+    # trim_left / trim_right independently.
+    check_eq("trim_left", string.trim_left("  x "), "x "),
+    check_eq("trim_right", string.trim_right("  x "), "  x"),
+    check_eq("trim_left all-ws", string.trim_left("   "), ""),
+    check_eq("trim_right all-ws", string.trim_right("   "), "")
+  ])

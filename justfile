@@ -1761,7 +1761,18 @@ task-io-smoke: bootstrap-from-seed
   build tests/task_io_smoke/http_request_cancel_drop.spr
   ( ulimit -n 64; run_once "http-cancel-drop" "http-cancel-drop-ok" )
   ( ulimit -n 64; SPROUT_GC_STRESS=1 run_once "http-cancel-drop/stress" "http-cancel-drop-ok" )
-  echo "==> task-io-smoke ✓ (read-park, accept-park, re-arm, http-serve-concurrency, http-conn-error-isolation, tcp-read-some-bad-args, write, cancel-drop, await-guard, timer-drop, timeout-drop, timeout-nested-guard, chan-cancel-drop, chan-timeout-drop, chan-negative-cap-guard, rendezvous-send-drop, send-on-closed-guard, double-close-guard, send-parked-close-guard, select-cancel-drop, select-timeout-drop, connect-park, http-idle-timeout, http-header-flood, http-write-timeout, http-body-timeout, http-body-bounds, http-pooled-serve, read-poll-once, read-deadline-loses-to-data, http-utf8-body, http-binary-body, tcp-accept-bad-handle, http-accept-exhaustion, tcp-nul-payload, http-request-parks, http-request-total-deadline, http-cancel-drop; interleaved; stress-clean)"
+  # (31) http_server header-parse must be LINEAR per header line. `parse_header_pair` lowercased the
+  # field-name and trimmed the value by rebuilding a String one codepoint at a time — Θ(n²), and
+  # nothing yields mid-parse, so one connection's parse froze every green task. The fixture sends a
+  # single header line whose 30 000-byte name and 30 000-space value drive both helpers, kept under
+  # max_header_bytes so it is PARSED (not 431-rejected). The probe is a sibling on a 50 ms timer; the
+  # unfixed parse pins the pump for ~1 s (measured 1058 ms), so a 50 ms sleep overruns to seconds —
+  # RED as "scheduler FROZEN". No /stress twin: collect-on-every-alloc trips the GC livelock guard on
+  # the large pure O(n)-piece build (a stress-mode artifact — threshold GC and HDRCHECK are both
+  # clean), and this fixture's value is the liveness measurement, which stress does not sharpen.
+  build tests/task_io_smoke/http_header_lower_parks.spr
+  run_once "http-header-lower-parks" "scheduler stayed live"
+  echo "==> task-io-smoke ✓ (read-park, accept-park, re-arm, http-serve-concurrency, http-conn-error-isolation, tcp-read-some-bad-args, write, cancel-drop, await-guard, timer-drop, timeout-drop, timeout-nested-guard, chan-cancel-drop, chan-timeout-drop, chan-negative-cap-guard, rendezvous-send-drop, send-on-closed-guard, double-close-guard, send-parked-close-guard, select-cancel-drop, select-timeout-drop, connect-park, http-idle-timeout, http-header-flood, http-write-timeout, http-body-timeout, http-body-bounds, http-pooled-serve, read-poll-once, read-deadline-loses-to-data, http-utf8-body, http-binary-body, tcp-accept-bad-handle, http-accept-exhaustion, tcp-nul-payload, http-request-parks, http-request-total-deadline, http-cancel-drop, http-header-lower-parks; interleaved; stress-clean)"
 
 # ── Linux gate (local, container-backed) ──────────────────────────────────────
 #

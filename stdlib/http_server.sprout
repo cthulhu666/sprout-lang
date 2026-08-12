@@ -157,21 +157,6 @@ fn find_headers_end(raw: String) -> Maybe Int =
 fn find_line_end(raw: String) -> Maybe Int =
   string.find(raw, "\r\n")
 
-fn char_at(raw: String, index: Int) -> Char =
-  string.char_at_or(raw, index, '?')
-
-fn lower_char(ch: Char) -> Char =
-  match string.find("ABCDEFGHIJKLMNOPQRSTUVWXYZ", string.string_from_char(ch)) with
-  | Nothing -> ch
-  | Just pos -> string.char_at_or("abcdefghijklmnopqrstuvwxyz", pos, '?')
-
-fn lower_ascii_from(raw: String, index: Int, total: Int, acc: String) -> String =
-  if index >= total then acc
-  else lower_ascii_from(raw, index + 1, total, string.concat(acc, string.string_from_char(lower_char(char_at(raw, index)))))
-
-fn lower_ascii(raw: String) -> String =
-  lower_ascii_from(raw, 0, string.length(raw), "")
-
 # Cut the header block into lines on CRLF, STRICTLY — a bare CR or bare LF left inside a line is a
 # rejection, not a separator and not something to delete.
 #
@@ -194,8 +179,9 @@ fn lower_ascii(raw: String) -> String =
 #
 # Cutting on the separator with str_find (a strstr) rather than walking codepoints also retires the
 # per-character `char_at_or`, which is O(index) and so was quadratic across the 64 KiB the header cap
-# admits. NB that is not the whole of that quadratic — `lower_ascii` and `trim` still rebuild a
-# String per character, and remain quadratic in the length of a SINGLE header line (BACKLOG).
+# admits. The other half of that quadratic — the per-character rebuild in the old local `lower_ascii`
+# and in `string.trim` — is gone too: both now run O(n) over Bytes (`string.to_lower_ascii` /
+# `string.trim`), so no single header line can freeze the pump (code review finding 5).
 fn split_header_lines(raw: String, acc: Vec String) -> ServerResult (Vec String) =
   match string.find(raw, "\r\n") with
   | Nothing ->
@@ -217,7 +203,7 @@ fn parse_header_pair(pair: (String, String)) -> Maybe (String, String) =
   match pair with
   | (name, value) ->
       if string.is_empty(name) then Nothing
-      else Just((lower_ascii(string.trim(name)), string.trim(value)))
+      else Just((string.to_lower_ascii(string.trim(name)), string.trim(value)))
 
 fn parse_header_line(raw: String) -> Maybe (String, String) =
   and_then(parse_header_pair, string.split_once(raw, ":"))
@@ -684,7 +670,7 @@ export fn with_header(name: String, value: String, resp: HttpServerResponse) -> 
   match resp with
   | HttpServerResponse status headers body -> HttpServerResponse(status, dict_set(header_name, value, headers), body)
 where
-  header_name = lower_ascii(name)
+  header_name = string.to_lower_ascii(name)
 
 # --- Routing ---------------------------------------------------------------
 # A route pairs an HTTP method and an exact path with a handler. `dispatch` scans
@@ -767,7 +753,7 @@ export fn request_header(name: String, req: HttpRequest) -> Maybe String =
   match req with
   | HttpRequest _ _ meta ->
       match meta with
-      | HttpRequestMeta _ headers _ -> dict_get(lower_ascii(name), headers)
+      | HttpRequestMeta _ headers _ -> dict_get(string.to_lower_ascii(name), headers)
 
 # --- Request params (low-level, lossless) --------------------------------------
 # Params are derived on demand from the already-parsed request (mirroring
@@ -825,8 +811,8 @@ where
 # (so "application/x-www-form-urlencoded; charset=utf-8" -> the bare media type).
 fn media_type(content_type: String) -> String =
   match string.split_once(content_type, ";") with
-  | Nothing -> lower_ascii(string.trim(content_type))
-  | Just parts -> match parts with | (media, _) -> lower_ascii(string.trim(media))
+  | Nothing -> string.to_lower_ascii(string.trim(content_type))
+  | Just parts -> match parts with | (media, _) -> string.to_lower_ascii(string.trim(media))
 
 fn is_form_urlencoded(req: HttpRequest) -> Bool =
   match request_header("content-type", req) with

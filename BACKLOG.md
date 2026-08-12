@@ -1301,15 +1301,24 @@ Legend:
   Needs an accessor returning all values for a name (Go's `Header` is `map[string][]string`; Rust's
   `HeaderMap` is multi-map) alongside the existing single-value `request_header`. Raised 2026-08-11
   by the http-subsystem code review (finding 3), which found the framing half.
-- [ ] `P2` **Header parsing is still quadratic in a single header line's length.** The 2026-08-11 fix
-  retired the worst term — `split_header_lines` now cuts on `\r\n` with `str_find` instead of walking
-  the block with `char_at_or`, which is O(index) per read and so was ~6e9 steps over the 64 KiB
-  `max_header_bytes` admits (measured by the code review's verifier at ~23 ms for 50 headers rising
-  superlinearly). What remains: `lower_ascii` and `string.trim` rebuild a `String` per character, so
-  one 64 KiB header LINE is still quadratic, and the parse has no yield point — on the single-threaded
-  cooperative scheduler a CPU-bound parse freezes the accept loop and every in-flight handler, with no
-  I/O to park on. Wants either byte-oriented in-place casing/trimming or a `Builder`, plus a
-  `task_yield` at a line boundary. Raised 2026-08-11 by the http-subsystem code review (finding 5).
+- [x] `P2` **Header parsing was quadratic in a single header line's length.** *(Done 2026-08-12.)*
+  The 2026-08-11 fix had retired the worst term (`split_header_lines` cuts on `\r\n` with `str_find`
+  instead of the O(index)-per-read `char_at_or` walk). What remained was `lower_ascii` and
+  `string.trim`, which rebuilt a `String` one codepoint at a time — Θ(n²) per header LINE, with no
+  yield point, so on the single-threaded cooperative scheduler one connection's parse froze the accept
+  loop and every in-flight handler. Measured at these sizes: a ~1 s freeze over a 30 000-byte name +
+  30 000-space value. Fixed by rewriting both as O(n) over `Bytes` (O(1) indexed access) in
+  `stdlib/string.sprout`: `trim`/`trim_left`/`trim_right` scan for the non-whitespace bounds and slice
+  once; the new `string.to_lower_ascii` coalesces unchanged runs into verbatim slices and joins in one
+  `string_concat_many` pass. `http_server`'s local `lower_ascii` (and its `char_at`/`lower_char`
+  helpers) are deleted in favour of the shared stdlib function. Both are byte-exact on multibyte UTF-8
+  (the only split points are ASCII whitespace / A..Z, always single-codepoint). No `task_yield` was
+  needed — O(n) over a 64 KiB line is sub-millisecond, so the freeze is gone without a yield point.
+  Regression: `tests/task_io_smoke/http_header_lower_parks.spr` (liveness, RED at 1058 ms) +
+  `tests/stdlib/test_string_case_trim.spr` (correctness incl. UTF-8). Lesson worth keeping: Sprout's
+  persistent `Vec`/`Builder` appends are all full-copy, so a byte-by-byte fold through EITHER is still
+  Θ(n²) — a genuinely O(n) pure build needs `string_concat_many` (bulk join) or divide-and-conquer,
+  not an accumulator. Raised 2026-08-11 by the http-subsystem code review (finding 5).
 - [ ] `P3` **`bytes_slice`'s extern declaration has misleading parameter names.**
   `stdlib/prelude.sprout` and `stdlib/bytes.sprout` declare `bytes_slice(b: Bytes, from: Int, to: Int)`,
   but the C implementation takes `(start, count)` and clamps `count` — `bytes.slice`'s wrapper gets it
