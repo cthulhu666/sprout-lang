@@ -13,13 +13,19 @@ import stdlib.string as string
 # `dup_cstr`, i.e. `strlen`, which stops at the first NUL. Everything after it was freed with the
 # response buffer. Nothing reported an error: the caller got `Ok` and a short body.
 #
-# ONE BINARY, TWO ROLES, selected by argv. That is not tidiness — it is forced. `http_request` is a
-# blocking builtin (it never calls scheduler_park_on_fd*), so a server green-task and an http_get in
-# the SAME process deadlock: the client freezes the pump before the server can accept. The peer must
-# therefore be a separate OS process, and making it this same program keeps the fixture free of any
-# external dependency. An earlier version used a python3 helper and broke immediately — python3 is
-# absent from the Linux smoke container, so `just linux-run http-client-binary-gate` could not run
-# the gate at all.
+# ONE BINARY, TWO ROLES, selected by argv, run as two OS PROCESSES.
+#
+# This shape was originally forced: `http_request` was a blocking builtin, so a server green-task
+# and an http_get in the same process deadlocked — the client froze the pump before the server could
+# accept. That is no longer true (the client parks now; see tests/task_io_smoke/http_request_parks.spr),
+# so a single-process version would work. The two processes are KEPT deliberately, because they buy
+# something the in-process fixtures cannot: the client is exercised against a peer with an entirely
+# separate scheduler, so a body arriving split across several kernel reads is driven by real socket
+# timing rather than by cooperative scheduling inside one pump.
+#
+# Making the peer this same program keeps the fixture free of any external dependency. An earlier
+# version used a python3 helper and broke immediately — python3 is absent from the Linux smoke
+# container, so `just linux-run http-client-binary-gate` could not run the gate at all.
 #
 #   binary_body serve <port>    one process, serves two connections, then exits
 #   binary_body <port>          the client, printing the byte count it received on each path

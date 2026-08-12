@@ -1,0 +1,54 @@
+import stdlib.task (Scope, with_scope, task_spawn, task_sleep)
+import stdlib.http_client (http_get)
+import stdlib.net (TcpListener, close_listener, listen_local)
+import stdlib.string as string
+
+# Regression (code review, finding 6): `http_request` must PARK the green task, never block the OS
+# thread. While it blocks, the pump cannot run — no sibling task advances and no timer fires, so a
+# single slow HTTP call freezes every green task in the process.
+#
+# The probe is a sibling that is ALREADY PARKED ON A TIMER when the request begins, because that is
+# the thing a blocked OS thread cannot serve. Spawn order carries the whole setup:
+#
+#   1. `probe` runs first, stamps t0, and parks on a 50 ms timer — control returns to the pump.
+#   2. `caller` runs and issues an HTTP request to a port that will never answer.
+#   3. The pump can only poll once `caller` yields. Blocking code never does, so the probe's timer —
+#      due 50 ms in — is not serviced until the request gives up 2000 ms later.
+#
+# So the measurement is one-sided and not a timing race: a 50 ms sleep may legitimately overrun by a
+# few ms, but it can only reach hundreds of ms if the pump was unreachable. 500 ms is the threshold
+# with a 10x margin under the 2000 ms freeze the bug produces.
+#
+# The listener is deliberately never `accept`ed. A bound socket completes the TCP handshake in the
+# KERNEL (up to the listen backlog), so the client connects and sends successfully and then waits
+# for a response that no green task will ever write — the request stalls in its read with no second
+# Sprout task involved. That keeps the fixture hermetic: no peer process, no network, and the stall
+# is exactly as long as the client's own timeout.
+fn probe() -> Unit !{IO} =
+  do
+    t0 <- time_now_micros()
+    task_sleep(50)
+    t1 <- time_now_micros()
+    report((t1 - t0) / 1000)
+
+fn report(elapsed_ms: Int) -> Unit !{IO} =
+  if elapsed_ms < 500 then term_write("scheduler stayed live\n")
+  else term_write(string.concat("scheduler FROZEN for ", string.concat(int_to_string(elapsed_ms), " ms\n")))
+
+# The result is intentionally discarded: the assertion is about the SCHEDULER, not about this
+# request, which is expected to end in `Err HttpTimeout` either way.
+fn caller() -> Unit !{IO} =
+  match http_get("http://127.0.0.1:28990/", "", 2000) with
+  | Ok _ -> term_write("")
+  | Err _ -> term_write("")
+
+fn run(s: Scope) -> Unit !{IO} =
+  do
+    task_spawn(s, \_ -> probe())
+    task_spawn(s, \_ -> caller())
+
+fn main() -> Unit !{IO} =
+  do
+    listener <- listen_local(28990)
+    with_scope(\s -> run(s))
+    close_listener(listener)

@@ -8,10 +8,11 @@
 #   /chunked  Transfer-Encoding   -> http_decode_chunked_body measured chunk data with strlen and
 #                                    reported "truncated chunk data", failing a valid response
 #
-# TWO PROCESSES, one binary. `http_request` is a blocking builtin (it never calls
-# scheduler_park_on_fd*), so a Sprout server green-task and a Sprout http_get in the SAME process
-# deadlock — the client freezes the scheduler pump before the server can accept. The peer therefore
-# has to be a separate OS process, and tests/http_client/binary_body.spr plays both roles by argv.
+# TWO PROCESSES, one binary; tests/http_client/binary_body.spr plays both roles by argv. This was
+# once forced — `http_request` blocked the OS thread, so a Sprout server task and a Sprout http_get
+# in the same process deadlocked. The client parks now, so the split is no longer required; it is
+# retained because it drives the client from a peer with its own scheduler, making the multi-read
+# delivery of a body a matter of real socket timing rather than cooperative scheduling.
 #
 # The peer is deliberately NOT a python3 helper: python3 is absent from the Linux smoke container,
 # so `just linux-run http-client-binary-gate` could not run the gate at all. Using the fixture

@@ -1,0 +1,74 @@
+import stdlib.task (TimeoutResult, Completed, Expired, with_timeout)
+import stdlib.net (TcpListener, close_listener, listen_local)
+import stdlib.http_client (http_get)
+import stdlib.string as string
+
+# Cancelling an in-flight HTTP request must FREE what the request was holding — the socket, and the
+# malloc'd buffers the C frame owns.
+#
+# This surface did not exist before the client parked. A blocking `http_request` could never be
+# force-dropped mid-request, because a task that never parks is never suspended in the poller and so
+# is never a candidate for `force_drop_task`. Making the client park is what put it there, and
+# `force_drop_task` frees a parked task's green stack WITHOUT unwinding the C frame on it: every
+# malloc the frame owns leaks, and every fd it owns leaks with it. The runtime answers with two
+# mechanisms and this fixture exercises both at once:
+#
+#   * the fd, via the unowned-fd park (`Task.park_close_fd`) — the client's socket is never entered
+#     into the connection handle table, so the parked frame is its ONLY reference and the drop is
+#     the last thing that could close it;
+#   * the request/response buffers and the parsed URL, via `scheduler_set_park_cleanup`. The usual
+#     rule ("whatever is held across a park lives on the task stack") cannot apply to a response
+#     buffer that grows across arbitrarily many parks.
+#
+# HOW A LEAK IS DETECTED. Leaks are invisible in a passing run, so the recipe runs this under
+# `ulimit -n 64` — the same technique `connect_park.spr` uses. Each cancelled request that failed to
+# close its socket would retain one descriptor; 80 of them exhaust a 64-descriptor table part-way
+# through, `socket()` starts failing, and the run reports the shortfall instead of the marker. This
+# is a descriptor-budget assertion, so it catches ANY per-cancellation descriptor leak on the path,
+# not only the one it was written for.
+#
+# The stall is hermetic. The listener is bound and never accepted, so the kernel completes each
+# handshake itself and the client is left waiting for a response no task will ever write; the only
+# thing that ends the request is the `with_timeout` deadline. There is no peer process, no network,
+# and no dependence on how long anything takes.
+fn port() -> Int = 28983
+
+# 20 ms deadline against a 60000 ms request budget. The gap is what makes the outcome unambiguous:
+# every one of these must end as `Expired` (the deadline force-dropped a parked task), and none can
+# reach the request's own timeout, which would be a different code path entirely.
+fn attempt() -> Bool !{IO} =
+  match with_timeout(20, \_ -> request_once()) with
+  | Expired -> true
+  | Completed _ -> false
+
+fn request_once() -> Bool !{IO} =
+  match http_get(url(), "", 60000) with
+  | Ok _ -> true
+  | Err _ -> true
+
+fn url() -> String =
+  string.concat("http://127.0.0.1:", string.concat(int_to_string(port()), "/"))
+
+# 80 iterations against a 64-descriptor cap: a one-per-cancellation leak cannot survive the count.
+fn expected() -> Int = 80
+
+fn drive(remaining: Int, expired: Int) -> Int !{IO} =
+  if remaining <= 0 then expired
+  else if attempt() then drive(remaining - 1, expired + 1)
+  else drive(remaining - 1, expired)
+
+fn report(expired: Int) -> Unit !{IO} =
+  if expired == expected() then term_write("http-cancel-drop-ok\n")
+  else
+    term_write(
+      string.concat(
+        "http-cancel-drop FAILED: only ",
+        string.concat(int_to_string(expired), string.concat(" of ", string.concat(int_to_string(expected()), " requests were force-dropped\n")))
+      )
+    )
+
+fn main() -> Unit !{IO} =
+  do
+    listener <- listen_local(port())
+    report(drive(expected(), 0))
+    close_listener(listener)

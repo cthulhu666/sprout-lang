@@ -1737,7 +1737,31 @@ task-io-smoke: bootstrap-from-seed
   run_once "tcp-nul-payload" "nul-bytes-intact"
   run_once "tcp-nul-payload/decode" "nul-decode-refused"
   SPROUT_GC_HDRCHECK=1 run_once "tcp-nul-payload/hdrcheck" "nul-bytes-intact"
-  echo "==> task-io-smoke ✓ (read-park, accept-park, re-arm, http-serve-concurrency, http-conn-error-isolation, tcp-read-some-bad-args, write, cancel-drop, await-guard, timer-drop, timeout-drop, timeout-nested-guard, chan-cancel-drop, chan-timeout-drop, chan-negative-cap-guard, rendezvous-send-drop, send-on-closed-guard, double-close-guard, send-parked-close-guard, select-cancel-drop, select-timeout-drop, connect-park, http-idle-timeout, http-header-flood, http-write-timeout, http-body-timeout, http-body-bounds, http-pooled-serve, read-poll-once, read-deadline-loses-to-data, http-utf8-body, http-binary-body, tcp-accept-bad-handle, http-accept-exhaustion, tcp-nul-payload; interleaved; stress-clean)"
+  # (30) The HTTP CLIENT must PARK, not block the OS thread. `http_request` ran on a blocking socket
+  # bounded by SO_RCVTIMEO/SO_SNDTIMEO, so every call froze the pump for its whole duration: no
+  # sibling task advanced and no timer fired. Measured on the unfixed runtime, a 2000 ms request
+  # froze the scheduler for 2001 ms. The probe is a sibling already parked on a 50 ms timer when the
+  # request starts — the thing a blocked thread cannot serve — so the RED is a 50 ms sleep that
+  # takes seconds. One-sided: no amount of scheduling jitter reaches the 500 ms threshold.
+  build tests/task_io_smoke/http_request_parks.spr
+  run_once "http-request-parks" "scheduler stayed live"
+  SPROUT_GC_STRESS=1 run_once "http-request-parks/stress" "scheduler stayed live"
+  # (30b) `timeout_ms` is a TOTAL request budget (Go's http.Client.Timeout / reqwest's timeout), not
+  # an idle one that progress re-arms. A semantics guard rather than a bug reproduction: the two
+  # readings are indistinguishable on any well-behaved peer, so the fixture is a server that drips
+  # one byte per 100 ms for 3 s against a 400 ms client. Negative control: re-stamping the deadline
+  # on each successful read makes it report 3123 ms and fail.
+  build tests/task_io_smoke/http_request_total_deadline.spr
+  run_once "http-request-total-deadline" "client honored its total deadline"
+  # (30c) Cancelling an in-flight request must free the socket AND the buffers the C frame owns.
+  # New surface: a blocking client could never be force-dropped mid-request because it never parked.
+  # Run under `ulimit -n 64` like connect-park, so a per-cancellation descriptor leak exhausts the
+  # table part-way through 80 attempts and reports a shortfall. Negative control: parking via the
+  # owned-fd entry point (no close-on-drop) yields "only 59 of 80".
+  build tests/task_io_smoke/http_request_cancel_drop.spr
+  ( ulimit -n 64; run_once "http-cancel-drop" "http-cancel-drop-ok" )
+  ( ulimit -n 64; SPROUT_GC_STRESS=1 run_once "http-cancel-drop/stress" "http-cancel-drop-ok" )
+  echo "==> task-io-smoke ✓ (read-park, accept-park, re-arm, http-serve-concurrency, http-conn-error-isolation, tcp-read-some-bad-args, write, cancel-drop, await-guard, timer-drop, timeout-drop, timeout-nested-guard, chan-cancel-drop, chan-timeout-drop, chan-negative-cap-guard, rendezvous-send-drop, send-on-closed-guard, double-close-guard, send-parked-close-guard, select-cancel-drop, select-timeout-drop, connect-park, http-idle-timeout, http-header-flood, http-write-timeout, http-body-timeout, http-body-bounds, http-pooled-serve, read-poll-once, read-deadline-loses-to-data, http-utf8-body, http-binary-body, tcp-accept-bad-handle, http-accept-exhaustion, tcp-nul-payload, http-request-parks, http-request-total-deadline, http-cancel-drop; interleaved; stress-clean)"
 
 # ── Linux gate (local, container-backed) ──────────────────────────────────────
 #
