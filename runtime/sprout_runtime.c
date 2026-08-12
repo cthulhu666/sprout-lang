@@ -6013,11 +6013,31 @@ static long long http_err_text(const char* ctor_name, const char* payload) {
   return http_err_cstr(ctor_name, dup_managed_cstr(payload, "http_request: out of memory"));
 }
 
-static long long http_ok_response(long long status, char* headers, char* body) {
+/* `body` is raw bytes with an explicit length, NOT a C string. It is copied into a BytesVal rather
+ * than registered as a cstr, because that is the only representation that can carry what a response
+ * body actually is: docs/spec-v0.md:64 makes a Sprout `String` valid UTF-8 and NUL-free, so minting
+ * one here from arbitrary network bytes broke the invariant twice over — truncating at a 0x00 and
+ * admitting invalid UTF-8 unchecked (nothing on this path called utf8_validate). This mirrors what
+ * the server side did for request bodies; a text caller decodes with `bytes.to_string`, which
+ * returns a Result and so puts the failure where it can be handled.
+ *
+ * Rooting: the headers cstr is registered and handled BEFORE the BytesVal is allocated, because
+ * sprout_alloc_bytes_val is a collection point (sprout_gc_maybe_collect_threshold) and an unrooted
+ * cstr would be reclaimed under it. sprout_alloc_bytes_data does not collect, so the half-built
+ * BytesVal between the two allocations is not exposed — the same shape bytes_slice/bytes_append use.
+ *
+ * OWNERSHIP: this takes both buffers. `headers` transfers through register_cstr as before; `body` is
+ * COPIED into GC-managed storage (it must be — a malloc'd C buffer cannot be a Bytes payload) and
+ * then freed here, so callers hand it over and do not free it themselves. */
+static long long http_ok_response(long long status, char* headers, char* body, size_t body_len) {
   headers = register_cstr(headers);
-  body = register_cstr(body);
   SPROUT_HANDLE(h_headers, (long long)(uintptr_t)headers);
-  SPROUT_HANDLE(h_body, (long long)(uintptr_t)body);
+  BytesVal* body_val = sprout_alloc_bytes_val("http_request: out of memory");
+  body_val->len = body_len;
+  body_val->data = sprout_alloc_bytes_data(body_len, "http_request: out of memory");
+  if (body_len > 0) memcpy(body_val->data, body, body_len);
+  free(body);
+  SPROUT_HANDLE(h_body, (long long)(uintptr_t)body_val);
   SPROUT_HANDLE(h_resp, sprout_make3(
     find_ctor_tag_by_name("stdlib.http.HttpResponse"),
     status,
@@ -6546,14 +6566,25 @@ static int hex_digit_value(char ch) {
   return -1;
 }
 
-static char* http_decode_chunked_body(const char* body, char** err) {
+/* Chunk FRAMING is text (a hex size, optional extensions, CRLF); chunk DATA is arbitrary bytes. This
+ * walked both with C string operations — `*cursor != '\0'` as a loop bound and `strlen(cursor)` as
+ * the count of bytes still available — so a 0x00 anywhere in chunk data ended the body early. It did
+ * not even fail quietly in the usual case: `strlen(cursor) < chunk_size` compared a truncated
+ * remainder against the chunk's real size and reported "truncated chunk data", turning a perfectly
+ * well-formed response into an `HttpDecode` error.
+ *
+ * Every scan is now bounded by `end` instead of by a NUL, and the decoded length is returned through
+ * `out_len` rather than being recoverable with strlen. `body_len` is exact: it descends from the
+ * ByteBuf that accumulated the recv, which has always tracked a true length. */
+static char* http_decode_chunked_body(const char* body, size_t body_len, size_t* out_len, char** err) {
   ByteBuf out;
   buf_init(&out);
   const char* cursor = body;
+  const char* end = body + body_len;
   while (1) {
-    while (*cursor == '\r' || *cursor == '\n') cursor++;
+    while (cursor < end && (*cursor == '\r' || *cursor == '\n')) cursor++;
     const char* size_start = cursor;
-    while (*cursor != '\0' && *cursor != '\r' && *cursor != '\n' && *cursor != ';') cursor++;
+    while (cursor < end && *cursor != '\r' && *cursor != '\n' && *cursor != ';') cursor++;
     const char* size_end = cursor;
     if (size_start == size_end) {
       free(out.data);
@@ -6570,22 +6601,24 @@ static char* http_decode_chunked_body(const char* body, char** err) {
       }
       chunk_size = (chunk_size * 16u) + (size_t)digit;
     }
-    while (*cursor != '\0' && *cursor != '\n') cursor++;
-    if (*cursor == '\n') cursor++;
+    while (cursor < end && *cursor != '\n') cursor++;
+    if (cursor < end && *cursor == '\n') cursor++;
     if (chunk_size == 0) {
-      while (*cursor == '\r' || *cursor == '\n') cursor++;
+      while (cursor < end && (*cursor == '\r' || *cursor == '\n')) cursor++;
       break;
     }
-    if (strlen(cursor) < chunk_size) {
+    /* Pointer arithmetic against the real end, not strlen: this is the comparison that used to
+     * reject a valid body whose chunk data contained a NUL. */
+    if ((size_t)(end - cursor) < chunk_size) {
       free(out.data);
       *err = dup_cstr("truncated chunk data");
       return NULL;
     }
     buf_append_bytes(&out, cursor, chunk_size);
     cursor += chunk_size;
-    if (cursor[0] == '\r' && cursor[1] == '\n') {
+    if (end - cursor >= 2 && cursor[0] == '\r' && cursor[1] == '\n') {
       cursor += 2;
-    } else if (cursor[0] == '\n') {
+    } else if (end - cursor >= 1 && cursor[0] == '\n') {
       cursor += 1;
     } else {
       free(out.data);
@@ -6593,10 +6626,21 @@ static char* http_decode_chunked_body(const char* body, char** err) {
       return NULL;
     }
   }
+  *out_len = out.len;
   return out.data != NULL ? out.data : dup_cstr("");
 }
 
-static long long http_response_result(char* response_data) {
+/* `response_len` is the exact byte count the recv loop accumulated, and taking it is the whole of the
+ * fix for the truncated-body defect. The buffer was always correct — buf_append_bytes memcpy's, so a
+ * 0x00 in the payload survives the read — but the length was dropped at this call boundary, leaving
+ * the body to be re-measured with strlen. A response whose body began "AAAA\0BBBB..." arrived as four
+ * bytes and an `Ok`.
+ *
+ * The status line and header block are still located with strstr, and that is deliberate rather than
+ * an oversight: those regions must be NUL-free to be valid HTTP at all, so a NUL there is a malformed
+ * response and stopping early is an acceptable reading of it. Only the BODY is arbitrary bytes, and
+ * only the body's extent is now derived from `response_len`. */
+static long long http_response_result(char* response_data, size_t response_len) {
   if (response_data == NULL || response_data[0] == '\0') {
     free(response_data);
     return http_err_text(
@@ -6646,7 +6690,12 @@ static long long http_response_result(char* response_data) {
 
   const char* headers_start = line_end + line_sep_len;
   char* headers = dup_slice(headers_start, (size_t)(sep - headers_start));
-  char* body_out = dup_cstr(sep + sep_len);
+  /* The body runs from just past the blank line to the END OF THE BUFFER — a span computed from
+   * `response_len`, never from strlen. `dup_slice` copies it byte-for-byte (memcpy), so NULs and
+   * invalid UTF-8 both survive; `body_len` is what carries the real extent from here on. */
+  const char* body_start = sep + sep_len;
+  size_t body_len = response_len - (size_t)(body_start - response_data);
+  char* body_out = dup_slice(body_start, body_len);
   char* transfer_encoding = http_header_value_ci(headers, "Transfer-Encoding");
   char* content_encoding = http_header_value_ci(headers, "Content-Encoding");
   if (content_encoding != NULL) {
@@ -6663,9 +6712,11 @@ static long long http_response_result(char* response_data) {
   if (transfer_encoding != NULL) {
     if (ascii_contains_token_ci(transfer_encoding, "chunked")) {
       char* chunk_err = NULL;
-      char* decoded = http_decode_chunked_body(body_out, &chunk_err);
+      size_t decoded_len = 0;
+      char* decoded = http_decode_chunked_body(body_out, body_len, &decoded_len, &chunk_err);
       free(body_out);
       body_out = decoded;
+      body_len = decoded_len;
       if (chunk_err != NULL) {
         free(transfer_encoding);
         free(headers);
@@ -6682,7 +6733,7 @@ static long long http_response_result(char* response_data) {
     free(transfer_encoding);
   }
   free(response_data);
-  return http_ok_response(status, headers, body_out);
+  return http_ok_response(status, headers, body_out, body_len);
 }
 
 #ifdef __APPLE__
@@ -7013,7 +7064,7 @@ static long long http_request_tls(HttpUrl* parsed, const char* request_data, siz
       tls_error_message("tls read failed", status, &tls)
     );
   }
-  return http_response_result(response.data);
+  return http_response_result(response.data, response.len);
 }
 #pragma clang diagnostic pop
 #endif
@@ -7183,7 +7234,7 @@ long long http_request(const char* method, const char* url, const char* headers_
   }
   close(fd);
   free_http_url(&parsed);
-  return http_response_result(response.data);
+  return http_response_result(response.data, response.len);
 }
 
 long long vector_empty(void) {

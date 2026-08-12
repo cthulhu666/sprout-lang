@@ -1,5 +1,5 @@
 module examples.sentry_api
-import stdlib.http (Result, HttpError, http_response_body, HttpResponse)
+import stdlib.http (Result, HttpError, http_response_text, HttpResponse)
 import stdlib.json (Json, JsonArray, JsonArrayStep, JsonError, json_array_next, json_get_array, json_get_field, json_get_string, parse)
 import stdlib.http_client (http_get)
 import stdlib.string as strlib
@@ -48,15 +48,23 @@ fn preview_body(body: String) -> String =
   if strlib.length(body) <= preview_limit() then body
   else strlib.concat(strlib.slice(body, 0, preview_limit()), "...")
 
+# The body is Bytes now, so a JSON response is decoded ONCE here and both the parse and the error
+# preview work on that String. A body that is not text fails as an HttpDecode rather than reaching
+# the JSON parser as mojibake.
 fn parse_json_response(resp: HttpResponse) -> Result HttpError Json =
-  match parse(http_response_body(resp)) with
+  match http_response_text(resp) with
+  | Err _ -> Err(HttpDecode("response body is not valid UTF-8 text"))
+  | Ok body -> parse_json_text(body)
+
+fn parse_json_text(body: String) -> Result HttpError Json =
+  match parse(body) with
   | Ok value -> Ok(value)
   | Err err ->
       match json_error_to_http_error(err) with
       | HttpDecode msg ->
           Err(
             HttpDecode(
-              concat4(msg, "; body starts with: ", "\"", concat3(preview_body(http_response_body(resp)), "\"", ""))
+              concat4(msg, "; body starts with: ", "\"", concat3(preview_body(body), "\"", ""))
             )
           )
       | other -> Err(other)

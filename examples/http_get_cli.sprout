@@ -1,5 +1,5 @@
 module examples.http_get_cli
-import stdlib.http (HttpError, http_response_body)
+import stdlib.http (HttpError, http_response_text)
 import stdlib.http_client (http_get)
 
 # Simple HTTP GET CLI client.
@@ -24,7 +24,10 @@ fn fetch_body_from_argv() -> Result String String !{IO} =
   do
     url <- result_from_maybe("usage: sprout run examples/http_get_cli.sprout <url>", argv_get(0))
     resp <- result_map_error(http_error_message, http_get(url, "", 5000))
-    Ok(http_response_body(resp))
+    # The body is Bytes, so printing it is a decode and a decode can fail. A CLI that prints text
+    # says so here rather than having the decision made for it during the read — `http_response_body`
+    # is what a caller fetching a PNG would use instead.
+    result_map_error(\_ -> "response body is not valid UTF-8 text", http_response_text(resp))
 
 fn main() -> Unit !{IO} =
   match fetch_body_from_argv() with

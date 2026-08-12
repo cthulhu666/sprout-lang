@@ -1,0 +1,92 @@
+import stdlib.task (Scope, with_scope, task_spawn)
+import stdlib.net (TcpConnection, close, close_listener, connect, accept, listen_local, read_avail_timeout, write_all_utf8)
+import stdlib.string as string
+import stdlib.bytes as bytes
+
+# Regression (code review, finding 7): a read must NEVER report `Err TcpTimeout` while the data it
+# was waiting for is already sitting in the socket buffer.
+#
+# `stdlib.net`'s comment claims exactly that guarantee — "every path to `Err TcpTimeout` has performed
+# a recv first" — but the recv it refers to is the one that ran BEFORE the park. Once the task is
+# parked, `tcp_wait` reports "not ready" whenever `scheduler_park_on_fd_timeout` saw
+# `park_woke_by_timer == 1`, and `pump_loop` sets that flag from whichever event of a PARK_FD_TIMER
+# pair it happens to iterate FIRST (runtime/sprout_scheduler.c:422-423 — the second event of the pair
+# is skipped via `on_io_list`). Kernel event order within one `sprout_poll_wait` batch is not
+# specified, so a task whose fd went readable and whose deadline expired in the same batch could be
+# told "timed out" with its data in hand. The C reader this replaced could not do that: it carried
+# `deadline_expired = 1; continue;` so that "the loop's next recv decides between data and
+# TCP_RECV_TIMEOUT" (commit 83df8dc9). Commit 612f8512 deleted the C loop and the Sprout rewrite did
+# not re-establish the guard.
+#
+# Forcing both events into ONE batch is what makes this deterministic rather than a coin flip:
+#
+#   1. `reader` parks with a 50 ms deadline, on an empty socket (fd + timer both registered).
+#   2. `writer` sends immediately — at ~t=0, a full 50 ms BEFORE that deadline. The fd is now
+#      readable, but the pump is not polling: green tasks are cooperative, so the pump only reaches
+#      `sprout_poll_wait` once nothing is runnable.
+#   3. `spinner` burns ~200 ms of CPU without ever parking. The reader's timer expires while it runs.
+#   4. Only now does the pump poll — and BOTH the fd event and the expired timer are pending, in one
+#      batch, with the order between them up to the kernel.
+#
+# So the assertion is one-sided, which is what keeps it from being a flaky timing test: the data was
+# written 50 ms before the deadline, so a timeout is wrong under EVERY event ordering. Fixed code
+# prints "reader got ping" no matter which event the pump sees first; unfixed code prints
+# "reader: TIMED OUT" whenever the timer happens to come first.
+# `term_write("")` is the base case only because Sprout has no `unit` literal — a Unit value comes
+# from calling something that returns one, and an empty write is the cheapest no-op available here.
+fn spin_until(target_us: Int) -> Unit !{IO} =
+  do
+    now <- time_now_micros()
+    if now >= target_us then term_write("") else spin_until(target_us)
+
+# CPU-bound and parking-free on purpose: a `task_sleep` here would park, the pump would poll, and the
+# two events would land in separate batches — which is precisely the case that never reproduced.
+fn spinner() -> Unit !{IO} =
+  do
+    now <- time_now_micros()
+    spin_until(now + 200000)
+
+fn reader(server: consuming TcpConnection) -> Unit !{IO} =
+  match read_avail_timeout(server, 50) with
+  | Ok data ->
+      match bytes.to_string(data) with
+      | Ok text -> report_and_close(server, string.concat("reader got ", text))
+      | Err _ -> report_and_close(server, "reader: payload was not text")
+  # The RED signal. Reached only by reporting a timeout on a connection whose data arrived well
+  # inside the budget.
+  | Err _ -> report_and_close(server, "reader: TIMED OUT")
+
+fn writer(client: consuming TcpConnection) -> Unit !{IO} =
+  match write_all_utf8(client, "ping") with
+  | Ok _ -> close(client)
+  | Err _ -> report_and_close(client, "writer: write failed")
+
+fn report_and_close(conn: consuming TcpConnection, line: String) -> Unit !{IO} =
+  do
+    term_write(line)
+    term_write("\n")
+    close(conn)
+
+# Spawn order matters: `reader` must reach its park before `writer` sends, so that the send lands on
+# an already-parked fd, and `spinner` must run last so the timer expires with the fd already readable.
+fn run(s: Scope, server: consuming TcpConnection, client: consuming TcpConnection) -> Unit !{IO} =
+  do
+    task_spawn(s, \_ -> reader(server))
+    task_spawn(s, \_ -> writer(client))
+    task_spawn(s, \_ -> spinner())
+
+fn main() -> Unit !{IO} =
+  do
+    listener <- listen_local(28997)
+    match connect("127.0.0.1", 28997) with
+    | Err _ -> close_listener(listener)
+    | Ok client ->
+        match accept(listener) with
+        | Err _ ->
+            do
+              close(client)
+              close_listener(listener)
+        | Ok server ->
+            do
+              with_scope(\s -> run(s, server, client))
+              close_listener(listener)
