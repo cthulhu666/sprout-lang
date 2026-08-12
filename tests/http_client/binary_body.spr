@@ -1,6 +1,8 @@
 import stdlib.http_client (http_get)
 import stdlib.http (HttpResponse, http_response_body)
+import stdlib.net (TcpConnection, TcpListener, accept, close, close_listener, listen_local, read_avail_timeout, write_all)
 import stdlib.bytes as bytes
+import stdlib.string as string
 
 # Regression (code review, finding 8): the HTTP CLIENT must deliver a response body byte-for-byte,
 # including 0x00 and bytes that are not valid UTF-8.
@@ -11,32 +13,160 @@ import stdlib.bytes as bytes
 # `dup_cstr`, i.e. `strlen`, which stops at the first NUL. Everything after it was freed with the
 # response buffer. Nothing reported an error: the caller got `Ok` and a short body.
 #
-# The payload is served by scripts/http_client_binary_gate.sh and is deliberately hostile in three
-# ways at once, so that no single half-fix passes:
+# ONE BINARY, TWO ROLES, selected by argv. That is not tidiness — it is forced. `http_request` is a
+# blocking builtin (it never calls scheduler_park_on_fd*), so a server green-task and an http_get in
+# the SAME process deadlock: the client freezes the pump before the server can accept. The peer must
+# therefore be a separate OS process, and making it this same program keeps the fixture free of any
+# external dependency. An earlier version used a python3 helper and broke immediately — python3 is
+# absent from the Linux smoke container, so `just linux-run http-client-binary-gate` could not run
+# the gate at all.
 #
-#   "AAAA" 0x00 "BBBB" 0xFF "CCCCCCCCCC"   = 20 bytes
-#
+#   binary_body serve <port>    one process, serves two connections, then exits
+#   binary_body <port>          the client, printing the byte count it received on each path
+
+# 20 bytes: "AAAA" 0x00 "BBBB" 0xFF "CCCCCCCCCC". Deliberately hostile in three ways at once, so no
+# half-fix passes:
 #   * the 0x00 at offset 4 truncates a strlen-measured body to 4 bytes;
-#   * the 0xFF at offset 9 is not valid UTF-8, so a body that is minted as a String without
-#     validation violates docs/spec-v0.md:64 even when nothing is truncated — this is what pins the
-#     body's type as Bytes rather than "String, but measured properly";
+#   * the 0xFF at offset 9 is not valid UTF-8, so this body cannot be carried by a String at all —
+#     which is what fixes the type as Bytes rather than "String, but measured properly";
 #   * the trailing run makes a partial copy visibly short rather than off by one.
-#
-# The chunked case matters separately: `http_decode_chunked_body` walked the body with `*cursor !=
-# '\0'` and measured chunk data with `strlen`, so a NUL inside chunk data discarded every chunk after
-# it — the same defect one layer down, reached only when Transfer-Encoding is present.
+fn payload() -> Bytes =
+  bytes.builder_build(
+    bytes.builder_append(
+      bytes.builder_append(
+        bytes.builder_append(
+          bytes.builder_append(
+            bytes.builder_bytes(bytes.from_string("AAAA")),
+            bytes.builder_byte(0)
+          ),
+          bytes.builder_bytes(bytes.from_string("BBBB"))
+        ),
+        bytes.builder_byte(255)
+      ),
+      bytes.builder_bytes(bytes.from_string("CCCCCCCCCC"))
+    )
+  )
+
+fn expected_len() -> Int =
+  20
+
+# A Content-Length response: the direct-copy path.
+# Built with string.concat rather than a template literal: the lexer rejects `\r` inside a template
+# literal ("unsupported escape sequence"), and CRLF is non-negotiable in an HTTP response.
+fn framed_response() -> Bytes =
+  bytes.builder_build(
+    bytes.builder_append(
+      bytes.builder_bytes(bytes.from_string(
+        string.concat(
+          "HTTP/1.1 200 OK\r\nContent-Type: application/octet-stream\r\nContent-Length: ",
+          string.concat(int_to_string(expected_len()), "\r\n\r\n")
+        )
+      )),
+      bytes.builder_bytes(payload())
+    )
+  )
+
+# A chunked response: one chunk carrying the whole payload, then the terminating 0-chunk. 0x14 is 20.
+# This is the path where the defect did not merely truncate — `http_decode_chunked_body` compared
+# `strlen(cursor) < chunk_size` and so reported "truncated chunk data", failing a well-formed
+# response outright.
+fn chunked_response() -> Bytes =
+  bytes.builder_build(
+    bytes.builder_append(
+      bytes.builder_append(
+        bytes.builder_bytes(bytes.from_string(
+          "HTTP/1.1 200 OK\r\nContent-Type: application/octet-stream\r\nTransfer-Encoding: chunked\r\n\r\n14\r\n"
+        )),
+        bytes.builder_bytes(payload())
+      ),
+      bytes.builder_bytes(bytes.from_string("\r\n0\r\n\r\n"))
+    )
+  )
+
+# --- server role ------------------------------------------------------------------------------
+
+# Read until the request head is complete, so the reply is not written into a half-sent request.
+fn read_request_head(conn: borrowing TcpConnection, acc: String) -> String !{IO} =
+  if string.contains(acc, "\r\n\r\n") then acc
+  else
+    match read_avail_timeout(conn, 5000) with
+    | Err _ -> acc
+    | Ok chunk ->
+        match bytes.to_string(chunk) with
+        | Err _ -> acc
+        | Ok text -> read_request_head(conn, string.concat(acc, text))
+
+fn serve_one(conn: consuming TcpConnection) -> Unit !{IO} =
+  do
+    head <- read_request_head(conn, "")
+    reply <- pick_reply(head)
+    # A bare statement, not `_ <-`: the bind form would propagate the write's Result into a block
+    # that returns Unit, which the fallible-bind rule rejects. A failed write here just means the
+    # client went away, and the client side reports that on its own.
+    write_all(conn, reply)
+    close(conn)
+
+fn pick_reply(head: String) -> Bytes !{IO} =
+  if string.contains(head, "/chunked") then chunked_response() else framed_response()
+
+# Exactly two connections, then exit — the client makes exactly two requests, so this terminates on
+# its own and the gate needs no kill.
+fn serve_loop(listener: borrowing TcpListener, remaining: Int) -> Unit !{IO} =
+  if remaining <= 0 then term_write("")
+  else
+    match accept(listener) with
+    | Err _ -> term_write("")
+    | Ok conn ->
+        do
+          serve_one(conn)
+          serve_loop(listener, remaining - 1)
+
+fn run_server(port: Int) -> Unit !{IO} =
+  do
+    listener <- listen_local(port)
+    # The readiness marker the gate waits on, printed only once the listener is bound.
+    term_write("ready\n")
+    serve_loop(listener, 2)
+    close_listener(listener)
+
+# --- client role ------------------------------------------------------------------------------
+
+fn line(label: String, value: String) -> String =
+  string.concat(label, string.concat(": ", string.concat(value, "\n")))
+
 fn report(label: String, url: String) -> Unit !{IO} =
   match http_get(url, "", 5000) with
-  | Err _ -> term_write(`${label}: REQUEST FAILED\n`)
-  | Ok resp -> term_write(`${label}: ${int_to_string(bytes.length(http_response_body(resp)))}\n`)
+  | Err _ -> term_write(line(label, "REQUEST FAILED"))
+  | Ok resp -> term_write(line(label, int_to_string(bytes.length(http_response_body(resp)))))
 
+fn url_for(port: Int, path: String) -> String =
+  string.concat("http://127.0.0.1:", string.concat(int_to_string(port), path))
+
+fn run_client(port: Int) -> Unit !{IO} =
+  do
+    report("content-length", url_for(port, "/binary"))
+    report("chunked", url_for(port, "/chunked"))
+
+# `arg_or` takes the `Maybe` rather than being bound with `<-`, because `<-` on a `Maybe` SHORT-
+# CIRCUITS it: `mode <- argv_get(0)` would bind a `String` and make a missing argument abandon the
+# block, which a `Unit`-returning main cannot carry. Passing the Maybe as an argument keeps the
+# absence a value — the same shape examples/http_get_cli.sprout uses.
 fn main() -> Unit !{IO} =
   do
-    port <- result_or_default("28771", argv_get(0))
-    report("content-length", `http://127.0.0.1:${port}/binary`)
-    report("chunked", `http://127.0.0.1:${port}/chunked`)
+    mode <- arg_or(argv_get(0), "")
+    port_text <- arg_or(argv_get(1), "")
+    dispatch(mode, port_text)
 
-fn result_or_default(fallback: String, m: Maybe String) -> String !{IO} =
-  match m with
+fn arg_or(raw: Maybe String, fallback: String) -> String =
+  match raw with
   | Nothing -> fallback
-  | Just v -> v
+  | Just text -> text
+
+fn dispatch(mode: String, port_text: String) -> Unit !{IO} =
+  if mode == "serve" then run_server(port_or(port_text, 28771))
+  else run_client(port_or(mode, 28771))
+
+fn port_or(text: String, fallback: Int) -> Int =
+  match parse_int(text) with
+  | Nothing -> fallback
+  | Just value -> value
