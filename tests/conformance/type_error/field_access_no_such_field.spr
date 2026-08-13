@@ -1,0 +1,18 @@
+# A deferred field access whose receiver later resolves to a type that does NOT
+# have that field. Dropping the obligation here leaves its result variable free,
+# and generalization then quantifies it — reinstating exactly the
+# `forall a. _ -> a` coercion the deferred-obligation pass exists to remove.
+# `main.missing_field` typed as `forall a. main.P -> (Int, a)` before this was
+# an error, and only `ast_to_ir` caught it, at lowering — so every check-only
+# path (`--phase check`, the LSP, sproutd) accepted the unsound scheme.
+module main
+
+type P = (x: Int, y: Int)
+
+fn known(q: P) -> Int = 0
+
+fn missing_field(p) =
+  let s = p.zzz
+  in (known(p), s)
+
+fn main() -> Unit !{IO} = print(int_to_string(known(P(x = 1, y = 2))))

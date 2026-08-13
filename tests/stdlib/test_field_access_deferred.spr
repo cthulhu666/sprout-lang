@@ -41,10 +41,21 @@ fn unconstrained_use(p) =
   let s = p.x
   in zero(p) + 0 * s
 
+# The receiver is determined by the DECLARED RETURN TYPE and by nothing else.
+# Obligations must therefore be settled after the return-type unification, not
+# before it: discharging too early reported "nothing in this declaration
+# determines what the value being read is" about a declaration that does.
+fn resolved_by_return_type(p) -> P =
+  if p.x > 0 then p else p
+
+fn read_x(p: P) -> Int = p.x
+
 fn main() -> Unit !{IO} =
   run_suite("field_access_deferred", [
     check_eq("read before receiver resolves", read_then_resolve(P(x = 4, y = 9)), 4),
     check_eq("read after receiver resolves", resolve_then_read(P(x = 4, y = 9)), 4),
     check_eq("chained field discharge", chained(Outer(inner = Inner(n = 7), label = "l")), 7),
-    check_eq("unconstrained field still typed", unconstrained_use(P(x = 3, y = 0)), 0)
+    check_eq("unconstrained field still typed", unconstrained_use(P(x = 3, y = 0)), 0),
+    check_eq("receiver resolved by the return type",
+      read_x(resolved_by_return_type(P(x = 1, y = 2))), 1)
   ])

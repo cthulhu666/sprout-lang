@@ -711,6 +711,18 @@ Annotating the parameter (`fn coerce(p: Point) = p.x`) resolves it. Accepting th
 unannotated form would make `coerce` a function from any type to any type, since
 the field's type would be free to be generalized.
 
+"Somewhere in the declaration" includes the **declared return type** and a `let`
+annotation, not only a parameter or a call — `fn f(p) -> Point = if p.x > 0 then p
+else p` is accepted, the return type being the only thing that determines `p`.
+
+Once the receiver's type IS known, the field must exist on it. A deferred access
+whose receiver turns out to lack the field — or not to be a record at all — is an
+error for the same reason, since leaving it untyped would generalize its result:
+
+```sprout
+fn missing(p) = (zero(p), p.zzz)   # error: Unknown record type or field: Point.zzz
+```
+
 **Semantics.** Records are nominal (two records with identical fields but
 different names are distinct types), immutable, and strict (field values are
 evaluated eagerly at construction). Field scoping is per-record: a field `x` of
