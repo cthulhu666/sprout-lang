@@ -182,10 +182,13 @@ export fn task_sleep(ms: Int) -> Unit !{IO} =
 # force-dropped when the deadline fires. A body blocked in a NESTED `with_scope` join (i.e. one
 # that wraps structured concurrent work) loud-fails on timeout — the tree-cancel cascade is a
 # later increment. This includes a NESTED with_timeout: if the OUTER deadline fires while the
-# body is inside an inner with_timeout, it loud-fails (aborts) too. A body whose I/O goes ready
-# in the deadline's exact poll batch is allowed to finish (best-effort ≥ ms); if it then re-parks
-# on further I/O, the effective wait can exceed `ms`. `ms <= 0` returns `Expired` at once WITHOUT
-# running the body. See docs/concurrency-deadlines-design-2026-07-15.md.
+# body is inside an inner with_timeout, it loud-fails (aborts) too. A body whose I/O goes ready in
+# the deadline's exact poll batch is allowed to run on to completion (best-effort ≥ ms); if it
+# instead re-parks, it is dropped like any other parked body and the answer is `Expired`. So the
+# overshoot past `ms` is bounded by one scheduling step of the body — never by its next I/O wait,
+# which is what an earlier revision allowed and is how the call could block forever.
+# `ms <= 0` returns `Expired` at once WITHOUT running the body.
+# See docs/concurrency-deadlines-design-2026-07-15.md.
 export fn with_timeout(ms: Int, body: Unit -> a !{IO}) -> TimeoutResult a !{IO} =
   if ms <= 0 then
     Expired

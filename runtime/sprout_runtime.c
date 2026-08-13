@@ -9167,27 +9167,48 @@ void accept_reserve_arm(void) {
  * queue so the caller's subsequent park is a real wait rather than a spin.
  *
  * If the reserve is unarmed (open failed at listen time, or a prior reopen failed), returns 0 without
- * shedding; the caller then parks park-only, the pre-fix behavior, which is degraded but not wrong.
+ * shedding; the caller then parks park-only, which is the pre-fix 100% CPU spin described above — not
+ * merely "slower". It is close to unreachable (the drain always leaves the reserve's slot free, so the
+ * reopen below has one to take), but it is a real degradation and not a graceful one.
  *
  * The loop closes each accepted fd immediately, so exactly one slot stays free throughout and accept
- * never re-hits EMFILE mid-drain. It stops only on EAGAIN (queue empty). A pending-network errno —
+ * never re-hits EMFILE mid-drain. It stops on EAGAIN (queue empty). A pending-network errno —
  * Linux's accept() surfacing a connection whose route died between SYN and accept — also DEQUEUES its
  * connection, so it is treated like the retryable set in tcp_accept and the drain continues; breaking
  * on it instead would leave the queue non-empty and reintroduce a (bounded) spin. Everything else
- * (EBADF, EINVAL) means nothing more is drainable here, so stop. */
+ * (EBADF, EINVAL) means nothing more is drainable here, so stop.
+ *
+ * BOUNDED, and that bound is load-bearing rather than defensive. This runs on the single scheduler
+ * thread with no park and no yield in it, so every iteration is one the rest of the process is frozen
+ * for: not just sibling handlers, but the very handlers whose completion returns the descriptors this
+ * exhaustion is waiting on. An unbounded drain against a peer that refills the queue as fast as we
+ * empty it therefore does not merely stall — it sustains the condition it is trying to relieve, and
+ * blocking the pump is a strictly worse failure than the CPU spin this function was written to fix
+ * (that spin at least re-entered the pump on every iteration, so siblings kept running).
+ *
+ * ACCEPT_SHED_MAX_PER_CALL bounds one visit at 4x the listen backlog (`listen(fd, 16)`), so a queue
+ * that is merely full is always drained whole and the cap is reached only under an arrival rate that
+ * outpaces accept+close. Hitting it is not a failure: the listener is still readable, so the caller's
+ * park returns at once and the next call sheds the next batch. That yields the same throughput with
+ * the pump serviced between batches — bounded work per visit instead of an open-ended freeze. */
+#define ACCEPT_SHED_MAX_PER_CALL 64
+
 int accept_shed_backlog(int listener_fd) {
   if (g_accept_reserve_fd < 0) return 0;
   close(g_accept_reserve_fd);
   g_accept_reserve_fd = -1;
   int shed = 0;
-  for (;;) {
+  /* Counts ITERATIONS, not sheds: EINTR is in the retryable set and consumes nothing, so bounding
+   * only the successful accepts would leave a signal storm able to spin here unbounded. */
+  for (int i = 0; i < ACCEPT_SHED_MAX_PER_CALL; i++) {
     int c = accept(listener_fd, NULL, NULL);
     if (c >= 0) { close(c); shed++; continue; }        /* shed one; slot is free again for the next */
     if (errno == EAGAIN || errno == EWOULDBLOCK) break; /* backlog drained: the real convergence */
     if (tcp_accept_errno_is_retryable(errno)) continue; /* consumed a queued conn; keep draining */
     break;                                              /* EBADF/EINVAL/etc: nothing left to shed */
   }
-  /* Re-arm. The last accept returned without taking a slot, so one is free for the reserve. If open
+  /* Re-arm. A slot is free on every exit path: the loop either stopped on an accept that took none
+   * (EAGAIN / a non-drainable errno) or hit the iteration cap right after a close(). If open
    * still fails, leave it unarmed — the next EMFILE degrades to park-only. */
   g_accept_reserve_fd = open("/dev/null", O_RDONLY | O_CLOEXEC);
   return shed;
@@ -9197,28 +9218,33 @@ int accept_shed_backlog(int listener_fd) {
  * server died rather than shedding one connection — and one of them was reachable by ordinary
  * traffic: `ECONNABORTED` means a peer reset between SYN and accept, which any public listener sees.
  *
- * The three-way split is what Go and nginx both do, and it is a split by WHO CAN DECIDE:
+ * The split is by WHO CAN DECIDE, and only ONE of the three buckets reaches the caller:
  *
  *  * EAGAIN parks; EINTR, ECONNABORTED and the eight pending-network errnos retry — see
  *    tcp_accept_errno_is_retryable above. Nothing happened that a caller could act on, so surfacing
  *    them would only make every caller write this loop.
- *  * EMFILE / ENFILE, and our own connection table being full — a real decision: shed load, back off,
- *    log. Reported as `TcpAcceptExhausted`, which the caller answers with a delay-and-retry (nginx
- *    disables accept events and re-arms on `accept_mutex_delay`; it never aborts). Erlang names this
- *    case distinctly too — `gen_tcp:accept` documents `Reason :: closed | timeout | system_limit |
- *    inet:posix()`, with `system_limit` separate from the POSIX errors.
+ *  * EMFILE / ENFILE, and our own connection table being full — ABSORBED HERE, shed-and-park, never
+ *    reported. There is deliberately no `TcpAcceptExhausted`, and that absence is the design (see
+ *    the matching note on stdlib/net.sprout's TcpError): the only useful response to exhaustion is
+ *    to wait on the LISTENER fd, and Sprout cannot express that wait — tcp_wait takes a connection
+ *    handle, and task_sleep needs a timerfd on Linux, i.e. exactly the descriptor that does not
+ *    exist under exhaustion, whose arming failure is deliberately process-fatal. A Sprout-level
+ *    back-off is therefore not merely redundant but actively unsafe, and an earlier revision of
+ *    http_server.sprout was killed in CI for writing one. Handling it here is what lets the caller's
+ *    accept loop have no error path at all for the transient cases.
  *  * anything else — EBADF, EINVAL, ENOTSOCK: a closed listener or a programming error, none of
  *    which heal. `TcpAcceptFailed`, carrying strerror. Deliberately NOT retried with a counter: once
- *    the retryable set above is handled, nothing left in this bucket becomes true later.
+ *    the retryable set above is handled, nothing left in this bucket becomes true later. This is the
+ *    only bucket a Sprout caller ever sees, and the only sound reply to it is to stop serving.
  *
- * Named cases rather than one error plus a "retryable?" predicate, deliberately: Go deprecated
- * net.Error.Temporary() with the note that "Temporary errors are not well-defined. Most 'temporary'
- * errors are timeouts, and the few exceptions are surprising. Do not use this method." The two
- * outcomes here want genuinely different handling, so the type says which one happened.
+ * Prior art for the absorbed bucket is the same either way — nginx disables accept events and
+ * re-arms on `accept_mutex_delay`, and never aborts; Erlang's `gen_tcp:accept` names `system_limit`
+ * separately from `inet:posix()`. The difference is that both of those have a timer available to
+ * back off WITH. We do the equivalent wait in C, on the listener, where one exists.
  *
- * Table-full is folded into TcpAcceptExhausted rather than given its own variant: it means the same
- * thing to a caller (no connection slot is available right now) and has the same remedy. The
- * distinction between an OS descriptor and one of our 2048 handles is not one a server can act on. */
+ * Table-full is absorbed alongside descriptor exhaustion rather than distinguished: it means the same
+ * thing (no connection slot is available right now) and has the same remedy. The distinction between
+ * an OS descriptor and one of our 2048 handles is not one a server can act on. */
 long long tcp_accept(long long listener) {
   if (listener <= 0 || listener >= 2048 || !g_listener_used[listener])
     return tcp_net_err0("stdlib.net.TcpInvalidHandle");

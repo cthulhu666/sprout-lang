@@ -248,11 +248,35 @@ owner so it can be woken by **either** the child completing **or** the timer fir
      guarantees it), avoiding the L0.5 `roots == NULL` loud-fail (cancellation doc §4.2).
      **This is the supported MVP case** — a body that parks directly on I/O (the §5.1 headline
      `with_timeout(500, \_ -> tcp_read(conn))`).
-   - **not done, `child.in_rq` (runnable — its fd went ready right at the boundary) → let it
-     finish.** Do **not** drop it (it is linked in the ready queue; dropping a queued task is a
-     use-after-free). Re-register as its awaiter and `park_to_pump` again; the child completes
-     → return 1 (`Completed`), `reason` left `Running`. Best-effort edge (`≥ ms`): a child one
-     scheduler tick from done finishes rather than being killed mid-flight.
+   - **not done, `child.park_kind` is `PARK_CHAN` / `PARK_SELECT` (parked in `chan_send` /
+     `chan_recv` / `chan_select`) → timed out.** Added with L0.8/L0.11, after this section was
+     first written. Same treatment as the `on_io_list` case, but the child is on a channel wait
+     queue rather than `g_io_head`, so `force_drop_task` tears down the channel/select
+     registrations instead of a poller one.
+   - **not done, `child.in_rq` (runnable — its fd went ready right at the boundary) → YIELD and
+     RE-CLASSIFY.** Do **not** drop it (it is linked in the ready queue; dropping a queued task
+     is a use-after-free). Clear `child->awaiter`, `rq_push` the owner, `park_to_pump`, then run
+     this whole classification again. Appending the owner behind the child makes the pump run the
+     child first, so on the next visit it is `done` (→ 1, `Completed`, the best-effort `≥ ms`
+     edge) or parked (→ one of the droppable branches above, → `Expired`).
+
+     **Corrected 2026-08-13 (green-threads review, finding 1).** The original rule here was
+     "re-register as its awaiter and `park_to_pump` again; the child completes → return 1",
+     justified by reading `in_rq` as "one scheduler tick from done". That reading is wrong:
+     `in_rq` means RUNNABLE, and a runnable child may run and then park on something else
+     entirely. The owner's deadline timer is already spent at this point, so that second await
+     had **no deadline at all** — a body shaped `read A; read B` blocked forever whenever A's
+     readiness landed in the deadline's own poll batch, with `with_timeout`'s only guarantee
+     silently void. Yielding instead of committing bounds the overshoot at one scheduling step
+     of the body. Re-looping terminates on the child's own progress; a body that never yields at
+     all is untimeoutable under a cooperative scheduler regardless, which is a property of the
+     model rather than of this branch.
+
+     Not reachable from a test: it needs the deadline timer and the child's fd readiness in the
+     *same* `poll_wait` batch with the timer listed first, a sub-microsecond window nothing can
+     schedule. The invariant is pinned by source assertion in `tests/c_runtime/run.sh`, and the
+     reachable neighbours (a body that wakes then re-parks; a channel-parked body) are covered in
+     `tests/stdlib/test_task_timeout.spr`.
    - **not done, neither `on_io_list` nor `in_rq` (blocked in a *nested* `with_scope` join or a
      `task_await`) → loud-fail.** A join/await-waiter lives in `s->waiter` / `child->awaiter`,
      *not* on `g_io_head` and *not* in the ready queue (verified: `io_list_push` is called only
@@ -472,8 +496,11 @@ TDD order (failing first, per AGENTS.md Definition of Ready):
    the self-cycle it guards against is a hang/UAF, so run it under ASan and with a bounded
    watchdog. Include the specific "fd-ready-in-the-same-batch-as-the-timer" sub-case (a socket
    that becomes readable at ~`ms`) — the exact trace that broke the naïve `park_kind` dedup.
-4. **Runnable-child-wins edge** — a child whose I/O goes ready right at the boundary must
-   return `Completed` (not be force-dropped mid-flight), exercising §5.2's third branch.
+4. **Runnable-child edge** — a child whose I/O goes ready right at the boundary must not be
+   force-dropped mid-flight: it runs on, and the OUTCOME follows what it does next — `Completed`
+   if it finishes, `Expired` if it re-parks. Both halves matter; the second is the finding-1
+   correction and is the one that used to hang. Exercising the branch directly needs a same-batch
+   timer/fd ordering no test can schedule, so this is covered indirectly (see §5.2's note).
 5. **`task_status` transitions** — a body that parks between bursts observes `Running` then
    `TimedOut`; under `scope_cancel` observes `Cancelled`; a scopeless/task-0 context reports
    `Running`.

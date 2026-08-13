@@ -77,6 +77,10 @@ int sprout_poll_wait(void** out_tokens, int* out_is_timer, int max) {
   struct kevent evs[64];
   int want = (max < 64) ? max : 64;
   int n = kevent(g_kq, NULL, 0, evs, want, NULL);   /* NULL timeout = block */
+  /* EINTR is a signal arriving while we blocked, not a failure. Report zero ready registrations and
+   * let the pump re-poll: nothing was consumed, so re-entering the wait is exactly right. Aborting
+   * here would take the whole process — every in-flight connection — for a delivered signal. */
+  if (n < 0 && errno == EINTR) return 0;
   if (n < 0) sprout_fail("sprout_poll_wait: kevent wait failed");
   for (int i = 0; i < n; i++) {
     out_tokens[i]   = evs[i].udata;
@@ -175,6 +179,8 @@ int sprout_poll_wait(void** out_tokens, int* out_is_timer, int max) {
   struct epoll_event evs[64];
   int want = (max < 64) ? max : 64;
   int n = epoll_wait(g_ep, evs, want, -1);   /* -1 = block */
+  /* EINTR: see the kqueue branch. Zero ready registrations, pump re-polls, nothing consumed. */
+  if (n < 0 && errno == EINTR) return 0;
   if (n < 0) sprout_fail("sprout_poll_wait: epoll_wait failed");
   for (int i = 0; i < n; i++) {
     uintptr_t raw = (uintptr_t)evs[i].data.ptr;   /* bit 0 set == a timer (see add_timer) */

@@ -553,6 +553,41 @@ Legend:
 
 ### 2) Networking and HTTP Client
 
+- [ ] `P2` **The epoll poller collapses two interests on one fd; kqueue does not.** Green-threads
+  review 2026-08-13, finding 3. `sprout_poll_add(fd, interest, token)` promises a per-`(fd, interest)`
+  registration, and only kqueue delivers one: `EVFILT_READ`/`EVFILT_WRITE` are independent knotes with
+  independent `udata`. The epoll backend keys purely by fd, so a second `sprout_poll_add` on an fd
+  another task already registered does `EPOLL_CTL_MOD` and silently replaces both the event mask and
+  `data.ptr` — the first task is registered nowhere, stays on `g_io_head`, and is never woken again
+  (hang, or a bogus "deadlock" abort). `sprout_poll_remove(fd, interest)` compounds it: it ignores
+  `interest` and `EPOLL_CTL_DEL`s the whole fd, so even sequential use lets one task's teardown destroy
+  another's registration. **Not reachable from today's stdlib** — `http_server` and the HTTP client each
+  keep exactly one task per socket — so this is latent, not live. It becomes live the moment a user
+  writes a duplex protocol with separate reader and writer tasks on one connection, and the symptom is
+  a Linux-only silent hang with no diagnostic, on a program that works on macOS. The one-task-per-fd
+  assumption is currently stated only in a comment at the top of `runtime/sprout_poll.c`.
+  **Fix (needs a call): make the assumption enforced rather than documented** — a per-fd owner table in
+  the scheduler that loud-fails on a second concurrent registration, so the violation is identical and
+  immediate on both backends. The alternative (make epoll genuinely per-interest by keeping a per-fd
+  pair of tokens and recomputing the mask on every add/remove) is more code and buys a capability
+  nothing asks for yet. Prefer the assert until something needs duplex.
+
+- [ ] `P2` **The pump only polls when the ready queue is empty, so one busy task starves all I/O.**
+  Found during the same review. `pump_loop` reaches `sprout_poll_wait` only on `rq_pop() == NULL`, so a
+  single perpetually-runnable task — anything looping on `task_yield`, which is the documented
+  cooperative idiom — keeps the ready queue non-empty forever and no fd readiness or timer is EVER
+  observed. `task_sleep` never wakes; deadlines never fire; parked connections never resume. This is
+  already known in one place and worked around locally rather than fixed: `tcp_accept`'s EMFILE comment
+  rejects a `task_yield` back-off for exactly this reason ("a yield loop would keep this task runnable
+  forever and the handlers whose completion frees descriptors would never wake — a livelock"). Treating
+  it as a property of the scheduler rather than a hazard each call site must dodge would remove that
+  whole class of workaround. **Fix (needs a call):** poll with a zero timeout on some cadence even when
+  the queue is non-empty — every N pump iterations, or whenever a poll has not run for some interval —
+  so readiness and timers are observed under sustained load. Cheap on both backends (`kevent` with a
+  zeroed `timespec`, `epoll_wait(..., 0)`); the cost is one non-blocking syscall per cadence, and the
+  cadence is the only real design question. Pairs naturally with the timerfd-free backend already
+  scoped below (one shared timerfd + a deadline heap), which needs a timeout-driven wait anyway.
+
 - [x] `P0` Add builtin: `http_request(method, url, headers, body, timeout_ms) -> Result HttpError HttpResponse`.
 - [x] `P0` Define `HttpResponse` shape (`status`, `headers`, `body`) and `HttpError` variants.
 - [x] `P1` Add convenience wrappers in `stdlib/http_client.sprout` (`get`, `post`, header helpers).
