@@ -1,0 +1,16 @@
+# A field access whose receiver is not yet resolved must still be type-checked
+# once the receiver IS resolved, later in the same body. Here `p.x` is read
+# before `zero(p)` pins `p` to `P`, and the result is passed to `str_len`. The
+# access mints an unconstrained result variable at the point of use, so without
+# a deferred obligation the body type-checks and `str_len` runs on a raw Int.
+module main
+
+type P = (x: Int, y: Int)
+
+fn zero(q: P) -> Int = 0
+
+fn bad(p) =
+  let s = p.x
+  in str_len(s) + zero(p)
+
+fn main() -> Unit !{IO} = print(int_to_string(bad(P(x = 1, y = 2))))

@@ -1,5 +1,6 @@
 module stdlib.compiler.unifier
 import stdlib.compiler.types as types
+import stdlib.compiler.source as source
 import stdlib.string as string
 
 # ---------------------------------------------------------------------------
@@ -7,18 +8,65 @@ import stdlib.string as string
 # ---------------------------------------------------------------------------
 #
 # The substitution is NOT stored here; callers thread it as a pure Dict.
-# Only the fresh-variable counters need mutation.
+# Only the fresh-variable counters and the parked field obligations mutate.
+
+# A field access inferred before its receiver's type was known. Inference is a
+# single left-to-right pass, so `p.x` can be reached while `p` is still an
+# unbound variable that a LATER call in the same body pins down. The access
+# cannot be typed at that moment, so the obligation is parked here and
+# discharged at the declaration boundary, where the substitution is final.
+# Parking is what makes the two orders agree: `zero(p) + str_len(p.x)` and
+# `str_len(p.x) + zero(p)` must not get different answers.
+export type FieldObligation (..) =
+  | FieldObligation types.Type String types.Type source.SourcePos
+  # FieldObligation receiver_type  field_name  result_var  pos
+
+export fn field_obligation_receiver(o: FieldObligation) -> types.Type =
+  match o with
+  | FieldObligation r _ _ _ -> r
+
+export fn field_obligation_field(o: FieldObligation) -> String =
+  match o with
+  | FieldObligation _ f _ _ -> f
+
+export fn field_obligation_result(o: FieldObligation) -> types.Type =
+  match o with
+  | FieldObligation _ _ v _ -> v
+
+export fn field_obligation_pos(o: FieldObligation) -> source.SourcePos =
+  match o with
+  | FieldObligation _ _ _ p -> p
 
 export type InferState (..) =
-  | InferState (Ref Int) (Ref Int) (Ref (Dict (List String)))
-  # InferState next_type_id  next_effect_id  ctor_map
+  | InferState (Ref Int) (Ref Int) (Ref (Dict (List String))) (Ref (List FieldObligation))
+  # InferState next_type_id  next_effect_id  ctor_map  parked_field_obligations
 
 export fn new_state() -> InferState !{IO} =
   do
     t_id <- ref_new(0)
     e_id <- ref_new(0)
     ctor_ref <- ref_new(dict_empty())
-    InferState(t_id, e_id, ctor_ref)
+    field_ref <- ref_new(Nil)
+    InferState(t_id, e_id, ctor_ref, field_ref)
+
+export fn park_field_obligation(state: InferState, o: FieldObligation) -> Unit !{IO} =
+  match state with
+  | InferState _ _ _ field_ref ->
+      do
+        parked <- ref_read(field_ref)
+        ref_write(field_ref, Cons(o, parked))
+
+# Read AND clear. Every declaration body passes through the boundary that calls
+# this, so clearing keeps one declaration's unresolved accesses from being
+# discharged against the next declaration's environment — including when a body
+# errors out before its own obligations are discharged.
+export fn take_field_obligations(state: InferState) -> List FieldObligation !{IO} =
+  match state with
+  | InferState _ _ _ field_ref ->
+      do
+        parked <- ref_read(field_ref)
+        ref_write(field_ref, Nil)
+        list_reverse(parked)
 
 # "$" cannot open a Sprout identifier (string.is_ident_start admits only
 # ASCII alpha or '_'; see stdlib/string.sprout), so a "$"-prefixed name can
@@ -29,7 +77,7 @@ export fn new_state() -> InferState !{IO} =
 # and silently corrupt unification (see tests/stdlib/compiler/test_fresh_tvar_collision.spr).
 export fn fresh(state: InferState) -> String !{IO} =
   match state with
-  | InferState t_ref _ _ ->
+  | InferState t_ref _ _ _ ->
       do
         n <- ref_read(t_ref)
         ref_write(t_ref, n + 1)
@@ -37,7 +85,7 @@ export fn fresh(state: InferState) -> String !{IO} =
 
 export fn fresh_effect(state: InferState) -> String !{IO} =
   match state with
-  | InferState _ e_ref _ ->
+  | InferState _ e_ref _ _ ->
       do
         n <- ref_read(e_ref)
         ref_write(e_ref, n + 1)
@@ -45,11 +93,11 @@ export fn fresh_effect(state: InferState) -> String !{IO} =
 
 export fn set_ctor_map(state: InferState, ctor_map: Dict (List String)) -> Unit !{IO} =
   match state with
-  | InferState _ _ ctor_ref -> ref_write(ctor_ref, ctor_map)
+  | InferState _ _ ctor_ref _ -> ref_write(ctor_ref, ctor_map)
 
 export fn get_ctor_map(state: InferState) -> Dict (List String) !{IO} =
   match state with
-  | InferState _ _ ctor_ref -> ref_read(ctor_ref)
+  | InferState _ _ ctor_ref _ -> ref_read(ctor_ref)
 
 # ---------------------------------------------------------------------------
 # apply_subst — walk a Type, replacing bound TVars
@@ -361,7 +409,7 @@ fn fresh_pattern_skolem(state: InferState) -> types.Type !{IO} =
 # no-collision guarantee as `fresh`. Shares the tyvar counter for uniqueness.
 fn fresh_skolem(state: InferState) -> String !{IO} =
   match state with
-  | InferState t_ref _ _ ->
+  | InferState t_ref _ _ _ ->
       do
         n <- ref_read(t_ref)
         ref_write(t_ref, n + 1)

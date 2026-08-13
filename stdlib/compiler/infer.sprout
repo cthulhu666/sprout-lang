@@ -619,6 +619,11 @@ fn infer_expr(
 # Declaration-boundary wrapper: applies s1 to the result so fresh TVars
 # never escape into lowering.  Declaration-level callers should use this;
 # sub-expression recursion stays on infer_expr.
+#
+# The obligations parked by get_field_from_resolved are settled HERE, before
+# the substitution is applied, because this is the first point at which the
+# declaration's substitution is complete: a field access is allowed to be
+# written before the call that determines its receiver's type.
 export fn typecheck_expr(
   state: unifier.InferState,
   env: Dict types.Scheme,
@@ -628,10 +633,147 @@ export fn typecheck_expr(
 ) -> InferResult !{IO} =
   do
     r <- infer_expr(state, env, subst, eff_subst, expr)
+    # Take unconditionally: an errored body must not leave its obligations
+    # parked for the next declaration to trip over.
+    pending <- unifier.take_field_obligations(state)
     match r with
     | InferErr _ _ -> r
     | InferOk typed_expr s1 eff_subst2 eff ->
-        InferOk(apply_subst_typed_expr(s1, typed_expr), s1, eff_subst2, eff)
+        do
+          d <- discharge_field_obligations(state, env, s1, pending)
+          match d with
+          | DischargeErr dpos dmsg -> InferErr(dpos, dmsg)
+          | DischargeOk s2 ->
+              InferOk(apply_subst_typed_expr(s2, typed_expr), s2, eff_subst2, eff)
+
+# --- Deferred field obligations ---
+
+type DischargeResult =
+  | DischargeOk (Dict types.Type)
+  | DischargeErr source.SourcePos String
+
+# One obligation's outcome. `OneBlocked` is explicit rather than inferred from
+# "the substitution did not grow": a settled obligation whose result variable
+# was already bound to the right type grows nothing either, and treating that
+# as blocked would report a spurious error on the round that follows.
+type OneResult =
+  | OneSettled (Dict types.Type)
+  | OneBlocked
+  | OneFailed source.SourcePos String
+
+# Settle every field access that could not be typed where it was written.
+#
+# One round resolves each receiver through the current substitution and, for
+# those that are now record types, unifies the real field type into the
+# variable the access was given. A resolution can itself unblock another
+# receiver (`let i = o.inner in i.n`, where `.n`'s receiver is `.inner`'s
+# result), so rounds repeat while any progress is made. When a round settles
+# nothing, the remaining receivers are undetermined for good: Sprout has no row
+# polymorphism, so a field name alone names no type and the access has no
+# principal typing. That is an error, not a fresh variable — a fresh variable
+# is what let the access be read at ANY type while lowering emitted a real
+# offset load.
+# Restores source order, so a declaration with several undetermined receivers
+# reports the FIRST one. Not `list_reverse`: this module shadows the prelude's
+# polymorphic one with a `List types.Type` definition (`:517`).
+fn reverse_obligations(
+  xs: List unifier.FieldObligation,
+  acc: List unifier.FieldObligation
+) -> List unifier.FieldObligation =
+  match xs with
+  | Nil -> acc
+  | Cons h t -> reverse_obligations(t, Cons(h, acc))
+
+fn discharge_field_obligations(
+  state: unifier.InferState,
+  env: Dict types.Scheme,
+  subst: Dict types.Type,
+  pending: List unifier.FieldObligation
+) -> DischargeResult !{IO} =
+  match pending with
+  | Nil -> DischargeOk(subst)
+  | [_ | _] -> discharge_round(state, env, subst, pending, Nil, false)
+
+fn discharge_round(
+  state: unifier.InferState,
+  env: Dict types.Scheme,
+  subst: Dict types.Type,
+  pending: List unifier.FieldObligation,
+  blocked: List unifier.FieldObligation,
+  progressed: Bool
+) -> DischargeResult !{IO} =
+  match pending with
+  | Nil ->
+      discharge_next_round(state, env, subst, reverse_obligations(blocked, Nil), progressed)
+  | Cons o rest ->
+      do
+        r <- discharge_one(state, env, subst, o)
+        match r with
+        | OneFailed dpos dmsg -> DischargeErr(dpos, dmsg)
+        | OneBlocked -> discharge_round(state, env, subst, rest, Cons(o, blocked), progressed)
+        | OneSettled s2 -> discharge_round(state, env, s2, rest, blocked, true)
+
+# A single obligation. The receiver is re-resolved through the CURRENT
+# substitution, not the one in force when the access was inferred.
+#
+# A receiver that resolved to a record whose field is unknown is left alone
+# rather than reported: an unknown field name on a known record is a different
+# defect with its own diagnostic in ast_to_ir, and stealing it here would only
+# change which message the user sees.
+fn discharge_one(
+  state: unifier.InferState,
+  env: Dict types.Scheme,
+  subst: Dict types.Type,
+  o: unifier.FieldObligation
+) -> OneResult !{IO} =
+  let resolved = unifier.apply_subst(subst, unifier.field_obligation_receiver(o))
+  in
+    match resolved with
+    | types.TConst rec_name ->
+        discharge_against_record(state, env, subst, o, types.type_id_name(rec_name), Nil)
+    | types.TApp _ _ ->
+        discharge_against_record(state, env, subst, o,
+          extract_tconst_name(resolved), extract_tapp_args(resolved))
+    | _ -> OneBlocked
+
+fn discharge_against_record(
+  state: unifier.InferState,
+  env: Dict types.Scheme,
+  subst: Dict types.Type,
+  o: unifier.FieldObligation,
+  rec_name: String,
+  type_args: List types.Type
+) -> OneResult !{IO} =
+  let field_name = unifier.field_obligation_field(o)
+  in
+    let Just field_scheme = dict_get("@rec:" ++ rec_name ++ ":" ++ field_name, env) else OneSettled(subst)
+    in
+      do
+        field_t <- record_field_access_type(state, field_scheme, type_args)
+        match unifier.unify_types(subst, unifier.field_obligation_result(o), field_t) with
+        | Err e ->
+            OneFailed(unifier.field_obligation_pos(o),
+              "Record field type mismatch reading `." ++ field_name ++ "`: " ++ e)
+        | Ok s2 -> OneSettled(s2)
+
+fn discharge_next_round(
+  state: unifier.InferState,
+  env: Dict types.Scheme,
+  subst: Dict types.Type,
+  blocked: List unifier.FieldObligation,
+  progressed: Bool
+) -> DischargeResult !{IO} =
+  match blocked with
+  | Nil -> DischargeOk(subst)
+  | [o | _] ->
+      if progressed
+      then discharge_round(state, env, subst, blocked, Nil, false)
+      else DischargeErr(unifier.field_obligation_pos(o), unknown_receiver_msg(unifier.field_obligation_field(o)))
+
+fn unknown_receiver_msg(field_name: String) -> String =
+  "Cannot infer the record type of `." ++ field_name
+    ++ "` — nothing in this declaration determines what the value being read is."
+    ++ " Annotate the parameter or binding"
 
 # --- Variable ---
 
@@ -4078,9 +4220,18 @@ fn get_field_from_resolved(
         extract_tconst_name(resolved), extract_tapp_args(resolved),
         typed_rec, field_name, rec_eff, pos)
   | _ ->
+      # The receiver is not a record type YET. Inference runs left to right, so
+      # a later call in the same body may still pin it down. Give the access a
+      # fresh result variable to carry the value, and park the obligation to
+      # type it — discharge_field_obligations settles it at the declaration
+      # boundary. Leaving the variable unconstrained instead is what let
+      # `fn coerce(p) = p.x` generalize to `forall a b. a -> b`.
       do
         v <- unifier.fresh(state)
-        InferOk(typed_ast.TGetField(typed_rec, field_name, types.TVar(types.tyvar_id(v)), pos), subst, eff_subst, rec_eff)
+        let result_var = types.TVar(types.tyvar_id(v))
+        unifier.park_field_obligation(state,
+          unifier.FieldObligation(resolved, field_name, result_var, pos))
+        InferOk(typed_ast.TGetField(typed_rec, field_name, result_var, pos), subst, eff_subst, rec_eff)
 
 fn extract_tconst_name(t: types.Type) -> String =
   match t with

@@ -672,6 +672,32 @@ A **function-typed field may be called inline** — `p.render(x)` loads the clos
 from the field and applies it, using the same head-first resolution (`p` an
 in-scope value ⇒ field-call; otherwise a module-qualified function call).
 
+**Typing.** Because records are nominal and Sprout has no row polymorphism, a
+field name does not name a type: `.x` is only typeable once the type of the value
+it reads from is known. That type does **not** have to be known at the point the
+access is written — inference runs left to right, so a later expression in the
+same declaration may be what determines it, and both orders must give the same
+answer:
+
+```sprout
+fn early(p) = str_len(p.x) + zero(p)   # `.x` read before `zero` pins `p` to `P`
+fn late(p)  = zero(p) + str_len(p.x)   # `zero` first — same program, same verdict
+```
+
+Both are rejected, for the same reason: `P.x` is an `Int`, not a `String`. (The
+wording of the two diagnostics differs — one is reported against the call, the
+other against the field read — but neither program compiles.) What is required is
+that the receiver's type be determined *somewhere in the declaration*.
+When nothing determines it, the access is an error rather than an open obligation:
+
+```sprout
+fn coerce(p) = p.x   # error: cannot infer the record type of `.x`
+```
+
+Annotating the parameter (`fn coerce(p: Point) = p.x`) resolves it. Accepting the
+unannotated form would make `coerce` a function from any type to any type, since
+the field's type would be free to be generalized.
+
 **Semantics.** Records are nominal (two records with identical fields but
 different names are distinct types), immutable, and strict (field values are
 evaluated eagerly at construction). Field scoping is per-record: a field `x` of

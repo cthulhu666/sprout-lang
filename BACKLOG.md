@@ -660,8 +660,33 @@ Legend:
   scope" diagnostic — one predicate call at one site. Add a `merge_indirect` fixture (unpack via
   an unannotated one-line helper) beside `existential_merge.spr` so the indirection cannot
   silently defeat it again. Update `gadts-v0.md` §342-343 either way.
-- [ ] `P1` **Field access on a not-yet-resolved receiver mints a fresh unconstrained tyvar
-  (`infer.sprout:4080-4083`).** `get_field_from_resolved`'s `| _ ->` arm invents a fresh tyvar
+- [x] `P1` **Field access on a not-yet-resolved receiver mints a fresh unconstrained tyvar
+  (`infer.sprout:4080-4083`). FIXED 2026-08-13** — implemented as the queue the entry's own "Fix"
+  paragraph describes, not the cheap backstop. `unifier.InferState` gains a fourth `Ref` holding
+  parked `FieldObligation receiver_type field_name result_var pos` records; the `| _ ->` arm
+  parks one instead of walking away from the fresh variable; `infer.discharge_field_obligations`
+  settles them in `typecheck_expr`, the declaration boundary where the substitution is complete
+  and before `apply_subst_typed_expr` runs. Rounds repeat while any obligation settles, because
+  one discharge can unblock the next (`let i = o.inner in i.n`); when a round settles nothing the
+  remaining receivers are undetermined for good and the FIRST in source order is reported.
+  Obligations are taken-and-cleared on the error path too, so a failed declaration cannot leak
+  them into the next one's environment. A receiver that resolves to a record lacking the field is
+  deliberately left to `ast_to_ir`'s existing diagnostic rather than restyled here.
+  Message: ``Cannot infer the record type of `.x` — nothing in this declaration determines what
+  the value being read is. Annotate the parameter or binding``; a resolved-but-conflicting access
+  gets ``Record field type mismatch reading `.x`: …``. Beyond closing the hole this fixes a
+  latent incompleteness: chained access through an unannotated receiver (`o.inner` then `.n`)
+  previously died in `ast_to_ir` with the position-less "field access '.n' on a non-record value"
+  and now compiles. Blast radius measured, not assumed: a 413-file `--phase check` sweep of
+  `examples/`, `tests/stdlib/` and `stdlib/` produced a byte-identical failure set before and
+  after, the compiler self-hosts through the new check (stage-3), 51/51 examples compile and
+  `ir-golden-diff` reports 58 files / 0 differences. Fixtures
+  `tests/conformance/type_error/field_access_{unknown_receiver,deferred_mismatch}.spr` (both
+  RED-verified: accepted, one SIGSEGV in `str_len`, one typed `forall a b. a -> b`) plus the
+  positive guard `tests/stdlib/test_field_access_deferred.spr`, which pins that a field read
+  BEFORE the call that resolves its receiver must keep working — the case a naive
+  "reject unresolved receivers" fix would have broken. `docs/spec-v0.md` §5's record section now
+  states the rule. Original analysis follows. `get_field_from_resolved`'s `| _ ->` arm invents a fresh tyvar
   for the field's type when the receiver has not yet resolved to a `TConst`/`TApp`, and emits
   `TGetField(…, TVar fresh, pos)`. **No deferred obligation is recorded and nothing revisits the
   node**, while `ast_to_ir` goes ahead and lowers a real offset-resolved field load
