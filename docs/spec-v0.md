@@ -486,6 +486,21 @@ So `match b with | Boxed x -> x` returned at a concrete type, `x + 1`, and
 merging two separately-unpacked existentials are all rejected; re-packing
 (`Boxed x -> Boxed(x)`) and ignoring (`Boxed _ -> ...`) are allowed.
 
+The hidden type must also not **outlive the unpack**: it may not appear in the
+type of the enclosing declaration, whether that type was written or inferred.
+Omitting the annotation is not an exception —
+
+```
+fn unbox(b: Boxed) = match b with | Boxed x -> x       # rejected at the decl
+let leaked = match Boxed("hi") with | Boxed x -> x     # rejected at the binding
+```
+
+are both errors, reported as `existential type escapes its scope in <name>`.
+Were either accepted, the abstract type would be fixed into that declaration's
+type and then shared by every one of its call sites — the opposite of the
+per-unpack freshness the rule above depends on, and enough to make two unpacks
+unify through the one shared declaration.
+
 **Runtime.** Zero cost — the same tagged representation as an ordinary
 constructor; the hidden type is erased.
 

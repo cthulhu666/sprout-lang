@@ -621,8 +621,23 @@ Legend:
   a `GlobalEnv` with no global substitution. Principled version: infer declarations in SCC
   dependency order, falling back to annotation-required only for genuine mutual recursion
   through an unannotated signature.
-- [ ] `P1` **An existential skolem escapes into a top-level scheme through an unannotated return
-  (`unifier.sprout:390-410`).** A skolem is a rigid `TConst` (`$sk<n>`), so it has no free type
+- [x] `P1` **An existential skolem escapes into a top-level scheme through an unannotated return
+  (`unifier.sprout:390-410`). FIXED 2026-08-13** — `typecheck_decl` now scans a `FnDecl`'s
+  inferred type with the existing `types.type_mentions_skolem` and rejects at the declaration;
+  `finish_let_decl` does the same for a top-level `let`, which was a **second, untracked route**
+  found while fixing this one (the value restriction's ftv test reads a skolem as "fully
+  resolved, nothing ambiguous" because a `TConst` has no free variables, so
+  `let leaked = match Boxed("hi") with | Boxed x -> x` bound monomorphically at the hidden type).
+  Diagnostics are a new "escapes its scope in `<name>`" pair; the advice is deliberately not
+  "annotate the return type", since writing one only moves the error to the rigidity scan.
+  `spec-v0.md` §5.6 gained the missing clause — its escape rule only said the hidden type may not
+  be "used at a concrete type", which describes the annotated case and left the inferred one
+  unstated. Fixtures `existential_escape_{unannotated,top_let}` and `existential_merge_indirect`
+  (all three RED-verified: accepted, and the merge one printed `2`, i.e. the merge
+  `existential_merge.spr` exists to reject went straight through); `test_existential_0a.spr`
+  gained the unannotated consumer and re-box shapes as the over-rejection guard. All 8 existential
+  suites pass, compiler self-hosts (stage-3), 51/51 examples. Original analysis follows.
+  A skolem is a rigid `TConst` (`$sk<n>`), so it has no free type
   variables; `generalize_resolved` computes `list_diff(ftv(resolved), env_ftv)` and never inspects
   the resolved type for skolems, so it rides through the decl's generalization at
   `infer.sprout:4962` as a fixed constant. Because a `TConst` is not quantified, instantiation
