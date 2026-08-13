@@ -1455,6 +1455,41 @@ fn first_concrete_typed_arg(typed_args: List typed_ast.TypedExpr, subst: Dict ty
 # Like first_concrete_typed_arg_str but skips heads in the excluded list.
 # Used when multiple constraints share a class: subsequent constraints skip
 # heads already committed to earlier TDict injections.
+# The head-directed counterparts of first_concrete_typed_arg_*: take the first
+# argument whose resolved type is headed by `want`, rather than the first
+# concrete argument of any type. Returning Nothing when no argument matches is
+# the point — the caller then forwards the obligation instead of substituting a
+# dictionary for an unrelated type.
+fn headed_typed_arg_str(
+  typed_args: List typed_ast.TypedExpr,
+  subst: Dict types.Type,
+  want: String
+) -> Maybe String =
+  match typed_args with
+  | Nil -> Nothing
+  | Cons first_arg rest ->
+      match concrete_type_str(unifier.apply_subst(subst, typed_ast.typed_expr_type(first_arg))) with
+      | Just s ->
+          if head_name_matches(s, want) then Just(s) else headed_typed_arg_str(rest, subst, want)
+      | Nothing -> headed_typed_arg_str(rest, subst, want)
+
+fn headed_typed_arg_typeexpr(
+  typed_args: List typed_ast.TypedExpr,
+  subst: Dict types.Type,
+  want: String
+) -> Maybe ast.TypeExpr =
+  match typed_args with
+  | Nil -> Nothing
+  | Cons first_arg rest ->
+      let arg_t = unifier.apply_subst(subst, typed_ast.typed_expr_type(first_arg))
+      in
+        match concrete_type_str(arg_t) with
+        | Just s ->
+            if head_name_matches(s, want)
+            then concrete_typeexpr(arg_t)
+            else headed_typed_arg_typeexpr(rest, subst, want)
+        | Nothing -> headed_typed_arg_typeexpr(rest, subst, want)
+
 fn first_concrete_typed_arg_str_excluding(
   typed_args: List typed_ast.TypedExpr,
   subst: Dict types.Type,
@@ -1845,6 +1880,77 @@ fn scan_ptf_prog_var_entries(
               else
                 scan_ptf_prog_var_entries(class_name, prog_var, rest, s3, env, pos, excluded)
 
+# --- Compound-head constraint tokens ---
+#
+# `where Sh (Box a)` has no head variable to canonicalize, so its entry used to
+# be the same "#none" as a genuinely headless constraint. These three keep the
+# head constructor instead. The token is the SOURCE name (`Box`); resolved types
+# carry the module-qualified one (`main.Box`), which is why head_name_matches
+# compares on the final dotted segment rather than by equality.
+
+fn compound_head_token(base: ast.TypeExpr) -> String =
+  match type_expr_head_name(base) with
+  | Just h -> "#app:" ++ h
+  | Nothing -> "#none"
+
+fn type_expr_head_name(te: ast.TypeExpr) -> Maybe String =
+  match te with
+  | ast.TypeName n -> Just(n)
+  | ast.TypeApply base _ -> type_expr_head_name(base)
+  | _ -> Nothing
+
+# Both token forms are discharged by scanning the ARGUMENTS, as opposed to a
+# variable head (decoded via scheme_vars) or a concrete-ctor head (looked up
+# directly). Sites that branch on "is this argument-scanned" must use this, not
+# a bare `== "#none"` test, or a "#app:" token falls into the head-variable path
+# and is decoded as a type variable name.
+fn is_arg_scanned_token(head_token: String) -> Bool =
+  head_token == "#none" || str_starts_with(head_token, "#app:")
+
+# Just the head constructor for a compound head, Nothing for a truly headless
+# constraint — i.e. "may I direct the argument scan?".
+fn arg_scan_head(head_token: String) -> Maybe String =
+  if str_starts_with(head_token, "#app:")
+  then Just(str_slice(head_token, 5, str_len(head_token)))
+  else Nothing
+
+fn head_name_matches(resolved_head: String, want: String) -> Bool =
+  resolved_head == want || str_ends_with_suffix(resolved_head, "." ++ want)
+
+# Discharge an argument-scanned constraint. With a known head (`where Sh (Box
+# a)`) the argument is chosen BY that head; a genuinely headless constraint
+# keeps the positional scan. When the head matches no argument the obligation is
+# forwarded rather than filled from an unrelated type — filling it was the bug.
+fn resolve_arg_scanned_tdict(
+  class_name: String,
+  head: Maybe String,
+  user_args: List typed_ast.TypedExpr,
+  subst: Dict types.Type,
+  env: Dict types.Scheme,
+  pos: source.SourcePos,
+  excluded: List String
+) -> Maybe typed_ast.TypedExpr =
+  let Just want = head else resolve_one_constraint_tdict(class_name, user_args, subst, env, pos, excluded)
+  in
+    let Just head_str = headed_typed_arg_str(user_args, subst, want) else resolve_via_fwd_or_scan(class_name, user_args, subst, env, pos)
+    in
+      let Just _ = dict_get("@inst:" ++ class_name ++ ":" ++ head_str, env) else resolve_via_fwd_or_scan(class_name, user_args, subst, env, pos)
+      in
+        Just(typed_ast.TDict(
+          ast.TypeConstraint(class_name,
+            Cons(headed_arg_typeexpr_or_name(head_str, user_args, subst, want), Nil)),
+          types.TConst(types.type_id(class_name)), pos, typed_ast.EvUnresolved))
+
+fn headed_arg_typeexpr_or_name(
+  head_str: String,
+  user_args: List typed_ast.TypedExpr,
+  subst: Dict types.Type,
+  want: String
+) -> ast.TypeExpr =
+  match headed_typed_arg_typeexpr(user_args, subst, want) with
+  | Just te -> te
+  | Nothing -> ast.TypeName(head_str)
+
 fn resolve_one_constraint_tdict(
   class_name: String,
   user_args: List typed_ast.TypedExpr,
@@ -2142,7 +2248,8 @@ fn decode_constraint_var(token: String, callee: String, env: Dict types.Scheme) 
 # list in where-clause order, so it injects one dict per constraint in order with
 # no gap-truncation or positional-mapping-of-partial-dicts (the root of the mixed
 # tyvar+concrete miscompile, BACKLOG #148). Each head_token resolves as: "#none" →
-# a headless (class-only) obligation; any other token → resolve_obligation with
+# a headless (class-only) obligation scanning the args; "#app:<Name>" → the same
+# scan DIRECTED by the compound head; any other token → resolve_obligation with
 # the decoded head var ("#pos:<k>" → the callee's scheme_vars binder; a plain name
 # → itself, routing to the @fwd forwarding path for a recursion/forward-ref var).
 fn inject_constrained_fn_dicts_via_field(
@@ -2165,14 +2272,16 @@ fn inject_constrained_fn_dicts_via_field(
   | Cons entry rest ->
       match entry with
       | (head_token, class_name) ->
-          if head_token == "#none" then
+          if is_arg_scanned_token(head_token) then
             # Resolve with s3 (post-argument-inference), not the stale pre-argument
-            # `subst`. A headless (compound-head) constraint like `where ToString
-            # (Box a)` scans the args for a concrete instance; an inline
-            # parametric-record arg carries its `a -> Int` binding only in s3, so
-            # the stale subst would leave it `Box $free` and poison the dict
-            # (unresolved-thunk crash). Mirrors the check_instance_for_marker fix.
-            match resolve_one_constraint_tdict(class_name, user_typed_args(typed_args), s3, env, pos, collect_injected_heads_for_class(class_name, typed_args)) with
+            # `subst`. A compound-head constraint like `where ToString (Box a)`
+            # finds its dict among the args; an inline parametric-record arg
+            # carries its `a -> Int` binding only in s3, so the stale subst would
+            # leave it `Box $free` and poison the dict (unresolved-thunk crash).
+            # Mirrors the check_instance_for_marker fix. arg_scan_head supplies
+            # the head when there is one, so the scan is directed rather than
+            # positional.
+            match resolve_arg_scanned_tdict(class_name, arg_scan_head(head_token), user_typed_args(typed_args), s3, env, pos, collect_injected_heads_for_class(class_name, typed_args)) with
             | Nothing ->
                 inject_constrained_fn_dicts_via_field(name, rest, prog_to_fresh, env, typed_callee, typed_args, subst, ret_t, s3, es3, call_eff, pos)
             | Just tdict ->
@@ -5373,8 +5482,9 @@ fn maybe_str_eq(m: Maybe String, s: String) -> Bool =
 #     by class, not position — a return-position constraint that was unresolved at
 #     inference leaves existing_dicts sparse, so positional indexing would hand a
 #     later constraint's dict to the wrong slot);
-#   - otherwise a HEADED constraint (head_token != "#none") scans the concrete
-#     return type for a matching @inst; a HEADLESS one ("#none") emits nothing.
+#   - otherwise a HEADED constraint (a head VARIABLE or concrete ctor) scans the
+#     concrete return type for a matching @inst; an argument-scanned one
+#     ("#none" or "#app:<Name>") emits nothing here.
 # (A residual corner remains: two constraints of the SAME class where one is an
 # unresolved return-position gap cannot be told apart by class alone.)
 fn build_constrained_fn_dicts_via_field(
@@ -5394,7 +5504,11 @@ fn build_constrained_fn_dicts_via_field(
               Cons(existing_d,
                    build_constrained_fn_dicts_via_field(rest, env, concrete_ret, pos, remaining))
           | Nothing ->
-              if head_token == "#none"
+              # An argument-scanned token (headless OR compound-head) emits
+              # nothing here: this site scans the RETURN type, and a `where
+              # ToString (Box a)` obligation is not discharged by the return type
+              # merely because the return type happens to have an instance.
+              if is_arg_scanned_token(head_token)
               then build_constrained_fn_dicts_via_field(rest, env, concrete_ret, pos, existing_dicts)
               else
                 match find_inst_in_return_type(class_name, concrete_ret, env, pos) with
@@ -6003,6 +6117,15 @@ fn canonicalize_constrained_constraints_acc(
                   # Concrete-ctor head (e.g. "List"): stable source name.
                   Cons((prog_var, class_name),
                        canonicalize_constrained_constraints_acc(rest, prog_to_fresh, s2, binders))
+          | [ast.TypeApply base _ | _] ->
+              # Compound head (`where Sh (Box a)`). There is no head VARIABLE, but
+              # there is a head CONSTRUCTOR, and it is the only thing that says
+              # which argument carries the dictionary. Collapsing it into "#none"
+              # left the injection site scanning arguments left to right and
+              # committing to the first concrete one, so the same constraint
+              # picked a different instance depending on parameter order.
+              Cons((compound_head_token(base), class_name),
+                   canonicalize_constrained_constraints_acc(rest, prog_to_fresh, s2, binders))
           | _ ->
               # Headless constraint (non-TypeName head): resolved without a head var.
               Cons(("#none", class_name),
@@ -6089,8 +6212,9 @@ fn register_superclass_markers(class_name: String, superclasses: List ast.TypeCo
 # head is instead the raw source var name, which decode_constraint_var passes
 # through unchanged and resolve_field_constraint routes to the @fwd forwarding
 # path — exactly as the retired @constrained_N marker did. A concrete-ctor head
-# keeps its name (resolves via @inst directly); a non-TypeName head is headless
-# ("#none").
+# keeps its name (resolves via @inst directly); a compound head keeps its head
+# constructor ("#app:<Name>") so a self-recursive call directs its argument scan
+# the same way an external call does; any other head is headless ("#none").
 fn constraint_source_tokens(constraints: List ast.TypeConstraint) -> List (String, String) =
   match constraints with
   | Nil -> Nil
@@ -6099,6 +6223,8 @@ fn constraint_source_tokens(constraints: List ast.TypeConstraint) -> List (Strin
       | ast.TypeConstraint class_name type_args ->
           match type_args with
           | [ast.TypeName prog_var | _] -> Cons((prog_var, class_name), constraint_source_tokens(rest))
+          | [ast.TypeApply base _ | _] ->
+              Cons((compound_head_token(base), class_name), constraint_source_tokens(rest))
           | _ -> Cons(("#none", class_name), constraint_source_tokens(rest))
 
 # §13.3(B): pre-scan registration of a FnDecl's signature. A constrained fn's

@@ -1,0 +1,53 @@
+import stdlib.test (check_eq, run_suite)
+
+# A compound-head constraint (`where ToString (Box a)`) must resolve its
+# dictionary from the constraint's HEAD, not from whichever argument happens to
+# be concrete first. The head was previously discarded ("#none"), so the
+# injection site scanned arguments left to right and committed to the first
+# concrete one — making the dictionary a function of PARAMETER ORDER.
+#
+# `describe_second` below is `describe_first` with its parameters swapped. Before
+# the fix it took `Int`'s ToString dictionary and printed the Box pointer as an
+# integer (`35184372089112`). Sibling coverage in
+# test_compound_constraint_inline_record.spr only ever passes the constrained
+# value first — exactly where the positional guess accidentally agrees.
+
+type Box a = (val: a, tag: String) deriving (ToString)
+
+type Crate a = (item: a) deriving (ToString)
+
+fn describe_first(b: Box a, n: Int) -> String where ToString (Box a) = to_string(b)
+
+fn describe_second(n: Int, b: Box a) -> String where ToString (Box a) = to_string(b)
+
+# Two concrete arguments, neither of which is the constrained one first.
+fn describe_third(n: Int, s: String, b: Box a) -> String where ToString (Box a) =
+  to_string(b)
+
+# Two compound-head constraints over DIFFERENT heads in one signature: each has
+# to pick its own argument, which a positional scan cannot do.
+fn describe_both(b: Box a, c: Crate b) -> String
+  where ToString (Box a), ToString (Crate b) =
+  to_string(b) ++ "|" ++ to_string(c)
+
+# A caller that is itself polymorphic over the class forwards a dictionary
+# rather than devirtualizing, which is the path a concrete-instance test never
+# exercises.
+fn shout(x: a) -> String where ToString a = to_string(x) ++ "!"
+
+fn shout_boxed(b: Box a) -> String where ToString (Box a) = shout(b)
+
+fn main() -> Unit !{IO} =
+  run_suite("compound_constraint_head_order", [
+    check_eq("constrained arg first", describe_first(Box(val = 1, tag = "t"), 35),
+      "Box(val = 1, tag = t)"),
+    check_eq("constrained arg second", describe_second(35, Box(val = 1, tag = "t")),
+      "Box(val = 1, tag = t)"),
+    check_eq("constrained arg last of three", describe_third(35, "s", Box(val = 1, tag = "t")),
+      "Box(val = 1, tag = t)"),
+    check_eq("two compound heads in one signature",
+      describe_both(Box(val = 1, tag = "t"), Crate(item = 2)),
+      "Box(val = 1, tag = t)|Crate(item = 2)"),
+    check_eq("forwarded through a class-polymorphic caller",
+      shout_boxed(Box(val = 1, tag = "t")), "Box(val = 1, tag = t)!")
+  ])
