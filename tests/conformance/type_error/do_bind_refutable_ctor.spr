@@ -1,0 +1,23 @@
+# The other side of the single-constructor relaxation: a genuinely refutable
+# constructor pattern in a `do` bind without an `else` must still be rejected.
+# It is now W5's exhaustiveness check that rejects it — refutability is a
+# property of the pattern versus its type (spec §5.2.1) — which also names the
+# missing constructor, where the parser's blanket "requires an `else`" could not.
+#
+# Supersedes tests/conformance/parse_error/refutable_do_bind_no_else.spr, which
+# pinned the same property at the wrong phase (and could not compile: its
+# scrutinee was an undefined name, so the parse error was all it ever reached).
+module main
+
+type Shape =
+  | Circle Int
+  | Square Int
+
+fn measure() -> Shape !{IO} = Square(3)
+
+fn area() -> Int !{IO} =
+  do
+    Circle(r) <- measure()
+    r * r
+
+fn main() -> Unit !{IO} = print(int_to_string(area()))

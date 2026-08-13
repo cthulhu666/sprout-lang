@@ -1,0 +1,57 @@
+import stdlib.test (check_eq, run_suite)
+
+# A single-constructor pattern is IRREFUTABLE by spec §5.2.1 — refutability is a
+# property of the pattern versus its type — so destructuring one in a `do` bind
+# needs no `else`. The parser decided refutability syntactically instead, so
+# every `ConstructorPattern` counted as refutable and the shape was closed off
+# both ways: without `else` the parser rejected it, and with the `else` the
+# parser demanded, W5 rejected the now-dead arm as unreachable. The two
+# diagnostics pointed in opposite directions, so neither led to a workaround.
+#
+# Refutability is now decided type-relatively by W5, which is where the spec puts
+# it. tests/conformance/type_error/do_bind_refutable_ctor.spr pins the other
+# side: a genuinely refutable constructor pattern still has to be rejected.
+
+wrap Cents = Int
+
+type Boxed a = | Boxed a
+
+fn earn() -> Cents !{IO} = Cents(250)
+
+fn stash(n: Int) -> Boxed Int !{IO} = Boxed(n)
+
+# `wrap` destructuring in an effectful bind.
+fn take_home() -> Int !{IO} =
+  do
+    Cents(c) <- earn()
+    c - 50
+
+# Single-constructor ADT destructuring in an effectful bind.
+fn unstash() -> Int !{IO} =
+  do
+    Boxed(n) <- stash(7)
+    n * 2
+
+# The same shapes as a pure do-`let`, which took the identical syntactic path.
+fn take_home_let() -> Int !{IO} =
+  do
+    let Cents(c) = Cents(250)
+    c - 50
+
+fn unstash_let() -> Int !{IO} =
+  do
+    let Boxed(n) = Boxed(7)
+    n * 2
+
+fn main() -> Unit !{IO} =
+  do
+    a <- take_home()
+    b <- unstash()
+    c <- take_home_let()
+    d <- unstash_let()
+    run_suite("do_bind_single_ctor", [
+      check_eq("wrap destructured in a bind", a, 200),
+      check_eq("single-ctor ADT destructured in a bind", b, 14),
+      check_eq("wrap destructured in a do-let", c, 200),
+      check_eq("single-ctor ADT destructured in a do-let", d, 14)
+    ])

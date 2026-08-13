@@ -256,6 +256,19 @@ continuation). RHS effect handling is inherited from `<-` and is unchanged — t
 purely a parse-time rewrite (`docs/effectful-let-else-v0.md`). Monadic propagation (a
 no-`else` form) remains planned.
 
+An **irrefutable** pattern needs no `else`, and per §5.2.1 that is decided against
+the pattern's *type*, not its syntax. A `wrap` or single-constructor ADT pattern is
+therefore destructured directly in either form:
+
+```sprout
+Cents(c) <- earn()       # single-constructor: total, no `else`
+let Boxed(n) = stash(7)
+```
+
+Both desugar to the same single `match` shown above, carrying one branch. A
+genuinely refutable pattern with no `else` reaches that match with cases uncovered
+and is rejected as a non-exhaustive match, naming the constructors it missed.
+
 ### 5.3 Lambda expression
 
 ```sprout

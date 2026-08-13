@@ -709,8 +709,29 @@ Legend:
   (`:5420`) to inspect the `TGetField` type slot it currently discards — **but note that pass is
   still dead code** (only self-recursive call sites), so this backstop only exists once the
   "wire in the dead `assert_resolved_typed_expr` pass" item lands.
-- [ ] `P2` **A single-constructor type cannot be destructured in a `do` bind — rejected in every
-  spelling (`parser.sprout:492-503`, `:529`, `:544`).** The parser decides do-bind refutability
+- [x] `P2` **A single-constructor type cannot be destructured in a `do` bind — rejected in every
+  spelling (`parser.sprout:492-503`, `:529`, `:544`). FIXED 2026-08-13** — done as the "Fix"
+  paragraph below describes. A no-`else` do step whose pattern the parser cannot lower directly
+  now becomes `DoStepTotal` and desugars through `build_do_total`, the same staircase as the
+  `else` form carrying ONE branch, so W5 decides refutability against the pattern's TYPE — where
+  spec §5.2.1 already put it. The syntactic predicate survives only to pick the direct-lowering
+  fast path (`ast_to_ir.do_bind_captures`); it no longer decides legality. `wrap` and
+  single-ctor ADT destructuring now work in `<-` and in do-`let`
+  (`tests/stdlib/test_do_bind_single_ctor.spr`, 4 checks, RED-verified as the parse error first).
+  Genuinely refutable patterns are still rejected and get a strictly better diagnostic:
+  "Non-exhaustive match on main.Shape — no branch matches Square" instead of the blanket
+  "refutable `<-` binding in a do block requires an `else`", which named nothing.
+  Fixture migration: `tests/conformance/parse_error/refutable_do_bind_no_else.{spr,err}` is
+  **deleted** and superseded by `tests/conformance/type_error/do_bind_refutable_{ctor,let}.spr` —
+  the property it pinned still holds, but the diagnostic legitimately moved phase, and the old
+  file could not have caught a regression anyway: its scrutinee was an undefined name, so it
+  never got past the parse error. The new pair covers `<-` and do-`let` with programs that
+  actually compile up to the exhaustiveness check. A tuple pattern in a do-`let`
+  (`let (a, b) = e`) also errored before and now works, via the same path. Spec §5.2.2 gained
+  the irrefutable-no-`else` case; §5.2.1 needed no change, having stated the type-relative rule
+  correctly all along — the parser was simply not implementing it. Compiler self-hosts
+  (stage-3), 415-file sweep unchanged, full suite green. Original analysis follows.
+  The parser decides do-bind refutability
   **syntactically**: `is_irrefutable_do_bind_pattern` admits only var/wildcard/unit/tuple-of-those,
   and every `ConstructorPattern` falls to `| _ -> false`. But spec §5.2.1 (`docs/spec-v0.md:203-210`)
   defines refutability as a property of the pattern *versus its type*, which is what W5 applies
