@@ -118,15 +118,40 @@ In `match`, each branch:
 
 The checker also performs a basic ADT exhaustiveness check and reports missing constructors.
 
-## Current limitations (intentional v0 core)
+## Current limitations
 
-- No typeclasses/traits.
-- Exhaustiveness checking is basic (ADT constructor coverage + catch-all).
-- Diagnostics are improving but still early-stage.
-- No effect system beyond the simple `IO a` surface annotation.
+Corrected 2026-08-13. This section previously claimed "No typeclasses/traits" and
+"No effect system beyond the simple `IO a` surface annotation"; both were long stale.
 
-Note: the repository prototype contains typeclass-related implementation work,
-but that support is not part of normative v0 yet.
+- **Typeclasses exist** and are implemented by dictionary passing: `class`/`instance`
+  declarations, `where C a` constraints on functions and instances, superclasses,
+  overlapping-instance rejection, and a post-resolve verifier
+  (`stdlib/compiler/verify_dispatch.sprout`). `Scheme` carries a first-class constraint
+  list. Concrete instances are devirtualized (`docs/devirtualization-v0.md`), so a test
+  using a concrete type does not exercise the dictionary path at all — write a function
+  polymorphic over the class to do that.
+- **Effects are represented but not enforced.** `Effect` has four forms
+  (`EffectPure`/`EffectIO`/`EffectRow`/`EffectVar`) and `TFunc` carries one, but
+  `unify_applied` discards both effect fields and `unify_effects` has zero call sites,
+  so `!{IO}` is documentation everywhere except `validate_entrypoint`'s syntactic
+  requirement that `main` declare it. Enforcement is deferred pending the effect-system
+  design pass (BACKLOG D2/W6). `docs/spec-v0.md` §7 rules 8 and 11 describe the intended
+  enforced behaviour, not today's.
+- **Exhaustiveness is per-column, not a full usefulness matrix.** W5 checks each column's
+  value space (`Bool` needs both literals, `Int`/`String`/`Char` need a catch-all, nested
+  constructor fields recurse), plus a sound top-level unreachable-branch check. A gap
+  arising only from a *combination* of field values — `(true, true) | (false, false)` on
+  `(Bool, Bool)`, or the catch-all-masked `(O, _) | (_, Z)` — is not rejected; it aborts
+  at runtime. Spec §5.5 documents this as intentional v0 over-acceptance.
+- The type system also carries **ownership/parameter modes** (`consuming`/`borrowing`/`once`,
+  invariant on the arrow), **linear types** (`docs/linear-task-v0.md`), **existentials and
+  skolems** (`docs/gadts-v0.md`), and **records with functional update** (`docs/records-v0.md`).
+- Diagnostics are improving but still early-stage; internal names (`$sk<n>`, `$t<n>`) can
+  still leak into user-facing messages.
+
+Known soundness gaps at the checker's seams are tracked in `BACKLOG.md` §1 under
+"Type-system review findings" and under "Dispatch Soundness & Diagnostics"; the review that
+found them is `docs/type-system-review-2026-08-13.md`.
 
 ## Practical reading order for contributors
 
