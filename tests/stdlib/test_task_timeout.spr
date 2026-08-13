@@ -1,5 +1,6 @@
 import stdlib.test (TestState, new_state, assert_true, assert_eq, summary)
 import stdlib.task as task
+import stdlib.chan as chan
 import stdlib.string as string
 
 # L0.7 deadlines (EXPERIMENTAL). with_timeout(ms, body) runs `body` as a child green task and
@@ -41,6 +42,39 @@ fn is_completed(r: task.TimeoutResult Int, expected: Int) -> Bool =
   | task.Completed (v) -> v == expected
   | task.Expired -> false
 
+# Parks, WAKES, then parks again — the shape that used to hang. When the deadline landed in the
+# same poll batch as the first park's wake, __await_deadline classified the body as `in_rq`, read
+# that as "one tick from done", and re-awaited it with its timer already spent; the body then
+# parked on the second sleep and with_timeout never returned. The classification is now a loop
+# that yields and re-reads, so the second park is seen as a park and dropped.
+#
+# This cannot reproduce the race itself — that needs the deadline and a readiness event in one poll
+# batch, timer first, which no test can schedule (the source invariant is pinned in
+# tests/c_runtime/run.sh instead). What it does pin is the property the fix must preserve on the
+# path that IS reachable: a body which makes progress and then re-parks still expires, and is still
+# dropped before its post-park side effect.
+fn wake_then_park(log: Ref String) -> Int !{IO} =
+  do
+    task.task_sleep(1)
+    ref_write(log, string.concat(ref_read(log), "w"))
+    task.task_sleep(2000)
+    ref_write(log, string.concat(ref_read(log), "!"))
+    99
+
+# Parked in chan_recv on a channel no one ever sends to (PARK_CHAN, not the poller). Distinct
+# branch of the same classification loop from the task_sleep cases above, which land on
+# g_io_head; this one is force-dropped off the channel's wait queue instead.
+fn recv_forever(ch: chan.Chan Int, log: Ref String) -> Int !{IO} =
+  match chan.chan_recv(ch) with
+  | chan.Got (v) -> after_recv(log)
+  | chan.Closed -> after_recv(log)
+
+# Only reachable if the recv above ever returns, which under this test's deadline it must not.
+fn after_recv(log: Ref String) -> Int !{IO} =
+  do
+    ref_write(log, string.concat(ref_read(log), "!"))
+    77
+
 fn main() -> Unit !{IO} =
   do
     state <- new_state()
@@ -60,4 +94,26 @@ fn main() -> Unit !{IO} =
     let r3 = task.with_timeout(0, \_ -> slow(zlog))
     assert_true(state, "zero-ms deadline expires immediately", is_expired(r3))
     assert_eq(state, "zero-ms body never ran", ref_read(zlog), "")
+    # 4. a body that parks, wakes, and parks AGAIN still expires — it must not be re-awaited without
+    #    a deadline once it has been classified as runnable. "w" proves it really did wake and make
+    #    progress; the absent "!" proves the second park was dropped rather than waited on.
+    wlog <- ref_new("")
+    let r4 = task.with_timeout(30, \_ -> wake_then_park(wlog))
+    assert_true(state, "body that re-parks after waking still times out", is_expired(r4))
+    assert_eq(state, "re-parking body woke once, then was dropped", ref_read(wlog), "w")
+    # 5. a body parked on a channel (PARK_CHAN) is force-dropped off the wait queue, not the poller.
+    clog <- ref_new("")
+    let r5 = chan_recv_timeout(clog)
+    assert_true(state, "channel-parked body times out", is_expired(r5))
+    assert_eq(state, "channel-parked body dropped before its side effect", ref_read(clog), "")
     summary(state)
+
+# The channel must outlive the with_timeout call, so it belongs to an enclosing scope — the body
+# parks on an ANCESTOR scope's channel, which is exactly the case the force-drop walk has to handle.
+fn chan_recv_timeout(log: Ref String) -> task.TimeoutResult Int !{IO} =
+  task.with_scope(\s -> chan_recv_timeout_in(s, log))
+
+fn chan_recv_timeout_in(s: task.Scope, log: Ref String) -> task.TimeoutResult Int !{IO} =
+  do
+    ch <- chan.chan_new(s, 1)
+    task.with_timeout(30, \_ -> recv_forever(ch, log))

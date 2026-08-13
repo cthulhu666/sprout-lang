@@ -849,55 +849,78 @@ long long __await_deadline(long long scope_handle, long long task_handle, long l
 
   owner->deadline_child = NULL;         /* no longer a deadline-owner */
 
-  if (child->done) {
-    /* Completed within the deadline. The child-first trampoline path already tore our timer
-     * down and unlinked us; if instead the timer harvested us and the child then finished, the
-     * timer is already consumed. If we are somehow still linked, tear it down. */
-    if (owner->on_io_list) {
-      if (!owner->park_timer_dead) {
-        sprout_poll_remove_timer(owner->park_timer_id);
-        owner->park_timer_dead = 1;
+  /* Classify what woke us, and RE-classify after each yield below. This is a loop rather than a
+   * straight line for one reason: the `in_rq` case cannot decide anything yet (see that branch).
+   * Every other case returns on its first visit, so the loop runs once for all of them. */
+  for (;;) {
+    if (child->done) {
+      /* Completed. The child-first trampoline path already tore our timer down and unlinked us;
+       * if instead the timer harvested us and the child then finished, the timer is already
+       * consumed. If we are somehow still linked, tear it down. */
+      if (owner->on_io_list) {
+        if (!owner->park_timer_dead) {
+          sprout_poll_remove_timer(owner->park_timer_id);
+          owner->park_timer_dead = 1;
+        }
+        io_list_remove(owner);
       }
-      io_list_remove(owner);
+      child->awaiter = NULL;
+      return 1;
     }
-    child->awaiter = NULL;
-    return 1;
-  }
 
-  /* The timer fired (child not done): the pump harvested + unlinked our timer, so we are off
-   * g_io_head. Classify the child (§5.2): */
-  if (child->on_io_list) {
-    /* Parked directly on I/O / a task_sleep timer — the supported MVP case. Time it out. */
-    s->reason = REASON_TIMEDOUT;
-    child->awaiter = NULL;              /* clear so force_drop's sibling-awaiter guard is not
-                                          tripped by our own (owner) awaiter link */
-    force_drop_task(child);
-    return 0;
+    /* The timer fired (child not done): the pump harvested + unlinked our timer, so we are off
+     * g_io_head. Classify the child (§5.2): */
+    if (child->on_io_list) {
+      /* Parked directly on I/O / a task_sleep timer — the supported MVP case. Time it out. */
+      s->reason = REASON_TIMEDOUT;
+      child->awaiter = NULL;            /* clear so force_drop's sibling-awaiter guard is not
+                                           tripped by our own (owner) awaiter link */
+      force_drop_task(child);
+      return 0;
+    }
+    if (child->park_kind == PARK_CHAN || child->park_kind == PARK_SELECT) {
+      /* Parked in chan_send/chan_recv (PARK_CHAN) or chan_select (PARK_SELECT) — droppable, same
+       * MVP-supported class as direct I/O. Not on g_io_head, so this is distinct from the
+       * on_io_list branch above; force_drop tears down the channel/select registration(s). */
+      s->reason = REASON_TIMEDOUT;
+      child->awaiter = NULL;
+      force_drop_task(child);
+      return 0;
+    }
+    if (child->in_rq) {
+      /* Its I/O went ready in the deadline's own poll batch, and the batch listed our timer event
+       * before its fd event, so we were resumed while it is still queued. It cannot be dropped
+       * here — force-dropping a task sitting in the ready queue is a UAF — and it cannot be
+       * classified either: `in_rq` means RUNNABLE, not "about to finish".
+       *
+       * The previous revision awaited it unbounded on that second reading ("one tick from done"),
+       * which is where with_timeout lost its only guarantee: the timer is spent, so a child that
+       * runs and then parks on some OTHER descriptor is awaited with no deadline at all and
+       * with_timeout never returns. A body doing `read A; read B` hangs forever whenever A's
+       * readiness lands in the same batch as the deadline.
+       *
+       * So: YIELD once and re-classify instead of committing. Appending ourselves behind the child
+       * makes the pump run it first, after which it is done (-> Completed, the best-effort
+       * ">= ms" the docs promise) or parked (-> the droppable branches above, -> Expired). Clearing
+       * `awaiter` first is required: we are re-entering the ready queue ourselves, and leaving the
+       * link set would have the child's trampoline rq_push us a SECOND time and self-cycle the
+       * queue (the L0.7 §5.3 double-wake hazard).
+       *
+       * Re-looping is bounded by the child's own progress: a body that yields instead of parking
+       * ping-pongs with us until it parks or finishes. A body that never yields at all cannot be
+       * timed out by any means under a cooperative scheduler, which is a property of the model,
+       * not of this loop. */
+      child->awaiter = NULL;
+      rq_push(owner);
+      park_to_pump();
+      continue;
+    }
+    /* Neither parked on I/O nor runnable -> blocked in a nested with_scope join or a task_await.
+     * Force-dropping it would orphan its inner scope; the tree-cancel cascade is deferred. This is
+     * the direct-I/O-only MVP boundary (design §5.2/§5.5). */
+    sprout_fail("with_timeout: cannot time out a body blocked in a nested scope/await — "
+                "deadline cascade deferred; time out a body that parks directly on I/O");
   }
-  if (child->park_kind == PARK_CHAN || child->park_kind == PARK_SELECT) {
-    /* Parked in chan_send/chan_recv (PARK_CHAN) or chan_select (PARK_SELECT) — droppable, same
-     * MVP-supported class as direct I/O. Not on g_io_head, so this is distinct from the on_io_list
-     * branch above; force_drop tears down the channel/select registration(s). */
-    s->reason = REASON_TIMEDOUT;
-    child->awaiter = NULL;
-    force_drop_task(child);
-    return 0;
-  }
-  if (child->in_rq) {
-    /* Its I/O went ready right at the boundary and it is now runnable. Dropping a queued task
-     * is a UAF, and it is one tick from done — let it finish (Completed). The timer is spent,
-     * so this is now a plain await with a single wake source (the child's trampoline). */
-    child->awaiter = owner;
-    park_to_pump();
-    child->awaiter = NULL;
-    return 1;
-  }
-  /* Neither parked on I/O nor runnable -> blocked in a nested with_scope join or a task_await.
-   * Force-dropping it would orphan its inner scope; the tree-cancel cascade is deferred. This is
-   * the direct-I/O-only MVP boundary (design §5.2/§5.5). */
-  sprout_fail("with_timeout: cannot time out a body blocked in a nested scope/await — "
-              "deadline cascade deferred; time out a body that parks directly on I/O");
-  return 0;  /* unreachable */
 }
 
 /* Cooperative yield: become runnable again and let the pump run another task.
@@ -1086,12 +1109,17 @@ long long __task_sleep(long long ms) {
  * just completes. Every task's chan_pending is rooted (task_create), so a value in flight
  * across a park stays live. See docs/concurrency-channels-design-2026-07-16.md §5, §11.
  *
- * Invariants (both from cap >= 1, so send-parked and recv-parked never coexist on one chan):
+ * Invariants (send-parked and recv-parked never coexist on one chan):
  *   send_waiters non-empty  =>  count == cap  (a sender parks only on a full buffer)
  *   recv_waiters non-empty  =>  count == 0    (a receiver parks only on an empty buffer)
+ * For cap >= 1 these follow from the counts. For cap == 0 (rendezvous, L0.10) both read as
+ * count == 0 and the non-coexistence comes from the handoff order instead: __chan_send pops a
+ * receiver before it can park, and __chan_recv pops a sender before it can park, so whichever
+ * side arrives second never reaches its park at all.
  */
 
-/* Create a cap-slot buffered channel in `scope`. cap must be >= 1 (rendezvous deferred). */
+/* Create a cap-slot channel in `scope`. cap == 0 is rendezvous (unbuffered): no ring, every value
+ * handed sender-to-receiver directly. cap >= 1 buffers. */
 long long __chan_new(long long scope_handle, long long capacity) {
   Scope* s = scope_of(scope_handle);
   if (s == NULL) sprout_fail("__chan_new: null scope");

@@ -153,4 +153,46 @@ grep -Eq '^emfile-shed-(drained|skipped)$' "$TMP_DIR/emfile_accept_shed.out" || 
   exit 1
 }
 
+echo "==> c runtime: accept shed is bounded per call so it cannot freeze the pump"
+# The shed runs on the single scheduler thread with no park in it, so an unbounded drain blocks every
+# other green task — including the handlers whose completion frees the descriptors it is waiting on.
+# See the file header for why this needs no EMFILE and why it does not hardcode the cap.
+compile accept_shed_bounded.c "$TMP_DIR/accept_shed_bounded" -O0 -g
+"$TMP_DIR/accept_shed_bounded" > "$TMP_DIR/accept_shed_bounded.out"
+grep -Eq '^accept-shed-bounded(-skipped)?$' "$TMP_DIR/accept_shed_bounded.out" || {
+  echo "accept shed bound test did not reach a known outcome:" >&2
+  cat "$TMP_DIR/accept_shed_bounded.out" >&2
+  exit 1
+}
+# The behavioural test above deliberately asserts the PROPERTY, not the number. Pin the constant's
+# existence separately, so removing the bound cannot pass by being retuned to something enormous.
+grep -q '#define ACCEPT_SHED_MAX_PER_CALL' "$ROOT/runtime/sprout_runtime.c" || {
+  echo "ACCEPT_SHED_MAX_PER_CALL is gone; the accept shed is unbounded again" >&2
+  exit 1
+}
+
+echo "==> c runtime: with_timeout re-classifies a runnable body instead of awaiting it unbounded"
+# Source invariant, because the behaviour is not reachable from a test. __await_deadline's `in_rq`
+# branch is entered only when the deadline timer and the child's fd readiness land in the SAME poll
+# batch AND the batch lists the timer first — a sub-microsecond window no test can schedule.
+#
+# The old code read `in_rq` as "one tick from done" and re-awaited the child with no timer left, so a
+# body doing `read A; read B` hung FOREVER whenever A's readiness hit that window: with_timeout's one
+# guarantee, silently void. The fix yields (rq_push(owner)) and re-classifies, so the child is either
+# done or parked-and-droppable by the next visit. That rq_push is the whole fix and appears nowhere
+# else in the scheduler, which makes it a precise witness.
+grep -q 'rq_push(owner);' "$ROOT/runtime/sprout_scheduler.c" || {
+  echo "__await_deadline no longer yields before re-classifying a runnable child;" >&2
+  echo "with_timeout can hang past its deadline again (green-threads review, finding 1)" >&2
+  exit 1
+}
+
+echo "==> c runtime: the poller treats EINTR as retryable, not fatal"
+# Both backends used to sprout_fail on ANY negative return from the wait, EINTR included — a delivered
+# signal taking down the whole process and every in-flight connection with it. One guard per backend.
+test "$(grep -c 'errno == EINTR' "$ROOT/runtime/sprout_poll.c")" = "2" || {
+  echo "sprout_poll_wait does not handle EINTR on both backends (kqueue + epoll)" >&2
+  exit 1
+}
+
 echo "==> c runtime tests passed"
