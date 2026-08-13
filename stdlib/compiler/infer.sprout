@@ -620,10 +620,18 @@ fn infer_expr(
 # never escape into lowering.  Declaration-level callers should use this;
 # sub-expression recursion stays on infer_expr.
 #
-# The obligations parked by get_field_from_resolved are settled HERE, before
-# the substitution is applied, because this is the first point at which the
-# declaration's substitution is complete: a field access is allowed to be
-# written before the call that determines its receiver's type.
+# Field obligations parked by get_field_from_resolved are NOT settled here.
+# The body's own substitution is not the declaration's last word: a declared
+# return type (`fn f(p) -> P = if p.ready then p else p`) or a `let`
+# annotation can be the only thing that determines a receiver, and both unify
+# AFTER this returns. Settling here reported "nothing in this declaration
+# determines what the value being read is" about a declaration that does — and
+# told the user to annotate the parameter, the one annotation that would not
+# have helped. Each declaration-level caller therefore settles them itself, via
+# finish_field_obligations, once its own unification has run.
+#
+# On the ERROR path they are dropped here, so a failed body cannot leave
+# obligations parked for the next declaration to trip over.
 export fn typecheck_expr(
   state: unifier.InferState,
   env: Dict types.Scheme,
@@ -633,18 +641,34 @@ export fn typecheck_expr(
 ) -> InferResult !{IO} =
   do
     r <- infer_expr(state, env, subst, eff_subst, expr)
-    # Take unconditionally: an errored body must not leave its obligations
-    # parked for the next declaration to trip over.
-    pending <- unifier.take_field_obligations(state)
     match r with
-    | InferErr _ _ -> r
-    | InferOk typed_expr s1 eff_subst2 eff ->
+    | InferErr _ _ ->
         do
-          d <- discharge_field_obligations(state, env, s1, pending)
-          match d with
-          | DischargeErr dpos dmsg -> InferErr(dpos, dmsg)
-          | DischargeOk s2 ->
-              InferOk(apply_subst_typed_expr(s2, typed_expr), s2, eff_subst2, eff)
+          _ <- unifier.take_field_obligations(state)
+          r
+    | InferOk _ _ _ _ -> r
+
+# Settle this declaration's parked field accesses against its FINAL
+# substitution, then re-apply so the repaired types reach lowering. Every
+# declaration-level caller of typecheck_expr must call this after its own
+# unification step — obligations left parked would otherwise be settled against
+# the next declaration's environment.
+fn finish_field_obligations(
+  state: unifier.InferState,
+  env: Dict types.Scheme,
+  subst: Dict types.Type,
+  typed_expr: typed_ast.TypedExpr
+) -> FinishResult !{IO} =
+  do
+    pending <- unifier.take_field_obligations(state)
+    d <- discharge_field_obligations(state, env, subst, pending)
+    match d with
+    | DischargeErr dpos dmsg -> FinishErr(dpos, dmsg)
+    | DischargeOk s2 -> FinishOk(apply_subst_typed_expr(s2, typed_expr), s2)
+
+type FinishResult =
+  | FinishOk typed_ast.TypedExpr (Dict types.Type)
+  | FinishErr source.SourcePos String
 
 # --- Deferred field obligations ---
 
@@ -716,10 +740,13 @@ fn discharge_round(
 # A single obligation. The receiver is re-resolved through the CURRENT
 # substitution, not the one in force when the access was inferred.
 #
-# A receiver that resolved to a record whose field is unknown is left alone
-# rather than reported: an unknown field name on a known record is a different
-# defect with its own diagnostic in ast_to_ir, and stealing it here would only
-# change which message the user sees.
+# A lookup miss is an ERROR, not a pass. Leaving it alone was the original
+# defect: the miss happens when the receiver resolved to a type without that
+# field — a non-record like `Int`, or a record lacking it — and dropping the
+# obligation leaves its result variable FREE for generalization to quantify.
+# That regenerates the `forall a. _ -> a` coercion this whole pass exists to
+# remove. `ast_to_ir` does catch it, but only at lowering, so every check-only
+# path (`--phase check`, the LSP, sproutd) accepted the unsound scheme.
 fn discharge_one(
   state: unifier.InferState,
   env: Dict types.Scheme,
@@ -746,7 +773,9 @@ fn discharge_against_record(
 ) -> OneResult !{IO} =
   let field_name = unifier.field_obligation_field(o)
   in
-    let Just field_scheme = dict_get("@rec:" ++ rec_name ++ ":" ++ field_name, env) else OneSettled(subst)
+    let Just field_scheme = dict_get("@rec:" ++ rec_name ++ ":" ++ field_name, env)
+          else OneFailed(unifier.field_obligation_pos(o),
+                 "Unknown record type or field: " ++ rec_name ++ "." ++ field_name)
     in
       do
         field_t <- record_field_access_type(state, field_scheme, type_args)
@@ -5265,12 +5294,20 @@ fn typecheck_decl(
         r <- typecheck_expr(state, global_env_dict(env), subst, eff_subst, expr)
         match r with
         | InferErr pos e -> TypedDeclErr(pos, e)
-        | InferOk typed_expr s1raw _ _ ->
+        | InferOk typed_expr0 s1raw _ _ ->
             # An optional `let x : T = e` annotation is checked against the
             # inferred RHS type before generalization, narrowing the scheme.
-            match apply_let_annotation(anno, s1raw, typed_ast.typed_expr_type(typed_expr), alias_env, name) with
+            match apply_let_annotation(anno, s1raw, typed_ast.typed_expr_type(typed_expr0), alias_env, name) with
             | Err msg -> TypedDeclErr(let_pos, msg)
-            | Ok s1 -> finish_let_decl(name, expr, typed_expr, s1, let_pos, env, env_ftv, eff_subst)
+            | Ok s1a ->
+                # AFTER the annotation unify, which may be the only thing that
+                # determines a deferred field access's receiver.
+                do
+                  f <- finish_field_obligations(state, global_env_dict(env), s1a, typed_expr0)
+                  match f with
+                  | FinishErr fpos fmsg -> TypedDeclErr(fpos, fmsg)
+                  | FinishOk typed_expr s1 ->
+                      finish_let_decl(name, expr, typed_expr, s1, let_pos, env, env_ftv, eff_subst)
   | ast.AliasDecl _ _ _ _ ->
       TypedDeclOk(typed_ast.TPassThrough(decl), env, env_ftv)
   | ast.ClassDecl class_name type_params methods superclasses _ ->
@@ -6018,8 +6055,12 @@ fn check_fn_body(
         # §13.3(B) S4: the recursion self-binding carries the constraint field
         # (fn_body_env), so recursive self-calls inject dicts from the Scheme —
         # no @constrained_N self markers to seed. fwd_env holds only @fwd/@eta_fwd.
-        InferOk typed_body s1 _ _ <- typecheck_expr(state, fn_body_env(name, params, inst_type, constraint_source_tokens(constraints), fwd_env), subst, eff_subst, body) else InferErr pos msg -> (fn_body_err(name, pos, msg), dict_empty(), Nil)
-        let Ok s2 = unifier.unify_types(s1, typed_ast.typed_expr_type(typed_body), fn_return_type(inst_type, list_length(params))) else Err e -> (return_mismatch_body_err(name, typed_body, fn_return_type(inst_type, list_length(params)), s1, "Return type mismatch in " ++ name ++ ": " ++ e), dict_empty(), Nil)
+        let body_env = fn_body_env(name, params, inst_type, constraint_source_tokens(constraints), fwd_env)
+        InferOk typed_body0 s1 _ _ <- typecheck_expr(state, body_env, subst, eff_subst, body) else InferErr pos msg -> (fn_body_err(name, pos, msg), dict_empty(), Nil)
+        let Ok s2a = unifier.unify_types(s1, typed_ast.typed_expr_type(typed_body0), fn_return_type(inst_type, list_length(params))) else Err e -> (return_mismatch_body_err(name, typed_body0, fn_return_type(inst_type, list_length(params)), s1, "Return type mismatch in " ++ name ++ ": " ++ e), dict_empty(), Nil)
+        # AFTER the return-type unify: the declared return type may be the only
+        # thing that determines a deferred field access's receiver.
+        FinishOk typed_body s2 <- finish_field_obligations(state, body_env, s2a, typed_body0) else FinishErr fpos fmsg -> (fn_body_err(name, fpos, fmsg), dict_empty(), Nil)
         match rigidity_violation(prog_to_fresh, s2, types.scheme_vars(decl_scheme)) with
         | Just bad ->
             (typed_ast.BodyErr(fn_pos, "Signature too general for its body in " ++ name ++ ": type variable " ++ bad), dict_empty(), Nil)
@@ -6314,10 +6355,17 @@ fn check_instance_method(
         br <- typecheck_expr(state, body_env, subst, eff_subst, body)
         match br with
         | InferErr pos msg -> instance_method_err(name, pos, msg)
-        | InferOk typed_body s1 _ _ ->
-            match unifier.unify_types(s1, typed_ast.typed_expr_type(typed_body), fn_return_type(inst_type, list_length(params))) with
-            | Err e -> InstanceMethodErr(typed_ast.typed_expr_pos(typed_body), "Return type mismatch in instance method " ++ name ++ ": " ++ e)
-            | Ok s2 -> finish_instance_method(name, params, ret_maybe, eff_maybe, body_env, s2, inst_type, typed_body, env)
+        | InferOk typed_body0 s1 _ _ ->
+            match unifier.unify_types(s1, typed_ast.typed_expr_type(typed_body0), fn_return_type(inst_type, list_length(params))) with
+            | Err e -> InstanceMethodErr(typed_ast.typed_expr_pos(typed_body0), "Return type mismatch in instance method " ++ name ++ ": " ++ e)
+            | Ok s2a ->
+                # AFTER the return-type unify — see finish_field_obligations.
+                do
+                  f <- finish_field_obligations(state, body_env, s2a, typed_body0)
+                  match f with
+                  | FinishErr fpos fmsg -> InstanceMethodErr(fpos, fmsg ++ " in instance method " ++ name)
+                  | FinishOk typed_body s2 ->
+                      finish_instance_method(name, params, ret_maybe, eff_maybe, body_env, s2, inst_type, typed_body, env)
 
 fn instance_method_err(name: String, pos: source.SourcePos, msg: String) -> InstanceMethodResult =
   # Previously: lenient short-circuit that returned a `dummy_unit()`-bodied

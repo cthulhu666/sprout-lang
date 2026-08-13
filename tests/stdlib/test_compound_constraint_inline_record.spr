@@ -1,14 +1,20 @@
 import stdlib.test (check_eq, check_true, run_suite)
 
-# Regression: a function with a HEADLESS (compound-head) constraint like
+# Regression: a function with a compound-head constraint like
 # `where ToString (Box a)` resolves its dict by scanning the arguments. That
-# scan (inject_constrained_fn_dicts_via_field's `#none` branch) must use the
-# post-argument substitution s3, not the stale pre-argument subst. An INLINE
-# parametric-record argument carries its `a -> Int` binding only in s3; the
-# stale subst left it `Box $free`, so the constraint dict was poisoned as an
+# scan (inject_constrained_fn_dicts_via_field's argument-scanned branch) must
+# use the post-argument substitution s3, not the stale pre-argument subst. An
+# INLINE parametric-record argument carries its `a -> Int` binding only in s3;
+# the stale subst left it `Box $free`, so the constraint dict was poisoned as an
 # unresolved thunk (runtime null-dict crash). This is the same class as the
 # check_instance_for_marker stale-subst fix, on the constrained-fn path.
 # See BACKLOG §deriving-records-follow-ups.
+#
+# NB the branch is no longer "#none": a compound head now keeps its constructor
+# as `#app:Box` and directs the scan by it. Every declaration here passes the
+# constrained value FIRST, which is where a positional scan accidentally agrees
+# with the truth — test_compound_constraint_head_order.spr covers the orders
+# that do not.
 
 type Box a = (val: a, tag: String) deriving (Eq, ToString)
 

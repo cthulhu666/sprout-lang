@@ -1,0 +1,12 @@
+# The sharper half of field_access_no_such_field: the deferred receiver resolves
+# to a NON-record type. `p == 0` pins `p` to `Int`, which has no fields at all,
+# so the field lookup misses for the same reason and the obligation was dropped
+# the same way. This one generalized to `forall a. Int -> a` — an unrestricted
+# coercion from Int to any type whatsoever.
+module main
+
+fn coerce_via_nonrecord(p) =
+  let s = p.x
+  in if p == 0 then s else s
+
+fn main() -> Unit !{IO} = print("unreachable")

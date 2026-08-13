@@ -687,8 +687,27 @@ Legend:
   one discharge can unblock the next (`let i = o.inner in i.n`); when a round settles nothing the
   remaining receivers are undetermined for good and the FIRST in source order is reported.
   Obligations are taken-and-cleared on the error path too, so a failed declaration cannot leak
-  them into the next one's environment. A receiver that resolves to a record lacking the field is
-  deliberately left to `ast_to_ir`'s existing diagnostic rather than restyled here.
+  them into the next one's environment.
+  **CORRECTION 2026-08-13 (independent post-merge review of the landed commits).** The first
+  landing was wrong in two ways, both reproduced. (i) **The soundness hole was not closed.**
+  `discharge_against_record` dropped the obligation whenever the field lookup missed — receiver
+  resolved to a non-record, or to a record without that field — leaving the result variable FREE
+  for generalization to quantify. `fn coerce_via_nonrecord(p) = let s = p.x in if p == 0 then s
+  else s` typed as `forall a. Int -> a`: precisely the coercion this item exists to remove. Only
+  `ast_to_ir` caught it, at lowering, so `--phase check`, the LSP and sproutd all accepted the
+  unsound scheme. The comment justifying the drop ("stealing it here would only change which
+  message the user sees") was simply wrong — it is not a message difference, it is a free
+  variable. A miss is now `OneFailed` carrying the existing "Unknown record type or field: X.y"
+  text. (ii) **It over-rejected.** Obligations were discharged inside `typecheck_expr`, i.e.
+  BEFORE the return-type unification and before `apply_let_annotation`, so a receiver determined
+  only by the signature was reported as undetermined: `fn f(p) -> P = if p.ready then p else p`
+  was rejected — contradicting the spec sentence this same change added, and advising the user to
+  annotate the parameter, the one annotation that does not help. Discharge moved out of
+  `typecheck_expr` into `finish_field_obligations`, which each of the three declaration-level
+  callers invokes after its own unification; `typecheck_expr` still clears on the error path so a
+  failed body cannot leak obligations. Fixtures
+  `tests/conformance/type_error/field_access_{no_such_field,nonrecord_receiver}.spr` plus a fifth
+  check in `test_field_access_deferred.spr`.
   Message: ``Cannot infer the record type of `.x` — nothing in this declaration determines what
   the value being read is. Annotate the parameter or binding``; a resolved-but-conflicting access
   gets ``Record field type mismatch reading `.x`: …``. Beyond closing the hole this fixes a
@@ -726,6 +745,41 @@ Legend:
   (`:5420`) to inspect the `TGetField` type slot it currently discards — **but note that pass is
   still dead code** (only self-recursive call sites), so this backstop only exists once the
   "wire in the dead `assert_resolved_typed_expr` pass" item lands.
+- [ ] `P2` **Numeric defaulting fires before a deferred field obligation is discharged, so
+  `Double` fields under arithmetic get a spurious `Int vs Double` error
+  (`infer.check_arith`, `infer.sprout:2782`).** Found by the post-merge review of the
+  deferred-field-obligation change; reproduced. `check_arith` unifies its two operands with each
+  other and then tries `Int` **first**. Two deferred field accesses are both still free at that
+  moment, so both default to `Int`; discharge then unifies `Int` against the real field type and
+  fails: `fn total(a, b) = (a.price * b.price, tag(a) + tag(b))` on `type Item = (price: Double)`
+  errors ``Record field type mismatch reading `.price`: Type mismatch: Int vs Double``. Valid code,
+  rejected. Note this is an INCOMPLETE FIX, not a regression: before the obligation queue existed
+  the same shape was a silent Int-arithmetic miscompile on a Double payload, so the loud error is
+  strictly safer than what it replaced — but it is still wrong. Moving the discharge later does
+  not help; the defaulting happens during body inference, long before any declaration-level
+  unification. **Fix:** make numeric defaulting yield to an undischarged field obligation — either
+  by having `check_arith` skip the `Int`-first attempt when an operand's type is a variable that a
+  parked obligation will bind, or by giving the obligation queue a chance to run before defaulting
+  rather than only after. Needs a look at how defaulting interacts with the queue generally, since
+  the same ordering hazard applies to any other "try a concrete type first" site.
+- [ ] `P3` **`head_name_matches` suffix-matches the final dotted segment, so a compound-head
+  constraint can bind to another module's same-named type (`infer.sprout:1917`).** From the same
+  review. `where Sh (Box a)` stores the SOURCE token `#app:Box`, while resolved argument types
+  carry module-qualified names, so the match is `str_ends_with_suffix("other_module.Box", ".Box")`.
+  Two modules each defining `Box` are indistinguishable and the scan takes whichever argument comes
+  first — the exact class of guess the `#app:` change was made to eliminate, just narrowed from
+  "any concrete argument" to "any argument whose type's last segment matches". **Fix:** qualify the
+  head at canonicalization time (resolve the constraint's `TypeExpr` through the same
+  name-resolution the parameter types get) so the comparison can be exact.
+- [ ] `P3` **`iface_codec` head-token vocabulary gained `#app:<Name>` with no iface version bump
+  (`iface_codec.sprout:48`, `:533`).** From the same review. `decode_iface_version` still accepts
+  only `"6"` and `compile_driver.sprout:191` still emits `IfaceFile(6, …)`, although the precedent
+  recorded in that same comment block is that v3→v4 was bumped precisely for a head-token format
+  change. `--check-iface` therefore reports `OK:` on a v6 file that an older v6-speaking compiler
+  would decode as a concrete-ctor head literally named `#app:Box`. No live miscompile today —
+  `module_loader.sprout` does not consume ifaces yet — so this is a forward-compatibility/contract
+  gap rather than a bug. **Fix:** bump to v7 on both sides, and add a `#app:` case to
+  `tests/stdlib/compiler/test_scheme_roundtrip.spr` (`:157`), which has none.
 - [x] `P2` **A single-constructor type cannot be destructured in a `do` bind — rejected in every
   spelling (`parser.sprout:492-503`, `:529`, `:544`). FIXED 2026-08-13** — done as the "Fix"
   paragraph below describes. A no-`else` do step whose pattern the parser cannot lower directly
