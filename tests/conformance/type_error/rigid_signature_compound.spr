@@ -1,0 +1,11 @@
+module main
+
+# W3/F-RIGID: the body forces the declared variable `a` to a COMPOUND type that
+# happens to contain no type constant (`b -> c`). The const-only guard read that
+# as "still fully polymorphic" and accepted it, but a caller may instantiate `a`
+# at Int while the body only ever produces a function — the signature is too
+# general for its body exactly as in the `-> Int` case.
+fn apply_it(x: a, g: b -> c) -> a = g
+
+fn main() -> Unit !{IO} =
+  print("unreachable")

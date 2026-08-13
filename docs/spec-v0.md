@@ -1119,6 +1119,19 @@ Effect note for v0:
     and general pattern bindings are not part of v0. A tuple pattern binds the
     right-hand side's element types positionally; the elements are not unified with
     one another, so `(a, n) = (x * 1.5, 4)` binds `a : Double` and `n : Int`.
+15. **Signature rigidity.** A type variable *written* in a function's signature is
+    universally quantified: the caller, not the body, chooses what it stands for.
+    The body must therefore leave it abstract, and a body that constrains it is a
+    compile error — "Signature too general for its body". A written variable is
+    constrained when it resolves to a type that is not a type variable
+    (`fn f(x: a) -> Int = x + 1` forces `a` to `Int`; `fn f(x: a, g: b -> c) -> a = g`
+    forces `a` to `b -> c`), or when two written variables resolve to the *same*
+    variable (`fn f(x: a, y: b) -> a = y` forces `a = b`) — an equation the signature
+    did not state. Both are rejected: a caller may still instantiate the variable at
+    anything, so accepting either would let the caller and the body disagree about a
+    value's representation. The rule applies only to variables the programmer wrote;
+    an **omitted** parameter or return type is an inference request, not a promise,
+    and inference is free to specialize it.
 
 ## 8. Standard Library Math Modules
 

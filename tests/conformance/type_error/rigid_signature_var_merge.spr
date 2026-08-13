@@ -1,0 +1,16 @@
+module main
+
+# W3/F-RIGID sibling of `rigid_signature`: there the body forces the declared
+# variable to a CONSTANT (`a` -> Int), which `type_has_const` catches. Here the
+# body merges two declared variables with each other — `snd_as_first` returns
+# `y: b` from a slot declared `a`, forcing `a = b`. The resolution is a bare
+# type variable, so the const-only guard passed it and the scheme silently
+# narrowed to `forall a. a -> a -> a`. `g` commits against the pre-scan
+# (un-narrowed) `forall a b` scheme, so `str_len` receives the Int 7 and the
+# program SIGSEGVs. A merge is a constraint the signature never declared.
+fn g() -> Int = str_len(snd_as_first("hello", 7))
+
+fn snd_as_first(x: a, y: b) -> a = y
+
+fn main() -> Unit !{IO} =
+  print(int_to_string(g()))
