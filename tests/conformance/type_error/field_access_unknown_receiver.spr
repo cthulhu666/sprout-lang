@@ -1,0 +1,9 @@
+# Nothing in this body determines what `p` is. Sprout has no row polymorphism,
+# so `.x` alone does not pick a type and the access has no principal typing.
+# Left unchecked the declaration generalizes to `forall a b. a -> b` — an
+# unrestricted coercion between any two types.
+module main
+
+fn coerce(p) = p.x
+
+fn main() -> Unit !{IO} = print("unreachable")

@@ -1,0 +1,50 @@
+import stdlib.test (check_eq, run_suite)
+
+# Blast-radius guard for the deferred field-obligation pass
+# (infer.discharge_field_obligations). Reading a field off a receiver whose type
+# is not known YET must keep working: inference is one left-to-right pass, so a
+# later call in the same body is allowed to be what pins the receiver down.
+# This file failing to COMPILE is the assertion; the checks pin the behaviour.
+# The rejection side is tests/conformance/type_error/field_access_*.spr.
+
+type P = (x: Int, y: Int)
+
+type Inner = (n: Int)
+
+type Outer = (inner: Inner, label: String)
+
+fn zero(q: P) -> Int = 0
+
+fn outer_zero(q: Outer) -> Int = 0
+
+# The receiver `p` is unannotated and unresolved when `.x` is read; `zero(p)`
+# resolves it afterwards. Discharging the obligation must give `s : Int`.
+fn read_then_resolve(p) =
+  let s = p.x
+  in s + zero(p)
+
+# The same shape with the resolving call FIRST. Both orders must agree — the
+# order-dependence is the defect this pass exists to remove.
+fn resolve_then_read(p) = zero(p) + p.x
+
+# One discharge feeding the next: `o.inner`'s type is only known once `o` is
+# resolved, and `i.n` is only typeable once `o.inner` has been discharged. This
+# is why the pass iterates instead of making a single sweep.
+fn chained(o) =
+  let i = o.inner
+  in i.n + outer_zero(o)
+
+# A field whose value is never constrained by anything else. The obligation
+# still has to be discharged — otherwise the result variable is generalized and
+# the declaration hands callers a value at any type they ask for.
+fn unconstrained_use(p) =
+  let s = p.x
+  in zero(p) + 0 * s
+
+fn main() -> Unit !{IO} =
+  run_suite("field_access_deferred", [
+    check_eq("read before receiver resolves", read_then_resolve(P(x = 4, y = 9)), 4),
+    check_eq("read after receiver resolves", resolve_then_read(P(x = 4, y = 9)), 4),
+    check_eq("chained field discharge", chained(Outer(inner = Inner(n = 7), label = "l")), 7),
+    check_eq("unconstrained field still typed", unconstrained_use(P(x = 3, y = 0)), 0)
+  ])
