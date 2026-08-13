@@ -621,6 +621,23 @@ Legend:
   a `GlobalEnv` with no global substitution. Principled version: infer declarations in SCC
   dependency order, falling back to annotation-required only for genuine mutual recursion
   through an unannotated signature.
+  **Correction 2026-08-13 to the "Fix" above — it does not work as written.** "Leave them out of
+  the binder list" assumes the placeholders are per-declaration, and they are not: the return
+  placeholder is `types.TVar(types.tyvar_id("_unann"))` (`:306`) — one fixed string shared by
+  EVERY function with an omitted return type, and `"_unann_" ++ name` (`:301`) shared by every
+  omitted parameter of the same name. Quantification is currently the only thing keeping them
+  apart, because instantiation freshens them per use. Unquantified, all of them would collide in
+  a single substitution and the first declaration to constrain `_unann` would constrain the rest.
+  So the mono route needs **per-declaration unique placeholder names** as a prerequisite —
+  e.g. `_unann@<qualified fn name>`. With that in place the placeholder becomes a genuine shared
+  unknown between the forward call site and the callee's later body inference, which is the
+  deferred-obligation shape that would make the forward reference CORRECT rather than merely
+  rejected: the caller's use and the callee's inferred type meet in one variable, and a conflict
+  surfaces as an ordinary type error at the callee. The cost is a monomorphism restriction on
+  forward references — a forward-declared unannotated function could no longer be used at two
+  different types in one expression — which is a user-visible acceptance change and needs a
+  decision, not a unilateral pick. (This is roughly what SCC-ordered inference buys within an
+  SCC anyway, at much lower cost.)
 - [x] `P1` **An existential skolem escapes into a top-level scheme through an unannotated return
   (`unifier.sprout:390-410`). FIXED 2026-08-13** — `typecheck_decl` now scans a `FnDecl`'s
   inferred type with the existing `types.type_mentions_skolem` and rejects at the declaration;
@@ -3146,6 +3163,24 @@ op-classification already in place.
   variable: cannot determine which `C` instance to use" (the Haskell-style ambiguity check). That
   also fixes (a), since the silent unchanged-call fallback becomes unreachable for a tyvar-headed
   dispatch and can then be tightened to "reject unless the head is a rigid non-instantiable type".
+  **Measured 2026-08-13 — do NOT simply reject at the fallback.** Both halves were re-reproduced
+  against the current compiler: (a) still reaches `clang: use of undefined value '@from_int'` with
+  no source position, and (b) still prints `int:7` then `bool` for the SAME closed subexpression
+  `to_str(from_int(7))`, decided by an unrelated argument. Then the cheap version of the fix —
+  turning `check_instance_fwd`'s dict-less fallback into a located error — was built and swept:
+  it **over-rejects 8 existing test files**, all of them return-position dispatch
+  (`test_return_type_dispatch`, `test_constrained_fn_return_type_dispatch`, `test_applicative`,
+  `test_deriving_enum`, `test_devirt_classmethods`, `test_typeclass_laws`,
+  `test_classmethod_dispatch_identity`, `test_type_identity_dispatch_paths`). The experiment was
+  reverted, unlanded. **This reframes the fix:** that fallback is not a catch-all for ambiguity,
+  it is the deliberate hand-off to the post-pass `resolve_dispatch_typed_expr`, which fills the
+  TDict once outer unification makes `ret_t` concrete. A return-position dispatch legitimately has
+  no dictionary *yet*. The ambiguity signal is therefore "still has no dictionary AFTER the
+  post-pass has run", so the check belongs in/after that pass (or in `verify_dispatch`, extended
+  to require a class-method call to carry a dict — today `verify_call` keys off the callee's
+  declared `where` clause and a class method has none, which is exactly why this slips through).
+  The compiler's own source self-hosts under the strict version (stage-3 clean), so the affected
+  surface is genuinely user-facing return-type dispatch, not compiler internals.
 - [ ] `P2` **Pattern-variable names share the fresh-tyvar namespace (`infer.sprout:2050`)** (fundamentals review, static finding, not yet exercised at runtime). Pattern-bound variable names and the inferencer's fresh `t0`/`t1`/… type-variable names are drawn from the same namespace with no collision guard; a match-pattern binding whose name happens to collide with a fresh tyvar could shadow, or be shadowed by, the wrong entity during unification/substitution. Not yet triggered by a known repro — flagged as a latent hazard by the 2026-07-03 fundamentals code review among the "high/static (not yet run)" findings, adjacent to this section's tyvar-identity work (item 4). Needs a minimal repro to confirm reachability, then either a namespace separator (reserve a prefix for fresh tyvars, distinct from any user-writable pattern-variable name) or a rename pass before pattern binding. Full findings: `docs/fundamentals-code-review-handoff-2026-07-03.md`.
 
 #### Record type-arg concretization at dispatch (surfaced by deriving-on-records)
