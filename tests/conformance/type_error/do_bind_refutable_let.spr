@@ -1,0 +1,14 @@
+# The pure do-`let` half of do_bind_refutable_ctor: it took the same syntactic
+# path in the parser and must be rejected on the same type-relative grounds.
+module main
+
+type Shape =
+  | Circle Int
+  | Square Int
+
+fn area() -> Int !{IO} =
+  do
+    let Circle(r) = Square(3)
+    r * r
+
+fn main() -> Unit !{IO} = print(int_to_string(area()))

@@ -466,9 +466,15 @@ fn step_has_bind_arrow(tokens: Vec token.Token, i: Int, depth: Int) -> Bool =
 # bound value/scrutinee, the optional residual pattern, the else handler, and the
 # source position of the binding (so the desugared match reads as `<-`/`let`, not
 # `match`, keeping the staircase lint from re-flagging generated code).
+# DoStepTotal is the same shape with no else handler: a pattern the parser
+# cannot lower directly, bound without an `else`. It desugars to the identical
+# staircase carrying ONE branch, which hands the refutability question to W5 —
+# where spec §5.2.1 puts it, since refutability is a property of the pattern
+# versus its type and the parser only sees syntax.
 type DoStepParse (..) =
   | DoStepPlain ast.DoStep
   | DoStepRefutable Bool ast.Pattern ast.Expr (Maybe ast.Pattern) ast.Expr source.SourcePos
+  | DoStepTotal Bool ast.Pattern ast.Expr source.SourcePos
 
 fn do_tmp_name(pos: source.SourcePos) -> String =
   "__do" ++ int_to_string(source.position_line(pos)) ++ "_" ++ int_to_string(source.position_column(pos))
@@ -489,11 +495,25 @@ fn build_do_refutable(is_bind: Bool, success_pat: ast.Pattern, value: ast.Expr, 
      else
        Cons(ast.DoExprStep(ast.MatchExpr(value, branches, pos)), Nil)
 
-# A do-bind `<pat> <- e` without `else` is legal only for an irrefutable pattern
-# (one that always matches): a variable, wildcard, unit, or a tuple of irrefutable
-# patterns. This mirrors exactly what `ast_to_ir.do_bind_captures` can lower; a
-# refutable pattern (constructor/literal) needs an `else` handler — see the `let`
-# case in parse_do_step_sub and build_do_refutable. O(n) in pattern nodes.
+# The no-`else` counterpart: one branch, so an irrefutable pattern (a `wrap`, a
+# single-constructor ADT) passes W5 and a genuinely refutable one gets W5's
+# non-exhaustive-match error — which names the missing constructors, unlike the
+# blanket parse error this replaced.
+fn build_do_total(is_bind: Bool, success_pat: ast.Pattern, value: ast.Expr, rest: List ast.DoStep, pos: source.SourcePos) -> List ast.DoStep =
+  let branches = Cons(ast.MatchBranch(success_pat, ast.DoExpr(rest, pos)), Nil)
+  in if is_bind then
+       let tmp = do_tmp_name(pos)
+       in Cons(ast.DoBindStep(ast.VarPattern(tmp, pos), value),
+            Cons(ast.DoExprStep(ast.MatchExpr(ast.VarExpr(tmp, pos), branches, pos)), Nil))
+     else
+       Cons(ast.DoExprStep(ast.MatchExpr(value, branches, pos)), Nil)
+
+# Whether a do-bind pattern can be lowered DIRECTLY, without a match staircase:
+# a variable, wildcard, unit, or a tuple of those. This mirrors exactly what
+# `ast_to_ir.do_bind_captures` can lower. Anything else routes through
+# build_do_refutable (with `else`) or build_do_total (without) — it selects the
+# lowering path and no longer decides legality, which is W5's job. O(n) in
+# pattern nodes.
 fn is_irrefutable_do_bind_pattern(pat: ast.Pattern) -> Bool =
   match pat with
   | ast.VarPattern _ _ -> true
@@ -526,7 +546,7 @@ fn parse_do_step_sub(step_tokens: Vec token.Token) -> Result ParseError (DoStepP
         match pat with
         | ast.VarPattern name _ -> Ok((DoStepPlain(ast.DoLetStep(name, value)), 0))
         | ast.WildcardPattern _ -> Ok((DoStepPlain(ast.DoLetStep("_", value)), 0))
-        | _ -> Err(ParseError("refutable `let` binding in a do block requires an `else`", slice_pos))
+        | _ -> Ok((DoStepTotal(false, pat, value, slice_pos), 0))
   else if step_has_bind_arrow(step_tokens, 0, 0) then
     do
       (pattern, i2) <- parse_pattern(step_tokens, 0)
@@ -541,7 +561,7 @@ fn parse_do_step_sub(step_tokens: Vec token.Token) -> Result ParseError (DoStepP
         if is_irrefutable_do_bind_pattern(pattern) then
           Ok((DoStepPlain(ast.DoBindStep(pattern, value)), 0))
         else
-          Err(ParseError("refutable `<-` binding in a do block requires an `else`", slice_pos))
+          Ok((DoStepTotal(true, pattern, value, slice_pos), 0))
   else
     do
       (value, _) <- parse_expr(step_tokens, 0)
@@ -576,6 +596,12 @@ fn collect_do_steps_at(tokens: Vec token.Token, i: Int, do_line: Int, block_col:
           match rest with
           | Nil -> Err(ParseError("a binding-else do step needs at least one following step as its success continuation", pos))
           | [_ | _] -> Ok((list_append(list_reverse(acc), build_do_refutable(is_bind, pat, value, residual, handler, rest, pos)), i3))
+    | DoStepTotal is_bind pat value pos ->
+        do
+          (rest, i3) <- collect_do_steps(tokens, i2, do_line, block_col, Nil)
+          match rest with
+          | Nil -> Err(ParseError("a destructuring do step needs at least one following step as its continuation", pos))
+          | [_ | _] -> Ok((list_append(list_reverse(acc), build_do_total(is_bind, pat, value, rest, pos)), i3))
 
 fn parse_do_expr(tokens: Vec token.Token, i: Int) -> Result ParseError (ast.Expr, Int) =
   do

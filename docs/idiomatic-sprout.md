@@ -29,6 +29,17 @@ fn build(ret_te: Maybe TypeExpr, ret_ty: Type, theta: Dict Type) -> Dict Type =
 ```
 
 A refutable pattern *requires* `else`; an irrefutable binding must not have one.
+Refutability is judged against the pattern's **type**, not its shape, so a
+`wrap` or single-constructor ADT pattern is irrefutable and takes no `else` —
+including in a `do` block, where `Cents(c) <- earn()` destructures directly:
+
+```sprout
+fn take_home() -> Int !{IO} =
+  do
+    Cents(c) <- earn()
+    c - 50
+```
+
 The right-hand sides are pure, and every `else` and the body unify to one result
 type.
 
