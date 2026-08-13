@@ -1089,7 +1089,8 @@ Effect note for v0:
 - Calling a function typed with `!{IO}` behaves like any other strict function call.
 - Effects happen when the call expression is evaluated.
 - Host-implemented builtins participate in effect checking exactly like ordinary
-  functions; their declared function type is the language contract.
+  functions; their declared function type is the language contract. (Which in v0
+  means they are equally unchecked — see the enforcement note under §7.)
 - A builtin uses `!{IO}` when evaluating the call may interact with runtime or
   external state such as terminal IO, files, environment, network, randomness,
   or host-backed analysis services.
@@ -1147,6 +1148,15 @@ Effect note for v0:
     value's representation. The rule applies only to variables the programmer wrote;
     an **omitted** parameter or return type is an inference request, not a promise,
     and inference is free to specialize it.
+
+> **Enforcement status of the effect rules (8, 9, 11).** These state the intended
+> discipline; the v0 checker does **not** enforce them. Effects are parsed, carried on
+> `TFunc`, and printed, but never unified: `unify_effects` exists and has no call site,
+> so a pure signature may call an `!{IO}` function and still typecheck as pure
+> (`fn shout(s: String) -> Unit = print(s)` is accepted today). An effect annotation is
+> therefore documentation, not a checked contract, and code must not rely on a missing
+> `!{IO}` to mean a function is pure. Rule 10 is the exception — the effect-polymorphic
+> `main` check *is* enforced, syntactically. Closing this is tracked in `BACKLOG.md`.
 
 ## 8. Standard Library Math Modules
 

@@ -707,6 +707,17 @@ Legend:
   pattern), and the syntactic gate is demoted to selecting the fast path rather than deciding
   legality.
 
+- [x] `P3` **Spec §7's effect rules claimed enforcement the checker does not perform. DOC HALF
+  FIXED 2026-08-13** — the review's F7 (effect rows inert, `unify_effects` has zero call sites) is
+  already tracked as an implementation item above (`merge_effects`, D2/W6). What was *not* tracked
+  is that `docs/spec-v0.md` §7 stated rules 8/9/11 as if they held. Verified by running the
+  checker: `fn shout(s: String) -> Unit = print(s)` is accepted and its type printed as
+  `String -> Unit`. §7 now carries an enforcement note saying effects are parsed, carried and
+  printed but never unified, so an annotation is documentation rather than a checked contract —
+  with the exception, also verified, that rule 10's effect-polymorphic `main` check *is* enforced
+  (`Executable entrypoint `main` must not be effect-polymorphic`). §6's builtin bullet
+  cross-references the note. The implementation half stays open under D2/W6.
+
 ### 2) Networking and HTTP Client
 
 - [ ] `P2` **The epoll poller collapses two interests on one fd; kqueue does not.** Green-threads
