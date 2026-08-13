@@ -551,6 +551,135 @@ Legend:
   - [x] `P2` **Golden IR corpus was gated by nothing. FIXED 2026-08-06.** `scripts/ir_golden_diff.sh` was invoked by no `just` target and no CI workflow, which is how two stale snapshots (`examples__astar`, `examples__repl_hosted`) survived a green `just test` *and* `gate-quick` — and why the commit before them was itself a stale-golden cleanup (`ec13b90`). Now wired as `just ir-golden-diff` (~55s, 57 files) into both `gate` and `ci-fast-gates`, so CI blocks a stale golden; deliberately **not** in `gate-quick`, which exists for the seconds-scale loop. `just ir-golden-snapshot` is the refresh path. The audit that found this also found the same defect class in `scripts/ir_byte_identical_check.sh` and in `gate-audit` itself (a drift guard CI never ran), so the durable fix is a new **assertion B in `gate-audit`**: every `scripts/*.sh` must be reachable from the justfile or a `.claude` hook, or be allowlisted with a written reason — and `gate-audit` now runs in `ci-fast-gates`. This also closes the `P3` "Golden-IR corpus diff for codegen changes" item under *CI / Build Performance*, whose corpus and scripts had been built but never wired or marked done — which is the root cause of the rot, not an accident.
   - [x] `P2` **`where` bindings took their type from the body instead of the right-hand side. FIXED 2026-08-06.** Reported as "`where` tuple destructuring misinfers `Double` as `Int`"; the reproduction showed the report was **narrower than the defect in two ways and wrong in one**. Not tuple-specific: scalar `where a = x * 2.0` failed identically. Not call-specific: `where a = 2.5` — a literal right-hand side, no call — failed too. And the claim that "a single-name `where` binding of a `Double` is fine" was **false**; those cases only appeared to work when the body independently pinned the type (`floor`'s `r > x` compares against a `Double` parameter, so `r` was forced), which is why the fault looked intermittent. Root cause: `where a = v` desugared to an immediately-applied lambda with an *unannotated* parameter, `(\a -> body)(v)`. `infer_call_general` infers the callee before the arguments, so the body was typed while `a` was an unconstrained variable, `check_arith` defaulted it to `Int`, and only then did the call unify `Int` against `v`'s real type — information flowed body → binding, i.e. backwards. Fix: `where` now desugars to the **same node `let … in` already used**, a single-arm `match` on the value (`build_let_binding_match`), and a match infers its scrutinee first. `let` never had the bug, which is exactly why two desugarings for one construct was the underlying flaw. Retired 168 lines of parser: the lambda form needed a synthetic `__sprout_where_N` parameter for non-variable patterns and hence a capture-avoidance scan, while a match arm binds the pattern directly. ~75 of those lines (the `expr_names` family) were **already dead** before this change, reachable only from a `fresh_where_tmp_name_from` that had no callers — invisible to unused-function detection because mutual recursion gives every member a caller. `spec-v0.md` §5.1 and typing rules 13–14 now specify the inference direction normatively. **Correction to an earlier claim in this entry:** the `ln_reduce`/`sqrt_reduce`/`cbrt_reduce` accumulator threading in `stdlib/math.sprout` was described here as a workaround for this bug that could now be rewritten to return `(mantissa, exponent)`. That was measured on 2026-08-06 and is wrong as a recommendation — the tuple form is **2.8x slower** for `ln` (12.4 vs 4.3 ns/call, bit-identical results), because tuple-return CPR does not fire on the self-recursive edge and so boxes once per reduction step. The bug did make the tuple form fail to compile at the time, which is how it came to be recorded as the reason; the shape is now kept on its own merits and documented as such in `stdlib/math.sprout`. The CPR gap is filed separately under *Sprout-IR / Model-C Codegen*.
 
+#### Type-system review findings (2026-08-13)
+
+> Multi-lens adversarial review of the type system (design + implementation), each finding
+> verified by an independent agent that had to reproduce it against `compile_driver_bin_stage1`,
+> then re-reproduced from scratch by the reviewing agent. Report: `docs/type-system-review-2026-08-13.md`.
+> Two more findings from the same review are filed under *Dispatch Soundness & Diagnostics*
+> (compound-head constraint dispatch; ambiguous class tyvar). The unifying root pattern across
+> six of the seven: **a site that converts "I do not know yet" into "anything you like"** rather
+> than into a deferred obligation or a located error.
+
+- [ ] `P1` **Declared type variables are not rigid: a const-free resolution passes the W3 guard
+  (`infer.sprout:5536-5555`).** `instantiate_with_vars` (`unifier.sprout:310`) mints signature
+  tyvars as ordinary flexible metavariables — no skolemization — so `unify_applied`'s TVar/TVar
+  arm (`unifier.sprout:227-231`) merges two of them freely. The only guard is the post-hoc
+  `rigidity_violation`, which rejects a declared var **only** when its resolution contains a
+  `TConst` (`type_has_const`, `:5559`). Every const-free resolution therefore passes:
+  `fn snd_as_first(x: a, y: b) -> a = y` is accepted and its scheme silently narrows to
+  `forall a. a -> a -> a`; so is `fn weird(x: a, g: b -> c) -> a = g`, where `a` is forced to a
+  compound arrow. The code comment at `:5548-5552` states the current intent explicitly ("a
+  variable bound to a purely-variable structure … is still fully polymorphic — not a violation"),
+  which is true for a *structure* but false for a *merge*: `a = b` is a constraint the signature
+  did not declare. **Miscompile window:** same-file, caller textually above callee, so the caller
+  commits against `pre_scan`'s un-narrowed scheme. Callee-first rejects cleanly; cross-module
+  rejects cleanly (the bundler emits the imported module first). Reproduced end-to-end — the
+  IR calls `str_len` on a raw `i64` 7 and SIGSEGVs (exit 139), and the bogus value is also
+  pushed as a **GC root**, so the type lie reaches the collector. In the orderings that *are*
+  rejected, the error blames the caller rather than the declaration whose body never satisfied
+  its own signature. **Fix:** in `rigidity_violation`, (a) reject any resolution that is not a
+  bare `TVar`, and (b) reject pairwise duplicates among the declared vars' resolutions. Keep the
+  `_unann` skip at `:5540` — it is correct and load-bearing (see the item below). The principled
+  alternative is real skolemization in `instantiate_with_vars`, machinery that already exists in
+  `instantiate_ctor_pattern` (`unifier.sprout:325`), but W3 deliberately avoided it to protect
+  `@fwd` dict forwarding, so that route reopens the dict-forwarding question.
+- [ ] `P1` **`_unann` placeholders are QUANTIFIED into the scheme published for forward
+  references (`infer.sprout:193`, `:255`, `:301`, `:306`).** `scheme_from_fn_parts` (`:169`)
+  synthesizes `_unann` for an omitted return type and `_unann_<param>` for an omitted parameter
+  type, and `collect_ret_type_vars`/`collect_param_type_vars` put both into the scheme's
+  **quantified var list**. `pre_scan_fn_decls` → `register_fn_decl_scheme` (`:5875-5890`)
+  registers that scheme in the global env, so a call checked before the callee's body
+  instantiates the placeholder to a fresh var and unifies it with whatever the caller wants.
+  Nothing ever reconciles the caller's committed choice against the callee's real inferred type
+  — the compiler prints the correct type in its own `--phase check` listing while emitting IR
+  that contradicts it. `fn report(xs: List Int) -> String = "count=" ++ summarize(xs)` above
+  `fn summarize(xs: List Int) = list_length(xs)` compiles clean and SIGSEGVs in `str_concat`.
+  Confirmed genuinely quantified (not merely a shared unconstrained mono var) by instantiating
+  the same forward callee's return at two different types in one caller expression. The
+  unannotated-**param** form has the identical hole, which matters because this repo's own
+  `compiler.sprout` cache params are unannotated for bootstrap compatibility (see the M7 item).
+  **Do not "fix" this by removing the `_unann` skip in `rigidity_violation` (`:5540`)** — that
+  skip is correct and necessary (removing it rejects every unannotated-return function, e.g.
+  `rcompose`; see `docs/fundamentals-code-review-handoff-2026-07-03.md:239-242`), and it fires
+  inside the *callee's* body check, which in the failing order runs after the caller has already
+  committed. **Fix:** keep minting the `_unann` TVars for the type shape but leave them OUT of
+  the `Scheme` binder list, so a forward caller sees a monomorphic unknown; pair with a located
+  diagnostic at the forward call site, since a mono var cannot be shared across declarations in
+  a `GlobalEnv` with no global substitution. Principled version: infer declarations in SCC
+  dependency order, falling back to annotation-required only for genuine mutual recursion
+  through an unannotated signature.
+- [ ] `P1` **An existential skolem escapes into a top-level scheme through an unannotated return
+  (`unifier.sprout:390-410`).** A skolem is a rigid `TConst` (`$sk<n>`), so it has no free type
+  variables; `generalize_resolved` computes `list_diff(ftv(resolved), env_ftv)` and never inspects
+  the resolved type for skolems, so it rides through the decl's generalization at
+  `infer.sprout:4962` as a fixed constant. Because a `TConst` is not quantified, instantiation
+  never refreshes it — **every call site of the decl shares one rigid type**.
+  `fn unbox(b: Boxed) = match b with | Boxed x -> x` gets the scheme
+  `main.Boxed -> $sk2130`; the program prints a raw heap address for a String and accepts a
+  heterogeneous `[Int, String]` list as homogeneous. **This defeats the fixture the repo already
+  maintains for exactly this property** — `tests/conformance/type_error/existential_merge.spr`
+  rejects the direct merge, but routing the identical shape through this one-line helper is
+  accepted. `types.type_mentions_skolem` exists and has exactly **one** call site in the whole
+  compiler (`unifier.sprout:217`, to reword a mismatch message); nothing checks a generalized
+  scheme. The annotated form (`-> a`) is caught by the rigidity scan, which is why only the
+  `_unann` path leaks. Blast radius is bounded: class dispatch on the escaped skolem is guarded
+  (`resolve_skolem_given`, `infer.sprout:1223`) and coercion to a concrete type is rejected; the
+  leak reaches runtime through fully-polymorphic externs such as `print`. **This falsifies the
+  premise recorded in `docs/gadts-v0.md:342-343`** — "A leaked skolem is an inert, unusable type,
+  which is why nominal rigidity is sound without levels." It is not inert once it reaches a
+  top-level scheme. **Fix:** call the existing `types.type_mentions_skolem` at the
+  decl-generalization site and reject with the existing located "existential type escapes its
+  scope" diagnostic — one predicate call at one site. Add a `merge_indirect` fixture (unpack via
+  an unannotated one-line helper) beside `existential_merge.spr` so the indirection cannot
+  silently defeat it again. Update `gadts-v0.md` §342-343 either way.
+- [ ] `P1` **Field access on a not-yet-resolved receiver mints a fresh unconstrained tyvar
+  (`infer.sprout:4080-4083`).** `get_field_from_resolved`'s `| _ ->` arm invents a fresh tyvar
+  for the field's type when the receiver has not yet resolved to a `TConst`/`TApp`, and emits
+  `TGetField(…, TVar fresh, pos)`. **No deferred obligation is recorded and nothing revisits the
+  node**, while `ast_to_ir` goes ahead and lowers a real offset-resolved field load
+  (`sprout_field(%p, 0)`). Later unification is then free to pin that variable to any type.
+  `fn bad(p) = let s = p.x in str_len(s) + zero(p)` checks clean as `main.P -> Int` and SIGSEGVs;
+  `fn coerce(p) = p.x` gets the scheme `forall a b. a -> b`. **Order-dependent within a single
+  expression**, which makes it a non-principality demonstration as well as a soundness hole:
+  `zero(p) + str_len(p.x)` is correctly rejected while the semantically identical
+  `str_len(p.x) + zero(p)` compiles and crashes. Annotating the parameter always closes it.
+  The maintainers have already patched one manifestation of this exact fallback — the comment at
+  `infer.sprout:2263-2265` names it as the cause of a lambda-argument bug, fixed with the
+  two-pass `infer_call_args`; the general unannotated-parameter case remains open. Distinct from
+  the tracked `assert_resolved_typed_expr` item under *Dispatch Soundness* and from the
+  unknown-field sibling at `:4112-4115` (which `ast_to_ir` does catch): those cost a bad error
+  message, this one costs memory safety. **Fix:** record a pending
+  `(receiver_type, field_name, result_var, pos)` obligation on `InferState` and discharge the
+  queue at the end of `check_fn_body` under the final substitution `s2`, erroring with a position
+  if the receiver is still unresolved or lacks the field — mirroring the existing
+  constrained-marker post-`s2` fixup. Cheap defence in depth: extend `assert_resolved_typed_expr`
+  (`:5420`) to inspect the `TGetField` type slot it currently discards — **but note that pass is
+  still dead code** (only self-recursive call sites), so this backstop only exists once the
+  "wire in the dead `assert_resolved_typed_expr` pass" item lands.
+- [ ] `P2` **A single-constructor type cannot be destructured in a `do` bind — rejected in every
+  spelling (`parser.sprout:492-503`, `:529`, `:544`).** The parser decides do-bind refutability
+  **syntactically**: `is_irrefutable_do_bind_pattern` admits only var/wildcard/unit/tuple-of-those,
+  and every `ConstructorPattern` falls to `| _ -> false`. But spec §5.2.1 (`docs/spec-v0.md:203-210`)
+  defines refutability as a property of the pattern *versus its type*, which is what W5 applies
+  (`infer.sprout:3074-3079`). A `wrap` or 1-ctor ADT pattern is irrefutable by the spec and
+  refutable by the parser, so it is closed off both ways: without `else` the parser rejects it
+  ("refutable `<-` binding in a do block requires an `else`"), and with the `else` the parser
+  demands, W5 rejects the now-dead else arm ("Unreachable match branch") — correctly, since the
+  spec says an `else` on an irrefutable pattern is an error. **The two diagnostics point in
+  opposite directions, so no error message leads the user to the workaround.** Affects `<-` and
+  do-`let`, constant-else and binding-else alike. W5 is not the bug and must not be changed; the
+  parser's over-approximation is the sole defect. Note `BACKLOG.md` §1's own entry for the change
+  that introduced this gate describes it as complete and correct and never noticed that
+  single-ctor destructuring is irrefutable and gets swept up. **Fix:** for a no-`else` do-bind
+  whose pattern is a `ConstructorPattern`, route it through the existing `build_do_refutable`
+  staircase with a single success arm and no else arm; W5's exhaustiveness check then decides
+  refutability type-relatively for free — a single-ctor pattern is total and passes, a genuinely
+  refutable one gets the ordinary non-exhaustive-match error, which is also a better diagnostic
+  than today's parse error. `do_bind_captures` stays untouched (it never sees the constructor
+  pattern), and the syntactic gate is demoted to selecting the fast path rather than deciding
+  legality.
+
 ### 2) Networking and HTTP Client
 
 - [ ] `P2` **The epoll poller collapses two interests on one fd; kqueue does not.** Green-threads
@@ -2840,6 +2969,74 @@ op-classification already in place.
 - [x] `P2` **(item 5) Codegen dispatches the Semigroup operator on the SOURCE NAME `append`, hijacking any user function so named — DONE 2026-07-18 via root-cause fix (b), across two commits: resolution side = 5b Part 1 (`69ed549`), codegen side = 5b Part 2 (`cbf03a7`). Acceptance criterion met: a user `fn append` now compiles correctly (regression test `test_classmethod_dispatch_identity.spr`), no stdout-swallowed codegen bail. See the 5b sub-items below.** Found 2026-07-14 building `tests/stdlib/test_task_nested_scope.spr`: a top-level `fn append(log: Ref String, s: String) -> Unit` silently broke codegen for the whole bundle. **Mechanism (verified in source):** the parser desugars `a ++ b` to `CallExpr("append", [a, b])` (`ast_to_ir.sprout:4201`), and codegen routes the append/Semigroup lowering purely on the callee *name string* — `if fname == "append" then translate_append_call(...)` (`ast_to_ir.sprout:4322`). So **any** call to a function literally named `append`, regardless of its actual binding/type, is force-routed into the Semigroup `++` lowering, which expects `String`/`List` operands or a resolved instance-dict witness. A user `append` returning `Unit` with no witness falls through to the `else` at `ast_to_ir.sprout:4307` and bails: `` `++`/append on a non-String/List type with no resolved Semigroup witness``. **Why it's insidious (3 failure-amplifiers):** (a) the error names `++`, code that never wrote `++` — it describes the *desugared* form; (b) the error is written to **stdout** (becomes line 1 of the emitted `.ll`) while `--emit-ir` **exits 0**, so it surfaces only later as an opaque `clang` "expected top-level entity" link error; (c) the trigger is the bare string `"append"`, not scope shadowing — a wholly unrelated function is hijacked. Same root class as items 1–4 in this section: **codegen keying dispatch on a source name instead of the typechecker's already-resolved identity** (cf. the `vec_sort`/`vec_sort_by` name-vs-witness bugs). **Memory:** `feedback_append_name_collides_semigroup` (also flags `map`/`compare`/`mempty` etc. as effectively-reserved names with no protection). **Prior-art survey (verified against primary sources, 2026-07-14):** the collision exists only because Sprout's operator desugars to a plain *identifier* in the value namespace. Comparable languages prevent it structurally, in two camps — (1) *operator target is a member, never a free identifier*: **Rust** `a + b` → `std::ops::Add::add` trait method ([reference](https://doc.rust-lang.org/reference/expressions/operator-expr.html)); **Scala** `a ++ b` ≡ `a.++(b)`, operators are methods ([docs](https://docs.scala-lang.org/tour/operators.html)); **Swift** the operator symbol itself is the function name, `static func +`, so an alphanumeric identifier can never collide ([Swift book, Advanced Operators](https://docs.swift.org/swift-book/documentation/the-swift-programming-language/advancedoperators/)). (2) *same choice as Sprout — class methods share the top-level namespace — but with a hard conflict rule*: **Haskell 2010 Report §4.3.1**: "Class methods share the top level namespace with variable bindings and field names; they must not conflict with other top level bindings in scope. That is, a class method can not have the same name as a top level definition …" ([report](https://www.haskell.org/onlinereport/haskell2010/haskellch4.html)). So top-level class-method names are a *legitimate* design (Haskell's) — the gap is the two missing safeguards. **Two fixes (analyze which, or both):** (a) **cheap/defensive (Haskell's rule):** at check time, reject a user `fn` whose name equals a class method (or any operator-desugar target) as a duplicate-definition error — turns the silent miscompile into a located diagnostic; small, but leaves the codegen name-magic. (b) **root-cause:** stop dispatching codegen on the string `"append"`; the typechecker has already resolved the call to a specific `Semigroup` instance (or a user function) — key `translate_append_call` off that resolved marker/identity, not the source name. Aligns with item 4 (canonical identity) and the general "resolve, don't re-match names" direction. **Acceptance criterion:** a program with a user-defined `fn append` (or `map`/`compare`) either compiles correctly (root-cause fix) or is rejected at compile time with a clear located diagnostic that names the collision (defensive fix) — never a stdout-swallowed codegen bail masquerading as a link error; regression test wired into a gate. **Sequence:** independent of items 1–4; the defensive fix (a) is landable now as a quick guard, the root-cause fix (b) is best folded into item 4's identity work.
   - [x] **(item 5b — value-namespace fix) DONE 2026-07-17** (branch `feat/canonical-tyvar-identity`). Root-cause fix, not the defensive guard: the parser no longer desugars `a ++ b` to a bare `CallExpr(VarExpr("append"))` — it emits `ast.BinaryExpr("++")` (symmetric with `+`/`-`), and `infer.infer_binary_op` gains a `"++"` case (`append_via_semigroup`) that dispatches to the Semigroup class method by IDENTITY, selecting the instance via `@inst:Semigroup:{head}` directly — a key no user `fn append` can clobber (the old path went through the evictable `@class:append` marker / value-namespace name). Emits the same `TCall(append, [TDict, l, r])` node codegen already lowered, so `ast_to_ir` is untouched. A user `fn append` is now an ordinary function; `++` is immune. NOTE: chose (b)-style root fix over (a) the defensive guard because the guard would REGRESS `stdlib.bytes` (legit qualified exports `empty`/`append`/`to_string`). Regression test `tests/stdlib/test_operator_not_hijacked_by_user_fn.spr` (RED = check-phase `Ref String vs String`; GREEN = `++` = Semigroup). Full compiler-source gate chain green + seed refreshed (fixed point iter 2).
   - [x] **(item 5b — Part 2: codegen symbol collision + dispatch hijack) DONE 2026-07-18** (commit `cbf03a7`, branch `feat/dispatch-identity-followups`, canonical-identity sub-campaign α). Fixed BOTH remaining codegen name-as-identity manifestations: (1) the SYMBOL COLLISION — every class method emitted a bare dispatcher symbol (`@append`, `@eq`, `@to_string`, `@compare`, `@empty`, `@fmap`, `@fold_values`), colliding with an emitted user `fn <class-method-name>` → `clang: invalid redefinition`; (2) the DISPATCH HIJACK — `ast_to_ir`'s `++` peephole keyed on `fname == "append"`, so a user `fn append` emitted `ast_to_ir: append expects at least 2 arguments` (1-arg) or a silent `str_concat` miscompile (2-string). **Fix:** a shared `classmethod_dispatch_name(class, method)` (lowering) mangles every dispatcher to `__cm_<Class>_<method>`, applied at BOTH the wrapper DEFINE (`generate_one_class_wrapper`) and every dispatch CALL site (`lower_dispatch_callee`, at the `TCall` lowering choke point). The rewrite is gated on the infer-injected leading `TDict` witness — present for every genuine dispatch (input/return/forward position), absent for a user shadow — so a shadowing top-level fn keeps its bare name and calls the user's own function. `ast_to_ir`'s `++` peephole re-keys on `"__cm_Semigroup_append"`. Behavior-preserving (every dispatch already routed through the bare wrapper; this is a consistent rename — value-position eta still targets `@__tc_`). Regression test `tests/stdlib/test_classmethod_dispatch_identity.spr` (user `append`/`to_string` shadow + genuine String/List `++`). Self-hosts to a fixed point; full gate chain green + seed refreshed. This closes the codegen-side root-cause fix (b) for item 5 above.
+- [ ] `P1` **(type-system review 2026-08-13) A compound-head constraint `where C (T a)` resolves
+  its dictionary by grabbing the first concrete argument (`infer.sprout:2033`, canonicalization at
+  `:5773-5776`).** `canonicalize_constrained_constraints_acc` **discards** a type-application
+  constraint head entirely, emitting the token `"#none"`.
+  `inject_constrained_fn_dicts_via_field`'s `#none` arm then resolves the dict by scanning the
+  call's arguments left to right for the first one with a concrete type head
+  (`first_concrete_typed_arg_str_excluding`, `:1316-1330`), committing with **no check that the
+  argument's type relates to the constraint's head and no backtracking**. Two failure modes, one
+  root cause: (a) if an earlier unrelated argument has an instance of that same class, its dict
+  hijacks the slot — a silent miscompile ranging from wrong output to a `non-exhaustive match`
+  abort to a SIGSEGV inside `str_concat`; (b) if that first concrete-headed argument has *no*
+  instance, the scan gives up rather than continuing to the argument that does match, and the
+  user gets a leaked internal string ("internal error: under-application of … reached codegen").
+  Reproduced: `fn describe(tag: Int, b: Box a) -> String where Sh (Box a) = sh(b)` prints
+  `int(35184372088840)` while the identical body with the parameters swapped prints `box(int(1))`
+  — same constraint, different dictionary, chosen only by parameter order. **This is NOT the
+  `first_concrete_arg(guess)` heuristic that item 3 above audited and deliberately spared.** That
+  tag is produced at `:1949` inside `resolve_obligation`, which is also the only path
+  `SPROUT_TRACE_DISPATCH` instruments; the `#none` arm returns before any trace call, and a
+  miscompiling call site emits **zero** dispatch events. The corpus sweeps that licensed sparing
+  the heuristic (160 files/14,465 events, later 225/20,863) were structurally incapable of
+  observing this path. Sibling of — not a duplicate of — the stale-subst `#none` fix below: that
+  one corrected `subst`→`s3` within the arg scan; this is the arg scan existing at all.
+  The shape is supported and regression-tested
+  (`tests/stdlib/test_compound_constraint_inline_record.spr:16`), but existing coverage only ever
+  passes the constrained value as the **first** argument — precisely where the positional guess
+  accidentally agrees with the truth. **Fix:** do not guess, the head is known —
+  `unifier.apply_subst(s3, fresh_t)` on the constraint head yields `Box Int` at the call site, so
+  resolve `@inst:C:<head-ctor>` directly (recursing to discharge the instance's own premise)
+  exactly as the concrete-ctor path at `:5769-5772` already does. That means preserving a real
+  token for a `TypeApp` head in `canonicalize_constrained_constraints_acc` instead of collapsing
+  to `"#none"`. If an argument scan is retained as a fallback it must unify each candidate's
+  substituted type against the constraint's substituted head before committing, and keep scanning
+  past an `@inst` miss. Failing either, raise the located "ambiguous typeclass dispatch … refusing
+  to guess" error item 3 already built — precise-or-loud, never precise-or-guess. Whichever route,
+  route the `#none` arm through `trace_dispatch` so it stops being invisible to corpus sweeps.
+- [ ] `P1` **(type-system review 2026-08-13) An ambiguous class type variable is never reported:
+  undefined link symbol, or a caller-dependent instance (`infer.sprout:1191-1193`, `:1772-1790`).**
+  The classic `show . read` ambiguity — here `to_str(from_int(n))`, where the dispatch tyvar is
+  determined by nothing — is not diagnosed. `find_fwd_tdict_in_args` (`:1237`) misses because the
+  fresh tyvar has no `@fwd:{tvar}:{class}` marker, and `scan_fwd_markers` (`:1775`) then does a
+  **class-only** scan of the whole env. Two outcomes: (a) with no `@fwd:*:{class}` marker in
+  scope, `check_instance_fwd`'s final fallback returns the call unchanged with no dictionary and
+  no error — `--phase check` and `--emit-ir` both exit 0, resolve and `verify_dispatch` both pass
+  clean (`verify_call` keys off the *callee's declared `where` clause*, and a class method has
+  none), and the sole user-visible symptom is `clang: use of undefined value '@from_int'` with no
+  Sprout source position. (b) with any such marker in scope, `scan_fwd_marker_entries`
+  (`:1786-1790`) returns the **first** one in `dict_entries(env)` order, so the ambiguous
+  expression silently adopts a dictionary belonging to an unrelated type variable. Reproduced:
+  in `fn amb(x: b, n: Int) -> String where Conv b = to_str(x) ++ "/" ++ to_str(from_int(n))`, the
+  closed subexpression `to_str(from_int(7))` — no free variables, no connection to `x` — prints
+  `bool` in one call and `int:7` in another. **That is incoherence, not merely a missing
+  diagnostic.** Two of the code's own asserted invariants are falsified: `:1189-1190` claims
+  "only a rigid function head reaches here unresolved" (case (a) reaches it with an ambiguous
+  fresh tyvar), and `scan_fwd_markers`' header describes itself as the fallback for a constraint
+  var "not visible at the head of any argument (e.g. `Ord k` where `k` appears inside a tuple)"
+  — i.e. it assumes the obligation belongs to a real declared constraint var that is merely
+  syntactically hidden, and has no way to tell that case from case (b). Case (a) is exactly what
+  `docs/spec-v0.md:1224-1226` says the constraint well-formedness rules exist to prevent, but
+  those rules only inspect declared `where` variables, so a body-local ambiguity with no `where`
+  clause at all slips past. **Fix:** do not delete `scan_fwd_markers` — its stated role is
+  legitimate — but gate it: before returning a marker, require the unresolved dispatch tyvar to
+  correspond to that marker's prog var (check it occurs in the enclosing declaration's constraint
+  set / `prog_to_fresh` image rather than being fresh from the call itself). When the dispatch
+  tyvar is tied to no declared constraint and no concrete type, emit a located "ambiguous type
+  variable: cannot determine which `C` instance to use" (the Haskell-style ambiguity check). That
+  also fixes (a), since the silent unchanged-call fallback becomes unreachable for a tyvar-headed
+  dispatch and can then be tightened to "reject unless the head is a rigid non-instantiable type".
 - [ ] `P2` **Pattern-variable names share the fresh-tyvar namespace (`infer.sprout:2050`)** (fundamentals review, static finding, not yet exercised at runtime). Pattern-bound variable names and the inferencer's fresh `t0`/`t1`/… type-variable names are drawn from the same namespace with no collision guard; a match-pattern binding whose name happens to collide with a fresh tyvar could shadow, or be shadowed by, the wrong entity during unification/substitution. Not yet triggered by a known repro — flagged as a latent hazard by the 2026-07-03 fundamentals code review among the "high/static (not yet run)" findings, adjacent to this section's tyvar-identity work (item 4). Needs a minimal repro to confirm reachability, then either a namespace separator (reserve a prefix for fresh tyvars, distinct from any user-writable pattern-variable name) or a rename pass before pattern binding. Full findings: `docs/fundamentals-code-review-handoff-2026-07-03.md`.
 
 #### Record type-arg concretization at dispatch (surfaced by deriving-on-records)
