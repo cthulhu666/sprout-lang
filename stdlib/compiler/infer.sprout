@@ -5523,51 +5523,97 @@ fn fold_fwd_entries(entries: List (String, types.Scheme), env: Dict types.Scheme
 # Signature rigidity check (W3/F-RIGID): a WRITTEN type variable must stay
 # abstract in the body. Each declared tyvar was instantiated to a fresh TVar
 # (recorded in prog_to_fresh keyed by the written name); after checking the body,
-# if one resolves through the final substitution to a NON-variable type, the body
-# constrained it and the declared signature is too general. A fresh var that
-# resolves to another variable is still polymorphic and fine. Runs
-# post-unification so it never perturbs dict forwarding (constraints leave the
-# tyvar a TVar), unlike skolemization.
+# each is re-derived from the final substitution. Runs post-unification so it
+# never perturbs dict forwarding (constraints leave the tyvar a TVar), unlike
+# skolemization — which is why the rule lives here and not in unify.
+#
+# A written variable survives only when it resolves to a bare variable that no
+# OTHER written variable also resolves to. Two ways to break it:
+#   - a compound resolution pins it to a structure the signature left open;
+#   - two written variables reaching the same variable is the undeclared
+#     constraint `a = b`.
+# Both were once accepted. The guard tested only whether the resolution
+# mentioned a TConst, so `fn snd(x: a, y: b) -> a = y` (merge) and
+# `fn f(x: a, g: b -> c) -> a = g` (const-free compound) passed, silently
+# narrowing the scheme while a forward caller committed against the un-narrowed
+# one — a SIGSEGV rather than a diagnostic. Fixtures:
+# tests/conformance/type_error/rigid_signature{,_var_merge,_compound}.spr.
 #
 # `names` are the scheme's quantified vars; `_unann`/`_unann_<param>` are
 # synthesized placeholders for UNANNOTATED returns/params (not written by the
 # programmer) and are excluded — inference is free to specialize those (e.g.
 # `rcompose(f: a->b, g: b->c) = \x -> g(f(x))`, whose inferred return is a->c).
 fn rigidity_violation(prog_to_fresh: Dict types.Type, s2: Dict types.Type, names: List String) -> Maybe String =
+  rigidity_violation_go(prog_to_fresh, s2, names, dict_empty(), fresh_to_written(prog_to_fresh))
+
+# `claimed` maps a resolved variable's identity to the written name that reached
+# it first, which is what turns a second arrival into a merge report.
+# `written` is the reverse of prog_to_fresh, used only to render.
+fn rigidity_violation_go(
+  prog_to_fresh: Dict types.Type,
+  s2: Dict types.Type,
+  names: List String,
+  claimed: Dict String,
+  written: Dict String
+) -> Maybe String =
   match names with
   | Nil -> Nothing
   | Cons n rest ->
-      if str_starts_with(n, "_unann") then rigidity_violation(prog_to_fresh, s2, rest)
+      if str_starts_with(n, "_unann") then rigidity_violation_go(prog_to_fresh, s2, rest, claimed, written)
       else
-        match dict_get(n, prog_to_fresh) with
-        | Nothing -> rigidity_violation(prog_to_fresh, s2, rest)
-        | Just fresh_v ->
-            match unifier.apply_subst(s2, fresh_v) with
-            | types.TVar _ -> rigidity_violation(prog_to_fresh, s2, rest)
-            | other ->
-                # A variable bound to a purely-variable structure (e.g. an
-                # identity's `t -> t`, or a tuple of vars) is still fully
-                # polymorphic — not a violation. Only a binding that pins the
-                # variable to a concrete constructor (Int, List c, ...) means the
-                # declared signature was too general for its body.
-                if type_has_const(other)
-                then Just(n ++ " forced to " ++ types.type_to_string(other))
-                else rigidity_violation(prog_to_fresh, s2, rest)
+        let Just fresh_v = dict_get(n, prog_to_fresh) else rigidity_violation_go(prog_to_fresh, s2, rest, claimed, written)
+        in
+          match unifier.apply_subst(s2, fresh_v) with
+          | types.TVar id ->
+              # Intact only if no earlier written variable resolved here too.
+              # Two written variables sharing one resolution is the constraint
+              # `a = b`, which the signature never declared.
+              match dict_get(types.tyvar_identity(id), claimed) with
+              | Just earlier -> Just(n ++ " merged with declared variable " ++ earlier)
+              | Nothing ->
+                  rigidity_violation_go(prog_to_fresh, s2, rest,
+                    dict_set(types.tyvar_identity(id), n, claimed), written)
+          | other ->
+              # Any compound resolution pins the variable to a structure the
+              # signature promised to leave open. This holds for a const-free
+              # one (`b -> c`) exactly as for `Int` or `List c`: a caller may
+              # still instantiate the variable at anything else.
+              Just(n ++ " forced to " ++ types.type_to_string(render_written(written, other)))
 
-# True if the type mentions any concrete type constructor (TConst) — as opposed
-# to being built purely from type variables via arrows and tuples.
-fn type_has_const(t: types.Type) -> Bool =
+# prog_to_fresh reversed: fresh-variable identity -> the name the programmer
+# wrote. Rendering a resolution through it keeps the internal "$t41" out of the
+# diagnostic, which for a merge is the whole message ("merged with a").
+fn fresh_to_written(prog_to_fresh: Dict types.Type) -> Dict String =
+  fresh_to_written_go(vec_to_list(dict_entries(prog_to_fresh)), dict_empty())
+
+fn fresh_to_written_go(entries: List (String, types.Type), acc: Dict String) -> Dict String =
+  match entries with
+  | Nil -> acc
+  | Cons entry rest ->
+      match entry with
+      | (written, t) ->
+          match t with
+          | types.TVar id -> fresh_to_written_go(rest, dict_set(types.tyvar_identity(id), written, acc))
+          | _ -> fresh_to_written_go(rest, acc)
+
+# Structural sibling of `types.apply_rename_type`, kept local because this
+# renames INTO the programmer's names for one diagnostic rather than into the
+# canonical a/b/c display names a scheme is printed with.
+fn render_written(written: Dict String, t: types.Type) -> types.Type =
   match t with
-  | types.TVar _ -> false
-  | types.TConst _ -> true
-  | types.TApp a b -> if type_has_const(a) then true else type_has_const(b)
-  | types.TFunc p r _ _ -> if type_has_const(p) then true else type_has_const(r)
-  | types.TTuple items -> tuple_has_const(items)
+  | types.TVar id ->
+      match dict_get(types.tyvar_identity(id), written) with
+      | Just name -> types.TVar(types.tyvar_id(name))
+      | Nothing -> t
+  | types.TConst _ -> t
+  | types.TApp base arg -> types.TApp(render_written(written, base), render_written(written, arg))
+  | types.TFunc p r eff own -> types.TFunc(render_written(written, p), render_written(written, r), eff, own)
+  | types.TTuple items -> types.TTuple(render_written_list(written, items))
 
-fn tuple_has_const(items: List types.Type) -> Bool =
+fn render_written_list(written: Dict String, items: List types.Type) -> List types.Type =
   match items with
-  | Nil -> false
-  | Cons h t -> if type_has_const(h) then true else tuple_has_const(t)
+  | Nil -> Nil
+  | Cons h t -> Cons(render_written(written, h), render_written_list(written, t))
 
 # M4.2 linear check, gated on the program declaring any linear type. When it does
 # not, skip the check AND the full-body substitution copy (evaluated only inside

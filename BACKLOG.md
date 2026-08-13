@@ -561,8 +561,20 @@ Legend:
 > six of the seven: **a site that converts "I do not know yet" into "anything you like"** rather
 > than into a deferred obligation or a located error.
 
-- [ ] `P1` **Declared type variables are not rigid: a const-free resolution passes the W3 guard
-  (`infer.sprout:5536-5555`).** `instantiate_with_vars` (`unifier.sprout:310`) mints signature
+- [x] `P1` **Declared type variables are not rigid: a const-free resolution passes the W3 guard
+  (`infer.sprout:5536-5555`). FIXED 2026-08-13** — `rigidity_violation` now rejects a written
+  variable that resolves to ANY compound type (not just one mentioning a `TConst`) and rejects
+  two written variables resolving to the same variable, reporting the latter as "type variable b
+  merged with declared variable a". `type_has_const`/`tuple_has_const` are gone; the resolution
+  is rendered back through the programmer's own names (`fresh_to_written`/`render_written`), so
+  the compound message reads "forced to b -> c" instead of leaking "$t41". The `_unann` skip is
+  untouched. Blast-radius survey before landing: the compiler self-hosts through the new check
+  (stage-3), all 51 examples compile, full suite green. Fixtures
+  `tests/conformance/type_error/rigid_signature_{var_merge,compound}.spr` (both RED-verified
+  accepted-then-SIGSEGV before the fix) plus the positive guard
+  `tests/stdlib/test_rigid_signature_accepts.spr`, which pins the shapes that must keep
+  compiling — including the two `_unann` forms the skip protects. Original analysis follows.
+  `instantiate_with_vars` (`unifier.sprout:310`) mints signature
   tyvars as ordinary flexible metavariables — no skolemization — so `unify_applied`'s TVar/TVar
   arm (`unifier.sprout:227-231`) merges two of them freely. The only guard is the post-hoc
   `rigidity_violation`, which rejects a declared var **only** when its resolution contains a

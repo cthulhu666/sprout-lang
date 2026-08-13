@@ -1,0 +1,57 @@
+import stdlib.test (check_eq, run_suite)
+
+# Blast-radius guard for the W3/F-RIGID tightening (infer.rigidity_violation).
+# The rule now rejects a written type variable that resolves to ANY compound
+# type, and rejects two written variables resolving to the same variable. Every
+# declaration below is a shape that must keep compiling — this file failing to
+# COMPILE is the assertion; the checks below only pin the runtime behaviour.
+# The rejection side lives in tests/conformance/type_error/rigid_signature*.spr.
+
+# A written variable resolving to a bare variable: the ordinary polymorphic case.
+fn ident(x: a) -> a = x
+
+# Two written variables that must stay DISTINCT. The merge rule keys on the
+# resolved variable's identity, so two unconstrained variables must not collide.
+fn keep_first(x: a, y: b) -> a = x
+
+# A written variable appearing inside a compound PARAMETER, then resolved by
+# application. `a` and `b` each resolve to a bare variable; the arrow is in the
+# signature, not in either variable's resolution.
+fn use_fn(f: a -> b, x: a) -> b = f(x)
+
+# Written variables under a tuple, reordered by the body.
+fn swap(p: (a, b)) -> (b, a) =
+  match p with
+  | (x, y) -> (y, x)
+
+# A CONSTRAINED written variable. The check runs post-unification precisely so a
+# class constraint leaves the tyvar a TVar rather than skolemizing it; if that
+# ever changes, dict forwarding breaks here first.
+fn describe(x: a) -> String where ToString a = to_string(x)
+
+# Unannotated return: the `_unann` placeholder is skipped by the check. Its
+# resolution IS a constant (Int), so without the skip this is rejected.
+fn inc(n: Int) = n + 1
+
+# Unannotated return resolving to a COMPOUND type — the `rcompose` shape named in
+# the check's own comment. Under the compound rule this is exactly what the
+# `_unann` skip has to keep protecting.
+fn compose2(f: a -> b, g: b -> c) = \x -> g(f(x))
+
+# The scheme must NOT have been narrowed: `keep_first` is used at two different
+# instantiations of `b`, which only typechecks if `a` and `b` stayed independent.
+fn keep_first_twice() -> String =
+  keep_first("kept", 1) ++ keep_first("!", true)
+
+fn main() -> Unit !{IO} =
+  run_suite("rigid_signature_accepts", [
+    check_eq("identity is polymorphic at Int", ident(7), 7),
+    check_eq("identity is polymorphic at String", ident("s"), "s"),
+    check_eq("distinct written vars stay distinct", keep_first("a", 1), "a"),
+    check_eq("written var inside a compound param", use_fn(\n -> n + 1, 4), 5),
+    check_eq("tuple written vars reorder", swap((1, "x")), ("x", 1)),
+    check_eq("constrained written var dispatches", describe(12), "12"),
+    check_eq("unannotated return still inferred", inc(41), 42),
+    check_eq("unannotated compound return", compose2(\n -> n + 1, \n -> n * 2)(5), 12),
+    check_eq("scheme not narrowed across instantiations", keep_first_twice(), "kept!")
+  ])
