@@ -1,0 +1,14 @@
+module main
+
+# Sibling of `existential_escape_unannotated` on the top-level-`let` path. The
+# value restriction rejects a non-value binding whose type still has FREE type
+# variables, but a skolem is a rigid TConst with none — so the ftv test read
+# `$sk<n>` as "fully resolved, nothing ambiguous" and bound `leaked`
+# monomorphically at the hidden type. `print` then rendered the String as a raw
+# heap address, the same miscompile as the function-decl route.
+
+type Boxed = | exists a. Boxed a
+
+let leaked = match Boxed("hi") with | Boxed x -> x
+
+fn main() -> Unit !{IO} = print(leaked)

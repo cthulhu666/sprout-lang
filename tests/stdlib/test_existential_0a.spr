@@ -27,9 +27,26 @@ fn rebox(b: Boxed) -> Boxed =
   match b with
   | Boxed x -> Boxed(x)
 
+# The same two legal shapes with the return type OMITTED — the closest
+# neighbours of the escape the checker now rejects at the declaration. The rule
+# keys on a skolem reaching the decl's OWN type, so consuming the unpacked value
+# (`Boxed -> String`) or re-packing it (`Boxed -> Boxed`) stays fine without an
+# annotation; only `= match b with | Boxed x -> x` puts the skolem in the type.
+# Unannotated is the shape that matters here: the annotated escape is caught by
+# the rigidity scan, so this path is the one the new check alone guards.
+fn describe_unann(b: Boxed) =
+  match b with
+  | Boxed _ -> "boxed"
+
+fn rebox_unann(b: Boxed) =
+  match b with
+  | Boxed x -> Boxed(x)
+
 fn main() -> Unit !{IO} =
   run_suite("existential_0a", [
     check_eq("heterogeneous list length", list_length([Boxed(1), Boxed("hi"), Boxed(true)]), 3),
     check_eq("describe ignores hidden value", describe(Boxed(42)), "boxed"),
-    check_eq("legal re-box round-trips", describe(rebox(Boxed(7))), "boxed")
+    check_eq("legal re-box round-trips", describe(rebox(Boxed(7))), "boxed"),
+    check_eq("unannotated consumer still accepted", describe_unann(Boxed(42)), "boxed"),
+    check_eq("unannotated re-box still accepted", describe(rebox_unann(Boxed(7))), "boxed")
   ])

@@ -4912,6 +4912,22 @@ fn typecheck_decls_inner(
                 typecheck_decls_inner(state, rest, new_env, subst, eff_subst, alias_env,
                   Cons(typed_decl, acc), new_env_ftv)
 
+# Phrased as the same "escapes its scope" family as the unifier's mismatch
+# rewording, so the two ends of the rule read alike. The advice is deliberately
+# NOT "annotate the return type" — writing one moves the error to the rigidity
+# scan (tests/conformance/type_error/existential_escape) without helping.
+fn skolem_escape_prefix(name: String) -> String =
+  "existential type escapes its scope in " ++ name
+    ++ ": a type hidden by an `exists` pattern cannot "
+
+fn skolem_escape_msg(name: String) -> String =
+  skolem_escape_prefix(name) ++ "appear in the function's own type"
+    ++ " — use the unpacked value inside its match branch instead of returning it"
+
+fn skolem_escape_let_msg(name: String) -> String =
+  skolem_escape_prefix(name) ++ "be the type of a top-level binding"
+    ++ " — consume the unpacked value inside its match branch"
+
 fn typecheck_decl(
   state: unifier.InferState,
   decl: ast.Decl,
@@ -4935,7 +4951,7 @@ fn typecheck_decl(
         GlobalEnv(mark_type_multiplicity(rec_name, mult,
           register_record_fields(rec_name, type_params, fields, global_env_dict(env)))),
         env_ftv)
-  | ast.FnDecl name params ret_type_maybe effects_maybe constraints _ _ ->
+  | ast.FnDecl name params ret_type_maybe effects_maybe constraints _ decl_pos ->
       do
         (r, fwd_markers, decl_constraints) <- check_fn_body(state, decl, global_env_dict(env), subst, eff_subst, alias_env, env_ftv)
         # WHY: @eta_fwd markers added here have free type variables that must be
@@ -4949,6 +4965,18 @@ fn typecheck_decl(
             # Retained as a constructor only to avoid breaking the typed_ast public API.
             TypedDeclErr(no_pos(), "internal: unexpected BodyLenient in " ++ name)
         | typed_ast.BodyOk typed_body inferred_fn_type ->
+            # A skolem reaching the decl's own type escaped a match branch, and
+            # generalize cannot notice: a skolem is a rigid TConst, so it has no
+            # free type variables for the ftv-difference to quantify. Being
+            # unquantified it is then NOT refreshed at instantiation, so it would
+            # become one rigid type shared by every call site — which is how an
+            # unannotated one-line unboxer both printed a String as a raw address
+            # and silently merged two unpacks that `existential_merge` rejects
+            # directly. The annotated form errors earlier (the rigidity scan sees
+            # the skolem as a TConst); only the `_unann` path reaches here.
+            if types.type_mentions_skolem(inferred_fn_type)
+            then TypedDeclErr(decl_pos, skolem_escape_msg(name))
+            else
             TypedDeclOk(
               typed_ast.TFnDecl(name, params, ret_type_maybe, effects_maybe, constraints, typed_body),
               # WHY: fold @eta_fwd markers into the global env so lowering can map fresh
@@ -5670,6 +5698,14 @@ fn finish_let_decl(name: String, expr: ast.Expr, typed_expr: typed_ast.TypedExpr
   match letdecl_linear_gate(s1, typed_expr, env) with
   | linear_check.LinFail lp lm -> TypedDeclErr(lp, lm)
   | linear_check.LinPass ->
+      # Sibling of the FnDecl escape check: a skolem is a TConst, so it has no
+      # free type variables and the value restriction's ftv test below reads it
+      # as "fully resolved, nothing to generalize" and binds it monomorphically.
+      # `let leaked = match Boxed("hi") with | Boxed x -> x` was accepted as
+      # `main.leaked : $sk<n>` on exactly that route.
+      if types.type_mentions_skolem(unifier.apply_subst(s1, typed_ast.typed_expr_type(typed_expr)))
+      then TypedDeclErr(let_pos, skolem_escape_let_msg(name))
+      else
       # Value restriction (W3/F-VALRESTR): a syntactic value generalizes; a
       # non-value (function call, if/match/do, ...) does not. A non-value whose
       # type still has free type variables is ambiguous — neither generalizable

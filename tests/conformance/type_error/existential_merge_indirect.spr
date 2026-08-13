@@ -1,0 +1,23 @@
+module main
+
+# Guards `existential_merge` against being defeated by one line of indirection.
+# That fixture pins "two unpacks must not unify" and rejects the direct
+# `match (b1, b2) with | (Boxed x, Boxed y) -> list_length([x, y])`. Routing the
+# same merge through an unannotated one-line unboxer USED TO BE ACCEPTED: the
+# escaped skolem became a single generalized type shared by every call site, so
+# the two unpacks unified through it rather than being kept distinct — the exact
+# property `existential_merge` exists to prevent, reachable by refactoring it.
+#
+# The rejection lands on `unbox`, where the escape happens, not on `merge`.
+
+type Boxed = | exists a. Boxed a
+
+fn unbox(b: Boxed) =
+  match b with
+  | Boxed x -> x
+
+fn merge(b1: Boxed, b2: Boxed) -> Int =
+  list_length([unbox(b1), unbox(b2)])
+
+fn main() -> Unit !{IO} =
+  print(merge(Boxed(1), Boxed("two")))

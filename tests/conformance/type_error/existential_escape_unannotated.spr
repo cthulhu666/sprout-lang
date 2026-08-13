@@ -1,0 +1,22 @@
+module main
+
+# Stage 0a soundness — the escape check with the return type OMITTED. The sibling
+# `existential_escape` declares `-> Int`, which the rigidity scan catches. With no
+# annotation the scan is skipped (the synthesized `_unann` placeholder is exempt),
+# so the skolem rode into the decl's generalized scheme instead: `unbox` was
+# accepted as `main.Boxed -> $sk<n>`.
+#
+# A skolem is a rigid TConst, so it has no free type variables — generalize's
+# ftv-difference never sees it — and being unquantified it is NOT refreshed at
+# instantiation. Every call site of `unbox` therefore shared ONE rigid type, and
+# `print` (forall a. a -> Unit) happily consumed it: printing a String through
+# this helper emitted a raw heap address.
+
+type Boxed = | exists a. Boxed a
+
+fn unbox(b: Boxed) =
+  match b with
+  | Boxed x -> x
+
+fn main() -> Unit !{IO} =
+  print(unbox(Boxed("hi")))
