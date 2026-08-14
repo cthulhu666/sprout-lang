@@ -483,6 +483,47 @@ fn all_annotated(params: List ast.Param) -> Maybe (List ast.TypeExpr) =
           | Nothing -> Nothing
       | ast.Param _ Nothing _ -> Nothing
 
+# Names bound LOCALLY at the current point of the walk.
+#
+# A class method is registered under its bare name, and the callee of a call is
+# just a `TVar name` — nothing in the typed AST marks it as a method rather than
+# an ordinary variable. `collect_fn_names` handles the top-level case by removing
+# the method entry when a top-level `fn` shares its name; a local binding needs
+# the mirror of that, but scoped, because it shadows the method only inside its
+# own body. So the walk carries the set of names in scope and `check_call` skips
+# a callee that is one of them.
+#
+# Without this, a parameter named after a method produced a hard error naming a
+# class the code never mentions:
+#
+#   fn use_it(append: Int -> Int -> Int, x: Int) -> Int = append(x, x)
+#   ERROR: dispatch-verify: No instance of Semigroup for Int
+fn bind_names(names: List String, locals: Dict Bool) -> Dict Bool =
+  match names with
+  | Nil -> locals
+  | Cons n rest -> bind_names(rest, dict_set(n, true, locals))
+
+fn bind_params(params: List ast.Param, locals: Dict Bool) -> Dict Bool =
+  match params with
+  | Nil -> locals
+  | Cons p rest ->
+      match p with
+      | ast.Param name _ _ -> bind_params(rest, dict_set(name, true, locals))
+
+# Every name a pattern binds. Literal and wildcard patterns bind nothing; a
+# constructor or tuple pattern binds whatever its sub-patterns do.
+fn pattern_bound_names(pat: ast.Pattern) -> List String =
+  match pat with
+  | ast.VarPattern name _ -> [name]
+  | ast.ConstructorPattern _ subpats _ -> pattern_list_bound_names(subpats)
+  | ast.TuplePattern subpats _ -> pattern_list_bound_names(subpats)
+  | _ -> Nil
+
+fn pattern_list_bound_names(pats: List ast.Pattern) -> List String =
+  match pats with
+  | Nil -> Nil
+  | Cons p rest -> list_append(pattern_bound_names(p), pattern_list_bound_names(rest))
+
 fn collect_decls(decls: List typed_ast.TypedDecl, sigs: Dict CalleeSig) -> List VerifyOutcome =
   match decls with
   | Nil -> Nil
@@ -490,7 +531,7 @@ fn collect_decls(decls: List typed_ast.TypedDecl, sigs: Dict CalleeSig) -> List 
 
 fn collect_decl(d: typed_ast.TypedDecl, sigs: Dict CalleeSig) -> List VerifyOutcome =
   match d with
-  | typed_ast.TFnDecl _ _ _ _ _ body -> collect_expr(body, sigs)
+  | typed_ast.TFnDecl _ params _ _ _ body -> collect_expr(body, sigs, bind_params(params, dict_empty()))
   | typed_ast.TInstanceDecl _ _ methods -> collect_methods(methods, sigs)
   | _ -> Nil
 
@@ -499,66 +540,86 @@ fn collect_methods(methods: List typed_ast.TypedInstanceMethod, sigs: Dict Calle
   | Nil -> Nil
   | Cons m rest ->
       match m with
-      | typed_ast.TypedInstanceMethod _ _ _ _ body ->
-          list_append(collect_expr(body, sigs), collect_methods(rest, sigs))
+      | typed_ast.TypedInstanceMethod _ params _ _ body ->
+          list_append(collect_expr(body, sigs, bind_params(params, dict_empty())),
+                      collect_methods(rest, sigs))
 
 # Walk an expression, checking every TCall and recursing into all subexpressions.
-fn collect_expr(e: typed_ast.TypedExpr, sigs: Dict CalleeSig) -> List VerifyOutcome =
+# `locals` grows at each binding form and is discarded on the way out, so a shadow
+# suppresses verification only within its own scope.
+fn collect_expr(e: typed_ast.TypedExpr, sigs: Dict CalleeSig, locals: Dict Bool) -> List VerifyOutcome =
   match e with
   | typed_ast.TCall callee args ret_ty pos ->
-      list_append(check_call(callee, args, ret_ty, pos, sigs), collect_exprs(Cons(callee, args), sigs))
-  | typed_ast.TIf c th el _ _ -> collect_exprs([c, th, el], sigs)
+      list_append(check_call(callee, args, ret_ty, pos, sigs, locals),
+                  collect_exprs(Cons(callee, args), sigs, locals))
+  | typed_ast.TIf c th el _ _ -> collect_exprs([c, th, el], sigs, locals)
   | typed_ast.TMatch scrut branches _ _ ->
-      list_append(collect_expr(scrut, sigs), collect_branches(branches, sigs))
-  | typed_ast.TLambda _ body _ _ -> collect_expr(body, sigs)
-  | typed_ast.TBinary _ l r _ _ -> collect_exprs([l, r], sigs)
-  | typed_ast.TUnary _ x _ _ -> collect_expr(x, sigs)
-  | typed_ast.TRange lo hi _ _ -> collect_exprs([lo, hi], sigs)
-  | typed_ast.TTuple items _ _ -> collect_exprs(items, sigs)
-  | typed_ast.TDo steps _ _ -> collect_do_steps(steps, sigs)
-  | typed_ast.TRecord _ fields _ _ -> collect_record_fields(fields, sigs)
-  | typed_ast.TGetField x _ _ _ -> collect_expr(x, sigs)
-  | typed_ast.TRecordUpdate base fields _ _ -> list_append(collect_expr(base, sigs), collect_record_fields(fields, sigs))
+      list_append(collect_expr(scrut, sigs, locals), collect_branches(branches, sigs, locals))
+  | typed_ast.TLambda params body _ _ -> collect_expr(body, sigs, bind_params(params, locals))
+  | typed_ast.TBinary _ l r _ _ -> collect_exprs([l, r], sigs, locals)
+  | typed_ast.TUnary _ x _ _ -> collect_expr(x, sigs, locals)
+  | typed_ast.TRange lo hi _ _ -> collect_exprs([lo, hi], sigs, locals)
+  | typed_ast.TTuple items _ _ -> collect_exprs(items, sigs, locals)
+  | typed_ast.TDo steps _ _ -> collect_do_steps(steps, sigs, locals)
+  | typed_ast.TRecord _ fields _ _ -> collect_record_fields(fields, sigs, locals)
+  | typed_ast.TGetField x _ _ _ -> collect_expr(x, sigs, locals)
+  | typed_ast.TRecordUpdate base fields _ _ ->
+      list_append(collect_expr(base, sigs, locals), collect_record_fields(fields, sigs, locals))
   | _ -> Nil
 
-fn collect_exprs(es: List typed_ast.TypedExpr, sigs: Dict CalleeSig) -> List VerifyOutcome =
+fn collect_exprs(es: List typed_ast.TypedExpr, sigs: Dict CalleeSig, locals: Dict Bool) -> List VerifyOutcome =
   match es with
   | Nil -> Nil
-  | Cons h t -> list_append(collect_expr(h, sigs), collect_exprs(t, sigs))
+  | Cons h t -> list_append(collect_expr(h, sigs, locals), collect_exprs(t, sigs, locals))
 
-fn collect_branches(branches: List typed_ast.TypedMatchBranch, sigs: Dict CalleeSig) -> List VerifyOutcome =
+fn collect_branches(branches: List typed_ast.TypedMatchBranch, sigs: Dict CalleeSig, locals: Dict Bool) -> List VerifyOutcome =
   match branches with
   | Nil -> Nil
   | Cons b rest ->
       match b with
-      | typed_ast.TypedMatchBranch _ body ->
-          list_append(collect_expr(body, sigs), collect_branches(rest, sigs))
+      | typed_ast.TypedMatchBranch pat body ->
+          list_append(collect_expr(body, sigs, bind_names(pattern_bound_names(pat), locals)),
+                      collect_branches(rest, sigs, locals))
 
-fn collect_do_steps(steps: List typed_ast.TypedDoStep, sigs: Dict CalleeSig) -> List VerifyOutcome =
+# Do steps bind SEQUENTIALLY: a name bound by one step is in scope for the steps
+# below it, but not for its own right-hand side.
+fn collect_do_steps(steps: List typed_ast.TypedDoStep, sigs: Dict CalleeSig, locals: Dict Bool) -> List VerifyOutcome =
   match steps with
   | Nil -> Nil
-  | Cons s rest -> list_append(collect_step(s, sigs), collect_do_steps(rest, sigs))
+  | Cons s rest ->
+      list_append(collect_step(s, sigs, locals), collect_do_steps(rest, sigs, step_binds(s, locals)))
 
-fn collect_step(s: typed_ast.TypedDoStep, sigs: Dict CalleeSig) -> List VerifyOutcome =
+fn step_binds(s: typed_ast.TypedDoStep, locals: Dict Bool) -> Dict Bool =
   match s with
-  | typed_ast.TDoBindStep _ expr -> collect_expr(expr, sigs)
-  | typed_ast.TDoLetStep _ expr -> collect_expr(expr, sigs)
-  | typed_ast.TDoExprStep expr -> collect_expr(expr, sigs)
+  | typed_ast.TDoBindStep pat _ -> bind_names(pattern_bound_names(pat), locals)
+  | typed_ast.TDoLetStep name _ -> dict_set(name, true, locals)
+  | typed_ast.TDoExprStep _ -> locals
 
-fn collect_record_fields(fields: List typed_ast.TypedRecordField, sigs: Dict CalleeSig) -> List VerifyOutcome =
+fn collect_step(s: typed_ast.TypedDoStep, sigs: Dict CalleeSig, locals: Dict Bool) -> List VerifyOutcome =
+  match s with
+  | typed_ast.TDoBindStep _ expr -> collect_expr(expr, sigs, locals)
+  | typed_ast.TDoLetStep _ expr -> collect_expr(expr, sigs, locals)
+  | typed_ast.TDoExprStep expr -> collect_expr(expr, sigs, locals)
+
+fn collect_record_fields(fields: List typed_ast.TypedRecordField, sigs: Dict CalleeSig, locals: Dict Bool) -> List VerifyOutcome =
   match fields with
   | Nil -> Nil
   | Cons f rest ->
       match f with
       | typed_ast.TypedRecordField _ expr ->
-          list_append(collect_expr(expr, sigs), collect_record_fields(rest, sigs))
+          list_append(collect_expr(expr, sigs, locals), collect_record_fields(rest, sigs, locals))
 
 # Check one call: look up the callee's signature, split args into value-args and
 # injected dicts (by variant — prepend and append both yield dicts in order), and
 # verify. Returns every (constraint, dict) outcome for the call — Nil for a
 # non-constrained or unknown callee.
-fn check_call(callee: typed_ast.TypedExpr, args: List typed_ast.TypedExpr, ret_ty: types.Type, pos: source.SourcePos, sigs: Dict CalleeSig) -> List VerifyOutcome =
+#
+# A callee bound in `locals` is not the class method or top-level fn of that name
+# — it is a parameter, lambda parameter, `let` or pattern binding that shadows it
+# — so it carries no signature to verify against and is skipped like any unknown.
+fn check_call(callee: typed_ast.TypedExpr, args: List typed_ast.TypedExpr, ret_ty: types.Type, pos: source.SourcePos, sigs: Dict CalleeSig, locals: Dict Bool) -> List VerifyOutcome =
   let Just name = callee_name(callee) else Nil
+      Nothing = dict_get(name, locals) else Nil
       Just sig = dict_get(name, sigs) else Nil
   in
     match sig with
