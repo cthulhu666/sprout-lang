@@ -1048,6 +1048,20 @@ fn call_arity_error(name: String, got: Int, want: Int) -> String =
   "'" ++ name ++ "' expects " ++ int_to_string(want) ++ " arguments, got "
     ++ int_to_string(got) ++ " (Sprout is n-ary; use `_` for partial application)"
 
+# Too MANY arguments. Reachable only when the callee's declared return type is
+# itself a function: with any other return type the surplus argument fails
+# unification first, as a type mismatch. Sprout is n-ary (docs/currying-and-pipe-
+# decision-v1.md §9a.5), so the extra arguments are a SEPARATE application of the
+# returned closure and have to be written as one.
+#
+# Silently accepting this miscompiled: codegen emitted a direct call to the
+# declared-arity symbol carrying the surplus arguments, LLVM discarded them, and
+# the call returned the closure handle reinterpreted as the result type.
+fn over_application_error(name: String, got: Int, want: Int) -> String =
+  "'" ++ name ++ "' expects " ++ int_to_string(want) ++ " arguments, got "
+    ++ int_to_string(got) ++ " — if it returns a function, apply the rest in a"
+    ++ " separate call: `" ++ name ++ "(…)(…)`"
+
 # A local binding (parameter, pattern var, do-bind) that reuses a top-level
 # function's name shadows it, so it must drop that function's `@arity:{name}`
 # marker: the name now refers to a value, whose under-application is a value-level
@@ -1066,12 +1080,31 @@ fn bind_local_scheme(name: String, scheme: types.Scheme, env: Dict types.Scheme)
 # function (bind_local_scheme drops the shadowed `@arity` marker, so
 # fn_declared_arity returns Nothing here). Just a clean arity error otherwise,
 # rather than silently building a partial the curried codegen miscompiles.
-fn under_application_error(name: String, got: Int, env: Dict types.Scheme) -> Maybe String =
+fn call_arity_error_for(name: String, got: Int, env: Dict types.Scheme) -> Maybe String =
   match fn_declared_arity(name, env) with
   | Nothing -> Nothing
   | Just want ->
-      if got >= want then Nothing
-      else Just(call_arity_error(name, got, want))
+      if got < want then Just(call_arity_error(name, got, want))
+      else if got > want then Just(over_application_error(name, got, want))
+      else Nothing
+
+# A zero-parameter function whose declared return type is itself a function has a
+# scheme indistinguishable from a one-parameter function's — both are `a -> b`. So
+# the no-argument branch of infer_call_resolve cannot tell `mk()` (exact arity)
+# from `adder()` (missing its argument) by type alone, and used to reject both.
+# The declared parameter count is what separates them.
+fn callee_has_zero_declared_arity(callee: ast.Expr, env: Dict types.Scheme) -> Bool =
+  match callee with
+  | ast.VarExpr name _ ->
+      match fn_declared_arity(name, env) with
+      | Just want -> want == 0
+      | Nothing -> false
+  | _ -> false
+
+fn type_is_function(t: types.Type) -> Bool =
+  match t with
+  | types.TFunc _ _ _ _ -> true
+  | _ -> false
 
 # Infer a call whose callee is a bare variable `name` (the common case).
 fn infer_call_var(
@@ -1090,7 +1123,7 @@ fn infer_call_var(
   | Just scheme ->
       do
         (t, prog_to_fresh) <- unifier.instantiate_with_vars(state, scheme)
-        match under_application_error(name, list_length(args), env) with
+        match call_arity_error_for(name, list_length(args), env) with
         | Just msg -> InferErr(cpos, msg)
         | Nothing ->
             infer_call_inner(state, env, subst, eff_subst, callee,
@@ -1160,11 +1193,34 @@ fn infer_call_inner(
             types.TVar(types.tyvar_id(v)),
             merge_effects(callee_eff, args_eff),
             callee_display_name(callee),
+            callee_has_zero_declared_arity(callee, env),
             pos)
           match r with
           | CallErr pos e -> InferErr(pos, e)
           | CallOk ret_t s3 es3 call_eff ->
               check_call_constraint(callee, typed_callee, typed_args, subst, env, ret_t, s3, es3, call_eff, pos, prog_to_fresh)
+
+# A call with no arguments. A function-typed result is only an error when the
+# callee is NOT a known zero-parameter function: `mk()` where `fn mk() -> Int ->
+# Int` is exact arity and legal, while `adder()` where `fn adder(n: Int) -> …` is
+# missing its argument. Both have the same resolved type, so `zero_arity_ok`
+# carries the declared parameter count the type cannot express.
+fn resolve_zero_arg_call(
+  subst: Dict types.Type,
+  eff_subst: Dict types.Effect,
+  resolved: types.Type,
+  ret_type: types.Type,
+  eff: types.Effect,
+  callee_display: String,
+  zero_arity_ok: Bool,
+  pos: source.SourcePos
+) -> CallResult =
+  if type_is_function(resolved) && ! zero_arity_ok
+  then CallErr(pos, callee_display ++ " requires arguments but was called with none")
+  else
+    match unifier.unify_types(subst, resolved, ret_type) with
+    | Err e -> CallErr(pos, "Call type mismatch: " ++ e)
+    | Ok s3 -> CallOk(unifier.apply_subst(s3, ret_type), s3, eff_subst, eff)
 
 fn callee_display_name(callee: ast.Expr) -> String =
   match callee with
@@ -1179,16 +1235,13 @@ fn infer_call_resolve(
   ret_type: types.Type,
   eff: types.Effect,
   callee_display: String,
+  zero_arity_ok: Bool,
   pos: source.SourcePos
 ) -> CallResult !{IO} =
   match arg_types with
   | Nil ->
-      match unifier.apply_subst(subst, callee_type) with
-      | types.TFunc _ _ _ _ -> CallErr(pos, callee_display ++ " requires arguments but was called with none")
-      | resolved ->
-          match unifier.unify_types(subst, resolved, ret_type) with
-          | Err e -> CallErr(pos, "Call type mismatch: " ++ e)
-          | Ok s3 -> CallOk(unifier.apply_subst(s3, ret_type), s3, eff_subst, eff)
+      resolve_zero_arg_call(subst, eff_subst, unifier.apply_subst(subst, callee_type),
+                            ret_type, eff, callee_display, zero_arity_ok, pos)
   | _ ->
       match unifier.unify_types(subst, callee_type,
               build_fn_type_like(arg_types, unifier.apply_subst(subst, callee_type), ret_type)) with
@@ -2947,6 +3000,8 @@ fn eq_via_class_method(
           types.TVar(types.tyvar_id(v)),
           eff,
           "'eq'",
+          # Always two arguments, so the no-argument branch is unreachable here.
+          false,
           pos)
         match r with
         | CallErr pos e -> InferErr(pos, op ++ " via Eq.eq: " ++ e)

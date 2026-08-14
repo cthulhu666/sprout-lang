@@ -1,0 +1,15 @@
+import stdlib.test (check_eq, run_suite)
+
+# `adder` takes one argument and returns a function. Passing two arguments in one
+# call is over-application: Sprout is n-ary, so the second argument belongs to a
+# separate application of the returned closure — `adder(1)(2)`.
+#
+# This used to be accepted and MISCOMPILED. Codegen emitted a direct call to the
+# arity-1 `@adder` with two arguments; LLVM discards the surplus, so the call
+# returned the closure handle reinterpreted as an Int. Exit 0, no diagnostic.
+fn adder(n: Int) -> Int -> Int = \m -> n + m
+
+fn main() -> Unit !{IO} =
+  run_suite("over_application", [
+    check_eq("over-applied", adder(1, 2), 3)
+  ])
