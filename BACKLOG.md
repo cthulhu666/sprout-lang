@@ -2787,6 +2787,28 @@ op-classification already in place.
 
 ### Native REPL & Analysis Service
 
+- [ ] `P1` **BUG: 11 of 27 top-level stdlib modules are silently invisible in the REPL; a
+  session-declared type cannot mention a prelude type** (2026-08-14). `import http_server` reports `ok`, then
+  `http_server.default_config()` fails with `Unknown variable`; `type Box = Box (Vec Int)` is
+  rejected outright with ``type-validation: unknown type name `Vec` ``. Root cause: the strict
+  type-name validation pass (`infer.sprout:4729`) seeds its vocabulary from the module's own
+  `decls` plus a hardcoded primitive list, and ignores `env`. The file path bundles the prelude
+  inline so `type Dict v` is in `decls`; the REPL/analysis-service path supplies the prelude as env
+  *schemes*, so a decl-scan finds nothing and every module whose TypeDecl/RecordDecl/AliasDecl
+  mentions `Result`/`Dict`/`Vec`/`MutVec` fails to check. `module_loader.sprout:366` then converts
+  that `CheckErr` into `Nil` silently, so the import looks like it worked. Affected: `args`,
+  `compiler`, `http_client`, `http_server`, `linalg`, `log`, `net`, `repl`, `scram`, `template`,
+  plus `http_middleware` by cascade; the `stdlib/compiler/` and `stdlib/math/` submodule trees are
+  unswept and likely add more. Fn signature positions are not covered by the pass, which is why
+  only decl positions trigger it. Fix (needs approval): a `@type:` marker family mirroring
+  `@linear:`/`@class:`, read back by a `type_names_from_env` mirroring `class_names_from_env`
+  (`infer.sprout:4918`) — markers are already passed through unprefixed by `prefix_pairs` and
+  retained by `select_pairs`, so this covers prelude *and* cross-module selective imports; plus
+  stop `load_module` swallowing a genuine `CheckErr` (distinguish "intentionally skipped" from
+  "found but failed to check", or the builtin-env path breaks). Second instance of the same
+  env-schemes-vs-decls divergence (the first was the REPL rejecting `where ToString a`); the
+  structural fix is converging `module_loader` with `iface_codec`, deferred. Full write-up,
+  prior-art survey, test plan and reproduction probe: `docs/repl-env-type-vocabulary-v0.md`.
 - [ ] `P1` Implement `complete_in_state` in `analysis_service_driver.sprout` (2026-05-18, updated 2026-07-17): `eval_expr_in_source` (compile-and-run) and `instances_in_source` are now implemented. `instances_in_source` (landed 2026-07-17) bundles the session source (prelude + transitive imports inlined), resolves the query in session naming context via a probe signature, and unification-matches instance heads (reusing `infer.type_from_ast` + `unifier.unify_types`), with a base-constructor fallback so `:i Maybe a` also surfaces `Functor Maybe`; see `stdlib/compiler/analysis_service_driver.sprout` (`resolve_instances` / `instance_match_names_for_type`) and `tests/stdlib/compiler/test_instances_in_source.spr`. Remaining stub: `complete_in_state` (tab completion, returns "not yet implemented"). Approach: reuse `type_of_in_source` machinery; filter by prefix from a gathered list of visible names from imports + declared names.
 - [ ] `P2` Fix analysis service env isolation: `SPROUT_GC_THRESHOLD` and `SPROUT_GC_ADAPT_RATIO` must not propagate to the `analysis_service_bin` subprocess (2026-05-23): the GC stress test (`test_native_repl_diagnostics_in_source_survives_forced_gc`) sets `GC_THRESHOLD=1` on the program binary env; the program spawns the analysis service with the same env, causing the native binary to GC on every allocation (~15 min to run). Python service ignored Sprout GC settings (Python runtime). Fix: strip `SPROUT_GC_*` vars from the env before launching the service, or use a separate wrapper script. Test is skipped until fixed.
 - [ ] `P2` Fix `symbol_locations_in_source` in `analysis_service_driver.sprout` to include constructor locations (2026-05-23): `collect_decl_locations` emits an entry for `TypeDecl name` but not for its constructors (e.g. `type Fruit = | Banana` produces 1 location for `Fruit`, missing `Banana`). `collect_decl_names` already walks ctors via `ctor_names` so the fix is to add parallel ctor emission in `collect_decl_locations`. `test_native_analysis_symbol_locations_in_source_builtin_runs_via_analysis_service` is skipped until fixed.
