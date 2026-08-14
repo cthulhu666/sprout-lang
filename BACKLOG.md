@@ -3235,6 +3235,33 @@ op-classification already in place.
   declared `where` clause and a class method has none, which is exactly why this slips through).
   The compiler's own source self-hosts under the strict version (stage-3 clean), so the affected
   surface is genuinely user-facing return-type dispatch, not compiler internals.
+  **Started 2026-08-14 on branch `fix/ambiguous-class-tyvar` (pushed, NO PR — the fixtures are RED
+  and would fail the type-error gate; CI only runs on PRs and pushes to master, so the branch is
+  inert).** Both halves re-verified against merged master `257f7638`: (a) `--phase check` clean,
+  (b) `main.describe : forall a. a -> String` printing `int:7` then `bool` at runtime. The two
+  RED repros are committed as
+  `tests/conformance/type_error/ambiguous_class_tyvar{,_incoherent}.spr` (no `.err` yet).
+  What the code reading added, and why the fix is TWO parts rather than one:
+  - **The gated scanner already exists.** `scan_fwd_markers_for_prog_var` (`:2090`) does exactly
+    the "only adopt a marker belonging to THIS constraint var" lookup the fix needs. It is simply
+    not reachable from this path: `check_instance_fwd` (`:1352`) calls the ungated, class-only
+    `scan_fwd_markers` (`:2052`), whose `is_fwd_key_for_class` matches `@fwd:<any tvar>:<class>`.
+  - **Marker shape.** Key is `@fwd:{tvar}:{class}`; the VALUE is a `Scheme` whose body is
+    `TConst <prog_var>` — the programmer's source name for the constraint variable. Gating
+    therefore needs the dispatch tyvar, which `check_instance_fwd` does not currently receive.
+    Its three call sites have different information: `:1298` (no class-var arg found at all),
+    `:1300` (arg found but its type is not concrete — the dispatch tyvar is
+    `apply_subst(s3, typed_expr_type(cv_arg))`), and `:1327` (return-position, dispatch tyvar
+    lives in `ret_t`). Threading a `Maybe types.Type` dispatch type through is the mechanical part.
+  - **Part 1 alone is not a fix.** Gating the scan turns case (b) into case (a) — no marker
+    adopted, so a dict-less call — which is silent today. Part 2 (error on a class-method call
+    still lacking a dictionary AFTER `resolve_dispatch_typed_expr`) is what makes either case
+    loud, and it is also what the over-rejection measurement above points at.
+  - **Known hazard before starting part 1.** Matching the dispatch tyvar against the marker key
+    means relying on canonical tyvar identity surviving `s3` renaming — the exact problem
+    `canonicalize_constrained_markers` was added for (PR #176, and #141 before it). Budget for
+    that, and prefer resolving the dispatch var to its prog var via `prog_to_fresh` (as
+    `resolve_field_constraint` does) over comparing raw identities.
 - [ ] `P2` **Pattern-variable names share the fresh-tyvar namespace (`infer.sprout:2050`)** (fundamentals review, static finding, not yet exercised at runtime). Pattern-bound variable names and the inferencer's fresh `t0`/`t1`/… type-variable names are drawn from the same namespace with no collision guard; a match-pattern binding whose name happens to collide with a fresh tyvar could shadow, or be shadowed by, the wrong entity during unification/substitution. Not yet triggered by a known repro — flagged as a latent hazard by the 2026-07-03 fundamentals code review among the "high/static (not yet run)" findings, adjacent to this section's tyvar-identity work (item 4). Needs a minimal repro to confirm reachability, then either a namespace separator (reserve a prefix for fresh tyvars, distinct from any user-writable pattern-variable name) or a rename pass before pattern binding. Full findings: `docs/fundamentals-code-review-handoff-2026-07-03.md`.
 
 #### Record type-arg concretization at dispatch (surfaced by deriving-on-records)

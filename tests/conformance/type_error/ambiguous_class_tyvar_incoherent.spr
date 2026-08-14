@@ -1,0 +1,33 @@
+# The sharper half of ambiguous_class_tyvar: with ANY `@fwd:*:Codec` marker in
+# scope, `scan_fwd_markers` does a CLASS-ONLY scan of the environment and adopts
+# the first match in dict order — with no check that the marker's type variable
+# is the one being dispatched.
+#
+# `to_str(from_int(7))` below is CLOSED: no free type variables, no mention of
+# `witness`, no dependence on the call site. Its value must not vary. Before the
+# fix `describe(1)` printed `int:7` and `describe(true)` printed `bool` — the
+# same expression denoting different values in different contexts. That is
+# incoherence, not merely a missing diagnostic.
+module main
+
+class Codec a {
+  fn from_int(n: Int) -> a
+  fn to_str(x: a) -> String
+}
+
+instance Codec Int {
+  fn from_int(n: Int) -> Int = n
+  fn to_str(x: Int) -> String = "int:" ++ int_to_string(x)
+}
+
+instance Codec Bool {
+  fn from_int(n: Int) -> Bool = n > 0
+  fn to_str(x: Bool) -> String = "bool"
+}
+
+fn describe(witness: b) -> String where Codec b = to_str(from_int(7))
+
+fn main() -> Unit !{IO} =
+  do
+    print(describe(1))
+    print(describe(true))
