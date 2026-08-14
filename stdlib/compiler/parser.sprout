@@ -546,6 +546,10 @@ fn all_irrefutable_do_bind(pats: List ast.Pattern) -> Bool =
   | Cons p rest ->
       if is_irrefutable_do_bind_pattern(p) then all_irrefutable_do_bind(rest) else false
 
+# Has a parse reached the end of the slice it was given?
+fn slice_consumed(step_tokens: Vec token.Token, i: Int) -> Bool =
+  tok_is_eof(tok_at(step_tokens, i)) || i >= vec_length(step_tokens)
+
 # Every arm below ends by checking that the step consumed its whole slice.
 #
 # It did not use to. Each arm discarded its final index (`(value, _) <- ...`),
@@ -553,7 +557,7 @@ fn all_irrefutable_do_bind(pats: List ast.Pattern) -> Bool =
 # a multi-name `let`. Two statements written on one line meant the second simply
 # never ran: `print("first") print("second")` printed only "first" and exited 0.
 fn step_fully_consumed(step_tokens: Vec token.Token, i: Int, step: DoStepParse) -> Result ParseError (DoStepParse, Int) =
-  if tok_is_eof(tok_at(step_tokens, i)) || i >= vec_length(step_tokens) then Ok((step, 0))
+  if slice_consumed(step_tokens, i) then Ok((step, 0))
   else
     Err(ParseError(
       string.concat("Unexpected token after the end of a do step at ", pos_str(cur_pos(step_tokens, i)))
@@ -591,31 +595,68 @@ fn do_let_first_binding_end(step_tokens: Vec token.Token, i2: Int) -> Int =
   scan_do_step_end(step_tokens, i2, i2, source.position_line(tok_pos(tok_at(step_tokens, i2))), 0,
                    source.position_column(tok_pos(tok_at(step_tokens, i2))))
 
+# Is there an `in` at bracket depth 0 anywhere in this slice? A prefilter for the
+# expression-form attempt below, so an ordinary `let` statement is not parsed
+# twice. Deliberately imprecise: it also fires on the `in` of a nested `let … in`
+# sitting in a binding's right-hand side, and the attempt then fails and falls
+# through — the same outcome as never firing.
+fn slice_has_toplevel_in(step_tokens: Vec token.Token, i: Int, depth: Int) -> Bool =
+  if slice_consumed(step_tokens, i) then false
+  else if depth == 0 && tok_is_keyword(tok_at(step_tokens, i), "in") then true
+  else slice_has_toplevel_in(step_tokens, i + 1,
+                             update_bracket_depth(tok_at(step_tokens, i), depth))
+
+# A `let` step whose binding group is closed by `in` is the §5.2.1 EXPRESSION
+# form, not the §5.2.1a statement form. The two are textually identical up to the
+# `in`, so the reading cannot be picked from the head of the slice: parse it as
+# one expression and keep that reading only if it accounts for the whole step.
+#
+# Falling back on anything else is what makes this safe. A slice the expression
+# parse consumes whole is one that is rejected TODAY — `in` heads no expression,
+# so `looks_like_do_step_start` never lets it begin a step and it stays inside
+# this slice, where the statement path finds no pattern at it or trips
+# `step_fully_consumed`. A slice the expression parse cannot consume — a
+# statement whose right-hand side holds a nested `let … in`, say — reaches the
+# statement path unchanged, so no accepted program changes meaning.
+fn parse_do_let_in_expr(step_tokens: Vec token.Token) -> Maybe ast.Expr =
+  if slice_has_toplevel_in(step_tokens, 0, 0) then
+    match parse_expr(step_tokens, 0) with
+    | Err _ -> Nothing
+    | Ok (value, i) -> if slice_consumed(step_tokens, i) then Just(value) else Nothing
+  else Nothing
+
+# The §5.2.1a `let` STATEMENT readings: a binding carrying an `else`, a multi-name
+# group, or one plain binding.
+fn parse_do_let_statement(step_tokens: Vec token.Token, slice_pos: source.SourcePos) -> Result ParseError (DoStepParse, Int) =
+  do
+    (_, i2) <- expected_keyword("let", step_tokens, 0)
+    (pat, i3) <- parse_pattern(step_tokens, i2)
+    (_, i4) <- expected_symbol("=", step_tokens, i3)
+    (value, i5) <- parse_expr(step_tokens, i4)
+    if tok_is_keyword(tok_at(step_tokens, i5), "else") then
+      do
+        (_, i6) <- expected_keyword("else", step_tokens, i5)
+        (residual, handler, i7) <- parse_let_else_clause(step_tokens, i6)
+        step_fully_consumed(step_tokens, i7,
+          DoStepRefutable(false, pat, value, residual, handler, slice_pos))
+    else if do_let_first_binding_end(step_tokens, i2) < vec_length(step_tokens) then
+      do
+        (steps, end_i) <- parse_do_let_bindings(step_tokens, i2,
+                            source.position_column(tok_pos(tok_at(step_tokens, i2))), Nil)
+        step_fully_consumed(step_tokens, end_i, DoStepLets(steps))
+    else
+      match pat with
+      | ast.VarPattern name _ -> step_fully_consumed(step_tokens, i5, DoStepPlain(ast.DoLetStep(name, value)))
+      | ast.WildcardPattern _ -> step_fully_consumed(step_tokens, i5, DoStepPlain(ast.DoLetStep("_", value)))
+      | _ -> step_fully_consumed(step_tokens, i5, DoStepTotal(false, pat, value, slice_pos))
+
 # Parses one do step from a sub-slice of tokens (step_tokens is the exact tokens for this step).
 fn parse_do_step_sub(step_tokens: Vec token.Token) -> Result ParseError (DoStepParse, Int) =
   let slice_pos = tok_pos(tok_at(step_tokens, 0))
   in if tok_is_keyword(tok_at(step_tokens, 0), "let") then
-    do
-      (_, i2) <- expected_keyword("let", step_tokens, 0)
-      (pat, i3) <- parse_pattern(step_tokens, i2)
-      (_, i4) <- expected_symbol("=", step_tokens, i3)
-      (value, i5) <- parse_expr(step_tokens, i4)
-      if tok_is_keyword(tok_at(step_tokens, i5), "else") then
-        do
-          (_, i6) <- expected_keyword("else", step_tokens, i5)
-          (residual, handler, i7) <- parse_let_else_clause(step_tokens, i6)
-          step_fully_consumed(step_tokens, i7,
-            DoStepRefutable(false, pat, value, residual, handler, slice_pos))
-      else if do_let_first_binding_end(step_tokens, i2) < vec_length(step_tokens) then
-        do
-          (steps, end_i) <- parse_do_let_bindings(step_tokens, i2,
-                              source.position_column(tok_pos(tok_at(step_tokens, i2))), Nil)
-          step_fully_consumed(step_tokens, end_i, DoStepLets(steps))
-      else
-        match pat with
-        | ast.VarPattern name _ -> step_fully_consumed(step_tokens, i5, DoStepPlain(ast.DoLetStep(name, value)))
-        | ast.WildcardPattern _ -> step_fully_consumed(step_tokens, i5, DoStepPlain(ast.DoLetStep("_", value)))
-        | _ -> step_fully_consumed(step_tokens, i5, DoStepTotal(false, pat, value, slice_pos))
+    match parse_do_let_in_expr(step_tokens) with
+    | Just value -> Ok((DoStepPlain(ast.DoExprStep(value)), 0))
+    | Nothing -> parse_do_let_statement(step_tokens, slice_pos)
   else if step_has_bind_arrow(step_tokens, 0, 0) then
     do
       (pattern, i2) <- parse_pattern(step_tokens, 0)

@@ -1,0 +1,92 @@
+import stdlib.test (check_eq, run_suite)
+
+# `let … in` (spec §5.2.1) used as a `do` STEP.
+#
+# §5.2.1 calls it "an ordinary expression (usable anywhere)" and a do step is a
+# place an expression goes, but §5.2.1a's multi-name `let` STATEMENT is textually
+# identical to it up to the `in`. The parser committed to the statement reading
+# from the `let` alone, so every shape below failed: `Expected pattern` where the
+# `in` sat, or a trailing-tokens error once an `else` had carried the parse past
+# the first binding.
+#
+# It was not a regression. Before the full-consumption backstop the same shapes
+# parsed and DISCARDED the `in <body>` in silence — `let x = print("b") in
+# print("c")` printed neither, exit 0. So these are the first spellings of this
+# form that have ever run.
+#
+# `in` must be dedented to the `let` column, as §5.2.1 requires. The one-line
+# spelling `let x = 1 in x` is not accepted in any position, here or in an
+# ordinary expression.
+
+# Single binding — the smallest shape, and the one the statement path used to
+# claim on sight.
+fn single(n: Int) -> Int =
+  do
+    let x = n + 1
+    in x + 10
+
+# Several bindings, layout-aligned: the §5.2.1a statement form up to the `in`.
+fn multi(n: Int) -> Int =
+  do
+    let x = n + 1
+        y = n + 2
+    in x + y
+
+# A binding carrying an `else`. §5.2.1a makes such a binding stand alone as a
+# statement, so this shape can ONLY be the expression form.
+fn with_else(m: Maybe Int) -> Int =
+  do
+    let Just v = m else 0
+    in v + 1
+
+# Chained binding-else, each recovering from its own payload. The `else` clause
+# consumes past the first binding, which is why a single token of lookahead after
+# that binding would not have found the `in`.
+fn chained(a: Result Int Int, b: Result Int Int) -> Int =
+  do
+    let Ok x = a else Err code -> code
+        Ok y = b else Err code -> code
+    in x + y
+
+# NOT the final step: the `let … in` is one expression step among several, and
+# the steps after it still run.
+fn not_final(n: Int) -> Int =
+  do
+    let x = n + 1
+    in x
+    let y = n + 2
+    y + 100
+
+# A `let` STATEMENT whose right-hand side contains a nested `let … in`. The
+# nested `in` sits at bracket depth 0, so it looks exactly like the terminator of
+# an expression-form binding group. This must still parse as a statement — it is
+# the case that proves the expression reading is only kept when it accounts for
+# the whole step.
+fn nested_rhs(n: Int) -> Int =
+  do
+    let x = match Just(n) with
+            | Just v -> let doubled = v * 2
+                        in doubled + 1
+            | Nothing -> 0
+    x + 100
+
+# Effects in the body. A do step carries the block's effects, and §5.2.1
+# constrains the RHS rather than the body, so an effectful body belongs here.
+fn effectful(n: Int) -> Unit !{IO} =
+  do
+    let label = "value="
+    in print(label ++ to_string(n))
+
+fn main() -> Unit !{IO} =
+  do
+    effectful(41)
+    run_suite("do_let_in_step", [
+      check_eq("single binding", single(1), 12),
+      check_eq("multiple bindings", multi(1), 5),
+      check_eq("binding with else, matches", with_else(Just(41)), 42),
+      check_eq("binding with else, refutes", with_else(Nothing), 0),
+      check_eq("chained binding-else, both match", chained(Ok(1), Ok(2)), 3),
+      check_eq("chained binding-else, second refutes", chained(Ok(1), Err(7)), 7),
+      check_eq("not the final step", not_final(1), 103),
+      check_eq("nested let..in in a statement rhs", nested_rhs(1), 103)
+    ])

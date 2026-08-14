@@ -267,6 +267,9 @@ Rules:
   `where`: a function may use both, with `where` as the outer scope (its bindings
   are visible in a `let … in` RHS/body; `let … in` bindings are not visible in
   `where`).
+- "Anywhere" includes a step of a `do` block, where the whole `let … in` is one
+  expression step. Up to its `in` it is written exactly like the multi-name `let`
+  *statement* of §5.2.1a, so the `in` is what distinguishes them — see §5.2.1a.
 
 ### 5.2.1a Multi-name `let` as a `do` statement
 
@@ -289,6 +292,28 @@ rule the expression form uses, so a right-hand side may span lines.
 A binding carrying an `else` (§5.2.2) must stand alone as a single-binding
 statement: its desugaring places the remaining steps inside a `match` arm, which
 is a shape one binding among several cannot have.
+
+**Statement or expression: the `in` decides.** A step beginning with `let` is
+this statement form *unless* an `in`, dedented to the `let` column, closes the
+binding group — then the step is one `let … in` expression (§5.2.1) and nothing
+here applies to it. The two are written identically up to that point, so the
+reading is not fixed by the `let`: it is fixed by whether the step turns out to
+be a whole `let … in`.
+
+```sprout
+do
+  let a = 1          # statement: `a` stays in scope for the steps below
+      b = a + 1
+  print(to_string(a + b))
+
+  let c = 1          # expression: `c` and `d` scope over the body only,
+      d = c + 1      # and the step's value is that body
+  in print(to_string(c + d))
+```
+
+The `else` restriction above is what makes the difference observable rather than
+academic: a multi-binding group carrying an `else` can only ever be the
+expression form.
 
 **One step per line.** A `do` step must consume the whole of its line (and any
 continuation lines indented under it). Trailing tokens are an error — they used
