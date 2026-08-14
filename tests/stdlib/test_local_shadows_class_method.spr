@@ -1,0 +1,86 @@
+import stdlib.test (check_eq, run_suite)
+
+# A LOCAL binding may share a class method's name.
+#
+# `build_sig_table` registers every class method under its bare name, and
+# `check_call` looked the callee up by name alone. `collect_fn_names` guarded the
+# top-level case — a top-level `fn append` suppresses Semigroup's entry — but
+# nothing guarded a parameter, a lambda parameter, a `let`, a do-bind or a match
+# binding. A call to any of those reported a hard error naming a class the code
+# never mentioned:
+#
+#   fn use_it(append: Int -> Int -> Int, x: Int) -> Int = append(x, x)
+#   ERROR: check: dispatch-verify: No instance of Semigroup for Int
+#
+# The verifier now carries the set of names bound locally at each point and skips
+# a callee that is one of them: a local shadow is not the method, so there is no
+# dispatch obligation to verify. Scoping is precise — the suppression lasts only
+# as long as the binding, so `real_dispatch` below still exercises the real
+# `to_string` method in the same file.
+
+fn add2(a: Int, b: Int) -> Int = a + b
+
+fn just_int(n: Int) -> Maybe Int = Just(n)
+
+# Parameter shadowing `Semigroup.append`.
+fn via_param(append: Int -> Int -> Int, x: Int) -> Int = append(x, x)
+
+# Parameter shadowing `ToString.to_string`, whose real method takes one argument
+# and so is the shape most likely to be confused with a genuine method call.
+fn via_param_to_string(to_string: Int -> String, x: Int) -> String = to_string(x)
+
+# Parameter shadowing `Applicative.pure`, which dispatches on its RETURN type —
+# a different arm of the verifier, reporting "ambiguous type variable" rather
+# than a missing instance.
+#
+# `Monoid.empty` is deliberately NOT covered here. A local named `empty` fails
+# too, but with `No instance of Monoid for Int` and no `dispatch-verify:` prefix
+# — it is rejected earlier, in dispatch resolution rather than in this verifier,
+# and it fails identically on the pre-2026-08-14 compiler. Different pass,
+# different age; tracked separately in BACKLOG.
+fn via_param_pure(pure: Int -> Maybe Int, x: Int) -> Maybe Int = pure(x)
+
+# `let` binding in a do block.
+fn via_let(x: Int) -> Int =
+  do
+    let append = \ (a, b) -> a * b
+    append(x, x)
+
+# Lambda parameter, applied inside the lambda body.
+fn via_lambda(x: Int) -> Int =
+  apply_it(\compare -> compare(x, x))
+
+fn apply_it(f: (Int -> Int -> Int) -> Int) -> Int = f(add2)
+
+# Match-branch binding.
+fn via_match(m: Maybe (Int -> String), x: Int) -> String =
+  match m with
+  | Just to_string -> to_string(x)
+  | Nothing -> "none"
+
+# The shadow must not leak: the REAL class method still dispatches in this file,
+# in a function that has no such binding.
+fn real_dispatch(x: Int) -> String = to_string(x)
+
+# Nor may it leak out of a nested scope back into the enclosing one.
+fn shadow_then_real(x: Int) -> String =
+  do
+    let inner = shadowed_helper(x)
+    to_string(x) ++ inner
+
+fn shadowed_helper(x: Int) -> String =
+  do
+    let to_string = \ (n) -> "shadowed"
+    to_string(x)
+
+fn main() -> Unit !{IO} =
+  run_suite("local_shadows_class_method", [
+    check_eq("parameter named append", via_param(add2, 21), 42),
+    check_eq("parameter named to_string", via_param_to_string(int_to_string, 7), "7"),
+    check_eq("parameter named pure", via_param_pure(just_int, 8), Just(8)),
+    check_eq("let named append", via_let(6), 36),
+    check_eq("lambda parameter named compare", via_lambda(4), 8),
+    check_eq("match binding named to_string", via_match(Just(int_to_string), 5), "5"),
+    check_eq("real method still dispatches", real_dispatch(9), "9"),
+    check_eq("shadow does not leak outward", shadow_then_real(3), "3shadowed")
+  ])
