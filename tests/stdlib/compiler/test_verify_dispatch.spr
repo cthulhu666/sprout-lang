@@ -136,4 +136,72 @@ fn main() -> Unit !{IO} =
     assert_true(state, "PHASE 2A: wrong return-dispatch dict (Read Bool vs ret Maybe Int) is flagged",
       match vd.verify_program(read_wrong_prog) with | Just _ -> true | Nothing -> false)
 
+    # --- CLASS-METHOD COVERAGE (BACKLOG "ambiguous class tyvar") ----------------
+    # A class method's dict can only come from its own call site: there is no
+    # `where` clause to forward through, and by the time verify_program runs both
+    # dispatch post-passes have already had their chance. So "no dict injected"
+    # is FINAL for a method, where for a constrained `fn` it is merely deferred.
+    #
+    # The class under test is the fixtures' `Codec a`: `from_int` dispatches on
+    # its RETURN, `to_str` on its argument — so `to_str(from_int(7))` mentions `a`
+    # nowhere else and nothing determines the instance.
+    let codec_class = typed_ast.TPassThrough(ast.ClassDecl("Codec", ["a"],
+      [ast.ClassMethodSig("from_int", [ast.Param("n", Just(ast.TypeName("Int")), ast.ModeDefault)], ast.TypeName("a"), Nothing),
+       ast.ClassMethodSig("to_str", [ast.Param("x", Just(ast.TypeName("a")), ast.ModeDefault)], ast.TypeName("String"), Nothing)],
+      [], dpos()))
+
+    # RED case (a): `to_str(<unresolved>)` with NO dict. The class var is pinned
+    # to nothing concrete, so nothing selects an instance -> AMBIGUOUS. Before the
+    # fix this compiled to a dict-less call that died at the LINKER with no source
+    # position; check_missing skipped it as "truth still polymorphic".
+    let amb_arg = typed_ast.TVar("v", types.TVar(types.tyvar_id("t0")), dpos())
+    let amb_call = typed_ast.TCall(typed_ast.TVar("to_str", types.type_string(), dpos()),
+      [amb_arg], types.type_string(), dpos())
+    let amb_prog = typed_ast.TypedProgram([codec_class, typed_ast.TFnDecl("amb_caller", [], Nothing, Nothing, [], amb_call)])
+    assert_true(state, "class-method call with no dict and an undetermined class var is flagged ambiguous",
+      match vd.verify_program(amb_prog) with | Just _ -> true | Nothing -> false)
+
+    # A method call whose class var IS pinned concretely but which still carries
+    # no dict means the resolver dropped an unsatisfiable obligation rather than
+    # rejecting it — the "No instance" shape, equally final for a method.
+    let noinst_call = typed_ast.TCall(typed_ast.TVar("to_str", types.type_string(), dpos()),
+      [typed_ast.TVar("v", t_int(), dpos())], types.type_string(), dpos())
+    let noinst_prog = typed_ast.TypedProgram([codec_class, typed_ast.TFnDecl("ni_caller", [], Nothing, Nothing, [], noinst_call)])
+    assert_true(state, "class-method call with no dict and a concrete class var is flagged",
+      match vd.verify_program(noinst_prog) with | Just _ -> true | Nothing -> false)
+
+    # NEGATIVE — the case the strict rule must NOT break. Inside `fn describe(w: b)
+    # -> String where Codec b`, a call to `to_str` legitimately forwards the
+    # caller's dict; that dict is present with a LOWERCASE (type-variable) head, so
+    # it takes the ordinary polymorphic-dict skip and never reaches the new rule.
+    let fwd_dict = typed_ast.TDict(ast.TypeConstraint("Codec", [ast.TypeName("b")]),
+      types.TConst(types.type_id("Codec")), dpos(), typed_ast.EvUnresolved)
+    let fwd_call = typed_ast.TCall(typed_ast.TVar("to_str", types.type_string(), dpos()),
+      [typed_ast.TVar("w", types.TVar(types.tyvar_id("b")), dpos()), fwd_dict], types.type_string(), dpos())
+    let fwd_prog = typed_ast.TypedProgram([codec_class, typed_ast.TFnDecl("fwd_caller", [], Nothing, Nothing, [], fwd_call)])
+    assert_true(state, "forwarded polymorphic dict on a class method stays clean",
+      match vd.verify_program(fwd_prog) with | Just _ -> false | Nothing -> true)
+
+    # NEGATIVE — an ordinary resolved method call: `to_str(1 : Int)` carrying
+    # `Codec Int`. The head matches the truth derived from the arg, so it verifies.
+    let ok_dict = typed_ast.TDict(ast.TypeConstraint("Codec", [ast.TypeName("Int")]),
+      types.TConst(types.type_id("Codec")), dpos(), typed_ast.EvUnresolved)
+    let ok_call = typed_ast.TCall(typed_ast.TVar("to_str", types.type_string(), dpos()),
+      [typed_ast.TVar("v", t_int(), dpos()), ok_dict], types.type_string(), dpos())
+    let ok_prog = typed_ast.TypedProgram([codec_class, typed_ast.TFnDecl("ok_caller", [], Nothing, Nothing, [], ok_call)])
+    assert_true(state, "correctly resolved class-method dict verifies clean",
+      match vd.verify_program(ok_prog) with | Just _ -> false | Nothing -> true)
+
+    # NEGATIVE — return-position dispatch, the shape that made the earlier
+    # inference-time version of this check over-reject 8 files. `from_int` binds
+    # `a` only in its return; at a call returning Int the truth is a = Int and the
+    # post-pass has already injected `Codec Int`, so it verifies rather than firing.
+    let ret_dict = typed_ast.TDict(ast.TypeConstraint("Codec", [ast.TypeName("Int")]),
+      types.TConst(types.type_id("Codec")), dpos(), typed_ast.EvUnresolved)
+    let ret_call = typed_ast.TCall(typed_ast.TVar("from_int", t_int(), dpos()),
+      [typed_ast.TInt(7, t_int(), dpos()), ret_dict], t_int(), dpos())
+    let ret_prog = typed_ast.TypedProgram([codec_class, typed_ast.TFnDecl("ret_caller", [], Nothing, Nothing, [], ret_call)])
+    assert_true(state, "return-position class-method dispatch with its post-pass dict verifies clean",
+      match vd.verify_program(ret_prog) with | Just _ -> false | Nothing -> true)
+
     summary(state)

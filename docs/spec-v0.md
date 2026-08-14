@@ -1323,6 +1323,46 @@ call that would otherwise only fail at link time:
   parameter*, or `where Eq b` where only `a` is annotated — is rejected as
   ambiguous, since no call site could ever determine the type to dispatch on.
 
+**Ambiguous class-method dispatch.**  The two rules above are about a *declared*
+`where` clause.  An expression can also be ambiguous with no `where` clause
+anywhere, when a class method's dispatch type occurs only in an intermediate
+value.  The canonical shape is a producer and a consumer of the same class
+composed directly:
+
+```sprout
+class Codec a {
+  fn from_int(n: Int) -> a
+  fn to_str(x: a) -> String
+}
+
+# rejected: nothing determines which Codec instance `from_int` should produce
+fn main() -> Unit !{IO} = print(to_str(from_int(7)))
+```
+
+`a` appears nowhere but between the two calls, so every `Codec` instance
+satisfies the constraint and different ones give different answers.  Sprout
+rejects this with a located **`ambiguous type variable in `<method>`: nothing
+determines which `<Class>` instance to use`**.  Both the type and the value must
+be pinned down by something the call can see; annotate the intermediate
+(`to_str(from_int(7) : Int)`) or an enclosing binding to resolve it.
+
+The rule is *not* "a class-method call must dispatch on a concrete type" —
+forwarding is still fine.  Inside `fn describe(x: b) -> String where Codec b`, a
+call `to_str(x)` dispatches on a type variable and is accepted, because the
+caller supplies the instance.  What is rejected is a class-method call whose
+dispatch type is determined by **neither** a concrete type **nor** any
+constraint in scope.  In particular a variable that merely *coexists* with an
+unrelated `where` clause does not count: in
+
+```sprout
+# also rejected: `to_str(from_int(7))` is closed — it never mentions `b`
+fn describe(witness: b) -> String where Codec b = to_str(from_int(7))
+```
+
+the `Codec b` witness must not be borrowed to resolve the closed subexpression.
+Doing so would make one expression denote different values in different calls,
+which is an incoherence rather than a missing diagnostic.
+
 ### `ToString` instances
 
 `to_string` is defined for the following types:

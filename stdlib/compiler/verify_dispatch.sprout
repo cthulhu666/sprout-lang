@@ -36,6 +36,26 @@ export type VerifyOutcome (..) =
   | VerifyMismatch source.SourcePos String  # a concrete dict head disagrees with the derived truth
   | VerifySkip String  # cannot verify (polymorphic / underdetermined) — reason
 
+# How to treat a constraint for which NO dict was injected at all.
+#
+# The two callee kinds differ in whether anything downstream could still supply
+# one. A constrained `fn` forwards its obligation through a hidden dict param, so
+# an absent dict at an underdetermined call site is routine — the resolver defers
+# it to whoever supplies the param. A CLASS METHOD has no `where` clause to
+# forward through and no later pass to fill it in: by the time this walk runs,
+# infer's `resolve_dispatch_typed_expr` and `resolve.resolve_program` have both
+# already had their chance. For a method, absent is final.
+export type MissingPolicy (..) =
+  | MissingDeferred  # constrained fn: an absent dict may be a legitimate forward
+  | MissingFinal String  # class method (its name): an absent dict is unresolvable
+
+# A callee signature the verifier can derive truth from, tagged with which
+# missing-dict policy applies. `SigMethod` carries the method name for the
+# diagnostic.
+type CalleeSig (..) =
+  | SigFn (List ast.TypeExpr) (Maybe ast.TypeExpr) (List ast.TypeConstraint)
+  | SigMethod String (List ast.TypeExpr) (Maybe ast.TypeExpr) (List ast.TypeConstraint)
+
 # ---------------------------------------------------------------------------
 # Structural match: source TypeExpr pattern <- concrete Type
 # ---------------------------------------------------------------------------
@@ -59,6 +79,22 @@ fn starts_lower(s: String) -> Bool =
   match str_char_at(short(s), 0) with
   | Nothing -> false
   | Just c -> c >= 'a' && c <= 'z'
+
+# A `$`-prefixed name is resolver-internal and never a user type constructor:
+# `$sk<n>` is the skolem minted by unpacking an existential, and `$ex_<var>` is
+# that skolem's STABLE forwarding identity (types.existential_fwd_head). The
+# compiler's own convention is that `$` marks a NON-CONCRETE head — resolve routes
+# it to EvForward (types.sprout:141) — but `starts_lower` is false for `$`, which
+# would otherwise classify both as constructors and compare them as if they were.
+# They deliberately denote the SAME rigid type through different passes: `$ex_<var>`
+# exists precisely because `$sk<n>` is fresh-per-instantiation and unstable. So a
+# correct existential dispatch reads as `ToString $ex_x` against a truth of
+# `$sk2416` and would be reported as a mismatch.
+#
+# Verifying an existential's dict is resolve_skolem_given's job, which looks the
+# given up PRECISELY by skolem name. This pass re-derives truth from a source
+# signature, which cannot see the packing, so it skips rather than guesses.
+fn is_reserved_head(s: String) -> Bool = str_starts_with(short(s), "$")
 
 fn bind_var(name: String, concrete: types.Type, theta: Dict types.Type) -> Maybe (Dict types.Type) =
   match dict_get(name, theta) with
@@ -117,7 +153,9 @@ fn match_te_list(patterns: List ast.TypeExpr, concretes: List types.Type, theta:
 # is a concrete dictionary head we can check.
 export fn type_head_str(t: types.Type) -> Maybe String =
   match t with
-  | types.TConst id -> Just(types.type_id_display(id))
+  | types.TConst id ->
+      if is_reserved_head(types.type_id_display(id)) then Nothing
+      else Just(types.type_id_display(id))
   | types.TApp base _ -> type_head_str(base)
   | types.TTuple items -> Just("Tuple" ++ int_to_string(list_length(items)))
   | types.TVar _ -> Nothing
@@ -158,8 +196,37 @@ export fn verify_call(
   dict_heads: List (String, Maybe String),
   pos: source.SourcePos
 ) -> List VerifyOutcome =
+  verify_call_with_policy(decl_param_tes, decl_ret_te, constraints, arg_types, ret_ty, dict_heads, pos, MissingDeferred)
+
+# Class-method variant. Same truth derivation, but an absent dict is FINAL rather
+# than deferred (see MissingPolicy). `method_name` appears in the diagnostic —
+# the class's own type-parameter name (`a` in `class Codec a`) means nothing to a
+# reader on its own, so the method that failed to dispatch is what identifies the
+# call.
+export fn verify_class_method_call(
+  method_name: String,
+  decl_param_tes: List ast.TypeExpr,
+  decl_ret_te: Maybe ast.TypeExpr,
+  constraints: List ast.TypeConstraint,
+  arg_types: List types.Type,
+  ret_ty: types.Type,
+  dict_heads: List (String, Maybe String),
+  pos: source.SourcePos
+) -> List VerifyOutcome =
+  verify_call_with_policy(decl_param_tes, decl_ret_te, constraints, arg_types, ret_ty, dict_heads, pos, MissingFinal(method_name))
+
+fn verify_call_with_policy(
+  decl_param_tes: List ast.TypeExpr,
+  decl_ret_te: Maybe ast.TypeExpr,
+  constraints: List ast.TypeConstraint,
+  arg_types: List types.Type,
+  ret_ty: types.Type,
+  dict_heads: List (String, Maybe String),
+  pos: source.SourcePos,
+  policy: MissingPolicy
+) -> List VerifyOutcome =
   check_constraints(constraints, dict_heads,
-    build_theta_ret(decl_ret_te, ret_ty, build_theta(decl_param_tes, arg_types, dict_empty())), pos)
+    build_theta_ret(decl_ret_te, ret_ty, build_theta(decl_param_tes, arg_types, dict_empty())), pos, policy)
 
 # Extend theta with return-position bindings: match the declared return TypeExpr
 # against the concrete call-site return type. A structural mismatch is swallowed
@@ -198,15 +265,15 @@ fn constraint_var(c: ast.TypeConstraint) -> Maybe String =
 fn constraint_class(c: ast.TypeConstraint) -> String =
   match c with | ast.TypeConstraint cls _ -> cls
 
-fn check_constraints(constraints: List ast.TypeConstraint, dict_heads: List (String, Maybe String), theta: Dict types.Type, pos: source.SourcePos) -> List VerifyOutcome =
+fn check_constraints(constraints: List ast.TypeConstraint, dict_heads: List (String, Maybe String), theta: Dict types.Type, pos: source.SourcePos, policy: MissingPolicy) -> List VerifyOutcome =
   match constraints with
   | Nil -> Nil
   | Cons c crest ->
       match take_by_class(constraint_class(c), dict_heads) with
       | Just (dh, remaining) ->
-          Cons(check_one(c, dh, theta, pos), check_constraints(crest, remaining, theta, pos))
+          Cons(check_one(c, dh, theta, pos), check_constraints(crest, remaining, theta, pos, policy))
       | Nothing ->
-          Cons(check_missing(c, theta, pos), check_constraints(crest, dict_heads, theta, pos))
+          Cons(check_missing(c, theta, pos, policy), check_constraints(crest, dict_heads, theta, pos, policy))
 
 # Remove and return the first (class, head) entry in dict_heads whose class
 # matches class_name (short name), preserving order of the remainder — mirrors
@@ -237,11 +304,39 @@ fn take_by_class(class_name: String, dict_heads: List (String, Maybe String)) ->
 # instead of rejecting the program (return-position constraints resolved only
 # after the call's return type is concrete, e.g. `concat_map`'s `Monoid t`
 # when `t` resolves to `Vec Int` and `Vec` has no Monoid instance).
-fn check_missing(c: ast.TypeConstraint, theta: Dict types.Type, pos: source.SourcePos) -> VerifyOutcome =
+fn check_missing(c: ast.TypeConstraint, theta: Dict types.Type, pos: source.SourcePos, policy: MissingPolicy) -> VerifyOutcome =
   let Just v = constraint_var(c) else VerifySkip(constraint_class(c) ++ ": non-var constraint head")
-      Just truth_ty = dict_get(v, theta) else VerifySkip(constraint_class(c) ++ " " ++ v ++ ": underdetermined by source signature")
-      Just truth_head = type_head_str(truth_ty) else VerifySkip(constraint_class(c) ++ " " ++ v ++ ": truth still polymorphic")
-  in VerifyMismatch(pos, "No instance of " ++ constraint_class(c) ++ " for " ++ truth_head)
+  in
+    match dict_get(v, theta) with
+    | Nothing -> underdetermined_missing(c, v, pos, policy)
+    | Just truth_ty ->
+        match type_head_str(truth_ty) with
+        | Just truth_head -> VerifyMismatch(pos, "No instance of " ++ constraint_class(c) ++ " for " ++ truth_head)
+        | Nothing -> underdetermined_missing(c, v, pos, policy)
+
+# The constraint var is not pinned to any concrete type AND no dict was injected.
+#
+# For a constrained `fn` this is the deferred case the pass must stay silent
+# about. For a class method it is the classic `show . read` ambiguity: the
+# instance is selected by a type that appears nowhere the call can see, both
+# instances satisfy the constraint, and they disagree. Left unreported it emits a
+# call with no dictionary at all, which survives every later check and fails at
+# the LINKER with no Sprout source position — or, worse, silently adopts an
+# unrelated variable's dict and makes one closed expression denote two different
+# values. See docs/spec-v0.md §constraint well-formedness.
+#
+# A legitimately forwarded polymorphic call does NOT reach here: it carries a
+# dict whose head is a type variable, so it takes check_one's skip path.
+fn underdetermined_missing(c: ast.TypeConstraint, v: String, pos: source.SourcePos, policy: MissingPolicy) -> VerifyOutcome =
+  match policy with
+  | MissingDeferred -> VerifySkip(constraint_class(c) ++ " " ++ v ++ ": underdetermined by source signature")
+  | MissingFinal method_name ->
+      # `short` on the class: post-bundling it carries a module prefix
+      # (`main.Codec`), which is noise in a message naming a class the user wrote.
+      VerifyMismatch(pos,
+        "ambiguous type variable in `" ++ short(method_name) ++ "`: nothing determines which `"
+        ++ short(constraint_class(c)) ++ "` instance to use. Annotate the "
+        ++ "expression with the type you mean.")
 
 fn check_one(c: ast.TypeConstraint, dict_head: (String, Maybe String), theta: Dict types.Type, pos: source.SourcePos) -> VerifyOutcome =
   match dict_head with
@@ -262,16 +357,18 @@ fn check_one(c: ast.TypeConstraint, dict_head: (String, Maybe String), theta: Di
 # Program walker: run verify_call at every constrained call site
 # ---------------------------------------------------------------------------
 #
-# Two passes: build a signature table from every TFnDecl that has BOTH a
-# `where`-clause and fully-annotated params (the only calls we can derive truth
-# for — everything else is skip-by-construction), then walk all expression trees
-# and check each TCall whose callee is a known constrained function. Returns the
-# first mismatch's (pos, message), or Nothing if every checkable call verified.
+# Two passes: build a signature table from every callee whose truth is derivable
+# — a TFnDecl with BOTH a `where`-clause and fully-annotated params, plus every
+# CLASS METHOD (whose constraint is its class applied to its own type parameter);
+# everything else is skip-by-construction — then walk all expression trees and
+# check each TCall against it. Returns the first mismatch's (pos, message), or
+# Nothing if every checkable call verified.
 #
-# Residual gap (phase 2a): class-method return-type dispatch via TMethodRef is NOT
-# covered — the sig table is TFnDecl-based and check_call keys the callee by TVar
-# name, so a method-ref callee is never looked up. Phase 2a covers return-type
-# dispatch only on regular constrained `fn`s. Method-ref dispatch is future work.
+# The two kinds differ only in how an ABSENT dict is read; see MissingPolicy.
+#
+# Residual gap: a class method invoked through a TMethodRef callee (rather than a
+# named TVar) is still not covered — check_call keys the callee by TVar name, so a
+# method-ref callee is never looked up.
 
 # Signature entry: the callee's param type annotations (in order) + its where-clause.
 # verify_program surfaces the first mismatch (the gate's failure); verify_stats
@@ -297,16 +394,69 @@ fn tally(os: List VerifyOutcome, ok: Int, sk: Int, mm: Int) -> (Int, Int, Int) =
       | VerifySkip _ -> tally(rest, ok, sk + 1, mm)
       | VerifyMismatch _ _ -> tally(rest, ok, sk, mm + 1)
 
-fn build_sig_table(decls: List typed_ast.TypedDecl, acc: Dict (List ast.TypeExpr, Maybe ast.TypeExpr, List ast.TypeConstraint)) -> Dict (List ast.TypeExpr, Maybe ast.TypeExpr, List ast.TypeConstraint) =
+# A top-level `fn` may legitimately SHADOW a class-method name — `tests/stdlib/
+# test_classmethod_dispatch_identity.spr` declares `fn append(x: Int) -> Int`
+# alongside Semigroup's `append` on purpose. Calls to that name then reach the fn,
+# not the method, so the method entry must not be registered at all. Overwriting
+# it with the fn's entry is not enough: an UNCONSTRAINED shadowing fn has no
+# verifiable signature (fn_sig returns Nothing), which would leave the method
+# entry in place and report `No instance of Semigroup for Int` on a plain call.
+fn build_sig_table(decls: List typed_ast.TypedDecl, acc: Dict CalleeSig) -> Dict CalleeSig =
+  build_fn_sigs(decls, build_class_sigs(decls, collect_fn_names(decls, dict_empty()), acc))
+
+fn collect_fn_names(decls: List typed_ast.TypedDecl, acc: Dict Bool) -> Dict Bool =
+  match decls with
+  | Nil -> acc
+  | Cons d rest ->
+      match d with
+      | typed_ast.TFnDecl name _ _ _ _ _ -> collect_fn_names(rest, dict_set(name, true, acc))
+      | _ -> collect_fn_names(rest, acc)
+
+fn build_fn_sigs(decls: List typed_ast.TypedDecl, acc: Dict CalleeSig) -> Dict CalleeSig =
   match decls with
   | Nil -> acc
   | Cons d rest ->
       match d with
       | typed_ast.TFnDecl name params ret _ constraints _ ->
           match fn_sig(params, ret, constraints) with
-          | Just sig -> build_sig_table(rest, dict_set(name, sig, acc))
-          | Nothing -> build_sig_table(rest, acc)
-      | _ -> build_sig_table(rest, acc)
+          | Just sig -> build_fn_sigs(rest, dict_set(name, sig, acc))
+          | Nothing -> build_fn_sigs(rest, acc)
+      | _ -> build_fn_sigs(rest, acc)
+
+# A class declaration survives inference as TPassThrough, still carrying every
+# method's written signature. Each method is registered as a callee whose sole
+# constraint is the class applied to its own type parameter — the obligation the
+# resolver must discharge with a dict at each call site. Registered under the bare
+# method name, which is exactly how infer keys `@class:{method}` and how the
+# callee appears as `TVar {method}`.
+#
+# Multi-parameter classes are skipped: `constraint_var` only reads a single
+# var-headed constraint, so a two-parameter class would yield an unusable head.
+fn build_class_sigs(decls: List typed_ast.TypedDecl, fn_names: Dict Bool, acc: Dict CalleeSig) -> Dict CalleeSig =
+  match decls with
+  | Nil -> acc
+  | Cons d rest ->
+      let typed_ast.TPassThrough inner = d else build_class_sigs(rest, fn_names, acc)
+          ast.ClassDecl class_name type_params methods _ _ = inner else build_class_sigs(rest, fn_names, acc)
+          [tv] = type_params else build_class_sigs(rest, fn_names, acc)
+      in build_class_sigs(rest, fn_names, add_class_methods(class_name, tv, methods, fn_names, acc))
+
+fn add_class_methods(class_name: String, tv: String, methods: List ast.ClassMethodSig, fn_names: Dict Bool, acc: Dict CalleeSig) -> Dict CalleeSig =
+  match methods with
+  | Nil -> acc
+  | Cons m rest ->
+      match m with
+      | ast.ClassMethodSig name params ret_te _ ->
+          match dict_get(name, fn_names) with
+          | Just _ -> add_class_methods(class_name, tv, rest, fn_names, acc)
+          | Nothing ->
+              match all_annotated(params) with
+              | Nothing -> add_class_methods(class_name, tv, rest, fn_names, acc)
+              | Just tes ->
+                  add_class_methods(class_name, tv, rest, fn_names,
+                    dict_set(name,
+                      SigMethod(name, tes, Just(ret_te), [ast.TypeConstraint(class_name, [ast.TypeName(tv)])]),
+                      acc))
 
 # A verifiable signature: has a where-clause AND every param is annotated (which a
 # where-clause guarantees in source, but stay defensive against synthesized decls).
@@ -314,13 +464,13 @@ fn build_sig_table(decls: List typed_ast.TypedDecl, acc: Dict (List ast.TypeExpr
 # — a constraint var appearing only in the return — can be pinned (phase 2a). A
 # return-position var is bound by matching this declared return against the call's
 # concrete return type; params alone leave it underdetermined -> skip.
-fn fn_sig(params: List ast.Param, ret: Maybe ast.TypeExpr, constraints: List ast.TypeConstraint) -> Maybe (List ast.TypeExpr, Maybe ast.TypeExpr, List ast.TypeConstraint) =
+fn fn_sig(params: List ast.Param, ret: Maybe ast.TypeExpr, constraints: List ast.TypeConstraint) -> Maybe CalleeSig =
   match constraints with
   | Nil -> Nothing
   | _ ->
       match all_annotated(params) with
       | Nothing -> Nothing
-      | Just tes -> Just((tes, ret, constraints))
+      | Just tes -> Just(SigFn(tes, ret, constraints))
 
 fn all_annotated(params: List ast.Param) -> Maybe (List ast.TypeExpr) =
   match params with
@@ -333,18 +483,18 @@ fn all_annotated(params: List ast.Param) -> Maybe (List ast.TypeExpr) =
           | Nothing -> Nothing
       | ast.Param _ Nothing _ -> Nothing
 
-fn collect_decls(decls: List typed_ast.TypedDecl, sigs: Dict (List ast.TypeExpr, Maybe ast.TypeExpr, List ast.TypeConstraint)) -> List VerifyOutcome =
+fn collect_decls(decls: List typed_ast.TypedDecl, sigs: Dict CalleeSig) -> List VerifyOutcome =
   match decls with
   | Nil -> Nil
   | Cons d rest -> list_append(collect_decl(d, sigs), collect_decls(rest, sigs))
 
-fn collect_decl(d: typed_ast.TypedDecl, sigs: Dict (List ast.TypeExpr, Maybe ast.TypeExpr, List ast.TypeConstraint)) -> List VerifyOutcome =
+fn collect_decl(d: typed_ast.TypedDecl, sigs: Dict CalleeSig) -> List VerifyOutcome =
   match d with
   | typed_ast.TFnDecl _ _ _ _ _ body -> collect_expr(body, sigs)
   | typed_ast.TInstanceDecl _ _ methods -> collect_methods(methods, sigs)
   | _ -> Nil
 
-fn collect_methods(methods: List typed_ast.TypedInstanceMethod, sigs: Dict (List ast.TypeExpr, Maybe ast.TypeExpr, List ast.TypeConstraint)) -> List VerifyOutcome =
+fn collect_methods(methods: List typed_ast.TypedInstanceMethod, sigs: Dict CalleeSig) -> List VerifyOutcome =
   match methods with
   | Nil -> Nil
   | Cons m rest ->
@@ -353,7 +503,7 @@ fn collect_methods(methods: List typed_ast.TypedInstanceMethod, sigs: Dict (List
           list_append(collect_expr(body, sigs), collect_methods(rest, sigs))
 
 # Walk an expression, checking every TCall and recursing into all subexpressions.
-fn collect_expr(e: typed_ast.TypedExpr, sigs: Dict (List ast.TypeExpr, Maybe ast.TypeExpr, List ast.TypeConstraint)) -> List VerifyOutcome =
+fn collect_expr(e: typed_ast.TypedExpr, sigs: Dict CalleeSig) -> List VerifyOutcome =
   match e with
   | typed_ast.TCall callee args ret_ty pos ->
       list_append(check_call(callee, args, ret_ty, pos, sigs), collect_exprs(Cons(callee, args), sigs))
@@ -371,12 +521,12 @@ fn collect_expr(e: typed_ast.TypedExpr, sigs: Dict (List ast.TypeExpr, Maybe ast
   | typed_ast.TRecordUpdate base fields _ _ -> list_append(collect_expr(base, sigs), collect_record_fields(fields, sigs))
   | _ -> Nil
 
-fn collect_exprs(es: List typed_ast.TypedExpr, sigs: Dict (List ast.TypeExpr, Maybe ast.TypeExpr, List ast.TypeConstraint)) -> List VerifyOutcome =
+fn collect_exprs(es: List typed_ast.TypedExpr, sigs: Dict CalleeSig) -> List VerifyOutcome =
   match es with
   | Nil -> Nil
   | Cons h t -> list_append(collect_expr(h, sigs), collect_exprs(t, sigs))
 
-fn collect_branches(branches: List typed_ast.TypedMatchBranch, sigs: Dict (List ast.TypeExpr, Maybe ast.TypeExpr, List ast.TypeConstraint)) -> List VerifyOutcome =
+fn collect_branches(branches: List typed_ast.TypedMatchBranch, sigs: Dict CalleeSig) -> List VerifyOutcome =
   match branches with
   | Nil -> Nil
   | Cons b rest ->
@@ -384,18 +534,18 @@ fn collect_branches(branches: List typed_ast.TypedMatchBranch, sigs: Dict (List 
       | typed_ast.TypedMatchBranch _ body ->
           list_append(collect_expr(body, sigs), collect_branches(rest, sigs))
 
-fn collect_do_steps(steps: List typed_ast.TypedDoStep, sigs: Dict (List ast.TypeExpr, Maybe ast.TypeExpr, List ast.TypeConstraint)) -> List VerifyOutcome =
+fn collect_do_steps(steps: List typed_ast.TypedDoStep, sigs: Dict CalleeSig) -> List VerifyOutcome =
   match steps with
   | Nil -> Nil
   | Cons s rest -> list_append(collect_step(s, sigs), collect_do_steps(rest, sigs))
 
-fn collect_step(s: typed_ast.TypedDoStep, sigs: Dict (List ast.TypeExpr, Maybe ast.TypeExpr, List ast.TypeConstraint)) -> List VerifyOutcome =
+fn collect_step(s: typed_ast.TypedDoStep, sigs: Dict CalleeSig) -> List VerifyOutcome =
   match s with
   | typed_ast.TDoBindStep _ expr -> collect_expr(expr, sigs)
   | typed_ast.TDoLetStep _ expr -> collect_expr(expr, sigs)
   | typed_ast.TDoExprStep expr -> collect_expr(expr, sigs)
 
-fn collect_record_fields(fields: List typed_ast.TypedRecordField, sigs: Dict (List ast.TypeExpr, Maybe ast.TypeExpr, List ast.TypeConstraint)) -> List VerifyOutcome =
+fn collect_record_fields(fields: List typed_ast.TypedRecordField, sigs: Dict CalleeSig) -> List VerifyOutcome =
   match fields with
   | Nil -> Nil
   | Cons f rest ->
@@ -407,16 +557,15 @@ fn collect_record_fields(fields: List typed_ast.TypedRecordField, sigs: Dict (Li
 # injected dicts (by variant — prepend and append both yield dicts in order), and
 # verify. Returns every (constraint, dict) outcome for the call — Nil for a
 # non-constrained or unknown callee.
-fn check_call(callee: typed_ast.TypedExpr, args: List typed_ast.TypedExpr, ret_ty: types.Type, pos: source.SourcePos, sigs: Dict (List ast.TypeExpr, Maybe ast.TypeExpr, List ast.TypeConstraint)) -> List VerifyOutcome =
-  match callee_name(callee) with
-  | Nothing -> Nil
-  | Just name ->
-      match dict_get(name, sigs) with
-      | Nothing -> Nil
-      | Just sig ->
-          match sig with
-          | (param_tes, ret_te, constraints) ->
-              verify_call(param_tes, ret_te, constraints, value_arg_types(args), ret_ty, dict_heads_of(args), pos)
+fn check_call(callee: typed_ast.TypedExpr, args: List typed_ast.TypedExpr, ret_ty: types.Type, pos: source.SourcePos, sigs: Dict CalleeSig) -> List VerifyOutcome =
+  let Just name = callee_name(callee) else Nil
+      Just sig = dict_get(name, sigs) else Nil
+  in
+    match sig with
+    | SigFn param_tes ret_te constraints ->
+        verify_call(param_tes, ret_te, constraints, value_arg_types(args), ret_ty, dict_heads_of(args), pos)
+    | SigMethod method_name param_tes ret_te constraints ->
+        verify_class_method_call(method_name, param_tes, ret_te, constraints, value_arg_types(args), ret_ty, dict_heads_of(args), pos)
 
 fn callee_name(e: typed_ast.TypedExpr) -> Maybe String =
   match e with
@@ -451,7 +600,7 @@ fn dict_head_from_args(head_args: List ast.TypeExpr) -> Maybe String =
 # the head is a type variable (a forwarded/polymorphic dict — legitimately skipped).
 fn dict_head_te(te: ast.TypeExpr) -> Maybe String =
   match te with
-  | ast.TypeName n -> if starts_lower(n) then Nothing else Just(short(n))
+  | ast.TypeName n -> if starts_lower(n) || is_reserved_head(n) then Nothing else Just(short(n))
   | ast.TypeApply base _ -> dict_head_te(base)
   | ast.TupleType items -> Just("Tuple" ++ int_to_string(list_length(items)))
   | _ -> Nothing
