@@ -60,10 +60,13 @@ module stdlib.math
 #
 # Per-function measurements and method: docs/math-transcendental-v0.md.
 #
-# The LANGUAGE still has no Double -> Int conversion (only `to_double`, an `sitofp`),
-# but this module now has a private one — `round_to_int`, built on the
-# `double_to_bits` intrinsic — because the O(1) reductions need the binary exponent as
-# an actual `Int`. See the note above it for why it stays private.
+# The LANGUAGE still has no Double -> Int conversion (only `to_double`, an `sitofp`);
+# this module supplies one, `to_int`, in pure Sprout over the `double_to_bits`
+# intrinsic. It returns `Maybe Int` because NaN, the infinities and |x| >= 2^63 have
+# no Int to name. The rounding family — `floor`/`ceiling`/`truncate`/`round` — stays
+# in Double and is total; compose it with `to_int` to pick a direction. A separate
+# private `round_to_int` remains for the O(1) reductions, which need the binary
+# exponent as an `Int` on a hot path and can prove their own inputs in range.
 #
 # The invariant the old "counters are Double-valued integers" note existed to justify
 # still holds, and is what matters: EVERY REDUCTION MOVES ONLY BY EXACT POWERS OF TWO,
@@ -284,6 +287,26 @@ export fn floor(x: Double) -> Double =
   else if r > x then r - 1.0
   else r
   where r = round_nearest(x)
+
+# `floor` with the comparison flipped: step UP when round-to-nearest went down.
+# The same zero short-circuit applies, and for the same reason.
+export fn ceiling(x: Double) -> Double =
+  if x == 0.0 then x
+  else if r < x then r + 1.0
+  else r
+  where r = round_nearest(x)
+
+# Toward zero — floor on the positive side, ceiling on the negative. The guard is
+# `x < 0.0`, which is FALSE for -0.0, so -0.0 takes the floor branch and its sign
+# survives.
+export fn truncate(x: Double) -> Double =
+  if x < 0.0 then ceiling(x) else floor(x)
+
+# Nearest, TIES TO EVEN — inherited for free from the ties rule of IEEE addition,
+# since round_nearest is the `(x + 2^52) - 2^52` trick and that add rounds ties to
+# even. Matches Haskell's `round`; Rust's `round` differs, taking ties away from
+# zero (its ties-to-even spelling is `round_ties_even`).
+export fn round(x: Double) -> Double = round_nearest(x)
 
 # --- Why the root iterations run a fixed pass count ---
 # `sqrt_iter` and `cbrt_iter` below run an UNCONDITIONAL 6 Newton passes. Neither tests
@@ -509,10 +532,9 @@ fn exp_series(r: Double) -> Double =
 # Domain: |v| < 2^52. exp's k is bounded by its own guards to [-1076, 1025], so the
 # only caller is far inside it.
 #
-# Deliberately PRIVATE. A general public `Double -> Int` needs a rounding-mode
-# decision (truncate? floor? round-half-even?) and a defined answer for non-integral,
-# out-of-range and NaN inputs — none of which this internal use requires. Filed in
-# BACKLOG rather than smuggled in under a name that only promises one of them.
+# Stays PRIVATE now that `to_int` exists. It answers a narrower question than the
+# public conversion does — round-to-nearest only, |v| < 2^52 only, total — and it
+# is on exp's hot path, so it must not acquire the guards `to_int` needs.
 #
 # Bits of 2^52: exponent field 52+1023 = 1075, mantissa 0 -> 1075 * 2^52.
 # `two52` itself is defined with the other powers of two near the top of the file.
@@ -524,6 +546,65 @@ fn round_to_int_pos(v: Double) -> Int =
 fn round_to_int(v: Double) -> Int =
   if v < 0.0 then 0 - round_to_int_pos(0.0 - v)
   else round_to_int_pos(v)
+
+# --- Double -> Int, the public conversion ---
+#
+# The layer splits in two and the split is the point. `floor`/`ceiling`/`truncate`/
+# `round` are TOTAL because they stay in Double: NaN and the infinities pass
+# through and no range question arises. `to_int` is the ONE partial function, so
+# it is the one place that decides what NaN, the infinities and |x| >= 2^63 mean.
+# A caller composes them — `to_int(floor(x))` floors, `to_int(ceiling(x))` rounds
+# up — and `to_int` alone truncates toward zero, as Rust, Go and C do, so it parts
+# company with `to_int(floor(x))` only on negative non-integral input.
+#
+# `Maybe Int` rather than a saturating `Int`, matching `parse_int`: a conversion
+# that cannot answer says so instead of returning a plausible wrong number.
+#
+# 2^63, as a bound rather than a literal — the lexer's integer range stops one
+# short of it, and it is not a value any Int can hold.
+let two63 = two64 / 2.0
+
+# Int's minimum, spelled without a literal for the same reason.
+fn min_int() -> Int = 0 - 9223372036854775807 - 1
+
+# An already-integral magnitude in [0, 2^63) to an Int, exactly.
+#
+# `round_to_int_pos` alone cannot do this: it adds 2^52, which for m >= 2^52 has
+# no mantissa room left and returns the wrong answer. Splitting m into a high and
+# a low half at 2^32 puts BOTH halves under 2^52, where the magic-constant trick
+# is exact. Every step is exact in Double: dividing by 2^32 only shifts the
+# exponent, and the residual is a difference of integers below 2^32.
+fn magnitude_to_int(m: Double) -> Int =
+  hi * 4294967296 + round_to_int_pos(lo)
+where
+  hi_d = floor(m / two32)
+  hi = round_to_int_pos(hi_d)
+  lo = m - hi_d * two32
+
+# NaN is tested FIRST and cannot be folded into the range guard: every comparison
+# against NaN is false, so `t >= two63 || t < -two63` is false for a NaN and would
+# fall through to convert garbage.
+#
+# The range boundary is ASYMMETRIC. Int's maximum, 2^63 - 1, is not representable
+# as a Double — the spacing at that magnitude is 1024, so the neighbouring Doubles
+# are 2^63 - 1024 and 2^63 itself. Int's minimum, -2^63, is a power of two and IS
+# exact, so it converts. It also cannot go through the negate-and-re-sign path,
+# whose positive half would be 2^63, so it is answered directly.
+export fn to_int(x: Double) -> Maybe Int =
+  if is_nan(x) then Nothing
+  else if t >= two63 then Nothing
+  else if t < 0.0 - two63 then Nothing
+  else if t == 0.0 - two63 then Just(min_int())
+  else if t < 0.0 then Just(0 - magnitude_to_int(0.0 - t))
+  else Just(magnitude_to_int(t))
+where
+  t = truncate(x)
+
+# `to_int` with the fallback written at the call site, mirroring `vec_get_or`.
+export fn to_int_or(x: Double, fallback: Int) -> Int =
+  match to_int(x) with
+  | Just n -> n
+  | Nothing -> fallback
 
 # O(1) since 2026-08-07: build 2^k directly instead of walking k in strides.
 #
