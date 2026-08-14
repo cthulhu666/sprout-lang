@@ -58,6 +58,21 @@ fn via_match(m: Maybe (Int -> String), x: Int) -> String =
   | Just to_string -> to_string(x)
   | Nothing -> "none"
 
+# A TUPLE pattern binds through `pattern_bound_names`' recursive arm, which the
+# cases above never reach — every one of them binds at depth 0 or through a
+# single constructor. If that arm ever answered `Nil`, the name would look
+# unbound and the call below would be read as a call to the class method again.
+fn via_tuple(p: (Int -> String, Int)) -> String =
+  match p with
+  | (to_string, n) -> to_string(n)
+
+# Constructor wrapping a tuple: two levels of recursion, so a binder found only
+# at depth 2 is covered too.
+fn via_nested(m: Maybe (Int -> String, Int)) -> String =
+  match m with
+  | Just (to_string, n) -> to_string(n)
+  | Nothing -> "none"
+
 # The shadow must not leak: the REAL class method still dispatches in this file,
 # in a function that has no such binding.
 fn real_dispatch(x: Int) -> String = to_string(x)
@@ -81,6 +96,8 @@ fn main() -> Unit !{IO} =
     check_eq("let named append", via_let(6), 36),
     check_eq("lambda parameter named compare", via_lambda(4), 8),
     check_eq("match binding named to_string", via_match(Just(int_to_string), 5), "5"),
+    check_eq("tuple pattern binds a class-method name", via_tuple((int_to_string, 5)), "5"),
+    check_eq("nested tuple-in-constructor binds it too", via_nested(Just((int_to_string, 6))), "6"),
     check_eq("real method still dispatches", real_dispatch(9), "9"),
     check_eq("shadow does not leak outward", shadow_then_real(3), "3shadowed")
   ])

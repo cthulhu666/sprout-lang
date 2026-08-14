@@ -47,6 +47,28 @@ The compiler may break this rule locally for unreachable-by-invariant cases, but
 
 No naming suffix is needed to mark fallibility — the return type carries the information. The compiler's existing `try_*` prefix is permitted as a semantic cue ("this is a search that might not match"), not as a partiality marker.
 
+### 2a. When a match classifies an ADT, enumerate every variant
+
+*[Compiler] where a function answers a question **about** a variant; [Universal] as a habit.*
+
+A catch-all is fine when its answer is genuinely right for anything not named above. It is a defect when the answer is only right for *today's* variants. The test to apply before writing `| _ ->`:
+
+> **Would this arm still give the right answer for a variant that does not exist yet?**
+
+If the answer is "no, a future variant would need its own arm", spell every variant out. The exhaustiveness check is a compile-time one and names what is missing —
+
+```
+ERROR: check: Non-exhaustive match on stdlib.compiler.ast.Pattern — no branch matches AsPattern in function ast.pattern_pos
+```
+
+— so the enumeration turns "someone must remember to update every site" into "the build stops until they have". That is a mechanical guarantee; a comment asking people to remember is not.
+
+This is not a licence to sweep wildcards out of the codebase. Most of the ~500 catch-alls under `stdlib/compiler/` are legitimate defaults, and a nested match on a *different* type inside a variant's arm is a common and correct one (`pattern_linear_binders` matches `types.Type` inside its tuple arm).
+
+**Before writing a classifier, look for an existing one.** "Which names does this pattern bind?" is answered in five places — `ast_to_ir.pattern_names`, `dce.pat_binds`, `linear_check.pattern_all_binders`, `linear_check.pattern_linear_binders`, `verify_dispatch.pattern_bound_names`. Reuse beats a sixth copy; if the copy is unavoidable (different return shape, module layering), match the exhaustive form the others use.
+
+Recorded because the cost is measured, not hypothetical: on 2026-08-14 a name-keyed dispatch check handled the top-level shadowing case and missed every local binder, making `fn f(append: …)` a hard compile error for seven hours. The fix for it was then written with a catch-all of its own, in a file whose four sibling functions were all exhaustive.
+
 ### 3. Make illegal states unrepresentable
 
 *[Universal]. The "no boolean blindness in public APIs" note below is specifically [Library].*
