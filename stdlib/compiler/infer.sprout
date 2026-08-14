@@ -1294,10 +1294,16 @@ fn check_instance_for_marker(
             # the post-pass only rewrites return-position calls, so s3 is the last
             # chance to see the concrete type. (ADTs dodge this: a constructor
             # application node is already concretely typed.)
+            # No class-var arg found at all: the constraint var is not at the head
+            # of any argument (it may be hidden inside a container), so there is no
+            # dispatch type to gate on — Nothing keeps the ungated scan.
             let Just cv_arg = class_var_arg_or_fallback(method_name, class_vars, typed_args, s3, env)
-                  else check_instance_fwd(types.type_id_name(class_name), typed_callee, typed_args, env, ret_t, s3, es3, call_eff, pos)
+                  else check_instance_fwd(types.type_id_name(class_name), typed_callee, typed_args, env, ret_t, s3, es3, call_eff, pos, Nothing)
+                # The arg was found but its type is not concrete — that type IS the
+                # dispatch type, so the scan can be gated on it.
                 Just head_str = concrete_type_str(unifier.apply_subst(s3, typed_ast.typed_expr_type(cv_arg)))
-                  else check_instance_fwd(types.type_id_name(class_name), typed_callee, typed_args, env, ret_t, s3, es3, call_eff, pos)
+                  else check_instance_fwd(types.type_id_name(class_name), typed_callee, typed_args, env, ret_t, s3, es3, call_eff, pos,
+                         Just(unifier.apply_subst(s3, typed_ast.typed_expr_type(cv_arg))))
             in
               if types.is_skolem_name(head_str) then
                 # Stage 0b: the dispatch value is an unpacked existential (a rigid
@@ -1323,8 +1329,9 @@ fn check_instance_for_marker(
             # an irrelevant arg type (e.g. the String input of `deserialize`).
             # Route directly to fwd markers; the post-pass walker
             # (resolve_dispatch_typed_expr) rewrites the TDict once the outer
-            # unification has made ret_t concrete.
-            check_instance_fwd(types.type_id_name(class_name), typed_callee, typed_args, env, ret_t, s3, es3, call_eff, pos)
+            # unification has made ret_t concrete. The instance is selected by the
+            # return type, so that is what gates the fallback scan.
+            check_instance_fwd(types.type_id_name(class_name), typed_callee, typed_args, env, ret_t, s3, es3, call_eff, pos, Just(ret_t))
       | _ -> InferOk(typed_ast.TCall(typed_callee, typed_args, ret_t, pos), s3, es3, call_eff)
 
 # Resolve a polymorphic class-method call by scanning args for a @fwd marker.
@@ -1333,6 +1340,13 @@ fn check_instance_for_marker(
 # cases where the constraint's type variable is not the first TVar-headed arg
 # (e.g., `fold_values(step: b->a->b, init: b, xs: f a)` — `f` has the @fwd
 # marker but `init`'s TVar `b` is found first by the scanner).
+#
+# `dispatch_t` is the type the instance is selected BY, when the caller knows it:
+# the resolved argument type for input-position dispatch, `ret_t` for
+# return-position. It gates the class-only fallback scan — see gated_fwd_scan.
+# `Nothing` means the caller genuinely has no dispatch type in hand (the
+# constraint var is hidden inside a container arg), which is the case the
+# ungated scan exists to serve.
 
 fn check_instance_fwd(
   class_name: String,
@@ -1343,13 +1357,14 @@ fn check_instance_fwd(
   s3: Dict types.Type,
   es3: Dict types.Effect,
   call_eff: types.Effect,
-  pos: source.SourcePos
+  pos: source.SourcePos,
+  dispatch_t: Maybe types.Type
 ) -> InferResult =
   match find_fwd_tdict_in_args(class_name, typed_args, env, pos) with
   | Just tdict ->
       InferOk(typed_ast.TCall(typed_callee, Cons(tdict, typed_args), ret_t, pos), s3, es3, call_eff)
   | Nothing ->
-      match scan_fwd_markers(class_name, env, pos) with
+      match gated_fwd_scan(class_name, env, s3, pos, dispatch_t) with
       | Just tdict ->
           InferOk(typed_ast.TCall(typed_callee, Cons(tdict, typed_args), ret_t, pos), s3, es3, call_eff)
       | Nothing ->
@@ -1362,6 +1377,46 @@ fn check_instance_fwd(
           if any_function_typed_arg(typed_args, s3)
           then InferErr(pos, "No instance of " ++ class_name ++ " for a function type")
           else InferOk(typed_ast.TCall(typed_callee, typed_args, ret_t, pos), s3, es3, call_eff)
+
+# The class-only fallback scan, gated on the type actually being dispatched.
+#
+# scan_fwd_markers matches `@fwd:<ANY tvar>:<class>` and returns the first hit in
+# dict order, with no check that the marker belongs to the variable under
+# dispatch. When the dispatch type is a variable that owns no marker — an
+# AMBIGUOUS one, mentioned nowhere the call can see — that unrelated marker is
+# adopted anyway, and the call silently borrows a dictionary chosen by dict
+# ordering. The observable damage is incoherence, not a missing diagnostic: in
+# `fn describe(w: b) -> String where Codec b = to_str(from_int(7))` the closed
+# subexpression `to_str(from_int(7))` mentions neither `w` nor `b`, yet
+# `describe(1)` printed `int:7` and `describe(true)` printed `bool`.
+#
+# The marker key is built from the constraint var's fresh-instantiation identity
+# (seed_fwd_with_supers), so a dispatch variable that owns a marker is found by
+# exact lookup. A miss means the variable is tied to no declared constraint:
+# resolve nothing, and let the call reach verify_dispatch dict-less, where it is
+# reported with a source position.
+#
+# A dispatch type that is not a variable, or that the caller does not have in
+# hand at all (`Nothing`), keeps the ungated scan. That is the case the scan was
+# written for — a constraint var not visible at the head of any argument, e.g.
+# `Ord k` where `k` appears inside a tuple.
+fn gated_fwd_scan(
+  class_name: String,
+  env: Dict types.Scheme,
+  s3: Dict types.Type,
+  pos: source.SourcePos,
+  dispatch_t: Maybe types.Type
+) -> Maybe typed_ast.TypedExpr =
+  # Resolve through s3 first: the dispatch type reaching here may still be an
+  # alias for the constraint var rather than the var itself, and the marker is
+  # keyed by the var's own identity. A dispatch type the caller does not have, or
+  # one that is not a bare variable, keeps the ungated scan.
+  let Just t = dispatch_t else scan_fwd_markers(class_name, env, pos)
+      types.TVar v = unifier.apply_subst(s3, t) else scan_fwd_markers(class_name, env, pos)
+      # A variable owning no marker for this class is tied to no declared
+      # constraint: resolve nothing rather than adopting an unrelated marker.
+      Just fwd_scheme = dict_get("@fwd:" ++ types.tyvar_identity(v) ++ ":" ++ class_name, env) else Nothing
+  in fwd_scheme_to_tdict(fwd_scheme, class_name, pos)
 
 # Stage 0b: resolve a class-method call whose dispatch value is an unpacked
 # existential skolem. The witness was packed into the box and seeded as
@@ -2788,8 +2843,15 @@ fn append_via_semigroup_at(
   | Nothing ->
       # Polymorphic operand (inside a generic fn with `where Semigroup t`): forward
       # the in-scope Semigroup witness, mirroring check_instance_for_marker's fwd path.
+      #
+      # Deliberately UNGATED (`Nothing`), unlike the class-method sites. `append`
+      # takes its class variable in argument position, and the post-pass repair
+      # (keep_or_forward_dispatch) only rewrites RETURN-position dispatch — so a
+      # gated `acc ++ x` inside a `where Monoid a` fold would go dictionary-less
+      # with nothing able to repair it. Gating here needs a symmetric
+      # input-position repair first.
       check_instance_fwd("Semigroup", typed_ast.TVar("append", t, pos),
-                         [typed_left, typed_right], env, t, s1, eff_subst, eff, pos)
+                         [typed_left, typed_right], env, t, s1, eff_subst, eff, pos, Nothing)
 
 fn check_arith(
   subst: Dict types.Type,
@@ -5609,12 +5671,17 @@ fn try_rewrite_for_return_dispatch(
   match dispatch_type_for_vars(method_type, strip_leading_tdicts(args), t, subst, class_vars) with
   | Nothing -> typed_ast.TCall(fn_, args, t, pos)
   | Just resolved_t ->
-      # Only rewrite when the resolved type has a concrete head.
-      # If still polymorphic (TVar), the existing inference-time dispatch via
-      # @fwd markers handles forwarding correctly; rewriting here would emit
-      # a TypeName("_") that breaks instance lookup.
+      # A concrete head resolves to its instance dict directly. A head that is
+      # still a type variable is a FORWARD, and this is the only place it can be
+      # decided: gated_fwd_scan deliberately declines to adopt a marker at
+      # inference time, because there the call's fresh return variable and the
+      # enclosing constraint's variable are not yet identified. `subst` here is
+      # the declaration's final substitution, so the two are now comparable —
+      # see forwarded_tdict_for_tyvar. Emitting nothing leaves the call
+      # dictionary-less, which verify_dispatch reports against its source
+      # position rather than letting it reach the linker.
       match concrete_type_str(resolved_t) with
-      | Nothing -> typed_ast.TCall(fn_, args, t, pos)
+      | Nothing -> keep_or_forward_dispatch(env, subst, fn_, args, t, pos, class_name, resolved_t)
       | Just _ ->
           typed_ast.TCall(fn_,
             Cons(typed_ast.TDict(
@@ -5622,6 +5689,74 @@ fn try_rewrite_for_return_dispatch(
               types.TConst(types.type_id(class_name)), pos, typed_ast.EvUnresolved),
               strip_leading_tdicts(args)),
             t, pos)
+
+# Inject a forwarded dict when the still-polymorphic dispatch variable is one the
+# enclosing declaration declared a constraint for; otherwise leave the call alone.
+fn keep_or_forward_dispatch(
+  env: Dict types.Scheme,
+  subst: Dict types.Type,
+  fn_: typed_ast.TypedExpr,
+  args: List typed_ast.TypedExpr,
+  t: types.Type,
+  pos: source.SourcePos,
+  class_name: String,
+  resolved_t: types.Type
+) -> typed_ast.TypedExpr =
+  match forwarded_tdict_for_tyvar(env, subst, class_name, resolved_t, pos) with
+  | Nothing -> typed_ast.TCall(fn_, args, t, pos)
+  | Just tdict -> typed_ast.TCall(fn_, Cons(tdict, strip_leading_tdicts(args)), t, pos)
+
+# Find the @fwd marker whose type variable is THE SAME as the dispatch variable
+# under the final substitution.
+#
+# The equality is deliberately not a raw key lookup on the dispatch variable's
+# identity. Unification is free to orient a binding either way — it may record
+# `a42 -> t7` rather than `t7 -> a42` — so the marker's own key (seeded from the
+# constraint variable's fresh instantiation) can name the variable that got
+# substituted AWAY. Substituting both sides before comparing is orientation-proof:
+# two variables that unified in either direction share a representative. Getting
+# this wrong reintroduces the mis-forwarding class of PR #176/#141, so the direct
+# key hit is only a fast path, never the whole test.
+fn forwarded_tdict_for_tyvar(
+  env: Dict types.Scheme,
+  subst: Dict types.Type,
+  class_name: String,
+  resolved_t: types.Type,
+  pos: source.SourcePos
+) -> Maybe typed_ast.TypedExpr =
+  let types.TVar v = resolved_t else Nothing
+  in
+    match dict_get("@fwd:" ++ types.tyvar_identity(v) ++ ":" ++ class_name, env) with
+    | Just fwd_scheme -> fwd_scheme_to_tdict(fwd_scheme, class_name, pos)
+    | Nothing -> match_fwd_marker_by_subst(class_name, v, subst, vec_to_list(dict_entries(env)), pos)
+
+fn match_fwd_marker_by_subst(
+  class_name: String,
+  v: types.TyVarId,
+  subst: Dict types.Type,
+  entries: List (String, types.Scheme),
+  pos: source.SourcePos
+) -> Maybe typed_ast.TypedExpr =
+  match entries with
+  | Nil -> Nothing
+  | Cons entry rest ->
+      match entry with
+      | (key, val) ->
+          if is_fwd_key_for_class(key, class_name) && fwd_key_tyvar_matches(key, class_name, v, subst)
+          then fwd_scheme_to_tdict(val, class_name, pos)
+          else match_fwd_marker_by_subst(class_name, v, subst, rest, pos)
+
+# The type-variable name embedded in an "@fwd:{tvar}:{class}" key.
+# NB str_slice's third argument is a LENGTH, not an end index.
+fn fwd_key_tyvar_name(key: String, class_name: String) -> String =
+  str_slice(key, str_len("@fwd:"), str_len(key) - str_len("@fwd:") - str_len(":" ++ class_name))
+
+# Does this "@fwd:{tvar}:{class}" key name a variable that the substitution has
+# identified with `v`? Both sides are substituted before comparison.
+fn fwd_key_tyvar_matches(key: String, class_name: String, v: types.TyVarId, subst: Dict types.Type) -> Bool =
+  let types.TVar mv = unifier.apply_subst(subst, types.TVar(types.tyvar_id(fwd_key_tyvar_name(key, class_name)))) else false
+      types.TVar rv = unifier.apply_subst(subst, types.TVar(v)) else false
+  in types.tyvar_eq(mv, rv)
 
 fn maybe_rewrite_class_method_call(
   env: Dict types.Scheme,

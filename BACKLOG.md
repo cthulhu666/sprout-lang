@@ -3185,7 +3185,7 @@ op-classification already in place.
   past an `@inst` miss. Failing either, raise the located "ambiguous typeclass dispatch … refusing
   to guess" error item 3 already built — precise-or-loud, never precise-or-guess. Whichever route,
   route the `#none` arm through `trace_dispatch` so it stops being invisible to corpus sweeps.
-- [ ] `P1` **(type-system review 2026-08-13) An ambiguous class type variable is never reported:
+- [x] `P1` **(type-system review 2026-08-13) An ambiguous class type variable is never reported:
   undefined link symbol, or a caller-dependent instance (`infer.sprout:1191-1193`, `:1772-1790`).**
   The classic `show . read` ambiguity — here `to_str(from_int(n))`, where the dispatch tyvar is
   determined by nothing — is not diagnosed. `find_fwd_tdict_in_args` (`:1237`) misses because the
@@ -3235,33 +3235,53 @@ op-classification already in place.
   declared `where` clause and a class method has none, which is exactly why this slips through).
   The compiler's own source self-hosts under the strict version (stage-3 clean), so the affected
   surface is genuinely user-facing return-type dispatch, not compiler internals.
-  **Started 2026-08-14 on branch `fix/ambiguous-class-tyvar` (pushed, NO PR — the fixtures are RED
-  and would fail the type-error gate; CI only runs on PRs and pushes to master, so the branch is
-  inert).** Both halves re-verified against merged master `257f7638`: (a) `--phase check` clean,
-  (b) `main.describe : forall a. a -> String` printing `int:7` then `bool` at runtime. The two
-  RED repros are committed as
-  `tests/conformance/type_error/ambiguous_class_tyvar{,_incoherent}.spr` (no `.err` yet).
-  What the code reading added, and why the fix is TWO parts rather than one:
-  - **The gated scanner already exists.** `scan_fwd_markers_for_prog_var` (`:2090`) does exactly
-    the "only adopt a marker belonging to THIS constraint var" lookup the fix needs. It is simply
-    not reachable from this path: `check_instance_fwd` (`:1352`) calls the ungated, class-only
-    `scan_fwd_markers` (`:2052`), whose `is_fwd_key_for_class` matches `@fwd:<any tvar>:<class>`.
-  - **Marker shape.** Key is `@fwd:{tvar}:{class}`; the VALUE is a `Scheme` whose body is
-    `TConst <prog_var>` — the programmer's source name for the constraint variable. Gating
-    therefore needs the dispatch tyvar, which `check_instance_fwd` does not currently receive.
-    Its three call sites have different information: `:1298` (no class-var arg found at all),
-    `:1300` (arg found but its type is not concrete — the dispatch tyvar is
-    `apply_subst(s3, typed_expr_type(cv_arg))`), and `:1327` (return-position, dispatch tyvar
-    lives in `ret_t`). Threading a `Maybe types.Type` dispatch type through is the mechanical part.
-  - **Part 1 alone is not a fix.** Gating the scan turns case (b) into case (a) — no marker
-    adopted, so a dict-less call — which is silent today. Part 2 (error on a class-method call
-    still lacking a dictionary AFTER `resolve_dispatch_typed_expr`) is what makes either case
-    loud, and it is also what the over-rejection measurement above points at.
-  - **Known hazard before starting part 1.** Matching the dispatch tyvar against the marker key
-    means relying on canonical tyvar identity surviving `s3` renaming — the exact problem
-    `canonicalize_constrained_markers` was added for (PR #176, and #141 before it). Budget for
-    that, and prefer resolving the dispatch var to its prog var via `prog_to_fresh` (as
-    `resolve_field_constraint` does) over comparing raw identities.
+  **FIXED 2026-08-14 on branch `fix/ambiguous-class-tyvar`.** Both fixtures
+  (`tests/conformance/type_error/ambiguous_class_tyvar{,_incoherent}.spr`) now fail with a located
+  `ambiguous type variable in <method>: nothing determines which <Class> instance to use`. Spec
+  rule written up in `docs/spec-v0.md` §Constraint syntax ("Ambiguous class-method dispatch").
+  The landed design is a **gate plus a repair**, which is NOT the gate-only shape originally
+  planned here — the difference is the important part for anyone touching this code:
+  - **Part 2 — the loud check (`verify_dispatch.sprout`).** Class decls survive inference as
+    `TPassThrough (ast.ClassDecl …)` carrying their method signatures, so the verifier now builds
+    a class-method signature table alongside its `TFnDecl` one and treats each method as a callee
+    whose sole constraint is its class applied to its own type parameter. The new rule is scoped
+    to methods (`MissingPolicy`): for a constrained `fn`, "no dict injected" is DEFERRED (a
+    legitimate forward through a hidden dict param), but a class method has no `where` clause to
+    forward through and no later pass to fill it in, so absent is FINAL. This is why the earlier
+    "reject at `check_instance_fwd`'s fallback" experiment over-rejected 8 files and this does
+    not: by the time `verify_program` runs, both dispatch post-passes have already had their turn.
+  - **Part 1 — the gate (`infer.sprout: gated_fwd_scan`).** The class-only `scan_fwd_markers`
+    fallback is now only reached when the caller has no dispatch type in hand (the
+    constraint-var-hidden-in-a-tuple case it was written for). With a dispatch type, only that
+    variable's own `@fwd` marker is adopted.
+  - **The gate ALONE over-rejects, and this is the load-bearing discovery.** At inference time a
+    legitimate forward and an ambiguous call are *indistinguishable*: in `mconcat`'s
+    `fold(\ (acc, x) -> acc ++ x, empty(), xs)`, `empty()`'s fresh return variable has not yet
+    been unified with `Monoid a`'s variable, so it looks exactly like the ambiguous
+    `from_int(7)`. Only the declaration's FINAL substitution separates them. So the adoption
+    decision moved into the post-pass: `resolve_dispatch_typed_expr` already receives `fwd_env`
+    plus the final `s2`, and now repairs a still-polymorphic return-position dispatch by finding
+    the marker whose variable the substitution has identified with the dispatch variable
+    (`forwarded_tdict_for_tyvar`). Anything left dict-less after that is genuinely ambiguous.
+  - **The marker match is equivalence-under-substitution, not a key lookup.** Unification may
+    orient a binding either way, so the marker's key can name the variable that was substituted
+    away; both sides are substituted before comparing. A raw identity comparison reintroduces the
+    mis-forwarding class of PR #176/#141. The direct key hit is a fast path only.
+  - **Sweep result:** 514 corpus files (`tests/stdlib`, `tests/conformance`, `examples`) checked
+    with `SPROUT_VERIFY_DISPATCH_OFF=1`; exactly the two intended fixtures report. Two
+    false-positive classes were found and fixed on the way: `$`-prefixed heads (`$sk<n>` skolems
+    and `$ex_<var>` existential forwarding identities) were being compared as if they were type
+    constructors, and a top-level `fn` shadowing a class-method name (`test_classmethod_dispatch_
+    identity`'s `fn append`) left the method's signature registered.
+- [ ] `P2` **Ambiguous `++` (Semigroup) dispatch is still resolved by an unrelated marker.** The
+  fix above gates three of `check_instance_fwd`'s four call sites; the fourth — the `++`
+  desugaring in `check_semigroup_append` — is deliberately left ungated. Gating it needs a
+  symmetric INPUT-position repair in the post-pass: `maybe_rewrite_class_method_call` returns
+  input-position calls unchanged (their class var is in the args), so a gated-off `acc ++ x`
+  inside `mconcat` would go dict-less with nothing to repair it, over-rejecting the prelude. The
+  incoherence therefore remains reachable by writing the ambiguous shape with `++` instead of a
+  user class method. Fix: find the class-var argument, resolve it under the final substitution,
+  and reuse `forwarded_tdict_for_tyvar`'s equivalence match; then pass `Just(t)` at that site.
 - [ ] `P2` **Pattern-variable names share the fresh-tyvar namespace (`infer.sprout:2050`)** (fundamentals review, static finding, not yet exercised at runtime). Pattern-bound variable names and the inferencer's fresh `t0`/`t1`/… type-variable names are drawn from the same namespace with no collision guard; a match-pattern binding whose name happens to collide with a fresh tyvar could shadow, or be shadowed by, the wrong entity during unification/substitution. Not yet triggered by a known repro — flagged as a latent hazard by the 2026-07-03 fundamentals code review among the "high/static (not yet run)" findings, adjacent to this section's tyvar-identity work (item 4). Needs a minimal repro to confirm reachability, then either a namespace separator (reserve a prefix for fresh tyvars, distinct from any user-writable pattern-variable name) or a rename pass before pattern binding. Full findings: `docs/fundamentals-code-review-handoff-2026-07-03.md`.
 
 #### Record type-arg concretization at dispatch (surfaced by deriving-on-records)
