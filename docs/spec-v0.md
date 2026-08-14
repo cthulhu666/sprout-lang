@@ -48,6 +48,30 @@ At top level, `let` initializers must be pure in v0. Effectful work is expected
 to be placed inside functions and triggered from `main` or other function
 calls.
 
+### Imports
+
+A file's `module` and `import` declarations form a header block before the
+first ordinary declaration. An import is one of:
+
+```sprout
+import stdlib.compiler.ast as ast          # aliased: names reached as `ast.<name>`
+import stdlib.collections (Vec, vec_get)   # selective: the listed names, unqualified
+```
+
+A **selective list may span lines**. The list continues until its closing
+parenthesis, however many lines that takes, and the continuation lines need no
+marker:
+
+```sprout
+import stdlib.math (pi, sin,
+                    cos, sqrt)
+```
+
+A `#` comment ends the scan for the line, so a parenthesis inside a trailing
+comment does not extend the list. Import lists get long — a real module carries
+over a hundred imports, several past 200 columns — and requiring one line made
+them unformattable.
+
 ## 4. Types
 
 Built-in types:

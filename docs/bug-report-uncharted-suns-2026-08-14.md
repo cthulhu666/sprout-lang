@@ -274,7 +274,20 @@ The bug is also wider than the reproduction shows: the qualified spelling has th
   prelude declaration reaches their bundle — yet the checker still knows the prelude's types, and
   `fn f() -> Maybe Int = Just(1)` compiles in such a file today. **Bundled is not the same set as in
   scope**, and a membership test over the wrong one rejects working programs.
-- **§2 — single-line `import`.** Pending.
+- **§2 — single-line `import`.** Fixed, taking the report's preferred option: a parenthesised import
+  list may span lines, so the 200-column lines it describes can be wrapped. `docs/spec-v0.md` §3.
+
+  The care here is that **two independent line scanners decide the same question** and neither can
+  detect disagreement. `source.strip_headers` chooses which leading lines to blank before tokenizing;
+  `module_loader.collect_imports` chooses which lines make up one import. If stripping consumed three
+  lines where collection read two, the parser receives a dangling `cos, sqrt)`; if the reverse, names
+  vanish. Both now call one exported paren-depth scan rather than keeping a private copy each.
+
+  That scan stops at `#`, so `import x (a, b) # (` stays balanced — comment handling has broken import
+  collection before, which is why it is pinned by a test rather than left to the reader.
+
+  Note the report's second complaint, that the workaround "reads as though the groupings mean
+  something", is answered too: repeating the module across several `import` lines is no longer needed.
 - **§3 — multi-name `let` as a `do` statement.** Fixed, taking the report's preferred option: the
   statement form now binds every name, sequentially, splitting bindings by the same layout rule the
   expression form uses. `docs/spec-v0.md` §5.2.1a states it.
