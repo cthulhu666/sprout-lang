@@ -1021,6 +1021,21 @@ fn mark_type_multiplicity(name: String, mult: ast.Multiplicity, env: Dict types.
         dict_set("@linear:" ++ name, types.mono(types.TConst(types.type_id("linear"))), env))
   | ast.Unrestricted -> env
 
+# Every type this module declares is recorded as a "@type:<TypeName>" env marker,
+# the same sentinel idiom as @linear:/@arity: above. Markers are exported to
+# importers verbatim: module_loader's is_marker_key keeps them unprefixed through
+# an aliased import and retains them through a SELECTIVE one, so the vocabulary
+# travels with the module either way. Read back by type_names_from_env, which
+# seeds the strict type-name validation pass on the path where imported modules
+# arrive as schemes rather than decls. Names are the short (prefix-stripped) form
+# collect_declared_type_names produces, matching how validate_te looks them up.
+fn mark_declared_types(names: List String, env: Dict types.Scheme) -> Dict types.Scheme =
+  match names with
+  | Nil -> env
+  | Cons name rest ->
+      mark_declared_types(rest,
+        dict_set("@type:" ++ name, types.mono(types.TConst(types.type_id(name))), env))
+
 # M4.6 removed the "@parammode:<name>" sentinel that used to live here. Parameter
 # ownership is now a field on `types.TFunc` (build_fn_type_modes), so it survives
 # instantiation, substitution, generalization and the interface codec, and is
@@ -4726,7 +4741,16 @@ export fn typecheck_decls(
     # Strict type-name validation: walk every TypeExpr in every type/alias/record
     # declaration and error immediately if a referenced type name is not declared.
     # Runs after pre_scan so mutually recursive ADTs are always in the declared set.
-    let declared_types = collect_declared_type_names(decls, builtin_type_names())
+    #
+    # The vocabulary is this module's own declarations PLUS the imported names the
+    # env carries as @type: markers. Both halves are needed: the file-bundling path
+    # inlines the prelude so its types are ordinary decls, while the REPL / LSP /
+    # analysis-service path supplies them as env schemes and nothing else would put
+    # `Vec` or an imported `Utf8Error` in scope. Mirrors the class-name seed below.
+    let own_type_names = collect_declared_type_names(decls, Nil)
+    let declared_types = own_type_names ++ type_names_from_env(env, builtin_type_names())
+    # Export this module's own type names so its importers get the same treatment.
+    let scanned_env_with_types = mark_declared_types(own_type_names, scanned_env)
     match validate_all_decls(decls, declared_types) with
     | Just (pos, err_msg) -> typed_ast.TypedErr(pos, err_msg)
     | Nothing ->
@@ -4742,10 +4766,12 @@ export fn typecheck_decls(
               match check_existential_constraints(decls) with
               | Just (pos, err_msg) -> typed_ast.TypedErr(pos, err_msg)
               | Nothing ->
-                # Wrap scanned_env as GlobalEnv at this seam — scanned_env is the
-                # output of pre_scan_fn_decls (Dict, raw pre-pass). From here on
-                # the env flows between decls as the wrap-protected GlobalEnv.
-                match typecheck_decls_inner(state, decls, GlobalEnv(scanned_env), subst, eff_subst, dict_empty(), Nil, unifier.ftv_env(scanned_env)) with
+                # Wrap scanned_env_with_types as GlobalEnv at this seam — it is the
+                # output of pre_scan_fn_decls (Dict, raw pre-pass) plus this module's
+                # @type: markers. From here on the env flows between decls as the
+                # wrap-protected GlobalEnv, and out to importers as the checked env.
+                # ftv is unaffected: a marker's body is a TConst, never a free var.
+                match typecheck_decls_inner(state, decls, GlobalEnv(scanned_env_with_types), subst, eff_subst, dict_empty(), Nil, unifier.ftv_env(scanned_env_with_types)) with
                 | typed_ast.TypedErr p m -> typed_ast.TypedErr(p, m)
                 | typed_ast.TypedOk prog schemes ->
                     # Final gate: a DEFINED `main` must be a well-formed entrypoint.
@@ -4928,6 +4954,26 @@ fn class_names_from_entries(entries: List (String, types.Scheme), acc: List Stri
             class_names_from_entries(rest, list_add_unique(string.after_last_dot(types.type_id_name(id)), acc))
         | _ -> class_names_from_entries(rest, acc)
       else class_names_from_entries(rest, acc)
+
+# Type names recoverable from the type environment's `@type:{TypeName}` markers,
+# the exact counterpart of class_names_from_env above (mark_declared_types writes
+# them; each marker's scheme body is `TConst(type_name)`). Same motivation: the
+# analysis-service / REPL path supplies the prelude and every imported module as
+# env schemes rather than decl nodes, so seeding the type vocabulary from decls
+# alone leaves `Vec`, `Dict`, `Result` and every cross-module type name unknown.
+fn type_names_from_env(env: Dict types.Scheme, acc: List String) -> List String =
+  type_names_from_entries(vec_to_list(dict_entries(env)), acc)
+
+fn type_names_from_entries(entries: List (String, types.Scheme), acc: List String) -> List String =
+  match entries with
+  | [] -> acc
+  | [(key, scheme) | rest] ->
+      if str_starts_with(key, "@type:") then
+        match scheme with
+        | types.Scheme _ _ (types.TConst id) _ _ ->
+            type_names_from_entries(rest, list_add_unique(string.after_last_dot(types.type_id_name(id)), acc))
+        | _ -> type_names_from_entries(rest, acc)
+      else type_names_from_entries(rest, acc)
 
 # The first constraint argument that is itself a known class name — the tell of a
 # variable-first swap like `where a ToString` (arg `ToString` is the real class),
