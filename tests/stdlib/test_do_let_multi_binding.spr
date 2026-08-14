@@ -1,0 +1,45 @@
+import stdlib.test (TestState, new_state, assert_true, summary)
+
+# A multi-name `let` must bind EVERY name when used as a `do` statement, exactly
+# as it does in expression position.
+#
+# The expression form `let a = 1 b = 2 in ...` has always bound all of them. As a
+# statement the same syntax parsed, bound the FIRST name, and discarded the rest
+# in silence — the complaint arrived at the use (`Unknown variable: b`), so a
+# binding that was written but never read was dropped with no diagnostic at all.
+#
+# Scoping must match the expression form too: each binding sees the ones above it.
+
+fn triangle() -> Int =
+  let a = 1
+      b = a + 1
+      c = b + 1
+  in a + b + c
+
+fn main() -> Unit !{IO} =
+  do
+    state <- new_state()
+
+    let a = 1
+        b = a + 1
+        c = b + 1
+
+    assert_true(state, "every name in a multi-name do-let is bound", a + b + c == 6)
+    assert_true(state, "a later binding sees an earlier one", c == 3)
+    assert_true(state, "statement form agrees with expression form", a + b + c == triangle())
+
+    # A single-name `let` statement must keep working unchanged.
+    let solo = 41
+
+    assert_true(state, "single-name do-let still binds", solo + 1 == 42)
+
+    # Bindings whose right-hand sides span lines still parse as one binding each:
+    # the split is by layout column, the same rule the expression form uses.
+    let wide = list_fold(\ (acc, x) -> acc + x,
+                         0,
+                         [1, 2, 3])
+        narrow = 6
+
+    assert_true(state, "a multi-line right-hand side is one binding", wide == narrow)
+
+    summary(state)

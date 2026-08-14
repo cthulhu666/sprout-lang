@@ -1,0 +1,11 @@
+# A `do` step that does not consume its whole line must be rejected, not
+# silently truncated.
+#
+# `parse_do_step_sub` parsed one expression per step and threw away whatever
+# followed, for EVERY step shape — not just `let`. So a second statement written
+# on the same line vanished with no diagnostic: this file used to print "first"
+# and "third" and exit 0, with `print("second")` dropped entirely.
+fn main() -> Unit !{IO} =
+  do
+    print("first") print("second")
+    print("third")

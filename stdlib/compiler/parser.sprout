@@ -471,8 +471,12 @@ fn step_has_bind_arrow(tokens: Vec token.Token, i: Int, depth: Int) -> Bool =
 # staircase carrying ONE branch, which hands the refutability question to W5 —
 # where spec §5.2.1 puts it, since refutability is a property of the pattern
 # versus its type and the parser only sees syntax.
+# DoStepLets carries a multi-name `let` statement, which yields one DoLetStep per
+# name. `let a = 1 / b = 2` in expression position has always bound both; as a
+# statement it produced one step and the rest were dropped.
 type DoStepParse (..) =
   | DoStepPlain ast.DoStep
+  | DoStepLets (List ast.DoStep)
   | DoStepRefutable Bool ast.Pattern ast.Expr (Maybe ast.Pattern) ast.Expr source.SourcePos
   | DoStepTotal Bool ast.Pattern ast.Expr source.SourcePos
 
@@ -528,6 +532,51 @@ fn all_irrefutable_do_bind(pats: List ast.Pattern) -> Bool =
   | Cons p rest ->
       if is_irrefutable_do_bind_pattern(p) then all_irrefutable_do_bind(rest) else false
 
+# Every arm below ends by checking that the step consumed its whole slice.
+#
+# It did not use to. Each arm discarded its final index (`(value, _) <- ...`),
+# so ANY tokens left over were dropped in silence — not just the tail bindings of
+# a multi-name `let`. Two statements written on one line meant the second simply
+# never ran: `print("first") print("second")` printed only "first" and exited 0.
+fn step_fully_consumed(step_tokens: Vec token.Token, i: Int, step: DoStepParse) -> Result ParseError (DoStepParse, Int) =
+  if tok_is_eof(tok_at(step_tokens, i)) || i >= vec_length(step_tokens) then Ok((step, 0))
+  else
+    Err(ParseError(
+      string.concat("Unexpected token after the end of a do step at ", pos_str(cur_pos(step_tokens, i)))
+        ++ " — a do block takes one step per line",
+      cur_pos(step_tokens, i)))
+
+# The bindings of a multi-name `let` statement, split by LAYOUT COLUMN — the same
+# rule `parse_let_block` applies to the expression form, so the two forms agree on
+# where one binding ends and the next begins (including a right-hand side that
+# spans lines).
+#
+# `else` is deliberately not accepted here: a refutable binding desugars to a
+# match carrying the remaining steps in its success arm, which is a shape one
+# binding of several cannot have. It stays a single-binding step.
+fn parse_do_let_bindings(step_tokens: Vec token.Token, i: Int, binding_col: Int, acc: List ast.DoStep) -> Result ParseError (List ast.DoStep, Int) =
+  if tok_is_eof(tok_at(step_tokens, i)) || i >= vec_length(step_tokens) then Ok((list_reverse(acc), i))
+  else
+    do
+      (pat, j) <- parse_pattern(step_tokens, i)
+      (_, k) <- expected_symbol("=", step_tokens, j)
+      (value, m) <- parse_expr(step_tokens, k)
+      match binding_name(pat) with
+      | Nothing -> Err(ParseError("a multi-name let binds plain names only", cur_pos(step_tokens, i)))
+      | Just name -> parse_do_let_bindings(step_tokens, m, binding_col, Cons(ast.DoLetStep(name, value), acc))
+
+fn binding_name(pat: ast.Pattern) -> Maybe String =
+  match pat with
+  | ast.VarPattern name _ -> Just(name)
+  | ast.WildcardPattern _ -> Just("_")
+  | _ -> Nothing
+
+# Does this `let` statement carry more than one binding? True when the slice holds
+# a token beyond the first binding's end, found by the layout scan.
+fn do_let_first_binding_end(step_tokens: Vec token.Token, i2: Int) -> Int =
+  scan_do_step_end(step_tokens, i2, i2, source.position_line(tok_pos(tok_at(step_tokens, i2))), 0,
+                   source.position_column(tok_pos(tok_at(step_tokens, i2))))
+
 # Parses one do step from a sub-slice of tokens (step_tokens is the exact tokens for this step).
 fn parse_do_step_sub(step_tokens: Vec token.Token) -> Result ParseError (DoStepParse, Int) =
   let slice_pos = tok_pos(tok_at(step_tokens, 0))
@@ -540,13 +589,19 @@ fn parse_do_step_sub(step_tokens: Vec token.Token) -> Result ParseError (DoStepP
       if tok_is_keyword(tok_at(step_tokens, i5), "else") then
         do
           (_, i6) <- expected_keyword("else", step_tokens, i5)
-          (residual, handler) <- parse_let_else_clause(step_tokens, i6)
-          Ok((DoStepRefutable(false, pat, value, residual, handler, slice_pos), 0))
+          (residual, handler, i7) <- parse_let_else_clause(step_tokens, i6)
+          step_fully_consumed(step_tokens, i7,
+            DoStepRefutable(false, pat, value, residual, handler, slice_pos))
+      else if do_let_first_binding_end(step_tokens, i2) < vec_length(step_tokens) then
+        do
+          (steps, end_i) <- parse_do_let_bindings(step_tokens, i2,
+                              source.position_column(tok_pos(tok_at(step_tokens, i2))), Nil)
+          step_fully_consumed(step_tokens, end_i, DoStepLets(steps))
       else
         match pat with
-        | ast.VarPattern name _ -> Ok((DoStepPlain(ast.DoLetStep(name, value)), 0))
-        | ast.WildcardPattern _ -> Ok((DoStepPlain(ast.DoLetStep("_", value)), 0))
-        | _ -> Ok((DoStepTotal(false, pat, value, slice_pos), 0))
+        | ast.VarPattern name _ -> step_fully_consumed(step_tokens, i5, DoStepPlain(ast.DoLetStep(name, value)))
+        | ast.WildcardPattern _ -> step_fully_consumed(step_tokens, i5, DoStepPlain(ast.DoLetStep("_", value)))
+        | _ -> step_fully_consumed(step_tokens, i5, DoStepTotal(false, pat, value, slice_pos))
   else if step_has_bind_arrow(step_tokens, 0, 0) then
     do
       (pattern, i2) <- parse_pattern(step_tokens, 0)
@@ -555,17 +610,18 @@ fn parse_do_step_sub(step_tokens: Vec token.Token) -> Result ParseError (DoStepP
       if tok_is_keyword(tok_at(step_tokens, i4), "else") then
         do
           (_, i5) <- expected_keyword("else", step_tokens, i4)
-          (residual, handler) <- parse_let_else_clause(step_tokens, i5)
-          Ok((DoStepRefutable(true, pattern, value, residual, handler, slice_pos), 0))
+          (residual, handler, i6) <- parse_let_else_clause(step_tokens, i5)
+          step_fully_consumed(step_tokens, i6,
+            DoStepRefutable(true, pattern, value, residual, handler, slice_pos))
       else
         if is_irrefutable_do_bind_pattern(pattern) then
-          Ok((DoStepPlain(ast.DoBindStep(pattern, value)), 0))
+          step_fully_consumed(step_tokens, i4, DoStepPlain(ast.DoBindStep(pattern, value)))
         else
-          Ok((DoStepTotal(true, pattern, value, slice_pos), 0))
+          step_fully_consumed(step_tokens, i4, DoStepTotal(true, pattern, value, slice_pos))
   else
     do
-      (value, _) <- parse_expr(step_tokens, 0)
-      Ok((DoStepPlain(ast.DoExprStep(value)), 0))
+      (value, i2) <- parse_expr(step_tokens, 0)
+      step_fully_consumed(step_tokens, i2, DoStepPlain(ast.DoExprStep(value)))
 
 # Parses one do step from tokens[i..end_i) and returns (step, end_i).
 fn parse_do_step(tokens: Vec token.Token, i: Int, end_i: Int) -> Result ParseError (DoStepParse, Int) =
@@ -590,6 +646,9 @@ fn collect_do_steps_at(tokens: Vec token.Token, i: Int, do_line: Int, block_col:
     (stepres, i2) <- parse_do_step(tokens, i, scan_do_step_end(tokens, i, i, do_line, 0, block_col))
     match stepres with
     | DoStepPlain step -> collect_do_steps(tokens, i2, do_line, block_col, Cons(step, acc))
+    # One statement, several steps — prepended in order, so `acc` (which is
+    # reversed) receives them last-first exactly as repeated DoStepPlain would.
+    | DoStepLets steps -> collect_do_steps(tokens, i2, do_line, block_col, list_append(list_reverse(steps), acc))
     | DoStepRefutable is_bind pat value residual handler pos ->
         do
           (rest, i3) <- collect_do_steps(tokens, i2, do_line, block_col, Nil)
@@ -651,27 +710,29 @@ fn build_let_binding_match(pat: ast.Pattern, rhs: ast.Expr, residual: Maybe ast.
       ast.MatchExpr(rhs, Cons(ast.MatchBranch(pat, rest), Nil), pos)
 
 # A constant else: the whole clause is one expression, re-parsed from `e`.
-fn parse_let_else_constant(step_tokens: Vec token.Token, e: Int) -> Result ParseError (Maybe ast.Pattern, ast.Expr) =
+# The third component is the index just past the clause, so a caller can tell
+# whether the step consumed its whole slice.
+fn parse_let_else_constant(step_tokens: Vec token.Token, e: Int) -> Result ParseError (Maybe ast.Pattern, ast.Expr, Int) =
   do
-    (fb, _) <- parse_expr(step_tokens, e)
-    Ok((Nothing, fb))
+    (fb, f) <- parse_expr(step_tokens, e)
+    Ok((Nothing, fb, f))
 
 # After a residual pattern parsed cleanly (ending at `f`): a `->` makes it a
 # binding-else (`<rpat> -> <handler>`); anything else means the pattern was really
 # the start of a constant expression, so fall back to parsing one from `e`.
-fn parse_let_else_after_pat(step_tokens: Vec token.Token, e: Int, rpat: ast.Pattern, f: Int) -> Result ParseError (Maybe ast.Pattern, ast.Expr) =
+fn parse_let_else_after_pat(step_tokens: Vec token.Token, e: Int, rpat: ast.Pattern, f: Int) -> Result ParseError (Maybe ast.Pattern, ast.Expr, Int) =
   match match_symbol(step_tokens, f, "->") with
   | Just (_, g) ->
       do
-        (handler, _) <- parse_expr(step_tokens, g)
-        Ok((Just(rpat), handler))
+        (handler, h) <- parse_expr(step_tokens, g)
+        Ok((Just(rpat), handler, h))
   | Nothing -> parse_let_else_constant(step_tokens, e)
 
 # Parses the else clause after `else` has been consumed at index `e`: either a
 # binding-else `<rpat> -> <handler>` (residual pattern followed by `->`) or the
 # classic constant `<expr>`. Disambiguates on a `->` after a well-formed pattern;
 # a pattern that fails to parse, or one not followed by `->`, is a constant else.
-fn parse_let_else_clause(step_tokens: Vec token.Token, e: Int) -> Result ParseError (Maybe ast.Pattern, ast.Expr) =
+fn parse_let_else_clause(step_tokens: Vec token.Token, e: Int) -> Result ParseError (Maybe ast.Pattern, ast.Expr, Int) =
   match parse_pattern(step_tokens, e) with
   | Ok (rpat, f) -> parse_let_else_after_pat(step_tokens, e, rpat, f)
   | Err _ -> parse_let_else_constant(step_tokens, e)
@@ -686,7 +747,7 @@ fn parse_let_binding_sub(step_tokens: Vec token.Token) -> Result ParseError ((as
     if tok_is_keyword(tok_at(step_tokens, d), "else") then
       do
         (_, e) <- expected_keyword("else", step_tokens, d)
-        (residual, fb) <- parse_let_else_clause(step_tokens, e)
+        (residual, fb, _) <- parse_let_else_clause(step_tokens, e)
         Ok(((pat, rhs, residual, Just(fb)), 0))
     else
       Ok(((pat, rhs, Nothing, Nothing), 0))

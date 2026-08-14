@@ -275,6 +275,21 @@ The bug is also wider than the reproduction shows: the qualified spelling has th
   `fn f() -> Maybe Int = Just(1)` compiles in such a file today. **Bundled is not the same set as in
   scope**, and a membership test over the wrong one rejects working programs.
 - **§2 — single-line `import`.** Pending.
-- **§3 — multi-name `let` as a `do` statement.** Pending. The root cause is not `let`-specific:
-  `parse_do_step_sub` discards unconsumed step tokens for *every* statement shape, so the silent
-  discard is general.
+- **§3 — multi-name `let` as a `do` statement.** Fixed, taking the report's preferred option: the
+  statement form now binds every name, sequentially, splitting bindings by the same layout rule the
+  expression form uses. `docs/spec-v0.md` §5.2.1a states it.
+
+  **The root cause was not `let`-specific**, and that is the more important half. Every arm of
+  `parse_do_step_sub` ended `(value, _) <- parse_expr(...)`, discarding the index it had just computed
+  — nothing ever checked that a step consumed its slice, for *any* step shape. Verified:
+  `print("first") print("second")` on one line printed only "first" and exited 0, erasing a whole
+  effectful statement with no diagnostic at all. That is worse than the reported case, where a dropped
+  binding at least fails later at its use.
+
+  So this is two changes: multi-binding support fixes the reported symptom, and a full-consumption
+  backstop turns every other silent discard into a located parse error. The backstop is a tightening
+  in its own right; its corpus sweep is 656 files with 1 finding, which is its own fixture.
+
+  A binding carrying an `else` still has to stand alone — its desugaring puts the remaining steps
+  inside a `match` arm, a shape one binding among several cannot have. That restriction is written
+  into the spec rather than left for someone to discover.
