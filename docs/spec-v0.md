@@ -1363,6 +1363,25 @@ the `Codec b` witness must not be borrowed to resolve the closed subexpression.
 Doing so would make one expression denote different values in different calls,
 which is an incoherence rather than a missing diagnostic.
 
+**Dispatch identity under several constraints of the same class.**  When more
+than one constraint of the same class is in scope, each use selects the instance
+for **its own** type, never whichever witness the compiler happens to reach
+first.  This holds however indirectly the operand acquires its type — in
+particular for a lambda parameter, whose type is only tied to the enclosing
+constraint variable once the lambda is matched against the higher-order
+function's parameter:
+
+```sprout
+fn fold_both(xs: List a, ys: List b, sa: a, sb: b, …) -> String
+  where Semigroup a, Semigroup b =
+  showa(list_fold(\ (acc, x) -> acc ++ x, sa, xs))   # uses Semigroup a
+  ++ "|"
+  ++ showb(list_fold(\ (acc, y) -> acc ++ y, sb, ys))  # uses Semigroup b
+```
+
+The two `++` operators denote different `append` implementations, chosen by
+their own operands.  Declaration order of the `where` constraints has no effect.
+
 ### `ToString` instances
 
 `to_string` is defined for the following types:
