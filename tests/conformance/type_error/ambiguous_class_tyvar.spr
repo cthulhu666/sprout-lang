@@ -1,0 +1,28 @@
+# The classic `show . read` ambiguity. `a` occurs ONLY in the intermediate
+# value — `from_int` produces one, `to_str` consumes it — so nothing determines
+# which `Codec` instance to use, and both satisfy the constraint while giving
+# different answers.
+#
+# Unreported, this emitted a call with no dictionary at all: `--phase check` and
+# `--emit-ir` both exited 0, `resolve` and `verify_dispatch` both passed, and the
+# first sign of trouble was the LINKER — `use of undefined value '@from_int'`,
+# with no Sprout source position. `verify_call` could not catch it because it
+# keys off the callee's declared `where` clause, and a class method has none.
+module main
+
+class Codec a {
+  fn from_int(n: Int) -> a
+  fn to_str(x: a) -> String
+}
+
+instance Codec Int {
+  fn from_int(n: Int) -> Int = n
+  fn to_str(x: Int) -> String = "int:" ++ int_to_string(x)
+}
+
+instance Codec Bool {
+  fn from_int(n: Int) -> Bool = n > 0
+  fn to_str(x: Bool) -> String = "bool"
+}
+
+fn main() -> Unit !{IO} = print(to_str(from_int(7)))
