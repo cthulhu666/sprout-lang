@@ -621,9 +621,17 @@ has no `Double → Int`), while the exponent-field construction needs an `Int`.
 
 Bit access supplies one, via the classic magic-number trick: for integral `d` in
 `[0, 2^52)`, `d + 2^52` has exponent field exactly `52+1023` and its *mantissa* bits are
-`d`, so subtracting the bit pattern of `2^52` leaves `d` exactly. It is kept **private** to
-`stdlib.math` — a general `Double → Int` is public surface needing a rounding-mode
-decision and an out-of-range story, neither of which this use requires.
+`d`, so subtracting the bit pattern of `2^52` leaves `d` exactly. `round_to_int` remains
+**private** to `stdlib.math`: it answers a narrower question than the public conversion —
+round-to-nearest only, `|v| < 2^52` only, total — and sits on `exp`'s hot path, so it must
+not acquire the guards a general conversion needs.
+
+The public conversion arrived later, as `to_int`, and is documented in
+[`docs/double-to-int-v0.md`](double-to-int-v0.md). The rounding-mode and out-of-range
+questions this section left open are answered there; the short version is that they
+**separate**. `floor`/`ceiling`/`truncate`/`round` stay in `Double` and are total, so
+the rounding-mode question never reaches the conversion; `to_int` returns `Maybe Int`,
+which is where the out-of-range question is answered, once.
 
 ### The overflow boundary, which the sweep missed
 

@@ -1,0 +1,167 @@
+import stdlib.test (check_true, run_suite)
+import stdlib.math (floor, ceiling, truncate, round, to_int, to_int_or, nan, is_nan)
+
+# TDD — the rounding family and the Double -> Int conversion.
+#
+# The layer splits in two, and the split is the design:
+#
+#   ROUNDING     Double -> Double, TOTAL. floor/ceiling/truncate/round never
+#                leave the type, so NaN and the infinities pass straight
+#                through and there is no range question to answer.
+#   CONVERSION   Double -> Maybe Int, PARTIAL. `to_int` is the ONE place where
+#                NaN, the infinities and |x| >= 2^63 have no answer, so it is
+#                the one place that decides what to do about them.
+#
+# A caller composes the two: `to_int(floor(x))` floors, `to_int(ceiling(x))`
+# rounds up. `to_int` on its own truncates toward zero, matching Rust, Go and C,
+# so it differs from `to_int(floor(x))` only on negative non-integral input.
+
+# 2^31, 2^32 and 2^63 built by multiplication: Sprout has no exponent literals,
+# and 2^63 exceeds the Int range the lexer accepts even when spelled as a Double.
+let two31 = 2147483648.0
+let two32 = 4294967296.0
+let two63 = two32 * two31
+
+# The largest Double that converts: 2^63 - 1024. Int's max, 2^63 - 1, is NOT
+# representable as a Double — mantissa spacing at that magnitude is 1024, so the
+# neighbouring Doubles are this one and 2^63 itself, which is out of range.
+let max_converting = 9223372036854774784.0
+
+# Int's min written without a literal: -9223372036854775808 would be lexed as
+# the out-of-range positive 9223372036854775808 before the sign applied.
+fn min_int() -> Int = 0 - 9223372036854775807 - 1
+
+fn just_eq(m: Maybe Int, v: Int) -> Bool =
+  match m with
+  | Just x -> x == v
+  | Nothing -> false
+
+fn is_nothing(m: Maybe Int) -> Bool =
+  match m with
+  | Just _ -> false
+  | Nothing -> true
+
+fn inf() -> Double = 1.0 / 0.0
+
+# --- Round-trip sweep -------------------------------------------------------
+# The point assertions above pin the boundaries; this pins everything between.
+# `to_int` splits its input at 2^32 into two halves that each fit the magic
+# constant trick, and a split that is wrong by one bit is invisible at any
+# single sample. For every exactly-representable Double the identity must hold:
+# to_int(to_double(i)) == Just i.
+#
+# Powers of two walk the whole exponent range up to 2^62, crossing 2^32 (the
+# split) and 2^52 (where a Double's ULP reaches 1) on the way. Both signs, since
+# the negative path negates, converts and re-signs.
+fn pow2_roundtrip_bad(k: Int, acc: Int) -> Int =
+  if k > 62 then acc
+  else pow2_roundtrip_bad(k + 1, acc + bad)
+where
+  i = pow2_int(k, 1)
+  ok_pos = just_eq(to_int(to_double(i)), i)
+  ok_neg = just_eq(to_int(to_double(0 - i)), 0 - i)
+  bad = if ok_pos && ok_neg then 0 else 1
+
+fn pow2_int(k: Int, acc: Int) -> Int =
+  if k <= 0 then acc else pow2_int(k - 1, acc * 2)
+
+# A dense run either side of zero, where the split's low half carries everything
+# and the high half is 0 — the case a split that ignores its high half passes.
+fn dense_roundtrip_bad(i: Int, hi: Int, acc: Int) -> Int =
+  if i > hi then acc
+  else dense_roundtrip_bad(i + 1, hi, acc + bad)
+where
+  bad = if just_eq(to_int(to_double(i)), i) then 0 else 1
+
+# Offsets around each power of two: a boundary bug shows up at 2^k - 1 and
+# 2^k + 1 rather than at 2^k itself. Bounded to k <= 52 so every sample is
+# exactly representable.
+fn near_pow2_roundtrip_bad(k: Int, acc: Int) -> Int =
+  if k > 52 then acc
+  else near_pow2_roundtrip_bad(k + 1, acc + bad)
+where
+  p = pow2_int(k, 1)
+  bad = if just_eq(to_int(to_double(p - 1)), p - 1) && just_eq(to_int(to_double(p + 1)), p + 1)
+        then 0 else 1
+
+fn main() -> Unit !{IO} =
+  run_suite("math_to_int", [
+    # --- ceiling: toward +inf ---
+    check_true("ceiling(3.01) == 4.0", ceiling(3.01) == 4.0),
+    check_true("ceiling(3.0) == 3.0", ceiling(3.0) == 3.0),
+    check_true("ceiling(-3.01) == -3.0", ceiling(-3.01) == -3.0),
+    check_true("ceiling(-3.99) == -3.0", ceiling(-3.99) == -3.0),
+    check_true("ceiling(NaN) is NaN", is_nan(ceiling(nan))),
+
+    # --- truncate: toward zero. The sign is what separates it from floor. ---
+    check_true("truncate(3.7) == 3.0", truncate(3.7) == 3.0),
+    check_true("truncate(-3.7) == -3.0", truncate(-3.7) == -3.0),
+    check_true("truncate(-0.5) == 0.0", truncate(-0.5) == 0.0),
+    check_true("truncate(NaN) is NaN", is_nan(truncate(nan))),
+
+    # --- round: nearest, TIES TO EVEN (what the 2^52 trick already gives,
+    # inherited from the ties rule of IEEE addition; also Haskell's `round`).
+    # Rust's `round` differs here — it takes ties AWAY from zero. ---
+    check_true("round(2.4) == 2.0", round(2.4) == 2.0),
+    check_true("round(2.6) == 3.0", round(2.6) == 3.0),
+    check_true("round(0.5) == 0.0 (tie to even)", round(0.5) == 0.0),
+    check_true("round(1.5) == 2.0 (tie to even)", round(1.5) == 2.0),
+    check_true("round(2.5) == 2.0 (tie to even)", round(2.5) == 2.0),
+    check_true("round(3.5) == 4.0 (tie to even)", round(3.5) == 4.0),
+    check_true("round(-2.5) == -2.0 (tie to even)", round(-2.5) == -2.0),
+    check_true("round(NaN) is NaN", is_nan(round(nan))),
+
+    # --- to_int: the ordinary cases ---
+    check_true("to_int(3.0) is Just 3", just_eq(to_int(3.0), 3)),
+    check_true("to_int(3.7) truncates toward zero", just_eq(to_int(3.7), 3)),
+    check_true("to_int(-3.7) truncates toward zero", just_eq(to_int(-3.7), -3)),
+    check_true("to_int(0.0) is Just 0", just_eq(to_int(0.0), 0)),
+    check_true("to_int(-0.0) is Just 0", just_eq(to_int(-0.0), 0)),
+
+    # THE COMPOSITION CONTRAST. This pair is what the design exists for: bare
+    # `to_int` truncates, `to_int . floor` floors, and they part company exactly
+    # on negative non-integral input — which is the sector-index case in the
+    # bug report, where truncating toward zero puts a star in the wrong bucket.
+    check_true("to_int(floor(-3.7)) is Just -4", just_eq(to_int(floor(-3.7)), -4)),
+    check_true("to_int(ceiling(-3.7)) is Just -3", just_eq(to_int(ceiling(-3.7)), -3)),
+    check_true("to_int(floor(3.7)) is Just 3", just_eq(to_int(floor(3.7)), 3)),
+
+    # --- to_int: values with no answer ---
+    # NaN FIRST, because it is the one that slips through. Every comparison
+    # against NaN is false, so a guard written only as `x >= hi || x < lo` is
+    # false for NaN and falls through to convert garbage.
+    check_true("to_int(NaN) is Nothing", is_nothing(to_int(nan))),
+    check_true("to_int(inf) is Nothing", is_nothing(to_int(inf()))),
+    check_true("to_int(-inf) is Nothing", is_nothing(to_int(0.0 - inf()))),
+    check_true("to_int(1e300-ish) is Nothing", is_nothing(to_int(two63 * two63))),
+
+    # --- to_int: the range boundary, which is ASYMMETRIC ---
+    check_true("to_int(2^63) is Nothing", is_nothing(to_int(two63))),
+    check_true("to_int(-2^63) is Just min_int", just_eq(to_int(0.0 - two63), min_int())),
+    check_true("to_int(2^63 - 1024) converts",
+      just_eq(to_int(max_converting), 9223372036854774784)),
+    check_true("to_int(-(2^63 - 1024)) converts",
+      just_eq(to_int(0.0 - max_converting), 0 - 9223372036854774784)),
+
+    # --- to_int at and past 2^52, the magnitude where a Double's ULP reaches 1.
+    # Below it the magic-constant trick carries the conversion; at and above it
+    # every Double is already integral and the trick's `x + 2^52` overflows the
+    # mantissa, so the implementation must switch strategies here. ---
+    check_true("to_int(2^52) is exact", just_eq(to_int(two32 * 1048576.0), 4503599627370496)),
+    check_true("to_int(2^52 + 2) is exact", just_eq(to_int(two32 * 1048576.0 + 2.0), 4503599627370498)),
+    check_true("to_int(2^60) is exact", just_eq(to_int(two32 * two32 / 16.0), 1152921504606846976)),
+
+    # --- to_int_or: the default is written at the call site ---
+    check_true("to_int_or(3.7, 99) == 3", to_int_or(3.7, 99) == 3),
+    check_true("to_int_or(NaN, 99) == 99", to_int_or(nan, 99) == 99),
+    check_true("to_int_or(inf, -1) == -1", to_int_or(inf(), -1) == -1),
+    check_true("to_int_or(floor(-3.7), 0) == -4", to_int_or(floor(-3.7), 0) == -4),
+
+    # --- round-trip sweeps ---
+    check_true("to_int . to_double is identity on +/-2^k, k = 0..62",
+      pow2_roundtrip_bad(0, 0) == 0),
+    check_true("to_int . to_double is identity on -5000..5000",
+      dense_roundtrip_bad(-5000, 5000, 0) == 0),
+    check_true("to_int . to_double is identity at 2^k +/- 1, k = 0..52",
+      near_pow2_roundtrip_bad(0, 0) == 0)
+  ])

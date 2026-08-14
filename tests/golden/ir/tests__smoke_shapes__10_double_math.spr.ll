@@ -238,6 +238,7 @@ declare i64 @crypto_base64_encode(i64)
 @stdlib.math.inf = global i64 zeroinitializer
 @stdlib.math.neg_zero = global i64 zeroinitializer
 @stdlib.math.two52_bits = private constant i64 4841369599423283200
+@stdlib.math.two63 = global i64 zeroinitializer
 
 define i64 @template_to_string(i64 %t) {
 entry:
@@ -8773,6 +8774,76 @@ join_1:
   ret i64 %t$2
 }
 
+define i64 @stdlib.math.ceiling(i64 %x) {
+entry:
+  %t$0 = call i64 @stdlib.math.round_nearest(i64 %x)
+  br label %arm_0_1
+arm_0_1:
+  %t$3 = bitcast double 0.0 to i64
+  %t$4$fa = bitcast i64 %x to double
+  %t$4$fb = bitcast i64 %t$3 to double
+  %t$4 = fcmp oeq double %t$4$fa, %t$4$fb
+  %t$5 = zext i1 %t$4 to i64
+  %t$15 = trunc i64 %t$5 to i1
+  br i1 %t$15, label %then_6, label %else_6
+then_6:
+  br label %join_6
+else_6:
+  %t$8$fa = bitcast i64 %t$0 to double
+  %t$8$fb = bitcast i64 %x to double
+  %t$8 = fcmp olt double %t$8$fa, %t$8$fb
+  %t$9 = zext i1 %t$8 to i64
+  %t$14 = trunc i64 %t$9 to i1
+  br i1 %t$14, label %then_10, label %else_10
+then_10:
+  %t$12 = bitcast double 1.0 to i64
+  %t$13$la = bitcast i64 %t$0 to double
+  %t$13$lb = bitcast i64 %t$12 to double
+  %t$13$fr = fadd double %t$13$la, %t$13$lb
+  %t$13 = bitcast double %t$13$fr to i64
+  br label %join_10
+else_10:
+  br label %join_10
+join_10:
+  %t$11 = phi i64 [%t$13, %then_10], [%t$0, %else_10]
+  br label %join_6
+join_6:
+  %t$7 = phi i64 [%x, %then_6], [%t$11, %join_10]
+  br label %join_1
+arm_1_1:
+  call void @sprout_abort_match()
+  unreachable
+join_1:
+  %t$2 = phi i64 [%t$7, %join_6]
+  ret i64 %t$2
+}
+
+define i64 @stdlib.math.truncate(i64 %x) {
+entry:
+  %t$0 = bitcast double 0.0 to i64
+  %t$1$fa = bitcast i64 %x to double
+  %t$1$fb = bitcast i64 %t$0 to double
+  %t$1 = fcmp olt double %t$1$fa, %t$1$fb
+  %t$2 = zext i1 %t$1 to i64
+  %t$7 = trunc i64 %t$2 to i1
+  br i1 %t$7, label %then_3, label %else_3
+then_3:
+  %t$5 = call i64 @stdlib.math.ceiling(i64 %x)
+  br label %join_3
+else_3:
+  %t$6 = call i64 @stdlib.math.floor(i64 %x)
+  br label %join_3
+join_3:
+  %t$4 = phi i64 [%t$5, %then_3], [%t$6, %else_3]
+  ret i64 %t$4
+}
+
+define i64 @stdlib.math.round(i64 %x) {
+entry:
+  %t$0 = call i64 @stdlib.math.round_nearest(i64 %x)
+  ret i64 %t$0
+}
+
 define i64 @stdlib.math.sqrt_iter(i64 %x$in, i64 %guess$in, i64 %i$in) {
 entry:
   %t$13 = alloca i64
@@ -9469,6 +9540,201 @@ else_3:
 join_3:
   %t$4 = phi i64 [%t$9, %then_3], [%t$10, %else_3]
   ret i64 %t$4
+}
+
+define i64 @stdlib.math.min_int() {
+entry:
+  %t$0 = add i64 0, 0
+  %t$1 = add i64 0, 9223372036854775807
+  %t$2 = sub i64 %t$0, %t$1
+  %t$3 = add i64 0, 1
+  %t$4 = sub i64 %t$2, %t$3
+  ret i64 %t$4
+}
+
+define i64 @stdlib.math.magnitude_to_int(i64 %m) {
+entry:
+  %t$0 = load i64, ptr @stdlib.math.two32
+  %t$1$la = bitcast i64 %m to double
+  %t$1$lb = bitcast i64 %t$0 to double
+  %t$1$fr = fdiv double %t$1$la, %t$1$lb
+  %t$1 = bitcast double %t$1$fr to i64
+  %t$2 = call i64 @stdlib.math.floor(i64 %t$1)
+  br label %arm_0_3
+arm_0_3:
+  %t$5 = call i64 @stdlib.math.round_to_int_pos(i64 %t$2)
+  br label %arm_0_6
+arm_0_6:
+  %t$8 = load i64, ptr @stdlib.math.two32
+  %t$9$la = bitcast i64 %t$2 to double
+  %t$9$lb = bitcast i64 %t$8 to double
+  %t$9$fr = fmul double %t$9$la, %t$9$lb
+  %t$9 = bitcast double %t$9$fr to i64
+  %t$10$la = bitcast i64 %m to double
+  %t$10$lb = bitcast i64 %t$9 to double
+  %t$10$fr = fsub double %t$10$la, %t$10$lb
+  %t$10 = bitcast double %t$10$fr to i64
+  br label %arm_0_11
+arm_0_11:
+  %t$13 = add i64 0, 4294967296
+  %t$14 = mul i64 %t$5, %t$13
+  %t$15 = call i64 @stdlib.math.round_to_int_pos(i64 %t$10)
+  %t$16 = add i64 %t$14, %t$15
+  br label %join_11
+arm_1_11:
+  call void @sprout_abort_match()
+  unreachable
+join_11:
+  %t$12 = phi i64 [%t$16, %arm_0_11]
+  br label %join_6
+arm_1_6:
+  call void @sprout_abort_match()
+  unreachable
+join_6:
+  %t$7 = phi i64 [%t$12, %join_11]
+  br label %join_3
+arm_1_3:
+  call void @sprout_abort_match()
+  unreachable
+join_3:
+  %t$4 = phi i64 [%t$7, %join_6]
+  ret i64 %t$4
+}
+
+define i64 @stdlib.math.to_int(i64 %x) {
+entry:
+  %t$0 = call i64 @stdlib.math.truncate(i64 %x)
+  br label %arm_0_1
+arm_0_1:
+  %t$3 = call i64 @stdlib.math.is_nan(i64 %x)
+  %t$47 = trunc i64 %t$3 to i1
+  br i1 %t$47, label %then_4, label %else_4
+then_4:
+  %t$6 = call i64 @sprout_alloc_obj(i64 0, i64 0)
+  br label %join_4
+else_4:
+  %t$7 = load i64, ptr @stdlib.math.two63
+  %t$8$fa = bitcast i64 %t$0 to double
+  %t$8$fb = bitcast i64 %t$7 to double
+  %t$8 = fcmp oge double %t$8$fa, %t$8$fb
+  %t$9 = zext i1 %t$8 to i64
+  %t$46 = trunc i64 %t$9 to i1
+  br i1 %t$46, label %then_10, label %else_10
+then_10:
+  %t$12 = call i64 @sprout_alloc_obj(i64 0, i64 0)
+  br label %join_10
+else_10:
+  %t$13 = bitcast double 0.0 to i64
+  %t$14 = load i64, ptr @stdlib.math.two63
+  %t$15$la = bitcast i64 %t$13 to double
+  %t$15$lb = bitcast i64 %t$14 to double
+  %t$15$fr = fsub double %t$15$la, %t$15$lb
+  %t$15 = bitcast double %t$15$fr to i64
+  %t$16$fa = bitcast i64 %t$0 to double
+  %t$16$fb = bitcast i64 %t$15 to double
+  %t$16 = fcmp olt double %t$16$fa, %t$16$fb
+  %t$17 = zext i1 %t$16 to i64
+  %t$45 = trunc i64 %t$17 to i1
+  br i1 %t$45, label %then_18, label %else_18
+then_18:
+  %t$20 = call i64 @sprout_alloc_obj(i64 0, i64 0)
+  br label %join_18
+else_18:
+  %t$21 = bitcast double 0.0 to i64
+  %t$22 = load i64, ptr @stdlib.math.two63
+  %t$23$la = bitcast i64 %t$21 to double
+  %t$23$lb = bitcast i64 %t$22 to double
+  %t$23$fr = fsub double %t$23$la, %t$23$lb
+  %t$23 = bitcast double %t$23$fr to i64
+  %t$24$fa = bitcast i64 %t$0 to double
+  %t$24$fb = bitcast i64 %t$23 to double
+  %t$24 = fcmp oeq double %t$24$fa, %t$24$fb
+  %t$25 = zext i1 %t$24 to i64
+  %t$44 = trunc i64 %t$25 to i1
+  br i1 %t$44, label %then_26, label %else_26
+then_26:
+  %t$28 = call i64 @stdlib.math.min_int()
+  %t$29 = call i64 @sprout_alloc_obj(i64 1, i64 1)
+  %t$29$ptr = inttoptr i64 %t$29 to ptr
+  %t$29$f0 = getelementptr i64, ptr %t$29$ptr, i64 0
+  store i64 %t$28, ptr %t$29$f0
+  br label %join_26
+else_26:
+  %t$30 = bitcast double 0.0 to i64
+  %t$31$fa = bitcast i64 %t$0 to double
+  %t$31$fb = bitcast i64 %t$30 to double
+  %t$31 = fcmp olt double %t$31$fa, %t$31$fb
+  %t$32 = zext i1 %t$31 to i64
+  %t$43 = trunc i64 %t$32 to i1
+  br i1 %t$43, label %then_33, label %else_33
+then_33:
+  %t$35 = add i64 0, 0
+  %t$36 = bitcast double 0.0 to i64
+  %t$37$la = bitcast i64 %t$36 to double
+  %t$37$lb = bitcast i64 %t$0 to double
+  %t$37$fr = fsub double %t$37$la, %t$37$lb
+  %t$37 = bitcast double %t$37$fr to i64
+  %t$38 = call i64 @stdlib.math.magnitude_to_int(i64 %t$37)
+  %t$39 = sub i64 %t$35, %t$38
+  %t$40 = call i64 @sprout_alloc_obj(i64 1, i64 1)
+  %t$40$ptr = inttoptr i64 %t$40 to ptr
+  %t$40$f0 = getelementptr i64, ptr %t$40$ptr, i64 0
+  store i64 %t$39, ptr %t$40$f0
+  br label %join_33
+else_33:
+  %t$41 = call i64 @stdlib.math.magnitude_to_int(i64 %t$0)
+  %t$42 = call i64 @sprout_alloc_obj(i64 1, i64 1)
+  %t$42$ptr = inttoptr i64 %t$42 to ptr
+  %t$42$f0 = getelementptr i64, ptr %t$42$ptr, i64 0
+  store i64 %t$41, ptr %t$42$f0
+  br label %join_33
+join_33:
+  %t$34 = phi i64 [%t$40, %then_33], [%t$42, %else_33]
+  br label %join_26
+join_26:
+  %t$27 = phi i64 [%t$29, %then_26], [%t$34, %join_33]
+  br label %join_18
+join_18:
+  %t$19 = phi i64 [%t$20, %then_18], [%t$27, %join_26]
+  br label %join_10
+join_10:
+  %t$11 = phi i64 [%t$12, %then_10], [%t$19, %join_18]
+  br label %join_4
+join_4:
+  %t$5 = phi i64 [%t$6, %then_4], [%t$11, %join_10]
+  br label %join_1
+arm_1_1:
+  call void @sprout_abort_match()
+  unreachable
+join_1:
+  %t$2 = phi i64 [%t$5, %join_4]
+  ret i64 %t$2
+}
+
+define i64 @stdlib.math.to_int_or(i64 %x, i64 %fallback) {
+entry:
+  %t$0$st = call { i64, i64 } @stdlib.math.to_int_worker(i64 %x)
+  %t$0 = extractvalue { i64, i64 } %t$0$st, 0
+  %t$1 = extractvalue { i64, i64 } %t$0$st, 1
+  br label %arm_0_2
+arm_0_2:
+  %t$4 = add i64 0, 1
+  %t$5 = icmp eq i64 %t$0, %t$4
+  br i1 %t$5, label %body_0_2, label %arm_1_2
+body_0_2:
+  br label %join_2
+arm_1_2:
+  %t$6 = add i64 0, 0
+  %t$7 = icmp eq i64 %t$0, %t$6
+  br i1 %t$7, label %body_1_2, label %arm_2_2
+body_1_2:
+  br label %join_2
+arm_2_2:
+  call void @sprout_abort_match()
+  unreachable
+join_2:
+  %t$3 = phi i64 [%t$1, %body_0_2], [%fallback, %body_1_2]
+  ret i64 %t$3
 }
 
 define i64 @stdlib.math.exp_scale(i64 %y, i64 %ki) {
@@ -16004,6 +16270,135 @@ wrepack_next_23:
   unreachable
 }
 
+define { i64, i64 } @stdlib.math.to_int_worker(i64 %x) {
+entry:
+  %t$0 = call i64 @stdlib.math.truncate(i64 %x)
+  br label %arm_0_1
+arm_0_1:
+  %t$3 = call i64 @stdlib.math.is_nan(i64 %x)
+  %t$47 = trunc i64 %t$3 to i1
+  br i1 %t$47, label %then_4, label %else_4
+then_4:
+  %t$6 = call i64 @sprout_alloc_obj(i64 0, i64 0)
+  br label %join_4
+else_4:
+  %t$7 = load i64, ptr @stdlib.math.two63
+  %t$8$fa = bitcast i64 %t$0 to double
+  %t$8$fb = bitcast i64 %t$7 to double
+  %t$8 = fcmp oge double %t$8$fa, %t$8$fb
+  %t$9 = zext i1 %t$8 to i64
+  %t$46 = trunc i64 %t$9 to i1
+  br i1 %t$46, label %then_10, label %else_10
+then_10:
+  %t$12 = call i64 @sprout_alloc_obj(i64 0, i64 0)
+  br label %join_10
+else_10:
+  %t$13 = bitcast double 0.0 to i64
+  %t$14 = load i64, ptr @stdlib.math.two63
+  %t$15$la = bitcast i64 %t$13 to double
+  %t$15$lb = bitcast i64 %t$14 to double
+  %t$15$fr = fsub double %t$15$la, %t$15$lb
+  %t$15 = bitcast double %t$15$fr to i64
+  %t$16$fa = bitcast i64 %t$0 to double
+  %t$16$fb = bitcast i64 %t$15 to double
+  %t$16 = fcmp olt double %t$16$fa, %t$16$fb
+  %t$17 = zext i1 %t$16 to i64
+  %t$45 = trunc i64 %t$17 to i1
+  br i1 %t$45, label %then_18, label %else_18
+then_18:
+  %t$20 = call i64 @sprout_alloc_obj(i64 0, i64 0)
+  br label %join_18
+else_18:
+  %t$21 = bitcast double 0.0 to i64
+  %t$22 = load i64, ptr @stdlib.math.two63
+  %t$23$la = bitcast i64 %t$21 to double
+  %t$23$lb = bitcast i64 %t$22 to double
+  %t$23$fr = fsub double %t$23$la, %t$23$lb
+  %t$23 = bitcast double %t$23$fr to i64
+  %t$24$fa = bitcast i64 %t$0 to double
+  %t$24$fb = bitcast i64 %t$23 to double
+  %t$24 = fcmp oeq double %t$24$fa, %t$24$fb
+  %t$25 = zext i1 %t$24 to i64
+  %t$44 = trunc i64 %t$25 to i1
+  br i1 %t$44, label %then_26, label %else_26
+then_26:
+  %t$28 = call i64 @stdlib.math.min_int()
+  %t$29 = call i64 @sprout_alloc_obj(i64 1, i64 1)
+  %t$29$ptr = inttoptr i64 %t$29 to ptr
+  %t$29$f0 = getelementptr i64, ptr %t$29$ptr, i64 0
+  store i64 %t$28, ptr %t$29$f0
+  br label %join_26
+else_26:
+  %t$30 = bitcast double 0.0 to i64
+  %t$31$fa = bitcast i64 %t$0 to double
+  %t$31$fb = bitcast i64 %t$30 to double
+  %t$31 = fcmp olt double %t$31$fa, %t$31$fb
+  %t$32 = zext i1 %t$31 to i64
+  %t$43 = trunc i64 %t$32 to i1
+  br i1 %t$43, label %then_33, label %else_33
+then_33:
+  %t$35 = add i64 0, 0
+  %t$36 = bitcast double 0.0 to i64
+  %t$37$la = bitcast i64 %t$36 to double
+  %t$37$lb = bitcast i64 %t$0 to double
+  %t$37$fr = fsub double %t$37$la, %t$37$lb
+  %t$37 = bitcast double %t$37$fr to i64
+  %t$38 = call i64 @stdlib.math.magnitude_to_int(i64 %t$37)
+  %t$39 = sub i64 %t$35, %t$38
+  %t$40 = call i64 @sprout_alloc_obj(i64 1, i64 1)
+  %t$40$ptr = inttoptr i64 %t$40 to ptr
+  %t$40$f0 = getelementptr i64, ptr %t$40$ptr, i64 0
+  store i64 %t$39, ptr %t$40$f0
+  br label %join_33
+else_33:
+  %t$41 = call i64 @stdlib.math.magnitude_to_int(i64 %t$0)
+  %t$42 = call i64 @sprout_alloc_obj(i64 1, i64 1)
+  %t$42$ptr = inttoptr i64 %t$42 to ptr
+  %t$42$f0 = getelementptr i64, ptr %t$42$ptr, i64 0
+  store i64 %t$41, ptr %t$42$f0
+  br label %join_33
+join_33:
+  %t$34 = phi i64 [%t$40, %then_33], [%t$42, %else_33]
+  br label %join_26
+join_26:
+  %t$27 = phi i64 [%t$29, %then_26], [%t$34, %join_33]
+  br label %join_18
+join_18:
+  %t$19 = phi i64 [%t$20, %then_18], [%t$27, %join_26]
+  br label %join_10
+join_10:
+  %t$11 = phi i64 [%t$12, %then_10], [%t$19, %join_18]
+  br label %join_4
+join_4:
+  %t$5 = phi i64 [%t$6, %then_4], [%t$11, %join_10]
+  br label %join_1
+arm_1_1:
+  call void @sprout_abort_match()
+  unreachable
+join_1:
+  %t$2 = phi i64 [%t$5, %join_4]
+  %t$48 = call i64 @sprout_tag(i64 %t$2)
+  %t$49 = add i64 0, 0
+  %t$50 = icmp eq i64 %t$48, %t$49
+  br i1 %t$50, label %wrepack_hit_49, label %wrepack_next_49
+wrepack_hit_49:
+  %t$52$r0 = insertvalue { i64, i64 } undef, i64 %t$48, 0
+  %t$52$r1 = insertvalue { i64, i64 } %t$52$r0, i64 0, 1
+  ret { i64, i64 } %t$52$r1
+wrepack_next_49:
+  %t$53 = add i64 0, 1
+  %t$54 = icmp eq i64 %t$48, %t$53
+  br i1 %t$54, label %wrepack_hit_53, label %wrepack_next_53
+wrepack_hit_53:
+  %t$55 = call i64 @sprout_field(i64 %t$2, i64 0)
+  %t$56$r0 = insertvalue { i64, i64 } undef, i64 %t$48, 0
+  %t$56$r1 = insertvalue { i64, i64 } %t$56$r0, i64 %t$55, 1
+  ret { i64, i64 } %t$56$r1
+wrepack_next_53:
+  call void @sprout_abort_match()
+  unreachable
+}
+
 define { i64, i64 } @vec_get_worker(i64 %index, i64 %vec) {
 entry:
   %t$0 = call i64 @sprout_field(i64 %vec, i64 0)
@@ -16162,6 +16557,13 @@ entry:
   %t$67$fr = fneg double %t$67$fa
   %t$67 = bitcast double %t$67$fr to i64
   store i64 %t$67, ptr @stdlib.math.neg_zero
+  %t$68 = load i64, ptr @stdlib.math.two64
+  %t$69 = bitcast double 2.0 to i64
+  %t$70$la = bitcast i64 %t$68 to double
+  %t$70$lb = bitcast i64 %t$69 to double
+  %t$70$fr = fdiv double %t$70$la, %t$70$lb
+  %t$70 = bitcast double %t$70$fr to i64
+  store i64 %t$70, ptr @stdlib.math.two63
   ret void
 }
 
