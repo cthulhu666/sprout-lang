@@ -56,6 +56,16 @@ Use commit messages that explain intent:
 
 **Seed gate** — `scripts/seed_gate.sh`, wired as a PreToolUse Bash hook. Intercepts `git commit` and blocks if `stdlib/compiler/*.sprout` or `stdlib/*.sprout` is staged without a refreshed `bootstrap/compile_driver.ll`. Bypass (when IR is genuinely unchanged): run `just verify-bootstrap-fixed-point` then `just seed-fp-ack`.
 
+> **Caveat — `just seed-stale` and CI answer different questions, and a comment-only edit splits them.** Three checks are easy to run together and are not the same thing:
+>
+> | check | compares | run by |
+> |---|---|---|
+> | `scripts/seed_gate.sh` (commit hook) | staged tree hash vs `.git/seed-fp-ack` | local `git commit` |
+> | `just seed-stale` | `shasum` of `stdlib/compiler/*.sprout` vs the `; seed-fingerprint:` line at the top of the seed | nothing automatic |
+> | `just verify-bootstrap-fixed-point` | the re-emitted IR is byte-identical | **CI** (`.github/workflows/ci.yml`) |
+>
+> Edit only a comment in a compiler source and the source bytes change while the emitted IR does not, so `seed-stale` reports STALE while the fixed point holds. **CI runs only the fixed-point check, so a red `seed-stale` is not evidence CI will fail** — and `seed-stale`'s own message says "Run: just refresh-seed", which will send you through a full reseed you did not need. For an IR-unchanged edit the bypass above (verify, then ack) is the correct path; reseed when you want the fingerprint line back in sync, not because the fixed point demands it. Note the commit hook compares *tree hashes*, not fingerprints: `just seed-fp-ack` must be its own step with nothing touching the index between it and the commit, or the ack goes stale and the hook blocks for a reason unrelated to the seed.
+
 > **Caveat — a new prelude `extern fn` is NOT an IR-unchanged edit.** `ir_lowering.lower_extern_decls` emits a `declare` for *every* bundled prelude extern, and `compile_driver` bundles the prelude, so adding one `extern fn` to `stdlib/prelude.sprout` adds one `declare` line to `bootstrap/compile_driver.ll`. `verify-bootstrap-fixed-point` will break; use a full `just refresh-seed` (delete the stale stage-1 binary first), **not** the `seed-fp-ack` bypass — even though `stdlib/compiler/` was untouched. No 2-step bootstrap is needed (no parser/compiler-source change; the seed diff is purely the additive declare line).
 
 Workflow:
