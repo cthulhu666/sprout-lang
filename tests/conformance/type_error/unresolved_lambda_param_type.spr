@@ -1,0 +1,10 @@
+# A LAMBDA parameter annotation is the one type position that does not live in a
+# declaration head — `LambdaExpr` is the only expression node that reaches a
+# TypeExpr at all. Rejecting the annotation on a named function while accepting
+# the identical one on a lambda would leave a hole precisely where a reader
+# assumes the rule is uniform, so function bodies are walked too.
+fn apply_it(f: Int -> Int) -> Int = f(5)
+
+fn g() -> Int = apply_it(\ (x: Nope) -> x + 1)
+
+fn main() -> Unit !{IO} = print(to_string(g()))

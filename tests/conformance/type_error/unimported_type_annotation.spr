@@ -1,0 +1,16 @@
+# The shape the bug report actually hit: the module IS imported, but only for a
+# value — the TYPE was left out of the import list. `stdlib.test` is imported for
+# `check_true`; `TestState` is not, so the annotation below names a type that is
+# declared in the bundle but not in scope here.
+#
+# This is the case that hides, because the file constructs no value of the type
+# — nothing but the annotation mentions it. Constructing one locally gives a good
+# diagnostic already (`Unknown record type or field`); annotating a value that
+# arrives from another module gave none.
+#
+# Since the name IS declared somewhere, the error can say where it comes from.
+import stdlib.test (check_true)
+
+fn describe(s: TestState) -> String = "state"
+
+fn main() -> Unit !{IO} = print("unreachable")

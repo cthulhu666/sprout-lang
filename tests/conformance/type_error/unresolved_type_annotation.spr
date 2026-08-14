@@ -1,0 +1,11 @@
+# An uppercase type name that nothing declares must be rejected AT THE
+# ANNOTATION, not admitted as a fresh opaque type.
+#
+# Before the fix this compiled cleanly and exited 0: `T` became a phantom type
+# distinct from every real one. The mistake surfaced only if the phantom later
+# met a real type at a call site, as a mismatch between two spellings that look
+# identical (`T vs probes.hastype.T`) — and only then, often thousands of lines
+# away from the annotation that caused it.
+fn ident(t: T) -> T = t
+
+fn main() -> Unit !{IO} = print("unreachable")
