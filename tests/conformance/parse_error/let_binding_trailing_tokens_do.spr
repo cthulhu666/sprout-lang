@@ -1,0 +1,15 @@
+module main
+
+# A `let … in` step whose binding line carries tokens past the end of the binding.
+# The layout scan hands the whole line to the binding parser, which stops after
+# `1`; everything after it used to be discarded in silence, so this compiled at
+# exit 0 and the `print` call never appeared in the emitted IR — a live statement
+# deleted with no diagnostic.
+#
+# The identical line WITHOUT the `in` is rejected by the do-step full-consumption
+# backstop ("Unexpected token after the end of a do step"), so accepting it here
+# was the same defect the backstop exists to prevent.
+fn main() -> Unit !{IO} =
+  do
+    let a = 1 print ("dropped")
+    in print("body " ++ to_string(a))
