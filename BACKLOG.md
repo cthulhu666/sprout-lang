@@ -3282,6 +3282,17 @@ op-classification already in place.
   incoherence therefore remains reachable by writing the ambiguous shape with `++` instead of a
   user class method. Fix: find the class-var argument, resolve it under the final substitution,
   and reuse `forwarded_tdict_for_tyvar`'s equivalence match; then pass `Just(t)` at that site.
+  Measured NOT to be an over-rejection risk in the other direction: input-position named-method
+  forwarding (`mshow(x)` directly, inside a HOF lambda, and through a container) all still
+  resolve, because `find_fwd_tdict_in_args` catches them before the gated scan.
+- [ ] `P3` **`extern fn str_slice(s: String, from: Int, to: Int)` misnames its third parameter.**
+  The third argument is a **length**, not an end index — the runtime signature is
+  `str_slice(long long s, long long start, long long length)` and `prelude.sprout` documents it
+  inline, but the `extern fn` declaration itself says `to`. Reading the declaration rather than
+  the comment produces a slice that is wrong by exactly `start` characters, which is silent
+  whenever the caller then compares the result against something (the marker-key parser in the
+  ambiguous-class-tyvar fix lost a session to it). Rename the parameter to `len`. Note this is a
+  `stdlib/prelude.sprout` edit, so it needs its own reseed cycle even though no IR changes.
 - [ ] `P2` **Pattern-variable names share the fresh-tyvar namespace (`infer.sprout:2050`)** (fundamentals review, static finding, not yet exercised at runtime). Pattern-bound variable names and the inferencer's fresh `t0`/`t1`/… type-variable names are drawn from the same namespace with no collision guard; a match-pattern binding whose name happens to collide with a fresh tyvar could shadow, or be shadowed by, the wrong entity during unification/substitution. Not yet triggered by a known repro — flagged as a latent hazard by the 2026-07-03 fundamentals code review among the "high/static (not yet run)" findings, adjacent to this section's tyvar-identity work (item 4). Needs a minimal repro to confirm reachability, then either a namespace separator (reserve a prefix for fresh tyvars, distinct from any user-writable pattern-variable name) or a rename pass before pattern binding. Full findings: `docs/fundamentals-code-review-handoff-2026-07-03.md`.
 
 #### Record type-arg concretization at dispatch (surfaced by deriving-on-records)
