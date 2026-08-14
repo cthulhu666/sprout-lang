@@ -103,13 +103,22 @@ export fn parse_import_line(line: String) -> Maybe ImportSpec =
 # uses. The two must consume the same number of lines, and a private helper on
 # each side would be free to drift; the failure would be silent, showing up as
 # dropped imports or a fragment handed to the parser.
+#
+# Every line is stripped of its comment before being spliced, INCLUDING the first
+# — the join starts from that line, so a comment trailing it lands mid-string
+# just as one on a continuation line does. Splicing verbatim left a `#` in the
+# middle of the joined text and `parse_import_line`'s name scan stops there, so a
+# comment anywhere in the list dropped every name below it, surfacing later and
+# elsewhere as `Unknown variable`. The depth scan already looks past comments;
+# this only brings the text into line with it.
 fn join_wrapped_import(joined: String, lines: List String, depth: Int) -> (String, List String) =
   if depth <= 0 then (joined, lines)
   else
     match lines with
     | Nil -> (joined, Nil)
     | Cons l rest ->
-        join_wrapped_import(joined ++ " " ++ l, rest, depth + source.line_paren_delta(l))
+        join_wrapped_import(joined ++ " " ++ source.strip_line_comment(l), rest,
+                            depth + source.line_paren_delta(l))
 
 fn collect_imports_from_lines(lines: List String, acc: List ImportSpec) -> List ImportSpec =
   match lines with
@@ -118,7 +127,8 @@ fn collect_imports_from_lines(lines: List String, acc: List ImportSpec) -> List 
       if str_starts_with(line, "module ") || line == "" || str_starts_with(line, "#") then
         collect_imports_from_lines(rest, acc)
       else if str_starts_with(line, "import ") then
-        match join_wrapped_import(line, rest, source.line_paren_delta(line)) with
+        match join_wrapped_import(source.strip_line_comment(line), rest,
+                                  source.line_paren_delta(line)) with
         | (joined, remaining) ->
             match parse_import_line(joined) with
             | Nothing -> collect_imports_from_lines(remaining, acc)

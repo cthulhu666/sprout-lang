@@ -8,6 +8,19 @@ import stdlib.math (pi,
 # into this import's list and drop whatever it declared. Comment lines have
 # broken import collection before, which is why this is pinned.
 import stdlib.string (trim)  # a comment with an unbalanced ( paren
+# A comment INSIDE an open list is a different case from the one above, which
+# sits on an already-CLOSED import and so never reaches the joiner at all. The
+# lines of a wrapped list are spliced into one string before its names are
+# scanned, and that scan stops dead at the first `#` — so a comment anywhere in
+# the list dropped every name after it, surfacing far away as `Unknown variable`.
+import stdlib.math (abs,
+                    # a comment line inside the list, with an unbalanced ( too
+                    ceiling,
+                    truncate)
+# The same hazard on the FIRST line of an open list: the joined string starts as
+# that line, so its trailing comment lands in the MIDDLE of the splice.
+import stdlib.math (exp,  # trailing comment while the list is still open
+                    is_nan)
 
 # A parenthesised import list may span lines.
 #
@@ -32,5 +45,18 @@ fn main() -> Unit !{IO} =
     assert_true(state, "a name from a third line resolves", floor(2.7) == 2.0)
     assert_true(state, "the assert helpers themselves came from a wrapped list", true)
     assert_true(state, "a `(` in a trailing comment is not counted", trim("  x  ") == "x")
+
+    # Names on BOTH sides of a comment line inside an open list must resolve. The
+    # name before it proves the splice still works; the two after it are the ones
+    # the comment used to swallow.
+    assert_true(state, "a name before a comment line in the list resolves", abs(-2.0) == 2.0)
+    assert_true(state, "a name after a comment line in the list resolves", ceiling(2.1) == 3.0)
+    assert_true(state, "a later name after a comment line resolves", truncate(-2.7) == -2.0)
+
+    # And past a comment trailing the list's FIRST line.
+    assert_true(state, "a name before a first-line trailing comment resolves", exp(0.0) == 1.0)
+    # Spelled `== false` rather than with a prefix `!`: `just fmt` currently
+    # rewrites `!f(x)` to `! f (x)` and eats the preceding space (BACKLOG P3).
+    assert_true(state, "a name after a first-line trailing comment resolves", is_nan(1.0) == false)
 
     summary(state)
