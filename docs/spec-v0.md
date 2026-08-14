@@ -295,6 +295,14 @@ continuation lines indented under it). Trailing tokens are an error — they use
 to be discarded in silence, so a second statement written on the same line as
 the first simply never ran.
 
+**Where a step ends.** A step runs up to the next line that both starts at the
+block's indentation column and begins with a token that can head an expression:
+an identifier, a literal of any kind, an opening `(`/`[`/`{`, a `\` lambda, a
+prefix `-` or `!`, a backtick template, or one of `let`/`if`/`match`/`do`/
+`true`/`false`. A line indented further — or one starting at the block column
+with a token that cannot head an expression, such as an operator or a `|` match
+arm — continues the step above it.
+
 ### 5.2.2 Refutable binds in `do` blocks *(experimental)*
 
 Inside a `do` block, both the effectful bind (`<pattern> <- <e>`) and the pure
