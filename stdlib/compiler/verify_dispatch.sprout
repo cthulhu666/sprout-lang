@@ -512,12 +512,26 @@ fn bind_params(params: List ast.Param, locals: Dict Bool) -> Dict Bool =
 
 # Every name a pattern binds. Literal and wildcard patterns bind nothing; a
 # constructor or tuple pattern binds whatever its sub-patterns do.
+#
+# Every variant is spelled out rather than defaulted, so a new binding-capable
+# pattern is a compile error here instead of a silent `Nil`. Answering `Nil` for a
+# pattern that does bind leaves the name looking unbound to `check_call`, which
+# then reads a call to that local as a call to the class method of the same name
+# — the defect this pass was extended to prevent. The codebase's other four
+# answers to the same question (`ast_to_ir.pattern_names`, `dce.pat_binds`,
+# `linear_check.pattern_all_binders`, `pattern_linear_binders`) are exhaustive for
+# this reason; this one was written with a catch-all and is now brought in line.
 fn pattern_bound_names(pat: ast.Pattern) -> List String =
   match pat with
   | ast.VarPattern name _ -> [name]
   | ast.ConstructorPattern _ subpats _ -> pattern_list_bound_names(subpats)
   | ast.TuplePattern subpats _ -> pattern_list_bound_names(subpats)
-  | _ -> Nil
+  | ast.WildcardPattern _ -> Nil
+  | ast.IntPattern _ _ -> Nil
+  | ast.BoolPattern _ _ -> Nil
+  | ast.StringPattern _ _ -> Nil
+  | ast.CharPattern _ _ -> Nil
+  | ast.UnitPattern _ -> Nil
 
 fn pattern_list_bound_names(pats: List ast.Pattern) -> List String =
   match pats with
