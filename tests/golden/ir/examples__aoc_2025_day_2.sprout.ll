@@ -9,7 +9,8 @@ declare i64 @char_to_string(i64)
 declare i64 @sprout_gc_push_i64_root(ptr)
 declare i64 @sprout_gc_pop_roots(i64)
 declare i64 @sprout_gc_register_i64_root(ptr)
-declare i64 @sprout_alloc_closure_env(i64)
+declare i64 @sprout_alloc_closure(i64, i64)
+declare void @sprout_closure_arity_check(i64, i64)
 declare i64 @sprout_alloc_tuple_blob(i64)
 declare i64 @sprout_register_ctor(i64, ptr, i64, ptr)
 declare i64 @sprout_tag(i64)
@@ -395,6 +396,7 @@ else_2:
   %t$21 = alloca i64
   store i64 %pred, ptr %t$21
   %t$22 = call i64 @sprout_gc_push_i64_root(ptr %t$21)
+  call void @sprout_closure_arity_check(i64 %pred, i64 1)
   %t$5$env_ptr = inttoptr i64 %pred to ptr
   %t$5$code = load ptr, ptr %t$5$env_ptr
   %t$5 = call i64 (i64, i64) %t$5$code(i64 %pred, i64 %lo)
@@ -507,7 +509,7 @@ entry:
   %t$8 = alloca i64
   store i64 %t$0, ptr %t$8
   %t$9 = call i64 @sprout_gc_push_i64_root(ptr %t$8)
-  %t$1 = call i64 @sprout_alloc_closure_env(i64 8)
+  %t$1 = call i64 @sprout_alloc_closure(i64 8, i64 1)
   %t$1$raw = inttoptr i64 %t$1 to ptr
   store ptr @__sprout_ir_eta_is_repeated_twice_0, ptr %t$1$raw
   %t$10 = alloca i64
@@ -519,7 +521,7 @@ entry:
   %t$13 = alloca i64
   store i64 %t$3, ptr %t$13
   %t$14 = call i64 @sprout_gc_push_i64_root(ptr %t$13)
-  %t$4 = call i64 @sprout_alloc_closure_env(i64 8)
+  %t$4 = call i64 @sprout_alloc_closure(i64 8, i64 1)
   %t$4$raw = inttoptr i64 %t$4 to ptr
   store ptr @__sprout_ir_eta_is_repeated_any_1, ptr %t$4$raw
   %t$15 = alloca i64

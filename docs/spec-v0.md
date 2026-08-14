@@ -408,9 +408,25 @@ Lambda expressions are anonymous functions.
   **compile error** (`'f' expects N arguments, got M`); use a `_`-placeholder partial
   (above) to partially apply. A function whose declared return type is itself a
   function (e.g. `-> Int -> Int`) is not under-application: it is saturated at its own
-  parameter count and returns that function. *(Enforcement covers direct calls to
-  known-arity functions; under-application through a function-typed value is completed
-  by the arity-aware-types follow-up — see `BACKLOG.md`.)*
+  parameter count and returns that function.
+- **Applying a function-typed *value* is checked at run time, not compile time.** A
+  function type does not determine how many arguments one application consumes: a
+  two-parameter lambda `\ (x, y) -> …` and a nested pair of one-parameter lambdas
+  `\x -> \y -> …` both have type `Int -> Int -> Int`. So where the callee is a value
+  rather than a name with a declared arity — a parameter, a `let` binding, an element
+  of a data structure — the compiler cannot decide the question, and the argument count
+  is compared against the value's actual arity when the application runs. A mismatch in
+  either direction **aborts with a diagnostic and a non-zero exit status**; it is never
+  silently completed, and never a partial application. Both spellings below are
+  well-typed, and each is an error for the other's callee:
+
+  ```sprout
+  fn pair_add() -> Int -> Int -> Int = \ (x, y) -> x + y   # one application, two args
+  fn nested_add() -> Int -> Int -> Int = \x -> \y -> x + y # two applications, one each
+  ```
+
+  Making this a *compile* error instead requires function types to carry their arity;
+  that is a follow-up — see `BACKLOG.md`.
 
 **Placeholder partial application.** A bare `_` in a call-argument position is a
 *hole*. A call containing one or more holes desugars, at parse time, to a lambda

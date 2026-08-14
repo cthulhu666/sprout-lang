@@ -1142,7 +1142,7 @@ fn args_have_leading_tdict(args: List typed_ast.TypedExpr) -> Bool =
 # A class-method call whose dispatch dictionary is a fully-resolved CONCRETE instance is
 # lowered to a DIRECT call of the concrete __tc_{Class}_{Type}_{method} fn, dropping the
 # generic __cm_ wrapper and the dead dict-of-eta-closures — no per-call
-# sprout_alloc_closure_env, no wrapper indirection.  The devirtualization analogue of CPR:
+# sprout_alloc_closure, no wrapper indirection.  The devirtualization analogue of CPR:
 # an identity known at compile time should not be rebuilt and dispatched through at run time.
 #
 # The concrete fn takes user args + one dict per the instance's OWN context constraints

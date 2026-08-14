@@ -3,7 +3,7 @@ import stdlib.test (check_eq, run_suite)
 # Concrete-instance devirtualization (docs/scalar-replacement-v0.md, A-full): a class-method call
 # whose dictionary is a fully-resolved concrete instance (no forwarded/polymorphic dict) is lowered
 # to a DIRECT call of the concrete `__tc_{Class}_{Type}_{method}` fn, dropping the runtime dictionary
-# entirely — no `sprout_alloc_closure_env`, no generic `__cm_` wrapper indirection. The optimization
+# entirely — no `sprout_alloc_closure`, no generic `__cm_` wrapper indirection. The optimization
 # is value-NEUTRAL, so these assert the SEMANTICS are unchanged; the IR-shape win (no closure allocs
 # at the concrete site) is checked separately against the emitted IR / smoke shape 09.
 

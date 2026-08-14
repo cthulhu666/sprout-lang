@@ -98,21 +98,21 @@ fn main() -> Unit !{IO} =
     assert_false(state, "T3: capturing IIFE inlines (arc b) — no lifted lambda fn", t3)
 
     # T3b: Arc (b) — the inlined IIFE also allocates NO closure env. Check the
-    # CALL site, not the bare symbol: `@sprout_alloc_closure_env` is always in the
-    # module `declare` preamble, so only `call i64 @sprout_alloc_closure_env`
+    # CALL site, not the bare symbol: `@sprout_alloc_closure` is always in the
+    # module `declare` preamble, so only `call i64 @sprout_alloc_closure`
     # (an actual allocation) distinguishes lift from inline.
     t3b <- translated_ok_ir_contains(
       "fn outer(n: Int) -> Int = (\\x -> x + n)(7)",
-      "call i64 @sprout_alloc_closure_env")
+      "call i64 @sprout_alloc_closure")
     assert_false(state, "T3b: inlined IIFE allocates no closure env (arc b)", t3b)
 
     # T4: A capturing lambda in ARGUMENT position is a genuine value -> it still
-    # lifts and emits sprout_alloc_closure_env (the runtime env+captures heap block).
+    # lifts and emits sprout_alloc_closure (the runtime env+captures heap block).
     # Vehicle: outer IIFE `(\\g -> g(5))` inlines; inner `\\x -> x + n` captures `n`.
     t4 <- translated_ok_ir_contains(
       "fn outer(n: Int) -> Int = (\\g -> g(5))(\\x -> x + n)",
-      "@sprout_alloc_closure_env")
-    assert_true(state, "T4: capturing lambda VALUE calls sprout_alloc_closure_env", t4)
+      "@sprout_alloc_closure")
+    assert_true(state, "T4: capturing lambda VALUE calls sprout_alloc_closure", t4)
 
     # T5: Arc (b) — a plain IIFE `(\\x -> x + 1)(5)` inlines (no lifted function).
     t5 <- translated_ok_ir_contains(

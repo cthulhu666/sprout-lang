@@ -39,7 +39,7 @@ optimization removes the *need* for — the demo is the measurement, not the sco
 
 **Measured cost.** The `terrain_rivers_demo` bake and tree-scatter passes each walk 1024² tiles;
 each `bake_tile` allocates an rgb `(Int,Int,Int)` tuple + the `from_ordinal` typeclass-dispatch
-**dictionary** (two `sprout_alloc_closure_env` envs — the second per-tile allocation; the
+**dictionary** (two `sprout_alloc_closure` envs — the second per-tile allocation; the
 `tile_kind_of`→`from_ordinal` `Maybe` itself is already CPR-unboxed to `{i64,i64}`, so it is *not* the
 box), each `place_tile` a `Maybe` (`tree_for_biome`) + a tuple (`variant_range`). Because the collector is
 non-generational (full-heap mark each cycle, over the resident 1024² grids), this young garbage is

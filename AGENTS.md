@@ -139,7 +139,15 @@ For any non-trivial language change, include:
 
 8. Preferred execution path: `mise exec -- just <task>`
 9. For fast iteration during development, run a single test file directly:
-   `./build/compile_driver_bin_stage1 --emit-ir stdlib_root tests/stdlib/test_foo.spr | clang - runtime/sprout_runtime.c -o /tmp/t && /tmp/t`
+   `./build/compile_driver_bin_stage1 --emit-ir stdlib tests/stdlib/test_foo.spr > /tmp/t.ll && clang /tmp/t.ll runtime/*.c -O2 -o /tmp/t && /tmp/t`
+   Three details this line gets wrong if you shorten it: the root argument is the
+   literal path `stdlib` (`stdlib_root` is the justfile *variable's* name, and passing
+   it verbatim fails with ``builtin `read_file`: prelude: No such file or directory``);
+   the runtime is **three** `.c` files, so `runtime/*.c` — naming only
+   `sprout_runtime.c` link-fails on `_http_park` / `_async_resolve`; and on macOS the
+   link also needs `-framework Security -framework CoreFoundation` (the justfile's
+   `clang_extra`). A test that imports `testsupport.*` needs `just test-file` instead,
+   which sets the package root.
    The full gate is `mise exec -- just test` (required by Definition of Done #5).
 
 ## Directory Conventions

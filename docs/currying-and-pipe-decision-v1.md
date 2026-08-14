@@ -238,6 +238,17 @@ catch-22 class as builtin removal. Suggested PR sequence:
 1. **Safety first:** add the arity field and make under-saturation a *clean panic* (not a build
    of a partial). This kills the Defect #2 segfault immediately and ships value on its own. It is
    the first half of A *and* a valid stopping point if the decision slips.
+
+   > **LANDED 2026-08-14**, and the decision did slip — C-b shipped first, and this step was
+   > skipped on the strength of a wrong sentence in §9a.5 (corrected there). Over-application is
+   > a clean panic too, not just under-saturation; both directions are unchecked without the
+   > field. Implementation note: the arity did **not** need "a header word alongside the code
+   > pointer" as §8.2 proposed. The GC header's `aux` is 50 bits and held only the capture count,
+   > so arity packs beside it the same way `SPROUT_HEAP_OBJ` packs `(tag << 8) | arity` — no
+   > payload slot, no capture reindexing, no size-formula change. The apply-site check is a call
+   > to `sprout_closure_arity_check` rather than inline compare-and-branch: an op that opened a
+   > basic block would leave downstream phis naming the wrong predecessor. Gate:
+   > `just closure-arity-smoke`.
 2. **Complete to A:** replace the panic with the build-partial branch. Full currying lands. The
    pipe's multi-arg special-case is removed in the same PR.
 
@@ -341,11 +352,25 @@ tracks effects) this is unobservable; a user wanting single evaluation binds the
 - It **satisfies "pass partials around"** — `add(_, 3)` is a first-class value you can store,
   pass, and apply anywhere — with *more* flexibility than currying (any position, not just
   left-to-right).
-- It does so with **none of Package A's cost**: no closure-ABI change, no runtime-arity field,
-  no GC-rooting of intermediate partials (§8.4), no new segfault surface. It only ever builds
-  ordinary lambdas, which already work.
+- It does so with **none of Package A's *partial-application* cost**: no PAP construction, no
+  GC-rooting of intermediate partials (§8.4). It only ever builds ordinary lambdas, which
+  already work.
+
+  > **Correction (2026-08-14).** This bullet originally also claimed "no closure-ABI change, no
+  > runtime-arity field, no new segfault surface", and that error cost a shipped wrong-code bug.
+  > C-b is C-a plus placeholders, and §9 states that **C-a also pays for the arity field and the
+  > clean-panic step** — §8.5 PR 1 is common to every package here. What C-b avoids is the
+  > *build-partial* branch, not the field itself. Skipping it left both mismatch directions
+  > unchecked for a function-typed **value**, exactly where the next bullet's promise does not
+  > reach: over-application returned the closure handle reinterpreted as the result type (exit 0,
+  > no diagnostic), and under-application dereferenced a register nothing had written (SIGSEGV).
+  > PR 1 landed 2026-08-14; see `BACKLOG.md` §Compiler / Stdlib Misc.
 - It **keeps C-a's beginner-friendly win**: `add3(1)(2)(3)` and a bare `add3(1)` remain clean
-  arity errors at the call site.
+  arity errors at the call site — but only for a **named** callee, whose declared arity the
+  checker knows. Through a value of the same type the check is a runtime one (§8.5 PR 1), because
+  the type does not carry the arity: `\(x, y) -> …` and `\x -> \y -> …` are both
+  `Int -> Int -> Int`. Making that a compile error too is precisely what C-a's arity-aware types
+  would buy, and is the open question C-b leaves behind.
 - Cost vs. A: no point-free / `andMap` / `<*>` — partials are always written with a visible
   `_`. For Sprout's "explicit, beginner-friendly, safe" identity this is arguably a feature.
 

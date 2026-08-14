@@ -616,6 +616,43 @@ static int sprout_gc_hdrcheck_on(void) {
 #define SPROUT_OBJ_ARITY_MASK ((unsigned long long)0xFFu)
 #define SPROUT_MAX_OBJ_ARITY  255
 
+/* CLOSURE aux packing: low bits hold the capture count, the rest hold the
+ * closure's parameter count (its runtime arity).  Same idiom as OBJ above, and
+ * for the same reason — aux is 50 bits and one field was using all of them.
+ *
+ * The arity is here rather than in a payload slot so the capture slots keep
+ * their indices (1..n_caps) and every size formula stays as it was; the apply
+ * site reads it from the header word at `env - 8`, adjacent to the code pointer
+ * it already loads.
+ *
+ * SYNC WITH stdlib/compiler/ir_lowering.sprout — `lower_closure_arity_load`
+ * reproduces this shift/mask in emitted IR.  Changing the split here without
+ * changing it there silently mis-reads every closure's arity.
+ *
+ * 32 bits of captures is past any reachable program; 18 bits of arity leaves
+ * room far beyond the parameter counts the parser accepts. */
+#define SPROUT_CLOSURE_NCAPS_BITS 32
+#define SPROUT_CLOSURE_NCAPS_MASK ((unsigned long long)0xFFFFFFFFu)
+#define SPROUT_CLOSURE_ARITY_MASK ((unsigned long long)0x3FFFFu)
+
+/* Arity of a closure that may be applied to any number of arguments, so the
+ * apply-site check passes it through.  Used only for the unresolved-dict poison
+ * thunk, whose code pointer panics on apply with a more specific message than an
+ * arity mismatch would give. */
+#define SPROUT_CLOSURE_ARITY_ANY SPROUT_CLOSURE_ARITY_MASK
+
+static inline unsigned long long sprout_closure_aux(unsigned long long n_caps,
+                                                    unsigned long long arity) {
+  return (n_caps & SPROUT_CLOSURE_NCAPS_MASK)
+       | ((arity & SPROUT_CLOSURE_ARITY_MASK) << SPROUT_CLOSURE_NCAPS_BITS);
+}
+static inline unsigned long long sprout_closure_ncaps(unsigned long long aux) {
+  return aux & SPROUT_CLOSURE_NCAPS_MASK;
+}
+static inline unsigned long long sprout_closure_arity_of(unsigned long long aux) {
+  return (aux >> SPROUT_CLOSURE_NCAPS_BITS) & SPROUT_CLOSURE_ARITY_MASK;
+}
+
 static inline uint64_t sprout_hdr_make(SproutHeapKind kind, unsigned long long aux) {
   return (uint64_t)(kind & 0xFF) | ((uint64_t)aux << 14);
 }
@@ -1034,7 +1071,8 @@ static size_t slot_bytes(SproutHeapKind kind, unsigned long long aux) {
        * lineage mode, so mirror that here to stay slot-consistent. */
       payload = (size_t)sprout_obj_alloc_arity((int)(aux & SPROUT_OBJ_ARITY_MASK)) * 8;
       break;
-    case SPROUT_HEAP_CLOSURE: payload = ((size_t)aux + 1) * 8;   break; /* n_caps+1 slots (slot0=code) */
+    case SPROUT_HEAP_CLOSURE: /* n_caps+1 slots (slot0=code); arity shares aux */
+      payload = ((size_t)sprout_closure_ncaps(aux) + 1) * 8;     break;
     case SPROUT_HEAP_VECTOR:  payload = sizeof(VectorVal);       break;
     case SPROUT_HEAP_MAP:     payload = sizeof(BSTNode);         break;
     case SPROUT_HEAP_BYTES:   payload = sizeof(BytesVal);        break;
@@ -1480,22 +1518,61 @@ static long long sprout_make_registered_obj(int arity, long long tag, long long 
   return box_ptr(payload);
 }
 
-long long sprout_alloc_closure_env(long long size) {
-  if (size < 0) tcp_fail("sprout_alloc_closure_env: size must be >= 0");
+long long sprout_alloc_closure(long long size, long long arity) {
+  if (size < 0) tcp_fail("sprout_alloc_closure: size must be >= 0");
+  if (arity < 0) tcp_fail("sprout_alloc_closure: arity must be >= 0");
+  if ((unsigned long long)arity > SPROUT_CLOSURE_ARITY_MASK)
+    tcp_fail("sprout_alloc_closure: arity exceeds the header's arity field");
   sprout_gc_maybe_collect_threshold();
   /* SYNC WITH stdlib/compiler/ir_lowering.sprout IRMkClosure lowering (FIX R4#8):
    *   IR computes size = (n_caps + 1) * 8.
    *   Runtime computes aux_slots = (size / 8) - 1 = n_caps.
    * Any layout change must update both formulas. */
   size_t slots = size == 0 ? 0 : (((size_t)size / sizeof(long long)) - 1);
-  void* out = sprout_gc_alloc_block(SPROUT_HEAP_CLOSURE, (unsigned long long)slots,
-                                    (size_t)size, "sprout_alloc_closure_env: out of memory");
+  void* out = sprout_gc_alloc_block(SPROUT_HEAP_CLOSURE,
+                                    sprout_closure_aux((unsigned long long)slots,
+                                                       (unsigned long long)arity),
+                                    (size_t)size, "sprout_alloc_closure: out of memory");
   if (g_debug_alloc_enabled) g_debug_alloc_closure++;
   /* FIX R4#9: zero-init the env payload to eliminate any window between
    * allocation and the IR-emitted capture stores where GC could observe
    * uninitialized slot values. */
   if (size > 0) memset(out, 0, (size_t)size);
   return (long long)(uintptr_t)out;
+}
+
+/* Guard on every application of a closure VALUE.
+ *
+ * A Sprout function type does not determine its calling convention: `pair_add`
+ * (`\(x, y) -> …`) and `nested_add` (`\x -> \y -> …`) share the type
+ * `Int -> Int -> Int` but are one two-parameter closure and two one-parameter
+ * ones.  So a call site applying a value of that type cannot know statically how
+ * many arguments one application may consume, and before this guard it simply
+ * called with whatever it had: a surplus argument was dropped and the closure
+ * handle came back reinterpreted as the result type (silent wrong answer, exit
+ * 0), while a missing one left the callee reading a register nothing wrote
+ * (SIGSEGV).  Calls to a statically-known callee are checked at compile time and
+ * never reach here.
+ *
+ * The wording mirrors infer.sprout's compile-time arity error on purpose — the
+ * same mistake should read the same way whichever side catches it.  It carries
+ * no colon deliberately: tcp_fail treats the text before the first colon as a
+ * builtin name, and this failure belongs to the user's call, not to a builtin. */
+void sprout_closure_arity_check(long long handle, long long n_args) {
+  void* payload = (void*)(uintptr_t)handle;
+  if (payload == NULL) tcp_fail("applied a null function value");
+  unsigned long long aux = sprout_hdr_aux(sprout_hdr_of(payload));
+  unsigned long long arity = sprout_closure_arity_of(aux);
+  if (arity == SPROUT_CLOSURE_ARITY_ANY) return;
+  if ((long long)arity == n_args) return;
+  {
+    char msg[224];
+    snprintf(msg, sizeof msg,
+             "this function value expects %llu arguments, got %lld — if it "
+             "returns a function, apply the rest in a separate call, as f(…)(…)",
+             arity, n_args);
+    tcp_fail(msg);
+  }
 }
 
 long long sprout_gc_register_i64_root(void* slot) {
@@ -1847,7 +1924,8 @@ static size_t sprout_heap_child_count_payload(void* payload) {
   unsigned long long aux = sprout_hdr_aux(h);
   switch (kind) {
     case SPROUT_HEAP_OBJ:     return (size_t)(aux & SPROUT_OBJ_ARITY_MASK);  /* arity */
-    case SPROUT_HEAP_CLOSURE: return (size_t)aux;                /* n_caps (slot 0 skipped) */
+    case SPROUT_HEAP_CLOSURE: /* n_caps (slot 0 skipped); arity shares aux */
+      return (size_t)sprout_closure_ncaps(aux);
     case SPROUT_HEAP_VECTOR:  return (size_t)((VectorVal*)payload)->len;
     case SPROUT_HEAP_MAP:     return 3;
     case SPROUT_HEAP_BYTES:   return 0;

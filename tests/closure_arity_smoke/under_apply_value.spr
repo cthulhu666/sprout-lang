@@ -1,0 +1,29 @@
+module main
+
+# Under-application of a function-typed VALUE must panic cleanly.
+#
+# `add2` and `nested()` have the SAME type, `Int -> Int -> Int`, and DIFFERENT
+# runtime arities: `add2` takes both arguments in one application, `nested()`
+# returns closures that take one at a time. The type cannot tell them apart, so a
+# call site applying a value of this type has no static way to know how many
+# arguments one application may consume — which is why the closure has to carry
+# its arity and the apply site has to check it.
+#
+# Without the check this call passes one argument to a two-parameter closure; the
+# callee reads a register that was never written and dereferences it. SIGSEGV.
+fn add2(x: Int, y: Int) -> Int = x + y
+
+fn nested() -> Int -> Int -> Int = \x -> \y -> x + y
+
+# argv is empty when the binary runs with no arguments, so the branch is decided
+# at RUNTIME — as in `div_by_zero.spr`, neither the Sprout compiler nor clang can
+# fold it away and recover the callee statically. With no arguments this yields
+# `add2`, the two-parameter closure.
+fn pick(args: List String) -> Int -> Int -> Int =
+  if list_length(args) == 0 then add2 else nested()
+
+fn main() -> Unit !{IO} =
+  do
+    args <- argv_all()
+    let f = pick(args)
+    print(int_to_string(f(1)(2)))

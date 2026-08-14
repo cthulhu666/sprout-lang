@@ -1,0 +1,35 @@
+module main
+
+# POSITIVE CONTROL for the two fixtures beside this one.
+#
+# Both of them assert that a mismatched application panics. On their own, a
+# compiler that panicked on EVERY closure application would pass them — so this
+# fixture pins the other side: each legal spelling, applied through a runtime-
+# chosen value the compiler cannot resolve statically, must still run and produce
+# the right answer.
+#
+# The two spellings are legal for different reasons, and both must survive:
+#   - `add2` is one two-parameter closure  -> one application of two arguments
+#   - `nested()` is nested one-parameter closures -> two applications of one
+fn add2(x: Int, y: Int) -> Int = x + y
+
+fn nested() -> Int -> Int -> Int = \x -> \y -> x + y
+
+fn pick_nary(args: List String) -> Int -> Int -> Int =
+  if list_length(args) == 0 then add2 else nested()
+
+fn pick_curried(args: List String) -> Int -> Int -> Int =
+  if list_length(args) == 0 then nested() else add2
+
+# A function-typed PARAMETER: the arity is invisible at this definition site, so
+# this is the shape that no call-site check on a named callee can ever cover.
+fn feed_saturated(g: Int -> Int -> Int) -> Int = g(1, 2)
+
+fn main() -> Unit !{IO} =
+  do
+    args <- argv_all()
+    let nary = pick_nary(args)
+        curried = pick_curried(args)
+    print(int_to_string(nary(1, 2)))
+    print(int_to_string(curried(1)(2)))
+    print(int_to_string(feed_saturated(add2)))

@@ -126,7 +126,8 @@ repl_type_of_in_source
 split_words
 sprout_abort_match
 sprout_alloc_obj  # arity-generic boxed-product allocation; replaces the former sprout_make0..sprout_make10 set (codegen now emits one call plus a store per field, as IRMakeTuple already did). Allocation writes the GC object header, so it cannot live in Sprout
-sprout_alloc_closure_env
+sprout_alloc_closure  # closure-env allocation carrying the closure's parameter count; writes the GC object header (kind plus the packed capture-count/arity aux), so it cannot live in Sprout. Replaces sprout_alloc_closure_env, which recorded no arity
+sprout_closure_arity_check  # guards every application of a closure VALUE, whose arity a Sprout function type does not determine (`\(x, y) -> …` and `\x -> \y -> …` share one type). Reads the GC header word, which Sprout cannot address, and must abort without returning, which no Sprout expression can do
 sprout_alloc_tuple_blob
 sprout_field
 sprout_gc_pop_roots
