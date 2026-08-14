@@ -6,6 +6,7 @@ import stdlib.compiler.token as token
 import stdlib.compiler.parser as parser
 import stdlib.compiler.module_loader as module_loader
 import stdlib.compiler.deriving as deriving
+import stdlib.string as string
 
 # ---------------------------------------------------------------------------
 # Public API
@@ -1085,6 +1086,339 @@ fn qualify_all_modules(modules: List ParsedModule, all_symbols: Dict ModuleSymbo
             qualify_all_modules(rest, all_symbols, stdlib_root, extra_roots))
 
 # ---------------------------------------------------------------------------
+# Post-qualification check: every type name must be one that exists
+# ---------------------------------------------------------------------------
+#
+# `qualify_type_name` returns its input unchanged when nothing in scope claims
+# the name, and `qualify_qualified_type` does the same for a dotted one. That
+# fallback is load-bearing rather than a bug: `stdlib/prelude.sprout` carries no
+# `module` header, so `Maybe`, `List` and `Result` are declared UNQUALIFIED and
+# every use of them in every module resolves through exactly this path. At the
+# moment of qualification an unresolved name and a prelude name are the same
+# thing — a name that matched nothing and was passed through.
+#
+# They separate AFTERWARDS, by membership. Every name a module may legitimately
+# reach — its own, an import's, the prelude's — is the name of some declaration
+# in the bundle, in whatever spelling qualification has left it carrying. So one
+# membership test covers BOTH phantom shapes, the bare `T` and the qualified
+# `nosuch.Bar`, with no special case for either.
+#
+# Without this the name became a fresh opaque type: `fn ident(t: T) -> T = t`
+# compiled and ran. The mistake surfaced only where the phantom met a real type,
+# as a mismatch between two spellings that read identically (`T` vs `mod.T`),
+# arbitrarily far from the annotation that caused it.
+
+# Names that are legitimately used in a type position with no declaration to
+# find. The first row is the language's primitives; the second is opaque
+# C-runtime types that back stdlib declarations (`Vector` for Vec/MutVec, `Map`
+# for Dict, `NativeSet` for Set, `Ref` for a mutable cell, `Builder` for the
+# bytes builder in stdlib/bytes.sprout).
+#
+# The list is derived from the `extern fn` signatures in `stdlib/`, not guessed:
+# every uppercase name appearing in one and declared by no `type`/`wrap`/`class`
+# is here. `Builder` was the miss that made 234 of 656 corpus files fail — it
+# reaches a type position only through an extern, which is exactly the position
+# the pre-existing type-validation pass in infer does not cover.
+fn undeclared_type_names() -> List String =
+  ["Int", "Double", "Bool", "String", "Char", "Unit", "Bytes", "IntRange",
+   "Vector", "Map", "NativeSet", "Ref", "Builder"]
+
+# A source type VARIABLE is lowercase (`a`, `elem`); a constructor is uppercase,
+# qualified or not. Checked on the short name so `mod.Foo` reads as a constructor.
+fn type_name_starts_lower(name: String) -> Bool =
+  match str_char_at(string.after_last_dot(name), 0) with
+  | Nothing -> false
+  | Just c -> c >= 'a' && c <= 'z'
+
+fn add_declared_type_name(decl: ast.Decl, acc: Dict String) -> Dict String =
+  match decl with
+  | ast.TypeDecl name _ _ _ _ _ -> dict_set(name, name, acc)
+  | ast.RecordDecl name _ _ _ _ _ -> dict_set(name, name, acc)
+  | ast.AliasDecl name _ _ _ -> dict_set(name, name, acc)
+  | ast.WrapDecl name _ _ -> dict_set(name, name, acc)
+  # Classes share the namespace: a constraint's head and an `any C` existential
+  # both reach a class through a type position.
+  | ast.ClassDecl name _ _ _ _ -> dict_set(name, name, acc)
+  | _ -> acc
+
+fn declared_type_names(decls: List ast.Decl, acc: Dict String) -> Dict String =
+  match decls with
+  | Nil -> acc
+  | Cons d rest -> declared_type_names(rest, add_declared_type_name(d, acc))
+
+fn type_name_in_scope(name: String, declared: Dict String) -> Bool =
+  if type_name_starts_lower(name) then true
+  else if str_list_member(name, undeclared_type_names()) then true
+  else
+    match dict_get(name, declared) with
+    | Just _ -> true
+    | Nothing -> false
+
+fn unresolved_in_type(t: ast.TypeExpr, declared: Dict String) -> Maybe String =
+  match t with
+  | ast.TypeName name -> if type_name_in_scope(name, declared) then Nothing else Just(name)
+  | ast.TypeApply base arg -> or_unresolved(unresolved_in_type(base, declared), arg, declared)
+  | ast.TypeArrow left right _ -> or_unresolved(unresolved_in_type(left, declared), right, declared)
+  | ast.TypeEffect base _ -> unresolved_in_type(base, declared)
+  | ast.TupleType items -> unresolved_in_types(items, declared)
+
+fn or_unresolved(found: Maybe String, t: ast.TypeExpr, declared: Dict String) -> Maybe String =
+  match found with
+  | Just n -> Just(n)
+  | Nothing -> unresolved_in_type(t, declared)
+
+fn unresolved_in_types(ts: List ast.TypeExpr, declared: Dict String) -> Maybe String =
+  match ts with
+  | Nil -> Nothing
+  | Cons t rest -> or_unresolved(unresolved_in_types(rest, declared), t, declared)
+
+fn unresolved_in_maybe_type(mt: Maybe ast.TypeExpr, declared: Dict String) -> Maybe String =
+  match mt with
+  | Nothing -> Nothing
+  | Just t -> unresolved_in_type(t, declared)
+
+fn unresolved_in_params(params: List ast.Param, declared: Dict String) -> Maybe String =
+  match params with
+  | Nil -> Nothing
+  | Cons p rest ->
+      match p with
+      | ast.Param _ anno _ ->
+          match unresolved_in_maybe_type(anno, declared) with
+          | Just n -> Just(n)
+          | Nothing -> unresolved_in_params(rest, declared)
+
+# A LAMBDA parameter may be annotated, and `LambdaExpr` is the only Expr node
+# that reaches a TypeExpr (every other one lives in a declaration head). So the
+# body has to be walked too, or `\ (x: Nope) -> x` stays a phantom while the
+# identical annotation on a named function is rejected — a hole exactly where a
+# reader would assume the rule is uniform.
+fn unresolved_in_expr(e: ast.Expr, declared: Dict String) -> Maybe String =
+  match e with
+  | ast.LambdaExpr params body _ ->
+      match unresolved_in_params(params, declared) with
+      | Just n -> Just(n)
+      | Nothing -> unresolved_in_expr(body, declared)
+  | ast.TupleExpr items _ -> unresolved_in_exprs(items, declared)
+  | ast.IfExpr cond th el _ -> unresolved_in_exprs([cond, th, el], declared)
+  | ast.MatchExpr scrutinee branches _ ->
+      match unresolved_in_expr(scrutinee, declared) with
+      | Just n -> Just(n)
+      | Nothing -> unresolved_in_branches(branches, declared)
+  | ast.CallExpr callee args _ -> unresolved_in_exprs(Cons(callee, args), declared)
+  | ast.BinaryExpr _ left right _ -> unresolved_in_exprs([left, right], declared)
+  | ast.UnaryExpr _ operand _ -> unresolved_in_expr(operand, declared)
+  | ast.IntRangeExpr lo hi _ -> unresolved_in_exprs([lo, hi], declared)
+  | ast.DoExpr steps _ -> unresolved_in_do_steps(steps, declared)
+  | ast.RecordExpr _ fields _ -> unresolved_in_record_exprs(fields, declared)
+  | ast.GetFieldExpr record _ _ -> unresolved_in_expr(record, declared)
+  | ast.RecordUpdateExpr base fields _ ->
+      match unresolved_in_expr(base, declared) with
+      | Just n -> Just(n)
+      | Nothing -> unresolved_in_record_exprs(fields, declared)
+  | ast.StringTemplateExpr parts _ -> unresolved_in_template_parts(parts, declared)
+  | _ -> Nothing
+
+fn unresolved_in_exprs(es: List ast.Expr, declared: Dict String) -> Maybe String =
+  match es with
+  | Nil -> Nothing
+  | Cons e rest ->
+      match unresolved_in_expr(e, declared) with
+      | Just n -> Just(n)
+      | Nothing -> unresolved_in_exprs(rest, declared)
+
+fn unresolved_in_branches(bs: List ast.MatchBranch, declared: Dict String) -> Maybe String =
+  match bs with
+  | Nil -> Nothing
+  | Cons b rest ->
+      match b with
+      | ast.MatchBranch _ body ->
+          match unresolved_in_expr(body, declared) with
+          | Just n -> Just(n)
+          | Nothing -> unresolved_in_branches(rest, declared)
+
+fn unresolved_in_do_steps(steps: List ast.DoStep, declared: Dict String) -> Maybe String =
+  match steps with
+  | Nil -> Nothing
+  | Cons s rest ->
+      match step_expr(s) with
+      | e ->
+          match unresolved_in_expr(e, declared) with
+          | Just n -> Just(n)
+          | Nothing -> unresolved_in_do_steps(rest, declared)
+
+fn step_expr(s: ast.DoStep) -> ast.Expr =
+  match s with
+  | ast.DoBindStep _ e -> e
+  | ast.DoLetStep _ e -> e
+  | ast.DoExprStep e -> e
+
+fn unresolved_in_record_exprs(fields: List ast.RecordField, declared: Dict String) -> Maybe String =
+  match fields with
+  | Nil -> Nothing
+  | Cons f rest ->
+      match f with
+      | ast.RecordField _ e ->
+          match unresolved_in_expr(e, declared) with
+          | Just n -> Just(n)
+          | Nothing -> unresolved_in_record_exprs(rest, declared)
+
+fn unresolved_in_template_parts(parts: List ast.TemplateExprPart, declared: Dict String) -> Maybe String =
+  match parts with
+  | Nil -> Nothing
+  | Cons p rest ->
+      match p with
+      | ast.LitPart _ -> unresolved_in_template_parts(rest, declared)
+      | ast.InterpPart e ->
+          match unresolved_in_expr(e, declared) with
+          | Just n -> Just(n)
+          | Nothing -> unresolved_in_template_parts(rest, declared)
+
+fn unresolved_in_constraints(cs: List ast.TypeConstraint, declared: Dict String) -> Maybe String =
+  match cs with
+  | Nil -> Nothing
+  | Cons c rest ->
+      match c with
+      | ast.TypeConstraint class_name args ->
+          match unresolved_in_types(Cons(ast.TypeName(class_name), args), declared) with
+          | Just n -> Just(n)
+          | Nothing -> unresolved_in_constraints(rest, declared)
+
+fn unresolved_in_signature(params: List ast.Param, ret: Maybe ast.TypeExpr, cs: List ast.TypeConstraint, declared: Dict String) -> Maybe String =
+  match unresolved_in_params(params, declared) with
+  | Just n -> Just(n)
+  | Nothing ->
+      match unresolved_in_maybe_type(ret, declared) with
+      | Just n -> Just(n)
+      | Nothing -> unresolved_in_constraints(cs, declared)
+
+fn unresolved_in_class_methods(ms: List ast.ClassMethodSig, declared: Dict String) -> Maybe String =
+  match ms with
+  | Nil -> Nothing
+  | Cons m rest ->
+      match m with
+      | ast.ClassMethodSig _ params ret _ ->
+          match unresolved_in_signature(params, Just(ret), Nil, declared) with
+          | Just n -> Just(n)
+          | Nothing -> unresolved_in_class_methods(rest, declared)
+
+fn unresolved_in_instance_methods(ms: List ast.InstanceMethodImpl, declared: Dict String) -> Maybe String =
+  match ms with
+  | Nil -> Nothing
+  | Cons m rest ->
+      match m with
+      | ast.InstanceMethodImpl _ params ret _ body ->
+          match unresolved_in_signature(params, ret, Nil, declared) with
+          | Just n -> Just(n)
+          | Nothing ->
+              match unresolved_in_expr(body, declared) with
+              | Just n -> Just(n)
+              | Nothing -> unresolved_in_instance_methods(rest, declared)
+
+fn unresolved_in_ctors(ctors: List ast.TypeConstructor, declared: Dict String) -> Maybe String =
+  match ctors with
+  | Nil -> Nothing
+  | Cons c rest ->
+      match c with
+      | ast.TypeConstructor _ args _ exist_constraints ->
+          match unresolved_in_types(args, declared) with
+          | Just n -> Just(n)
+          | Nothing ->
+              match unresolved_in_constraints(exist_constraints, declared) with
+              | Just n -> Just(n)
+              | Nothing -> unresolved_in_ctors(rest, declared)
+
+fn unresolved_in_record_fields(fields: List ast.RecordFieldDecl, declared: Dict String) -> Maybe String =
+  match fields with
+  | Nil -> Nothing
+  | Cons f rest ->
+      match f with
+      | ast.RecordFieldDecl _ t ->
+          match unresolved_in_type(t, declared) with
+          | Just n -> Just(n)
+          | Nothing -> unresolved_in_record_fields(rest, declared)
+
+# The name of the declaration an unresolved type was written in, for the message.
+# Qualified, so it names the module too — the report's cost came from not knowing
+# which of 4,400 lines the annotation was on.
+fn decl_display_name(decl: ast.Decl) -> String =
+  match decl with
+  | ast.FnDecl name _ _ _ _ _ _ -> name
+  | ast.ExternFnDecl name _ _ _ _ -> name
+  | ast.TypeDecl name _ _ _ _ _ -> name
+  | ast.RecordDecl name _ _ _ _ _ -> name
+  | ast.AliasDecl name _ _ _ -> name
+  | ast.WrapDecl name _ _ -> name
+  | ast.ClassDecl name _ _ _ _ -> name
+  | ast.LetDecl name _ _ _ -> name
+  | ast.InstanceDecl constraint _ _ _ ->
+      match constraint with
+      | ast.TypeConstraint class_name _ -> "instance " ++ class_name
+
+fn unresolved_in_decl(decl: ast.Decl, declared: Dict String) -> Maybe String =
+  match decl with
+  | ast.FnDecl _ params ret _ cs body _ ->
+      match unresolved_in_signature(params, ret, cs, declared) with
+      | Just n -> Just(n)
+      | Nothing -> unresolved_in_expr(body, declared)
+  | ast.ExternFnDecl _ params ret _ _ -> unresolved_in_signature(params, ret, Nil, declared)
+  | ast.TypeDecl _ _ ctors _ _ _ -> unresolved_in_ctors(ctors, declared)
+  | ast.RecordDecl _ _ fields _ _ _ -> unresolved_in_record_fields(fields, declared)
+  | ast.AliasDecl _ _ rhs _ -> unresolved_in_type(rhs, declared)
+  | ast.WrapDecl _ inner _ -> unresolved_in_type(inner, declared)
+  | ast.ClassDecl _ _ methods supers _ ->
+      match unresolved_in_class_methods(methods, declared) with
+      | Just n -> Just(n)
+      | Nothing -> unresolved_in_constraints(supers, declared)
+  | ast.InstanceDecl constraint inst_cs methods _ ->
+      match unresolved_in_constraints(Cons(constraint, inst_cs), declared) with
+      | Just n -> Just(n)
+      | Nothing -> unresolved_in_instance_methods(methods, declared)
+  | ast.LetDecl _ body anno _ ->
+      match unresolved_in_maybe_type(anno, declared) with
+      | Just n -> Just(n)
+      | Nothing -> unresolved_in_expr(body, declared)
+
+# Which module exports a name spelled like this one. The unresolved name is bare
+# (`TestState`), the declared one is qualified (`stdlib.test.TestState`), so the
+# match is on the last segment and the answer is the prefix. Runs only on the
+# error path, so the linear scan costs nothing in a successful compile.
+fn exporting_module(name: String, declared_names: List String) -> Maybe String =
+  match declared_names with
+  | Nil -> Nothing
+  | Cons d rest ->
+      if string.after_last_dot(d) == string.after_last_dot(name) && str_find(d, ".") != -1
+      then Just(str_slice(d, 0, str_len(d) - str_len(string.after_last_dot(d)) - 1))
+      else exporting_module(name, rest)
+
+fn unresolved_type_message(name: String, decl_name: String, declared: Dict String) -> String =
+  match exporting_module(name, dict_keys_list(declared)) with
+  | Nothing -> base
+  | Just mod_name ->
+      base ++ ". `" ++ mod_name ++ "` exports it — add it to that module's import list"
+  where base = "unknown type `" ++ name ++ "` in `" ++ decl_name
+               ++ "`: nothing in scope declares that name"
+
+fn find_unresolved_type(decls: List ast.Decl, declared: Dict String) -> Maybe(source.SourcePos, String) =
+  match decls with
+  | Nil -> Nothing
+  | Cons d rest ->
+      match unresolved_in_decl(d, declared) with
+      | Just name -> Just((ast.decl_pos(d), unresolved_type_message(name, decl_display_name(d), declared)))
+      | Nothing -> find_unresolved_type(rest, declared)
+
+# `ambient` carries names the CHECKER has in scope that the bundle does not
+# declare — see ambient_type_names. Merged into the declared set rather than
+# threaded separately, so the walk has one lookup and one meaning of "in scope".
+# Ambient names are bare, so they never become an import suggestion.
+fn add_ambient_names(names: List String, acc: Dict String) -> Dict String =
+  match names with
+  | Nil -> acc
+  | Cons n rest -> add_ambient_names(rest, dict_set(n, n, acc))
+
+fn validate_type_names(decls: List ast.Decl, ambient: List String) -> Maybe(source.SourcePos, String) =
+  find_unresolved_type(decls, add_ambient_names(ambient, declared_type_names(decls, dict_empty())))
+
+# ---------------------------------------------------------------------------
 # Post-qualification assertion: no qualified name may start with '.'
 # An empty module prefix + dot (e.g. ".fn_name") is always a bug in
 # scan_source_info or build_resolve_ctx returning an empty module name.
@@ -1117,13 +1451,16 @@ fn validate_qualified_decls(decls: List ast.Decl) -> Maybe(source.SourcePos, Str
       | Just msg -> Just((ast.decl_pos(d), msg))
       | Nothing -> validate_qualified_decls(rest)
 
-fn make_bundle_or_err(modules: List ParsedModule, stdlib_root: String, extra_roots: List String) -> BundleResult =
+fn make_bundle_or_err(modules: List ParsedModule, stdlib_root: String, extra_roots: List String, ambient: List String) -> BundleResult =
   match validate_qualified_decls(qualified) with
   | Just (pos, err_msg) -> BundleErr(pos, "[assert] qualify_decl: " ++ err_msg)
   | Nothing ->
-      match deriving.validate_deriving_decls(qualified) with
-      | Just (pos, err_msg) -> BundleErr(pos, "deriving: " ++ err_msg)
-      | Nothing -> BundleOk(ast.Program(deriving.expand_deriving_decls(qualified), no_pos()))
+      match validate_type_names(qualified, ambient) with
+      | Just (pos, err_msg) -> BundleErr(pos, err_msg)
+      | Nothing ->
+        match deriving.validate_deriving_decls(qualified) with
+        | Just (pos, err_msg) -> BundleErr(pos, "deriving: " ++ err_msg)
+        | Nothing -> BundleOk(ast.Program(deriving.expand_deriving_decls(qualified), no_pos()))
   where qualified = qualify_all_modules(modules, build_all_symbols(modules), stdlib_root, extra_roots)
 
 export fn bundle_file(path: source.FilePath, stdlib_root: source.StdlibRoot) -> BundleResult !{IO} =
@@ -1132,6 +1469,28 @@ export fn bundle_file(path: source.FilePath, stdlib_root: source.StdlibRoot) -> 
 # Like bundle_file, but resolves dotted non-stdlib imports against extra package
 # roots (docs/packaging-v0.md §10 phase 2). bundle_file delegates here with no
 # extra roots, so all existing callers are unaffected.
+# Type names the CHECKER has in scope that the BUNDLE does not declare.
+#
+# An importless, self-contained file is deliberately not given the prelude
+# (collect_modules says why), so no prelude declaration reaches the bundle — yet
+# the checker still knows the prelude's types, and `fn f() -> Maybe Int = Just(1)`
+# compiles in such a file today. A membership test over bundled declarations
+# alone would reject every one of those. So when the prelude is absent, its
+# EXPORTED names are read separately and allowed.
+#
+# `scan_source_info` rather than a parse: it is the same cheap line scan the
+# bundler already runs per module, and for UPPERCASE names its exported list is
+# exactly the types and classes — a function export is lowercase and would be
+# allowed as a type variable regardless.
+fn ambient_type_names(modules: List ParsedModule, stdlib_root: String) -> List String !{IO} =
+  if any_has_module_name(modules) then Nil
+  else
+    match read_file(prelude_path(stdlib_root)) with
+    | Err _ -> Nil
+    | Ok src ->
+        match scan_source_info(src) with
+        | (_, exported, _) -> exported
+
 export fn bundle_file_with_roots(path: source.FilePath, stdlib_root: source.StdlibRoot, extra_roots: List String) -> BundleResult !{IO} =
   do
     (err, modules) <- collect_modules(source.filepath_str(path), source.stdlib_root_str(stdlib_root), extra_roots)
@@ -1139,7 +1498,10 @@ export fn bundle_file_with_roots(path: source.FilePath, stdlib_root: source.Stdl
     # Module-load / import-parse failures: no single decl span (parse errors
     # embed their own `at L:C` in the message text). no_pos() is honest here.
     | Just msg -> BundleErr(no_pos(), msg)
-    | Nothing -> make_bundle_or_err(modules, source.stdlib_root_str(stdlib_root), extra_roots)
+    | Nothing ->
+        do
+          ambient <- ambient_type_names(modules, source.stdlib_root_str(stdlib_root))
+          make_bundle_or_err(modules, source.stdlib_root_str(stdlib_root), extra_roots, ambient)
 
 # ---------------------------------------------------------------------------
 # Phase: dump-qualify — show original→qualified name mapping per module

@@ -1,0 +1,10 @@
+# The QUALIFIED spelling has the same hole as the bare one, and the bug report
+# did not find it: `qualify_qualified_type` also falls back to the name unchanged
+# when the alias resolves to nothing, so `nosuch.Bar` became a phantom too and
+# this file compiled cleanly.
+#
+# Both shapes must be covered by one rule, or fixing the bare case just moves the
+# hole one spelling to the left.
+fn width(b: nosuch.Bar) -> Int = 1
+
+fn main() -> Unit !{IO} = print("unreachable")

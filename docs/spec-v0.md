@@ -86,6 +86,26 @@ For this v0 milestone, effect annotations support only:
 Mixed or multi-entry rows such as `!{IO, e}` and `!{e, f}` are not part of the
 language contract yet.
 
+**Type names must resolve.** A type name written in any type position — a
+parameter or return annotation, a constructor field, a record field, an alias
+right-hand side, a constraint, a lambda parameter — must name a type or class
+that is *in scope at that point*: declared in the same module, brought in by an
+import, or supplied by the prelude. A name that resolves to nothing is an error
+reported at the declaration that writes it. It is **not** admitted as a fresh
+opaque type.
+
+A lowercase name in a type position is a type variable and is always in scope;
+this rule concerns uppercase names only. The qualified spelling is subject to the
+same rule: `mod.Name` must name an exported type of a module imported under the
+alias `mod`.
+
+The distinction that makes this worth stating is between *declared somewhere* and
+*in scope here*. A type exported by a module that the current module imports
+**for some other name** is not in scope: importing `mod (make)` does not bring
+`mod.T` into scope, and writing bare `T` is an error even though `mod.T` exists.
+Where the compiler can identify a module exporting a matching name, the
+diagnostic says which one.
+
 Type inference:
 
 - Let-bound values are inferred.

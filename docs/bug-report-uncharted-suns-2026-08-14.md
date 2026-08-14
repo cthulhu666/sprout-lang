@@ -251,7 +251,29 @@ The bug is also wider than the reproduction shows: the qualified spelling has th
   The report's request for "truncation or floor" is served by composition rather than by two separate
   conversions: `to_int` alone truncates toward zero, `to_int(floor(x))` floors, and for the sector
   indexing described they differ exactly on negative coordinates. Design: `docs/double-to-int-v0.md`.
-- **§1 — phantom type.** Pending. See the correction above.
+- **§1 — phantom type.** Fixed, and **wider than reported in two further directions**. Besides the
+  qualified spelling noted above, a **lambda parameter** annotation had the same hole
+  (`\ (x: Nope) -> x` compiled) — `LambdaExpr` is the one expression node that reaches a type. A fix
+  aimed only at the reproduction would have left two ways in. All three are now one rule, stated
+  normatively in `docs/spec-v0.md` §4.
+
+  The check lives in the **bundler**, because that is the only place that knows what a module
+  *imports*. It is a membership test run after qualification: every type name must be one that some
+  declaration in the bundle carries, in whatever spelling qualification left it with. That single test
+  covers the bare and the qualified shape with no special case for either.
+
+  The diagnostic does more than the report asked for. Where a module exports a matching name it says
+  which one: ``unknown type `T` in `f`: nothing in scope declares that name. `probes.hastype` exports
+  it — add it to that module's import list``. It is reported at the declaration carrying the
+  annotation — the "line 8" the report wanted — and the suggested import was verified to compile.
+
+  **Two things nearly made the fix wrong**, both caught by sweeping the corpus rather than trusting
+  the reproduction. `Builder`, the opaque C type behind `stdlib/bytes.sprout`, reaches a type position
+  only through an `extern fn` and is declared nowhere — 234 of 656 files failed on that name alone.
+  And importless files are *deliberately* denied the prelude (`bundler.sprout` explains why), so no
+  prelude declaration reaches their bundle — yet the checker still knows the prelude's types, and
+  `fn f() -> Maybe Int = Just(1)` compiles in such a file today. **Bundled is not the same set as in
+  scope**, and a membership test over the wrong one rejects working programs.
 - **§2 — single-line `import`.** Pending.
 - **§3 — multi-name `let` as a `do` statement.** Pending. The root cause is not `let`-specific:
   `parse_do_step_sub` discards unconsumed step tokens for *every* statement shape, so the silent
