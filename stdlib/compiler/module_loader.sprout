@@ -94,6 +94,23 @@ export fn parse_import_line(line: String) -> Maybe ImportSpec =
     | (module_name, i2) -> parse_import_after_module(line, module_name, i2)
   else Nothing
 
+# Joins the lines of ONE import whose parenthesised list is still open, so
+# `parse_import_line` always sees a complete declaration. Joined with a space:
+# `is_word_char` already treats a space as a separator exactly as it treats the
+# original line break, so the name scan is unaffected.
+#
+# Depth comes from `source.line_paren_delta` — the SAME scan `strip_headers`
+# uses. The two must consume the same number of lines, and a private helper on
+# each side would be free to drift; the failure would be silent, showing up as
+# dropped imports or a fragment handed to the parser.
+fn join_wrapped_import(joined: String, lines: List String, depth: Int) -> (String, List String) =
+  if depth <= 0 then (joined, lines)
+  else
+    match lines with
+    | Nil -> (joined, Nil)
+    | Cons l rest ->
+        join_wrapped_import(joined ++ " " ++ l, rest, depth + source.line_paren_delta(l))
+
 fn collect_imports_from_lines(lines: List String, acc: List ImportSpec) -> List ImportSpec =
   match lines with
   | Nil -> list_reverse(acc)
@@ -101,9 +118,11 @@ fn collect_imports_from_lines(lines: List String, acc: List ImportSpec) -> List 
       if str_starts_with(line, "module ") || line == "" || str_starts_with(line, "#") then
         collect_imports_from_lines(rest, acc)
       else if str_starts_with(line, "import ") then
-        match parse_import_line(line) with
-        | Nothing -> collect_imports_from_lines(rest, acc)
-        | Just spec -> collect_imports_from_lines(rest, Cons(spec, acc))
+        match join_wrapped_import(line, rest, source.line_paren_delta(line)) with
+        | (joined, remaining) ->
+            match parse_import_line(joined) with
+            | Nothing -> collect_imports_from_lines(remaining, acc)
+            | Just spec -> collect_imports_from_lines(remaining, Cons(spec, acc))
       else
         list_reverse(acc)
 

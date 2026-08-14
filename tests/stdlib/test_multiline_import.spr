@@ -1,0 +1,36 @@
+import stdlib.test (TestState, new_state,
+                    assert_true, summary)
+import stdlib.math (pi,
+                    sqrt,
+                    floor)
+# A trailing comment must not be counted: the `(` below is inside a comment, so
+# this import is balanced and complete. Counting it would swallow the next line
+# into this import's list and drop whatever it declared. Comment lines have
+# broken import collection before, which is why this is pinned.
+import stdlib.string (trim)  # a comment with an unbalanced ( paren
+
+# A parenthesised import list may span lines.
+#
+# It could not before: header stripping and import collection are both
+# LINE-based, so the continuation line was not recognised as part of the header.
+# Stripping stopped there and the parser was handed `cos, sqrt)`, reported as a
+# generic `Expected declaration at 2:21`; independently, import collection saw
+# only the names on the first line and silently dropped the rest.
+#
+# The rule this file pins: an import's parenthesised list continues until the
+# parenthesis closes, however many lines that takes. This file imports six names
+# across three wrapped lists, and every one of them must resolve — a fix that
+# only stopped the parse error while still dropping the continuation names would
+# fail here rather than pass quietly.
+
+fn main() -> Unit !{IO} =
+  do
+    state <- new_state()
+
+    assert_true(state, "a name from the first line of a wrapped list resolves", pi > 3.14)
+    assert_true(state, "a name from a continuation line resolves", sqrt(4.0) == 2.0)
+    assert_true(state, "a name from a third line resolves", floor(2.7) == 2.0)
+    assert_true(state, "the assert helpers themselves came from a wrapped list", true)
+    assert_true(state, "a `(` in a trailing comment is not counted", trim("  x  ") == "x")
+
+    summary(state)

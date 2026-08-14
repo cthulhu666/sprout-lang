@@ -166,14 +166,44 @@ export fn first_codepoint(s: String) -> Maybe Int =
 # deletion shifted all reported diagnostic positions up by the stripped count.
 # Single authority shared by every compile entry point (bundler, LSP, analysis,
 # drivers) so their diagnostics agree.
+# An import's parenthesised name list may span lines, so a header line is not
+# always recognisable on its own: the continuation of a wrapped list looks like
+# ordinary code. Stripping therefore carries the open-parenthesis depth and keeps
+# consuming while it is positive.
 export fn strip_headers(s: String) -> String =
-  strip_headers_go(s, bytes_from_utf8(s), 0, 0)
+  strip_headers_go(s, bytes_from_utf8(s), 0, 0, 0)
 
 fn is_header_line_byte(s: String, pos: Int) -> Bool =
   str_starts_with_at_byte(s, pos, "module ") ||
   str_starts_with_at_byte(s, pos, "import ") ||
   str_starts_with_at_byte(s, pos, "#") ||
   str_starts_with_at_byte(s, pos, "\n")
+
+# Net parenthesis depth contributed by the bytes in [i, limit).
+#
+# THE SINGLE AUTHORITY on where a wrapped import ends. `module_loader` decides
+# the same question when it joins the lines of one import, and the two must not
+# drift: if stripping consumed a different number of lines than collection read,
+# a file would either lose imports or hand the parser a fragment.
+#
+# Scanning stops at `#` so a trailing comment cannot miscount — `import x (a, b) # (`
+# is balanced. An import header contains no string literals, so no quoting rule
+# is needed here.
+fn paren_delta_bytes(b: Bytes, i: Int, limit: Int, depth: Int) -> Int =
+  if i >= limit then depth
+  else
+    match decode_char_at(b, i) with
+    | Nothing -> depth
+    | Just (ch, next) ->
+        if ch == '#' then depth
+        else if ch == '(' then paren_delta_bytes(b, next, limit, depth + 1)
+        else if ch == ')' then paren_delta_bytes(b, next, limit, depth - 1)
+        else paren_delta_bytes(b, next, limit, depth)
+
+# The String entry point to the same scan, for callers that already hold a line.
+export fn line_paren_delta(line: String) -> Int =
+  paren_delta_bytes(b, 0, str_byte_len(line), 0)
+  where b = bytes_from_utf8(line)
 
 # Byte index just past the next '\n' from byte offset i (or end of input).
 fn next_line_byte(b: Bytes, i: Int) -> Int =
@@ -190,11 +220,18 @@ fn byte_to_cp(b: Bytes, i: Int, cp: Int, limit: Int) -> Int =
     | Nothing -> cp
     | Just (_, next) -> byte_to_cp(b, next, cp + 1, limit)
 
-fn strip_headers_go(s: String, bytes: Bytes, pos: Int, stripped: Int) -> String =
+# `depth > 0` means the previous line left an import's list open, so this line is
+# a continuation and is consumed whatever it looks like. Depth is floored at zero
+# so a stray `)` cannot drive it negative and silently disable the check.
+fn strip_headers_go(s: String, bytes: Bytes, pos: Int, stripped: Int, depth: Int) -> String =
   if pos >= str_byte_len(s) then string.repeat("\n", stripped)
-  else if is_header_line_byte(s, pos) then strip_headers_go(s, bytes, next_line_byte(bytes, pos), stripped + 1)
+  else if depth > 0 || is_header_line_byte(s, pos) then
+    strip_headers_go(s, bytes, eol, stripped + 1, floor_zero(depth + paren_delta_bytes(bytes, pos, eol, 0)))
   else str_concat(string.repeat("\n", stripped), str_slice(s, cp, str_len(s) - cp))
   where cp = byte_to_cp(bytes, 0, 0, pos)
+        eol = next_line_byte(bytes, pos)
+
+fn floor_zero(n: Int) -> Int = if n < 0 then 0 else n
 
 # ── Cursor scanning ──────────────────────────────────────────────────────────
 
