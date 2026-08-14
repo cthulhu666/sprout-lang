@@ -11,8 +11,8 @@ generic `__cm_{Class}_{method}` wrapper. Verified on `from_ordinal(tag)` at `Enu
 (`stdlib/compiler/lowering.sprout`, `lower_dispatch_callee`):
 
 ```llvm
-%t$0 = call @sprout_alloc_closure_env(8)   ; env wrapping ordinal-eta      ← DEAD (never used)
-%t$1 = call @sprout_alloc_closure_env(8)   ; env wrapping from_ordinal-eta
+%t$0 = call @sprout_alloc_closure(8, 1)   ; env wrapping ordinal-eta   ← DEAD (never used)
+%t$1 = call @sprout_alloc_closure(8, 1)   ; env wrapping from_ordinal-eta
 %t$2 = call @__cm_Enum_from_ordinal_worker(i64 %tag, %t$0, %t$1)   ; generic wrapper
 ```
 
@@ -32,7 +32,7 @@ SRA removed the rivers-demo `bake_tile` rgb tuple, the *remaining* per-tile allo
 **Goals.**
 1. Lower a class-method call whose dispatch dictionary is a **fully-resolved concrete instance with no
    context constraints** to a **direct call** of the concrete `__tc_{Class}_{Type}_{method}` fn,
-   dropping the runtime dictionary entirely — no `sprout_alloc_closure_env`, no `__cm_` indirection.
+   dropping the runtime dictionary entirely — no `sprout_alloc_closure`, no `__cm_` indirection.
 2. Value-neutral, ABI-preserving: reuse the already-emitted concrete instance functions; no new codegen,
    no representation change.
 
@@ -118,7 +118,7 @@ only the lowering of an already-resolved concrete dispatch changes.
   Int through the String dict — caught here, invisible to `opt --passes=verify`). Plus a **polymorphic**
   consumer (forwarded dict, must not devirt).
 - `tests/smoke_shapes/09_devirt_classmethod.spr` — IR shape: concrete `from_ordinal` emits no
-  `sprout_alloc_closure_env` and a direct `__tc_` call.
+  `sprout_alloc_closure` and a direct `__tc_` call.
 - IR-verified gate per shape (direct `__tc_` vs `__cm_` fallback); `opt --passes=verify` clean; the
   self-hosted reseed reaches a fixed point — the compiler devirt's its own `Eq`/`Ord`/`ToString` calls
   (including multi-child instances) and still compiles itself.

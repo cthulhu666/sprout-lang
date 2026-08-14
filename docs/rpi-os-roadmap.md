@@ -78,7 +78,7 @@ Resolves to a `declare i64 @uart_send(i64)` in LLVM IR. Implicitly carries `IO` 
 Must provide:
 - `SproutObj` struct (identical ABI to the OS runtime — must match self-hosted codegen assumptions)
 - `sprout_make0` … `sprout_make9`, `sprout_nothing`, `sprout_tag`, `sprout_field`, `sprout_register_ctor`
-- `sprout_alloc_closure_env`, `sprout_alloc_tuple_blob` — backed by a static bump allocator:
+- `sprout_alloc_closure`, `sprout_alloc_tuple_blob` — backed by a static bump allocator:
   ```c
   static uint8_t _heap[SPROUT_HEAP_SIZE] __attribute__((aligned(16)));
   static size_t  _heap_top = 0;

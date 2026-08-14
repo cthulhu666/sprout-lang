@@ -9,7 +9,8 @@ declare i64 @char_to_string(i64)
 declare i64 @sprout_gc_push_i64_root(ptr)
 declare i64 @sprout_gc_pop_roots(i64)
 declare i64 @sprout_gc_register_i64_root(ptr)
-declare i64 @sprout_alloc_closure_env(i64)
+declare i64 @sprout_alloc_closure(i64, i64)
+declare void @sprout_closure_arity_check(i64, i64)
 declare i64 @sprout_alloc_tuple_blob(i64)
 declare i64 @sprout_register_ctor(i64, ptr, i64, ptr)
 declare i64 @sprout_tag(i64)
@@ -48,6 +49,7 @@ declare i64 @analysis_complete_in_state(ptr, ptr, ptr)
 
 define i64 @apply(i64 %f, i64 %x) {
 entry:
+  call void @sprout_closure_arity_check(i64 %f, i64 1)
   %t$0$env_ptr = inttoptr i64 %f to ptr
   %t$0$code = load ptr, ptr %t$0$env_ptr
   %t$0 = call i64 (i64, i64) %t$0$code(i64 %f, i64 %x)
@@ -70,13 +72,13 @@ entry:
 
 define i64 @__sprout_user_main() {
 entry:
-  %t$0 = call i64 @sprout_alloc_closure_env(i64 8)
+  %t$0 = call i64 @sprout_alloc_closure(i64 8, i64 1)
   %t$0$raw = inttoptr i64 %t$0 to ptr
   store ptr @__sprout_ir_lambda_0, ptr %t$0$raw
   %t$6 = alloca i64
   store i64 %t$0, ptr %t$6
   %t$7 = call i64 @sprout_gc_push_i64_root(ptr %t$6)
-  %t$1 = call i64 @sprout_alloc_closure_env(i64 8)
+  %t$1 = call i64 @sprout_alloc_closure(i64 8, i64 1)
   %t$1$raw = inttoptr i64 %t$1 to ptr
   store ptr @__sprout_ir_lambda_1, ptr %t$1$raw
   %t$2 = add i64 0, 3

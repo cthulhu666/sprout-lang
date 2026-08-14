@@ -1,0 +1,24 @@
+module main
+
+# Over-application of a function-typed VALUE must panic cleanly.
+#
+# The mirror of `under_apply_value.spr`: same two functions, same shared type, but
+# here the runtime picks the ONE-parameter closure and the call site supplies two
+# arguments. Without the check the surplus argument sits in a register the callee
+# never reads, and the call yields the inner closure's handle reinterpreted as an
+# Int — a plausible-looking number, exit 0, no diagnostic. That silence is the
+# reason this is a gate.
+fn add2(x: Int, y: Int) -> Int = x + y
+
+fn nested() -> Int -> Int -> Int = \x -> \y -> x + y
+
+# Runtime-decided, as above; with no arguments this yields `nested()`, whose
+# closures take one argument each.
+fn pick(args: List String) -> Int -> Int -> Int =
+  if list_length(args) == 0 then nested() else add2
+
+fn main() -> Unit !{IO} =
+  do
+    args <- argv_all()
+    let f = pick(args)
+    print(int_to_string(f(1, 2)))

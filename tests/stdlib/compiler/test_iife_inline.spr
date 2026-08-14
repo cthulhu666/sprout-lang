@@ -17,7 +17,7 @@ import stdlib.string as string
 #
 # Signals (both RED on the pre-fix compiler, GREEN after):
 #   - translate_decl_with_idx returns an empty `lifted` list (no synthetic lambda fn).
-#   - the lowered fn body contains no `sprout_alloc_closure_env` call.
+#   - the lowered fn body contains no `sprout_alloc_closure` call.
 # Pure IRFunction inspection; runs on the current stage-1 (no seed churn).
 
 fn no_pos() -> source.SourcePos = source.SourcePos(0, 0, 0)
@@ -70,7 +70,7 @@ fn check_inlined(state: TestState, label: String, d: typed_ast.TypedDecl) -> Uni
                 lifted_count(triple) == 0)
               let fir = ir_lowering.lower_fn_with_table(triple_fn(triple), dict_empty())
               assert_true(state, label ++ ": IIFE inlined — no closure allocation",
-                string.contains(fir, "sprout_alloc_closure_env") == false)
+                string.contains(fir, "sprout_alloc_closure") == false)
 
 fn main() -> Unit !{IO} =
   do

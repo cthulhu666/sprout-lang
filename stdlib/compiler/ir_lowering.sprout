@@ -270,17 +270,20 @@ fn lower_op(op: sprout_ir.IROp, ret_ty: String, str_table: Dict (String, Int)) -
            ", i64 " ++ int_to_string(list_length(args)) ++ ")\n" ++
          "  " ++ r ++ "$ptr = inttoptr i64 " ++ r ++ " to ptr\n" ++
          lower_ctor_stores(r, args, 0))
-  | sprout_ir.IRMkClosure r code_fn caps ->
+  | sprout_ir.IRMkClosure r code_fn arity caps ->
       # sz = (num_captures + 1) * 8 bytes; slot 0 holds the code pointer.
-      # r is the i64 closure handle — directly the return of sprout_alloc_closure_env.
+      # r is the i64 closure handle — directly the return of sprout_alloc_closure.
       # FIX R4#2: derived SSA names use '$' separator (was '_') so they cannot
       # collide with any user-written identifier. '$' is rejected by Sprout's lexer.
-      # SYNC WITH runtime/sprout_runtime.c sprout_alloc_closure_env:
+      # SYNC WITH runtime/sprout_runtime.c sprout_alloc_closure:
       #   IR computes size = (n_caps + 1) * 8.
       #   Runtime computes slots = (size / 8) - 1 = n_caps.
       # Any layout change must update both formulas. (See also FIX R4#8.)
-      "  " ++ r ++ " = call i64 @sprout_alloc_closure_env(i64 " ++
-        int_to_string((list_length(caps) + 1) * 8) ++ ")\n" ++
+      # The arity rides in the header's aux field, so it costs no payload slot and
+      # the capture slot indices below are unchanged.
+      "  " ++ r ++ " = call i64 @sprout_alloc_closure(i64 " ++
+        int_to_string((list_length(caps) + 1) * 8) ++ ", i64 " ++
+        int_to_string(arity) ++ ")\n" ++
       "  " ++ r ++ "$raw = inttoptr i64 " ++ r ++ " to ptr\n" ++
       "  store ptr @" ++ code_fn ++ ", ptr " ++ r ++ "$raw" ++
       mk_closure_cap_stores(caps, r ++ "$raw", 1)
@@ -288,6 +291,19 @@ fn lower_op(op: sprout_ir.IROp, ret_ty: String, str_table: Dict (String, Int)) -
       # env (the closure handle) is passed as the implicit first arg per M2 ABI.
       # Opaque-pointer LLVM (15+) requires the function type spelled out at each indirect call.
       # FIX R4#2: derived names use '$' separator.
+      #
+      # The guard call comes first: this is the one call site where the argument
+      # count is not known to match the callee, because a Sprout function type
+      # does not fix a value's arity (`\(x, y) -> …` and `\x -> \y -> …` share
+      # one type).  Calls to a statically-known callee lower via
+      # translate_general_call and never come through here.
+      #
+      # It is a call rather than an inline compare-and-branch on purpose: an op
+      # that opened a new basic block would leave any downstream phi naming the
+      # wrong predecessor (sprout_ir.sprout's IRPhi warning), since lower_op
+      # renders ops inside a block whose label the builder has already fixed.
+      "  call void @sprout_closure_arity_check(i64 " ++ callee ++ ", i64 " ++
+        int_to_string(list_length(args)) ++ ")\n" ++
       "  " ++ r ++ "$env_ptr = inttoptr i64 " ++ callee ++ " to ptr\n" ++
       "  " ++ r ++ "$code = load ptr, ptr " ++ r ++ "$env_ptr\n" ++
       "  " ++ r ++ " = call i64 (" ++ replicate_i64_csv(1 + list_length(args)) ++ ") " ++
@@ -459,7 +475,10 @@ export fn ir_header() -> String =
   "declare i64 @sprout_gc_push_i64_root(ptr)\n" ++
   "declare i64 @sprout_gc_pop_roots(i64)\n" ++
   "declare i64 @sprout_gc_register_i64_root(ptr)\n" ++
-  "declare i64 @sprout_alloc_closure_env(i64)\n" ++
+  "declare i64 @sprout_alloc_closure(i64, i64)\n" ++
+  # Arity guard on every closure-value application; aborts on a mismatch rather
+  # than calling through with the wrong argument count.
+  "declare void @sprout_closure_arity_check(i64, i64)\n" ++
   # Heap-allocate a raw i64-array blob for tuple storage (N * 8 bytes).
   # Called by IRMakeTuple lowering; one declaration covers all arities.
   "declare i64 @sprout_alloc_tuple_blob(i64)\n" ++
@@ -578,7 +597,8 @@ fn is_hardcoded_intrinsic(name: String) -> Bool =
   name == "str_slice" ||
   name == "int_to_string" || name == "char_to_string" ||
   name == "sprout_gc_push_i64_root" || name == "sprout_gc_pop_roots" ||
-  name == "sprout_alloc_closure_env" || name == "sprout_alloc_tuple_blob" ||
+  name == "sprout_alloc_closure" || name == "sprout_closure_arity_check" ||
+  name == "sprout_alloc_tuple_blob" ||
   name == "sprout_register_ctor" || name == "sprout_tag" || name == "sprout_field" ||
   name == "sprout_abort_match" || name == "panic" ||
   name == "sprout_alloc_obj" ||

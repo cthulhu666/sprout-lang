@@ -30,7 +30,7 @@ at full arity — the desugaring of `where` / `let..in`) are now **beta-reduced 
 retires the per-call closure allocation for *every* `where`/`let..in` and, in particular,
 lets mutual-TCO fire through a `where` — so `stdlib/scram.sprout`'s `hi_step` reverts from the
 Phase-A do-`let` workaround to idiomatic `where` and stays GREEN. Unit-tested
-(`test_iife_inline.spr`: no lifted fn, no `sprout_alloc_closure_env`, incl. a nested IIFE that
+(`test_iife_inline.spr`: no lifted fn, no `sprout_alloc_closure`, incl. a nested IIFE that
 references an outer IIFE-bound var); the scram-`where` RED→GREEN experiment isolates the inline
 as the cause (identical source, pre-arc-(b) compiler exhausts roots, arc-(b) compiler passes);
 seed re-refreshed to a fixed point.
@@ -297,7 +297,7 @@ v0 is silent (an optimization, not a checked contract). Two follow-ups are noted
   the default suite).
 - **Arc (b) — IIFE inline (pure IR transform):** `tests/stdlib/compiler/test_iife_inline.spr`
   — an immediately-applied lambda (incl. a nested IIFE referencing an outer IIFE-bound var)
-  translates with an empty `lifted` list and no `sprout_alloc_closure_env`. RED on the pre-arc
+  translates with an empty `lifted` list and no `sprout_alloc_closure`. RED on the pre-arc
   compiler (lifts a closure), GREEN after. Plus the scram-`where` RED→GREEN experiment above.
 
 ## 10. Spec / docs status

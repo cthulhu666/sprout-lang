@@ -944,7 +944,7 @@ fn translate_expr(expr: typed_ast.TypedExpr, params: List String,
                         ref_write(lifted_ref, Cons(wrapper_fn, existing_lifted))
                         Ok((Nil, cur_label,
                              list_append(cur_ops,
-                               Cons(sprout_ir.IRMkClosure(fresh_name(name_prefix, idx), wrapper_name, Nil), Nil)),
+                               Cons(sprout_ir.IRMkClosure(fresh_name(name_prefix, idx), wrapper_name, arity, Nil), Nil)),
                              fresh_name(name_prefix, idx), idx + 1))
                   | Nothing ->
                       # An unbound name at codegen is always a compiler-internal
@@ -979,7 +979,8 @@ fn translate_expr(expr: typed_ast.TypedExpr, params: List String,
                           ref_write(lifted_ref, Cons(synthesize_unresolved_poison_thunk(thunk_name), existing_lifted))
                           Ok((Nil, cur_label,
                                list_append(cur_ops,
-                                 Cons(sprout_ir.IRMkClosure(fresh_name(name_prefix, idx), thunk_name, Nil), Nil)),
+                                 Cons(sprout_ir.IRMkClosure(fresh_name(name_prefix, idx), thunk_name,
+                                        closure_arity_any(), Nil), Nil)),
                                fresh_name(name_prefix, idx), idx + 1))
                       else Err("ast_to_ir: unbound variable '" ++ name ++ "'")
   | typed_ast.TBinary op left right _ _ ->
@@ -2230,7 +2231,8 @@ fn translate_lambda_lifted(lparams: List ast.Param, body: typed_ast.TypedExpr,
               let closure_result = fresh_name(name_prefix, idx)
               Ok((Nil, cur_label,
                    list_append(cur_ops,
-                     Cons(sprout_ir.IRMkClosure(closure_result, lam_fn_name, cap_ssas), Nil)),
+                     Cons(sprout_ir.IRMkClosure(closure_result, lam_fn_name,
+                            list_length(lam_param_names), cap_ssas), Nil)),
                    closure_result, idx + 1))
 
 # Translate `left <op> right` into IR ops.  Op must be one of
@@ -6938,6 +6940,15 @@ fn synthesize_eta_wrapper(fn_name: String, arity: Int, wrapper_name: String) -> 
                               Cons(sprout_ir.IRCall("%ret", sprout_ir.IRTUnknown, fn_name, build_wrapper_arg_ssas(0, arity)),
                               Cons(sprout_ir.IRRet("%ret"), Nil))),
                         Nil))
+
+# Arity recorded for a closure the apply-site check must wave through.
+#
+# SYNC WITH runtime/sprout_runtime.c SPROUT_CLOSURE_ARITY_ANY (the arity field is
+# 18 bits; this is all of them set).  Only the poison thunk below uses it: that
+# thunk declares no user parameters yet is applied with the method's arguments,
+# so a real arity would make the check fire first and replace its located message
+# with a generic arity mismatch.
+fn closure_arity_any() -> Int = 262143
 
 # Poison thunk for an unresolved (free-tyvar) typeclass dict — see the
 # `__unresolved_` branch in translate_expr.  A closure whose slot-0 code pointer

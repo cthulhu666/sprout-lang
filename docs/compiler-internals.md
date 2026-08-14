@@ -80,6 +80,19 @@ Three properties are load-bearing if you touch `region_find` or `sprout_heap_loo
 
 `just gc-arena-check` asserts the fast path is actually taken (`arena_regions > 1`, `overflow_regions == 0`), that disabling works, and that a deliberately undersized arena produces a *mixed* state where both lookup paths are live at once. That gate exists because a failed or mis-sized reservation silently reverts to the search while every other test still passes. Rationale, measurements, and the regressions found while building it: [gc-arena-lookup-v0.md](gc-arena-lookup-v0.md) §12.
 
+### Closure layout: the header's `aux` carries the arity as well as the capture count
+
+A closure env is a heap block with the code pointer at slot 0 and captures at slots 1..n. Its GC header word packs `kind` in bits 0–7 and `aux` in bits 14–63, and for `SPROUT_HEAP_CLOSURE` that 50-bit `aux` holds **two** fields: the capture count in the low 32 bits and the closure's **arity** — how many arguments one application consumes — above it. Same idiom as `SPROUT_HEAP_OBJ`'s `(tag << 8) | arity`, and chosen for the same reason: it adds a field without moving a payload slot, so the capture indices, the `(n_caps + 1) * 8` size formula, and the GC child walk all keep their existing shape. `sprout_closure_aux` / `sprout_closure_ncaps` / `sprout_closure_arity_of` in `runtime/sprout_runtime.c` are the only places that know the split.
+
+**The arity is load-bearing, not diagnostic.** A Sprout function type does not determine a value's calling convention: `\(x, y) -> …` is one two-parameter closure and `\x -> \y -> …` is two one-parameter ones, and both have type `Int -> Int -> Int`. So a call site applying a *value* cannot know statically how many arguments one application may consume. Every `IRApplyClosure` therefore emits a `@sprout_closure_arity_check(handle, n_args)` call ahead of the indirect call; without it, over-application returned the closure handle reinterpreted as the result type (exit 0, no diagnostic) and under-application dereferenced a register nothing had written (SIGSEGV). Calls to a statically-known callee lower through `translate_general_call`, are checked at compile time, and never reach the runtime guard.
+
+Two constraints if you touch this:
+
+- **The split is duplicated in emitted IR.** `ir_lowering.sprout` writes the arity through `@sprout_alloc_closure(size, arity)`, and both files carry SYNC comments. Changing the bit split in one place silently mis-reads every closure's arity.
+- **The check must stay call-shaped, not branch-shaped.** An inline compare-and-branch would open a new basic block mid-op, and `lower_op` renders ops inside a block whose label the builder has already fixed — any downstream `IRPhi` would then name a predecessor that is no longer the real one.
+
+`SPROUT_CLOSURE_ARITY_ANY` (all arity bits set) marks a closure the check waves through. Only the unresolved-dict poison thunk uses it: that thunk declares no user parameters yet is applied with the method's arguments, so a truthful arity would make the guard fire first and replace its located message with a generic mismatch.
+
 ### Type-aware GC rooting — the `ir_rooting` pass
 
 **Intentional design — do not root non-heap scalars.**
@@ -202,7 +215,7 @@ Design + status: `docs/devirtualization-v0.md` (LANDED). A related but distinct 
 
 - **What.** A class-method call whose dispatch dictionary is a **statically-known concrete instance**
   is lowered to a **direct call** of the concrete `__tc_{Class}_{Type}_{method}` fn, dropping the
-  runtime dictionary — no `sprout_alloc_closure_env`, no generic `__cm_` wrapper indirection. Before,
+  runtime dictionary — no `sprout_alloc_closure`, no generic `__cm_` wrapper indirection. Before,
   every concrete class-method call built a dict of eta-closures (one per method, most dead) and called
   the generic wrapper, which then dispatched *indirectly* to the concrete fn.
 - **Gate (`try_devirt_concrete`).** Fires iff the leading (and only) `TDict` is `EvClasses blocks` and

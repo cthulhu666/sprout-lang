@@ -1997,6 +1997,66 @@ div-by-zero-smoke: bootstrap-from-seed
   fi
   echo "==> div-by-zero-smoke ✓ (clean panic, exit $ec)"
 
+# Closure-arity guard regression (CI gate).  A Sprout function type does not fix
+# a value's arity — `\(x, y) -> …` and `\x -> \y -> …` share `Int -> Int -> Int`
+# — so applying a function-typed VALUE with the wrong argument count cannot be
+# caught by the call-site checks in infer.sprout, which key on a named callee.
+# Unguarded, over-application returned the closure handle as the result type
+# (silent wrong answer, exit 0) and under-application SIGSEGV'd.  Each fixture
+# picks its callee from argv at RUNTIME so neither Sprout nor clang can resolve
+# it statically and fold the mismatch away.
+#
+# The third fixture is a POSITIVE CONTROL: a guard that panicked on every closure
+# application would satisfy the first two on its own.
+[group('smoke')]
+closure-arity-smoke: bootstrap-from-seed
+  #!/usr/bin/env bash
+  set -euo pipefail
+  TMPD=$(mktemp -d /tmp/sprout_cloar_XXXXXX)
+  trap 'rm -rf "$TMPD"' EXIT
+  build_fixture() {
+    if ! "{{build_dir}}/compile_driver_bin_stage1" --emit-ir "{{stdlib_root}}" \
+         "tests/closure_arity_smoke/$1.spr" > "$TMPD/$1.ll" 2>"$TMPD/$1.emit.err"; then
+      echo "closure-arity-smoke: emit-IR failed for $1" >&2; cat "$TMPD/$1.emit.err" >&2; exit 1
+    fi
+    if ! clang "$TMPD/$1.ll" {{runtime_src}} -O2 {{clang_extra}} -o "$TMPD/$1.bin" 2>"$TMPD/$1.link.err"; then
+      echo "closure-arity-smoke: link failed for $1" >&2; cat "$TMPD/$1.link.err" >&2; exit 1
+    fi
+  }
+  for f in under_apply_value over_apply_value saturated_value; do build_fixture "$f"; done
+
+  # Both mismatch directions must abort cleanly, naming the counts.
+  for f in under_apply_value over_apply_value; do
+    set +e; "$TMPD/$f.bin" > "$TMPD/$f.out" 2>"$TMPD/$f.err"; ec=$?; set -e
+    if [ "$ec" -eq 0 ]; then
+      echo "closure-arity-smoke: $f did NOT panic (exit 0) — the arity guard is missing." >&2
+      echo "  stdout was: $(cat "$TMPD/$f.out")" >&2
+      exit 1
+    fi
+    if [ "$ec" -ge 128 ]; then
+      echo "closure-arity-smoke: $f died on signal $((ec - 128)) instead of panicking cleanly." >&2
+      exit 1
+    fi
+    if ! grep -q "this function value expects" "$TMPD/$f.err"; then
+      echo "closure-arity-smoke: $f aborted (exit $ec) without the arity diagnostic." >&2
+      echo "--- stderr was ---" >&2; cat "$TMPD/$f.err" >&2
+      exit 1
+    fi
+  done
+
+  # Positive control: every legal spelling still runs and still computes 1 + 2.
+  set +e; "$TMPD/saturated_value.bin" > "$TMPD/sat.out" 2>"$TMPD/sat.err"; ec=$?; set -e
+  if [ "$ec" -ne 0 ]; then
+    echo "closure-arity-smoke: POSITIVE CONTROL failed (exit $ec) — the guard fires on" >&2
+    echo "  saturated applications, so the assertions above prove nothing." >&2
+    cat "$TMPD/sat.err" >&2; exit 1
+  fi
+  if [ "$(tr -d '\n' < "$TMPD/sat.out")" != "333" ]; then
+    echo "closure-arity-smoke: POSITIVE CONTROL produced '$(tr '\n' ' ' < "$TMPD/sat.out")', expected 3 3 3." >&2
+    exit 1
+  fi
+  echo "==> closure-arity-smoke ✓ (both mismatch directions panic cleanly, saturated calls unaffected)"
+
 # TCO runtime regression (CI gate): a deep tail-recursive program must run to
 # completion under typed codegen (--use-ir-codegen, now the default). The fixture
 # carries a heap param rooted across the recursive call, so a non-TCO'd typed
@@ -2432,6 +2492,7 @@ ci-fast-gates: bootstrap-from-seed build-fmt-from-seed
     "gc-arena|gc-arena-check"
     "argv-smoke|argv-smoke"
     "div-by-zero-smoke|div-by-zero-smoke"
+    "closure-arity-smoke|closure-arity-smoke"
     "stack-overflow-smoke|stack-overflow-smoke"
     "flush-on-crash-smoke|flush-on-crash-smoke"
     "task-io-smoke|task-io-smoke"

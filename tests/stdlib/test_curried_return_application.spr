@@ -15,16 +15,14 @@ import stdlib.test (check_eq, run_suite)
 # application is written separately. The over-applied spelling is now a located
 # error, pinned by tests/conformance/type_error/over_application.spr.
 #
-# NOT CLOSED — over-application through an ALIAS still miscompiles silently:
-#
-#   let g = adder
-#   g(1, 2)          # returns the closure handle as an Int, exit 0
-#
-# The check keys on `@arity:<name>`, which bind_local_scheme drops for a local (it
-# has to: the name now refers to a value). No named-call check sees the alias, and
-# the closure header carries no arity for a dynamic check. Closing it needs a
-# runtime-arity field and over-application handling in the closure ABI — a runtime
-# change, tracked in BACKLOG. The cases below are the direct-call class only.
+# The cases below are the DIRECT-call class: a callee named at the call site, whose
+# declared arity the checker reads from `@arity:<name>`. Through a function-typed
+# VALUE that marker is gone — bind_local_scheme drops it for a local, as it must,
+# since the name now refers to a value — and the type cannot stand in for it,
+# because `pair_add` and `nested_add` below are the proof that one type spans two
+# arities. Those applications are checked at runtime instead, against the arity
+# recorded in the closure header: tests/closure_arity_smoke/, `just
+# closure-arity-smoke`.
 
 # One declared parameter, one arrow in the return type.
 fn adder(n: Int) -> Int -> Int = \m -> n + m

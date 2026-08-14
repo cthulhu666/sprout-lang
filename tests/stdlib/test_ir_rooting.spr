@@ -188,7 +188,7 @@ fn test6_program() -> sprout_ir.IRProgram =
 #   %clo = IRMkClosure "lam" [%c]    ← trigger; %c is a capture, dead afterward
 #   ret %clo
 #
-# @sprout_alloc_closure_env allocates the env (a GC point) before the capture
+# @sprout_alloc_closure allocates the env (a GC point) before the capture
 # stores emitted by ir_lowering; the capture is not handle-protected, so %c
 # must be rooted across the mk-closure.  Expected: 1 root.
 fn test7_program() -> sprout_ir.IRProgram =
@@ -196,7 +196,7 @@ fn test7_program() -> sprout_ir.IRProgram =
     sprout_ir.IRFunction("closure_cap", Nil, "i64", Cons(
       sprout_ir.IRBlock("entry",
         Cons(sprout_ir.IRStrConst("%c", "%c_raw", "c"),
-        Cons(sprout_ir.IRMkClosure("%clo", "lam", Cons("%c", Nil)),
+        Cons(sprout_ir.IRMkClosure("%clo", "lam", 1, Cons("%c", Nil)),
         Cons(sprout_ir.IRRet("%clo"), Nil)))),
       Nil)),
     Nil), Nil, Nil, Nil)
@@ -700,7 +700,7 @@ fn main() -> Unit !{IO} =
 
     # --- Test 7: IRMkClosure capture rooted across the mk-closure (PR-A regression).
     # %c is dead after the mk-closure but must be rooted because
-    # @sprout_alloc_closure_env allocates before the capture stores.
+    # @sprout_alloc_closure allocates before the capture stores.
     check_eq("T7: exactly one push_i64_root for IRMkClosure capture",
               count(lower(test7_program()), "call i64 @sprout_gc_push_i64_root"), 1),
     check_eq("T7: exactly one pop_roots(i64 1) around the mk-closure",
