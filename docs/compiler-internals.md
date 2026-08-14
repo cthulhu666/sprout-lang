@@ -233,6 +233,36 @@ Design + status: `docs/devirtualization-v0.md` (LANDED). A related but distinct 
   CPR routes it to that fn's `_worker` — the returned `Maybe`/tuple stays unboxed. This is what makes
   the rivers-demo `bake_tile` fully allocation-free (tuple SRA + devirt).
 
+## Whole-program passes: scan `decls` AND read `env`
+
+**Any pass that derives a fact by scanning `decls` must also recover that fact
+from `env`.** The two compile entry points assemble a program differently, and a
+pass that only walks `decls` silently sees an empty vocabulary on one of them:
+
+- **File / `--phase check` / `compile_full_ir`** — `bundler.bundle_file` inlines
+  the prelude and every import as real AST nodes, so `prog.decls` holds every
+  `TypeDecl`/`ClassDecl`. A decl-scan sees everything.
+- **REPL / LSP / analysis service** — `compiler.compile_source_with_cache` →
+  `checker.check_program_with_env` parses only the session source. Imports arrive
+  as an env of `(name, Scheme)` pairs plus `@`-prefixed markers, never as decls.
+  A decl-scan sees nothing.
+
+`infer.class_names_from_env` and `infer.type_names_from_env` are the reference
+implementations: each scans `dict_entries(env)` for its marker family
+(`@class:`, `@type:`) and folds the recovered names into the decl-derived set.
+
+This has bitten twice. A `where ToString a` constraint using a prelude class was
+rejected in the REPL because the class set was empty; then the type-name
+validation pass rejected `Vec`, `Dict` and `Result`, making 11 of 27 top-level
+stdlib modules unloadable there. Both were invisible to `just test`, which
+exercises the bundling path. Write the regression test against
+`compile_source_with_cache` — see `tests/stdlib/compiler/test_repl_type_vocabulary.spr`
+and `docs/repl-env-type-vocabulary-v0.md`.
+
+The failure mode is silent by construction: `module_loader.load_module` turns a
+module's `CheckErr` into an empty pair list, so the error surfaces far from its
+cause as `Unknown variable: <module>.<name>`.
+
 ## Driver diagnostic contract: stderr + nonzero exit
 
 Anything in `stdlib/compiler/*_driver.sprout` that reports a problem must obey two
