@@ -244,6 +244,33 @@ Rules:
   are visible in a `let … in` RHS/body; `let … in` bindings are not visible in
   `where`).
 
+### 5.2.1a Multi-name `let` as a `do` statement
+
+A `let` statement in a `do` block may carry **several bindings**, layout-aligned
+under the first one exactly as in `let … in` (§5.2.1), and binds every name:
+
+```sprout
+do
+  let a = 1
+      b = a + 1
+      c = b + 1
+  print(to_string(a + b + c))
+```
+
+Bindings are **sequential**, matching §5.2.1: each is in scope for the ones below
+it and for the rest of the block. The statement is equivalent to writing one
+`let` statement per name, and the split between bindings uses the same layout
+rule the expression form uses, so a right-hand side may span lines.
+
+A binding carrying an `else` (§5.2.2) must stand alone as a single-binding
+statement: its desugaring places the remaining steps inside a `match` arm, which
+is a shape one binding among several cannot have.
+
+**One step per line.** A `do` step must consume the whole of its line (and any
+continuation lines indented under it). Trailing tokens are an error — they used
+to be discarded in silence, so a second statement written on the same line as
+the first simply never ran.
+
 ### 5.2.2 Refutable binds in `do` blocks *(experimental)*
 
 Inside a `do` block, both the effectful bind (`<pattern> <- <e>`) and the pure
