@@ -1364,12 +1364,11 @@ Doing so would make one expression denote different values in different calls,
 which is an incoherence rather than a missing diagnostic.
 
 **Dispatch identity under several constraints of the same class.**  When more
-than one constraint of the same class is in scope, each use selects the instance
-for **its own** type, never whichever witness the compiler happens to reach
-first.  This holds however indirectly the operand acquires its type — in
-particular for a lambda parameter, whose type is only tied to the enclosing
-constraint variable once the lambda is matched against the higher-order
-function's parameter:
+than one constraint of the same class is in scope, an **operator** dispatches on
+its own operand's type, never on whichever witness the compiler reaches first.
+This holds even when the operand's type is tied to the constraint variable only
+indirectly — in particular for a lambda parameter, whose type is fixed only once
+the lambda is matched against the higher-order function's parameter:
 
 ```sprout
 fn fold_both(xs: List a, ys: List b, sa: a, sb: b, …) -> String
@@ -1381,6 +1380,13 @@ fn fold_both(xs: List a, ys: List b, sa: a, sb: b, …) -> String
 
 The two `++` operators denote different `append` implementations, chosen by
 their own operands.  Declaration order of the `where` constraints has no effect.
+
+The same holds for a class-method call whose dispatching argument the compiler
+can identify from the method's declared parameter types.  It is **not yet
+guaranteed** when it cannot — when the constraint variable appears only nested
+inside a parameter's type rather than as that parameter's own type.  With
+several constraints of one class in scope, such a call may still select the
+wrong one; this is a known gap tracked in `BACKLOG.md`, not intended behaviour.
 
 ### `ToString` instances
 
