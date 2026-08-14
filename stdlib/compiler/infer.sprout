@@ -2844,14 +2844,15 @@ fn append_via_semigroup_at(
       # Polymorphic operand (inside a generic fn with `where Semigroup t`): forward
       # the in-scope Semigroup witness, mirroring check_instance_for_marker's fwd path.
       #
-      # Deliberately UNGATED (`Nothing`), unlike the class-method sites. `append`
-      # takes its class variable in argument position, and the post-pass repair
-      # (keep_or_forward_dispatch) only rewrites RETURN-position dispatch — so a
-      # gated `acc ++ x` inside a `where Monoid a` fold would go dictionary-less
-      # with nothing able to repair it. Gating here needs a symmetric
-      # input-position repair first.
+      # Gated on the operand type, like the class-method sites. Ungated, a scan
+      # that found ANY `@fwd:*:Semigroup` marker resolved `++` by dict order: with
+      # two `Semigroup` constraints in scope, one fold ran with the other's
+      # dictionary and String's `append` was applied to a `List` — a silent
+      # miscompile, not a crash. Gating is only safe because
+      # maybe_forward_input_dispatch repairs the lambda-parameter forwards that
+      # the gate would otherwise leave dictionary-less.
       check_instance_fwd("Semigroup", typed_ast.TVar("append", t, pos),
-                         [typed_left, typed_right], env, t, s1, eff_subst, eff, pos, Nothing)
+                         [typed_left, typed_right], env, t, s1, eff_subst, eff, pos, Just(t))
 
 fn check_arith(
   subst: Dict types.Type,
@@ -5690,6 +5691,40 @@ fn try_rewrite_for_return_dispatch(
               strip_leading_tdicts(args)),
             t, pos)
 
+# Input-position dispatch resolves eagerly during inference, so a call that
+# already carries a dict is left exactly as it is — re-deriving it here could only
+# disagree with a decision made on better information.
+#
+# What arrives here dict-less is a FORWARD whose variable was not yet identified
+# with its constraint's variable when check_instance_fwd ran. `find_fwd_tdict_in_args`
+# reads each argument's RAW node type, so a lambda parameter — whose type is a
+# fresh variable until the lambda unifies with the higher-order function's
+# parameter — misses its own marker. That is the `acc ++ x` inside a fold. The
+# declaration's final substitution has since identified the two, so repair it
+# exactly as the return-position path does.
+#
+# This is what makes gating the `++` site safe: without the repair, gating turns
+# every such fold into a dictionary-less call.
+fn maybe_forward_input_dispatch(
+  env: Dict types.Scheme,
+  subst: Dict types.Type,
+  fn_: typed_ast.TypedExpr,
+  args: List typed_ast.TypedExpr,
+  t: types.Type,
+  pos: source.SourcePos,
+  class_name: String,
+  class_vars: List String,
+  method_type: types.Type
+) -> typed_ast.TypedExpr =
+  let Nil = collect_all_tdicts(args) else typed_ast.TCall(fn_, args, t, pos)
+      Just resolved_t = dispatch_type_for_vars(method_type, args, t, subst, class_vars)
+        else typed_ast.TCall(fn_, args, t, pos)
+      # A concrete head is inference's business, not this pass's: if it resolved
+      # concretely and still has no dict, that is a missing instance, which
+      # verify_dispatch reports against the call's position.
+      Nothing = concrete_type_str(resolved_t) else typed_ast.TCall(fn_, args, t, pos)
+  in keep_or_forward_dispatch(env, subst, fn_, args, t, pos, class_name, resolved_t)
+
 # Inject a forwarded dict when the still-polymorphic dispatch variable is one the
 # enclosing declaration declared a constraint for; otherwise leave the call alone.
 fn keep_or_forward_dispatch(
@@ -5783,7 +5818,8 @@ fn maybe_rewrite_class_method_call(
                       | Just method_scheme ->
                           match method_scheme with
                           | types.Scheme _ _ method_type _ _ ->
-                              if class_var_in_args(method_type, class_vars) then typed_ast.TCall(fn_, args, t, pos)
+                              if class_var_in_args(method_type, class_vars)
+                              then maybe_forward_input_dispatch(env, subst, fn_, args, t, pos, types.type_id_name(class_name), class_vars, method_type)
                               else try_rewrite_for_return_dispatch(env, subst, fn_, args, t, pos, types.type_id_name(class_name), class_vars, method_type)
               | _ -> typed_ast.TCall(fn_, args, t, pos)
   | _ -> typed_ast.TCall(fn_, args, t, pos)

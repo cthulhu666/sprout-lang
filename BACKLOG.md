@@ -3273,18 +3273,38 @@ op-classification already in place.
     and `$ex_<var>` existential forwarding identities) were being compared as if they were type
     constructors, and a top-level `fn` shadowing a class-method name (`test_classmethod_dispatch_
     identity`'s `fn append`) left the method's signature registered.
-- [ ] `P2` **Ambiguous `++` (Semigroup) dispatch is still resolved by an unrelated marker.** The
-  fix above gates three of `check_instance_fwd`'s four call sites; the fourth — the `++`
-  desugaring in `check_semigroup_append` — is deliberately left ungated. Gating it needs a
-  symmetric INPUT-position repair in the post-pass: `maybe_rewrite_class_method_call` returns
-  input-position calls unchanged (their class var is in the args), so a gated-off `acc ++ x`
-  inside `mconcat` would go dict-less with nothing to repair it, over-rejecting the prelude. The
-  incoherence therefore remains reachable by writing the ambiguous shape with `++` instead of a
-  user class method. Fix: find the class-var argument, resolve it under the final substitution,
-  and reuse `forwarded_tdict_for_tyvar`'s equivalence match; then pass `Just(t)` at that site.
-  Measured NOT to be an over-rejection risk in the other direction: input-position named-method
-  forwarding (`mshow(x)` directly, inside a HOF lambda, and through a container) all still
-  resolve, because `find_fwd_tdict_in_args` catches them before the gated scan.
+- [x] `P2` **`++` (Semigroup) dispatch resolved by an unrelated marker — FIXED 2026-08-14, same
+  branch.** Initially deferred, then closed once a repro showed the hole was not merely an
+  ambiguity gap but a **live silent miscompile**. `find_fwd_tdict_in_args` reads each operand's
+  RAW node type, so a lambda parameter — whose type is a fresh variable until the lambda unifies
+  with the higher-order function's parameter — misses its own marker and `++` fell through to the
+  class-only scan. With TWO `Semigroup` constraints in scope that scan returned whichever marker
+  came first in dict order, so in
+  `fn fold_both(xs: List a, ys: List b, …) where Semigroup a, Semigroup b` the `List` fold ran
+  with `String`'s dictionary: `__tc_Semigroup_String_append` applied to a list, printing a tab and
+  two control bytes instead of `[9, 1, 2]`. Verified present on master `257f7638` too, so it was
+  pre-existing rather than introduced by the gate. Fix = `maybe_forward_input_dispatch`, the
+  symmetric input-position repair (a dict-less input-position call whose dispatch type is still a
+  variable gets the marker its variable is identified with under the final substitution), which
+  is what makes passing `Just(t)` at the `++` site safe. Regression test:
+  `tests/stdlib/test_semigroup_append_dispatch_identity.spr` (both constraint orders, plus the
+  single-marker `mconcat` shape and direct non-lambda operands as controls).
+- [ ] `P2` **The remaining ungated scan (`class_var_arg_or_fallback` found no class-var arg) can
+  still pick the wrong marker.** Discovered while testing the `++` fix. When
+  `check_instance_for_marker` cannot identify which argument carries the class variable, it calls
+  `check_instance_fwd` with `Nothing`, which keeps the ungated class-only scan — and that scan has
+  the same first-in-dict-order defect. Repro: in the `fold_both` shape above, add
+  `ToString a, ToString b` and render with `to_string` instead of passed-in functions; BOTH
+  `to_string` calls lower to `__cm_ToString_to_string(…, %__tc_ToString_2_to_string)` — the dict
+  for `a` — so the `b` value is rendered through `a`'s instance. (`SPROUT_TRACE_DISPATCH=1`
+  confirms the CALLER resolves all four dicts correctly; the mis-selection is inside the callee.)
+  Not fixed here because the obvious fix does not work: making that site gated as well (declining
+  to scan) breaks the prelude's `map4` with `No instance of Applicative for a function type`, so
+  the scan is load-bearing for at least the Applicative shape. Closing this needs the post-pass
+  repair to cover the no-class-var-arg case — `dispatch_type_for_vars` already searches the
+  declared parameter types structurally, so it can find a class variable nested inside a
+  container, which `class_var_arg_or_fallback` cannot — and then the Applicative path re-checked
+  against it.
 - [ ] `P3` **`extern fn str_slice(s: String, from: Int, to: Int)` misnames its third parameter.**
   The third argument is a **length**, not an end index — the runtime signature is
   `str_slice(long long s, long long start, long long length)` and `prelude.sprout` documents it

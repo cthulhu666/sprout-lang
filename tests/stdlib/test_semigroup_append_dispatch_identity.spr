@@ -1,0 +1,70 @@
+import stdlib.test (TestState, new_state, assert_true, summary)
+
+# `++` (Semigroup `append`) must dispatch on ITS OWN operand type, not on
+# whichever Semigroup witness happens to come first in the environment.
+#
+# The defect: `find_fwd_tdict_in_args` reads each operand's RAW node type. A
+# lambda parameter's type is a fresh variable not yet identified with the
+# enclosing constraint's variable, so both operands miss the direct
+# `@fwd:{tvar}:Semigroup` lookup and `++` fell through to a CLASS-ONLY scan of the
+# environment. With two `Semigroup` constraints in scope that scan returned
+# whichever marker came first in dict order, so one of the two folds below ran
+# with the other's dictionary.
+#
+# It is a silent miscompile, not a crash: applying String's `append` to a `List`
+# reads list pointers as string bytes. Before the fix the `List` fold produced a
+# tab and two control characters instead of `[9, 1, 2]`.
+#
+# Rendering is passed in as plain function parameters rather than using
+# `ToString`. That is deliberate: it keeps this test measuring Semigroup dispatch
+# only, instead of also depending on how a second two-marker class resolves.
+
+fn fold_both(xs: List a, ys: List b, sa: a, sb: b, showa: a -> String, showb: b -> String) -> String
+  where Semigroup a, Semigroup b =
+  showa(list_fold(\ (acc, x) -> acc ++ x, sa, xs))
+  ++ "|"
+  ++ showb(list_fold(\ (acc, y) -> acc ++ y, sb, ys))
+
+# Same hazard with the two constraints declared in the opposite order, so a fix
+# that merely happens to pick the right marker by position does not pass.
+fn fold_both_swapped(ys: List b, xs: List a, sb: b, sa: a, showb: b -> String, showa: a -> String) -> String
+  where Semigroup a, Semigroup b =
+  showb(list_fold(\ (acc, y) -> acc ++ y, sb, ys))
+  ++ "|"
+  ++ showa(list_fold(\ (acc, x) -> acc ++ x, sa, xs))
+
+# Single-constraint fold — the `mconcat` shape. This one always worked (only one
+# marker to find) and must keep working: it is the legitimate lambda-parameter
+# forward that gating the `++` site would break without the post-pass repair.
+fn cat_all(xs: List a, seed: a) -> a where Semigroup a =
+  list_fold(\ (acc, x) -> acc ++ x, seed, xs)
+
+# Direct (non-lambda) operands: each operand's raw type IS the constraint
+# variable, so the direct lookup resolves it. The control case.
+fn direct_both(x: a, y: a, p: b, q: b, showa: a -> String, showb: b -> String) -> String
+  where Semigroup a, Semigroup b =
+  showa(x ++ y) ++ "|" ++ showb(p ++ q)
+
+fn show_str(s: String) -> String = s
+fn show_ints(xs: List Int) -> String = to_string(xs)
+
+fn main() -> Unit !{IO} =
+  do
+    state <- new_state()
+
+    assert_true(state, "two Semigroup markers: each fold uses its OWN operand's dict",
+      fold_both(["b", "c"], [[1], [2]], "a", [9], show_str, show_ints) == "abc|[9, 1, 2]")
+
+    assert_true(state, "same, with the constraints declared in the opposite order",
+      fold_both_swapped([[1], [2]], ["b", "c"], [9], "a", show_ints, show_str) == "[9, 1, 2]|abc")
+
+    assert_true(state, "single-marker fold still forwards (the mconcat shape)",
+      cat_all(["b", "c"], "a") == "abc")
+
+    assert_true(state, "single-marker fold forwards at a different element type",
+      show_ints(cat_all([[1], [2]], [9])) == "[9, 1, 2]")
+
+    assert_true(state, "direct operands resolve by their own tyvar",
+      direct_both("a", "b", [1], [2], show_str, show_ints) == "ab|[1, 2]")
+
+    summary(state)
