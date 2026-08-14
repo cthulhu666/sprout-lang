@@ -1048,15 +1048,19 @@ fn call_arity_error(name: String, got: Int, want: Int) -> String =
   "'" ++ name ++ "' expects " ++ int_to_string(want) ++ " arguments, got "
     ++ int_to_string(got) ++ " (Sprout is n-ary; use `_` for partial application)"
 
-# Too MANY arguments. Reachable only when the callee's declared return type is
-# itself a function: with any other return type the surplus argument fails
-# unification first, as a type mismatch. Sprout is n-ary (docs/currying-and-pipe-
-# decision-v1.md §9a.5), so the extra arguments are a SEPARATE application of the
-# returned closure and have to be written as one.
+# Too MANY arguments. This runs BEFORE unification, so it covers both callees.
 #
-# Silently accepting this miscompiled: codegen emitted a direct call to the
-# declared-arity symbol carrying the surplus arguments, LLVM discarded them, and
-# the call returned the closure handle reinterpreted as the result type.
+# A callee returning a function unified happily and then MISCOMPILED: codegen
+# emitted a direct call to the declared-arity symbol carrying the surplus
+# arguments, LLVM discarded them, and the call returned the closure handle
+# reinterpreted as the result type. A callee returning anything else was already
+# rejected, but as "Call type mismatch" once the surplus argument would not
+# unify; it now reports the arity, which names the actual mistake.
+#
+# Sprout is n-ary (docs/currying-and-pipe-decision-v1.md §9a.5), so surplus
+# arguments are a SEPARATE application of the returned closure. Hence the
+# conditional phrasing below: that advice applies only when the result really is
+# a function, and this message is shared with the case where it is not.
 fn over_application_error(name: String, got: Int, want: Int) -> String =
   "'" ++ name ++ "' expects " ++ int_to_string(want) ++ " arguments, got "
     ++ int_to_string(got) ++ " — if it returns a function, apply the rest in a"

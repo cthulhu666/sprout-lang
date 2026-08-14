@@ -1,0 +1,15 @@
+import stdlib.test (check_eq, run_suite)
+
+# Over-application of a callee whose return type is NOT a function.
+#
+# This was already rejected, but as "Call type mismatch" — the surplus argument
+# failed to unify, so the diagnostic described a type where the mistake was an
+# arity. The arity check now runs before unification and covers both callees, so
+# the message names the actual problem. The sibling fixture over_application.spr
+# covers the function-returning callee, which unified happily and miscompiled.
+fn twice(x: Int) -> Int = x + x
+
+fn main() -> Unit !{IO} =
+  run_suite("over_application_plain", [
+    check_eq("over-applied", twice(1, 2), 2)
+  ])
