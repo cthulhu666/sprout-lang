@@ -411,6 +411,18 @@ fn build_cons_pattern(items: List ast.Pattern, tail: ast.Pattern, pos: source.So
 # ---------------------------------------------------------------------------
 # Do expression helpers
 
+# Can this token head an expression, and so begin a new step?
+#
+# The arms must mirror `parse_primary` and `parse_unary` — every literal kind,
+# opening bracket and prefix operator they accept, plus the four keywords that
+# head an expression form (`let`/`if`/`match`/`do`). A form left out is not a
+# harmless omission: `scan_do_step_end` reads a "no" as "this line continues the
+# previous step", so the earlier step's slice swallows the line and the step is
+# lost. `tests/stdlib/test_do_step_starts.spr` exercises one of each and fails
+# at parse time when the two lists drift apart.
+#
+# Prefix `!` cannot be confused with infix `!=`: the lexer matches the two-char
+# operators first, so `!=` never reaches here as a bare `!`.
 fn looks_like_do_step_start(tokens: Vec token.Token, i: Int) -> Bool =
   tok_is_keyword(tok_at(tokens, i), "let") ||
   tok_is_keyword(tok_at(tokens, i), "if") ||
@@ -420,6 +432,7 @@ fn looks_like_do_step_start(tokens: Vec token.Token, i: Int) -> Bool =
   tok_is_keyword(tok_at(tokens, i), "false") ||
   tok_is_ident(tok_at(tokens, i)) ||
   tok_is_int(tok_at(tokens, i)) ||
+  tok_is_float(tok_at(tokens, i)) ||
   tok_is_string(tok_at(tokens, i)) ||
   tok_is_char(tok_at(tokens, i)) ||
   tok_is_symbol(tok_at(tokens, i), "\\") ||
@@ -427,6 +440,7 @@ fn looks_like_do_step_start(tokens: Vec token.Token, i: Int) -> Bool =
   tok_is_symbol(tok_at(tokens, i), "{") ||
   tok_is_symbol(tok_at(tokens, i), "(") ||
   tok_is_symbol(tok_at(tokens, i), "-") ||
+  tok_is_symbol(tok_at(tokens, i), "!") ||
   tok_is_template_start(tok_at(tokens, i))
 
 fn update_bracket_depth(t: token.Token, depth: Int) -> Int =

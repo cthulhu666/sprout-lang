@@ -306,3 +306,19 @@ The bug is also wider than the reproduction shows: the qualified spelling has th
   A binding carrying an `else` still has to stand alone — its desugaring puts the remaining steps
   inside a `match` arm, a shape one binding among several cannot have. That restriction is written
   into the spec rather than left for someone to discover.
+
+  **Follow-up (2026-08-14): the backstop immediately earned its keep.** Reported downstream right
+  after landing — a bare `Double` literal as a `do` step stopped parsing, e.g. a block ending in
+  `0.0`. The backstop was the messenger, not the cause. A step ends where the *next* step begins, and
+  `scan_do_step_end` asks `looks_like_do_step_start` whether the next line's first token can head an
+  expression; that allow-list must mirror `parse_primary` and `parse_unary`, and it was missing float
+  literals and prefix `!`. On a "no" the scan runs on, so the previous step's slice swallowed the
+  whole line.
+
+  Before the backstop this was **silent wrong code**, which is the point worth carrying: a block of
+  two bare `Double` steps compiled clean on the pre-backstop compiler and evaluated to the *first*
+  step's value — `0.0` where `1.0` is correct, exit 0, no diagnostic. Confirmed by building the
+  pre-backstop compiler from its committed seed and running it, not inferred. So the parse error was
+  strictly better than what it replaced, and the allow-list gap is now fixed as well.
+  `tests/stdlib/test_do_step_starts.spr` pins one step of each accepted form so the two lists cannot
+  drift apart again, and `docs/spec-v0.md` §5.2.1a now states where a step ends normatively.

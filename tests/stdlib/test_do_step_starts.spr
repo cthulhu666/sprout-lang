@@ -1,0 +1,143 @@
+import stdlib.test (TestState, new_state, assert_true, summary)
+
+# A do step ends where the NEXT step begins. `scan_do_step_end` finds that point
+# by asking `looks_like_do_step_start` whether the next line's first token can
+# head an expression; when the answer is wrongly "no", the scan runs on and the
+# PREVIOUS step's token slice swallows the whole line.
+#
+# That used to be silent. A bare `3.5` after another step compiled clean and the
+# block evaluated to the earlier step's value instead — wrong code, exit 0, no
+# diagnostic. `step_fully_consumed` now rejects the leftover tokens, so the same
+# shape is a parse error rather than a wrong answer; either way the step is lost.
+#
+# The allow-list must therefore mirror `parse_primary` and `parse_unary` exactly.
+# One helper below per form those two accept, each with the form as a step that
+# is NOT the first — the only position where the scan can swallow it. A form
+# missing from the allow-list fails this file at PARSE time.
+
+fn pre() -> Int = 0
+
+fn s_true() -> Bool =
+  do
+    pre()
+    true
+
+fn s_false() -> Bool =
+  do
+    pre()
+    false
+
+fn s_int() -> Int =
+  do
+    pre()
+    42
+
+fn s_float() -> Double =
+  do
+    pre()
+    3.5
+
+fn s_char() -> Char =
+  do
+    pre()
+    'z'
+
+fn s_string() -> String =
+  do
+    pre()
+    "hi"
+
+fn s_template() -> String =
+  do
+    pre()
+    `v=${1 + 1}`
+
+# The lambda is a discarded middle step, not the block's value: returning it
+# would need a `-> Int -> Int` signature, and calling such a function currently
+# yields the closure rather than applying the argument (BACKLOG, Parser/codegen).
+# Step position is what this file tests, and a middle step tests it just as well.
+fn s_lambda() -> Int =
+  do
+    pre()
+    \x -> x + 1
+    5
+
+fn s_list() -> List Int =
+  do
+    pre()
+    [1, 2, 3]
+
+fn s_dict() -> Dict Int =
+  do
+    pre()
+    {alpha: 1, beta: 2}
+
+fn s_paren() -> Int =
+  do
+    pre()
+    (1 + 2)
+
+fn s_ident() -> Int =
+  do
+    pre()
+    pre() + 5
+
+fn s_neg() -> Int =
+  do
+    pre()
+    -5
+
+fn s_bang() -> Bool =
+  do
+    pre()
+    ! false
+
+fn s_let() -> Int =
+  do
+    pre()
+    let a = 4
+    a + 1
+
+fn s_if() -> Int =
+  do
+    pre()
+    if true then 6 else 0
+
+fn s_match() -> Int =
+  do
+    pre()
+    match Just(7) with
+    | Just n -> n
+    | Nothing -> 0
+
+fn s_do() -> Int =
+  do
+    pre()
+    do
+      pre()
+      9
+
+fn main() -> Unit !{IO} =
+  do
+    state <- new_state()
+
+    assert_true(state, "`true` heads a later do step", s_true())
+    assert_true(state, "`false` heads a later do step", s_false() == false)
+    assert_true(state, "an Int literal heads a later do step", s_int() == 42)
+    assert_true(state, "a Double literal heads a later do step", s_float() == 3.5)
+    assert_true(state, "a Char literal heads a later do step", s_char() == 'z')
+    assert_true(state, "a String literal heads a later do step", s_string() == "hi")
+    assert_true(state, "a template heads a later do step", s_template() == "v=2")
+    assert_true(state, "a lambda heads a later do step", s_lambda() == 5)
+    assert_true(state, "a list literal heads a later do step", list_length(s_list()) == 3)
+    assert_true(state, "a dict literal heads a later do step", vec_length(dict_keys(s_dict())) == 2)
+    assert_true(state, "a parenthesised expr heads a later do step", s_paren() == 3)
+    assert_true(state, "an identifier heads a later do step", s_ident() == 5)
+    assert_true(state, "unary `-` heads a later do step", s_neg() == 0 - 5)
+    assert_true(state, "prefix `!` heads a later do step", s_bang())
+    assert_true(state, "`let` heads a later do step", s_let() == 5)
+    assert_true(state, "`if` heads a later do step", s_if() == 6)
+    assert_true(state, "`match` heads a later do step", s_match() == 7)
+    assert_true(state, "a nested `do` heads a later do step", s_do() == 9)
+
+    summary(state)
