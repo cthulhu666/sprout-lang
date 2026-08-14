@@ -322,3 +322,118 @@ The bug is also wider than the reproduction shows: the qualified spelling has th
   strictly better than what it replaced, and the allow-list gap is now fixed as well.
   `tests/stdlib/test_do_step_starts.spr` pins one step of each accepted form so the two lists cannot
   drift apart again, and `docs/spec-v0.md` §5.2.1a now states where a step ends normatively.
+
+
+---
+
+## 5. `let … in` cannot end a `do` block — §5.2.1a shadows §5.2.1
+
+**Found:** 2026-08-14, against `ed8162b0` / `baf2c113`, while extracting the simulation out of
+Uncharted Suns' render loop (`docs/sim-extraction-v0.md` step 3b).
+
+**Status:** fallout of the fix for issue 1 in this document, so it is filed here rather than fresh.
+
+### The repro (11 lines, no project code)
+
+```sprout
+fn tail(a: Int, b: Int) -> Unit !{IO} = print(to_string(a + b))
+
+fn shape_a(n: Int) -> Unit !{IO} =
+  do
+    print("a")
+    let x = n + 1
+        y = n + 2
+    in tail(x, y)
+
+fn main() -> Unit !{IO} = shape_a(1)
+```
+
+```
+ERROR: bundle: Parse error: Expected pattern at 9:5
+```
+
+Indenting the chain deeper does not help: the same shape inside a real do block, at 12 columns
+rather than 8, reports `Expected pattern at 3779:13`.
+
+### Why it is a bug rather than a restriction
+
+The spec permits it in one section and forbids it in another:
+
+- **§5.2.1** — *"`let … in` is an ordinary expression (**usable anywhere**)."* A final `do` step is
+  "anywhere".
+- **§5.2.1a** — the new multi-name `let` **statement** form, layout-aligned under the first binding.
+
+The two are **textually identical up to the `in`**. `let x = n + 1` / `y = n + 2` is simultaneously a
+valid §5.2.1a statement prefix and a valid §5.2.1 expression prefix; the parser commits to the
+statement reading, and the `in` then has nowhere to go. §5.2.1a is the newcomer, and the shape it
+displaced is one §5.2.1 explicitly allows.
+
+Suggested fix: one token of lookahead — on reaching `in` at the end of a layout-aligned binding
+group in a `do` step, reparse the group as the §5.2.1 expression form. Whichever way it is resolved,
+§5.2.1 and §5.2.1a should stop contradicting each other.
+
+### Why it matters downstream (not a corner case)
+
+This is the shape a large refactor has to produce. Uncharted Suns' render loop ends in
+
+```sprout
+match picked with
+| (best_d2, …) ->
+    let hit = …
+        sel2 = …
+    in render_loop(…)
+```
+
+— a ~350-line `let` chain whose only reason for being wrapped in that `match` is that the wrapper
+puts it in **expression position**. Extracting the simulation means splitting that chain, and a
+`let … in` expression cannot be cut apart while statements can. With this bug in place the wrapper
+cannot be removed, so the chain cannot become statements, so the split has to be worked around
+rather than done.
+
+**Not verified:** whether this is strictly a *regression*. Proving the shape parsed before
+`ed8162b0` needs the pre-fix compiler, which has since been rebuilt over. Uncharted Suns never used
+`let … in` as a `do` step, so our tree is no evidence either way — the case against it here is the
+spec's own §5.2.1, not observed past behaviour.
+
+### Resolution
+
+Fixed. The report is right that §5.2.1 and §5.2.1a contradicted each other; two of its supporting
+claims turned out otherwise, and both changed the shape of the fix.
+
+**Not a regression — settled, not left open.** The pre-`ed8162b0` compiler was rebuilt from its
+committed seed (`git show ed8162b0^:bootstrap/compile_driver.ll`, linked against the current runtime)
+and run. It **accepted** this shape and discarded the `in <body>` in silence. The report's own repro
+failed there only because dropping the body left the `let`'s `Int` where `Unit` was wanted; with the
+types lined up nothing complained at all:
+
+```sprout
+do
+  print("a")
+  let x = print("b")
+  in print("c")          # pre-ed8162b0: printed "a" only. Exit 0, no diagnostic.
+```
+
+So `let … in` as a `do` step has never once worked. `ed8162b0` turned silent wrong code into a loud
+parse error, exactly as it did for the `0.0` step of issue 1 — the error is the messenger.
+
+**Wider than "multi-name", and the suggested fix would not have covered it.** Single-binding is
+equally broken, and so are both `else` forms. One token of lookahead after the first binding finds
+the `in` only when the group has one plain binding: an `else` carries the parse past it, so
+`let Ok x = a else Err c -> c` / `Ok y = b else Err c -> c` / `in …` — valid §5.2.1, and only ever
+expressible as the expression form, since §5.2.1a makes an `else` binding stand alone — still failed.
+
+The fix instead decides the reading from the **whole step**: a step beginning with `let` that holds a
+bracket-depth-0 `in` is parsed as one expression, and that reading is kept only if it accounts for
+the entire step. Anything else falls through to the statement path untouched, which is what keeps a
+`let` *statement* whose right-hand side contains a nested `let … in` (a `match` arm, say) parsing as
+it does today. Nothing accepted today changes meaning: a step-level `in` is rejected outright right
+now, because `in` heads no expression and so can never begin a step.
+
+`in` must still be **dedented to the `let` column**, as §5.2.1 has always required. The one-line
+spelling `let x = 1 in x` remains rejected — not a do-step matter, since it fails in ordinary
+expression position too, and §5.2.1 never permitted it. Filed in `BACKLOG.md` together with its
+diagnostic, which reports `Expected pattern` against the *following* declaration.
+
+Covered by `tests/stdlib/test_do_let_in_step.spr` (single, multi, `else`, chained `else`, a
+non-final step, an effectful body, and the nested-right-hand-side case that must stay a statement).
+§5.2.1 and §5.2.1a now state the `in` rule together instead of contradicting each other.
