@@ -205,6 +205,21 @@ export fn line_paren_delta(line: String) -> Int =
   paren_delta_bytes(b, 0, str_byte_len(line), 0)
   where b = bytes_from_utf8(line)
 
+# A line with any comment removed, applying the SAME `#` rule the scan above uses
+# to stop counting.
+#
+# The pair matters. `line_paren_delta` already looks past a comment, so a caller
+# that keeps the commented text while trusting that depth ends up with a string
+# the depth says is an import list and whose tail is in fact a comment. That is
+# how a comment inside a wrapped list came to swallow every name after it: the
+# lines were spliced verbatim, and the name scan stopped at the `#`.
+#
+# `str_slice`'s third argument is a LENGTH, not an end index — equal here only
+# because the slice starts at 0.
+export fn strip_line_comment(line: String) -> String =
+  if i < 0 then line else str_slice(line, 0, i)
+  where i = str_find(line, "#")
+
 # Byte index just past the next '\n' from byte offset i (or end of input).
 fn next_line_byte(b: Bytes, i: Int) -> Int =
   match decode_char_at(b, i) with
