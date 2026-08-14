@@ -1,8 +1,9 @@
 # Type vocabulary in env-schemes mode (REPL / analysis service) — v0
 
-Status: **design proposal, not implemented.** Normative spec is unaffected (this is a
-compiler-internal defect, not a language-semantics change). Diagnostics behaviour changes;
-see §7.
+Status: **Fix A implemented** (§4.1) together with two import-list completions (§4.4). Fix B (§4.2)
+and the two defects this work exposed (§11) are filed, not fixed. Normative spec is unaffected —
+this is a compiler-internal defect, not a language-semantics change — though §11.2 raises a
+visibility question the spec will need to settle. Diagnostics behaviour changes; see §7.
 
 ## 1. Problem statement
 
@@ -84,6 +85,31 @@ except `prelude` itself:
 
 Loading cleanly: `bytes chan collections crypto http json math mutable process regex rng string
 task terminal test url`.
+
+### 1.2.1 State after this change (measured)
+
+Rerunning the same probe with the fix in §4.1 applied, plus the two one-line import completions
+described in §4.4:
+
+| before | after | module |
+|---|---|---|
+| broken | **loads** | `args`, `compiler`, `http_client`, `linalg`, `log`, `net`, `template` |
+| broken | still broken | `http_middleware`, `http_server`, `repl`, `scram` |
+
+Seven of eleven restored, and — importantly — **the four that remain now fail for a single
+different root cause**, unrelated to type vocabulary:
+
+```
+repl:            Type mismatch: StatefulSession vs compiler.StatefulSession
+http_middleware: Type mismatch: Logger vs log.Logger
+scram:           Type mismatch: CryptoError vs crypto.CryptoError
+http_server:     Type mismatch: Utf8Error vs bytes.Utf8Error
+```
+
+One imported type reaches two places under two different names — bare in one, alias-qualified in
+the other — and unification treats them as distinct. That is a type-*identity* defect, not a
+vocabulary one, and it is filed separately (§11). No module that loaded cleanly before this change
+regressed.
 
 Scope note: the sweep covers top-level `stdlib/*.sprout` only. The `stdlib/compiler/` and
 `stdlib/math/` submodule trees are not included and are likely to add further hits — the two
@@ -171,16 +197,23 @@ signature positions today — the moment N1 is lifted, a prelude-only seed break
 
 Three edits:
 
-1. **Emit.** Where a `TypeDecl`/`RecordDecl`/`AliasDecl`/`WrapDecl` is registered, also
-   `dict_set("@type:" ++ name, …, env)` with a dummy scheme, mirroring `@linear:`.
-2. **Read.** Add `type_names_from_env(env, acc)` mirroring `class_names_from_env`
-   (`infer.sprout:4918-4930`) — scan for the `@type:` prefix, `after_last_dot` the name,
-   `list_add_unique`.
-3. **Seed.** Change `infer.sprout:4729` to
-   `collect_declared_type_names(decls, type_names_from_env(env, builtin_type_names()))`.
+Three edits, as implemented:
 
-Edit 3 is a one-line change that makes the broken pass structurally identical to the working one
-beside it.
+1. **Emit.** `mark_declared_types(names, env)` folds one `@type:<TypeName>` marker per declared
+   type into the env, mirroring `mark_type_multiplicity` beside it. It is fed from
+   `collect_declared_type_names(decls, Nil)` — the *same* walk the validation pass uses, so the
+   exported vocabulary and the validated vocabulary cannot drift, and `TypeDecl`/`RecordDecl`/
+   `AliasDecl`/`WrapDecl` are covered uniformly by construction rather than at four call sites.
+2. **Read.** `type_names_from_env(env, acc)` mirrors `class_names_from_env` line for line.
+3. **Seed.** In `typecheck_decls`, the vocabulary becomes
+   `own_type_names ++ type_names_from_env(env, builtin_type_names())`, and the marker-bearing env
+   is what flows into `typecheck_decls_inner` — so it reaches importers as the checked env.
+
+Edit 3 makes the broken pass structurally identical to the working one beside it.
+
+Threading note: `ftv_env` is computed over the marker-bearing env. That is safe by construction —
+a marker's scheme body is a `TConst`, never a free type variable — and stated in-file so the two
+env values are not "fixed" back apart later.
 
 ### 4.2 Fix B — stop swallowing `CheckErr` (secondary, smaller)
 
@@ -192,11 +225,26 @@ here must distinguish:
 - *found on disk but failed to check* — `read_file` succeeded and `tokenize`/`parse_program`/
   `check_program_with_env` then failed; this must surface.
 
-Only the second class changes. Fix A removes the current instances, but the swallow is what turned
-a one-line diagnostic into a multi-hour investigation, and the next divergence will land in the
-same trap. Recommended shape: return a result type distinguishing the two, and have
+Only the second class changes. Fix A removes most of the current instances, but the swallow is what
+turned a one-line diagnostic into a multi-hour investigation, and the next divergence will land in
+the same trap. Recommended shape: return a result type distinguishing the two, and have
 `op_session_update` report the underlying error, so `import stdlib.net` fails loudly at the import
 line rather than mystifying the user one command later.
+
+**Deferred out of this change, with measurement.** `load_module` returns
+`List (String, types.Scheme)`; threading a `Result` through it reaches `apply_import_spec`,
+`build_import_pairs_acc`, `build_import_pairs` and `load_prelude_pairs`, whose callers are **12
+sites across 5 driver modules** (`compiler.sprout`, `analysis_service_driver.sprout`,
+`lower_driver.sprout`, `type_driver.sprout`, plus `module_loader` itself), each of which must then
+decide what to do with an error it currently cannot receive. That is an error-plumbing refactor,
+and Collaboration Rule 2 says not to land one on top of a semantics change. The alternative — a
+side-channel `Ref` of load failures — is the kind of workaround this project declines.
+
+One trap for whoever does it: `load_module` calls `cache_put(cache, name, Nil)` *before* loading,
+to break import cycles, and on failure that `Nil` stays cached. The `ModuleCache` is held on
+`StartupState` and shared across every session op, so a naive fix reports the error once and then
+silently serves the cached `Nil` to every later import of that module. Either do not cache
+failures, or cache the failure itself.
 
 ### 4.3 What the survey points at, deferred
 
@@ -214,6 +262,27 @@ work stream is already building — is the structural fix, and would retire this
 than patching its current instance. It is out of scope here: the iface series is phased and
 independently sequenced, and Fix A unblocks users now at a fraction of the cost. Recorded so the
 `@type:` marker is understood as a deliberate interim step, not the end state.
+
+### 4.4 Two import lists completed (included here)
+
+With Fix A in place, `net` and `template` still failed — on *constructors*, not type names:
+
+```
+net:      Unknown constructor: Utf8DecodeError
+template: Unknown constructor: JsonFloat
+```
+
+Neither is a compiler gap. `stdlib/net.sprout:3` imports the type `Utf8Error` from `bytes` but not
+its constructor `Utf8DecodeError`, which it then applies; `stdlib/template.sprout:12` lists eleven
+`Json` constructors and omits `JsonFloat`, which it then matches on at two sites. The bundling path
+inlines the whole module and so never noticed; the env path honours the selective list. Adding the
+two missing names is correct under either reading of selective-import semantics — you should import
+what you use — so both one-line completions are included here, and each clears its module entirely.
+
+This does raise a real semantics question the change does **not** decide: should
+`import M (T)` bring `T`'s constructors into scope, the way `T(..)` does in Haskell? Sprout's
+`select_named_pairs` matches names exactly, so today it does not, while the bundler effectively
+does. Filed in §11; the two completions above are correct whichever way it is ruled.
 
 ## 5. Syntax and semantics impact
 
@@ -252,9 +321,13 @@ No message text is reworded.
 
 ## 8. Compatibility and migration
 
-No migration. No source change in `stdlib/` or user code. The file-compilation path is untouched
-(G3) — the bundled prelude already puts these names in `decls`, so `type_names_from_env` adds
-names already present and `list_add_unique` absorbs the duplicates.
+No migration, and no change required in user code. The file-compilation path is untouched (G3) —
+the bundled prelude already puts these names in `decls`, so `type_names_from_env` adds names
+already present and duplicates are absorbed (the vocabulary is only ever membership-tested).
+
+Two `stdlib/` source lines do change (§4.4): `net.sprout` and `template.sprout` gain the
+constructor names they already use. Both are no-ops for the bundling path, which had those
+constructors in scope regardless.
 
 On the seed, to be unambiguous: the IR emitted for *compiled programs* does not change, so the
 golden-IR gate (DoD #12) should stay clean. The seed itself **does** need a full `just refresh-seed`
@@ -263,27 +336,41 @@ golden-IR gate (DoD #12) should stay clean. The seed itself **does** need a full
 
 ## 9. Tests added/updated
 
-Per Definition of Ready #2, these are written and confirmed failing before implementation:
+`tests/stdlib/compiler/test_repl_type_vocabulary.spr` — four assertions, written first and
+confirmed RED (3 failing, 1 passing) against the unmodified compiler, GREEN after. It drives
+`compile_source_with_cache`, the path the REPL actually uses; `--phase check` on a file passes
+today and would prove nothing. Modelled on `test_repl_constraint_check.spr`, the regression test
+for the first instance of this same divergence.
 
-1. **Regression, driven through the real REPL path** — not `--phase check` on a file, which passes
-   today and would prove nothing. Per the standing lesson from the `where ToString a` bug, drive
-   `compile_source_with_cache` / a real `build/sproutd`:
-   - `import stdlib.net` then `net.tcp_error_message` resolves.
-   - `import stdlib.http_server` then `http_server.default_config()` evaluates.
-2. **Session-local declaration** — `type Box = Box (Vec Int)` is accepted in a REPL session.
-   Distinct code path from (1): no import involved, the session's own decls hit the same pass.
-3. **Selective import carries the marker** — `import stdlib.bytes (Utf8Error, from_string)` makes
-   `Utf8Error` usable in a session-declared type. Guards the `select_pairs` path, which is the
-   half a prelude-only fix would miss.
-4. **Negative** — a genuinely undeclared type name still errors with the same message. Confirms
-   the fix widens the vocabulary rather than disabling the pass.
-5. **Coverage gap in the edited file** (Definition of Ready #4) — `type_names_from_env` on an env
-   with no `@type:` markers returns the seed unchanged.
-6. **Fix B** — a module that is found but fails to check surfaces its error; a module that is
-   unresolvable still returns `Nil` silently. Both directions, or the builtin path breaks.
+1. **Session-local declaration** — `type Box = | Box (Vec Int)` is accepted in a session. No import
+   involved: the session's own decls hit the pass with the prelude supplied as schemes.
+2. **Aliased import resolves** — `import stdlib.args` then `args.arg_flag(args.parse(t), "x")`.
+   `args` declares `Args (Dict String) …` and contributed nothing before the fix.
+3. **Selective import carries the vocabulary** — `import stdlib.bytes (Utf8Error, from_string)`
+   makes `Utf8Error` usable in a session-declared type. Guards the `select_pairs` path, the half a
+   prelude-only fix would miss.
+4. **Negative** — `type Bad = | Bad (NoSuchType Int)` is still rejected. Confirms the fix widens
+   the vocabulary rather than disabling the pass; this one passed in the RED run, which is how we
+   know the pass was live and the other three failures were real.
 
-A cheap standing guard worth considering: assert every stdlib module loads cleanly through
-`load_module`. That is exactly the probe in Appendix A, and it would have caught all eleven.
+The negative case doubles as the coverage-gap test required by Definition of Ready #4: it is the
+first test to exercise `validate_te`'s rejection path with a non-empty env-derived vocabulary.
+
+Note the test file deliberately does **not** use Kuba's original `http_server.default_config()`
+repro — that module is still blocked by the separate defect in §11, and a test asserting it would
+fail for a reason this change does not own. It becomes the natural regression test for §11.
+
+Two gaps worth recording rather than pretending away:
+
+- **`just test-file` does not set `SPROUT_STDLIB_ROOT`.** This test, like
+  `test_repl_constraint_check.spr`, no-ops to `0 passed, 0 failed` without it and reports
+  `SUITE PASSED`. Only the full `just test` runner (`justfile:416`) sets it. A test that silently
+  skips and reports success is a trap for the next person doing fast iteration; worth either
+  setting the var in `_test-file` or failing loudly on its absence.
+- **A standing guard is missing.** Asserting that every stdlib module loads cleanly through
+  `load_module` — exactly the probe in Appendix A — would have caught all eleven modules the day
+  they broke, and would catch §11's four today. Not added here because four modules are currently
+  red, so the guard would land failing; it should land with §11's fix.
 
 ## 10. Spec/docs status
 
@@ -295,6 +382,38 @@ the invariant, which is the durable lesson:
 > Any pass that derives a fact by scanning `decls` must also read that fact from `env`, because the
 > REPL/LSP/analysis-service path supplies imported modules as schemes and markers rather than as
 > declarations. `class_names_from_env` is the reference implementation.
+
+Also update §7's item 3 when Fix B lands; it describes behaviour this change does not yet deliver.
+
+## 11. What this change exposed (filed, not fixed)
+
+### 11.1 An imported type has two identities — `T` vs `alias.T`
+
+The four modules still failing after this change all fail the same way:
+
+```
+repl:            Type mismatch: StatefulSession vs compiler.StatefulSession
+http_middleware: Type mismatch: Logger vs log.Logger
+scram:           Type mismatch: CryptoError vs crypto.CryptoError
+http_server:     Type mismatch: Utf8Error vs bytes.Utf8Error
+```
+
+One imported type arrives under two names — bare in one position, alias-qualified in another — and
+unification treats them as distinct constructors. The bundling path never sees this because
+inlining gives every type exactly one name. This is a type-*identity* defect in how imported type
+names are resolved, not a vocabulary one, and it is the last thing standing between the REPL and a
+working `import http_server`. **It should be fixed next; it owns the original bug report.**
+
+### 11.2 Should `import M (T)` bring `T`'s constructors?
+
+Raised by §4.4. `select_named_pairs` matches names exactly, so a selective import of a type does
+not import its constructors; the bundler, by inlining, behaves as if it does. Two stdlib modules
+were relying on the permissive behaviour. Prior art is clear that this is a real design axis
+(Haskell spells the permissive form `T(..)` explicitly, precisely because `T` alone does not imply
+it), so the options are to require explicit constructor listing, to make `T` imply `T`'s
+constructors, or to add a `T(..)` form. A ruling belongs in `docs/spec-v0.md` §visibility/exports.
+Until then the bundler and the env path disagree, and that disagreement is exactly the class of
+silent divergence this document is about.
 
 ---
 

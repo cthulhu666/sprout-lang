@@ -1,0 +1,54 @@
+module main
+import stdlib.test (TestState, new_state, assert_true, summary)
+import stdlib.compiler.compiler as compiler
+import stdlib.compiler.module_loader as module_loader
+import stdlib.compiler.source as source
+
+# Regression: strict type-name validation must see IMPORTED type names on the
+# REPL / analysis-service path (compile_source_with_cache), where the prelude and
+# every imported module arrive as env schemes plus @-markers, not as decl nodes.
+# Seeding the vocabulary from the session's own decls alone left `Vec`, `Dict`,
+# `Result` and every cross-module type name unknown, so a correct declaration was
+# rejected as "unknown type name" — and, because module_loader turns a failing
+# module's CheckErr into an empty pair list, an `import` of any module with such a
+# declaration silently contributed nothing and every name from it read as
+# "Unknown variable". 11 of 27 top-level stdlib modules were affected.
+#
+# This exercises the exact path the REPL uses; the file-bundling path
+# (--phase check) inlines the prelude as decls and does not reproduce any of it.
+# See docs/repl-env-type-vocabulary-v0.md.
+
+fn is_compile_ok(r: compiler.CompileResult) -> Bool =
+  match r with
+  | compiler.CompileOk _ -> true
+  | compiler.CompileFail _ -> false
+
+fn main() -> Unit !{IO} =
+  do
+    state <- new_state()
+    match env_get("SPROUT_STDLIB_ROOT") with
+    | Nothing -> ()
+    | Just stdlib_root ->
+        do
+          cache <- module_loader.new_cache()
+          # A session-local type whose field is a PRELUDE type must be accepted.
+          let prelude_ty = "module app.session\n\ntype Box = | Box (Vec Int)\n"
+          r_prelude <- compiler.compile_source_with_cache(prelude_ty, source.StdlibRoot(stdlib_root), cache)
+          assert_true(state, "REPL: session type with a prelude-typed field accepted", is_compile_ok(r_prelude))
+          # An aliased import of a module that itself declares a prelude-typed
+          # field must load, so its names resolve. `stdlib.args` declares
+          # `Args (Dict String) …` and contributed nothing before the fix.
+          let imported = "module app.session\n\nimport stdlib.args\n\nfn flag(t: List String) -> Bool = args.arg_flag(args.parse(t), \"x\")\n"
+          r_imported <- compiler.compile_source_with_cache(imported, source.StdlibRoot(stdlib_root), cache)
+          assert_true(state, "REPL: name from a module with a prelude-typed field resolves", is_compile_ok(r_imported))
+          # A SELECTIVE import must carry the type vocabulary too — markers are
+          # retained by select_pairs. Guards the half a prelude-only seed misses.
+          let selective = "module app.session\n\nimport stdlib.bytes (Utf8Error, from_string)\n\ntype Wrapped = | Wrapped Utf8Error\n"
+          r_selective <- compiler.compile_source_with_cache(selective, source.StdlibRoot(stdlib_root), cache)
+          assert_true(state, "REPL: selectively imported type name usable in a declaration", is_compile_ok(r_selective))
+          # A genuinely undeclared type name must STILL be rejected: the fix
+          # widens the vocabulary, it does not disable the pass.
+          let bogus = "module app.session\n\ntype Bad = | Bad (NoSuchType Int)\n"
+          r_bogus <- compiler.compile_source_with_cache(bogus, source.StdlibRoot(stdlib_root), cache)
+          assert_true(state, "REPL: genuinely unknown type name still rejected", is_compile_ok(r_bogus) == false)
+    summary(state)

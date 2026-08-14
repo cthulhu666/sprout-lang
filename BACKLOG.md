@@ -2787,8 +2787,57 @@ op-classification already in place.
 
 ### Native REPL & Analysis Service
 
-- [ ] `P1` **BUG: 11 of 27 top-level stdlib modules are silently invisible in the REPL; a
-  session-declared type cannot mention a prelude type** (2026-08-14). `import http_server` reports `ok`, then
+- [ ] `P0` **BUG: an imported type has two identities in the REPL — `T` vs `alias.T`** (2026-08-14).
+  The last thing standing between the REPL and a working `import http_server`; it owns the original
+  bug report. Four modules fail to load through `module_loader` with a type-identity mismatch —
+  `repl` (`StatefulSession` vs `compiler.StatefulSession`), `http_middleware` (`Logger` vs
+  `log.Logger`), `scram` (`CryptoError` vs `crypto.CryptoError`), `http_server` (`Utf8Error` vs
+  `bytes.Utf8Error`). One imported type reaches two positions under two names — bare in one,
+  alias-qualified in the other — and unification treats them as distinct constructors. The bundling
+  path never sees it because inlining gives every type exactly one name. Uncovered by the
+  type-vocabulary fix below, which removed the earlier wall these modules hit first. Regression test
+  should be Kuba's original repro: `import stdlib.http_server` then `http_server.default_config()`.
+  A standing guard — assert every stdlib module loads cleanly through `load_module` (probe in
+  `docs/repl-env-type-vocabulary-v0.md` Appendix A) — should land with the fix; it is red today.
+  Analysis: `docs/repl-env-type-vocabulary-v0.md` §11.1.
+- [ ] `P2` **Decide whether `import M (T)` brings `T`'s constructors into scope** (2026-08-14).
+  `select_named_pairs` matches names exactly, so a selective import of a type does not import its
+  constructors; the bundler, by inlining, behaves as if it does. Two stdlib modules were relying on
+  the permissive behaviour and failed on the env path (`net` applying `Utf8DecodeError`, `template`
+  matching `JsonFloat`) — both import lists have since been completed, so this is a semantics
+  ruling, not a live break. Options: require explicit constructor listing (status quo on the env
+  path), make `T` imply `T`'s constructors, or add an explicit `T(..)` form (Haskell spells the
+  permissive case that way precisely because `T` alone does not imply it). Ruling belongs in
+  `docs/spec-v0.md` §visibility/exports; the bundler and the env path disagree until then.
+  Analysis: `docs/repl-env-type-vocabulary-v0.md` §11.2 and §4.4.
+- [ ] `P2` **Fix B — `load_module` silently swallows a genuine `CheckErr`** (2026-08-14).
+  `module_loader.sprout:366` turns a module that fails to check into an empty pair list, so a
+  broken `import` reports `ok` and every name from it reads as `Unknown variable` one command
+  later. That swallow is what turned a one-line diagnostic into a multi-hour investigation. Must
+  distinguish *intentionally skipped* (`module_name_to_path` → `Nothing`; stays silent, the
+  builtin-env path depends on it) from *found on disk but failed to check* (must surface). Deferred
+  from the fix below because threading a `Result` through `load_module` reaches 12 call sites
+  across 5 driver modules, which is an error-plumbing refactor and Collaboration Rule 2 says not to
+  land one on a semantics change. Trap: `load_module` caches `Nil` *before* loading to break import
+  cycles, and the `ModuleCache` is shared across every session op — a naive fix reports the error
+  once, then serves the cached `Nil` forever. Analysis: `docs/repl-env-type-vocabulary-v0.md` §4.2.
+- [x] `P1` **FIXED 2026-08-14. BUG: 11 of 27 top-level stdlib modules were silently invisible in the
+  REPL; a session-declared type could not mention a prelude type.**
+  **Resolution.** A `@type:<TypeName>` env marker family (`mark_declared_types`), read back by
+  `type_names_from_env` — a line-for-line mirror of the `class_names_from_env` sibling one line
+  below the broken seed — so the strict type-name validation pass sees imported type vocabulary on
+  the path where modules arrive as schemes rather than decls. Markers ride `is_marker_key`, so they
+  survive both aliased and selective imports; a prelude-only seed would have missed the latter.
+  Fed from the same `collect_declared_type_names` walk the pass itself uses, so exported and
+  validated vocabulary cannot drift. Also completed two under-specified stdlib import lists
+  (`net` ← `Utf8DecodeError`, `template` ← `JsonFloat`) that the bundler had been forgiving.
+  Restored 7 of the 11: `args`, `compiler`, `http_client`, `linalg`, `log`, `net`, `template`; no
+  previously-loading module regressed. The remaining 4 fail for the unrelated type-identity defect
+  filed as `P0` above. Tests: `tests/stdlib/compiler/test_repl_type_vocabulary.spr` (4 assertions,
+  RED-verified before implementation, driving `compile_source_with_cache` — the file `--phase check`
+  path does not reproduce any of this). Design doc: `docs/repl-env-type-vocabulary-v0.md`.
+  <details><summary>Original report and diagnosis</summary>
+  `import http_server` reports `ok`, then
   `http_server.default_config()` fails with `Unknown variable`; `type Box = Box (Vec Int)` is
   rejected outright with ``type-validation: unknown type name `Vec` ``. Root cause: the strict
   type-name validation pass (`infer.sprout:4729`) seeds its vocabulary from the module's own
@@ -2809,6 +2858,7 @@ op-classification already in place.
   env-schemes-vs-decls divergence (the first was the REPL rejecting `where ToString a`); the
   structural fix is converging `module_loader` with `iface_codec`, deferred. Full write-up,
   prior-art survey, test plan and reproduction probe: `docs/repl-env-type-vocabulary-v0.md`.
+  </details>
 - [ ] `P1` Implement `complete_in_state` in `analysis_service_driver.sprout` (2026-05-18, updated 2026-07-17): `eval_expr_in_source` (compile-and-run) and `instances_in_source` are now implemented. `instances_in_source` (landed 2026-07-17) bundles the session source (prelude + transitive imports inlined), resolves the query in session naming context via a probe signature, and unification-matches instance heads (reusing `infer.type_from_ast` + `unifier.unify_types`), with a base-constructor fallback so `:i Maybe a` also surfaces `Functor Maybe`; see `stdlib/compiler/analysis_service_driver.sprout` (`resolve_instances` / `instance_match_names_for_type`) and `tests/stdlib/compiler/test_instances_in_source.spr`. Remaining stub: `complete_in_state` (tab completion, returns "not yet implemented"). Approach: reuse `type_of_in_source` machinery; filter by prefix from a gathered list of visible names from imports + declared names.
 - [ ] `P2` Fix analysis service env isolation: `SPROUT_GC_THRESHOLD` and `SPROUT_GC_ADAPT_RATIO` must not propagate to the `analysis_service_bin` subprocess (2026-05-23): the GC stress test (`test_native_repl_diagnostics_in_source_survives_forced_gc`) sets `GC_THRESHOLD=1` on the program binary env; the program spawns the analysis service with the same env, causing the native binary to GC on every allocation (~15 min to run). Python service ignored Sprout GC settings (Python runtime). Fix: strip `SPROUT_GC_*` vars from the env before launching the service, or use a separate wrapper script. Test is skipped until fixed.
 - [ ] `P2` Fix `symbol_locations_in_source` in `analysis_service_driver.sprout` to include constructor locations (2026-05-23): `collect_decl_locations` emits an entry for `TypeDecl name` but not for its constructors (e.g. `type Fruit = | Banana` produces 1 location for `Fruit`, missing `Banana`). `collect_decl_names` already walks ctors via `ctor_names` so the fix is to add parallel ctor emission in `collect_decl_locations`. `test_native_analysis_symbol_locations_in_source_builtin_runs_via_analysis_service` is skipped until fixed.

@@ -9,7 +9,7 @@ module stdlib.template
 # {% endfor %}`. No filters beyond `safe`, no expression operators — see the roadmap.
 
 import stdlib.string as string
-import stdlib.json (Json, JsonArray, JsonNull, JsonBool, JsonInt, JsonString, JsonObject, JsonObjectNil, JsonArrayNil, JsonArrayStep, json_get_field, json_array_next)
+import stdlib.json (Json, JsonArray, JsonNull, JsonBool, JsonInt, JsonFloat, JsonString, JsonObject, JsonObjectNil, JsonArrayNil, JsonArrayStep, json_get_field, json_array_next)
 
 export type Template =
   | Template (Vec Node)

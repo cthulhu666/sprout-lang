@@ -1,6 +1,6 @@
 module stdlib.net
 
-import stdlib.bytes (Utf8Error, from_string, to_string, length)
+import stdlib.bytes (Utf8Error, Utf8DecodeError, from_string, to_string, length)
 
 export extern fn tcp_listen(port: Int) -> Int !{IO}
 # Recoverable since the C3 fix: `Err TcpAcceptFailed` for a listener that is broken rather than busy.
