@@ -228,7 +228,11 @@ fn first_or(xs: List Int, dflt: Int) -> Int =
 Each binding is `<pattern> = <expr>` (irrefutable, no `else`),
 `<pattern> = <expr> else <expr>` (**constant else**), or
 `<pattern> = <expr> else <residual-pat> -> <handler>` (**binding-else** — the
-residual pattern names the refuted value). Bindings are **sequential**: each is
+residual pattern names the refuted value). A binding must account for **its whole
+line**: a token after the end of a binding (or after its `else` clause) is a
+compile error, not a second statement and not something to ignore — one binding
+per line, as one step per line in a `do` block. Writing
+`let a = 1 print("hi")` is rejected rather than quietly dropping the call. Bindings are **sequential**: each is
 in scope for later bindings and the body (a binding's own right-hand side sees
 the *previous* meaning of any name it rebinds). With continuation `<rest>` (the
 remaining bindings and body), a binding desugars to a single `match`:

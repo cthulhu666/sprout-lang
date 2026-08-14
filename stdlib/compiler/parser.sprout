@@ -618,11 +618,24 @@ fn slice_has_toplevel_in(step_tokens: Vec token.Token, i: Int, depth: Int) -> Bo
 # `step_fully_consumed`. A slice the expression parse cannot consume — a
 # statement whose right-hand side holds a nested `let … in`, say — reaches the
 # statement path unchanged, so no accepted program changes meaning.
-fn parse_do_let_in_expr(step_tokens: Vec token.Token) -> Maybe ast.Expr =
+#
+# The result separates "not this form" from "this form, malformed": `Nothing` is
+# no top-level `in` at all, `Just (Err …)` is a slice that looked like the
+# expression form and failed. The caller still tries the statement reading in the
+# second case — the prefilter is imprecise on purpose — but when BOTH readings
+# fail it reports this error, because a top-level `in` says which one was meant.
+# Without that, a malformed `let … in` surfaced as the statement path's complaint
+# about the `in` line ("Expected = at …"), pointing away from the real mistake.
+fn parse_do_let_in_expr(step_tokens: Vec token.Token) -> Maybe (Result ParseError ast.Expr) =
   if slice_has_toplevel_in(step_tokens, 0, 0) then
     match parse_expr(step_tokens, 0) with
-    | Err _ -> Nothing
-    | Ok (value, i) -> if slice_consumed(step_tokens, i) then Just(value) else Nothing
+    | Err e -> Just(Err(e))
+    | Ok (value, i) ->
+        if slice_consumed(step_tokens, i) then Just(Ok(value))
+        else Just(Err (ParseError(
+          string.concat("Unexpected token after the end of a let binding at ", pos_str(cur_pos(step_tokens, i)))
+            ++ " — a let block takes one binding per line",
+          cur_pos(step_tokens, i))))
   else Nothing
 
 # The §5.2.1a `let` STATEMENT readings: a binding carrying an `else`, a multi-name
@@ -655,8 +668,17 @@ fn parse_do_step_sub(step_tokens: Vec token.Token) -> Result ParseError (DoStepP
   let slice_pos = tok_pos(tok_at(step_tokens, 0))
   in if tok_is_keyword(tok_at(step_tokens, 0), "let") then
     match parse_do_let_in_expr(step_tokens) with
-    | Just value -> Ok((DoStepPlain(ast.DoExprStep(value)), 0))
+    | Just (Ok value) -> Ok((DoStepPlain(ast.DoExprStep(value)), 0))
     | Nothing -> parse_do_let_statement(step_tokens, slice_pos)
+    | Just (Err in_err) ->
+        # Still try the statement reading: the `in` prefilter also fires on a
+        # nested `let … in` inside a binding's right-hand side, which is a
+        # perfectly good statement. Only when that fails too is `in_err` the
+        # honest report — it names the mistake, where the statement path would
+        # complain about the `in` line it was never going to accept.
+        match parse_do_let_statement(step_tokens, slice_pos) with
+        | Ok stmt -> Ok(stmt)
+        | Err _ -> Err(in_err)
   else if step_has_bind_arrow(step_tokens, 0, 0) then
     do
       (pattern, i2) <- parse_pattern(step_tokens, 0)
@@ -793,7 +815,12 @@ fn parse_let_else_clause(step_tokens: Vec token.Token, e: Int) -> Result ParseEr
   | Err _ -> parse_let_else_constant(step_tokens, e)
 
 # Parses one binding `<pat> = <rhs> [else <fb> | else <rpat> -> <h>]` from its
-# exact token slice.
+# exact token slice, returning where the binding actually ended.
+#
+# Both arms used to return a dummy `0`, and the else arm discarded the clause's
+# own end index as well — so nothing could compare where the binding stopped
+# against where its slice ended, and `parse_let_binding_step` resumed at the
+# layout-scanned boundary regardless. Tokens in between were dropped in silence.
 fn parse_let_binding_sub(step_tokens: Vec token.Token) -> Result ParseError ((ast.Pattern, ast.Expr, Maybe ast.Pattern, Maybe ast.Expr), Int) =
   do
     (pat, b) <- parse_pattern(step_tokens, 0)
@@ -802,15 +829,33 @@ fn parse_let_binding_sub(step_tokens: Vec token.Token) -> Result ParseError ((as
     if tok_is_keyword(tok_at(step_tokens, d), "else") then
       do
         (_, e) <- expected_keyword("else", step_tokens, d)
-        (residual, fb, _) <- parse_let_else_clause(step_tokens, e)
-        Ok(((pat, rhs, residual, Just(fb)), 0))
+        (residual, fb, g) <- parse_let_else_clause(step_tokens, e)
+        Ok(((pat, rhs, residual, Just(fb)), g))
     else
-      Ok(((pat, rhs, Nothing, Nothing), 0))
+      Ok(((pat, rhs, Nothing, Nothing), d))
+
+# A binding must consume its whole layout-scanned slice, for the same reason a do
+# step must (`step_fully_consumed`): anything left over is a statement the parser
+# is about to delete without saying so. `let a = 1 print("x")` compiled at exit 0
+# with the call absent from the emitted IR — and the identical line without an
+# `in` was already a loud error, so the two forms disagreed about the same text.
+#
+# `used` indexes the SLICE, which starts at `i` in `tokens`, so the offending
+# token is at `i + used` in the original vector.
+fn let_binding_fully_consumed(tokens: Vec token.Token, i: Int, used: Int, slice: Vec token.Token) -> Result ParseError Bool =
+  if slice_consumed(slice, used) then Ok(true)
+  else
+    Err(ParseError(
+      string.concat("Unexpected token after the end of a let binding at ", pos_str(cur_pos(tokens, i + used)))
+        ++ " — a let block takes one binding per line",
+      cur_pos(tokens, i + used)))
 
 # Parses one binding (given its layout-scanned slice end), recurses for the rest.
 fn parse_let_binding_step(tokens: Vec token.Token, i: Int, block_col: Int, binding_end: Int) -> Result ParseError (ast.Expr, Int) =
   do
-    (binding, _) <- parse_let_binding_sub(vec_slice(i, binding_end - i, tokens))
+    let slice = vec_slice(i, binding_end - i, tokens)
+    (binding, used) <- parse_let_binding_sub(slice)
+    _ <- let_binding_fully_consumed(tokens, i, used, slice)
     (rest, k) <- parse_let_block(tokens, binding_end, block_col)
     match binding with
     | (pat, rhs, residual, fb) -> Ok((build_let_binding_match(pat, rhs, residual, fb, rest, cur_pos(tokens, i)), k))

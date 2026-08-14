@@ -1,0 +1,11 @@
+module main
+
+# The `else` arm has its own discarded end index — `parse_let_binding_sub` bound
+# the else clause's end to `_`, so a binding whose fallback is followed by stray
+# tokens dropped them by a second route, independent of the `= <rhs>` one above.
+fn pick(m: Maybe Int) -> Int =
+  let Just n = m else 0 print ("dropped")
+  in n
+
+fn main() -> Unit !{IO} =
+  print(to_string(pick(Just(7))))

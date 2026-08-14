@@ -1,0 +1,13 @@
+module main
+
+# The same defect in pure EXPRESSION position, which predates `let … in` becoming
+# a do step: `999` sits past the end of the binding and used to vanish, so this
+# compiled at exit 0 and returned 1. The binding parser discarded its own end
+# index (returning a dummy 0), so nothing compared where the binding stopped
+# against where its layout-scanned slice ended.
+fn f() -> Int =
+  let a = 1 999
+  in a
+
+fn main() -> Unit !{IO} =
+  print(to_string(f()))
