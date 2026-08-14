@@ -5316,6 +5316,17 @@ fn translate_general_call(fname: String, call_ty: types.Type,
       then Err("internal error: under-application of '" ++ fname ++ "' reached codegen (arity "
                  ++ int_to_string(info.arity) ++ ", got " ++ int_to_string(list_length(arg_names))
                  ++ "); the n-ary arity check should have rejected it before lowering")
+      # Over-application is the same leak in the other direction, and it used to
+      # fall through to a direct call carrying the surplus arguments. LLVM drops
+      # them silently — the call returned the closure handle as the result type,
+      # exit 0, no diagnostic. The surplus cannot be re-applied as one group here
+      # either: the closure's runtime arity follows the BODY (`\ (x, y) -> …` is
+      # one two-argument closure, `\x -> \y -> …` two one-argument ones), which
+      # this site cannot see. infer.over_application_error rejects it first.
+      else if info.arity < list_length(arg_names)
+      then Err("internal error: over-application of '" ++ fname ++ "' reached codegen (arity "
+                 ++ int_to_string(info.arity) ++ ", got " ++ int_to_string(list_length(arg_names))
+                 ++ "); the n-ary arity check should have rejected it before lowering")
       else finish_direct_call(fname, call_ty, arg_blocks, cur_lbl,
                               cur_ops, arg_names, idx, name_prefix)
   | Nothing ->

@@ -1,0 +1,52 @@
+import stdlib.test (check_eq, run_suite)
+
+# Applying a function whose declared return type is itself a function type.
+#
+# `test_function_returning_function.spr` covers such a function being DEFINED and
+# its result passed to a higher-order helper (`apply_int(adder(5), 3)`). It never
+# applies the result directly, and that gap hid a wrong-code bug: an exact-arity
+# call followed by a second application (`adder(5)(3)`) is the only legal spelling,
+# and the illegal one-call spelling (`adder(5, 3)`) compiled to a direct call to
+# the arity-1 symbol with two arguments. LLVM discards the surplus, so the call
+# yielded the closure handle as an Int — exit 0, no diagnostic.
+#
+# Sprout is n-ary with exact-arity calls (docs/currying-and-pipe-decision-v1.md
+# §9a.5), so a call supplies exactly the declared parameters and each further
+# application is written separately. The over-applied spelling is now a located
+# error, pinned by tests/conformance/type_error/over_application.spr.
+#
+# NOT CLOSED — over-application through an ALIAS still miscompiles silently:
+#
+#   let g = adder
+#   g(1, 2)          # returns the closure handle as an Int, exit 0
+#
+# The check keys on `@arity:<name>`, which bind_local_scheme drops for a local (it
+# has to: the name now refers to a value). No named-call check sees the alias, and
+# the closure header carries no arity for a dynamic check. Closing it needs a
+# runtime-arity field and over-application handling in the closure ABI — a runtime
+# change, tracked in BACKLOG. The cases below are the direct-call class only.
+
+# One declared parameter, one arrow in the return type.
+fn adder(n: Int) -> Int -> Int = \m -> n + m
+
+# ZERO declared parameters. `mk()` is an exact-arity call — it was rejected with
+# "'mk' requires arguments but was called with none", which keyed on the result
+# TYPE being a function rather than on the declared parameter count, leaving a
+# function of this shape impossible to call at all.
+fn mk() -> Int -> Int = \x -> x + 1
+
+# Two arrows, body is a single TWO-parameter lambda: one application of two args.
+fn pair_add() -> Int -> Int -> Int = \ (x, y) -> x + y
+
+# Two arrows, body is NESTED one-parameter lambdas: two applications of one arg.
+# The closure's runtime arity follows the body, not the type, which is why the
+# surplus arguments of an over-applied call cannot simply be re-applied as a group.
+fn nested_add() -> Int -> Int -> Int = \x -> \y -> x + y
+
+fn main() -> Unit !{IO} =
+  run_suite("curried_return_application", [
+    check_eq("declared param, then apply the result", adder(5)(3), 8),
+    check_eq("zero declared params is an exact-arity call", mk()(4), 5),
+    check_eq("two-param lambda takes both at once", pair_add()(1, 2), 3),
+    check_eq("nested lambdas take one at a time", nested_add()(1)(2), 3)
+  ])
