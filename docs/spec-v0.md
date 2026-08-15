@@ -156,6 +156,25 @@ Int` has type `Int -> Int -> Int`.
 Omitted effect annotations mean the function is pure. In v0, the only built-in
 effect label is `IO`.
 
+**A name may be declared at most once at a module's top level.** A second `fn`
+with the same name is rejected at that second declaration:
+
+```
+`twice` is defined more than once in this module
+```
+
+The rule is keyed on the **name alone, not on (name, arity)**: Sprout has no
+overloading (§5.3), so `fn scale(x: Int)` and `fn scale(x: Int, y: Int)` in one
+module are two definitions of one name, not two overloads. Imported definitions
+do not participate — every module's definitions carry their module prefix, so a
+local `map` and the prelude's `map` are distinct names and coexist.
+
+This is a well-formedness rule about the module, so it is reported at the
+duplicate declaration. Before it existed, a duplicate lowered to two `define`
+blocks for one symbol, which the front end accepted and only the LLVM verifier
+rejected — and where the arities differed, the second declaration shadowed the
+first, so a *caller* was blamed with an arity error for a defect in the module.
+
 Functions may also end with a local `where` block:
 
 ```sprout

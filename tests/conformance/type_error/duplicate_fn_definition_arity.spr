@@ -1,0 +1,13 @@
+# Companion to duplicate_fn_definition.spr: the SAME name at a DIFFERENT arity.
+#
+# This is the case a reader is most likely to expect to work, because in a
+# language with overloading it would. Sprout is exact-arity n-ary with no
+# overloading (docs/currying-and-pipe-decision-v1.md §9a.5), so these are two
+# definitions of one symbol exactly like the same-arity case — and they lower to
+# two `define` blocks with the same mangled name just the same. Keying the check
+# on the name ALONE, not on (name, arity), is what covers this.
+fn scale(x: Int) -> Int = x * 2
+
+fn scale(x: Int, y: Int) -> Int = x * y
+
+fn main() -> Unit !{IO} = print(scale(3))

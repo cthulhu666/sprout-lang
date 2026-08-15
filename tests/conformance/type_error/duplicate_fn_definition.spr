@@ -1,0 +1,16 @@
+# Two top-level `fn`s with the same name in one module. The front end accepted
+# this outright: `--phase check` reported OK and `--emit-ir` exited 0, emitting
+# TWO `define` blocks for one symbol. The only thing that ever objected was
+# `opt --passes=verify` ("invalid redefinition of function 'twice'") — an LLVM
+# error naming a mangled symbol, with no source position and no mention of
+# either declaration. On the ordinary compile path that invalid IR is handed
+# straight to clang.
+#
+# Found while implementing the instance-head check (PR #108): a new helper was
+# written byte-identical to one already 3000 lines up in infer.sprout, and the
+# SEED REFRESH is what reported it.
+fn twice(x: Int) -> Int = x + 1
+
+fn twice(x: Int) -> Int = x + 1
+
+fn main() -> Unit !{IO} = print(twice(1))
