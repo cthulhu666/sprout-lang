@@ -72,6 +72,41 @@ comment does not extend the list. Import lists get long — a real module carrie
 over a hundred imports, several past 200 columns — and requiring one line made
 them unformattable.
 
+### Externs are outside the module system
+
+An `extern fn` declaration is **not a module-scoped name**. It is never
+qualified, never renamed, and never enters a module's exported set, so:
+
+- `export` on an `extern fn` has no effect. It parses and is discarded.
+- An extern is reachable by its **bare name** from anywhere its declaring module
+  is part of the build. Importing the module — under any alias, or selectively
+  for some unrelated name — is what puts it there.
+- A selective import list has no bearing on an extern either way. Naming one is
+  accepted and does nothing; omitting one does not hide it. Given
+  `extern fn read_file` and `export fn read_text` in `stdlib.fs`, both
+  `import stdlib.fs (read_file)` and `import stdlib.fs (read_text)` compile, and
+  under either one a bare `read_file(…)` call resolves.
+
+The consequence for diagnostics is worth stating plainly, because it differs from
+the rule for type names above: a missing import for an extern produces **no
+import-related error**. Nothing checks value references against the import graph,
+so the failure surfaces later and elsewhere — as `Unknown variable` from the
+typechecker, or as an undefined symbol at link time.
+
+Where a builtin is declared therefore decides whether a program can reach it.
+The governing rule:
+
+> An extern is declared in the prelude if the prelude's own code calls it, if it
+> is a hardcoded compiler intrinsic, or if it is language core. Otherwise it is
+> declared in the module that owns its surface — but only if that module is a
+> **leaf**, or one its consumers would import anyway.
+
+The leaf qualifier is normative rather than stylistic because there is no
+cross-module dead-code elimination: importing a module emits every definition in
+it and in everything it imports, called or not. Homing an extern in a module that
+its consumers do not otherwise want makes every one of them carry that module's
+whole body.
+
 ## 4. Types
 
 Built-in types:
@@ -1414,7 +1449,10 @@ Semantics:
 
 ### 8.1.1 Double bit access (Experimental)
 
-Two prelude functions expose the raw IEEE 754 binary64 encoding of a `Double`:
+Two functions in `stdlib.math` expose the raw IEEE 754 binary64 encoding of a
+`Double`. They are not in the prelude: reinterpreting a `Double`'s bits is a
+deliberate reach for the math module, and `to_double` remains the globally
+available numeric bridge. Import `stdlib.math` to call them.
 
 ```sprout
 double_to_bits(x: Double) -> Int

@@ -18,6 +18,7 @@ exceptions, no null:
 ```sprout
 module main
 import stdlib.string
+import stdlib.env as env
 
 fn check(name: String) -> Result String String =
   if string.length(name) > 0 then Ok(name) else Err("empty name")
@@ -28,7 +29,7 @@ fn greet(r: Result String String) -> String =
   | Err e   -> string.concat("skipped: ", e)
 
 fn main() -> Unit !{IO} =
-  match env_get("USER") with
+  match env.get("USER") with
   | Just raw -> raw |> string.trim |> check |> greet |> print
   | Nothing  -> print("no USER set")
 ```

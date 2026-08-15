@@ -1819,6 +1819,28 @@ Legend:
   finer modules. Surfaced by the prelude-extern split, which converted bare extern calls into
   wrapper calls.
 
+  **Update 2026-08-15 — this is no longer small, and it now constrains design.** Tier E measured the
+  cost when the imported module is not a leaf, and it decided two placements:
+
+  | placement tried | consumer | cost |
+  |---|---|---|
+  | `env_get` in `stdlib.process` | `examples/io_do_demo` | **+247** lines (12 unrelated defines: `proc_run`, `ProcResult`, the Bytes decode chain) |
+  | `env_get` in a leaf `stdlib.env` | same | +23 |
+  | `char_to_str` in `stdlib.string` | `examples/tcp_echo_once` | **+2058** lines, ~12% (62 unused `stdlib.string` defines, for one ESC character) |
+  | `char_to_str` in the prelude | same | 0 |
+
+  The `stdlib.process` placement also put **11 `@stdlib.process.*` bodies into
+  `bootstrap/compile_driver.ll`**, because `infer.sprout` reads one `SPROUT_TRACE_DISPATCH` switch.
+  Both were reverted to the cheaper home. The surviving payer is `stdlib/json.sprout`, which had no
+  imports and now carries ~2,700 lines of unused `stdlib.string` + `stdlib.bytes` bodies for four
+  byte-offset externs at ~85 call sites — accepted as an honest dependency for a text parser, and
+  recorded here as the concrete number this entry previously lacked.
+
+  Until this is fixed, the placement rule in [spec-v0.md §3 *Externs are outside the module
+  system*](docs/spec-v0.md) has to carry the weight: **an extern may move only to a leaf module, or
+  to one its consumers would import anyway.** That is a workaround for missing DCE masquerading as a
+  design principle; fixing DCE would let placement be decided on meaning alone.
+
 - [ ] `P3` **`import stdlib.prelude` silently doubles the prelude in the bundle.** The prelude has
   no `module` header, so `any_has_module_name` (`bundler.sprout:540`) is false for a file whose only
   import is `stdlib.prelude`, and the bundler does not auto-prepend — the explicit import supplies
@@ -1828,6 +1850,62 @@ Legend:
   vestigial `import stdlib.prelude as prelude` whose alias was never used, and both were fixed by
   deleting it. No such import remains in the repo, so this is currently latent — worth a lint that
   rejects `import stdlib.prelude` outright, since there is no case where it is correct.
+
+### Prelude extern relocation — status and open questions
+
+**Done 2026-08-15.** `stdlib/prelude.sprout` declared **85 `extern fn`s**, every one of them
+globally reachable and emitted as a `declare` into every program with a module header. **42 have
+moved out; 43 remain** (`grep -c '^extern fn' stdlib/prelude.sprout`). The original plan projected
+44; the difference is `double_to_string`, which turned out to be called by the prelude's own
+`instance ToString Double`, and the `char_to_str`/`char_from_codepoint` pair, which was moved and
+then measured back. The rule that governs what stays is normative in
+[spec-v0.md §3 *Externs are outside the module system*](docs/spec-v0.md).
+
+| tier | what moved | destination |
+|---|---|---|
+| — | `print_int`, `read_lines`, `read_int_lines`, `string_join_newlines` | **deleted** — zero callers; `read_lines` had no C implementation at all, so it could never have linked |
+| A | `regex_*` (5), `crypto_*` (3) | already declared in `stdlib.regex` / `stdlib.crypto`; the prelude copies were redundant |
+| B | `bytes_*` (7) | `stdlib.bytes` |
+| C | `vec_make_filled`, `vector_mutset`, `vector_get_direct` | `stdlib.mutable` |
+| D | `term_*` (8) | `stdlib.terminal` |
+| E | `read_file`, `write_file` / `env_get` / `time_now_micros`, `wall_time_micros` | new leaf modules `stdlib.fs` / `stdlib.env` / `stdlib.time` |
+| E | `str_byte_len`, `str_slice_bytes`, `str_starts_with_at_byte`, `str_split_lines`, `split_words` | `stdlib.string` |
+| E | `double_to_bits`, `double_from_bits` | `stdlib.math` |
+
+One latent defect was fixed on the way: the prelude declared
+`regex_replace_all_literal(s, pattern, replacement)` while the C takes
+`(pattern, replacement, text)`. All three parameters are `String`, so both declarations typechecked
+and the **wrong one was the globally reachable one** — a caller who never imported `stdlib.regex`
+could follow the prelude's parameter names and get silently wrong output with no diagnostic.
+`just check-extern-signatures` (`scripts/check_extern_signatures.sh`) now forbids the shape: one C
+symbol, one `extern fn` declaration, repo-wide.
+
+Coverage closed while relocating, all of it previously absent: `stdlib.crypto` and
+`stdlib.terminal` had **no test anywhere**; `read_file`, `write_file`, `env_get`,
+`wall_time_micros` and `split_words` had no test that treated them as the subject rather than as
+setup for something else. New: `test_crypto`, `test_terminal`, `test_fs`, `test_env`,
+`test_string_words`, plus the wall-clock half of `test_time`.
+
+**Open question — relocate `Vec` / `Dict` / `Set`?** The 19 `vector_*` / `map_*` / `native_set_*`
+externs that remain are pinned by mechanics, not by policy: the prelude's own combinators call
+them, and the prelude cannot import (its `ParsedModule` is built with `Nil` imports, hard-coded at
+`bundler.sprout:536`), so an extern cannot leave while its wrapper stays. Moving them means moving
+the **types and combinators** — which, unlike an extern, forces every caller to import, touching
+essentially every file that writes a `Vec` literal or calls `dict_get`. Explicitly **undecided**:
+recorded as a question, not a committed task.
+
+**Open question — the remaining `str_*` and `to_double`.** `str_len`, `str_char_at`, `str_find`,
+`str_starts_with` and `to_double` satisfy none of the three "stays" criteria (no prelude-body
+caller, not intrinsics, not obviously core) yet were deliberately left in place: `str_len` alone
+has 44 consumer files, and they are the operations a beginner reaches for. The honest statement is
+that the rule has a fourth, ergonomic criterion — *char-indexed string operations and numeric
+conversion are language core even when the prelude does not call them* — which is written into the
+spec but is a judgement call, not a mechanical test.
+
+**Orphan.** `string_join_newlines` was added 2026-05-11 for `codegen.sprout` (see the entry at
+line ~1757); that file no longer exists and the builtin had no other caller, so the declaration was
+deleted. The **C implementation is still in `runtime/sprout_runtime.c`** and is now unreachable
+from Sprout — a candidate for removal, deliberately not bundled into this change.
 
 - [ ] `P3` **`just test-file` reports a false green for tests that need `SPROUT_STDLIB_ROOT`**
   (2026-08-14). REPL/analysis-service tests guard on `env_get("SPROUT_STDLIB_ROOT")` and no-op

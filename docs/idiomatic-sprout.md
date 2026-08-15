@@ -189,9 +189,11 @@ To run a fallible call for its effect and **continue** regardless, use it as a b
 statement; `_ <- e` does *not* mean that, it still propagates:
 
 ```sprout
+import stdlib.fs as fs
+...
 do
-  write_file(path, contents)   # run it, discard the Result, continue
-  _ <- write_file(path, more)  # propagates on Err — needs a Result-returning fn
+  fs.write_text(path, contents)   # run it, discard the Result, continue
+  _ <- fs.write_text(path, more)  # propagates on Err — needs a Result-returning fn
 ```
 
 ## Match lists by shape with `[…]` patterns
