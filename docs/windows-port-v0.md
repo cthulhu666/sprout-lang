@@ -163,18 +163,10 @@ exist.
 
 **One exception — the context switch gets a real seam.** `ucontext_t` is embedded by value in the
 `Task` struct, and fibers have no equivalent type (a fiber is an opaque `LPVOID`), so this cannot
-be an `#ifdef` around call sites alone. Introduce `runtime/sprout_context.h`:
-
-| Operation | POSIX | Windows |
-|---|---|---|
-| `sprout_ctx_adopt_current(ctx)` | `getcontext` | `ConvertThreadToFiber` |
-| `sprout_ctx_create(ctx, entry, stack_bytes)` | `getcontext` + `uc_stack` + `makecontext` | `CreateFiber` |
-| `sprout_ctx_switch(from, to)` | `swapcontext` | `SwitchToFiber` |
-| `sprout_ctx_destroy(ctx)` | `free(stack)` | `DeleteFiber` |
-
-That covers every existing use: `sprout_scheduler.c:399`, `:446`, `:509` (switches), `:549-553`
-(pump setup), `:616-621` (task setup), and all three stack frees — `:451` and `:455` (the pump
-reclaiming a finished task) and `:743` (`force_drop_task`).
+be an `#ifdef` around call sites alone. Hence `runtime/sprout_context.h`, landed at W0b — the four operations and the decisions behind them are in §4.6. It covers every
+existing use: `sprout_scheduler.c:390`, `:437`, `:499` (switches), `:509` (task-0 adoption),
+`:539` (pump setup), `:603` (task setup), and all three stack frees — `:442` and `:445` (the pump
+reclaiming a finished task) and `:727` (`force_drop_task`).
 
 ### 4.3 W2 in detail: the poller, and why `WSAPoll` goes first
 
@@ -220,11 +212,11 @@ Neither should be adopted before `WSAPoll` is measured against a real workload.
 
 ### 4.4 W1 in detail: the one genuine risk
 
-`force_drop_task` (with_timeout expiry / scope_cancel, `sprout_scheduler.c:678`) frees a parked
-task's stack **without unwinding the C frame on it** (`:743`) — a deliberate design whose
+`force_drop_task` (with_timeout expiry / scope_cancel, `sprout_scheduler.c:662`) frees a parked
+task's stack **without unwinding the C frame on it** (`:727`) — a deliberate design whose
 consequences the codebase already handles via `scheduler_set_park_cleanup`
-(`sprout_scheduler.h:126-135`). Under fibers the stack belongs to the fiber, so `free(t->stack)`
-becomes `DeleteFiber`.
+(`sprout_scheduler.h:126-135`). Since W0b that free is `sprout_ctx_destroy` (§4.6); under fibers
+its body becomes `DeleteFiber`.
 
 Microsoft documents exactly two dangerous cases, and Sprout is in neither:
 
@@ -236,12 +228,13 @@ Microsoft documents exactly two dangerous cases, and Sprout is in neither:
 Sprout's scheduler is single-threaded and force-drops run **from the pump fiber against a parked
 task**, which is neither the running fiber nor another thread's selected fiber. Deleting it frees
 *"the stack, a subset of the registers, and the fiber data"* — precisely the current
-`free(t->stack)` semantics.
+`sprout_ctx_destroy` semantics, whose contract already states the caller must not be executing on
+the context it destroys.
 
 **Two further fiber facts that constrain the port:**
 
 - *"If your fiber function returns, the thread running the fiber exits."* Sprout's
-  `task_trampoline` already never returns — it swaps back to the pump (`sprout_scheduler.c:509`)
+  `task_trampoline` already never returns — it swaps back to the pump (`sprout_scheduler.c:499`)
   — so the existing structure is already correct. It must stay that way.
 - Fiber-local storage switches with the fiber, but plain TLS does **not**. The runtime uses no
   TLS today (§1.2); that must remain true, or any added TLS has to become FLS.
@@ -253,12 +246,47 @@ Any surface with no Windows implementation returns the established
 silent success, and never a compile-time removal**. A stub that reports success is worse than one
 that fails, for the same reason `just test-file`'s silent skip is a worse outcome than a red test.
 
+### 4.6 The context seam, as landed (W0b)
+
+`runtime/sprout_context.h`. The decisive constraint is stack ownership: `makecontext` runs on a
+stack you hand it, `CreateFiber` allocates its own and returns an opaque handle. So **`SproutCtx`
+owns its stack and no operation accepts a caller-supplied one** — otherwise the interface would
+carry an op the Windows arm cannot implement, which is the whole thing the seam exists to avoid.
+`Task`'s `ucontext_t ctx` + `void* stack` collapse into one `SproutCtx ctx`.
+
+| Op | POSIX | W1 |
+|---|---|---|
+| `sprout_ctx_adopt_current` | no-op; `uc` is filled by the first switch out | `ConvertThreadToFiber` |
+| `sprout_ctx_create(c, entry, bytes)` | `malloc` + `getcontext`/`makecontext` | `CreateFiber` |
+| `sprout_ctx_switch(from, to)` | `swapcontext` | `SwitchToFiber(to)` |
+| `sprout_ctx_destroy` | `free`; idempotent | `DeleteFiber` |
+
+`ctx_switch` keeps a `from` argument that `SwitchToFiber` ignores. All three call sites pass the
+currently-running context, so that is documented as the interface's precondition rather than left
+to chance — a switch whose source is some third context has no Windows implementation.
+
+`ctx_create` returns a status code instead of failing internally, which keeps each caller's
+diagnostic wording its own. Messages are byte-identical to the pre-seam ones, **including
+`"getcontext failed"` — a non-POSIX arm has to reword that**, and the header says so.
+
+**One deliberate behaviour delta:** the pump's stack moves from a 256 KiB BSS array to a
+constructor-time `malloc`, for the ownership reason above. Its OOM path fails loudly, matching the
+task path.
+
+Incidental: the `-Wdeprecated-declarations` suppression (macOS marks the `ucontext` family
+deprecated) narrows from the whole 1300-line scheduler to the four calls that need it. Nothing
+else was leaning on it — the TU compiles clean under `-Wall -Wextra -Wdeprecated-declarations`.
+
+A `_WIN32` include trips an `#error` naming this milestone, so `just windows-probe` reports the
+scheduler's blocker as that `#error` rather than as `ucontext.h` — the work list points at the
+milestone that closes it.
+
 ## 5. Milestones
 
 | ID | Scope | Exit criterion |
 |---|---|---|
 | **W0a** | *(done, 2026-08-15)* `scripts/windows_probe.sh` + `just windows-probe`: measure what the target provides and where each TU stops; adopt §4.1's pure-Win32 rule | a measured §6, replacing the assumed one |
-| **W0b** | `sprout_context.h` seam — extract the `ucontext` calls behind a 4-op header, POSIX arm behaviourally unchanged | `just test` + `just linux-smoke` + the example canary still pass **on POSIX**; no Windows code yet |
+| **W0b** | *(done, 2026-08-15)* `sprout_context.h` seam — the `ucontext` calls behind a 4-op header, POSIX arm behaviourally unchanged but for §4.6's one delta | `just test` + `task-io-smoke` + `linux-smoke` + the example canary still pass **on POSIX**; no Windows code yet |
 | **W1** | `ucontext` → fibers, per §4.4 | task spawn / yield / join / `scope_cancel` smoke passes |
 | **W2** | `WSAPoll` backend + timer min-heap, per §4.3 | `task_sleep` + `with_timeout` + a TCP echo smoke pass |
 | **W3** | Winsock2, files, arena, console, regex, process — §6 | all three TUs compile; `just windows-probe` becomes a gate |
@@ -316,7 +344,7 @@ blocked on a missing API. Score at W0a: **56 available, 22 missing.**
 | TU | First blocker |
 |---|---|
 | `sprout_poll.c` | `:94` `sys/epoll.h` — note it reaches the *epoll* arm, because the file's `#ifdef __APPLE__` / `#else` treats "not macOS" as "Linux". Windows needs a genuine three-way split, not an arm appended after the `#else`. |
-| `sprout_scheduler.c` | `:30` `ucontext.h` — i.e. W0b's seam is this TU's entire blocker |
+| `sprout_scheduler.c` | was `:30` `ucontext.h` — i.e. W0b's seam was this TU's entire blocker. Since W0b it is `sprout_context.h`'s own `#error`, which W1 replaces with the fiber arm |
 | `sprout_runtime.c` | `:7` `regex.h` |
 
 ## 7. Syntax, type-system and error-message impact
@@ -357,16 +385,25 @@ Each milestone's exit criterion in §5 is its test. Additionally:
   no Windows machine — the fast feedback loop for the whole port. It is a **diagnostic** until W3:
   the runtime is POSIX-only today, so a non-zero missing count is the expected state and its
   output *is* the work list. At W3 it becomes a gate, when all three TUs are meant to compile.
-- **W0b** is covered entirely by gates that already exist (`just test`, `just linux-smoke`, the
-  example canary). It adds no new test, by design — a refactor that needs a new test to prove it
-  behaviour-preserving is not behaviour-preserving.
+- **W0b** is covered by gates that already exist. A refactor needing a *new* test to prove it
+  behaviour-preserving is not behaviour-preserving, so the evidence is the standing suite:
+  `just test`, `compile-examples-stage1`, the 5-example run canary, `gc-safety-check --strict`,
+  and above all **`task-io-smoke` on kqueue and `linux-smoke` on epoll+timerfd** — 43 scenarios
+  each including the GC-stress variants and the ASan-verified select/chan force-drop negative
+  controls, which target exactly the free-ordering the seam rewrites.
+
+  One test *was* added (`tests/stdlib/test_task_timeout.spr`, a `with_timeout` over a
+  `chan_select`-parked body). It closes no coverage hole — `tests/task_io_smoke/` already had
+  both the timeout and cancel variants, and CI runs them — but that harness is not part of
+  `just test`, so the `PARK_SELECT` force-drop branch was invisible to the gate AGENTS.md
+  requires for a runtime change. The seam rewrites that branch; it belongs in the default suite.
 - **W5** adds a `windows-latest` CI job mirroring the existing `macos-latest` job's shape
   (`.github/workflows/ci.yml:181-210`, which bootstraps and runs a task/IO smoke against the
   kqueue backend). The Windows job runs the same smoke against the `WSAPoll` backend, and
   **builds with clang targeting `x86_64-pc-windows-msvc`** — the local loop is mingw, so MSVC has
   to be the gated one for §4.1's rule to stay honest.
-- No Sprout-level tests change. The language surface is identical; only which platforms the
-  runtime supports changes.
+- No Sprout-level test *expectations* change. The language surface is identical; only which
+  platforms the runtime supports changes.
 
 ## 11. Sources
 
