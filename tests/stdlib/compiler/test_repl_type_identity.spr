@@ -1,0 +1,54 @@
+module main
+import stdlib.test (TestState, new_state, assert_true, summary)
+import stdlib.compiler.compiler as compiler
+import stdlib.compiler.module_loader as module_loader
+import stdlib.compiler.source as source
+
+# Regression: an imported type must have ONE identity on the REPL /
+# analysis-service path. `prefix_pairs` alias-qualified a module's binding KEYS
+# but left the type constructors inside those schemes bare, so
+#   bytes.to_string :: Bytes -> Result Utf8Error String
+# could never unify with an annotation `Result bytes.Utf8Error String`, which
+# `lookup_type_var` keeps verbatim as TConst("bytes.Utf8Error").
+#
+# Four stdlib modules failed to load this way (http_server, http_middleware,
+# repl, scram), which is what kept `import http_server` broken in the REPL even
+# after the type-vocabulary fix.
+#
+# The canonical form matches the bundler's `qualified_name`: `<module>.<Type>`,
+# except the prelude, which has no module header and so stays unqualified.
+# See docs/repl-env-type-vocabulary-v0.md §11.1.
+
+fn is_compile_ok(r: compiler.CompileResult) -> Bool =
+  match r with
+  | compiler.CompileOk _ -> true
+  | compiler.CompileFail _ -> false
+
+fn main() -> Unit !{IO} =
+  do
+    state <- new_state()
+    match env_get("SPROUT_STDLIB_ROOT") with
+    | Nothing -> ()
+    | Just stdlib_root ->
+        do
+          cache <- module_loader.new_cache()
+          # An ALIAS-qualified annotation must match the aliased value's own type.
+          let aliased = "module app.session\n\nimport stdlib.bytes as bytes\n\nfn f(b: Bytes) -> Result bytes.Utf8Error String = bytes.to_string(b)\n"
+          r_aliased <- compiler.compile_source_with_cache(aliased, source.StdlibRoot(stdlib_root), cache)
+          assert_true(state, "identity: alias-qualified annotation matches aliased value", is_compile_ok(r_aliased))
+          # A SELECTIVE import names the type bare; that must resolve to the same
+          # identity, not a second one.
+          let selective = "module app.session\n\nimport stdlib.bytes (Utf8Error, to_string)\n\nfn f(b: Bytes) -> Result Utf8Error String = to_string(b)\n"
+          r_selective <- compiler.compile_source_with_cache(selective, source.StdlibRoot(stdlib_root), cache)
+          assert_true(state, "identity: bare annotation from a selective import matches", is_compile_ok(r_selective))
+          # The same type reached through TWO different modules must converge on
+          # one identity: http_server.request_body returns bytes' Utf8Error, and
+          # the session names that type through its own alias for bytes.
+          let crossed = "module app.session\n\nimport stdlib.http_server\nimport stdlib.bytes as b\n\nfn g(r: http_server.HttpRequest) -> Result b.Utf8Error String = http_server.request_body(r)\n"
+          r_crossed <- compiler.compile_source_with_cache(crossed, source.StdlibRoot(stdlib_root), cache)
+          assert_true(state, "identity: same type via two modules converges", is_compile_ok(r_crossed))
+          # A genuinely wrong type must STILL be rejected — this widens nothing.
+          let bogus = "module app.session\n\nimport stdlib.bytes as bytes\n\nfn f(b: Bytes) -> Result bytes.Utf8Error Int = bytes.to_string(b)\n"
+          r_bogus <- compiler.compile_source_with_cache(bogus, source.StdlibRoot(stdlib_root), cache)
+          assert_true(state, "identity: a genuinely mismatched type still rejected", is_compile_ok(r_bogus) == false)
+    summary(state)
