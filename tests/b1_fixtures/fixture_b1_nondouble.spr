@@ -1,4 +1,6 @@
 module main
+# vector_get_direct / vec_make_filled are externs owned by stdlib.mutable.
+import stdlib.mutable as mutable
 
 # B1 gate coverage-gap (RepUnsupported, non-Double PRIMITIVE): a fully-applied
 # `vector_get_direct` on a `Vector Int` must stay a `call @vector_get_direct`

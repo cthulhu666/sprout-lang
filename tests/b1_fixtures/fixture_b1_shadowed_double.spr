@@ -1,4 +1,8 @@
 module main
+# vector_get_direct is an extern owned by stdlib.mutable. Note this module's kernels use the
+# PRIMITIVE Double while `main.Double` below is a heap ADT — keeping those distinct under the
+# same import is exactly what this fixture guards.
+import stdlib.mutable as mutable
 
 # B1-Double gate regression (finding ①, the UAF): a user type named `Double`
 # that is a HEAP ADT must NOT trigger the scalar B1 fast-path. Its canonical name

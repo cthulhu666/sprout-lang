@@ -1,0 +1,88 @@
+import stdlib.test (check_eq, check_true, run_suite)
+import stdlib.crypto as crypto
+import stdlib.bytes as bytes
+
+# stdlib.crypto had NO test coverage anywhere in tests/ — only a passing mention in
+# examples/io_result_do_demo.sprout. This closes that gap (AGENTS.md "What tests to
+# write" #3) ahead of removing the duplicate crypto_* extern declarations from the
+# prelude.
+#
+# It also pins the property that removal depends on: every call here goes through
+# `import stdlib.crypto`, so the suite proves the module is self-sufficient without
+# the prelude's copies. That failure mode is otherwise silent — externs are invisible
+# to the module system (bundler.sprout:597), so a missing declaration surfaces as an
+# `Unknown variable` or a link error rather than a scoping diagnostic.
+#
+# Digests are compared as base64 rather than hex so no hex helper is needed. Every
+# expected value below was generated locally, not recalled:
+#   printf 'abc' | openssl dgst -sha256 -binary | openssl base64
+#   printf 'what do ya want for nothing?' | openssl dgst -sha256 -hmac 'Jefe' -binary | openssl base64
+#   printf 'foobar' | openssl base64
+
+fn sha256_b64(text: String) -> String =
+  crypto.base64_encode(crypto.sha256(bytes.from_string(text)))
+
+fn hmac_b64(key: String, message: String) -> String =
+  crypto.base64_encode(crypto.hmac_sha256(bytes.from_string(key), bytes.from_string(message)))
+
+fn encode(text: String) -> String =
+  crypto.base64_encode(bytes.from_string(text))
+
+# Decode back to text so a padding or alphabet bug shows as corrupted output rather
+# than as an opaque Bytes comparison.
+fn roundtrip(text: String) -> String =
+  match crypto.base64_decode(crypto.base64_encode(bytes.from_string(text))) with
+  | Ok raw ->
+      match bytes.to_string(raw) with
+      | Ok back -> back
+      | Err _ -> "utf8-error"
+  | Err _ -> "decode-error"
+
+fn decode_rejects(raw: String) -> Bool =
+  match crypto.base64_decode(raw) with
+  | Ok _ -> false
+  | Err _ -> true
+
+fn xor_b64(left: String, right: String) -> String =
+  match crypto.bytes_xor(bytes.from_string(left), bytes.from_string(right)) with
+  | Ok out -> crypto.base64_encode(out)
+  | Err _ -> "xor-error"
+
+fn xor_length_mismatch_errs() -> Bool =
+  match crypto.bytes_xor(bytes.from_string("ab"), bytes.from_string("abc")) with
+  | Ok _ -> false
+  | Err _ -> true
+
+fn main() -> Unit !{IO} =
+  run_suite("crypto", [
+    # --- SHA-256 (RFC 6234 vectors) ---
+    check_eq("sha256 of \"abc\"", sha256_b64("abc"),
+      "ungWv48Bz+pBQUDeXa4iI7ADYaOWF3qctBD/YfIAFa0="),
+    # The empty input is the case a length-prefix or padding bug breaks first.
+    check_eq("sha256 of the empty string", sha256_b64(""),
+      "47DEQpj8HBSa+/TImW+5JCeuQeRkm5NMpJWZG3hSuFU="),
+
+    # --- HMAC-SHA256 (RFC 4231 test case 2) ---
+    # Argument order matters and is not symmetric: swapping key and message yields a
+    # different digest, so this pins the parameter order against the C, which is the
+    # exact defect class that put regex_replace_all_literal wrong in the prelude.
+    check_eq("hmac_sha256 key=Jefe", hmac_b64("Jefe", "what do ya want for nothing?"),
+      "W9zBRr9gdU5qBCQmCJV1x1oAPwidJzmDnexYuWTsOEM="),
+
+    # --- base64 (RFC 4648 vectors, covering all three padding lengths) ---
+    check_eq("base64 no padding", encode("foobar"), "Zm9vYmFy"),
+    check_eq("base64 one pad char", encode("Hi"), "SGk="),
+    check_eq("base64 empty input", encode(""), ""),
+
+    check_eq("base64 round-trips ASCII", roundtrip("foobar"), "foobar"),
+    check_eq("base64 round-trips non-ASCII", roundtrip("café 日本"), "café 日本"),
+    check_true("base64_decode rejects a non-alphabet character", decode_rejects("Zm9v*mFy")),
+
+    # --- bytes_xor ---
+    # Self-XOR is all zeros, which needs no external vector to be obviously right.
+    check_eq("xor of a value with itself is zero", xor_b64("abc", "abc"), "AAAA"),
+    check_true("xor rejects mismatched lengths", xor_length_mismatch_errs())
+  ])
+
+# Not covered here: crypto.random_bytes, which is !{IO} and so cannot appear in the
+# pure `check_*` list this suite is built from.

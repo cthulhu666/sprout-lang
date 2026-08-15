@@ -1281,12 +1281,9 @@ instance ToString (a, b, c, d, e) where ToString a, ToString b, ToString c, ToSt
 # I/O
 extern fn print(val: a) -> Unit !{IO}
 extern fn eprint(val: String) -> Unit !{IO}
-extern fn print_int(n: Int) -> Int !{IO}
 extern fn read_file(path: String) -> Result String String !{IO}
 extern fn write_file(path: String, content: String) -> Result String Unit !{IO}
 extern fn panic(msg: String) -> a !{IO}
-extern fn read_lines(path: String) -> List String !{IO}
-extern fn read_int_lines(path: String) -> Vector Int !{IO}
 extern fn argv_get(idx: Int) -> Maybe String !{IO}
 
 export fn argv_all() -> List String !{IO} =
@@ -1458,7 +1455,6 @@ extern fn int_range_end(r: IntRange) -> Int
 # String primitives
 extern fn str_concat(a: String, b: String) -> String
 extern fn string_concat_many(xs: List String) -> String
-extern fn string_join_newlines(xs: List String) -> String
 extern fn str_len(s: String) -> Int
 extern fn str_slice(s: String, from: Int, to: Int) -> String
 # O(strlen + byte_len). Byte-indexed substring; faster than str_slice when the
@@ -1477,7 +1473,10 @@ extern fn str_byte_len(s: String) -> Int
 extern fn str_starts_with_at_byte(s: String, byte: Int, prefix: String) -> Bool
 extern fn split_words(s: String) -> List String
 
-# Raw vector (unboxed mutable array)
+# Raw vector — the PERSISTENT ops only. These back the immutable `Vec` whose combinators are
+# prelude code below, so they cannot move: the prelude has no imports (bundler.sprout:536) and a
+# prelude wrapper therefore pins its extern. The three MUTABLE ops (vec_make_filled,
+# vector_mutset, vector_get_direct) back MutVec and nothing here, and now live in stdlib.mutable.
 extern fn vector_empty() -> Vector a
 extern fn vector_length(v: Vector a) -> Int
 extern fn vector_get(v: Vector a, i: Int) -> Maybe a
@@ -1485,9 +1484,6 @@ extern fn vector_set(v: Vector a, i: Int, val: a) -> Vector a
 extern fn vector_append(v: Vector a, val: a) -> Vector a
 extern fn vector_concat(a: Vector x, b: Vector x) -> Vector x
 extern fn vector_from_list(xs: List a) -> Vector a
-extern fn vec_make_filled(n: Int, val: a) -> Vector a !{IO}
-extern fn vector_mutset(v: Vector a, i: Int, val: a) -> Unit !{IO}
-extern fn vector_get_direct(v: Vector a, i: Int) -> a !{IO}
 
 # Raw map (string-keyed hash map)
 extern fn map_empty() -> Map v
@@ -1505,14 +1501,9 @@ extern fn native_set_member(key: String, s: NativeSet) -> Bool
 extern fn native_set_to_list(s: NativeSet) -> List String
 extern fn native_set_size(s: NativeSet) -> Int
 
-# Bytes
-extern fn bytes_empty() -> Bytes
-extern fn bytes_length(b: Bytes) -> Int
-extern fn bytes_get(b: Bytes, i: Int) -> Maybe Int
-extern fn bytes_slice(b: Bytes, from: Int, to: Int) -> Bytes
-extern fn bytes_append(b: Bytes, other: Bytes) -> Bytes
-extern fn bytes_singleton(val: Int) -> Bytes
-extern fn bytes_from_utf8(s: String) -> Bytes
+# Bytes primitives are NOT declared here. They live in stdlib.bytes, which declares the full set
+# (these seven plus bytes_to_utf8 and the bytes_builder_* family) and must be imported explicitly.
+# `Bytes` itself stays a prelude type: it is named in signatures across net/http/crypto.
 
 # Mutable references
 extern fn ref_new(val: a) -> Ref a !{IO}
@@ -1521,12 +1512,11 @@ extern fn ref_write(r: Ref a, val: a) -> Unit !{IO}
 
 # Mutable vectors and matrices now live in stdlib.mutable (import explicitly).
 
-# Regex
-extern fn regex_validate(pattern: String) -> Result String Unit
-extern fn regex_is_match(pattern: String, text: String) -> Bool
-extern fn regex_find_range(pattern: String, text: String) -> Maybe IntRange
-extern fn regex_replace_all_literal(s: String, pattern: String, replacement: String) -> String
-extern fn regex_escape(s: String) -> String
+# Regex primitives are NOT declared here. They live in stdlib.regex, which must be imported
+# explicitly. The duplicate copies that used to sit here were not merely redundant: this block
+# declared `regex_replace_all_literal(s, pattern, replacement)` while the C takes
+# (pattern, replacement, text). All three are String, so both declarations typechecked and the
+# wrong one was the globally reachable one. `just check-extern-signatures` now forbids the shape.
 
 # Network primitives are NOT declared here. They live in stdlib.net, which must be imported
 # explicitly — a socket read is not something a program should be able to reach by accident. The one
@@ -1543,7 +1533,5 @@ extern fn term_read_line() -> Maybe String !{IO}
 extern fn term_write(text: String) -> Unit !{IO}
 
 
-# Crypto
-extern fn crypto_sha256(b: Bytes) -> Bytes
-extern fn crypto_hmac_sha256(key: Bytes, msg: Bytes) -> Bytes
-extern fn crypto_base64_encode(b: Bytes) -> String
+# Crypto primitives are NOT declared here. They live in stdlib.crypto, which declares the full
+# set (these three plus base64_decode, bytes_xor, random_bytes) and must be imported explicitly.
