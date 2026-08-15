@@ -2520,6 +2520,13 @@ ci-fast-gates: bootstrap-from-seed build-fmt-from-seed
     # predated the explicit-`_` partial-application syntax.
     "c-runtime-test|c-runtime-test"
     "b1-gate|b1-gate"
+    # Added with the prelude-extern relocation: one C symbol, one `extern fn`
+    # declaration, repo-wide. The prelude and stdlib.regex both declared
+    # regex_replace_all_literal with DIFFERENT parameter orders, both typechecked
+    # (all three params are String), and the wrong one was the globally reachable
+    # one — so this catches a class of defect that produces silently wrong output
+    # with no diagnostic. gate-audit caught it being unwired before it ever ran here.
+    "extern-signatures|check-extern-signatures"
   )
   declare -a pids=() labels=()
   idx=0; active=0
@@ -2624,7 +2631,7 @@ gate-quick: fmt-check test compile-examples-stage1 smoke-shapes bundle-smoke
 # advisory), so it runs in the body rather than as an arg-less dependency.
 # Full CI-parity battery (slow, ~15-25m); a green run means CI will not surprise you.
 [group('gate')]
-gate: fmt-check smoke-shapes bundle-smoke loud-fail-smoke diagnostic-stream-smoke argv-smoke trace-dispatch-smoke verify-dispatch-smoke div-by-zero-smoke stack-overflow-smoke flush-on-crash-smoke tco-runtime-smoke c-runtime-test b1-gate check-approved-builtins verify-bootstrap-fixed-point ir-golden-diff compile-examples-stage1 compile-bench run-example-canary test task-io-smoke http-client-binary-gate http-tls-gate test-stress
+gate: fmt-check smoke-shapes bundle-smoke loud-fail-smoke diagnostic-stream-smoke argv-smoke trace-dispatch-smoke verify-dispatch-smoke div-by-zero-smoke stack-overflow-smoke flush-on-crash-smoke tco-runtime-smoke c-runtime-test b1-gate check-approved-builtins check-extern-signatures verify-bootstrap-fixed-point ir-golden-diff compile-examples-stage1 compile-bench run-example-canary test task-io-smoke http-client-binary-gate http-tls-gate test-stress
   #!/usr/bin/env bash
   set -euo pipefail
   echo "==> gate: gc-safety-check --strict..."
