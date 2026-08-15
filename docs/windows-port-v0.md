@@ -135,7 +135,8 @@ So the ABI choice is driven by risk and ergonomics, not by Steamworks:
 
 - **Develop with mingw-w64.** `clang --target=x86_64-w64-mingw32` cross-compiles from macOS with
   a `brew install mingw-w64` sysroot, keeping the day-to-day loop on the machine the work happens
-  on.
+  on. Verified at W0a against mingw-w64 14.0.0; `just windows-probe` locates the sysroot via
+  `brew --prefix mingw-w64`, overridable with `SPROUT_MINGW_SYSROOT`.
 - **Ship with MSVC**, and gate it in CI from W5 onward so the path never rots.
 - **The rule that makes both work: write the Windows backend against pure Win32 + ISO C, never
   against mingw's POSIX shims.** mingw-w64 supplies `unistd.h`, `sys/time.h`, `strings.h` and
@@ -256,32 +257,61 @@ that fails, for the same reason `just test-file`'s silent skip is a worse outcom
 
 | ID | Scope | Exit criterion |
 |---|---|---|
-| **W0** | `sprout_context.h` seam; `just windows-cross` recipe compiling (not linking) the three runtime TUs with `clang --target=x86_64-w64-mingw32`; adopt §4.1's pure-Win32 rule | all three `.c` files reach `clang -c` exit 0 |
+| **W0a** | *(done, 2026-08-15)* `scripts/windows_probe.sh` + `just windows-probe`: measure what the target provides and where each TU stops; adopt §4.1's pure-Win32 rule | a measured §6, replacing the assumed one |
+| **W0b** | `sprout_context.h` seam — extract the `ucontext` calls behind a 4-op header, POSIX arm behaviourally unchanged | `just test` + `just linux-smoke` + the example canary still pass **on POSIX**; no Windows code yet |
 | **W1** | `ucontext` → fibers, per §4.4 | task spawn / yield / join / `scope_cancel` smoke passes |
 | **W2** | `WSAPoll` backend + timer min-heap, per §4.3 | `task_sleep` + `with_timeout` + a TCP echo smoke pass |
-| **W3** | Winsock2, files, arena, threads, console, regex, process — §6 | the runtime links |
-| **W4** | Vectored exception handler; `CaptureStackBackTrace`/DbgHelp or a loud stub | a deliberate stack overflow prints a diagnostic, not a silent exit |
+| **W3** | Winsock2, files, arena, console, regex, process — §6 | all three TUs compile; `just windows-probe` becomes a gate |
+| **W4** | Vectored exception handler; `CaptureStackBackTrace` or a loud stub | a deliberate stack overflow prints a diagnostic, not a silent exit |
 | **W5** | First `.exe`; `windows-latest` CI job; game-side link flags | uncharted-suns runs on Windows |
 
 W1 and W2 carry the design risk; W3 is mechanical substitution.
 
-## 6. W3 surface inventory
+**W0 was originally one milestone whose exit criterion was "all three `.c` files reach `clang -c`
+exit 0". That was wrong** — it is W3's criterion, not a first step: `sprout_runtime.c` stops on
+its very first non-standard include, so reaching a clean compile means W3 and W4 are already
+done. The split separates a *measurement* (W0a, no design decisions, cannot be wrong) from the
+first *code* change (W0b, a pure POSIX-side refactor needing no Windows toolchain at all).
 
-Counts are occurrences in `runtime/sprout_runtime.c` unless noted.
+W0b is deliberately not Windows code. Extracting the seam while it still has one implementation
+means the existing POSIX gates can prove it correct; doing it later means debugging the refactor
+and the fiber port simultaneously, on a platform that cannot yet run the test suite.
 
-| POSIX surface | Count | Windows replacement |
-|---|---|---|
-| BSD sockets (`sys/socket.h`, `netinet/in.h`, `arpa/inet.h`, `netdb.h`) | pervasive | Winsock2 — `SOCKET` is **not** an `int` fd, plus `WSAStartup`, `closesocket`, `WSAGetLastError`. Touches every `tcp_*` builtin and the handle table. |
-| `termios` family | 14 | `SetConsoleMode` + `ENABLE_VIRTUAL_TERMINAL_PROCESSING`. The escape sequences `stdlib.terminal` emits work on Windows 10+. |
-| `sigaction` / `sigaltstack` | 10 | vectored exception handler (W4) |
-| `backtrace` (`execinfo.h`) | 13 | `CaptureStackBackTrace` / DbgHelp, or a loud stub (W4) |
-| `fork` / `execvp` / `pipe` | 3 / 3 / 7 | `CreateProcess` + anonymous pipes. **Needed by Milestone B and the game's offline `gen-living` bake, not by the shipped game** — implement rather than stub, because `analysis_service_driver.sprout:751` shells out via `["sh", "-c", …]` and there is no `sh` on Windows either way. |
-| `regcomp` (POSIX `<regex.h>`) | 1 (`regex_compile_ere`, `:6039`) | **Not in the MSVC CRT.** Vendor a small implementation. Stubbing removes a *language-visible* feature, so this is its own backlog item, not a W3 sub-bullet. |
-| `mmap(PROT_NONE)` GC arena | 2 + 4 `mprotect` | `VirtualAlloc` `MEM_RESERVE` / `MEM_COMMIT` — a direct equivalent, the easiest item on this list |
-| `pthread_create` (async DNS) | 2 | `CreateThread`; `stdatomic.h` is C11 and portable |
-| `readlink` / `_NSGetExecutablePath` | 2 / 2 | `GetModuleFileName` |
-| `getrlimit` | 1 | stub |
-| `ftell` | `:7241` | `_ftelli64` |
+## 6. W3 surface inventory — **measured**
+
+Measured 2026-08-15 against mingw-w64 14.0.0 with `just windows-probe`
+(`scripts/windows_probe.sh`), which probes each header and function independently. Re-run it
+rather than trusting this table if the toolchain moves. Counts are occurrences in
+`runtime/sprout_runtime.c` unless noted.
+
+**Every Win32 replacement this design names is available** — all of `ConvertThreadToFiber`,
+`CreateFiber`, `SwitchToFiber`, `DeleteFiber`, `WSAPoll`, `WSAStartup`, `closesocket`,
+`VirtualAlloc`, `SetConsoleMode`, `GetModuleFileNameA`, `CreateProcessA`, `CreatePipe`,
+`CaptureStackBackTrace`, `AddVectoredExceptionHandler`, `CreateWaitableTimerA`. No item below is
+blocked on a missing API. Score at W0a: **56 available, 22 missing.**
+
+| POSIX surface | Count | Probe result | Windows replacement |
+|---|---|---|---|
+| BSD sockets (`sys/socket.h`, `netinet/in.h`, `arpa/inet.h`, `netdb.h`) | pervasive | all 4 headers **missing** | Winsock2 (`winsock2.h`, `ws2tcpip.h` both present) — `SOCKET` is **not** an `int` fd, plus `WSAStartup`, `closesocket`, `WSAGetLastError`. Touches every `tcp_*` builtin and the handle table. |
+| `termios` family | 14 | header **missing** | `SetConsoleMode`/`GetConsoleMode` + `ENABLE_VIRTUAL_TERMINAL_PROCESSING`. The escapes `stdlib.terminal` emits work on Windows 10+. |
+| `sigaction` / `sigaltstack` | 10 | `signal.h` present, but `sigaction`, `sigaltstack`, `sigemptyset` all **missing** | vectored exception handler (W4). `signal`/`raise` do exist, but not the POSIX surface the crash handler needs. |
+| `backtrace` (`execinfo.h`) | 13 | header **missing**; `dbghelp.h` also **absent from the sysroot** | `CaptureStackBackTrace` (in `windows.h`, present). DbgHelp is *not* an option here, so frames come back as addresses — symbolization is a separate question, not a W4 blocker. |
+| `fork` / `execvp` / `pipe` | 3 / 3 / 7 | `fork` **missing**, `pipe` **missing**, `execvp` present | `CreateProcessA` + `CreatePipe`. **Needed by Milestone B and the game's offline `gen-living` bake, not by the shipped game.** Note `analysis_service_driver.sprout:751` shells out via `["sh", "-c", …]` and there is no `sh` on Windows either way. |
+| `regcomp` (POSIX `<regex.h>`) | 1 (`regex_compile_ere`, `:6039`) | header **missing** | Vendor a small ERE implementation. **This is `sprout_runtime.c`'s *first* blocker (line 7)** — nothing else in that TU can be compile-checked until it is resolved or temporarily `#ifdef`'d out, which makes it an ordering constraint on top of being a feature question. Own backlog item: stubbing it removes a *language-visible* feature. |
+| `mmap(PROT_NONE)` GC arena | 2 + 4 `mprotect` | `sys/mman.h` **missing** | `VirtualAlloc` `MEM_RESERVE`/`MEM_COMMIT` — a direct equivalent, the easiest item here |
+| `pthread_create` (async DNS) | 2 | **`pthread.h` present**, and `pthread_create`/`_detach`/`_mutex_lock`/`_cond_wait` all available | **No work needed under mingw** (winpthreads). Corrects this table's pre-measurement claim that `CreateThread` was required. It *would* be required under MSVC, so §4.1's ship-target rule still applies — treat this as deferred, not free. |
+| `readlink` / `_NSGetExecutablePath` | 2 / 2 | `readlink` **missing** | `GetModuleFileNameA` |
+| `getrlimit` | 1 | `sys/resource.h` **missing** | stub |
+| `ftell` | `:7241` | `ftello`, `fseeko`, `_ftelli64`, `_fseeki64` **all present** | Use **`_ftelli64`**, not `ftello`: the probe shows mingw provides both, but only `_ftelli64` also exists under MSVC, so it is the one choice that satisfies §4.1's write-to-the-strict-surface rule. |
+| `sys/wait.h`, `poll.h` | — | both **missing** | subsumed by `CreateProcessA` and `WSAPoll` respectively |
+
+**Where each TU stops today** (a missing include is fatal, so each reports one blocker per run):
+
+| TU | First blocker |
+|---|---|
+| `sprout_poll.c` | `:94` `sys/epoll.h` — note it reaches the *epoll* arm, because the file's `#ifdef __APPLE__` / `#else` treats "not macOS" as "Linux". Windows needs a genuine three-way split, not an arm appended after the `#else`. |
+| `sprout_scheduler.c` | `:30` `ucontext.h` — i.e. W0b's seam is this TU's entire blocker |
+| `sprout_runtime.c` | `:7` `regex.h` |
 
 ## 7. Syntax, type-system and error-message impact
 
@@ -317,8 +347,13 @@ Named here so it is not rediscovered later; designed when W5 lands.
 
 Each milestone's exit criterion in §5 is its test. Additionally:
 
-- **W0** adds `just windows-cross`, a compile-only gate runnable from macOS/Linux with no Windows
-  machine — the fast feedback loop for the whole port.
+- **W0a** added `just windows-probe` (`scripts/windows_probe.sh`), runnable from macOS/Linux with
+  no Windows machine — the fast feedback loop for the whole port. It is a **diagnostic** until W3:
+  the runtime is POSIX-only today, so a non-zero missing count is the expected state and its
+  output *is* the work list. At W3 it becomes a gate, when all three TUs are meant to compile.
+- **W0b** is covered entirely by gates that already exist (`just test`, `just linux-smoke`, the
+  example canary). It adds no new test, by design — a refactor that needs a new test to prove it
+  behaviour-preserving is not behaviour-preserving.
 - **W5** adds a `windows-latest` CI job mirroring the existing `macos-latest` job's shape
   (`.github/workflows/ci.yml:181-210`, which bootstraps and runs a task/IO smoke against the
   kqueue backend). The Windows job runs the same smoke against the `WSAPoll` backend, and
