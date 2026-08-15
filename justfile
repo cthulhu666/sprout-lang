@@ -1973,6 +1973,16 @@ http-tls-gate: bootstrap-from-seed
 linux-smoke: (linux-run "task-io-smoke")
   @echo "==> linux-smoke ✓ (task-io-smoke on Linux, epoll+timerfd backend, HDRCHECK on)"
 
+# Windows port W0a. DIAGNOSTIC, not a gate: the runtime is POSIX-only today, so a
+# non-zero "missing" count is the expected state and the output IS the port's work
+# list. Becomes a gate at W3, when all three TUs are meant to compile
+# (docs/windows-port-v0.md §5). Needs a mingw-w64 sysroot: `brew install mingw-w64`,
+# or point SPROUT_MINGW_SYSROOT at one.
+# Report what the Windows target provides, and where each runtime TU stops.
+[group('dev')]
+windows-probe:
+  bash scripts/windows_probe.sh
+
 # Division-by-zero guard regression (CI gate). The fixture divides by a RUNTIME
 # zero (`10 / list_length(argv)` with no args), which neither the compiler nor
 # clang can fold. A bare `sdiv i64 _, 0` is LLVM undefined behavior; the emitted
