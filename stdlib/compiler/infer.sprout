@@ -4789,9 +4789,12 @@ export fn typecheck_decls(
       match validate_constraints_all(decls, collect_declared_class_names(decls, class_names_from_env(env, Nil))) with
       | Just (pos, err_msg) -> typed_ast.TypedErr(pos, err_msg)
       | Nothing ->
-        match check_overlapping_instances(decls, dict_empty()) with
+        match check_tyvar_instance_heads(decls) with
         | Just (pos, err_msg) -> typed_ast.TypedErr(pos, err_msg)
         | Nothing ->
+          match check_overlapping_instances(decls, dict_empty()) with
+          | Just (pos, err_msg) -> typed_ast.TypedErr(pos, err_msg)
+          | Nothing ->
             match check_missing_superclass_instances(decls) with
             | Just (pos, err_msg) -> typed_ast.TypedErr(pos, err_msg)
             | Nothing ->
@@ -5216,6 +5219,53 @@ fn instance_key_and_class(c: ast.TypeConstraint) -> Maybe (String, String) =
       | [head_te | _] ->
           Just((str_concat("@inst:", str_concat(class_name, str_concat(":", type_head_str(type_from_ast(head_te, dict_empty()))))),
                 string.after_last_dot(class_name)))
+
+# ---------------------------------------------------------------------------
+# Type-variable instance-head validation
+# ---------------------------------------------------------------------------
+#
+# `instance Boxer a` parses, and register_instance_marker registers it under
+# `@inst:Boxer:{tyvar}` — a key no dispatch site ever looks up, because dispatch
+# resolves through concrete_type_str, which returns Nothing for a variable head.
+# So the declaration looked accepted while EVERY use failed with "No instance of
+# Boxer for T" at the CALL site, blaming the caller for a defect in the instance.
+# Sprout has no catch-all/overlapping-instance resolution (see
+# check_overlapping_instances), so a variable head can never become meaningful:
+# reject it where it is written.
+#
+# Discriminates on the AST head, NOT on type_from_ast: that is called here with
+# an empty local_vars, so an unbound `a` resolves to TConst("a") — indistinguishable
+# from a genuine nullary constructor by the time types.Type is reached. The
+# lowercase-initial convention (is_lowercase_name) is the same discriminator
+# lowering.is_type_var_name and bundler.type_name_starts_lower use. The head is
+# read with type_expr_head_name (defined above for the constraint-token scan), so
+# an applied variable head (`instance C (a b)`) is rejected here too.
+fn instance_head_tyvar(c: ast.TypeConstraint) -> Maybe (String, String) =
+  match c with
+  | ast.TypeConstraint class_name type_args ->
+      match type_args with
+      | Nil -> Nothing
+      | [head_te | _] ->
+          match type_expr_head_name(head_te) with
+          | Nothing -> Nothing
+          | Just n ->
+              if is_lowercase_name(n)
+              then Just((string.after_last_dot(class_name), n))
+              else Nothing
+
+fn check_tyvar_instance_heads(decls: List ast.Decl) -> Maybe(source.SourcePos, String) =
+  match decls with
+  | Nil -> Nothing
+  | Cons decl rest ->
+      match decl with
+      | ast.InstanceDecl constraint _ _ _ ->
+          match instance_head_tyvar(constraint) with
+          | Nothing -> check_tyvar_instance_heads(rest)
+          | Just (cls, var_name) ->
+              Just((ast.decl_pos(decl),
+                    "Instance head for " ++ cls
+                      ++ " must be a concrete type, not the type variable `" ++ var_name ++ "`"))
+      | _ -> check_tyvar_instance_heads(rest)
 
 fn check_overlapping_instances(decls: List ast.Decl, seen: Dict Bool) -> Maybe(source.SourcePos, String) =
   match decls with

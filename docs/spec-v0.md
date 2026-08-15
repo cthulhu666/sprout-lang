@@ -1546,6 +1546,43 @@ above: it prevents the obligation from being silently dropped (a codegen
 under-application) or resolved to a wrong default dictionary (a silent
 miscompile that reads a closure through an unrelated instance).
 
+**An instance head must be a concrete type constructor.**  The head of an
+`instance` declaration — the type immediately after the class name — must be
+headed by a type *constructor* (`Int`, `List a`, `Result e a`, a tuple).  A bare
+type variable (`instance C a`), or an applied variable head (`instance C (a b)`),
+is rejected at the instance declaration with:
+
+```
+Instance head for C must be a concrete type, not the type variable `a`
+```
+
+Sprout resolves an instance by the head constructor of the dispatch type, so a
+variable head names no dispatchable type: it would register an instance that no
+call site can ever select.  Rejecting it at the declaration is what makes the
+diagnostic land on the instance rather than on every later use — before this
+rule, `instance C a` was accepted and each use failed with `No instance of C for
+T`, blaming the caller for a defect in the instance.
+
+**Two instances may not share a head constructor.**  Instance selection keys on
+the head constructor *alone*, so `instance C (List a)` and `instance C (List Int)`
+both name `C`-at-`List` and the second would silently shadow the first.  Sprout
+has no overlapping-instance resolution and no instance-specificity ordering, so
+this is always an error:
+
+```
+Overlapping instances for C
+```
+
+The granularity is the head constructor, not the full type: `instance C (List Int)`
+and `instance C (List Bool)` are rejected as overlapping even though no type
+matches both.
+
+Together these two rules mirror the Haskell 2010 Report §4.3.2 restriction that an
+instance head be "a type constructor `T` applied to simple type variables … [which]
+must all be distinct".  Sprout is more permissive in admitting concrete type
+arguments (`instance C (List Int)` — legal only with GHC's `FlexibleInstances`) and
+more restrictive in that two such instances may not share a head constructor.
+
 ### `Applicative` class and `mapN` helpers
 
 ```
