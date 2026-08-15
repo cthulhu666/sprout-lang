@@ -5344,6 +5344,15 @@ fn type_apply_spine_args(te: ast.TypeExpr, acc: List ast.TypeExpr) -> List ast.T
 # Lifting this restriction later is the GHC FlexibleInstances position, and it
 # requires the key to carry the full head plus most-specific-wins matching — see
 # the widening item in BACKLOG.md. Until then a nested argument is rejected too.
+#
+# The raw name is the right thing to test here, NOT string.after_last_dot(name)
+# as is_constructor_ref does: is_lowercase_name already answers false for any
+# dotted name, so a module-qualified type can never be taken for a type variable
+# even though it may START lowercase. Verified — an aliased `instance Holder
+# (List json.Json)` arrives here as `stdlib.json.Json` and is correctly reported
+# as a concrete argument. Adding after_last_dot would BREAK that: it would reduce
+# the name to `Json`, still uppercase and still rejected, but it would also
+# reduce a hypothetical `mod.a` to a bare `a` and admit it.
 fn head_arg_problem(args: List ast.TypeExpr, seen: List String) -> Maybe String =
   match args with
   | Nil -> Nothing
