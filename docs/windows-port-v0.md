@@ -344,3 +344,22 @@ Each milestone's exit criterion in §5 is its test. Additionally:
   — `\Device\Afd`, `IOCTL_AFD_POLL`, wepoll attribution.
 - [raylib releases](https://github.com/raysan5/raylib/releases) — `win64_mingw-w64` and
   `win64_msvc16` variants.
+
+## 12. Appendix — the uncharted-suns side
+
+Recorded here because the driver lives in a different repo (`uncharted-suns`, private) and these
+items would otherwise be rediscovered at W5. They are game-repo work, not language-repo work.
+
+- **`Justfile:26`** — `gfx_link` has a macOS arm and a Linux/X11 arm only. Windows needs
+  `-lraylib -lopengl32 -lgdi32 -lwinmm`.
+- **The game's own C shims must cross-compile too.** `graphics/sprout_gfx.c` and
+  `graphics/sprout_audio.c` are linked into every graphics build alongside the runtime
+  (`Justfile:106`), so §4.1's pure-Win32 discipline applies to them identically.
+- **Obtain a Windows raylib.** raylib 6.0 publishes both variants the develop/ship split needs:
+  `raylib-6.0_win64_mingw-w64.zip` and `raylib-6.0_win64_msvc16.zip`. The `raylib_prefix` variable
+  (`Justfile:19`) currently defaults to a `brew --prefix raylib` lookup and needs a Windows arm.
+- **Subsystem**: `-mwindows` / `/SUBSYSTEM:WINDOWS`, per §9.
+- **Not part of the ship**: the offline `gen-living` bake shells out to the `sqlite3` CLI
+  (`game/livegen_bake.sprout:46`). That is dev-time tooling that runs on macOS; it does not need
+  a Windows port, and its `proc_run` dependency is why the `CreateProcess` item is Milestone-B
+  scoped rather than a Milestone-A blocker.
