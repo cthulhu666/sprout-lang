@@ -284,6 +284,12 @@ Measured 2026-08-15 against mingw-w64 14.0.0 with `just windows-probe`
 rather than trusting this table if the toolchain moves. Counts are occurrences in
 `runtime/sprout_runtime.c` unless noted.
 
+**Scope of this measurement:** the probe compiles with `-fsyntax-only`, so it measures the
+*compile* surface only. Link-time facts are invisible to it and land at W5 — most concretely for
+winpthreads, which may need `-lwinpthread` and may carry a `libwinpthread-1.dll` runtime
+dependency unless linked statically. "No work under mingw" for the pthread row below means no
+*code* work; the link and redistribution question is open.
+
 **Every Win32 replacement this design names is available** — all of `ConvertThreadToFiber`,
 `CreateFiber`, `SwitchToFiber`, `DeleteFiber`, `WSAPoll`, `WSAStartup`, `closesocket`,
 `VirtualAlloc`, `SetConsoleMode`, `GetModuleFileNameA`, `CreateProcessA`, `CreatePipe`,
