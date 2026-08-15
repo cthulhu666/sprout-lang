@@ -64,6 +64,24 @@ would both license sharing one buffer between two calls and let a `MutVec` be co
 context. `tests/stdlib/test_mutvec_push.spr` pins the non-sharing empirically rather than trusting
 the absence of a CSE pass.
 
+### `mutvec_len` became effectful
+
+Growable `MutVec` also changed an existing signature. `mutvec_len` was pure, and while `MutVec` was
+fixed-length that was *true* — the length was a function of the handle alone. `mutvec_push` makes it
+mutable state, so two calls on the same handle can now disagree, and it is declared `!{IO}`.
+
+The underlying `vector_length` stays pure, and must: it also backs the immutable `Vec`, where the
+length genuinely is fixed. **One C symbol, two truths** — and since an extern may be declared exactly
+once (`scripts/check_extern_signatures.sh` enforces this), the distinction cannot live in the
+declaration. It has to live in the wrapper, which is why `stdlib.mutable` re-states the effect rather
+than the prelude.
+
+Nothing in the repo broke: every one of the 13 external call sites was already inside an `!{IO}`
+function, as were all 9 internal ones. Note this is *not* a change any test can catch — effects are
+parsed but never checked (`spec-v0.md` §7), so both signatures typecheck. The test added alongside
+pins the semantics instead: the same call, on the same handle, returning different answers either
+side of a push.
+
 ### The requirement that can fail silently
 
 Growth is **in place**: `vector_push` reallocates `v->data` inside the *existing* `VectorVal` rather
