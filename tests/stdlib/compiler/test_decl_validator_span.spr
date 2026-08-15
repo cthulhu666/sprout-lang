@@ -2,6 +2,7 @@ module main
 import stdlib.test (TestState, new_state, assert_true, summary)
 import stdlib.compiler.compiler as compiler
 import stdlib.compiler.source as source
+import stdlib.env as env
 
 # Regression for guideline #5 (errors carry a source location from inception),
 # decl-validator edition. The four top-level validators in typecheck_decls
@@ -32,7 +33,7 @@ fn diag_line_is(result: compiler.CompileResult, want: Int) -> Bool =
 fn main() -> Unit !{IO} =
   do
     state <- new_state()
-    match env_get("SPROUT_STDLIB_ROOT") with
+    match env.get("SPROUT_STDLIB_ROOT") with
     | Nothing -> ()
     | Just root ->
         do

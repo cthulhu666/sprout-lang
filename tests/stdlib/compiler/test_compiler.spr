@@ -4,6 +4,7 @@ import stdlib.compiler.compiler as compiler
 import stdlib.compiler.module_loader as module_loader
 import stdlib.compiler.types as types
 import stdlib.compiler.source as source
+import stdlib.env as env
 
 fn is_ok(r: compiler.CompileResult) -> Bool =
   match r with
@@ -97,7 +98,7 @@ fn main() -> Unit !{IO} =
     # modules and verify that qualified names survive import resolution correctly.
     # Skipped gracefully when running outside the just test harness.
     # ---------------------------------------------------------------------------
-    match env_get("SPROUT_STDLIB_ROOT") with
+    match env.get("SPROUT_STDLIB_ROOT") with
     | Nothing -> ()
     | Just stdlib_root ->
         do

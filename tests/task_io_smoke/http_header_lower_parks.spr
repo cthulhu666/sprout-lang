@@ -4,6 +4,7 @@ import stdlib.net (TcpConnection, connect, close, write_all_utf8, read_exact_utf
 import stdlib.http_server (HttpRequest, HttpServerResponse, ok, serve_n)
 import stdlib.string as string
 import stdlib.terminal as terminal
+import stdlib.time as time
 
 # Regression (code review, finding 5): the header parser must not spend time QUADRATIC in the length
 # of a single header line. `parse_header_pair` lowercases the field-name with `lower_ascii` and trims
@@ -26,9 +27,9 @@ import stdlib.terminal as terminal
 
 fn probe() -> Unit !{IO} =
   do
-    t0 <- time_now_micros()
+    t0 <- time.now_micros()
     task_sleep(50)
-    t1 <- time_now_micros()
+    t1 <- time.now_micros()
     report((t1 - t0) / 1000)
 
 fn report(elapsed_ms: Int) -> Unit !{IO} =

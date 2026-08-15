@@ -14,6 +14,8 @@ import stdlib.compiler.lowering as lowering
 import stdlib.compiler.dce as dce
 import stdlib.compiler.ir_pipeline as ir_pipeline
 import stdlib.compiler.source as source
+import stdlib.fs as fs
+import stdlib.env as env
 
 # ---------------------------------------------------------------------------
 # Public API types
@@ -120,7 +122,7 @@ export fn compile_source_with_cache(src: String, stdlib_root: source.StdlibRoot,
 
 # compile_file: read a file, strip headers, then call compile_source.
 export fn compile_file(path: source.FilePath) -> CompileResult !{IO} =
-  match read_file(source.filepath_str(path)) with
+  match fs.read_text(source.filepath_str(path)) with
   | Err msg -> panic("read_file: " ++ source.filepath_str(path) ++ ": " ++ msg)
   | Ok src -> compile_source(source.strip_headers(src))
 
@@ -192,7 +194,7 @@ export type IrFullResult (..) =
 # `verified > 0` on real programs is the evidence that the verifier fires on actual
 # calls rather than skipping everything (a clean run vs. a silent no-op).
 fn report_verify_stats(prog: typed_ast.TypedProgram) -> Unit !{IO} =
-  match env_get("SPROUT_VERIFY_DISPATCH_STATS") with
+  match env.get("SPROUT_VERIFY_DISPATCH_STATS") with
   | Nothing -> ()
   | Just _ ->
       match verify_dispatch.verify_stats(prog) with
@@ -240,7 +242,7 @@ export fn compile_phase_check_with_roots(path: source.FilePath, stdlib_root: sou
                     match verify_dispatch.verify_program(resolved) with
                     | Nothing -> typed_ast.TypedOk(resolved, env)
                     | Just (vpos, vmsg) ->
-                        match env_get("SPROUT_VERIFY_DISPATCH_OFF") with
+                        match env.get("SPROUT_VERIFY_DISPATCH_OFF") with
                         | Just _ ->
                             do
                               _ <- eprint("[verify-dispatch] (suppressed) " ++ vmsg)
@@ -314,7 +316,7 @@ fn compile_phase_check_with_cache(path: source.FilePath, stdlib_root: source.Std
                     match verify_dispatch.verify_program(resolved) with
                     | Nothing -> typed_ast.TypedOk(resolved, env)
                     | Just (vpos, vmsg) ->
-                        match env_get("SPROUT_VERIFY_DISPATCH_OFF") with
+                        match env.get("SPROUT_VERIFY_DISPATCH_OFF") with
                         | Just _ ->
                             do
                               _ <- eprint("[verify-dispatch] (suppressed) " ++ vmsg)

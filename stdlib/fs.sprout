@@ -1,0 +1,35 @@
+module stdlib.fs
+
+# Filesystem primitives. Declared here rather than in the prelude: nothing in the prelude calls
+# them, and under the rule "an extern lives in the module that owns its surface" this is that
+# module. Touching the filesystem becomes an explicit dependency — the same reasoning the prelude
+# already records for stdlib.net's socket primitives and stdlib.terminal's control codes.
+#
+# `export` on an `extern fn` would be inert: the parser discards it (parser.sprout:1941) and the
+# bundler never registers extern names (bundler.sprout:597), so an extern is reachable by bare name
+# from anywhere this module is bundled. The wrapper API below is what makes that reach intentional
+# and greppable, not a visibility rule.
+#
+# NO TYPE DECLARATIONS IN THIS MODULE, deliberately. The REPL's module loader validates type-decl
+# field names against a fixed vocabulary and swallows the error when one is missing, which is why
+# eleven stdlib modules currently fail to load there (docs/repl-env-type-vocabulary-v0.md §1.2).
+# Function signatures are not scanned, so a module of externs and wrappers loads cleanly. Adding a
+# `type` here would silently drop stdlib.fs out of the REPL.
+extern fn read_file(path: String) -> Result String String !{IO}
+extern fn write_file(path: String, content: String) -> Result String Unit !{IO}
+
+# The names say `text`, not `file`, because that is the real contract. `read_file` runs
+# `utf8_validate` over the whole buffer before it hands anything back (sprout_runtime.c:2984) and
+# reports the decode failure as `Err` — so this pair genuinely cannot read a binary file, and the
+# name should say so rather than implying a general reader. It also leaves honest room for a
+# bytes-valued pair later; stdlib.process reached exactly that point with subprocess output (see
+# its header comment) once holding binary data in a `String` proved unusable.
+#
+# `Err` is a human-readable message, not a matchable code: `strerror(errno)` for an I/O failure,
+# the utf8_validate reason for a non-text file, or `"null path"` / `"out of memory"`. Do not
+# pattern-match its content.
+export fn read_text(path: String) -> Result String String !{IO} =
+  read_file(path)
+
+export fn write_text(path: String, content: String) -> Result String Unit !{IO} =
+  write_file(path, content)

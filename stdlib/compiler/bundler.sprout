@@ -10,6 +10,7 @@ import stdlib.string as string
 # Load-bearing despite the alias never being written — see the note in source.sprout.
 # `bytes_from_utf8` is an extern owned by stdlib.bytes and needs that module bundled.
 import stdlib.bytes as bytes
+import stdlib.fs as fs
 
 # ---------------------------------------------------------------------------
 # Public API
@@ -440,7 +441,7 @@ fn process_wi_visit(
         if str_list_member(path, visiting_list) then
           Cons("Import cycle detected involving: " ++ path, Nil)
         else
-          match read_file(path) with
+          match fs.read_text(path) with
           | Err msg -> panic("read_file: " ++ path ++ ": " ++ msg)
           | Ok src ->
               do
@@ -519,7 +520,7 @@ fn collect_modules(entry_path: String, stdlib_root: String, extra_roots: List St
           # non-intrinsic prelude name from such a file is a hard error
           # (codegen.emit_named_call), not a silent zero_val.
           if any_has_module_name(rev_mods) then
-            match read_file(prelude_path(stdlib_root)) with
+            match fs.read_text(prelude_path(stdlib_root)) with
             | Err msg -> panic("read_file: prelude: " ++ msg)
             | Ok prelude_src ->
                 match scan_source_info(prelude_src) with
@@ -1488,7 +1489,7 @@ export fn bundle_file(path: source.FilePath, stdlib_root: source.StdlibRoot) -> 
 fn ambient_type_names(modules: List ParsedModule, stdlib_root: String) -> List String !{IO} =
   if any_has_module_name(modules) then Nil
   else
-    match read_file(prelude_path(stdlib_root)) with
+    match fs.read_text(prelude_path(stdlib_root)) with
     | Err _ -> Nil
     | Ok src ->
         match scan_source_info(src) with

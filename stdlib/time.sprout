@@ -1,0 +1,30 @@
+module stdlib.time
+
+# The two clocks. Declared here rather than in the prelude: nothing in the prelude calls them, and
+# under the rule "an extern lives in the module that owns its surface" this is that module.
+#
+# `export` on an `extern fn` would be inert: the parser discards it (parser.sprout:1941) and the
+# bundler never registers extern names (bundler.sprout:597), so an extern is reachable by bare name
+# from anywhere this module is bundled. The wrapper API below is what makes that reach intentional
+# and greppable, not a visibility rule.
+#
+# NO TYPE DECLARATIONS IN THIS MODULE, deliberately — see the same note in stdlib/fs.sprout. A
+# `type` here would silently drop stdlib.time out of the REPL.
+extern fn time_now_micros() -> Int !{IO}
+extern fn wall_time_micros() -> Int !{IO}
+
+# CLOCK_MONOTONIC. The epoch is UNSPECIFIED — only the difference between two calls carries
+# meaning. This is the clock for elapsed time: timeouts, deadlines, benchmarks.
+export fn now_micros() -> Int !{IO} =
+  time_now_micros()
+
+# CLOCK_REALTIME: microseconds since the Unix epoch. This is the clock for civil time — log
+# timestamps, `format_iso8601`, anything a human reads as a date.
+#
+# It is NOT monotonic. NTP slew and manual clock changes can move it backwards, so a duration
+# computed from two of these values can come out negative or wildly wrong. Never subtract wall
+# times to measure elapsed time; that is what `now_micros` is for. The two names are one keystroke
+# apart at a call site, and picking the wrong one produces a bug that stays invisible until the
+# clock is adjusted — which is why they are documented as a pair rather than separately.
+export fn wall_micros() -> Int !{IO} =
+  wall_time_micros()

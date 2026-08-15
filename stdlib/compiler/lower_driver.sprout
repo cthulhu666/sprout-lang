@@ -8,6 +8,7 @@ import stdlib.compiler.module_loader as module_loader
 import stdlib.compiler.typed_ast as typed_ast
 import stdlib.compiler.lowering as lowering
 import stdlib.compiler.source as source
+import stdlib.fs as fs
 
 # ---------------------------------------------------------------------------
 # String helpers
@@ -40,7 +41,7 @@ fn print_tc_names(decls: List typed_ast.TypedDecl) -> Unit !{IO} =
 # Core pipeline: read → lex → parse → typecheck → lower → print
 
 fn run_file(path: String, stdlib_root: String) -> Unit !{IO} =
-  match read_file(path) with
+  match fs.read_text(path) with
   | Err msg -> panic("read_file: " ++ path ++ ": " ++ msg)
   | Ok src ->
       do

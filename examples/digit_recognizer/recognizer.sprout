@@ -1,5 +1,6 @@
 module examples.digit_recognizer.recognizer
 import stdlib.mutable (MutVec, mutvec_new, mutvec_at, mutvec_set, mutvec_map_inplace, MutMatrix, mutmatrix_new, mutmatrix_set, mutmatrix_cols, mutmatrix_rows, mutmatrix_row_dot, mutmatrix_row_sub_scaled_inplace, mutmatrix_row_add_scaled_into)
+import stdlib.fs as fs
 
 # Handwritten-digit recognition trained on real public data.
 #
@@ -146,7 +147,7 @@ fn load_lines(lines: List String) -> List (MutVec Double, Int) !{IO} =
 
 fn load_dataset(path: String) -> List (MutVec Double, Int) !{IO} =
   # Match read_file directly: a do-bind would strip the Result wrapper.
-  match read_file(path) with
+  match fs.read_text(path) with
   | Err _ -> Nil
   | Ok text -> load_lines(str_split_lines(text))
 

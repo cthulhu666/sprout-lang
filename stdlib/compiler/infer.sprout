@@ -6,6 +6,7 @@ import stdlib.compiler.typed_ast as typed_ast
 import stdlib.compiler.source as source
 import stdlib.compiler.linear_check as linear_check
 import stdlib.string as string
+import stdlib.env as env
 
 # ---------------------------------------------------------------------------
 # Env wraps — GlobalEnv vs raw body-scope Dict types.Scheme
@@ -2322,7 +2323,7 @@ fn render_ptf_resolved(prog_to_fresh: Dict types.Type, s3: Dict types.Type) -> S
 fn trace_dispatch(callee: String, class_name: String, prog_var: String,
                   prog_to_fresh: Dict types.Type, s3: Dict types.Type,
                   resolved: Maybe typed_ast.TypedExpr, path: String) -> Unit !{IO} =
-  match env_get("SPROUT_TRACE_DISPATCH") with
+  match env.get("SPROUT_TRACE_DISPATCH") with
   | Nothing -> ()
   | Just _ ->
       eprint("[dispatch] callee=" ++ callee ++ " class=" ++ class_name

@@ -3,6 +3,7 @@ import stdlib.test (TestState, new_state, assert_true, summary)
 import stdlib.compiler.compiler as compiler
 import stdlib.compiler.source as source
 import stdlib.string as string
+import stdlib.env as env
 
 # Regression tests for guideline #5 (errors carry source location).
 #
@@ -40,7 +41,7 @@ fn diag_msg(d: compiler.Diagnostic) -> String =
 fn main() -> Unit !{IO} =
   do
     state <- new_state()
-    match env_get("SPROUT_STDLIB_ROOT") with
+    match env.get("SPROUT_STDLIB_ROOT") with
     | Nothing -> ()
     | Just stdlib_root ->
         do

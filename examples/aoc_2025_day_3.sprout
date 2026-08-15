@@ -1,6 +1,7 @@
 module examples.aoc_2025_day_3
 import stdlib.collections (Vec, vec_empty, vec_append, vec_length, vec_get_or, vec_set)
 import stdlib.string (string_digits, string_lines)
+import stdlib.fs as fs
 
 # Advent of Code 2025 Day 3: Battery Boost
 # For each bank line, pick digits in-order to maximize resulting number.
@@ -90,7 +91,7 @@ fn lines_to_banks_all(lines: Vec String) -> Vec (Vec Int) =
   lines_to_banks(lines, 0, vec_length(lines), vec_empty())
 
 fn stdin_banks() -> Vec (Vec Int) !{IO} =
-  match read_file("-") with
+  match fs.read_text("-") with
   | Ok content -> parse_all_banks(content)
   | Err msg -> panic("read_file: " ++ msg)
 

@@ -47,11 +47,6 @@ declare i64 @analysis_eval_expr_in_source(ptr, ptr)
 declare i64 @analysis_instances_in_source(ptr, ptr)
 declare i64 @analysis_complete_in_state(ptr, ptr, ptr)
 
-declare i64 @read_file(i64)
-declare i64 @write_file(i64, i64)
-declare i64 @env_get(i64)
-declare i64 @time_now_micros()
-declare i64 @wall_time_micros()
 declare i64 @double_to_string(i64)
 declare i64 @char_to_str(i64)
 declare i64 @char_from_codepoint(i64)
@@ -107,6 +102,8 @@ declare i64 @bytes_builder_u16_be(i64)
 declare i64 @bytes_builder_u32_be(i64)
 declare i64 @bytes_builder_append(i64, i64)
 declare i64 @bytes_builder_build(i64)
+declare i64 @time_now_micros()
+declare i64 @wall_time_micros()
 declare i64 @tcp_listen(i64)
 declare i64 @tcp_accept(i64)
 declare i64 @tcp_write(i64, i64)
@@ -135,6 +132,8 @@ declare i64 @__chan_recv(i64)
 declare i64 @__chan_close(i64)
 declare i64 @__chan_select(i64)
 declare i64 @json_stringify(i64)
+declare i64 @read_file(i64)
+declare i64 @write_file(i64, i64)
 @.str.0 = private unnamed_addr constant { i64, [17 x i8] } { i64 262154, [17 x i8] c"division by zero\00" }
 @.str.1 = private unnamed_addr constant { i64, [3 x i8] } { i64 32778, [3 x i8] c", \00" }
 @.str.2 = private unnamed_addr constant { i64, [3 x i8] } { i64 32778, [3 x i8] c", \00" }
@@ -11085,6 +11084,18 @@ entry:
   ret i64 %t$1
 }
 
+define i64 @stdlib.time.now_micros() {
+entry:
+  %t$0 = call i64 @time_now_micros()
+  ret i64 %t$0
+}
+
+define i64 @stdlib.time.wall_micros() {
+entry:
+  %t$0 = call i64 @wall_time_micros()
+  ret i64 %t$0
+}
+
 define i64 @stdlib.net.tcp_error_message(i64 %err) {
 entry:
   %t$0 = call i64 @sprout_tag(i64 %err)
@@ -11281,7 +11292,7 @@ entry:
   %t$24 = alloca i64
   store i64 %payload, ptr %t$24
   %t$25 = call i64 @sprout_gc_push_i64_root(ptr %t$24)
-  %t$0 = call i64 @time_now_micros()
+  %t$0 = call i64 @stdlib.time.now_micros()
   %t$1 = load i64, ptr @stdlib.net.poll_write
   %t$2 = sub i64 %deadline_us, %t$0
   %t$3 = add i64 0, 1000
@@ -11557,7 +11568,7 @@ join_3:
 
 define i64 @stdlib.net.read_avail_wait(i64 %handle, i64 %deadline_us) {
 entry:
-  %t$0 = call i64 @time_now_micros()
+  %t$0 = call i64 @stdlib.time.now_micros()
   %t$1 = load i64, ptr @stdlib.net.poll_read
   %t$2 = sub i64 %deadline_us, %t$0
   %t$3 = add i64 0, 1000
@@ -11619,7 +11630,7 @@ entry:
   %t$6 = alloca i64
   store i64 %conn, ptr %t$6
   %t$7 = call i64 @sprout_gc_push_i64_root(ptr %t$6)
-  %t$0 = call i64 @time_now_micros()
+  %t$0 = call i64 @stdlib.time.now_micros()
   %t$1 = call i64 @stdlib.net.tcp_connection_handle(i64 %conn)
   %t$2 = add i64 0, 1000
   %t$3 = mul i64 %timeout_ms, %t$2
@@ -15232,7 +15243,7 @@ join_3:
 
 define i64 @stdlib.http_server.deadline_in(i64 %ms) {
 entry:
-  %t$0 = call i64 @time_now_micros()
+  %t$0 = call i64 @stdlib.time.now_micros()
   %t$1 = add i64 0, 1000
   %t$2 = mul i64 %ms, %t$1
   %t$3 = add i64 %t$0, %t$2
@@ -15241,7 +15252,7 @@ entry:
 
 define i64 @stdlib.http_server.remaining_ms(i64 %deadline) {
 entry:
-  %t$0 = call i64 @time_now_micros()
+  %t$0 = call i64 @stdlib.time.now_micros()
   %t$1 = icmp sge i64 %t$0, %deadline
   %t$2 = zext i1 %t$1 to i64
   %t$12 = trunc i64 %t$2 to i1
@@ -21928,7 +21939,7 @@ entry:
   %t$12 = alloca i64
   store i64 %fields, ptr %t$12
   %t$13 = call i64 @sprout_gc_push_i64_root(ptr %t$12)
-  %t$0 = call i64 @wall_time_micros()
+  %t$0 = call i64 @stdlib.time.wall_micros()
   %t$1 = call i64 @stdlib.log.format_iso8601(i64 %t$0)
   %t$2 = call i64 @stdlib.log.base_fields(i64 %lg)
   %t$14 = alloca i64
@@ -22162,7 +22173,7 @@ entry:
   %t$14 = alloca i64
   store i64 %t$1, ptr %t$14
   %t$15 = call i64 @sprout_gc_push_i64_root(ptr %t$14)
-  %t$2 = call i64 @time_now_micros()
+  %t$2 = call i64 @stdlib.time.now_micros()
   call void @sprout_closure_arity_check(i64 %t$0, i64 1)
   %t$3$env_ptr = inttoptr i64 %t$0 to ptr
   %t$3$code = load ptr, ptr %t$3$env_ptr
@@ -22170,7 +22181,7 @@ entry:
   %t$16 = alloca i64
   store i64 %t$3, ptr %t$16
   %t$17 = call i64 @sprout_gc_push_i64_root(ptr %t$16)
-  %t$4 = call i64 @time_now_micros()
+  %t$4 = call i64 @stdlib.time.now_micros()
   %t$5 = getelementptr inbounds { i64, [8 x i8] }, ptr @.str.194, i64 0, i32 1, i64 0
   %t$6 = ptrtoint ptr %t$5 to i64
   %t$7 = sub i64 %t$4, %t$2
@@ -29519,6 +29530,29 @@ join_2:
   ret i64 %t$3
 }
 
+define i64 @stdlib.fs.read_text(i64 %path) {
+entry:
+  %t$1 = alloca i64
+  store i64 %path, ptr %t$1
+  %t$2 = call i64 @sprout_gc_push_i64_root(ptr %t$1)
+  %t$0 = call i64 @read_file(i64 %path)
+  %t$3 = call i64 @sprout_gc_pop_roots(i64 1)
+  ret i64 %t$0
+}
+
+define i64 @stdlib.fs.write_text(i64 %path, i64 %content) {
+entry:
+  %t$1 = alloca i64
+  store i64 %path, ptr %t$1
+  %t$2 = call i64 @sprout_gc_push_i64_root(ptr %t$1)
+  %t$3 = alloca i64
+  store i64 %content, ptr %t$3
+  %t$4 = call i64 @sprout_gc_push_i64_root(ptr %t$3)
+  %t$0 = call i64 @write_file(i64 %path, i64 %content)
+  %t$5 = call i64 @sprout_gc_pop_roots(i64 2)
+  ret i64 %t$0
+}
+
 define i64 @examples.http_web_server.seed_store() {
 entry:
   %t$0 = add i64 0, 1
@@ -31599,7 +31633,7 @@ arm_0_2:
   %t$56 = alloca i64
   store i64 %t$4, ptr %t$56
   %t$57 = call i64 @sprout_gc_push_i64_root(ptr %t$56)
-  %t$5$st = call { i64, i64 } @read_file_worker(i64 %t$4)
+  %t$5$st = call { i64, i64 } @stdlib.fs.read_text_worker(i64 %t$4)
   %t$5 = extractvalue { i64, i64 } %t$5$st, 0
   %t$6 = extractvalue { i64, i64 } %t$5$st, 1
   %t$58 = call i64 @sprout_gc_pop_roots(i64 1)
@@ -31699,7 +31733,7 @@ body_1_7:
   %t$92 = alloca i64
   store i64 %t$27, ptr %t$92
   %t$93 = call i64 @sprout_gc_push_i64_root(ptr %t$92)
-  %t$28$st = call { i64, i64 } @read_file_worker(i64 %t$27)
+  %t$28$st = call { i64, i64 } @stdlib.fs.read_text_worker(i64 %t$27)
   %t$28 = extractvalue { i64, i64 } %t$28$st, 0
   %t$29 = extractvalue { i64, i64 } %t$28$st, 1
   %t$94 = call i64 @sprout_gc_pop_roots(i64 1)
@@ -35847,36 +35881,6 @@ wrepack_next_64:
   unreachable
 }
 
-define { i64, i64 } @read_file_worker(i64 %path) {
-entry:
-  %t$10 = alloca i64
-  store i64 %path, ptr %t$10
-  %t$11 = call i64 @sprout_gc_push_i64_root(ptr %t$10)
-  %t$0 = call i64 @read_file(i64 %path)
-  %t$12 = call i64 @sprout_gc_pop_roots(i64 1)
-  %t$1 = call i64 @sprout_tag(i64 %t$0)
-  %t$2 = add i64 0, 7
-  %t$3 = icmp eq i64 %t$1, %t$2
-  br i1 %t$3, label %wrepack_hit_2, label %wrepack_next_2
-wrepack_hit_2:
-  %t$4 = call i64 @sprout_field(i64 %t$0, i64 0)
-  %t$5$r0 = insertvalue { i64, i64 } undef, i64 %t$1, 0
-  %t$5$r1 = insertvalue { i64, i64 } %t$5$r0, i64 %t$4, 1
-  ret { i64, i64 } %t$5$r1
-wrepack_next_2:
-  %t$6 = add i64 0, 8
-  %t$7 = icmp eq i64 %t$1, %t$6
-  br i1 %t$7, label %wrepack_hit_6, label %wrepack_next_6
-wrepack_hit_6:
-  %t$8 = call i64 @sprout_field(i64 %t$0, i64 0)
-  %t$9$r0 = insertvalue { i64, i64 } undef, i64 %t$1, 0
-  %t$9$r1 = insertvalue { i64, i64 } %t$9$r0, i64 %t$8, 1
-  ret { i64, i64 } %t$9$r1
-wrepack_next_6:
-  call void @sprout_abort_match()
-  unreachable
-}
-
 define { i64, i64 } @result_map_error_worker(i64 %f, i64 %r) {
 entry:
   %t$0 = call i64 @sprout_tag(i64 %r)
@@ -36145,6 +36149,36 @@ wrepack_hit_7:
   %t$10$r1 = insertvalue { i64, i64 } %t$10$r0, i64 0, 1
   ret { i64, i64 } %t$10$r1
 wrepack_next_7:
+  call void @sprout_abort_match()
+  unreachable
+}
+
+define { i64, i64 } @stdlib.fs.read_text_worker(i64 %path) {
+entry:
+  %t$10 = alloca i64
+  store i64 %path, ptr %t$10
+  %t$11 = call i64 @sprout_gc_push_i64_root(ptr %t$10)
+  %t$0 = call i64 @read_file(i64 %path)
+  %t$12 = call i64 @sprout_gc_pop_roots(i64 1)
+  %t$1 = call i64 @sprout_tag(i64 %t$0)
+  %t$2 = add i64 0, 7
+  %t$3 = icmp eq i64 %t$1, %t$2
+  br i1 %t$3, label %wrepack_hit_2, label %wrepack_next_2
+wrepack_hit_2:
+  %t$4 = call i64 @sprout_field(i64 %t$0, i64 0)
+  %t$5$r0 = insertvalue { i64, i64 } undef, i64 %t$1, 0
+  %t$5$r1 = insertvalue { i64, i64 } %t$5$r0, i64 %t$4, 1
+  ret { i64, i64 } %t$5$r1
+wrepack_next_2:
+  %t$6 = add i64 0, 8
+  %t$7 = icmp eq i64 %t$1, %t$6
+  br i1 %t$7, label %wrepack_hit_6, label %wrepack_next_6
+wrepack_hit_6:
+  %t$8 = call i64 @sprout_field(i64 %t$0, i64 0)
+  %t$9$r0 = insertvalue { i64, i64 } undef, i64 %t$1, 0
+  %t$9$r1 = insertvalue { i64, i64 } %t$9$r0, i64 %t$8, 1
+  ret { i64, i64 } %t$9$r1
+wrepack_next_6:
   call void @sprout_abort_match()
   unreachable
 }

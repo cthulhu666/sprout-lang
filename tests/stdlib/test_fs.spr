@@ -1,0 +1,42 @@
+import stdlib.test (TestState, new_state, assert_true, assert_eq, summary)
+import stdlib.fs as fs
+
+# `read_file` / `write_file` had NO direct test coverage: both were exercised only
+# incidentally, as setup helpers inside compiler tests that assert something else
+# entirely (tests/stdlib/compiler/test_wrap_codegen.spr writes a fixture, then
+# checks codegen). This is the first test that treats them as the subject.
+#
+# It lands together with their move out of the prelude into stdlib.fs, so it also
+# serves as the reachability check for that move: externs are invisible to the
+# module system (bundler.sprout:597 drops ExternFnDecl), so a wrong import graph
+# does not produce a scoping diagnostic — it produces `Unknown variable` from the
+# typechecker or an undefined symbol at link time.
+
+fn main() -> Unit !{IO} =
+  do
+    state <- new_state()
+
+    let path = "/tmp/sprout_test_fs_roundtrip.txt"
+
+    # Multi-byte content on purpose: both builtins go through the CSTR path, so a
+    # byte-length-vs-char-length bug would corrupt exactly this case and pass for
+    # pure ASCII.
+    let content = "line one\ncafé 日本\n"
+
+    match fs.write_text(path, content) with
+    | Err msg -> assert_true(state, "write_text succeeds (" ++ msg ++ ")", false)
+    | Ok _ ->
+        do
+          assert_true(state, "write_text succeeds", true)
+
+          match fs.read_text(path) with
+          | Err msg -> assert_true(state, "read_text succeeds (" ++ msg ++ ")", false)
+          | Ok got -> assert_eq(state, "round-trips byte-for-byte", got, content)
+
+    # The error path. A read of a path that cannot exist must report `Err`, not
+    # panic and not return an empty `Ok` — the distinction the Result exists for.
+    match fs.read_text("/tmp/sprout_test_fs_definitely_absent_xyzzy/nope.txt") with
+    | Err _ -> assert_true(state, "read_text of a missing path is Err", true)
+    | Ok _ -> assert_true(state, "read_text of a missing path is Err", false)
+
+    summary(state)

@@ -4,6 +4,7 @@ import stdlib.net (TcpConnection, TcpListener, accept, close, close_listener, li
 import stdlib.string as string
 import stdlib.bytes as bytes
 import stdlib.terminal as terminal
+import stdlib.time as time
 
 # `timeout_ms` on the HTTP CLIENT is a TOTAL request deadline: one budget spanning connect, send and
 # the entire body read. It is not an idle deadline that progress re-arms.
@@ -78,9 +79,9 @@ fn accept_and_serve(listener: borrowing TcpListener) -> Unit !{IO} =
 
 fn client() -> Unit !{IO} =
   do
-    t0 <- time_now_micros()
+    t0 <- time.now_micros()
     http_get("http://127.0.0.1:28985/", "", 400)
-    t1 <- time_now_micros()
+    t1 <- time.now_micros()
     report((t1 - t0) / 1000)
 
 # The window is wide on purpose. The lower bound only rejects an implementation that gives up before

@@ -2,6 +2,7 @@ import stdlib.http_server (HttpRequest, HttpServerResponse, parse, ok, response_
 import stdlib.http_middleware (with_logging)
 import stdlib.log (Logger, Info, stderr_logger, logger_with_sink, format_iso8601)
 import stdlib.string as string
+import stdlib.time as time
 
 # Per-request overhead of the stdlib.http_middleware access-log middleware,
 # measured in isolation (no sockets, no wrk). Each variant calls the handler in a
@@ -33,9 +34,9 @@ fn report(label: String, us: Int, n: Int) -> Unit !{IO} =
 
 fn bench_handler(label: String, h: HttpRequest -> HttpServerResponse !{IO}, req: HttpRequest, n: Int) -> Unit !{IO} =
   do
-    t0 <- time_now_micros()
+    t0 <- time.now_micros()
     checksum <- run_loop(h, req, n, 0)
-    t1 <- time_now_micros()
+    t1 <- time.now_micros()
     report(label, t1 - t0, n)
 
 # --- cost breakdown: the three clock reads and the ISO-8601 formatter ---------
@@ -43,14 +44,14 @@ fn clock_loop(n: Int, acc: Int) -> Int !{IO} =
   if n <= 0 then acc
   else
     do
-      t <- time_now_micros()
+      t <- time.now_micros()
       clock_loop(n - 1, acc + t)
 
 fn wall_loop(n: Int, acc: Int) -> Int !{IO} =
   if n <= 0 then acc
   else
     do
-      t <- wall_time_micros()
+      t <- time.wall_micros()
       wall_loop(n - 1, acc + t)
 
 fn fmt_loop(n: Int, acc: Int) -> Int !{IO} =
@@ -59,9 +60,9 @@ fn fmt_loop(n: Int, acc: Int) -> Int !{IO} =
 
 fn bench_pure(label: String, kind: Int, n: Int) -> Unit !{IO} =
   do
-    t0 <- time_now_micros()
+    t0 <- time.now_micros()
     c <- run_pure(kind, n)
-    t1 <- time_now_micros()
+    t1 <- time.now_micros()
     report(label, t1 - t0, n)
 
 fn run_pure(kind: Int, n: Int) -> Int !{IO} =

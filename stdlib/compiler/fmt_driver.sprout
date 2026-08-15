@@ -3,6 +3,7 @@ module stdlib.compiler.fmt_driver
 import stdlib.compiler.formatter as formatter
 import stdlib.compiler.lint_rules as lint_rules
 import stdlib.string as string
+import stdlib.fs as fs
 
 fn print_issues(path: String, issues: List formatter.LintIssue) -> Unit !{IO} =
   match issues with
@@ -26,7 +27,7 @@ fn print_findings(path: String, findings: List lint_rules.LintFinding) -> Unit !
             print_findings(path, t)
 
 fn run_fmt_check(path: String) -> Int !{IO} =
-  match read_file(path) with
+  match fs.read_text(path) with
   | Err msg -> panic("read_file: " ++ path ++ ": " ++ msg)
   | Ok src ->
       do
@@ -41,7 +42,7 @@ fn run_fmt_check(path: String) -> Int !{IO} =
           1
 
 fn run_fmt_write(path: String) -> Int !{IO} =
-  match read_file(path) with
+  match fs.read_text(path) with
   | Err msg -> panic("read_file: " ++ path ++ ": " ++ msg)
   | Ok src ->
       do
@@ -52,7 +53,7 @@ fn run_fmt_write(path: String) -> Int !{IO} =
           print("ok: " ++ path)
           0
         else
-          match write_file(path, formatted) with
+          match fs.write_text(path, formatted) with
           | Err msg -> panic("write_file: " ++ path ++ ": " ++ msg)
           | Ok _ ->
               do
@@ -60,7 +61,7 @@ fn run_fmt_write(path: String) -> Int !{IO} =
                 0
 
 fn run_lint_file(path: String) -> Int !{IO} =
-  match read_file(path) with
+  match fs.read_text(path) with
   | Err msg -> panic("read_file: " ++ path ++ ": " ++ msg)
   | Ok src ->
       do

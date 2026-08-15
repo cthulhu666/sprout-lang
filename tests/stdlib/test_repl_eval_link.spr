@@ -14,6 +14,7 @@ import stdlib.process as process
 import stdlib.string as string
 import stdlib.compiler.analysis_service_driver as service
 import stdlib.terminal as terminal
+import stdlib.fs as fs
 
 fn trivial_main_ir() -> String =
   "define i64 @main() {\nentry:\n  ret i64 0\n}\n"
@@ -46,7 +47,7 @@ fn main() -> Unit !{IO} =
           let bin_path = "/tmp/sprout_eval_link_test_bin"
           use_darwin <- is_darwin()
           objs_ref <- ref_new("")
-          match write_file(ir_path, trivial_main_ir()) with
+          match fs.write_text(ir_path, trivial_main_ir()) with
           | Err msg -> assert_true(state, "write trivial IR", false)
           | Ok _ ->
               # CWD is the repo root under `just test`, so "runtime" resolves.

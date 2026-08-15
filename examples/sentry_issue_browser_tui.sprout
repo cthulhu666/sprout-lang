@@ -2,12 +2,13 @@ module examples.sentry_issue_browser_tui
 import examples.sentry_api (IssueDetail, IssueSummary, issue_detail_culprit, issue_detail_id, issue_detail_level, issue_detail_permalink, issue_detail_short_id, issue_detail_status, issue_detail_title, issue_id, issue_short_id, issue_status, issue_title, sentry_get_issue_detail, sentry_http_error_message, sentry_list_issues)
 import stdlib.terminal as terminal
 import stdlib.string as strlib
+import stdlib.env as env
 
 export type SentryConfig (..) =
   | SentryConfig String String String
 
 fn read_env_required(name: String) -> Result String String !{IO} =
-  match env_get(name) with
+  match env.get(name) with
   | Just value -> Ok(value)
   | Nothing -> Err(strlib.concat("missing environment variable: ", name))
 

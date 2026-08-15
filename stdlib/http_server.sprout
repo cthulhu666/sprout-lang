@@ -7,6 +7,7 @@ import stdlib.bytes as bytes
 import stdlib.chan (Chan, Recv, Got, Closed, chan_new, chan_send, chan_recv, chan_close)
 import stdlib.task (Scope, with_scope, task_spawn, task_yield)
 import stdlib.url (parse_query)
+import stdlib.time as time
 
 export type HttpRequest =
   | HttpRequest String String HttpRequestMeta
@@ -141,14 +142,14 @@ fn rate_ms(bytes: Int, rate_bps: Int) -> Int =
 # step mid-request cannot make a deadline fire early or never.
 fn deadline_in(ms: Int) -> Int !{IO} =
   do
-    now <- time_now_micros()
+    now <- time.now_micros()
     now + ms * 1000
 
 # Milliseconds left until `deadline`, floored at 0. A budget of 0 makes read_avail_timeout poll once
 # and report a timeout, so an already-expired deadline needs no special case at the call site.
 fn remaining_ms(deadline: Int) -> Int !{IO} =
   do
-    now <- time_now_micros()
+    now <- time.now_micros()
     if now >= deadline then 0 else (deadline - now) / 1000
 
 fn find_headers_end(raw: String) -> Maybe Int =

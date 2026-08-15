@@ -13,6 +13,8 @@ import stdlib.compiler.unifier as unifier
 import stdlib.string as string
 import stdlib.process as process
 import stdlib.terminal as terminal
+import stdlib.fs as fs
+import stdlib.env as env
 
 # ---------------------------------------------------------------------------
 # Header stripping is source.strip_headers (line-preserving): stripped lines
@@ -573,7 +575,7 @@ export fn resolve_instances(src: String, query: String, stdlib_root: source.Stdl
     match parse_query_type(query) with
     | Err msg -> InstancesErr(msg)
     | Ok query_display_te ->
-        match write_file(instances_source_path(), augment_probe_source(src, query)) with
+        match fs.write_text(instances_source_path(), augment_probe_source(src, query)) with
         | Err msg -> InstancesErr("instances_in_source: write_file: " ++ msg)
         | Ok _ ->
             do
@@ -786,7 +788,7 @@ fn run_eval_binary() -> json.Json !{IO} =
     collect_eval_output(run_result)
 
 fn env_forces_frameworks() -> Bool !{IO} =
-  match env_get("SPROUT_DARWIN_FRAMEWORKS") with
+  match env.get("SPROUT_DARWIN_FRAMEWORKS") with
   | Just _ -> true
   | Nothing -> false
 
@@ -818,7 +820,7 @@ fn link_and_run_eval(ir_result: compiler.IrFullResult, state: StartupState) -> j
       | Nil -> error_response("eval_expr_in_source: codegen failed")
       | [d | _] -> error_response(diag_msg(d))
   | compiler.IrFullOk ir_text ->
-      match write_file(eval_ir_path(), ir_text) with
+      match fs.write_text(eval_ir_path(), ir_text) with
       | Err msg -> panic("write_file: eval.ir: " ++ msg)
       | Ok _ ->
           do
@@ -830,7 +832,7 @@ fn link_and_run_eval(ir_result: compiler.IrFullResult, state: StartupState) -> j
             | Ok _ -> run_eval_binary()
 
 fn compile_and_run_eval(src: String, state: StartupState) -> json.Json !{IO} =
-  match write_file(eval_source_path(), src) with
+  match fs.write_text(eval_source_path(), src) with
   | Err msg -> panic("write_file: eval_source: " ++ msg)
   | Ok _ ->
       do

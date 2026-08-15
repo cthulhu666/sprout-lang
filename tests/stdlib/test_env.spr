@@ -1,0 +1,46 @@
+import stdlib.test (TestState, new_state, assert_true, assert_eq, summary)
+import stdlib.env as env
+import stdlib.process (proc_run, proc_stdout_or)
+
+# `env_get` had NO test anywhere. Fifteen test files call it to read SPROUT_*
+# switches, and not one asserts anything about it. This closes that gap, and
+# lands with its move out of the prelude into stdlib.env.
+#
+# Why a module of its own rather than stdlib.process, where the environment
+# arguably belongs semantically: stdlib.process carries the whole subprocess API,
+# and both were measured. Routing env reads through it put 12 unrelated
+# definitions — proc_run, ProcResult, the Bytes→String decode chain — into every
+# consumer that wanted one config switch, including the compiler seed via
+# infer.sprout. examples/io_do_demo went +247 lines of IR against +12 for a leaf
+# module. There is no cross-module dead-code elimination (BACKLOG §7), so that
+# cost is paid by every consumer, forever. A leaf module with no imports and no
+# types costs essentially nothing, which is the same shape as stdlib.fs and
+# stdlib.time.
+#
+# This test still imports stdlib.process — for the cross-check below, which needs
+# a child process. That is a test-only dependency; no shipping consumer of
+# `env.get` takes it on.
+
+fn main() -> Unit !{IO} =
+  do
+    state <- new_state()
+
+    # PATH is the one variable guaranteed present: exec'ing this binary needed it.
+    match env.get("PATH") with
+    | Nothing -> assert_true(state, "PATH is set", false)
+    | Just p -> assert_true(state, "PATH is set and non-empty", str_len(p) > 0)
+
+    match env.get("SPROUT_DEFINITELY_NOT_SET_XYZZY") with
+    | Nothing -> assert_true(state, "an unset name is Nothing", true)
+    | Just _ -> assert_true(state, "an unset name is Nothing", false)
+
+    # The two assertions above would also pass if `get` returned a hardcoded
+    # string, so cross-check against the real environment: a child inherits ours,
+    # so what the shell expands must equal what we read.
+    r_path <- proc_run(["sh", "-c", "printf %s \"$PATH\""])
+    let child_path = proc_stdout_or(r_path, "<not-utf8>")
+    match env.get("PATH") with
+    | Nothing -> assert_true(state, "PATH matches the child's view", false)
+    | Just p -> assert_eq(state, "PATH matches the child's view", p, child_path)
+
+    summary(state)

@@ -6,6 +6,7 @@ import stdlib.log as log
 import stdlib.template (Template, compile, render)
 import stdlib.json (Json, JsonObject, JsonObjectCons, JsonObjectNil, string, int, array_from_list)
 import stdlib.string as string
+import stdlib.fs as fs
 
 # A small but complete CRUD web app: users are created, listed, edited, and deleted
 # through HTML forms (not just JSON endpoints). The user list lives in a shared,
@@ -230,10 +231,10 @@ fn form_template_path() -> String = "examples/templates/user_form.html"
 # Startup diagnostics go through the logger (stderr) at Error level, not `print`
 # (stdout) — the same logger the request middleware uses.
 fn main() -> Unit !{IO} =
-  match read_file(list_template_path()) with
+  match fs.read_text(list_template_path()) with
   | Err msg -> log.error(lg, `failed to read ${list_template_path()}: ${msg}`)
   | Ok list_src ->
-      match read_file(form_template_path()) with
+      match fs.read_text(form_template_path()) with
       | Err msg -> log.error(lg, `failed to read ${form_template_path()}: ${msg}`)
       | Ok form_src -> compile_and_serve(lg, list_src, form_src)
 where

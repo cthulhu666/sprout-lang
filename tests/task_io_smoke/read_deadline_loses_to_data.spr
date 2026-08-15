@@ -3,6 +3,7 @@ import stdlib.net (TcpConnection, close, close_listener, connect, accept, listen
 import stdlib.string as string
 import stdlib.bytes as bytes
 import stdlib.terminal as terminal
+import stdlib.time as time
 
 # Regression (code review, finding 7): a read must NEVER report `Err TcpTimeout` while the data it
 # was waiting for is already sitting in the socket buffer.
@@ -37,14 +38,14 @@ import stdlib.terminal as terminal
 # from calling something that returns one, and an empty write is the cheapest no-op available here.
 fn spin_until(target_us: Int) -> Unit !{IO} =
   do
-    now <- time_now_micros()
+    now <- time.now_micros()
     if now >= target_us then terminal.write("") else spin_until(target_us)
 
 # CPU-bound and parking-free on purpose: a `task_sleep` here would park, the pump would poll, and the
 # two events would land in separate batches — which is precisely the case that never reproduced.
 fn spinner() -> Unit !{IO} =
   do
-    now <- time_now_micros()
+    now <- time.now_micros()
     spin_until(now + 200000)
 
 fn reader(server: consuming TcpConnection) -> Unit !{IO} =

@@ -2,6 +2,7 @@ import stdlib.task (Scope, with_scope, task_spawn, task_sleep)
 import stdlib.net (TcpConnection, connect, close)
 import stdlib.string as string
 import stdlib.terminal as terminal
+import stdlib.time as time
 
 # Regression (code review, finding 10): resolving a NAME must PARK the green task, never block the OS
 # thread. getaddrinfo(3) is opaque blocking libc with no park point inside it, so while it runs the
@@ -24,9 +25,9 @@ import stdlib.terminal as terminal
 # not about the connection.
 fn probe() -> Unit !{IO} =
   do
-    t0 <- time_now_micros()
+    t0 <- time.now_micros()
     task_sleep(50)
-    t1 <- time_now_micros()
+    t1 <- time.now_micros()
     report((t1 - t0) / 1000)
 
 fn report(elapsed_ms: Int) -> Unit !{IO} =

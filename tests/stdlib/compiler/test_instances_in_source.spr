@@ -4,6 +4,7 @@ import stdlib.compiler.analysis_service_driver as svc
 import stdlib.compiler.ast as ast
 import stdlib.compiler.source as source
 import stdlib.string as string
+import stdlib.env as env
 
 # Synthetic-program builders — exercise the pure matcher without needing a real
 # stdlib_root/bundle, so the test is hermetic and fast.
@@ -98,7 +99,7 @@ fn main() -> Unit !{IO} =
 
     # Integration: drive the real bundle+probe path when the suite provides the
     # stdlib root (no-op under `just test-file`, which does not set it).
-    match env_get("SPROUT_STDLIB_ROOT") with
+    match env.get("SPROUT_STDLIB_ROOT") with
     | Nothing -> ()
     | Just stdlib_root ->
         do

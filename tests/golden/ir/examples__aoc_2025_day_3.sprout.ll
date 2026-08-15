@@ -47,11 +47,6 @@ declare i64 @analysis_eval_expr_in_source(ptr, ptr)
 declare i64 @analysis_instances_in_source(ptr, ptr)
 declare i64 @analysis_complete_in_state(ptr, ptr, ptr)
 
-declare i64 @read_file(i64)
-declare i64 @write_file(i64, i64)
-declare i64 @env_get(i64)
-declare i64 @time_now_micros()
-declare i64 @wall_time_micros()
 declare i64 @double_to_string(i64)
 declare i64 @char_to_str(i64)
 declare i64 @char_from_codepoint(i64)
@@ -107,6 +102,8 @@ declare i64 @bytes_builder_u16_be(i64)
 declare i64 @bytes_builder_u32_be(i64)
 declare i64 @bytes_builder_append(i64, i64)
 declare i64 @bytes_builder_build(i64)
+declare i64 @read_file(i64)
+declare i64 @write_file(i64, i64)
 @.str.0 = private unnamed_addr constant { i64, [17 x i8] } { i64 262154, [17 x i8] c"division by zero\00" }
 @.str.1 = private unnamed_addr constant { i64, [3 x i8] } { i64 32778, [3 x i8] c", \00" }
 @.str.2 = private unnamed_addr constant { i64, [3 x i8] } { i64 32778, [3 x i8] c", \00" }
@@ -11149,6 +11146,29 @@ entry:
   ret i64 %t$3
 }
 
+define i64 @stdlib.fs.read_text(i64 %path) {
+entry:
+  %t$1 = alloca i64
+  store i64 %path, ptr %t$1
+  %t$2 = call i64 @sprout_gc_push_i64_root(ptr %t$1)
+  %t$0 = call i64 @read_file(i64 %path)
+  %t$3 = call i64 @sprout_gc_pop_roots(i64 1)
+  ret i64 %t$0
+}
+
+define i64 @stdlib.fs.write_text(i64 %path, i64 %content) {
+entry:
+  %t$1 = alloca i64
+  store i64 %path, ptr %t$1
+  %t$2 = call i64 @sprout_gc_push_i64_root(ptr %t$1)
+  %t$3 = alloca i64
+  store i64 %content, ptr %t$3
+  %t$4 = call i64 @sprout_gc_push_i64_root(ptr %t$3)
+  %t$0 = call i64 @write_file(i64 %path, i64 %content)
+  %t$5 = call i64 @sprout_gc_pop_roots(i64 2)
+  ret i64 %t$0
+}
+
 define i64 @examples.aoc_2025_day_3.shrink_for_digit(i64 %digits$in, i64 %size$in, i64 %drops$in, i64 %digit$in) {
 entry:
   %t$29 = alloca i64
@@ -11722,7 +11742,7 @@ entry:
   %t$15 = alloca i64
   store i64 %t$1, ptr %t$15
   %t$16 = call i64 @sprout_gc_push_i64_root(ptr %t$15)
-  %t$2$st = call { i64, i64 } @read_file_worker(i64 %t$1)
+  %t$2$st = call { i64, i64 } @stdlib.fs.read_text_worker(i64 %t$1)
   %t$2 = extractvalue { i64, i64 } %t$2$st, 0
   %t$3 = extractvalue { i64, i64 } %t$2$st, 1
   %t$17 = call i64 @sprout_gc_pop_roots(i64 1)
@@ -15500,36 +15520,6 @@ wrepack_next_64:
   unreachable
 }
 
-define { i64, i64 } @read_file_worker(i64 %path) {
-entry:
-  %t$10 = alloca i64
-  store i64 %path, ptr %t$10
-  %t$11 = call i64 @sprout_gc_push_i64_root(ptr %t$10)
-  %t$0 = call i64 @read_file(i64 %path)
-  %t$12 = call i64 @sprout_gc_pop_roots(i64 1)
-  %t$1 = call i64 @sprout_tag(i64 %t$0)
-  %t$2 = add i64 0, 7
-  %t$3 = icmp eq i64 %t$1, %t$2
-  br i1 %t$3, label %wrepack_hit_2, label %wrepack_next_2
-wrepack_hit_2:
-  %t$4 = call i64 @sprout_field(i64 %t$0, i64 0)
-  %t$5$r0 = insertvalue { i64, i64 } undef, i64 %t$1, 0
-  %t$5$r1 = insertvalue { i64, i64 } %t$5$r0, i64 %t$4, 1
-  ret { i64, i64 } %t$5$r1
-wrepack_next_2:
-  %t$6 = add i64 0, 8
-  %t$7 = icmp eq i64 %t$1, %t$6
-  br i1 %t$7, label %wrepack_hit_6, label %wrepack_next_6
-wrepack_hit_6:
-  %t$8 = call i64 @sprout_field(i64 %t$0, i64 0)
-  %t$9$r0 = insertvalue { i64, i64 } undef, i64 %t$1, 0
-  %t$9$r1 = insertvalue { i64, i64 } %t$9$r0, i64 %t$8, 1
-  ret { i64, i64 } %t$9$r1
-wrepack_next_6:
-  call void @sprout_abort_match()
-  unreachable
-}
-
 define { i64, i64 } @split_on_char_worker(i64 %s, i64 %sep) {
 entry:
   %t$27 = alloca i64
@@ -15631,6 +15621,36 @@ entry:
   store i64 %value, ptr %t$10
   %t$11 = call i64 @sprout_gc_push_i64_root(ptr %t$10)
   %t$0 = call i64 @bytes_to_utf8(i64 %value)
+  %t$12 = call i64 @sprout_gc_pop_roots(i64 1)
+  %t$1 = call i64 @sprout_tag(i64 %t$0)
+  %t$2 = add i64 0, 7
+  %t$3 = icmp eq i64 %t$1, %t$2
+  br i1 %t$3, label %wrepack_hit_2, label %wrepack_next_2
+wrepack_hit_2:
+  %t$4 = call i64 @sprout_field(i64 %t$0, i64 0)
+  %t$5$r0 = insertvalue { i64, i64 } undef, i64 %t$1, 0
+  %t$5$r1 = insertvalue { i64, i64 } %t$5$r0, i64 %t$4, 1
+  ret { i64, i64 } %t$5$r1
+wrepack_next_2:
+  %t$6 = add i64 0, 8
+  %t$7 = icmp eq i64 %t$1, %t$6
+  br i1 %t$7, label %wrepack_hit_6, label %wrepack_next_6
+wrepack_hit_6:
+  %t$8 = call i64 @sprout_field(i64 %t$0, i64 0)
+  %t$9$r0 = insertvalue { i64, i64 } undef, i64 %t$1, 0
+  %t$9$r1 = insertvalue { i64, i64 } %t$9$r0, i64 %t$8, 1
+  ret { i64, i64 } %t$9$r1
+wrepack_next_6:
+  call void @sprout_abort_match()
+  unreachable
+}
+
+define { i64, i64 } @stdlib.fs.read_text_worker(i64 %path) {
+entry:
+  %t$10 = alloca i64
+  store i64 %path, ptr %t$10
+  %t$11 = call i64 @sprout_gc_push_i64_root(ptr %t$10)
+  %t$0 = call i64 @read_file(i64 %path)
   %t$12 = call i64 @sprout_gc_pop_roots(i64 1)
   %t$1 = call i64 @sprout_tag(i64 %t$0)
   %t$2 = add i64 0, 7

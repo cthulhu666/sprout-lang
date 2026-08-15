@@ -2,6 +2,7 @@ module stdlib.http_middleware
 
 import stdlib.http_server (HttpRequest, HttpServerResponse, response_status, request_method, request_path)
 import stdlib.log as log
+import stdlib.time as time
 
 # Opt-in middleware for the HTTP server. A middleware is just a handler
 # transformer — `Handler -> Handler` — so composing one is ordinary higher-order
@@ -19,9 +20,9 @@ import stdlib.log as log
 export fn with_logging(lg: log.Logger, handler: HttpRequest -> HttpServerResponse !{IO}) -> HttpRequest -> HttpServerResponse !{IO} =
   \req ->
     do
-      start <- time_now_micros()
+      start <- time.now_micros()
       resp <- handler(req)
-      fin <- time_now_micros()
+      fin <- time.now_micros()
       log.info_f(lg, "request", access_fields(req, resp, fin - start))
       resp
 

@@ -1,18 +1,44 @@
-# Tests for time_now_micros: monotonic microsecond counter (CLOCK_MONOTONIC).
-# Only elapsed differences are meaningful; the epoch is unspecified.
+# The two clocks in stdlib.time, which are NOT interchangeable:
+#   now_micros()  — CLOCK_MONOTONIC. Unspecified epoch; only DIFFERENCES mean
+#                   anything. For elapsed time, timeouts, benchmarks.
+#   wall_micros() — CLOCK_REALTIME. Microseconds since the Unix epoch. Steps under
+#                   NTP, so it must never be used to measure elapsed time.
+# (sprout_runtime.c:509-526 states both contracts.)
+#
+# `wall_time_micros` previously had NO test anywhere; only the monotonic counter
+# was covered. That gap is closed below, which matters because the two builtins
+# are one keystroke apart at a call site and mixing them up produces a bug that
+# is invisible until a clock adjustment.
 import stdlib.test (TestState, new_state, assert_true, summary)
+import stdlib.time as time
 
 fn main() -> Unit !{IO} =
   do
     state <- new_state()
 
-    t0 <- time_now_micros()
-    assert_true(state, "time_now_micros > 0", t0 > 0)
+    t0 <- time.now_micros()
+    assert_true(state, "now_micros > 0", t0 > 0)
 
-    t1 <- time_now_micros()
+    t1 <- time.now_micros()
     assert_true(state, "monotonic: t1 >= t0", t1 >= t0)
 
-    t2 <- time_now_micros()
+    t2 <- time.now_micros()
     assert_true(state, "monotonic: t2 >= t1", t2 >= t1)
+
+    # Wall clock. The only epoch-independent thing worth asserting is that the
+    # value really is microseconds-since-1970 rather than 0 (the failure return
+    # of gettimeofday) or a monotonic since-boot count. 1.6e15 us is 2020-09-13:
+    # a lower bound cannot expire, so this is not a time bomb.
+    w0 <- time.wall_micros()
+    assert_true(state, "wall_micros is past 2020 (microseconds since the epoch)",
+      w0 > 1600000000000000)
+
+    # Two reads taken back to back must land in the same moment. This catches a
+    # unit error — a seconds- or nanoseconds-valued builtin would still clear the
+    # bound above, but would not stay inside a one-minute window in these terms.
+    w1 <- time.wall_micros()
+    let drift = if w1 >= w0 then w1 - w0 else w0 - w1
+    assert_true(state, "successive wall_micros reads are microseconds apart, not eras",
+      drift < 60000000)
 
     summary(state)

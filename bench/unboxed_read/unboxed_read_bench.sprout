@@ -8,6 +8,7 @@ module main
 # loops (A*) dilute.  Prints a checksum and the wall time in microseconds.
 
 import stdlib.mutable (MutVec, mutvec_new, mutvec_at, mutvec_set)
+import stdlib.time as time
 
 # v[i] = i, so the per-pass sum is 0 + 1 + … + (n-1).
 fn fill(v: MutVec Int, i: Int, n: Int) -> Unit !{IO} =
@@ -35,9 +36,9 @@ fn main() -> Unit !{IO} =
   do
     v <- mutvec_new(1000, 0)
     _ <- fill(v, 0, 1000)
-    t0 <- time_now_micros()
+    t0 <- time.now_micros()
     total <- repeat_sum(v, 1000, 100000, 0)
-    t1 <- time_now_micros()
+    t1 <- time.now_micros()
     print("checksum=")
     print(total)
     print(" time_us=")

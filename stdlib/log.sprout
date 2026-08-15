@@ -1,6 +1,7 @@
 module stdlib.log
 
 import stdlib.string as string
+import stdlib.time as time
 
 # Leveled, structured logging. A logger is an immutable capability value that is
 # threaded explicitly (never an ambient global) — matching docs/observability-
@@ -146,7 +147,7 @@ fn run_sink(lg: Logger, line: String) -> Unit !{IO} =
 # Read the wall clock, format, and hand the finished line to the sink.
 fn emit(lg: Logger, lvl: Level, msg: String, fields: Vec (String, String)) -> Unit !{IO} =
   do
-    now <- wall_time_micros()
+    now <- time.wall_micros()
     run_sink(lg, format_line(format_iso8601(now), lvl, msg, all_fields(base_fields(lg), fields)))
 
 # Emit a record iff its level passes the logger's threshold. When gated out,
