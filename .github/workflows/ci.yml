@@ -213,3 +213,47 @@ jobs:
         # public endpoint or certificate lifetime to depend on. Includes its own negative
         # control — the same request must FAIL without the trust anchor.
         run: just http-tls-gate
+
+  # Windows port (docs/windows-port-v0.md). Pulled forward from milestone W5 to W1 deliberately:
+  # W1 replaces the scheduler's context switch with Win32 Fibers, and the alternative local loop
+  # — Wine — is the wrong instrument for it. Wine is an independent reimplementation of Win32,
+  # and fibers plus WSAPoll are exactly where a reimplementation is most likely to differ from
+  # the real thing, so a green Wine run would not establish the port works. (It is also being
+  # retired underneath us: Homebrew's wine casks are disabled from 2026-09-01, and x86_64 Wine
+  # on Apple Silicon depends on Rosetta 2, which Apple is winding down.) A free GitHub-hosted
+  # runner is genuine Windows, so the fiber work gets a real gate from its first commit rather
+  # than four milestones of unverified code.
+  #
+  # WHAT THIS RUNS TODAY, and why that is all it can run: the runtime is POSIX-only — all three
+  # C translation units still fail to compile for Windows (the windows-probe recipe reports where
+  # each stops) — so there is nothing to bootstrap, link, or execute. What CAN be checked today
+  # is the code GENERATOR, and it is worth checking: section 1.1's "codegen needs zero work" claim
+  # was verified once by hand at planning time and has been ungated since. The gate below compiles
+  # every committed golden IR snapshot to a Windows COFF object for both Windows targets, and
+  # verifies the COFF machine type in the object header rather than a zero exit status alone.
+  #
+  # GROWTH PATH — each milestone adds a step here, and this job is green at every one of them:
+  #   W1  compile runtime/sprout_context.h's fiber arm
+  #   W2  compile sprout_poll.c's WSAPoll backend
+  #   W3  all three TUs compile; the windows-probe recipe graduates from diagnostic to gate
+  #   W5  link and RUN a task/IO smoke, mirroring what the macos job does for kqueue
+  #
+  # Advisory, like `macos`: `test` on Linux stays the one required check. Unlike a job that is
+  # red until W3, this one is green from day one, which is what keeps a red result meaningful.
+  windows:
+    runs-on: windows-latest
+    defaults:
+      run:
+        # Git Bash. The gate is a bash script so it runs identically on a developer's macOS or
+        # Linux box via `just windows-ir-gate` — the Windows host is what makes the result
+        # trustworthy, not something the script needs to know about.
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Golden IR compiles to Windows COFF (x86-64 + ARM64)
+        # The image ships LLVM (20.x at time of writing — well above the >= 16 that opaque-pointer
+        # IR requires) but does not put it on PATH, so the script discovers clang and prints which
+        # one it found as its first line. A future image change therefore fails with an explicit
+        # "no clang found" rather than a confusing compile error.
+        run: bash scripts/windows_ir_gate.sh

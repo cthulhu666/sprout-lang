@@ -41,6 +41,15 @@ support claim; ARM64 Windows is a non-goal per §2.)
 
 **Conclusion: zero codegen work. The ~11.3k-line C runtime is the entire job.**
 
+**Now gated, not assumed.** The above was a one-time hand check; `just windows-ir-gate`
+(`scripts/windows_ir_gate.sh`) runs it on every commit over **all 58** golden IR snapshots × both
+Windows targets, and checks the COFF machine type in the object header rather than trusting a
+zero exit status. It also asserts the corpus still contains `musttail`, so a golden refresh that
+dropped the one ABI-sensitive construct cannot silently weaken the gate. Needs only clang ≥ 16 —
+no runtime, no sysroot, no Windows host — which is why it can be green today while the runtime
+still does not compile for Windows at all. The `windows` CI job runs it on a real Windows host
+(§10).
+
 ### 1.2 Two structural advantages that already exist
 
 - **GC rooting is an explicit shadow stack** (`sprout_gc_push_i64_root`,
@@ -291,9 +300,24 @@ milestone that closes it.
 | **W2** | `WSAPoll` backend + timer min-heap, per §4.3 | `task_sleep` + `with_timeout` + a TCP echo smoke pass |
 | **W3** | Winsock2, files, arena, console, regex, process — §6 | all three TUs compile; `just windows-probe` becomes a gate |
 | **W4** | Vectored exception handler; `CaptureStackBackTrace` or a loud stub | a deliberate stack overflow prints a diagnostic, not a silent exit |
-| **W5** | First `.exe`; `windows-latest` CI job; game-side link flags | uncharted-suns runs on Windows |
+| **W5** | First `.exe`; game-side link flags; the `windows` job gains a run smoke | uncharted-suns runs on Windows |
 
 W1 and W2 carry the design risk; W3 is mechanical substitution.
+
+**The `windows-latest` CI job moved from W5 to W1** (`.github/workflows/ci.yml`, job `windows`).
+It was originally listed as a W5 deliverable, which would have meant writing the fiber and poller
+work — the two milestones carrying the design risk — with no Windows verification at all, then
+discovering four milestones' worth of problems at once. The alternative local loop, Wine, is the
+wrong instrument: it is an independent reimplementation of Win32, and fibers and `WSAPoll` are
+precisely where a reimplementation is most likely to differ, so a green Wine run would not
+establish that the port works. (It is also being retired underneath us — Homebrew's wine casks are
+disabled from 2026-09-01, and x86_64 Wine on Apple Silicon rides Rosetta 2, which Apple is winding
+down.) A free GitHub-hosted runner is genuine Windows.
+
+The job is **green from day one and grows one step per milestone** — today `windows-ir-gate`
+(§1.1), then the fiber arm at W1, the `WSAPoll` backend at W2, all three TUs at W3, and a linked
+run smoke at W5. A job that is red until W3 would train everyone to ignore it, which costs more
+than it gains.
 
 **W0 was originally one milestone whose exit criterion was "all three `.c` files reach `clang -c`
 exit 0". That was wrong** — it is W3's criterion, not a first step: `sprout_runtime.c` stops on
@@ -397,11 +421,19 @@ Each milestone's exit criterion in §5 is its test. Additionally:
   both the timeout and cancel variants, and CI runs them — but that harness is not part of
   `just test`, so the `PARK_SELECT` force-drop branch was invisible to the gate AGENTS.md
   requires for a runtime change. The seam rewrites that branch; it belongs in the default suite.
-- **W5** adds a `windows-latest` CI job mirroring the existing `macos-latest` job's shape
-  (`.github/workflows/ci.yml:181-210`, which bootstraps and runs a task/IO smoke against the
-  kqueue backend). The Windows job runs the same smoke against the `WSAPoll` backend, and
-  **builds with clang targeting `x86_64-pc-windows-msvc`** — the local loop is mingw, so MSVC has
-  to be the gated one for §4.1's rule to stay honest.
+- **The `windows` CI job exists from W1**, not W5 (see §5 for why it moved). It is **advisory**,
+  like `macos` — `test` on Linux stays the one required check — and green at every milestone
+  rather than red until W3, because a job that is expected to fail stops being read.
+  - *today*: `just windows-ir-gate` on a Windows host. Compiles committed IR only, so it needs
+    no runtime, no sysroot and no bootstrap — the reason it can pass while none of the three C
+    TUs compile for Windows.
+  - *W1*: `runtime/sprout_context.h`'s fiber arm compiles. *W2*: `sprout_poll.c`'s `WSAPoll`
+    backend compiles. *W3*: all three TUs compile, and `just windows-probe` graduates from
+    diagnostic to gate.
+  - *W5*: link and **run** a task/IO smoke, mirroring what the `macos` job
+    (`.github/workflows/ci.yml`) does for kqueue — the same battery against the `WSAPoll`
+    backend. Built with clang targeting `x86_64-pc-windows-msvc`: the local loop is mingw, so
+    MSVC has to be the gated one for §4.1's rule to stay honest.
 - No Sprout-level test *expectations* change. The language surface is identical; only which
   platforms the runtime supports changes.
 

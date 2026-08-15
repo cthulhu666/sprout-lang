@@ -1983,6 +1983,17 @@ linux-smoke: (linux-run "task-io-smoke")
 windows-probe:
   bash scripts/windows_probe.sh
 
+# Windows port. A REAL GATE, unlike windows-probe, and green today: it compiles only
+# committed golden IR, which needs no runtime and no Windows host. Gates the claim
+# that codegen is already target-neutral (docs/windows-port-v0.md §1.1) — emitted IR
+# carries `unknown-unknown-unknown` with no datalayout and passes everything as boxed
+# i64, so there is no struct-passing surface for Win64-vs-SysV to disagree about.
+# Also run by the `windows` CI job. Needs only clang >= 16 (SPROUT_CLANG overrides).
+# Compile every golden IR snapshot to a Windows COFF object, x86-64 and ARM64.
+[group('dev')]
+windows-ir-gate:
+  bash scripts/windows_ir_gate.sh
+
 # Division-by-zero guard regression (CI gate). The fixture divides by a RUNTIME
 # zero (`10 / list_length(argv)` with no args), which neither the compiler nor
 # clang can fold. A bare `sdiv i64 _, 0` is LLVM undefined behavior; the emitted
@@ -2641,7 +2652,7 @@ gate-quick: fmt-check test compile-examples-stage1 smoke-shapes bundle-smoke
 # advisory), so it runs in the body rather than as an arg-less dependency.
 # Full CI-parity battery (slow, ~15-25m); a green run means CI will not surprise you.
 [group('gate')]
-gate: fmt-check smoke-shapes bundle-smoke loud-fail-smoke diagnostic-stream-smoke argv-smoke trace-dispatch-smoke verify-dispatch-smoke div-by-zero-smoke stack-overflow-smoke flush-on-crash-smoke tco-runtime-smoke c-runtime-test b1-gate check-approved-builtins check-extern-signatures verify-bootstrap-fixed-point ir-golden-diff compile-examples-stage1 compile-bench run-example-canary test task-io-smoke http-client-binary-gate http-tls-gate test-stress
+gate: fmt-check smoke-shapes bundle-smoke loud-fail-smoke diagnostic-stream-smoke argv-smoke trace-dispatch-smoke verify-dispatch-smoke div-by-zero-smoke stack-overflow-smoke flush-on-crash-smoke tco-runtime-smoke c-runtime-test b1-gate check-approved-builtins check-extern-signatures verify-bootstrap-fixed-point ir-golden-diff windows-ir-gate compile-examples-stage1 compile-bench run-example-canary test task-io-smoke http-client-binary-gate http-tls-gate test-stress
   #!/usr/bin/env bash
   set -euo pipefail
   echo "==> gate: gc-safety-check --strict..."
@@ -2712,6 +2723,10 @@ gate-audit:
     for d in $deps; do [[ "$d" =~ ^[a-z][a-z0-9-]*$ ]] && expand "$d"; done
   }
   gate_set=$(printf '%s\n%s\n' "$(expand gate)" "$BODY" | sort -u)
+  # NOTE: this matches COMMENTS as well as `run:` lines, so a task named in workflow prose
+  # counts as "CI runs it" and the English word "just" can invent a task name. Both are load-
+  # bearing today: `just test` appears only in a comment, and the gate-only assertion below
+  # relies on that match. See BACKLOG §10 before "fixing" it.
   ci_tasks=$(grep -oE 'just +[a-z][a-z0-9-]*' "$CI_WORKFLOW" | awk '{print $2}' | sort -u)
   missing=""
   for t in $ci_tasks; do
