@@ -1,0 +1,37 @@
+module main
+
+# Golden-stdout coverage for `stdlib.terminal`, which had NONE: its only exercise
+# anywhere in the tree was examples/sentry_issue_browser_tui.sprout.
+#
+# Every escape below is written unconditionally by the runtime (no isatty gate —
+# see term_clear/term_move/term_hide_cursor in sprout_runtime.c), so the byte
+# stream is identical piped or on a tty, which is what makes this testable at all.
+#
+# The half of the module NOT covered here is the input side
+# (term_read_key_once / term_read_line_once / term_is_interactive_once): those
+# depend on stdin and on isatty, so they are not golden-stdout testable. See the
+# `P0` key-input entry in BACKLOG §4.
+import stdlib.terminal as term
+
+fn main() -> Unit !{IO} = do
+  # Builtin-backed cursor/screen control.
+  term.clear()  # ESC[2J ESC[H
+  term.move(3, 7)  # ESC[3;7H
+  term.hide_cursor()  # ESC[?25l
+  term.show_cursor()  # ESC[?25h
+
+  # Pure-Sprout ANSI over term_write — the capabilities BACKLOG §4 asks for as
+  # "builtins", correctly implemented in stdlib instead (Builtin vs Stdlib #4).
+  term.enter_alt_screen()  # ESC[?1049h
+  term.set_bold()  # ESC[1m
+  term.set_fg(255, 0, 0)  # ESC[38;2;255;0;0m  (24-bit truecolor)
+  term.set_bg(0, 128, 64)  # ESC[48;2;0;128;64m
+  term.write("hi")
+  term.reset_style()  # ESC[0m
+
+  # Composed helpers.
+  term.term_home()  # ESC[1;1H
+  term.term_render_line(2, "L")  # ESC[2;1H then "L"
+  term.term_reset_screen()  # ESC[2J ESC[H then ESC[1;1H
+  term.exit_alt_screen()  # ESC[?1049l
+  term.write("\n")
