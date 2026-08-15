@@ -5211,10 +5211,16 @@ fn validate_entrypoint(decls: List ast.Decl) -> Maybe(source.SourcePos, String) 
 # `@inst:{Class}:{Head}` marker, so the second silently shadows the first at
 # dispatch.  Sprout has no orphan/overlap resolution, so this is always an
 # error.  The key mirrors register_instance_marker exactly (head-constructor
-# only), so `instance Bar (List a)` and `instance Bar (List Int)` collide on
+# only), so `instance Bar (List a)` and `instance Bar (List b)` collide on
 # `@inst:Bar:List` just like a literal duplicate does.  Scans the program's own
 # decls (not the seeded prelude env), so prelude instances — each a distinct
 # head — never false-positive.
+#
+# Since check_tyvar_instance_heads now restricts a head to a constructor applied
+# to DISTINCT type variables, any two heads reaching here with the same
+# constructor are alpha-equivalent — this pass no longer has a
+# `List Int` vs `List Bool` case to over-approximate, because neither head is
+# legal in the first place.
 fn instance_key_and_class(c: ast.TypeConstraint) -> Maybe (String, String) =
   match c with
   | ast.TypeConstraint class_name type_args ->
@@ -5300,6 +5306,58 @@ fn instance_head_problem(te: ast.TypeExpr) -> Maybe String =
   | ast.TypeArrow _ _ _ -> Just("a function type")
   | ast.TupleType _ -> Nothing
 
+# The ARGUMENTS of the head, in source order.
+#
+# `ast.TypeApply` is BINARY (ast.sprout:10), so `Pair a b` is
+# `TypeApply(TypeApply(TypeName "Pair", TypeName "a"), TypeName "b")` — the spine
+# has to be walked or only the last argument is seen. Two forms are not spines:
+# a tuple's arguments are its elements (its head is the TupleN constructor), and
+# TypeEffect is transparent, because type_from_ast drops the annotation and the
+# marker key is derived from the type it produces.
+fn instance_head_args(te: ast.TypeExpr) -> List ast.TypeExpr =
+  match te with
+  | ast.TupleType items -> items
+  | ast.TypeEffect inner _ -> instance_head_args(inner)
+  | _ -> type_apply_spine_args(te, Nil)
+
+fn type_apply_spine_args(te: ast.TypeExpr, acc: List ast.TypeExpr) -> List ast.TypeExpr =
+  match te with
+  | ast.TypeApply base arg -> type_apply_spine_args(base, Cons(arg, acc))
+  | _ -> acc
+
+# Haskell 2010 §4.3.2: the head is "a type constructor T applied to simple type
+# variables u1, … uk … the ui must all be distinct". Sprout needs the same rule
+# for a sharper reason than Haskell does — the `@inst:` key is derived by
+# type_head_str, whose `TApp base _` arm DISCARDS every argument, so `List Int`
+# and `List String` are one key. An instance that names a concrete argument
+# therefore answers for types it was never written for, and its body runs on
+# them: `instance Describe (List Int)` summing its elements accepted a
+# `List String` and added the String pointers as machine integers (check OK,
+# clean IR, no diagnostic anywhere). Rejecting the head is what makes the coarse
+# key honest — every head it can represent is now a head it represents exactly.
+#
+# `seen` accumulates the variables already bound by this head, which is what
+# distinctness is checked against; `Pair a a` is built only from variables and
+# would otherwise pass, while still keying the same `@inst:C:Pair` that answers
+# for `Pair Int Bool`.
+#
+# Lifting this restriction later is the GHC FlexibleInstances position, and it
+# requires the key to carry the full head plus most-specific-wins matching — see
+# the widening item in BACKLOG.md. Until then a nested argument is rejected too.
+fn head_arg_problem(args: List ast.TypeExpr, seen: List String) -> Maybe String =
+  match args with
+  | Nil -> Nothing
+  | Cons a rest ->
+      match a with
+      | ast.TypeName n ->
+          if is_lowercase_name(n) == false then Just("`" ++ n ++ "` is a concrete type")
+          else if list_member(n, seen) then Just("`" ++ n ++ "` appears more than once")
+          else head_arg_problem(rest, Cons(n, seen))
+      | _ -> Just("one argument is not a type variable")
+
+# Returns (class, rule) where `rule` completes "Instance head for {class} …".
+# The head-shape rule is checked first: a variable or function head is a defect
+# in the head ITSELF, and reporting it as an argument problem would misdescribe it.
 fn instance_head_tyvar(c: ast.TypeConstraint) -> Maybe (String, String) =
   match c with
   | ast.TypeConstraint class_name type_args ->
@@ -5307,8 +5365,15 @@ fn instance_head_tyvar(c: ast.TypeConstraint) -> Maybe (String, String) =
       | Nil -> Nothing
       | [head_te | _] ->
           match instance_head_problem(head_te) with
-          | Nothing -> Nothing
-          | Just problem -> Just((string.after_last_dot(class_name), problem))
+          | Just problem ->
+              Just((string.after_last_dot(class_name),
+                    "must be a concrete type, not " ++ problem))
+          | Nothing ->
+              match head_arg_problem(instance_head_args(head_te), Nil) with
+              | Nothing -> Nothing
+              | Just detail ->
+                  Just((string.after_last_dot(class_name),
+                        "must be a type constructor applied to distinct type variables, but " ++ detail))
 
 fn check_tyvar_instance_heads(decls: List ast.Decl) -> Maybe(source.SourcePos, String) =
   match decls with
@@ -5318,9 +5383,8 @@ fn check_tyvar_instance_heads(decls: List ast.Decl) -> Maybe(source.SourcePos, S
       | ast.InstanceDecl constraint _ _ _ ->
           match instance_head_tyvar(constraint) with
           | Nothing -> check_tyvar_instance_heads(rest)
-          | Just (cls, problem) ->
-              Just((ast.decl_pos(decl),
-                    "Instance head for " ++ cls ++ " must be a concrete type, not " ++ problem))
+          | Just (cls, rule) ->
+              Just((ast.decl_pos(decl), "Instance head for " ++ cls ++ " " ++ rule))
       | _ -> check_tyvar_instance_heads(rest)
 
 fn check_overlapping_instances(decls: List ast.Decl, seen: Dict Bool) -> Maybe(source.SourcePos, String) =

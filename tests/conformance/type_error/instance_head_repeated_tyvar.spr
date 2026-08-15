@@ -1,0 +1,23 @@
+# The DISTINCTNESS half of the instance-head rule (Haskell 2010 §4.3.2: "a type
+# constructor T applied to simple type variables u1, … uk … the ui must all be
+# distinct").
+#
+# `Pair a a` is built only from type variables, so the head-shape check alone
+# would wave it through — but it silently means "a Pair whose halves are the same
+# type", a restriction the key cannot express: the marker is `@inst:Same:Pair`,
+# which also answers for `Pair Int Bool`. Same failure mode as a concrete
+# argument, reached by a different route, so it needs its own coverage.
+class Same a {
+  fn same(x: a) -> Bool
+}
+
+type Pair a b =
+  | MkPair a b
+
+instance Same (Pair a a) {
+  fn same(x: Pair a a) -> Bool = true
+}
+
+fn mixed() -> Pair Int Bool = MkPair(1, true)
+
+fn main() -> Unit !{IO} = print(same(mixed()))

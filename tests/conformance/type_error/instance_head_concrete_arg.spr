@@ -1,0 +1,28 @@
+# An instance head carrying a CONCRETE type argument. This is the shape that
+# made the head-granular `@inst:` key unsound, and it is why the Haskell 2010
+# §4.3.2 restriction exists.
+#
+# Before this rule, the program below COMPILED AND RAN. `register_instance_marker`
+# derives its key through `type_head_str`, whose `TApp base _` arm discards every
+# argument — so `List Int` and `List String` are the same key, `@inst:Describe:List`.
+# Nothing downstream ever compared the instance's argument to the call site's, so
+# `describe(strs())` selected the `List Int` body and its `Int` arithmetic ran on
+# String payloads: `--phase check` reported OK, clang linked cleanly, and the
+# program printed a sum of two String heap pointers (8737893664 on one run).
+#
+# Note there is only ONE instance here — `check_overlapping_instances` cannot fire.
+# The defect is not a collision between instances; it is that a single instance
+# answers for types it was never written for.
+class Describe a {
+  fn describe(x: a) -> String
+}
+
+fn add(acc: Int, n: Int) -> Int = acc + n
+
+instance Describe (List Int) {
+  fn describe(x: List Int) -> String = int_to_string(list_fold(add, 0, x))
+}
+
+fn strs() -> List String = Cons("hello", Cons("world", Nil))
+
+fn main() -> Unit !{IO} = print(describe(strs()))

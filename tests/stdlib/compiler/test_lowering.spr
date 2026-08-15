@@ -356,16 +356,22 @@ fn main() -> Unit !{IO} =
     # Bug: resolve_obligation fell through to first-concrete-arg heuristic which
     # found Box Int's head "Box" and picked @inst:MyC:Box instead of @inst:MyC:Int.
     # Use a user-defined Box type (avoids Cons/Nil not being in scope in the isolated
-    # typecheck env) with a concrete Box Int instance so the first-arg heuristic
-    # resolves to Box (wrong) vs the prog_to_fresh scan which resolves to Int (correct).
-    r_dict_conc <- run_lower("class MyC a {\n  fn myop(x: a) -> String\n}\ninstance MyC Int {\n  fn myop(x: Int) -> String = \"int\"\n}\ntype Box a = Box a\ninstance MyC (Box Int) {\n  fn myop(xs: Box Int) -> String = \"boxint\"\n}\nfn boxwrap(xs: Box a) -> String where MyC a = \"ok\"\nfn probe() -> String = boxwrap(Box(42))")
+    # typecheck env) with a Box instance so the first-arg heuristic resolves to Box
+    # (wrong) vs the prog_to_fresh scan which resolves to Int (correct).
+    # The Box instance was `instance MyC (Box Int)` until the instance-head rule
+    # landed (spec §8.5). What this test needs from it is only that it OCCUPY the
+    # `@inst:MyC:Box` key, and `Box a` occupies the same one — the key keeps the head
+    # constructor alone — so the hazard is unchanged and the head is now legal.
+    r_dict_conc <- run_lower("class MyC a {\n  fn myop(x: a) -> String\n}\ninstance MyC Int {\n  fn myop(x: Int) -> String = \"int\"\n}\ntype Box a = Box a\ninstance MyC (Box a) {\n  fn myop(xs: Box a) -> String = \"boxint\"\n}\nfn boxwrap(xs: Box a) -> String where MyC a = \"ok\"\nfn probe() -> String = boxwrap(Box(42))")
     assert_true(state, "constrained dict injection (container arg) lowers ok", is_lower_ok(r_dict_conc))
     assert_true(state, "constrained dict injection uses Int dict not Box dict",
       str_starts_with(lowered_fn_body_dict_var_name(r_dict_conc, "probe"), "__tc_MyC_Int_"))
 
     # Gap 2: two independent constraint vars, both in container positions.
     # Each must resolve to its own element dict (Int / Bool), not the container dicts.
-    r_dual <- run_lower("class CA a {\n  fn opA(x: a) -> String\n}\nclass CB a {\n  fn opB(x: a) -> Int\n}\ninstance CA Int {\n  fn opA(x: Int) -> String = \"a\"\n}\ninstance CB Bool {\n  fn opB(x: Bool) -> Int = 0\n}\ntype BoxA a = BoxA a\ntype BoxB a = BoxB a\ninstance CA (BoxA Int) {\n  fn opA(xs: BoxA Int) -> String = \"abox\"\n}\ninstance CB (BoxB Bool) {\n  fn opB(xs: BoxB Bool) -> Int = 1\n}\nfn dual(x: BoxA a, y: BoxB b) -> String where CA a, CB b = \"ok\"\nfn probe() -> String = dual(BoxA(42), BoxB(true))")
+    # As above, the two container instances were `BoxA Int` / `BoxB Bool` before the
+    # instance-head rule; they only need to occupy `@inst:CA:BoxA` / `@inst:CB:BoxB`.
+    r_dual <- run_lower("class CA a {\n  fn opA(x: a) -> String\n}\nclass CB a {\n  fn opB(x: a) -> Int\n}\ninstance CA Int {\n  fn opA(x: Int) -> String = \"a\"\n}\ninstance CB Bool {\n  fn opB(x: Bool) -> Int = 0\n}\ntype BoxA a = BoxA a\ntype BoxB a = BoxB a\ninstance CA (BoxA a) {\n  fn opA(xs: BoxA a) -> String = \"abox\"\n}\ninstance CB (BoxB b) {\n  fn opB(xs: BoxB b) -> Int = 1\n}\nfn dual(x: BoxA a, y: BoxB b) -> String where CA a, CB b = \"ok\"\nfn probe() -> String = dual(BoxA(42), BoxB(true))")
     assert_true(state, "dual constraint (two containers) lowers ok", is_lower_ok(r_dual))
     assert_true(state, "dual constraint: first var resolves to Int dict (CA)",
       str_starts_with(lowered_fn_body_dict_var_for_prefix(r_dual, "probe", "__tc_CA_Int_"), "__tc_CA_Int_"))
