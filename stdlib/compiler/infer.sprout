@@ -5225,33 +5225,51 @@ fn instance_key_and_class(c: ast.TypeConstraint) -> Maybe (String, String) =
 # ---------------------------------------------------------------------------
 #
 # `instance Boxer a` parses, and register_instance_marker registers it under
-# `@inst:Boxer:{tyvar}` — a key no dispatch site ever looks up, because dispatch
-# resolves through concrete_type_str, which returns Nothing for a variable head.
-# So the declaration looked accepted while EVERY use failed with "No instance of
-# Boxer for T" at the CALL site, blaming the caller for a defect in the instance.
-# Sprout has no catch-all/overlapping-instance resolution (see
-# check_overlapping_instances), so a variable head can never become meaningful:
-# reject it where it is written.
+# `@inst:Boxer:a` — a key no dispatch site ever looks up, because dispatch
+# resolves through concrete_type_str, which returns Nothing for a variable head,
+# and no real type is spelled with a lowercase name. So the declaration looked
+# accepted while EVERY use failed with "No instance of Boxer for T" at the CALL
+# site, blaming the caller for a defect in the instance. Sprout has no
+# catch-all/overlapping-instance resolution (see check_overlapping_instances), so
+# a variable head can never become meaningful: reject it where it is written.
 #
 # Discriminates on the AST head, NOT on type_from_ast: that is called here with
 # an empty local_vars, so an unbound `a` resolves to TConst("a") — indistinguishable
 # from a genuine nullary constructor by the time types.Type is reached. The
 # lowercase-initial convention (is_lowercase_name) is the same discriminator
-# lowering.is_type_var_name and bundler.type_name_starts_lower use. The head is
-# read with type_expr_head_name (defined above for the constraint-token scan), so
-# an applied variable head (`instance C (a b)`) is rejected here too.
+# lowering.is_type_var_name and bundler.type_name_starts_lower use.
+#
+# The walk must mirror what type_from_ast does to the SAME TypeExpr, because the
+# marker key is derived from that type. Getting this wrong is how the first cut
+# of this check leaked (code review, 2026-08-15):
+#   - TypeEffect: type_from_ast DROPS the annotation and recurses into `inner`,
+#     so `a !{IO}` has exactly the head of `a`. Stopping here let an effect
+#     annotation smuggle a bare variable head past the check.
+#   - TypeArrow: becomes TFunc, which has no constructor head at all. Function
+#     types have no instances (spec §8.5), and the pre-existing diagnostic for
+#     that fires at the CALL site — the same misblame this pass exists to remove
+#     — so reject the declaration instead.
+#   - TupleType: becomes TTuple, whose type_head_str is `TupleN`. That IS a
+#     legitimate concrete head; the prelude's `instance Eq (a, b)` depends on it,
+#     so tuples must pass even though their elements are variables.
+fn instance_head_problem(te: ast.TypeExpr) -> Maybe String =
+  match te with
+  | ast.TypeName n ->
+      if is_lowercase_name(n) then Just("the type variable `" ++ n ++ "`") else Nothing
+  | ast.TypeApply base _ -> instance_head_problem(base)
+  | ast.TypeEffect inner _ -> instance_head_problem(inner)
+  | ast.TypeArrow _ _ _ -> Just("a function type")
+  | ast.TupleType _ -> Nothing
+
 fn instance_head_tyvar(c: ast.TypeConstraint) -> Maybe (String, String) =
   match c with
   | ast.TypeConstraint class_name type_args ->
       match type_args with
       | Nil -> Nothing
       | [head_te | _] ->
-          match type_expr_head_name(head_te) with
+          match instance_head_problem(head_te) with
           | Nothing -> Nothing
-          | Just n ->
-              if is_lowercase_name(n)
-              then Just((string.after_last_dot(class_name), n))
-              else Nothing
+          | Just problem -> Just((string.after_last_dot(class_name), problem))
 
 fn check_tyvar_instance_heads(decls: List ast.Decl) -> Maybe(source.SourcePos, String) =
   match decls with
@@ -5261,10 +5279,9 @@ fn check_tyvar_instance_heads(decls: List ast.Decl) -> Maybe(source.SourcePos, S
       | ast.InstanceDecl constraint _ _ _ ->
           match instance_head_tyvar(constraint) with
           | Nothing -> check_tyvar_instance_heads(rest)
-          | Just (cls, var_name) ->
+          | Just (cls, problem) ->
               Just((ast.decl_pos(decl),
-                    "Instance head for " ++ cls
-                      ++ " must be a concrete type, not the type variable `" ++ var_name ++ "`"))
+                    "Instance head for " ++ cls ++ " must be a concrete type, not " ++ problem))
       | _ -> check_tyvar_instance_heads(rest)
 
 fn check_overlapping_instances(decls: List ast.Decl, seen: Dict Bool) -> Maybe(source.SourcePos, String) =
