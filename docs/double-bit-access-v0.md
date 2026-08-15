@@ -147,7 +147,13 @@ there. The performance improvement is a consequence, not the argument.
 
 ## 5. Syntax and semantics
 
-Two prelude functions, named per house convention (`char_to_string`,
+> **Superseded 2026-08-15 — these are no longer prelude functions.** Both declarations moved to
+> `stdlib/math.sprout`, the only consumer in the tree, as part of the prelude-extern relocation
+> (see `BACKLOG.md` §*Prelude extern relocation*). Reaching them now requires `import stdlib.math`.
+> Everything below about their *semantics* is unchanged and still normative; only the "in the
+> prelude" framing in §5 and §8 is historical.
+
+Two functions, named per house convention (`char_to_string`,
 `char_from_codepoint`), which also reads closest to Rust's `to_bits`/`from_bits`:
 
 ```sprout

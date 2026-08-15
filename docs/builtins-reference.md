@@ -23,17 +23,54 @@ Builtin effect convention:
 - internal and compatibility hooks still follow the same typing rule, but they
   are not part of the preferred ordinary-module surface
 
-`!{IO}` builtins:
+### Where a builtin lives
+
+Not every builtin is globally reachable. A builtin is declared either in
+`stdlib/prelude.sprout` — which every program with a module header receives
+automatically — or in the module that owns its surface, which must be imported
+explicitly. The placement rule:
+
+> An extern stays in the prelude if the prelude's own code calls it, if it is a
+> hardcoded compiler intrinsic, or if it is language core (the `Ref` family, the
+> char-indexed `String` operations, the `Vec`/`Dict`/`Set` primitives).
+> Otherwise it moves to a module — but only to a **leaf** module, or one its
+> consumers would import anyway.
+
+The leaf qualifier is load-bearing, because there is no cross-module dead-code
+elimination: `import stdlib.X` emits every definition in `X` and everything `X`
+imports, whether called or not. Homing `env_get` in `stdlib.process` was measured
+at 247 extra lines of IR in a demo that reads one variable; a leaf `stdlib.env`
+costs 23.
+
+Note that an extern is invisible to the module system — the bundler never
+registers extern names, so `export` on one is inert and a moved extern is still
+called by **bare name**. Importing its module is what brings it into the build,
+not the import list's contents. A consumer that forgets the import gets
+`Unknown variable` from the typechecker or an undefined symbol at link time, not
+a missing-import diagnostic.
+
+`!{IO}` builtins in the prelude:
 
 - `print(x) -> Unit !{IO}`
-- `print_int(x: Int) -> Int !{IO}` (prints and returns `x`, useful for native backend subset)
-- `read_lines(path: String) -> List String !{IO}`
-- `read_file(path: String) -> Result String String !{IO}`
-- `write_file(path: String, content: String) -> Result String Unit !{IO}`
 - `panic(msg: String) -> a !{IO}`
-- `read_int_lines(path: String) -> Vector Int !{IO}`
-- `env_get(name: String) -> Maybe String !{IO}`
 - `argv_get(index: Int) -> Maybe String !{IO}` (`0` is the first user-supplied program argument)
+
+`!{IO}` builtins in modules — imported explicitly, then called by bare name or
+through the module's wrapper API:
+
+| builtin | module | preferred call |
+|---|---|---|
+| `read_file(path) -> Result String String` | `stdlib.fs` | `fs.read_text(path)` |
+| `write_file(path, content) -> Result String Unit` | `stdlib.fs` | `fs.write_text(path, content)` |
+| `env_get(name) -> Maybe String` | `stdlib.env` | `env.get(name)` |
+| `time_now_micros() -> Int` | `stdlib.time` | `time.now_micros()` — monotonic, for elapsed time |
+| `wall_time_micros() -> Int` | `stdlib.time` | `time.wall_micros()` — realtime, for timestamps |
+| `term_*` | `stdlib.terminal` | `terminal.write(…)`, `terminal.clear()`, … |
+| `vec_make_filled`, `vector_mutset`, `vector_get_direct` | `stdlib.mutable` | the `MutVec` API |
+| `bytes_*` | `stdlib.bytes` | bare name |
+| `crypto_*` | `stdlib.crypto` | bare name |
+| `regex_*` | `stdlib.regex` | bare name |
+| `proc_run_vec`, `proc_run_stdin_vec` | `stdlib.process` | `process.proc_run(…)` |
 - `int_range(lo: Int, hi: Int) -> IntRange`
 - `int_range_start(r: IntRange) -> Int`
 - `int_range_end(r: IntRange) -> Int`
@@ -104,7 +141,8 @@ Pure value transforms and runtime-backed persistent data helpers:
 - `parse_int(s: String) -> Int`
 - `int_to_string(value: Int) -> String` (runtime primitive; public formatting should prefer `Show.to_string`)
 - `char_to_string(value: Char) -> String`
-- `split_words(s: String) -> List String`
+- `char_to_str(codepoint: Int) -> String` (note: an Int codepoint, unlike `char_to_string`)
+- `char_from_codepoint(cp: Int) -> Char`
 - `str_concat(a: String, b: String) -> String`
 - `str_len(s: String) -> Int`
 - `str_slice(s: String, start: Int, len: Int) -> String`
@@ -112,6 +150,20 @@ Pure value transforms and runtime-backed persistent data helpers:
 - `str_find(s: String, needle: String) -> Int` (`-1` when not found)
 - `str_starts_with(s: String, prefix: String) -> Bool`
 - `str_compare(left: String, right: String) -> Int` (`-1`, `0`, `1`)
+
+The list above is the **char-indexed** core, which stays in the prelude. The
+byte-indexed surface and the splitters live in `stdlib.string` and need
+`import stdlib.string` — they are then called by bare name, not through a
+wrapper, because several sit in per-token and per-byte parse loops:
+
+- `str_byte_len(s: String) -> Int` (O(1), from the CSTR header)
+- `str_slice_bytes(s: String, byte_start: Int, byte_len: Int) -> String`
+- `str_starts_with_at_byte(s: String, byte: Int, prefix: String) -> Bool`
+- `str_split_lines(s: String) -> List String`
+- `split_words(s: String) -> List String`
+
+Likewise `double_to_bits` / `double_from_bits` live in `stdlib.math`
+(see [spec-v0.md §8.1.1](./spec-v0.md)).
 - `bytes_empty() -> Bytes`
 - `bytes_length(value: Bytes) -> Int`
 - `bytes_get(value: Bytes, index: Int) -> Maybe Int`
@@ -168,7 +220,7 @@ Effect notes:
   pressure that the current `!{IO}` and singleton `!{e}` model cannot express
   cleanly.
 
-String/runtime helpers are host-implemented primitives. In the current experimental text slice, `str_len`, `str_slice`, `str_char_at`, and `str_find` use Unicode code-point semantics rather than UTF-8 byte offsets. Application code should use `stdlib.string`; direct `str_*`/`split_words` usage is reserved for `stdlib.*` modules. The same applies to raw `regex_*` helpers, which are internal to `stdlib.regex`.
+String/runtime helpers are host-implemented primitives. In the current experimental text slice, `str_len`, `str_slice`, `str_char_at`, and `str_find` use Unicode code-point semantics rather than UTF-8 byte offsets. Application code should use `stdlib.string`; direct `str_*`/`split_words` usage is reserved for `stdlib.*` modules. The same applies to raw `regex_*` helpers, which are internal to `stdlib.regex`. Note that the byte-offset builtins are no longer globally reachable at all — `str_byte_len`, `str_slice_bytes`, `str_starts_with_at_byte`, `str_split_lines` and `split_words` are declared in `stdlib.string`, so reaching one now requires importing that module rather than merely ignoring a convention.
 
 Standard library (Sprout source in `stdlib/prelude.sprout`):
 
@@ -623,6 +675,34 @@ Terminal convenience module (in `stdlib/terminal.sprout`):
 These helpers follow the current sequencing style rule: use `do` for
 multi-step `IO` and mixed `IO` plus `Maybe`/`Result` flows, and keep
 `after(...)` only for trivial single-step convenience.
+
+Filesystem module (in `stdlib/fs.sprout`):
+
+- `read_text(path: String) -> Result String String !{IO}`
+- `write_text(path: String, content: String) -> Result String Unit !{IO}`
+
+Named `*_text` rather than `*_file` because that is the actual contract:
+`read_file` validates the whole buffer as UTF-8 before returning and reports a
+binary file as `Err`, so this pair cannot read one. `Err` carries a
+human-readable message — `strerror(errno)`, a UTF-8 decode reason, or
+`"null path"` / `"out of memory"` — and must not be pattern-matched on.
+
+Environment module (in `stdlib/env.sprout`):
+
+- `get(name: String) -> Maybe String !{IO}`
+
+`Nothing` means the name is unset. A name set to the **empty string** is
+`Just ""`, not `Nothing`, matching POSIX — test the constructor, not emptiness.
+
+Time module (in `stdlib/time.sprout`) — two clocks that are **not**
+interchangeable:
+
+- `now_micros() -> Int !{IO}` — CLOCK_MONOTONIC. Unspecified epoch; only
+  *differences* are meaningful. Use for elapsed time, timeouts, benchmarks.
+- `wall_micros() -> Int !{IO}` — CLOCK_REALTIME, microseconds since the Unix
+  epoch. Use for timestamps and civil-time rendering. **Not monotonic**: NTP
+  steps can move it backwards, so never subtract two of these to measure a
+  duration.
 
 Collections module (in `stdlib/collections.sprout`):
 
