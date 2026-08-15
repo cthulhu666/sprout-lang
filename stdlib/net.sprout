@@ -1,6 +1,7 @@
 module stdlib.net
 
 import stdlib.bytes (Utf8Error, Utf8DecodeError, from_string, to_string, length)
+import stdlib.time as time
 
 export extern fn tcp_listen(port: Int) -> Int !{IO}
 # Recoverable since the C3 fix: `Err TcpAcceptFailed` for a listener that is broken rather than busy.
@@ -164,7 +165,7 @@ let poll_write = 2
 
 fn write_all_by_wait(handle: Int, payload: Bytes, deadline_us: Int, offset: Int, total: Int) -> Result TcpError Int !{IO} =
   do
-    now <- time_now_micros()
+    now <- time.now_micros()
     # A `remaining <= 0` makes tcp_wait answer "not ready" without parking, so an already-spent
     # budget needs no special case here.
     ready <- tcp_wait(handle, poll_write, (deadline_us - now) / 1000)
@@ -225,7 +226,7 @@ fn read_avail_go(handle: Int, deadline_us: Int) -> Result TcpError Bytes !{IO} =
 
 fn read_avail_wait(handle: Int, deadline_us: Int) -> Result TcpError Bytes !{IO} =
   do
-    now <- time_now_micros()
+    now <- time.now_micros()
     # A non-positive remainder makes tcp_wait answer "not ready" without parking, so a spent budget
     # needs no special case — and the recv above has already run, so buffered data still wins.
     ready <- tcp_wait(handle, poll_read, (deadline_us - now) / 1000)
@@ -252,7 +253,7 @@ fn read_avail_wait(handle: Int, deadline_us: Int) -> Result TcpError Bytes !{IO}
 # in its own loop as well; http_server does.
 export fn read_avail_timeout(conn: borrowing TcpConnection, timeout_ms: Int) -> Result TcpError Bytes !{IO} =
   do
-    now <- time_now_micros()
+    now <- time.now_micros()
     read_avail_go(tcp_connection_handle(conn), now + timeout_ms * 1000)
 
 # O(count): reads bytes, then validates and copies the UTF-8 payload.

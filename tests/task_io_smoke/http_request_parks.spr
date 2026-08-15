@@ -3,6 +3,7 @@ import stdlib.http_client (http_get)
 import stdlib.net (TcpListener, close_listener, listen_local)
 import stdlib.string as string
 import stdlib.terminal as terminal
+import stdlib.time as time
 
 # Regression (code review, finding 6): `http_request` must PARK the green task, never block the OS
 # thread. While it blocks, the pump cannot run — no sibling task advances and no timer fires, so a
@@ -27,9 +28,9 @@ import stdlib.terminal as terminal
 # is exactly as long as the client's own timeout.
 fn probe() -> Unit !{IO} =
   do
-    t0 <- time_now_micros()
+    t0 <- time.now_micros()
     task_sleep(50)
-    t1 <- time_now_micros()
+    t1 <- time.now_micros()
     report((t1 - t0) / 1000)
 
 fn report(elapsed_ms: Int) -> Unit !{IO} =

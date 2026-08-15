@@ -47,11 +47,6 @@ declare i64 @analysis_eval_expr_in_source(ptr, ptr)
 declare i64 @analysis_instances_in_source(ptr, ptr)
 declare i64 @analysis_complete_in_state(ptr, ptr, ptr)
 
-declare i64 @read_file(i64)
-declare i64 @write_file(i64, i64)
-declare i64 @env_get(i64)
-declare i64 @time_now_micros()
-declare i64 @wall_time_micros()
 declare i64 @double_to_string(i64)
 declare i64 @char_to_str(i64)
 declare i64 @char_from_codepoint(i64)
@@ -107,6 +102,8 @@ declare i64 @bytes_builder_u16_be(i64)
 declare i64 @bytes_builder_u32_be(i64)
 declare i64 @bytes_builder_append(i64, i64)
 declare i64 @bytes_builder_build(i64)
+declare i64 @time_now_micros()
+declare i64 @wall_time_micros()
 declare i64 @tcp_listen(i64)
 declare i64 @tcp_accept(i64)
 declare i64 @tcp_write(i64, i64)
@@ -10757,6 +10754,18 @@ entry:
   ret i64 %t$1
 }
 
+define i64 @stdlib.time.now_micros() {
+entry:
+  %t$0 = call i64 @time_now_micros()
+  ret i64 %t$0
+}
+
+define i64 @stdlib.time.wall_micros() {
+entry:
+  %t$0 = call i64 @wall_time_micros()
+  ret i64 %t$0
+}
+
 define i64 @stdlib.net.tcp_error_message(i64 %err) {
 entry:
   %t$0 = call i64 @sprout_tag(i64 %err)
@@ -10953,7 +10962,7 @@ entry:
   %t$24 = alloca i64
   store i64 %payload, ptr %t$24
   %t$25 = call i64 @sprout_gc_push_i64_root(ptr %t$24)
-  %t$0 = call i64 @time_now_micros()
+  %t$0 = call i64 @stdlib.time.now_micros()
   %t$1 = load i64, ptr @stdlib.net.poll_write
   %t$2 = sub i64 %deadline_us, %t$0
   %t$3 = add i64 0, 1000
@@ -11229,7 +11238,7 @@ join_3:
 
 define i64 @stdlib.net.read_avail_wait(i64 %handle, i64 %deadline_us) {
 entry:
-  %t$0 = call i64 @time_now_micros()
+  %t$0 = call i64 @stdlib.time.now_micros()
   %t$1 = load i64, ptr @stdlib.net.poll_read
   %t$2 = sub i64 %deadline_us, %t$0
   %t$3 = add i64 0, 1000
@@ -11291,7 +11300,7 @@ entry:
   %t$6 = alloca i64
   store i64 %conn, ptr %t$6
   %t$7 = call i64 @sprout_gc_push_i64_root(ptr %t$6)
-  %t$0 = call i64 @time_now_micros()
+  %t$0 = call i64 @stdlib.time.now_micros()
   %t$1 = call i64 @stdlib.net.tcp_connection_handle(i64 %conn)
   %t$2 = add i64 0, 1000
   %t$3 = mul i64 %timeout_ms, %t$2
@@ -14904,7 +14913,7 @@ join_3:
 
 define i64 @stdlib.http_server.deadline_in(i64 %ms) {
 entry:
-  %t$0 = call i64 @time_now_micros()
+  %t$0 = call i64 @stdlib.time.now_micros()
   %t$1 = add i64 0, 1000
   %t$2 = mul i64 %ms, %t$1
   %t$3 = add i64 %t$0, %t$2
@@ -14913,7 +14922,7 @@ entry:
 
 define i64 @stdlib.http_server.remaining_ms(i64 %deadline) {
 entry:
-  %t$0 = call i64 @time_now_micros()
+  %t$0 = call i64 @stdlib.time.now_micros()
   %t$1 = icmp sge i64 %t$0, %deadline
   %t$2 = zext i1 %t$1 to i64
   %t$12 = trunc i64 %t$2 to i1

@@ -5,6 +5,7 @@ import stdlib.compiler.lexer as lexer
 import stdlib.compiler.parser as parser
 import stdlib.compiler.checker as checker
 import stdlib.compiler.source as source
+import stdlib.fs as fs
 
 # ---------------------------------------------------------------------------
 # ImportSpec — parsed representation of one import line
@@ -347,7 +348,7 @@ fn load_module(name: String, stdlib_root: String, cache: ModuleCache) -> List (S
           match module_name_to_path(source.ModuleName(name), stdlib_root) with
           | Nothing -> Nil
           | Just path ->
-              match read_file(path) with
+              match fs.read_text(path) with
               | Err msg -> panic("read_file: " ++ path ++ ": " ++ msg)
               | Ok src ->
                   do

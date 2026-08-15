@@ -4,6 +4,7 @@ import stdlib.compiler.token as token
 import stdlib.compiler.parser as parser
 import stdlib.compiler.ast as ast
 import stdlib.compiler.source as source
+import stdlib.fs as fs
 
 # ---------------------------------------------------------------------------
 # String helpers
@@ -310,7 +311,7 @@ fn parse_err_msg(e: parser.ParseError) -> String =
 # Entry point
 
 fn run_file(path: String) -> Unit !{IO} =
-  let Ok src = read_file(path) else Err msg -> panic("read_file: " ++ path ++ ": " ++ msg)
+  let Ok src = fs.read_text(path) else Err msg -> panic("read_file: " ++ path ++ ": " ++ msg)
       Ok tokens = lexer.tokenize(source.strip_headers(src)) else Err e -> print(lex_err_msg(e))
       Ok prog = parser.parse_program(tokens) else Err e -> print(parse_err_msg(e))
       ast.Program decls _ = prog

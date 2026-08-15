@@ -47,11 +47,6 @@ declare i64 @analysis_eval_expr_in_source(ptr, ptr)
 declare i64 @analysis_instances_in_source(ptr, ptr)
 declare i64 @analysis_complete_in_state(ptr, ptr, ptr)
 
-declare i64 @read_file(i64)
-declare i64 @write_file(i64, i64)
-declare i64 @env_get(i64)
-declare i64 @time_now_micros()
-declare i64 @wall_time_micros()
 declare i64 @double_to_string(i64)
 declare i64 @char_to_str(i64)
 declare i64 @char_from_codepoint(i64)
@@ -107,6 +102,7 @@ declare i64 @bytes_builder_u16_be(i64)
 declare i64 @bytes_builder_u32_be(i64)
 declare i64 @bytes_builder_append(i64, i64)
 declare i64 @bytes_builder_build(i64)
+declare i64 @env_get(i64)
 @.str.0 = private unnamed_addr constant { i64, [17 x i8] } { i64 262154, [17 x i8] c"division by zero\00" }
 @.str.1 = private unnamed_addr constant { i64, [3 x i8] } { i64 32778, [3 x i8] c", \00" }
 @.str.2 = private unnamed_addr constant { i64, [3 x i8] } { i64 32778, [3 x i8] c", \00" }
@@ -11152,6 +11148,16 @@ entry:
   ret i64 %t$3
 }
 
+define i64 @stdlib.env.get(i64 %name) {
+entry:
+  %t$1 = alloca i64
+  store i64 %name, ptr %t$1
+  %t$2 = call i64 @sprout_gc_push_i64_root(ptr %t$1)
+  %t$0 = call i64 @env_get(i64 %name)
+  %t$3 = call i64 @sprout_gc_pop_roots(i64 1)
+  ret i64 %t$0
+}
+
 define i64 @examples.io_do_demo.configured_name() {
 entry:
   %t$0 = getelementptr inbounds { i64, [12 x i8] }, ptr @.str.25, i64 0, i32 1, i64 0
@@ -11164,7 +11170,7 @@ entry:
   %t$5 = call i64 @print_str(ptr %t$5$ptr)
   %t$6 = getelementptr inbounds { i64, [12 x i8] }, ptr @.str.27, i64 0, i32 1, i64 0
   %t$7 = ptrtoint ptr %t$6 to i64
-  %t$8$st = call { i64, i64 } @env_get_unboxed(i64 %t$7)
+  %t$8$st = call { i64, i64 } @stdlib.env.get_worker(i64 %t$7)
   %t$8 = extractvalue { i64, i64 } %t$8$st, 0
   %t$9 = extractvalue { i64, i64 } %t$8$st, 1
   %t$10 = add i64 0, 0
@@ -14586,7 +14592,7 @@ entry:
   %t$5 = call i64 @print_str(ptr %t$5$ptr)
   %t$6 = getelementptr inbounds { i64, [12 x i8] }, ptr @.str.71, i64 0, i32 1, i64 0
   %t$7 = ptrtoint ptr %t$6 to i64
-  %t$8$st = call { i64, i64 } @env_get_unboxed(i64 %t$7)
+  %t$8$st = call { i64, i64 } @stdlib.env.get_worker(i64 %t$7)
   %t$8 = extractvalue { i64, i64 } %t$8$st, 0
   %t$9 = extractvalue { i64, i64 } %t$8$st, 1
   %t$10 = add i64 0, 0
@@ -15035,6 +15041,16 @@ wrepack_hit_6:
 wrepack_next_6:
   call void @sprout_abort_match()
   unreachable
+}
+
+define { i64, i64 } @stdlib.env.get_worker(i64 %name) {
+entry:
+  %t$0$st = call { i64, i64 } @env_get_unboxed(i64 %name)
+  %t$0 = extractvalue { i64, i64 } %t$0$st, 0
+  %t$1 = extractvalue { i64, i64 } %t$0$st, 1
+  %t$2$r0 = insertvalue { i64, i64 } undef, i64 %t$0, 0
+  %t$2$r1 = insertvalue { i64, i64 } %t$2$r0, i64 %t$1, 1
+  ret { i64, i64 } %t$2$r1
 }
 
 define { i64, i64 } @stdlib.string.char_at_worker(i64 %raw, i64 %index) {

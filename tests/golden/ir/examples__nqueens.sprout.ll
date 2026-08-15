@@ -47,11 +47,6 @@ declare i64 @analysis_eval_expr_in_source(ptr, ptr)
 declare i64 @analysis_instances_in_source(ptr, ptr)
 declare i64 @analysis_complete_in_state(ptr, ptr, ptr)
 
-declare i64 @read_file(i64)
-declare i64 @write_file(i64, i64)
-declare i64 @env_get(i64)
-declare i64 @time_now_micros()
-declare i64 @wall_time_micros()
 declare i64 @double_to_string(i64)
 declare i64 @char_to_str(i64)
 declare i64 @char_from_codepoint(i64)
@@ -92,6 +87,8 @@ declare i64 @native_set_size(i64)
 declare i64 @ref_new(i64)
 declare i64 @ref_read(i64)
 declare i64 @ref_write(i64, i64)
+declare i64 @time_now_micros()
+declare i64 @wall_time_micros()
 @.str.0 = private unnamed_addr constant { i64, [17 x i8] } { i64 262154, [17 x i8] c"division by zero\00" }
 @.str.1 = private unnamed_addr constant { i64, [3 x i8] } { i64 32778, [3 x i8] c", \00" }
 @.str.2 = private unnamed_addr constant { i64, [3 x i8] } { i64 32778, [3 x i8] c", \00" }
@@ -8519,6 +8516,18 @@ join_3:
   ret i64 %t$4
 }
 
+define i64 @stdlib.time.now_micros() {
+entry:
+  %t$0 = call i64 @time_now_micros()
+  ret i64 %t$0
+}
+
+define i64 @stdlib.time.wall_micros() {
+entry:
+  %t$0 = call i64 @wall_time_micros()
+  ret i64 %t$0
+}
+
 define i64 @examples.nqueens.make_bool_vec(i64 %size$in, i64 %i$in, i64 %acc$in) {
 entry:
   %t$10 = alloca i64
@@ -8853,7 +8862,7 @@ divok_1:
 
 define i64 @examples.nqueens.print_result(i64 %n, i64 %c, i64 %t0) {
 entry:
-  %t$0 = call i64 @time_now_micros()
+  %t$0 = call i64 @stdlib.time.now_micros()
   %t$1 = getelementptr inbounds { i64, [3 x i8] }, ptr @.str.15, i64 0, i32 1, i64 0
   %t$2 = ptrtoint ptr %t$1 to i64
   %t$20 = alloca i64
@@ -8955,7 +8964,7 @@ entry:
 
 define i64 @examples.nqueens.bench_n(i64 %n) {
 entry:
-  %t$0 = call i64 @time_now_micros()
+  %t$0 = call i64 @stdlib.time.now_micros()
   %t$1 = call i64 @examples.nqueens.count_solutions(i64 %n)
   %t$2 = call i64 @examples.nqueens.print_result(i64 %n, i64 %t$1, i64 %t$0)
   ret i64 %t$2

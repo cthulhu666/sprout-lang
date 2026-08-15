@@ -1,4 +1,5 @@
 module main
+import stdlib.time as time
 
 # Microbenchmark witness for concrete-instance devirtualization
 # (docs/devirtualization-v0.md).  A tight loop over a CONCRETE class-method call
@@ -57,9 +58,9 @@ fn repeat_total(n: Int, reps: Int, acc: Int) -> Int =
 
 fn main() -> Unit !{IO} =
   do
-    t0 <- time_now_micros()
+    t0 <- time.now_micros()
     let total = repeat_total(1000000, 20, 0)
-    t1 <- time_now_micros()
+    t1 <- time.now_micros()
     print("checksum=")
     print(total)
     print(" time_us=")

@@ -2,6 +2,8 @@ module main
 import stdlib.test (TestState, new_state, assert_true, assert_false, summary)
 import stdlib.compiler.compiler as compiler
 import stdlib.compiler.source as source
+import stdlib.fs as fs
+import stdlib.env as env
 
 # M4.5 ERASURE. `borrowing`/`consuming` are a type-checker feature: they must
 # reach no IR pass and change no emitted instruction.
@@ -98,7 +100,7 @@ fn ir_text(r: compiler.IrFullResult) -> String =
 fn main() -> Unit !{IO} =
   do
     state <- new_state()
-    match env_get("SPROUT_STDLIB_ROOT") with
+    match env.get("SPROUT_STDLIB_ROOT") with
     | Nothing -> ()
     | Just stdlib_root ->
         do
@@ -108,12 +110,12 @@ fn main() -> Unit !{IO} =
           let once_path = "/tmp/sprout_test_borrow_erasure_once.sprout"
           let once_plain_path = "/tmp/sprout_test_borrow_erasure_once_plain.sprout"
           let once_absent_path = "/tmp/sprout_test_borrow_erasure_once_absent.sprout"
-          write_file(unmod_path, unmodified_src)
-          write_file(consuming_path, consuming_src)
-          write_file(borrowing_path, borrowing_src)
-          write_file(once_path, once_src)
-          write_file(once_plain_path, once_plain_src)
-          write_file(once_absent_path, once_absent_src)
+          fs.write_text(unmod_path, unmodified_src)
+          fs.write_text(consuming_path, consuming_src)
+          fs.write_text(borrowing_path, borrowing_src)
+          fs.write_text(once_path, once_src)
+          fs.write_text(once_plain_path, once_plain_src)
+          fs.write_text(once_absent_path, once_absent_src)
 
           r_unmod <- compiler.compile_full_ir(source.FilePath(unmod_path), source.StdlibRoot(stdlib_root))
           r_consuming <- compiler.compile_full_ir(source.FilePath(consuming_path), source.StdlibRoot(stdlib_root))

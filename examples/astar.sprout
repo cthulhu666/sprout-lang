@@ -1,6 +1,7 @@
 module examples.astar
 import stdlib.math.int (abs)
 import stdlib.mutable (MutVec, mutvec_new, mutvec_at, mutvec_set)
+import stdlib.time as time
 
 # A* shortest-path on a 100×100 grid.
 #
@@ -112,12 +113,12 @@ fn format_ms(micros: Int) -> String =
 
 fn print_result(n: Int, total: Int, t0: Int) -> Unit !{IO} =
   do
-    t1 <- time_now_micros()
+    t1 <- time.now_micros()
     print(string_concat_many(["A* 100x100, ", int_to_string(n), " runs, path=", int_to_string(total / n), " steps"]))
     eprint(string_concat_many([format_ms(t1 - t0), "  (", int_to_string((t1 - t0) / n), " us/run)"]))
 
 fn main() -> Unit !{IO} =
   do
-    t0 <- time_now_micros()
+    t0 <- time.now_micros()
     total <- run_iters(100, 0)
     print_result(100, total, t0)

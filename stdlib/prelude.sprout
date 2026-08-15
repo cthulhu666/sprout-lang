@@ -1281,8 +1281,10 @@ instance ToString (a, b, c, d, e) where ToString a, ToString b, ToString c, ToSt
 # I/O
 extern fn print(val: a) -> Unit !{IO}
 extern fn eprint(val: String) -> Unit !{IO}
-extern fn read_file(path: String) -> Result String String !{IO}
-extern fn write_file(path: String, content: String) -> Result String Unit !{IO}
+# Filesystem primitives are NOT declared here. `read_file` / `write_file` live in stdlib.fs, which
+# must be imported explicitly; callers use `fs.read_text` / `fs.write_text`. Reading and writing
+# files is not something a program should be able to reach by accident — the same reasoning already
+# recorded below for stdlib.net's socket primitives.
 extern fn panic(msg: String) -> a !{IO}
 extern fn argv_get(idx: Int) -> Maybe String !{IO}
 
@@ -1296,17 +1298,18 @@ fn argv_collect(i: Int) -> List String !{IO} =
       rest <- argv_collect(i + 1)
       Cons(s, rest)
 
-extern fn env_get(name: String) -> Maybe String !{IO}
-# Returns microseconds from a monotonic clock (CLOCK_MONOTONIC).
-# Only differences between two calls are meaningful — the epoch is unspecified.
-# Use for elapsed-time measurement (benchmarks, timeouts); not for wall-clock timestamps.
-extern fn time_now_micros() -> Int !{IO}
-
-# Returns microseconds since the Unix epoch from the wall clock (CLOCK_REALTIME).
-# NOT monotonic — subject to NTP steps and manual clock changes, so it must not be
-# used for elapsed-time measurement (use time_now_micros for that). Use for civil-time
-# rendering such as log timestamps (see stdlib.log).
-extern fn wall_time_micros() -> Int !{IO}
+# The process environment is NOT declared here. `env_get` lives in stdlib.env; callers use
+# `env.get`. It is a leaf module rather than part of stdlib.process — where the environment would
+# sit more naturally, beside the `proc_run` family that hands it to every child — because there is
+# no cross-module dead-code elimination, so that placement made every consumer that wanted one
+# config switch carry the entire subprocess API (see stdlib/env.sprout for the measurement).
+#
+# The two clocks are NOT declared here either. `time_now_micros` (CLOCK_MONOTONIC, for elapsed
+# time) and `wall_time_micros` (CLOCK_REALTIME, for civil time) live in stdlib.time as
+# `time.now_micros` and `time.wall_micros`. They are documented as a pair there because they are
+# one keystroke apart at a call site and confusing them yields a bug that stays invisible until the
+# clock is adjusted — the kind of distinction a module header can hold and a flat extern list
+# cannot.
 
 # Numeric / string conversions
 # W8/P1 (D5): total signed-decimal integer parse. Returns Nothing for anything

@@ -1,6 +1,7 @@
 import stdlib.test (TestState, new_state, assert_true, assert_false, assert_eq, summary)
 import stdlib.string as string
 import stdlib.terminal as terminal
+import stdlib.time as time
 
 # Pins the DEFINING property of the two byte-offset string builtins: their cost
 # must not depend on the length of the string being scanned.
@@ -62,9 +63,9 @@ fn min_starts_with_us(s: String, remaining: Int, best: Int) -> Int !{IO} =
   if remaining <= 0 then best
   else
     do
-      t0 <- time_now_micros()
+      t0 <- time.now_micros()
       let hits = probe_starts_with(s, iterations, 0)
-      t1 <- time_now_micros()
+      t1 <- time.now_micros()
       let elapsed = if hits == iterations then t1 - t0 else t1 - t0 + 1000000
       min_starts_with_us(s, remaining - 1, if elapsed < best then elapsed else best)
 
@@ -72,9 +73,9 @@ fn min_slice_us(s: String, remaining: Int, best: Int) -> Int !{IO} =
   if remaining <= 0 then best
   else
     do
-      t0 <- time_now_micros()
+      t0 <- time.now_micros()
       let total = probe_slice(s, iterations, 0)
-      t1 <- time_now_micros()
+      t1 <- time.now_micros()
       let elapsed = if total == iterations * 2 then t1 - t0 else t1 - t0 + 1000000
       min_slice_us(s, remaining - 1, if elapsed < best then elapsed else best)
 

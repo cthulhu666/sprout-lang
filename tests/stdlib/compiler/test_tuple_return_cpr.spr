@@ -2,6 +2,8 @@ module main
 import stdlib.test (TestState, new_state, assert_true, assert_false, summary)
 import stdlib.compiler.compiler as compiler
 import stdlib.compiler.source as source
+import stdlib.fs as fs
+import stdlib.env as env
 
 # IR-level tests pinning where tuple-return CPR (docs/scalar-replacement-v0.md) does and
 # does NOT fire. Both facts are load-bearing for a decision recorded in stdlib/math.sprout:
@@ -61,14 +63,14 @@ fn allocates_tuple(ir: String) -> Bool =
 fn main() -> Unit !{IO} =
   do
     state <- new_state()
-    match env_get("SPROUT_STDLIB_ROOT") with
+    match env.get("SPROUT_STDLIB_ROOT") with
     | Nothing -> ()
     | Just stdlib_root ->
         do
           let tuple_path = "/tmp/sprout_test_tuple_cpr_tuple.sprout"
           let acc_path = "/tmp/sprout_test_tuple_cpr_acc.sprout"
-          write_file(tuple_path, tuple_src)
-          write_file(acc_path, acc_src)
+          fs.write_text(tuple_path, tuple_src)
+          fs.write_text(acc_path, acc_src)
 
           r_tup <- compiler.compile_full_ir(source.FilePath(tuple_path), source.StdlibRoot(stdlib_root))
           r_acc <- compiler.compile_full_ir(source.FilePath(acc_path), source.StdlibRoot(stdlib_root))

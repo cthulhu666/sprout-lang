@@ -1,6 +1,7 @@
 module examples.io_do_demo
 
 import stdlib.string
+import stdlib.env as env
 
 # Demonstrates the preferred narrow do notation for mixed IO and Maybe
 # sequencing, including a pure local `let` step inside the effectful block.
@@ -13,7 +14,7 @@ fn configured_name() -> Maybe String !{IO} =
   do
     print("do:io-maybe")
     print("reading SPROUT_NAME")
-    raw <- env_get("SPROUT_NAME")
+    raw <- env.get("SPROUT_NAME")
     let cleaned = string.trim(raw)
     Just(cleaned)
 

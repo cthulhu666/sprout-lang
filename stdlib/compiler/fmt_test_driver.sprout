@@ -1,12 +1,13 @@
 module stdlib.compiler.fmt_test_driver
 
 import stdlib.compiler.formatter as formatter
+import stdlib.fs as fs
 
 fn format_and_write(p: String) -> Unit !{IO} =
-  match read_file(p) with
+  match fs.read_text(p) with
   | Err msg -> panic("read_file: " ++ p ++ ": " ++ msg)
   | Ok src ->
-      match write_file("/dev/stdout", formatter.format_source(src)) with
+      match fs.write_text("/dev/stdout", formatter.format_source(src)) with
       | Err msg -> panic("write_file: /dev/stdout: " ++ msg)
       | Ok _ -> ()
 

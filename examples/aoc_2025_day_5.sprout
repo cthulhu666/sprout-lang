@@ -1,6 +1,7 @@
 module examples.aoc_2025_day_5
 import stdlib.collections (Vec, vec_append, vec_empty, vec_get, vec_sort_by)
 import stdlib.string (split_once, string_lines, trim)
+import stdlib.fs as fs
 
 # Advent of Code 2025 Day 5: Cafeteria
 # part1 counts how many available ingredient IDs are fresh.
@@ -101,7 +102,7 @@ fn solve_database(db: Database) -> Answers =
   | Database ranges ingredients -> solve_ranges(ranges, ingredients)
 
 export fn solve_stdin() -> Answers !{IO} =
-  match read_file("-") with
+  match fs.read_text("-") with
   | Ok content -> solve_database(parse_database(string_lines(content), 0, false, vec_empty(), vec_empty()))
   | Err msg -> panic("read_file: " ++ msg)
 

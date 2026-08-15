@@ -1,4 +1,5 @@
 module examples.nqueens
+import stdlib.time as time
 
 # N-Queens: count all solutions for an N×N board using backtracking.
 #
@@ -56,12 +57,12 @@ fn format_ms(micros: Int) -> String =
 
 fn print_result(n: Int, c: Int, t0: Int) -> Unit !{IO} =
   do
-    t1 <- time_now_micros()
+    t1 <- time.now_micros()
     print(string_concat_many(["N=", int_to_string(n), ": ", int_to_string(c), "  ", format_ms(t1 - t0)]))
 
 fn bench_n(n: Int) -> Unit !{IO} =
   do
-    t0 <- time_now_micros()
+    t0 <- time.now_micros()
     print_result(n, count_solutions(n), t0)
 
 fn main() -> Unit !{IO} =

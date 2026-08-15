@@ -6,6 +6,7 @@ import stdlib.compiler.ast as ast
 import stdlib.compiler.checker as checker
 import stdlib.compiler.module_loader as module_loader
 import stdlib.compiler.source as source
+import stdlib.fs as fs
 
 # ---------------------------------------------------------------------------
 # String helpers (shared with driver.sprout)
@@ -24,7 +25,7 @@ fn parse_err_msg(e: parser.ParseError) -> String =
 # Core: lex → parse → check → dump typed names
 
 fn run_file(path: String, stdlib_root: String) -> Unit !{IO} =
-  match read_file(path) with
+  match fs.read_text(path) with
   | Err msg -> panic("read_file: " ++ path ++ ": " ++ msg)
   | Ok src ->
       do

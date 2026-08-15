@@ -2,6 +2,7 @@ module main
 import stdlib.test (TestState, new_state, assert_true, summary)
 import stdlib.compiler.compiler as compiler
 import stdlib.compiler.source as source
+import stdlib.env as env
 
 # Regression for guideline #5 (errors carry a source location from inception),
 # pattern-inference edition. A type error discovered while inferring a *pattern*
@@ -26,7 +27,7 @@ fn diag_line(d: compiler.Diagnostic) -> Int =
 fn main() -> Unit !{IO} =
   do
     state <- new_state()
-    match env_get("SPROUT_STDLIB_ROOT") with
+    match env.get("SPROUT_STDLIB_ROOT") with
     | Nothing -> ()
     | Just stdlib_root ->
         do

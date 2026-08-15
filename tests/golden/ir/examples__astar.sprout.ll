@@ -47,11 +47,6 @@ declare i64 @analysis_eval_expr_in_source(ptr, ptr)
 declare i64 @analysis_instances_in_source(ptr, ptr)
 declare i64 @analysis_complete_in_state(ptr, ptr, ptr)
 
-declare i64 @read_file(i64)
-declare i64 @write_file(i64, i64)
-declare i64 @env_get(i64)
-declare i64 @time_now_micros()
-declare i64 @wall_time_micros()
 declare i64 @double_to_string(i64)
 declare i64 @char_to_str(i64)
 declare i64 @char_from_codepoint(i64)
@@ -95,6 +90,8 @@ declare i64 @ref_write(i64, i64)
 declare i64 @vec_make_filled(i64, i64)
 declare i64 @vector_mutset(i64, i64, i64)
 declare i64 @vector_get_direct(i64, i64)
+declare i64 @time_now_micros()
+declare i64 @wall_time_micros()
 @.str.0 = private unnamed_addr constant { i64, [17 x i8] } { i64 262154, [17 x i8] c"division by zero\00" }
 @.str.1 = private unnamed_addr constant { i64, [3 x i8] } { i64 32778, [3 x i8] c", \00" }
 @.str.2 = private unnamed_addr constant { i64, [3 x i8] } { i64 32778, [3 x i8] c", \00" }
@@ -10672,6 +10669,18 @@ join_1:
   ret i64 %t$2
 }
 
+define i64 @stdlib.time.now_micros() {
+entry:
+  %t$0 = call i64 @time_now_micros()
+  ret i64 %t$0
+}
+
+define i64 @stdlib.time.wall_micros() {
+entry:
+  %t$0 = call i64 @wall_time_micros()
+  ret i64 %t$0
+}
+
 define i64 @examples.astar.int_mod(i64 %a, i64 %b) {
 entry:
   %t$0 = icmp eq i64 %b, 0
@@ -11462,7 +11471,7 @@ divok_14:
 
 define i64 @examples.astar.print_result(i64 %n, i64 %total, i64 %t0) {
 entry:
-  %t$0 = call i64 @time_now_micros()
+  %t$0 = call i64 @stdlib.time.now_micros()
   %t$1 = getelementptr inbounds { i64, [13 x i8] }, ptr @.str.31, i64 0, i32 1, i64 0
   %t$2 = ptrtoint ptr %t$1 to i64
   %t$40 = alloca i64
@@ -11639,7 +11648,7 @@ divok_26:
 
 define i64 @__sprout_user_main() {
 entry:
-  %t$0 = call i64 @time_now_micros()
+  %t$0 = call i64 @stdlib.time.now_micros()
   %t$1 = add i64 0, 100
   %t$2 = add i64 0, 0
   %t$3 = call i64 @examples.astar.run_iters(i64 %t$1, i64 %t$2)

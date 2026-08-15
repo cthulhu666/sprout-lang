@@ -3,6 +3,8 @@ import stdlib.test (TestState, new_state, assert_true, summary)
 import stdlib.compiler.compiler as compiler
 import stdlib.compiler.source as source
 import stdlib.string as string
+import stdlib.fs as fs
+import stdlib.env as env
 
 # Regression for guideline #5 (errors carry a source location from inception),
 # BundleErr edition. A bundle-time failure — here an invalid `deriving` clause —
@@ -33,13 +35,13 @@ fn diag_msg(d: compiler.Diagnostic) -> String =
 fn main() -> Unit !{IO} =
   do
     state <- new_state()
-    match env_get("SPROUT_STDLIB_ROOT") with
+    match env.get("SPROUT_STDLIB_ROOT") with
     | Nothing -> ()
     | Just stdlib_root ->
         do
           let path = "/tmp/sprout_bundle_error_span_fixture.spr"
           # `Bogus` is not a derivable class; the offending TypeDecl is on line 1.
-          write_file(path, "type Color (..) deriving (Bogus) =\n  | Red\n  | Green\n  | Blue\n")
+          fs.write_text(path, "type Color (..) deriving (Bogus) =\n  | Red\n  | Green\n  | Blue\n")
           r <- compiler.compile_full(source.FilePath(path), source.StdlibRoot(stdlib_root))
           assert_true(state, "bad deriving produces FullFail",
             match r with | compiler.FullFail _ -> true | _ -> false)

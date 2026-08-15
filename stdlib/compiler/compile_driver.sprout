@@ -15,6 +15,7 @@ import stdlib.compiler.ir_rooting as ir_rooting
 import stdlib.compiler.ir_pipeline as ir_pipeline
 import stdlib.compiler.iface_codec as iface_codec
 import stdlib.compiler.source as source
+import stdlib.fs as fs
 
 # ---------------------------------------------------------------------------
 # Diagnostic position formatting
@@ -76,7 +77,7 @@ fn print_diags(diags: List compiler.Diagnostic, failed: Ref Int) -> Unit !{IO} =
 # Entry point (default phase: source-level typecheck with import resolution)
 
 fn run_file(path: String, stdlib_root: String, failed: Ref Int) -> Unit !{IO} =
-  match read_file(path) with
+  match fs.read_text(path) with
   | Err msg -> panic("read_file: " ++ path ++ ": " ++ msg)
   | Ok raw -> run_with_src(raw, stdlib_root, failed)
 
@@ -212,7 +213,7 @@ fn run_file_emit_iface(module_name: String, path: String, stdlib_root: String, f
 # unaffected either way — its driver call sits in an `if` condition, so the
 # grep, not the status, still decides.
 
-# An UNREADABLE file is INVALID, not silence. This used to open `contents <- read_file(path)`
+# An UNREADABLE file is INVALID, not silence. This used to open `contents <- fs.read_text(path)`
 # inside the `do`, which discards the `Err` and returns early from a `Unit`-returning function —
 # so the driver printed nothing at all and exited 0 for a file it never read, defeating the exit-status
 # contract promised directly above. `match read_file` makes the failure a case, the same shape
@@ -223,7 +224,7 @@ fn run_file_emit_iface(module_name: String, path: String, stdlib_root: String, f
 # code, which is the measurement's central result and the reason a diagnostic for the shape is worth
 # having. Regression: the --check-iface cases in `just diagnostic-stream-smoke`.
 fn run_check_iface(path: String, failed: Ref Int) -> Unit !{IO} =
-  match read_file(path) with
+  match fs.read_text(path) with
   | Err msg ->
       do
         print("INVALID: " ++ path ++ " (unreadable: " ++ msg ++ ")")
@@ -286,7 +287,7 @@ fn print_prefixed_list(prefix: String, items: List String) -> Unit !{IO} =
         print_prefixed_list(prefix, rest)
 
 fn run_file_scan_info(path: String, stdlib_root: String) -> Unit !{IO} =
-  match read_file(path) with
+  match fs.read_text(path) with
   | Err msg -> panic("read_file: " ++ path ++ ": " ++ msg)
   | Ok raw ->
       match bundler.scan_source_info(raw) with

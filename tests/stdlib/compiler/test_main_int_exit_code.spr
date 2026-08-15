@@ -12,6 +12,7 @@ import stdlib.test (TestState, new_state, assert_true, assert_eq, summary)
 import stdlib.process as process
 import stdlib.string as string
 import stdlib.terminal as terminal
+import stdlib.fs as fs
 
 fn fixture_source() -> String =
   "module main_int_exit_fixture\n\nfn main() -> Int !{IO} =\n  do\n    print(\"fixture running\")\n    7\n"
@@ -44,7 +45,7 @@ fn write_emitted_ir(ll_path: String, compiled: process.ProcResult) -> Bool !{IO}
   match process.proc_stdout_text(compiled) with
   | Err _ -> false
   | Ok ir_text ->
-      match write_file(ll_path, ir_text) with
+      match fs.write_text(ll_path, ir_text) with
       | Err _ -> false
       | Ok _ -> true
 
@@ -63,7 +64,7 @@ fn main() -> Unit !{IO} =
           let ll_path = "/tmp/sprout_main_int_exit_fixture.ll"
           let bin_path = "/tmp/sprout_main_int_exit_fixture_bin"
           use_darwin <- is_darwin()
-          match write_file(src_path, fixture_source()) with
+          match fs.write_text(src_path, fixture_source()) with
           | Err _ -> assert_true(state, "write fixture source", false)
           | Ok _ ->
               do

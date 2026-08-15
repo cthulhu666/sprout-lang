@@ -1,4 +1,5 @@
 module main
+import stdlib.time as time
 
 # A/B microbenchmark: accumulator-threading range reduction vs the tuple-returning
 # `(mantissa, exponent)` form, for `ln`.
@@ -99,7 +100,7 @@ where
 fn arg(i: Int) -> Double = to_double(i) * step
 
 # Each loop is `!{IO}` so the do-block below sequences it strictly between the two
-# time_now_micros() reads; a pure signature would let it float outside the timed window.
+# time.now_micros() reads; a pure signature would let it float outside the timed window.
 fn loop_baseline(i: Int, acc: Double) -> Double !{IO} =
   if i >= reps then acc else loop_baseline(i + 1, acc + arg(i))
 
@@ -118,23 +119,23 @@ fn main() -> Unit !{IO} =
   do
     print(string_concat_many(["reps=", int_to_string(reps),
       "  (subtract the baseline row to get per-call cost)"]))
-    t0 <- time_now_micros()
+    t0 <- time.now_micros()
     s_b <- loop_baseline(0, 0.0)
-    t1 <- time_now_micros()
+    t1 <- time.now_micros()
     _ <- report("baseline", t1 - t0, s_b)
-    t2 <- time_now_micros()
+    t2 <- time.now_micros()
     s_a <- loop_acc(0, 0.0)
-    t3 <- time_now_micros()
+    t3 <- time.now_micros()
     _ <- report("A_accumulator", t3 - t2, s_a)
-    t4 <- time_now_micros()
+    t4 <- time.now_micros()
     s_t <- loop_tup(0, 0.0)
-    t5 <- time_now_micros()
+    t5 <- time.now_micros()
     _ <- report("B_tuple_cold", t5 - t4, s_t)
-    t6 <- time_now_micros()
+    t6 <- time.now_micros()
     s_a2 <- loop_acc(0, 0.0)
-    t7 <- time_now_micros()
+    t7 <- time.now_micros()
     _ <- report("A_accumulator_rerun", t7 - t6, s_a2)
-    t8 <- time_now_micros()
+    t8 <- time.now_micros()
     s_t2 <- loop_tup(0, 0.0)
-    t9 <- time_now_micros()
+    t9 <- time.now_micros()
     report("B_tuple_warm", t9 - t8, s_t2)

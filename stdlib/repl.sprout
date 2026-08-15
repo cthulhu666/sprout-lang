@@ -3,6 +3,7 @@ import stdlib.compiler as compiler
 import stdlib.compiler.parser as parser
 import stdlib.terminal as terminal
 import stdlib.string as string
+import stdlib.fs as fs
 
 let esc = char_to_str(27)
 
@@ -195,7 +196,7 @@ fn stdlib_module_completion_names() -> Vec String =
   append_space_names(vec_empty(), "bytes collections crypto http http_client math net string terminal")
 
 fn prelude_completion_names() -> Vec String !{IO} =
-  match read_file(module_path("stdlib.prelude")) with
+  match fs.read_text(module_path("stdlib.prelude")) with
   | Err msg -> panic("read_file: prelude: " ++ msg)
   | Ok content -> gather_exported_names(string.string_lines(content), 0, false, vec_empty())
 
@@ -360,7 +361,7 @@ fn dotted_completion_candidates(prefix: String, imports: Vec String) -> Vec Stri
   | Just namespace_ref ->
       names_from_module_source(
         take_before(namespace_ref, "|"),
-        read_file(module_path(take_after(namespace_ref, "|")))
+        fs.read_text(module_path(take_after(namespace_ref, "|")))
       )
   | Nothing -> vec_empty()
 
