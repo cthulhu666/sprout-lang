@@ -198,7 +198,9 @@ so emitted IR must remain byte-identical (`just ir-golden-diff`). Runtime-intern
 no seed refresh and no `APPROVED_BUILTINS` entry (no new `long long` builtin).
 
 Platform surface: `mmap`/`mprotect`/`madvise` on darwin and linux, both already POSIX
-targets for this runtime. No Windows support is implied because none exists today.
+targets for this runtime. No Windows support is implied because none exists today — when
+it does, `VirtualAlloc` `MEM_RESERVE`/`MEM_COMMIT` is the direct equivalent of this
+design's reserve-then-commit shape; see [windows-port-v0.md](windows-port-v0.md) §6.
 
 ## 9. Tests
 

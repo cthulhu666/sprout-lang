@@ -49,7 +49,10 @@ client of it alongside future user code.
 ## Non-goals (v1)
 
 - Platform-aware separators (Windows backslash, drive letters). Sprout has
-  no Windows backend today; defer until one exists.
+  no Windows backend today; defer until one exists. A port is planned but
+  gated: [windows-port-v0.md](windows-port-v0.md) Milestone A ships a Windows
+  *runtime* without ever running the compiler there, and path handling only
+  becomes load-bearing at Milestone B.
 - Absolute-vs-relative type distinction. The bug class is rare and the
   conversion ceremony is high; expose `is_absolute` as a value-level
   predicate instead.
