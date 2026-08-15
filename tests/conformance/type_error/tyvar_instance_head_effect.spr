@@ -1,0 +1,14 @@
+# Regression (code review, 2026-08-15): an effect annotation must not smuggle a
+# bare type-variable head past the instance-head check. type_from_ast DROPS the
+# `!{IO}` and recurses into `a`, so this registers the same dead `@inst:Boxer:a`
+# marker as a plain `instance Boxer a` — but the first cut of the head walk
+# returned Nothing for TypeEffect and accepted it.
+class Boxer a {
+  fn box_size(v: a) -> Int
+}
+
+instance Boxer (a !{IO}) {
+  fn box_size(v: a) -> Int = 0
+}
+
+fn main() -> Unit !{IO} = print(1)

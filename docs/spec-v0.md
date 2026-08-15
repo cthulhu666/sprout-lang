@@ -1548,20 +1548,33 @@ miscompile that reads a closure through an unrelated instance).
 
 **An instance head must be a concrete type constructor.**  The head of an
 `instance` declaration — the type immediately after the class name — must be
-headed by a type *constructor* (`Int`, `List a`, `Result e a`, a tuple).  A bare
-type variable (`instance C a`), or an applied variable head (`instance C (a b)`),
-is rejected at the instance declaration with:
+headed by a type *constructor* (`Int`, `List a`, `Result e a`, a tuple).  These
+are all rejected at the instance declaration:
+
+| head | rejected because |
+|---|---|
+| `instance C a` | a bare type variable |
+| `instance C (a b)` | an applied variable head |
+| `instance C (a !{IO})` | an effect annotation is dropped, leaving a variable head |
+| `instance C (a -> b)` | a function type has no constructor head |
 
 ```
 Instance head for C must be a concrete type, not the type variable `a`
+Instance head for C must be a concrete type, not a function type
 ```
+
+A tuple head (`instance C (a, b)`) is *accepted*: tuples have a constructor head
+(`Tuple2`), so the elements may be variables — the prelude's `Eq`/`ToString`
+tuple instances rely on this.
 
 Sprout resolves an instance by the head constructor of the dispatch type, so a
 variable head names no dispatchable type: it would register an instance that no
 call site can ever select.  Rejecting it at the declaration is what makes the
 diagnostic land on the instance rather than on every later use — before this
 rule, `instance C a` was accepted and each use failed with `No instance of C for
-T`, blaming the caller for a defect in the instance.
+T`, blaming the caller for a defect in the instance.  The same reasoning covers
+the function-typed head, whose pre-existing `No instance of C for a function
+type` diagnostic also fired at the call site.
 
 **Two instances may not share a head constructor.**  Instance selection keys on
 the head constructor *alone*, so `instance C (List a)` and `instance C (List Int)`
