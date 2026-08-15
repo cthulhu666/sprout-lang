@@ -1,0 +1,22 @@
+# The TUPLE route to the distinctness rule.
+#
+# `instance_head_args` has two arms that reach `head_arg_problem`: the TypeApply
+# spine (covered by instance_head_repeated_tyvar) and TupleType, covered here.
+# They are separate code paths — a tuple is not an application, its head is the
+# `TupleN` constructor and its "arguments" are its elements — so the spec §8.5
+# claim that `instance C (a, a)` is rejected needs its own fixture rather than
+# riding on the constructor case.
+#
+# The accepting counterpart, `instance C (a, b)`, is exercised throughout the
+# prelude (`instance Eq (a, b)`, `instance Ord (a, b)`, `instance ToString (a, b)`).
+class Twin a {
+  fn twin(x: a) -> Int
+}
+
+instance Twin (a, a) {
+  fn twin(x: (a, a)) -> Int = 1
+}
+
+fn mixed() -> (Int, Bool) = (1, true)
+
+fn main() -> Unit !{IO} = print(twin(mixed()))

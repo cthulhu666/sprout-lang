@@ -118,6 +118,21 @@ let below = -temperature                              # - negates a number
 # `not is_valid(x)` does NOT parse — use `!is_valid(x)`
 ```
 
+**An instance head takes type variables, not concrete arguments**
+`instance C (List Int)` is rejected; the head must be a type constructor applied to
+*distinct* type variables (spec §8.5, following Haskell 2010 §4.3.2). Instance
+selection keys on the head constructor alone, so a `List Int` instance would also
+answer for `List String` — and run its `Int` code on it. To get an instance at one
+specific argument type, give that instantiation a type of its own.
+```sprout
+instance Summable (Vec Int) { … }        # rejected: `Int` is a concrete type
+instance Summable (Vec a) { … }          # ok — a distinct type variable
+
+type IntVec =                            # the idiom for a specific element type
+  | MkIntVec (Vec Int)
+instance Summable IntVec { … }           # ok — `IntVec` is its own head
+```
+
 **No multi-module user programs outside `stdlib/`**
 The module loader (`module_name_to_path`) resolves only `stdlib.<name>` imports and
 single-segment dotless names. Any *other* dotted import (e.g. `import myapp.util`)
