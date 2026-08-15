@@ -128,6 +128,18 @@ writing into a `MutVec` by position:
 range_each(\i -> print(to_string(i * i)), range(1, n))
 ```
 
+Indexed writes are for when you know the size. When you *don't* — the count is
+discovered as you go — start empty and push, rather than guessing a capacity and
+inventing an overflow policy at the call site:
+
+```sprout
+import stdlib.mutable as mut
+...
+do
+  log <- mut.mutvec_empty()
+  list_each(\body -> mut.mutvec_push(log, body), bodies)   # grows as needed
+```
+
 ## Chain transforms with `|>`
 
 The prelude is data-last — the collection is always the final argument — so a

@@ -11,7 +11,7 @@ module stdlib.mutable
 # (bundler.sprout:536 gives it `Nil` import specs), so a prelude wrapper pins its
 # extern. They are visible here implicitly.
 #
-# The three MUTABLE ones are declared below instead. They back `MutVec` and
+# The four MUTABLE ones are declared below instead. They back `MutVec` and
 # nothing else — the prelude never calls them — so under the rule "an extern lives
 # in the module that owns its type" this is where they belong. The split falls
 # exactly on the pure/`!{IO}` line.
@@ -20,9 +20,15 @@ module stdlib.mutable
 # to the module system (bundler.sprout:597 drops `ExternFnDecl`), so they resolve
 # by bare name once this module is in the bundle — which every `MutVec` user
 # already arranges by importing it.
+#
+# Two of them WRITE: `vector_mutset` and `vector_push`. Both are candidate
+# write-barrier sites for a future generational collector, and both carry the
+# ageprof hook that prices one. Every `MutVec`/`MutMatrix` mutation in this module
+# routes through those two, so there is no bypass.
 extern fn vec_make_filled(n: Int, val: a) -> Vector a !{IO}
 extern fn vector_mutset(v: Vector a, i: Int, val: a) -> Unit !{IO}
 extern fn vector_get_direct(v: Vector a, i: Int) -> a !{IO}
+extern fn vector_push(v: Vector a, val: a) -> Unit !{IO}
 
 # ---------------------------------------------------------------------------
 # MutVec — a 1-D mutable array (opaque; use the mutvec_* functions only)
@@ -37,7 +43,20 @@ export fn mutvec_new(n: Int, val: a) -> MutVec a !{IO} =
     raw <- vec_make_filled(n, val)
     MutVec(raw)
 
-# O(1). The fixed length of the mutable vector.
+# A vector of length 0, to be filled with `mutvec_push`. Use this — not
+# `mutvec_new(0, dummy)` — when the size is discovered at runtime: it needs no fill
+# value, so it works for element types you cannot cheaply conjure a member of.
+#
+# `!{IO}` even though the underlying `vector_empty` is pure: the result is a fresh
+# piece of mutable state, and a pure signature would both license the compiler to
+# share one buffer between two calls and let a `MutVec` be conjured in a pure
+# context, which the rest of this API does not allow. (`vector_empty` itself cannot
+# be marked effectful — prelude `Vec` code calls it in pure contexts.)
+export fn mutvec_empty() -> MutVec a !{IO} =
+  MutVec(vector_empty())
+
+# O(1). The number of LIVE elements — what has been written or pushed, never the
+# spare capacity a push may have reserved beyond it.
 export fn mutvec_len(v: MutVec a) -> Int =
   vector_length(mutvec_raw(v))
 
@@ -60,6 +79,24 @@ export fn mutvec_at(v: MutVec a, i: Int) -> a !{IO} =
 
 export fn mutvec_set(v: MutVec a, i: Int, val: a) -> Unit !{IO} =
   vector_mutset(mutvec_raw(v), i, val)
+
+# Amortised O(1). Append `val`, extending the length by one and doubling the
+# backing capacity (from 8) whenever it is full.
+#
+# The growth happens in place, so it is visible through EVERY copy of the handle —
+# including copies taken before the push and stored in records or component
+# columns. That is what makes a `MutVec` usable as a log whose size is discovered
+# at runtime, rather than one that must guess a capacity up front and then decide
+# by hand whether to drop, evict, or overflow.
+#
+# `mutvec_len` counts pushes, not capacity, and `mutvec_get`/`mutvec_at` keep
+# bounds-checking against the length — an index in the spare capacity misses or
+# fails loudly exactly as it did before the push.
+#
+# Iteration takes no snapshot: `mutvec_each`/`mutvec_fold` read the length once on
+# entry, so pushing from inside one of them is the caller's problem.
+export fn mutvec_push(v: MutVec a, val: a) -> Unit !{IO} =
+  vector_push(mutvec_raw(v), val)
 
 fn mutvec_each_go(f: a -> Unit !{IO}, raw: Vector a, i: Int, total: Int) -> Unit !{IO} =
   if i >= total then ()

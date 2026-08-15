@@ -209,5 +209,6 @@ vector_get
 vector_get_direct  # O(1) read directly from VectorVal pointer; bypasses Vec ADT for MutVec; bounds-checked in C
 vector_length
 vector_mutset  # O(1) in-place write to VectorVal slot; required for MutVec mutation; not expressible as a pure Sprout fn
+vector_push  # Amortised O(1) in-place append: realloc's the VectorVal's backing array (doubling from 8) and bumps ->len. Not expressible in Sprout — the backing array is a plain malloc'd long long* owned by the VectorVal, with no Sprout-visible handle, so neither the realloc nor the ->len bump can be written outside C. Composing existing builtins cannot substitute: vector_append/vector_concat allocate a FRESH VectorVal per call, which is both O(n) per element (O(n²) in a push loop) and wrong for MutVec, whose handles are copied into records that must see the growth (requirement R3)
 vector_set
 write_file
