@@ -1,3 +1,13 @@
+# Head-overlap: two instances that are written differently but collide on the
+# `@inst:Bar:List` key. Distinct from `duplicate_instance`, which is a literal
+# textual duplicate.
+#
+# This was `instance Bar (List a)` + `instance Bar (List Int)` until the
+# instance-head rule landed (spec §8.5). `List Int` is no longer a legal head, so
+# that pair now trips the HEAD check before ever reaching the overlap check, and
+# the fixture stopped testing what it is named for. Two differently-spelled
+# variables keep the collision while staying inside the rule — the key is derived
+# from the head constructor alone, so `List a` and `List b` are one key.
 class Bar a {
   fn bar(x: a) -> Int
 }
@@ -6,6 +16,6 @@ instance Bar (List a) {
   fn bar(x: List a) -> Int = 1
 }
 
-instance Bar (List Int) {
-  fn bar(x: List Int) -> Int = 2
+instance Bar (List b) {
+  fn bar(x: List b) -> Int = 2
 }

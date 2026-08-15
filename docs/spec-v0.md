@@ -1603,10 +1603,12 @@ above: it prevents the obligation from being silently dropped (a codegen
 under-application) or resolved to a wrong default dictionary (a silent
 miscompile that reads a closure through an unrelated instance).
 
-**An instance head must be a concrete type constructor.**  The head of an
-`instance` declaration — the type immediately after the class name — must be
-headed by a type *constructor* (`Int`, `List a`, `Result e a`, a tuple).  These
-are all rejected at the instance declaration:
+**An instance head must be a type constructor applied to distinct type
+variables.**  The head of an `instance` declaration — the type immediately after
+the class name — must be headed by a type *constructor* (`Int`, `List a`,
+`Result e a`, a tuple), and each argument of that constructor must be a type
+variable, with no variable repeated.  These are all rejected at the instance
+declaration:
 
 | head | rejected because |
 |---|---|
@@ -1614,44 +1616,67 @@ are all rejected at the instance declaration:
 | `instance C (a b)` | an applied variable head |
 | `instance C (a !{IO})` | an effect annotation is dropped, leaving a variable head |
 | `instance C (a -> b)` | a function type has no constructor head |
+| `instance C (List Int)` | a concrete type argument |
+| `instance C (Pair a a)` | the same variable used twice |
+| `instance C (List (Maybe a))` | a nested type argument |
 
 ```
 Instance head for C must be a concrete type, not the type variable `a`
 Instance head for C must be a concrete type, not a function type
+Instance head for C must be a type constructor applied to distinct type variables, but `Int` is a concrete type
+Instance head for C must be a type constructor applied to distinct type variables, but `a` appears more than once
+Instance head for C must be a type constructor applied to distinct type variables, but one argument is not a type variable
 ```
 
 A tuple head (`instance C (a, b)`) is *accepted*: tuples have a constructor head
-(`Tuple2`), so the elements may be variables — the prelude's `Eq`/`ToString`
-tuple instances rely on this.
+(`Tuple2`) applied to distinct variables — the prelude's `Eq`/`ToString` tuple
+instances rely on this.  `instance C (a, a)` is not.
 
-Sprout resolves an instance by the head constructor of the dispatch type, so a
-variable head names no dispatchable type: it would register an instance that no
-call site can ever select.  Rejecting it at the declaration is what makes the
-diagnostic land on the instance rather than on every later use — before this
-rule, `instance C a` was accepted and each use failed with `No instance of C for
-T`, blaming the caller for a defect in the instance.  The same reasoning covers
-the function-typed head, whose pre-existing `No instance of C for a function
-type` diagnostic also fired at the call site.
+Both halves of the rule exist for one reason: **Sprout selects an instance by the
+head constructor of the dispatch type alone, discarding its arguments.**  A
+variable head names no dispatchable type, so it registers an instance no call site
+can select — before this rule, `instance C a` was accepted and every use failed
+with `No instance of C for T`, blaming the caller for a defect in the instance.  A
+concrete argument is the mirror image, and worse: `instance Describe (List Int)`
+registers `Describe`-at-`List`, which equally answers for `List String`, so a
+`List String` reaches the `List Int` body and its `Int` arithmetic runs on `String`
+payloads — accepted by the checker with no diagnostic at any phase.  Restricting
+the head to what the key can represent is what makes selection-by-head-constructor
+sound.
+
+To write an instance at one specific argument type, give that instantiation a type
+of its own, so it has a head constructor of its own:
+
+```
+type IntVec =
+  | MkIntVec (Vec Int)
+
+instance Summable IntVec { … }
+```
 
 **Two instances may not share a head constructor.**  Instance selection keys on
-the head constructor *alone*, so `instance C (List a)` and `instance C (List Int)`
-both name `C`-at-`List` and the second would silently shadow the first.  Sprout
-has no overlapping-instance resolution and no instance-specificity ordering, so
-this is always an error:
+the head constructor, so `instance C (List a)` and `instance C (List b)` both name
+`C`-at-`List` and the second would silently shadow the first.  Sprout has no
+overlapping-instance resolution and no instance-specificity ordering, so this is
+always an error:
 
 ```
 Overlapping instances for C
 ```
 
-The granularity is the head constructor, not the full type: `instance C (List Int)`
-and `instance C (List Bool)` are rejected as overlapping even though no type
-matches both.
-
-Together these two rules mirror the Haskell 2010 Report §4.3.2 restriction that an
+Together these rules are the Haskell 2010 Report §4.3.2 restriction that an
 instance head be "a type constructor `T` applied to simple type variables … [which]
-must all be distinct".  Sprout is more permissive in admitting concrete type
-arguments (`instance C (List Int)` — legal only with GHC's `FlexibleInstances`) and
-more restrictive in that two such instances may not share a head constructor.
+must all be distinct".  Because a legal head is a constructor applied to distinct
+variables, two instances sharing a head constructor are alpha-equivalent, so the
+overlap rule above is the Report's own prohibition on duplicate instances rather
+than an extra Sprout restriction.
+
+Admitting concrete type arguments (`instance C (List Int)`) is GHC's
+`FlexibleInstances` extension, which pairs the relaxation with *full-head
+matching* — selecting an instance by unifying the whole head rather than its
+constructor.  The two arrive together by necessity; Sprout has the
+head-constructor key only, and so takes the Haskell 2010 position.  Lifting the
+restriction requires widening the key first (see `BACKLOG.md`).
 
 ### `Applicative` class and `mapN` helpers
 

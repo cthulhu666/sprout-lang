@@ -1,22 +1,49 @@
 module examples.typeclass_collections_demo
 import stdlib.collections (Vec, vec_fold)
 
+# A collection that can be reduced to an Int.
 class Summable c {
   fn sum_values(xs: c) -> Int
 }
 
-instance Summable (Vec Int) {
-  fn sum_values(xs: Vec Int) -> Int =
-    vec_fold(add, 0, xs)
-}
+# `instance Summable (Vec Int)` is NOT legal (spec §8.5): an instance head must be
+# a type constructor applied to distinct type variables. The reason is that
+# instance selection keys on the head CONSTRUCTOR alone, so a `Vec Int` instance
+# would also answer for `Vec String` — and this Int arithmetic would then run on
+# String payloads.
+#
+# The idiom for "an instance at one specific element type" is to give that
+# instantiation a type of its own, so it has a head of its own. This is the same
+# newtype-wrapping Haskell 2010 calls for, where `instance C [Int]` likewise needs
+# an extension.
+type IntVec =
+  | MkIntVec (Vec Int)
+
+type BoolVec =
+  | MkBoolVec (Vec Bool)
 
 fn add(acc: Int, value: Int) -> Int = acc + value
 
+fn add_flag(acc: Int, flag: Bool) -> Int = if flag then acc + 1 else acc
+
+instance Summable IntVec {
+  fn sum_values(xs: IntVec) -> Int =
+    match xs with
+    | MkIntVec v -> vec_fold(add, 0, v)
+}
+
+instance Summable BoolVec {
+  fn sum_values(xs: BoolVec) -> Int =
+    match xs with
+    | MkBoolVec v -> vec_fold(add_flag, 0, v)
+}
+
+# Dispatch through a constrained polymorphic helper: `sum_any` knows only that its
+# argument is `Summable`, and the dictionary is supplied per instantiation.
 fn sum_any(values: a) -> Int where Summable a =
   sum_values(values)
 
-fn sum_vec(values: Vec Int) -> Int where Summable (Vec Int) =
-  sum_any(values)
-
 fn main() -> Unit !{IO} =
-  [3, 4, 5] |> sum_vec |> print
+  do
+    [3, 4, 5] |> vec_from_list |> MkIntVec |> sum_any |> print
+    [true, false, true] |> vec_from_list |> MkBoolVec |> sum_any |> print
