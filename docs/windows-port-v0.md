@@ -360,6 +360,6 @@ items would otherwise be rediscovered at W5. They are game-repo work, not langua
   (`Justfile:19`) currently defaults to a `brew --prefix raylib` lookup and needs a Windows arm.
 - **Subsystem**: `-mwindows` / `/SUBSYSTEM:WINDOWS`, per §9.
 - **Not part of the ship**: the offline `gen-living` bake shells out to the `sqlite3` CLI
-  (`game/livegen_bake.sprout:46`). That is dev-time tooling that runs on macOS; it does not need
-  a Windows port, and its `proc_run` dependency is why the `CreateProcess` item is Milestone-B
-  scoped rather than a Milestone-A blocker.
+  (`game/livegen_bake.sprout:46`). That is dev-time tooling that runs on macOS and does not need a
+  Windows port. It is the only game-side `proc_run` user, so keeping it out of scope is precisely
+  what leaves `CreateProcess` off the Milestone-A critical path.
