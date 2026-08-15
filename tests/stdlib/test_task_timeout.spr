@@ -69,7 +69,16 @@ fn recv_forever(ch: chan.Chan Int, log: Ref String) -> Int !{IO} =
   | chan.Got (v) -> after_recv(log)
   | chan.Closed -> after_recv(log)
 
-# Only reachable if the recv above ever returns, which under this test's deadline it must not.
+# Parked in chan_select on channels no one ever sends to (PARK_SELECT). A select registers the
+# parked task on EVERY channel it lists, so its force-drop unlinks all of them at once — a
+# different branch from the PARK_CHAN case above, which removes the task from one wait queue.
+# Two channels, because a drop that unlinked only the first would leave the second holding a
+# registration that points at a freed task.
+fn select_forever(cs: List (chan.Chan Int), log: Ref String) -> Int !{IO} =
+  match chan.chan_select(cs) with
+  | (_, _) -> after_recv(log)
+
+# Only reachable if the recv/select above ever returns, which under this test's deadline it must not.
 fn after_recv(log: Ref String) -> Int !{IO} =
   do
     ref_write(log, string.concat(ref_read(log), "!"))
@@ -106,6 +115,12 @@ fn main() -> Unit !{IO} =
     let r5 = chan_recv_timeout(clog)
     assert_true(state, "channel-parked body times out", is_expired(r5))
     assert_eq(state, "channel-parked body dropped before its side effect", ref_read(clog), "")
+    # 6. a body parked in chan_select (PARK_SELECT) is unlinked from EVERY channel it registered on,
+    #    not just the first — the multi-registration force-drop branch.
+    slog <- ref_new("")
+    let r6 = select_timeout(slog)
+    assert_true(state, "select-parked body times out", is_expired(r6))
+    assert_eq(state, "select-parked body dropped before its side effect", ref_read(slog), "")
     summary(state)
 
 # The channel must outlive the with_timeout call, so it belongs to an enclosing scope — the body
@@ -117,3 +132,14 @@ fn chan_recv_timeout_in(s: task.Scope, log: Ref String) -> task.TimeoutResult In
   do
     ch <- chan.chan_new(s, 1)
     task.with_timeout(30, \_ -> recv_forever(ch, log))
+
+# Same ancestor-scope ownership as chan_recv_timeout, over two channels so the select parks
+# registered on both.
+fn select_timeout(log: Ref String) -> task.TimeoutResult Int !{IO} =
+  task.with_scope(\s -> select_timeout_in(s, log))
+
+fn select_timeout_in(s: task.Scope, log: Ref String) -> task.TimeoutResult Int !{IO} =
+  do
+    a <- chan.chan_new(s, 1)
+    b <- chan.chan_new(s, 1)
+    task.with_timeout(30, \_ -> select_forever([a, b], log))
