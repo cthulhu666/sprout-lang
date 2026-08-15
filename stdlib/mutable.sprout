@@ -57,7 +57,19 @@ export fn mutvec_empty() -> MutVec a !{IO} =
 
 # O(1). The number of LIVE elements — what has been written or pushed, never the
 # spare capacity a push may have reserved beyond it.
-export fn mutvec_len(v: MutVec a) -> Int =
+#
+# `!{IO}` because the length is mutable state: `mutvec_push` changes it, so this
+# is not a function of its argument alone and two calls on the same handle may
+# disagree. A pure signature would say otherwise, and would license a future CSE
+# pass to evaluate it once — the same reasoning that makes `mutvec_empty`
+# effectful. It stayed pure while `MutVec` was fixed-length, where the claim was
+# true; growable `MutVec` is what made it false.
+#
+# The underlying `vector_length` stays pure and must: it also backs the immutable
+# `Vec`, where the length genuinely is fixed. One C symbol, two truths — and
+# since an extern may be declared only once (scripts/check_extern_signatures.sh),
+# the distinction has to live in the wrapper rather than the declaration.
+export fn mutvec_len(v: MutVec a) -> Int !{IO} =
   vector_length(mutvec_raw(v))
 
 # O(1). Total: Nothing when i is out of range (routes through the bounds-checked
