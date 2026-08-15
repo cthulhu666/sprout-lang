@@ -1,8 +1,12 @@
 # Growable `MutVec` — v0
 
-**Status:** shipped 2026-08-15, minimal surface. Normative behaviour is in
-[spec-v0.md](./spec-v0.md) and [builtins-reference.md](./builtins-reference.md#growing-a-mutvec); this
-document records the problem, the decisions, and what was deliberately left out.
+**Status:** shipped 2026-08-15, minimal surface. Behaviour is documented in
+[builtins-reference.md](./builtins-reference.md#growing-a-mutvec); this document records the problem,
+the decisions, and what was deliberately left out.
+
+`MutVec` is a stdlib type, not part of the language core, so `spec-v0.md` does not describe it and
+this change did not add it there — the spec has never mentioned `MutVec`. Nothing here alters syntax,
+typing rules, or evaluation order.
 
 ## Problem
 
