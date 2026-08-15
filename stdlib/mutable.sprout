@@ -6,8 +6,23 @@ module stdlib.mutable
 # indices internally and reads with `vector_get_direct`, so callers avoid the
 # user-visible `Maybe` traffic of indexed `get` while staying bounds-safe.
 #
-# The raw `Vector` backing store and its `vector_*` builtins stay in the prelude
-# (shared with the immutable `Vec`), available here implicitly.
+# The PERSISTENT `vector_*` builtins stay in the prelude: they back the immutable
+# `Vec`, whose combinators are prelude code, and the prelude cannot import
+# (bundler.sprout:536 gives it `Nil` import specs), so a prelude wrapper pins its
+# extern. They are visible here implicitly.
+#
+# The three MUTABLE ones are declared below instead. They back `MutVec` and
+# nothing else — the prelude never calls them — so under the rule "an extern lives
+# in the module that owns its type" this is where they belong. The split falls
+# exactly on the pure/`!{IO}` line.
+#
+# Declaring them here does not change how callers name them: externs are invisible
+# to the module system (bundler.sprout:597 drops `ExternFnDecl`), so they resolve
+# by bare name once this module is in the bundle — which every `MutVec` user
+# already arranges by importing it.
+extern fn vec_make_filled(n: Int, val: a) -> Vector a !{IO}
+extern fn vector_mutset(v: Vector a, i: Int, val: a) -> Unit !{IO}
+extern fn vector_get_direct(v: Vector a, i: Int) -> a !{IO}
 
 # ---------------------------------------------------------------------------
 # MutVec — a 1-D mutable array (opaque; use the mutvec_* functions only)

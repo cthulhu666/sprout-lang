@@ -1313,6 +1313,15 @@ check-approved-builtins:
   fi
   echo "==> check-approved-builtins ✓"
 
+# One C symbol, one `extern fn` declaration.  Externs are invisible to the
+# module system (bundler.sprout:597) and the LLVM `declare` is deduped by name
+# (ir_lowering.sprout:585), so a symbol declared twice with different parameter
+# orders typechecks and silently resolves to whichever copy a call site sees.
+# `regex_replace_all_literal` shipped that way; this gate is why it cannot again.
+[group('smoke')]
+check-extern-signatures:
+  ./scripts/check_extern_signatures.sh
+
 # DoD #10 — example canary RUN.  The canary set must compile AND run to
 # completion without crashing.  `just compile-examples-stage1` only covers
 # compile; this recipe adds the runtime check.

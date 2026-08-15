@@ -40,6 +40,16 @@ fi
 
 emit() { "$STAGE1" --emit-ir stdlib "$1" 2>/dev/null; }
 
+# Extract one function's body from emitted IR.
+#
+# The two NEGATIVE assertions below must look at the FIXTURE's OWN function, not at the whole
+# module. Since the prelude-extern split, `vector_get_direct` is owned by stdlib.mutable, so
+# these fixtures must import it — and that module contains genuine `Vector Double` kernels
+# (mutmatrix_row_dot and friends) whose inlined `vec_get_d` ops are CORRECT and have nothing
+# to do with what these cases assert. A whole-module grep counts those and reports a UAF that
+# is not there. Scoping to the fixture's own `define` is what the assertions always meant.
+fn_body() { awk "/^define i64 @$1\(/,/^\}/"; }
+
 # ①/④a — B1 fires on a genuine Vector Double.
 if [ "$(emit "$TESTS/test_b1_double.spr" | grep -cF '$ep = getelementptr')" -gt 0 ]; then
   echo "  ok: B1 inlines real Vector Double"
@@ -48,14 +58,14 @@ else
 fi
 
 # ① — shadowed heap `Double` must NOT be inlined (UAF guard).
-if [ "$(emit "$FIX/fixture_b1_shadowed_double.spr" | grep -cEe 'vec_get_d|[$]ep = getelementptr')" -eq 0 ]; then
+if [ "$(emit "$FIX/fixture_b1_shadowed_double.spr" | fn_body 'main\.read_first' | grep -cEe 'vec_get_d|[$]ep = getelementptr')" -eq 0 ]; then
   echo "  ok: shadowed heap 'Double' stays a call"
 else
   echo "  FAIL: B1 fired on a shadowed heap 'Double' — unrooted heap load (UAF)"; fail=1
 fi
 
 # ①' — an ordinary non-Double PRIMITIVE (Vector Int) stays a call (RepUnsupported).
-if [ "$(emit "$FIX/fixture_b1_nondouble.spr" | grep -cEe 'vec_get_d|[$]ep = getelementptr')" -eq 0 ]; then
+if [ "$(emit "$FIX/fixture_b1_nondouble.spr" | fn_body 'main\.read_first' | grep -cEe 'vec_get_d|[$]ep = getelementptr')" -eq 0 ]; then
   echo "  ok: non-Double primitive (Vector Int) stays a call"
 else
   echo "  FAIL: B1 fired on a Vector Int — only scalar-Double is inlinable today"; fail=1

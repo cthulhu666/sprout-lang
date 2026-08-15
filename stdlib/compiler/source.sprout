@@ -1,5 +1,10 @@
 module stdlib.compiler.source
 import stdlib.string as string
+# Load-bearing despite the alias never being written: `bytes_from_utf8` / `bytes_get` below are
+# `extern fn`s owned by stdlib.bytes, and externs resolve by bare name only once their module is
+# in the bundle (bundler.sprout:597 drops ExternFnDecl, so they are never module-qualified).
+# Removing this import does not produce a scoping error — it produces a link failure.
+import stdlib.bytes as bytes
 
 export type SourcePos (..) =
   | SourcePos Int Int Int

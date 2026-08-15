@@ -7,6 +7,9 @@ import stdlib.compiler.parser as parser
 import stdlib.compiler.module_loader as module_loader
 import stdlib.compiler.deriving as deriving
 import stdlib.string as string
+# Load-bearing despite the alias never being written — see the note in source.sprout.
+# `bytes_from_utf8` is an extern owned by stdlib.bytes and needs that module bundled.
+import stdlib.bytes as bytes
 
 # ---------------------------------------------------------------------------
 # Public API

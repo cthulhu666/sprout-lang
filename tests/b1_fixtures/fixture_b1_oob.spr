@@ -1,4 +1,7 @@
 module main
+# vec_make_filled / vector_get_direct are externs owned by stdlib.mutable; the import bundles
+# that module so they resolve. The alias is deliberately unused — see stdlib/mutable.sprout.
+import stdlib.mutable as mutable
 
 # B1 trap coverage (finding ④b): a raw out-of-bounds read on a real `Vector Double`
 # must hit the INLINE bounds-check guard (vec_double_guard: `idx uge len` -> IRPanic)

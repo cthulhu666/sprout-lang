@@ -1,4 +1,6 @@
 module main
+# vector_get_direct is an extern owned by stdlib.mutable; the import bundles that module.
+import stdlib.mutable as mutable
 
 # B1 gate regression (finding ②): an UNDER-APPLIED vector_get_direct on a
 # `Vector Double` must still reach translate_partial_application and build a
