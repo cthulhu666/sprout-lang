@@ -128,8 +128,8 @@ let inv_two512 = 1.0 / two512
 #
 # The reductions below split a positive Double into `mantissa * 2^exponent` in
 # CONSTANT time, using `double_to_bits` / `double_from_bits` (compiler intrinsics
-# that lower to nothing — see stdlib/prelude.sprout and
-# docs/double-bit-access-v0.md). Before this, reduction walked the exponent in
+# that lower to nothing — declared just below, and see docs/double-bit-access-v0.md).
+# Before this, reduction walked the exponent in
 # power-of-two strides: ~20 compare-multiply-branch steps, which is exactly why
 # `ln(1e-300)` and `sqrt(1e300)` were 13-20x libm while normal magnitudes were 1-2x.
 #
@@ -145,6 +145,33 @@ let inv_two512 = 1.0 / two512
 # the bias yields m in [1, 2) with the mantissa bits untouched, so the split is
 # exact and contributes zero rounding error — the same property the old
 # power-of-two ladder had, and the reason accuracy is unchanged.
+
+# Compiler intrinsics: raw IEEE 754 binary64 bit access. Declared here rather than in the
+# prelude because this module is their only consumer in the tree, and reinterpreting a
+# Double's bits is precisely the operation that should require reaching for the math module
+# on purpose. (`to_double`, the numeric bridge, stays in the prelude.)
+#
+# Intercepted in ast_to_ir and lowered to NOTHING — there is no @double_to_bits symbol, and
+# no `runtime/APPROVED_BUILTINS` entry, because there is no operation to perform. Under the
+# i64-uniform value ABI a `Double` and an `Int` are already the same LLVM type
+# (`fn id_d(x: Double) -> Double` and `fn id_i(x: Int) -> Int` both emit
+# `define i64 @f(i64 %x) { ret i64 %x }`), so a bitcast between them is a type-system
+# operation with zero instructions behind it. Same declared-but-intercepted arrangement as
+# `print` and `to_double`, including the restriction that neither can be used as a
+# first-class value (`map(double_to_bits, xs)` references an undefined symbol and fails to
+# LINK — loud, not silent).
+#
+# These are REINTERPRETATIONS, not conversions: `double_to_bits(1.0)` is 4607182418800017408,
+# not 1. Total in both directions and exact for every bit pattern, including both zeros (the
+# only way to tell -0.0 from 0.0, since IEEE compares them equal) and every NaN payload
+# (nothing is canonicalised — cf. Java's doubleToRawLongBits, not doubleToLongBits).
+#
+# Added to make a Double's binary exponent obtainable in O(1), which is what the range
+# reduction below needs to stop being 13-20x libm at the exponent extremes — without linking
+# libm. Rationale, prior-art survey and the rejected alternatives (LLVM `llvm.frexp` lowers
+# to a libm CALL; a C builtin is redundant): docs/double-bit-access-v0.md.
+extern fn double_to_bits(x: Double) -> Int
+extern fn double_from_bits(bits: Int) -> Double
 
 # One unit in the binary64 exponent field, and the exponent bias.
 let exp_field_unit = 4503599627370496

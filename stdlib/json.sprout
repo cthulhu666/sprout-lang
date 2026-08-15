@@ -1,4 +1,5 @@
 module stdlib.json
+import stdlib.string as string
 
 export type JsonError (..) =
   | JsonDecode String

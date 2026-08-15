@@ -1,5 +1,6 @@
 import stdlib.test (check_true, check_false, run_suite)
 import stdlib.json as json
+import stdlib.string as string
 
 fn is_ok(r: Result json.JsonError json.Json) -> Bool =
   match r with

@@ -1,4 +1,5 @@
 import stdlib.terminal as terminal
+import stdlib.string as string
 
 # Regression test for the lexer O(n^2) fix.
 #

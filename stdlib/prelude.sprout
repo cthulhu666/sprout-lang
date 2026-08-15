@@ -1414,6 +1414,15 @@ export fn parse_double(s: String) -> Maybe Double =
 extern fn int_to_string(n: Int) -> String
 extern fn double_to_string(x: Double) -> String
 extern fn char_to_string(c: Char) -> String
+# The Char conversion trio stays together, and stays here. `char_to_string` is pinned anyway
+# (`instance ToString Char` below is built on it), and homing the other two in stdlib.string
+# was measured and rejected: stdlib.terminal needs exactly one of them —
+# `let esc = char_to_str(27)` for the ANSI escape prefix — and importing stdlib.string for it
+# put 62 unused wrapper bodies into every terminal consumer (examples/tcp_echo_once grew ~12%).
+# An extern belongs in a module its consumers would want anyway, or in a leaf; stdlib.string is
+# neither for a caller that wants one codepoint.
+#
+# Note the near-collision: `char_to_str` takes an Int CODEPOINT, `char_to_string` takes a `Char`.
 extern fn char_to_str(codepoint: Int) -> String
 extern fn char_from_codepoint(cp: Int) -> Char
 
@@ -1425,30 +1434,10 @@ extern fn char_from_codepoint(cp: Int) -> Char
 # that references the undefined @to_double and fails to link (loud, not silent).
 extern fn to_double(n: Int) -> Double
 
-# Compiler intrinsics: raw IEEE 754 binary64 bit access.  Intercepted in
-# ast_to_ir and lowered to NOTHING — there is no @double_to_bits symbol, and no
-# `runtime/APPROVED_BUILTINS` entry, because there is no operation to perform.
-# Under the i64-uniform value ABI a `Double` and an `Int` are already the same
-# LLVM type (`fn id_d(x: Double) -> Double` and `fn id_i(x: Int) -> Int` both emit
-# `define i64 @f(i64 %x) { ret i64 %x }`), so a bitcast between them is a
-# type-system operation with zero instructions behind it.  Same declared-but-
-# intercepted arrangement as `print` and `to_double`, including the restriction
-# that neither can be used as a first-class value (`map(double_to_bits, xs)`
-# references an undefined symbol and fails to LINK — loud, not silent).
-#
-# These are REINTERPRETATIONS, not conversions: `double_to_bits(1.0)` is
-# 4607182418800017408, not 1.  `to_double` above is the numeric bridge.  Total in
-# both directions and exact for every bit pattern, including both zeros (the only
-# way to tell -0.0 from 0.0, since IEEE compares them equal) and every NaN payload
-# (nothing is canonicalised — cf. Java's doubleToRawLongBits, not doubleToLongBits).
-#
-# Added to make a Double's binary exponent obtainable in O(1), which is what
-# `stdlib.math`'s range reduction needs to stop being 13-20x libm at the exponent
-# extremes — without linking libm.  Rationale, prior-art survey and the rejected
-# alternatives (LLVM `llvm.frexp` lowers to a libm CALL; a C builtin is redundant):
-# docs/double-bit-access-v0.md.
-extern fn double_to_bits(x: Double) -> Int
-extern fn double_from_bits(bits: Int) -> Double
+# Raw IEEE 754 binary64 bit access is NOT declared here. `double_to_bits` /
+# `double_from_bits` live in stdlib.math, their only consumer in the tree, with the full
+# rationale. `to_double` above stays: it is the numeric bridge every program may want,
+# whereas reinterpreting a Double's bits is a deliberate reach for the math module.
 
 # Integer ranges
 extern fn int_range(start: Int, end: Int) -> IntRange
@@ -1460,21 +1449,25 @@ extern fn str_concat(a: String, b: String) -> String
 extern fn string_concat_many(xs: List String) -> String
 extern fn str_len(s: String) -> Int
 extern fn str_slice(s: String, from: Int, to: Int) -> String
-# O(strlen + byte_len). Byte-indexed substring; faster than str_slice when the
-# caller already tracks byte positions (most compiler stdlib scanning loops).
-# CALLER CONTRACT: byte_start and byte_start+byte_len MUST land on UTF-8
-# codepoint boundaries. The runtime panics on mid-codepoint split rather than
-# silently emitting invalid UTF-8. For codepoint-indexed slicing of arbitrary
-# user input, use str_slice instead.
-extern fn str_slice_bytes(s: String, byte_start: Int, byte_len: Int) -> String
 extern fn str_char_at(s: String, i: Int) -> Maybe Char
 extern fn str_find(haystack: String, needle: String) -> Int
 extern fn str_starts_with(s: String, prefix: String) -> Bool
 extern fn str_compare(a: String, b: String) -> Int
-extern fn str_split_lines(s: String) -> List String
-extern fn str_byte_len(s: String) -> Int
-extern fn str_starts_with_at_byte(s: String, byte: Int, prefix: String) -> Bool
-extern fn split_words(s: String) -> List String
+# What stays above is the CHAR-INDEXED core: the operations a beginner reaches for without
+# thinking, which is why they stay globally reachable. The BYTE-indexed surface
+# (`str_byte_len`, `str_slice_bytes`, `str_starts_with_at_byte`) and the whole-string
+# splitters (`str_split_lines`, `split_words`) are NOT declared here — they live in
+# stdlib.string and are called by bare name once it is imported. Byte offsets are an
+# encoding and performance concern, and reaching for one over the char-indexed equivalent
+# should be a deliberate, recorded choice rather than an accident of what happened to be in
+# scope.
+#
+# stdlib.string is a fair home for those five even though it is not a leaf, because it CALLS
+# three of them (`words`, `byte_length`, `string_lines`) and because every consumer but one is
+# a compiler source that already imports it. The exception is stdlib.json, which pays ~2,700
+# lines of unused stdlib.string and stdlib.bytes bodies for four externs at ~85 call sites —
+# an honest dependency for a text parser, and the concrete cost of having no cross-module DCE
+# (BACKLOG §7).
 
 # Raw vector — the PERSISTENT ops only. These back the immutable `Vec` whose combinators are
 # prelude code below, so they cannot move: the prelude has no imports (bundler.sprout:536) and a

@@ -1,4 +1,5 @@
 import stdlib.test (check_eq, run_suite)
+import stdlib.string as string
 
 # Tests for the byte-indexed str_slice_bytes builtin.
 # str_slice_bytes(s, byte_start, byte_len) -> String

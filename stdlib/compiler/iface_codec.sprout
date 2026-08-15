@@ -7,6 +7,7 @@ import stdlib.compiler.linear_check as linear_check
 # Load-bearing despite the alias never being written — see the note in source.sprout.
 # `bytes_from_utf8` is an extern owned by stdlib.bytes and needs that module bundled.
 import stdlib.bytes as bytes
+import stdlib.string as string
 
 # ============================================================================
 # Iface codec — hand-written serialize/deserialize for types.Scheme and its

@@ -1,5 +1,6 @@
 module stdlib.compiler.ir_lowering
 import stdlib.compiler.sprout_ir as sprout_ir
+import stdlib.string as string
 
 # LLVM string/char escaping (escape_char_for_ir / encode_str_for_ir / global len).
 fn escape_char_for_ir(ch: Char) -> String =

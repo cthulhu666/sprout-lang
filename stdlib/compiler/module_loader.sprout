@@ -6,6 +6,7 @@ import stdlib.compiler.parser as parser
 import stdlib.compiler.checker as checker
 import stdlib.compiler.source as source
 import stdlib.fs as fs
+import stdlib.string as string
 
 # ---------------------------------------------------------------------------
 # ImportSpec — parsed representation of one import line

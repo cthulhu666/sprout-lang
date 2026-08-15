@@ -1,0 +1,62 @@
+import stdlib.test (check_eq, run_suite)
+import stdlib.string (words)
+
+# Characterization test for `words`, which wraps the `split_words` builtin. It had
+# NO coverage: the only test-side reference to `split_words` anywhere was
+# test_ir_codegen_named_fn_eta.spr, which uses it as an arbitrary named function
+# to eta-expand and asserts nothing about what it returns. This pins the contract
+# ahead of moving the declaration out of the prelude into stdlib.string.
+#
+# Contract (sprout_runtime.c:5405-5430): split on ASCII space, tab, CR or LF.
+# Runs of separators collapse, and leading/trailing ones are dropped, so no empty
+# word is ever produced — unlike `string_lines`, which preserves interior blanks.
+# That asymmetry between the two splitters is the thing most likely to be assumed
+# wrong, so both directions are asserted below.
+
+fn split(raw: String) -> Vec String = vec_from_list(words(raw))
+
+fn nth(v: Vec String, i: Int) -> String = vec_get_or(i, "<none>", v)
+
+fn main() -> Unit !{IO} =
+  let empty = split("")
+      blanks = split("   \t\r\n ")
+      one = split("alpha")
+      three = split("a b c")
+      padded = split("  a  b  ")
+      mixed = split("a\tb\nc\rd")
+      utf8 = split("café 日本 ok")
+  in run_suite("string_words", [
+    check_eq("empty string -> no words", vec_length(empty), 0),
+
+    # The separator-only case is the one that distinguishes this from a naive
+    # split-on-delimiter, which would return a list of empty strings.
+    check_eq("whitespace only -> no words", vec_length(blanks), 0),
+
+    check_eq("single word: count", vec_length(one), 1),
+    check_eq("single word: content", nth(one, 0), "alpha"),
+
+    check_eq("three words: count", vec_length(three), 3),
+    check_eq("three words [0]", nth(three, 0), "a"),
+    check_eq("three words [1]", nth(three, 1), "b"),
+    check_eq("three words [2]", nth(three, 2), "c"),
+
+    # Runs collapse and edges are trimmed: no empty word at either end.
+    check_eq("padded and doubled separators: count", vec_length(padded), 2),
+    check_eq("padded [0]", nth(padded, 0), "a"),
+    check_eq("padded [1]", nth(padded, 1), "b"),
+
+    # All four separator bytes, not just space.
+    check_eq("tab/newline/CR all split: count", vec_length(mixed), 4),
+    check_eq("mixed [0]", nth(mixed, 0), "a"),
+    check_eq("mixed [1] (after tab)", nth(mixed, 1), "b"),
+    check_eq("mixed [2] (after LF)", nth(mixed, 2), "c"),
+    check_eq("mixed [3] (after CR)", nth(mixed, 3), "d"),
+
+    # The scan is byte-wise, which is safe only because no UTF-8 continuation byte
+    # can equal an ASCII separator. This asserts that: a multi-byte word must come
+    # back whole, not chopped mid-sequence.
+    check_eq("multi-byte words: count", vec_length(utf8), 3),
+    check_eq("multi-byte [0] intact", nth(utf8, 0), "café"),
+    check_eq("multi-byte [1] intact", nth(utf8, 1), "日本"),
+    check_eq("multi-byte [2]", nth(utf8, 2), "ok")
+  ])
