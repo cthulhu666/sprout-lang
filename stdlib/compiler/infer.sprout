@@ -142,7 +142,34 @@ fn lookup_type_var(name: String, local_vars: Dict types.Type) -> types.Type =
   # name verbatim. Stripping here collapsed `main.Foo` and a prelude `Foo` to one
   # identity. The prelude's canonical form is unqualified (empty module header), so
   # this is a no-op on dotless names and only preserves genuine module prefixes.
-  | Nothing -> types.TConst(types.type_id(name))
+  #
+  # On the bundling path the name IS already canonical, because the bundler
+  # rewrote it. On the env path nothing has, and the two sides of an annotation
+  # disagree: an imported module is checked with its header stripped, so its
+  # schemes carry SHORT type names (`bytes.to_string :: … Result Utf8Error …`),
+  # while the annotation still spells the importer's alias (`bytes.Utf8Error`).
+  # Dropping a KNOWN alias prefix makes the two meet on the short name the env
+  # path uses everywhere — including in the `@linear:` and `@inst:` marker keys,
+  # which are keyed by short type name and would MISS if types were qualified
+  # here instead. A prefix that is not an import alias (`main.Foo`) is returned
+  # verbatim, so T7's distinction survives untouched.
+  | Nothing -> resolve_qualified_type_name(name, local_vars)
+
+# The alias part of `alias.Type` — the FIRST segment, which is what an import
+# binds. An already-canonical `stdlib.bytes.Utf8Error` yields `stdlib`, which is
+# never an alias, so it falls through and is returned verbatim.
+fn before_first_dot(name: String) -> String =
+  if i == -1 then name else str_slice(name, 0, i)
+  where i = str_find(name, ".")
+
+# `@qualalias:` keys carry ':' and '@', neither legal in a type name, so the
+# sentinels cannot collide with a real type parameter sharing the dict.
+fn resolve_qualified_type_name(name: String, local_vars: Dict types.Type) -> types.Type =
+  if str_find(name, ".") == -1 then types.TConst(types.type_id(name))
+  else
+    match dict_get(str_concat("@qualalias:", before_first_dot(name)), local_vars) with
+    | Just _ -> types.TConst(types.type_id(string.after_last_dot(name)))
+    | Nothing -> types.TConst(types.type_id(name))
 
 fn type_list_from_ast(parts: List ast.TypeExpr, local_vars: Dict types.Type) -> List types.Type =
   match parts with
@@ -4736,7 +4763,12 @@ export fn typecheck_decls(
     # before processing bodies.  This enables forward references and
     # mutual recursion (e.g., decorated_sort_split calling decorated_sort which
     # is defined later in the same file).
-    let scanned_env = pre_scan_fn_decls(decls, env, dict_empty())
+    # The importer's type-name spellings, lifted out of the env's @qual* markers
+    # into the alias_env — which is the base every local_vars dict is built on
+    # (build_type_var_dict), so lookup_type_var sees them at every annotation
+    # position without threading a new parameter through inference.
+    let qual_env = import_aliases_from_env(env)
+    let scanned_env = pre_scan_fn_decls(decls, env, qual_env)
     unifier.set_ctor_map(state, build_ctor_map(decls, dict_empty()))
     # Strict type-name validation: walk every TypeExpr in every type/alias/record
     # declaration and error immediately if a referenced type name is not declared.
@@ -4771,7 +4803,7 @@ export fn typecheck_decls(
                 # @type: markers. From here on the env flows between decls as the
                 # wrap-protected GlobalEnv, and out to importers as the checked env.
                 # ftv is unaffected: a marker's body is a TConst, never a free var.
-                match typecheck_decls_inner(state, decls, GlobalEnv(scanned_env_with_types), subst, eff_subst, dict_empty(), Nil, unifier.ftv_env(scanned_env_with_types)) with
+                match typecheck_decls_inner(state, decls, GlobalEnv(scanned_env_with_types), subst, eff_subst, qual_env, Nil, unifier.ftv_env(scanned_env_with_types)) with
                 | typed_ast.TypedErr p m -> typed_ast.TypedErr(p, m)
                 | typed_ast.TypedOk prog schemes ->
                     # Final gate: a DEFINED `main` must be a well-formed entrypoint.
@@ -4961,6 +4993,24 @@ fn class_names_from_entries(entries: List (String, types.Scheme), acc: List Stri
 # analysis-service / REPL path supplies the prelude and every imported module as
 # env schemes rather than decl nodes, so seeding the type vocabulary from decls
 # alone leaves `Vec`, `Dict`, `Result` and every cross-module type name unknown.
+# Lift module_loader's @qualalias: markers into an alias_env seed, keyed
+# identically so lookup_type_var reads them back. alias_env is the base every
+# local_vars dict is built on (build_type_var_dict), so the sentinels reach
+# every annotation position without threading a parameter through inference.
+fn import_aliases_from_env(env: Dict types.Scheme) -> Dict types.Type =
+  import_aliases_go(vec_to_list(dict_entries(env)), dict_empty())
+
+fn import_aliases_go(entries: List (String, types.Scheme), acc: Dict types.Type) -> Dict types.Type =
+  match entries with
+  | [] -> acc
+  | [(key, scheme) | rest] ->
+      if str_starts_with(key, "@qualalias:") then
+        match scheme with
+        | types.Scheme _ _ (types.TConst id) _ _ ->
+            import_aliases_go(rest, dict_set(key, types.TConst(id), acc))
+        | _ -> import_aliases_go(rest, acc)
+      else import_aliases_go(rest, acc)
+
 fn type_names_from_env(env: Dict types.Scheme, acc: List String) -> List String =
   type_names_from_entries(vec_to_list(dict_entries(env)), acc)
 

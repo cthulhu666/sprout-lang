@@ -367,9 +367,45 @@ fn load_module(name: String, stdlib_root: String, cache: ModuleCache) -> List (S
                               | checker.CheckOk env ->
                                   do
                                     let declared = program_declared_names(prog)
-                                    let own_pairs = select_named_pairs(dict_to_pairs(env), declared) ++ collect_marker_pairs(dict_to_pairs(env))
+                                    # Canonicalize this module's OWN type names on the way out, and
+                                    # drop the importer-scoped @qual* markers so one module's aliases
+                                    # never resolve inside another's.
+                                    let own_pairs =
+                                      select_named_pairs(dict_to_pairs(env), declared)
+                                        ++ drop_import_qualifiers(collect_marker_pairs(dict_to_pairs(env)))
                                     cache_put(cache, name, own_pairs)
                                     own_pairs
+
+# ---- Import-alias resolution ----------------------------------------------
+#
+# `@qualalias:<alias>` records that `<alias>` is a name this module bound with
+# `import M as alias`, so the checker can tell the alias-qualified spelling
+# `alias.T` from a genuinely module-qualified type name.
+#
+# Only the ALIAS needs recording. The env path names every type by its short
+# name — a module is checked with its header stripped, so its own decls are
+# bare, and `prefix_pairs` qualifies binding KEYS without touching the types
+# inside their schemes. So `bytes.to_string` has type `Bytes -> Result
+# Utf8Error String`, and an annotation `Result bytes.Utf8Error String` matches
+# it once the alias is dropped. Nothing else has to move.
+#
+# This marker describes the IMPORTER's vocabulary, not the imported module's,
+# so unlike every other marker family it must NOT propagate onward:
+# `load_module` drops it when collecting the markers it exports, or one
+# module's aliases would resolve inside another's.
+
+fn is_import_qualifier_key(k: String) -> Bool =
+  str_starts_with(k, "@qualalias:")
+
+fn drop_import_qualifiers(pairs: List (String, types.Scheme)) -> List (String, types.Scheme) =
+  match pairs with
+  | Nil -> Nil
+  | Cons (k, v) rest ->
+      if is_import_qualifier_key(k) then drop_import_qualifiers(rest)
+      else Cons((k, v), drop_import_qualifiers(rest))
+
+fn alias_marker(module_name: String) -> types.Scheme =
+  types.mono(types.TConst(types.type_id(module_name)))
 
 # Apply a single import spec: load the module and namespace/filter its pairs.
 fn apply_import_spec(spec: ImportSpec, stdlib_root: String, cache: ModuleCache) -> List (String, types.Scheme) !{IO} =
@@ -377,11 +413,12 @@ fn apply_import_spec(spec: ImportSpec, stdlib_root: String, cache: ModuleCache) 
   | ImportAlias module_name alias ->
       do
         pairs <- load_module(module_name, stdlib_root, cache)
-        prefix_pairs(pairs, alias)
+        Cons((str_concat("@qualalias:", alias), alias_marker(module_name)),
+          prefix_pairs(drop_import_qualifiers(pairs), alias))
   | ImportSelective module_name names ->
       do
         pairs <- load_module(module_name, stdlib_root, cache)
-        select_pairs(pairs, names)
+        select_pairs(drop_import_qualifiers(pairs), names)
 
 fn build_import_pairs_acc(specs: List ImportSpec, stdlib_root: String, cache: ModuleCache, acc: List (String, types.Scheme)) -> List (String, types.Scheme) !{IO} =
   match specs with

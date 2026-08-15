@@ -387,9 +387,9 @@ Also update §7's item 3 when Fix B lands; it describes behaviour this change do
 
 ## 11. What this change exposed (filed, not fixed)
 
-### 11.1 An imported type has two identities — `T` vs `alias.T`
+### 11.1 An imported type has two identities — `T` vs `alias.T` — **FIXED**
 
-The four modules still failing after this change all fail the same way:
+The four modules still failing after the vocabulary change all failed the same way:
 
 ```
 repl:            Type mismatch: StatefulSession vs compiler.StatefulSession
@@ -398,11 +398,56 @@ scram:           Type mismatch: CryptoError vs crypto.CryptoError
 http_server:     Type mismatch: Utf8Error vs bytes.Utf8Error
 ```
 
-One imported type arrives under two names — bare in one position, alias-qualified in another — and
-unification treats them as distinct constructors. The bundling path never sees this because
-inlining gives every type exactly one name. This is a type-*identity* defect in how imported type
-names are resolved, not a vocabulary one, and it is the last thing standing between the REPL and a
-working `import http_server`. **It should be fixed next; it owns the original bug report.**
+**Root cause.** `prefix_pairs` qualifies an aliased import's binding KEYS but leaves the type
+constructors inside those schemes untouched. Measured directly:
+
+```
+import stdlib.bytes as bytes
+  bytes.to_string :: Bytes -> Result Utf8Error String
+  ^^^^^^ key qualified                ^^^^^^^^^ type still short
+```
+
+while `lookup_type_var` keeps an annotation `Result bytes.Utf8Error String` verbatim, per T7. The
+two spellings can never unify. The bundling path never sees it because inlining gives every type
+exactly one name.
+
+**Resolution: drop a known alias prefix.** `import M as a` records `@qualalias:a` in the env;
+`lookup_type_var` resolves `a.T` to the short `T`, meeting the scheme on the name the env path
+already uses. A prefix that is *not* an import alias (`main.Foo`) is still returned verbatim, so
+T7's distinction survives. Implementation: `module_loader.apply_import_spec` emits the marker,
+`infer.import_aliases_from_env` lifts it into the `alias_env` — which is the base of every
+`local_vars` dict (`build_type_var_dict`), so the sentinel reaches every annotation position
+without threading a new parameter through inference.
+
+Result: **26 of 27** top-level stdlib modules load. The last one, `stdlib.repl`, fails inside the
+unswept `stdlib/compiler/` subtree (`parser.submission_starts_decl` *is* exported, so it is a
+separate defect). `import http_server` works in the REPL — the original bug report.
+
+### 11.1a Why NOT canonical `<module>.<Type>` names — measured
+
+The principled alternative is one canonical name per type, matching `bundler.qualified_name`. It
+was implemented and **rejected on evidence**, which is worth recording because it looks obviously
+correct on paper:
+
+Every marker family in the env path is keyed by **short type name**, so qualifying types anywhere
+silently breaks the lookups:
+
+- `@linear:<TypeName>` — read via `head_type_name(t)` (`linear_check.sprout:112`). Canonicalizing
+  made an imported linear type read as `stdlib.net.TcpConnection`; the lookup missed and
+  `http_server` failed with ``  `borrowing` is only allowed on a parameter of a linear type ``.
+- `@inst:<Class>:<head>` — typeclass dispatch. Keys are built bare
+  (`type_from_ast(head_te, dict_empty())`) but looked up from resolved types, so canonicalization
+  breaks instance dispatch for imported types — a failure a module-load probe does *not* surface.
+
+Measured side by side: canonical reached 22/27 modules with new interaction classes still
+appearing each iteration; alias-stripping reached 26/27 and disturbs no marker family. Making
+canonical correct means canonicalizing (or short-name-stripping) **every** marker family — a
+change to typeclass dispatch and linearity, not a bug fix. Filed separately; see `BACKLOG.md`.
+
+**Known limitation inherited, not introduced.** Under alias-stripping, two modules' same-named
+types collapse to one identity inside an importer. That is already true today for selectively
+imported types, which arrive bare; this extends it to alias-qualified spellings. Canonical naming
+is what closes it.
 
 ### 11.2 Should `import M (T)` bring `T`'s constructors?
 

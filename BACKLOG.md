@@ -2797,7 +2797,39 @@ op-classification already in place.
 
 ### Native REPL & Analysis Service
 
-- [ ] `P0` **BUG: an imported type has two identities in the REPL — `T` vs `alias.T`** (2026-08-14).
+- [ ] `P2` **Canonical `<module>.<Type>` identity on the env path** (2026-08-15). Today two modules'
+  same-named types collapse to one identity inside an importer — already true for selectively
+  imported types (they arrive bare) and now also for alias-qualified spellings, since those resolve
+  by dropping the alias. One canonical name per type, matching `bundler.qualified_name`, closes it.
+  **Scope is bigger than it looks, and this was measured, not guessed:** every `@`-marker family on
+  the env path is keyed by SHORT type name — `@linear:<TypeName>` (read via
+  `linear_check.head_type_name`), `@inst:<Class>:<head>` (typeclass dispatch, keys built bare via
+  `type_from_ast(head_te, dict_empty())`), `@class:`, `@type:`. Qualifying types makes those
+  lookups MISS silently. An implementation attempt reached 22/27 stdlib modules with new
+  interaction classes still surfacing (it broke `@linear:`, and would have broken instance dispatch
+  for imported types — which a module-load probe does not exercise), versus 26/27 for the
+  alias-stripping fix that landed. Doing this properly means moving every marker family to
+  canonical keys, or stripping to short names at every marker lookup — a change to dispatch and
+  linearity that needs its own design doc and PR. Analysis + measurements:
+  `docs/repl-env-type-vocabulary-v0.md` §11.1a; invariant recorded in `docs/compiler-internals.md`.
+- [x] `P0` **FIXED 2026-08-15. BUG: an imported type has two identities in the REPL — `T` vs
+  `alias.T`.**
+  **Resolution.** `prefix_pairs` qualified an aliased import's binding KEYS but left the type
+  constructors inside those schemes short, so `bytes.to_string :: Bytes -> Result Utf8Error String`
+  could never unify with an annotation `Result bytes.Utf8Error String` (which `lookup_type_var`
+  keeps verbatim per T7). Fixed by resolving a KNOWN alias prefix away: `import M as a` records a
+  `@qualalias:a` env marker, `infer.import_aliases_from_env` lifts it into `alias_env` — the base of
+  every `local_vars` dict (`build_type_var_dict`), so it reaches every annotation position with no
+  new parameter threaded through inference — and `lookup_type_var` resolves `a.T` to the short `T`.
+  A prefix that is not an import alias (`main.Foo`) is still returned verbatim, so T7 holds.
+  Also completed a fourth under-specified stdlib import list (`http_server` ← `HttpUnsupportedStatus`).
+  **26 of 27** top-level stdlib modules now load; `import http_server` works in the REPL, which was
+  the original report. The last one, `stdlib.repl`, fails in the unswept `stdlib/compiler/` subtree
+  (`parser.submission_starts_decl` IS exported — separate defect). Tests:
+  `tests/stdlib/compiler/test_repl_type_identity.spr` (4 assertions, RED-verified 2 fail/2 pass —
+  the two passing pinned the regression the cheaper alias-qualifying design would have caused).
+  Canonical naming was implemented and rejected on measurement; see the `P2` above.
+  <details><summary>Original report</summary>
   The last thing standing between the REPL and a working `import http_server`; it owns the original
   bug report. Four modules fail to load through `module_loader` with a type-identity mismatch —
   `repl` (`StatefulSession` vs `compiler.StatefulSession`), `http_middleware` (`Logger` vs
@@ -2810,10 +2842,12 @@ op-classification already in place.
   A standing guard — assert every stdlib module loads cleanly through `load_module` (probe in
   `docs/repl-env-type-vocabulary-v0.md` Appendix A) — should land with the fix; it is red today.
   Analysis: `docs/repl-env-type-vocabulary-v0.md` §11.1.
+  </details>
 - [ ] `P2` **Decide whether `import M (T)` brings `T`'s constructors into scope** (2026-08-14).
   `select_named_pairs` matches names exactly, so a selective import of a type does not import its
-  constructors; the bundler, by inlining, behaves as if it does. Two stdlib modules were relying on
-  the permissive behaviour and failed on the env path (`net` applying `Utf8DecodeError`, `template`
+  constructors; the bundler, by inlining, behaves as if it does. **Three** stdlib modules were
+  relying on the permissive behaviour and failed on the env path (`net` applying `Utf8DecodeError`,
+  `http_server` applying `HttpUnsupportedStatus`, `template`
   matching `JsonFloat`) — both import lists have since been completed, so this is a semantics
   ruling, not a live break. Options: require explicit constructor listing (status quo on the env
   path), make `T` imply `T`'s constructors, or add an explicit `T(..)` form (Haskell spells the

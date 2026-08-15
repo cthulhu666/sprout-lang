@@ -263,6 +263,32 @@ The failure mode is silent by construction: `module_loader.load_module` turns a
 module's `CheckErr` into an empty pair list, so the error surfaces far from its
 cause as `Unknown variable: <module>.<name>`.
 
+## Env-path type names are SHORT, and the marker families depend on it
+
+On the env path a type is named by its short name — a module is checked with its
+header stripped, so its own declarations are bare, and `prefix_pairs` qualifies
+an aliased import's binding *keys* without touching the types inside their
+schemes. **Every `@`-marker family is keyed on that short name:**
+
+| marker | keyed by | read at |
+|---|---|---|
+| `@linear:<TypeName>` | short type name | `linear_check.head_type_name` |
+| `@inst:<Class>:<head>` | short type head | typeclass dispatch in `infer` |
+| `@class:`, `@type:` | short name (readers apply `after_last_dot`) | `infer` |
+
+So **introducing module-qualified type names on this path breaks marker lookups
+rather than failing loudly.** A canonical-naming attempt made an imported linear
+type read as `stdlib.net.TcpConnection`, missing `@linear:` and reporting the
+unrelated `` `borrowing` is only allowed on a parameter of a linear type ``; the
+`@inst:` breakage would have been worse, since a module-load probe does not
+exercise dispatch. If you need qualified names here, every marker family has to
+move with them — treat that as the scope, not as a follow-up.
+
+This is why an alias-qualified annotation (`bytes.Utf8Error`) is resolved by
+*dropping* the known alias rather than by qualifying the scheme to match it.
+A prefix that is not an import alias is left verbatim, preserving T7. See
+`docs/repl-env-type-vocabulary-v0.md` §11.1.
+
 ## Driver diagnostic contract: stderr + nonzero exit
 
 Anything in `stdlib/compiler/*_driver.sprout` that reports a problem must obey two
