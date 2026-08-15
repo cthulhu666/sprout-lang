@@ -66,7 +66,7 @@ through the module's wrapper API:
 | `time_now_micros() -> Int` | `stdlib.time` | `time.now_micros()` — monotonic, for elapsed time |
 | `wall_time_micros() -> Int` | `stdlib.time` | `time.wall_micros()` — realtime, for timestamps |
 | `term_*` | `stdlib.terminal` | `terminal.write(…)`, `terminal.clear()`, … |
-| `vec_make_filled`, `vector_mutset`, `vector_get_direct` | `stdlib.mutable` | the `MutVec` API |
+| `vec_make_filled`, `vector_mutset`, `vector_get_direct`, `vector_push` | `stdlib.mutable` | the `MutVec` API |
 | `bytes_*` | `stdlib.bytes` | bare name |
 | `crypto_*` | `stdlib.crypto` | bare name |
 | `regex_*` | `stdlib.regex` | bare name |
@@ -822,6 +822,16 @@ Quick reference for the main collection types in the prelude and `stdlib`, with 
 | `Bytes` | `bytes.append` (`bytes_append`) | O(\|left\| + \|right\|) | Allocates a fresh contiguous buffer and copies both inputs. |
 | `bytes.Builder` | `bytes.builder_append` | O(chunks\_left + chunks\_right) | Concatenates chunk tables without flattening the bytes themselves; the final `bytes.builder_build` is O(total\_bytes). The right tool for protocol packet assembly and other "many small fragments, one final blob" patterns. |
 | `Dict v` | `++` (Semigroup instance) | O(m · log(n + m)) | Persistent: each of `right`'s m entries is folded into `left` via `dict_set`, which is O(log n) copy-on-write on the balanced AVL map (path copy, not a full-array copy). For very large merges, folding into a freshly built dict avoids re-walking the growing left. |
+| `MutVec a` (`stdlib.mutable`) | `mutvec_push` (one element) | amortised O(1) | **Mutable and in place**, unlike every other row here. Start from `mutvec_empty()` when the size is discovered at runtime; capacity doubles from 8 as it fills. See below. |
+
+### Growing a `MutVec`
+
+`mutvec_push` appends one element, doubling the backing capacity (starting at 8) whenever it fills. Two properties are worth knowing before you rely on it:
+
+- **Growth is in place, so every copy of the handle sees it.** The backing array is reallocated *inside* the existing vector object, not swapped for a fresh one, so a handle already stored in a record or an ECS component column keeps working after a push — including one copied before the growth happened. This is what makes `MutVec` usable as a runtime-sized log rather than something that must guess a capacity up front.
+- **`mutvec_len` counts elements, never capacity**, and `mutvec_get` / `mutvec_at` keep bounds-checking against the length. An index that lands in reserved-but-unwritten capacity misses (`Nothing`) or fails loudly, exactly as it did before the push.
+
+Doubling means the peak allocation can be up to 2× the final length. A caller that knows the size and cares about the peak should allocate it directly with `mutvec_new(n, fill)` and write by index. Iteration takes no snapshot — `mutvec_each` / `mutvec_fold` read the length once on entry, so pushing from inside one of them is the caller's problem.
 
 If you find yourself repeatedly appending small fragments to a `String`, reach for `bytes.Builder` (collect fragments as `Bytes`, finalize once) or the `string_concat_many` builtin (one allocation for an arbitrary list of `String`s). String interpolation with `` `pre${x}post` `` desugars to `string_concat_many` automatically.
 

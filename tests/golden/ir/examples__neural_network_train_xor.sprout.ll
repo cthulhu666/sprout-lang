@@ -83,6 +83,7 @@ declare i64 @ref_write(i64, i64)
 declare i64 @vec_make_filled(i64, i64)
 declare i64 @vector_mutset(i64, i64, i64)
 declare i64 @vector_get_direct(i64, i64)
+declare i64 @vector_push(i64, i64)
 @.str.0 = private unnamed_addr constant { i64, [17 x i8] } { i64 262154, [17 x i8] c"division by zero\00" }
 @.str.1 = private unnamed_addr constant { i64, [3 x i8] } { i64 32778, [3 x i8] c", \00" }
 @.str.2 = private unnamed_addr constant { i64, [3 x i8] } { i64 32778, [3 x i8] c", \00" }
@@ -8560,6 +8561,20 @@ entry:
   ret i64 %t$1
 }
 
+define i64 @stdlib.mutable.mutvec_empty() {
+entry:
+  %t$0 = call i64 @vector_empty()
+  %t$2 = alloca i64
+  store i64 %t$0, ptr %t$2
+  %t$3 = call i64 @sprout_gc_push_i64_root(ptr %t$2)
+  %t$1 = call i64 @sprout_alloc_obj(i64 13, i64 1)
+  %t$1$ptr = inttoptr i64 %t$1 to ptr
+  %t$1$f0 = getelementptr i64, ptr %t$1$ptr, i64 0
+  store i64 %t$0, ptr %t$1$f0
+  %t$4 = call i64 @sprout_gc_pop_roots(i64 1)
+  ret i64 %t$1
+}
+
 define i64 @stdlib.mutable.mutvec_len(i64 %v) {
 entry:
   %t$0 = call i64 @stdlib.mutable.mutvec_raw(i64 %v)
@@ -8589,6 +8604,20 @@ define i64 @stdlib.mutable.mutvec_set(i64 %v, i64 %i, i64 %val) {
 entry:
   %t$0 = call i64 @stdlib.mutable.mutvec_raw(i64 %v)
   %t$1 = call i64 @vector_mutset(i64 %t$0, i64 %i, i64 %val)
+  ret i64 %t$1
+}
+
+define i64 @stdlib.mutable.mutvec_push(i64 %v, i64 %val) {
+entry:
+  %t$0 = call i64 @stdlib.mutable.mutvec_raw(i64 %v)
+  %t$2 = alloca i64
+  store i64 %val, ptr %t$2
+  %t$3 = call i64 @sprout_gc_push_i64_root(ptr %t$2)
+  %t$4 = alloca i64
+  store i64 %t$0, ptr %t$4
+  %t$5 = call i64 @sprout_gc_push_i64_root(ptr %t$4)
+  %t$1 = call i64 @vector_push(i64 %t$0, i64 %val)
+  %t$6 = call i64 @sprout_gc_pop_roots(i64 2)
   ret i64 %t$1
 }
 

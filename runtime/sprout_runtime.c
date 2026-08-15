@@ -7882,6 +7882,45 @@ long long vector_mutset(long long vec, long long index, long long value) {
   return 0;
 }
 
+/* Append `value`, growing the backing array by doubling when it is full.  Backs
+ * mutvec_push; amortised O(1).
+ *
+ * The realloc happens INSIDE the existing VectorVal, so every copy of the handle
+ * sees the growth — including the copies already stored in records and component
+ * columns, which outlive the call that made them.  Reallocating into a fresh
+ * VectorVal would leave those holders reading the stale buffer, and that is the
+ * one way a growable vector fails silently.  (tests/stdlib/test_mutvec_push.spr
+ * pins it: it copies the handle before the growth and reads through the copy.)
+ *
+ * The store order is load-bearing: write data[len] BEFORE bumping len.  The
+ * collector takes a vector's child count from ->len
+ * (sprout_heap_child_count_payload), so a len bumped first would expose an
+ * uninitialised capacity slot to the mark phase as if it were a heap pointer.
+ *
+ * No GC allocation happens here: sprout_realloc_vector_data is a plain realloc
+ * (sprout_realloc_counted), which never calls sprout_gc_maybe_collect_threshold.
+ * So the collector cannot run mid-call and neither argument needs rooting.  The
+ * flip side is that pushes alone never trip the collection threshold — the
+ * backing array is plain malloc and invisible to an object-count-based trigger
+ * (BACKLOG "GC trigger is object-count-blind").  For a growing buffer that is the
+ * right answer anyway: it is live, not garbage. */
+long long vector_push(long long vec, long long value) {
+  VectorVal* v = (VectorVal*)(uintptr_t)vec;
+  if (v == NULL) tcp_fail("vector_push: null vector");
+  if (v->len >= v->cap) {
+    if (v->cap > (long long)(SIZE_MAX / sizeof(long long)) / 2) tcp_fail("vector_push: vector too large");
+    long long new_cap = v->cap <= 0 ? 8 : v->cap * 2;
+    v->data = sprout_realloc_vector_data(v->data, (size_t)new_cap, "vector_push: out of memory");
+    v->cap = new_cap;
+  }
+  /* The same candidate write-barrier site as vector_mutset: a push stores into an
+   * already-allocated object, so a generational barrier would have to cover it. */
+  if (sprout_gc_ageprof_on()) sprout_ap_note_ptr_store(vec, value);
+  v->data[v->len] = value;
+  v->len = v->len + 1;
+  return 0;
+}
+
 long long vector_get_direct(long long vec, long long index) {
   VectorVal* v = (VectorVal*)(uintptr_t)vec;
   if (v == NULL) tcp_fail("vector_get_direct: null vector");

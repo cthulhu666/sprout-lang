@@ -1,0 +1,146 @@
+import stdlib.test (TestState, new_state, assert_eq, summary)
+import stdlib.mutable (MutVec, mutvec_new, mutvec_empty, mutvec_push, mutvec_at, mutvec_get, mutvec_set, mutvec_len, mutvec_fold)
+
+# Push the integers [i, n) in ascending order.
+fn push_range(v: MutVec Int, i: Int, n: Int) -> Unit !{IO} =
+  if i >= n then ()
+  else
+    do
+      _ <- mutvec_push(v, i)
+      push_range(v, i + 1, n)
+
+# Sum of [0, n) — the expected fold total for a vector filled by push_range.
+fn sum_to(n: Int) -> Int =
+  n * (n - 1) / 2
+
+fn total(v: MutVec Int) -> Int !{IO} =
+  mutvec_fold(\ (acc, x) -> acc + x, 0, v)
+
+# Order-sensitive checksum: a * 31 + x, so a permutation of the same elements
+# gives a different number (a plain sum would not).
+fn checksum(v: MutVec Int) -> Int !{IO} =
+  mutvec_fold(\ (acc, x) -> acc * 31 + x, 7, v)
+
+# Taken as an already-computed Maybe rather than doing the lookup here: inside a
+# `do` block, `m <- mutvec_get(..)` would fallible-bind and unwrap the Maybe, which
+# is precisely the Nothing case these assertions need to observe.
+fn or_else(m: Maybe Int, dflt: Int) -> Int =
+  match m with
+  | Just x -> x
+  | Nothing -> dflt
+
+fn main() -> Unit !{IO} =
+  do
+    state <- new_state()
+
+    # mutvec_empty starts at length 0.
+    e <- mutvec_empty()
+    assert_eq(state, "mutvec_empty starts empty", mutvec_len(e), 0)
+
+    # A single push onto an empty vector: cap 0 -> 8.
+    _ <- mutvec_push(e, 5)
+    assert_eq(state, "push onto empty sets len 1", mutvec_len(e), 1)
+    e0 <- mutvec_at(e, 0)
+    assert_eq(state, "push onto empty stores the element", e0, 5)
+
+    # R2 — len tracks pushes, not capacity. 40 crosses cap 8 -> 16 -> 32 -> 64.
+    v <- mutvec_empty()
+    _ <- push_range(v, 0, 40)
+    assert_eq(state, "R2 len counts pushes across three regrowths", mutvec_len(v), 40)
+    assert_eq(state, "push preserves every element across regrowth", total(v), sum_to(40))
+    v0 <- mutvec_at(v, 0)
+    v7 <- mutvec_at(v, 7)
+    v8 <- mutvec_at(v, 8)
+    v39 <- mutvec_at(v, 39)
+    assert_eq(state, "element 0 survives regrowth", v0, 0)
+    assert_eq(state, "element 7 (last of the first block) survives", v7, 7)
+    assert_eq(state, "element 8 (first past the first regrowth)", v8, 8)
+    assert_eq(state, "element 39 (last pushed)", v39, 39)
+
+    # Ascending order is preserved, not just membership.
+    ordered <- mutvec_empty()
+    _ <- push_range(ordered, 0, 12)
+    expected <- mutvec_new(12, 0)
+    _ <- fill_ascending(expected, 0, 12)
+    ec <- checksum(expected)
+    oc <- checksum(ordered)
+    assert_eq(state, "push preserves index order", oc, ec)
+
+    # R3 — growth is visible through a copy of the handle taken BEFORE the growth.
+    # This is the acceptance criterion, and the only one that can fail silently: a
+    # push that reallocated into a FRESH VectorVal would pass every test above and
+    # still leave earlier holders of the handle pointing at the stale buffer.
+    orig <- mutvec_empty()
+    _ <- push_range(orig, 0, 4)
+    let alias = orig
+    assert_eq(state, "R3 alias agrees before growth", mutvec_len(alias), 4)
+    _ <- push_range(orig, 4, 40)
+    assert_eq(state, "R3 alias sees the length after growth", mutvec_len(alias), 40)
+    a39 <- mutvec_at(alias, 39)
+    assert_eq(state, "R3 alias sees an element pushed after growth", a39, 39)
+    assert_eq(state, "R3 alias sees the whole grown contents", total(alias), sum_to(40))
+
+    # R4 — bounds stay against len, not cap. After 9 pushes cap is 16, so indices
+    # 9..15 are allocated but not live; reading one must miss, never return the
+    # uninitialised slot.
+    b <- mutvec_empty()
+    _ <- push_range(b, 0, 9)
+    assert_eq(state, "R4 len is 9 after nine pushes", mutvec_len(b), 9)
+    assert_eq(state, "R4 last live index reads back", or_else(mutvec_get(b, 8), -1), 8)
+    assert_eq(state, "R4 first index past len misses", or_else(mutvec_get(b, 9), -1), -1)
+    assert_eq(state, "R4 index inside spare capacity misses", or_else(mutvec_get(b, 15), -1), -1)
+    assert_eq(state, "R4 negative index misses", or_else(mutvec_get(b, 0 - 1), -1), -1)
+
+    # Push onto a filled vector (len == cap == n from mutvec_new): the realloc must
+    # keep the existing prefix and append after it.
+    f <- mutvec_new(3, 7)
+    _ <- mutvec_push(f, 100)
+    assert_eq(state, "push onto a filled vector grows len", mutvec_len(f), 4)
+    f0 <- mutvec_at(f, 0)
+    f2 <- mutvec_at(f, 2)
+    f3 <- mutvec_at(f, 3)
+    assert_eq(state, "realloc keeps prefix slot 0", f0, 7)
+    assert_eq(state, "realloc keeps prefix slot 2", f2, 7)
+    assert_eq(state, "push appends after the prefix", f3, 100)
+
+    # Two mutvec_empty() calls must yield two independent vectors. mutvec_empty
+    # wraps `vector_empty`, which the prelude declares PURE (it has to: prelude Vec
+    # code calls it in pure contexts). If the compiler ever shares or hoists that
+    # nullary pure call, both handles become the same buffer and this fails.
+    p <- mutvec_empty()
+    q <- mutvec_empty()
+    _ <- mutvec_push(p, 1)
+    assert_eq(state, "mutvec_empty does not share a buffer", mutvec_len(q), 0)
+    _ <- mutvec_push(q, 2)
+    assert_eq(state, "independent buffers keep their own length", mutvec_len(p), 1)
+    p0 <- mutvec_at(p, 0)
+    q0 <- mutvec_at(q, 0)
+    assert_eq(state, "independent buffers keep their own contents (p)", p0, 1)
+    assert_eq(state, "independent buffers keep their own contents (q)", q0, 2)
+
+    # Heap elements, not just unboxed Ints: the collector scans data[0..len), so a
+    # pushed String must stay reachable. The interleaved allocation is there to give
+    # a collection somewhere to happen (and under SPROUT_GC_STRESS=1, it does).
+    s <- mutvec_empty()
+    _ <- push_strings(s, 0, 30)
+    assert_eq(state, "pushed strings: length", mutvec_len(s), 30)
+    s0 <- mutvec_at(s, 0)
+    s29 <- mutvec_at(s, 29)
+    assert_eq(state, "pushed string survives regrowth (first)", s0, "item-0")
+    assert_eq(state, "pushed string survives regrowth (last)", s29, "item-29")
+
+    summary(state)
+
+fn fill_ascending(v: MutVec Int, i: Int, n: Int) -> Unit !{IO} =
+  if i >= n then ()
+  else
+    do
+      _ <- mutvec_set(v, i, i)
+      fill_ascending(v, i + 1, n)
+
+fn push_strings(v: MutVec String, i: Int, n: Int) -> Unit !{IO} =
+  if i >= n then ()
+  else
+    do
+      _ <- mutvec_push(v, `item-${int_to_string(i)}`)
+      push_strings(v, i + 1, n)
