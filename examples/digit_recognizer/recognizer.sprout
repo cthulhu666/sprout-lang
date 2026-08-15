@@ -1,6 +1,7 @@
 module examples.digit_recognizer.recognizer
 import stdlib.mutable (MutVec, mutvec_new, mutvec_at, mutvec_set, mutvec_map_inplace, MutMatrix, mutmatrix_new, mutmatrix_set, mutmatrix_cols, mutmatrix_rows, mutmatrix_row_dot, mutmatrix_row_sub_scaled_inplace, mutmatrix_row_add_scaled_into)
 import stdlib.fs as fs
+import stdlib.string as string
 
 # Handwritten-digit recognition trained on real public data.
 #

@@ -1,6 +1,7 @@
 import stdlib.test (TestState, new_state, assert_true, assert_false, summary)
 import stdlib.regex as regex
 import stdlib.terminal as terminal
+import stdlib.string as string
 
 # ABI guard for every builtin reached through `extern fn … -> Bool`.
 #

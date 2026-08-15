@@ -1,4 +1,5 @@
 import stdlib.test (TestState, new_state, assert_eq, assert_true, summary)
+import stdlib.math as math
 
 # `double_to_bits` / `double_from_bits` — raw IEEE 754 binary64 reinterpretation.
 #

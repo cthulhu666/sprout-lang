@@ -2,6 +2,35 @@ module stdlib.string
 import stdlib.collections (List, Vec, vec_empty, vec_append)
 import stdlib.bytes as bytes
 
+# String primitives owned by this module rather than by the prelude.
+#
+# The prelude keeps the CHAR-INDEXED core that every program uses without thinking —
+# `str_len`, `str_slice`, `str_char_at`, `str_find`, `str_starts_with`, `str_concat`,
+# `str_compare`, `char_to_string`. Those are beginner-facing ergonomics and stay globally
+# reachable. What lives here is the specialist surface: BYTE-indexed operations, whole-string
+# splitters, and codepoint-level Char conversion. Byte offsets in particular are an encoding and
+# performance concern, not a first-week one — a caller reaching for `str_byte_len` over `str_len`
+# is making a deliberate choice, and an explicit import is the right place to record it.
+#
+# Unlike stdlib.fs / stdlib.time / stdlib.terminal, consumers of these call them BY BARE NAME and
+# import this module only to bundle it. That is deliberate: `str_starts_with_at_byte` runs ~70
+# times in stdlib/json.sprout's parse loop and `str_slice_bytes` sits in the lexer's per-token
+# path, so routing them through wrappers would fold an unmeasured performance change into a
+# relocation refactor. Externs resolve by bare name wherever their module is bundled
+# (bundler.sprout:597 never registers them), so the import alone is sufficient — and a consumer
+# that forgets it gets `Unknown variable`, not a missing-import diagnostic.
+extern fn str_byte_len(s: String) -> Int
+# O(strlen + byte_len). Byte-indexed substring; faster than str_slice when the caller
+# already tracks byte positions (most compiler stdlib scanning loops).
+# CALLER CONTRACT: byte_start and byte_start+byte_len MUST land on UTF-8 codepoint
+# boundaries. The runtime panics on a mid-codepoint split rather than silently emitting
+# invalid UTF-8. For codepoint-indexed slicing of arbitrary user input, use `str_slice`
+# (prelude) or `slice` below instead.
+extern fn str_slice_bytes(s: String, byte_start: Int, byte_len: Int) -> String
+extern fn str_starts_with_at_byte(s: String, byte: Int, prefix: String) -> Bool
+extern fn str_split_lines(s: String) -> List String
+extern fn split_words(s: String) -> List String
+
 export fn words(raw: String) -> List String =
   split_words(raw)
 

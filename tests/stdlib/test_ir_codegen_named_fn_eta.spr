@@ -1,3 +1,4 @@
+import stdlib.string as string
 # Rebase-merge regression marker: synthesize_eta_wrapper must build IRFunction
 # with List (String, IRType) params, not List String. PR #44 (IRType ADT) changed
 # the IRFunction constructor; PR #51 must use build_wrapper_arg_params (not
