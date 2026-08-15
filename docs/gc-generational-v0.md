@@ -235,12 +235,27 @@ BACKLOG:283 says the barrier goes in `ref_write` **+** `vector_mutset`; BACKLOG:
 says the remembered set is "populated only in `ref_write` (the sole mutation
 primitive)". Enumerated:
 
-- **Barrier sites:** `ref_write` (`sprout_runtime.c`) and `vector_mutset`. All
-  `MutVec`/`MutMatrix` writes route through the latter — `mutvec_set` calls
-  `vector_mutset`, `mutmatrix_set` calls `mutvec_set`, and the fused
-  `mutmatrix_row_sub_scaled_go` also calls `vector_mutset`. `stdlib/mutable.sprout`
-  declares no writing externs of its own, so there is no bypass. **BACKLOG:283 is
-  right and BACKLOG:1355 is wrong.**
+- **Barrier sites: `ref_write`, `vector_mutset`, and `vector_push`** (all in
+  `sprout_runtime.c`). Indexed `MutVec`/`MutMatrix` writes route through
+  `vector_mutset` — `mutvec_set` calls it, `mutmatrix_set` calls `mutvec_set`, and
+  the fused `mutmatrix_row_sub_scaled_go` calls it directly. Appends route through
+  `vector_push`, which stores a pointer into an already-allocated `VectorVal`
+  exactly as `vector_mutset` does. **BACKLOG:283 is right about the first two and
+  BACKLOG:1355 is wrong.**
+
+  > **This list was wrong for one commit, and the way it went wrong is the point.**
+  > Until 2026-08-15 it enumerated only the first two sites and closed the argument
+  > with "`stdlib/mutable.sprout` declares no writing externs of its own, so there
+  > is no bypass". Landing growable `MutVec` added `vector_push` to that module and
+  > silently falsified the justification — nothing checks it, so the sentence went
+  > on reading as verified. An implementer who had built the barrier from this
+  > section in the interval would have shipped a nursery that frees live young
+  > objects reachable only through a pushed slot. **Before implementing §8 step 3,
+  > re-derive this list from the runtime rather than trusting it**, and treat
+  > mechanising the check as part of the work: grep `sprout_runtime.c` for every
+  > non-static function that writes into an existing object's payload
+  > (`v->data[...] = `, `->value = `, and friends) and confirm each either carries
+  > the barrier or is provably persistent.
 - **Not barrier sites — the scheduler's stores into task structs**
   (`r->chan_pending`, `st->chan_pending`, `self->chan_pending`, `t->result` in
   `runtime/sprout_scheduler.c`). They are rooted by address (`/* rooted via
@@ -263,7 +278,8 @@ Sequencing, if it goes ahead:
    minor collection that still rebuilds the whole heap's freelist is not proportional
    to the young set.
 2. Sticky-mark-bit promotion using bits 9–13, reusing this instrument's age field.
-3. A **typed** barrier (§6) at the two sites in §7, with the remembered set shaped
+3. A **typed** barrier (§6) at the sites in §7 — **re-derived from the runtime, not
+   read off that list**, per the warning there — with the remembered set shaped
    **per-domain from day one** — BACKLOG:1355 proposes one global fixed-size array,
    while tier-2 share-nothing multicore is the declared direction
    (`docs/concurrency-design-exploration-2026-07-13.md`) and both Erlang and OCaml 5
