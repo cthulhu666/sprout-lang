@@ -97,7 +97,10 @@ for tu in sprout_poll.c sprout_scheduler.c sprout_runtime.c; do
   if "${CC[@]}" "$ROOT/runtime/$tu" >"$TMP/err" 2>&1; then
     echo "compiles"
   else
-    head -1 "$TMP/err" | sed "s|$ROOT/||"
+    # The first LINE is often "In file included from …" — a note, not the blocker. Take the
+    # first line that actually says `error:`, falling back to line 1 if clang worded it some
+    # other way.
+    { grep -m1 'error:' "$TMP/err" || head -1 "$TMP/err"; } | sed "s|$ROOT/||"
   fi
 done
 

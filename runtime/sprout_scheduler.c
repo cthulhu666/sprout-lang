@@ -1,8 +1,9 @@
 /* Cooperative green-thread scheduler for Sprout L0.1 structured concurrency
  * (EXPERIMENTAL). Single OS thread, no preemption: tasks run until they call
- * task_yield (or finish). Housed in its own translation unit so the deprecated-
- * on-macOS ucontext API and its feature-test macros stay out of the main
- * runtime. See docs/concurrency-design-exploration-2026-07-13.md (§4.A, §8.5)
+ * task_yield (or finish). Housed in its own translation unit so the platform
+ * context-switch machinery stays out of the main runtime; the switch itself sits
+ * behind runtime/sprout_context.h, the one part of the runtime with no portable
+ * spelling. See docs/concurrency-design-exploration-2026-07-13.md (§4.A, §8.5)
  * and runtime/sprout_scheduler.h for the GC-root-context contract.
  *
  * Concurrency model (L0.1/L0.2): structured, join-only. `with_scope` opens a
@@ -20,22 +21,14 @@
  * lands in the correct per-task LIFO.
  */
 
-/* ucontext on macOS lives behind these feature-test macros; define before any
- * include pulls in <sys/ucontext.h>. */
-#define _XOPEN_SOURCE 700
-#define _DARWIN_C_SOURCE 1
+/* FIRST: it defines the feature-test macros that select the context API, and
+ * those are inert once any libc header has been read. */
+#include "sprout_context.h"
 
 #include <stdlib.h>
 #include <stdint.h>
-#include <ucontext.h>
 #include <unistd.h>   /* close() — force-dropping an unowned-fd park closes the socket */
 #include "sprout_scheduler.h"
-
-/* macOS marks makecontext/swapcontext deprecated; we knowingly use them. */
-#ifdef __APPLE__
-#pragma clang diagnostic push
-#pragma clang diagnostic ignored "-Wdeprecated-declarations"
-#endif
 
 /* Fixed per-task sizing. Stacks and root pools are non-moving mallocs — required
  * because a root slot is an address into the task's stack read while the task is
@@ -71,8 +64,7 @@ typedef struct Chan Chan;
 typedef struct SelectWaiter SelectWaiter;
 
 typedef struct Task {
-  ucontext_t   ctx;
-  void*        stack;      /* malloc'd green stack; NULL for task-0 (native stack) */
+  SproutCtx    ctx;        /* execution context; OWNS the green stack (none for task-0) */
   SproutRoots* roots;      /* this task's GC temp-root context */
   long long    work;       /* Unit->a closure handle (env ptr); rooted via &work */
   long long    result;     /* awaitable task's result; rooted via &result post-done */
@@ -184,8 +176,7 @@ struct SelectWaiter {
 /* The single scheduler pump. Every task (and task-0/main) PARKS by swapping to
  * g_pump; the pump resumes a task by swapping into it. One pump owns the whole
  * schedule, so nesting and I/O parking fall out of the same mechanism. */
-static ucontext_t g_pump;
-static char       g_pump_stack[SPROUT_PUMP_STACK_BYTES];
+static SproutCtx  g_pump;
 
 /* task-0 (main): native stack + the 131072-slot compiler root pool. Materialized
  * as a Task so the pump parks/resumes it uniformly (roots set at startup). */
@@ -396,7 +387,7 @@ static long long sprout_task_invoke(long long work) {
 /* Park the current task: hand control to the pump. The pump restores
  * g_current_task + g_current_roots before it resumes us. */
 static void park_to_pump(void) {
-  swapcontext(&g_current_task->ctx, &g_pump);
+  sprout_ctx_switch(&g_current_task->ctx, &g_pump);
 }
 
 /* The scheduler pump loop (runs on its own stack). Picks the next runnable task;
@@ -443,23 +434,22 @@ static void pump_loop(void) {
     }
     g_current_task = t;
     sprout_roots_switch(t->roots);        /* switch-point: match roots to the task */
-    swapcontext(&g_pump, &t->ctx);        /* run t until it parks or finishes */
+    sprout_ctx_switch(&g_pump, &t->ctx);  /* run t until it parks or finishes */
     if (t != &g_task0 && t->done) {       /* finished (task-0 never reclaimed here) */
       if (t->awaitable) {
         /* Keep the record + roots (they root the result) until task_await consumes
          * it or the owning scope closes; only the green stack is done with here. */
-        free(t->stack);
-        t->stack = NULL;
+        sprout_ctx_destroy(&t->ctx);
       } else {                            /* fire-and-forget: reclaim everything now */
         sprout_roots_free(t->roots);
-        free(t->stack);
+        sprout_ctx_destroy(&t->ctx);
         free(t);
       }
     }
   }
 }
 
-/* makecontext entry point for a green task. On entry the pump has set
+/* Entry point of a green task's context. On entry the pump has set
  * g_current_task to us and switched g_current_roots to our context. Runs the body,
  * wakes any awaiter and the scope's joiner if we were the last, then parks forever. */
 static void task_trampoline(void) {
@@ -506,7 +496,7 @@ static void task_trampoline(void) {
     rq_push(s->waiter);
     s->waiter = NULL;
   }
-  swapcontext(&t->ctx, &g_pump);   /* back to the pump; never resumed (done) */
+  sprout_ctx_switch(&t->ctx, &g_pump);   /* back to the pump; never resumed (done) */
 }
 
 /* Startup: initialize the poller and the pump context, and materialize task-0.
@@ -516,7 +506,7 @@ __attribute__((constructor))
 static void sprout_scheduler_init(void) {
   sprout_poll_init();
 
-  g_task0.stack = NULL;                 /* native stack; never freed */
+  sprout_ctx_adopt_current(&g_task0.ctx); /* the process's own stack; never freed */
   g_task0.roots = sprout_roots_main();  /* the 131072-slot compiler pool */
   g_task0.done  = 0;
   g_task0.scope = NULL;
@@ -546,11 +536,9 @@ static void sprout_scheduler_init(void) {
   sprout_roots_push_ptr(g_task0.roots, &g_task0.chan_pending);
   g_current_task = &g_task0;
 
-  if (getcontext(&g_pump) != 0) sprout_fail("sprout_scheduler_init: getcontext failed");
-  g_pump.uc_stack.ss_sp   = g_pump_stack;
-  g_pump.uc_stack.ss_size = SPROUT_PUMP_STACK_BYTES;
-  g_pump.uc_link          = NULL;       /* pump_loop never returns */
-  makecontext(&g_pump, pump_loop, 0);
+  int rc = sprout_ctx_create(&g_pump, pump_loop, SPROUT_PUMP_STACK_BYTES);
+  if (rc == SPROUT_CTX_ENOMEM) sprout_fail("sprout_scheduler_init: out of memory (pump stack)");
+  if (rc != 0)                 sprout_fail("sprout_scheduler_init: getcontext failed");
 }
 
 long long __scope_open(void) {
@@ -564,15 +552,13 @@ long long __scope_open(void) {
   return (long long)(intptr_t)s;
 }
 
-/* Shared task construction: allocate the record + green stack + GC root context,
- * root the work-closure, prime the ucontext, and enqueue it runnable. `awaitable`
- * selects the reclamation lifecycle (see the Task struct and pump_loop). Returns
- * the new Task*. */
+/* Shared task construction: allocate the record + GC root context, root the
+ * work-closure, prime the execution context (which allocates the green stack),
+ * and enqueue it runnable. `awaitable` selects the reclamation lifecycle (see the
+ * Task struct and pump_loop). Returns the new Task*. */
 static Task* task_create(Scope* s, long long work, int awaitable) {
   Task* t = (Task*)malloc(sizeof(Task));
   if (t == NULL) sprout_fail("task scheduler: out of memory (task record)");
-  t->stack = malloc(SPROUT_TASK_STACK_BYTES);
-  if (t->stack == NULL) sprout_fail("task scheduler: out of memory (green stack)");
   t->roots      = sprout_roots_new(SPROUT_TASK_ROOT_SLOTS);
   t->work       = work;
   t->result     = 0;
@@ -613,12 +599,10 @@ static Task* task_create(Scope* s, long long work, int awaitable) {
   sprout_roots_push_ptr(t->roots, &t->work);
   sprout_roots_push_ptr(t->roots, &t->chan_pending);
 
-  /* getcontext initializes the struct before makecontext reads its uc_* fields. */
-  if (getcontext(&t->ctx) != 0) sprout_fail("task scheduler: getcontext failed");
-  t->ctx.uc_stack.ss_sp   = t->stack;
-  t->ctx.uc_stack.ss_size = SPROUT_TASK_STACK_BYTES;
-  t->ctx.uc_link          = NULL;   /* trampoline swaps out explicitly; never returns */
-  makecontext(&t->ctx, task_trampoline, 0);
+  /* Allocates the green stack and primes the context to enter the trampoline on it. */
+  int rc = sprout_ctx_create(&t->ctx, task_trampoline, SPROUT_TASK_STACK_BYTES);
+  if (rc == SPROUT_CTX_ENOMEM) sprout_fail("task scheduler: out of memory (green stack)");
+  if (rc != 0)                 sprout_fail("task scheduler: getcontext failed");
 
   rq_push(t);       /* runnable, in the global queue */
   s->live++;
@@ -740,12 +724,12 @@ static void force_drop_task(Task* t) {
   /* Free roots first (unregisters the context so no later collection scans it), then the
    * stack; no allocation between (design §7). */
   sprout_roots_free(t->roots);
-  free(t->stack);
+  sprout_ctx_destroy(&t->ctx);
   if (t->awaitable) {
-    /* Record stays reachable via scope->forks; scope-close frees it. Null the freed pointers
-     * so close's guard skips them (no double-free). Never awaited. */
+    /* Record stays reachable via scope->forks; scope-close frees it. Null the freed roots
+     * pointer so close's guard skips it (no double-free); ctx_destroy is itself idempotent.
+     * Never awaited. */
     t->roots = NULL;
-    t->stack = NULL;
   } else {
     /* Fire-and-forget: not in scope->forks, so free the record here and now. */
     free(t);
@@ -1327,7 +1311,3 @@ long long __chan_select(long long list_handle) {
   self->chan_pending = 0;
   return sprout_chan_make_selected(i, sprout_chan_make_got(v));
 }
-
-#ifdef __APPLE__
-#pragma clang diagnostic pop
-#endif
