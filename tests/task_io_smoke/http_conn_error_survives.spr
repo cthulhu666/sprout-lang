@@ -3,6 +3,7 @@ import stdlib.chan (Chan, chan_new, chan_send, chan_recv)
 import stdlib.net (TcpConnection, connect, write_all_utf8, read_exact_utf8, close)
 import stdlib.http_server (HttpRequest, HttpServerResponse, ok, request_path, serve_n)
 import stdlib.string as string
+import stdlib.terminal as terminal
 
 # C1 regression: a single connection's transport failure must NOT abort the whole
 # server process. `crash_client` connects, sends a full request, then CLOSES without
@@ -57,7 +58,7 @@ fn good_client(port: Int, ready: Chan Int) -> Unit !{IO} =
 fn good_connect(port: Int) -> Unit !{IO} =
   match connect("127.0.0.1", port) with
   | Ok conn -> good_send_and_report(conn)
-  | Err _ -> term_write("good connect failed\n")
+  | Err _ -> terminal.write("good connect failed\n")
 
 # Bare statement for the same reason as above: `_ <-` would skip `good_report` and `close` on a write
 # error, turning a diagnosable failure into a silent no-output pass plus a leaked connection.
@@ -70,9 +71,9 @@ fn good_send_and_report(conn: consuming TcpConnection) -> Unit !{IO} =
 fn good_report(conn: borrowing TcpConnection) -> Unit !{IO} =
   match read_exact_utf8(conn, 12) with
   | Ok line ->
-      if line == "HTTP/1.1 200" then term_write("good served\n")
-      else term_write(`good bad ${line}\n`)
-  | Err _ -> term_write("good read failed\n")
+      if line == "HTTP/1.1 200" then terminal.write("good served\n")
+      else terminal.write(`good bad ${line}\n`)
+  | Err _ -> terminal.write("good read failed\n")
 
 fn run(s: Scope, port: Int, ready: Chan Int) -> Unit !{IO} =
   do
@@ -90,4 +91,4 @@ fn body(s: Scope) -> Unit !{IO} =
 fn main() -> Unit !{IO} =
   do
     with_scope(\s -> body(s))
-    term_write("done\n")
+    terminal.write("done\n")

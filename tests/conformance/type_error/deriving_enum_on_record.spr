@@ -1,8 +1,10 @@
 # `deriving (Enum)` is ill-defined for a record: Enum requires a nullary-only
 # ADT (ordinal <-> constructor), but a record is a single field-bearing product.
 # The error fires eagerly at the deriving site (bundle time), not at a use site.
+import stdlib.terminal as terminal
+
 type Point = (x: Int, y: Int) deriving (Enum)
 
 fn main() -> Unit !{IO} =
   do
-    term_write("unreachable")
+    terminal.write("unreachable")

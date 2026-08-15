@@ -3,6 +3,7 @@ import stdlib.net (TcpConnection, connect, close, write_all_utf8, read_avail_tim
 import stdlib.bytes as bytes
 import stdlib.http_server (HttpRequest, HttpServerResponse, ServerConfig, ok, serve_n_with)
 import stdlib.string as string
+import stdlib.terminal as terminal
 
 # http_server response-WRITE bound (review follow-up to the C3 read-timeout work).
 #
@@ -70,9 +71,9 @@ fn stall_then_check(conn: borrowing TcpConnection) -> Unit !{IO} =
     task_sleep(1200)
     received <- drain(conn, 0)
     if received < 4000000 then
-      term_write("write-bounded\n")
+      terminal.write("write-bounded\n")
     else
-      term_write(`MISMATCH: server delivered ${int_to_string(received)} bytes of a stalled response\n`)
+      terminal.write(`MISMATCH: server delivered ${int_to_string(received)} bytes of a stalled response\n`)
 
 fn deaf_client(port: Int) -> Unit !{IO} =
   match connect("127.0.0.1", port) with
@@ -80,9 +81,9 @@ fn deaf_client(port: Int) -> Unit !{IO} =
     do
       match write_all_utf8(conn, "GET /big HTTP/1.1\r\nHost: x\r\n\r\n") with
       | Ok _ -> stall_then_check(conn)
-      | Err _ -> term_write("MISMATCH: deaf client could not send its request\n")
+      | Err _ -> terminal.write("MISMATCH: deaf client could not send its request\n")
       close(conn)
-  | Err _ -> term_write("MISMATCH: deaf client could not connect\n")
+  | Err _ -> terminal.write("MISMATCH: deaf client could not connect\n")
 
 # The server task is spawned first so it reaches `tcp_listen` (and parks in accept) before the client
 # task runs — the startup ordering every fixture in this directory relies on.
@@ -95,4 +96,4 @@ fn run(s: Scope, port: Int) -> Unit !{IO} =
 fn main() -> Unit !{IO} =
   do
     with_scope(\s -> run(s, 28989))
-    term_write("done\n")
+    terminal.write("done\n")

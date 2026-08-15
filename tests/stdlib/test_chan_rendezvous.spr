@@ -3,6 +3,7 @@ import stdlib.task (Scope, with_scope, task_spawn, task_fork, task_await, task_y
 import stdlib.chan (Chan, Recv, Got, Closed, chan_new, chan_send, chan_recv)
 import stdlib.mutable (MutVec, mutvec_new, mutvec_get, mutvec_set)
 import stdlib.string as string
+import stdlib.terminal as terminal
 
 # Rendezvous (capacity-0) channels (EXPERIMENTAL). `chan_new(scope, 0)` creates an UNBUFFERED
 # channel: a send does not complete until a receiver takes the value, and a receive does not
@@ -58,7 +59,7 @@ fn send_blocks(s: Scope) -> Int !{IO} =
 # it the second exchange deadlocks. Sum is order-independent, but reaching it at all is the test. ---
 fn produce(ch: Chan Int, i: Int, n: Int) -> Unit !{IO} =
   if i > n then
-    term_write("")
+    terminal.write("")
   else
     do
       chan_send(ch, i)  # blocks until the consumer takes it

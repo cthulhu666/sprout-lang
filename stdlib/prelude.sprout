@@ -1522,15 +1522,9 @@ extern fn ref_write(r: Ref a, val: a) -> Unit !{IO}
 # explicitly — a socket read is not something a program should be able to reach by accident. The one
 # exception used to be `tcp_read`, whose String return type is exactly why it is gone.
 
-# Terminal
-extern fn term_clear() -> Unit !{IO}
-extern fn term_move(row: Int, col: Int) -> Unit !{IO}
-extern fn term_hide_cursor() -> Unit !{IO}
-extern fn term_show_cursor() -> Unit !{IO}
-extern fn term_is_interactive() -> Bool !{IO}
-extern fn term_read_key() -> String !{IO}
-extern fn term_read_line() -> Maybe String !{IO}
-extern fn term_write(text: String) -> Unit !{IO}
+# Terminal primitives are NOT declared here. They live in stdlib.terminal, which must be imported
+# explicitly and exposes them through a wrapper API (`write`, `clear`, ...) rather than the raw
+# term_* names.
 
 
 # Crypto primitives are NOT declared here. They live in stdlib.crypto, which declares the full

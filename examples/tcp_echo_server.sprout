@@ -1,5 +1,6 @@
 module examples.tcp_echo_server
 import stdlib.net (TcpConnection, TcpListener, accept, close, close_listener, listen_local, read_avail_timeout, tcp_error_message, write_all)
+import stdlib.terminal as terminal
 
 # Multi-connection TCP echo server.
 #
@@ -21,15 +22,15 @@ fn echo(conn: consuming TcpConnection) -> Unit !{IO} =
     match read_avail_timeout(conn, 30000) with
     | Ok payload ->
         match write_all(conn, payload) with
-        | Ok _ -> term_write("echoed\n")
-        | Err err -> term_write(`write failed: ${tcp_error_message(err)}\n`)
+        | Ok _ -> terminal.write("echoed\n")
+        | Err err -> terminal.write(`write failed: ${tcp_error_message(err)}\n`)
     # A read error — including the 30s deadline expiring, and including a client that simply reset —
     # drops THIS connection and returns to the accept loop. The old C loop aborted the process.
-    | Err err -> term_write(`read failed: ${tcp_error_message(err)}\n`)
+    | Err err -> terminal.write(`read failed: ${tcp_error_message(err)}\n`)
     close(conn)
 
 fn serve_loop(listener: borrowing TcpListener, remaining: Int) -> Unit !{IO} =
-  if remaining <= 0 then term_write("connection budget exhausted\n")
+  if remaining <= 0 then terminal.write("connection budget exhausted\n")
   else
     match accept(listener) with
     | Ok conn ->
@@ -39,7 +40,7 @@ fn serve_loop(listener: borrowing TcpListener, remaining: Int) -> Unit !{IO} =
     # Recoverable since the C3 fix: before it, any accept error killed the process. Note this stops the
     # loop rather than retrying — `stdlib.http_server` is where the retry-and-back-off policy lives,
     # and duplicating it here would make a minimal example less minimal.
-    | Err err -> term_write(`accept failed: ${tcp_error_message(err)}\n`)
+    | Err err -> terminal.write(`accept failed: ${tcp_error_message(err)}\n`)
 
 fn main() -> Unit !{IO} =
   do

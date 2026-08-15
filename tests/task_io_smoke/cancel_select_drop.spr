@@ -1,5 +1,6 @@
 import stdlib.task (Scope, with_scope, task_fork, detach, task_spawn, task_yield, scope_cancel)
 import stdlib.chan (Chan, Recv, Got, Closed, chan_new, chan_select)
+import stdlib.terminal as terminal
 
 # L0.11 select-drop cancellation (EXPERIMENTAL). A task parked in chan_select is registered on
 # EVERY channel it listed at once, so force-drop must unlink it from ALL of them (not just one) and
@@ -22,13 +23,13 @@ fn select_forever(a: Chan Int, b: Chan Int) -> Int !{IO} =
   do
     let held = "live-" ++ "root"
     v <- sel_val(a, b)  # parks on BOTH a and b forever — nobody ever sends
-    term_write(held)  # unreachable; forces `held` rooted across the park
+    terminal.write(held)  # unreachable; forces `held` rooted across the park
     v
 
 fn select_forever_unit(a: Chan Int, b: Chan Int) -> Unit !{IO} =
   do
     _ <- select_forever(a, b)
-    term_write("")
+    terminal.write("")
 
 fn run(s: Scope) -> Unit !{IO} =
   do
@@ -38,9 +39,9 @@ fn run(s: Scope) -> Unit !{IO} =
     task_spawn(s, \_ -> select_forever_unit(a, b))  # fire-and-forget, select-parks on [a, b]
     task_yield()  # let both reach chan_select and register on both channels
     scope_cancel(s)  # force-drop both, unlinking each from BOTH a and b
-    term_write("cancelled\n")  # owner continues; awaits neither
+    terminal.write("cancelled\n")  # owner continues; awaits neither
 
 fn main() -> Unit !{IO} =
   do
     with_scope(\s -> run(s))
-    term_write("done\n")  # reached only if both select-parked tasks were dropped from all channels
+    terminal.write("done\n")  # reached only if both select-parked tasks were dropped from all channels

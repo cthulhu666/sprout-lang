@@ -1,5 +1,6 @@
 import stdlib.task (Scope, with_scope, task_fork, detach, task_spawn, task_yield, scope_cancel)
 import stdlib.chan (Chan, chan_new, chan_send)
+import stdlib.terminal as terminal
 
 # Rendezvous send-park drop (L0.10, EXPERIMENTAL). On a cap-0 channel a sender with no ready
 # receiver parks on the channel's SEND wait-queue (unlike the buffered fixtures, which only ever
@@ -13,7 +14,7 @@ fn send_forever(ch: Chan String) -> Unit !{IO} =
   do
     let held = "live-" ++ "root"
     chan_send(ch, "pay" ++ "load")  # parks here forever — nobody ever receives
-    term_write(held)  # unreachable; forces `held` rooted across the park
+    terminal.write(held)  # unreachable; forces `held` rooted across the park
 
 fn body(s: Scope) -> Unit !{IO} =
   do
@@ -22,9 +23,9 @@ fn body(s: Scope) -> Unit !{IO} =
     task_spawn(s, \_ -> send_forever(ch))  # fire-and-forget, send-parks
     task_yield()  # let both reach chan_send and park
     scope_cancel(s)  # force-drop both send-parked tasks
-    term_write("cancelled\n")  # owner continues; awaits neither
+    terminal.write("cancelled\n")  # owner continues; awaits neither
 
 fn main() -> Unit !{IO} =
   do
     with_scope(\s -> body(s))
-    term_write("done\n")  # reached only if both send-parked tasks were dropped by cancel
+    terminal.write("done\n")  # reached only if both send-parked tasks were dropped by cancel

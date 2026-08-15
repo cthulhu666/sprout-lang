@@ -2,6 +2,7 @@ import stdlib.task (Scope, with_scope, task_spawn, task_sleep)
 import stdlib.net (TcpConnection, connect, close, write_all, write_all_utf8, read_exact_utf8)
 import stdlib.bytes as bytes
 import stdlib.http_server (HttpRequest, HttpServerResponse, ServerConfig, request_body_bytes, response, serve_n_with)
+import stdlib.terminal as terminal
 
 # Binary request bodies. Before this, the body was typed String end to end, which could not carry
 # bytes for two independent reasons — both verified in the runtime, not assumed:
@@ -36,9 +37,9 @@ fn intact(b: Bytes) -> Bool =
 fn expect_status(conn: borrowing TcpConnection, want: String, marker: String) -> Unit !{IO} =
   match read_exact_utf8(conn, 12) with
   | Ok reply ->
-      if reply == want then term_write(`${marker}\n`)
-      else term_write(`MISMATCH: ${marker} got ${reply}\n`)
-  | Err _ -> term_write(`MISMATCH: ${marker} read failed\n`)
+      if reply == want then terminal.write(`${marker}\n`)
+      else terminal.write(`MISMATCH: ${marker} got ${reply}\n`)
+  | Err _ -> terminal.write(`MISMATCH: ${marker} read failed\n`)
 
 fn headers() -> String = "POST /bin HTTP/1.1\r\nHost: x\r\nContent-Length: 3\r\n\r\n"
 
@@ -50,9 +51,9 @@ fn inline_client(port: Int) -> Unit !{IO} =
     do
       match write_all(conn, bytes.append(bytes.from_string(headers()), payload())) with
       | Ok _ -> expect_status(conn, "HTTP/1.1 200", "binary-inline-200")
-      | Err _ -> term_write("MISMATCH: inline client could not send\n")
+      | Err _ -> terminal.write("MISMATCH: inline client could not send\n")
       close(conn)
-  | Err _ -> term_write("MISMATCH: inline client could not connect\n")
+  | Err _ -> terminal.write("MISMATCH: inline client could not connect\n")
 
 # Body in a separate write after a pause, so read_remaining_body must run — the path where the
 # strlen-based accumulator did its damage.
@@ -66,10 +67,10 @@ fn split_client(port: Int) -> Unit !{IO} =
             task_sleep(100)
             match write_all(conn, payload()) with
             | Ok _ -> expect_status(conn, "HTTP/1.1 200", "binary-split-200")
-            | Err _ -> term_write("MISMATCH: split client could not send its body\n")
-      | Err _ -> term_write("MISMATCH: split client could not send its headers\n")
+            | Err _ -> terminal.write("MISMATCH: split client could not send its body\n")
+      | Err _ -> terminal.write("MISMATCH: split client could not send its headers\n")
       close(conn)
-  | Err _ -> term_write("MISMATCH: split client could not connect\n")
+  | Err _ -> terminal.write("MISMATCH: split client could not connect\n")
 
 fn run(s: Scope, port: Int) -> Unit !{IO} =
   do
@@ -81,4 +82,4 @@ fn run(s: Scope, port: Int) -> Unit !{IO} =
 fn main() -> Unit !{IO} =
   do
     with_scope(\s -> run(s, 28995))
-    term_write("done\n")
+    terminal.write("done\n")

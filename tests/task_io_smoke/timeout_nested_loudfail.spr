@@ -1,5 +1,6 @@
 import stdlib.task as task
 import stdlib.net (tcp_listen, tcp_accept)
+import stdlib.terminal as terminal
 
 # L0.7 MVP boundary (EXPERIMENTAL). with_timeout can force-drop a body parked DIRECTLY on I/O,
 # but NOT one blocked in a NESTED with_scope join — dropping it would orphan the inner scope, and
@@ -11,7 +12,7 @@ import stdlib.net (tcp_listen, tcp_accept)
 fn worker(listener: Int) -> Unit !{IO} =
   do
     tcp_accept(listener)  # parks forever — no client connects
-    term_write("")
+    terminal.write("")
 
 fn fork_and_join(s: task.Scope, listener: Int) -> Int !{IO} =
   do
@@ -27,6 +28,6 @@ fn main() -> Unit !{IO} =
   do
     la <- tcp_listen(28999)
     match task.with_timeout(50, \_ -> structured_body(la)) with
-    | task.Completed (_) -> term_write("UNEXPECTED completed\n")
-    | task.Expired -> term_write("UNEXPECTED expired\n")
-    term_write("UNEXPECTED done\n")  # unreachable: the deadline must loud-fail on the join-blocked body
+    | task.Completed (_) -> terminal.write("UNEXPECTED completed\n")
+    | task.Expired -> terminal.write("UNEXPECTED expired\n")
+    terminal.write("UNEXPECTED done\n")  # unreachable: the deadline must loud-fail on the join-blocked body

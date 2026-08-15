@@ -1,6 +1,7 @@
 import stdlib.task (Scope, with_scope, task_spawn, task_sleep)
 import stdlib.net (TcpConnection, TcpListener, TcpTimeout, connect, accept, listen_local, close, close_listener, read_avail_timeout, write_all_utf8)
 import stdlib.bytes as bytes
+import stdlib.terminal as terminal
 
 # The two ends of `read_avail_timeout`'s contract, neither of which had any coverage.
 #
@@ -36,20 +37,20 @@ fn serve_late(listener: consuming TcpListener) -> Unit !{IO} =
   | Err _ ->
       do
         close_listener(listener)
-        term_write("MISMATCH: server could not accept\n")
+        terminal.write("MISMATCH: server could not accept\n")
 
 fn report_and_close(conn: consuming TcpConnection, line: String) -> Unit !{IO} =
   do
-    term_write(line)
+    terminal.write(line)
     close(conn)
 
 # Marker discipline: `poll-once-timed-out` / `bounded-read-got-data` appear on their success paths
 # only, never in a failure message the recipe's `grep -q` would then match.
 fn check_poll_once(conn: borrowing TcpConnection) -> Unit !{IO} =
   match read_avail_timeout(conn, 0) with
-  | Err TcpTimeout -> term_write("poll-once-timed-out\n")
-  | Err _ -> term_write("MISMATCH: poll-once reported a socket error\n")
-  | Ok chunk -> term_write(`MISMATCH: poll-once returned ${int_to_string(bytes.length(chunk))} bytes\n`)
+  | Err TcpTimeout -> terminal.write("poll-once-timed-out\n")
+  | Err _ -> terminal.write("MISMATCH: poll-once reported a socket error\n")
+  | Ok chunk -> terminal.write(`MISMATCH: poll-once returned ${int_to_string(bytes.length(chunk))} bytes\n`)
 
 fn check_bounded_read(conn: borrowing TcpConnection) -> Unit !{IO} =
   match read_avail_timeout(conn, 5000) with
@@ -57,11 +58,11 @@ fn check_bounded_read(conn: borrowing TcpConnection) -> Unit !{IO} =
     match bytes.to_string(chunk) with
     | Ok text ->
         if text == "late" then
-          term_write("bounded-read-got-data\n")
+          terminal.write("bounded-read-got-data\n")
         else
-          term_write(`MISMATCH: bounded read returned ${text}\n`)
-    | Err _ -> term_write("MISMATCH: bounded read payload was not text\n")
-  | Err _ -> term_write("MISMATCH: bounded read failed inside its budget\n")
+          terminal.write(`MISMATCH: bounded read returned ${text}\n`)
+    | Err _ -> terminal.write("MISMATCH: bounded read payload was not text\n")
+  | Err _ -> terminal.write("MISMATCH: bounded read failed inside its budget\n")
 
 fn client(port: Int) -> Unit !{IO} =
   match connect("127.0.0.1", port) with
@@ -70,7 +71,7 @@ fn client(port: Int) -> Unit !{IO} =
       check_poll_once(conn)
       check_bounded_read(conn)
       close(conn)
-  | Err _ -> term_write("MISMATCH: client could not connect\n")
+  | Err _ -> terminal.write("MISMATCH: client could not connect\n")
 
 fn run(s: Scope, port: Int) -> Unit !{IO} =
   do
@@ -80,4 +81,4 @@ fn run(s: Scope, port: Int) -> Unit !{IO} =
 fn main() -> Unit !{IO} =
   do
     with_scope(\s -> run(s, 28987))
-    term_write("done\n")
+    terminal.write("done\n")

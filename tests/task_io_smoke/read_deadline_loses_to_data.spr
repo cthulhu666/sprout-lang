@@ -2,6 +2,7 @@ import stdlib.task (Scope, with_scope, task_spawn)
 import stdlib.net (TcpConnection, close, close_listener, connect, accept, listen_local, read_avail_timeout, write_all_utf8)
 import stdlib.string as string
 import stdlib.bytes as bytes
+import stdlib.terminal as terminal
 
 # Regression (code review, finding 7): a read must NEVER report `Err TcpTimeout` while the data it
 # was waiting for is already sitting in the socket buffer.
@@ -32,12 +33,12 @@ import stdlib.bytes as bytes
 # written 50 ms before the deadline, so a timeout is wrong under EVERY event ordering. Fixed code
 # prints "reader got ping" no matter which event the pump sees first; unfixed code prints
 # "reader: TIMED OUT" whenever the timer happens to come first.
-# `term_write("")` is the base case only because Sprout has no `unit` literal — a Unit value comes
+# `terminal.write("")` is the base case only because Sprout has no `unit` literal — a Unit value comes
 # from calling something that returns one, and an empty write is the cheapest no-op available here.
 fn spin_until(target_us: Int) -> Unit !{IO} =
   do
     now <- time_now_micros()
-    if now >= target_us then term_write("") else spin_until(target_us)
+    if now >= target_us then terminal.write("") else spin_until(target_us)
 
 # CPU-bound and parking-free on purpose: a `task_sleep` here would park, the pump would poll, and the
 # two events would land in separate batches — which is precisely the case that never reproduced.
@@ -63,8 +64,8 @@ fn writer(client: consuming TcpConnection) -> Unit !{IO} =
 
 fn report_and_close(conn: consuming TcpConnection, line: String) -> Unit !{IO} =
   do
-    term_write(line)
-    term_write("\n")
+    terminal.write(line)
+    terminal.write("\n")
     close(conn)
 
 # Spawn order matters: `reader` must reach its park before `writer` sends, so that the send lands on

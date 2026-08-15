@@ -1796,6 +1796,39 @@ Legend:
 
 ### 7) Tooling and Developer UX
 
+- [ ] `P2` **`just ir-golden-diff` truncates each file's diff at 40 lines, so DoD #12's "read the
+  diff before regenerating" silently shows a prefix.** `scripts/ir_golden_diff.sh:55` is
+  `diff --unified=3 "$file_a" "$file_b" | head -40`. Any change touching more than ~15 lines per
+  golden overflows it, and the cut is marked only by a bare `---`, which reads as ordinary diff
+  punctuation. Found 2026-08-15 during the prelude-extern split: the change removed 19 declares per
+  file, the tool displayed through `regex_replace_all_literal` and silently dropped `regex_escape`
+  plus all three `crypto_*`. Noticed only by reconciling the reported set against what had been
+  deleted and finding four missing. The recipe's own comment says regenerating without reading is
+  "how a real regression gets laundered into an 'expected' snapshot" — truncation defeats exactly
+  that. **The reliable review is `git diff tests/golden/ir/` AFTER snapshotting**, which is complete
+  by construction; consider making that the documented workflow, raising the cap, or at minimum
+  printing "(truncated, N more lines)" so the reader knows they are seeing a prefix.
+
+- [ ] `P3` **No cross-module DCE for unused exported module functions.** A program importing a
+  module for one function emits every exported function in it. Measured 2026-08-15:
+  `examples/tcp_echo_once.sprout` imports `stdlib.terminal` and calls 3 of its wrappers, but its IR
+  carries all **17** `define`s plus a `__sprout_init_globals` it did not previously need (from
+  `terminal.sprout`'s module-level `let esc`). They are emitted with external linkage, so LLVM's own
+  DCE cannot remove them either. Small in absolute terms, but it makes "import a module to use one
+  helper" cost more than it should, and it is a standing argument against splitting the stdlib into
+  finer modules. Surfaced by the prelude-extern split, which converted bare extern calls into
+  wrapper calls.
+
+- [ ] `P3` **`import stdlib.prelude` silently doubles the prelude in the bundle.** The prelude has
+  no `module` header, so `any_has_module_name` (`bundler.sprout:540`) is false for a file whose only
+  import is `stdlib.prelude`, and the bundler does not auto-prepend — the explicit import supplies
+  the single copy. Add *any* import of a module-bearing file and the auto-prepend switches on, the
+  program gets two copies of every prelude instance, and it fails with `Overlapping instances for
+  Semigroup`. Hit 2026-08-15 in `test_dbe_synthetic.spr` and `test_lexer_slice.spr`; both had a
+  vestigial `import stdlib.prelude as prelude` whose alias was never used, and both were fixed by
+  deleting it. No such import remains in the repo, so this is currently latent — worth a lint that
+  rejects `import stdlib.prelude` outright, since there is no case where it is correct.
+
 - [ ] `P3` **`just test-file` reports a false green for tests that need `SPROUT_STDLIB_ROOT`**
   (2026-08-14). REPL/analysis-service tests guard on `env_get("SPROUT_STDLIB_ROOT")` and no-op
   without it — `test_repl_constraint_check.spr` and `test_repl_type_vocabulary.spr` both print

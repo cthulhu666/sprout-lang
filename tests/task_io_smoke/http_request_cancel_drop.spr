@@ -2,6 +2,7 @@ import stdlib.task (TimeoutResult, Completed, Expired, with_timeout)
 import stdlib.net (TcpListener, close_listener, listen_local)
 import stdlib.http_client (http_get)
 import stdlib.string as string
+import stdlib.terminal as terminal
 
 # Cancelling an in-flight HTTP request must FREE what the request was holding — the socket, and the
 # malloc'd buffers the C frame owns.
@@ -58,9 +59,9 @@ fn drive(remaining: Int, expired: Int) -> Int !{IO} =
   else drive(remaining - 1, expired)
 
 fn report(expired: Int) -> Unit !{IO} =
-  if expired == expected() then term_write("http-cancel-drop-ok\n")
+  if expired == expected() then terminal.write("http-cancel-drop-ok\n")
   else
-    term_write(
+    terminal.write(
       string.concat(
         "http-cancel-drop FAILED: only ",
         string.concat(int_to_string(expired), string.concat(" of ", string.concat(int_to_string(expected()), " requests were force-dropped\n")))

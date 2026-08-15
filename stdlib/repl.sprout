@@ -1,7 +1,7 @@
 module stdlib.repl
 import stdlib.compiler as compiler
 import stdlib.compiler.parser as parser
-import stdlib.terminal (term_is_interactive_once, term_read_key_once, term_read_line_once)
+import stdlib.terminal as terminal
 import stdlib.string as string
 
 let esc = char_to_str(27)
@@ -17,16 +17,16 @@ type ReadResult =
   | ReadNotice String
 
 fn term_noop() -> Unit !{IO} =
-  term_write("")
+  terminal.write("")
 
 fn write_line(prompt: Maybe String, text: String) -> Unit !{IO} =
   match prompt with
-  | Just _ -> term_write(text ++ "\r\n")
+  | Just _ -> terminal.write(text ++ "\r\n")
   | Nothing -> print(text)
 
 fn finish_loop(prompt: Maybe String) -> Unit !{IO} =
   match prompt with
-  | Just _ -> term_write("\r\n")
+  | Just _ -> terminal.write("\r\n")
   | Nothing -> term_noop()
 
 fn render_lines(prompt: Maybe String, lines: Vec String, index: Int) -> Unit !{IO} =
@@ -73,8 +73,8 @@ export fn delete_before(raw: String, index: Int) -> String =
 
 fn redraw_input(prompt: String, current: String, cursor: Int) -> Unit !{IO} =
   do
-    term_write("\r" ++ prompt ++ current ++ esc ++ "[K")
-    term_write("\r" ++ prompt ++ slice_left(current, cursor))
+    terminal.write("\r" ++ prompt ++ current ++ esc ++ "[K")
+    terminal.write("\r" ++ prompt ++ slice_left(current, cursor))
 
 fn ignore_key(value: String !{IO}) -> Unit !{IO} =
   term_noop()
@@ -90,13 +90,13 @@ fn escape_token(second: String, third: String) -> String =
 fn read_escape_token_second(second: String) -> String !{IO} =
   if second == "[" then
     do
-      third <- term_read_key_once()
+      third <- terminal.term_read_key_once()
       escape_token(second, third)
   else second
 
 fn read_escape_token() -> String !{IO} =
   do
-    second <- term_read_key_once()
+    second <- terminal.term_read_key_once()
     read_escape_token_second(second)
 
 fn history_value(index: Int, fallback: String, history: Vec String) -> String =
@@ -120,7 +120,7 @@ fn render_interactive_match_lines(matches: Vec String, index: Int) -> Unit !{IO}
   match vec_get(index, matches) with
   | Just line ->
       do
-        term_write(line ++ "\r\n")
+        terminal.write(line ++ "\r\n")
         render_interactive_match_lines(matches, index + 1)
   | Nothing -> term_noop()
 
@@ -439,7 +439,7 @@ fn complete_current_line(prompt: String, history: Vec String, session: compiler.
           interactive_read_line_loop(prompt, history, session, next, string.length(next), -1, next)
       else
         do
-          term_write("\r\n")
+          terminal.write("\r\n")
           render_interactive_match_lines(matches, 0)
           redraw_input(prompt, current, cursor)
           interactive_read_line_loop(prompt, history, session, current, cursor, -1, current)
@@ -464,12 +464,12 @@ fn interactive_read_line_step(prompt: String, history: Vec String, session: comp
   | "ctrl-d" ->
       if current == "" then
         do
-          term_write("\r\n")
+          terminal.write("\r\n")
           Nothing
       else interactive_read_line_loop(prompt, history, session, current, cursor, browse_index, draft)
   | "enter" ->
       do
-        term_write("\r\n")
+        terminal.write("\r\n")
         Just(current)
   | "backspace" ->
       if cursor <= 0 then interactive_read_line_loop(prompt, history, session, current, cursor, browse_index, draft)
@@ -500,7 +500,7 @@ fn interactive_read_line_step(prompt: String, history: Vec String, session: comp
         interactive_read_line_loop(prompt, history, session, current, string.length(current), browse_index, draft)
   | "ctrl-l" ->
       do
-        term_write(esc ++ "[2J" ++ esc ++ "[H")
+        terminal.write(esc ++ "[2J" ++ esc ++ "[H")
         redraw_input(prompt, current, cursor)
         interactive_read_line_loop(prompt, history, session, current, cursor, browse_index, draft)
   | "up" ->
@@ -523,7 +523,7 @@ fn interactive_read_line_step(prompt: String, history: Vec String, session: comp
 
 fn interactive_read_line_loop(prompt: String, history: Vec String, session: compiler.StatefulSession, current: String, cursor: Int, browse_index: Int, draft: String) -> Maybe String !{IO} =
   do
-    key <- term_read_key_once()
+    key <- terminal.term_read_key_once()
     interactive_read_line_step(prompt, history, session, current, cursor, browse_index, draft, key)
 
 fn interactive_read_line(prompt: String, history: Vec String, session: compiler.StatefulSession) -> Maybe String !{IO} =
@@ -534,7 +534,7 @@ fn interactive_read_line(prompt: String, history: Vec String, session: compiler.
 fn read_input_line(prompt: Maybe String, history: Vec String, session: compiler.StatefulSession) -> Maybe String !{IO} =
   match prompt with
   | Just text -> interactive_read_line(text, history, session)
-  | Nothing -> term_read_line_once()
+  | Nothing -> terminal.term_read_line_once()
 
 fn append_submission_line(acc: String, line: String) -> String =
   if acc == "" then line else acc ++ "\n" ++ line
@@ -715,7 +715,7 @@ fn start_repl(prompt: Maybe String, banner: String) -> Unit !{IO} =
   if banner == "" then run_repl(prompt)
   else
     do
-      term_write(banner)
+      terminal.write(banner)
       run_repl(prompt)
 
 fn repl_loop_session(prompt: Maybe String, history: Vec String, session: compiler.StatefulSession) -> Unit !{IO} =
@@ -762,6 +762,6 @@ export fn repl_loop(prompt: Maybe String, history: Vec String, imports: Vec Stri
     repl_loop_session(prompt, history, full_session)
 
 export fn run() -> Unit !{IO} =
-  if term_is_interactive_once()
+  if terminal.term_is_interactive_once()
   then start_repl(Just("sprout> "), "Sprout REPL. Use :help for commands.\r\n")
   else start_repl(Nothing, "")

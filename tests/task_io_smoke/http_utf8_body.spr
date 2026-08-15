@@ -1,6 +1,7 @@
 import stdlib.task (Scope, with_scope, task_spawn, task_sleep)
 import stdlib.net (TcpConnection, connect, close, write_all_utf8, read_exact_utf8)
 import stdlib.http_server (HttpRequest, HttpServerResponse, ServerConfig, request_body, response, serve_n_with)
+import stdlib.terminal as terminal
 
 # `Content-Length` counts BYTES; the body path used to measure and cut in CODEPOINTS (concurrency
 # review C5). `café` is 5 bytes and 4 codepoints, so it separates the two index spaces — an ASCII
@@ -26,9 +27,9 @@ fn handle(req: HttpRequest) -> HttpServerResponse !{IO} =
 fn expect_status(conn: borrowing TcpConnection, want: String, marker: String) -> Unit !{IO} =
   match read_exact_utf8(conn, 12) with
   | Ok reply ->
-      if reply == want then term_write(`${marker}\n`)
-      else term_write(`MISMATCH: ${marker} got ${reply}\n`)
-  | Err _ -> term_write(`MISMATCH: ${marker} read failed\n`)
+      if reply == want then terminal.write(`${marker}\n`)
+      else terminal.write(`MISMATCH: ${marker} got ${reply}\n`)
+  | Err _ -> terminal.write(`MISMATCH: ${marker} read failed\n`)
 
 # The read-loop case. Headers first, then the body in a SEPARATE write after a pause, so the body
 # cannot arrive with the header block and `read_remaining_body` must run at least one round. This is
@@ -43,10 +44,10 @@ fn split_client(port: Int) -> Unit !{IO} =
             task_sleep(100)
             match write_all_utf8(conn, "café") with
             | Ok _ -> expect_status(conn, "HTTP/1.1 200", "split-multibyte-200")
-            | Err _ -> term_write("MISMATCH: split client could not send its body\n")
-      | Err _ -> term_write("MISMATCH: split client could not send its headers\n")
+            | Err _ -> terminal.write("MISMATCH: split client could not send its body\n")
+      | Err _ -> terminal.write("MISMATCH: split client could not send its headers\n")
       close(conn)
-  | Err _ -> term_write("MISMATCH: split client could not connect\n")
+  | Err _ -> terminal.write("MISMATCH: split client could not connect\n")
 
 # The fast path: headers and body in one write, so `continue_read_request` satisfies the length from
 # what is already buffered and never enters the read loop. Same body, different code path — the two
@@ -57,9 +58,9 @@ fn inline_client(port: Int) -> Unit !{IO} =
     do
       match write_all_utf8(conn, "POST /inline HTTP/1.1\r\nHost: x\r\nContent-Length: 5\r\n\r\ncafé") with
       | Ok _ -> expect_status(conn, "HTTP/1.1 200", "inline-multibyte-200")
-      | Err _ -> term_write("MISMATCH: inline client could not send\n")
+      | Err _ -> terminal.write("MISMATCH: inline client could not send\n")
       close(conn)
-  | Err _ -> term_write("MISMATCH: inline client could not connect\n")
+  | Err _ -> terminal.write("MISMATCH: inline client could not connect\n")
 
 # A byte count landing INSIDE a multi-byte sequence: 4 announced bytes of a 5-byte character. Still a
 # 400, but note WHO answers it now. The body is `Bytes`, so the server frames the 4 bytes the client
@@ -78,9 +79,9 @@ fn split_codepoint_client(port: Int) -> Unit !{IO} =
     do
       match write_all_utf8(conn, "POST /cut HTTP/1.1\r\nHost: x\r\nContent-Length: 4\r\n\r\ncafé") with
       | Ok _ -> expect_status(conn, "HTTP/1.1 400", "split-codepoint-400")
-      | Err _ -> term_write("MISMATCH: split-codepoint client could not send\n")
+      | Err _ -> terminal.write("MISMATCH: split-codepoint client could not send\n")
       close(conn)
-  | Err _ -> term_write("MISMATCH: split-codepoint client could not connect\n")
+  | Err _ -> terminal.write("MISMATCH: split-codepoint client could not connect\n")
 
 # The bounds are generous on purpose: nothing here is testing a timeout, and a body deadline tight
 # enough to be interesting would make a 408 ambiguous between "mis-framed" and "too slow" — which is
@@ -96,4 +97,4 @@ fn run(s: Scope, port: Int) -> Unit !{IO} =
 fn main() -> Unit !{IO} =
   do
     with_scope(\s -> run(s, 28994))
-    term_write("done\n")
+    terminal.write("done\n")

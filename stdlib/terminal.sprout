@@ -1,5 +1,24 @@
 module stdlib.terminal
 
+# Terminal control primitives. Declared here rather than in the prelude: nothing in the prelude
+# calls them, and under the rule "an extern lives in the module that owns its surface" this is
+# that module. Reaching a terminal becomes an explicit dependency — the same reasoning the
+# prelude already records for stdlib.net's socket primitives.
+#
+# Callers use the wrappers below (`write`, `clear`, ...), not these names directly. Note that
+# `export` on an `extern fn` would be inert: the parser discards it (parser.sprout:1941) and the
+# bundler never registers extern names (bundler.sprout:597), so an extern is reachable by bare
+# name from anywhere this module is bundled. The wrapper API is what makes that reach
+# intentional and greppable, not a visibility rule.
+extern fn term_clear() -> Unit !{IO}
+extern fn term_move(row: Int, col: Int) -> Unit !{IO}
+extern fn term_hide_cursor() -> Unit !{IO}
+extern fn term_show_cursor() -> Unit !{IO}
+extern fn term_is_interactive() -> Bool !{IO}
+extern fn term_read_key() -> String !{IO}
+extern fn term_read_line() -> Maybe String !{IO}
+extern fn term_write(text: String) -> Unit !{IO}
+
 export fn clear() -> Unit !{IO} =
   term_clear()
 

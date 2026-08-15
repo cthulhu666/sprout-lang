@@ -1,5 +1,6 @@
 # `deriving (Enum)` requires all constructors to be nullary — a field-bearing
 # variant cannot be rebuilt from an Int alone, so from_ordinal is ill-defined.
+import stdlib.terminal as terminal
 # The error fires eagerly at the deriving site (bundle time), not at a use site.
 type Bad (..) deriving (Enum) =
   | Nullary
@@ -7,4 +8,4 @@ type Bad (..) deriving (Enum) =
 
 fn main() -> Unit !{IO} =
   do
-    term_write("unreachable")
+    terminal.write("unreachable")

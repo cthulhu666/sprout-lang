@@ -2,6 +2,7 @@ import stdlib.task (Scope, with_scope, task_spawn)
 import stdlib.net (TcpConnection, TcpListener, accept, close, close_listener, connect, listen_local, read_avail_timeout, read_exact_utf8, write_all_utf8)
 import stdlib.string as string
 import stdlib.bytes as bytes
+import stdlib.terminal as terminal
 
 # L0.3 I/O parking — exercises the poller paths a single read-park does NOT:
 #  * accept-parking: `server` is spawned before anyone connects, so accept
@@ -35,7 +36,7 @@ fn server(listener: consuming TcpListener) -> Unit !{IO} =
   | Err _ ->
       do
         close_listener(listener)
-        term_write("server accept failed\n")
+        terminal.write("server accept failed\n")
 
 fn serve_rounds(conn: consuming TcpConnection) -> Unit !{IO} =
   do
@@ -54,10 +55,10 @@ fn read_round(conn: borrowing TcpConnection, label: String) -> Unit !{IO} =
       match bytes.to_string(payload) with
       | Ok text ->
           do
-            term_write(string.concat(label, text))
-            term_write("\n")
-      | Err _ -> term_write("server: payload was not text\n")
-  | Err _ -> term_write("server read failed\n")
+            terminal.write(string.concat(label, text))
+            terminal.write("\n")
+      | Err _ -> terminal.write("server: payload was not text\n")
+  | Err _ -> terminal.write("server read failed\n")
 
 # Connect from within the task (after `server` has parked on accept), so the
 # accept genuinely parks rather than finding a pre-filled backlog.
@@ -75,20 +76,20 @@ fn client(port: Int) -> Unit !{IO} =
         send_or_fail(conn, "ping2")
         read_ack(conn, "client round2 ")
         close(conn)
-  | Err e -> term_write("client connect failed\n")
+  | Err e -> terminal.write("client connect failed\n")
 
 fn send_or_fail(conn: borrowing TcpConnection, msg: String) -> Unit !{IO} =
   match write_all_utf8(conn, msg) with
-  | Ok _ -> term_write("")
-  | Err _ -> term_write("write failed\n")
+  | Ok _ -> terminal.write("")
+  | Err _ -> terminal.write("write failed\n")
 
 fn read_ack(conn: borrowing TcpConnection, label: String) -> Unit !{IO} =
   match read_exact_utf8(conn, 4) with
   | Ok a ->
       do
-        term_write(string.concat(label, a))
-        term_write("\n")
-  | Err _ -> term_write("client read failed\n")
+        terminal.write(string.concat(label, a))
+        terminal.write("\n")
+  | Err _ -> terminal.write("client read failed\n")
 
 fn run(s: Scope, listener: consuming TcpListener, port: Int) -> Unit !{IO} =
   do

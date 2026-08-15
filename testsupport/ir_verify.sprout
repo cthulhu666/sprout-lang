@@ -13,6 +13,7 @@ module testsupport.ir_verify
 # `stdlib/` so test-only machinery stays out of the shipped standard library.
 
 import stdlib.process as process
+import stdlib.terminal as terminal
 
 # Returns true iff `clang` accepts `ir` as a well-formed LLVM IR module.
 # If clang is not installed the assertion auto-passes (CI always has clang; a
@@ -24,7 +25,7 @@ export fn clang_verifies_ir(ir: String) -> Bool !{IO} =
     match process.proc_ok(probe) with
     | false ->
         do
-          term_write("[clang_verifies_ir] clang not in PATH — assertion auto-passes\n")
+          terminal.write("[clang_verifies_ir] clang not in PATH — assertion auto-passes\n")
           true
     | true ->
         do
@@ -39,7 +40,7 @@ export fn clang_verifies_ir(ir: String) -> Bool !{IO} =
           | true -> true
           | false ->
               do
-                term_write("[clang_verifies_ir] clang rejected IR — stderr:\n")
-                term_write(process.proc_stderr_or(result, "<clang stderr was not valid UTF-8>"))
-                term_write("\n")
+                terminal.write("[clang_verifies_ir] clang rejected IR — stderr:\n")
+                terminal.write(process.proc_stderr_or(result, "<clang stderr was not valid UTF-8>"))
+                terminal.write("\n")
                 false

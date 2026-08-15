@@ -1,5 +1,6 @@
 import stdlib.test (TestState, new_state, assert_true, assert_false, summary)
 import stdlib.regex as regex
+import stdlib.terminal as terminal
 
 # ABI guard for every builtin reached through `extern fn … -> Bool`.
 #
@@ -91,7 +92,7 @@ fn main() -> Unit !{IO} =
     # The VALUE depends on whether stdout is a tty (false under the test harness,
     # true in a terminal), so only canonicality is assertable — which is exactly
     # the property that was broken.
-    interactive <- term_is_interactive()
+    interactive <- terminal.term_is_interactive_once()
     assert_true(state, "term_is_interactive is canonical", is_canonical(interactive))
 
     summary(state)

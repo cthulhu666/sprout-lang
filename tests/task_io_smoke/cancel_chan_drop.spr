@@ -1,5 +1,6 @@
 import stdlib.task (Scope, with_scope, task_fork, detach, task_spawn, task_yield, scope_cancel)
 import stdlib.chan (Chan, Recv, Got, Closed, chan_new, chan_recv)
+import stdlib.terminal as terminal
 
 # L0.8 channel-drop cancellation (EXPERIMENTAL). A task suspended in chan_recv on an
 # empty channel that nobody ever sends to cannot check task_cancelled — it is parked on
@@ -17,7 +18,7 @@ fn recv_forever(ch: Chan Int) -> Int !{IO} =
   do
     let held = "live-" ++ "root"
     r <- chan_recv(ch)  # parks here forever — nobody ever sends
-    term_write(held)  # unreachable; forces `held` rooted across the park
+    terminal.write(held)  # unreachable; forces `held` rooted across the park
     match r with
     | Got v -> v
     | Closed -> 0
@@ -25,7 +26,7 @@ fn recv_forever(ch: Chan Int) -> Int !{IO} =
 fn recv_forever_unit(ch: Chan Int) -> Unit !{IO} =
   do
     _ <- recv_forever(ch)
-    term_write("")
+    terminal.write("")
 
 fn body(s: Scope) -> Unit !{IO} =
   do
@@ -34,9 +35,9 @@ fn body(s: Scope) -> Unit !{IO} =
     task_spawn(s, \_ -> recv_forever_unit(ch))  # fire-and-forget, recv-parks
     task_yield()  # let both reach chan_recv and park
     scope_cancel(s)  # force-drop both channel-parked tasks
-    term_write("cancelled\n")  # owner continues; awaits neither
+    terminal.write("cancelled\n")  # owner continues; awaits neither
 
 fn main() -> Unit !{IO} =
   do
     with_scope(\s -> body(s))
-    term_write("done\n")  # reached only if both parked tasks were dropped by cancel
+    terminal.write("done\n")  # reached only if both parked tasks were dropped by cancel

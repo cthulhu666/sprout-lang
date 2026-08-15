@@ -92,14 +92,6 @@ declare i64 @native_set_size(i64)
 declare i64 @ref_new(i64)
 declare i64 @ref_read(i64)
 declare i64 @ref_write(i64, i64)
-declare i64 @term_clear()
-declare i64 @term_move(i64, i64)
-declare i64 @term_hide_cursor()
-declare i64 @term_show_cursor()
-declare i64 @term_is_interactive()
-declare i64 @term_read_key()
-declare i64 @term_read_line()
-declare i64 @term_write(i64)
 declare i64 @bytes_empty()
 declare i64 @bytes_singleton(i64)
 declare i64 @bytes_length(i64)
@@ -121,6 +113,14 @@ declare i64 @analysis_session_eval(i64, i64)
 declare i64 @analysis_session_type_of(i64, i64)
 declare i64 @analysis_session_diagnostics(i64)
 declare i64 @analysis_session_destroy(i64)
+declare i64 @term_clear()
+declare i64 @term_move(i64, i64)
+declare i64 @term_hide_cursor()
+declare i64 @term_show_cursor()
+declare i64 @term_is_interactive()
+declare i64 @term_read_key()
+declare i64 @term_read_line()
+declare i64 @term_write(i64)
 @.str.0 = private unnamed_addr constant { i64, [17 x i8] } { i64 262154, [17 x i8] c"division by zero\00" }
 @.str.1 = private unnamed_addr constant { i64, [3 x i8] } { i64 32778, [3 x i8] c", \00" }
 @.str.2 = private unnamed_addr constant { i64, [3 x i8] } { i64 32778, [3 x i8] c", \00" }
@@ -44742,7 +44742,7 @@ entry:
   %t$3 = alloca i64
   store i64 %t$1, ptr %t$3
   %t$4 = call i64 @sprout_gc_push_i64_root(ptr %t$3)
-  %t$2 = call i64 @term_write(i64 %t$1)
+  %t$2 = call i64 @stdlib.terminal.write(i64 %t$1)
   %t$5 = call i64 @sprout_gc_pop_roots(i64 1)
   ret i64 %t$2
 }
@@ -44769,7 +44769,7 @@ body_0_1:
   %t$17 = alloca i64
   store i64 %t$7, ptr %t$17
   %t$18 = call i64 @sprout_gc_push_i64_root(ptr %t$17)
-  %t$8 = call i64 @term_write(i64 %t$7)
+  %t$8 = call i64 @stdlib.terminal.write(i64 %t$7)
   %t$19 = call i64 @sprout_gc_pop_roots(i64 1)
   br label %join_1
 arm_1_1:
@@ -44802,7 +44802,7 @@ body_0_1:
   %t$11 = alloca i64
   store i64 %t$6, ptr %t$11
   %t$12 = call i64 @sprout_gc_push_i64_root(ptr %t$11)
-  %t$7 = call i64 @term_write(i64 %t$6)
+  %t$7 = call i64 @stdlib.terminal.write(i64 %t$6)
   %t$13 = call i64 @sprout_gc_pop_roots(i64 1)
   br label %join_1
 arm_1_1:
@@ -45089,7 +45089,7 @@ entry:
   %t$34 = alloca i64
   store i64 %t$8, ptr %t$34
   %t$35 = call i64 @sprout_gc_push_i64_root(ptr %t$34)
-  %t$9 = call i64 @term_write(i64 %t$8)
+  %t$9 = call i64 @stdlib.terminal.write(i64 %t$8)
   %t$36 = call i64 @sprout_gc_pop_roots(i64 1)
   %t$10 = getelementptr inbounds { i64, [2 x i8] }, ptr @.str.375, i64 0, i32 1, i64 0
   %t$11 = ptrtoint ptr %t$10 to i64
@@ -45110,7 +45110,7 @@ entry:
   %t$45 = alloca i64
   store i64 %t$14, ptr %t$45
   %t$46 = call i64 @sprout_gc_push_i64_root(ptr %t$45)
-  %t$15 = call i64 @term_write(i64 %t$14)
+  %t$15 = call i64 @stdlib.terminal.write(i64 %t$14)
   %t$47 = call i64 @sprout_gc_pop_roots(i64 1)
   ret i64 %t$15
 }
@@ -45476,7 +45476,7 @@ body_0_2:
   %t$26 = alloca i64
   store i64 %t$8, ptr %t$26
   %t$27 = call i64 @sprout_gc_push_i64_root(ptr %t$26)
-  %t$9 = call i64 @term_write(i64 %t$8)
+  %t$9 = call i64 @stdlib.terminal.write(i64 %t$8)
   %t$28 = call i64 @sprout_gc_pop_roots(i64 1)
   %t$10 = add i64 0, 1
   %t$11 = add i64 %index, %t$10
@@ -48995,7 +48995,7 @@ else_29:
   %t$96 = alloca i64
   store i64 %t$40, ptr %t$96
   %t$97 = call i64 @sprout_gc_push_i64_root(ptr %t$96)
-  %t$41 = call i64 @term_write(i64 %t$40)
+  %t$41 = call i64 @stdlib.terminal.write(i64 %t$40)
   %t$98 = call i64 @sprout_gc_pop_roots(i64 1)
   %t$42 = add i64 0, 0
   %t$43 = call i64 @stdlib.repl.render_interactive_match_lines(i64 %t$4, i64 %t$42)
@@ -49242,7 +49242,7 @@ then_16:
   %t$190 = alloca i64
   store i64 %t$19, ptr %t$190
   %t$191 = call i64 @sprout_gc_push_i64_root(ptr %t$190)
-  %t$20 = call i64 @term_write(i64 %t$19)
+  %t$20 = call i64 @stdlib.terminal.write(i64 %t$19)
   %t$192 = call i64 @sprout_gc_pop_roots(i64 1)
   %t$21 = call i64 @sprout_alloc_obj(i64 0, i64 0)
   br label %join_16
@@ -49288,7 +49288,7 @@ body_2_0:
   %t$206 = alloca i64
   store i64 %t$31, ptr %t$206
   %t$207 = call i64 @sprout_gc_push_i64_root(ptr %t$206)
-  %t$32 = call i64 @term_write(i64 %t$31)
+  %t$32 = call i64 @stdlib.terminal.write(i64 %t$31)
   %t$208 = call i64 @sprout_gc_pop_roots(i64 1)
   %t$33 = call i64 @sprout_alloc_obj(i64 1, i64 1)
   %t$33$ptr = inttoptr i64 %t$33 to ptr
@@ -49670,7 +49670,7 @@ body_12_0:
   %t$340 = alloca i64
   store i64 %t$134, ptr %t$340
   %t$341 = call i64 @sprout_gc_push_i64_root(ptr %t$340)
-  %t$135 = call i64 @term_write(i64 %t$134)
+  %t$135 = call i64 @stdlib.terminal.write(i64 %t$134)
   %t$342 = call i64 @sprout_gc_pop_roots(i64 1)
   %t$136 = call i64 @stdlib.repl.redraw_input(i64 %prompt, i64 %current, i64 %cursor)
   %t$137 = add i64 0, 0
@@ -52024,7 +52024,7 @@ else_3:
   %t$14 = alloca i64
   store i64 %banner, ptr %t$14
   %t$15 = call i64 @sprout_gc_push_i64_root(ptr %t$14)
-  %t$6 = call i64 @term_write(i64 %banner)
+  %t$6 = call i64 @stdlib.terminal.write(i64 %banner)
   %t$16 = call i64 @sprout_gc_pop_roots(i64 1)
   %t$7 = call i64 @stdlib.repl.run_repl(i64 %prompt)
   %t$17 = call i64 @sprout_gc_pop_roots(i64 1)

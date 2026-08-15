@@ -12,6 +12,7 @@ import stdlib.compiler.infer as infer
 import stdlib.compiler.unifier as unifier
 import stdlib.string as string
 import stdlib.process as process
+import stdlib.terminal as terminal
 
 # ---------------------------------------------------------------------------
 # Header stripping is source.strip_headers (line-preserving): stripped lines
@@ -1056,14 +1057,14 @@ fn dispatch_line(line: String, state: StartupState) -> json.Json !{IO} =
 # Service loop
 
 fn service_loop(state: StartupState) -> Unit !{IO} =
-  match term_read_line() with
+  match terminal.term_read_line_once() with
   | Nothing -> ()
   | Just line ->
       if string.is_empty(line) then service_loop(state)
       else
         do
           response <- dispatch_line(line, state)
-          term_write(json.stringify(response) ++ "\n")
+          terminal.write(json.stringify(response) ++ "\n")
           service_loop(state)
 
 export fn run_service(stdlib_root: String) -> Unit !{IO} =

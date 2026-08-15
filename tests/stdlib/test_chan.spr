@@ -2,6 +2,7 @@ import stdlib.test (TestState, new_state, assert_eq, summary)
 import stdlib.task (Scope, with_scope, task_spawn, task_fork, task_await, task_yield)
 import stdlib.chan (Chan, Recv, Got, Closed, chan_new, chan_send, chan_recv)
 import stdlib.string as string
+import stdlib.terminal as terminal
 
 # L0.8 bounded buffered channels (EXPERIMENTAL). `chan_new(scope, cap)` creates a
 # cap-slot channel tied to `scope` (freed at scope close). `chan_send` parks the
@@ -39,7 +40,7 @@ fn roundtrip(s: Scope) -> Int !{IO} =
 # park directions (send-park + the recv that drains) and FIFO order. ---
 fn produce(ch: Chan Int, n: Int, i: Int) -> Unit !{IO} =
   if i > n then
-    term_write("")
+    terminal.write("")
   else
     do
       chan_send(ch, i)  # parks here once the buffer is full
@@ -135,7 +136,7 @@ fn parked_recv_heap_driver(s: Scope) -> String !{IO} =
 # discriminating oracle). This still exercises the full send-park→drain flow under GC. ---
 fn produce_heap(ch: Chan String, tags: String, i: Int, n: Int) -> Unit !{IO} =
   if i > n then
-    term_write("")
+    terminal.write("")
   else
     do
       chan_send(ch, `${tags}${i}`)  # 2nd+ send parks holding this value
