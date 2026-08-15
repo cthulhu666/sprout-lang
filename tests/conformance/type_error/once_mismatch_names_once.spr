@@ -13,8 +13,9 @@ module main
 # `.err` pins the `once` wording; it would match the old text nowhere.
 
 import stdlib.task (Scope, with_scope, task_spawn)
+import stdlib.terminal as terminal
 
 fn apply_spawner(g: Scope -> (Unit -> Unit !{IO}) -> Unit !{IO}, s: Scope) -> Unit !{IO} =
-  g(s)(\_ -> term_write("hi\n"))
+  g(s)(\_ -> terminal.write("hi\n"))
 
 fn main() -> Unit !{IO} = with_scope(\s -> apply_spawner(task_spawn, s))

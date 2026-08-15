@@ -3,6 +3,7 @@ import stdlib.net (TcpConnection, connect, close, write_all_utf8, read_exact_utf
 import stdlib.http_server (HttpRequest, HttpServerResponse, ServerConfig, ok, request_path, serve_n_with)
 import stdlib.chan (Chan, Got, Closed, chan_new, chan_send, chan_recv)
 import stdlib.string as string
+import stdlib.terminal as terminal
 
 # http_server header-flood bound (review follow-up to the C3 timeout fix).
 #
@@ -68,17 +69,17 @@ fn flooding_client(port: Int, done: Chan Int) -> Unit !{IO} =
         chan_send(done, 1)
       else
         do
-          term_write("MISMATCH: server accepted an unbounded header block\n")
+          terminal.write("MISMATCH: server accepted an unbounded header block\n")
           chan_send(done, 0)
   | Err _ ->
     do
-      term_write("MISMATCH: flooding client could not connect\n")
+      terminal.write("MISMATCH: flooding client could not connect\n")
       chan_send(done, 0)
 
 # Runs after the flooder is done, so its 200 proves the server survived the flood.
 fn prompt_client(port: Int, done: Chan Int) -> Unit !{IO} =
   match chan_recv(done) with
-  | Closed -> term_write("MISMATCH: flood result channel closed\n")
+  | Closed -> terminal.write("MISMATCH: flood result channel closed\n")
   | Got verdict -> serve_check(port, verdict)
 
 fn serve_check(port: Int, first: Int) -> Unit !{IO} =
@@ -92,15 +93,15 @@ fn serve_check(port: Int, first: Int) -> Unit !{IO} =
           | Ok line ->
             if line == "HTTP/1.1 200" then
               if first == 1 then
-                term_write("flood-bounded\n")
+                terminal.write("flood-bounded\n")
               else
-                term_write("MISMATCH: served, but the flood was not bounded\n")
+                terminal.write("MISMATCH: served, but the flood was not bounded\n")
             else
-              term_write(`MISMATCH: second client got ${line}\n`)
-          | Err _ -> term_write("MISMATCH: second client could not read\n")
-        | Err _ -> term_write("MISMATCH: second client could not write\n")
+              terminal.write(`MISMATCH: second client got ${line}\n`)
+          | Err _ -> terminal.write("MISMATCH: second client could not read\n")
+        | Err _ -> terminal.write("MISMATCH: second client could not write\n")
         close(conn)
-    | Err _ -> term_write("MISMATCH: server stopped accepting after the flood\n")
+    | Err _ -> terminal.write("MISMATCH: server stopped accepting after the flood\n")
 
 fn run(s: Scope, port: Int, done: Chan Int) -> Unit !{IO} =
   do
@@ -117,4 +118,4 @@ fn body(s: Scope) -> Unit !{IO} =
 fn main() -> Unit !{IO} =
   do
     with_scope(\s -> body(s))
-    term_write("done\n")
+    terminal.write("done\n")

@@ -11,6 +11,7 @@
 import stdlib.test (TestState, new_state, assert_true, assert_eq, summary)
 import stdlib.process as process
 import stdlib.string as string
+import stdlib.terminal as terminal
 
 fn fixture_source() -> String =
   "module main_int_exit_fixture\n\nfn main() -> Int !{IO} =\n  do\n    print(\"fixture running\")\n    7\n"
@@ -54,7 +55,7 @@ fn main() -> Unit !{IO} =
     match have_clang with
     | false ->
         do
-          term_write("[test_main_int_exit_code] clang not in PATH — assertion auto-passes\n")
+          terminal.write("[test_main_int_exit_code] clang not in PATH — assertion auto-passes\n")
           assert_true(state, "Int-returning main propagates exit code (auto-skipped: no clang)", true)
     | true ->
         do
@@ -71,9 +72,9 @@ fn main() -> Unit !{IO} =
                 match process.proc_ok(compiled) with
                 | false ->
                     do
-                      term_write("[test_main_int_exit_code] compile failed:\n")
-                      term_write(process.proc_stderr_or(compiled, "<compiler stderr was not valid UTF-8>"))
-                      term_write("\n")
+                      terminal.write("[test_main_int_exit_code] compile failed:\n")
+                      terminal.write(process.proc_stderr_or(compiled, "<compiler stderr was not valid UTF-8>"))
+                      terminal.write("\n")
                       assert_true(state, "fixture compiles", false)
                 | true ->
                     do
@@ -85,9 +86,9 @@ fn main() -> Unit !{IO} =
                           match process.proc_ok(linked) with
                           | false ->
                               do
-                                term_write("[test_main_int_exit_code] link failed:\n")
-                                term_write(process.proc_stderr_or(linked, "<linker stderr was not valid UTF-8>"))
-                                term_write("\n")
+                                terminal.write("[test_main_int_exit_code] link failed:\n")
+                                terminal.write(process.proc_stderr_or(linked, "<linker stderr was not valid UTF-8>"))
+                                terminal.write("\n")
                                 assert_true(state, "fixture links", false)
                           | true ->
                               do

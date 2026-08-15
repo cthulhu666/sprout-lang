@@ -1,6 +1,7 @@
 import stdlib.task as task
 import stdlib.net (tcp_listen, tcp_accept, tcp_close)
 import stdlib.string as string
+import stdlib.terminal as terminal
 
 # L0.7 with_timeout I/O-drop (EXPERIMENTAL). A body parked in the poller on tcp_accept (nobody
 # ever connects) cannot check a flag — it is asleep in kqueue/epoll. So when the deadline fires,
@@ -22,7 +23,7 @@ fn accept_forever(listener: Int) -> Int !{IO} =
     | Err _ -> panic("accept_forever: accept returned instead of parking")
     | Ok conn ->
         do
-          term_write(held)  # unreachable; forces `held` rooted across the park
+          terminal.write(held)  # unreachable; forces `held` rooted across the park
           tcp_close(conn)  # unreachable; present only so `conn` is used
           99
 
@@ -30,6 +31,6 @@ fn main() -> Unit !{IO} =
   do
     la <- tcp_listen(28998)
     match task.with_timeout(50, \_ -> accept_forever(la)) with
-    | task.Completed (_) -> term_write("UNEXPECTED completed\n")
-    | task.Expired -> term_write("expired\n")  # deadline fired; child force-dropped
-    term_write("done\n")  # reached only if the fd-parked body was dropped on the deadline
+    | task.Completed (_) -> terminal.write("UNEXPECTED completed\n")
+    | task.Expired -> terminal.write("expired\n")  # deadline fired; child force-dropped
+    terminal.write("done\n")  # reached only if the fd-parked body was dropped on the deadline

@@ -4,6 +4,7 @@ import stdlib.json as json
 import stdlib.compiler.compiler as compiler
 import stdlib.compiler.source as source
 import stdlib.string as string
+import stdlib.terminal as terminal
 
 extern fn stdin_read_bytes(n: Int) -> Maybe String !{IO}
 
@@ -37,7 +38,7 @@ fn build_lsp_state(stdlib_root: String) -> LspState !{IO} =
 # JetBrains) send compact single-line JSON bodies.
 
 fn lsp_send(body: String) -> Unit !{IO} =
-  term_write("Content-Length: " ++ int_to_string(string.byte_length(body)) ++ "\r\n\r\n" ++ body)
+  terminal.write("Content-Length: " ++ int_to_string(string.byte_length(body)) ++ "\r\n\r\n" ++ body)
 
 # W8/P1: parse_int is total (Maybe Int); a malformed header yields Nothing
 # instead of Just(0).
@@ -45,7 +46,7 @@ export fn parse_content_length(line: String) -> Maybe Int =
   and_then(parse_int, string.strip_prefix(line, "Content-Length: "))
 
 fn read_headers_loop(cl: Maybe Int) -> Maybe Int !{IO} =
-  match term_read_line() with
+  match terminal.term_read_line_once() with
   | Nothing -> Nothing
   | Just line ->
       if string.is_empty(line) then cl

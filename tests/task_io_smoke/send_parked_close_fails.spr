@@ -1,5 +1,6 @@
 import stdlib.task (Scope, with_scope, task_spawn, task_yield)
 import stdlib.chan (Chan, chan_new, chan_send, chan_close)
+import stdlib.terminal as terminal
 
 # L0.9 close guard, send-PARK path (distinct from send_on_closed_fails, which hits the send ENTRY
 # check). A task send-parked on a FULL channel must LOUD-FAIL when the channel is closed under it:
@@ -10,7 +11,7 @@ fn producer(ch: Chan Int) -> Unit !{IO} =
   do
     chan_send(ch, 1)  # buffers into the cap-1 channel (no park)
     chan_send(ch, 2)  # buffer full -> PARKS holding this value
-    term_write("should-not-reach\n")
+    terminal.write("should-not-reach\n")
 
 fn body(s: Scope) -> Unit !{IO} =
   do
@@ -18,9 +19,9 @@ fn body(s: Scope) -> Unit !{IO} =
     task_spawn(s, \_ -> producer(ch))
     task_yield()  # let the producer buffer 1 then park on the full channel at send 2
     chan_close(ch)  # wakes the parked sender -> it aborts on resume
-    term_write("closed\n")
+    terminal.write("closed\n")
 
 fn main() -> Unit !{IO} =
   do
     with_scope(\s -> body(s))
-    term_write("done\n")
+    terminal.write("done\n")

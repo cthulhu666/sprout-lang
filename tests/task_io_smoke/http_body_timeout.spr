@@ -1,6 +1,7 @@
 import stdlib.task (Scope, with_scope, task_spawn, task_sleep)
 import stdlib.net (TcpConnection, connect, close, write_all_utf8, read_exact_utf8)
 import stdlib.http_server (HttpRequest, HttpServerResponse, ServerConfig, ok, request_path, serve_n_with)
+import stdlib.terminal as terminal
 
 # http_server BODY-phase timeout, and the total-vs-idle distinction (review follow-ups to C3).
 #
@@ -34,10 +35,10 @@ fn expect_status(conn: borrowing TcpConnection, want: String, label: String) -> 
   match read_exact_utf8(conn, 12) with
   | Ok line ->
     if line == want then
-      term_write(`${label}\n`)
+      terminal.write(`${label}\n`)
     else
-      term_write(`MISMATCH: got ${line}\n`)
-  | Err _ -> term_write("MISMATCH: status read failed\n")
+      terminal.write(`MISMATCH: got ${line}\n`)
+  | Err _ -> terminal.write("MISMATCH: status read failed\n")
 
 # Promises 10 body bytes and sends none. Both a total and an idle deadline must answer 408; without
 # any body deadline the handler parks forever and the program hangs on the recipe's perl `alarm`.
@@ -47,9 +48,9 @@ fn stalled_body_client(port: Int) -> Unit !{IO} =
     do
       match write_all_utf8(conn, "POST /stalled HTTP/1.1\r\nHost: x\r\nContent-Length: 10\r\n\r\n") with
       | Ok _ -> expect_status(conn, "HTTP/1.1 408", "stalled-body-408")
-      | Err _ -> term_write("MISMATCH: stalled-body client could not send its headers\n")
+      | Err _ -> terminal.write("MISMATCH: stalled-body client could not send its headers\n")
       close(conn)
-  | Err _ -> term_write("MISMATCH: stalled-body client could not connect\n")
+  | Err _ -> terminal.write("MISMATCH: stalled-body client could not connect\n")
 
 # Four 5-byte chunks, 200 ms apart. Progress before each gap expires, so an idle deadline never
 # fires; the run outlasts the budget several times over, so a total one fires every time.
@@ -69,9 +70,9 @@ fn dribbling_client(port: Int) -> Unit !{IO} =
     do
       match write_all_utf8(conn, "POST /dribble HTTP/1.1\r\nHost: x\r\nContent-Length: 20\r\n\r\n") with
       | Ok _ -> dribble_then_expect(conn)
-      | Err _ -> term_write("MISMATCH: dribbling client could not send its headers\n")
+      | Err _ -> terminal.write("MISMATCH: dribbling client could not send its headers\n")
       close(conn)
-  | Err _ -> term_write("MISMATCH: dribbling client could not connect\n")
+  | Err _ -> terminal.write("MISMATCH: dribbling client could not connect\n")
 
 fn dribble_then_expect(conn: borrowing TcpConnection) -> Unit !{IO} =
   do
@@ -79,7 +80,7 @@ fn dribble_then_expect(conn: borrowing TcpConnection) -> Unit !{IO} =
     if sent then
       expect_status(conn, "HTTP/1.1 200", "dribbled-body-200")
     else
-      term_write("MISMATCH: server hung up on a body that was still making progress\n")
+      terminal.write("MISMATCH: server hung up on a body that was still making progress\n")
 
 # body_ms is 2000 and min_rate_bps is effectively unlimited, so the body deadline here is ~2 s of
 # flat grace: long enough that the dribbler's 800 ms of 200 ms gaps completes, short enough that a
@@ -97,4 +98,4 @@ fn run(s: Scope, port: Int) -> Unit !{IO} =
 fn main() -> Unit !{IO} =
   do
     with_scope(\s -> run(s, 28988))
-    term_write("done\n")
+    terminal.write("done\n")

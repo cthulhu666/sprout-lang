@@ -1,5 +1,6 @@
 import stdlib.task (Scope, with_scope, with_timeout, TimeoutResult, Completed, Expired)
 import stdlib.chan (Chan, Recv, Got, Closed, chan_new, chan_select)
+import stdlib.terminal as terminal
 
 # L0.11 with_timeout over a chan_select body (EXPERIMENTAL). A timed body parked in chan_select on
 # channels nobody sends to must be FORCE-DROPPED when its deadline fires — __await_deadline
@@ -19,7 +20,7 @@ fn timed_select(a: Chan Int, b: Chan Int) -> Int !{IO} =
   do
     let held = "live-" ++ "root"
     v <- sel_val(a, b)  # parks on both a and b forever
-    term_write(held)  # unreachable; forces `held` rooted across the park
+    terminal.write(held)  # unreachable; forces `held` rooted across the park
     v
 
 fn run(s: Scope) -> Unit !{IO} =
@@ -28,10 +29,10 @@ fn run(s: Scope) -> Unit !{IO} =
     b <- chan_new(s, 1)
     let result = with_timeout(50, \_ -> timed_select(a, b))
     match result with
-    | Completed v -> term_write("completed\n")
-    | Expired -> term_write("expired\n")
+    | Completed v -> terminal.write("completed\n")
+    | Expired -> terminal.write("expired\n")
 
 fn main() -> Unit !{IO} =
   do
     with_scope(\s -> run(s))
-    term_write("done\n")  # reached only after the timed-out select body was force-dropped
+    terminal.write("done\n")  # reached only after the timed-out select body was force-dropped

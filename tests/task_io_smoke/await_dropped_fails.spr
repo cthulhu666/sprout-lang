@@ -1,6 +1,7 @@
 import stdlib.task (Scope, Task, with_scope, task_fork, task_await, task_yield, scope_cancel)
 import stdlib.net (tcp_listen, tcp_accept, tcp_close)
 import stdlib.string as string
+import stdlib.terminal as terminal
 
 # L0.5 guard (EXPERIMENTAL). The design invariant is that a task force-dropped by
 # scope_cancel is NEVER awaited (the owner cancels only after it has the result it
@@ -26,10 +27,10 @@ fn body(s: Scope, listener: Int) -> Unit !{IO} =
     task_yield()  # let it reach accept and park
     scope_cancel(s)  # force-drops the parked fork
     let v = task_await(t)  # ILLEGAL: awaiting a dropped task -> abort
-    term_write(string.concat("unreachable ", int_to_string(v)))
+    terminal.write(string.concat("unreachable ", int_to_string(v)))
 
 fn main() -> Unit !{IO} =
   do
     listener <- tcp_listen(28995)
     with_scope(\s -> body(s, listener))
-    term_write("unreachable done\n")
+    terminal.write("unreachable done\n")

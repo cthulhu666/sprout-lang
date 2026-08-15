@@ -1,4 +1,5 @@
 import stdlib.net (TcpError, TcpInvalidHandle, TcpInvalidArgument, tcp_read_some)
+import stdlib.terminal as terminal
 
 # Covers tcp_read_some's argument-validation paths deterministically (no socket timing needed).
 # Both must return an Err, never abort — reaching "done" is the proof, since a regression to a
@@ -14,12 +15,12 @@ import stdlib.net (TcpError, TcpInvalidHandle, TcpInvalidArgument, tcp_read_some
 fn main() -> Unit !{IO} =
   do
     match tcp_read_some(1999, 1024) with
-    | Err TcpInvalidHandle -> term_write("invalid-handle err\n")
-    | Err _ -> term_write("wrong-err\n")
-    | Ok _ -> term_write("unexpected-ok\n")
+    | Err TcpInvalidHandle -> terminal.write("invalid-handle err\n")
+    | Err _ -> terminal.write("wrong-err\n")
+    | Ok _ -> terminal.write("unexpected-ok\n")
     match tcp_read_some(1999, 0) with
     # The handle is checked first, so a bad handle wins over a bad count — assert the pair that is
     # actually reachable rather than pretending the order is unspecified.
-    | Err TcpInvalidHandle -> term_write("zero-count-handle-checked-first\ndone\n")
-    | Err _ -> term_write("wrong-err-2\n")
-    | Ok _ -> term_write("unexpected-ok-2\n")
+    | Err TcpInvalidHandle -> terminal.write("zero-count-handle-checked-first\ndone\n")
+    | Err _ -> terminal.write("wrong-err-2\n")
+    | Ok _ -> terminal.write("unexpected-ok-2\n")

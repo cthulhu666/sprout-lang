@@ -3,6 +3,7 @@ import stdlib.http_client (http_get)
 import stdlib.http (HttpResponse, HttpError, HttpTimeout, HttpNetwork, HttpBadStatus, HttpDecode, http_response_body)
 import stdlib.bytes as bytes
 import stdlib.string as string
+import stdlib.terminal as terminal
 
 # The HTTPS client path, end to end, against a local TLS server.
 #
@@ -39,15 +40,15 @@ fn probe() -> Unit !{IO} =
 # 500 ms against a 50 ms sleep: a one-sided bound with 10x headroom, so the verdict never turns on
 # scheduling jitter — only on the pump being unreachable.
 fn report(elapsed_ms: Int) -> Unit !{IO} =
-  if elapsed_ms < 500 then term_write("tls-scheduler-live\n")
-  else term_write(string.concat("tls-scheduler-FROZEN ", string.concat(int_to_string(elapsed_ms), " ms\n")))
+  if elapsed_ms < 500 then terminal.write("tls-scheduler-live\n")
+  else terminal.write(string.concat("tls-scheduler-FROZEN ", string.concat(int_to_string(elapsed_ms), " ms\n")))
 
 fn caller(url: String) -> Unit !{IO} =
   match http_get(url, "", 5000) with
   # The message is printed, not swallowed: the negative-control run asserts on the FAILURE, and a
   # certificate rejection ("tls handshake failed (status=-9807)") has to be distinguishable from a
   # connection that never happened.
-  | Err e -> term_write(string.concat("tls-request-FAILED: ", string.concat(err_text(e), "\n")))
+  | Err e -> terminal.write(string.concat("tls-request-FAILED: ", string.concat(err_text(e), "\n")))
   | Ok resp -> emit(bytes.length(http_response_body(resp)))
 
 fn err_text(e: HttpError) -> String =
@@ -60,8 +61,8 @@ fn err_text(e: HttpError) -> String =
 # A zero-length body would mean the read loop returned without delivering anything, which an
 # `Ok` alone would not distinguish from success.
 fn emit(n: Int) -> Unit !{IO} =
-  if n > 0 then term_write(string.concat("tls-body-bytes ", string.concat(int_to_string(n), "\n")))
-  else term_write("tls-body-EMPTY\n")
+  if n > 0 then terminal.write(string.concat("tls-body-bytes ", string.concat(int_to_string(n), "\n")))
+  else terminal.write("tls-body-EMPTY\n")
 
 # Spawn order matters: `probe` must reach its timer park before the request starts, so the timer is
 # already outstanding when the TLS handshake begins.

@@ -1,0 +1,48 @@
+import stdlib.test (TestState, new_state, assert_true, summary)
+import stdlib.terminal as terminal
+
+# stdlib.terminal had NO test coverage anywhere in tests/. This closes that gap
+# (AGENTS.md "What tests to write" #3) ahead of moving the term_* extern
+# declarations out of the prelude and into this module.
+#
+# SCOPE, stated plainly: this is a REACHABILITY and liveness test, not a
+# behavioural one. Terminal output cannot be read back in-process, so what is
+# actually being pinned is that stdlib.terminal's wrappers resolve, link, and
+# execute — which is exactly the failure mode the extern move risks. Externs are
+# invisible to the module system (bundler.sprout:597 drops ExternFnDecl), so a
+# missing declaration does NOT produce a scoping diagnostic; it produces an
+# `Unknown variable` from the typechecker or an undefined-symbol link error. A
+# suite that never reaches `summary` fails, which is the signal here.
+#
+# Deliberately NOT called:
+#   clear / move / hide_cursor / show_cursor / set_fg / set_bold — these emit ANSI
+#     escapes to stdout, which would garble the harness's own output (the runner
+#     greps stdout for "SUITE FAILED").
+#   term_read_key_once / term_read_line_once — these block on stdin.
+#
+# term_is_interactive_once's VALUE is deliberately not asserted: it is
+# `isatty(stdin) && isatty(stdout)` (sprout_runtime.c:3292), so it is false under
+# the piped harness but true if the binary is run by hand on a terminal. Pinning
+# it either way would make the suite environment-dependent.
+
+fn main() -> Unit !{IO} =
+  do
+    state <- new_state()
+
+    # Empty write: exercises the extern with no visible output.
+    _ <- terminal.write("")
+
+    # Non-ASCII write: term_write goes through the CSTR path, so a multi-byte
+    # string is the case a length/encoding bug would break. Terminated with \n so
+    # it occupies its own line and cannot prefix one of the harness's PASS lines.
+    _ <- terminal.write("café 日本\n")
+
+    interactive <- terminal.term_is_interactive_once()
+    assert_true(state, "term_is_interactive_once returns a usable Bool",
+      interactive || ! interactive)
+
+    # Reaching this line at all is the substance of the test: every wrapper above
+    # resolved to a live symbol and returned.
+    assert_true(state, "stdlib.terminal wrappers resolve, link and execute", true)
+
+    summary(state)

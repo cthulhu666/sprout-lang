@@ -1,5 +1,6 @@
 import stdlib.test (TestState, new_state, assert_true, assert_false, assert_eq, summary)
 import stdlib.string as string
+import stdlib.terminal as terminal
 
 # Pins the DEFINING property of the two byte-offset string builtins: their cost
 # must not depend on the length of the string being scanned.
@@ -83,7 +84,7 @@ fn budget_us(baseline: Int) -> Int =
 # Printed for both probes whether they pass or fail, so a failure on a machine
 # you cannot attach to still says WHICH way it went.
 fn report(label: String, short_us: Int, long_us: Int) -> Unit !{IO} =
-  term_write("  [cost] " ++ label ++ ": 1KiB=" ++ int_to_string(short_us) ++
+  terminal.write("  [cost] " ++ label ++ ": 1KiB=" ++ int_to_string(short_us) ++
              "us 1MiB=" ++ int_to_string(long_us) ++ "us budget=" ++
              int_to_string(budget_us(short_us)) ++ "us\n")
 

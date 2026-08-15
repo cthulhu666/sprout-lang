@@ -3,6 +3,7 @@ import stdlib.http_client (http_get)
 import stdlib.net (TcpConnection, TcpListener, accept, close, close_listener, listen_local, read_avail_timeout, write_all_utf8)
 import stdlib.string as string
 import stdlib.bytes as bytes
+import stdlib.terminal as terminal
 
 # `timeout_ms` on the HTTP CLIENT is a TOTAL request deadline: one budget spanning connect, send and
 # the entire body read. It is not an idle deadline that progress re-arms.
@@ -30,11 +31,11 @@ import stdlib.bytes as bytes
 # Content-Length matters: it stops the client from treating a pause as end-of-message, so the read
 # stays outstanding and the deadline is the only thing that can end it.
 fn drip(conn: borrowing TcpConnection, remaining: Int) -> Unit !{IO} =
-  if remaining <= 0 then term_write("")
+  if remaining <= 0 then terminal.write("")
   else
     match write_all_utf8(conn, "x") with
     # The peer going away is the EXPECTED end of this loop: the client hit its deadline and closed.
-    | Err _ -> term_write("")
+    | Err _ -> terminal.write("")
     | Ok _ ->
         do
           task_sleep(100)
@@ -72,7 +73,7 @@ fn server(listener: consuming TcpListener) -> Unit !{IO} =
 
 fn accept_and_serve(listener: borrowing TcpListener) -> Unit !{IO} =
   match accept(listener) with
-  | Err _ -> term_write("server: accept failed\n")
+  | Err _ -> terminal.write("server: accept failed\n")
   | Ok conn -> serve(conn)
 
 fn client() -> Unit !{IO} =
@@ -86,8 +87,8 @@ fn client() -> Unit !{IO} =
 # its budget; the upper bound is 3.75x the deadline and still less than half the 3 s drip, so the
 # verdict never turns on scheduling jitter.
 fn report(elapsed_ms: Int) -> Unit !{IO} =
-  if elapsed_ms >= 300 && elapsed_ms <= 1500 then term_write("client honored its total deadline\n")
-  else term_write(string.concat("client OVERRAN its deadline: ", string.concat(int_to_string(elapsed_ms), " ms\n")))
+  if elapsed_ms >= 300 && elapsed_ms <= 1500 then terminal.write("client honored its total deadline\n")
+  else terminal.write(string.concat("client OVERRAN its deadline: ", string.concat(int_to_string(elapsed_ms), " ms\n")))
 
 fn run(s: Scope, listener: consuming TcpListener) -> Unit !{IO} =
   do

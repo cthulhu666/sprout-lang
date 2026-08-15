@@ -1,6 +1,7 @@
 import stdlib.task (Scope, with_scope, task_spawn, task_sleep)
 import stdlib.net (TcpConnection, connect, close, write_all_utf8, read_exact_utf8)
 import stdlib.http_server (HttpRequest, HttpServerResponse, ServerConfig, ok, serve_n_with)
+import stdlib.terminal as terminal
 
 # The two bounds that make handler occupancy FINITE, which is the prerequisite for a bounded worker
 # pool (docs/green-task-pool-v0.md §5.2): a size cap answered 413, and a minimum data rate.
@@ -22,9 +23,9 @@ fn handle(_req: HttpRequest) -> HttpServerResponse !{IO} = ok("served")
 fn expect_status(conn: borrowing TcpConnection, want: String, marker: String) -> Unit !{IO} =
   match read_exact_utf8(conn, 12) with
   | Ok reply ->
-      if reply == want then term_write(`${marker}\n`)
-      else term_write(`MISMATCH: ${marker} got ${reply}\n`)
-  | Err _ -> term_write(`MISMATCH: ${marker} read failed\n`)
+      if reply == want then terminal.write(`${marker}\n`)
+      else terminal.write(`MISMATCH: ${marker} got ${reply}\n`)
+  | Err _ -> terminal.write(`MISMATCH: ${marker} read failed\n`)
 
 # Announces more than max_body_bytes. Must be refused on the ANNOUNCEMENT — before any of the body is
 # read — so an oversized upload costs one response rather than the whole transfer. A server that only
@@ -35,9 +36,9 @@ fn huge_body_client(port: Int) -> Unit !{IO} =
     do
       match write_all_utf8(conn, "POST /huge HTTP/1.1\r\nHost: x\r\nContent-Length: 100000\r\n\r\n") with
       | Ok _ -> expect_status(conn, "HTTP/1.1 413", "huge-body-413")
-      | Err _ -> term_write("MISMATCH: huge-body client could not send its headers\n")
+      | Err _ -> terminal.write("MISMATCH: huge-body client could not send its headers\n")
       close(conn)
-  | Err _ -> term_write("MISMATCH: huge-body client could not connect\n")
+  | Err _ -> terminal.write("MISMATCH: huge-body client could not connect\n")
 
 # 40 bytes at ~13 B/s — under the 100 B/s floor. It never stalls, so every idle deadline would be
 # re-armed forever; only the size-scaled TOTAL cuts it off. Answered 408: it is not malformed, it
@@ -60,9 +61,9 @@ fn slow_body_client(port: Int) -> Unit !{IO} =
           do
             _sent <- crawl(conn, 10)
             expect_status(conn, "HTTP/1.1 408", "below-rate-408")
-      | Err _ -> term_write("MISMATCH: slow-body client could not send its headers\n")
+      | Err _ -> terminal.write("MISMATCH: slow-body client could not send its headers\n")
       close(conn)
-  | Err _ -> term_write("MISMATCH: slow-body client could not connect\n")
+  | Err _ -> terminal.write("MISMATCH: slow-body client could not connect\n")
 
 # The control, and the reason a rate floor is risky: 40 bytes sent in one go is far above the floor,
 # so it must be served normally. A floor that cut this off would be worse than no floor at all.
@@ -72,9 +73,9 @@ fn prompt_body_client(port: Int) -> Unit !{IO} =
     do
       match write_all_utf8(conn, "POST /ok HTTP/1.1\r\nHost: x\r\nContent-Length: 40\r\n\r\n0123456789012345678901234567890123456789") with
       | Ok _ -> expect_status(conn, "HTTP/1.1 200", "above-rate-200")
-      | Err _ -> term_write("MISMATCH: prompt-body client could not send\n")
+      | Err _ -> terminal.write("MISMATCH: prompt-body client could not send\n")
       close(conn)
-  | Err _ -> term_write("MISMATCH: prompt-body client could not connect\n")
+  | Err _ -> terminal.write("MISMATCH: prompt-body client could not connect\n")
 
 # max_body_bytes 65536 refuses the 100000-byte announcement. min_rate_bps 100 with body_ms 200 gives
 # the 40-byte crawler 200 + 40*1000/100 = 600 ms, well short of the 3 s it takes — while the prompt
@@ -90,4 +91,4 @@ fn run(s: Scope, port: Int) -> Unit !{IO} =
 fn main() -> Unit !{IO} =
   do
     with_scope(\s -> run(s, 28991))
-    term_write("done\n")
+    terminal.write("done\n")

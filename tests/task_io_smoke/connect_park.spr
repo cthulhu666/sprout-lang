@@ -1,5 +1,6 @@
 import stdlib.task as task
 import stdlib.net (tcp_listen, tcp_close_listener, tcp_connect, tcp_close, tcp_error_message)
+import stdlib.terminal as terminal
 
 # L0.3 connect-park (regression). `tcp_connect` used to run connect() on a BLOCKING socket, so a
 # connect that could not complete promptly froze the whole OS thread: the pump never ran, no timer
@@ -72,9 +73,9 @@ fn attempts(remaining: Int, expired: Int) -> Int !{IO} =
           attempts(remaining - 1, expired)
       | Err e ->
         do
-          term_write("FAILED: connect errored instead of parking: ")
-          term_write(tcp_error_message(e))
-          term_write("\n")
+          terminal.write("FAILED: connect errored instead of parking: ")
+          terminal.write(tcp_error_message(e))
+          terminal.write("\n")
           0
 
 fn main() -> Unit !{IO} =
@@ -84,8 +85,8 @@ fn main() -> Unit !{IO} =
     let stalled = attempts(80, 0)
     if refused then
       if stalled > 0 then
-        term_write("connect-park-ok\n")
+        terminal.write("connect-park-ok\n")
       else
-        term_write("FAILED: no connect ever parked past its deadline\n")
+        terminal.write("FAILED: no connect ever parked past its deadline\n")
     else
-      term_write("FAILED: connect to a dead port did not report an error\n")
+      terminal.write("FAILED: connect to a dead port did not report an error\n")

@@ -1,6 +1,7 @@
 import stdlib.task (Scope, with_scope, task_spawn, task_sleep)
 import stdlib.net (TcpConnection, connect, close)
 import stdlib.string as string
+import stdlib.terminal as terminal
 
 # Regression (code review, finding 10): resolving a NAME must PARK the green task, never block the OS
 # thread. getaddrinfo(3) is opaque blocking libc with no park point inside it, so while it runs the
@@ -29,13 +30,13 @@ fn probe() -> Unit !{IO} =
     report((t1 - t0) / 1000)
 
 fn report(elapsed_ms: Int) -> Unit !{IO} =
-  if elapsed_ms < 500 then term_write("scheduler stayed live\n")
-  else term_write(string.concat("scheduler FROZEN for ", string.concat(int_to_string(elapsed_ms), " ms\n")))
+  if elapsed_ms < 500 then terminal.write("scheduler stayed live\n")
+  else terminal.write(string.concat("scheduler FROZEN for ", string.concat(int_to_string(elapsed_ms), " ms\n")))
 
 fn caller() -> Unit !{IO} =
   match connect("localhost", 28991) with
   | Ok conn -> close(conn)
-  | Err _ -> term_write("")
+  | Err _ -> terminal.write("")
 
 fn run(s: Scope) -> Unit !{IO} =
   do

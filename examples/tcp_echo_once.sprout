@@ -1,5 +1,6 @@
 module examples.tcp_echo_once
 import stdlib.net (TcpConnection, TcpListener, accept, close, close_listener, listen_local, read_avail_timeout, tcp_error_message, write_all)
+import stdlib.terminal as terminal
 
 # One-shot TCP echo server. Run and connect once to localhost:8081.
 #
@@ -18,9 +19,9 @@ fn echo(conn: consuming TcpConnection) -> Unit !{IO} =
     match read_avail_timeout(conn, 30000) with
     | Ok payload ->
         match write_all(conn, payload) with
-        | Ok sent -> term_write(`echoed ${int_to_string(sent)} bytes\n`)
-        | Err err -> term_write(`write failed: ${tcp_error_message(err)}\n`)
-    | Err err -> term_write(`read failed: ${tcp_error_message(err)}\n`)
+        | Ok sent -> terminal.write(`echoed ${int_to_string(sent)} bytes\n`)
+        | Err err -> terminal.write(`write failed: ${tcp_error_message(err)}\n`)
+    | Err err -> terminal.write(`read failed: ${tcp_error_message(err)}\n`)
     close(conn)
 
 fn main() -> Unit !{IO} =
@@ -28,5 +29,5 @@ fn main() -> Unit !{IO} =
     listener <- listen_local(8081)
     match accept(listener) with
     | Ok conn -> echo(conn)
-    | Err err -> term_write(`accept failed: ${tcp_error_message(err)}\n`)
+    | Err err -> terminal.write(`accept failed: ${tcp_error_message(err)}\n`)
     close_listener(listener)

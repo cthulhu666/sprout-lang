@@ -9,6 +9,7 @@ import stdlib.compiler.lowering as lowering
 import stdlib.compiler.ast_to_ir as ast_to_ir
 import stdlib.compiler.typed_ast as typed_ast
 import testsupport.ir_verify (clang_verifies_ir)
+import stdlib.terminal as terminal
 
 # PR 2.5 — IR-level pattern matching.
 # Phase 1 (this file): hand-built IRPrograms exercising the new IR ops
@@ -268,9 +269,9 @@ fn main() -> Unit !{IO} =
     match translate_source(src_int_match) with
     | Err msg ->
         do
-          term_write("T-match-1: translate_source failed: ")
-          term_write(msg)
-          term_write("\n")
+          terminal.write("T-match-1: translate_source failed: ")
+          terminal.write(msg)
+          terminal.write("\n")
           assert_true(state, "T-match-1: int match compiles via IR codegen", false)
     | Ok ir_int_match ->
         do
@@ -297,9 +298,9 @@ fn main() -> Unit !{IO} =
     match translate_source(src_bool_match) with
     | Err msg ->
         do
-          term_write("T-match-2: translate_source failed: ")
-          term_write(msg)
-          term_write("\n")
+          terminal.write("T-match-2: translate_source failed: ")
+          terminal.write(msg)
+          terminal.write("\n")
           assert_true(state, "T-match-2: bool match compiles via IR codegen", false)
     | Ok ir_bool_match ->
         do
@@ -330,9 +331,9 @@ fn main() -> Unit !{IO} =
     match translate_source(src_ctor_no_bind) with
     | Err msg ->
         do
-          term_write("T-match-3: translate_source failed: ")
-          term_write(msg)
-          term_write("\n")
+          terminal.write("T-match-3: translate_source failed: ")
+          terminal.write(msg)
+          terminal.write("\n")
           assert_true(state, "T-match-3: 0-arity ctor match compiles", false)
     | Ok ir_ctor_no_bind ->
         do
@@ -350,9 +351,9 @@ fn main() -> Unit !{IO} =
     match translate_source(src_ctor_bind) with
     | Err msg ->
         do
-          term_write("T-match-4: translate_source failed: ")
-          term_write(msg)
-          term_write("\n")
+          terminal.write("T-match-4: translate_source failed: ")
+          terminal.write(msg)
+          terminal.write("\n")
           assert_true(state, "T-match-4: ctor-with-binding match compiles", false)
     | Ok ir_ctor_bind ->
         do
@@ -376,9 +377,9 @@ fn main() -> Unit !{IO} =
     match translate_source(src_string_field) with
     | Err msg ->
         do
-          term_write("T-match-5: translate_source failed: ")
-          term_write(msg)
-          term_write("\n")
+          terminal.write("T-match-5: translate_source failed: ")
+          terminal.write(msg)
+          terminal.write("\n")
           assert_true(state, "T-match-5: String-field ctor match translates end-to-end", false)
     | Ok ir_string_field ->
         do
@@ -419,9 +420,9 @@ fn main() -> Unit !{IO} =
     match translate_source(src_capture_leak) with
     | Err msg ->
         do
-          term_write("T-match-7: translate_source failed: ")
-          term_write(msg)
-          term_write("\n")
+          terminal.write("T-match-7: translate_source failed: ")
+          terminal.write(msg)
+          terminal.write("\n")
           assert_true(state, "T-match-7: shadowed-field + sibling-arm match compiles", false)
     | Ok ir_capture_leak ->
         do
@@ -470,9 +471,9 @@ fn main() -> Unit !{IO} =
     match translate_source(src_bool_ret_match) with
     | Err msg_9 ->
         do
-          term_write("T-match-9 translate_source failed: ")
-          term_write(msg_9)
-          term_write("\n")
+          terminal.write("T-match-9 translate_source failed: ")
+          terminal.write(msg_9)
+          terminal.write("\n")
           assert_true(state, "T-match-9: Bool-returning match compiles", false)
     | Ok ir_bool_match ->
         do
@@ -494,9 +495,9 @@ fn main() -> Unit !{IO} =
     match translate_source(src_bool_lambda) with
     | Err msg_10 ->
         do
-          term_write("T-match-10 translate_source failed: ")
-          term_write(msg_10)
-          term_write("\n")
+          terminal.write("T-match-10 translate_source failed: ")
+          terminal.write(msg_10)
+          terminal.write("\n")
           assert_true(state, "T-match-10: Bool-returning lambda compiles (#6 closed)", false)
     | Ok ir_bool_lambda ->
         do
@@ -513,9 +514,9 @@ fn main() -> Unit !{IO} =
     match translate_source(src_bool_capture) with
     | Err msg_11 ->
         do
-          term_write("T-match-11 translate_source failed: ")
-          term_write(msg_11)
-          term_write("\n")
+          terminal.write("T-match-11 translate_source failed: ")
+          terminal.write(msg_11)
+          terminal.write("\n")
           assert_true(state, "T-match-11: Bool-capturing lambda compiles (#7 closed)", false)
     | Ok ir_bool_capture ->
         do

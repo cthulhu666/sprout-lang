@@ -1,6 +1,7 @@
 import stdlib.task (Scope, with_scope, task_spawn)
 import stdlib.net (TcpConnection, connect, close, write_all_utf8, read_exact_utf8)
 import stdlib.http_server (HttpRequest, HttpServerResponse, ServerConfig, ok, response, request_path, serve_pooled_n_with)
+import stdlib.terminal as terminal
 
 # `serve_pooled`: a FIXED pool of long-lived workers pulling owned connections off a channel, instead
 # of one fire-and-forget task per connection. The win is that `makecontext` runs once per worker
@@ -27,9 +28,9 @@ fn handle(req: HttpRequest) -> HttpServerResponse !{IO} =
 fn expect_status(conn: borrowing TcpConnection, want: String, marker: String) -> Unit !{IO} =
   match read_exact_utf8(conn, 12) with
   | Ok reply ->
-      if reply == want then term_write(`${marker}\n`)
-      else term_write(`MISMATCH: ${marker} got ${reply}\n`)
-  | Err _ -> term_write(`MISMATCH: ${marker} read failed\n`)
+      if reply == want then terminal.write(`${marker}\n`)
+      else terminal.write(`MISMATCH: ${marker} got ${reply}\n`)
+  | Err _ -> terminal.write(`MISMATCH: ${marker} read failed\n`)
 
 fn one_request(port: Int, path: String, want: String, marker: String) -> Unit !{IO} =
   match connect("127.0.0.1", port) with
@@ -37,9 +38,9 @@ fn one_request(port: Int, path: String, want: String, marker: String) -> Unit !{
     do
       match write_all_utf8(conn, "GET " ++ path ++ " HTTP/1.1\r\nHost: x\r\n\r\n") with
       | Ok _ -> expect_status(conn, want, marker)
-      | Err _ -> term_write(`MISMATCH: ${marker} could not send\n`)
+      | Err _ -> terminal.write(`MISMATCH: ${marker} could not send\n`)
       close(conn)
-  | Err _ -> term_write(`MISMATCH: ${marker} could not connect\n`)
+  | Err _ -> terminal.write(`MISMATCH: ${marker} could not connect\n`)
 
 # Sequential on purpose: with two workers and five connections issued one at a time, every
 # connection after the second can only be served by a worker that came back for more work.
@@ -67,4 +68,4 @@ fn run(s: Scope, port: Int) -> Unit !{IO} =
 fn main() -> Unit !{IO} =
   do
     with_scope(\s -> run(s, 28993))
-    term_write("done\n")
+    terminal.write("done\n")

@@ -3,6 +3,7 @@ import stdlib.http (HttpResponse, http_response_body)
 import stdlib.net (TcpConnection, TcpListener, accept, close, close_listener, listen_local, read_avail_timeout, write_all)
 import stdlib.bytes as bytes
 import stdlib.string as string
+import stdlib.terminal as terminal
 
 # Regression (code review, finding 8): the HTTP CLIENT must deliver a response body byte-for-byte,
 # including 0x00 and bytes that are not valid UTF-8.
@@ -118,10 +119,10 @@ fn pick_reply(head: String) -> Bytes !{IO} =
 # Exactly two connections, then exit — the client makes exactly two requests, so this terminates on
 # its own and the gate needs no kill.
 fn serve_loop(listener: borrowing TcpListener, remaining: Int) -> Unit !{IO} =
-  if remaining <= 0 then term_write("")
+  if remaining <= 0 then terminal.write("")
   else
     match accept(listener) with
-    | Err _ -> term_write("")
+    | Err _ -> terminal.write("")
     | Ok conn ->
         do
           serve_one(conn)
@@ -131,7 +132,7 @@ fn run_server(port: Int) -> Unit !{IO} =
   do
     listener <- listen_local(port)
     # The readiness marker the gate waits on, printed only once the listener is bound.
-    term_write("ready\n")
+    terminal.write("ready\n")
     serve_loop(listener, 2)
     close_listener(listener)
 
@@ -142,8 +143,8 @@ fn line(label: String, value: String) -> String =
 
 fn report(label: String, url: String) -> Unit !{IO} =
   match http_get(url, "", 5000) with
-  | Err _ -> term_write(line(label, "REQUEST FAILED"))
-  | Ok resp -> term_write(line(label, int_to_string(bytes.length(http_response_body(resp)))))
+  | Err _ -> terminal.write(line(label, "REQUEST FAILED"))
+  | Ok resp -> terminal.write(line(label, int_to_string(bytes.length(http_response_body(resp)))))
 
 fn url_for(port: Int, path: String) -> String =
   string.concat("http://127.0.0.1:", string.concat(int_to_string(port), path))

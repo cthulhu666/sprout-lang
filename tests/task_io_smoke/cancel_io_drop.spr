@@ -1,6 +1,7 @@
 import stdlib.task (Scope, with_scope, task_fork, detach, task_spawn, task_yield, scope_cancel)
 import stdlib.net (tcp_listen, tcp_accept, tcp_close)
 import stdlib.string as string
+import stdlib.terminal as terminal
 
 # L0.5 I/O-drop cancellation (EXPERIMENTAL). A task suspended in the poller (here on
 # tcp_accept, with nobody ever connecting) cannot check task_cancelled — it is asleep
@@ -24,14 +25,14 @@ fn accept_forever(listener: Int) -> Int !{IO} =
     | Err _ -> panic("accept_forever: accept returned instead of parking")
     | Ok conn ->
         do
-          term_write(held)  # unreachable; forces `held` rooted across the park
+          terminal.write(held)  # unreachable; forces `held` rooted across the park
           tcp_close(conn)  # unreachable; present only so `conn` is used
           99
 
 fn accept_forever_unit(listener: Int) -> Unit !{IO} =
   do
     _ <- accept_forever(listener)
-    term_write("")
+    terminal.write("")
 
 fn body(s: Scope, la: Int, lb: Int) -> Unit !{IO} =
   do
@@ -39,11 +40,11 @@ fn body(s: Scope, la: Int, lb: Int) -> Unit !{IO} =
     task_spawn(s, \_ -> accept_forever_unit(lb))  # fire-and-forget, parks on lb
     task_yield()  # let both reach accept and park
     scope_cancel(s)  # force-drop both parked tasks
-    term_write("cancelled\n")  # owner continues; awaits neither
+    terminal.write("cancelled\n")  # owner continues; awaits neither
 
 fn main() -> Unit !{IO} =
   do
     la <- tcp_listen(28996)
     lb <- tcp_listen(28997)
     with_scope(\s -> body(s, la, lb))
-    term_write("done\n")  # reached only if both parked tasks were dropped by cancel
+    terminal.write("done\n")  # reached only if both parked tasks were dropped by cancel

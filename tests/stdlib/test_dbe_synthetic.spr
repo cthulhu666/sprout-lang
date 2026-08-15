@@ -1,4 +1,4 @@
-import stdlib.prelude as prelude
+import stdlib.terminal as terminal
 
 # Tests for Dead Let Elimination (DLE) pass.
 # These functions have TDoLetStep bindings that are pure and unreferenced.
@@ -40,14 +40,14 @@ fn test_dead_lambda() -> Int !{IO} =
 fn assert_eq_int(label: String, expected: Int, actual: Int) -> Unit !{IO} =
   do
     if expected == actual
-    then term_write("PASS " ++ label ++ "\n")
-    else term_write("FAIL " ++ label ++ ": expected " ++ int_to_string(expected) ++ " got " ++ int_to_string(actual) ++ "\n")
+    then terminal.write("PASS " ++ label ++ "\n")
+    else terminal.write("FAIL " ++ label ++ ": expected " ++ int_to_string(expected) ++ " got " ++ int_to_string(actual) ++ "\n")
 
 fn assert_eq_str(label: String, expected: String, actual: String) -> Unit !{IO} =
   do
     if expected == actual
-    then term_write("PASS " ++ label ++ "\n")
-    else term_write("FAIL " ++ label ++ ": expected " ++ expected ++ " got " ++ actual ++ "\n")
+    then terminal.write("PASS " ++ label ++ "\n")
+    else terminal.write("FAIL " ++ label ++ ": expected " ++ expected ++ " got " ++ actual ++ "\n")
 
 fn main() -> Unit !{IO} =
   do

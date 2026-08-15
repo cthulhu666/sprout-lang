@@ -2,6 +2,7 @@ import stdlib.task (Scope, with_scope, task_spawn, scope_cancel)
 import stdlib.chan (Chan, chan_new, chan_send, chan_recv)
 import stdlib.net (TcpConnection, connect, close, write_all_utf8, read_exact_utf8)
 import stdlib.http_server (HttpRequest, HttpServerResponse, ok, request_path, serve)
+import stdlib.terminal as terminal
 
 # stdlib.http_server.serve is the UNBOUNDED accept loop: unlike serve_n it never
 # stops on a connection count, so it must keep accepting past any small bound.
@@ -24,15 +25,15 @@ fn handle(req: HttpRequest) -> HttpServerResponse =
 
 fn send_or_fail(conn: borrowing TcpConnection, msg: String) -> Unit !{IO} =
   match write_all_utf8(conn, msg) with
-  | Ok _ -> term_write("")
-  | Err _ -> term_write("write failed\n")
+  | Ok _ -> terminal.write("")
+  | Err _ -> terminal.write("write failed\n")
 
 fn report(conn: borrowing TcpConnection, label: String) -> Unit !{IO} =
   match read_exact_utf8(conn, 12) with
   | Ok line ->
-      if line == "HTTP/1.1 200" then term_write(`${label} ok\n`)
-      else term_write(`${label} bad ${line}\n`)
-  | Err _ -> term_write(`${label} read failed\n`)
+      if line == "HTTP/1.1 200" then terminal.write(`${label} ok\n`)
+      else terminal.write(`${label} bad ${line}\n`)
+  | Err _ -> terminal.write(`${label} read failed\n`)
 
 fn one_request(port: Int, label: String, req: String) -> Unit !{IO} =
   match connect("127.0.0.1", port) with
@@ -41,7 +42,7 @@ fn one_request(port: Int, label: String, req: String) -> Unit !{IO} =
         send_or_fail(conn, req)
         report(conn, label)
         close(conn)
-  | Err _ -> term_write(`${label} connect failed\n`)
+  | Err _ -> terminal.write(`${label} connect failed\n`)
 
 # Three sequential connections; each is a fresh accept -> fresh handler for serve.
 fn client(port: Int, done: Chan Int) -> Unit !{IO} =
@@ -58,9 +59,9 @@ fn body(s: Scope, port: Int) -> Unit !{IO} =
     task_spawn(s, \_ -> client(port, done))
     _ <- chan_recv(done)  # owner parks until all three responses are read
     scope_cancel(s)  # force-drop the serve task still parked in tcp_accept
-    term_write("shutdown\n")
+    terminal.write("shutdown\n")
 
 fn main() -> Unit !{IO} =
   do
     with_scope(\s -> body(s, 28998))
-    term_write("done\n")  # reached only if the parked serve task was dropped
+    terminal.write("done\n")  # reached only if the parked serve task was dropped

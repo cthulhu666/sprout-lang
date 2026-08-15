@@ -2,6 +2,7 @@ import stdlib.task (Scope, with_scope, task_spawn)
 import stdlib.net (TcpConnection, close, close_listener, connect, accept, listen_local, read_avail_timeout, write_all_utf8)
 import stdlib.string as string
 import stdlib.bytes as bytes
+import stdlib.terminal as terminal
 
 # L0.3 I/O parking smoke. Two green tasks share one loopback connection pair:
 # `reader` reads before any data exists, `writer` then sends. With I/O parking,
@@ -37,7 +38,7 @@ fn reader(server: consuming TcpConnection) -> Unit !{IO} =
 
 fn writer(client: consuming TcpConnection) -> Unit !{IO} =
   do
-    term_write("writer sent\n")
+    terminal.write("writer sent\n")
     match write_all_utf8(client, "ping") with
     | Ok _ -> close(client)
     | Err _ -> report_and_close(client, "writer: write failed")
@@ -45,8 +46,8 @@ fn writer(client: consuming TcpConnection) -> Unit !{IO} =
 # The borrow-then-consume tail both tasks share: write the line, then release.
 fn report_and_close(conn: consuming TcpConnection, line: String) -> Unit !{IO} =
   do
-    term_write(line)
-    term_write("\n")
+    terminal.write(line)
+    terminal.write("\n")
     close(conn)
 
 fn run(s: Scope, server: consuming TcpConnection, client: consuming TcpConnection) -> Unit !{IO} =
@@ -68,8 +69,8 @@ fn main() -> Unit !{IO} =
             do
               close_listener(listener)
               close(conn)
-              term_write("accept failed\n")
+              terminal.write("accept failed\n")
     | Err e ->
         do
           close_listener(listener)
-          term_write("connect failed\n")
+          terminal.write("connect failed\n")

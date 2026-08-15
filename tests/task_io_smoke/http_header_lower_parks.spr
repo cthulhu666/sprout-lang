@@ -3,6 +3,7 @@ import stdlib.chan (Chan, chan_new, chan_send, chan_recv)
 import stdlib.net (TcpConnection, connect, close, write_all_utf8, read_exact_utf8)
 import stdlib.http_server (HttpRequest, HttpServerResponse, ok, serve_n)
 import stdlib.string as string
+import stdlib.terminal as terminal
 
 # Regression (code review, finding 5): the header parser must not spend time QUADRATIC in the length
 # of a single header line. `parse_header_pair` lowercases the field-name with `lower_ascii` and trims
@@ -31,8 +32,8 @@ fn probe() -> Unit !{IO} =
     report((t1 - t0) / 1000)
 
 fn report(elapsed_ms: Int) -> Unit !{IO} =
-  if elapsed_ms < 500 then term_write("scheduler stayed live\n")
-  else term_write(string.concat("scheduler FROZEN for ", string.concat(int_to_string(elapsed_ms), " ms\n")))
+  if elapsed_ms < 500 then terminal.write("scheduler stayed live\n")
+  else terminal.write(string.concat("scheduler FROZEN for ", string.concat(int_to_string(elapsed_ms), " ms\n")))
 
 # Grow `unit` by doubling until it reaches `target`, then cut to exactly `target` — so the harness
 # that builds the payload is itself linear, not part of what we are measuring.
@@ -66,15 +67,15 @@ fn send_request(port: Int) -> Unit !{IO} =
         write_all_utf8(conn, big_request())
         drain(conn)
         close(conn)
-  | Err _ -> term_write("client connect failed\n")
+  | Err _ -> terminal.write("client connect failed\n")
 
 # Read the status line so the request completes and serve_n(port, 1, ...) returns, letting the scope
 # join. Borrowing (the owner closes); the response is not asserted on — the assertion is entirely the
 # probe's liveness verdict.
 fn drain(conn: borrowing TcpConnection) -> Unit !{IO} =
   match read_exact_utf8(conn, 12) with
-  | Ok _ -> term_write("")
-  | Err _ -> term_write("")
+  | Ok _ -> terminal.write("")
+  | Err _ -> terminal.write("")
 
 # serve_n binds its listener before its first accept-park, so signalling `ready` at spawn time and
 # having the client wait on it orders the connect after the bind without a fixed sleep.

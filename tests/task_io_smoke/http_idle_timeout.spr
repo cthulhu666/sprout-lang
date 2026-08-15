@@ -1,6 +1,7 @@
 import stdlib.task (Scope, with_scope, task_spawn)
 import stdlib.net (TcpConnection, connect, close, write_all_utf8, read_exact_utf8)
 import stdlib.http_server (HttpRequest, HttpServerResponse, ServerConfig, ok, request_path, serve_n_with)
+import stdlib.terminal as terminal
 
 # http_server idle-connection timeout (concurrency review C3 regression).
 #
@@ -37,10 +38,10 @@ fn expect_status(conn: borrowing TcpConnection, want: String, label: String) -> 
   match read_exact_utf8(conn, 12) with
   | Ok line ->
     if line == want then
-      term_write(`${label}\n`)
+      terminal.write(`${label}\n`)
     else
-      term_write(`MISMATCH: got ${line}\n`)
-  | Err _ -> term_write("MISMATCH: read failed\n")
+      terminal.write(`MISMATCH: got ${line}\n`)
+  | Err _ -> terminal.write("MISMATCH: read failed\n")
 
 # Connects, then goes silent. The server must give up on its own and say 408.
 fn silent_client(port: Int) -> Unit !{IO} =
@@ -49,7 +50,7 @@ fn silent_client(port: Int) -> Unit !{IO} =
     do
       expect_status(conn, "HTTP/1.1 408", "silent-got-408")
       close(conn)
-  | Err _ -> term_write("FAILED silent client could not connect\n")
+  | Err _ -> terminal.write("FAILED silent client could not connect\n")
 
 # Sends a full request immediately; must be served normally.
 fn prompt_client(port: Int) -> Unit !{IO} =
@@ -58,9 +59,9 @@ fn prompt_client(port: Int) -> Unit !{IO} =
     do
       match write_all_utf8(conn, "GET /ok HTTP/1.1\r\nHost: x\r\n\r\n") with
       | Ok _ -> expect_status(conn, "HTTP/1.1 200", "prompt-got-200")
-      | Err _ -> term_write("FAILED prompt client write failed\n")
+      | Err _ -> terminal.write("FAILED prompt client write failed\n")
       close(conn)
-  | Err _ -> term_write("FAILED prompt client could not connect\n")
+  | Err _ -> terminal.write("FAILED prompt client could not connect\n")
 
 # The server task is spawned first, so it reaches `tcp_listen` (and parks in accept) before either
 # client task runs — the same startup ordering the other http fixtures rely on.
@@ -74,4 +75,4 @@ fn run(s: Scope, port: Int) -> Unit !{IO} =
 fn main() -> Unit !{IO} =
   do
     with_scope(\s -> run(s, 28992))
-    term_write("done\n")
+    terminal.write("done\n")

@@ -1,4 +1,5 @@
 import stdlib.net (TcpError, TcpInvalidHandle, tcp_accept)
+import stdlib.terminal as terminal
 
 # REGRESSION (concurrency review C3). `tcp_accept` must be RECOVERABLE, not fatal.
 #
@@ -17,7 +18,7 @@ import stdlib.net (TcpError, TcpInvalidHandle, tcp_accept)
 fn main() -> Unit !{IO} =
   do
     match tcp_accept(1999) with
-    | Err TcpInvalidHandle -> term_write("invalid-listener err\n")
-    | Err _ -> term_write("wrong-err\n")
-    | Ok _ -> term_write("unexpected-ok\n")
-    term_write("done\n")
+    | Err TcpInvalidHandle -> terminal.write("invalid-listener err\n")
+    | Err _ -> terminal.write("wrong-err\n")
+    | Ok _ -> terminal.write("unexpected-ok\n")
+    terminal.write("done\n")

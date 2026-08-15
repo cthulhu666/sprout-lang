@@ -1,6 +1,7 @@
 import stdlib.task (TimeoutResult, Completed, Expired, with_timeout, task_sleep)
 import stdlib.net (TcpConnection, connect, close)
 import stdlib.string as string
+import stdlib.terminal as terminal
 
 # Cancelling a task mid-DNS-resolve must not hang, crash, or corrupt state — this is the first OS
 # thread in the runtime (finding 10), and cancellation is the delicate path: a force-drop closes the
@@ -62,9 +63,9 @@ fn drive(remaining: Int, expired: Int) -> Int !{IO} =
       drive(remaining - 1, expired + e)
 
 fn report(expired: Int) -> Unit !{IO} =
-  if expired >= floor() then term_write("dns-cancel-drop-ok\n")
+  if expired >= floor() then terminal.write("dns-cancel-drop-ok\n")
   else
-    term_write(
+    terminal.write(
       string.concat(
         "dns-cancel-drop FAILED: only ",
         string.concat(int_to_string(expired), string.concat(" of ", string.concat(int_to_string(attempts()), " attempts were force-dropped (async cancellation path may be broken)\n")))

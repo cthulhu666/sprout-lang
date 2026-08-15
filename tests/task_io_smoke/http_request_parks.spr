@@ -2,6 +2,7 @@ import stdlib.task (Scope, with_scope, task_spawn, task_sleep)
 import stdlib.http_client (http_get)
 import stdlib.net (TcpListener, close_listener, listen_local)
 import stdlib.string as string
+import stdlib.terminal as terminal
 
 # Regression (code review, finding 6): `http_request` must PARK the green task, never block the OS
 # thread. While it blocks, the pump cannot run — no sibling task advances and no timer fires, so a
@@ -32,15 +33,15 @@ fn probe() -> Unit !{IO} =
     report((t1 - t0) / 1000)
 
 fn report(elapsed_ms: Int) -> Unit !{IO} =
-  if elapsed_ms < 500 then term_write("scheduler stayed live\n")
-  else term_write(string.concat("scheduler FROZEN for ", string.concat(int_to_string(elapsed_ms), " ms\n")))
+  if elapsed_ms < 500 then terminal.write("scheduler stayed live\n")
+  else terminal.write(string.concat("scheduler FROZEN for ", string.concat(int_to_string(elapsed_ms), " ms\n")))
 
 # The result is intentionally discarded: the assertion is about the SCHEDULER, not about this
 # request, which is expected to end in `Err HttpTimeout` either way.
 fn caller() -> Unit !{IO} =
   match http_get("http://127.0.0.1:28990/", "", 2000) with
-  | Ok _ -> term_write("")
-  | Err _ -> term_write("")
+  | Ok _ -> terminal.write("")
+  | Err _ -> terminal.write("")
 
 fn run(s: Scope) -> Unit !{IO} =
   do

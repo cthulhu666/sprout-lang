@@ -13,6 +13,7 @@ import stdlib.test (TestState, new_state, assert_true, summary)
 import stdlib.process as process
 import stdlib.string as string
 import stdlib.compiler.analysis_service_driver as service
+import stdlib.terminal as terminal
 
 fn trivial_main_ir() -> String =
   "define i64 @main() {\nentry:\n  ret i64 0\n}\n"
@@ -37,7 +38,7 @@ fn main() -> Unit !{IO} =
     match have_clang with
     | false ->
         do
-          term_write("[test_repl_eval_link] clang not in PATH — assertion auto-passes\n")
+          terminal.write("[test_repl_eval_link] clang not in PATH — assertion auto-passes\n")
           assert_true(state, "runtime links as a whole (auto-skipped: no clang)", true)
     | true ->
         do
@@ -57,9 +58,9 @@ fn main() -> Unit !{IO} =
                   assert_true(state, "eval path links the whole runtime (scheduler_park_on_fd resolves)", true)
               | Err emsg ->
                   do
-                    term_write("[test_repl_eval_link] link failed:\n")
-                    term_write(emsg)
-                    term_write("\n")
+                    terminal.write("[test_repl_eval_link] link failed:\n")
+                    terminal.write(emsg)
+                    terminal.write("\n")
                     assert_true(state, "eval path links the whole runtime (scheduler_park_on_fd resolves)", false)
 
     summary(state)

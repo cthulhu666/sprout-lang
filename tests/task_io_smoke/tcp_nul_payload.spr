@@ -1,6 +1,7 @@
 import stdlib.task (Scope, with_scope, task_spawn)
 import stdlib.net (TcpConnection, accept, close, close_listener, connect, listen_local, read_avail_timeout, write_all)
 import stdlib.bytes as bytes
+import stdlib.terminal as terminal
 
 # REGRESSION (W2 R2, `net` half). A socket read must not produce a Sprout String.
 #
@@ -49,21 +50,21 @@ fn reader(server: consuming TcpConnection) -> Unit !{IO} =
     # has length 1, so the length check alone would catch it, but the trailing `b` is what proves
     # nothing downstream of the NUL was dropped.
     if (bytes.length(got) == 3) && (byte_at(got, 0) == 97) && (byte_at(got, 1) == 0) && (byte_at(got, 2) == 98) then
-      term_write("nul-bytes-intact\n")
+      terminal.write("nul-bytes-intact\n")
     else
-      term_write(`MISMATCH: got ${int_to_string(bytes.length(got))} bytes\n`)
+      terminal.write(`MISMATCH: got ${int_to_string(bytes.length(got))} bytes\n`)
     # The choke point. Delivering these bytes is correct; calling them text is not, and the refusal
     # is what stops the illegal String from being reconstructed one layer up.
     match bytes.to_string(got) with
-    | Ok _ -> term_write("MISMATCH: to_string accepted a NUL byte\n")
-    | Err _ -> term_write("nul-decode-refused\n")
+    | Ok _ -> terminal.write("MISMATCH: to_string accepted a NUL byte\n")
+    | Err _ -> terminal.write("nul-decode-refused\n")
     close(server)
 
 fn writer(client: consuming TcpConnection) -> Unit !{IO} =
   do
     match write_all(client, payload()) with
-    | Ok _ -> term_write("")
-    | Err _ -> term_write("MISMATCH: writer could not send\n")
+    | Ok _ -> terminal.write("")
+    | Err _ -> terminal.write("MISMATCH: writer could not send\n")
     close(client)
 
 fn run(s: Scope, server: consuming TcpConnection, client: consuming TcpConnection) -> Unit !{IO} =
@@ -85,9 +86,9 @@ fn main() -> Unit !{IO} =
             do
               close_listener(listener)
               close(client)
-              term_write("MISMATCH: could not accept\n")
+              terminal.write("MISMATCH: could not accept\n")
     | Err _ ->
         do
           close_listener(listener)
-          term_write("MISMATCH: could not connect\n")
-    term_write("done\n")
+          terminal.write("MISMATCH: could not connect\n")
+    terminal.write("done\n")

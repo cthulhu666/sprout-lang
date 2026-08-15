@@ -1,5 +1,6 @@
 import stdlib.task (Scope, with_scope, with_timeout, TimeoutResult, Completed, Expired)
 import stdlib.chan (Chan, Recv, Got, Closed, chan_new, chan_recv)
+import stdlib.terminal as terminal
 
 # L0.8 with_timeout over a channel recv (EXPERIMENTAL). A timed body that parks in
 # chan_recv on an empty channel nobody sends to must be FORCE-DROPPED when its deadline
@@ -15,7 +16,7 @@ fn timed_recv(ch: Chan Int) -> Int !{IO} =
   do
     let held = "live-" ++ "root"
     r <- chan_recv(ch)  # parks here forever — nobody ever sends
-    term_write(held)  # unreachable; forces `held` rooted across the park
+    terminal.write(held)  # unreachable; forces `held` rooted across the park
     match r with
     | Got v -> v
     | Closed -> 0
@@ -25,10 +26,10 @@ fn run(s: Scope) -> Unit !{IO} =
     ch <- chan_new(s, 1)
     let result = with_timeout(50, \_ -> timed_recv(ch))
     match result with
-    | Completed v -> term_write("completed\n")
-    | Expired -> term_write("expired\n")
+    | Completed v -> terminal.write("completed\n")
+    | Expired -> terminal.write("expired\n")
 
 fn main() -> Unit !{IO} =
   do
     with_scope(\s -> run(s))
-    term_write("done\n")  # reached only after the timed-out recv body was force-dropped
+    terminal.write("done\n")  # reached only after the timed-out recv body was force-dropped
