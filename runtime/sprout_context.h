@@ -1,0 +1,106 @@
+/* Execution-context seam for the green-thread scheduler.
+ *
+ * The scheduler switches between a pump and N green tasks. That is the one part
+ * of the runtime with no portable spelling: POSIX offers ucontext, Windows offers
+ * Fibers, and the two disagree about who owns the stack — makecontext runs on a
+ * stack you hand it, CreateFiber allocates its own and returns an opaque handle.
+ * So SproutCtx OWNS its stack, and no operation here takes a caller-supplied one.
+ *
+ * Four operations cover every use in sprout_scheduler.c:
+ *
+ *   adopt_current  the thread already running (task-0 / main), whose stack the
+ *                  runtime did not allocate and must never free
+ *   create         a fresh context that begins executing `entry` on a new stack
+ *   switch         suspend one context, resume another
+ *   destroy        release the stack of a context that is not running
+ *
+ * This header must be the FIRST include in any translation unit that uses it:
+ * the feature-test macros below select the ucontext declarations, and a
+ * feature-test macro is inert once any libc header has been read.
+ *
+ * Windows arm: docs/windows-port-v0.md, milestone W1.
+ */
+#ifndef SPROUT_CONTEXT_H
+#define SPROUT_CONTEXT_H
+
+#if defined(_WIN32)
+#error "sprout_context.h has no Windows arm yet — see docs/windows-port-v0.md (W1)."
+#endif
+
+/* ucontext on macOS lives behind these; define before any include pulls in
+ * <sys/ucontext.h>. */
+#define _XOPEN_SOURCE 700
+#define _DARWIN_C_SOURCE 1
+
+#include <stdlib.h>
+#include <ucontext.h>
+
+/* macOS marks getcontext/makecontext/swapcontext deprecated; we knowingly use
+ * them. Scoped to this header, so the suppression covers the four calls that
+ * need it rather than every line of the scheduler. */
+#ifdef __APPLE__
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wdeprecated-declarations"
+#endif
+
+/* A suspended (or running) execution context. `stack` is owned: non-NULL exactly
+ * when this context was created by sprout_ctx_create and not yet destroyed. It is
+ * a non-moving malloc because GC root slots are addresses INTO it, read while the
+ * task is suspended (see sprout_scheduler.h). */
+typedef struct SproutCtx {
+  ucontext_t uc;
+  void*      stack;
+} SproutCtx;
+
+/* Adopt the caller's own thread of execution as a context. Its stack belongs to
+ * the OS, so nothing is allocated and destroy is a no-op; `uc` is filled by the
+ * first switch OUT of this context. */
+static inline void sprout_ctx_adopt_current(SproutCtx* c) {
+  c->stack = NULL;
+}
+
+/* Prime `c` to begin executing `entry` on a fresh stack of `stack_bytes`.
+ * `entry` must never return — every context here leaves by switching out.
+ * Returns 0 on success, SPROUT_CTX_ENOMEM if the stack could not be allocated,
+ * SPROUT_CTX_EPRIME if the context could not be initialized. Returning a code
+ * rather than failing internally keeps the caller's diagnostic wording its own —
+ * today both callers word EPRIME as "getcontext failed", which a non-POSIX arm
+ * has to reword. */
+#define SPROUT_CTX_ENOMEM (-1)
+#define SPROUT_CTX_EPRIME (-2)
+
+static inline int sprout_ctx_create(SproutCtx* c, void (*entry)(void), size_t stack_bytes) {
+  c->stack = malloc(stack_bytes);
+  if (c->stack == NULL) return SPROUT_CTX_ENOMEM;
+  if (getcontext(&c->uc) != 0) {      /* initializes uc before makecontext reads its uc_* fields */
+    free(c->stack);
+    c->stack = NULL;
+    return SPROUT_CTX_EPRIME;
+  }
+  c->uc.uc_stack.ss_sp   = c->stack;
+  c->uc.uc_stack.ss_size = stack_bytes;
+  c->uc.uc_link          = NULL;      /* `entry` never returns; nothing to resume */
+  makecontext(&c->uc, entry, 0);
+  return 0;
+}
+
+/* Suspend `from` and resume `to`. `from` MUST be the context currently executing:
+ * Windows' SwitchToFiber names only the destination, so a switch whose source is
+ * some third context has no implementation there. */
+static inline void sprout_ctx_switch(SproutCtx* from, SproutCtx* to) {
+  swapcontext(&from->uc, &to->uc);
+}
+
+/* Release `c`'s stack. Idempotent, and a no-op on an adopted context. The caller
+ * must not be executing on `c` — the scheduler destroys a context only from the
+ * pump, which runs on its own. */
+static inline void sprout_ctx_destroy(SproutCtx* c) {
+  free(c->stack);
+  c->stack = NULL;
+}
+
+#ifdef __APPLE__
+#pragma clang diagnostic pop
+#endif
+
+#endif /* SPROUT_CONTEXT_H */
