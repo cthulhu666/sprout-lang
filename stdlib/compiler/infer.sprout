@@ -4789,18 +4789,21 @@ export fn typecheck_decls(
       match validate_constraints_all(decls, collect_declared_class_names(decls, class_names_from_env(env, Nil))) with
       | Just (pos, err_msg) -> typed_ast.TypedErr(pos, err_msg)
       | Nothing ->
-        match check_tyvar_instance_heads(decls) with
+        match check_duplicate_fn_decls(decls, dict_empty()) with
         | Just (pos, err_msg) -> typed_ast.TypedErr(pos, err_msg)
         | Nothing ->
-          match check_overlapping_instances(decls, dict_empty()) with
+          match check_tyvar_instance_heads(decls) with
           | Just (pos, err_msg) -> typed_ast.TypedErr(pos, err_msg)
           | Nothing ->
-            match check_missing_superclass_instances(decls) with
+            match check_overlapping_instances(decls, dict_empty()) with
             | Just (pos, err_msg) -> typed_ast.TypedErr(pos, err_msg)
             | Nothing ->
-              match check_existential_constraints(decls) with
+              match check_missing_superclass_instances(decls) with
               | Just (pos, err_msg) -> typed_ast.TypedErr(pos, err_msg)
               | Nothing ->
+                match check_existential_constraints(decls) with
+                | Just (pos, err_msg) -> typed_ast.TypedErr(pos, err_msg)
+                | Nothing ->
                 # Wrap scanned_env_with_types as GlobalEnv at this seam — it is the
                 # output of pre_scan_fn_decls (Dict, raw pre-pass) plus this module's
                 # @type: markers. From here on the env flows between decls as the
@@ -5219,6 +5222,41 @@ fn instance_key_and_class(c: ast.TypeConstraint) -> Maybe (String, String) =
       | [head_te | _] ->
           Just((str_concat("@inst:", str_concat(class_name, str_concat(":", type_head_str(type_from_ast(head_te, dict_empty()))))),
                 string.after_last_dot(class_name)))
+
+# ---------------------------------------------------------------------------
+# Duplicate top-level definition validation
+# ---------------------------------------------------------------------------
+#
+# Two top-level `fn`s sharing a name lower to two `define` blocks for one mangled
+# symbol, and the front end accepted that outright: `--phase check` reported OK
+# and `--emit-ir` exited 0. The only thing that ever objected was
+# `opt --passes=verify`, with a mangled name and no source position — and on the
+# ordinary compile path the invalid IR goes straight to clang instead.
+#
+# Keyed on the NAME ALONE, not on (name, arity). Sprout has no overloading
+# (docs/currying-and-pipe-decision-v1.md §9a.5), so a same-name/different-arity
+# pair is two definitions of one symbol just the same. That case did fail before
+# this check, but at the CALL site with an arity error — the second definition
+# had shadowed the first in the env, so the caller was blamed for a defect in the
+# module.
+#
+# Reports the SECOND occurrence, which is the line to delete.
+#
+# No false positive from bundling: `decls` here is post-bundler, where every
+# imported module's definitions carry their module prefix, so a local `map` and
+# the prelude's `map` are distinct keys. Only FnDecl participates — instance and
+# class methods are InstanceMethodImpl/ClassMethodSig, not top-level decls, so
+# the many `fn eq` implementations across instances never collide here.
+fn check_duplicate_fn_decls(decls: List ast.Decl, seen: Dict Bool) -> Maybe(source.SourcePos, String) =
+  match decls with
+  | Nil -> Nothing
+  | Cons decl rest ->
+      match decl with
+      | ast.FnDecl name _ _ _ _ _ pos ->
+          match dict_get(name, seen) with
+          | Just _ -> Just((pos, "`" ++ name ++ "` is defined more than once in this module"))
+          | Nothing -> check_duplicate_fn_decls(rest, dict_set(name, true, seen))
+      | _ -> check_duplicate_fn_decls(rest, seen)
 
 # ---------------------------------------------------------------------------
 # Type-variable instance-head validation
