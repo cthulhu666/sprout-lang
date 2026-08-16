@@ -209,15 +209,68 @@ timerfd per registration and can therefore fail to arm under `ulimit -n` pressur
 pressure, so **on Windows the "returns 0" path becomes unreachable**. Document it as
 unreachable-but-honoured rather than leaving the contract undefined.
 
-**Fallbacks, if `WSAPoll` proves inadequate:**
+**Sockets only — the limitation that bites, and it is not `WSAPoll`-specific.** `WSAPoll` accepts
+only sockets, where epoll and kqueue accept any descriptor. Sprout depends on that generality in
+exactly one place: **async DNS parks a green task on a `pipe()` read end**
+(`sprout_runtime.c:7110`), used as the completion signal from the detached `getaddrinfo` thread.
+No readiness backend on Windows can poll a pipe.
 
-- *AFD/wepoll-style* (mio's approach) preserves readiness semantics at scale, but reaches
-  `\Device\Afd` through **undocumented** NT interfaces and means **vendoring third-party code** —
-  which under this project's norms is an explicit call for Kuba, not a default.
-- *IOCP* is the industry answer but is a completion model; adopting it means reshaping the park
-  protocol, not just the backend.
+The fix is a **loopback socket pair** — the pipe carries a single completion byte, so a
+self-connected `127.0.0.1` pair serves the same purpose and is a socket. W2 owns this; it is not
+optional, and it is not a reason to prefer a different poller, because *the alternative has the
+same limitation* (below).
 
-Neither should be adopted before `WSAPoll` is measured against a real workload.
+### 4.3.1 Poller decision (2026-08-16): `WSAPoll`, revisitable
+
+**Decided: `WSAPoll`, vendoring nothing.** Recorded with its limits so the decision can be
+re-opened on evidence rather than re-litigated from scratch.
+
+**AFD/wepoll buys no capability.** It was carried above as the scale fallback, implying it reached
+further than `WSAPoll`. It does not. wepoll's own README states its limitations:
+
+> *"Only works with sockets."* … *"Edge-triggered (`EPOLLET`) mode isn't supported."*
+
+That is structural: AFD *is* the Ancillary Function Driver, the kernel layer beneath Winsock, so
+it has no more reach than `WSAPoll` — it offers a *registered set* instead of a re-passed array,
+and nothing else. In particular **it does not solve the DNS-pipe problem either**. (The
+edge-triggered gap is moot for us: this poller is documented one-shot, nearer `EPOLLONESHOT`.)
+
+So the only question AFD answers is scale, and three facts bound it:
+
+| bound | value |
+|---|---|
+| worst-case registered fds | **2048** — `g_conn_fd[2048]`, `sprout_runtime.c:153` |
+| worst-case array copied per wait | ~16 KB of `WSAPOLLFD` |
+| what is actually in the array | tasks *currently parked*, since registration is one-shot — not all open connections |
+
+and the motivating consumer, uncharted-suns (§12), is a single-player title whose poller load is
+timers, not sockets. The C10k regime AFD exists for is not a workload Sprout has.
+
+**What makes this safe to decide now is that it is cheap to undo.** The poller is a 6-function
+interface with two backends behind it (`sprout_scheduler.h:71-100`); W2 is the act of adding a
+third, and a fourth would be the same contained change to one file — no call-site churn, no
+protocol reshape. Choosing AFD today would pay undocumented NT interfaces, vendored third-party
+code, and permanent maintenance up front against a hypothetical. Choosing `WSAPoll` today pays a
+later swap the architecture already accommodates.
+
+**Revisit triggers — any one of these re-opens it:**
+
+- A **measured** `WSAPoll` bottleneck on a real workload. Not a suspicion: this decision rests on
+  the shape of the problem (the 2048 cap, one-shot registration, the driver's socket count), and
+  no one has benchmarked `WSAPoll` under Sprout. A measurement beats the reasoning above.
+- **`g_conn_fd`'s 2048 cap being raised toward five figures.** The cap is what bounds the array
+  copy; if the HTTP server is meant to serve serious concurrency, the calculus changes and AFD
+  stops being hypothetical. Whether 2048 is a deliberate ceiling or an arbitrary table size is
+  currently unanswered.
+- A need to poll something that is **not a socket and not the DNS pipe**. Both readiness options
+  fail there, so that is the case that forces **IOCP** — which does reach other handle types
+  (named pipes support overlapped I/O) and is what Go and libuv use.
+
+**IOCP is deliberately not the fallback of first resort**, and not for performance reasons: it is
+a *completion* model, so unlike swapping in AFD it reshapes the park protocol rather than just the
+backend. That is the one option this interface does **not** make cheap to adopt later, which is
+the argument for keeping it out of W2 — and for taking the non-socket requirement above seriously
+if it ever appears.
 
 ### 4.4 W1 in detail: the one genuine risk
 
@@ -542,6 +595,9 @@ Each milestone's exit criterion in §5 is its test. Additionally:
 - [libuv design overview](https://docs.libuv.org/en/v1.x/design.html) — "IOCP on Windows".
 - [Rust `mio` `src/sys/windows/afd.rs`](https://github.com/tokio-rs/mio/blob/master/src/sys/windows/afd.rs)
   — `\Device\Afd`, `IOCTL_AFD_POLL`, wepoll attribution.
+- [wepoll README](https://github.com/piscisaureus/wepoll) — *"Only works with sockets"* and no
+  edge-triggered support: the two limits that decide §4.3.1, since they mean AFD reaches no
+  further than `WSAPoll`.
 - [raylib releases](https://github.com/raysan5/raylib/releases) — `win64_mingw-w64` and
   `win64_msvc16` variants.
 
