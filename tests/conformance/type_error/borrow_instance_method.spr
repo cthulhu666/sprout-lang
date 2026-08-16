@@ -17,15 +17,13 @@ module main
 
 type linear Res = Res Int
 
-class Peekable a {
+class Peekable a
   fn peek(r: a) -> Int
-}
 
-instance Peekable Res {
+instance Peekable Res
   fn peek(r: borrowing Res) -> Int =
     match r with
     | Res n -> n
-}
 
 fn go(r: Res) -> Int = peek(r)
 

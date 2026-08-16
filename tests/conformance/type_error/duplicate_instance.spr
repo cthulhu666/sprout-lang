@@ -1,11 +1,8 @@
-class Foo a {
+class Foo a
   fn foo(x: a) -> Int
-}
 
-instance Foo Int {
+instance Foo Int
   fn foo(x: Int) -> Int = x
-}
 
-instance Foo Int {
+instance Foo Int
   fn foo(x: Int) -> Int = x
-}

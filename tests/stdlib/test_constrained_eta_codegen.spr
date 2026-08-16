@@ -1,18 +1,15 @@
 import stdlib.test (check_true, run_suite)
 
-class MyEq a {
+class MyEq a
   fn my_eq(x: a, y: a) -> Bool
-}
 
 type Box a = Box a
 
-instance MyEq Int {
+instance MyEq Int
   fn my_eq(x: Int, y: Int) -> Bool = x == y
-}
 
-instance MyEq (Box a) where MyEq a {
+instance MyEq (Box a) where MyEq a
   fn my_eq(x: Box a, y: Box a) -> Bool = true
-}
 
 fn apply_box_eq(f: Box Int -> Box Int -> Bool) -> Bool =
   f(Box(1), Box(2))

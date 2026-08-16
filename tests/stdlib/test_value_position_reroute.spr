@@ -8,19 +8,16 @@ import stdlib.test (check_true, run_suite)
 # detect a wrong-slot dispatch — here each instance yields a DISTINCT string, so
 # selecting the wrong dictionary is observable in the output, not just a crash.
 
-class Label a {
+class Label a
   fn label(x: a) -> String
-}
 
 type Wrap a = Wrap a
 
-instance Label Int {
+instance Label Int
   fn label(x: Int) -> String = "int"
-}
 
-instance Label (Wrap a) where Label a {
+instance Label (Wrap a) where Label a
   fn label(x: Wrap a) -> String = "wrap"
-}
 
 fn apply_label(f: a -> String, x: a) -> String = f(x)
 

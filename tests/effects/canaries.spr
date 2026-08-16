@@ -106,26 +106,23 @@ fn unreachable_arm(n: Int) -> Int =
 # the `instance` one. Instrumenting only the first would leave every instance
 # method out of the census — silently, and in the direction that reads as good
 # news. These two pin that both are recorded.
-class Describe a {
+class Describe a
   fn describe(x: a) -> String
-}
 
 type Quiet = Quiet
 type Noisy = Noisy
 
 # Must NOT be flagged: pure method, pure body.
-instance Describe Quiet {
+instance Describe Quiet
   fn describe(x: Quiet) -> String =
     "quiet"
-}
 
 # Must be flagged: pure method signature, body reaches IO.
-instance Describe Noisy {
+instance Describe Noisy
   fn describe(x: Noisy) -> String =
     do
       print("noisy")
       "noisy"
-}
 
 fn main() -> Unit !{IO} =
   do

@@ -357,10 +357,9 @@ type Color (..) deriving (Eq, Ord, ToString) =
 type Set a (..) =
   | Set (List a)
 
-instance Eq (Set a) where Eq a {
+instance Eq (Set a) where Eq a
   fn eq(left: Set a, right: Set a) -> Bool =
     set_equal_by_contents(left, right)
-}
 ```
 
 For a C-like enum (all constructors nullary) that needs a stable integer form —

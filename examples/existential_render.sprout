@@ -20,11 +20,10 @@ type Cell = | Cell (any ToString)
 # limited to built-ins; any type with the interface qualifies.
 type Temp = | Celsius Int
 
-instance ToString Temp {
+instance ToString Temp
   fn to_string(t: Temp) -> String =
     match t with
     | Celsius c -> `${int_to_string(c)} deg C`
-}
 
 # Unpacking binds the hidden value at a rigid, abstract type — all you can do with
 # it is what the interface allows. `to_string` dispatches on the witness packed at

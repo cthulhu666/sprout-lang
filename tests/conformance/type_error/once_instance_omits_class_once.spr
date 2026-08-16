@@ -11,12 +11,10 @@ module main
 # value"), which is the wrong failure for this pair: nothing here leaks, the
 # defect is an unbounded invocation count.
 
-class Runner a {
+class Runner a
   fn run_it(s: a, work: once Unit -> Int) -> Int
-}
 
-instance Runner Int {
+instance Runner Int
   fn run_it(s: Int, work: Unit -> Int) -> Int = s + work(()) + work(())
-}
 
 fn main() -> Unit !{IO} = print(to_string(run_it(1, \_ -> 2)))

@@ -1,16 +1,15 @@
 # Parity lowering corpus: class with two methods, one instance.
 # Expected __tc_* names: __tc_Container_Stack_empty, __tc_Container_Stack_size
 
-class Container t {
+class Container t
   fn empty(x: t) -> Bool
   fn size(x: t) -> Int
-}
 
 type Stack =
   | Empty
   | Push Int Stack
 
-instance Container Stack {
+instance Container Stack
   fn empty(x: Stack) -> Bool =
     match x with
     | Empty -> true
@@ -19,7 +18,6 @@ instance Container Stack {
     match x with
     | Empty -> 0
     | Push _ _ -> 1
-}
 
 fn is_empty(x: Stack) -> Bool where Container Stack =
   empty(x)

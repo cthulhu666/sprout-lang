@@ -704,34 +704,28 @@ export fn map5(g: a -> b -> c -> d -> e -> r, fa: f a, fb: f b, fc: f c, fd: f d
   map3(\ (ab, cd, ev) -> match ab with | (a, b) -> match cd with | (c, d) -> g(a, b, c, d, ev),
        map2(ap_pair, fa, fb), map2(ap_pair, fc, fd), fe)
 
-instance Semigroup String {
+instance Semigroup String
   fn append(left: String, right: String) -> String =
     str_concat(left, right)
-}
 
-instance Eq Int {
+instance Eq Int
   fn eq(left: Int, right: Int) -> Bool = left == right
-}
 
-instance Eq Bool {
+instance Eq Bool
   fn eq(left: Bool, right: Bool) -> Bool = left == right
-}
 
-instance Eq String {
+instance Eq String
   fn eq(left: String, right: String) -> Bool = left == right
-}
 
-instance Eq Char {
+instance Eq Char
   # O(1). A Char is an immediate i64 codepoint; == is an integer compare.
   fn eq(left: Char, right: Char) -> Bool = left == right
-}
 
-instance Eq (Maybe a) where Eq a {
+instance Eq (Maybe a) where Eq a
   fn eq(left: Maybe a, right: Maybe a) -> Bool =
     match left with
     | Nothing -> match right with | Nothing -> true | Just _ -> false
     | Just x -> match right with | Nothing -> false | Just y -> eq(x, y)
-}
 
 fn list_eq(left: List a, right: List a) -> Bool where Eq a =
   match left with
@@ -740,44 +734,38 @@ fn list_eq(left: List a, right: List a) -> Bool where Eq a =
       | Nil -> false
       | Cons y ys -> if eq(x, y) then list_eq(xs, ys) else false
 
-instance Eq (List a) where Eq a {
+instance Eq (List a) where Eq a
   fn eq(left: List a, right: List a) -> Bool = list_eq(left, right)
-}
 
-instance Eq (Result e a) where Eq e, Eq a {
+instance Eq (Result e a) where Eq e, Eq a
   fn eq(left: Result e a, right: Result e a) -> Bool =
     match left with
     | Ok x -> match right with | Ok y -> eq(x, y) | Err _ -> false
     | Err e -> match right with | Ok _ -> false | Err f -> eq(e, f)
-}
 
-instance Eq (a, b) where Eq a, Eq b {
+instance Eq (a, b) where Eq a, Eq b
   fn eq(left: (a, b), right: (a, b)) -> Bool =
     match left with
     | (x1, y1) -> match right with
       | (x2, y2) -> eq(x1, x2) && eq(y1, y2)
-}
 
-instance Eq (a, b, c) where Eq a, Eq b, Eq c {
+instance Eq (a, b, c) where Eq a, Eq b, Eq c
   fn eq(left: (a, b, c), right: (a, b, c)) -> Bool =
     match left with
     | (x1, y1, z1) -> match right with
       | (x2, y2, z2) -> eq(x1, x2) && eq(y1, y2) && eq(z1, z2)
-}
 
-instance Eq (a, b, c, d) where Eq a, Eq b, Eq c, Eq d {
+instance Eq (a, b, c, d) where Eq a, Eq b, Eq c, Eq d
   fn eq(left: (a, b, c, d), right: (a, b, c, d)) -> Bool =
     match left with
     | (x1, y1, z1, w1) -> match right with
       | (x2, y2, z2, w2) -> eq(x1, x2) && eq(y1, y2) && eq(z1, z2) && eq(w1, w2)
-}
 
-instance Eq (a, b, c, d, e) where Eq a, Eq b, Eq c, Eq d, Eq e {
+instance Eq (a, b, c, d, e) where Eq a, Eq b, Eq c, Eq d, Eq e
   fn eq(left: (a, b, c, d, e), right: (a, b, c, d, e)) -> Bool =
     match left with
     | (x1, y1, z1, w1, v1) -> match right with
       | (x2, y2, z2, w2, v2) -> eq(x1, x2) && eq(y1, y2) && eq(z1, z2) && eq(w1, w2) && eq(v1, v2)
-}
 
 fn vec_eq_from(left: Vec a, right: Vec a, i: Int, total: Int) -> Bool where Eq a =
   if i == total then true
@@ -787,11 +775,10 @@ fn vec_eq_from(left: Vec a, right: Vec a, i: Int, total: Int) -> Bool where Eq a
     in if eq(lv, rv) then vec_eq_from(left, right, i + 1, total)
        else false
 
-instance Eq (Vec a) where Eq a {
+instance Eq (Vec a) where Eq a
   fn eq(left: Vec a, right: Vec a) -> Bool =
     if vec_length(left) != vec_length(right) then false
     else vec_eq_from(left, right, 0, vec_length(left))
-}
 
 fn dict_entries_eq(le: Vec (String, v), re: Vec (String, v), i: Int, total: Int) -> Bool where Eq v =
   if i == total then true
@@ -806,71 +793,60 @@ fn dict_eq(le: Vec (String, v), re: Vec (String, v)) -> Bool where Eq v =
   if vec_length(le) != vec_length(re) then false
   else dict_entries_eq(le, re, 0, vec_length(le))
 
-instance Eq (Dict v) where Eq v {
+instance Eq (Dict v) where Eq v
   fn eq(left: Dict v, right: Dict v) -> Bool =
     dict_eq(dict_entries(left), dict_entries(right))
-}
 
-instance ToString Double {
+instance ToString Double
   fn to_string(value: Double) -> String =
     double_to_string(value)
-}
 
-instance ToString Int {
+instance ToString Int
   fn to_string(value: Int) -> String =
     int_to_string(value)
-}
 
-instance ToString Bool {
+instance ToString Bool
   fn to_string(value: Bool) -> String =
     if value then "true" else "false"
-}
 
-instance ToString String {
+instance ToString String
   fn to_string(value: String) -> String =
     value
-}
 
-instance ToString Char {
+instance ToString Char
   # O(1). A Char is an i64 codepoint; char_to_string encodes it to a UTF-8 String.
   fn to_string(value: Char) -> String =
     char_to_string(value)
-}
 
-instance ToString IntRange {
+instance ToString IntRange
   fn to_string(value: IntRange) -> String =
     "IntRange(" ++ int_to_string(range_start(value)) ++ ", " ++ int_to_string(range_end(value)) ++ ")"
-}
 
-instance Ord Int {
+instance Ord Int
   fn compare(left: Int, right: Int) -> Int =
     if left < right then -1
     else if left > right then 1
     else 0
-}
 
-instance Ord Bool {
+instance Ord Bool
   fn compare(left: Bool, right: Bool) -> Int =
     if left == right then 0
     else if left then 1
     else -1
-}
 
-instance Ord String {
+instance Ord String
   fn compare(left: String, right: String) -> Int =
     str_compare(left, right)
-}
 
 # Ord for tuples (arities 2-5): lexicographic, short-circuiting on the first
 # unequal component (mirrors the chain `deriving (Ord)` emits).
-instance Ord (a, b) where Ord a, Ord b {
+instance Ord (a, b) where Ord a, Ord b
   fn compare(left: (a, b), right: (a, b)) -> Int =
     match left with
     | (x1, y1) -> match right with
       | (x2, y2) -> match compare(x1, x2) with | 0 -> compare(y1, y2) | c -> c
-}
 
-instance Ord (a, b, c) where Ord a, Ord b, Ord c {
+instance Ord (a, b, c) where Ord a, Ord b, Ord c
   fn compare(left: (a, b, c), right: (a, b, c)) -> Int =
     match left with
     | (x1, y1, z1) -> match right with
@@ -878,9 +854,8 @@ instance Ord (a, b, c) where Ord a, Ord b, Ord c {
         match compare(x1, x2) with
         | 0 -> match compare(y1, y2) with | 0 -> compare(z1, z2) | c -> c
         | c -> c
-}
 
-instance Ord (a, b, c, d) where Ord a, Ord b, Ord c, Ord d {
+instance Ord (a, b, c, d) where Ord a, Ord b, Ord c, Ord d
   fn compare(left: (a, b, c, d), right: (a, b, c, d)) -> Int =
     match left with
     | (x1, y1, z1, w1) -> match right with
@@ -890,9 +865,8 @@ instance Ord (a, b, c, d) where Ord a, Ord b, Ord c, Ord d {
           | 0 -> match compare(z1, z2) with | 0 -> compare(w1, w2) | c -> c
           | c -> c
         | c -> c
-}
 
-instance Ord (a, b, c, d, e) where Ord a, Ord b, Ord c, Ord d, Ord e {
+instance Ord (a, b, c, d, e) where Ord a, Ord b, Ord c, Ord d, Ord e
   fn compare(left: (a, b, c, d, e), right: (a, b, c, d, e)) -> Int =
     match left with
     | (x1, y1, z1, w1, v1) -> match right with
@@ -904,15 +878,13 @@ instance Ord (a, b, c, d, e) where Ord a, Ord b, Ord c, Ord d, Ord e {
             | c -> c
           | c -> c
         | c -> c
-}
 
 # Nothing < Just (declaration/tag order now matches the semantic convention).
-instance Ord (Maybe a) where Ord a {
+instance Ord (Maybe a) where Ord a
   fn compare(left: Maybe a, right: Maybe a) -> Int =
     match left with
     | Nothing -> match right with | Nothing -> 0 | Just _ -> 0 - 1
     | Just x -> match right with | Nothing -> 1 | Just y -> compare(x, y)
-}
 
 # Lexicographic; empty list is smallest (Nil < Cons). O(shared prefix).
 fn list_compare(left: List a, right: List a) -> Int where Ord a =
@@ -922,17 +894,15 @@ fn list_compare(left: List a, right: List a) -> Int where Ord a =
       | Nil -> 1
       | Cons y ys -> match compare(x, y) with | 0 -> list_compare(xs, ys) | c -> c
 
-instance Ord (List a) where Ord a {
+instance Ord (List a) where Ord a
   fn compare(left: List a, right: List a) -> Int = list_compare(left, right)
-}
 
 # Ok < Err (declaration/tag order).
-instance Ord (Result e a) where Ord e, Ord a {
+instance Ord (Result e a) where Ord e, Ord a
   fn compare(left: Result e a, right: Result e a) -> Int =
     match left with
     | Ok x -> match right with | Ok y -> compare(x, y) | Err _ -> 0 - 1
     | Err e -> match right with | Ok _ -> 1 | Err f -> compare(e, f)
-}
 
 # Lexicographic; shorter vec is smaller when it is a prefix. O(shared prefix).
 fn vec_compare_from(left: Vec a, right: Vec a, i: Int, ltot: Int, rtot: Int) -> Int where Ord a =
@@ -946,50 +916,42 @@ fn vec_compare_from(left: Vec a, right: Vec a, i: Int, ltot: Int, rtot: Int) -> 
       | 0 -> vec_compare_from(left, right, i + 1, ltot, rtot)
       | c -> c
 
-instance Ord (Vec a) where Ord a {
+instance Ord (Vec a) where Ord a
   fn compare(left: Vec a, right: Vec a) -> Int =
     vec_compare_from(left, right, 0, vec_length(left), vec_length(right))
-}
 
-instance Semigroup (List a) {
+instance Semigroup (List a)
   fn append(left: List a, right: List a) -> List a =
     list_append(left, right)
-}
 
-instance Monoid String {
+instance Monoid String
   fn empty() -> String = ""
-}
 
-instance Monoid (List a) {
+instance Monoid (List a)
   fn empty() -> List a = Nil
-}
 
-instance Functor List {
+instance Functor List
   fn fmap(f: a -> b, xs: List a) -> List b =
     list_map(f, xs)
-}
 
-instance Functor Maybe {
+instance Functor Maybe
   fn fmap(f: a -> b, xs: Maybe a) -> Maybe b =
     match xs with
     | Nothing -> Nothing
     | Just x -> Just(f(x))
-}
 
 # Functor (Result e): map over the Ok value, pass Err through unchanged. Required as
 # the superclass of Applicative (Result e) — without it, a forwarded Applicative dict
 # (map3/map4/map5) over Result has an unresolvable Functor slot and null-fills.
-instance Functor (Result e) {
+instance Functor (Result e)
   fn fmap(f: a -> b, r: Result e a) -> Result e b =
     match r with
     | Err x -> Err(x)
     | Ok v -> Ok(f(v))
-}
 
-instance Foldable List {
+instance Foldable List
   fn fold_values(step: b -> a -> b, init: b, xs: List a) -> b =
     list_fold(step, init, xs)
-}
 
 # O(n·m): the cartesian ("list monad") product — for each x in xs, combine it with
 # every y in ys. This is the instance consistent with a List monad; the pairwise
@@ -999,19 +961,17 @@ fn map2_list(g: a -> b -> c, xs: List a, ys: List b) -> List c =
   | Nil -> Nil
   | Cons x rest -> list_append(list_map(\y -> g(x, y), ys), map2_list(g, rest, ys))
 
-instance Applicative List {
+instance Applicative List
   # pure produces a singleton — the unit of the cartesian product.
   fn pure(x: a) -> List a = Cons(x, Nil)
   fn map2(g: a -> b -> c, xs: List a, ys: List b) -> List c = map2_list(g, xs, ys)
-}
 
-instance Monad List {
+instance Monad List
   # Bind = flatten-map: concatenate f applied across every element. Consistent
   # with the cartesian-product Applicative above.
   fn flat_map(f: a -> List b, xs: List a) -> List b = list_flat_map(f, xs)
-}
 
-instance Applicative Maybe {
+instance Applicative Maybe
   fn pure(x: a) -> Maybe a = Just(x)
   # Fail-fast: any Nothing collapses the whole result. `do` desugars to the same
   # nested match, so this is flat source with identical short-circuit codegen.
@@ -1020,17 +980,15 @@ instance Applicative Maybe {
       x <- mx
       y <- my
       Just(g(x, y))
-}
 
-instance Monad Maybe {
+instance Monad Maybe
   # Nothing short-circuits; Just x feeds the payload to the continuation.
   fn flat_map(f: a -> Maybe b, mx: Maybe a) -> Maybe b =
     match mx with
     | Nothing -> Nothing
     | Just x -> f(x)
-}
 
-instance Applicative (Result e) {
+instance Applicative (Result e)
   fn pure(x: a) -> Result e a = Ok(x)
   # Fail-fast: the first Err short-circuits (left-biased); `do` carries the Err
   # through automatically. Error-accumulating semantics need a distinct type
@@ -1040,38 +998,33 @@ instance Applicative (Result e) {
       x <- rx
       y <- ry
       Ok(g(x, y))
-}
 
-instance Monad (Result e) {
+instance Monad (Result e)
   # Left-biased: the first Err short-circuits; Ok x feeds the payload onward.
   fn flat_map(f: a -> Result e b, rx: Result e a) -> Result e b =
     match rx with
     | Err e -> Err(e)
     | Ok x -> f(x)
-}
 
-instance Functor Vec {
+instance Functor Vec
   fn fmap(f: a -> b, xs: Vec a) -> Vec b =
     vec_map(f, xs)
-}
 
-instance Foldable Vec {
+instance Foldable Vec
   fn fold_values(step: b -> a -> b, init: b, xs: Vec a) -> b =
     vec_fold(step, init, xs)
-}
 
 fn vec_append_flip(acc: Vec a, item: a) -> Vec a =
   vec_append(item, acc)
 
 # O(n+m): one fresh backing array, both element blocks copied in a single pass
 # via the vector_concat builtin (no intermediate cons cells).
-instance Semigroup (Vec a) {
+instance Semigroup (Vec a)
   fn append(left: Vec a, right: Vec a) -> Vec a =
     match left with
     | Vec lraw ->
         match right with
         | Vec rraw -> Vec(vector_concat(lraw, rraw))
-}
 
 # O(m · log(n + m)): each of the m right-hand entries is read via an O(log m) map_nth
 # and inserted via an O(log) dict_set on the growing (n..n+m) left. No bulk-build map primitive exists.
@@ -1085,11 +1038,10 @@ fn dict_append_entries(acc: Dict v, raw: Map v, index: Int, total: Int) -> Dict 
         | Nothing -> acc
         | Just value -> dict_append_entries(dict_set(key, value, acc), raw, index + 1, total)
 
-instance Semigroup (Dict v) {
+instance Semigroup (Dict v)
   fn append(left: Dict v, right: Dict v) -> Dict v =
     match right with
     | Dict raw -> dict_append_entries(left, raw, 0, map_size(raw))
-}
 
 export fn foldable_to_vec(xs: f a) -> Vec a where Foldable f =
   vec_from_list(list_reverse_go(fold(\ (acc, x) -> Cons(x, acc), Nil, xs), Nil))
@@ -1173,12 +1125,11 @@ export fn when_error(f: e -> Unit !{IO}, r: Result e a) -> Result e a !{IO} =
   | Ok x -> Ok(x)
   | Err e -> after(f(e), r)
 
-instance ToString (Maybe a) where ToString a {
+instance ToString (Maybe a) where ToString a
   fn to_string(x: Maybe a) -> String =
     match x with
     | Nothing -> "Nothing"
     | Just v -> "Just(" ++ to_string(v) ++ ")"
-}
 
 fn list_to_string_parts(strs: List String, first: Bool, acc: List String) -> String =
   match strs with
@@ -1192,17 +1143,15 @@ fn list_to_string_go(strs: List String) -> String =
   list_to_string_parts(strs, true, Nil)
 
 # O(n): one to_string call per element; string joining via string_concat_many is O(total chars).
-instance ToString (List a) where ToString a {
+instance ToString (List a) where ToString a
   fn to_string(xs: List a) -> String =
     "[" ++ list_to_string_go(list_map(\ (v) -> to_string(v), xs)) ++ "]"
-}
 
-instance ToString (Result e a) where ToString e, ToString a {
+instance ToString (Result e a) where ToString e, ToString a
   fn to_string(x: Result e a) -> String =
     match x with
     | Ok v -> "Ok(" ++ to_string(v) ++ ")"
     | Err e -> "Err(" ++ to_string(e) ++ ")"
-}
 
 fn vec_to_string_go(vec: Vec a, i: Int, total: Int, first: Bool, acc: List String) -> String where ToString a =
   if i == total then string_concat_many(list_reverse_go(acc, Nil))
@@ -1214,10 +1163,9 @@ fn vec_to_string_go(vec: Vec a, i: Int, total: Int, first: Bool, acc: List Strin
         else vec_to_string_go(vec, i + 1, total, false, Cons(to_string(v), Cons(", ", acc)))
 
 # O(n): one to_string call per element; string joining via string_concat_many is O(total chars).
-instance ToString (Vec a) where ToString a {
+instance ToString (Vec a) where ToString a
   fn to_string(vec: Vec a) -> String =
     "[" ++ vec_to_string_go(vec, 0, vec_length(vec), true, Nil) ++ "]"
-}
 
 fn dict_to_string_go(entries: Vec (String, v), i: Int, total: Int, first: Bool, acc: List String) -> String where ToString v =
   if i == total then string_concat_many(list_reverse_go(acc, Nil))
@@ -1232,44 +1180,38 @@ fn dict_to_string_go(entries: Vec (String, v), i: Int, total: Int, first: Bool, 
 fn dict_entries_to_string(entries: Vec (String, v)) -> String where ToString v =
   dict_to_string_go(entries, 0, vec_length(entries), true, Nil)
 
-instance ToString (Dict v) where ToString v {
+instance ToString (Dict v) where ToString v
   fn to_string(dict: Dict v) -> String =
     "{" ++ dict_entries_to_string(dict_entries(dict)) ++ "}"
-}
 
-instance ToString Set {
+instance ToString Set
   # O(n): set_to_list is O(n); list_to_string_go joins parts via string_concat_many.
   fn to_string(s: Set) -> String =
     "{" ++ list_to_string_go(set_to_list(s)) ++ "}"
-}
 
 # O(1)
-instance ToString (a, b) where ToString a, ToString b {
+instance ToString (a, b) where ToString a, ToString b
   fn to_string(t: (a, b)) -> String =
     match t with
     | (x, y) -> "(" ++ to_string(x) ++ ", " ++ to_string(y) ++ ")"
-}
 
 # O(1)
-instance ToString (a, b, c) where ToString a, ToString b, ToString c {
+instance ToString (a, b, c) where ToString a, ToString b, ToString c
   fn to_string(t: (a, b, c)) -> String =
     match t with
     | (x, y, z) -> "(" ++ to_string(x) ++ ", " ++ to_string(y) ++ ", " ++ to_string(z) ++ ")"
-}
 
 # O(1)
-instance ToString (a, b, c, d) where ToString a, ToString b, ToString c, ToString d {
+instance ToString (a, b, c, d) where ToString a, ToString b, ToString c, ToString d
   fn to_string(t: (a, b, c, d)) -> String =
     match t with
     | (x, y, z, w) -> "(" ++ to_string(x) ++ ", " ++ to_string(y) ++ ", " ++ to_string(z) ++ ", " ++ to_string(w) ++ ")"
-}
 
 # O(1)
-instance ToString (a, b, c, d, e) where ToString a, ToString b, ToString c, ToString d, ToString e {
+instance ToString (a, b, c, d, e) where ToString a, ToString b, ToString c, ToString d, ToString e
   fn to_string(t: (a, b, c, d, e)) -> String =
     match t with
     | (x, y, z, w, v) -> "(" ++ to_string(x) ++ ", " ++ to_string(y) ++ ", " ++ to_string(z) ++ ", " ++ to_string(w) ++ ", " ++ to_string(v) ++ ")"
-}
 
 # ---------------------------------------------------------------------------
 # Extern fn declarations for user-callable C builtins.

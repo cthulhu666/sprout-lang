@@ -11,22 +11,19 @@ import stdlib.test (check_true, check_eq, run_suite)
 
 type Box a = (val: a, tag: String)
 
-instance Eq (Box a) where Eq a {
+instance Eq (Box a) where Eq a
   fn eq(left: Box a, right: Box a) -> Bool =
     eq(left.val, right.val) && eq(left.tag, right.tag)
-}
 
-instance Ord (Box a) where Ord a {
+instance Ord (Box a) where Ord a
   fn compare(left: Box a, right: Box a) -> Int =
     match compare(left.val, right.val) with
     | 0 -> compare(left.tag, right.tag)
     | c -> c
-}
 
-instance ToString (Box a) where ToString a {
+instance ToString (Box a) where ToString a
   fn to_string(value: Box a) -> String =
     "Box(val = " ++ to_string(value.val) ++ ", tag = " ++ value.tag ++ ")"
-}
 
 fn not(b: Bool) -> Bool = if b then false else true
 

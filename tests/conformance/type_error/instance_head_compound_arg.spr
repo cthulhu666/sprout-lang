@@ -6,13 +6,11 @@
 # This is the case GHC's FlexibleInstances is named for: it "allows the head of
 # the instance declaration to mention arbitrary nested types", which Haskell 2010
 # forbids. Sprout takes the Haskell 2010 position for now (spec §8.5).
-class Nested a {
+class Nested a
   fn depth(x: a) -> Int
-}
 
-instance Nested (List (Maybe a)) {
+instance Nested (List (Maybe a))
   fn depth(x: List (Maybe a)) -> Int = 2
-}
 
 fn plain() -> List Int = Cons(1, Nil)
 

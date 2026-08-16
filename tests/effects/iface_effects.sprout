@@ -37,7 +37,6 @@ export class Runner a {
 
 export type Stderr = Stderr
 
-instance Sink Stderr {
+instance Sink Stderr
   fn emit(s: Stderr, line: String) -> Unit !{IO} = eprint(line)
   fn describe(s: Stderr) -> String = "stderr"
-}

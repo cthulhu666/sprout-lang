@@ -12,11 +12,14 @@ import stdlib.collections (Foldable, List, Vec, vec_length, foldable_to_vec)
 # dropped, reordered, or mis-resolved dict observable as wrong output rather than
 # only a crash. Green on the marker path (pre-S3) and the field path (post-S3).
 
-class Label a {
+class Label a
   fn label(x: a) -> String
-}
-instance Label Int {fn label(x: Int) -> String = "I"}
-instance Label Bool {fn label(x: Bool) -> String = "B"}
+
+instance Label Int
+  fn label(x: Int) -> String = "I"
+
+instance Label Bool
+  fn label(x: Bool) -> String = "B"
 
 # tyvar constraint at scheme-var position 0, concrete-ctor constraint on List.
 fn tagged_count(x: a, xs: List Int) -> String where Label a, Foldable List =

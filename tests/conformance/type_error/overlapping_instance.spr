@@ -8,14 +8,11 @@
 # the fixture stopped testing what it is named for. Two differently-spelled
 # variables keep the collision while staying inside the rule — the key is derived
 # from the head constructor alone, so `List a` and `List b` are one key.
-class Bar a {
+class Bar a
   fn bar(x: a) -> Int
-}
 
-instance Bar (List a) {
+instance Bar (List a)
   fn bar(x: List a) -> Int = 1
-}
 
-instance Bar (List b) {
+instance Bar (List b)
   fn bar(x: List b) -> Int = 2
-}

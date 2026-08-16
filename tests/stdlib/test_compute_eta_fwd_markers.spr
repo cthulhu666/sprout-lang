@@ -9,33 +9,26 @@ import stdlib.test (check_true, run_suite)
 #       seed @eta_fwd: markers for its Eq super so eta-expanded value-position
 #       class methods can locate the forwarded dict slot.
 
-class MyEq a {
+class MyEq a
   fn my_eq(x: a, y: a) -> Bool
-}
 
-class MyShow a {
+class MyShow a
   fn my_show(x: a) -> String
-}
 
-class MyOrd a where MyEq a {
+class MyOrd a where MyEq a
   fn my_lt(x: a, y: a) -> Bool
-}
 
-instance MyEq Int {
+instance MyEq Int
   fn my_eq(x: Int, y: Int) -> Bool = x == y
-}
 
-instance MyShow Int {
+instance MyShow Int
   fn my_show(x: Int) -> String = int_to_string(x)
-}
 
-instance MyEq Bool {
+instance MyEq Bool
   fn my_eq(x: Bool, y: Bool) -> Bool = x == y
-}
 
-instance MyOrd Int {
+instance MyOrd Int
   fn my_lt(x: Int, y: Int) -> Bool = x < y
-}
 
 # Case (1): two constraints in one signature.  The fwd_markers dict produced
 # by compute_eta_fwd_markers must contain @eta_fwd:{fresh}:MyEq AND

@@ -10,23 +10,20 @@ module tests.existential_module_qualified
 
 import stdlib.test (check_eq, run_suite)
 
-class Paint a {
+class Paint a
   fn hue(v: a) -> String
   fn coats(v: a) -> Int
-}
 
 type Wall = | Wall Int
 type Trim = | Trim String
 
-instance Paint Wall {
+instance Paint Wall
   fn hue(v: Wall) -> String = match v with | Wall _ -> "white"
   fn coats(v: Wall) -> Int = match v with | Wall n -> n
-}
 
-instance Paint Trim {
+instance Paint Trim
   fn hue(v: Trim) -> String = match v with | Trim c -> c
   fn coats(v: Trim) -> Int = match v with | Trim _ -> 2
-}
 
 type Coated = | Coated (any Paint)
 

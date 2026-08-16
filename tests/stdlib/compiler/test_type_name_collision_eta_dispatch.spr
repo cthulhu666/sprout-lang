@@ -14,9 +14,8 @@ import stdlib.test (TestState, new_state, assert_eq, summary)
 # last segment would mis-resolve to a forwarded/null dict and SIGSEGV. Must print "WW".
 type Maybe a = Wrap a
 
-instance ToString (Maybe a) {
+instance ToString (Maybe a)
   fn to_string(m: Maybe a) -> String = "W"
-}
 
 fn main() -> Unit !{IO} =
   do

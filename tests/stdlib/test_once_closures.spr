@@ -67,13 +67,11 @@ fn nonlinear_capture(n: Int) -> Int = run_once(\_ -> n + 1)
 # argument 2 at check time; without linear_check.drop_leading_dicts the zip
 # shifts by the dictionary count, `work` reads as an ordinary consuming position,
 # and the move is rejected as a plain capture.
-class Runner a {
+class Runner a
   fn run_it(s: a, work: once Unit -> Int) -> Int
-}
 
-instance Runner Int {
+instance Runner Int
   fn run_it(s: Int, work: once Unit -> Int) -> Int = s + work(())
-}
 
 fn move_in_class_method(f: File) -> Int = run_it(1000, \_ -> release(f))
 

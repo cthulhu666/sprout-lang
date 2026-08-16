@@ -130,12 +130,12 @@ selection keys on the head constructor alone, so a `List Int` instance would als
 answer for `List String` — and run its `Int` code on it. To get an instance at one
 specific argument type, give that instantiation a type of its own.
 ```sprout
-instance Summable (Vec Int) { … }        # rejected: `Int` is a concrete type
-instance Summable (Vec a) { … }          # ok — a distinct type variable
+instance Summable (Vec Int)              # rejected: `Int` is a concrete type
+instance Summable (Vec a)                # ok — a distinct type variable
 
 type IntVec =                            # the idiom for a specific element type
   | MkIntVec (Vec Int)
-instance Summable IntVec { … }           # ok — `IntVec` is its own head
+instance Summable IntVec                 # ok — `IntVec` is its own head
 ```
 
 **No multi-module user programs outside `stdlib/`**

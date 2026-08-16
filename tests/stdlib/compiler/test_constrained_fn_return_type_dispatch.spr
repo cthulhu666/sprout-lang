@@ -9,17 +9,14 @@ import stdlib.test (check_eq, run_suite)
 #
 # PR fix: add post-pass for constrained fn calls mirroring resolve_dispatch_typed_expr.
 
-class Deser a {
+class Deser a
   fn deser(s: String) -> Maybe a
-}
 
-instance Deser Int {
+instance Deser Int
   fn deser(s: String) -> Maybe Int = Just(42)
-}
 
-instance Deser Bool {
+instance Deser Bool
   fn deser(s: String) -> Maybe Bool = Just(true)
-}
 
 # Single-level return-type dispatch (already worked via resolve_dispatch_typed_expr).
 fn deser_direct_int(s: String) -> Maybe Int = deser(s)

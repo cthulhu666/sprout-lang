@@ -48,15 +48,13 @@ fn rank_ord(r: Rank) -> Int =
   | Mid -> 1
   | Hi -> 2
 
-instance Eq Rank {
+instance Eq Rank
   fn eq(a: Rank, b: Rank) -> Bool = rank_ord(a) == rank_ord(b)
-}
 
-instance Ord Rank {
+instance Ord Rank
   fn compare(a: Rank, b: Rank) -> Int =
     if eq(a, b) then 0
     else rank_ord(a) - rank_ord(b)
-}
 
 fn rank_lt(a: Rank, b: Rank) -> Bool = compare(a, b) < 0
 fn rank_eq(a: Rank, b: Rank) -> Bool = eq(a, b)

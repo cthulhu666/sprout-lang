@@ -10,20 +10,17 @@
 # incoherence, not merely a missing diagnostic.
 module main
 
-class Codec a {
+class Codec a
   fn from_int(n: Int) -> a
   fn to_str(x: a) -> String
-}
 
-instance Codec Int {
+instance Codec Int
   fn from_int(n: Int) -> Int = n
   fn to_str(x: Int) -> String = "int:" ++ int_to_string(x)
-}
 
-instance Codec Bool {
+instance Codec Bool
   fn from_int(n: Int) -> Bool = n > 0
   fn to_str(x: Bool) -> String = "bool"
-}
 
 fn describe(witness: b) -> String where Codec b = to_str(from_int(7))
 

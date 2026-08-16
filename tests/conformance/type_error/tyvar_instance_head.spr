@@ -4,12 +4,10 @@
 # Boxer for T" while the declaration itself looked fine. Sprout has no
 # catch-all/overlapping-instance resolution, so reject it at the instance site
 # rather than let it register an unreachable marker.
-class Boxer a {
+class Boxer a
   fn box_size(v: a) -> Int
-}
 
-instance Boxer a {
+instance Boxer a
   fn box_size(v: a) -> Int = 0
-}
 
 fn main() -> Unit !{IO} = print(box_size(true))

@@ -11,23 +11,19 @@ import stdlib.test (check_eq, check_true, run_suite)
 # Concrete instances devirtualize the dictionary away, so only a function that is
 # polymorphic over the class -- `where Label a` -- exercises forwarding.
 
-class Label a {
+class Label a
   fn label(x: a) -> String
-}
 
-instance Label Int {
+instance Label Int
   fn label(x: Int) -> String = `i${to_string(x)}`
-}
 
-instance Label Bool {
+instance Label Bool
   fn label(x: Bool) -> String = if x then "T" else "F"
-}
 
 type Tagged a = (tag: String, item: a)
 
-instance Label (Tagged a) where Label a {
+instance Label (Tagged a) where Label a
   fn label(x: Tagged a) -> String = `${x.tag}:${label(x.item)}`
-}
 
 # Polymorphic over the class AND handed a lambda: the dictionary for `a` must be
 # forwarded into the call while the lambda's parameter type is resolved from the

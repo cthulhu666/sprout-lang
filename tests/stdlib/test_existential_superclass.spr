@@ -13,29 +13,23 @@
 
 import stdlib.test (check_eq, run_suite)
 
-class Tag a {
+class Tag a
   fn tag(v: a) -> String
-}
 
-class Labeled a where Tag a {
+class Labeled a where Tag a
   fn label(v: a) -> String
-}
 
-instance Tag Int {
+instance Tag Int
   fn tag(v: Int) -> String = "n"
-}
 
-instance Labeled Int {
+instance Labeled Int
   fn label(v: Int) -> String = "num"
-}
 
-instance Tag String {
+instance Tag String
   fn tag(v: String) -> String = "s"
-}
 
-instance Labeled String {
+instance Labeled String
   fn label(v: String) -> String = "str"
-}
 
 type LBox = | LBox (any Labeled)
 

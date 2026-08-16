@@ -30,9 +30,8 @@ import stdlib.test (check_eq, run_suite)
 # Result: dispatch resolves to main's own instance → "MAIN".
 type Maybe a = Wrap a
 
-instance ToString (Maybe a) {
+instance ToString (Maybe a)
   fn to_string(m: Maybe a) -> String = "MAIN"
-}
 
 fn main() -> Unit !{IO} =
   run_suite("type_name_collision_instance_dispatch", [
