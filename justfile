@@ -1053,7 +1053,11 @@ effect-report-smoke: bootstrap-from-seed
     failed=$((failed + 1))
   fi
   # A function that MUST be reported as a gap (declared pure, body reaches IO).
-  for fn in shout calls_loud each_lambda each_named; do
+  # apply_now and via_local are the counterweights to make_shouter below: all
+  # three build a closure over `print`, and only make_shouter fails to call it.
+  # A fix that makes closure-construction pure by simply dropping infer_lambda's
+  # over-approximation turns ALL THREE clean — these two are what catch that.
+  for fn in shout calls_loud each_lambda each_named apply_now via_local; do
     if ! grep -qE "^effect GAP ${fn}:" "$TMPD/out"; then
       echo "effect-report-smoke: expected a GAP for '${fn}', got:" >&2
       grep -E "^effect (GAP|ok) ${fn}:" "$TMPD/out" >&2 || echo "  (no line at all)" >&2
@@ -1064,7 +1068,7 @@ effect-report-smoke: bootstrap-from-seed
   # documented LIMITATION, not a success — see the fixture. `each_pure` is the
   # false-positive guard: it fails if `!{e}` stops being freshened per
   # instantiation and the IO binding from the two calls above leaks into it.
-  for fn in loud over_declared honest_pure calls_shout each_pure unreachable_arm main; do
+  for fn in loud over_declared honest_pure calls_shout each_pure make_shouter unreachable_arm main; do
     if grep -qE "^effect GAP ${fn}:" "$TMPD/out"; then
       echo "effect-report-smoke: unexpected GAP for '${fn}':" >&2
       grep -E "^effect GAP ${fn}:" "$TMPD/out" >&2

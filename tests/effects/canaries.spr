@@ -65,6 +65,32 @@ fn each_named(xs: List String) -> Unit = list_each(print, xs)
 # correct code. Guards `scheme_effect_vars` actually being populated.
 fn each_pure(xs: List String) -> Unit = list_each(\x -> (), xs)
 
+# --- Must NOT be flagged: BUILDING a closure that does IO is pure. ---
+# The `examples/http_web_server.routes` shape, reduced. Evaluating this allocates
+# a closure and returns it; no output is written. The IO belongs to the returned
+# ARROW (`String -> Unit !{IO}`), and fires when a caller invokes it.
+#
+# This was the last false positive standing between the report and enforcement:
+# all six real corpus gaps were this shape, so flipping the report to an error
+# would have rejected six correct programs. See docs/effect-enforcement-v0.md §9.4.
+fn make_shouter() -> String -> Unit !{IO} = \s -> print(s)
+
+# --- Must be flagged: the closure is built AND applied, right here. ---
+# The counterweight to make_shouter, and it exercises a different code path:
+# the callee is an expression, not a name, so it goes through infer_call_general,
+# which merges the effect of EVALUATING the callee — not the arrow's effect.
+# Dropping infer_lambda's over-approximation without also reading the arrow here
+# makes this report pure, which is the quiet-failure direction.
+fn apply_now(s: String) -> Unit = (\x -> print(x))(s)
+
+# --- Must be flagged: closure bound to a local, then called. ---
+# The third path: `f` is a variable, so the effect must come from its arrow via
+# infer_call_var/arrows_effect. Between this, apply_now and each_named, all three
+# ways an effect can reach a call site are pinned.
+fn via_local(s: String) -> Unit =
+  let f = \x -> print(x)
+  in f(s)
+
 # --- Must NOT be flagged: `panic` is PURE, deliberately. ---
 # An abort has no continuation, so nothing downstream can observe it — see
 # docs/effect-enforcement-v0.md §6 for the survey behind that call. Before the
