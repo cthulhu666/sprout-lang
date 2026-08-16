@@ -2068,6 +2068,15 @@ windows-ir-gate:
 windows-tu-check:
   bash scripts/windows_tu_check.sh
 
+# Windows port. The one Windows gate that checks BEHAVIOUR, not compilation — and the only
+# one that can before W5 links an executable, because the poller needs Ws2_32 alone: no
+# scheduler, no GC, no runtime. Skips with a note off-Windows (it has to RUN a .exe), so it
+# is CI-only in practice for the same reason windows-tu-check is.
+# Build and run the WSAPoll poller self-test against real loopback sockets.
+[group('dev')]
+windows-poll-selftest:
+  bash scripts/windows_poll_selftest.sh
+
 # Division-by-zero guard regression (CI gate). The fixture divides by a RUNTIME
 # zero (`10 / list_length(argv)` with no args), which neither the compiler nor
 # clang can fold. A bare `sdiv i64 _, 0` is LLVM undefined behavior; the emitted
@@ -2791,7 +2800,11 @@ gate-audit:
   #     which a contributor who never touches the port has no reason to install; putting it in
   #     `gate` would make the standard battery fail on a missing optional toolchain. CI runs it
   #     on a real Windows host against MSVC, which is the stricter surface anyway.
-  EXCLUDE="bootstrap-from-seed build-fmt-from-seed refresh-seed ci-fast-gates test-stdlib-core-stage1 test-stdlib-compiler-stage1 windows-tu-check"
+  #   windows-poll-selftest — CI-only for a harder reason than the above: it RUNS a Windows
+  #     executable, so no cross-compiler substitutes. Off-Windows it exits 0 with a note, and a
+  #     gate entry that is a guaranteed no-op for every non-Windows contributor is worse than no
+  #     entry — it reads as coverage that is not there.
+  EXCLUDE="bootstrap-from-seed build-fmt-from-seed refresh-seed ci-fast-gates test-stdlib-core-stage1 test-stdlib-compiler-stage1 windows-tu-check windows-poll-selftest"
   # Tasks gate runs from its BODY (not reachable via --show dependency expansion).
   BODY="gc-safety-check"
   expand() {  # print a recipe name and, recursively, its dependency recipe names
@@ -2909,7 +2922,7 @@ gate-audit:
   # column-0 line ends a just recipe body.)
   VERIFY_EXCLUDE=$(printf '%s\n' gate gate-quick check lint test-file fmt-check-file \
                                  lint-file check-iface-all test-stdlib-stage2 linux-smoke \
-                                 windows-tu-check)
+                                 windows-tu-check windows-poll-selftest)
   #   gate, gate-quick — the batteries themselves; C already covers gate's membership, and
   #     gate-quick is the deliberately-partial local subset (its point is being faster than CI).
   #   check, lint, test-file, fmt-check-file, lint-file — single-FILE / interactive developer
@@ -2927,6 +2940,8 @@ gate-audit:
   #     two bash scripts and depends on no toolchain nobody has tested there. This assertion
   #     looks for `just <recipe>`, so it cannot see that. Off-Windows the recipe also needs a
   #     mingw-w64 sysroot, which is why it is not in `gate` either (see EXCLUDE above).
+  #   windows-poll-selftest — same story: the `windows` job runs the script directly, and this
+  #     assertion only sees `just <recipe>` invocations.
   all_recipes=$(just --summary 2>/dev/null | tr ' ' '\n' | sort -u)
   if [[ -z "$all_recipes" ]]; then
     echo "gate-audit ✗ — could not enumerate recipes; assertion D would pass vacuously." >&2
