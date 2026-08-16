@@ -1,0 +1,37 @@
+module main
+
+# spec-v0.md §7 rule 9, at the `instance` declaration boundary — the twin of
+# effect_two_variables.spr, and it gets its own fixture for the same reason
+# effect_pure_instance_method_does_io.spr does.
+#
+# `infer.sprout` has TWO sites that record an effect report: the `fn` one and the
+# `instance` one. The first version of the effect census instrumented only the
+# `fn` site, leaving all 83 instance methods out of the count — silently, and in
+# the direction that reads as good news. Every rule inherits that hazard, and
+# rule 9 inherits it twice over: its check reads the DECLARED scheme, which the
+# instance site has to build separately from the one the `fn` site uses. A rule
+# that reached one boundary and not the other would pass every `fn` test while
+# quietly exempting every instance method in the program.
+#
+# `run_both` names two effect variables, `e` and `d`. Its body calls only `f`, so
+# the two never meet and no row is inferred — this fixture pins the instance
+# boundary AND the read-the-signature behaviour at once.
+#
+# Note the class method signature above declares the same two variables and is
+# NOT reported: a class method has no body, so no effect report is recorded for
+# it. Any instance of the class is rejected, so the form cannot be used; a class
+# declared and never instantiated is not.
+
+class Runner a {
+  fn run_both(x: a, f: Int -> Unit !{e}, g: Int -> Unit !{d}) -> Unit !{e}
+}
+
+type Box = Box
+
+instance Runner Box {
+  fn run_both(x: Box, f: Int -> Unit !{e}, g: Int -> Unit !{d}) -> Unit !{e} =
+    f(1)
+}
+
+fn main() -> Unit !{IO} =
+  run_both(Box, \n -> print(int_to_string(n)), \n -> ())

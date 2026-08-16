@@ -1,9 +1,10 @@
 # Effect enforcement — v0
 
 **Status: done.** Spec §7 rules 8, 9, 10 and 11 are all **enforced** — a body that performs IO under
-a pure signature is a compile error, and so is a signature needing more than one effect variable.
-Read §9–§12 for the current state; §1–§8 are the original measurement and remain accurate as history,
-but their numbers are superseded. §12.1 corrects a claim made in §11.
+a pure signature is a compile error, and so is a signature that names more than one effect variable.
+Read §9–§13 for the current state; §1–§8 are the original measurement and remain accurate as history,
+but their numbers are superseded. §12.1 corrects a claim made in §11, and **§13 corrects rule 9's
+implementation as landed in §12** — it checked the wrong side and got both directions wrong.
 
 Landed 2026-08-16, in order: the measurement instrument (§4), `panic` decided **pure** (§6), effect
 variables quantified and bound by unification (§9), closure construction correctly attributed as pure
@@ -656,3 +657,151 @@ identifiers that do not exist.
 The accept fixture is the guard against over-correcting: a check that rejected any declaration whose
 inferred effect mentions a variable would kill every effect-polymorphic helper in the prelude, and
 the `type_error` fixture alone would never notice.
+
+## 13. Rule 9 checked the wrong side (2026-08-16, correcting §12)
+
+A code review of the §12 change found that rule 9's check read the **inferred** effect, and that this
+was wrong in both directions. The rule is now checked against the **declared signature**. §12 stays
+as written — it records the reasoning that led to the rejection, which was sound; only the predicate
+it shipped was wrong.
+
+### 13.1 The proxy that failed
+
+§12 defined a rule-9 violation as "the inferred effect is a multi-label row". That is a *proxy* for
+the property rule 9 actually names — how many effect variables the signature quantifies — and §9's
+per-instantiation freshening broke it in both directions at once.
+
+**False rejection.** A row is also what two fresh instantiations of *one* variable produce:
+
+```sprout
+fn maybe_do(n: Int) -> Unit !{e} = ()
+
+fn caller(n: Int) -> Unit !{e} =
+  do
+    maybe_do(n)
+    maybe_do(n)
+```
+```
+5:1: ERROR: check: `main.caller` combines two effect variables (2 distinct), but a
+signature may quantify only one … — write the same variable on every
+effect-polymorphic parameter
+```
+
+Every signature here names exactly one variable, so the suggested fix was already true of the source
+and there was nothing the author could do. `apply_effect_subst` could not rescue it either: both row
+members are *unbound*, so no substitution relates them, and adding the missing `EffectRow` arm there
+would not have collapsed this row.
+
+Note what shape it takes: `maybe_do`'s `!{e}` is **unpinned** — it appears only in the return effect,
+with no parameter to constrain it. That is why §12's accept fixture missed the bug. In
+`run/effect_one_variable_ok.spr` the variable is pinned by a higher-order parameter, so the two
+instantiations unify and collapse to a single variable before any merge sees a row. Every
+effect-polymorphic helper in the prelude is of the pinned kind, which is also why the corpus census
+showed nothing: **0 of 2951 declarations** in the compiler tree hit it. It was latent in-tree and
+live in user code — the census could not have found it, and no gate would have.
+
+**False acceptance.** Symmetrically, a signature naming two variables whose body never makes them
+meet builds no row at all:
+
+```sprout
+fn unused_second(f: Int -> Unit !{e}, g: Int -> Unit !{d}, n: Int) -> Unit !{e} = f(n)
+```
+
+This compiled clean and reported `effect ok`, while §12's own spec edit promised "a signature may
+quantify at most one effect variable". The spec described the intended rule; the implementation
+checked something else.
+
+### 13.2 The fix: ask the declaration
+
+`EffectReport` now carries the declared `Scheme` alongside the two effects, and rule 9 reads it:
+
+- **too many variables** — `types.scheme_effect_vars` counts the effect variables the signature
+  names, in source spelling, scanning every arrow rather than the top-level effect alone (a variable
+  written on a parameter is the common case and appears nowhere else).
+- **a written row** — `types.scheme_row_labels` finds a multi-label row anywhere in the signature.
+
+Rule 8 still compares declared against inferred; only rule 9 moved. The two effects stay on the
+report because rule 8 needs them.
+
+### 13.3 Dropping the inferred side opens no rule-8 hole
+
+The obvious worry: if an inferred row is no longer rejected, can a row hide real IO under a pure
+signature? It cannot. `merge_effects` matches `EffectIO` in **both** argument positions before any
+row is built, so IO absorbs every variable it meets and a row can never contain it. An inferred row
+is IO-free by construction.
+
+Verified rather than assumed, on the sharpest available shape — an unpinned, unresolvable `!{e}`
+merged with a HOF whose effect variable unification binds to IO through its argument, in both
+orders. Each still infers `!{IO}` and is still rejected by rule 8. Pinned by
+`type_error/effect_var_merged_with_io.spr`.
+
+### 13.4 `!{IO, e}` is rejected, for a different reason
+
+A written multi-label row mixing the concrete label with a variable names exactly **one** variable,
+so it satisfies the singleton limit. §12's check rejected it anyway — with a message reporting that
+it "combines two effect variables (2 distinct)", counting `IO` as an effect variable and offering
+advice that did not apply.
+
+**Decision: keep rejecting it, under its own wording.** §7 defines no row form and `unify_effects`
+has no rule relating a row to anything, so this is an undefined v0 form; and rejecting preserves the
+behaviour that shipped rather than newly admitting a type the spec does not define. The check now
+scans parameter arrows too, closing the half-coverage where `f: Int -> Unit !{IO, e}` was accepted
+because only the top-level effect was inspected.
+
+### 13.5 The diagnostic can now name the variables
+
+Reading the declaration means the source spellings are available, so the message names them:
+
+```
+`main.unused_second` names 2 effect variables (`d`, `e`), but a signature may quantify
+only one (spec-v0.md §7 rule 9) — write the same variable on every effect-polymorphic
+parameter, e.g. `f: a -> Unit !{e}, g: b -> Unit !{e}`
+```
+
+§12's justification for printing only a count — that the inferred row holds freshened `$e0`/`$e1`
+names appearing nowhere in the source — was correct *for a check reading the inferred row*, and
+dissolves along with it.
+
+### 13.6 What else the review corrected
+
+- **The summary double-counted.** `effect_report_is_var` returns true for `EffectRow`, so every
+  declaration counted as a row was also counted as an unresolved effect variable — and that line is
+  what a migration estimate is read off. The two counts are now disjoint by construction, one
+  reading the inferred effect and the other the declared signature, so they can be added.
+- **`ROW` is now a misnomer, kept deliberately.** The verdict was named when a rule-9 violation
+  always *was* an inferred row. It now means "rule 9", and the common cause is two written variables
+  with no row anywhere. Renaming would ripple through the smoke gate, this document and the spec
+  note for a cosmetic gain; the meaning is documented at the definition instead.
+- **The error position is first-per-rule, not first-in-file.** `enforce_effects` scans every gap
+  before any rule-9 violation, so a rule-9 error early in a file is masked by a gap later in it, and
+  fixing the gap makes the position jump backwards. The rule-8-first ordering is deliberate (§12);
+  the comment claiming source-order position was not, and now says which it means.
+
+### 13.7 Fixtures
+
+| fixture | pins |
+|---|---|
+| `run/effect_one_variable_unpinned_ok.spr` | an **unpinned** single variable, instantiated twice — the false rejection. Compiles **and runs**. |
+| `type_error/effect_two_variables_uncombined.spr` | two variables the body never combines — the false acceptance |
+| `type_error/effect_mixed_row.spr` | `!{IO, e}` rejected as an undefined form, not as two variables |
+| `type_error/effect_var_merged_with_io.spr` | rule 8 survives rule 9 leaving the inferred side |
+| `type_error/effect_two_variables_instance.spr` | rule 9 reaches the **instance** boundary, whose declared scheme is built separately |
+
+The first two are the pair §12 needed and did not have: its fixtures were both of the *pinned* kind,
+which is precisely the kind that cannot exhibit either defect.
+
+The instance fixture follows the precedent set by rule 8's
+`effect_pure_instance_method_does_io.spr`: `infer` records effect reports at two sites, the census's
+original bug was instrumenting only the `fn` one, and rule 9 inherits that hazard twice over because
+the instance site builds its declared scheme separately from the `fn` site's.
+
+**Known limitation, from writing that fixture.** A **class method signature** is not checked. It has
+no body, so no effect report is recorded for it, and a class declaring
+`fn m(f: a -> Unit !{e}, g: b -> Unit !{d}) -> Unit !{e}` is accepted. Any *instance* of that class
+is rejected, so the form cannot actually be used — a class declared and never instantiated is the
+only case that escapes. Left as-is: enforcement lives on the declaration-boundary reports, and
+adding a second, body-less check path for class signatures is a larger change than the escape
+justifies.
+
+Full suite green, 51/51 examples, `ir-golden-diff` 0 differences (a check-only change emits no
+codegen), and the compiler bootstraps itself to a fixed point under the corrected rule.

@@ -107,8 +107,15 @@ fn enforce_effects(result: typed_ast.TypedResult, reports: List unifier.EffectRe
                 effect_multi_var_message(first))
 
 # The prelude has no list_filter; these are the local ones, as compile_driver
-# does for its own count. Order is source order, so the reported position is the
-# FIRST offending declaration rather than an arbitrary one.
+# does for its own count. Order is source order, so each list reports its FIRST
+# offending declaration rather than an arbitrary one.
+#
+# Across the two lists, order is by RULE and not by position: every gap is
+# considered before any rule-9 violation, so a rule-9 error early in a file is
+# masked by a gap later in it, and fixing the gap makes the reported position
+# jump backwards. That is deliberate — see the ordering note in enforce_effects
+# — but it does mean "first offending declaration" holds within a rule, not
+# across the file.
 fn effect_gaps(reports: List unifier.EffectReport) -> List unifier.EffectReport =
   match reports with
   | Nil -> Nil
@@ -123,16 +130,52 @@ fn effect_multi_vars(reports: List unifier.EffectReport) -> List unifier.EffectR
       if unifier.effect_report_is_multi_var(r) then Cons(r, effect_multi_vars(rest))
       else effect_multi_vars(rest)
 
-# Names the count, not the variables. The inferred row holds FRESHENED names
-# (`$e0`, `$e1`) that appear nowhere in the source, so printing them would send
-# the reader looking for identifiers that do not exist; the source names are not
-# on the report. The count plus the fix is what the author can act on.
+# Two causes, two messages. Both are rule-9 rejections, but the fix differs and a
+# single wording could only fit one of them.
+#
+# The variables are named in their SOURCE spelling, which is possible now that the
+# check reads the declared scheme. The earlier message could only give a count:
+# it read the inferred row, whose members are freshened (`$e0`, `$e1`) and appear
+# nowhere in the source, so printing them sent the reader hunting for identifiers
+# that do not exist.
 fn effect_multi_var_message(r: unifier.EffectReport) -> String =
-  "`" ++ unifier.effect_report_name(r) ++ "` combines two effect variables ("
-    ++ int_to_string(list_length(unifier.effect_report_var_labels(r)))
-    ++ " distinct), but a signature may quantify only one (spec-v0.md §7 rule 9)"
+  match unifier.effect_report_effect_vars(r) with
+  | [a, b | rest] -> effect_too_many_vars_message(r, Cons(a, Cons(b, rest)))
+  | _ -> effect_row_message(r)
+
+fn effect_too_many_vars_message(r: unifier.EffectReport, vars: List String) -> String =
+  "`" ++ unifier.effect_report_name(r) ++ "` names "
+    ++ int_to_string(list_length(vars)) ++ " effect variables ("
+    ++ quoted_var_list(vars)
+    ++ "), but a signature may quantify only one (spec-v0.md §7 rule 9)"
     ++ " — write the same variable on every effect-polymorphic parameter,"
     ++ " e.g. `f: a -> Unit !{e}, g: b -> Unit !{e}`"
+
+# `!{IO, e}` satisfies the singleton count — one variable — so rule 9's "write the
+# same variable everywhere" advice does not apply. It is rejected because §7
+# defines no row form at all.
+fn effect_row_message(r: unifier.EffectReport) -> String =
+  "`" ++ unifier.effect_report_name(r) ++ "` declares the effect row `!{"
+    ++ join_effect_labels(unifier.effect_report_row_labels(r))
+    ++ "}`, which spec-v0.md §7 does not define — an effect annotation is one"
+    ++ " concrete effect (`!{IO}`), one effect variable (`!{e}`), or omitted for"
+    ++ " purity"
+
+fn quoted_var_list(vars: List String) -> String =
+  match vars with
+  | Nil -> ""
+  | Cons v rest ->
+      match rest with
+      | Nil -> "`" ++ v ++ "`"
+      | _ -> "`" ++ v ++ "`, " ++ quoted_var_list(rest)
+
+fn join_effect_labels(labels: List String) -> String =
+  match labels with
+  | Nil -> ""
+  | Cons l rest ->
+      match rest with
+      | Nil -> l
+      | _ -> l ++ ", " ++ join_effect_labels(rest)
 
 # Names every offending declaration, and shows the fix rather than describing it.
 # The first line carries the phrase the conformance fixtures pin.

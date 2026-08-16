@@ -179,11 +179,19 @@ fn effect_report_line(r: unifier.EffectReport) -> String =
 # needs the report to enumerate exactly what will fail to compile.
 #
 #   GAP  rule 8 — the body performs IO under a pure signature
-#   ROW  rule 9 — the signature needs more than one effect variable
+#   ROW  rule 9 — the signature names more than one effect variable, or writes a
+#                 multi-label row
 #
 # `ROW` was added when rule 9 started being enforced. Leaving it out would have
 # printed `ok` for a declaration the checker rejects, which is precisely the
 # report-disagrees-with-checker failure this file already guards against.
+#
+# The name outlived its original meaning: the verdict was called ROW when rule 9
+# was checked against the INFERRED effect, where a violation always was a row.
+# The check now reads the declared signature, so the common cause is two written
+# variables and no row need exist. Kept because the smoke gate, the spec note and
+# `docs/effect-enforcement-v0.md` all pin the token; it means "rule 9", not "a row
+# was inferred".
 fn effect_report_verdict(r: unifier.EffectReport) -> String =
   if effect_report_is_gap(r) then "GAP"
   else if unifier.effect_report_is_multi_var(r) then "ROW"
@@ -196,16 +204,25 @@ fn effect_report_verdict(r: unifier.EffectReport) -> String =
 fn effect_report_is_gap(r: unifier.EffectReport) -> Bool =
   unifier.effect_report_is_gap(r)
 
+# An inferred row counts as unresolved, and deliberately so: its members ARE
+# unbound effect variables, and after rule 9 moved to the declared side an
+# inferred row is no longer a rejection at all — it is what two fresh
+# instantiations of one legitimate variable look like.
 fn effect_report_is_var(r: unifier.EffectReport) -> Bool =
   match unifier.effect_report_inferred(r) with
   | types.EffectVar _ -> true
   | types.EffectRow _ -> true
   | _ -> false
 
+# The two violation counts are disjoint by construction — one reads the inferred
+# effect, the other the declared signature — so they can be added. They were not
+# when rule 9 read the inferred side: every declaration counted as a row was also
+# counted as an unresolved var, and the migration estimate this line exists to
+# feed double-counted them.
 fn print_effect_summary(reports: List unifier.EffectReport) -> Unit !{IO} =
   print("effect-summary: " ++ int_to_string(list_length(reports)) ++ " declarations, "
     ++ int_to_string(count_where(effect_report_is_gap, reports)) ++ " gaps (declared pure, inferred !{IO}), "
-    ++ int_to_string(count_where(unifier.effect_report_is_multi_var, reports)) ++ " multi-variable rows, "
+    ++ int_to_string(count_where(unifier.effect_report_is_multi_var, reports)) ++ " singleton-rule violations, "
     ++ int_to_string(count_where(effect_report_is_var, reports)) ++ " unresolved effect vars")
 
 fn count_where(p: unifier.EffectReport -> Bool, reports: List unifier.EffectReport) -> Int =

@@ -1,0 +1,17 @@
+module main
+
+# The under-approximation twin of effect_two_variables.spr.
+#
+# `unused_second` quantifies TWO effect variables, `e` and `d` — exactly what
+# spec-v0.md §7 rule 9 forbids. But its body never calls `g`, so the two never
+# meet and inference never builds a row. A rule-9 check that read the INFERRED
+# effect reported `ok` and the declaration compiled.
+#
+# Rule 9 constrains the signature, not the body, so whether the second variable
+# is used is irrelevant: writing it at all is the violation.
+
+fn unused_second(f: Int -> Unit !{e}, g: Int -> Unit !{d}, n: Int) -> Unit !{e} =
+  f(n)
+
+fn main() -> Unit !{IO} =
+  unused_second(\n -> print(int_to_string(n)), \n -> (), 3)

@@ -1,0 +1,19 @@
+module main
+
+# A written multi-label row mixing the concrete label `IO` with a variable.
+#
+# spec-v0.md §7 defines an effect annotation as either a concrete closed effect
+# or a singleton variable; it defines no row form, and `unify_effects` has no
+# rule relating a row to anything. This is rejected as an undefined v0 form.
+#
+# It is NOT a rule-9 violation: `!{IO, e}` names exactly one effect variable, so
+# the singleton count is satisfied. The regression this pins is the diagnostic —
+# the earlier check reported "combines two effect variables (2 distinct)" and
+# counted `IO`, a concrete label, as one of the variables. The advice that
+# followed (write the same variable on every parameter) did not apply.
+
+fn writes(s: String) -> Unit !{IO, e} =
+  print(s)
+
+fn main() -> Unit !{IO} =
+  writes("hi")
