@@ -154,6 +154,19 @@ fn main() -> Unit !{IO} =
     assert_true(state, "over-indented instance member is rejected",
       parse_fails("instance Codec Int\n  fn from_int(n: Int) -> Int = n\n    fn to_str(x: Int) -> Int = x"))
 
+    # Under-indentation is the dangerous direction.  A member that is indented
+    # past the keyword — so plainly meant as a member — but misaligned must not
+    # be handed back to the top-level parser: an instance member is a valid
+    # top-level `fn`, so it would be silently reinterpreted as one, leaving the
+    # instance short a method and the program compiling with a different
+    # meaning.  Only a dedent to (or past) the keyword's own column ends a body.
+    assert_true(state, "under-indented class member is rejected",
+      parse_fails("class Codec a\n    fn from_int(n: Int) -> a\n  fn to_str(x: a) -> Int"))
+    assert_true(state, "under-indented instance member is rejected",
+      parse_fails("instance Codec Int\n    fn from_int(n: Int) -> Int = n\n  fn to_str(x: Int) -> Int = x"))
+    assert_eq(state, "an under-indented instance member is not a top-level fn",
+      decl_count("instance Codec Int\n    fn from_int(n: Int) -> Int = n\n  fn to_str(x: Int) -> Int = x"), -1)
+
     # ── the brace form keeps working (both forms are accepted) ────────────
     assert_true(state, "brace class still parses",
       parse_ok("class Codec a {\n  fn from_int(n: Int) -> a\n  fn to_str(x: a) -> Int\n}"))
