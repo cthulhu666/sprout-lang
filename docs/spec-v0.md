@@ -1388,11 +1388,18 @@ Effect note for v0:
 8. Effect annotations are checked on function types; omitted annotations mean purity.
 9. Function types may quantify a singleton effect variable `!{e}`; use sites
    instantiate it with either purity or a concrete closed effect supported in v0.
-   **Singleton is a limit, not a description**: a signature may quantify at most
-   one effect variable, and a body that combines two — `f: a -> Unit !{e}` beside
-   `g: b -> Unit !{d}` — is rejected. The combination would infer a multi-label
-   row, which this section does not define; write the same variable on every
-   effect-polymorphic parameter instead.
+   **Singleton is a limit, not a description**: a signature may name at most one
+   effect variable. `f: a -> Unit !{e}` beside `g: b -> Unit !{d}` is rejected
+   whether or not the body ever combines them — the limit is on the signature, so
+   an unused second variable violates it just as a used one does. Write the same
+   variable on every effect-polymorphic parameter instead.
+
+   An annotation is a single concrete effect (`!{IO}`), a single effect variable
+   (`!{e}`), or omitted for purity. A multi-label row — `!{IO, e}`, `!{a, b}` —
+   is not a form this section defines and is rejected wherever it is written,
+   including on a parameter's arrow. Note `!{IO, e}` names only one variable and
+   so satisfies the singleton limit above; it is rejected under this sentence
+   rather than that one.
 10. `main` must use a concrete effect annotation when effectful; it may not be
     effect-polymorphic.
 11. A pure function body may not call `!{IO}` functions unless it is allowed by
@@ -1433,10 +1440,14 @@ Effect note for v0:
 >   functions…") is rule 8 stated operationally — a body calling an `!{IO}` function infers
 >   `!{IO}`, which a pure signature does not admit. Its escape clause is honoured: where the
 >   body's effect resolves to a variable rather than to `!{IO}`, the declaration is accepted.
-> - **9** is the singleton rule: a signature may quantify **at most one** effect variable.
->   Two distinct variables meeting in one body infer a multi-label row, which this section
->   does not define and which no v0 use site can instantiate, there being one concrete
->   label. That is rejected rather than accepted silently.
+> - **9** is the singleton rule: a signature may name **at most one** effect variable, and
+>   may not write a multi-label row. It is checked against the **declared signature**, never
+>   against what the body infers. That distinction is normative, because the two questions
+>   have different answers in both directions: a signature naming two variables whose body
+>   never combines them infers no row and would pass an inference-side check, while two
+>   fresh instantiations of a *single* variable — `fn f(n: Int) -> Unit !{e}` called twice —
+>   do infer a row and would fail one, despite naming exactly one variable and being
+>   conformant. Rule 9 constrains what the author wrote, so that is what is read.
 > - **10** (`main` may not be effect-polymorphic) was already enforced, syntactically.
 >
 > Three properties of the check are normative, not implementation detail:

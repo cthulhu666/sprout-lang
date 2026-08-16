@@ -442,10 +442,31 @@ fn list_dedup(xs: List String) -> List String =
 export fn ftv(t: Type) -> List String =
   list_dedup(ftv_acc(t, Nil))
 
+# The effect VARIABLES a bare effect names. `EffectVar` is the ordinary case; a
+# row contributes every label that is not the concrete `IO`, mirroring
+# `effect_of_single_label`'s rule that `IO` is the one concrete label in v0 and
+# any other identifier is a variable.
+#
+# `IO` must never be counted here. This feeds `scheme_quantified`, which freshens
+# what it returns, and freshening `IO` would turn the one concrete effect into a
+# per-instantiation variable. It also feeds rule 9's singleton count, where
+# counting `IO` would reject the ordinary `fn f(g: a -> b !{e}) -> Unit !{IO}`.
+#
+# The row arm is not dead: a written `!{a, b}` reaches here as a row, and without
+# it those variables were quantified by nothing — the shared-global-variable bug
+# that `scheme_quantified` exists to prevent, just via a different spelling.
 export fn ftv_effect(e: Effect) -> List String =
   match e with
   | EffectVar name -> Cons(name, Nil)
+  | EffectRow labels -> effect_var_labels(labels)
   | _ -> Nil
+
+fn effect_var_labels(labels: List String) -> List String =
+  match labels with
+  | Nil -> Nil
+  | Cons label rest ->
+      if label == "IO" then effect_var_labels(rest)
+      else Cons(label, effect_var_labels(rest))
 
 # Every effect variable reachable from a type, including the ones buried in a
 # parameter's arrow. `ftv_effect` above sees only a bare Effect, which for a
@@ -478,6 +499,65 @@ fn ftv_effect_type_list_acc(items: List Type, acc: List String) -> List String =
 # a written `!{e}` is by definition bound by that signature.
 export fn scheme_effect_vars_of(t: Type, e: Effect) -> List String =
   list_union(ftv_effect_type(t), ftv_effect(e))
+
+# Does this signature WRITE a multi-label effect row anywhere?
+#
+# §7 defines an effect annotation as a concrete closed effect (`!{IO}`) or a
+# singleton variable (`!{e}`); it defines no row, and `unify_effects` has no rule
+# relating a row to anything. `effect_from_labels` builds one only for a source
+# annotation of two or more labels, so this is asking a question about what the
+# author wrote, not about anything inference produced.
+#
+# Separate from the singleton count because `!{IO, e}` names exactly ONE variable
+# and so satisfies rule 9 — it is undefined for a different reason, and saying so
+# with rule 9's wording is what made the old diagnostic call `IO` a variable.
+#
+# Walks arrows, not just the top-level effect: a parameter `f: Int -> Unit !{IO, e}`
+# is the same undefined form written one level in, and a check that saw only the
+# top level would accept it — the half-coverage this whole change exists to end.
+# Returns the labels of the first row found, or `Nil` for a signature that writes
+# none. One walk answers both questions a caller has — whether to reject, and
+# which labels to name in the diagnostic — so the predicate below is derived from
+# it rather than duplicating the traversal.
+export fn scheme_row_labels(s: Scheme) -> List String =
+  match effect_row_labels(scheme_effects(s)) with
+  | Nil -> type_row_labels(scheme_type(s))
+  | labels -> labels
+
+export fn scheme_has_multi_label_row(s: Scheme) -> Bool =
+  match scheme_row_labels(s) with
+  | Nil -> false
+  | _ -> true
+
+fn effect_row_labels(e: Effect) -> List String =
+  match e with
+  | EffectRow labels -> labels
+  | _ -> Nil
+
+fn type_row_labels(t: Type) -> List String =
+  match t with
+  | TVar _ -> Nil
+  | TConst _ -> Nil
+  | TApp base arg -> first_row_labels(type_row_labels(base), arg)
+  | TFunc param ret eff _ ->
+      match effect_row_labels(eff) with
+      | Nil -> first_row_labels(type_row_labels(param), ret)
+      | labels -> labels
+  | TTuple items -> type_list_row_labels(items)
+
+# `Nil` from the left branch means "keep looking", so fall through to the right.
+fn first_row_labels(found: List String, fallback: Type) -> List String =
+  match found with
+  | Nil -> type_row_labels(fallback)
+  | labels -> labels
+
+fn type_list_row_labels(items: List Type) -> List String =
+  match items with
+  | Nil -> Nil
+  | Cons h t ->
+      match type_row_labels(h) with
+      | Nil -> type_list_row_labels(t)
+      | labels -> labels
 
 export fn ftv_scheme(s: Scheme) -> List String =
   list_diff(

@@ -1,0 +1,29 @@
+module main
+
+# Rule 8 must survive rule 9's check moving to the DECLARED side.
+#
+# Once rule 9 stops consulting the inferred effect, an inferred row is no longer
+# rejected — so the question this pins is whether a row can ever hide real IO.
+# It cannot: `merge_effects` matches `EffectIO` in both argument positions before
+# any row is built, so IO absorbs every variable it meets and a row never
+# contains it.
+#
+# `sneaky` is the sharpest shape for that claim. It merges an UNPINNED `!{e}`
+# (unresolvable — `maybe_do` has no parameter to constrain it) with a HOF whose
+# effect variable unification binds to IO through its argument. If merging read
+# raw, unsubstituted effects, the result would be a frozen two-label row, the
+# declaration would report no gap, and a pure signature would quietly perform IO.
+# It infers `!{IO}` instead, and rule 8 rejects it.
+
+fn maybe_do(n: Int) -> Unit !{e} = ()
+
+fn hof(f: Int -> Unit !{q}, n: Int) -> Unit !{q} =
+  f(n)
+
+fn sneaky(n: Int) -> Unit =
+  do
+    maybe_do(1)
+    hof(\m -> print(int_to_string(m)), n)
+
+fn main() -> Unit !{IO} =
+  sneaky(3)

@@ -42,25 +42,36 @@ export fn field_obligation_pos(o: FieldObligation) -> source.SourcePos =
 # agree, and reported by `--phase effects`. Nothing acts on a mismatch yet: the
 # v0 checker does not enforce the effect rules (spec-v0.md §7), and the point of
 # collecting this is to size that enforcement before committing to it.
+# The declared scheme is carried alongside the two effects because the two rules
+# ask about different things. Rule 8 compares declared against inferred, so the
+# effects are enough. Rule 9 constrains the SIGNATURE — "may quantify a singleton
+# effect variable" — and neither effect can answer that: the declared field holds
+# only the top-level effect (blind to a variable written on a parameter's arrow),
+# and the inferred field describes what the body did, which is not what rule 9
+# governs. The scheme is the declaration, so it is what rule 9 reads.
 export type EffectReport (..) =
-  | EffectReport String types.Effect types.Effect source.SourcePos
-  # EffectReport fn_name  declared  inferred  pos
+  | EffectReport String types.Effect types.Effect source.SourcePos types.Scheme
+  # EffectReport fn_name  declared  inferred  pos  declared_scheme
 
 export fn effect_report_name(r: EffectReport) -> String =
   match r with
-  | EffectReport n _ _ _ -> n
+  | EffectReport n _ _ _ _ -> n
 
 export fn effect_report_declared(r: EffectReport) -> types.Effect =
   match r with
-  | EffectReport _ d _ _ -> d
+  | EffectReport _ d _ _ _ -> d
 
 export fn effect_report_inferred(r: EffectReport) -> types.Effect =
   match r with
-  | EffectReport _ _ i _ -> i
+  | EffectReport _ _ i _ _ -> i
 
 export fn effect_report_pos(r: EffectReport) -> source.SourcePos =
   match r with
-  | EffectReport _ _ _ p -> p
+  | EffectReport _ _ _ p _ -> p
+
+export fn effect_report_decl_scheme(r: EffectReport) -> types.Scheme =
+  match r with
+  | EffectReport _ _ _ _ s -> s
 
 # "This declaration under-declares its effect." The SINGLE definition, used by
 # both consumers: `--phase effects` to label a line GAP, and `checker` to reject.
@@ -79,42 +90,55 @@ export fn effect_report_is_gap(r: EffectReport) -> Bool =
   | (types.EffectPure, types.EffectIO) -> true
   | _ -> false
 
-# "This declaration needs more than one effect variable." The second rejection,
-# for spec §7 rule 9: a function type quantifies a SINGLETON effect variable.
+# "This signature is not a singleton effect variable." The second rejection, for
+# spec §7 rule 9. The SINGLE definition, read by both `--phase effects` (to label
+# a line ROW) and `checker` (to reject) — same no-drift contract as rule 8 above.
 #
-# A body that combines two of them infers `!{e, d}` — a multi-label row, which §7
-# does not define and which no v0 use site can instantiate, there being exactly
-# one concrete label. Nothing rejected it, so the checker accepted a type the
-# spec has no rule for.
+# Two distinct causes, because they are two different defects:
 #
-# It only became reachable when effect variables started being freshened per
-# instantiation: before that every `!{e}` in the program was one shared variable,
-# so two could never meet as distinct labels. Not a soundness hole — `IO` wins
-# every merge, so a row can never contain it — but the same silent disagreement
-# between what inference builds and what the spec defines that hid the original
-# effect bug for the whole of v0.
+#   - more than one effect variable named — `f: a -> Unit !{e}, g: b -> Unit !{d}`.
+#     Rule 9's singleton limit, stated directly.
+#   - a written multi-label row — `!{IO, e}`. Names ONE variable, so it satisfies
+#     the singleton count; it is undefined for the separate reason that §7 has no
+#     row form. Reporting it under rule 9's wording is what made the earlier
+#     diagnostic call `IO` an effect variable.
 #
-# Both sides are checked. The inferred side catches a body that combines two; the
-# declared side catches a signature written `!{a, b}` directly.
+# This reads the DECLARATION, never the inferred effect, and that is the fix for
+# a check that got both directions wrong by reading inference instead:
+#
+#   - false REJECTION. An inferred row is also what two fresh instantiations of
+#     ONE variable produce. `fn maybe_do(n: Int) -> Unit !{e}` called twice merges
+#     `$e0` with `$e1` into a row, and the declaration was rejected for combining
+#     two variables when it named one. `apply_effect_subst` could not collapse it
+#     either: both members are unbound, so no substitution relates them.
+#     Fixture: `run/effect_one_variable_unpinned_ok.spr`.
+#   - false ACCEPTANCE. A signature naming two variables whose body never makes
+#     them meet builds no row at all, so it compiled.
+#     Fixture: `type_error/effect_two_variables_uncombined.spr`.
+#
+# Dropping the inferred side opens no rule-8 hole: `merge_effects` matches
+# `EffectIO` in both argument positions before building any row, so IO absorbs
+# every variable it meets and a row can never contain it. An inferred row is
+# therefore always IO-free, and a body that truly performs IO still infers `!{IO}`
+# and is still caught. Pinned by `type_error/effect_var_merged_with_io.spr`.
 export fn effect_report_is_multi_var(r: EffectReport) -> Bool =
-  effect_is_multi_var(effect_report_declared(r))
-    || effect_is_multi_var(effect_report_inferred(r))
+  list_length(effect_report_effect_vars(r)) > 1
+    || effect_report_has_row(r)
 
-fn effect_is_multi_var(e: types.Effect) -> Bool =
-  match e with
-  | types.EffectRow labels -> list_length(labels) > 1
-  | _ -> false
+# The effect variables the SIGNATURE names, in source spelling — `e`, `d`, not the
+# freshened `$e0`. Every arrow is scanned, not just the top-level effect, because
+# a variable written on a parameter (`list_each`'s `f: a -> Unit !{e}`) is the
+# common case and never appears at the top level of anything else.
+export fn effect_report_effect_vars(r: EffectReport) -> List String =
+  types.scheme_effect_vars(effect_report_decl_scheme(r))
 
-# The variables involved, for the diagnostic. Reads whichever side is the row.
-export fn effect_report_var_labels(r: EffectReport) -> List String =
-  match effect_row_labels(effect_report_inferred(r)) with
-  | Nil -> effect_row_labels(effect_report_declared(r))
-  | labels -> labels
+export fn effect_report_has_row(r: EffectReport) -> Bool =
+  types.scheme_has_multi_label_row(effect_report_decl_scheme(r))
 
-fn effect_row_labels(e: types.Effect) -> List String =
-  match e with
-  | types.EffectRow labels -> labels
-  | _ -> Nil
+# The labels of the written row, for the diagnostic. `Nil` when the signature
+# writes none, in which case the rejection came from the variable count instead.
+export fn effect_report_row_labels(r: EffectReport) -> List String =
+  types.scheme_row_labels(effect_report_decl_scheme(r))
 
 # What `unify_types` returns: BOTH substitutions, or a message.
 #

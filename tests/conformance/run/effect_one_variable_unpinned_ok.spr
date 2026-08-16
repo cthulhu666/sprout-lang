@@ -1,0 +1,30 @@
+module main
+
+# spec-v0.md §7 rule 9 permits ONE effect variable per signature. Every signature
+# here quantifies exactly one (`e`), so every one of them is conformant.
+#
+# The twist that made this a false rejection: `maybe_do`'s `!{e}` is *unpinned* —
+# it appears only in the return effect, with no parameter to constrain it. Each
+# call instantiates it fresh, so calling it twice in one body merges `$e0` with
+# `$e1` into a two-label row, and a rule-9 check that read the INFERRED effect
+# saw that row and reported "combines two effect variables". The suggested fix —
+# write the same variable on every parameter — was already true of the source.
+#
+# The accept twin `effect_one_variable_ok.spr` cannot catch this: there the
+# variable is pinned by a higher-order parameter, so the two instantiations
+# unify and collapse before the merge ever sees a row.
+#
+# Rule 9 is a statement about the SIGNATURE, so the check counts the effect
+# variables the declaration names, not the shape inference happens to build.
+
+fn maybe_do(n: Int) -> Unit !{e} = ()
+
+fn caller(n: Int) -> Unit !{e} =
+  do
+    maybe_do(n)
+    maybe_do(n)
+
+fn main() -> Unit !{IO} =
+  do
+    caller(1)
+    print("ok")

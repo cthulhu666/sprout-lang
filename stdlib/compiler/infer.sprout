@@ -6746,7 +6746,7 @@ fn check_fn_body(
         # should report the type error: this arm exits before recording.
         _ <- unifier.record_effect_report(state,
                unifier.EffectReport(name, types.scheme_effects(decl_scheme),
-                 unifier.apply_effect_subst(es2a, body_eff), fn_pos))
+                 unifier.apply_effect_subst(es2a, body_eff), fn_pos, decl_scheme))
         # AFTER the return-type unify: the declared return type may be the only
         # thing that determines a deferred field access's receiver.
         FinishOk typed_body s2 <- finish_field_obligations(state, body_env, s2a, typed_body0) else FinishErr fpos fmsg -> (fn_body_err(name, fpos, fmsg), dict_empty(), Nil)
@@ -7038,7 +7038,11 @@ fn check_instance_method(
   match method with
   | ast.InstanceMethodImpl name params ret_maybe eff_maybe body ->
       do
-        (inst_type, prog_to_fresh) <- unifier.instantiate_with_vars(state, scheme_from_fn_parts(params, ret_maybe, eff_maybe, dict_empty()))
+        # Let-bound rather than inlined into instantiate_with_vars: rule 9 asks
+        # about the DECLARATION, so the report needs the pre-instantiation scheme
+        # (source names `e`, `d`) and not `inst_type`'s freshened `$e0`.
+        let decl_scheme = scheme_from_fn_parts(params, ret_maybe, eff_maybe, dict_empty())
+        (inst_type, prog_to_fresh) <- unifier.instantiate_with_vars(state, decl_scheme)
         let fwd_env = seed_forward_markers(inst_constraints, prog_to_fresh, env)
         let body_env = extend_env_with_params(params, ctor_param_types(inst_type), fwd_env)
         br <- typecheck_expr(state, body_env, subst, eff_subst, body)
@@ -7058,7 +7062,7 @@ fn check_instance_method(
             # The record happens inside instance_method_checked, after the
             # return-type unify — same ordering and same reasons as check_fn_body.
             instance_method_checked(state, name, params, ret_maybe, eff_maybe,
-              body_env, s1, es1, inst_type, typed_body0, body_eff, env)
+              body_env, s1, es1, inst_type, typed_body0, body_eff, env, decl_scheme)
 
 # Two instances of one class define the same method name, so the bare name would
 # collapse them into a single census entry. The instance HEAD is not in scope here
@@ -7083,7 +7087,8 @@ fn instance_method_checked(
   inst_type: types.Type,
   typed_body0: typed_ast.TypedExpr,
   body_eff: types.Effect,
-  env: Dict types.Scheme
+  env: Dict types.Scheme,
+  decl_scheme: types.Scheme
 ) -> InstanceMethodResult !{IO} =
   match unifier.unify_types(s1, es1, typed_ast.typed_expr_type(typed_body0), fn_return_type(inst_type, list_length(params))) with
   | unifier.UnifyErr e -> InstanceMethodErr(typed_ast.typed_expr_pos(typed_body0), "Return type mismatch in instance method " ++ name ++ ": " ++ e)
@@ -7094,7 +7099,8 @@ fn instance_method_checked(
                unifier.EffectReport(instance_report_name(name, inst_type),
                  effect_from_maybe_labels(eff_maybe),
                  unifier.apply_effect_subst(es2a, body_eff),
-                 typed_ast.typed_expr_pos(typed_body0)))
+                 typed_ast.typed_expr_pos(typed_body0),
+                 decl_scheme))
         f <- finish_field_obligations(state, body_env, s2a, typed_body0)
         match f with
         | FinishErr fpos fmsg -> InstanceMethodErr(fpos, fmsg ++ " in instance method " ++ name)
