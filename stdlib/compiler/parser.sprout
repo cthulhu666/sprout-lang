@@ -1872,8 +1872,12 @@ fn collect_class_method_sigs_layout(tokens: Vec token.Token, i: Int, keyword_col
   else if block_col == -1 then
     collect_class_method_sigs_layout_at(tokens, i, keyword_col,
       source.position_column(tok_pos(tok_at(tokens, i))), acc)
-  else if source.position_column(tok_pos(tok_at(tokens, i))) < block_col then Ok((list_reverse(acc), i))
-  else if source.position_column(tok_pos(tok_at(tokens, i))) > block_col then
+  # Misalignment in EITHER direction is an error.  This branch is reachable only
+  # when the token is indented past the keyword (the guard above returned
+  # otherwise), so it is plainly meant as a member — handing it back to the
+  # top-level parser would silently reinterpret it.  Only a dedent to or past
+  # the keyword's own column ends a body.
+  else if source.position_column(tok_pos(tok_at(tokens, i))) != block_col then
     Err(ParseError(string.concat("Unexpected indentation in class body at ", pos_str(cur_pos(tokens, i))), cur_pos(tokens, i)))
   else
     collect_class_method_sigs_layout_at(tokens, i, keyword_col, block_col, acc)
@@ -1937,8 +1941,11 @@ fn collect_instance_methods_layout(tokens: Vec token.Token, i: Int, keyword_col:
   else if block_col == -1 then
     collect_instance_methods_layout_at(tokens, i, keyword_col,
       source.position_column(tok_pos(tok_at(tokens, i))), acc)
-  else if source.position_column(tok_pos(tok_at(tokens, i))) < block_col then Ok((list_reverse(acc), i))
-  else if source.position_column(tok_pos(tok_at(tokens, i))) > block_col then
+  # Misalignment in either direction is an error — see the class collector.  It
+  # matters more here: an instance member IS a valid top-level `fn`, so an
+  # under-indented one would be silently reinterpreted as one, leaving the
+  # instance short a method and the program compiling with a different meaning.
+  else if source.position_column(tok_pos(tok_at(tokens, i))) != block_col then
     Err(ParseError(string.concat("Unexpected indentation in instance body at ", pos_str(cur_pos(tokens, i))), cur_pos(tokens, i)))
   else
     collect_instance_methods_layout_at(tokens, i, keyword_col, block_col, acc)

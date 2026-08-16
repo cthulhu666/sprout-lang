@@ -1611,16 +1611,22 @@ Both forms are accepted and denote the same declaration.  The layout form is
 idiomatic; the brace form is retained for compatibility.
 
 The layout rule is the one already used by `do`, `let … in` and `match`.  The
-first member fixes the block column; a subsequent member indented *further* than
-that column is rejected with **`Unexpected indentation in class body`** (resp.
-**`… in instance body`**), and a `fn` at or left of the `class`/`instance`
-keyword's own column ends the body rather than joining it.  A member's body may
-wrap onto further-indented lines without ending the block.  An empty body is
-legal — the class declares no methods.
+first member fixes the **block column**, and exactly one thing ends the body: a
+`fn` at or left of the `class`/`instance` keyword's own column.  A member
+indented past the keyword but *not* on the block column — in either direction —
+is rejected with **`Unexpected indentation in class body`** (resp. **`… in
+instance body`**).  A member's body may wrap onto further-indented lines without
+ending the block.  An empty body is legal — the class declares no methods.
 
-The column is what ends an `instance` body: an instance member `fn f(x) = e` is
-syntactically identical to a top-level `fn`, so a dedent is the only signal that
-the block is over.
+Under-indentation is an error rather than an end-of-body because an instance
+member `fn f(x) = e` is syntactically identical to a top-level `fn`.  Were a
+misaligned member handed back to the top-level parser it would be silently
+reinterpreted as an ordinary function, leaving the instance short a method and
+the program compiling with a different meaning and no diagnostic.  This is where
+the layout form is deliberately stricter than `do`, which ends its block on any
+dedent: a `do` block's enclosing context is an expression, so a dedented token
+there is a genuine continuation of an outer block, whereas nothing at all may
+appear between a body's members.
 
 **Constraint syntax.**  A `where` clause names the **class first, then the
 constrained type variable(s)**: `where ToString a`, `where Applicative f`,
