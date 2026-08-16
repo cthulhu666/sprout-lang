@@ -92,13 +92,22 @@ fn enforce_effects(result: typed_ast.TypedResult, reports: List unifier.EffectRe
   | typed_ast.TypedErr _ _ -> result
   | typed_ast.TypedOk _ _ ->
       match effect_gaps(reports) with
-      | Nil -> result
       | Cons first rest ->
           typed_ast.TypedErr(unifier.effect_report_pos(first),
             effect_gap_message(first, rest))
+      | Nil ->
+          # Rule 8 first, rule 9 second. A declaration that both under-declares
+          # and needs two variables is more usefully reported as the former: the
+          # missing `!{IO}` is a fact about what the code does, while the extra
+          # variable is a fact about how its signature is written.
+          match effect_multi_vars(reports) with
+          | Nil -> result
+          | [first | _] ->
+              typed_ast.TypedErr(unifier.effect_report_pos(first),
+                effect_multi_var_message(first))
 
-# The prelude has no list_filter; this is the local one, as compile_driver does
-# for its own count. Order is source order, so the reported position is the
+# The prelude has no list_filter; these are the local ones, as compile_driver
+# does for its own count. Order is source order, so the reported position is the
 # FIRST offending declaration rather than an arbitrary one.
 fn effect_gaps(reports: List unifier.EffectReport) -> List unifier.EffectReport =
   match reports with
@@ -106,6 +115,24 @@ fn effect_gaps(reports: List unifier.EffectReport) -> List unifier.EffectReport 
   | Cons r rest ->
       if unifier.effect_report_is_gap(r) then Cons(r, effect_gaps(rest))
       else effect_gaps(rest)
+
+fn effect_multi_vars(reports: List unifier.EffectReport) -> List unifier.EffectReport =
+  match reports with
+  | Nil -> Nil
+  | Cons r rest ->
+      if unifier.effect_report_is_multi_var(r) then Cons(r, effect_multi_vars(rest))
+      else effect_multi_vars(rest)
+
+# Names the count, not the variables. The inferred row holds FRESHENED names
+# (`$e0`, `$e1`) that appear nowhere in the source, so printing them would send
+# the reader looking for identifiers that do not exist; the source names are not
+# on the report. The count plus the fix is what the author can act on.
+fn effect_multi_var_message(r: unifier.EffectReport) -> String =
+  "`" ++ unifier.effect_report_name(r) ++ "` combines two effect variables ("
+    ++ int_to_string(list_length(unifier.effect_report_var_labels(r)))
+    ++ " distinct), but a signature may quantify only one (spec-v0.md §7 rule 9)"
+    ++ " — write the same variable on every effect-polymorphic parameter,"
+    ++ " e.g. `f: a -> Unit !{e}, g: b -> Unit !{e}`"
 
 # Names every offending declaration, and shows the fix rather than describing it.
 # The first line carries the phrase the conformance fixtures pin.

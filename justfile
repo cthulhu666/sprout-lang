@@ -1077,6 +1077,20 @@ effect-report-smoke: bootstrap-from-seed
   done
   # The summary line is what the D1 migration estimate is read off. If the report
   # ever stops emitting it, every downstream number silently becomes zero.
+  # The report must NEVER print `ok` for something the checker rejects. Every
+  # non-ok verdict is a rejection, so a new rule that gains an error without
+  # gaining a verdict silently breaks that correspondence. `ROW` (rule 9) is
+  # asserted against its own fixture, since canaries.spr has no two-variable
+  # declaration — it could not, being a file that must keep reporting rather
+  # than failing to compile.
+  ROWFIX=tests/conformance/type_error/effect_two_variables.spr
+  if ! "{{build_dir}}/compile_driver_bin_stage1" --phase effects "{{stdlib_root}}" "$ROWFIX" 2>&1 \
+       | grep -qE '^effect ROW .*two_hofs'; then
+    echo "effect-report-smoke: no ROW verdict for the two-effect-variable fixture" >&2
+    "{{build_dir}}/compile_driver_bin_stage1" --phase effects "{{stdlib_root}}" "$ROWFIX" 2>&1 \
+      | grep -E 'two_hofs' >&2 || echo "  (no line at all)" >&2
+    failed=$((failed + 1))
+  fi
   if ! grep -qE "^effect-summary: [0-9]+ declarations, [0-9]+ gaps" "$TMPD/out"; then
     echo "effect-report-smoke: no effect-summary line in output:" >&2
     cat "$TMPD/out" >&2

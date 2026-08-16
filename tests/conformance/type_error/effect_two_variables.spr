@@ -1,0 +1,29 @@
+module main
+
+# spec-v0.md §7 rule 9: a function type quantifies a SINGLETON effect variable.
+#
+# `two_hofs` writes two, and its body combines them. The inferred effect is then
+# `!{e, d}` — a multi-label row, which §7 does not define and which no v0 use
+# site can instantiate, since `IO` is the only concrete label. The compiler used
+# to infer that row and accept it silently.
+#
+# It became reachable only once effect variables were freshened per instantiation
+# (docs/effect-enforcement-v0.md §9): before that every `!{e}` in the program was
+# ONE shared variable, so two of them could never meet as distinct labels. Fixing
+# that layer exposed this one.
+#
+# Not a soundness hole — `IO` wins every merge, so a row can never contain it and
+# nothing unsafe compiled. It is a conformance hole: the checker accepted a type
+# the spec has no rule for, which is the same silent disagreement between two
+# representations that hid the original effect bug for the whole of v0.
+#
+# The fix is to write ONE variable on both parameters; see
+# tests/conformance/run/effect_one_variable_ok.spr for that form.
+
+fn two_hofs(f: Int -> Unit !{e}, g: Int -> Unit !{d}) -> Unit !{e} =
+  do
+    f(1)
+    g(2)
+
+fn main() -> Unit !{IO} =
+  two_hofs(\n -> print(int_to_string(n)), \n -> print(int_to_string(n)))

@@ -1,0 +1,28 @@
+module main
+
+# The ACCEPT twin of tests/conformance/type_error/effect_two_variables.spr.
+#
+# One effect variable, used on both higher-order parameters and on the result —
+# the form spec-v0.md §7 rule 9 describes, and the shape `list_each`/`list_fold`
+# already use. The rejection of two variables must not catch this.
+#
+# It is also the guard against over-correcting: a check that rejected any
+# declaration whose inferred effect mentions a variable would kill every
+# effect-polymorphic helper in the prelude, and the type_error fixture alone
+# would never notice.
+
+fn both(f: Int -> Unit !{e}, g: Int -> Unit !{e}, n: Int) -> Unit !{e} =
+  do
+    f(n)
+    g(n)
+
+# Instantiated at IO here; the same function instantiates at pure below.
+fn noisy(n: Int) -> Unit !{IO} = print(int_to_string(n))
+
+fn quiet(n: Int) -> Unit = ()
+
+fn main() -> Unit !{IO} =
+  do
+    both(noisy, noisy, 7)
+    both(quiet, quiet, 0)
+    print("done")

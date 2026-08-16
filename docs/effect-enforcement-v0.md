@@ -1,8 +1,9 @@
 # Effect enforcement — v0
 
-**Status: done.** Spec §7 rule 8 is **enforced** — a body that performs IO under a pure signature is
-a compile error. Read §9–§11 for the current state; §1–§8 are the original measurement and remain
-accurate as history, but their numbers are superseded.
+**Status: done.** Spec §7 rules 8, 9, 10 and 11 are all **enforced** — a body that performs IO under
+a pure signature is a compile error, and so is a signature needing more than one effect variable.
+Read §9–§12 for the current state; §1–§8 are the original measurement and remain accurate as history,
+but their numbers are superseded. §12.1 corrects a claim made in §11.
 
 Landed 2026-08-16, in order: the measurement instrument (§4), `panic` decided **pure** (§6), effect
 variables quantified and bound by unification (§9), closure construction correctly attributed as pure
@@ -577,3 +578,81 @@ notice, since they only pin the direction that must fail.
 
 Zero source annotations. Zero correct programs rejected. Full suite green, 51/51 examples,
 `ir-golden-diff` 0 differences, and the compiler bootstraps itself under enforcement.
+
+## 12. Rule 9: one effect variable per signature (2026-08-16)
+
+Two corrections and one fix, all from re-reading the rules against the implementation after §11.
+
+### 12.1 Correction: rule 11 was already enforced
+
+§11 and its commit message said "rules 9 and 11 are still not enforced". **Rule 11 is enforced** — it
+is the same check as rule 8, stated operationally. One probe settles it:
+
+```sprout
+fn writer(s: String) -> Unit !{IO} = print(s)
+fn pure_calls_io(s: String) -> Unit = writer(s)
+```
+```
+4:1: ERROR: check: `pure_calls_io` performs IO but is declared pure
+```
+
+A body calling an `!{IO}` function infers `!{IO}`, and a pure signature does not admit it. Rule 11's
+escape clause — "unless allowed by the surrounding singleton effect variable instantiation" — is
+honoured by the accept-when-unresolved rule: where the body's effect is a variable rather than
+`!{IO}`, the declaration passes.
+
+### 12.2 Rule 9 had a real, reachable hole
+
+Rule 9 says a use site instantiates `!{e}` "with either purity or a concrete closed effect supported
+in v0". Two *distinct* variables meeting in one body produced neither:
+
+```sprout
+fn two_hofs(f: Int -> Unit !{e}, g: Int -> Unit !{d}) -> Unit !{e} = do f(1); g(2)
+```
+```
+effect ok two_hofs: declared !{e}, inferred !{$e1, $e0}
+```
+
+A two-label row — which §7 does not define, and which no v0 use site can instantiate, `IO` being the
+only concrete label — inferred and accepted silently.
+
+**It became reachable only because §9 made effect variables real.** Before that every `!{e}` in the
+program was one shared variable, so two of them could never meet as distinct labels. Fixing one layer
+exposed the next, which is the ordinary shape of this work rather than a regression.
+
+**It was not a soundness hole.** `merge_effects` gives `IO` priority over everything, so a row can
+never contain `IO`, and nothing unsafe compiled. It was a conformance hole: the checker accepted a
+type the spec has no rule for — the same silent disagreement between what inference builds and what
+the spec defines that hid the original effect bug for the whole of v0 (§2).
+
+### 12.3 Decision: reject, do not widen
+
+Three options were on the table: reject two variables, silently unify them (`e := d`), or widen §7 to
+support closed multi-label rows. **Rejecting** was chosen (Kuba, 2026-08-16).
+
+Rule 9 already says *singleton*, so a signature with two variables was never v0-conformant; the
+implementation simply never said so. Unifying them silently would redefine two names the author
+deliberately wrote differently. Widening is a language change committing v0 to a feature only one
+label can exercise.
+
+Migration cost: **zero**. Exactly one declaration in the 5927-declaration corpus infers a row, and it
+is the conformance fixture written to demonstrate the bug.
+
+### 12.4 The report gains a third verdict
+
+`--phase effects` now prints `GAP` (rule 8), `ROW` (rule 9) or `ok`, and the summary counts rows
+separately. Adding the rejection without adding the verdict would have printed `ok` for a declaration
+the checker rejects — exactly the report-disagrees-with-checker failure §11.1 exists to prevent.
+
+The diagnostic names the *count*, not the variables: the inferred row holds freshened names (`$e0`,
+`$e1`) that appear nowhere in the source, and printing them would send the reader looking for
+identifiers that do not exist.
+
+| fixture | pins |
+|---|---|
+| `type_error/effect_two_variables.spr` | two variables rejected |
+| `run/effect_one_variable_ok.spr` | one variable across two HOF parameters still compiles **and runs**, instantiated at both IO and pure |
+
+The accept fixture is the guard against over-correcting: a check that rejected any declaration whose
+inferred effect mentions a variable would kill every effect-polymorphic helper in the prelude, and
+the `type_error` fixture alone would never notice.
