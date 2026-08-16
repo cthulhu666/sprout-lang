@@ -1,12 +1,18 @@
 # Effect enforcement — v0
 
-**Status:** measurement landed 2026-08-16, and `panic` is now **pure** (§6, decided the same day
-after the survey in §6.2). Enforcement itself is **not** started, and the remaining hard gate is
-effect-variable solving (§7). With `panic` pure the corpus has **3** effect gaps, all three a known
-instrument over-approximation rather than a real finding, so enforcing spec §7 rule 8 would cost
-zero source annotations. `docs/spec-v0.md` §7 rules 8, 9 and 11 state the intended discipline and its enforcement note
-states that the v0 checker does not apply them. This document records what was actually broken, what
-was fixed to make the gap measurable, and the number that came out.
+**Status:** the inference is complete and the corpus is clean; **enforcement itself is still not
+started**, and is now unblocked. Read §9 and §10 for the current state — §1–§8 are the original
+measurement and remain accurate as history, but their numbers are superseded.
+
+Landed 2026-08-16, in order: the measurement instrument (§4), `panic` decided **pure** (§6), effect
+variables quantified and bound by unification (§9), and closure construction correctly attributed as
+pure (§10). Together those took the corpus from 12 reported gaps to **zero real ones** — every gap
+the report now emits is a canary that is supposed to be broken. Enforcing `docs/spec-v0.md` §7 rule 8
+therefore costs zero source annotations and rejects zero correct programs.
+
+`docs/spec-v0.md` §7 rules 8, 9 and 11 state the intended discipline, and its enforcement note states
+that the v0 checker does not apply them. This document records what was actually broken, what was
+fixed to make the gap measurable, and the numbers that came out.
 
 Nothing here changes what any program compiles to. Effects are erased before codegen.
 
@@ -416,7 +422,7 @@ The 8 survivors are the effect-polymorphic functions themselves — `list_each`,
 The single new gap is `each_named`, the canary for the closed blind spot. No previously-reported gap
 disappeared.
 
-### 9.4 The remaining blocker for enforcement
+### 9.4 The remaining blocker for enforcement — cleared, see §10
 
 Six real gaps survive (the other five are the canary fixture's deliberate breakage), and **all six are
 the same false positive**: a pure function that builds a closure whose body does IO.
@@ -437,3 +443,61 @@ crossed a higher-order boundary, so removing it would previously have left `list
 unchecked. The arrow now carries the effect and unification reads it, so the correct attribution
 (constructing a closure is pure; the effect lives in its arrow) loses nothing. That is the next
 change, and enforcement follows it.
+
+## 10. Closure construction is pure (2026-08-16)
+
+`infer_lambda_expected` returned the lambda **body's** effect as the effect of the lambda
+*expression*. It now returns `EffectPure`; the body's effect goes only where it belongs, on the
+lambda's arrow. Constructing a closure performs no effect — the effect fires when something calls it.
+
+That lie was load-bearing until §9 landed, for the reason §9's own change removed: the arrow was a
+dead end, so over-approximating here was the only path by which an effect crossed a higher-order
+boundary. It is now redundant as well as wrong.
+
+### 10.1 It cost six false positives, which is what blocked enforcement
+
+Every function that *builds* an effectful closure reported as effectful:
+
+```sprout
+fn routes(list_tmpl: Template, form_tmpl: Template, store: Ref Store) -> Vec Route =
+  [ Route("GET", "/users", \req -> handle_list(list_tmpl, store, req)), … ]
+```
+
+Evaluating `routes(…)` allocates nine `Route` records and returns them. No handler runs; nothing is
+read or written. The declaration is honest and the inference was wrong. `Route`'s field type is
+already `HttpRequest -> HttpServerResponse !{IO}` (`http_server.sprout:687`) and the lambda's arrow
+already matched it, so the effect was recorded **twice** — correctly on the arrow, incorrectly on the
+enclosing expression — and only the second reached the declaration boundary.
+
+### 10.2 The half that is easy to miss
+
+Removing the over-approximation alone makes directly-applied lambdas go quiet, because
+`infer_call_general` never read the callee's arrow effect. Two effects meet at a call and both
+belong in it: evaluating the callee *expression* (computing which function to call may itself do IO)
+and *invoking* the result. Only the first was counted. `infer_call_var` had always merged both —
+`call_effect_of` is its equivalent of the second — so this arm was the asymmetric one, and it went
+unnoticed because a non-name callee is usually a lambda applied on the spot, whose effect arrived
+through the over-approximation by accident.
+
+The canaries pin all three ways an effect can reach a call site, and they are what stop a
+"simplification" that turns closure construction pure across the board:
+
+| canary | path | verdict |
+|---|---|---|
+| `make_shouter` | builds a closure, never calls it | must **not** be flagged |
+| `apply_now` | `(\x -> print(x))(s)` — non-name callee | must be flagged |
+| `via_local` | `let f = \x -> … in f(s)` — name callee | must be flagged |
+| `each_named` | `list_each(print, xs)` — through `!{e}` | must be flagged |
+
+### 10.3 Measurement: the corpus is clean
+
+Same 696-file corpus:
+
+| | before §9 | after §9 | after §10 |
+|---|---:|---:|---:|
+| real gaps (excluding the canary fixture) | 5 | 6 | **0** |
+| unresolved effect variables | 38 | 8 | 8 |
+
+Every gap the report now emits is a canary that is *supposed* to be broken. **Enforcing spec §7 rule
+8 costs zero source annotations and rejects zero correct programs** — which is what the whole
+instrument was built to find out.

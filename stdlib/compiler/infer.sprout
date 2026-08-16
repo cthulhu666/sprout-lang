@@ -1104,7 +1104,22 @@ fn infer_call_general(
     match cr with
     | InferErr pos e -> InferErr(pos, e)
     | InferOk typed_callee s1 es1 callee_eff ->
-        infer_call_inner(state, env, s1, es1, callee, typed_callee, callee_eff, dict_empty(), args, pos)
+        # Two distinct effects meet here and both belong in the call's effect:
+        # evaluating the callee EXPRESSION (`callee_eff` — computing which function
+        # to call may itself do IO), and INVOKING the resulting function
+        # (`arrows_effect`, read off the callee's own arrows). Only the first was
+        # counted. `infer_call_var` has always merged both — `call_effect_of` is its
+        # equivalent of the second — so this arm was the asymmetric one.
+        #
+        # It went unnoticed because a callee that is an expression rather than a
+        # name is usually a lambda applied on the spot, and `infer_lambda` used to
+        # report the lambda body's effect as the lambda expression's, so the effect
+        # arrived through `callee_eff` by accident. Correcting that attribution
+        # removes the accident. Canary: `apply_now`.
+        infer_call_inner(state, env, s1, es1, callee, typed_callee,
+          merge_effects(callee_eff,
+            arrows_effect(typed_ast.typed_expr_type(typed_callee), list_length(args))),
+          dict_empty(), args, pos)
 
 # Package C-b part 2 (n-ary): a top-level function's declared parameter count is
 # stored as an "@arity:{name}" env marker (see pre_scan_fn_decls). A call that
@@ -4435,25 +4450,35 @@ fn infer_lambda_expected(
     | InferErr pos e -> InferErr(pos, e)
     | InferOk typed_body s1 es1 body_eff ->
         # The lambda's TYPE gets the body's effect on its innermost arrow, matching
-        # what a written `a -> Unit !{IO}` produces.
+        # what a written `a -> Unit !{IO}` produces. The EXPRESSION's effect is
+        # `EffectPure`, because constructing a closure performs no effect: the
+        # effect belongs to the arrow and fires when something CALLS it.
         #
-        # `body_eff` is ALSO still returned as the enclosing expression's effect,
-        # and that is deliberate even though it is strictly wrong: building a
-        # closure performs no IO, so a correct attribution would report pure here
-        # and fire the effect when the closure is CALLED. Reporting pure today
-        # would lose the effect entirely, because the arrow that now carries it
-        # goes nowhere — unify_types ignores TFunc's effect field and never
-        # populates eff_subst, so instantiating a callee's `!{e}` makes a fresh
-        # EffectVar that nothing ever binds. Until effect unification is threaded
-        # through unify_types, `merge_effects(acc_eff, lam_eff)` at the argument
-        # site is the ONLY path by which an effect crosses a higher-order boundary
-        # — and list_each/list_fold, the repo's recommended effectful idiom, are
-        # exactly that boundary. Over-approximating here keeps them visible.
+        # This returned `body_eff` until 2026-08-16, deliberately and wrongly. The
+        # arrow was a dead end — `unify_applied` discarded TFunc's effect field, so
+        # instantiating a callee's `!{e}` made a variable nothing bound — and
+        # over-approximating here was therefore the ONLY path by which an effect
+        # crossed a higher-order boundary. Reporting the truth would have made
+        # `list_each`/`list_fold`, the repo's recommended effectful idiom, report
+        # clean. Now that arrows unify, the arrow carries it and the lie is
+        # redundant as well as wrong.
+        #
+        # The lie was not free: it made every function that BUILDS an effectful
+        # closure report as effectful. All six real gaps in the corpus census were
+        # that and nothing else (`log.stderr_logger`, `http_middleware.with_logging`,
+        # `http_web_server.routes`, …), which is what blocked enforcement — flipping
+        # the report to an error would have rejected six correct programs.
+        #
+        # Removing it requires `infer_call_general` to read the callee's arrow
+        # effect, which it did not: for a callee that is an expression rather than a
+        # name, the only effect it contributed was the cost of EVALUATING the callee.
+        # A directly-applied lambda `(\x -> print(x))(s)` was caught solely by the
+        # over-approximation. Canaries: `apply_now` and `via_local`.
         InferOk(
           typed_ast.TLambda(params, typed_body,
             build_fn_type_modes(param_types, param_modes(params),
               typed_ast.typed_expr_type(typed_body), body_eff), pos),
-          s1, es1, body_eff)
+          s1, es1, types.EffectPure)
 
 fn seed_param_types(fresh: List types.Type, expected: Maybe types.Type) -> List types.Type =
   match expected with
