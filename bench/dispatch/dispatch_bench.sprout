@@ -19,19 +19,17 @@ import stdlib.time as time
 # loop's ONLY per-iteration heap traffic — this isolates the win that heavier,
 # allocation-rich loops (A*, the digit net) dilute or hide in cold code.
 
-class Weight a {
+class Weight a
   fn weight(item: a) -> Int
-}
 
 type Coin = Copper | Silver | Gold
 
-instance Weight Coin {
+instance Weight Coin
   fn weight(c: Coin) -> Int =
     match c with
     | Copper -> 1
     | Silver -> 5
     | Gold -> 25
-}
 
 # Half-open loop bound: upto(n) is [0, n) as n iterations (IntRange is inclusive).
 fn upto(n: Int) -> IntRange = range(0, n - 1)

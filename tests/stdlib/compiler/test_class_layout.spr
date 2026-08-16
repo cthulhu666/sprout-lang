@@ -167,6 +167,27 @@ fn main() -> Unit !{IO} =
     assert_eq(state, "an under-indented instance member is not a top-level fn",
       decl_count("instance Codec Int\n    fn from_int(n: Int) -> Int = n\n  fn to_str(x: Int) -> Int = x"), -1)
 
+    # ── `export` prefix ───────────────────────────────────────────────────
+    #
+    # `parse_decl` consumes `export` and hands `parse_class_decl` the `class`
+    # token alone, so the keyword column it sees is 8, not 1.  Keying the guard
+    # on that column made every member look like it was at or left of the
+    # keyword, which ended the body at once and left the members to be read as
+    # top-level declarations.  `export class` is how the whole prelude declares
+    # its classes, so this shape must be pinned.
+    assert_eq(state, "export class collects its sigs",
+      class_method_count("export class Codec a\n  fn from_int(n: Int) -> a\n  fn to_str(x: a) -> Int"), 2)
+    assert_eq(state, "export class is a single decl",
+      decl_count("export class Codec a\n  fn from_int(n: Int) -> a\n  fn to_str(x: a) -> Int"), 1)
+    assert_eq(state, "export class with a superclass clause",
+      class_method_count("export class Ord a where Eq a\n  fn compare(left: a, right: a) -> Int"), 1)
+    assert_eq(state, "export class does not absorb the following fn",
+      decl_count("export class Codec a\n  fn from_int(n: Int) -> a\n\nfn top() -> Int = 1"), 2)
+    assert_eq(state, "export instance collects its impls",
+      instance_method_count("export instance Codec Int\n  fn from_int(n: Int) -> Int = n"), 1)
+    assert_true(state, "a misaligned member under an export class is still rejected",
+      parse_fails("export class Codec a\n    fn from_int(n: Int) -> a\n  fn to_str(x: a) -> Int"))
+
     # ── the brace form keeps working (both forms are accepted) ────────────
     assert_true(state, "brace class still parses",
       parse_ok("class Codec a {\n  fn from_int(n: Int) -> a\n  fn to_str(x: a) -> Int\n}"))
