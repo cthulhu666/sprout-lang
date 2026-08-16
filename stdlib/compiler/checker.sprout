@@ -62,11 +62,25 @@ export fn check_program_with_env(prog: ast.Program, extra: List (String, types.S
 # Used by lower_driver to feed the lowering pass.
 export fn typecheck_typed(prog: ast.Program, extra: List (String, types.Scheme)) -> typed_ast.TypedResult !{IO} =
   do
+    (result, _) <- typecheck_typed_with_effects(prog, extra)
+    result
+
+# Like typecheck_typed but also hands back the declared-vs-inferred effect census
+# infer.check_fn_body accumulated on the way through. The reports live on the
+# InferState, which typecheck_typed creates and drops, so reaching them needs an
+# entry point at this level rather than a reader further out. Used by
+# `--phase effects`; nothing else should need it until effects are enforced.
+export fn typecheck_typed_with_effects(prog: ast.Program, extra: List (String, types.Scheme))
+    -> (typed_ast.TypedResult, List unifier.EffectReport) !{IO} =
+  do
     state <- unifier.new_state()
     let desugared = desugar_program(prog)
     match desugared with
     | ast.Program decls _ ->
-        infer.typecheck_decls(state, decls, dict_from_list(builtin_entries() ++ extra), dict_empty(), dict_empty())
+        do
+          result <- infer.typecheck_decls(state, decls, dict_from_list(builtin_entries() ++ extra), dict_empty(), dict_empty())
+          reports <- unifier.effect_reports(state)
+          (result, reports)
 
 # ---------------------------------------------------------------------------
 # String template / Vec-literal desugar pass

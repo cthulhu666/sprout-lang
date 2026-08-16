@@ -1379,13 +1379,22 @@ Effect note for v0:
     and inference is free to specialize it.
 
 > **Enforcement status of the effect rules (8, 9, 11).** These state the intended
-> discipline; the v0 checker does **not** enforce them. Effects are parsed, carried on
-> `TFunc`, and printed, but never unified: `unify_effects` exists and has no call site,
-> so a pure signature may call an `!{IO}` function and still typecheck as pure
-> (`fn shout(s: String) -> Unit = print(s)` is accepted today). An effect annotation is
-> therefore documentation, not a checked contract, and code must not rely on a missing
-> `!{IO}` to mean a function is pure. Rule 10 is the exception — the effect-polymorphic
-> `main` check *is* enforced, syntactically. Closing this is tracked in `BACKLOG.md`.
+> discipline; the v0 checker does **not** enforce them. A pure signature may call an
+> `!{IO}` function and still typecheck as pure — `fn shout(s: String) -> Unit = print(s)`
+> is accepted today. An effect annotation is therefore documentation, not a checked
+> contract, and code must not rely on a missing `!{IO}` to mean a function is pure.
+> Rule 10 is the exception — the effect-polymorphic `main` check *is* enforced,
+> syntactically.
+>
+> Since 2026-08-16 effects are *inferred*: a declared effect reaches the innermost arrow
+> of the function's type, a call merges its callee's effect, and each declaration's
+> declared-vs-inferred pair is available via `compile_driver --phase effects`. What is
+> still missing is the check — nothing compares the two, and nothing rejects a mismatch.
+> Note this earlier said effects were "carried on `TFunc`" and "never unified"; both were
+> misleading. They were carried on `Scheme` with the arrows hardcoded pure, and the
+> problem was never a missing call to `unify_effects` (which is the wrong operation: the
+> rule is subsumption, inferred ⊑ declared, and over-declaring must be accepted). See
+> `docs/effect-enforcement-v0.md`; closing this is tracked in `BACKLOG.md`.
 
 ## 8. Standard Library Math Modules
 

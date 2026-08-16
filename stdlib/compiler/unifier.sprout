@@ -37,9 +37,30 @@ export fn field_obligation_pos(o: FieldObligation) -> source.SourcePos =
   match o with
   | FieldObligation _ _ _ p -> p
 
+# One function's declared effect next to the effect its body actually performs.
+# Recorded by infer.check_fn_body for every declaration, whether or not the two
+# agree, and reported by `--phase effects`. Nothing acts on a mismatch yet: the
+# v0 checker does not enforce the effect rules (spec-v0.md §7), and the point of
+# collecting this is to size that enforcement before committing to it.
+export type EffectReport (..) =
+  | EffectReport String types.Effect types.Effect
+  # EffectReport fn_name  declared  inferred
+
+export fn effect_report_name(r: EffectReport) -> String =
+  match r with
+  | EffectReport n _ _ -> n
+
+export fn effect_report_declared(r: EffectReport) -> types.Effect =
+  match r with
+  | EffectReport _ d _ -> d
+
+export fn effect_report_inferred(r: EffectReport) -> types.Effect =
+  match r with
+  | EffectReport _ _ i -> i
+
 export type InferState (..) =
-  | InferState (Ref Int) (Ref Int) (Ref (Dict (List String))) (Ref (List FieldObligation))
-  # InferState next_type_id  next_effect_id  ctor_map  parked_field_obligations
+  | InferState (Ref Int) (Ref Int) (Ref (Dict (List String))) (Ref (List FieldObligation)) (Ref (List EffectReport))
+  # InferState next_type_id  next_effect_id  ctor_map  parked_field_obligations  effect_reports
 
 export fn new_state() -> InferState !{IO} =
   do
@@ -47,11 +68,36 @@ export fn new_state() -> InferState !{IO} =
     e_id <- ref_new(0)
     ctor_ref <- ref_new(dict_empty())
     field_ref <- ref_new(Nil)
-    InferState(t_id, e_id, ctor_ref, field_ref)
+    effect_ref <- ref_new(Nil)
+    InferState(t_id, e_id, ctor_ref, field_ref, effect_ref)
+
+# Unlike take_field_obligations this ACCUMULATES across the whole program: the
+# report is a whole-program census, not a per-declaration obligation.
+export fn record_effect_report(state: InferState, r: EffectReport) -> Unit !{IO} =
+  match state with
+  | InferState _ _ _ _ effect_ref ->
+      do
+        prior <- ref_read(effect_ref)
+        ref_write(effect_ref, Cons(r, prior))
+
+export fn effect_reports(state: InferState) -> List EffectReport !{IO} =
+  match state with
+  | InferState _ _ _ _ effect_ref ->
+      do
+        prior <- ref_read(effect_ref)
+        list_reverse_reports(prior)
+
+fn list_reverse_reports(xs: List EffectReport) -> List EffectReport =
+  list_reverse_reports_acc(xs, Nil)
+
+fn list_reverse_reports_acc(xs: List EffectReport, acc: List EffectReport) -> List EffectReport =
+  match xs with
+  | Nil -> acc
+  | Cons h t -> list_reverse_reports_acc(t, Cons(h, acc))
 
 export fn park_field_obligation(state: InferState, o: FieldObligation) -> Unit !{IO} =
   match state with
-  | InferState _ _ _ field_ref ->
+  | InferState _ _ _ field_ref _ ->
       do
         parked <- ref_read(field_ref)
         ref_write(field_ref, Cons(o, parked))
@@ -62,7 +108,7 @@ export fn park_field_obligation(state: InferState, o: FieldObligation) -> Unit !
 # errors out before its own obligations are discharged.
 export fn take_field_obligations(state: InferState) -> List FieldObligation !{IO} =
   match state with
-  | InferState _ _ _ field_ref ->
+  | InferState _ _ _ field_ref _ ->
       do
         parked <- ref_read(field_ref)
         ref_write(field_ref, Nil)
@@ -77,7 +123,7 @@ export fn take_field_obligations(state: InferState) -> List FieldObligation !{IO
 # and silently corrupt unification (see tests/stdlib/compiler/test_fresh_tvar_collision.spr).
 export fn fresh(state: InferState) -> String !{IO} =
   match state with
-  | InferState t_ref _ _ _ ->
+  | InferState t_ref _ _ _ _ ->
       do
         n <- ref_read(t_ref)
         ref_write(t_ref, n + 1)
@@ -85,7 +131,7 @@ export fn fresh(state: InferState) -> String !{IO} =
 
 export fn fresh_effect(state: InferState) -> String !{IO} =
   match state with
-  | InferState _ e_ref _ _ ->
+  | InferState _ e_ref _ _ _ ->
       do
         n <- ref_read(e_ref)
         ref_write(e_ref, n + 1)
@@ -93,11 +139,11 @@ export fn fresh_effect(state: InferState) -> String !{IO} =
 
 export fn set_ctor_map(state: InferState, ctor_map: Dict (List String)) -> Unit !{IO} =
   match state with
-  | InferState _ _ ctor_ref _ -> ref_write(ctor_ref, ctor_map)
+  | InferState _ _ ctor_ref _ _ -> ref_write(ctor_ref, ctor_map)
 
 export fn get_ctor_map(state: InferState) -> Dict (List String) !{IO} =
   match state with
-  | InferState _ _ ctor_ref _ -> ref_read(ctor_ref)
+  | InferState _ _ ctor_ref _ _ -> ref_read(ctor_ref)
 
 # ---------------------------------------------------------------------------
 # apply_subst — walk a Type, replacing bound TVars
@@ -409,7 +455,7 @@ fn fresh_pattern_skolem(state: InferState) -> types.Type !{IO} =
 # no-collision guarantee as `fresh`. Shares the tyvar counter for uniqueness.
 fn fresh_skolem(state: InferState) -> String !{IO} =
   match state with
-  | InferState t_ref _ _ _ ->
+  | InferState t_ref _ _ _ _ ->
       do
         n <- ref_read(t_ref)
         ref_write(t_ref, n + 1)

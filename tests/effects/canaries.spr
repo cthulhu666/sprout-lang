@@ -1,0 +1,84 @@
+# Canaries for `--phase effects`, the declared-vs-inferred effect report.
+#
+# This file is not a behaviour test: it is the instrument's own calibration
+# rig. Every function below has a KNOWN correct answer, written next to it, so
+# that a report which silently says nothing is caught as a failure rather than
+# read as "the codebase is clean". An earlier hand-rolled version of this
+# instrument reported zero gaps across 316 declarations and was believed for a
+# while; it was only caught by checking it against a case known to be broken.
+#
+# No module header on purpose: the prelude is then not bundled into the IR, but
+# it IS still loaded into the typecheck env (that is why `print` resolves here),
+# so the report stays a handful of lines instead of hundreds.
+
+# --- Must be flagged: declared pure, body reaches IO directly. ---
+# This is the case docs/spec-v0.md §7's enforcement note names as accepted today.
+fn shout(s: String) -> Unit = print(s)
+
+# --- Must NOT be flagged: declared !{IO}, body does IO. Honest. ---
+fn loud(s: String) -> Unit !{IO} = print(s)
+
+# --- Must NOT be flagged: over-declaring is allowed (inferred pure ⊑ declared IO).
+# `mutvec_len` depends on exactly this: its body is a pure `vector_length` call
+# and its signature is !{IO} because the length is mutable state.
+fn over_declared(n: Int) -> Int !{IO} = n + 1
+
+# --- Must NOT be flagged: pure declaration, pure body. The overwhelming majority.
+fn honest_pure(n: Int) -> Int = n * 2
+
+# --- Must be flagged: one hop through a correctly-annotated callee. ---
+fn calls_loud(s: String) -> Unit = loud(s)
+
+# --- Must NOT be flagged, and this is a LIMITATION, not a success. ---
+# `shout` is declared pure, so its arrow says pure, so this caller looks clean.
+# The report is one wave of propagation, not a fixed point: this function can
+# only surface after `shout` above is annotated. The D1 migration number read
+# off a single run is therefore a LOWER BOUND.
+fn calls_shout(s: String) -> Unit = shout(s)
+
+# --- Must be flagged: the effect enters through a lambda argument. ---
+# This works only because infer_lambda still reports the lambda BODY's effect as
+# the effect of the enclosing expression. That attribution is technically wrong
+# (building a closure performs no IO) but it is the sole mechanism by which
+# effects cross a higher-order boundary today, because unify_types ignores the
+# arrow's effect field and nothing ever binds an EffectVar.
+fn each_lambda(xs: List String) -> Unit = list_each(\x -> print(x), xs)
+
+# --- Must NOT be flagged, and this is the KNOWN BLIND SPOT. ---
+# Passing `print` by name rather than wrapping it in a lambda routes around the
+# mechanism above: the reference is just a value, and `!{e}` never gets bound.
+# Documented rather than fixed — closing it needs effect unification threaded
+# through unify_types, which is out of scope for a reporting-only change.
+fn each_named(xs: List String) -> Unit = list_each(print, xs)
+
+# --- Instance methods are a SECOND declaration boundary, with its own discard. ---
+# infer.sprout has two sites that bind a body's inferred effect; the `fn` one and
+# the `instance` one. Instrumenting only the first would leave every instance
+# method out of the census — silently, and in the direction that reads as good
+# news. These two pin that both are recorded.
+class Describe a {
+  fn describe(x: a) -> String
+}
+
+type Quiet = Quiet
+type Noisy = Noisy
+
+# Must NOT be flagged: pure method, pure body.
+instance Describe Quiet {
+  fn describe(x: Quiet) -> String =
+    "quiet"
+}
+
+# Must be flagged: pure method signature, body reaches IO.
+instance Describe Noisy {
+  fn describe(x: Noisy) -> String =
+    do
+      print("noisy")
+      "noisy"
+}
+
+fn main() -> Unit !{IO} =
+  do
+    loud("calibration")
+    honest_pure(1)
+    ()
