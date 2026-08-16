@@ -23,17 +23,15 @@ module tests.effects.iface_effects
 
 # A class method with a declared effect. Its arrow must carry (EffectIO) in the
 # emitted scheme, not just the scheme's trailing effect field.
-export class Sink a {
+export class Sink a
   fn emit(s: a, line: String) -> Unit !{IO}
   fn describe(s: a) -> String
-}
 
 # An effect-POLYMORPHIC method. `!{e}` must survive as (EffectVar e) and must be
 # listed among the scheme's quantified effect variables — an empty list there is
 # the shared-global-variable bug.
-export class Runner a {
+export class Runner a
   fn run_with(s: a, f: Int -> Unit !{e}) -> Unit !{e}
-}
 
 export type Stderr = Stderr
 

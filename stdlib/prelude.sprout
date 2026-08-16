@@ -348,17 +348,14 @@ export fn vec_sum(vec: Vec Int) -> Int =
 export fn vec_sum_by(f: a -> Int, vec: Vec a) -> Int =
   vec_fold(\ (acc, x) -> acc + f(x), 0, vec)
 
-export class Eq a {
+export class Eq a
   fn eq(left: a, right: a) -> Bool
-}
 
-export class ToString a {
+export class ToString a
   fn to_string(value: a) -> String
-}
 
-export class Ord a where Eq a {
+export class Ord a where Eq a
   fn compare(left: a, right: a) -> Int
-}
 
 # A type whose values map to and from a contiguous 0-based ordinal — the
 # declaration-order index of each constructor. `deriving (Enum)` synthesizes
@@ -367,10 +364,9 @@ export class Ord a where Eq a {
 # class variable appears only in the return, so a call must fix the target type
 # through a concrete boundary (a typed fn return / annotation), not a fully
 # polymorphic context.
-export class Enum a {
+export class Enum a
   fn ordinal(v: a) -> Int
   fn from_ordinal(n: Int) -> Maybe a
-}
 
 export fn ord_lt(x: a, y: a) -> Bool where Ord a =
   compare(x, y) < 0
@@ -621,31 +617,26 @@ export fn set_remove(target: String, xs: Set) -> Set =
   list_fold(\ (acc, x) -> if x == target then acc else set_insert(x, acc),
             set_empty(), set_to_list(xs))
 
-export class Semigroup t {
+export class Semigroup t
   fn append(left: t, right: t) -> t
-}
 
-export class Monoid t where Semigroup t {
+export class Monoid t where Semigroup t
   fn empty() -> t
-}
 
-export class Functor f {
+export class Functor f
   fn fmap(f: a -> b, xs: f a) -> f b
-}
 
-export class Foldable f {
+export class Foldable f
   fn fold_values(step: b -> a -> b, init: b, xs: f a) -> b
-}
 
 # Applicative (Package C-b shape): the primitive is `map2` (apply an n-ary function
 # to values in a context), NOT `ap`/`<*>` — the latter feeds one wrapped argument at
 # a time, which needs curried partial application that Sprout does not have. `pure`
 # lifts a plain value; its `f`-only-in-return signature dispatches on the target type
 # (same as `Enum`). `map3`..`map5` derive from `map2` below.
-export class Applicative f where Functor f {
+export class Applicative f where Functor f
   fn pure(x: a) -> f a
   fn map2(g: a -> b -> c, xs: f a, ys: f b) -> f c
-}
 
 # Monad completes the Functor -> Applicative -> Monad tower: `flat_map` is
 # monadic bind (thread `xs : m a` into `f : a -> m b`, short-circuiting on the
@@ -653,9 +644,8 @@ export class Applicative f where Functor f {
 # Monad adds only bind. The method is `flat_map`; the exported combinator is
 # `and_then` (the `fmap`/`map`, `fold_values`/`fold` free-fn-delegates-to-method
 # idiom), keeping the class-method name out of the global namespace.
-export class Monad m where Applicative m {
+export class Monad m where Applicative m
   fn flat_map(f: a -> m b, xs: m a) -> m b
-}
 
 export fn and_then(f: a -> m b, xs: m a) -> m b where Monad m =
   flat_map(f, xs)

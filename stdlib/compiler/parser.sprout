@@ -1887,6 +1887,19 @@ fn collect_class_method_sigs_layout_at(tokens: Vec token.Token, i: Int, keyword_
     (sig, i2) <- parse_class_method_sig(tokens, i)
     collect_class_method_sigs_layout(tokens, i2, keyword_col, block_col, Cons(sig, acc))
 
+# The column the layout guard must key on is the DECLARATION's first token, not
+# the `class`/`instance` keyword's.  `parse_decl` consumes a leading `export`
+# via skip_export and passes only the keyword index on, so for
+# `export class Eq a` the keyword sits at column 8 while the members are at 3 —
+# keying on the keyword would put every member at or left of it, ending the body
+# immediately and leaving the members to be read as top-level declarations.
+# `export` is the only prefix skip_export consumes, so one token of lookbehind
+# recovers the declaration's true column.
+fn decl_start_col(tokens: Vec token.Token, i: Int) -> Int =
+  if tok_is_keyword(tok_at(tokens, i - 1), "export")
+  then source.position_column(tok_pos(tok_at(tokens, i - 1)))
+  else source.position_column(tok_pos(tok_at(tokens, i)))
+
 # Two body forms, chosen by one token of lookahead: an explicit `{ … }`, or the
 # layout form.  Both are accepted so the brace sources still in the tree keep
 # parsing while they are migrated.
@@ -1902,11 +1915,11 @@ fn parse_class_body(tokens: Vec token.Token, i: Int, keyword_col: Int) -> Result
 
 fn parse_class_decl(tokens: Vec token.Token, i: Int) -> Result ParseError (ast.Decl, Int) =
   do
-    (class_tok, i2) <- expected_keyword("class", tokens, i)
+    (_, i2) <- expected_keyword("class", tokens, i)
     (name_tok, i3) <- expected_ident("class name", tokens, i2)
     (params, i4) <- collect_ident_list(tokens, i3, Nil)
     (superclasses, i5) <- parse_optional_instance_constraints(tokens, i4)
-    (methods, i6) <- parse_class_body(tokens, i5, source.position_column(tok_pos(class_tok)))
+    (methods, i6) <- parse_class_body(tokens, i5, decl_start_col(tokens, i))
     Ok((ast.ClassDecl(token.token_text(name_tok), list_reverse(params), methods, superclasses, cur_pos(tokens, i)), i6))
 
 fn parse_instance_method(tokens: Vec token.Token, i: Int) -> Result ParseError (ast.InstanceMethodImpl, Int) =
@@ -1967,10 +1980,10 @@ fn parse_instance_body(tokens: Vec token.Token, i: Int, keyword_col: Int) -> Res
 
 fn parse_instance_decl(tokens: Vec token.Token, i: Int) -> Result ParseError (ast.Decl, Int) =
   do
-    (inst_tok, i2) <- expected_keyword("instance", tokens, i)
+    (_, i2) <- expected_keyword("instance", tokens, i)
     (constraint, i3) <- parse_type_constraint(tokens, i2)
     (inst_constraints, i4) <- parse_optional_instance_constraints(tokens, i3)
-    (methods, i5) <- parse_instance_body(tokens, i4, source.position_column(tok_pos(inst_tok)))
+    (methods, i5) <- parse_instance_body(tokens, i4, decl_start_col(tokens, i))
     Ok((ast.InstanceDecl(constraint, inst_constraints, methods, cur_pos(tokens, i)), i5))
 
 fn parse_optional_instance_constraints(tokens: Vec token.Token, i: Int) -> Result ParseError (List ast.TypeConstraint, Int) =

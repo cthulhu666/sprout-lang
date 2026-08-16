@@ -27,9 +27,8 @@ export type JsonArrayStep (..) =
 export type JsonObjectStep (..) =
   | JsonObjectStep String Json JsonObject
 
-export class JsonEncode a {
+export class JsonEncode a
   fn encode_json(value: a) -> Json
-}
 
 export fn null() -> Json =
   JsonNull
