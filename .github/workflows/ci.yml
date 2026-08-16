@@ -265,3 +265,11 @@ jobs:
         # mingw's shims fails HERE rather than at W5. The developer loop off-Windows uses a
         # mingw-w64 sysroot instead, which is why this step is not in `just gate`.
         run: bash scripts/windows_tu_check.sh
+
+      - name: WSAPoll poller behaves (self-test, real loopback sockets)
+        # The first Windows step that checks BEHAVIOUR rather than compilation. Everything else
+        # here waits for W5 to link an executable; the poller does not, because it needs only
+        # Ws2_32 — no scheduler, no GC, no runtime. That matters most for the case WSAPoll cannot
+        # express at all (a wait whose parked set is entirely timers), which is the common path
+        # for a game and would otherwise go unexercised until W5.
+        run: bash scripts/windows_poll_selftest.sh

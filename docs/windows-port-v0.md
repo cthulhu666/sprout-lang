@@ -68,6 +68,24 @@ still does not compile for Windows at all. The `windows` CI job runs it on a rea
 **Goal.** A Windows `.exe` of uncharted-suns, cross-built from macOS/Linux, running the full
 green-thread scheduler and graphics stack.
 
+**Standing constraint on the whole effort (Kuba, 2026-08-16): the port changes no macOS or Linux
+behaviour or logic.** Windows support is additive. A Windows arm goes *alongside* the POSIX code,
+never through a refactor of it, and "while I am here" cleanups of a working POSIX path are out of
+scope by construction. This is what keeps every milestone's POSIX gate meaningful: a green
+`just test` after a Windows milestone should be green for the boring reason that nothing on that
+path moved.
+
+Two consequences that are easy to miss:
+
+- A **three-way `#if`** puts Windows first and leaves both POSIX arms textually intact, rather
+  than restructuring a two-way split into something "cleaner".
+- Where a Windows change would require reworking shared POSIX code, the Windows arm waits for the
+  milestone that owns that surface instead of landing early. §4.3's DNS pipe is the worked example.
+
+One delta predates the constraint and is recorded rather than hidden: W0b moved the scheduler
+pump's stack from a BSS array to a `malloc` (§4.6), unavoidable under `CreateFiber`'s ownership
+model. It is an allocation-strategy change, gated by the full POSIX suite, and it is the only one.
+
 **Non-goals for Milestone A:**
 
 - **Running the *compiler* on Windows.** That is Milestone B: the `justfile` and `scripts/*.sh`
@@ -216,9 +234,23 @@ exactly one place: **async DNS parks a green task on a `pipe()` read end**
 No readiness backend on Windows can poll a pipe.
 
 The fix is a **loopback socket pair** — the pipe carries a single completion byte, so a
-self-connected `127.0.0.1` pair serves the same purpose and is a socket. W2 owns this; it is not
-optional, and it is not a reason to prefer a different poller, because *the alternative has the
-same limitation* (below).
+self-connected `127.0.0.1` pair serves the same purpose and is a socket. Winsock has no
+`socketpair()`; the emulation is `bind` a loopback listener → `listen(1)` → `getsockname` →
+`connect` → `accept`. libuv hand-rolls exactly that (`src/win/tcp.c:1627`, `uv_socketpair`), which
+is the practical confirmation that no Winsock equivalent exists. Sprout's version can use a
+blocking `accept` where libuv needs `AcceptEx`, because libuv requires overlapped handles for IOCP
+and this pair is built once on one thread.
+
+**This landed in W3, not W2** — a scope correction made when W2 was implemented. The change is
+mechanical, but it sits in `async_resolve` (`sprout_runtime.c:7095`), a function that also calls
+`fcntl`, `read`, `close` and `pthread_create`, in a TU that does not compile for Windows at all
+until W3 clears `regex.h` at line 7. Writing the Windows arm at W2 would have produced code no
+gate could compile, in the one place a mistake breaks the POSIX DNS path — the same
+unverifiable-exit-criterion error W0 and W1 each made once. What W2 did leave at the site is a
+comment, so someone editing the DNS path learns the constraint without reading this document.
+
+None of this is a reason to prefer a different poller, because *the alternative has the same
+limitation* (below).
 
 ### 4.3.1 Poller decision (2026-08-16): `WSAPoll`, revisitable
 
@@ -415,6 +447,80 @@ is why `windows_tu_check.sh` runs mingw off-Windows and MSVC in CI rather than t
 alone. `sprout_scheduler.c` is therefore listed as outstanding against W3 — its remaining blocker
 is the socket-`close` substitution, Winsock work by nature, not scheduler work.
 
+### 4.8 The `WSAPoll` backend, as landed (W2)
+
+`sprout_poll.c` gained a third arm, placed **first** in the chain — `#if defined(_WIN32)` /
+`#elif defined(__APPLE__)` / `#else`. W0a had already flagged why: the file's old `#else` reads
+"not macOS" as "Linux", so a Windows arm appended after it is dead code and `sys/epoll.h` is what
+the compiler actually reaches. The two POSIX arms are otherwise untouched.
+
+**The finding that shaped it: `WSAPoll` cannot wait on an empty socket set.** Two statements on
+the same Microsoft Learn page: *"The array must contain at least one structure with a valid
+socket"*, and `WSAEINVAL` is returned *"if none of the sockets specified in the **fd** member of
+any of the **WSAPOLLFD** structures pointed to by the fdarray parameter were valid."*
+
+The scheduler's pump blocks in `sprout_poll_wait` whenever anything at all is parked
+(`sprout_scheduler.c:401`), and that includes a parked set that is **entirely timers** — a single
+`task_sleep` produces one. On kqueue and epoll the question cannot arise, because each exposes a
+timer as a pollable object (`EVFILT_TIMER`, `timerfd`) sitting in the same wait set as the
+sockets. Windows has no timerfd equivalent, so the deadlines live in a heap here and the socket
+array is legitimately empty.
+
+This is not a corner case for the motivating consumer: uncharted-suns is a single-player title
+whose poller load is timers, so the empty-socket wait is its *common* path. A timers-only wait
+therefore uses `Sleep(nearest deadline)` instead of `WSAPoll`. That is safe for a reason specific
+to this runtime rather than to `Sleep`: the only cross-thread wakeup the runtime has is the
+detached `getaddrinfo` thread, and a pending DNS park is a socket park once §4.3's loopback pair
+lands — so a wakeup can never arrive while the poller is in a timers-only sleep. Should a second
+cross-thread wakeup source ever appear, this is the line that has to change.
+
+Decisions worth recording:
+
+- **The timeout is clamped to `[0, INT_MAX]`.** Deadlines are `long long` milliseconds and
+  `WSAPoll`'s `timeout` is a signed `INT` in which *"a negative value indicates that WSAPoll
+  should wait indefinitely"*. An already-due deadline computes negative, so an unclamped
+  subtraction would turn "fire this now" into "block forever" — a hang, in the code path that
+  exists to prevent hangs. `-1` is passed only when no timer is registered at all.
+- **Due timers are harvested on both return paths**, not only when `WSAPoll` times out. A deadline
+  and a ready socket can come due in the same wait, and the pump already handles a batch carrying
+  both, because a `PARK_FD_TIMER` task is registered on each (`sprout_scheduler.c:418-423`).
+- **The registration array is kept compact rather than using negative-fd holes.** `WSAPoll` would
+  let holes stay in place — negative entries are *"ignored and their revents will be set to
+  POLLNVAL"* — but then the array length and the live-socket count diverge, and the empty-set test
+  above depends on the second. One number is harder to get wrong than two.
+- **Timer ids are monotonic and never reused.** That is what makes `sprout_poll_remove_timer` safe
+  against a stale token (§5.1's guarantee): an id belonging to an already-harvested timer matches
+  nothing, rather than matching whatever new timer landed in that slot. Removal is an O(n) scan
+  over *concurrently parked* sleepers — cheaper than the syscall the POSIX arms spend, and it
+  avoids an id→slot index that every heap sift would have to maintain.
+- **`sprout_poll_add_timer`'s "returns 0" path is unreachable in practice.** On epoll it is a real
+  failure (one timerfd per registration, first thing to break under `ulimit -n`); here only the
+  heap's `realloc` can fail. Honoured, not removed.
+- **`sprout_poll_init` is empty.** `WSAStartup` belongs to W3's socket layer — the runtime must
+  have initialized Winsock before it can hand this layer an fd to poll.
+
+**Not done here, deliberately:** the `int fd` in the poller interface. A Winsock `SOCKET` is a
+`UINT_PTR`, not an `int`; the Windows arm casts, and W3 widens the interface when it converts the
+handle table. Splitting that off keeps W2 to one file.
+
+**W2 also breaks the compile-only pattern, on purpose.** `tests/windows/poll_selftest.c` +
+`scripts/windows_poll_selftest.sh` build and **run** the backend on the CI runner against real
+loopback sockets. Nothing else in this port can do that before W5, and the poller is the wrong
+component to accept it for: unlike W3's substitutions, its logic branches — the empty-socket set
+that must never reach `WSAPoll`, a timeout clamp whose failure mode is a hang, a swap-remove
+during a live scan. Left to W5, a bug in any of those would surface tangled with four other
+milestones' bugs.
+
+It works this early because the poller's dependency set is `Ws2_32` and nothing else: no
+scheduler, no GC, no Sprout runtime. The test `#include`s `sprout_poll.c` directly to reach its
+file-static tables and supplies its own `sprout_fail`. Seven cases: timers-only ordering (the
+`WSAEINVAL` path), a removed timer never firing, socket readiness, one-shot registration not
+re-reporting a still-readable socket, a deadline beating an idle socket (the `with_timeout`
+shape, and where an unclamped timeout would hang), a deregistered fd staying silent, and a
+socket plus a due timer arriving in **one** batch. It also exercises the loopback-pair
+construction W3 needs for the DNS fix — so if that emulation is wrong, this says so at W2 rather
+than the DNS path saying it at W3.
+
 ## 5. Milestones
 
 | ID | Scope | Exit criterion |
@@ -422,7 +528,7 @@ is the socket-`close` substitution, Winsock work by nature, not scheduler work.
 | **W0a** | *(done, 2026-08-15)* `scripts/windows_probe.sh` + `just windows-probe`: measure what the target provides and where each TU stops; adopt §4.1's pure-Win32 rule | a measured §6, replacing the assumed one |
 | **W0b** | *(done, 2026-08-15)* `sprout_context.h` seam — the `ucontext` calls behind a 4-op header, POSIX arm behaviourally unchanged but for §4.6's one delta | `just test` + `task-io-smoke` + `linux-smoke` + the example canary still pass **on POSIX**; no Windows code yet |
 | **W1** | *(done, 2026-08-16)* `ucontext` → fibers, per §4.4 and §4.7 | `sprout_context.h`'s Windows arm compiles under **both** mingw and MSVC; POSIX gates unchanged |
-| **W2** | `WSAPoll` backend + timer min-heap, per §4.3 | `task_sleep` + `with_timeout` + a TCP echo smoke pass |
+| **W2** | *(done, 2026-08-16)* `WSAPoll` backend + timer min-heap, per §4.3 and §4.8 | `sprout_poll.c` compiles under **both** mingw and MSVC (promoted to `windows_tu_check.sh`'s EXPECTED); POSIX gates unchanged |
 | **W3** | Winsock2, files, arena, console, regex, process — §6 | all three TUs compile; `just windows-probe` becomes a gate |
 | **W4** | Vectored exception handler; `CaptureStackBackTrace` or a loud stub | a deliberate stack overflow prints a diagnostic, not a silent exit |
 | **W5** | First `.exe`; game-side link flags; the `windows` job gains a run smoke | uncharted-suns runs on Windows |
@@ -559,9 +665,14 @@ Each milestone's exit criterion in §5 is its test. Additionally:
     the host SDK — the **ship** surface, and the stricter one, since MSVC has no `unistd.h`, no
     `sys/time.h` and no POSIX shims. Off-Windows the same script uses a mingw-w64 sysroot, so
     §4.1's develop-mingw / ship-MSVC split is exercised on both sides rather than asserted.
-    Currently 1 expected (`sprout_context.h`), 3 outstanding.
-  - *W2*: `sprout_poll.c` joins the expected list. *W3*: `sprout_runtime.c` does too, and
-    `just windows-probe` graduates from diagnostic to gate.
+    Currently 2 expected (`sprout_context.h`, `sprout_poll.c`), 2 outstanding.
+  - *`windows-poll-selftest`* (added at W2): builds and **runs** `tests/windows/poll_selftest.c`
+    against real loopback sockets — the first Windows gate that checks behaviour rather than
+    compilation, three milestones before W5 makes that generally possible. See §4.8 for why the
+    poller specifically does not wait. Off-Windows the script exits 0 with a note, since it must
+    run a `.exe`; that is why it is CI-only rather than a `just gate` member.
+  - *W3*: `sprout_runtime.c` joins the expected list, and `just windows-probe` graduates from
+    diagnostic to gate.
   - *W5*: link and **run** a task/IO smoke, mirroring what the `macos` job
     (`.github/workflows/ci.yml`) does for kqueue — the same battery against the `WSAPoll`
     backend. Built with clang targeting `x86_64-pc-windows-msvc`: the local loop is mingw, so
@@ -593,6 +704,9 @@ Each milestone's exit criterion in §5 is its test. Additionally:
 - [Go `src/runtime/netpoll_windows.go`](https://github.com/golang/go/blob/master/src/runtime/netpoll_windows.go)
   — IOCP (`CreateIoCompletionPort`, `GetQueuedCompletionStatusEx`).
 - [libuv design overview](https://docs.libuv.org/en/v1.x/design.html) — "IOCP on Windows".
+- [libuv `uv_socketpair`, Windows implementation](https://github.com/libuv/libuv/blob/v1.x/src/win/tcp.c)
+  (`src/win/tcp.c:1627`) — `WSASocketW` → `bind` loopback → `listen(1)` → `getsockname` →
+  `connect` → `AcceptEx`. Cited in §4.3 as evidence that Winsock has no `socketpair()`.
 - [Rust `mio` `src/sys/windows/afd.rs`](https://github.com/tokio-rs/mio/blob/master/src/sys/windows/afd.rs)
   — `\Device\Afd`, `IOCTL_AFD_POLL`, wepoll attribution.
 - [wepoll README](https://github.com/piscisaureus/wepoll) — *"Only works with sockets"* and no

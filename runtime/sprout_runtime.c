@@ -7091,6 +7091,13 @@ static int async_resolve(const char* host, const char* port,
     req->write_fd = -1;
     if (req->host != NULL && req->port != NULL &&
         atomic_load(&g_dns_threads_inflight) < SPROUT_DNS_THREAD_CAP) {
+      /* This pipe is the ONE place the runtime parks a green task on something that is not
+       * a socket, and no Windows readiness poller can watch it — neither WSAPoll nor AFD,
+       * which sits beneath Winsock and is equally socket-only. A Windows port replaces it
+       * with a self-connected loopback pair (Winsock has no socketpair(); the emulation is
+       * bind/listen(1)/getsockname/connect/accept), which is equivalent because the channel
+       * carries exactly one completion byte. Kept here so someone editing the DNS path does
+       * not have to be reading the Windows design doc to learn this. */
       int pipefds[2] = { -1, -1 };
       if (pipe(pipefds) == 0) {
         fcntl(pipefds[0], F_SETFD, FD_CLOEXEC);

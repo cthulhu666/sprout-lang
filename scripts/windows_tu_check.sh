@@ -20,6 +20,7 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 # One entry per TU that must compile, with the milestone that put it here.
 EXPECTED=(
   "runtime/sprout_context.h|W1 — the fiber arm (compiled via a TU that includes it)"
+  "runtime/sprout_poll.c|W2 — the WSAPoll backend"
 )
 # Not yet expected; listed so the output is a work list rather than a silence.
 #
@@ -31,7 +32,6 @@ EXPECTED=(
 # whole reason this script runs both toolchains instead of trusting one.
 OUTSTANDING=(
   "runtime/sprout_scheduler.c|W3 — mingw ok; MSVC stops on unistd.h (close() -> closesocket)"
-  "runtime/sprout_poll.c|W2 — needs the WSAPoll backend; stops on sys/epoll.h"
   "runtime/sprout_runtime.c|W3 — stops on regex.h, its first non-standard include"
 )
 
