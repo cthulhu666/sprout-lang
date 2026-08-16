@@ -1608,7 +1608,11 @@ class Codec a {
 ```
 
 Both forms are accepted and denote the same declaration.  The layout form is
-idiomatic; the brace form is retained for compatibility.
+idiomatic; the brace form is **deprecated**.  It still parses — no source is
+broken by the deprecation — but the linter reports every occurrence as
+`deprecated-brace-body`, anchored on the opening `{`.  A `{` in an effect
+annotation within the declaration head (`instance Boxer (a !{IO})`) is not a
+body brace and is not reported.
 
 The layout rule is the one already used by `do`, `let … in` and `match`.  The
 first member fixes the **block column**, and exactly one thing ends the body: a

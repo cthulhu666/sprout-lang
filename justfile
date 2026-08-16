@@ -99,13 +99,17 @@ build-fmt-from-seed: bootstrap-from-seed
   SEED="bootstrap/compile_driver.ll"
   FMT_DRIVER="{{stdlib_root}}/compiler/fmt_driver.sprout"
   FORMATTER="{{stdlib_root}}/compiler/formatter.sprout"
+  LINT_RULES="{{stdlib_root}}/compiler/lint_rules.sprout"
   # Freshness check: skip rebuild if fmt_bin is newer than every input it
-  # transitively depends on. The four checks cover: compiler changes
-  # (STAGE1, SEED), formatter rule changes (FORMATTER), driver wiring
-  # (FMT_DRIVER). Misses subtle prelude.sprout changes affecting fmt; the
-  # user can force a rebuild with `rm build/fmt_bin && just build-fmt-from-seed`.
-  if [[ -x "$OUT" && "$OUT" -nt "$STAGE1" && "$OUT" -nt "$SEED" && "$OUT" -nt "$FMT_DRIVER" && "$OUT" -nt "$FORMATTER" ]]; then
-    echo "==> fmt_bin is up-to-date with stage-1 + seed + formatter sources; skipping rebuild."
+  # transitively depends on. The five checks cover: compiler changes
+  # (STAGE1, SEED), formatter rule changes (FORMATTER), lint rule changes
+  # (LINT_RULES — fmt_bin's `lint` subcommand is built on it, so a new or
+  # edited rule would otherwise never reach `just lint` or the pre-commit
+  # hook), driver wiring (FMT_DRIVER). Misses subtle prelude.sprout changes
+  # affecting fmt; force a rebuild with
+  # `rm build/fmt_bin && just build-fmt-from-seed`.
+  if [[ -x "$OUT" && "$OUT" -nt "$STAGE1" && "$OUT" -nt "$SEED" && "$OUT" -nt "$FMT_DRIVER" && "$OUT" -nt "$FORMATTER" && "$OUT" -nt "$LINT_RULES" ]]; then
+    echo "==> fmt_bin is up-to-date with stage-1 + seed + formatter/lint sources; skipping rebuild."
     exit 0
   fi
   TMP_LL="/tmp/sprout_fmt_$$.ll"
