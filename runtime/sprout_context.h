@@ -3,7 +3,7 @@
  * The scheduler switches between a pump and N green tasks. That is the one part
  * of the runtime with no portable spelling: POSIX offers ucontext, Windows offers
  * Fibers, and the two disagree about who owns the stack — makecontext runs on a
- * stack you hand it, CreateFiber allocates its own and returns an opaque handle.
+ * stack you hand it, CreateFiberEx allocates its own and returns an opaque handle.
  * So SproutCtx OWNS its stack, and no operation here takes a caller-supplied one.
  *
  * Four operations cover every use in sprout_scheduler.c:
@@ -14,18 +14,103 @@
  *   switch         suspend one context, resume another
  *   destroy        release the stack of a context that is not running
  *
- * This header must be the FIRST include in any translation unit that uses it:
- * the feature-test macros below select the ucontext declarations, and a
+ * This header must be the FIRST include in any translation unit that uses it: the
+ * POSIX arm's feature-test macros select the ucontext declarations, and a
  * feature-test macro is inert once any libc header has been read.
  *
- * Windows arm: docs/windows-port-v0.md, milestone W1.
+ * Design and rationale: docs/windows-port-v0.md §4.4, §4.6.
  */
 #ifndef SPROUT_CONTEXT_H
 #define SPROUT_CONTEXT_H
 
+#include <stddef.h>
+
+/* Returned by sprout_ctx_create / sprout_ctx_adopt_current. Codes rather than an
+ * internal abort, so each caller keeps its own diagnostic wording. */
+#define SPROUT_CTX_ENOMEM (-1)   /* no memory for the stack */
+#define SPROUT_CTX_EPRIME (-2)   /* the context could not be initialized */
+
 #if defined(_WIN32)
-#error "sprout_context.h has no Windows arm yet — see docs/windows-port-v0.md (W1)."
+
+/* ─────────────────────────── Windows: Win32 Fibers ───────────────────────────
+ *
+ * Fibers are the direct analogue: cooperatively scheduled, one runs per thread,
+ * and switching is explicit. The mapping is exact — ConvertThreadToFiber for the
+ * thread we are already on, CreateFiberEx for the pump and every green task.
+ *
+ * "Only fibers can execute other fibers", so the adopt must happen before any
+ * switch. sprout_scheduler_init is a constructor and adopts task-0 there, which
+ * is early enough for every path into the scheduler.
+ */
+
+/* Windows 10 is the port's floor — WSAPoll does not report failed connects before
+ * version 2004 (docs/windows-port-v0.md §4.3). The fiber API itself only needs
+ * 0x0400. */
+#ifndef _WIN32_WINNT
+#define _WIN32_WINNT 0x0A00
 #endif
+
+#include <windows.h>
+
+typedef struct SproutCtx {
+  LPVOID fiber;    /* CreateFiberEx handle, or this thread's own from ConvertThreadToFiber */
+  int    adopted;  /* 1 = the thread's own fiber; DeleteFiber would kill the thread */
+} SproutCtx;
+
+/* CreateFiberEx wants VOID WINAPI f(LPVOID); the seam's entry points take no
+ * argument. Trampoline rather than cast between incompatible function-pointer
+ * types — the cast happens to work on x64 (WINAPI is a no-op there and the extra
+ * argument is ignored) but is wrong under 32-bit stdcall. The entry travels in
+ * lpParameter, which exists for exactly this. */
+static VOID WINAPI sprout_ctx_fiber_entry(LPVOID param) {
+  ((void (*)(void))param)();
+  /* Unreachable: every entry leaves by switching out. If one ever returned, the
+   * thread running the fiber would exit — which is why that is a precondition and
+   * not a detail. */
+}
+
+static inline int sprout_ctx_adopt_current(SproutCtx* c) {
+  c->adopted = 1;
+  c->fiber   = ConvertThreadToFiber(NULL);
+  return (c->fiber == NULL) ? SPROUT_CTX_EPRIME : 0;
+}
+
+static inline int sprout_ctx_create(SproutCtx* c, void (*entry)(void), size_t stack_bytes) {
+  c->adopted = 0;
+  /* commit 0 = the executable's default, so pages are backed as the stack grows —
+   * matching the POSIX arm, where malloc'd pages are equally only backed once
+   * touched. Committing stack_bytes up front would make every task cost 1 MiB of
+   * real memory. Reserve is the same size the POSIX arm allocates; Windows'
+   * own default reserve is 1 MiB, which SPROUT_TASK_STACK_BYTES already matches.
+   *
+   * FIBER_FLAG_FLOAT_SWITCH adds CONTEXT_FLOATING_POINT to what the fiber saves.
+   * Sprout compiles Float arithmetic to real `double` instructions, so unsaved FP
+   * state is silent data corruption across a yield. It is redundant on x86-64 and
+   * ARM64, where winnt.h defines CONTEXT_FULL to already include the FP bit, and
+   * load-bearing on 32-bit x86, where CONTEXT_FULL is CONTROL|INTEGER|SEGMENTS and
+   * omits it. Passed unconditionally: it costs nothing where it is redundant, and
+   * the bug it prevents is invisible. */
+  c->fiber = CreateFiberEx((SIZE_T)0, (SIZE_T)stack_bytes, FIBER_FLAG_FLOAT_SWITCH,
+                           sprout_ctx_fiber_entry, (LPVOID)(void*)entry);
+  return (c->fiber == NULL) ? SPROUT_CTX_ENOMEM : 0;
+}
+
+static inline void sprout_ctx_switch(SproutCtx* from, SproutCtx* to) {
+  (void)from;   /* precondition: `from` is the running fiber, which SwitchToFiber implies */
+  SwitchToFiber(to->fiber);
+}
+
+static inline void sprout_ctx_destroy(SproutCtx* c) {
+  /* Deleting the thread's OWN fiber makes the thread call ExitThread, so an
+   * adopted context releases nothing — same as the POSIX arm, where task-0 owns no
+   * malloc'd stack. Idempotent for the same reason free(NULL) is. */
+  if (c->fiber != NULL && !c->adopted) DeleteFiber(c->fiber);
+  c->fiber = NULL;
+}
+
+#else
+
+/* ──────────────────────────────── POSIX: ucontext ─────────────────────────── */
 
 /* ucontext on macOS lives behind these; define before any include pulls in
  * <sys/ucontext.h>. */
@@ -54,21 +139,17 @@ typedef struct SproutCtx {
 
 /* Adopt the caller's own thread of execution as a context. Its stack belongs to
  * the OS, so nothing is allocated and destroy is a no-op; `uc` is filled by the
- * first switch OUT of this context. */
-static inline void sprout_ctx_adopt_current(SproutCtx* c) {
+ * first switch OUT of this context. Cannot fail here — the return type exists for
+ * the Windows arm, where ConvertThreadToFiber can. */
+static inline int sprout_ctx_adopt_current(SproutCtx* c) {
   c->stack = NULL;
+  return 0;
 }
 
 /* Prime `c` to begin executing `entry` on a fresh stack of `stack_bytes`.
  * `entry` must never return — every context here leaves by switching out.
- * Returns 0 on success, SPROUT_CTX_ENOMEM if the stack could not be allocated,
- * SPROUT_CTX_EPRIME if the context could not be initialized. Returning a code
- * rather than failing internally keeps the caller's diagnostic wording its own —
- * today both callers word EPRIME as "getcontext failed", which a non-POSIX arm
- * has to reword. */
-#define SPROUT_CTX_ENOMEM (-1)
-#define SPROUT_CTX_EPRIME (-2)
-
+ * Today both callers word EPRIME as "getcontext failed"; the Windows arm cannot
+ * produce EPRIME at all, so that wording stays accurate where it is used. */
 static inline int sprout_ctx_create(SproutCtx* c, void (*entry)(void), size_t stack_bytes) {
   c->stack = malloc(stack_bytes);
   if (c->stack == NULL) return SPROUT_CTX_ENOMEM;
@@ -102,5 +183,7 @@ static inline void sprout_ctx_destroy(SproutCtx* c) {
 #ifdef __APPLE__
 #pragma clang diagnostic pop
 #endif
+
+#endif /* _WIN32 */
 
 #endif /* SPROUT_CONTEXT_H */

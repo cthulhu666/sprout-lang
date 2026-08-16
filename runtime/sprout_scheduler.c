@@ -506,7 +506,10 @@ __attribute__((constructor))
 static void sprout_scheduler_init(void) {
   sprout_poll_init();
 
-  sprout_ctx_adopt_current(&g_task0.ctx); /* the process's own stack; never freed */
+  /* task-0 runs on the process's own stack, which the runtime never frees. On Windows this
+   * is also what makes every later switch legal: only a fiber can run another fiber. */
+  if (sprout_ctx_adopt_current(&g_task0.ctx) != 0)
+    sprout_fail("sprout_scheduler_init: could not adopt the main thread as a context");
   g_task0.roots = sprout_roots_main();  /* the 131072-slot compiler pool */
   g_task0.done  = 0;
   g_task0.scope = NULL;

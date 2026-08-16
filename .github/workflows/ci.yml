@@ -257,3 +257,11 @@ jobs:
         # one it found as its first line. A future image change therefore fails with an explicit
         # "no clang found" rather than a confusing compile error.
         run: bash scripts/windows_ir_gate.sh
+
+      - name: Runtime TUs that are expected to compile for Windows
+        # Grows one entry per milestone. On this host the script targets
+        # x86_64-pc-windows-msvc against the installed SDK — the SHIP surface, and the stricter
+        # of the two: MSVC has no unistd.h, no sys/time.h, no POSIX shims, so code written to
+        # mingw's shims fails HERE rather than at W5. The developer loop off-Windows uses a
+        # mingw-w64 sysroot instead, which is why this step is not in `just gate`.
+        run: bash scripts/windows_tu_check.sh

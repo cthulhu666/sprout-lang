@@ -248,6 +248,32 @@ the context it destroys.
 - Fiber-local storage switches with the fiber, but plain TLS does **not**. The runtime uses no
   TLS today (§1.2); that must remain true, or any added TLS has to become FLS.
 
+**The floating-point trap, found while implementing W1.** `CreateFiberEx`'s `dwFlags` is not
+cosmetic:
+
+> *"If this parameter is zero, the floating-point state on x86 systems is not switched and data
+> can be corrupted if a fiber uses floating-point arithmetic."*
+
+Sprout compiles `Float` arithmetic to real `double` instructions — `ir_lowering.sprout:115-118`
+bitcasts the i64 handle to `double`, applies `fadd`/`fmul`/…, and bitcasts back — so green tasks
+absolutely do use FP, and unsaved FP state across a yield is *silent* data corruption. `ucontext`
+has no equivalent hazard, so nothing in the POSIX arm hints at it.
+
+The mechanism is that `CONTEXT_FULL` is defined **per architecture**, verified in mingw-w64's
+`winnt.h`:
+
+| architecture | `CONTEXT_FULL` | flag needed? |
+|---|---|---|
+| i386 (`CONTEXT_i386`) | `CONTROL │ INTEGER │ SEGMENTS` | **yes** — FP is omitted |
+| x86-64 (`CONTEXT_AMD64`) | `CONTROL │ INTEGER │ FLOATING_POINT` | no — already covered |
+
+which is exactly why Microsoft words the hazard as *"on x86 systems"*. `FIBER_FLAG_FLOAT_SWITCH`
+adds `CONTEXT_FLOATING_POINT` to what the fiber saves (confirmed against ReactOS's independent
+kernel32 implementation, which applies it with no architecture conditional).
+
+**Sprout passes it unconditionally.** It is free where it is redundant, and the bug it prevents is
+invisible — wrong arithmetic, no crash, no diagnostic. That asymmetry decides it.
+
 ### 4.5 The loud-stub policy
 
 Any surface with no Windows implementation returns the established
@@ -288,7 +314,46 @@ else was leaning on it — the TU compiles clean under `-Wall -Wextra -Wdeprecat
 
 A `_WIN32` include trips an `#error` naming this milestone, so `just windows-probe` reports the
 scheduler's blocker as that `#error` rather than as `ucontext.h` — the work list points at the
-milestone that closes it.
+milestone that closes it. **W1 replaced that `#error` with the fiber arm.**
+
+### 4.7 The fiber arm, as landed (W1)
+
+W0b's shape held: W1 filled in four function bodies and changed **no scheduler logic**. The one
+call-site edit was `sprout_ctx_adopt_current` gaining a return code, because
+`ConvertThreadToFiber` can fail where the POSIX no-op cannot.
+
+| Op | POSIX | Windows |
+|---|---|---|
+| `adopt_current` | no-op; `uc` filled by the first switch out | `ConvertThreadToFiber(NULL)` |
+| `create` | `malloc` + `getcontext`/`makecontext` | `CreateFiberEx(0, bytes, FIBER_FLAG_FLOAT_SWITCH, …)` |
+| `switch` | `swapcontext` | `SwitchToFiber(to)` — `from` unused, as designed |
+| `destroy` | `free` | `DeleteFiber`, skipped when adopted |
+
+Decisions worth keeping:
+
+- **Stack sizing is `commit = 0`, `reserve = stack_bytes`.** Commit-0 takes the executable's
+  default so pages are backed as the stack grows — matching the POSIX arm, where a `malloc`'d
+  stack is equally only backed once touched. Committing `stack_bytes` up front would make every
+  task cost a real megabyte. Windows' own default *reserve* is 1 MiB, which
+  `SPROUT_TASK_STACK_BYTES` already is, so the two platforms agree without tuning.
+- **`SproutCtx` carries an `adopted` flag.** `DeleteFiber` on the thread's own fiber makes that
+  thread call `ExitThread`; task-0 must never be deleted. The POSIX arm gets this for free
+  (task-0 owns no malloc'd stack), so the flag exists only on the Windows side.
+- **A trampoline, not a function-pointer cast.** `CreateFiberEx` wants `VOID WINAPI f(LPVOID)`
+  and the seam's entries take no argument. The cast happens to work on x64 — `WINAPI` is a no-op
+  there and the extra argument is ignored — but is wrong under 32-bit `stdcall`, so the entry
+  travels in `lpParameter` instead, which is what that parameter is for.
+- **`FIBER_FLAG_FLOAT_SWITCH` is passed unconditionally** — see §4.4's floating-point trap.
+
+**W1's original exit criterion was unachievable, the same way W0's was.** It read *"task spawn /
+yield / join / `scope_cancel` smoke passes"*, which requires **running** on Windows — impossible
+until W5 links an executable. The achievable criterion at W1 is compilation, gated by
+`scripts/windows_tu_check.sh`.
+
+That gate turned up a result better than the milestone promised: **the whole of
+`sprout_scheduler.c` compiles for Windows**, not just the seam. `sprout_scheduler.h` only
+*declares* the poller interface, so nothing on the scheduler's path reaches a POSIX poller header.
+The scheduler is done pending a poller; `sprout_poll.c` is W2's whole job.
 
 ## 5. Milestones
 
@@ -296,7 +361,7 @@ milestone that closes it.
 |---|---|---|
 | **W0a** | *(done, 2026-08-15)* `scripts/windows_probe.sh` + `just windows-probe`: measure what the target provides and where each TU stops; adopt §4.1's pure-Win32 rule | a measured §6, replacing the assumed one |
 | **W0b** | *(done, 2026-08-15)* `sprout_context.h` seam — the `ucontext` calls behind a 4-op header, POSIX arm behaviourally unchanged but for §4.6's one delta | `just test` + `task-io-smoke` + `linux-smoke` + the example canary still pass **on POSIX**; no Windows code yet |
-| **W1** | `ucontext` → fibers, per §4.4 | task spawn / yield / join / `scope_cancel` smoke passes |
+| **W1** | *(done, 2026-08-16)* `ucontext` → fibers, per §4.4 and §4.7 | `sprout_context.h`'s Windows arm **and the whole of `sprout_scheduler.c`** compile for Windows; POSIX gates unchanged |
 | **W2** | `WSAPoll` backend + timer min-heap, per §4.3 | `task_sleep` + `with_timeout` + a TCP echo smoke pass |
 | **W3** | Winsock2, files, arena, console, regex, process — §6 | all three TUs compile; `just windows-probe` becomes a gate |
 | **W4** | Vectored exception handler; `CaptureStackBackTrace` or a loud stub | a deliberate stack overflow prints a diagnostic, not a silent exit |
@@ -368,7 +433,7 @@ blocked on a missing API. Score at W0a: **56 available, 22 missing.**
 | TU | First blocker |
 |---|---|
 | `sprout_poll.c` | `:94` `sys/epoll.h` — note it reaches the *epoll* arm, because the file's `#ifdef __APPLE__` / `#else` treats "not macOS" as "Linux". Windows needs a genuine three-way split, not an arm appended after the `#else`. |
-| `sprout_scheduler.c` | was `:30` `ucontext.h` — i.e. W0b's seam was this TU's entire blocker. Since W0b it is `sprout_context.h`'s own `#error`, which W1 replaces with the fiber arm |
+| `sprout_scheduler.c` | **compiles** since W1. Was `:30` `ucontext.h` (so W0b's seam was this TU's entire blocker), then briefly `sprout_context.h`'s own `#error` |
 | `sprout_runtime.c` | `:7` `regex.h` |
 
 ## 7. Syntax, type-system and error-message impact
@@ -424,12 +489,19 @@ Each milestone's exit criterion in §5 is its test. Additionally:
 - **The `windows` CI job exists from W1**, not W5 (see §5 for why it moved). It is **advisory**,
   like `macos` — `test` on Linux stays the one required check — and green at every milestone
   rather than red until W3, because a job that is expected to fail stops being read.
-  - *today*: `just windows-ir-gate` on a Windows host. Compiles committed IR only, so it needs
-    no runtime, no sysroot and no bootstrap — the reason it can pass while none of the three C
-    TUs compile for Windows.
-  - *W1*: `runtime/sprout_context.h`'s fiber arm compiles. *W2*: `sprout_poll.c`'s `WSAPoll`
-    backend compiles. *W3*: all three TUs compile, and `just windows-probe` graduates from
-    diagnostic to gate.
+  - *`windows-ir-gate`*: compiles committed IR only, so it needs no runtime, no sysroot and no
+    bootstrap — the reason it could pass from day one, while none of the three C TUs compiled
+    for Windows.
+  - *`windows-tu-check`* (added at W1): compiles the runtime TUs that are **expected** to build,
+    from a list that grows one entry per milestone, and prints the rest as outstanding. A TU on
+    the list is a promise; shrinking the list to make the gate pass is the one way to defeat it,
+    which the script says out loud. On the runner it targets `x86_64-pc-windows-msvc` against
+    the host SDK — the **ship** surface, and the stricter one, since MSVC has no `unistd.h`, no
+    `sys/time.h` and no POSIX shims. Off-Windows the same script uses a mingw-w64 sysroot, so
+    §4.1's develop-mingw / ship-MSVC split is exercised on both sides rather than asserted.
+    Currently 2 expected (`sprout_context.h`, `sprout_scheduler.c`), 2 outstanding.
+  - *W2*: `sprout_poll.c` joins the expected list. *W3*: `sprout_runtime.c` does too, and
+    `just windows-probe` graduates from diagnostic to gate.
   - *W5*: link and **run** a task/IO smoke, mirroring what the `macos` job
     (`.github/workflows/ci.yml`) does for kqueue — the same battery against the `WSAPoll`
     backend. Built with clang targeting `x86_64-pc-windows-msvc`: the local loop is mingw, so
@@ -444,6 +516,17 @@ Each milestone's exit criterion in §5 is its test. Additionally:
 - [Fibers — Win32 apps, Microsoft Learn](https://learn.microsoft.com/en-us/windows/win32/procthread/fibers)
   — `ConvertThreadToFiber`, `CreateFiber`, `SwitchToFiber`, `DeleteFiber` semantics; fiber state;
   TLS/FLS behaviour.
+- [CreateFiberEx function (winbase.h), Microsoft Learn](https://learn.microsoft.com/en-us/windows/win32/api/winbase/nf-winbase-createfiberex)
+  — `dwStackCommitSize` / `dwStackReserveSize` semantics and their zero-defaults; the
+  `FIBER_FLAG_FLOAT_SWITCH` floating-point warning; the 1 MiB default reserve.
+- [ConvertThreadToFiber function (winbase.h), Microsoft Learn](https://learn.microsoft.com/en-us/windows/win32/api/winbase/nf-winbase-convertthreadtofiber)
+  — "Only fibers can execute other fibers"; NULL return on failure.
+- mingw-w64 `winnt.h` (local sysroot, read directly) — the per-architecture `CONTEXT_FULL`
+  definitions that explain *why* `FIBER_FLAG_FLOAT_SWITCH` is x86-only in Microsoft's wording:
+  `CONTEXT_AMD64`'s includes `CONTEXT_FLOATING_POINT`, `CONTEXT_i386`'s does not.
+- [ReactOS `dll/win32/kernel32/client/fiber.c`](https://doxygen.reactos.org/d9/d44/dll_2win32_2kernel32_2client_2fiber_8c_source.html)
+  — independent implementation showing `FIBER_FLAG_FLOAT_SWITCH` mapping to
+  `CONTEXT_FULL | CONTEXT_FLOATING_POINT`, with no architecture conditional.
 - [WSAPoll function (winsock2.h), Microsoft Learn](https://learn.microsoft.com/en-us/windows/win32/api/winsock2/nf-winsock2-wsapoll)
   — flags, timeout, `POLLNVAL` on negative fds, the Windows 10 version 2004 connect-failure note,
   the APC/alertable-wait note.

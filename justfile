@@ -1994,6 +1994,17 @@ windows-probe:
 windows-ir-gate:
   bash scripts/windows_ir_gate.sh
 
+# Windows port. A GATE over the runtime TUs that are expected to compile for Windows,
+# growing one entry per milestone (docs/windows-port-v0.md §5). A TU on the EXPECTED
+# list is a promise: a regression that stops it compiling turns this red. NOT in
+# `just gate` — it needs a mingw-w64 sysroot the average contributor has no reason to
+# install; CI runs it on a real Windows host against MSVC instead, which is also the
+# stricter surface (§4.1's develop-mingw / ship-MSVC rule).
+# Compile the runtime TUs that are meant to build for Windows, and list what is left.
+[group('dev')]
+windows-tu-check:
+  bash scripts/windows_tu_check.sh
+
 # Division-by-zero guard regression (CI gate). The fixture divides by a RUNTIME
 # zero (`10 / list_length(argv)` with no args), which neither the compiler nor
 # clang can fold. A bare `sdiv i64 _, 0` is LLVM undefined behavior; the emitted
@@ -2712,7 +2723,11 @@ gate-audit:
   #     it is a meta-guard over the gate list, so `gate` depending on it would be circular.
   #   test-stdlib-core-stage1 / test-stdlib-compiler-stage1 — the split suite CI runs; gate
   #     covers both via test → test-stdlib-stage1 (the combined core+compiler suite).
-  EXCLUDE="bootstrap-from-seed build-fmt-from-seed refresh-seed ci-fast-gates test-stdlib-core-stage1 test-stdlib-compiler-stage1"
+  #   windows-tu-check — CI-only BY DESIGN. It needs a mingw-w64 sysroot to run off-Windows,
+  #     which a contributor who never touches the port has no reason to install; putting it in
+  #     `gate` would make the standard battery fail on a missing optional toolchain. CI runs it
+  #     on a real Windows host against MSVC, which is the stricter surface anyway.
+  EXCLUDE="bootstrap-from-seed build-fmt-from-seed refresh-seed ci-fast-gates test-stdlib-core-stage1 test-stdlib-compiler-stage1 windows-tu-check"
   # Tasks gate runs from its BODY (not reachable via --show dependency expansion).
   BODY="gc-safety-check"
   expand() {  # print a recipe name and, recursively, its dependency recipe names
@@ -2829,7 +2844,8 @@ gate-audit:
   # (printf rather than a heredoc: a heredoc's terminator must sit at column 0, and a
   # column-0 line ends a just recipe body.)
   VERIFY_EXCLUDE=$(printf '%s\n' gate gate-quick check lint test-file fmt-check-file \
-                                 lint-file check-iface-all test-stdlib-stage2 linux-smoke)
+                                 lint-file check-iface-all test-stdlib-stage2 linux-smoke \
+                                 windows-tu-check)
   #   gate, gate-quick — the batteries themselves; C already covers gate's membership, and
   #     gate-quick is the deliberately-partial local subset (its point is being faster than CI).
   #   check, lint, test-file, fmt-check-file, lint-file — single-FILE / interactive developer
@@ -2842,6 +2858,11 @@ gate-audit:
   #     stage-2 is the bootstrap's next hop, exercised by verify-bootstrap-fixed-point instead.
   #   linux-smoke — needs a container runtime, and CI already RUNS on Linux, so gating it there
   #     is pure waste. Its whole purpose is covering a platform CI has and developers do not.
+  #   windows-tu-check — CI DOES run it, in the `windows` job, but by invoking the script
+  #     directly: that runner has no mise/just, deliberately, so the job stays a checkout plus
+  #     two bash scripts and depends on no toolchain nobody has tested there. This assertion
+  #     looks for `just <recipe>`, so it cannot see that. Off-Windows the recipe also needs a
+  #     mingw-w64 sysroot, which is why it is not in `gate` either (see EXCLUDE above).
   all_recipes=$(just --summary 2>/dev/null | tr ' ' '\n' | sort -u)
   if [[ -z "$all_recipes" ]]; then
     echo "gate-audit ✗ — could not enumerate recipes; assertion D would pass vacuously." >&2
