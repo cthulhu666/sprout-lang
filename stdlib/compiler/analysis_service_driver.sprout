@@ -408,9 +408,11 @@ fn te_is_apply(te: ast.TypeExpr) -> Bool =
   | _ -> false
 
 fn unify_ok(a: types.Type, b: types.Type) -> Bool =
-  match unifier.unify_types(dict_empty(), a, b) with
-  | Ok _ -> true
-  | Err _ -> false
+  # no_effect_subst: a yes/no "do these two types unify" probe for type search.
+  # Nothing downstream reads a substitution, let alone an effect one.
+  match unifier.unify_types(dict_empty(), unifier.no_effect_subst(), a, b) with
+  | unifier.UnifyOk _ _ -> true
+  | unifier.UnifyErr _ -> false
 
 fn te_matches_query(pattern: ast.TypeExpr, query_te: ast.TypeExpr, alias_env: Dict types.Type) -> Bool =
   if unify_ok(te_to_type(pattern, alias_env), te_to_type(query_te, alias_env)) then true

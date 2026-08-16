@@ -1423,12 +1423,23 @@ Effect note for v0:
 >
 > Since 2026-08-16 effects are *inferred*: a declared effect reaches the innermost arrow
 > of the function's type, a call merges its callee's effect, and each declaration's
-> declared-vs-inferred pair is available via `compile_driver --phase effects`. What is
-> still missing is the check — nothing compares the two, and nothing rejects a mismatch.
+> declared-vs-inferred pair is available via `compile_driver --phase effects`. Effect
+> variables are quantified, freshened per instantiation and bound by unification, so an
+> effect crossing a higher-order boundary — `list_each(print, xs)` — is inferred too.
+> What is still missing is the check: nothing compares the two, and nothing rejects a
+> mismatch.
+>
+> Unification of an arrow's effect is deliberately **total** — it binds effect variables
+> and never fails. This is normative for the v0 checker: because the declaration-boundary
+> rule is *subsumption* (inferred ⊑ declared) and over-declaring is legal, two arrows
+> whose effects differ are not thereby a type error, and a program's acceptance must not
+> depend on effect inference. Rejection belongs at the declaration boundary and nowhere
+> else.
+>
 > Note this earlier said effects were "carried on `TFunc`" and "never unified"; both were
 > misleading. They were carried on `Scheme` with the arrows hardcoded pure, and the
-> problem was never a missing call to `unify_effects` (which is the wrong operation: the
-> rule is subsumption, inferred ⊑ declared, and over-declaring must be accepted). See
+> problem was never a missing call to `unify_effects` (which is the wrong operation at the
+> declaration boundary: the rule is subsumption, and over-declaring must be accepted). See
 > `docs/effect-enforcement-v0.md`; closing this is tracked in `BACKLOG.md`.
 
 ## 8. Standard Library Math Modules

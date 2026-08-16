@@ -191,17 +191,7 @@ fn type_list_from_ast(parts: List ast.TypeExpr, local_vars: Dict types.Type) -> 
   | Cons h t -> Cons(type_from_ast(h, local_vars), type_list_from_ast(t, local_vars))
 
 export fn effect_from_maybe_labels(labels: Maybe (List String)) -> types.Effect =
-  match labels with
-  | Nothing -> types.EffectPure
-  | Just ls ->
-      match ls with
-      | Nil -> types.EffectPure
-      | Cons label rest ->
-          match rest with
-          | Nil ->
-              if label == "IO" then types.EffectIO
-              else types.EffectVar(label)
-          | _ -> types.EffectRow(ls)
+  types.effect_from_labels(labels)
 
 # ---------------------------------------------------------------------------
 # Build a Scheme from a FnDecl
@@ -306,14 +296,14 @@ fn build_type_var_dict(vars: List String, acc: Dict types.Type) -> Dict types.Ty
 # (seeding its free lowercase tyvars as TVars, as fn signatures do) and unify it
 # against the inferred RHS type, so the annotation narrows the binding's scheme
 # before generalization. A mismatch is a loud, located error.
-fn apply_let_annotation(anno: Maybe ast.TypeExpr, s1: Dict types.Type, rhs_type: types.Type, alias_env: Dict types.Type, name: String) -> Result String (Dict types.Type) =
+fn apply_let_annotation(anno: Maybe ast.TypeExpr, s1: Dict types.Type, es1: Dict types.Effect, rhs_type: types.Type, alias_env: Dict types.Type, name: String) -> unifier.Unified =
   match anno with
-  | Nothing -> Ok(s1)
+  | Nothing -> unifier.UnifyOk(s1, es1)
   | Just te ->
       let decl_type = type_from_ast(te, build_type_var_dict(collect_te_vars(te, Nil), alias_env))
-      in match unifier.unify_types(s1, unifier.apply_subst(s1, rhs_type), decl_type) with
-         | Ok s2 -> Ok(s2)
-         | Err e -> Err("type annotation mismatch for `" ++ name ++ "`: " ++ e)
+      in match unifier.unify_types(s1, es1, unifier.apply_subst(s1, rhs_type), decl_type) with
+         | unifier.UnifyOk s2 es2 -> unifier.UnifyOk(s2, es2)
+         | unifier.UnifyErr e -> unifier.UnifyErr("type annotation mismatch for `" ++ name ++ "`: " ++ e)
 
 fn scheme_from_fn_parts_inner(
   type_params: List String,
@@ -322,9 +312,8 @@ fn scheme_from_fn_parts_inner(
   effects_maybe: Maybe (List String),
   alias_env: Dict types.Type
 ) -> types.Scheme =
-  types.Scheme(
+  types.scheme_quantified(
     type_params,
-    Nil,
     build_fn_type_modes(param_types_from_decl(params, local_vars), param_modes(params),
       ret_from_maybe_with_vars(ret_type_maybe, local_vars),
       effect_from_maybe_labels(effects_maybe)),
@@ -416,13 +405,32 @@ fn build_fn_type_like(params: List types.Type, template: types.Type, ret: types.
   match params with
   | Nil -> ret
   | Cons p rest ->
-      types.TFunc(p, build_fn_type_like(rest, template_ret(template), ret), types.EffectPure,
-        template_own(template))
+      types.TFunc(p, build_fn_type_like(rest, template_ret(template), ret),
+        template_eff(template), template_own(template))
 
 fn template_own(t: types.Type) -> types.Ownership =
   match t with
   | types.TFunc _ _ _ own -> own
   | _ -> types.OwnConsume
+
+# Inherit the arrow's effect from the callee, exactly as template_own inherits
+# its ownership, and for the same reason: this function builds "the callee's type
+# as this call site sees it", and the call site knows the argument and result
+# types but nothing whatsoever about the effect.
+#
+# This slot was `EffectPure` while arrow effects were ignored by unification.
+# Once they are not, a hardcoded Pure is an assertion the call site is in no
+# position to make: unifying `list_each`'s innermost `!{e}` against it would bind
+# e := Pure and manufacture a pure reading for a call that may well do IO. Note
+# it would not be caught by the obvious test — `unify_tfunc` unifies the
+# PARAMETER before the return, so an IO argument binds e first and the bogus
+# (IO, Pure) meeting is then absorbed by the conservative arm. The bug would only
+# appear for a callee whose effect variable is not also reachable from a
+# parameter, which is the case no canary would have covered.
+fn template_eff(t: types.Type) -> types.Effect =
+  match t with
+  | types.TFunc _ _ eff _ -> eff
+  | _ -> types.EffectPure
 
 fn template_ret(t: types.Type) -> types.Type =
   match t with
@@ -505,9 +513,8 @@ fn register_one_ctor(
   | ast.TypeConstructor name fields exist_vars exist_constraints ->
       dict_set(
         name,
-        types.Scheme(
+        types.scheme_quantified(
           list_append(type_params, exist_vars),
-          Nil,
           ctor_fn_type(fields, build_local_params(exist_vars, local_vars), result_type),
           types.EffectPure,
           exist_constraint_pairs(exist_constraints)
@@ -875,11 +882,14 @@ fn discharge_against_record(
     in
       do
         field_t <- record_field_access_type(state, field_scheme, type_args)
-        match unifier.unify_types(subst, unifier.field_obligation_result(o), field_t) with
-        | Err e ->
+        # no_effect_subst: OneResult carries only a type substitution, and the
+        # deferred-obligation chain above it is six functions deep.
+        match unifier.unify_types(subst, unifier.no_effect_subst(),
+                unifier.field_obligation_result(o), field_t) with
+        | unifier.UnifyErr e ->
             OneFailed(unifier.field_obligation_pos(o),
               "Record field type mismatch reading `." ++ field_name ++ "`: " ++ e)
-        | Ok s2 -> OneSettled(s2)
+        | unifier.UnifyOk s2 _ -> OneSettled(s2)
 
 fn discharge_next_round(
   state: unifier.InferState,
@@ -995,11 +1005,11 @@ fn infer_if_checked(
   else_: ast.Expr,
   pos: source.SourcePos
 ) -> InferResult !{IO} =
-  match unifier.unify_types(subst, typed_ast.typed_expr_type(typed_cond), types.type_bool()) with
-  | Err e -> InferErr(pos, "If condition must be Bool: " ++ e)
-  | Ok s2 ->
+  match unifier.unify_types(subst, eff_subst, typed_ast.typed_expr_type(typed_cond), types.type_bool()) with
+  | unifier.UnifyErr e -> InferErr(pos, "If condition must be Bool: " ++ e)
+  | unifier.UnifyOk s2 es2 ->
       do
-        tr <- infer_expr(state, env, s2, eff_subst, then_)
+        tr <- infer_expr(state, env, s2, es2, then_)
         match tr with
         | InferErr pos e -> InferErr(pos, e)
         | InferOk typed_then s3 es3 then_eff ->
@@ -1022,14 +1032,15 @@ fn infer_if_merge(
   else_eff: types.Effect,
   pos: source.SourcePos
 ) -> InferResult !{IO} =
-  match unifier.unify_types(subst, typed_ast.typed_expr_type(typed_then), typed_ast.typed_expr_type(typed_else)) with
-  | Err e -> InferErr(pos, "If branches must have same type: " ++ e)
-  | Ok s5 ->
+  match unifier.unify_types(subst, eff_subst, typed_ast.typed_expr_type(typed_then), typed_ast.typed_expr_type(typed_else)) with
+  | unifier.UnifyErr e -> InferErr(pos, "If branches must have same type: " ++ e)
+  | unifier.UnifyOk s5 es5 ->
       InferOk(
         typed_ast.TIf(typed_cond, typed_then, typed_else,
                       unifier.apply_subst(s5, typed_ast.typed_expr_type(typed_then)), pos),
-        s5, eff_subst,
-        merge_effects(cond_eff, merge_effects(then_eff, else_eff))
+        s5, es5,
+        unifier.apply_effect_subst(es5,
+          merge_effects(cond_eff, merge_effects(then_eff, else_eff)))
       )
 
 # --- Call ---
@@ -1361,9 +1372,10 @@ fn resolve_zero_arg_call(
   if type_is_function(resolved) && ! zero_arity_ok
   then CallErr(pos, callee_display ++ " requires arguments but was called with none")
   else
-    match unifier.unify_types(subst, resolved, ret_type) with
-    | Err e -> CallErr(pos, "Call type mismatch: " ++ e)
-    | Ok s3 -> CallOk(unifier.apply_subst(s3, ret_type), s3, eff_subst, eff)
+    match unifier.unify_types(subst, eff_subst, resolved, ret_type) with
+    | unifier.UnifyErr e -> CallErr(pos, "Call type mismatch: " ++ e)
+    | unifier.UnifyOk s3 es3 ->
+        CallOk(unifier.apply_subst(s3, ret_type), s3, es3, unifier.apply_effect_subst(es3, eff))
 
 fn callee_display_name(callee: ast.Expr) -> String =
   match callee with
@@ -1386,10 +1398,17 @@ fn infer_call_resolve(
       resolve_zero_arg_call(subst, eff_subst, unifier.apply_subst(subst, callee_type),
                             ret_type, eff, callee_display, zero_arity_ok, pos)
   | _ ->
-      match unifier.unify_types(subst, callee_type,
+      # THE site effect unification exists for. Unifying the callee's declared
+      # type against the shape this call demands is what meets a parameter's
+      # `!{e}` with the argument's actual arrow effect, so `list_each(print, xs)`
+      # binds e := IO here — and `apply_effect_subst` below is what turns that
+      # binding into the call's reported effect. Passing `eff` through unresolved
+      # (as this did) makes the whole channel a silent no-op.
+      match unifier.unify_types(subst, eff_subst, callee_type,
               build_fn_type_like(arg_types, unifier.apply_subst(subst, callee_type), ret_type)) with
-      | Err e -> CallErr(pos, "Call type mismatch: " ++ e)
-      | Ok s3 -> CallOk(unifier.apply_subst(s3, ret_type), s3, eff_subst, eff)
+      | unifier.UnifyErr e -> CallErr(pos, "Call type mismatch: " ++ e)
+      | unifier.UnifyOk s3 es3 ->
+          CallOk(unifier.apply_subst(s3, ret_type), s3, es3, unifier.apply_effect_subst(es3, eff))
 
 # --- Constraint checking ---
 #
@@ -2825,7 +2844,7 @@ fn infer_call_args(
           do
             ret <- unifier.fresh(state)
             infer_lambda_slots(state, env,
-              push_down_arg_slots(s1, callee_type, slots, types.TVar(types.tyvar_id(ret))),
+              push_down_arg_slots(s1, es1, callee_type, slots, types.TVar(types.tyvar_id(ret))),
               es1, slots, Nil, types.EffectPure)
 
 fn has_lambda_slot(slots: List ArgSlot) -> Bool =
@@ -2868,14 +2887,22 @@ fn infer_arg_slots(
 # "Call type mismatch" wording rather than surfacing a speculative failure.
 fn push_down_arg_slots(
   subst: Dict types.Type,
+  eff_subst: Dict types.Effect,
   callee_type: types.Type,
   slots: List ArgSlot,
   ret: types.Type
 ) -> Dict types.Type =
-  match unifier.unify_types(subst, callee_type,
-          build_fn_type_like(arg_slot_types(slots), unifier.apply_subst(subst, callee_type), ret)) with
-  | Err _ -> subst
-  | Ok s -> s
+  # The effect substitution is deliberately NOT taken from here. This pass runs
+  # BEFORE the held-back lambdas are inferred, so their slots are still bare type
+  # variables with nothing but a pure placeholder arrow; any effect bound now
+  # would be read off a lambda whose body has not been looked at. The real
+  # binding happens in infer_call_resolve, after infer_lambda_slots has given
+  # each lambda its actual arrow. Feeding the input still matters — it is what
+  # lets an already-bound variable resolve during this unification.
+  unifier.unified_subst(
+    unifier.unify_types(subst, eff_subst, callee_type,
+      build_fn_type_like(arg_slot_types(slots), unifier.apply_subst(subst, callee_type), ret)),
+    subst)
 
 fn arg_slot_types(slots: List ArgSlot) -> List types.Type =
   match slots with
@@ -3007,11 +3034,11 @@ fn append_via_semigroup(
   eff: types.Effect,
   pos: source.SourcePos
 ) -> InferResult =
-  match unifier.unify_types(subst, typed_ast.typed_expr_type(typed_left), typed_ast.typed_expr_type(typed_right)) with
-  | Err e -> InferErr(pos, "`++` needs matching Semigroup operands: " ++ e)
-  | Ok s1 ->
+  match unifier.unify_types(subst, eff_subst, typed_ast.typed_expr_type(typed_left), typed_ast.typed_expr_type(typed_right)) with
+  | unifier.UnifyErr e -> InferErr(pos, "`++` needs matching Semigroup operands: " ++ e)
+  | unifier.UnifyOk s1 es1 ->
       append_via_semigroup_at(unifier.apply_subst(s1, typed_ast.typed_expr_type(typed_left)),
-                              env, typed_left, typed_right, s1, eff_subst, eff, pos)
+                              env, typed_left, typed_right, s1, es1, eff, pos)
 
 fn append_via_semigroup_at(
   t: types.Type,
@@ -3064,19 +3091,19 @@ fn check_arith(
   # Int or Double.  Int op Int -> Int; Double op Double -> Double; a mixed
   # Int/Double pair fails the operand unify (no implicit promotion).  `/` stays
   # in this set for Int (truncating) — the deliberate §7.3 divergence.
-  match unifier.unify_types(subst, typed_ast.typed_expr_type(typed_left), typed_ast.typed_expr_type(typed_right)) with
-  | Err e -> InferErr(pos, op ++ " needs matching numeric operands: " ++ e)
-  | Ok s1 ->
-      match unifier.unify_types(s1, typed_ast.typed_expr_type(typed_left), types.type_int()) with
-      | Ok s2 ->
+  match unifier.unify_types(subst, eff_subst, typed_ast.typed_expr_type(typed_left), typed_ast.typed_expr_type(typed_right)) with
+  | unifier.UnifyErr e -> InferErr(pos, op ++ " needs matching numeric operands: " ++ e)
+  | unifier.UnifyOk s1 es1 ->
+      match unifier.unify_types(s1, es1, typed_ast.typed_expr_type(typed_left), types.type_int()) with
+      | unifier.UnifyOk s2 es2 ->
           InferOk(typed_ast.TBinary(op, typed_left, typed_right, types.type_int(), pos),
-                  s2, eff_subst, eff)
-      | Err _ ->
-          match unifier.unify_types(s1, typed_ast.typed_expr_type(typed_left), types.type_double()) with
-          | Err e -> InferErr(pos, op ++ " needs Int or Double operands: " ++ e)
-          | Ok s2 ->
+                  s2, es2, eff)
+      | unifier.UnifyErr _ ->
+          match unifier.unify_types(s1, es1, typed_ast.typed_expr_type(typed_left), types.type_double()) with
+          | unifier.UnifyErr e -> InferErr(pos, op ++ " needs Int or Double operands: " ++ e)
+          | unifier.UnifyOk s2 es2 ->
               InferOk(typed_ast.TBinary(op, typed_left, typed_right, types.type_double(), pos),
-                      s2, eff_subst, eff)
+                      s2, es2, eff)
 
 fn check_compare(
   subst: Dict types.Type,
@@ -3090,24 +3117,24 @@ fn check_compare(
   # Unify left and right with each other first, then check the result is
   # Int, Char, or Double.  Double comparison (e.g. `x < 0.0`) lowers to an
   # ordered fcmp in the IR (docs/nn-gap-analysis.md §7.1).
-  match unifier.unify_types(subst, typed_ast.typed_expr_type(typed_left), typed_ast.typed_expr_type(typed_right)) with
-  | Err e -> InferErr(pos, op ++ " needs matching types: " ++ e)
-  | Ok s1 ->
-      match unifier.unify_types(s1, typed_ast.typed_expr_type(typed_left), types.type_int()) with
-      | Ok s2 ->
+  match unifier.unify_types(subst, eff_subst, typed_ast.typed_expr_type(typed_left), typed_ast.typed_expr_type(typed_right)) with
+  | unifier.UnifyErr e -> InferErr(pos, op ++ " needs matching types: " ++ e)
+  | unifier.UnifyOk s1 es1 ->
+      match unifier.unify_types(s1, es1, typed_ast.typed_expr_type(typed_left), types.type_int()) with
+      | unifier.UnifyOk s2 es2 ->
           InferOk(typed_ast.TBinary(op, typed_left, typed_right, types.type_bool(), pos),
-                  s2, eff_subst, eff)
-      | Err _ ->
-          match unifier.unify_types(s1, typed_ast.typed_expr_type(typed_left), types.type_char()) with
-          | Ok s2 ->
+                  s2, es2, eff)
+      | unifier.UnifyErr _ ->
+          match unifier.unify_types(s1, es1, typed_ast.typed_expr_type(typed_left), types.type_char()) with
+          | unifier.UnifyOk s2 es2 ->
               InferOk(typed_ast.TBinary(op, typed_left, typed_right, types.type_bool(), pos),
-                      s2, eff_subst, eff)
-          | Err _ ->
-              match unifier.unify_types(s1, typed_ast.typed_expr_type(typed_left), types.type_double()) with
-              | Err e -> InferErr(pos, op ++ " needs Int, Char, or Double: " ++ e)
-              | Ok s2 ->
+                      s2, es2, eff)
+          | unifier.UnifyErr _ ->
+              match unifier.unify_types(s1, es1, typed_ast.typed_expr_type(typed_left), types.type_double()) with
+              | unifier.UnifyErr e -> InferErr(pos, op ++ " needs Int, Char, or Double: " ++ e)
+              | unifier.UnifyOk s2 es2 ->
                   InferOk(typed_ast.TBinary(op, typed_left, typed_right, types.type_bool(), pos),
-                          s2, eff_subst, eff)
+                          s2, es2, eff)
 
 fn is_primitive_eq_type(t: types.Type) -> Bool =
   match t with
@@ -3183,14 +3210,14 @@ fn check_eq(
   eff: types.Effect,
   pos: source.SourcePos
 ) -> InferResult !{IO} =
-  match unifier.unify_types(subst, typed_ast.typed_expr_type(typed_left), typed_ast.typed_expr_type(typed_right)) with
-  | Err e -> InferErr(pos, op ++ " needs same types: " ++ e)
-  | Ok s1 ->
+  match unifier.unify_types(subst, eff_subst, typed_ast.typed_expr_type(typed_left), typed_ast.typed_expr_type(typed_right)) with
+  | unifier.UnifyErr e -> InferErr(pos, op ++ " needs same types: " ++ e)
+  | unifier.UnifyOk s1 es1 ->
       if is_primitive_eq_type(unifier.apply_subst(s1, typed_ast.typed_expr_type(typed_left))) then
         InferOk(typed_ast.TBinary(op, typed_left, typed_right, types.type_bool(), pos),
-                s1, eff_subst, eff)
+                s1, es1, eff)
       else
-        eq_via_class_method(state, env, op, typed_left, typed_right, s1, eff_subst, eff, pos)
+        eq_via_class_method(state, env, op, typed_left, typed_right, s1, es1, eff, pos)
 
 fn check_bool(
   subst: Dict types.Type,
@@ -3201,14 +3228,14 @@ fn check_bool(
   eff: types.Effect,
   pos: source.SourcePos
 ) -> InferResult !{IO} =
-  match unifier.unify_types(subst, typed_ast.typed_expr_type(typed_left), types.type_bool()) with
-  | Err e -> InferErr(pos, op ++ " needs Bool: " ++ e)
-  | Ok s1 ->
-      match unifier.unify_types(s1, typed_ast.typed_expr_type(typed_right), types.type_bool()) with
-      | Err e -> InferErr(pos, op ++ " needs Bool: " ++ e)
-      | Ok s2 ->
+  match unifier.unify_types(subst, eff_subst, typed_ast.typed_expr_type(typed_left), types.type_bool()) with
+  | unifier.UnifyErr e -> InferErr(pos, op ++ " needs Bool: " ++ e)
+  | unifier.UnifyOk s1 es1 ->
+      match unifier.unify_types(s1, es1, typed_ast.typed_expr_type(typed_right), types.type_bool()) with
+      | unifier.UnifyErr e -> InferErr(pos, op ++ " needs Bool: " ++ e)
+      | unifier.UnifyOk s2 es2 ->
           InferOk(typed_ast.TBinary(op, typed_left, typed_right, types.type_bool(), pos),
-                  s2, eff_subst, eff)
+                  s2, es2, eff)
 
 # --- Unary ---
 
@@ -3231,19 +3258,19 @@ fn infer_unary(
         # here; without it the operand type flows through unchecked and codegen
         # miscompiles — `! 3` lowers `xor i64, 1` over raw Int bits, yielding 2.
         if op == "!" then
-          match unifier.unify_types(s1, typed_ast.typed_expr_type(typed_operand), types.type_bool()) with
-          | Err e -> InferErr(pos, "! (logical not) needs a Bool operand: " ++ e)
-          | Ok s2 ->
-              InferOk(typed_ast.TUnary(op, typed_operand, types.type_bool(), pos), s2, es1, eff)
+          match unifier.unify_types(s1, es1, typed_ast.typed_expr_type(typed_operand), types.type_bool()) with
+          | unifier.UnifyErr e -> InferErr(pos, "! (logical not) needs a Bool operand: " ++ e)
+          | unifier.UnifyOk s2 es2 ->
+              InferOk(typed_ast.TUnary(op, typed_operand, types.type_bool(), pos), s2, es2, eff)
         else if op == "-" then
-          match unifier.unify_types(s1, typed_ast.typed_expr_type(typed_operand), types.type_int()) with
-          | Ok s2 ->
-              InferOk(typed_ast.TUnary(op, typed_operand, types.type_int(), pos), s2, es1, eff)
-          | Err _ ->
-              match unifier.unify_types(s1, typed_ast.typed_expr_type(typed_operand), types.type_double()) with
-              | Err e -> InferErr(pos, "- (negation) needs an Int or Double operand: " ++ e)
-              | Ok s2 ->
-                  InferOk(typed_ast.TUnary(op, typed_operand, types.type_double(), pos), s2, es1, eff)
+          match unifier.unify_types(s1, es1, typed_ast.typed_expr_type(typed_operand), types.type_int()) with
+          | unifier.UnifyOk s2 es2 ->
+              InferOk(typed_ast.TUnary(op, typed_operand, types.type_int(), pos), s2, es2, eff)
+          | unifier.UnifyErr _ ->
+              match unifier.unify_types(s1, es1, typed_ast.typed_expr_type(typed_operand), types.type_double()) with
+              | unifier.UnifyErr e -> InferErr(pos, "- (negation) needs an Int or Double operand: " ++ e)
+              | unifier.UnifyOk s2 es2 ->
+                  InferOk(typed_ast.TUnary(op, typed_operand, types.type_double(), pos), s2, es2, eff)
         else
           InferErr(pos, "unknown unary operator: " ++ op)
 
@@ -3353,9 +3380,11 @@ fn ctor_field_types(
   | Just scheme ->
       do
         ctor_type <- unifier.instantiate(state, scheme)
-        match unifier.unify_types(subst, adt_type, ctor_result_type(ctor_type)) with
-        | Err _ -> Nothing
-        | Ok s1 -> Just(unifier.apply_subst_list(s1, ctor_param_types(ctor_type)))
+        # no_effect_subst: exhaustiveness column expansion, which asks only what
+        # the constructor's field types are. Its result never reaches an effect.
+        match unifier.unify_types(subst, unifier.no_effect_subst(), adt_type, ctor_result_type(ctor_type)) with
+        | unifier.UnifyErr _ -> Nothing
+        | unifier.UnifyOk s1 _ -> Just(unifier.apply_subst_list(s1, ctor_param_types(ctor_type)))
 
 # Are all field columns of a constructor covered?  Returns the first gap, if any.
 fn columns_covered(
@@ -3744,9 +3773,10 @@ fn infer_branch_unify(
   ret_type: types.Type,
   body_eff: types.Effect
 ) -> InferResult !{IO} =
-  match unifier.unify_types(subst, typed_ast.typed_expr_type(typed_body), ret_type) with
-  | Err e -> InferErr(typed_ast.typed_expr_pos(typed_body), "Match branch type mismatch: " ++ e)
-  | Ok s3 -> InferOk(typed_body, s3, eff_subst, body_eff)
+  match unifier.unify_types(subst, eff_subst, typed_ast.typed_expr_type(typed_body), ret_type) with
+  | unifier.UnifyErr e -> InferErr(typed_ast.typed_expr_pos(typed_body), "Match branch type mismatch: " ++ e)
+  | unifier.UnifyOk s3 es3 ->
+      InferOk(typed_body, s3, es3, unifier.apply_effect_subst(es3, body_eff))
 
 # --- Pattern inference ---
 #
@@ -3789,10 +3819,10 @@ fn check_pattern_type(
   expected_type: types.Type,
   label: String
 ) -> InferResult !{IO} =
-  match unifier.unify_types(subst, expected, expected_type) with
-  | Err e -> InferErr(pos, label ++ " pattern: " ++ e)
-  | Ok s1 ->
-      InferOk(typed_ast.TUnit(expected_type, no_pos()), s1, eff_subst, types.EffectPure)
+  match unifier.unify_types(subst, eff_subst, expected, expected_type) with
+  | unifier.UnifyErr e -> InferErr(pos, label ++ " pattern: " ++ e)
+  | unifier.UnifyOk s1 es1 ->
+      InferOk(typed_ast.TUnit(expected_type, no_pos()), s1, es1, types.EffectPure)
 
 fn infer_tuple_pattern(
   pos: source.SourcePos,
@@ -3817,10 +3847,10 @@ fn infer_tuple_pattern_unified(
   elem_vars: List types.Type,
   pats: List ast.Pattern
 ) -> InferResult !{IO} =
-  match unifier.unify_types(subst, expected, types.TTuple(elem_vars)) with
-  | Err e -> InferErr(pos, "Tuple pattern: " ++ e)
-  | Ok s1 ->
-      check_pattern_list(pos, state, env, s1, eff_subst, elem_vars, pats)
+  match unifier.unify_types(subst, eff_subst, expected, types.TTuple(elem_vars)) with
+  | unifier.UnifyErr e -> InferErr(pos, "Tuple pattern: " ++ e)
+  | unifier.UnifyOk s1 es1 ->
+      check_pattern_list(pos, state, env, s1, es1, elem_vars, pats)
 
 fn make_fresh_var_list(state: unifier.InferState, pats: List ast.Pattern) -> List types.Type !{IO} =
   match pats with
@@ -3883,10 +3913,10 @@ fn infer_ctor_pattern_typed(
   fields: List ast.Pattern,
   ctor_type: types.Type
 ) -> InferResult !{IO} =
-  match unifier.unify_types(subst, expected, ctor_result_type(ctor_type)) with
-  | Err e -> InferErr(pos, "Constructor " ++ name ++ ": " ++ e)
-  | Ok s1 ->
-      check_pattern_list(pos, state, env, s1, eff_subst, ctor_param_types(ctor_type), fields)
+  match unifier.unify_types(subst, eff_subst, expected, ctor_result_type(ctor_type)) with
+  | unifier.UnifyErr e -> InferErr(pos, "Constructor " ++ name ++ ": " ++ e)
+  | unifier.UnifyOk s1 es1 ->
+      check_pattern_list(pos, state, env, s1, es1, ctor_param_types(ctor_type), fields)
 
 fn ctor_result_type(t: types.Type) -> types.Type =
   match t with
@@ -4155,9 +4185,11 @@ fn do_block_carries(
         let want =
           if do_family_name(fam) == "Maybe" then types.type_maybe(types.TVar(types.tyvar_id(tv)))
           else types.type_result(result_error_slot(do_family_type(fam)), types.TVar(types.tyvar_id(tv)))
-        match unifier.unify_types(subst, block_ty, want) with
-        | Ok s -> CarryOk(s)
-        | Err _ ->
+        # no_effect_subst: BlockCarry carries only a type substitution, and this
+        # unification is against `Maybe a` / `Result e a` — neither is an arrow.
+        match unifier.unify_types(subst, unifier.no_effect_subst(), block_ty, want) with
+        | unifier.UnifyOk s _ -> CarryOk(s)
+        | unifier.UnifyErr _ ->
             CarryErr(fallible_bind_msg(do_family_name(fam), do_family_type(fam),
                                        "the block", unifier.apply_subst(subst, block_ty)),
                      do_family_pos(fam))
@@ -4495,9 +4527,9 @@ fn register_record_fields_loop(
               env))
 
 fn make_record_field_scheme(rec_name: String, type_params: List String, field_t: types.Type) -> types.Scheme =
-  types.Scheme(
+  types.scheme_quantified(
     list_map(\p -> str_concat(rec_name, str_concat(".", p)), type_params),
-    Nil, field_t, types.EffectPure, Nil)
+    field_t, types.EffectPure, Nil)
 
 fn infer_record_expr(
   state: unifier.InferState,
@@ -4590,10 +4622,10 @@ fn infer_record_fields(
                     # agree on each param. Field schemes carry no effect/constraint
                     # vars, so a plain subst suffices.
                     let field_t = unifier.apply_subst(param_subst, types.scheme_type(field_scheme))
-                    in match unifier.unify_types(s1, typed_ast.typed_expr_type(typed_val), field_t) with
-                       | Err e -> InferErr(pos, "Record field type mismatch: " ++ e)
-                       | Ok s2 ->
-                           infer_record_fields(state, env, s2, es1, type_name, rest_fields,
+                    in match unifier.unify_types(s1, es1, typed_ast.typed_expr_type(typed_val), field_t) with
+                       | unifier.UnifyErr e -> InferErr(pos, "Record field type mismatch: " ++ e)
+                       | unifier.UnifyOk s2 es2 ->
+                           infer_record_fields(state, env, s2, es2, type_name, rest_fields,
                              Cons(typed_ast.TypedRecordField(fname, typed_val), acc_fields),
                              merge_effects(acc_eff, val_eff), pos, param_subst, result_type)
 
@@ -4828,11 +4860,11 @@ fn infer_update_fields(
                 match vr with
                 | InferErr pos e -> InferErr(pos, e)
                 | InferOk typed_val s1 es1 val_eff ->
-                      match unifier.unify_types(s1, typed_ast.typed_expr_type(typed_val),
+                      match unifier.unify_types(s1, es1, typed_ast.typed_expr_type(typed_val),
                                                 concrete_field_type(field_scheme, type_args)) with
-                      | Err e -> InferErr(pos, "record update field type mismatch: " ++ e)
-                      | Ok s2 ->
-                          infer_update_fields(state, env, s2, es1, rec_name, type_args, base_type, typed_base, rest,
+                      | unifier.UnifyErr e -> InferErr(pos, "record update field type mismatch: " ++ e)
+                      | unifier.UnifyOk s2 es2 ->
+                          infer_update_fields(state, env, s2, es2, rec_name, type_args, base_type, typed_base, rest,
                             Cons(typed_ast.TypedRecordField(fname, typed_val), acc),
                             merge_effects(acc_eff, val_eff), pos)
 
@@ -4852,12 +4884,12 @@ fn infer_range(
   do
     InferOk typed_lo s1 es1 lo_eff <- infer_expr(state, env, subst, eff_subst, lo) else InferErr p e -> InferErr(p, e)
     InferOk typed_hi s2 es2 hi_eff <- infer_expr(state, env, s1, es1, hi) else InferErr p e -> InferErr(p, e)
-    let Ok s3 = unifier.unify_types(s2, typed_ast.typed_expr_type(typed_lo), types.type_int()) else Err e -> InferErr(pos, "Range needs Int: " ++ e)
-    let Ok s4 = unifier.unify_types(s3, typed_ast.typed_expr_type(typed_hi), types.type_int()) else Err e -> InferErr(pos, "Range needs Int: " ++ e)
+    let unifier.UnifyOk s3 es3 = unifier.unify_types(s2, es2, typed_ast.typed_expr_type(typed_lo), types.type_int()) else unifier.UnifyErr e -> InferErr(pos, "Range needs Int: " ++ e)
+    let unifier.UnifyOk s4 es4 = unifier.unify_types(s3, es3, typed_ast.typed_expr_type(typed_hi), types.type_int()) else unifier.UnifyErr e -> InferErr(pos, "Range needs Int: " ++ e)
     InferOk(
       typed_ast.TRange(typed_lo, typed_hi,
         types.TConst(types.type_id("IntRange")), pos),
-      s4, es2, merge_effects(lo_eff, hi_eff))
+      s4, es4, merge_effects(lo_eff, hi_eff))
 
 # ---------------------------------------------------------------------------
 # Program-level typechecking
@@ -5802,12 +5834,12 @@ fn typecheck_decl(
         r <- typecheck_expr(state, global_env_dict(env), subst, eff_subst, expr)
         match r with
         | InferErr pos e -> TypedDeclErr(pos, e)
-        | InferOk typed_expr0 s1raw _ _ ->
+        | InferOk typed_expr0 s1raw es1raw _ ->
             # An optional `let x : T = e` annotation is checked against the
             # inferred RHS type before generalization, narrowing the scheme.
-            match apply_let_annotation(anno, s1raw, typed_ast.typed_expr_type(typed_expr0), alias_env, name) with
-            | Err msg -> TypedDeclErr(let_pos, msg)
-            | Ok s1a ->
+            match apply_let_annotation(anno, s1raw, es1raw, typed_ast.typed_expr_type(typed_expr0), alias_env, name) with
+            | unifier.UnifyErr msg -> TypedDeclErr(let_pos, msg)
+            | unifier.UnifyOk s1a es1a ->
                 # AFTER the annotation unify, which may be the only thing that
                 # determines a deferred field access's receiver.
                 do
@@ -5815,7 +5847,7 @@ fn typecheck_decl(
                   match f with
                   | FinishErr fpos fmsg -> TypedDeclErr(fpos, fmsg)
                   | FinishOk typed_expr s1 ->
-                      finish_let_decl(name, expr, typed_expr, s1, let_pos, env, env_ftv, eff_subst)
+                      finish_let_decl(name, expr, typed_expr, s1, let_pos, env, env_ftv, es1a)
   | ast.AliasDecl _ _ _ _ ->
       TypedDeclOk(typed_ast.TPassThrough(decl), env, env_ftv)
   | ast.ClassDecl class_name type_params methods superclasses _ ->
@@ -6672,15 +6704,21 @@ fn check_fn_body(
         # (fn_body_env), so recursive self-calls inject dicts from the Scheme —
         # no @constrained_N self markers to seed. fwd_env holds only @fwd/@eta_fwd.
         let body_env = fn_body_env(name, params, inst_type, constraint_source_tokens(constraints), fwd_env)
-        InferOk typed_body0 s1 _ body_eff <- typecheck_expr(state, body_env, subst, eff_subst, body) else InferErr pos msg -> (fn_body_err(name, pos, msg), dict_empty(), Nil)
+        InferOk typed_body0 s1 es1 body_eff <- typecheck_expr(state, body_env, subst, eff_subst, body) else InferErr pos msg -> (fn_body_err(name, pos, msg), dict_empty(), Nil)
         # The declaration boundary: the one place that holds both the declared
         # effect and the effect the body was inferred to perform. Enforcement will
         # compare them HERE and reject a body that exceeds its signature; for now
         # the pair is only recorded, so `--phase effects` can size that migration
         # before the language commits to it (spec-v0.md §7 enforcement note).
+        #
+        # apply_effect_subst resolves the body's effect against the bindings its
+        # own inference produced. Without it a body whose effect came from a
+        # higher-order call reports the raw variable — `!{$e2}` rather than the
+        # `!{IO}` that unifying `list_each`'s parameter against `print` bound it to.
         _ <- unifier.record_effect_report(state,
-               unifier.EffectReport(name, types.scheme_effects(decl_scheme), body_eff))
-        let Ok s2a = unifier.unify_types(s1, typed_ast.typed_expr_type(typed_body0), fn_return_type(inst_type, list_length(params))) else Err e -> (return_mismatch_body_err(name, typed_body0, fn_return_type(inst_type, list_length(params)), s1, "Return type mismatch in " ++ name ++ ": " ++ e), dict_empty(), Nil)
+               unifier.EffectReport(name, types.scheme_effects(decl_scheme),
+                 unifier.apply_effect_subst(es1, body_eff)))
+        let unifier.UnifyOk s2a _ = unifier.unify_types(s1, es1, typed_ast.typed_expr_type(typed_body0), fn_return_type(inst_type, list_length(params))) else unifier.UnifyErr e -> (return_mismatch_body_err(name, typed_body0, fn_return_type(inst_type, list_length(params)), s1, "Return type mismatch in " ++ name ++ ": " ++ e), dict_empty(), Nil)
         # AFTER the return-type unify: the declared return type may be the only
         # thing that determines a deferred field access's receiver.
         FinishOk typed_body s2 <- finish_field_obligations(state, body_env, s2a, typed_body0) else FinishErr fpos fmsg -> (fn_body_err(name, fpos, fmsg), dict_empty(), Nil)
@@ -6978,7 +7016,7 @@ fn check_instance_method(
         br <- typecheck_expr(state, body_env, subst, eff_subst, body)
         match br with
         | InferErr pos msg -> instance_method_err(name, pos, msg)
-        | InferOk typed_body0 s1 _ body_eff ->
+        | InferOk typed_body0 s1 es1 body_eff ->
             # The instance-method twin of the record in check_fn_body. Both sites
             # discard a body effect, and instrumenting only the `fn` one would
             # leave every `instance` method out of the census — silently, and in
@@ -6987,9 +7025,10 @@ fn check_instance_method(
             do
               _ <- unifier.record_effect_report(state,
                      unifier.EffectReport(instance_report_name(name, inst_type),
-                       effect_from_maybe_labels(eff_maybe), body_eff))
+                       effect_from_maybe_labels(eff_maybe),
+                       unifier.apply_effect_subst(es1, body_eff)))
               instance_method_checked(state, name, params, ret_maybe, eff_maybe,
-                body_env, s1, inst_type, typed_body0, env)
+                body_env, s1, es1, inst_type, typed_body0, env)
 
 # Two instances of one class define the same method name, so the bare name would
 # collapse them into a single census entry. The instance HEAD is not in scope here
@@ -7010,13 +7049,14 @@ fn instance_method_checked(
   eff_maybe: Maybe (List String),
   body_env: Dict types.Scheme,
   s1: Dict types.Type,
+  es1: Dict types.Effect,
   inst_type: types.Type,
   typed_body0: typed_ast.TypedExpr,
   env: Dict types.Scheme
 ) -> InstanceMethodResult !{IO} =
-  match unifier.unify_types(s1, typed_ast.typed_expr_type(typed_body0), fn_return_type(inst_type, list_length(params))) with
-  | Err e -> InstanceMethodErr(typed_ast.typed_expr_pos(typed_body0), "Return type mismatch in instance method " ++ name ++ ": " ++ e)
-  | Ok s2a ->
+  match unifier.unify_types(s1, es1, typed_ast.typed_expr_type(typed_body0), fn_return_type(inst_type, list_length(params))) with
+  | unifier.UnifyErr e -> InstanceMethodErr(typed_ast.typed_expr_pos(typed_body0), "Return type mismatch in instance method " ++ name ++ ": " ++ e)
+  | unifier.UnifyOk s2a _ ->
       # AFTER the return-type unify — see finish_field_obligations.
       do
         f <- finish_field_obligations(state, body_env, s2a, typed_body0)

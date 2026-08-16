@@ -309,12 +309,51 @@ export fn type_result(e: Type, a: Type) -> Type = TApp(TApp (TConst(type_id("Res
 export fn effect_pure() -> Effect = EffectPure
 export fn effect_io() -> Effect = EffectIO
 
+# The one place a written `!{...}` annotation becomes an Effect.
+#
+# `infer` and `iface_codec` each grew their own copy of this, and they did NOT
+# agree: iface_codec's built `EffectRow(["IO"])` for every annotation, where
+# infer's built `EffectIO`. `unify_effects` has no rule relating a one-element
+# row to the concrete label it contains, so the two would not unify — which cost
+# nothing while nothing compared two effects, and is a hazard now that arrow
+# effects meet. (iface_codec's copy fed only the encoder, whose output no
+# type-checker reads back today, so no program was ever misjudged; the point is
+# that one value must not have two spellings.) Both now delegate here.
+export fn effect_from_labels(labels: Maybe (List String)) -> Effect =
+  match labels with
+  | Nothing -> EffectPure
+  | Just ls -> effect_of_label_list(ls)
+
+fn effect_of_label_list(ls: List String) -> Effect =
+  match ls with
+  | Nil -> EffectPure
+  | Cons label rest ->
+      match rest with
+      | Nil -> effect_of_single_label(label)
+      | _ -> EffectRow(ls)
+
+fn effect_of_single_label(label: String) -> Effect =
+  if label == "IO" then EffectIO else EffectVar(label)
+
 # ---------------------------------------------------------------------------
 # Scheme accessors / constructors
 # ---------------------------------------------------------------------------
 
 export fn mono(t: Type) -> Scheme =
   Scheme(Nil, Nil, t, EffectPure, Nil)
+
+# Build a scheme that quantifies the effect variables its own signature binds.
+#
+# Every declaration site should use this rather than passing `Nil` for the
+# effect-var field. An unquantified `!{e}` is not merely unhelpful: because
+# `build_effect_repl` only freshens the variables a scheme names, an omitted one
+# survives instantiation verbatim, so every use of every `!{e}` signature in the
+# program shares ONE variable. The first call that binds it to IO makes every
+# other call read as IO too. See `ftv_effect_type` for why the top-level effect
+# alone is not enough to find them.
+export fn scheme_quantified(type_params: List String, t: Type, e: Effect,
+                            constraints: List (String, String)) -> Scheme =
+  Scheme(type_params, scheme_effect_vars_of(t, e), t, e, constraints)
 
 export fn scheme_vars(s: Scheme) -> List String =
   match s with | Scheme vs _ _ _ _ -> vs
@@ -408,9 +447,41 @@ export fn ftv_effect(e: Effect) -> List String =
   | EffectVar name -> Cons(name, Nil)
   | _ -> Nil
 
+# Every effect variable reachable from a type, including the ones buried in a
+# parameter's arrow. `ftv_effect` above sees only a bare Effect, which for a
+# scheme means only its top-level effect — and that is not where the interesting
+# variables are. In `list_each(f: a -> Unit !{e}, xs: List a) -> Unit !{e}` the
+# top-level `!{e}` and the parameter's `!{e}` are the SAME variable, so scanning
+# the top level alone happens to find it; but `fn twice(f: a -> a !{e}) -> a`
+# has one only in parameter position, and a scheme that fails to quantify it
+# shares a single global EffectVar across every instantiation in the program.
+export fn ftv_effect_type(t: Type) -> List String =
+  list_dedup(ftv_effect_type_acc(t, Nil))
+
+fn ftv_effect_type_acc(t: Type, acc: List String) -> List String =
+  match t with
+  | TVar _ -> acc
+  | TConst _ -> acc
+  | TApp base arg -> ftv_effect_type_acc(base, ftv_effect_type_acc(arg, acc))
+  | TFunc param ret eff _ ->
+      ftv_effect_type_acc(param, ftv_effect_type_acc(ret, list_union(ftv_effect(eff), acc)))
+  | TTuple items -> ftv_effect_type_list_acc(items, acc)
+
+fn ftv_effect_type_list_acc(items: List Type, acc: List String) -> List String =
+  match items with
+  | Nil -> acc
+  | Cons h t -> ftv_effect_type_list_acc(t, ftv_effect_type_acc(h, acc))
+
+# The effect variables a scheme should quantify: those in its type's arrows plus
+# its own declared effect. Callers subtract the enclosing environment's free
+# variables where that applies (generalize); a declaration site does not, because
+# a written `!{e}` is by definition bound by that signature.
+export fn scheme_effect_vars_of(t: Type, e: Effect) -> List String =
+  list_union(ftv_effect_type(t), ftv_effect(e))
+
 export fn ftv_scheme(s: Scheme) -> List String =
   list_diff(
-    list_union(ftv(scheme_type(s)), ftv_effect(scheme_effects(s))),
+    list_union(ftv(scheme_type(s)), scheme_effect_vars_of(scheme_type(s), scheme_effects(s))),
     list_union(scheme_vars(s), scheme_effect_vars(s))
   )
 

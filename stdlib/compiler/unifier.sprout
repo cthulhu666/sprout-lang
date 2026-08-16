@@ -58,6 +58,54 @@ export fn effect_report_inferred(r: EffectReport) -> types.Effect =
   match r with
   | EffectReport _ _ i -> i
 
+# What `unify_types` returns: BOTH substitutions, or a message.
+#
+# This replaced `Result String (Dict types.Type)` when arrow effects started
+# unifying. The pair is deliberately one value rather than two returns: several
+# callers unify speculatively and drop the result on failure (infer.sprout's
+# push_down_arg_slots is the clearest — `| Err _ -> subst`), and an effect
+# substitution returned separately from a failed attempt would leak that
+# attempt's bindings into the real one. Bundling them means a discarded
+# unification discards both halves or neither, with no per-call-site discipline
+# required.
+export type Unified (..) =
+  | UnifyOk (Dict types.Type) (Dict types.Effect)
+  | UnifyErr String
+
+export fn unified_subst(u: Unified, fallback: Dict types.Type) -> Dict types.Type =
+  match u with
+  | UnifyOk s _ -> s
+  | UnifyErr _ -> fallback
+
+export fn unified_eff_subst(u: Unified, fallback: Dict types.Effect) -> Dict types.Effect =
+  match u with
+  | UnifyOk _ es -> es
+  | UnifyErr _ -> fallback
+
+fn unified_of_bind(r: Result String (Dict types.Type), eff_subst: Dict types.Effect) -> Unified =
+  match r with
+  | Ok s -> UnifyOk(s, eff_subst)
+  | Err e -> UnifyErr(e)
+
+# A `unify_types` call that deliberately does not participate in effect
+# inference. Grep for it to find every such site.
+#
+# Some callers sit behind a result type that carries only a type substitution —
+# the deferred field-obligation chain (`OneResult`) is six functions deep and
+# would need all six widened. Rather than widen them for a case that needs a
+# record field whose type is a function carrying an effect variable, reached
+# through a DEFERRED access, those sites opt out here.
+#
+# This is sound, not merely tolerable, and the reason is worth stating: arrow
+# effect unification is total (see `unify_arrow_effects`), so the effect
+# substitution can never change whether a unification succeeds. Passing an empty
+# one therefore produces exactly the same types and the same errors as passing
+# the real one; the only loss is that a binding CREATED at such a site is not
+# visible later. That direction under-reports an effect, which is the direction
+# the report is already conservative in. It is not a correctness hole, and it
+# would become one only if arrow effect unification were ever made strict.
+export fn no_effect_subst() -> Dict types.Effect = dict_empty()
+
 export type InferState (..) =
   | InferState (Ref Int) (Ref Int) (Ref (Dict (List String))) (Ref (List FieldObligation)) (Ref (List EffectReport))
   # InferState next_type_id  next_effect_id  ctor_map  parked_field_obligations  effect_reports
@@ -252,21 +300,50 @@ fn bind_var(name: String, t: types.Type, subst: Dict types.Type) -> Result Strin
 
 export fn unify_types(
   subst: Dict types.Type,
+  eff_subst: Dict types.Effect,
   left: types.Type,
   right: types.Type
-) -> Result String (Dict types.Type) =
-  unify_applied(subst, apply_subst(subst, left), apply_subst(subst, right))
+) -> Unified =
+  unify_applied(subst, eff_subst, apply_subst(subst, left), apply_subst(subst, right))
 
 # Helpers to avoid nested-match-in-arm pattern (Sprout typechecker limitation)
-fn unify_tapp(subst: Dict types.Type, bl: types.Type, al: types.Type, br: types.Type, ar: types.Type) -> Result String (Dict types.Type) =
-  match unify_applied(subst, bl, br) with
-  | Err e -> Err(e)
-  | Ok s1 -> unify_applied(s1, apply_subst(s1, al), apply_subst(s1, ar))
+fn unify_tapp(subst: Dict types.Type, eff_subst: Dict types.Effect, bl: types.Type, al: types.Type, br: types.Type, ar: types.Type) -> Unified =
+  match unify_applied(subst, eff_subst, bl, br) with
+  | UnifyErr e -> UnifyErr(e)
+  | UnifyOk s1 es1 -> unify_applied(s1, es1, apply_subst(s1, al), apply_subst(s1, ar))
 
-fn unify_tfunc(subst: Dict types.Type, p1: types.Type, r1: types.Type, p2: types.Type, r2: types.Type) -> Result String (Dict types.Type) =
-  match unify_applied(subst, p1, p2) with
-  | Err e -> Err(e)
-  | Ok s1 -> unify_applied(s1, apply_subst(s1, r1), apply_subst(s1, r2))
+# The arrows' effects meet here, and this is the ONLY place an effect variable
+# ever gets bound. `e1` and `e2` are unified BEFORE the parameter and return, so
+# a later failure discards the binding along with the substitution — the two
+# travel together in `Unified` precisely so a speculative unify_types that is
+# thrown away cannot leave an effect binding behind.
+fn unify_tfunc(subst: Dict types.Type, eff_subst: Dict types.Effect,
+               p1: types.Type, r1: types.Type, e1: types.Effect,
+               p2: types.Type, r2: types.Type, e2: types.Effect) -> Unified =
+  match unify_applied(subst, unify_arrow_effects(eff_subst, e1, e2), p1, p2) with
+  | UnifyErr e -> UnifyErr(e)
+  | UnifyOk s1 es1 -> unify_applied(s1, es1, apply_subst(s1, r1), apply_subst(s1, r2))
+
+# Arrow-position effect unification BINDS but never REJECTS.
+#
+# `unify_effects` has an Err arm for a row that meets an incompatible row, and
+# that arm must not reach a user. Sprout's rule at a declaration boundary is
+# SUBSUMPTION, not equality: a pure body under an `!{IO}` signature is legal and
+# idiomatic (spec §7), so two arrows whose effects differ are not thereby a type
+# error. Enforcement happens at the one place the language defines it —
+# `check_fn_body` comparing a body's inferred effect against its declaration —
+# and nowhere else.
+#
+# Getting this wrong is worse than leaving effects unchecked. Until this change,
+# populating arrow effects provably could not reject a program, because
+# `unify_applied` discarded the field; the moment it stops discarding it, every
+# effect imprecision anywhere in inference becomes a candidate compile error on
+# correct code. Swallowing the Err keeps the old guarantee: turning effect
+# inference on can make the REPORT wrong, never the ACCEPT/REJECT decision.
+fn unify_arrow_effects(eff_subst: Dict types.Effect, e1: types.Effect, e2: types.Effect) -> Dict types.Effect =
+  match unify_effects(eff_subst, e1, e2) with
+  | Ok es -> es
+  | Err _ -> eff_subst
 
 # Parameter ownership is INVARIANT (M4.6): the two conventions are different
 # types and neither substitutes for the other. Both directions are unsound —
@@ -279,11 +356,12 @@ fn unify_tfunc(subst: Dict types.Type, p1: types.Type, r1: types.Type, p2: types
 #
 # Effects are deliberately still ignored above; ownership is not, because an
 # ownership mismatch is a soundness bug rather than a conservatism knob.
-fn unify_tfunc_owned(subst: Dict types.Type, l: types.Type, r: types.Type,
-                     p1: types.Type, r1: types.Type, o1: types.Ownership,
-                     p2: types.Type, r2: types.Type, o2: types.Ownership) -> Result String (Dict types.Type) =
-  if types.ownership_eq(o1, o2) then unify_tfunc(subst, p1, r1, p2, r2)
-  else Err(ownership_mismatch_error(l, r, o1, o2))
+fn unify_tfunc_owned(subst: Dict types.Type, eff_subst: Dict types.Effect,
+                     l: types.Type, r: types.Type,
+                     p1: types.Type, r1: types.Type, e1: types.Effect, o1: types.Ownership,
+                     p2: types.Type, r2: types.Type, e2: types.Effect, o2: types.Ownership) -> Unified =
+  if types.ownership_eq(o1, o2) then unify_tfunc(subst, eff_subst, p1, r1, e1, p2, r2, e2)
+  else UnifyErr(ownership_mismatch_error(l, r, o1, o2))
 
 # The explanation branches on WHICH pair actually mismatched. It used to be a
 # single sentence about `borrowing`, written when Ownership had two values; once
@@ -314,46 +392,49 @@ fn type_mismatch_error(l: types.Type, r: types.Type) -> String =
 
 fn unify_applied(
   subst: Dict types.Type,
+  eff_subst: Dict types.Effect,
   l: types.Type,
   r: types.Type
-) -> Result String (Dict types.Type) =
+) -> Unified =
   match (l, r) with
   | (types.TVar a, types.TVar b) ->
       # Bind right→left so the left (expected/older) TVar stays canonical.
       # This ensures @fwd markers (keyed by the instantiation TVar) remain
       # reachable after tuple pattern matching introduces fresh element vars.
-      if types.tyvar_eq(a, b) then Ok(subst) else bind_var(types.tyvar_identity(b), l, subst)
-  | (types.TVar a, _) -> bind_var(types.tyvar_identity(a), r, subst)
-  | (_, types.TVar b) -> bind_var(types.tyvar_identity(b), l, subst)
+      if types.tyvar_eq(a, b) then UnifyOk(subst, eff_subst)
+      else unified_of_bind(bind_var(types.tyvar_identity(b), l, subst), eff_subst)
+  | (types.TVar a, _) -> unified_of_bind(bind_var(types.tyvar_identity(a), r, subst), eff_subst)
+  | (_, types.TVar b) -> unified_of_bind(bind_var(types.tyvar_identity(b), l, subst), eff_subst)
   | (types.TConst a, types.TConst b) ->
       # Module-qualified type identity (T7): exact match on the canonical name.
       # Bare-name comparison (after_last_dot both sides) silently unified two
       # same-short-named types from different modules — distinct layouts, one
       # identity. The bundler already resolves references to canonical names, so
       # equal identity means equal name; the prelude's canonical form is unqualified.
-      if types.type_id_eq(a, b) then Ok(subst) else Err(type_mismatch_error(l, r))
-  | (types.TApp bl al, types.TApp br ar) -> unify_tapp(subst, bl, al, br, ar)
-  | (types.TFunc p1 r1 _ o1, types.TFunc p2 r2 _ o2) ->
-      unify_tfunc_owned(subst, l, r, p1, r1, o1, p2, r2, o2)
-  | (types.TTuple xs, types.TTuple ys) -> unify_list(subst, xs, ys)
+      if types.type_id_eq(a, b) then UnifyOk(subst, eff_subst) else UnifyErr(type_mismatch_error(l, r))
+  | (types.TApp bl al, types.TApp br ar) -> unify_tapp(subst, eff_subst, bl, al, br, ar)
+  | (types.TFunc p1 r1 e1 o1, types.TFunc p2 r2 e2 o2) ->
+      unify_tfunc_owned(subst, eff_subst, l, r, p1, r1, e1, o1, p2, r2, e2, o2)
+  | (types.TTuple xs, types.TTuple ys) -> unify_list(subst, eff_subst, xs, ys)
   | _ ->
-      Err(type_mismatch_error(l, r))
+      UnifyErr(type_mismatch_error(l, r))
 
-fn unify_list_step(subst: Dict types.Type, x: types.Type, y: types.Type, xr: List types.Type, yr: List types.Type) -> Result String (Dict types.Type) =
-  match unify_applied(subst, apply_subst(subst, x), apply_subst(subst, y)) with
-  | Err e -> Err(e)
-  | Ok s1 -> unify_list(s1, xr, yr)
+fn unify_list_step(subst: Dict types.Type, eff_subst: Dict types.Effect, x: types.Type, y: types.Type, xr: List types.Type, yr: List types.Type) -> Unified =
+  match unify_applied(subst, eff_subst, apply_subst(subst, x), apply_subst(subst, y)) with
+  | UnifyErr e -> UnifyErr(e)
+  | UnifyOk s1 es1 -> unify_list(s1, es1, xr, yr)
 
 fn unify_list(
   subst: Dict types.Type,
+  eff_subst: Dict types.Effect,
   xs: List types.Type,
   ys: List types.Type
-) -> Result String (Dict types.Type) =
+) -> Unified =
   match (xs, ys) with
-  | (Nil, Nil) -> Ok(subst)
-  | (Nil, _) -> Err("Tuple arity mismatch")
-  | (_, Nil) -> Err("Tuple arity mismatch")
-  | (Cons x xr, Cons y yr) -> unify_list_step(subst, x, y, xr, yr)
+  | (Nil, Nil) -> UnifyOk(subst, eff_subst)
+  | (Nil, _) -> UnifyErr("Tuple arity mismatch")
+  | (_, Nil) -> UnifyErr("Tuple arity mismatch")
+  | (Cons x xr, Cons y yr) -> unify_list_step(subst, eff_subst, x, y, xr, yr)
 
 # ---------------------------------------------------------------------------
 # unify_effects — pure effect-row unification
@@ -497,7 +578,10 @@ export fn generalize(
 fn generalize_resolved(env_ftv: List String, resolved: types.Type, resolved_eff: types.Effect) -> types.Scheme =
   types.Scheme(
     types.list_diff(types.ftv(resolved), env_ftv),
-    types.list_diff(types.ftv_effect(resolved_eff), env_ftv),
+    # scheme_effect_vars_of, not ftv_effect: an inferred function value can carry
+    # an effect variable in a parameter's arrow with nothing at the top level, and
+    # a scheme that fails to name it leaves it globally shared after instantiation.
+    types.list_diff(types.scheme_effect_vars_of(resolved, resolved_eff), env_ftv),
     resolved,
     resolved_eff,
     Nil

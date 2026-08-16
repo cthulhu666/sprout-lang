@@ -110,15 +110,15 @@ carries the *declared* effect; nothing writes an inferred effect back. So a mis-
 flagged, but the callers it taints are not — they surface only on a later run, after `helper` is
 annotated. **Every number below is a lower bound on the first wave.**
 
-**Named functions passed as values are a blind spot.** `list_each(\x -> print(x), xs)` is caught;
-`list_each(print, xs)` is not. The effect crosses a higher-order boundary today only because
-`infer_lambda` reports the lambda *body's* effect as the effect of the enclosing expression. That
-attribution is strictly wrong — building a closure performs no IO — but it is the only mechanism
-available, because `unify_types` ignores the arrow's effect field and never populates `eff_subst`,
-so a callee's `!{e}` instantiates to a fresh `EffectVar` that nothing ever binds. Reporting the
-technically-correct pure there would make `list_each`/`list_fold` — the repo's own recommended
-effectful idiom — report clean, and those are precisely the boundary that matters. Over-approximating
-keeps them visible until effect unification is threaded through `unify_types`.
+**Named functions passed as values were a blind spot — closed 2026-08-16, see §9.**
+`list_each(\x -> print(x), xs)` was caught; `list_each(print, xs)` was not. The effect crossed a
+higher-order boundary only because `infer_lambda` reports the lambda *body's* effect as the effect of
+the enclosing expression. That attribution is strictly wrong — building a closure performs no IO —
+but it was the only mechanism available, because `unify_types` ignored the arrow's effect field and
+never populated `eff_subst`, so a callee's `!{e}` instantiated to a fresh `EffectVar` that nothing
+ever bound. Reporting the technically-correct pure there would have made `list_each`/`list_fold` —
+the repo's own recommended effectful idiom — report clean, and those are precisely the boundary that
+matters. Over-approximating kept them visible until effect unification landed.
 
 ## 5. The measurement
 
@@ -303,12 +303,11 @@ Sources: [Koka `std/core`](https://koka-lang.github.io/koka/doc/std_core.html) �
 
 ## 7. What is not done
 
+Two of the four items here were done on 2026-08-16; see §9. What remains:
+
 - Enforcement itself. The comparison site is `infer.check_fn_body`, which now holds both values and
-  records them; turning the record into a `BodyErr` is the flip.
-- Effect-variable solving. `!{e}` is written in `list_each`/`list_fold`/`list_map` signatures in the
-  prelude, is never quantified (`scheme_effect_vars` is `Nil` for every declaration) and is never
-  bound. Enforcement cannot ship Pure/IO-only: the prelude depends on the polymorphic case on day
-  one.
+  records them; turning the record into a `BodyErr` is the flip. **Blocked on correcting
+  `infer_lambda`'s attribution** — see §9.4, which is now the only thing standing in front of it.
 - Writing an inferred effect back to the env, which is what would turn the report from one wave into
   a fixed point.
 - The conformance fixture for the first case enforcement must reject
@@ -326,3 +325,115 @@ An unrecognised `--phase` argument used to fall through to the default source ch
 `--phase efects` ran something else and looked like it had worked. It is now an error. A gate that
 asserts on a phase's output is only as good as the driver's willingness to admit the phase does not
 exist.
+
+## 9. Effect unification (2026-08-16)
+
+Effect variables are now quantified, freshened per instantiation, and **bound by unification**. This
+closes the §4 blind spot and removes the second bullet of §7.
+
+### 9.1 What was actually missing
+
+Not "wire up `unify_effects`" — there was no missing call site. `unify_effects`, `apply_effect_subst`,
+`build_effect_repl` and a fully-threaded `eff_subst` in every `InferResult` all existed and were all
+correct. Two things were absent, and each alone made the other useless:
+
+1. **Nothing quantified an effect variable.** Every declaration site passed `Nil` for `Scheme`'s
+   effect-var field (`infer.scheme_from_fn_parts_inner`, the constructor and record-field scheme
+   builders, `iface_codec.method_scheme`). `build_effect_repl` freshens only the variables a scheme
+   *names*, so an omitted one survived instantiation verbatim and **every `!{e}` in the program was
+   one shared variable**. `types.ftv_effect` could not have found them anyway: it reads a bare
+   `Effect`, which for a scheme is only its top-level effect, and the interesting variables live in
+   parameter arrows. `types.ftv_effect_type` walks the type for them.
+2. **`unify_applied` discarded the arrow's effect field**, matching `TFunc p r _ o` on both sides. So
+   even a freshened variable met the other arrow's effect and nothing happened.
+
+### 9.2 Three decisions worth recording
+
+**Arrow-position effect unification binds but never rejects** (`unifier.unify_arrow_effects`). Until
+this change, populating arrow effects provably could not reject a program, because the field was
+discarded. The moment it is read, every imprecision anywhere in inference becomes a candidate compile
+error on correct code — and Sprout's rule is *subsumption*, so two arrows whose effects differ are
+not thereby a type error (over-declaring is legal, §7 of the spec). Swallowing `unify_effects`' `Err`
+preserves the old guarantee: turning effect inference on can make the report wrong, never the
+accept/reject decision.
+
+**`build_fn_type_like` inherits each arrow's effect from the callee** rather than hardcoding
+`EffectPure`, exactly as it already inherited ownership via `template_own`. A hardcoded `Pure` is an
+assertion the call site is in no position to make; unified against `list_each`'s innermost `!{e}` it
+binds `e := Pure` and manufactures a pure reading. This one would not have shown up in testing —
+`unify_tfunc` unifies the parameter first, so an IO argument binds `e` before the bogus meeting,
+which is then absorbed by the conservative arm.
+
+**`unify_types` returns one `Unified` value carrying both substitutions**, not two results. Several
+callers unify speculatively and drop the result on failure; a separately-returned effect substitution
+would leak a failed attempt's bindings into the real one. Bundling them makes a discarded unification
+discard both halves, with no per-call-site discipline required. Sites behind a result type that
+carries only a type substitution opt out through `unifier.no_effect_subst()` — greppable, and sound
+because totality (above) means the effect substitution can never change whether unification succeeds.
+
+### 9.2a The second AST walk, and why the canaries could not see it
+
+`iface_codec` carries its own copy of the AST-to-type walk, and it had diverged from `infer`'s three
+ways: `!{IO}` normalised to `EffectRow(["IO"])` rather than `EffectIO` (two spellings of one value,
+which `unify_effects` has no rule relating); `typeexpr_to_type_with_vars` discarded a `TypeArrow`'s
+effect labels; and `params_to_func_type` built every arrow pure. All three are now shared or aligned.
+
+**This was latent, not observed.** Nothing type-checks against a decoded interface file:
+`decode_iface_file`'s only consumer is `--check-iface`, which counts entries for well-formedness. The
+wrong arrows were written to disk and read by nobody, and no program was ever misjudged. It is
+recorded here because the day a consumer appears is the worst possible day to discover the two walks
+disagree — and because of how the divergence survived a gate that was built to catch exactly this
+class of thing.
+
+`canaries.spr` deliberately has **no module header**, which keeps its report to a handful of lines
+instead of hundreds. That also means it never produces an interface file, so every assertion in
+`effect-report-smoke` was structurally blind to this path — green, and blind. The fix is a second
+fixture that does have a header (`tests/effects/iface_effects.sprout`) with three assertions against
+the *encoded* form, which is the only place this walk's output is visible. The before/after is
+concrete:
+
+| | before | after |
+|---|---|---|
+| `emit`'s inner arrow | `(EffectPure)` | `(EffectIO)` |
+| `emit`'s scheme effect | `(EffectRow (IO))` | `(EffectIO)` |
+| `run_with`'s quantified effect vars | `()` | `(e)` |
+| `run_with`'s arrows | all `(EffectPure)` | `(EffectVar e)` |
+
+The general lesson is the one §4 already records in a different form: a fixture chosen to keep output
+small is a fixture that has excluded something, and what it excluded is invisible in a green run.
+
+### 9.3 Measurement
+
+Identical corpus, 696 files, 5859 unique declarations, before and after:
+
+| | before | after |
+|---|---:|---:|
+| unresolved effect variables | 38 | **8** |
+| gaps (declared pure, inferred `!{IO}`) | 10 | 11 |
+
+The 8 survivors are the effect-polymorphic functions themselves — `list_each`, `list_fold`,
+`range_each`, `range_fold` and their `_go` workers — where an unbound variable is what `!{e}` *means*.
+The single new gap is `each_named`, the canary for the closed blind spot. No previously-reported gap
+disappeared.
+
+### 9.4 The remaining blocker for enforcement
+
+Six real gaps survive (the other five are the canary fixture's deliberate breakage), and **all six are
+the same false positive**: a pure function that builds a closure whose body does IO.
+
+| declaration | shape |
+|---|---|
+| `stdlib.log.stderr_logger` | `logger_with_sink(min, \line -> eprint(line))` |
+| `stdlib.http_middleware.with_logging` | body is `\req -> do …`; returns a function |
+| `examples.http_web_server.routes` | a `Vec Route` of IO-performing handlers |
+| `main.get_at` | `vector_get_direct(v, _)` — the `_` desugars to a lambda |
+| `capture_logger` (×2 test files) | `logger_with_sink(Info, \line -> …)` |
+
+Every one is `infer_lambda` reporting the lambda body's effect as the enclosing expression's — the
+§4 over-approximation. **Enforcing today would reject six correct programs.**
+
+Correcting it is now safe, and was not before: the attribution was the *only* path by which an effect
+crossed a higher-order boundary, so removing it would previously have left `list_each`/`list_fold`
+unchecked. The arrow now carries the effect and unification reads it, so the correct attribution
+(constructing a closure is pure; the effect lives in its arrow) loses nothing. That is the next
+change, and enforcement follows it.

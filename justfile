@@ -1053,16 +1053,18 @@ effect-report-smoke: bootstrap-from-seed
     failed=$((failed + 1))
   fi
   # A function that MUST be reported as a gap (declared pure, body reaches IO).
-  for fn in shout calls_loud each_lambda; do
+  for fn in shout calls_loud each_lambda each_named; do
     if ! grep -qE "^effect GAP ${fn}:" "$TMPD/out"; then
       echo "effect-report-smoke: expected a GAP for '${fn}', got:" >&2
       grep -E "^effect (GAP|ok) ${fn}:" "$TMPD/out" >&2 || echo "  (no line at all)" >&2
       failed=$((failed + 1))
     fi
   done
-  # A function that must NOT be reported as a gap. `calls_shout` and `each_named`
-  # are here as documented LIMITATIONS, not successes — see the fixture.
-  for fn in loud over_declared honest_pure calls_shout each_named unreachable_arm main; do
+  # A function that must NOT be reported as a gap. `calls_shout` is here as a
+  # documented LIMITATION, not a success — see the fixture. `each_pure` is the
+  # false-positive guard: it fails if `!{e}` stops being freshened per
+  # instantiation and the IO binding from the two calls above leaks into it.
+  for fn in loud over_declared honest_pure calls_shout each_pure unreachable_arm main; do
     if grep -qE "^effect GAP ${fn}:" "$TMPD/out"; then
       echo "effect-report-smoke: unexpected GAP for '${fn}':" >&2
       grep -E "^effect GAP ${fn}:" "$TMPD/out" >&2
@@ -1074,6 +1076,40 @@ effect-report-smoke: bootstrap-from-seed
   if ! grep -qE "^effect-summary: [0-9]+ declarations, [0-9]+ gaps" "$TMPD/out"; then
     echo "effect-report-smoke: no effect-summary line in output:" >&2
     cat "$TMPD/out" >&2
+    failed=$((failed + 1))
+  fi
+  # --- The interface-file path, which the fixture above structurally cannot reach. ---
+  #
+  # canaries.spr has no module header on purpose, so `--phase effects` on it only
+  # ever exercises within-module inference. iface_codec carries a SECOND copy of
+  # the AST-to-type walk, and every assertion above is blind to it. These three
+  # pin the encoded output, which is the only place that copy's result is visible.
+  IFX=tests/effects/iface_effects.sprout
+  [ -f "$IFX" ] || { echo "effect-report-smoke: missing fixture $IFX" >&2; exit 1; }
+  if ! "{{build_dir}}/compile_driver_bin_stage1" --emit-iface "{{stdlib_root}}" \
+         tests.effects.iface_effects "$IFX" > "$TMPD/iface" 2>"$TMPD/iface.err"; then
+    echo "effect-report-smoke: --emit-iface failed on $IFX" >&2; cat "$TMPD/iface.err" >&2; exit 1
+  fi
+  # A declared !{IO} must reach the method's INNERMOST arrow, not just the
+  # scheme's trailing effect field. `params_to_func_type` built every arrow pure.
+  if ! grep -q '(TFunc (TConst String) (TConst Unit) (EffectIO) consume)' "$TMPD/iface"; then
+    echo "effect-report-smoke: class method 'emit' lost its !{IO} on the arrow:" >&2
+    tr ')' ')\n' < "$TMPD/iface" | grep -A2 'NamedScheme emit' >&2
+    failed=$((failed + 1))
+  fi
+  # A method's !{IO} must normalise to (EffectIO), the same value infer builds.
+  # iface_codec's own effect_from_maybe_labels produced (EffectRow (IO)) — a
+  # value unify_effects has no rule relating to the label it contains.
+  if grep -q '(EffectRow (IO))' "$TMPD/iface"; then
+    echo "effect-report-smoke: !{IO} encoded as a one-element row, not EffectIO:" >&2
+    tr ')' ')\n' < "$TMPD/iface" | grep 'EffectRow' >&2
+    failed=$((failed + 1))
+  fi
+  # An effect-polymorphic method must QUANTIFY its variable. An empty list in the
+  # scheme's second field is the every-`!{e}`-is-one-global-variable bug.
+  if ! grep -q 'NamedScheme run_with (Scheme (a) (e)' "$TMPD/iface"; then
+    echo "effect-report-smoke: 'run_with' does not quantify its effect variable:" >&2
+    tr ')' ')\n' < "$TMPD/iface" | grep -A2 'NamedScheme run_with' >&2
     failed=$((failed + 1))
   fi
   if (( failed > 0 )); then
