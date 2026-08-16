@@ -1579,6 +1579,49 @@ The following typeclass instances are provided by `stdlib/prelude.sprout` and ar
 automatically available without an explicit import.  They are experimental in v0
 (consistent with the module/typeclass extension status noted in §1).
 
+**Declaration syntax.**  A `class` or `instance` declaration is a head followed
+by a body of `fn` members.  The body takes one of two forms.
+
+*Layout form* (idiomatic) — the members are the run of `fn` declarations
+indented past the `class`/`instance` keyword and aligned on a single column.
+The body ends at the first token that is not a `fn` on that column, normally the
+next top-level declaration:
+
+```sprout
+class Codec a
+  fn from_int(n: Int) -> a
+  fn to_str(x: a) -> String
+
+instance Codec Int
+  fn from_int(n: Int) -> Int = n
+  fn to_str(x: Int) -> String = int_to_string(x)
+```
+
+*Brace form* — the members are enclosed in `{ … }` and their indentation is not
+significant:
+
+```sprout
+class Codec a {
+  fn from_int(n: Int) -> a
+  fn to_str(x: a) -> String
+}
+```
+
+Both forms are accepted and denote the same declaration.  The layout form is
+idiomatic; the brace form is retained for compatibility.
+
+The layout rule is the one already used by `do`, `let … in` and `match`.  The
+first member fixes the block column; a subsequent member indented *further* than
+that column is rejected with **`Unexpected indentation in class body`** (resp.
+**`… in instance body`**), and a `fn` at or left of the `class`/`instance`
+keyword's own column ends the body rather than joining it.  A member's body may
+wrap onto further-indented lines without ending the block.  An empty body is
+legal — the class declares no methods.
+
+The column is what ends an `instance` body: an instance member `fn f(x) = e` is
+syntactically identical to a top-level `fn`, so a dedent is the only signal that
+the block is over.
+
 **Constraint syntax.**  A `where` clause names the **class first, then the
 constrained type variable(s)**: `where ToString a`, `where Applicative f`,
 `where Eq a, Ord b`.  Two well-formedness rules are enforced at check time, both
