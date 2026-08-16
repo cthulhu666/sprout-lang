@@ -245,7 +245,8 @@ let answer = 42
 ```
 
 Bindings are immutable.
-At top level, `let` initializers must be pure.
+At top level, `let` initializers must be pure. (**Not yet enforced** — see the note in
+§6; an effectful top-level `let` is accepted today.)
 
 **Type annotation (experimental).** A top-level `let` binding may carry an
 optional type annotation between the name and `=`:
@@ -1368,6 +1369,14 @@ Effect note for v0:
 - v0 does not provide delayed execution, mixed/open effect rows, or handlers.
 - Because top-level `let` bindings must be pure, imported modules do not perform
   effectful initialization merely by being loaded.
+
+> **Not yet enforced (2026-08-16).** The top-level-`let` purity rule above is normative
+> but unchecked: `let boom = print("at load time")` type-checks, binding
+> `main.boom : Unit`. The §7 enforcement note below covers `fn` and instance-method
+> bodies; a `let` initializer's inferred effect is still discarded. Tracked in
+> `BACKLOG.md`. Do not read this bullet as a guarantee the compiler currently makes —
+> it is what v0 intends, and until the check lands an effectful top-level `let` is
+> accepted.
 
 ## 7. Typing Rules (High Level)
 
