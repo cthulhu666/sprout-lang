@@ -42,6 +42,9 @@ Formatting rules that should be treated as fixed:
 - Write `name: Type`, not `name : Type`.
 - Put spaces around `=`, `->`, binary operators, and `++`.
 - Put a space before effect annotations: `-> Unit !{IO}`.
+- Write `class` and `instance` bodies in the layout form — members indented two
+  spaces past the keyword, no braces. The brace form still parses, but it is a
+  compatibility shim, not the house style.
 
 Examples:
 

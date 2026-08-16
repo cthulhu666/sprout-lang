@@ -1,0 +1,169 @@
+import stdlib.test (new_state, assert_eq, assert_true, assert_false, summary)
+import stdlib.compiler.lexer as lexer
+import stdlib.compiler.parser as parser
+import stdlib.compiler.ast as ast
+
+# Layout-delimited `class` and `instance` bodies: the members are the run of
+# `fn` declarations indented past the introducing keyword, exactly as `do`,
+# `let` and `match` blocks already work (parser.collect_do_steps_at).
+#
+# The termination case is what these tests are really about.  A class body is
+# signatures only, but an instance method (`fn f(x) = e`) is token-for-token a
+# top-level `fn`, so ONLY the column tells the parser where the block stops.
+# Every "… then a top-level fn" case below fails on a parser that just keeps
+# collecting `fn`s: the following declaration is swallowed as a member.
+
+fn first_decl(src: String) -> Maybe ast.Decl =
+  match lexer.tokenize(src) with
+  | Err _ -> Nothing
+  | Ok toks ->
+      match parser.parse_program(toks) with
+      | Err _ -> Nothing
+      | Ok prog ->
+          match prog with
+          | ast.Program decls _ ->
+              match decls with
+              | [] -> Nothing
+              | [d | _] -> Just(d)
+
+fn second_decl(src: String) -> Maybe ast.Decl =
+  match lexer.tokenize(src) with
+  | Err _ -> Nothing
+  | Ok toks ->
+      match parser.parse_program(toks) with
+      | Err _ -> Nothing
+      | Ok prog ->
+          match prog with
+          | ast.Program decls _ ->
+              match decls with
+              | [] -> Nothing
+              | [_] -> Nothing
+              | [_, d | _] -> Just(d)
+
+# -1 distinguishes "did not parse" from "parsed with zero members", which is a
+# legal outcome for an empty class body and must not silently look like failure.
+fn decl_count(src: String) -> Int =
+  match lexer.tokenize(src) with
+  | Err _ -> -1
+  | Ok toks ->
+      match parser.parse_program(toks) with
+      | Err _ -> -1
+      | Ok prog ->
+          match prog with
+          | ast.Program decls _ -> list_length(decls)
+
+fn class_method_count(src: String) -> Int =
+  match first_decl(src) with
+  | Just (ast.ClassDecl _ _ methods _ _) -> list_length(methods)
+  | _ -> -1
+
+fn class_superclass_count(src: String) -> Int =
+  match first_decl(src) with
+  | Just (ast.ClassDecl _ _ _ supers _) -> list_length(supers)
+  | _ -> -1
+
+fn instance_method_count(src: String) -> Int =
+  match first_decl(src) with
+  | Just (ast.InstanceDecl _ _ methods _) -> list_length(methods)
+  | _ -> -1
+
+fn second_is_fn(src: String) -> Bool =
+  match second_decl(src) with
+  | Just (ast.FnDecl _ _ _ _ _ _ _) -> true
+  | _ -> false
+
+fn parse_ok(src: String) -> Bool =
+  match lexer.tokenize(src) with
+  | Err _ -> false
+  | Ok toks ->
+      match parser.parse_program(toks) with
+      | Ok _ -> true
+      | Err _ -> false
+
+fn parse_fails(src: String) -> Bool =
+  match lexer.tokenize(src) with
+  | Err _ -> true
+  | Ok toks ->
+      match parser.parse_program(toks) with
+      | Err _ -> true
+      | Ok _ -> false
+
+fn main() -> Unit !{IO} =
+  do
+    state <- new_state()
+
+    # ── class: layout form ────────────────────────────────────────────────
+    assert_eq(state, "layout class collects both sigs",
+      class_method_count("class Codec a\n  fn from_int(n: Int) -> a\n  fn to_str(x: a) -> Int"), 2)
+    assert_eq(state, "layout class is a single decl",
+      decl_count("class Codec a\n  fn from_int(n: Int) -> a\n  fn to_str(x: a) -> Int"), 1)
+    assert_eq(state, "layout class with one sig",
+      class_method_count("class Show a\n  fn show(x: a) -> Int"), 1)
+
+    # An empty body is legal — the class simply has no methods.  It must not be
+    # mistaken for a parse failure, hence the -1 sentinel above.
+    assert_eq(state, "layout class with empty body",
+      class_method_count("class Marker a\n\nfn top() -> Int = 1"), 0)
+    assert_eq(state, "empty layout class does not eat the next decl",
+      decl_count("class Marker a\n\nfn top() -> Int = 1"), 2)
+
+    # `where <superclass>` already occupies the position Haskell uses to open a
+    # body, so the layout form has to work with the constraint clause present.
+    assert_eq(state, "layout class with superclass keeps its sigs",
+      class_method_count("class Applicative f where Functor f\n  fn pure(x: a) -> f a\n  fn map2(g: Int, xs: f a, ys: f a) -> f a"), 2)
+    assert_eq(state, "layout class with superclass keeps its constraint",
+      class_superclass_count("class Applicative f where Functor f\n  fn pure(x: a) -> f a"), 1)
+
+    # Termination: without a column check the trailing `fn` becomes a 3rd sig.
+    assert_eq(state, "layout class stops at a dedented fn",
+      decl_count("class Codec a\n  fn from_int(n: Int) -> a\n  fn to_str(x: a) -> Int\n\nfn top() -> Int = 1"), 2)
+    assert_eq(state, "layout class does not absorb the following fn",
+      class_method_count("class Codec a\n  fn from_int(n: Int) -> a\n  fn to_str(x: a) -> Int\n\nfn top() -> Int = 1"), 2)
+    assert_true(state, "decl after a layout class is a fn decl",
+      second_is_fn("class Codec a\n  fn from_int(n: Int) -> a\n\nfn top() -> Int = 1"))
+
+    # ── instance: layout form ─────────────────────────────────────────────
+    assert_eq(state, "layout instance collects both impls",
+      instance_method_count("instance Codec Int\n  fn from_int(n: Int) -> Int = n\n  fn to_str(x: Int) -> Int = x"), 2)
+    assert_eq(state, "layout instance is a single decl",
+      decl_count("instance Codec Int\n  fn from_int(n: Int) -> Int = n\n  fn to_str(x: Int) -> Int = x"), 1)
+
+    # A method body may wrap onto further-indented lines; those lines belong to
+    # the body's own expression parse and must never reach the member collector.
+    assert_eq(state, "layout instance with a wrapped body",
+      instance_method_count("instance Codec Int\n  fn to_str(x: Int) -> Int =\n    if x == 0 then 1 else 2\n  fn from_int(n: Int) -> Int = n"), 2)
+    assert_eq(state, "layout instance with a do-block body",
+      instance_method_count("instance Codec Int\n  fn to_str(x: Int) -> Int =\n    let y = x\n    in y\n  fn from_int(n: Int) -> Int = n"), 2)
+
+    # Termination, the hard case: an instance member and a top-level fn are
+    # syntactically identical, so only the dedent ends the block.
+    assert_eq(state, "layout instance stops at a dedented fn",
+      decl_count("instance Codec Int\n  fn from_int(n: Int) -> Int = n\n\nfn top() -> Int = 1"), 2)
+    assert_eq(state, "layout instance does not absorb the following fn",
+      instance_method_count("instance Codec Int\n  fn from_int(n: Int) -> Int = n\n\nfn top() -> Int = 1"), 1)
+    assert_true(state, "decl after a layout instance is a fn decl",
+      second_is_fn("instance Codec Int\n  fn from_int(n: Int) -> Int = n\n\nfn top() -> Int = 1"))
+
+    # Back-to-back blocks: the class must end where the instance begins.
+    assert_eq(state, "layout class followed by layout instance",
+      decl_count("class Codec a\n  fn from_int(n: Int) -> a\n\ninstance Codec Int\n  fn from_int(n: Int) -> Int = n"), 2)
+
+    # ── misindentation is an error, not a silent reinterpretation ─────────
+    assert_true(state, "over-indented class member is rejected",
+      parse_fails("class Codec a\n  fn from_int(n: Int) -> a\n    fn to_str(x: a) -> Int"))
+    assert_true(state, "over-indented instance member is rejected",
+      parse_fails("instance Codec Int\n  fn from_int(n: Int) -> Int = n\n    fn to_str(x: Int) -> Int = x"))
+
+    # ── the brace form keeps working (both forms are accepted) ────────────
+    assert_true(state, "brace class still parses",
+      parse_ok("class Codec a {\n  fn from_int(n: Int) -> a\n  fn to_str(x: a) -> Int\n}"))
+    assert_eq(state, "brace class still collects its sigs",
+      class_method_count("class Codec a {\n  fn from_int(n: Int) -> a\n  fn to_str(x: a) -> Int\n}"), 2)
+    assert_true(state, "brace instance still parses",
+      parse_ok("instance Codec Int {\n  fn from_int(n: Int) -> Int = n\n}"))
+    assert_eq(state, "brace instance still collects its impls",
+      instance_method_count("instance Codec Int {\n  fn from_int(n: Int) -> Int = n\n}"), 1)
+    assert_false(state, "an unclosed brace class is still an error",
+      parse_ok("class Codec a {\n  fn from_int(n: Int) -> a"))
+
+    summary(state)

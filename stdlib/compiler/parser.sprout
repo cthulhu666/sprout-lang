@@ -1857,16 +1857,53 @@ fn collect_class_method_sigs(tokens: Vec token.Token, i: Int, acc: List ast.Clas
   else
     Ok((list_reverse(acc), i))
 
+# The layout form's member run: the `fn`s indented past the `class` keyword and
+# aligned on a single block column.  `block_col == -1` until the first member
+# fixes it — the same state machine as collect_do_steps, and deliberately so:
+# `do`, `let` and `match` already end their blocks on a dedent, and a class body
+# that behaved differently would be a second layout rule to learn.
+#
+# `keyword_col` is the guard that makes the *first* member meaningful.  Without
+# it a `fn` in column 1 would establish block_col = 1 and every following
+# top-level declaration would be collected as a class method.
+fn collect_class_method_sigs_layout(tokens: Vec token.Token, i: Int, keyword_col: Int, block_col: Int, acc: List ast.ClassMethodSig) -> Result ParseError (List ast.ClassMethodSig, Int) =
+  if ! (tok_is_keyword(tok_at(tokens, i), "fn")) then Ok((list_reverse(acc), i))
+  else if source.position_column(tok_pos(tok_at(tokens, i))) <= keyword_col then Ok((list_reverse(acc), i))
+  else if block_col == -1 then
+    collect_class_method_sigs_layout_at(tokens, i, keyword_col,
+      source.position_column(tok_pos(tok_at(tokens, i))), acc)
+  else if source.position_column(tok_pos(tok_at(tokens, i))) < block_col then Ok((list_reverse(acc), i))
+  else if source.position_column(tok_pos(tok_at(tokens, i))) > block_col then
+    Err(ParseError(string.concat("Unexpected indentation in class body at ", pos_str(cur_pos(tokens, i))), cur_pos(tokens, i)))
+  else
+    collect_class_method_sigs_layout_at(tokens, i, keyword_col, block_col, acc)
+
+fn collect_class_method_sigs_layout_at(tokens: Vec token.Token, i: Int, keyword_col: Int, block_col: Int, acc: List ast.ClassMethodSig) -> Result ParseError (List ast.ClassMethodSig, Int) =
+  do
+    (sig, i2) <- parse_class_method_sig(tokens, i)
+    collect_class_method_sigs_layout(tokens, i2, keyword_col, block_col, Cons(sig, acc))
+
+# Two body forms, chosen by one token of lookahead: an explicit `{ … }`, or the
+# layout form.  Both are accepted so the brace sources still in the tree keep
+# parsing while they are migrated.
+fn parse_class_body(tokens: Vec token.Token, i: Int, keyword_col: Int) -> Result ParseError (List ast.ClassMethodSig, Int) =
+  if tok_is_symbol(tok_at(tokens, i), "{") then
+    do
+      (_, i2) <- expected_symbol("{", tokens, i)
+      (methods, i3) <- collect_class_method_sigs(tokens, i2, Nil)
+      (_, i4) <- expected_symbol("}", tokens, i3)
+      Ok((methods, i4))
+  else
+    collect_class_method_sigs_layout(tokens, i, keyword_col, -1, Nil)
+
 fn parse_class_decl(tokens: Vec token.Token, i: Int) -> Result ParseError (ast.Decl, Int) =
   do
-    (_, i2) <- expected_keyword("class", tokens, i)
+    (class_tok, i2) <- expected_keyword("class", tokens, i)
     (name_tok, i3) <- expected_ident("class name", tokens, i2)
     (params, i4) <- collect_ident_list(tokens, i3, Nil)
     (superclasses, i5) <- parse_optional_instance_constraints(tokens, i4)
-    (_, i6) <- expected_symbol("{", tokens, i5)
-    (methods, i7) <- collect_class_method_sigs(tokens, i6, Nil)
-    (_, i8) <- expected_symbol("}", tokens, i7)
-    Ok((ast.ClassDecl(token.token_text(name_tok), list_reverse(params), methods, superclasses, cur_pos(tokens, i)), i8))
+    (methods, i6) <- parse_class_body(tokens, i5, source.position_column(tok_pos(class_tok)))
+    Ok((ast.ClassDecl(token.token_text(name_tok), list_reverse(params), methods, superclasses, cur_pos(tokens, i)), i6))
 
 fn parse_instance_method(tokens: Vec token.Token, i: Int) -> Result ParseError (ast.InstanceMethodImpl, Int) =
   do
@@ -1889,15 +1926,45 @@ fn collect_instance_methods(tokens: Vec token.Token, i: Int, acc: List ast.Insta
   else
     Ok((list_reverse(acc), i))
 
+# As collect_class_method_sigs_layout, but the stakes are higher: an instance
+# member `fn f(x) = e` is token-for-token a top-level `fn`, so the column is the
+# *only* thing that says where the block ends.  A member's body may wrap onto
+# further-indented lines — those are consumed by parse_expr and never reach this
+# loop, which only ever inspects the token a completed member stopped at.
+fn collect_instance_methods_layout(tokens: Vec token.Token, i: Int, keyword_col: Int, block_col: Int, acc: List ast.InstanceMethodImpl) -> Result ParseError (List ast.InstanceMethodImpl, Int) =
+  if ! (tok_is_keyword(tok_at(tokens, i), "fn")) then Ok((list_reverse(acc), i))
+  else if source.position_column(tok_pos(tok_at(tokens, i))) <= keyword_col then Ok((list_reverse(acc), i))
+  else if block_col == -1 then
+    collect_instance_methods_layout_at(tokens, i, keyword_col,
+      source.position_column(tok_pos(tok_at(tokens, i))), acc)
+  else if source.position_column(tok_pos(tok_at(tokens, i))) < block_col then Ok((list_reverse(acc), i))
+  else if source.position_column(tok_pos(tok_at(tokens, i))) > block_col then
+    Err(ParseError(string.concat("Unexpected indentation in instance body at ", pos_str(cur_pos(tokens, i))), cur_pos(tokens, i)))
+  else
+    collect_instance_methods_layout_at(tokens, i, keyword_col, block_col, acc)
+
+fn collect_instance_methods_layout_at(tokens: Vec token.Token, i: Int, keyword_col: Int, block_col: Int, acc: List ast.InstanceMethodImpl) -> Result ParseError (List ast.InstanceMethodImpl, Int) =
+  do
+    (m, i2) <- parse_instance_method(tokens, i)
+    collect_instance_methods_layout(tokens, i2, keyword_col, block_col, Cons(m, acc))
+
+fn parse_instance_body(tokens: Vec token.Token, i: Int, keyword_col: Int) -> Result ParseError (List ast.InstanceMethodImpl, Int) =
+  if tok_is_symbol(tok_at(tokens, i), "{") then
+    do
+      (_, i2) <- expected_symbol("{", tokens, i)
+      (methods, i3) <- collect_instance_methods(tokens, i2, Nil)
+      (_, i4) <- expected_symbol("}", tokens, i3)
+      Ok((methods, i4))
+  else
+    collect_instance_methods_layout(tokens, i, keyword_col, -1, Nil)
+
 fn parse_instance_decl(tokens: Vec token.Token, i: Int) -> Result ParseError (ast.Decl, Int) =
   do
-    (_, i2) <- expected_keyword("instance", tokens, i)
+    (inst_tok, i2) <- expected_keyword("instance", tokens, i)
     (constraint, i3) <- parse_type_constraint(tokens, i2)
     (inst_constraints, i4) <- parse_optional_instance_constraints(tokens, i3)
-    (_, i5) <- expected_symbol("{", tokens, i4)
-    (methods, i6) <- collect_instance_methods(tokens, i5, Nil)
-    (_, i7) <- expected_symbol("}", tokens, i6)
-    Ok((ast.InstanceDecl(constraint, inst_constraints, methods, cur_pos(tokens, i)), i7))
+    (methods, i5) <- parse_instance_body(tokens, i4, source.position_column(tok_pos(inst_tok)))
+    Ok((ast.InstanceDecl(constraint, inst_constraints, methods, cur_pos(tokens, i)), i5))
 
 fn parse_optional_instance_constraints(tokens: Vec token.Token, i: Int) -> Result ParseError (List ast.TypeConstraint, Int) =
   match match_keyword(tokens, i, "where") with
