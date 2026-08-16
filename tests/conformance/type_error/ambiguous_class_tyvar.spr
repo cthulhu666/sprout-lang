@@ -10,19 +10,16 @@
 # keys off the callee's declared `where` clause, and a class method has none.
 module main
 
-class Codec a {
+class Codec a
   fn from_int(n: Int) -> a
   fn to_str(x: a) -> String
-}
 
-instance Codec Int {
+instance Codec Int
   fn from_int(n: Int) -> Int = n
   fn to_str(x: Int) -> String = "int:" ++ int_to_string(x)
-}
 
-instance Codec Bool {
+instance Codec Bool
   fn from_int(n: Int) -> Bool = n > 0
   fn to_str(x: Bool) -> String = "bool"
-}
 
 fn main() -> Unit !{IO} = print(to_str(from_int(7)))

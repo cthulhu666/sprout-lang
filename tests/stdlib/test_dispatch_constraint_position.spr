@@ -5,17 +5,14 @@ import stdlib.test (check_eq, run_suite)
 # selected by the class-var PARAMETER POSITION (`x: a`), not by "first concrete
 # arg" — otherwise `describe("tag", 42)` wrongly selects the `Desc String`
 # instance and prints "STRING". (fundamentals review W4 / probe sr_dispatch.)
-class Desc a {
+class Desc a
   fn describe(tag: String, x: a) -> String
-}
 
-instance Desc String {
+instance Desc String
   fn describe(tag: String, x: String) -> String = "STRING"
-}
 
-instance Desc Int {
+instance Desc Int
   fn describe(tag: String, x: Int) -> String = "INT"
-}
 
 fn main() -> Unit !{IO} =
   run_suite("dispatch_constraint_position", [

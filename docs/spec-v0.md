@@ -1644,10 +1644,9 @@ value.  The canonical shape is a producer and a consumer of the same class
 composed directly:
 
 ```sprout
-class Codec a {
+class Codec a
   fn from_int(n: Int) -> a
   fn to_str(x: a) -> String
-}
 
 # rejected: nothing determines which Codec instance `from_int` should produce
 fn main() -> Unit !{IO} = print(to_str(from_int(7)))
@@ -1784,7 +1783,8 @@ of its own, so it has a head constructor of its own:
 type IntVec =
   | MkIntVec (Vec Int)
 
-instance Summable IntVec { … }
+instance Summable IntVec
+  …
 ```
 
 **Two instances may not share a head constructor.**  Instance selection keys on
@@ -1814,10 +1814,9 @@ restriction requires widening the key first (see `BACKLOG.md`).
 ### `Applicative` class and `mapN` helpers
 
 ```
-class Applicative f where Functor f {
+class Applicative f where Functor f
   fn pure(x: a) -> f a
   fn map2(g: a -> b -> c, xs: f a, ys: f b) -> f c
-}
 ```
 
 `Applicative` lifts an n-ary function over values in a context `f`.  Its primitive
@@ -1857,9 +1856,8 @@ destructuring them in a final combiner (no currying is used or required).
 ### `Monad` class and generic `and_then`
 
 ```
-class Monad m where Applicative m {
+class Monad m where Applicative m
   fn flat_map(f: a -> m b, xs: m a) -> m b
-}
 
 and_then(f: a -> m b, xs: m a) -> m b where Monad m   # = flat_map(f, xs)
 ```

@@ -20,13 +20,11 @@ fn adder(n: Int) -> Int -> Int = \m -> n + m
 fn partial_ret(n: Int) -> Int -> Int = add(n, _)
 
 # Case 3: an instance method whose return type is a function (exercises 4030 path).
-class MakeAdder t {
+class MakeAdder t
   fn make_adder(base: t) -> Int -> Int
-}
 
-instance MakeAdder Int {
+instance MakeAdder Int
   fn make_adder(base: Int) -> Int -> Int = \m -> base + m
-}
 
 fn main() -> Unit !{IO} =
   run_suite("function_returning_function", [

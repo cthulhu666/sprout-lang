@@ -1,14 +1,11 @@
-class Eq a {
+class Eq a
   fn eq(x: a, y: a) -> Bool
-}
 
-instance Eq Int {
+instance Eq Int
   fn eq(x: Int, y: Int) -> Bool = x == y
-}
 
-instance Eq String {
+instance Eq String
   fn eq(x: String, y: String) -> Bool = x == y
-}
 
 fn check_ints() -> Bool = eq(1, 2)
 

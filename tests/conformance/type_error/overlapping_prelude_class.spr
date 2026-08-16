@@ -7,12 +7,10 @@ module main
 type Foo (..) =
   | MkFoo
 
-instance ToString Foo {
+instance ToString Foo
   fn to_string(x: Foo) -> String = "a"
-}
 
-instance ToString Foo {
+instance ToString Foo
   fn to_string(x: Foo) -> String = "b"
-}
 
 fn main() -> Unit !{IO} = print(to_string(MkFoo))

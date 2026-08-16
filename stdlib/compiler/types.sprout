@@ -736,21 +736,17 @@ fn types_eq(left: List Type, right: List Type) -> Bool =
       | Nil -> false
       | Cons y ys -> if type_eq(x, y) then types_eq(xs, ys) else false
 
-instance Eq Effect {
+instance Eq Effect
   fn eq(left: Effect, right: Effect) -> Bool = effect_eq(left, right)
-}
 
-instance Eq Type {
+instance Eq Type
   fn eq(left: Type, right: Type) -> Bool = type_eq(left, right)
-}
 
-instance ToString Effect {
+instance ToString Effect
   fn to_string(e: Effect) -> String = effect_to_string(e)
-}
 
-instance ToString Type {
+instance ToString Type
   fn to_string(t: Type) -> String = type_to_string(t)
-}
 
 fn scheme_eq(left: Scheme, right: Scheme) -> Bool =
   match left with
@@ -779,10 +775,8 @@ fn constraints_eq(a: List (String, String), b: List (String, String)) -> Bool =
                     if c1 == c2 then constraints_eq(ra, rb) else false
                   else false
 
-instance Eq Scheme {
+instance Eq Scheme
   fn eq(left: Scheme, right: Scheme) -> Bool = scheme_eq(left, right)
-}
 
-instance ToString Scheme {
+instance ToString Scheme
   fn to_string(s: Scheme) -> String = scheme_to_string(s)
-}

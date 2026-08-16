@@ -11,18 +11,16 @@ module main
 # news. Enforcement inherits the same hazard: a flip applied at one boundary and
 # not the other passes every `fn` test while quietly exempting every instance.
 
-class Describe a {
+class Describe a
   fn describe(x: a) -> String
-}
 
 type Noisy = Noisy
 
-instance Describe Noisy {
+instance Describe Noisy
   fn describe(x: Noisy) -> String =
     do
       print("noisy")
       "noisy"
-}
 
 fn main() -> Unit !{IO} =
   print(describe(Noisy))

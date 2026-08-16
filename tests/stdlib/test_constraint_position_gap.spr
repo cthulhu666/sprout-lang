@@ -12,12 +12,17 @@ import stdlib.test (check_eq, run_suite)
 # §13.3(B) S3 flip (Context-1 consumer reads scheme_constraints instead of the
 # @constrained_N markers): green before and after the flip.
 
-class Label a {
+class Label a
   fn label(x: a) -> String
-}
-instance Label Int {fn label(x: Int) -> String = "I"}
-instance Label Bool {fn label(x: Bool) -> String = "B"}
-instance Label String {fn label(x: String) -> String = "S"}
+
+instance Label Int
+  fn label(x: Int) -> String = "I"
+
+instance Label Bool
+  fn label(x: Bool) -> String = "B"
+
+instance Label String
+  fn label(x: String) -> String = "S"
 
 fn inner(x: a) -> String where Label a =
   label(x)

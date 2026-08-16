@@ -11,15 +11,17 @@ import stdlib.test (check_eq, run_suite)
 # constraint of the SAME class and fills Default's slot from the concrete return
 # type instead. Without the fix this file crashes at runtime.
 
-class Default a {
+class Default a
   fn def() -> a
-}
-class Tag a {
-  fn tag(x: a) -> Int
-}
 
-instance Default Int {fn def() -> Int = 42}
-instance Tag Bool {fn tag(x: Bool) -> Int = if x then 1 else 0}
+class Tag a
+  fn tag(x: a) -> Int
+
+instance Default Int
+  fn def() -> Int = 42
+
+instance Tag Bool
+  fn tag(x: Bool) -> Int = if x then 1 else 0
 
 # where-clause: return-position constraint (Default a) BEFORE the input-position
 # one (Tag b) — the ordering that triggered the mis-mapping.

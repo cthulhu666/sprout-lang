@@ -11,25 +11,21 @@ import stdlib.test (check_eq, run_suite)
 # element's `tag` and each instance yields a DISTINCT string — so a wrong or
 # dropped inner dict changes the output (or crashes) instead of passing silently.
 
-class Tag a {
+class Tag a
   fn tag(x: a) -> String
-}
 
 type Box a = Box a
 
-instance Tag Int {
+instance Tag Int
   fn tag(x: Int) -> String = "int"
-}
 
-instance Tag Bool {
+instance Tag Bool
   fn tag(x: Bool) -> String = "bool"
-}
 
-instance Tag (Box a) where Tag a {
+instance Tag (Box a) where Tag a
   fn tag(b: Box a) -> String =
     match b with
     | Box inner -> "box(" ++ tag(inner) ++ ")"
-}
 
 fn apply_tag(f: a -> String, x: a) -> String = f(x)
 

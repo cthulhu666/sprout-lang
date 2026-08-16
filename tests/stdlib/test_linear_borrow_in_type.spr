@@ -38,13 +38,11 @@ fn via_value(f: File) -> Int =
 # spine has no dictionary parameter. `c` is therefore parameter 1 in the source
 # but argument 2 at check time — zipping the two naively shifts every mode by
 # the number of dictionaries and this case reads as a reuse of `f`.
-class Sink a {
+class Sink a
   fn send(s: a, c: borrowing File) -> Int
-}
 
-instance Sink Int {
+instance Sink Int
   fn send(s: Int, c: borrowing File) -> Int = s
-}
 
 fn via_class(f: File) -> Int =
   do
@@ -55,13 +53,11 @@ fn via_class(f: File) -> Int =
 # ModeDefault and ModeConsuming are the SAME ownership at the type level (both
 # consume), so this is agreement, not a mismatch. The instance body must then
 # discharge the obligation itself.
-class Closer a {
+class Closer a
   fn shut(s: a, c: File) -> Int
-}
 
-instance Closer Int {
+instance Closer Int
   fn shut(s: Int, c: consuming File) -> Int = s + release(c)
-}
 
 fn via_consuming(f: File) -> Int = shut(5, f)
 

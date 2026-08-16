@@ -13,15 +13,13 @@
 # Note there is only ONE instance here — `check_overlapping_instances` cannot fire.
 # The defect is not a collision between instances; it is that a single instance
 # answers for types it was never written for.
-class Describe a {
+class Describe a
   fn describe(x: a) -> String
-}
 
 fn add(acc: Int, n: Int) -> Int = acc + n
 
-instance Describe (List Int) {
+instance Describe (List Int)
   fn describe(x: List Int) -> String = int_to_string(list_fold(add, 0, x))
-}
 
 fn strs() -> List String = Cons("hello", Cons("world", Nil))
 

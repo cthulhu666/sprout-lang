@@ -3,12 +3,10 @@
 # `!{IO}` and recurses into `a`, so this registers the same dead `@inst:Boxer:a`
 # marker as a plain `instance Boxer a` — but the first cut of the head walk
 # returned Nothing for TypeEffect and accepted it.
-class Boxer a {
+class Boxer a
   fn box_size(v: a) -> Int
-}
 
-instance Boxer (a !{IO}) {
+instance Boxer (a !{IO})
   fn box_size(v: a) -> Int = 0
-}
 
 fn main() -> Unit !{IO} = print(1)

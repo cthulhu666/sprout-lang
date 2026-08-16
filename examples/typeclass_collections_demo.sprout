@@ -2,9 +2,8 @@ module examples.typeclass_collections_demo
 import stdlib.collections (Vec, vec_fold)
 
 # A collection that can be reduced to an Int.
-class Summable c {
+class Summable c
   fn sum_values(xs: c) -> Int
-}
 
 # `instance Summable (Vec Int)` is NOT legal (spec §8.5): an instance head must be
 # a type constructor applied to distinct type variables. The reason is that
@@ -26,17 +25,15 @@ fn add(acc: Int, value: Int) -> Int = acc + value
 
 fn add_flag(acc: Int, flag: Bool) -> Int = if flag then acc + 1 else acc
 
-instance Summable IntVec {
+instance Summable IntVec
   fn sum_values(xs: IntVec) -> Int =
     match xs with
     | MkIntVec v -> vec_fold(add, 0, v)
-}
 
-instance Summable BoolVec {
+instance Summable BoolVec
   fn sum_values(xs: BoolVec) -> Int =
     match xs with
     | MkBoolVec v -> vec_fold(add_flag, 0, v)
-}
 
 # Dispatch through a constrained polymorphic helper: `sum_any` knows only that its
 # argument is `Summable`, and the dictionary is supplied per instantiation.

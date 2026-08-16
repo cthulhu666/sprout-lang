@@ -8,22 +8,19 @@ import stdlib.test (check_eq, run_suite)
 # when it reaches lowering; eta-expansion fails; the sentinel emits
 # __eta_unresolved_ToString_to_string, producing a linker error at compile time.
 
-class Showcase a {
+class Showcase a
   fn showcase(x: a) -> String
-}
 
 fn apply_str(f: Int -> String, x: Int) -> String = f(x)
 fn apply_bool(f: Bool -> String, x: Bool) -> String = f(x)
 
-instance Showcase Int {
+instance Showcase Int
   fn showcase(x: Int) -> String =
     apply_str(to_string, x)
-}
 
-instance Showcase Bool {
+instance Showcase Bool
   fn showcase(x: Bool) -> String =
     apply_bool(to_string, x)
-}
 
 fn run_showcase(x: a) -> String where Showcase a =
   showcase(x)

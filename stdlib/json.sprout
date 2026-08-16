@@ -315,25 +315,21 @@ fn json_object_from_dict_entries(entries: Vec (String, a), index: Int, total: In
 export fn object_from_dict(items: Dict a) -> Json where JsonEncode a =
   JsonObject(json_object_from_dict_entries(dict_entries(items), 0, vec_length(dict_entries(items)), JsonObjectNil))
 
-instance JsonEncode Json {
+instance JsonEncode Json
   fn encode_json(value: Json) -> Json =
     value
-}
 
-instance JsonEncode Int {
+instance JsonEncode Int
   fn encode_json(value: Int) -> Json =
     int(value)
-}
 
-instance JsonEncode Bool {
+instance JsonEncode Bool
   fn encode_json(value: Bool) -> Json =
     bool(value)
-}
 
-instance JsonEncode String {
+instance JsonEncode String
   fn encode_json(value: String) -> Json =
     string(value)
-}
 
 fn json_object_find(obj: JsonObject, key: String) -> Maybe Json =
   match obj with

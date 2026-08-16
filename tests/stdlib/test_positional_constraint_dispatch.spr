@@ -18,11 +18,14 @@ import stdlib.collections (Foldable, List, Vec, vec_length, foldable_to_vec)
 # SIGSEGV. Green on the fixed compiler; RED if resolution regresses (verified via
 # reverting canonicalize_constrained_markers).
 
-class Label a {
+class Label a
   fn label(x: a) -> String
-}
-instance Label Int {fn label(x: Int) -> String = "I"}
-instance Label Bool {fn label(x: Bool) -> String = "B"}
+
+instance Label Int
+  fn label(x: Int) -> String = "I"
+
+instance Label Bool
+  fn label(x: Bool) -> String = "B"
 
 # One forwarding hop: inner carries `Label a`; outer forwards its own constraint
 # into inner via the @constrained marker.

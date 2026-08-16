@@ -1,18 +1,15 @@
 # Parity lowering corpus: polymorphic constraint function.
 # Expected __tc_* names: __tc_Show_Int_show, __tc_Show_Bool_show
 
-class Show t {
+class Show t
   fn show(x: t) -> String
-}
 
-instance Show Int {
+instance Show Int
   fn show(x: Int) -> String = int_to_string(x)
-}
 
-instance Show Bool {
+instance Show Bool
   fn show(x: Bool) -> String =
     if x then "true" else "false"
-}
 
 fn show_any(x: a) -> String where Show a =
   show(x)

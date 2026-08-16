@@ -1,25 +1,21 @@
 import stdlib.test (check_true, check_false, run_suite)
 
-class Valid a {
+class Valid a
   fn valid(x: a) -> Bool
-}
 
 type Pair a b =
   | MkPair a b
 
-instance Valid Int {
+instance Valid Int
   fn valid(x: Int) -> Bool = x == 1
-}
 
-instance Valid Bool {
+instance Valid Bool
   fn valid(x: Bool) -> Bool = x
-}
 
-instance Valid (Pair a b) where Valid a, Valid b {
+instance Valid (Pair a b) where Valid a, Valid b
   fn valid(x: Pair a b) -> Bool =
     match x with
     | MkPair xa xb -> valid(xa) && valid(xb)
-}
 
 fn valid_mixed(x: Pair a Bool) -> Bool where Valid (Pair a Bool), Valid a =
   valid(x)

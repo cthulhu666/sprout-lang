@@ -9,13 +9,11 @@
 #
 # The accepting counterpart, `instance C (a, b)`, is exercised throughout the
 # prelude (`instance Eq (a, b)`, `instance Ord (a, b)`, `instance ToString (a, b)`).
-class Twin a {
+class Twin a
   fn twin(x: a) -> Int
-}
 
-instance Twin (a, a) {
+instance Twin (a, a)
   fn twin(x: (a, a)) -> Int = 1
-}
 
 fn mixed() -> (Int, Bool) = (1, true)
 

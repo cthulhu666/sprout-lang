@@ -3,12 +3,10 @@
 # rejection must recurse to `a` rather than stopping at the outermost node.
 # Without the recursion this parses as a "constructor applied to an argument"
 # and slips through to register another unreachable @inst marker.
-class Boxer a {
+class Boxer a
   fn box_size(v: a) -> Int
-}
 
-instance Boxer (a b) {
+instance Boxer (a b)
   fn box_size(v: a b) -> Int = 0
-}
 
 fn main() -> Unit !{IO} = print(1)

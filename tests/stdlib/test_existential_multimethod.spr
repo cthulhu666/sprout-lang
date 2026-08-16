@@ -12,20 +12,17 @@
 
 import stdlib.test (check_eq, run_suite)
 
-class Describe a {
+class Describe a
   fn dname(v: a) -> String
   fn dsize(v: a) -> Int
-}
 
-instance Describe Int {
+instance Describe Int
   fn dname(v: Int) -> String = "int"
   fn dsize(v: Int) -> Int = v
-}
 
-instance Describe String {
+instance Describe String
   fn dname(v: String) -> String = "str"
   fn dsize(v: String) -> Int = str_len(v)
-}
 
 type Box = | Box (any Describe)
 

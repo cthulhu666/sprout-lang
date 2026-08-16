@@ -9,11 +9,14 @@ import stdlib.collections (Foldable, List, Vec, vec_length, foldable_to_vec)
 # forwarding path, then deletes the @constrained family. This pins the observable
 # output of both paths so a dropped or mis-forwarded dict shows as wrong output.
 
-class Tag a {
+class Tag a
   fn tag(x: a) -> String
-}
-instance Tag Int {fn tag(x: Int) -> String = "I"}
-instance Tag Bool {fn tag(x: Bool) -> String = "B"}
+
+instance Tag Int
+  fn tag(x: Int) -> String = "I"
+
+instance Tag Bool
+  fn tag(x: Bool) -> String = "B"
 
 # (1) Self-recursion: the recursive self-call must forward the enclosing Tag
 # dict (var stays polymorphic in the body — @fwd path), not re-resolve it.

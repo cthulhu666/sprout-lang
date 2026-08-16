@@ -2,20 +2,17 @@ type Maybe a =
   | Nothing
   | Just a
 
-class Positive a {
+class Positive a
   fn is_pos(x: a) -> Bool
-}
 
-instance Positive Int {
+instance Positive Int
   fn is_pos(x: Int) -> Bool = x > 0
-}
 
-instance Positive (Maybe a) where Positive a {
+instance Positive (Maybe a) where Positive a
   fn is_pos(x: Maybe a) -> Bool =
     match x with
     | Nothing -> 1 > 2
     | Just v -> is_pos(v)
-}
 
 fn nothing_int() -> Maybe Int = Nothing
 

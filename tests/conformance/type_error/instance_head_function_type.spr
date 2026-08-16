@@ -2,12 +2,10 @@
 # constructor to key on. Function types have no instances (spec §8.5), and the
 # pre-existing diagnostic for that fires at the CALL site — the same misblame the
 # instance-head check exists to remove — so reject the declaration itself.
-class Boxer a {
+class Boxer a
   fn box_size(v: a) -> Int
-}
 
-instance Boxer (a -> b) {
+instance Boxer (a -> b)
   fn box_size(v: a -> b) -> Int = 0
-}
 
 fn main() -> Unit !{IO} = print(1)

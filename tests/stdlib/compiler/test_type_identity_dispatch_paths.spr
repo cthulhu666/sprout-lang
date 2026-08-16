@@ -14,9 +14,8 @@ import stdlib.test (check_eq, run_suite)
 # during the PR #156 rebase — type_head_name and the Unit placeholders.)
 type Box a = MkBox a
 
-instance ToString (Box a) {
+instance ToString (Box a)
   fn to_string(m: Box a) -> String = "BOX"
-}
 
 # (a) constrained-function concrete-argument dispatch
 fn describe(x: a) -> String where ToString a =
@@ -24,13 +23,11 @@ fn describe(x: a) -> String where ToString a =
 
 type Cell = MkCell Int
 
-class Zero a {
+class Zero a
   fn zero() -> a
-}
 
-instance Zero Cell {
+instance Zero Cell
   fn zero() -> Cell = MkCell(7)
-}
 
 fn cell_val(c: Cell) -> Int =
   match c with

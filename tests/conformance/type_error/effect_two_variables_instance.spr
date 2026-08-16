@@ -22,16 +22,14 @@ module main
 # it. Any instance of the class is rejected, so the form cannot be used; a class
 # declared and never instantiated is not.
 
-class Runner a {
+class Runner a
   fn run_both(x: a, f: Int -> Unit !{e}, g: Int -> Unit !{d}) -> Unit !{e}
-}
 
 type Box = Box
 
-instance Runner Box {
+instance Runner Box
   fn run_both(x: Box, f: Int -> Unit !{e}, g: Int -> Unit !{d}) -> Unit !{e} =
     f(1)
-}
 
 fn main() -> Unit !{IO} =
   run_both(Box, \n -> print(int_to_string(n)), \n -> ())

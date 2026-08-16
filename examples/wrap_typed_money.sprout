@@ -13,17 +13,15 @@ wrap Cents = Int
 # `Int`, dispatch is on the static type, so each renders differently: an account
 # id as "#1001", a money amount as "$12.99".
 
-instance ToString AccountId {
+instance ToString AccountId
   fn to_string(id: AccountId) -> String =
     match id with
     | AccountId n -> "#" ++ to_string(n)
-}
 
-instance ToString Cents {
+instance ToString Cents
   fn to_string(amount: Cents) -> String =
     match amount with
     | Cents total -> "$" ++ to_string(total / 100) ++ "." ++ pad2(cents_fraction(total))
-}
 
 # Sub-dollar remainder of an amount, e.g. 1299 -> 99. There is no `%` operator,
 # so we derive it from integer division.

@@ -6,13 +6,11 @@ type AlwaysEqual =
 type NeverEqual =
   | NeverEqual Int
 
-instance Eq AlwaysEqual {
+instance Eq AlwaysEqual
   fn eq(left: AlwaysEqual, right: AlwaysEqual) -> Bool = true
-}
 
-instance Eq NeverEqual {
+instance Eq NeverEqual
   fn eq(left: NeverEqual, right: NeverEqual) -> Bool = false
-}
 
 fn recursive_both_eq(left: a, right: b, depth: Int) -> Bool where Eq a, Eq b =
   if depth == 0 then

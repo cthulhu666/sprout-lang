@@ -7,16 +7,14 @@
 # type", a restriction the key cannot express: the marker is `@inst:Same:Pair`,
 # which also answers for `Pair Int Bool`. Same failure mode as a concrete
 # argument, reached by a different route, so it needs its own coverage.
-class Same a {
+class Same a
   fn same(x: a) -> Bool
-}
 
 type Pair a b =
   | MkPair a b
 
-instance Same (Pair a a) {
+instance Same (Pair a a)
   fn same(x: Pair a a) -> Bool = true
-}
 
 fn mixed() -> Pair Int Bool = MkPair(1, true)
 

@@ -20,13 +20,11 @@ import stdlib.test (TestState, new_state, assert_true, summary)
 type Pair e a =
   | MkPair e a
 
-class Deser c {
+class Deser c
   fn deser(s: String) -> c
-}
 
-instance Deser Int {
+instance Deser Int
   fn deser(s: String) -> Int = 7
-}
 
 # `where Deser e` constrains the INNER type parameter of the `Pair e Bool`
 # return type. No argument carries `e`, so the dict must be resolved by
