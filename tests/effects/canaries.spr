@@ -37,19 +37,33 @@ fn calls_loud(s: String) -> Unit = loud(s)
 fn calls_shout(s: String) -> Unit = shout(s)
 
 # --- Must be flagged: the effect enters through a lambda argument. ---
-# This works only because infer_lambda still reports the lambda BODY's effect as
-# the effect of the enclosing expression. That attribution is technically wrong
-# (building a closure performs no IO) but it is the sole mechanism by which
-# effects cross a higher-order boundary today, because unify_types ignores the
-# arrow's effect field and nothing ever binds an EffectVar.
+# Two independent mechanisms can flag this, and that is worth knowing when it
+# breaks. The older one is `infer_lambda` reporting the lambda BODY's effect as
+# the effect of the enclosing expression — an attribution that is technically
+# wrong, since building a closure performs no IO. The newer one is real: the
+# lambda's arrow carries !{IO}, unifying it against `list_each`'s `!{e}` binds
+# e := IO. Once infer_lambda's attribution is corrected, only the second remains,
+# and this line is what proves the second is actually doing the work.
 fn each_lambda(xs: List String) -> Unit = list_each(\x -> print(x), xs)
 
-# --- Must NOT be flagged, and this is the KNOWN BLIND SPOT. ---
-# Passing `print` by name rather than wrapping it in a lambda routes around the
-# mechanism above: the reference is just a value, and `!{e}` never gets bound.
-# Documented rather than fixed — closing it needs effect unification threaded
-# through unify_types, which is out of scope for a reporting-only change.
+# --- Must be flagged: the effect enters through a NAMED function argument. ---
+# This was the known blind spot until effect unification landed. Passing `print`
+# by name rather than wrapping it in a lambda routes around infer_lambda
+# entirely: the reference is just a value. It is caught now only because
+# `unify_applied`'s TFunc arm unifies the arrows' effect fields, binding
+# `list_each`'s `!{e}` to IO. This is THE canary for that channel — if it stops
+# flagging, effect unification has been disconnected, and `each_lambda` above
+# will keep passing on the over-approximation alone and hide it.
 fn each_named(xs: List String) -> Unit = list_each(print, xs)
+
+# --- Must NOT be flagged: a pure callback through the same HOF. ---
+# `list_each`'s `!{e}` must be FRESHENED at each instantiation. If it is not,
+# every `!{e}` in the program shares one global EffectVar("e"), the binding
+# e := IO from the two uses above leaks into this one, and a genuinely pure
+# function reports a gap. That is a FALSE POSITIVE, the one failure direction
+# the enforcement step cannot tolerate: at step 4 it becomes a compile error on
+# correct code. Guards `scheme_effect_vars` actually being populated.
+fn each_pure(xs: List String) -> Unit = list_each(\x -> (), xs)
 
 # --- Must NOT be flagged: `panic` is PURE, deliberately. ---
 # An abort has no continuation, so nothing downstream can observe it — see

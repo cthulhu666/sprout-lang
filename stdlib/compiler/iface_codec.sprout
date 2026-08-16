@@ -629,10 +629,22 @@ fn typeexpr_to_type_with_vars(te: ast.TypeExpr, local_vars: Dict types.Type) -> 
   | ast.TypeApply base arg ->
       types.TApp(typeexpr_to_type_with_vars(base, local_vars),
                  typeexpr_to_type_with_vars(arg, local_vars))
-  | ast.TypeArrow param ret _ ->
+  # The effect labels were discarded here until effect unification landed, which
+  # is the same defect `infer.type_from_ast` had — two walkers over the same AST,
+  # one fixed and one not. A class method taking `f: a -> Unit !{IO}` produced a
+  # pure arrow in its serialized scheme.
+  #
+  # Latent, not observed: nothing currently type-checks against a decoded iface
+  # (`decode_iface_file`'s only consumer is `--check-iface`, which counts entries
+  # for well-formedness), so the wrong arrow was written to disk and read by
+  # nobody. Aligned anyway — the day a consumer appears is the worst possible day
+  # to discover the two walks disagree. Pinned by `just effect-report-smoke`,
+  # which asserts on the ENCODED form, since that is the only place this walk's
+  # output is visible.
+  | ast.TypeArrow param ret effs ->
       types.TFunc(typeexpr_to_type_with_vars(param, local_vars),
                   typeexpr_to_type_with_vars(ret, local_vars),
-                  types.EffectPure,
+                  types.effect_from_labels(effs),
                   types.OwnConsume)
   | ast.TypeEffect inner _ -> typeexpr_to_type_with_vars(inner, local_vars)
   | ast.TupleType parts ->
@@ -668,27 +680,38 @@ fn te_outermost_name(te: ast.TypeExpr) -> String =
 # Effects come from the method's `effects` field (Nothing → EffectPure).
 # O(n) in number of params.
 fn method_scheme(type_params: List String, params: List ast.Param, ret: ast.TypeExpr, effects: Maybe (List String)) -> types.Scheme =
-  types.Scheme(type_params, Nil,
-    params_to_func_type(params, typeexpr_to_type_with_vars(ret, make_local_vars(type_params)), make_local_vars(type_params)),
+  types.scheme_quantified(type_params,
+    params_to_func_type(params, typeexpr_to_type_with_vars(ret, make_local_vars(type_params)),
+      make_local_vars(type_params), effect_from_maybe_labels(effects)),
     effect_from_maybe_labels(effects), Nil)
 
 fn effect_from_maybe_labels(labels: Maybe (List String)) -> types.Effect =
-  match labels with
-  | Nothing -> types.EffectPure
-  | Just Nil -> types.EffectPure
-  | Just xs -> types.EffectRow(xs)
+  types.effect_from_labels(labels)
 
 # Build a right-associating TFunc chain from a list of Params.
-# Final return type is appended at the end with EffectPure between args;
-# the outermost effect comes from the method declaration itself.
-fn params_to_func_type(params: List ast.Param, ret: types.Type, local_vars: Dict types.Type) -> types.Type =
+#
+# The declared effect goes on the INNERMOST arrow and every outer arrow is pure,
+# matching `parser.make_type_arrow` and `infer.build_fn_type_modes`. Sprout
+# applications are n-ary (spec §5.3), so only the arrow that actually returns the
+# result can be the one performing the effect. Every arrow was pure here until
+# effect unification landed, which left a method's declared effect recorded in
+# the scheme's effect field but absent from the type — and `call_effect_of` reads
+# the arrows, not that field, for any call with arguments. Latent for the same
+# reason as `typeexpr_to_type_with_vars` above: no consumer reads it back yet.
+fn params_to_func_type(params: List ast.Param, ret: types.Type, local_vars: Dict types.Type,
+                       eff: types.Effect) -> types.Type =
   match params with
   | Nil -> ret
   | Cons (ast.Param _ maybe_te mode) rest ->
       types.TFunc(param_type_from_maybe(maybe_te, local_vars),
-                  params_to_func_type(rest, ret, local_vars),
-                  types.EffectPure,
+                  params_to_func_type(rest, ret, local_vars, eff),
+                  params_arrow_effect(rest, eff),
                   linear_check.ownership_of_param_mode(mode))
+
+fn params_arrow_effect(rest: List ast.Param, eff: types.Effect) -> types.Effect =
+  match rest with
+  | Nil -> eff
+  | _ -> types.EffectPure
 
 fn param_type_from_maybe(maybe_te: Maybe ast.TypeExpr, local_vars: Dict types.Type) -> types.Type =
   match maybe_te with

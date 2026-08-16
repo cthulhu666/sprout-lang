@@ -1,0 +1,43 @@
+module tests.effects.iface_effects
+
+# Companion fixture to canaries.spr, for the ONE thing canaries.spr structurally
+# cannot cover: the interface-file path.
+#
+# canaries.spr deliberately has no module header, so `--phase effects` on it
+# exercises only within-module inference. Everything `iface_codec` does is
+# therefore invisible to that gate — which matters, because iface_codec has its
+# own second copy of the AST-to-type walk, and that copy had the same two
+# hardcoded-EffectPure bugs `infer` did:
+#
+#   * `typeexpr_to_type_with_vars` discarded a `TypeArrow`'s effect labels;
+#   * `params_to_func_type` built every arrow pure, so a method's declared
+#     effect lived in the scheme's effect field and nowhere in its type.
+#
+# Those were LATENT, not observed: nothing currently type-checks against a
+# decoded iface (the only consumer of `decode_iface_file` is `--check-iface`,
+# which counts entries for well-formedness). This fixture exists so the
+# alignment does not silently rot back — the encoded form is the only place the
+# iface walk's output is visible.
+#
+# Asserted by `just effect-report-smoke`.
+
+# A class method with a declared effect. Its arrow must carry (EffectIO) in the
+# emitted scheme, not just the scheme's trailing effect field.
+export class Sink a {
+  fn emit(s: a, line: String) -> Unit !{IO}
+  fn describe(s: a) -> String
+}
+
+# An effect-POLYMORPHIC method. `!{e}` must survive as (EffectVar e) and must be
+# listed among the scheme's quantified effect variables — an empty list there is
+# the shared-global-variable bug.
+export class Runner a {
+  fn run_with(s: a, f: Int -> Unit !{e}) -> Unit !{e}
+}
+
+export type Stderr = Stderr
+
+instance Sink Stderr {
+  fn emit(s: Stderr, line: String) -> Unit !{IO} = eprint(line)
+  fn describe(s: Stderr) -> String = "stderr"
+}
