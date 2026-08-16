@@ -169,10 +169,25 @@ fn print_effect_reports(reports: List unifier.EffectReport) -> Unit !{IO} =
   list_each(\r -> print(effect_report_line(r)), reports)
 
 fn effect_report_line(r: unifier.EffectReport) -> String =
-  "effect " ++ (if effect_report_is_gap(r) then "GAP" else "ok") ++ " "
+  "effect " ++ effect_report_verdict(r) ++ " "
     ++ unifier.effect_report_name(r) ++ ": declared "
     ++ types.effect_to_string(unifier.effect_report_declared(r)) ++ ", inferred "
     ++ types.effect_to_string(unifier.effect_report_inferred(r))
+
+# Every verdict other than `ok` is a REJECTION by `checker.enforce_effects`, and
+# that correspondence is the phase's whole value — a reader migrating a codebase
+# needs the report to enumerate exactly what will fail to compile.
+#
+#   GAP  rule 8 — the body performs IO under a pure signature
+#   ROW  rule 9 — the signature needs more than one effect variable
+#
+# `ROW` was added when rule 9 started being enforced. Leaving it out would have
+# printed `ok` for a declaration the checker rejects, which is precisely the
+# report-disagrees-with-checker failure this file already guards against.
+fn effect_report_verdict(r: unifier.EffectReport) -> String =
+  if effect_report_is_gap(r) then "GAP"
+  else if unifier.effect_report_is_multi_var(r) then "ROW"
+  else "ok"
 
 # Deliberately NOT a local copy. This phase's whole value is that a GAP line
 # predicts exactly what `checker.enforce_effects` will reject, so both read the
@@ -190,6 +205,7 @@ fn effect_report_is_var(r: unifier.EffectReport) -> Bool =
 fn print_effect_summary(reports: List unifier.EffectReport) -> Unit !{IO} =
   print("effect-summary: " ++ int_to_string(list_length(reports)) ++ " declarations, "
     ++ int_to_string(count_where(effect_report_is_gap, reports)) ++ " gaps (declared pure, inferred !{IO}), "
+    ++ int_to_string(count_where(unifier.effect_report_is_multi_var, reports)) ++ " multi-variable rows, "
     ++ int_to_string(count_where(effect_report_is_var, reports)) ++ " unresolved effect vars")
 
 fn count_where(p: unifier.EffectReport -> Bool, reports: List unifier.EffectReport) -> Int =

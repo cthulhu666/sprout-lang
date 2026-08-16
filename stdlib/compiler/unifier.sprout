@@ -79,6 +79,43 @@ export fn effect_report_is_gap(r: EffectReport) -> Bool =
   | (types.EffectPure, types.EffectIO) -> true
   | _ -> false
 
+# "This declaration needs more than one effect variable." The second rejection,
+# for spec §7 rule 9: a function type quantifies a SINGLETON effect variable.
+#
+# A body that combines two of them infers `!{e, d}` — a multi-label row, which §7
+# does not define and which no v0 use site can instantiate, there being exactly
+# one concrete label. Nothing rejected it, so the checker accepted a type the
+# spec has no rule for.
+#
+# It only became reachable when effect variables started being freshened per
+# instantiation: before that every `!{e}` in the program was one shared variable,
+# so two could never meet as distinct labels. Not a soundness hole — `IO` wins
+# every merge, so a row can never contain it — but the same silent disagreement
+# between what inference builds and what the spec defines that hid the original
+# effect bug for the whole of v0.
+#
+# Both sides are checked. The inferred side catches a body that combines two; the
+# declared side catches a signature written `!{a, b}` directly.
+export fn effect_report_is_multi_var(r: EffectReport) -> Bool =
+  effect_is_multi_var(effect_report_declared(r))
+    || effect_is_multi_var(effect_report_inferred(r))
+
+fn effect_is_multi_var(e: types.Effect) -> Bool =
+  match e with
+  | types.EffectRow labels -> list_length(labels) > 1
+  | _ -> false
+
+# The variables involved, for the diagnostic. Reads whichever side is the row.
+export fn effect_report_var_labels(r: EffectReport) -> List String =
+  match effect_row_labels(effect_report_inferred(r)) with
+  | Nil -> effect_row_labels(effect_report_declared(r))
+  | labels -> labels
+
+fn effect_row_labels(e: types.Effect) -> List String =
+  match e with
+  | types.EffectRow labels -> labels
+  | _ -> Nil
+
 # What `unify_types` returns: BOTH substitutions, or a message.
 #
 # This replaced `Result String (Dict types.Type)` when arrow effects started

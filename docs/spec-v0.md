@@ -1388,6 +1388,11 @@ Effect note for v0:
 8. Effect annotations are checked on function types; omitted annotations mean purity.
 9. Function types may quantify a singleton effect variable `!{e}`; use sites
    instantiate it with either purity or a concrete closed effect supported in v0.
+   **Singleton is a limit, not a description**: a signature may quantify at most
+   one effect variable, and a body that combines two — `f: a -> Unit !{e}` beside
+   `g: b -> Unit !{d}` — is rejected. The combination would infer a multi-label
+   row, which this section does not define; write the same variable on every
+   effect-polymorphic parameter instead.
 10. `main` must use a concrete effect annotation when effectful; it may not be
     effect-polymorphic.
 11. A pure function body may not call `!{IO}` functions unless it is allowed by
@@ -1416,11 +1421,23 @@ Effect note for v0:
     an **omitted** parameter or return type is an inference request, not a promise,
     and inference is free to specialize it.
 
-> **Enforcement of the effect rules (8, 9, 11).** Rule 8 is **enforced** as of 2026-08-16.
-> `fn shout(s: String) -> Unit = print(s)` is a compile error; an effect annotation is a
-> checked contract, and a missing `!{IO}` now means the compiler has verified the function
-> performs no IO. Rule 10 (the effect-polymorphic `main` check) was already enforced,
-> syntactically. This replaces a note that stood for the whole of v0 saying the opposite.
+> **Enforcement of the effect rules.** Rules 8, 9, 10 and 11 are all **enforced** as of
+> 2026-08-16. `fn shout(s: String) -> Unit = print(s)` is a compile error; an effect
+> annotation is a checked contract, and a missing `!{IO}` now means the compiler has
+> verified the function performs no IO. This replaces a note that stood for the whole of v0
+> saying the opposite.
+>
+> Which check covers which rule:
+>
+> - **8** and **11** are one check. Rule 11 ("a pure function body may not call `!{IO}`
+>   functions…") is rule 8 stated operationally — a body calling an `!{IO}` function infers
+>   `!{IO}`, which a pure signature does not admit. Its escape clause is honoured: where the
+>   body's effect resolves to a variable rather than to `!{IO}`, the declaration is accepted.
+> - **9** is the singleton rule: a signature may quantify **at most one** effect variable.
+>   Two distinct variables meeting in one body infer a multi-label row, which this section
+>   does not define and which no v0 use site can instantiate, there being one concrete
+>   label. That is rejected rather than accepted silently.
+> - **10** (`main` may not be effect-polymorphic) was already enforced, syntactically.
 >
 > Three properties of the check are normative, not implementation detail:
 >
