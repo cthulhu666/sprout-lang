@@ -1,7 +1,8 @@
 # Effect enforcement — v0
 
-**Status:** measurement landed 2026-08-16; enforcement **not** started and blocked on one decision
-(§6). `docs/spec-v0.md` §7 rules 8, 9 and 11 state the intended discipline and its enforcement note
+**Status:** measurement landed 2026-08-16; enforcement **not** started. §6 now carries a verified
+prior-art survey and a recommendation (`panic` should be pure) awaiting a call; the remaining hard
+gate is effect-variable solving (§7), not the `panic` question. `docs/spec-v0.md` §7 rules 8, 9 and 11 state the intended discipline and its enforcement note
 states that the v0 checker does not apply them. This document records what was actually broken, what
 was fixed to make the gap measurable, and the number that came out.
 
@@ -170,12 +171,92 @@ with an internal-error fallback must be annotated `!{IO}`, which is both a large
 and arguably a false statement: the function is pure in every case where it produces a value.
 
 The alternatives are (a) `panic` becomes pure, (b) `panic` gets its own effect distinct from `IO`,
-or (c) the declaration stands and the fallbacks get annotated. This is a semantics choice with
-established prior art on all three sides, so per the Design Change Process it wants a proper
-verified survey before a call — that survey has **not** been done and is not asserted here.
+or (c) the declaration stands and the fallbacks get annotated.
 
-**Until it is settled, the honest reading of the measurement is: enforcing rule 8 costs three
-annotations plus whatever the `panic` decision implies.**
+### 6.1 The argument for keeping `!{IO}`, stated first because it is real
+
+`panic` **writes to stderr**. `runtime/sprout_runtime.c:3023` calls `tcp_fail`, which does
+`fprintf(stderr, "runtime error: %s\n", msg)` and then `exit(1)` (`:5037`). Sprout's own §6 rule says
+a builtin takes `!{IO}` "when evaluating the call may interact with runtime or external state such as
+terminal IO". By the letter of that rule `panic` qualifies, and no amount of prior art overrides
+Sprout's own normative text.
+
+What the survey settles is whether that rule should be read that literally — because **every
+language below aborts by printing a diagnostic too, and not one of them treats that as an effect.**
+
+### 6.2 Prior-art survey
+
+Every row verified against the language's own reference or standard-library documentation. The
+question asked of each: *does the possibility of an unrecoverable abort appear in a function's
+type?*
+
+| language | recoverable failure | abort / panic | in the abort's type? |
+|---|---|---|---|
+| **Koka** — full effect system | `exn` effect | `exn` effect | **Yes, but not `io`.** `alias pure = <exn,div>`; `alias io = <exn,io-noexn>`. `exn` is a distinct effect *contained in* both, and `total = <>` excludes it. |
+| **Haskell** | `IO` / `Either` | `error :: HasCallStack => [Char] -> a` | **No.** Not in `IO`; returns a bare `a`, callable from pure code. |
+| **Rust** | `Result<T, E>` in the signature | `panic!` | **No.** Not part of a function's type; the Reference calls a panic "a response to an error condition that is typically not expected to be recoverable". |
+| **Java** | checked exceptions, declared in `throws` | `Error`, `RuntimeException` | **No.** "The unchecked exception classes … are exempted from compile-time checking." |
+| **Swift** | `throws` | `fatalError(…) -> Never` | **No.** Not a throwing function; callers need no `throws`. |
+| **Zig** | error union `ErrorSet!T` in the signature | `@panic`, `unreachable` | **No.** Outside the error-union system; does not change the return type. |
+
+Two things are unanimous across six languages that otherwise disagree about almost everything:
+
+1. **Abort is never the same thing as I/O.** Not one language folds it into its I/O or side-effect
+   channel. Koka is the only one that tracks it at all, and tracks it as a *separate, weaker* effect
+   that is explicitly inside its definition of `pure`.
+2. **The split is recoverable-vs-not, not observable-vs-not.** Java, Swift and Zig each track
+   *recoverable* failure in the signature with real rigour, and each deliberately exempts the
+   abort — despite every one of those aborts also printing a diagnostic on the way out.
+
+Java's specification gives the rationale in normative text, and it describes Sprout's nine gaps
+exactly:
+
+> Error classes are exempted because they can occur at many points in the program and recovery from
+> them is difficult or impossible. A program declaring such exceptions would be cluttered,
+> pointlessly.
+
+### 6.3 Why the stderr write does not settle it
+
+The reason the survey is unanimous despite every abort writing a diagnostic is that **an effect is
+worth tracking because a continuation can observe it.** `print(x)` matters in a pure function because
+the program keeps running and something downstream can tell. `panic` has no continuation: the write
+is the last thing that happens before `exit(1)`, and no Sprout expression can observe it. Nothing a
+caller does is different for having called a function that might panic, because if it panics the
+caller does not run.
+
+That is also why `panic`'s return type is `a` — the same bottom-shaped signature as Haskell's `error
+:: [Char] -> a` and Swift's `-> Never`. The type already says "this does not come back". Adding
+`!{IO}` on top says "and the rest of your program is impure because of it", which is the part that
+is not true.
+
+### 6.4 Recommendation
+
+**Declare `panic` pure, and record why in `runtime/APPROVED_BUILTINS` and §6 of the spec.**
+
+That is option (a), and it matches five of the six languages surveyed. Option (b) — Koka's answer, a
+separate `exn`-like effect — is the most principled but is not affordable in v0: Sprout's effect
+system has exactly one concrete label, `!{IO}`, and no `EffectRow` semantics (§7 says v0 has no mixed
+or open rows), so adding a second label is an effect-system design change rather than a declaration
+change. It is the right long-term shape and belongs with the same work that makes `!{e}` solvable.
+
+Option (c) — leave it, annotate the nine — is the one option with no prior art behind it, and it
+buys a signature that is misleading in the direction that matters: it would make nine functions that
+are pure in every returning case advertise themselves as impure.
+
+**Consequence for the migration.** With `panic` pure, the twelve gaps drop to three, and all three
+are the known lambda-construction over-approximation of §4 rather than real findings. Enforcing
+rule 8 then costs **zero source annotations** — but it should not ship until `!{e}` is solvable
+(§7), which remains the real gate.
+
+**Caveat this recommendation does not resolve.** §6 of the spec would need amending, because the
+literal rule quoted in §6.1 above says otherwise. That is a normative edit, not a footnote.
+
+Sources: [Koka `std/core`](https://koka-lang.github.io/koka/doc/std_core.html) ·
+[Haskell `base` Prelude](https://hackage-content.haskell.org/package/base-4.22.0.0/docs/Prelude.html) ·
+[The Rust Reference — Panic](https://doc.rust-lang.org/reference/panic.html) ·
+[JLS SE21 §11](https://docs.oracle.com/javase/specs/jls/se21/html/jls-11.html) ·
+[Swift `fatalError`](https://developer.apple.com/documentation/swift/fatalerror(_:file:line:)) ·
+[Zig Language Reference](https://ziglang.org/documentation/master/)
 
 ## 7. What is not done
 
