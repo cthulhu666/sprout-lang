@@ -20,12 +20,17 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 # One entry per TU that must compile, with the milestone that put it here.
 EXPECTED=(
   "runtime/sprout_context.h|W1 — the fiber arm (compiled via a TU that includes it)"
-  # The whole scheduler TU, not just the seam: sprout_scheduler.h only DECLARES the poller
-  # interface, so nothing on this path reaches a POSIX poller header.
-  "runtime/sprout_scheduler.c|W1 — the whole scheduler TU"
 )
 # Not yet expected; listed so the output is a work list rather than a silence.
+#
+# sprout_scheduler.c is the instructive one. It compiles clean under MINGW — sprout_scheduler.h
+# only DECLARES the poller interface, so nothing on that path reaches a POSIX poller header —
+# and W1 briefly listed it as expected on that basis. The first MSVC run said otherwise: line 30
+# is `#include <unistd.h>` for close(), which mingw supplies and MSVC does not. That is §4.1's
+# develop-mingw / ship-MSVC rule catching a real difference on its first outing, which is the
+# whole reason this script runs both toolchains instead of trusting one.
 OUTSTANDING=(
+  "runtime/sprout_scheduler.c|W3 — mingw ok; MSVC stops on unistd.h (close() -> closesocket)"
   "runtime/sprout_poll.c|W2 — needs the WSAPoll backend; stops on sys/epoll.h"
   "runtime/sprout_runtime.c|W3 — stops on regex.h, its first non-standard include"
 )
@@ -67,16 +72,21 @@ for entry in "${EXPECTED[@]}"; do
   path="${entry%%|*}"; why="${entry#*|}"
   src="$ROOT/$path"
   # A header is checked by compiling a TU that includes it, so the check covers what a real
-  # consumer sees rather than the header in isolation.
+  # consumer sees rather than the header in isolation. The path goes on the COMMAND LINE via
+  # -include, never inside the generated source: under Git Bash $src is a POSIX-style path
+  # (/d/a/...) that clang, a native Windows binary, cannot open — but MSYS rewrites path-shaped
+  # ARGV entries to D:/a/... on the way through. Embedding it in an #include skips that
+  # rewriting and fails only on Windows.
+  EXTRA=()
+  target="$src"
   if [ "${path##*.}" = "h" ]; then
-    printf '#include "%s"\nint main(void){return 0;}\n' "$src" > "$TMP/tu.c"
+    printf 'int main(void){return 0;}\n' > "$TMP/tu.c"
+    EXTRA=(-include "$src")
     target="$TMP/tu.c"
-  else
-    target="$src"
   fi
   printf '  %-34s ' "$(basename "$path")"
   if "$CLANG" --target="$TRIPLE" "${SYSROOT_ARGS[@]}" -fsyntax-only -Wall -Wextra \
-       "$target" 2>"$TMP/err"; then
+       "${EXTRA[@]}" "$target" 2>"$TMP/err"; then
     echo "ok      ($why)"
   else
     echo "FAILED  ($why)"

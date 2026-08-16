@@ -350,10 +350,17 @@ yield / join / `scope_cancel` smoke passes"*, which requires **running** on Wind
 until W5 links an executable. The achievable criterion at W1 is compilation, gated by
 `scripts/windows_tu_check.sh`.
 
-That gate turned up a result better than the milestone promised: **the whole of
-`sprout_scheduler.c` compiles for Windows**, not just the seam. `sprout_scheduler.h` only
-*declares* the poller interface, so nothing on the scheduler's path reaches a POSIX poller header.
-The scheduler is done pending a poller; `sprout_poll.c` is W2's whole job.
+**And the two-toolchain rule earned its keep on that gate's first real run.** W1 initially also
+claimed `sprout_scheduler.c` as a whole, on the strength of a local mingw build: `sprout_scheduler.h`
+only *declares* the poller interface, so nothing on the scheduler's path reaches a POSIX poller
+header, and mingw compiled the TU clean. The first MSVC run refuted it — line 30 is
+`#include <unistd.h>` for `close()`, which mingw supplies and **MSVC does not**. The claim was
+true of the developer surface and false of the ship surface.
+
+That is precisely the failure §4.1 predicts, arriving where it is cheap instead of at W5, and it
+is why `windows_tu_check.sh` runs mingw off-Windows and MSVC in CI rather than trusting either
+alone. `sprout_scheduler.c` is therefore listed as outstanding against W3 — its remaining blocker
+is the socket-`close` substitution, Winsock work by nature, not scheduler work.
 
 ## 5. Milestones
 
@@ -361,7 +368,7 @@ The scheduler is done pending a poller; `sprout_poll.c` is W2's whole job.
 |---|---|---|
 | **W0a** | *(done, 2026-08-15)* `scripts/windows_probe.sh` + `just windows-probe`: measure what the target provides and where each TU stops; adopt §4.1's pure-Win32 rule | a measured §6, replacing the assumed one |
 | **W0b** | *(done, 2026-08-15)* `sprout_context.h` seam — the `ucontext` calls behind a 4-op header, POSIX arm behaviourally unchanged but for §4.6's one delta | `just test` + `task-io-smoke` + `linux-smoke` + the example canary still pass **on POSIX**; no Windows code yet |
-| **W1** | *(done, 2026-08-16)* `ucontext` → fibers, per §4.4 and §4.7 | `sprout_context.h`'s Windows arm **and the whole of `sprout_scheduler.c`** compile for Windows; POSIX gates unchanged |
+| **W1** | *(done, 2026-08-16)* `ucontext` → fibers, per §4.4 and §4.7 | `sprout_context.h`'s Windows arm compiles under **both** mingw and MSVC; POSIX gates unchanged |
 | **W2** | `WSAPoll` backend + timer min-heap, per §4.3 | `task_sleep` + `with_timeout` + a TCP echo smoke pass |
 | **W3** | Winsock2, files, arena, console, regex, process — §6 | all three TUs compile; `just windows-probe` becomes a gate |
 | **W4** | Vectored exception handler; `CaptureStackBackTrace` or a loud stub | a deliberate stack overflow prints a diagnostic, not a silent exit |
@@ -433,7 +440,7 @@ blocked on a missing API. Score at W0a: **56 available, 22 missing.**
 | TU | First blocker |
 |---|---|
 | `sprout_poll.c` | `:94` `sys/epoll.h` — note it reaches the *epoll* arm, because the file's `#ifdef __APPLE__` / `#else` treats "not macOS" as "Linux". Windows needs a genuine three-way split, not an arm appended after the `#else`. |
-| `sprout_scheduler.c` | **compiles** since W1. Was `:30` `ucontext.h` (so W0b's seam was this TU's entire blocker), then briefly `sprout_context.h`'s own `#error` |
+| `sprout_scheduler.c` | since W1: **compiles under mingw**, and under MSVC stops at `:30` `unistd.h` (`close()`, a Winsock substitution — W3). Was `:30` `ucontext.h` before W0b, then briefly `sprout_context.h`'s own `#error`. The probe measures the **mingw** surface, so it now reports this TU as compiling; `just windows-tu-check` is what covers the MSVC surface |
 | `sprout_runtime.c` | `:7` `regex.h` |
 
 ## 7. Syntax, type-system and error-message impact
@@ -499,7 +506,7 @@ Each milestone's exit criterion in §5 is its test. Additionally:
     the host SDK — the **ship** surface, and the stricter one, since MSVC has no `unistd.h`, no
     `sys/time.h` and no POSIX shims. Off-Windows the same script uses a mingw-w64 sysroot, so
     §4.1's develop-mingw / ship-MSVC split is exercised on both sides rather than asserted.
-    Currently 2 expected (`sprout_context.h`, `sprout_scheduler.c`), 2 outstanding.
+    Currently 1 expected (`sprout_context.h`), 3 outstanding.
   - *W2*: `sprout_poll.c` joins the expected list. *W3*: `sprout_runtime.c` does too, and
     `just windows-probe` graduates from diagnostic to gate.
   - *W5*: link and **run** a task/IO smoke, mirroring what the `macos` job
