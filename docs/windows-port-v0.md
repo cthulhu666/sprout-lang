@@ -1,9 +1,10 @@
 # Windows port — Milestone A: compile *to* Windows
 
-Status: **design, not yet implemented.** Non-normative; `docs/spec-v0.md` remains the normative
-source for language semantics. Nothing here changes the language.
+Status: **W0a–W2 implemented and on master; PARKED after W2 — see §5.1 to resume.** Non-normative;
+`docs/spec-v0.md` remains the normative source for language semantics. Nothing here changes the
+language.
 
-Date: 2026-08-15.
+Date: 2026-08-15. Last updated: 2026-08-16 (W2 landed, arc parked).
 
 ## 1. Problem
 
@@ -230,7 +231,7 @@ unreachable-but-honoured rather than leaving the contract undefined.
 **Sockets only — the limitation that bites, and it is not `WSAPoll`-specific.** `WSAPoll` accepts
 only sockets, where epoll and kqueue accept any descriptor. Sprout depends on that generality in
 exactly one place: **async DNS parks a green task on a `pipe()` read end**
-(`sprout_runtime.c:7110`), used as the completion signal from the detached `getaddrinfo` thread.
+(`sprout_runtime.c:7117`), used as the completion signal from the detached `getaddrinfo` thread.
 No readiness backend on Windows can poll a pipe.
 
 The fix is a **loopback socket pair** — the pipe carries a single completion byte, so a
@@ -242,7 +243,7 @@ blocking `accept` where libuv needs `AcceptEx`, because libuv requires overlappe
 and this pair is built once on one thread.
 
 **This landed in W3, not W2** — a scope correction made when W2 was implemented. The change is
-mechanical, but it sits in `async_resolve` (`sprout_runtime.c:7095`), a function that also calls
+mechanical, but it sits in `async_resolve` (`sprout_runtime.c:7102`), a function that also calls
 `fcntl`, `read`, `close` and `pthread_create`, in a TU that does not compile for Windows at all
 until W3 clears `regex.h` at line 7. Writing the Windows arm at W2 would have produced code no
 gate could compile, in the one place a mistake breaks the POSIX DNS path — the same
@@ -559,6 +560,52 @@ first *code* change (W0b, a pure POSIX-side refactor needing no Windows toolchai
 W0b is deliberately not Windows code. Extracting the seam while it still has one implementation
 means the existing POSIX gates can prove it correct; doing it later means debugging the refactor
 and the fiber port simultaneously, on a platform that cannot yet run the test suite.
+
+### 5.1 Parked at W2 (2026-08-16) — how to pick this up
+
+The arc is **paused after W2, deliberately, not blocked.** W0a/W0b/W1/W2 are on master; nothing is
+half-landed, no branch is outstanding, and every gate listed below is green. This section exists so
+resuming needs no archaeology.
+
+**What works today.** Two of the three runtime TUs compile for Windows under *both* toolchains, and
+the poller is verified by *execution*, not just compilation:
+
+| | state |
+|---|---|
+| `runtime/sprout_context.h` | compiles (mingw + MSVC) — fiber arm, W1 |
+| `runtime/sprout_poll.c` | compiles (mingw + MSVC) **and runs** — `WSAPoll` arm, W2 |
+| `runtime/sprout_scheduler.c` | mingw only; MSVC stops at line 30, `#include <unistd.h>` for `close()` → W3 |
+| `runtime/sprout_runtime.c` | stops at line 7, `#include <regex.h>` → W3 |
+
+**The developer loop, all runnable from macOS/Linux with no Windows machine:**
+
+    just windows-probe          # what the target provides; a diagnostic until W3, then a gate
+    just windows-tu-check       # the promise list: TUs that must compile (mingw here, MSVC in CI)
+    just windows-ir-gate        # golden IR -> Win64 COFF, x86-64 + ARM64 (in `just gate`)
+    just windows-poll-selftest  # skips off-Windows; CI runs it for real
+
+`just windows-tu-check` needs a mingw-w64 sysroot (`brew install mingw-w64`, or
+`SPROUT_MINGW_SYSROOT`). The `windows` CI job runs the last three on a real Windows host against
+MSVC and is **advisory** — `test` remains the only required check.
+
+**Two decisions are waiting on the project owner, and W3 should not start without them.** Both are
+language-or-product questions wearing porting clothes, which is why they were split out rather than
+absorbed into W3's substitution list:
+
+1. **POSIX `<regex.h>` has no MSVC equivalent.** One use, `regex_compile_ere`
+   (`sprout_runtime.c:6039`). Vendor a small ERE implementation, or narrow a **language-visible**
+   feature on Windows? Own BACKLOG entry.
+2. **`proc_run`'s `fork`/`execvp`/`pipe` → `CreateProcess`.** Needed by Milestone B and the game's
+   offline bake, *not* by the shipped game — so a loud stub may be the right answer rather than a
+   compromise.
+
+**Two items W2 explicitly handed to W3**, both recorded at their call sites so they cannot be lost:
+the DNS-pipe → loopback-pair swap (§4.3, comment at `sprout_runtime.c:7102`) and widening the
+poller interface's `int fd` to a `SOCKET` (§4.8).
+
+**The standing constraint governing everything above is §2**: this port changes no macOS or Linux
+behaviour or logic. Read it before writing W3 — it is what decides, in the ambiguous cases, whether
+a Windows arm goes in now or waits for the milestone that owns the surface.
 
 ## 6. W3 surface inventory — **measured**
 
