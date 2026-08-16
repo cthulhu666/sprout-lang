@@ -6,6 +6,7 @@ import stdlib.compiler.ast as ast
 import stdlib.compiler.checker as checker
 import stdlib.compiler.compiler as compiler
 import stdlib.compiler.types as types
+import stdlib.compiler.unifier as unifier
 import stdlib.compiler.bundler as bundler
 import stdlib.compiler.typed_ast as typed_ast
 import stdlib.compiler.sprout_ir as sprout_ir
@@ -140,6 +141,64 @@ fn run_file_check(path: String, stdlib_root: String, extra_roots: List String, f
         do
           print("OK")
           checker.dump_typed_program_names(typed_prog, env)
+
+# ---------------------------------------------------------------------------
+# Phase: effects — declared-vs-inferred effect census
+#
+# Reports, never rejects. The v0 checker does not enforce the effect rules
+# (spec-v0.md §7), and this exists to measure what enforcing them would cost
+# before the language commits to it.
+#
+# READ THE SUMMARY AS A LOWER BOUND. Callers resolve a callee through its env
+# scheme, which carries the DECLARED effect — nothing writes an inferred effect
+# back. So when `helper` is mis-declared pure, this run flags `helper` alone; the
+# callers it taints only surface on a later run, after `helper` is annotated.
+# One wave of propagation, not a fixed point.
+
+fn run_file_effects(path: String, stdlib_root: String, extra_roots: List String, failed: Ref Int) -> Unit !{IO} =
+  do
+    (result, reports) <- compiler.compile_phase_effects_with_roots(source.FilePath(path), source.StdlibRoot(stdlib_root), extra_roots)
+    match result with
+    | typed_ast.TypedErr pos msg -> report_error(failed, format_pos(pos) ++ "ERROR: " ++ msg)
+    | typed_ast.TypedOk _ _ ->
+        do
+          print_effect_reports(reports)
+          print_effect_summary(reports)
+
+fn print_effect_reports(reports: List unifier.EffectReport) -> Unit !{IO} =
+  list_each(\r -> print(effect_report_line(r)), reports)
+
+fn effect_report_line(r: unifier.EffectReport) -> String =
+  "effect " ++ (if effect_report_is_gap(r) then "GAP" else "ok") ++ " "
+    ++ unifier.effect_report_name(r) ++ ": declared "
+    ++ types.effect_to_string(unifier.effect_report_declared(r)) ++ ", inferred "
+    ++ types.effect_to_string(unifier.effect_report_inferred(r))
+
+# A gap is an UNDER-declaration: the body does more than the signature admits.
+# Over-declaring is not a gap and must never be reported as one — a pure body
+# under an `!{IO}` signature is exactly how `mutvec_len` says "my result is not a
+# function of my argument alone", and enforcement will accept it (inferred ⊑
+# declared). An effect VARIABLE is left out of the gap count in both directions:
+# `!{e}` is neither satisfied nor violated until instantiation, which v0 cannot
+# solve for, so calling it either way would be inventing a number.
+fn effect_report_is_gap(r: unifier.EffectReport) -> Bool =
+  match (unifier.effect_report_declared(r), unifier.effect_report_inferred(r)) with
+  | (types.EffectPure, types.EffectIO) -> true
+  | _ -> false
+
+fn effect_report_is_var(r: unifier.EffectReport) -> Bool =
+  match unifier.effect_report_inferred(r) with
+  | types.EffectVar _ -> true
+  | types.EffectRow _ -> true
+  | _ -> false
+
+fn print_effect_summary(reports: List unifier.EffectReport) -> Unit !{IO} =
+  print("effect-summary: " ++ int_to_string(list_length(reports)) ++ " declarations, "
+    ++ int_to_string(count_where(effect_report_is_gap, reports)) ++ " gaps (declared pure, inferred !{IO}), "
+    ++ int_to_string(count_where(effect_report_is_var, reports)) ++ " unresolved effect vars")
+
+fn count_where(p: unifier.EffectReport -> Bool, reports: List unifier.EffectReport) -> Int =
+  list_fold(\ (acc, r) -> if p(r) then acc + 1 else acc, 0, reports)
 
 # ---------------------------------------------------------------------------
 # Phase: lower — typeclass dictionary-passing lowering
@@ -323,13 +382,20 @@ fn run_batch(stdlib_root: String, idx: Int, phase: String, extra_roots: List Str
         if phase == "bundle" then run_file_bundle(path, stdlib_root, extra_roots, failed)
         else if phase == "check" then run_file_check(path, stdlib_root, extra_roots, failed)
         else if phase == "lower" then run_file_lower(path, stdlib_root, extra_roots, failed)
+        else if phase == "effects" then run_file_effects(path, stdlib_root, extra_roots, failed)
         else if phase == "recheck" then run_file_recheck(path, stdlib_root, extra_roots, failed)
         else if phase == "ir-typed" then run_file_use_ir_codegen(path, stdlib_root, extra_roots, failed)
         # scan-info and dump-qualify have no diagnostic path of their own — they
         # panic on a read failure — so they take no flag.
         else if phase == "scan-info" then run_file_scan_info(path, stdlib_root)
         else if phase == "dump-qualify" then run_file_dump_qualify(path, stdlib_root)
-        else run_file(path, stdlib_root, failed)
+        else if phase == "" then run_file(path, stdlib_root, failed)
+        # An unrecognised phase used to fall through to the default source check
+        # and exit 0, so `--phase efects` silently ran something else and looked
+        # like it had worked. A gate asserting on a phase's output is only as good
+        # as the driver's willingness to admit the phase does not exist.
+        else report_error(failed, "ERROR: unknown phase `" ++ phase
+               ++ "`: expected bundle|check|effects|lower|recheck|scan-info|dump-qualify")
         # Keep going after a failure: a batch reports every bad file, and `failed`
         # is write-1-only so the status survives the remaining files.
         run_batch(stdlib_root, idx + 1, phase, extra_roots, failed)
@@ -365,7 +431,7 @@ fn main() -> Int !{IO} =
     | ["--phase", _ | _] ->
         report_error(failed, "ERROR: usage: compile-driver --phase <phase> <stdlib-root> [--package-root <dir>] <file>...")
     | ["--phase" | _] ->
-        report_error(failed, "ERROR: --phase requires an argument: bundle|check|lower|recheck|scan-info|dump-qualify")
+        report_error(failed, "ERROR: --phase requires an argument: bundle|check|effects|lower|recheck|scan-info|dump-qualify")
     # --package-root before the bare form: the general arm would otherwise bind
     # path to the literal "--package-root". Mirrors the --emit-ir surface so the
     # typed-codegen path resolves dotted non-stdlib imports (e.g. testsupport.*).
@@ -386,6 +452,6 @@ fn main() -> Int !{IO} =
     | [stdlib_root | _] ->
         run_batch(stdlib_root, 1, "", Nil, failed)
     | _ ->
-        report_error(failed, "ERROR: usage: compile-driver [--phase bundle|check|lower|recheck|scan-info|dump-qualify | --emit-ir [--debug] | --use-ir-codegen | --emit-iface <module-name> | --check-iface <iface-file>] <stdlib-root> <file>...")
+        report_error(failed, "ERROR: usage: compile-driver [--phase bundle|check|effects|lower|recheck|scan-info|dump-qualify | --emit-ir [--debug] | --use-ir-codegen | --emit-iface <module-name> | --check-iface <iface-file>] <stdlib-root> <file>...")
     code <- ref_read(failed)
     code

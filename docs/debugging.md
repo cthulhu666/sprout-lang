@@ -9,6 +9,10 @@ Tools and protocols to reach for **when something is broken** in the Sprout comp
 | `scan-info <stdlib> <file>` | Calls `bundler.scan_source_info` and prints `module:`, `export:`, `ctor:` lines. Diagnoses module-name extraction bugs without running the full bundler pipeline. |
 | `dump-qualify <stdlib> <file>` | Runs full collection + qualify and prints original→qualified name mapping per module, plus `ctx: EMPTY` or `ctx: populated` for each. A `ctx: EMPTY` line means `build_resolve_ctx` failed to find the module's path in `all_symbols` — all names stay unqualified, triggering the `[assert]` error. |
 | `bundle <stdlib> <file>` | Runs the full bundle phase and prints qualified decl names. Gold standard for detecting qualify-stage regressions; output must be identical between stage-0 and stage-1 (verified by `tests/stdlib/test_bundler.spr`). |
+| `effects <stdlib> <file>` | Prints one line per declaration — declared effect vs the effect its body was inferred to perform — plus a summary. Reports, never rejects: the v0 checker does not enforce the effect rules (spec §7). Read the count as a **lower bound**; nothing writes an inferred effect back to the env, so a mis-declared callee is flagged but its callers are not until it is annotated. Calibrated by `just effect-report-smoke` against `tests/effects/canaries.spr`; see `docs/effect-enforcement-v0.md`. |
+
+An unrecognised phase is an error. It used to fall through to the default source
+check and exit 0, so a typo ran something else and looked like it had worked.
 
 **Troubleshooting `BundleErr("[assert] qualify_decl: FnDecl starts with '.'...")`:**
 1. Run `--phase scan-info` to confirm `scan_source_info` returns a valid non-empty module name.

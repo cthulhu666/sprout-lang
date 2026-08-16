@@ -482,7 +482,17 @@ export fn effect_to_string(e: Effect) -> String =
   | EffectRow labels -> "!{" ++ join_list(", ", labels) ++ "}"
 
 fn scheme_body(s: Scheme) -> String =
-  type_to_string(scheme_type(s)) ++ effect_suffix(scheme_effects(s))
+  type_to_string(scheme_type(s)) ++ scheme_effect_suffix(scheme_type(s), scheme_effects(s))
+
+# A declared effect is recorded in TWO places — on the innermost arrow of the
+# type, and on the Scheme — because a zero-parameter function has no arrow to
+# hold one (`fn main() -> Unit !{IO}` types as plain `Unit`). Printing both would
+# render every effectful function as `String -> Unit !{IO} !{IO}`, so the arrow
+# wins whenever there is an arrow: func_to_string has already emitted it.
+fn scheme_effect_suffix(t: Type, eff: Effect) -> String =
+  match t with
+  | TFunc _ _ _ _ -> ""
+  | _ -> effect_suffix(eff)
 
 # ---------------------------------------------------------------------------
 # GHC-style variable renaming for scheme display
@@ -528,7 +538,7 @@ fn rename_vars_list(vars: List String, rename: Dict String) -> List String =
       | Nothing -> Cons(v, rename_vars_list(rest, rename))
 
 fn scheme_to_string_renamed(vars: List String, t: Type, eff: Effect) -> String =
-  "forall " ++ join_list(" ", rename_vars_list(vars, rename)) ++ ". " ++ type_to_string(apply_rename_type(rename, t)) ++ effect_suffix(eff)
+  "forall " ++ join_list(" ", rename_vars_list(vars, rename)) ++ ". " ++ type_to_string(apply_rename_type(rename, t)) ++ scheme_effect_suffix(t, eff)
   where rename = build_var_rename(vars, 0, dict_empty())
 
 export fn scheme_to_string(s: Scheme) -> String =

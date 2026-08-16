@@ -1018,6 +1018,69 @@ bundle-smoke: bootstrap-from-seed
   fi
   echo "==> bundle-smoke ✓"
 
+# Calibration gate for `--phase effects`, the declared-vs-inferred effect report.
+#
+# This gate exists because the instrument's failure mode is SILENCE, not noise.
+# A hand-rolled predecessor reported zero gaps across 316 declarations and read
+# as "the codebase is well-annotated"; it was actually reporting nothing at all,
+# and was caught only by running it against a case already known to be broken.
+# So this asserts on both halves: the cases that MUST be flagged, and the ones
+# that must NOT — a report that flags everything is as useless as one that flags
+# nothing. tests/effects/canaries.spr documents the expected answer per function.
+[group('smoke')]
+effect-report-smoke: bootstrap-from-seed
+  #!/usr/bin/env bash
+  set -euo pipefail
+  FIX=tests/effects/canaries.spr
+  [ -f "$FIX" ] || { echo "effect-report-smoke: missing fixture $FIX" >&2; exit 1; }
+  TMPD=$(mktemp -d /tmp/sprout_eff_XXXXXX)
+  trap 'rm -rf "$TMPD"' EXIT
+  if ! "{{build_dir}}/compile_driver_bin_stage1" --phase effects "{{stdlib_root}}" "$FIX" > "$TMPD/out" 2>&1; then
+    echo "effect-report-smoke: --phase effects failed" >&2; cat "$TMPD/out" >&2; exit 1
+  fi
+  failed=0
+  # infer.sprout has TWO sites that discard a body's inferred effect — the `fn`
+  # one and the `instance` one. Instrumenting only the first left every instance
+  # method out of the census, silently and in the flattering direction. These two
+  # lines are the guard against that regressing.
+  if ! grep -qE '^effect GAP instance describe\(Noisy\):' "$TMPD/out"; then
+    echo "effect-report-smoke: instance methods are not being recorded" >&2
+    grep -E '^effect (GAP|ok) instance ' "$TMPD/out" >&2 || echo "  (no instance lines at all)" >&2
+    failed=$((failed + 1))
+  fi
+  if ! grep -qE '^effect ok instance describe\(Quiet\):' "$TMPD/out"; then
+    echo "effect-report-smoke: expected a clean instance line for describe(Quiet)" >&2
+    failed=$((failed + 1))
+  fi
+  # A function that MUST be reported as a gap (declared pure, body reaches IO).
+  for fn in shout calls_loud each_lambda; do
+    if ! grep -qE "^effect GAP ${fn}:" "$TMPD/out"; then
+      echo "effect-report-smoke: expected a GAP for '${fn}', got:" >&2
+      grep -E "^effect (GAP|ok) ${fn}:" "$TMPD/out" >&2 || echo "  (no line at all)" >&2
+      failed=$((failed + 1))
+    fi
+  done
+  # A function that must NOT be reported as a gap. `calls_shout` and `each_named`
+  # are here as documented LIMITATIONS, not successes — see the fixture.
+  for fn in loud over_declared honest_pure calls_shout each_named main; do
+    if grep -qE "^effect GAP ${fn}:" "$TMPD/out"; then
+      echo "effect-report-smoke: unexpected GAP for '${fn}':" >&2
+      grep -E "^effect GAP ${fn}:" "$TMPD/out" >&2
+      failed=$((failed + 1))
+    fi
+  done
+  # The summary line is what the D1 migration estimate is read off. If the report
+  # ever stops emitting it, every downstream number silently becomes zero.
+  if ! grep -qE "^effect-summary: [0-9]+ declarations, [0-9]+ gaps" "$TMPD/out"; then
+    echo "effect-report-smoke: no effect-summary line in output:" >&2
+    cat "$TMPD/out" >&2
+    failed=$((failed + 1))
+  fi
+  if (( failed > 0 )); then
+    echo "effect-report-smoke: $failed assertion(s) failed" >&2; exit 1
+  fi
+  echo "==> effect-report-smoke ✓"
+
 # Loud-fail guard.  A call to a callee that resolves to NOTHING must be
 # DIAGNOSED, never silently zero-filled into `ret i64 0`.  This is the
 # regression guard for the strictness that replaced direct codegen's
@@ -2520,6 +2583,7 @@ ci-fast-gates: bootstrap-from-seed build-fmt-from-seed
     "approved-builtins|check-approved-builtins"
     "smoke-shapes|smoke-shapes"
     "bundle-smoke|bundle-smoke"
+    "effect-report-smoke|effect-report-smoke"
     "fmt-check|fmt-check"
     "type-errors|test-type-errors"
     "parse-errors|test-parse-errors"

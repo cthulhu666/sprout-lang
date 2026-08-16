@@ -126,13 +126,26 @@ export fn type_from_ast(te: ast.TypeExpr, local_vars: Dict types.Type) -> types.
   | ast.TypeName name -> lookup_type_var(name, local_vars)
   | ast.TypeApply base arg ->
       types.TApp(type_from_ast(base, local_vars), type_from_ast(arg, local_vars))
-  | ast.TypeArrow param ret _ ->
+  | ast.TypeArrow param ret effs ->
       # An ANNOTATED arrow type means consuming: arrow-type syntax cannot yet
       # spell `borrowing` (deferred — see BACKLOG "modifiers in arrow types"), so
       # there is nothing here to read. Passing a borrowing function to such an
       # annotation is therefore a mode mismatch, and its message says so.
+      #
+      # `effs` was discarded here until 2026-08-16, which is why a parameter
+      # written `f: a -> Unit !{e}` typed as a plain `a -> Unit`: the parser has
+      # always recorded the effect (parser.make_type_arrow hoists a trailing
+      # annotation onto the arrow it is building, so `a -> b -> C !{IO}` puts it
+      # on the INNERMOST arrow), and inference threw it away one step later.
       types.TFunc(type_from_ast(param, local_vars), type_from_ast(ret, local_vars),
-        types.EffectPure, types.OwnConsume)
+        effect_from_maybe_labels(effs), types.OwnConsume)
+  # A bare effect suffix on a NON-arrow type. `Type` has no effect slot outside
+  # TFunc, so there is nowhere to put it — but nothing is lost: the two positions
+  # where a trailing annotation is meaningful are both intercepted earlier. On an
+  # arrow, parser.make_type_arrow hoists it into the TypeArrow above; on a
+  # declaration's return type, the decl parser splits it out into the FnDecl's own
+  # `effects` field (parser.sprout:1760), which is how `fn main() -> Unit !{IO}`
+  # carries an effect with no arrow to hang it on.
   | ast.TypeEffect inner _ -> type_from_ast(inner, local_vars)
   | ast.TupleType parts -> types.TTuple(type_list_from_ast(parts, local_vars))
 
@@ -313,7 +326,8 @@ fn scheme_from_fn_parts_inner(
     type_params,
     Nil,
     build_fn_type_modes(param_types_from_decl(params, local_vars), param_modes(params),
-      ret_from_maybe_with_vars(ret_type_maybe, local_vars)),
+      ret_from_maybe_with_vars(ret_type_maybe, local_vars),
+      effect_from_maybe_labels(effects_maybe)),
     effect_from_maybe_labels(effects_maybe),
     Nil
   )
@@ -345,12 +359,32 @@ fn build_fn_type(params: List types.Type, ret: types.Type) -> types.Type =
 # what puts `borrowing` (and, since M4.4a, `once`) into the type of every
 # top-level fn, extern fn, class method and instance method — they all reach
 # TFunc through here.
-fn build_fn_type_modes(params: List types.Type, modes: List ast.ParamMode, ret: types.Type) -> types.Type =
+#
+# `eff` lands on the INNERMOST arrow, which is not an arbitrary pick: it is the
+# placement parser.make_type_arrow already gives a hand-written `a -> b -> C !{IO}`,
+# so a declared and a written signature produce the same type. It is also the only
+# placement consistent with §5.3, where a call is always saturated and never a
+# partial application — every arrow is consumed at once, so an outer-arrow effect
+# would describe an application that cannot be written.
+#
+# A ZERO-parameter function has no arrow to carry anything, which is why the
+# declared effect also stays on the Scheme: `fn main() -> Unit !{IO}` types as
+# plain `Unit`, and Scheme's effect field is the only place its !{IO} can live.
+# types.scheme_to_string knows this and prints whichever one is load-bearing.
+fn build_fn_type_modes(params: List types.Type, modes: List ast.ParamMode, ret: types.Type,
+                       eff: types.Effect) -> types.Type =
   match params with
   | Nil -> ret
   | Cons p rest ->
-      types.TFunc(p, build_fn_type_modes(rest, mode_list_tail(modes), ret), types.EffectPure,
-        own_of_mode(mode_list_head(modes)))
+      types.TFunc(p, build_fn_type_modes(rest, mode_list_tail(modes), ret, eff),
+        arrow_effect_at(rest, eff), own_of_mode(mode_list_head(modes)))
+
+# The effect belongs to the last arrow only; every earlier one is a pure step
+# toward it.
+fn arrow_effect_at(rest: List types.Type, eff: types.Effect) -> types.Effect =
+  match rest with
+  | Nil -> eff
+  | _ -> types.EffectPure
 
 fn own_of_mode(m: ast.ParamMode) -> types.Ownership =
   linear_check.ownership_of_param_mode(m)
@@ -530,13 +564,47 @@ fn collect_ctor_names(ctors: List ast.TypeConstructor, acc: List String) -> List
 # Effect merging
 # ---------------------------------------------------------------------------
 
+# The effect of doing `a` and then `b`. IO absorbs everything; purity is the
+# identity. Two DIFFERENT variables cannot be reduced to one — a body that calls
+# an `!{e}` callee and an `!{f}` callee performs both — so they merge into a row.
+#
+# That last case used to fall through to `| _ -> a`, silently dropping `b`
+# (BACKLOG "merge_effects drops one variable side"). It was unreachable while
+# every callee reported pure; wiring the callee effect through infer_call_var
+# makes it live, so it is fixed here rather than left as a known-wrong input to
+# the numbers this report produces.
 fn merge_effects(a: types.Effect, b: types.Effect) -> types.Effect =
   match (a, b) with
   | (types.EffectIO, _) -> types.EffectIO
   | (_, types.EffectIO) -> types.EffectIO
   | (types.EffectPure, other) -> other
   | (other, types.EffectPure) -> other
-  | _ -> a
+  | _ -> merge_effect_labels(a, b)
+
+fn merge_effect_labels(a: types.Effect, b: types.Effect) -> types.Effect =
+  match list_union_labels(effect_labels(a), effect_labels(b)) with
+  | [only] -> types.EffectVar(only)
+  | labels -> types.EffectRow(labels)
+
+fn effect_labels(e: types.Effect) -> List String =
+  match e with
+  | types.EffectVar name -> [name]
+  | types.EffectRow labels -> labels
+  # Pure and IO are both handled by merge_effects before reaching here.
+  | _ -> Nil
+
+fn list_union_labels(xs: List String, ys: List String) -> List String =
+  match ys with
+  | Nil -> xs
+  | Cons y rest ->
+      if list_member(y, xs)
+      then list_union_labels(xs, rest)
+      else list_union_labels(list_append_label(xs, y), rest)
+
+fn list_append_label(xs: List String, y: String) -> List String =
+  match xs with
+  | Nil -> [y]
+  | Cons h t -> Cons(h, list_append_label(t, y))
 
 # ---------------------------------------------------------------------------
 # List helpers (type-specific reverse functions)
@@ -1173,8 +1241,36 @@ fn infer_call_var(
         match call_arity_error_for(name, list_length(args), env) with
         | Just msg -> InferErr(cpos, msg)
         | Nothing ->
+            # This slot was a hardcoded `types.EffectPure` until 2026-08-16, and it
+            # is the single reason effect inference produced no signal: every named
+            # call is routed through here, so every callee looked pure and
+            # merge_effects only ever merged pure with pure.
             infer_call_inner(state, env, subst, eff_subst, callee,
-              typed_ast.TVar(name, t, cpos), types.EffectPure, prog_to_fresh, args, pos)
+              typed_ast.TVar(name, t, cpos), call_effect_of(scheme, t, list_length(args)),
+              prog_to_fresh, args, pos)
+
+# The effect a SATURATED call performs: the merge of every arrow the call
+# consumes. Calls are always saturated (§5.3 — never a partial application), so
+# every arrow goes at once and only their merge is observable. Normally exactly
+# one of them is non-pure, since build_fn_type_modes puts the declared effect on
+# the innermost arrow; merging rather than indexing keeps this correct for a
+# hand-written type that places it somewhere else.
+#
+# A zero-argument call consumes no arrow, so its effect has to come off the
+# Scheme — that is where `fn main() -> Unit !{IO}` keeps its !{IO}, there being
+# no arrow in a nullary signature to hold one.
+fn call_effect_of(scheme: types.Scheme, t: types.Type, argc: Int) -> types.Effect =
+  if argc <= 0 then types.scheme_effects(scheme) else arrows_effect(t, argc)
+
+fn arrows_effect(t: types.Type, argc: Int) -> types.Effect =
+  if argc <= 0 then types.EffectPure
+  else
+    match t with
+    | types.TFunc _ ret eff _ -> merge_effects(eff, arrows_effect(ret, argc - 1))
+    # Fewer arrows than arguments: an over-application the arity check has
+    # already rejected, or a type variable standing in for a callee whose shape
+    # is not yet known. Nothing to read either way.
+    | _ -> types.EffectPure
 
 # `print` is a type-erased runtime renderer, so it cannot recover per-element
 # types of a tuple (a Bool prints as 1, a static-String element as its raw
@@ -4306,10 +4402,25 @@ fn infer_lambda_expected(
     match br with
     | InferErr pos e -> InferErr(pos, e)
     | InferOk typed_body s1 es1 body_eff ->
+        # The lambda's TYPE gets the body's effect on its innermost arrow, matching
+        # what a written `a -> Unit !{IO}` produces.
+        #
+        # `body_eff` is ALSO still returned as the enclosing expression's effect,
+        # and that is deliberate even though it is strictly wrong: building a
+        # closure performs no IO, so a correct attribution would report pure here
+        # and fire the effect when the closure is CALLED. Reporting pure today
+        # would lose the effect entirely, because the arrow that now carries it
+        # goes nowhere — unify_types ignores TFunc's effect field and never
+        # populates eff_subst, so instantiating a callee's `!{e}` makes a fresh
+        # EffectVar that nothing ever binds. Until effect unification is threaded
+        # through unify_types, `merge_effects(acc_eff, lam_eff)` at the argument
+        # site is the ONLY path by which an effect crosses a higher-order boundary
+        # — and list_each/list_fold, the repo's recommended effectful idiom, are
+        # exactly that boundary. Over-approximating here keeps them visible.
         InferOk(
           typed_ast.TLambda(params, typed_body,
             build_fn_type_modes(param_types, param_modes(params),
-              typed_ast.typed_expr_type(typed_body)), pos),
+              typed_ast.typed_expr_type(typed_body), body_eff), pos),
           s1, es1, body_eff)
 
 fn seed_param_types(fresh: List types.Type, expected: Maybe types.Type) -> List types.Type =
@@ -6561,7 +6672,14 @@ fn check_fn_body(
         # (fn_body_env), so recursive self-calls inject dicts from the Scheme —
         # no @constrained_N self markers to seed. fwd_env holds only @fwd/@eta_fwd.
         let body_env = fn_body_env(name, params, inst_type, constraint_source_tokens(constraints), fwd_env)
-        InferOk typed_body0 s1 _ _ <- typecheck_expr(state, body_env, subst, eff_subst, body) else InferErr pos msg -> (fn_body_err(name, pos, msg), dict_empty(), Nil)
+        InferOk typed_body0 s1 _ body_eff <- typecheck_expr(state, body_env, subst, eff_subst, body) else InferErr pos msg -> (fn_body_err(name, pos, msg), dict_empty(), Nil)
+        # The declaration boundary: the one place that holds both the declared
+        # effect and the effect the body was inferred to perform. Enforcement will
+        # compare them HERE and reject a body that exceeds its signature; for now
+        # the pair is only recorded, so `--phase effects` can size that migration
+        # before the language commits to it (spec-v0.md §7 enforcement note).
+        _ <- unifier.record_effect_report(state,
+               unifier.EffectReport(name, types.scheme_effects(decl_scheme), body_eff))
         let Ok s2a = unifier.unify_types(s1, typed_ast.typed_expr_type(typed_body0), fn_return_type(inst_type, list_length(params))) else Err e -> (return_mismatch_body_err(name, typed_body0, fn_return_type(inst_type, list_length(params)), s1, "Return type mismatch in " ++ name ++ ": " ++ e), dict_empty(), Nil)
         # AFTER the return-type unify: the declared return type may be the only
         # thing that determines a deferred field access's receiver.
@@ -6860,17 +6978,52 @@ fn check_instance_method(
         br <- typecheck_expr(state, body_env, subst, eff_subst, body)
         match br with
         | InferErr pos msg -> instance_method_err(name, pos, msg)
-        | InferOk typed_body0 s1 _ _ ->
-            match unifier.unify_types(s1, typed_ast.typed_expr_type(typed_body0), fn_return_type(inst_type, list_length(params))) with
-            | Err e -> InstanceMethodErr(typed_ast.typed_expr_pos(typed_body0), "Return type mismatch in instance method " ++ name ++ ": " ++ e)
-            | Ok s2a ->
-                # AFTER the return-type unify — see finish_field_obligations.
-                do
-                  f <- finish_field_obligations(state, body_env, s2a, typed_body0)
-                  match f with
-                  | FinishErr fpos fmsg -> InstanceMethodErr(fpos, fmsg ++ " in instance method " ++ name)
-                  | FinishOk typed_body s2 ->
-                      finish_instance_method(name, params, ret_maybe, eff_maybe, body_env, s2, inst_type, typed_body, env)
+        | InferOk typed_body0 s1 _ body_eff ->
+            # The instance-method twin of the record in check_fn_body. Both sites
+            # discard a body effect, and instrumenting only the `fn` one would
+            # leave every `instance` method out of the census — silently, and in
+            # the direction that reads as good news, which is the failure mode
+            # this phase exists to catch.
+            do
+              _ <- unifier.record_effect_report(state,
+                     unifier.EffectReport(instance_report_name(name, inst_type),
+                       effect_from_maybe_labels(eff_maybe), body_eff))
+              instance_method_checked(state, name, params, ret_maybe, eff_maybe,
+                body_env, s1, inst_type, typed_body0, env)
+
+# Two instances of one class define the same method name, so the bare name would
+# collapse them into a single census entry. The instance HEAD is not in scope here
+# — check_instance_method receives only the constraints — but the method's first
+# parameter is the head for every instance method that takes one, and inst_type is
+# already built. A nullary method (e.g. Applicative.pure) falls back to the bare
+# name, which is a report label, not an identity the compiler relies on.
+fn instance_report_name(name: String, inst_type: types.Type) -> String =
+  match inst_type with
+  | types.TFunc param _ _ _ -> "instance " ++ name ++ "(" ++ types.type_to_string(param) ++ ")"
+  | _ -> "instance " ++ name
+
+fn instance_method_checked(
+  state: unifier.InferState,
+  name: String,
+  params: List ast.Param,
+  ret_maybe: Maybe ast.TypeExpr,
+  eff_maybe: Maybe (List String),
+  body_env: Dict types.Scheme,
+  s1: Dict types.Type,
+  inst_type: types.Type,
+  typed_body0: typed_ast.TypedExpr,
+  env: Dict types.Scheme
+) -> InstanceMethodResult !{IO} =
+  match unifier.unify_types(s1, typed_ast.typed_expr_type(typed_body0), fn_return_type(inst_type, list_length(params))) with
+  | Err e -> InstanceMethodErr(typed_ast.typed_expr_pos(typed_body0), "Return type mismatch in instance method " ++ name ++ ": " ++ e)
+  | Ok s2a ->
+      # AFTER the return-type unify — see finish_field_obligations.
+      do
+        f <- finish_field_obligations(state, body_env, s2a, typed_body0)
+        match f with
+        | FinishErr fpos fmsg -> InstanceMethodErr(fpos, fmsg ++ " in instance method " ++ name)
+        | FinishOk typed_body s2 ->
+            finish_instance_method(name, params, ret_maybe, eff_maybe, body_env, s2, inst_type, typed_body, env)
 
 fn instance_method_err(name: String, pos: source.SourcePos, msg: String) -> InstanceMethodResult =
   # Previously: lenient short-circuit that returned a `dummy_unit()`-bodied

@@ -5,6 +5,7 @@ import stdlib.compiler.parser as parser
 import stdlib.compiler.ast as ast
 import stdlib.compiler.checker as checker
 import stdlib.compiler.types as types
+import stdlib.compiler.unifier as unifier
 import stdlib.compiler.module_loader as module_loader
 import stdlib.compiler.bundler as bundler
 import stdlib.compiler.typed_ast as typed_ast
@@ -214,6 +215,24 @@ export fn compile_phase_bundle_with_roots(path: source.FilePath, stdlib_root: so
 
 export fn compile_phase_check(path: source.FilePath, stdlib_root: source.StdlibRoot) -> typed_ast.TypedResult !{IO} =
   compile_phase_check_with_roots(path, stdlib_root, Nil)
+
+# Phase: effects — typecheck and hand back the declared-vs-inferred effect census.
+#
+# Deliberately stops after the typecheck rather than reusing
+# compile_phase_check_with_roots: resolve/lowering come after, and the reports are
+# complete the moment inference finishes. Running the later passes would add time
+# and new ways to fail without changing a single line of the report.
+export fn compile_phase_effects_with_roots(path: source.FilePath, stdlib_root: source.StdlibRoot, extra_roots: List String)
+    -> (typed_ast.TypedResult, List unifier.EffectReport) !{IO} =
+  do
+    bundle_result <- bundler.bundle_file_with_roots(path, stdlib_root, extra_roots)
+    match bundle_result with
+    | bundler.BundleErr pos msg -> (typed_ast.TypedErr(pos, "bundle: " ++ msg), Nil)
+    | bundler.BundleOk prog ->
+        do
+          cache <- module_loader.new_cache()
+          prelude_pairs <- module_loader.load_prelude_pairs(source.stdlib_root_str(stdlib_root), cache)
+          checker.typecheck_typed_with_effects(prog, prelude_pairs)
 
 export fn compile_phase_check_with_roots(path: source.FilePath, stdlib_root: source.StdlibRoot, extra_roots: List String) -> typed_ast.TypedResult !{IO} =
   do
