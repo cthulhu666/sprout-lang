@@ -88,7 +88,7 @@ native_set_insert
 native_set_member
 native_set_size
 native_set_to_list
-panic
+panic  # Declared PURE (`panic : String -> a`), despite writing to stderr and calling exit(1) via tcp_fail. Not an oversight, and not a carve-out: ~187 tcp_fail sites already sit behind builtins declared pure (vector_length aborts on a null vector), so aborting-is-not-an-effect was the de facto rule and panic — the only builtin whose sole purpose is to abort — was the lone inconsistency. An abort has no continuation, so nothing downstream can observe the write, and the bottom-shaped return type already says it does not come back. Decided 2026-08-16; normative in spec §6, survey in docs/effect-enforcement-v0.md §6, pinned by tests/effects/canaries.spr `unreachable_arm`.
 print_int
 print_newline
 print_str

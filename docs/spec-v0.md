@@ -1322,9 +1322,44 @@ Effect note for v0:
   means they are equally unchecked — see the enforcement note under §7.)
 - A builtin uses `!{IO}` when evaluating the call may interact with runtime or
   external state such as terminal IO, files, environment, network, randomness,
-  or host-backed analysis services.
+  or host-backed analysis services **in a way the rest of the program can
+  observe**. The qualifier is normative: the test is whether a *continuation* can
+  tell the call happened, not whether the implementation touches a descriptor.
+  The two readings differ only on builtins that abort, covered below.
 - A builtin stays pure when it only computes or transforms values, even if its
   result type is `Maybe ...` or `Result ...`.
+- **Aborting the program is not an effect.** A builtin that may terminate the
+  process stays pure. An abort has no continuation, so no Sprout expression can
+  observe it, and no caller behaves differently for having called a function that
+  might abort — if it aborts, the caller does not run.
+
+  This is not a new exemption; it is what the prelude has always done. Every
+  runtime abort goes through `tcp_fail`, which writes `runtime error: <msg>` to
+  stderr and calls `exit(1)`, and there are ~187 such call sites behind builtins
+  that are overwhelmingly declared **pure**: `vector_length : Vector a -> Int`
+  aborts on a null vector, as do `vector_get`, `str_len` and most of the rest.
+  Under the descriptor-touching reading every one of them would be `!{IO}`.
+
+  `panic : String -> a` is the only builtin whose *sole purpose* is to abort, and
+  until 2026-08-16 it was the only one annotated `!{IO}` for it. That made it the
+  odd one out rather than the exception, so it is now declared pure like the rest.
+  Its bottom-shaped return type `a` already carries the only information a caller
+  can act on: this does not come back.
+
+  The cost was measured in both directions: as `!{IO}` it made nine functions in
+  `stdlib/compiler/` — pure in every case where they return, ending in
+  `| _ -> panic("… (internal error)")` — report as effect gaps. It also matches
+  every language surveyed; Java, Swift and Zig each track recoverable failure in a
+  signature and each deliberately exempt the abort, and Koka, the one language
+  that tracks it, tracks it as `exn`, a separate weaker effect inside its own
+  `pure` alias rather than folded into `io`. Rationale and primary sources:
+  `docs/effect-enforcement-v0.md` §6.
+
+  Note this does **not** generalise to "diverging calls are pure". An infinite
+  loop is not an abort; a Sprout function that never returns but keeps running
+  can still perform observable I/O, and its effects are tracked as usual. The
+  exemption is for termination of the whole program, which is why it covers
+  exactly one builtin.
 - v0 provides only restricted effect polymorphism via singleton effect variables
   such as `!{e}`.
 - v0 does not provide delayed execution, mixed/open effect rows, or handlers.

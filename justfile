@@ -1062,7 +1062,7 @@ effect-report-smoke: bootstrap-from-seed
   done
   # A function that must NOT be reported as a gap. `calls_shout` and `each_named`
   # are here as documented LIMITATIONS, not successes — see the fixture.
-  for fn in loud over_declared honest_pure calls_shout each_named main; do
+  for fn in loud over_declared honest_pure calls_shout each_named unreachable_arm main; do
     if grep -qE "^effect GAP ${fn}:" "$TMPD/out"; then
       echo "effect-report-smoke: unexpected GAP for '${fn}':" >&2
       grep -E "^effect GAP ${fn}:" "$TMPD/out" >&2
