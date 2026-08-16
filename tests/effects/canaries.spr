@@ -51,6 +51,16 @@ fn each_lambda(xs: List String) -> Unit = list_each(\x -> print(x), xs)
 # through unify_types, which is out of scope for a reporting-only change.
 fn each_named(xs: List String) -> Unit = list_each(print, xs)
 
+# --- Must NOT be flagged: `panic` is PURE, deliberately. ---
+# An abort has no continuation, so nothing downstream can observe it — see
+# docs/effect-enforcement-v0.md §6 for the survey behind that call. Before the
+# 2026-08-16 decision `panic` was `!{IO}`, which made every exhaustiveness arm of
+# this shape report as an effect gap: nine of the twelve gaps in the first corpus
+# census were this and nothing else. If this line ever reports GAP again,
+# `panic`'s declaration has drifted back.
+fn unreachable_arm(n: Int) -> Int =
+  if n < 0 then panic("unreachable_arm: negative (internal error)") else n
+
 # --- Instance methods are a SECOND declaration boundary, with its own discard. ---
 # infer.sprout has two sites that bind a body's inferred effect; the `fn` one and
 # the `instance` one. Instrumenting only the first would leave every instance

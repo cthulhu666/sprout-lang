@@ -45,6 +45,12 @@ Stdlib must not expose partial functions. Every `f : A -> B` is defined on all o
 
 The compiler may break this rule locally for unreachable-by-invariant cases, but the unreachable arm must surface an explicit error with location, never silent garbage.
 
+**`panic` is pure, and that makes this rule the only thing standing in front of it.** Since 2026-08-16 `panic : String -> a` carries no effect (spec §6; rationale in `docs/effect-enforcement-v0.md` §6), so a function that panics looks identical in its signature to one that cannot. Nothing in the type system will now push back on `panic` the way an `!{IO}` annotation used to. That was the point — an unreachable arm should not make its function advertise an impurity it does not have — but it removes the one accidental brake, so the discipline has to be deliberate:
+
+- `panic` is for **violated internal invariants**: a state the compiler's own construction rules make impossible, where continuing would produce silent garbage. `| _ -> panic("lowering: … (internal error)")` is the canonical shape.
+- `panic` is **not** for input the caller could plausibly supply. Bad user input, a missing key, a malformed file, a failed parse — those are `Maybe`/`Result`, and were before.
+- If you cannot write the sentence "this cannot happen unless *we* have a bug," it is not a panic.
+
 No naming suffix is needed to mark fallibility — the return type carries the information. The compiler's existing `try_*` prefix is permitted as a semantic cue ("this is a search that might not match"), not as a partiality marker.
 
 ### 2a. When a match classifies an ADT, enumerate every variant

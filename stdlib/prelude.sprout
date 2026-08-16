@@ -1285,7 +1285,44 @@ extern fn eprint(val: String) -> Unit !{IO}
 # must be imported explicitly; callers use `fs.read_text` / `fs.write_text`. Reading and writing
 # files is not something a program should be able to reach by accident — the same reasoning already
 # recorded below for stdlib.net's socket primitives.
-extern fn panic(msg: String) -> a !{IO}
+# `panic` is PURE, and it is consistent with the rest of this block, not an
+# exception to it.
+#
+# It does perform terminal I/O: the runtime writes `runtime error: <msg>` to
+# stderr and calls exit(1) (sprout_runtime.c panic -> tcp_fail). By the letter of
+# spec §6 as it read before 2026-08-16 — "!{IO} when evaluating the call may
+# interact with runtime or external state such as terminal IO" — that would make
+# it effectful.
+#
+# But so would most of this file. EVERY runtime abort goes through tcp_fail, and
+# there are ~187 such call sites behind builtins declared pure right here:
+# `vector_length : Vector a -> Int` aborts on a null vector, as do `vector_get`
+# and `str_len`. Aborting-is-not-an-effect was already the de facto rule; `panic`
+# was simply the only builtin whose sole PURPOSE is to abort, and so the only one
+# anyone thought to annotate for it. It was the inconsistency, not the exception.
+#
+# An effect is worth tracking when a CONTINUATION can observe it. `print(x)` in a
+# pure function matters because the program keeps running and something
+# downstream can tell. `panic` has no continuation: the write is the last thing
+# that happens, and no caller behaves differently for having called a function
+# that might panic — if it panics, the caller does not run. Its return type is
+# already `a`, the bottom-shaped signature that says "this does not come back";
+# `!{IO}` on top would add "and the rest of your program is impure because of
+# it", which is the part that is false.
+#
+# Every language surveyed agrees, including the ones that track failure hardest:
+# Java, Swift and Zig each put recoverable failure in the signature and each
+# deliberately exempt the abort, though all of their aborts print a diagnostic
+# too. Koka alone tracks it, as `exn` — a separate, weaker effect sitting inside
+# its own `pure` alias, never folded into `io`. Full survey with primary sources:
+# docs/effect-enforcement-v0.md §6.
+#
+# CONSEQUENCE, measured: this is the difference between 12 and 3 effect gaps
+# across the 4337-declaration corpus. Nine functions are pure in every case where
+# they return and end in `| _ -> panic("... (internal error)")`; declaring panic
+# effectful made all nine advertise an impurity they do not have.
+# tests/effects/canaries.spr pins it via `unreachable_arm`.
+extern fn panic(msg: String) -> a
 extern fn argv_get(idx: Int) -> Maybe String !{IO}
 
 export fn argv_all() -> List String !{IO} =

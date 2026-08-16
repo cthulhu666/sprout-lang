@@ -52,8 +52,20 @@ a missing-import diagnostic.
 `!{IO}` builtins in the prelude:
 
 - `print(x) -> Unit !{IO}`
-- `panic(msg: String) -> a !{IO}`
 - `argv_get(index: Int) -> Maybe String !{IO}` (`0` is the first user-supplied program argument)
+
+Pure builtin in the prelude that nevertheless touches the terminal:
+
+- `panic(msg: String) -> a` — writes `runtime error: <msg>` to stderr and exits 1,
+  and is **deliberately not `!{IO}`**. An abort has no continuation, so nothing
+  downstream can observe the write; the `a` return type already says it does not
+  come back. Callable from a pure function, which is the point — an unreachable
+  `| _ -> panic("… (internal error)")` arm does not make its function effectful.
+
+  It is not alone in this, only the most visible: most pure builtins abort the
+  same way on a precondition violation (`vector_length` and `vector_get` abort on
+  a null vector, `str_slice` on a negative start or length), and they are pure too.
+  Normative in spec §6; survey in `docs/effect-enforcement-v0.md` §6.
 
 `!{IO}` builtins in modules — imported explicitly, then called by bare name or
 through the module's wrapper API:

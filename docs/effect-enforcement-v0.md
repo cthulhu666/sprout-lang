@@ -1,8 +1,10 @@
 # Effect enforcement — v0
 
-**Status:** measurement landed 2026-08-16; enforcement **not** started. §6 now carries a verified
-prior-art survey and a recommendation (`panic` should be pure) awaiting a call; the remaining hard
-gate is effect-variable solving (§7), not the `panic` question. `docs/spec-v0.md` §7 rules 8, 9 and 11 state the intended discipline and its enforcement note
+**Status:** measurement landed 2026-08-16, and `panic` is now **pure** (§6, decided the same day
+after the survey in §6.2). Enforcement itself is **not** started, and the remaining hard gate is
+effect-variable solving (§7). With `panic` pure the corpus has **3** effect gaps, all three a known
+instrument over-approximation rather than a real finding, so enforcing spec §7 rule 8 would cost
+zero source annotations. `docs/spec-v0.md` §7 rules 8, 9 and 11 state the intended discipline and its enforcement note
 states that the v0 checker does not apply them. This document records what was actually broken, what
 was fixed to make the gap measurable, and the number that came out.
 
@@ -160,7 +162,7 @@ The nine are all the same shape — an exhaustiveness arm that cannot be reached
 | typed_ast.TMethodRef _ _ _ _ _ -> panic("dce.is_pure_expr: TMethodRef survived lowering (internal error)")
 ```
 
-## 6. The open decision: is `panic` an effect?
+## 6. Is `panic` an effect? Decided: no
 
 `stdlib/prelude.sprout:1288` declares `extern fn panic(msg: String) -> a !{IO}`. That is why nine of
 the twelve gaps exist, and it is a bigger question than the count suggests, because it decides the
@@ -183,6 +185,18 @@ Sprout's own normative text.
 
 What the survey settles is whether that rule should be read that literally — because **every
 language below aborts by printing a diagnostic too, and not one of them treats that as an effect.**
+
+**And neither, it turns out, does Sprout.** Checking the "only such builtin" claim while writing
+this up found the opposite of what was expected: every runtime abort goes through `tcp_fail` →
+`fprintf(stderr, …)` → `exit(1)`, and there are **~187 such call sites** sitting behind builtins that
+are declared **pure**. `vector_length : Vector a -> Int` aborts on a null vector. So do
+`vector_get`, `str_len`, and most of the rest. Under the descriptor-touching reading of §6, all of
+them are mis-annotated.
+
+That reframes the whole question. `panic` is not a builtin asking for an exception — it is the only
+builtin whose *sole purpose* is to abort, and consequently the only one anybody thought to annotate
+`!{IO}` for aborting. It was the **inconsistency**, not the special case, and the decision below
+removes it rather than carving anything out.
 
 ### 6.2 Prior-art survey
 
@@ -229,11 +243,24 @@ That is also why `panic`'s return type is `a` — the same bottom-shaped signatu
 `!{IO}` on top says "and the rest of your program is impure because of it", which is the part that
 is not true.
 
-### 6.4 Recommendation
+### 6.4 Decision — `panic` is pure (2026-08-16)
 
-**Declare `panic` pure, and record why in `runtime/APPROVED_BUILTINS` and §6 of the spec.**
+**Adopted: option (a).** `stdlib/prelude.sprout` now declares `extern fn panic(msg: String) -> a`
+with no effect. The normative statement is in `docs/spec-v0.md` §6, which also amends the
+builtin-effect rule that previously said otherwise; the justification is in
+`runtime/APPROVED_BUILTINS`; and `tests/effects/canaries.spr` pins it via `unreachable_arm`, so a
+drift back to `!{IO}` fails `just effect-report-smoke` rather than quietly re-inflating the gap count.
 
-That is option (a), and it matches five of the six languages surveyed. Option (b) — Koka's answer, a
+Two things were **not** adopted along with it, deliberately:
+
+- **This does not generalise to "diverging calls are pure".** An infinite loop is not an abort. A
+  Sprout function that never returns but keeps running can still perform observable I/O, and its
+  effects are tracked as usual. The exemption is for termination of the whole *program*, which is
+  why it covers exactly one builtin.
+- **Sprout still has no `exn` effect.** Koka's answer remains the better long-term shape, and
+  adopting purity here does not close that door — it just declines to open it in v0.
+
+It matches five of the six languages surveyed. Option (b) — Koka's answer, a
 separate `exn`-like effect — is the most principled but is not affordable in v0: Sprout's effect
 system has exactly one concrete label, `!{IO}`, and no `EffectRow` semantics (§7 says v0 has no mixed
 or open rows), so adding a second label is an effect-system design change rather than a declaration
@@ -243,13 +270,29 @@ Option (c) — leave it, annotate the nine — is the one option with no prior a
 buys a signature that is misleading in the direction that matters: it would make nine functions that
 are pure in every returning case advertise themselves as impure.
 
-**Consequence for the migration.** With `panic` pure, the twelve gaps drop to three, and all three
-are the known lambda-construction over-approximation of §4 rather than real findings. Enforcing
-rule 8 then costs **zero source annotations** — but it should not ship until `!{e}` is solvable
-(§7), which remains the real gate.
+**Consequence for the migration — re-measured after the change, not predicted.** The census in §5
+was run again with `panic` pure, same 124 files, same 4337 declarations:
 
-**Caveat this recommendation does not resolve.** §6 of the spec would need amending, because the
-literal rule quoted in §6.1 above says otherwise. That is a normative edit, not a footnote.
+| declared → inferred | before | after |
+|---|---:|---:|
+| pure → pure | 3617 | 3626 |
+| `!{IO}` → `!{IO}` | 672 | 671 |
+| `!{IO}` → pure (over-declared) | 13 | 14 |
+| **pure → `!{IO}` (gap)** | **12** | **3** |
+
+The three survivors are exactly the lambda-construction over-approximations named in §4 —
+`log.stderr_logger`, `http_middleware.with_logging`, `http_web_server.routes` — and not one is a
+real finding. **Enforcing rule 8 now costs zero source annotations.**
+
+It should still not ship until `!{e}` is solvable (§7). That was always the real gate; the `panic`
+question was never the expensive one, only the loudest.
+
+**The normative edit that came with it.** §6.1's rule said a builtin is `!{IO}` when the call "may
+interact with runtime or external state such as terminal IO". Taken literally that makes `panic`
+effectful, so the rule itself was amended rather than quietly excepted: it now reads "…**in a way the
+rest of the program can observe**", with the observability test stated as normative and the abort
+case spelled out. For every builtin but `panic` the two readings agree, which is why the change is a
+clarification of intent rather than a reclassification of anything else.
 
 Sources: [Koka `std/core`](https://koka-lang.github.io/koka/doc/std_core.html) ·
 [Haskell `base` Prelude](https://hackage-content.haskell.org/package/base-4.22.0.0/docs/Prelude.html) ·
