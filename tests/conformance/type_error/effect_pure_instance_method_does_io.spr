@@ -1,0 +1,28 @@
+module main
+
+# spec-v0.md §7 rule 8, at the `instance` declaration boundary — the twin of
+# effect_pure_body_does_io.spr, and it gets its own fixture for a specific
+# reason.
+#
+# `infer.sprout` has TWO sites that bind a body's inferred effect against a
+# declaration: the `fn` one and the `instance` one. The first version of the
+# effect census instrumented only the `fn` site, which left all 83 instance
+# methods out of the count — silently, and in the direction that reads as good
+# news. Enforcement inherits the same hazard: a flip applied at one boundary and
+# not the other passes every `fn` test while quietly exempting every instance.
+
+class Describe a {
+  fn describe(x: a) -> String
+}
+
+type Noisy = Noisy
+
+instance Describe Noisy {
+  fn describe(x: Noisy) -> String =
+    do
+      print("noisy")
+      "noisy"
+}
+
+fn main() -> Unit !{IO} =
+  print(describe(Noisy))

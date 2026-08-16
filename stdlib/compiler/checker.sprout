@@ -62,14 +62,76 @@ export fn check_program_with_env(prog: ast.Program, extra: List (String, types.S
 # Used by lower_driver to feed the lowering pass.
 export fn typecheck_typed(prog: ast.Program, extra: List (String, types.Scheme)) -> typed_ast.TypedResult !{IO} =
   do
-    (result, _) <- typecheck_typed_with_effects(prog, extra)
-    result
+    (result, reports) <- typecheck_typed_with_effects(prog, extra)
+    enforce_effects(result, reports)
 
-# Like typecheck_typed but also hands back the declared-vs-inferred effect census
-# infer.check_fn_body accumulated on the way through. The reports live on the
-# InferState, which typecheck_typed creates and drops, so reaching them needs an
-# entry point at this level rather than a reader further out. Used by
-# `--phase effects`; nothing else should need it until effects are enforced.
+# spec-v0.md §7 rule 8, enforced. A declaration whose body performs IO under a
+# pure signature is rejected here.
+#
+# Deliberately a POST-PASS over the whole report list rather than an error raised
+# at the declaration boundary, for two reasons.
+#
+# It reports every offending declaration at once. The boundary raises one error
+# and inference stops; a codebase migrating to enforced effects would then get
+# its gaps one compile at a time, which is the difference between a morning and
+# a week.
+#
+# And it keeps `--phase effects` alive. That phase calls
+# typecheck_typed_with_effects directly and so never reaches this function: the
+# census instrument survives enforcement intact, which matters most precisely
+# when enforcement is new and somebody needs the full list to migrate against.
+# Both paths share `unifier.effect_report_is_gap`, so the report cannot drift
+# from what the checker actually rejects.
+#
+# A pre-existing type error wins: `result` is returned untouched when it is
+# already TypedErr, and infer records nothing for a declaration whose return type
+# failed to unify.
+fn enforce_effects(result: typed_ast.TypedResult, reports: List unifier.EffectReport)
+    -> typed_ast.TypedResult =
+  match result with
+  | typed_ast.TypedErr _ _ -> result
+  | typed_ast.TypedOk _ _ ->
+      match effect_gaps(reports) with
+      | Nil -> result
+      | Cons first rest ->
+          typed_ast.TypedErr(unifier.effect_report_pos(first),
+            effect_gap_message(first, rest))
+
+# The prelude has no list_filter; this is the local one, as compile_driver does
+# for its own count. Order is source order, so the reported position is the
+# FIRST offending declaration rather than an arbitrary one.
+fn effect_gaps(reports: List unifier.EffectReport) -> List unifier.EffectReport =
+  match reports with
+  | Nil -> Nil
+  | Cons r rest ->
+      if unifier.effect_report_is_gap(r) then Cons(r, effect_gaps(rest))
+      else effect_gaps(rest)
+
+# Names every offending declaration, and shows the fix rather than describing it.
+# The first line carries the phrase the conformance fixtures pin.
+fn effect_gap_message(first: unifier.EffectReport, rest: List unifier.EffectReport) -> String =
+  "`" ++ unifier.effect_report_name(first) ++ "` performs IO but is declared pure"
+    ++ " — add `!{IO}` after its return type (spec-v0.md §7 rule 8)"
+    ++ effect_gap_others(rest)
+
+fn effect_gap_others(rest: List unifier.EffectReport) -> String =
+  match rest with
+  | Nil -> ""
+  | _ ->
+      "\n  " ++ int_to_string(list_length(rest)) ++ " more in this program:"
+        ++ list_fold(\ (acc, r) -> acc ++ "\n    " ++ unifier.effect_report_name(r), "", rest)
+
+# Like typecheck_typed but hands back the declared-vs-inferred effect census
+# alongside the result, and does NOT enforce it. The reports live on the
+# InferState, which is created and dropped here, so reaching them needs an entry
+# point at this level rather than a reader further out.
+#
+# Two callers, and the difference between them is the point. `typecheck_typed`
+# wraps this in `enforce_effects` and is what every normal compile goes through.
+# `--phase effects` calls this one directly, so the census keeps enumerating
+# every declaration even in a program enforcement would reject — which is what
+# makes the phase usable for migrating a codebase onto enforced effects rather
+# than something that dies at the first gap.
 export fn typecheck_typed_with_effects(prog: ast.Program, extra: List (String, types.Scheme))
     -> (typed_ast.TypedResult, List unifier.EffectReport) !{IO} =
   do

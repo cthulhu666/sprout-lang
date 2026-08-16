@@ -174,17 +174,12 @@ fn effect_report_line(r: unifier.EffectReport) -> String =
     ++ types.effect_to_string(unifier.effect_report_declared(r)) ++ ", inferred "
     ++ types.effect_to_string(unifier.effect_report_inferred(r))
 
-# A gap is an UNDER-declaration: the body does more than the signature admits.
-# Over-declaring is not a gap and must never be reported as one — a pure body
-# under an `!{IO}` signature is exactly how `mutvec_len` says "my result is not a
-# function of my argument alone", and enforcement will accept it (inferred ⊑
-# declared). An effect VARIABLE is left out of the gap count in both directions:
-# `!{e}` is neither satisfied nor violated until instantiation, which v0 cannot
-# solve for, so calling it either way would be inventing a number.
+# Deliberately NOT a local copy. This phase's whole value is that a GAP line
+# predicts exactly what `checker.enforce_effects` will reject, so both read the
+# one definition in `unifier`. A second copy here would be free to drift, and a
+# report that disagrees with the checker is worse than no report at all.
 fn effect_report_is_gap(r: unifier.EffectReport) -> Bool =
-  match (unifier.effect_report_declared(r), unifier.effect_report_inferred(r)) with
-  | (types.EffectPure, types.EffectIO) -> true
-  | _ -> false
+  unifier.effect_report_is_gap(r)
 
 fn effect_report_is_var(r: unifier.EffectReport) -> Bool =
   match unifier.effect_report_inferred(r) with

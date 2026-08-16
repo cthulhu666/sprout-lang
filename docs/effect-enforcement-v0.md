@@ -1,18 +1,23 @@
 # Effect enforcement — v0
 
-**Status:** the inference is complete and the corpus is clean; **enforcement itself is still not
-started**, and is now unblocked. Read §9 and §10 for the current state — §1–§8 are the original
-measurement and remain accurate as history, but their numbers are superseded.
+**Status: done.** Spec §7 rule 8 is **enforced** — a body that performs IO under a pure signature is
+a compile error. Read §9–§11 for the current state; §1–§8 are the original measurement and remain
+accurate as history, but their numbers are superseded.
 
 Landed 2026-08-16, in order: the measurement instrument (§4), `panic` decided **pure** (§6), effect
-variables quantified and bound by unification (§9), and closure construction correctly attributed as
-pure (§10). Together those took the corpus from 12 reported gaps to **zero real ones** — every gap
-the report now emits is a canary that is supposed to be broken. Enforcing `docs/spec-v0.md` §7 rule 8
-therefore costs zero source annotations and rejects zero correct programs.
+variables quantified and bound by unification (§9), closure construction correctly attributed as pure
+(§10), and enforcement (§11). Together those took the corpus from 12 reported gaps to **zero real
+ones** before the flip, so enforcement cost **zero source annotations and rejected zero correct
+programs**.
 
-`docs/spec-v0.md` §7 rules 8, 9 and 11 state the intended discipline, and its enforcement note states
-that the v0 checker does not apply them. This document records what was actually broken, what was
-fixed to make the gap measurable, and the numbers that came out.
+The sequencing was not incidental. Each of §9 and §10 was a prerequisite for the next, and flipping
+enforcement at any earlier point would have rejected correct code: before §9, `list_each(print, xs)`
+was invisible; before §10, every function that merely *built* an effectful closure reported as
+effectful, which was six false positives. The instrument existed to find that out before committing,
+and it did.
+
+This document records what was broken, what was fixed to make the gap measurable, the numbers that
+came out, and the decisions taken along the way.
 
 Nothing here changes what any program compiles to. Effects are erased before codegen.
 
@@ -501,3 +506,74 @@ Same 696-file corpus:
 Every gap the report now emits is a canary that is *supposed* to be broken. **Enforcing spec §7 rule
 8 costs zero source annotations and rejects zero correct programs** — which is what the whole
 instrument was built to find out.
+
+## 11. Enforcement (2026-08-16)
+
+Spec §7 rule 8 is enforced. `fn shout(s: String) -> Unit = print(s)` no longer compiles.
+
+```
+14:1: ERROR: check: `main.shout` performs IO but is declared pure
+  — add `!{IO}` after its return type (spec-v0.md §7 rule 8)
+```
+
+Accepted, deliberately: over-declaring (`fn f(n: Int) -> Int !{IO} = n + 1`), and an unresolved
+effect variable. The rule is subsumption, and where the checker does not know it accepts — every
+imprecision in effect inference must fail towards accepting a program.
+
+### 11.1 A post-pass, not a boundary error
+
+`check_fn_body` and `check_instance_method` still only *record*. `checker.typecheck_typed` scans the
+collected reports afterwards and rejects. Two things follow, and both were the point:
+
+**Every gap is reported in one compile.** Raising the error at the declaration boundary stops
+inference at the first offender, so a codebase adopting enforcement would receive its gaps one
+compile at a time. The post-pass names them all:
+
+```
+16:1: ERROR: check: `shout` performs IO but is declared pure — add `!{IO}` …
+  6 more in this program:
+    calls_loud
+    each_lambda
+    …
+```
+
+**`--phase effects` survives enforcement.** It calls `typecheck_typed_with_effects` directly and so
+never reaches the enforcing wrapper — the census instrument keeps enumerating, which matters most
+precisely when enforcement is new and somebody needs the whole list to migrate against. An earlier
+draft of this change would have killed the phase at its first gap; that was the wrong trade, since
+the phase's entire purpose is the census.
+
+Both paths call `unifier.effect_report_is_gap`. That predicate had a copy in `compile_driver`; it now
+has one definition, because a report that disagrees with the checker is worse than no report.
+
+### 11.2 Two ordering details that change results
+
+The record moved to **after** the return-type unify, and resolves with *that* unification's effect
+substitution rather than the body's. A return type can bind an effect variable the body left open —
+a body returning a closure meets the declared arrow there and nowhere earlier — so resolving too
+early reports raw variables where an effect is in fact known. Recording after also means a
+declaration with both a type error and an effect gap reports the type error, which is the right
+priority.
+
+### 11.3 Coverage
+
+| fixture | pins |
+|---|---|
+| `type_error/effect_pure_body_does_io.spr` | the `fn` boundary rejects |
+| `type_error/effect_pure_instance_method_does_io.spr` | the `instance` boundary rejects |
+| `run/effect_over_declared_ok.spr` | over-declaring still **compiles and runs** |
+| `tests/effects/canaries.spr` (via `--phase effects`) | the report still enumerates, and its GAP/ok verdicts |
+
+The instance fixture is separate on purpose. `infer` has two sites that bind a body's effect against
+a declaration, and the first version of this census instrumented only the `fn` one — leaving all 83
+instance methods out of the count, silently. Enforcement inherits that hazard exactly: a flip applied
+to one boundary passes every `fn` test while exempting every instance method in the program.
+
+`effect_over_declared_ok` guards the opposite failure: a checker that *unified* the two effects
+instead of subsuming them would reject legal code, and the `type_error` fixtures alone would not
+notice, since they only pin the direction that must fail.
+
+### 11.4 Cost
+
+Zero source annotations. Zero correct programs rejected. Full suite green, 51/51 examples,
+`ir-golden-diff` 0 differences, and the compiler bootstraps itself under enforcement.
