@@ -1318,8 +1318,11 @@ Effect note for v0:
 - Calling a function typed with `!{IO}` behaves like any other strict function call.
 - Effects happen when the call expression is evaluated.
 - Host-implemented builtins participate in effect checking exactly like ordinary
-  functions; their declared function type is the language contract. (Which in v0
-  means they are equally unchecked — see the enforcement note under §7.)
+  functions; their declared function type is the language contract. A builtin has
+  no Sprout body to infer from, so its declaration is taken on trust and is the
+  one place the effect discipline rests on an assertion rather than a check —
+  which is why the rule below is stated normatively and `runtime/APPROVED_BUILTINS`
+  requires a justification per entry.
 - A builtin uses `!{IO}` when evaluating the call may interact with runtime or
   external state such as terminal IO, files, environment, network, randomness,
   or host-backed analysis services **in a way the rest of the program can
@@ -1413,34 +1416,38 @@ Effect note for v0:
     an **omitted** parameter or return type is an inference request, not a promise,
     and inference is free to specialize it.
 
-> **Enforcement status of the effect rules (8, 9, 11).** These state the intended
-> discipline; the v0 checker does **not** enforce them. A pure signature may call an
-> `!{IO}` function and still typecheck as pure — `fn shout(s: String) -> Unit = print(s)`
-> is accepted today. An effect annotation is therefore documentation, not a checked
-> contract, and code must not rely on a missing `!{IO}` to mean a function is pure.
-> Rule 10 is the exception — the effect-polymorphic `main` check *is* enforced,
-> syntactically.
+> **Enforcement of the effect rules (8, 9, 11).** Rule 8 is **enforced** as of 2026-08-16.
+> `fn shout(s: String) -> Unit = print(s)` is a compile error; an effect annotation is a
+> checked contract, and a missing `!{IO}` now means the compiler has verified the function
+> performs no IO. Rule 10 (the effect-polymorphic `main` check) was already enforced,
+> syntactically. This replaces a note that stood for the whole of v0 saying the opposite.
 >
-> Since 2026-08-16 effects are *inferred*: a declared effect reaches the innermost arrow
-> of the function's type, a call merges its callee's effect, and each declaration's
-> declared-vs-inferred pair is available via `compile_driver --phase effects`. Effect
-> variables are quantified, freshened per instantiation and bound by unification, so an
-> effect crossing a higher-order boundary — `list_each(print, xs)` — is inferred too.
-> What is still missing is the check: nothing compares the two, and nothing rejects a
-> mismatch.
+> Three properties of the check are normative, not implementation detail:
 >
-> Unification of an arrow's effect is deliberately **total** — it binds effect variables
-> and never fails. This is normative for the v0 checker: because the declaration-boundary
-> rule is *subsumption* (inferred ⊑ declared) and over-declaring is legal, two arrows
-> whose effects differ are not thereby a type error, and a program's acceptance must not
-> depend on effect inference. Rejection belongs at the declaration boundary and nowhere
-> else.
+> 1. **The rule is subsumption, inferred ⊑ declared — not equality.** Over-declaring is
+>    accepted: a pure body under an `!{IO}` signature is legal and is how a function
+>    states that its result is not a function of its arguments alone. Only
+>    *under*-declaration is rejected.
+> 2. **Unification of an arrow's effect is total.** It binds effect variables and never
+>    fails, so two arrows whose effects differ are not thereby a type error and a
+>    program's acceptance never depends on effect inference reaching a particular answer
+>    mid-way. Rejection happens at the declaration boundary and nowhere else.
+> 3. **An unresolved effect variable is accepted.** `!{e}` is neither satisfied nor
+>    violated until instantiation; where the checker does not know, it accepts. Every
+>    imprecision in effect inference must therefore fail towards accepting a program, not
+>    rejecting one.
 >
-> Note this earlier said effects were "carried on `TFunc`" and "never unified"; both were
-> misleading. They were carried on `Scheme` with the arrows hardcoded pure, and the
-> problem was never a missing call to `unify_effects` (which is the wrong operation at the
-> declaration boundary: the rule is subsumption, and over-declaring must be accepted). See
-> `docs/effect-enforcement-v0.md`; closing this is tracked in `BACKLOG.md`.
+> Enforcement runs as a pass over the whole program rather than aborting at the first
+> offending declaration, so a codebase adopting it sees every gap in one compile.
+> `compile_driver --phase effects` prints the same declared-vs-inferred census **without**
+> rejecting, and shares the checker's gap predicate, so the report is an exact preview of
+> what will be rejected.
+>
+> Note this note earlier said effects were "carried on `TFunc`" and "never unified"; both
+> were misleading. They were carried on `Scheme` with the arrows hardcoded pure, and the
+> problem was never a missing call to `unify_effects` — that is the wrong operation at a
+> declaration boundary, since it accepts both directions and the rule is one-directional.
+> See `docs/effect-enforcement-v0.md`.
 
 ## 8. Standard Library Math Modules
 

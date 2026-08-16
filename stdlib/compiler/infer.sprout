@@ -6730,20 +6730,23 @@ fn check_fn_body(
         # no @constrained_N self markers to seed. fwd_env holds only @fwd/@eta_fwd.
         let body_env = fn_body_env(name, params, inst_type, constraint_source_tokens(constraints), fwd_env)
         InferOk typed_body0 s1 es1 body_eff <- typecheck_expr(state, body_env, subst, eff_subst, body) else InferErr pos msg -> (fn_body_err(name, pos, msg), dict_empty(), Nil)
+        let unifier.UnifyOk s2a es2a = unifier.unify_types(s1, es1, typed_ast.typed_expr_type(typed_body0), fn_return_type(inst_type, list_length(params))) else unifier.UnifyErr e -> (return_mismatch_body_err(name, typed_body0, fn_return_type(inst_type, list_length(params)), s1, "Return type mismatch in " ++ name ++ ": " ++ e), dict_empty(), Nil)
         # The declaration boundary: the one place that holds both the declared
-        # effect and the effect the body was inferred to perform. Enforcement will
-        # compare them HERE and reject a body that exceeds its signature; for now
-        # the pair is only recorded, so `--phase effects` can size that migration
-        # before the language commits to it (spec-v0.md §7 enforcement note).
+        # effect and the effect the body was inferred to perform. Recorded for
+        # every declaration whether or not they agree; `checker.typecheck_typed`
+        # turns a disagreement into an error as a post-pass over the whole list,
+        # and `--phase effects` prints the same list without rejecting anything.
         #
-        # apply_effect_subst resolves the body's effect against the bindings its
-        # own inference produced. Without it a body whose effect came from a
-        # higher-order call reports the raw variable — `!{$e2}` rather than the
-        # `!{IO}` that unifying `list_each`'s parameter against `print` bound it to.
+        # Recorded AFTER the return-type unify, and resolved with THAT unify's
+        # effect substitution (es2a, not es1), for two reasons. A return type can
+        # bind an effect variable the body's own inference left open — a body
+        # returning a closure meets the declared arrow here and nowhere earlier —
+        # so resolving with es1 leaves a class of effects reported as raw
+        # variables. And a declaration with both a type error and an effect gap
+        # should report the type error: this arm exits before recording.
         _ <- unifier.record_effect_report(state,
                unifier.EffectReport(name, types.scheme_effects(decl_scheme),
-                 unifier.apply_effect_subst(es1, body_eff)))
-        let unifier.UnifyOk s2a _ = unifier.unify_types(s1, es1, typed_ast.typed_expr_type(typed_body0), fn_return_type(inst_type, list_length(params))) else unifier.UnifyErr e -> (return_mismatch_body_err(name, typed_body0, fn_return_type(inst_type, list_length(params)), s1, "Return type mismatch in " ++ name ++ ": " ++ e), dict_empty(), Nil)
+                 unifier.apply_effect_subst(es2a, body_eff), fn_pos))
         # AFTER the return-type unify: the declared return type may be the only
         # thing that determines a deferred field access's receiver.
         FinishOk typed_body s2 <- finish_field_obligations(state, body_env, s2a, typed_body0) else FinishErr fpos fmsg -> (fn_body_err(name, fpos, fmsg), dict_empty(), Nil)
@@ -7046,14 +7049,16 @@ fn check_instance_method(
             # discard a body effect, and instrumenting only the `fn` one would
             # leave every `instance` method out of the census — silently, and in
             # the direction that reads as good news, which is the failure mode
-            # this phase exists to catch.
-            do
-              _ <- unifier.record_effect_report(state,
-                     unifier.EffectReport(instance_report_name(name, inst_type),
-                       effect_from_maybe_labels(eff_maybe),
-                       unifier.apply_effect_subst(es1, body_eff)))
-              instance_method_checked(state, name, params, ret_maybe, eff_maybe,
-                body_env, s1, es1, inst_type, typed_body0, env)
+            # this phase exists to catch. Enforcement inherits the same hazard:
+            # a flip applied at one boundary and not the other passes every `fn`
+            # test while quietly exempting every instance method in the program.
+            # Regression: tests/conformance/type_error/
+            # effect_pure_instance_method_does_io.spr.
+            #
+            # The record happens inside instance_method_checked, after the
+            # return-type unify — same ordering and same reasons as check_fn_body.
+            instance_method_checked(state, name, params, ret_maybe, eff_maybe,
+              body_env, s1, es1, inst_type, typed_body0, body_eff, env)
 
 # Two instances of one class define the same method name, so the bare name would
 # collapse them into a single census entry. The instance HEAD is not in scope here
@@ -7077,13 +7082,19 @@ fn instance_method_checked(
   es1: Dict types.Effect,
   inst_type: types.Type,
   typed_body0: typed_ast.TypedExpr,
+  body_eff: types.Effect,
   env: Dict types.Scheme
 ) -> InstanceMethodResult !{IO} =
   match unifier.unify_types(s1, es1, typed_ast.typed_expr_type(typed_body0), fn_return_type(inst_type, list_length(params))) with
   | unifier.UnifyErr e -> InstanceMethodErr(typed_ast.typed_expr_pos(typed_body0), "Return type mismatch in instance method " ++ name ++ ": " ++ e)
-  | unifier.UnifyOk s2a _ ->
+  | unifier.UnifyOk s2a es2a ->
       # AFTER the return-type unify — see finish_field_obligations.
       do
+        _ <- unifier.record_effect_report(state,
+               unifier.EffectReport(instance_report_name(name, inst_type),
+                 effect_from_maybe_labels(eff_maybe),
+                 unifier.apply_effect_subst(es2a, body_eff),
+                 typed_ast.typed_expr_pos(typed_body0)))
         f <- finish_field_obligations(state, body_env, s2a, typed_body0)
         match f with
         | FinishErr fpos fmsg -> InstanceMethodErr(fpos, fmsg ++ " in instance method " ++ name)

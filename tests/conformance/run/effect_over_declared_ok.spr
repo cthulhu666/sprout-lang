@@ -1,0 +1,31 @@
+module main
+
+# The ACCEPT side of spec-v0.md §7 rule 8, and the reason the rule is stated as
+# subsumption (inferred ⊑ declared) rather than equality.
+#
+# Every declaration here over-declares: the signature promises `!{IO}` and the
+# body performs none. That must compile. It is not a loophole — it is how a
+# function says "my result is not a function of my arguments alone", which is
+# exactly what `mutvec_len` relies on (docs/growable-mutvec-v0.md): its body is a
+# pure `vector_length` call, and dropping the `!{IO}` would license the optimiser
+# to treat repeated reads of a mutable length as one.
+#
+# The rejecting twin is tests/conformance/type_error/effect_pure_body_does_io.spr.
+# A checker that unified the two effects instead of subsuming them would reject
+# this file, and `just test` would still pass without it — the type_error
+# fixtures only pin the direction that must fail.
+
+fn over_declared(n: Int) -> Int !{IO} = n + 1
+
+fn pure_body_io_sig(s: String) -> String !{IO} = s ++ "!"
+
+# Over-declaring through a higher-order call: the callback is pure, so
+# `list_fold`'s `!{e}` resolves to pure, and the enclosing !{IO} still holds.
+fn sum_io(xs: List Int) -> Int !{IO} =
+  list_fold(\ (acc, x) -> acc + x, 0, xs)
+
+fn main() -> Unit !{IO} =
+  do
+    print(int_to_string(over_declared(41)))
+    print(pure_body_io_sig("ok"))
+    print(int_to_string(sum_io([1, 2, 3])))

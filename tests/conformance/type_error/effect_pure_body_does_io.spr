@@ -1,0 +1,17 @@
+module main
+
+# spec-v0.md §7 rule 8, at the `fn` declaration boundary.
+#
+# `shout` writes to stdout and says it does not. This exact program is the one
+# named in the spec's enforcement note as "compiles today", and in
+# docs/effect-enforcement-v0.md §1 as the thing the whole measurement existed to
+# size. It stopped compiling on 2026-08-16.
+#
+# The rule is SUBSUMPTION, inferred ⊑ declared — see effect_over_declared_ok in
+# tests/conformance/run/ for the other direction, where a pure body under an
+# `!{IO}` signature is accepted on purpose.
+
+fn shout(s: String) -> Unit = print(s)
+
+fn main() -> Unit !{IO} =
+  shout("hi")

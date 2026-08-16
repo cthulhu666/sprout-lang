@@ -43,20 +43,41 @@ export fn field_obligation_pos(o: FieldObligation) -> source.SourcePos =
 # v0 checker does not enforce the effect rules (spec-v0.md §7), and the point of
 # collecting this is to size that enforcement before committing to it.
 export type EffectReport (..) =
-  | EffectReport String types.Effect types.Effect
-  # EffectReport fn_name  declared  inferred
+  | EffectReport String types.Effect types.Effect source.SourcePos
+  # EffectReport fn_name  declared  inferred  pos
 
 export fn effect_report_name(r: EffectReport) -> String =
   match r with
-  | EffectReport n _ _ -> n
+  | EffectReport n _ _ _ -> n
 
 export fn effect_report_declared(r: EffectReport) -> types.Effect =
   match r with
-  | EffectReport _ d _ -> d
+  | EffectReport _ d _ _ -> d
 
 export fn effect_report_inferred(r: EffectReport) -> types.Effect =
   match r with
-  | EffectReport _ _ i -> i
+  | EffectReport _ _ i _ -> i
+
+export fn effect_report_pos(r: EffectReport) -> source.SourcePos =
+  match r with
+  | EffectReport _ _ _ p -> p
+
+# "This declaration under-declares its effect." The SINGLE definition, used by
+# both consumers: `--phase effects` to label a line GAP, and `checker` to reject.
+#
+# They must not drift, because they answer the same question for opposite
+# purposes — the report exists to predict exactly what enforcement will reject,
+# and a report that disagrees with the checker is worse than no report.
+#
+# Only under-declaration counts. Over-declaring is legal and deliberate: the rule
+# is subsumption, inferred ⊑ declared, so a pure body under an `!{IO}` signature
+# is how `mutvec_len` says its result is not a function of its argument alone.
+# An unresolved effect VARIABLE is not a gap either — the checker accepts when it
+# does not know, which is the only safe direction for a conservatism knob.
+export fn effect_report_is_gap(r: EffectReport) -> Bool =
+  match (effect_report_declared(r), effect_report_inferred(r)) with
+  | (types.EffectPure, types.EffectIO) -> true
+  | _ -> false
 
 # What `unify_types` returns: BOTH substitutions, or a message.
 #

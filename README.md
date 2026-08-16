@@ -44,10 +44,13 @@ Running with `USER="  Ada  "` prints `Hello, Ada`. More in [`examples/`](./examp
   and failure.
 - **Typeclasses** — dictionary-passing (`Eq`, `Ord`, `ToString`, `Semigroup`,
   `Monoid`, …), including return-type dispatch.
-- **Effects in types** — pure functions are unannotated; effectful ones carry
-  `!{IO}` (with singleton effect variables `!{e}` for higher-order helpers).
-  Open effect rows are not supported yet. Aborting is *not* an effect: `panic`
-  is pure, so an unreachable-by-invariant arm does not make its function
+- **Effects in types, and they are checked** — pure functions are unannotated;
+  effectful ones carry `!{IO}` (with singleton effect variables `!{e}` for
+  higher-order helpers). A body that performs IO under a pure signature is a
+  compile error, so a missing `!{IO}` means the compiler verified the function
+  does none. Over-declaring is fine — the rule is *inferred ⊑ declared*, not
+  equality. Open effect rows are not supported yet. Aborting is *not* an effect:
+  `panic` is pure, so an unreachable-by-invariant arm does not make its function
   effectful ([why](docs/effect-enforcement-v0.md#6-is-panic-an-effect-decided-no)).
 - **Zero-cost `wrap` newtypes**, first-class **tuples**, and function-local
   `where` blocks (normative v0).
