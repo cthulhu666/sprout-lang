@@ -16,6 +16,10 @@ effects are not enforced at all (F-EFF), declared type signatures are not checke
 bodies (F-RIGID), top-level heap globals are swept by the GC on the typed path (F-GROOT),
 strings admit out-of-bounds heap reads (F-UTF8), and `/` is LLVM UB on zero (F-DIV).
 
+> **F-EFF is closed as of 2026-08-16** — see W6 below for what shipped, what shipped
+> differently from the fix sketch, and the one sub-item (top-level `let` purity) still
+> open. Every other statement above is as of 2026-07-03 and has not been re-audited here.
+
 ---
 
 ## 1. Reproduction harness
@@ -45,6 +49,8 @@ else in this doc is a clear single-solution bug fix and can proceed without aski
 **Status (2026-07-04): all five worked through with Kuba.** D1 (division), D3 (retire
 direct path), D4 (reject, Bytes-primary), D5 (parse_int/mutvec_get) DECIDED; D2 (effects)
 DEFERRED pending an effect-system design pass. Details inline below.
+**Update 2026-08-16: D2 is RESOLVED** — the design pass happened and is written up in
+`docs/effect-enforcement-v0.md`; all five decisions are now settled.
 
 - **D1 (blocks W7) — DECIDED 2026-07-04:** `/` (and `%` if implemented) stays a bare-`Int`
   operator that **panics with source location** on divisor `0` and on `INT_MIN / -1` (both
@@ -57,9 +63,21 @@ DEFERRED pending an effect-system design pass. Details inline below.
   interpreter per spec §8.4); the `INT_MIN / -1` division-overflow case is the sole
   exception (panics, since it is genuine UB). W7 emits the guard in the (surviving, typed)
   codegen path; spec §6/§8.4 updated in the same change.
-- **D2 (blocks W6) — DEFERRED 2026-07-04:** W6 is blocked on a proper **effect-system
+- **D2 (blocked W6) — RESOLVED 2026-08-16.** The design pass this deferral demanded exists:
+  `docs/effect-enforcement-v0.md`. Each open question below was answered there — the lattice
+  and subsumption direction in §11 (**inferred ⊑ declared**, so over-declaring is legal and
+  only under-declaring is rejected), the meaning of `!{e}` in §9 and §12–13 (a *singleton*
+  variable, freshened per instantiation, at most one per signature), and `merge_effects` in
+  §9. `Pure ~ IO` in arrow position is still accepted, deliberately: arrow-position
+  unification is total and enforcement happens in a post-pass instead (see W6 below). The
+  recommended warn-mode rollout was superseded by something better — `--phase effects`, a
+  standing census that measured the blast radius (4337 declarations, 12 gaps, then 3, then
+  0) *before* any check could reject anything, and that survives enforcement as an
+  instrument. Original deferral text follows.
+
+  W6 was blocked on a proper **effect-system
   design pass**, not merely on rollout shape. Kuba: "effects are not designed properly
-  yet." The open design questions must settle first — the v0 effect lattice (Pure/IO as
+  yet." The open design questions had to settle first — the v0 effect lattice (Pure/IO as
   closed rows vs. open rows), subsumption direction (a pure fn is usable where IO is
   expected, i.e. Pure ⊆ IO, but not the reverse — today `unify_effects_applied`
   `unifier.sprout:235-236` accepts `Pure ~ IO` BOTH ways), the meaning of effect
@@ -269,7 +287,11 @@ operator — negate with `== false`.
   generalizes to `forall a. MutVec (List a)`; Int written, String read; accepted.
 - **Location:** `LetDecl` at `infer.sprout:2955-2967` — `unifier.generalize` on ANY
   expression; the initializer's effect is also discarded (`InferOk typed_expr s1 _ _`),
-  silently violating the top-level-purity rule (full enforcement of that lands with W6).
+  silently violating the top-level-purity rule. **Still true after W6 (verified
+  2026-08-16): `let boom = print("at load time")` type-checks, binding `main.boom : Unit`.**
+  W6 enforced the `fn` and instance-method boundaries and left this one; it is the only
+  W6 sub-item still open, and it lands here rather than there because the same line also
+  carries the value restriction.
 - **Fix sketch:** syntactic value restriction — generalize only syntactic values
   (lambdas, literals, variables, constructors/tuples of values); monomorphic otherwise.
 - **Blast-radius check:** stdlib/compiler may rely on generalizing non-value lets
@@ -376,30 +398,82 @@ unifier T7; `tests/conformance/run/` is orphaned). Fixtures under
   matches — run full suite early).
 - **Gates:** compiler change → full §4 battery.
 
-### W6 — F-EFF: effect-system enforcement campaign  [2-3S, CRITICAL, confirmed empirically; rollout per D2]
+### W6 — F-EFF: effect-system enforcement campaign  [DONE 2026-08-16 except top-level `let` purity]
 
-- **Evidence:** probe `sr_effect` (pure-declared fn calling `print`) → checker OK, env
-  shows `main.sneaky : Int -> Int`. Probe `sr_mainpoly` (`fn main() -> Unit !{e}`) → OK
-  despite spec.
-- **Three independent holes, each must close:**
+> **Status — DONE 2026-08-16, with one sub-item left open.** All three holes below are
+> closed and spec §7 rules 8, 9, 10 and 11 are enforced. Design, measurements and the
+> decisions taken along the way: `docs/effect-enforcement-v0.md`; landed-work history:
+> `BACKLOG.md` §"Enforce the effect rules". Both probes are now rejected — verified
+> 2026-08-16 — and both were already covered by gated fixtures under different names, so
+> **do not add the Appendix A copies as new tests**:
+>
+> | probe | fixture | gate |
+> |---|---|---|
+> | `sr_effect` | `tests/conformance/type_error/effect_pure_body_does_io` | `test-type-errors` |
+> | `sr_mainpoly` | `tests/conformance/executable_error/main_effect_polymorphic_entrypoint` | `test-executable-errors` |
+>
+> The other regression tests this section asked for exist too:
+> `run/effect_one_variable_ok` and `run/effect_one_variable_unpinned_ok` (an `!{e}` helper
+> accepted at both purities), `run/effect_over_declared_ok` (subsumption), and per-hole
+> negatives `type_error/effect_pure_instance_method_does_io`, `effect_two_variables{,_instance,_uncombined}`,
+> `effect_mixed_row`, `effect_var_merged_with_io`.
+>
+> **Still open — top-level `let` initializer purity** (the "same campaign" bullet below).
+> Spec §6 states it normatively — "Because top-level `let` bindings must be pure, imported
+> modules do not perform effectful initialization merely by being loaded" — and it is
+> *not* checked: `let boom = print("at load time")` type-checks clean, binding
+> `main.boom : Unit`. `LetDecl` still discards its initializer's effect. Tracked in
+> `BACKLOG.md`; it needs a design call rather than a patch, because it meets W3's value
+> restriction at the same line.
+
+- **Evidence (2026-07-03, both now rejected):** probe `sr_effect` (pure-declared fn calling
+  `print`) → checker OK, env shows `main.sneaky : Int -> Int`. Probe `sr_mainpoly`
+  (`fn main() -> Unit !{e}`) → OK despite spec.
+- **Three independent holes, each must close** — all three closed:
   1. `check_fn_body` `infer.sprout:3503` (and `LetDecl` :2960) discards the inferred body
      effect — never compared with `effect_from_maybe_labels(effects_maybe)`.
+     **CLOSED** for the `fn` and instance-method boundaries (`effect-enforcement-v0.md`
+     §11); `LetDecl` is the open sub-item above.
   2. `infer_call_var` `infer.sprout:581-598` instantiates only `scheme_type`;
      `scheme_effects` never consulted → calling `print` infers Pure.
+     **CLOSED**, and it was six broken sites rather than this one — the producer side of
+     the type is reconstructed in `effect-enforcement-v0.md` §§9–10.
   3. `unifier.sprout:185` unifies `TFunc` ignoring both effect fields; `unify_effects`
      :233-236 accepts `Pure ~ IO` both directions. Define the real v0 lattice: Pure and
      IO as closed rows; singleton effect var instantiable to either; mismatch = error.
+     **CLOSED, but NOT by this sketch — read `effect-enforcement-v0.md` §9.2 before
+     acting on the sentence above.** Arrow unification does now carry the effect field and
+     bind effect variables, but it remains **total** — `Pure ~ IO` in arrow position is
+     still accepted, on purpose. Two reasons the sketch missed. First, the rule is
+     *subsumption*, not equality: over-declaring is legal, so two arrows whose effects
+     differ are not thereby a type error and "mismatch = error" would reject correct
+     programs. Second, the moment a discarded field is read, every imprecision anywhere in
+     inference becomes a candidate compile error on correct code; keeping unification
+     total means turning effect inference on can make the *report* wrong but never the
+     accept/reject decision. Rejection therefore happens at the declaration boundary and
+     nowhere else — a post-pass over the effect reports `infer` collects, which names every
+     gap in one compile and lets `--phase effects` print an exact preview of it. All of
+     this is normative: spec §7's enforcement note, points 1–3.
 - **Same campaign:** `merge_effects` `infer.sprout:340-346` drops one side for var/var
-  and var/row merges (`| _ -> a`) — latent until enforcement, then live; top-level `let`
-  initializer purity (spec §3) via the no-longer-discarded effect; `main` must reject
-  effect polymorphism (spec §10.10).
-- **Rollout (pending D2):** land all checks behind `SPROUT_EFFECTS_ENFORCE=1`; run suite
-  + self-compile + examples under the flag; fix every flushed violation (each is a real
-  mislabeled function — e.g. anything calling an `!{IO}` extern from a pure signature);
-  flip default; delete flag. Keep per-step commits small (Collaboration §1).
-- **Regression tests:** `sr_effect`, `sr_mainpoly` rejected; effect-polymorphic helper
-  (`!{e}`) instantiated at both purity and IO accepted; pure-calls-pure accepted;
-  typecheck-failure tests for each hole individually.
+  and var/row merges (`| _ -> a`) — latent until enforcement, then live **[DONE
+  2026-08-16 — two distinct variables now merge into an `EffectRow`, which rule 9 then
+  rejects]**; top-level `let`
+  initializer purity (spec §3 — the rule is actually stated in §6, Evaluation Semantics)
+  via the no-longer-discarded effect **[STILL OPEN — see the
+  status box above]**; `main` must reject
+  effect polymorphism (spec §10.10) **[DONE 2026-07-28, ahead of this campaign and outside
+  it — `e69c3ab5` "infer: validate the executable entrypoint's signature" checks the
+  entrypoint syntactically, not through the effect checker; pinned by
+  `executable_error/main_effect_polymorphic_entrypoint`]**.
+- **Rollout (pending D2) — superseded; recorded as the plan that was not followed.** The
+  proposal was to land the checks behind `SPROUT_EFFECTS_ENFORCE=1`, run the suite under
+  the flag, fix each flushed violation, then flip and delete the flag. What shipped
+  instead was `--phase effects`: a declared-vs-inferred census that sized the blast radius
+  with no check in the compiler at all, so the flag had nothing to protect. It also
+  outlived the migration, which a flag would not have. The prediction the flag existed to
+  hedge — "expect many mislabeled functions" — was wrong: the corpus needed **zero**
+  annotations, because four preceding fixes took the real gap count to 0 first.
+- **Regression tests:** all present — see the fixture table in the status box above.
 - **Gates:** compiler change → full §4 battery; expect multiple seed refreshes.
 
 ### W7 — F-DIV: division UB  [div-by-zero DONE 2026-07-05, CRITICAL; INT_MIN/-1 operator-guard deferred]
@@ -643,7 +717,7 @@ retirement PR's loud-panic pass; each needs a `--use-direct-codegen` repro only 
 | 8 | W9 lexer/parser batch | — |
 | 12 | W7 division | D1 DECIDED |
 | 13 | W10 direct-path retirement (C5-typed + C9 elsewhere) | D3 DECIDED (retire) |
-| — | W6 effects campaign | **D2 DEFERRED — needs effect-system design first** |
+| — | ~~W6 effects campaign~~ **DONE 2026-08-16**, except top-level `let` purity (BACKLOG) | D2 RESOLVED |
 | — | W2/R2 ingestion (reject, Bytes-primary) | D4 DECIDED; design + D5 coupling |
 | — | W11 mediums | fold into adjacent sessions |
 
@@ -652,9 +726,20 @@ before W3 because it's one localized wrong-selection bug with a crisp test; W3 b
 because skolemization changes what W6's enforcement sees; W6 late because it's the
 largest blast radius and D2 shapes it.
 
+**W6 ran out of order and the "largest blast radius" reason for deferring it did not hold:**
+the radius was measured before any check could reject, and came to 0 real gaps in 4337
+declarations, so the corpus needed no annotations at all. The W3-before-W6 ordering was
+respected in the half that matters — signature rigidity is enforced (`sr_rigid` is rejected
+with "Signature too general for its body in `main.f`: type variable `a` forced to `Int`",
+spec §7 rule 15), so skolemization was already in place when enforcement landed. **This
+table has not been re-audited row by row** — W6's row is accurate as of 2026-08-16; treat
+the others as last verified 2026-07-04.
+
 ## Appendix A — probe programs (canonical copies)
 
-`sr_effect.sprout` — must be REJECTED after W6:
+`sr_effect.sprout` — **REJECTED as of 2026-08-16.** Already a gated fixture, as
+`tests/conformance/type_error/effect_pure_body_does_io` (same shape, `shout`/`print`);
+do not add a second copy.
 ```sprout
 module main
 
@@ -773,7 +858,9 @@ fn main() -> Unit !{IO} =
   print(int_to_string(h(true)))
 ```
 
-`sr_mainpoly.sprout` — must be REJECTED after W6:
+`sr_mainpoly.sprout` — **REJECTED as of 2026-08-16**, by `validate_entrypoint` at check
+time rather than by the effect checker (spec §10.10, "must not be effect-polymorphic").
+Gated fixture: `tests/conformance/executable_error/main_effect_polymorphic_entrypoint`.
 ```sprout
 module main
 

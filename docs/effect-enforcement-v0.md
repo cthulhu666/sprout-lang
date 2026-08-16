@@ -316,6 +316,22 @@ Sources: [Koka `std/core`](https://koka-lang.github.io/koka/doc/std_core.html) �
 
 ## 7. What is not done
 
+> **Superseded — read §§9–13 for the current list.** This section is a snapshot taken before
+> enforcement landed; two of its three items are now done (enforcement itself, §11; the
+> `shout` fixture, which landed *with* the implementation as
+> `tests/conformance/type_error/effect_pure_body_does_io`, so the ordering problem it
+> describes never bit). Only env write-back remains from this list.
+>
+> One gap this doc never covered, added here so the "what is not done" heading is not
+> misleading: **top-level `let` initializers are not checked for purity.** Spec §6 requires
+> it ("Because top-level `let` bindings must be pure, imported modules do not perform
+> effectful initialization merely by being loaded") and `let boom = print("at load time")`
+> type-checks clean. §11's post-pass covers the `fn` and instance-method boundaries;
+> `LetDecl` still discards its initializer's effect, and `--phase effects` does not
+> enumerate top-level `let`s at all, so the census cannot size it either. Tracked in
+> `BACKLOG.md`; it needs a design call, because the same line also carries the value
+> restriction. Original snapshot follows.
+
 Two of the four items here were done on 2026-08-16; see §9. What remains:
 
 - Enforcement itself. The comparison site is `infer.check_fn_body`, which now holds both values and
