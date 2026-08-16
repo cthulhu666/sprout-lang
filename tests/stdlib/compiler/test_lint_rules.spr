@@ -16,13 +16,13 @@ fn finding_rule(f: lint_rules.LintFinding) -> String =
 
 fn first_line(findings: List lint_rules.LintFinding) -> Int =
   match findings with
-  | Nil -> -1
-  | Cons f _ -> finding_line(f)
+  | [] -> -1
+  | [f | _] -> finding_line(f)
 
 fn first_rule(findings: List lint_rules.LintFinding) -> String =
   match findings with
-  | Nil -> ""
-  | Cons f _ -> finding_rule(f)
+  | [] -> ""
+  | [f | _] -> finding_rule(f)
 
 fn finding_message(f: lint_rules.LintFinding) -> String =
   match f with
@@ -30,8 +30,8 @@ fn finding_message(f: lint_rules.LintFinding) -> String =
 
 fn first_message(findings: List lint_rules.LintFinding) -> String =
   match findings with
-  | Nil -> ""
-  | Cons f _ -> finding_message(f)
+  | [] -> ""
+  | [f | _] -> finding_message(f)
 
 fn mentions_let_else(msg: String) -> Bool =
   str_find(msg, "let..else") != -1
@@ -335,6 +335,59 @@ let do_bind_hand_written_wildcard_tail =
   "    Cons h _ <- get_list() else 0\n" ++
   "    h\n"
 
+# --- deprecated-brace-body fixtures -------------------------------------
+#
+# Both body forms parse (the brace form is still accepted); the rule is what
+# makes the deprecated one visible.
+
+let brace_class =
+  "class Codec a {\n" ++
+  "  fn from_int(n: Int) -> a\n" ++
+  "}\n"
+
+let brace_instance =
+  "instance Codec Int {\n" ++
+  "  fn from_int(n: Int) -> Int = n\n" ++
+  "}\n"
+
+let brace_class_superclass =
+  "class Applicative f where Functor f {\n" ++
+  "  fn pure(x: a) -> f a\n" ++
+  "}\n"
+
+let brace_two_blocks =
+  "class Codec a {\n" ++
+  "  fn from_int(n: Int) -> a\n" ++
+  "}\n" ++
+  "\n" ++
+  "instance Codec Int {\n" ++
+  "  fn from_int(n: Int) -> Int = n\n" ++
+  "}\n"
+
+let layout_class =
+  "class Codec a\n" ++
+  "  fn from_int(n: Int) -> a\n"
+
+let layout_instance =
+  "instance Codec Int\n" ++
+  "  fn from_int(n: Int) -> Int = n\n"
+
+# `instance Boxer (a !{IO})` — a `{` sits between the keyword and the body, but
+# it belongs to an effect annotation, not to a body.
+let instance_head_effect =
+  "class Boxer a\n" ++
+  "  fn box_size(v: a) -> Int\n" ++
+  "\n" ++
+  "instance Boxer (a !{IO})\n" ++
+  "  fn box_size(v: a) -> Int = 0\n"
+
+let layout_class_effect_sig =
+  "class Runner a\n" ++
+  "  fn run(v: a) -> Unit !{IO}\n"
+
+let brace_in_string =
+  "fn snippet() -> String = \"class Foo { fn f(x: Int) -> Int }\"\n"
+
 fn main() -> Unit !{IO} =
   do
     state <- new_state()
@@ -421,5 +474,43 @@ fn main() -> Unit !{IO} =
     assert_eq(state, "hand-written wildcard-tail pattern in a do-bind: reported", count_list(lint_rules.lint_ast(do_bind_hand_written_wildcard_tail)), 1)
 
     assert_eq(state, "hand-written Cons h t var-tail recursion: no list-prefix-pattern finding either", count_by_rule(lint_rules.lint_ast(list_recursion_hand_written), "list-prefix-pattern"), 0)
+
+    # --- deprecated-brace-body ------------------------------------------
+    assert_eq(state, "brace class body: one finding",
+      count_by_rule(lint_rules.lint_ast(brace_class), "deprecated-brace-body"), 1)
+    assert_eq(state, "brace instance body: one finding",
+      count_by_rule(lint_rules.lint_ast(brace_instance), "deprecated-brace-body"), 1)
+    assert_eq(state, "brace class with a superclass clause: one finding",
+      count_by_rule(lint_rules.lint_ast(brace_class_superclass), "deprecated-brace-body"), 1)
+    assert_eq(state, "two brace blocks: one finding each",
+      count_by_rule(lint_rules.lint_ast(brace_two_blocks), "deprecated-brace-body"), 2)
+
+    # The finding anchors on the `{` itself, not the declaration head — that is
+    # the token the author has to delete.
+    assert_eq(state, "brace class: anchored at the opening brace's line",
+      first_line(lint_rules.lint_ast(brace_class)), 1)
+    assert_eq(state, "brace class: rule id",
+      first_rule(lint_rules.lint_ast(brace_class)), "deprecated-brace-body")
+
+    # The layout form is the point of the rule — it must stay silent.
+    assert_eq(state, "layout class body: no finding",
+      count_by_rule(lint_rules.lint_ast(layout_class), "deprecated-brace-body"), 0)
+    assert_eq(state, "layout instance body: no finding",
+      count_by_rule(lint_rules.lint_ast(layout_instance), "deprecated-brace-body"), 0)
+
+    # An effect annotation in an instance HEAD puts a `{` between the keyword
+    # and the body — `instance Boxer (a !{IO})`. It is `!{`, not a body brace,
+    # and tests/conformance/type_error/tyvar_instance_head_effect.spr is a live
+    # in-tree file of exactly this shape.
+    assert_eq(state, "effect annotation in an instance head: no finding",
+      count_by_rule(lint_rules.lint_ast(instance_head_effect), "deprecated-brace-body"), 0)
+    assert_eq(state, "effect annotation in a class method sig: no finding",
+      count_by_rule(lint_rules.lint_ast(layout_class_effect_sig), "deprecated-brace-body"), 0)
+
+    # A string literal is a single token, so the scan cannot see into one — but
+    # this file itself is full of brace snippets inside strings and is staged
+    # through the pre-commit hook, so the property is worth pinning.
+    assert_eq(state, "brace syntax inside a string literal: no finding",
+      count_by_rule(lint_rules.lint_ast(brace_in_string), "deprecated-brace-body"), 0)
 
     summary(state)

@@ -43,8 +43,10 @@ Formatting rules that should be treated as fixed:
 - Put spaces around `=`, `->`, binary operators, and `++`.
 - Put a space before effect annotations: `-> Unit !{IO}`.
 - Write `class` and `instance` bodies in the layout form — members indented two
-  spaces past the keyword, no braces. The brace form still parses, but it is a
-  compatibility shim, not the house style.
+  spaces past the keyword, no braces. The brace form still parses but is
+  deprecated; the linter flags it as `deprecated-brace-body`, and because the
+  pre-commit hook fails on any lint finding, a staged file using braces will not
+  commit.
 
 Examples:
 

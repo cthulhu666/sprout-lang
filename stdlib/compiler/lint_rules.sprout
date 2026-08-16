@@ -1,8 +1,10 @@
 module stdlib.compiler.lint_rules
 
+import stdlib.collections (Vec, vec_get, vec_length)
 import stdlib.compiler.ast as ast
 import stdlib.compiler.parser as parser
 import stdlib.compiler.lexer as lexer
+import stdlib.compiler.token as token
 import stdlib.compiler.source as source
 import stdlib.string as string
 import stdlib.compiler.desugar_ctx as desugar_ctx
@@ -631,6 +633,71 @@ fn drop_desugared_matches(src: String, findings: List LintFinding) -> List LintF
           then drop_desugared_matches(src, rest)
           else Cons(f, drop_desugared_matches(src, rest))
 
+# ---------------------------------------------------------------------------
+# Rule: deprecated-brace-body
+#
+# `class C a { … }` / `instance C T { … }`. Both body forms parse — the brace
+# form is kept so old sources still compile — so this rule is what makes the
+# deprecated one visible. See docs/spec-v0.md §8.5 "Declaration syntax".
+#
+# Token-based, not AST-based: ClassDecl/InstanceDecl record the members, not
+# which delimiter produced them, so the AST cannot tell the two forms apart.
+# The token stream can, and lint_ast already has it in hand.
+
+fn brace_tok_at(tokens: Vec token.Token, i: Int) -> token.Token =
+  match vec_get(i, tokens) with
+  | Just t -> t
+  | Nothing -> token.eof_token(source.SourcePos(0, 0, 0))
+
+fn brace_is_keyword(t: token.Token, kw: String) -> Bool =
+  match token.token_kind(t) with
+  | token.TokenKeywordKind -> token.token_text(t) == kw
+  | _ -> false
+
+fn brace_is_symbol(t: token.Token, sym: String) -> Bool =
+  match token.token_kind(t) with
+  | token.TokenSymbolKind -> token.token_text(t) == sym
+  | _ -> false
+
+fn brace_is_decl_keyword(t: token.Token) -> Bool =
+  match token.token_kind(t) with
+  | token.TokenKeywordKind -> parser.is_decl_keyword(token.token_text(t))
+  | _ -> false
+
+# From just past a `class`/`instance` keyword, find the `{` that opens its body.
+#
+# Two things end the search without a finding: a declaration keyword (`fn` for
+# the layout form's first member, or the next top-level declaration after an
+# empty body) and end of input. `parser.is_decl_keyword` is the single source of
+# truth for that set, so a new declaration form cannot silently widen the scan.
+#
+# The one `{` that must NOT be mistaken for a body is the one in an effect
+# annotation — `instance Boxer (a !{IO})` puts one in the declaration head. The
+# lexer emits `!` and `{` as separate symbol tokens, so the preceding token
+# identifies it.
+fn find_body_brace(tokens: Vec token.Token, i: Int, n: Int) -> Maybe source.SourcePos =
+  if i >= n then Nothing
+  else if brace_is_decl_keyword(brace_tok_at(tokens, i)) then Nothing
+  else if brace_is_symbol(brace_tok_at(tokens, i), "{")
+       && ! (brace_is_symbol(brace_tok_at(tokens, i - 1), "!")) then
+    Just(token.token_position(brace_tok_at(tokens, i)))
+  else find_body_brace(tokens, i + 1, n)
+
+fn brace_body_scan(tokens: Vec token.Token, i: Int, n: Int, acc: List LintFinding) -> List LintFinding =
+  if i >= n then list_reverse(acc)
+  else if brace_is_keyword(brace_tok_at(tokens, i), "class")
+       || brace_is_keyword(brace_tok_at(tokens, i), "instance") then
+    match find_body_brace(tokens, i + 1, n) with
+    | Nothing -> brace_body_scan(tokens, i + 1, n, acc)
+    | Just pos ->
+        brace_body_scan(tokens, i + 1, n,
+          Cons(mk_finding(pos, "deprecated-brace-body",
+            "brace-delimited class/instance body is deprecated — drop the braces and indent the members past the keyword"), acc))
+  else brace_body_scan(tokens, i + 1, n, acc)
+
+fn brace_body_findings(tokens: Vec token.Token) -> List LintFinding =
+  brace_body_scan(tokens, 0, vec_length(tokens), Nil)
+
 # lint_ast: run every AST-based rule over a source file. Parse failures yield
 # no findings (formatter.lint_source's text-based checks already cover files
 # that don't even parse; this rule set only has something to say once the
@@ -643,4 +710,5 @@ export fn lint_ast(src: String) -> List LintFinding =
       | Err _ -> Nil
       | Ok prog ->
           list_append(drop_desugared_matches(src, lint_program(prog)),
-            list_append(list_shape_findings(src, prog), list_prefix_findings(src, prog)))
+            list_append(list_shape_findings(src, prog),
+              list_append(list_prefix_findings(src, prog), brace_body_findings(toks))))
