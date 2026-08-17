@@ -67,8 +67,9 @@ opposite of the direction the runtime is supposed to travel.
   functions the code in this package will not be used." A future intercept of a
   `bits.rotate` written in Sprout is exactly that pattern, and needs no new design.
 - **Deciding `Int`'s overflow policy.** Still open in
-  `docs/int-overflow-policy-decision.md`; §5 below couples to it rather than pre-empting
-  it.
+  `docs/int-overflow-policy-decision.md`, and this design is now **independent of it**:
+  §5.2 exempts `bit_shl` from it outright, so nothing here waits on that deferral and
+  nothing here changes when it resolves.
 
 ## 3. Prior-art survey
 
@@ -179,38 +180,54 @@ partitions them by width-dependence and commits per function:
 | `bit_and` `bit_or` `bit_xor` | Well-defined on infinite two's complement — bit *i* of the result depends only on bit *i* of each operand, and sign-extension is well-defined at every position. This is exactly Haskell's `Bits Integer`. | **Width-independent.** Survives the widening unchanged. |
 | `bit_not` | `bit_not x = -x - 1` on infinite two's complement — no width appears in the definition. | **Width-independent.** |
 | `bit_shr` (arithmetic) | `floor(x / 2^n)`, for any `n >= 0`. No width appears. | **Width-independent.** |
-| `bit_shl` | Exact `x * 2^n` under bignum; **drops high bits** under i64. | **Width-dependent in its failure mode only.** See §5.2. |
-| `bit_shr_zf` (zero-fill) | **Meaningless.** "Fill from the top bit" presumes a top bit; an arbitrary-precision negative has none. | **The one 64-bit-scoped function in the set.** |
+| `bit_shl` | Exact `x * 2^n` under bignum; **discards high bits** under i64, which §5.2 makes its specified behaviour rather than an overflow condition. | **64-bit-scoped.** |
+| `bit_shr_zf` (zero-fill) | **Meaningless.** "Fill from the top bit" presumes a top bit; an arbitrary-precision negative has none. | **64-bit-scoped.** |
 
-`bit_shr_zf` cannot simply be dropped — GC-header `aux` extraction needs it, and so does
-any code reading a negative `Double`'s bit pattern via `double_to_bits`. So it is
-specified honestly: **defined in terms of the 64-bit two's-complement representation**,
-and flagged in-file as respecify-or-restrict if `Int` ever widens. Haskell's
-`bitSizeMaybe = Nothing` for `Integer` is the primary-source confirmation that this is a
-real boundary rather than pedantry, not a Sprout quirk.
+So **five of the seven functions are width-independent and two are not.** Neither of the
+two can be dropped: GC-header `aux` extraction needs `bit_shr_zf`, as does any code
+reading a negative `Double`'s bit pattern via `double_to_bits`, and `bit_shl` is how a
+mask gets built in the first place.
 
-### 5.2 Two different overflows, and only one of them has a consensus
+Both are therefore specified honestly — **defined in terms of the 64-bit two's-complement
+representation**, and flagged at their declarations as respecify-or-restrict if `Int` ever
+widens. That is the whole point of writing the partition down: the widening becomes a
+documented breaking change against two named functions, rather than a silent output drift
+across all seven. Haskell's `bitSizeMaybe = Nothing` for `Integer` is the primary-source
+confirmation that this boundary is real rather than pedantry, and not a Sprout quirk.
 
-These must be kept apart, because the verified Rust wording separates them:
+### 5.2 Value-overflow: `bit_shl` discards, and is not an error
+
+Two overflows have to be kept apart, and the verified Rust wording is what separates them:
 
 - **Count-overflow** — `n < 0` or `n >= 64`. Rust calls exactly this (and *only* this)
-  overflow. It is a soundness item here; §5.3.
-- **Value-overflow** — bits shifted off the top by `bit_shl`. Rust does **not** treat
-  this as overflow: `1i64 << 63` truncates silently even in debug, in a language that
-  panics on `*` overflow. Every fixed-width language surveyed behaves the same way.
+  overflow. Genuinely a soundness item, decided in §5.3.
+- **Value-overflow** — bits shifted off the top by `bit_shl`. Rust does **not** treat this
+  as overflow: `1i64 << 63` truncates silently even in debug, in a language that panics on
+  `*` overflow. This subsection.
 
-**Status: OPEN.** The two candidates are (i) couple `bit_shl`'s value-overflow to
-whatever `*` does, inheriting the still-open decision in
-`docs/int-overflow-policy-decision.md`; or (ii) exempt it — high bits are always
-discarded, and `bit_shl` joins `bit_shr_zf` in §5.1's width-dependent bucket.
+Conflating them is the trap: the first is undefined behaviour if unguarded, the second is
+ordinary defined behaviour everywhere, so a single "shift overflow" policy would either
+leave poison reachable or reject valid programs.
 
-The forward-compatibility argument for (i) is the one that document's §5 item 2 makes for
-arithmetic: under a trapping policy an overflowing program panics today and *succeeds*
-once `Int` is arbitrary-precision — a safe transition — whereas under silent truncation
-such a program *changes output* at the widening.
+**Decided (2026-08-17, Kuba): `bit_shl` discards the high bits, always, and is exempt
+from `*`'s overflow policy.** It is specified as `x * 2^n` **within a 64-bit window**,
+with bits above position 63 discarded — which is why §5.1 lists it as 64-bit-scoped
+rather than width-independent.
 
-**Prior art, verified 2026-08-17, cuts against (i).** The survey is unanimous within each
-width camp:
+```
+bit_shl(1, 63)  == -9223372036854775808   # never panics
+bit_shl(3, 63)  == -9223372036854775808   # two bits discarded, still not an error
+```
+
+The consequence, stated plainly: `bit_shl`'s behaviour does **not** change if
+`docs/int-overflow-policy-decision.md` later lands on trapping. It is a bit-window
+operation that happens to coincide with multiplication in range, not multiplication that
+happens to be implemented by shifting.
+
+**Prior art, verified 2026-08-17 — this is the unanimous answer**, and the survey is what
+decided it. Note it cuts *against* the alternative that was recommended here in the first
+draft (couple to `*`, inheriting the deferred decision), which is recorded below rather
+than deleted, because the argument for it is real and will resurface when `Int` widens.
 
 | Language | Traps `*` overflow? | Left shift with bits falling off the top |
 |---|---|---|
@@ -220,31 +237,42 @@ width camp:
 | **Python** | n/a — arbitrary precision | never truncates, and the definition is the notable part: "A left shift by *n* bits is **defined as multiplication with `pow(2,n)`**". |
 | **Haskell** | n/a for `Integer` | `shiftL` is exact on `Integer` (unbounded — `bitSizeMaybe` is `Nothing`); truncates on fixed-width `Int`. |
 
-Two things follow. **Every** language surveyed *defines* left shift as multiplication by
-`2^n`, so option (i)'s specification wording is uncontroversial — the divergence is
-purely the overflow policy. And the three safety-first languages that **do** trap `*`
-overflow all **exempt** the shift, Zig going as far as adding three separate operations
-rather than making plain `<<` checked. Option (i) is therefore not merely
-"Sprout-original"; it is contradicted by the three closest precedents, and has to outweigh
-a unanimous survey rather than fill a gap in one.
+Two things follow, and together they are the decision. **Every** language surveyed
+*defines* left shift as multiplication by `2^n`, so that wording is uncontroversial and
+survives here — the divergence between the camps is purely the overflow *policy*. And the
+three safety-first languages that **do** trap `*` overflow all **exempt** the shift, Zig
+going as far as adding three separate operations rather than making plain `<<` checked.
+Coupling would therefore not have been merely "Sprout-original": it would have been
+contradicted by the three closest precedents.
 
-The counterweight those three languages do not carry: none of them intends to widen its
-integer type, while `docs/spec-v0.md` §8.4 says Sprout does.
+### The rejected alternative, and why it will resurface
 
-The honest cost of (i), if the overflow decision lands as Option A (trap):
-**`bit_shl(1, 63)` is `INT_MIN`, i.e. signed overflow, so it would panic** — and the
-lexer cannot write the `INT_MIN` literal to work around it either (same document, §5).
-Programs wanting the sign bit as a mask are not stuck under either candidate, because the
-complement route stays exact:
+Couple `bit_shl` to `*`, inheriting `docs/int-overflow-policy-decision.md`. Its argument is
+the one that document's §5 item 2 makes for arithmetic, and it is not a weak one: under a
+trapping policy, an overflowing program panics today and *succeeds* once `Int` is
+arbitrary-precision — a safe transition — whereas a program relying on truncation
+*changes output* at the widening. **None of the three trapping languages carries this
+consideration, because none of them intends to widen its integer type, while
+`docs/spec-v0.md` §8.4 says Sprout does.**
+
+What settles it is that the §5.1 partition converts that risk into a *documented* one.
+`bit_shl` and `bit_shr_zf` are declared 64-bit-scoped from day one, so the widening
+respecifies two named functions as a visible breaking change instead of silently altering
+what working programs compute. The alternative bought the same protection by making a
+routine shift fail: had `*` landed on trapping, `bit_shl(1, 63)` would panic — a shift
+every other language surveyed performs without complaint — and the lexer cannot even write
+the `INT_MIN` literal one would use to work around it (`int-overflow-policy-decision.md`
+§5).
+
+Either way, the sign-bit mask never needed `bit_shl`:
 
 ```sprout
 bits.bit_not(bits.bit_shr_zf(bits.bit_not(0), 1))   # 0x8000000000000000
 ```
 
-Note the two candidates already agree on today's *behaviour*: `*` currently wraps, so
-under (i) `bit_shl` truncates today exactly as it does under (ii). They diverge only if
-the deferred overflow decision lands on trapping — and in how the function is documented
-in the meantime, which is what §5.1's width partition turns on.
+**Re-open this if the bignum migration is ever scheduled.** At that point `bit_shl`'s
+respecification is on the table regardless, and the coupling argument gets its hearing with
+a concrete migration plan behind it rather than a hypothetical one.
 
 ### 5.3 Shift-count domain is a soundness item, not a footnote
 
@@ -420,12 +448,17 @@ To be written with the implementation, per Definition of Ready #2 (failing first
   `bit_not(0) == -1` and `bit_not(x) == -x - 1`; **`bit_shr` vs `bit_shr_zf` on a
   negative** (the pair's whole reason for existing); and a composed `rotr32` as the
   realism check.
-- The §5.3 boundary, which is the decided behaviour and therefore the part that must be
-  pinned rather than left to the lowering: counts `0`, `1`, `63` normal; `bit_shl(1, 64)`
-  and `bit_shr_zf(-8, 64)` are `0`; `bit_shr(-8, 64)` is `-1`; a negative count panics.
-  Note counts `>= 64` are exactly where a naive lowering yields LLVM poison, so a wrong
+- The §5.3 count boundary, which is decided behaviour and therefore must be pinned rather
+  than left to the lowering: counts `0`, `1`, `63` normal; `bit_shl(1, 64)` and
+  `bit_shr_zf(-8, 64)` are `0`; `bit_shr(-8, 64)` is `-1`; a negative count panics. Note
+  counts `>= 64` are exactly where a naive lowering yields LLVM poison, so a wrong
   implementation here is liable to *look* right at `-O0` and diverge under optimisation —
   the test must assert values, not merely that it does not crash.
+- The §5.2 discard behaviour, which needs pinning for the opposite reason — it must
+  **not** become an error: `bit_shl(1, 63) == -9223372036854775808` and
+  `bit_shl(3, 63) == -9223372036854775808` (two bits discarded), both total. These are the
+  regression guard if `*` later gains overflow trapping; a shared `IRIMul`-style guard
+  applied over-eagerly would break exactly here.
 - A `Bytes`-driven SHA-256 round against a known digest, if the pure-Sprout core lands
   in the same arc — the strongest end-to-end evidence that the set is sufficient.
 - Golden IR: a constant shift must emit one instruction and no branch (§9), which is the
