@@ -1,0 +1,73 @@
+import stdlib.test (TestState, new_state, assert_eq, assert_true, summary)
+import stdlib.bits
+
+# Hex (`0x`) and binary (`0b`) integer literals.
+#
+# WHY THEY WERE ADDED. The lexer scanned decimal digit runs only, so every mask
+# had to be written in base 10 with its hex spelling relegated to a comment —
+# `tests/stdlib/test_double_bits.spr` still shows what that costs. A bitwise API
+# whose masks are unwritable in hex undercuts its own expressibility, so these
+# landed alongside stdlib.bits (docs/bitwise-int-ops-v0.md §5.5).
+#
+# WHAT IS DELIBERATELY NOT HERE. A `_` digit separator (`1_000_000`): `_` is an
+# identifier-start character, so `1_000` currently lexes as the int `1` followed
+# by the identifier `_000`, and changing that is a lexer decision of its own
+# rather than part of this one.
+#
+# The literal's SOURCE SPELLING survives into the token, which is what lets
+# `just fmt` reprint `0xFF` as `0xFF` rather than 255. `just fmt-check` in CI is
+# the real guard on that; this file pins the values.
+
+fn main() -> Unit !{IO} =
+  do
+    state <- new_state()
+
+    # --- hex, and the fact that it means the same thing as decimal ---
+    assert_eq(state, "0x0 is 0", 0x0, 0)
+    assert_eq(state, "0xFF is 255", 0xFF, 255)
+    assert_eq(state, "hex is case-insensitive in its digits", 0xff, 0xFF)
+    assert_eq(state, "hex is case-insensitive in its prefix", 0Xff, 0xFF)
+    assert_eq(state, "0xDEADBEEF", 0xDEADBEEF, 3735928559)
+    assert_eq(state, "0x7FFFFFFFFFFFFFFF is the largest Int", 0x7FFFFFFFFFFFFFFF,
+      9223372036854775807)
+
+    # The IEEE 754 constants that motivated this, now readable. Compare
+    # test_double_bits.spr, where the same values appear as bare decimals.
+    assert_eq(state, "2^52, one unit in the exponent field",
+      0x0010000000000000, 4503599627370496)
+    assert_eq(state, "the encoding of 1.0", 0x3FF0000000000000,
+      4607182418800017408)
+
+    # --- binary ---
+    assert_eq(state, "0b0 is 0", 0b0, 0)
+    assert_eq(state, "0b1010 is 10", 0b1010, 10)
+    assert_eq(state, "0b11111111 is 255", 0b11111111, 0xFF)
+    assert_eq(state, "binary prefix is case-insensitive", 0B1010, 0b1010)
+
+    # --- they compose with everything, being ordinary Int literals ---
+    assert_eq(state, "hex in arithmetic", 0x10 + 0x20, 48)
+    assert_eq(state, "hex as a bitwise mask", bit_and(0xDEAD, 0x00FF), 0xAD)
+    assert_eq(state, "hex as a shift count", bit_shl(1, 0x3F),
+      -9223372036854775808)
+    assert_eq(state, "binary reads as a bit pattern",
+      bit_or(0b1010, 0b0101), 0b1111)
+
+    # --- in a pattern position, not just an expression ---
+    assert_eq(state, "hex literal as a match pattern", classify(0xFF), 1)
+    assert_eq(state, "binary literal as a match pattern", classify(0b10), 2)
+    assert_eq(state, "no pattern matched", classify(7), 0)
+
+    # --- a prefix with no digits is NOT a radix literal ---
+    # `0x` alone falls back to the decimal 0 plus an identifier, which is a parse
+    # error in any expression — so there is no silent misreading to test for here,
+    # only the fact that a lone 0 still lexes normally next to identifiers.
+    assert_eq(state, "a bare 0 still lexes as 0", 0, 0)
+    assert_true(state, "0x0 and 0 are the same value", 0x0 == 0)
+
+    summary(state)
+
+fn classify(n: Int) -> Int =
+  match n with
+  | 0xFF -> 1
+  | 0b10 -> 2
+  | _ -> 0

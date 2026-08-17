@@ -16,6 +16,21 @@ module stdlib.compiler.sprout_ir
 #   IRIAdd   String String String      — result = lhs + rhs   (i64)
 #   IRISub   String String String      — result = lhs - rhs   (i64)
 #   IRIMul   String String String      — result = lhs * rhs   (i64)
+#   IRIAnd   String String String      — result = lhs & rhs   (i64)
+#   IRIOr    String String String      — result = lhs | rhs   (i64)
+#   IRIXor   String String String      — result = lhs ^ rhs   (i64)
+#   IRIShl   String String String      — result = lhs << rhs  (i64, logical)
+#   IRIAShr  String String String      — result = lhs >> rhs  (i64, ARITHMETIC:
+#                                          vacated bits take the sign bit)
+#   IRILShr  String String String      — result = lhs >> rhs  (i64, LOGICAL:
+#                                          vacated bits are zero)
+#       — The five bitwise ops back stdlib.bits (docs/bitwise-int-ops-v0.md).
+#         `bit_not` needs no constructor of its own: it is IRIXor against -1.
+#       — CALLER OBLIGATION on the three shifts: LLVM yields POISON when the
+#         shift count is >= 64 or negative, so these constructors carry a
+#         precondition of 0 <= rhs <= 63. ast_to_ir is what guarantees it, by
+#         constant-folding a literal count or emitting a guard CFG for a
+#         dynamic one; nothing at this layer can check it.
 #   IRICmp   String String String String
 #       — result = icmp <pred> lhs, rhs   (i1)
 #       — argument order: result-name, predicate, lhs, rhs.
@@ -93,6 +108,25 @@ export type IROp (..) =
   # zero matches LLVM's: undefined behaviour.  Source-level division-by-zero
   # guards must be inserted by the user (or by a later pass) before the IRIDiv.
   | IRIDiv String String String
+  # Bitwise ops on Int, backing stdlib.bits (docs/bitwise-int-ops-v0.md).  Each
+  # lowers to exactly one LLVM instruction.  `bit_not` is absent on purpose — it
+  # is IRIXor against -1, so it needs no constructor.
+  | IRIAnd String String String
+  | IRIOr String String String
+  | IRIXor String String String
+  # Shifts.  IRIAShr is the ARITHMETIC right shift (sign-filling, `ashr`);
+  # IRILShr is the LOGICAL one (zero-filling, `lshr`).  Sprout needs both named
+  # because it has a single `Int` type, so unlike Rust the signedness of the
+  # operand cannot pick between them.
+  #
+  # PRECONDITION, 0 <= rhs <= 63.  LLVM's shl/ashr/lshr are POISON for a count
+  # at or above the bit width, and poison propagates — a violation can look
+  # correct at -O0 and diverge under optimisation.  ast_to_ir discharges this
+  # (constant-folding a literal count, or emitting the guard CFG for a dynamic
+  # one); these constructors cannot check it and do not try.
+  | IRIShl String String String
+  | IRIAShr String String String
+  | IRILShr String String String
   # Float ops (Double).  A Double is carried as its i64 bit-pattern through the
   # uniform ABI; these ops bitcast to `double`, apply the float instruction, and
   # bitcast the result back to i64 — so the operand/result SSA names are i64 like
@@ -533,6 +567,12 @@ fn print_op(op: IROp) -> String =
   | IRISub r a b -> "    " ++ r ++ " = isub " ++ a ++ ", " ++ b
   | IRIMul r a b -> "    " ++ r ++ " = imul " ++ a ++ ", " ++ b
   | IRIDiv r a b -> "    " ++ r ++ " = idiv " ++ a ++ ", " ++ b
+  | IRIAnd r a b -> "    " ++ r ++ " = iand " ++ a ++ ", " ++ b
+  | IRIOr r a b -> "    " ++ r ++ " = ior " ++ a ++ ", " ++ b
+  | IRIXor r a b -> "    " ++ r ++ " = ixor " ++ a ++ ", " ++ b
+  | IRIShl r a b -> "    " ++ r ++ " = ishl " ++ a ++ ", " ++ b
+  | IRIAShr r a b -> "    " ++ r ++ " = iashr " ++ a ++ ", " ++ b
+  | IRILShr r a b -> "    " ++ r ++ " = ilshr " ++ a ++ ", " ++ b
   | IRFloatConst r text -> "    " ++ r ++ " = fconst " ++ text
   | IRFAdd r a b -> "    " ++ r ++ " = fadd " ++ a ++ ", " ++ b
   | IRFSub r a b -> "    " ++ r ++ " = fsub " ++ a ++ ", " ++ b

@@ -1,0 +1,19 @@
+module main
+
+import stdlib.bits
+
+# stdlib.bits shift-count guard regression (CI gate). The count is -1 at RUNTIME
+# (argv is empty when the binary is run with no arguments), so neither the Sprout
+# compiler nor clang can fold it — a LITERAL negative count is rejected at compile
+# time instead, and would therefore not exercise this path at all.
+#
+# Unguarded, `shl i64 %x, -1` is LLVM POISON, which is the failure mode this gate
+# exists to catch: poison propagates, so a missing guard can look correct at -O0
+# and produce a different answer at -O2. The emitted guard must panic cleanly with
+# "negative shift count" and a non-zero exit.
+#
+# Same shape, and same reason, as tests/div_smoke/div_by_zero.spr.
+fn main() -> Unit !{IO} =
+  do
+    args <- argv_all()
+    print(int_to_string(bit_shl(1, list_length(args) - 1)))

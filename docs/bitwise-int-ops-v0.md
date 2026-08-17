@@ -120,20 +120,34 @@ Seven declarations over six distinct LLVM instructions: `bit_shr` is `ashr`,
 `bit_shr_zf` is `lshr`, and `bit_not` is `xor -1` (so it can reuse the xor op with a
 constant rather than needing a seventh).
 
-Usage, for the two motivating shapes:
+Usage, for the two motivating shapes. **The calls are unqualified**, which is not a
+style choice — see the note below the snippet:
 
 ```sprout
-import stdlib.bits as bits
+import stdlib.bits
 
 # GC-header-style field extraction
-fn header_kind(w: Int) -> Int = bits.bit_and(w, 255)
-fn header_aux(w: Int) -> Int  = bits.bit_shr_zf(w, 14)
+fn header_kind(w: Int) -> Int = bit_and(w, 0xFF)
+fn header_aux(w: Int) -> Int  = bit_shr_zf(w, 14)
 
 # SHA-256's rotr32 — composed from the primitives, not a primitive
 fn rotr32(x: Int, n: Int) -> Int =
-  bits.bit_and(bits.bit_or(bits.bit_shr_zf(x, n), bits.bit_shl(x, 32 - n)),
-               4294967295)
+  bit_and(bit_or(bit_shr_zf(bit_and(x, 0xFFFFFFFF), n), bit_shl(x, 32 - n)),
+          0xFFFFFFFF)
 ```
+
+> **An extern cannot be reached through a qualified name, so `bits.bit_and(w, 0xFF)`
+> does not work.** Verified, not inferred — it fails with
+> `check: Unknown variable: math.double_to_bits` for the equivalent call on the
+> existing intrinsic. Spec §"Externs are outside the module system" is the rule
+> ("never qualified, never renamed, and never enters a module's exported set") and
+> `bundler.qualify_decl` is the mechanism: `ExternFnDecl` is the one declaration form
+> whose name passes through unchanged. `import stdlib.bits` therefore serves only to
+> pull the module into the build; the names arrive bare, under any alias or none.
+>
+> This applies to `double_to_bits` today and is why `tests/stdlib/test_double_bits.spr`
+> calls it bare despite importing `stdlib.math as math`. Worth stating loudly here
+> because seven new names make it seven new chances to be confused by it.
 
 ### Why not operators — the F#-style route
 
@@ -267,7 +281,7 @@ the `INT_MIN` literal one would use to work around it (`int-overflow-policy-deci
 Either way, the sign-bit mask never needed `bit_shl`:
 
 ```sprout
-bits.bit_not(bits.bit_shr_zf(bits.bit_not(0), 1))   # 0x8000000000000000
+bit_not(bit_shr_zf(bit_not(0), 1))   # 0x8000000000000000
 ```
 
 **Re-open this if the bignum migration is ever scheduled.** At that point `bit_shl`'s
@@ -301,6 +315,28 @@ end of a 64-bit window rather than a malformed one. And Haskell's `shiftL` count
 non-negative" is the verified precedent for **rejecting** a negative count outright
 instead of silently reinterpreting it as a large positive one.
 
+#### A statically known negative count is a compile error, not a panic
+
+Refinement settled during implementation, and a strengthening rather than a change:
+`bit_shl(1, -1)` written with a **literal** count never runs, so it is rejected at compile
+time —
+
+```
+ast_to_ir: bit_shl shift count is negative (-1); a shift count must be 0 or greater
+```
+
+— while a count that is only negative at run time panics as specified above. Go and Zig
+both reject constant out-of-range shifts at compile time, so this is the precedented half
+of the same rule; rejecting the case we can see is strictly better than waiting for it to
+fail in production, and it also avoids emitting a block that is unreachable by
+construction.
+
+The practical consequence for testing is the reason this is worth spelling out: **the
+panic path is only reachable with a count the compiler cannot see.**
+`tests/bits_smoke/negative_shift.spr` therefore derives its count from `argv`
+(`list_length(args) - 1`), exactly as `tests/div_smoke/div_by_zero.spr` derives its
+divisor — a literal would be rejected before it could panic.
+
 **The alternative, and why it lost.** Masking the count to `& 63` (Java, JavaScript) is
 branch-free and needs no guard at all, but it makes `bit_shl(1, 64) == 1` and turns
 `bit_shl(1, -1)` into a shift by 63. Both are silent lies about what the program asked
@@ -330,9 +366,19 @@ cost of: `4503599627370496` in the code with `2^52` explained in a comment, and
 `0x3FF0000000000000` reachable only as `4607182418800017408`.
 
 A bitwise design whose masks are unwritable in hex undercuts its own expressibility
-claim. `0x` / `0b` integer literals are a **lexer-only** change (one more branch in
-`scan_int_next`, no parser or type impact) and are **recommended to land in the same
-arc**. Filed to `BACKLOG.md` either way so it cannot go silent.
+claim, so `0x` and `0b` literals **landed in the same change**. Two details of how:
+
+- The token keeps the literal's **source spelling** (`0xFF` stays `"0xFF"`), and the
+  parser decodes the radix in `int_from_lexed`. Decoding in the lexer instead would have
+  been shorter but would make `just fmt` reprint `0xFF` as `255` — a formatter that
+  silently rewrites your masks, caught by design rather than by CI.
+- The prelude's `parse_int` is deliberately **not** taught about prefixes. It is the
+  public `String -> Maybe Int` for *user input*, where quietly accepting `"0xFF"` would
+  change the meaning of programs that validate input with it.
+
+A `_` digit separator (`1_000_000`) is **not** included: `_` is an identifier-start
+character, so `1_000` currently lexes as `1` followed by the identifier `_000`, and
+changing that is a lexer decision of its own rather than part of this one.
 
 ## 6. Type-system impact
 
@@ -414,30 +460,76 @@ A full `just refresh-seed` is nonetheless required, for the ordinary reason: the
 implementation edits `stdlib/compiler/` (four files, §9). Delete the stale stage-1 binary
 first.
 
-## 9. Implementation overview (for approval; no code written for this document)
+## 9. Implementation
 
 The `double_to_bits` route, one step heavier because these ops do emit instructions.
-Blast radius verified against `IRIMul` as the exact template, per new IR op:
+Six new IR ops (`bit_not` needs none — it is `xor` against `-1`), following `IRIMul` as
+the template:
 
-| File | Sites | What |
-|---|---|---|
-| `stdlib/compiler/sprout_ir.sprout` | 3 — `:18` comment block, `:90` constructor, `:534` debug render | six new constructors |
-| `stdlib/compiler/ir_lowering.sprout` | 1 — `:137` | `and` / `or` / `xor` / `shl` / `ashr` / `lshr` `i64` |
-| `stdlib/compiler/ir_rooting.sprout` | 5 exhaustive matches — `:147, :280, :378, :454, :760` | all scalar: `false` / `Nothing` / operand list / result name |
-| `stdlib/compiler/ast_to_ir.sprout` | 1 — `translate_call` ~`:4850` | name intercept beside `double_to_bits` |
-| `stdlib/bits.sprout` | new file | the seven declarations, with the §5.1 width note at `bit_shr_zf` |
+| File | What |
+|---|---|
+| `stdlib/bits.sprout` | new — the seven declarations, with the §5.1 width note at `bit_shl` / `bit_shr_zf` |
+| `stdlib/compiler/sprout_ir.sprout` | six constructors, the header comment block, the debug renderer |
+| `stdlib/compiler/ir_lowering.sprout` | `and` / `or` / `xor` / `shl` / `ashr` / `lshr` on `i64`, **no flags** — `shl nuw` would be wrong, since discarding high bits is specified behaviour and not an assumption to exploit |
+| `stdlib/compiler/ir_rooting.sprout` | five exhaustive matches (`op_triggers_gc`, `op_produces_simple_heap`, `op_uses`, `op_def`, `op_exposes_operands`); all scalar, so all trivially non-allocating |
+| `stdlib/compiler/ast_to_ir.sprout` | the name intercept beside `double_to_bits`, plus constant folding and `finish_checked_shift` |
+| `stdlib/compiler/lexer.sprout`, `parser.sprout`, `stdlib/string.sprout` | the `0x` / `0b` literals of §5.5 |
 
-Two notes for whoever builds it:
+`op_triggers_gc_summary` looks like a sixth `ir_rooting` site but is not: it delegates
+through a `_` arm to `op_triggers_gc`.
+
+Three notes that mattered in practice:
 
 - **There is no second codegen path to update.** `stdlib/compiler/codegen.sprout` no
   longer exists, so only the typed path needs touching — simpler than what the older
   design docs (which reference `codegen.sprout:2106` for arithmetic) describe.
-- **Shift guards go in `ast_to_ir`, never `ir_lowering`.** The guard CFG must be built
-  where W7 built its divide-by-zero guard; block-splitting in the `ir_lowering` text
-  layer breaks phi predecessors (`docs/int-overflow-policy-decision.md` §6). And when
-  the count is an integer literal in `0..63` — the dominant case, and *every* GC-header
-  field extraction — the guard is folded away at translate time, so a constant shift
-  costs one instruction and no branch.
+- **Shift guards go in `ast_to_ir`, never `ir_lowering`,** where W7 built its
+  divide-by-zero guard; block-splitting in the `ir_lowering` text layer breaks phi
+  predecessors (`docs/int-overflow-policy-decision.md` §6). `finish_checked_shift` emits
+  five blocks — seal, panic, range check, saturate, shift — joined by a phi, and the join
+  block becomes the new current block so downstream phis name it as their predecessor.
+- **No seventh IR op was needed.** An LLVM `select` would have flattened the guard, but
+  `IRICmp` / `IRCondBr` / `IRBr` / `IRPhi` / `IRConst` already cover it, and the phi shape
+  is what the rest of this translator already uses (`translate_if`).
+
+### 9.1 Verified emitted shapes
+
+The constant-fold claim is the one most likely to rot silently, so it was checked in the
+emitted IR rather than assumed:
+
+```llvm
+define i64 @main.const_shift(i64 %w) {        ; bit_shr_zf(w, 14)
+entry:
+  %t$0 = lshr i64 %w, 14                      ; ONE instruction, no branch, no block
+  ret i64 %t$0
+}
+
+define i64 @main.const_saturated(i64 %w) {    ; bit_shl(w, 70)
+entry:
+  %t$0 = add i64 0, 0                         ; folded to the constant, no guard
+  ret i64 %t$0
+}
+
+define i64 @main.dyn_shift(i64 %w, i64 %n) {  ; bit_shl(w, n) — guard CFG
+entry:
+  %t$0 = icmp slt i64 %n, 0
+  br i1 %t$0, label %shiftpanic_0, label %shiftchk_0
+shiftpanic_0:
+  … call i64 @panic(…) ; unreachable
+shiftchk_0:
+  %t$3 = icmp sgt i64 %n, 63
+  br i1 %t$3, label %shiftsat_0, label %shiftdo_0
+shiftsat_0:
+  %t$4 = add i64 0, 0
+  br label %shiftjoin_0
+shiftdo_0:
+  %t$5 = shl i64 %w, %n
+  br label %shiftjoin_0
+shiftjoin_0:
+  %t$6 = phi i64 [%t$4, %shiftsat_0], [%t$5, %shiftdo_0]
+  ret i64 %t$6
+}
+```
 
 ## 10. Tests
 
