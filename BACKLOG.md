@@ -2125,6 +2125,24 @@ what the LSP actually does: `docs/language-server-roadmap.md`.
   advertised-but-dead capability gives an editor a broken feature rather than an absent one. The
   gate asserts the implication *advertised ⇒ answers*, so it re-arms itself automatically as each
   handler lands.
+- [x] `P1` **Sprout files were plain text in every JetBrains IDE. DONE 2026-08-17 (M1).** New Gradle/Kotlin
+  subproject `editors/intellij/` (toolchain pinned in its own `mise.toml` — Java 21, which the platform
+  has required since 2024.2, correcting this arc's initial JDK-17 assumption; Gradle 9.7). Ships file type
+  (`.sprout`/`.spr`), a hand-written lexer, syntax highlighting, a colour-settings page, a `#` commenter,
+  and brace matching, plus a **flat** `ParserDefinition` — one root node over the tokens — because the
+  commenter and brace matcher need *some* PSI and a real Kotlin parser is a permanent non-goal (it would
+  be a second authority on Sprout's syntax). Colour classification follows
+  `tree-sitter-sprout/queries/highlights.scm`, extended with the three things a tree-sitter query over
+  that grammar had no node for: `#` comments, `${…}` interpolation, float literals. Recipes
+  `plugin-test`/`plugin-build`/`plugin-verify`/`plugin-run`; CI job `intellij-plugin` runs test+build
+  (not verify — it downloads GBs of IDE per version). 25 lexer tests, the strongest of which lexes real
+  `stdlib/` and `stdlib/compiler/` sources and asserts full coverage with no unclassifiable characters.
+  `verifyPlugin`: **Compatible** against 2024.2/2024.3/2025.1/2025.2, all **Community** — the empirical
+  form of "the language layer needs no paid API", which building against Community makes structural.
+  Two findings worth keeping: the verifier rejects any plugin ID containing the word `intellij`
+  (`TemplateWordInPluginId`) and `buildPlugin` + tests both accepted the bad ID, so the verifier belongs
+  in the release path; and Kotlin raw strings interpret `${…}`, which silently collides with Sprout's own
+  interpolation syntax in any embedded sample.
 - [ ] `P1` **Wire the five LSP features whose compiler API already exists.** `lsp_driver.sprout` is
   a transport with five unplugged sockets, not a missing feature set: formatting
   (`formatter.format_source`), hover (`compiler.type_of_in_source`), document symbols

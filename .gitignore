@@ -21,6 +21,13 @@ bench/*/http_log_middleware_bench
 # checksum-verified on demand, so it is reproducible rather than tracked.
 .cache/
 
+# Gradle/JVM scratch for the JetBrains plugin (editors/intellij). `build/` above
+# already covers its output directory; these are the tool caches beside it. The
+# .intellijPlatform one holds downloaded IDE distributions and is large.
+editors/intellij/.gradle/
+editors/intellij/.intellijPlatform/
+editors/intellij/.kotlin/
+
 # Large demo model for the galaxy-map ship scene (44 MB). Loaded by relative
 # path at runtime; the compile-examples gate never loads it, so it is kept out
 # of git history. Drop the file here manually to see the ship scene.

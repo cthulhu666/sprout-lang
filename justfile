@@ -2802,6 +2802,36 @@ build-sproutd: bootstrap-from-seed
 # `sproutd --analysis-service <stdlib_root>` runs the identical
 # analysis_service_driver.run_service entry (see stdlib/compiler/sproutd_driver.sprout).
 
+# ── JetBrains plugin (editors/intellij) ───────────────────────────────────────
+#
+# A Gradle/Kotlin subproject with its own toolchain, on the same footing as
+# tree-sitter-sprout/. Its JDK and Gradle are pinned in editors/intellij/mise.toml
+# rather than the root one, so no other recipe pays for a JVM it never uses.
+# Design: docs/intellij-plugin-v0.md.
+
+# Lexer tests. Fixture-free JUnit — no IDE sandbox, so it runs in seconds.
+[group('test')]
+plugin-test:
+  cd editors/intellij && mise exec -- gradle --quiet test
+
+# Build the installable plugin zip into editors/intellij/build/distributions/.
+[group('build')]
+plugin-build:
+  cd editors/intellij && mise exec -- gradle --quiet buildPlugin
+
+# JetBrains' own plugin verifier, across the recommended IDE range. Downloads IDE
+# distributions on first run (GBs, cached afterwards).
+[group('test')]
+plugin-verify:
+  cd editors/intellij && mise exec -- gradle --quiet verifyPlugin
+
+# Launch a sandbox IDE with the plugin installed, for manual checks.
+[group('dev')]
+plugin-run:
+  cd editors/intellij && mise exec -- gradle runIde
+
+# ── REPL, continued ───────────────────────────────────────────────────────────
+
 # Drive `sproutd --lsp` with framed JSON-RPC and assert the protocol contract.
 # Covers what only a round-trip shows: Content-Length framing, diagnostic
 # line/column, and that every advertised capability actually answers. The pure
@@ -2905,7 +2935,14 @@ gate-audit:
   #     executable, so no cross-compiler substitutes. Off-Windows it exits 0 with a note, and a
   #     gate entry that is a guaranteed no-op for every non-Windows contributor is worse than no
   #     entry — it reads as coverage that is not there.
-  EXCLUDE="bootstrap-from-seed build-fmt-from-seed refresh-seed ci-fast-gates test-stdlib-core-stage1 test-stdlib-compiler-stage1 windows-tu-check windows-poll-selftest"
+  #   plugin-test / plugin-build — CI-only for the windows-tu-check reason: they need a JVM,
+  #     Gradle and a ~1GB IDE distribution (editors/intellij/mise.toml pins the first two, but
+  #     nothing installs them until you work on the plugin). A contributor who never touches
+  #     editors/intellij has no reason to hold that toolchain, and `gate` failing on its absence
+  #     would make the standard battery unrunnable for them. `just plugin-test` is the local
+  #     equivalent when you are working there. NOTE: lsp-smoke is deliberately NOT here — it
+  #     needs only sproutd, which this repo builds itself, so it belongs in `gate` proper.
+  EXCLUDE="bootstrap-from-seed build-fmt-from-seed refresh-seed ci-fast-gates test-stdlib-core-stage1 test-stdlib-compiler-stage1 windows-tu-check windows-poll-selftest plugin-test plugin-build"
   # Tasks gate runs from its BODY (not reachable via --show dependency expansion).
   BODY="gc-safety-check"
   expand() {  # print a recipe name and, recursively, its dependency recipe names
@@ -3023,7 +3060,7 @@ gate-audit:
   # column-0 line ends a just recipe body.)
   VERIFY_EXCLUDE=$(printf '%s\n' gate gate-quick check lint test-file fmt-check-file \
                                  lint-file check-iface-all test-stdlib-stage2 linux-smoke \
-                                 windows-tu-check windows-poll-selftest)
+                                 windows-tu-check windows-poll-selftest plugin-verify)
   #   gate, gate-quick — the batteries themselves; C already covers gate's membership, and
   #     gate-quick is the deliberately-partial local subset (its point is being faster than CI).
   #   check, lint, test-file, fmt-check-file, lint-file — single-FILE / interactive developer
@@ -3043,6 +3080,12 @@ gate-audit:
   #     mingw-w64 sysroot, which is why it is not in `gate` either (see EXCLUDE above).
   #   windows-poll-selftest — same story: the `windows` job runs the script directly, and this
   #     assertion only sees `just <recipe>` invocations.
+  #   plugin-verify — JetBrains' plugin verifier. Genuinely manual, and genuinely NOT dead: it
+  #     is the pre-release gate for editors/intellij, and it already caught a defect that
+  #     plugin-build and the lexer tests both accepted (a plugin ID the Marketplace rejects).
+  #     It stays out of CI because it downloads a full IDE distribution for every version in
+  #     its recommended range — several GB per run — which is disproportionate for a per-push
+  #     gate on a subproject most changes never touch. Run it before publishing.
   all_recipes=$(just --summary 2>/dev/null | tr ' ' '\n' | sort -u)
   if [[ -z "$all_recipes" ]]; then
     echo "gate-audit ✗ — could not enumerate recipes; assertion D would pass vacuously." >&2

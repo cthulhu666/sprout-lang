@@ -241,6 +241,46 @@ jobs:
         # line/column, document lifecycle, and capability honesty.
         run: just lsp-smoke
 
+  # JetBrains plugin (editors/intellij, docs/intellij-plugin-v0.md). Separate job because it is a
+  # Gradle/Kotlin build with a JVM toolchain that no other job needs — the toolchain is pinned in
+  # editors/intellij/mise.toml rather than the root config for exactly that reason.
+  #
+  # Runs `test` and `buildPlugin`, NOT `verifyPlugin`: the verifier downloads a full IDE
+  # distribution per version in its recommended range (several GB), which is too much for every
+  # push. It stays a pre-release gate — and it earns that status, having caught a real defect
+  # (a plugin ID the Marketplace rejects) that compiling and testing both accepted.
+  intellij-plugin:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install mise toolchain (just 1.39.0, from mise.toml)
+        uses: jdx/mise-action@v2
+
+      - name: Cache Gradle caches and the downloaded IDE distribution
+        # Compiling against the platform downloads ~1GB of IDE. Keyed on the build files so a
+        # platformVersion bump invalidates it rather than silently reusing the old IDE.
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+          key: gradle-${{ runner.os }}-${{ hashFiles('editors/intellij/**/*.gradle.kts', 'editors/intellij/gradle.properties') }}
+          restore-keys: gradle-${{ runner.os }}-
+
+      - name: Install the plugin's JVM toolchain
+        # mise refuses to read a config file it has not been told to trust, which is the right
+        # default and needs one explicit step in CI.
+        run: |
+          mise trust editors/intellij/mise.toml
+          cd editors/intellij && mise install
+
+      - name: Lexer tests
+        run: just plugin-test
+
+      - name: Build the plugin
+        run: just plugin-build
+
   # Windows port (docs/windows-port-v0.md). Pulled forward from milestone W5 to W1 deliberately:
   # W1 replaces the scheduler's context switch with Win32 Fibers, and the alternative local loop
   # — Wine — is the wrong instrument for it. Wine is an independent reimplementation of Win32,

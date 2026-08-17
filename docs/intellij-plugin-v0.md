@@ -104,7 +104,18 @@ set is 19 keywords plus literals and comments — small enough that a hand-writt
 not a meaningful duplication of the compiler's lexer, and the classification already has
 an authority to copy: `tree-sitter-sprout/queries/highlights.scm`.
 
-### 4.1 Known imprecision, accepted
+### 4.1 A flat PSI tree, and why there is one at all
+
+Rejecting a real parser leaves a gap: several editor features — the commenter, brace
+matching, extend-selection — reach for the PSI of the file they act on, and a language
+file type with no `ParserDefinition` has none.
+
+`SproutParserDefinition` supplies a **flat** tree: one root node over the lexer's tokens,
+with no structure above them. That is enough for all three features and honest about
+knowing nothing more. It is not a placeholder for a future real parser; per §4, a
+hand-maintained Kotlin parser is a non-goal, not a deferral.
+
+### 4.2 Known imprecision, accepted
 
 `module`, `import`, `as`, `alias`, `linear` and `record` are **not keywords** — they are
 absent from `lexer.sprout`'s `is_keyword` and are ordinary identifiers that the parser
@@ -126,6 +137,23 @@ and **unavailable in IntelliJ IDEA open-source builds and Android Studio**. Base
 Extension point `com.intellij.platform.lsp.serverSupportProvider`, renamed to
 `…integrationProvider` at 2026.1.4+ — too new to require, so v0 targets the older name.
 
+### 5.1.1 Toolchain, and a corrected assumption
+
+**Java 21, for the whole supported range.** The arc was initially planned around JDK 17;
+JetBrains' build-number-ranges table lists Java 21 as required from **2024.2** onward —
+that is, for every version this plugin targets, not only recent ones. Pinned in
+`editors/intellij/mise.toml` alongside Gradle 9.7, deliberately *not* in the root
+`mise.toml`: `jdx/mise-action` installs everything in `[tools]` for every CI job, and no
+other job needs a JVM.
+
+Build: IntelliJ Platform Gradle Plugin 2.x (`org.jetbrains.intellij.platform`).
+
+**The plugin ID may not contain the word `intellij`.** `dev.sprout.intellij` is rejected by
+the verifier (`TemplateWordInPluginId`) as a leftover from the project template, so the ID
+is `dev.sprout.lang`. The Kotlin package keeps the longer name. Worth recording because
+`buildPlugin` and the test suite both accepted the bad ID — only `verifyPlugin` caught it,
+which is the argument for keeping the verifier in the release path.
+
 ### 5.2 The one unverified assumption
 
 The platform documentation describes `<depends optional="true" config-file="…">` for
@@ -146,8 +174,8 @@ are unset. A silently dead server is the one outcome to avoid.
 
 | # | Scope | Touches Sprout? |
 |---|---|---|
-| M0 | Drive the server under test: smoke harness, unit tests, `just lsp-smoke`, CI job | capabilities only |
-| M1 | Plugin core: file type, lexer, highlighting, commenter, brace matcher | no |
+| M0 | **Done.** Drive the server under test: smoke harness, unit tests, `just lsp-smoke`, CI job | capabilities only |
+| M1 | **Done.** Plugin core: file type, lexer, highlighting, colour page, commenter, brace matcher | no |
 | M2 | Package roots reach the env typecheck path | yes (reseed) |
 | M3 | LSP client layer, settings, optional-depends verification | no |
 | M4 | Wire the five features, one change each; add a `ModuleCache` to `LspState` | yes (reseed) |
@@ -201,7 +229,24 @@ so it needs a full `just refresh-seed` and will move golden IR.
   document lifecycle (`didChange` re-checks, `didClose` clears), shutdown behaviour, and
   the §7 honesty invariant. Includes an explicit non-vacuity assertion, because "the
   server said nothing" would otherwise pass every grep-shaped check.
-- Plugin side: `./gradlew buildPlugin verifyPlugin`, plus a `runIde` sandbox check that the
-  plugin loads in an IDE **without** the LSP module.
+- `editors/intellij/src/test/kotlin/.../SproutLexerTest.kt` — 25 tests, fixture-free JUnit
+  (the lexer touches no platform service, so no IDE sandbox is needed and a failure can
+  only mean a lexing bug). Pins the restatement against the compiler's actual rules: the
+  19 keywords and no more, contextual words recognised only at line start, `0x`/`0b`
+  literals, `0x` with no digits degrading to `0` + `x` exactly as `scan_radix_end` does,
+  `1..5` as int-operator-int rather than a malformed float, an unterminated string stopping
+  at the newline, and interpolation depth so a record literal inside `${…}` does not end it.
+
+  The strongest test is the last: it lexes **real** sources — `prelude.sprout`,
+  `string.sprout`, `json.sprout`, `lexer.sprout`, `parser.sprout`, `lsp_driver.sprout` —
+  and asserts full buffer coverage with zero unclassifiable characters. Hand-written
+  fixtures only prove the lexer handles what its author thought of. It fails rather than
+  skips when a file is missing, since a silent skip would quietly retire it.
+- Plugin side: `just plugin-test`, `just plugin-build`, `just plugin-verify`. The verifier
+  reports **Compatible** against 2024.2, 2024.3, 2025.1 and 2025.2 — all IntelliJ IDEA
+  *Community*, which is the empirical form of §4's claim that the language layer needs no
+  commercial API.
+- Later, for the LSP layer: a `runIde` sandbox check that the plugin loads in an IDE
+  **without** the LSP module.
 - Acceptance: open `uncharted-suns` with its package root configured and confirm
   `loam.*`/`game.*` symbols resolve — the case that fails today (§1.1, `BACKLOG.md` §7.6).

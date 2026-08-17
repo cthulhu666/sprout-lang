@@ -1,0 +1,13 @@
+# JVM toolchain, scoped to this subtree.
+#
+# Deliberately NOT in the repo-root mise.toml: `jdx/mise-action` installs everything in
+# [tools] for every CI job, and no other job needs a JDK or Gradle. mise reads config
+# from the current directory upward, so these apply when working here and nowhere else.
+#
+# Java 21 because the platform requires it from 2024.2 onward — the whole supported
+# range, not just recent releases. (An earlier draft of the arc assumed 17; verified
+# against JetBrains' build-number-ranges table, which lists 21 for every version from
+# 2024.2 through 2026.1.)
+[tools]
+java = "temurin-21"
+gradle = "9.7.0"
