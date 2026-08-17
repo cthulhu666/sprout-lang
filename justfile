@@ -2814,10 +2814,18 @@ build-sproutd: bootstrap-from-seed
 plugin-test:
   cd editors/intellij && mise exec -- gradle --quiet test
 
-# Build the installable plugin zip into editors/intellij/build/distributions/.
+# Build the installable plugin zip and print where it landed — the path is the whole
+# point of running this, since installing means pasting it into an IDE's file dialog.
 [group('build')]
 plugin-build:
-  cd editors/intellij && mise exec -- gradle --quiet buildPlugin
+  #!/usr/bin/env bash
+  set -euo pipefail
+  cd editors/intellij
+  mise exec -- gradle --quiet buildPlugin
+  ZIP="$(ls -t build/distributions/*.zip | head -1)"
+  echo "==> Built $(pwd)/$ZIP"
+  echo "    Install: IDE → Settings → Plugins → gear icon → Install Plugin from Disk…"
+  echo "    Requires a JetBrains IDE version 2024.2 or newer."
 
 # JetBrains' own plugin verifier, across the recommended IDE range. Downloads IDE
 # distributions on first run (GBs, cached afterwards).
