@@ -199,28 +199,52 @@ These must be kept apart, because the verified Rust wording separates them:
   this as overflow: `1i64 << 63` truncates silently even in debug, in a language that
   panics on `*` overflow. Every fixed-width language surveyed behaves the same way.
 
-**Recommendation: couple `bit_shl`'s value-overflow to whatever `*` does**, and let it
-inherit the still-open decision in `docs/int-overflow-policy-decision.md` rather than
-answering it here.
+**Status: OPEN.** The two candidates are (i) couple `bit_shl`'s value-overflow to
+whatever `*` does, inheriting the still-open decision in
+`docs/int-overflow-policy-decision.md`; or (ii) exempt it — high bits are always
+discarded, and `bit_shl` joins `bit_shr_zf` in §5.1's width-dependent bucket.
 
-This is a **Sprout-original choice, not a prior-art-backed one**, and is presented as
-such. Its justification is the same forward-compatibility argument that document's §5
-item 2 makes for arithmetic: under a trapping policy, an overflowing program panics
-today and *succeeds* once `Int` is arbitrary-precision — a safe transition; under silent
-wrap, such a program *changes output* at the widening, which is a real break.
+The forward-compatibility argument for (i) is the one that document's §5 item 2 makes for
+arithmetic: under a trapping policy an overflowing program panics today and *succeeds*
+once `Int` is arbitrary-precision — a safe transition — whereas under silent truncation
+such a program *changes output* at the widening.
 
-The honest cost, if the overflow decision lands as Option A (trap): **`bit_shl(1, 63)` is
-`INT_MIN`, i.e. signed overflow, so it would panic** — and the lexer cannot write the
-`INT_MIN` literal to work around it either (same document, §5). Programs wanting the
-sign bit as a mask are not stuck, because the complement route stays exact:
+**Prior art, verified 2026-08-17, cuts against (i).** The survey is unanimous within each
+width camp:
+
+| Language | Traps `*` overflow? | Left shift with bits falling off the top |
+|---|---|---|
+| **Rust** | yes, panics in debug | **discards silently** — for shifts, overflow is *only* "the right-hand argument is greater than or equal to the number of bits in the type of the left-hand argument, or is negative". `1i64 << 63` never panics. |
+| **Swift** | yes — "by default Swift reports an error rather than allowing an invalid value to be created" | **discards silently** — "Any bits that are moved beyond the bounds of the integer's storage are discarded." |
+| **Zig** | yes (Illegal Behaviour; panics in Debug/ReleaseSafe) | plain `<<` carries no overflow qualification: "Moves all bits to the left, inserting new zeroes at the least-significant bit". Checking is in *separate* operations — `<<\|` (saturating), `@shlExact`, `@shlWithOverflow`. (Their exact semantics were not retrievable; only their existence and the `<<` wording are verified.) |
+| **Python** | n/a — arbitrary precision | never truncates, and the definition is the notable part: "A left shift by *n* bits is **defined as multiplication with `pow(2,n)`**". |
+| **Haskell** | n/a for `Integer` | `shiftL` is exact on `Integer` (unbounded — `bitSizeMaybe` is `Nothing`); truncates on fixed-width `Int`. |
+
+Two things follow. **Every** language surveyed *defines* left shift as multiplication by
+`2^n`, so option (i)'s specification wording is uncontroversial — the divergence is
+purely the overflow policy. And the three safety-first languages that **do** trap `*`
+overflow all **exempt** the shift, Zig going as far as adding three separate operations
+rather than making plain `<<` checked. Option (i) is therefore not merely
+"Sprout-original"; it is contradicted by the three closest precedents, and has to outweigh
+a unanimous survey rather than fill a gap in one.
+
+The counterweight those three languages do not carry: none of them intends to widen its
+integer type, while `docs/spec-v0.md` §8.4 says Sprout does.
+
+The honest cost of (i), if the overflow decision lands as Option A (trap):
+**`bit_shl(1, 63)` is `INT_MIN`, i.e. signed overflow, so it would panic** — and the
+lexer cannot write the `INT_MIN` literal to work around it either (same document, §5).
+Programs wanting the sign bit as a mask are not stuck under either candidate, because the
+complement route stays exact:
 
 ```sprout
 bits.bit_not(bits.bit_shr_zf(bits.bit_not(0), 1))   # 0x8000000000000000
 ```
 
-If the overflow decision lands as Option B (wrap), `bit_shl` truncates like every
-surveyed fixed-width language and this paragraph becomes moot. Either way `bit_shl` does
-not need its own policy.
+Note the two candidates already agree on today's *behaviour*: `*` currently wraps, so
+under (i) `bit_shl` truncates today exactly as it does under (ii). They diverge only if
+the deferred overflow decision lands on trapping — and in how the function is documented
+in the meantime, which is what §5.1's width partition turns on.
 
 ### 5.3 Shift-count domain is a soundness item, not a footnote
 
