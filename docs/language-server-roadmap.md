@@ -13,12 +13,37 @@ editor and IDE support.
 > in `stdlib/compiler/lsp_driver.sprout` on top of the existing self-hosted
 > compiler API (`stdlib/compiler.sprout`).
 >
-> Open follow-up work (still relevant):
+> **Status (2026-08-17): measured, and two claims below were wrong.** The server is now
+> driven by `scripts/lsp_smoke.sh` (`just lsp-smoke`) with real framed messages. Its pure
+> helpers were already unit-tested (`tests/stdlib/compiler/test_lsp_driver.spr`), but
+> nothing had ever exercised the **transport**: no test and no recipe ran `--lsp`, so the
+> protocol behaviour was known only by hand-driving the binary. What that run established:
 >
-> - precise diagnostic positions (current LSP reports full-range first-error only)
-> - real completion (currently a stub)
-> - workspace-wide symbol search, go-to-definition, rename
-> - incremental analysis / module dependency tracking
+> - **Diagnostic positions are already precise and per-diagnostic.** The old claim
+>   "full-range first-error only" was wrong. The actual defect is narrower: `diag_range`
+>   sets `end == start`, so every range is zero-width.
+> - **`compiler.type_of_in_source` exists** (`stdlib/compiler.sprout`), contradicting the
+>   in-file comment that said hover was blocked on it. Hover is unwired, not unblocked.
+> - `initialize` now advertises **only** `textDocumentSync`. It previously claimed
+>   `hoverProvider` and `completionProvider` while returning null and `[]` — an editor
+>   renders that as a broken feature rather than an absent one. Each capability goes back
+>   in the change that wires its handler, and the smoke gate asserts that implication.
+>
+> Open follow-up work:
+>
+> - widen diagnostic ranges past zero-width (a token's extent; full spans need §5.1)
+> - wire the five features whose compiler API already exists: formatting
+>   (`formatter.format_source`), hover (`type_of_in_source`), document symbols
+>   (`symbol_inventory_in_source`), definition (`symbol_locations_in_source`),
+>   completion (`complete_in_state`)
+> - hold a `ModuleCache` in `LspState` — `compile_source_with_cache` exists, but the LSP
+>   calls `compile_source_with_root`, so every keystroke re-checks cold
+> - package roots: the env path the LSP uses cannot resolve them at all, so a
+>   multi-root project reports every imported name as unknown
+> - workspace-wide symbol search, rename
+>
+> §2 and §11 below predate self-hosting and describe reusing the original host-language
+> implementation; that is historical context, not a plan.
 >
 > The high-level direction below remains valid.
 

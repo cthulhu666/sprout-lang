@@ -2802,6 +2802,14 @@ build-sproutd: bootstrap-from-seed
 # `sproutd --analysis-service <stdlib_root>` runs the identical
 # analysis_service_driver.run_service entry (see stdlib/compiler/sproutd_driver.sprout).
 
+# Drive `sproutd --lsp` with framed JSON-RPC and assert the protocol contract.
+# Covers what only a round-trip shows: Content-Length framing, diagnostic
+# line/column, and that every advertised capability actually answers. The pure
+# helpers are covered by tests/stdlib/compiler/test_lsp_driver.spr under `just test`.
+[group('test')]
+lsp-smoke: build-sproutd
+  bash scripts/lsp_smoke.sh
+
 # ── Aggregate Gates ───────────────────────────────────────────────────────────
 #
 # One-shot verification batteries so the pre-commit ritual is a single command
@@ -2829,7 +2837,7 @@ gate-quick: fmt-check test compile-examples-stage1 smoke-shapes bundle-smoke
 # advisory), so it runs in the body rather than as an arg-less dependency.
 # Full CI-parity battery (slow, ~15-25m); a green run means CI will not surprise you.
 [group('gate')]
-gate: fmt-check smoke-shapes bundle-smoke loud-fail-smoke diagnostic-stream-smoke argv-smoke trace-dispatch-smoke verify-dispatch-smoke div-by-zero-smoke stack-overflow-smoke flush-on-crash-smoke tco-runtime-smoke c-runtime-test b1-gate check-approved-builtins check-extern-signatures verify-bootstrap-fixed-point ir-golden-diff windows-ir-gate compile-examples-stage1 compile-bench run-example-canary test task-io-smoke http-client-binary-gate http-tls-gate test-stress
+gate: fmt-check smoke-shapes bundle-smoke loud-fail-smoke diagnostic-stream-smoke argv-smoke trace-dispatch-smoke verify-dispatch-smoke div-by-zero-smoke stack-overflow-smoke flush-on-crash-smoke tco-runtime-smoke c-runtime-test b1-gate check-approved-builtins check-extern-signatures verify-bootstrap-fixed-point ir-golden-diff windows-ir-gate compile-examples-stage1 compile-bench run-example-canary test lsp-smoke task-io-smoke http-client-binary-gate http-tls-gate test-stress
   #!/usr/bin/env bash
   set -euo pipefail
   echo "==> gate: gc-safety-check --strict..."
