@@ -32,6 +32,12 @@ Out of scope for v0:
 - Identifiers: `[a-zA-Z_][a-zA-Z0-9_]*`
 - Keywords: `fn`, `let`, `where`, `type`, `wrap`, `match`, `with`, `if`, `then`, `else`, `true`, `false`
 - Literals: integer, boolean, string, unit (`()`)
+- Integer literals are decimal (`255`), hexadecimal (`0xFF`), or binary (`0b1010`).
+  The `0x`/`0b` prefix and hex digits are case-insensitive, so `0XFF`, `0xff` and
+  `0xFF` are the same literal. The digit run after a prefix must be non-empty; `0x`
+  alone is not an integer literal. There is **no** digit separator — `1_000` is the
+  literal `1` followed by the identifier `_000`. All three forms denote the same
+  kind of value and are interchangeable in expressions and patterns.
 - Comments: line comments start with `#` and continue to end of line
 
 ## 3. Program Structure
@@ -1571,6 +1577,53 @@ higher-order function (`map(double_to_bits, xs)`) fails at link time.
 
 Status: experimental. Rationale, the prior-art survey, and the rejected
 alternatives are in `docs/double-bit-access-v0.md`.
+
+### 8.1.2 Bitwise integer operations (Experimental)
+
+`stdlib.bits` provides bitwise operations on `Int`. They are **functions, not
+operators**: `>>` and `<<` are function composition (§5), and `&`, `^` and `~` are
+not tokens of the language.
+
+```sprout
+bit_and(a: Int, b: Int) -> Int
+bit_or(a: Int, b: Int) -> Int
+bit_xor(a: Int, b: Int) -> Int
+bit_not(a: Int) -> Int
+bit_shl(x: Int, n: Int) -> Int      # left shift
+bit_shr(x: Int, n: Int) -> Int      # arithmetic right shift (sign-filling)
+bit_shr_zf(x: Int, n: Int) -> Int   # logical right shift (zero-fill)
+```
+
+Like `print`, `to_double` and the two functions above, these are compiler
+intrinsics: each lowers to a single machine instruction, and none **can be used as
+a first-class value** (`list_fold(bit_xor, 0, xs)` fails at link time). Being
+`extern` declarations they are also **never module-qualified** (§"Externs are
+outside the module system") — `import stdlib.bits` puts them in the build and they
+are then called by bare name.
+
+`bit_not(x)` is `-x - 1`: it flips every bit, so `bit_not(0)` is `-1`. It is the
+integer complement, not the boolean `!`.
+
+**Shift count.** A count of `0..63` shifts as expected. A count `>= 64` saturates to
+the limit of the mathematical definition — `0` for `bit_shl` and `bit_shr_zf`, and
+all sign bits (`0` or `-1`) for `bit_shr`. A **negative** count is an error: it
+panics at run time, and a negative *literal* count is rejected at compile time.
+
+**Shifted-out bits are discarded, and that is not an error.** `bit_shl` is `x * 2^n`
+within a 64-bit window, so `bit_shl(1, 63)` is `-9223372036854775808` and
+`bit_shl(2, 63)` is `0`, both total. This is deliberately independent of any
+overflow policy for `*` (§6.5, §8.4).
+
+**Width.** `bit_and`, `bit_or`, `bit_xor`, `bit_not` and `bit_shr` are defined
+without reference to a width and are unaffected should `Int` become
+arbitrary-precision as §8.4 intends. `bit_shl` and `bit_shr_zf` are defined on the
+64-bit two's-complement representation and would have to be respecified.
+
+`rotate`, `popcount` and similar are **not** provided: they are ordinary functions
+composed from the above.
+
+Status: experimental. Rationale, the prior-art survey and the rejected
+operator spellings are in `docs/bitwise-int-ops-v0.md`.
 
 ### 8.2 Partiality
 

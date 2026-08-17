@@ -65,13 +65,13 @@ packed type HeapHeader = { kind: U8, color: U2, gc_bits: U4, aux: U50 }
   are the entry ticket, and the deferred OCaml-style tagging project
   needs the same machinery at codegen level — one design effort, two
   consumers.
-- **Update 2026-08-17: the bitwise half of that entry ticket is
-  designed** — `docs/bitwise-int-ops-v0.md` (proposed, not implemented).
-  It splits the two: bitwise-on-`Int` needs no representation decision
-  and lands as seven intrinsics in a new `stdlib.bits`, while sized
-  unsigned ints stay open. Note it names the field-extract shape here as
-  a motivating consumer, so a `packed type` design can assume the
-  primitives exist.
+- **Update 2026-08-17: the bitwise half of that entry ticket has
+  LANDED** — seven intrinsics in `stdlib.bits`, plus `0x`/`0b` literals
+  (`docs/bitwise-int-ops-v0.md`). It splits the two: bitwise-on-`Int`
+  needed no representation decision, while sized unsigned ints stay open.
+  A `packed type` design can now assume the primitives exist, and the
+  field-extract shape sketched above is exercised as a test case
+  (`tests/stdlib/test_bits.spr`, the kind/colour/aux extraction).
 
 **Why it matters strategically:** this + finding 1's observation are
 the evidence pair for eventually moving runtime logic into Sprout,
