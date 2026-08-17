@@ -281,6 +281,12 @@ jobs:
       - name: Build the plugin
         run: just plugin-build
 
+      - name: Optional-LSP split holds (plugin loads without the LSP module)
+        # The one property CI can check that the plugin verifier cannot: the verifier
+        # reports the missing LSP package against Community whether the split is intact or
+        # broken, so it is useless as a gate here. This reads the shipped bytecode instead.
+        run: just plugin-split-check
+
   # Windows port (docs/windows-port-v0.md). Pulled forward from milestone W5 to W1 deliberately:
   # W1 replaces the scheduler's context switch with Win32 Fibers, and the alternative local loop
   # — Wine — is the wrong instrument for it. Wine is an independent reimplementation of Win32,

@@ -68,8 +68,12 @@ arc: the plugin is the visible deliverable, but the leverage is server-side.
   local checkout. Packaging is a separate problem.
 - **Precise multi-token diagnostic spans**, semantic tokens, rename, find-references,
   inlay hints. All want the span refactor in `language-server-roadmap.md` §5.1 first.
-- **Community-edition LSP support** — see §5.2 for why, and `BACKLOG.md` §7.6 for the
-  LSP4IJ follow-up that would close it.
+- **Community-edition LSP support** — the platform's LSP API is absent there, so the
+  language layer works and diagnostics do not. `BACKLOG.md` §7.6 carries the LSP4IJ
+  follow-up that would close it.
+- **Go-to-definition for locals, parameters and constructors.** The server's
+  `symbol_locations_in_source` covers top-level declarations only, and adding scope
+  tracking is a separate piece of work from wiring the request.
 
 ## 3. Prior art
 
@@ -154,14 +158,40 @@ is `dev.sprout.lang`. The Kotlin package keeps the longer name. Worth recording 
 `buildPlugin` and the test suite both accepted the bad ID — only `verifyPlugin` caught it,
 which is the argument for keeping the verifier in the release path.
 
-### 5.2 The one unverified assumption
+### 5.2 The optional-module split — RESOLVED, and the check is not the obvious one
 
 The platform documentation describes `<depends optional="true" config-file="…">` for
 *plugin* dependencies and does not state whether it works for platform modules such as
-`com.intellij.modules.lsp`. The design assumes it does. **This must be checked in a
-sandbox before the LSP layer is considered done**; if it does not hold, the fallback is
-two artifacts (core plugin plus LSP add-on) from the same Gradle project — a build-file
-change, not a redesign.
+`com.intellij.modules.lsp`. It does: `plugin.xml` carries the optional dependency, every
+LSP extension is registered in `sprout-lsp.xml`, and the plugin builds and verifies as one
+artifact. The two-artifact fallback is not needed.
+
+**The interesting part is how that is enforced, because the obvious check does not work.**
+Running the plugin verifier against IntelliJ IDEA Community reports:
+
+```
+Package 'com.intellij.platform.lsp' is not found along with its 4 classes.
+```
+
+and fails the build. That problem is *expected and harmless* — the referencing classes are
+registered only in `sprout-lsp.xml`, which an IDE without the module never loads, so they
+are never classloaded. But the verifier cannot distinguish "safely absent" from "will throw
+`NoSuchClassError`"; its own wording is "may be caused by absence of optional dependency",
+which hands the judgement back to the reader. It is therefore red whether the split is
+intact or broken — useless as a gate, and corrosive as a habit, because a permanently red
+check trains people to ignore it.
+
+The real discriminator is not *whether* the package is referenced but *from where*, and
+that is decidable from the bytecode. `scripts/plugin_lsp_split_check.sh`
+(`just plugin-split-check`, wired into CI) asserts that every class referencing
+`com.intellij.platform.lsp` lives under `dev.sprout.intellij.lsp`. It needs no IDE
+download, and it refuses to pass vacuously in either direction — no classes found, or *no*
+class referencing the LSP API, both fail loudly rather than reporting a reassuring OK.
+
+RED-verified by adding an LSP reference to `SproutLanguage` and watching it name that class.
+
+Consequently `pluginVerification` targets commercial IDEs only. That is not a gap in
+coverage; it is the same question asked by an instrument that can answer it.
 
 ### 5.3 Server discovery
 
@@ -177,7 +207,7 @@ are unset. A silently dead server is the one outcome to avoid.
 | M0 | **Done.** Drive the server under test: smoke harness, unit tests, `just lsp-smoke`, CI job | capabilities only |
 | M1 | **Done.** Plugin core: file type, lexer, highlighting, colour page, commenter, brace matcher | no |
 | M2 | Package roots reach the env typecheck path | yes (reseed) |
-| M3 | LSP client layer, settings, optional-depends verification | no |
+| M3 | **Done.** LSP client layer, settings + toolchain detection, split gate | no |
 | M4 | Wire the five features, one change each; add a `ModuleCache` to `LspState` | yes (reseed) |
 | M5 | Diagnostic ranges wider than zero | yes (reseed) |
 
