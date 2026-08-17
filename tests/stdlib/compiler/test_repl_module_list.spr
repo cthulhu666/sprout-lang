@@ -1,0 +1,97 @@
+module main
+
+import stdlib.test (TestState, new_state, assert_true, summary)
+import stdlib.repl as repl
+import stdlib.env as env
+import stdlib.process as process
+import stdlib.string as string
+import stdlib.collections (Vec)
+
+# THE REPL'S MODULE-NAME COMPLETION LIST MUST NOT ROT.
+#
+# `repl.stdlib_module_completion_names` is a literal, because the language has no
+# directory-listing primitive and shelling out per keypress would cost a subprocess
+# and silently offer nothing on the Windows port. A literal that nothing checks,
+# though, goes stale invisibly: it was missing 15 of 30 modules — `json`, `time`,
+# `fs`, `rng`, `regex`, `task`, `chan` and every module added since it was written,
+# `bits` included.
+#
+# So the staleness is caught here instead, at a place where a subprocess is free.
+# This is the whole reason the literal is acceptable.
+
+fn stdlib_root() -> String !{IO} =
+  match env.get("SPROUT_STDLIB_ROOT") with
+  | Just root -> root
+  | Nothing -> "stdlib"
+
+# Module leaves on disk, minus `prelude` (always in scope, never imported by name).
+# `sh -c` because proc_run is argv-based and does not expand the glob itself.
+fn modules_on_disk(root: String) -> List String !{IO} =
+  do
+    result <- process.proc_run(["sh", "-c", "ls " ++ root ++ "/*.sprout"])
+    leaves_of_lines(string.string_lines(process.proc_stdout_or(result, "")), 0, root ++ "/", Nil)
+
+fn leaves_of_lines(lines: Vec String, index: Int, prefix: String, acc: List String) -> List String =
+  match vec_get(index, lines) with
+  | Nothing -> list_reverse(acc)
+  | Just line ->
+      let leaf = leaf_of_path(string.trim(line), prefix)
+      in if leaf == "" || leaf == "prelude" then leaves_of_lines(lines, index + 1, prefix, acc)
+         else leaves_of_lines(lines, index + 1, prefix, Cons(leaf, acc))
+
+fn leaf_of_path(path: String, prefix: String) -> String =
+  if string.starts_with(path, prefix)
+  then strip_suffix(string.slice(path, string.length(prefix),
+    string.length(path) - string.length(prefix)), ".sprout")
+  else ""
+
+fn strip_suffix(raw: String, suffix: String) -> String =
+  if string.ends_with(raw, suffix)
+  then string.slice(raw, 0, string.length(raw) - string.length(suffix))
+  else raw
+
+fn offered(name: String, names: Vec String) -> Bool = vec_has(name, names, 0)
+
+fn vec_has(name: String, names: Vec String, index: Int) -> Bool =
+  match vec_get(index, names) with
+  | Nothing -> false
+  | Just candidate -> if candidate == name then true else vec_has(name, names, index + 1)
+
+fn missing_from_list(disk: List String, offered_names: Vec String) -> List String =
+  match disk with
+  | Nil -> Nil
+  | Cons leaf rest ->
+      if offered(leaf, offered_names) then missing_from_list(rest, offered_names)
+      else Cons(leaf, missing_from_list(rest, offered_names))
+
+fn report_missing(state: TestState, missing: List String) -> Unit !{IO} =
+  match missing with
+  | Nil -> ()
+  | Cons name rest ->
+      do
+        assert_true(state, "module `" ++ name ++ "` is offered for completion", false)
+        report_missing(state, rest)
+
+fn main() -> Unit !{IO} =
+  do
+    state <- new_state()
+    root <- stdlib_root()
+    disk <- modules_on_disk(root)
+    let offered_names = repl.stdlib_module_completion_names()
+
+    # If `ls` produced nothing the check is vacuous, and a vacuous pass is the trap
+    # this file exists to avoid — so say so out loud.
+    assert_true(state, "the module enumeration found something to check",
+      list_length(disk) > 10)
+
+    assert_true(state, "every stdlib module on disk is offered for completion",
+      list_length(missing_from_list(disk, offered_names)) == 0)
+    # Name each straggler, so a failure says WHICH module to add.
+    report_missing(state, missing_from_list(disk, offered_names))
+
+    # And a spot check in the other direction: the list must not invent modules.
+    assert_true(state, "`bits` is offered", offered("bits", offered_names))
+    assert_true(state, "a module that does not exist is not offered",
+      offered("no_such_module", offered_names) == false)
+
+    summary(state)

@@ -218,18 +218,6 @@ fn is_ident_char(ch: Char) -> Bool =
   (ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z') ||
   (ch >= '0' && ch <= '9') || ch == '_'
 
-fn read_ident_chars(s: String, bytes: Bytes, b: Int, acc: String) -> (String, Int) =
-  if b >= str_byte_len(s) then (acc, b)
-  else
-    match source.decode_char_at(bytes, b) with
-    | Nothing -> (acc, b)
-    | Just (ch, _) ->
-        if is_ident_char(ch) then read_ident_chars(s, bytes, b + 1, str_concat(acc, char_to_string(ch)))
-        else (acc, b)
-
-fn read_ident_at(s: String, bytes: Bytes, b: Int) -> (String, Int) =
-  read_ident_chars(s, bytes, skip_spaces_in(s, bytes, b), "")
-
 # Read a dotted identifier like "stdlib.compiler.ast".
 fn read_dotted_ident_chars(s: String, bytes: Bytes, b: Int, acc: String) -> (String, Int) =
   if b >= str_byte_len(s) then (acc, b)
@@ -250,86 +238,45 @@ fn read_dotted_ident_chars(s: String, bytes: Bytes, b: Int, acc: String) -> (Str
 fn read_dotted_ident_at(s: String, bytes: Bytes, b: Int) -> (String, Int) =
   read_dotted_ident_chars(s, bytes, skip_spaces_in(s, bytes, b), "")
 
-fn has_ctor_export(s: String, bytes: Bytes, b: Int) -> Bool =
-  str_starts_with_at_byte(s, skip_spaces_in(s, bytes, b), "(..)")
-
-# Skip a run of space-separated type-parameter idents (e.g. the `a` in `type Foo a (..)`),
-# returning the first non-ident position. Without this, has_ctor_export looks for `(..)`
-# immediately after the type NAME and misses it on a GENERIC type, so a generic ADT's
-# constructors are never exported cross-module. read_ident_at skips leading spaces and returns
-# ("", pos) at the first non-ident char (the `(` of `(..)`, or `=`).
-fn skip_type_params(s: String, bytes: Bytes, b: Int) -> Int =
-  match read_ident_at(s, bytes, b) with
-  | ("", pos) -> pos
-  | (_, b2) -> skip_type_params(s, bytes, b2)
-
 # Returns (module_name, exported_names, ctor_export_type_names).
-# Scans all lines for `module`, `export fn`, `export type`, `export let`, `export class`.
+#
+# The export set and the `(..)` constructor-export markers come from
+# `parser.scan_module_surface`, the single definition of a module's surface
+# (docs/module-surface-authority-v0.md §6). They used to be recovered here by
+# matching line prefixes, which is how this function came to disagree with the
+# REPL's own scanner about what a module publishes — and why the prefix order
+# `export type linear ` before `export type ` was load-bearing (the generic prefix
+# otherwise read the contextual marker word `linear` as the type's name; regression
+# tests/stdlib/test_linear_cross_module.spr `consume_annotated`). A token scan
+# cannot have that hazard.
+#
+# Only the module name is still read from the text, because headers are stripped
+# before tokenizing and so `module x.y` never reaches the token stream.
 export fn scan_source_info(src: String) -> (String, List String, List String) =
-  scan_lines(src, bytes, 0, "", Nil, Nil)
+  match lexer.tokenize(source.strip_headers(src)) with
+  # A source that does not lex has no surface to report. Callers that need the
+  # error raise it from their own tokenize (process_wi_finalize); the rest are
+  # diagnostic paths where an empty surface is the honest answer.
+  | Err _ -> (scan_module_name(src), Nil, Nil)
+  | Ok tokens -> surface_info(scan_module_name(src), parser.scan_module_surface(tokens))
+
+fn surface_info(mod_name: String, surface: parser.ModuleSurface) -> (String, List String, List String) =
+  (mod_name, parser.surface_exported(surface), parser.surface_ctor_types(surface))
+
+# The `module x.y` header, or "" when there is none. Takes the FIRST such line: a
+# module header is the first declaration in a file, and the line scan this replaced
+# took the last, which would have preferred a line inside a multi-line string
+# literal over the real header.
+export fn scan_module_name(src: String) -> String =
+  scan_module_name_at(src, bytes, 0)
   where bytes = bytes_from_utf8(src)
 
-fn scan_lines(src: String, bytes: Bytes, i: Int, mod_name: String, exported: List String, ctor_types: List String) -> (String, List String, List String) =
-  if i >= str_byte_len(src) then (mod_name, list_reverse(exported), list_reverse(ctor_types))
-  else
-    match process_line(src, bytes, i, nl, mod_name, exported, ctor_types) with
-    | (new_mod, new_exp, new_ctor) ->
-        scan_lines(src, bytes, nl + 1, new_mod, new_exp, new_ctor)
-  where nl = find_newline(src, bytes, i)
-
-fn process_line(src: String, bytes: Bytes, i: Int, nl: Int, mod_name: String, exported: List String, ctor_types: List String) -> (String, List String, List String) =
-  if str_starts_with_at_byte(src, i, "module ") then
+fn scan_module_name_at(src: String, bytes: Bytes, i: Int) -> String =
+  if i >= str_byte_len(src) then ""
+  else if str_starts_with_at_byte(src, i, "module ") then
     match read_dotted_ident_at(src, bytes, i + 7) with
-    | (name, _) -> (name, exported, ctor_types)
-  else if str_starts_with_at_byte(src, i, "export type alias ") then
-    match read_ident_at(src, bytes, i + 18) with
-    | ("", _) -> (mod_name, exported, ctor_types)
-    | (name, _) -> (mod_name, Cons(name, exported), ctor_types)
-  # `export type linear Foo = ...` must be checked BEFORE the plain
-  # `export type ` prefix, exactly as `export type alias ` is. Without this the
-  # generic branch reads the contextual marker word `linear` as the type's name,
-  # so the module exports a phantom type called `linear` and never exports `Foo`
-  # at all — which silently disables qualification of every annotation naming it
-  # (`Type mismatch: mod.Foo vs Foo`) and misroutes its constructor exports.
-  # Regression: tests/stdlib/test_linear_cross_module.spr `consume_annotated`.
-  else if str_starts_with_at_byte(src, i, "export type linear ") then
-    match read_ident_at(src, bytes, i + 19) with
-    | ("", _) -> (mod_name, exported, ctor_types)
-    | (name, i2) ->
-        if has_ctor_export(src, bytes, skip_type_params(src, bytes, i2)) then
-          (mod_name, Cons(name, exported), Cons(name, ctor_types))
-        else
-          (mod_name, Cons(name, exported), ctor_types)
-  else if str_starts_with_at_byte(src, i, "export type ") then
-    match read_ident_at(src, bytes, i + 12) with
-    | ("", _) -> (mod_name, exported, ctor_types)
-    | (name, i2) ->
-        # Skip any type parameters before looking for `(..)` so a GENERIC type
-        # (`export type Foo a (..)`) exports its constructors like a non-generic one does.
-        if has_ctor_export(src, bytes, skip_type_params(src, bytes, i2)) then
-          (mod_name, Cons(name, exported), Cons(name, ctor_types))
-        else
-          (mod_name, Cons(name, exported), ctor_types)
-  else if str_starts_with_at_byte(src, i, "export fn ") then
-    match read_ident_at(src, bytes, i + 10) with
-    | ("", _) -> (mod_name, exported, ctor_types)
-    | (name, _) -> (mod_name, Cons(name, exported), ctor_types)
-  else if str_starts_with_at_byte(src, i, "export let ") then
-    match read_ident_at(src, bytes, i + 11) with
-    | ("", _) -> (mod_name, exported, ctor_types)
-    | (name, _) -> (mod_name, Cons(name, exported), ctor_types)
-  else if str_starts_with_at_byte(src, i, "export class ") then
-    match read_ident_at(src, bytes, i + 13) with
-    | ("", _) -> (mod_name, exported, ctor_types)
-    | (name, _) -> (mod_name, Cons(name, exported), ctor_types)
-  # export wrap Foo = T — exports the type AND its synthetic constructor
-  # (which shares the type's name), so add to both exported and ctor_types.
-  else if str_starts_with_at_byte(src, i, "export wrap ") then
-    match read_ident_at(src, bytes, i + 12) with
-    | ("", _) -> (mod_name, exported, ctor_types)
-    | (name, _) -> (mod_name, Cons(name, exported), Cons(name, ctor_types))
-  else
-    (mod_name, exported, ctor_types)
+    | (name, _) -> name
+  else scan_module_name_at(src, bytes, find_newline(src, bytes, i) + 1)
 
 # ---------------------------------------------------------------------------
 # Header stripping (strips module + import lines before parsing)
@@ -466,27 +413,30 @@ fn process_wi_finalize(
   ordered: Ref (List ParsedModule)
 ) -> List String !{IO} =
   do
-    match scan_source_info(src) with
-    | (mod_name, exported_names, ctor_type_names) ->
-        match lexer.tokenize(source.strip_headers(src)) with
-        | Err e ->
-            match e with
-            | token.TokenizeError msg _ -> Cons("Lex error in " ++ path ++ ": " ++ msg, Nil)
-        | Ok tokens ->
-            match parser.parse_program(tokens) with
-              | Err e ->
-                  match e with
-                  | parser.ParseError msg _ -> Cons("Parse error in " ++ path ++ ": " ++ msg, Nil)
-              | Ok prog ->
-                  do
-                    match prog with
-                    | ast.Program decls _ ->
-                        do
-                          ordered_now <- ref_read(ordered)
-                          ref_write(ordered, Cons (ParsedModule(mod_name, path, specs, exported_names, ctor_type_names, decls), ordered_now))
-                          seen_now <- ref_read(seen)
-                          ref_write(seen, Cons(path, seen_now))
-                          Nil
+    # One tokenize serves both the module surface and the parse. Calling
+    # scan_source_info here would lex the source a second time, and lexing it twice
+    # is how the surface could differ from the AST in the first place.
+    match lexer.tokenize(source.strip_headers(src)) with
+    | Err e ->
+        match e with
+        | token.TokenizeError msg _ -> Cons("Lex error in " ++ path ++ ": " ++ msg, Nil)
+    | Ok tokens ->
+        match parser.parse_program(tokens) with
+          | Err e ->
+              match e with
+              | parser.ParseError msg _ -> Cons("Parse error in " ++ path ++ ": " ++ msg, Nil)
+          | Ok prog ->
+              do
+                match prog with
+                | ast.Program decls _ ->
+                    do
+                      let surface = parser.scan_module_surface(tokens)
+                      ordered_now <- ref_read(ordered)
+                      ref_write(ordered, Cons (ParsedModule(scan_module_name(src), path, specs,
+                        parser.surface_exported(surface), parser.surface_ctor_types(surface), decls), ordered_now))
+                      seen_now <- ref_read(seen)
+                      ref_write(seen, Cons(path, seen_now))
+                      Nil
 
 fn visit_module_iter(
   entry_path: String,

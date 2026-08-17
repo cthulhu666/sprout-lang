@@ -1,0 +1,147 @@
+module main
+
+import stdlib.test (TestState, new_state, assert_true, summary)
+import stdlib.compiler.parser as parser
+import stdlib.compiler.lexer as lexer
+import stdlib.compiler.bundler as bundler
+import stdlib.compiler.token as token
+import stdlib.collections (Vec)
+
+# ONE AUTHORITY FOR "WHAT DOES THIS MODULE PUBLISH".
+#
+# `parser.skip_export` discards the `export` keyword before it reaches the AST, and
+# `parser.skip_visibility` does the same for the `(..)` constructor-export marker.
+# Both facts were therefore recovered downstream by scanning source TEXT, in two
+# independent line scanners:
+#
+#   bundler.scan_source_info    — matches line prefixes with byte offsets
+#   repl.gather_exported_names  — accepts lines starting with "export "
+#
+# The second is why NO extern is ever offered as a REPL completion, from any module
+# including the prelude: an `extern fn` line does not start with `export`, and per
+# spec-v0 §"Externs are outside the module system" writing `export` on one is a
+# parsed-and-discarded no-op, so nobody does. `print`, `panic` and `int_to_string`
+# were all missing from completion.
+#
+# The first carries a scar from the same fragility, recorded in its own comments:
+# `export type linear Foo` had to be tested BEFORE `export type `, because the
+# generic prefix otherwise reads the contextual marker word `linear` as the type's
+# name. That ordering hazard cannot exist in a token scan.
+#
+# `parser.scan_module_surface` is now the one definition, and it decides by CALLING
+# the parser's own predicates (`is_alias_type_decl`, `skip_linear_marker`,
+# `skip_visibility`) rather than re-deriving them from text.
+#
+# Nothing here is a new language rule: every assertion is what the file compiler
+# already does. See docs/module-surface-authority-v0.md §6.
+
+# A source exercising every declaration form that can carry `export`, plus the
+# forms that must NOT end up in the export set.
+fn sample_source() -> String =
+  "module app.sample\n"
+    ++ "\n"
+    ++ "import stdlib.bytes (length)\n"
+    ++ "\n"
+    ++ "export fn shown(a: Int) -> Int = a\n"
+    ++ "\n"
+    ++ "fn hidden(a: Int) -> Int = a\n"
+    ++ "\n"
+    ++ "export let shown_let = 1\n"
+    ++ "\n"
+    ++ "export class Shownable a\n"
+    ++ "  fn describe(x: a) -> String\n"
+    ++ "\n"
+    ++ "export type Opened (..) =\n"
+    ++ "  | OpenedOne\n"
+    ++ "  | OpenedTwo Int\n"
+    ++ "\n"
+    ++ "export type Closed =\n"
+    ++ "  | ClosedOne\n"
+    ++ "\n"
+    ++ "type Private =\n"
+    ++ "  | PrivateOne\n"
+    ++ "\n"
+    ++ "export type alias Aliased = Int\n"
+    ++ "\n"
+    ++ "export type linear Owned (..) =\n"
+    ++ "  | OwnedOne Int\n"
+    ++ "\n"
+    ++ "export wrap Wrapped = Int\n"
+    ++ "\n"
+    ++ "extern fn plain_extern(a: Int) -> Int\n"
+    ++ "\n"
+    ++ "export extern fn exported_extern(a: Int) -> Int\n"
+
+fn surface_of(src: String) -> parser.ModuleSurface =
+  match lexer.tokenize(src) with
+  | Err _ -> panic("tokenize failed for the sample source")
+  | Ok toks -> parser.scan_module_surface(toks)
+
+fn has(name: String, names: List String) -> Bool = list_member(name, names)
+
+fn main() -> Unit !{IO} =
+  do
+    state <- new_state()
+    let surface = surface_of(sample_source())
+    let exported = parser.surface_exported(surface)
+    let ctor_types = parser.surface_ctor_types(surface)
+    let globals = parser.surface_globals(surface)
+
+    # --- the export set ---
+    assert_true(state, "export fn is exported", has("shown", exported))
+    assert_true(state, "a non-exported fn is not", has("hidden", exported) == false)
+    assert_true(state, "export let is exported", has("shown_let", exported))
+    assert_true(state, "export class is exported", has("Shownable", exported))
+    assert_true(state, "export type is exported", has("Opened", exported))
+    assert_true(state, "a non-exported type is not", has("Private", exported) == false)
+    assert_true(state, "export type alias is exported", has("Aliased", exported))
+    assert_true(state, "export wrap is exported", has("Wrapped", exported))
+
+    # The scar case: a contextual `linear` marker must not be mistaken for the name.
+    assert_true(state, "export type linear exports the TYPE, not the word linear",
+      has("Owned", exported))
+    assert_true(state, "the marker word `linear` is never itself exported",
+      has("linear", exported) == false)
+
+    # --- constructor exports, i.e. the `(..)` marker ---
+    assert_true(state, "(..) marks the type as exporting its constructors",
+      has("Opened", ctor_types))
+    assert_true(state, "a type without (..) does not export constructors",
+      has("Closed", ctor_types) == false)
+    assert_true(state, "(..) is found after a linear marker too", has("Owned", ctor_types))
+    assert_true(state, "wrap exports its synthetic constructor", has("Wrapped", ctor_types))
+    assert_true(state, "an alias exports no constructors", has("Aliased", ctor_types) == false)
+
+    # --- globals: the reason this scan exists ---
+    # An extern is ast.ScopeGlobal. It is NOT in the export set (writing `export`
+    # on one is a no-op) but it IS part of the module's surface, which is what
+    # makes it offerable as a completion.
+    assert_true(state, "a plain extern is a global", has("plain_extern", globals))
+    assert_true(state, "an extern written `export extern` is also a global",
+      has("exported_extern", globals))
+    assert_true(state, "an extern is NOT in the export set",
+      has("plain_extern", exported) == false)
+    assert_true(state, "`export extern` does not put the name in the export set",
+      has("exported_extern", exported) == false)
+
+    # --- equivalence with the text scanner being replaced ---
+    # The token scan must not silently change what the bundler sees; this is what
+    # makes swapping the two safe rather than hopeful.
+    match bundler.scan_source_info(sample_source()) with
+    | (_, text_exported, text_ctor_types) ->
+        do
+          assert_true(state, "token scan agrees with the text scanner on exports",
+            same_names(exported, text_exported))
+          assert_true(state, "token scan agrees with the text scanner on ctor exports",
+            same_names(ctor_types, text_ctor_types))
+
+    summary(state)
+
+# Set equality by mutual membership — the two scanners need not agree on order.
+fn same_names(a: List String, b: List String) -> Bool =
+  all_in(a, b) && all_in(b, a)
+
+fn all_in(xs: List String, ys: List String) -> Bool =
+  match xs with
+  | Nil -> true
+  | Cons x rest -> if list_member(x, ys) then all_in(rest, ys) else false

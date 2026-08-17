@@ -2998,21 +2998,32 @@ op-classification already in place.
   fail with every failure on the env path and both controls green). Design:
   `docs/module-surface-authority-v0.md`. Note `bits.bit_or` now correctly FAILS in `:type` too — that
   spelling never compiled.
-- [ ] `P1` **One export authority: retire both raw-text scanners** (2026-08-17). `parser.skip_export`
-  discards the `export` keyword before it reaches the AST, so `bundler.scan_source_info` and
-  `repl.gather_exported_names` each recover the publish-set by scanning source *text*. Consequence
-  users see: `repl.gather_exported_names` only accepts lines starting with `export `, an `extern fn`
-  line never does (and per spec `export` on an extern is parsed and discarded, so nobody writes it) —
-  therefore **no extern is ever a REPL completion candidate, from any module, including the prelude**:
-  `print`, `panic`, `int_to_string` are all missing. Fix: one token-derived export scan in the parser
-  feeding both. Recommended over a real `export` field on `ast.Decl` — the field is the better model
-  but costs a 244-site constructor sweep including `tests/` and `iface_codec` both directions, for no
-  property the token scan lacks, and does not block adding it later. Rides along:
-  `repl.stdlib_module_completion_names` is a hardcoded string missing 15 modules, and there is no
-  directory-listing primitive anywhere in the language (`process.proc_run(["ls", root])` composes
-  without a new builtin). Also convert `analysis_service_driver.collect_decl_names` to the authority
-  in the same change, since it already edits that surface.
-  Design: `docs/module-surface-authority-v0.md` §6.
+- [x] `P1` **DONE 2026-08-17. One export authority: both raw-text scanners retired.**
+  `parser.skip_export` discarded the `export` keyword and `skip_visibility` the `(..)` marker before
+  either reached the AST, so `bundler.scan_source_info` and `repl.gather_exported_names` each
+  recovered the publish-set by scanning source *text* — and the REPL's copy accepted only lines
+  starting with `export `, which an `extern fn` line never is (and `export` on an extern is a
+  parsed-and-discarded no-op, so nobody writes one). **No extern was ever a REPL completion
+  candidate, from any module including the prelude**: `print`, `panic`, `int_to_string` all missing,
+  and `stdlib.bits` offered nothing at all. **Resolution:** `parser.scan_module_surface` — a token
+  scan that decides by calling the parser's own predicates (`is_alias_type_decl`,
+  `skip_linear_marker`, `skip_visibility`), so the `export type linear ` / `export type ` prefix
+  ordering hazard the text scanner documented cannot exist. `bundler.scan_source_info` delegates to
+  it, `repl.gather_exported_names` is deleted, `analysis_service_driver.collect_decl_names` now
+  derives its extern exclusion from `ast.decl_value_scopes`, and `process_wi_finalize` stopped lexing
+  each module twice. REPL completion parses now (~81ms for the prelude vs ~38ms to tokenize; TAB-only,
+  measured before deciding). The `export` field on `ast.Decl` was rejected: better long-term model,
+  244-site sweep, no property the token scan lacks — and not blocked by this. Tests:
+  `test_module_surface_scan.spr` (21, incl. equivalence with the scanner it replaces),
+  `test_repl_completion_surface.spr` (14), `test_repl_module_list.spr` (4, RED-verified by deleting a
+  module from the list). Gotcha found and pinned: gating constructor completions on `(..)` silently
+  drops `Just`/`Nothing`/`Ok`/`Err`, because the prelude declares those types WITHOUT `(..)` and is
+  inlined rather than imported. Design: `docs/module-surface-authority-v0.md` §6.
+- [ ] `P3` **`repl.stdlib_module_completion_names` is still a literal** (2026-08-17). Deliberate:
+  there is no directory-listing primitive in the language, so enumerating at runtime means `sh -c ls`
+  per keypress — a subprocess, and one that silently offers nothing on the Windows port. Staleness is
+  caught by `tests/stdlib/compiler/test_repl_module_list.spr` instead. Revisit if a `read_dir`
+  primitive ever lands (which needs its own approval per "Builtin vs Stdlib").
 - [ ] `P2` **Retire the env typecheck path onto the bundler** (2026-08-17). The structural end of
   "two front ends that can disagree": have the analysis service bundle like the file path so only one
   answer exists. Measured cost — a cold bundler check is 1.1s on `infer.sprout` and 0.41s on

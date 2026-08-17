@@ -110,43 +110,31 @@ fn require_int_field(req: json.Json, field: String) -> Result String Int =
 # ---------------------------------------------------------------------------
 # AST name extraction
 
-fn ctor_names(ctors: List ast.TypeConstructor, acc: List String) -> List String =
-  match ctors with
-  | Nil -> acc
-  | Cons ctor rest ->
-      match ctor with
-      | ast.TypeConstructor name _ _ _ -> ctor_names(rest, Cons(name, acc))
-
-fn method_sig_names(methods: List ast.ClassMethodSig, acc: List String) -> List String =
-  match methods with
-  | Nil -> acc
-  | Cons m rest ->
-      match m with
-      | ast.ClassMethodSig name _ _ _ -> method_sig_names(rest, Cons(name, acc))
-
+# Names a session declaration introduces, for redefinition detection. VALUE names
+# come from ast.decl_value_scopes — the single authority — so an extern is excluded
+# here because it is ScopeGlobal, not because this site says so. Type-level names
+# are a separate axis the authority does not cover, and are added alongside.
 fn collect_decl_names(decls: List ast.Decl, acc: List String) -> List String =
   match decls with
   | Nil -> list_reverse(acc)
   | Cons d rest ->
-      match d with
-      | ast.FnDecl name _ _ _ _ _ _ ->
-          collect_decl_names(rest, Cons(name, acc))
-      | ast.TypeDecl name _ ctors _ _ _ ->
-          collect_decl_names(rest, ctor_names(ctors, Cons(name, acc)))
-      | ast.RecordDecl name _ _ _ _ _ ->
-          collect_decl_names(rest, Cons(name, acc))
-      | ast.LetDecl name _ _ _ ->
-          collect_decl_names(rest, Cons(name, acc))
-      | ast.ClassDecl name _ methods _ _ ->
-          collect_decl_names(rest, method_sig_names(methods, Cons(name, acc)))
-      | ast.InstanceDecl _ _ _ _ ->
-          collect_decl_names(rest, acc)
-      | ast.AliasDecl name _ _ _ ->
-          collect_decl_names(rest, Cons(name, acc))
-      | ast.WrapDecl name _ _ ->
-          collect_decl_names(rest, Cons(name, acc))
-      | ast.ExternFnDecl _ _ _ _ _ ->
-          collect_decl_names(rest, acc)
+      collect_decl_names(rest,
+        prepend_names(ast.scope_names_module(ast.decl_value_scopes(d)), decl_type_names(d, acc)))
+
+fn prepend_names(names: List String, acc: List String) -> List String =
+  match names with
+  | Nil -> acc
+  | Cons name rest -> prepend_names(rest, Cons(name, acc))
+
+# The type/class-level name a declaration introduces, if any.
+fn decl_type_names(d: ast.Decl, acc: List String) -> List String =
+  match d with
+  | ast.TypeDecl name _ _ _ _ _ -> Cons(name, acc)
+  | ast.RecordDecl name _ _ _ _ _ -> Cons(name, acc)
+  | ast.ClassDecl name _ _ _ _ -> Cons(name, acc)
+  | ast.AliasDecl name _ _ _ -> Cons(name, acc)
+  | ast.WrapDecl name _ _ -> acc  # its name is already a value name (the ctor)
+  | _ -> acc
 
 fn parse_decl_names(src: String) -> List String =
   match lexer.tokenize(source.strip_headers(src)) with

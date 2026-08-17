@@ -2154,3 +2154,129 @@ where
   first_pos = match vec_get(0, tokens) with
     | Just t -> tok_pos(t)
     | Nothing -> source.SourcePos(0, 0, 0)
+
+# ---------------------------------------------------------------------------
+# Module surface — what a module publishes
+#
+# THE SINGLE DEFINITION of a module's export set, and the one place `(..)` and
+# `export` are recovered. Both are consumed by the parser and dropped —
+# `skip_export` and `skip_visibility` discard them, and neither reaches the AST —
+# so every downstream consumer used to re-derive them by scanning source TEXT, in
+# two independent line scanners that then disagreed. See
+# docs/module-surface-authority-v0.md §6.
+#
+# This is a token scan, not a parse: callers need a module's surface far more often
+# than its AST (REPL completion runs it per keypress), and tokens are enough. It is
+# nonetheless exact, because it decides by CALLING the parser's own predicates —
+# `is_alias_type_decl`, `skip_linear_marker`, `skip_visibility` — rather than
+# matching text. That is what removes the line-prefix ordering hazard the text
+# scanner carried: it had to test `export type linear ` before `export type `, or
+# read the contextual marker word `linear` as the type's name.
+#
+# `export` and `extern` are reserved keywords and appear only as declaration
+# modifiers, so reacting to them at any token position is safe.
+
+export type ModuleSurface (..) =
+  # exported names; types whose constructors are exported; global (extern) names
+  | ModuleSurface (List String) (List String) (List String)
+
+export fn surface_exported(s: ModuleSurface) -> List String =
+  match s with
+  | ModuleSurface exported _ _ -> exported
+
+export fn surface_ctor_types(s: ModuleSurface) -> List String =
+  match s with
+  | ModuleSurface _ ctor_types _ -> ctor_types
+
+# ast.ScopeGlobal names: externs. Deliberately NOT part of the export set —
+# `export` on an extern is a parsed-and-discarded no-op (spec-v0 §"Externs are
+# outside the module system") — but part of the module's surface, which is what
+# lets a completion offer them.
+export fn surface_globals(s: ModuleSurface) -> List String =
+  match s with
+  | ModuleSurface _ _ globals -> globals
+
+export fn scan_module_surface(tokens: Vec token.Token) -> ModuleSurface =
+  scan_surface_from(tokens, 0, Nil, Nil, Nil)
+
+fn scan_surface_from(
+  tokens: Vec token.Token,
+  i: Int,
+  exported: List String,
+  ctor_types: List String,
+  globals: List String
+) -> ModuleSurface =
+  if i >= vec_length(tokens) || tok_is_eof(tok_at(tokens, i)) then
+    ModuleSurface(list_reverse(exported), list_reverse(ctor_types), list_reverse(globals))
+  else if tok_is_keyword(tok_at(tokens, i), "export") then
+    scan_exported_decl(tokens, i + 1, exported, ctor_types, globals)
+  else if tok_is_keyword(tok_at(tokens, i), "extern") then
+    scan_surface_from(tokens, i + 1, exported, ctor_types, extern_name_at(tokens, i, globals))
+  else
+    scan_surface_from(tokens, i + 1, exported, ctor_types, globals)
+
+# `j` indexes the declaration keyword that followed `export`.
+fn scan_exported_decl(
+  tokens: Vec token.Token,
+  j: Int,
+  exported: List String,
+  ctor_types: List String,
+  globals: List String
+) -> ModuleSurface =
+  # `export extern fn` — the modifier has no effect, so record nothing here and let
+  # the extern arm classify it as a global.
+  if tok_is_keyword(tok_at(tokens, j), "extern") then
+    scan_surface_from(tokens, j, exported, ctor_types, globals)
+  else if tok_is_keyword(tok_at(tokens, j), "fn")
+    || tok_is_keyword(tok_at(tokens, j), "let")
+    || tok_is_keyword(tok_at(tokens, j), "class") then
+    scan_surface_from(tokens, j + 1, name_at(tokens, j + 1, exported), ctor_types, globals)
+  # A wrap's synthetic constructor shares the type's name, so it is exported with it.
+  else if tok_is_keyword(tok_at(tokens, j), "wrap") then
+    scan_surface_from(tokens, j + 1, name_at(tokens, j + 1, exported),
+      name_at(tokens, j + 1, ctor_types), globals)
+  else if tok_is_keyword(tok_at(tokens, j), "type") then
+    scan_exported_type(tokens, j, exported, ctor_types, globals)
+  else
+    scan_surface_from(tokens, j, exported, ctor_types, globals)
+
+fn scan_exported_type(
+  tokens: Vec token.Token,
+  j: Int,
+  exported: List String,
+  ctor_types: List String,
+  globals: List String
+) -> ModuleSurface =
+  # `type alias A = …` publishes the name and no constructors.
+  if is_alias_type_decl(tokens, j) then
+    scan_surface_from(tokens, j + 1, name_at(tokens, j + 2, exported), ctor_types, globals)
+  else
+    scan_named_type(tokens, skip_linear_marker(tokens, j + 1), exported, ctor_types, globals)
+
+# `n` indexes the type's name, past any contextual `linear` marker. Type parameters
+# are skipped before looking for `(..)`, so a generic type exports its constructors
+# the same way a non-generic one does.
+fn scan_named_type(
+  tokens: Vec token.Token,
+  n: Int,
+  exported: List String,
+  ctor_types: List String,
+  globals: List String
+) -> ModuleSurface =
+  if exports_ctors(tokens, skip_type_param_idents(tokens, n + 1)) then
+    scan_surface_from(tokens, n + 1, name_at(tokens, n, exported), name_at(tokens, n, ctor_types), globals)
+  else
+    scan_surface_from(tokens, n + 1, name_at(tokens, n, exported), ctor_types, globals)
+
+fn exports_ctors(tokens: Vec token.Token, i: Int) -> Bool =
+  skip_visibility(tokens, i) != i
+
+fn skip_type_param_idents(tokens: Vec token.Token, i: Int) -> Int =
+  if tok_is_ident(tok_at(tokens, i)) then skip_type_param_idents(tokens, i + 1) else i
+
+fn name_at(tokens: Vec token.Token, i: Int, acc: List String) -> List String =
+  if tok_is_ident(tok_at(tokens, i)) then Cons(token.token_text(tok_at(tokens, i)), acc) else acc
+
+# `i` indexes the `extern` keyword; the name follows `fn`.
+fn extern_name_at(tokens: Vec token.Token, i: Int, globals: List String) -> List String =
+  if tok_is_keyword(tok_at(tokens, i + 1), "fn") then name_at(tokens, i + 2, globals) else globals
