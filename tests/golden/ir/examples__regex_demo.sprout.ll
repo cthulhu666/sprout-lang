@@ -125,66 +125,70 @@ declare i64 @split_words(i64)
 @.str.17 = private unnamed_addr constant { i64, [1 x i8] } { i64 10, [1 x i8] c"\00" }
 @.str.18 = private unnamed_addr constant { i64, [1 x i8] } { i64 10, [1 x i8] c"\00" }
 @.str.19 = private unnamed_addr constant { i64, [53 x i8] } { i64 851978, [53 x i8] c"abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ\00" }
-@.str.20 = private unnamed_addr constant { i64, [1 x i8] } { i64 10, [1 x i8] c"\00" }
-@.str.21 = private unnamed_addr constant { i64, [1 x i8] } { i64 10, [1 x i8] c"\00" }
+@.str.20 = private unnamed_addr constant { i64, [17 x i8] } { i64 262154, [17 x i8] c"0123456789abcdef\00" }
+@.str.21 = private unnamed_addr constant { i64, [17 x i8] } { i64 262154, [17 x i8] c"0123456789ABCDEF\00" }
 @.str.22 = private unnamed_addr constant { i64, [1 x i8] } { i64 10, [1 x i8] c"\00" }
-@.str.23 = private unnamed_addr constant { i64, [2 x i8] } { i64 16394, [2 x i8] c"\0D\00" }
-@.str.24 = private unnamed_addr constant { i64, [11 x i8] } { i64 163850, [11 x i8] c"0123456789\00" }
-@.str.25 = private unnamed_addr constant { i64, [9 x i8] } { i64 131082, [9 x i8] c"matched=\00" }
-@.str.26 = private unnamed_addr constant { i64, [9 x i8] } { i64 131082, [9 x i8] c"|prefix=\00" }
-@.str.27 = private unnamed_addr constant { i64, [9 x i8] } { i64 131082, [9 x i8] c"|suffix=\00" }
-@.str.28 = private unnamed_addr constant { i64, [11 x i8] } { i64 163850, [11 x i8] c"|replaced=\00" }
-@.str.29 = private unnamed_addr constant { i64, [10 x i8] } { i64 147466, [10 x i8] c"|escaped=\00" }
-@.str.30 = private unnamed_addr constant { i64, [5 x i8] } { i64 65546, [5 x i8] c"<ID>\00" }
-@.str.31 = private unnamed_addr constant { i64, [15 x i8] } { i64 229386, [15 x i8] c"literal [A-Z]+\00" }
-@.str.32 = private unnamed_addr constant { i64, [27 x i8] } { i64 425994, [27 x i8] c"regex matched but no range\00" }
-@.str.33 = private unnamed_addr constant { i64, [12 x i8] } { i64 180234, [12 x i8] c"no id found\00" }
-@.str.34 = private unnamed_addr constant { i64, [18 x i8] } { i64 278538, [18 x i8] c"[A-Z][A-Z]-[0-9]+\00" }
-@.str.35 = private unnamed_addr constant { i64, [18 x i8] } { i64 278538, [18 x i8] c"invalid pattern: \00" }
-@.str.36 = private unnamed_addr constant { i64, [22 x i8] } { i64 344074, [22 x i8] c"unsupported pattern: \00" }
-@.str.37 = private unnamed_addr constant { i64, [52 x i8] } { i64 835594, [52 x i8] c"usage: sprout run examples/regex_demo.sprout <text>\00" }
-@.str.38 = private unnamed_addr constant { i64, [5 x i8] } { i64 65546, [5 x i8] c"true\00" }
-@.str.39 = private unnamed_addr constant { i64, [6 x i8] } { i64 81930, [6 x i8] c"false\00" }
-@.str.40 = private unnamed_addr constant { i64, [10 x i8] } { i64 147466, [10 x i8] c"IntRange(\00" }
-@.str.41 = private unnamed_addr constant { i64, [3 x i8] } { i64 32778, [3 x i8] c", \00" }
-@.str.42 = private unnamed_addr constant { i64, [2 x i8] } { i64 16394, [2 x i8] c")\00" }
-@.str.43 = private unnamed_addr constant { i64, [1 x i8] } { i64 10, [1 x i8] c"\00" }
-@.str.44 = private unnamed_addr constant { i64, [8 x i8] } { i64 114698, [8 x i8] c"Nothing\00" }
-@.str.45 = private unnamed_addr constant { i64, [6 x i8] } { i64 81930, [6 x i8] c"Just(\00" }
-@.str.46 = private unnamed_addr constant { i64, [2 x i8] } { i64 16394, [2 x i8] c")\00" }
-@.str.47 = private unnamed_addr constant { i64, [2 x i8] } { i64 16394, [2 x i8] c"[\00" }
-@.str.48 = private unnamed_addr constant { i64, [2 x i8] } { i64 16394, [2 x i8] c"]\00" }
-@.str.49 = private unnamed_addr constant { i64, [4 x i8] } { i64 49162, [4 x i8] c"Ok(\00" }
-@.str.50 = private unnamed_addr constant { i64, [2 x i8] } { i64 16394, [2 x i8] c")\00" }
-@.str.51 = private unnamed_addr constant { i64, [5 x i8] } { i64 65546, [5 x i8] c"Err(\00" }
+@.str.23 = private unnamed_addr constant { i64, [1 x i8] } { i64 10, [1 x i8] c"\00" }
+@.str.24 = private unnamed_addr constant { i64, [1 x i8] } { i64 10, [1 x i8] c"\00" }
+@.str.25 = private unnamed_addr constant { i64, [2 x i8] } { i64 16394, [2 x i8] c"\0D\00" }
+@.str.26 = private unnamed_addr constant { i64, [11 x i8] } { i64 163850, [11 x i8] c"0123456789\00" }
+@.str.27 = private unnamed_addr constant { i64, [9 x i8] } { i64 131082, [9 x i8] c"matched=\00" }
+@.str.28 = private unnamed_addr constant { i64, [9 x i8] } { i64 131082, [9 x i8] c"|prefix=\00" }
+@.str.29 = private unnamed_addr constant { i64, [9 x i8] } { i64 131082, [9 x i8] c"|suffix=\00" }
+@.str.30 = private unnamed_addr constant { i64, [11 x i8] } { i64 163850, [11 x i8] c"|replaced=\00" }
+@.str.31 = private unnamed_addr constant { i64, [10 x i8] } { i64 147466, [10 x i8] c"|escaped=\00" }
+@.str.32 = private unnamed_addr constant { i64, [5 x i8] } { i64 65546, [5 x i8] c"<ID>\00" }
+@.str.33 = private unnamed_addr constant { i64, [15 x i8] } { i64 229386, [15 x i8] c"literal [A-Z]+\00" }
+@.str.34 = private unnamed_addr constant { i64, [27 x i8] } { i64 425994, [27 x i8] c"regex matched but no range\00" }
+@.str.35 = private unnamed_addr constant { i64, [12 x i8] } { i64 180234, [12 x i8] c"no id found\00" }
+@.str.36 = private unnamed_addr constant { i64, [18 x i8] } { i64 278538, [18 x i8] c"[A-Z][A-Z]-[0-9]+\00" }
+@.str.37 = private unnamed_addr constant { i64, [18 x i8] } { i64 278538, [18 x i8] c"invalid pattern: \00" }
+@.str.38 = private unnamed_addr constant { i64, [22 x i8] } { i64 344074, [22 x i8] c"unsupported pattern: \00" }
+@.str.39 = private unnamed_addr constant { i64, [52 x i8] } { i64 835594, [52 x i8] c"usage: sprout run examples/regex_demo.sprout <text>\00" }
+@.str.40 = private unnamed_addr constant { i64, [5 x i8] } { i64 65546, [5 x i8] c"true\00" }
+@.str.41 = private unnamed_addr constant { i64, [6 x i8] } { i64 81930, [6 x i8] c"false\00" }
+@.str.42 = private unnamed_addr constant { i64, [10 x i8] } { i64 147466, [10 x i8] c"IntRange(\00" }
+@.str.43 = private unnamed_addr constant { i64, [3 x i8] } { i64 32778, [3 x i8] c", \00" }
+@.str.44 = private unnamed_addr constant { i64, [2 x i8] } { i64 16394, [2 x i8] c")\00" }
+@.str.45 = private unnamed_addr constant { i64, [1 x i8] } { i64 10, [1 x i8] c"\00" }
+@.str.46 = private unnamed_addr constant { i64, [8 x i8] } { i64 114698, [8 x i8] c"Nothing\00" }
+@.str.47 = private unnamed_addr constant { i64, [6 x i8] } { i64 81930, [6 x i8] c"Just(\00" }
+@.str.48 = private unnamed_addr constant { i64, [2 x i8] } { i64 16394, [2 x i8] c")\00" }
+@.str.49 = private unnamed_addr constant { i64, [2 x i8] } { i64 16394, [2 x i8] c"[\00" }
+@.str.50 = private unnamed_addr constant { i64, [2 x i8] } { i64 16394, [2 x i8] c"]\00" }
+@.str.51 = private unnamed_addr constant { i64, [4 x i8] } { i64 49162, [4 x i8] c"Ok(\00" }
 @.str.52 = private unnamed_addr constant { i64, [2 x i8] } { i64 16394, [2 x i8] c")\00" }
-@.str.53 = private unnamed_addr constant { i64, [2 x i8] } { i64 16394, [2 x i8] c"[\00" }
-@.str.54 = private unnamed_addr constant { i64, [2 x i8] } { i64 16394, [2 x i8] c"]\00" }
-@.str.55 = private unnamed_addr constant { i64, [2 x i8] } { i64 16394, [2 x i8] c"{\00" }
-@.str.56 = private unnamed_addr constant { i64, [2 x i8] } { i64 16394, [2 x i8] c"}\00" }
+@.str.53 = private unnamed_addr constant { i64, [5 x i8] } { i64 65546, [5 x i8] c"Err(\00" }
+@.str.54 = private unnamed_addr constant { i64, [2 x i8] } { i64 16394, [2 x i8] c")\00" }
+@.str.55 = private unnamed_addr constant { i64, [2 x i8] } { i64 16394, [2 x i8] c"[\00" }
+@.str.56 = private unnamed_addr constant { i64, [2 x i8] } { i64 16394, [2 x i8] c"]\00" }
 @.str.57 = private unnamed_addr constant { i64, [2 x i8] } { i64 16394, [2 x i8] c"{\00" }
 @.str.58 = private unnamed_addr constant { i64, [2 x i8] } { i64 16394, [2 x i8] c"}\00" }
-@.str.59 = private unnamed_addr constant { i64, [2 x i8] } { i64 16394, [2 x i8] c"(\00" }
-@.str.60 = private unnamed_addr constant { i64, [3 x i8] } { i64 32778, [3 x i8] c", \00" }
-@.str.61 = private unnamed_addr constant { i64, [2 x i8] } { i64 16394, [2 x i8] c")\00" }
-@.str.62 = private unnamed_addr constant { i64, [2 x i8] } { i64 16394, [2 x i8] c"(\00" }
-@.str.63 = private unnamed_addr constant { i64, [3 x i8] } { i64 32778, [3 x i8] c", \00" }
-@.str.64 = private unnamed_addr constant { i64, [3 x i8] } { i64 32778, [3 x i8] c", \00" }
-@.str.65 = private unnamed_addr constant { i64, [2 x i8] } { i64 16394, [2 x i8] c")\00" }
-@.str.66 = private unnamed_addr constant { i64, [2 x i8] } { i64 16394, [2 x i8] c"(\00" }
-@.str.67 = private unnamed_addr constant { i64, [3 x i8] } { i64 32778, [3 x i8] c", \00" }
-@.str.68 = private unnamed_addr constant { i64, [3 x i8] } { i64 32778, [3 x i8] c", \00" }
+@.str.59 = private unnamed_addr constant { i64, [2 x i8] } { i64 16394, [2 x i8] c"{\00" }
+@.str.60 = private unnamed_addr constant { i64, [2 x i8] } { i64 16394, [2 x i8] c"}\00" }
+@.str.61 = private unnamed_addr constant { i64, [2 x i8] } { i64 16394, [2 x i8] c"(\00" }
+@.str.62 = private unnamed_addr constant { i64, [3 x i8] } { i64 32778, [3 x i8] c", \00" }
+@.str.63 = private unnamed_addr constant { i64, [2 x i8] } { i64 16394, [2 x i8] c")\00" }
+@.str.64 = private unnamed_addr constant { i64, [2 x i8] } { i64 16394, [2 x i8] c"(\00" }
+@.str.65 = private unnamed_addr constant { i64, [3 x i8] } { i64 32778, [3 x i8] c", \00" }
+@.str.66 = private unnamed_addr constant { i64, [3 x i8] } { i64 32778, [3 x i8] c", \00" }
+@.str.67 = private unnamed_addr constant { i64, [2 x i8] } { i64 16394, [2 x i8] c")\00" }
+@.str.68 = private unnamed_addr constant { i64, [2 x i8] } { i64 16394, [2 x i8] c"(\00" }
 @.str.69 = private unnamed_addr constant { i64, [3 x i8] } { i64 32778, [3 x i8] c", \00" }
-@.str.70 = private unnamed_addr constant { i64, [2 x i8] } { i64 16394, [2 x i8] c")\00" }
-@.str.71 = private unnamed_addr constant { i64, [2 x i8] } { i64 16394, [2 x i8] c"(\00" }
-@.str.72 = private unnamed_addr constant { i64, [3 x i8] } { i64 32778, [3 x i8] c", \00" }
-@.str.73 = private unnamed_addr constant { i64, [3 x i8] } { i64 32778, [3 x i8] c", \00" }
+@.str.70 = private unnamed_addr constant { i64, [3 x i8] } { i64 32778, [3 x i8] c", \00" }
+@.str.71 = private unnamed_addr constant { i64, [3 x i8] } { i64 32778, [3 x i8] c", \00" }
+@.str.72 = private unnamed_addr constant { i64, [2 x i8] } { i64 16394, [2 x i8] c")\00" }
+@.str.73 = private unnamed_addr constant { i64, [2 x i8] } { i64 16394, [2 x i8] c"(\00" }
 @.str.74 = private unnamed_addr constant { i64, [3 x i8] } { i64 32778, [3 x i8] c", \00" }
 @.str.75 = private unnamed_addr constant { i64, [3 x i8] } { i64 32778, [3 x i8] c", \00" }
-@.str.76 = private unnamed_addr constant { i64, [2 x i8] } { i64 16394, [2 x i8] c")\00" }
-@.str.77 = private unnamed_addr constant { i64, [2 x i8] } { i64 16394, [2 x i8] c".\00" }
-@.str.78 = private unnamed_addr constant { i64, [11 x i8] } { i64 163850, [11 x i8] c"0123456789\00" }
-@.str.79 = private unnamed_addr constant { i64, [28 x i8] } { i64 442378, [28 x i8] c"unsupported regex feature: \00" }
+@.str.76 = private unnamed_addr constant { i64, [3 x i8] } { i64 32778, [3 x i8] c", \00" }
+@.str.77 = private unnamed_addr constant { i64, [3 x i8] } { i64 32778, [3 x i8] c", \00" }
+@.str.78 = private unnamed_addr constant { i64, [2 x i8] } { i64 16394, [2 x i8] c")\00" }
+@.str.79 = private unnamed_addr constant { i64, [2 x i8] } { i64 16394, [2 x i8] c".\00" }
+@.str.80 = private unnamed_addr constant { i64, [11 x i8] } { i64 163850, [11 x i8] c"0123456789\00" }
+@.str.81 = private unnamed_addr constant { i64, [17 x i8] } { i64 262154, [17 x i8] c"0123456789abcdef\00" }
+@.str.82 = private unnamed_addr constant { i64, [17 x i8] } { i64 262154, [17 x i8] c"0123456789ABCDEF\00" }
+@.str.83 = private unnamed_addr constant { i64, [28 x i8] } { i64 442378, [28 x i8] c"unsupported regex feature: \00" }
 @.cname.0 = private unnamed_addr constant [8 x i8] c"Nothing\00"
 @.cfkinds.0 = private unnamed_addr constant [1 x i8] c"\00"
 @.cname.1 = private unnamed_addr constant [5 x i8] c"Just\00"
@@ -10229,6 +10233,109 @@ join_1:
   ret i64 %t$2
 }
 
+define i64 @stdlib.string.hex_digit_value(i64 %ch) {
+entry:
+  %t$0 = getelementptr inbounds { i64, [17 x i8] }, ptr @.str.20, i64 0, i32 1, i64 0
+  %t$1 = ptrtoint ptr %t$0 to i64
+  %t$16 = alloca i64
+  store i64 %t$1, ptr %t$16
+  %t$17 = call i64 @sprout_gc_push_i64_root(ptr %t$16)
+  %t$2 = call i64 @stdlib.string.string_from_char(i64 %ch)
+  %t$18 = alloca i64
+  store i64 %t$2, ptr %t$18
+  %t$19 = call i64 @sprout_gc_push_i64_root(ptr %t$18)
+  %t$3$st = call { i64, i64 } @stdlib.string.find_worker(i64 %t$1, i64 %t$2)
+  %t$3 = extractvalue { i64, i64 } %t$3$st, 0
+  %t$4 = extractvalue { i64, i64 } %t$3$st, 1
+  %t$20 = call i64 @sprout_gc_pop_roots(i64 2)
+  br label %arm_0_5
+arm_0_5:
+  %t$7 = add i64 0, 1
+  %t$8 = icmp eq i64 %t$3, %t$7
+  br i1 %t$8, label %body_0_5, label %arm_1_5
+body_0_5:
+  %t$21 = alloca i64
+  store i64 %t$4, ptr %t$21
+  %t$22 = call i64 @sprout_gc_push_i64_root(ptr %t$21)
+  %t$9 = call i64 @sprout_alloc_obj(i64 1, i64 1)
+  %t$9$ptr = inttoptr i64 %t$9 to ptr
+  %t$9$f0 = getelementptr i64, ptr %t$9$ptr, i64 0
+  store i64 %t$4, ptr %t$9$f0
+  %t$23 = call i64 @sprout_gc_pop_roots(i64 1)
+  br label %join_5
+arm_1_5:
+  %t$10 = add i64 0, 0
+  %t$11 = icmp eq i64 %t$3, %t$10
+  br i1 %t$11, label %body_1_5, label %arm_2_5
+body_1_5:
+  %t$12 = getelementptr inbounds { i64, [17 x i8] }, ptr @.str.21, i64 0, i32 1, i64 0
+  %t$13 = ptrtoint ptr %t$12 to i64
+  %t$24 = alloca i64
+  store i64 %t$13, ptr %t$24
+  %t$25 = call i64 @sprout_gc_push_i64_root(ptr %t$24)
+  %t$14 = call i64 @stdlib.string.string_from_char(i64 %ch)
+  %t$26 = alloca i64
+  store i64 %t$14, ptr %t$26
+  %t$27 = call i64 @sprout_gc_push_i64_root(ptr %t$26)
+  %t$15 = call i64 @stdlib.string.find(i64 %t$13, i64 %t$14)
+  %t$28 = call i64 @sprout_gc_pop_roots(i64 2)
+  br label %join_5
+arm_2_5:
+  call void @sprout_abort_match()
+  unreachable
+join_5:
+  %t$6 = phi i64 [%t$9, %body_0_5], [%t$15, %body_1_5]
+  ret i64 %t$6
+}
+
+define i64 @stdlib.string.is_hex_digit(i64 %ch) {
+entry:
+  %t$0$st = call { i64, i64 } @stdlib.string.hex_digit_value_worker(i64 %ch)
+  %t$0 = extractvalue { i64, i64 } %t$0$st, 0
+  %t$1 = extractvalue { i64, i64 } %t$0$st, 1
+  br label %arm_0_2
+arm_0_2:
+  %t$4 = add i64 0, 1
+  %t$5 = icmp eq i64 %t$0, %t$4
+  br i1 %t$5, label %body_0_2, label %arm_1_2
+body_0_2:
+  %t$6 = add i64 0, 1
+  br label %join_2
+arm_1_2:
+  %t$7 = add i64 0, 0
+  %t$8 = icmp eq i64 %t$0, %t$7
+  br i1 %t$8, label %body_1_2, label %arm_2_2
+body_1_2:
+  %t$9 = add i64 0, 0
+  br label %join_2
+arm_2_2:
+  call void @sprout_abort_match()
+  unreachable
+join_2:
+  %t$3 = phi i64 [%t$6, %body_0_2], [%t$9, %body_1_2]
+  ret i64 %t$3
+}
+
+define i64 @stdlib.string.is_binary_digit(i64 %ch) {
+entry:
+  %t$0 = add i64 0, 48
+  %t$1 = icmp eq i64 %ch, %t$0
+  %t$2 = zext i1 %t$1 to i64
+  %t$9 = trunc i64 %t$2 to i1
+  br i1 %t$9, label %then_3, label %else_3
+then_3:
+  %t$5 = add i64 0, 1
+  br label %join_3
+else_3:
+  %t$6 = add i64 0, 49
+  %t$7 = icmp eq i64 %ch, %t$6
+  %t$8 = zext i1 %t$7 to i64
+  br label %join_3
+join_3:
+  %t$4 = phi i64 [%t$5, %then_3], [%t$8, %else_3]
+  ret i64 %t$4
+}
+
 define i64 @stdlib.string.is_ws_byte(i64 %b) {
 entry:
   %t$0 = add i64 0, 32
@@ -10412,7 +10519,7 @@ arm_1_4:
   %t$9 = icmp eq i64 %t$2, %t$8
   br i1 %t$9, label %body_1_4, label %arm_2_4
 body_1_4:
-  %t$10 = getelementptr inbounds { i64, [1 x i8] }, ptr @.str.20, i64 0, i32 1, i64 0
+  %t$10 = getelementptr inbounds { i64, [1 x i8] }, ptr @.str.22, i64 0, i32 1, i64 0
   %t$11 = ptrtoint ptr %t$10 to i64
   br label %join_4
 arm_2_4:
@@ -10521,7 +10628,7 @@ arm_0_13:
   %t$24 = trunc i64 %t$16 to i1
   br i1 %t$24, label %then_17, label %else_17
 then_17:
-  %t$19 = getelementptr inbounds { i64, [1 x i8] }, ptr @.str.21, i64 0, i32 1, i64 0
+  %t$19 = getelementptr inbounds { i64, [1 x i8] }, ptr @.str.23, i64 0, i32 1, i64 0
   %t$20 = ptrtoint ptr %t$19 to i64
   br label %join_17
 else_17:
@@ -11049,7 +11156,7 @@ entry:
   %t$11 = trunc i64 %t$2 to i1
   br i1 %t$11, label %then_3, label %else_3
 then_3:
-  %t$5 = getelementptr inbounds { i64, [1 x i8] }, ptr @.str.22, i64 0, i32 1, i64 0
+  %t$5 = getelementptr inbounds { i64, [1 x i8] }, ptr @.str.24, i64 0, i32 1, i64 0
   %t$6 = ptrtoint ptr %t$5 to i64
   br label %join_3
 else_3:
@@ -11158,7 +11265,7 @@ join_4:
 
 define i64 @stdlib.string.strip_trailing_cr(i64 %s) {
 entry:
-  %t$0 = getelementptr inbounds { i64, [2 x i8] }, ptr @.str.23, i64 0, i32 1, i64 0
+  %t$0 = getelementptr inbounds { i64, [2 x i8] }, ptr @.str.25, i64 0, i32 1, i64 0
   %t$1 = ptrtoint ptr %t$0 to i64
   %t$10 = alloca i64
   store i64 %s, ptr %t$10
@@ -11299,7 +11406,7 @@ entry:
 
 define i64 @stdlib.string.digit_value(i64 %ch) {
 entry:
-  %t$0 = getelementptr inbounds { i64, [11 x i8] }, ptr @.str.24, i64 0, i32 1, i64 0
+  %t$0 = getelementptr inbounds { i64, [11 x i8] }, ptr @.str.26, i64 0, i32 1, i64 0
   %t$1 = ptrtoint ptr %t$0 to i64
   %t$4 = alloca i64
   store i64 %t$1, ptr %t$4
@@ -11478,7 +11585,7 @@ entry:
 
 define i64 @examples.regex_demo.render_match(i64 %raw, i64 %start, i64 %end, i64 %replaced, i64 %escaped) {
 entry:
-  %t$0 = getelementptr inbounds { i64, [9 x i8] }, ptr @.str.25, i64 0, i32 1, i64 0
+  %t$0 = getelementptr inbounds { i64, [9 x i8] }, ptr @.str.27, i64 0, i32 1, i64 0
   %t$1 = ptrtoint ptr %t$0 to i64
   %t$2 = sub i64 %end, %start
   %t$26 = alloca i64
@@ -11499,7 +11606,7 @@ entry:
   %t$35 = call i64 @sprout_gc_push_i64_root(ptr %t$34)
   %t$4 = call i64 @__tc_Semigroup_String_append(i64 %t$1, i64 %t$3)
   %t$36 = call i64 @sprout_gc_pop_roots(i64 2)
-  %t$5 = getelementptr inbounds { i64, [9 x i8] }, ptr @.str.26, i64 0, i32 1, i64 0
+  %t$5 = getelementptr inbounds { i64, [9 x i8] }, ptr @.str.28, i64 0, i32 1, i64 0
   %t$6 = ptrtoint ptr %t$5 to i64
   %t$37 = alloca i64
   store i64 %t$4, ptr %t$37
@@ -11519,7 +11626,7 @@ entry:
   %t$45 = call i64 @sprout_gc_push_i64_root(ptr %t$44)
   %t$10 = call i64 @__tc_Semigroup_String_append(i64 %t$7, i64 %t$9)
   %t$46 = call i64 @sprout_gc_pop_roots(i64 2)
-  %t$11 = getelementptr inbounds { i64, [9 x i8] }, ptr @.str.27, i64 0, i32 1, i64 0
+  %t$11 = getelementptr inbounds { i64, [9 x i8] }, ptr @.str.29, i64 0, i32 1, i64 0
   %t$12 = ptrtoint ptr %t$11 to i64
   %t$47 = alloca i64
   store i64 %t$10, ptr %t$47
@@ -11540,7 +11647,7 @@ entry:
   %t$55 = call i64 @sprout_gc_push_i64_root(ptr %t$54)
   %t$17 = call i64 @__tc_Semigroup_String_append(i64 %t$13, i64 %t$16)
   %t$56 = call i64 @sprout_gc_pop_roots(i64 2)
-  %t$18 = getelementptr inbounds { i64, [11 x i8] }, ptr @.str.28, i64 0, i32 1, i64 0
+  %t$18 = getelementptr inbounds { i64, [11 x i8] }, ptr @.str.30, i64 0, i32 1, i64 0
   %t$19 = ptrtoint ptr %t$18 to i64
   %t$57 = alloca i64
   store i64 %t$17, ptr %t$57
@@ -11555,7 +11662,7 @@ entry:
   %t$63 = call i64 @sprout_gc_push_i64_root(ptr %t$62)
   %t$21 = call i64 @__tc_Semigroup_String_append(i64 %t$20, i64 %replaced)
   %t$64 = call i64 @sprout_gc_pop_roots(i64 1)
-  %t$22 = getelementptr inbounds { i64, [10 x i8] }, ptr @.str.29, i64 0, i32 1, i64 0
+  %t$22 = getelementptr inbounds { i64, [10 x i8] }, ptr @.str.31, i64 0, i32 1, i64 0
   %t$23 = ptrtoint ptr %t$22 to i64
   %t$65 = alloca i64
   store i64 %t$21, ptr %t$65
@@ -11598,7 +11705,7 @@ body_0_2:
 ntest_6:
   %t$10 = call i64 @sprout_field(i64 %t$6, i64 0)
   %t$11 = call i64 @sprout_field(i64 %t$6, i64 1)
-  %t$12 = getelementptr inbounds { i64, [5 x i8] }, ptr @.str.30, i64 0, i32 1, i64 0
+  %t$12 = getelementptr inbounds { i64, [5 x i8] }, ptr @.str.32, i64 0, i32 1, i64 0
   %t$13 = ptrtoint ptr %t$12 to i64
   %t$34 = alloca i64
   store i64 %re, ptr %t$34
@@ -11611,7 +11718,7 @@ ntest_6:
   %t$39 = call i64 @sprout_gc_push_i64_root(ptr %t$38)
   %t$14 = call i64 @stdlib.regex.replace_all_literal(i64 %re, i64 %t$13, i64 %raw)
   %t$40 = call i64 @sprout_gc_pop_roots(i64 1)
-  %t$15 = getelementptr inbounds { i64, [15 x i8] }, ptr @.str.31, i64 0, i32 1, i64 0
+  %t$15 = getelementptr inbounds { i64, [15 x i8] }, ptr @.str.33, i64 0, i32 1, i64 0
   %t$16 = ptrtoint ptr %t$15 to i64
   %t$41 = alloca i64
   store i64 %t$14, ptr %t$41
@@ -11643,11 +11750,11 @@ body_1_2:
   %t$28 = trunc i64 %t$21 to i1
   br i1 %t$28, label %then_22, label %else_22
 then_22:
-  %t$24 = getelementptr inbounds { i64, [27 x i8] }, ptr @.str.32, i64 0, i32 1, i64 0
+  %t$24 = getelementptr inbounds { i64, [27 x i8] }, ptr @.str.34, i64 0, i32 1, i64 0
   %t$25 = ptrtoint ptr %t$24 to i64
   br label %join_22
 else_22:
-  %t$26 = getelementptr inbounds { i64, [12 x i8] }, ptr @.str.33, i64 0, i32 1, i64 0
+  %t$26 = getelementptr inbounds { i64, [12 x i8] }, ptr @.str.35, i64 0, i32 1, i64 0
   %t$27 = ptrtoint ptr %t$26 to i64
   br label %join_22
 join_22:
@@ -11663,7 +11770,7 @@ join_2:
 
 define i64 @examples.regex_demo.summarize(i64 %raw) {
 entry:
-  %t$0 = getelementptr inbounds { i64, [18 x i8] }, ptr @.str.34, i64 0, i32 1, i64 0
+  %t$0 = getelementptr inbounds { i64, [18 x i8] }, ptr @.str.36, i64 0, i32 1, i64 0
   %t$1 = ptrtoint ptr %t$0 to i64
   %t$26 = alloca i64
   store i64 %raw, ptr %t$26
@@ -11704,7 +11811,7 @@ arm_0_12:
   br i1 %t$15, label %body_0_12, label %arm_1_12
 body_0_12:
   %t$16 = call i64 @sprout_field(i64 %t$3, i64 0)
-  %t$17 = getelementptr inbounds { i64, [18 x i8] }, ptr @.str.35, i64 0, i32 1, i64 0
+  %t$17 = getelementptr inbounds { i64, [18 x i8] }, ptr @.str.37, i64 0, i32 1, i64 0
   %t$18 = ptrtoint ptr %t$17 to i64
   %t$37 = alloca i64
   store i64 %t$16, ptr %t$37
@@ -11721,7 +11828,7 @@ arm_1_12:
   br i1 %t$21, label %body_1_12, label %arm_2_12
 body_1_12:
   %t$22 = call i64 @sprout_field(i64 %t$3, i64 0)
-  %t$23 = getelementptr inbounds { i64, [22 x i8] }, ptr @.str.36, i64 0, i32 1, i64 0
+  %t$23 = getelementptr inbounds { i64, [22 x i8] }, ptr @.str.38, i64 0, i32 1, i64 0
   %t$24 = ptrtoint ptr %t$23 to i64
   %t$42 = alloca i64
   store i64 %t$22, ptr %t$42
@@ -11758,7 +11865,7 @@ arm_0_3:
   %t$6 = icmp eq i64 %t$1, %t$5
   br i1 %t$6, label %body_0_3, label %arm_1_3
 body_0_3:
-  %t$7 = getelementptr inbounds { i64, [52 x i8] }, ptr @.str.37, i64 0, i32 1, i64 0
+  %t$7 = getelementptr inbounds { i64, [52 x i8] }, ptr @.str.39, i64 0, i32 1, i64 0
   %t$8 = ptrtoint ptr %t$7 to i64
   %t$9$ptr = inttoptr i64 %t$8 to ptr
   %t$9 = call i64 @print_str(ptr %t$9$ptr)
@@ -12782,11 +12889,11 @@ entry:
   %t$6 = trunc i64 %value to i1
   br i1 %t$6, label %then_0, label %else_0
 then_0:
-  %t$2 = getelementptr inbounds { i64, [5 x i8] }, ptr @.str.38, i64 0, i32 1, i64 0
+  %t$2 = getelementptr inbounds { i64, [5 x i8] }, ptr @.str.40, i64 0, i32 1, i64 0
   %t$3 = ptrtoint ptr %t$2 to i64
   br label %join_0
 else_0:
-  %t$4 = getelementptr inbounds { i64, [6 x i8] }, ptr @.str.39, i64 0, i32 1, i64 0
+  %t$4 = getelementptr inbounds { i64, [6 x i8] }, ptr @.str.41, i64 0, i32 1, i64 0
   %t$5 = ptrtoint ptr %t$4 to i64
   br label %join_0
 join_0:
@@ -12807,7 +12914,7 @@ entry:
 
 define i64 @__tc_ToString_IntRange_to_string(i64 %value) {
 entry:
-  %t$0 = getelementptr inbounds { i64, [10 x i8] }, ptr @.str.40, i64 0, i32 1, i64 0
+  %t$0 = getelementptr inbounds { i64, [10 x i8] }, ptr @.str.42, i64 0, i32 1, i64 0
   %t$1 = ptrtoint ptr %t$0 to i64
   %t$14 = alloca i64
   store i64 %value, ptr %t$14
@@ -12822,7 +12929,7 @@ entry:
   %t$19 = call i64 @sprout_gc_push_i64_root(ptr %t$18)
   %t$4 = call i64 @__tc_Semigroup_String_append(i64 %t$1, i64 %t$3)
   %t$20 = call i64 @sprout_gc_pop_roots(i64 2)
-  %t$5 = getelementptr inbounds { i64, [3 x i8] }, ptr @.str.41, i64 0, i32 1, i64 0
+  %t$5 = getelementptr inbounds { i64, [3 x i8] }, ptr @.str.43, i64 0, i32 1, i64 0
   %t$6 = ptrtoint ptr %t$5 to i64
   %t$21 = alloca i64
   store i64 %t$4, ptr %t$21
@@ -12842,7 +12949,7 @@ entry:
   %t$29 = call i64 @sprout_gc_push_i64_root(ptr %t$28)
   %t$10 = call i64 @__tc_Semigroup_String_append(i64 %t$7, i64 %t$9)
   %t$30 = call i64 @sprout_gc_pop_roots(i64 3)
-  %t$11 = getelementptr inbounds { i64, [2 x i8] }, ptr @.str.42, i64 0, i32 1, i64 0
+  %t$11 = getelementptr inbounds { i64, [2 x i8] }, ptr @.str.44, i64 0, i32 1, i64 0
   %t$12 = ptrtoint ptr %t$11 to i64
   %t$31 = alloca i64
   store i64 %t$10, ptr %t$31
@@ -13911,7 +14018,7 @@ entry:
 
 define i64 @__tc_Monoid_String_empty() {
 entry:
-  %t$0 = getelementptr inbounds { i64, [1 x i8] }, ptr @.str.43, i64 0, i32 1, i64 0
+  %t$0 = getelementptr inbounds { i64, [1 x i8] }, ptr @.str.45, i64 0, i32 1, i64 0
   %t$1 = ptrtoint ptr %t$0 to i64
   ret i64 %t$1
 }
@@ -14373,7 +14480,7 @@ arm_0_1:
   %t$4 = icmp eq i64 %t$0, %t$3
   br i1 %t$4, label %body_0_1, label %arm_1_1
 body_0_1:
-  %t$5 = getelementptr inbounds { i64, [8 x i8] }, ptr @.str.44, i64 0, i32 1, i64 0
+  %t$5 = getelementptr inbounds { i64, [8 x i8] }, ptr @.str.46, i64 0, i32 1, i64 0
   %t$6 = ptrtoint ptr %t$5 to i64
   br label %join_1
 arm_1_1:
@@ -14382,7 +14489,7 @@ arm_1_1:
   br i1 %t$8, label %body_1_1, label %arm_2_1
 body_1_1:
   %t$9 = call i64 @sprout_field(i64 %x, i64 0)
-  %t$10 = getelementptr inbounds { i64, [6 x i8] }, ptr @.str.45, i64 0, i32 1, i64 0
+  %t$10 = getelementptr inbounds { i64, [6 x i8] }, ptr @.str.47, i64 0, i32 1, i64 0
   %t$11 = ptrtoint ptr %t$10 to i64
   %t$17 = alloca i64
   store i64 %__tc_ToString_0_to_string, ptr %t$17
@@ -14399,7 +14506,7 @@ body_1_1:
   %t$24 = call i64 @sprout_gc_push_i64_root(ptr %t$23)
   %t$13 = call i64 @__tc_Semigroup_String_append(i64 %t$11, i64 %t$12)
   %t$25 = call i64 @sprout_gc_pop_roots(i64 4)
-  %t$14 = getelementptr inbounds { i64, [2 x i8] }, ptr @.str.46, i64 0, i32 1, i64 0
+  %t$14 = getelementptr inbounds { i64, [2 x i8] }, ptr @.str.48, i64 0, i32 1, i64 0
   %t$15 = ptrtoint ptr %t$14 to i64
   %t$26 = alloca i64
   store i64 %t$13, ptr %t$26
@@ -14436,7 +14543,7 @@ entry:
 
 define i64 @__tc_ToString_List_a_to_string(i64 %xs, i64 %__tc_ToString_0_to_string) {
 entry:
-  %t$0 = getelementptr inbounds { i64, [2 x i8] }, ptr @.str.47, i64 0, i32 1, i64 0
+  %t$0 = getelementptr inbounds { i64, [2 x i8] }, ptr @.str.49, i64 0, i32 1, i64 0
   %t$1 = ptrtoint ptr %t$0 to i64
   %t$9 = alloca i64
   store i64 %xs, ptr %t$9
@@ -14467,7 +14574,7 @@ entry:
   %t$22 = call i64 @sprout_gc_push_i64_root(ptr %t$21)
   %t$5 = call i64 @__tc_Semigroup_String_append(i64 %t$1, i64 %t$4)
   %t$23 = call i64 @sprout_gc_pop_roots(i64 4)
-  %t$6 = getelementptr inbounds { i64, [2 x i8] }, ptr @.str.48, i64 0, i32 1, i64 0
+  %t$6 = getelementptr inbounds { i64, [2 x i8] }, ptr @.str.50, i64 0, i32 1, i64 0
   %t$7 = ptrtoint ptr %t$6 to i64
   %t$24 = alloca i64
   store i64 %t$5, ptr %t$24
@@ -14490,7 +14597,7 @@ arm_0_1:
   br i1 %t$4, label %body_0_1, label %arm_1_1
 body_0_1:
   %t$5 = call i64 @sprout_field(i64 %x, i64 0)
-  %t$6 = getelementptr inbounds { i64, [4 x i8] }, ptr @.str.49, i64 0, i32 1, i64 0
+  %t$6 = getelementptr inbounds { i64, [4 x i8] }, ptr @.str.51, i64 0, i32 1, i64 0
   %t$7 = ptrtoint ptr %t$6 to i64
   %t$23 = alloca i64
   store i64 %__tc_ToString_1_to_string, ptr %t$23
@@ -14507,7 +14614,7 @@ body_0_1:
   %t$30 = call i64 @sprout_gc_push_i64_root(ptr %t$29)
   %t$9 = call i64 @__tc_Semigroup_String_append(i64 %t$7, i64 %t$8)
   %t$31 = call i64 @sprout_gc_pop_roots(i64 4)
-  %t$10 = getelementptr inbounds { i64, [2 x i8] }, ptr @.str.50, i64 0, i32 1, i64 0
+  %t$10 = getelementptr inbounds { i64, [2 x i8] }, ptr @.str.52, i64 0, i32 1, i64 0
   %t$11 = ptrtoint ptr %t$10 to i64
   %t$32 = alloca i64
   store i64 %t$9, ptr %t$32
@@ -14524,7 +14631,7 @@ arm_1_1:
   br i1 %t$14, label %body_1_1, label %arm_2_1
 body_1_1:
   %t$15 = call i64 @sprout_field(i64 %x, i64 0)
-  %t$16 = getelementptr inbounds { i64, [5 x i8] }, ptr @.str.51, i64 0, i32 1, i64 0
+  %t$16 = getelementptr inbounds { i64, [5 x i8] }, ptr @.str.53, i64 0, i32 1, i64 0
   %t$17 = ptrtoint ptr %t$16 to i64
   %t$37 = alloca i64
   store i64 %__tc_ToString_0_to_string, ptr %t$37
@@ -14541,7 +14648,7 @@ body_1_1:
   %t$44 = call i64 @sprout_gc_push_i64_root(ptr %t$43)
   %t$19 = call i64 @__tc_Semigroup_String_append(i64 %t$17, i64 %t$18)
   %t$45 = call i64 @sprout_gc_pop_roots(i64 4)
-  %t$20 = getelementptr inbounds { i64, [2 x i8] }, ptr @.str.52, i64 0, i32 1, i64 0
+  %t$20 = getelementptr inbounds { i64, [2 x i8] }, ptr @.str.54, i64 0, i32 1, i64 0
   %t$21 = ptrtoint ptr %t$20 to i64
   %t$46 = alloca i64
   store i64 %t$19, ptr %t$46
@@ -14562,7 +14669,7 @@ join_1:
 
 define i64 @__tc_ToString_Vec_a_to_string(i64 %vec, i64 %__tc_ToString_0_to_string) {
 entry:
-  %t$0 = getelementptr inbounds { i64, [2 x i8] }, ptr @.str.53, i64 0, i32 1, i64 0
+  %t$0 = getelementptr inbounds { i64, [2 x i8] }, ptr @.str.55, i64 0, i32 1, i64 0
   %t$1 = ptrtoint ptr %t$0 to i64
   %t$2 = add i64 0, 0
   %t$3 = call i64 @vec_length(i64 %vec)
@@ -14587,7 +14694,7 @@ entry:
   %t$21 = call i64 @sprout_gc_push_i64_root(ptr %t$20)
   %t$7 = call i64 @__tc_Semigroup_String_append(i64 %t$1, i64 %t$6)
   %t$22 = call i64 @sprout_gc_pop_roots(i64 4)
-  %t$8 = getelementptr inbounds { i64, [2 x i8] }, ptr @.str.54, i64 0, i32 1, i64 0
+  %t$8 = getelementptr inbounds { i64, [2 x i8] }, ptr @.str.56, i64 0, i32 1, i64 0
   %t$9 = ptrtoint ptr %t$8 to i64
   %t$23 = alloca i64
   store i64 %t$7, ptr %t$23
@@ -14602,7 +14709,7 @@ entry:
 
 define i64 @__tc_ToString_Dict_v_to_string(i64 %dict, i64 %__tc_ToString_0_to_string) {
 entry:
-  %t$0 = getelementptr inbounds { i64, [2 x i8] }, ptr @.str.55, i64 0, i32 1, i64 0
+  %t$0 = getelementptr inbounds { i64, [2 x i8] }, ptr @.str.57, i64 0, i32 1, i64 0
   %t$1 = ptrtoint ptr %t$0 to i64
   %t$8 = alloca i64
   store i64 %dict, ptr %t$8
@@ -14624,7 +14731,7 @@ entry:
   %t$18 = call i64 @sprout_gc_push_i64_root(ptr %t$17)
   %t$4 = call i64 @__tc_Semigroup_String_append(i64 %t$1, i64 %t$3)
   %t$19 = call i64 @sprout_gc_pop_roots(i64 4)
-  %t$5 = getelementptr inbounds { i64, [2 x i8] }, ptr @.str.56, i64 0, i32 1, i64 0
+  %t$5 = getelementptr inbounds { i64, [2 x i8] }, ptr @.str.58, i64 0, i32 1, i64 0
   %t$6 = ptrtoint ptr %t$5 to i64
   %t$20 = alloca i64
   store i64 %t$4, ptr %t$20
@@ -14639,7 +14746,7 @@ entry:
 
 define i64 @__tc_ToString_Set_to_string(i64 %s) {
 entry:
-  %t$0 = getelementptr inbounds { i64, [2 x i8] }, ptr @.str.57, i64 0, i32 1, i64 0
+  %t$0 = getelementptr inbounds { i64, [2 x i8] }, ptr @.str.59, i64 0, i32 1, i64 0
   %t$1 = ptrtoint ptr %t$0 to i64
   %t$8 = alloca i64
   store i64 %s, ptr %t$8
@@ -14658,7 +14765,7 @@ entry:
   %t$16 = call i64 @sprout_gc_push_i64_root(ptr %t$15)
   %t$4 = call i64 @__tc_Semigroup_String_append(i64 %t$1, i64 %t$3)
   %t$17 = call i64 @sprout_gc_pop_roots(i64 3)
-  %t$5 = getelementptr inbounds { i64, [2 x i8] }, ptr @.str.58, i64 0, i32 1, i64 0
+  %t$5 = getelementptr inbounds { i64, [2 x i8] }, ptr @.str.60, i64 0, i32 1, i64 0
   %t$6 = ptrtoint ptr %t$5 to i64
   %t$18 = alloca i64
   store i64 %t$4, ptr %t$18
@@ -14681,7 +14788,7 @@ arm_0_0:
   %t$3$ptr = inttoptr i64 %t to ptr
   %t$3$gep = getelementptr i64, ptr %t$3$ptr, i64 1
   %t$3 = load i64, ptr %t$3$gep
-  %t$4 = getelementptr inbounds { i64, [2 x i8] }, ptr @.str.59, i64 0, i32 1, i64 0
+  %t$4 = getelementptr inbounds { i64, [2 x i8] }, ptr @.str.61, i64 0, i32 1, i64 0
   %t$5 = ptrtoint ptr %t$4 to i64
   %t$16 = alloca i64
   store i64 %__tc_ToString_1_to_string, ptr %t$16
@@ -14704,7 +14811,7 @@ arm_0_0:
   %t$27 = call i64 @sprout_gc_push_i64_root(ptr %t$26)
   %t$7 = call i64 @__tc_Semigroup_String_append(i64 %t$5, i64 %t$6)
   %t$28 = call i64 @sprout_gc_pop_roots(i64 2)
-  %t$8 = getelementptr inbounds { i64, [3 x i8] }, ptr @.str.60, i64 0, i32 1, i64 0
+  %t$8 = getelementptr inbounds { i64, [3 x i8] }, ptr @.str.62, i64 0, i32 1, i64 0
   %t$9 = ptrtoint ptr %t$8 to i64
   %t$29 = alloca i64
   store i64 %t$7, ptr %t$29
@@ -14723,7 +14830,7 @@ arm_0_0:
   %t$37 = call i64 @sprout_gc_push_i64_root(ptr %t$36)
   %t$12 = call i64 @__tc_Semigroup_String_append(i64 %t$10, i64 %t$11)
   %t$38 = call i64 @sprout_gc_pop_roots(i64 6)
-  %t$13 = getelementptr inbounds { i64, [2 x i8] }, ptr @.str.61, i64 0, i32 1, i64 0
+  %t$13 = getelementptr inbounds { i64, [2 x i8] }, ptr @.str.63, i64 0, i32 1, i64 0
   %t$14 = ptrtoint ptr %t$13 to i64
   %t$39 = alloca i64
   store i64 %t$12, ptr %t$39
@@ -14755,7 +14862,7 @@ arm_0_0:
   %t$4$ptr = inttoptr i64 %t to ptr
   %t$4$gep = getelementptr i64, ptr %t$4$ptr, i64 2
   %t$4 = load i64, ptr %t$4$gep
-  %t$5 = getelementptr inbounds { i64, [2 x i8] }, ptr @.str.62, i64 0, i32 1, i64 0
+  %t$5 = getelementptr inbounds { i64, [2 x i8] }, ptr @.str.64, i64 0, i32 1, i64 0
   %t$6 = ptrtoint ptr %t$5 to i64
   %t$22 = alloca i64
   store i64 %__tc_ToString_2_to_string, ptr %t$22
@@ -14784,7 +14891,7 @@ arm_0_0:
   %t$37 = call i64 @sprout_gc_push_i64_root(ptr %t$36)
   %t$8 = call i64 @__tc_Semigroup_String_append(i64 %t$6, i64 %t$7)
   %t$38 = call i64 @sprout_gc_pop_roots(i64 2)
-  %t$9 = getelementptr inbounds { i64, [3 x i8] }, ptr @.str.63, i64 0, i32 1, i64 0
+  %t$9 = getelementptr inbounds { i64, [3 x i8] }, ptr @.str.65, i64 0, i32 1, i64 0
   %t$10 = ptrtoint ptr %t$9 to i64
   %t$39 = alloca i64
   store i64 %t$8, ptr %t$39
@@ -14803,7 +14910,7 @@ arm_0_0:
   %t$47 = call i64 @sprout_gc_push_i64_root(ptr %t$46)
   %t$13 = call i64 @__tc_Semigroup_String_append(i64 %t$11, i64 %t$12)
   %t$48 = call i64 @sprout_gc_pop_roots(i64 2)
-  %t$14 = getelementptr inbounds { i64, [3 x i8] }, ptr @.str.64, i64 0, i32 1, i64 0
+  %t$14 = getelementptr inbounds { i64, [3 x i8] }, ptr @.str.66, i64 0, i32 1, i64 0
   %t$15 = ptrtoint ptr %t$14 to i64
   %t$49 = alloca i64
   store i64 %t$13, ptr %t$49
@@ -14822,7 +14929,7 @@ arm_0_0:
   %t$57 = call i64 @sprout_gc_push_i64_root(ptr %t$56)
   %t$18 = call i64 @__tc_Semigroup_String_append(i64 %t$16, i64 %t$17)
   %t$58 = call i64 @sprout_gc_pop_roots(i64 8)
-  %t$19 = getelementptr inbounds { i64, [2 x i8] }, ptr @.str.65, i64 0, i32 1, i64 0
+  %t$19 = getelementptr inbounds { i64, [2 x i8] }, ptr @.str.67, i64 0, i32 1, i64 0
   %t$20 = ptrtoint ptr %t$19 to i64
   %t$59 = alloca i64
   store i64 %t$18, ptr %t$59
@@ -14857,7 +14964,7 @@ arm_0_0:
   %t$5$ptr = inttoptr i64 %t to ptr
   %t$5$gep = getelementptr i64, ptr %t$5$ptr, i64 3
   %t$5 = load i64, ptr %t$5$gep
-  %t$6 = getelementptr inbounds { i64, [2 x i8] }, ptr @.str.66, i64 0, i32 1, i64 0
+  %t$6 = getelementptr inbounds { i64, [2 x i8] }, ptr @.str.68, i64 0, i32 1, i64 0
   %t$7 = ptrtoint ptr %t$6 to i64
   %t$28 = alloca i64
   store i64 %__tc_ToString_3_to_string, ptr %t$28
@@ -14892,7 +14999,7 @@ arm_0_0:
   %t$47 = call i64 @sprout_gc_push_i64_root(ptr %t$46)
   %t$9 = call i64 @__tc_Semigroup_String_append(i64 %t$7, i64 %t$8)
   %t$48 = call i64 @sprout_gc_pop_roots(i64 2)
-  %t$10 = getelementptr inbounds { i64, [3 x i8] }, ptr @.str.67, i64 0, i32 1, i64 0
+  %t$10 = getelementptr inbounds { i64, [3 x i8] }, ptr @.str.69, i64 0, i32 1, i64 0
   %t$11 = ptrtoint ptr %t$10 to i64
   %t$49 = alloca i64
   store i64 %t$9, ptr %t$49
@@ -14911,7 +15018,7 @@ arm_0_0:
   %t$57 = call i64 @sprout_gc_push_i64_root(ptr %t$56)
   %t$14 = call i64 @__tc_Semigroup_String_append(i64 %t$12, i64 %t$13)
   %t$58 = call i64 @sprout_gc_pop_roots(i64 2)
-  %t$15 = getelementptr inbounds { i64, [3 x i8] }, ptr @.str.68, i64 0, i32 1, i64 0
+  %t$15 = getelementptr inbounds { i64, [3 x i8] }, ptr @.str.70, i64 0, i32 1, i64 0
   %t$16 = ptrtoint ptr %t$15 to i64
   %t$59 = alloca i64
   store i64 %t$14, ptr %t$59
@@ -14930,7 +15037,7 @@ arm_0_0:
   %t$67 = call i64 @sprout_gc_push_i64_root(ptr %t$66)
   %t$19 = call i64 @__tc_Semigroup_String_append(i64 %t$17, i64 %t$18)
   %t$68 = call i64 @sprout_gc_pop_roots(i64 2)
-  %t$20 = getelementptr inbounds { i64, [3 x i8] }, ptr @.str.69, i64 0, i32 1, i64 0
+  %t$20 = getelementptr inbounds { i64, [3 x i8] }, ptr @.str.71, i64 0, i32 1, i64 0
   %t$21 = ptrtoint ptr %t$20 to i64
   %t$69 = alloca i64
   store i64 %t$19, ptr %t$69
@@ -14949,7 +15056,7 @@ arm_0_0:
   %t$77 = call i64 @sprout_gc_push_i64_root(ptr %t$76)
   %t$24 = call i64 @__tc_Semigroup_String_append(i64 %t$22, i64 %t$23)
   %t$78 = call i64 @sprout_gc_pop_roots(i64 10)
-  %t$25 = getelementptr inbounds { i64, [2 x i8] }, ptr @.str.70, i64 0, i32 1, i64 0
+  %t$25 = getelementptr inbounds { i64, [2 x i8] }, ptr @.str.72, i64 0, i32 1, i64 0
   %t$26 = ptrtoint ptr %t$25 to i64
   %t$79 = alloca i64
   store i64 %t$24, ptr %t$79
@@ -14987,7 +15094,7 @@ arm_0_0:
   %t$6$ptr = inttoptr i64 %t to ptr
   %t$6$gep = getelementptr i64, ptr %t$6$ptr, i64 4
   %t$6 = load i64, ptr %t$6$gep
-  %t$7 = getelementptr inbounds { i64, [2 x i8] }, ptr @.str.71, i64 0, i32 1, i64 0
+  %t$7 = getelementptr inbounds { i64, [2 x i8] }, ptr @.str.73, i64 0, i32 1, i64 0
   %t$8 = ptrtoint ptr %t$7 to i64
   %t$34 = alloca i64
   store i64 %__tc_ToString_4_to_string, ptr %t$34
@@ -15028,7 +15135,7 @@ arm_0_0:
   %t$57 = call i64 @sprout_gc_push_i64_root(ptr %t$56)
   %t$10 = call i64 @__tc_Semigroup_String_append(i64 %t$8, i64 %t$9)
   %t$58 = call i64 @sprout_gc_pop_roots(i64 2)
-  %t$11 = getelementptr inbounds { i64, [3 x i8] }, ptr @.str.72, i64 0, i32 1, i64 0
+  %t$11 = getelementptr inbounds { i64, [3 x i8] }, ptr @.str.74, i64 0, i32 1, i64 0
   %t$12 = ptrtoint ptr %t$11 to i64
   %t$59 = alloca i64
   store i64 %t$10, ptr %t$59
@@ -15047,7 +15154,7 @@ arm_0_0:
   %t$67 = call i64 @sprout_gc_push_i64_root(ptr %t$66)
   %t$15 = call i64 @__tc_Semigroup_String_append(i64 %t$13, i64 %t$14)
   %t$68 = call i64 @sprout_gc_pop_roots(i64 2)
-  %t$16 = getelementptr inbounds { i64, [3 x i8] }, ptr @.str.73, i64 0, i32 1, i64 0
+  %t$16 = getelementptr inbounds { i64, [3 x i8] }, ptr @.str.75, i64 0, i32 1, i64 0
   %t$17 = ptrtoint ptr %t$16 to i64
   %t$69 = alloca i64
   store i64 %t$15, ptr %t$69
@@ -15066,7 +15173,7 @@ arm_0_0:
   %t$77 = call i64 @sprout_gc_push_i64_root(ptr %t$76)
   %t$20 = call i64 @__tc_Semigroup_String_append(i64 %t$18, i64 %t$19)
   %t$78 = call i64 @sprout_gc_pop_roots(i64 2)
-  %t$21 = getelementptr inbounds { i64, [3 x i8] }, ptr @.str.74, i64 0, i32 1, i64 0
+  %t$21 = getelementptr inbounds { i64, [3 x i8] }, ptr @.str.76, i64 0, i32 1, i64 0
   %t$22 = ptrtoint ptr %t$21 to i64
   %t$79 = alloca i64
   store i64 %t$20, ptr %t$79
@@ -15085,7 +15192,7 @@ arm_0_0:
   %t$87 = call i64 @sprout_gc_push_i64_root(ptr %t$86)
   %t$25 = call i64 @__tc_Semigroup_String_append(i64 %t$23, i64 %t$24)
   %t$88 = call i64 @sprout_gc_pop_roots(i64 2)
-  %t$26 = getelementptr inbounds { i64, [3 x i8] }, ptr @.str.75, i64 0, i32 1, i64 0
+  %t$26 = getelementptr inbounds { i64, [3 x i8] }, ptr @.str.77, i64 0, i32 1, i64 0
   %t$27 = ptrtoint ptr %t$26 to i64
   %t$89 = alloca i64
   store i64 %t$25, ptr %t$89
@@ -15104,7 +15211,7 @@ arm_0_0:
   %t$97 = call i64 @sprout_gc_push_i64_root(ptr %t$96)
   %t$30 = call i64 @__tc_Semigroup_String_append(i64 %t$28, i64 %t$29)
   %t$98 = call i64 @sprout_gc_pop_roots(i64 12)
-  %t$31 = getelementptr inbounds { i64, [2 x i8] }, ptr @.str.76, i64 0, i32 1, i64 0
+  %t$31 = getelementptr inbounds { i64, [2 x i8] }, ptr @.str.78, i64 0, i32 1, i64 0
   %t$32 = ptrtoint ptr %t$31 to i64
   %t$99 = alloca i64
   store i64 %t$30, ptr %t$99
@@ -15204,7 +15311,7 @@ wrepack_next_30:
 
 define { i64, i64 } @parse_mantissa_worker(i64 %mant) {
 entry:
-  %t$0 = getelementptr inbounds { i64, [2 x i8] }, ptr @.str.77, i64 0, i32 1, i64 0
+  %t$0 = getelementptr inbounds { i64, [2 x i8] }, ptr @.str.79, i64 0, i32 1, i64 0
   %t$1 = ptrtoint ptr %t$0 to i64
   %t$68 = alloca i64
   store i64 %mant, ptr %t$68
@@ -15647,7 +15754,7 @@ entry:
 
 define { i64, i64 } @stdlib.string.digit_value_worker(i64 %ch) {
 entry:
-  %t$0 = getelementptr inbounds { i64, [11 x i8] }, ptr @.str.78, i64 0, i32 1, i64 0
+  %t$0 = getelementptr inbounds { i64, [11 x i8] }, ptr @.str.80, i64 0, i32 1, i64 0
   %t$1 = ptrtoint ptr %t$0 to i64
   %t$6 = alloca i64
   store i64 %t$1, ptr %t$6
@@ -15721,6 +15828,80 @@ wrepack_next_16:
   unreachable
 }
 
+define { i64, i64 } @stdlib.string.hex_digit_value_worker(i64 %ch) {
+entry:
+  %t$0 = getelementptr inbounds { i64, [17 x i8] }, ptr @.str.81, i64 0, i32 1, i64 0
+  %t$1 = ptrtoint ptr %t$0 to i64
+  %t$25 = alloca i64
+  store i64 %t$1, ptr %t$25
+  %t$26 = call i64 @sprout_gc_push_i64_root(ptr %t$25)
+  %t$2 = call i64 @stdlib.string.string_from_char(i64 %ch)
+  %t$27 = alloca i64
+  store i64 %t$2, ptr %t$27
+  %t$28 = call i64 @sprout_gc_push_i64_root(ptr %t$27)
+  %t$3$st = call { i64, i64 } @stdlib.string.find_worker(i64 %t$1, i64 %t$2)
+  %t$3 = extractvalue { i64, i64 } %t$3$st, 0
+  %t$4 = extractvalue { i64, i64 } %t$3$st, 1
+  %t$29 = call i64 @sprout_gc_pop_roots(i64 2)
+  br label %arm_0_5
+arm_0_5:
+  %t$7 = add i64 0, 1
+  %t$8 = icmp eq i64 %t$3, %t$7
+  br i1 %t$8, label %body_0_5, label %arm_1_5
+body_0_5:
+  %t$30 = alloca i64
+  store i64 %t$4, ptr %t$30
+  %t$31 = call i64 @sprout_gc_push_i64_root(ptr %t$30)
+  %t$9 = call i64 @sprout_alloc_obj(i64 1, i64 1)
+  %t$9$ptr = inttoptr i64 %t$9 to ptr
+  %t$9$f0 = getelementptr i64, ptr %t$9$ptr, i64 0
+  store i64 %t$4, ptr %t$9$f0
+  %t$32 = call i64 @sprout_gc_pop_roots(i64 1)
+  br label %join_5
+arm_1_5:
+  %t$10 = add i64 0, 0
+  %t$11 = icmp eq i64 %t$3, %t$10
+  br i1 %t$11, label %body_1_5, label %arm_2_5
+body_1_5:
+  %t$12 = getelementptr inbounds { i64, [17 x i8] }, ptr @.str.82, i64 0, i32 1, i64 0
+  %t$13 = ptrtoint ptr %t$12 to i64
+  %t$33 = alloca i64
+  store i64 %t$13, ptr %t$33
+  %t$34 = call i64 @sprout_gc_push_i64_root(ptr %t$33)
+  %t$14 = call i64 @stdlib.string.string_from_char(i64 %ch)
+  %t$35 = alloca i64
+  store i64 %t$14, ptr %t$35
+  %t$36 = call i64 @sprout_gc_push_i64_root(ptr %t$35)
+  %t$15 = call i64 @stdlib.string.find(i64 %t$13, i64 %t$14)
+  %t$37 = call i64 @sprout_gc_pop_roots(i64 2)
+  br label %join_5
+arm_2_5:
+  call void @sprout_abort_match()
+  unreachable
+join_5:
+  %t$6 = phi i64 [%t$9, %body_0_5], [%t$15, %body_1_5]
+  %t$16 = call i64 @sprout_tag(i64 %t$6)
+  %t$17 = add i64 0, 0
+  %t$18 = icmp eq i64 %t$16, %t$17
+  br i1 %t$18, label %wrepack_hit_17, label %wrepack_next_17
+wrepack_hit_17:
+  %t$20$r0 = insertvalue { i64, i64 } undef, i64 %t$16, 0
+  %t$20$r1 = insertvalue { i64, i64 } %t$20$r0, i64 0, 1
+  ret { i64, i64 } %t$20$r1
+wrepack_next_17:
+  %t$21 = add i64 0, 1
+  %t$22 = icmp eq i64 %t$16, %t$21
+  br i1 %t$22, label %wrepack_hit_21, label %wrepack_next_21
+wrepack_hit_21:
+  %t$23 = call i64 @sprout_field(i64 %t$6, i64 0)
+  %t$24$r0 = insertvalue { i64, i64 } undef, i64 %t$16, 0
+  %t$24$r1 = insertvalue { i64, i64 } %t$24$r0, i64 %t$23, 1
+  ret { i64, i64 } %t$24$r1
+wrepack_next_21:
+  call void @sprout_abort_match()
+  unreachable
+}
+
 define { i64, i64 } @vec_get_worker(i64 %index, i64 %vec) {
 entry:
   %t$0 = call i64 @sprout_field(i64 %vec, i64 0)
@@ -15734,7 +15915,7 @@ entry:
 
 define void @__sprout_init_globals() {
 entry:
-  %t$0 = getelementptr inbounds { i64, [28 x i8] }, ptr @.str.79, i64 0, i32 1, i64 0
+  %t$0 = getelementptr inbounds { i64, [28 x i8] }, ptr @.str.83, i64 0, i32 1, i64 0
   %t$1 = ptrtoint ptr %t$0 to i64
   store i64 %t$1, ptr @stdlib.regex.unsupported_prefix
   call i64 @sprout_gc_register_i64_root(ptr @stdlib.regex.unsupported_prefix)
