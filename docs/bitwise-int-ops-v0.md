@@ -274,9 +274,13 @@ What settles it is that the §5.1 partition converts that risk into a *documente
 respecifies two named functions as a visible breaking change instead of silently altering
 what working programs compute. The alternative bought the same protection by making a
 routine shift fail: had `*` landed on trapping, `bit_shl(1, 63)` would panic — a shift
-every other language surveyed performs without complaint — and the lexer cannot even write
-the `INT_MIN` literal one would use to work around it (`int-overflow-policy-decision.md`
-§5).
+every other language surveyed performs without complaint.
+
+> **Corrected within this same change.** An earlier draft added here that "the lexer cannot
+> even write the `INT_MIN` literal one would use to work around it"
+> (`int-overflow-policy-decision.md` §5). The `0x` literals of §5.5 make that false:
+> `0x8000000000000000` **is** `INT_MIN`, verified by running it. §5.6 says what over-range
+> literals do and why that is the useful reading for mask-writing.
 
 Either way, the sign-bit mask never needed `bit_shl`:
 
@@ -379,6 +383,37 @@ claim, so `0x` and `0b` literals **landed in the same change**. Two details of h
 A `_` digit separator (`1_000_000`) is **not** included: `_` is an identifier-start
 character, so `1_000` currently lexes as `1` followed by the identifier `_000`, and
 changing that is a lexer decision of its own rather than part of this one.
+
+### 5.6 Over-range literals wrap to the low 64 bits
+
+A literal too large for `Int` wraps, in **both** bases, and is read as a signed
+two's-complement value. Verified by running it:
+
+```
+0x7FFFFFFFFFFFFFFF   ==  9223372036854775807
+0x8000000000000000   == -9223372036854775808   # INT_MIN
+0xFFFFFFFFFFFFFFFF   == -1                     # all ones
+9223372036854775808  == -9223372036854775808   # decimal, identical treatment
+```
+
+Three things follow, and they are worth stating because the behaviour was previously an
+unexamined consequence of unchecked accumulation rather than a decision:
+
+- **Hex and decimal agree.** The decimal case is pre-existing (`parse_int` wraps rather
+  than failing), so radix literals introduce no new inconsistency. This was checked
+  precisely because a divergence here would have been a silent trap.
+- **For mask-writing this is the *useful* reading.** `0xFFFFFFFFFFFFFFFF` meaning `-1` is
+  what an author of an all-ones mask wants, and it is the only reading under which every
+  64-bit pattern is writable — a mask notation that rejected half the patterns would be
+  the wrong tool. It is also what makes the `INT_MIN` correction above true.
+- **It is nonetheless unfinished business, and coupled to a parked decision.**
+  `docs/int-overflow-policy-decision.md` §7 keeps W9/X4 (reject over-range integer
+  *literals* at compile time) parked behind the overflow question. Whenever X4 lands it
+  must decide radix literals **explicitly**: applying a naive "value must fit in `Int`"
+  rule to hex would reject `0xFFFFFFFFFFFFFFFF`, breaking exactly the mask idiom this
+  section endorses. Recorded on that item in `BACKLOG.md`.
+
+Pinned by `tests/stdlib/test_int_literals.spr`, so a later change cannot alter it quietly.
 
 ## 6. Type-system impact
 

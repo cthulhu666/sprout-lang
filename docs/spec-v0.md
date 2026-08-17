@@ -38,6 +38,12 @@ Out of scope for v0:
   alone is not an integer literal. There is **no** digit separator — `1_000` is the
   literal `1` followed by the identifier `_000`. All three forms denote the same
   kind of value and are interchangeable in expressions and patterns.
+  A literal too large for `Int` currently **wraps to the low 64 bits** and is read
+  as signed, in every base (`0xFFFFFFFFFFFFFFFF` is `-1`; decimal
+  `9223372036854775808` is `INT_MIN`). This is what makes every 64-bit pattern
+  writable as a mask, and is slated for revisit together with the
+  literal-overflow decision (`docs/int-overflow-policy-decision.md`), which must
+  rule on radix literals explicitly rather than by a general fits-in-`Int` test.
 - Comments: line comments start with `#` and continue to end of line
 
 ## 3. Program Structure

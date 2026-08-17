@@ -57,6 +57,23 @@ fn main() -> Unit !{IO} =
     assert_eq(state, "binary literal as a match pattern", classify(0b10), 2)
     assert_eq(state, "no pattern matched", classify(7), 0)
 
+    # --- over-range literals wrap to the low 64 bits, in BOTH bases ---
+    # Not decoration: this is what makes every 64-bit pattern writable, so an
+    # all-ones mask can be spelled 0xFFFFFFFFFFFFFFFF rather than -1. The decimal
+    # case is pre-existing (parse_int wraps rather than failing) and is asserted
+    # beside the hex one so a future literal-overflow rule cannot change one base
+    # without this file noticing. Design note: docs/bitwise-int-ops-v0.md §5.6.
+    assert_eq(state, "0x8000000000000000 is INT_MIN", 0x8000000000000000,
+      -9223372036854775808)
+    assert_eq(state, "0xFFFFFFFFFFFFFFFF is all ones, i.e. -1",
+      0xFFFFFFFFFFFFFFFF, -1)
+    assert_eq(state, "an all-ones mask leaves a value unchanged",
+      bit_and(48350, 0xFFFFFFFFFFFFFFFF), 48350)
+    assert_eq(state, "decimal over-range wraps the same way",
+      9223372036854775808, -9223372036854775808)
+    assert_eq(state, "the sign-bit mask agrees with the complement route",
+      0x8000000000000000, bit_not(bit_shr_zf(bit_not(0), 1)))
+
     # --- a prefix with no digits is NOT a radix literal ---
     # `0x` alone falls back to the decimal 0 plus an identifier, which is a parse
     # error in any expression — so there is no silent misreading to test for here,
