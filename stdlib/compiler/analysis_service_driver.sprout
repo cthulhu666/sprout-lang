@@ -583,39 +583,33 @@ fn op_instances_in_source(src: String, query: String, state: StartupState) -> js
 # ---------------------------------------------------------------------------
 # type_of_in_source — infer the type of an expression in a source context
 #
-# Strategy (mirrors Python's infer_type_in_source):
-#   1. Append a sentinel let-binding to the source:
-#        let __repl_source_value = <expr>
-#   2. Run compile_source_with_root on the augmented source.
-#   3. Look up "__repl_source_value" in the resulting env.
-#   4. Render the Scheme with types.scheme_to_string.
+# The mechanism (append a sentinel binding, typecheck, read the sentinel's Scheme back
+# out of the env) lives in compiler.scheme_of_expr_in_source: hover in the LSP needs the
+# same answer, and a second copy here is how one question comes to have two answers.
+# This function is now only the wording of the failures, which is observable — the REPL
+# prints these strings.
 #
-# The sentinel name is unlikely to collide with user code, but double-underscore
-# names ARE valid Sprout identifiers (the lexer accepts _ as identifier-start).
-# augment_source guards against the collision explicitly.
+# make_eval_source below still builds the binding itself, because it appends a `main` as
+# well; the NAME is shared so the two cannot drift apart.
 
-fn sentinel_name() -> String = "__repl_source_value"
+fn sentinel_name() -> String = compiler.expr_sentinel_name()
 
-fn augment_source(src: String, expr: String) -> String =
-  src ++ "\nlet " ++ sentinel_name() ++ " = " ++ expr
+# First diagnostic's message, or a fallback when the list is empty. Three copies of this
+# rendering existed; the fallback string differs per operation, which is why it is a
+# parameter rather than a fixed message.
+fn first_diag_response(diags: List compiler.Diagnostic, fallback: String) -> json.Json =
+  match diags with
+  | Nil -> error_response(fallback)
+  | [d | _] -> error_response(diag_msg(d))
 
 fn op_type_of_in_source(src: String, expr: String, state: StartupState) -> json.Json !{IO} =
-  if str_find(src, "let " ++ sentinel_name()) != -1 then
-    error_response("source contains reserved name '" ++ sentinel_name() ++ "'; cannot infer type")
-  else do
-    result <- compiler.compile_source_with_cache(augment_source(src, expr), source.StdlibRoot(state_stdlib_root(state)), state_cache(state))
-    match result with
-    | compiler.CompileFail diags ->
-        match diags with
-        | Nil -> error_response("type_of_in_source: typecheck failed")
-        | [d | _] ->
-            match d with
-            | compiler.DiagError _ msg -> error_response(msg)
-            | compiler.DiagWarning _ msg -> error_response(msg)
-    | compiler.CompileOk env ->
-        match dict_get(sentinel_name(), env) with
-        | Nothing -> error_response("type_of_in_source: could not infer type of expression")
-        | Just scheme -> ok_response(json.JsonString(types.scheme_to_string(scheme)))
+  match compiler.scheme_of_expr_in_source(
+      src, expr, source.StdlibRoot(state_stdlib_root(state)), Nil, state_cache(state)) with
+  | compiler.ExprSentinelCollision ->
+      error_response("source contains reserved name '" ++ sentinel_name() ++ "'; cannot infer type")
+  | compiler.ExprCheckFailed diags -> first_diag_response(diags, "type_of_in_source: typecheck failed")
+  | compiler.ExprNotInferable -> error_response("type_of_in_source: could not infer type of expression")
+  | compiler.ExprSchemeOk scheme -> ok_response(json.JsonString(types.scheme_to_string(scheme)))
 
 # ---------------------------------------------------------------------------
 # eval_expr_in_source — compile and run an expression in a source context
@@ -802,10 +796,7 @@ fn diag_msg(d: compiler.Diagnostic) -> String =
 
 fn link_and_run_eval(ir_result: compiler.IrFullResult, state: StartupState) -> json.Json !{IO} =
   match ir_result with
-  | compiler.IrFullFail diags ->
-      match diags with
-      | Nil -> error_response("eval_expr_in_source: codegen failed")
-      | [d | _] -> error_response(diag_msg(d))
+  | compiler.IrFullFail diags -> first_diag_response(diags, "eval_expr_in_source: codegen failed")
   | compiler.IrFullOk ir_text ->
       match fs.write_text(eval_ir_path(), ir_text) with
       | Err msg -> panic("write_file: eval.ir: " ++ msg)
@@ -853,37 +844,23 @@ fn eval_with_scheme(src: String, expr: String, state: StartupState, scheme: type
     | Just full_src -> compile_and_run_eval(full_src, state)
   where type_str = types.scheme_to_string(scheme)
 
-fn eval_with_type_result(src: String, expr: String, state: StartupState, result: compiler.CompileResult) -> json.Json !{IO} =
-  match result with
-  | compiler.CompileFail diags ->
-      match diags with
-      | Nil -> error_response("eval_expr_in_source: typecheck failed")
-      | [d | _] ->
-          match d with
-          | compiler.DiagError _ msg -> error_response(msg)
-          | compiler.DiagWarning _ msg -> error_response(msg)
-  | compiler.CompileOk env ->
-      match dict_get(sentinel_name(), env) with
-      | Nothing -> error_response("eval_expr_in_source: could not infer type of expression")
-      | Just scheme -> eval_with_scheme(src, expr, state, scheme)
-
+# Evaluation needs the Scheme itself, not its rendering: it branches on function /
+# polymorphic / effectful to decide how to print the value. That is why the shared core
+# returns a Scheme and the string form is a wrapper over it.
 fn op_eval_expr_in_source(src: String, expr: String, state: StartupState) -> json.Json !{IO} =
-  if str_find(src, "let " ++ sentinel_name()) != -1 then
-    error_response("source contains reserved name '" ++ sentinel_name() ++ "'; cannot eval")
-  else do
-    type_result <- compiler.compile_source_with_cache(augment_source(src, expr), source.StdlibRoot(state_stdlib_root(state)), state_cache(state))
-    eval_with_type_result(src, expr, state, type_result)
+  match compiler.scheme_of_expr_in_source(
+      src, expr, source.StdlibRoot(state_stdlib_root(state)), Nil, state_cache(state)) with
+  | compiler.ExprSentinelCollision ->
+      error_response("source contains reserved name '" ++ sentinel_name() ++ "'; cannot eval")
+  | compiler.ExprCheckFailed diags -> first_diag_response(diags, "eval_expr_in_source: typecheck failed")
+  | compiler.ExprNotInferable -> error_response("eval_expr_in_source: could not infer type of expression")
+  | compiler.ExprSchemeOk scheme -> eval_with_scheme(src, expr, state, scheme)
 
 # ---------------------------------------------------------------------------
 # Session ops (M2)
 
 fn compile_fail_response(diags: List compiler.Diagnostic) -> json.Json =
-  match diags with
-  | Nil -> error_response("type check failed")
-  | [d | _] ->
-      match d with
-      | compiler.DiagError _ msg -> error_response(msg)
-      | compiler.DiagWarning _ msg -> error_response(msg)
+  first_diag_response(diags, "type check failed")
 
 fn op_session_create(state: StartupState) -> json.Json !{IO} =
   do

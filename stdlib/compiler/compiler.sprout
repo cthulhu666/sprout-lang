@@ -156,6 +156,63 @@ export fn compile_source_with_cache_roots(src: String, stdlib_root: source.Stdli
 export fn compile_source_with_cache(src: String, stdlib_root: source.StdlibRoot, cache) -> CompileResult !{IO} =
   compile_source_with_cache_roots(src, stdlib_root, Nil, cache)
 
+# ---------------------------------------------------------------------------
+# The type of an expression in a source context
+# ---------------------------------------------------------------------------
+#
+# Append a sentinel binding to the module, typecheck it, and read the sentinel's Scheme
+# back out of the resulting env:
+#
+#   <src>
+#   let __repl_source_value = <expr>
+#
+# The single authority for that trick. Three callers need it — the analysis service's
+# type_of_in_source and eval_expr_in_source, and hover in the LSP — and eval needs the
+# Scheme itself (it branches on pure vs !{IO} to decide how to print a value), so the
+# core returns the Scheme and rendering to a string is a wrapper over it.
+#
+# Failures are an ADT rather than a message: the service's error strings and the REPL's
+# :type output are observable, so each caller renders its own wording. A custom ADT and
+# not Result, for the LexParseResult reason above.
+
+export type ExprSchemeResult (..) =
+  | ExprSchemeOk types.Scheme
+  | ExprSentinelCollision
+  | ExprCheckFailed (List Diagnostic)
+  | ExprNotInferable
+
+# Unlikely to collide with user code, but double-underscore names ARE valid Sprout
+# identifiers (the lexer accepts _ as identifier-start), so the collision is checked.
+# Exported because a caller rendering the collision message needs to name it.
+export fn expr_sentinel_name() -> String = "__repl_source_value"
+
+fn augment_with_sentinel(src: String, expr: String) -> String =
+  src ++ "\nlet " ++ expr_sentinel_name() ++ " = " ++ expr
+
+export fn scheme_of_expr_in_source(src: String, expr: String, stdlib_root: source.StdlibRoot,
+                                   extra_roots: List String, cache) -> ExprSchemeResult !{IO} =
+  if str_find(src, "let " ++ expr_sentinel_name()) != -1 then ExprSentinelCollision
+  else
+    do
+      result <- compile_source_with_cache_roots(
+        augment_with_sentinel(src, expr), stdlib_root, extra_roots, cache)
+      match result with
+      | CompileFail diags -> ExprCheckFailed(diags)
+      | CompileOk env ->
+          match dict_get(expr_sentinel_name(), env) with
+          | Nothing -> ExprNotInferable
+          | Just scheme -> ExprSchemeOk(scheme)
+
+# Rendered form, for hover and :type. Nothing on any failure — a caller that needs to
+# say WHY calls scheme_of_expr_in_source and matches the reason.
+export fn type_of_expr_in_source(src: String, expr: String, stdlib_root: source.StdlibRoot,
+                                 extra_roots: List String, cache) -> Maybe String !{IO} =
+  match scheme_of_expr_in_source(src, expr, stdlib_root, extra_roots, cache) with
+  | ExprSchemeOk scheme -> Just(types.scheme_to_string(scheme))
+  | ExprSentinelCollision -> Nothing
+  | ExprCheckFailed _ -> Nothing
+  | ExprNotInferable -> Nothing
+
 # compile_file: read a file, strip headers, then call compile_source.
 export fn compile_file(path: source.FilePath) -> CompileResult !{IO} =
   match fs.read_text(source.filepath_str(path)) with

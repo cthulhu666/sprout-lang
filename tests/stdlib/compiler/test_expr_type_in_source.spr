@@ -1,0 +1,135 @@
+module main
+
+import stdlib.test (TestState, new_state, assert_true, summary)
+import stdlib.compiler.compiler as compiler
+import stdlib.compiler.source as source
+import stdlib.compiler.module_loader as module_loader
+import stdlib.string as string
+import stdlib.env as env
+
+# THE TYPE OF AN EXPRESSION IN A SOURCE CONTEXT — ONE AUTHORITY.
+#
+# The trick is small: append `let __repl_source_value = <expr>` to the module, typecheck
+# it, and read the sentinel's Scheme back out of the resulting env. It had two copies in
+# analysis_service_driver (op_type_of_in_source and op_eval_expr_in_source), and hover
+# needed a third. Three copies of a mechanism is how the module-surface bugs happened, so
+# it lives here instead and both of those call it.
+#
+# Two properties the copies could not have:
+#
+#   1. PACKAGE ROOTS. The service reaches this through a builtin that talks to a
+#      co-process started as `sproutd --analysis-service <stdlib_root>` — a command line
+#      with no package roots. Hover routed that way would fail on any project with a
+#      dotted non-stdlib import while diagnostics for the same file succeeded.
+#   2. THE SCHEME ITSELF. eval_expr_in_source branches on pure vs !{IO} to decide how to
+#      print a value, so the core returns the Scheme and rendering is a wrapper over it.
+#      A string-only API would have forced eval to keep its own copy.
+#
+# Failures are an ADT, not a message: the service's error strings and the REPL's :type
+# output are observable, so each caller renders its own wording.
+
+fn stdlib_root() -> String !{IO} =
+  match env.get("SPROUT_STDLIB_ROOT") with
+  | Just root -> root
+  | Nothing -> "stdlib"
+
+fn package_root() -> String = "tests/conformance/package_resolution/roots"
+
+fn plain_source() -> String =
+  "let answer = 42\n"
+    ++ "\n"
+    ++ "fn twice(n: Int) -> Int = n * 2\n"
+
+fn source_using_package() -> String =
+  "import demo.greet (greeting)\n"
+    ++ "\n"
+    ++ "fn use_it() -> String = greeting()\n"
+
+# Diagnostic has no Eq instance, so `diags != Nil` will not typecheck.
+fn reports_diagnostics(r: compiler.ExprSchemeResult) -> Bool =
+  match r with
+  | compiler.ExprCheckFailed diags ->
+      match diags with
+      | Nil -> false
+      | [_ | _] -> true
+  | compiler.ExprSchemeOk _ -> false
+  | compiler.ExprSentinelCollision -> false
+  | compiler.ExprNotInferable -> false
+
+fn is_scheme_ok(r: compiler.ExprSchemeResult) -> Bool =
+  match r with
+  | compiler.ExprSchemeOk _ -> true
+  | compiler.ExprSentinelCollision -> false
+  | compiler.ExprCheckFailed _ -> false
+  | compiler.ExprNotInferable -> false
+
+# A `<-` bind strips the Maybe off an effectful function's result, so the Maybe is
+# matched at the call instead. "" stands for "no type": a Scheme never renders empty.
+fn rendered_type(src: String, expr: String, sr: source.StdlibRoot, roots: List String,
+                 cache) -> String !{IO} =
+  match compiler.type_of_expr_in_source(src, expr, sr, roots, cache) with
+  | Nothing -> ""
+  | Just text -> text
+
+fn main() -> Unit !{IO} =
+  do
+    state <- new_state()
+    root <- stdlib_root()
+    let sr = source.StdlibRoot(root)
+    cache <- module_loader.new_cache()
+
+    # --- the rendered form, which is what hover shows ---
+    literal <- rendered_type(plain_source(), "42", sr, Nil, cache)
+    assert_true(state, "a literal's type is reported", string.contains(literal, "Int"))
+
+    bound <- rendered_type(plain_source(), "answer", sr, Nil, cache)
+    assert_true(state, "a name declared in the source has its type reported",
+      string.contains(bound, "Int"))
+
+    # A function's type must render as a function, not as its result. Sprout function
+    # types are curried, so the arrow is what distinguishes them.
+    fn_type <- rendered_type(plain_source(), "twice", sr, Nil, cache)
+    assert_true(state, "a function's type renders as a function type, not as its result",
+      string.contains(fn_type, "->"))
+
+    # --- the Scheme form, which eval needs ---
+    scheme <- compiler.scheme_of_expr_in_source(plain_source(), "answer", sr, Nil, cache)
+    assert_true(state, "the Scheme form succeeds on the same expression",
+      is_scheme_ok(scheme))
+
+    # --- failures are distinguishable, so each caller can word its own message ---
+    unknown <- compiler.scheme_of_expr_in_source(plain_source(), "nope", sr, Nil, cache)
+    assert_true(state, "an unknown name reports the typecheck diagnostics",
+      reports_diagnostics(unknown))
+
+    unknown_rendered <- rendered_type(plain_source(), "nope", sr, Nil, cache)
+    assert_true(state, "the rendered form answers Nothing on a failure",
+      unknown_rendered == "")
+
+    # Double-underscore names are valid Sprout identifiers, so a source CAN already bind
+    # the sentinel. Appending a second binding of the same name would make the typecheck
+    # fail for a reason that has nothing to do with the user's expression, so the
+    # collision is reported as itself.
+    collision <- compiler.scheme_of_expr_in_source(
+      "let " ++ compiler.expr_sentinel_name() ++ " = 1\n", "42", sr, Nil, cache)
+    assert_true(state, "a source already binding the sentinel is reported as a collision",
+      match collision with
+      | compiler.ExprSentinelCollision -> true
+      | compiler.ExprSchemeOk _ -> false
+      | compiler.ExprCheckFailed _ -> false
+      | compiler.ExprNotInferable -> false)
+
+    # --- package roots reach it: the property the builtin route cannot have ---
+    let roots = Cons(package_root(), Nil)
+    with_roots <- rendered_type(source_using_package(), "use_it", sr, roots, cache)
+    assert_true(state, "an expression using a package-root import is typed when the root is given",
+      string.contains(with_roots, "String"))
+
+    # Negative control: without the root it must fail. A pass here would mean the default
+    # search path had been widened, which is a worse bug than the one being fixed.
+    cache2 <- module_loader.new_cache()
+    without_roots <- rendered_type(source_using_package(), "use_it", sr, Nil, cache2)
+    assert_true(state, "the same expression is untyped with no root registered",
+      without_roots == "")
+
+    summary(state)

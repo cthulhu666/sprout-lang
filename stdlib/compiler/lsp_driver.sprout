@@ -178,7 +178,7 @@ fn check_and_push_diagnostics(uri: String, src: String, state: LspState) -> Unit
     | compiler.CompileFail diags -> push_diagnostics(uri, diags, state)
 
 # ---------------------------------------------------------------------------
-# Hover — word extraction + type_of_in_source
+# Hover — word extraction + type_of_expr_in_source
 
 fn is_hover_ident_ch(ch: Char) -> Bool =
   string.is_ident_continue(ch) || ch == '.'
@@ -225,11 +225,24 @@ fn make_hover_result(id: json.Json, type_str: String) -> json.Json =
           json.JsonObjectNil))),
       json.JsonObjectNil)))
 
-# Hover is not wired: `compiler.type_of_in_source` exists and takes exactly the word
-# `extract_word` produces, but nothing calls it yet, so this returns null. The
-# capability is therefore not advertised — see server_capabilities below.
+# Hover types the word under the cursor by asking for its type IN THIS SOURCE, so a
+# name means what it means here — including names from package-root modules.
+#
+# Deliberately NOT `compiler.type_of_in_source`, despite the name: that one is a builtin
+# that talks to a co-process launched as `sproutd --analysis-service <stdlib_root>`, a
+# command line with no package roots. Hover through it would fail on exactly the projects
+# whose diagnostics work, so the in-process, roots-aware call is used instead.
+#
+# A failure answers null. There is nothing useful to say to an editor about an
+# expression whose type could not be determined, and the type checker is already
+# reporting the reason as a diagnostic on the same document.
 fn do_hover(id: json.Json, src: String, word: String, state: LspState) -> Unit !{IO} =
-  send_message(make_result(id, json.JsonNull))
+  do
+    cache <- module_loader.new_cache()
+    match compiler.type_of_expr_in_source(src, word,
+        source.StdlibRoot(lsp_stdlib_root(state)), lsp_package_roots(state), cache) with
+    | Nothing -> send_message(make_result(id, json.JsonNull))
+    | Just type_str -> send_message(make_hover_result(id, type_str))
 
 export type HoverParams (..) deriving (Eq, ToString) = HoverParams String Int Int
 
@@ -244,17 +257,19 @@ export fn extract_hover_params(params: json.Json) -> Maybe HoverParams =
 # ---------------------------------------------------------------------------
 # Initialize capabilities
 #
-# Advertise only what answers. `hoverProvider` and `completionProvider` used to be
-# listed here while `do_hover` returned null unconditionally and completion returned
-# an empty list — which gives an editor a broken feature rather than an absent one.
-# Add each capability back in the change that wires its handler; scripts/lsp_smoke.sh
-# asserts the implication, so an advertisement without an answer fails the gate.
+# Advertise only what answers. `hoverProvider` and `completionProvider` were both listed
+# here while `do_hover` returned null unconditionally and completion returned an empty
+# list — which gives an editor a broken feature rather than an absent one. Hover is wired
+# now, so it is advertised again; completion is not, so it stays absent until it is.
+# scripts/lsp_smoke.sh asserts the implication, so an advertisement without an answer
+# fails the gate.
 
 fn server_capabilities() -> json.Json =
   json.JsonObject(
     json.JsonObjectCons("textDocumentSync", json.JsonInt(1),
     json.JsonObjectCons("definitionProvider", json.JsonBool(true),
-    json.JsonObjectNil)))
+    json.JsonObjectCons("hoverProvider", json.JsonBool(true),
+    json.JsonObjectNil))))
 
 fn initialize_result() -> json.Json =
   json.JsonObject(

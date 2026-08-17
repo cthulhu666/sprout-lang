@@ -51,6 +51,17 @@ Every unimplemented feature already has its compiler API:
 So `lsp_driver.sprout` is a transport with five unplugged sockets. This shapes the whole
 arc: the plugin is the visible deliverable, but the leverage is server-side.
 
+> **Correction after wiring hover (2026-08-17): read that table with one caution.** An
+> `analysis_*`-backed entry in `stdlib/compiler.sprout` is not Sprout code — it is a
+> `declare` into the C runtime, which talks to a **co-process** launched as
+> `sproutd --analysis-service <stdlib_root>`. That command line carries no package roots,
+> so any feature routed through it silently loses them, and would fail on exactly the
+> projects whose diagnostics succeed. Hover therefore went through
+> `compiler.type_of_expr_in_source` — in-process and roots-aware — not through
+> `compiler.type_of_in_source`, whose name suggests otherwise. Definition never had the
+> problem: `compiler.declaration_position` is in-process. Completion and document symbols
+> still need checking against this, and formatting does not (it is pure text).
+
 ## 2. Goals and non-goals
 
 **Goals**
@@ -208,7 +219,7 @@ are unset. A silently dead server is the one outcome to avoid.
 | M1 | **Done.** Plugin core: file type, lexer, highlighting, colour page, commenter, brace matcher | no |
 | M2 | **Done.** Package roots reach the env typecheck path | yes (reseed) |
 | M3 | **Done.** LSP client layer, settings + toolchain detection, split gate | no |
-| M4 | Wire the five features, one change each; add a `ModuleCache` to `LspState` | yes (reseed) |
+| M4 | Wire the five features, one change each; add a `ModuleCache` to `LspState`. **Definition and hover done**; formatting, document symbols and completion remain | yes (reseed) |
 | M5 | Diagnostic ranges wider than zero | yes (reseed) |
 
 M0–M3 is the smallest sequence producing a plugin worth installing. M4 is where it becomes
@@ -230,9 +241,13 @@ as a broken language rather than an incomplete one.
 ## 8. Syntax, semantics, type-system and error-message impact
 
 **None.** No language surface changes: no new syntax, no typing rules, no evaluation-order
-or visibility changes, and no new diagnostics. The only compiler-source edits in the arc
-are in the LSP transport (`lsp_driver.sprout`) and in threading an existing resolver's
-extra-roots parameter through the env path (M2) — neither alters what any program means.
+or visibility changes, and no new diagnostics. The compiler-source edits in the arc are in
+the LSP transport (`lsp_driver.sprout`), in threading an existing resolver's extra-roots
+parameter through the env path (M2), and in promoting two analysis mechanisms into
+`compiler/compiler.sprout` so the transport and the analysis service share them
+(`declaration_position`, `scheme_of_expr_in_source`) — none of which alters what any
+program means. The analysis service's error strings are preserved byte-for-byte, since the
+REPL prints them.
 
 Diagnostic *text* is unchanged throughout; M5 changes only the range attached to it.
 
@@ -256,9 +271,19 @@ so it needs a full `just refresh-seed` and will move golden IR.
   extraction with every required-field rejection). Already existed; extended 22 → 29 for
   the gaps found while writing the smoke gate.
 - `scripts/lsp_smoke.sh` via `just lsp-smoke` — framing, diagnostic line and column,
-  document lifecycle (`didChange` re-checks, `didClose` clears), shutdown behaviour, and
-  the §7 honesty invariant. Includes an explicit non-vacuity assertion, because "the
-  server said nothing" would otherwise pass every grep-shaped check.
+  document lifecycle (`didChange` re-checks, `didClose` clears), shutdown behaviour, package
+  roots, definition, hover, and the §7 honesty invariant. Includes an explicit non-vacuity
+  assertion, because "the server said nothing" would otherwise pass every grep-shaped check.
+
+  Two of its assertions are load-bearing beyond the feature they name. The package-root
+  **hover** case cannot pass if hover is routed across the analysis-service fork, so it was
+  written before that design was chosen and decided it. And the "declines on a non-name
+  position" cases pass *vacuously* while a handler is unwired — noted next to each, because
+  an assertion that is green for the wrong reason is how a fixture the server had never
+  parsed once looked like a working decline.
+- `tests/stdlib/compiler/test_expr_type_in_source.spr` — the promoted type-of-expression
+  core: rendering, the raw `Scheme` form evaluation needs, each distinguishable failure,
+  the sentinel-collision guard, and a package-root case with a negative control.
 - `editors/intellij/src/test/kotlin/.../SproutLexerTest.kt` — 25 tests, fixture-free JUnit
   (the lexer touches no platform service, so no IDE sandbox is needed and a failure can
   only mean a lexing bug). Pins the restatement against the compiler's actual rules: the
