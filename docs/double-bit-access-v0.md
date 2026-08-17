@@ -174,6 +174,12 @@ this whole class of declaration.
 
 ### Why no bitwise operators
 
+> **Answered elsewhere since 2026-08-17.** The general gap this section defers is now
+> designed (not implemented) in `docs/bitwise-int-ops-v0.md`, which takes the
+> named-function route for the reason given below — the spellings are taken — rather
+> than adding operators. Everything below still explains why *this* change did not need
+> them.
+
 `&`, `|`, `<<`, `>>` are absent from Sprout, and `>>`/`<<` are already taken —
 they are **function composition** (`rcompose`/`lcompose`, `prelude.sprout:1112`).
 Adding integer bitwise operators would therefore need new spellings and a
