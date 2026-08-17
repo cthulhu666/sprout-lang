@@ -172,7 +172,42 @@ resp="$(drive "$INIT" "$(open_doc "$DEF_URI" "$DEF_SRC")" "$(def_req 23 3 3)")"
 echo "$resp" | grep -q '"id":23,"result":null'
 check "definition returns null rather than guessing on a non-name position" $?
 
-# --- 7. capability honesty -------------------------------------------------------
+# --- 7. hover --------------------------------------------------------------------
+# Hover answers with the inferred type of the word under the cursor.
+hov_req() { # id, uri, line, character
+  printf '{"jsonrpc":"2.0","id":%s,"method":"textDocument/hover","params":{"textDocument":{"uri":"%s"},"position":{"line":%s,"character":%s}}}' "$1" "$2" "$3" "$4"
+}
+
+# `answer` on line 2 (0-based) of GOOD is bound to 42.
+resp="$(drive "$INIT" "$(open_doc "$URI" "$GOOD")" "$(hov_req 31 "$URI" 2 4)")"
+echo "$resp" | grep -q '"id":31,"result":{"contents":{"kind":"plaintext","value":"Int"}}'
+check "hover reports the inferred type of a local binding" $?
+
+# A qualified name resolves through the import, so hover must render the imported
+# scheme rather than failing on the dot.
+resp="$(drive "$INIT" "$(open_doc "$DEF_URI" "$DEF_SRC")" "$(hov_req 32 "$DEF_URI" 7 16)")"
+echo "$resp" | grep -q '"id":32,"result":{"contents":.*String'
+check "hover reports the type of a qualified imported name" $?
+
+# Declining is a correct answer, same as definition: no word under the cursor.
+# This one PASSES VACUOUSLY while hover is unwired (everything answers null), so it
+# proves nothing on its own — it earns its keep only once the assertions above are
+# green, as the guard against answering a position that holds no name.
+resp="$(drive "$INIT" "$(open_doc "$URI" "$GOOD")" "$(hov_req 33 "$URI" 2 3)")"
+echo "$resp" | grep -q '"id":33,"result":null'
+check "hover returns null on a non-name position" $?
+
+# THE DISCRIMINATING ASSERTION. Hover must honour `--package-root` exactly as
+# diagnostics do. Routing hover through the `analysis_type_of_in_source` builtin
+# cannot pass this: that builtin talks to a co-process started as
+# `sproutd --analysis-service <stdlib_root>`, whose command line carries no package
+# roots, so the import is unresolvable on the other side of the fork. An editor would
+# then show correct diagnostics and a failing hover in the same file.
+resp="$(drive_with_roots "$PKG_ROOT" "$INIT" "$(open_doc "$PKG_URI" "$PKG_SRC")" "$(hov_req 34 "$PKG_URI" 2 8)")"
+echo "$resp" | grep -q '"id":34,"result":{"contents":'
+check "hover resolves a name from a package-root module" $?
+
+# --- 8. capability honesty -------------------------------------------------------
 # Everything advertised must answer. This is the check that would have caught
 # `hoverProvider: true` shipping alongside a handler that returns null unconditionally.
 caps="$(drive "$INIT")"
