@@ -2104,6 +2104,55 @@ from Sprout — a candidate for removal, deliberately not bundled into this chan
       Original remaining scope, kept for context: `emit_var` (`codegen.sprout:1900`) silently zero-filled *any* unknown name in value position (consumer C3 in the sentinel-flow map, `docs/dict-resolution-north-star-plan-2026-06-30.md` appendix). Tightening it must preserve the one intentional case: `__unresolved_*` phantom free-tyvar dict sentinels are correctly null-filled (guarded by `test_unresolved_dict_nullfill`; see `ast_to_ir.sprout`'s explicit sentinel check for the pattern to mirror) — unknown non-sentinel names should become a hard error, matching `ast_to_ir.sprout`'s strict behavior. Option (a)-style loudness preferred per `feedback_no_half_measures`. Surfaced 2026-06-17 during M3 IR codegen typeclass dispatch investigation.
 - [ ] `P2` Complete the M3b eta→single-authority collapse (blocked on tyvar canonicalization). **M3b-5 landed 2026-07-08: `resolve_tdict` DELETED** (`docs/dict-resolution-north-star-plan-2026-06-30.md` §M3b-5 (PR-B)). Lowering's `try_eta_in_class`/`try_eta_forwarded_without_class` remain a *second* resolution authority for ONE shape: a **polymorphic (type-variable-head) forwarded** value-position class method (e.g. `apply_any(x, to_string)` inside `fn f(x: a) ... where ToString a`). `resolve.method_ref_evidence` emits `EvUnresolved` for the non-concrete head, so lowering resolves it. Making resolve emit `EvForward` produces a key `ToString_<generalized-tyvar>` that misses `ctx_fwd`'s source-name key `ToString_a` — the [[project_typevar_identity_generalization_gap]] name-vs-generalized divergence. Durable fix = canonicalize tyvar identity in the dict resolver; then delete `try_eta_*` and add the deferred `TFunc` gate (prereq 1) + marker-miss test (prereq 2). Until then the nullary value-position case stays correct via `try_eta_in_class`'s existing `TFunc` gate → clean sentinel. **Fix-options menu for "canonicalize tyvar identity" (from `project_typevar_identity_generalization_gap`):** (a) co-generate the `@constrained_N` marker's var name WITH the generalized scheme so they never drift (smallest change); (b) don't rename on `generalize()` — keep source names in the scheme (then `scheme_vars` and markers coincide, the precise `Just` branch fires); (c) key constraints by a canonical positional/De-Bruijn index, not names. Any of the three retires the whole family of name-mismatch bypasses. (Item 4 below — "Canonical type-variable identity" — ultimately landed a (c)-flavored fix, positional scheme-var identity; this item's own `try_eta_*` collapse is the one place in the dict-resolution subsystem that fix didn't reach, since it lives on the lowering side, not `infer.sprout`'s marker/scheme machinery.)
 
+### 7.6) Editor integration — LSP server and the JetBrains plugin
+
+Arc plan: `docs/intellij-plugin-v0.md`. Server-side context and the corrected status of
+what the LSP actually does: `docs/language-server-roadmap.md`.
+
+- [x] `P1` **Nothing had ever exercised the LSP transport, and the server shipped two capabilities
+  it did not implement. DONE 2026-08-17.** The pure helpers were already unit-tested
+  (`tests/stdlib/compiler/test_lsp_driver.spr`), but no test and no recipe ran `--lsp`, so protocol
+  behaviour was known only by hand-driving the binary. Added `scripts/lsp_smoke.sh`
+  (`just lsp-smoke`, plus a non-blocking `lsp` CI job) driving the real binary with framed
+  JSON-RPC, and extended the unit suite 22 → 29 (digits inside an identifier, cursor on the dot of
+  a qualified name, the `col == length` boundary, and position 0,0 — the one legal hover position a
+  truthiness-shaped guard would drop). What the first transport run established, correcting the
+  repo's own notes: diagnostic
+  positions were **already precise** (the roadmap's "full-range first-error only" was wrong — the
+  real defect is `end == start`), and `compiler.type_of_in_source` **exists**, contradicting the
+  in-file comment claiming hover was blocked on it. `initialize` advertised `hoverProvider: true`
+  and a `completionProvider` while returning `null` and `[]`; both were **removed**, because an
+  advertised-but-dead capability gives an editor a broken feature rather than an absent one. The
+  gate asserts the implication *advertised ⇒ answers*, so it re-arms itself automatically as each
+  handler lands.
+- [ ] `P1` **Wire the five LSP features whose compiler API already exists.** `lsp_driver.sprout` is
+  a transport with five unplugged sockets, not a missing feature set: formatting
+  (`formatter.format_source`), hover (`compiler.type_of_in_source`), document symbols
+  (`symbol_inventory_in_source`), definition (`symbol_locations_in_source` — top-level only), and
+  completion (`complete_in_state`, which needs an adapter: it is REPL-line-shaped, so it wants the
+  document line up to the cursor). One change per feature, each re-adding its own capability.
+- [ ] `P1` **The LSP re-checks cold on every keystroke.** `check_and_push_diagnostics` calls
+  `compiler.compile_source_with_root`, which builds a fresh `ModuleCache` per request;
+  `compile_source_with_cache` already exists and wants a cache held in `LspState`. Measured
+  2026-08-17: 0.30s wall for initialize + didOpen + didChange on a two-import file, and ~1s for a
+  cold check of a compiler-sized file against tens of ms warm.
+- [ ] `P1` **The env typecheck path cannot resolve package roots, so a multi-root project reports
+  every imported name as unknown.** `module_loader.resolve_module_path(name, root, extra_roots)`
+  is called **only** from `bundler.sprout`; the env path (`build_import_pairs` → `load_module`,
+  reached via `compile_source_with_root`) resolves `stdlib.*` only, and `--package-root` exists
+  solely on the batch CLI. Verified 2026-08-17: `import loam.gfx as gfx` produces **no** import
+  diagnostic, and then every use reports `check: Unknown variable: gfx.draw_frame` — so
+  uncharted-suns would open solid red in an editor. Same two-front-end split as the env-path
+  retirement item; thread `extra_roots` through so the env path *calls* the existing resolver
+  rather than answering the question a second way.
+- [ ] `P2` **Diagnostic ranges are zero-width.** `lsp_driver.diag_range` sets `end == start`, so
+  clients get a caret rather than an underlined token. Widening to the offending token's extent is
+  small; full multi-token spans need the span refactor in `language-server-roadmap.md` §5.1.
+- [ ] `P3` **LSP4IJ for Community-edition IntelliJ IDEs.** The JetBrains LSP API is unavailable in
+  IntelliJ IDEA open-source builds and Android Studio, so the plugin's LSP layer is paid-IDE only
+  (highlighting works everywhere). LSP4IJ (Red Hat, EPL-2.0, 2024.2+) would close that gap at the
+  cost of a third-party runtime dependency.
+
 ### 8) Runtime and FFI Foundations for Database Clients
 
 - [x] `P0` Define a safer representation for external resource handles (currently `stdlib.net` wrapper ADTs; true opacity still depends on hidden constructors).

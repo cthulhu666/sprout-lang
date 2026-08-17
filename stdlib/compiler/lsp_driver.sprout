@@ -216,7 +216,9 @@ fn make_hover_result(id: json.Json, type_str: String) -> json.Json =
           json.JsonObjectNil))),
       json.JsonObjectNil)))
 
-# type_of_in_source is not yet implemented in compiler.sprout; hover returns null.
+# Hover is not wired: `compiler.type_of_in_source` exists and takes exactly the word
+# `extract_word` produces, but nothing calls it yet, so this returns null. The
+# capability is therefore not advertised — see server_capabilities below.
 fn do_hover(id: json.Json, src: String, word: String, state: LspState) -> Unit !{IO} =
   send_message(make_result(id, json.JsonNull))
 
@@ -232,17 +234,17 @@ export fn extract_hover_params(params: json.Json) -> Maybe HoverParams =
 
 # ---------------------------------------------------------------------------
 # Initialize capabilities
+#
+# Advertise only what answers. `hoverProvider` and `completionProvider` used to be
+# listed here while `do_hover` returned null unconditionally and completion returned
+# an empty list — which gives an editor a broken feature rather than an absent one.
+# Add each capability back in the change that wires its handler; scripts/lsp_smoke.sh
+# asserts the implication, so an advertisement without an answer fails the gate.
 
 fn server_capabilities() -> json.Json =
   json.JsonObject(
     json.JsonObjectCons("textDocumentSync", json.JsonInt(1),
-    json.JsonObjectCons("hoverProvider", json.JsonBool(true),
-    json.JsonObjectCons("completionProvider",
-      json.JsonObject(
-        json.JsonObjectCons("triggerCharacters",
-          json.array_from_list(Cons(json.JsonString("."), Nil)),
-        json.JsonObjectNil)),
-    json.JsonObjectNil))))
+    json.JsonObjectNil))
 
 fn initialize_result() -> json.Json =
   json.JsonObject(

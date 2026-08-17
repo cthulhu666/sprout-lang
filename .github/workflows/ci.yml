@@ -214,6 +214,33 @@ jobs:
         # control — the same request must FAIL without the trust anchor.
         run: just http-tls-gate
 
+  # LSP transport gate. Its own job because it needs `sproutd`, which no other job builds —
+  # the `test` job bootstraps stage-1 and never links the daemon. Deliberately NOT part of the
+  # required `test` check yet: this is the first automated coverage the LSP server has ever had
+  # (nothing exercised `--lsp` before), so it earns the required-check promotion after it has
+  # proven itself stable rather than before.
+  lsp:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install mise toolchain (just 1.39.0, from mise.toml)
+        uses: jdx/mise-action@v2
+
+      - name: Install LLVM/Clang, expose bare clang/opt on PATH
+        # Same reason as the `test` job: the build recipes call bare `clang` and `opt`, which
+        # only the versioned LLVM bindir carries.
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y llvm clang
+          LLVM_BINDIR="$(ls -d /usr/lib/llvm-*/bin | sort -V | tail -n1)"
+          echo "$LLVM_BINDIR" >> "$GITHUB_PATH"
+
+      - name: Drive the LSP server with framed JSON-RPC
+        # Builds sproutd via the recipe's own dependency, then asserts framing, diagnostic
+        # line/column, document lifecycle, and capability honesty.
+        run: just lsp-smoke
+
   # Windows port (docs/windows-port-v0.md). Pulled forward from milestone W5 to W1 deliberately:
   # W1 replaces the scheduler's context switch with Win32 Fibers, and the alternative local loop
   # — Wine — is the wrong instrument for it. Wine is an independent reimplementation of Win32,

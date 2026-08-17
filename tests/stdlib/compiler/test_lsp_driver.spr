@@ -63,6 +63,23 @@ fn main() -> Unit !{IO} =
     # extract_word — col past end of line
     check_eq("extract_word: col past end",
       lsp.extract_word("hi", 10), ""),
+    # The off-by-one boundary specifically: col == length, not merely far past it.
+    check_eq("extract_word: col exactly at end of line",
+      lsp.extract_word("hi", 2), ""),
+    check_eq("extract_word: operator gives empty",
+      lsp.extract_word("let x = 1", 6), ""),
+
+    # extract_word — the rest of the qualified-name surface hover depends on.
+    # `.` is an ident char here, so the cursor may sit ON the dot, and the word must
+    # stop before a following paren rather than swallowing it.
+    check_eq("extract_word: cursor on the dot itself",
+      lsp.extract_word("string.join(\"|\")", 6), "string.join"),
+    check_eq("extract_word: last char before a paren",
+      lsp.extract_word("string.join(\"|\")", 10), "string.join"),
+    # Digits continue an identifier (is_ident_continue admits them); nothing else
+    # in this file has a digit inside a name.
+    check_eq("extract_word: digits continue an identifier",
+      lsp.extract_word("read_u32_be(b)", 6), "read_u32_be"),
 
     # extract_hover_params — exercises every failure branch individually,
     # plus the well-formed happy path.
@@ -87,5 +104,17 @@ fn main() -> Unit !{IO} =
     check_eq("extract_hover_params: missing character rejected",
       lsp.extract_hover_params(hover_params_json(json.JsonString("file:///a.spr"),
         json.JsonObject(json.JsonObjectCons("line", json.JsonInt(3), json.JsonObjectNil)))),
-      Nothing)
+      Nothing),
+    # Line 0, character 0 is the first position in the file and a perfectly legal
+    # hover target. It is also the one position a truthiness-style guard would drop,
+    # so pin it rather than assume the field checks stay shape-based.
+    check_eq("extract_hover_params: position 0,0 accepted",
+      lsp.extract_hover_params(hover_params_json(json.JsonString("file:///a.spr"),
+        json.JsonObject(
+          json.JsonObjectCons("line", json.JsonInt(0),
+          json.JsonObjectCons("character", json.JsonInt(0),
+          json.JsonObjectNil))))),
+      Just(lsp.HoverParams("file:///a.spr", 0, 0))),
+    check_eq("extract_hover_params: empty object rejected",
+      lsp.extract_hover_params(json.JsonObject(json.JsonObjectNil)), Nothing)
   ])
