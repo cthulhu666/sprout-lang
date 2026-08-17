@@ -23,6 +23,13 @@
 #     nothing at all — ast_to_ir returns the argument's SSA name unchanged. Same
 #     arrangement as `to_double` and `print`, neither of which is listed here
 #     either. See docs/double-bit-access-v0.md.
+#   bit_and / bit_or / bit_xor / bit_not / bit_shl / bit_shr / bit_shr_zf —
+#     stdlib.bits, added 2026-08-17. Also COMPILER INTRINSICS with no runtime
+#     symbol: each lowers to one LLVM instruction (and/or/xor/shl/ashr/lshr;
+#     bit_not is xor against -1), so there is nothing to call and nothing to
+#     allowlist. Rule 4 does not even come up — this is not "impossible in
+#     Sprout" but "not a function". The shift-count guard is emitted in
+#     ast_to_ir and reuses the existing @panic. See docs/bitwise-int-ops-v0.md.
 
 analysis_check_source
 analysis_complete_in_state
