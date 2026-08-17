@@ -1,0 +1,94 @@
+module main
+
+import stdlib.test (TestState, new_state, assert_true, summary)
+import stdlib.repl as repl
+import stdlib.fs as fs
+import stdlib.env as env
+import stdlib.collections (Vec, vec_length)
+import stdlib.process as process
+import stdlib.string as string
+
+# REPL COMPLETION MUST OFFER WHAT THE COMPILER ACCEPTS.
+#
+# The completion candidate set was built by a line scan that accepted only lines
+# beginning with `export `. An `extern fn` line never does — and per spec-v0
+# §"Externs are outside the module system" writing `export` on one is a
+# parsed-and-discarded no-op, so no author writes it. Consequence: NO extern was
+# ever offered, from any module including the prelude, so `print`, `panic`,
+# `int_to_string` and 40 more were missing while every ordinary function was there.
+#
+# `stdlib.bits` made it total rather than partial: the module is nothing but
+# externs, so it had no completions at all and `bits.<TAB>` offered nothing.
+#
+# Candidates now come from parser.scan_module_surface plus ast.decl_value_scopes —
+# the same two authorities the bundler uses. See docs/module-surface-authority-v0.md.
+
+fn stdlib_root() -> String !{IO} =
+  match env.get("SPROUT_STDLIB_ROOT") with
+  | Just root -> root
+  | Nothing -> "stdlib"
+
+fn read_module(root: String, leaf: String) -> String !{IO} =
+  match fs.read_text(root ++ "/" ++ leaf ++ ".sprout") with
+  | Err msg -> panic("read_file: " ++ leaf ++ ": " ++ msg)
+  | Ok content -> content
+
+fn offered(name: String, names: Vec String) -> Bool =
+  vec_contains_name(name, names, 0)
+
+fn vec_contains_name(name: String, names: Vec String, index: Int) -> Bool =
+  match vec_get(index, names) with
+  | Nothing -> false
+  | Just candidate -> if candidate == name then true else vec_contains_name(name, names, index + 1)
+
+fn main() -> Unit !{IO} =
+  do
+    state <- new_state()
+    root <- stdlib_root()
+
+    prelude <- read_module(root, "prelude")
+    let prelude_public = repl.module_public_names(prelude)
+    let prelude_globals = repl.module_global_names(prelude)
+
+    # --- the regression: prelude externs are offered ---
+    assert_true(state, "prelude extern `print` is offered", offered("print", prelude_globals))
+    assert_true(state, "prelude extern `panic` is offered", offered("panic", prelude_globals))
+    assert_true(state, "prelude extern `int_to_string` is offered",
+      offered("int_to_string", prelude_globals))
+
+    # --- and ordinary exports did not stop being offered ---
+    assert_true(state, "an ordinary exported fn is still offered",
+      offered("list_map", prelude_public))
+
+    # --- constructors of an exported type are still offered ---
+    # The line scan collected these from `| Ctor` lines. Losing them while fixing
+    # externs would trade one gap for another, which is exactly what happened on the
+    # first attempt: gating them on the `(..)` marker dropped all four, because the
+    # prelude declares Maybe/List/Result WITHOUT `(..)` and their constructors are in
+    # scope anyway (the prelude is inlined, not imported). Pinned here for that reason.
+    assert_true(state, "constructor `Just` is offered", offered("Just", prelude_public))
+    assert_true(state, "constructor `Nothing` is offered", offered("Nothing", prelude_public))
+    assert_true(state, "constructor `Ok` is offered", offered("Ok", prelude_public))
+    assert_true(state, "constructor `Err` is offered", offered("Err", prelude_public))
+
+    # An extern is never in the module-scoped set, because it is never `alias.`-spelled.
+    assert_true(state, "an extern is not offered as a qualifiable name",
+      offered("print", prelude_public) == false)
+
+    # --- stdlib.bits: a module that is ENTIRELY externs ---
+    bits <- read_module(root, "bits")
+    let bits_public = repl.module_public_names(bits)
+    let bits_globals = repl.module_global_names(bits)
+    assert_true(state, "bits offers bit_or", offered("bit_or", bits_globals))
+    assert_true(state, "bits offers bit_shr_zf", offered("bit_shr_zf", bits_globals))
+    assert_true(state, "bits has no qualifiable names at all — it is all externs",
+      vec_length(bits_public) == 0)
+
+    # --- a module with both kinds keeps them apart ---
+    bytes_src <- read_module(root, "bytes")
+    assert_true(state, "bytes offers its extern bytes_length",
+      offered("bytes_length", repl.module_global_names(bytes_src)))
+    assert_true(state, "bytes offers its exported fn length",
+      offered("length", repl.module_public_names(bytes_src)))
+
+    summary(state)

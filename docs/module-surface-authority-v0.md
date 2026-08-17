@@ -1,7 +1,7 @@
 # One authority for module surface — v0
 
-Status: **Part B implemented** (§5), gated by §8's differential conformance test. Parts A and C are
-designed here and land separately (§6, §7). The normative spec is **unaffected and was never
+Status: **Parts A and B implemented** (§5, §6), each gated by a conformance test (§8). The env-path
+retirement (§7) is designed here and deferred. The normative spec is **unaffected and was never
 wrong** — `docs/spec-v0.md` §"Externs are outside the module system" already states the rule this
 change makes the analysis path obey.
 
@@ -180,29 +180,77 @@ the spec says and what the file compiler has always done.
 does not participate in name resolution, and converting it touches REPL redefinition semantics; it
 moves to the authority in Part A's change, which already edits that surface.
 
-## 6. Part A — one token-derived export scan (designed, not yet landed)
+## 6. Part A — one token-derived export scan (implemented)
 
-The second root cause: `parse_decl` calls `skip_export` (`parser.sprout`), so the `export` keyword
-is **discarded and never reaches the AST**. Every consumer needing the publish-set must therefore
-re-derive it from source text, which is why sites #1 and #5 are line scanners. Nothing noticed
+The second root cause: `parse_decl` calls `skip_export`, and `parse_type_decl` calls
+`skip_visibility`, so both the `export` keyword and the `(..)` constructor-export marker are
+**consumed and discarded, and neither reaches the AST**. Every consumer needing the publish-set had
+to re-derive it from source text, which is why sites #1 and #5 were line scanners. Nothing noticed
 because `formatter.format_source` is line-based too, so `export` survives formatting textually and
 never round-trips through an AST.
 
-Consequence, and the reported symptom: `repl.gather_exported_names` accepts only lines starting with
-`export `. An `extern fn` line never does — and per spec, `export` on an extern is parsed and
-discarded, so no author writes it. So **no extern is ever a completion candidate, from any module,
-including the prelude**: `print`, `panic` and `int_to_string` are missing too.
+Consequence, and the second half of the reported symptom: `repl.gather_exported_names` accepted only
+lines starting with `export `. An `extern fn` line never does — and per spec, `export` on an extern
+is parsed and discarded, so no author writes it. So **no extern was ever a completion candidate,
+from any module, including the prelude**: `print`, `panic` and `int_to_string` were missing too.
 
-Planned fix: one **token-derived** export scan in the parser, replacing both text scanners, so the
-publish-set comes from the same lexer the parser uses. Recommended over a real `export` field on
-`ast.Decl`: the field is the better long-term model but costs a 244-site constructor sweep including
-`tests/` and `iface_codec` in both directions, and buys no property the token scan does not. It does
-not block the field later.
+### 6.1 `parser.scan_module_surface`
 
-Two smaller items ride along: REPL completion must offer bare extern names (and *not* `alias.`-
-prefixed ones, per §5.4), and `repl.stdlib_module_completion_names` is a hardcoded string missing 15
-modules. There is no directory-listing primitive anywhere in the language, so enumerating them needs
-`process.proc_run(["ls", root])` or an approved new builtin.
+```sprout
+export type ModuleSurface (..) =
+  | ModuleSurface (List String) (List String) (List String)
+    # exported names; types whose constructors are exported; global (extern) names
+```
+
+A **token** scan, not a parse — callers want a module's surface far more often than its AST — but
+exact, because it decides by *calling* the parser's own predicates (`is_alias_type_decl`,
+`skip_linear_marker`, `skip_visibility`) instead of matching text. That is what removes the hazard
+the text scanner documented in its own comments: it had to test the prefix `export type linear `
+*before* `export type `, or the generic branch read the contextual marker word `linear` as the
+type's name, exporting a phantom type called `linear`.
+
+Chosen over a real `export` field on `ast.Decl`: the field is the better long-term model but costs a
+244-site constructor sweep including `tests/` and `iface_codec` in both directions, and buys no
+property the token scan does not. It does not block adding the field later.
+
+### 6.2 Consumers
+
+| site | before | after |
+|---|---|---|
+| `bundler.scan_source_info` | line scan for module name + exports + `(..)` | delegates; only the module name is still read from text (headers are stripped before tokenizing, so `module x.y` never reaches the token stream) |
+| `bundler.process_wi_finalize` | text scan, then a **separate** tokenize for the parse | one tokenize serving both — lexing twice is how the surface could differ from the AST |
+| `repl.gather_exported_names` | `export `-prefix line scan | **deleted** |
+| `repl` completion | line scan | parses: export set from `scan_module_surface`, names per declaration from `ast.decl_value_scopes` |
+| `analysis_service_driver.collect_decl_names` | per-constructor, externs excluded by hand | value names from the authority; the extern exclusion is derived |
+
+Dead after the swap and removed: `read_ident_at`, `read_ident_chars`, `is_ident_char`,
+`has_ctor_export`, `skip_type_params` in `bundler`; `ctor_names`, `method_sig_names` in
+`analysis_service_driver`.
+
+### 6.3 Completion now parses, and that was measured
+
+Tokenize+parse of the prelude (the largest module) is ~81ms against ~38ms to tokenize alone.
+Completion runs on TAB only, so exactness was worth the difference. Externs are offered **bare** and
+never `alias.`-qualified, matching §5.4 — which is why they appear in the unqualified candidate set
+and are deliberately absent from the dotted one.
+
+**Constructor names are gated on the export set, not on `(..)`,** and that is deliberate. The
+looser-looking choice is the accurate one: the prelude declares `Maybe`, `List` and `Result` with no
+`(..)` at all, yet `Just` and `Ok` are in scope everywhere because the prelude is inlined rather
+than imported. A first attempt gated on `(..)` and silently dropped all four from completion.
+Whether an *aliased* import should offer `ns.Ctor` for a type without `(..)` is genuinely open
+(`repl-env-type-vocabulary-v0.md` §11.2 — the bundler behaves as if it does, the env path does not);
+preserving the previous completion behaviour keeps this change from ruling on it by accident.
+
+### 6.4 The module-name list stays a literal, checked by a test
+
+`repl.stdlib_module_completion_names` was a hardcoded string missing **15 of 30** modules —
+`json`, `time`, `fs`, `rng`, `regex`, `task`, `chan` and everything added since it was written,
+`bits` included. It remains a literal: there is no directory-listing primitive in the language, so
+enumerating at runtime means `sh -c ls` per keypress, which costs a subprocess and would silently
+offer nothing on the Windows port. The staleness is caught in
+`tests/stdlib/compiler/test_repl_module_list.spr` instead, where a subprocess is free — verified to
+fail, naming the missing module, by removing `bits` from the list.
 
 ## 7. Retiring the env path (scoped, not designed here)
 
@@ -233,6 +281,24 @@ Cases 6 and 7 are the ones that stop the fix from being "disable qualification" 
 everything". The file defaults `SPROUT_STDLIB_ROOT` to the relative `stdlib` rather than no-opping
 when it is unset, avoiding the silent `0 passed / SUITE PASSED` trap recorded in
 `repl-env-type-vocabulary-v0.md` §9.
+
+Part A adds three more:
+
+`tests/stdlib/compiler/test_module_surface_scan.spr` (21 assertions) — every declaration form that
+can carry `export`, the `(..)` marker after both a plain and a `linear` type, `export extern` being
+inert, and **equivalence with the text scanner being replaced** on the same source. That last group
+is what makes the swap provable rather than hopeful; the pre-existing
+`tests/stdlib/compiler/test_bundler.spr` (17 assertions, untouched) passes against the new
+implementation and covers module-name extraction.
+
+`tests/stdlib/compiler/test_repl_completion_surface.spr` (14) — `print`, `panic`, `int_to_string`
+and `bit_or` are offered; an extern is *not* offered as a qualifiable name; `stdlib.bits` has zero
+qualifiable names because it is all externs; and the four prelude constructors are pinned, which is
+what caught the `(..)`-gating mistake in §6.3.
+
+`tests/stdlib/compiler/test_repl_module_list.spr` (4) — enumerates `stdlib/` and fails per missing
+module. Verified to fail by deleting `bits` from the list. It also asserts the enumeration found
+something, because a vacuous pass is the failure mode this file exists to prevent.
 
 Still owed, and now unblocked by that document's §11.1 fix: a standing guard that every top-level
 `stdlib/` module loads cleanly through `load_module`. Its §9 asks for exactly this and could not

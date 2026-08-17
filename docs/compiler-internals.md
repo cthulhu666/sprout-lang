@@ -282,11 +282,20 @@ it rather than asserting it, and
 `tests/stdlib/compiler/test_module_surface_agreement.spr` fails if they ever drift
 apart again. See `docs/module-surface-authority-v0.md`.
 
-Two sites still answer a *related* question — "what does this module export?" — by
-scanning raw source text (`bundler.scan_source_info`,
-`repl.gather_exported_names`), because `parser.skip_export` discards the `export`
-keyword before it reaches the AST. That is the same class awaiting the same
-treatment; it is why no `extern fn` is ever offered as a REPL completion.
+The related question — "what does this module export?" — had the same shape and the
+same fix. `parser.skip_export` discards the `export` keyword and `skip_visibility`
+the `(..)` marker before either reaches the AST, so two independent raw-text line
+scanners recovered them (`bundler.scan_source_info`, `repl.gather_exported_names`),
+and the REPL's copy keyed on a `export ` line prefix — which an `extern fn` line
+never has, so no extern was ever offered as a completion, from any module including
+the prelude. `parser.scan_module_surface` is now the one definition. It is a token
+scan rather than a parse (callers want a surface far more often than an AST) but
+decides by CALLING the parser's own predicates, which is what removes the
+text-prefix ordering hazard: the old scanner had to test `export type linear `
+before `export type ` or it read the marker word `linear` as the type's name.
+
+**When a fact is consumed by the parser and dropped, expect it to reappear as
+re-derivation somewhere with worse tools.** Both of these did.
 
 ## Env-path type names are SHORT, and the marker families depend on it
 

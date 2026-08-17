@@ -1,6 +1,10 @@
 module stdlib.repl
 import stdlib.compiler as compiler
 import stdlib.compiler.parser as parser
+import stdlib.compiler.lexer as lexer
+import stdlib.compiler.source as source
+import stdlib.compiler.ast as ast
+import stdlib.compiler.token as token
 import stdlib.terminal as terminal
 import stdlib.string as string
 import stdlib.fs as fs
@@ -192,13 +196,27 @@ fn append_space_names(acc: Vec String, raw: String) -> Vec String =
 fn repl_command_names() -> Vec String =
   append_space_names(vec_empty(), ":help :quit :q :exit :type :t :instances :i")
 
-fn stdlib_module_completion_names() -> Vec String =
-  append_space_names(vec_empty(), "bytes collections crypto http http_client math net string terminal")
+# Every importable top-level stdlib module, minus `prelude` (always in scope, never
+# imported by name). Kept as a literal rather than read from the filesystem: there
+# is no directory-listing primitive in the language, and shelling out to `ls` per
+# keypress would both cost a subprocess and silently offer nothing on the Windows
+# port. tests/stdlib/compiler/test_repl_module_list.spr enumerates stdlib/ and fails
+# when this drifts, so it cannot rot unnoticed the way it had (it was missing 15
+# modules, including every one added since it was written).
+export fn stdlib_module_completion_names() -> Vec String =
+  append_space_names(vec_empty(),
+    "args bits bytes chan collections compiler crypto env fs http http_client "
+      ++ "http_middleware http_server json linalg log math mutable net process regex "
+      ++ "repl rng scram string task template terminal test time url")
 
+# The prelude is in scope unqualified, so BOTH its exports and its externs are
+# offered bare. The externs are the ones that were missing entirely: `print`,
+# `panic`, `int_to_string`, `str_len` and 40 others.
 fn prelude_completion_names() -> Vec String !{IO} =
   match fs.read_text(module_path("stdlib.prelude")) with
   | Err msg -> panic("read_file: prelude: " ++ msg)
-  | Ok content -> gather_exported_names(string.string_lines(content), 0, false, vec_empty())
+  | Ok content ->
+      append_names_from_vec(module_public_names(content), module_global_names(content), 0)
 
 fn append_names_from_vec(acc: Vec String, names: Vec String, index: Int) -> Vec String =
   match vec_get(index, names) with
@@ -303,20 +321,79 @@ fn module_path(module_name: String) -> String =
   | Nothing -> "stdlib/" ++ module_name ++ ".sprout"
   | Just _ -> replace_char(module_name, '.', '/', 0, "") ++ ".sprout"
 
-fn append_exported_names(names: Vec String, line: String) -> Vec String =
-  append_declaration_names(names, trim(line))
+# ---------------------------------------------------------------------------
+# What a module publishes, for completion
+# ---------------------------------------------------------------------------
+#
+# This asks the compiler instead of scanning source text. The line scan it
+# replaced accepted only lines beginning with `export `, so it could never offer
+# an `extern fn` — and since `export` on an extern is a parsed-and-discarded no-op
+# (spec-v0 §"Externs are outside the module system") nobody writes it. The result
+# was that NO extern was ever a completion candidate from any module, the prelude
+# included: `print`, `panic` and `int_to_string` were all missing.
+#
+# Two authorities are consumed here and neither is re-derived:
+#   parser.scan_module_surface  — the export set, `(..)` markers, and globals
+#   ast.decl_value_scopes       — the names a declaration introduces
+# So a completion can no longer offer a name the compiler would reject, nor miss
+# one it would accept. See docs/module-surface-authority-v0.md §6.
+#
+# It parses, which the line scan could not afford to. Completion runs on TAB only,
+# and a parse of the largest module (the prelude) measures ~80ms against ~40ms to
+# tokenize it — an acceptable price for exactness on a keypress the user asked for.
 
-fn gather_exported_names(lines: Vec String, index: Int, in_exported_type: Bool, acc: Vec String) -> Vec String =
-  match vec_get(index, lines) with
-  | Just line ->
-      if string.starts_with(trim(line), "export type ") then
-        gather_exported_names(lines, index + 1, true, append_exported_names(acc, trim(line)))
-      else if in_exported_type && string.starts_with(trim(line), "| ") then
-        gather_exported_names(lines, index + 1, true, append_unique_name(acc, take_name_from(trim(line), 2)))
-      else if string.starts_with(trim(line), "export ") then
-        gather_exported_names(lines, index + 1, false, append_exported_names(acc, trim(line)))
-      else gather_exported_names(lines, index + 1, false, acc)
-  | Nothing -> acc
+export fn module_public_names(content: String) -> Vec String =
+  match lexer.tokenize(source.strip_headers(content)) with
+  | Err _ -> vec_empty()
+  | Ok toks -> public_names_from_tokens(toks, parser.scan_module_surface(toks))
+
+fn public_names_from_tokens(toks: Vec token.Token, surface: parser.ModuleSurface) -> Vec String =
+  match parser.parse_program(toks) with
+  # Unparseable module: the export set is still trustworthy (it is token-derived),
+  # so offer that much rather than nothing.
+  | Err _ -> vec_from_list(parser.surface_exported(surface))
+  | Ok prog ->
+      let exported = parser.surface_exported(surface)
+      in exported_ctor_names(prog, exported, vec_from_list(exported))
+
+# Constructors of every EXPORTED type, gated on the export set rather than on the
+# `(..)` marker. That looks like the looser choice and is the accurate one: the
+# prelude declares `Maybe`, `List` and `Result` with no `(..)` at all, yet `Just`
+# and `Ok` are in scope everywhere, because the prelude is inlined rather than
+# imported. Gating on `(..)` silently dropped all four from completion.
+#
+# Whether an ALIASED import should offer `ns.Ctor` for a type without `(..)` is a
+# genuinely open question — the bundler behaves as if it does, the env path does not
+# (docs/repl-env-type-vocabulary-v0.md §11.2). Preserving the previous completion
+# behaviour keeps this change from ruling on it by accident.
+fn exported_ctor_names(prog: ast.Program, exported: List String, acc: Vec String) -> Vec String =
+  match prog with
+  | ast.Program decls _ -> ctor_names_of_decls(decls, exported, acc)
+
+fn ctor_names_of_decls(decls: List ast.Decl, exported: List String, acc: Vec String) -> Vec String =
+  match decls with
+  | Nil -> acc
+  | Cons d rest -> ctor_names_of_decls(rest, exported, ctor_names_of_decl(d, exported, acc))
+
+fn ctor_names_of_decl(d: ast.Decl, exported: List String, acc: Vec String) -> Vec String =
+  match d with
+  | ast.TypeDecl name _ _ _ _ _ ->
+      if list_member(name, exported)
+      then append_names_from_list(acc, ast.scope_names_module(ast.decl_value_scopes(d)))
+      else acc
+  | _ -> acc
+
+fn append_names_from_list(acc: Vec String, names: List String) -> Vec String =
+  match names with
+  | Nil -> acc
+  | Cons name rest -> append_names_from_list(append_unique_name(acc, name), rest)
+
+# Externs are ast.ScopeGlobal: spelled bare, never `alias.`-qualified. They belong
+# in the top-level candidate set, never in the dotted one.
+export fn module_global_names(content: String) -> Vec String =
+  match lexer.tokenize(source.strip_headers(content)) with
+  | Err _ -> vec_empty()
+  | Ok toks -> vec_from_list(parser.surface_globals(parser.scan_module_surface(toks)))
 
 fn qualify_names(namespace: String, names: Vec String, index: Int, acc: Vec String) -> Vec String =
   match vec_get(index, names) with
@@ -351,10 +428,32 @@ fn find_imported_namespace_ref(namespace: String, imports: Vec String, index: In
       else find_imported_namespace_ref(namespace, imports, index + 1)
   | Nothing -> Nothing
 
+# Only the module-scoped names are qualified. An extern is never `alias.`-spelled,
+# so it is deliberately absent here and offered bare from the top-level set instead
+# — the same rule the bundler and the checker now both apply.
 fn names_from_module_source(ns: String, content_result: Result String String) -> Vec String =
   match content_result with
   | Err _ -> vec_empty()
-  | Ok content -> qualify_names(ns, gather_exported_names(string.string_lines(content), 0, false, vec_empty()), 0, vec_empty())
+  | Ok content -> qualify_names(ns, module_public_names(content), 0, vec_empty())
+
+# Externs of every imported module, spelled bare. `import stdlib.bits` makes
+# `bit_or` callable but never `bits.bit_or`, so the only place it can be offered is
+# the unqualified candidate set — which is why none of them ever appeared before.
+fn append_imported_globals(names: Vec String, imports: Vec String, index: Int) -> Vec String !{IO} =
+  match vec_get(index, imports) with
+  | Nothing -> names
+  | Just line ->
+      if string.starts_with(trim(line), "import ") then
+        append_imported_globals(
+          append_names_from_vec(names,
+            globals_of_module(import_target_module(trim(drop_prefix(trim(line), "import ")))), 0),
+          imports, index + 1)
+      else append_imported_globals(names, imports, index + 1)
+
+fn globals_of_module(module_name: String) -> Vec String !{IO} =
+  match fs.read_text(module_path(module_name)) with
+  | Err _ -> vec_empty()
+  | Ok content -> module_global_names(content)
 
 fn dotted_completion_candidates(prefix: String, imports: Vec String) -> Vec String !{IO} =
   match find_imported_namespace_ref(take_before(prefix, "."), imports, 0) with
@@ -378,38 +477,35 @@ fn gather_declaration_names(declarations: Vec String, index: Int, acc: Vec Strin
   | Just line -> gather_declaration_names(declarations, index + 1, append_declaration_names(acc, trim(line)))
   | Nothing -> acc
 
+# Everything spellable without a `.`: REPL commands, importable module names, the
+# prelude's exports AND externs, the session's own declarations, the leaf names and
+# selectively-imported names of its imports, and — new here — the externs of every
+# imported module.
+fn unqualified_candidates(session: compiler.StatefulSession) -> Vec String !{IO} =
+  do
+    prelude_names <- prelude_completion_names()
+    let base =
+      append_names_from_vec(
+        append_names_from_vec(
+          append_names_from_vec(vec_empty(), repl_command_names(), 0),
+          stdlib_module_completion_names(), 0),
+        prelude_names, 0)
+    with_globals <- append_imported_globals(base, compiler.stateful_session_imports(session), 0)
+    gather_declaration_names(
+      compiler.stateful_session_declarations(session),
+      0,
+      gather_import_names(compiler.stateful_session_imports(session), 0, with_globals))
+
 fn completion_candidates_local(line_buffer: String, session: compiler.StatefulSession) -> (String, Vec String) !{IO} =
   match completion_prefix(line_buffer) with
   | prefix ->
       match string.find(prefix, ".") with
       | Nothing ->
-        match prelude_completion_names() with
-        | prelude_names ->
+        match unqualified_candidates(session) with
+        | candidates ->
             (
               prefix,
-              filter_names_by_prefix(
-                prefix,
-                lower_ascii(prefix),
-                gather_declaration_names(
-                  compiler.stateful_session_declarations(session),
-                  0,
-                  gather_import_names(
-                    compiler.stateful_session_imports(session),
-                    0,
-                    append_names_from_vec(
-                      append_names_from_vec(
-                        append_names_from_vec(vec_empty(), repl_command_names(), 0),
-                        stdlib_module_completion_names(),
-                        0
-                      ),
-                      prelude_names,
-                      0
-                    )
-                  )
-                ),
-                0,
-                vec_empty()
-              )
+              filter_names_by_prefix(prefix, lower_ascii(prefix), candidates, 0, vec_empty())
             )
       | Just _ ->
         (
