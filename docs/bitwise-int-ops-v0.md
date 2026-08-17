@@ -230,19 +230,35 @@ lowering therefore reintroduces the exact undefined-behaviour class W7 closed fo
 finding that plain `add i64` overflow is *defined*, so this would be a genuine
 regression in kind, not more of the same).
 
-Two models:
+**Decided (2026-08-17, Kuba): the mathematical model.** A count `>= 64` yields the limit
+of the mathematical definition — `0` for `bit_shl` and `bit_shr_zf`, and `0` or `-1` (all
+sign bits, per the operand's sign) for `bit_shr`. A **negative** count is a **panic**
+with a source location, reusing W7's `IRPanic` terminator.
 
-- **Mask the count to `& 63`** (Java, JavaScript). Cheap and branch-free, but makes
-  `bit_shl(1, 64) == 1`. A silent lie about what the program asked for.
-- **The mathematical model (recommended).** A count `>= 64` yields `0` for `bit_shl` and
-  `bit_shr_zf`, and `0` or `-1` (all sign bits) for `bit_shr` — i.e. the limit of the
-  mathematical definition. A **negative** count **panics** with a source location,
-  reusing W7's `IRPanic` terminator.
+```
+bit_shl(1, 64)     ==  0     # not 1
+bit_shl(1, 70)     ==  0
+bit_shr(-8, 64)    == -1     # all sign bits
+bit_shr_zf(-8, 64) ==  0
+bit_shl(1, -1)     ->  panic at <file>:<line>
+```
 
-The recommendation is consistent with the arbitrary-precision reading in §5.1 (where
-"shift by 70" is a perfectly ordinary request), and Haskell's `shiftL` count "must be
-non-negative" is the verified precedent for rejecting negatives outright rather than
-silently reinterpreting them.
+Two reasons, in order of weight. It is consistent with the arbitrary-precision reading in
+§5.1, where "shift by 70" is a perfectly ordinary request that happens to fall off the
+end of a 64-bit window rather than a malformed one. And Haskell's `shiftL` count "must be
+non-negative" is the verified precedent for **rejecting** a negative count outright
+instead of silently reinterpreting it as a large positive one.
+
+**The alternative, and why it lost.** Masking the count to `& 63` (Java, JavaScript) is
+branch-free and needs no guard at all, but it makes `bit_shl(1, 64) == 1` and turns
+`bit_shl(1, -1)` into a shift by 63. Both are silent lies about what the program asked
+for, which is the failure mode this language does not accept elsewhere (the same
+objection `int-overflow-policy-decision.md` §5 raises against silent arithmetic wrap).
+
+**Cost, stated honestly.** A non-constant count pays a compare and a branch. A count that
+is an integer literal in `0..63` pays nothing — the guard is folded away at translate
+time (§9), and that covers every GC-header field extraction and every mask in this
+document's examples.
 
 ### 5.4 Not first-class values
 
@@ -378,8 +394,14 @@ To be written with the implementation, per Definition of Ready #2 (failing first
 - `tests/stdlib/test_bits.spr` — the algebraic identities (`bit_and(x, x) == x`,
   `bit_xor(x, x) == 0`, `bit_not(bit_not(x)) == x`, `bit_or(x, bit_not(x)) == -1`);
   `bit_not(0) == -1` and `bit_not(x) == -x - 1`; **`bit_shr` vs `bit_shr_zf` on a
-  negative** (the pair's whole reason for existing); counts `0`, `1`, `63`, `64`; the
-  negative-count panic; and a composed `rotr32` as the realism check.
+  negative** (the pair's whole reason for existing); and a composed `rotr32` as the
+  realism check.
+- The §5.3 boundary, which is the decided behaviour and therefore the part that must be
+  pinned rather than left to the lowering: counts `0`, `1`, `63` normal; `bit_shl(1, 64)`
+  and `bit_shr_zf(-8, 64)` are `0`; `bit_shr(-8, 64)` is `-1`; a negative count panics.
+  Note counts `>= 64` are exactly where a naive lowering yields LLVM poison, so a wrong
+  implementation here is liable to *look* right at `-O0` and diverge under optimisation —
+  the test must assert values, not merely that it does not crash.
 - A `Bytes`-driven SHA-256 round against a known digest, if the pure-Sprout core lands
   in the same arc — the strongest end-to-end evidence that the set is sufficient.
 - Golden IR: a constant shift must emit one instruction and no branch (§9), which is the
