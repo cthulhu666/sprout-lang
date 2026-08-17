@@ -1,0 +1,145 @@
+module main
+
+import stdlib.test (TestState, new_state, assert_true, summary)
+import stdlib.compiler.compiler as compiler
+import stdlib.compiler.module_loader as module_loader
+import stdlib.compiler.source as source
+import stdlib.env as env
+import stdlib.fs as fs
+
+# THE TWO PATHS MUST AGREE ON WHAT AN IMPORT BRINGS INTO SCOPE.
+#
+# Sprout typechecks through two different front ends, and they answer "what names
+# does `import M` make visible, and under what spelling?" independently:
+#
+#   file/bundler path — bundler.bundle_file inlines every module into one program
+#     and canonicalises names. Used by `just run`, `--emit-ir`, `just test`, and by
+#     the REPL's own eval step.
+#   REPL/env path — module_loader.build_import_pairs re-checks each module and
+#     extracts `(name, Scheme)` pairs. Used by the REPL's check, `:type`, the LSP,
+#     and every analysis-service diagnostic.
+#
+# The second exists because analysis must typecheck a FRAGMENT against imported
+# modules without bundling them — a second REPRESENTATION of one rule. Whenever it
+# becomes a second DECISION, the two disagree, and the disagreement is silent: code
+# the REPL accepts fails to compile, and vice versa. This is the third recorded
+# instance (docs/repl-env-type-vocabulary-v0.md §1.3 lists the first two, both
+# passes that answered a question by walking `decls` where the env path has none).
+#
+# So this file is not a test of one feature. It pins the two paths to each other:
+# every case asserts BOTH give the SAME verdict, and the expected verdict is the
+# one docs/spec-v0.md mandates. A case failing on one line and passing on the other
+# is exactly the bug class being fenced off.
+#
+# THE EXTERN RULE UNDER TEST — spec §"Externs are outside the module system": an
+# `extern fn` is never qualified, never renamed, never in a module's exported set.
+# It is reachable by BARE name wherever its declaring module is in the build, and a
+# selective import list has no bearing on it either way. The bundler implements
+# this by dropping externs from its symbol table entirely; the env path must reach
+# the same answer rather than re-deciding it.
+
+fn scratch_path() -> String = "/tmp/sprout_module_surface_agreement.sprout"
+
+fn session(imports: String, body: String) -> String =
+  "module app.session\n\n" ++ imports ++ "\n\n" ++ body ++ "\n"
+
+# `just test` exports SPROUT_STDLIB_ROOT; `just test-file` does not. Defaulting to
+# the relative "stdlib" keeps this file meaningful under both instead of silently
+# no-opping to "0 passed, 0 failed / SUITE PASSED" — the trap recorded in
+# docs/repl-env-type-vocabulary-v0.md §9.
+fn stdlib_root() -> String !{IO} =
+  match env.get("SPROUT_STDLIB_ROOT") with
+  | Just root -> root
+  | Nothing -> "stdlib"
+
+fn write_scratch(src: String) -> Unit !{IO} =
+  match fs.write_text(scratch_path(), src) with
+  | Err msg -> panic("write_file: " ++ scratch_path() ++ ": " ++ msg)
+  | Ok _ -> ()
+
+# The file/bundler front end. Needs a real path, so the source is staged on disk —
+# the same thing the analysis service does to eval an expression.
+fn bundler_accepts(src: String, root: String) -> Bool !{IO} =
+  do
+    write_scratch(src)
+    result <- compiler.compile_full(source.FilePath(scratch_path()), source.StdlibRoot(root))
+    match result with
+    | compiler.FullOk _ _ -> true
+    | compiler.FullFail _ -> false
+
+# The REPL/env front end, driven exactly as the analysis service drives it.
+fn env_accepts(src: String, root: String, cache: module_loader.ModuleCache) -> Bool !{IO} =
+  do
+    result <- compiler.compile_source_with_cache(src, source.StdlibRoot(root), cache)
+    match result with
+    | compiler.CompileOk _ -> true
+    | compiler.CompileFail _ -> false
+
+# Two assertions per case, deliberately not one: naming the path that dissents
+# turns "the paths disagree" into "the env path is the wrong one here".
+fn both_paths(
+  state: TestState,
+  label: String,
+  src: String,
+  expected: Bool,
+  root: String,
+  cache: module_loader.ModuleCache
+) -> Unit !{IO} =
+  do
+    via_bundler <- bundler_accepts(src, root)
+    via_env <- env_accepts(src, root, cache)
+    assert_true(state, label ++ " [file/bundler path]", via_bundler == expected)
+    assert_true(state, label ++ " [REPL/env path]", via_env == expected)
+
+fn main() -> Unit !{IO} =
+  do
+    state <- new_state()
+    root <- stdlib_root()
+    cache <- module_loader.new_cache()
+
+    # --- the extern rule, one case per import form ---
+
+    # Plain import, bare call: the spelling the spec mandates and the only one
+    # that compiles today.
+    both_paths(state, "plain import: bare extern resolves",
+      session("import stdlib.bits", "fn f() -> Int = bit_or(3, 5)"), true, root, cache)
+
+    # Alias-qualified: MUST be rejected. An extern is never module-qualified, so
+    # `bits.bit_or` names nothing. The env path accepting it is what made the REPL
+    # unusable — `:type bits.bit_or` answered, then the eval failed to compile.
+    both_paths(state, "plain import: alias-qualified extern does not resolve",
+      session("import stdlib.bits", "fn f() -> Int = bits.bit_or(3, 5)"), false, root, cache)
+
+    # A selective list has no bearing on an extern: `length` is named, the extern
+    # `bytes_length` is not, and it resolves anyway (spec §Externs, third bullet).
+    both_paths(state, "selective import: an unlisted extern still resolves",
+      session("import stdlib.bytes (length)",
+        "fn f() -> Int = bytes_length(bytes_from_utf8(\"hi\"))"), true, root, cache)
+
+    # An alias does not rename an extern either.
+    both_paths(state, "aliased import: extern is still bare, not alias-qualified",
+      session("import stdlib.bits as b", "fn f() -> Int = bit_or(3, 5)"), true, root, cache)
+
+    # "Wherever its declaring module is part of the build" includes TRANSITIVELY.
+    # `stdlib.http` imports `stdlib.bytes`; that puts bytes in the build, so the
+    # bytes externs resolve here without bytes being imported directly. Global
+    # names must therefore cross a module boundary the way markers do — an extern
+    # that stopped at its importer would satisfy every case above and still break.
+    both_paths(state, "transitive import: an extern from an indirect module resolves",
+      session("import stdlib.http",
+        "fn f() -> Int = bytes_length(bytes_from_utf8(\"hi\"))"), true, root, cache)
+
+    # --- controls: these must already agree, or the harness proves nothing ---
+
+    # An ordinary `export fn` IS alias-qualified. Pins the fix to externs rather
+    # than letting it disable qualification wholesale.
+    both_paths(state, "control: ordinary exported fn is alias-qualified",
+      session("import stdlib.bytes", "fn f() -> Int = bytes.length(bytes.empty())"),
+      true, root, cache)
+
+    # And a name that exists nowhere is still rejected by both.
+    both_paths(state, "control: an undeclared name resolves on neither path",
+      session("import stdlib.bits", "fn f() -> Int = no_such_name_at_all(1)"),
+      false, root, cache)
+
+    summary(state)
