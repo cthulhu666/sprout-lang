@@ -2168,6 +2168,40 @@ div-by-zero-smoke: bootstrap-from-seed
   fi
   echo "==> div-by-zero-smoke ✓ (clean panic, exit $ec)"
 
+# stdlib.bits shift-count guard regression (CI gate). Same shape and same reason as
+# div-by-zero-smoke above: the count is -1 at RUNTIME (`list_length(argv) - 1` with
+# no args), which neither the compiler nor clang can fold, and a LITERAL negative
+# count is a compile error so it would not reach this path at all. Unguarded,
+# `shl i64 %x, -1` is LLVM poison — and poison propagates, so a missing guard can
+# look correct at -O0 and diverge at -O2. The emitted guard must panic cleanly.
+[group('smoke')]
+negative-shift-smoke: bootstrap-from-seed
+  #!/usr/bin/env bash
+  set -euo pipefail
+  TMPD=$(mktemp -d /tmp/sprout_negshift_XXXXXX)
+  trap 'rm -rf "$TMPD"' EXIT
+  FIXTURE=tests/bits_smoke/negative_shift.spr
+  if ! "{{build_dir}}/compile_driver_bin_stage1" --emit-ir "{{stdlib_root}}" "$FIXTURE" > "$TMPD/out.ll" 2>"$TMPD/emit.err"; then
+    echo "negative-shift-smoke: emit-IR failed" >&2; cat "$TMPD/emit.err" >&2; exit 1
+  fi
+  if ! clang "$TMPD/out.ll" {{runtime_src}} -O2 {{clang_extra}} -o "$TMPD/bin" 2>"$TMPD/link.err"; then
+    echo "negative-shift-smoke: link failed" >&2; cat "$TMPD/link.err" >&2; exit 1
+  fi
+  set +e
+  "$TMPD/bin" > "$TMPD/run.out" 2>"$TMPD/run.err"
+  ec=$?
+  set -e
+  if [ "$ec" -eq 0 ]; then
+    echo "negative-shift-smoke: a negative shift count did NOT panic (exit 0) — the guard is missing or was optimized away" >&2
+    exit 1
+  fi
+  if ! grep -q "negative shift count" "$TMPD/run.err"; then
+    echo "negative-shift-smoke: not reported cleanly (exit $ec); expected 'negative shift count' on stderr" >&2
+    echo "--- stderr was ---" >&2; cat "$TMPD/run.err" >&2
+    exit 1
+  fi
+  echo "==> negative-shift-smoke ✓ (clean panic, exit $ec)"
+
 # Closure-arity guard regression (CI gate).  A Sprout function type does not fix
 # a value's arity — `\(x, y) -> …` and `\x -> \y -> …` share `Int -> Int -> Int`
 # — so applying a function-typed VALUE with the wrong argument count cannot be
@@ -2664,6 +2698,7 @@ ci-fast-gates: bootstrap-from-seed build-fmt-from-seed
     "gc-arena|gc-arena-check"
     "argv-smoke|argv-smoke"
     "div-by-zero-smoke|div-by-zero-smoke"
+    "negative-shift-smoke|negative-shift-smoke"
     "closure-arity-smoke|closure-arity-smoke"
     "stack-overflow-smoke|stack-overflow-smoke"
     "flush-on-crash-smoke|flush-on-crash-smoke"

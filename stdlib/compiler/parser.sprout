@@ -24,13 +24,42 @@ fn tok_at(tokens: Vec token.Token, i: Int) -> token.Token =
 fn tok_pos(t: token.Token) -> source.SourcePos =
   token.token_position(t)
 
+# Value of a `0x`/`0b` literal's digit run. Uses hex_digit_value for both radices
+# and rejects any digit at or above the radix, so `0b12` is not silently read as 2.
+fn radix_digits_value(text: String, index: Int, radix: Int, acc: Int) -> Maybe Int =
+  if index >= str_len(text) then Just(acc)
+  else
+    match str_char_at(text, index) with
+    | Nothing -> Nothing
+    | Just ch ->
+        match string.hex_digit_value(ch) with
+        | Nothing -> Nothing
+        | Just v ->
+            if v >= radix then Nothing
+            else radix_digits_value(text, index + 1, radix, (acc * radix) + v)
+
+# A radix-prefixed int literal, or Nothing for a decimal one.
+#
+# The prelude's `parse_int` is deliberately NOT taught about prefixes: it is the
+# public String -> Maybe Int for USER input, where quietly accepting "0xFF" would
+# change the meaning of existing programs that validate input with it.
+fn radix_from_lexed(text: String) -> Maybe Int =
+  if str_starts_with(text, "0x") || str_starts_with(text, "0X") then
+    radix_digits_value(text, 2, 16, 0)
+  else if str_starts_with(text, "0b") || str_starts_with(text, "0B") then
+    radix_digits_value(text, 2, 2, 0)
+  else Nothing
+
 # W8/P1: parse_int is now total (Maybe Int). Int-literal tokens are already
 # validated by the lexer, so unwrap with a loud panic — Nothing here means a
 # lexer invariant was violated, not user error.
 fn int_from_lexed(text: String) -> Int =
-  match parse_int(text) with
+  match radix_from_lexed(text) with
   | Just n -> n
-  | Nothing -> panic("parser: lexer produced a non-integer int-literal token: " ++ text)
+  | Nothing ->
+      match parse_int(text) with
+      | Just n -> n
+      | Nothing -> panic("parser: lexer produced a non-integer int-literal token: " ++ text)
 
 fn cur_pos(tokens: Vec token.Token, i: Int) -> source.SourcePos =
   tok_pos(tok_at(tokens, i))

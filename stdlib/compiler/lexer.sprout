@@ -326,10 +326,47 @@ fn scan_float_frac_end(int_end: source.SourceCursor) -> Maybe source.SourceCurso
       else
         Nothing
 
+# The digit run of a radix literal, which must be NON-EMPTY — otherwise the `0x`
+# was not a radix prefix at all and the caller falls back to decimal.
+fn scan_radix_digits(cursor: source.SourceCursor, pred: Char -> Bool) -> Maybe source.SourceCursor =
+  match source.peek(cursor) with
+  | Nothing -> Nothing
+  | Just ch -> if pred(ch) then Just(source.take_while(cursor, pred)) else Nothing
+
+# A `0x`/`0b`-prefixed integer literal, or Nothing for an ordinary decimal one.
+# The prefix is accepted in either case (`0X`, `0B`), as are hex digits.
+#
+# A prefix with no valid digit after it is deliberately NOT an error here: `0x`
+# falls back to the decimal int `0` followed by the identifier `x`, which the
+# parser rejects as two adjacent expressions. That keeps scan_int_next free of a
+# Result (it is called from two places that would each have to thread it), and it
+# cannot silently change the meaning of any existing program, because `0x` was a
+# parse error before radix literals existed too.
+fn scan_radix_end(cursor: source.SourceCursor) -> Maybe source.SourceCursor =
+  match source.next(cursor) with
+  | Nothing -> Nothing
+  | Just (lead, after_lead) ->
+      if lead != '0' then Nothing
+      else
+        match source.next(after_lead) with
+        | Nothing -> Nothing
+        | Just (marker, after_marker) ->
+            if marker == 'x' || marker == 'X' then
+              scan_radix_digits(after_marker, string.is_hex_digit)
+            else if marker == 'b' || marker == 'B' then
+              scan_radix_digits(after_marker, string.is_binary_digit)
+            else Nothing
+
+# The token carries the literal's SOURCE SPELLING, not its value — `0xFF` stays
+# "0xFF" — so the formatter reprints hex as hex. The parser decodes the radix
+# (int_from_lexed).
 fn scan_int_next(raw: String, cursor: source.SourceCursor) -> (source.SourceCursor, token.Token) =
-  match scan_float_frac_end(int_end) with
-  | Just frac_end -> (frac_end, emit_token(token.TokenFloatKind, raw, cursor, frac_end))
-  | Nothing -> (int_end, emit_token(token.TokenIntKind, raw, cursor, int_end))
+  match scan_radix_end(cursor) with
+  | Just radix_end -> (radix_end, emit_token(token.TokenIntKind, raw, cursor, radix_end))
+  | Nothing ->
+      match scan_float_frac_end(int_end) with
+      | Just frac_end -> (frac_end, emit_token(token.TokenFloatKind, raw, cursor, frac_end))
+      | Nothing -> (int_end, emit_token(token.TokenIntKind, raw, cursor, int_end))
 where
   int_end = scan_int_end(cursor)
 

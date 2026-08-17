@@ -1,0 +1,173 @@
+import stdlib.test (TestState, new_state, assert_eq, assert_true, summary)
+import stdlib.bits
+
+# Bitwise integer operations. Design, prior-art survey and the two semantics
+# decisions this file pins: docs/bitwise-int-ops-v0.md.
+#
+# WHY THESE EXIST. Sprout had no way to mask a field out of a word, shift, or
+# XOR two integers, which is why SHA-256, HMAC-SHA-256 and even a byte-wise XOR
+# are C builtins (runtime/APPROVED_BUILTINS:64-67) and why the PRNG is an LCG
+# over a hand-rolled `imod` rather than a xorshift.
+#
+# THEY ARE COMPILER INTRINSICS. Each is intercepted in ast_to_ir and lowered to
+# one LLVM instruction — no runtime symbol, no APPROVED_BUILTINS entry, same
+# mechanism as `double_to_bits`. Two consequences visible here: they are called
+# by BARE name even though they are declared in stdlib.bits (an extern is never
+# qualified — spec §"Externs are outside the module system"), and they cannot be
+# passed as values (`list_fold(bit_xor, 0, xs)` would fail to link).
+#
+# TWO SEMANTICS DECISIONS ARE PINNED BELOW, and they pull in opposite
+# directions, which is why both need tests:
+#
+#   §5.3  a shift COUNT outside 0..63 is out of domain. Count >= 64 saturates
+#         (0, or all sign bits for the arithmetic shift); a negative count
+#         PANICS. Unguarded, `shl i64 %x, 64` is LLVM poison.
+#   §5.2  bits shifted off the TOP are discarded and that is NOT an error.
+#         bit_shl(1, 63) is INT_MIN, total, and must stay total even if `*`
+#         later gains overflow trapping.
+#
+# THE ARGV COUNTS ARE LOAD-BEARING, NOT DECORATION. A literal shift count is
+# constant-folded at translate time, so a test written only with literals never
+# reaches the guard CFG at all. `list_length(args)` is 0 at runtime (the test
+# runs with no arguments) and neither Sprout nor clang can fold it, so the
+# dynamic-count assertions below are the only ones that exercise the guard.
+# Same trick, and same reason, as tests/div_smoke/div_by_zero.spr.
+
+fn main() -> Unit !{IO} =
+  do
+    state <- new_state()
+    args <- argv_all()
+
+    # `zero` is 0 but opaque to both compilers; `dyn n` is n by the same route.
+    let zero = list_length(args)
+
+    # --- masking and field extraction: the motivating use ---
+    # 48350 is 0xBCDE, so its low byte is 0xDE. Values here stay decimal on
+    # purpose: hex literals land in the same change, and pinning bitwise
+    # semantics with them would make this suite depend on that lexer work.
+    assert_eq(state, "bit_and masks the low byte", bit_and(48350, 255), 222)
+    assert_eq(state, "bit_and with 0 clears", bit_and(48350, 0), 0)
+    assert_eq(state, "bit_or sets bits", bit_or(160, 13), 173)
+    assert_eq(state, "bit_xor toggles bits", bit_xor(204, 170), 102)
+
+    # --- algebraic identities, the cheapest real check on the lowering ---
+    assert_eq(state, "and is idempotent", bit_and(48350, 48350), 48350)
+    assert_eq(state, "or is idempotent", bit_or(48350, 48350), 48350)
+    assert_eq(state, "xor with self is 0", bit_xor(48350, 48350), 0)
+    assert_eq(state, "xor with 0 is identity", bit_xor(48350, 0), 48350)
+    assert_eq(state, "and with -1 is identity", bit_and(48350, -1), 48350)
+    assert_eq(state, "or with -1 is -1", bit_or(48350, -1), -1)
+
+    # --- complement: -x - 1 on two's complement, no width in the definition ---
+    assert_eq(state, "bit_not 0 is -1", bit_not(0), -1)
+    assert_eq(state, "bit_not -1 is 0", bit_not(-1), 0)
+    assert_eq(state, "bit_not x is -x - 1", bit_not(48350), -48351)
+    assert_eq(state, "bit_not is an involution", bit_not(bit_not(48350)), 48350)
+    assert_eq(state, "x or not x is -1", bit_or(48350, bit_not(48350)), -1)
+    assert_eq(state, "x and not x is 0", bit_and(48350, bit_not(48350)), 0)
+
+    # --- shifts in range: multiplication and floor division by 2^n ---
+    assert_eq(state, "shl by 0 is identity", bit_shl(48350, 0), 48350)
+    assert_eq(state, "shl by 1 doubles", bit_shl(48350, 1), 96700)
+    assert_eq(state, "shl by 4 is times 16", bit_shl(1, 4), 16)
+    assert_eq(state, "shr by 0 is identity", bit_shr(48350, 0), 48350)
+    assert_eq(state, "shr by 1 halves", bit_shr(48350, 1), 24175)
+    assert_eq(state, "shr is floor division, not truncation", bit_shr(-7, 1), -4)
+    assert_eq(state, "shr_zf by 0 is identity", bit_shr_zf(48350, 0), 48350)
+    assert_eq(state, "shr_zf by 1 halves a positive", bit_shr_zf(48350, 1), 24175)
+
+    # --- the two right shifts differ ONLY on negatives: their whole purpose ---
+    assert_eq(state, "shr sign-fills a negative", bit_shr(-8, 1), -4)
+    assert_eq(state, "shr_zf zero-fills the same value",
+      bit_shr_zf(-8, 1), 9223372036854775804)
+    assert_eq(state, "shr of -1 stays -1 at any count", bit_shr(-1, 40), -1)
+    assert_eq(state, "shr_zf of -1 exposes the zero fill",
+      bit_shr_zf(-1, 63), 1)
+
+    # --- §5.2 value-overflow: high bits are DISCARDED, and it is not an error ---
+    # If a shared overflow guard is ever applied to `bit_shl` these turn into
+    # panics rather than failures, which is exactly what must not happen.
+    assert_eq(state, "shl to the sign bit is INT_MIN, not an overflow error",
+      bit_shl(1, 63), -9223372036854775808)
+    assert_eq(state, "shl discarding two bits is still total",
+      bit_shl(3, 63), -9223372036854775808)
+    assert_eq(state, "shl discarding every bit gives 0", bit_shl(2, 63), 0)
+
+    # --- §5.3 count boundary, CONSTANT counts (the folded path) ---
+    assert_eq(state, "shl by 63 is in range", bit_shl(1, 63), -9223372036854775808)
+    assert_eq(state, "shl by 64 saturates to 0", bit_shl(1, 64), 0)
+    assert_eq(state, "shl by 200 saturates to 0", bit_shl(1, 200), 0)
+    assert_eq(state, "shr_zf by 64 saturates to 0", bit_shr_zf(-8, 64), 0)
+    assert_eq(state, "shr by 64 saturates to all sign bits", bit_shr(-8, 64), -1)
+    assert_eq(state, "shr by 64 of a positive saturates to 0", bit_shr(8, 64), 0)
+
+    # --- §5.3 count boundary, DYNAMIC counts (the guard CFG path) ---
+    # These are the assertions the constant-fold path cannot reach.
+    assert_eq(state, "dynamic count 0 is identity",
+      bit_shl(48350, zero), 48350)
+    assert_eq(state, "dynamic count 1 doubles", bit_shl(48350, zero + 1), 96700)
+    assert_eq(state, "dynamic count 63 reaches the sign bit",
+      bit_shl(1, zero + 63), -9223372036854775808)
+    assert_eq(state, "dynamic count 64 saturates shl to 0",
+      bit_shl(1, zero + 64), 0)
+    assert_eq(state, "dynamic count 64 saturates shr_zf to 0",
+      bit_shr_zf(-8, zero + 64), 0)
+    assert_eq(state, "dynamic count 64 saturates shr to all sign bits",
+      bit_shr(-8, zero + 64), -1)
+    assert_eq(state, "dynamic count 200 saturates",
+      bit_shl(1, zero + 200), 0)
+    assert_eq(state, "dynamic and constant agree in range",
+      bit_shr_zf(-8, zero + 1), bit_shr_zf(-8, 1))
+
+    # --- composition: the primitives are sufficient for real work ---
+    # rotr32 is SHA-256's core mixing step. It is deliberately NOT a primitive
+    # (Go keeps rotate in the math/bits library for the same reason); if this
+    # passes, the seven functions are enough to write a hash core in Sprout.
+    # 2864434397 is 0xAABBCCDD, whose byte pattern makes a rotation legible:
+    # rotating right by 8 must give 0xDDAABBCC = 3718953932.
+    assert_eq(state, "rotr32 by 0 is identity", rotr32(2864434397, 0), 2864434397)
+    assert_eq(state, "rotr32 by 8 moves the low byte to the top",
+      rotr32(2864434397, 8), 3718953932)
+    assert_eq(state, "rotr32 by 16 is its own inverse pair",
+      rotr32(rotr32(2864434397, 16), 16), 2864434397)
+    assert_eq(state, "rotr32 stays inside 32 bits",
+      bit_shr_zf(rotr32(2864434397, 8), 32), 0)
+
+    # popcount composed from shr_zf + and, proving iteration works over bits
+    assert_eq(state, "popcount of 0", popcount(0), 0)
+    assert_eq(state, "popcount of 255", popcount(255), 8)
+    assert_eq(state, "popcount of -1 is 64", popcount(-1), 64)
+
+    # --- a GC-header-shaped extraction, the design's motivating consumer ---
+    # kind 8b | colour 2b | reserved 4b | aux (rest), per
+    # docs/gc-phase2-retro-handoff-2026-07-05.md §2.
+    assert_eq(state, "header kind field", header_kind(header), 37)
+    assert_eq(state, "header colour field", header_colour(header), 2)
+    assert_eq(state, "header aux field", header_aux(header), 1000)
+
+    summary(state)
+where
+  # aux=1000 at bit 14, reserved=0, colour=2 at bit 8, kind=37
+  header = bit_or(bit_or(bit_shl(1000, 14), bit_shl(2, 8)), 37)
+
+# --- helpers, all pure Sprout over the seven intrinsics ---
+
+# Right-rotate within a 32-bit window: the two halves of the rotation are
+# spliced with `or`, then masked back down to 32 bits. `bit_shr_zf` (not
+# `bit_shr`) is required — a sign-filling shift would smear ones into the high
+# half for any value with bit 31 set.
+fn rotr32(x: Int, n: Int) -> Int =
+  bit_and(bit_or(bit_shr_zf(bit_and(x, 4294967295), n), bit_shl(x, 32 - n)),
+          4294967295)
+
+fn popcount(x: Int) -> Int = popcount_go(x, 64, 0)
+
+fn popcount_go(x: Int, remaining: Int, acc: Int) -> Int =
+  if remaining <= 0 then acc
+  else popcount_go(bit_shr_zf(x, 1), remaining - 1, acc + bit_and(x, 1))
+
+fn header_kind(w: Int) -> Int = bit_and(w, 255)
+
+fn header_colour(w: Int) -> Int = bit_and(bit_shr_zf(w, 8), 3)
+
+fn header_aux(w: Int) -> Int = bit_shr_zf(w, 14)

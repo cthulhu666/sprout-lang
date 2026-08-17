@@ -146,6 +146,13 @@ fn op_triggers_gc(op: sprout_ir.IROp) -> Bool =
   | sprout_ir.IRISub _ _ _ -> false
   | sprout_ir.IRIMul _ _ _ -> false
   | sprout_ir.IRIDiv _ _ _ -> false
+  # stdlib.bits: register arithmetic on unboxed i64, allocates nothing.
+  | sprout_ir.IRIAnd _ _ _ -> false
+  | sprout_ir.IRIOr _ _ _ -> false
+  | sprout_ir.IRIXor _ _ _ -> false
+  | sprout_ir.IRIShl _ _ _ -> false
+  | sprout_ir.IRIAShr _ _ _ -> false
+  | sprout_ir.IRILShr _ _ _ -> false
   | sprout_ir.IRFloatConst _ _ -> false
   | sprout_ir.IRFAdd _ _ _ -> false
   | sprout_ir.IRFSub _ _ _ -> false
@@ -279,6 +286,13 @@ fn op_produces_simple_heap(op: sprout_ir.IROp) -> Maybe String =
   | sprout_ir.IRISub _ _ _ -> Nothing
   | sprout_ir.IRIMul _ _ _ -> Nothing
   | sprout_ir.IRIDiv _ _ _ -> Nothing
+  # stdlib.bits: the result is an unboxed i64, never a heap pointer.
+  | sprout_ir.IRIAnd _ _ _ -> Nothing
+  | sprout_ir.IRIOr _ _ _ -> Nothing
+  | sprout_ir.IRIXor _ _ _ -> Nothing
+  | sprout_ir.IRIShl _ _ _ -> Nothing
+  | sprout_ir.IRIAShr _ _ _ -> Nothing
+  | sprout_ir.IRILShr _ _ _ -> Nothing
   | sprout_ir.IRFloatConst _ _ -> Nothing
   | sprout_ir.IRFAdd _ _ _ -> Nothing
   | sprout_ir.IRFSub _ _ _ -> Nothing
@@ -377,6 +391,12 @@ fn op_uses(op: sprout_ir.IROp) -> List String =
   | sprout_ir.IRISub _ a b -> [a, b]
   | sprout_ir.IRIMul _ a b -> [a, b]
   | sprout_ir.IRIDiv _ a b -> [a, b]
+  | sprout_ir.IRIAnd _ a b -> [a, b]
+  | sprout_ir.IRIOr _ a b -> [a, b]
+  | sprout_ir.IRIXor _ a b -> [a, b]
+  | sprout_ir.IRIShl _ a b -> [a, b]
+  | sprout_ir.IRIAShr _ a b -> [a, b]
+  | sprout_ir.IRILShr _ a b -> [a, b]
   | sprout_ir.IRFloatConst _ _ -> Nil
   | sprout_ir.IRFAdd _ a b -> [a, b]
   | sprout_ir.IRFSub _ a b -> [a, b]
@@ -453,6 +473,12 @@ fn op_def(op: sprout_ir.IROp) -> Maybe String =
   | sprout_ir.IRISub r _ _ -> Just(r)
   | sprout_ir.IRIMul r _ _ -> Just(r)
   | sprout_ir.IRIDiv r _ _ -> Just(r)
+  | sprout_ir.IRIAnd r _ _ -> Just(r)
+  | sprout_ir.IRIOr r _ _ -> Just(r)
+  | sprout_ir.IRIXor r _ _ -> Just(r)
+  | sprout_ir.IRIShl r _ _ -> Just(r)
+  | sprout_ir.IRIAShr r _ _ -> Just(r)
+  | sprout_ir.IRILShr r _ _ -> Just(r)
   | sprout_ir.IRFloatConst r _ -> Just(r)
   | sprout_ir.IRFAdd r _ _ -> Just(r)
   | sprout_ir.IRFSub r _ _ -> Just(r)
@@ -759,6 +785,14 @@ fn op_exposes_operands(op: sprout_ir.IROp) -> Bool =
   | sprout_ir.IRISub _ _ _ -> false
   | sprout_ir.IRIMul _ _ _ -> false
   | sprout_ir.IRIDiv _ _ _ -> false
+  # stdlib.bits: operands are unboxed i64 and nothing allocates, so there is no
+  # window in which a collection could see them.
+  | sprout_ir.IRIAnd _ _ _ -> false
+  | sprout_ir.IRIOr _ _ _ -> false
+  | sprout_ir.IRIXor _ _ _ -> false
+  | sprout_ir.IRIShl _ _ _ -> false
+  | sprout_ir.IRIAShr _ _ _ -> false
+  | sprout_ir.IRILShr _ _ _ -> false
   | sprout_ir.IRFloatConst _ _ -> false
   | sprout_ir.IRFAdd _ _ _ -> false
   | sprout_ir.IRFSub _ _ _ -> false

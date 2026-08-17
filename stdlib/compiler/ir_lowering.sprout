@@ -136,6 +136,17 @@ fn lower_op(op: sprout_ir.IROp, ret_ty: String, str_table: Dict (String, Int)) -
   | sprout_ir.IRISub r a b -> "  " ++ r ++ " = sub i64 " ++ a ++ ", " ++ b
   | sprout_ir.IRIMul r a b -> "  " ++ r ++ " = mul i64 " ++ a ++ ", " ++ b
   | sprout_ir.IRIDiv r a b -> "  " ++ r ++ " = sdiv i64 " ++ a ++ ", " ++ b
+  # stdlib.bits. One instruction each, no flags: `and`/`or`/`xor` are total, and
+  # the three shifts are poison-free only because ast_to_ir has already bounded
+  # the count to 0..63 (see the precondition on the constructors). Emitting `shl
+  # nuw` or `ashr exact` here would be wrong — discarding high bits is the
+  # SPECIFIED behaviour of bit_shl, not an assumption we may exploit.
+  | sprout_ir.IRIAnd r a b -> "  " ++ r ++ " = and i64 " ++ a ++ ", " ++ b
+  | sprout_ir.IRIOr r a b -> "  " ++ r ++ " = or i64 " ++ a ++ ", " ++ b
+  | sprout_ir.IRIXor r a b -> "  " ++ r ++ " = xor i64 " ++ a ++ ", " ++ b
+  | sprout_ir.IRIShl r a b -> "  " ++ r ++ " = shl i64 " ++ a ++ ", " ++ b
+  | sprout_ir.IRIAShr r a b -> "  " ++ r ++ " = ashr i64 " ++ a ++ ", " ++ b
+  | sprout_ir.IRILShr r a b -> "  " ++ r ++ " = lshr i64 " ++ a ++ ", " ++ b
   # Float ops: operands are i64 bit-patterns — bitcast to double, apply the
   # instruction, bitcast the result back to i64 (uniform ABI, §7.1).
   | sprout_ir.IRFloatConst r text -> "  " ++ r ++ " = bitcast double " ++ text ++ " to i64"

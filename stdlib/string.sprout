@@ -162,6 +162,24 @@ export fn is_ident_start(ch: Char) -> Bool =
 export fn is_ident_continue(ch: Char) -> Bool =
   is_ident_start(ch) || is_ascii_digit_char(ch)
 
+# Radix digits, for `0x` / `0b` integer literals. The index of the character in
+# the digit string IS its value — the same trick as digit_value below. Both cases
+# are accepted, so `0xFF` and `0xff` agree.
+#
+# Binary digits deliberately have no separate value function: they are a subset of
+# hex, so a caller decoding base 2 uses hex_digit_value and rejects any value >= 2.
+# Shared by the lexer (which scans the run) and the parser (which decodes it).
+export fn hex_digit_value(ch: Char) -> Maybe Int =
+  match find("0123456789abcdef", string_from_char(ch)) with
+  | Just v -> Just(v)
+  | Nothing -> find("0123456789ABCDEF", string_from_char(ch))
+
+export fn is_hex_digit(ch: Char) -> Bool =
+  match hex_digit_value(ch) with | Just _ -> true | Nothing -> false
+
+export fn is_binary_digit(ch: Char) -> Bool =
+  ch == '0' || ch == '1'
+
 # ── ASCII whitespace trimming, O(n) ───────────────────────────────────────────────────────────────
 # The previous versions recursed one codepoint at a time (`slice(raw, 1, len-1)` + a front-scanning
 # `char_at_or`), which is Θ(n²) even when nothing is stripped — quadratic on a single long header

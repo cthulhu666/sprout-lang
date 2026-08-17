@@ -4811,6 +4811,198 @@ fn translate_double_bits_call(fname: String, args: List typed_ast.TypedExpr,
                      name_prefix)
   | Nil -> Err("ast_to_ir: " ++ fname ++ " expects 1 argument, got 0")
 
+# --- stdlib.bits intrinsics.  docs/bitwise-int-ops-v0.md ---------------------
+#
+# Recognized by name in translate_call and lowered to one LLVM instruction each,
+# the same arrangement as `to_double` / `double_to_bits`: there is no @bit_and
+# symbol in the runtime and no APPROVED_BUILTINS entry, because nothing is being
+# called.
+#
+# `bit_not` has no IR op of its own — flipping every bit is xor against -1, so it
+# reuses IRIXor with a literal operand (as IRBoolNot does with `xor i64 %x, 1`).
+fn bits_plain_op(fname: String, result: String, a: String, b: String) -> Maybe sprout_ir.IROp =
+  if fname == "bit_and" then Just(sprout_ir.IRIAnd(result, a, b))
+  else if fname == "bit_or" then Just(sprout_ir.IRIOr(result, a, b))
+  else if fname == "bit_xor" then Just(sprout_ir.IRIXor(result, a, b))
+  else Nothing
+
+fn bits_shift_op(fname: String, result: String, x: String, n: String) -> Maybe sprout_ir.IROp =
+  if fname == "bit_shl" then Just(sprout_ir.IRIShl(result, x, n))
+  else if fname == "bit_shr" then Just(sprout_ir.IRIAShr(result, x, n))
+  else if fname == "bit_shr_zf" then Just(sprout_ir.IRILShr(result, x, n))
+  else Nothing
+
+fn is_bits_shift(fname: String) -> Bool =
+  fname == "bit_shl" || fname == "bit_shr" || fname == "bit_shr_zf"
+
+export fn is_bits_intrinsic(fname: String) -> Bool =
+  fname == "bit_and" || fname == "bit_or" || fname == "bit_xor"
+    || fname == "bit_not" || is_bits_shift(fname)
+
+# The value a shift saturates to once the count leaves 0..63.  Shifting a 64-bit
+# word by 64 or more leaves nothing of it — except for the ARITHMETIC right
+# shift, whose limit is the sign bit smeared across the whole word, which is
+# what `ashr x, 63` produces for both signs.
+fn bits_saturate_op(fname: String, result: String, x: String) -> sprout_ir.IROp =
+  if fname == "bit_shr" then sprout_ir.IRIAShr(result, x, "63")
+  else sprout_ir.IRConst(result, 0)
+
+# Guard CFG for a shift whose count is not a literal.  LLVM's shl/ashr/lshr are
+# POISON for a count at or above the bit width, so the count must be bounded
+# before the instruction is reached — the same undefined-behaviour class the
+# division-by-zero guard closed (finish_checked_div above), and the reason this
+# cannot be done at the ir_lowering text layer: splitting blocks there breaks
+# phi predecessors.
+#
+# Emits five blocks.  The negative-count arm panics (noreturn, so it needs no
+# join edge); the >= 64 arm materialises the saturated value; the in-range arm
+# does the shift; and a join phi selects between the latter two.  The join block
+# becomes the new current block, so downstream phis name it as their predecessor.
+#
+# The `sgt 63` test is signed and correct because the negative case has already
+# branched away, so the value reaching it is known non-negative.
+#
+# Consumes 7 fresh-name slots: neg-cmp, msg-raw, msg, ovf-cmp, saturated,
+# shifted, phi.
+fn finish_checked_shift(fname: String,
+                        xblocks: List sprout_ir.IRBlock, nblocks: List sprout_ir.IRBlock,
+                        cur_lbl: String, cur_ops: List sprout_ir.IROp,
+                        x_name: String, n_name: String,
+                        idx: Int, name_prefix: String) ->
+    Result String (List sprout_ir.IRBlock, String, List sprout_ir.IROp, String, Int) =
+  match bits_shift_op(fname, shifted, x_name, n_name) with
+  | Nothing -> Err("ast_to_ir: finish_checked_shift on non-shift " ++ fname)
+  | Just do_op ->
+      Ok((list_append(list_append(xblocks, nblocks),
+                      [cond_block, panic_block, chk_block, sat_block,
+                       sprout_ir.IRBlock(do_lbl,
+                         [do_op, sprout_ir.IRBr(join_lbl)])]),
+          join_lbl, Cons(phi_op, Nil), phi_result, idx + 7))
+  where neg_name = fresh_name(name_prefix, idx)
+        msg_raw = fresh_name(name_prefix, idx + 1)
+        msg_result = fresh_name(name_prefix, idx + 2)
+        ovf_name = fresh_name(name_prefix, idx + 3)
+        sat_value = fresh_name(name_prefix, idx + 4)
+        shifted = fresh_name(name_prefix, idx + 5)
+        phi_result = fresh_name(name_prefix, idx + 6)
+        panic_lbl = "shiftpanic_" ++ int_to_string(idx)
+        chk_lbl = "shiftchk_" ++ int_to_string(idx)
+        sat_lbl = "shiftsat_" ++ int_to_string(idx)
+        do_lbl = "shiftdo_" ++ int_to_string(idx)
+        join_lbl = "shiftjoin_" ++ int_to_string(idx)
+        cond_block = sprout_ir.IRBlock(cur_lbl,
+                       list_append(cur_ops,
+                         [sprout_ir.IRICmp(neg_name, "slt", n_name, "0"),
+                          sprout_ir.IRCondBr(neg_name, panic_lbl, chk_lbl)]))
+        panic_block = sprout_ir.IRBlock(panic_lbl,
+                        [sprout_ir.IRStrConst(msg_result, msg_raw,
+                           fname ++ ": negative shift count"),
+                         sprout_ir.IRPanic(msg_result)])
+        chk_block = sprout_ir.IRBlock(chk_lbl,
+                      [sprout_ir.IRICmp(ovf_name, "sgt", n_name, "63"),
+                       sprout_ir.IRCondBr(ovf_name, sat_lbl, do_lbl)])
+        sat_block = sprout_ir.IRBlock(sat_lbl,
+                      [bits_saturate_op(fname, sat_value, x_name),
+                       sprout_ir.IRBr(join_lbl)])
+        phi_op = sprout_ir.IRPhi(phi_result, "i64",
+                   [(sat_value, sat_lbl), (shifted, do_lbl)])
+
+# A shift whose count is an integer LITERAL needs no guard at all: the domain is
+# decided at compile time.  In range, the count becomes an immediate operand
+# (`shl i64 %x, 14`), so a mask or field extract is one instruction with no
+# branch and no block — which is the whole reason the guard above is acceptable.
+#
+# A literal count of 64 or more folds to the saturated value.  A literal NEGATIVE
+# count is rejected outright: the dynamic case can only panic at run time, but a
+# statically known one is a program that cannot be right, and Go and Zig reject
+# constant out-of-range shifts at compile time for the same reason.
+fn translate_folded_shift(fname: String, n: Int,
+                          xblocks: List sprout_ir.IRBlock, cur_lbl: String,
+                          cur_ops: List sprout_ir.IROp, x_name: String,
+                          idx: Int, name_prefix: String) ->
+    Result String (List sprout_ir.IRBlock, String, List sprout_ir.IROp, String, Int) =
+  if n < 0 then
+    Err("ast_to_ir: " ++ fname ++ " shift count is negative (" ++ int_to_string(n)
+          ++ "); a shift count must be 0 or greater")
+  else if n > 63 then
+    Ok((xblocks, cur_lbl,
+        list_append(cur_ops, Cons(bits_saturate_op(fname, result, x_name), Nil)),
+        result, idx + 1))
+  else
+    match bits_shift_op(fname, result, x_name, int_to_string(n)) with
+    | Nothing -> Err("ast_to_ir: translate_folded_shift on non-shift " ++ fname)
+    | Just op ->
+        Ok((xblocks, cur_lbl, list_append(cur_ops, Cons(op, Nil)), result, idx + 1))
+  where result = fresh_name(name_prefix, idx)
+
+fn translate_bits_call(fname: String, args: List typed_ast.TypedExpr,
+                       params: List String, ctors: Dict sprout_ir.CtorInfo, idx: Int,
+                       cur_label: String, cur_ops: List sprout_ir.IROp,
+                       captures: Dict String,
+                       lifted_ref: Ref (List sprout_ir.IRFunction),
+                       top_level: Set, let_names: Set, fn_arities: Dict FnInfo,
+                       lambda_ctr_ref: Ref Int, lifted_idx_ref: Ref (Dict Int),
+                       name_prefix: String) ->
+    Result String (List sprout_ir.IRBlock, String, List sprout_ir.IROp, String, Int) !{IO} =
+  match args with
+  | [x, n | _] ->
+      match translate_expr(x, params, ctors, idx, cur_label, cur_ops,
+                           captures, lifted_ref, top_level, let_names, fn_arities, lambda_ctr_ref, lifted_idx_ref,
+                           name_prefix) with
+      | Err msg -> Err(msg)
+      | Ok xr ->
+          match xr with
+          | (xblocks, xlbl, xops, x_name, idx1) ->
+              if is_bits_shift(fname) then
+                # A literal count is folded; anything else gets the guard.  The
+                # literal's own translation is skipped entirely — an immediate
+                # operand costs no instruction, and a TInt has no side effects to
+                # preserve.
+                match n with
+                | typed_ast.TInt count _ _ ->
+                    translate_folded_shift(fname, count, xblocks, xlbl, xops, x_name,
+                                           idx1, name_prefix)
+                | _ ->
+                    match translate_expr(n, params, ctors, idx1, xlbl, xops,
+                                         captures, lifted_ref, top_level, let_names, fn_arities,
+                                         lambda_ctr_ref, lifted_idx_ref, name_prefix) with
+                    | Err msg -> Err(msg)
+                    | Ok nr ->
+                        match nr with
+                        | (nblocks, nlbl, nops, n_name, idx2) ->
+                            finish_checked_shift(fname, xblocks, nblocks, nlbl, nops,
+                                                 x_name, n_name, idx2, name_prefix)
+              else
+                match translate_expr(n, params, ctors, idx1, xlbl, xops,
+                                     captures, lifted_ref, top_level, let_names, fn_arities,
+                                     lambda_ctr_ref, lifted_idx_ref, name_prefix) with
+                | Err msg -> Err(msg)
+                | Ok nr ->
+                    match nr with
+                    | (nblocks, nlbl, nops, n_name, idx2) ->
+                        match bits_plain_op(fname, fresh_name(name_prefix, idx2), x_name, n_name) with
+                        | Nothing ->
+                            Err("ast_to_ir: " ++ fname ++ " expects 1 argument, got 2")
+                        | Just op ->
+                            Ok((list_append(xblocks, nblocks), nlbl,
+                                list_append(nops, Cons(op, Nil)),
+                                fresh_name(name_prefix, idx2), idx2 + 1))
+  | [x | _] ->
+      if fname == "bit_not" then
+        match translate_expr(x, params, ctors, idx, cur_label, cur_ops,
+                             captures, lifted_ref, top_level, let_names, fn_arities, lambda_ctr_ref, lifted_idx_ref,
+                             name_prefix) with
+        | Err msg -> Err(msg)
+        | Ok xr ->
+            match xr with
+            | (xblocks, xlbl, xops, x_name, idx1) ->
+                Ok((xblocks, xlbl,
+                    list_append(xops,
+                      Cons(sprout_ir.IRIXor(fresh_name(name_prefix, idx1), x_name, "-1"), Nil)),
+                    fresh_name(name_prefix, idx1), idx1 + 1))
+      else Err("ast_to_ir: " ++ fname ++ " expects 2 arguments, got 1")
+  | Nil -> Err("ast_to_ir: " ++ fname ++ " expects arguments, got 0")
+
 fn translate_call(callee: typed_ast.TypedExpr, args: List typed_ast.TypedExpr,
                   call_ty: types.Type, params: List String,
                   ctors: Dict sprout_ir.CtorInfo, idx: Int,
@@ -4851,6 +5043,10 @@ fn translate_call(callee: typed_ast.TypedExpr, args: List typed_ast.TypedExpr,
           then translate_double_bits_call(fname, args, params, ctors, idx,
                                           cur_label, cur_ops, captures, lifted_ref, top_level, let_names, fn_arities,
                                           lambda_ctr_ref, lifted_idx_ref, name_prefix)
+          else if is_bits_intrinsic(fname)
+          then translate_bits_call(fname, args, params, ctors, idx,
+                                   cur_label, cur_ops, captures, lifted_ref, top_level, let_names, fn_arities,
+                                   lambda_ctr_ref, lifted_idx_ref, name_prefix)
           else if param_known(fname, params)
           then
             # Trust the typechecker: any param reached here was accepted as

@@ -1,0 +1,86 @@
+module stdlib.bits
+
+# Bitwise integer operations on `Int`.
+#
+# Design, prior-art survey, and the two semantics decisions: docs/bitwise-int-ops-v0.md.
+#
+# NAMED FUNCTIONS, NOT OPERATORS, and that was the central decision. `>>` and `<<` are
+# already function composition (`rcompose`/`lcompose`), and `&`, `^` and `~` are not even
+# lexed. Operators would therefore need new spellings, F#-style `&&& ||| ^^^ ~~~ <<< >>>` —
+# F# tripled its characters for exactly this reason, its own `>>` being forward composition.
+# Named functions cost no lexer entry, no precedence tier and no fixity decision, and if
+# operators are ever wanted they desugar to these very functions (OCaml's model, where
+# `external ( lsl ) = "%lslint"` has the signature govern typing and the name govern
+# codegen). Elm's `Bitwise` module and Go's `math/bits` are the shipped precedents.
+#
+# COMPILER INTRINSICS. Each is intercepted in `ast_to_ir` and lowered to a single LLVM
+# instruction — `and`, `or`, `xor`, `shl`, `ashr`, `lshr`. There is no `@bit_and` symbol in
+# the runtime and no `runtime/APPROVED_BUILTINS` entry, by design: nothing is being called.
+# Same declared-but-intercepted arrangement as `print`, `to_double` and `double_to_bits`,
+# including two consequences worth stating because they surprise people:
+#
+#   - An extern is never module-qualified (spec §"Externs are outside the module system"),
+#     so these are called by BARE name. `import stdlib.bits` puts them in the build;
+#     `bits.bit_and(w, 255)` does NOT resolve and fails with `Unknown variable`.
+#   - They cannot be used as first-class values. `list_fold(bit_xor, 0, xs)` references an
+#     undefined symbol and fails to LINK — loud rather than silent. Wrap it in a one-line
+#     ordinary function (`fn bxor(a: Int, b: Int) -> Int = bit_xor(a, b)`) if you need to
+#     pass one around.
+#
+# WIDTH. Five of the seven are definable without reference to any width, and survive `Int`
+# eventually becoming arbitrary-precision (spec §8.4) unchanged: `bit_and`, `bit_or`,
+# `bit_xor` are per-bit on infinite two's complement, `bit_not x` is `-x - 1`, and `bit_shr`
+# is `floor(x / 2^n)`. The other two are scoped to the 64-bit representation and are marked
+# as such at their declarations — they are what a widening would have to respecify.
+#
+# WHY THIS MODULE EXISTS AT ALL. Without it, masking a field out of a word is inexpressible
+# in Sprout, which is why SHA-256, HMAC-SHA-256 and even a byte-wise XOR live in the C
+# runtime, why `stdlib.rng` is an LCG rather than a xorshift, and why the GC header word
+# cannot be read from Sprout. It is a capability gap, not a speed one — there is no measured
+# bottleneck here, and the doc says so plainly.
+
+# --- width-independent: meaning does not depend on Int being 64 bits ---
+
+# Per-bit and/or/xor. On two's complement, bit i of the result depends only on bit i of
+# each operand, so these are exact at any width.
+extern fn bit_and(a: Int, b: Int) -> Int
+extern fn bit_or(a: Int, b: Int) -> Int
+extern fn bit_xor(a: Int, b: Int) -> Int
+
+# Flip every bit: `bit_not(x) == -x - 1`. Note `bit_not(0)` is -1, not 1 — this is the
+# integer complement, NOT the boolean `!`.
+extern fn bit_not(a: Int) -> Int
+
+# Arithmetic right shift: `floor(x / 2^n)`, filling vacated high bits with the sign bit.
+# Floor, not truncation — `bit_shr(-7, 1)` is -4, while `-7 / 2` is -3.
+extern fn bit_shr(x: Int, n: Int) -> Int
+
+# --- 64-bit-scoped: respecify these if Int ever widens ---
+
+# Left shift: `x * 2^n` within a 64-bit window, with bits above position 63 DISCARDED.
+#
+# The discarding is specified behaviour, not an overflow condition, and is deliberately
+# exempt from whatever `*` does about overflow (docs/int-overflow-policy-decision.md is
+# still open on that). So `bit_shl(1, 63)` is INT_MIN and `bit_shl(2, 63)` is 0, both total,
+# and neither changes if `*` later starts trapping. Prior art is unanimous: Rust, Swift and
+# Zig all trap `*` overflow and all let the left shift discard silently.
+extern fn bit_shl(x: Int, n: Int) -> Int
+
+# Logical right shift: vacated high bits are filled with ZEROS regardless of sign, so
+# `bit_shr_zf(-8, 1)` is a large positive number. This is the one function in the set with
+# no arbitrary-precision meaning at all — "fill from the top bit" presumes a top bit, and an
+# unbounded negative integer has none (cf. Haskell's `bitSizeMaybe = Nothing` for `Integer`,
+# and Python having no `>>>` operator). It cannot be dropped: extracting a field from a word
+# whose high bit may be set, or reading a negative Double's bit pattern via
+# `double_to_bits`, both require it.
+extern fn bit_shr_zf(x: Int, n: Int) -> Int
+
+# SHIFT COUNT DOMAIN, for all three shifts. A count of 0..63 shifts as expected. A count
+# >= 64 saturates to the limit of the mathematical definition — 0 for `bit_shl` and
+# `bit_shr_zf`, all sign bits (0 or -1) for `bit_shr`. A NEGATIVE count PANICS.
+#
+# This is a soundness matter, not a style choice: LLVM's `shl`/`lshr`/`ashr` yield POISON
+# when the count is >= the bit width, which is the same undefined-behaviour class the
+# division-by-zero guard closed. The guard is emitted in `ast_to_ir`, and folded away
+# entirely when the count is an integer literal in 0..63 — so a mask or field extract costs
+# one instruction and no branch, and only a genuinely dynamic count pays for the check.
