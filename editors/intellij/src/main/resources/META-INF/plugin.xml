@@ -1,0 +1,48 @@
+<!--
+  Name, description, vendor and idea-version are injected at build time by the
+  IntelliJ Platform Gradle plugin from build.gradle.kts / gradle.properties, so they are
+  deliberately absent here — declaring them twice makes the build warn and lets the two
+  copies drift.
+
+  The only dependency is `com.intellij.modules.platform`, which every IntelliJ-based IDE
+  provides. Nothing in this layer needs a commercial IDE; the LSP layer, which does, is
+  added in a later milestone behind an optional dependency so this one keeps working
+  where that module is absent.
+-->
+<idea-plugin>
+  <!--
+    NOT `dev.sprout.intellij`: the plugin verifier rejects an ID containing the word
+    "intellij" (TemplateWordInPluginId), because it is a leftover from the project
+    template. The Kotlin package keeps that name; only the ID may not.
+  -->
+  <id>dev.sprout.lang</id>
+
+  <depends>com.intellij.modules.platform</depends>
+
+  <extensions defaultExtensionNs="com.intellij">
+    <fileType
+        name="Sprout"
+        language="Sprout"
+        implementationClass="dev.sprout.intellij.SproutFileType"
+        fieldName="INSTANCE"
+        extensions="sprout;spr"/>
+
+    <lang.parserDefinition
+        language="Sprout"
+        implementationClass="dev.sprout.intellij.SproutParserDefinition"/>
+
+    <lang.syntaxHighlighterFactory
+        language="Sprout"
+        implementationClass="dev.sprout.intellij.SproutSyntaxHighlighterFactory"/>
+
+    <lang.commenter
+        language="Sprout"
+        implementationClass="dev.sprout.intellij.SproutCommenter"/>
+
+    <lang.braceMatcher
+        language="Sprout"
+        implementationClass="dev.sprout.intellij.SproutBraceMatcher"/>
+
+    <colorSettingsPage implementation="dev.sprout.intellij.SproutColorSettingsPage"/>
+  </extensions>
+</idea-plugin>
