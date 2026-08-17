@@ -1,0 +1,91 @@
+module main
+
+import stdlib.test (TestState, new_state, assert_true, summary)
+import stdlib.compiler.compiler as compiler
+import stdlib.compiler.source as source
+import stdlib.compiler.module_loader as module_loader
+import stdlib.env as env
+
+# PACKAGE ROOTS MUST REACH THE ENV TYPECHECK PATH.
+#
+# `module_loader.resolve_module_path(name, stdlib_root, extra_roots)` is the resolver that
+# honours extra package roots, and until this change its ONLY callers were in
+# `bundler.sprout`. The env path — `build_import_pairs` → `load_module`, reached from
+# `compile_source_with_root` — called `module_name_to_path` instead, which knows only
+# `stdlib.*` and bare names. `--package-root` existed solely on the batch CLI.
+#
+# The env path is what the REPL, the analysis service and the LSP all typecheck with, so
+# a project with dotted non-stdlib imports got no import error and then `Unknown variable`
+# for every name from those modules. Verified against a real editor session on 2026-08-17:
+# `import loam.gfx as gfx` reported nothing, and `gfx.draw_frame(1)` reported
+# `check: Unknown variable: gfx.draw_frame`. An editor showed the whole project red.
+#
+# This is the same two-front-end split as the env-path retirement item: one question,
+# two answers, one of them wrong. The fix consumes the EXISTING resolver rather than
+# adding a third way to answer it.
+#
+# Fixture reuse: tests/conformance/package_resolution/ already carries a module that lives
+# outside stdlib_root (`demo.greet`), built for the batch-CLI gate. Same fixture, other
+# front end — which is the point.
+
+fn stdlib_root() -> String !{IO} =
+  match env.get("SPROUT_STDLIB_ROOT") with
+  | Just root -> root
+  | Nothing -> "stdlib"
+
+fn package_root() -> String = "tests/conformance/package_resolution/roots"
+
+# A module that resolves ONLY under the extra root.
+fn source_using_package() -> String =
+  "import demo.greet (greeting)\n"
+    ++ "\n"
+    ++ "fn use_it() -> String = greeting()\n"
+
+fn is_ok(result: compiler.CompileResult) -> Bool =
+  match result with
+  | compiler.CompileOk _ -> true
+  | compiler.CompileFail _ -> false
+
+fn main() -> Unit !{IO} =
+  do
+    state <- new_state()
+    root <- stdlib_root()
+    let roots = Cons(package_root(), Nil)
+
+    # --- the resolver itself already knew how; nothing called it this way ---
+    assert_true(state, "resolve_module_path finds a module under an extra root",
+      match module_loader.resolve_module_path(source.ModuleName("demo.greet"), root, roots) with
+      | Nothing -> false
+      | Just _ -> true)
+    assert_true(state, "resolve_module_path does NOT find it without the extra root",
+      match module_loader.resolve_module_path(source.ModuleName("demo.greet"), root, Nil) with
+      | Nothing -> true
+      | Just _ -> false)
+
+    # --- the env path, which is the actual regression ---
+    with_roots <- compiler.compile_source_with_roots(
+      source_using_package(), source.StdlibRoot(root), roots)
+    assert_true(state, "env path resolves a package-root import when given the root",
+      is_ok(with_roots))
+
+    # Negative control. Without the root the name must NOT resolve — a pass here would
+    # mean the search path had been widened by default, which is a different bug.
+    without_roots <- compiler.compile_source_with_root(
+      source_using_package(), source.StdlibRoot(root))
+    assert_true(state, "env path still rejects the import with no root registered",
+      is_ok(without_roots) == false)
+
+    # --- the cached variant the analysis service and LSP will use ---
+    cache <- module_loader.new_cache()
+    cached <- compiler.compile_source_with_cache_roots(
+      source_using_package(), source.StdlibRoot(root), roots, cache)
+    assert_true(state, "cached env path resolves a package-root import", is_ok(cached))
+
+    # Warm cache must not lose the roots: the second call takes the cache-hit branch,
+    # which is where a threading mistake would hide.
+    cached_again <- compiler.compile_source_with_cache_roots(
+      source_using_package(), source.StdlibRoot(root), roots, cache)
+    assert_true(state, "a warm cache still resolves the package-root import",
+      is_ok(cached_again))
+
+    summary(state)

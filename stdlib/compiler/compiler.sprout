@@ -85,16 +85,29 @@ export fn compile_source(src: String) -> CompileResult !{IO} =
         | checker.CheckErr pos msg -> CompileFail(Cons (DiagError(pos, "check: " ++ msg), Nil))
         | checker.CheckOk env -> CompileOk(env)
 
-# compile_source_with_root: like compile_source but also resolves imports.
+# compile_source_with_roots: like compile_source but also resolves imports.
 # Accepts raw source (with module/import header); strips headers internally
 # before parsing so the bootstrap parser only sees declaration bodies.
-# stdlib_root is the filesystem root for stdlib.* module resolution.
-export fn compile_source_with_root(src: String, stdlib_root: source.StdlibRoot) -> CompileResult !{IO} =
+# stdlib_root is the filesystem root for stdlib.* module resolution; extra_roots are
+# package roots for dotted non-stdlib imports, matching the batch CLI's --package-root.
+export fn compile_source_with_roots(src: String, stdlib_root: source.StdlibRoot, extra_roots: List String) -> CompileResult !{IO} =
   do
     cache <- module_loader.new_cache()
+    compile_source_with_cache_roots(src, stdlib_root, extra_roots, cache)
+
+# stdlib-only form. Most callers have no package roots; those that do (the LSP, and
+# anything else driving a multi-root project) call the roots form above.
+export fn compile_source_with_root(src: String, stdlib_root: source.StdlibRoot) -> CompileResult !{IO} =
+  compile_source_with_roots(src, stdlib_root, Nil)
+
+# compile_source_with_cache_roots: like compile_source_with_roots but uses a
+# caller-provided cache. The cache is NOT recreated — the caller owns its lifecycle.
+# cache param is unannotated: its type is constrained by the module_loader callees.
+export fn compile_source_with_cache_roots(src: String, stdlib_root: source.StdlibRoot, extra_roots: List String, cache) -> CompileResult !{IO} =
+  do
     let sr = source.stdlib_root_str(stdlib_root)
     prelude_pairs <- module_loader.load_prelude_pairs(sr, cache)
-    import_pairs <- module_loader.build_import_pairs(module_loader.collect_imports(src), sr, cache)
+    import_pairs <- module_loader.build_import_pairs_with_roots(module_loader.collect_imports(src), sr, extra_roots, cache)
     match lex_parse(source.strip_headers(src)) with
     | LexParseFail diags -> CompileFail(diags)
     | LexParseOk prog ->
@@ -104,22 +117,8 @@ export fn compile_source_with_root(src: String, stdlib_root: source.StdlibRoot) 
           | checker.CheckErr pos msg -> CompileFail(Cons (DiagError(pos, "check: " ++ msg), Nil))
           | checker.CheckOk env -> CompileOk(env)
 
-# compile_source_with_cache: like compile_source_with_root but uses a caller-provided cache.
-# The cache is NOT recreated — the caller is responsible for its lifecycle.
-# cache param is unannotated: its type is constrained by the module_loader callees.
 export fn compile_source_with_cache(src: String, stdlib_root: source.StdlibRoot, cache) -> CompileResult !{IO} =
-  do
-    let sr = source.stdlib_root_str(stdlib_root)
-    prelude_pairs <- module_loader.load_prelude_pairs(sr, cache)
-    import_pairs <- module_loader.build_import_pairs(module_loader.collect_imports(src), sr, cache)
-    match lex_parse(source.strip_headers(src)) with
-    | LexParseFail diags -> CompileFail(diags)
-    | LexParseOk prog ->
-        do
-          result <- checker.check_program_with_env(prog, prelude_pairs ++ import_pairs)
-          match result with
-          | checker.CheckErr pos msg -> CompileFail(Cons (DiagError(pos, "check: " ++ msg), Nil))
-          | checker.CheckOk env -> CompileOk(env)
+  compile_source_with_cache_roots(src, stdlib_root, Nil, cache)
 
 # compile_file: read a file, strip headers, then call compile_source.
 export fn compile_file(path: source.FilePath) -> CompileResult !{IO} =

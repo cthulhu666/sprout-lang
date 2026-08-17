@@ -206,7 +206,7 @@ are unset. A silently dead server is the one outcome to avoid.
 |---|---|---|
 | M0 | **Done.** Drive the server under test: smoke harness, unit tests, `just lsp-smoke`, CI job | capabilities only |
 | M1 | **Done.** Plugin core: file type, lexer, highlighting, colour page, commenter, brace matcher | no |
-| M2 | Package roots reach the env typecheck path | yes (reseed) |
+| M2 | **Done.** Package roots reach the env typecheck path | yes (reseed) |
 | M3 | **Done.** LSP client layer, settings + toolchain detection, split gate | no |
 | M4 | Wire the five features, one change each; add a `ModuleCache` to `LspState` | yes (reseed) |
 | M5 | Diagnostic ranges wider than zero | yes (reseed) |

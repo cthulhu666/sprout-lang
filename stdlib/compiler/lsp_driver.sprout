@@ -11,23 +11,29 @@ extern fn stdin_read_bytes(n: Int) -> Maybe String !{IO}
 # ---------------------------------------------------------------------------
 # LspState
 
-type LspState = LspState String (Ref (Dict String)) (Ref Bool)
-  # stdlib_root, open_documents (uri -> source), shutdown_requested
+type LspState = LspState String (List String) (Ref (Dict String)) (Ref Bool)
+  # stdlib_root, package_roots, open_documents (uri -> source), shutdown_requested
 
 fn lsp_stdlib_root(state: LspState) -> String =
-  match state with | LspState r _ _ -> r
+  match state with | LspState r _ _ _ -> r
+
+# Package roots for dotted non-stdlib imports. Without them a multi-root project gets no
+# import error and then `Unknown variable` for every name from those modules — the whole
+# project underlined in the editor.
+fn lsp_package_roots(state: LspState) -> List String =
+  match state with | LspState _ p _ _ -> p
 
 fn lsp_documents(state: LspState) -> Ref (Dict String) =
-  match state with | LspState _ d _ -> d
+  match state with | LspState _ _ d _ -> d
 
 fn lsp_shutdown_flag(state: LspState) -> Ref Bool =
-  match state with | LspState _ _ s -> s
+  match state with | LspState _ _ _ s -> s
 
-fn build_lsp_state(stdlib_root: String) -> LspState !{IO} =
+fn build_lsp_state(stdlib_root: String, package_roots: List String) -> LspState !{IO} =
   do
     docs <- ref_new(dict_empty())
     shutdown <- ref_new(false)
-    LspState(stdlib_root, docs, shutdown)
+    LspState(stdlib_root, package_roots, docs, shutdown)
 
 # ---------------------------------------------------------------------------
 # LSP framing
@@ -163,7 +169,8 @@ fn push_diagnostics(uri: String, diags: List compiler.Diagnostic, state: LspStat
 
 fn check_and_push_diagnostics(uri: String, src: String, state: LspState) -> Unit !{IO} =
   do
-    result <- compiler.compile_source_with_root(src, source.StdlibRoot(lsp_stdlib_root(state)))
+    result <- compiler.compile_source_with_roots(
+      src, source.StdlibRoot(lsp_stdlib_root(state)), lsp_package_roots(state))
     match result with
     | compiler.CompileOk _ -> push_diagnostics(uri, Nil, state)
     | compiler.CompileFail diags -> push_diagnostics(uri, diags, state)
@@ -370,6 +377,9 @@ fn lsp_loop(state: LspState) -> Unit !{IO} =
       handle_after_shutdown_check(method, req, shutdown, state)
 
 export fn run_lsp(stdlib_root: String) -> Unit !{IO} =
+  run_lsp_with_roots(stdlib_root, Nil)
+
+export fn run_lsp_with_roots(stdlib_root: String, package_roots: List String) -> Unit !{IO} =
   do
-    state <- build_lsp_state(stdlib_root)
+    state <- build_lsp_state(stdlib_root, package_roots)
     lsp_loop(state)

@@ -2172,15 +2172,24 @@ what the LSP actually does: `docs/language-server-roadmap.md`.
   `compile_source_with_cache` already exists and wants a cache held in `LspState`. Measured
   2026-08-17: 0.30s wall for initialize + didOpen + didChange on a two-import file, and ~1s for a
   cold check of a compiler-sized file against tens of ms warm.
-- [ ] `P1` **The env typecheck path cannot resolve package roots, so a multi-root project reports
-  every imported name as unknown.** `module_loader.resolve_module_path(name, root, extra_roots)`
-  is called **only** from `bundler.sprout`; the env path (`build_import_pairs` → `load_module`,
-  reached via `compile_source_with_root`) resolves `stdlib.*` only, and `--package-root` exists
-  solely on the batch CLI. Verified 2026-08-17: `import loam.gfx as gfx` produces **no** import
-  diagnostic, and then every use reports `check: Unknown variable: gfx.draw_frame` — so
-  uncharted-suns would open solid red in an editor. Same two-front-end split as the env-path
-  retirement item; thread `extra_roots` through so the env path *calls* the existing resolver
-  rather than answering the question a second way.
+- [x] `P1` **The env typecheck path could not resolve package roots, so a multi-root project reported
+  every imported name as unknown. FIXED 2026-08-17 (M2).** `module_loader.resolve_module_path(name,
+  root, extra_roots)` was called **only** from `bundler.sprout`; the env path (`build_import_pairs` →
+  `load_module`, reached via `compile_source_with_root`) called `module_name_to_path`, which knows only
+  `stdlib.*` and bare names — and `--package-root` existed solely on the batch CLI. Verified against a
+  live editor session: `import loam.gfx as gfx` produced **no** import diagnostic and then
+  `check: Unknown variable: gfx.draw_frame` for every use, so uncharted-suns opened solid red.
+  Same two-front-end split as the env-path retirement item, fixed the same way the module-surface arc
+  fixes them: the env path now **calls the existing resolver** instead of answering the question a
+  second, narrower way. Roots thread through the recursion, so a package module importing another one
+  resolves too. `sproutd --lsp <root> --package-root <dir>` (repeatable, unlike `compile_driver`'s
+  single fixed-position form) plus `compile_source_with_roots` / `compile_source_with_cache_roots`;
+  the stdlib-only signatures stay and delegate, so ~40 existing call sites are untouched. Covered by
+  `test_env_package_roots.spr` (6 assertions incl. a negative control that the default search path was
+  NOT widened, and a warm-cache case where a threading mistake would hide) and two `lsp-smoke`
+  assertions driving the real server. Fixture reused from the batch-CLI gate — same module, other
+  front end, which is the point. **Retiring the env path (BACKLOG item on the analysis service)
+  subsumes this**; until then the two paths at least share the resolver.
 - [ ] `P2` **Diagnostic ranges are zero-width.** `lsp_driver.diag_range` sets `end == start`, so
   clients get a caret rather than an underlined token. Widening to the offending token's extent is
   small; full multi-token spans need the span refactor in `language-server-roadmap.md` §5.1.
