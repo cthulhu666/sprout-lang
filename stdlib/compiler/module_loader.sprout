@@ -242,21 +242,40 @@ fn collect_marker_pairs(pairs: List (String, types.Scheme)) -> List (String, typ
       if is_marker_key(k) then Cons((k, v), collect_marker_pairs(rest))
       else collect_marker_pairs(rest)
 
+# Names infer marked "@extern:" — the ast.ScopeGlobal class. A global name is
+# spelled bare wherever its declaring module is in the build, so it is exempt from
+# aliasing and from selective filtering alike; both exemptions read this list.
+fn extern_marker_prefix() -> String = "@extern:"
+
+fn extern_names(pairs: List (String, types.Scheme)) -> List String =
+  match pairs with
+  | Nil -> Nil
+  | Cons (k, _) rest ->
+      if str_starts_with(k, extern_marker_prefix())
+      then Cons(str_slice(k, str_len(extern_marker_prefix()), str_len(k)), extern_names(rest))
+      else extern_names(rest)
+
 # @class: and @instance: markers are intentionally NOT prefixed — they are
 # looked up by unqualified class/type name, not by the call-site expression. A
 # constrained fn's constraints ride its own (prefixed) scheme via the Scheme
 # constraint field (§13.3(B)), so no marker key needs the call-site name folded in.
-fn prefix_pairs(pairs: List (String, types.Scheme), pfx: String) -> List (String, types.Scheme) =
+#
+# `globals` gets the same pass-through for a different reason: an extern is never
+# module-qualified (ast.NameScope, spec-v0 §"Externs are outside the module
+# system"), so prefixing one invents a spelling the bundler will reject.
+fn prefix_pairs(pairs: List (String, types.Scheme), pfx: String, globals: List String) -> List (String, types.Scheme) =
   match pairs with
   | Nil -> Nil
   | Cons (k, v) rest ->
-      if is_marker_key(k) then Cons((k, v), prefix_pairs(rest, pfx))
-      else Cons((str_concat(pfx, str_concat(".", k)), v), prefix_pairs(rest, pfx))
+      if is_marker_key(k) || list_member(k, globals) then Cons((k, v), prefix_pairs(rest, pfx, globals))
+      else Cons((str_concat(pfx, str_concat(".", k)), v), prefix_pairs(rest, pfx, globals))
 
 # Select explicitly-named pairs AND all marker pairs from the module so
 # that typeclass instances defined in the imported module remain available.
-fn select_pairs(pairs: List (String, types.Scheme), names: List String) -> List (String, types.Scheme) =
-  collect_marker_pairs(pairs) ++ select_named_pairs(pairs, names)
+# Globals ride along unconditionally: naming an extern in an import list does
+# nothing and omitting one does not hide it.
+fn select_pairs(pairs: List (String, types.Scheme), names: List String, globals: List String) -> List (String, types.Scheme) =
+  collect_marker_pairs(pairs) ++ select_named_pairs(pairs, names ++ globals)
 
 fn select_named_pairs(pairs: List (String, types.Scheme), names: List String) -> List (String, types.Scheme) =
   match names with
@@ -282,36 +301,25 @@ fn find_pair(pairs: List (String, types.Scheme), name: String) -> Maybe types.Sc
 # record fields).  Using declared names is more precise than a key-exclusion
 # filter: the exclusion approach breaks when a module re-declares a name that
 # also exists in the prelude (e.g. collections.sprout re-declares vec_singleton).
+#
+# Globals are the one exception, and are selected by MARKER rather than by
+# declaration: an extern is visible wherever its declaring module is in the build,
+# including transitively, so a module re-exports the ones that reached it as well
+# as its own. Marker-driven selection covers both in one pass.
 
-fn ctor_value_names(ctors: List ast.TypeConstructor, acc: List String) -> List String =
-  match ctors with
-  | Nil -> acc
-  | Cons (ast.TypeConstructor name _ _ _) rest -> ctor_value_names(rest, Cons(name, acc))
-
-fn class_method_names_acc(methods: List ast.ClassMethodSig, acc: List String) -> List String =
-  match methods with
-  | Nil -> acc
-  | Cons (ast.ClassMethodSig name _ _ _) rest -> class_method_names_acc(rest, Cons(name, acc))
-
-fn decl_value_names(decl: ast.Decl, acc: List String) -> List String =
-  match decl with
-  | ast.FnDecl name _ _ _ _ _ _ -> Cons(name, acc)
-  | ast.ExternFnDecl name _ _ _ _ -> Cons(name, acc)
-  | ast.TypeDecl _ _ ctors _ _ _ -> ctor_value_names(ctors, acc)
-  | ast.LetDecl name _ _ _ -> Cons(name, acc)
-  | ast.ClassDecl _ _ methods _ _ -> class_method_names_acc(methods, acc)
-  # WrapDecl: the synthetic constructor is a value with the same name as the type.
-  | ast.WrapDecl name _ _ -> Cons(name, acc)
-  | _ -> acc
-
-fn program_declared_names(prog: ast.Program) -> List String =
+# Module-scoped value names only — the names an importer sees under the module's
+# alias. Which names those are is ast.decl_value_scopes' call, not this file's;
+# globals are excluded here and picked up from their "@extern:" markers instead, so
+# a module's own externs and its transitively inherited ones travel one path.
+fn program_module_value_names(prog: ast.Program) -> List String =
   match prog with
   | ast.Program decls _ -> program_decls_loop(decls, Nil)
 
 fn program_decls_loop(decls: List ast.Decl, acc: List String) -> List String =
   match decls with
   | Nil -> acc
-  | Cons d rest -> program_decls_loop(rest, decl_value_names(d, acc))
+  | Cons d rest ->
+      program_decls_loop(rest, ast.scope_names_module(ast.decl_value_scopes(d)) ++ acc)
 
 # Header stripping is source.strip_headers (line-preserving, shared authority).
 
@@ -368,13 +376,19 @@ fn load_module(name: String, stdlib_root: String, cache: ModuleCache) -> List (S
                               | checker.CheckErr _ _ -> Nil
                               | checker.CheckOk env ->
                                   do
-                                    let declared = program_declared_names(prog)
                                     # Canonicalize this module's OWN type names on the way out, and
                                     # drop the importer-scoped @qual* markers so one module's aliases
                                     # never resolve inside another's.
+                                    let env_pairs = dict_to_pairs(env)
+                                    let markers = drop_import_qualifiers(collect_marker_pairs(env_pairs))
+                                    # Globals are re-exported by name, not by declaration: the markers
+                                    # cover this module's own externs AND every extern reaching it
+                                    # through an import, which is what makes a transitively imported
+                                    # extern resolve here the way it does after bundling.
                                     let own_pairs =
-                                      select_named_pairs(dict_to_pairs(env), declared)
-                                        ++ drop_import_qualifiers(collect_marker_pairs(dict_to_pairs(env)))
+                                      select_named_pairs(env_pairs, program_module_value_names(prog))
+                                        ++ select_named_pairs(env_pairs, extern_names(markers))
+                                        ++ markers
                                     cache_put(cache, name, own_pairs)
                                     own_pairs
 
@@ -415,12 +429,14 @@ fn apply_import_spec(spec: ImportSpec, stdlib_root: String, cache: ModuleCache) 
   | ImportAlias module_name alias ->
       do
         pairs <- load_module(module_name, stdlib_root, cache)
+        let visible = drop_import_qualifiers(pairs)
         Cons((str_concat("@qualalias:", alias), alias_marker(module_name)),
-          prefix_pairs(drop_import_qualifiers(pairs), alias))
+          prefix_pairs(visible, alias, extern_names(visible)))
   | ImportSelective module_name names ->
       do
         pairs <- load_module(module_name, stdlib_root, cache)
-        select_pairs(drop_import_qualifiers(pairs), names)
+        let visible = drop_import_qualifiers(pairs)
+        select_pairs(visible, names, extern_names(visible))
 
 fn build_import_pairs_acc(specs: List ImportSpec, stdlib_root: String, cache: ModuleCache, acc: List (String, types.Scheme)) -> List (String, types.Scheme) !{IO} =
   match specs with

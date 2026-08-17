@@ -579,10 +579,10 @@ fn build_symbols_from_decls(mod_name: String, exported: List String, ctor_types:
 
 fn add_decl_to_symbols(mod_name: String, exported: List String, ctor_types: List String, decl: ast.Decl, acc: ModuleSymbols) -> ModuleSymbols =
   match decl with
-  | ast.FnDecl name _ _ _ _ _ _ ->
-      add_value_to_symbols(mod_name, name, str_list_member(name, exported), acc)
-  | ast.LetDecl name _ _ _ ->
-      add_value_to_symbols(mod_name, name, str_list_member(name, exported), acc)
+  | ast.FnDecl _ _ _ _ _ _ _ ->
+      add_scoped_values(mod_name, exported, decl, acc)
+  | ast.LetDecl _ _ _ _ ->
+      add_scoped_values(mod_name, exported, decl, acc)
   | ast.TypeDecl name _ ctors _ _ _ ->
       add_type_to_symbols(mod_name, name, ctors, exported, ctor_types, acc)
   | ast.RecordDecl name _ _ _ _ _ ->
@@ -598,7 +598,24 @@ fn add_decl_to_symbols(mod_name: String, exported: List String, ctor_types: List
       add_type_to_symbols(mod_name, name,
         [ast.TypeConstructor(name, [inner], Nil, Nil)],
         exported, ctor_types, acc)
-  | ast.ExternFnDecl _ _ _ _ _ -> acc
+  # An extern contributes no module symbol, and that is DERIVED rather than
+  # asserted here: ast.decl_value_scopes classifies it ScopeGlobal, so
+  # scope_names_module returns nothing to record. The env path excludes it from
+  # program_module_value_names by the same call, which is what keeps the two front
+  # ends from spelling an extern two different ways.
+  | ast.ExternFnDecl _ _ _ _ _ ->
+      add_scoped_values(mod_name, exported, decl, acc)
+
+# Register every module-scoped value name a declaration introduces.
+fn add_scoped_values(mod_name: String, exported: List String, decl: ast.Decl, acc: ModuleSymbols) -> ModuleSymbols =
+  add_value_names(mod_name, exported, ast.scope_names_module(ast.decl_value_scopes(decl)), acc)
+
+fn add_value_names(mod_name: String, exported: List String, names: List String, acc: ModuleSymbols) -> ModuleSymbols =
+  match names with
+  | Nil -> acc
+  | Cons name rest ->
+      add_value_names(mod_name, exported, rest,
+        add_value_to_symbols(mod_name, name, str_list_member(name, exported), acc))
 
 fn add_value_to_symbols(mod_name: String, name: String, is_exported: Bool, acc: ModuleSymbols) -> ModuleSymbols =
   match acc with
