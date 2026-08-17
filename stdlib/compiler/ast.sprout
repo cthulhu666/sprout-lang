@@ -215,6 +215,65 @@ export fn decl_pos(d: Decl) -> source.SourcePos =
   | AliasDecl _ _ _ p -> p
   | WrapDecl _ _ p -> p
 
+# --- Name scope: how an importer spells a declared value ---
+#
+# THE SINGLE AUTHORITY for this question. Sprout typechecks through two front
+# ends — `bundler` inlines every module into one program, `module_loader` extracts
+# `(name, Scheme)` pairs per module for the REPL/LSP — and both must agree on
+# which names an importer sees and under what spelling. When each decided it
+# per-constructor on its own they reached opposite answers for `ExternFnDecl`, and
+# the REPL accepted code the compiler rejected. Consumers filter this; none
+# re-decides it.
+#
+# `ScopeGlobal` is spec-v0 §"Externs are outside the module system": an extern is
+# never qualified, never renamed, never in a module's exported set, and is
+# reachable by bare name wherever its declaring module is part of the build —
+# including transitively, and regardless of any selective import list.
+export type NameScope (..) =
+  | ScopeModule  # qualified canonically; visibility follows the import form
+  | ScopeGlobal  # bare everywhere the declaring module is in the build
+
+# Every value-level name a declaration introduces, each with its scope. Type and
+# class names are a separate axis and are not listed; a `ClassDecl` contributes its
+# method names, which are values.
+export fn decl_value_scopes(d: Decl) -> List (String, NameScope) =
+  match d with
+  | FnDecl name _ _ _ _ _ _ -> [(name, ScopeModule)]
+  | ExternFnDecl name _ _ _ _ -> [(name, ScopeGlobal)]
+  | LetDecl name _ _ _ -> [(name, ScopeModule)]
+  | TypeDecl _ _ ctors _ _ _ -> ctor_value_scopes(ctors)
+  | ClassDecl _ _ methods _ _ -> method_value_scopes(methods)
+  # WrapDecl: the synthetic constructor is a value sharing the type's name.
+  | WrapDecl name _ _ -> [(name, ScopeModule)]
+  | _ -> Nil
+
+fn ctor_value_scopes(ctors: List TypeConstructor) -> List (String, NameScope) =
+  match ctors with
+  | Nil -> Nil
+  | Cons (TypeConstructor name _ _ _) rest -> Cons((name, ScopeModule), ctor_value_scopes(rest))
+
+fn method_value_scopes(methods: List ClassMethodSig) -> List (String, NameScope) =
+  match methods with
+  | Nil -> Nil
+  | Cons (ClassMethodSig name _ _ _) rest -> Cons((name, ScopeModule), method_value_scopes(rest))
+
+export fn scope_names_all(scoped: List (String, NameScope)) -> List String =
+  match scoped with
+  | Nil -> Nil
+  | Cons (name, _) rest -> Cons(name, scope_names_all(rest))
+
+export fn scope_names_module(scoped: List (String, NameScope)) -> List String =
+  match scoped with
+  | Nil -> Nil
+  | Cons (name, ScopeModule) rest -> Cons(name, scope_names_module(rest))
+  | Cons _ rest -> scope_names_module(rest)
+
+export fn scope_names_global(scoped: List (String, NameScope)) -> List String =
+  match scoped with
+  | Nil -> Nil
+  | Cons (name, ScopeGlobal) rest -> Cons(name, scope_names_global(rest))
+  | Cons _ rest -> scope_names_global(rest)
+
 # --- Program ---
 
 export type Program (..) =

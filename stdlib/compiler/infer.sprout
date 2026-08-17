@@ -1129,6 +1129,15 @@ fn infer_call_general(
 fn arity_marker(n: Int) -> types.Scheme =
   types.mono(types.TConst(types.type_id(int_to_string(n))))
 
+# "@extern:<name>" present ⇒ that value is an extern, i.e. ast.ScopeGlobal: bare
+# everywhere, never module-qualified, never filtered by an import list. Recorded
+# here because this is where an extern's signature enters the env, and read by
+# module_loader so the env path spells externs the way the bundler does. Like
+# every marker family it rides prefix_pairs/select_pairs unprefixed, which is
+# exactly the propagation a global name needs.
+fn extern_marker() -> types.Scheme =
+  types.mono(types.TConst(types.type_id("extern")))
+
 # Per-declaration linearity is recorded as a sentinel env entry, mirroring the
 # @arity: marker idiom above: "@linear:<TypeName>" present ⇒ the type constructor
 # was declared `type linear`. Keyed by the type name (a type's head TypeId name),
@@ -5701,6 +5710,24 @@ fn register_single_param_alias(
   | _ -> alias_env
   where sentinel = str_concat("__aliasparam__", param)
 
+# An extern is always marked global, but its signature is bound only when the name
+# is free: a module re-declaring an extern already in scope must not shadow the
+# scheme that is there, and the marker must not be lost to that skip either.
+fn pre_scan_extern(
+  name: String,
+  params: List ast.Param,
+  ret_type_maybe: Maybe ast.TypeExpr,
+  effects_maybe: Maybe (List String),
+  alias_env: Dict types.Type,
+  env: Dict types.Scheme
+) -> Dict types.Scheme =
+  match dict_get(name, env) with
+  | Just _ -> dict_set("@extern:" ++ name, extern_marker(), env)
+  | Nothing ->
+      dict_set("@extern:" ++ name, extern_marker(),
+        dict_set("@arity:" ++ name, arity_marker(list_length(params)),
+          dict_set(name, scheme_from_fn_parts(params, ret_type_maybe, effects_maybe, alias_env), env)))
+
 fn pre_scan_fn_decls(decls: List ast.Decl, env: Dict types.Scheme, alias_env: Dict types.Type) -> Dict types.Scheme =
   match decls with
   | Nil -> env
@@ -5712,13 +5739,9 @@ fn pre_scan_fn_decls(decls: List ast.Decl, env: Dict types.Scheme, alias_env: Di
               register_fn_decl_scheme(name, params, ret_type_maybe, effects_maybe, constraints, alias_env, env)),
             alias_env)
       | ast.ExternFnDecl name params ret_type_maybe effects_maybe _ ->
-          match dict_get(name, env) with
-          | Just _ -> pre_scan_fn_decls(rest, env, alias_env)
-          | Nothing ->
-              pre_scan_fn_decls(rest,
-                dict_set("@arity:" ++ name, arity_marker(list_length(params)),
-                  dict_set(name, scheme_from_fn_parts(params, ret_type_maybe, effects_maybe, alias_env), env)),
-                alias_env)
+          pre_scan_fn_decls(rest,
+            pre_scan_extern(name, params, ret_type_maybe, effects_maybe, alias_env, env),
+            alias_env)
       | ast.AliasDecl name [] rhs_te _ ->
           pre_scan_fn_decls(rest, env,
             dict_set(name, type_from_ast(rhs_te, dict_empty()), alias_env))

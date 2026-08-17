@@ -2981,6 +2981,51 @@ op-classification already in place.
 
 ### Native REPL & Analysis Service
 
+- [x] `P0` **FIXED 2026-08-17. BUG: no spelling of an imported extern worked in the REPL.**
+  `import stdlib.bits` then `bit_or(3, 5)` gave `Unknown variable: bit_or`, and `bits.bit_or(3, 5)`
+  gave `Unknown variable: bits.bit_or` — while `:type bits.bit_or` answered `Int -> Int -> Int`.
+  Affected every extern in every non-prelude module (`bytes_length`, `double_to_bits`, `read_file`);
+  `stdlib.bits` was simply the first module that is *entirely* externs. **Root cause:** the question
+  "what does an importer see, and under what spelling" was decided independently in five places, and
+  `module_loader.decl_value_names`/`prefix_pairs` reached the opposite answer from
+  `bundler.add_decl_to_symbols` for `ExternFnDecl` — so the env pre-check demanded the qualified
+  spelling and the bundler that actually compiles the eval demanded the bare one. **Resolution:** one
+  authority, `ast.decl_value_scopes`/`ast.NameScope`, consumed by both front ends; extern provenance
+  rides a new `@extern:` marker family emitted by `infer.pre_scan_extern`, which inherits exactly the
+  unprefixed/unfiltered propagation a global name needs. Selecting globals *by marker* rather than by
+  declaration is what makes transitive visibility work. Gate:
+  `tests/stdlib/compiler/test_module_surface_agreement.spr` (14 assertions, RED-verified 9 pass/5
+  fail with every failure on the env path and both controls green). Design:
+  `docs/module-surface-authority-v0.md`. Note `bits.bit_or` now correctly FAILS in `:type` too — that
+  spelling never compiled.
+- [ ] `P1` **One export authority: retire both raw-text scanners** (2026-08-17). `parser.skip_export`
+  discards the `export` keyword before it reaches the AST, so `bundler.scan_source_info` and
+  `repl.gather_exported_names` each recover the publish-set by scanning source *text*. Consequence
+  users see: `repl.gather_exported_names` only accepts lines starting with `export `, an `extern fn`
+  line never does (and per spec `export` on an extern is parsed and discarded, so nobody writes it) —
+  therefore **no extern is ever a REPL completion candidate, from any module, including the prelude**:
+  `print`, `panic`, `int_to_string` are all missing. Fix: one token-derived export scan in the parser
+  feeding both. Recommended over a real `export` field on `ast.Decl` — the field is the better model
+  but costs a 244-site constructor sweep including `tests/` and `iface_codec` both directions, for no
+  property the token scan lacks, and does not block adding it later. Rides along:
+  `repl.stdlib_module_completion_names` is a hardcoded string missing 15 modules, and there is no
+  directory-listing primitive anywhere in the language (`process.proc_run(["ls", root])` composes
+  without a new builtin). Also convert `analysis_service_driver.collect_decl_names` to the authority
+  in the same change, since it already edits that surface.
+  Design: `docs/module-surface-authority-v0.md` §6.
+- [ ] `P2` **Retire the env typecheck path onto the bundler** (2026-08-17). The structural end of
+  "two front ends that can disagree": have the analysis service bundle like the file path so only one
+  answer exists. Measured cost — a cold bundler check is 1.1s on `infer.sprout` and 0.41s on
+  `http_server.sprout`, against ~19ms for a warm env check of a six-module session — so it needs a
+  parsed-module cache first, plus a bundle-from-source entry point, and it touches ~6 analysis ops.
+  It does **not** subsume the export-scanner work above. Sequenced last.
+  Design: `docs/module-surface-authority-v0.md` §7.
+- [ ] `P2` **Standing guard: every top-level stdlib module loads cleanly through `load_module`**
+  (2026-08-17). Asked for by `docs/repl-env-type-vocabulary-v0.md` §9 and blocked at the time because
+  four modules were red; §11.1's fix took it to 26/27, so it is landable now. Would have caught all
+  eleven modules of that bug the day they broke. Land it together with the one remaining red module
+  (`stdlib.repl`, failing inside the unswept `stdlib/compiler/` subtree) or with an explicit
+  known-red list so it cannot silently rot.
 - [ ] `P2` **Canonical `<module>.<Type>` identity on the env path** (2026-08-15). Today two modules'
   same-named types collapse to one identity inside an importer — already true for selectively
   imported types (they arrive bare) and now also for alias-qualified spellings, since those resolve

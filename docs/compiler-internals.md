@@ -263,6 +263,31 @@ The failure mode is silent by construction: `module_loader.load_module` turns a
 module's `CheckErr` into an empty pair list, so the error surfaces far from its
 cause as `Unknown variable: <module>.<name>`.
 
+### The stronger form: don't re-decide, consume an authority
+
+The rule above is necessary but not sufficient, and the third instance proved it.
+`module_loader` was **not** missing information when it prefixed an extern with the
+import alias — it pattern-matched `ExternFnDecl` and simply decided differently
+from `bundler.add_decl_to_symbols`, which drops externs. Reading a fact from `env`
+as well as `decls` does not help when two sites disagree about what the fact
+*means*. `import stdlib.bits` then `bit_or(3, 5)` failed in the REPL, while
+`bits.bit_or` typechecked there and failed to compile — no spelling worked.
+
+**So: a question about a module's surface has one definition, and every site
+consumes it.** `ast.decl_value_scopes` / `ast.NameScope` is that definition for
+"which names does an importer see, and under what spelling"; `ScopeGlobal` is the
+extern rule from spec-v0 §"Externs are outside the module system", including its
+transitive reach. `bundler` and `module_loader` both derive their behaviour from
+it rather than asserting it, and
+`tests/stdlib/compiler/test_module_surface_agreement.spr` fails if they ever drift
+apart again. See `docs/module-surface-authority-v0.md`.
+
+Two sites still answer a *related* question — "what does this module export?" — by
+scanning raw source text (`bundler.scan_source_info`,
+`repl.gather_exported_names`), because `parser.skip_export` discards the `export`
+keyword before it reaches the AST. That is the same class awaiting the same
+treatment; it is why no `extern fn` is ever offered as a REPL completion.
+
 ## Env-path type names are SHORT, and the marker families depend on it
 
 On the env path a type is named by its short name — a module is checked with its
