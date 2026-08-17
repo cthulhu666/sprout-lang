@@ -19,6 +19,13 @@
 
   <depends>com.intellij.modules.platform</depends>
 
+  <!--
+    The LSP client, kept OPTIONAL so this plugin still loads where the module is absent
+    (IntelliJ IDEA open-source builds, Android Studio) with the language layer intact.
+    Everything LSP-related lives in the config-file below and is not classloaded there.
+  -->
+  <depends optional="true" config-file="sprout-lsp.xml">com.intellij.modules.lsp</depends>
+
   <extensions defaultExtensionNs="com.intellij">
     <fileType
         name="Sprout"

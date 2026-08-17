@@ -2833,6 +2833,14 @@ plugin-build:
 plugin-verify:
   cd editors/intellij && mise exec -- gradle --quiet verifyPlugin
 
+# The plugin must load in IDEs with NO LSP module (IntelliJ IDEA Community, Android
+# Studio) with the language layer intact. Asserts that from the shipped bytecode: only
+# classes under dev.sprout.intellij.lsp may reference com.intellij.platform.lsp.
+# See the script's header for why the verifier cannot answer this.
+[group('test')]
+plugin-split-check: plugin-build
+  bash scripts/plugin_lsp_split_check.sh
+
 # Launch a sandbox IDE with the plugin installed, for manual checks.
 [group('dev')]
 plugin-run:
@@ -2950,7 +2958,9 @@ gate-audit:
   #     would make the standard battery unrunnable for them. `just plugin-test` is the local
   #     equivalent when you are working there. NOTE: lsp-smoke is deliberately NOT here — it
   #     needs only sproutd, which this repo builds itself, so it belongs in `gate` proper.
-  EXCLUDE="bootstrap-from-seed build-fmt-from-seed refresh-seed ci-fast-gates test-stdlib-core-stage1 test-stdlib-compiler-stage1 windows-tu-check windows-poll-selftest plugin-test plugin-build"
+  #   plugin-split-check — same toolchain reason as plugin-test/plugin-build, which it
+  #     depends on for the artifact it inspects.
+  EXCLUDE="bootstrap-from-seed build-fmt-from-seed refresh-seed ci-fast-gates test-stdlib-core-stage1 test-stdlib-compiler-stage1 windows-tu-check windows-poll-selftest plugin-test plugin-build plugin-split-check"
   # Tasks gate runs from its BODY (not reachable via --show dependency expansion).
   BODY="gc-safety-check"
   expand() {  # print a recipe name and, recursively, its dependency recipe names

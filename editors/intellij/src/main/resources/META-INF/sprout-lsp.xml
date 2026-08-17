@@ -1,0 +1,24 @@
+<!--
+  Loaded only when `com.intellij.modules.lsp` is present — see the optional <depends> in
+  plugin.xml. That module ships in the commercial JetBrains IDEs (RubyMine among them) and
+  NOT in IntelliJ IDEA open-source builds or Android Studio, so everything here is absent
+  rather than broken in those.
+
+  Nothing in the language layer may reference these classes; if it did, the plugin would
+  fail to load exactly where this split is supposed to protect it. `just plugin-verify`
+  runs the verifier against IntelliJ IDEA Community explicitly to catch that.
+-->
+<idea-plugin>
+  <extensions defaultExtensionNs="com.intellij">
+    <platformLspServerSupportProvider
+        implementation="dev.sprout.intellij.lsp.SproutLspServerSupportProvider"/>
+
+    <projectConfigurable
+        parentId="tools"
+        instance="dev.sprout.intellij.lsp.SproutConfigurable"
+        id="dev.sprout.settings"
+        displayName="Sprout"/>
+
+    <notificationGroup id="Sprout" displayType="BALLOON"/>
+  </extensions>
+</idea-plugin>

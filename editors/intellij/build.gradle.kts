@@ -16,14 +16,13 @@ repositories {
 }
 
 dependencies {
-  // Compiled against IntelliJ IDEA **Community** on purpose. The language layer must run
-  // in every IntelliJ-based IDE, and building against Community makes that structural: a
-  // paid-only API would fail to compile here rather than fail to load in someone's
-  // Community install. The LSP layer, which genuinely needs a commercial IDE, is added in
-  // a later milestone and switches this to Ultimate.
+  // Ultimate, because `com.intellij.modules.lsp` ships only in commercial IDEs. See
+  // gradle.properties for what that costs and how pluginVerification compensates.
   intellijPlatform {
     create(
-      IntelliJPlatformType.IntellijIdeaCommunity,
+      IntelliJPlatformType.valueOf(providers.gradleProperty("platformType").get().let {
+        if (it == "IU") "IntellijIdeaUltimate" else "IntellijIdeaCommunity"
+      }),
       providers.gradleProperty("platformVersion").get(),
     )
     pluginVerifier()
@@ -62,7 +61,22 @@ intellijPlatform {
   }
 
   pluginVerification {
-    ides { recommended() }
+    // Commercial IDEs only, and deliberately NOT IntelliJ IDEA Community — measured, not
+    // assumed. Verifying against Community reports `Package 'com.intellij.platform.lsp' is
+    // not found` and FAILS the build. That problem is expected and harmless: the classes
+    // referencing it are registered only in sprout-lsp.xml, which an IDE lacking the LSP
+    // module never loads, so they are never classloaded. But the verifier cannot tell
+    // "safely absent" from "will throw NoSuchClassError" — its own wording is "may be
+    // caused by absence of optional dependency", leaving the judgement to the reader.
+    //
+    // A gate that is permanently red for a benign reason teaches people to ignore it. The
+    // Community guarantee is enforced instead by `just plugin-split-check`, which asserts
+    // the discriminator directly — only classes under dev.sprout.intellij.lsp may reference
+    // that package — needs no IDE download, and runs in CI.
+    ides {
+      create(IntelliJPlatformType.IntellijIdeaUltimate, "2024.2.5")
+      recommended()
+    }
   }
 }
 

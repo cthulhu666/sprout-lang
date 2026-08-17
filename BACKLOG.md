@@ -2143,7 +2143,25 @@ what the LSP actually does: `docs/language-server-roadmap.md`.
   (`TemplateWordInPluginId`) and `buildPlugin` + tests both accepted the bad ID, so the verifier belongs
   in the release path; and Kotlin raw strings interpret `${…}`, which silently collides with Sprout's own
   interpolation syntax in any embedded sample.
-- [ ] `P1` **Wire the five LSP features whose compiler API already exists.** `lsp_driver.sprout` is
+- [x] `P1` **LSP client layer for the JetBrains plugin. DONE 2026-08-17 (M3).** `sproutd --lsp` now starts
+  from the IDE, so diagnostics from the real typechecker appear in RubyMine and its commercial siblings.
+  Toolchain paths come from settings (Tools → Sprout) with a bounded walk-up autodetect for the pair that
+  must travel together — a built `build/sproutd` and the `stdlib/` it was built against; half a checkout
+  is deliberately *not* a hit, since a stale binary paired with someone else's stdlib gives confidently
+  wrong diagnostics. Unconfigured projects get one balloon with a Configure action rather than a silently
+  dead server. **The optional-dependency question is resolved** (`docs/intellij-plugin-v0.md` §5.2): the
+  split works, but the plugin verifier CANNOT gate it — run against Community it reports the missing LSP
+  package whether the split is intact or broken, and says so ("may be caused by absence of optional
+  dependency"), so it fails the build for a benign reason. Replaced with `just plugin-split-check`
+  (`scripts/plugin_lsp_split_check.sh`, in CI): every class referencing `com.intellij.platform.lsp` must
+  live under `dev.sprout.intellij.lsp`, asserted against the shipped bytecode, refusing to pass vacuously
+  in either direction. RED-verified. 33 plugin tests (25 lexer + 8 detection).
+- [ ] `P1` **Wire the five LSP features whose compiler API already exists.** Go-to-definition is the one
+  users hit first — currently "Cannot find declaration to go to", because nothing answers
+  `textDocument/definition`. `symbol_locations_in_source` covers **top-level declarations of one file**,
+  so cross-file navigation needs `collect_imports` + `resolve_module_path` (both exported) to locate the
+  providing module, parse it, and read the position back. Locals, parameters and constructors need scope
+  tracking and are a separate piece of work. `lsp_driver.sprout` is
   a transport with five unplugged sockets, not a missing feature set: formatting
   (`formatter.format_source`), hover (`compiler.type_of_in_source`), document symbols
   (`symbol_inventory_in_source`), definition (`symbol_locations_in_source` — top-level only), and
