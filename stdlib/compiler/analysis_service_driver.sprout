@@ -127,14 +127,11 @@ fn prepend_names(names: List String, acc: List String) -> List String =
   | Cons name rest -> prepend_names(rest, Cons(name, acc))
 
 # The type/class-level name a declaration introduces, if any.
+# The type axis moved to ast.decl_type_names, beside decl_value_scopes, once
+# go-to-definition needed the same question answered. Two per-constructor matches over
+# Decl is precisely how the value axis came to disagree with itself.
 fn decl_type_names(d: ast.Decl, acc: List String) -> List String =
-  match d with
-  | ast.TypeDecl name _ _ _ _ _ -> Cons(name, acc)
-  | ast.RecordDecl name _ _ _ _ _ -> Cons(name, acc)
-  | ast.ClassDecl name _ _ _ _ -> Cons(name, acc)
-  | ast.AliasDecl name _ _ _ -> Cons(name, acc)
-  | ast.WrapDecl name _ _ -> acc  # its name is already a value name (the ctor)
-  | _ -> acc
+  prepend_names(ast.decl_type_names(d), acc)
 
 fn parse_decl_names(src: String) -> List String =
   match lexer.tokenize(source.strip_headers(src)) with

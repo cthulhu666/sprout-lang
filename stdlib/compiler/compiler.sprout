@@ -85,6 +85,42 @@ export fn compile_source(src: String) -> CompileResult !{IO} =
         | checker.CheckErr pos msg -> CompileFail(Cons (DiagError(pos, "check: " ++ msg), Nil))
         | checker.CheckOk env -> CompileOk(env)
 
+# ---------------------------------------------------------------------------
+# Declaration lookup — the query behind go-to-definition.
+#
+# Lives here rather than in the LSP transport because the protocol layer should stay
+# thin (docs/language-server-roadmap.md §4.3), and because the REPL and analysis
+# service want the same answer.
+#
+# A declaration "introduces" a name when it appears in either axis of the shared
+# authority: ast.decl_value_scopes (values, including constructors and class methods)
+# or ast.decl_type_names (types, classes, aliases). Every Decl carries a SourcePos, so
+# the position is ast.decl_pos — no per-constructor match here, which is the point.
+#
+# Positions are ORIGINAL line numbers: source.strip_headers blanks header lines rather
+# than deleting them, precisely so this holds.
+
+fn decl_introduces(d: ast.Decl, name: String) -> Bool =
+  list_member(name, ast.scope_names_all(ast.decl_value_scopes(d)))
+    || list_member(name, ast.decl_type_names(d))
+
+fn find_decl_pos(decls: List ast.Decl, name: String) -> Maybe source.SourcePos =
+  match decls with
+  | Nil -> Nothing
+  | Cons d rest ->
+      if decl_introduces(d, name) then Just(ast.decl_pos(d))
+      else find_decl_pos(rest, name)
+
+# Where `name` is declared in `src`, or Nothing when this source does not declare it.
+# A constructor or class method resolves to its enclosing declaration — there is no
+# finer position recorded, and landing on the type or class is what a reader wants.
+export fn declaration_position(src: String, name: String) -> Maybe source.SourcePos =
+  match lex_parse(source.strip_headers(src)) with
+  | LexParseFail _ -> Nothing
+  | LexParseOk prog ->
+      match prog with
+      | ast.Program decls _ -> find_decl_pos(decls, name)
+
 # compile_source_with_roots: like compile_source but also resolves imports.
 # Accepts raw source (with module/import header); strips headers internally
 # before parsing so the bootstrap parser only sees declaration bodies.

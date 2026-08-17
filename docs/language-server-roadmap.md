@@ -32,10 +32,13 @@ editor and IDE support.
 > Open follow-up work:
 >
 > - widen diagnostic ranges past zero-width (a token's extent; full spans need §5.1)
-> - wire the five features whose compiler API already exists: formatting
+> - ~~definition~~ **done**: `compiler.declaration_position` over the shared
+>   `ast.decl_value_scopes` + `ast.decl_type_names` authorities; resolves same-file,
+>   qualified cross-file, and selectively-imported names. Locals and parameters are out
+>   of scope — no position is recorded for them
+> - wire the remaining four whose compiler API already exists: formatting
 >   (`formatter.format_source`), hover (`type_of_in_source`), document symbols
->   (`symbol_inventory_in_source`), definition (`symbol_locations_in_source`),
->   completion (`complete_in_state`)
+>   (`symbol_inventory_in_source`), completion (`complete_in_state`)
 > - hold a `ModuleCache` in `LspState` — `compile_source_with_cache` exists, but the LSP
 >   calls `compile_source_with_root`, so every keystroke re-checks cold
 > - ~~package roots~~ **done**: `sproutd --lsp <root> --package-root <dir>` (repeatable);
