@@ -2173,21 +2173,37 @@ what the LSP actually does: `docs/language-server-roadmap.md`.
   `language-server-roadmap.md` §4.3. Covered by `test_definition_lookup.spr` (13 assertions, one per
   declaration form, pinning that positions are ORIGINAL line numbers despite header stripping) and four
   `lsp-smoke` assertions driving the real server, including the cross-file case and a decline.
-- [ ] `P1` **Wire the remaining four LSP features whose compiler API already exists.** formatting
-  (`formatter.format_source`), hover (`compiler.type_of_in_source`), document symbols
-  (`symbol_inventory_in_source`), completion (`complete_in_state` — REPL-line-shaped, so it wants the
-  document line up to the cursor). Each goes in with its own capability; `lsp-smoke` asserts
-  *advertised ⇒ answers* and skips absent capabilities, so the gate arms itself as they land. `lsp_driver.sprout` is
-  a transport with five unplugged sockets, not a missing feature set: formatting
-  (`formatter.format_source`), hover (`compiler.type_of_in_source`), document symbols
-  (`symbol_inventory_in_source`), definition (`symbol_locations_in_source` — top-level only), and
-  completion (`complete_in_state`, which needs an adapter: it is REPL-line-shaped, so it wants the
-  document line up to the cursor). One change per feature, each re-adding its own capability.
-- [ ] `P1` **The LSP re-checks cold on every keystroke.** `check_and_push_diagnostics` calls
-  `compiler.compile_source_with_root`, which builds a fresh `ModuleCache` per request;
-  `compile_source_with_cache` already exists and wants a cache held in `LspState`. Measured
-  2026-08-17: 0.30s wall for initialize + didOpen + didChange on a two-import file, and ~1s for a
-  cold check of a compiler-sized file against tens of ms warm.
+- [x] `P1` **Hover returned null unconditionally, so the editor showed no types. FIXED 2026-08-17.**
+  `do_hover` discarded its arguments. It now answers with the inferred type of the word under the
+  cursor: `Int` for a binding, `Int -> Int` for a function, `String -> String` for `string.trim`.
+  **The API is `compiler.type_of_expr_in_source`, deliberately NOT `compiler.type_of_in_source`
+  despite the name.** The latter is a `declare` into the C runtime that talks to a co-process
+  launched as `sproutd --analysis-service <stdlib_root>` — a command line carrying **no package
+  roots** — so hover through it would have failed on exactly the projects whose diagnostics work,
+  showing a type checker that appears to disagree with itself inside one file. That co-process is
+  persistent (forked once, holding a warm cache), so the objection is correctness, not spawn cost.
+  The mechanism — append `let __repl_source_value = <expr>`, typecheck, read the sentinel's `Scheme`
+  out of the env — had **two** copies in `analysis_service_driver` and hover needed a third, so it
+  was promoted to `compiler.scheme_of_expr_in_source` and both callers now use it. The core returns
+  the `Scheme` and rendering is a wrapper, because `eval_expr_in_source` branches on
+  function/polymorphic/effectful to decide how to print. Failures are an ADT rather than a message,
+  keeping the service's error strings and the REPL's `:type` output byte-identical. Covered by
+  `test_expr_type_in_source.spr` (9 assertions incl. the sentinel collision, a package-root case, and
+  a negative control) and four `lsp-smoke` assertions, one of which cannot pass under the builtin
+  route and was written before the design was chosen for that reason.
+- [ ] `P1` **Wire the remaining three LSP features whose compiler API already exists.** formatting
+  (`formatter.format_source`), document symbols (`symbol_inventory_in_source`), completion
+  (`complete_in_state` — REPL-line-shaped, so it wants the document line up to the cursor). Each goes
+  in with its own capability; `lsp-smoke` asserts *advertised ⇒ answers* and skips absent
+  capabilities, so the gate arms itself as they land. **Check each API for the hover trap**: an
+  `analysis_*` name in `stdlib/compiler.sprout` is a builtin that crosses the analysis-service fork
+  and therefore loses package roots, while the in-process compiler modules keep them.
+- [ ] `P1` **The LSP re-checks cold on every request.** `check_and_push_diagnostics` and `do_hover`
+  each build a fresh `ModuleCache`; `compile_source_with_cache_roots` already exists and wants a
+  cache held in `LspState`. Needs an invalidation policy for `didChange` of an imported module, which
+  is why it is not folded into the feature changes. Measured 2026-08-17: 0.30s wall for initialize +
+  didOpen + didChange on a two-import file, and ~1s for a cold check of a compiler-sized file against
+  tens of ms warm.
 - [x] `P1` **The env typecheck path could not resolve package roots, so a multi-root project reported
   every imported name as unknown. FIXED 2026-08-17 (M2).** `module_loader.resolve_module_path(name,
   root, extra_roots)` was called **only** from `bundler.sprout`; the env path (`build_import_pairs` →

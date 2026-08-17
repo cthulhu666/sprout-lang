@@ -24,6 +24,7 @@ editor and IDE support.
 >   sets `end == start`, so every range is zero-width.
 > - **`compiler.type_of_in_source` exists** (`stdlib/compiler.sprout`), contradicting the
 >   in-file comment that said hover was blocked on it. Hover is unwired, not unblocked.
+>   (Later correction: it exists, but it is the wrong door — see the hover entry below.)
 > - `initialize` now advertises **only** `textDocumentSync`. It previously claimed
 >   `hoverProvider` and `completionProvider` while returning null and `[]` — an editor
 >   renders that as a broken feature rather than an absent one. Each capability goes back
@@ -36,11 +37,22 @@ editor and IDE support.
 >   `ast.decl_value_scopes` + `ast.decl_type_names` authorities; resolves same-file,
 >   qualified cross-file, and selectively-imported names. Locals and parameters are out
 >   of scope — no position is recorded for them
-> - wire the remaining four whose compiler API already exists: formatting
->   (`formatter.format_source`), hover (`type_of_in_source`), document symbols
->   (`symbol_inventory_in_source`), completion (`complete_in_state`)
-> - hold a `ModuleCache` in `LspState` — `compile_source_with_cache` exists, but the LSP
->   calls `compile_source_with_root`, so every keystroke re-checks cold
+> - ~~hover~~ **done**: `compiler.type_of_expr_in_source`, and note the API — **not**
+>   `compiler.type_of_in_source`, despite the name. That one is a `declare` into the C
+>   runtime which talks to a co-process launched as
+>   `sproutd --analysis-service <stdlib_root>`, a command line carrying **no package
+>   roots**, so hover routed through it would fail on precisely the projects whose
+>   diagnostics succeed. The mechanism (append a sentinel binding, typecheck, read the
+>   sentinel's `Scheme` out of the env) now lives once in `compiler.sprout`; the analysis
+>   service calls it instead of keeping its own two copies
+> - wire the remaining three whose compiler API already exists: formatting
+>   (`formatter.format_source`), document symbols (`symbol_inventory_in_source`),
+>   completion (`complete_in_state`). The same caution applies to each — check whether
+>   the API is in-process or across the analysis-service fork
+> - hold a `ModuleCache` in `LspState` — `compile_source_with_cache_roots` exists, but
+>   every diagnostics run and every hover builds a fresh cache, so both re-check cold.
+>   Needs an invalidation policy for `didChange` of an imported module, which is why it
+>   is not folded into the feature changes
 > - ~~package roots~~ **done**: `sproutd --lsp <root> --package-root <dir>` (repeatable);
 >   the env path now calls the same `resolve_module_path` the bundler uses instead of a
 >   narrower stdlib-only resolver
