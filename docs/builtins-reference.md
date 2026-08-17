@@ -175,7 +175,20 @@ wrapper, because several sit in per-token and per-byte parse loops:
 - `split_words(s: String) -> List String`
 
 Likewise `double_to_bits` / `double_from_bits` live in `stdlib.math`
-(see [spec-v0.md §8.1.1](./spec-v0.md)).
+(see [spec-v0.md §8.1.1](./spec-v0.md)), and the bitwise intrinsics live in
+`stdlib.bits` (see [spec-v0.md §8.1.2](./spec-v0.md) and
+[bitwise-int-ops-v0.md](./bitwise-int-ops-v0.md)). Both families are compiler
+intrinsics with **no runtime symbol and no `APPROVED_BUILTINS` entry** — each
+lowers to a machine instruction, so there is nothing to call:
+
+- `bit_and(a: Int, b: Int) -> Int`, `bit_or`, `bit_xor` (same shape)
+- `bit_not(a: Int) -> Int` — flips every bit, so `bit_not(0)` is `-1`
+- `bit_shl(x: Int, n: Int) -> Int` — left shift; bits above position 63 are discarded
+- `bit_shr(x: Int, n: Int) -> Int` — arithmetic (sign-filling) right shift
+- `bit_shr_zf(x: Int, n: Int) -> Int` — logical (zero-fill) right shift
+
+A shift count of `0..63` shifts as expected; `>= 64` saturates; a negative count
+panics, and a negative *literal* count is a compile error.
 - `bytes_empty() -> Bytes`
 - `bytes_length(value: Bytes) -> Int`
 - `bytes_get(value: Bytes, index: Int) -> Maybe Int`

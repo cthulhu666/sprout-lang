@@ -1,8 +1,8 @@
 # Bitwise integer operations (v0)
 
-**Status:** proposed. Design only; nothing here is implemented. `docs/spec-v0.md` is
-normative for the stable core; this document holds the rationale and the decisions that
-implementation would need.
+**Status:** implemented, experimental. `docs/spec-v0.md` §8.1.2 is normative for the
+surface; this document holds the rationale, the prior-art survey, and the two semantics
+decisions (§5.2, §5.3) with the alternatives that lost.
 
 ## 1. Problem statement
 
@@ -533,34 +533,43 @@ shiftjoin_0:
 
 ## 10. Tests
 
-To be written with the implementation, per Definition of Ready #2 (failing first):
-
-- `tests/stdlib/test_bits.spr` — the algebraic identities (`bit_and(x, x) == x`,
-  `bit_xor(x, x) == 0`, `bit_not(bit_not(x)) == x`, `bit_or(x, bit_not(x)) == -1`);
-  `bit_not(0) == -1` and `bit_not(x) == -x - 1`; **`bit_shr` vs `bit_shr_zf` on a
-  negative** (the pair's whole reason for existing); and a composed `rotr32` as the
-  realism check.
-- The §5.3 count boundary, which is decided behaviour and therefore must be pinned rather
-  than left to the lowering: counts `0`, `1`, `63` normal; `bit_shl(1, 64)` and
-  `bit_shr_zf(-8, 64)` are `0`; `bit_shr(-8, 64)` is `-1`; a negative count panics. Note
-  counts `>= 64` are exactly where a naive lowering yields LLVM poison, so a wrong
-  implementation here is liable to *look* right at `-O0` and diverge under optimisation —
-  the test must assert values, not merely that it does not crash.
-- The §5.2 discard behaviour, which needs pinning for the opposite reason — it must
-  **not** become an error: `bit_shl(1, 63) == -9223372036854775808` and
-  `bit_shl(3, 63) == -9223372036854775808` (two bits discarded), both total. These are the
-  regression guard if `*` later gains overflow trapping; a shared `IRIMul`-style guard
-  applied over-eagerly would break exactly here.
-- A `Bytes`-driven SHA-256 round against a known digest, if the pure-Sprout core lands
-  in the same arc — the strongest end-to-end evidence that the set is sufficient.
-- Golden IR: a constant shift must emit one instruction and no branch (§9), which is the
-  claim most likely to regress silently.
+- **`tests/stdlib/test_bits.spr`** (55 assertions). The algebraic identities
+  (`bit_and(x, x) == x`, `bit_xor(x, x) == 0`, `bit_not(bit_not(x)) == x`,
+  `bit_or(x, bit_not(x)) == -1`); `bit_not(0) == -1` and `bit_not(x) == -x - 1`;
+  **`bit_shr` vs `bit_shr_zf` on a negative**, which is the pair's whole reason for
+  existing; composed `rotr32` and `popcount`; and a GC-header-shaped
+  kind/colour/aux extraction as the realism check.
+- **Both count boundaries, constant *and* dynamic.** This is the part that needs
+  care rather than diligence: the constant-fold path means a test written with
+  literal counts **never reaches the guard CFG at all**. So the dynamic assertions
+  derive their count from `argv` (`list_length(args)`, which is 0 at run time and
+  opaque to both Sprout and clang) — the same trick, for the same reason, as
+  `tests/div_smoke/div_by_zero.spr`. Without it, `finish_checked_shift` would be
+  entirely untested by a suite that looked thorough.
+- **The §5.2 discard behaviour, pinned for the opposite reason** — it must *not*
+  become an error: `bit_shl(1, 63)` and `bit_shl(3, 63)` are both `INT_MIN` and
+  total. This is the regression guard if `*` ever gains overflow trapping and a
+  shared guard is applied over-eagerly.
+- **`tests/bits_smoke/negative_shift.spr` + `just negative-shift-smoke`** (gate list,
+  beside `div-by-zero-smoke`). A panic needs a non-zero exit and a message on stderr,
+  which the assertion harness cannot express. Built at `-O2` on purpose: counts
+  outside `0..63` are where a missing guard yields poison, and poison can look
+  correct at `-O0` and diverge once the optimiser propagates it.
+- **`tests/stdlib/test_int_literals.spr`** (21 assertions) for §5.5, including hex in
+  *pattern* position and the `0x`/`0b` case-insensitivity.
+- Not done: a `Bytes`-driven SHA-256 round against a known digest. The primitives are
+  now sufficient for it (§2), but the hash core itself is separate work.
 
 ## 11. Spec/docs status
 
-- `docs/spec-v0.md` §8 — a new subsection beside §8.1.1 (Double bit access), listing the
-  seven names and marked **experimental**.
-- `runtime/APPROVED_BUILTINS` — **no entry**, by design; noted there so the absence reads
-  as deliberate rather than as an omission, exactly as `double_to_bits` is.
-- `BACKLOG.md` §528 — the bitwise-on-`Int` half points here; the sized-int and
-  packed-record halves stay open.
+- `docs/spec-v0.md` §8.1.2 — the seven names, the shift-count domain, the discard rule
+  and the width partition, marked **experimental**; §2 gains the `0x`/`0b` literal forms
+  and the explicit absence of a digit separator.
+- `runtime/APPROVED_BUILTINS` — **no entry**, by design, exactly as for `double_to_bits`.
+- `BACKLOG.md` — the bitwise half of the §528 pair is closed and points here; sized
+  unsigned ints and `packed type` stay open, as does the `_` digit separator.
+- `stdlib/math.sprout`'s range-reduction comment is left as-is. Its claim that Sprout has
+  no bitwise *operators* is still true, and its division-by-`2^52` is exactly equivalent
+  to a shift under the positive-operand precondition it documents — rewriting the one
+  module that must stay free of rounding surprises, for no behavioural gain, is not worth
+  a reseed.
