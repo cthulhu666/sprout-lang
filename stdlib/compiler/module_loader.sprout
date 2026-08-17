@@ -342,11 +342,19 @@ fn cache_put(cache: ModuleCache, name: String, pairs: List (String, types.Scheme
 
 # Load a module by name, returning all its top-level name→scheme pairs.
 # Recursively loads imports first, using the cache to avoid re-checking.
-# Non-stdlib or unresolvable modules return Nil (silently skipped).
+# Unresolvable modules return Nil (silently skipped).
+#
+# `extra_roots` are the package roots a dotted non-stdlib import resolves under.
+# Resolution goes through resolve_module_path — the SAME resolver the bundler uses —
+# rather than module_name_to_path, which knows only `stdlib.*` and bare names. Calling
+# the shared resolver is the point: this path used to answer "where does this module
+# live" a second, narrower way, so a project with package roots typechecked correctly
+# when compiled and reported every imported name as unknown in the REPL, the analysis
+# service and the LSP.
 #
 # Note: the cache lookup is done via ref_read + dict_get in a plain match (not
 # a do-bind) to avoid the typechecker treating Maybe as the do-sequence family.
-fn load_module(name: String, stdlib_root: String, cache: ModuleCache) -> List (String, types.Scheme) !{IO} =
+fn load_module(name: String, stdlib_root: String, extra_roots: List String, cache: ModuleCache) -> List (String, types.Scheme) !{IO} =
   do
     d <- ref_read(cache)
     match dict_get(name, d) with
@@ -354,15 +362,18 @@ fn load_module(name: String, stdlib_root: String, cache: ModuleCache) -> List (S
     | Nothing ->
         do
           cache_put(cache, name, Nil)
-          match module_name_to_path(source.ModuleName(name), stdlib_root) with
+          match resolve_module_path(source.ModuleName(name), stdlib_root, extra_roots) with
           | Nothing -> Nil
           | Just path ->
               match fs.read_text(path) with
               | Err msg -> panic("read_file: " ++ path ++ ": " ++ msg)
               | Ok src ->
                   do
-                    import_pairs <- build_import_pairs(collect_imports(src), stdlib_root, cache)
-                    prelude_pairs <- if name == "stdlib.prelude" then Nil else load_module("stdlib.prelude", stdlib_root, cache)
+                    # Roots thread through the recursion: a module under a package root
+                    # may import another one, and dropping them here would resolve the
+                    # first level only.
+                    import_pairs <- build_import_pairs_with_roots(collect_imports(src), stdlib_root, extra_roots, cache)
+                    prelude_pairs <- if name == "stdlib.prelude" then Nil else load_module("stdlib.prelude", stdlib_root, extra_roots, cache)
                     let base_pairs = prelude_pairs ++ import_pairs
                     match lexer.tokenize(source.strip_headers(src)) with
                     | Err _ -> Nil
@@ -424,33 +435,40 @@ fn alias_marker(module_name: String) -> types.Scheme =
   types.mono(types.TConst(types.type_id(module_name)))
 
 # Apply a single import spec: load the module and namespace/filter its pairs.
-fn apply_import_spec(spec: ImportSpec, stdlib_root: String, cache: ModuleCache) -> List (String, types.Scheme) !{IO} =
+fn apply_import_spec(spec: ImportSpec, stdlib_root: String, extra_roots: List String, cache: ModuleCache) -> List (String, types.Scheme) !{IO} =
   match spec with
   | ImportAlias module_name alias ->
       do
-        pairs <- load_module(module_name, stdlib_root, cache)
+        pairs <- load_module(module_name, stdlib_root, extra_roots, cache)
         let visible = drop_import_qualifiers(pairs)
         Cons((str_concat("@qualalias:", alias), alias_marker(module_name)),
           prefix_pairs(visible, alias, extern_names(visible)))
   | ImportSelective module_name names ->
       do
-        pairs <- load_module(module_name, stdlib_root, cache)
+        pairs <- load_module(module_name, stdlib_root, extra_roots, cache)
         let visible = drop_import_qualifiers(pairs)
         select_pairs(visible, names, extern_names(visible))
 
-fn build_import_pairs_acc(specs: List ImportSpec, stdlib_root: String, cache: ModuleCache, acc: List (String, types.Scheme)) -> List (String, types.Scheme) !{IO} =
+fn build_import_pairs_acc(specs: List ImportSpec, stdlib_root: String, extra_roots: List String, cache: ModuleCache, acc: List (String, types.Scheme)) -> List (String, types.Scheme) !{IO} =
   match specs with
   | Nil -> acc
   | Cons spec rest ->
       do
-        pairs <- apply_import_spec(spec, stdlib_root, cache)
-        build_import_pairs_acc(rest, stdlib_root, cache, acc ++ pairs)
+        pairs <- apply_import_spec(spec, stdlib_root, extra_roots, cache)
+        build_import_pairs_acc(rest, stdlib_root, extra_roots, cache, acc ++ pairs)
 
+# Resolve imports against stdlib_root plus the given package roots.
+export fn build_import_pairs_with_roots(specs: List ImportSpec, stdlib_root: String, extra_roots: List String, cache: ModuleCache) -> List (String, types.Scheme) !{IO} =
+  build_import_pairs_acc(specs, stdlib_root, extra_roots, cache, Nil)
+
+# stdlib-only form, kept because most callers have no package roots to offer.
 export fn build_import_pairs(specs: List ImportSpec, stdlib_root: String, cache: ModuleCache) -> List (String, types.Scheme) !{IO} =
-  build_import_pairs_acc(specs, stdlib_root, cache, Nil)
+  build_import_pairs_with_roots(specs, stdlib_root, Nil, cache)
 
-# Load the prelude's exported name→scheme pairs (unqualified, same as how the
-# Python CLI exposes them via with_prelude).  Always call before build_import_pairs
+# Load the prelude's exported name→scheme pairs. Always call before build_import_pairs
 # so the cache is warm for any module that transitively imports the prelude.
+#
+# No roots parameter: the prelude lives under stdlib_root by definition, and its imports
+# are stdlib modules. If that ever stops being true this needs the roots too.
 export fn load_prelude_pairs(stdlib_root: String, cache: ModuleCache) -> List (String, types.Scheme) !{IO} =
-  load_module("stdlib.prelude", stdlib_root, cache)
+  load_module("stdlib.prelude", stdlib_root, Nil, cache)

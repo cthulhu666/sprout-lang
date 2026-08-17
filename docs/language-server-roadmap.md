@@ -38,8 +38,9 @@ editor and IDE support.
 >   completion (`complete_in_state`)
 > - hold a `ModuleCache` in `LspState` — `compile_source_with_cache` exists, but the LSP
 >   calls `compile_source_with_root`, so every keystroke re-checks cold
-> - package roots: the env path the LSP uses cannot resolve them at all, so a
->   multi-root project reports every imported name as unknown
+> - ~~package roots~~ **done**: `sproutd --lsp <root> --package-root <dir>` (repeatable);
+>   the env path now calls the same `resolve_module_path` the bundler uses instead of a
+>   narrower stdlib-only resolver
 > - workspace-wide symbol search, rename
 >
 > §2 and §11 below predate self-hosting and describe reusing the original host-language

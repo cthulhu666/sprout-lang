@@ -6,16 +6,36 @@ import stdlib.compiler.lsp_driver as lsp
 extern fn sproutd_self_init() -> Unit !{IO}
 extern fn sproutd_init_with_root(root: String) -> Unit !{IO}
 
+# Collect every `--package-root <dir>` pair, in order.
+#
+# Repeatable, unlike compile_driver's single fixed-position form (which its own comment
+# calls the walking-skeleton surface). A project can sit on more than one package root,
+# and an editor building the command line has no reason to be limited to one; a single
+# occurrence behaves identically either way.
+#
+# A trailing `--package-root` with no directory after it is dropped rather than fatal:
+# killing the language server over a malformed argument would leave the editor with no
+# diagnostics and no explanation.
+fn collect_package_roots(args: List String) -> List String =
+  match args with
+  | Nil -> Nil
+  | Cons flag rest ->
+      if flag == "--package-root" then
+        match rest with
+        | Nil -> Nil
+        | Cons dir tail -> Cons(dir, collect_package_roots(tail))
+      else collect_package_roots(rest)
+
 fn main() -> Unit !{IO} =
   do
     args <- argv_all()
     match args with
     | ["--analysis-service", stdlib_root | _] -> service.run_service(stdlib_root)
     | ["--analysis-service" | _] -> panic("sproutd: --analysis-service requires stdlib_root argument")
-    | ["--lsp", stdlib_root | _] ->
+    | ["--lsp", stdlib_root | rest] ->
         do
           sproutd_init_with_root(stdlib_root)
-          lsp.run_lsp(stdlib_root)
+          lsp.run_lsp_with_roots(stdlib_root, collect_package_roots(rest))
     | ["--lsp" | _] -> panic("sproutd: --lsp requires stdlib_root argument")
     | _ ->
         do
