@@ -257,6 +257,20 @@ fn method_value_scopes(methods: List ClassMethodSig) -> List (String, NameScope)
   | Nil -> Nil
   | Cons (ClassMethodSig name _ _ _) rest -> Cons((name, ScopeModule), method_value_scopes(rest))
 
+# The TYPE axis the comment above sets aside: every type-level name a declaration
+# introduces. Together with decl_value_scopes this covers every name a declaration brings
+# into scope, which is what a "where is this name declared" query needs.
+#
+# WrapDecl is absent on purpose: its name is already a value name (the synthetic
+# constructor), so decl_value_scopes reports it and listing it here would duplicate.
+export fn decl_type_names(d: Decl) -> List String =
+  match d with
+  | TypeDecl name _ _ _ _ _ -> [name]
+  | RecordDecl name _ _ _ _ _ -> [name]
+  | ClassDecl name _ _ _ _ -> [name]
+  | AliasDecl name _ _ _ -> [name]
+  | _ -> Nil
+
 export fn scope_names_all(scoped: List (String, NameScope)) -> List String =
   match scoped with
   | Nil -> Nil

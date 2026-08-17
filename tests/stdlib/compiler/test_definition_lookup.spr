@@ -1,0 +1,97 @@
+module main
+
+import stdlib.test (TestState, new_state, assert_true, summary)
+import stdlib.compiler.compiler as compiler
+import stdlib.compiler.source as source
+
+# WHERE IS THIS NAME DECLARED — the query behind go-to-definition.
+#
+# `compiler.declaration_position` answers it for one source. It is built on the two
+# existing authorities rather than a fresh walk over `Decl`: `ast.decl_value_scopes` for
+# value names (which already covers constructors and class methods) and the new
+# `ast.decl_type_names` for the type axis that authority explicitly sets aside. A third
+# per-constructor match over `Decl` is how the value axis came to disagree with itself in
+# the first place.
+#
+# The property most likely to break silently is LINE NUMBERING. `source.strip_headers`
+# blanks module/import lines rather than deleting them precisely so positions keep their
+# original line numbers; a deletion-based strip would shift every result up by the header
+# count, which reads as "go-to-definition is a few lines off" rather than as a bug in
+# stripping. So the fixture below carries a header, and every expected line is the line in
+# the ORIGINAL text.
+
+# Line numbers are 1-based and are stated per declaration. Keep this in sync by hand —
+# that is the point of the test.
+fn fixture() -> String =
+  "module app.defs\n"  # 1
+    ++ "\n"  # 2
+    ++ "import stdlib.string as string\n"  # 3
+    ++ "\n"  # 4
+    ++ "export fn top_fn(a: Int) -> Int = a\n"  # 5
+    ++ "\n"  # 6
+    ++ "export type Colour (..) =\n"  # 7
+    ++ "  | Red\n"  # 8
+    ++ "  | Green Int\n"  # 9
+    ++ "\n"  # 10
+    ++ "export let top_let = 1\n"  # 11
+    ++ "\n"  # 12
+    ++ "export class Shout a\n"  # 13
+    ++ "  fn shout(x: a) -> String\n"  # 14
+    ++ "\n"  # 15
+    ++ "export type alias Name = String\n"  # 16
+    ++ "\n"  # 17
+    ++ "export wrap Wrapped = Int\n"  # 18
+    ++ "\n"  # 19
+    ++ "extern fn ext_thing(a: Int) -> Int\n"  # 20
+
+fn line_of(name: String) -> Int =
+  match compiler.declaration_position(fixture(), name) with
+  | Nothing -> 0
+  | Just pos -> source.position_line(pos)
+
+fn found(name: String) -> Bool =
+  match compiler.declaration_position(fixture(), name) with
+  | Nothing -> false
+  | Just _ -> true
+
+fn check_line(state: TestState, label: String, name: String, expected: Int) -> Unit !{IO} =
+  assert_true(state, label ++ " (line " ++ int_to_string(line_of(name)) ++ ")",
+    line_of(name) == expected)
+
+fn main() -> Unit !{IO} =
+  do
+    state <- new_state()
+
+    # --- one case per declaration form ---
+    check_line(state, "fn", "top_fn", 5)
+    check_line(state, "type", "Colour", 7)
+    check_line(state, "let", "top_let", 11)
+    check_line(state, "class", "Shout", 13)
+    check_line(state, "type alias", "Name", 16)
+    check_line(state, "wrap", "Wrapped", 18)
+
+    # An extern IS navigable. The analysis service's own location collector skips
+    # externs, but every Decl carries a SourcePos, so the omission there was a choice
+    # rather than a limit — and `stdlib.bits` is nothing but externs, so skipping them
+    # would make that module unreachable.
+    check_line(state, "extern fn", "ext_thing", 20)
+
+    # --- names a declaration introduces beyond its own ---
+    # A constructor resolves to its type's declaration; there is no finer position to
+    # offer, and landing on the type is what a reader wants anyway.
+    check_line(state, "constructor (nullary)", "Red", 7)
+    check_line(state, "constructor (with payload)", "Green", 7)
+    # Likewise a class method resolves to its class.
+    check_line(state, "class method", "shout", 13)
+
+    # --- the negative, and the header-stripping property ---
+    assert_true(state, "an undeclared name has no position", found("nope") == false)
+    assert_true(state, "a stripped header line is not itself a declaration",
+      found("app.defs") == false)
+
+    # If stripping ever becomes deletion-based rather than blanking, every line above
+    # shifts by the header size. Stated once, explicitly, so the failure is legible.
+    assert_true(state, "positions are ORIGINAL line numbers, not post-strip ones",
+      line_of("top_fn") == 5)
+
+    summary(state)

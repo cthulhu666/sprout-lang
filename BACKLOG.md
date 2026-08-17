@@ -2156,12 +2156,28 @@ what the LSP actually does: `docs/language-server-roadmap.md`.
   (`scripts/plugin_lsp_split_check.sh`, in CI): every class referencing `com.intellij.platform.lsp` must
   live under `dev.sprout.intellij.lsp`, asserted against the shipped bytecode, refusing to pass vacuously
   in either direction. RED-verified. 33 plugin tests (25 lexer + 8 detection).
-- [ ] `P1` **Wire the five LSP features whose compiler API already exists.** Go-to-definition is the one
-  users hit first — currently "Cannot find declaration to go to", because nothing answers
-  `textDocument/definition`. `symbol_locations_in_source` covers **top-level declarations of one file**,
-  so cross-file navigation needs `collect_imports` + `resolve_module_path` (both exported) to locate the
-  providing module, parse it, and read the position back. Locals, parameters and constructors need scope
-  tracking and are a separate piece of work. `lsp_driver.sprout` is
+- [x] `P1` **Go-to-definition. DONE 2026-08-17.** Was the first thing a user hit ("Cannot find declaration
+  to go to"), because nothing answered `textDocument/definition`. Three cases now resolve: a name declared
+  in the open document, a qualified name followed into its providing module (`string.trim` lands on
+  `stdlib/string.sprout`), and a bare name brought in by a selective import. Built on the existing
+  authorities rather than a fresh walk over `Decl` — `ast.decl_value_scopes` for values (which already
+  covers constructors and class methods) plus the new **`ast.decl_type_names`** for the type axis that
+  authority explicitly sets aside; the analysis service's local copy of that match was deleted in favour
+  of it. Position is `ast.decl_pos`, so **externs are navigable** — every `Decl` carries a `SourcePos`, and
+  `collect_decl_locations` skipping externs was a choice, not a limit (`stdlib.bits` is nothing but
+  externs, so skipping them would make the module unreachable). A constructor or class method resolves to
+  its enclosing declaration; no finer position is recorded. Locals, parameters and pattern bindings stay
+  **out of scope** — nothing records their positions, and guessing would move the cursor somewhere wrong,
+  which is worse than declining; `null` is a correct answer and the editor says so plainly.
+  `compiler.declaration_position` lives in the compiler layer, not the transport, per
+  `language-server-roadmap.md` §4.3. Covered by `test_definition_lookup.spr` (13 assertions, one per
+  declaration form, pinning that positions are ORIGINAL line numbers despite header stripping) and four
+  `lsp-smoke` assertions driving the real server, including the cross-file case and a decline.
+- [ ] `P1` **Wire the remaining four LSP features whose compiler API already exists.** formatting
+  (`formatter.format_source`), hover (`compiler.type_of_in_source`), document symbols
+  (`symbol_inventory_in_source`), completion (`complete_in_state` — REPL-line-shaped, so it wants the
+  document line up to the cursor). Each goes in with its own capability; `lsp-smoke` asserts
+  *advertised ⇒ answers* and skips absent capabilities, so the gate arms itself as they land. `lsp_driver.sprout` is
   a transport with five unplugged sockets, not a missing feature set: formatting
   (`formatter.format_source`), hover (`compiler.type_of_in_source`), document symbols
   (`symbol_inventory_in_source`), definition (`symbol_locations_in_source` — top-level only), and

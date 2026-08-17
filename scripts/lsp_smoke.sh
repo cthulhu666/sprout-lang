@@ -142,7 +142,37 @@ resp="$(drive "$INIT" "$(open_doc "$PKG_URI" "$PKG_SRC")")"
 echo "$resp" | grep -q 'Unknown variable: greeting'
 check "the same import is unresolved with no root registered" $?
 
-# --- 6. capability honesty -------------------------------------------------------
+# --- 6. go to definition ---------------------------------------------------------
+# Fixtures avoid `->` deliberately; `let` bindings exercise the same lookup.
+DEF_URI="file:///tmp/lsp_smoke_def.sprout"
+# Quotes inside the fixture must be escaped for the JSON string that carries it; an
+# unescaped one makes didOpen unparseable, and the server then answers `null` to every
+# definition request — which reads as "declined politely" rather than "never saw the file".
+DEF_SRC='module app.d\nimport stdlib.string as string\n\nlet helper = 1\n\nlet y = helper\n\nlet z = string.trim(\" a \")\n'
+def_req() { # id, line, character
+  printf '{"jsonrpc":"2.0","id":%s,"method":"textDocument/definition","params":{"textDocument":{"uri":"%s"},"position":{"line":%s,"character":%s}}}' "$1" "$DEF_URI" "$2" "$3"
+}
+
+# Same file: `helper` on line 5 is declared on line 3 (0-based).
+resp="$(drive "$INIT" "$(open_doc "$DEF_URI" "$DEF_SRC")" "$(def_req 21 5 9)")"
+echo "$resp" | grep -q "\"id\":21,\"result\":{\"uri\":\"$DEF_URI\",\"range\":{\"start\":{\"line\":3,"
+check "definition resolves a name declared in the same file" $?
+
+# Across files: `string.trim` must land in stdlib/string.sprout, NOT in the open
+# document. Getting the file right is the half that a same-file-only implementation
+# would silently fail.
+resp="$(drive "$INIT" "$(open_doc "$DEF_URI" "$DEF_SRC")" "$(def_req 22 7 16)")"
+echo "$resp" | grep -q '"id":22,"result":{"uri":"file://.*/stdlib/string.sprout"'
+check "definition follows a qualified name into the providing module" $?
+
+# Declining is a correct answer. Locals and parameters have no recorded position, and
+# guessing would send the cursor somewhere wrong — worse than saying nothing.
+# Column 3 of `let helper = 1` is the space between the keyword and the name.
+resp="$(drive "$INIT" "$(open_doc "$DEF_URI" "$DEF_SRC")" "$(def_req 23 3 3)")"
+echo "$resp" | grep -q '"id":23,"result":null'
+check "definition returns null rather than guessing on a non-name position" $?
+
+# --- 7. capability honesty -------------------------------------------------------
 # Everything advertised must answer. This is the check that would have caught
 # `hoverProvider: true` shipping alongside a handler that returns null unconditionally.
 caps="$(drive "$INIT")"
@@ -155,6 +185,14 @@ if echo "$caps" | grep -q '"hoverProvider":true'; then
   check "hoverProvider is advertised, so hover must answer" $?
 else
   echo "SKIP hover is not advertised (honest: the handler is not wired yet)"
+fi
+
+if echo "$caps" | grep -q '"definitionProvider":true'; then
+  resp="$(drive "$INIT" "$(open_doc "$DEF_URI" "$DEF_SRC")" "$(def_req 24 5 9)")"
+  ! echo "$resp" | grep -q '"id":24,"result":null'
+  check "definitionProvider is advertised, so definition must answer" $?
+else
+  echo "SKIP definition is not advertised"
 fi
 
 if echo "$caps" | grep -q '"completionProvider"'; then

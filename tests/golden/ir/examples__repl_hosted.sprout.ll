@@ -16342,6 +16342,105 @@ join_1:
   ret i64 %t$2
 }
 
+define i64 @stdlib.compiler.ast.decl_type_names(i64 %d) {
+entry:
+  %t$0 = call i64 @sprout_tag(i64 %d)
+  br label %arm_0_1
+arm_0_1:
+  %t$3 = add i64 0, 93
+  %t$4 = icmp eq i64 %t$0, %t$3
+  br i1 %t$4, label %body_0_1, label %arm_1_1
+body_0_1:
+  %t$5 = call i64 @sprout_field(i64 %d, i64 0)
+  %t$24 = alloca i64
+  store i64 %t$5, ptr %t$24
+  %t$25 = call i64 @sprout_gc_push_i64_root(ptr %t$24)
+  %t$6 = call i64 @sprout_alloc_obj(i64 5, i64 0)
+  %t$26 = alloca i64
+  store i64 %t$6, ptr %t$26
+  %t$27 = call i64 @sprout_gc_push_i64_root(ptr %t$26)
+  %t$7 = call i64 @sprout_alloc_obj(i64 6, i64 2)
+  %t$7$ptr = inttoptr i64 %t$7 to ptr
+  %t$7$f0 = getelementptr i64, ptr %t$7$ptr, i64 0
+  store i64 %t$5, ptr %t$7$f0
+  %t$7$f1 = getelementptr i64, ptr %t$7$ptr, i64 1
+  store i64 %t$6, ptr %t$7$f1
+  %t$28 = call i64 @sprout_gc_pop_roots(i64 2)
+  br label %join_1
+arm_1_1:
+  %t$8 = add i64 0, 94
+  %t$9 = icmp eq i64 %t$0, %t$8
+  br i1 %t$9, label %body_1_1, label %arm_2_1
+body_1_1:
+  %t$10 = call i64 @sprout_field(i64 %d, i64 0)
+  %t$29 = alloca i64
+  store i64 %t$10, ptr %t$29
+  %t$30 = call i64 @sprout_gc_push_i64_root(ptr %t$29)
+  %t$11 = call i64 @sprout_alloc_obj(i64 5, i64 0)
+  %t$31 = alloca i64
+  store i64 %t$11, ptr %t$31
+  %t$32 = call i64 @sprout_gc_push_i64_root(ptr %t$31)
+  %t$12 = call i64 @sprout_alloc_obj(i64 6, i64 2)
+  %t$12$ptr = inttoptr i64 %t$12 to ptr
+  %t$12$f0 = getelementptr i64, ptr %t$12$ptr, i64 0
+  store i64 %t$10, ptr %t$12$f0
+  %t$12$f1 = getelementptr i64, ptr %t$12$ptr, i64 1
+  store i64 %t$11, ptr %t$12$f1
+  %t$33 = call i64 @sprout_gc_pop_roots(i64 2)
+  br label %join_1
+arm_2_1:
+  %t$13 = add i64 0, 96
+  %t$14 = icmp eq i64 %t$0, %t$13
+  br i1 %t$14, label %body_2_1, label %arm_3_1
+body_2_1:
+  %t$15 = call i64 @sprout_field(i64 %d, i64 0)
+  %t$34 = alloca i64
+  store i64 %t$15, ptr %t$34
+  %t$35 = call i64 @sprout_gc_push_i64_root(ptr %t$34)
+  %t$16 = call i64 @sprout_alloc_obj(i64 5, i64 0)
+  %t$36 = alloca i64
+  store i64 %t$16, ptr %t$36
+  %t$37 = call i64 @sprout_gc_push_i64_root(ptr %t$36)
+  %t$17 = call i64 @sprout_alloc_obj(i64 6, i64 2)
+  %t$17$ptr = inttoptr i64 %t$17 to ptr
+  %t$17$f0 = getelementptr i64, ptr %t$17$ptr, i64 0
+  store i64 %t$15, ptr %t$17$f0
+  %t$17$f1 = getelementptr i64, ptr %t$17$ptr, i64 1
+  store i64 %t$16, ptr %t$17$f1
+  %t$38 = call i64 @sprout_gc_pop_roots(i64 2)
+  br label %join_1
+arm_3_1:
+  %t$18 = add i64 0, 98
+  %t$19 = icmp eq i64 %t$0, %t$18
+  br i1 %t$19, label %body_3_1, label %arm_4_1
+body_3_1:
+  %t$20 = call i64 @sprout_field(i64 %d, i64 0)
+  %t$39 = alloca i64
+  store i64 %t$20, ptr %t$39
+  %t$40 = call i64 @sprout_gc_push_i64_root(ptr %t$39)
+  %t$21 = call i64 @sprout_alloc_obj(i64 5, i64 0)
+  %t$41 = alloca i64
+  store i64 %t$21, ptr %t$41
+  %t$42 = call i64 @sprout_gc_push_i64_root(ptr %t$41)
+  %t$22 = call i64 @sprout_alloc_obj(i64 6, i64 2)
+  %t$22$ptr = inttoptr i64 %t$22 to ptr
+  %t$22$f0 = getelementptr i64, ptr %t$22$ptr, i64 0
+  store i64 %t$20, ptr %t$22$f0
+  %t$22$f1 = getelementptr i64, ptr %t$22$ptr, i64 1
+  store i64 %t$21, ptr %t$22$f1
+  %t$43 = call i64 @sprout_gc_pop_roots(i64 2)
+  br label %join_1
+arm_4_1:
+  %t$23 = call i64 @sprout_alloc_obj(i64 5, i64 0)
+  br label %join_1
+arm_5_1:
+  call void @sprout_abort_match()
+  unreachable
+join_1:
+  %t$2 = phi i64 [%t$7, %body_0_1], [%t$12, %body_1_1], [%t$17, %body_2_1], [%t$22, %body_3_1], [%t$23, %arm_4_1]
+  ret i64 %t$2
+}
+
 define i64 @stdlib.compiler.ast.scope_names_all(i64 %scoped) {
 entry:
   %t$0 = call i64 @sprout_tag(i64 %scoped)

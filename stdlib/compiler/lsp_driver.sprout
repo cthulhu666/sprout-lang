@@ -3,7 +3,9 @@ module stdlib.compiler.lsp_driver
 import stdlib.json as json
 import stdlib.compiler.compiler as compiler
 import stdlib.compiler.source as source
+import stdlib.compiler.module_loader as module_loader
 import stdlib.string as string
+import stdlib.fs as fs
 import stdlib.terminal as terminal
 
 extern fn stdin_read_bytes(n: Int) -> Maybe String !{IO}
@@ -251,7 +253,8 @@ export fn extract_hover_params(params: json.Json) -> Maybe HoverParams =
 fn server_capabilities() -> json.Json =
   json.JsonObject(
     json.JsonObjectCons("textDocumentSync", json.JsonInt(1),
-    json.JsonObjectNil))
+    json.JsonObjectCons("definitionProvider", json.JsonBool(true),
+    json.JsonObjectNil)))
 
 fn initialize_result() -> json.Json =
   json.JsonObject(
@@ -336,6 +339,117 @@ fn handle_hover(id: json.Json, params: json.Json, state: LspState) -> Unit !{IO}
             | Just src -> handle_hover_with_source(id, src, line_num, char_num, state)
 
 # ---------------------------------------------------------------------------
+# Go to definition
+#
+# The word under the cursor is resolved to a declaring module, that module's source is
+# read, and `compiler.declaration_position` finds the declaration. Three cases:
+#
+#   gfx.draw_frame  — qualified. The part before the last dot is an import alias (or a
+#                     module name imported without one); the rest is the member.
+#   greeting        — bare, declared in another module by a selective import.
+#   top_fn          — bare, declared in this document.
+#
+# Locals, parameters and pattern bindings are OUT OF SCOPE: nothing records their
+# positions, and inventing an answer would send the cursor somewhere wrong, which is
+# worse than declining. `null` is a valid response and the editor says so plainly.
+
+# The editor needs an absolute URI. Paths come from resolve_module_path, which joins the
+# roots it was given — and an editor passes absolute roots, so these are absolute. A
+# relative root (a hand-launched server) yields a relative path, which the client cannot
+# open; it is left as-is rather than guessed at against the server's cwd, which is not
+# necessarily the editor's.
+fn uri_for_path(path: String) -> String = "file://" ++ path
+
+fn location_json(uri: String, line: Int, col: Int) -> json.Json =
+  json.JsonObject(
+    json.JsonObjectCons("uri", json.JsonString(uri),
+    json.JsonObjectCons("range", diag_range(line - 1, col - 1),
+    json.JsonObjectNil)))
+
+# The module a qualified name's prefix refers to: an alias if one was bound, otherwise
+# the module's own name when it was imported without one.
+fn module_for_qualifier(specs: List module_loader.ImportSpec, qualifier: String) -> Maybe String =
+  match specs with
+  | Nil -> Nothing
+  | Cons spec rest ->
+      match spec with
+      | module_loader.ImportAlias module_name alias ->
+          if alias == qualifier || module_name == qualifier then Just(module_name)
+          else module_for_qualifier(rest, qualifier)
+      | module_loader.ImportSelective module_name _ ->
+          if module_name == qualifier then Just(module_name)
+          else module_for_qualifier(rest, qualifier)
+
+# The module a BARE name came from, when a selective import named it.
+fn module_for_selected_name(specs: List module_loader.ImportSpec, name: String) -> Maybe String =
+  match specs with
+  | Nil -> Nothing
+  | Cons spec rest ->
+      match spec with
+      | module_loader.ImportSelective module_name names ->
+          if list_member(name, names) then Just(module_name)
+          else module_for_selected_name(rest, name)
+      | module_loader.ImportAlias _ _ -> module_for_selected_name(rest, name)
+
+fn definition_in_module(module_name: String, member: String, state: LspState) -> Maybe json.Json !{IO} =
+  let Just path = module_loader.resolve_module_path(
+        source.ModuleName(module_name), lsp_stdlib_root(state), lsp_package_roots(state)) else Nothing
+      Ok module_src = fs.read_text(path) else Nothing
+      Just pos = compiler.declaration_position(module_src, member) else Nothing
+  in Just(location_json(uri_for_path(path),
+       source.position_line(pos), source.position_column(pos)))
+
+# A qualified name, resolved through the importing document's own import list.
+# Split at the LAST dot: the qualifier may itself be dotted when a module is imported
+# without an alias (`stdlib.string.trim`), while the member never is.
+fn definition_qualified(word: String, src: String, state: LspState) -> Maybe json.Json !{IO} =
+  let Just(qualifier, member) = string.rsplit_once(word, ".") else Nothing
+      Just module_name = module_for_qualifier(module_loader.collect_imports(src), qualifier) else Nothing
+  in definition_in_module(module_name, member, state)
+
+fn definition_bare(word: String, src: String, uri: String, state: LspState) -> Maybe json.Json !{IO} =
+  match compiler.declaration_position(src, word) with
+  | Just pos ->
+      Just(location_json(uri, source.position_line(pos), source.position_column(pos)))
+  | Nothing ->
+      match module_for_selected_name(module_loader.collect_imports(src), word) with
+      | Nothing -> Nothing
+      | Just module_name -> definition_in_module(module_name, word, state)
+
+fn definition_for_word(word: String, src: String, uri: String, state: LspState) -> Maybe json.Json !{IO} =
+  if string.contains(word, ".") then definition_qualified(word, src, state)
+  else definition_bare(word, src, uri, state)
+
+# The result is matched at the call rather than bound with `<-`: a do-bind unwraps a
+# Maybe returned from an effectful function, so `target <- definition_for_word(...)`
+# would hand back a bare Json and lose the not-found case.
+fn send_definition_for(id: json.Json, word: String, src: String, uri: String, state: LspState) -> Unit !{IO} =
+  match definition_for_word(word, src, uri, state) with
+  | Nothing -> send_message(make_result(id, json.JsonNull))
+  | Just loc -> send_message(make_result(id, loc))
+
+fn handle_definition_at(id: json.Json, uri: String, src: String, line_num: Int, char_num: Int, state: LspState) -> Unit !{IO} =
+  match vec_get(line_num, string.string_lines(src)) with
+  | Nothing -> send_message(make_result(id, json.JsonNull))
+  | Just line_str ->
+      let word = extract_word(line_str, char_num)
+      in if string.is_empty(word) then send_message(make_result(id, json.JsonNull))
+         else send_definition_for(id, word, src, uri, state)
+
+fn handle_definition(id: json.Json, params: json.Json, state: LspState) -> Unit !{IO} =
+  # Same TextDocumentPositionParams shape as hover, so the same extractor serves both.
+  match extract_hover_params(params) with
+  | Nothing -> send_message(make_result(id, json.JsonNull))
+  | Just hp ->
+      match hp with
+      | HoverParams uri line_num char_num ->
+          do
+            docs <- ref_read(lsp_documents(state))
+            match dict_get(uri, docs) with
+            | Nothing -> send_message(make_result(id, json.JsonNull))
+            | Just src -> handle_definition_at(id, uri, src, line_num, char_num, state)
+
+# ---------------------------------------------------------------------------
 # Dispatch
 
 fn dispatch_lsp(method: String, req: json.Json, state: LspState) -> Unit !{IO} =
@@ -346,6 +460,7 @@ fn dispatch_lsp(method: String, req: json.Json, state: LspState) -> Unit !{IO} =
   else if method == "textDocument/didChange" then handle_did_change(get_params(req), state)
   else if method == "textDocument/didClose" then handle_did_close(get_params(req), state)
   else if method == "textDocument/hover" then handle_hover(get_id(req), get_params(req), state)
+  else if method == "textDocument/definition" then handle_definition(get_id(req), get_params(req), state)
   else if method == "textDocument/completion" then
     send_message(make_result(get_id(req), json.array_from_list(Nil)))
   else ()
