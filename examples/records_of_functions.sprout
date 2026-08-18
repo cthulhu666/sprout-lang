@@ -1,0 +1,65 @@
+module examples.records_of_functions
+
+# A record whose fields are all FUNCTIONS is a first-class bundle of behaviour.
+# It is built, named, stored and passed like any other value, and a field call
+# `c.encode(text)` loads the closure out of the field and applies it — so
+# choosing a different strategy is choosing a different record, with no class,
+# instance or dispatch machinery involved.
+#
+# The payoff is `compose` below: because a `Codec` is an ordinary value rather
+# than a declaration, codecs can be built at runtime and combined into new ones.
+# That is the thing a typeclass cannot do — an instance is fixed at compile time
+# and there is exactly one per type.
+
+import stdlib.string as string
+
+type Codec = (encode: String -> String, decode: String -> String)
+
+# `encode` and `decode` must be inverses; `roundtrip` is that property, checked
+# against whichever codec it is handed.
+fn roundtrip(c: Codec, text: String) -> Bool =
+  c.decode(c.encode(text)) == text
+
+# A codec FACTORY: `bracket` closes over its own arguments, so the functions in
+# the returned record are closures, not top-level names. Each call produces a
+# different codec.
+fn bracket(open: String, close: String) -> Codec =
+  Codec(
+    encode = \text -> open ++ text ++ close,
+    decode = \text -> strip_around(open, close, text)
+  )
+
+# `let..else` gives the fallback for a prefix or suffix that is not there, so
+# decoding a string this codec did not produce returns it unchanged instead of
+# failing.
+fn strip_around(open: String, close: String, text: String) -> String =
+  let Just head = string.strip_suffix(text, close) else text
+      Just body = string.strip_prefix(head, open) else text
+  in body
+
+fn tag(label: String) -> Codec =
+  bracket(label ++ ":", "")
+
+# Two codecs compose into a third. `decode` unwinds in the opposite order from
+# `encode`, which is what keeps the inverse property true of the result.
+fn compose(outer: Codec, inner: Codec) -> Codec =
+  Codec(
+    encode = \text -> outer.encode(inner.encode(text)),
+    decode = \text -> inner.decode(outer.decode(text))
+  )
+
+# The record holds only functions, so a human-readable name for each codec is
+# carried alongside it at the use site rather than inside the record.
+fn codecs() -> List (String, Codec) =
+  [("angle", bracket("<", ">")),
+   ("quote", bracket("\"", "\"")),
+   ("v1 tag", tag("v1")),
+   ("v1 tag in angles", compose(bracket("<", ">"), tag("v1")))]
+
+fn report(sample: String, named: (String, Codec)) -> Unit !{IO} =
+  match named with
+  | (name, codec) ->
+      print(`${name}: ${codec.encode(sample)} (roundtrip ${to_string(roundtrip(codec, sample))})`)
+
+fn main() -> Unit !{IO} =
+  list_each(\named -> report("hello", named), codecs())
