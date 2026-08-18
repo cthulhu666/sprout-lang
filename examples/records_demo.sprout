@@ -1,0 +1,67 @@
+module examples.records_demo
+
+# Records are product types with NAMED fields (spec §5.6.3). The two punctuation
+# marks are not interchangeable and each means what it says: `:` in a declaration
+# is "has type", `=` in a construction is "has value" — the same split as
+# `x: Int` on a parameter and `let x = 0` on a binding.
+#
+# Two properties do most of the work in this file:
+#   - access is TOTAL — `s.port` yields the field, never a `Maybe`;
+#   - records are IMMUTABLE — `with` builds a new one instead of mutating.
+
+type Timeouts = (connect_ms: Int, read_ms: Int) deriving (Eq, ToString)
+
+type Server = (host: String, port: Int, timeouts: Timeouts) deriving (Eq, ToString)
+
+fn dev_server() -> Server =
+  Server(
+    host = "localhost",
+    port = 8080,
+    timeouts = Timeouts(connect_ms = 500, read_ms = 2000)
+  )
+
+# Access chains through a nested record: `s.timeouts` is itself a record, so the
+# second dot reads a field of it.
+fn read_budget_ms(s: Server) -> Int =
+  s.timeouts.read_ms
+
+# `with` names only the fields that change; every other field is copied. The
+# result is a NEW record, so the base is still usable afterwards — see `main`,
+# which prints the original again after both updates.
+fn promote(s: Server) -> Server =
+  s with (host = "api.example.com", port = 443)
+
+# The value of an updated field may read the base being updated, and `with`
+# nests, so a field that is itself a record is updated the same way.
+fn relax_read_budget(s: Server) -> Server =
+  s with (timeouts = (s.timeouts with (read_ms = s.timeouts.read_ms * 2)))
+
+# A record type can take type parameters. The argument is inferred at
+# construction, so `tag_env(8080)` is a `Tagged Int` without an annotation.
+type Tagged a = (value: a, source: String)
+
+fn tag_env(value: a) -> Tagged a =
+  Tagged(value = value, source = "env")
+
+fn describe(s: Server) -> String =
+  `${s.host}:${to_string(s.port)} read<=${to_string(read_budget_ms(s))}ms`
+
+fn main() -> Unit !{IO} =
+  do
+    let base = dev_server()
+    print(describe(base))
+    print(describe(promote(base)))
+    print(describe(relax_read_budget(base)))
+
+    # Unchanged: neither update touched `base`.
+    print(describe(base))
+
+    # `deriving` gives structural equality and a readable rendering for free.
+    # The derived rendering currently prefixes the declaring module's name; that
+    # it does so for a type declared in a module but not one declared in the
+    # entry file is a known inconsistency, tracked in BACKLOG.md.
+    print(to_string(base.timeouts))
+    print(`rebuilt equals original? ${to_string(eq(base, dev_server()))}`)
+
+    let port = tag_env(8080)
+    print(`${to_string(port.value)} came from ${port.source}`)
