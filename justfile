@@ -250,7 +250,18 @@ debug-run file: bootstrap-from-seed
 
 # Run all stdlib + compiler-stage tests (stage-1).
 [group('test')]
-test: test-stdlib-stage1 test-type-errors test-parse-errors test-executable-errors test-conformance-run test-package-resolution
+test: test-stdlib-stage1 test-type-errors test-parse-errors test-executable-errors test-conformance-run test-package-resolution test-front-end-agreement
+
+# The two typecheck front ends must reach the same verdict, and the editor one must
+# terminate. `--phase check` runs the bundler; the DEFAULT phase runs the env path, which
+# is what the REPL, analysis service and LSP use — and which no gate ran before this one,
+# because every compile_driver call in this file passes an explicit phase. Both bugs it
+# was written for came from a user in an editor, not from CI. Bounds time as well as
+# comparing verdicts: a non-terminating check cannot be caught by an in-process .spr test,
+# which would hang `just test` rather than fail it.
+[group('test')]
+test-front-end-agreement: bootstrap-from-seed
+  bash scripts/front_end_agreement.sh
 
 # Second-root (--package-root) module resolution gate: an app importing a module
 # from an extra package root resolves only when that root is registered

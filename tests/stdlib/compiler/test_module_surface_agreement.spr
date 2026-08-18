@@ -3,6 +3,7 @@ module main
 import stdlib.test (TestState, new_state, assert_true, summary)
 import stdlib.compiler.compiler as compiler
 import stdlib.compiler.module_loader as module_loader
+import stdlib.compiler.bundler as bundler
 import stdlib.compiler.source as source
 import stdlib.env as env
 import stdlib.fs as fs
@@ -68,7 +69,7 @@ fn bundler_accepts(src: String, root: String) -> Bool !{IO} =
     | compiler.FullFail _ -> false
 
 # The REPL/env front end, driven exactly as the analysis service drives it.
-fn env_accepts(src: String, root: String, cache: module_loader.ModuleCache) -> Bool !{IO} =
+fn env_accepts(src: String, root: String, cache: bundler.LoadEnv) -> Bool !{IO} =
   do
     result <- compiler.compile_source_with_cache(src, source.StdlibRoot(root), cache)
     match result with
@@ -83,7 +84,7 @@ fn both_paths(
   src: String,
   expected: Bool,
   root: String,
-  cache: module_loader.ModuleCache
+  cache: bundler.LoadEnv
 ) -> Unit !{IO} =
   do
     via_bundler <- bundler_accepts(src, root)
@@ -95,7 +96,7 @@ fn main() -> Unit !{IO} =
   do
     state <- new_state()
     root <- stdlib_root()
-    cache <- module_loader.new_cache()
+    cache <- bundler.new_load_env()
 
     # --- the extern rule, one case per import form ---
 

@@ -2767,6 +2767,24 @@ retired; see git history. Genuinely-open, non-Python follow-ups that outlived it
 
 ## Compiler Internals Follow-Ups
 
+- [ ] `P1` **`unifier.apply_full_subst` does not terminate on a cyclic substitution**
+  (2026-08-18). Found via the LSP: `sproutd` sat at 99.7% CPU for 15 minutes with RSS flat at
+  2.4 MB. `sample(1)` stack: `infer_call_var → unifier.instantiate_with_vars →
+  apply_full_subst → apply_full_subst → …`, dominated by `map_get_unboxed`/`strcmp`. Flat RSS with
+  unbounded time means it is cycling a fixed structure rather than recursing away — consistent with
+  a binding `α := … α …` that an occurs check should make impossible, though that is NOT yet proven
+  (re-expansion of a shared substitution chain fits the evidence too).
+  **Trigger, bisected:** two `task_fork`s whose forked function calls any *imported-module*
+  function. One fork is fine; two forks calling only prelude builtins are fine; two forks calling
+  `task_sleep` OR `string.trim` both hang, so the effect/`Task` machinery is a red herring and the
+  imported-scheme instantiation is the common factor. Minimal repro is 18 lines — see the trigger
+  table in `docs/module-surface-authority-v0.md` §7.1; `examples/concurrent_fetch.sprout` is the
+  real-world case, which the bundler checks clean in 0.28s.
+  **Now unreachable from editors** (the env path that reached it is retired), so this is latent, not
+  live — but it is a real non-termination in the unifier and other routes to it are unproven. Any
+  fix needs a time-bounded harness: an in-process `.spr` test cannot bound its own runtime and would
+  hang `just test` instead of failing it.
+
 > Open compiler/runtime follow-ups relocated here 2026-07-05 from the retired
 > "Minimum Viable Path to Escape Python" milestone log. Milestones M1–M7 completed
 > (stage-3 fixed point, 2026-05-17); the done-history execution log was dropped —
@@ -3217,13 +3235,30 @@ op-classification already in place.
   per keypress — a subprocess, and one that silently offers nothing on the Windows port. Staleness is
   caught by `tests/stdlib/compiler/test_repl_module_list.spr` instead. Revisit if a `read_dir`
   primitive ever lands (which needs its own approval per "Builtin vs Stdlib").
-- [ ] `P2` **Retire the env typecheck path onto the bundler** (2026-08-17). The structural end of
-  "two front ends that can disagree": have the analysis service bundle like the file path so only one
-  answer exists. Measured cost — a cold bundler check is 1.1s on `infer.sprout` and 0.41s on
-  `http_server.sprout`, against ~19ms for a warm env check of a six-module session — so it needs a
-  parsed-module cache first, plus a bundle-from-source entry point, and it touches ~6 analysis ops.
-  It does **not** subsume the export-scanner work above. Sequenced last.
-  Design: `docs/module-surface-authority-v0.md` §7.
+- [x] `P2` **Retire the env typecheck path onto the bundler. DONE 2026-08-18.** The structural end of
+  "two front ends that can disagree". `compile_source_with_cache_roots` — the choke point every
+  editor-facing caller funnels through — now bundles instead of building an environment of imported
+  schemes, sharing `check_bundled` with `--phase check` so the two cannot diverge by construction.
+  New `bundler.bundle_source_with_roots` + `bundler.LoadEnv` (source overlay for unsaved buffers,
+  parsed-module memo, prelude-scheme memo). Found four real divergences on the example corpus, all
+  reported by a user in RubyMine and invisible to CI because **no gate ran the env path** — it is the
+  *default* phase and every justfile invocation passes an explicit one. Closed by
+  `scripts/front_end_agreement.sh` (in `just test`), which compares both front ends over the corpus
+  and bounds time, since one of the four was a non-terminating check that wedged the whole LSP
+  session. Measured: first check 0.25s, subsequent re-checks 0.04s (the path it replaced: 0.08s and
+  0.08s); `tests/golden/ir` byte-identical. Detail: `docs/module-surface-authority-v0.md` §7.
+- [ ] `P2` **Delete `module_loader.build_import_pairs*` and the orphan `type_driver` /
+  `lower_driver`** (2026-08-18). Those two driver modules are unreferenced — nothing imports them,
+  no justfile recipe builds them — and they are the only remaining callers of the retired
+  scheme-environment path, each carrying its own copy of it. `build_import_pairs_with_roots` is
+  marked RETIRED in-file. Deleting all three finishes the retirement; kept out of the landing change
+  to keep it reviewable. `load_prelude_pairs` stays either way — the bundler's `check_bundled` uses
+  it for the ambient-prelude case.
+- [ ] `P2` **The LSP overlays only the entry document** (2026-08-18). `LoadEnv` can carry every open
+  dirty buffer, and that is what makes checking an unsaved multi-file edit correct, but
+  `check_and_push_diagnostics` overlays just the document being checked. An unsaved edit in a second
+  tab is therefore invisible to a check of the first, which reads from disk. Feed `lsp_documents`
+  into the overlay to close it.
 - [ ] `P2` **Standing guard: every top-level stdlib module loads cleanly through `load_module`**
   (2026-08-17). Asked for by `docs/repl-env-type-vocabulary-v0.md` §9 and blocked at the time because
   four modules were red; §11.1's fix took it to 26/27, so it is landable now. Would have caught all

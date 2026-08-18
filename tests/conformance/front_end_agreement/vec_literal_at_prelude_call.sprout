@@ -1,0 +1,16 @@
+module fixtures.vec_literal_at_prelude_call
+
+# A bare list literal handed to a PRELUDE function whose parameter is `Vec`.
+#
+# The Vec-context desugar builds its index by scanning the decls of the program being
+# checked (desugar_ctx.build_fn_sig_index). The bundler concatenates the prelude in, so
+# `vec_sort`'s FnDecl is present, its parameter reads as `Vec`, and the literal is wrapped
+# in `vec_from_list`. The env path receives the prelude as SCHEMES in the environment and
+# never as decls, so the index has no entry, no wrap is inserted, and inference reports
+# `Vec vs List` against source that is correct.
+#
+# Nothing about the literal is unusual — the divergence needs only that the callee comes
+# from the prelude rather than from this file.
+
+fn sorted() -> Vec Int =
+  vec_sort([88, 72, 95, 61])

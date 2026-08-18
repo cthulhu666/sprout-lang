@@ -4,6 +4,7 @@ import stdlib.test (TestState, new_state, assert_true, summary)
 import stdlib.compiler.compiler as compiler
 import stdlib.compiler.source as source
 import stdlib.compiler.module_loader as module_loader
+import stdlib.compiler.bundler as bundler
 import stdlib.env as env
 
 # PACKAGE ROOTS MUST REACH THE ENV TYPECHECK PATH.
@@ -76,7 +77,7 @@ fn main() -> Unit !{IO} =
       is_ok(without_roots) == false)
 
     # --- the cached variant the analysis service and LSP will use ---
-    cache <- module_loader.new_cache()
+    cache <- bundler.new_load_env()
     cached <- compiler.compile_source_with_cache_roots(
       source_using_package(), source.StdlibRoot(root), roots, cache)
     assert_true(state, "cached env path resolves a package-root import", is_ok(cached))

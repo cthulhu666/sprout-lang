@@ -252,13 +252,65 @@ offer nothing on the Windows port. The staleness is caught in
 `tests/stdlib/compiler/test_repl_module_list.spr` instead, where a subprocess is free — verified to
 fail, naming the missing module, by removing `bits` from the list.
 
-## 7. Retiring the env path (scoped, not designed here)
+## 7. Retiring the env path (IMPLEMENTED 2026-08-18)
 
-The maximal reading of G1 is to have one front end. Measured cost: a cold bundler check is 1.1s on
-`infer.sprout` (the largest module) and 0.41s on `http_server.sprout`, against tens of milliseconds
-for a warm env check — a real LSP regression without a parsed-module cache. It also needs a
-bundle-from-source entry point and touches ~6 analysis ops, and it would not remove the text
-scanners, so it does not subsume Part A. Sequenced after Parts A and B.
+The maximal reading of G1 is to have one front end. It is now the case.
+
+### 7.1 What forced it
+
+Four divergences, all found by a user in an editor rather than by CI, because **no gate ran the env
+path**: every `compile_driver` invocation in the justfile passes `--phase check`, `--emit-ir` or
+another explicit phase, and the env path is the *default* phase. On the 51-file example corpus:
+
+| example | the env path said | cause |
+|---|---|---|
+| `vec_basics` | `Vec vs List` on correct source | `desugar_ctx.build_fn_sig_index` scans only the decls of the program being checked, so with the prelude arriving as schemes it never learned `vec_sort` takes a `Vec` and inserted no `vec_from_list` wrap |
+| `http_get_cli`, `sentry_api` | `Unknown constructor: HttpTimeout` | imported ADT constructors absent from the env |
+| `repl_hosted` | `Unknown variable: repl.run` | qualified name from an imported module unresolved |
+| `concurrent_fetch` | *never terminated* | cyclic substitution in `unifier.apply_full_subst`, reached only from this path |
+
+The last one is why an editor session died rather than degraded: the LSP loop is single-threaded, so
+one non-terminating `didOpen` stops the server reading any further message — no diagnostics, no
+hover, no navigation, for every file, until the process is killed.
+
+### 7.2 Shape
+
+`compile_source_with_cache_roots` is the choke point — `_with_root`, `_with_roots` and `_with_cache`
+are all wrappers over it, and the five production callers plus `scheme_of_expr_in_source` go through
+it. So the migration is one function body, not a scattered sweep; the ~30 call sites are untouched.
+
+- **`bundler.bundle_source_with_roots`** bundles from SOURCE rather than a path.
+- **`bundler.LoadEnv`** carries a *source overlay* (in-memory buffers that take precedence over the
+  filesystem — how an unsaved buffer, or an entry with no file at all, enters a bundle) and two
+  memos (parsed modules by path; the prelude's schemes). Overlay paths are never memoised: they are
+  dirty by definition.
+- **`compiler.check_bundled`** is the shared post-bundle pipeline (typecheck → resolve →
+  dispatch-verify), so checking a FILE and checking a BUFFER cannot diverge by construction.
+- Bundling qualifies a named module's own top-level names, so the entry module's names are
+  re-exposed bare (`unqualify_entry_names`) and the API's contract is unchanged.
+
+### 7.3 Cost, measured
+
+The 1.1s figure quoted before was a cold check with no memo. Measured after, driving the real
+server on `vec_basics.sprout`: **first check 0.25s** (was 0.08s), **every subsequent full re-check
+0.04s** (was 0.08s). The editor pays a quarter-second once per session and is then twice as fast as
+the path it replaced, because the `LoadEnv` now survives across requests where the old code built a
+fresh cache per hover.
+
+Emitted IR is unaffected: `tests/golden/ir` is byte-identical across the change.
+
+### 7.4 The gate
+
+`scripts/front_end_agreement.sh` (wired into `just test`) runs both front ends over
+`examples/` plus dedicated fixtures and fails on any disagreement **or any hang** — it bounds time
+as well as comparing verdicts, because a non-terminating check cannot be caught by an in-process
+`.spr` test, which would hang `just test` rather than fail it.
+
+### 7.5 Not done
+
+`module_loader.build_import_pairs*` still exists, used only by the unreferenced `type_driver` /
+`lower_driver` diagnostic drivers. It is marked retired in-file; deleting it and them is filed in
+`BACKLOG.md`.
 
 ## 8. Tests
 

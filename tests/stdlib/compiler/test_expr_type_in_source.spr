@@ -3,7 +3,7 @@ module main
 import stdlib.test (TestState, new_state, assert_true, summary)
 import stdlib.compiler.compiler as compiler
 import stdlib.compiler.source as source
-import stdlib.compiler.module_loader as module_loader
+import stdlib.compiler.bundler as bundler
 import stdlib.string as string
 import stdlib.env as env
 
@@ -66,7 +66,7 @@ fn is_scheme_ok(r: compiler.ExprSchemeResult) -> Bool =
 # A `<-` bind strips the Maybe off an effectful function's result, so the Maybe is
 # matched at the call instead. "" stands for "no type": a Scheme never renders empty.
 fn rendered_type(src: String, expr: String, sr: source.StdlibRoot, roots: List String,
-                 cache) -> String !{IO} =
+                 cache: bundler.LoadEnv) -> String !{IO} =
   match compiler.type_of_expr_in_source(src, expr, sr, roots, cache) with
   | Nothing -> ""
   | Just text -> text
@@ -76,7 +76,7 @@ fn main() -> Unit !{IO} =
     state <- new_state()
     root <- stdlib_root()
     let sr = source.StdlibRoot(root)
-    cache <- module_loader.new_cache()
+    cache <- bundler.new_load_env()
 
     # --- the rendered form, which is what hover shows ---
     literal <- rendered_type(plain_source(), "42", sr, Nil, cache)
@@ -127,7 +127,7 @@ fn main() -> Unit !{IO} =
 
     # Negative control: without the root it must fail. A pass here would mean the default
     # search path had been widened, which is a worse bug than the one being fixed.
-    cache2 <- module_loader.new_cache()
+    cache2 <- bundler.new_load_env()
     without_roots <- rendered_type(source_using_package(), "use_it", sr, Nil, cache2)
     assert_true(state, "the same expression is untyped with no root registered",
       without_roots == "")

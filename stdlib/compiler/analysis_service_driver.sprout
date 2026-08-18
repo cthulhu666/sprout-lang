@@ -648,7 +648,7 @@ fn runtime_objs_dir() -> String = "/tmp/sprout_runtime_daemon_objs"
 # ---------------------------------------------------------------------------
 # StartupState — pre-compiled runtime objects dir, stdlib_root, and persistent module cache
 
-type StartupState = StartupState String (Ref String) (Ref (Dict (List (String, types.Scheme)))) (Ref (Dict SessionState)) (Ref Int)
+type StartupState = StartupState String (Ref String) bundler.LoadEnv(Ref (Dict SessionState)) (Ref Int)
   # stdlib_root, runtime_objs_dir ("" = not yet compiled), cache, sessions, next_session_id
 
 fn state_stdlib_root(state: StartupState) -> String =
@@ -659,7 +659,7 @@ fn state_runtime_obj_ref(state: StartupState) -> Ref String =
   match state with
   | StartupState _ ref _ _ _ -> ref
 
-fn state_cache(state: StartupState) -> Ref (Dict (List (String, types.Scheme))) =
+fn state_cache(state: StartupState) -> bundler.LoadEnv =
   match state with
   | StartupState _ _ cache _ _ -> cache
 
@@ -677,11 +677,11 @@ fn state_next_id(state: StartupState) -> Ref Int =
 fn build_startup_state(stdlib_root: String) -> StartupState !{IO} =
   do
     runtime_obj_ref <- ref_new("")
-    cache <- module_loader.new_cache()
-    prelude_pairs <- module_loader.load_prelude_pairs(stdlib_root, cache)
+    load_env <- bundler.new_load_env()
+    prelude_pairs <- module_loader.load_prelude_pairs(stdlib_root, bundler.load_env_schemes(load_env))
     sessions <- ref_new(dict_empty())
     next_id <- ref_new(1)
-    StartupState(stdlib_root, runtime_obj_ref, cache, sessions, next_id)
+    StartupState(stdlib_root, runtime_obj_ref, load_env, sessions, next_id)
 
 # Shell command that compiles every runtime .c into fresh objects under
 # `objs_dir`.  proc_run is argv-based (no glob expansion), so the `*.c` glob is
@@ -814,7 +814,7 @@ fn compile_and_run_eval(src: String, state: StartupState) -> json.Json !{IO} =
   | Err msg -> panic("write_file: eval_source: " ++ msg)
   | Ok _ ->
       do
-        ir_result <- compiler.compile_full_ir_with_cache(source.FilePath(eval_source_path()), source.StdlibRoot(state_stdlib_root(state)), state_cache(state))
+        ir_result <- compiler.compile_full_ir_with_cache(source.FilePath(eval_source_path()), source.StdlibRoot(state_stdlib_root(state)), bundler.load_env_schemes(state_cache(state)))
         link_and_run_eval(ir_result, state)
 
 export fn is_function_scheme(s: types.Scheme) -> Bool =
@@ -1036,10 +1036,10 @@ fn service_loop(state: StartupState) -> Unit !{IO} =
 export fn run_service(stdlib_root: String) -> Unit !{IO} =
   if stdlib_root == "" then do
     runtime_obj_ref <- ref_new("")
-    cache <- module_loader.new_cache()
+    load_env <- bundler.new_load_env()
     sessions <- ref_new(dict_empty())
     next_id <- ref_new(1)
-    service_loop(StartupState("", runtime_obj_ref, cache, sessions, next_id))
+    service_loop(StartupState("", runtime_obj_ref, load_env, sessions, next_id))
   else do
     state <- build_startup_state(stdlib_root)
     service_loop(state)

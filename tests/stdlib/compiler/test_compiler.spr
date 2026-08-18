@@ -1,7 +1,7 @@
 module main
 import stdlib.test (TestState, new_state, assert_eq, assert_true, assert_false, summary)
 import stdlib.compiler.compiler as compiler
-import stdlib.compiler.module_loader as module_loader
+import stdlib.compiler.bundler as bundler
 import stdlib.compiler.types as types
 import stdlib.compiler.source as source
 import stdlib.env as env
@@ -28,21 +28,23 @@ fn main() -> Unit !{IO} =
   do
     state <- new_state()
 
-    # new_cache() creates an independent, empty cache each time
-    cache1 <- module_loader.new_cache()
-    d1 <- ref_read(cache1)
-    assert_eq(state, "new_cache starts empty", vec_length(dict_keys(d1)), 0)
+    # new_load_env() creates an independent, empty memo each time
+    cache1 <- bundler.new_load_env()
+    d1 <- ref_read(bundler.load_env_schemes(cache1))
+    assert_eq(state, "new_load_env starts empty", vec_length(dict_keys(d1)), 0)
 
-    cache2 <- module_loader.new_cache()
-    d2 <- ref_read(cache2)
-    assert_eq(state, "each new_cache is independent", vec_length(dict_keys(d2)), 0)
+    cache2 <- bundler.new_load_env()
+    d2 <- ref_read(bundler.load_env_schemes(cache2))
+    assert_eq(state, "each new_load_env is independent", vec_length(dict_keys(d2)), 0)
 
     # compile_source_with_cache: pre-seed "stdlib.prelude" so load_prelude_pairs
     # takes the cache-hit branch and skips file I/O.  This lets us test the
     # cache-sharing invariant without needing a real stdlib_root on disk.
-    cache3 <- module_loader.new_cache()
-    d3 <- ref_read(cache3)
-    ref_write(cache3, dict_set("stdlib.prelude", Nil, d3))
+    # The sources below carry no module header and no imports, so the bundle does
+    # not pull in the prelude either — which is why an empty stdlib_root works.
+    cache3 <- bundler.new_load_env()
+    d3 <- ref_read(bundler.load_env_schemes(cache3))
+    ref_write(bundler.load_env_schemes(cache3), dict_set("stdlib.prelude", Nil, d3))
 
     r1 <- compiler.compile_source_with_cache("fn x() -> Int = 42", source.StdlibRoot(""), cache3)
     assert_true(state, "compile_source_with_cache: valid source compiles ok", is_ok(r1))
@@ -106,7 +108,7 @@ fn main() -> Unit !{IO} =
           # own_pairs by filter_own_pairs because its name collides with the
           # prelude's vec_singleton.  After the fix, load_module uses
           # program_declared_names so the collision no longer matters.
-          cache_c <- module_loader.new_cache()
+          cache_c <- bundler.new_load_env()
           r_collections <- compiler.compile_source_with_cache(
             "import collections\nfn foo() -> Vec Int = collections.vec_singleton(42)",
             source.StdlibRoot(stdlib_root), cache_c)
@@ -116,7 +118,7 @@ fn main() -> Unit !{IO} =
 
           # Regression guard: a module that only re-declares a prelude name
           # (with no other names) must not produce an empty qualified namespace.
-          cache_c2 <- module_loader.new_cache()
+          cache_c2 <- bundler.new_load_env()
           r_qualified_alias <- compiler.compile_source_with_cache(
             "import stdlib.collections as col\nfn bar() -> Vec Bool = col.vec_singleton(true)",
             source.StdlibRoot(stdlib_root), cache_c2)
@@ -125,7 +127,7 @@ fn main() -> Unit !{IO} =
             is_ok(r_qualified_alias))
 
           # Sanity: an unknown qualified name still fails (guard against false OK).
-          cache_c3 <- module_loader.new_cache()
+          cache_c3 <- bundler.new_load_env()
           r_bad <- compiler.compile_source_with_cache(
             "import collections\nfn baz() -> Int = collections.no_such_fn()",
             source.StdlibRoot(stdlib_root), cache_c3)
@@ -138,7 +140,7 @@ fn main() -> Unit !{IO} =
           # Test matrix: with/without module header, with/without spaces around *.
 
           # No module header, no param annotation — baseline
-          cache_d <- module_loader.new_cache()
+          cache_d <- bundler.new_load_env()
           r_bare <- compiler.compile_source_with_cache(
             "fn double(x) = x * 2",
             source.StdlibRoot(stdlib_root), cache_d)
@@ -147,7 +149,7 @@ fn main() -> Unit !{IO} =
             is_ok(r_bare))
 
           # module app.session header, spaces around operator
-          cache_d2 <- module_loader.new_cache()
+          cache_d2 <- bundler.new_load_env()
           r_session_space <- compiler.compile_source_with_cache(
             "module app.session\n\nfn double(x) = x * 2",
             source.StdlibRoot(stdlib_root), cache_d2)
@@ -156,7 +158,7 @@ fn main() -> Unit !{IO} =
             is_ok(r_session_space))
 
           # module app.session header, no spaces around operator
-          cache_d3 <- module_loader.new_cache()
+          cache_d3 <- bundler.new_load_env()
           r_session_nospace <- compiler.compile_source_with_cache(
             "module app.session\n\nfn double(x) = x*2",
             source.StdlibRoot(stdlib_root), cache_d3)
