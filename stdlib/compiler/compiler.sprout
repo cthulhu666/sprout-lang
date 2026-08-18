@@ -242,10 +242,28 @@ export fn scheme_of_expr_in_source(src: String, expr: String, stdlib_root: sourc
         augment_with_sentinel(src, expr), stdlib_root, extra_roots, cache)
       match result with
       | CompileFail diags -> ExprCheckFailed(diags)
-      | CompileOk env ->
-          match dict_get(expr_sentinel_name(), env) with
-          | Nothing -> ExprNotInferable
-          | Just scheme -> ExprSchemeOk(scheme)
+      | CompileOk env -> scheme_from_env(expr, env)
+
+# A bare name answers with what it was DECLARED as; anything else goes through the
+# sentinel.
+#
+# The sentinel re-infers the type of a *reference* to the name, and referencing a value is
+# pure — so a declared effect that lives only on the Scheme is replaced by the sentinel's
+# own. That is every zero-parameter function: it has no arrow to carry the effect (see
+# `types.scheme_effect_suffix`), so `fn main() -> Unit !{IO}` reported as plain `Unit` in
+# hover, the REPL's `:type` and the analysis service alike, while the checked env held
+# `Unit !{IO}` under the name's own key the whole time.
+#
+# Only top-level names can hit, because the sentinel is appended at module scope and sees
+# exactly the same bindings — so this changes which Scheme is read, never which name
+# resolves.
+fn scheme_from_env(expr: String, env: Dict types.Scheme) -> ExprSchemeResult =
+  match dict_get(string.trim(expr), env) with
+  | Just declared -> ExprSchemeOk(declared)
+  | Nothing ->
+      match dict_get(expr_sentinel_name(), env) with
+      | Nothing -> ExprNotInferable
+      | Just scheme -> ExprSchemeOk(scheme)
 
 # Rendered form, for hover and :type. Nothing on any failure — a caller that needs to
 # say WHY calls scheme_of_expr_in_source and matches the reason.

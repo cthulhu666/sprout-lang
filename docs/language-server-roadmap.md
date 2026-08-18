@@ -49,6 +49,15 @@ editor and IDE support.
 >   diagnostics succeed. The mechanism (append a sentinel binding, typecheck, read the
 >   sentinel's `Scheme` out of the env) now lives once in `compiler.sprout`; the analysis
 >   service calls it instead of keeping its own two copies
+> - ~~hover reported every nullary effectful function as pure~~ **done**: a bare name now
+>   answers with the `Scheme` the env holds under *its own key*, and only a non-name
+>   expression goes through the sentinel. The sentinel types a **reference** to the name,
+>   and referencing a value is pure, so a declared effect living only on the `Scheme` was
+>   replaced by the sentinel's own — which is every zero-parameter function, since it has
+>   no arrow to carry the effect (`types.scheme_effect_suffix`). Every `main` in the tree
+>   hovered as plain `Unit`. Not hover-only: the REPL's `:type` and the analysis service
+>   read the same function. Measured on the real server, `fn main() -> Unit !{IO}` before
+>   and after: `Unit` → `Unit !{IO}`
 > - ~~unimplemented methods~~ **done**: every JSON-RPC *request* now gets a reply
 >   (`-32601` when the method is not implemented); notifications stay silent. It used to
 >   end in `else ()`, dropping requests too. A real client sends four such methods on the

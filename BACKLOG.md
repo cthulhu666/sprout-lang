@@ -2316,6 +2316,32 @@ what the LSP actually does: `docs/language-server-roadmap.md`.
 - [ ] `P2` **Diagnostic ranges are zero-width.** `lsp_driver.diag_range` sets `end == start`, so
   clients get a caret rather than an underlined token. Widening to the offending token's extent is
   small; full multi-token spans need the span refactor in `language-server-roadmap.md` §5.1.
+- [x] `P1` **Hover, `:type` and the analysis service reported every nullary effectful function as
+  pure. DONE 2026-08-18.** `fn main() -> Unit !{IO}` hovered as plain `Unit` — measured on the real
+  server, so every `main` in the tree read as pure. `scheme_of_expr_in_source` appends
+  `let __repl_source_value = <expr>` and reads back the **sentinel's** Scheme; the sentinel types a
+  *reference* to the name, and referencing a value is pure, so a declared effect that lives only on
+  the Scheme was replaced. That is exactly the zero-parameter case: a nullary function has no arrow
+  to carry the effect (`types.scheme_effect_suffix`), while a parameterised one keeps it *inside* the
+  type and survived by accident. Fix: a bare name answers with the Scheme the checked env already
+  holds under its own key — the right answer was in the same dict the whole time, verified by probe
+  (`nullary: Unit !{IO}`) — and only a non-name expression still goes through the sentinel. Only
+  top-level names can hit, because the sentinel is appended at module scope and sees the same
+  bindings, so this changes which Scheme is read, never which name resolves. Five assertions in
+  `test_expr_type_in_source.spr` (three of them controls: the arrow case that already worked, a pure
+  nullary, a polymorphic name) plus two in `lsp-smoke`, because hover is where a user reads it.
+  Golden IR unchanged — this is an analysis API, not codegen.
+- [ ] `P3` **Surface effects more ambiently than hover.** Prior art, verified against primary
+  sources 2026-08-18: **there is no established convention for marking purity in an IDE.** LSP 3.17
+  defines ten semantic token modifiers and none concerns effects (`async` is the nearest). Haskell —
+  the canonical purity language — draws no such distinction: `hls-semantic-tokens-plugin` emits token
+  *types* only and lists modifiers as `[future]`. rust-analyzer shows the extension path, adding
+  custom `unsafe`/`consuming` modifiers. Flix, the closest analogue (effect-typed, first-class VS
+  Code support), puts effects in **hover text** — which is what Sprout now does. If we want more,
+  **inlay hints** (JetBrains client 2025.2+) beat colour: Sprout effects are polymorphic (`!{e}`), and
+  a binary pure/effectful colour cannot express an effect variable while text can. Unverified and
+  worth checking first: whether the JetBrains LSP client can map *custom* semantic token modifiers to
+  text attributes at all — its public docs cover semantic tokens in one line.
 - [ ] `P3` **LSP4IJ for Community-edition IntelliJ IDEs.** The JetBrains LSP API is unavailable in
   IntelliJ IDEA open-source builds and Android Studio, so the plugin's LSP layer is paid-IDE only
   (highlighting works everywhere). LSP4IJ (Red Hat, EPL-2.0, 2024.2+) would close that gap at the

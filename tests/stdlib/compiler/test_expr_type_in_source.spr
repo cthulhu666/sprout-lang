@@ -40,6 +40,19 @@ fn plain_source() -> String =
     ++ "\n"
     ++ "fn twice(n: Int) -> Int = n * 2\n"
 
+# A declared effect is recorded in two places — on the innermost arrow of the type, and on
+# the Scheme — because a zero-parameter function has no arrow to hold one (see
+# `types.scheme_effect_suffix`). Only the first survives re-inference, so `boot` is the case
+# that loses its effect and `shout` is the case that accidentally keeps it.
+fn effectful_source() -> String =
+  "fn boot() -> Unit !{IO} = ()\n"
+    ++ "\n"
+    ++ "fn shout(text: String) -> Unit !{IO} = ()\n"
+    ++ "\n"
+    ++ "fn pure_boot() -> Int = 1\n"
+    ++ "\n"
+    ++ "fn ident(x: a) -> a = x\n"
+
 fn source_using_package() -> String =
   "import demo.greet (greeting)\n"
     ++ "\n"
@@ -62,6 +75,10 @@ fn is_scheme_ok(r: compiler.ExprSchemeResult) -> Bool =
   | compiler.ExprSentinelCollision -> false
   | compiler.ExprCheckFailed _ -> false
   | compiler.ExprNotInferable -> false
+
+# `== false` rather than a prefix `!` on the call: the formatter renders `!f(x)` as
+# `! f (x)`, which reads worse than the comparison it replaces.
+fn mentions_no_effect(text: String) -> Bool = string.contains(text, "!{") == false
 
 # A `<-` bind strips the Maybe off an effectful function's result, so the Maybe is
 # matched at the call instead. "" stands for "no type": a Scheme never renders empty.
@@ -96,6 +113,41 @@ fn main() -> Unit !{IO} =
     scheme <- compiler.scheme_of_expr_in_source(plain_source(), "answer", sr, Nil, cache)
     assert_true(state, "the Scheme form succeeds on the same expression",
       is_scheme_ok(scheme))
+
+    # --- a declared name reports what it was DECLARED as, effects included ---
+    #
+    # Hover, the REPL's :type and the analysis service all read this. Before the fix they
+    # answered `Unit` for every `main` in the tree: the sentinel binding re-infers the type
+    # of a *reference*, and referencing a value is pure, so the Scheme-level effect of a
+    # nullary function was replaced by the sentinel's own. The checked env had `Unit !{IO}`
+    # under the name's own key the whole time.
+    nullary_effect <- rendered_type(effectful_source(), "boot", sr, Nil, cache)
+    assert_true(state, "a nullary effectful function reports its effect",
+      string.contains(nullary_effect, "!{IO}"))
+
+    # The control that says the fix is about the Scheme and not about effects generally:
+    # this one already worked, because its effect rides on the arrow inside the type.
+    arrow_effect <- rendered_type(effectful_source(), "shout", sr, Nil, cache)
+    assert_true(state, "an effectful function with a parameter still reports its effect",
+      string.contains(arrow_effect, "!{IO}"))
+
+    # The opposite control. Without it, "always print !{IO}" would satisfy the assertions
+    # above, and every pure function would start reading as effectful.
+    pure_nullary <- rendered_type(effectful_source(), "pure_boot", sr, Nil, cache)
+    assert_true(state, "a pure nullary function reports no effect",
+      string.contains(pure_nullary, "Int") && mentions_no_effect(pure_nullary))
+
+    # Preferring the declared scheme must not disturb polymorphism: a type variable stays a
+    # type variable rather than being instantiated by the sentinel's binding.
+    poly <- rendered_type(effectful_source(), "ident", sr, Nil, cache)
+    assert_true(state, "a polymorphic name still renders as a function over a variable",
+      string.contains(poly, "->") && mentions_no_effect(poly))
+
+    # An expression that is not a bare name has no env entry, so it must still go through
+    # the sentinel — and must not acquire an effect on the way.
+    call <- rendered_type(effectful_source(), "pure_boot()", sr, Nil, cache)
+    assert_true(state, "a call expression is still typed through the sentinel",
+      string.contains(call, "Int") && mentions_no_effect(call))
 
     # --- failures are distinguishable, so each caller can word its own message ---
     unknown <- compiler.scheme_of_expr_in_source(plain_source(), "nope", sr, Nil, cache)
