@@ -207,7 +207,45 @@ resp="$(drive_with_roots "$PKG_ROOT" "$INIT" "$(open_doc "$PKG_URI" "$PKG_SRC")"
 echo "$resp" | grep -q '"id":34,"result":{"contents":'
 check "hover resolves a name from a package-root module" $?
 
-# --- 8. capability honesty -------------------------------------------------------
+# --- 7b. the server announces itself ----------------------------------------------
+# A `window/logMessage` on initialize is what puts the server in the IDE's own log. It
+# exists because a real "go to definition does not work" report could not be diagnosed
+# from the IDE at all — answering "is the server even running?" needed a process listing.
+resp="$(drive "$INIT")"
+echo "$resp" | grep -q '"method":"window/logMessage"'
+check "the server announces itself on initialize" $?
+# It must report the roots it was ACTUALLY given: a server running against the wrong
+# stdlib or with no package roots looks identical from outside to a correct one.
+resp="$(drive_with_roots "$PKG_ROOT" "$INIT")"
+echo "$resp" | grep -q "package roots: $PKG_ROOT"
+check "the announcement reports the package roots in effect" $?
+
+# --- 8. unimplemented methods still answer ---------------------------------------
+# JSON-RPC 2.0: every REQUEST must get a response. Only notifications may be dropped.
+#
+# This was found by driving the server with a conversation shaped like a real IDE's
+# rather than the minimal one above: RubyMine sends documentSymbol, semanticTokens,
+# codeAction and foldingRange on the first file it opens, and every one of them
+# vanished without a reply, leaving the client waiting for a response that never came.
+# The minimal smoke fixture never sent them, so nothing here noticed.
+unknown_req='{"jsonrpc":"2.0","id":41,"method":"textDocument/documentSymbol","params":{"textDocument":{"uri":"'"$URI"'"}}}'
+resp="$(drive "$INIT" "$(open_doc "$URI" "$GOOD")" "$unknown_req")"
+echo "$resp" | grep -q '"id":41' && echo "$resp" | grep -q '\-32601'
+check "an unimplemented request is answered with method-not-found" $?
+
+# A notification has no id and MUST NOT be answered — replying to one is as wrong as
+# dropping a request. `$/cancelRequest` is the one a client sends constantly.
+resp="$(drive "$INIT" "$(open_doc "$URI" "$GOOD")" \
+  '{"jsonrpc":"2.0","method":"$/cancelRequest","params":{"id":41}}')"
+! echo "$resp" | grep -q '\-32601'
+check "an unimplemented notification is dropped silently" $?
+
+# The server must still be alive afterwards: an unknown method is not a fatal one.
+resp="$(drive "$INIT" "$(open_doc "$DEF_URI" "$DEF_SRC")" "$unknown_req" "$(def_req 42 5 9)")"
+echo "$resp" | grep -q '"id":42,"result":{"uri"'
+check "the server keeps serving after an unimplemented request" $?
+
+# --- 9. capability honesty -------------------------------------------------------
 # Everything advertised must answer. This is the check that would have caught
 # `hoverProvider: true` shipping alongside a handler that returns null unconditionally.
 caps="$(drive "$INIT")"

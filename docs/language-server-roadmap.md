@@ -49,6 +49,14 @@ editor and IDE support.
 >   diagnostics succeed. The mechanism (append a sentinel binding, typecheck, read the
 >   sentinel's `Scheme` out of the env) now lives once in `compiler.sprout`; the analysis
 >   service calls it instead of keeping its own two copies
+> - ~~unimplemented methods~~ **done**: every JSON-RPC *request* now gets a reply
+>   (`-32601` when the method is not implemented); notifications stay silent. It used to
+>   end in `else ()`, dropping requests too. A real client sends four such methods on the
+>   first file it opens, so the minimal smoke conversation was hiding it — drive the
+>   server with a realistic exchange, not a hand-written minimal one
+> - ~~server is invisible~~ **done**: `window/logMessage` on `initialize` reports the
+>   stdlib root and package roots in effect, so the IDE's own log shows the server the way
+>   it shows every other one. Before this, answering "is it even running?" needed `ps`
 > - wire the remaining three whose compiler API already exists: formatting
 >   (`formatter.format_source`), document symbols (`symbol_inventory_in_source`),
 >   completion (`complete_in_state`). The same caution applies to each — check whether
