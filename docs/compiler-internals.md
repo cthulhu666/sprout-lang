@@ -178,7 +178,7 @@ non-empty set silently returned `Nil` until the sret branch was added.
 
 - **Platform-conditional.** arm64 leaves the register clean in practice, so no macOS run can catch it. It is live only on x86-64 — which is what CI and the release artifacts build.
 - **Input-conditional.** It bites only where the function falls through to a comparison. An early `return 0` compiles to `xorl %eax, %eax`, which zeroes all of `RAX`, so the *same function* is correct for some inputs and wrong for others.
-- **It hid itself from the audit gate.** `scripts/check_approved_builtins.sh` greps for `long long <name>(`, so a `_Bool` definition was invisible to `runtime/APPROVED_BUILTINS` too — the ABI mismatch and the missing allowlist entry had one cause.
+- **It hid itself from the audit gate.** the `check-approved-builtins` justfile recipe greps for `^long long <name>(`, so a `_Bool` definition was invisible to `runtime/APPROVED_BUILTINS` too — the ABI mismatch and the missing allowlist entry had one cause.
 
 It surfaced only when a new test called `str_starts_with_at_byte` with the first inputs in the repo's history that returned false via the comparison path.
 

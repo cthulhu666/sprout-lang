@@ -69,7 +69,7 @@ and `p with (name = …)` update), integer ranges (`a..b`),
 existential constructors (`| exists a. Cell a where ToString a`, and its `(any C)`
 sugar — trait objects / heterogeneous collections), linear types with
 `consuming`/`borrowing`/`once` parameter modes, growable `MutVec` (`mutvec_push`),
-green-task concurrency with channels and `select`, and
+green-task concurrency with channels and a recv-only `select`, and
 `#@unstable`/`#@wip`-style declaration annotations. See the design drafts below.
 
 `class` and `instance` bodies use the layout (indentation) form; the brace form still
