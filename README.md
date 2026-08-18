@@ -1,3 +1,5 @@
+![Sprout logo](logo.png)
+
 # Sprout
 
 A statically typed, functional-first programming language aimed at strong safety
