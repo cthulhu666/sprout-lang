@@ -33,6 +33,18 @@
         id="dev.sprout.settings"
         displayName="Sprout"/>
 
-    <notificationGroup id="Sprout" displayType="BALLOON"/>
+    <!--
+      Reports an unconfigured plugin on the file itself. The balloon below fires once and
+      auto-hides; this stays until the cause is gone, which is the difference between a
+      user noticing and a user concluding the language has no diagnostics.
+    -->
+    <editorNotificationProvider
+        implementation="dev.sprout.intellij.lsp.SproutEditorNotificationProvider"/>
+
+    <!--
+      STICKY_BALLOON, not BALLOON: the transient form was missed in a real session, and the
+      thing it reports — no server at all — has no other transient signal.
+    -->
+    <notificationGroup id="Sprout" displayType="STICKY_BALLOON"/>
   </extensions>
 </idea-plugin>

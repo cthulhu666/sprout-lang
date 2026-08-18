@@ -211,6 +211,47 @@ a server on its own. It takes three settings — sproutd path, stdlib root, pack
 with walk-up auto-detection from the project root and an explicit notification when they
 are unset. A silently dead server is the one outcome to avoid.
 
+#### 5.3.1 Detection has a hard limit, so the report is the feature
+
+Auto-detection looks for a `build/sproutd` and `stdlib/` **pair**, at most `MAX_WALK_UP`
+levels above the project root. It is deliberately narrow in two ways. It will not accept
+half a checkout, because a binary paired with someone else's stdlib gives confidently wrong
+diagnostics. And it only looks *up*, because guessing at a checkout in an unrelated tree is
+how a stale toolchain gets selected silently.
+
+That limit is not hypothetical. Opening `uncharted-suns` — the one real Sprout project, and
+one that lives in an entirely different tree from the language repo — produced **no
+diagnostics and no navigation at all**, and the cause was invisible from the editor: the
+walk could not reach a checkout, nothing was configured, and `fileOpened` returned before
+starting anything. Every symptom pointed at the language.
+
+Detection cannot be fixed to cover this; a cross-tree toolchain is genuinely unguessable.
+What can be fixed is the silence, so the plugin reports the two configuration states that
+otherwise present as a broken language:
+
+| State | Presents as | Reported by |
+|---|---|---|
+| No sproutd + stdlib pair | No diagnostics, no hover, no navigation — like a language server with nothing to say | Editor banner + sticky balloon |
+| Package roots unset, file imports dotted non-`stdlib` modules | Every name from those modules reported as unknown — like broken code | Editor banner |
+
+The decision is a pure function, `diagnoseConfig`, over the resolved toolchain, the
+configured roots and the file's import header — the same shape as `detectFrom`, and for the
+same reason: it is testable without an IDE fixture, and it is the logic most likely to be
+quietly wrong.
+
+The second row is exact rather than heuristic: `module_loader.resolve_module_path` sends a
+`stdlib.*` or undotted name to the stdlib root and resolves everything else *only* through
+`try_extra_roots`. So a dotted non-`stdlib` import with no root configured cannot resolve,
+by construction. The scan stops at the first top-level declaration, which bounds it to the
+header and keeps an `import`-shaped line inside a multi-line backtick template from
+counting — safe because no file in `stdlib/`, `examples/`, `tests/` or uncharted-suns places
+an import after a declaration.
+
+A banner rather than only a balloon, because the balloon was already there, fired, and was
+missed. Balloons report an event; this is a *state*, and it holds until someone changes a
+setting. The balloon is kept and made sticky, since it is the only signal for a file that is
+never opened.
+
 ## 6. Milestones
 
 | # | Scope | Touches Sprout? |

@@ -2223,7 +2223,31 @@ what the LSP actually does: `docs/language-server-roadmap.md`.
   cache held in `LspState`. Needs an invalidation policy for `didChange` of an imported module, which
   is why it is not folded into the feature changes. Measured 2026-08-17: 0.30s wall for initialize +
   didOpen + didChange on a two-import file, and ~1s for a cold check of a compiler-sized file against
-  tens of ms warm.
+  tens of ms warm. **Partly done 2026-08-18** (env-path retirement): `LspState` now holds a
+  session-long `bundler.LoadEnv` and every re-check reuses it — 0.04s warm. What remains is the
+  invalidation policy for a `didChange` of an *imported* module, which the memo does not notice.
+- [x] `P1` **The plugin was silent about being unconfigured, so an unconfigured project read as a
+  broken language. DONE 2026-08-18.** Opening `uncharted-suns` in RubyMine gave no diagnostics and no
+  navigation at all. Cause: `SproutSettings.detectFrom` looks for a `build/sproutd` + `stdlib/` pair at
+  most `MAX_WALK_UP` levels *above* the project root, and the language checkout lives in an unrelated
+  tree, so nothing resolved and `fileOpened` returned before starting a server. The only signal was a
+  transient balloon. Detection cannot cover this — a cross-tree toolchain is unguessable — so the fix
+  is to report the state: a persistent `EditorNotificationProvider` banner on the file itself, with a
+  `Configure…` link, plus `STICKY_BALLOON`. Covers **two** states, the second being the one that bites
+  next: package roots unset while the file imports dotted non-`stdlib` modules, which otherwise
+  presents as a wall of `unknown type` errors about correct code. The predicate is exact, not
+  heuristic — `resolve_module_path` resolves such names *only* via `try_extra_roots`. Decision is a
+  pure `diagnoseConfig`, tested without an IDE fixture (10 tests), and the import scan stops at the
+  first top-level declaration — verified against every `.sprout` in `stdlib/`, `examples/`, `tests/`
+  and uncharted-suns that none places an import after one.
+- [ ] `P2` **`try_extra_roots` consults only the first package root, and checks nothing.**
+  `module_loader.sprout:200` matches `[root | _]` and returns `<root>/<dotted-as-path>.sprout`
+  unconditionally — no existence check, no attempt at the remaining roots. So a project needing two
+  package roots silently resolves everything against the first, and the IntelliJ plugin's
+  `pathSeparator`-joined multi-root setting is single-root in practice. The in-file comment names this
+  ("pure — no filesystem existence check"), so it is a known deferral rather than a defect, but it is
+  now user-visible through a settings field that implies otherwise. Fixing it needs IO in the
+  resolver; until then the plugin's settings comment should not promise multi-root behaviour.
 - [x] `P1` **The env typecheck path could not resolve package roots, so a multi-root project reported
   every imported name as unknown. FIXED 2026-08-17 (M2).** `module_loader.resolve_module_path(name,
   root, extra_roots)` was called **only** from `bundler.sprout`; the env path (`build_import_pairs` →
