@@ -2242,6 +2242,28 @@ what the LSP actually does: `docs/language-server-roadmap.md`.
   assertions driving the real server. Fixture reused from the batch-CLI gate — same module, other
   front end, which is the point. **Retiring the env path (BACKLOG item on the analysis service)
   subsumes this**; until then the two paths at least share the resolver.
+- [x] `P1` **Unimplemented LSP requests got no response at all. FIXED 2026-08-18.** `dispatch_lsp`
+  ended in `else ()`, which silently dropped every unknown method — including JSON-RPC *requests*,
+  which the spec requires be answered. Found by driving the server with a conversation shaped like a
+  real IDE's instead of the minimal one the smoke gate sent: RubyMine issues `documentSymbol`,
+  `semanticTokens/full`, `codeAction` and `foldingRange` on the first file it opens, and every one
+  vanished without a reply, leaving the client waiting on a response that never came. The decision is
+  now the pure, exported `unknown_method_response` (`id` present ⇒ `-32601` error; absent ⇒ silence),
+  so it is unit-testable and the transport only performs the IO. Three `lsp-smoke` assertions plus
+  three unit tests, including that a **string** id is echoed verbatim — a client matches replies to
+  pending requests by id, so a wrong id is worse than none.
+- [x] `P1` **The server could not say it was alive. FIXED 2026-08-18.** A `window/logMessage` on
+  `initialize` now reports the stdlib root and the package roots actually in effect. Motivated by a
+  real report: answering "is the server even running?" required a process listing, because nothing
+  the server did reached the IDE log — every other language server in the IDE is visible there. It
+  also surfaces the two things that are easy to get wrong and impossible to see from outside: the
+  wrong stdlib, and missing package roots.
+- [ ] `P2` **The plugin cannot auto-detect a toolchain for a project that is not a Sprout checkout.**
+  `SproutSettings.detectFrom` walks up for `build/sproutd` **and** `stdlib/` together; `uncharted-suns`
+  has neither, and nothing within six levels above it, so the game repo — Sprout's only real user —
+  can never auto-configure. Settings → Tools → Sprout works, but the only signal that it is needed is
+  one transient balloon. Options: honour `SPROUT_ROOT`, remember the last working toolchain across
+  projects, or make the unconfigured state persistent rather than a balloon.
 - [ ] `P2` **Diagnostic ranges are zero-width.** `lsp_driver.diag_range` sets `end == start`, so
   clients get a caret rather than an underlined token. Widening to the offending token's extent is
   small; full multi-token spans need the span refactor in `language-server-roadmap.md` §5.1.

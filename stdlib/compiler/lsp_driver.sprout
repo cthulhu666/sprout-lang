@@ -284,8 +284,36 @@ fn initialize_result() -> json.Json =
 # ---------------------------------------------------------------------------
 # Request / notification handlers
 
+# Say hello, in the one channel a client is guaranteed to surface.
+#
+# Motivated by a real debugging session: go-to-definition "did not work", and answering
+# whether the server was even RUNNING took a process listing, because nothing the server
+# did reached the IDE's log. A `window/logMessage` is the standard way for a server to be
+# visible there — every other language server in the IDE shows up this way — and it
+# reports the roots it was actually given, which is the other thing that is easy to get
+# wrong and impossible to see from outside.
+fn log_message(text: String) -> Unit !{IO} =
+  send_message(
+    json.JsonObject(
+      json.JsonObjectCons("jsonrpc", json.JsonString("2.0"),
+      json.JsonObjectCons("method", json.JsonString("window/logMessage"),
+      json.JsonObjectCons("params",
+        json.JsonObject(
+          json.JsonObjectCons("type", json.JsonInt(3),
+          json.JsonObjectCons("message", json.JsonString(text),
+          json.JsonObjectNil))),
+      json.JsonObjectNil)))))
+
+fn roots_summary(roots: List String) -> String =
+  match roots with
+  | Nil -> "none"
+  | _ -> string.join(", ", roots)
+
 fn handle_initialize(id: json.Json, state: LspState) -> Unit !{IO} =
-  send_message(make_result(id, initialize_result()))
+  do
+    send_message(make_result(id, initialize_result()))
+    log_message("sproutd LSP ready — stdlib: " ++ lsp_stdlib_root(state)
+      ++ "; package roots: " ++ roots_summary(lsp_package_roots(state)))
 
 fn handle_shutdown(id: json.Json, state: LspState) -> Unit !{IO} =
   do
@@ -467,6 +495,20 @@ fn handle_definition(id: json.Json, params: json.Json, state: LspState) -> Unit 
 # ---------------------------------------------------------------------------
 # Dispatch
 
+# JSON-RPC 2.0: every REQUEST gets a response, only notifications may be dropped. The
+# distinction is the `id` field — present on requests, absent on notifications — so a
+# missing `id` is the reason to stay silent, not an excuse to.
+#
+# This matters because a real client sends methods this server does not implement on the
+# very first file it opens: documentSymbol, semanticTokens, codeAction, foldingRange,
+# and $/cancelRequest. Dropping the requests among them leaves the client waiting for a
+# reply that never arrives. Pure and exported so the decision is unit-testable; the
+# caller performs the IO.
+export fn unknown_method_response(method: String, req: json.Json) -> Maybe json.Json =
+  match json.json_get_field(req, "id") with
+  | Nothing -> Nothing
+  | Just id -> Just(make_error(id, -32601, "method not implemented: " ++ method))
+
 fn dispatch_lsp(method: String, req: json.Json, state: LspState) -> Unit !{IO} =
   if method == "initialize" then handle_initialize(get_id(req), state)
   else if method == "initialized" then ()
@@ -478,7 +520,10 @@ fn dispatch_lsp(method: String, req: json.Json, state: LspState) -> Unit !{IO} =
   else if method == "textDocument/definition" then handle_definition(get_id(req), get_params(req), state)
   else if method == "textDocument/completion" then
     send_message(make_result(get_id(req), json.array_from_list(Nil)))
-  else ()
+  else
+    match unknown_method_response(method, req) with
+    | Nothing -> ()
+    | Just reply -> send_message(reply)
 
 fn handle_after_shutdown_check(method: String, req: json.Json, shutdown: Bool, state: LspState) -> Unit !{IO} =
   if method == "exit" then ()

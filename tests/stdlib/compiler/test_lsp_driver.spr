@@ -16,6 +16,28 @@ fn well_formed_position() -> json.Json =
     json.JsonObjectCons("character", json.JsonInt(7),
     json.JsonObjectNil)))
 
+# A JSON-RPC message with an id is a REQUEST and must be answered; one without is a
+# NOTIFICATION and must not be. Real clients send plenty of both that this server does
+# not implement — documentSymbol, semanticTokens, codeAction, $/cancelRequest — and
+# dropping a request leaves the client waiting for a reply that never comes.
+fn request_json(id: Int, method: String) -> json.Json =
+  json.JsonObject(
+    json.JsonObjectCons("jsonrpc", json.JsonString("2.0"),
+    json.JsonObjectCons("id", json.JsonInt(id),
+    json.JsonObjectCons("method", json.JsonString(method),
+    json.JsonObjectNil))))
+
+fn notification_json(method: String) -> json.Json =
+  json.JsonObject(
+    json.JsonObjectCons("jsonrpc", json.JsonString("2.0"),
+    json.JsonObjectCons("method", json.JsonString(method),
+    json.JsonObjectNil)))
+
+fn rendered(value: Maybe json.Json) -> String =
+  match value with
+  | Nothing -> ""
+  | Just j -> json.stringify(j)
+
 fn main() -> Unit !{IO} =
   run_suite("lsp_driver", [
     # parse_content_length
@@ -116,5 +138,27 @@ fn main() -> Unit !{IO} =
           json.JsonObjectNil))))),
       Just(lsp.HoverParams("file:///a.spr", 0, 0))),
     check_eq("extract_hover_params: empty object rejected",
-      lsp.extract_hover_params(json.JsonObject(json.JsonObjectNil)), Nothing)
+      lsp.extract_hover_params(json.JsonObject(json.JsonObjectNil)), Nothing),
+
+    # unknown_method_response — request vs notification
+    check_eq("unknown method: a request is answered with method-not-found",
+      rendered(lsp.unknown_method_response("textDocument/documentSymbol",
+        request_json(41, "textDocument/documentSymbol"))),
+      "{\"jsonrpc\":\"2.0\",\"id\":41,\"error\":{\"code\":-32601,"
+        ++ "\"message\":\"method not implemented: textDocument/documentSymbol\"}}"),
+    # The id must be echoed VERBATIM: a client matches the reply to its pending request
+    # by it, so a response carrying the wrong id is worse than none.
+    check_eq("unknown method: a string id is echoed unchanged",
+      rendered(lsp.unknown_method_response("x",
+        json.JsonObject(
+          json.JsonObjectCons("id", json.JsonString("abc"),
+          json.JsonObjectNil)))),
+      "{\"jsonrpc\":\"2.0\",\"id\":\"abc\",\"error\":{\"code\":-32601,"
+        ++ "\"message\":\"method not implemented: x\"}}"),
+    # Json has no Eq instance, so the absence is asserted through the same rendering as
+    # the cases above; "" is unambiguous because a reply always renders non-empty.
+    check_eq("unknown method: a notification is not answered",
+      rendered(lsp.unknown_method_response("$/cancelRequest",
+        notification_json("$/cancelRequest"))),
+      "")
   ])
