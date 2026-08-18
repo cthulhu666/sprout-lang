@@ -125,6 +125,45 @@ or phi/insertvalue type mismatches. Run `just llvm-where <ll_file> <N>` to ident
 
 **Implementation:** `scripts/llvm_diag.sh` — single-pass awk; O(n) in file size, no temp files.
 
+## A hung or spinning process — `sample(1)` names the Sprout function
+
+A Sprout binary that stops responding does not need print-statement archaeology. Sprout
+compiles to LLVM with **real, fully-qualified function names**, so the OS sampler reports
+the Sprout call stack directly:
+
+```
+ps -o pid,stat,time,%cpu,rss -p <pid>          # spinning, or blocked?
+sample <pid> 2 -mayDie -f /tmp/stack.txt       # macOS; use perf/gdb on Linux
+grep -A 40 "Call graph" /tmp/stack.txt
+```
+
+The output reads as ordinary Sprout:
+
+```
+stdlib.compiler.lsp_driver.lsp_loop$u
+  stdlib.compiler.compiler.compile_source_with_roots
+    stdlib.compiler.checker.check_program_with_env
+      stdlib.compiler.infer.infer_call_var
+        stdlib.compiler.unifier.instantiate_with_vars
+          stdlib.compiler.unifier.apply_full_subst      <- repeating
+```
+
+**Read `%CPU` and `RSS` together — they separate three different bugs:**
+
+| `%CPU` | `RSS` | reading |
+|---|---|---|
+| ~100 % | flat | cycling a fixed structure — e.g. a cyclic substitution an occurs check should have prevented. Not runaway recursion; that grows the stack |
+| ~100 % | climbing | genuine runaway recursion or unbounded allocation |
+| ~0 % | flat | blocked on I/O — a read that will never be satisfied, or a deadlock |
+
+This is what identified the 2026-08-18 LSP wedge: 99.7 % CPU, 15 min of CPU in 15 min of
+wall time, RSS pinned at 2.4 MB, looping in `apply_full_subst`. `ps` alone said "alive",
+the client's log said "no response in 10000 ms", and neither named the cause.
+
+For a server reading stdin, drive it from a script and sample the child while it is stuck
+(see `scripts/front_end_agreement.sh` for the timeout-bounded variant used as a gate) —
+sampling the editor's own server process works too, and needs no rebuild.
+
 ## Stack-overflow panic + backtrace
 
 Compiled Sprout programs catch native stack overflow and report it instead of
