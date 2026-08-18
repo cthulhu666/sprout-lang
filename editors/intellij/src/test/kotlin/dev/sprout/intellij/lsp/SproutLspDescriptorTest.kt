@@ -61,13 +61,47 @@ class SproutLspDescriptorTest {
   @Test
   fun `declares the implementation class that exists`() {
     val xml = descriptor()
-    val implementation = Regex("""implementation="([^"]+)"""").find(xml)?.groupValues?.get(1)
+    val implementations = Regex("""implementation="([^"]+)"""").findAll(xml)
+      .map { it.groupValues[1] }.toList()
     assertEquals(
-      "dev.sprout.intellij.lsp.SproutLspServerSupportProvider",
-      implementation,
+      listOf(
+        "dev.sprout.intellij.lsp.SproutLspServerSupportProvider",
+        "dev.sprout.intellij.lsp.SproutEditorNotificationProvider",
+      ),
+      implementations,
     )
     // A tag pointing at a class that was renamed away fails the same way a wrong tag does:
-    // silently, at registration time, in an IDE nobody is watching.
-    Class.forName(implementation)
+    // silently, at registration time, in an IDE nobody is watching. Every tag, not just the
+    // first — an unloadable second extension is exactly as quiet as an unloadable first.
+    implementations.forEach { Class.forName(it) }
+  }
+
+  @Test
+  fun `registers the banner that reports an unconfigured plugin`() {
+    // The unconfigured case is otherwise reported only by a balloon, which was missed in a
+    // real session and left a whole project reading as "this language has no diagnostics".
+    // The EP name and interface are the platform's own, read out of app.jar:
+    //
+    //     <extensionPoint qualifiedName="com.intellij.editorNotificationProvider"
+    //                     area="IDEA_PROJECT"
+    //                     interface="com.intellij.ui.EditorNotificationProvider"/>
+    val xml = descriptor()
+    assertTrue(
+      "sprout-lsp.xml must register <editorNotificationProvider>, or an unconfigured " +
+        "plugin reports itself only through a balloon that auto-hides.",
+      xml.contains("<editorNotificationProvider"),
+    )
+  }
+
+  @Test
+  fun `the unconfigured balloon is sticky`() {
+    // A transient balloon is the exact signal that was missed. What it reports — no server
+    // at all — has no other transient form, so it must survive until dismissed.
+    val xml = descriptor()
+    assertTrue(
+      "The Sprout notification group must use STICKY_BALLOON. Found:\n" +
+        xml.lines().filter { it.contains("notificationGroup") }.joinToString("\n"),
+      xml.contains("""<notificationGroup id="Sprout" displayType="STICKY_BALLOON"/>"""),
+    )
   }
 }

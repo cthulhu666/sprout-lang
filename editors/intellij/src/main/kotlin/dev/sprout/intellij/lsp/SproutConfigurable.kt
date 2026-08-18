@@ -39,7 +39,8 @@ class SproutConfigurable(private val project: Project) : BoundConfigurable("Spro
           .comment(
             "Extra roots for dotted non-stdlib imports, separated by " +
               "<code>${java.io.File.pathSeparator}</code>. Without these, names from such a " +
-              "module are reported as unknown.",
+              "module are reported as unknown. Note that the compiler currently resolves " +
+              "against the <b>first</b> root only.",
           )
       }
     }
@@ -57,6 +58,9 @@ class SproutConfigurable(private val project: Project) : BoundConfigurable("Spro
 
   override fun apply() {
     super.apply()
+    // Re-run the banner's decision against the saved settings. Without this the warning
+    // outlives the problem, which is its own kind of misinformation.
+    com.intellij.ui.EditorNotifications.getInstance(project).updateAllNotifications()
     // The command line is built when the server starts, so an existing server keeps the
     // old paths. Say so rather than leaving the user wondering why nothing changed.
     com.intellij.notification.NotificationGroupManager.getInstance()
