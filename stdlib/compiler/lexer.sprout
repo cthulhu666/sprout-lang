@@ -50,8 +50,20 @@ fn is_keyword(raw: String) -> Bool =
   raw == "deriving" ||
   raw == "wrap"
 
+# `.` is here as well as in `is_ident_continue`, and the two do not conflict.
+# A dot INSIDE an identifier run is absorbed by `scan_ident_end`, so `p.x` and
+# `stdlib.string.trim` are still single tokens; `.` is not an ident-START, so a
+# dot that begins a token falls through to here and becomes a standalone symbol.
+# That is postfix field access — dot-access "Scope B", docs/records-v0.md §4.3.
+# Before this, such a dot was `Unexpected character .`, so nothing that lexes
+# today changes meaning.
+#
+# `..` is unaffected: `try_multi_char_symbol` runs BEFORE this fallback, so the
+# range operator still wins over two single dots. A float keeps its dot too —
+# `scan_float_frac_end` consumes it from the digit-run path, which also runs
+# first.
 fn single_symbol(ch: Char) -> Bool =
-  string.contains("()=,:+-*/<>\\!{}[]|", string.string_from_char(ch))
+  string.contains("()=,:+-*/<>\\!{}[]|.", string.string_from_char(ch))
 
 fn emit_token(kind: token.TokenKind, raw: String, start: source.SourceCursor, end: source.SourceCursor) -> token.Token =
   token.Token(kind, slice_between(raw, start, end), cursor_position(start))

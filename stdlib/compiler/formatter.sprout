@@ -177,6 +177,12 @@ fn is_call_like_pp_other(prev: token.Token, pp: token.Token, next_tok: Maybe tok
     | token.TokenCharKind -> false
     | _ ->
         if looks_like_type_group(prev, next_tok) then false
+        # `.` here is the postfix field-access operator (docs/records-v0.md §4.3
+        # "Scope B"), so `<expr>.field(args)` is a call on a function-typed field
+        # and takes no space before `(` — same as any other callee. A standalone
+        # `.` token only ever means postfix access, so this cannot misfire.
+        # Without it the formatter emits `mk_ops().double (21)`.
+        else if token.token_text(pp) == "." then true
         else if token.token_text(pp) == ")" then true
         else if token.token_text(pp) == "]" then true
         else if token.token_text(pp) == "}" then true

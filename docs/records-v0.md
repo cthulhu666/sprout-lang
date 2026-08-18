@@ -175,16 +175,37 @@ worth knowing: for a dotted name qualification *does* claim, module qualificatio
 wins, whereas inference's rule would prefer the value. That divergence predates
 the rule and is tracked separately.
 
-**Scope A (v0):** the head must be a bare variable, so access on a compound
-expression is written with an intermediate binding:
+**Scope A** is the rule above: the head is a bare variable, and the whole dotted
+name is one token settled by name resolution.
+
+**Scope B — postfix `.field` on any expression — has LANDED**, so the
+intermediate binding is no longer required:
 
 ```sprout
-let p = make_point(3, 4) in p.x        # not make_point(3, 4).x in v0
+make_point(3, 4).x                     # was a lex error; now equivalent to
+let p = make_point(3, 4) in p.x        # ... this
 ```
 
-Scope B (postfix `.field` on any expression) requires making `.` a real operator
-token and moving qualified-name assembly into the parser; it is deferred (§12)
-and is purely additive.
+It did not need qualified-name assembly to move into the parser, which is why it
+turned out much smaller than this document originally estimated. The two scopes
+partition cleanly on a property the lexer already had: `.` is an ident-CONTINUE
+character but not an ident-START. So a dot inside an identifier run is still
+absorbed (Scope A, unchanged — `p.x` and `stdlib.string.trim` stay single
+tokens), and only a dot that *begins* a token — which was previously
+`Unexpected character .` — becomes the standalone symbol the parser reads as
+postfix access. Nothing that lexed before lexes differently.
+
+Two details worth keeping in mind when reading the parser:
+
+- The identifier after a postfix dot may itself be dotted, because `.` is still
+  ident-continue: `mk_line().from.x` lexes as `.` followed by the single token
+  `from.x`. `parse_field_postfix` splits that remainder and folds it, so both
+  scopes produce identical nested `GetFieldExpr`.
+- Call application, `.field` and `with (…)` now share **one** postfix loop
+  (`parse_postfix_rest`) rather than two sequential ones, so they interleave in
+  any order — `f(x).y.z(w)`, `(p with (…)).x`. The old pair could not express a
+  call applied to an update's result; every order it accepted is accepted
+  unchanged.
 
 ### 4.4 Update — `with` expression
 
@@ -329,9 +350,11 @@ existing GC object model). Any deviation requires up-front approval per
 
 ## 12. Deferred / open
 
-- **Dot access Scope B** — postfix `.field` on arbitrary expressions
-  (`f(x).field`); needs `.` as an operator token + parser-side qualified-name
-  assembly. Additive; own design.
+- ~~**Dot access Scope B**~~ — **LANDED** (see §4.3). Postfix `.field` on
+  arbitrary expressions (`f(x).field`). It needed `.` as an operator token, but
+  *not* the parser-side qualified-name assembly this list assumed: Scope A keeps
+  its single-token form because `.` is ident-continue but not ident-start, so the
+  two scopes never contend for the same dot.
 - **Generic `Dict k v`** — arbitrary key types via `Ord`/`Hashable`; orthogonal
   to records (§7).
 - **Accessor functions** — an Elm-style first-class `.field` for point-free

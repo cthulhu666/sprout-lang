@@ -1,0 +1,117 @@
+import stdlib.test (check_eq, check_true, run_suite)
+
+# Postfix `.field` on an arbitrary expression — dot-access "Scope B"
+# (docs/records-v0.md §4.3/§12, spec §5.6.3).
+#
+# Before this landed, `.` was ONLY an ident-continue character, so `p.x` lexed as
+# one token and a `.` in any other position was a hard lex error:
+#
+#   ERROR: bundle: Lex error: Unexpected character .
+#
+# It fired at the `.`, before parsing, so `f(x).field` had no diagnostic
+# connecting it to records at all. `.` is now also a standalone symbol token, and
+# the parser's postfix loop accepts `.ident` beside call application and `with`
+# update.
+#
+# Two lexer interactions are pinned here because they are what a naive change
+# breaks: `..` (the range operator) must still win over two single dots, and a
+# float literal must still consume its own dot.
+
+type Point = (x: Int, y: Int)
+type Line = (from: Point, to: Point)
+type Ops = (double: Int -> Int, label: String)
+
+fn mk(a: Int, b: Int) -> Point = Point(x = a, y = b)
+
+fn mk_line() -> Line = Line(from = Point(x = 1, y = 2), to = Point(x = 30, y = 40))
+
+fn dbl(n: Int) -> Int = n * 2
+
+fn mk_ops() -> Ops = Ops(double = dbl, label = "twice")
+
+fn id_point(p: Point) -> Point = p
+
+# --- the shape that was a lex error: a field off a CALL result ---
+fn call_field() -> Int = mk(1, 2).x
+
+fn call_field_second() -> Int = mk(1, 2).y
+
+# Both fields of one call, so a fix that resolves the receiver but drops the
+# field cannot pass by returning the record.
+fn call_field_both() -> Int = mk(3, 4).x * 100 + mk(3, 4).y
+
+# --- a field off a PARENTHESISED expression ---
+fn paren_field() -> Int = (Point(x = 5, y = 6)).x
+
+fn paren_around_call() -> Int = (mk(7, 8)).y
+
+# --- a field off a record LITERAL with no parens ---
+fn literal_field() -> Int = Point(x = 9, y = 10).y
+
+# --- multi-segment chains off a call ---
+# The lexer emits `.` then the ident `from.x` as ONE token (`.` is still
+# ident-continue), so the parser has to split and fold the remainder itself.
+fn chain_two() -> Int = mk_line().from.x
+
+fn chain_two_second() -> Int = mk_line().to.y
+
+# --- call applied to a field-access result ---
+fn field_then_call() -> Int = mk_ops().double(21)
+
+fn field_then_call_chained() -> Int = mk_ops().double(mk(11, 0).x)
+
+# --- postfix interleaved with `with` update ---
+fn update_then_field() -> Int = (mk(1, 2) with (x = 99)).x
+
+fn field_off_nested_call() -> Int = id_point(mk(12, 13)).y
+
+# --- Scope A must keep working unchanged ---
+fn scope_a_param(p: Point) -> Int = p.x
+
+fn scope_a_chain(l: Line) -> Int = l.from.x + l.to.y
+
+# --- lexer regression guards ---
+# `..` must still lex as the range operator, not two dots.
+fn range_still_lexes() -> Int = range_count(1..4)
+
+# A float literal must still consume its own dot.
+fn float_still_lexes() -> Double = 1.5 + 0.25
+
+# A module-qualified name is still one dotted identifier, not postfix access.
+fn module_qualified_still_lexes() -> Int = str_len("abcd")
+
+fn main() -> Unit !{IO} =
+  run_suite("postfix field access (Scope B)", [
+    # --- field off a call result ---
+    check_eq("field off a call", call_field(), 1),
+    check_eq("second field off a call", call_field_second(), 2),
+    check_eq("both fields off calls", call_field_both(), 304),
+
+    # --- field off a parenthesised expression ---
+    check_eq("field off a paren expression", paren_field(), 5),
+    check_eq("field off a parenthesised call", paren_around_call(), 8),
+
+    # --- field off a record literal ---
+    check_eq("field off a record literal", literal_field(), 10),
+
+    # --- chains ---
+    check_eq("two-segment chain off a call", chain_two(), 1),
+    check_eq("two-segment chain, second field", chain_two_second(), 40),
+
+    # --- call applied to a field ---
+    check_eq("function field called off a call", field_then_call(), 42),
+    check_eq("field call with a field-access argument", field_then_call_chained(), 22),
+
+    # --- interleaving with `with` ---
+    check_eq("field off a with-update", update_then_field(), 99),
+    check_eq("field off a nested call", field_off_nested_call(), 13),
+
+    # --- Scope A regression guards ---
+    check_eq("Scope A: parameter head", scope_a_param(Point(x = 21, y = 0)), 21),
+    check_eq("Scope A: chain off a parameter", scope_a_chain(mk_line()), 41),
+
+    # --- lexer regression guards ---
+    check_eq("range operator still lexes", range_still_lexes(), 4),
+    check_true("float literal still lexes", float_still_lexes() == 1.75),
+    check_eq("module-qualified name still lexes", module_qualified_still_lexes(), 4)
+  ])
