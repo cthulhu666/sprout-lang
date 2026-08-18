@@ -484,7 +484,7 @@ Legend:
     exhaustiveness. Out of scope for v0/v1.
 - [ ] `P2` Revisit string-interpolation type-directed dispatch (Mechanism A): Phase 4 ships a simple syntactic-coercion form (elaborator inserts `template_to_string` only at `String`-expected contexts; default template result is `String`). Evaluate migrating to an `IsTemplate` typeclass with instances for `String` and `StringTemplate` once usage patterns settle. Class-based dispatch is more principled and consistent with the rest of the class system; tradeoff is added constraint-machinery overhead and possible defaulting ambiguity. Decision should be driven by whether a third meaningful instance (e.g. `Bytes`, a logging frame, a tagged-template processor) lands and forces generality.
 - [x] `P1` Validate type-name references in `TypeDecl` field and constraint positions resolve to a declared type (strict type-name validation). Landed in PR feat/strict-typedecl-validation: `validate_all_decls` pass in `stdlib/compiler/infer.sprout` runs after `pre_scan_fn_decls`, walks `TypeDecl` constructor fields, `RecordDecl` field types, and `AliasDecl` RHS type-exprs; emits `type-validation: unknown type name \`X\` in declaration \`Y\`` on the first unresolved uppercase `TypeName`. Mutual recursion between ADTs is safe (pass runs post-scan). Positions NOT yet covered (see follow-up below): `ClassDecl` method signatures, `InstanceDecl` constraint types, `FnDecl` param/return annotations.
-- [ ] `P2` Extend strict type-name validation to `ClassDecl` method signatures, `InstanceDecl` constraint types, and `FnDecl` param/return annotations (follow-up to P1 above). The `validate_decl` function in `stdlib/compiler/infer.sprout` currently matches `| _ -> Nothing` for these positions. Extend it — the main complication for `FnDecl`/`ClassDecl` is correctly threading local type-parameter sets into `validate_te` so that method-specific variables like `a`, `b` in `fmap(f: a -> b) -> f b` are not flagged.
+- [ ] `P2` Extend strict type-name validation to `ClassDecl` method signatures, `InstanceDecl` constraint types, and `FnDecl` param/return annotations (follow-up to P1 above). The `validate_decl` function in `stdlib/compiler/infer.sprout` currently matches `| _ -> Nothing` for these positions. Extend it — the main complication for `FnDecl`/`ClassDecl` is correctly threading local type-parameter sets into `validate_te` so that method-specific variables like `a`, `b` in `fmap(f: a -> b) -> f b` are not flagged. **PARTLY STALE for the `FnDecl` half (measured 2026-08-18): an unresolved UPPERCASE name in a `FnDecl` param or return annotation is already rejected at the annotation, naming the type, by the bundler's `unresolved_in_types` — not by `validate_decl`.** Verified with and without a module header: ``5:1: ERROR: bundle: unknown type `Vector3` in `…scale`: nothing in scope declares that name``. So the remaining `FnDecl` work is consolidation (one pass instead of two, better position) rather than a missing check; `ClassDecl`/`InstanceDecl` are unverified and may still be genuinely uncovered. Confirm each position empirically before implementing. The lowercase case is a separate, genuinely open gap — see §9's "A LOWERCASE type name in a parameter/return annotation is silently a fresh type VARIABLE".
 - [x] `P1` **Silent miscompile: a user top-level name colliding with an imported function's parameter resolves to the user global — FIXED 2026-07-16.** Discovered 2026-07-16 while adding channels (L0.8). Repro: a program defining `fn body(ch) = …` and calling `with_timeout(ms, \_ -> body(ch))` — `with_timeout(ms, body)`'s **parameter** `body` (a `Unit -> a` closure argument) is resolved to the user's top-level `@body` **function** instead of the parameter. The lowering then eta-expands the global (`\a0 -> body(a0)`) and passes THAT as the fork body, discarding the real closure argument — so the captured `ch` is never seen and `body` runs with the unit `0`, crashing (`sprout_tag: null pointer` in the channel case, arbitrary wrong behaviour in general). **ROOT CAUSE (narrower than the original guess — NOT the checker, NOT the `translate_expr` TVar resolver, which orders params before globals correctly): it was closure-conversion's free-variable analysis.** `ast_to_ir.compute_free_vars` excluded any name present in `top_level` (top-level fn + ctor names) from the free-variable set, on the assumption such names are `@`-addressable globals that need no capture. But an enclosing function's parameter that *collides* with a top-level fn name is thereby dropped from the lifted lambda's capture set (`__sprout_ir_lambda_12` captured only `ms`, not `body`); inside the lifted body, `body` is then neither a capture nor a lambda param, so `translate_expr`'s TVar path falls through to `fn_arities` and eta-expands the top-level `@body` (`__sprout_ir_eta_body_13` = `\a0 -> @body(a0)`). **FIX (one line, `ast_to_ir.sprout:31`): delete the `|| set_member(name, top_level)` clause.** `compute_free_vars`'s sole caller (the lambda-lifting site) already runs the result through `filter_capturable` (keep iff in `params ∪ captures`), which drops genuine globals anyway — so the `top_level` exclusion was redundant *everywhere except at a collision*, where it caused this bug. Byte-identical IR for all non-colliding code (seed fixed-point reached at iteration 2, one past the codegen change); also fixes the nested-lambda variant (an outer-lambda capture colliding with a global) for free, which a `top_level`-minus-`params` set-diff would have missed. Regression test `tests/stdlib/test_param_shadows_toplevel_fn.spr` — a **pure, scheduler-free** shape (a HOF param passed in value position inside a capturing lambda + a same-named top-level fn), RED = `1004` (999+5, the global) vs GREEN = `47` (the closure). Same *class* as the `append`/Semigroup collision (BACKLOG item 5 below) but a **distinct mechanism**: that one is codegen dispatching on a source name; this one is free-var analysis excluding a shadowed name. The broader architectural root (canonical identity, item 4/item 5) remains open for the `append` family. `tests/task_io_smoke/timeout_chan_drop.spr` can now safely use `body` as a param name (kept as-is to avoid seed churn; the pure regression test is the guard).
 - [x] `P1` Stream IR codegen output per-function instead of materializing the full `IRProgram` in memory. Shipped via a new `stdlib/compiler/ir_pipeline.sprout` streaming orchestrator that runs translate→root→lower per-function with `Ref(List String)` accumulators, so no full `IRProgram` is ever held in memory simultaneously. Output is byte-identical to the pre-streaming path (golden diff: 0 differences). Peak RSS on the 8 `test_ir_codegen_*` tests that import `stdlib.compiler` dropped from ~2 GB to ~240 MB; the 8 files have been removed from `tests/IR_XFAIL` and the OOM skip mechanism removed from `_run-ir-files` in the justfile.
 - [ ] `P1` Typed-IR `@print` call site dispatch. Surfaced 2026-06-18 during PR 70 audit. Typed-IR emits `call i64 @print(i64 %x)` for every call to prelude's `extern fn print(val: a) -> Unit !{IO}`, and `ir_lowering.sprout`'s hardcoded `declare i64 @print(i64)` exists — but **`@print` is not defined in `runtime/sprout_runtime.c`**. Programs compiled via `--use-ir-codegen` that call `print()` (factorial, fizzbuzz, etc.) **fail to link** with `Undefined symbols: _print`. The bug has been masked because `run-example-canary-ir`'s `_run-ir-files` recipe only runs `opt --passes=verify` on the emitted IR — it does not link or execute the binary, unlike its direct-codegen counterpart `run-example-canary` (which is gated by AGENTS.md DoD #11 to run to completion). Direct codegen handles this at the AST level: `emit_call` (codegen.sprout:2434) special-cases `TVar "print"` and dispatches in `emit_print_call` (codegen.sprout:2474) to `@print_str(ptr)` / `@print_value(i64)` based on the runtime type of the argument. The fix in typed-IR is to add equivalent dispatch in `ast_to_ir.sprout`'s `translate_direct_call` (or wherever `TVar "print"` reaches codegen). Two follow-up items: (a) extend `_run-ir-files` to optionally link + run via the same flag set as `run-example-canary` so this class of bug surfaces in CI; (b) decide whether `eprint` (which has a runtime bridge function at `sprout_runtime.c:1270` for "old stage-1 codegen") needs the same audit.
@@ -2359,12 +2359,136 @@ what the LSP actually does: `docs/language-server-roadmap.md`.
 > (2026-07-30); their roadmap now lives there. These are the pure language/stdlib items that
 > graphics work surfaced but that belong to Sprout the language — kept here.
 
+> **Reported 2026-08-18 (Kuba, from uncharted-suns).** The five entries immediately below came in
+> as one batch of missing language features hit while writing the game. All five were reproduced
+> against `build/compile_driver_bin_stage1` at `97f08cdf` before being filed; each entry records
+> the measured behaviour rather than the report. Two of them (dot-access items) turned out to be
+> the same root cause seen from two sides, and are being fixed together.
+
+- [ ] `P1` **Dot access "Scope B": postfix `.field` on any expression is a LEX ERROR.**
+  Reported from uncharted-suns 2026-08-18; reproduced. `f(x).field` and `(expr).field` both die
+  with ``ERROR: bundle: Lex error: Unexpected character .`` — at the `.`, before parsing, so
+  there is no diagnostic connecting it to records at all. Measured on
+  `print(int_to_string(mk(1, 2).x))` → `6:31: Unexpected character .`, and on the parenthesised
+  form `(Vec2(x = 1, y = 2)).x` → `4:43`, so it is not specific to calls: it is every receiver
+  that is not a bare dotted identifier.
+  **Not new, but never tracked as an item.** `docs/records-v0.md` §4.3 defines exactly this
+  boundary — "**Scope A (v0):** the head must be a bare variable" — and §12 defers Scope B as
+  "purely additive". It was carried only as a parenthetical inside the records V1-roadmap entry
+  ("Deferred (own designs, additive): dot-access 'Scope B' …"), which is why nothing surfaced it.
+  Promoted here with the evidence.
+  **Root cause, and why it is a lexer question and not a parser one.** `lexer.sprout:14`
+  makes `.` an **ident-continue** character (`string.is_ident_continue(ch) || ch == '.'`), so
+  `p.origin.x` is ONE token and dot access is implemented as a name-resolution rule rather than a
+  syntactic one. `.` is not ident-*start*, so a `.` that does not continue an identifier run
+  reaches the fallback and errors. Fix shape: emit a standalone `.` as an ordinary
+  `TokenSymbolKind` token (no new `TokenKind` is needed — `Token` already carries kind + text) and
+  add a `.ident` case to the parser's postfix loop beside the existing `with`-update postfix
+  (`parser.sprout:1106`), building the same `ast.GetFieldExpr` the resolution rule builds today.
+  Additive: every currently-legal program lexes identically, because today those inputs are hard
+  errors. Float literals are unaffected — `1.5` is consumed by the digit-run path
+  (`lexer.sprout:313-321`) before the symbol fallback.
+- [ ] `P1` **Field access on an IMPORTED (or any module-level) binding: `v_zero.x` →
+  `Unknown variable: v_zero.x`.** Reported from uncharted-suns 2026-08-18; reproduced and
+  root-caused. Repro: module `fixture.geom` exports `let v_zero = Vec2(x = 0, y = 7)`; an
+  importing file writing `v_zero.x` gets ``4:23: ERROR: check: Unknown variable: v_zero.x``.
+  **This is a BUG, not a missing feature — the rule is already normative and simply never runs.**
+  `docs/records-v0.md` §4.3 specifies head-first resolution ("if the head component is an
+  in-scope value, the name is a field-access chain on that value"), and `infer.infer_var_or_field`
+  (`infer.sprout:940`) implements it faithfully. But the **bundler runs first** and
+  `qualify_value_name` (`bundler.sprout:973-975`) branches on the dot before the rule is ever
+  consulted:
+  ```sprout
+  if str_list_member(name, scope) then name
+  else if str_find(name, ".") != -1 then qualify_qualified_value(ctx, name)   # <-- takes this
+  ```
+  `qualify_qualified_value` splits `v_zero.x` into alias `v_zero` + symbol `x`, finds no module
+  aliased `v_zero`, and returns the name **unchanged**. Inference then sees `v_zero.x` while the
+  environment holds only the bundled `fixture.geom.v_zero`, so the head lookup misses and it falls
+  through to a plain lookup of the whole dotted string. Confirmed against `--phase bundle`, which
+  lists the declaration as `fixture.geom.v_zero`.
+  **Scope is wider than "imported".** The dotted branch is taken for *any* module-level value,
+  so a same-module top-level `let` is the same shape; only locals and parameters work today,
+  because for those `qualify_qualified_value` also declines and inference's head-first rule then
+  finds the head in `scope`. So the working case works by accident of two passes both declining.
+  **Note the precedence hazard for whoever fixes it:** the two phases disagree today. For a name
+  the bundler *does* claim (`string.trim`), module qualification wins; for one it declines, the
+  value wins at inference. A fix that only extends the bundler's declined path is purely additive
+  (it can only affect programs that error today); changing the claimed path would change
+  shadowing semantics and needs its own call.
+- [ ] `P2` **A descending `range(a, b)` (`b < a`) counts DOWNWARD instead of being empty.**
+  Reported from uncharted-suns 2026-08-18; reproduced and run. `range_step`
+  (`stdlib/prelude.sprout:76`) returns `-1` when `start > end`, and `range_count` returns
+  `|start - end| + 1`, so `range(0, -1)` has **two** elements. Measured end-to-end: a
+  `range_fold` over `range(0, 0 - 1)` printed `visit 0` / `visit -1` and returned `count=2`,
+  with `range_count = 2`.
+  **Why this is filed as a semantics question and not only an ergonomics one.** Because `range` is
+  inclusive at BOTH ends, the ordinary spelling of "walk n rows" is
+  `range_fold(f, acc, range(0, n - 1))` — and that expression reads two **out-of-bounds indices**
+  whenever `n == 0`, failing at runtime rather than at compile time. The empty case is the one an
+  author never writes a test for, so this converts a routine boundary into a latent crash.
+  **Existing entry covers only half of it.** §7 B5 ("half-open iteration helper", `P2`) proposes
+  adding `count_each`/`count_fold`/`upto(n)` so callers can avoid the shape. That is a useful
+  addition and is orthogonal to the question here, which is whether `range(a, b)` with `b < a`
+  should be **empty**, with downward counting moved to a separate, explicitly-named construct
+  (`down_to`/`range_by`). A helper leaves the sharp edge in place for everyone who writes the
+  obvious thing; changing `range` removes it.
+  **Prior-art survey — PARTIAL, must be completed before the call is made.** Verified by running
+  each toolchain locally (2026-08-18), not from memory:
+  | language | `[0 .. -1]` equivalent | descending spelled as |
+  | --- | --- | --- |
+  | Python 3.12 | `list(range(0,-1))` → `[]` | `range(0,-1,-1)` (explicit step) |
+  | Haskell (GHC 9.x, `runghc`) | `[0..(-1)] :: [Int]` → `[]` | `[0,-1..]` (explicit second element) |
+  | Rust 1.x (`rustc`) | `(0..-1)` and `(0..=-1)` → `[]` | `.rev()` |
+  Three for three: a backwards range is **empty**, and counting down is a *separate spelling*.
+  Still to verify against primary sources before deciding: Kotlin (`downTo`), Swift (`stride`) —
+  the local Swift toolchain crashed on the probe, so no row is claimed for it.
+  **Compatibility note:** this is a breaking change for any caller that relies on the flip. An
+  in-tree sweep of `range(` call sites is a prerequisite, as is a decision on whether
+  `range_contains`/`range_to_list`/`range_step` keep a descending representation at all.
+- [ ] `P2` **A LOWERCASE type name in a parameter/return annotation is silently a fresh type
+  VARIABLE, so a typo'd type is accepted and the error lands somewhere else entirely.**
+  Reported from uncharted-suns 2026-08-18. **The report's headline is already fixed for the
+  uppercase case — measured, so do not re-implement it:** `fn scale(v: Vector3, …) -> Vector3`
+  with no `Vector3` in scope IS rejected at the annotation, naming the type
+  (``5:1: ERROR: bundle: unknown type `Vector3` in `…scale`: nothing in scope declares that
+  name``), by the bundler's `unresolved_in_types` — with **and** without a module header.
+  *(This also makes the "`FnDecl` param/return annotations" clause of the §1 strict-type-name
+  follow-up (`P2`, "Extend strict type-name validation to `ClassDecl` … and `FnDecl` param/return
+  annotations") stale for the FnDecl half; the `infer.validate_decl` pass indeed does not cover
+  it, but a different pass does. Confirm before working that entry.)*
+  **What is genuinely open is the lowercase case,** which is how the reporter actually hit it.
+  Lowercase = type variable is the ML/Haskell convention Sprout follows, and an undeclared one is
+  legal by design, so `fn dot(a: vec3, b: vec3) -> Double` with `Vec3` declared right above
+  compiles the annotation clean. Reproduced: field reads off the tyvar park deferred obligations,
+  numeric defaulting pins them to `Int`, and the failure surfaces as
+  ``8:25: ERROR: check: Return type mismatch in …dot: Type mismatch: Int vs Double`` — blaming
+  the *body's return*, on a different line from the `vec3` that caused it. In the reporter's
+  tree the distance was ~1700 lines, inside a `sqrt` the change never touched.
+  **Mechanism is shared with two existing entries** — the deferred-field-obligation queue (§1,
+  landed) and its known incomplete fix ("Numeric defaulting fires before a deferred field
+  obligation is discharged", `P2`, §1), which describes the *same* `Int vs Double` misreport.
+  Fixing the defaulting order improves the message but does not address this entry: the
+  annotation would still be accepted, just misreported differently.
+  **Suggested rule, low false-positive rate:** reject (or warn on) a lowercase annotation whose
+  name matches a **declared type in scope case-insensitively** — `vec3` where `Vec3` exists is a
+  typo with essentially no legitimate reading. A blanket "type variables must be declared" rule is
+  the Rust answer and a much larger, breaking language change; it needs its own design and a
+  prior-art survey, since Sprout currently follows the Haskell/ML implicit-quantification side.
+
 - [ ] `P2` Language-core wart: a `wrap` type used in a **user-defined function's type annotation across modules** does not canonicalize — `fn f(v: linalg.Vec3)` in user code sees `linalg.Vec3` as distinct from the value's `stdlib.linalg.Vec3` (Call type mismatch). Values flow fine into the defining module's own functions, so stdlib APIs work; only user-written helpers over imported wrap types break. Likely in the module-qualified-type-identity machinery (docs/module-qualified-type-identity-design-2026-07-10.md).
 - [ ] `P2` Language-core: unbox small fixed-shape numeric records (`Vec3 {x,y,z}` as 3 raw f64s, not a heap pointer) — the ergonomic+fast path for individual small vectors. Additive on top of the tested flat-buffer foundation (`stdlib/linalg.sprout` `Vec3` slice landed; `Vec4`/`Mat4`/`Quat` pending).
 - [ ] `P2` Native `Float` (f32) type + `Vector Float` unboxed path (mirrors `RepScalarDouble` in the B1 codegen gate). Doubles-everywhere is correct today; float32 earns its keep only when Sprout owns bulk GPU-bound buffers. Evidence-driven — decide by measured buffer/upload cost.
 - [x] `P1` **Double→Int conversion. CLOSED 2026-08-14** — shipped as `math.to_int : Double -> Maybe Int` plus `to_int_or`, and the rounding family it composes with (`ceiling`/`truncate`/`round` joining the pre-existing `floor`, all `Double -> Double`). Design, prior-art survey and the two traps: `docs/double-to-int-v0.md`. **Not** the core runtime/prelude primitive this entry asked for, and deliberately not: pure Sprout over the existing `double_to_bits` intrinsic costs no builtin, no runtime symbol and no seed `declare`, and an `fptosi` extern would need the same range guards anyway since `fptosi` is poison on NaN and overflow. Three things worth carrying forward. (1) **The layers separate.** Rounding stays in `Double` and is total, so the rounding-mode question never reaches the conversion; `to_int` is the single partial function and answers the out-of-range question once. That is also how Rust arranges it. (2) **The range boundary is asymmetric** — `2^63 - 1` is not representable as a Double (spacing 1024 up there) so nothing at or above `2^63` converts, but `-2^63` is a power of two, is exact, and must be answered directly rather than through negate-and-re-sign. (3) **NaN cannot be folded into a range guard**: every comparison against NaN is false, so `t >= hi || t < lo` is false for NaN and falls through to convert garbage. Superseded the duplicate `P3` entry in §math. The **lossless float text encoding** this entry also mentioned is NOT unblocked by it — that blocker is wide-integer arithmetic (128-bit/bignum for Ryū/Grisu), as the §math entry records.
 - [ ] `P3` Remove the dead C `json_parse` tree-parser (`runtime/sprout_runtime.c`, marked SUPERSEDED; the Sprout `stdlib.json.json_parse` replaced it). Extract the shared low-level helpers (`sprout_json_skip_ws`/`_parse_string`/`_parse_hex4`) still used by the by-key extractor, then delete `json_parse`/`json_parse_value`/`_array`/`_object`/`_number`/`_ok_result`/`_err_result`/`_reverse_*` and drop `json_parse` from `APPROVED_BUILTINS`.
 - [ ] `P3` `deriving (Enum)` breadth — `values`/`enum_values`, and optionally `succ`/`pred`/`min_bound`/`max_bound`. Deferred from the Enum landing (2026-07-24); no in-tree consumer needs them yet. `values : List a` (all variants in declaration order) is the most-requested (Java `values()`, Kotlin `entries`, C# `Enum.GetValues`, Scala 3 `values`) and rides the same return-type-dispatch path as `from_ordinal`. Ref: spec §8.6, `docs/deriving-v1-draft.md`.
+  - **A consumer now exists (2026-08-18, uncharted-suns; reported by Kuba at low priority).** The
+    "no in-tree consumer" justification for `P3` no longer holds out-of-tree: without `values`,
+    code needing every variant of a nullary ADT must list the constructors by hand, which silently
+    rots the moment a constructor is added — the failure mode `values` exists to prevent, and one
+    an exhaustiveness checker cannot catch because a hand-written list is not a `match`. Left at
+    `P3` per the report; raise if a second consumer appears. No new design work needed — the entry
+    above already names the mechanism (return-type dispatch, same path as `from_ordinal`).
 
 ### 10) Windows port and cross-platform runtime
 
@@ -2648,7 +2772,7 @@ dot-guard `infer.is_lowercase_name` has (a dotted name is never a type variable)
      - **Recommendation: strip.** Needs a `stdlib/compiler/` edit, so it is seed-gated (`just refresh-seed`) plus a cross-module `to_string` test. `tests/stdlib/test_imported_records.spr` deliberately asserts only the field rendering (`ends_with "(x = 1, y = 2)"`) so that it does not bake in either side of this decision.
    - [x] `P2` **Parametric-record construction type-arg inference. LANDED 2026-07-31.** `infer_record_fields` no longer hardcodes the result as a bare `TConst`: `infer_record_expr` instantiates the record's declared type params ONCE (recovered from any field scheme's qvars — `make_record_field_scheme` generalizes every field over the full ordered list), threads that shared subst into each field's declared type instead of a per-field `instantiate`, and emits `TApp(TConst Name, [params…])`. So `Box(val = 5, …)` now types as `Box Int` and a `Box Int`-annotated use type-checks; field access/update already peeled `TApp`, so they light up unchanged; codegen is untouched (parametric fields already box uniformly, kind `'_'`). Monomorphic records are byte-identical (Nil qvars → empty subst, bare `TConst` result — seed fixed point holds at iteration 2). Also closed a **latent unsoundness** the old code masked: `Pair(fst = 1, snd = "x")` for `type Pair a = (fst: a, snd: a)` was wrongly accepted (each field instantiated independently); now rejected at construction. Tests: `tests/stdlib/test_parametric_records.spr` (incl. a parametric record inside an existential — the motivating `Widget` shape), `tests/conformance/type_error/record_parametric_field_conflict.spr`.
    - [x] `P3` **Inline function-field call `v.f(x)`. LANDED 2026-07-31.** A call whose callee is a dotted field access on an in-scope value (`v.render(x)`) parsed the callee as a whole (qualified) name → "Unknown variable v.render". `infer_call` now rewrites such a callee to a `GetFieldExpr` chain and infers it as a general higher-order callee (`dotted_field_callee`, mirroring `infer_var_or_field`'s head-first/value-wins rule — a module-qualified callee is unaffected); `ast_to_ir`'s `translate_call` `TGetField` arm loads the field's closure and applies via `IRApplyClosure` (same shape as the chained-call `TCall` arm). The field-loaded closure is heap-rooted across allocating arg eval — gated by a new case in `tests/stdlib/test_stress_records_heap.spr` (function field called with an allocating arg under `SPROUT_GC_STRESS=1`). Tests: `tests/stdlib/test_record_field_call.spr`; unblocks the clean-inline-call `examples/existential_widget.sprout` (parametric record + existential). Spec §5.6.3.
-   Deferred (own designs, additive): dot-access "Scope B" (postfix `.field` on arbitrary expressions, needs `.` as an operator token); generic `Dict k v` with arbitrary key types (orthogonal to records); Elm-style first-class `.field` accessor functions for point-free pipelines.
+   Deferred (own designs, additive): dot-access "Scope B" (postfix `.field` on arbitrary expressions, needs `.` as an operator token) — **now tracked as its own `P1` item in §9**, promoted 2026-08-18 after uncharted-suns hit it; generic `Dict k v` with arbitrary key types (orthogonal to records); Elm-style first-class `.field` accessor functions for point-free pipelines.
    First milestone constraints: no row polymorphism, no structural subtyping, no implicit field punning, no field defaults/partial construction, no `deriving` on records, and no attempt to fold records into the current ADT surface without a dedicated spec.
 6. Add a Unicode `Char` type and define string text semantics in v1.
    Initial scope: distinct `Char` values and literals, `String` text defined in terms of Unicode code points, and a small helper surface such as `char_at`, `char_at_or`, `string_from_char`, and `string_chars`.
