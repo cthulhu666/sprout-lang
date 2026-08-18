@@ -148,8 +148,19 @@ For any non-trivial language change, include:
    the runtime is **three** `.c` files, so `runtime/*.c` — naming only
    `sprout_runtime.c` link-fails on `_http_park` / `_async_resolve`; and on macOS the
    link also needs `-framework Security -framework CoreFoundation` (the justfile's
-   `clang_extra`). A test that imports `testsupport.*` needs `just test-file` instead,
-   which sets the package root.
+   `clang_extra`).
+   **A test that imports `testsupport.*` needs `--package-root` — and `just test-file`
+   does NOT pass it** (corrected 2026-08-18; this line previously claimed the opposite
+   and sends you chasing a phantom bug). `_test-file` runs
+   `--emit-ir "{{stdlib_root}}" "{{file}}"` with no package root, so a `testsupport.*`
+   import resolves to nothing and every type from it is reported as
+   ``unknown type `X`: nothing in scope declares that name`` — including in
+   `tests/stdlib/test_imported_records.spr`, which is green in CI. Only the
+   `_test-stdlib` runner passes `--package-root "{{justfile_directory()}}"`. So for a
+   `testsupport.*` test either run the whole directory
+   (`mise exec -- just test-stdlib-core-stage1`) or invoke the driver directly and add
+   the flag yourself:
+   `./build/compile_driver_bin_stage1 --emit-ir <repo-root>/stdlib --package-root <repo-root> tests/stdlib/test_foo.spr`.
    The full gate is `mise exec -- just test` (required by Definition of Done #5).
 
 ## Directory Conventions
