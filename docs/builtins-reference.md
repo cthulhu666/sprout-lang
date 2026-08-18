@@ -393,9 +393,9 @@ Integer math semantics:
 - when `n > 0`, `mod(x, n)` returns `Just r` with `0 <= r < n`
 - when `n <= 0`, `mod(x, n)` returns `Nothing`
 - `pow(base, exp)` returns `Nothing` when `exp < 0`
-- interpreter `Int` arithmetic currently follows host arbitrary-precision integer behavior
-- the current native backend still lowers `Int` to `i64`, so overflow-sensitive results for `abs`, `pow`, `gcd`, and `lcm` are not yet backend-independent outside the backend's current representable range
-- this is a v0 implementation limitation, not the intended long-term meaning of `Int`
+- `Int` is *specified* as a mathematical integer, but the only backend lowers it to machine `i64`, so arithmetic wraps (defined two's-complement, not UB)
+- overflow-sensitive results for `abs`, `pow`, `gcd`, and `lcm` are therefore silently wrong outside the representable range
+- this is a v0 implementation limitation, not the intended long-term meaning of `Int`; whether `+`/`-`/`*` should trap is open (`docs/int-overflow-policy-decision.md`)
 
 Double math (`stdlib.math`) — all pure Sprout, **no C builtins**; `Double` is an
 experimental extension rather than normative v0:
@@ -805,7 +805,7 @@ Example classification:
 - Library-style examples expose helpers without `main`; use `just check` for them directly, or import them from another runnable module.
 - `examples/sentry_api.sprout` is a library-style module layering Sentry-specific API helpers plus typed issue-summary and issue-detail decoding on top of generic `stdlib.http` + `stdlib.http_client`.
 - `examples/sentry_issue_browser_tui.sprout` is a library-style interactive issue browser module with environment-based config loading, list navigation, refresh, and detail rendering.
-- `examples/sentry_issue_browser.sprout` is the runnable wrapper around that helper module for `sprout run` and `sprout compile --native`, including HTTPS-backed Sentry API calls in native mode.
+- `examples/sentry_issue_browser.sprout` is the runnable wrapper around that helper module for `just run` and `just compile-native`, including HTTPS-backed Sentry API calls in native mode.
 - `examples/http_get_cli.sprout` is a runnable CLI example that reads its URL from `argv_get(0)` and prints the response body.
 - `examples/text_demo.sprout` is a runnable Unicode-aware text summary CLI showing `Char`, `char_at_or`, `string_from_char`, and code-point `length`.
 - `examples/regex_demo.sprout` is a runnable experimental regex demo showing `compile`, `find_first`, `is_match`, `replace_all_literal`, and `escape`, including doubled-backslash regex patterns inside ordinary string literals.

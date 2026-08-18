@@ -40,8 +40,8 @@ Running with `USER="  Ada  "` prints `Hello, Ada`. More in [`examples/`](./examp
 
 - **Full type inference** — Hindley–Milner; most code needs no annotations.
 - **Functional core** — algebraic data types, exhaustive pattern matching,
-  immutable values, `Int`/`Double` numerics, `Maybe`/`Result` for optionality
-  and failure.
+  immutable values, `Int`/`Double` numerics (with `0x`/`0b` literals and
+  `stdlib.bits`), `Maybe`/`Result` for optionality and failure.
 - **Typeclasses** — dictionary-passing (`Eq`, `Ord`, `ToString`, `Semigroup`,
   `Monoid`, …), including return-type dispatch.
 - **Effects in types, and they are checked** — pure functions are unannotated;
@@ -58,14 +58,22 @@ Running with `USER="  Ada  "` prints `Hello, Ada`. More in [`examples/`](./examp
   native binaries via LLVM IR + clang; a small C runtime with a mark-sweep GC.
 - **Beginner-friendly diagnostics** — `line:col` errors, exhaustiveness checks,
   unknown-name and missing-instance reporting.
+- **Editor and REPL tooling** — `sproutd` serves LSP (diagnostics, go-to-definition,
+  hover) and an interactive REPL (`just build-sproutd && just repl`); a JetBrains
+  plugin lives in [`editors/intellij`](./editors/intellij).
 
 **Experimental slices** (implemented, not yet normative v0): the module system,
 typeclasses, records (`type User = (name: String)` — parametric, with `p.x` access
 and `p with (name = …)` update), integer ranges (`a..b`),
 `Char`/Unicode text, `stdlib.regex`, `do` notation for `Maybe`/`Result`/`IO`,
 existential constructors (`| exists a. Cell a where ToString a`, and its `(any C)`
-sugar — trait objects / heterogeneous collections), and
+sugar — trait objects / heterogeneous collections), linear types with
+`consuming`/`borrowing`/`once` parameter modes, growable `MutVec` (`mutvec_push`),
+green-task concurrency with channels and `select`, and
 `#@unstable`/`#@wip`-style declaration annotations. See the design drafts below.
+
+`class` and `instance` bodies use the layout (indentation) form; the brace form still
+parses but is deprecated and reported by the linter as `deprecated-brace-body`.
 
 ## Documentation
 
@@ -73,7 +81,8 @@ sugar — trait objects / heterogeneous collections), and
 - **[Idiomatic Sprout](./docs/idiomatic-sprout.md)** — how to write clean, flat, idiomatic code.
 - [Language design](./docs/language-design-v0.md) · [design best practices](./docs/language-design-best-practices.md)
 - [Style guide](./docs/style-guide-v0.md) · [stdlib/compiler guidelines](./docs/guidelines.md)
-- [HM typechecker guide](./docs/hm-typechecker.md)
+- [HM typechecker guide](./docs/hm-typechecker.md) · [effect enforcement](./docs/effect-enforcement-v0.md) · [records](./docs/records-v0.md)
+- [Compiler internals](./docs/compiler-internals.md) · [packaging](./docs/packaging-v0.md) · [language server](./docs/language-server-roadmap.md)
 - [Builtins reference](./docs/builtins-reference.md) — host builtins + collections.
 - [Toolchain, build & implementation status](./docs/development.md)
 - [Debugging](./docs/debugging.md) · [Bootstrap chain](./docs/bootstrap-chain.md)
@@ -91,7 +100,7 @@ mise exec -- just compile-native examples/fizzbuzz.sprout /tmp/fizzbuzz
 /tmp/fizzbuzz
 ```
 
-Full toolchain, tasks, commands, and the native-backend subset live in
+Full toolchain, tasks, driver CLI, and platform support live in
 [docs/development.md](./docs/development.md). Run the test suite with
 `mise exec -- just test`.
 
@@ -100,10 +109,10 @@ Full toolchain, tasks, commands, and the native-backend subset live in
 - `docs/` — design and process documents
 - `examples/` — sample source files
 - `stdlib/` — standard library (`prelude.sprout`) plus protocol helpers
-- `stdlib/compiler/` — self-hosted compiler (`parser`, `typechecker`, `codegen`, `compile_driver`)
-- `runtime/` — C runtime and GC (`sprout_runtime.c`)
+- `stdlib/compiler/` — self-hosted compiler (`parser`, `infer`/`checker`, `ast_to_ir`/`ir_lowering`, `compile_driver`)
+- `runtime/` — C runtime, GC, poller and scheduler (`sprout_runtime.c`, `sprout_poll.c`, `sprout_scheduler.c`)
 - `tests/` — test suites (native Sprout tests under `tests/stdlib/`)
-- `tests/conformance/` — executable behavior fixtures (`run`, `parse_error`, `type_error`, `runtime_error`)
+- `tests/conformance/` — executable behavior fixtures (`run`, `parse_error`, `type_error`, `executable_error`)
 - `bootstrap/` — committed LLVM IR seed for stage-1 bootstrap
 - `mise.toml` / `justfile` — pinned toolchain and common commands
 
@@ -138,12 +147,27 @@ type IntVec =                            # the idiom for a specific element type
 instance Summable IntVec                 # ok — `IntVec` is its own head
 ```
 
-**No multi-module user programs outside `stdlib/`**
-The module loader (`module_name_to_path`) resolves only `stdlib.<name>` imports and
-single-segment dotless names. Any *other* dotted import (e.g. `import myapp.util`)
-silently resolves to nothing — there is no error at import time; the symbols simply
-never bind, surfacing later as an `Unknown variable` at the use site. Keep a user
-program in a single file (or contribute the shared code under `stdlib/`).
+**A dotted import outside `stdlib/` needs `--package-root`, and fails silently without it**
+The default search path resolves only `stdlib.<name>` imports and single-segment
+dotless names. Any *other* dotted import (e.g. `import myapp.util`) resolves under an
+extra package root, registered by passing `--package-root <dir>` right after the
+stdlib root. Omit the flag and the import resolves to nothing **silently** — there is
+no error at import time; the symbols never bind, surfacing later as an
+`Unknown variable` at the use site.
+```
+compile_driver_bin_stage1 --emit-ir stdlib --package-root ./lib app.sprout
+```
+One extra root, in that fixed position — the walking-skeleton surface
+([packaging-v0.md](./docs/packaging-v0.md) §10). Both directions are gated by
+`just test-package-resolution`.
+
+**A file with no `module` header gets no prelude**
+Self-contained, importless files are *deliberately* not given the prelude — they define
+their own types and functions (see `examples/maybe_map.sprout`, which redefines `Maybe`
+and `map`). The prelude is prepended only once some module header brings a named module
+into scope. So a bare `.spr` fixture that calls a non-intrinsic prelude name fails with
+`unbound variable` / `unknown constructor`, not a silent default. Add a `module` header,
+or define what you use.
 
 ## Partial Application with `_`
 

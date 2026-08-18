@@ -11,7 +11,11 @@ editor and IDE support.
 > bottom of this doc (`sprout/lsp_server.py`, `sprout/diagnostics.py`, etc.)
 > is **obsolete** — those files never shipped; the LSP is implemented entirely
 > in `stdlib/compiler/lsp_driver.sprout` on top of the existing self-hosted
-> compiler API (`stdlib/compiler.sprout`).
+> compiler API (`stdlib/compiler.sprout`). The same applies to every other
+> Python reference below (§4 "reuse the existing Python implementation", §11
+> "Build the Server in Python First" and its premise "the compiler is already
+> written in Python"): the compiler was self-hosted and the Python pipeline
+> removed in May 2026, so those are historical rationale, not live advice.
 >
 > **Status (2026-08-17): measured, and two claims below were wrong.** The server is now
 > driven by `scripts/lsp_smoke.sh` (`just lsp-smoke`) with real framed messages. Its pure

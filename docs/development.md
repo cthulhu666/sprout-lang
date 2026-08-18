@@ -41,7 +41,25 @@ Common tasks:
 - Build native binary (clang): `mise exec -- just compile-native examples/factorial.sprout /tmp/factorial`
 - Build debug binary (DWARF, no optimisation): `mise exec -- just build-debug examples/factorial.sprout /tmp/factorial_dbg`
 - Debug binary under lldb: `mise exec -- just debug-run examples/factorial.sprout`
-- REPL: not yet available (the Python-backed REPL has been removed; a native launcher is planned — track progress in BACKLOG.md)
+- REPL: `mise exec -- just build-sproutd` once, then `mise exec -- just repl`
+- Language server (LSP): `build/sproutd --lsp <stdlib-root>`; see [language-server-roadmap.md](./language-server-roadmap.md) and `editors/intellij` for the JetBrains plugin
+
+### Platforms
+
+Supported hosts today are **macOS arm64** and **Linux x86_64/aarch64** — the two that
+CI builds and that `release.yml` publishes binaries for.
+
+**Windows is a port in progress, not a supported host.** It is parked after milestone W2
+with a resume point recorded in [windows-port-v0.md](./windows-port-v0.md). What the
+`windows` CI job gates today is compilation and one behavioural check, not a working
+toolchain: the golden IR compiles to Windows COFF for x86-64 and ARM64, the runtime
+translation units expected to build under MSVC do build, and the WSAPoll poller passes a
+self-test over real loopback sockets. Nothing links a Windows executable yet (W5).
+
+Local gates all run the kqueue backend; CI runs epoll + timerfd, and the two diverge in
+ways unreachable on macOS. Before pushing a change to `runtime/`, the scheduler, or
+`stdlib/net.sprout` / `stdlib/http_server.sprout`, run `mise exec -- just linux-smoke`
+(needs a container runtime, which is why it is opt-in).
 
 ### Native runtime GC environment variables
 
@@ -92,29 +110,51 @@ exceeds `SPROUT_GC_THRESHOLD / factor` — smaller programs sit on the floor and
 Tip: `SPROUT_GC_LIVELOCK_ACTION=abort SPROUT_DEBUG_GC=1` turns an infinite GC thrash into a fast diagnosable crash with a full cycle log.
 
 
-## Native backend (current subset)
+## Compiler driver (CLI)
 
-`sprout compile` currently supports a small subset:
+`build/compile_driver_bin_stage1` **is** the compiler; the `just` recipes above wrap it.
+Released binaries are the same driver under a friendlier name
+(`sprout-linux-x86_64` / `sprout-linux-aarch64`, built by
+`.github/workflows/release.yml` on tag push). There is no separate `sprout` executable.
 
-- top-level `fn`, `type`, and top-level `let` (constant and runtime-initialized),
-- `Int`/`Bool`/`String` typed params and returns, plus effectful returns such as `Unit !{IO}` and `Int !{IO}`,
-- expressions: literals, vars, arithmetic, comparisons, `&&`, `||`, function composition (`f >> g` means `g(f(x))`, `f << g` means `f(g(x))`), lambdas (`\(x, y) -> ...`), `if`, direct calls, indirect closure calls, recursion,
-- tuple expressions/types/patterns with general `n`-tuple arity (`(x, y)`, `(Int, String)`, `match pair with | (x, y) -> ...`),
-  one-arg lambdas may also use the shorthand `\x -> ...`,
-  and empty lambda parameter lists are currently rejected,
-- ADT constructor calls and `match` lowering (constructors with up to 3 fields),
-- generic type variables are currently erased to runtime `i64` handles,
-- closure-backed function values are supported, including captured lambdas and higher-order params/returns,
-- `print(...)` lowering for `Int`/`Bool`/`String`/ADT values,
-- `print_int(...)` external call.
+Drive it directly when you need a phase the recipes do not expose:
 
-TCP server builtins are available in interpreter and native (`sprout compile --native`) modes.
-Typed TCP client builtins are also available and now use `Bytes` payloads for raw protocol data.
-Application code should prefer the typed `stdlib.net` wrapper API over bare `Int` socket handles.
-Raw `bytes_*` primitives are internal to `stdlib.*`; application code should use `stdlib.bytes`.
-`to_string` rejects invalid UTF-8 and decoded NUL bytes; `read_c_string` is the intended helper for null-terminated protocol strings.
-`http_request` is available in native mode for plain `http://` requests, and also supports `https://` on macOS via the system TLS stack.
-Set `SPROUT_HTTP_TLS_DEBUG=1` when running a native binary to emit TLS handshake/read/write debug lines to stderr.
+| Invocation | Result on stdout |
+|---|---|
+| `<stdlib-root> <file>...` | compile (default path) |
+| `--emit-ir [--debug] <stdlib-root> [--package-root <dir>] <file>...` | LLVM IR text |
+| `--phase <p> <stdlib-root> [--package-root <dir>] <file>...` | stop after one phase — see below |
+| `--use-ir-codegen <stdlib-root> [--package-root <dir>] <file>` | LLVM IR via typed AST → Sprout-IR |
+| `--emit-iface <stdlib-root> <module-name> <file>` | encoded module interface |
+| `--check-iface <iface-file>` | interface verification result |
+
+`<stdlib-root>` is a **path**, not a flag — pass the literal `stdlib` directory.
+`--phase` accepts `bundle`, `check`, `effects`, `lower`, `recheck`, `scan-info`, and
+`dump-qualify`; [debugging.md](./debugging.md) explains what each is for.
+`just build-debug` passes `--emit-ir --debug` and then links with `clang -g -O0`.
+
+Two invariants the driver guarantees, both gated by `just diagnostic-stream-smoke`:
+
+- **Diagnostics go to stderr**, because stdout carries the artifact. A diagnostic on
+  stdout does not merely look untidy — redirected into a `.ll` file it *becomes* the
+  artifact, and the Sprout error resurfaces later as a clang parse error.
+- **A failed run exits nonzero**, including a mistyped invocation, so a broken step
+  stops a script instead of looking like a successful no-op.
+
+For what the *language* accepts, read [spec-v0.md](./spec-v0.md); it is normative and
+current, and this document deliberately does not duplicate it.
+
+## Runtime surface notes
+
+TCP server and typed TCP client builtins are available in native builds
+(`just compile-native`); client payloads are `Bytes` for raw protocol data.
+Application code should prefer the typed `stdlib.net` wrapper API over bare `Int`
+socket handles. Raw `bytes_*` primitives are internal to `stdlib.*`; application code
+should use `stdlib.bytes`. `to_string` rejects invalid UTF-8 and decoded NUL bytes;
+`read_c_string` is the intended helper for null-terminated protocol strings.
+`http_request` handles plain `http://`, and `https://` on macOS via the system TLS
+stack. Set `SPROUT_HTTP_TLS_DEBUG=1` when running a native binary to emit TLS
+handshake/read/write debug lines to stderr.
 
 The native server (`stdlib.http_server` / `stdlib.net`) spawns each accepted connection as a fire-and-forget green task (Layer-0 concurrency), so a slow connection does not block others — handlers interleave at their socket-I/O park points on a single OS thread. `serve_n`'s `max_connections` bounds the number of connections *accepted*; its enclosing `with_scope` joins all spawned handlers before returning.
 
@@ -136,6 +176,13 @@ Resolution:
 
 - `import stdlib.http` resolves to `stdlib/http.sprout`
 - loader checks importing file directory first, then current working directory
+- a **dotted non-stdlib** import (`import myapp.util`) resolves only under an extra
+  package root registered with `--package-root <dir>`, passed right after
+  `<stdlib-root>`. Without it the import resolves to nothing *silently* — there is no
+  error at import time; the symbols never bind and surface later as `Unknown variable`
+  at the use site. One root, fixed position — the walking-skeleton surface
+  (`docs/packaging-v0.md` §10 phase 2). Gated by `just test-package-resolution`, which
+  pins both directions: registered root resolves, unregistered root does not.
 - import cycles are rejected
 - bare `import x.y.z` introduces a namespace qualifier using the last path segment (`z.symbol`)
 - `import x.y.z as alias` introduces `alias.symbol`
@@ -155,7 +202,7 @@ Commands:
 - Emit LLVM IR: `mise exec -- just compile input.sprout out.ll`
 - Native binary (requires `clang`): `mise exec -- just compile-native input.sprout out_bin`
 - Run without args: `mise exec -- just run input.sprout`
-- REPL: not yet available (planned; see BACKLOG.md)
+- REPL: `mise exec -- just build-sproutd`, then `mise exec -- just repl`
 - Formatter/linter:
   - format in place: `mise exec -- just fmt-file your_file.sprout`
   - check formatting only: `mise exec -- just fmt-check-file your_file.sprout`

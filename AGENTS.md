@@ -157,8 +157,8 @@ For any non-trivial language change, include:
 - `docs/` normative and supporting design docs.
 - `examples/` user-facing language examples.
 - `stdlib/` language-level standard library source (`prelude.sprout`).
-- `stdlib/compiler/` self-hosted compiler source (`parse`, `infer`, `codegen`, `compile_driver`, etc.).
-- `runtime/` C runtime and GC (`sprout_runtime.c`).
+- `stdlib/compiler/` self-hosted compiler source (`parser`, `infer`, `ast_to_ir`, `ir_lowering`, `compile_driver`, etc.).
+- `runtime/` C runtime, GC, poller and scheduler (`sprout_runtime.c`, `sprout_poll.c`, `sprout_scheduler.c`); link all three.
 - `tests/stdlib/` native Sprout test files (`.spr`); run via `just test`.
 - `tests/conformance/` executable language behavior fixtures.
 - `bootstrap/` committed LLVM IR seed (`compile_driver.ll`) for stage-1 bootstrap.
