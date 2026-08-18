@@ -10,7 +10,21 @@
 -->
 <idea-plugin>
   <extensions defaultExtensionNs="com.intellij">
-    <platformLspServerSupportProvider
+    <!--
+      The tag composes with defaultExtensionNs into the FULL extension point name, so this
+      one reads `com.intellij.platform.lsp.serverSupportProvider` — which is what the
+      platform declares, verbatim, in its own intellij.platform.lsp.xml:
+
+        <extensionPoint qualifiedName="com.intellij.platform.lsp.serverSupportProvider"
+                        interface="com.intellij.platform.lsp.api.LspServerSupportProvider"/>
+
+      It was `platformLspServerSupportProvider` for a day, i.e. `com.intellij.platformLspServerSupportProvider`,
+      which no IDE declares. An extension registered against a non-existent extension point
+      is simply never instantiated: no server, no diagnostics, no hover, no navigation —
+      and no error either, while highlighting kept working from the other descriptor.
+      SproutLspRegistrationTest asserts this registration, because nothing else can.
+    -->
+    <platform.lsp.serverSupportProvider
         implementation="dev.sprout.intellij.lsp.SproutLspServerSupportProvider"/>
 
     <projectConfigurable

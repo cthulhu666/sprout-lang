@@ -16,20 +16,41 @@ repositories {
 }
 
 dependencies {
-  // Ultimate, because `com.intellij.modules.lsp` ships only in commercial IDEs. See
-  // gradle.properties for what that costs and how pluginVerification compensates.
+  // Ultimate, because the LSP API ships only in commercial IDEs.
+  //
+  // But note what Ultimate does NOT give us: it carries the LSP *API* — its own bundled
+  // plugins register providers with it — while declaring no `com.intellij.modules.lsp`
+  // module, in either 2024.2.5 or 2025.1.7.2 (checked in product-info.json and across every
+  // bundled XML descriptor). RubyMine 2025.2 declares it. Our optional <depends> keys on
+  // that module, so the LSP half of the plugin never loads here and
+  // SproutLspRegistrationTest can only report itself inert.
+  //
+  // Set SPROUT_IDE_HOME to an installed IDE that declares the module to make that test
+  // real. The path stays out of the repo deliberately — it is local setup.
   intellijPlatform {
-    create(
-      IntelliJPlatformType.valueOf(providers.gradleProperty("platformType").get().let {
-        if (it == "IU") "IntellijIdeaUltimate" else "IntellijIdeaCommunity"
-      }),
-      providers.gradleProperty("platformVersion").get(),
-    )
+    val localIde = providers.environmentVariable("SPROUT_IDE_HOME").orNull
+    if (localIde != null) {
+      local(localIde)
+    } else {
+      create(
+        IntelliJPlatformType.valueOf(providers.gradleProperty("platformType").get().let {
+          if (it == "IU") "IntellijIdeaUltimate" else "IntellijIdeaCommunity"
+        }),
+        providers.gradleProperty("platformVersion").get(),
+      )
+    }
     pluginVerifier()
     testFramework(TestFrameworkType.Platform)
   }
 
   testImplementation("junit:junit:4.13.2")
+}
+
+// Tell the tests which IDE they are running against. SproutLspRegistrationTest asserts
+// registration only when this is set, because the default platform cannot load the
+// optional LSP descriptor at all and a failure there would say nothing about the plugin.
+tasks.test {
+  systemProperty("sprout.ide.home", providers.environmentVariable("SPROUT_IDE_HOME").orNull ?: "")
 }
 
 kotlin {
