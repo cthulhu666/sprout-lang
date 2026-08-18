@@ -1,0 +1,88 @@
+module main
+
+import stdlib.test (TestState, new_state, assert_true, summary)
+import stdlib.compiler.compiler as compiler
+import stdlib.compiler.source as source
+import stdlib.compiler.typed_ast as typed_ast
+import stdlib.fs as fs
+import stdlib.env as env
+
+# ONE QUESTION, ONE ANSWER: the two typecheck front ends must reach the same verdict.
+#
+# Sprout typechecks through two independent paths:
+#
+#   bundler  — `bundle_file` → check. Used by the batch compiler, `just test`,
+#              `compile-examples` and `--phase check`. EVERY gate in this repo runs it.
+#   env      — `build_import_pairs` → `load_module` → `check_program_with_env`, reached
+#              from `compile_source_with_*`. Used by the REPL, the analysis service and
+#              the LSP. NO gate ran it until this file.
+#
+# That asymmetry is why divergences here are found by users rather than by CI. The one
+# that motivated this test was reported from a live RubyMine session on 2026-08-18:
+# `examples/vec_basics.sprout` checks clean in 0.28s under the bundler and reports
+# `check: Call type mismatch: Type mismatch: Vec vs List in function main` under the env
+# path, so the editor showed a red error on correct code.
+#
+# Root cause: `desugar_ctx.build_fn_sig_index` computes Vec context by scanning the decls
+# of the program being checked. The bundler concatenates the prelude in, so `vec_sort`'s
+# parameter reads as `Vec` and the list literal is wrapped in `vec_from_list`. The env path
+# receives the prelude as SCHEMES and never as decls, so the pass runs against an empty
+# vocabulary and inserts nothing. Same shape as the `where ToString a` REPL bug: a
+# decl-scanning pass verified only on the file path.
+#
+# Two assertions per fixture rather than one equality, so a dissenting path is NAMED
+# rather than reported as a bare disagreement. The two controls are what stop "make them
+# agree" from being satisfied by rejecting everything or accepting everything.
+#
+# NOT covered here, and it cannot be: `examples/concurrent_fetch.sprout` makes the env
+# path loop forever in `unifier.apply_full_subst`, and an in-process test cannot bound
+# time. That case belongs to the timeout-bounded sweep gate instead.
+
+fn stdlib_root() -> String !{IO} =
+  match env.get("SPROUT_STDLIB_ROOT") with
+  | Just root -> root
+  | Nothing -> "stdlib"
+
+fn fixture(name: String) -> String =
+  "tests/conformance/front_end_agreement/" ++ name ++ ".sprout"
+
+fn read_or_empty(path: String) -> String !{IO} =
+  match fs.read_text(path) with
+  | Ok src -> src
+  | Err _ -> ""
+
+# The batch answer — what `--phase check` tells a user at the command line.
+fn bundler_accepts(path: String, root: String) -> Bool !{IO} =
+  match compiler.compile_phase_check(source.FilePath(path), source.StdlibRoot(root)) with
+  | typed_ast.TypedOk _ _ -> true
+  | typed_ast.TypedErr _ _ -> false
+
+# The editor answer — what the LSP, REPL and analysis service tell a user.
+fn env_accepts(src: String, root: String) -> Bool !{IO} =
+  match compiler.compile_source_with_root(src, source.StdlibRoot(root)) with
+  | compiler.CompileOk _ -> true
+  | compiler.CompileFail _ -> false
+
+fn check_fixture(state: TestState, name: String, root: String, expected: Bool) -> Unit !{IO} =
+  do
+    let path = fixture(name)
+    src <- read_or_empty(path)
+    assert_true(state, name ++ ": fixture is readable", str_len(src) > 0)
+    bundler <- bundler_accepts(path, root)
+    envp <- env_accepts(src, root)
+    assert_true(state, name ++ ": bundler verdict is the spec's", bundler == expected)
+    assert_true(state, name ++ ": env path verdict is the spec's", envp == expected)
+
+fn main() -> Unit !{IO} =
+  do
+    state <- new_state()
+    root <- stdlib_root()
+
+    # The reported divergence. Correct source, so both paths must ACCEPT.
+    check_fixture(state, "vec_literal_at_prelude_call", root, true)
+
+    # Controls.
+    check_fixture(state, "both_accept", root, true)
+    check_fixture(state, "both_reject", root, false)
+
+    summary(state)

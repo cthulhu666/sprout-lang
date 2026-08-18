@@ -458,6 +458,17 @@ fn build_import_pairs_acc(specs: List ImportSpec, stdlib_root: String, extra_roo
         build_import_pairs_acc(rest, stdlib_root, extra_roots, cache, acc ++ pairs)
 
 # Resolve imports against stdlib_root plus the given package roots.
+#
+# RETIRED — do not adopt this for new work. Building an environment of imported SCHEMES
+# was the second answer to "does this typecheck?", and it disagreed with the bundler's
+# answer in four measured ways on the example corpus: a false `Vec vs List`, unknown
+# imported constructors, unresolved qualified names, and one file it never finished
+# checking. Everything user-facing — the LSP, the analysis service, the REPL — now goes
+# through `compiler.compile_source_with_cache_roots`, which bundles.
+#
+# It survives only for the unreferenced `type_driver` / `lower_driver` diagnostic
+# drivers; see BACKLOG for removing those and this together. `scripts/front_end_agreement.sh`
+# is the gate that would catch a new caller drifting away from the bundler's answer.
 export fn build_import_pairs_with_roots(specs: List ImportSpec, stdlib_root: String, extra_roots: List String, cache: ModuleCache) -> List (String, types.Scheme) !{IO} =
   build_import_pairs_acc(specs, stdlib_root, extra_roots, cache, Nil)
 

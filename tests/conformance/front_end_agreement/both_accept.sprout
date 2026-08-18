@@ -1,0 +1,9 @@
+module fixtures.both_accept
+
+# Control: ordinary correct source using an imported module. Both front ends must ACCEPT.
+# Without this, "make them agree" could be satisfied by rejecting everything.
+
+import stdlib.string as string
+
+fn shout(name: String) -> String =
+  string.trim(name) ++ "!"

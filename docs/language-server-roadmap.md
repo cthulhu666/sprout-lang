@@ -61,13 +61,22 @@ editor and IDE support.
 >   (`formatter.format_source`), document symbols (`symbol_inventory_in_source`),
 >   completion (`complete_in_state`). The same caution applies to each — check whether
 >   the API is in-process or across the analysis-service fork
-> - hold a `ModuleCache` in `LspState` — `compile_source_with_cache_roots` exists, but
->   every diagnostics run and every hover builds a fresh cache, so both re-check cold.
->   Needs an invalidation policy for `didChange` of an imported module, which is why it
->   is not folded into the feature changes
+> - ~~hold a cache in `LspState`~~ **done**: a `bundler.LoadEnv` lives for the session, so
+>   imports and the prelude are parsed once instead of per request. Measured on the real
+>   server: first check 0.25s, every later full re-check 0.04s — against 0.08s and 0.08s
+>   before, when each hover built a fresh cache. Invalidation is by construction rather
+>   than by policy: the edited buffer goes through the LoadEnv's source OVERLAY, and
+>   overlay paths are never memoised
+> - ~~the LSP typechecked differently from the compiler~~ **done**: `compile_source_*` now
+>   bundles, sharing `check_bundled` with `--phase check`. It used to build an environment
+>   of imported schemes — a second answer to the same question, which on the example corpus
+>   produced a false `Vec vs List`, unknown imported constructors, unresolved qualified
+>   names, and one file whose check never terminated and wedged the whole session. Guarded
+>   by `scripts/front_end_agreement.sh` in `just test`. **Message shape changed on this
+>   path**: a syntax error now reads `bundle: Parse error in <path>: …` rather than
+>   `parse: …`; positions are unchanged and still in original-file coordinates
 > - ~~package roots~~ **done**: `sproutd --lsp <root> --package-root <dir>` (repeatable);
->   the env path now calls the same `resolve_module_path` the bundler uses instead of a
->   narrower stdlib-only resolver
+>   resolution goes through the same `resolve_module_path` the bundler uses
 > - workspace-wide symbol search, rename
 >
 > §2 and §11 below predate self-hosting and describe reusing the original host-language

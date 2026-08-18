@@ -1,7 +1,7 @@
 module main
 import stdlib.test (TestState, new_state, assert_true, summary)
 import stdlib.compiler.compiler as compiler
-import stdlib.compiler.module_loader as module_loader
+import stdlib.compiler.bundler as bundler
 import stdlib.compiler.source as source
 import stdlib.env as env
 
@@ -15,8 +15,10 @@ import stdlib.env as env
 # declaration silently contributed nothing and every name from it read as
 # "Unknown variable". 11 of 27 top-level stdlib modules were affected.
 #
-# This exercises the exact path the REPL uses; the file-bundling path
-# (--phase check) inlines the prelude as decls and does not reproduce any of it.
+# The path this exercises has since been retired onto the bundler, so the REPL now
+# inlines the prelude as decls exactly like `--phase check` and the asymmetry that caused
+# the bug is gone. The assertions stay: they pin the behaviour rather than the mechanism,
+# and a regression to a second answer is what they would catch.
 # See docs/repl-env-type-vocabulary-v0.md.
 
 fn is_compile_ok(r: compiler.CompileResult) -> Bool =
@@ -31,7 +33,7 @@ fn main() -> Unit !{IO} =
     | Nothing -> ()
     | Just stdlib_root ->
         do
-          cache <- module_loader.new_cache()
+          cache <- bundler.new_load_env()
           # A session-local type whose field is a PRELUDE type must be accepted.
           let prelude_ty = "module app.session\n\ntype Box = | Box (Vec Int)\n"
           r_prelude <- compiler.compile_source_with_cache(prelude_ty, source.StdlibRoot(stdlib_root), cache)

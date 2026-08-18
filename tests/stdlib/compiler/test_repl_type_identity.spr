@@ -1,7 +1,7 @@
 module main
 import stdlib.test (TestState, new_state, assert_true, summary)
 import stdlib.compiler.compiler as compiler
-import stdlib.compiler.module_loader as module_loader
+import stdlib.compiler.bundler as bundler
 import stdlib.compiler.source as source
 import stdlib.env as env
 
@@ -32,7 +32,7 @@ fn main() -> Unit !{IO} =
     | Nothing -> ()
     | Just stdlib_root ->
         do
-          cache <- module_loader.new_cache()
+          cache <- bundler.new_load_env()
           # An ALIAS-qualified annotation must match the aliased value's own type.
           let aliased = "module app.session\n\nimport stdlib.bytes as bytes\n\nfn f(b: Bytes) -> Result bytes.Utf8Error String = bytes.to_string(b)\n"
           r_aliased <- compiler.compile_source_with_cache(aliased, source.StdlibRoot(stdlib_root), cache)

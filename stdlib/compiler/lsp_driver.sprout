@@ -4,6 +4,7 @@ import stdlib.json as json
 import stdlib.compiler.compiler as compiler
 import stdlib.compiler.source as source
 import stdlib.compiler.module_loader as module_loader
+import stdlib.compiler.bundler as bundler
 import stdlib.string as string
 import stdlib.fs as fs
 import stdlib.terminal as terminal
@@ -13,37 +14,47 @@ extern fn stdin_read_bytes(n: Int) -> Maybe String !{IO}
 # ---------------------------------------------------------------------------
 # LspState
 
-type LspState = LspState String (List String) (Ref (Dict String)) (Ref Bool)
-  # stdlib_root, package_roots, open_documents (uri -> source), shutdown_requested
+type LspState = LspState String (List String) (Ref (Dict String)) (Ref Bool) bundler.LoadEnv
+  # stdlib_root, package_roots, open_documents (uri -> source), shutdown_requested,
+  # load_env (parsed-module + prelude-scheme memo, held for the whole session)
 
 fn lsp_stdlib_root(state: LspState) -> String =
-  match state with | LspState r _ _ _ -> r
+  match state with | LspState r _ _ _ _ -> r
 
 # Package roots for dotted non-stdlib imports. Without them a multi-root project gets no
 # import error and then `Unknown variable` for every name from those modules — the whole
 # project underlined in the editor.
 fn lsp_package_roots(state: LspState) -> List String =
-  match state with | LspState _ p _ _ -> p
+  match state with | LspState _ p _ _ _ -> p
 
 fn lsp_documents(state: LspState) -> Ref (Dict String) =
-  match state with | LspState _ _ d _ -> d
+  match state with | LspState _ _ d _ _ -> d
 
 fn lsp_shutdown_flag(state: LspState) -> Ref Bool =
-  match state with | LspState _ _ _ s -> s
+  match state with | LspState _ _ _ s _ -> s
+
+# One memo for the session. A check re-parses the edited buffer and reuses every import,
+# which is what makes typechecking the way the batch compiler does affordable per
+# keystroke: without it the prelude alone is re-read, re-parsed and re-typechecked on
+# every diagnostic and every hover.
+fn lsp_load_env(state: LspState) -> bundler.LoadEnv =
+  match state with | LspState _ _ _ _ e -> e
 
 fn build_lsp_state(stdlib_root: String, package_roots: List String) -> LspState !{IO} =
   do
     docs <- ref_new(dict_empty())
     shutdown <- ref_new(false)
-    LspState(stdlib_root, package_roots, docs, shutdown)
+    load_env <- bundler.new_load_env()
+    LspState(stdlib_root, package_roots, docs, shutdown, load_env)
 
 # ---------------------------------------------------------------------------
 # LSP framing
 #
 # Write: compose "Content-Length: N\r\n\r\n<body>" via term_write (fflushes).
-# Read headers: use term_read_line (strips \r\n).
-# Read body: use term_read_line — valid because all major LSP clients (VS Code,
-# JetBrains) send compact single-line JSON bodies.
+# Read headers: term_read_line_once (strips \r\n).
+# Read body: stdin_read_bytes(n) — BYTES, matching the byte count the header declares
+# and the byte count `lsp_send` writes. Reading the body as a line would desync on any
+# document containing a multi-byte character, because Content-Length counts bytes.
 
 fn lsp_send(body: String) -> Unit !{IO} =
   terminal.write("Content-Length: " ++ int_to_string(string.byte_length(body)) ++ "\r\n\r\n" ++ body)
@@ -171,8 +182,9 @@ fn push_diagnostics(uri: String, diags: List compiler.Diagnostic, state: LspStat
 
 fn check_and_push_diagnostics(uri: String, src: String, state: LspState) -> Unit !{IO} =
   do
-    result <- compiler.compile_source_with_roots(
-      src, source.StdlibRoot(lsp_stdlib_root(state)), lsp_package_roots(state))
+    result <- compiler.compile_source_at_with_cache_roots(
+      src, path_for_uri(uri), source.StdlibRoot(lsp_stdlib_root(state)),
+      lsp_package_roots(state), lsp_load_env(state))
     match result with
     | compiler.CompileOk _ -> push_diagnostics(uri, Nil, state)
     | compiler.CompileFail diags -> push_diagnostics(uri, diags, state)
@@ -238,9 +250,8 @@ fn make_hover_result(id: json.Json, type_str: String) -> json.Json =
 # reporting the reason as a diagnostic on the same document.
 fn do_hover(id: json.Json, src: String, word: String, state: LspState) -> Unit !{IO} =
   do
-    cache <- module_loader.new_cache()
     match compiler.type_of_expr_in_source(src, word,
-        source.StdlibRoot(lsp_stdlib_root(state)), lsp_package_roots(state), cache) with
+        source.StdlibRoot(lsp_stdlib_root(state)), lsp_package_roots(state), lsp_load_env(state)) with
     | Nothing -> send_message(make_result(id, json.JsonNull))
     | Just type_str -> send_message(make_hover_result(id, type_str))
 
@@ -402,6 +413,14 @@ fn handle_hover(id: json.Json, params: json.Json, state: LspState) -> Unit !{IO}
 # open; it is left as-is rather than guessed at against the server's cwd, which is not
 # necessarily the editor's.
 fn uri_for_path(path: String) -> String = "file://" ++ path
+
+# The inverse, for naming the file a load error came from. A client that sends some other
+# URI scheme (an untitled buffer, say) gets the URI back unchanged — it is only ever used
+# as a label and as the overlay key, so an unusual one costs nothing.
+export fn path_for_uri(uri: String) -> String =
+  match string.strip_prefix(uri, "file://") with
+  | Just path -> path
+  | Nothing -> uri
 
 fn location_json(uri: String, line: Int, col: Int) -> json.Json =
   json.JsonObject(

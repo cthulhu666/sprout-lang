@@ -5,6 +5,7 @@ import stdlib.compiler.lexer as lexer
 import stdlib.compiler.token as token
 import stdlib.compiler.parser as parser
 import stdlib.compiler.module_loader as module_loader
+import stdlib.compiler.types as types
 import stdlib.compiler.deriving as deriving
 import stdlib.string as string
 # Load-bearing despite the alias never being written — see the note in source.sprout.
@@ -19,6 +20,49 @@ import stdlib.fs as fs
 export type BundleResult (..) =
   | BundleOk ast.Program
   | BundleErr source.SourcePos String
+
+# Where module sources come from, and what has already been parsed.
+#
+#   overlay : in-memory sources, keyed by path, that take PRECEDENCE over the
+#             filesystem. An editor typechecks buffers that are not on disk — unsaved
+#             edits, and an entry "file" that may have no path at all — and this is how
+#             they enter the bundle. Every open dirty buffer can be supplied, not just
+#             the active one, which the env path could never do.
+#   parsed  : memo of path → ParsedModule, so a session that checks the same file after
+#             each keystroke re-reads and re-parses its imports once instead of always.
+#   schemes : the module_loader cache behind `load_prelude_pairs`, which TYPECHECKS the
+#             prelude to produce its schemes. Held here so one caller-owned value covers
+#             every repeated cost of a check, rather than two.
+#
+# Overlay paths are deliberately never memoised: they are dirty by definition.
+# The memo is keyed by path with no mtime check, matching the cache it replaces — an
+# external edit to an already-parsed file is not noticed. That is why the overlay, and
+# not the memo, is what an editor's live buffers go through.
+# The scheme cache is spelled out rather than written as `module_loader.ModuleCache`:
+# a type alias is not transparent across a module boundary here, so the alias and its
+# expansion do not unify and `new_cache()`'s result would not fit the field.
+export type LoadEnv (..) =
+  | LoadEnv (Dict String) (Ref (Dict ParsedModule)) (Ref (Dict (List (String, types.Scheme))))
+
+export fn new_load_env() -> LoadEnv !{IO} =
+  do
+    parsed <- ref_new(dict_empty())
+    schemes <- module_loader.new_cache()
+    LoadEnv(dict_empty(), parsed, schemes)
+
+# A LoadEnv sharing this one's memos but reading the given in-memory sources first.
+export fn load_env_with_overlay(overlay: Dict String, base: LoadEnv) -> LoadEnv =
+  match base with
+  | LoadEnv _ parsed schemes -> LoadEnv(overlay, parsed, schemes)
+
+fn load_env_overlay(e: LoadEnv) -> Dict String =
+  match e with | LoadEnv o _ _ -> o
+
+fn load_env_parsed(e: LoadEnv) -> Ref (Dict ParsedModule) =
+  match e with | LoadEnv _ p _ -> p
+
+export fn load_env_schemes(e: LoadEnv) -> Ref (Dict (List (String, types.Scheme))) =
+  match e with | LoadEnv _ _ s -> s
 
 # ---------------------------------------------------------------------------
 # Internal types
@@ -309,6 +353,18 @@ type WorkItem =
   | WIVisit String
   | WILeave String
   | WIFinalize String String (List module_loader.ImportSpec)
+  # Already parsed on an earlier call: record the memoised module, skip lex and parse.
+  | WIRecord ParsedModule
+
+# A load failure: the file it came from, where in that file, and what went wrong.
+#
+# The position is carried SEPARATELY from the message rather than only being embedded in
+# its text. An editor needs it as a range, and a lex or parse error reported at
+# `no_pos()` lands on line 0 and squiggles nothing — which is what happened to every
+# syntax error the moment the editor started typechecking by bundling. TokenizeError and
+# ParseError have always carried the position; only this channel dropped it.
+type LoadIssue =
+  | LoadIssue String source.SourcePos String
 
 fn spec_to_path(spec: module_loader.ImportSpec, stdlib_root: String, extra_roots: List String) -> Maybe String =
   match spec with
@@ -342,8 +398,9 @@ fn process_work(
   seen: Ref (List String),
   ordered: Ref (List ParsedModule),
   stdlib_root: String,
-  extra_roots: List String
-) -> List String !{IO} =
+  extra_roots: List String,
+  load_env: LoadEnv
+) -> List LoadIssue !{IO} =
   do
     stack <- ref_read(work)
     match stack with
@@ -351,10 +408,10 @@ fn process_work(
     | Cons item rest ->
         do
           ref_write(work, rest)
-          errs <- process_item(item, work, visiting, seen, ordered, stdlib_root, extra_roots)
+          errs <- process_item(item, work, visiting, seen, ordered, stdlib_root, extra_roots, load_env)
           match errs with
           | [_ | _] -> errs
-          | Nil -> process_work(work, visiting, seen, ordered, stdlib_root, extra_roots)
+          | Nil -> process_work(work, visiting, seen, ordered, stdlib_root, extra_roots, load_env)
 
 fn process_item(
   item: WorkItem,
@@ -363,12 +420,48 @@ fn process_item(
   seen: Ref (List String),
   ordered: Ref (List ParsedModule),
   stdlib_root: String,
-  extra_roots: List String
-) -> List String !{IO} =
+  extra_roots: List String,
+  load_env: LoadEnv
+) -> List LoadIssue !{IO} =
   match item with
-  | WIVisit path -> process_wi_visit(path, work, visiting, seen, ordered, stdlib_root, extra_roots)
+  | WIVisit path -> process_wi_visit(path, work, visiting, seen, ordered, stdlib_root, extra_roots, load_env)
   | WILeave path -> process_wi_leave(path, visiting)
-  | WIFinalize path src specs -> process_wi_finalize(path, src, specs, seen, ordered)
+  | WIFinalize path src specs -> process_wi_finalize(path, src, specs, seen, ordered, load_env)
+  | WIRecord mod -> process_wi_record(mod, seen, ordered)
+
+# The source of a module: an in-memory buffer if the caller supplied one, else the file.
+# An overlay entry for a path that does not exist on disk is the point, not an edge case —
+# it is how an editor typechecks an unsaved buffer.
+fn module_source(path: String, load_env: LoadEnv) -> String !{IO} =
+  match dict_get(path, load_env_overlay(load_env)) with
+  | Just src -> src
+  | Nothing ->
+      match fs.read_text(path) with
+      | Err msg -> panic("read_file: " ++ path ++ ": " ++ msg)
+      | Ok src -> src
+
+# A memoised parse, only when the caller has not overridden this path in memory.
+fn memoised_module(path: String, load_env: LoadEnv) -> Maybe ParsedModule !{IO} =
+  match dict_get(path, load_env_overlay(load_env)) with
+  | Just _ -> Nothing
+  | Nothing ->
+      do
+        parsed <- ref_read(load_env_parsed(load_env))
+        dict_get(path, parsed)
+
+fn process_wi_record(
+  mod: ParsedModule,
+  seen: Ref (List String),
+  ordered: Ref (List ParsedModule)
+) -> List LoadIssue !{IO} =
+  match mod with
+  | ParsedModule _ path _ _ _ _ ->
+      do
+        ordered_now <- ref_read(ordered)
+        ref_write(ordered, Cons(mod, ordered_now))
+        seen_now <- ref_read(seen)
+        ref_write(seen, Cons(path, seen_now))
+        Nil
 
 fn process_wi_visit(
   path: String,
@@ -377,8 +470,9 @@ fn process_wi_visit(
   seen: Ref (List String),
   ordered: Ref (List ParsedModule),
   stdlib_root: String,
-  extra_roots: List String
-) -> List String !{IO} =
+  extra_roots: List String,
+  load_env: LoadEnv
+) -> List LoadIssue !{IO} =
   do
     seen_list <- ref_read(seen)
     if str_list_member(path, seen_list) then Nil
@@ -386,20 +480,59 @@ fn process_wi_visit(
       do
         visiting_list <- ref_read(visiting)
         if str_list_member(path, visiting_list) then
-          Cons("Import cycle detected involving: " ++ path, Nil)
+          Cons(LoadIssue(path, no_pos(), "Import cycle detected involving: " ++ path), Nil)
         else
-          match fs.read_text(path) with
-          | Err msg -> panic("read_file: " ++ path ++ ": " ++ msg)
-          | Ok src ->
-              do
-                let specs = module_loader.collect_imports(src)
-                let dep_paths = specs_to_paths(specs, stdlib_root, extra_roots)
-                ref_write(visiting, Cons(path, visiting_list))
-                stack_now <- ref_read(work)
-                ref_write(work, push_visit_items(list_reverse(dep_paths), Cons (WIFinalize(path, src, specs), Cons (WILeave(path), stack_now))))
-                Nil
+          do
+            # A memo hit carries the module's own import specs, so it skips the read and
+            # the parse while still walking exactly the same dependency edges.
+            # Matched at the call, not bound with `<-`: a do-bind unwraps a Maybe returned
+            # from an effectful function and would lose the miss case.
+            match memoised_module(path, load_env) with
+            | Just mod ->
+                enqueue_module(path, parsed_specs(mod), WIRecord(mod),
+                  work, visiting, visiting_list, stdlib_root, extra_roots)
+            | Nothing ->
+                do
+                  src <- module_source(path, load_env)
+                  let specs = module_loader.collect_imports(src)
+                  enqueue_module(path, specs, WIFinalize(path, src, specs),
+                    work, visiting, visiting_list, stdlib_root, extra_roots)
 
-fn process_wi_leave(path: String, visiting: Ref (List String)) -> List String !{IO} =
+# Mark the module in progress and push its dependencies above the item that completes it,
+# so the subtree is finished before the module itself is recorded.
+fn enqueue_module(
+  path: String,
+  specs: List module_loader.ImportSpec,
+  finish: WorkItem,
+  work: Ref (List WorkItem),
+  visiting: Ref (List String),
+  visiting_list: List String,
+  stdlib_root: String,
+  extra_roots: List String
+) -> List LoadIssue !{IO} =
+  do
+    let dep_paths = specs_to_paths(specs, stdlib_root, extra_roots)
+    ref_write(visiting, Cons(path, visiting_list))
+    stack_now <- ref_read(work)
+    ref_write(work, push_visit_items(list_reverse(dep_paths), Cons(finish, Cons (WILeave(path), stack_now))))
+    Nil
+
+fn parsed_specs(mod: ParsedModule) -> List module_loader.ImportSpec =
+  match mod with
+  | ParsedModule _ _ specs _ _ _ -> specs
+
+fn issue_message(issue: LoadIssue) -> String =
+  match issue with | LoadIssue _ _ msg -> msg
+
+# A position is only reportable when the failure is in the file the caller asked about.
+# An error inside an IMPORTED module has a position in THAT file, and handing it back
+# would land the squiggle on an unrelated line of the document being edited. The message
+# still names the offending path, so nothing is lost but a misplaced marker.
+fn issue_pos_for_entry(issue: LoadIssue, entry_path: String) -> source.SourcePos =
+  match issue with
+  | LoadIssue path pos _ -> if path == entry_path then pos else no_pos()
+
+fn process_wi_leave(path: String, visiting: Ref (List String)) -> List LoadIssue !{IO} =
   do
     visiting_list <- ref_read(visiting)
     ref_write(visiting, remove_str_from_list(path, visiting_list))
@@ -410,8 +543,9 @@ fn process_wi_finalize(
   src: String,
   specs: List module_loader.ImportSpec,
   seen: Ref (List String),
-  ordered: Ref (List ParsedModule)
-) -> List String !{IO} =
+  ordered: Ref (List ParsedModule),
+  load_env: LoadEnv
+) -> List LoadIssue !{IO} =
   do
     # One tokenize serves both the module surface and the parse. Calling
     # scan_source_info here would lex the source a second time, and lexing it twice
@@ -419,43 +553,56 @@ fn process_wi_finalize(
     match lexer.tokenize(source.strip_headers(src)) with
     | Err e ->
         match e with
-        | token.TokenizeError msg _ -> Cons("Lex error in " ++ path ++ ": " ++ msg, Nil)
+        | token.TokenizeError msg pos -> Cons(LoadIssue(path, pos, "Lex error in " ++ path ++ ": " ++ msg), Nil)
     | Ok tokens ->
         match parser.parse_program(tokens) with
           | Err e ->
               match e with
-              | parser.ParseError msg _ -> Cons("Parse error in " ++ path ++ ": " ++ msg, Nil)
+              | parser.ParseError msg pos -> Cons(LoadIssue(path, pos, "Parse error in " ++ path ++ ": " ++ msg), Nil)
           | Ok prog ->
               do
                 match prog with
                 | ast.Program decls _ ->
                     do
                       let surface = parser.scan_module_surface(tokens)
+                      let mod = ParsedModule(scan_module_name(src), path, specs,
+                        parser.surface_exported(surface), parser.surface_ctor_types(surface), decls)
+                      memoise_module(path, mod, load_env)
                       ordered_now <- ref_read(ordered)
-                      ref_write(ordered, Cons (ParsedModule(scan_module_name(src), path, specs,
-                        parser.surface_exported(surface), parser.surface_ctor_types(surface), decls), ordered_now))
+                      ref_write(ordered, Cons(mod, ordered_now))
                       seen_now <- ref_read(seen)
                       ref_write(seen, Cons(path, seen_now))
                       Nil
+
+# Record a parse for reuse — unless the caller supplied this path's source in memory, in
+# which case it is a dirty buffer and memoising it would serve a stale parse next time.
+fn memoise_module(path: String, mod: ParsedModule, load_env: LoadEnv) -> Unit !{IO} =
+  match dict_get(path, load_env_overlay(load_env)) with
+  | Just _ -> ()
+  | Nothing ->
+      do
+        parsed <- ref_read(load_env_parsed(load_env))
+        ref_write(load_env_parsed(load_env), dict_set(path, mod, parsed))
 
 fn visit_module_iter(
   entry_path: String,
   stdlib_root: String,
   extra_roots: List String,
   seen: Ref (List String),
-  ordered: Ref (List ParsedModule)
-) -> List String !{IO} =
+  ordered: Ref (List ParsedModule),
+  load_env: LoadEnv
+) -> List LoadIssue !{IO} =
   do
     work <- ref_new(Cons (WIVisit(entry_path), Nil))
     visiting <- ref_new(Nil)
-    process_work(work, visiting, seen, ordered, stdlib_root, extra_roots)
+    process_work(work, visiting, seen, ordered, stdlib_root, extra_roots, load_env)
 
 # Collect all modules in topological order, optionally prepending the prelude.
-fn collect_modules(entry_path: String, stdlib_root: String, extra_roots: List String) -> (Maybe String, List ParsedModule) !{IO} =
+fn collect_modules(entry_path: String, stdlib_root: String, extra_roots: List String, load_env: LoadEnv) -> (Maybe LoadIssue, List ParsedModule) !{IO} =
   do
     seen <- ref_new(Nil)
     ordered <- ref_new(Nil)
-    errs <- visit_module_iter(entry_path, stdlib_root, extra_roots, seen, ordered)
+    errs <- visit_module_iter(entry_path, stdlib_root, extra_roots, seen, ordered, load_env)
     match errs with
     | [e | _] -> (Just(e), Nil)
     | Nil ->
@@ -470,26 +617,45 @@ fn collect_modules(entry_path: String, stdlib_root: String, extra_roots: List St
           # non-intrinsic prelude name from such a file is a hard error
           # (codegen.emit_named_call), not a silent zero_val.
           if any_has_module_name(rev_mods) then
-            match fs.read_text(prelude_path(stdlib_root)) with
-            | Err msg -> panic("read_file: prelude: " ++ msg)
-            | Ok prelude_src ->
-                match scan_source_info(prelude_src) with
-                  | (_, prelude_exported, prelude_ctor_types) ->
-                      match lexer.tokenize(source.strip_headers(prelude_src)) with
-                      | Err e ->
-                          match e with
-                          | token.TokenizeError msg _ -> (Just(str_concat("Lex error in prelude: ", msg)), Nil)
-                      | Ok tokens ->
-                          match parser.parse_program(tokens) with
-                            | Err e ->
-                                match e with
-                                | parser.ParseError msg _ -> (Just(str_concat("Parse error in prelude: ", msg)), Nil)
-                            | Ok prog ->
-                                match prog with
-                                | ast.Program decls _ ->
-                                    (Nothing, Cons (ParsedModule("", prelude_path(stdlib_root), Nil, prelude_exported, prelude_ctor_types, decls), rev_mods))
+            do
+              (err, prelude) <- prelude_module(stdlib_root, load_env)
+              match prelude with
+              | Nothing -> (err, Nil)
+              | Just mod -> (Nothing, Cons(mod, rev_mods))
           else
             (Nothing, rev_mods)
+
+# The prelude as a ParsedModule, memoised like any other module. Without the memo it is
+# re-read and re-parsed on every bundle, and it is the largest file in the tree — which is
+# the single biggest cost an editor pays per keystroke.
+fn prelude_module(stdlib_root: String, load_env: LoadEnv) -> (Maybe LoadIssue, Maybe ParsedModule) !{IO} =
+  do
+    let path = prelude_path(stdlib_root)
+    match memoised_module(path, load_env) with
+    | Just mod -> (Nothing, Just(mod))
+    | Nothing ->
+        do
+          src <- module_source(path, load_env)
+          match scan_source_info(src) with
+          | (_, exported, ctor_types) ->
+              match lexer.tokenize(source.strip_headers(src)) with
+              | Err e ->
+                  match e with
+                  | token.TokenizeError msg pos ->
+                      (Just (LoadIssue(path, pos, str_concat("Lex error in prelude: ", msg))), Nothing)
+              | Ok tokens ->
+                  match parser.parse_program(tokens) with
+                  | Err e ->
+                      match e with
+                      | parser.ParseError msg pos ->
+                          (Just (LoadIssue(path, pos, str_concat("Parse error in prelude: ", msg))), Nothing)
+                  | Ok prog ->
+                      match prog with
+                      | ast.Program decls _ ->
+                          do
+                            let mod = ParsedModule("", path, Nil, exported, ctor_types, decls)
+                            memoise_module(path, mod, load_env)
+                            (Nothing, Just(mod))
 
 fn any_has_module_name(mods: List ParsedModule) -> Bool =
   match mods with
@@ -1464,11 +1630,34 @@ fn ambient_type_names(modules: List ParsedModule, stdlib_root: String) -> List S
 
 export fn bundle_file_with_roots(path: source.FilePath, stdlib_root: source.StdlibRoot, extra_roots: List String) -> BundleResult !{IO} =
   do
-    (err, modules) <- collect_modules(source.filepath_str(path), source.stdlib_root_str(stdlib_root), extra_roots)
+    load_env <- new_load_env()
+    bundle_entry(source.filepath_str(path), stdlib_root, extra_roots, load_env)
+
+# Bundle a module given its SOURCE rather than its path.
+#
+# This is the entry point an editor needs, and the reason the two front ends can now be
+# one. The buffer being checked may differ from what is on disk, or have no file at all
+# (a REPL line, a hover's sentinel-augmented snippet), so it enters through the overlay
+# under `entry_path` and is found there instead of being read.
+#
+# `entry_path` is not required to exist. It still matters: imports resolve against
+# stdlib_root and extra_roots rather than relative to it, but it is the key the entry
+# occupies in the overlay and the name that appears in load errors, so callers with a
+# real path should pass it.
+#
+# The load_env's memo persists across calls, so a session re-checking one buffer re-parses
+# only that buffer.
+export fn bundle_source_with_roots(src: String, entry_path: String, stdlib_root: source.StdlibRoot,
+                                   extra_roots: List String, load_env: LoadEnv) -> BundleResult !{IO} =
+  bundle_entry(entry_path, stdlib_root, extra_roots,
+    load_env_with_overlay(dict_set(entry_path, src, load_env_overlay(load_env)), load_env))
+
+fn bundle_entry(entry_path: String, stdlib_root: source.StdlibRoot, extra_roots: List String,
+                load_env: LoadEnv) -> BundleResult !{IO} =
+  do
+    (err, modules) <- collect_modules(entry_path, source.stdlib_root_str(stdlib_root), extra_roots, load_env)
     match err with
-    # Module-load / import-parse failures: no single decl span (parse errors
-    # embed their own `at L:C` in the message text). no_pos() is honest here.
-    | Just msg -> BundleErr(no_pos(), msg)
+    | Just issue -> BundleErr(issue_pos_for_entry(issue, entry_path), issue_message(issue))
     | Nothing ->
         do
           ambient <- ambient_type_names(modules, source.stdlib_root_str(stdlib_root))
@@ -1526,8 +1715,9 @@ fn dump_qualify_modules_acc(modules: List ParsedModule, all_symbols: Dict Module
 
 export fn dump_qualify_file(path: source.FilePath, stdlib_root: source.StdlibRoot) -> List String !{IO} =
   do
-    (err, modules) <- collect_modules(source.filepath_str(path), source.stdlib_root_str(stdlib_root), Nil)
+    load_env <- new_load_env()
+    (err, modules) <- collect_modules(source.filepath_str(path), source.stdlib_root_str(stdlib_root), Nil, load_env)
     match err with
-    | Just msg -> Cons("ERROR: " ++ msg, Nil)
+    | Just issue -> Cons("ERROR: " ++ issue_message(issue), Nil)
     | Nothing -> dump_qualify_modules_acc(modules, build_all_symbols(modules), source.stdlib_root_str(stdlib_root))
 

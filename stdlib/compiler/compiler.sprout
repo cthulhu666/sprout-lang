@@ -17,6 +17,7 @@ import stdlib.compiler.ir_pipeline as ir_pipeline
 import stdlib.compiler.source as source
 import stdlib.fs as fs
 import stdlib.env as env
+import stdlib.string as string
 
 # ---------------------------------------------------------------------------
 # Public API types
@@ -122,38 +123,81 @@ export fn declaration_position(src: String, name: String) -> Maybe source.Source
       | ast.Program decls _ -> find_decl_pos(decls, name)
 
 # compile_source_with_roots: like compile_source but also resolves imports.
-# Accepts raw source (with module/import header); strips headers internally
-# before parsing so the bootstrap parser only sees declaration bodies.
+# Accepts raw source (with module/import header).
 # stdlib_root is the filesystem root for stdlib.* module resolution; extra_roots are
 # package roots for dotted non-stdlib imports, matching the batch CLI's --package-root.
 export fn compile_source_with_roots(src: String, stdlib_root: source.StdlibRoot, extra_roots: List String) -> CompileResult !{IO} =
   do
-    cache <- module_loader.new_cache()
-    compile_source_with_cache_roots(src, stdlib_root, extra_roots, cache)
+    load_env <- bundler.new_load_env()
+    compile_source_with_cache_roots(src, stdlib_root, extra_roots, load_env)
 
 # stdlib-only form. Most callers have no package roots; those that do (the LSP, and
 # anything else driving a multi-root project) call the roots form above.
 export fn compile_source_with_root(src: String, stdlib_root: source.StdlibRoot) -> CompileResult !{IO} =
   compile_source_with_roots(src, stdlib_root, Nil)
 
-# compile_source_with_cache_roots: like compile_source_with_roots but uses a
-# caller-provided cache. The cache is NOT recreated — the caller owns its lifecycle.
-# cache param is unannotated: its type is constrained by the module_loader callees.
-export fn compile_source_with_cache_roots(src: String, stdlib_root: source.StdlibRoot, extra_roots: List String, cache) -> CompileResult !{IO} =
-  do
-    let sr = source.stdlib_root_str(stdlib_root)
-    prelude_pairs <- module_loader.load_prelude_pairs(sr, cache)
-    import_pairs <- module_loader.build_import_pairs_with_roots(module_loader.collect_imports(src), sr, extra_roots, cache)
-    match lex_parse(source.strip_headers(src)) with
-    | LexParseFail diags -> CompileFail(diags)
-    | LexParseOk prog ->
-        do
-          result <- checker.check_program_with_env(prog, prelude_pairs ++ import_pairs)
-          match result with
-          | checker.CheckErr pos msg -> CompileFail(Cons (DiagError(pos, "check: " ++ msg), Nil))
-          | checker.CheckOk env -> CompileOk(env)
+# The path an in-memory buffer occupies while it is bundled. It need not exist: the
+# source is supplied through the overlay, so it is a key rather than a location. Callers
+# that DO have a real path should still prefer it, so load errors name something real.
+export fn source_entry_path() -> String = "<source>"
 
-export fn compile_source_with_cache(src: String, stdlib_root: source.StdlibRoot, cache) -> CompileResult !{IO} =
+# compile_source_with_cache_roots: typecheck raw source the way the batch compiler
+# typechecks a file — by bundling it — reusing a caller-owned LoadEnv so a session that
+# checks the same buffer repeatedly re-parses only that buffer.
+#
+# THIS FUNCTION IS WHY THE TWO FRONT ENDS ARE NOW ONE. It used to build an environment of
+# imported SCHEMES (`load_prelude_pairs` + `build_import_pairs_with_roots`) and check
+# against that, while the batch compiler bundled imported DECLS and checked those. Same
+# question, two implementations, and they disagreed in at least four ways on the example
+# corpus alone — a false `Vec vs List`, unknown imported constructors, unresolved
+# qualified names, and one file on which the env path did not terminate at all. See
+# `scripts/front_end_agreement.sh`, which exists to keep them from drifting apart again.
+#
+# `cache` keeps its name and position, so the ~30 call sites are unchanged; only the value
+# they construct moved from `module_loader.new_cache()` to `bundler.new_load_env()`.
+#
+# It is now ANNOTATED, where it used to be left bare "because the module_loader callees
+# constrain it". They no longer do: the bundler destructures a LoadEnv lazily, so a
+# ModuleCache passed here type-checked fine and then died as `runtime error:
+# non-exhaustive match` inside an accessor. An annotation makes that a compile error at
+# the call site, which is where the mistake is.
+export fn compile_source_with_cache_roots(src: String, stdlib_root: source.StdlibRoot, extra_roots: List String,
+                                          cache: bundler.LoadEnv) -> CompileResult !{IO} =
+  compile_source_at_with_cache_roots(src, source_entry_path(), stdlib_root, extra_roots, cache)
+
+# As above, but for a buffer that HAS a path on disk. Load errors then name the real file
+# instead of the placeholder, which is what an editor should report.
+export fn compile_source_at_with_cache_roots(src: String, entry_path: String, stdlib_root: source.StdlibRoot,
+                                             extra_roots: List String, cache: bundler.LoadEnv) -> CompileResult !{IO} =
+  do
+    bundled <- bundler.bundle_source_with_roots(src, entry_path, stdlib_root, extra_roots, cache)
+    match bundled with
+    | bundler.BundleErr pos msg -> CompileFail(Cons (DiagError(pos, "bundle: " ++ msg), Nil))
+    | bundler.BundleOk prog ->
+        do
+          result <- check_bundled(prog, stdlib_root, cache)
+          match result with
+          | typed_ast.TypedErr pos msg -> CompileFail(Cons (DiagError(pos, msg), Nil))
+          | typed_ast.TypedOk _ env -> CompileOk(unqualify_entry_names(bundler.scan_module_name(src), env))
+
+# Bundling qualifies a named module's own top-level names (`examples.foo.bar`), but every
+# consumer of this env looks them up as written in the file — the REPL's sentinel, the
+# analysis service's ops, `dump_typed_names`. Re-expose the entry module's own names bare
+# so the API's contract is unchanged by how it is now implemented. Qualified keys are
+# kept as well, since imported names are only reachable that way.
+fn unqualify_entry_names(module_name: String, env: Dict types.Scheme) -> Dict types.Scheme =
+  if module_name == "" then env
+  else add_bare_aliases(vec_to_list(dict_entries(env)), module_name ++ ".", env)
+
+fn add_bare_aliases(entries: List (String, types.Scheme), prefix: String, acc: Dict types.Scheme) -> Dict types.Scheme =
+  match entries with
+  | Nil -> acc
+  | Cons (key, scheme) rest ->
+      match string.strip_prefix(key, prefix) with
+      | Nothing -> add_bare_aliases(rest, prefix, acc)
+      | Just bare -> add_bare_aliases(rest, prefix, dict_set(bare, scheme, acc))
+
+export fn compile_source_with_cache(src: String, stdlib_root: source.StdlibRoot, cache: bundler.LoadEnv) -> CompileResult !{IO} =
   compile_source_with_cache_roots(src, stdlib_root, Nil, cache)
 
 # ---------------------------------------------------------------------------
@@ -190,7 +234,7 @@ fn augment_with_sentinel(src: String, expr: String) -> String =
   src ++ "\nlet " ++ expr_sentinel_name() ++ " = " ++ expr
 
 export fn scheme_of_expr_in_source(src: String, expr: String, stdlib_root: source.StdlibRoot,
-                                   extra_roots: List String, cache) -> ExprSchemeResult !{IO} =
+                                   extra_roots: List String, cache: bundler.LoadEnv) -> ExprSchemeResult !{IO} =
   if str_find(src, "let " ++ expr_sentinel_name()) != -1 then ExprSentinelCollision
   else
     do
@@ -206,7 +250,7 @@ export fn scheme_of_expr_in_source(src: String, expr: String, stdlib_root: sourc
 # Rendered form, for hover and :type. Nothing on any failure — a caller that needs to
 # say WHY calls scheme_of_expr_in_source and matches the reason.
 export fn type_of_expr_in_source(src: String, expr: String, stdlib_root: source.StdlibRoot,
-                                 extra_roots: List String, cache) -> Maybe String !{IO} =
+                                 extra_roots: List String, cache: bundler.LoadEnv) -> Maybe String !{IO} =
   match scheme_of_expr_in_source(src, expr, stdlib_root, extra_roots, cache) with
   | ExprSchemeOk scheme -> Just(types.scheme_to_string(scheme))
   | ExprSentinelCollision -> Nothing
@@ -333,32 +377,40 @@ export fn compile_phase_check_with_roots(path: source.FilePath, stdlib_root: sou
     | bundler.BundleErr pos msg -> typed_ast.TypedErr(pos, "bundle: " ++ msg)
     | bundler.BundleOk prog ->
         do
-          cache <- module_loader.new_cache()
-          prelude_pairs <- module_loader.load_prelude_pairs(source.stdlib_root_str(stdlib_root), cache)
-          result <- checker.typecheck_typed(prog, prelude_pairs)
-          match result with
-          | typed_ast.TypedErr pos msg -> typed_ast.TypedErr(pos, "check: " ++ msg)
-          | typed_ast.TypedOk typed_prog env ->
-              match resolve.resolve_program(typed_prog, env) with
-              | resolve.ResolveErr pos msg -> typed_ast.TypedErr(pos, "check: " ++ msg)
-              | resolve.ResolveOk resolved ->
-                  # Dictionary-passing verifier (retro item 1, phase 1). A finding is a
-                  # soundness bug (a dict resolved to the wrong instance) — fatal by
-                  # default, verified clean across the corpus + compiler source before
-                  # this flip. SPROUT_VERIFY_DISPATCH_OFF downgrades it to a warning
-                  # (escape hatch for an uncovered false positive in the wild);
-                  # SPROUT_VERIFY_DISPATCH_STATS logs coverage (verified/skipped/mismatched).
-                  do
-                    _ <- report_verify_stats(resolved)
-                    match verify_dispatch.verify_program(resolved) with
-                    | Nothing -> typed_ast.TypedOk(resolved, env)
-                    | Just (vpos, vmsg) ->
-                        match env.get("SPROUT_VERIFY_DISPATCH_OFF") with
-                        | Just _ ->
-                            do
-                              _ <- eprint("[verify-dispatch] (suppressed) " ++ vmsg)
-                              typed_ast.TypedOk(resolved, env)
-                        | Nothing -> typed_ast.TypedErr(vpos, "check: dispatch-verify: " ++ vmsg)
+          load_env <- bundler.new_load_env()
+          check_bundled(prog, stdlib_root, load_env)
+
+# Everything after the bundle: typecheck, resolve, verify dispatch. Shared so that
+# checking a FILE and checking a BUFFER cannot diverge — the whole point of retiring the
+# env path is that this code has exactly one implementation.
+fn check_bundled(prog: ast.Program, stdlib_root: source.StdlibRoot, load_env: bundler.LoadEnv) -> typed_ast.TypedResult !{IO} =
+  do
+    prelude_pairs <- module_loader.load_prelude_pairs(
+      source.stdlib_root_str(stdlib_root), bundler.load_env_schemes(load_env))
+    result <- checker.typecheck_typed(prog, prelude_pairs)
+    match result with
+    | typed_ast.TypedErr pos msg -> typed_ast.TypedErr(pos, "check: " ++ msg)
+    | typed_ast.TypedOk typed_prog env ->
+        match resolve.resolve_program(typed_prog, env) with
+        | resolve.ResolveErr pos msg -> typed_ast.TypedErr(pos, "check: " ++ msg)
+        | resolve.ResolveOk resolved ->
+            # Dictionary-passing verifier (retro item 1, phase 1). A finding is a
+            # soundness bug (a dict resolved to the wrong instance) — fatal by
+            # default, verified clean across the corpus + compiler source before
+            # this flip. SPROUT_VERIFY_DISPATCH_OFF downgrades it to a warning
+            # (escape hatch for an uncovered false positive in the wild);
+            # SPROUT_VERIFY_DISPATCH_STATS logs coverage (verified/skipped/mismatched).
+            do
+              _ <- report_verify_stats(resolved)
+              match verify_dispatch.verify_program(resolved) with
+              | Nothing -> typed_ast.TypedOk(resolved, env)
+              | Just (vpos, vmsg) ->
+                  match env.get("SPROUT_VERIFY_DISPATCH_OFF") with
+                  | Just _ ->
+                      do
+                        _ <- eprint("[verify-dispatch] (suppressed) " ++ vmsg)
+                        typed_ast.TypedOk(resolved, env)
+                  | Nothing -> typed_ast.TypedErr(vpos, "check: dispatch-verify: " ++ vmsg)
 
 export fn compile_phase_lower(path: source.FilePath, stdlib_root: source.StdlibRoot) -> typed_ast.TypedResult !{IO} =
   compile_phase_lower_with_roots(path, stdlib_root, Nil)

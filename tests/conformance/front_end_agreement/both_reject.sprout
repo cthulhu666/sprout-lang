@@ -1,0 +1,7 @@
+module fixtures.both_reject
+
+# Control: a genuine type error. Both front ends must REJECT.
+# Without this, "make them agree" could be satisfied by accepting everything.
+
+fn broken() -> Int =
+  "not an int"
