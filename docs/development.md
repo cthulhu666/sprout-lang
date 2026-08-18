@@ -46,8 +46,11 @@ Common tasks:
 
 ### Platforms
 
-Supported hosts today are **macOS arm64** and **Linux x86_64/aarch64** — the two that
-CI builds and that `release.yml` publishes binaries for.
+Supported hosts today are **macOS** and **Linux**. The two workflows cover different
+slices of that, and it is worth keeping them apart: `ci.yml` runs the full `test` job on
+`ubuntu-latest` plus a `macos` job on `macos-latest`, while `release.yml` publishes
+binaries for Linux **x86_64 and aarch64** only — there is no released macOS artifact,
+and no CI job builds Linux aarch64.
 
 **Windows is a port in progress, not a supported host.** It is parked after milestone W2
 with a resume point recorded in [windows-port-v0.md](./windows-port-v0.md). What the
@@ -131,7 +134,7 @@ Drive it directly when you need a phase the recipes do not expose:
 `<stdlib-root>` is a **path**, not a flag — pass the literal `stdlib` directory.
 `--phase` accepts `bundle`, `check`, `effects`, `lower`, `recheck`, `scan-info`, and
 `dump-qualify`; [debugging.md](./debugging.md) explains what each is for.
-`just build-debug` passes `--emit-ir --debug` and then links with `clang -g -O0`.
+`just build-debug` passes `--emit-ir --debug` and then links with `clang -g -O0`. The `--debug` flag itself is currently a **no-op** — both `--emit-ir` arms dispatch identically, and the DWARF comes from `clang -g`; see [debugging.md §Debugging compiled programs](./debugging.md#debugging-compiled-programs-dwarf--lldb).
 
 Two invariants the driver guarantees, both gated by `just diagnostic-stream-smoke`:
 

@@ -123,7 +123,7 @@ for the temporary-revert sequence that breaks the catch-22.
 |------|---------|----------------|
 | Instant freshness | `just seed-stale` | Compares stored `seed-fingerprint` against current `stdlib/compiler/*.sprout` hash. No compilation. |
 | Full fixed point | `just verify-bootstrap-fixed-point` | Rebuilds stage-1 from the seed, re-emits IR for `compile_driver.sprout`, and `cmp`s against the seed body. |
-| Bundle parity | `just test` runs `tests/stdlib/test_bundler.spr` | Bundle-phase output identical between rebuilt stages. |
+| Bundle parity | `just test` runs `tests/stdlib/compiler/test_bundler.spr` | Bundle-phase output identical between rebuilt stages. |
 | Stage-2 self-compile smoke | `just test` (when stage-2 present) | Stage-2 self-compile produces no `ERROR:` lines. |
 
 A pre-commit hook (`scripts/seed_gate.sh`, wired as a PreToolUse Bash hook)
