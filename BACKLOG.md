@@ -1829,6 +1829,18 @@ Legend:
 
 ### 7) Tooling and Developer UX
 
+- [ ] `P2` **`just fmt` inserts a space after every prefix `!`, and a second one before a call's
+  argument list (2026-08-18).** Measured with `fmt_bin fmt` on a probe: `!f(x)` → `! f (x)`,
+  `!flag` → `! flag`, `!(x > 1)` → `! (x > 1)`. Unary minus is **unaffected** — `-f2(x)` round-trips
+  — so this is specific to `!` rather than to prefix operators generally. Output is idempotent
+  (`fmt --check` passes on it) and lint-clean, and it parses identically, so this is a readability
+  defect only. It matters because `!` is the *only* boolean negation Sprout has (the word `not` is a
+  parse error) and README/`docs/idiomatic-sprout.md` present `!x` as the idiom — which `just fmt`
+  then rewrites into a form nobody would write by hand. Hit while writing
+  `test_expr_type_in_source.spr`, where the assertions were restructured to `… == false` purely to
+  avoid it. Likely the same `is_word_like` space-suppression path noted in the fmt_bin entry below,
+  which records that `!` was not a prefix operator when the formatter was written.
+
 - [ ] `P2` **`just gate-audit` derives "CI runs task X" by grepping the workflow's COMMENTS as well as its `run:` lines (2026-08-15).** `justfile`'s `ci_tasks=$(grep -oE 'just +[a-z][a-z0-9-]*' "$CI_WORKFLOW" …)` matches anywhere in `.github/workflows/ci.yml`, so workflow prose invents requirements. Two failure modes, both hit for real while adding the `windows` job: a task named only in a comment counts as CI-run (`just windows-probe`, a purely local diagnostic), and the ENGLISH WORD "just" manufactures a task name — "rather than just a zero exit status" demanded a `gate` entry for a recipe called `a`. Comments were reworded to dodge it; the audit was left alone deliberately. **Fixing it is not a one-liner:** piping through `sed 's/#.*//'` first makes assertion A correct but immediately breaks assertion C, because `just test` appears in ci.yml *only inside a comment* — CI actually invokes the split `test-stdlib-core-stage1` / `test-stdlib-compiler-stage1` plus `ci-fast-gates`. So the audit's current green rests on a comment match, and the real question behind the fix is whether CI should invoke `just test` by name or `test-package-resolution`/`test-stdlib-stage1` belong in `GATE_ONLY_EXCLUDE`. Decide that first, then strip comments.
 - [ ] `P2` **`just ir-golden-diff` truncates each file's diff at 40 lines, so DoD #12's "read the
   diff before regenerating" silently shows a prefix.** `scripts/ir_golden_diff.sh:55` is
@@ -2342,6 +2354,23 @@ what the LSP actually does: `docs/language-server-roadmap.md`.
   a binary pure/effectful colour cannot express an effect variable while text can. Unverified and
   worth checking first: whether the JetBrains LSP client can map *custom* semantic token modifiers to
   text attributes at all — its public docs cover semantic tokens in one line.
+- [ ] `P2` **Hover answers only for top-level names; a local or a parameter returns null
+  (2026-08-18).** Measured on the real server: hovering `n` in `fn fizzbuzz(n: Int) -> String`
+  (`examples/fizzbuzz.sprout`) answers `"result":null`, so the editor shows nothing. Not a defect in
+  the handler — it is inherent to the mechanism. `scheme_of_expr_in_source` appends
+  `let __repl_source_value = <expr>` at **module scope**, where a local is not in scope, so the
+  typecheck fails and hover correctly declines rather than guessing. Fixing it needs a
+  position-aware lookup (the type of the name *at that point in the program*), not just a name —
+  i.e. it wants the typed AST, which is the same capability `language-server-roadmap.md` §5.1's span
+  refactor is about. Worth pairing with that rather than doing twice. Note the user-visible cost is
+  larger than it sounds: parameters and `let`-bound locals are most of what a reader points at.
+- [ ] `P3` **The unconfigured-plugin banner does not re-collect when the toolchain appears
+  (2026-08-18).** `SproutEditorNotificationProvider` decides from `SproutSettings.resolve`, and
+  `EditorNotifications.updateAllNotifications` is called only from `SproutConfigurable.apply()`. So
+  building `build/sproutd` while a project is open — without touching the settings dialog — leaves
+  the banner up until some other editor event forces re-collection. Harmless (the banner is stale,
+  never wrong-in-the-other-direction) and the natural fix is a VFS listener on the resolved sproutd
+  path, which is more machinery than the annoyance justifies today.
 - [ ] `P3` **LSP4IJ for Community-edition IntelliJ IDEs.** The JetBrains LSP API is unavailable in
   IntelliJ IDEA open-source builds and Android Studio, so the plugin's LSP layer is paid-IDE only
   (highlighting works everywhere). LSP4IJ (Red Hat, EPL-2.0, 2024.2+) would close that gap at the
@@ -3773,6 +3802,18 @@ op-classification already in place.
   default has never been measured against real handler depth — measure what depth handlers use.
 
 ### Compiler / Stdlib Misc
+
+- [ ] `P3` **Audit every other consumer of the effect's DUAL bookkeeping (2026-08-18).** A declared
+  effect is recorded twice — on the innermost arrow of the type *and* on the `Scheme` — because a
+  zero-parameter function has no arrow to hold one (`types.scheme_effect_suffix`, and the comment at
+  `types.sprout:638`). Any pass that reconstructs a type without carrying the `Scheme` therefore
+  drops the effect, **silently and only for nullary functions**. That is not hypothetical: it is
+  exactly how hover, the REPL's `:type` and the analysis service came to report every `main` in the
+  tree as pure `Unit` (fixed 2026-08-18, §7.6). The fix was local to one caller; the *class* was not
+  audited. Wanted: find the other places that read a type back out after inference or
+  re-generalisation and check each for the nullary case specifically — a parameterised function
+  cannot expose the bug, so an audit that tests only the obvious shape finds nothing. Removing the
+  duplication outright (one home for the effect) is the deeper fix and a bigger call.
 
 - [ ] `P3` **Decide when to delete the deprecated brace form of `class`/`instance` bodies (2026-08-16).** The layout form is idiomatic, the whole corpus was migrated, and the brace form is now **deprecated**: `parse_class_body`/`parse_instance_body` still accept `{ … }` (one token of lookahead), and `lint_rules.deprecated-brace-body` reports every occurrence. Since the pre-commit hook fails on any lint finding, new brace code cannot be committed — so the deprecation is already enforced and the open question is only *when the parser support goes*, not whether. Keeping the parser half costs nothing and keeps any out-of-tree source compiling. Prior art is split on ever removing it: Haskell keeps both permanently (§2.7 layout is defined as brace insertion, and the two "can be freely mixed"), Scala 3 likewise keeps optional braces; PureScript documents layout only. Deleting it is a small parser deletion, the §8.5 "Declaration syntax" rewrite, and retiring the lint rule with its tests. **Prerequisite before deleting:** the lint rule is currently the only thing pointing users at the fix, so removal should land the parse error's message with the same guidance the rule gives.
 - [x] `P2` **FIXED 2026-08-15. A duplicate top-level `fn` definition is accepted by the typechecker and only caught by the LLVM verifier.** `check_duplicate_fn_decls` now rejects it at the second declaration (`` `twice` is defined more than once in this module ``), keyed on the **name alone** — Sprout has no overloading, so a same-name/different-arity pair is two definitions of one symbol, and that case previously failed at the *call site* with an arity error because the second declaration had shadowed the first in the env. Only `FnDecl` participates: instance/class methods are `InstanceMethodImpl`/`ClassMethodSig`, so the many `fn eq` implementations across instances never collide. No bundling false positive — `decls` is post-bundler, where imported definitions carry their module prefix (confirmed by the compiler still self-compiling with the check active, across its ~40 bundled modules). Spec §5.1; fixtures `duplicate_fn_definition{,_arity}`. Original report follows. Two same-name, same-arity top-level `fn`s in one module pass `--phase check` (reports `OK`, and lists the name once in the env dump) and `--emit-ir` **exits 0**, emitting two `define` blocks for the same symbol. Nothing in the Sprout front end objects; the failure surfaces only if someone runs `opt --passes=verify`, as `invalid redefinition of function 'twice'` — an LLVM error naming a mangled symbol, with no source position and no mention of either declaration site. On the ordinary compile path the invalid IR is handed to clang instead. 5-line reproducer: two identical `fn twice(x: Int) -> Int = x + 1` above a `main` that calls it. Found the hard way while implementing the tyvar-instance-head fix — a new helper was written byte-identical to an existing one 3000 lines up in `infer.sprout`, and the *seed refresh* was what reported it. Wanted: a duplicate-definition check over top-level decls in the same pass family as `check_overlapping_instances`, reporting the second declaration's position. Note the shadowing question is adjacent but separate (prelude-vs-local shadowing, BACKLOG §prelude-bundling item) — this is two definitions in ONE module, where no shadowing rule could make it well-defined.
