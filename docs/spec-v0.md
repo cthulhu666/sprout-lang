@@ -872,8 +872,19 @@ same-named module in head position. An **in-scope value** is any binding the nam
 resolves to — a parameter, a local, *or* a module-level binding, whether declared
 by a top-level `let` in the current module or imported from another. Access is
 **total** — `p.x` always yields the field's value (no `Maybe`), in contrast to
-`dict_get`. In v0 the head must be a bare variable; access on a compound
-expression uses an intermediate `let`.
+`dict_get`.
+
+`.field` is **also a postfix operator**, so the receiver need not be a bare
+variable: `f(x).field`, `(e).field` and `Point(x = 1, y = 2).x` are all
+well-formed. A dot is read as this operator exactly when it does not continue an
+identifier — `p.x` and `stdlib.string.length` are still single tokens settled by
+the resolution rule above. The two spellings agree: both build the same
+field-access chain, so `let p = f(x) in p.y` and `f(x).y` are equivalent.
+
+Postfix `.field` binds as tightly as call application and record update, and the
+three may be interleaved, associating left to right: `f(x).y.z(w)` and
+`(p with (x = 1)).x` both parse. A `.` not followed by an identifier is a parse
+error.
 
 A **function-typed field may be called inline** — `p.render(x)` loads the closure
 from the field and applies it, using the same head-first resolution (`p` an

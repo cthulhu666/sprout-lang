@@ -1100,27 +1100,73 @@ fn parse_unary(tokens: Vec token.Token, i: Int) -> Result ParseError (ast.Expr, 
 fn parse_call(tokens: Vec token.Token, i: Int) -> Result ParseError (ast.Expr, Int) =
   do
     (expr, i2) <- parse_primary(tokens, i)
-    (called, i3) <- parse_call_rest(tokens, i2, expr)
-    parse_update_rest(tokens, i3, called)
+    parse_postfix_rest(tokens, i2, expr)
+
+# The single postfix loop.  Call application `(args)`, field access `.field` and
+# record update `with (…)` all bind tighter than every operator and all take the
+# expression to their left as their receiver, so one loop handles the three and
+# they may INTERLEAVE in any order: `f(x).y.z(w)`, `(p with (…)).x`.
+#
+# This replaces two sequential loops (all calls, then all `with`s), which could
+# not express a call applied to an update's result.  Anything the old pair
+# accepted this accepts identically — it only stops rejecting orders that were
+# previously a parse error.
+fn parse_postfix_rest(tokens: Vec token.Token, i: Int, base: ast.Expr) -> Result ParseError (ast.Expr, Int) =
+  if tok_is_symbol(tok_at(tokens, i), "(") then
+    parse_call_postfix(tokens, i, base)
+  else if is_field_postfix_at(tokens, i) then
+    parse_field_postfix(tokens, i, base)
+  else if is_update_postfix_at(tokens, i) then
+    parse_update_postfix(tokens, i, base)
+  else Ok((base, i))
+
+fn parse_call_postfix(tokens: Vec token.Token, i: Int, callee: ast.Expr) -> Result ParseError (ast.Expr, Int) =
+  do
+    (_, i2) <- expected_symbol("(", tokens, i)
+    (args, i3) <- collect_call_args(tokens, i2, Nil)
+    (_, i4) <- expected_symbol(")", tokens, i3)
+    parse_postfix_rest(tokens, i4, desugar_placeholder_call(callee, list_reverse(args), cur_pos(tokens, i)))
+
+# Postfix field access: a standalone `.` followed by an identifier
+# (docs/records-v0.md §4.3, "Scope B").  Requires the identifier so a bare
+# trailing `.` still fails as a parse error rather than being consumed silently.
+fn is_field_postfix_at(tokens: Vec token.Token, i: Int) -> Bool =
+  tok_is_symbol(tok_at(tokens, i), ".") && tok_is_ident(tok_at(tokens, i + 1))
+
+# `.` is still an ident-CONTINUE character, so the identifier after the dot may
+# itself be dotted: `mk_line().from.x` lexes as `.` then the single ident token
+# `from.x`.  The remainder is therefore split and folded here, left-to-right,
+# into the same nested `GetFieldExpr` the Scope A resolution rule builds.
+fn parse_field_postfix(tokens: Vec token.Token, i: Int, base: ast.Expr) -> Result ParseError (ast.Expr, Int) =
+  do
+    (_, i2) <- expected_symbol(".", tokens, i)
+    (name_tok, i3) <- expected_ident("a field name after '.'", tokens, i2)
+    parse_postfix_rest(tokens, i3,
+      fold_field_chain(base, token.token_text(name_tok), cur_pos(tokens, i)))
+
+fn fold_field_chain(base: ast.Expr, rest: String, pos: source.SourcePos) -> ast.Expr =
+  match string.split_once(rest, ".") with
+  | Nothing -> ast.GetFieldExpr(base, rest, pos)
+  | Just (field, more) -> fold_field_chain(ast.GetFieldExpr(base, field, pos), more, pos)
 
 # Record update postfix: `base with ( field = value, ... )` (docs/records-v0.md
 # §4.4).  Recognised only when `with` is followed by `( ident =` — a match branch
 # pattern never contains `ident =`, so this never captures the `with` of an
-# enclosing `match ... with` (which is followed by `|` or a pattern).  Loops so
-# `p with (...) with (...)` chains left-to-right.
-fn parse_update_rest(tokens: Vec token.Token, i: Int, base: ast.Expr) -> Result ParseError (ast.Expr, Int) =
-  if tok_is_keyword(tok_at(tokens, i), "with")
-     && tok_is_symbol(tok_at(tokens, i + 1), "(")
-     && tok_is_ident(tok_at(tokens, i + 2))
-     && tok_is_symbol(tok_at(tokens, i + 3), "=") then
-    do
-      (_, i2) <- expected_keyword("with", tokens, i)
-      (_, i3) <- expected_symbol("(", tokens, i2)
-      (fields, i4) <- collect_record_literal_fields(tokens, i3, Nil)
-      (_, i5) <- expected_symbol(")", tokens, i4)
-      parse_update_rest(tokens, i5,
-        ast.RecordUpdateExpr(base, list_reverse(fields), cur_pos(tokens, i)))
-  else Ok((base, i))
+# enclosing `match ... with` (which is followed by `|` or a pattern).
+fn is_update_postfix_at(tokens: Vec token.Token, i: Int) -> Bool =
+  tok_is_keyword(tok_at(tokens, i), "with")
+  && tok_is_symbol(tok_at(tokens, i + 1), "(")
+  && tok_is_ident(tok_at(tokens, i + 2))
+  && tok_is_symbol(tok_at(tokens, i + 3), "=")
+
+fn parse_update_postfix(tokens: Vec token.Token, i: Int, base: ast.Expr) -> Result ParseError (ast.Expr, Int) =
+  do
+    (_, i2) <- expected_keyword("with", tokens, i)
+    (_, i3) <- expected_symbol("(", tokens, i2)
+    (fields, i4) <- collect_record_literal_fields(tokens, i3, Nil)
+    (_, i5) <- expected_symbol(")", tokens, i4)
+    parse_postfix_rest(tokens, i5,
+      ast.RecordUpdateExpr(base, list_reverse(fields), cur_pos(tokens, i)))
 
 # Package C-b: `_`-placeholder partial application (docs/currying-and-pipe-decision-v1.md §9a).
 # A bare `_` in a call-argument position is a hole. A call carrying >=1 hole
@@ -1166,15 +1212,6 @@ fn desugar_placeholder_call(callee: ast.Expr, args: List ast.Expr, pos: source.S
     ast.LambdaExpr(hole_params(args, 0), ast.CallExpr(callee, fill_holes(args, 0, pos), pos), pos)
   else
     ast.CallExpr(callee, args, pos)
-
-fn parse_call_rest(tokens: Vec token.Token, i: Int, callee: ast.Expr) -> Result ParseError (ast.Expr, Int) =
-  match match_symbol(tokens, i, "(") with
-  | Nothing -> Ok((callee, i))
-  | Just (_, i2) ->
-      do
-        (args, i3) <- collect_call_args(tokens, i2, Nil)
-        (_, i4) <- expected_symbol(")", tokens, i3)
-        parse_call_rest(tokens, i4, desugar_placeholder_call(callee, list_reverse(args), cur_pos(tokens, i)))
 
 fn collect_call_args(tokens: Vec token.Token, i: Int, acc: List ast.Expr) -> Result ParseError (List ast.Expr, Int) =
   if tok_is_symbol(tok_at(tokens, i), ")") then Ok((acc, i))
