@@ -2264,6 +2264,31 @@ what the LSP actually does: `docs/language-server-roadmap.md`.
   can never auto-configure. Settings → Tools → Sprout works, but the only signal that it is needed is
   one transient balloon. Options: honour `SPROUT_ROOT`, remember the last working toolchain across
   projects, or make the unconfigured state persistent rather than a balloon.
+- [x] `P0` **The plugin's LSP layer never registered, so nothing worked. FIXED 2026-08-18.**
+  `sprout-lsp.xml` declared `<platformLspServerSupportProvider>`, which under
+  `defaultExtensionNs="com.intellij"` composes to `com.intellij.platformLspServerSupportProvider`
+  — an extension point no IDE declares. The platform's real name, read from RubyMine's own
+  `intellij.platform.lsp.xml`, is **`com.intellij.platform.lsp.serverSupportProvider`**, so the tag
+  must be `<platform.lsp.serverSupportProvider>`. An extension registered against a non-existent
+  extension point is silently never instantiated: `fileOpened` never ran, no server ever started,
+  and there were no diagnostics, no hover and no navigation — while syntax highlighting kept
+  working, because the language layer registers elsewhere in a different descriptor. That
+  combination is what made it look like a definition bug.
+  **Nothing in the build could catch it.** `verifyPlugin` passed against 8 IDE builds: an extension
+  tag resolving to no extension point is not an API misuse. `plugin-split-check` verified the
+  bytecode split, not registration. Two tests now cover it: `SproutLspDescriptorTest` (pins the tag
+  as text; runs everywhere) and `SproutLspRegistrationTest` (asserts the provider is in the EP's
+  extension list). Verified against a real RubyMine, where the EP then holds
+  `dev.sprout.intellij.lsp.SproutLspServerSupportProvider` beside Tailwind's, Vue's and the
+  TypeScript ones.
+- [ ] `P2` **The registration test is inert on the default build platform.** IntelliJ IDEA Ultimate
+  carries the LSP *API* — its bundled plugins register providers with it — but declares no
+  `com.intellij.modules.lsp` module, in either 2024.2.5 or 2025.1.7.2 (checked in `product-info.json`
+  and across every bundled XML descriptor). Our optional `<depends>` keys on that module, so the LSP
+  descriptor cannot load there and `SproutLspRegistrationTest` can only report itself inert. Setting
+  `SPROUT_IDE_HOME` to an installed IDE that provides it (RubyMine does) arms the assertion, but CI
+  has no such IDE. Options: find the smallest downloadable IDE that declares the module, or check the
+  module list of the verifier's IDEs directly.
 - [ ] `P2` **Diagnostic ranges are zero-width.** `lsp_driver.diag_range` sets `end == start`, so
   clients get a caret rather than an underlined token. Widening to the offending token's extent is
   small; full multi-token spans need the span refactor in `language-server-roadmap.md` §5.1.
