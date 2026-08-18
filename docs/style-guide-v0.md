@@ -242,7 +242,11 @@ Effects should remain visually explicit.
 
 Rules:
 
-- Write explicit `!{IO}` annotations on effectful functions.
+- Write explicit `!{IO}` annotations on effectful functions. Since 2026-08-16 this is
+  not merely style — a body that performs IO under a pure signature is a compile error
+  (spec §7 rule 8; see [effect-enforcement-v0.md](./effect-enforcement-v0.md)). The
+  style rule that remains yours to keep is *not over-declaring*: the compiler accepts
+  `!{IO}` on a function that does none.
 - Do not hide effectful work inside misleadingly named helpers.
 - For structuring the pure/effectful split, see
   [idiomatic-sprout.md § Keep effects at the edges](./idiomatic-sprout.md).

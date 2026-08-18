@@ -7,10 +7,16 @@ Define strict, beginner-friendly evaluation semantics for a statically typed, fu
 
 1. Function application is strict.
 - Semantics: Evaluate callee first, then arguments left-to-right. All arguments are evaluated before entering the function body.
-- Current v0 contract: calls support under-application. Multi-parameter
-  declarations still have nested-arrow types, and `f(x)` produces a function
-  value when `f` declares more parameters.
+- Current v0 contract: **Sprout is n-ary, not curried.** A call must saturate its
+  callee; under-application is a compile error (`add3(1)(2)(3)` is rejected, not a
+  partial). Partial application is explicit, via `_` placeholders in any argument
+  position — `add(_, 1)`, `add3(_, _, 3)` — which desugar to ordinary lambdas.
+  Ruled 2026-07-26 (Package C-b); `docs/spec-v0.md` §5.3 is normative for the
+  placeholder syntax, and `docs/currying-and-pipe-decision-v1.md` carries the
+  rationale for choosing n-ary over currying.
 - Rationale: Deterministic order makes programs easier to reason about and debug.
+  N-ary keeps arity errors at the call site, where they are legible, instead of
+  deferring them into a mis-shaped closure.
 - Tradeoff: Requires closure-backed partial applications and consistent runtime
   behavior across user-defined functions and builtins.
 
@@ -67,6 +73,7 @@ Define strict, beginner-friendly evaluation semantics for a statically typed, fu
 - Semantics: effectful functions are annotated explicitly, for example `fn main() -> Unit !{IO} = ...`; omitted effect annotations mean purity.
 - Rationale: This keeps runtime interaction explicit without changing Sprout's strict execution model.
 - Tradeoff: v0 currently supports closed effects with the built-in `IO` label plus restricted singleton effect variables such as `!{e}`; mixed/open rows and richer effect labels are still deferred.
+- Status: annotations are **enforced**, not documentation — a body that performs IO under a pure signature is rejected (spec §7 rule 8), and a signature may quantify at most one effect variable (rule 9). Landed 2026-08-16; see `docs/effect-enforcement-v0.md`. The rule is *inferred ⊑ declared*, so over-declaring `!{IO}` is accepted.
 
 ## v0 Positioning
 - Default evaluation strategy: strict.

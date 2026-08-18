@@ -10,7 +10,7 @@ compiler.
 ```
 bootstrap/compile_driver.ll           ← committed IR seed (text LLVM IR)
         │  just bootstrap-from-seed
-        │  (opt --passes=verify   +   clang … runtime/sprout_runtime.c)
+        │  (opt --passes=verify   +   clang … runtime/*.c)
         ▼
 build/compile_driver_bin_stage1       ← stage-1: first self-hosted binary
         │  just build-stage2
@@ -25,7 +25,7 @@ build/compile_driver_bin_stage3       ← stage-3: fixed-point verification
 
 The seed is platform-agnostic LLVM IR text. `clang` materializes the host
 target at link time, so the same `bootstrap/compile_driver.ll` produces stage-1
-binaries on every supported host (macOS arm64, Linux x86_64). The first line of
+binaries on every supported host (macOS arm64, Linux x86_64 and aarch64). The first line of
 the seed carries a `; seed-fingerprint: <sha256>` comment recording the hash of
 all `stdlib/compiler/*.sprout` sources at the time of the last `refresh-seed`.
 
@@ -45,13 +45,20 @@ beyond the LLVM target triple (which is overridden by clang at link time).
 
 ```
 opt --passes=verify bootstrap/compile_driver.ll -o /dev/null
-clang bootstrap/compile_driver.ll runtime/sprout_runtime.c -O2 \
+clang bootstrap/compile_driver.ll runtime/*.c -O2 \
     -o build/compile_driver_bin_stage1
+# on macOS, append: -framework Security -framework CoreFoundation
 ```
 
 Validates the IR then links it with the C runtime. No prior compiler binary is
 required — only `clang` and `opt` on `PATH`. This is the only stage that
 consumes the committed seed.
+
+**The runtime is three translation units**, not one: `sprout_runtime.c`,
+`sprout_poll.c`, and `sprout_scheduler.c`. Naming only `sprout_runtime.c` link-fails
+on `_http_park` / `_async_resolve`. On macOS the link also needs
+`-framework Security -framework CoreFoundation` (the justfile's `clang_extra`, empty
+on other platforms). `just bootstrap-from-seed` handles both.
 
 ### Stage 2 — Self-compiled binary
 
@@ -61,8 +68,9 @@ consumes the committed seed.
 build/compile_driver_bin_stage1 --emit-ir stdlib stdlib/compiler/compile_driver.sprout \
     > /tmp/stage2.ll
 opt --passes=verify /tmp/stage2.ll -o /dev/null
-clang /tmp/stage2.ll runtime/sprout_runtime.c -O2 \
+clang /tmp/stage2.ll runtime/*.c -O2 \
     -o build/compile_driver_bin_stage2
+# on macOS, append: -framework Security -framework CoreFoundation
 ```
 
 Stage-1 compiles `compile_driver.sprout` end-to-end (bundle → typecheck →
@@ -105,8 +113,9 @@ commit where the seed diverges from current stage-1 output.
 
 If the committed seed predates a syntax change in `parser.sprout`, `clang
 bootstrap/compile_driver.ll` still produces a working stage-1 — but that
-stage-1 cannot parse the new source. See AGENTS.md §"Bootstrap binary rebuild
-protocol" for the temporary-revert sequence that breaks the catch-22.
+stage-1 cannot parse the new source. See
+[debugging.md §2-Step Bootstrap Protocol](debugging.md#2-step-bootstrap-protocol)
+for the temporary-revert sequence that breaks the catch-22.
 
 ## Verification gates
 
@@ -129,7 +138,7 @@ by `just seed-fp-ack`.
 |----------|--------|-------------|
 | `bootstrap/compile_driver.ll` | LLVM IR text + fingerprint header | Committed seed; the trust root. |
 | `build/compile_driver_bin_stage{1,2,3}` | ELF/Mach-O native binary | Self-hosted stages. |
-| `runtime/sprout_runtime.c` | C source | GC runtime; linked by clang at each stage. |
+| `runtime/*.c` | C source | GC runtime, poller, scheduler; linked by clang at each stage. |
 | `/tmp/sprout_*.ll` (transient) | LLVM IR text | Emitted by stage-N during build-stageN+1; not persisted. |
 
 ## Trust Model
@@ -148,4 +157,9 @@ by `just seed-fp-ack`.
 The seed is the only artifact a maintainer needs to audit. Everything below
 it is mechanical reproduction.
 
-Release policy for distributing self-built binaries has not yet been decided.
+## Release artifacts
+
+`.github/workflows/release.yml` builds stage-1 on tag push for Linux x86_64 and
+aarch64, verifies the examples, and publishes the binaries as
+`sprout-linux-x86_64` and `sprout-linux-aarch64` via `softprops/action-gh-release`.
+They are the stage-1 driver, renamed — the same artifact this chain produces.

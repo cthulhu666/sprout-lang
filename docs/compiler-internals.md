@@ -337,7 +337,7 @@ stdout therefore does not merely look untidy — it *becomes* the artifact. Unti
 dev loop in AGENTS.md
 
 ```
-compile_driver_bin_stage1 --emit-ir stdlib f.spr | clang - runtime/sprout_runtime.c
+compile_driver_bin_stage1 --emit-ir stdlib f.spr | clang -x ir - runtime/*.c
 ```
 
 turned a Sprout type error into a *clang* error quoting the Sprout error back:

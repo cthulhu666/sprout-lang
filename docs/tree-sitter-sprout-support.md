@@ -5,10 +5,18 @@ index Sprout source reliably.
 
 It is an implementation brief, not a normative language spec.
 
+> **Status (2026-08-18): partially delivered.** Deliverables 1–4 below exist in
+> `tree-sitter-sprout/` — `grammar.js` (all eight top-level declaration forms, plus
+> common expression and pattern forms), the layout external scanner (`src/scanner.c`),
+> the generated `src/parser.c` / `src/grammar.json` / `src/node-types.json`, both query
+> files, and a small corpus. The grammar took approach **1** below (external scanner)
+> and is deliberately conservative. Deliverables 5–6 — indexer tests and the CBM
+> `.sprout` extension entry — are still open and live outside this repo.
+
 ## Why This Is Needed
 
-`codebase-memory-mcp` supports a fixed set of tree-sitter grammars. Sprout is
-not one of them, so `.sprout` files are currently skipped by the graph indexer.
+`codebase-memory-mcp` supports a fixed set of tree-sitter grammars. Sprout was
+not one of them, so `.sprout` files were skipped by the graph indexer.
 
 For Sprout support, CBM needs a real parser for Sprout syntax, not just an
 extension mapping.
@@ -90,8 +98,9 @@ validation. It does need stable source spans for declaration names.
 
 ## Compatibility Notes
 
-Sprout already has a hosted parser and a rich AST in Python and Sprout source.
-That is useful for validation, but CBM cannot consume it directly.
+Sprout already has a self-hosted parser and a rich AST in
+`stdlib/compiler/parser.sprout` and `stdlib/compiler/ast.sprout`. That is useful for
+validation, but CBM cannot consume it directly.
 
 So the practical path is:
 

@@ -54,8 +54,8 @@ The terms:
 - `TApp`: type application (`Maybe a`, `IO Unit`).
 - `Scheme`: generalized polymorphic type (`forall a. a -> a`).
 
-In v0, `IO a` is just another surface type constructor from the typechecker’s
-point of view. It does not trigger a distinct effect-checking phase.
+`Effect` is a first-class field on `TFunc`, not a surface type constructor, and it
+is checked — see §Effects below.
 
 ## Inference workflow
 
@@ -94,6 +94,59 @@ This is the key HM idea.
 
 This lets one function work at multiple types safely.
 
+## Effects
+
+An effect is not a type — it is a **third field on the arrow**, alongside the parameter
+and result types. `fn f(x: Int) -> Int !{IO}` is `TFunc(Int, Int, EffectIO)`; the same
+function without the annotation is `TFunc(Int, Int, EffectPure)`. `Effect` has four
+forms in `types.sprout`: `EffectPure`, `EffectIO`, `EffectVar` (the singleton variable
+`!{e}`), and `EffectRow` (which spec §7 does not define, and which exists so the checker
+can *reject* it with a good message rather than fail to parse it).
+
+Effects are inferred and enforced, and the two halves are deliberately separate.
+
+**Inference is permissive.** `unify_effects` (`unifier.sprout`) binds effect variables
+and treats `Pure` and `IO` as compatible in both directions — it never rejects a program
+on its own. At arrow positions it is wrapped by `unify_arrow_effects`, which *swallows*
+even the one error `unify_effects` can produce. That looks strange until you see why:
+Sprout's rule at a declaration boundary is **subsumption, not equality**. A pure body
+under an `!{IO}` signature is legal and idiomatic, so two arrows whose effects differ are
+not thereby a type error. Keeping rejection out of unification means turning effect
+inference on can make a *report* wrong, but never the accept/reject decision.
+
+Effect variables are quantified like type variables: `Scheme` carries
+`scheme_effect_vars` alongside `scheme_vars`, and `instantiate` freshens both.
+
+**Enforcement happens in exactly one place** — `enforce_effects` in `checker.sprout`,
+a post-pass over the declared-vs-inferred census that inference accumulated:
+
+- **Rule 8** — a body that performs IO under a pure signature is rejected:
+
+  ```
+  3:1: ERROR: check: `main.save` performs IO but is declared pure — add `!{IO}` after its return type (spec-v0.md §7 rule 8)
+  ```
+
+  Every offending declaration is named, not just the first.
+- **Rule 9** — a signature may quantify at most one effect variable, and may not
+  write a row. Two variables gets you their source spellings back, not `$e0`/`$e1`.
+
+It is a post-pass rather than an error raised at the boundary for two reasons: it reports
+*every* offending declaration in one compile (migrating a codebase is then a morning, not
+a week), and it leaves `--phase effects` — the census instrument — working, because that
+phase calls the un-enforcing entry point directly. Both paths share
+`unifier.effect_report_is_gap`, so the census cannot drift from what the checker rejects.
+
+Two consequences worth knowing:
+
+- **Over-declaring is free.** The rule is *inferred ⊑ declared*, not equality. `!{IO}` on
+  a function that turns out to be pure is accepted.
+- **`panic` is pure.** Aborting is not an effect (spec §6), so an unreachable-by-invariant
+  arm does not make its function effectful. `docs/effect-enforcement-v0.md` §6 has the
+  rationale; `docs/guidelines.md` §2 has the discipline this removes the brake from.
+
+Rows and open effects are still unsupported: an annotation is one concrete effect
+(`!{IO}`), one effect variable (`!{e}`), or omitted for purity.
+
 ## ADTs and pattern matching
 
 For:
@@ -130,13 +183,10 @@ Corrected 2026-08-13. This section previously claimed "No typeclasses/traits" an
   list. Concrete instances are devirtualized (`docs/devirtualization-v0.md`), so a test
   using a concrete type does not exercise the dictionary path at all — write a function
   polymorphic over the class to do that.
-- **Effects are represented but not enforced.** `Effect` has four forms
-  (`EffectPure`/`EffectIO`/`EffectRow`/`EffectVar`) and `TFunc` carries one, but
-  `unify_applied` discards both effect fields and `unify_effects` has zero call sites,
-  so `!{IO}` is documentation everywhere except `validate_entrypoint`'s syntactic
-  requirement that `main` declare it. Enforcement is deferred pending the effect-system
-  design pass (BACKLOG D2/W6). `docs/spec-v0.md` §7 rules 8 and 11 describe the intended
-  enforced behaviour, not today's.
+- **Effects are enforced.** Corrected 2026-08-18; this bullet previously said effects
+  were represented but not enforced and that `unify_effects` had zero call sites. Both
+  became false on 2026-08-16, when spec §7 rules 8 and 9 landed as real rejections. See
+  §Effects below for how it works.
 - **Exhaustiveness is per-column, not a full usefulness matrix.** W5 checks each column's
   value space (`Bool` needs both literals, `Int`/`String`/`Char` need a catch-all, nested
   constructor fields recurse), plus a sound top-level unreachable-branch check. A gap
@@ -160,6 +210,7 @@ found them is `docs/type-system-review-2026-08-13.md`.
 3. `infer_pattern` + `ensure_exhaustive_match`
 4. `unify`, `bind_var`, `apply`
 5. `generalize` / `instantiate`
+6. `unify_effects` / `unify_arrow_effects` (unifier) then `enforce_effects` (checker)
 
 ## Quick examples
 

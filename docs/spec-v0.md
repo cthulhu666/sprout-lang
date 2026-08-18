@@ -1544,12 +1544,15 @@ Semantics:
 - If `n <= 0`, `mod(x, n)` returns `Nothing`.
 - `pow(base, exp)` returns `Nothing` when `exp < 0`; otherwise it returns
   `Just` of the integer power.
-- In the interpreter, `Int` arithmetic currently follows host arbitrary-precision
-  integer behavior.
-- In the current native backend, `Int` values are lowered to machine `i64`
-  values. Overflow-sensitive results for `abs`, `pow`, `gcd`, and `lcm` are
-  therefore not yet fully backend-independent once computation leaves the
-  backend's current representable range.
+- `Int` is *specified* as a mathematical (arbitrary-precision) integer. No
+  implementation realizes that today: the only backend lowers `Int` to machine
+  `i64`, so arithmetic wraps.
+- Wraparound is **defined** two's-complement behavior, not undefined behavior:
+  codegen emits plain `add`/`sub`/`mul` with no `nsw`/`nuw` flags. Overflow-sensitive
+  results for `abs`, `pow`, `gcd`, and `lcm` are therefore silently wrong, not
+  memory-unsafe, once computation leaves the representable range. Whether `+`/`-`/`*`
+  should instead trap is an open policy question
+  (`docs/int-overflow-policy-decision.md`).
 - This backend range limitation is a temporary implementation constraint in v0,
   not the intended long-term meaning of `Int`.
 - The presence of `pow` and `mod` in `stdlib.math.int` does not imply implicit
@@ -2199,10 +2202,9 @@ fn main() -> Unit !{IO} =
   print("hello")
 ```
 
-`main` is the conventional program entrypoint in v0. Executable entrypoints
-accepted by `sprout run` and `sprout compile` must be a zero-argument
-`fn main() -> Unit !{IO}` or `fn main() -> Int !{IO}`, after module
-qualification is resolved. Pure `main` definitions and effect-polymorphic
+`main` is the conventional program entrypoint in v0. An executable entrypoint must
+be a zero-argument `fn main() -> Unit !{IO}` or `fn main() -> Int !{IO}`, after
+module qualification is resolved. Pure `main` definitions and effect-polymorphic
 `main` definitions are rejected at the executable boundary. Helper functions
 may still use shapes such as `Maybe a !{IO}` or `Result e a !{IO}` and be
 handled explicitly from `main`.
