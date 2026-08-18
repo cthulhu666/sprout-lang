@@ -1,0 +1,94 @@
+import stdlib.test (check_eq, check_true, run_suite)
+import testsupport.rec_fixture (Point, Line, Ops, origin, unit_line, std_ops)
+
+# Dot access whose HEAD is a module-level binding (docs/records-v0.md §4.3).
+#
+# The §4.3 rule — "if the head component is an in-scope value, the name is a
+# field-access chain on that value" — was implemented only in `infer`, which sees
+# names after the bundler has already rewritten them. For a local or a parameter
+# both passes decline to claim the dotted name, so inference's head-first rule
+# gets its chance and access works. For a MODULE-LEVEL binding it did not:
+# `bundler.qualify_value_name` branches on the dot first, hands `origin.x` to
+# module-alias lookup, which declines and returns the name unchanged — while the
+# environment holds only the bundled `testsupport.rec_fixture.origin`. The head
+# lookup then missed and the whole dotted string was looked up as one name:
+#
+#   ERROR: check: Unknown variable: origin.x
+#
+# RED before the bundler fix, GREEN after. Both an imported binding and a
+# same-module one are covered: they are the same defect, since the dotted branch
+# is taken for any module-level value, not only an imported one.
+
+# Same-module top-level binding — the half that needs no import to fail.
+let local_origin = Point(x = 5, y = 11)
+
+fn imported_x() -> Int = origin.x
+
+fn imported_y() -> Int = origin.y
+
+# Both fields of one binding, so a fix that resolves the head but drops the
+# field segment cannot pass by returning the record itself.
+fn imported_both() -> Int = origin.x * 100 + origin.y
+
+fn same_module_x() -> Int = local_origin.x
+
+fn same_module_both() -> Int = local_origin.x * 100 + local_origin.y
+
+# Two segments off an imported head: the chain must fold, not just resolve.
+fn nested_from_x() -> Int = unit_line.from.x
+
+fn nested_to_y() -> Int = unit_line.to.y
+
+# A field read off an imported binding used as a call ARGUMENT, which reaches
+# the rewrite through a different parser/inference path than a bare body.
+fn passed_as_arg() -> Int = double_it(origin.x)
+
+fn double_it(n: Int) -> Int = n * 2
+
+# Function-typed field called inline off an imported binding.
+fn field_call() -> Int = std_ops.double(21)
+
+fn field_call_str() -> String = std_ops.greet("bob")
+
+# A local parameter must keep winning in head position — the case that already
+# worked, pinned so the fix cannot regress it.
+fn from_param(p: Point) -> Int = p.x
+
+# A local `let` binding, likewise already working, likewise pinned.
+fn from_local() -> Int =
+  let p = Point(x = 8, y = 9)
+  in p.y
+
+# The head-first rule says a VALUE beats a same-named module. `string` is an
+# in-scope module name in most files; here a local binding named `line` shadows
+# nothing, but the shape that matters is that a module-qualified call still
+# resolves as qualification when no value claims the head.
+fn module_qualified_still_works() -> Int = string_length_of("abcd")
+
+fn string_length_of(s: String) -> Int = str_len(s)
+
+fn main() -> Unit !{IO} =
+  run_suite("dot access on module-level bindings", [
+    # --- imported binding as the head ---
+    check_eq("imported binding, first field", imported_x(), 3),
+    check_eq("imported binding, second field", imported_y(), 7),
+    check_eq("imported binding, both fields", imported_both(), 307),
+
+    # --- same-module top-level binding as the head ---
+    check_eq("same-module binding, first field", same_module_x(), 5),
+    check_eq("same-module binding, both fields", same_module_both(), 511),
+
+    # --- multi-segment chains ---
+    check_eq("nested chain off an imported head", nested_from_x(), 1),
+    check_eq("nested chain, second field", nested_to_y(), 40),
+
+    # --- other positions the rewrite has to reach ---
+    check_eq("field read as a call argument", passed_as_arg(), 6),
+    check_eq("function-typed field called inline", field_call(), 42),
+    check_eq("function-typed field returning String", field_call_str(), "hi bob"),
+
+    # --- regression guards for what already worked ---
+    check_eq("parameter head still wins", from_param(Point(x = 2, y = 4)), 2),
+    check_eq("local let head still wins", from_local(), 9),
+    check_true("module qualification still resolves", module_qualified_still_works() == 4)
+  ])

@@ -155,6 +155,26 @@ a local **shadows** a module name; the rule is **local-binding wins in head
 position**. Field access is **total** — `p.x` always yields the field's value
 (no `Maybe`), in contrast to `dict_get` (§7).
 
+**"In-scope value" includes module-level bindings.** A head naming a top-level
+`let` — in the current module or imported from another — is a field-access chain
+exactly like a parameter or a local. This takes two implementations rather than
+one, and the reason is phase ordering: the bundler rewrites every module-level
+name to its canonical qualified form *before* inference runs, so by then the head
+exists in the environment only under that canonical name and inference's own
+head-first lookup cannot find it. The rule is therefore applied twice —
+`bundler.dotted_value_field_access` for module-level heads (where the canonical
+name is still known) and `infer.infer_var_or_field` for locals and parameters
+(which the bundler does not rewrite). Both split with `string.split_once` and
+build the same `GetFieldExpr` chain. Before this was fixed, `origin.x` on an
+imported binding failed with `Unknown variable: origin.x`; access appeared to
+work only because, for a local, *both* passes decline to claim the dotted name.
+
+The bundler's copy is consulted only after module qualification has declined, so
+it can only affect names that would otherwise fail to resolve. One consequence
+worth knowing: for a dotted name qualification *does* claim, module qualification
+wins, whereas inference's rule would prefer the value. That divergence predates
+the rule and is tracked separately.
+
 **Scope A (v0):** the head must be a bare variable, so access on a compound
 expression is written with an intermediate binding:
 

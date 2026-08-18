@@ -868,9 +868,12 @@ Because the lexer absorbs `.` into identifiers, `p.x` and `p.from.x` lex as a
 single dotted token, resolved by a name-resolution rule: split on `.`; if the
 head is an in-scope value the name is a field-access chain on it, otherwise it is
 a module qualification (`stdlib.string.length`). A local binding wins over a
-same-named module in head position. Access is **total** — `p.x` always yields the
-field's value (no `Maybe`), in contrast to `dict_get`. In v0 the head must be a
-bare variable; access on a compound expression uses an intermediate `let`.
+same-named module in head position. An **in-scope value** is any binding the name
+resolves to — a parameter, a local, *or* a module-level binding, whether declared
+by a top-level `let` in the current module or imported from another. Access is
+**total** — `p.x` always yields the field's value (no `Maybe`), in contrast to
+`dict_get`. In v0 the head must be a bare variable; access on a compound
+expression uses an intermediate `let`.
 
 A **function-typed field may be called inline** — `p.render(x)` loads the closure
 from the field and applies it, using the same head-first resolution (`p` an

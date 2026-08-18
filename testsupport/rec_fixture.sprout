@@ -58,3 +58,20 @@ export fn mk_box(n: Int) -> Box Int = Box(val = n, label = "int")
 export fn hold(c: Cfg) -> Holder = Holder(c)
 
 export fn mk_tok(n: Int) -> Tok = Tok(id = n, tag = "t")
+
+# Module-level `let` bindings, for tests/stdlib/test_dot_access_module_level.spr.
+# A dotted name whose head is one of these is a field-access chain, not a module
+# qualification (docs/records-v0.md §4.3). Only a binding — not a function — can
+# exercise that, because a call's result is a Scope B receiver.
+export let origin = Point(x = 3, y = 7)
+
+# Nested, so the chain has to fold more than one segment off an imported head.
+export let unit_line = Line(from = Point(x = 1, y = 2), to = Point(x = 30, y = 40))
+
+# A function-typed field reached off an imported binding: the callee rewrite is a
+# separate path from plain access (infer.dotted_field_callee).
+export let std_ops = Ops(double = fixture_double, greet = fixture_greet)
+
+fn fixture_double(n: Int) -> Int = n * 2
+
+fn fixture_greet(s: String) -> String = `hi ${s}`

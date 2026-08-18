@@ -994,6 +994,60 @@ fn qualify_qualified_value(ctx: ResolveCtx, name: String) -> String =
           | Nothing -> name
           | Just canonical -> canonical
 
+# Dot access whose head is a MODULE-LEVEL value (docs/records-v0.md §4.3).
+#
+# §4.3's rule — "if the head component is an in-scope value, the name is a
+# field-access chain on that value" — is implemented in `infer.infer_var_or_field`,
+# but by the time inference runs the bundler has already rewritten every
+# module-level name to its canonical form, so the head is in the environment only
+# under THAT name and the rule's head lookup misses.  `origin.x` then reached
+# `infer_var` as one undivided string and failed with `Unknown variable: origin.x`.
+# The rule has to be applied here, the phase that still knows the head's canonical
+# name.  Locals and parameters are deliberately left to infer's copy of the rule:
+# for those the bundler has nothing to rewrite, and access already works.
+#
+# Consulted ONLY after module qualification declined, which makes this additive —
+# every name it rewrites is one that fails to resolve today.  The two phases
+# disagree about precedence for names qualification DOES claim (there, module
+# wins; at inference, the value would); that divergence predates this rule and is
+# left alone deliberately, since changing it would change shadowing semantics.
+fn dotted_value_field_access(
+  ctx: ResolveCtx,
+  scope: List String,
+  name: String,
+  pos: source.SourcePos
+) -> Maybe ast.Expr =
+  if str_find(name, ".") == -1 then Nothing
+  else if str_list_member(name, scope) then Nothing
+  else if qualify_qualified_value(ctx, name) != name then Nothing
+  else
+    match string.split_once(name, ".") with
+    | Nothing -> Nothing
+    | Just (head, rest) ->
+        if str_list_member(head, scope) then Nothing
+        else
+          match module_level_value(ctx, head) with
+          | Nothing -> Nothing
+          | Just canonical ->
+              Just(build_field_chain(ast.VarExpr(canonical, pos), rest, pos))
+
+# The head's canonical name: this module's own top-level values first, then names
+# imported unqualified.  Same two dictionaries `qualify_value_name` consults, in
+# the same order, so a head resolves here exactly when the bare name would.
+fn module_level_value(ctx: ResolveCtx, head: String) -> Maybe String =
+  match dict_get(head, ctx_value_locals(ctx)) with
+  | Just canonical -> Just(canonical)
+  | Nothing -> dict_get(head, ctx_unqual_values(ctx))
+
+# Fold a dotted remainder `from.x` into nested GetFieldExpr on `base`.  Mirrors
+# `infer.build_field_chain` and splits with the same `string.split_once`, so the
+# two phases cannot disagree about where a chain divides — that disagreement is
+# the defect this rule exists to close.
+fn build_field_chain(base: ast.Expr, rest: String, pos: source.SourcePos) -> ast.Expr =
+  match string.split_once(rest, ".") with
+  | Nothing -> ast.GetFieldExpr(base, rest, pos)
+  | Just (field, more) -> build_field_chain(ast.GetFieldExpr(base, field, pos), more, pos)
+
 fn qualify_pattern(ctx: ResolveCtx, p: ast.Pattern) -> ast.Pattern =
   match p with
   | ast.ConstructorPattern name args pos ->
@@ -1050,7 +1104,9 @@ fn qualify_expr_list(ctx: ResolveCtx, scope: List String, exprs: List ast.Expr) 
 fn qualify_expr(ctx: ResolveCtx, scope: List String, expr: ast.Expr) -> ast.Expr =
   match expr with
   | ast.VarExpr name pos ->
-      ast.VarExpr(qualify_value_name(ctx, scope, name), pos)
+      match dotted_value_field_access(ctx, scope, name, pos) with
+      | Just chain -> chain
+      | Nothing -> ast.VarExpr(qualify_value_name(ctx, scope, name), pos)
   | ast.IntExpr _ _ -> expr
   | ast.FloatExpr _ _ -> expr
   | ast.BoolExpr _ _ -> expr
