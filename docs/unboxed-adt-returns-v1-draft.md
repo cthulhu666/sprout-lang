@@ -57,9 +57,13 @@ Allowlisted 12 functions (all have C `_unboxed` implementations):
 > 2026-08-19 — they were the only two whose `_unboxed` variant ALLOCATED, which
 > forced the runtime's CPR block to weaken its GC invariant to "allocation must be
 > last" for a measured gain of ~0.8% on a `regexec`-dominated call. Every
-> remaining entry allocates nothing. The membership of both lists (and the
-> matching `declare` block in `ir_lowering.sprout`) is pinned by
-> `tests/stdlib/test_ir_codegen_cpr_maybe_externs.spr`.
+> remaining entry triggers no collection. The membership of both lists is pinned
+> by `tests/stdlib/test_ir_codegen_cpr_maybe_externs.spr`: all eight survivors are
+> asserted to emit `IRCallUnboxed2`, the two removed names are asserted to appear
+> nowhere, and the eight `declare` lines in `ir_lowering.sprout` are asserted
+> positively — that last part matters because checking only for the ABSENCE of the
+> removed names would stay green if a survivor were dropped from the declare block
+> while remaining in the allow-list, a drift that otherwise surfaces at link time.
 
 Codegen: `emit_match_unboxed_adt` routes `match f(args) with` to
 `call { i64, i64 } @f_unboxed(...)` + `extractvalue` (no `sprout_tag`/`sprout_field`).
