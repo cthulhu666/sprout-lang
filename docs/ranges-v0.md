@@ -203,13 +203,29 @@ is needed for the fix.
 
 ### Package B — symmetry now, if you want it despite §4's recommendation
 
-Requires direction in the value, which two fields cannot hold alongside emptiness. Then:
+Requires direction in the value, which two fields cannot hold alongside emptiness. Everything in
+Package A, plus:
 
-- `IntRangeVal` gains `long long step` (`runtime/sprout_runtime.c:122`)
-- one new accessor builtin `int_range_step` + an `APPROVED_BUILTINS` justification — **requires
-  explicit approval** per AGENTS.md "Builtin vs Stdlib" rules 4-6
-- `range_up(a,b)` / `range_down(a,b)`; bare `range` retired (§3c); `range_step` stays public
-- every in-tree `range(` call site renamed (~12), plus a rename sweep in uncharted-suns
+- `IntRangeVal` gains `long long step` (`runtime/sprout_runtime.c:122`). The GC block size derives
+  from `sizeof` (`:1081`) and the type has zero pointer slots (`:1876`), so tracing stays at zero
+  traced children — no GC change.
+- `int_range` gains a step parameter, or a new 3-arg extern joins it. Either way
+  `runtime/APPROVED_BUILTINS:80-82` is amended and **explicit approval is required** per AGENTS.md
+  "Builtin vs Stdlib" rules 4-6.
+- **One new accessor builtin** `int_range_step`, peer to the existing `int_range_start`/`int_range_end`
+  — also approval-gated.
+- The hardcoded declare at `stdlib/compiler/ir_lowering.sprout:557`
+  (`declare i64 @int_range(i64, i64)`) must match the new arity, and the `IntRangeExpr` lowering
+  (`ast_to_ir.sprout:1069`) must pass `step = 1`.
+- `range_up(a,b)` / `range_down(a,b)`; bare `range` retired (§3c); `range_step` stays public and
+  becomes load-bearing again for the walkers.
+- Every in-tree `range(` call site renamed (~12), plus a rename sweep in uncharted-suns.
+- A prelude extern signature change forces a **full `just refresh-seed`**, not the `seed-fp-ack`
+  bypass — see the AGENTS.md caveat on new prelude externs adding `declare` lines to the seed.
+
+**This is a sketch, not a costed plan.** If it is chosen, it gets its own design section before
+implementation; the list above is what is currently known to be required, not a guarantee of
+completeness.
 
 **Do not** implement Package B as a native Sprout record. Appendix B records why, with the
 load-bearing fact that kills it.
@@ -268,10 +284,7 @@ initially suggested otherwise and why that reading was wrong.
 
 ## 7. Error-message impact
 
-One new diagnostic, modelled on clippy's `reversed_empty_ranges` (§3b). It fires only when **both
-operands are integer literals** and `hi < lo` — purely syntactic, no type information required.
-
-Proposed text:
+One new diagnostic, following the convention `spec-v0.md:1632` already states (§3b). Proposed text:
 
 ```
 ERROR: check: range `5..1` is empty, so it yields no values
@@ -279,22 +292,42 @@ ERROR: check: range `5..1` is empty, so it yields no values
   to iterate downward, reverse an ascending range instead
 ```
 
-**Where it lives — follow the existing precedent.** The negative-literal-shift rejection (§3b) is
-implemented as an `Err` returned from translation in `stdlib/compiler/ast_to_ir.sprout:4924-4926`.
-The reversed literal range should be rejected the same way and in the same place, from the `TRange`
-arm (`:1069`), so the two "statically known to be wrong" diagnostics live together and behave
-identically.
+### Scope — what it does and does not catch
 
-Rejected alternatives:
+It fires **only when both bounds are integer literals** and `hi < lo`. Purely syntactic; no type
+information needed.
 
-- `stdlib/compiler/lint_rules.sprout` — cheapest, and it already walks `ast.IntRangeExpr` at
-  `:126`, `:192`, `:433`, `:553` with `LintFinding` (`:15-19`) carrying line/col/rule-id/message.
-  **But lint is a separate `fmt_bin lint` subcommand (`justfile:80`), not part of compilation**, so a
-  finding would not block a build. A diagnostic that only fires when someone runs `just lint` does
-  not prevent the bug this document exists to prevent — and it would diverge from how the shift
-  precedent behaves.
-- The **check/infer phase** — better source positions, but it would put two sibling diagnostics in
-  two different phases for no gain.
+It deliberately does **not** fire on a computed range. `range(0, n - 1)` at `n == 0` stays silent and
+yields empty — that is the whole point of §2 goal 1, and warning on it would make the fixed idiom
+unusable.
+
+**Both spellings must be covered.** `5..1` is an `ast.IntRangeExpr`, but `range(5, 1)` is an ordinary
+call to a prelude function and is *not* that node. Catching only the syntax form would be a
+half-diagnostic — and since most in-tree code uses `range(a, b)` rather than `a..b`, it would be the
+less common half. The call form is recognised by canonical callee name, the same way
+`recognize_string_builtin("str_concat")` already special-cases prelude functions. Both forms produce
+the same message.
+
+### Where it lives — the check phase, *not* where the precedent lives
+
+The negative-literal-shift rejection is implemented as an `Err` from translation in
+`stdlib/compiler/ast_to_ir.sprout:4924-4926`. **Do not copy that location**, for a reason worth
+recording: `tests/conformance/` categories are keyed to *phases* — `type_error/` is `--phase check`
+output, `parse_error/` is the parse phase, `executable_error/` is `validate_entrypoint`
+(`tests/conformance/README.md:12-15`) — and **there is no category for an `ast_to_ir`-phase
+rejection**. Consistently, the shift precedent has **no conformance fixture at all** (grepped: zero
+hits for `bit_shl`/`shift count` under `tests/conformance/`). That is a coverage gap in the
+precedent, not a pattern to reproduce.
+
+The check phase gives the diagnostic a harness that is already gated in `ci-fast-gates`, plus better
+source positions. So this design follows the *convention* the spec states while diverging from the
+*location* the one existing instance chose.
+
+Rejected alternative: `stdlib/compiler/lint_rules.sprout` — cheapest, and it already walks
+`ast.IntRangeExpr` at `:126`, `:192`, `:433`, `:553` with `LintFinding` (`:15-19`) carrying
+line/col/rule-id/message. **But lint is a separate `fmt_bin lint` subcommand (`justfile:80`), not
+part of compilation**, so a finding would not block a build. A diagnostic that only fires when
+someone runs `just lint` does not prevent the bug this document exists to prevent.
 
 ---
 
@@ -345,8 +378,11 @@ Per Definition of Ready #2/#3, these are written and confirmed failing before im
 9. Boundary preserved: `range(1, 5)` still ascends over five elements
 10. `to_string(range(5, 1)) == "IntRange(5, 1)"` — bounds stored as given
 
-**New** — a conformance fixture for the reversed-literal diagnostic under
-`tests/conformance/type_error/` (or the lint corpus, per §7's sub-decision).
+**New** — `tests/conformance/type_error/reversed_literal_range.spr` plus its `.err` file, per §7.
+Two fixtures, since §7 requires both spellings to be caught: one for `5..1` and one for
+`range(5, 1)`. A positive fixture under `tests/conformance/run/` must also confirm that a *computed*
+backwards range is accepted silently and yields empty — otherwise nothing guards against the
+diagnostic being widened to catch the case §2 goal 1 exists to make legal.
 
 **Updated**:
 
@@ -441,9 +477,11 @@ not regress bare files. Its only cost is one accessor builtin needing approval.
 
 ---
 
-## Appendix C — adjacent findings, filed separately
+## Appendix C — adjacent findings
 
-Turned up while surveying; none is in scope here.
+Turned up while surveying; none is in scope here. **All five are filed under `BACKLOG.md`
+§"Compiler / Stdlib Misc"** with the detail and reproduction steps; the summaries below exist so a
+reviewer of this document does not have to cross-reference to see what was noticed and set aside.
 
 1. **`examples/digit_recognizer/recognizer.sprout:256`** uses `range(0, total_epochs)`, which is
    inclusive and therefore runs `total_epochs + 1` epochs — inconsistent with the `upto(n)`
@@ -456,7 +494,11 @@ Turned up while surveying; none is in scope here.
    exclusive, contrary to every other `IntRange` operation. Currently dormant: `match_from_range`
    (`:32`) projects both fields into a `Match` ADT before anything could misread them. It becomes
    actively misleading once `range_count` means "elements in a closed interval".
-4. **`range_to_vec`** (`prelude.sprout:203`) is O(n²) via copying `vec_append`, already noted at
+4. **The negative-literal shift rejection has no conformance fixture**, because no conformance
+   category covers an `ast_to_ir`-phase rejection. This is the gap §7 declines to reproduce.
+5. **`range_to_vec`** (`prelude.sprout:203`) is O(n²) via copying `vec_append`, already noted at
    `tests/stdlib/test_vec_sort_stacksafe.spr:10`. Worth a doc note.
-5. **No `range_map`**, and none should be added until a caller asks —
-   `range_to_list |> list_map` covers it.
+
+Deliberately **not** filed: there is no `range_map`, and none should be added until a caller asks
+for one — `range_to_list |> list_map` covers it, and the repo's convention is to add on demand
+rather than for symmetry. Recorded here so a future reader does not read its absence as an oversight.

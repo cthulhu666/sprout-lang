@@ -3803,6 +3803,50 @@ op-classification already in place.
 
 ### Compiler / Stdlib Misc
 
+Five items below were surfaced while designing `docs/ranges-v0.md` (2026-08-19) and are recorded
+there in its Appendix C. None is in scope for that change.
+
+- [ ] `P2` **`regex_find_range` stores a HALF-OPEN span in an inclusive-range type.** POSIX
+  `rm_eo` is exclusive (`runtime/sprout_runtime.c:5731`), and `stdlib/regex.sprout:53-55` slices the
+  suffix starting *at* `end` — treating it as exclusive, contrary to every other `IntRange`
+  operation, all of which treat `end` as inclusive. **Currently dormant**, and verified so:
+  `match_from_range` (`regex.sprout:32`) is the sole consumer and projects both fields into a
+  `Match Int Int` ADT before anything could misread them, and a zero-length match
+  (`rm_so == rm_eo`) still slices correctly. It becomes actively misleading once `range_count` means
+  "elements in a closed interval" (`docs/ranges-v0.md` §5). Fix: `regex_find_range` returns
+  `Maybe (Int, Int)`, or the two range externs move under an opaque carrier name local to
+  `stdlib/regex.sprout`. Zero public API change either way — `find_first` already returns
+  `Maybe Match`. Note this also removes the last C-side constructor of `IntRange` besides
+  `int_range` itself (`sprout_alloc_range_val` has exactly three callers: `:2860`, `:5538`, `:5729`).
+- [ ] `P3` **`examples/digit_recognizer/recognizer.sprout:256` looks like an off-by-one.** It uses
+  `range_each(epoch_step, range(0, total_epochs))`, which is inclusive and therefore runs
+  `total_epochs + 1` epochs. Every other loop in the same file goes through
+  `upto(n) = range(0, n - 1)` (`:44`, used at `:90, 98, 175, 176, 185, 216, 217`), so `:256` is
+  inconsistent with the file's own convention. Confirm intent before changing — an extra epoch is
+  not observably wrong output, which is why it has survived.
+- [ ] `P3` **`lo..hi` with unspaced identifier operands does not compile.** Reproduced:
+  `range_count(lo..hi)` yields ``ERROR: check: Cannot infer the record type of `.hi` `` because a dot
+  inside an identifier run is absorbed by the lexer, so `lo..hi` is one dotted token rather than
+  three. `lo .. hi` and `0..n` both work; verified that no in-tree code uses the broken spelling.
+  **`docs/int-ranges-v1-draft.md` §7 uses it in its own example**, so the draft is wrong as written.
+  Not a regression from the postfix-`.` work (a dotted ident `lo..hi` never resolved); only the error
+  message changed. Fix is either a lexer special-case for `..` inside an ident run, or correcting the
+  draft and documenting the spacing requirement.
+- [ ] `P3` **The negative-literal shift-count rejection has no conformance fixture.**
+  `docs/spec-v0.md:1633` states it normatively ("a negative *literal* count is rejected at compile
+  time") and `stdlib/compiler/ast_to_ir.sprout:4924-4926` implements it, but grepping
+  `tests/conformance/` for `bit_shl`/`shift count` returns zero hits. The gap is structural, not an
+  oversight: the conformance categories are keyed to phases — `type_error/` is `--phase check`,
+  `parse_error/` the parse phase, `executable_error/` `validate_entrypoint`
+  (`tests/conformance/README.md:12-15`) — and **there is no category for an `ast_to_ir`-phase
+  rejection**. Either add one, or move the rejection into the check phase where a harness already
+  exists. `docs/ranges-v0.md` §7 chose the latter for its own diagnostic rather than reproduce this
+  gap.
+- [ ] `P3` **`range_to_vec` is O(n²).** `stdlib/prelude.sprout:203` folds via copying `vec_append`,
+  already acknowledged at `tests/stdlib/test_vec_sort_stacksafe.spr:10`. Wants a doc note on the
+  function, or a `vec_from_list` single-allocation rewrite mirroring the one at `prelude.sprout:314`.
+  Not a redesign.
+
 - [ ] `P3` **Audit every other consumer of the effect's DUAL bookkeeping (2026-08-18).** A declared
   effect is recorded twice — on the innermost arrow of the type *and* on the `Scheme` — because a
   zero-parameter function has no arrow to hold one (`types.scheme_effect_suffix`, and the comment at
