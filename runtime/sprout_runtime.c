@@ -5425,9 +5425,15 @@ static BSTNode*  bst_nth_node(long long h, long long n);
  * Each _unboxed variant mirrors its boxed counterpart but returns SproutUnboxed2
  * instead of a heap-allocated Just/Nothing.  The codegen emits calls to these
  * when a match immediately scrutinises the return value (direct-match CPR path).
- * GC safety: none of these call sprout_makeN, so no GC can trigger after the
- * last allocation returns.  The caller pushes extracted field0 as a temp root
- * in the Just arm before any further GC-triggering call (see emit_match_unboxed_adt).
+ * GC safety: no GC can trigger AFTER the last allocation returns — that is the
+ * actual invariant, and it is what makes returning a bare i64 pointer safe.  Most
+ * of these allocate nothing at all; `regex_find_match_unboxed` does call
+ * sprout_make2, but it is the final allocation in the function and only
+ * cached_tag_just() (a linear scan of the ctor table, no allocation) runs after it.
+ * A variant that allocated, then called something else that could allocate, would
+ * break this — the earlier pointer would be unrooted across the second trigger.
+ * The caller pushes extracted field0 as a temp root in the Just arm before any
+ * further GC-triggering call (see emit_match_unboxed_adt).
  * NOTE: if a future moving GC is added, the returned i64 pointers must be
  * re-rooted via handles before any allocation; the non-moving invariant makes
  * this safe today. */
