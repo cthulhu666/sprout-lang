@@ -103,6 +103,24 @@ fn main() -> Unit !{IO} =
     check_eq("extract_word: digits continue an identifier",
       lsp.extract_word("read_u32_be(b)", 6), "read_u32_be"),
 
+    # `..` is the range operator, not part of a name — hover on either endpoint
+    # of `lo..hi` must resolve that endpoint. It used to extract the whole
+    # `lo..hi`, which resolves to nothing (BACKLOG P1, 2026-08-19).
+    check_eq("extract_word: left endpoint of a range",
+      lsp.extract_word("lo..hi", 0), "lo"),
+    check_eq("extract_word: right endpoint of a range",
+      lsp.extract_word("lo..hi", 4), "hi"),
+    check_eq("extract_word: right endpoint, cursor on its last char",
+      lsp.extract_word("lo..hi", 5), "hi"),
+    # A field path either side of the operator: the field dots still join.
+    check_eq("extract_word: field path left of a range",
+      lsp.extract_word("p.x..p.y", 1), "p.x"),
+    check_eq("extract_word: field path right of a range",
+      lsp.extract_word("p.x..p.y", 6), "p.y"),
+    # A single dot is unaffected — the guard needs a dot ADJACENT to a dot.
+    check_eq("extract_word: lone dot still joins a qualified name",
+      lsp.extract_word("a.b", 2), "a.b"),
+
     # extract_hover_params — exercises every failure branch individually,
     # plus the well-formed happy path.
     check_eq("extract_hover_params: well-formed accepted",

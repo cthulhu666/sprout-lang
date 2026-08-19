@@ -673,9 +673,12 @@ reviewer of this document does not have to cross-reference to see what was notic
 1. **`examples/digit_recognizer/recognizer.sprout:256`** uses `range(0, total_epochs)`, which is
    inclusive and therefore runs `total_epochs + 1` epochs — inconsistent with the `upto(n)`
    convention the same file uses at `:90, 98, 175, 176, 185, 216, 217`. Likely an off-by-one.
-2. **`lo..hi` unspaced does not compile**: `ERROR: check: Cannot infer the record type of '.hi'`,
-   because a dot inside an identifier run is absorbed by the lexer. `lo .. hi` and `0..n` both work.
-   `docs/int-ranges-v1-draft.md` §7 uses the broken spelling in its own example.
+2. **`lo..hi` unspaced did not compile** — `ERROR: check: Cannot infer the record type of '.hi'`,
+   because a dot inside an identifier run was absorbed by the lexer, while `lo .. hi` and `0..n`
+   both worked. **Fixed 2026-08-19**: an identifier run now ends before a `..` (spec §2), and the
+   formatter emits the tight `a..b` on both sides. Was the one finding here that grew teeth — the
+   formatter rewrote the working spaced form into the broken one, so "compiles" and "fmt-clean"
+   were unsatisfiable together for that spelling.
 3. **`regex_find_range` puts a half-open span in an inclusive-range type.** POSIX `rm_eo` is
    exclusive, and `stdlib/regex.sprout:53-55` slices the suffix starting *at* `end` — treating it as
    exclusive, contrary to every other `IntRange` operation. Currently dormant: `match_from_range`

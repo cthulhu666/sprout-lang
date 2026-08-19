@@ -47006,51 +47006,164 @@ entry:
   ret i64 %t$4
 }
 
-define i64 @stdlib.compiler.lexer.is_ident_continue(i64 %ch) {
-entry:
-  %t$0 = call i64 @stdlib.string.is_ident_continue(i64 %ch)
-  %t$7 = trunc i64 %t$0 to i1
-  br i1 %t$7, label %then_1, label %else_1
-then_1:
-  %t$3 = add i64 0, 1
-  br label %join_1
-else_1:
-  %t$4 = add i64 0, 46
-  %t$5 = icmp eq i64 %ch, %t$4
-  %t$6 = zext i1 %t$5 to i64
-  br label %join_1
-join_1:
-  %t$2 = phi i64 [%t$3, %then_1], [%t$6, %else_1]
-  ret i64 %t$2
-}
-
-define i64 @__sprout_ir_eta_stdlib.compiler.lexer.is_ident_continue_26(i64 %env$, i64 %a0) {
+define i64 @__sprout_ir_eta_stdlib.string.is_ident_continue_26(i64 %env$, i64 %a0) {
 entry:
   %t$0 = alloca i64
   store i64 %a0, ptr %t$0
   %t$1 = call i64 @sprout_gc_push_i64_root(ptr %t$0)
-  %ret = call i64 @stdlib.compiler.lexer.is_ident_continue(i64 %a0)
+  %ret = call i64 @stdlib.string.is_ident_continue(i64 %a0)
   %t$2 = call i64 @sprout_gc_pop_roots(i64 1)
   ret i64 %ret
 }
 
 define i64 @stdlib.compiler.lexer.scan_ident_end(i64 %cursor) {
 entry:
-  %t$2 = alloca i64
-  store i64 %cursor, ptr %t$2
-  %t$3 = call i64 @sprout_gc_push_i64_root(ptr %t$2)
+  %t$3 = alloca i64
+  store i64 %cursor, ptr %t$3
+  %t$4 = call i64 @sprout_gc_push_i64_root(ptr %t$3)
   %t$0 = call i64 @sprout_alloc_closure(i64 8, i64 1)
   %t$0$raw = inttoptr i64 %t$0 to ptr
-  store ptr @__sprout_ir_eta_stdlib.compiler.lexer.is_ident_continue_26, ptr %t$0$raw
-  %t$4 = alloca i64
-  store i64 %t$0, ptr %t$4
-  %t$5 = call i64 @sprout_gc_push_i64_root(ptr %t$4)
+  store ptr @__sprout_ir_eta_stdlib.string.is_ident_continue_26, ptr %t$0$raw
+  %t$5 = alloca i64
+  store i64 %t$0, ptr %t$5
+  %t$6 = call i64 @sprout_gc_push_i64_root(ptr %t$5)
   %t$1 = call i64 @stdlib.compiler.source.take_while(i64 %cursor, i64 %t$0)
-  %t$6 = call i64 @sprout_gc_pop_roots(i64 2)
-  ret i64 %t$1
+  %t$7 = call i64 @sprout_gc_pop_roots(i64 2)
+  %t$8 = alloca i64
+  store i64 %t$1, ptr %t$8
+  %t$9 = call i64 @sprout_gc_push_i64_root(ptr %t$8)
+  %t$2 = call i64 @stdlib.compiler.lexer.scan_ident_dotted(i64 %t$1)
+  %t$10 = call i64 @sprout_gc_pop_roots(i64 1)
+  ret i64 %t$2
 }
 
-define i64 @__sprout_ir_eta_stdlib.string.is_ascii_digit_27(i64 %env$, i64 %a0) {
+define i64 @__sprout_ir_eta_stdlib.string.is_ident_continue_27(i64 %env$, i64 %a0) {
+entry:
+  %t$0 = alloca i64
+  store i64 %a0, ptr %t$0
+  %t$1 = call i64 @sprout_gc_push_i64_root(ptr %t$0)
+  %ret = call i64 @stdlib.string.is_ident_continue(i64 %a0)
+  %t$2 = call i64 @sprout_gc_pop_roots(i64 1)
+  ret i64 %ret
+}
+
+define i64 @stdlib.compiler.lexer.scan_ident_dotted(i64 %run_end$in) {
+entry:
+  %t$24 = alloca i64
+  store i64 %run_end$in, ptr %t$24
+  %t$25 = call ptr @llvm.stacksave()
+  br label %tco_loop
+tco_loop:
+  %run_end = load i64, ptr %t$24
+  %t$26 = alloca i64
+  store i64 %run_end, ptr %t$26
+  %t$27 = call i64 @sprout_gc_push_i64_root(ptr %t$26)
+  %t$0 = call i64 @stdlib.compiler.source.next(i64 %run_end)
+  %t$1 = call i64 @sprout_tag(i64 %t$0)
+  %t$28 = call i64 @sprout_gc_pop_roots(i64 1)
+  br label %arm_0_2
+arm_0_2:
+  %t$4 = add i64 0, 0
+  %t$5 = icmp eq i64 %t$1, %t$4
+  br i1 %t$5, label %body_0_2, label %arm_1_2
+body_0_2:
+  br label %join_2
+arm_1_2:
+  %t$6 = add i64 0, 1
+  %t$7 = icmp eq i64 %t$1, %t$6
+  br i1 %t$7, label %body_1_2, label %arm_2_2
+body_1_2:
+  %t$8 = call i64 @sprout_field(i64 %t$0, i64 0)
+  %t$9$ptr = inttoptr i64 %t$8 to ptr
+  %t$9$gep = getelementptr i64, ptr %t$9$ptr, i64 0
+  %t$9 = load i64, ptr %t$9$gep
+  %t$10$ptr = inttoptr i64 %t$8 to ptr
+  %t$10$gep = getelementptr i64, ptr %t$10$ptr, i64 1
+  %t$10 = load i64, ptr %t$10$gep
+  %t$11 = add i64 0, 46
+  %t$12 = icmp ne i64 %t$9, %t$11
+  %t$13 = zext i1 %t$12 to i64
+  %t$23 = trunc i64 %t$13 to i1
+  br i1 %t$23, label %then_14, label %else_14
+then_14:
+  br label %join_14
+else_14:
+  %t$29 = alloca i64
+  store i64 %t$10, ptr %t$29
+  %t$30 = call i64 @sprout_gc_push_i64_root(ptr %t$29)
+  %t$31 = alloca i64
+  store i64 %run_end, ptr %t$31
+  %t$32 = call i64 @sprout_gc_push_i64_root(ptr %t$31)
+  %t$16 = call i64 @stdlib.compiler.lexer.peek_is_dot(i64 %t$10)
+  %t$22 = trunc i64 %t$16 to i1
+  %t$33 = call i64 @sprout_gc_pop_roots(i64 2)
+  br i1 %t$22, label %then_17, label %else_17
+then_17:
+  br label %join_17
+else_17:
+  %t$34 = alloca i64
+  store i64 %t$10, ptr %t$34
+  %t$35 = call i64 @sprout_gc_push_i64_root(ptr %t$34)
+  %t$19 = call i64 @sprout_alloc_closure(i64 8, i64 1)
+  %t$19$raw = inttoptr i64 %t$19 to ptr
+  store ptr @__sprout_ir_eta_stdlib.string.is_ident_continue_27, ptr %t$19$raw
+  %t$36 = alloca i64
+  store i64 %t$19, ptr %t$36
+  %t$37 = call i64 @sprout_gc_push_i64_root(ptr %t$36)
+  %t$20 = call i64 @stdlib.compiler.source.take_while(i64 %t$10, i64 %t$19)
+  %t$38 = call i64 @sprout_gc_pop_roots(i64 2)
+  store i64 %t$20, ptr %t$24
+  call void @llvm.stackrestore(ptr %t$25)
+  br label %tco_loop
+join_17:
+  %t$18 = phi i64 [%run_end, %then_17]
+  br label %join_14
+join_14:
+  %t$15 = phi i64 [%run_end, %then_14], [%t$18, %join_17]
+  br label %join_2
+arm_2_2:
+  call void @sprout_abort_match()
+  unreachable
+join_2:
+  %t$3 = phi i64 [%run_end, %body_0_2], [%t$15, %join_14]
+  ret i64 %t$3
+}
+
+define i64 @stdlib.compiler.lexer.peek_is_dot(i64 %cursor) {
+entry:
+  %t$12 = alloca i64
+  store i64 %cursor, ptr %t$12
+  %t$13 = call i64 @sprout_gc_push_i64_root(ptr %t$12)
+  %t$0$st = call { i64, i64 } @stdlib.compiler.source.peek_worker(i64 %cursor)
+  %t$0 = extractvalue { i64, i64 } %t$0$st, 0
+  %t$1 = extractvalue { i64, i64 } %t$0$st, 1
+  %t$14 = call i64 @sprout_gc_pop_roots(i64 1)
+  br label %arm_0_2
+arm_0_2:
+  %t$4 = add i64 0, 0
+  %t$5 = icmp eq i64 %t$0, %t$4
+  br i1 %t$5, label %body_0_2, label %arm_1_2
+body_0_2:
+  %t$6 = add i64 0, 0
+  br label %join_2
+arm_1_2:
+  %t$7 = add i64 0, 1
+  %t$8 = icmp eq i64 %t$0, %t$7
+  br i1 %t$8, label %body_1_2, label %arm_2_2
+body_1_2:
+  %t$9 = add i64 0, 46
+  %t$10 = icmp eq i64 %t$1, %t$9
+  %t$11 = zext i1 %t$10 to i64
+  br label %join_2
+arm_2_2:
+  call void @sprout_abort_match()
+  unreachable
+join_2:
+  %t$3 = phi i64 [%t$6, %body_0_2], [%t$11, %body_1_2]
+  ret i64 %t$3
+}
+
+define i64 @__sprout_ir_eta_stdlib.string.is_ascii_digit_28(i64 %env$, i64 %a0) {
 entry:
   %t$0 = alloca i64
   store i64 %a0, ptr %t$0
@@ -47067,7 +47180,7 @@ entry:
   %t$3 = call i64 @sprout_gc_push_i64_root(ptr %t$2)
   %t$0 = call i64 @sprout_alloc_closure(i64 8, i64 1)
   %t$0$raw = inttoptr i64 %t$0 to ptr
-  store ptr @__sprout_ir_eta_stdlib.string.is_ascii_digit_27, ptr %t$0$raw
+  store ptr @__sprout_ir_eta_stdlib.string.is_ascii_digit_28, ptr %t$0$raw
   %t$4 = alloca i64
   store i64 %t$0, ptr %t$4
   %t$5 = call i64 @sprout_gc_push_i64_root(ptr %t$4)
@@ -51293,7 +51406,7 @@ join_2:
   ret i64 %t$3
 }
 
-define i64 @__sprout_ir_eta_stdlib.string.is_hex_digit_28(i64 %env$, i64 %a0) {
+define i64 @__sprout_ir_eta_stdlib.string.is_hex_digit_29(i64 %env$, i64 %a0) {
 entry:
   %t$0 = alloca i64
   store i64 %a0, ptr %t$0
@@ -51303,7 +51416,7 @@ entry:
   ret i64 %ret
 }
 
-define i64 @__sprout_ir_eta_stdlib.string.is_binary_digit_29(i64 %env$, i64 %a0) {
+define i64 @__sprout_ir_eta_stdlib.string.is_binary_digit_30(i64 %env$, i64 %a0) {
 entry:
   %ret = call i64 @stdlib.string.is_binary_digit(i64 %a0)
   ret i64 %ret
@@ -51395,7 +51508,7 @@ then_40:
   %t$69 = call i64 @sprout_gc_push_i64_root(ptr %t$68)
   %t$42 = call i64 @sprout_alloc_closure(i64 8, i64 1)
   %t$42$raw = inttoptr i64 %t$42 to ptr
-  store ptr @__sprout_ir_eta_stdlib.string.is_hex_digit_28, ptr %t$42$raw
+  store ptr @__sprout_ir_eta_stdlib.string.is_hex_digit_29, ptr %t$42$raw
   %t$70 = alloca i64
   store i64 %t$42, ptr %t$70
   %t$71 = call i64 @sprout_gc_push_i64_root(ptr %t$70)
@@ -51426,7 +51539,7 @@ then_54:
   %t$74 = call i64 @sprout_gc_push_i64_root(ptr %t$73)
   %t$56 = call i64 @sprout_alloc_closure(i64 8, i64 1)
   %t$56$raw = inttoptr i64 %t$56 to ptr
-  store ptr @__sprout_ir_eta_stdlib.string.is_binary_digit_29, ptr %t$56$raw
+  store ptr @__sprout_ir_eta_stdlib.string.is_binary_digit_30, ptr %t$56$raw
   %t$75 = alloca i64
   store i64 %t$56, ptr %t$75
   %t$76 = call i64 @sprout_gc_push_i64_root(ptr %t$75)
@@ -56118,7 +56231,7 @@ join_1:
   ret i64 %t$2
 }
 
-define i64 @__sprout_ir_eta___tc_Eq_String_eq_30(i64 %env$, i64 %a0, i64 %a1) {
+define i64 @__sprout_ir_eta___tc_Eq_String_eq_31(i64 %env$, i64 %a0, i64 %a1) {
 entry:
   %ret = call i64 @__tc_Eq_String_eq(i64 %a0, i64 %a1)
   ret i64 %ret
@@ -56148,7 +56261,7 @@ body_0_1:
   %t$21 = call i64 @sprout_gc_push_i64_root(ptr %t$20)
   %t$6 = call i64 @sprout_alloc_closure(i64 8, i64 2)
   %t$6$raw = inttoptr i64 %t$6 to ptr
-  store ptr @__sprout_ir_eta___tc_Eq_String_eq_30, ptr %t$6$raw
+  store ptr @__sprout_ir_eta___tc_Eq_String_eq_31, ptr %t$6$raw
   %t$22 = alloca i64
   store i64 %t$6, ptr %t$22
   %t$23 = call i64 @sprout_gc_push_i64_root(ptr %t$22)
@@ -63986,7 +64099,7 @@ join_1:
   ret i64 %t$2
 }
 
-define i64 @__sprout_ir_lambda_31(i64 %env$, i64 %v) {
+define i64 @__sprout_ir_lambda_32(i64 %env$, i64 %v) {
 entry:
   %t$0$env_ptr = inttoptr i64 %env$ to ptr
   %t$0$slot_ptr = getelementptr i64, ptr %t$0$env_ptr, i64 1
@@ -64017,7 +64130,7 @@ entry:
   %t$14 = call i64 @sprout_gc_push_i64_root(ptr %t$13)
   %t$2 = call i64 @sprout_alloc_closure(i64 16, i64 1)
   %t$2$raw = inttoptr i64 %t$2 to ptr
-  store ptr @__sprout_ir_lambda_31, ptr %t$2$raw
+  store ptr @__sprout_ir_lambda_32, ptr %t$2$raw
   %t$2$raw$slot$1 = getelementptr i64, ptr %t$2$raw, i64 1
   store i64 %__tc_ToString_0_to_string, ptr %t$2$raw$slot$1
   %t$15 = alloca i64
@@ -65369,7 +65482,7 @@ wrepack_next_40:
   unreachable
 }
 
-define i64 @__sprout_ir_eta_stdlib.string.is_hex_digit_32(i64 %env$, i64 %a0) {
+define i64 @__sprout_ir_eta_stdlib.string.is_hex_digit_33(i64 %env$, i64 %a0) {
 entry:
   %t$0 = alloca i64
   store i64 %a0, ptr %t$0
@@ -65379,7 +65492,7 @@ entry:
   ret i64 %ret
 }
 
-define i64 @__sprout_ir_eta_stdlib.string.is_binary_digit_33(i64 %env$, i64 %a0) {
+define i64 @__sprout_ir_eta_stdlib.string.is_binary_digit_34(i64 %env$, i64 %a0) {
 entry:
   %ret = call i64 @stdlib.string.is_binary_digit(i64 %a0)
   ret i64 %ret
@@ -65471,7 +65584,7 @@ then_40:
   %t$78 = call i64 @sprout_gc_push_i64_root(ptr %t$77)
   %t$42 = call i64 @sprout_alloc_closure(i64 8, i64 1)
   %t$42$raw = inttoptr i64 %t$42 to ptr
-  store ptr @__sprout_ir_eta_stdlib.string.is_hex_digit_32, ptr %t$42$raw
+  store ptr @__sprout_ir_eta_stdlib.string.is_hex_digit_33, ptr %t$42$raw
   %t$79 = alloca i64
   store i64 %t$42, ptr %t$79
   %t$80 = call i64 @sprout_gc_push_i64_root(ptr %t$79)
@@ -65502,7 +65615,7 @@ then_54:
   %t$83 = call i64 @sprout_gc_push_i64_root(ptr %t$82)
   %t$56 = call i64 @sprout_alloc_closure(i64 8, i64 1)
   %t$56$raw = inttoptr i64 %t$56 to ptr
-  store ptr @__sprout_ir_eta_stdlib.string.is_binary_digit_33, ptr %t$56$raw
+  store ptr @__sprout_ir_eta_stdlib.string.is_binary_digit_34, ptr %t$56$raw
   %t$84 = alloca i64
   store i64 %t$56, ptr %t$84
   %t$85 = call i64 @sprout_gc_push_i64_root(ptr %t$84)
@@ -78339,7 +78452,7 @@ else_34:
   ret { i64, i64 } %t$48$r1
 }
 
-define i64 @__sprout_ir_eta___tc_Eq_String_eq_34(i64 %env$, i64 %a0, i64 %a1) {
+define i64 @__sprout_ir_eta___tc_Eq_String_eq_35(i64 %env$, i64 %a0, i64 %a1) {
 entry:
   %ret = call i64 @__tc_Eq_String_eq(i64 %a0, i64 %a1)
   ret i64 %ret
@@ -78436,7 +78549,7 @@ body_1_13:
   %t$77 = call i64 @sprout_gc_push_i64_root(ptr %t$76)
   %t$24 = call i64 @sprout_alloc_closure(i64 8, i64 2)
   %t$24$raw = inttoptr i64 %t$24 to ptr
-  store ptr @__sprout_ir_eta___tc_Eq_String_eq_34, ptr %t$24$raw
+  store ptr @__sprout_ir_eta___tc_Eq_String_eq_35, ptr %t$24$raw
   %t$78 = alloca i64
   store i64 %t$24, ptr %t$78
   %t$79 = call i64 @sprout_gc_push_i64_root(ptr %t$78)

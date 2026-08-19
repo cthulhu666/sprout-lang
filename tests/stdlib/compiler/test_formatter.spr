@@ -72,5 +72,29 @@ fn main() -> Unit !{IO} =
     # Over-reach guard: trailing whitespace OUTSIDE a template is still linted
     # (trailing-whitespace issue + the resulting not-formatted issue = 2).
     check_eq("lint still flags trailing whitespace outside a template",
-      issue_count("x = 1\ny = 2 \n"), 2)
+      issue_count("x = 1\ny = 2 \n"), 2),
+
+    # `..` is TIGHT on both sides, matching every language that spells ranges
+    # this way (Rust/Kotlin/Ruby `a..b`).  It already came out tight between
+    # word-like endpoints; the bug was the parenthesised form, where
+    # needs_space_word_or_op forced a space before the `(` because `..` is
+    # neither an inline op nor word-like, yielding the asymmetric `(a).. (b)`.
+    check_eq("range stays tight between identifiers",
+      formatter.format_source("lo..hi\n"), "lo..hi\n"),
+    check_eq("spaced range is tightened",
+      formatter.format_source("lo .. hi\n"), "lo..hi\n"),
+    check_eq("parenthesised range is tight on both sides",
+      formatter.format_source("(lo)..(hi)\n"), "(lo)..(hi)\n"),
+    check_eq("parenthesised range: stray space after `..` removed",
+      formatter.format_source("(lo).. (hi)\n"), "(lo)..(hi)\n"),
+    check_eq("range with int endpoints stays tight",
+      formatter.format_source("0..n\n"), "0..n\n"),
+    check_eq("call-bounded range is tight",
+      formatter.format_source("lo(x)..hi(y)\n"), "lo(x)..hi(y)\n"),
+
+    # The constructor-export marker `(..)` is the same `..` token and must not
+    # gain interior spaces.
+    check_eq("constructor-export marker unchanged",
+      formatter.format_source("type Color (..) deriving (Eq) =\n"),
+      "type Color (..) deriving (Eq) =\n")
   ])

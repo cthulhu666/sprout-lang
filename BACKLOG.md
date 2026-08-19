@@ -3852,6 +3852,18 @@ op-classification already in place.
 Five items below were surfaced while designing `docs/ranges-v0.md` (2026-08-19) and are recorded
 there in its Appendix C. None is in scope for that change.
 
+- [ ] `P3` **`just fmt` puts a space between a `!`-negated callee and its arguments.**
+  `!is_hover_ident_ch(ch)` is reformatted to `! is_hover_ident_ch (ch)` — two warts in one, the
+  space after `!` and the space before `(`. Found 2026-08-19 while fixing the `..` spacing (the
+  new code was restructured to a positive predicate to avoid it, so nothing in-tree is currently
+  affected). Same mechanism as the `..` half of that fix: `is_call_like_pp_other`
+  (`stdlib/compiler/formatter.sprout`) does not recognise `!` as a prev-prev token after which
+  `ident(` is a call, so the `(`-spacing fallback fires. The postfix-`.` and `..` cases are both
+  handled there by an explicit `token_text(pp) == …` arm; `!` wants the same arm, plus a look at
+  `needs_space_curr_bang`'s counterpart for the space AFTER `!`. Low value on its own — it only
+  bites code that negates a call directly — but it is a one-line fix in a chain that already has
+  the precedent.
+
 - [x] `P2` **`regex_find_range` stores a HALF-OPEN span in an inclusive-range type. FIXED 2026-08-19** (branch `feat/int-range-pure-sprout`) — took the first option: the builtin is now `regex_find_match`, returning `Maybe Match` built in C via `find_ctor_tag_by_name("stdlib.regex.Match")` + `sprout_make2`, the same way `sprout_make_proc_result` builds `stdlib.process.ProcResult`. `match_from_range` is deleted and `find_first` is a one-line forward. As this entry predicted, that removed the last C-side constructor of `IntRange` — which is what let the type become pure Sprout and all five `int_range*` builtins disappear. Zero-width matches (`rm_so == rm_eo`) are now pinned by tests rather than only reasoned about, since `start == end` means *empty* for a span and *one element* for an inclusive range. Original analysis below.
 
   <details><summary>original</summary>
@@ -3876,27 +3888,19 @@ there in its Appendix C. None is in scope for that change.
   `upto(n) = range(0, n - 1)` (`:44`, used at `:90, 98, 175, 176, 185, 216, 217`), so `:256` is
   inconsistent with the file's own convention. Confirm intent before changing — an extra epoch is
   not observably wrong output, which is why it has survived.
-- [ ] `P1` **`just fmt` rewrites an identifier-bounded range literal into a form that does not
-  compile.** Upgraded from `P3` on 2026-08-19 after reproducing the formatter half: this is not a
-  spelling papercut, the formatter actively breaks working code, and because `fmt-check` is a
-  `ci-fast-gates` gate the two constraints are **unsatisfiable** for the affected spelling.
+- [x] `P1` **`just fmt` rewrote an identifier-bounded range literal into a form that did not
+  compile.** Fixed 2026-08-19. `scan_ident_end` absorbed the `..` into the identifier run, because
+  `try_multi_char_symbol` only recognises `..` at a token START — so `five..one` was one dotted
+  token and failed with ``check: Cannot infer the record type of `.one` ``, while `just fmt`
+  rewrote the working `five .. one` into exactly that broken form (making "compiles" and
+  "fmt-clean" unsatisfiable together, since `fmt-check` is a `ci-fast-gates` gate).
 
-  The trigger is precise — **an identifier written immediately before `..`**. The lexer absorbs the
-  dot into the identifier run, so `five..one` is one dotted token and fails with
-  ``ERROR: check: Cannot infer the record type of `.one` ``. What compiles: `five .. one` (spaced),
-  `0..one` (digit on the left), `(five)..(one)` (paren on the left). What `just fmt` does: rewrites
-  the spaced-and-working `five .. one` into the unspaced-and-broken `five..one`.
-
-  Also note the formatter emits a **third**, asymmetric spelling for the paren form —
-  `(five).. (one)`, space after rather than before. That compiles and is fmt-stable (verified
-  idempotent), which is why `tests/stdlib/test_range_down.spr` uses it, but it is plainly not the
-  intended rendering.
-
-  Not a regression from the postfix-`.` work — a dotted ident `five..one` never resolved; only the
-  error message changed when `.` became a postfix operator. **`docs/int-ranges-v1-draft.md` §7 uses
-  the broken spelling in its own example.** Fix: teach the lexer that `..` terminates an identifier
-  run (it already handles `..` as a multi-char symbol via `try_multi_char_symbol`, so the ident
-  scanner is the only place that needs to stop), then make the formatter emit `a..b` uniformly.
+  The fix is in three places: the ident run now stops before a `..` (a trailing dot still rides on
+  the identifier, which `parse_var_or_ctor` needs); the formatter emits `..` tight on both sides,
+  which also retires the asymmetric `(five).. (one)` it used to produce; and LSP hover stops its
+  word scan at a `..` so hovering an endpoint resolves that endpoint. Spec §2 now states the rule
+  normatively. `tests/stdlib/test_range_down.spr` uses the plain `five..one` as the end-to-end
+  guard, with token-level coverage in `tests/stdlib/compiler/test_lexer.spr`.
 - [ ] `P3` **The negative-literal shift-count rejection has no conformance fixture.**
   `docs/spec-v0.md:1633` states it normatively ("a negative *literal* count is rejected at compile
   time") and `stdlib/compiler/ast_to_ir.sprout:4924-4926` implements it, but grepping

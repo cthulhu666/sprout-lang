@@ -183,6 +183,10 @@ fn is_call_like_pp_other(prev: token.Token, pp: token.Token, next_tok: Maybe tok
         # `.` token only ever means postfix access, so this cannot misfire.
         # Without it the formatter emits `mk_ops().double (21)`.
         else if token.token_text(pp) == "." then true
+        # `..` is the range operator, so `lo(x)..hi(y)` has a call on each side
+        # and neither `(` takes a space. Without it the formatter emits
+        # `lo(x)..hi (y)` — the same shape as the postfix-`.` case above.
+        else if token.token_text(pp) == ".." then true
         else if token.token_text(pp) == ")" then true
         else if token.token_text(pp) == "]" then true
         else if token.token_text(pp) == "}" then true
@@ -277,6 +281,14 @@ fn needs_space(prev_prev: Maybe token.Token, prev: Maybe token.Token, curr: toke
       if tok_is_punct(curr, "!") then needs_space_curr_bang(p)
       else if tok_is_punct(p, "!") then
         if tok_is_punct(curr, "{") then false else true
+      # `..` is TIGHT on both sides — `lo..hi`, `(lo)..(hi)`, `0..n` — which is
+      # how every language spelling ranges this way writes them (Rust, Kotlin,
+      # Ruby). Stated here rather than left to the word-like fallback because
+      # `..` is neither an inline op nor word-like, so the fallback forced a
+      # space before a following `(`/`[`/`{`/keyword and produced the asymmetric
+      # `(lo).. (hi)`. It also keeps the constructor-export marker `(..)` tight.
+      else if tok_is_punct(curr, "..") then false
+      else if tok_is_punct(p, "..") then false
       else if tok_is_punct(curr, ":") then false
       else if tok_is_punct(p, ":") then true
       else if tok_is_punct(p, "-") then

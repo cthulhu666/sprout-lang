@@ -30,6 +30,14 @@ Out of scope for v0:
 ## 2. Lexical Structure
 
 - Identifiers: `[a-zA-Z_][a-zA-Z0-9_]*`
+- A `.` **extends** an identifier token, so a qualified name (`string.trim`) and a
+  dotted field path (`p.x`, `line.from.x`) are each a **single** token — including a
+  trailing dot, which is retained so that `p.` reports a missing field name rather
+  than two adjacent expressions. The one exception is `..`: an identifier token
+  **ends** before it, so the range operator needs no surrounding spaces and
+  `lo..hi` is three tokens (`lo`, `..`, `hi`), never one. Ranges therefore lex
+  uniformly whatever their endpoints are — `0..n`, `lo..hi`, `p.x..p.y`,
+  `first(xs)..last(xs)` — and `a..b` is the canonical spelling the formatter emits.
 - Keywords: `fn`, `let`, `where`, `type`, `wrap`, `match`, `with`, `if`, `then`, `else`, `true`, `false`
 - Literals: integer, boolean, string, unit (`()`)
 - Integer literals are decimal (`255`), hexadecimal (`0xFF`), or binary (`0b1010`).

@@ -40,7 +40,10 @@ Formatting rules that should be treated as fixed:
 - End files with a trailing newline.
 - Do not leave trailing whitespace.
 - Write `name: Type`, not `name : Type`.
-- Put spaces around `=`, `->`, binary operators, and `++`.
+- Put spaces around `=`, `->`, binary operators, and `++`. The one exception is the
+  range operator `..`, which is written **tight** on both sides — `0..n`, `lo..hi`,
+  `p.x..p.y` — matching how ranges are spelled elsewhere (Rust, Kotlin, Ruby). The
+  formatter normalises it, so `lo .. hi` becomes `lo..hi`.
 - Put a space before effect annotations: `-> Unit !{IO}`.
 - Write `class` and `instance` bodies in the layout form — members indented two
   spaces past the keyword, no braces. The brace form still parses but is
@@ -172,7 +175,7 @@ Use these body rules:
 - Prefer one expression per visual line.
 - Keep deeply nested expressions rare; introduce helpers or local bindings when
   structure becomes hard to scan.
-- Keep binary operators surrounded by spaces.
+- Keep binary operators surrounded by spaces — except `..`, which is tight (§2).
 
 ## 7. `where` Blocks
 
