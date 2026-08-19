@@ -12,7 +12,16 @@ export type Match (..) =
 
 extern fn regex_validate(pattern: String) -> Result String Unit
 extern fn regex_is_match(pattern: String, text: String) -> Bool
-extern fn regex_find_range(pattern: String, text: String) -> Maybe IntRange
+# Returns the span DIRECTLY as a Match rather than as an IntRange.
+#
+# It used to borrow IntRange as a two-Int transport, which was wrong twice over: a
+# match span is half-open `[start, end)` while an IntRange is inclusive of both
+# ends, so the same pair of numbers means different things in the two types; and a
+# span has no direction, so the runtime wrote a "nominal" step of +1 into a field
+# that meant nothing here. This was also the ONLY place the C runtime constructed
+# an IntRange, and therefore the only thing keeping the type in the runtime at all
+# (docs/ranges-v0.md Appendix B).
+extern fn regex_find_match(pattern: String, text: String) -> Maybe Match
 extern fn regex_replace_all_literal(pattern: String, replacement: String, text: String) -> String
 extern fn regex_escape(raw: String) -> String
 
@@ -29,9 +38,6 @@ fn classify_compile_error(msg: String) -> RegexError =
   if str_starts_with(msg, unsupported_prefix) then RegexUnsupportedFeature(unsupported_detail(msg))
   else RegexInvalidPattern(msg)
 
-fn match_from_range(range: IntRange) -> Match =
-  Match(int_range_start(range), int_range_end(range))
-
 # Cost follows regex compilation in the native runtime and is at least linear in the pattern size.
 export fn compile(pattern: String) -> Result RegexError Regex =
   match regex_validate(pattern) with
@@ -44,9 +50,7 @@ export fn is_match(re: Regex, text: String) -> Bool =
 
 # Cost depends on the regex engine and input text; result conversion itself is O(1).
 export fn find_first(re: Regex, text: String) -> Maybe Match =
-  match regex_find_range(raw_pattern(re), text) with
-  | Just range -> Just(match_from_range(range))
-  | Nothing -> Nothing
+  regex_find_match(raw_pattern(re), text)
 
 export fn split_first(re: Regex, text: String) -> Maybe (String, String) =
   match find_first(re, text) with

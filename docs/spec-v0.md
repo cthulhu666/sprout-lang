@@ -1660,9 +1660,32 @@ total functions.
 
 ### 8.3 Integer ranges (Experimental)
 
-`IntRange` is a built-in opaque type (§5) denoting an **inclusive interval walked in a
-fixed direction**. The direction is part of the value, not inferred from which bound is
-larger. Design rationale and prior art: `docs/ranges-v0.md`.
+`IntRange` denotes an **inclusive interval walked in a fixed direction**. The direction
+is part of the value, not inferred from which bound is larger. Design rationale and prior
+art: `docs/ranges-v0.md`.
+
+It is an ordinary algebraic data type declared in the prelude, **not** a built-in opaque
+type (§5):
+
+```sprout
+export type IntRange =
+  | IntRange Int Int Int   # start, end, step
+```
+
+Three consequences follow from it being an ordinary type, and all three are normative:
+
+1. It may be **destructured**, like any ADT: `match r with | IntRange s e st -> …`.
+2. The constructor is **applicable**, and therefore applicable with a step outside
+   `{+1, -1}`. `range_step` is defined as the **sign** of the stored field — `-1` when it
+   is negative and `+1` otherwise — so every operation sees a legal direction regardless
+   of what was stored. An out-of-range step is normalized, never honoured and never an
+   error.
+3. It **prints like an ADT**: `print(1..4)` writes `IntRange(1, 4, 1)`. It formerly wrote
+   `1..4`, which was a special case in the runtime's printer for the opaque
+   representation.
+
+Programs SHOULD read the fields through `range_start` / `range_end` / `range_step` rather
+than by pattern match, because only `range_step` applies the normalization in (2).
 
 **Construction.** Two peer constructors, neither of which is the default spelling:
 
@@ -1670,9 +1693,10 @@ larger. Design rationale and prior art: `docs/ranges-v0.md`.
 - `range_down(hi, lo)` — step `-1`, enumerating `hi, hi-1, …, lo`. Arguments read in
   iteration order, so the first argument is where enumeration begins.
 
-`lo..hi` is sugar for `range_up(lo, hi)`. **There is no descending literal**: `a..b`
-always builds an ascending range. Both operands are evaluated left-to-right, as for any
-binary operator.
+`lo..hi` is sugar for `range_up(lo, hi)` — a call to that prelude function, so the syntax
+requires the prelude to be in scope. **There is no descending literal**: `a..b` always
+builds an ascending range. Both operands are evaluated left-to-right, as for any binary
+operator.
 
 **Emptiness.** A range is empty when its end lies past its start *in its direction of
 travel*:

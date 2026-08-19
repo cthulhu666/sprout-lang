@@ -77,11 +77,6 @@ eprint  # stderr write bridge for old stage-1 codegen that emits @eprint(i64); t
 eprint_str  # writes C string to stderr; Sprout has no stderr output primitive (print/print_str target stdout only)
 env_get
 http_request
-int_range
-int_range_by  # Constructs an IntRange with an explicit direction (step +1/-1), which `int_range` cannot express — it is fixed ascending, and is deliberately left 2-ary because its declare is hardcoded in ir_lowering.sprout for preludeless `a..b` and is baked into the committed seed. Reaching it from Sprout is impossible for the same reason as its peers: IntRange is an opaque runtime block (SPROUT_HEAP_RANGE), not an ADT or record, so there is no constructor to apply. Approved by the user 2026-08-19 per AGENTS.md "Builtin vs Stdlib" rules 4-6; see docs/ranges-v0.md §4.
-int_range_end
-int_range_start
-int_range_step  # Reads the direction field of the opaque IntRange heap block, exactly as its two peers above read start/end. IntRange is a runtime representation (SPROUT_HEAP_RANGE), not a Sprout ADT or record, so its fields are unreachable from Sprout — there is no pattern to match and no `.field` to read. Deliberately NOT made a record instead: C cannot construct one (records get no runtime ctor registration, so find_ctor_tag_by_name fails), and a 3-field record would take the GC from tracing 0 children to 3. See docs/ranges-v0.md Appendix B. Approved by the user 2026-08-19 per AGENTS.md "Builtin vs Stdlib" rules 4-6.
 int_to_string
 json_parse
 json_stringify
@@ -112,7 +107,7 @@ ref_new
 ref_read
 ref_write
 regex_escape
-regex_find_range
+regex_find_match  # Renamed from regex_find_range (2026-08-19). Same justification — wraps POSIX regcomp/regexec — but now returns stdlib.regex.Match instead of borrowing IntRange as a two-Int transport, which is what let IntRange leave the runtime entirely.
 regex_is_match  # Pre-existing builtin, not new. Absent until 2026-08-08 only because it was DEFINED `_Bool` while declared `i64`; the gate greps `long long <name>(`, so the ABI mismatch also hid it from this allowlist. Cannot be Sprout: wraps POSIX regcomp/regexec.
 regex_replace_all_literal
 regex_validate

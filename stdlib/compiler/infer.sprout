@@ -5138,7 +5138,7 @@ fn builtin_type_names() -> List String =
   append(primitive_type_names(), c_runtime_type_names())
 
 fn primitive_type_names() -> List String =
-  ["Int", "Double", "Bool", "String", "Char", "Unit", "Bytes", "IntRange"]
+  ["Int", "Double", "Bool", "String", "Char", "Unit", "Bytes"]
 
 fn c_runtime_type_names() -> List String =
   ["Vector", "Map", "NativeSet", "Ref"]

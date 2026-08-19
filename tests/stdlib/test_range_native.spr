@@ -44,22 +44,41 @@ fn main() -> Unit !{IO} =
     assert_eq(state, "range_end agrees with the second field", range_end(r), 6)
     assert_eq(state, "range_step agrees with the third field", range_step(r), 1)
 
-    # 2. A malformed step is constructible now. It must not hang.
+    # 2. A malformed step is constructible now, and is NORMALIZED to its sign
+    # rather than honoured.
     #
-    # step 4 from 1 lands on 1, 5, 9 — it never equals the end bound 6, so a
-    # walker that only stopped at `current == end` would run past it and keep
-    # going until Int overflow. Stopping on "past the end" bounds it.
+    # Honouring it would be the worse choice, and not merely because the docs say
+    # step is +1 or -1. A step of 4 from 1 lands on 1, 5, 9 — it never *equals* the
+    # end bound, so `range_at_end` (exact equality) cannot fire, and near MAX_INT
+    # `current + step` would jump over the end, wrap negative, and leave
+    # `range_past_end` permanently false: a hang. Normalizing in `range_step`
+    # keeps every walker seeing +1 or -1, which is exactly the condition under
+    # which the boundary guard is sound.
     let skipping = IntRange(1, 6, 4)
 
-    assert_eq(state, "a step that skips the end bound still terminates",
-      range_fold(add_all, 0, skipping), 1 + 5)
+    assert_eq(state, "an oversized step is normalized to +1, not honoured",
+      range_step(skipping), 1)
 
-    assert_true(state, "a skipping range is not reported empty",
-      ! range_is_empty (skipping))
+    assert_eq(state, "so it walks every element in between",
+      range_fold(add_all, 0, skipping), 1 + 2 + 3 + 4 + 5 + 6)
 
-    # A zero step cannot advance. It must be treated as empty rather than
-    # looping forever on the same value.
-    assert_true(state, "a zero step is empty rather than non-terminating",
-      range_is_empty(IntRange(1, 6, 0)))
+    assert_eq(state, "an oversized negative step normalizes to -1",
+      range_step(IntRange(6, 1, 0 - 4)), -1)
+
+    # A zero step cannot advance at all, so it cannot mean "descending"; it
+    # normalizes upward like any non-negative step.
+    assert_eq(state, "a zero step normalizes to +1 rather than stalling",
+      range_step(IntRange(1, 6, 0)), 1)
+
+    assert_eq(state, "and therefore walks normally instead of hanging",
+      range_count(IntRange(1, 6, 0)), 6)
+
+    # 3. Stringification carries the direction. Without it the two ranges below —
+    # one with five elements, one with none — are indistinguishable as text.
+    assert_eq(state, "to_string shows the step, so direction survives",
+      to_string(range_up(1, 5)), "IntRange(1, 5, 1)")
+
+    assert_eq(state, "and the empty descending range over the same bounds differs",
+      to_string(range_down(1, 5)), "IntRange(1, 5, -1)")
 
     summary(state)

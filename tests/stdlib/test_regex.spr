@@ -91,6 +91,15 @@ fn main() -> Unit !{IO} =
     check_eq("match start is a codepoint offset, not a byte offset",
       match_start("[0-9]+", "café 42"), 5),
     check_eq("match end is a codepoint offset", match_end("[0-9]+", "café 42"), 7),
+    # A ZERO-WIDTH match, which is where a Match span and an IntRange disagree most
+    # sharply: `Match(0, 0)` is an EMPTY half-open span, while the IntRange this
+    # span used to be carried in is inclusive, so the same pair of numbers means
+    # "one element" there. The distinction was unobservable only because
+    # match_from_range threw the range away immediately; these pin start == end as
+    # a real, reachable result rather than a degenerate one.
+    check_eq("a zero-width match starts where it ends", match_start("x*", "abc"), 0),
+    check_eq("a zero-width match ends where it starts", match_end("x*", "abc"), 0),
+    check_true("a zero-width match is still a match", find_some("x*", "abc")),
     # split_first is where a byte/codepoint mix-up would corrupt output rather than just shift a
     # number: the prefix would keep a stray continuation byte and the suffix would lose one.
     check_eq("split_first prefix keeps the multi-byte character whole",
