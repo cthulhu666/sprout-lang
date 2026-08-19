@@ -1,0 +1,111 @@
+import stdlib.test (TestState, new_state, assert_eq, assert_false, summary)
+import stdlib.mutable (MutVec, mutvec_new, mutvec_at, mutvec_set)
+
+# Regression tests for docs/ranges-v0.md: a range that is empty for its own
+# direction yields NOTHING, and emptiness is representable at all.
+#
+# Before the fix, `range_step` fabricated a direction from bound order
+# (prelude.sprout:76), so `range(0, -1)` was a two-element DESCENDING range; and
+# all three walkers terminated on `current == end_value`, so none of them could
+# produce zero elements or return an untouched accumulator.
+#
+# WHY EVERY BOUND BELOW IS A BINDING RATHER THAN A LITERAL: a range with literal
+# bounds that is empty for its direction is a COMPILE ERROR by design (§7), so an
+# empty range's runtime behaviour is only reachable through computed bounds. That
+# is also the shape real code has — the motivating bug is `range_up(0, n - 1)`,
+# never a hand-written `range_up(5, 1)`. Literal empty ranges are exercised in
+# tests/conformance/type_error/ instead, where being rejected is the assertion.
+
+fn add_step(acc: Int, x: Int) -> Int = acc + x
+
+# Counts how many times range_each actually applied its function, via a cell.
+fn bump(cell: MutVec Int, _x: Int) -> Unit !{IO} =
+  do
+    cur <- mutvec_at(cell, 0)
+    mutvec_set(cell, 0, cur + 1)
+
+fn main() -> Unit !{IO} =
+  do
+    state <- new_state()
+
+    let hi = 5
+    let lo = 1
+    let same = 3
+
+    # --- an ascending range whose end is below its start is EMPTY -----------
+
+    assert_eq(state, "range_count of an empty ascending range",
+      range_count(range_up(hi, lo)), 0)
+
+    assert_eq(state, "range_to_list of an empty ascending range",
+      range_to_list(range_up(hi, lo)), Nil)
+
+    # The accumulator must come back untouched — the walker cannot apply `step`
+    # even once. This is the case that was structurally impossible before.
+    assert_eq(state, "range_fold over an empty range returns init",
+      range_fold(add_step, 7, range_up(hi, lo)), 7)
+
+    assert_false(state, "range_contains is false for every target when empty",
+      range_contains(range_up(hi, lo), same))
+
+    assert_eq(state, "range_to_vec of an empty range has no elements",
+      vec_length(range_to_vec(range_up(hi, lo))), 0)
+
+    empty_visits <- mutvec_new(1, 0)
+    _ <- range_each(\i -> bump(empty_visits, i), range_up(hi, lo))
+    visits <- mutvec_at(empty_visits, 0)
+    assert_eq(state, "range_each applies f zero times when empty", visits, 0)
+
+    # --- the motivating case: walking n rows at n == 0 ----------------------
+    # `range_up(0, n - 1)` is the ordinary spelling of a half-open [0, n) walk.
+    # At n == 0 that is range_up(0, -1), which used to visit 0 and -1 — two
+    # OUT-OF-BOUNDS indices — instead of doing nothing.
+
+    let n = 0
+    zero_visits <- mutvec_new(1, 0)
+    _ <- range_each(\i -> bump(zero_visits, i), range_up(0, n - 1))
+    walked <- mutvec_at(zero_visits, 0)
+    assert_eq(state, "walking n rows at n == 0 visits nothing", walked, 0)
+
+    assert_eq(state, "folding n rows at n == 0 leaves the accumulator",
+      range_fold(add_step, 0, range_up(0, n - 1)), 0)
+
+    # --- a descending range is empty when its end is ABOVE its start --------
+    # Emptiness is direction-relative: the same bound order that makes an
+    # ascending range empty makes a descending one non-empty, and vice versa.
+
+    assert_eq(state, "range_count of an empty descending range",
+      range_count(range_down(lo, hi)), 0)
+
+    assert_eq(state, "range_to_list of an empty descending range",
+      range_to_list(range_down(lo, hi)), Nil)
+
+    assert_eq(state, "range_fold over an empty descending range returns init",
+      range_fold(add_step, 9, range_down(lo, hi)), 9)
+
+    assert_false(state, "range_contains is false when a descending range is empty",
+      range_contains(range_down(lo, hi), same))
+
+    # --- boundaries that must NOT change -----------------------------------
+
+    assert_eq(state, "a single-element range still has one element",
+      range_count(range_up(same, same)), 1)
+
+    assert_eq(state, "a single-element range still yields that element",
+      range_to_list(range_up(same, same)), Cons(3, Nil))
+
+    assert_eq(state, "a single-element descending range still has one element",
+      range_count(range_down(same, same)), 1)
+
+    assert_eq(state, "an ordinary ascending range still ascends",
+      range_to_list(range_up(lo, hi)), Cons(1, Cons(2, Cons(3, Cons(4, Cons(5, Nil))))))
+
+    assert_eq(state, "an ordinary ascending range still folds over every element",
+      range_fold(add_step, 0, range_up(lo, hi)), 15)
+
+    # Bounds are stored as given, so the rendering reflects the operands rather
+    # than a normalized form — an empty range still prints its bounds.
+    assert_eq(state, "an empty range renders its bounds as written",
+      to_string(range_up(hi, lo)), "IntRange(5, 1)")
+
+    summary(state)

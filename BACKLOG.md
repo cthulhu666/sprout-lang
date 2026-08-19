@@ -3824,14 +3824,27 @@ there in its Appendix C. None is in scope for that change.
   `upto(n) = range(0, n - 1)` (`:44`, used at `:90, 98, 175, 176, 185, 216, 217`), so `:256` is
   inconsistent with the file's own convention. Confirm intent before changing — an extra epoch is
   not observably wrong output, which is why it has survived.
-- [ ] `P3` **`lo..hi` with unspaced identifier operands does not compile.** Reproduced:
-  `range_count(lo..hi)` yields ``ERROR: check: Cannot infer the record type of `.hi` `` because a dot
-  inside an identifier run is absorbed by the lexer, so `lo..hi` is one dotted token rather than
-  three. `lo .. hi` and `0..n` both work; verified that no in-tree code uses the broken spelling.
-  **`docs/int-ranges-v1-draft.md` §7 uses it in its own example**, so the draft is wrong as written.
-  Not a regression from the postfix-`.` work (a dotted ident `lo..hi` never resolved); only the error
-  message changed. Fix is either a lexer special-case for `..` inside an ident run, or correcting the
-  draft and documenting the spacing requirement.
+- [ ] `P1` **`just fmt` rewrites an identifier-bounded range literal into a form that does not
+  compile.** Upgraded from `P3` on 2026-08-19 after reproducing the formatter half: this is not a
+  spelling papercut, the formatter actively breaks working code, and because `fmt-check` is a
+  `ci-fast-gates` gate the two constraints are **unsatisfiable** for the affected spelling.
+
+  The trigger is precise — **an identifier written immediately before `..`**. The lexer absorbs the
+  dot into the identifier run, so `five..one` is one dotted token and fails with
+  ``ERROR: check: Cannot infer the record type of `.one` ``. What compiles: `five .. one` (spaced),
+  `0..one` (digit on the left), `(five)..(one)` (paren on the left). What `just fmt` does: rewrites
+  the spaced-and-working `five .. one` into the unspaced-and-broken `five..one`.
+
+  Also note the formatter emits a **third**, asymmetric spelling for the paren form —
+  `(five).. (one)`, space after rather than before. That compiles and is fmt-stable (verified
+  idempotent), which is why `tests/stdlib/test_range_down.spr` uses it, but it is plainly not the
+  intended rendering.
+
+  Not a regression from the postfix-`.` work — a dotted ident `five..one` never resolved; only the
+  error message changed when `.` became a postfix operator. **`docs/int-ranges-v1-draft.md` §7 uses
+  the broken spelling in its own example.** Fix: teach the lexer that `..` terminates an identifier
+  run (it already handles `..` as a multi-char symbol via `try_multi_char_symbol`, so the ident
+  scanner is the only place that needs to stop), then make the formatter emit `a..b` uniformly.
 - [ ] `P3` **The negative-literal shift-count rejection has no conformance fixture.**
   `docs/spec-v0.md:1633` states it normatively ("a negative *literal* count is rejected at compile
   time") and `stdlib/compiler/ast_to_ir.sprout:4924-4926` implements it, but grepping

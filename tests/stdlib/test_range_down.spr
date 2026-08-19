@@ -1,0 +1,114 @@
+import stdlib.test (TestState, new_state, assert_eq, assert_true, assert_false, summary)
+import stdlib.mutable (MutVec, mutvec_new, mutvec_at, mutvec_set)
+
+# docs/ranges-v0.md §2 goal 3 — SYMMETRIC construction. Building a descending
+# range must look like building an ascending one and work with every existing
+# combinator unchanged. These tests exist to pin that symmetry: each case below
+# has an ascending twin, and the only difference is which constructor was used.
+#
+# Direction now lives in the value (a step field), not in the bound order, which
+# is what lets `range_down(1, 5)` be empty rather than silently ascending.
+
+fn add_step(acc: Int, x: Int) -> Int = acc + x
+
+fn first_step(acc: Int, x: Int) -> Int = if acc == -1 then x else acc
+
+fn record_visit(seen: MutVec Int, slot: MutVec Int, x: Int) -> Unit !{IO} =
+  do
+    i <- mutvec_at(slot, 0)
+    mutvec_set(seen, i, x)
+    mutvec_set(slot, 0, i + 1)
+
+fn main() -> Unit !{IO} =
+  do
+    state <- new_state()
+
+    # --- the constructors are peers -----------------------------------------
+
+    assert_eq(state, "range_up ascends", range_to_list(range_up(1, 4)),
+      Cons(1, Cons(2, Cons(3, Cons(4, Nil)))))
+
+    assert_eq(state, "range_down descends", range_to_list(range_down(4, 1)),
+      Cons(4, Cons(3, Cons(2, Cons(1, Nil)))))
+
+    # --- every combinator takes both, unchanged -----------------------------
+
+    assert_eq(state, "range_count counts a descending range",
+      range_count(range_down(5, 1)), 5)
+
+    assert_eq(state, "range_fold folds a descending range",
+      range_fold(add_step, 0, range_down(5, 1)), 15)
+
+    # Order matters, and this is the case a sum cannot detect: the fold must see
+    # 5 first, not 1. A commutative step would pass either way.
+    assert_eq(state, "range_fold visits a descending range from the top down",
+      range_fold(first_step, -1, range_down(5, 1)), 5)
+
+    assert_true(state, "range_contains holds inside a descending range",
+      range_contains(range_down(5, 1), 3))
+
+    assert_false(state, "range_contains is false outside a descending range",
+      range_contains(range_down(5, 1), 9))
+
+    assert_eq(state, "range_to_vec materializes a descending range",
+      vec_length(range_to_vec(range_down(5, 1))), 5)
+
+    # range_each must apply f in descending order too, not merely n times.
+    seen <- mutvec_new(3, 0)
+    slot <- mutvec_new(1, 0)
+    _ <- range_each(\x -> record_visit(seen, slot, x), range_down(3, 1))
+    v0 <- mutvec_at(seen, 0)
+    v2 <- mutvec_at(seen, 2)
+    assert_eq(state, "range_each visits the top of a descending range first", v0, 3)
+    assert_eq(state, "range_each visits the bottom of a descending range last", v2, 1)
+
+    # --- accessors report the direction rather than infer it -----------------
+
+    assert_eq(state, "range_step is +1 for an ascending range",
+      range_step(range_up(1, 5)), 1)
+
+    assert_eq(state, "range_step is -1 for a descending range",
+      range_step(range_down(5, 1)), 0 - 1)
+
+    # A descending range keeps its bounds in the order they were given: `start`
+    # is where iteration begins, which for a descending range is the larger one.
+    assert_eq(state, "range_start of a descending range is where it begins",
+      range_start(range_down(5, 1)), 5)
+
+    assert_eq(state, "range_end of a descending range is where it stops",
+      range_end(range_down(5, 1)), 1)
+
+    # --- the two directions are distinct VALUES, not one normalized form -----
+    # This is the property that a two-field representation could not express:
+    # range_up(3, 3) and range_down(3, 3) enumerate the same single element but
+    # are different ranges, and their steps say so.
+
+    assert_eq(state, "a single-element descending range yields that element",
+      range_to_list(range_down(3, 3)), Cons(3, Nil))
+
+    assert_eq(state, "same bounds, opposite directions, different steps",
+      range_step(range_up(3, 3)) - range_step(range_down(3, 3)), 2)
+
+    # --- `..` syntax stays ascending ----------------------------------------
+    # Documented asymmetry (docs/ranges-v0.md §5): there is no descending
+    # literal, so a reversed `..` is an EMPTY ASCENDING range, not a descending
+    # one.
+    #
+    # THE PARENTHESES ARE REQUIRED and are not style. Bounds must be bindings
+    # because a literal `5..1` is a compile error (§7); but an identifier written
+    # immediately before `..` is absorbed into one dotted token, so `five..one`
+    # does not compile — and `just fmt` rewrites the spaced `five .. one` into
+    # exactly that broken form. Parenthesising is the only spelling that both
+    # compiles and survives the formatter. Filed in BACKLOG under
+    # "Compiler / Stdlib Misc".
+
+    let five = 5
+    let one = 1
+
+    assert_eq(state, "a reversed .. literal is ascending, therefore empty",
+      range_count((five).. (one)), 0)
+
+    assert_eq(state, "the .. literal agrees with range_up",
+      range_to_list(1..4), range_to_list(range_up(1, 4)))
+
+    summary(state)
