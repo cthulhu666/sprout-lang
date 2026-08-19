@@ -76,8 +76,11 @@ This milestone rejects:
 ## Implementation overview
 
 - Raw builtins:
-  `regex_validate`, `regex_is_match`, `regex_find_range`,
+  `regex_validate`, `regex_is_match`, `regex_find_match`,
   `regex_replace_all_literal`, `regex_escape`
+  (`regex_find_match` was named `regex_find_range` until 2026-08-19, when it
+  stopped transporting its span in an `IntRange` and began returning
+  `Maybe stdlib.regex.Match` directly.)
 - `stdlib.regex` wraps those raw hooks and exposes the stable user-facing API.
 - Raw `regex_*` builtins remain restricted to `stdlib.*` modules by surface
   checks.

@@ -3862,7 +3862,33 @@ there in its Appendix C. None is in scope for that change.
   handled there by an explicit `token_text(pp) == …` arm; `!` wants the same arm, plus a look at
   `needs_space_curr_bang`'s counterpart for the space AFTER `!`. Low value on its own — it only
   bites code that negates a call directly — but it is a one-line fix in a chain that already has
-  the precedent.
+  the precedent. **Update 2026-08-19:** the "nothing in-tree is currently affected" note above now
+  costs something. `tests/stdlib/test_ir_codegen_cpr_maybe_externs.spr` wanted
+  `!str_starts_with(out, "ERR: ")` and had to be written
+  `if str_starts_with(out, "ERR: ") then false else true` instead, with a comment pointing here, so
+  that `just fmt` stays a fixed point. That is the second file to be contorted around this bug
+  rather than the first to expose it, which is the signal to just fix `is_call_like_pp_other`.
+
+- [x] `P2` **The two ALLOCATING CPR unboxed variants are gone. DONE 2026-08-19** (branch
+  `fix/review-158-followups`) — `regex_find_match_unboxed` and `term_read_line_unboxed` were
+  removed from `unboxed_maybe_extern_name` (ast_to_ir), from the `declare` block (ir_lowering),
+  and from `runtime/sprout_runtime.c`. They were the ONLY two unboxed variants that allocated
+  their payload, which forced the runtime's CPR block to weaken its GC invariant from "none of
+  these allocate" to "allocation must be the last thing that happens" — a condition no tool
+  checks. **Measured before deciding** (both arms in one binary, 300k calls each, arm shape the
+  only variable): CPR median 359,929 µs vs boxed 362,924 µs — ~10 ns saved against a ~1200 ns
+  `regexec`-dominated call, i.e. 0.8%, and CPR was *slower* in 2 of 5 rounds. `term_read_line`
+  blocks on stdin, so its case is worse still. Per "Builtin vs Stdlib" rule 6 that is not a
+  bottleneck, so the surface went and callers take the boxed path (behaviourally identical).
+  **Correction worth keeping:** these were NOT dead code, though a review reported them as such
+  on the strength of 0 call sites across all 60 golden IR files. CPR chains — matching a *user
+  fn* with simple arms builds a Tier-2 `_worker`, and if that worker forwards straight to an
+  extern, Tier-1 fires inside it — so `regex.find_first` did reach the variant, and
+  `tests/stdlib/test_regex.spr` executed it on every CI run. The corpus missed it by one arm
+  shape: `examples/regex_demo.sprout` destructures with a nested `Just (Match s e)`, which
+  `is_simple_maybe_arm` rejects. New `tests/stdlib/test_ir_codegen_cpr_maybe_externs.spr` pins
+  the allow-list directly (13 assertions) so corpus coverage is no longer load-bearing; it is
+  the first test to reference `unboxed_maybe_extern_name` at all.
 
 - [x] `P2` **`regex_find_range` stores a HALF-OPEN span in an inclusive-range type. FIXED 2026-08-19** (branch `feat/int-range-pure-sprout`) — took the first option: the builtin is now `regex_find_match`, returning `Maybe Match` built in C via `find_ctor_tag_by_name("stdlib.regex.Match")` + `sprout_make2`, the same way `sprout_make_proc_result` builds `stdlib.process.ProcResult`. `match_from_range` is deleted and `find_first` is a one-line forward. As this entry predicted, that removed the last C-side constructor of `IntRange` — which is what let the type become pure Sprout and all five `int_range*` builtins disappear. Zero-width matches (`rm_so == rm_eo`) are now pinned by tests rather than only reasoned about, since `start == end` means *empty* for a span and *one element* for an inclusive range. Original analysis below.
 

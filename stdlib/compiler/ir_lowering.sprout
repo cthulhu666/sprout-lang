@@ -515,19 +515,21 @@ export fn ir_header() -> String =
   # Tier-1 CPR peephole: unboxed { i64, i64 } (SproutUnboxed2) variants of the
   # Maybe-returning externs.  Emitted by IRCallUnboxed2 when a `match` scrutinizes
   # one of these directly.  Arg signatures mirror the boxed externs' uniform-i64
-  # ABI (env/regex pass a pointer in an i64 register — identical to the boxed
-  # declares above them).  All 10 declared unconditionally; only the linked ones
-  # are used.  Must stay in sync with unboxed_maybe_extern_name in ast_to_ir.sprout.
+  # ABI (env passes a pointer in an i64 register — identical to the boxed
+  # declares above them).  All 8 declared unconditionally; only the linked ones
+  # are used.  Must stay in sync with unboxed_maybe_extern_name in ast_to_ir.sprout;
+  # tests/stdlib/test_ir_codegen_cpr_maybe_externs.spr pins both lists together.
+  # `regex_find_match_unboxed` and `term_read_line_unboxed` were dropped on
+  # 2026-08-19 along with their C definitions — they were the only two that
+  # allocated (see the note on unboxed_maybe_extern_name).
   "declare { i64, i64 } @vector_get_unboxed(i64, i64)\n" ++
   "declare { i64, i64 } @map_get_unboxed(i64, i64)\n" ++
   "declare { i64, i64 } @map_nth_key_unboxed(i64, i64)\n" ++
   "declare { i64, i64 } @map_nth_value_unboxed(i64, i64)\n" ++
   "declare { i64, i64 } @bytes_get_unboxed(i64, i64)\n" ++
   "declare { i64, i64 } @str_char_at_unboxed(i64, i64)\n" ++
-  "declare { i64, i64 } @regex_find_match_unboxed(i64, i64)\n" ++
   "declare { i64, i64 } @argv_get_unboxed(i64)\n" ++
   "declare { i64, i64 } @env_get_unboxed(i64)\n" ++
-  "declare { i64, i64 } @term_read_line_unboxed()\n" ++
   # IO builtins used by programs after M3 PR 11 (do-block support) lands.
   # print() dispatches by argument type (mirrors direct codegen's emit_print_call):
   #   String/Char -> @print_str(ptr) via IRPrintStr;  Int/Bool -> @print_value(i64)

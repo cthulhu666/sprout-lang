@@ -58,9 +58,14 @@ fn is_nonallocating_read(fname: String) -> Bool =
 #   str_char_at_unboxed (4372) — returns the decoded codepoint (immediate i64).
 #   argv_get_unboxed (4349), env_get_unboxed (4342) — return an existing
 #     argv / getenv() pointer (no Sprout allocation).
-# EXCLUDED (they DO allocate their payload → MUST stay triggers):
-#   regex_find_match_unboxed (allocates the Match via sprout_make2),
-#   term_read_line_unboxed (4368, register_cstr).
+# This list is now the WHOLE of unboxed_maybe_extern_name — every CPR variant
+# the codegen can emit is non-allocating.  It had two exclusions until
+# 2026-08-19 (regex_find_match_unboxed, which built its Match via sprout_make2,
+# and term_read_line_unboxed, which registered a cstr); both were deleted rather
+# than kept as triggers, so there is no allocating variant left to exclude.
+# The `else true` fallback below still matters: it is what keeps an unrecognised
+# `_unboxed` name a trigger, so a future allocating variant is over-rooted rather
+# than silently trusted.
 fn is_nonallocating_unboxed_read(fname: String) -> Bool =
   fname == "vector_get_unboxed"
   || fname == "map_get_unboxed"
@@ -87,11 +92,11 @@ fn op_triggers_gc(op: sprout_ir.IROp) -> Bool =
   # non-allocating read/store externs (B2).  Peek the callee name; over-roots any
   # callee not on the list (correctness > optimization).
   | sprout_ir.IRCall _ _ fname _ -> if is_nonallocating_read(fname) then false else true
-  # IRCallUnboxed2 calls a C `_unboxed` extern.  Most (vector_get, map_get, …)
-  # return { tag, value } by value and do NOT allocate; regex_find_match_unboxed
-  # and term_read_line_unboxed still allocate their payload.  Peek the callee name
-  # (B2 reach extension): non-trigger for the verified non-allocating variants,
-  # trigger otherwise.
+  # IRCallUnboxed2 calls a C `_unboxed` extern.  Every variant the codegen can
+  # currently emit (vector_get, map_get, str_char_at, …) returns { tag, value }
+  # by value and does NOT allocate.  Peek the callee name (B2 reach extension):
+  # non-trigger for the verified non-allocating variants, trigger otherwise — the
+  # fallback is deliberate, so an unrecognised name is over-rooted, not trusted.
   | sprout_ir.IRCallUnboxed2 _ _ _ fname _ ->
       if is_nonallocating_unboxed_read(fname) then false else true
   # IRRetUnboxed2 is a terminator: two insertvalues + ret, pure — no allocation.

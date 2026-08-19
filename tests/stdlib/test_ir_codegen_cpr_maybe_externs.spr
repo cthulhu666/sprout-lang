@@ -1,0 +1,158 @@
+import stdlib.test (TestState, new_state, assert_true, assert_false, summary)
+import stdlib.compiler.lexer as lexer
+import stdlib.compiler.parser as parser
+import stdlib.compiler.checker as checker
+import stdlib.compiler.lowering as lowering
+import stdlib.compiler.ast_to_ir as ast_to_ir
+import stdlib.compiler.ir_rooting as ir_rooting
+import stdlib.compiler.ir_lowering as ir_lowering
+import stdlib.compiler.typed_ast as typed_ast
+
+# Pins the MEMBERSHIP of ast_to_ir.unboxed_maybe_extern_name — the Tier-1 CPR
+# allow-list that decides whether `match <extern>(..)` emits IRCallUnboxed2 (a
+# { i64, i64 } call into a `<name>_unboxed` C variant) or an ordinary boxed
+# `call i64 @<name>`.
+#
+# Until 2026-08-19 that list had NO test: nothing in tests/ referenced
+# `unboxed_maybe_extern_name`, so a name could be added or dropped silently. The
+# list is also duplicated in ir_lowering.sprout's `declare` block (see the
+# "Must stay in sync" comment at ir_lowering.sprout:520), and drift between the
+# two surfaces only at link time.
+#
+# The two ALLOCATING variants (regex_find_match_unboxed, term_read_line_unboxed)
+# were removed on 2026-08-19. Measured value was ~10 ns against a ~1200 ns
+# regexec-dominated call — 0.8%, and slower in 2 of 5 rounds — while they were
+# the sole reason the runtime's CPR block could not assert the strong "none of
+# these allocate" GC invariant. AGENTS.md "Builtin vs Stdlib" rule 6 (performance
+# is not sufficient justification without a measured bottleneck) settles it.
+#
+# They were NOT dead code, despite having zero call sites in all 60 golden IR
+# files. `regex.find_first` is a bare forward to the extern, so a caller matching
+# it with SIMPLE arms gets a Tier-2 worker that reaches Tier-1 — which is what
+# tests/stdlib/test_regex.spr does, executing the variant on every CI run. The
+# golden corpus misses it only because examples/regex_demo.sprout destructures
+# with a NESTED arm, which the peephole rejects. That near-miss is the reason
+# this file tests the allow-list directly rather than relying on corpus evidence.
+
+# --- Fixture construction ---------------------------------------------------
+# Two details this harness needs, both learned the hard way:
+#
+# 1. `checker.typecheck_typed(prog, Nil)` runs with an EMPTY environment — no
+#    prelude — so `Just`/`Nothing` are unknown constructors unless the fixture
+#    declares its own `Maybe`. That is harmless here: the peephole dispatches on
+#    the constructor NAMES (ast_to_ir.is_simple_maybe_arm matches the literal
+#    strings "Just"/"Nothing"), not on the prelude's identity for the type.
+#
+# 2. The peephole keys on the callee NAME only, never on the payload type, so
+#    each extern is declared with a deliberately simplified signature (`Maybe
+#    Int` where the real `regex_find_match` returns `Maybe Match`). These sources
+#    are translated, never linked, so the simplification is unobservable.
+let maybe_decl = "type Maybe a =\n  | Nothing\n  | Just a\n\n"
+
+# A direct `match <name>(..)` with simple Maybe arms — exactly the shape the
+# peephole requires.
+fn probe_two_arg(name: String) -> String =
+  maybe_decl
+    ++ "extern fn " ++ name ++ "(a: String, b: String) -> Maybe Int\n\n"
+    ++ "fn probe(a: String, b: String) -> Int =\n"
+    ++ "  match " ++ name ++ "(a, b) with\n"
+    ++ "  | Just m -> m\n"
+    ++ "  | Nothing -> 0\n"
+
+fn probe_no_arg(name: String) -> String =
+  maybe_decl
+    ++ "extern fn " ++ name ++ "() -> Maybe Int\n\n"
+    ++ "fn probe() -> Int =\n"
+    ++ "  match " ++ name ++ "() with\n"
+    ++ "  | Just m -> m\n"
+    ++ "  | Nothing -> 0\n"
+
+# Returns the emitted IR, or a string starting "ERR: ". Deliberately NOT a
+# `Result`: an earlier draft returned one and folded every failure to `false`,
+# which made each `assert_false` pass VACUOUSLY when the fixture did not even
+# typecheck. Every fixture below is asserted to translate before its content is
+# asserted, so a broken fixture fails loudly instead of reading as a clean absence.
+fn translate_or_msg(src: String) -> String !{IO} =
+  match lexer.tokenize(src) with
+  | Err _ -> "ERR: lex"
+  | Ok toks ->
+      match parser.parse_program(toks) with
+      | Err _ -> "ERR: parse"
+      | Ok prog ->
+          do
+            tc <- checker.typecheck_typed(prog, Nil)
+            match tc with
+            | typed_ast.TypedErr _ msg -> "ERR: check: " ++ msg
+            | typed_ast.TypedOk typed_prog env ->
+                match ast_to_ir.translate_program(lowering.lower_program(typed_prog, env)) with
+                | Err msg -> "ERR: ast_to_ir: " ++ msg
+                | Ok pair ->
+                    match pair with
+                    | (ir_prog, idx_map) ->
+                        ir_lowering.lower_program(ir_rooting.insert_roots(ir_prog, idx_map))
+
+# Spelled as an if/else rather than `!str_starts_with(...)` on purpose: `just fmt`
+# rewrites a `!`-negated CALL to `! str_starts_with (out, "ERR: ")`, adding both a
+# space after `!` and one before `(` (BACKLOG.md, "just fmt puts a space between a
+# `!`-negated callee and its arguments", P3). Nothing else in-tree currently trips
+# that bug and this file should not become the first. Restore the `!` form once
+# is_call_like_pp_other in formatter.sprout learns about `!`.
+fn translated(out: String) -> Bool =
+  if str_starts_with(out, "ERR: ") then false else true
+
+fn has(out: String, needle: String) -> Bool =
+  str_find(out, needle) != -1
+
+fn main() -> Unit !{IO} =
+  do
+    state <- new_state()
+
+    # --- REMOVED (2026-08-19): the two variants that allocated their payload. --
+    # Each must now lower to the ordinary boxed call, and the `_unboxed` symbol
+    # must appear NOWHERE in the module — not even as a `declare`, since
+    # ir_lowering emits that block unconditionally for every listed name.
+    rgx <- translate_or_msg(probe_two_arg("regex_find_match"))
+    assert_true(state, "regex fixture translates", translated(rgx))
+    assert_true(state, "regex_find_match lowers to the BOXED call",
+                has(rgx, "call i64 @regex_find_match("))
+    assert_false(state, "regex_find_match_unboxed appears nowhere (call or declare)",
+                 has(rgx, "regex_find_match_unboxed"))
+
+    trl <- translate_or_msg(probe_no_arg("term_read_line"))
+    assert_true(state, "term_read_line fixture translates", translated(trl))
+    assert_true(state, "term_read_line lowers to the BOXED call",
+                has(trl, "call i64 @term_read_line("))
+    assert_false(state, "term_read_line_unboxed appears nowhere (call or declare)",
+                 has(trl, "term_read_line_unboxed"))
+
+    # --- SURVIVORS: the eight non-allocating reads keep the peephole. ---------
+    # These are the hot ones — across the 60-file golden corpus str_char_at has
+    # 165 call sites, map_nth_key/map_nth_value 147 each, vector_get 98 — and
+    # every one returns an existing pointer or an immediate, which is what lets
+    # the runtime block assert "none of these allocate" once the two above go.
+    vget <- translate_or_msg(probe_two_arg("vector_get"))
+    assert_true(state, "vector_get fixture translates", translated(vget))
+    assert_true(state, "vector_get keeps CPR (non-allocating read)",
+                has(vget, "call { i64, i64 } @vector_get_unboxed"))
+
+    schar <- translate_or_msg(probe_two_arg("str_char_at"))
+    assert_true(state, "str_char_at keeps CPR (non-allocating read)",
+                has(schar, "call { i64, i64 } @str_char_at_unboxed"))
+
+    mget <- translate_or_msg(probe_two_arg("map_get"))
+    assert_true(state, "map_get keeps CPR (non-allocating read)",
+                has(mget, "call { i64, i64 } @map_get_unboxed"))
+
+    eget <- translate_or_msg(probe_no_arg("env_get"))
+    assert_true(state, "env_get keeps CPR (returns getenv pointer, no allocation)",
+                has(eget, "call { i64, i64 } @env_get_unboxed"))
+
+    # --- Membership is an explicit allow-list, not a suffix convention. -------
+    # Locks that nothing opts in merely by existing: an extern absent from
+    # unboxed_maybe_extern_name stays boxed even in the peephole's exact shape.
+    other <- translate_or_msg(probe_two_arg("some_other_extern"))
+    assert_true(state, "unlisted-extern fixture translates", translated(other))
+    assert_false(state, "an extern outside the allow-list never gets CPR",
+                 has(other, "some_other_extern_unboxed"))
+
+    summary(state)

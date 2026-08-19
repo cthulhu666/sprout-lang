@@ -1074,8 +1074,11 @@ fn translate_expr(expr: typed_ast.TypedExpr, params: List String,
       # Deliberately a call rather than an inline IntRange construction: building
       # the constructor here would mean looking a prelude ctor tag up from the
       # lowering, and a preludeless file's `a..b` would then fail with a novel
-      # "unknown constructor" instead of the same undefined-symbol link error every
-      # other prelude call already produces.  One indirection per range literal.
+      # "unknown constructor" instead of the failure every other prelude call
+      # already produces: an unresolvable `@range_up` reference.  Note that is an
+      # IR-PARSE error ("use of undefined value"), not a link error — a prelude
+      # function gets no `declare`, unlike an extern.  One indirection per range
+      # literal.
       #
       # No step argument, because `a..b` is ALWAYS ascending: the syntax has no
       # descending form, so a reversed literal like `5..1` is an EMPTY ascending
@@ -3270,11 +3273,24 @@ fn fresh_body_label(branch_idx: Int, base_idx: Int) -> String =
 
 # Maybe-returning externs with a runtime `<name>_unboxed` (SproutUnboxed2) variant.
 # Width-3 (native_set_to_list) is excluded — different sret ABI, not Tier 1.
+#
+# EVERY name here returns an existing pointer or an immediate and allocates
+# NOTHING.  That is a load-bearing property, not a coincidence: it is what lets
+# the runtime's CPR block assert the strong "no GC can trigger inside these"
+# invariant, and what lets ir_rooting.is_nonallocating_unboxed_read treat the
+# whole list as non-triggers.  Do not add an allocating extern here.
+#
+# `regex_find_match` and `term_read_line` WERE on this list until 2026-08-19 and
+# were the only two that allocated their payload.  Both were removed: measured at
+# ~10 ns against a ~1200 ns regexec-dominated call (0.8%, sign-inconsistent over
+# five rounds), and `term_read_line` blocks on stdin, so neither had a bottleneck
+# to justify the runtime surface (AGENTS.md "Builtin vs Stdlib" rule 6).  They now
+# lower to the ordinary boxed call.  Pinned by
+# tests/stdlib/test_ir_codegen_cpr_maybe_externs.spr.
 fn unboxed_maybe_extern_name(base: String) -> Maybe String =
   if base == "vector_get" || base == "map_get" || base == "map_nth_key"
      || base == "map_nth_value" || base == "bytes_get" || base == "str_char_at"
-     || base == "argv_get" || base == "env_get" || base == "regex_find_match"
-     || base == "term_read_line"
+     || base == "argv_get" || base == "env_get"
   then Just(base ++ "_unboxed")
   else Nothing
 

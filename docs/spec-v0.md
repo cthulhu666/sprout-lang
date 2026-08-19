@@ -654,8 +654,13 @@ RHS must be either:
   > bundler admits the prelude's exported type names in that case rather than
   > rejecting every signature mentioning `Maybe` or `Result`. What such a file
   > cannot do is *build* a range: `a..b` lowers to a call to the prelude's
-  > `range_up`, which compiles and then fails at link with an undefined symbol —
-  > the same outcome as calling any other prelude function from such a file.
+  > `range_up`, so the emitted module carries a `call i64 @range_up` with neither
+  > a `define` nor a `declare` for it. That is invalid IR, rejected by the IR
+  > parser — `error: use of undefined value '@range_up'` — before any link step
+  > is reached. This is the same outcome as calling any other prelude *function*
+  > from such a file, and it is NOT the extern case described above: an extern
+  > always gets a `declare` emitted for it, so an unresolved extern really does
+  > survive to link time.
 - A lowercase type variable (e.g. `a`, `b`) bound by the enclosing type
   declaration's parameter list.
 

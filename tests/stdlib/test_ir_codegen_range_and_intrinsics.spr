@@ -65,9 +65,11 @@ fn main() -> Unit !{IO} =
     #
     # It was `@int_range`, a C builtin with a hardcoded declare.  IntRange is now
     # an ordinary Sprout ADT, so `a..b` is an ordinary Sprout call — deliberately a
-    # call rather than an inline constructor, so that a preludeless file fails with
-    # the same undefined-symbol error as every other prelude call instead of a
-    # novel "unknown constructor" (docs/ranges-v0.md Appendix B).
+    # call rather than an inline constructor, so that a preludeless file fails the
+    # same way every other prelude call does (an unresolvable `@range_up`, which
+    # the IR parser rejects as "use of undefined value" — not a link error, since
+    # a prelude function gets no `declare`) instead of with a novel
+    # "unknown constructor" (docs/ranges-v0.md Appendix B).
     #
     # Source: `fn r() -> IntRange = 1..5`
     # Expected IR: `call i64 @range_up(i64 %t0, i64 %t1)` (or similar SSA names)

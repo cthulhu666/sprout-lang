@@ -494,17 +494,26 @@ fn test20_program() -> sprout_ir.IRProgram =
       Nil)),
     Nil), Nil, Nil, Nil)
 
-# Test 21 (negative lock): `regex_find_range_unboxed` — an unboxed variant that
-# DOES allocate its payload (@sprout_alloc_range_val, runtime:4404) — STAYS a
-# trigger.  Guards against whitelisting every `_unboxed` name blindly.
+# Test 21 (negative lock): an `_unboxed` callee that is NOT on
+# ir_rooting.is_nonallocating_unboxed_read's allow-list STAYS a trigger.  Guards
+# against whitelisting every `_unboxed` name blindly — membership must be an
+# explicit, verified list, never a suffix convention.
+#
+# This used to name `regex_find_range_unboxed`, a real allocating variant.  That
+# symbol was renamed to regex_find_match_unboxed on 2026-08-19 and then deleted
+# outright (it was one of only two allocating variants; see the CPR block comment
+# in runtime/sprout_runtime.c).  The test kept passing throughout, because ANY
+# unrecognised name is a trigger — which is precisely why it had stopped testing
+# anything real.  It now uses an obviously-hypothetical name, so it can never
+# again drift into naming a symbol that does not exist while looking meaningful.
 fn test21_program() -> sprout_ir.IRProgram =
   sprout_ir.IRProgram(Cons(
-    sprout_ir.IRFunction("regex_unboxed_trigger",
+    sprout_ir.IRFunction("unlisted_unboxed_trigger",
       Cons(("p", sprout_ir.IRTHeap), Cons(("pat", sprout_ir.IRTHeap),
       Cons(("txt", sprout_ir.IRTHeap), Nil))), "i64", Cons(
       sprout_ir.IRBlock("entry",
         Cons(sprout_ir.IRCallUnboxed2("%tag", "%ro", sprout_ir.IRTHeap,
-                                      "regex_find_range_unboxed", Cons("%pat", Cons("%txt", Nil))),
+                                      "hypothetical_allocating_unboxed", Cons("%pat", Cons("%txt", Nil))),
         Cons(sprout_ir.IRRet("%p"), Nil))),
       Nil)),
     Nil), Nil, Nil, Nil)
@@ -778,8 +787,8 @@ fn main() -> Unit !{IO} =
     check_false("T20: no push_i64_root across vector_get_unboxed (non-allocating unboxed read)",
                  contains(lower(test20_program()), "call i64 @sprout_gc_push_i64_root")),
 
-    # --- Test 21 (negative lock): regex_find_range_unboxed STAYS a trigger (allocates payload).
-    check_true("T21: regex_find_range_unboxed (allocating unboxed) still roots the live heap value",
+    # --- Test 21 (negative lock): an unlisted `_unboxed` callee STAYS a trigger.
+    check_true("T21: an unboxed variant outside the allow-list still roots the live heap value",
                 contains(lower(test21_program()), "call i64 @sprout_gc_push_i64_root")),
 
     # --- Test 22 (B2 reach): env_get_unboxed is a NON-trigger (returns getenv ptr, no alloc).

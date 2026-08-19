@@ -45,6 +45,22 @@ Allowlisted 12 functions (all have C `_unboxed` implementations):
 `regex_find_range`, `vector_get`, `map_get`, `map_nth_key`, `map_nth_value`,
 `bytes_get`, `native_set_to_list`.
 
+> **The list above is the 2026-05-27 original and is no longer current.** Tier-1
+> membership now lives in `ast_to_ir.unboxed_maybe_extern_name` and is **8**:
+> `vector_get`, `map_get`, `map_nth_key`, `map_nth_value`, `bytes_get`,
+> `str_char_at`, `argv_get`, `env_get`. The four that left, so the arithmetic is
+> checkable: `native_set_to_list` moved to the width-3 sret ABI (per the status
+> note above, so not Tier 1); `str_char_at_byte` went with
+> `str_char_width_at_byte`, replaced by the total `decode_char_at` over `Bytes` in
+> `stdlib.compiler.source` (review F3); and `regex_find_range` was
+> renamed `regex_find_match` and then removed along with `term_read_line` on
+> 2026-08-19 — they were the only two whose `_unboxed` variant ALLOCATED, which
+> forced the runtime's CPR block to weaken its GC invariant to "allocation must be
+> last" for a measured gain of ~0.8% on a `regexec`-dominated call. Every
+> remaining entry allocates nothing. The membership of both lists (and the
+> matching `declare` block in `ir_lowering.sprout`) is pinned by
+> `tests/stdlib/test_ir_codegen_cpr_maybe_externs.spr`.
+
 Codegen: `emit_match_unboxed_adt` routes `match f(args) with` to
 `call { i64, i64 } @f_unboxed(...)` + `extractvalue` (no `sprout_tag`/`sprout_field`).
 
