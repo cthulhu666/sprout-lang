@@ -73,6 +73,21 @@ fn main() -> Unit !{IO} =
     assert_eq(state, "and therefore walks normally instead of hanging",
       range_count(IntRange(1, 6, 0)), 6)
 
+    # The case that motivated normalizing rather than honouring the step, at the
+    # boundary where honouring it is not merely wrong but non-terminating.
+    #
+    # `range_at_end` stops on exact equality with the end bound. With step 4 from
+    # int_max - 2 the walker would land on int_max - 2, then compute int_max + 2 —
+    # which wraps to a large negative — so it never equals int_max and
+    # `range_past_end` (current > end) is false forever. Normalizing to +1 makes
+    # this identical to `range_up(int_max - 2, int_max)`, which terminates.
+    #
+    # This assertion HANGS rather than fails if range_step ever stops normalizing.
+    let int_max = 9223372036854775807
+
+    assert_eq(state, "a malformed step at MAX_INT terminates via normalization",
+      range_count(IntRange(int_max - 2, int_max, 4)), 3)
+
     # 3. Stringification carries the direction. Without it the two ranges below —
     # one with five elements, one with none — are indistinguishable as text.
     #
