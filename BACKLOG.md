@@ -4009,6 +4009,37 @@ there in its Appendix C. None is in scope for that change.
 
 ### CI / Build Performance
 
+- [ ] `P2` **The apt LLVM install has no retry and no cache, and it hung CI for 24 min on
+  2026-08-19.** `.github/workflows/ci.yml:60-62` (job `test`) and `:233-235` (job `lsp`) both run a
+  bare `sudo apt-get update && sudo apt-get install -y llvm clang …` with no retry, no timeout and no
+  package cache. On run 32302215532 that single step sat *in progress* for **24 minutes**; the same
+  step on the immediately preceding run (32298377900, 43 min earlier) took **24 seconds** — a ~60×
+  stall, before one line of Sprout was compiled. The other four jobs (macos, windows, lsp,
+  intellij-plugin) finished in 1–4 min, so the PR simply looked like it had slow tests.
+
+  Two properties make this worse than an ordinary flake:
+
+  - **It cannot fail fast.** GitHub's default job timeout is 6 hours, so a stalled mirror burns the
+    whole budget rather than erroring. Diagnosis requires drilling into per-step timings; from the
+    checks list it is indistinguishable from a long test run.
+  - **The workflow caches the deterministic thing and not the fragile one.** There is a
+    `Cache stage-1 binary` step, so the *local, reproducible* bootstrap (23s) is cached, while the
+    *networked, third-party* apt fetch is not. That is the risk exactly inverted.
+
+  **Note this supersedes the "red herring" line in the item below.** That entry says
+  "`setup` (the apt-get job) is a red herring — ~1s every run; the GCE host is persistent" — measured
+  on the former self-hosted GCE worker, where the package set survived between runs. CI moved to
+  GitHub-hosted `ubuntu-latest` on 2026-07-31, where every run starts from a clean image and the
+  install is a fresh network fetch. The conclusion did not survive the move.
+
+  Options, cheapest first: (a) wrap both steps in a retry loop (3 attempts, backoff) — a handful of
+  lines, no new dependency, and enough to convert a stalled mirror into a retried one; (b) add
+  `timeout-minutes` to the step so it fails in ~5 min instead of hanging for 6 hours — pairs well
+  with (a) and is the smallest change that restores fail-fast; (c) cache the apt archives, or use a
+  prebuilt LLVM action, which also cuts the normal-case 24s. (a)+(b) together are the recommended
+  first increment; (c) is a separate optimization and should be measured before it is assumed to
+  help, since 24s is not currently a bottleneck.
+
 - [ ] `P2` **CI wall time grew ~8 → 15–20 min ("slower and slower")** — investigated 2026-07-22, no code landed (findings recorded, build paused by Kuba's call). **NOTE (2026-07-31): all measurements below were taken on the former self-hosted GCE worker. CI now runs on GitHub-hosted `ubuntu-latest` — wall times and the worker-capacity levers are superseded; retriage against the new runner before acting.** Two independent effects, kept separate:
   - *Monotonic creep (the "slower and slower"):* the stdlib test corpus grew 101 (Jun 25) → 144 (Jul 8) → 211 (Jul 21). `test-stdlib-stage1` is CPU-bound — 137s wall but **13.5 min of CPU** at 8-wide on an 11-core box locally — and scales ~linearly with test count. The hogs are the **18 heavy compiler-importing tests** (each re-emits the whole compiler, ~16s emit-IR locally), not the 153 prelude-only tests (~0.5s each).
   - *Bimodal ~7-min spikes (→21 min):* stage-1 build-cache miss. The `actions/cache` key is `hashFiles('bootstrap/compile_driver.ll', 'runtime/sprout_runtime.c')`, and nearly every compiler PR refreshes the seed → new key → `bootstrap-from-seed` re-runs `opt --passes=verify` + `clang -O2` over ~271k IR lines. Confirmed via a natural experiment: commit `afff944` ran 21.2 / 20.2 / 14.4 min (runs 758/759/760) on byte-identical code as the cache warmed. `setup` (the apt-get job) is a red herring — ~1s every run; the GCE host is persistent.
