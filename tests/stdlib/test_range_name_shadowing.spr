@@ -1,0 +1,50 @@
+import stdlib.test (TestState, new_state, assert_eq, summary)
+
+# Regression: the statically-empty-range diagnostic keyed on the NAME `range_up` /
+# `range_down` without consulting scope, so a LOCAL binding that shadows one of
+# them was rejected on sight:
+#
+#   fn go(range_up: Int -> Int -> Int) -> Int = range_up(5, 1)
+#   ERROR: check: range `range_up(5, 1)` is empty, so it yields no values...
+#
+# Top-level declarations are safe because a module's own are qualified
+# (`main.range_up`), but parameters, `let` bindings and lambda parameters stay
+# bare — so the name alone cannot decide whether the prelude's constructor is
+# what is being called. The fix requires the name to resolve to something that
+# actually returns an IntRange.
+#
+# This file must COMPILE for the test to mean anything: a false positive is a
+# check error, so the regression shows up as a build failure rather than a wrong
+# assertion.
+
+fn subtract(a: Int, b: Int) -> Int = a - b
+
+# `range_up` here is a parameter, not the prelude constructor.
+fn apply_shadowed_up(range_up: Int -> Int -> Int) -> Int =
+  range_up(5, 1)
+
+# Same for the descending name, and with bounds that WOULD be a statically empty
+# `range_down` if the prelude's constructor were what this resolved to.
+fn apply_shadowed_down(range_down: Int -> Int -> Int) -> Int =
+  range_down(1, 5)
+
+fn main() -> Unit !{IO} =
+  do
+    state <- new_state()
+
+    assert_eq(state, "a parameter named range_up shadows the constructor",
+      apply_shadowed_up(subtract), 4)
+
+    assert_eq(state, "a parameter named range_down shadows the constructor",
+      apply_shadowed_down(subtract), -4)
+
+    # A `let` binding shadows it too, and the diagnostic must still stay quiet.
+    let range_up = subtract
+
+    assert_eq(state, "a let binding named range_up shadows the constructor",
+      range_up(5, 1), 4)
+
+    # The real constructor is still diagnosed where it IS the prelude's: that
+    # case is covered by tests/conformance/type_error/reversed_literal_range_call.
+
+    summary(state)

@@ -212,15 +212,28 @@ Ranges are built by one of two peer constructors, and neither is the default spe
 ```sprout
 range_up(1, 5)      # 1 2 3 4 5      1..5 is the same thing
 range_down(5, 1)    # 5 4 3 2 1
-range_up(5, 1)      # empty — end is below start
-range_down(1, 5)    # empty — end is above start
 ```
+
+Emptiness is direction-relative: a range is empty when its end lies past its start
+*in the direction of travel*, so `range_up(hi, lo)` with `hi > lo` yields nothing, and
+so does `range_down(lo, hi)` with `lo < hi`. Both are spelled with **computed** bounds
+above on purpose — written with constant ones they are rejected at compile time:
+
+```
+ERROR: check: range `range_up(5, 1)` is empty, so it yields no values: the start
+bound 5 is above the end bound 1, and it counts upward only. To count downward
+write `range_down(5, 1)`
+```
+
+An empty range is what you want from `range_up(0, n - 1)` at `n == 0`; an empty range
+you *wrote out in full* is a typo, and the two are distinguishable because only the
+second has literal bounds.
 
 Direction lives in the range itself (`range_step` reports `+1` or `-1`), so every
 combinator takes either one unchanged. The `a..b` literal is **ascending only** —
 there is no descending literal, so a reversed one is an *empty ascending* range rather
-than a descending one, and a reversed literal with constant bounds is rejected at
-compile time since it can only be a typo. See [docs/ranges-v0.md](docs/ranges-v0.md).
+than a descending one, and the same literal-bounds rule rejects it. See
+[docs/ranges-v0.md](docs/ranges-v0.md).
 
 Because inline multi-statement `do`-lambdas do not yet parse, lift a multi-line step
 body into a named helper and pass it via a single-expression lambda:

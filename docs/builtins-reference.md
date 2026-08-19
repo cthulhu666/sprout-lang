@@ -83,9 +83,11 @@ through the module's wrapper API:
 | `crypto_*` | `stdlib.crypto` | bare name |
 | `regex_*` | `stdlib.regex` | bare name |
 | `proc_run_vec`, `proc_run_stdin_vec` | `stdlib.process` | `process.proc_run(…)` |
-- `int_range(lo: Int, hi: Int) -> IntRange`
+- `int_range(lo: Int, hi: Int) -> IntRange` — the **ascending** constructor, behind `range_up` and the `a..b` literal. Kept at arity 2 rather than growing a step parameter because its `declare` is hardcoded in `ir_lowering.sprout` *and baked into the committed seed*, so a wider signature would make the old seed emit a 2-arg declare against 3-arg calls.
+- `int_range_by(lo: Int, hi: Int, step: Int) -> IntRange` — the general constructor, behind `range_down`. `step` is the **direction**, restricted to `+1` or `-1`; anything else is fatal. Direction is carried rather than inferred from bound order, which is what makes an empty range representable at all (`docs/ranges-v0.md`).
 - `int_range_start(r: IntRange) -> Int`
 - `int_range_end(r: IntRange) -> Int`
+- `int_range_step(r: IntRange) -> Int` — `+1` or `-1`, behind `range_step`. Every walker consults it instead of comparing the bounds, so `range_up(5, 1)` and `range_down(5, 1)` are distinguishable despite identical bounds.
 - `tcp_listen(port: Int) -> Int !{IO}`
 - `tcp_accept(listener: Int) -> Result stdlib.net.TcpError Int !{IO}` — **recoverable**, not fatal. `EAGAIN` parks; `EINTR`, `ECONNABORTED` and the eight pending-network errnos [accept(2)](https://man7.org/linux/man-pages/man2/accept.2.html) says to *"treat like EAGAIN by retrying"* (`ENETDOWN`, `EPROTO`, `ENOPROTOOPT`, `EHOSTDOWN`, `ENONET`, `EHOSTUNREACH`, `EOPNOTSUPP`, `ENETUNREACH`) are retried inside the builtin, since none is an event a caller could act on. `EMFILE`/`ENFILE` and a full connection table become `Err TcpAcceptExhausted`, which a caller answers by backing off and retrying — the condition is transient, so this must never be fatal. Everything else (`EBADF`, `EINVAL`, `ENOTSOCK`) becomes `Err TcpAcceptFailed`, which does not heal and should stop the loop.
 - `tcp_write(conn: Int, payload: String) -> Unit !{IO}`

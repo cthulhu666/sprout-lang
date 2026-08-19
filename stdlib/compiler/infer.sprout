@@ -1068,9 +1068,10 @@ fn infer_call(
       else
         # A statically-empty range_up/range_down, rejected before the call is
         # otherwise inferred.  Same rule as the `a..b` literal form; see
-        # reversed_literal_range.  Fires only on the bare prelude names with two
-        # literal bounds, so it costs one string compare on every other call.
-        match reversed_literal_range_call(name, args) with
+        # reversed_literal_range.  Fires only on a name that RESOLVES to a range
+        # constructor with two literal bounds, so it costs one arity check on
+        # every other call.
+        match reversed_literal_range_call(name, env, args) with
         | Just message -> InferErr(pos, message)
         | Nothing ->
             # `v.render(x)` — a call whose callee is a record field access on an
@@ -4965,15 +4966,43 @@ fn reversed_literal_range(lo: ast.Expr, hi: ast.Expr) -> Maybe String =
 # The constructor spelling of the same mistake.  Matched on the BARE name only:
 # prelude functions are not module-qualified, so a user's own `range_up` inside a
 # module reads as `mymod.range_up` here and is correctly left alone.
-fn reversed_literal_range_call(name: String, args: List ast.Expr) -> Maybe String =
+fn reversed_literal_range_call(name: String, env: Dict types.Scheme, args: List ast.Expr) -> Maybe String =
   match args with
   | [lo, hi] ->
-      if name == "range_up" then
+      if ! yields_int_range (name, env) then Nothing
+      else if name == "range_up" then
         static_empty_range(lo, hi, 1, call_form("range_up", lo, hi))
       else if name == "range_down" then
         static_empty_range(lo, hi, -1, call_form("range_down", lo, hi))
       else Nothing
   | _ -> Nothing
+
+# Does `name` resolve to something that actually builds an IntRange?
+#
+# The name alone cannot answer this. A module's own top-level declarations are
+# qualified (`main.range_up`), so those never collide — but PARAMETERS, `let`
+# bindings and lambda parameters stay bare, and shadow the prelude's constructor
+# under an identical spelling. Keying the diagnostic on the spelling therefore
+# rejected `fn go(range_up: Int -> Int -> Int) -> Int = range_up(5, 1)`, a program
+# with no range in it at all (tests/stdlib/test_range_name_shadowing.spr).
+#
+# The scheme settles it: the constructors return IntRange and a shadowing binding
+# almost never does. Checked on the FINAL result so partial application is treated
+# the same as a saturated call.
+fn yields_int_range(name: String, env: Dict types.Scheme) -> Bool =
+  match dict_get(name, env) with
+  | Nothing -> false
+  | Just s -> is_int_range(final_result_type(types.scheme_type(s)))
+
+fn final_result_type(t: types.Type) -> types.Type =
+  match t with
+  | types.TFunc _ ret _ _ -> final_result_type(ret)
+  | _ -> t
+
+fn is_int_range(t: types.Type) -> Bool =
+  match t with
+  | types.TConst id -> types.type_id_eq(id, types.type_id("IntRange"))
+  | _ -> false
 
 fn call_form(fn_name: String, lo: ast.Expr, hi: ast.Expr) -> String =
   match (static_int_value(lo), static_int_value(hi)) with
