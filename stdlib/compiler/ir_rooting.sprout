@@ -59,7 +59,7 @@ fn is_nonallocating_read(fname: String) -> Bool =
 #   argv_get_unboxed (4349), env_get_unboxed (4342) — return an existing
 #     argv / getenv() pointer (no Sprout allocation).
 # EXCLUDED (they DO allocate their payload → MUST stay triggers):
-#   regex_find_range_unboxed (4404, @sprout_alloc_range_val),
+#   regex_find_match_unboxed (allocates the Match via sprout_make2),
 #   term_read_line_unboxed (4368, register_cstr).
 fn is_nonallocating_unboxed_read(fname: String) -> Bool =
   fname == "vector_get_unboxed"
@@ -88,7 +88,7 @@ fn op_triggers_gc(op: sprout_ir.IROp) -> Bool =
   # callee not on the list (correctness > optimization).
   | sprout_ir.IRCall _ _ fname _ -> if is_nonallocating_read(fname) then false else true
   # IRCallUnboxed2 calls a C `_unboxed` extern.  Most (vector_get, map_get, …)
-  # return { tag, value } by value and do NOT allocate; regex_find_range_unboxed
+  # return { tag, value } by value and do NOT allocate; regex_find_match_unboxed
   # and term_read_line_unboxed still allocate their payload.  Peek the callee name
   # (B2 reach extension): non-trigger for the verified non-allocating variants,
   # trigger otherwise.

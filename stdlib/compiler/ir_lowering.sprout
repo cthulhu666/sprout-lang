@@ -524,7 +524,7 @@ export fn ir_header() -> String =
   "declare { i64, i64 } @map_nth_value_unboxed(i64, i64)\n" ++
   "declare { i64, i64 } @bytes_get_unboxed(i64, i64)\n" ++
   "declare { i64, i64 } @str_char_at_unboxed(i64, i64)\n" ++
-  "declare { i64, i64 } @regex_find_range_unboxed(i64, i64)\n" ++
+  "declare { i64, i64 } @regex_find_match_unboxed(i64, i64)\n" ++
   "declare { i64, i64 } @argv_get_unboxed(i64)\n" ++
   "declare { i64, i64 } @env_get_unboxed(i64)\n" ++
   "declare { i64, i64 } @term_read_line_unboxed()\n" ++
@@ -550,17 +550,6 @@ export fn ir_header() -> String =
   # argv_get() work in typed-built binaries (mirrors direct codegen,
   # codegen.sprout:3093/:3350).  i32/ptr match the C signature.
   "declare i64 @sprout_set_argv(i32, ptr)\n" ++
-  # int_range is declared as extern fn in prelude.sprout; the declare is also
-  # hardcoded here so files that call the range syntax (1..N) without importing
-  # prelude explicitly still link.  Listed in is_hardcoded_intrinsic to suppress
-  # the duplicate emit from lower_extern_decls.
-  # Deliberately still 2-ary: `a..b` is always ASCENDING (docs/ranges-v0.md §5),
-  # so the syntax never needs a step argument, and keeping this string stable
-  # avoids a 2-step bootstrap — it is baked into the committed seed, so an arity
-  # change here would make the old seed emit a declare that mismatches the new
-  # call sites.  int_range_by / int_range_step are NOT hardcoded: only `a..b`
-  # reaches the runtime without the prelude, and it reaches only this one.
-  "declare i64 @int_range(i64, i64)\n" ++
   # analysis_* intrinsics are runtime-implemented compiler bridge functions
   # (sprout_runtime.c).  They are NOT represented as TExternFnDecl in any user
   # source file — they are registered only via checker.sprout's analysis_entries()
@@ -623,7 +612,6 @@ fn is_hardcoded_intrinsic(name: String) -> Bool =
   name == "print" || name == "eprint" || name == "argv_get" ||
   name == "print_str" || name == "print_value" || name == "eprint_str" ||
   name == "append" ||
-  name == "int_range" ||
   name == "analysis_check_source" || name == "analysis_declared_names_in_source" ||
   name == "analysis_exported_names_in_source" ||
   name == "analysis_symbol_inventory_in_source" ||

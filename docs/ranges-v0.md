@@ -80,7 +80,11 @@ The silent case is the hazard, and it is the one an author never writes a test f
 2. **No half-open constructor.** The fix makes `range_up(0, n - 1)` correct at `n == 0`, which
    demotes `BACKLOG.md:1804` (B5) from a correctness requirement to optional sugar. Separate
    decision.
-3. **`IntRange` does not become a native Sprout record.** Appendix B — C cannot construct one.
+3. ~~**`IntRange` does not become a native Sprout record.** Appendix B — C cannot construct
+   one.~~ **Reversed 2026-08-19.** It is now a native Sprout ADT and all five `int_range*`
+   builtins are gone. The refutation was about a *record* specifically (records get no runtime
+   ctor registration); an ADT is registered, and the one C-side constructor was decoupled
+   instead. See the note at the head of Appendix B.
 4. **No descending `..` literal syntax.** `5..1` stays an *empty ascending* range, and §5 records
    that asymmetry as a known trap rather than pretending it away.
 5. No `Foldable`/`Iterable` instance for `IntRange` — it is kind `*` and the class needs `* -> *`
@@ -247,8 +251,12 @@ Package A, plus:
 - A prelude extern signature change forces a **full `just refresh-seed`**, not the `seed-fp-ack`
   bypass — see the AGENTS.md caveat on new prelude externs adding `declare` lines to the seed.
 
-**Do not** implement Package B as a native Sprout record. Appendix B records why, with the
-load-bearing fact that kills it.
+> **Superseded 2026-08-19.** This paragraph said *"**Do not** implement Package B as a native
+> Sprout record. Appendix B records why, with the load-bearing fact that kills it."* Package B
+> shipped as described, and was then replaced: `IntRange` is a native Sprout ADT
+> (`IntRange Int Int Int`), the `step` field is an ordinary field, and the runtime carries no
+> range representation at all. The load-bearing fact turned out to be about a shape that was
+> not the one available. See Appendix B.
 
 ### 4.1 Direction-aware contracts
 
@@ -585,6 +593,45 @@ genuinely allocating — a latent use-after-free. The C-extern-only version of t
 available and is unrelated to this design.
 
 ## Appendix B — why `IntRange` is not becoming a native Sprout record
+
+> **SUPERSEDED 2026-08-19.** `IntRange` *is* now a native Sprout type — an ADT,
+> `IntRange Int Int Int` in the prelude — and all five `int_range*` builtins are gone.
+> This appendix is kept because it is the argument that lost, and three of its four
+> claims were true; what it got wrong is what they were worth.
+>
+> - **The "load-bearing assumption" was about the wrong shape.** It refutes a *record*
+>   (records get no runtime ctor registration, so `find_ctor_tag_by_name` fails). That
+>   is correct and still is. But the implementation is an **ADT**, which *is*
+>   registered — so the refutation never applied to the shape actually chosen. The
+>   appendix rejected an option it had not fully enumerated.
+> - **Cost 3 was worthless.** "Bare-file regression" is real — a preludeless `a..b` no
+>   longer compiles. But a preludeless file cannot call `range_start`, `range_count` or
+>   any other accessor either: they are Sprout prelude functions and fail at link. So
+>   the capability being protected was the ability to *construct a range you can
+>   perform no operation on*. Nothing in the corpus used it.
+> - **Costs 1 and 2 were real and were paid.** GC tracing does go from 0 children to 3
+>   (the child count is the object's arity, so scalar fields are walked too), and every
+>   ctor tag downstream of the prelude did shift, moving all ~60 goldens. Accepted
+>   deliberately, with the diff read per DoD #12.
+> - **The escape route the appendix itself named is what unblocked it.** It observed
+>   that the regex consumer "could move under an opaque carrier name with zero C
+>   change". The actual fix was better: `regex_find_match` returns a `Match` directly,
+>   which also closed a separately-filed defect (a half-open span stored in an
+>   inclusive-range type).
+>
+> **On performance, the appendix's implied cost is the wrong sign.** Measured on the
+> emitted IR across all 60 goldens, the change *removes* **823 `alloca` +
+> `sprout_gc_push_i64_root` pairs** (895 removed, 72 added). The mechanism is
+> `ir_rooting.sprout:89`: every `IRCall` counts as possibly-allocating, so each
+> `int_range_start(r)` — a call to a C extern — forced a GC root around it. A pattern
+> match lowers to `sprout_field`, which is not a trigger, so the rooting analysis can
+> now see that reading a range field allocates nothing.
+>
+> An earlier note in this document cited a ~12× read slowdown from a micro-benchmark.
+> That figure is **not reproduced here and contradicts the IR evidence above**, so it
+> is withdrawn rather than restated: 823 fewer root operations cannot make reads
+> slower. Cost 1 (GC tracing 0 → 3 children per range object) is still real and still
+> paid; it is a mark-phase cost on live ranges, not a per-read cost.
 
 Considered and rejected. It was attractive because it would have made `step` an ordinary field, so
 symmetric constructors would need no new builtin and no approval.

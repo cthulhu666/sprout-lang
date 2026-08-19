@@ -1313,7 +1313,7 @@ fn qualify_all_modules(modules: List ParsedModule, all_symbols: Dict ModuleSymbo
 # reaches a type position only through an extern, which is exactly the position
 # the pre-existing type-validation pass in infer does not cover.
 fn undeclared_type_names() -> List String =
-  ["Int", "Double", "Bool", "String", "Char", "Unit", "Bytes", "IntRange",
+  ["Int", "Double", "Bool", "String", "Char", "Unit", "Bytes",
    "Vector", "Map", "NativeSet", "Ref", "Builder"]
 
 # A source type VARIABLE is lowercase (`a`, `elem`); a constructor is uppercase,

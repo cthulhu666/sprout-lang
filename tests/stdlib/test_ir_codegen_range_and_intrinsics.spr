@@ -13,12 +13,16 @@ import stdlib.compiler.sprout_ir as sprout_ir
 #
 # Gap 1: `1..5` (TRange) was unconditionally rejected with
 #   "ast_to_ir: range not yet supported".
-#   Fix: translate start + end_, emit IRCall "int_range".
+#   Fix: translate start + end_, emit IRCall "range_up".  (Originally
+#   "int_range", a C builtin; IntRange became an ordinary Sprout ADT on
+#   2026-08-19 and the callee is now the prelude function.)
 #
 # Gap 2: analysis_* intrinsics (used by the REPL) were not declared in the
 #   emitted LLVM; the runtime implements them but ir_lowering's header omitted
-#   their declares.  Fix: add all 10 analysis_* + int_range to ir_header and
+#   their declares.  Fix: add all 10 analysis_* to ir_header and
 #   is_hardcoded_intrinsic (skipping duplicate emit from prelude's extern fn).
+#   `int_range` was on that list too until IntRange stopped being a builtin: a
+#   Sprout prelude function needs no declare, because it is DEFINED in the bundle.
 
 # Drive a Sprout source string through lex -> parse -> typecheck_typed ->
 # lower_program -> ast_to_ir.translate_program, return IR string or Err.
@@ -57,20 +61,25 @@ fn main() -> Unit !{IO} =
 
     # ---------------------------------------------------------------------------
     # T1: TRange — `1..5` translates without error and emits a call to
-    # @int_range.  Mirrors direct codegen's emit_range which calls
-    # `call i64 @int_range(i64 <start>, i64 <end>)`.
+    # @range_up, the PRELUDE function.
+    #
+    # It was `@int_range`, a C builtin with a hardcoded declare.  IntRange is now
+    # an ordinary Sprout ADT, so `a..b` is an ordinary Sprout call — deliberately a
+    # call rather than an inline constructor, so that a preludeless file fails with
+    # the same undefined-symbol error as every other prelude call instead of a
+    # novel "unknown constructor" (docs/ranges-v0.md Appendix B).
     #
     # Source: `fn r() -> IntRange = 1..5`
-    # Expected IR: `call i64 @int_range(i64 %t0, i64 %t1)` (or similar SSA names)
+    # Expected IR: `call i64 @range_up(i64 %t0, i64 %t1)` (or similar SSA names)
     t1_no_err <- translated_ok_contains(
       "fn r() -> IntRange =\n  1..5\n",
       "define i64 @r")
     assert_true(state, "T1a: TRange — `1..5` compiles (no error)", t1_no_err)
 
-    t1_calls_int_range <- translated_ok_contains(
+    t1_calls_range_up <- translated_ok_contains(
       "fn r() -> IntRange =\n  1..5\n",
-      "@int_range")
-    assert_true(state, "T1b: TRange — `1..5` emits call to @int_range", t1_calls_int_range)
+      "@range_up")
+    assert_true(state, "T1b: TRange — `1..5` emits call to @range_up", t1_calls_range_up)
 
     # T1c: TRange with variable endpoints.
     # `fn r2(lo: Int, hi: Int) -> IntRange = lo .. hi`
@@ -78,8 +87,8 @@ fn main() -> Unit !{IO} =
     # would otherwise scan `lo..hi` as a single token and fail to parse TRange.
     t1c <- translated_ok_contains(
       "fn r2(lo: Int, hi: Int) -> IntRange =\n  lo .. hi\n",
-      "@int_range")
-    assert_true(state, "T1c: TRange with variable endpoints emits @int_range call", t1c)
+      "@range_up")
+    assert_true(state, "T1c: TRange with variable endpoints emits @range_up call", t1c)
 
     # ---------------------------------------------------------------------------
     # T2: analysis_* intrinsics — ir_lowering header declares them so that

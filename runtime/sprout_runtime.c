@@ -48,7 +48,6 @@ typedef enum {
   SPROUT_HEAP_BYTES = 5,
   SPROUT_HEAP_BUILDER = 6,
   SPROUT_HEAP_TUPLE = 7,
-  SPROUT_HEAP_RANGE = 8,
   SPROUT_HEAP_REF = 9,
   SPROUT_HEAP_CSTR = 10
 } SproutHeapKind;
@@ -118,18 +117,6 @@ typedef struct {
   size_t count;
   BytesVal** chunks;
 } BuilderVal;
-
-/* An inclusive integer interval walked in a fixed direction.  `step` is +1 or -1
-   and never 0; it holds the DIRECTION rather than inferring it from bound order,
-   which is what lets an interval be empty (ascending with end < start, or
-   descending with end > start) instead of silently reversing.  See
-   docs/ranges-v0.md §4.1.  Scalar-only, so the GC traces zero children
-   (sprout_heap_child_count_payload) and the block size derives from sizeof. */
-typedef struct {
-  long long start;
-  long long end;
-  long long step;
-} IntRangeVal;
 
 typedef struct {
   long long value;
@@ -207,7 +194,7 @@ static long long g_gc_marked_count = 0;
 /* Per-type live counts and CSTR bytes after each sweep (logged with SPROUT_DEBUG_GC). */
 static long long g_gc_live_obj = 0, g_gc_live_closure = 0, g_gc_live_vec = 0;
 static long long g_gc_live_map = 0, g_gc_live_bytes = 0, g_gc_live_builder = 0;
-static long long g_gc_live_tuple = 0, g_gc_live_range = 0, g_gc_live_ref = 0;
+static long long g_gc_live_tuple = 0, g_gc_live_ref = 0;
 static long long g_gc_live_cstr = 0, g_gc_live_cstr_bytes = 0;
 /* Adaptive-threshold enable switch.  NOT a ratio any more: since the policy became
    `threshold = live * factor` (see sprout_gc_collect_with_reason) the swept fraction
@@ -364,7 +351,6 @@ static long long sprout_utf8_decode_at(const char* s, size_t pos, size_t width);
 static long long sprout_utf8_codepoint_prefix_count(const char* s, size_t byte_limit);
 static void json_append_value(ByteBuf* out, long long value);
 static BytesVal* bytes_from_chunk_bytes(const unsigned char* data, size_t len, const char* ctx);
-static IntRangeVal* sprout_alloc_range_val(const char* ctx);
 static void sha256_digest(const unsigned char* data, size_t len, unsigned char out[32]);
 static void hmac_sha256_digest(const unsigned char* key, size_t key_len, const unsigned char* msg, size_t msg_len, unsigned char out[32]);
 static char* base64_encode_bytes(const unsigned char* data, size_t len);
@@ -568,10 +554,10 @@ static void sprout_gc_log_cycle(
   );
   fprintf(
     stderr,
-    "[sprout gc]   types: obj=%lld closure=%lld vec=%lld map=%lld ref=%lld cstr=%lld(%.1fKB) bytes=%lld builder=%lld tuple=%lld range=%lld\n",
+    "[sprout gc]   types: obj=%lld closure=%lld vec=%lld map=%lld ref=%lld cstr=%lld(%.1fKB) bytes=%lld builder=%lld tuple=%lld\n",
     g_gc_live_obj, g_gc_live_closure, g_gc_live_vec, g_gc_live_map,
     g_gc_live_ref, g_gc_live_cstr, (double)g_gc_live_cstr_bytes / 1024.0,
-    g_gc_live_bytes, g_gc_live_builder, g_gc_live_tuple, g_gc_live_range
+    g_gc_live_bytes, g_gc_live_builder, g_gc_live_tuple
   );
 }
 
@@ -1085,7 +1071,6 @@ static size_t slot_bytes(SproutHeapKind kind, unsigned long long aux) {
     case SPROUT_HEAP_BYTES:   payload = sizeof(BytesVal);        break;
     case SPROUT_HEAP_BUILDER: payload = sizeof(BuilderVal);      break;
     case SPROUT_HEAP_TUPLE:   payload = (size_t)aux * 8;        break;
-    case SPROUT_HEAP_RANGE:   payload = sizeof(IntRangeVal);     break;
     case SPROUT_HEAP_REF:     payload = sizeof(RefVal);          break;
     case SPROUT_HEAP_CSTR:    payload = (size_t)aux + 1;        break; /* aux=len, +1 for NUL */
     default:                  payload = 8;                      break;
@@ -1878,13 +1863,6 @@ static BytesVal** sprout_alloc_builder_chunks(size_t count, const char* ctx) {
   return count == 0 ? NULL : (BytesVal**)sprout_alloc_counted(&g_debug_alloc_builder, count * sizeof(BytesVal*), ctx);
 }
 
-static IntRangeVal* sprout_alloc_range_val(const char* ctx) {
-  sprout_gc_maybe_collect_threshold();
-  IntRangeVal* out = (IntRangeVal*)sprout_gc_alloc_block(SPROUT_HEAP_RANGE, 0, sizeof(IntRangeVal), ctx);
-  if (g_debug_alloc_enabled) g_debug_alloc_sprout_obj++;
-  return out;
-}
-
 long long ref_new(long long value) {
   sprout_gc_maybe_collect_threshold();
   RefVal* r = (RefVal*)sprout_gc_alloc_block(SPROUT_HEAP_REF, 0, sizeof(RefVal), "ref_new: out of memory");
@@ -1938,7 +1916,6 @@ static size_t sprout_heap_child_count_payload(void* payload) {
     case SPROUT_HEAP_BYTES:   return 0;
     case SPROUT_HEAP_BUILDER: return ((BuilderVal*)payload)->count;
     case SPROUT_HEAP_TUPLE:   return (size_t)aux;
-    case SPROUT_HEAP_RANGE:   return 0;
     case SPROUT_HEAP_REF:     return 1;
     case SPROUT_HEAP_CSTR:    return 0;
     default:                  return 0;
@@ -1974,7 +1951,6 @@ static long long sprout_heap_child_value_payload(void* payload, size_t index) {
       memcpy(&word, (char*)payload + (index * sizeof(uintptr_t)), sizeof(uintptr_t));
       return (long long)word;
     }
-    case SPROUT_HEAP_RANGE: break;
     case SPROUT_HEAP_REF:
       if (index == 0) return ((RefVal*)payload)->value;
       break;
@@ -2379,7 +2355,7 @@ static void sprout_gc_sweep(void) {
   memset(g_freelist, 0, sizeof(g_freelist));
   g_gc_live_obj = g_gc_live_closure = g_gc_live_vec = 0;
   g_gc_live_map = g_gc_live_bytes = g_gc_live_builder = 0;
-  g_gc_live_tuple = g_gc_live_range = g_gc_live_ref = 0;
+  g_gc_live_tuple = g_gc_live_ref = 0;
   g_gc_live_cstr = g_gc_live_cstr_bytes = 0;
 
   int lineage_on = sprout_gc_lineage_on();
@@ -2464,7 +2440,6 @@ static void sprout_gc_sweep(void) {
             case SPROUT_HEAP_BYTES:   g_gc_live_bytes++;    break;
             case SPROUT_HEAP_BUILDER: g_gc_live_builder++;  break;
             case SPROUT_HEAP_TUPLE:   g_gc_live_tuple++;    break;
-            case SPROUT_HEAP_RANGE:   g_gc_live_range++;    break;
             case SPROUT_HEAP_REF:     g_gc_live_ref++;      break;
             case SPROUT_HEAP_CSTR:
               g_gc_live_cstr++;
@@ -2730,9 +2705,6 @@ static void print_inline_value(long long v) {
     SproutHeapKind kind = sprout_hdr_kind(h);
     if (kind == SPROUT_HEAP_CSTR) {
       printf("%s", (const char*)(uintptr_t)v);
-    } else if (kind == SPROUT_HEAP_RANGE) {
-      IntRangeVal* value = (IntRangeVal*)(uintptr_t)v;
-      printf("%lld..%lld", value->start, value->end);
     } else if (kind == SPROUT_HEAP_TUPLE) {
       /* Tuple blob: aux words, each a value (recurse).  Renders structurally
          like an ADT — e.g. (1, 7) — consistent with print's Bool-as-i64
@@ -2862,50 +2834,6 @@ long long double_to_string(long long bits) {
   memcpy(out, buf, content_len);
   out[content_len] = '\0';
   return (long long)(uintptr_t)out;
-}
-/* Ascending constructor.  Kept at its original 2-arity ON PURPOSE: the declare
-   for @int_range is hardcoded in ir_lowering.sprout so that `a..b` links without
-   the prelude, and that string is baked into the committed bootstrap seed.
-   Changing the arity here would make the old seed emit a 2-arg declare against
-   3-arg calls, forcing a 2-step bootstrap for no semantic gain.  Descending
-   ranges go through int_range_by instead. */
-long long int_range(long long start, long long end) {
-  IntRangeVal* out = sprout_alloc_range_val("int_range: out of memory");
-  out->start = start;
-  out->end = end;
-  out->step = 1;
-  return (long long)(uintptr_t)out;
-}
-/* `step` must be +1 or -1.  Guarded here rather than trusted from the callers:
-   the only Sprout constructor that reaches this is range_down, which hardcodes
-   -1, but this extern outlives it and a step of 0 would make every walker loop
-   forever.  Failing at construction turns a hang into a diagnosable error. */
-long long int_range_by(long long start, long long end, long long step) {
-  if (step != 1 && step != -1)
-    tcp_fail("int_range_by: step must be 1 or -1");
-  IntRangeVal* out = sprout_alloc_range_val("int_range_by: out of memory");
-  out->start = start;
-  out->end = end;
-  out->step = step;
-  return (long long)(uintptr_t)out;
-}
-long long int_range_start(long long range_h) {
-  IntRangeVal* value = (IntRangeVal*)(uintptr_t)range_h;
-  if (value == NULL || sprout_heap_kind_at(value) != SPROUT_HEAP_RANGE)
-    tcp_fail("int_range_start: expected IntRange");
-  return value->start;
-}
-long long int_range_end(long long range_h) {
-  IntRangeVal* value = (IntRangeVal*)(uintptr_t)range_h;
-  if (value == NULL || sprout_heap_kind_at(value) != SPROUT_HEAP_RANGE)
-    tcp_fail("int_range_end: expected IntRange");
-  return value->end;
-}
-long long int_range_step(long long range_h) {
-  IntRangeVal* value = (IntRangeVal*)(uintptr_t)range_h;
-  if (value == NULL || sprout_heap_kind_at(value) != SPROUT_HEAP_RANGE)
-    tcp_fail("int_range_step: expected IntRange");
-  return value->step;
 }
 long long env_get(const char* name) {
   if (name == NULL) tcp_fail("env_get: null name");
@@ -5555,27 +5483,30 @@ SproutUnboxed2 str_char_at_unboxed(long long s_val, long long index) {
   return (SproutUnboxed2){ cached_tag_nothing(), 0 };
 }
 
-SproutUnboxed2 regex_find_range_unboxed(const char* pattern, const char* text) {
-  if (pattern == NULL || text == NULL) tcp_fail("regex_find_range_unboxed: null input");
+/* Builds `stdlib.regex.Match` directly, the same way sprout_make_proc_result
+   builds stdlib.process.ProcResult.  This used to allocate an IntRange and let
+   Sprout unpack it one line later, which meant the runtime carried a whole heap
+   kind to transport two integers — and transported them in a type whose meaning
+   did not match (IntRange is inclusive; a span is half-open, so start == end is
+   "one element" there and "empty" here).  Match says what is meant. */
+SproutUnboxed2 regex_find_match_unboxed(const char* pattern, const char* text) {
+  if (pattern == NULL || text == NULL) tcp_fail("regex_find_match_unboxed: null input");
   regex_t compiled;
   char* error = NULL;
   if (!regex_compile_ere(pattern, &compiled, &error)) {
-    regex_builtin_fail("regex_find_range_unboxed", error);
+    regex_builtin_fail("regex_find_match_unboxed", error);
   }
   regmatch_t match;
   int status = regexec(&compiled, text, 1, &match, 0);
   regfree(&compiled);
   if (status == REG_NOMATCH) return (SproutUnboxed2){ cached_tag_nothing(), 0 };
   if (status != 0 || match.rm_so < 0 || match.rm_eo < 0)
-    tcp_fail("regex_find_range_unboxed: regexec failed");
-  IntRangeVal* range = sprout_alloc_range_val("regex_find_range_unboxed: out of memory");
-  range->start = sprout_utf8_codepoint_prefix_count(text, (size_t)match.rm_so);
-  range->end   = sprout_utf8_codepoint_prefix_count(text, (size_t)match.rm_eo);
-  /* A match span is not iterated, so the direction is nominal — but the field
-     must be a legal +1/-1 rather than left uninitialized.  This use of IntRange
-     as a half-open span is itself filed in BACKLOG ("Compiler / Stdlib Misc"). */
-  range->step  = 1;
-  return (SproutUnboxed2){ cached_tag_just(), (int64_t)(uintptr_t)range };
+    tcp_fail("regex_find_match_unboxed: regexec failed");
+  long long start = sprout_utf8_codepoint_prefix_count(text, (size_t)match.rm_so);
+  long long end   = sprout_utf8_codepoint_prefix_count(text, (size_t)match.rm_eo);
+  /* Both fields are scalars, so nothing needs rooting across this allocation. */
+  long long span = sprout_make2(find_ctor_tag_by_name("stdlib.regex.Match"), start, end);
+  return (SproutUnboxed2){ cached_tag_just(), (int64_t)span };
 }
 
 SproutUnboxed2 vector_get_unboxed(long long vec, long long index) {
@@ -5747,12 +5678,12 @@ long long regex_is_match(const char* pattern, const char* text) {
   return status == 0 ? 1 : 0;
 }
 
-long long regex_find_range(const char* pattern, const char* text) {
-  if (pattern == NULL || text == NULL) tcp_fail("regex_find_range: null input");
+long long regex_find_match(const char* pattern, const char* text) {
+  if (pattern == NULL || text == NULL) tcp_fail("regex_find_match: null input");
   regex_t compiled;
   char* error = NULL;
   if (!regex_compile_ere(pattern, &compiled, &error)) {
-    regex_builtin_fail("regex_find_range", error);
+    regex_builtin_fail("regex_find_match", error);
   }
   regmatch_t match;
   int status = regexec(&compiled, text, 1, &match, 0);
@@ -5761,15 +5692,16 @@ long long regex_find_range(const char* pattern, const char* text) {
     return sprout_make0(find_ctor_tag_by_name("Nothing"));
   }
   if (status != 0 || match.rm_so < 0 || match.rm_eo < 0) {
-    tcp_fail("regex_find_range: regexec failed");
+    tcp_fail("regex_find_match: regexec failed");
   }
-  IntRangeVal* range = sprout_alloc_range_val("regex_find_range: out of memory");
-  range->start = sprout_utf8_codepoint_prefix_count(text, (size_t)match.rm_so);
-  range->end = sprout_utf8_codepoint_prefix_count(text, (size_t)match.rm_eo);
-  /* Nominal direction; see the note on the unboxed variant above. */
-  range->step = 1;
-  SPROUT_HANDLE(h_range, (long long)(uintptr_t)range);
-  return sprout_make1(find_ctor_tag_by_name("Just"), sprout_handle_get(h_range));
+  long long start = sprout_utf8_codepoint_prefix_count(text, (size_t)match.rm_so);
+  long long end = sprout_utf8_codepoint_prefix_count(text, (size_t)match.rm_eo);
+  /* See the unboxed variant for why this is a Match rather than an IntRange. The
+     Match must be rooted across sprout_make1, which allocates; the two offsets
+     are scalars and need no rooting. */
+  long long span = sprout_make2(find_ctor_tag_by_name("stdlib.regex.Match"), start, end);
+  SPROUT_HANDLE(h_span, span);
+  return sprout_make1(find_ctor_tag_by_name("Just"), sprout_handle_get(h_span));
 }
 
 long long regex_replace_all_literal(long long pattern_i, long long replacement_i, long long text_i) {

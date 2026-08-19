@@ -1067,14 +1067,20 @@ fn translate_expr(expr: typed_ast.TypedExpr, params: List String,
                         fresh_name(name_prefix, idx1), idx1 + 1))
               else Err("ast_to_ir: unary op '" ++ op ++ "' not yet supported")
   | typed_ast.TRange start end_ _ _ ->
-      # call @int_range(start, end_) returning the IntRange handle.  int_range is
-      # declared as extern fn in prelude.sprout so it flows through
-      # collect_extern_decls automatically.
+      # call @range_up(start, end_) — the PRELUDE function, not a builtin.  It was
+      # `@int_range`, a C extern with a hardcoded declare; IntRange is now an
+      # ordinary Sprout type, so this is an ordinary Sprout call.
+      #
+      # Deliberately a call rather than an inline IntRange construction: building
+      # the constructor here would mean looking a prelude ctor tag up from the
+      # lowering, and a preludeless file's `a..b` would then fail with a novel
+      # "unknown constructor" instead of the same undefined-symbol link error every
+      # other prelude call already produces.  One indirection per range literal.
       #
       # No step argument, because `a..b` is ALWAYS ascending: the syntax has no
       # descending form, so a reversed literal like `5..1` is an EMPTY ascending
-      # range rather than a descending one (docs/ranges-v0.md §5).  @int_range
-      # sets step = +1 itself; range_down goes through @int_range_by instead.
+      # range rather than a descending one (docs/ranges-v0.md §5).  range_up sets
+      # step = +1 itself; range_down passes -1.
       match translate_expr(start, params, ctors, idx, cur_label, cur_ops,
                            captures, lifted_ref, top_level, let_names, fn_arities,
                            lambda_ctr_ref, lifted_idx_ref, name_prefix) with
@@ -1092,7 +1098,7 @@ fn translate_expr(expr: typed_ast.TypedExpr, params: List String,
                       Ok((list_append(sblocks, eblocks), ecur_lbl,
                            list_append(ecur_ops,
                              Cons(sprout_ir.IRCall(fresh_name(name_prefix, idx2), sprout_ir.IRTHeap,
-                                                   "int_range", [s_name, e_name]), Nil)),
+                                                   "range_up", [s_name, e_name]), Nil)),
                            fresh_name(name_prefix, idx2), idx2 + 1))
   | typed_ast.TDo steps _ _ ->
       translate_do(steps, params, ctors, idx, cur_label, cur_ops,
@@ -3267,7 +3273,7 @@ fn fresh_body_label(branch_idx: Int, base_idx: Int) -> String =
 fn unboxed_maybe_extern_name(base: String) -> Maybe String =
   if base == "vector_get" || base == "map_get" || base == "map_nth_key"
      || base == "map_nth_value" || base == "bytes_get" || base == "str_char_at"
-     || base == "argv_get" || base == "env_get" || base == "regex_find_range"
+     || base == "argv_get" || base == "env_get" || base == "regex_find_match"
      || base == "term_read_line"
   then Just(base ++ "_unboxed")
   else Nothing

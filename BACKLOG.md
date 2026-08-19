@@ -3852,7 +3852,11 @@ op-classification already in place.
 Five items below were surfaced while designing `docs/ranges-v0.md` (2026-08-19) and are recorded
 there in its Appendix C. None is in scope for that change.
 
-- [ ] `P2` **`regex_find_range` stores a HALF-OPEN span in an inclusive-range type.** POSIX
+- [x] `P2` **`regex_find_range` stores a HALF-OPEN span in an inclusive-range type. FIXED 2026-08-19** (branch `feat/int-range-pure-sprout`) — took the first option: the builtin is now `regex_find_match`, returning `Maybe Match` built in C via `find_ctor_tag_by_name("stdlib.regex.Match")` + `sprout_make2`, the same way `sprout_make_proc_result` builds `stdlib.process.ProcResult`. `match_from_range` is deleted and `find_first` is a one-line forward. As this entry predicted, that removed the last C-side constructor of `IntRange` — which is what let the type become pure Sprout and all five `int_range*` builtins disappear. Zero-width matches (`rm_so == rm_eo`) are now pinned by tests rather than only reasoned about, since `start == end` means *empty* for a span and *one element* for an inclusive range. Original analysis below.
+
+  <details><summary>original</summary>
+
+  POSIX
   `rm_eo` is exclusive (`runtime/sprout_runtime.c:5731`), and `stdlib/regex.sprout:53-55` slices the
   suffix starting *at* `end` — treating it as exclusive, contrary to every other `IntRange`
   operation, all of which treat `end` as inclusive. **Currently dormant**, and verified so:
@@ -3864,6 +3868,8 @@ there in its Appendix C. None is in scope for that change.
   `stdlib/regex.sprout`. Zero public API change either way — `find_first` already returns
   `Maybe Match`. Note this also removes the last C-side constructor of `IntRange` besides
   `int_range` itself (`sprout_alloc_range_val` has exactly three callers: `:2860`, `:5538`, `:5729`).
+
+  </details>
 - [ ] `P3` **`examples/digit_recognizer/recognizer.sprout:256` looks like an off-by-one.** It uses
   `range_each(epoch_step, range(0, total_epochs))`, which is inclusive and therefore runs
   `total_epochs + 1` epochs. Every other loop in the same file goes through

@@ -64,33 +64,63 @@ export type Dict v =
 export type Set =
   | Set NativeSet
 
-# An IntRange is an inclusive interval walked in a FIXED direction, carried in the
-# value itself rather than inferred from which bound is larger. `range_up` and
-# `range_down` are peers — neither is the default spelling — and each is EMPTY when
-# its end lies past its start in the direction of travel. Normative contracts in
-# docs/ranges-v0.md §4.1.
+# An inclusive interval walked in a FIXED direction: start, end, step.
+#
+# An ordinary Sprout type, not a runtime handle. It was an opaque C heap block
+# (SPROUT_HEAP_RANGE) with five builtins behind it, which bought nothing: the fields
+# are three scalars, no operation on them needs the host, and the one place C
+# *constructed* a range was `regex_find_range` using it as a two-Int transport for a
+# span that is not even a range (half-open, directionless). With that decoupled,
+# nothing about the type wants to live outside Sprout. See docs/ranges-v0.md
+# Appendix B, which argued the other way and is superseded there.
+#
+# Read `step` through `range_step`, never off the field: the accessor normalizes it
+# to +1 or -1, and every walker depends on that.
+export type IntRange =
+  | IntRange Int Int Int
+
+# `range_up` and `range_down` are peers — neither is the default spelling — and each
+# is EMPTY when its end lies past its start in the direction of travel. Normative
+# contracts in docs/ranges-v0.md §4.1.
 #
 # Emptiness is therefore direction-relative, and this is the whole point: because
 # `range_up(0, n - 1)` is the ordinary spelling of a half-open [0, n) walk, it must
 # do nothing at n == 0 rather than walk 0 and -1. Inferring direction from bound
 # order made that case unrepresentable.
 export fn range_up(lo: Int, hi: Int) -> IntRange =
-  int_range(lo, hi)
+  IntRange(lo, hi, 1)
 
 # Counts DOWN from `hi` to `lo` inclusive. The arguments read in iteration order,
 # so `range_down(5, 1)` starts at 5 — the mirror of `range_up(1, 5)` starting at 1.
 export fn range_down(hi: Int, lo: Int) -> IntRange =
-  int_range_by(hi, lo, -1)
+  IntRange(hi, lo, -1)
 
 export fn range_start(value: IntRange) -> Int =
-  int_range_start(value)
+  match value with
+  | IntRange start _ _ -> start
 
 export fn range_end(value: IntRange) -> Int =
-  int_range_end(value)
+  match value with
+  | IntRange _ end_value _ -> end_value
 
-# +1 or -1, read from the range rather than reconstructed from bound order.
+# +1 or -1 — the DIRECTION, read from the range rather than reconstructed from
+# bound order.
+#
+# Normalized to the SIGN of the stored field, which is what upholds the "+1 or -1"
+# invariant now that the constructor is ordinary Sprout. It used to be a C builtin
+# that `tcp_fail`ed on any other step, and that check has no Sprout equivalent: a
+# prelude constructor is in scope in every file regardless of `(..)`, because the
+# prelude is inlined rather than imported, so `IntRange(1, 6, 4)` cannot be
+# prevented. Normalizing here makes it harmless instead of fatal.
+#
+# Honouring an arbitrary step would be worse than either. `range_at_end` stops on
+# exact equality with the end bound, so a step larger than 1 can step OVER the end
+# without ever matching it — and near MAX_INT that addition wraps negative, leaving
+# `range_past_end` false forever. Every walker seeing only +1 or -1 is precisely the
+# condition under which that guard is sound.
 export fn range_step(value: IntRange) -> Int =
-  int_range_step(value)
+  match value with
+  | IntRange _ _ step -> if step < 0 then -1 else 1
 
 # True once `current` has travelled past `end_value` in the direction `step`. The
 # sign logic lives here once, so the three walkers below cannot disagree about
@@ -852,8 +882,13 @@ instance ToString Char
     char_to_string(value)
 
 instance ToString IntRange
+  # Includes the step. Without it an ascending range and the EMPTY descending range
+  # over the same bounds stringify identically — `range_up(1, 5)` has five elements
+  # and `range_down(1, 5)` has none, and direction is the only thing that says which.
+  # This also matches what `print` now renders, since an IntRange is an ordinary ADT.
   fn to_string(value: IntRange) -> String =
-    "IntRange(" ++ int_to_string(range_start(value)) ++ ", " ++ int_to_string(range_end(value)) ++ ")"
+    "IntRange(" ++ int_to_string(range_start(value)) ++ ", " ++ int_to_string(range_end(value))
+      ++ ", " ++ int_to_string(range_step(value)) ++ ")"
 
 instance Ord Int
   fn compare(left: Int, right: Int) -> Int =
@@ -1451,17 +1486,8 @@ extern fn to_double(n: Int) -> Double
 # rationale. `to_double` above stays: it is the numeric bridge every program may want,
 # whereas reinterpreting a Double's bits is a deliberate reach for the math module.
 
-# Integer ranges
-# int_range builds an ASCENDING range (step +1) and stays 2-ary so that the
-# hardcoded declare in ir_lowering.sprout — which lets `a..b` link without the
-# prelude, and which is baked into the committed seed — needs no arity change.
-# int_range_by takes an explicit step, which must be 1 or -1; the runtime rejects
-# anything else, because a step of 0 would make every walker loop forever.
-extern fn int_range(start: Int, end: Int) -> IntRange
-extern fn int_range_by(start: Int, end: Int, step: Int) -> IntRange
-extern fn int_range_start(r: IntRange) -> Int
-extern fn int_range_end(r: IntRange) -> Int
-extern fn int_range_step(r: IntRange) -> Int
+# Integer ranges need no externs: IntRange is an ordinary Sprout type declared
+# above, and `a..b` lowers to a `range_up` call.
 
 # String primitives
 extern fn str_concat(a: String, b: String) -> String
