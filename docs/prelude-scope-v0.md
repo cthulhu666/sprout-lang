@@ -287,11 +287,17 @@ staged `bootstrap/compile_driver.ll` are required (DoD #9). No 2-step bootstrap:
 headers are stripped pre-parse, so the grammar the seed's parser must handle is
 unchanged.
 
-**Must verify before implementing.** The REPL and the analysis service enter
-through `bundle_source` with an overlay buffer that may have no module header.
-`repl.sprout:360-363` states its completion logic depends on the prelude being
-"inlined rather than imported", so these paths are sensitive to this change and
-their current behaviour has not yet been established.
+**REPL and analysis service: unaffected, and a precedent.** Both enter through
+`bundle_source` with an overlay buffer, so they looked at risk. They are not:
+`stdlib/compiler.sprout:53` assembles every session buffer under a synthesised
+`module app.session` header, so they already always get the prelude. They have to
+— a REPL that could not call prelude functions would be useless, and a headerless
+buffer gets no prelude bodies.
+
+This is the strongest evidence available that §4.2 step 2 is sound: the one
+interactive consumer of this path **already invented the synthetic module name**,
+locally and by hand, for exactly this reason. The proposal generalises a mechanism
+that is already in production rather than introducing one.
 
 ## 9. Tests added/updated
 
@@ -323,12 +329,12 @@ their current behaviour has not yet been established.
 
 ## 11. Open questions
 
-1. **`examples/maybe_map.sprout`.** Under this design it works unchanged, keeping
-   `Maybe`/`Just`/`Nothing`. But the example exists to teach ADTs, and shadowing
-   three prelude names to do so may teach the wrong lesson — Haskell's
-   require-it-to-be-explicit stance is the beginner-friendly datapoint, and
-   Sprout's stated goals lean that way. Rename to `MyMaybe`, or keep the
-   shadowing as a demonstration that shadowing works?
+1. ~~**`examples/maybe_map.sprout`** — rename to `MyMaybe`, or keep the
+   shadowing?~~ **Resolved: keep it unchanged.** The file stays verbatim and
+   becomes a live demonstration that shadowing a prelude name works, which this
+   design promotes from accident to documented guarantee (goal 2). It therefore
+   doubles as the user-facing regression test for §4.2 step 4 — if the synthetic
+   prefix ever leaks, this example prints `$entry.Just(3)` and the golden moves.
 2. **Directive spelling.** `no_prelude` as a bare header line, versus attaching it
    to the header (`module main no_prelude`), versus a punctuation-led form.
 3. **`$entry` as the synthetic name.** Unforgeable and never displayed, so the
