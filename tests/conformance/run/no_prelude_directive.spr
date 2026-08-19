@@ -1,0 +1,16 @@
+no_prelude
+
+# The explicit opt-out (docs/prelude-scope-v0.md §4.2 step 5). With the prelude
+# unconditional, a file that genuinely wants to be preludeless — a codegen fixture
+# exercising a path where no typeclass dict witness is in scope, say — says so here
+# rather than achieving it accidentally by declaring no imports.
+#
+# `no_prelude` is a HEADER directive: source.strip_headers removes it before the
+# lexer runs, so it needs no grammar support. `print` is special-cased in the
+# compiler rather than declared in the prelude, which is what lets a preludeless
+# file produce output at all.
+
+fn twice(n: Int) -> Int = n + n
+
+fn main() -> Unit !{IO} =
+  print(twice(21))
