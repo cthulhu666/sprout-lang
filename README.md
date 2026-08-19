@@ -202,12 +202,25 @@ list_each (f: a -> Unit !{e}, xs: List a)  -> Unit !{e}            # traverse fo
 list_fold (step: b -> a -> b !{e}, init: b, xs: List a) -> b !{e}
 ```
 
-`IntRange` is inclusive of both ends, so a half-open `[0, n)` loop is `range(0, n - 1)`
-**only when `n >= 1`**. Beware `n == 0`: `range(0, -1)` iterates *descending* over
-`[0, -1]` (start > end flips the step to −1), running the body on `0` and `-1` instead
-of zero times. Guard a possibly-empty loop: `if n == 0 then () else range_each(f, range(0, n - 1))`.
-(The hand-rolled `if i >= n` loop handled `n == 0` for free; a half-open range helper is
-tracked in BACKLOG.)
+`IntRange` is inclusive of both ends, so a half-open `[0, n)` loop is
+`range_up(0, n - 1)` — including at `n == 0`, which needs **no guard**. A range is
+empty when its end lies past its start in the direction of travel, so `range_up(0, -1)`
+iterates zero times.
+
+Ranges are built by one of two peer constructors, and neither is the default spelling:
+
+```sprout
+range_up(1, 5)      # 1 2 3 4 5      1..5 is the same thing
+range_down(5, 1)    # 5 4 3 2 1
+range_up(5, 1)      # empty — end is below start
+range_down(1, 5)    # empty — end is above start
+```
+
+Direction lives in the range itself (`range_step` reports `+1` or `-1`), so every
+combinator takes either one unchanged. The `a..b` literal is **ascending only** —
+there is no descending literal, so a reversed one is an *empty ascending* range rather
+than a descending one, and a reversed literal with constant bounds is rejected at
+compile time since it can only be a typo. See [docs/ranges-v0.md](docs/ranges-v0.md).
 
 Because inline multi-statement `do`-lambdas do not yet parse, lift a multi-line step
 body into a named helper and pass it via a single-expression lambda:

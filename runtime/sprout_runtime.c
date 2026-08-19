@@ -119,9 +119,16 @@ typedef struct {
   BytesVal** chunks;
 } BuilderVal;
 
+/* An inclusive integer interval walked in a fixed direction.  `step` is +1 or -1
+   and never 0; it holds the DIRECTION rather than inferring it from bound order,
+   which is what lets an interval be empty (ascending with end < start, or
+   descending with end > start) instead of silently reversing.  See
+   docs/ranges-v0.md §4.1.  Scalar-only, so the GC traces zero children
+   (sprout_heap_child_count_payload) and the block size derives from sizeof. */
 typedef struct {
   long long start;
   long long end;
+  long long step;
 } IntRangeVal;
 
 typedef struct {
@@ -2856,10 +2863,30 @@ long long double_to_string(long long bits) {
   out[content_len] = '\0';
   return (long long)(uintptr_t)out;
 }
+/* Ascending constructor.  Kept at its original 2-arity ON PURPOSE: the declare
+   for @int_range is hardcoded in ir_lowering.sprout so that `a..b` links without
+   the prelude, and that string is baked into the committed bootstrap seed.
+   Changing the arity here would make the old seed emit a 2-arg declare against
+   3-arg calls, forcing a 2-step bootstrap for no semantic gain.  Descending
+   ranges go through int_range_by instead. */
 long long int_range(long long start, long long end) {
   IntRangeVal* out = sprout_alloc_range_val("int_range: out of memory");
   out->start = start;
   out->end = end;
+  out->step = 1;
+  return (long long)(uintptr_t)out;
+}
+/* `step` must be +1 or -1.  Guarded here rather than trusted from the callers:
+   the only Sprout constructor that reaches this is range_down, which hardcodes
+   -1, but this extern outlives it and a step of 0 would make every walker loop
+   forever.  Failing at construction turns a hang into a diagnosable error. */
+long long int_range_by(long long start, long long end, long long step) {
+  if (step != 1 && step != -1)
+    tcp_fail("int_range_by: step must be 1 or -1");
+  IntRangeVal* out = sprout_alloc_range_val("int_range_by: out of memory");
+  out->start = start;
+  out->end = end;
+  out->step = step;
   return (long long)(uintptr_t)out;
 }
 long long int_range_start(long long range_h) {
@@ -2873,6 +2900,12 @@ long long int_range_end(long long range_h) {
   if (value == NULL || sprout_heap_kind_at(value) != SPROUT_HEAP_RANGE)
     tcp_fail("int_range_end: expected IntRange");
   return value->end;
+}
+long long int_range_step(long long range_h) {
+  IntRangeVal* value = (IntRangeVal*)(uintptr_t)range_h;
+  if (value == NULL || sprout_heap_kind_at(value) != SPROUT_HEAP_RANGE)
+    tcp_fail("int_range_step: expected IntRange");
+  return value->step;
 }
 long long env_get(const char* name) {
   if (name == NULL) tcp_fail("env_get: null name");
@@ -5538,6 +5571,10 @@ SproutUnboxed2 regex_find_range_unboxed(const char* pattern, const char* text) {
   IntRangeVal* range = sprout_alloc_range_val("regex_find_range_unboxed: out of memory");
   range->start = sprout_utf8_codepoint_prefix_count(text, (size_t)match.rm_so);
   range->end   = sprout_utf8_codepoint_prefix_count(text, (size_t)match.rm_eo);
+  /* A match span is not iterated, so the direction is nominal — but the field
+     must be a legal +1/-1 rather than left uninitialized.  This use of IntRange
+     as a half-open span is itself filed in BACKLOG ("Compiler / Stdlib Misc"). */
+  range->step  = 1;
   return (SproutUnboxed2){ cached_tag_just(), (int64_t)(uintptr_t)range };
 }
 
@@ -5729,6 +5766,8 @@ long long regex_find_range(const char* pattern, const char* text) {
   IntRangeVal* range = sprout_alloc_range_val("regex_find_range: out of memory");
   range->start = sprout_utf8_codepoint_prefix_count(text, (size_t)match.rm_so);
   range->end = sprout_utf8_codepoint_prefix_count(text, (size_t)match.rm_eo);
+  /* Nominal direction; see the note on the unboxed variant above. */
+  range->step = 1;
   SPROUT_HANDLE(h_range, (long long)(uintptr_t)range);
   return sprout_make1(find_ctor_tag_by_name("Just"), sprout_handle_get(h_range));
 }

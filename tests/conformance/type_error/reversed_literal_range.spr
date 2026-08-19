@@ -1,0 +1,18 @@
+# `a..b` counts UPWARD only (spec §8.3), so a literal `5..1` names a specific
+# empty interval — a program that cannot be right. Rejected at compile time
+# rather than left to yield nothing, mirroring the negative-literal shift-count
+# rule (§8.1.2): the computed case gets the total runtime answer, a statically
+# known one is a mistake.
+#
+# No prelude function is called here on purpose: a bare `.spr` gets no prelude,
+# so `range_count` would be unbound and its error could mask the one under test.
+# `IntRange` is a built-in primitive type name (spec §5), so the annotation alone
+# needs nothing imported.
+#
+# The POSITIVE counterpart is tests/stdlib/test_range_empty.spr, which runs with
+# the prelude and pins that a range with COMPUTED bounds is NOT diagnosed and is
+# simply empty — `range_up(0, n - 1)` at n == 0 must stay legal, since that is the
+# ordinary spelling of a half-open [0, n) walk.
+fn empty_route() -> IntRange = 5..1
+
+fn main() -> Unit !{IO} = print("unreachable")

@@ -32,7 +32,7 @@ instance Weight Coin
     | Gold -> 25
 
 # Half-open loop bound: upto(n) is [0, n) as n iterations (IntRange is inclusive).
-fn upto(n: Int) -> IntRange = range(0, n - 1)
+fn upto(n: Int) -> IntRange = range_up(0, n - 1)
 
 # Sprout has no `%` operator; integer modulo is `n - (n / m) * m`.
 fn mod3(n: Int) -> Int = n - (n / 3) * 3

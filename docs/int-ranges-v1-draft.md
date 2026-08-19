@@ -14,6 +14,11 @@ Current implementation status:
 - The implemented slice includes inclusive `a..b` syntax, ascending and
   descending unit-step semantics, distinct `IntRange` values, and the helper
   surface described below.
+- **Partly superseded 2026-08-19.** `docs/ranges-v0.md` replaces the
+  direction-from-bound-order rule (§2 goal 4, §6 rule 3, and §14 Q2 below, each
+  annotated in place). A backwards range is now empty and direction is carried in
+  the value via `range_up` / `range_down`. Read `ranges-v0.md` first where the two
+  disagree; everything else in this draft still stands.
 - Remaining work is mainly contract and diagnostics polish rather than basic
   parser, typechecker, interpreter, or native-backend support.
 
@@ -35,7 +40,13 @@ That leaves a gap in the language surface:
 1. Add a beginner-readable surface for integer ranges.
 2. Make range construction cheap and explicit rather than eager list-building.
 3. Keep the first milestone small: integer-only, inclusive-only, unit-step.
-4. Support both ascending and descending ranges without extra syntax.
+4. ~~Support both ascending and descending ranges without extra syntax.~~
+   **SUPERSEDED 2026-08-19 by `docs/ranges-v0.md`.** "Without extra syntax" meant
+   inferring the direction from bound order, which made an empty range
+   unrepresentable and turned `range(0, n - 1)` at `n == 0` into a walk over `0` and
+   `-1`. Both directions are still supported, but through the peer constructors
+   `range_up` / `range_down` — an extra *name*, not extra syntax. `a..b` remains
+   ascending-only.
 5. Provide a small standard-library surface for common range operations.
 
 ## 3. Non-Goals
@@ -103,8 +114,13 @@ order.
 Semantics:
 
 1. Both bounds are evaluated left-to-right like other binary operators.
-2. If `lo <= hi`, the range enumerates upward from `lo` to `hi`.
-3. If `lo > hi`, the range enumerates downward from `lo` to `hi`.
+2. `lo..hi` enumerates upward from `lo` to `hi`.
+3. ~~If `lo > hi`, the range enumerates downward from `lo` to `hi`.~~
+   **SUPERSEDED 2026-08-19 by `docs/ranges-v0.md` §5**: if `lo > hi` the range is
+   **EMPTY**. Direction is carried in the range rather than inferred from bound
+   order, and `a..b` always builds an ascending one. Downward enumeration is
+   `range_down(hi, lo)`. A reversed literal with constant bounds is rejected at
+   compile time.
 4. Both endpoints are included.
 5. Range construction itself is cheap; materialization happens only through
    explicit stdlib helpers like `range_to_list`.
@@ -242,8 +258,14 @@ Deferred beyond the first milestone:
 
 1. Should `IntRange` be a language-level primitive type or an ordinary stdlib
    type with compiler-recognized syntax?
-2. Should descending ranges be part of the first milestone, or should `lo > hi`
-   be rejected and deferred to a separate design?
+2. ~~Should descending ranges be part of the first milestone, or should `lo > hi`
+   be rejected and deferred to a separate design?~~ **RESOLVED 2026-08-19 by
+   `docs/ranges-v0.md`.** Neither option as posed: `lo > hi` is not rejected and
+   descending is not deferred. `lo > hi` yields an **empty** range (the total
+   answer, per `docs/guidelines.md:39`), and descending survives as the explicit
+   `range_down` constructor with the direction stored in the value. A reversed
+   *literal* is rejected at compile time, which is the "rejected" half of the
+   question applied only where it cannot be anything but a typo.
 3. Should `range_count` always return `Int`, or should it use `Maybe Int` if
    future integer backends introduce bounded-count concerns?
 4. Should later half-open forms be added at all, or should Sprout keep the

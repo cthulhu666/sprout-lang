@@ -554,6 +554,12 @@ export fn ir_header() -> String =
   # hardcoded here so files that call the range syntax (1..N) without importing
   # prelude explicitly still link.  Listed in is_hardcoded_intrinsic to suppress
   # the duplicate emit from lower_extern_decls.
+  # Deliberately still 2-ary: `a..b` is always ASCENDING (docs/ranges-v0.md §5),
+  # so the syntax never needs a step argument, and keeping this string stable
+  # avoids a 2-step bootstrap — it is baked into the committed seed, so an arity
+  # change here would make the old seed emit a declare that mismatches the new
+  # call sites.  int_range_by / int_range_step are NOT hardcoded: only `a..b`
+  # reaches the runtime without the prelude, and it reaches only this one.
   "declare i64 @int_range(i64, i64)\n" ++
   # analysis_* intrinsics are runtime-implemented compiler bridge functions
   # (sprout_runtime.c).  They are NOT represented as TExternFnDecl in any user

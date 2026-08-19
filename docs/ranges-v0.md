@@ -112,11 +112,17 @@ six with `..`-style syntax, five make `5..1` empty and none descends.
 
 First, project doctrine forbids it. `docs/guidelines.md:39` makes "Total over partial" a *hard
 mandate* — "the stdlib must not export a partial function" — and `:51` rules out panic for exactly
-this shape: "`panic` is **not** for input the caller could plausibly supply." Sprout does panic on
-div-by-zero (`spec-v0.md:1327`) and on a negative shift count (`:1633`), but in both cases there is
-no total answer to give. An empty interval is mathematically well-defined: `[5,1] = ∅` **is** the
-total answer. `examples/aoc_2025_day_5.sprout:24-27` builds ranges straight from parsed input, so a
-trap would turn one malformed input line into a crash — precisely the prohibited shape.
+this shape: "`panic` is **not** for input the caller could plausibly supply."
+
+The dividing line is already written down. `spec-v0.md:1651-1654` (§8.2 Partiality) explains why
+`stdlib.math.int` returns `Maybe` rather than panicking: an out-of-domain `Int` argument has no total
+answer "because `Int` has no spare bottom value". Sprout does panic on div-by-zero (`:1327`) and on
+a negative shift count (`:1633`), and both are that same case — no answer exists. **A backwards
+range is not that case.** An empty interval is mathematically well-defined; `[5,1] = ∅` **is** the
+total answer, so the convention says return it.
+
+`examples/aoc_2025_day_5.sprout:24-27` builds ranges straight from parsed input, so a trap would turn
+one malformed input line into a crash — precisely the shape `guidelines.md:51` prohibits.
 
 Second, and decisively, **a trap does not fix the motivating bug.** The defect is
 `range_fold(f, acc, range(0, n - 1))` at `n == 0`. Trapping converts a silent wrong answer into a
@@ -293,6 +299,29 @@ Sequenced so that each step is independently verifiable and no step leaves the t
 Steps 2-4 must land in one commit — the extern arity change makes them mutually dependent, and any
 split leaves the tree uncompilable in between.
 
+### 4.3 Deviations from the plan, and why
+
+Recorded during implementation. Both are departures from §4.2 as written above.
+
+**1. `int_range` keeps its 2-arity; a new `int_range_by` carries the step.** §4 said "`int_range`
+gains a step parameter, **or** a new 3-arg extern joins it" — the second option turned out to be
+strictly better, for a reason not visible when the plan was written. The declare string
+`declare i64 @int_range(i64, i64)` is hardcoded at `ir_lowering.sprout:557` *and baked into the
+committed bootstrap seed*. Changing the arity would make the old seed emit a 2-arg declare against
+3-arg call sites, forcing the 2-step bootstrap protocol. Splitting the constructor avoids it
+entirely: `int_range` stays ascending (setting `step = 1` itself), `int_range_by` takes an explicit
+step, and `a..b` — which is ascending-only anyway — still reaches the 2-ary one. **Net effect on the
+compiler: nothing but comments changed**, so no bootstrap hazard arises at all. Cost: two new
+builtins rather than one, both listed in `APPROVED_BUILTINS` with justifications.
+
+**2. The two `upto(n)` helpers are kept, not retired.** §4.2 step 5 said to retire them as
+bug workarounds. That reading was wrong: their *justification* changes but their *value* does not.
+They are half-open `[0, n)` loop bounds — exactly what `BACKLOG.md:1804` (B5) independently wants —
+and inlining `range_up(0, n - 1)` at the seven `recognizer.sprout` call sites would remove a useful
+abstraction and add churn for nothing. Both bodies now call `range_up`, and their comments say they
+are sugar rather than a guard. Notably `recognizer.sprout:43` already *claimed* "upto(0) is the
+empty range"; that claim only became true with this change.
+
 ### Why `range_by(a, b, step)` is not in either package
 
 Not taste — arithmetic. `range_contains` and `range_count` with arbitrary step need modular
@@ -308,21 +337,28 @@ which is **wrong for negative operands** — exactly the case a negative step in
 No spelling changes. `a..b` still parses to `ast.IntRangeExpr` (`stdlib/compiler/ast.sprout:118`)
 and still means the inclusive interval. What changes is what a backwards one *means*.
 
-Normative contracts, to be added to the spec (§10):
+Normative contracts, now in `spec-v0.md` §8.3. The `before` column uses the retired `range(a, b)`;
+the `after` column its replacement `range_up(a, b)`.
 
-| expression | today | after |
+| expression | before | after |
 |---|---|---|
-| `range_count(range(5, 1))` | `5` | `0` |
-| `range_contains(range(5, 1), 3)` | `true` | `false` |
-| `range_to_list(range(5, 1))` | `[5,4,3,2,1]` | `Nil` |
-| `range_fold(f, init, range(5, 1))` | folds 5 elements | `init` |
-| `range_each(f, range(5, 1))` | applies `f` 5 times | no-op |
-| `range_to_vec(range(5, 1))` | 5 elements | empty |
-| `range_count(range(3, 3))` | `1` | `1` (unchanged — a single-element range) |
-| `to_string(range(5, 1))` | `"IntRange(5, 1)"` | `"IntRange(5, 1)"` (bounds stored as given) |
+| `range_count(5, 1)` | `5` | `0` |
+| `range_contains((5,1), 3)` | `true` | `false` |
+| `range_to_list(5, 1)` | `[5,4,3,2,1]` | `Nil` |
+| `range_fold(f, init, (5,1))` | folds 5 elements | `init`, `f` not applied once |
+| `range_each(f, (5,1))` | applies `f` 5 times | no-op |
+| `range_to_vec(5, 1)` | 5 elements | empty |
+| `range_count(3, 3)` | `1` | `1` (unchanged — a single-element range) |
+| `to_string(5, 1)` | `"IntRange(5, 1)"` | `"IntRange(5, 1)"` (bounds stored as given) |
 
-Bounds are stored as written, so `to_string` is unaffected and
-`tests/stdlib/test_to_string.spr:41-43` needs no update.
+And the descending mirror, which has no `before` because it could not be expressed:
+`range_down(5, 1)` has five elements starting at 5, while `range_down(1, 5)` is **empty** — the
+opposite crossing from the ascending case.
+
+Bounds are stored as written, so `to_string` shows the operands and does not reveal the direction:
+a descending range and its reversed ascending twin render alike. `tests/stdlib/test_to_string.spr`
+therefore needed only the rename, not new expectations — its case labelled "descending" now
+genuinely builds one via `range_down`, where before it was a bound-order accident.
 
 **One asymmetry to document loudly rather than paper over.** `..` exists only in the ascending
 form, so under Package B `5..1` would be empty while `range_down(5, 1)` descends. Under Package A
@@ -380,12 +416,20 @@ It deliberately does **not** fire on a computed range. `range(0, n - 1)` at `n =
 yields empty — that is the whole point of §2 goal 1, and warning on it would make the fixed idiom
 unusable.
 
-**Both spellings must be covered.** `5..1` is an `ast.IntRangeExpr`, but `range(5, 1)` is an ordinary
+**Both spellings are covered.** `5..1` is an `ast.IntRangeExpr`, but `range_up(5, 1)` is an ordinary
 call to a prelude function and is *not* that node. Catching only the syntax form would be a
-half-diagnostic — and since most in-tree code uses `range(a, b)` rather than `a..b`, it would be the
-less common half. The call form is recognised by canonical callee name, the same way
-`recognize_string_builtin("str_concat")` already special-cases prelude functions. Both forms produce
-the same message.
+half-diagnostic — and since most in-tree code uses the constructor rather than `a..b`, it would be
+the less useful half.
+
+- The syntax form is checked in `infer_range`, which already holds both operand expressions.
+- The call form is checked in `infer_call`, in the arm matching a bare `ast.VarExpr` callee — the
+  same place `print` is already special-cased. Matching the **bare** name is what makes this safe:
+  prelude functions are not module-qualified, so a user's own `range_up` inside a module reads as
+  `mymod.range_up` here and is correctly left alone. Every other call pays one string comparison.
+
+Both share one message builder, so the spellings differ only in the form quoted back. The descending
+mirror is covered too: `range_down(1, 5)` is empty for *its* direction and reports "is below the end
+bound … counts downward only", suggesting `range_up`.
 
 ### Where it lives — the check phase, *not* where the precedent lives
 
@@ -465,11 +509,20 @@ Per Definition of Ready #2/#3, these are written and confirmed failing before im
 9. Boundary preserved: `range(1, 5)` still ascends over five elements
 10. `to_string(range(5, 1)) == "IntRange(5, 1)"` — bounds stored as given
 
-**New** — `tests/conformance/type_error/reversed_literal_range.spr` plus its `.err` file, per §7.
-Two fixtures, since §7 requires both spellings to be caught: one for `5..1` and one for
-`range(5, 1)`. A positive fixture under `tests/conformance/run/` must also confirm that a *computed*
-backwards range is accepted silently and yields empty — otherwise nothing guards against the
-diagnostic being widened to catch the case §2 goal 1 exists to make legal.
+**New** — two conformance fixtures under `tests/conformance/type_error/`, one per spelling (§7):
+
+- `reversed_literal_range` — the `5..1` syntax form. Calls **no** prelude function on purpose: a
+  bare `.spr` gets no prelude (`tests/conformance/README.md:21-24`), so `range_count` would be
+  unbound and its error could mask the one under test. `IntRange` is a built-in type name, so the
+  annotation alone needs nothing imported.
+- `reversed_literal_range_call` — the constructor form, carrying `range_up(5, 1)` *and* the
+  descending mirror `range_down(1, 5)`. Has a `module` header, which is what makes the prelude
+  available.
+
+**The positive counterpart is `tests/stdlib/test_range_empty.spr`, not a `run/` fixture.** A `run/`
+fixture cannot express it — those are preludeless, so `range_up` would be unbound. The stdlib test
+already pins that a *computed* backwards range is accepted silently and yields empty, which is the
+property that stops the diagnostic from being widened into the case §2 goal 1 exists to make legal.
 
 **Updated**:
 

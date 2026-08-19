@@ -1,0 +1,14 @@
+module main
+
+# The constructor form of the same mistake as reversed_literal_range.spr. Most
+# code writes `range_up(a, b)` rather than `a..b`, so catching only the syntax
+# form would be the less useful half of the diagnostic.
+#
+# `range_down(1, 5)` is the mirror image and must be caught too: emptiness is
+# direction-relative, so a DESCENDING range is empty when its end is ABOVE its
+# start — the opposite crossing from the ascending case.
+fn empty_up() -> IntRange = range_up(5, 1)
+
+fn empty_down() -> IntRange = range_down(1, 5)
+
+fn main() -> Unit !{IO} = print("unreachable")

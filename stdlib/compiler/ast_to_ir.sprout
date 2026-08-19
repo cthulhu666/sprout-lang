@@ -1067,9 +1067,14 @@ fn translate_expr(expr: typed_ast.TypedExpr, params: List String,
                         fresh_name(name_prefix, idx1), idx1 + 1))
               else Err("ast_to_ir: unary op '" ++ op ++ "' not yet supported")
   | typed_ast.TRange start end_ _ _ ->
-      # Mirrors direct codegen's emit_range: call @int_range(start, end_)
-      # returning the IntRange handle.  int_range is declared as extern fn in
-      # prelude.sprout so it flows through collect_extern_decls automatically.
+      # call @int_range(start, end_) returning the IntRange handle.  int_range is
+      # declared as extern fn in prelude.sprout so it flows through
+      # collect_extern_decls automatically.
+      #
+      # No step argument, because `a..b` is ALWAYS ascending: the syntax has no
+      # descending form, so a reversed literal like `5..1` is an EMPTY ascending
+      # range rather than a descending one (docs/ranges-v0.md §5).  @int_range
+      # sets step = +1 itself; range_down goes through @int_range_by instead.
       match translate_expr(start, params, ctors, idx, cur_label, cur_ops,
                            captures, lifted_ref, top_level, let_names, fn_arities,
                            lambda_ctr_ref, lifted_idx_ref, name_prefix) with
