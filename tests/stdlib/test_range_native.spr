@@ -1,0 +1,65 @@
+import stdlib.test (TestState, new_state, assert_eq, assert_true, summary)
+
+# IntRange is a Sprout value, not an opaque runtime handle (docs/ranges-v0.md
+# Appendix B, reversed). These tests pin the two things that only become true once
+# the representation moves into Sprout, so they fail against the extern version:
+#
+#  1. It can be PATTERN MATCHED. Against the extern `IntRange` there is no
+#     constructor to match, so `match r with | IntRange s e st -> ...` does not
+#     compile at all.
+#  2. The constructor is directly constructible, and therefore constructible
+#     WRONG — the `tcp_fail` in `int_range_by` that rejected a step outside
+#     {+1, -1} has no Sprout equivalent, because prelude constructors are in
+#     scope everywhere regardless of `(..)` (the prelude is inlined, not
+#     imported). A malformed step must therefore be survivable rather than
+#     fatal: the walkers stop on "past the end" as well as "at the end", so a
+#     step that skips over the end terminates instead of running to Int overflow.
+#
+# (2) is the safety property that the C validation used to provide for free. It
+# is tested here because it is the one thing this change makes WORSE if the
+# walkers are not written for it, and the failure mode is a hang rather than a
+# wrong answer.
+
+fn add_all(acc: Int, x: Int) -> Int = acc + x
+
+fn main() -> Unit !{IO} =
+  do
+    state <- new_state()
+
+    # 1. Destructuring — impossible while IntRange is an extern type.
+    let r = range_up(2, 6)
+
+    assert_eq(state, "an ascending range destructures to its three fields",
+      match r with
+      | IntRange s e st -> s + e + st,
+      2 + 6 + 1)
+
+    assert_eq(state, "a descending range carries step -1 in the value",
+      match range_down(6, 2) with
+      | IntRange _ _ st -> st,
+      -1)
+
+    # The accessors agree with the fields they read.
+    assert_eq(state, "range_start agrees with the first field", range_start(r), 2)
+    assert_eq(state, "range_end agrees with the second field", range_end(r), 6)
+    assert_eq(state, "range_step agrees with the third field", range_step(r), 1)
+
+    # 2. A malformed step is constructible now. It must not hang.
+    #
+    # step 4 from 1 lands on 1, 5, 9 — it never equals the end bound 6, so a
+    # walker that only stopped at `current == end` would run past it and keep
+    # going until Int overflow. Stopping on "past the end" bounds it.
+    let skipping = IntRange(1, 6, 4)
+
+    assert_eq(state, "a step that skips the end bound still terminates",
+      range_fold(add_all, 0, skipping), 1 + 5)
+
+    assert_true(state, "a skipping range is not reported empty",
+      ! range_is_empty (skipping))
+
+    # A zero step cannot advance. It must be treated as empty rather than
+    # looping forever on the same value.
+    assert_true(state, "a zero step is empty rather than non-terminating",
+      range_is_empty(IntRange(1, 6, 0)))
+
+    summary(state)
