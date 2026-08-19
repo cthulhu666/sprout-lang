@@ -75,10 +75,18 @@ fn main() -> Unit !{IO} =
 
     # 3. Stringification carries the direction. Without it the two ranges below —
     # one with five elements, one with none — are indistinguishable as text.
+    #
+    # Bounds come from BINDINGS, not literals: `range_down(1, 5)` written out is a
+    # statically-empty range and the checker rejects it, so the empty case can only
+    # be built from computed bounds. That rule is the subject of
+    # tests/conformance/type_error/reversed_literal_range_call.spr.
+    let one = 1
+    let five = 5
+
     assert_eq(state, "to_string shows the step, so direction survives",
-      to_string(range_up(1, 5)), "IntRange(1, 5, 1)")
+      to_string(range_up(one, five)), "IntRange(1, 5, 1)")
 
     assert_eq(state, "and the empty descending range over the same bounds differs",
-      to_string(range_down(1, 5)), "IntRange(1, 5, -1)")
+      to_string(range_down(one, five)), "IntRange(1, 5, -1)")
 
     summary(state)

@@ -104,9 +104,11 @@ fn main() -> Unit !{IO} =
       range_fold(add_step, 0, range_up(lo, hi)), 15)
 
     # Bounds are stored as given, so the rendering reflects the operands rather
-    # than a normalized form — an empty range still prints its bounds.
+    # than a normalized form — an empty range still prints its bounds. The step is
+    # rendered too, because without it this value and the NON-empty `range_down(hi, lo)`
+    # over the same bounds would be indistinguishable as text.
     assert_eq(state, "an empty range renders its bounds as written",
-      to_string(range_up(hi, lo)), "IntRange(5, 1)")
+      to_string(range_up(hi, lo)), "IntRange(5, 1, 1)")
 
     # --- termination at the representable extremes --------------------------
     # A walker that only asked "have we gone PAST the end?" would, at

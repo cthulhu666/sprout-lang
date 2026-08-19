@@ -38,10 +38,12 @@ fn main() -> Unit !{IO} =
     check_eq("polymorphic imported to_string eta", show_via_value_method(42), "42"),
     check_eq("to_string via let-decl list_map", to_string_int_list, ["1", "2", "3"]),
     check_eq("to_string via user-defined higher-order let-decl", applied_via_ho, ["10", "20", "30"]),
-    check_eq("to_string IntRange ascending", to_string(range_up(0, 10)), "IntRange(0, 10)"),
-    # Renders the bounds as given, so a descending range and its reversed
-    # ascending twin print alike. The direction lives in the step field, which
-    # to_string does not show — see docs/ranges-v0.md §5.
-    check_eq("to_string IntRange descending", to_string(range_down(5, 1)), "IntRange(5, 1)"),
-    check_eq("to_string IntRange single", to_string(range_up(3, 3)), "IntRange(3, 3)")
+    check_eq("to_string IntRange ascending", to_string(range_up(0, 10)), "IntRange(0, 10, 1)"),
+    # Renders the bounds as given PLUS the step. The step is what distinguishes a
+    # descending range from its reversed ascending twin: `range_down(5, 1)` below has
+    # five elements while `range_up(5, 1)` has none, and the bounds alone are identical.
+    # This test previously asserted the two-field form and carried a comment saying the
+    # direction "does not show" — that was the defect, not the contract.
+    check_eq("to_string IntRange descending", to_string(range_down(5, 1)), "IntRange(5, 1, -1)"),
+    check_eq("to_string IntRange single", to_string(range_up(3, 3)), "IntRange(3, 3, 1)")
   ])
