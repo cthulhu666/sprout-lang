@@ -1,0 +1,11 @@
+# A file with no `module` header still gets the prelude (docs/prelude-scope-v0.md).
+#
+# Before: prelude availability was inferred from the import graph, so this file —
+# headerless AND importless — got no prelude DECLARATIONS while the checker was
+# still handed the prelude's SCHEMES. `negate` therefore type-checked, the driver
+# emitted `call i64 @negate` with no matching define, and exit was 0. The failure
+# surfaced only inside clang as `use of undefined value '@negate'`, which is the
+# same hole behind the quarantined '@lcompose' and '@Err' xfails.
+
+fn main() -> Unit !{IO} =
+  print(negate(7))
