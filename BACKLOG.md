@@ -2049,7 +2049,7 @@ from Sprout — a candidate for removal, deliberately not bundled into this chan
 
 ### 7.2) Doc-sweep follow-ups (2026-08-18)
 
-Found while correcting stale claims across the user-facing docs; neither is a doc fix.
+Found while correcting stale claims across the user-facing docs; none is a doc fix.
 
 - [ ] `P3` **`--emit-ir --debug` is inert at the driver.** Both arms of the `--emit-ir`
   match in `compile_driver.main` dispatch to `run_batch(..., "ir-typed", ...)` identically
@@ -2064,6 +2064,38 @@ Found while correcting stale claims across the user-facing docs; neither is a do
   readers at it for the open `+`/`-`/`*` policy question — so its ground-truth section should
   re-verify against `ir_lowering.sprout` rather than a file that no longer exists. Cheap: the
   finding itself (plain `add/sub/mul i64`, no `nsw`) is still correct, only the citation rotted.
+- [ ] `P2` **A preludeless file calling a prelude function escapes to `clang` instead of a
+  Sprout diagnostic.** `bundler.collect_modules` deliberately withholds the prelude from an
+  importless, self-contained file (so `examples/maybe_map.sprout` may redefine `Maybe`/`map`),
+  and its comment promises the resulting unresolved call is "a hard error
+  (codegen.emit_named_call), not a silent zero_val". That backend was deleted in `5f29b9da`
+  ("compiler: retire the direct codegen backend") and the Sprout-IR path has no equivalent
+  check, so the guarantee lapsed silently. Today `fn main() -> Int !{IO} = range_count(range_up(1, 4))`
+  in a headerless `.spr` **type-checks and emits IR with exit 0**, calling `@range_up` and
+  `@range_count` with neither a `declare` nor a `define`; the user's first sign of trouble is
+  `error: use of undefined value '@range_count'` from clang. The quarantined conformance xfails
+  `aoc2025_day1_sample` (`'@lcompose'`) and `stdlib_two_constraints_same_class` (`'@Err'`) are
+  this same hole, which is why they are labelled `link:`. Fix: at bundle time, reject a call to
+  a prelude-exported lowercase name that no bundled module declares, pointing at the missing
+  `module` header — restoring what the retired backend used to enforce. Also fix the stale
+  citation at `bundler.sprout:618`.
+- [ ] `P2` **A named module's constructors print with their qualified name.** `print(Apple(3))`
+  in a file headed `module main` outputs `main.Apple(3)`, not `Apple(3)` — the runtime ctor
+  display string is the bundler's qualified symbol (`bundler.qualified_name`, `:202`) rather
+  than the source-level name. Verified against a non-colliding ctor, so this is plain
+  qualification leaking to users, not a collision artefact. Two consequences: it is already
+  wrong for every named module today, and it *blocks* making the prelude unconditional — the
+  seven headerless examples would start printing `main.Just(3)` where they print `Just(3)`
+  now. Fix: carry the raw name alongside the qualified one in `CtorInfo` and emit the raw one
+  as the display string.
+- [ ] `P3` **DCE is absent from the `--emit-ir` path.** `dce.elim_program` is applied in
+  `compile_phase_lower*` (`compiler.sprout:442`, `:513`) but not in `compile_full` (`:311`),
+  which is what `--emit-ir` uses — so every emitted module carries the whole prelude whether
+  or not it is reachable (a 7-line `module main` that calls one local function still emits
+  ~12.7k lines, including an unused `@map`). Wiring DCE into `compile_full` would shrink the
+  entire 811k-line golden corpus and make an unconditional prelude nearly free in golden
+  churn. Gated separately: it rewrites every golden at once, so it wants its own PR with the
+  diff read per AGENTS.md DoD #12.
 
 ### 7.3) In-Language Stdlib Test Framework
 
