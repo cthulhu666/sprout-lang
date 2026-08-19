@@ -167,12 +167,52 @@ headerless files the prelude's own name.
    affected: `stdlib/prelude.sprout` is the only headerless file under `stdlib/`,
    and it is prepended rather than imported.
 
-4. **Never display the synthetic name.** `$entry.` is stripped wherever a
-   qualified name reaches the user: constructor display strings and diagnostic
-   text. This is goal 4, and it is what keeps `print(Just(2))` printing `Just(3)`
-   rather than `$entry.Just(3)`, and keeps a type error reading `Maybe Int`
-   rather than `$entry.Maybe Int`. Real module names keep their prefix — for a
-   named module the prefix is useful disambiguation.
+4. **Never display the synthetic name — but strip it at RENDER time only, never
+   at registration.** This is goal 4: `print(Just(2))` must print `Just(3)`, not
+   `$entry.Just(3)`, and a type error must read `Maybe Int`, not
+   `$entry.Maybe Int`. Real module names keep their prefix, which is useful
+   disambiguation.
+
+   > **Revised 2026-08-19.** This step previously said only "`$entry.` is
+   > stripped wherever a qualified name reaches the user: constructor display
+   > strings and diagnostic text", which reads as a cosmetic change. It is not.
+   > `CtorMeta.name` is a **single field serving both display and lookup**, so
+   > stripping it at registration is a wrong-tag bug, not a rendering choice:
+   >
+   > - `find_ctor_tag_by_name` (`runtime/sprout_runtime.c:2660`) is a **first-wins
+   >   linear scan** over `g_ctor_meta`. Register the entry file's `Just` as bare
+   >   `Just` and there are two entries under that name — the prelude's and the
+   >   entry's, with different tags and possibly different arities. The runtime
+   >   calls this function *itself* (`env_get` at :2843, the `stdlib.regex.Match`
+   >   construction), so it would silently take whichever registered first.
+   > - `sprout_make0` (`:4887`) keys its `g_nothing_singleton` cache on
+   >   `strcmp(name, "Nothing")`. A stripped entry-file `Nothing` would match and
+   >   be handed the cached singleton **carrying the prelude's tag**. Left as
+   >   `$entry.Nothing` it simply misses the fast path — a lost allocation
+   >   optimization, not a correctness bug, which is the right failure direction.
+   >
+   > Note the exact-match-then-suffix order in `find_ctor_tag_by_name` means the
+   > *unstripped* design is already safe: a lookup for `"Just"` hits the prelude's
+   > exact entry and never reaches the suffix fallback.
+   >
+   > **Two render surfaces, and they live in different languages.** The C
+   > printers — `print_inline_obj` (`:2680`, what `print` of an ADT reaches) and
+   > the stderr debug printer (`:4853`) — both do `printf("%s", meta->name)` and
+   > are where stripping belongs on the runtime side. Compiler **diagnostic** text
+   > is Sprout-side, in error rendering, and is a separate edit. No conformance
+   > fixture pins a function name (`grep "in function" tests/conformance/*/*.err`
+   > returns nothing), so no `.err` file gates this half — it is a UX requirement,
+   > not a test-driven one.
+   >
+   > **Out of scope, recorded:** `json_ctor_is` (`:6168`) dispatches JSON encoding
+   > on a ctor-name suffix match, so it treats `$entry.X` exactly as it already
+   > treats `main.X`. Pre-existing class; this change does not widen it.
+
+   **Entry-point detection needs no change** — verified, not assumed.
+   `is_entry_fn_name` (`ast_to_ir.sprout:5915`, mirrored in `infer.is_main_decl_name`
+   and `codegen.sprout:1906`) accepts `name == "main" || name` ending in `".main"`.
+   `$entry.main` satisfies the suffix arm, so the synthetic name routes through the
+   existing qualified-main path that `module main` files already use.
 
 5. **Add an explicit opt-out header.** A file whose header block contains the
    directive gets no prelude. Because headers are stripped *before* `tokenize`
