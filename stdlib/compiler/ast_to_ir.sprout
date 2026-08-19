@@ -3274,11 +3274,13 @@ fn fresh_body_label(branch_idx: Int, base_idx: Int) -> String =
 # Maybe-returning externs with a runtime `<name>_unboxed` (SproutUnboxed2) variant.
 # Width-3 (native_set_to_list) is excluded — different sret ABI, not Tier 1.
 #
-# EVERY name here returns an existing pointer or an immediate and allocates
-# NOTHING.  That is a load-bearing property, not a coincidence: it is what lets
-# the runtime's CPR block assert the strong "no GC can trigger inside these"
-# invariant, and what lets ir_rooting.is_nonallocating_unboxed_read treat the
-# whole list as non-triggers.  Do not add an allocating extern here.
+# NO name here can trigger a collection or return a GC-managed object.  That is a
+# load-bearing property, not a coincidence: it is what lets the runtime's CPR block
+# assert the strong "no GC can trigger inside these" invariant, and what lets
+# ir_rooting.is_nonallocating_unboxed_read treat the whole list as non-triggers.
+# Do not add an extern here that allocates GC memory.  (argv_get/env_get do reach
+# malloc via intern_string on a cache miss, but interned strings are permanent and
+# non-arena and no collection can trigger there — see the runtime's CPR header.)
 #
 # `regex_find_match` and `term_read_line` WERE on this list until 2026-08-19 and
 # were the only two that allocated their payload.  Both were removed: measured at

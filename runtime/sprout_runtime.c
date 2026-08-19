@@ -5426,10 +5426,16 @@ static BSTNode*  bst_nth_node(long long h, long long n);
  * instead of a heap-allocated Just/Nothing.  The codegen emits calls to these
  * when a match immediately scrutinises the return value (direct-match CPR path).
  *
- * GC INVARIANT: none of these allocate.  Every one returns an existing pointer
- * (v->data[i], node->key, node->value, getenv's string, an interned argv entry)
- * or an immediate (a decoded codepoint, a byte).  No GC can trigger inside them,
- * which is what makes returning a bare unrooted i64 pointer safe.
+ * GC INVARIANT: none of these can trigger a collection, and none returns memory
+ * the collector manages.  Most simply hand back a pointer they were given
+ * (v->data[i], node->key, node->value) or an immediate (a decoded codepoint, a
+ * byte).  env_get_unboxed and argv_get_unboxed are the ones worth stating
+ * carefully: they route through intern_string, which on a cache MISS does call
+ * malloc — but it is a bare malloc with no sprout_gc_maybe_collect_threshold(),
+ * and interned strings are permanent and non-arena (sprout_heap_lookup returns
+ * NULL for them, so the collector skips them).  So "allocates nothing" is loose;
+ * the load-bearing property is *triggers no collection and produces no GC-managed
+ * object*, which is what makes returning a bare unrooted i64 pointer safe.
  *
  * This invariant held only weakly until 2026-08-19: `regex_find_match_unboxed`
  * and `term_read_line_unboxed` DID allocate their payload, so the rule had to be
@@ -5677,8 +5683,14 @@ long long regex_find_match(const char* pattern, const char* text) {
   }
   long long start = sprout_utf8_codepoint_prefix_count(text, (size_t)match.rm_so);
   long long end = sprout_utf8_codepoint_prefix_count(text, (size_t)match.rm_eo);
-  /* See the unboxed variant for why this is a Match rather than an IntRange. The
-     Match must be rooted across sprout_make1, which allocates; the two offsets
+  /* A Match rather than an IntRange, because the two types do not mean the same
+     thing: a regex span is half-open [start, end) while an IntRange includes both
+     ends, so start == end reads as "empty" here and "one element" there. Borrowing
+     IntRange also forced a nominal step of +1 into a field a span has no use for.
+     (This rationale used to live on regex_find_match_unboxed, which was deleted
+     2026-08-19 — see the CPR block header for why.)
+
+     The Match must be rooted across sprout_make1, which allocates; the two offsets
      are scalars and need no rooting. */
   long long span = sprout_make2(find_ctor_tag_by_name("stdlib.regex.Match"), start, end);
   SPROUT_HANDLE(h_span, span);

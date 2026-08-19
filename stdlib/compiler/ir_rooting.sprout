@@ -52,12 +52,21 @@ fn is_nonallocating_read(fname: String) -> Bool =
 # which returns { tag, value } BY VALUE.  The reads below build no Sprout heap
 # object (all verified in runtime/sprout_runtime.c — only add a name after
 # reading its body):
-#   vector_get_unboxed (4410), map_get_unboxed (4417), map_nth_key_unboxed (4425),
-#   map_nth_value_unboxed (4431), bytes_get_unboxed (4437) — return data[i] /
-#     node->key / node->value directly.
-#   str_char_at_unboxed (4372) — returns the decoded codepoint (immediate i64).
-#   argv_get_unboxed (4349), env_get_unboxed (4342) — return an existing
-#     argv / getenv() pointer (no Sprout allocation).
+#   vector_get_unboxed, map_get_unboxed, map_nth_key_unboxed,
+#     map_nth_value_unboxed, bytes_get_unboxed — return data[i] / node->key /
+#     node->value directly.
+#   str_char_at_unboxed — returns the decoded codepoint (immediate i64).
+#   argv_get_unboxed, env_get_unboxed — return an interned string.  These two do
+#     reach malloc on an intern-table MISS, but it is a bare malloc with no
+#     sprout_gc_maybe_collect_threshold(), and interned strings are permanent and
+#     non-arena, so no collection triggers and nothing GC-managed is produced.
+#     (See the CPR block header in runtime/sprout_runtime.c, which states the
+#     invariant in that precise form.)
+#
+# Line numbers deliberately omitted.  This block used to cite one per name
+# (4342-4437); every one had drifted ~1100 lines out of date by 2026-08-19 while
+# still reading as authoritative — the same rot that had test_ir_rooting.spr's
+# Test 21 naming a function deleted three commits earlier.  Grep the name.
 # This list is now the WHOLE of unboxed_maybe_extern_name — every CPR variant
 # the codegen can emit is non-allocating.  It had two exclusions until
 # 2026-08-19 (regex_find_match_unboxed, which built its Match via sprout_make2,

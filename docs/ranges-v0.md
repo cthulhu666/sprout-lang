@@ -606,7 +606,10 @@ available and is unrelated to this design.
 >   appendix rejected an option it had not fully enumerated.
 > - **Cost 3 was worthless.** "Bare-file regression" is real — a preludeless `a..b` no
 >   longer compiles. But a preludeless file cannot call `range_start`, `range_count` or
->   any other accessor either: they are Sprout prelude functions and fail at link. So
+>   any other accessor either: they are Sprout prelude functions, and a call to one
+>   is an unresolvable `@range_up` / `@range_start` that the IR PARSER rejects
+>   ("use of undefined value") — not a link error, since a prelude function gets no
+>   `declare` the way an extern does. So
 >   the capability being protected was the ability to *construct a range you can
 >   perform no operation on*. Nothing in the corpus used it.
 > - **Costs 1 and 2 were real and were paid.** GC tracing does go from 0 children to 3
