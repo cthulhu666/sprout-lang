@@ -62,21 +62,29 @@ The silent case is the hazard, and it is the one an author never writes a test f
 
 **Goals.**
 
-1. `range(a, b)` with `b < a` is empty: zero elements, `range_count == 0`, `range_fold` returns
-   `init`, `range_each` is a no-op.
+1. An **ascending** range whose end is below its start is empty: zero elements, `range_count == 0`,
+   `range_fold` returns `init`, `range_each` is a no-op. Symmetrically for descending — see §4.1.
 2. Make emptiness *representable* — restructure the three walkers so `init` can be returned.
-3. Diagnose the one case that is unambiguously a mistake: a **literal** reversed range.
-4. Leave every accessor that is passed as a first-class function intact.
-5. Keep the change free of runtime edits, new builtins, and representation churn.
+   Today it cannot be.
+3. **Symmetric construction.** Building a descending range must look like building an ascending one
+   and work with every existing combinator unchanged: `range_up` / `range_down`, one marked pair,
+   neither privileged (§3c).
+4. Diagnose the one case that is unambiguously a mistake: a range with **literal** bounds that is
+   empty for its own direction.
+5. Leave every accessor that is passed as a first-class function intact.
 
 **Non-goals (hard fence).**
 
-1. **No descending range value in this change.** Deferred with a documented path — §4, Package B.
-2. **No arbitrary step** (`range_by`). See §4 for the concrete arithmetic reason, not taste.
-3. **No half-open constructor.** The fix makes `range(0, n - 1)` correct at `n == 0`, which demotes
-   `BACKLOG.md:1804` (B5) from a correctness requirement to optional sugar. Separate decision.
-4. **No representation change.** Two fields suffice to encode empty; see §4 and Appendix B.
-5. No descending `..` literal syntax.
+1. **No arbitrary step** (`range_by`). See §4 for the concrete arithmetic reason, not taste. The
+   step field this design adds makes it *possible* later; it does not make it wise now.
+2. **No half-open constructor.** The fix makes `range_up(0, n - 1)` correct at `n == 0`, which
+   demotes `BACKLOG.md:1804` (B5) from a correctness requirement to optional sugar. Separate
+   decision.
+3. **`IntRange` does not become a native Sprout record.** Appendix B — C cannot construct one.
+4. **No descending `..` literal syntax.** `5..1` stays an *empty ascending* range, and §5 records
+   that asymmetry as a known trap rather than pretending it away.
+5. No `Foldable`/`Iterable` instance for `IntRange` — it is kind `*` and the class needs `* -> *`
+   (`prelude.sprout:629`), so the `range_*` family stays separate from `list_*`/`vec_*` permanently.
 
 ---
 
@@ -182,9 +190,19 @@ descending on its own rather than as a rider on a bug fix.
 
 ## 4. Implementation overview — the approval gate
 
-Two coherent packages. **Package A is recommended.**
+**DECIDED 2026-08-19: Package B.** The user chose symmetry, and explicitly approved the runtime
+change and the two builtin changes it requires (AGENTS.md Collaboration Rule 6). The reasoning that
+carried it: with exactly one consumer of the language, a rename is cheaper now than it will ever be
+again, and the range surface is marked experimental in both `docs/int-ranges-v1-draft.md` and
+`examples/int_range_demo.sprout:3`. Package A is retained below as the rejected alternative, since
+its "no representation change needed" analysis is what establishes that a third field is a *choice*
+rather than a necessity.
 
-### Package A (recommended) — semantics + diagnostic, prelude-only
+See §4.1 for the direction-aware contracts, which are not a straightforward extension of Package A's
+— a step field makes emptiness **direction-relative**, and every predicate has to branch on the sign
+rather than assume `end < start` means empty.
+
+### Package A (REJECTED — retained for its analysis) — semantics + diagnostic, prelude-only
 
 `IntRange` stays a two-field C heap block. This is sufficient because two fields can encode
 *empty* **or** *descending* — just not both — and we are choosing empty. No representation change
@@ -201,7 +219,7 @@ is needed for the fix.
 
 `range` keeps its name. Nothing downstream is renamed. Accessors stay functions (§6).
 
-### Package B — symmetry now, if you want it despite §4's recommendation
+### Package B (CHOSEN) — symmetry, via a step field
 
 Requires direction in the value, which two fields cannot hold alongside emptiness. Everything in
 Package A, plus:
@@ -223,12 +241,57 @@ Package A, plus:
 - A prelude extern signature change forces a **full `just refresh-seed`**, not the `seed-fp-ack`
   bypass — see the AGENTS.md caveat on new prelude externs adding `declare` lines to the seed.
 
-**This is a sketch, not a costed plan.** If it is chosen, it gets its own design section before
-implementation; the list above is what is currently known to be required, not a guarantee of
-completeness.
-
 **Do not** implement Package B as a native Sprout record. Appendix B records why, with the
 load-bearing fact that kills it.
+
+### 4.1 Direction-aware contracts
+
+A step field makes emptiness relative to direction, so **no predicate may assume `end < start` means
+empty**. Let `s = range_step(r)`, which is `+1` or `-1` and never `0`.
+
+| | ascending (`s == +1`) | descending (`s == -1`) |
+|---|---|---|
+| non-empty when | `start <= end` | `start >= end` |
+| empty when | `end < start` | `end > start` |
+| `range_count` | `max(0, end - start + 1)` | `max(0, start - end + 1)` |
+| `range_contains(r, t)` | `start <= t && t <= end` | `end <= t && t <= start` |
+| walker base case | stop when `current > end` | stop when `current < end` |
+
+Both empty cases must yield the same observable nothing: `range_count == 0`, `range_to_list == Nil`,
+`range_fold` returns `init` untouched, `range_each` applies `f` zero times, `range_contains == false`,
+`range_to_vec` empty.
+
+The three walkers (`prelude.sprout:91,98,111`) currently terminate on `current == end_value`, which
+is why empty is unrepresentable. Each needs a *direction-dependent* guard, not a single `>`
+comparison — the cleanest form is one helper that answers "is `current` past `end` given `s`", used
+by all three, so the sign logic exists once rather than three times.
+
+**A step of `0` must be unconstructible.** `range_up` and `range_down` are the only constructors and
+they hardcode `+1`/`-1`; the `int_range` extern takes the step as a parameter, so nothing in Sprout
+can pass `0`, but the walkers would not terminate if anything did. Guard it at the runtime boundary
+(`tcp_fail` on `step == 0` in `int_range`) rather than trusting the callers, since the extern is
+reachable from any future stdlib code.
+
+### 4.2 Ordering
+
+Sequenced so that each step is independently verifiable and no step leaves the tree uncompilable:
+
+1. **Failing tests first** (Definition of Ready #2/#3) — `tests/stdlib/test_range_empty.spr` and
+   `test_range_down.spr`, confirmed failing for the right reason.
+2. **Runtime**: `IntRangeVal.step`, `int_range` arity + `step == 0` guard, `int_range_step`,
+   `APPROVED_BUILTINS` entries, the two regex constructors pass `+1`, the debug printer at `:2726`.
+3. **Compiler**: the hardcoded declare arity (`ir_lowering.sprout:557`), `TRange` lowering passes
+   `+1` (`ast_to_ir.sprout:1069`).
+4. **Prelude**: extern decls, `range_up`/`range_down`, `range` retired, `range_step` reads the field,
+   the direction-aware predicates and walkers per §4.1.
+5. **Rename sweep**: ~12 in-tree `range(` call sites; retire the two `upto` helpers.
+6. **Diagnostic** (§7), then its conformance fixtures.
+7. **Docs**: spec section, draft amendments, README, `int_range_demo.sprout` rewritten.
+8. **Seed + goldens**: full `just refresh-seed`, then read the whole `git diff tests/golden/ir`
+   before snapshotting.
+
+Steps 2-4 must land in one commit — the extern arity change makes them mutually dependent, and any
+split leaves the tree uncompilable in between.
 
 ### Why `range_by(a, b, step)` is not in either package
 
@@ -269,9 +332,25 @@ there is no such split. A descending literal is a separate decision either way.
 
 ## 6. Type-system impact
 
-**None.** No new types, no representation change, no inference change. `IntRange` stays a primitive
-type name in the two hardcoded lists (`bundler.sprout:1316`, `infer.sprout:5034`) and
-`infer_range` (`infer.sprout:4925`) is untouched.
+**No new types and no inference change.** `IntRange` stays an opaque primitive type name in the two
+hardcoded lists (`bundler.sprout:1316`, `infer.sprout:5034`), and `infer_range` (`infer.sprout:4925`)
+still types `a..b` as `TConst("IntRange")` — the added field is invisible to the type system because
+the type stays opaque. This is the payoff of *not* making it a record: the third field is a runtime
+detail, not a typing one.
+
+Two signature changes at the extern boundary, both in `stdlib/prelude.sprout`:
+
+- `extern fn int_range(start: Int, end: Int, step: Int) -> IntRange` — was 2-ary
+- `extern fn int_range_step(r: IntRange) -> Int` — new
+
+Neither is polymorphic and neither participates in inference beyond ordinary call checking.
+
+**Accessors stay functions, and this is settled by evidence rather than preference.**
+`examples/aoc_2025_day_5.sprout:83` passes `range_start` first-class to `vec_sort_by`. A field read
+is not a value and Sprout has no field sections, so replacing accessors with documented field reads
+would break working code. `docs/style-guide-v0.md:282` also names `range_start(r)` as an
+exemplar of permitted data-first accessor ordering. See Appendix A for why a microbenchmark
+initially suggested otherwise and why that reading was wrong.
 
 **Accessors stay functions, and this is settled by evidence rather than preference.**
 `examples/aoc_2025_day_5.sprout:83` passes `range_start` first-class to `vec_sort_by`. A field read
@@ -342,13 +421,21 @@ someone runs `just lint` does not prevent the bug this document exists to preven
   rewritten, not merely re-snapshotted.
 - Nothing else. No in-tree code *iterates* a descending range.
 
-**uncharted-suns** is the language's primary consumer and the reporter of this defect. Under
-Package A it needs no migration at all: `range` keeps its name and signature, and the only
-behaviour change is the one it asked for. Under Package B every `range(` call site there must be
-renamed to `range_up`.
+**uncharted-suns** is the language's primary consumer and the reporter of this defect. Package B
+(chosen) requires migration there, and it is worth stating plainly what that migration is:
 
-`range_step` moving from `export` to private is source-breaking in principle. Grepped: zero callers
-outside the prelude, in-tree.
+- **Every `range(a, b)` call becomes `range_up(a, b)`.** Mechanical, and a compile error at every
+  site if missed — `range` is removed rather than deprecated, so nothing fails silently. That is the
+  point of removing rather than aliasing: a retained `range` would keep working with the *new* empty
+  semantics, which is exactly the case where silence would be harmful.
+- **`a..b` is unaffected.** The syntax keeps working and means `range_up`.
+- **No behavioural surprise beyond the fix requested.** Any site relying on `range(hi, lo)` counting
+  downward becomes `range_down(hi, lo)`; any site that hit the `n == 0` bug is fixed by the rename
+  alone.
+
+`range_step` stays exported under Package B and becomes load-bearing again (it reads the new field
+rather than fabricating a direction), so no accessor is withdrawn. Grepped: zero callers outside the
+prelude, in-tree.
 
 **Golden IR**: all 60 files in `tests/golden/ir/` reference `int_range` — the prelude is bundled
 into every program — so **any** prelude change rewrites all 60. This is a constant, not a cost of
