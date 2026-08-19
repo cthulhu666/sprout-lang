@@ -6,8 +6,13 @@
 #
 # No prelude function is called here on purpose: a bare `.spr` gets no prelude,
 # so `range_count` would be unbound and its error could mask the one under test.
-# `IntRange` is a built-in primitive type name (spec §5), so the annotation alone
-# needs nothing imported.
+# `IntRange` is no longer a built-in primitive type (it became an ordinary prelude
+# ADT on 2026-08-19), but the annotation still needs nothing imported: the bundler
+# admits the prelude's exported TYPE names even in a preludeless file, so the name
+# resolves. The `5..1` below WOULD be unbuildable in a preludeless file — it lowers
+# to a call to the prelude's `range_up`, which has no definition here — but that
+# never comes up, because the diagnostic under test rejects it during checking and
+# lowering is never reached.
 #
 # The POSITIVE counterpart is tests/stdlib/test_range_empty.spr, which runs with
 # the prelude and pins that a range with COMPUTED bounds is NOT diagnosed and is

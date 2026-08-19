@@ -5425,13 +5425,31 @@ static BSTNode*  bst_nth_node(long long h, long long n);
  * Each _unboxed variant mirrors its boxed counterpart but returns SproutUnboxed2
  * instead of a heap-allocated Just/Nothing.  The codegen emits calls to these
  * when a match immediately scrutinises the return value (direct-match CPR path).
- * GC safety: no GC can trigger AFTER the last allocation returns — that is the
- * actual invariant, and it is what makes returning a bare i64 pointer safe.  Most
- * of these allocate nothing at all; `regex_find_match_unboxed` does call
- * sprout_make2, but it is the final allocation in the function and only
- * cached_tag_just() (a linear scan of the ctor table, no allocation) runs after it.
- * A variant that allocated, then called something else that could allocate, would
- * break this — the earlier pointer would be unrooted across the second trigger.
+ *
+ * GC INVARIANT: none of these allocate.  Every one returns an existing pointer
+ * (v->data[i], node->key, node->value, getenv's string, an interned argv entry)
+ * or an immediate (a decoded codepoint, a byte).  No GC can trigger inside them,
+ * which is what makes returning a bare unrooted i64 pointer safe.
+ *
+ * This invariant held only weakly until 2026-08-19: `regex_find_match_unboxed`
+ * and `term_read_line_unboxed` DID allocate their payload, so the rule had to be
+ * softened to "allocation must be the last thing that happens" — a condition no
+ * tool checks and a reviewer must re-derive by reading each body to the end.
+ * Both were deleted.  Measured worth was ~10 ns against a ~1200 ns regexec-
+ * dominated call (0.8%, and slower in 2 of 5 rounds), while term_read_line blocks
+ * on stdin, so neither had a bottleneck to justify the surface.  Callers now take
+ * the boxed path, which is behaviourally identical.  Keep it that way: adding an
+ * allocating variant here silently reintroduces the weak rule for the whole block.
+ *
+ * On coverage, precisely: `regex_find_match_unboxed` WAS executed in CI, by
+ * tests/stdlib/test_regex.spr — `regex.find_first` is a bare forward to the
+ * extern, so a caller matching it with simple arms gets a Tier-2 worker that
+ * reaches Tier-1.  It is absent from all 60 golden IR files only because
+ * examples/regex_demo.sprout happens to destructure with a NESTED arm, which the
+ * peephole rejects.  `term_read_line_unboxed` had no executing test and never
+ * had one — it blocks on stdin.  So "zero golden call sites" was never evidence
+ * of dead code here; the measurement above is what justified the removal.
+ *
  * The caller pushes extracted field0 as a temp root in the Just arm before any
  * further GC-triggering call (see emit_match_unboxed_adt).
  * NOTE: if a future moving GC is added, the returned i64 pointers must be
@@ -5453,23 +5471,6 @@ SproutUnboxed2 argv_get_unboxed(long long index) {
   return (SproutUnboxed2){ cached_tag_just(), (int64_t)(uintptr_t)intern_string(g_sprout_argv[index + 1]) };
 }
 
-SproutUnboxed2 term_read_line_unboxed(void) {
-  char* line = NULL;
-  size_t cap = 0;
-  ssize_t len = getline(&line, &cap, stdin);
-  if (len < 0) {
-    free(line);
-    if (feof(stdin)) return (SproutUnboxed2){ cached_tag_nothing(), 0 };
-    tcp_fail("term_read_line_unboxed: read error");
-  }
-  while (len > 0 && (line[len - 1] == '\n' || line[len - 1] == '\r')) {
-    len -= 1;
-    line[len] = '\0';
-  }
-  line = register_cstr(line);
-  return (SproutUnboxed2){ cached_tag_just(), (int64_t)(uintptr_t)line };
-}
-
 SproutUnboxed2 str_char_at_unboxed(long long s_val, long long index) {
   const char* s = (const char*)s_val;
   if (s == NULL) tcp_fail("str_char_at_unboxed: null input");
@@ -5487,32 +5488,6 @@ SproutUnboxed2 str_char_at_unboxed(long long s_val, long long index) {
     cp_idx++;
   }
   return (SproutUnboxed2){ cached_tag_nothing(), 0 };
-}
-
-/* Builds `stdlib.regex.Match` directly, the same way sprout_make_proc_result
-   builds stdlib.process.ProcResult.  This used to allocate an IntRange and let
-   Sprout unpack it one line later, which meant the runtime carried a whole heap
-   kind to transport two integers — and transported them in a type whose meaning
-   did not match (IntRange is inclusive; a span is half-open, so start == end is
-   "one element" there and "empty" here).  Match says what is meant. */
-SproutUnboxed2 regex_find_match_unboxed(const char* pattern, const char* text) {
-  if (pattern == NULL || text == NULL) tcp_fail("regex_find_match_unboxed: null input");
-  regex_t compiled;
-  char* error = NULL;
-  if (!regex_compile_ere(pattern, &compiled, &error)) {
-    regex_builtin_fail("regex_find_match_unboxed", error);
-  }
-  regmatch_t match;
-  int status = regexec(&compiled, text, 1, &match, 0);
-  regfree(&compiled);
-  if (status == REG_NOMATCH) return (SproutUnboxed2){ cached_tag_nothing(), 0 };
-  if (status != 0 || match.rm_so < 0 || match.rm_eo < 0)
-    tcp_fail("regex_find_match_unboxed: regexec failed");
-  long long start = sprout_utf8_codepoint_prefix_count(text, (size_t)match.rm_so);
-  long long end   = sprout_utf8_codepoint_prefix_count(text, (size_t)match.rm_eo);
-  /* Both fields are scalars, so nothing needs rooting across this allocation. */
-  long long span = sprout_make2(find_ctor_tag_by_name("stdlib.regex.Match"), start, end);
-  return (SproutUnboxed2){ cached_tag_just(), (int64_t)span };
 }
 
 SproutUnboxed2 vector_get_unboxed(long long vec, long long index) {
