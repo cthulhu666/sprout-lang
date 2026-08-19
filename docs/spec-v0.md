@@ -638,7 +638,16 @@ RHS must be either:
 
 - A locally-declared type (in the same module bundle).
 - A built-in primitive type (`Int`, `Double`, `Bool`, `String`, `Char`, `Unit`,
-  `Bytes`, `IntRange`).
+  `Bytes`).
+  > `IntRange` was in this list until 2026-08-19. It is now an ordinary type
+  > declared in the prelude (§8.3), so it satisfies the *first* bullet instead.
+  >
+  > The *name* still resolves in a file that receives no prelude, because the
+  > bundler admits the prelude's exported type names in that case rather than
+  > rejecting every signature mentioning `Maybe` or `Result`. What such a file
+  > cannot do is *build* a range: `a..b` lowers to a call to the prelude's
+  > `range_up`, which compiles and then fails at link with an undefined symbol —
+  > the same outcome as calling any other prelude function from such a file.
 - A lowercase type variable (e.g. `a`, `b`) bound by the enclosing type
   declaration's parameter list.
 
