@@ -1,24 +1,60 @@
 module examples.int_range_demo
 
-# Demonstrates the current experimental IntRange surface with a small
-# warehouse-picking style example.
+# The IntRange surface: an inclusive interval that knows which way it travels.
+#
+# Two properties do the work in this file:
+#   - `range_up` and `range_down` are PEERS. Neither is the default spelling, and
+#     both feed the same combinators — `range_count`, `range_fold`, `range_each`,
+#     `range_contains` take either without knowing which they were handed.
+#   - a range is EMPTY when its end lies past its start in the direction of
+#     travel, so a boundary case does nothing rather than quietly reversing.
+#
+# The `a..b` literal builds an ASCENDING range only; there is no descending
+# literal, so a reversed one like `6..2` is an *empty ascending* range rather
+# than a descending one. Write `range_down(6, 2)` for that. A reversed literal
+# with constant bounds is rejected at compile time, since it can only be a typo.
+
+# A warehouse picking route over aisles.
 
 fn aisle_pick_minutes(aisle: Int) -> Int =
   if range_contains(1..4, aisle) then 3 else 5
 
 fn route_minutes(route: IntRange) -> Int =
-  range_fold(
-    \ (acc, aisle) -> acc + aisle_pick_minutes(aisle),
-    0,
-    route
-  )
+  range_fold(\ (acc, aisle) -> acc + aisle_pick_minutes(aisle), 0, route)
 
-fn return_trip_crosses_loading_bay(route: IntRange) -> Int =
-  if range_contains(route, 4) then 100 else 0
+fn describe(label: String, route: IntRange) -> Unit !{IO} =
+  print(
+    `${label}: ${to_string(range_count(route))} aisles, `
+      ++ `${to_string(route_minutes(route))} min, step ${to_string(range_step(route))}`
+  )
 
 fn main() -> Unit !{IO} =
-  print(
-    range_count(2..6)
-    + route_minutes(2..6)
-    + return_trip_crosses_loading_bay(6..2)
-  )
+  do
+    # Same aisles, opposite directions. The cost is identical because addition
+    # does not care about order — but the ranges are genuinely different values.
+    describe("outbound 2 -> 6", range_up(2, 6))
+    describe("return   6 -> 2", range_down(6, 2))
+
+    # ...and the difference IS observable: each range starts where it says it does.
+    print(
+      `outbound starts at ${to_string(range_start(range_up(2, 6)))}, `
+        ++ `return starts at ${to_string(range_start(range_down(6, 2)))}`
+    )
+
+    # A shift with nobody on it. `range_up(0, crew - 1)` is the ordinary spelling
+    # of a half-open [0, crew) walk; at crew = 0 that is range_up(0, -1), which
+    # visits nothing. It used to walk 0 and -1 — two indices outside the shift.
+    let crew = 0
+    describe("empty shift", range_up(0, crew - 1))
+
+    # Emptiness is direction-relative, so the mirror image is empty too: counting
+    # DOWN from 2 to 6 never gets started.
+    #
+    # The bounds are bindings rather than literals because `range_down(2, 6)`
+    # written out is a COMPILE ERROR: a literal range that is empty for its own
+    # direction can only be a typo, so the compiler rejects it and suggests
+    # `range_up`. Only computed bounds can be empty, which is the case that
+    # actually occurs — an empty shift, an empty grid, a zero-length row.
+    let top = 2
+    let bottom = 6
+    describe("backwards down", range_down(top, bottom))

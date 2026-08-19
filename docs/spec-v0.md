@@ -1658,6 +1658,59 @@ the prior-art survey behind them are in `docs/math-partiality-v0.md`; Rule 1's
 `Maybe`-returning signatures are a standing commitment and will not be narrowed to
 total functions.
 
+### 8.3 Integer ranges (Experimental)
+
+`IntRange` is a built-in opaque type (§5) denoting an **inclusive interval walked in a
+fixed direction**. The direction is part of the value, not inferred from which bound is
+larger. Design rationale and prior art: `docs/ranges-v0.md`.
+
+**Construction.** Two peer constructors, neither of which is the default spelling:
+
+- `range_up(lo, hi)` — step `+1`, enumerating `lo, lo+1, …, hi`.
+- `range_down(hi, lo)` — step `-1`, enumerating `hi, hi-1, …, lo`. Arguments read in
+  iteration order, so the first argument is where enumeration begins.
+
+`lo..hi` is sugar for `range_up(lo, hi)`. **There is no descending literal**: `a..b`
+always builds an ascending range. Both operands are evaluated left-to-right, as for any
+binary operator.
+
+**Emptiness.** A range is empty when its end lies past its start *in its direction of
+travel*:
+
+| step | non-empty when | empty when |
+|---|---|---|
+| `+1` | `start <= end` | `end < start` |
+| `-1` | `start >= end` | `end > start` |
+
+Emptiness is therefore direction-relative: `range_up(5, 1)` and `range_down(1, 5)` are
+both empty, while `range_up(1, 5)` and `range_down(5, 1)` both have five elements. This
+is the total answer in the sense of §8.2 — an empty interval is well defined, so no
+partiality arises and nothing panics.
+
+**Contracts on an empty range.** All of the following hold, for either direction:
+
+- `range_count` is `0`
+- `range_is_empty` is `true`
+- `range_contains` is `false` for every target
+- `range_to_list` is `Nil`; `range_to_vec` has no elements
+- `range_fold(f, init, r)` is `init`, with `f` **not applied even once**
+- `range_each(f, r)` applies `f` zero times
+
+**Bounds are stored as written.** No normalization occurs, so `range_start` and
+`range_end` return the operands as given — for a descending range, `range_start` is the
+larger. `to_string` reflects those bounds and does not show the direction, so a
+descending range and its reversed ascending twin render alike.
+
+**Diagnostics.** A range whose bounds are both integer *literals* and which is empty for
+its direction is **rejected at compile time**, naming the fix. This mirrors the rule for
+shift counts (§8.1.2): the computed case gets the total runtime answer, while a
+statically-known-empty range is a program that cannot be right. A range with computed
+bounds is never diagnosed — `range_up(0, n - 1)` at `n == 0` is legal and empty, and is
+the ordinary spelling of a half-open `[0, n)` walk.
+
+**Step.** `range_step` reports `+1` or `-1`. No other step is constructible in this
+version; arbitrary steps are deferred (`docs/ranges-v0.md` §4).
+
 ## 8.5 Standard Prelude Typeclass Instances (Experimental)
 
 The following typeclass instances are provided by `stdlib/prelude.sprout` and are

@@ -1803,6 +1803,8 @@ Legend:
 - [ ] `P2` **Tail-spread syntax for list-literal expressions (`[a, b | tail]`).** Raised 2026-07-13 during the Cons-chain-to-list-literal refactor. List-literal **patterns** already support a tail spread (`parse_list_pattern`, `parser.sprout:370-400`: `[]`, `[a, b]`, `[a, b | rest]`), but list-literal **expressions** do not — `parse_list_literal`/`desugar_list_literal`/`collect_expr_list` (`parser.sprout:854-961`) only build a fixed, comma-separated, `Nil`-terminated chain. This leaves a real asymmetry: constructs like `Cons(h, Cons(sep, acc))` (prepending a fixed number of elements onto an existing list variable — e.g. `stdlib/string.sprout:167`, `stdlib/prelude.sprout:419/1035/1061/1076`, `stdlib/compiler/ir_rooting.sprout:347`, `stdlib/compiler/driver.sprout:184/206`) cannot be written as list literals today, unlike their `Nil`-terminated siblings which convert cleanly to `[a, b, c]`. Adding expression-side `[a, b | tail]` (desugaring to `Cons(a, Cons(b, tail))`, mirroring the existing pattern-side desugar) would close the gap and let these accumulator-building call sites read as literals too. Needs its own Design Change Process pass (prior-art survey — e.g. Haskell's lack of a literal cons-spread vs OCaml's `a :: b :: tail`, Elm's `::` operator) since it's new expression syntax, not a mechanical rewrite.
 - [ ] `P2` **B5 — half-open iteration helper for the new combinators.** Surfaced 2026-07-09 (advisor review of the combinator work). The iteration combinators take an inclusive `IntRange`, so the common half-open `[0, n)` loop is `range(0, n - 1)` — which is **wrong at `n == 0`**: `range(0, -1)` flips to a descending step and iterates over `0` and `-1` instead of zero times. The hand-rolled `if i >= n` loops it replaces handled `n == 0` for free, so the combinators are a regression for possibly-empty half-open loops unless the caller guards `n == 0`. Add a safe half-open helper, e.g. `count_each(f: Int -> Unit !{e}, n: Int)` / `count_fold` (iterate `[0, n)`, no-op when `n <= 0`), or an exclusive-range constructor `upto(n)`. Then update the README Iteration Combinators note (currently documents the guard workaround) to recommend the helper. Low-risk stdlib addition; effect-poly like the existing grid.
 
+  **DEMOTED TO SUGAR 2026-08-19 — the correctness half is gone.** `docs/ranges-v0.md` made a backwards range empty, so `range_up(0, n - 1)` is now *correct* at `n == 0` and needs no guard; the README note that documented the workaround has been replaced. What remains is an ergonomics question only: whether `[0, n)` deserves a name of its own. Two in-tree definitions of `fn upto(n) = range_up(0, n - 1)` still exist (`bench/dispatch/dispatch_bench.sprout:35`, `examples/digit_recognizer/recognizer.sprout:46`), which is the evidence for adding one. **If it is added, do NOT call it `upto`** — one character from `range_up`, different arity, different meaning; `count_each` / `count_fold` avoid the collision. Note also that every in-tree `upto` result is consumed immediately by `range_fold`/`range_each`, so the combinator pair covers 100% of real usage and an exclusive-range *constructor* would be the weaker option.
+
 - [x] `P2` Mutable containers module + `MutMatrix`. **LANDED 2026-07-09.** Extracted `MutVec` (+ `mutvec_new/get/set`) out of the implicit prelude into a new `stdlib.mutable` module (mutation is now an explicit, opt-in import) and added a row-major `MutMatrix a` there (bounds-checked `mutmatrix_get`/`set`, `mutmatrix_new`/`rows`/`cols`, backed by one `MutVec`). Every bare `MutVec` consumer now imports `stdlib.mutable` (5 stdlib tests, the value-restriction fixture, astar + neural_network_train_xor). `examples/digit_recognizer/recognizer.sprout` rewritten to hold weights in a `Net` record of two `MutMatrix` + two `MutVec`, deleting the flat-vector index math (`iw1`/`ib1`/`iw2`/`ib2`, `off_*`, `n_weights`); training output byte-identical. No compiler code used `MutVec` (comments only), so the seed is IR-unchanged.
 
 - [x] `P2` Growable `MutVec` — **LANDED 2026-08-15**, design in [docs/growable-mutvec-v0.md](docs/growable-mutvec-v0.md). One new builtin (`vector_push`, in-place realloc of the `VectorVal` backing array, doubling from 8) plus `mutvec_push` / `mutvec_empty` in `stdlib.mutable`. `mutvec_empty` needed no builtin — `vector_empty` was already a prelude extern backing `Vec`. Growth is in place, so every copy of the handle sees it; `len` stays live-length and bounds stay checked against it. Third write-barrier site — see the amendment to the generational-GC entry above.
@@ -2445,7 +2447,19 @@ what the LSP actually does: `docs/language-server-roadmap.md`.
   value wins at inference. A fix that only extends the bundler's declined path is purely additive
   (it can only affect programs that error today); changing the claimed path would change
   shadowing semantics and needs its own call.
-- [ ] `P2` **A descending `range(a, b)` (`b < a`) counts DOWNWARD instead of being empty.**
+- [x] `P2` **A descending `range(a, b)` (`b < a`) counts DOWNWARD instead of being empty.
+  FIXED 2026-08-19** — design and rationale in `docs/ranges-v0.md`; resolved as Package B
+  (symmetry), not the minimal fix. `range` is **retired** in favour of the peer constructors
+  `range_up` / `range_down`; direction now lives in the value (a `step` field on `IntRangeVal`,
+  reachable via the new `int_range_by` / `int_range_step` builtins) rather than being inferred from
+  bound order. A range is empty when its end lies past its start *in its direction of travel*, so
+  `range_up(5, 1)` and `range_down(1, 5)` are both empty. `a..b` stays ascending-only. A range whose
+  bounds are both **literals** and empty for its direction is rejected at compile time — matching
+  the rule `spec-v0.md:1632` already applies to a negative literal shift count — while computed
+  bounds stay silent, which is what keeps `range_up(0, n - 1)` legal at `n == 0`. Normative
+  semantics now in `spec-v0.md` §8.3; `docs/int-ranges-v1-draft.md` §2 goal 4, §6 rule 3 and §14 Q2
+  annotated as superseded. Original report follows.
+  
   Reported from uncharted-suns 2026-08-18; reproduced and run. `range_step`
   (`stdlib/prelude.sprout:76`) returns `-1` when `start > end`, and `range_count` returns
   `|start - end| + 1`, so `range(0, -1)` has **two** elements. Measured end-to-end: a
@@ -3855,6 +3869,24 @@ there in its Appendix C. None is in scope for that change.
   rejection**. Either add one, or move the rejection into the check phase where a harness already
   exists. `docs/ranges-v0.md` §7 chose the latter for its own diagnostic rather than reproduce this
   gap.
+- [ ] `P3` **No exported `Int` bound constants, so every caller open-codes them.** Surfaced
+  2026-08-19 while writing range boundary tests. There is no `int_max` / `int_min` anywhere in the
+  stdlib: `stdlib/math.sprout:595` keeps a **private** `fn min_int() -> Int = 0 - 9223372036854775807 - 1`,
+  and nothing exposes the maximum at all. Callers therefore repeat the magic literal —
+  `tests/stdlib/test_range_empty.spr` now does, as did `math.sprout` before it.
+
+  The awkward `0 - <max> - 1` spelling is not stylistic: **the lexer cannot represent the INT_MIN
+  literal**, as `stdlib/prelude.sprout:46-47` records on `int_is_min` ("Detected without an INT_MIN
+  literal (which the lexer cannot yet represent)"). So `int_min` genuinely cannot be written
+  directly, which is exactly the argument for defining it once in the stdlib rather than asking
+  every caller to know the trick.
+
+  Proposal: export `int_max` and `int_min` from `stdlib.math.int` (its documented home for
+  integer-domain concerns), have `math.sprout`'s private `min_int()` and `prelude`'s `int_is_min`
+  use them, and note in the spec that the negative bound is spelled `0 - int_max - 1` until the
+  lexer accepts the literal. Small, but it touches the prelude and wants its own tests, so it was
+  deliberately kept out of the ranges change.
+
 - [ ] `P3` **`range_to_vec` is O(n²).** `stdlib/prelude.sprout:203` folds via copying `vec_append`,
   already acknowledged at `tests/stdlib/test_vec_sort_stacksafe.spr:10`. Wants a doc note on the
   function, or a `vec_from_list` single-allocation rewrite mirroring the one at `prelude.sprout:314`.

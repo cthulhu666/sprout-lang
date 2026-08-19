@@ -21,10 +21,10 @@ fn int_or_zero(m: Maybe Int) -> Int =
 
 fn parse_range(raw: String) -> IntRange =
   match split_once(raw, "-") with
-  | Nothing -> range(int_or_zero(parse_int(trim(raw))), int_or_zero(parse_int(trim(raw))))
+  | Nothing -> range_up(int_or_zero(parse_int(trim(raw))), int_or_zero(parse_int(trim(raw))))
   | Just pair ->
       match pair with
-      | (left, right) -> range(int_or_zero(parse_int(trim(left))), int_or_zero(parse_int(trim(right))))
+      | (left, right) -> range_up(int_or_zero(parse_int(trim(left))), int_or_zero(parse_int(trim(right))))
 
 fn parse_database(lines: Vec String, index: Int, seen_blank: Bool, ranges: Vec IntRange, ids: Vec Int) -> Database =
   match vec_get(index, lines) with
@@ -60,7 +60,7 @@ fn overlaps(left: IntRange, right: IntRange) -> Bool =
   range_start(left) <= range_end(right) && range_start(right) <= range_end(left)
 
 fn merge_pair(left: IntRange, right: IntRange) -> IntRange =
-  range(
+  range_up(
     if range_start(left) < range_start(right) then range_start(left) else range_start(right),
     if range_end(left) > range_end(right) then range_end(left) else range_end(right)
   )
@@ -81,7 +81,7 @@ fn merge_sorted_ranges(sorted: Vec IntRange, index: Int, current: IntRange, seen
 
 
 fn normalized_ranges(ranges: Vec IntRange) -> Vec IntRange =
-  merge_sorted_ranges(vec_sort_by(range_start, ranges), 0, range(0, 0), false, vec_empty())
+  merge_sorted_ranges(vec_sort_by(range_start, ranges), 0, range_up(0, 0), false, vec_empty())
 
 fn count_covered_ids_from(merged: Vec IntRange, index: Int, acc: Int) -> Int =
   match vec_get(index, merged) with

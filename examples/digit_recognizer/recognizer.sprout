@@ -25,7 +25,7 @@ import stdlib.string as string
 # each opens it with `match ctx with | Ctx (Net ...) hidden out dhidden`.  `lr` stays
 # an explicit argument.  Iteration uses the prelude's effect-polymorphic combinators
 # (`range_each`/`range_fold`/`list_each`/`list_fold`) over `upto(n)`, the [0, n) bound
-# (IntRange is inclusive, so upto wraps the `range(0, n - 1)`).  Each loop body is a
+# (IntRange is inclusive, so upto wraps the `range_up(0, n - 1)`).  Each loop body is a
 # local `let`-closure that captures the enclosing ctx buffers.
 #
 # Run from the repository root:
@@ -39,9 +39,11 @@ let n_hid = 256
 let n_out = 10
 
 # Half-open loop bound: upto(n) spans [0, n) as n iterations. IntRange is inclusive,
-# so a raw [0, n) loop would read `range(0, n - 1)`; upto keeps that off the call sites
-# (and upto(0) is the empty range, the correct n = 0 case).
-fn upto(n: Int) -> IntRange = range(0, n - 1)
+# so a raw [0, n) loop would read `range_up(0, n - 1)`; upto keeps that off the call
+# sites. `upto(0)` is the empty range, which this comment has always CLAIMED and
+# which only became true when a backwards range stopped counting downward — before
+# that, upto(0) was range(0, -1) and walked indices 0 and -1 (docs/ranges-v0.md §1).
+fn upto(n: Int) -> IntRange = range_up(0, n - 1)
 
 # W1: n_hid x n_in, B1: n_hid, W2: n_out x n_hid, B2: n_out.
 type Net = Net(MutMatrix Double) (MutVec Double) (MutMatrix Double) (MutVec Double)
@@ -253,7 +255,7 @@ fn train(ctx: Ctx, train_set: List (MutVec Double, Int), test_set: List (MutVec 
     let epoch_step = \epoch -> do
           report(ctx, test_set, epoch, n_test)
           train_epoch(ctx, train_set, lr)
-    range_each(epoch_step, range(0, total_epochs))
+    range_each(epoch_step, range_up(0, total_epochs))
 
 fn main() -> Unit !{IO} =
   do

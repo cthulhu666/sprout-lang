@@ -64,8 +64,23 @@ export type Dict v =
 export type Set =
   | Set NativeSet
 
-export fn range(lo: Int, hi: Int) -> IntRange =
+# An IntRange is an inclusive interval walked in a FIXED direction, carried in the
+# value itself rather than inferred from which bound is larger. `range_up` and
+# `range_down` are peers — neither is the default spelling — and each is EMPTY when
+# its end lies past its start in the direction of travel. Normative contracts in
+# docs/ranges-v0.md §4.1.
+#
+# Emptiness is therefore direction-relative, and this is the whole point: because
+# `range_up(0, n - 1)` is the ordinary spelling of a half-open [0, n) walk, it must
+# do nothing at n == 0 rather than walk 0 and -1. Inferring direction from bound
+# order made that case unrepresentable.
+export fn range_up(lo: Int, hi: Int) -> IntRange =
   int_range(lo, hi)
+
+# Counts DOWN from `hi` to `lo` inclusive. The arguments read in iteration order,
+# so `range_down(5, 1)` starts at 5 — the mirror of `range_up(1, 5)` starting at 1.
+export fn range_down(hi: Int, lo: Int) -> IntRange =
+  int_range_by(hi, lo, -1)
 
 export fn range_start(value: IntRange) -> Int =
   int_range_start(value)
@@ -73,9 +88,31 @@ export fn range_start(value: IntRange) -> Int =
 export fn range_end(value: IntRange) -> Int =
   int_range_end(value)
 
+# +1 or -1, read from the range rather than reconstructed from bound order.
 export fn range_step(value: IntRange) -> Int =
-  if range_start(value) <= range_end(value) then 1 else -1
+  int_range_step(value)
 
+# True once `current` has travelled past `end_value` in the direction `step`. The
+# sign logic lives here once, so the three walkers below cannot disagree about
+# where an empty range terminates.
+fn range_past_end(current: Int, end_value: Int, step: Int) -> Bool =
+  if step > 0 then current > end_value else current < end_value
+
+# True on the LAST element, so a walker can stop without computing `current + step`.
+# That matters only at the extremes — `range_up(x, MAX_INT)` would otherwise
+# increment past MAX_INT, wrap to MIN_INT, and never satisfy `range_past_end`,
+# turning a very long loop into a non-terminating one. Cheap insurance: one Int
+# comparison per iteration, against a loop body that already calls a closure.
+fn range_at_end(current: Int, end_value: Int) -> Bool =
+  current == end_value
+
+# O(1): a range with no elements. Ascending is empty when its end is below its
+# start; descending when its end is above it.
+export fn range_is_empty(value: IntRange) -> Bool =
+  range_past_end(range_start(value), range_end(value), range_step(value))
+
+# No empty special case is needed: when the range is empty the two bounds are
+# crossed, so no target can satisfy both comparisons.
 export fn range_contains(value: IntRange, target: Int) -> Bool =
   if range_step(value) > 0 then
     target >= range_start(value) && target <= range_end(value)
@@ -83,39 +120,45 @@ export fn range_contains(value: IntRange, target: Int) -> Bool =
     target <= range_start(value) && target >= range_end(value)
 
 export fn range_count(value: IntRange) -> Int =
-  if range_step(value) > 0 then
+  if range_is_empty(value) then 0
+  else if range_step(value) > 0 then
     (range_end(value) - range_start(value)) + 1
   else
     (range_start(value) - range_end(value)) + 1
 
 fn range_to_list_go(current: Int, end_value: Int, step: Int) -> List Int =
-  if current == end_value then Cons(current, Nil)
+  if range_past_end(current, end_value, step) then Nil
+  else if range_at_end(current, end_value) then Cons(current, Nil)
   else Cons(current, range_to_list_go(current + step, end_value, step))
 
 export fn range_to_list(value: IntRange) -> List Int =
   range_to_list_go(range_start(value), range_end(value), range_step(value))
 
 fn range_fold_go(current: Int, end_value: Int, by: Int, acc: b, step: b -> Int -> b !{e}) -> b !{e} =
-  if current == end_value then step(acc, current)
+  if range_past_end(current, end_value, by) then acc
+  else if range_at_end(current, end_value) then step(acc, current)
   else
     do
       next <- step(acc, current)
       range_fold_go(current + by, end_value, by, next, step)
 
-# O(n): inclusive fold over [start, end] following the range's step. The step's effect
-# row is polymorphic (`!{e}`), so pure callers get `e = {}` and effectful callers may
+# O(n): inclusive fold over the range, following its step. Returns `init` untouched
+# when the range is empty — `step` is not applied even once. The step's effect row
+# is polymorphic (`!{e}`), so pure callers get `e = {}` and effectful callers may
 # read/write mutable state inside `step`. Data-last: the range is the final argument.
 export fn range_fold(step: b -> Int -> b !{e}, init: b, r: IntRange) -> b !{e} =
   range_fold_go(range_start(r), range_end(r), range_step(r), init, step)
 
 fn range_each_go(f: Int -> Unit !{e}, current: Int, end_value: Int, by: Int) -> Unit !{e} =
-  if current == end_value then f(current)
+  if range_past_end(current, end_value, by) then ()
+  else if range_at_end(current, end_value) then f(current)
   else
     do
       _ <- f(current)
       range_each_go(f, current + by, end_value, by)
 
-# O(n): inclusive imperative loop over [start, end]; `f` runs for its effect at each index.
+# O(n): inclusive imperative loop over the range; `f` runs for its effect at each
+# index, and zero times when the range is empty.
 export fn range_each(f: Int -> Unit !{e}, r: IntRange) -> Unit !{e} =
   range_each_go(f, range_start(r), range_end(r), range_step(r))
 
@@ -1409,9 +1452,16 @@ extern fn to_double(n: Int) -> Double
 # whereas reinterpreting a Double's bits is a deliberate reach for the math module.
 
 # Integer ranges
+# int_range builds an ASCENDING range (step +1) and stays 2-ary so that the
+# hardcoded declare in ir_lowering.sprout — which lets `a..b` link without the
+# prelude, and which is baked into the committed seed — needs no arity change.
+# int_range_by takes an explicit step, which must be 1 or -1; the runtime rejects
+# anything else, because a step of 0 would make every walker loop forever.
 extern fn int_range(start: Int, end: Int) -> IntRange
+extern fn int_range_by(start: Int, end: Int, step: Int) -> IntRange
 extern fn int_range_start(r: IntRange) -> Int
 extern fn int_range_end(r: IntRange) -> Int
+extern fn int_range_step(r: IntRange) -> Int
 
 # String primitives
 extern fn str_concat(a: String, b: String) -> String

@@ -108,4 +108,29 @@ fn main() -> Unit !{IO} =
     assert_eq(state, "an empty range renders its bounds as written",
       to_string(range_up(hi, lo)), "IntRange(5, 1)")
 
+    # --- termination at the representable extremes --------------------------
+    # A walker that only asked "have we gone PAST the end?" would, at
+    # end == MAX_INT, compute MAX_INT + 1, wrap to MIN_INT, and never satisfy
+    # that test — a non-terminating loop. `range_at_end` stops on the last
+    # element instead, before the overflowing increment. These two cases HANG
+    # rather than fail if that guard is removed, which is the point of them.
+
+    # Written this way because the lexer cannot represent the INT_MIN literal
+    # (see the note on `int_is_min`, prelude.sprout:46). The stdlib has no
+    # exported bound constants — `stdlib/math.sprout:595` keeps a private
+    # `min_int()` of exactly this shape — which is filed in BACKLOG.
+    let int_max = 9223372036854775807
+    let int_min = 0 - int_max - 1
+
+    assert_eq(state, "an ascending range ending at MAX_INT terminates",
+      range_count(range_up(int_max - 2, int_max)), 3)
+
+    assert_eq(state, "an ascending range ending at MAX_INT yields its last element",
+      range_fold(\ (acc, i) -> if i == int_max then acc + 1 else acc, 0,
+        range_up(int_max - 2, int_max)),
+      1)
+
+    assert_eq(state, "a descending range ending at MIN_INT terminates",
+      range_count(range_down(int_min + 2, int_min)), 3)
+
     summary(state)

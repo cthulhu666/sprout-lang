@@ -1066,15 +1066,22 @@ fn infer_call(
       if name == "print" then
         infer_print_call(state, env, subst, eff_subst, callee, cpos, args, pos)
       else
-        # `v.render(x)` — a call whose callee is a record field access on an
-        # in-scope value, not a bare/module-qualified function name. Rewrite the
-        # dotted callee to a GetFieldExpr chain and infer it as a general (higher-
-        # order) callee, mirroring infer_var_or_field's head-first dot rule (a local
-        # value wins over a same-named module). A module-qualified callee (head not
-        # in scope) falls through to infer_call_var unchanged.
-        match dotted_field_callee(name, env, cpos) with
-        | Just field_callee -> infer_call_general(state, env, subst, eff_subst, field_callee, args, pos)
-        | Nothing -> infer_call_var(state, env, subst, eff_subst, callee, name, cpos, args, pos)
+        # A statically-empty range_up/range_down, rejected before the call is
+        # otherwise inferred.  Same rule as the `a..b` literal form; see
+        # reversed_literal_range.  Fires only on the bare prelude names with two
+        # literal bounds, so it costs one string compare on every other call.
+        match reversed_literal_range_call(name, args) with
+        | Just message -> InferErr(pos, message)
+        | Nothing ->
+            # `v.render(x)` — a call whose callee is a record field access on an
+            # in-scope value, not a bare/module-qualified function name. Rewrite the
+            # dotted callee to a GetFieldExpr chain and infer it as a general (higher-
+            # order) callee, mirroring infer_var_or_field's head-first dot rule (a local
+            # value wins over a same-named module). A module-qualified callee (head not
+            # in scope) falls through to infer_call_var unchanged.
+            match dotted_field_callee(name, env, cpos) with
+            | Just field_callee -> infer_call_general(state, env, subst, eff_subst, field_callee, args, pos)
+            | Nothing -> infer_call_var(state, env, subst, eff_subst, callee, name, cpos, args, pos)
   | _ -> infer_call_general(state, env, subst, eff_subst, callee, args, pos)
 
 # If `name` is a dotted access whose head is an in-scope value (not a module),
@@ -4906,6 +4913,74 @@ fn infer_update_fields(
 # Range expression (new)
 # ---------------------------------------------------------------------------
 
+# The value of an expression that is a statically-known integer, or Nothing if it
+# is anything else.  Handles a negated literal, because `0..-1` is written with a
+# unary minus rather than lexed as one negative token.
+fn static_int_value(e: ast.Expr) -> Maybe Int =
+  match e with
+  | ast.IntExpr n _ -> Just(n)
+  | ast.UnaryExpr op operand _ ->
+      if op == "-" then
+        match static_int_value(operand) with
+        | Just n -> Just(0 - n)
+        | Nothing -> Nothing
+      else Nothing
+  | _ -> Nothing
+
+# A range whose bounds are both statically known and crossed FOR ITS DIRECTION names
+# a specific empty interval.  No caller writes that on purpose, so it is rejected
+# rather than left to yield nothing — the same rule the spec already applies to a
+# negative literal shift count (§8.1.2): the dynamic case gets the total answer, a
+# statically known one is a program that cannot be right.
+#
+# Bounds that are COMPUTED are never diagnosed.  `range_up(0, n - 1)` at n == 0 is
+# legal and empty, and is the ordinary spelling of a half-open [0, n) walk — warning
+# on it would make the fixed idiom unusable.
+#
+# `shown` is how the offending range was spelled, so the message quotes the source
+# form the author actually wrote rather than a normalized one.
+fn static_empty_range(lo: ast.Expr, hi: ast.Expr, step: Int, shown: String) -> Maybe String =
+  match (static_int_value(lo), static_int_value(hi)) with
+  | (Just l, Just h) ->
+      if step > 0 && h < l then Just(empty_range_text(shown, l, h, true))
+      else if step < 0 && h > l then Just(empty_range_text(shown, l, h, false))
+      else Nothing
+  | _ -> Nothing
+
+fn empty_range_text(shown: String, l: Int, h: Int, ascending: Bool) -> String =
+  "range `" ++ shown ++ "` is empty, so it yields no values: the start bound "
+    ++ int_to_string(l)
+    ++ (if ascending then " is above the end bound " else " is below the end bound ")
+    ++ int_to_string(h)
+    ++ (if ascending then ", and it counts upward only. To count downward write `range_down("
+        else ", and it counts downward only. To count upward write `range_up(")
+    ++ int_to_string(l) ++ ", " ++ int_to_string(h) ++ ")`"
+
+fn reversed_literal_range(lo: ast.Expr, hi: ast.Expr) -> Maybe String =
+  match (static_int_value(lo), static_int_value(hi)) with
+  | (Just l, Just h) ->
+      static_empty_range(lo, hi, 1, int_to_string(l) ++ ".." ++ int_to_string(h))
+  | _ -> Nothing
+
+# The constructor spelling of the same mistake.  Matched on the BARE name only:
+# prelude functions are not module-qualified, so a user's own `range_up` inside a
+# module reads as `mymod.range_up` here and is correctly left alone.
+fn reversed_literal_range_call(name: String, args: List ast.Expr) -> Maybe String =
+  match args with
+  | [lo, hi] ->
+      if name == "range_up" then
+        static_empty_range(lo, hi, 1, call_form("range_up", lo, hi))
+      else if name == "range_down" then
+        static_empty_range(lo, hi, -1, call_form("range_down", lo, hi))
+      else Nothing
+  | _ -> Nothing
+
+fn call_form(fn_name: String, lo: ast.Expr, hi: ast.Expr) -> String =
+  match (static_int_value(lo), static_int_value(hi)) with
+  | (Just l, Just h) ->
+      fn_name ++ "(" ++ int_to_string(l) ++ ", " ++ int_to_string(h) ++ ")"
+  | _ -> fn_name
+
 fn infer_range(
   state: unifier.InferState,
   env: Dict types.Scheme,
@@ -4920,10 +4995,13 @@ fn infer_range(
     InferOk typed_hi s2 es2 hi_eff <- infer_expr(state, env, s1, es1, hi) else InferErr p e -> InferErr(p, e)
     let unifier.UnifyOk s3 es3 = unifier.unify_types(s2, es2, typed_ast.typed_expr_type(typed_lo), types.type_int()) else unifier.UnifyErr e -> InferErr(pos, "Range needs Int: " ++ e)
     let unifier.UnifyOk s4 es4 = unifier.unify_types(s3, es3, typed_ast.typed_expr_type(typed_hi), types.type_int()) else unifier.UnifyErr e -> InferErr(pos, "Range needs Int: " ++ e)
-    InferOk(
-      typed_ast.TRange(typed_lo, typed_hi,
-        types.TConst(types.type_id("IntRange")), pos),
-      s4, es4, merge_effects(lo_eff, hi_eff))
+    match reversed_literal_range(lo, hi) with
+    | Just message -> InferErr(pos, message)
+    | Nothing ->
+        InferOk(
+          typed_ast.TRange(typed_lo, typed_hi,
+            types.TConst(types.type_id("IntRange")), pos),
+          s4, es4, merge_effects(lo_eff, hi_eff))
 
 # ---------------------------------------------------------------------------
 # Program-level typechecking

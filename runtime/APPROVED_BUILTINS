@@ -78,8 +78,10 @@ eprint_str  # writes C string to stderr; Sprout has no stderr output primitive (
 env_get
 http_request
 int_range
+int_range_by  # Constructs an IntRange with an explicit direction (step +1/-1), which `int_range` cannot express — it is fixed ascending, and is deliberately left 2-ary because its declare is hardcoded in ir_lowering.sprout for preludeless `a..b` and is baked into the committed seed. Reaching it from Sprout is impossible for the same reason as its peers: IntRange is an opaque runtime block (SPROUT_HEAP_RANGE), not an ADT or record, so there is no constructor to apply. Approved by the user 2026-08-19 per AGENTS.md "Builtin vs Stdlib" rules 4-6; see docs/ranges-v0.md §4.
 int_range_end
 int_range_start
+int_range_step  # Reads the direction field of the opaque IntRange heap block, exactly as its two peers above read start/end. IntRange is a runtime representation (SPROUT_HEAP_RANGE), not a Sprout ADT or record, so its fields are unreachable from Sprout — there is no pattern to match and no `.field` to read. Deliberately NOT made a record instead: C cannot construct one (records get no runtime ctor registration, so find_ctor_tag_by_name fails), and a 3-field record would take the GC from tracing 0 children to 3. See docs/ranges-v0.md Appendix B. Approved by the user 2026-08-19 per AGENTS.md "Builtin vs Stdlib" rules 4-6.
 int_to_string
 json_parse
 json_stringify

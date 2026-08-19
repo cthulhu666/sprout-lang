@@ -17,31 +17,31 @@ fn main() -> Unit !{IO} =
     state <- new_state()
 
     # 1. range_fold, PURE step, data-last new arg order (reorder regression).
-    #    IntRange is inclusive: range(0, 4) = 0+1+2+3+4 = 10.
+    #    IntRange is inclusive: range_up(0, 4) = 0+1+2+3+4 = 10.
     assert_eq(
       state,
-      "range_fold pure sum over inclusive range(0,4)",
-      range_fold(add_step, 0, range(0, 4)),
+      "range_fold pure sum over inclusive range_up(0,4)",
+      range_fold(add_step, 0, range_up(0, 4)),
       10
     )
 
     # 2. range_each, effectful step (single-expression lambda closing over v).
-    #    range(0, 3) writes indices 0..3; v[i] = i*i, so v[3] = 9.
+    #    range_up(0, 3) writes indices 0..3; v[i] = i*i, so v[3] = 9.
     v <- mutvec_new(4, 0)
-    _ <- range_each(\i -> mutvec_set(v, i, i * i), range(0, 3))
+    _ <- range_each(\i -> mutvec_set(v, i, i * i), range_up(0, 3))
     v3 <- mutvec_at(v, 3)
     assert_eq(state, "range_each fills v[3] = 3*3", v3, 9)
 
     # 3. range_fold, EFFECTFUL step: dot product of two length-4 vectors.
     #    a = [1,2,3,4], b = [10,20,30,40] -> 10+40+90+160 = 300.
     a <- mutvec_new(4, 0)
-    _ <- range_each(\i -> mutvec_set(a, i, i + 1), range(0, 3))
+    _ <- range_each(\i -> mutvec_set(a, i, i + 1), range_up(0, 3))
     b <- mutvec_new(4, 0)
-    _ <- range_each(\i -> mutvec_set(b, i, (i + 1) * 10), range(0, 3))
+    _ <- range_each(\i -> mutvec_set(b, i, (i + 1) * 10), range_up(0, 3))
     assert_eq(
       state,
       "range_fold effectful dot product",
-      range_fold(\ (acc, i) -> dot_step(a, b, acc, i), 0, range(0, 3)),
+      range_fold(\ (acc, i) -> dot_step(a, b, acc, i), 0, range_up(0, 3)),
       300
     )
 
