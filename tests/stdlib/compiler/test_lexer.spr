@@ -83,6 +83,43 @@ fn main() -> Unit !{IO} =
     check_eq("range first token stays int", tok_kind_at("1..5", 0), "int"),
     check_eq("range first int text", tok_text_at("1..5", 0), "1"),
 
+    # Dotted identifiers: `.` is an ident-CONTINUE character, so a qualified
+    # name or a Scope-A field path is ONE token.
+    check_eq("qualified name is one token", tok_text_at("string.trim", 0), "string.trim"),
+    check_eq("qualified name token count", token_count("string.trim"), 2),
+    check_eq("deep path is one token", tok_text_at("a.b.c", 0), "a.b.c"),
+    # A TRAILING dot rides on the identifier — parse_var_or_ctor relies on it to
+    # report `exists a.` as a missing field name rather than as two expressions.
+    check_eq("trailing dot rides on ident", tok_text_at("exists a.", 1), "a."),
+    check_eq("trailing dot before ')'", tok_text_at("f(a.)", 2), "a."),
+
+    # `..` TERMINATES an identifier run, so an identifier-bounded range needs no
+    # spaces: `lo..hi` is three tokens, not one dotted ident.  Regression guard —
+    # `take_while(is_ident_continue)` used to swallow the operator, and the range
+    # then reached the checker as a field read (`Cannot infer the record type of
+    # `.hi``).  BACKLOG P1, 2026-08-19.
+    check_eq("ident range: left endpoint", tok_text_at("lo..hi", 0), "lo"),
+    check_eq("ident range: operator", tok_text_at("lo..hi", 1), ".."),
+    check_eq("ident range: right endpoint", tok_text_at("lo..hi", 2), "hi"),
+    check_eq("ident range token count", token_count("lo..hi"), 4),
+    check_eq("ident range operator kind", tok_kind_at("lo..hi", 1), "symbol"),
+    # Digit on the right is the same shape (the right endpoint is not an ident).
+    check_eq("ident..int: left endpoint", tok_text_at("lo..5", 0), "lo"),
+    check_eq("ident..int: operator", tok_text_at("lo..5", 1), ".."),
+    check_eq("ident..int: right endpoint kind", tok_kind_at("lo..5", 2), "int"),
+    # A field path on both sides: only the `..` stops the run, not the field dots.
+    check_eq("field-path range: left endpoint", tok_text_at("p.x..p.y", 0), "p.x"),
+    check_eq("field-path range: operator", tok_text_at("p.x..p.y", 1), ".."),
+    check_eq("field-path range: right endpoint", tok_text_at("p.x..p.y", 2), "p.y"),
+    # `${...}` bodies are scanned by scan_interp_body, which reuses the same
+    # identifier scanner — so a range splits there too (tokens: `, ${, lo, .., hi).
+    check_eq("range inside a template interpolation: left endpoint",
+      tok_text_at("`${lo..hi}`", 2), "lo"),
+    check_eq("range inside a template interpolation: operator",
+      tok_text_at("`${lo..hi}`", 3), ".."),
+    check_eq("range inside a template interpolation: right endpoint",
+      tok_text_at("`${lo..hi}`", 4), "hi"),
+
     # String literals
     check_eq("string kind", tok_kind_at("\"hello\"", 0), "string"),
     check_eq("string text", tok_text_at("\"hello\"", 0), "hello"),

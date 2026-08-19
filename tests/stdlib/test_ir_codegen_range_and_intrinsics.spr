@@ -83,12 +83,25 @@ fn main() -> Unit !{IO} =
 
     # T1c: TRange with variable endpoints.
     # `fn r2(lo: Int, hi: Int) -> IntRange = lo .. hi`
-    # Spaces around `..` are required when endpoints are identifiers; the lexer
-    # would otherwise scan `lo..hi` as a single token and fail to parse TRange.
     t1c <- translated_ok_contains(
       "fn r2(lo: Int, hi: Int) -> IntRange =\n  lo .. hi\n",
       "@range_up")
     assert_true(state, "T1c: TRange with variable endpoints emits @range_up call", t1c)
+
+    # T1d: the SAME range written without spaces. `..` terminates an identifier
+    # run, so this is the canonical spelling (and the one `just fmt` emits).
+    # It used to lex as the single dotted ident `lo..hi` and reach the checker as
+    # a field read: `Cannot infer the record type of `.hi``.
+    t1d <- translated_ok_contains(
+      "fn r3(lo: Int, hi: Int) -> IntRange =\n  lo..hi\n",
+      "@range_up")
+    assert_true(state, "T1d: unspaced `lo..hi` emits @range_up call", t1d)
+
+    # T1e: field paths on both sides — the field dots still join, only `..` splits.
+    t1e <- translated_ok_contains(
+      "type P = (x: Int, y: Int)\n\nfn r4(p: P) -> IntRange =\n  p.x..p.y\n",
+      "@range_up")
+    assert_true(state, "T1e: `p.x..p.y` emits @range_up call", t1e)
 
     # ---------------------------------------------------------------------------
     # T2: analysis_* intrinsics — ir_lowering header declares them so that

@@ -195,23 +195,35 @@ fn check_and_push_diagnostics(uri: String, src: String, state: LspState) -> Unit
 fn is_hover_ident_ch(ch: Char) -> Bool =
   string.is_ident_continue(ch) || ch == '.'
 
+fn is_dot_at(line: String, i: Int) -> Bool =
+  match string.char_at(line, i) with
+  | Nothing -> false
+  | Just ch -> ch == '.'
+
+# A dot that belongs to a `..`, i.e. the range operator rather than a qualified
+# name or a field path. The lexer stops an identifier run there
+# (lexer.sprout scan_ident_end), so hover must too: without this, hovering
+# either endpoint of `lo..hi` extracts the whole `lo..hi` and resolves nothing.
+# A lone dot still joins, so `string.trim` and `p.x` stay single hover words.
+fn is_range_dot(line: String, i: Int) -> Bool =
+  is_dot_at(line, i) && (is_dot_at(line, i - 1) || is_dot_at(line, i + 1))
+
+# True when the character at [i] continues the hover word. Off the end of the
+# line it is false, which stops both scans at the boundary.
+fn hover_word_continues(line: String, i: Int) -> Bool =
+  match string.char_at(line, i) with
+  | Nothing -> false
+  | Just ch -> if is_range_dot(line, i) then false else is_hover_ident_ch(ch)
+
 fn word_start(line: String, col: Int) -> Int =
   if col <= 0 then 0
-  else
-    match string.char_at(line, col - 1) with
-    | Nothing -> col
-    | Just ch ->
-        if is_hover_ident_ch(ch) then word_start(line, col - 1)
-        else col
+  else if hover_word_continues(line, col - 1) then word_start(line, col - 1)
+  else col
 
 fn word_end_loop(line: String, col: Int, total: Int) -> Int =
   if col >= total then total
-  else
-    match string.char_at(line, col) with
-    | Nothing -> col
-    | Just ch ->
-        if is_hover_ident_ch(ch) then word_end_loop(line, col + 1, total)
-        else col
+  else if hover_word_continues(line, col) then word_end_loop(line, col + 1, total)
+  else col
 
 fn extract_word_impl(line: String, col: Int, len: Int) -> String =
   string.slice(line, wstart, word_end_loop(line, col, len) - wstart)

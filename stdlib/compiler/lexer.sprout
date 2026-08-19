@@ -10,14 +10,39 @@ fn cursor_position(cursor: source.SourceCursor) -> source.SourcePos =
 fn slice_between(raw: String, start: source.SourceCursor, end: source.SourceCursor) -> String =
   str_slice_bytes(raw, source.cursor_byte_offset(start), source.cursor_byte_offset(end) - source.cursor_byte_offset(start))
 
-fn is_ident_continue(ch: Char) -> Bool =
-  string.is_ident_continue(ch) || ch == '.'
-
 # scan_ident_end / scan_int_end: advance past a maximal run from the cursor.
 # take_while consumes the leading char too (an ident-start / digit also
 # satisfies the continue predicate), matching the old advance-then-while.
+#
+# A `.` continues an identifier run — that is what keeps a qualified name
+# (`string.trim`) and a Scope-A field path (`p.x`) a SINGLE token — but the run
+# stops before a `..`, so the range operator survives an identifier on its left.
+# The stop needs one character of lookahead, which is why this is a hand-rolled
+# walk rather than one `take_while(ident_continue_or_dot)`: `try_multi_char_symbol`
+# recognises `..` only at a token START, so a dot-inclusive take_while swallowed
+# the operator and `lo..hi` arrived at the checker as a field read of `.hi`
+# (BACKLOG P1, 2026-08-19 — `just fmt` rewrote the working `lo .. hi` into it).
 fn scan_ident_end(cursor: source.SourceCursor) -> source.SourceCursor =
-  source.take_while(cursor, is_ident_continue)
+  scan_ident_dotted(source.take_while(cursor, string.is_ident_continue))
+
+# At `run_end` — just past a dot-free run — absorb `.` plus the run after it and
+# keep going, unless that dot opens a `..`.
+#
+# A TRAILING dot is deliberately absorbed (`a.` is one token): `parse_var_or_ctor`
+# reads the dot off the identifier to report `exists a.` as a missing field name
+# instead of as two adjacent expressions (parser.sprout, `exists a.` comment).
+fn scan_ident_dotted(run_end: source.SourceCursor) -> source.SourceCursor =
+  match source.next(run_end) with
+  | Nothing -> run_end
+  | Just (ch, after_dot) ->
+      if ch != '.' then run_end
+      else if peek_is_dot(after_dot) then run_end
+      else scan_ident_dotted(source.take_while(after_dot, string.is_ident_continue))
+
+fn peek_is_dot(cursor: source.SourceCursor) -> Bool =
+  match source.peek(cursor) with
+  | Nothing -> false
+  | Just ch -> ch == '.'
 
 fn scan_int_end(cursor: source.SourceCursor) -> source.SourceCursor =
   source.take_while(cursor, string.is_ascii_digit)
@@ -50,7 +75,7 @@ fn is_keyword(raw: String) -> Bool =
   raw == "deriving" ||
   raw == "wrap"
 
-# `.` is here as well as in `is_ident_continue`, and the two do not conflict.
+# `.` is here as well as inside identifier runs, and the two do not conflict.
 # A dot INSIDE an identifier run is absorbed by `scan_ident_end`, so `p.x` and
 # `stdlib.string.trim` are still single tokens; `.` is not an ident-START, so a
 # dot that begins a token falls through to here and becomes a standalone symbol.
@@ -58,10 +83,11 @@ fn is_keyword(raw: String) -> Bool =
 # Before this, such a dot was `Unexpected character .`, so nothing that lexes
 # today changes meaning.
 #
-# `..` is unaffected: `try_multi_char_symbol` runs BEFORE this fallback, so the
-# range operator still wins over two single dots. A float keeps its dot too —
-# `scan_float_frac_end` consumes it from the digit-run path, which also runs
-# first.
+# `..` never reaches here: `try_multi_char_symbol` runs BEFORE this fallback, so
+# the range operator wins over two single dots — and `scan_ident_end` stops its
+# run before a `..` so that an identifier on the left cannot hide the operator
+# from that check. A float keeps its dot too — `scan_float_frac_end` consumes it
+# from the digit-run path, which also runs first.
 fn single_symbol(ch: Char) -> Bool =
   string.contains("()=,:+-*/<>\\!{}[]|.", string.string_from_char(ch))
 

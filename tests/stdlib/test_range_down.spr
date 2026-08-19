@@ -94,19 +94,17 @@ fn main() -> Unit !{IO} =
     # literal, so a reversed `..` is an EMPTY ASCENDING range, not a descending
     # one.
     #
-    # THE PARENTHESES ARE REQUIRED and are not style. Bounds must be bindings
-    # because a literal `5..1` is a compile error (§7); but an identifier written
-    # immediately before `..` is absorbed into one dotted token, so `five..one`
-    # does not compile — and `just fmt` rewrites the spaced `five .. one` into
-    # exactly that broken form. Parenthesising is the only spelling that both
-    # compiles and survives the formatter. Filed in BACKLOG under
-    # "Compiler / Stdlib Misc".
+    # The bounds must be BINDINGS, because a literal `5..1` is a compile error
+    # (§7). They need no parentheses: `five..one` is the plain spelling and is
+    # also what `just fmt` emits. It used to be unparseable — the lexer absorbed
+    # the `..` into the identifier run — so this assertion doubles as the
+    # end-to-end guard for that fix (see tests/stdlib/compiler/test_lexer.spr).
 
     let five = 5
     let one = 1
 
     assert_eq(state, "a reversed .. literal is ascending, therefore empty",
-      range_count((five).. (one)), 0)
+      range_count(five..one), 0)
 
     assert_eq(state, "the .. literal agrees with range_up",
       range_to_list(1..4), range_to_list(range_up(1, 4)))
