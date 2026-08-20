@@ -2089,30 +2089,63 @@ Found while correcting stale claims across the user-facing docs; none is a doc f
   readers at it for the open `+`/`-`/`*` policy question — so its ground-truth section should
   re-verify against `ir_lowering.sprout` rather than a file that no longer exists. Cheap: the
   finding itself (plain `add/sub/mul i64`, no `nsw`) is still correct, only the citation rotted.
-- [ ] `P2` **A preludeless file calling a prelude function escapes to `clang` instead of a
-  Sprout diagnostic.** `bundler.collect_modules` deliberately withholds the prelude from an
-  importless, self-contained file (so `examples/maybe_map.sprout` may redefine `Maybe`/`map`),
-  and its comment promises the resulting unresolved call is "a hard error
-  (codegen.emit_named_call), not a silent zero_val". That backend was deleted in `5f29b9da`
-  ("compiler: retire the direct codegen backend") and the Sprout-IR path has no equivalent
-  check, so the guarantee lapsed silently. Today `fn main() -> Int !{IO} = range_count(range_up(1, 4))`
-  in a headerless `.spr` **type-checks and emits IR with exit 0**, calling `@range_up` and
-  `@range_count` with neither a `declare` nor a `define`; the user's first sign of trouble is
-  `error: use of undefined value '@range_count'` from clang. The quarantined conformance xfails
-  `aoc2025_day1_sample` (`'@lcompose'`) and `stdlib_two_constraints_same_class` (`'@Err'`) are
-  this same hole, which is why they are labelled `link:`. Fix: at bundle time, reject a call to
-  a prelude-exported lowercase name that no bundled module declares, pointing at the missing
-  `module` header — restoring what the retired backend used to enforce. Also fix the stale
-  citation at `bundler.sprout:618`.
-- [ ] `P2` **A named module's constructors print with their qualified name.** `print(Apple(3))`
-  in a file headed `module main` outputs `main.Apple(3)`, not `Apple(3)` — the runtime ctor
-  display string is the bundler's qualified symbol (`bundler.qualified_name`, `:202`) rather
-  than the source-level name. Verified against a non-colliding ctor, so this is plain
-  qualification leaking to users, not a collision artefact. Two consequences: it is already
-  wrong for every named module today, and it *blocks* making the prelude unconditional — the
-  seven headerless examples would start printing `main.Just(3)` where they print `Just(3)`
-  now. Fix: carry the raw name alongside the qualified one in `CtorInfo` and emit the raw one
-  as the display string.
+- [ ] `P2` **A `no_prelude` file calling a prelude function escapes to `clang` instead of a
+  Sprout diagnostic.** Nothing in the Sprout-IR path checks that a called name is actually
+  bound. `bundler.collect_modules`' comment promised the unresolved call was "a hard error
+  (codegen.emit_named_call), not a silent zero_val", but that backend was deleted in `5f29b9da`
+  ("compiler: retire the direct codegen backend") and the guarantee lapsed silently. Re-measured
+  2026-08-20 on `c4a4500a`: `no_prelude` + `fn main() -> Int !{IO} = range_count(range_up(1, 4))`
+  **type-checks and emits IR with exit 0**, no `ERROR:` in the output, calling `@range_count`
+  with neither a `declare` nor a `define`; the user's first sign of trouble is
+  `error: use of undefined value '@range_count'` from clang. Fix: at bundle time, reject a call
+  to a name no bundled module declares. Also fix the stale citation at `bundler.sprout:618`.
+
+  > **Rescoped 2026-08-20 — the stated cause was never the real one.** This entry originally
+  > read "a *preludeless* file", attributing the hole to `collect_modules` "deliberately
+  > withholding the prelude from an importless, self-contained file". PR #164 deleted that
+  > withholding, and the headline repro now compiles, links and runs — but the defect
+  > survived, because the cause was never the withholding: it is that the IR path performs no
+  > unbound-name check at all. `no_prelude` simply gives the same hole a new door. A fix aimed
+  > at the cause as originally stated would have closed this entry and left the bug.
+  >
+  > Two pieces of evidence cited here were also invalidated: the xfails
+  > `aoc2025_day1_sample` (`'@lcompose'`) and `stdlib_two_constraints_same_class` (`'@Err'`)
+  > were offered as instances of this hole, and both now pass —
+  > `tests/conformance/run/XFAIL` is empty. They were prelude-scope failures wearing a
+  > `link:` label, not unbound-name failures.
+- [x] `P2` **FIXED 2026-08-20. A named module's constructors printed with their qualified name.**
+  `print(Apple(3))` in a file headed `module main` output `main.Apple(3)`; the display string was
+  the bundler's qualified symbol (`bundler.qualified_name`, `:202`). Normative rule now in
+  `docs/spec-v0.md` §8.5; `docs/prelude-scope-v0.md` §4.2 step 4 carries the superseding note.
+  **Three corrections to this entry, worth keeping because each changed the shape of the fix:**
+  - **The prescribed fix (carry the raw name alongside the qualified one in `CtorInfo`) was
+    redundant data.** `qualified_name` is `<module> ++ "." ++ <ctor>` and a ctor name is an
+    identifier, so it cannot contain a dot — the segment after the last dot *is* the source-form
+    name, recovered exactly. Deriving it at render costs one `strrchr`; carrying it would have
+    meant a 5th `sprout_register_ctor` argument, i.e. an ABI change against the committed seed
+    for information already present. The rule was also already in the tree for *type* names
+    (`analysis_service_driver.te_to_string` via `string.after_last_dot`, with a comment that it
+    "never feeds matching"); constructors just never got it.
+  - **"It *blocks* making the prelude unconditional" was false**, and PR #164 shipped without
+    this fix by stripping only the synthetic `$entry.` prefix in the runtime. That workaround is
+    now deleted — the general rule subsumes it.
+  - **There were TWO render surfaces, not one.** The C runtime (`display_ctor_name`, reached by
+    `print`) and `deriving.sprout`, which bakes the ctor name into a string *literal* at compile
+    time for a derived `ToString` — a String the program may never print, so the runtime has no
+    render to intercept. Fixing only the C side left `to_string(Apple(3))` as `main.Apple(3)`;
+    this was confirmed by relinking already-emitted IR against the patched runtime, which fixed
+    exactly the `print` lines of the fixture and none of the `to_string` ones.
+  A REPL defect fell out for free: the REPL wraps a session in `module app.session`
+  (`stdlib/compiler.sprout:53`), so a session-defined ctor echoed as `app.session.Red`.
+  `analysis_service_driver.sprout:557` says the REPL "never surfaces the synthetic
+  `app.session.` prefix" — true where it is written (the `:i` *query* display, which is
+  rendered from the user's own text) and untrue of values, which took the runtime path. Both
+  surfaces comply now. Tests: `tests/conformance/run/
+  ctor_display_unqualified.spr` (both surfaces, nesting, and a prelude-ctor control) and
+  `tests/stdlib/compiler/test_ctor_display.spr`, which pins the *opposite* direction too —
+  diagnostics keep `demo.f` / `demo.Fruit` — so a future merge of the message-level strip
+  (`source.strip_entry_names`) with the name-level one (`source.display_ctor_name`) fails there
+  rather than in a user's error output.
 - [ ] `P3` **DCE is absent from the `--emit-ir` path.** `dce.elim_program` is applied in
   `compile_phase_lower*` (`compiler.sprout:442`, `:513`) but not in `compile_full` (`:311`),
   which is what `--emit-ir` uses — so every emitted module carries the whole prelude whether
@@ -2134,7 +2167,7 @@ Found while correcting stale claims across the user-facing docs; none is a doc f
 - [x] `P2` Add `tests/stdlib/test_collections.spr` (13 assertions): replaces element-extraction workarounds with direct `assert_eq` on `Vec Int` and `Dict Int` values including structural equality checks on `vec_reverse`, `vec_slice`, and `dict_remove` results (2026-05-24).
 - [x] `P2` Add law-oriented conformance tests via `assert_eq` once list/functor/monoid `Eq` instances are stable.
 - [x] `P1` **Gate the orphaned conformance corpora.** Audit (2026-07-27) found only `conformance/type_error` (via `test-type-errors`) and `package_resolution` were wired into any gate; `conformance/run` (golden stdout, 26 fixtures — grown as recently as records-v0 4 days prior), `parse_error`, `runtime_error`, `executable_error`, and `parity_*` ran **nowhere**. Symptoms of the rot: an orphan `run/stdlib_fold_filter_map.out` whose `.spr` was deleted in the W8-totality commit and never noticed; the landed W5-exhaustiveness feature's "positive conformance" fixtures (`run/{exhaustive_match_shapes,tuple_catchall_reachable}`) had never actually executed in CI. Fix: new `test-conformance-run` recipe (compile → link → run → byte-diff stdout vs `.out`; detects the `--emit-ir` "ERROR:-into-stdout, exit 0" blind spot by grepping output, not exit status) with a `tests/conformance/run/XFAIL` manifest that quarantines known-broken fixtures **visibly** — an unexpected pass or an orphan `.out` fails the gate (self-healing). Generalized `_test-type-errors` → `_test-reject <dir>` and added `test-parse-errors`. Both wired into `ci-fast-gates` and `test`. Result: 18 `run/` fixtures now gated green, 8 quarantined with per-fixture reasons.
-- [ ] `P2` **Rehabilitate the 8 quarantined `run/` fixtures** (`tests/conformance/run/XFAIL`). All 8 reference prelude names without importing — bare `.spr` files are self-contained and get no prelude. Four (`stdlib_laws_functor`, `stdlib_laws_monoid`, `stdlib_string_template_{basic,callsite}`) additionally use the **removed** `Cons`/`Nil` cons-list type → rewrite to `Vec`/`[...]`. Two (`stdlib_mixed_io_{maybe,result}_do`) need a prelude import for `Just`/`Ok`. Two (`aoc2025_day1_sample` `>>`→`@lcompose`, `stdlib_two_constraints_same_class` `@Err`) fail at link on an undefined prelude symbol — confirm whether an import fixes them or they expose a real codegen gap. Un-quarantine each as it is repaired (the gate flips red if a repair works but the basename stays in XFAIL).
+- [x] `P2` **DONE 2026-08-20 (should have been closed by PR #164; missed there and caught while scoping the ctor-display work). Rehabilitate the 8 quarantined `run/` fixtures.** All 8 shared one root cause — "a bare `.spr` file is self-contained and gets NO prelude" — so making the prelude unconditional cleared the whole manifest at once, with no per-fixture repair. `tests/conformance/run/XFAIL` is now empty and its header records why; the self-healing gate is what reported it (every one came back as UNEXPECTED PASS). **One claim in this entry was simply wrong and mis-scoped four of the eight:** it said `Cons`/`Nil` was "the **removed** cons-list type" needing a rewrite to `Vec`/`[...]`. They are the prelude's List constructors (`stdlib/prelude.sprout:32-34`) and always were — nothing needed rewriting; they needed the prelude. The two labelled `link:` (`aoc2025_day1_sample` `@lcompose`, `stdlib_two_constraints_same_class` `@Err`) were likewise prelude-scope failures wearing a link label, not the codegen gap this entry suspected — see the unbound-name item in §7.2, which they had been offered as evidence for.
 - [~] `P2` **Dispose of the obsolete negative corpora.** Chose option (b): re-implement entrypoint validation. **LANDED (`validate_entrypoint`, `infer.sprout`):** a `main` that is *defined* must be a well-formed entrypoint — zero args, `Unit`/`Int` return, concrete `!{IO}` effect (not pure, not effect-polymorphic). Runs as a final gate on an otherwise-valid program (after the body typechecks, so it never masks a real body error). The 5 signature fixtures in `conformance/executable_error` are revived and gated via `test-executable-errors` (`_test-reject`, wired into `ci-fast-gates` + `test`); `.err` strings updated; positive fixture `conformance/run/main_int_exit_ok.spr` added. Spec §10.10 already specified these rules (previously unenforced) — now enforced.
   - **Deferred: the "missing main" check** (`executable_error/missing_main` is xfailed). Requiring a `main` cannot be a type-check error — at type-check the compiler can't tell a library check (`--phase check`, no `main` expected) from an executable build, and main-less library files are legitimate (e.g. `examples/sentry_api.sprout`, `examples/sentry_issue_browser_tui.sprout`). It needs an explicit executable-vs-library compile mode (thread the intent from `--emit-ir`/codegen, where `has_user_main` is already computed) before it can fire. `runtime_error/main_arity_mismatch` (a duplicate of the arity case, mislabeled as runtime) and `parity_*` (byte-parity vs the retired reference, no golden) are still candidates to delete — decide separately.
 - [~] `P2` **Test-assertion boilerplate: pure-list `check_eq`/`run_suite` redesign.** The old framework threads a `TestState` `Ref` through every assertion — ~2,560 call sites across 222 files each repeat `state`, plus per-file `new_state`/`do`/`summary` scaffolding. **API LANDED:** `stdlib/test.sprout` now exports `check_eq(label, actual, expected) where Eq a, ToString a -> TestCase` (evaluates `eq`+`to_string` eagerly → a *monomorphic* `TestCase(label, passed, detail)`, so a heterogeneous set of assertions collapses into a homogeneous `Vec TestCase`), `check_true`/`check_false`, and `run_suite(name, cases)` which folds the Vec *purely* and prints one report + the `SUITE PASSED/FAILED` line the runner greps (no `panic`, so no flush dependency). HUnit/tasty value-model adapted to a strict language (Rust `#[test]` discovery is off the table without macros/reflection). The effectful `assert_eq`/`state` API is retained as the escape hatch for tests that need IO to produce the actual (e.g. `test_log.spr` capture sink, ~21 IO files). **Migrated: 89 files** — 3 pilot (`test_math`/`test_applicative`/`test_string`) + 86 via a 5-way Sonnet codemod (854 assertions, count-verified 1:1, full `just test` + `test-stress` green). Two more codemod outputs (`test_list_pattern_runtime`, `test_vec_literal_coercion`) were reverted to the old API: their *helper* functions carry pre-existing, deliberate lint-flagged content (a legacy `Cons x Nil` parity test; a `vec_from_list([...])` that is literally the `redundant-vec-from-list` rule's own target), and the pre-commit lint hook blocks re-staging them. The linter has no inline suppression mechanism, so intentional lint-rule-target test content cannot be re-committed — see the follow-up item below. **Staying on the effectful `TestState` API by design:** ~79 files with interleaved IO binds (channels, tasks, `Ref` sinks, compiler AST-building) + ~51 files whose `main` interleaves order-sensitive `let`/`match`/GC-churn between assertions (the sequential `do` form is clearer and, for GC-stress tests, order is the point). That split is the intended end state, not remaining debt — the pure-list API is for pure-assertion suites, the effectful API for order/IO-sensitive ones. **Codemod lessons** (for any future batch): Sprout list literals reject a trailing comma after the last element (hard parse error); pure `let`s threaded through `main` hoist cleanly to a `let … in run_suite(...)` prefix (backward-only deps, order-independent for pure values); a branching `main` becomes `run_suite(name, match … with | … -> [checks])` returning a `Vec TestCase` per arm; `let … in` cannot bind a multi-line `match` RHS (use a `where` clause instead). Design decision recorded: eager `check_eq` trades per-assertion crash localization, but that is already near-illusory (the harness captures stdout block-buffered, so a SIGSEGV discards buffered `PASS:` lines today); the flush item below would restore it for both APIs.

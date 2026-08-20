@@ -218,6 +218,25 @@ headerless files the prelude's own name.
    `$entry.Maybe Int`. Real module names keep their prefix, which is useful
    disambiguation.
 
+   > **SUPERSEDED for values, 2026-08-20.** The last clause was wrong, and only
+   > half of it was ever true. A *rendered value* gains nothing from its module
+   > prefix, and keeping it meant `print(Apple(3))` in a file headed `module main`
+   > printed `main.Apple(3)` — already broken for every named module before this
+   > design touched anything, and worse in the REPL, which wraps a session in
+   > `module app.session` and so echoed `app.session.Red`. That was filed as its
+   > own backlog item at the time and is now fixed: a constructor renders by the
+   > segment after the last dot, uniformly, so the `$entry.` case needs no special
+   > handling at all. Normative statement: `docs/spec-v0.md` §8.5.
+   >
+   > **Diagnostics are unchanged** — they keep real module prefixes and strip only
+   > `$entry.`, exactly as this step describes. The two rules are now genuinely
+   > different operations rather than one rule at two strengths, which is why
+   > `source.strip_entry_names` (message-level) and `source.display_ctor_name`
+   > (name-level) are separate functions carrying a comment against merging them.
+   > Everything below this note about *where* to strip — render, never
+   > registration — held up exactly as written and is the reason the broader rule
+   > was a safe change to make.
+
    > **Revised 2026-08-19.** This step previously said only "`$entry.` is
    > stripped wherever a qualified name reaches the user: constructor display
    > strings and diagnostic text", which reads as a cosmetic change. It is not.
