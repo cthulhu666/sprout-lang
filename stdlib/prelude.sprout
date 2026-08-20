@@ -1432,6 +1432,16 @@ fn parse_mantissa(mant: String) -> Maybe Double =
            | (Just iv, Just fv) -> Just(iv + (fv / pow10(str_len(fp))))
            | _ -> Nothing
 
+# An exponent's digits, with the optional sign it is allowed to carry: `-` or an explicit `+`
+# (RFC 8259's `exp` production and IEEE 754 both permit the `+`, and `%g` writers emit it —
+# `double_to_string(10.0^15)` is "1e+15"). `parse_int` cannot be used for the `+` case and must
+# not learn to: a `+` is legal ONLY here, never on the mantissa, so teaching `parse_int` about it
+# would make `parse_double("+1.5")` and the JSON reader accept a form the grammar forbids.
+# Accumulating from index 1 skips the `+` and still rejects everything else, so "1e+-3" and a
+# bare "1e+" stay Nothing.
+fn parse_exponent(es: String) -> Maybe Int =
+  if str_starts_with(es, "+") then accum_digits(es, 1, 0, false) else parse_int(es)
+
 # Split off an optional 'e'/'E' exponent: returns (mantissa, exponent). No exponent -> 0;
 # a present-but-malformed exponent -> Nothing.
 fn split_exponent(body: String) -> Maybe (String, Int) =
@@ -1440,15 +1450,20 @@ fn split_exponent(body: String) -> Maybe (String, Int) =
          | Nothing -> split_on_char(body, "E")) with
   | Nothing -> Just((body, 0))
   | Just (mant, es) ->
-      match parse_int(es) with
+      match parse_exponent(es) with
       | Nothing -> Nothing
       | Just e -> Just((mant, e))
 
 # Parse a decimal Double from text: optional leading '-', an integer part, an optional
-# '.' fraction, and an optional 'e'/'E' exponent (with optional sign). Returns Nothing on
-# any malformed input, never crashes. Pure Sprout — no strtod builtin: the magnitude is
-# `intpart + frac/10^len(frac)`, then scaled by `10^exp`. Accurate to Double arithmetic
-# (fine for config/JSON data), NOT a bit-exact strtod round-trip.
+# '.' fraction, and an optional 'e'/'E' exponent (with optional sign, '+' included). Returns
+# Nothing on any malformed input, never crashes. Pure Sprout — no strtod builtin: the magnitude
+# is `intpart + frac/10^len(frac)`, then scaled by `10^exp`. Accurate to Double arithmetic
+# (fine for config/JSON data), NOT a bit-exact strtod round-trip: below 1.0 the two roundings
+# (forming the fraction, then dividing) can land 1 ULP off.
+#
+# The sign is applied with unary `-`, which lowers to `fneg` — an IEEE sign flip. Subtracting
+# from zero instead would silently drop the sign of "-0", because 0.0 - 0.0 is +0.0 under
+# round-to-nearest, and `-0.0` is a value the writer emits and callers can observe (spec §8.1.1).
 export fn parse_double(s: String) -> Maybe Double =
   let neg = str_starts_with(s, "-")
       body = if neg then str_slice(s, 1, str_len(s)) else s
@@ -1457,7 +1472,8 @@ export fn parse_double(s: String) -> Maybe Double =
      | Just (mant, e) ->
          match parse_mantissa(mant) with
          | Nothing -> Nothing
-         | Just mag -> Just(if neg then 0.0 - (mag * pow10(e)) else mag * pow10(e))
+         | Just mag -> let magnitude = mag * pow10(e)
+                       in Just(if neg then -magnitude else magnitude)
 extern fn int_to_string(n: Int) -> String
 extern fn double_to_string(x: Double) -> String
 extern fn char_to_string(c: Char) -> String

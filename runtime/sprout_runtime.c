@@ -2805,6 +2805,29 @@ long long int_to_string(long long value) {
   out[content_len] = '\0';
   return (long long)(uintptr_t)out;
 }
+/* Append ".0" when a "%g" rendering came out as a bare integer, so a Double never reads back
+ * as an Int.  A rendering carrying '.', an exponent, or inf/nan letters already says what it
+ * is and is returned untouched — which is what keeps "inf"/"nan" out of this rule.
+ *
+ * Shared by double_to_string and the JSON writer because both halves of the problem are the
+ * same: each renders with "%g", and each feeds a reader that decides int-vs-float by looking
+ * for a '.' or an exponent.  Applying it in only one of them is what made a JsonFloat(2.0)
+ * come back as JsonInt(2).  Returns the (possibly grown) length; `cap` is the buffer size. */
+static int append_dot_zero_if_bare_int(char* buf, int written, size_t cap) {
+  for (int i = 0; i < written; i++) {
+    char c = buf[i];
+    if (c == '.' || c == 'e' || c == 'E' ||
+        c == 'n' || c == 'N' || c == 'i' || c == 'I') return written;
+  }
+  if (written + 2 < (int)cap) {
+    buf[written]     = '.';
+    buf[written + 1] = '0';
+    written += 2;
+    buf[written] = '\0';
+  }
+  return written;
+}
+
 /* Format a Double (passed as its i64 bit-pattern, uniform ABI) to decimal text.
  * Uses "%g" (6 significant digits, trailing zeros stripped) as the default;
  * fine-grained formatting is a separate future tool.  When "%g" yields a bare
@@ -2844,18 +2867,7 @@ long long double_to_string(long long bits) {
     double back = strtod(buf, &end);
     if (end != buf && *end == '\0' && back == d) break;
   }
-  int is_bare_int = 1;
-  for (int i = 0; i < written; i++) {
-    char c = buf[i];
-    if (c == '.' || c == 'e' || c == 'E' ||
-        c == 'n' || c == 'N' || c == 'i' || c == 'I') { is_bare_int = 0; break; }
-  }
-  if (is_bare_int && written + 2 < (int)sizeof(buf)) {
-    buf[written]     = '.';
-    buf[written + 1] = '0';
-    written += 2;
-    buf[written] = '\0';
-  }
+  written = append_dot_zero_if_bare_int(buf, written, sizeof(buf));
   size_t content_len = (size_t)written;
   sprout_gc_maybe_collect_threshold();
   char* out = sprout_gc_alloc_cstr(content_len, "double_to_string: out of memory");
@@ -6251,12 +6263,23 @@ static void json_append_value(ByteBuf* out, long long value) {
     buf_append_cstr(out, int_buf);
   } else if (json_ctor_is(ctor_name, "JsonFloat")) {
     /* JsonFloat holds a Double (i64 IEEE-754 bits in field 0). %.17g round-trips it as a
-     * valid JSON number literal, which the Sprout json_parse re-reads via parse_double. */
+     * valid JSON number literal, which the Sprout json_parse re-reads via parse_double.
+     *
+     * The ".0" matters as much as the digits: json_parse decides JsonInt-vs-JsonFloat by
+     * looking for a '.' or an exponent (stdlib/json.sprout), and JSON itself draws no such
+     * distinction, so a bare "2" gives the reader no evidence the value was a Double and it
+     * returns JsonInt(2).  Without this the TYPE changed across a round trip for every
+     * integral-valued float, and "-0" lost its sign as the integral case that also carries
+     * information.  Non-finite values are left alone by the helper and stay "inf"/"nan",
+     * which are not valid JSON — tracked separately. */
     double d;
     long long bits = sprout_field(value, 0);
     memcpy(&d, &bits, sizeof(d));
     char flt_buf[64];
-    snprintf(flt_buf, sizeof(flt_buf), "%.17g", d);
+    int flt_written = snprintf(flt_buf, sizeof(flt_buf), "%.17g", d);
+    if (flt_written < 0) tcp_fail("json_stringify: formatting failed");
+    if (flt_written >= (int)sizeof(flt_buf)) tcp_fail("json_stringify: formatted value too long");
+    append_dot_zero_if_bare_int(flt_buf, flt_written, sizeof(flt_buf));
     buf_append_cstr(out, flt_buf);
   } else if (json_ctor_is(ctor_name, "JsonString")) {
     json_append_escaped_string(out, (const char*)(uintptr_t)sprout_field(value, 0));
