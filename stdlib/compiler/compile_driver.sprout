@@ -26,7 +26,7 @@ fn format_pos(pos: source.SourcePos) -> String =
   match pos with
   | source.SourcePos _ line col ->
       if line == 0 then ""
-      else int_to_string(line) ++ ":" ++ int_to_string(col) ++ ": "
+      else `${line}:${col}: `
 
 # ---------------------------------------------------------------------------
 # Header stripping is source.strip_headers (line-preserving, shared authority).
