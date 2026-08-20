@@ -1,0 +1,31 @@
+# The `show . read` ambiguity of ambiguous_class_tyvar, moved into a top-level
+# `let`. Same expression, same two instances, same reason nothing determines
+# `a` — only the body it sits in differs.
+#
+# It needs its own fixture rather than an extra binding in that one: the
+# harness greps the compiler's output for the expected substring, and both
+# forms produce the same message, so a second binding there would be satisfied
+# by the `fn`-body error alone and could never go RED.
+#
+# Unreported, this reached the LINKER — `use of undefined value '@from_int'`,
+# no Sprout position — while the `fn`-body form above it was rejected at check
+# time. The dispatch verifier walks `TFnDecl` and `TInstanceDecl` bodies and
+# let every other declaration fall into a `_` catch-all, so a top-level `let`
+# initializer was never verified at all.
+module main
+
+class Codec a
+  fn from_int(n: Int) -> a
+  fn to_str(x: a) -> String
+
+instance Codec Int
+  fn from_int(n: Int) -> Int = n
+  fn to_str(x: Int) -> String = "int:" ++ int_to_string(x)
+
+instance Codec Bool
+  fn from_int(n: Int) -> Bool = n > 0
+  fn to_str(x: Bool) -> String = "bool"
+
+let ambiguous = to_str(from_int(7))
+
+fn main() -> Unit !{IO} = print(ambiguous)

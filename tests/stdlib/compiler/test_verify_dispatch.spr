@@ -161,6 +161,15 @@ fn main() -> Unit !{IO} =
     assert_true(state, "class-method call with no dict and an undetermined class var is flagged ambiguous",
       match vd.verify_program(amb_prog) with | Just _ -> true | Nothing -> false)
 
+    # The SAME call, in a top-level `let` instead of a `fn`. Only the declaration
+    # wrapper differs, which is the point: `collect_decl` matched TFnDecl and
+    # TInstanceDecl and sent every other declaration to a `_` arm, so no `let`
+    # initializer was ever walked and this identical call was invisible.
+    let amb_let_prog = typed_ast.TypedProgram([codec_class,
+      typed_ast.TLetDecl("amb_binding", amb_call)])
+    assert_true(state, "the same ambiguous call in a top-level let is flagged too",
+      match vd.verify_program(amb_let_prog) with | Just _ -> true | Nothing -> false)
+
     # A method call whose class var IS pinned concretely but which still carries
     # no dict means the resolver dropped an unsatisfiable obligation rather than
     # rejecting it — the "No instance" shape, equally final for a method.
@@ -191,6 +200,14 @@ fn main() -> Unit !{IO} =
     let ok_prog = typed_ast.TypedProgram([codec_class, typed_ast.TFnDecl("ok_caller", [], Nothing, Nothing, [], ok_call)])
     assert_true(state, "correctly resolved class-method dict verifies clean",
       match vd.verify_program(ok_prog) with | Just _ -> false | Nothing -> true)
+
+    # The precision half of the TLetDecl arm. Walking a `let` body is only correct
+    # if it also stays SILENT on a resolved call: pinning the rejection alone would
+    # be satisfied by an arm that flags every `let`.
+    let ok_let_prog = typed_ast.TypedProgram([codec_class,
+      typed_ast.TLetDecl("ok_binding", ok_call)])
+    assert_true(state, "a correctly resolved dict in a top-level let verifies clean",
+      match vd.verify_program(ok_let_prog) with | Just _ -> false | Nothing -> true)
 
     # NEGATIVE — return-position dispatch, the shape that made the earlier
     # inference-time version of this check over-reject 8 files. `from_int` binds
