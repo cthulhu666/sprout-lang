@@ -10,5 +10,15 @@ fn payload() -> json.Json =
     ]
   )
 
-fn main() -> Unit !{IO} =
-  print(json.stringify(payload()))
+# JSON has no NaN and no infinities, so `stringify` refuses one instead of inventing a stand-in.
+fn unwritable() -> json.Json =
+  json.JsonFloat(1.0 / 0.0)
+
+fn render(value: json.Json) -> String =
+  match json.stringify(value) with
+  | Ok text -> text
+  | Err err -> "refused: " ++ json.json_error_message(err)
+
+fn main() -> Unit !{IO} = do
+  print(render(payload()))
+  print(render(unwritable()))

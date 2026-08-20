@@ -1,6 +1,6 @@
 module examples.sentry_api
 import stdlib.http (Result, HttpError, http_response_text, HttpResponse)
-import stdlib.json (Json, JsonArray, JsonArrayStep, JsonError, json_array_next, json_get_array, json_get_field, json_get_string, parse)
+import stdlib.json (Json, JsonArray, JsonArrayStep, JsonError, json_array_next, json_error_message, json_get_array, json_get_field, json_get_string, parse)
 import stdlib.http_client (http_get)
 import stdlib.string as strlib
 
@@ -38,8 +38,7 @@ fn sentry_issue_detail_url(issue_id: String) -> String =
   concat4("https://sentry.io/api/0/issues/", issue_id, "/", "")
 
 fn json_error_to_http_error(err: JsonError) -> HttpError =
-  match err with
-  | JsonDecode msg -> HttpDecode(msg)
+  HttpDecode(json_error_message(err))
 
 fn preview_limit() -> Int =
   160

@@ -3,6 +3,7 @@ import stdlib.string as string
 
 export type JsonError (..) =
   | JsonDecode String
+  | JsonNonFinite Double
 
 export type Json (..) =
   | JsonNull
@@ -278,9 +279,72 @@ export fn encode(value: a) -> Json where JsonEncode a =
 export fn parse(raw: String) -> Result JsonError Json =
   json_parse(raw)
 
-# O(size of JSON tree): walks the whole value and builds a fresh string.
-export fn stringify(value: Json) -> String =
-  json_stringify(value)
+# A Double is writable as JSON only when it is finite. RFC 8259 §6 states that values outside the
+# `number` grammar, "such as Infinity and NaN", are not permitted.
+#
+# Three explicit comparisons rather than an arithmetic identity like `x - x == 0.0`: that form
+# reads as a trick and leans on the optimizer never assuming no-NaN. `x == x` is false only for
+# NaN. `1.0 / 0.0` is a genuine +inf because Double `/` lowers to an unguarded fdiv — only integer
+# `/` traps — which is how stdlib.math builds its own `inf`.
+#
+# Defined here rather than imported from stdlib.math, whose `is_nan` is half of it. Sprout bundles
+# per program, so the dependency would land on every program that imports this module: measured
+# on a trivial json-only program, adding stdlib.math takes it from 20178 to 24476 IR lines and
+# 419 to 486 functions (+21%), for a three-line predicate. This module's only other import is
+# stdlib.string, and keeping the footprint that thin is worth one small duplication.
+fn is_finite(x: Double) -> Bool =
+  let inf = 1.0 / 0.0
+  in (x == x) && (x < inf) && (x > 0.0 - inf)
+
+# The first non-finite Double in document order, or Nothing when every number is writable.
+# O(size of tree).
+fn first_non_finite(value: Json) -> Maybe Double =
+  match value with
+  | JsonFloat x -> if is_finite(x) then Nothing else Just(x)
+  | JsonArray arr -> first_non_finite_array(arr)
+  | JsonObject obj -> first_non_finite_object(obj)
+  | _ -> Nothing
+
+fn first_non_finite_array(arr: JsonArray) -> Maybe Double =
+  match arr with
+  | JsonArrayNil -> Nothing
+  | JsonArrayCons head tail ->
+      match first_non_finite(head) with
+      | Just x -> Just(x)
+      | Nothing -> first_non_finite_array(tail)
+
+fn first_non_finite_object(obj: JsonObject) -> Maybe Double =
+  match obj with
+  | JsonObjectNil -> Nothing
+  | JsonObjectCons _ v rest ->
+      match first_non_finite(v) with
+      | Just x -> Just(x)
+      | Nothing -> first_non_finite_object(rest)
+
+# O(size of JSON tree), in two passes: one to reject non-finite Doubles, one to build the string.
+#
+# Refusing rather than coercing is the deliberate choice. JSON cannot express NaN or the
+# infinities, so a writer has to invent something, and every silent option changes the value's
+# TYPE across a round trip: `null` (JavaScript, serde_json) comes back JsonNull, a quoted "NaN"
+# (Jackson) comes back JsonString. That is the defect the ".0" rule in the writer exists to
+# prevent, so it would be odd to reintroduce it here. Go, .NET, Swift and Ruby's `JSON.generate`
+# all refuse instead; Sprout can say so in the return type.
+#
+# `json_stringify` is reached only through here, so the writer may assume every Double it sees
+# is finite.
+export fn stringify(value: Json) -> Result JsonError String =
+  match first_non_finite(value) with
+  | Just x -> Err(JsonNonFinite(x))
+  | Nothing -> Ok(json_stringify(value))
+
+# A readable rendering of any JsonError, so a caller can report one without matching variant by
+# variant. Which variants exist is this module's business: `parse` only ever produces JsonDecode
+# and `stringify` only ever produces JsonNonFinite, but neither promises that, and a caller that
+# enumerates them has to be revisited every time the set grows.
+export fn json_error_message(err: JsonError) -> String =
+  match err with
+  | JsonDecode msg -> msg
+  | JsonNonFinite x -> "non-finite number: " ++ double_to_string(x)
 
 fn json_array_from_list(items: List Json) -> JsonArray =
   match items with

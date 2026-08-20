@@ -128,8 +128,18 @@ fn json_get_str(obj: json.Json, key: String) -> Maybe String =
 fn json_get_int_fld(obj: json.Json, key: String) -> Maybe Int =
   and_then(json.json_get_int, json.json_get_field(obj, key))
 
+# Every message this driver builds is made of strings, ints and bools, so `stringify` cannot
+# refuse one. The fallback still sends well-formed JSON-RPC rather than nothing: dropping a
+# response leaves the client blocked on a reply that never arrives.
+# A fixed literal, not the error text: this string is hand-built JSON, so interpolating anything
+# into it would rest on that text never containing a quote or a backslash.
+fn unencodable_notice() -> String =
+  "{\"jsonrpc\":\"2.0\",\"method\":\"window/logMessage\",\"params\":{\"type\":1,\"message\":\"lsp: response held a value that cannot be encoded as JSON\"}}"
+
 fn send_message(msg: json.Json) -> Unit !{IO} =
-  lsp_send(json.stringify(msg))
+  match json.stringify(msg) with
+  | Ok text -> lsp_send(text)
+  | Err _ -> lsp_send(unencodable_notice())
 
 # ---------------------------------------------------------------------------
 # Diagnostics — public compiler.Diagnostic has (message, line, col)

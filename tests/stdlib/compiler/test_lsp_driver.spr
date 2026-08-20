@@ -33,10 +33,15 @@ fn notification_json(method: String) -> json.Json =
     json.JsonObjectCons("method", json.JsonString(method),
     json.JsonObjectNil)))
 
+fn stringified(j: json.Json) -> String =
+  match json.stringify(j) with
+  | Ok text -> text
+  | Err _ -> ""
+
 fn rendered(value: Maybe json.Json) -> String =
   match value with
   | Nothing -> ""
-  | Just j -> json.stringify(j)
+  | Just j -> stringified(j)
 
 fn main() -> Unit !{IO} =
   run_suite("lsp_driver", [
