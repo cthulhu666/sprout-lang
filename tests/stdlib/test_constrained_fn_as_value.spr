@@ -1,0 +1,136 @@
+import stdlib.test (check_eq, run_suite)
+
+# A user `fn` carrying its own `where` clause, referenced as a VALUE rather than applied.
+#
+# Codegen gives such a function one hidden parameter PER METHOD of each constraint's class
+# (plus its transitive superclasses), so its emitted arity exceeds the arity its source type
+# advertises. Applying it directly is fine — the call site supplies the dictionary. Naming it
+# without applying it hands the caller a function value whose arity does not match its type,
+# and the mismatch surfaces as a runtime abort rather than anything the type checker sees.
+#
+# The cases below pin the value position across the shapes it can take and across three
+# distinct hidden-arity counts, because the arity IS the mechanism:
+#   ToString -> 1 method  -> 1 hidden slot
+#   Enum     -> 2 methods -> 2 hidden slots
+#   MyOrd    -> 1 own + 1 inherited from MyEq -> 2 hidden slots
+# An implementation that hardcodes a single slot passes the first group and fails the rest.
+
+class MyEq a
+  fn my_eq(x: a, y: a) -> Bool
+
+class MyOrd a where MyEq a
+  fn my_cmp(x: a, y: a) -> Int
+
+instance MyEq Int
+  fn my_eq(x: Int, y: Int) -> Bool = x == y
+
+instance MyOrd Int
+  fn my_cmp(x: Int, y: Int) -> Int = if x < y then 0 - 1 else if x == y then 0 else 1
+
+type Color = Red | Green | Blue
+
+instance Enum Color
+  fn ordinal(c: Color) -> Int =
+    match c with
+    | Red -> 0
+    | Green -> 1
+    | Blue -> 2
+  fn from_ordinal(i: Int) -> Color =
+    match i with
+    | 0 -> Red
+    | 1 -> Green
+    | _ -> Blue
+
+# --- the constrained functions under test ---
+
+fn label(x: a) -> String where ToString a = to_string(x)
+
+fn next_wrapped(c: a) -> Int where Enum a = ordinal(c) + 1
+
+fn cmp_str(x: a, y: a) -> String where MyOrd a = to_string(my_cmp(x, y))
+
+fn pair_label(x: a, y: b) -> String where ToString a, ToString b =
+  to_string(x) ++ "/" ++ to_string(y)
+
+# --- the value positions ---
+
+fn apply1(f: Int -> String, n: Int) -> String = f(n)
+
+fn apply1_color(f: Color -> Int, c: Color) -> Int = f(c)
+
+fn apply2(f: Int -> Int -> String, x: Int, y: Int) -> String = f(x, y)
+
+fn apply_mixed(f: Int -> Bool -> String, n: Int, b: Bool) -> String = f(n, b)
+
+# What this file does NOT cover, deliberately: mentions whose receiving slot fixes nothing, in a
+# caller with no `where` clause of its own. Returning the reference and `let f = label in f(n)` are
+# the obvious two, but the rule is about the slot rather than the syntax, so it also covers a record
+# field, a list or tuple element, and an argument to a bare-tyvar parameter — `Just(label)` is
+# argument position and is rejected all the same.
+#
+# None of that is specific to naming a constrained function: a hand-written lambda in those same
+# positions fails identically on a compiler without this change. The parameter type is fixed only by
+# something LATER, and dictionary resolution has already run and guessed by then. Separate defect;
+# see BACKLOG.md. Testing any of them here would pin that gap, not this fix — and their diagnostics
+# are themselves recorded as wrong and due to change, so pinning the current text would make the
+# real fix harder rather than safer.
+#
+# The same two positions inside a `where`-constrained caller DO work, and are covered below: there
+# the caller has a forwarded dictionary slot for the reference to close over, so nothing has to be
+# guessed. The distinction is which of the two the reader should expect, so both are pinned.
+
+instance ToString Color
+  fn to_string(c: Color) -> String =
+    match c with
+    | Red -> "RED"
+    | Green -> "GREEN"
+    | Blue -> "BLUE"
+
+# Non-argument position (a `let`) inside a `where`-constrained caller. Checked at three types, one
+# with a distinctive instance: a dictionary picked by scanning rather than by forwarding could
+# satisfy at most one of them, so a single passing type would not have been evidence.
+fn via_let_polymorphic(x: b) -> String where ToString b =
+  let f = label
+  in f(x)
+
+# A caller polymorphic over the class. Concrete instances devirtualize the dictionary away,
+# so only a `where`-constrained caller exercises dictionary FORWARDING — the reference here
+# must close over the caller's own hidden slot rather than any instance's.
+fn label_via_hof(x: a) -> String where ToString a = apply_generic(label, x)
+
+fn apply_generic(f: a -> String, x: a) -> String = f(x)
+
+fn concat_all(xs: List String) -> String =
+  match xs with
+  | [] -> ""
+  | [x | rest] -> x ++ concat_all(rest)
+
+fn main() -> Unit !{IO} =
+  run_suite("constrained_fn_as_value", [
+    # ToString: one hidden slot.
+    check_eq("passed to a hof", apply1(label, 3), "3"),
+    check_eq("applied through a polymorphic hof", apply_generic(label, 6), "6"),
+    check_eq("forwarded from a where-constrained caller", label_via_hof(7), "7"),
+    # A prelude HOF rather than one declared in this file — the shape the original report named.
+    check_eq("passed to list_map", concat_all(list_map(label, [1, 2, 3])), "123"),
+
+    # Enum: two hidden slots, so a one-slot implementation misses here.
+    check_eq("two-method class as a value", apply1_color(next_wrapped, Green), 2),
+
+    # Superclass: MyOrd contributes its own method plus MyEq's inherited one.
+    check_eq("superclass slots as a value", apply2(cmp_str, 1, 2), "-1"),
+
+    # Non-argument position, but inside a where-constrained caller, so the dictionary is forwarded
+    # rather than guessed. Three types, because one wrong dictionary could still satisfy one of them.
+    check_eq("let-bound in a where-constrained caller, Int", via_let_polymorphic(7), "7"),
+    check_eq("let-bound in a where-constrained caller, Bool", via_let_polymorphic(true), "true"),
+    check_eq("let-bound in a where-constrained caller, custom instance", via_let_polymorphic(Blue), "BLUE"),
+
+    # The free-tyvar dead dictionary: never invoked, and must stay inert rather than become an
+    # error. This shape ran clean before the change and the rewrite now routes it through the
+    # push-down path, so it is the one previously-working case that could regress.
+    check_eq("free-tyvar dead dict stays inert", list_length(list_map(label, [])), 0),
+
+    # Two separate constraints: pins the ORDER the dictionaries are appended in.
+    check_eq("two constraints as a value", apply_mixed(pair_label, 8, true), "8/true")
+  ])

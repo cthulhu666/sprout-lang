@@ -1951,6 +1951,45 @@ inside a parameter's type rather than as that parameter's own type.  With
 several constraints of one class in scope, such a call may still select the
 wrong one; this is a known gap tracked in `BACKLOG.md`, not intended behaviour.
 
+**Constrained functions as values.**  A `where`-constrained function may be
+passed to another function without being applied, and its type there is the one
+its signature declares — the dictionaries it receives are not part of it:
+
+```sprout
+fn label(x: a) -> String where ToString a = to_string(x)
+fn apply(f: Int -> String, n: Int) -> String = f(n)
+
+apply(label, 3)     # `label` has type `Int -> String` here
+```
+
+The dictionary must come from somewhere the compiler can read at the point of
+the mention: either a receiving parameter whose declared type fixes it, as
+above, or a `where` clause on the enclosing function, which supplies one to
+forward.  Given either, the mention may appear anywhere a value may — including
+bound with `let`:
+
+```sprout
+fn describe(x: b) -> String where ToString b =
+  let f = label                    # forwards `describe`'s own dictionary
+  in f(x)
+```
+
+A mention with **neither** is rejected at compile time.  The rule is about the
+receiving slot, not about the syntax around it, so it covers more than it might
+appear: binding the function with `let` or returning it from a function with no
+`where` clause of its own, but equally a record field, a list or tuple element,
+and an argument whose receiving parameter is a bare type variable rather than a
+concrete type — `Just(label)` is argument position and is still rejected,
+because `Just`'s parameter fixes nothing.
+
+This is a known gap tracked in `BACKLOG.md`, not a deliberate restriction.  It
+applies equally to a hand-written lambda in the same positions, so it is a
+limit of how far declared types propagate rather than anything about
+constrained functions.  Diagnostics in this area are uneven and are part of
+the tracked gap: most of these positions report a dictionary mismatch naming a
+type variable from the callee's signature, and an annotated top-level binding
+currently reports an internal error rather than a diagnostic.
+
 ### `ToString` instances
 
 `to_string` is defined for the following types:
