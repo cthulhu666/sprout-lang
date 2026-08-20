@@ -103,6 +103,15 @@ fn nan_d() -> Double = (1.0 / 0.0) - (1.0 / 0.0)
 # value a too-eager finiteness guard would be most likely to reject.
 fn big_finite() -> Double = 1000000.0 * 1000000.0 * 100000.0
 
+# EXACTLY the two infinities. For any finite x the reciprocal is non-zero — even at the largest
+# double, where it is ~5.6e-309: subnormal, but not 0. Zero itself gives 1.0 / 0.0 = inf, and NaN
+# gives NaN, so neither is mistaken for one.
+#
+# The obvious `x == x + 1.0` is NOT this test: it holds for every double at or above 2^53, so it
+# cannot tell an infinity from a merely large number, and a control that cannot fail is not a
+# control. `check_false` cases below pin that.
+fn is_infinite(x: Double) -> Bool = (1.0 / x) == 0.0
+
 fn arr_of(x: json.Json) -> json.Json =
   json.JsonArray(json.JsonArrayCons(x, json.JsonArrayNil))
 
@@ -282,8 +291,13 @@ fn main() -> Unit !{IO} =
     # "NaN" would hand back a different Json constructor than went in — the same silent round-trip
     # type change that the ".0" rule above exists to prevent. Refusing says so in the type instead.
     check_true("control: nan_d really is NaN",! (nan_d() == nan_d())),
-    check_true("control: pos_inf really is infinite", pos_inf() == pos_inf() + 1.0),
-    check_true("control: neg_inf really is infinite", neg_inf() == neg_inf() - 1.0),
+    check_true("control: pos_inf really is infinite", is_infinite(pos_inf())),
+    check_true("control: neg_inf really is infinite", is_infinite(neg_inf())),
+    # And the controls can fail — otherwise they assert nothing about these three values.
+    check_false("control: a large finite double is not infinite", is_infinite(big_finite())),
+    check_false("control: zero is not infinite", is_infinite(0.0)),
+    check_false("control: NaN is not infinite", is_infinite(nan_d())),
+    check_false("control: an infinity is not NaN",! (pos_inf() == pos_inf())),
 
     check_true("NaN is refused", refuses(json.JsonFloat(nan_d()))),
     check_true("+inf is refused", refuses(json.JsonFloat(pos_inf()))),
