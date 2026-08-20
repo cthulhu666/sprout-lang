@@ -134,12 +134,12 @@ declare i64 @ref_write(i64, i64)
 @.str.56 = private unnamed_addr constant { i64, [3 x i8] } { i64 32778, [3 x i8] c", \00" }
 @.str.57 = private unnamed_addr constant { i64, [3 x i8] } { i64 32778, [3 x i8] c", \00" }
 @.str.58 = private unnamed_addr constant { i64, [2 x i8] } { i64 16394, [2 x i8] c")\00" }
-@.str.59 = private unnamed_addr constant { i64, [32 x i8] } { i64 507914, [32 x i8] c"examples.records_demo.Timeouts(\00" }
+@.str.59 = private unnamed_addr constant { i64, [10 x i8] } { i64 147466, [10 x i8] c"Timeouts(\00" }
 @.str.60 = private unnamed_addr constant { i64, [14 x i8] } { i64 213002, [14 x i8] c"connect_ms = \00" }
 @.str.61 = private unnamed_addr constant { i64, [3 x i8] } { i64 32778, [3 x i8] c", \00" }
 @.str.62 = private unnamed_addr constant { i64, [11 x i8] } { i64 163850, [11 x i8] c"read_ms = \00" }
 @.str.63 = private unnamed_addr constant { i64, [2 x i8] } { i64 16394, [2 x i8] c")\00" }
-@.str.64 = private unnamed_addr constant { i64, [30 x i8] } { i64 475146, [30 x i8] c"examples.records_demo.Server(\00" }
+@.str.64 = private unnamed_addr constant { i64, [8 x i8] } { i64 114698, [8 x i8] c"Server(\00" }
 @.str.65 = private unnamed_addr constant { i64, [8 x i8] } { i64 114698, [8 x i8] c"host = \00" }
 @.str.66 = private unnamed_addr constant { i64, [3 x i8] } { i64 32778, [3 x i8] c", \00" }
 @.str.67 = private unnamed_addr constant { i64, [8 x i8] } { i64 114698, [8 x i8] c"port = \00" }
@@ -12382,7 +12382,7 @@ join_3:
 
 define i64 @__tc_ToString_examples_records_demo_Timeouts_to_string(i64 %value) {
 entry:
-  %t$0 = getelementptr inbounds { i64, [32 x i8] }, ptr @.str.59, i64 0, i32 1, i64 0
+  %t$0 = getelementptr inbounds { i64, [10 x i8] }, ptr @.str.59, i64 0, i32 1, i64 0
   %t$1 = ptrtoint ptr %t$0 to i64
   %t$2 = getelementptr inbounds { i64, [14 x i8] }, ptr @.str.60, i64 0, i32 1, i64 0
   %t$3 = ptrtoint ptr %t$2 to i64
@@ -12484,7 +12484,7 @@ join_10:
 
 define i64 @__tc_ToString_examples_records_demo_Server_to_string(i64 %value) {
 entry:
-  %t$0 = getelementptr inbounds { i64, [30 x i8] }, ptr @.str.64, i64 0, i32 1, i64 0
+  %t$0 = getelementptr inbounds { i64, [8 x i8] }, ptr @.str.64, i64 0, i32 1, i64 0
   %t$1 = ptrtoint ptr %t$0 to i64
   %t$2 = getelementptr inbounds { i64, [8 x i8] }, ptr @.str.65, i64 0, i32 1, i64 0
   %t$3 = ptrtoint ptr %t$2 to i64

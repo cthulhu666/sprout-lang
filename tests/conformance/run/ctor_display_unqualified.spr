@@ -1,0 +1,40 @@
+module main
+
+# A constructor renders under the name the user WROTE, never the bundler's
+# qualified symbol. This file is headed `module main`, so every ctor declared
+# below is bundled as `main.<Name>` — and none of that may reach the output.
+#
+# Two independent render paths have to agree, which is why both appear here:
+#   - `print` goes through the C runtime (`print_inline_obj` -> display_ctor_name)
+#   - `to_string` on a `deriving (ToString)` type is Sprout code whose ctor name
+#     was baked into a string literal at compile time (`deriving.sprout`)
+# A fix applied to only one of them passes half this fixture.
+#
+# The rule is "the segment after the last dot", which is exact rather than
+# heuristic: a bundled name is `<module> ++ "." ++ <ctor>` and a ctor name is an
+# identifier, so it can never itself contain a dot.
+#
+# Diagnostics deliberately keep the qualified name — a different surface with a
+# different audience, pinned by tests/stdlib/compiler/test_ctor_display.spr.
+
+type Fruit deriving (ToString) = Apple Int | Pear
+
+type Box = (w: Int, h: Int) deriving (ToString)
+
+# Nesting matters: the inner value renders through the same path as the outer
+# one, so a fix that only handles the top-level ctor shows up here.
+type Crate deriving (ToString) = Crate Fruit
+
+fn main() -> Unit !{IO} =
+  do
+    print(Apple(3))
+    print(Pear)
+    print(to_string(Apple(3)))
+    print(to_string(Pear))
+    print(to_string(Box(w = 2, h = 5)))
+    print(Crate (Apple(1)))
+    print(to_string(Crate (Pear)))
+    # Control: the prelude's ctors are already unqualified (the prelude bundles
+    # under the empty module name), so these read the same before and after.
+    print(Just(9))
+    print(Nothing)

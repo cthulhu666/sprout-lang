@@ -196,6 +196,34 @@ export let entry_module_prefix: String = "$entry."
 export fn strip_entry_names(msg: String) -> String =
   string.replace_all(entry_module_prefix, "", msg)
 
+# The display name of a constructor: the name the user wrote, with the bundler's
+# module qualification dropped. `main.Apple` -> `Apple`, `$entry.Box` -> `Box`,
+# and a prelude ctor (bundled under the empty module name) is already bare, so
+# `Just` -> `Just`.
+#
+# EXACT, not a heuristic: `bundler.qualified_name` builds `<module> ++ "." ++
+# <ctor>` and a ctor name is an identifier, so it can never contain a dot itself.
+# The last segment is therefore the source-form name, recovered losslessly.
+#
+# ── This is NOT a variant of strip_entry_names, and the two must not merge ──
+# They differ in what they are applied TO, which is what makes them look alike
+# and behave differently:
+#
+#   strip_entry_names  takes a whole MESSAGE and removes one unspeakable prefix.
+#                      Real module prefixes survive on purpose — a diagnostic
+#                      reading "in demo.f" tells the reader which module.
+#   display_ctor_name  takes a single NAME and keeps only its last segment.
+#
+# Apply this one to a message and it shreds every qualified name in it, keeping
+# only the text after the final dot in the whole string. Both directions are
+# pinned by tests/stdlib/compiler/test_ctor_display.spr.
+#
+# The runtime has the same rule in C for values it renders itself
+# (`display_ctor_name`, sprout_runtime.c); this copy exists for the one place the
+# name becomes a string LITERAL in generated code (deriving.sprout).
+export fn display_ctor_name(name: String) -> String =
+  string.after_last_dot(name)
+
 # ── Header stripping ─────────────────────────────────────────────────────────
 #
 # strip_headers removes the leading block of `module` / `import` / comment /

@@ -14848,6 +14848,16 @@ entry:
   ret i64 %t$3
 }
 
+define i64 @stdlib.compiler.source.display_ctor_name(i64 %name) {
+entry:
+  %t$1 = alloca i64
+  store i64 %name, ptr %t$1
+  %t$2 = call i64 @sprout_gc_push_i64_root(ptr %t$1)
+  %t$0 = call i64 @stdlib.string.after_last_dot(i64 %name)
+  %t$3 = call i64 @sprout_gc_pop_roots(i64 1)
+  ret i64 %t$0
+}
+
 define i64 @stdlib.compiler.source.strip_headers(i64 %s) {
 entry:
   %t$5 = alloca i64

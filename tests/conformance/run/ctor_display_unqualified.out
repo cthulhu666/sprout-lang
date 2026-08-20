@@ -1,0 +1,9 @@
+Apple(3)
+Pear
+Apple(3)
+Pear
+Box(w = 2, h = 5)
+Crate(Apple(1))
+Crate(Pear)
+Just(9)
+Nothing

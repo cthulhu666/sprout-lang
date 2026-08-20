@@ -2675,9 +2675,23 @@ static long long find_ctor_tag_by_name(const char* name) {
   return -1;
 }
 
-/* A ctor name as a USER should see it: without the compiler's synthetic module
-   prefix for a headerless entry file (docs/prelude-scope-v0.md §4.2 step 4).
-   `print(Just(2))` must read `Just(2)`, not `$entry.Just(2)`.
+/* A ctor name as a USER should see it: the name they wrote, never the bundler's
+   qualified symbol.  `print(Apple(3))` in a file headed `module main` must read
+   `Apple(3)` — `main.` is an artefact of bundling, not something in the source.
+
+   The rule is "the segment after the last dot", and it is EXACT rather than a
+   heuristic: bundler.qualified_name builds `<module> ++ "." ++ <ctor>`, and a
+   ctor name is an identifier, so it can never itself contain a dot.  The suffix
+   is therefore the source-form name, recovered losslessly — which is why nothing
+   is carried alongside `name` to support this.  The same rule already renders
+   TYPE names in the REPL (analysis_service_driver.te_to_string, via
+   string.after_last_dot); this extends it to constructors.
+
+   Values render bare; DIAGNOSTICS deliberately keep the qualified name, because
+   there the prefix answers a question the reader actually has ("which module?").
+   The two must not be merged into one helper: applied to a whole message, a
+   last-dot strip would shred every qualified name in it.  See
+   tests/stdlib/compiler/test_ctor_display.spr, which pins both directions.
 
    Stripping happens HERE, at the render, and never at registration. CtorMeta.name
    is a single field serving both display and lookup, and two lookups depend on
@@ -2693,14 +2707,19 @@ static long long find_ctor_tag_by_name(const char* name) {
        carrying the PRELUDE's tag. Left qualified it merely misses the fast path,
        which is the right direction to fail in.
 
-   Real module prefixes (`main.`, `examples.foo.`) are deliberately kept — they
-   are useful disambiguation, and only the synthetic name is unspeakable. */
-#define SPROUT_ENTRY_PREFIX "$entry."
-
+   This supersedes the narrower rule that shipped with the unconditional prelude
+   (docs/prelude-scope-v0.md §4.2 step 4), which stripped only the synthetic
+   `$entry.` and kept real module prefixes on the grounds that they were useful
+   disambiguation.  They are not, at least not to the reader of a printed value:
+   Haskell (`deriving Show`), Rust (`#[derive(Debug)]`), Swift (default enum
+   reflection) and Python (`@dataclass` repr) all render the bare constructor,
+   and Python has `__module__` right there and uses `__qualname__` instead.  The
+   cost accepted is that two modules' same-named ctors now render identically;
+   tags and identity are untouched, so only the printed string collides. */
 static const char* display_ctor_name(const char* name) {
   if (name == NULL) return NULL;
-  size_t n = sizeof(SPROUT_ENTRY_PREFIX) - 1;
-  return strncmp(name, SPROUT_ENTRY_PREFIX, n) == 0 ? name + n : name;
+  const char* dot = strrchr(name, '.');
+  return dot != NULL ? dot + 1 : name;
 }
 
 static void print_inline_value(long long v);

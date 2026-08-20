@@ -112,10 +112,13 @@ type Maybe a =                       # shadows the prelude's Maybe
 fn main() -> Unit !{IO} = print(Just(3))   # prints `Just(3)`
 ```
 
-The synthesised name is never shown to a user: it is stripped from constructor
-display strings, from derived `to_string` output, and from diagnostics. It is also
-unwritable — it begins with `$`, which no Sprout identifier may contain
-(§2) — so no source file can declare a module that collides with it.
+The synthesised name is never shown to a user. In rendered values this needs no
+special rule: constructors render unqualified whatever their module (§8.5
+`ToString` instances), so the synthetic name drops out with every other module
+prefix. Diagnostics do keep real module prefixes, so there the synthetic name is
+removed specifically. It is also unwritable — it begins with `$`, which no Sprout
+identifier may contain (§2) — so no source file can declare a module that
+collides with it.
 
 Shadowing has two known limits, both because the construct resolves by
 *unqualified* name: a redefined type cannot be bound with `<-` (do notation picks
@@ -1969,6 +1972,21 @@ Tuple instances format nested tuples recursively.  A 6-tuple or larger has no
 `ToString` instance in the current prelude; adding one requires an explicit
 instance declaration.
 
+**A constructor renders under its source-form name, never a module-qualified
+one.**  A ctor declared in `module main` renders `Apple(3)`, not `main.Apple(3)`,
+and this holds for every module — a named one, a headerless entry file (§3.1), and
+the prelude alike.  The rule applies to both surfaces that render a constructor:
+the runtime rendering used by `print`, and the string a derived `ToString`
+produces (§8.6).  Nesting is uniform, so an inner value renders bare too:
+`Crate(Apple(1))`.
+
+The consequence to be aware of is that two modules' same-named constructors
+render identically.  That is deliberate — the qualified name exists to
+disambiguate *symbols*, and a value's rendering is not one.  **Diagnostics are the
+opposite case and keep the qualification**, because there the module prefix
+answers a question the reader has: a type error says `Return type mismatch in
+demo.f: Type mismatch: demo.Fruit vs Int`.
+
 **Function types have no instances.**  No class instance is provided — or
 representable — for a function type `a -> b`: instance heads dispatch on a type
 *constructor*, and there is no `instance C (a -> b)` form.  Requiring `C` on a
@@ -2176,7 +2194,7 @@ non-empty.  Whitespace and line breaks inside the parentheses are allowed.
 |---|---|---|
 | `Eq` | all ADT shapes | `eq(left, right)` — `match (left, right) with` per-ctor pairs comparing fields with recursive `eq`; cross-ctor pairs return false.  The `==` and `!=` infix operators desugar to `Eq.eq` dispatch for all non-primitive types; `==` on `Int`, `Bool`, `Char`, and `String` uses the built-in comparison path. |
 | `Ord` | all ADT shapes | `compare(left, right)` — nested match; constructors compared by declaration index (first-declared is least); same-ctor pairs compare fields lexicographically via `match compare(l0, r0) with \| 0 -> ... \| c -> c` chains |
-| `ToString` | all ADT shapes | `to_string(value)` — renders as `"CtorName"` for nullary, `"CtorName(to_string(f0), ..., to_string(fN-1))"` for N-field |
+| `ToString` | all ADT shapes | `to_string(value)` — renders as `"CtorName"` for nullary, `"CtorName(to_string(f0), ..., to_string(fN-1))"` for N-field. `CtorName` is the **source-form** name: `deriving` expands after the bundler has qualified declarations, so the name it sees is `main.Apple`, and it emits `Apple` (§8.5) |
 | `Enum` | **nullary-only ADTs** | `ordinal(v)` — `match v with` mapping each constructor to its 0-based declaration index; `from_ordinal(n)` — `if n == 0 then Just(Ctor0) else ... else Nothing`, the total-with-`Nothing` inverse |
 
 `Enum` is restricted to types whose every constructor is nullary: `from_ordinal`

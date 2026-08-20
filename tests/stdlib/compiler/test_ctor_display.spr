@@ -1,0 +1,96 @@
+module main
+import stdlib.test (TestState, new_state, assert_true, assert_false, assert_eq, summary)
+import stdlib.compiler.compiler as compiler
+import stdlib.compiler.source as source
+import stdlib.string as string
+import stdlib.fs as fs
+import stdlib.env as env
+
+# The display-vs-identity split for qualified names, pinned from BOTH sides.
+#
+# A ctor's bundled symbol is `<module>.<Ctor>`. Two surfaces consume that name
+# and they must disagree on purpose:
+#
+#   VALUES render bare      — `to_string(Apple(3))` is "Apple(3)", not
+#                             "main.Apple(3)". The user never wrote the prefix.
+#   DIAGNOSTICS stay qualified — "Return type mismatch in main.f" is *useful*;
+#                             the prefix says which module the name came from.
+#
+# The risk this file exists to catch is the two collapsing into one helper. They
+# look like the same string operation and are not: the value-side rule is "take
+# the segment after the last dot", and applying that to a whole diagnostic would
+# shred every qualified name in it. Both directions are asserted below, so a
+# future merge fails here rather than in a user's error output.
+#
+# This file is headed `module main`, so the types it declares are themselves
+# bundled as `main.*` — the assertions need no fixture on disk.
+
+type Fruit deriving (ToString) = Apple Int | Pear
+
+type Box = (w: Int, h: Int) deriving (ToString)
+
+# Nesting: the inner ctor renders through the same path as the outer one.
+type Crate deriving (ToString) = Crate Fruit
+
+fn first_diag_msg(r: compiler.FullResult) -> String =
+  match r with
+  | compiler.FullOk _ _ -> "<compiled unexpectedly>"
+  | compiler.FullFail diags ->
+      match diags with
+      | Nil -> "<failed with no diagnostic>"
+      | [d | _] -> diag_msg(d)
+
+fn diag_msg(d: compiler.Diagnostic) -> String =
+  match d with
+  | compiler.DiagError _ msg -> msg
+  | compiler.DiagWarning _ msg -> msg
+
+fn main() -> Unit !{IO} =
+  do
+    state <- new_state()
+
+    # ---- values render bare ------------------------------------------------
+    assert_eq(state, "named-module ctor with a field renders bare",
+      to_string(Apple(3)), "Apple(3)")
+    assert_eq(state, "named-module nullary ctor renders bare",
+      to_string(Pear), "Pear")
+    assert_eq(state, "named-module record renders bare",
+      to_string(Box(w = 2, h = 5)), "Box(w = 2, h = 5)")
+    assert_eq(state, "nested ctors both render bare",
+      to_string(Crate (Pear)), "Crate(Pear)")
+    assert_eq(state, "nested ctor with a field renders bare",
+      to_string(Crate (Apple(1))), "Crate(Apple(1))")
+
+    # Control: a prelude ctor bundles under the empty module name, so it has no
+    # prefix to lose. If this ever fails, the rule has started eating names that
+    # were never qualified.
+    assert_eq(state, "prelude ctor is unaffected", to_string(Just(9)), "Just(9)")
+
+    # ---- diagnostics stay qualified ---------------------------------------
+    match env.get("SPROUT_STDLIB_ROOT") with
+    | Nothing ->
+        # Deliberately a FAILURE, not a skip: these assertions need the bundler,
+        # and a silent skip would report a vacuous green (BACKLOG 7.2, the
+        # `just test-file` false-green item).
+        assert_true(state, "SPROUT_STDLIB_ROOT is set (required for the diagnostic half)", false)
+    | Just stdlib_root ->
+        do
+          let named = "/tmp/sprout_ctor_display_named.spr"
+          fs.write_text(named, "module demo\n\ntype Fruit = Apple Int\n\nfn f() -> Int = Apple(1)\n")
+          r_named <- compiler.compile_full(source.FilePath(named), source.StdlibRoot(stdlib_root))
+          let msg_named = first_diag_msg(r_named)
+          assert_true(state, "a diagnostic keeps the qualified FUNCTION name",
+            string.contains(msg_named, "demo.f"))
+          assert_true(state, "a diagnostic keeps the qualified TYPE name",
+            string.contains(msg_named, "demo.Fruit"))
+
+          # The other half of #164's guarantee: the synthetic entry-module name
+          # is unspeakable, so it must never reach a message even though a real
+          # module prefix does.
+          let head = "/tmp/sprout_ctor_display_headerless.spr"
+          fs.write_text(head, "fn describe(n: Int) -> String = n\n")
+          r_head <- compiler.compile_full(source.FilePath(head), source.StdlibRoot(stdlib_root))
+          assert_false(state, "no synthetic entry-module name in a diagnostic",
+            string.contains(first_diag_msg(r_head), "$entry"))
+
+    summary(state)
