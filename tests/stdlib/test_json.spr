@@ -1,6 +1,7 @@
 import stdlib.test (check_true, check_false, run_suite)
 import stdlib.json as json
 import stdlib.string as string
+import stdlib.math
 
 fn is_ok(r: Result json.JsonError json.Json) -> Bool =
   match r with
@@ -58,6 +59,28 @@ fn field_string_is(input: String, key: String, want: String) -> Bool =
       Just fv = json.json_get_field(v, key) else false
       Just s = json.json_get_string(fv) else false
   in s == want
+
+# Built by arithmetic, not by parsing: -1.0 * 0.0 is -0.0 under IEEE 754.
+fn neg_zero() -> Double = (0.0 - 1.0) * 0.0
+
+# Bit-pattern comparison, for the one property `approx` cannot express: -0.0 and 0.0 are
+# numerically EQUAL, so only the bits show whether the sign survived.
+fn top_float_has_bits(input: String, reference: Double) -> Bool =
+  let Ok v = json.parse(input) else false
+      Just x = json.json_get_float(v) else false
+  in double_to_bits(x) == double_to_bits(reference)
+
+# A JsonFloat must come back a JsonFloat. The check is `json_get_int` returning Nothing, NOT
+# `json_get_float` returning Just: json_get_float deliberately coerces a JsonInt (`:365`), so it
+# answers Just either way and cannot see the collapse this pins.
+fn float_stays_float(x: Double) -> Bool =
+  let Ok v = json.parse(json.stringify(json.JsonFloat(x))) else false
+  in is_nothing_int(json.json_get_int(v))
+
+fn float_round_trip_bits(x: Double) -> Bool =
+  let Ok v = json.parse(json.stringify(json.JsonFloat(x))) else false
+      Just y = json.json_get_float(v) else false
+  in double_to_bits(y) == double_to_bits(x)
 
 fn int_on_float_is_nothing(input: String) -> Bool =
   match json.parse(input) with
@@ -170,6 +193,40 @@ fn main() -> Unit !{IO} =
     check_true("json_get_int on a float returns Nothing", int_on_float_is_nothing("0.104")),
     check_true("float round-trips through stringify", stringify_round_trip_ok("{\"au\": 0.104}")),
     check_true("negative float round-trips", stringify_round_trip_ok("-1.5e-1")),
+
+    # --- '+'-signed exponents (RFC 8259 `exp` allows one; %g writers emit them) ---
+    # The writer renders any magnitude >= 1e17 exponentially, so before this was accepted the
+    # reader could not read its own output there, and rejected conformant JSON from any producer.
+    check_true("parse + exponent", top_float_approx("1e+3", 1000.0, 0.01)),
+    check_true("parse + exponent, capital E", top_float_approx("2.5E+2", 250.0, 0.01)),
+    check_true("parse + exponent with a fraction", top_float_approx("1.25e+2", 125.0, 0.01)),
+    check_true("+ exponent in an object field",
+               field_float_approx("{\"au\": 1.5e+2}", "au", 150.0, 0.01)),
+    check_true("+ exponent survives a stringify round trip", stringify_round_trip_ok("1e+17")),
+    check_true("a mantissa may NOT carry a +", is_err(json.parse("+1.5"))),
+    check_true("a dangling + exponent is rejected", is_err(json.parse("1e+"))),
+    check_true("a double-signed exponent is rejected", is_err(json.parse("1e+-3"))),
+
+    # Signed zero: -0.0 and 0.0 are numerically equal, so this compares bit patterns. Note the
+    # sign survives only when the literal is written as a FLOAT — a bare "-0" is an integer
+    # token to this parser (no '.' or exponent), and JSON gives no way to tell the two apart.
+    check_true("parsing -0.0 keeps the sign", top_float_has_bits("-0.0", neg_zero())),
+    check_true("parsing -0.0e5 keeps the sign", top_float_has_bits("-0.0e5", neg_zero())),
+    check_true("parsing 0.0 stays positive", top_float_has_bits("0.0", 0.0)),
+
+    # --- a JsonFloat stays a JsonFloat across a round trip ---
+    # The writer appends ".0" to an integral rendering for the same reason double_to_string does:
+    # JSON has no int/float distinction, so a bare "2" leaves the reader no evidence the value was
+    # a Double and it returns JsonInt(2) — the value's TYPE changing under a round trip.
+    check_true("an integral float stays a float", float_stays_float(2.0)),
+    check_true("a fractional float stays a float", float_stays_float(2.5)),
+    check_true("negative zero stays a float", float_stays_float(neg_zero())),
+    check_true("an integral float keeps its value", float_round_trip_bits(2.0)),
+    check_true("a fractional float keeps its value", float_round_trip_bits(2.5)),
+    check_true("negative zero survives the full round trip", float_round_trip_bits(neg_zero())),
+    check_true("a plain JsonInt is still an int", is_ok(json.parse(json.stringify(json.JsonInt(2))))),
+    check_true("a plain JsonInt does not become a float",
+               int_on_float_is_nothing("2.5") && (! is_nothing_int (json.json_get_int(json.JsonInt(2))))),
 
     # --- json_get_bool (accessor for the JsonBool variant) ---
     check_true("json_get_bool on true", is_just_true(bool_of("true"))),
