@@ -19,13 +19,22 @@ fn contains(haystack: String, needle: String) -> Bool =
 # Both sources include a main that calls make/get so DCE cannot eliminate them.
 # fn main() -> Int !{IO} is recognized as the Sprout entry point.
 
+# Both fixtures say `no_prelude` (docs/prelude-scope-v0.md §4.2 step 5), and the
+# assertions below are why. They are ABSENCE proofs over the whole emitted module
+# — "this IR contains no call to @sprout_alloc_obj" — and the prelude allocates
+# and reads fields all over itself, so a bundled prelude makes such a proof
+# unstatable. Opting out costs these fixtures nothing: they use Int, one wrap and
+# one ADT, and no prelude name at all. It also keeps their symbols unqualified, so
+# the presence guards can stay `@make` rather than `@$entry.make`.
 let wrap_src =
+  "no_prelude\n" ++
   "wrap Age = Int\n" ++
   "fn make(n: Int) -> Age = Age(n)\n" ++
   "fn get(a: Age) -> Int = match a with | Age n -> n\n" ++
   "fn main() -> Int !{IO} = get(make(42))\n"
 
 let regular_adt_src =
+  "no_prelude\n" ++
   "type Age = Age Int\n" ++
   "fn make(n: Int) -> Age = Age(n)\n" ++
   "fn get(a: Age) -> Int = match a with | Age n -> n\n" ++

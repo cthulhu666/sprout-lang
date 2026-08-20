@@ -40,21 +40,26 @@ fn main() -> Unit !{IO} =
     # compile_source_with_cache: pre-seed "stdlib.prelude" so load_prelude_pairs
     # takes the cache-hit branch and skips file I/O.  This lets us test the
     # cache-sharing invariant without needing a real stdlib_root on disk.
-    # The sources below carry no module header and no imports, so the bundle does
-    # not pull in the prelude either — which is why an empty stdlib_root works.
+    #
+    # The sources below say `no_prelude` so the BUNDLE does not read the prelude
+    # off disk either — which is what lets an empty stdlib_root work. They used to
+    # get that implicitly, by having no module header and no imports; the prelude
+    # is unconditional now (docs/prelude-scope-v0.md), so the opt-out is explicit.
+    # The subject here is cache sharing, not prelude scope: these sources reference
+    # nothing outside themselves, so opting out costs the test nothing.
     cache3 <- bundler.new_load_env()
     d3 <- ref_read(bundler.load_env_schemes(cache3))
     ref_write(bundler.load_env_schemes(cache3), dict_set("stdlib.prelude", Nil, d3))
 
-    r1 <- compiler.compile_source_with_cache("fn x() -> Int = 42", source.StdlibRoot(""), cache3)
+    r1 <- compiler.compile_source_with_cache("no_prelude\n\nfn x() -> Int = 42", source.StdlibRoot(""), cache3)
     assert_true(state, "compile_source_with_cache: valid source compiles ok", is_ok(r1))
 
     # Second call on the same cache — prelude entry is still there, no re-read.
-    r2 <- compiler.compile_source_with_cache("fn y() -> Bool = true", source.StdlibRoot(""), cache3)
+    r2 <- compiler.compile_source_with_cache("no_prelude\n\nfn y() -> Bool = true", source.StdlibRoot(""), cache3)
     assert_true(state, "compile_source_with_cache: cache persists across calls", is_ok(r2))
 
     # A type error is still caught even through the cache path.
-    r3 <- compiler.compile_source_with_cache("fn z() -> Int = true", source.StdlibRoot(""), cache3)
+    r3 <- compiler.compile_source_with_cache("no_prelude\n\nfn z() -> Int = true", source.StdlibRoot(""), cache3)
     assert_true(state, "compile_source_with_cache: type error detected via cache path", is_fail(r3))
 
     # compile_source (no root needed) is unaffected by M1

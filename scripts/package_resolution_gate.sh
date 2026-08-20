@@ -42,5 +42,21 @@ else
   fail=1
 fi
 
+# Header check: an imported file must declare a `module` header
+# (docs/prelude-scope-v0.md §4.2 step 3). The root IS registered here, so
+# resolution succeeds and the header check is the only thing that can reject it.
+# Asserted on the MESSAGE, not just the exit status: the whole point of the
+# diagnostic is that it names the file and the cause, where the old behaviour
+# reported `... is defined more than once in this module` about whichever symbol
+# happened to collide with the prelude — or nothing at all.
+hdr="$("$DRV" --phase check "$STDLIB" --package-root "$PKG_ROOT" "$FIX/app_headerless.spr" 2>&1)"
+if echo "$hdr" | grep -q 'no `module` header' && echo "$hdr" | grep -q 'headerless.sprout'; then
+  echo "PASS header: headerless imported file diagnosed by path and cause"
+else
+  echo "FAIL header: expected a 'no \`module\` header' diagnostic naming headerless.sprout"
+  echo "$hdr" | head -5
+  fail=1
+fi
+
 [ "$fail" -eq 0 ] && echo "==> package-resolution gate: OK" || echo "==> package-resolution gate: FAILED"
 exit $fail

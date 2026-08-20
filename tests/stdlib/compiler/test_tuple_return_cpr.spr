@@ -25,7 +25,15 @@ fn contains(haystack: String, needle: String) -> Bool =
 
 # A self-recursive tuple-returning reduction, destructured by the caller via `where`.
 # Shaped exactly like ln_reduce's rejected alternative.
+# Both fixtures say `no_prelude` (docs/prelude-scope-v0.md §4.2 step 5), and the
+# assertions below are why. `allocates_tuple` is an ABSENCE proof over the whole
+# emitted module — "the accumulator form allocates no tuple" — and the prelude
+# allocates tuples of its own, so a bundled prelude makes that unstatable. Opting
+# out costs these fixtures nothing: they are Int arithmetic and one tuple. It also
+# keeps their symbols unqualified, so the presence guards can stay `@split_worker`
+# and `@reduce_acc` rather than the `$entry.`-qualified spellings.
 let tuple_src =
+  "no_prelude\n" ++
   "fn split(x: Int, k: Int) -> (Int, Int) =\n" ++
   "  if x >= 2 then split(x / 2, k + 1)\n" ++
   "  else (x, k)\n" ++
@@ -37,6 +45,7 @@ let tuple_src =
 
 # The accumulator-threading control: identical work, no tuple anywhere.
 let acc_src =
+  "no_prelude\n" ++
   "fn reduce_acc(x: Int, k: Int) -> Int =\n" ++
   "  if x >= 2 then reduce_acc(x / 2, k + 1)\n" ++
   "  else x + k\n" ++

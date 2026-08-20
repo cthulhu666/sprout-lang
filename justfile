@@ -1054,16 +1054,29 @@ effect-report-smoke: bootstrap-from-seed
     echo "effect-report-smoke: --phase effects failed" >&2; cat "$TMPD/out" >&2; exit 1
   fi
   failed=0
+  # Every name in this report is MODULE-QUALIFIED, and the patterns below allow an
+  # optional dotted prefix (`Q`) rather than pinning one. `--phase effects` is a
+  # debug surface, so it deliberately shows real qualified names — including the
+  # synthetic `$entry.` a headerless entry file carries since
+  # docs/prelude-scope-v0.md. canaries.spr is headerless, so `shout` reports as
+  # `$entry.shout`.
+  #
+  # This is not cosmetic. The NEGATIVE assertions below are of the form "no GAP
+  # line for this name", so a pattern that can no longer match makes them pass
+  # VACUOUSLY — the gate would go green while testing nothing. An optional prefix
+  # keeps both directions live and survives the fixture gaining a `module` header
+  # or the synthetic name changing.
+  Q='([A-Za-z0-9_.$]+\.)?'
   # infer.sprout has TWO sites that discard a body's inferred effect — the `fn`
   # one and the `instance` one. Instrumenting only the first left every instance
   # method out of the census, silently and in the flattering direction. These two
   # lines are the guard against that regressing.
-  if ! grep -qE '^effect GAP instance describe\(Noisy\):' "$TMPD/out"; then
+  if ! grep -qE "^effect GAP instance describe\(${Q}Noisy\):" "$TMPD/out"; then
     echo "effect-report-smoke: instance methods are not being recorded" >&2
     grep -E '^effect (GAP|ok) instance ' "$TMPD/out" >&2 || echo "  (no instance lines at all)" >&2
     failed=$((failed + 1))
   fi
-  if ! grep -qE '^effect ok instance describe\(Quiet\):' "$TMPD/out"; then
+  if ! grep -qE "^effect ok instance describe\(${Q}Quiet\):" "$TMPD/out"; then
     echo "effect-report-smoke: expected a clean instance line for describe(Quiet)" >&2
     failed=$((failed + 1))
   fi
@@ -1073,9 +1086,9 @@ effect-report-smoke: bootstrap-from-seed
   # A fix that makes closure-construction pure by simply dropping infer_lambda's
   # over-approximation turns ALL THREE clean — these two are what catch that.
   for fn in shout calls_loud each_lambda each_named apply_now via_local; do
-    if ! grep -qE "^effect GAP ${fn}:" "$TMPD/out"; then
+    if ! grep -qE "^effect GAP ${Q}${fn}:" "$TMPD/out"; then
       echo "effect-report-smoke: expected a GAP for '${fn}', got:" >&2
-      grep -E "^effect (GAP|ok) ${fn}:" "$TMPD/out" >&2 || echo "  (no line at all)" >&2
+      grep -E "^effect (GAP|ok) ${Q}${fn}:" "$TMPD/out" >&2 || echo "  (no line at all)" >&2
       failed=$((failed + 1))
     fi
   done
@@ -1084,9 +1097,9 @@ effect-report-smoke: bootstrap-from-seed
   # false-positive guard: it fails if `!{e}` stops being freshened per
   # instantiation and the IO binding from the two calls above leaks into it.
   for fn in loud over_declared honest_pure calls_shout each_pure make_shouter unreachable_arm main; do
-    if grep -qE "^effect GAP ${fn}:" "$TMPD/out"; then
+    if grep -qE "^effect GAP ${Q}${fn}:" "$TMPD/out"; then
       echo "effect-report-smoke: unexpected GAP for '${fn}':" >&2
-      grep -E "^effect GAP ${fn}:" "$TMPD/out" >&2
+      grep -E "^effect GAP ${Q}${fn}:" "$TMPD/out" >&2
       failed=$((failed + 1))
     fi
   done

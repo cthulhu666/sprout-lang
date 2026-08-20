@@ -11698,7 +11698,7 @@ entry:
   ret i64 %t$3
 }
 
-define i64 @fetch(i64 %name, i64 %latency_ms) {
+define i64 @$entry.fetch(i64 %name, i64 %latency_ms) {
 entry:
   %t$0 = getelementptr inbounds { i64, [15 x i8] }, ptr @.str.27, i64 0, i32 1, i64 0
   %t$1 = ptrtoint ptr %t$0 to i64
@@ -11740,7 +11740,7 @@ entry:
   %t$4 = alloca i64
   store i64 %t$1, ptr %t$4
   %t$5 = call i64 @sprout_gc_push_i64_root(ptr %t$4)
-  %t$3 = call i64 @fetch(i64 %t$1, i64 %t$2)
+  %t$3 = call i64 @$entry.fetch(i64 %t$1, i64 %t$2)
   %t$6 = call i64 @sprout_gc_pop_roots(i64 1)
   ret i64 %t$3
 }
@@ -11753,7 +11753,7 @@ entry:
   %t$4 = alloca i64
   store i64 %t$1, ptr %t$4
   %t$5 = call i64 @sprout_gc_push_i64_root(ptr %t$4)
-  %t$3 = call i64 @fetch(i64 %t$1, i64 %t$2)
+  %t$3 = call i64 @$entry.fetch(i64 %t$1, i64 %t$2)
   %t$6 = call i64 @sprout_gc_pop_roots(i64 1)
   ret i64 %t$3
 }
@@ -11766,12 +11766,12 @@ entry:
   %t$4 = alloca i64
   store i64 %t$1, ptr %t$4
   %t$5 = call i64 @sprout_gc_push_i64_root(ptr %t$4)
-  %t$3 = call i64 @fetch(i64 %t$1, i64 %t$2)
+  %t$3 = call i64 @$entry.fetch(i64 %t$1, i64 %t$2)
   %t$6 = call i64 @sprout_gc_pop_roots(i64 1)
   ret i64 %t$3
 }
 
-define i64 @load_dashboard(i64 %s) {
+define i64 @$entry.load_dashboard(i64 %s) {
 entry:
   %t$17 = alloca i64
   store i64 %s, ptr %t$17
@@ -11856,7 +11856,7 @@ entry:
   %t$1 = alloca i64
   store i64 %s, ptr %t$1
   %t$2 = call i64 @sprout_gc_push_i64_root(ptr %t$1)
-  %t$0 = call i64 @load_dashboard(i64 %s)
+  %t$0 = call i64 @$entry.load_dashboard(i64 %s)
   %t$3 = call i64 @sprout_gc_pop_roots(i64 1)
   ret i64 %t$0
 }

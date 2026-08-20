@@ -92,6 +92,59 @@ comment does not extend the list. Import lists get long — a real module carrie
 over a hundred imports, several past 200 columns — and requiring one line made
 them unformattable.
 
+### 3.1 Prelude scope
+
+**The prelude is available in every file, unconditionally.** Its declarations are
+prepended to every bundle. Rationale and migration: `docs/prelude-scope-v0.md`.
+
+**A `module` header is required on any imported file; only the entry file may omit
+it.** An imported file without one is rejected at bundle time, naming the file.
+
+A headerless entry file receives a compiler-synthesised module name, so its
+declarations are qualified like any other module's and may freely **shadow**
+prelude names:
+
+```sprout
+type Maybe a =                       # shadows the prelude's Maybe
+  | Nothing
+  | Just a
+
+fn main() -> Unit !{IO} = print(Just(3))   # prints `Just(3)`
+```
+
+The synthesised name is never shown to a user: it is stripped from constructor
+display strings, from derived `to_string` output, and from diagnostics. It is also
+unwritable — it begins with `$`, which no Sprout identifier may contain
+(§2) — so no source file can declare a module that collides with it.
+
+Shadowing has two known limits, both because the construct resolves by
+*unqualified* name: a redefined type cannot be bound with `<-` (do notation picks
+the monad family by bare name), and a redefined class collides in the
+class-method wrapper symbol. Both predate this rule and apply equally to a named
+module; use `no_prelude` for a file that needs either.
+
+#### The `no_prelude` opt-out
+
+A file whose header block contains the bare line `no_prelude` receives no
+prelude. It is a header line, like `module` and `import`, and so must appear
+before the first ordinary declaration; the whole line must be the directive.
+
+```sprout
+no_prelude
+
+fn twice(n: Int) -> Int = n + n
+```
+
+A `no_prelude` file keeps its declarations **unqualified** — there is no prelude
+to be shadowed, and staying bare is what makes the two limits above go away.
+
+The opt-out is whole-file. Selective hiding (`hiding(null)`) is not provided.
+
+> **Known limitation.** The checker is still handed the prelude's schemes
+> unconditionally, so a `no_prelude` file that calls a prelude function
+> type-checks and then fails in the IR parser (`use of undefined value
+> '@negate'`) rather than reporting an unknown name. Tracked in `BACKLOG.md`.
+
 ### Externs are outside the module system
 
 An `extern fn` declaration is **not a module-scoped name**. It is never
@@ -648,19 +701,19 @@ RHS must be either:
 - A built-in primitive type (`Int`, `Double`, `Bool`, `String`, `Char`, `Unit`,
   `Bytes`).
   > `IntRange` was in this list until 2026-08-19. It is now an ordinary type
-  > declared in the prelude (§8.3), so it satisfies the *first* bullet instead.
+  > declared in the prelude (§8.3), so it satisfies the *first* bullet instead —
+  > and since the prelude is unconditional (§3.1), every file has it locally
+  > declared.
   >
-  > The *name* still resolves in a file that receives no prelude, because the
-  > bundler admits the prelude's exported type names in that case rather than
-  > rejecting every signature mentioning `Maybe` or `Result`. What such a file
-  > cannot do is *build* a range: `a..b` lowers to a call to the prelude's
-  > `range_up`, so the emitted module carries a `call i64 @range_up` with neither
-  > a `define` nor a `declare` for it. That is invalid IR, rejected by the IR
-  > parser — `error: use of undefined value '@range_up'` — before any link step
-  > is reached. This is the same outcome as calling any other prelude *function*
-  > from such a file, and it is NOT the extern case described above: an extern
-  > always gets a `declare` emitted for it, so an unresolved extern really does
-  > survive to link time.
+  > Until 2026-08-20 this note described a special case for a file that received
+  > no prelude: the bundler admitted the prelude's exported *type names* so a
+  > signature mentioning `Maybe` would not be rejected, while `a..b` still lowered
+  > to a `call i64 @range_up` with no `define` and no `declare` — invalid IR,
+  > rejected by the IR parser as `error: use of undefined value '@range_up'`. The
+  > admit-the-names workaround is gone with the condition that motivated it. The
+  > dangling-call shape survives only behind the explicit `no_prelude` opt-out
+  > (§3.1); it is NOT the extern case described above, since an extern always gets
+  > a `declare` emitted and so really does survive to link time.
 - A lowercase type variable (e.g. `a`, `b`) bound by the enclosing type
   declaration's parameter list.
 

@@ -1,3 +1,10 @@
+no_prelude
+
+# This fixture declares its OWN `class Eq`/`class Show`, which the prelude also
+# declares, so it opts out of the prelude (docs/prelude-scope-v0.md §4.2 step 5).
+# Same pre-existing `__cm_<Class>_<method>` mangling collision as instance_check —
+# see that file for the `module demo` reproduction.
+
 # Conformance file: type classes and instances
 # Covers: ClassDecl, InstanceDecl
 

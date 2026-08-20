@@ -58,9 +58,15 @@ fn format_pos(pos: source.SourcePos) -> String =
 
 # report_error: the single funnel for an error diagnostic — stderr, and mark the
 # run failed. Prefer this over a bare eprint so neither half can be forgotten.
+#
+# Being the single funnel makes it the right place to drop the synthetic module
+# name a headerless entry file carries (source.strip_entry_names): every
+# diagnostic this driver emits passes through here, so no message-building site
+# has to remember. `--phase dump-qualify` prints through `print` instead and so
+# still shows the real qualified names, which is what a debug dump is for.
 fn report_error(failed: Ref Int, msg: String) -> Unit !{IO} =
   do
-    eprint(msg)
+    eprint(source.strip_entry_names(msg))
     ref_write(failed, 1)
 
 fn print_diags(diags: List compiler.Diagnostic, failed: Ref Int) -> Unit !{IO} =

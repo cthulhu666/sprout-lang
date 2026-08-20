@@ -18,10 +18,22 @@ into `justfile` and `ci-fast-gates` in the same change.
 
 ## Adding a fixture
 
-- **`run/`** — write `<name>.spr` and its expected stdout `<name>.out`. Bare `.spr`
-  files are self-contained and get **no prelude** (see README §Not Yet Supported):
-  define the types/constructors you use, or the fixture will fail with
-  `unbound variable` / `unknown constructor`.
+- **`run/`** — write `<name>.spr` and its expected stdout `<name>.out`. Every
+  fixture gets the **prelude**, headerless or not
+  ([prelude-scope-v0.md](../../docs/prelude-scope-v0.md)), so prelude names and
+  constructors are simply available. Redefining one shadows it, and the fixture's
+  own declarations are qualified under a synthetic module name that is stripped
+  from all output — so `print(Just(3))` prints `Just(3)`.
+
+  Add `no_prelude` as the first line if the fixture needs to be preludeless. Two
+  cases genuinely do, both because the construct resolves by *unqualified* name:
+  a fixture that redefines a type and binds it with `<-`, and one that declares
+  its own `class`. `codegen_do_bind.spr`, `instance_check.spr` and
+  `type_classes.spr` are the in-tree examples.
+
+  > Until 2026-08-20 this said bare `.spr` files were self-contained and got no
+  > prelude, so a fixture had to define everything it used. That is what put all
+  > 8 entries in `run/XFAIL`; the manifest is now empty.
 - **`type_error/` · `parse_error/` · `executable_error/`** — write `<name>.spr` and
   `<name>.err` holding a stable substring of the expected diagnostic (matched with
   `grep -F`, so pick a message fragment, not the line/column suffix).

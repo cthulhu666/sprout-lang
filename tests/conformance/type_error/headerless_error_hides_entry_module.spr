@@ -1,0 +1,15 @@
+# A diagnostic about a headerless file must never show the compiler's synthetic
+# module name (docs/prelude-scope-v0.md §4.2 step 4, goal 4).
+#
+# This file has no `module` header, so the bundler names it `$entry` to keep its
+# declarations out of the prelude's namespace. That name is unwritable in Sprout
+# source and means nothing to a reader, so it is stripped at every render
+# boundary. The surface pinned here is a message naming the enclosing FUNCTION —
+# `Return type mismatch in describe` — which no fixture covered before, and which
+# reads `$entry.describe` without the strip.
+#
+# The mismatch is deliberate: `Int` returned where `String` was declared.
+
+fn describe(n: Int) -> String = n
+
+fn main() -> Unit !{IO} = print(describe(1))

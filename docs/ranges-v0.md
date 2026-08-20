@@ -519,10 +519,11 @@ Per Definition of Ready #2/#3, these are written and confirmed failing before im
 
 **New** — two conformance fixtures under `tests/conformance/type_error/`, one per spelling (§7):
 
-- `reversed_literal_range` — the `5..1` syntax form. Calls **no** prelude function on purpose: a
-  bare `.spr` gets no prelude (`tests/conformance/README.md:21-24`), so `range_count` would be
-  unbound and its error could mask the one under test. `IntRange` is a built-in type name, so the
-  annotation alone needs nothing imported.
+- `reversed_literal_range` — the `5..1` syntax form. Calls **no** prelude function, originally
+  because a bare `.spr` got no prelude and `range_count` would have been unbound, masking the
+  error under test. That reason expired on 2026-08-20: the prelude is unconditional
+  ([prelude-scope-v0.md](./prelude-scope-v0.md)), so `range_count` would resolve fine now. The
+  fixture is left minimal anyway — one diagnostic per fixture is the better shape.
 - `reversed_literal_range_call` — the constructor form, carrying `range_up(5, 1)` *and* the
   descending mirror `range_down(1, 5)`. Has a `module` header, which is what makes the prelude
   available.
@@ -660,6 +661,11 @@ with zero C change. But three further costs are not:
 3. **Bare-file regression.** `a..b` works with no prelude *today* because
    `declare i64 @int_range(i64, i64)` is hardcoded at `ir_lowering.sprout:557`. As a record literal
    it would need a ctor-table entry that a preludeless file has no way to get.
+   > Narrowed on 2026-08-20: the prelude is unconditional
+   > ([prelude-scope-v0.md](./prelude-scope-v0.md)), so this now applies only to a file that
+   > opts out with `no_prelude`, not to every headerless file. Objections 1 and 2 are
+   > unaffected — and 2 got *worse*, since the prelude now bundles into every program rather
+   > than only those with a named module in their import closure.
 
 **Conclusion:** if symmetry is wanted, the `long long step` field in `IntRangeVal` (Package B) is
 strictly better than the record — it keeps GC tracing at zero children, renumbers no tags, and does

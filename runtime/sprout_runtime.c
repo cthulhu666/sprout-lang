@@ -2675,6 +2675,34 @@ static long long find_ctor_tag_by_name(const char* name) {
   return -1;
 }
 
+/* A ctor name as a USER should see it: without the compiler's synthetic module
+   prefix for a headerless entry file (docs/prelude-scope-v0.md §4.2 step 4).
+   `print(Just(2))` must read `Just(2)`, not `$entry.Just(2)`.
+
+   Stripping happens HERE, at the render, and never at registration. CtorMeta.name
+   is a single field serving both display and lookup, and two lookups depend on
+   the name being intact:
+
+     - find_ctor_tag_by_name is a first-wins linear scan over g_ctor_meta. Register
+       an entry file's `Just` as bare `Just` and two entries answer to that name
+       with different tags — the runtime calls this itself (env_get, the
+       stdlib.regex.Match construction), so it would silently take whichever came
+       first.
+     - sprout_make0 keys its Nothing singleton on strcmp(name, "Nothing"). A
+       stripped entry-file `Nothing` would match and be handed a cached object
+       carrying the PRELUDE's tag. Left qualified it merely misses the fast path,
+       which is the right direction to fail in.
+
+   Real module prefixes (`main.`, `examples.foo.`) are deliberately kept — they
+   are useful disambiguation, and only the synthetic name is unspeakable. */
+#define SPROUT_ENTRY_PREFIX "$entry."
+
+static const char* display_ctor_name(const char* name) {
+  if (name == NULL) return NULL;
+  size_t n = sizeof(SPROUT_ENTRY_PREFIX) - 1;
+  return strncmp(name, SPROUT_ENTRY_PREFIX, n) == 0 ? name + n : name;
+}
+
 static void print_inline_value(long long v);
 
 static void print_inline_obj(void* o) {
@@ -2684,7 +2712,7 @@ static void print_inline_obj(void* o) {
     printf("Ctor%lld", tag);
     return;
   }
-  printf("%s", m->name);
+  printf("%s", display_ctor_name(m->name));
   if (m->arity <= 0) return;
   printf("(");
   long long* fields = (long long*)o;
@@ -4855,7 +4883,7 @@ static void sprout_debug_adt_rec(long long val, int depth) {
     fprintf(stderr, "<tag:%lld>", tag);
     return;
   }
-  fprintf(stderr, "%s", meta->name);
+  fprintf(stderr, "%s", display_ctor_name(meta->name));
   if (meta->arity == 0) return;
   fprintf(stderr, "(");
   const char* fk = (meta->field_kinds != NULL) ? meta->field_kinds : "";

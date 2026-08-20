@@ -1,0 +1,13 @@
+# DELIBERATELY has no `module` header — that is what this fixture is for.
+#
+# An imported file must declare one (docs/prelude-scope-v0.md §4.2 step 3).
+# Imports resolve by PATH, with no check that the file declares a matching name,
+# so a headerless imported file used to reach the bundle and emit its
+# declarations UNQUALIFIED — into the same flat namespace as the prelude. The
+# only sign was `... is defined more than once in this module` on whichever
+# symbol happened to collide, a message that names neither this file nor the
+# cause. Now it is diagnosed directly, at bundle time, by path.
+#
+# Nothing compiles this file on its own; it is reached only through
+# app_headerless.spr, which the package-resolution gate expects to FAIL.
+export fn unreachable_value() -> Int = 1
