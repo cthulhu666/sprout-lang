@@ -1016,8 +1016,18 @@ fn dispatch(req: json.Json, state: StartupState) -> json.Json !{IO} =
 
 fn dispatch_line(line: String, state: StartupState) -> json.Json !{IO} =
   match json.parse(line) with
-  | Err (json.JsonDecode msg) -> error_response(string.concat("invalid JSON: ", msg))
+  | Err err -> error_response("invalid JSON: " ++ json.json_error_message(err))
   | Ok req -> dispatch(req, state)
+
+# Responses are built from strings, ints and bools, so `stringify` cannot refuse one. The
+# fallback answers with the same error shape rather than nothing, so a client reading one line
+# per request stays in step.
+# The fallback is a fixed literal, not the error text: it is hand-built JSON, so interpolating
+# anything into it would rest on that text never containing a quote or a backslash.
+fn response_text(response: json.Json) -> String =
+  match json.stringify(response) with
+  | Ok text -> text
+  | Err _ -> "{\"ok\":false,\"error\":\"internal: response held a value that cannot be encoded as JSON\"}"
 
 # ---------------------------------------------------------------------------
 # Service loop
@@ -1030,7 +1040,7 @@ fn service_loop(state: StartupState) -> Unit !{IO} =
       else
         do
           response <- dispatch_line(line, state)
-          terminal.write(json.stringify(response) ++ "\n")
+          terminal.write(response_text(response) ++ "\n")
           service_loop(state)
 
 export fn run_service(stdlib_root: String) -> Unit !{IO} =

@@ -33,10 +33,17 @@ fn is_nothing_array(m: Maybe json.JsonArray) -> Bool =
   | Nothing -> true
   | Just _ -> false
 
+# `stringify` reports a refusal in its result type, so the round-trip helpers unwrap it. The
+# fallback is deliberately "", which is NOT valid JSON: an unexpected Err then surfaces as a
+# parse failure in the test that used it, rather than passing quietly.
+fn stringified(value: json.Json) -> String =
+  let Ok text = json.stringify(value) else ""
+  in text
+
 fn stringify_round_trip_ok(input: String) -> Bool =
   match json.parse(input) with
   | Err _ -> false
-  | Ok v -> is_ok(json.parse(json.stringify(v)))
+  | Ok v -> is_ok(json.parse(stringified(v)))
 
 fn abs_d(x: Double) -> Double = if x < 0.0 then 0.0 - x else x
 
@@ -74,13 +81,54 @@ fn top_float_has_bits(input: String, reference: Double) -> Bool =
 # `json_get_float` returning Just: json_get_float deliberately coerces a JsonInt (`:365`), so it
 # answers Just either way and cannot see the collapse this pins.
 fn float_stays_float(x: Double) -> Bool =
-  let Ok v = json.parse(json.stringify(json.JsonFloat(x))) else false
+  let Ok v = json.parse(stringified(json.JsonFloat(x))) else false
   in is_nothing_int(json.json_get_int(v))
 
 fn float_round_trip_bits(x: Double) -> Bool =
-  let Ok v = json.parse(json.stringify(json.JsonFloat(x))) else false
+  let Ok v = json.parse(stringified(json.JsonFloat(x))) else false
       Just y = json.json_get_float(v) else false
   in double_to_bits(y) == double_to_bits(x)
+
+# --- non-finite Doubles ------------------------------------------------------------------
+# Sprout has no literal for NaN or the infinities, so they are built by arithmetic: Double `/`
+# lowers to an unguarded fdiv (only integer `/` traps), so `1.0 / 0.0` is a genuine +inf. The
+# predicates below are written inline rather than imported from stdlib.math, so that this file
+# does not depend on the module whose behaviour it would then be testing through.
+fn pos_inf() -> Double = 1.0 / 0.0
+fn neg_inf() -> Double = 0.0 - (1.0 / 0.0)
+fn nan_d() -> Double = (1.0 / 0.0) - (1.0 / 0.0)
+
+# 1e17, built by multiplication because Sprout source has no scientific-notation literal. This
+# is the magnitude at which the writer switches to exponential form, i.e. the largest ordinary
+# value a too-eager finiteness guard would be most likely to reject.
+fn big_finite() -> Double = 1000000.0 * 1000000.0 * 100000.0
+
+fn arr_of(x: json.Json) -> json.Json =
+  json.JsonArray(json.JsonArrayCons(x, json.JsonArrayNil))
+
+fn obj_of(x: json.Json) -> json.Json =
+  json.JsonObject(json.JsonObjectCons("k", x, json.JsonObjectNil))
+
+# Asserts the SPECIFIC variant, not merely Err. A JsonDecode here would mean the writer refused
+# for an unrelated reason, and a bare `is_err` check would still call that a pass.
+fn refuses(value: json.Json) -> Bool =
+  match json.stringify(value) with
+  | Ok _ -> false
+  | Err (json.JsonNonFinite _) -> true
+  | Err (json.JsonDecode _) -> false
+
+fn accepts(value: json.Json) -> Bool =
+  match json.stringify(value) with
+  | Ok _ -> true
+  | Err _ -> false
+
+# The offending value is carried out, not just the fact that something was refused. `!(x == x)`
+# is true only for NaN.
+fn refused_value_is_nan(value: json.Json) -> Bool =
+  match json.stringify(value) with
+  | Ok _ -> false
+  | Err (json.JsonNonFinite x) -> ! (x == x)
+  | Err (json.JsonDecode _) -> false
 
 fn int_on_float_is_nothing(input: String) -> Bool =
   match json.parse(input) with
@@ -224,9 +272,41 @@ fn main() -> Unit !{IO} =
     check_true("an integral float keeps its value", float_round_trip_bits(2.0)),
     check_true("a fractional float keeps its value", float_round_trip_bits(2.5)),
     check_true("negative zero survives the full round trip", float_round_trip_bits(neg_zero())),
-    check_true("a plain JsonInt is still an int", is_ok(json.parse(json.stringify(json.JsonInt(2))))),
+    check_true("a plain JsonInt is still an int", is_ok(json.parse(stringified(json.JsonInt(2))))),
     check_true("a plain JsonInt does not become a float",
                int_on_float_is_nothing("2.5") && (! is_nothing_int (json.json_get_int(json.JsonInt(2))))),
+
+    # --- non-finite Doubles are refused, never coerced ---
+    # RFC 8259 §6 states outright that values outside the `number` grammar, "such as Infinity and
+    # NaN", are not permitted, so a writer must do SOMETHING. Coercing to `null` or to a quoted
+    # "NaN" would hand back a different Json constructor than went in — the same silent round-trip
+    # type change that the ".0" rule above exists to prevent. Refusing says so in the type instead.
+    check_true("control: nan_d really is NaN",! (nan_d() == nan_d())),
+    check_true("control: pos_inf really is infinite", pos_inf() == pos_inf() + 1.0),
+    check_true("control: neg_inf really is infinite", neg_inf() == neg_inf() - 1.0),
+
+    check_true("NaN is refused", refuses(json.JsonFloat(nan_d()))),
+    check_true("+inf is refused", refuses(json.JsonFloat(pos_inf()))),
+    check_true("-inf is refused", refuses(json.JsonFloat(neg_inf()))),
+    check_true("NaN inside an array is refused", refuses(arr_of(json.JsonFloat(nan_d())))),
+    check_true("+inf inside an object is refused", refuses(obj_of(json.JsonFloat(pos_inf())))),
+    check_true("NaN two levels down is refused",
+               refuses(obj_of(arr_of(json.JsonFloat(nan_d()))))),
+    check_true("the refused value is carried in the error",
+               refused_value_is_nan(json.JsonFloat(nan_d()))),
+
+    # The guard must reject non-finite values and NOTHING else — an over-broad predicate would
+    # make these fail, including the -0.0 whose sign the writer goes out of its way to keep.
+    check_true("a finite float is accepted", accepts(json.JsonFloat(1.5))),
+    check_true("zero is accepted", accepts(json.JsonFloat(0.0))),
+    check_true("negative zero is accepted", accepts(json.JsonFloat(neg_zero()))),
+    check_true("a large finite magnitude is accepted", accepts(json.JsonFloat(big_finite()))),
+    check_true("an int is accepted", accepts(json.JsonInt(2))),
+    check_true("null is accepted", accepts(json.JsonNull)),
+    check_true("a finite tree of the refused shape is accepted",
+               accepts(obj_of(arr_of(json.JsonFloat(1.5))))),
+    check_true("accepted output is re-parsable",
+               is_ok(json.parse(stringified(json.JsonFloat(1.5))))),
 
     # --- json_get_bool (accessor for the JsonBool variant) ---
     check_true("json_get_bool on true", is_just_true(bool_of("true"))),

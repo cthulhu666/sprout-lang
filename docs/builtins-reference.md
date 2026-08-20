@@ -219,7 +219,8 @@ panics, and a negative *literal* count is a compile error.
 - `map_set(m: Map a, key: String, value: a) -> Map a`
 - `map_remove(m: Map a, key: String) -> Map a`
 - `map_size(m: Map a) -> Int`
-- public JSON entrypoints live in `stdlib.json` as `parse(raw)` and `stringify(value)`
+- public JSON entrypoints live in `stdlib.json` as `parse(raw)` and `stringify(value)`; both return
+  a `Result JsonError _`
 - `vector_empty() -> Vector a`
 - `vector_length(v: Vector a) -> Int`
 - `vector_get(v: Vector a, index: Int) -> Maybe a`
@@ -588,7 +589,12 @@ JSON stdlib helpers (in `stdlib/json.sprout`):
 - `JsonArrayStep` / `JsonObjectStep` traversal ADTs
 - builder helpers: `null()`, `bool(value)`, `int(value)`, `string(value)`, `array_from_list(items)`, `object_from_pairs(items)`, `object_from_dict(items)`
 - `parse(raw) -> Result JsonError Json`
-- `stringify(value: Json) -> String` (compact JSON for the currently representable subset)
+- `stringify(value: Json) -> Result JsonError String` (compact JSON). Returns `Err(JsonNonFinite x)`
+  when the tree contains a NaN or an infinity: RFC 8259 §6 has no syntax for either, so a writer
+  must choose between refusing and inventing a stand-in, and every stand-in (`null`, a quoted
+  `"NaN"`) comes back a different `Json` constructor than went in.
+- `json_error_message(err: JsonError) -> String` — render any `JsonError` without matching on the
+  variant set
 - `json_get_field(value, key) -> Maybe Json`
 - `json_get_string(value) -> Maybe String`
 - `json_get_int(value) -> Maybe Int`

@@ -6270,8 +6270,12 @@ static void json_append_value(ByteBuf* out, long long value) {
      * distinction, so a bare "2" gives the reader no evidence the value was a Double and it
      * returns JsonInt(2).  Without this the TYPE changed across a round trip for every
      * integral-valued float, and "-0" lost its sign as the integral case that also carries
-     * information.  Non-finite values are left alone by the helper and stay "inf"/"nan",
-     * which are not valid JSON — tracked separately. */
+     * information.
+     *
+     * INVARIANT: every Double reaching here is finite.  `json_stringify` is module-private to
+     * stdlib/json.sprout and its only caller, `stringify`, walks the tree first and returns
+     * Err(JsonNonFinite) for NaN and the infinities — which %g would otherwise render as a bare
+     * "nan"/"inf", not valid JSON.  So this branch handles finite values only. */
     double d;
     long long bits = sprout_field(value, 0);
     memcpy(&d, &bits, sizeof(d));
