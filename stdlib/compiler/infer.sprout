@@ -929,6 +929,54 @@ fn value_var_node(name: String, t: types.Type, pos: source.SourcePos, env: Dict 
               typed_ast.TMethodRef(name, types.type_id_name(class_name), t, pos, typed_ast.EvUnresolved)
           | _ -> typed_ast.TVar(name, t, pos)
 
+# A value-position reference to a user `fn` carrying its own `where` clause, rewritten into the
+# eta-lambda the programmer could have written by hand: `label` becomes `\__eta_x0 -> label(__eta_x0)`.
+#
+# Constrained functions take one hidden parameter per method of each constraint's class (plus its
+# transitive superclasses), appended after the user-visible ones. A CALL supplies those — infer
+# prepends TDict evidence here, resolve fills it, lowering appends the witnesses — so the arity works
+# out. A bare mention has no call to hang that evidence on, so it used to lower to a plain TVar whose
+# emitted arity still counted the hidden slots while its type advertised only the visible ones. The
+# result linked and died at run time on an arity check, with nothing for the type checker to catch.
+#
+# Wrapping the mention in a lambda turns it back into a call, which is the one shape all three passes
+# already handle. Nothing here resolves a dictionary: that stays resolve's job (lowering.sprout §M3b-5),
+# and the tyvar-headed case a `where`-constrained caller needs forwards for free.
+#
+# Class methods are excluded — the `@class:` marker routes them to TMethodRef, which lowering
+# eta-expands from Evidence. Zero-arity functions are excluded too: there is no lambda to build, and
+# `\-> make()` is not a shape the language has.
+fn constrained_fn_eta(name: String, scheme: types.Scheme, pos: source.SourcePos, env: Dict types.Scheme) -> Maybe ast.Expr =
+  match dict_get("@class:" ++ name, env) with
+  | Just _ -> Nothing
+  | Nothing ->
+      match types.scheme_constraints(scheme) with
+      | [] -> Nothing
+      | [_ | _] -> constrained_fn_eta_lambda(name, pos, env)
+
+# Arity comes from the DECLARED parameter count, not from counting arrows in the type: a zero-parameter
+# function returning a function has the same `a -> b` scheme as a one-parameter function, so the type
+# cannot tell them apart (the reason fn_declared_arity exists — see call_arity_error_for). A local
+# binding that shadows a top-level function drops the marker in bind_local_scheme, so a shadowed name
+# returns Nothing here and keeps today's behaviour.
+fn constrained_fn_eta_lambda(name: String, pos: source.SourcePos, env: Dict types.Scheme) -> Maybe ast.Expr =
+  let Just arity = fn_declared_arity(name, env) else Nothing
+  in if arity == 0 then Nothing
+     else Just(ast.LambdaExpr(
+       eta_fn_params(arity, 0),
+       ast.CallExpr(ast.VarExpr(name, pos), eta_fn_args(arity, 0, pos), pos),
+       pos))
+
+fn eta_fn_param_name(i: Int) -> String = "__eta_x" ++ int_to_string(i)
+
+fn eta_fn_params(n: Int, i: Int) -> List ast.Param =
+  if i >= n then Nil
+  else Cons(ast.Param(eta_fn_param_name(i), Nothing, ast.ModeDefault), eta_fn_params(n, i + 1))
+
+fn eta_fn_args(n: Int, i: Int, pos: source.SourcePos) -> List ast.Expr =
+  if i >= n then Nil
+  else Cons(ast.VarExpr(eta_fn_param_name(i), pos), eta_fn_args(n, i + 1, pos))
+
 # Dot-access resolution rule (docs/records-v0.md §4.3, Scope A variable chains).
 # A dotted name `p.x` lexes as a single identifier, ambiguous between record
 # field access and module qualification (`stdlib.string.foo`).  Values and
@@ -971,9 +1019,15 @@ fn infer_var(
   match dict_get(name, env) with
   | Nothing -> InferErr(pos, "Unknown variable: " ++ name)
   | Just scheme ->
-      do
-        t <- unifier.instantiate(state, scheme)
-        InferOk(value_var_node(name, t, pos, env), subst, eff_subst, types.EffectPure)
+      match constrained_fn_eta(name, scheme, pos, env) with
+      # Re-enter inference on the synthesized lambda, the same way the dotted-name case above
+      # re-enters on a field chain.  The call inside it is an ordinary call, so it routes through
+      # infer_call_var rather than back to here — the rewrite cannot recur.
+      | Just expanded -> infer_expr(state, env, subst, eff_subst, expanded)
+      | Nothing ->
+          do
+            t <- unifier.instantiate(state, scheme)
+            InferOk(value_var_node(name, t, pos, env), subst, eff_subst, types.EffectPure)
 
 # --- If ---
 
@@ -2879,6 +2933,13 @@ fn infer_call_args(
               push_down_arg_slots(s1, es1, callee_type, slots, types.TVar(types.tyvar_id(ret))),
               es1, slots, Nil, types.EffectPure)
 
+# A bare `VarExpr` naming a constrained function, as its eta-lambda; anything else unchanged.
+fn eta_expand_constrained_arg(e: ast.Expr, env: Dict types.Scheme) -> ast.Expr =
+  let ast.VarExpr name pos = e else e
+      Just scheme = dict_get(name, env) else e
+      Just expanded = constrained_fn_eta(name, scheme, pos, env) else e
+  in expanded
+
 fn has_lambda_slot(slots: List ArgSlot) -> Bool =
   match slots with
   | Nil -> false
@@ -2899,14 +2960,21 @@ fn infer_arg_slots(
 ) -> ArgSlotsResult !{IO} =
   match args with
   | Nil -> SlotsOk(arg_slot_list_reverse(acc), subst, eff_subst)
-  | Cons arg rest ->
-      match arg with
+  | Cons arg0 rest ->
+      # Rewrite a bare mention of a constrained function into its eta-lambda HERE rather than in
+      # infer_var, because this match is where an argument's fate is decided: a lambda is held back
+      # and later typed against the callee's declared parameter, while everything else is inferred
+      # eagerly with no expected type.  A dictionary resolved eagerly has only the constrained
+      # function's own signature to go on, so it guesses from the return type — `apply1(label, 3)`
+      # picked `ToString String`.  Arriving as a LambdaExpr instead puts it on the push-down path,
+      # where `Int -> String` fixes the parameter before any dictionary is chosen.
+      match eta_expand_constrained_arg(arg0, env) with
       | ast.LambdaExpr params body lpos ->
           do
             v <- unifier.fresh(state)
             infer_arg_slots(state, env, subst, eff_subst, rest,
               Cons(ArgLambda(params, body, types.TVar(types.tyvar_id(v)), lpos), acc))
-      | _ ->
+      | arg ->
           do
             r <- infer_expr(state, env, subst, eff_subst, arg)
             match r with
