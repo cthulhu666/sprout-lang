@@ -47,7 +47,7 @@ fn fixture() -> String =
 fn line_of(name: String) -> Int =
   match compiler.declaration_position(fixture(), name) with
   | Nothing -> 0
-  | Just pos -> source.position_line(pos)
+  | Just pos -> pos.line
 
 fn found(name: String) -> Bool =
   match compiler.declaration_position(fixture(), name) with

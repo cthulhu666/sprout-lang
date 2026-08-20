@@ -16,7 +16,7 @@ export type LintFinding (..) =
   | LintFinding Int Int String String
 
 fn mk_finding(pos: source.SourcePos, rule_id: String, message: String) -> LintFinding =
-  LintFinding(source.position_line(pos), source.position_column(pos), rule_id, message)
+  LintFinding(pos.line, pos.column, rule_id, message)
 
 # ---------------------------------------------------------------------------
 # Rule: staircase-of-doom
@@ -387,7 +387,7 @@ fn rest_of_line(src: String, line: Int, col: Int) -> String =
   where text = nth_line(str_split_lines(src), line, 1)
 
 fn drop_desugared_list_patterns(src: String, positions: List source.SourcePos) -> List source.SourcePos =
-  filter(\pos -> is_written_as_ctor(src, source.position_line(pos), source.position_column(pos)), positions)
+  filter(\pos -> is_written_as_ctor(src, pos.line, pos.column), positions)
 
 fn list_shape_findings(src: String, prog: ast.Program) -> List LintFinding =
   match prog with

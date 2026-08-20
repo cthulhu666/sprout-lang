@@ -25,13 +25,13 @@ fn first_diag(result: compiler.CompileResult) -> Maybe compiler.Diagnostic =
 
 fn diag_line(d: compiler.Diagnostic) -> Int =
   match d with
-  | compiler.DiagError pos _ -> source.position_line(pos)
-  | compiler.DiagWarning pos _ -> source.position_line(pos)
+  | compiler.DiagError pos _ -> pos.line
+  | compiler.DiagWarning pos _ -> pos.line
 
 fn diag_col(d: compiler.Diagnostic) -> Int =
   match d with
-  | compiler.DiagError pos _ -> source.position_column(pos)
-  | compiler.DiagWarning pos _ -> source.position_column(pos)
+  | compiler.DiagError pos _ -> pos.column
+  | compiler.DiagWarning pos _ -> pos.column
 
 fn diag_msg(d: compiler.Diagnostic) -> String =
   match d with

@@ -14170,24 +14170,6 @@ join_1:
   ret i64 %t$2
 }
 
-define i64 @stdlib.compiler.source.position_index(i64 %pos) {
-entry:
-  %t$0 = call i64 @sprout_field(i64 %pos, i64 0)
-  ret i64 %t$0
-}
-
-define i64 @stdlib.compiler.source.position_line(i64 %pos) {
-entry:
-  %t$0 = call i64 @sprout_field(i64 %pos, i64 1)
-  ret i64 %t$0
-}
-
-define i64 @stdlib.compiler.source.position_column(i64 %pos) {
-entry:
-  %t$0 = call i64 @sprout_field(i64 %pos, i64 2)
-  ret i64 %t$0
-}
-
 define i64 @stdlib.compiler.source.cursor_source(i64 %cursor) {
 entry:
   %t$0 = call i64 @sprout_tag(i64 %cursor)
@@ -17790,14 +17772,14 @@ join_2:
 
 define i64 @stdlib.compiler.parser.pos_str(i64 %pos) {
 entry:
-  %t$0 = call i64 @stdlib.compiler.source.position_line(i64 %pos)
+  %t$0 = call i64 @sprout_field(i64 %pos, i64 1)
   %t$8 = alloca i64
   store i64 %pos, ptr %t$8
   %t$9 = call i64 @sprout_gc_push_i64_root(ptr %t$8)
   %t$1 = call i64 @int_to_string(i64 %t$0)
   %t$2 = getelementptr inbounds { i64, [2 x i8] }, ptr @.str.51, i64 0, i32 1, i64 0
   %t$3 = ptrtoint ptr %t$2 to i64
-  %t$4 = call i64 @stdlib.compiler.source.position_column(i64 %pos)
+  %t$4 = call i64 @sprout_field(i64 %pos, i64 2)
   %t$10 = alloca i64
   store i64 %t$1, ptr %t$10
   %t$11 = call i64 @sprout_gc_push_i64_root(ptr %t$10)
@@ -22764,11 +22746,11 @@ tco_loop:
   br label %arm_0_1
 arm_0_1:
   %t$3 = call i64 @stdlib.compiler.parser.tok_pos(i64 %t$0)
-  %t$4 = call i64 @stdlib.compiler.source.position_line(i64 %t$3)
+  %t$4 = call i64 @sprout_field(i64 %t$3, i64 1)
   br label %arm_0_5
 arm_0_5:
   %t$7 = call i64 @stdlib.compiler.parser.tok_pos(i64 %t$0)
-  %t$8 = call i64 @stdlib.compiler.source.position_column(i64 %t$7)
+  %t$8 = call i64 @sprout_field(i64 %t$7, i64 2)
   br label %arm_0_9
 arm_0_9:
   %t$11 = call i64 @stdlib.compiler.parser.tok_is_eof(i64 %t$0)
@@ -23056,7 +23038,7 @@ define i64 @stdlib.compiler.parser.do_tmp_name(i64 %pos) {
 entry:
   %t$0 = getelementptr inbounds { i64, [5 x i8] }, ptr @.str.123, i64 0, i32 1, i64 0
   %t$1 = ptrtoint ptr %t$0 to i64
-  %t$2 = call i64 @stdlib.compiler.source.position_line(i64 %pos)
+  %t$2 = call i64 @sprout_field(i64 %pos, i64 1)
   %t$11 = alloca i64
   store i64 %pos, ptr %t$11
   %t$12 = call i64 @sprout_gc_push_i64_root(ptr %t$11)
@@ -23079,7 +23061,7 @@ entry:
   %t$21 = call i64 @sprout_gc_push_i64_root(ptr %t$20)
   %t$7 = call i64 @__tc_Semigroup_String_append(i64 %t$4, i64 %t$6)
   %t$22 = call i64 @sprout_gc_pop_roots(i64 2)
-  %t$8 = call i64 @stdlib.compiler.source.position_column(i64 %pos)
+  %t$8 = call i64 @sprout_field(i64 %pos, i64 2)
   %t$23 = alloca i64
   store i64 %t$7, ptr %t$23
   %t$24 = call i64 @sprout_gc_push_i64_root(ptr %t$23)
@@ -24074,11 +24056,11 @@ entry:
   %t$9 = call i64 @sprout_gc_push_i64_root(ptr %t$8)
   %t$0 = call i64 @stdlib.compiler.parser.tok_at(i64 %step_tokens, i64 %i2)
   %t$1 = call i64 @stdlib.compiler.parser.tok_pos(i64 %t$0)
-  %t$2 = call i64 @stdlib.compiler.source.position_line(i64 %t$1)
+  %t$2 = call i64 @sprout_field(i64 %t$1, i64 1)
   %t$3 = add i64 0, 0
   %t$4 = call i64 @stdlib.compiler.parser.tok_at(i64 %step_tokens, i64 %i2)
   %t$5 = call i64 @stdlib.compiler.parser.tok_pos(i64 %t$4)
-  %t$6 = call i64 @stdlib.compiler.source.position_column(i64 %t$5)
+  %t$6 = call i64 @sprout_field(i64 %t$5, i64 2)
   %t$7 = call i64 @stdlib.compiler.parser.scan_do_step_end(i64 %step_tokens, i64 %i2, i64 %i2, i64 %t$2, i64 %t$3, i64 %t$6)
   %t$10 = call i64 @sprout_gc_pop_roots(i64 1)
   ret i64 %t$7
@@ -24668,7 +24650,7 @@ then_68:
   %t$241 = call i64 @sprout_gc_push_i64_root(ptr %t$240)
   %t$70 = call i64 @stdlib.compiler.parser.tok_at(i64 %step_tokens, i64 %t$9)
   %t$71 = call i64 @stdlib.compiler.parser.tok_pos(i64 %t$70)
-  %t$72 = call i64 @stdlib.compiler.source.position_column(i64 %t$71)
+  %t$72 = call i64 @sprout_field(i64 %t$71, i64 2)
   %t$73 = call i64 @sprout_alloc_obj(i64 5, i64 0)
   %t$242 = alloca i64
   store i64 %t$73, ptr %t$242
@@ -25574,7 +25556,7 @@ else_2:
   %t$75 = call i64 @sprout_gc_push_i64_root(ptr %t$74)
   %t$7 = call i64 @stdlib.compiler.parser.tok_at(i64 %tokens, i64 %i)
   %t$8 = call i64 @stdlib.compiler.parser.tok_pos(i64 %t$7)
-  %t$9 = call i64 @stdlib.compiler.source.position_line(i64 %t$8)
+  %t$9 = call i64 @sprout_field(i64 %t$8, i64 1)
   %t$10 = icmp eq i64 %t$9, %do_line
   %t$11 = zext i1 %t$10 to i64
   %t$56 = trunc i64 %t$11 to i1
@@ -25621,7 +25603,7 @@ then_21:
   %t$89 = call i64 @sprout_gc_push_i64_root(ptr %t$88)
   %t$23 = call i64 @stdlib.compiler.parser.tok_at(i64 %tokens, i64 %i)
   %t$24 = call i64 @stdlib.compiler.parser.tok_pos(i64 %t$23)
-  %t$25 = call i64 @stdlib.compiler.source.position_column(i64 %t$24)
+  %t$25 = call i64 @sprout_field(i64 %t$24, i64 2)
   %t$90 = call i64 @sprout_gc_pop_roots(i64 2)
   %t$26 = musttail call i64 @stdlib.compiler.parser.collect_do_steps_at(i64 %tokens, i64 %i, i64 %do_line, i64 %t$25, i64 %acc)
   ret i64 %t$26
@@ -25634,7 +25616,7 @@ else_21:
   %t$94 = call i64 @sprout_gc_push_i64_root(ptr %t$93)
   %t$27 = call i64 @stdlib.compiler.parser.tok_at(i64 %tokens, i64 %i)
   %t$28 = call i64 @stdlib.compiler.parser.tok_pos(i64 %t$27)
-  %t$29 = call i64 @stdlib.compiler.source.position_column(i64 %t$28)
+  %t$29 = call i64 @sprout_field(i64 %t$28, i64 2)
   %t$30 = icmp slt i64 %t$29, %block_col
   %t$31 = zext i1 %t$30 to i64
   %t$54 = trunc i64 %t$31 to i1
@@ -25674,7 +25656,7 @@ else_32:
   %t$108 = call i64 @sprout_gc_push_i64_root(ptr %t$107)
   %t$37 = call i64 @stdlib.compiler.parser.tok_at(i64 %tokens, i64 %i)
   %t$38 = call i64 @stdlib.compiler.parser.tok_pos(i64 %t$37)
-  %t$39 = call i64 @stdlib.compiler.source.position_column(i64 %t$38)
+  %t$39 = call i64 @sprout_field(i64 %t$38, i64 2)
   %t$40 = icmp sgt i64 %t$39, %block_col
   %t$41 = zext i1 %t$40 to i64
   %t$53 = trunc i64 %t$41 to i1
@@ -26194,7 +26176,7 @@ do_cont_4:
   %t$9$gep = getelementptr i64, ptr %t$9$ptr, i64 1
   %t$9 = load i64, ptr %t$9$gep
   %t$10 = call i64 @stdlib.compiler.parser.tok_pos(i64 %t$8)
-  %t$11 = call i64 @stdlib.compiler.source.position_line(i64 %t$10)
+  %t$11 = call i64 @sprout_field(i64 %t$10, i64 1)
   %t$12 = add i64 0, 1
   %t$13 = sub i64 0, %t$12
   %t$53 = alloca i64
@@ -27376,7 +27358,7 @@ else_4:
   %t$38 = call i64 @sprout_gc_push_i64_root(ptr %t$37)
   %t$18 = call i64 @stdlib.compiler.parser.tok_at(i64 %tokens, i64 %i)
   %t$19 = call i64 @stdlib.compiler.parser.tok_pos(i64 %t$18)
-  %t$20 = call i64 @stdlib.compiler.source.position_line(i64 %t$19)
+  %t$20 = call i64 @sprout_field(i64 %t$19, i64 1)
   %t$21 = add i64 0, 0
   %t$22 = call i64 @stdlib.compiler.parser.scan_do_step_end(i64 %tokens, i64 %i, i64 %i, i64 %t$20, i64 %t$21, i64 %block_col)
   %t$23 = call i64 @stdlib.compiler.parser.parse_let_binding_step(i64 %tokens, i64 %i, i64 %block_col, i64 %t$22)
@@ -27484,7 +27466,7 @@ else_13:
   %t$55 = call i64 @sprout_gc_push_i64_root(ptr %t$54)
   %t$20 = call i64 @stdlib.compiler.parser.tok_at(i64 %tokens, i64 %t$8)
   %t$21 = call i64 @stdlib.compiler.parser.tok_pos(i64 %t$20)
-  %t$22 = call i64 @stdlib.compiler.source.position_column(i64 %t$21)
+  %t$22 = call i64 @sprout_field(i64 %t$21, i64 2)
   %t$56 = call i64 @sprout_gc_pop_roots(i64 2)
   %t$23 = musttail call i64 @stdlib.compiler.parser.parse_let_block$u(i64 %tokens, i64 %t$8, i64 %t$22)
   ret i64 %t$23
@@ -28207,7 +28189,7 @@ body_1_4:
   br i1 %t$26, label %then_19, label %else_19
 then_19:
   %t$21 = call i64 @stdlib.compiler.parser.tok_pos(i64 %t$13)
-  %t$22 = call i64 @stdlib.compiler.source.position_column(i64 %t$21)
+  %t$22 = call i64 @sprout_field(i64 %t$21, i64 2)
   %t$23 = icmp slt i64 %t$22, %branch_col
   %t$24 = zext i1 %t$23 to i64
   br label %join_19
@@ -28247,7 +28229,7 @@ else_27:
   br i1 %t$39, label %then_35, label %else_35
 then_35:
   %t$37 = call i64 @stdlib.compiler.parser.tok_pos(i64 %t$13)
-  %t$38 = call i64 @stdlib.compiler.source.position_column(i64 %t$37)
+  %t$38 = call i64 @sprout_field(i64 %t$37, i64 2)
   br label %join_35
 else_35:
   br label %join_35
@@ -43233,7 +43215,7 @@ else_5:
   %t$67 = call i64 @sprout_gc_push_i64_root(ptr %t$66)
   %t$10 = call i64 @stdlib.compiler.parser.tok_at(i64 %tokens, i64 %i)
   %t$11 = call i64 @stdlib.compiler.parser.tok_pos(i64 %t$10)
-  %t$12 = call i64 @stdlib.compiler.source.position_column(i64 %t$11)
+  %t$12 = call i64 @sprout_field(i64 %t$11, i64 2)
   %t$13 = icmp sle i64 %t$12, %keyword_col
   %t$14 = zext i1 %t$13 to i64
   %t$48 = trunc i64 %t$14 to i1
@@ -43280,7 +43262,7 @@ then_24:
   %t$81 = call i64 @sprout_gc_push_i64_root(ptr %t$80)
   %t$26 = call i64 @stdlib.compiler.parser.tok_at(i64 %tokens, i64 %i)
   %t$27 = call i64 @stdlib.compiler.parser.tok_pos(i64 %t$26)
-  %t$28 = call i64 @stdlib.compiler.source.position_column(i64 %t$27)
+  %t$28 = call i64 @sprout_field(i64 %t$27, i64 2)
   %t$82 = call i64 @sprout_gc_pop_roots(i64 2)
   %t$29 = musttail call i64 @stdlib.compiler.parser.collect_class_method_sigs_layout_at(i64 %tokens, i64 %i, i64 %keyword_col, i64 %t$28, i64 %acc)
   ret i64 %t$29
@@ -43293,7 +43275,7 @@ else_24:
   %t$86 = call i64 @sprout_gc_push_i64_root(ptr %t$85)
   %t$30 = call i64 @stdlib.compiler.parser.tok_at(i64 %tokens, i64 %i)
   %t$31 = call i64 @stdlib.compiler.parser.tok_pos(i64 %t$30)
-  %t$32 = call i64 @stdlib.compiler.source.position_column(i64 %t$31)
+  %t$32 = call i64 @sprout_field(i64 %t$31, i64 2)
   %t$33 = icmp ne i64 %t$32, %block_col
   %t$34 = zext i1 %t$33 to i64
   %t$46 = trunc i64 %t$34 to i1
@@ -43440,7 +43422,7 @@ then_6:
   %t$10 = call i64 @stdlib.compiler.parser.tok_at(i64 %tokens, i64 %t$9)
   %t$22 = call i64 @sprout_gc_pop_roots(i64 1)
   %t$11 = call i64 @stdlib.compiler.parser.tok_pos(i64 %t$10)
-  %t$12 = call i64 @stdlib.compiler.source.position_column(i64 %t$11)
+  %t$12 = call i64 @sprout_field(i64 %t$11, i64 2)
   br label %join_6
 else_6:
   %t$23 = alloca i64
@@ -43449,7 +43431,7 @@ else_6:
   %t$13 = call i64 @stdlib.compiler.parser.tok_at(i64 %tokens, i64 %i)
   %t$25 = call i64 @sprout_gc_pop_roots(i64 1)
   %t$14 = call i64 @stdlib.compiler.parser.tok_pos(i64 %t$13)
-  %t$15 = call i64 @stdlib.compiler.source.position_column(i64 %t$14)
+  %t$15 = call i64 @sprout_field(i64 %t$14, i64 2)
   br label %join_6
 join_6:
   %t$7 = phi i64 [%t$12, %then_6], [%t$15, %else_6]
@@ -44483,7 +44465,7 @@ else_5:
   %t$67 = call i64 @sprout_gc_push_i64_root(ptr %t$66)
   %t$10 = call i64 @stdlib.compiler.parser.tok_at(i64 %tokens, i64 %i)
   %t$11 = call i64 @stdlib.compiler.parser.tok_pos(i64 %t$10)
-  %t$12 = call i64 @stdlib.compiler.source.position_column(i64 %t$11)
+  %t$12 = call i64 @sprout_field(i64 %t$11, i64 2)
   %t$13 = icmp sle i64 %t$12, %keyword_col
   %t$14 = zext i1 %t$13 to i64
   %t$48 = trunc i64 %t$14 to i1
@@ -44530,7 +44512,7 @@ then_24:
   %t$81 = call i64 @sprout_gc_push_i64_root(ptr %t$80)
   %t$26 = call i64 @stdlib.compiler.parser.tok_at(i64 %tokens, i64 %i)
   %t$27 = call i64 @stdlib.compiler.parser.tok_pos(i64 %t$26)
-  %t$28 = call i64 @stdlib.compiler.source.position_column(i64 %t$27)
+  %t$28 = call i64 @sprout_field(i64 %t$27, i64 2)
   %t$82 = call i64 @sprout_gc_pop_roots(i64 2)
   %t$29 = musttail call i64 @stdlib.compiler.parser.collect_instance_methods_layout_at(i64 %tokens, i64 %i, i64 %keyword_col, i64 %t$28, i64 %acc)
   ret i64 %t$29
@@ -44543,7 +44525,7 @@ else_24:
   %t$86 = call i64 @sprout_gc_push_i64_root(ptr %t$85)
   %t$30 = call i64 @stdlib.compiler.parser.tok_at(i64 %tokens, i64 %i)
   %t$31 = call i64 @stdlib.compiler.parser.tok_pos(i64 %t$30)
-  %t$32 = call i64 @stdlib.compiler.source.position_column(i64 %t$31)
+  %t$32 = call i64 @sprout_field(i64 %t$31, i64 2)
   %t$33 = icmp ne i64 %t$32, %block_col
   %t$34 = zext i1 %t$33 to i64
   %t$46 = trunc i64 %t$34 to i1
@@ -67874,7 +67856,7 @@ else_2:
   %t$80 = call i64 @sprout_gc_push_i64_root(ptr %t$79)
   %t$6 = call i64 @stdlib.compiler.parser.tok_at(i64 %tokens, i64 %i)
   %t$7 = call i64 @stdlib.compiler.parser.tok_pos(i64 %t$6)
-  %t$8 = call i64 @stdlib.compiler.source.position_line(i64 %t$7)
+  %t$8 = call i64 @sprout_field(i64 %t$7, i64 1)
   %t$9 = icmp eq i64 %t$8, %do_line
   %t$10 = zext i1 %t$9 to i64
   %t$11 = trunc i64 %t$10 to i1
@@ -67915,7 +67897,7 @@ then_19:
   %t$91 = call i64 @sprout_gc_push_i64_root(ptr %t$90)
   %t$20 = call i64 @stdlib.compiler.parser.tok_at(i64 %tokens, i64 %i)
   %t$21 = call i64 @stdlib.compiler.parser.tok_pos(i64 %t$20)
-  %t$22 = call i64 @stdlib.compiler.source.position_column(i64 %t$21)
+  %t$22 = call i64 @sprout_field(i64 %t$21, i64 2)
   %t$23 = call i64 @stdlib.compiler.parser.collect_do_steps_at(i64 %tokens, i64 %i, i64 %do_line, i64 %t$22, i64 %acc)
   %t$92 = call i64 @sprout_gc_pop_roots(i64 2)
   %t$24 = call i64 @sprout_tag(i64 %t$23)
@@ -67948,7 +67930,7 @@ else_19:
   %t$96 = call i64 @sprout_gc_push_i64_root(ptr %t$95)
   %t$33 = call i64 @stdlib.compiler.parser.tok_at(i64 %tokens, i64 %i)
   %t$34 = call i64 @stdlib.compiler.parser.tok_pos(i64 %t$33)
-  %t$35 = call i64 @stdlib.compiler.source.position_column(i64 %t$34)
+  %t$35 = call i64 @sprout_field(i64 %t$34, i64 2)
   %t$36 = icmp slt i64 %t$35, %block_col
   %t$37 = zext i1 %t$36 to i64
   %t$38 = trunc i64 %t$37 to i1
@@ -67982,7 +67964,7 @@ else_38:
   %t$107 = call i64 @sprout_gc_push_i64_root(ptr %t$106)
   %t$42 = call i64 @stdlib.compiler.parser.tok_at(i64 %tokens, i64 %i)
   %t$43 = call i64 @stdlib.compiler.parser.tok_pos(i64 %t$42)
-  %t$44 = call i64 @stdlib.compiler.source.position_column(i64 %t$43)
+  %t$44 = call i64 @sprout_field(i64 %t$43, i64 2)
   %t$45 = icmp sgt i64 %t$44, %block_col
   %t$46 = zext i1 %t$45 to i64
   %t$47 = trunc i64 %t$46 to i1
@@ -68498,7 +68480,7 @@ body_1_4:
   br i1 %t$26, label %then_19, label %else_19
 then_19:
   %t$21 = call i64 @stdlib.compiler.parser.tok_pos(i64 %t$13)
-  %t$22 = call i64 @stdlib.compiler.source.position_column(i64 %t$21)
+  %t$22 = call i64 @sprout_field(i64 %t$21, i64 2)
   %t$23 = icmp slt i64 %t$22, %branch_col
   %t$24 = zext i1 %t$23 to i64
   br label %join_19
@@ -68538,7 +68520,7 @@ else_27:
   br i1 %t$39, label %then_35, label %else_35
 then_35:
   %t$37 = call i64 @stdlib.compiler.parser.tok_pos(i64 %t$13)
-  %t$38 = call i64 @stdlib.compiler.source.position_column(i64 %t$37)
+  %t$38 = call i64 @sprout_field(i64 %t$37, i64 2)
   br label %join_35
 else_35:
   br label %join_35
@@ -73117,7 +73099,7 @@ then_68:
   %t$250 = call i64 @sprout_gc_push_i64_root(ptr %t$249)
   %t$70 = call i64 @stdlib.compiler.parser.tok_at(i64 %step_tokens, i64 %t$9)
   %t$71 = call i64 @stdlib.compiler.parser.tok_pos(i64 %t$70)
-  %t$72 = call i64 @stdlib.compiler.source.position_column(i64 %t$71)
+  %t$72 = call i64 @sprout_field(i64 %t$71, i64 2)
   %t$73 = call i64 @sprout_alloc_obj(i64 5, i64 0)
   %t$251 = alloca i64
   store i64 %t$73, ptr %t$251

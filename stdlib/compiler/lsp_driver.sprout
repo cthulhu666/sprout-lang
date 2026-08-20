@@ -478,7 +478,7 @@ fn definition_in_module(module_name: String, member: String, state: LspState) ->
       Ok module_src = fs.read_text(path) else Nothing
       Just pos = compiler.declaration_position(module_src, member) else Nothing
   in Just(location_json(uri_for_path(path),
-       source.position_line(pos), source.position_column(pos)))
+       pos.line, pos.column))
 
 # A qualified name, resolved through the importing document's own import list.
 # Split at the LAST dot: the qualifier may itself be dotted when a module is imported
@@ -491,7 +491,7 @@ fn definition_qualified(word: String, src: String, state: LspState) -> Maybe jso
 fn definition_bare(word: String, src: String, uri: String, state: LspState) -> Maybe json.Json !{IO} =
   match compiler.declaration_position(src, word) with
   | Just pos ->
-      Just(location_json(uri, source.position_line(pos), source.position_column(pos)))
+      Just(location_json(uri, pos.line, pos.column))
   | Nothing ->
       match module_for_selected_name(module_loader.collect_imports(src), word) with
       | Nothing -> Nothing

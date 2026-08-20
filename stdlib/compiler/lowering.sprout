@@ -1492,7 +1492,7 @@ fn consume_inner_dicts(children: List typed_ast.Evidence, pos: source.SourcePos,
   | Cons child rest -> list_append(consume_evidence(child, pos, ctx), consume_inner_dicts(rest, pos, ctx))
 
 fn pos_loc(pos: source.SourcePos) -> String =
-  int_to_string(source.position_line(pos)) ++ ":" ++ int_to_string(source.position_column(pos))
+  int_to_string(pos.line) ++ ":" ++ int_to_string(pos.column)
 
 # M3b-4b: consume a value-position method's Evidence into an eta-lambda, REUSING
 # make_eta_lambda_with_dicts so the emitted lambda is byte-identical to today's

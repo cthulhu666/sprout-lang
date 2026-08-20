@@ -149,8 +149,8 @@ fn match_ident(tokens: Vec token.Token, i: Int) -> Maybe(token.Token, Int) =
   else Nothing
 
 fn pos_str(pos: source.SourcePos) -> String =
-  string.concat(int_to_string(source.position_line(pos)),
-  string.concat(":", int_to_string(source.position_column(pos))))
+  string.concat(int_to_string(pos.line),
+  string.concat(":", int_to_string(pos.column)))
 
 fn make_error(msg: String, tokens: Vec token.Token, i: Int) -> ParseError =
   ParseError(msg, cur_pos(tokens, i))
@@ -490,8 +490,8 @@ fn scan_do_step_end(tokens: Vec token.Token, i: Int, start_i: Int, prev_line: In
   else scan_do_step_end(tokens, i + 1, start_i, this_line, update_bracket_depth(t, depth), block_col)
 where
   t = tok_at(tokens, i)
-  this_line = source.position_line(tok_pos(t))
-  this_col = source.position_column(tok_pos(t))
+  this_line = tok_pos(t).line
+  this_col = tok_pos(t).column
 
 # Returns true if the token list has a '<-' at bracket depth 0 BEFORE any
 # match/if/do keyword at depth 0 (which cannot appear in a pattern, so they
@@ -524,7 +524,7 @@ type DoStepParse (..) =
   | DoStepTotal Bool ast.Pattern ast.Expr source.SourcePos
 
 fn do_tmp_name(pos: source.SourcePos) -> String =
-  "__do" ++ int_to_string(source.position_line(pos)) ++ "_" ++ int_to_string(source.position_column(pos))
+  "__do" ++ int_to_string(pos.line) ++ "_" ++ int_to_string(pos.column)
 
 # Desugars a refutable do step, given the already-collected `rest` steps, into
 # ordinary steps: an effectful bind runs the value into a fresh temp then matches
@@ -621,8 +621,8 @@ fn binding_name(pat: ast.Pattern) -> Maybe String =
 # Does this `let` statement carry more than one binding? True when the slice holds
 # a token beyond the first binding's end, found by the layout scan.
 fn do_let_first_binding_end(step_tokens: Vec token.Token, i2: Int) -> Int =
-  scan_do_step_end(step_tokens, i2, i2, source.position_line(tok_pos(tok_at(step_tokens, i2))), 0,
-                   source.position_column(tok_pos(tok_at(step_tokens, i2))))
+  scan_do_step_end(step_tokens, i2, i2, tok_pos(tok_at(step_tokens, i2)).line, 0,
+                   tok_pos(tok_at(step_tokens, i2)).column)
 
 # Is there an `in` at bracket depth 0 anywhere in this slice? A prefilter for the
 # expression-form attempt below, so an ordinary `let` statement is not parsed
@@ -684,7 +684,7 @@ fn parse_do_let_statement(step_tokens: Vec token.Token, slice_pos: source.Source
     else if do_let_first_binding_end(step_tokens, i2) < vec_length(step_tokens) then
       do
         (steps, end_i) <- parse_do_let_bindings(step_tokens, i2,
-                            source.position_column(tok_pos(tok_at(step_tokens, i2))), Nil)
+                            tok_pos(tok_at(step_tokens, i2)).column, Nil)
         step_fully_consumed(step_tokens, end_i, DoStepLets(steps))
     else
       match pat with
@@ -738,11 +738,11 @@ fn parse_do_step(tokens: Vec token.Token, i: Int, end_i: Int) -> Result ParseErr
 # Collects all do steps at the established block column.
 fn collect_do_steps(tokens: Vec token.Token, i: Int, do_line: Int, block_col: Int, acc: List ast.DoStep) -> Result ParseError (List ast.DoStep, Int) =
   if tok_is_eof(tok_at(tokens, i)) then Ok((list_reverse(acc), i))
-  else if source.position_line(tok_pos(tok_at(tokens, i))) == do_line then Ok((list_reverse(acc), i))
+  else if tok_pos(tok_at(tokens, i)).line == do_line then Ok((list_reverse(acc), i))
   else if block_col == -1 then
-    collect_do_steps_at(tokens, i, do_line, source.position_column(tok_pos(tok_at(tokens, i))), acc)
-  else if source.position_column(tok_pos(tok_at(tokens, i))) < block_col then Ok((list_reverse(acc), i))
-  else if source.position_column(tok_pos(tok_at(tokens, i))) > block_col then
+    collect_do_steps_at(tokens, i, do_line, tok_pos(tok_at(tokens, i)).column, acc)
+  else if tok_pos(tok_at(tokens, i)).column < block_col then Ok((list_reverse(acc), i))
+  else if tok_pos(tok_at(tokens, i)).column > block_col then
     Err(ParseError(string.concat("Unexpected indentation in do block at ", pos_str(cur_pos(tokens, i))), cur_pos(tokens, i)))
   else
     collect_do_steps_at(tokens, i, do_line, block_col, acc)
@@ -771,7 +771,7 @@ fn collect_do_steps_at(tokens: Vec token.Token, i: Int, do_line: Int, block_col:
 fn parse_do_expr(tokens: Vec token.Token, i: Int) -> Result ParseError (ast.Expr, Int) =
   do
     (do_tok, i2) <- expected_keyword("do", tokens, i)
-    (steps, i3) <- collect_do_steps(tokens, i2, source.position_line(tok_pos(do_tok)), -1, Nil)
+    (steps, i3) <- collect_do_steps(tokens, i2, tok_pos(do_tok).line, -1, Nil)
     if list_length(steps) == 0 then
       Err(ParseError(string.concat("Expected at least one do step at ", pos_str(tok_pos(do_tok))), tok_pos(do_tok)))
     else
@@ -897,7 +897,7 @@ fn parse_let_block(tokens: Vec token.Token, i: Int, block_col: Int) -> Result Pa
       parse_expr(tokens, j)
   else
     parse_let_binding_step(tokens, i, block_col,
-      scan_do_step_end(tokens, i, i, source.position_line(tok_pos(tok_at(tokens, i))), 0, block_col))
+      scan_do_step_end(tokens, i, i, tok_pos(tok_at(tokens, i)).line, 0, block_col))
 
 fn parse_let_else_expr(tokens: Vec token.Token, i: Int) -> Result ParseError (ast.Expr, Int) =
   do
@@ -905,7 +905,7 @@ fn parse_let_else_expr(tokens: Vec token.Token, i: Int) -> Result ParseError (as
     if tok_is_keyword(tok_at(tokens, a), "in") then
       Err(ParseError("let requires at least one binding before in", cur_pos(tokens, a)))
     else
-      parse_let_block(tokens, a, source.position_column(tok_pos(tok_at(tokens, a))))
+      parse_let_block(tokens, a, tok_pos(tok_at(tokens, a)).column)
 
 # ---------------------------------------------------------------------------
 # Expression parsing
@@ -942,11 +942,11 @@ fn collect_match_branches(tokens: Vec token.Token, i: Int, acc: List ast.MatchBr
   match match_symbol(tokens, i, "|") with
   | Nothing -> Ok((acc, i))
   | Just (bar_tok, i2) ->
-      if branch_col != -1 && source.position_column(tok_pos(bar_tok)) < branch_col
+      if branch_col != -1 && tok_pos(bar_tok).column < branch_col
       then Ok((acc, i))
       else
         do
-          let col = if branch_col == -1 then source.position_column(tok_pos(bar_tok)) else branch_col
+          let col = if branch_col == -1 then tok_pos(bar_tok).column else branch_col
           (pattern, i3) <- parse_pattern(tokens, i2)
           (_, i4) <- expected_symbol("->", tokens, i3)
           (value, i5) <- parse_expr(tokens, i4)
@@ -1934,16 +1934,16 @@ fn collect_class_method_sigs(tokens: Vec token.Token, i: Int, acc: List ast.Clas
 # top-level declaration would be collected as a class method.
 fn collect_class_method_sigs_layout(tokens: Vec token.Token, i: Int, keyword_col: Int, block_col: Int, acc: List ast.ClassMethodSig) -> Result ParseError (List ast.ClassMethodSig, Int) =
   if ! (tok_is_keyword(tok_at(tokens, i), "fn")) then Ok((list_reverse(acc), i))
-  else if source.position_column(tok_pos(tok_at(tokens, i))) <= keyword_col then Ok((list_reverse(acc), i))
+  else if tok_pos(tok_at(tokens, i)).column <= keyword_col then Ok((list_reverse(acc), i))
   else if block_col == -1 then
     collect_class_method_sigs_layout_at(tokens, i, keyword_col,
-      source.position_column(tok_pos(tok_at(tokens, i))), acc)
+      tok_pos(tok_at(tokens, i)).column, acc)
   # Misalignment in EITHER direction is an error.  This branch is reachable only
   # when the token is indented past the keyword (the guard above returned
   # otherwise), so it is plainly meant as a member — handing it back to the
   # top-level parser would silently reinterpret it.  Only a dedent to or past
   # the keyword's own column ends a body.
-  else if source.position_column(tok_pos(tok_at(tokens, i))) != block_col then
+  else if tok_pos(tok_at(tokens, i)).column != block_col then
     Err(ParseError(string.concat("Unexpected indentation in class body at ", pos_str(cur_pos(tokens, i))), cur_pos(tokens, i)))
   else
     collect_class_method_sigs_layout_at(tokens, i, keyword_col, block_col, acc)
@@ -1963,8 +1963,8 @@ fn collect_class_method_sigs_layout_at(tokens: Vec token.Token, i: Int, keyword_
 # recovers the declaration's true column.
 fn decl_start_col(tokens: Vec token.Token, i: Int) -> Int =
   if tok_is_keyword(tok_at(tokens, i - 1), "export")
-  then source.position_column(tok_pos(tok_at(tokens, i - 1)))
-  else source.position_column(tok_pos(tok_at(tokens, i)))
+  then tok_pos(tok_at(tokens, i - 1)).column
+  else tok_pos(tok_at(tokens, i)).column
 
 # Two body forms, chosen by one token of lookahead: an explicit `{ … }`, or the
 # layout form.  Both are accepted so the brace sources still in the tree keep
@@ -2016,15 +2016,15 @@ fn collect_instance_methods(tokens: Vec token.Token, i: Int, acc: List ast.Insta
 # loop, which only ever inspects the token a completed member stopped at.
 fn collect_instance_methods_layout(tokens: Vec token.Token, i: Int, keyword_col: Int, block_col: Int, acc: List ast.InstanceMethodImpl) -> Result ParseError (List ast.InstanceMethodImpl, Int) =
   if ! (tok_is_keyword(tok_at(tokens, i), "fn")) then Ok((list_reverse(acc), i))
-  else if source.position_column(tok_pos(tok_at(tokens, i))) <= keyword_col then Ok((list_reverse(acc), i))
+  else if tok_pos(tok_at(tokens, i)).column <= keyword_col then Ok((list_reverse(acc), i))
   else if block_col == -1 then
     collect_instance_methods_layout_at(tokens, i, keyword_col,
-      source.position_column(tok_pos(tok_at(tokens, i))), acc)
+      tok_pos(tok_at(tokens, i)).column, acc)
   # Misalignment in either direction is an error — see the class collector.  It
   # matters more here: an instance member IS a valid top-level `fn`, so an
   # under-indented one would be silently reinterpreted as one, leaving the
   # instance short a method and the program compiling with a different meaning.
-  else if source.position_column(tok_pos(tok_at(tokens, i))) != block_col then
+  else if tok_pos(tok_at(tokens, i)).column != block_col then
     Err(ParseError(string.concat("Unexpected indentation in instance body at ", pos_str(cur_pos(tokens, i))), cur_pos(tokens, i)))
   else
     collect_instance_methods_layout_at(tokens, i, keyword_col, block_col, acc)
