@@ -67,7 +67,7 @@ fn wrap_arg_name_legacy(args: List ast.Pattern) -> String =
   | Cons (ast.WildcardPattern _) Nil -> "_"
   | _ -> "?"
 
-let dummy_pos = source.SourcePos(0, 0, 0)
+let dummy_pos = source.SourcePos(index = 0, line = 0, column = 0)
 
 fn main() -> Unit !{IO} =
   do

@@ -196,7 +196,7 @@ fn empty_resolve_ctx() -> ResolveCtx =
 # Utilities
 # ---------------------------------------------------------------------------
 
-fn no_pos() -> source.SourcePos = source.SourcePos(0, 0, 0)
+fn no_pos() -> source.SourcePos = source.SourcePos(index = 0, line = 0, column = 0)
 
 fn qualified_name(module_name: source.ModuleName, name: source.RawName) -> source.QualifiedName =
   source.QualifiedName(

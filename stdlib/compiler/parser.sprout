@@ -19,7 +19,7 @@ export type ParseError (..) =
 fn tok_at(tokens: Vec token.Token, i: Int) -> token.Token =
   match vec_get(i, tokens) with
   | Just t -> t
-  | Nothing -> token.eof_token(source.SourcePos(0, 0, 0))
+  | Nothing -> token.eof_token(source.SourcePos(index = 0, line = 0, column = 0))
 
 fn tok_pos(t: token.Token) -> source.SourcePos =
   token.token_position(t)
@@ -2190,7 +2190,7 @@ export fn parse_program(tokens: Vec token.Token) -> Result ParseError ast.Progra
 where
   first_pos = match vec_get(0, tokens) with
     | Just t -> tok_pos(t)
-    | Nothing -> source.SourcePos(0, 0, 0)
+    | Nothing -> source.SourcePos(index = 0, line = 0, column = 0)
 
 # ---------------------------------------------------------------------------
 # Module surface — what a module publishes

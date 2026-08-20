@@ -14,7 +14,7 @@ import stdlib.compiler.source as source
 # { i64, i64 } worker (tail constructors -> struct, `if` recursed into), and the
 # matched call site must route to it — no boxed `@bget` allocation.
 
-fn no_pos() -> source.SourcePos = source.SourcePos(0, 0, 0)
+fn no_pos() -> source.SourcePos = source.SourcePos(index = 0, line = 0, column = 0)
 
 fn box_int() -> types.Type =
   types.TApp(types.TConst(types.type_id("Box")), types.TConst(types.type_id("Int")))

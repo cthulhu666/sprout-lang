@@ -9,7 +9,7 @@ import stdlib.env as env
 # Synthetic-program builders — exercise the pure matcher without needing a real
 # stdlib_root/bundle, so the test is hermetic and fast.
 
-fn pos() -> source.SourcePos = source.SourcePos(0, 1, 1)
+fn pos() -> source.SourcePos = source.SourcePos(index = 0, line = 1, column = 1)
 
 fn tn(name: String) -> ast.TypeExpr = ast.TypeName(name)
 

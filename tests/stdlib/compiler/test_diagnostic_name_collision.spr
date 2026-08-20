@@ -37,7 +37,7 @@ fn main() -> Unit !{IO} =
     state <- new_state()
     assert_eq(state, "report side bundles + checks", report_message_count(), 0)
     assert_eq(state, "DiagError kind",
-      diag_kind(compiler.DiagError(source.SourcePos(0, 0, 0), "boom")), "error")
+      diag_kind(compiler.DiagError(source.SourcePos(index = 0, line = 0, column = 0), "boom")), "error")
     assert_eq(state, "DiagWarning kind",
-      diag_kind(compiler.DiagWarning(source.SourcePos(0, 0, 0), "careful")), "warning")
+      diag_kind(compiler.DiagWarning(source.SourcePos(index = 0, line = 0, column = 0), "careful")), "warning")
     summary(state)

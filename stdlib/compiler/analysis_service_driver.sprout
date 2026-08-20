@@ -257,13 +257,9 @@ fn collect_diag_fields(
   | Cons d rest ->
       match d with
       | compiler.DiagError pos msg ->
-          match pos with
-          | source.SourcePos _ line col ->
-              collect_diag_fields(rest, Cons(msg, msgs), Cons(line, lines), Cons(col, cols))
+          collect_diag_fields(rest, Cons(msg, msgs), Cons(pos.line, lines), Cons(pos.column, cols))
       | compiler.DiagWarning pos msg ->
-          match pos with
-          | source.SourcePos _ line col ->
-              collect_diag_fields(rest, Cons(msg, msgs), Cons(line, lines), Cons(col, cols))
+          collect_diag_fields(rest, Cons(msg, msgs), Cons(pos.line, lines), Cons(pos.column, cols))
 
 fn diags_to_json(diags: List compiler.Diagnostic) -> json.Json =
   match collect_diag_fields(diags, Nil, Nil, Nil) with

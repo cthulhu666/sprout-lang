@@ -23,7 +23,7 @@ fn sample_type_decl_colour() -> ast.Decl =
         Cons(ast.TypeConstructor("Blue", Nil, Nil, Nil), Nil))),
     Nil,
     ast.Unrestricted,
-    source.SourcePos(0, 0, 0))
+    source.SourcePos(index = 0, line = 0, column = 0))
 
 # `type Maybe a = Just a | Nothing` in module "mymod"
 fn sample_type_decl_maybe() -> ast.Decl =
@@ -33,7 +33,7 @@ fn sample_type_decl_maybe() -> ast.Decl =
       Cons(ast.TypeConstructor("Nothing", Nil, Nil, Nil), Nil)),
     Nil,
     ast.Unrestricted,
-    source.SourcePos(0, 0, 0))
+    source.SourcePos(index = 0, line = 0, column = 0))
 
 # `type OtherThing = Blah` in module "other.mod"
 fn sample_type_decl_other() -> ast.Decl =
@@ -42,7 +42,7 @@ fn sample_type_decl_other() -> ast.Decl =
     Cons(ast.TypeConstructor("Blah", Nil, Nil, Nil), Nil),
     Nil,
     ast.Unrestricted,
-    source.SourcePos(0, 0, 0))
+    source.SourcePos(index = 0, line = 0, column = 0))
 
 # `class MyEq a { fn my_eq(a, a) -> Bool }` with no superclasses, in "mymod"
 fn sample_class_decl() -> ast.Decl =
@@ -54,7 +54,7 @@ fn sample_class_decl() -> ast.Decl =
       ast.TypeName("Bool"),
       Nothing), Nil),
     Nil,
-    source.SourcePos(0, 0, 0))
+    source.SourcePos(index = 0, line = 0, column = 0))
 
 # `class OtherClass a` in "other.mod"
 fn sample_class_decl_other() -> ast.Decl =
@@ -62,7 +62,7 @@ fn sample_class_decl_other() -> ast.Decl =
     Cons("a", Nil),
     Nil,
     Nil,
-    source.SourcePos(0, 0, 0))
+    source.SourcePos(index = 0, line = 0, column = 0))
 
 # `instance MyEq Int` in "mymod"
 fn sample_instance_decl_int() -> typed_ast.TypedDecl =

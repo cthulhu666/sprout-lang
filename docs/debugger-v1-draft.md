@@ -5,8 +5,8 @@
 Compiled Sprout programs currently produce native binaries with no debug information.
 When something goes wrong, developers have no way to set breakpoints at Sprout source
 lines, step through execution, or inspect Sprout ADT values.  The source positions
-(`SourcePos(index, line, col)`) needed to solve this are already present on every
-`TypedExpr` node — they just need to reach the emitted IR.
+(`SourcePos`, a record of `index` / `line` / `column`) needed to solve this are already
+present on every `TypedExpr` node — they just need to reach the emitted IR.
 
 ## Goals
 

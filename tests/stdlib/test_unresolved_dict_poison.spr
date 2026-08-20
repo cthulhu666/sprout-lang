@@ -37,7 +37,7 @@ fn probe_program() -> typed_ast.TypedProgram =
     Cons(typed_ast.TFnDecl("poison_probe", Nil, Nothing, Nothing, Nil,
            typed_ast.TVar("__unresolved_ToString_Box",
                           types.TConst(types.type_id("Int")),
-                          source.SourcePos(0, 0, 0))),
+                          source.SourcePos(index = 0, line = 0, column = 0))),
     Nil))
 
 # Lower the probe to LLVM text. This used to `<-`-bind translate_program's

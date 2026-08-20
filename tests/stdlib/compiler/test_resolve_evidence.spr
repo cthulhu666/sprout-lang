@@ -11,7 +11,7 @@ import stdlib.compiler.source as source
 # superclasses (matching lowering's class_with_transitive_supers). So a plain
 # Eq yields a 1-block EvClasses; an Ord yields a 2-block [Ord, Eq] EvClasses.
 
-fn dpos() -> source.SourcePos = source.SourcePos(0, 1, 1)
+fn dpos() -> source.SourcePos = source.SourcePos(index = 0, line = 1, column = 1)
 
 fn tn(name: String) -> ast.TypeExpr = ast.TypeName(name)
 

@@ -1,0 +1,59 @@
+module main
+import stdlib.test (TestState, new_state, assert_eq, summary)
+import stdlib.compiler.source as source
+
+# `source.SourcePos` is a RECORD, not a positional three-`Int` ADT.
+#
+# The type it replaced was `SourcePos Int Int Int`, and nothing at a construction
+# site said which Int was which: `SourcePos(0, 0, 0)` is equally readable as
+# index/line/column, line/column/index, or a typo. Two of the three fields are
+# 1-based and one is 0-based, so a swap is silent — it produces a plausible
+# position that points at the wrong character.
+#
+# What this file pins is the *named* surface, from both directions:
+#
+#   CONSTRUCTION must be by field name. On the old ADT `SourcePos(index = 5, …)`
+#     was a parse error, so this file is the failing test that drove the change.
+#   READING must agree between the two spellings — direct field access and the
+#     `position_*` accessors are the same value, so neither reads a wrong offset.
+#
+# The 0-based/1-based split is asserted with three DISTINCT values, deliberately.
+# Equal values would let any permutation of the fields pass; 5/2/3 fails unless
+# each field is wired to the accessor that names it.
+#
+# `index` is the CODEPOINT index, not the byte offset — `SourceCursor` carries the
+# byte offset in a separate slot (`source.sprout`, `cursor_byte_offset`). The
+# name is load-bearing: the two were conflatable while the field was anonymous.
+
+fn a_pos() -> source.SourcePos = source.SourcePos(index = 5, line = 2, column = 3)
+
+fn main() -> Unit !{IO} =
+  do
+    state <- new_state()
+
+    # ---- construction is by field name, read back through the accessors -----
+    assert_eq(state, "position_index reads the index field", source.position_index(a_pos()), 5)
+    assert_eq(state, "position_line reads the line field", source.position_line(a_pos()), 2)
+    assert_eq(state, "position_column reads the column field", source.position_column(a_pos()), 3)
+
+    # ---- the two read spellings agree --------------------------------------
+    # Field access is what the accessors will collapse into; asserting both here
+    # means removing an accessor later cannot silently change what a caller sees.
+    assert_eq(state, "`.index` agrees with position_index",
+      a_pos().index, source.position_index(a_pos()))
+    assert_eq(state, "`.line` agrees with position_line",
+      a_pos().line, source.position_line(a_pos()))
+    assert_eq(state, "`.column` agrees with position_column",
+      a_pos().column, source.position_column(a_pos()))
+
+    # ---- the origin position, spelled out ----------------------------------
+    # `cursor_from_string` starts at codepoint 0 on line 1, column 1 — the one
+    # place the 0-based/1-based split is visible in a single value. Written as a
+    # record so the asymmetry is legible instead of being `SourcePos(0, 1, 1)`.
+    let origin = source.source_position(source.cursor_from_string("hello"))
+    assert_eq(state, "a fresh cursor starts at codepoint index 0",
+      source.position_index(origin), 0)
+    assert_eq(state, "a fresh cursor starts on line 1", source.position_line(origin), 1)
+    assert_eq(state, "a fresh cursor starts at column 1", source.position_column(origin), 1)
+
+    summary(state)

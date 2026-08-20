@@ -2965,7 +2965,7 @@ dot-guard `infer.is_lowercase_name` has (a dotted name is never a type variable)
    (Related but narrower: the stack-overflow-diagnostic-v2 item in "Tooling and Developer UX" above also proposes DWARF line-table emission for backtrace→source mapping. This is the broader `--debug` debugger.)
    Approach: emit LLVM DWARF debug metadata from the codegen pass (opt-in via `--debug`
    flag), then use `lldb`/`gdb` as the debugger UI.  Every `TypedExpr` already carries
-   `SourcePos(index, line, col)` — the foundation is in place.
+   a `SourcePos` (a record of `index` / `line` / `column`) — the foundation is in place.
    Three milestones:
    - M1: DWARF emission in `codegen.sprout`; 4th IR section for debug metadata; `--debug`
      flag wired through the compile driver.  Delivers `b file.spr:N`, `n`, `s`, `bt` in

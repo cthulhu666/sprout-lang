@@ -6,8 +6,26 @@ import stdlib.string as string
 # Removing this import does not produce a scoping error — it produces a link failure.
 import stdlib.bytes as bytes
 
-export type SourcePos (..) =
-  | SourcePos Int Int Int
+# A position in a source file: the codepoint INDEX (0-based), and the LINE and
+# COLUMN a human reads in an editor (both 1-based).
+#
+# A record rather than `SourcePos Int Int Int` because the fields are not
+# interchangeable and were indistinguishable while anonymous: `SourcePos(0, 0, 0)`
+# said nothing about which Int was which, and one field is 0-based while two are
+# 1-based, so transposing any pair produced a plausible position pointing at the
+# wrong character rather than an error.
+#
+# `index` is a CODEPOINT index, deliberately not a byte offset — `SourceCursor`
+# below carries the byte offset in its own slot, and the two are intentionally
+# separate (see `cursor_byte_offset`). That distinction had no way to be stated
+# at a construction site before the field carried a name.
+#
+# Costs nothing over the ADT it replaced, and slightly less: a record allocates
+# the identical boxed object (same tag, same arity — `ast_to_ir.build_ctor_table_acc`
+# enters a record into the same ctor table as an ADT ctor) while field access
+# skips the tag load, tag compare, and unreachable-arm branch that a
+# single-constructor `match` still emits.
+export type SourcePos = (index: Int, line: Int, column: Int)
 
 # SourceCursor carries the raw source String (for byte slicing and prefix
 # matching), its UTF-8 Bytes (for safe, bounds-checked codepoint decoding), the
@@ -59,23 +77,20 @@ export fn global_name_str(g: GlobalName) -> String =
   match g with | GlobalName s -> s
 
 export fn cursor_from_string(raw: String) -> SourceCursor =
-  SourceCursor(raw, bytes_from_utf8(raw), 0, SourcePos(0, 1, 1))
+  SourceCursor(raw, bytes_from_utf8(raw), 0, SourcePos(index = 0, line = 1, column = 1))
 
 export fn source_position(cursor: SourceCursor) -> SourcePos =
   match cursor with
   | SourceCursor _ _ _ pos -> pos
 
-export fn position_index(pos: SourcePos) -> Int =
-  match pos with
-  | SourcePos index _ _ -> index
+# Field readers, retained so the ~60 existing `position_*` call sites keep
+# working; `pos.index` / `pos.line` / `pos.column` say the same thing directly and
+# these are scheduled for removal in a follow-up.
+export fn position_index(pos: SourcePos) -> Int = pos.index
 
-export fn position_line(pos: SourcePos) -> Int =
-  match pos with
-  | SourcePos _ line _ -> line
+export fn position_line(pos: SourcePos) -> Int = pos.line
 
-export fn position_column(pos: SourcePos) -> Int =
-  match pos with
-  | SourcePos _ _ column -> column
+export fn position_column(pos: SourcePos) -> Int = pos.column
 
 fn cursor_source(cursor: SourceCursor) -> String =
   match cursor with
@@ -368,12 +383,10 @@ export fn peek(cursor: SourceCursor) -> Maybe Char =
   | Just (ch, _) -> Just(ch)
 
 fn advance_position(pos: SourcePos, ch: Char) -> SourcePos =
-  match pos with
-  | SourcePos index line column ->
-      if ch == '\n' || ch == '\r' then
-        SourcePos(index + 1, line + 1, 1)
-      else
-        SourcePos(index + 1, line, column + 1)
+  if ch == '\n' || ch == '\r' then
+    SourcePos(index = pos.index + 1, line = pos.line + 1, column = 1)
+  else
+    SourcePos(index = pos.index + 1, line = pos.line, column = pos.column + 1)
 
 # next: consume one codepoint — returns the char and the advanced cursor, or
 # Nothing at end.  Total: end-of-input is a value the caller must handle, so a

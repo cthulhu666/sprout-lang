@@ -10,7 +10,7 @@ import stdlib.compiler.ast as ast
 import stdlib.compiler.source as source
 
 # Build a minimal no_pos helper.
-fn no_pos() -> source.SourcePos = source.SourcePos(0, 0, 0)
+fn no_pos() -> source.SourcePos = source.SourcePos(index = 0, line = 0, column = 0)
 
 # Build a trivial TypedProgram: a single fn main() = 42
 fn trivial_program() -> typed_ast.TypedProgram =

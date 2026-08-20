@@ -718,7 +718,7 @@ fn typed_method_rev_acc(xs: List typed_ast.TypedInstanceMethod, acc: List typed_
 # compiler-synthesized node, or a whole-file/IO error with no single span. Never
 # as a shortcut at an error site where a real position is already in scope
 # (that is the guideline-#5 regression this campaign fixes).
-fn no_pos() -> source.SourcePos = source.SourcePos(0, 0, 0)
+fn no_pos() -> source.SourcePos = source.SourcePos(index = 0, line = 0, column = 0)
 
 fn dummy_unit() -> typed_ast.TypedExpr =
   typed_ast.TUnit(types.TConst(types.type_id("Unit")), no_pos())

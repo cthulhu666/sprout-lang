@@ -9,10 +9,10 @@ import stdlib.compiler.source as source
 # ast.template_ctor_interp when synthesizing List/TemplatePart AST nodes.
 fn run_check(src: String) -> checker.CheckResult !{IO} =
   match lexer.tokenize(src) with
-  | Err _ -> checker.CheckErr(source.SourcePos(0, 0, 0), "lex error")
+  | Err _ -> checker.CheckErr(source.SourcePos(index = 0, line = 0, column = 0), "lex error")
   | Ok toks ->
       match parser.parse_program(toks) with
-      | Err _ -> checker.CheckErr(source.SourcePos(0, 0, 0), "parse error")
+      | Err _ -> checker.CheckErr(source.SourcePos(index = 0, line = 0, column = 0), "parse error")
       | Ok prog -> checker.check_program(prog)
 
 fn is_check_ok(r: checker.CheckResult) -> Bool =

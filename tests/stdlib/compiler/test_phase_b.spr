@@ -8,7 +8,7 @@ import stdlib.compiler.source as source
 
 # Phase B (signature unification) unit tests. See docs/mutual-tco-phase-b-v0.md.
 
-fn no_pos() -> source.SourcePos = source.SourcePos(0, 0, 0)
+fn no_pos() -> source.SourcePos = source.SourcePos(index = 0, line = 0, column = 0)
 fn int_t() -> types.Type = types.TConst(types.type_id("Int"))
 fn adt_t() -> types.Type = types.TApp(types.TConst(types.type_id("List")), int_t())
 fn tvar(n: String) -> typed_ast.TypedExpr = typed_ast.TVar(n, int_t(), no_pos())
