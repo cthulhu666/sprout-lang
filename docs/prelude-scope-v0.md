@@ -464,8 +464,28 @@ Done, 2026-08-20:
    design promotes from accident to documented guarantee (goal 2). It therefore
    doubles as the user-facing regression test for §4.2 step 4 — if the synthetic
    prefix ever leaks, this example prints `$entry.Just(3)` and the golden moves.
-2. **Directive spelling.** `no_prelude` as a bare header line, versus attaching it
-   to the header (`module main no_prelude`), versus a punctuation-led form.
-3. **`$entry` as the synthetic name.** Unforgeable and never displayed, so the
+2. ~~**Directive spelling.** `no_prelude` as a bare header line, versus attaching
+   it to the header (`module main no_prelude`), versus a punctuation-led form.~~
+   **Resolved: the bare header line.** Attaching it to `module` would have made it
+   unavailable to the files that most want it — the entry files, which are
+   headerless by definition — and a punctuation-led form has nowhere to go, since
+   `#` opens a comment in Sprout (which is why Rust's `#![no_implicit_prelude]`
+   could not be borrowed). The bare line also needs no grammar change: header
+   lines are stripped before `tokenize`, so one arm in `is_header_line_byte` plus
+   a scan bounded to the leading block is the whole mechanism.
+
+   Implementation added one requirement the design did not state: the directive
+   must match the WHOLE line. `no_prelude_lookalike` is an ordinary identifier and
+   a prefix match would have silently un-preluded any file declaring one.
+   Asserted in `test_bundle_prelude_scope.spr`.
+
+3. ~~**`$entry` as the synthetic name.** Unforgeable and never displayed, so the
    spelling is invisible; confirming there is no objection to `$` in emitted
-   symbol names.
+   symbol names.~~ **Resolved: `$entry`, and `$` is fine in emitted symbols.**
+   Verified rather than assumed, before any code was written: `opt --passes=verify`
+   accepts `define i64 @$entry.f()` written bare (round-tripping it as
+   `@"$entry.f"`), and a module defining `@$entry.main` links and runs under clang
+   on Mach-O. `$` is in LLVM's identifier charset — the same charset that makes
+   the `.` in `@examples.collections_demo.half` an ordinary character rather than
+   structure. A synthetic name only has to be illegal *upstream*, which `$` is:
+   `string.is_ident_start` rejects it.
