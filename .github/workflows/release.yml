@@ -22,6 +22,7 @@ jobs:
       - name: Install LLVM/Clang, expose bare clang/opt on PATH
         # See .github/workflows/ci.yml for the rationale (opaque-ptr IR needs
         # LLVM >= 16; recipes call bare clang/opt from the versioned bindir).
+        timeout-minutes: 5
         run: |
           sudo apt-get update
           sudo apt-get install -y llvm clang
@@ -52,6 +53,7 @@ jobs:
         uses: jdx/mise-action@v2
 
       - name: Install LLVM/Clang, expose bare clang/opt on PATH
+        timeout-minutes: 5
         run: |
           sudo apt-get update
           sudo apt-get install -y llvm clang

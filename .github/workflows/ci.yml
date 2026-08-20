@@ -57,6 +57,9 @@ jobs:
         # passing, so two of its ten assertions were silently unsanitized. Added when
         # c-runtime-test was wired into ci-fast-gates. Unversioned name so it tracks the
         # distro's default clang alongside the bindir rule below.
+        #
+        # Bounded: Ubuntu's apt mirrors stall. Worst green run here is 144 s.
+        timeout-minutes: 5
         run: |
           sudo apt-get update
           sudo apt-get install -y llvm clang libclang-rt-dev ripgrep
@@ -193,6 +196,7 @@ jobs:
         # would die on its first step. Homebrew puts it at /opt/homebrew/opt/llvm/bin, which is
         # exactly the path mise.toml prepends, so no PATH handling is needed here beyond the
         # install: the mise step below picks it up.
+        timeout-minutes: 15
         run: brew install llvm
 
       - name: Install mise toolchain (just 1.39.0, from mise.toml)
@@ -230,6 +234,7 @@ jobs:
       - name: Install LLVM/Clang, expose bare clang/opt on PATH
         # Same reason as the `test` job: the build recipes call bare `clang` and `opt`, which
         # only the versioned LLVM bindir carries.
+        timeout-minutes: 5
         run: |
           sudo apt-get update
           sudo apt-get install -y llvm clang
