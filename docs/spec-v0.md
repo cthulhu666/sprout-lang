@@ -1929,6 +1929,9 @@ determines which `<Class>` instance to use`**.  Both the type and the value must
 be pinned down by something the call can see; annotate the intermediate
 (`to_str(from_int(7) : Int)`) or an enclosing binding to resolve it.
 
+The rule is not scoped to `fn` bodies: a top-level `let` initializer is checked
+the same way, so `let s = to_str(from_int(7))` is rejected identically.
+
 The rule is *not* "a class-method call must dispatch on a concrete type" —
 forwarding is still fine.  Inside `fn describe(x: b) -> String where Codec b`, a
 call `to_str(x)` dispatches on a type variable and is accepted, because the

@@ -547,7 +547,15 @@ fn collect_decl(d: typed_ast.TypedDecl, sigs: Dict CalleeSig) -> List VerifyOutc
   match d with
   | typed_ast.TFnDecl _ params _ _ _ body -> collect_expr(body, sigs, bind_params(params, dict_empty()))
   | typed_ast.TInstanceDecl _ _ methods -> collect_methods(methods, sigs)
-  | _ -> Nil
+  # A top-level `let` initializer is a body like any other and is walked like one:
+  # an ambiguous class-method chain in one is rejected here rather than left to
+  # surface at the linker. It binds no parameters, so nothing shadows a callee name.
+  | typed_ast.TLetDecl _ body -> collect_expr(body, sigs, dict_empty())
+  # Bodyless. Every declaration is listed rather than left to a wildcard, so a
+  # TypedDecl carrying an expression fails to compile here instead of silently
+  # skipping verification.
+  | typed_ast.TExternFnDecl _ _ _ _ -> Nil
+  | typed_ast.TPassThrough _ -> Nil
 
 fn collect_methods(methods: List typed_ast.TypedInstanceMethod, sigs: Dict CalleeSig) -> List VerifyOutcome =
   match methods with
