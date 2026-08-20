@@ -165,22 +165,19 @@ fn diag_severity(d: compiler.Diagnostic) -> Int =
 
 fn diag_to_lsp(d: compiler.Diagnostic) -> json.Json =
   match d with
+  # LSP positions are 0-based; SourcePos line/column are 1-based.
   | compiler.DiagError pos msg ->
-      match pos with
-      | source.SourcePos _ line col ->
-          json.JsonObject(
-            json.JsonObjectCons("range", diag_range(line - 1, col - 1),
-            json.JsonObjectCons("severity", json.JsonInt(1),
-            json.JsonObjectCons("message", json.JsonString(msg),
-            json.JsonObjectNil))))
+      json.JsonObject(
+        json.JsonObjectCons("range", diag_range(pos.line - 1, pos.column - 1),
+        json.JsonObjectCons("severity", json.JsonInt(1),
+        json.JsonObjectCons("message", json.JsonString(msg),
+        json.JsonObjectNil))))
   | compiler.DiagWarning pos msg ->
-      match pos with
-      | source.SourcePos _ line col ->
-          json.JsonObject(
-            json.JsonObjectCons("range", diag_range(line - 1, col - 1),
-            json.JsonObjectCons("severity", json.JsonInt(2),
-            json.JsonObjectCons("message", json.JsonString(msg),
-            json.JsonObjectNil))))
+      json.JsonObject(
+        json.JsonObjectCons("range", diag_range(pos.line - 1, pos.column - 1),
+        json.JsonObjectCons("severity", json.JsonInt(2),
+        json.JsonObjectCons("message", json.JsonString(msg),
+        json.JsonObjectNil))))
 
 fn push_diagnostics(uri: String, diags: List compiler.Diagnostic, state: LspState) -> Unit !{IO} =
   send_message(make_notification("textDocument/publishDiagnostics",

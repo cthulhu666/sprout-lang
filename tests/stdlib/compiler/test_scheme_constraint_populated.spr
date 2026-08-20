@@ -16,10 +16,10 @@ import stdlib.compiler.source as source
 
 fn run_check(src: String) -> typed_ast.TypedResult !{IO} =
   match lexer.tokenize(src) with
-  | Err _ -> typed_ast.TypedErr(source.SourcePos(0, 0, 0), "lex error")
+  | Err _ -> typed_ast.TypedErr(source.SourcePos(index = 0, line = 0, column = 0), "lex error")
   | Ok toks ->
       match parser.parse_program(toks) with
-      | Err _ -> typed_ast.TypedErr(source.SourcePos(0, 0, 0), "parse error")
+      | Err _ -> typed_ast.TypedErr(source.SourcePos(index = 0, line = 0, column = 0), "parse error")
       | Ok prog -> checker.typecheck_typed(prog, Nil)
 
 # Render a constraint list to a stable string ("<head_token>:<class>;" per entry).

@@ -647,7 +647,7 @@ fn drop_desugared_matches(src: String, findings: List LintFinding) -> List LintF
 fn brace_tok_at(tokens: Vec token.Token, i: Int) -> token.Token =
   match vec_get(i, tokens) with
   | Just t -> t
-  | Nothing -> token.eof_token(source.SourcePos(0, 0, 0))
+  | Nothing -> token.eof_token(source.SourcePos(index = 0, line = 0, column = 0))
 
 fn brace_is_keyword(t: token.Token, kw: String) -> Bool =
   match token.token_kind(t) with

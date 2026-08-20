@@ -14,7 +14,7 @@ import stdlib.compiler.source as source
 # `mvget` mirrors stdlib.mutable.mutvec_get: a thin wrapper whose Maybe escapes
 # as a return value, so Tier-1 (direct-extern only) never fires on it.
 
-fn no_pos() -> source.SourcePos = source.SourcePos(0, 0, 0)
+fn no_pos() -> source.SourcePos = source.SourcePos(index = 0, line = 0, column = 0)
 
 fn maybe_int() -> types.Type =
   types.TApp(types.TConst(types.type_id("Maybe")), types.TConst(types.type_id("Int")))

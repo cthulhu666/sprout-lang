@@ -46,7 +46,7 @@ fn tdict_ev_is_unresolved() -> Bool =
   match typed_ast.TDict(
     ast.TypeConstraint("Show", Cons(ast.TypeName("Int"), Nil)),
     types.TConst(types.type_id("Show")),
-    source.SourcePos(0, 1, 1),
+    source.SourcePos(index = 0, line = 1, column = 1),
     typed_ast.EvUnresolved) with
   | typed_ast.TDict _ _ _ ev -> is_unresolved(ev)
   | _ -> false
@@ -55,7 +55,7 @@ fn tdict_ev_is_forwarded() -> Bool =
   match typed_ast.TDict(
     ast.TypeConstraint("Show", Cons(ast.TypeName("a"), Nil)),
     types.TConst(types.type_id("Show")),
-    source.SourcePos(0, 1, 1),
+    source.SourcePos(index = 0, line = 1, column = 1),
     typed_ast.EvForward("Show", "dict0")) with
   | typed_ast.TDict _ _ _ ev -> is_forward(ev)
   | _ -> false

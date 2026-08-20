@@ -115,7 +115,7 @@ fn ctx_bound_vars(ctx: LowerCtx) -> List String =
 fn ctx_with_bound(vars: List String, ctx: LowerCtx) -> LowerCtx =
   LowerCtx(ctx_class_order(ctx), ctx_fwd(ctx), ctx_inst(ctx), ctx_super_map(ctx), ctx_inst_meta(ctx), ctx_scheme_env(ctx), ctx_class_params(ctx), list_append(ctx_bound_vars(ctx), vars))
 
-fn no_pos() -> source.SourcePos = source.SourcePos(0, 0, 0)
+fn no_pos() -> source.SourcePos = source.SourcePos(index = 0, line = 0, column = 0)
 
 fn param_names_from_list(ps: List ast.Param) -> List String =
   match ps with

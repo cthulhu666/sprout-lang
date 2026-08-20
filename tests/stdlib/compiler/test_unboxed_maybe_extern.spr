@@ -14,7 +14,7 @@ import stdlib.compiler.source as source
 # read back with @sprout_tag / @sprout_field.  This eliminates the per-call
 # `Just` heap allocation (measured ~20 ns/get, ~71% of the get cost).
 
-fn no_pos() -> source.SourcePos = source.SourcePos(0, 0, 0)
+fn no_pos() -> source.SourcePos = source.SourcePos(index = 0, line = 0, column = 0)
 
 fn maybe_int() -> types.Type =
   types.TApp(types.TConst(types.type_id("Maybe")), types.TConst(types.type_id("Int")))

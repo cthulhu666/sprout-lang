@@ -1028,9 +1028,8 @@ fn encode_ast_bool(b: Bool) -> String =
 
 # O(1). Encodes a SourcePos as (Pos idx line col).
 fn encode_ast_pos(p: source.SourcePos) -> String =
-  match p with
-  | source.SourcePos idx line col ->
-      string_concat_many(["(Pos ", int_to_string(idx), " ", int_to_string(line), " ", int_to_string(col), ")"])
+  string_concat_many(["(Pos ", int_to_string(p.index), " ", int_to_string(p.line), " ",
+                      int_to_string(p.column), ")"])
 
 # O(n) where n = length of inner encoding. Encodes Maybe (List String).
 fn encode_maybe_str_list(m: Maybe (List String)) -> String =
@@ -1499,7 +1498,7 @@ fn decode_pos_at(s: String, bytes: Bytes, i: Int, total: Int) -> Maybe(source.So
           Just(line, m2) = read_int_atom(s, bytes, skip_ws(s, bytes, m1, total), total) else Nothing
           Just(col, m3) = read_int_atom(s, bytes, skip_ws(s, bytes, m2, total), total) else Nothing
           Just end = expect_char(s, bytes, skip_ws(s, bytes, m3, total), total, ')') else Nothing
-      in Just((source.SourcePos(idx, line, col), end))
+      in Just((source.SourcePos(index = idx, line = line, column = col), end))
     else Nothing
 
 # Decodes (Just <inner>) or (Nothing) for a Maybe (List String).

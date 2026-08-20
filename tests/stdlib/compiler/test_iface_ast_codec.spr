@@ -16,8 +16,8 @@ import stdlib.compiler.iface_codec as iface_codec
 
 # --- Positions and helpers ---
 
-fn pos0() -> source.SourcePos = source.SourcePos(0, 1, 1)
-fn pos1() -> source.SourcePos = source.SourcePos(5, 2, 3)
+fn pos0() -> source.SourcePos = source.SourcePos(index = 0, line = 1, column = 1)
+fn pos1() -> source.SourcePos = source.SourcePos(index = 5, line = 2, column = 3)
 
 fn rt_expr(e: ast.Expr) -> Bool =
   match iface_codec.decode_ast_expr(iface_codec.encode_ast_expr(e)) with
@@ -142,10 +142,7 @@ fn main() -> Unit !{IO} =
       | Nothing -> false
       | Just e ->
           match e with
-          | ast.VarExpr _ p ->
-              match p with
-              | source.SourcePos idx line col ->
-                  idx == 5 && line == 2 && col == 3
+          | ast.VarExpr _ p -> p.index == 5 && p.line == 2 && p.column == 3
           | _ -> false)
 
     # === Compound Expr forms ===

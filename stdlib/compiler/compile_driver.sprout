@@ -23,10 +23,8 @@ import stdlib.fs as fs
 
 # format_pos: "line:col: " prefix when position is known; empty string for no_pos().
 fn format_pos(pos: source.SourcePos) -> String =
-  match pos with
-  | source.SourcePos _ line col ->
-      if line == 0 then ""
-      else int_to_string(line) ++ ":" ++ int_to_string(col) ++ ": "
+  if pos.line == 0 then ""
+  else int_to_string(pos.line) ++ ":" ++ int_to_string(pos.column) ++ ": "
 
 # ---------------------------------------------------------------------------
 # Header stripping is source.strip_headers (line-preserving, shared authority).

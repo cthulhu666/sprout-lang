@@ -8179,9 +8179,10 @@ fn worker_source_for(name: String, decls: List typed_ast.TypedDecl,
 # translates it to a boxed `call @name(…)` and repacks the result.
 fn synth_extern_body(name: String, params: List ast.Param) -> typed_ast.TypedExpr =
   typed_ast.TCall(
-    typed_ast.TVar(name, types.TConst(types.type_id("Unit")), source.SourcePos(0, 0, 0)),
+    typed_ast.TVar(name, types.TConst(types.type_id("Unit")),
+                   source.SourcePos(index = 0, line = 0, column = 0)),
     synth_param_vars(params),
-    types.TConst(types.type_id("Unit")), source.SourcePos(0, 0, 0))
+    types.TConst(types.type_id("Unit")), source.SourcePos(index = 0, line = 0, column = 0))
 
 fn synth_param_vars(params: List ast.Param) -> List typed_ast.TypedExpr =
   match params with
@@ -8189,7 +8190,8 @@ fn synth_param_vars(params: List ast.Param) -> List typed_ast.TypedExpr =
   | Cons p rest ->
       match p with
       | ast.Param pname _ _ ->
-          Cons(typed_ast.TVar(pname, types.TConst(types.type_id("Unit")), source.SourcePos(0, 0, 0)),
+          Cons(typed_ast.TVar(pname, types.TConst(types.type_id("Unit")),
+                              source.SourcePos(index = 0, line = 0, column = 0)),
                synth_param_vars(rest))
 
 # Emit the worker (+ its lifted lambdas) for one matched callee `name`, or

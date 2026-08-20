@@ -20,7 +20,7 @@ import stdlib.string as string
 #   - the lowered fn body contains no `sprout_alloc_closure` call.
 # Pure IRFunction inspection; runs on the current stage-1 (no seed churn).
 
-fn no_pos() -> source.SourcePos = source.SourcePos(0, 0, 0)
+fn no_pos() -> source.SourcePos = source.SourcePos(index = 0, line = 0, column = 0)
 fn int_t() -> types.Type = types.TConst(types.type_id("Int"))
 fn tvar(name: String) -> typed_ast.TypedExpr = typed_ast.TVar(name, int_t(), no_pos())
 fn tint(n: Int) -> typed_ast.TypedExpr = typed_ast.TInt(n, int_t(), no_pos())

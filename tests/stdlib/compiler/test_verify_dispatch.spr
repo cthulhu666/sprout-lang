@@ -12,7 +12,7 @@ import stdlib.compiler.typed_ast as typed_ast
 # where Ord k`, called with a projection whose key type k != element type a. A
 # mis-resolved dict (Ord a instead of Ord k) must be caught.
 
-fn dpos() -> source.SourcePos = source.SourcePos(0, 1, 1)
+fn dpos() -> source.SourcePos = source.SourcePos(index = 0, line = 1, column = 1)
 
 fn t_int() -> types.Type = types.TConst(types.type_id("Int"))
 fn t_pair_ii() -> types.Type = types.TTuple([t_int(), t_int()])

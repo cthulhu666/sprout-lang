@@ -68,7 +68,7 @@ type LexParseResult =
 
 # no_pos: placeholder used when the upstream error type does not yet carry a
 # SourcePos.  Every call site is a Phase-2 TODO: fix the upstream type instead.
-fn no_pos() -> source.SourcePos = source.SourcePos(0, 0, 0)
+fn no_pos() -> source.SourcePos = source.SourcePos(index = 0, line = 0, column = 0)
 
 fn lex_err_diag(e: token.TokenizeError) -> Diagnostic =
   match e with
