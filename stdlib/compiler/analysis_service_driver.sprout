@@ -162,40 +162,40 @@ fn collect_decl_locations(
       | ast.FnDecl name _ _ _ _ _ pos ->
           collect_decl_locations(rest, line_offset,
             Cons("fn", categories), Cons(name, names),
-            Cons(source.position_line(pos) + line_offset, lines),
-            Cons(source.position_column(pos), cols))
+            Cons(pos.line + line_offset, lines),
+            Cons(pos.column, cols))
       | ast.TypeDecl name _ _ _ _ pos ->
           collect_decl_locations(rest, line_offset,
             Cons("type", categories), Cons(name, names),
-            Cons(source.position_line(pos) + line_offset, lines),
-            Cons(source.position_column(pos), cols))
+            Cons(pos.line + line_offset, lines),
+            Cons(pos.column, cols))
       | ast.RecordDecl name _ _ _ _ pos ->
           collect_decl_locations(rest, line_offset,
             Cons("type", categories), Cons(name, names),
-            Cons(source.position_line(pos) + line_offset, lines),
-            Cons(source.position_column(pos), cols))
+            Cons(pos.line + line_offset, lines),
+            Cons(pos.column, cols))
       | ast.LetDecl name _ _ pos ->
           collect_decl_locations(rest, line_offset,
             Cons("let", categories), Cons(name, names),
-            Cons(source.position_line(pos) + line_offset, lines),
-            Cons(source.position_column(pos), cols))
+            Cons(pos.line + line_offset, lines),
+            Cons(pos.column, cols))
       | ast.ClassDecl name _ _ _ pos ->
           collect_decl_locations(rest, line_offset,
             Cons("class", categories), Cons(name, names),
-            Cons(source.position_line(pos) + line_offset, lines),
-            Cons(source.position_column(pos), cols))
+            Cons(pos.line + line_offset, lines),
+            Cons(pos.column, cols))
       | ast.InstanceDecl _ _ _ _ ->
           collect_decl_locations(rest, line_offset, categories, names, lines, cols)
       | ast.AliasDecl name _ _ pos ->
           collect_decl_locations(rest, line_offset,
             Cons("alias", categories), Cons(name, names),
-            Cons(source.position_line(pos) + line_offset, lines),
-            Cons(source.position_column(pos), cols))
+            Cons(pos.line + line_offset, lines),
+            Cons(pos.column, cols))
       | ast.WrapDecl name _ pos ->
           collect_decl_locations(rest, line_offset,
             Cons("type", categories), Cons(name, names),
-            Cons(source.position_line(pos) + line_offset, lines),
-            Cons(source.position_column(pos), cols))
+            Cons(pos.line + line_offset, lines),
+            Cons(pos.column, cols))
       | ast.ExternFnDecl _ _ _ _ _ ->
           collect_decl_locations(rest, line_offset, categories, names, lines, cols)
 

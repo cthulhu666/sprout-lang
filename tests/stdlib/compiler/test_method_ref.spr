@@ -43,7 +43,7 @@ fn main() -> Unit !{IO} =
     assert_eq(state, "TMethodRef type accessor",
       type_name(typed_ast.typed_expr_type(mref())), "String")
     assert_eq(state, "TMethodRef pos-line accessor",
-      source.position_line(typed_ast.typed_expr_pos(mref())), 7)
+      typed_ast.typed_expr_pos(mref()).line, 7)
     assert_true(state, "TMethodRef starts EvUnresolved", ev_is_unresolved(mref_evidence(mref())))
     summary(state)
 

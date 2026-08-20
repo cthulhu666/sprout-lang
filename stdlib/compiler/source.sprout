@@ -83,14 +83,11 @@ export fn source_position(cursor: SourceCursor) -> SourcePos =
   match cursor with
   | SourceCursor _ _ _ pos -> pos
 
-# Field readers, retained so the ~60 existing `position_*` call sites keep
-# working; `pos.index` / `pos.line` / `pos.column` say the same thing directly and
-# these are scheduled for removal in a follow-up.
-export fn position_index(pos: SourcePos) -> Int = pos.index
-
-export fn position_line(pos: SourcePos) -> Int = pos.line
-
-export fn position_column(pos: SourcePos) -> Int = pos.column
+# No position_index / position_line / position_column accessors: read the fields
+# directly (`pos.index`, `pos.line`, `pos.column`). They existed to name the slots
+# of a positional ADT, which the record's field labels now do at the declaration.
+# A wrapper that only forwards to a same-named field is one more name to keep in
+# sync for no added meaning.
 
 fn cursor_source(cursor: SourceCursor) -> String =
   match cursor with

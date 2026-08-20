@@ -479,7 +479,7 @@ type SpanState =
   | SpanState (List Int) (List TplSpan)
 
 fn tok_line(tok: token.Token) -> Int =
-  source.position_line(token.token_position(tok))
+  token.token_position(tok).line
 
 fn span_step(state: SpanState, tok: token.Token) -> SpanState =
   match state with

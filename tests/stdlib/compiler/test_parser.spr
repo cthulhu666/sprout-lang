@@ -29,7 +29,7 @@ fn first_fn_body_line(src: String) -> Result BodyLineError Int =
       ast.Program([d | _]) _ = prog else Err(NoDecls)
       ast.FnDecl _ _ _ _ _ body _ = d else Err(FirstNotFn)
       ast.MatchExpr _ _ pos = body else Err(BodyNotMatch)
-  in Ok(source.position_line(pos))
+  in Ok(pos.line)
 
 # The desugared body's node shape, so a test can assert that `where` and the
 # equivalent `let … in` lower to the SAME constructor. Two desugarings for one
