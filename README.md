@@ -163,13 +163,28 @@ One extra root, in that fixed position — the walking-skeleton surface
 ([packaging-v0.md](./docs/packaging-v0.md) §10). Both directions are gated by
 `just test-package-resolution`.
 
-**A file with no `module` header gets no prelude**
-Self-contained, importless files are *deliberately* not given the prelude — they define
-their own types and functions (see `examples/maybe_map.sprout`, which redefines `Maybe`
-and `map`). The prelude is prepended only once some module header brings a named module
-into scope. So a bare `.spr` fixture that calls a non-intrinsic prelude name fails with
-`unbound variable` / `unknown constructor`, not a silent default. Add a `module` header,
-or define what you use.
+**Every file gets the prelude; opt out with `no_prelude`**
+The prelude is unconditional — a file with no `module` header gets it too
+([prelude-scope-v0.md](./docs/prelude-scope-v0.md)). Redefining a prelude name is fine
+and shadows it (`examples/maybe_map.sprout` redefines `Maybe` and `map`), because a
+headerless file gets its own namespace rather than sharing the prelude's.
+
+To opt out, put `no_prelude` on its own line in the header block:
+
+```sprout
+no_prelude
+
+fn twice(n: Int) -> Int = n + n
+```
+
+Two things to know about opting out. A `no_prelude` file stays *unqualified*, which is
+what lets it redefine `Maybe` and bind it with `<-`, or declare its own `class Eq` —
+both of those resolve by unqualified name, so they only work without a prelude to
+collide with. And the checker still knows the prelude's schemes, so calling a prelude
+function from a `no_prelude` file type-checks and then fails in the IR parser rather
+than as a diagnostic (tracked in [BACKLOG.md](./BACKLOG.md)).
+
+An **imported** file must declare a `module` header — only the entry may be headerless.
 
 ## Partial Application with `_`
 

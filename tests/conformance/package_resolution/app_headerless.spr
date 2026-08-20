@@ -1,0 +1,8 @@
+import demo.headerless (unreachable_value)
+
+# Importing a file that declares no `module` header must be diagnosed at bundle
+# time, naming the offending file (docs/prelude-scope-v0.md §4.2 step 3). The
+# package-resolution gate registers the same root as app.spr, so resolution
+# SUCCEEDS and the header check is the only thing that can reject this.
+fn main() -> Unit !{IO} =
+  print(unreachable_value())

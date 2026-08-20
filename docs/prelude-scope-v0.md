@@ -1,10 +1,55 @@
 # Prelude scope: always on, with an explicit opt-out
 
-**Status:** proposed design, not yet implemented. Supersedes the implicit
-"no named module ⇒ no prelude" rule in `bundler.collect_modules`.
+**Status: implemented, 2026-08-20.** Supersedes the implicit "no named module ⇒ no
+prelude" rule in `bundler.collect_modules`.
 
-Normative outcome, once implemented, belongs in `docs/spec-v0.md`; this document
-carries the rationale and the migration.
+The normative rule is `docs/spec-v0.md` §3.1; this document carries the rationale,
+the migration, and what implementation found that the design had wrong.
+
+## 0. What implementation corrected
+
+Four things, all of which changed the work rather than merely annotating it.
+
+1. **§4.1's "shadowing already works" was too strong.** It was verified against
+   `examples/maybe_map.sprout` — a plain ADT and a plain `map` — and holds for
+   that. It does **not** hold for a redefined typeclass or a redefined monad
+   family, because two resolutions still key on the *unqualified* name: do
+   notation picks the monad family by bare name, and the class-method wrapper is
+   mangled `__cm_<Class>_<method>` with no module prefix (the dictionary
+   parameter, `__tc_demo.Eq_0_eq`, *is* qualified — only the wrapper is not).
+   Both were confirmed pre-existing by reproducing each with a `module demo`
+   header. Three conformance fixtures relied on the old carve-out for exactly
+   this, and now say `no_prelude`. Recorded as follow-ups in `BACKLOG.md`.
+
+2. **Naming the entry is COUPLED to prepending the prelude.** Step 2 read as an
+   independent step. It is not: the synthetic name exists only to keep the entry
+   out of the prelude's namespace, so a `no_prelude` file must stay *unqualified*
+   — otherwise it loses the prelude *and* the bare names that (1) depends on.
+   Applying the rename unconditionally broke `codegen_do_bind` in a way the old
+   carve-out did not.
+
+3. **"No in-tree file is affected" (step 3) was false.** `stdlib/compiler/dce.sprout`
+   had imports but no `module` header, so its declarations were emitting
+   *unqualified* into every bundle — defect (c) live in the compiler's own source,
+   one prelude-name collision away from breaking. The new diagnostic found it on
+   the first reseed. Fixed by adding the header it should always have had.
+
+4. **`no_prelude` re-opens defect (b), and this is not fixed.** `check_bundled`
+   hands the checker `load_prelude_pairs` unconditionally, so a `no_prelude` file
+   calling `negate` type-checks and then fails in the IR parser. With the prelude
+   now always bundled those pairs are redundant in the normal case, so deleting
+   them is both the root-cause fix and a code removal — but there are 9 call sites
+   across the batch, LSP, REPL and analysis paths, so it is its own change.
+   Tracked in `BACKLOG.md`.
+
+One prediction held exactly: no grammar change, so no 2-step bootstrap. Every
+reseed reached a fixed point at iteration 2.
+
+An unplanned dividend: `tests/conformance/run/XFAIL` went from 8 entries to zero.
+All 8 shared the root cause this removes. The manifest also claimed `Cons`/`Nil`
+"was REMOVED from the language" and that four fixtures needed rewriting — false;
+they are prelude List constructors (`stdlib/prelude.sprout:32-34`) and those
+fixtures needed only the prelude.
 
 ## 1. Problem statement
 
@@ -341,31 +386,75 @@ that is already in production rather than introducing one.
 
 ## 9. Tests added/updated
 
-1. **TDD, defect (a)** — a headerless file calling a prelude function compiles,
-   links and runs. Fails today at clang.
-2. **TDD, defect (c)** — a headerless *imported* file produces the §7 diagnostic,
-   not "defined more than once".
-3. **Shadowing** — `examples/maybe_map.sprout`'s shape as a `tests/stdlib` case:
-   local `Maybe`/`Just`/`Nothing` with the prelude present, asserted to run.
-4. **Goal 4 regression, both surfaces** — a headerless file printing a local
-   constructor asserts exactly `Just(3)`, and a headerless file with a type error
-   asserts the message contains no `$entry`. These are the tests that would have
-   caught the `main.Just(3)` leak.
-5. **Opt-out** — a `no_prelude` file compiles and runs using no prelude name; and
-   one calling a prelude name yields the §7 scope diagnostic rather than a clang
-   error.
-6. **Conformance** — `no_prelude` in a non-header position is a parse or bundle
-   error, not silently accepted.
+Landed, 2026-08-20. Numbering follows the plan; deviations are noted.
+
+1. **TDD, defect (a)** — `tests/conformance/run/prelude_in_headerless_file.spr`:
+   a headerless file calling `negate` compiles, links and runs, printing `-7`.
+   Confirmed failing first, as `clang: use of undefined value '@negate'`.
+2. **TDD, defect (c)** — moved to `scripts/package_resolution_gate.sh` plus
+   `tests/conformance/package_resolution/{app_headerless.spr,roots/demo/headerless.sprout}`.
+   It needs a real package tree (a directory per dotted segment), which no
+   `tests/stdlib` suite can build — `stdlib.fs` has `read_text`/`write_text` and no
+   `mkdir` — and that gate already owns such a tree. Asserts the message names both
+   the file and the cause, not just a nonzero exit.
+3. **Shadowing** — `tests/stdlib/compiler/test_bundle_prelude_scope.spr` (new, 16
+   assertions), asserting on the BUNDLE rather than on a run: whether the prelude's
+   declarations are present, and what module name the entry's own carry. Covers a
+   headerless file, a named module, a file redefining `Maybe`, `no_prelude`, a name
+   that merely *starts* with the directive, and the prelude as its own entry.
+4. **Goal 4 regression, both surfaces** — `examples/maybe_map.sprout` prints
+   `Just(3)` (its golden IR is in the corpus, so a leak moves it), and
+   `tests/conformance/type_error/headerless_error_hides_entry_module.spr` pins a
+   message naming a *function* — the surface §4.2 step 4 flagged as uncovered.
+5. **Opt-out** — `tests/conformance/run/no_prelude_directive.spr` compiles and
+   runs, printing `42`. The second half is **not** asserted: a `no_prelude` file
+   calling a prelude name still fails in the IR parser rather than as a diagnostic,
+   because `load_prelude_pairs` is unconditional. See §0 item 4 and `BACKLOG.md`.
+6. **Conformance** — not added. `no_prelude` in a non-header position is an
+   ordinary identifier, which is the correct behaviour rather than an error: the
+   directive is recognised only in the leading header block (`source.has_no_prelude`
+   stops at the first non-header line, the same boundary `strip_headers` uses). The
+   property worth testing is that a *lookalike* name does not opt out, which test 3
+   covers.
+
+Not planned, required by the change:
+
+7. **Five suites re-scoped for a bundled prelude.** `test_wrap_codegen` and
+   `test_tuple_return_cpr` make ABSENCE assertions over the whole emitted module
+   ("no call to `@sprout_alloc_obj`", "allocates no tuple"), which a bundled prelude
+   makes unstatable — their fixtures now say `no_prelude`. `test_compiler`'s
+   cache-sharing test relied on a preludeless bundle to make an empty
+   `stdlib_root` work, same fix. `test_ir_codegen_do_bind_strip` redefines `Maybe`
+   and binds it with `<-` (§0 item 1). `test_borrow_erasure`'s presence guards now
+   match the `$entry.`-qualified spellings.
+8. **`compiler.env_scheme`** — hover and `:type` looked the sentinel up by bare
+   name, so on any headerless buffer both lookups missed and the answer was
+   silently `Nothing`. Caught by `test_expr_type_in_source` (10 failures), which is
+   why that suite existed.
 
 ## 10. Spec/docs updated
 
-- `docs/spec-v0.md`: a normative section on prelude scope — currently silent on
-  the subject. States the unconditional rule, shadowing, and `no_prelude`.
-- `README.md` §Not Yet Supported: drop anything implying importless files are
-  special.
-- This document: mark implemented, with the normative statement pointing at the
-  spec.
-- `BACKLOG.md`: the preludeless-diagnostic P2 entry in §7.2 is closed by §7 here.
+Done, 2026-08-20:
+
+- `docs/spec-v0.md` **§3.1** — the normative rule: prelude unconditional,
+  shadowing, the header requirement on imported files, `no_prelude`, and the two
+  known shadowing limits. The §5.6 `IntRange` note, which described the
+  admit-the-prelude's-type-names workaround, is corrected: that workaround is
+  deleted along with the condition that motivated it.
+- `README.md` — the "a file with no `module` header gets no prelude" gotcha is
+  replaced by the `no_prelude` opt-out and its two caveats.
+- `tests/conformance/README.md` — the fixture-authoring instruction said a bare
+  `.spr` must define everything it uses, which is what filled `run/XFAIL`. Two
+  other documents cited it by line number, so this was the load-bearing one.
+- `docs/ranges-v0.md` — two claims narrowed: the `reversed_literal_range` fixture's
+  stated reason for calling no prelude function has expired, and Package C's
+  "bare-file regression" objection now applies only to `no_prelude` files (while
+  its ctor-tag-renumbering objection got *worse*, since the prelude now bundles
+  into every program).
+- `BACKLOG.md` — three pre-existing gaps this surfaced, each with a `module demo`
+  reproduction proving it is not a regression; the 8-xfail note in the Model-C
+  status entry marked cleared.
+- This document: §0, recording the four things implementation corrected.
 
 ## 11. Open questions
 

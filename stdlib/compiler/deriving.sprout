@@ -156,9 +156,20 @@ fn emit_eq_instance(name: String, type_params: List String, ctors: List ast.Type
 # Build the to_string body string for one ctor. For nullary ctors, returns
 # just the ctor name. For N-field ctors, returns
 # "Ctor(" ++ to_string(__d_v_0) ++ ", " ++ to_string(__d_v_1) ++ ", " ++ ... ++ ")".
+#
+# This runs on QUALIFIED decls (`bundler.make_bundle_or_err` expands deriving
+# after qualification), so the name arrives as `$entry.Box` for a headerless entry
+# file. It is stripped HERE, and only here, because this is the one place the name
+# becomes a string LITERAL — the program's own output, not a symbol. The sibling
+# `build_ctor_var_pattern` keeps the qualified name, which it must: that is the
+# pattern that has to match the constructor.
+#
+# The runtime's display path (`display_ctor_name`) cannot help with this one: a
+# derived `to_string` returns a String the program may never print.
 fn build_to_string_branch_body(ctor_name: String, arity: Int, pos: source.SourcePos) -> ast.Expr =
-  if arity == 0 then ast.StringExpr(ctor_name, pos)
-  else build_to_string_concat_chain(ctor_name, arity, pos)
+  if arity == 0 then ast.StringExpr(display, pos)
+  else build_to_string_concat_chain(display, arity, pos)
+  where display = source.strip_entry_names(ctor_name)
 
 # Constructs the string-concat chain for a multi-field ctor body.
 fn build_to_string_concat_chain(ctor_name: String, arity: Int, pos: source.SourcePos) -> ast.Expr =
@@ -511,9 +522,13 @@ fn build_record_to_string_acc(fields: List ast.RecordFieldDecl, acc: ast.Expr, p
           ast.BinaryExpr("++", ast.StringExpr(", ", pos),
             record_field_to_string_part(record_field_name(f), pos), pos), pos), pos)
 
+# The record counterpart of build_to_string_branch_body — same reason for the
+# strip, same restriction to the string LITERAL. `instance_head_typeexpr` next
+# door still receives the qualified name, because that one names a type.
 fn build_record_to_string_body(name: String, fields: List ast.RecordFieldDecl, pos: source.SourcePos) -> ast.Expr =
   ast.BinaryExpr("++",
-    ast.BinaryExpr("++", ast.StringExpr(name ++ "(", pos), build_record_to_string_fields(fields, pos), pos),
+    ast.BinaryExpr("++", ast.StringExpr(source.strip_entry_names(name) ++ "(", pos),
+      build_record_to_string_fields(fields, pos), pos),
     ast.StringExpr(")", pos),
     pos)
 

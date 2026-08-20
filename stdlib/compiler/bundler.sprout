@@ -597,7 +597,20 @@ fn visit_module_iter(
     visiting <- ref_new(Nil)
     process_work(work, visiting, seen, ordered, stdlib_root, extra_roots, load_env)
 
-# Collect all modules in topological order, optionally prepending the prelude.
+# Collect all modules in topological order, prepending the prelude.
+#
+# The prelude is UNCONDITIONAL (docs/prelude-scope-v0.md). It used to be withheld
+# from a file with no named module anywhere in its import closure, on the theory
+# that such a file was a self-contained unit defining its own types. Two things
+# were wrong with that. It inferred the language available in a file from its
+# import graph, so adding one unrelated `import` silently changed it. And it
+# withheld only the prelude's DECLARATIONS — the checker was handed its schemes
+# regardless — so a call to a prelude function from such a file type-checked,
+# emitted a call with no matching define, and failed inside clang instead of
+# producing a diagnostic.
+#
+# A headerless entry file keeps its own namespace rather than sharing the
+# prelude's; see name_entry_module.
 fn collect_modules(entry_path: String, stdlib_root: String, extra_roots: List String, load_env: LoadEnv) -> (Maybe LoadIssue, List ParsedModule) !{IO} =
   do
     seen <- ref_new(Nil)
@@ -608,22 +621,104 @@ fn collect_modules(entry_path: String, stdlib_root: String, extra_roots: List St
     | Nil ->
         do
           mods <- ref_read(ordered)
-          let rev_mods = list_reverse(mods)
-          # Self-contained (importless) files are DELIBERATELY not given the
-          # prelude — they define their own types/functions (see
-          # examples/maybe_map.sprout, which redefines Maybe and map).  A bare
-          # file with no named modules is such a unit; only append the prelude
-          # once some imported module pulls it into scope.  A call to a
-          # non-intrinsic prelude name from such a file is a hard error
-          # (codegen.emit_named_call), not a silent zero_val.
-          if any_has_module_name(rev_mods) then
-            do
-              (err, prelude) <- prelude_module(stdlib_root, load_env)
-              match prelude with
-              | Nothing -> (err, Nil)
-              | Just mod -> (Nothing, Cons(mod, rev_mods))
-          else
-            (Nothing, rev_mods)
+          let plain_mods = list_reverse(mods)
+          match headerless_import(plain_mods, entry_path) with
+          | Just issue -> (Just(issue), Nil)
+          | Nothing ->
+              do
+                skip <- skip_prelude(entry_path, stdlib_root, load_env)
+                # Naming the entry is COUPLED to prepending the prelude, not done
+                # unconditionally: the synthetic name exists only to keep the entry
+                # out of the prelude's namespace, and with no prelude there is
+                # nothing to keep it out of. Qualifying anyway would be a pure loss,
+                # because two resolutions still key on the UNQUALIFIED name — do
+                # notation picks the monad family by it, and the class-method
+                # wrapper `__cm_<Class>_<method>` is mangled from it. A `no_prelude`
+                # file that defines its own `Maybe` or `Eq` depends on staying bare.
+                if skip then (Nothing, plain_mods)
+                else
+                  do
+                    (err, prelude) <- prelude_module(stdlib_root, load_env)
+                    match prelude with
+                    | Nothing -> (err, Nil)
+                    | Just mod ->
+                        (Nothing, Cons(mod, name_entry_module(plain_mods, entry_path)))
+
+# An IMPORTED file must declare a module header.
+#
+# Imports resolve by PATH (`module_loader.resolve_module_path`) with no check that
+# the file declares a matching name, so an imported file could be headerless. Its
+# declarations then emitted unqualified and collided with the prelude's, and the
+# only sign was ``…is defined more than once in this module`` — a message about a
+# symbol, naming neither the file nor the real cause. This says the cause.
+#
+# It is also what makes a single fixed `$entry` name sound: exactly one file in a
+# bundle may be headerless, so one synthetic name can never collide with another.
+#
+# The prelude is exempt by construction — it is prepended after this check rather
+# than imported, so it is not in the list.
+fn headerless_import(mods: List ParsedModule, entry_path: String) -> Maybe LoadIssue =
+  match mods with
+  | Nil -> Nothing
+  | Cons mod rest ->
+      match mod with
+      | ParsedModule mod_name path _ _ _ _ ->
+          if mod_name == "" && path != entry_path then
+            Just(LoadIssue(path, no_pos(),
+              "imported file " ++ path ++ " has no `module` header; an imported file must "
+                ++ "declare one so its declarations have a namespace of their own"))
+          else headerless_import(rest, entry_path)
+
+# The two cases that get no prelude prepended.
+#
+# The prelude AS the entry: prepending it would list the same path twice — the
+# memo hands back the same ParsedModule — and every one of its declarations would
+# then be "defined more than once". `--phase bundle stdlib/prelude.sprout` is a
+# standing check (AGENTS.md Definition of Done #8), so this is a reachable path.
+#
+# The `no_prelude` directive: the explicit, file-local opt-out. It re-reads the
+# entry source rather than recording the flag on ParsedModule, which would mean a
+# seventh field threaded through 39 construction and destructuring sites. The cost
+# is one extra read of ONE file, and none at all on the editor path — a buffer
+# being checked is already in the overlay, so `module_source` returns it directly.
+fn skip_prelude(entry_path: String, stdlib_root: String, load_env: LoadEnv) -> Bool !{IO} =
+  if entry_path == prelude_path(stdlib_root) then true
+  else
+    do
+      src <- module_source(entry_path, load_env)
+      source.has_no_prelude(src)
+
+# Give a headerless ENTRY file the synthetic module name, so its declarations
+# qualify like every other module's.
+#
+# `qualified_name` (:202) reads the empty module name as "do not qualify", and ""
+# is exactly the name the prelude carries. A headerless file therefore shared one
+# flat namespace with the prelude, and every name it redefined — `Maybe`, `map` —
+# collided. Naming it resolves that with the shadowing the language already has:
+# the file's `Just` becomes `$entry.Just` while the prelude keeps `Just`.
+#
+# The name itself is `source.entry_module_name`, which is also where the render-
+# time strip lives — one authority, so the two cannot drift. A single FIXED name
+# is sound because only the entry may be headerless: an imported file without a
+# `module` header is diagnosed.
+#
+# Applied HERE rather than where the module is parsed, because the parse is
+# memoised across bundles: the same file may be the entry of one bundle and an
+# import of the next, and stamping the name into the memo would carry it over.
+#
+# Called ONLY on the branch that prepends the prelude, which is what makes the
+# prelude-as-entry case need no guard here: that entry takes the skip branch, so
+# its own unqualified symbols — the ones every other module resolves against, and
+# the ones baked into bootstrap/compile_driver.ll — are never renamed.
+fn name_entry_module(mods: List ParsedModule, entry_path: String) -> List ParsedModule =
+  match mods with
+  | Nil -> Nil
+  | Cons mod rest ->
+      match mod with
+      | ParsedModule mod_name path specs exported ctor_types decls ->
+          if mod_name == "" && path == entry_path then
+            Cons(ParsedModule(source.entry_module_name, path, specs, exported, ctor_types, decls), rest)
+          else Cons(mod, name_entry_module(rest, entry_path))
 
 # The prelude as a ParsedModule, memoised like any other module. Without the memo it is
 # re-read and re-parsed on every bundle, and it is the largest file in the tree — which is
@@ -656,14 +751,6 @@ fn prelude_module(stdlib_root: String, load_env: LoadEnv) -> (Maybe LoadIssue, M
                             let mod = ParsedModule("", path, Nil, exported, ctor_types, decls)
                             memoise_module(path, mod, load_env)
                             (Nothing, Just(mod))
-
-fn any_has_module_name(mods: List ParsedModule) -> Bool =
-  match mods with
-  | Nil -> false
-  | Cons mod rest ->
-      match mod with
-      | ParsedModule mod_name _ _ _ _ _ ->
-          if mod_name != "" then true else any_has_module_name(rest)
 
 # ---------------------------------------------------------------------------
 # Symbol table building
@@ -1599,17 +1686,13 @@ fn find_unresolved_type(decls: List ast.Decl, declared: Dict String) -> Maybe(so
       | Just name -> Just((ast.decl_pos(d), unresolved_type_message(name, decl_display_name(d), declared)))
       | Nothing -> find_unresolved_type(rest, declared)
 
-# `ambient` carries names the CHECKER has in scope that the bundle does not
-# declare — see ambient_type_names. Merged into the declared set rather than
-# threaded separately, so the walk has one lookup and one meaning of "in scope".
-# Ambient names are bare, so they never become an import suggestion.
-fn add_ambient_names(names: List String, acc: Dict String) -> Dict String =
-  match names with
-  | Nil -> acc
-  | Cons n rest -> add_ambient_names(rest, dict_set(n, n, acc))
-
-fn validate_type_names(decls: List ast.Decl, ambient: List String) -> Maybe(source.SourcePos, String) =
-  find_unresolved_type(decls, add_ambient_names(ambient, declared_type_names(decls, dict_empty())))
+# The declared set is now the whole story. It used to be widened with an
+# "ambient" list — the prelude's exported names, re-read from source, because a
+# preludeless bundle did not declare them while the checker still knew them. With
+# the prelude unconditional (collect_modules), its types are declared in the
+# bundle like any other module's, so there is nothing left to compensate for.
+fn validate_type_names(decls: List ast.Decl) -> Maybe(source.SourcePos, String) =
+  find_unresolved_type(decls, declared_type_names(decls, dict_empty()))
 
 # ---------------------------------------------------------------------------
 # Post-qualification assertion: no qualified name may start with '.'
@@ -1644,11 +1727,11 @@ fn validate_qualified_decls(decls: List ast.Decl) -> Maybe(source.SourcePos, Str
       | Just msg -> Just((ast.decl_pos(d), msg))
       | Nothing -> validate_qualified_decls(rest)
 
-fn make_bundle_or_err(modules: List ParsedModule, stdlib_root: String, extra_roots: List String, ambient: List String) -> BundleResult =
+fn make_bundle_or_err(modules: List ParsedModule, stdlib_root: String, extra_roots: List String) -> BundleResult =
   match validate_qualified_decls(qualified) with
   | Just (pos, err_msg) -> BundleErr(pos, "[assert] qualify_decl: " ++ err_msg)
   | Nothing ->
-      match validate_type_names(qualified, ambient) with
+      match validate_type_names(qualified) with
       | Just (pos, err_msg) -> BundleErr(pos, err_msg)
       | Nothing ->
         match deriving.validate_deriving_decls(qualified) with
@@ -1662,28 +1745,6 @@ export fn bundle_file(path: source.FilePath, stdlib_root: source.StdlibRoot) -> 
 # Like bundle_file, but resolves dotted non-stdlib imports against extra package
 # roots (docs/packaging-v0.md §10 phase 2). bundle_file delegates here with no
 # extra roots, so all existing callers are unaffected.
-# Type names the CHECKER has in scope that the BUNDLE does not declare.
-#
-# An importless, self-contained file is deliberately not given the prelude
-# (collect_modules says why), so no prelude declaration reaches the bundle — yet
-# the checker still knows the prelude's types, and `fn f() -> Maybe Int = Just(1)`
-# compiles in such a file today. A membership test over bundled declarations
-# alone would reject every one of those. So when the prelude is absent, its
-# EXPORTED names are read separately and allowed.
-#
-# `scan_source_info` rather than a parse: it is the same cheap line scan the
-# bundler already runs per module, and for UPPERCASE names its exported list is
-# exactly the types and classes — a function export is lowercase and would be
-# allowed as a type variable regardless.
-fn ambient_type_names(modules: List ParsedModule, stdlib_root: String) -> List String !{IO} =
-  if any_has_module_name(modules) then Nil
-  else
-    match fs.read_text(prelude_path(stdlib_root)) with
-    | Err _ -> Nil
-    | Ok src ->
-        match scan_source_info(src) with
-        | (_, exported, _) -> exported
-
 export fn bundle_file_with_roots(path: source.FilePath, stdlib_root: source.StdlibRoot, extra_roots: List String) -> BundleResult !{IO} =
   do
     load_env <- new_load_env()
@@ -1714,10 +1775,7 @@ fn bundle_entry(entry_path: String, stdlib_root: source.StdlibRoot, extra_roots:
     (err, modules) <- collect_modules(entry_path, source.stdlib_root_str(stdlib_root), extra_roots, load_env)
     match err with
     | Just issue -> BundleErr(issue_pos_for_entry(issue, entry_path), issue_message(issue))
-    | Nothing ->
-        do
-          ambient <- ambient_type_names(modules, source.stdlib_root_str(stdlib_root))
-          make_bundle_or_err(modules, source.stdlib_root_str(stdlib_root), extra_roots, ambient)
+    | Nothing -> make_bundle_or_err(modules, source.stdlib_root_str(stdlib_root), extra_roots)
 
 # ---------------------------------------------------------------------------
 # Phase: dump-qualify — show original→qualified name mapping per module

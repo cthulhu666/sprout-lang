@@ -2692,8 +2692,11 @@ dot-guard `infer.is_lowercase_name` has (a dotted name is never a type variable)
    default) and `--use-ir-codegen` both dispatch through `ast_to_ir` + `ir_lowering`,
    and the old direct backend `stdlib/compiler/codegen.sprout` has been deleted (M3.2).
    M2 acceptance was re-verified end-to-end on a tree rebased onto `origin/master`:
-   `just test` green through the IR path (only the 8 pre-existing `conformance/run`
-   fixture-rot `xfail`s remain — see "conformance-run fixture rehabilitation"); the
+   `just test` green through the IR path (at the time, 8 pre-existing `conformance/run`
+   fixture-rot `xfail`s remained; **all 8 were cleared on 2026-08-20** by making the
+   prelude unconditional — `docs/prelude-scope-v0.md` — since "a bare .spr file gets no
+   prelude" was the single root cause behind every one, and `tests/conformance/run/XFAIL`
+   is now empty); the
    full `tests/stdlib{,/compiler}` corpus (230 suites) compiles+runs clean under an
    explicit `--use-ir-codegen` sweep; stage-1 self-compiles to a **byte-identical**
    fixed point (stage-2 re-emits identical IR); `verify-bootstrap-fixed-point` and the
@@ -3855,6 +3858,49 @@ op-classification already in place.
   default has never been measured against real handler depth — measure what depth handlers use.
 
 ### Compiler / Stdlib Misc
+
+Three items below were surfaced by implementing `docs/prelude-scope-v0.md` (2026-08-20). All
+three are **pre-existing** — each was confirmed by reproducing it with an ordinary `module demo`
+header, so none was introduced by that change. Making the prelude unconditional stopped hiding
+them: the files that hit them were previously exempt only because they received no prelude at
+all, and now say `no_prelude` instead.
+
+- [ ] `P2` **A redefined typeclass collides in the class-method wrapper symbol.** A file that
+  declares `class Eq a` when the prelude also declares one emits two definitions of
+  `@__cm_Eq_eq` and the IR is rejected: `invalid redefinition of function '__cm_Eq_eq'`.
+  Module qualification is threaded *most* of the way — the dictionary parameter is
+  `__tc_demo.Eq_0_eq`, correctly qualified — and stops at the method wrapper, which is mangled
+  from the class and method names only. Reproduce: prepend `module demo` to
+  `tests/conformance/run/instance_check.spr` (before its `no_prelude` line) and
+  `--emit-ir`, then `opt --passes=verify`. Fix is presumably to include the class's module in
+  the `__cm_` mangling, but the dictionary-passing lowering reads these names in several
+  places, so the change needs tracing before it is costed. Affected fixtures:
+  `tests/conformance/run/instance_check.spr`, `type_classes.spr`.
+
+- [ ] `P2` **Do notation resolves the monad family by unqualified name, so a user-defined
+  `Maybe` is not bindable with `<-`.** `x <- safe_div(a, b)` where `safe_div` returns the
+  file's own `Maybe Int` reports `Call type mismatch: Type mismatch: Int vs demo.Maybe Int`.
+  The bind machinery matches the family on the bare name `Maybe`, so a qualified
+  `demo.Maybe`/`$entry.Maybe` is not recognised as the same family. Reproduce: prepend
+  `module demo` to `tests/conformance/run/codegen_do_bind.spr` (before its `no_prelude` line).
+  This is the same class of gap as the item above — qualification is not yet uniform across
+  the resolutions that key on names — and worth fixing together with it. Affected fixtures:
+  `tests/conformance/run/codegen_do_bind.spr`, `tests/stdlib/test_ir_codegen_do_bind_strip.spr`.
+
+- [ ] `P2` **`load_prelude_pairs` is now redundant, and its redundancy is what leaves
+  `no_prelude` with a raw IR-parser error instead of a diagnostic.** `compiler.check_bundled`
+  hands the checker the prelude's schemes unconditionally. With the prelude always bundled
+  (`docs/prelude-scope-v0.md`) those schemes are already in the bundled declarations, so the
+  injection changes nothing for a normal file — but for a `no_prelude` file it makes
+  `print(negate(7))` type-check and then fail as `error: use of undefined value '@negate'`,
+  which is precisely the defect (b) that design set out to close. Deleting the injection is
+  therefore both the root-cause fix and a code removal: a genuinely unknown name is already
+  rejected properly (`Unknown variable: no_such_function_anywhere`), so the same message would
+  appear here. Not done in that change because there are 9 `load_prelude_pairs` call sites
+  across `compiler.sprout`, `analysis_service_driver`, `lower_driver` and `type_driver` — the
+  batch, LSP, REPL and analysis paths — and changing the checker's environment on all of them
+  wants its own verification pass. Verify with: a `no_prelude` file calling `negate` must
+  report an unknown name, and `just test` plus `just gate` must stay green.
 
 Five items below were surfaced while designing `docs/ranges-v0.md` (2026-08-19) and are recorded
 there in its Appendix C. None is in scope for that change.

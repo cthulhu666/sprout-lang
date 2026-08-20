@@ -5,20 +5,16 @@
 # expected failure. If a quarantined fixture starts PASSING again, the gate goes
 # RED ("UNEXPECTED PASS — remove from XFAIL") so quarantine is self-healing.
 #
-# Root cause (all 8): each fixture references prelude constructors or combinators
-# without importing them. Bare .spr files are self-contained and get NO prelude
-# (README §Not Yet Supported), so these names are unbound today. Four additionally
-# use the `Cons`/`Nil` cons-list type, which was REMOVED from the language (Sprout
-# lists are `Vec` / `[...]`) — those need rewriting, not just an import.
+# EMPTY as of the unconditional prelude (docs/prelude-scope-v0.md). All 8 entries
+# shared one root cause — "a bare .spr file is self-contained and gets NO prelude"
+# — so making the prelude unconditional cleared the whole manifest at once. The
+# self-healing gate is what reported it: every one came back as UNEXPECTED PASS.
 #
-# Repair tracked in BACKLOG (conformance-run fixture rehabilitation).
+# One claim in the old manifest was simply wrong and is worth recording, because
+# it mis-scoped four of the eight. It said `Cons`/`Nil` "was REMOVED from the
+# language (Sprout lists are Vec / [...])" and that those fixtures "need
+# rewriting, not just an import". They did not: `Cons`/`Nil` are the prelude's
+# List constructors (stdlib/prelude.sprout:32-34) and always were. Nothing needed
+# rewriting; they needed the prelude.
+#
 # Format: one basename (no extension) per line; `#` comments and blank lines ignored.
-
-aoc2025_day1_sample              # `>>` compose lowers to @lcompose (prelude) — unbound without import
-stdlib_two_constraints_same_class # @Err (Result ctor, prelude) unbound without import
-stdlib_mixed_io_maybe_do         # `Just` ctor (prelude Maybe) unknown without import
-stdlib_mixed_io_result_do        # `Ok` ctor (prelude Result) unknown without import
-stdlib_laws_functor              # uses removed `Cons`/`Nil` cons-list — rewrite to Vec
-stdlib_laws_monoid               # uses removed `Cons`/`Nil` cons-list — rewrite to Vec
-stdlib_string_template_basic     # uses removed `Cons`/`Nil` cons-list — rewrite to Vec
-stdlib_string_template_callsite  # uses removed `Cons`/`Nil` cons-list — rewrite to Vec

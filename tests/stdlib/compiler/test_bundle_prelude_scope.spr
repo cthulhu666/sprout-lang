@@ -1,0 +1,156 @@
+module main
+import stdlib.test (TestState, new_state, assert_true, assert_false, assert_eq, summary)
+import stdlib.compiler.bundler as bundler
+import stdlib.compiler.ast as ast
+import stdlib.compiler.source as source
+import stdlib.fs as fs
+import stdlib.env as env
+import stdlib.string as string
+
+# The prelude is UNCONDITIONAL, and a headerless entry file gets its own
+# namespace (docs/prelude-scope-v0.md §4.2 steps 1-2).
+#
+# Asserted on the BUNDLE rather than on emitted IR, because that is where both
+# halves of the change live: whether the prelude's declarations are present at
+# all, and what module name the entry file's own declarations qualify under. The
+# end-to-end consequence is covered by tests/conformance/run/, which needs a
+# clang link to observe the old failure at all.
+
+fn decl_name(d: ast.Decl) -> String =
+  match d with
+  | ast.FnDecl name _ _ _ _ _ _ -> name
+  | ast.ExternFnDecl name _ _ _ _ -> name
+  | ast.TypeDecl name _ _ _ _ _ -> name
+  | ast.RecordDecl name _ _ _ _ _ -> name
+  | ast.LetDecl name _ _ _ -> name
+  | ast.ClassDecl name _ _ _ _ -> name
+  | ast.AliasDecl name _ _ _ -> name
+  | ast.WrapDecl name _ _ -> name
+  | ast.InstanceDecl _ _ _ _ -> ""
+
+fn decl_names(decls: List ast.Decl) -> List String =
+  list_map(decl_name, decls)
+
+# Bundle a source string written to `path`, and return its declaration names.
+#
+# A BundleErr yields the message under an "ERR: " prefix rather than Nil: an
+# empty list would make every `!list_member(...)` assertion below pass
+# vacuously, which is exactly how a bundle failure could hide as a green suite.
+fn bundled_names(src: String, path: String, stdlib_root: String) -> List String !{IO} =
+  do
+    fs.write_text(path, src)
+    r <- bundler.bundle_file(source.FilePath(path), source.StdlibRoot(stdlib_root))
+    match r with
+    | bundler.BundleErr _ msg -> Cons("ERR: " ++ msg, Nil)
+    | bundler.BundleOk prog ->
+        match prog with
+        | ast.Program decls _ -> decl_names(decls)
+
+fn has(names: List String, n: String) -> Bool = list_member(n, names)
+
+fn count_of(names: List String, n: String) -> Int =
+  list_fold(\ (acc, x) -> if x == n then acc + 1 else acc, 0, names)
+
+fn errored(names: List String) -> Bool =
+  match names with
+  | [first | _] -> string.starts_with(first, "ERR: ")
+  | Nil -> true
+
+fn main() -> Unit !{IO} =
+  do
+    state <- new_state()
+    # Matched at the call, not bound with `<-`: a do-bind unwraps a Maybe returned
+    # from an effectful function and would lose the miss case.
+    #
+    # A missing root FAILS rather than skipping. Every assertion below runs a
+    # bundle, so without the root they would all report an error the suite has no
+    # reason to expect — and a silent skip would show a green suite that checked
+    # nothing at all.
+    match env.get("SPROUT_STDLIB_ROOT") with
+    | Nothing ->
+        assert_true(state, "SPROUT_STDLIB_ROOT is set (the suite cannot bundle without it)", false)
+    | Just stdlib_root ->
+        do
+          # ── A headerless, importless file still gets the prelude ──────────
+          plain <- bundled_names(
+            "fn main() -> Unit !{IO} =\n  print(negate(7))\n",
+            "/tmp/sprout_prelude_scope_plain.spr", stdlib_root)
+          assert_false(state, "headerless file bundles cleanly", errored(plain))
+          assert_true(state, "headerless file's bundle declares the prelude's negate",
+            has(plain, "negate"))
+          assert_true(state, "headerless file's own main is qualified as $entry.main",
+            has(plain, "$entry.main"))
+          assert_false(state, "headerless file's main is NOT left unqualified",
+            has(plain, "main"))
+
+          # ── A named module is unaffected ──────────────────────────────────
+          named <- bundled_names(
+            "module demo\n\nfn main() -> Unit !{IO} =\n  print(negate(7))\n",
+            "/tmp/sprout_prelude_scope_named.spr", stdlib_root)
+          assert_false(state, "named module bundles cleanly", errored(named))
+          assert_true(state, "named module keeps its declared name", has(named, "demo.main"))
+          assert_false(state, "named module is never renamed to $entry", has(named, "$entry.main"))
+
+          # ── Redefining a prelude name shadows instead of colliding ────────
+          # This is the pair that steps 1 and 2 must land together to satisfy:
+          # step 1 alone puts both definitions in one flat namespace.
+          shadow <- bundled_names(
+            "type Maybe a =\n  | Nothing\n  | Just a\n\nfn main() -> Unit !{IO} =\n  print(1)\n",
+            "/tmp/sprout_prelude_scope_shadow.spr", stdlib_root)
+          assert_false(state, "a file redefining Maybe bundles cleanly", errored(shadow))
+          assert_true(state, "the file's own Maybe is qualified", has(shadow, "$entry.Maybe"))
+          assert_eq(state, "the prelude's Maybe is still declared exactly once",
+            count_of(shadow, "Maybe"), 1)
+
+          # ── `no_prelude` opts out, and leaves the entry UNQUALIFIED ───────
+          # The two halves are coupled on purpose. The synthetic name exists only
+          # to keep the entry out of the prelude's namespace, so with no prelude
+          # there is nothing to keep it out of — and two resolutions still key on
+          # the unqualified name (do notation's monad family, the
+          # `__cm_<Class>_<method>` wrapper), so a preludeless file that defines
+          # its own `Maybe` or `Eq` depends on staying bare.
+          optout <- bundled_names(
+            "no_prelude\n\ntype Maybe a =\n  | Nothing\n  | Just a\n\nfn main() -> Unit !{IO} =\n  print(1)\n",
+            "/tmp/sprout_prelude_scope_optout.spr", stdlib_root)
+          assert_false(state, "a no_prelude file bundles cleanly", errored(optout))
+          assert_false(state, "no_prelude means no prelude declarations", has(optout, "negate"))
+          assert_true(state, "a no_prelude file's own Maybe stays unqualified", has(optout, "Maybe"))
+          assert_false(state, "a no_prelude file is NOT renamed to $entry",
+            has(optout, "$entry.Maybe"))
+
+          # `no_prelude` must match the WHOLE line — this declares an ordinary
+          # function whose name merely starts with the directive.
+          lookalike <- bundled_names(
+            "fn no_prelude_lookalike() -> Int = 1\n\nfn main() -> Unit !{IO} =\n  print(negate(7))\n",
+            "/tmp/sprout_prelude_scope_lookalike.spr", stdlib_root)
+          assert_false(state, "a name starting with the directive bundles cleanly", errored(lookalike))
+          assert_true(state, "a name starting with the directive does NOT opt out",
+            has(lookalike, "negate"))
+
+          # The diagnostic for a headerless IMPORTED file needs a real package
+          # tree — a directory per dotted segment — which this suite cannot build
+          # (stdlib.fs has read_text/write_text and no mkdir). It is covered by
+          # scripts/package_resolution_gate.sh, which already owns that fixture
+          # tree and the --package-root harness.
+
+          # ── The prelude as its own entry is not included twice ────────────
+          # `--phase bundle stdlib/prelude.sprout` is a standing check (AGENTS.md
+          # Definition of Done #8), so an unconditional prepend has to special-case
+          # the entry BEING the prelude or every prelude decl doubles.
+          prelude <- bundled_names_of_path(stdlib_root ++ "/prelude.sprout", stdlib_root)
+          assert_false(state, "the prelude bundles as its own entry", errored(prelude))
+          assert_eq(state, "prelude-as-entry declares negate exactly once",
+            count_of(prelude, "negate"), 1)
+          assert_false(state, "prelude-as-entry is not renamed to $entry",
+            has(prelude, "$entry.negate"))
+    summary(state)
+
+# Same as bundled_names, for a file that already exists and must not be rewritten.
+fn bundled_names_of_path(path: String, stdlib_root: String) -> List String !{IO} =
+  do
+    r <- bundler.bundle_file(source.FilePath(path), source.StdlibRoot(stdlib_root))
+    match r with
+    | bundler.BundleErr _ msg -> Cons("ERR: " ++ msg, Nil)
+    | bundler.BundleOk prog ->
+        match prog with
+        | ast.Program decls _ -> decl_names(decls)

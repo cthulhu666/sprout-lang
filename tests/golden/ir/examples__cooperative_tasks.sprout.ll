@@ -11696,7 +11696,7 @@ entry:
   ret i64 %t$3
 }
 
-define i64 @worker(i64 %name) {
+define i64 @$entry.worker(i64 %name) {
 entry:
   %t$0 = getelementptr inbounds { i64, [8 x i8] }, ptr @.str.27, i64 0, i32 1, i64 0
   %t$1 = ptrtoint ptr %t$0 to i64
@@ -11740,7 +11740,7 @@ entry:
   %t$3 = alloca i64
   store i64 %t$1, ptr %t$3
   %t$4 = call i64 @sprout_gc_push_i64_root(ptr %t$3)
-  %t$2 = call i64 @worker(i64 %t$1)
+  %t$2 = call i64 @$entry.worker(i64 %t$1)
   %t$5 = call i64 @sprout_gc_pop_roots(i64 1)
   ret i64 %t$2
 }
@@ -11752,12 +11752,12 @@ entry:
   %t$3 = alloca i64
   store i64 %t$1, ptr %t$3
   %t$4 = call i64 @sprout_gc_push_i64_root(ptr %t$3)
-  %t$2 = call i64 @worker(i64 %t$1)
+  %t$2 = call i64 @$entry.worker(i64 %t$1)
   %t$5 = call i64 @sprout_gc_pop_roots(i64 1)
   ret i64 %t$2
 }
 
-define i64 @spawn_workers(i64 %s) {
+define i64 @$entry.spawn_workers(i64 %s) {
 entry:
   %t$4 = alloca i64
   store i64 %s, ptr %t$4
@@ -11786,7 +11786,7 @@ entry:
   %t$1 = alloca i64
   store i64 %s, ptr %t$1
   %t$2 = call i64 @sprout_gc_push_i64_root(ptr %t$1)
-  %t$0 = call i64 @spawn_workers(i64 %s)
+  %t$0 = call i64 @$entry.spawn_workers(i64 %s)
   %t$3 = call i64 @sprout_gc_pop_roots(i64 1)
   ret i64 %t$0
 }

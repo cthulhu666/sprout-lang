@@ -1,3 +1,4 @@
+module stdlib.compiler.dce
 import stdlib.compiler.typed_ast as typed_ast
 import stdlib.compiler.types as types
 import stdlib.compiler.ast as ast

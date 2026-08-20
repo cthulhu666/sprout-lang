@@ -1,3 +1,10 @@
+no_prelude
+
+# Opted out of the prelude (docs/prelude-scope-v0.md §4.2 step 5): this fixture
+# redefines `Maybe` on purpose (see below) AND binds it with `<-`, and do notation
+# resolves the monad family by UNQUALIFIED name. It used to get no prelude by
+# accident, for having no header and no imports; now it says so.
+
 # Verifies do-block Maybe wrapper-strip binding lowers via
 # --use-ir-codegen (M3 PR 13).  Closes the Maybe slice of the 8-entry IR_XFAIL
 # gap left by PR 11's do-block implementation.

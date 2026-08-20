@@ -34,6 +34,17 @@ export type Diagnostic (..) =
   | DiagError source.SourcePos String
   | DiagWarning source.SourcePos String
 
+# Build a diagnostic with the synthetic entry-module name removed from its text.
+#
+# Every DiagError in the tree is constructed in this module, so this is the render
+# boundary for the library front ends — the LSP and analysis service hand
+# Diagnostic straight to an editor. Prefer these over the bare constructors: the
+# strip is closed under adding new diagnostics, which a per-message-site strip
+# would not be. Idempotent, so overlapping with compile_driver.report_error costs
+# nothing.
+fn diag_error(pos: source.SourcePos, msg: String) -> Diagnostic =
+  DiagError(pos, source.strip_entry_names(msg))
+
 # The result of a compile/check request
 export type CompileResult (..) =
   | CompileOk (Dict types.Scheme)
@@ -61,11 +72,11 @@ fn no_pos() -> source.SourcePos = source.SourcePos(0, 0, 0)
 
 fn lex_err_diag(e: token.TokenizeError) -> Diagnostic =
   match e with
-  | token.TokenizeError msg pos -> DiagError(pos, "lex: " ++ msg)
+  | token.TokenizeError msg pos -> diag_error(pos, "lex: " ++ msg)
 
 fn parse_err_diag(e: parser.ParseError) -> Diagnostic =
   match e with
-  | parser.ParseError msg pos -> DiagError(pos, "parse: " ++ msg)
+  | parser.ParseError msg pos -> diag_error(pos, "parse: " ++ msg)
 
 fn lex_parse(src: String) -> LexParseResult =
   match lexer.tokenize(src) with
@@ -83,7 +94,7 @@ export fn compile_source(src: String) -> CompileResult !{IO} =
       do
         result <- checker.check_program(prog)
         match result with
-        | checker.CheckErr pos msg -> CompileFail(Cons (DiagError(pos, "check: " ++ msg), Nil))
+        | checker.CheckErr pos msg -> CompileFail(Cons(diag_error(pos, "check: " ++ msg), Nil))
         | checker.CheckOk env -> CompileOk(env)
 
 # ---------------------------------------------------------------------------
@@ -172,12 +183,12 @@ export fn compile_source_at_with_cache_roots(src: String, entry_path: String, st
   do
     bundled <- bundler.bundle_source_with_roots(src, entry_path, stdlib_root, extra_roots, cache)
     match bundled with
-    | bundler.BundleErr pos msg -> CompileFail(Cons (DiagError(pos, "bundle: " ++ msg), Nil))
+    | bundler.BundleErr pos msg -> CompileFail(Cons(diag_error(pos, "bundle: " ++ msg), Nil))
     | bundler.BundleOk prog ->
         do
           result <- check_bundled(prog, stdlib_root, cache)
           match result with
-          | typed_ast.TypedErr pos msg -> CompileFail(Cons (DiagError(pos, msg), Nil))
+          | typed_ast.TypedErr pos msg -> CompileFail(Cons(diag_error(pos, msg), Nil))
           | typed_ast.TypedOk _ env -> CompileOk(unqualify_entry_names(bundler.scan_module_name(src), env))
 
 # Bundling qualifies a named module's own top-level names (`examples.foo.bar`), but every
@@ -258,12 +269,30 @@ export fn scheme_of_expr_in_source(src: String, expr: String, stdlib_root: sourc
 # exactly the same bindings — so this changes which Scheme is read, never which name
 # resolves.
 fn scheme_from_env(expr: String, env: Dict types.Scheme) -> ExprSchemeResult =
-  match dict_get(string.trim(expr), env) with
+  match env_scheme(string.trim(expr), env) with
   | Just declared -> ExprSchemeOk(declared)
   | Nothing ->
-      match dict_get(expr_sentinel_name(), env) with
+      match env_scheme(expr_sentinel_name(), env) with
       | Nothing -> ExprNotInferable
       | Just scheme -> ExprSchemeOk(scheme)
+
+# Look up a TOP-LEVEL name that the caller knows only unqualified.
+#
+# A buffer being checked has no `module` header — it enters as `<source>`
+# (`source_entry_path`) — so the bundler gives it the synthetic module name and its
+# top-level declarations land in the env as `$entry.answer`, not `answer`. The
+# sentinel is one of those declarations, appended at module scope. Without this,
+# hover and `:type` on any headerless buffer silently answered Nothing: both
+# lookups in scheme_from_env missed, and ExprNotInferable is indistinguishable
+# from a genuinely untypeable expression.
+#
+# Bare form FIRST: a named module's reference to a prelude name is unqualified and
+# must keep hitting the prelude's scheme rather than being re-sought under a
+# prefix it does not have.
+fn env_scheme(name: String, env: Dict types.Scheme) -> Maybe types.Scheme =
+  match dict_get(name, env) with
+  | Just scheme -> Just(scheme)
+  | Nothing -> dict_get(source.entry_module_prefix ++ name, env)
 
 # Rendered form, for hover and :type. Nothing on any failure — a caller that needs to
 # say WHY calls scheme_of_expr_in_source and matches the reason.
@@ -303,14 +332,14 @@ export fn compile_full(path: source.FilePath, stdlib_root: source.StdlibRoot) ->
   do
     bundle_result <- bundler.bundle_file(path, stdlib_root)
     match bundle_result with
-    | bundler.BundleErr pos msg -> FullFail(Cons (DiagError(pos, "bundle: " ++ msg), Nil))
+    | bundler.BundleErr pos msg -> FullFail(Cons(diag_error(pos, "bundle: " ++ msg), Nil))
     | bundler.BundleOk prog ->
         do
           cache <- module_loader.new_cache()
           prelude_pairs <- module_loader.load_prelude_pairs(source.stdlib_root_str(stdlib_root), cache)
           tc_result <- checker.typecheck_typed(prog, prelude_pairs)
           match tc_result with
-          | typed_ast.TypedErr pos msg -> FullFail(Cons (DiagError(pos, "check: " ++ msg), Nil))
+          | typed_ast.TypedErr pos msg -> FullFail(Cons(diag_error(pos, "check: " ++ msg), Nil))
           | typed_ast.TypedOk typed_prog env ->
               FullOk(lowering.lower_program(typed_prog, env), env)
 
@@ -451,10 +480,10 @@ export fn compile_full_ir(path: source.FilePath, stdlib_root: source.StdlibRoot)
   do
     recheck_result <- compile_phase_recheck(path, stdlib_root)
     match recheck_result with
-    | typed_ast.TypedErr pos msg -> IrFullFail(Cons (DiagError(pos, msg), Nil))
+    | typed_ast.TypedErr pos msg -> IrFullFail(Cons(diag_error(pos, msg), Nil))
     | typed_ast.TypedOk typed_lowered _ ->
         match ir_pipeline.compile_program_streaming(typed_lowered) with
-        | Err msg -> IrFullFail(Cons (DiagError(no_pos(), "codegen: " ++ msg), Nil))
+        | Err msg -> IrFullFail(Cons(diag_error(no_pos(), "codegen: " ++ msg), Nil))
         | Ok ir_text -> IrFullOk(ir_text)
 
 
@@ -465,10 +494,10 @@ export fn compile_full_ir_with_cache(path: source.FilePath, stdlib_root: source.
   do
     recheck_result <- compile_phase_recheck_with_cache(path, stdlib_root, cache)
     match recheck_result with
-    | typed_ast.TypedErr pos msg -> IrFullFail(Cons (DiagError(pos, msg), Nil))
+    | typed_ast.TypedErr pos msg -> IrFullFail(Cons(diag_error(pos, msg), Nil))
     | typed_ast.TypedOk typed_lowered _ ->
         match ir_pipeline.compile_program_streaming(typed_lowered) with
-        | Err msg -> IrFullFail(Cons (DiagError(no_pos(), "codegen: " ++ msg), Nil))
+        | Err msg -> IrFullFail(Cons(diag_error(no_pos(), "codegen: " ++ msg), Nil))
         | Ok ir_text -> IrFullOk(ir_text)
 
 fn compile_phase_check_with_cache(path: source.FilePath, stdlib_root: source.StdlibRoot, cache) -> typed_ast.TypedResult !{IO} =

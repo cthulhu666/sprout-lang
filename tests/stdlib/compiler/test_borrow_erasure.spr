@@ -136,10 +136,16 @@ fn main() -> Unit !{IO} =
           # Guard the absence proofs below: if compilation had failed, the IR
           # would be "" and every `assert_false(contains(...))` would pass for
           # the wrong reason.
-          assert_true(state, "unmodified IR contains @release definition",
-            contains(unmod_ir, "define i64 @release"))
-          assert_true(state, "borrowing IR contains @peek definition",
-            contains(borrowing_ir, "define i64 @peek"))
+          #
+          # `$entry.` is the synthetic module name a headerless entry file gets
+          # (docs/prelude-scope-v0.md §4.2 step 2) — these fixture sources declare
+          # no `module` header, so their symbols qualify under it. Matching the
+          # qualified spelling keeps the guard a real guard: a bare `@release`
+          # would silently stop matching and take the absence proofs down with it.
+          assert_true(state, "unmodified IR contains @$entry.release definition",
+            contains(unmod_ir, "define i64 @$entry.release"))
+          assert_true(state, "borrowing IR contains @$entry.peek definition",
+            contains(borrowing_ir, "define i64 @$entry.peek"))
 
           # THE erasure assertion: one token of source difference, zero bytes of
           # IR difference.

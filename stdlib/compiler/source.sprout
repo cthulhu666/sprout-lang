@@ -162,6 +162,40 @@ export fn first_codepoint(s: String) -> Maybe Int =
   | Nothing -> Nothing
   | Just (cp, _) -> Just(cp)
 
+# ── The synthetic module name for a headerless entry file ────────────────────
+#
+# A file with no `module` header still needs a namespace of its own, or its
+# declarations share the prelude's and collide (docs/prelude-scope-v0.md §4.1).
+# `bundler.name_entry_module` assigns this name; it lives HERE so the string has
+# one authority shared with the strip below and with the runtime's
+# `SPROUT_ENTRY_PREFIX`.
+#
+# `$` makes it unforgeable — Sprout identifiers are `[A-Za-z_][A-Za-z0-9_]*`
+# (`string.is_ident_start`), so no source file can declare a module that collides
+# with it — while LLVM's identifier charset accepts `$` unmangled.
+export let entry_module_name: String = "$entry"
+
+export let entry_module_prefix: String = "$entry."
+
+# Remove the synthetic prefix from text about to be shown to a user.
+#
+# Applied at the RENDER boundary — where compiler-internal message text becomes
+# user-facing output — rather than at each site that builds a message. Those
+# sites are unbounded and grow with every new diagnostic: a name appears in
+# `is defined more than once`, in `unknown type X in Y`, in `in function Y`, in
+# an exhaustiveness list, in a type printed by a mismatch. A boundary strip is
+# closed under adding new ones; a per-site strip has to be re-remembered forever.
+#
+# A whole-message REPLACE, not a prefix strip: names sit mid-message inside
+# backticks, and one message can carry several (an exhaustiveness list names
+# every missing constructor). Idempotent, so layering it at more than one
+# boundary is harmless.
+#
+# Deliberately NOT applied to `--phase qualify`'s debug dump: a debug surface
+# should show the real qualified names, which is the whole reason to look at it.
+export fn strip_entry_names(msg: String) -> String =
+  string.replace_all(entry_module_prefix, "", msg)
+
 # ── Header stripping ─────────────────────────────────────────────────────────
 #
 # strip_headers removes the leading block of `module` / `import` / comment /
@@ -182,7 +216,51 @@ fn is_header_line_byte(s: String, pos: Int) -> Bool =
   str_starts_with_at_byte(s, pos, "module ") ||
   str_starts_with_at_byte(s, pos, "import ") ||
   str_starts_with_at_byte(s, pos, "#") ||
-  str_starts_with_at_byte(s, pos, "\n")
+  str_starts_with_at_byte(s, pos, "\n") ||
+  is_no_prelude_line_byte(s, pos)
+
+# ── The `no_prelude` opt-out ─────────────────────────────────────────────────
+#
+# A header line that suppresses the prelude for this file
+# (docs/prelude-scope-v0.md §4.2 step 5). Because the directive is a HEADER line
+# it is stripped before `tokenize` runs, so it needs no grammar and no parser
+# change — which is also why it must be recognised by `is_header_line_byte`
+# above, or the stripper would leave it for the parser as a bare identifier.
+#
+# The WHOLE line must be the directive: `no_prelude_thing` is an ordinary
+# identifier and must not be mistaken for it. Rust's `#![no_implicit_prelude]`
+# could not be borrowed literally — `#` opens a comment in Sprout, so the
+# directive would be invisible.
+export let no_prelude_directive: String = "no_prelude"
+
+fn is_no_prelude_line_byte(s: String, pos: Int) -> Bool =
+  str_starts_with_at_byte(s, pos, no_prelude_directive) &&
+    is_line_end_at_byte(s, pos + str_byte_len(no_prelude_directive))
+
+fn is_line_end_at_byte(s: String, pos: Int) -> Bool =
+  pos >= str_byte_len(s) ||
+    str_starts_with_at_byte(s, pos, "\n") ||
+    str_starts_with_at_byte(s, pos, "\r")
+
+# Does this source opt out of the prelude?
+#
+# Scans only the LEADING header block, stopping at the first line that is not a
+# header — the same boundary `strip_headers` uses, and for the same reason: a
+# whole-file scan (as `scan_module_name` does) could find the word inside a
+# multi-line string literal and suppress the prelude for text the parser still
+# sees as code.
+export fn has_no_prelude(s: String) -> Bool =
+  has_no_prelude_go(s, bytes_from_utf8(s), 0, 0)
+
+fn has_no_prelude_go(s: String, bytes: Bytes, pos: Int, depth: Int) -> Bool =
+  if pos >= str_byte_len(s) then false
+  else if depth == 0 && is_no_prelude_line_byte(s, pos) then true
+  # Mirrors strip_headers_go: `depth > 0` means an import's parenthesised list is
+  # still open, so this line is a continuation whatever it looks like.
+  else if depth > 0 || is_header_line_byte(s, pos) then
+    has_no_prelude_go(s, bytes, eol, floor_zero(depth + paren_delta_bytes(bytes, pos, eol, 0)))
+  else false
+  where eol = next_line_byte(bytes, pos)
 
 # Net parenthesis depth contributed by the bytes in [i, limit).
 #
