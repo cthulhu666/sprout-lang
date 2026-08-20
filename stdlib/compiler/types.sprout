@@ -692,6 +692,12 @@ fn scheme_to_string_renamed(vars: List String, t: Type, eff: Effect) -> String =
   "forall " ++ join_list(" ", rename_vars_list(vars, rename)) ++ ". " ++ type_to_string(apply_rename_type(rename, t)) ++ scheme_effect_suffix(t, eff)
   where rename = build_var_rename(vars, 0, dict_empty())
 
+# A type rendered with the given variables shown as `a`, `b`, … instead of the inference engine's
+# internal `$t` names. A diagnostic that names a type the user did not write needs this: `$t2150`
+# is an implementation detail, and printing it reads as a compiler leak rather than an explanation.
+export fn type_to_string_renamed(vars: List String, t: Type) -> String =
+  type_to_string(apply_rename_type(build_var_rename(vars, 0, dict_empty()), t))
+
 export fn scheme_to_string(s: Scheme) -> String =
   match scheme_vars(s) with
   | Nil -> scheme_body(s)

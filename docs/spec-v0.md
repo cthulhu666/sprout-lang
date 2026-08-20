@@ -340,6 +340,26 @@ lowering, so `let xs : Vec Int = [1, 2, 3]` yields a `Vec` (§5.5.1) at the
 binding site. Free lowercase names in the annotation are ordinary type variables
 (`let id_pair : (a, a) = …`).
 
+**The annotation is evidence, not just a check.** When the initializer is a
+function literal, its parameters take their types from the annotation *before*
+the body is inferred — the same direction §5.1 makes normative for `where`
+bindings, and for the same reason: information flows from the declaration into
+the body, never backwards. This is observable wherever the body needs a type to
+be known rather than merely consistent, typeclass dispatch being the case that
+motivated it (§8): in `let labeller : Int -> String = label`, the annotation is
+what makes the instance `ToString Int`.
+
+**An undetermined dictionary in a top-level binding is an error.** A top-level
+`let` is a single value, so a typeclass dictionary its initializer needs is
+chosen once, at the binding, and every use gets that choice — unlike a `fn`,
+which receives its dictionary per call. If the binding's type still quantifies
+over a type variable that a dictionary depends on, nothing determines the
+choice and the binding is rejected (`ambiguous typeclass binding: …`) rather
+than resolved by guesswork. Adding an annotation that fixes the variable is the
+remedy. A dictionary the binding's type does not quantify over is unaffected:
+`let empty = list_map(label, [])` has type `List String`, quantifies nothing,
+and its never-invoked dictionary stays inert.
+
 This version annotates **top-level** `let` bindings only; annotations on
 `let … in` (§5.2.1), function-local `where` bindings, and do-block `let` steps
 are not yet part of the language. See `docs/binding-annotations-v0.md`.
@@ -1963,32 +1983,46 @@ apply(label, 3)     # `label` has type `Int -> String` here
 ```
 
 The dictionary must come from somewhere the compiler can read at the point of
-the mention: either a receiving parameter whose declared type fixes it, as
-above, or a `where` clause on the enclosing function, which supplies one to
-forward.  Given either, the mention may appear anywhere a value may — including
-bound with `let`:
+the mention: a receiving parameter whose declared type fixes it, as above; a
+`where` clause on the enclosing function, which supplies one to forward; or a
+type annotation on the binding.  Given any of the three, the mention may appear
+anywhere a value may — including bound with `let`:
 
 ```sprout
 fn describe(x: b) -> String where ToString b =
   let f = label                    # forwards `describe`'s own dictionary
   in f(x)
+
+let labeller: Int -> String = label   # the annotation fixes `ToString Int`
 ```
 
-A mention with **neither** is rejected at compile time.  The rule is about the
-receiving slot, not about the syntax around it, so it covers more than it might
-appear: binding the function with `let` or returning it from a function with no
-`where` clause of its own, but equally a record field, a list or tuple element,
-and an argument whose receiving parameter is a bare type variable rather than a
+A top-level `let` is **checked against its annotation**: the declared type is
+known before the right-hand side is inferred, which is what lets it determine
+the instance.  Without an annotation there is nothing to determine it, and
+because a top-level binding is a single value — one slot holding one closure,
+where a `fn` would take its dictionary as a parameter — the choice cannot be
+deferred to each use.  Such a binding is rejected:
+
+```sprout
+let labeller = label
+# ambiguous typeclass binding: `labeller` needs a ToString instance, but its
+# type a -> String leaves that choice open ...
+```
+
+A mention with **none** of the three is rejected at compile time.  The rule is
+about the receiving slot, not about the syntax around it, so it covers more
+than it might appear: returning the function from a function with no `where`
+clause of its own, but equally a record field, a list or tuple element, and an
+argument whose receiving parameter is a bare type variable rather than a
 concrete type — `Just(label)` is argument position and is still rejected,
 because `Just`'s parameter fixes nothing.
 
-This is a known gap tracked in `BACKLOG.md`, not a deliberate restriction.  It
-applies equally to a hand-written lambda in the same positions, so it is a
-limit of how far declared types propagate rather than anything about
-constrained functions.  Diagnostics in this area are uneven and are part of
-the tracked gap: most of these positions report a dictionary mismatch naming a
-type variable from the callee's signature, and an annotated top-level binding
-currently reports an internal error rather than a diagnostic.
+Those remaining positions are a known gap tracked in `BACKLOG.md`, not a
+deliberate restriction.  The gap applies equally to a hand-written lambda in
+the same positions, so it is a limit of how far declared types propagate rather
+than anything about constrained functions.  Their diagnostics are uneven and
+part of the tracked gap: they report a dictionary mismatch naming a type
+variable from the callee's signature.
 
 ### `ToString` instances
 

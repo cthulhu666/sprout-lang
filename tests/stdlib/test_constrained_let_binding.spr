@@ -1,0 +1,63 @@
+import stdlib.test (check_eq, run_suite)
+
+# A top-level `let` whose initializer needs a typeclass dictionary.
+#
+# Every other body — a `fn`, an instance method — gets `resolve_dispatch_typed_expr` run over it,
+# the post-pass that fills a dictionary slot the inference-time injection left open. A top-level
+# `let` initializer is neither, so the slot stayed open and the call reached codegen one argument
+# short of the arity its dictionary parameters imply.
+#
+# Both shapes below are annotated, and the annotation is what determines the instance: without it
+# there is nothing to pick from, and a top-level `let` is a single global slot, so a dictionary
+# left open at definition can never be filled at a use site.
+
+class Def a
+  fn def() -> a
+
+instance Def Int
+  fn def() -> Int = 7
+
+# A second instance so a resolver that GUESSES has something wrong to land on: the return-type
+# scan sees only `make`'s own signature, where the constraint variable is the bare return type.
+instance Def String
+  fn def() -> String = "seven"
+
+fn make() -> a where Def a = def()
+
+fn label(x: a) -> String where ToString a = to_string(x)
+
+fn apply1(f: Int -> String, n: Int) -> String = f(n)
+
+# Return-position dispatch: the annotation on the binding is the only thing that fixes `a`.
+let def_int: Int = make()
+
+let def_str: String = make()
+
+# Value position: `label` is referenced rather than applied, so it is eta-expanded into
+# `\__eta_x0 -> label(__eta_x0)`, and the annotation must reach that lambda's parameter for
+# `ToString Int` to be the dictionary chosen.
+let labeller: Int -> String = label
+
+# The precision boundary of the ambiguity rejection, and the reason it is stated in terms of the
+# call rather than the dictionary. This binding generalizes over `a` AND contains a dictionary,
+# but the two are unrelated: `to_string(7)` fixes `ToString Int` at the literal, and no later use
+# could have chosen differently. Rejecting it would be a false positive on working code — this
+# exact shape compiles and runs correctly on the compiler before this change.
+let tag_with_seven = \x -> (x, to_string(7))
+
+fn main() -> Unit !{IO} =
+  run_suite("constrained_let_binding", [
+    # Both types come from the same constrained function, so a single baked-in guess cannot
+    # satisfy both — one of them would be wrong.
+    check_eq("return-position dispatch, annotated Int", def_int, 7),
+    check_eq("return-position dispatch, annotated String", def_str, "seven"),
+
+    # The value-position binding, applied directly and through a hof.
+    check_eq("constrained fn bound to an annotated let", labeller(4), "4"),
+    check_eq("that binding passed on to a hof", apply1(labeller, 3), "3"),
+
+    # A determined dictionary in a generalizing binding stays legitimate, and stays polymorphic:
+    # used at two types, which a binding that had been narrowed to keep its dictionary could not do.
+    check_eq("determined dict in a generalizing binding, at Int", to_string(tag_with_seven(1)), "(1, 7)"),
+    check_eq("the same binding at Bool", to_string(tag_with_seven(true)), "(true, 7)")
+  ])
