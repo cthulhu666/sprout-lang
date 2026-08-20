@@ -1,0 +1,19 @@
+# A top-level `let` bound to a constrained function with no annotation to fix the instance.
+#
+# The binding is one global slot holding one closure, so the dictionary chosen at definition is
+# the dictionary every use gets — there is no per-use choice to defer to, which is what makes an
+# unresolved constraint here an error rather than a polymorphic binding. A `fn` differs precisely
+# because it takes its dictionary as a parameter.
+#
+# Unreported, this compiled to a closure carrying `ToString String`, the guess read off `label`'s
+# own return type, and `apply1(labeller, 3)` then read an Int as a string pointer: a SIGSEGV with
+# nothing said at compile time. Sibling of ambiguous_class_tyvar — same ambiguity, different site.
+module main
+
+fn label(x: a) -> String where ToString a = to_string(x)
+
+fn apply1(f: Int -> String, n: Int) -> String = f(n)
+
+let labeller = label
+
+fn main() -> Unit !{IO} = print(apply1(labeller, 3))

@@ -300,10 +300,51 @@ fn apply_let_annotation(anno: Maybe ast.TypeExpr, s1: Dict types.Type, es1: Dict
   match anno with
   | Nothing -> unifier.UnifyOk(s1, es1)
   | Just te ->
-      let decl_type = type_from_ast(te, build_type_var_dict(collect_te_vars(te, Nil), alias_env))
-      in match unifier.unify_types(s1, es1, unifier.apply_subst(s1, rhs_type), decl_type) with
-         | unifier.UnifyOk s2 es2 -> unifier.UnifyOk(s2, es2)
-         | unifier.UnifyErr e -> unifier.UnifyErr("type annotation mismatch for `" ++ name ++ "`: " ++ e)
+      match unifier.unify_types(s1, es1, unifier.apply_subst(s1, rhs_type), let_annotation_type(te, alias_env)) with
+      | unifier.UnifyOk s2 es2 -> unifier.UnifyOk(s2, es2)
+      | unifier.UnifyErr e -> unifier.UnifyErr("type annotation mismatch for `" ++ name ++ "`: " ++ e)
+
+# The annotation as a type, with its free lowercase variables seeded as TVars the way a `fn`
+# signature's are. Shared by the check above and the push-down below so the two cannot resolve
+# the same written type differently.
+fn let_annotation_type(te: ast.TypeExpr, alias_env: Dict types.Type) -> types.Type =
+  type_from_ast(te, build_type_var_dict(collect_te_vars(te, Nil), alias_env))
+
+# `let x: T = e` where `e` is a lambda: CHECK the lambda against T instead of inferring it and
+# unifying afterwards. Haskell 2010 §4.4.1 states the rule this restores — "each use of f is
+# treated as having the declared type. It is a static error if the same type cannot also be
+# inferred for the defining occurrence" — a signature is checked against the definition.
+#
+# It matters here because a dictionary is chosen DURING the body's inference. `apply_let_annotation`
+# runs after, so `let labeller: Int -> String = label` used to type-check clean while the eta-lambda
+# inside it had already resolved `ToString String` off `label`'s own return type — the annotation
+# arrived too late to be evidence. The parameter has to be `Int` before the constrained call in the
+# body is looked at, which is what `infer_lambda_expected`'s `expected` seeds.
+#
+# The test is "is a lambda after the eta rewrite", not "was eta-rewritten": a hand-written
+# `\n -> label(n)` reaches the same dead end and gets the same fix. `eta_expand_constrained_arg`
+# leaves every other expression alone, so a non-lambda right-hand side takes the ordinary path and
+# `apply_let_annotation` remains its only annotation check.
+#
+# A local `let` has no annotation to push (its surface form binds a pattern and carries no
+# TypeExpr), so this is a top-level-declaration concern only.
+fn typecheck_let_rhs(
+  state: unifier.InferState,
+  env: Dict types.Scheme,
+  subst: Dict types.Type,
+  eff_subst: Dict types.Effect,
+  expr: ast.Expr,
+  anno: Maybe ast.TypeExpr,
+  alias_env: Dict types.Type
+) -> InferResult !{IO} =
+  match anno with
+  | Nothing -> typecheck_expr(state, env, subst, eff_subst, expr)
+  | Just te ->
+      match eta_expand_constrained_arg(expr, env) with
+      | ast.LambdaExpr params body lpos ->
+          infer_lambda_expected(state, env, subst, eff_subst, params, body,
+            Just(let_annotation_type(te, alias_env)), lpos)
+      | _ -> typecheck_expr(state, env, subst, eff_subst, expr)
 
 fn scheme_from_fn_parts_inner(
   type_params: List String,
@@ -6054,7 +6095,7 @@ fn typecheck_decl(
       extern_decl_result(name, params, ret_type_maybe, effects_maybe, ext_pos, alias_env, env, env_ftv)
   | ast.LetDecl name expr anno let_pos ->
       do
-        r <- typecheck_expr(state, global_env_dict(env), subst, eff_subst, expr)
+        r <- typecheck_let_rhs(state, global_env_dict(env), subst, eff_subst, expr, anno, alias_env)
         match r with
         | InferErr pos e -> TypedDeclErr(pos, e)
         | InferOk typed_expr0 s1raw es1raw _ ->
@@ -6070,7 +6111,18 @@ fn typecheck_decl(
                   match f with
                   | FinishErr fpos fmsg -> TypedDeclErr(fpos, fmsg)
                   | FinishOk typed_expr s1 ->
-                      finish_let_decl(name, expr, typed_expr, s1, let_pos, env, env_ftv, es1a)
+                      # The dispatch post-pass, which every `fn` body and instance method already
+                      # gets (check_fn_body, check_instance_methods) and a top-level `let` did not.
+                      # It fills a dictionary slot that inference-time injection left open — the
+                      # return-position case, where only the concrete return type names the
+                      # instance. Run with s1, i.e. AFTER apply_let_annotation, because for a `let`
+                      # the annotation is the only thing that makes that return type concrete:
+                      # `let d: Int = make()` has nothing else to say which `Def` instance it means.
+                      # Without this the slot stayed open and the call reached codegen an argument
+                      # short of the arity its dictionary parameters imply.
+                      finish_let_decl(name, expr,
+                        resolve_dispatch_typed_expr(global_env_dict(env), s1, typed_expr),
+                        s1, let_pos, env, env_ftv, es1a)
   | ast.AliasDecl _ _ _ _ ->
       TypedDeclOk(typed_ast.TPassThrough(decl), env, env_ftv)
   | ast.ClassDecl class_name type_params methods superclasses _ ->
@@ -6863,6 +6915,165 @@ fn letdecl_linear_gate(s1: Dict types.Type, typed_expr: typed_ast.TypedExpr,
     linear_check.check_body_linear(apply_subst_typed_expr(s1, typed_expr), global_env_dict(env))
   else linear_check.LinPass
 
+# The class of the first typeclass dictionary in an expression whose choice depends on one of
+# `quantified` — the variables the binding is about to generalize over.
+#
+# The question cannot be put to the TDict node: its head was committed when the node was built, so
+# a guessed `ToString String` and a determined one are the same three words. Put it to the CALL
+# instead. A dictionary is determined by the constraint variable's instantiation there, so if
+# neither the call's arguments nor its result mentions a variable the binding generalizes over,
+# the choice is already made and generalizing cannot unmake it:
+#
+#   let tag = \x -> (x, to_string(7))    # quantifies `a`; the dict is ToString Int, from the 7
+#
+# is legitimate, and stays legitimate. Only a dictionary hanging on `a` itself is ambiguous.
+fn first_ambiguous_dict_class(e: typed_ast.TypedExpr, subst: Dict types.Type,
+                              quantified: List String) -> Maybe String =
+  match e with
+  | typed_ast.TMethodRef _ class_name t _ _ ->
+      if type_mentions_quantified(t, subst, quantified) then Just(class_name) else Nothing
+  | typed_ast.TCall callee args t _ ->
+      match dict_class_of_args(args) with
+      | Just class_name ->
+          if call_mentions_quantified(args, t, subst, quantified) then Just(class_name)
+          else ambiguous_dict_in_list(Cons(callee, args), subst, quantified)
+      | Nothing -> ambiguous_dict_in_list(Cons(callee, args), subst, quantified)
+  | typed_ast.TLambda _ body _ _ -> first_ambiguous_dict_class(body, subst, quantified)
+  | typed_ast.TIf cond thn els _ _ -> ambiguous_dict_in_list([cond, thn, els], subst, quantified)
+  | typed_ast.TMatch scrut arms _ _ ->
+      match first_ambiguous_dict_class(scrut, subst, quantified) with
+      | Just c -> Just(c)
+      | Nothing -> ambiguous_dict_in_arms(arms, subst, quantified)
+  | typed_ast.TDo steps _ _ -> ambiguous_dict_in_steps(steps, subst, quantified)
+  | typed_ast.TTuple items _ _ -> ambiguous_dict_in_list(items, subst, quantified)
+  | typed_ast.TBinary _ l r _ _ -> ambiguous_dict_in_list([l, r], subst, quantified)
+  | typed_ast.TUnary _ operand _ _ -> first_ambiguous_dict_class(operand, subst, quantified)
+  | typed_ast.TRange l r _ _ -> ambiguous_dict_in_list([l, r], subst, quantified)
+  | typed_ast.TRecord _ fields _ _ -> ambiguous_dict_in_fields(fields, subst, quantified)
+  | typed_ast.TRecordUpdate base fields _ _ ->
+      match first_ambiguous_dict_class(base, subst, quantified) with
+      | Just c -> Just(c)
+      | Nothing -> ambiguous_dict_in_fields(fields, subst, quantified)
+  | typed_ast.TGetField obj _ _ _ -> first_ambiguous_dict_class(obj, subst, quantified)
+  # A TDict reached other than as a call argument has no call to read an instantiation off.
+  | typed_ast.TDict _ _ _ _ -> Nothing
+  # Leaves, listed rather than left to a wildcard: a new TypedExpr constructor should fail to
+  # compile here instead of silently bypassing the guard, since what it guards against is silent.
+  | typed_ast.TVar _ _ _ -> Nothing
+  | typed_ast.TInt _ _ _ -> Nothing
+  | typed_ast.TFloat _ _ _ -> Nothing
+  | typed_ast.TBool _ _ _ -> Nothing
+  | typed_ast.TString _ _ _ -> Nothing
+  | typed_ast.TChar _ _ _ -> Nothing
+  | typed_ast.TUnit _ _ -> Nothing
+
+# The class of the first TDict among a call's arguments — where inference puts the witnesses it
+# injects. Nothing means the call needs no dictionary.
+fn dict_class_of_args(args: List typed_ast.TypedExpr) -> Maybe String =
+  match args with
+  | [] -> Nothing
+  | [arg | rest] ->
+      match arg with
+      | typed_ast.TDict constraint _ _ _ ->
+          match constraint with
+          | ast.TypeConstraint class_name _ -> Just(class_name)
+      | _ -> dict_class_of_args(rest)
+
+fn call_mentions_quantified(args: List typed_ast.TypedExpr, ret: types.Type,
+                            subst: Dict types.Type, quantified: List String) -> Bool =
+  type_mentions_quantified(ret, subst, quantified) ||
+    args_mention_quantified(args, subst, quantified)
+
+fn args_mention_quantified(args: List typed_ast.TypedExpr, subst: Dict types.Type,
+                           quantified: List String) -> Bool =
+  match args with
+  | [] -> false
+  | [arg | rest] ->
+      type_mentions_quantified(typed_ast.typed_expr_type(arg), subst, quantified) ||
+        args_mention_quantified(rest, subst, quantified)
+
+fn type_mentions_quantified(t: types.Type, subst: Dict types.Type, quantified: List String) -> Bool =
+  any_var_quantified(types.ftv(unifier.apply_subst(subst, t)), quantified)
+
+fn any_var_quantified(vars: List String, quantified: List String) -> Bool =
+  match vars with
+  | [] -> false
+  | [v | rest] -> list_member(v, quantified) || any_var_quantified(rest, quantified)
+
+fn ambiguous_dict_in_list(es: List typed_ast.TypedExpr, subst: Dict types.Type,
+                          quantified: List String) -> Maybe String =
+  match es with
+  | [] -> Nothing
+  | [e | rest] ->
+      match first_ambiguous_dict_class(e, subst, quantified) with
+      | Just c -> Just(c)
+      | Nothing -> ambiguous_dict_in_list(rest, subst, quantified)
+
+fn ambiguous_dict_in_arms(arms: List typed_ast.TypedMatchBranch, subst: Dict types.Type,
+                          quantified: List String) -> Maybe String =
+  match arms with
+  | [] -> Nothing
+  | [arm | rest] ->
+      match arm with
+      | typed_ast.TypedMatchBranch _ body ->
+          match first_ambiguous_dict_class(body, subst, quantified) with
+          | Just c -> Just(c)
+          | Nothing -> ambiguous_dict_in_arms(rest, subst, quantified)
+
+fn ambiguous_dict_in_fields(fields: List typed_ast.TypedRecordField, subst: Dict types.Type,
+                            quantified: List String) -> Maybe String =
+  match fields with
+  | [] -> Nothing
+  | [f | rest] ->
+      match f with
+      | typed_ast.TypedRecordField _ v ->
+          match first_ambiguous_dict_class(v, subst, quantified) with
+          | Just c -> Just(c)
+          | Nothing -> ambiguous_dict_in_fields(rest, subst, quantified)
+
+fn ambiguous_dict_in_steps(steps: List typed_ast.TypedDoStep, subst: Dict types.Type,
+                           quantified: List String) -> Maybe String =
+  match steps with
+  | [] -> Nothing
+  | [step | rest] ->
+      match ambiguous_dict_in_step(step, subst, quantified) with
+      | Just c -> Just(c)
+      | Nothing -> ambiguous_dict_in_steps(rest, subst, quantified)
+
+fn ambiguous_dict_in_step(step: typed_ast.TypedDoStep, subst: Dict types.Type,
+                          quantified: List String) -> Maybe String =
+  match step with
+  | typed_ast.TDoBindStep _ e -> first_ambiguous_dict_class(e, subst, quantified)
+  | typed_ast.TDoLetStep _ e -> first_ambiguous_dict_class(e, subst, quantified)
+  | typed_ast.TDoExprStep e -> first_ambiguous_dict_class(e, subst, quantified)
+
+# A top-level `let` that generalizes over a type variable its initializer needs a DICTIONARY for
+# is ambiguous, and rejecting it is the only sound answer: the binding is one global slot holding
+# one closure, so whatever instance was chosen at definition is the instance every use gets.
+# Nothing later can fix it, unlike a `fn`, which takes its dictionary as a parameter.
+#
+# Without this, `let labeller = label` (for `label … where ToString a`) compiled to a closure
+# carrying `ToString String` — the guess read off `label`'s own return type — and applying it to an
+# Int read that Int as a string pointer. A SIGSEGV, silent up to the moment it ran.
+#
+# Haskell reaches the same place from the other side: §4.5.5's monomorphism restriction refuses to
+# generalize a constrained binding's variables, then §4.3.4 defaulting picks a type. Sprout has no
+# defaulting, so an undetermined variable has to be an error rather than a silent choice.
+#
+# Two things keep this from over-reaching, and both are pinned by tests. The variables tested are
+# the binding's OWN quantified ones, so `let empty = list_map(label, [])` — type `List String`,
+# quantifying nothing — keeps its never-invoked dictionary and stays inert. And the dictionary must
+# actually depend on one of them (first_ambiguous_dict_class), so a determined dictionary inside a
+# polymorphic binding, `let tag = \x -> (x, to_string(7))`, is left alone.
+fn let_dict_ambiguity_msg(name: String, quantified: List String, t: types.Type,
+                          subst: Dict types.Type, typed_expr: typed_ast.TypedExpr) -> Maybe String =
+  let [_ | _] = quantified else Nothing
+      Just class_name = first_ambiguous_dict_class(typed_expr, subst, quantified) else Nothing
+  in Just("ambiguous typeclass binding: `" ++ name ++ "` needs a " ++ class_name
+            ++ " instance, but its type " ++ types.type_to_string_renamed(quantified, t)
+            ++ " leaves that choice open; a top-level binding holds a single value, so the instance"
+            ++ " cannot be picked per use — add a type annotation that fixes it")
+
 # The M4.2 linear gate + value-restriction generalization for a top-level `let`,
 # extracted so the LetDecl arm body is a plain call (keeps its match chain shallow).
 fn finish_let_decl(name: String, expr: ast.Expr, typed_expr: typed_ast.TypedExpr,
@@ -6886,13 +7097,18 @@ fn finish_let_decl(name: String, expr: ast.Expr, typed_expr: typed_ast.TypedExpr
       # pinnable to one type — so it is rejected, as SML rejects ungeneralizable
       # top-level type variables.
       if is_syntactic_value(expr) then
-        TypedDeclOk(
-          typed_ast.TLetDecl(name, typed_expr),
-          GlobalEnv(dict_set(name,
-            unifier.generalize(env_ftv, s1, eff_subst,
-              typed_ast.typed_expr_type(typed_expr), types.EffectPure),
-            global_env_dict(env))),
-          env_ftv)
+        let resolved = unifier.apply_subst(s1, typed_ast.typed_expr_type(typed_expr))
+        in match let_dict_ambiguity_msg(name, types.list_diff(types.ftv(resolved), env_ftv),
+                                        resolved, s1, typed_expr) with
+           | Just msg -> TypedDeclErr(let_pos, msg)
+           | Nothing ->
+               TypedDeclOk(
+                 typed_ast.TLetDecl(name, typed_expr),
+                 GlobalEnv(dict_set(name,
+                   unifier.generalize(env_ftv, s1, eff_subst,
+                     typed_ast.typed_expr_type(typed_expr), types.EffectPure),
+                   global_env_dict(env))),
+                 env_ftv)
       else
         match types.list_diff(types.ftv(unifier.apply_subst(s1, typed_ast.typed_expr_type(typed_expr))), env_ftv) with
         | [_ | _] ->

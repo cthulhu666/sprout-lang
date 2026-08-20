@@ -1,0 +1,1 @@
+ambiguous typeclass binding: `main.labeller` needs a ToString instance, but its type a -> String leaves that choice open; a top-level binding holds a single value, so the instance cannot be picked per use — add a type annotation that fixes it
