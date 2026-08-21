@@ -263,91 +263,22 @@ let greeting = "hello, " ++ name ++ "!"
 let msg = `processed ${done} of ${total}`
 ```
 
-**Both are idiomatic. Choose on readability, and know that a template is not an
-optimization.** Embedding a value is *not* on its own a reason to reach for
-`${…}` — a short `++` chain that converts a value explicitly is equally good
-style, and for a handful of short parts it is the cheaper of the two:
+**Both are idiomatic — choose on readability.** Embedding a value is not on its
+own a reason to prefer `${…}`: `"total: " ++ int_to_string(total)` is good style,
+not a form awaiting modernisation.
 
-```sprout
-# Both fine. The first is not "less idiomatic" for using int_to_string.
-fn format_pos(pos: SourcePos) -> String =
-  int_to_string(pos.line) ++ ":" ++ int_to_string(pos.column) ++ ": "
+A template is **not** an allocation win — it costs three more allocations than an
+equivalent `++` chain, at every size, because it builds a `List String` of the
+parts first. What it buys back is copying, which only pays off once the result is
+large:
 
-fn format_pos_t(pos: SourcePos) -> String = `${pos.line}:${pos.column}: `
-```
+- **result under ~1 KB** (diagnostics, labels, keys) — `++` is faster, up to 2×
+- **result over ~3 KB** — the template is faster, 1.4× rising to ~9× at 13 KB
+- **accumulating in a loop** — use neither; both are O(n²) per iteration.
+  Collect into a `List String` and call `string.join` / `string_concat_many` once.
 
-The trade, measured on exactly that four-part case (allocating calls inside the
-one function body, `--emit-ir`):
-
-| | `++` chain | `` `${…}` `` template |
-|---|---|---|
-| heap allocations | **5** | **8** |
-| — of which list nodes | 0 | 5 (one `Cons` per part, plus `Nil`) |
-| — of which strings | 5 | 3 |
-| bytes copied (7-byte result) | 15 | **7** |
-| emitted IR lines | 34 | 68 |
-
-A template lowers to *build a `List String` of the parts, then call
-`string_concat_many`*, so **every part costs a cons cell on top of the string it
-already needed** — more allocations, and roughly twice the IR. What it buys back
-is copying: `++` copies through growing intermediates (quadratic in the part
-count), while `string_concat_many` walks the list once to size the result,
-allocates once, and copies once (linear).
-
-### Where the crossover actually is
-
-Timed, best-of-3, 200k iterations per cell, `-O2`, parts pre-bound as `String`
-so nothing is measuring `int_to_string`. Ratio is the loser's time over the
-winner's:
-
-| parts | part len | result size | winner |
-|---|---|---|---|
-| 2 | 4 | 8 B | `++` **2.00×** |
-| 4 | 4 | 16 B | `++` 1.52× |
-| 8 | 4 | 32 B | `++` 1.39× |
-| 16 | 4 | 64 B | `++` 1.21× |
-| 32 | 4 | 128 B | `++` 1.05× |
-| 2 | 400 | 800 B | `++` 1.25× |
-| 4 | 40 | 160 B | `++` 1.44× |
-| 8 | 40 | 320 B | `++` 1.20× |
-| 4 | 400 | 1.6 KB | *tie* (1.01×) |
-| 16 | 40 | 640 B | template 1.25× |
-| 8 | 400 | 3.2 KB | template 1.43× |
-| 32 | 40 | 1.3 KB | template 1.76× |
-| 16 | 400 | 6.4 KB | template 3.59× |
-| 32 | 400 | 12.8 KB | template **8.97×** |
-
-**The deciding quantity is bytes copied, not the number of parts.** Thirty-two
-parts still favour `++` when the parts are short (1.05× at a 128-byte result),
-because each extra part costs the template a cons cell *and* a `to_string` call
-— the lowering emits one per part even when the instance is identity, as it is
-for `String` — so part count loads both sides, not just `++`.
-
-Read off the table:
-
-- **Result under ~1 KB — prefer `++`.** It wins everywhere in that band, by
-  1.05×–2.00×. Every diagnostic prefix, label, key, and short message lives here.
-- **Result ~1–2 KB — a tie.** Pick on readability; the difference is noise.
-- **Result above ~3 KB — prefer a template**, and the gap widens fast: 1.43× at
-  3 KB, 3.59× at 6 KB, 8.97× at 13 KB. This is `++`'s quadratic copying finally
-  dominating.
-
-**Building a string in a loop is a separate trap, and a template does not fix
-it.** Appending to an accumulator once per iteration is O(n²) copying whichever
-syntax you use. Accumulate the pieces in a `List String` and concatenate once at
-the end — `string.join` or `string_concat_many` — which is the same single-pass
-sizing that makes templates win at scale, without a cons cell per part beyond
-the list you were building anyway.
-
-Above all: neither form is hot enough to matter outside a measured bottleneck,
-and the repo's standing rule on performance claims applies here too (`AGENTS.md`
-§"Builtin vs Stdlib" rule 6 — performance justifies nothing without a concrete,
-measured bottleneck). Prefer whichever reads better; reach for this table only
-when a profile sent you here.
-
-These numbers exist because the intuition runs the other way — "one concat call
-must beat three" — and PR #171 was opened on it before measurement showed that
-at diagnostic sizes the template is the slower of the two.
+Numbers, method, and the reasoning: **[string-building-v0.md](./string-building-v0.md)**
+(re-runnable via `just bench-string-concat`).
 
 Backtick templates may span multiple physical lines — the newlines are literal
 content. This is the idiomatic way to embed a multi-line block (a shader, a
