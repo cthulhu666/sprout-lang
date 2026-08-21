@@ -1,0 +1,85 @@
+import stdlib.test (check_eq, run_suite)
+
+# A `where`-constrained function in RETURN position, under a declared return type.
+#
+# `fn pick() -> Int -> String = label` is the second site of the same gap an annotated
+# top-level `let` had: a dictionary is chosen DURING the body's inference, and the
+# declared return type was only unified against the body AFTERWARDS — too late to be
+# the evidence that picks the instance. The resolver fell back to scanning and landed
+# on `String`, the constrained function's own return type.
+#
+# The declared return type is the only thing that fixes the variable here, exactly as
+# the annotation is for a `let`, so it has to reach the lambda's parameter before the
+# constrained call in the body is looked at.
+#
+# `tests/stdlib/test_constrained_fn_as_value.spr` covers the same family in ARGUMENT
+# position; positions that fix nothing at all (a record field, `Just(label)`) remain
+# uncovered there and here, and are a different defect.
+
+type Color = Red | Green | Blue
+
+instance ToString Color
+  fn to_string(c: Color) -> String =
+    match c with
+    | Red -> "RED"
+    | Green -> "GREEN"
+    | Blue -> "BLUE"
+
+instance Enum Color
+  fn ordinal(c: Color) -> Int =
+    match c with
+    | Red -> 0
+    | Green -> 1
+    | Blue -> 2
+  fn from_ordinal(i: Int) -> Color =
+    match i with
+    | 0 -> Red
+    | 1 -> Green
+    | _ -> Blue
+
+fn label(x: a) -> String where ToString a = to_string(x)
+
+# Two hidden dictionary slots rather than one (`Enum` has `ordinal` + `from_ordinal`),
+# so an implementation that pushes down enough for a single-method class still fails.
+fn tag(x: a) -> Int where Enum a = ordinal(x)
+
+fn pair_label(x: a, y: b) -> String where ToString a, ToString b =
+  to_string(x) ++ "/" ++ to_string(y)
+
+# The bare mention. Nothing but the declared return type says which instance.
+fn pick_int() -> Int -> String = label
+
+# The same shape at a second type with a distinctive instance: a dictionary chosen by
+# scanning could satisfy one of these by luck, not both.
+fn pick_color() -> Color -> String = label
+
+# Hand-written, not produced by the eta rewrite. It reaches the same dead end, so the
+# fix must key on "is a lambda", not on "was eta-expanded".
+fn pick_lambda() -> Int -> String = \n -> label(n)
+
+# Two dictionary slots.
+fn pick_tag() -> Color -> Int = tag
+
+# Two constraints, two parameters: pins that the pushed-down type reaches BOTH
+# parameters and that the dictionaries stay in declaration order.
+fn pick_pair() -> Int -> Bool -> String = pair_label
+
+# The case the tyvar mapping has to get right: the return type mentions `a`, and it is
+# the SAME `a` as the parameter's, not a fresh one. This already worked by forwarding
+# the caller's own dictionary, so it is a regression guard rather than a new case — if
+# the pushed-down type were resolved through a separate mapping, `a` would split in two.
+fn labeller_for(x: a) -> a -> String where ToString a = \y -> label(y)
+
+fn main() -> Unit !{IO} =
+  run_suite("constrained_fn_return_position", [
+    check_eq("return-position mention, at Int", pick_int()(4), "4"),
+    check_eq("the same mention at a user type", pick_color() (Red), "RED"),
+    check_eq("hand-written lambda, same position", pick_lambda()(7), "7"),
+    check_eq("two dictionary slots (Enum)", pick_tag() (Green), 1),
+    check_eq("two constraints, two params", pick_pair()(3, true), "3/true"),
+
+    # The forwarding case, at two types, since a dictionary that stopped forwarding
+    # and started scanning could still satisfy one of them.
+    check_eq("return type mentioning the param's own tyvar, at Int", labeller_for(1)(2), "2"),
+    check_eq("the same, at a user type", labeller_for(Red) (Blue), "BLUE")
+  ])
