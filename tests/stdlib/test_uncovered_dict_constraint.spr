@@ -1,0 +1,77 @@
+import stdlib.test (check_eq, run_suite)
+
+# The ACCEPTED side of the uncovered-dictionary rejection
+# (tests/conformance/type_error/uncovered_dict_*.spr hold the rejected side).
+#
+# A function that generalizes a type variable, needs a class dictionary for it, and declares no
+# `where` constraint supplying one is rejected: the dictionary gets guessed once at definition and
+# every caller receives that guess. Rejecting is only half a rule, though — an implementation that
+# flagged every generalized variable, or every dictionary, would satisfy the conformance fixtures
+# completely while making the four shapes below uncompilable. They are what says the rule is
+# narrow, so they are asserted here rather than described in a comment.
+#
+# Each one differs from a REJECTED program by exactly one thing, named per case.
+
+class MyEq a
+  fn my_eq(x: a, y: a) -> Bool
+
+class MyOrd a where MyEq a
+  fn my_cmp(x: a, y: a) -> Int
+
+instance MyEq Int
+  fn my_eq(x: Int, y: Int) -> Bool = x == y
+
+instance MyOrd Int
+  fn my_cmp(x: Int, y: Int) -> Int = if x < y then 0 - 1 else if x == y then 0 else 1
+
+type Box a = (val: a)
+
+instance ToString (Box a)
+  fn to_string(b: Box a) -> String = "Box"
+
+fn label(x: a) -> String where ToString a = to_string(x)
+
+# (1) DETERMINED BY THE BODY. No return annotation and no `where` clause, exactly like the
+# rejected `fn pick() = label` — but the dictionary hangs on the literal 7, not on anything this
+# function generalizes. It generalizes nothing at all, so there is no per-use choice to lose.
+fn make() = label(7)
+
+# (2) FORWARDED. Character-for-character the rejected uncovered_dict_param_position.spr body; the
+# `where` clause is the entire difference. It gives the caller a hidden dictionary parameter, so
+# the instance is supplied per call instead of chosen once.
+fn relabel(x: a) where ToString a = label(x)
+
+# (3) NO DICTIONARY AT ALL. Generalizes `a` with no `where` clause — the rejected shape's
+# signature — but nothing in the body needs an instance, and the callee is a PARAMETER rather than
+# a constrained global. A rule keyed on "generalizes an uncovered variable" alone rejects this.
+fn pass_through(f: a -> String, x: a) = f(x)
+
+# (4) COVERED THROUGH A SUPERCLASS. `via_ord` declares `MyOrd a` while `needs_eq` demands `MyEq a`.
+# The dictionary is genuinely forwarded, so coverage must not be a literal class-name comparison.
+fn needs_eq(x: a, y: a) -> Bool where MyEq a = my_eq(x, y)
+
+fn via_ord(x: a, y: a) -> Bool where MyOrd a = needs_eq(x, y)
+
+# (5) COVERED BY A COMPOUND HEAD. `where ToString (Box a)` constrains an application, not a bare
+# variable, so a coverage test that only reads a bare-variable head sees `a` as uncovered and
+# rejects a forwarding that is real.
+fn shout_boxed(b: Box a) -> String where ToString (Box a) = label(b) ++ "!"
+
+# (6) The variable is generalized by NOTHING here — `main` has no type variables — so the dead
+# dictionary in an empty container stays inert instead of becoming an error. The rejection is a
+# property of a declaration that generalizes, not of any expression that leaves a variable free;
+# three suites in this corpus depend on that and would fail as a group.
+fn count_empty() -> Int = list_length(list_map(label, []))
+
+fn main() -> Unit !{IO} =
+  run_suite("uncovered_dict_constraint", [
+    check_eq("dictionary determined by the body, no annotation needed", make(), "7"),
+    # Two types through one forwarded dictionary: a single wrong-but-lucky instance passes one.
+    check_eq("forwarded through a where clause, Int", relabel(5), "5"),
+    check_eq("forwarded through a where clause, Bool", relabel(true), "true"),
+    check_eq("generalized with no dictionary anywhere", pass_through(\n -> "n", 5), "n"),
+    check_eq("covered through a superclass, equal", via_ord(1, 1), true),
+    check_eq("covered through a superclass, unequal", via_ord(1, 2), false),
+    check_eq("covered by a compound constraint head", shout_boxed(Box(val = 1)), "Box!"),
+    check_eq("free-tyvar dead dictionary stays inert", count_empty(), 0)
+  ])

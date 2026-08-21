@@ -1,0 +1,20 @@
+# A constrained function called from a caller that declares no `where` clause of its own.
+#
+# `relabel_nowhere` generalizes `a`, and `label(x)` needs a `ToString a` dictionary for it. The
+# caller has no `where` clause, so it has no hidden dict parameter for that obligation to be
+# forwarded through — the resolver guessed one at definition and baked it into a single closure.
+#
+# Unreported, this compiled at exit 0 and SIGSEGVd: the emitted function's arity includes the
+# hidden dict slot that its declared type does not mention, so `relabel_nowhere(5)` passed the 5
+# into the dict slot and read it as a dictionary pointer.
+#
+# The sibling with the SAME body but a `where` clause is legitimate and stays accepted; see
+# tests/stdlib/test_uncovered_dict_constraint.spr. The distinction is whether anything can supply
+# the dictionary per call, not how the body is written.
+module main
+
+fn label(x: a) -> String where ToString a = to_string(x)
+
+fn relabel_nowhere(x: a) = label(x)
+
+fn main() -> Unit !{IO} = print(relabel_nowhere(5) ++ relabel_nowhere(true))

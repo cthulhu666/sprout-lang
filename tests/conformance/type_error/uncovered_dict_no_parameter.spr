@@ -1,0 +1,16 @@
+# The same uncovered dictionary, but the constraint variable appears in NO parameter.
+#
+# Separate fixture from uncovered_dict_param_position rather than a second case in it, because
+# the two need different advice and the harness matches on a substring: telling the reader here
+# to "add `where ToString a`" would be a lie. A `where` clause supplies its dictionary per call
+# through a parameter, and this function has no parameter mentioning `a` for that to happen at.
+#
+# What the reader should write instead is a concrete return type — `fn pick() -> Int -> String`
+# — which fixes the instance at the definition, where it is actually determined.
+module main
+
+fn label(x: a) -> String where ToString a = to_string(x)
+
+fn pick() = label
+
+fn main() -> Unit !{IO} = print(pick()(5))

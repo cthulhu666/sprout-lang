@@ -70,7 +70,10 @@ fn apply_mixed(f: Int -> Bool -> String, n: Int, b: Bool) -> String = f(n, b)
 #
 # Returning the reference is NOT in that set: a declared return type fixes the variable exactly as
 # an annotation on a `let` does, and `tests/stdlib/test_constrained_fn_return_position.spr` covers
-# it. Returning it from a fn that declares no return type at all still fixes nothing.
+# it. Returning it from a fn that declares no return type at all fixes nothing and is now a
+# located compile error rather than a crash — see
+# `tests/conformance/type_error/uncovered_dict_no_parameter.spr`, with the accepted shapes it is
+# distinguished from in `tests/stdlib/test_uncovered_dict_constraint.spr`.
 #
 # None of that is specific to naming a constrained function: a hand-written lambda in those same
 # positions fails identically on a compiler without this change. The parameter type is fixed only by
