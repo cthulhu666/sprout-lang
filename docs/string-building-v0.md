@@ -242,3 +242,100 @@ after a change to:
   cell the defaults put at `++` faster 1.39× — the winner inverted, not just the
   margin. The script now marks sub-100 ms cells `[NOISY]` and says so in its
   summary; believe only unmarked rows.
+
+## 10. Making the choice moot — open, not scheduled
+
+Everything above documents a tradeoff contributors have to *know*. The better
+outcome is not a better-documented tradeoff but no tradeoff: a template that is
+never slower than the `++` chain it replaces. This section records what was
+learned about how to get there. **Nothing here is decided or scheduled** — see
+the `BACKLOG.md` entry that points at it.
+
+### 10.1 The structural constraint
+
+The desugar (`stdlib/compiler/desugar_ctx.sprout`) is **purely syntactic and runs
+before typechecking** — its own header says "never sees inferred types". So at the
+moment the strategy is chosen, the compiler knows:
+
+- the number of effective parts,
+- which parts are literals, and their exact text,
+
+and does **not** know the type or the rendered length of any `${…}`. This is what
+makes "use `++` when the result is short" undecidable at that point: *short* is a
+runtime property of the interpolated values.
+
+Three cases are already special-cased there (`desugar_ctx.sprout:14-17`), so the
+cheap wins are taken: empty → `""`, **all-literal → one merged literal** (a real
+constant-fold), single effective part → that part alone. Only the general case
+builds the cons list, via `desugar_template_general`.
+
+### 10.2 Making templates faster (keeping the current lowering)
+
+| lever | saves | cost / blocker |
+|---|---|---|
+| **A. Flat buffer** — write parts into an `alloca` array, add a runtime `string_concat_n(ptr, count)` | **all n `Cons` cells + the `Nil`** — the entire allocation deficit from §3 | **new builtin ⇒ needs approval up front** (`AGENTS.md` §"Builtin vs Stdlib" 4–6). Rooting an n-slot array must respect the shadow-stack ABI (`docs/compiler-internals.md`); the existing API roots one slot per call, which is already n pushes |
+| **B. Elide the identity `to_string`** on parts already typed `String` | n direct calls — **no allocations** | needs types, so it cannot live in the syntactic desugar; would be a post-typecheck peephole |
+| **C. Merge adjacent literal parts** | ~nothing — the lexer already emits one literal per run | negligible either way |
+
+**Only A closes the gap**, because the gap is allocations, not calls (§3). A would
+make the template form ≥ `++` at every size and delete the crossover outright. B
+is small by comparison.
+
+### 10.3 Desugaring small templates to `++`
+
+The other direction: leave the runtime alone and pick `++` when it is the better
+lowering. Two variants, and the difference between them matters.
+
+**Variant 1 — syntactic, on part count.** In `desugar_template_general`, emit a
+left-associated `++` chain when the effective part count is ≤ N. Measured support
+for N = 4 (§4): `++` wins or ties in **every** cell at 2 and 4 parts, including
+400-byte parts. Cheap — one function, no type info, no runtime change, no new
+builtin — and N = 4 covers the `${line}:${col}: ` shape that started all this.
+
+Its honest weakness is a tail: four *very* long interpolated values (~10 KB each)
+would be pessimised by roughly the copy ratio, ~2.25× at n = 4. Bounded, but
+invisible at desugar time.
+
+**Variant 2 — type-directed, on provable bounds.** Choose after typechecking,
+where `to_string`'s resolved instance is visible. `Int`, `Bool`, `Char` and string
+literals have compile-time-bounded render lengths, so a template made only of
+those is *provably* small and `++` is *provably* better; a template containing
+`${some_string}` keeps `string_concat_many`. No heuristic and no tail risk.
+
+Cost: the decision has to move somewhere type-aware — either a peephole in
+`ast_to_ir` that recognises the `string_concat_many(<cons-list>)` shape the
+desugar emits and rewrites it when every element's type is bounded, or a split of
+the desugar into syntactic and post-typecheck halves. The peephole is the smaller
+of the two and needs no change to `desugar_ctx.sprout` at all.
+
+### 10.4 Why this is worth doing, and why not for the reason you'd guess
+
+**Not for speed.** Nothing here is a measured bottleneck, and `AGENTS.md`
+§"Builtin vs Stdlib" rule 6 says that alone justifies nothing. A 1.4× win on a
+function that runs once per diagnostic is not a reason to touch the compiler.
+
+**For the guidance burden.** If small templates lowered to `++`, §§3–7 of this
+document stop being something a contributor has to know: the crossover would not
+exist in the size range real code lives in, "choose on readability" would be the
+whole rule, and PR #171 becomes *impossible to get wrong* rather than merely
+documented. Deleting a rule beats explaining it.
+
+That argument favours **Variant 2** — a heuristic that is right in the common case
+still leaves a tail to explain, which is most of what makes the current situation
+annoying.
+
+### 10.5 Required before implementing
+
+1. **Prior-art survey** (`AGENTS.md` §"Design Change Process" 3). Interpolation
+   lowering is a settled question elsewhere — C#, Java, Kotlin, Scala all make a
+   strategy choice here — and each row must be verified against a language
+   reference or spec, not recalled. Not yet done.
+2. **Builtin approval** for 10.2 A specifically, before any code.
+3. **A regression pin on the emitted shape.** Whichever variant lands, the point
+   is *which lowering is chosen*, so the test has to assert on emitted IR (as
+   `tests/golden/ir/` and the smoke shapes already do), not only on the resulting
+   string — an output-only test passes under either lowering and would let a
+   silent revert through.
+4. **Re-run `just bench-string-concat`** after, and update §4. A change to the
+   lowering moves the crossover by construction; if the numbers do not move, the
+   change did not take effect.
