@@ -39,6 +39,18 @@ seed-fp-ack:
   git write-tree > "$ACK"
   echo "Seed fixed-point acked for staged tree: $(cat "$ACK")"
 
+# Measure `++` chain vs backtick template across part count x part length.
+# Produces (and re-verifies) the table in docs/string-building-v0.md.
+#
+# NOT a gate, on purpose: the output is a wall-clock timing, so a threshold
+# assertion on it would go red for machine load rather than for a defect. Run it
+# when the template lowering, str_concat/string_concat_many, or the GC's
+# allocation path changes — those can move the crossover.
+[group('dev')]
+bench-string-concat: bootstrap-from-seed
+  DRIVER="{{build_dir}}/compile_driver_bin_stage1" STDLIB="{{stdlib_root}}" \
+    CLANG_EXTRA="{{clang_extra}}" bash scripts/bench_string_concat.sh
+
 # Launch the interactive Sprout REPL via sproutd (self-configuring).
 # Prerequisites: just build-sproutd
 [group('dev')]
