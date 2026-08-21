@@ -1,0 +1,1 @@
+Executable entrypoint `main` must declare its return type and effect; write `fn main() -> Unit !{IO}`, or `fn main() -> Int !{IO}` to set the process exit code
