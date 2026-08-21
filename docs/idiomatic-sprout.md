@@ -263,6 +263,55 @@ let greeting = "hello, " ++ name ++ "!"
 let msg = `processed ${done} of ${total}`
 ```
 
+**Both are idiomatic. Choose on readability, and know that a template is not an
+optimization.** Embedding a value is *not* on its own a reason to reach for
+`${…}` — a short `++` chain that converts a value explicitly is equally good
+style, and for a handful of short parts it is the cheaper of the two:
+
+```sprout
+# Both fine. The first is not "less idiomatic" for using int_to_string.
+fn format_pos(pos: SourcePos) -> String =
+  int_to_string(pos.line) ++ ":" ++ int_to_string(pos.column) ++ ": "
+
+fn format_pos_t(pos: SourcePos) -> String = `${pos.line}:${pos.column}: `
+```
+
+The trade, measured on exactly that four-part case (allocating calls inside the
+one function body, `--emit-ir`):
+
+| | `++` chain | `` `${…}` `` template |
+|---|---|---|
+| heap allocations | **5** | **8** |
+| — of which list nodes | 0 | 5 (one `Cons` per part, plus `Nil`) |
+| — of which strings | 5 | 3 |
+| bytes copied (7-byte result) | 15 | **7** |
+| emitted IR lines | 34 | 68 |
+
+A template lowers to *build a `List String` of the parts, then call
+`string_concat_many`*, so **every part costs a cons cell on top of the string it
+already needed** — more allocations, and roughly twice the IR. What it buys back
+is copying: `++` copies through growing intermediates (quadratic in the part
+count), while `string_concat_many` walks the list once to size the result,
+allocates once, and copies once (linear).
+
+So the crossover is about the parts, not about whether values are embedded:
+
+- **Few, short parts** (a diagnostic prefix, a two-word label) — prefer `++`.
+  Fewer allocations, and the copying `string_concat_many` saves is a handful of
+  bytes.
+- **Many parts, long parts, or a loop** — prefer a template (or
+  `string_concat_many` / `string.join` directly). Here the quadratic copying is
+  the real cost and the cons cells are noise.
+- **Readability disagrees with the above** — follow readability. Neither form is
+  hot enough to matter outside a measured bottleneck, and the repo's standing
+  rule on performance claims applies here too (`AGENTS.md` §"Builtin vs Stdlib"
+  rule 6: performance justifies nothing without a concrete, measured
+  bottleneck).
+
+This table exists because the intuition runs the other way — "one concat call
+must beat three" — and PR #171 was opened on it before measurement showed the
+opposite.
+
 Backtick templates may span multiple physical lines — the newlines are literal
 content. This is the idiomatic way to embed a multi-line block (a shader, a
 query, an HTML fragment) instead of a `"…\n" ++ "…\n"` chain:
