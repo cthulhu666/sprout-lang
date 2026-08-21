@@ -346,6 +346,39 @@ fn typecheck_let_rhs(
             Just(let_annotation_type(te, alias_env)), lpos)
       | _ -> typecheck_expr(state, env, subst, eff_subst, expr)
 
+# `fn f(…) -> T = e` where `e` is a lambda: CHECK it against the declared return type
+# rather than inferring it and unifying at the declaration boundary afterwards. Same
+# correction `typecheck_let_rhs` makes for an annotated `let`, at the other position that
+# has a declared type to push down. A dictionary is chosen DURING the body's inference, so
+# a check that runs after cannot be the evidence: `fn pick() -> Int -> String = label`
+# resolved `ToString String` off `label`'s own return type.
+#
+# The expected type is read off `inst_type` rather than the return `TypeExpr`. That is the
+# whole reason this is safe: `inst_type` is the signature instantiated ONCE, so a return
+# type naming a parameter's variable — `fn wrap(x: a) -> a -> String where ToString a` —
+# already shares that variable with the parameter, where resolving the TypeExpr separately
+# would mint a second `a`.
+#
+# Only when a return type was written. With none, `fn_return_type` yields the metavar the
+# signature was seeded with, which is not evidence about anything.
+fn typecheck_fn_body(
+  state: unifier.InferState,
+  env: Dict types.Scheme,
+  subst: Dict types.Type,
+  eff_subst: Dict types.Effect,
+  body: ast.Expr,
+  ret_type_maybe: Maybe ast.TypeExpr,
+  expected_ret: types.Type
+) -> InferResult !{IO} =
+  match ret_type_maybe with
+  | Nothing -> typecheck_expr(state, env, subst, eff_subst, body)
+  | Just _ ->
+      match eta_expand_constrained_arg(body, env) with
+      | ast.LambdaExpr lparams lbody lpos ->
+          infer_lambda_expected(state, env, subst, eff_subst, lparams, lbody,
+            Just(expected_ret), lpos)
+      | _ -> typecheck_expr(state, env, subst, eff_subst, body)
+
 fn scheme_from_fn_parts_inner(
   type_params: List String,
   params: List ast.Param,
@@ -7143,7 +7176,7 @@ fn check_fn_body(
         # (fn_body_env), so recursive self-calls inject dicts from the Scheme —
         # no @constrained_N self markers to seed. fwd_env holds only @fwd/@eta_fwd.
         let body_env = fn_body_env(name, params, inst_type, constraint_source_tokens(constraints), fwd_env)
-        InferOk typed_body0 s1 es1 body_eff <- typecheck_expr(state, body_env, subst, eff_subst, body) else InferErr pos msg -> (fn_body_err(name, pos, msg), dict_empty(), Nil)
+        InferOk typed_body0 s1 es1 body_eff <- typecheck_fn_body(state, body_env, subst, eff_subst, body, ret_type_maybe, fn_return_type(inst_type, list_length(params))) else InferErr pos msg -> (fn_body_err(name, pos, msg), dict_empty(), Nil)
         let unifier.UnifyOk s2a es2a = unifier.unify_types(s1, es1, typed_ast.typed_expr_type(typed_body0), fn_return_type(inst_type, list_length(params))) else unifier.UnifyErr e -> (return_mismatch_body_err(name, typed_body0, fn_return_type(inst_type, list_length(params)), s1, "Return type mismatch in " ++ name ++ ": " ++ e), dict_empty(), Nil)
         # The declaration boundary: the one place that holds both the declared
         # effect and the effect the body was inferred to perform. Recorded for

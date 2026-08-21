@@ -349,6 +349,15 @@ be known rather than merely consistent, typeclass dispatch being the case that
 motivated it (§8): in `let labeller : Int -> String = label`, the annotation is
 what makes the instance `ToString Int`.
 
+A function's **declared return type** is evidence in the same way and for the
+same reason.  Where the body is a function literal, its parameters take their
+types from the declared return type before the body is inferred, so in
+`fn pick() -> Int -> String = label` the return type is what makes the instance
+`ToString Int`.  These two — an annotated `let` and a declared return type — are
+the positions that carry a written type; elsewhere a function literal is typed
+against the parameter it is passed to, and a position that fixes nothing (a
+record field, an element of a list) determines no instance.
+
 **An undetermined dictionary in a top-level binding is an error.** A top-level
 `let` is a single value, so a typeclass dictionary its initializer needs is
 chosen once, at the binding, and every use gets that choice — unlike a `fn`,
@@ -1987,8 +1996,9 @@ apply(label, 3)     # `label` has type `Int -> String` here
 
 The dictionary must come from somewhere the compiler can read at the point of
 the mention: a receiving parameter whose declared type fixes it, as above; a
-`where` clause on the enclosing function, which supplies one to forward; or a
-type annotation on the binding.  Given any of the three, the mention may appear
+`where` clause on the enclosing function, which supplies one to forward; a type
+annotation on the binding; or the declared return type of the function the
+mention is returned from.  Given any of the four, the mention may appear
 anywhere a value may — including bound with `let`:
 
 ```sprout
@@ -2012,13 +2022,15 @@ let labeller = label
 # type a -> String leaves that choice open ...
 ```
 
-A mention with **none** of the three is rejected at compile time.  The rule is
+A mention with **none** of the four is rejected at compile time.  The rule is
 about the receiving slot, not about the syntax around it, so it covers more
-than it might appear: returning the function from a function with no `where`
-clause of its own, but equally a record field, a list or tuple element, and an
-argument whose receiving parameter is a bare type variable rather than a
-concrete type — `Just(label)` is argument position and is still rejected,
-because `Just`'s parameter fixes nothing.
+than it might appear: a record field, a list or tuple element, and an argument
+whose receiving parameter is a bare type variable rather than a concrete type —
+`Just(label)` is argument position and is still rejected, because `Just`'s
+parameter fixes nothing.  Returning the function is likewise governed by the
+slot: with a declared return type that fixes the variable it is accepted, and
+with none — neither a return type nor a `where` clause on the enclosing
+function — there is nothing to read and the mention is rejected.
 
 Those remaining positions are a known gap tracked in `BACKLOG.md`, not a
 deliberate restriction.  The gap applies equally to a hand-written lambda in

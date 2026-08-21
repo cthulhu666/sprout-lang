@@ -63,10 +63,14 @@ fn apply2(f: Int -> Int -> String, x: Int, y: Int) -> String = f(x, y)
 fn apply_mixed(f: Int -> Bool -> String, n: Int, b: Bool) -> String = f(n, b)
 
 # What this file does NOT cover, deliberately: mentions whose receiving slot fixes nothing, in a
-# caller with no `where` clause of its own. Returning the reference and `let f = label in f(n)` are
-# the obvious two, but the rule is about the slot rather than the syntax, so it also covers a record
-# field, a list or tuple element, and an argument to a bare-tyvar parameter — `Just(label)` is
-# argument position and is rejected all the same.
+# caller with no `where` clause of its own. `let f = label in f(n)` is the obvious one, but the rule
+# is about the slot rather than the syntax, so it also covers a record field, a list or tuple
+# element, and an argument to a bare-tyvar parameter — `Just(label)` is argument position and is
+# rejected all the same.
+#
+# Returning the reference is NOT in that set: a declared return type fixes the variable exactly as
+# an annotation on a `let` does, and `tests/stdlib/test_constrained_fn_return_position.spr` covers
+# it. Returning it from a fn that declares no return type at all still fixes nothing.
 #
 # None of that is specific to naming a constrained function: a hand-written lambda in those same
 # positions fails identically on a compiler without this change. The parameter type is fixed only by
