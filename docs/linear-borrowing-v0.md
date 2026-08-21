@@ -573,8 +573,10 @@ and `decode_tfunc_at` rejects a tagless `TFunc` independently.
 
 **Erasure held.** `just ir-golden-diff` across 58 files: **additions only, zero changed or removed
 lines**. The two added `define` blocks are the `ast.mode_is_borrowing` / `ast.param_mode_of`
-helpers, and they appear only in `repl_hosted.sprout`, the one golden program that bundles the
-compiler itself. No pre-existing function's body moved by an instruction.
+helpers, and they appear only in the one golden program that bundles the compiler itself — at the
+time `examples/repl_hosted.sprout`, since replaced by
+`tests/smoke_shapes/11_compiler_bundle.spr`. No pre-existing function's body moved by an
+instruction.
 
 ---
 

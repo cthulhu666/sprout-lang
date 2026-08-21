@@ -1,0 +1,42 @@
+module main
+
+import stdlib.repl
+import stdlib.compiler.source as source
+
+# The one golden-corpus program that bundles the SELF-HOSTED COMPILER.
+#
+# Every other corpus entry is a user-level program, so its IR moves only when
+# codegen for user constructs moves. This one pulls `stdlib.compiler.*` in
+# transitively through `stdlib.repl`, which makes its golden the only place a
+# change to the compiler's OWN internals shows up as an IR diff — ~80k lines of
+# it. That is load-bearing coverage, not incidental bulk: it is what noticed the
+# `SourcePos` ADT→record conversion (the tag dispatch a single-constructor match
+# was paying, and SourcePos's now-absent `sprout_register_ctor`), neither of which
+# any user-level example can see.
+#
+# It replaces `examples/repl_hosted.sprout`, which held this role until it was
+# removed. Two things improved in the move:
+#
+#   - `tests/smoke_shapes/` is covered by `just smoke-shapes` (DoD #7 — the
+#     `str_concat(ptr null,…)` null-pointer codegen guard). `examples/` is not,
+#     so the compiler-bundling shape was previously outside that check.
+#   - A smoke shape is IR-only — never linked, never run — which suits a program
+#     whose `main` is an interactive REPL loop far better than an `examples/`
+#     entry did (examples are compiled, and five of them are run by
+#     `just run-example-canary`).
+#
+# `repl.run()` is CALLED rather than merely imported: an unreferenced import
+# gives the bundler license to emit none of the module, and the whole point here
+# is that the compiler's code reaches the IR.
+#
+# `stdlib.compiler.source` is imported DIRECTLY, and used, on purpose. The
+# transitive path through `stdlib.repl` is what supplies the breadth, but it is
+# also invisible — were `repl` ever refactored to stop reaching the compiler,
+# this file would still compile and the coverage would vanish silently. The
+# direct dependency anchors the intent where a reader (and a grep) can see it.
+
+fn origin_line() -> Int =
+  source.source_position(source.cursor_from_string("")).line
+
+fn main() -> Unit !{IO} =
+  if origin_line() == 1 then repl.run() else print(origin_line())

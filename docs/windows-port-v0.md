@@ -30,9 +30,14 @@ fine" would not be good enough — `musttail` (mutual-recursion TCO) and
 `llvm.stacksave`/`llvm.stackrestore`:
 
 ```
-clang --target=x86_64-pc-windows-gnu   -c tests/golden/ir/examples__astar.sprout.ll       -o /tmp/x.obj
-clang --target=aarch64-pc-windows-msvc -c tests/golden/ir/examples__repl_hosted.sprout.ll -o /tmp/a.obj
+clang --target=x86_64-pc-windows-gnu   -c tests/golden/ir/examples__astar.sprout.ll                        -o /tmp/x.obj
+clang --target=aarch64-pc-windows-msvc -c tests/golden/ir/tests__smoke_shapes__11_compiler_bundle.spr.ll -o /tmp/a.obj
 ```
+
+(The second file was `examples__repl_hosted.sprout.ll` until that example was removed; the
+compiler-bundling golden it names is the successor, and carries the same `musttail` and
+`llvm.stacksave`/`llvm.stackrestore` usage that makes it the interesting target here — re-verified
+on the new path, exit 0 with only `-Woverride-module`.)
 
 Both exit 0, emitting only `-Woverride-module`. `file /tmp/x.obj` reports
 `Intel amd64 COFF object file, not stripped, 7 sections`. Compiling to an object needs no Windows
