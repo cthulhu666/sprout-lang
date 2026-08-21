@@ -234,7 +234,17 @@ tracked "wire in the dead `assert_resolved_typed_expr` pass" backlog item lands.
 ---
 
 ### F7 — [85] Effect rows are inert; `unify_effects` has zero call sites
-`stdlib/compiler/unifier.sprout:242` · soundness · **TRACKED** (`BACKLOG.md:236`, `:1728`, `:1738/1746`; `docs/fundamentals-code-review-handoff-2026-07-03.md:389`)
+`stdlib/compiler/unifier.sprout:242` · soundness · **RESOLVED 2026-08-16** (was TRACKED via
+`docs/fundamentals-code-review-handoff-2026-07-03.md` D2/W6)
+
+> **Finding resolved; the analysis below is the 2026-08-13 state, kept as the record of why.**
+> Spec §7 rules 8 and 11 are enforced as real rejections since 2026-08-16 — a pure-annotated
+> body that calls `print` is now rejected — so "`!{IO}` is documentation everywhere except
+> `validate_entrypoint`" (below) no longer holds. The fix was **not** the missing
+> `unify_effects` call this finding proposes: unification accepts both directions, and the
+> rule at a declaration boundary is one-directional subsumption (inferred ⊑ declared). See
+> `docs/effect-enforcement-v0.md` and spec §7's enforcement note. Two narrower gaps stay open
+> in `BACKLOG.md` §1: top-level `let` purity, and unknown effect labels.
 
 `unify_applied`'s TFunc arm wildcards both effect fields; `unify_effects`/`unify_effects_applied`
 have zero call sites in `stdlib/` or `tests/`. So `eff_subst` — threaded through every `infer_*`

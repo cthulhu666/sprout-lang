@@ -855,16 +855,31 @@ Legend:
   pattern), and the syntactic gate is demoted to selecting the fast path rather than deciding
   legality.
 
-- [x] `P3` **Spec §7's effect rules claimed enforcement the checker does not perform. DOC HALF
-  FIXED 2026-08-13** — the review's F7 (effect rows inert, `unify_effects` has zero call sites) is
-  already tracked as an implementation item above (`merge_effects`, D2/W6). What was *not* tracked
-  is that `docs/spec-v0.md` §7 stated rules 8/9/11 as if they held. Verified by running the
-  checker: `fn shout(s: String) -> Unit = print(s)` is accepted and its type printed as
-  `String -> Unit`. §7 now carries an enforcement note saying effects are parsed, carried and
-  printed but never unified, so an annotation is documentation rather than a checked contract —
-  with the exception, also verified, that rule 10's effect-polymorphic `main` check *is* enforced
-  (`Executable entrypoint `main` must not be effect-polymorphic`). §6's builtin bullet
-  cross-references the note. The implementation half stays open under D2/W6.
+- [x] `P3` **Spec §7's effect rules claimed enforcement the checker did not perform. DOC HALF
+  FIXED 2026-08-13; IMPLEMENTATION HALF LANDED 2026-08-16 — this entry's body is superseded,
+  re-verified 2026-08-21.** Original problem: `docs/spec-v0.md` §7 stated rules 8/9/11 as if they
+  held, and they did not. That is now false in both halves, so **do not read the description below
+  as current** — three of its claims have since been retracted:
+  - *"effect rows inert, `unify_effects` has zero call sites"* — wrong then and now. `unify_effects`
+    is called from `unifier.sprout:426`, and per §7's own note the missing call was never the
+    mechanism: effects were carried on `Scheme` with the arrows hardcoded pure, and unification is
+    the wrong operation at a declaration boundary anyway (it accepts both directions; the rule is
+    one-directional subsumption).
+  - *"`fn shout(s: String) -> Unit = print(s)` is accepted"* — now **rejected**: ``ERROR: check:
+    `shout` performs IO but is declared pure — add `!{IO}` after its return type (spec-v0.md §7
+    rule 8)``. Rule 11 (a pure caller of an `!{IO}` function) is enforced by the same pass and
+    reports the same diagnostic. Both re-verified 2026-08-21.
+  - *"§7 now carries an enforcement note saying effects are … never unified, so an annotation is
+    documentation rather than a checked contract"* — §7 says the opposite today and explicitly
+    retracts that wording; an `!{IO}` annotation on a `fn` or instance method is a checked
+    contract. See `docs/effect-enforcement-v0.md`.
+
+  **What actually remains open** is narrower than "the implementation half" and is tracked as its
+  own two items in §1 above, not here: top-level `let` initializers are still unchecked for purity
+  (spec §6 carries a not-yet-enforced note), and an unknown effect label is still accepted and
+  inert (`!{NOPE}`, and the undefined empty row `!{}`). Both re-confirmed accepted 2026-08-21.
+  D2/W6 are no longer blocked — the effect-system design pass they were deferred pending is
+  `docs/effect-enforcement-v0.md`, and W6 was closed out in `2f947648`.
 
 ### 2) Networking and HTTP Client
 
@@ -2711,16 +2726,20 @@ programs, session-by-session fix plan, and the five user decisions needed (D1-D5
 `+`/`*` overflow = documented i64 wrap), D3 (retire the direct codegen path — **DONE 2026-07-12**, `codegen.sprout` deleted; typed IR is the sole backend), D4 (reject
 invalid UTF-8, Bytes-primary via the `bytes_to_utf8` choke point), and D5 (total
 `parse_int : Maybe Int` + delete dead `split_ints`; `mutvec_get : Maybe a`) all DECIDED;
-**D2 (effects) DEFERRED** — W6 is blocked on an effect-system *design* pass, not rollout
-shape. See §2 of the handoff doc for full rationale. W1 (global GC roots), W5
+**D2 (effects) — DEFERRED then RESOLVED 2026-08-16.** W6 was blocked on an effect-system
+*design* pass, not rollout shape; that pass is `docs/effect-enforcement-v0.md` and the
+enforcement landed with it (spec §7 rules 8/9/11 are checked on `fn` and instance-method
+bodies). The handoff doc's §2 rationale is the *pre-decision* record — read it for why the
+deferral happened, not for current behavior. Two narrower gaps stay open in §1 above
+(top-level `let` purity, unknown effect labels). W1 (global GC roots), W5
 (exhaustiveness, done — see §1 "Language Core and Safety" above), and W2 R1/R3/R4 (UTF-8
 runtime safety) already landed. W3 (rigidity + value restriction), W4
 (dispatch-by-constraint-position), W7 (div-by-zero), and W8 (prelude totality) have since
 landed too; W11 T8 (fresh-tyvar namespace) + T10 (inner-TApp return-type dict) landed
 2026-07-08. Remaining unblocked correctness work: W9 remainder, W7's `INT_MIN / -1`
 operator guard (coupled to the int-overflow policy), W2 R2, and T11 (iface-gated). W11 T7
-(bare-name type identity) LANDED 2026-07-10. W6 (effects) stays DEFERRED pending an
-effect-system design pass.
+(bare-name type identity) LANDED 2026-07-10. W6 (effects) LANDED 2026-08-16 — closed out in
+`2f947648`; see D2 above.
 
 **Bare-name type identity — cross-module type-name collision. DONE 2026-07-10** (branch
 `design/module-qualified-type-identity`, W11/T7). Type identity is now module-qualified.
