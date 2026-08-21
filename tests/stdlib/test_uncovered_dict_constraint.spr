@@ -63,6 +63,21 @@ fn shout_boxed(b: Box a) -> String where ToString (Box a) = label(b) ++ "!"
 # three suites in this corpus depend on that and would fail as a group.
 fn count_empty() -> Int = list_length(list_map(label, []))
 
+# (7) and (8) SHADOWING. A local binding reuses the name of the constrained global while the
+# enclosing function generalizes `a` and declares no `where` clause — the rejected signature
+# exactly. Attribution resolves the callee to a scheme, and a local resolves to none, so there is
+# no constraint to attribute and nothing to reject. Neither binder is a parameter, so the
+# accepted-parameter case (3) does not cover them: `let..in` desugars to a match var-pattern and a
+# lambda parameter is a third path again. Nothing else in the corpus shadows a constrained global,
+# which is why these are asserted rather than assumed.
+fn shadow_via_let(x: a) =
+  let label = \y -> "local"
+  in label(x)
+
+fn apply_it(f: a -> String, x: a) -> String = f(x)
+
+fn shadow_via_lambda(x: a) = apply_it(\label -> "local", x)
+
 fn main() -> Unit !{IO} =
   run_suite("uncovered_dict_constraint", [
     check_eq("dictionary determined by the body, no annotation needed", make(), "7"),
@@ -73,5 +88,9 @@ fn main() -> Unit !{IO} =
     check_eq("covered through a superclass, equal", via_ord(1, 1), true),
     check_eq("covered through a superclass, unequal", via_ord(1, 2), false),
     check_eq("covered by a compound constraint head", shout_boxed(Box(val = 1)), "Box!"),
-    check_eq("free-tyvar dead dictionary stays inert", count_empty(), 0)
+    check_eq("free-tyvar dead dictionary stays inert", count_empty(), 0),
+    # Two types again: a shadow wrongly resolved to the global would fix one instance for both.
+    check_eq("let-bound local shadowing a constrained global, Int", shadow_via_let(5), "local"),
+    check_eq("let-bound local shadowing a constrained global, Bool", shadow_via_let(true), "local"),
+    check_eq("lambda parameter shadowing a constrained global", shadow_via_lambda(5), "local")
   ])
