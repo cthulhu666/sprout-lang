@@ -1,0 +1,76 @@
+import stdlib.test (check_eq, run_suite)
+
+# A `where` constraint whose variable is determined ONLY by how the call's RESULT is used.
+#
+# `pick_where()` takes no argument mentioning `a`; the instance is fixed by the application that
+# follows. Dictionary resolution runs during inference, before that application is unified, so the
+# call site had no dictionary injected — and the post-pass that exists to repair exactly this case
+# could not locate the variable, because the return type is a FUNCTION and the repair scanned only
+# type applications and tuples. The call was then reported as `No instance of ToString for Int`,
+# which is false: `ToString Int` exists.
+#
+# Each function is exercised at TWO types. One dictionary chosen for both would satisfy half the
+# assertions, so a single type would not distinguish a repair from a lucky guess.
+
+type Color = Red | Green | Blue
+
+instance ToString Color
+  fn to_string(c: Color) -> String =
+    match c with
+    | Red -> "RED"
+    | Green -> "GREEN"
+    | Blue -> "BLUE"
+
+fn label(x: a) -> String where ToString a = to_string(x)
+
+# The constraint variable appears only inside the returned FUNCTION type.
+fn pick_where() -> a -> String where ToString a = label
+
+# The same, with the result bound before it is applied: the application that determines `a` is a
+# separate expression from the call that needs the dictionary.
+fn use_bound(n: Int) -> String =
+  let f = pick_where()
+  in f(n)
+
+# A second constraint alongside the return-only one, to pin that repairing one does not
+# misalign the other — they are matched by class, and only one of them is return-only.
+fn tagged(seed: b) -> a -> String where ToString b, ToString a = label
+
+instance Enum Color
+  fn ordinal(c: Color) -> Int =
+    match c with
+    | Red -> 0
+    | Green -> 1
+    | Blue -> 2
+  fn from_ordinal(i: Int) -> Maybe Color =
+    match i with
+    | 0 -> Just(Red)
+    | 1 -> Just(Green)
+    | _ -> Just(Blue)
+
+# NOT a function return: the constraint variable sits inside a `Maybe a`, which the pre-existing
+# return-type scan already resolved by descending into the type application. The structural route
+# is tried first, so this pins that it ADDS a resolution rather than displacing one — a regression
+# here would mean the new path took over a case that already worked and got it wrong.
+fn decode(i: Int) -> Maybe a where Enum a = from_ordinal(i)
+
+fn decode_color(i: Int) -> Maybe Color = decode(i)
+
+fn decoded_ordinal(i: Int) -> Int =
+  match decode_color(i) with
+  | Just c -> ordinal(c)
+  | Nothing -> 0 - 1
+
+fn main() -> Unit !{IO} =
+  run_suite("return_only_constraint", [
+    check_eq("return-only constraint, Int", pick_where()(5), "5"),
+    check_eq("return-only constraint, Bool", pick_where()(true), "true"),
+    check_eq("return-only constraint, custom instance", pick_where() (Green), "GREEN"),
+    check_eq("result bound before it is applied", use_bound(7), "7"),
+    check_eq("return-only alongside an argument-fixed constraint", tagged(0)(9), "9"),
+    check_eq("return-only alongside an argument-fixed constraint, other type",
+      tagged("s") (Blue), "BLUE"),
+    # The already-working non-function shape, at two ordinals so a constant answer fails.
+    check_eq("non-function return-only shape still resolves", decoded_ordinal(1), 1),
+    check_eq("non-function return-only shape still resolves, other value", decoded_ordinal(2), 2)
+  ])

@@ -6328,7 +6328,8 @@ fn maybe_rewrite_constrained_fn_call(
       typed_ast.TCall(fn_,
         list_append(
           user_typed_args(args),
-          build_constrained_fn_dicts_via_field(cs, env,
+          build_constrained_fn_dicts_via_field(cs, env, fn_name,
+            unifier.apply_subst(subst, typed_ast.typed_expr_type(fn_)),
             unifier.apply_subst(subst, t),
             pos, collect_all_tdicts(args))),
         t, pos)
@@ -6367,14 +6368,17 @@ fn maybe_str_eq(m: Maybe String, s: String) -> Bool =
 #     by class, not position — a return-position constraint that was unresolved at
 #     inference leaves existing_dicts sparse, so positional indexing would hand a
 #     later constraint's dict to the wrong slot);
-#   - otherwise a HEADED constraint (a head VARIABLE or concrete ctor) scans the
-#     concrete return type for a matching @inst; an argument-scanned one
-#     ("#none" or "#app:<Name>") emits nothing here.
+#   - otherwise a HEADED constraint (a head VARIABLE or concrete ctor) locates its
+#     variable in the callee's declared type and takes the instance for whatever
+#     this call instantiated it to, falling back to scanning the concrete return
+#     type; an argument-scanned one ("#none" or "#app:<Name>") emits nothing here.
 # (A residual corner remains: two constraints of the SAME class where one is an
 # unresolved return-position gap cannot be told apart by class alone.)
 fn build_constrained_fn_dicts_via_field(
   constraints: List (String, String),
   env: Dict types.Scheme,
+  fn_name: String,
+  callee_ty: types.Type,
   concrete_ret: types.Type,
   pos: source.SourcePos,
   existing_dicts: List typed_ast.TypedExpr
@@ -6387,21 +6391,56 @@ fn build_constrained_fn_dicts_via_field(
           match take_dict_for_class(class_name, existing_dicts) with
           | Just (existing_d, remaining) ->
               Cons(existing_d,
-                   build_constrained_fn_dicts_via_field(rest, env, concrete_ret, pos, remaining))
+                   build_constrained_fn_dicts_via_field(rest, env, fn_name, callee_ty, concrete_ret, pos, remaining))
           | Nothing ->
               # An argument-scanned token (headless OR compound-head) emits
               # nothing here: this site scans the RETURN type, and a `where
               # ToString (Box a)` obligation is not discharged by the return type
               # merely because the return type happens to have an instance.
               if is_arg_scanned_token(head_token)
-              then build_constrained_fn_dicts_via_field(rest, env, concrete_ret, pos, existing_dicts)
+              then build_constrained_fn_dicts_via_field(rest, env, fn_name, callee_ty, concrete_ret, pos, existing_dicts)
               else
-                match find_inst_in_return_type(class_name, concrete_ret, env, pos) with
+                match constraint_var_dict(class_name, head_token, fn_name, env, callee_ty, pos) with
                 | Just new_dict ->
                     Cons(new_dict,
-                         build_constrained_fn_dicts_via_field(rest, env, concrete_ret, pos, existing_dicts))
+                         build_constrained_fn_dicts_via_field(rest, env, fn_name, callee_ty, concrete_ret, pos, existing_dicts))
                 | Nothing ->
-                    build_constrained_fn_dicts_via_field(rest, env, concrete_ret, pos, existing_dicts)
+                    match find_inst_in_return_type(class_name, concrete_ret, env, pos) with
+                    | Just new_dict ->
+                        Cons(new_dict,
+                             build_constrained_fn_dicts_via_field(rest, env, fn_name, callee_ty, concrete_ret, pos, existing_dicts))
+                    | Nothing ->
+                        build_constrained_fn_dicts_via_field(rest, env, fn_name, callee_ty, concrete_ret, pos, existing_dicts)
+
+# Locate the constraint's own variable in the callee's DECLARED type, walked alongside the type
+# this call instantiated it to, and take the instance for what it was instantiated to.
+#
+# Preferred over scanning the return type because a scan takes the first component carrying an
+# instance and cannot tell the constrained variable from the one beside it. `pick() -> a -> String
+# where ToString a` returns `Int -> String` at the call, and BOTH halves have a `ToString`
+# instance; a scan picking `String` reproduces the mis-resolution that reading a constrained
+# function's own return type used to cause. The structural walk asks where `a` actually sits.
+#
+# This is the route class-method dispatch already takes for a class variable that appears only in
+# return position (find_class_var_in_type); constrained functions kept the older scan, which also
+# never descended into a FUNCTION-typed return at all, so `pick()(5)` resolved to no dictionary and
+# was reported as a missing instance that in fact existed.
+#
+# Nothing when the callee has no scheme, the variable cannot be located, the type it was
+# instantiated to is still polymorphic, or no instance is registered for it — each leaves the
+# caller's existing return-type scan to try, so no resolution that worked before changes.
+fn constraint_var_dict(class_name: String, head_token: String, fn_name: String,
+                       env: Dict types.Scheme, callee_ty: types.Type,
+                       pos: source.SourcePos) -> Maybe typed_ast.TypedExpr =
+  let Just sch = dict_get(fn_name, env) else Nothing
+      Just concrete = find_class_var_in_type(types.scheme_type(sch), callee_ty,
+                        decode_constraint_var(head_token, fn_name, env)) else Nothing
+      Just head_str = concrete_type_str(concrete) else Nothing
+      Just _ = dict_get("@inst:" ++ class_name ++ ":" ++ head_str, env) else Nothing
+  in
+    Just(typed_ast.TDict(
+      ast.TypeConstraint(class_name, Cons(type_to_typeexpr(concrete), Nil)),
+      types.TConst(types.type_id(class_name)), pos, typed_ast.EvUnresolved))
 
 # Scan a concrete return type for an inner component that has an @inst marker
 # for the given class.  Tries the type itself first (handles `a` in return
@@ -7157,8 +7196,9 @@ fn fn_dict_coverage_msg(name: String, params: List ast.Param,
         | Just cls ->
             Just("`" ++ name ++ "` needs a " ++ string.after_last_dot(cls) ++ " instance for a"
                    ++ " type variable it generalizes, and that variable appears in no parameter,"
-                   ++ " so no call site can supply the instance — annotate with the concrete type"
-                   ++ " you mean")
+                   ++ " so no call site can supply the instance — declare a return type naming the"
+                   ++ " variable and constrain it with a `where` clause, or annotate with the"
+                   ++ " concrete type you mean")
         | Nothing -> Nothing
 
 # The internal type variables the declared `where` clause already supplies a dictionary for.
