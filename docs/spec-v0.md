@@ -2520,13 +2520,21 @@ module qualification is resolved. Pure `main` definitions and effect-polymorphic
 may still use shapes such as `Maybe a !{IO}` or `Result e a !{IO}` and be
 handled explicitly from `main`.
 
+The entrypoint signature must be written out: the gate reads the **declared**
+signature, not the inferred type, so `fn main() = print("hi")` is rejected even
+though its body is well-typed.
+
 These rules are enforced at type-check for any **defined** `main` (a function
 named `main`, or the entry module's qualified `<mod>.main`), as a final
 well-formedness gate that runs only once the body itself typechecks — so a
 broken `main` body reports its own error first. The diagnostics are:
 `Executable entrypoint \`main\` must take zero arguments`,
+`… must declare its return type and effect` (an unannotated `main`),
 `… must return Unit or Int`, `… must declare the {IO} effect` (a pure `main`),
-and `… must not be effect-polymorphic`. A **missing** `main` is not yet
+and `… must not be effect-polymorphic`. Each carries the accepted signature as
+a trailing hint — `; write \`fn main() -> Unit !{IO}\`, or \`fn main() -> Int
+!{IO}\` to set the process exit code` — so one edit resolves the diagnostic
+rather than each rejected field revealing the next. A **missing** `main` is not yet
 diagnosed: at type-check the compiler cannot distinguish a library check from an
 executable build (a library module legitimately defines no `main`), so requiring
 one awaits an explicit executable-vs-library compile mode.

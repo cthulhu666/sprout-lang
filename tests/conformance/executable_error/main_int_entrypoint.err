@@ -1,1 +1,1 @@
-Executable entrypoint `main` must return Unit or Int
+Executable entrypoint `main` must return Unit or Int; write `fn main() -> Unit !{IO}`, or `fn main() -> Int !{IO}` to set the process exit code

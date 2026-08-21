@@ -5582,6 +5582,15 @@ fn validate_constraints_all(decls: List ast.Decl, classes: List String) -> Maybe
 # from an executable build. "missing main" is enforced only on the executable
 # codegen path.
 #
+# The gate reads the DECLARED signature off the parse tree, never the inferred
+# type, so an unannotated `fn main() = ...` fails it. That is its own diagnostic
+# (`must declare its return type and effect`) rather than the wrong-return-type
+# one: "no annotation" and "annotated with the wrong type" are different
+# mistakes and reporting the second for the first sends the author to read a
+# body that is fine. Every diagnostic here also carries main_signature_hint, so
+# one edit fixes the signature outright instead of each rejected field
+# surfacing the next one.
+#
 # is_main_decl_name mirrors ast_to_ir.is_entry_fn_name / codegen.is_entry_fn_name.
 fn is_main_decl_name(name: String) -> Bool =
   name == "main" || (n >= 5 && str_slice(name, n - 5, 5) == ".main")
@@ -5600,20 +5609,34 @@ fn any_effect_var(effs: List String) -> Bool =
   | Nil -> false
   | Cons e rest -> if is_lowercase_name(e) then true else any_effect_var(rest)
 
+# Every entrypoint diagnostic ends with the full accepted signature, so the
+# author writes one correct annotation rather than fixing the return type only
+# to be told about the effect next.
+fn main_signature_hint() -> String =
+  "; write `fn main() -> Unit !{IO}`, or `fn main() -> Int !{IO}` to set the process exit code"
+
+fn main_error(what: String) -> Maybe String =
+  Just("Executable entrypoint `main` " ++ what ++ main_signature_hint())
+
 fn main_effect_error(effects: Maybe (List String)) -> Maybe String =
   match effects with
-  | Nothing -> Just("Executable entrypoint `main` must declare the {IO} effect")
+  | Nothing -> main_error("must declare the {IO} effect")
   | Just effs ->
-      if any_effect_var(effs) then Just("Executable entrypoint `main` must not be effect-polymorphic")
-      else if str_list_contains(effs, "IO") == false then Just("Executable entrypoint `main` must declare the {IO} effect")
+      if any_effect_var(effs) then main_error("must not be effect-polymorphic")
+      else if str_list_contains(effs, "IO") == false then main_error("must declare the {IO} effect")
       else Nothing
 
 fn check_main_signature(params: List ast.Param, ret: Maybe ast.TypeExpr, effects: Maybe (List String)) -> Maybe String =
   match params with
   | [] ->
-      if main_return_ok(ret) == false then Just("Executable entrypoint `main` must return Unit or Int")
-      else main_effect_error(effects)
-  | _ -> Just("Executable entrypoint `main` must take zero arguments")
+      # A return type is syntactically required before an effect row, so an
+      # absent return type means the signature is unannotated outright.
+      match ret with
+      | Nothing -> main_error("must declare its return type and effect")
+      | Just _ ->
+          if main_return_ok(ret) == false then main_error("must return Unit or Int")
+          else main_effect_error(effects)
+  | _ -> main_error("must take zero arguments")
 
 # Returns the first entrypoint diagnostic among the decls, or Nothing.
 fn validate_entrypoint(decls: List ast.Decl) -> Maybe(source.SourcePos, String) =
