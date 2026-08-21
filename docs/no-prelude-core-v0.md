@@ -106,6 +106,45 @@ the first row. No fixture anywhere exercises those names inside a `no_prelude`
 file. Whatever lands must include a capability matrix (§9), because the existing
 gates' silence here is not evidence of anything.
 
+### 1.1 Who actually needs the opt-out — and what that implies about this design
+
+Sizing a floor requires knowing who stands on it. Measured against the whole
+in-repo population of `no_prelude` files, and the reason each one gives *in its
+own header comment*:
+
+| | files | why it opts out | permanent? |
+|---|---|---|---|
+| **A. Absence proofs over emitted IR** | `test_wrap_codegen`, `test_tuple_return_cpr` | "ABSENCE proofs over the whole emitted module — 'this IR contains no call to `@sprout_alloc_obj`' — and the prelude allocates and reads fields all over itself, so a bundled prelude makes such a proof unstatable" | **Yes.** No compiler fix removes this. |
+| **B. Masking two known compiler bugs** | `instance_check`, `type_classes` (`invalid redefinition of function '__cm_Eq_eq'`); `codegen_do_bind`, `test_ir_codegen_do_bind_strip` (`Int vs demo.Maybe Int`) | each says: "a `module demo` header reproduces the same failure … That gap is pre-existing and tracked in BACKLOG; the file previously escaped it only by getting no prelude at all" | **No.** Evaporates when the two open `P2` qualification items land. |
+| **C. Testing the directive itself** | `no_prelude_directive`, `test_bundle_prelude_scope` | self-referential | Only while the directive exists. |
+
+**The uncomfortable finding: category A needs nothing from the floor.** Those two
+fixtures "use Int, one wrap and one ADT, and no prelude name at all" — verified,
+zero occurrences of `print`, `str_concat`, `int_to_string`, `str_len` or `panic`
+in either. The floor's 15 names are wanted by categories **B** and **C** only.
+
+So this design invests in a surface whose principal consumers are workarounds for
+two bugs that are already tracked and already scheduled to be fixed together.
+That does not make the floor wrong — the reported defect is real, the 31 clang
+errors are real, and `no_prelude` needs a defined meaning for as long as it
+exists. But it does mean **the sequencing is a live question**, and §4.3's
+"seed only the extern schemes" interim looks stronger in this light than it did
+when it was written: it fixes the defect with zero regression and zero semantic
+commitment, which is what you want while the population is still shrinking.
+
+**Two further facts about how the opt-out actually landed,** both of which argue
+the same way:
+
+- `prelude-scope-v0.md` §8 projected ~90 fixtures would need marking
+  (30 `conformance/run`, 26 `type_error`, 15 `tests/stdlib`, …). The
+  implementation marked **7**. Nearly everything simply gained the prelude and
+  was fine, so the opt-out's real constituency was an order of magnitude smaller
+  than the design expected.
+- That table's "keeps goldens tiny" rationale for `tests/smoke_shapes` was **not
+  acted on**: those files gained the prelude and their goldens grew by ~12,000
+  lines each in `d7ee84e9`. The cost was accepted rather than avoided, which is
+  evidence that golden size is not by itself a reason to want the opt-out.
+
 ## 2. Goals and non-goals
 
 **Goals.**
@@ -339,12 +378,27 @@ error: use of undefined value '@range_count'
 demo.spr:26:26: ERROR: check: Unknown variable: range_count in function main
 ```
 
-The message is the existing `infer_var` one, unchanged. `validate_type_names`
-already produces a targeted hint for the type axis ("`stdlib.test` exports it —
-add it to that module's import list"); an analogous value-axis hint ("the prelude
-exports it — remove `no_prelude`") is **optional polish, deliberately not
-proposed here.** It would be a new message needing its own tests, and the plain
-diagnostic is already correct and positioned.
+**The plain `infer_var` message is not sufficient, and this document originally
+got that wrong.** `prelude-scope-v0.md` §7 already specified the diagnostic for
+exactly this case, and specified it as a requirement rather than a nicety — "this
+closes defect (b), and is the one place `no_prelude` must not silently defer to
+clang":
+
+```
+ERROR: check: `range_count` is not in scope: this file declares `no_prelude`,
+so the prelude is unavailable. Remove the directive, or define `range_count` here.
+```
+
+That is a commitment already made in an approved design and not yet implemented,
+so it is **in scope here, not optional polish.** It also does strictly more work
+than the generic message: the generic one leaves a reader to discover that a
+one-word header line is why a name they can see in the prelude is not in scope.
+
+Mechanically it needs the unbound-name error path to know whether the file opted
+out — the same `source.has_no_prelude` answer `skip_prelude` already computes —
+and a way to tell "the prelude exports this" from "nothing exports this", which
+`validate_type_names`' `exporting_module` already does for the type axis and can
+be mirrored for values.
 
 ## 8. Compatibility and migration
 
