@@ -1,0 +1,48 @@
+import stdlib.test (check_eq, run_suite)
+
+# A `wrap` type carrying its own `ToString` instance, rendered through `${…}`.
+#
+# Interpolation and `to_string` must agree: `${v}` is `to_string(v)`, so a `wrap`
+# type reaches its own instance rather than the instance of the type it wraps.
+# Nothing else pins that combination — `examples/wrap_typed_money.sprout` covers
+# `wrap` + `ToString` but renders with `++`, so the interpolation path is unguarded.
+#
+# Two wraps over the SAME underlying `Int` with different instances, because one
+# wrap alone cannot distinguish "dispatched on the wrap" from "dispatched on `Int`
+# and formatted by luck".
+
+wrap Minutes = Int
+
+wrap Seconds = Int
+
+instance ToString Minutes
+  fn to_string(x: Minutes) -> String =
+    match x with
+    | Minutes n -> `${n} minutes`
+
+instance ToString Seconds
+  fn to_string(x: Seconds) -> String =
+    match x with
+    | Seconds n -> `${n}s`
+
+let m = Minutes(10)
+
+let s = Seconds(10)
+
+fn describe(x: a) -> String where ToString a = `<${x}>`
+
+fn main() -> Unit !{IO} =
+  run_suite("wrap_tostring_interpolation", [
+    check_eq("interpolating a wrap reaches its own instance", `${m}`, "10 minutes"),
+    check_eq("a second wrap over the same Int picks its own", `${s}`, "10s"),
+
+    # `${…}` and `to_string` are the same call; a divergence here would mean the
+    # interpolation lowering had its own dispatch path.
+    check_eq("interpolation agrees with to_string", `${m}`, to_string(m)),
+
+    # Embedded in surrounding text, the shape the original bug report used.
+    check_eq("interpolation inside a larger template", `took ${m} exactly`, "took 10 minutes exactly"),
+
+    # Through a forwarded dictionary rather than a direct instance lookup.
+    check_eq("interpolation under a where-constrained caller", describe(s), "<10s>")
+  ])
