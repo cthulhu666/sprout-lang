@@ -141,9 +141,38 @@ the same way:
   was fine, so the opt-out's real constituency was an order of magnitude smaller
   than the design expected.
 - That table's "keeps goldens tiny" rationale for `tests/smoke_shapes` was **not
-  acted on**: those files gained the prelude and their goldens grew by ~12,000
-  lines each in `d7ee84e9`. The cost was accepted rather than avoided, which is
-  evidence that golden size is not by itself a reason to want the opt-out.
+  acted on.** §8 predicted outright: *"The 4 smoke shapes stay small because they
+  opt out."* Today **0 of 10** smoke shapes carry the directive. The design's "4"
+  was exactly right — 4 were small (66, 110, 81, 99 lines) while the other 6
+  already had headers or imports and were already ~12.4k — and those same 4 are
+  the ones that grew, **356 → 49,981 lines**. `01_noparam.spr` is two lines of
+  source (`fn val() -> Int = 42`; `fn main() … = print(val())`) and its golden went
+  66 → 12,471 lines, a factor of 189.
+
+  That growth is **outside the design's own budget**: §8 accounted for "+88k lines
+  on an 811k-line corpus (~11%)" from the 7 examples, explicitly excluding the
+  smoke shapes on the assumption they would opt out. Actual growth exceeded the
+  budget by ~50k lines, entirely from the files assumed exempt. §0 ("What
+  implementation corrected") lists four corrections and **none of them is this**,
+  so it is an unrecorded gap between design and implementation rather than a
+  revised decision.
+
+  The mitigation that would have made it moot — wiring DCE into `compile_full` —
+  was an explicit non-goal (§2) and is still open as `P3`: "a 7-line `module main`
+  that calls one local function still emits ~12.7k lines, including an unused
+  `@map`."
+
+  **This has a live cost, not just a tidiness one.** `scripts/ir_golden_diff.sh:55`
+  truncates each file's diff at `head -40`. Against a 12.5k-line golden that is at
+  most a 0.3% sample, which is exactly the hazard AGENTS.md DoD #12 already warns
+  about ("one such change produced a 27,274-line real diff, i.e. the report was a
+  2% sample"). Letting the goldens inflate degraded the golden gate's
+  readability — the corpus is now 955,705 lines across 60 files.
+
+  For the purposes of *this* design the relevant conclusion is narrower: golden
+  size is **not** a live reason to want the opt-out, because the project already
+  accepted a 140× inflation rather than use it for that. One more item off the
+  justification list in the table above.
 
 ## 2. Goals and non-goals
 
