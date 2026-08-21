@@ -6960,6 +6960,12 @@ fn letdecl_linear_gate(s1: Dict types.Type, typed_expr: typed_ast.TypedExpr,
 #   let tag = \x -> (x, to_string(7))    # quantifies `a`; the dict is ToString Int, from the 7
 #
 # is legitimate, and stays legitimate. Only a dictionary hanging on `a` itself is ambiguous.
+#
+# The test is per-BINDING, not per-variable: it asks whether a dictionary is ambiguous given
+# everything this binding generalizes, and attributes it to no particular variable. Asking it
+# about one variable in isolation reads false — `merge_runs`'s `where Ord k` over
+# `List (k, Int, a)` mentions the payload `a` too. A caller that needs per-variable attribution
+# wants uncovered_dict_subject, which derives the subject from the callee's own constraint.
 fn first_ambiguous_dict_class(e: typed_ast.TypedExpr, subst: Dict types.Type,
                               quantified: List String) -> Maybe String =
   match e with
@@ -7107,6 +7113,267 @@ fn let_dict_ambiguity_msg(name: String, quantified: List String, t: types.Type,
             ++ " leaves that choice open; a top-level binding holds a single value, so the instance"
             ++ " cannot be picked per use — add a type annotation that fixes it")
 
+# The `fn` sibling of let_dict_ambiguity_msg: the same unsoundness at the other generalization
+# site. A function generalizes a type variable, its body needs a class dictionary for that
+# variable, and its own `where` clause declares no constraint that would supply one per call. The
+# resolver has already guessed — one dictionary, read off whatever the body happened to mention,
+# baked into a function whose emitted arity now carries a hidden dict slot its declared type does
+# not mention.
+#
+# `fn relabel(x: a) = label(x)` compiled at exit 0 and then died: `relabel(5)` put the 5 in that
+# slot and dereferenced it as a dictionary pointer.
+#
+# The variable must be one this declaration GENERALIZES. A free variable it does not — the element
+# type of `vec_sort(vec_empty())`, whose dictionary is never invoked because the vector is empty —
+# keeps its inert dead dictionary, since `main` generalizes nothing. Same exemption
+# let_dict_ambiguity_msg makes, and three tests in the corpus depend on it.
+#
+# Coverage is subtracted by VARIABLE rather than by (class, variable) pair. That is sound only
+# because verify_dispatch already rejects the residual a pairwise test would add: a covered
+# variable whose body needs a DIFFERENT class (`fn f(x: a) -> Int where ToString a = ordinal(x)`)
+# is reported there, at the declaration. A pairwise test here would additionally have to
+# reimplement superclass closure to keep `where MyOrd a` forwarding a `MyEq a` obligation.
+# tests/conformance/type_error/uncovered_dict_wrong_class.spr pins that division of labour so
+# neither pass can quietly stop covering it.
+fn fn_dict_coverage_msg(name: String, params: List ast.Param,
+                        constraints: List ast.TypeConstraint, prog_to_fresh: Dict types.Type,
+                        s2: Dict types.Type, inst_type: types.Type, env_ftv: List String,
+                        typed_body: typed_ast.TypedExpr,
+                        env: Dict types.Scheme) -> Maybe String =
+  let uncovered = types.list_diff(
+        types.list_diff(types.ftv(unifier.apply_subst(s2, inst_type)), env_ftv),
+        constraints_covered_ftv(constraints, prog_to_fresh, s2))
+      [_ | _] = uncovered else Nothing
+  in
+    match named_uncovered_dict(collect_param_type_vars(params, Nil), prog_to_fresh, s2,
+                               uncovered, typed_body, env) with
+    | Just (v, cls) ->
+        Just("`" ++ name ++ "` needs a " ++ cls ++ " instance for type variable `" ++ v
+               ++ "`, but declares no `where` constraint for it, so one instance was chosen at"
+               ++ " definition instead of per call — add `where " ++ cls ++ " " ++ v
+               ++ "` to its signature")
+    | Nothing ->
+        match uncovered_dict_subject(typed_body, s2, uncovered, env) with
+        | Just cls ->
+            Just("`" ++ name ++ "` needs a " ++ string.after_last_dot(cls) ++ " instance for a"
+                   ++ " type variable it generalizes, and that variable appears in no parameter,"
+                   ++ " so no call site can supply the instance — annotate with the concrete type"
+                   ++ " you mean")
+        | Nothing -> Nothing
+
+# The internal type variables the declared `where` clause already supplies a dictionary for.
+fn constraints_covered_ftv(constraints: List ast.TypeConstraint, prog_to_fresh: Dict types.Type,
+                           s2: Dict types.Type) -> List String =
+  match constraints with
+  | Nil -> Nil
+  | Cons c rest ->
+      list_append(constraint_covered_ftv(c, prog_to_fresh, s2),
+                  constraints_covered_ftv(rest, prog_to_fresh, s2))
+
+# Every source variable the constraint's head mentions, not just a bare-variable head: a compound
+# head covers the variables inside it, so `where ToString (Box a)` covers `a`. That is coarser
+# than the obligation it actually discharges — it does not supply `ToString a` — and coarse in the
+# safe direction, matching the by-variable subtraction this whole check is built on.
+fn constraint_covered_ftv(c: ast.TypeConstraint, prog_to_fresh: Dict types.Type,
+                          s2: Dict types.Type) -> List String =
+  match c with
+  | ast.TypeConstraint _ args ->
+      source_vars_ftv(collect_te_vars_list(args, Nil), prog_to_fresh, s2)
+
+fn source_vars_ftv(vs: List String, prog_to_fresh: Dict types.Type,
+                   s2: Dict types.Type) -> List String =
+  match vs with
+  | Nil -> Nil
+  | Cons v rest ->
+      list_append(source_var_ftv(v, prog_to_fresh, s2), source_vars_ftv(rest, prog_to_fresh, s2))
+
+# The internal variables a source-level type-variable name stands for after inference.
+fn source_var_ftv(v: String, prog_to_fresh: Dict types.Type, s2: Dict types.Type) -> List String =
+  let Just t = dict_get(v, prog_to_fresh) else Nil
+  in types.ftv(unifier.apply_subst(s2, t))
+
+# The first parameter-mentioned source variable whose dictionary is uncovered, with the class that
+# needs it. Reported separately from the unnamed case because a source name is what makes
+# `where C a` printable advice; a variable inference introduced with no source name
+# (`fn pick() = label`) has no name to offer and takes the other message.
+fn named_uncovered_dict(param_vars: List String, prog_to_fresh: Dict types.Type,
+                        s2: Dict types.Type, uncovered: List String,
+                        body: typed_ast.TypedExpr,
+                        env: Dict types.Scheme) -> Maybe (String, String) =
+  match param_vars with
+  | Nil -> Nothing
+  | Cons v rest ->
+      let ivs = list_common(source_var_ftv(v, prog_to_fresh, s2), uncovered)
+      in
+        match uncovered_dict_subject(body, s2, ivs, env) with
+        | Just cls -> Just((v, string.after_last_dot(cls)))
+        | Nothing -> named_uncovered_dict(rest, prog_to_fresh, s2, uncovered, body, env)
+
+fn list_common(xs: List String, ys: List String) -> List String =
+  match xs with
+  | Nil -> Nil
+  | Cons x rest ->
+      if list_member(x, ys) then Cons(x, list_common(rest, ys)) else list_common(rest, ys)
+
+# ---------------------------------------------------------------------------
+# Per-variable dictionary attribution
+# ---------------------------------------------------------------------------
+#
+# The class of the first call in `e` whose dictionary is being selected for one of `uncovered`.
+#
+# Distinct from first_ambiguous_dict_class, which asks whether a dictionary is ambiguous given
+# everything a binding generalizes and attributes it to no particular variable. Here the variable
+# IS the question, so the subject has to be derived rather than guessed at from the call's shape:
+# `merge_runs`'s `where Ord k` over `List (k, Int, a)` mentions the payload `a`, and `fold`'s
+# `where Foldable f` sits behind an `init: b` that is the first variable-typed argument. Both read
+# as uncovered under any positional rule and neither is.
+#
+# The subject comes from the callee's own constraint instead: the §13.3(B) Scheme constraint field
+# names the variable each constraint is on, and the callee reference carries that scheme already
+# instantiated for this call, so matching the two recovers what the constraint was instantiated
+# TO. Only class-constrained user functions are reachable this way; a class METHOD is
+# verify_dispatch's jurisdiction and is already rejected there.
+fn uncovered_dict_subject(e: typed_ast.TypedExpr, subst: Dict types.Type,
+                          uncovered: List String, env: Dict types.Scheme) -> Maybe String =
+  let [_ | _] = uncovered else Nothing
+  in
+    match e with
+    | typed_ast.TCall callee args _ _ ->
+        match call_uncovered_class(callee, subst, uncovered, env) with
+        | Just cls -> Just(cls)
+        | Nothing -> uncovered_dict_in_list(Cons(callee, args), subst, uncovered, env)
+    | typed_ast.TLambda _ body _ _ -> uncovered_dict_subject(body, subst, uncovered, env)
+    | typed_ast.TIf c th el _ _ -> uncovered_dict_in_list([c, th, el], subst, uncovered, env)
+    | typed_ast.TMatch scrut arms _ _ ->
+        match uncovered_dict_subject(scrut, subst, uncovered, env) with
+        | Just cls -> Just(cls)
+        | Nothing -> uncovered_dict_in_arms(arms, subst, uncovered, env)
+    | typed_ast.TDo steps _ _ -> uncovered_dict_in_steps(steps, subst, uncovered, env)
+    | typed_ast.TTuple items _ _ -> uncovered_dict_in_list(items, subst, uncovered, env)
+    | typed_ast.TBinary _ l r _ _ -> uncovered_dict_in_list([l, r], subst, uncovered, env)
+    | typed_ast.TUnary _ operand _ _ -> uncovered_dict_subject(operand, subst, uncovered, env)
+    | typed_ast.TRange l r _ _ -> uncovered_dict_in_list([l, r], subst, uncovered, env)
+    | typed_ast.TRecord _ fields _ _ -> uncovered_dict_in_fields(fields, subst, uncovered, env)
+    | typed_ast.TRecordUpdate base fields _ _ ->
+        match uncovered_dict_subject(base, subst, uncovered, env) with
+        | Just cls -> Just(cls)
+        | Nothing -> uncovered_dict_in_fields(fields, subst, uncovered, env)
+    | typed_ast.TGetField obj _ _ _ -> uncovered_dict_subject(obj, subst, uncovered, env)
+    # Leaves, listed rather than left to a wildcard: a new TypedExpr constructor should fail to
+    # compile here instead of silently bypassing a guard against a silent miscompile.
+    | typed_ast.TDict _ _ _ _ -> Nothing
+    | typed_ast.TMethodRef _ _ _ _ _ -> Nothing
+    | typed_ast.TVar _ _ _ -> Nothing
+    | typed_ast.TInt _ _ _ -> Nothing
+    | typed_ast.TFloat _ _ _ -> Nothing
+    | typed_ast.TBool _ _ _ -> Nothing
+    | typed_ast.TString _ _ _ -> Nothing
+    | typed_ast.TChar _ _ _ -> Nothing
+    | typed_ast.TUnit _ _ -> Nothing
+
+# The class of the callee's first constraint whose subject falls in `uncovered`.
+fn call_uncovered_class(callee: typed_ast.TypedExpr, subst: Dict types.Type,
+                        uncovered: List String, env: Dict types.Scheme) -> Maybe String =
+  let typed_ast.TVar name _ _ = callee else Nothing
+      Just sch = dict_get(name, env) else Nothing
+      theta = match_scheme_body(types.scheme_type(sch), types.scheme_vars(sch),
+                                unifier.apply_subst(subst, typed_ast.typed_expr_type(callee)),
+                                dict_empty())
+  in constraint_subject_in(types.scheme_constraints(sch), name, env, theta, subst, uncovered)
+
+fn constraint_subject_in(constraints: List (String, String), callee: String,
+                         env: Dict types.Scheme, theta: Dict types.Type,
+                         subst: Dict types.Type, uncovered: List String) -> Maybe String =
+  match constraints with
+  | Nil -> Nothing
+  | Cons (token, cls) rest ->
+      let Just subject = dict_get(decode_constraint_var(token, callee, env), theta)
+            else constraint_subject_in(rest, callee, env, theta, subst, uncovered)
+      in
+        match list_common(types.ftv(unifier.apply_subst(subst, subject)), uncovered) with
+        | [] -> constraint_subject_in(rest, callee, env, theta, subst, uncovered)
+        | [_ | _] -> Just(cls)
+
+# Bind a scheme's own type variables to what this occurrence instantiated them to. Only names the
+# scheme quantifies are bound; a structural mismatch simply stops descending, leaving the affected
+# variable unbound, which reads downstream as "not attributable" rather than as a false subject.
+fn match_scheme_body(pattern: types.Type, vars: List String, actual: types.Type,
+                     theta: Dict types.Type) -> Dict types.Type =
+  match pattern with
+  | types.TVar name ->
+      if list_member(types.tyvar_identity(name), vars)
+      then dict_set(types.tyvar_identity(name), actual, theta)
+      else theta
+  | types.TConst _ -> theta
+  | types.TApp pb pa ->
+      match actual with
+      | types.TApp ab aa -> match_scheme_body(pb, vars, ab, match_scheme_body(pa, vars, aa, theta))
+      | _ -> theta
+  | types.TFunc pp pr _ _ ->
+      match actual with
+      | types.TFunc ap ar _ _ -> match_scheme_body(pp, vars, ap, match_scheme_body(pr, vars, ar, theta))
+      | _ -> theta
+  | types.TTuple pitems ->
+      match actual with
+      | types.TTuple aitems -> match_scheme_body_list(pitems, vars, aitems, theta)
+      | _ -> theta
+
+fn match_scheme_body_list(ps: List types.Type, vars: List String, as_: List types.Type,
+                          theta: Dict types.Type) -> Dict types.Type =
+  match ps with
+  | Nil -> theta
+  | Cons p prest ->
+      match as_ with
+      | Nil -> theta
+      | Cons a arest -> match_scheme_body_list(prest, vars, arest, match_scheme_body(p, vars, a, theta))
+
+fn uncovered_dict_in_list(es: List typed_ast.TypedExpr, subst: Dict types.Type,
+                          uncovered: List String, env: Dict types.Scheme) -> Maybe String =
+  match es with
+  | Nil -> Nothing
+  | Cons e rest ->
+      match uncovered_dict_subject(e, subst, uncovered, env) with
+      | Just cls -> Just(cls)
+      | Nothing -> uncovered_dict_in_list(rest, subst, uncovered, env)
+
+fn uncovered_dict_in_arms(arms: List typed_ast.TypedMatchBranch, subst: Dict types.Type,
+                          uncovered: List String, env: Dict types.Scheme) -> Maybe String =
+  match arms with
+  | Nil -> Nothing
+  | Cons arm rest ->
+      match arm with
+      | typed_ast.TypedMatchBranch _ body ->
+          match uncovered_dict_subject(body, subst, uncovered, env) with
+          | Just cls -> Just(cls)
+          | Nothing -> uncovered_dict_in_arms(rest, subst, uncovered, env)
+
+fn uncovered_dict_in_fields(fields: List typed_ast.TypedRecordField, subst: Dict types.Type,
+                            uncovered: List String, env: Dict types.Scheme) -> Maybe String =
+  match fields with
+  | Nil -> Nothing
+  | Cons f rest ->
+      match f with
+      | typed_ast.TypedRecordField _ v ->
+          match uncovered_dict_subject(v, subst, uncovered, env) with
+          | Just cls -> Just(cls)
+          | Nothing -> uncovered_dict_in_fields(rest, subst, uncovered, env)
+
+fn uncovered_dict_in_steps(steps: List typed_ast.TypedDoStep, subst: Dict types.Type,
+                           uncovered: List String, env: Dict types.Scheme) -> Maybe String =
+  match steps with
+  | Nil -> Nothing
+  | Cons step rest ->
+      match uncovered_dict_in_step(step, subst, uncovered, env) with
+      | Just cls -> Just(cls)
+      | Nothing -> uncovered_dict_in_steps(rest, subst, uncovered, env)
+
+fn uncovered_dict_in_step(step: typed_ast.TypedDoStep, subst: Dict types.Type,
+                          uncovered: List String, env: Dict types.Scheme) -> Maybe String =
+  match step with
+  | typed_ast.TDoBindStep _ e -> uncovered_dict_subject(e, subst, uncovered, env)
+  | typed_ast.TDoLetStep _ e -> uncovered_dict_subject(e, subst, uncovered, env)
+  | typed_ast.TDoExprStep e -> uncovered_dict_subject(e, subst, uncovered, env)
+
 # The M4.2 linear gate + value-restriction generalization for a top-level `let`,
 # extracted so the LetDecl arm body is a plain call (keeps its match chain shallow).
 fn finish_let_decl(name: String, expr: ast.Expr, typed_expr: typed_ast.TypedExpr,
@@ -7201,6 +7468,16 @@ fn check_fn_body(
         | Just bad ->
             (typed_ast.BodyErr(fn_pos, "Signature too general for its body in " ++ name ++ ": type variable " ++ bad), dict_empty(), Nil)
         | Nothing ->
+          # A generalized type variable whose dictionary nothing supplies per call. Checked
+          # before the linear gate only because it reports a signature defect, and a signature
+          # the caller must change first makes any later complaint about the body premature.
+          # body_env, not env: a parameter or self-binding that shadows a global constrained
+          # function resolves here to its own constraint-free scheme, so the walk attributes
+          # nothing to it. `fn pass_through(f: a -> String, x: a) = f(x)` calls a parameter.
+          match fn_dict_coverage_msg(name, params, constraints, prog_to_fresh, s2, inst_type,
+                                     env_ftv, typed_body, body_env) with
+          | Just msg -> (typed_ast.BodyErr(fn_pos, msg), dict_empty(), Nil)
+          | Nothing ->
             # M4.2: enforce consume-exactly-once for linear-typed bindings, on the
             # fully-substituted body/type. A violation becomes a BodyErr, surfacing
             # through the same path as any type error. Gated so a linear-free

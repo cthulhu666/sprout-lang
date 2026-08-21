@@ -1,0 +1,36 @@
+# A `where`-COVERED type variable whose body needs a dictionary of a DIFFERENT class.
+#
+# `wrong_class` declares `ToString a` and calls `ordinal`, which needs `Enum a`. The variable is
+# covered, so the uncovered-dictionary check in infer subtracts it and stays silent; the class
+# mismatch is caught by verify_dispatch instead, at the declaration.
+#
+# This fixture exists to pin that division of labour. infer's check subtracts coverage by VARIABLE
+# rather than by (class, variable) pair — deliberately, because a pairwise test would have to
+# reimplement superclass closure to avoid rejecting `where MyOrd a` forwarding a `MyEq a`
+# obligation. That simplification is only sound while this case keeps being rejected somewhere,
+# so if this fixture ever goes green, the by-variable subtraction has to become pairwise.
+#
+# Every call below is at a type with BOTH instances, so no use site can fail an instance lookup:
+# the rejection has to come from the declaration itself, not from an unsatisfiable call.
+module main
+
+type Color = Red | Green | Blue
+
+instance Enum Color
+  fn ordinal(c: Color) -> Int =
+    match c with
+    | Red -> 0
+    | Green -> 1
+    | Blue -> 2
+  fn from_ordinal(i: Int) -> Color =
+    match i with
+    | 0 -> Red
+    | 1 -> Green
+    | _ -> Blue
+
+instance ToString Color
+  fn to_string(c: Color) -> String = "C"
+
+fn wrong_class(x: a) -> Int where ToString a = ordinal(x)
+
+fn main() -> Unit !{IO} = print(to_string(wrong_class(Green)))

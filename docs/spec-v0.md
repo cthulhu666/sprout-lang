@@ -2032,6 +2032,34 @@ slot: with a declared return type that fixes the variable it is accepted, and
 with none — neither a return type nor a `where` clause on the enclosing
 function — there is nothing to read and the mention is rejected.
 
+The rule is not confined to *mentions*.  **Applying** a constrained function
+inside a function that generalizes the constrained variable is rejected on the
+same grounds: with no `where` clause there is no dictionary parameter to forward,
+so the instance would be chosen once at definition and every caller would receive
+that choice.  Adding the clause is what makes it legal.  When the variable appears
+in no parameter, a `where` clause has nothing to attach a dictionary to, and the
+diagnostic asks for a concrete annotation instead:
+
+```sprout
+fn relabel(x: a) = label(x)
+# `relabel` needs a ToString instance for type variable `a`, but declares no
+# `where` constraint for it ... add `where ToString a` to its signature
+
+fn relabel(x: a) where ToString a = label(x)   # accepted: the dictionary forwards
+
+fn pick() = label
+# `pick` needs a ToString instance for a type variable it generalizes, and that
+# variable appears in no parameter ... annotate with the concrete type you mean
+```
+
+The variable must be one the declaration **generalizes**.  A free variable it does
+not is unaffected: `list_map(label, [])` inside a monomorphic function leaves an
+element type undetermined, but the enclosing signature is not polymorphic and the
+dictionary is never invoked, so the dead dictionary stays inert rather than
+becoming an error.  Coverage is judged per variable, so a variable a `where`
+clause constrains is exempt here even when the body needs a *different* class of
+it; that case is rejected by dispatch verification instead.
+
 Those remaining positions are a known gap tracked in `BACKLOG.md`, not a
 deliberate restriction.  The gap applies equally to a hand-written lambda in
 the same positions, so it is a limit of how far declared types propagate rather
