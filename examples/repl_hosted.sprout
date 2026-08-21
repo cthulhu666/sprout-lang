@@ -1,4 +1,0 @@
-module examples.repl_hosted
-import stdlib.repl
-
-fn main() -> Unit !{IO} = repl.run()

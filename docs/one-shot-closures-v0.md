@@ -274,9 +274,10 @@ proved directly in `tests/stdlib/compiler/test_borrow_erasure.spr`, where two so
 exactly the `once` token emit byte-identical IR and no `once` token survives into the output — but
 the golden corpus still moved, in five files and for two reasons, both read before regenerating:
 
-1. **`repl_hosted.sprout`** — the parser gained the string literal `"once"`, and this is the one
+1. **`repl_hosted.sprout`** — the parser gained the string literal `"once"`, and this was the one
    golden program that bundles the compiler itself. `@.str.228` becomes `"once"` and every later
-   constant shifts one index with identical content. No emitted instruction changed.
+   constant shifts one index with identical content. No emitted instruction changed. (That file has
+   since been removed; `tests/smoke_shapes/11_compiler_bundle.spr` now holds this role.)
 2. **`http_echo_server` / `http_web_server` / `tcp_echo_once` / `tcp_echo_server`** — the new
    `net.read_avail` definition, plus a real codegen change in `http_server`'s read loop:
    `pop_roots(i64 1)` became `pop_roots(i64 2)`. That is the migration, not the modifier. A
