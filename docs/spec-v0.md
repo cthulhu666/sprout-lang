@@ -2037,8 +2037,9 @@ inside a function that generalizes the constrained variable is rejected on the
 same grounds: with no `where` clause there is no dictionary parameter to forward,
 so the instance would be chosen once at definition and every caller would receive
 that choice.  Adding the clause is what makes it legal.  When the variable appears
-in no parameter, a `where` clause has nothing to attach a dictionary to, and the
-diagnostic asks for a concrete annotation instead:
+in no parameter, a `where` clause has nothing to *attach* to until the signature
+names the variable somewhere, so the diagnostic asks for a declared return type
+carrying the constraint, or a concrete annotation:
 
 ```sprout
 fn relabel(x: a) = label(x)
@@ -2049,8 +2050,18 @@ fn relabel(x: a) where ToString a = label(x)   # accepted: the dictionary forwar
 
 fn pick() = label
 # `pick` needs a ToString instance for a type variable it generalizes, and that
-# variable appears in no parameter ... annotate with the concrete type you mean
+# variable appears in no parameter ... declare a return type naming the variable
+# and constrain it with a `where` clause, or annotate with the concrete type
+
+fn pick() -> a -> String where ToString a = label   # accepted
+fn pick() -> Int -> String = label                  # accepted, fixed at Int
 ```
+
+The first accepted form is dispatched **per call**: the constraint variable is
+determined by how the result is used, so `pick()(5)` and `pick()(true)` select
+different instances from one declaration.  This is resolved after the call's type
+is known rather than while its arguments are being inferred, since there are no
+arguments to read it from.
 
 The variable must be one the declaration **generalizes**.  A free variable it does
 not is unaffected: `list_map(label, [])` inside a monomorphic function leaves an
