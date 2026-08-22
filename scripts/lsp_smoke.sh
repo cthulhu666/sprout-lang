@@ -102,6 +102,57 @@ check "the diagnostic points at the offending token (2:13)" $?
 echo "$resp" | grep -q '"end":{"line":2,"character":13}'
 check "the diagnostic range is currently zero-width (end == start)" $?
 
+# --- 2b. `no_prelude` scope: the editor must agree with the batch compiler --------
+# Two front ends decide independently what is in scope for a `no_prelude` file, and for
+# a while only one of them was fixed. `compiler.check_bundled` stopped seeding the
+# checker with the prelude's schemes (`469924cf`, docs/no-prelude-core-v0.md) — that is
+# what turned a call to a prelude function from a clang `use of undefined value` into a
+# positioned diagnostic. The analysis service keeps a `load_prelude_pairs` call of its
+# own, so "fixed in the batch compiler" carried no information about what an editor
+# shows; it had to be driven to find out.
+#
+# It agrees, because that call is a cache pre-warm rather than an environment injection
+# (`analysis_service_driver.build_startup_state` discards the pairs). Asserted here
+# because nothing makes the two agree ON PURPOSE: a change to either side could split
+# them, and the symptom would be an editor that accepts what the build rejects.
+NP_URI="file:///tmp/lsp_smoke_no_prelude.sprout"
+
+resp="$(drive "$INIT" "$(open_doc "$NP_URI" 'no_prelude\n\nfn main() -> Int !{IO} = range_count(range_up(1, 4))\n')")"
+echo "$resp" | grep -q 'Unknown variable: range_count'
+check "no_prelude: a prelude function is out of scope in the editor too" $?
+
+# The control that pins the cause to the seeding. A name in NEITHER the prelude nor the
+# bundle was rejected correctly throughout — so the assertion above is only evidence
+# about prelude exports if this one holds too.
+resp="$(drive "$INIT" "$(open_doc "$NP_URI" 'no_prelude\n\nfn main() -> Int !{IO} = totally_bogus_name(1)\n')")"
+echo "$resp" | grep -q 'Unknown variable: totally_bogus_name'
+check "no_prelude: a genuinely unknown name is rejected" $?
+
+# The floor must survive. `no_prelude` drops the library, not the language: the
+# prelude's primitive-only externs stay in scope (`bundler.prelude_floor`). Without
+# this, both assertions above would also pass on a server that handed a `no_prelude`
+# file nothing at all — which is the failure mode the floor exists to prevent, and the
+# one a prototype shipped past a fully green suite.
+resp="$(drive "$INIT" "$(open_doc "$NP_URI" 'no_prelude\n\nfn main() -> Int !{IO} = str_len(\"ab\")\n')")"
+echo "$resp" | grep -q '"diagnostics":\[\]'
+check "no_prelude: a floor name stays in scope" $?
+
+# THE DISCRIMINATING ASSERTION. The floor is a CUT, and only a name on the far side of
+# it shows where the cut is. `vector_length` is an extern like `str_len` and its
+# signature mentions nothing the prelude declares (`Vector` is a builtin type constant),
+# so a floor defined as "type-closed against the prelude" would admit it — the floor is
+# deliberately narrower, scalars only. Without this, the assertion above would pass just
+# as well on a server that handed a `no_prelude` file the whole prelude back.
+resp="$(drive "$INIT" "$(open_doc "$NP_URI" 'no_prelude\n\nfn main() -> Int !{IO} = vector_length(vector_empty())\n')")"
+echo "$resp" | grep -q 'Unknown variable: vector_length'
+check "no_prelude: a non-floor extern is out of scope" $?
+
+# And the whole section must be about `no_prelude`, not about the server being broken:
+# with the directive removed, both names resolve.
+resp="$(drive "$INIT" "$(open_doc "$NP_URI" 'module m\n\nfn main() -> Int !{IO} = str_len(\"ab\") + vector_length(vector_empty())\n')")"
+echo "$resp" | grep -q '"diagnostics":\[\]'
+check "no_prelude: dropping the directive restores both names" $?
+
 # --- 3. document lifecycle -------------------------------------------------------
 # didChange must re-check: opening broken and then fixing it must clear the squiggle.
 resp="$(drive "$INIT" "$(open_doc "$URI" "$BAD")" "$(change_doc "$URI" "$GOOD")")"
