@@ -355,8 +355,28 @@ types from the declared return type before the body is inferred, so in
 `fn pick() -> Int -> String = label` the return type is what makes the instance
 `ToString Int`.  These two — an annotated `let` and a declared return type — are
 the positions that carry a written type; elsewhere a function literal is typed
-against the parameter it is passed to, and a position that fixes nothing (a
-record field, an element of a list) determines no instance.
+against the parameter it is passed to.
+
+**A position that fixes nothing still determines the instance.** Expected-type
+propagation is how a function *literal* learns its parameter types, and it
+reaches only the positions above. Instance selection for a `where`-constrained
+function used as a **value** does not depend on it: the dictionary is chosen
+after unification, by locating the constraint's own variable in the callee's
+declared type walked alongside the type the call instantiated it to. Whatever
+the value was sitting in when it was written is irrelevant, so a constructor
+payload, a list or tuple element, a record field of polymorphic type, and a
+local `let … in` all dispatch to the instance the eventual use requires. The
+choice is per call, so the same constrained function reached through the same
+position from two callers yields two different dictionaries:
+
+```sprout
+fn label(x: a) -> String where ToString a = to_string(x)
+
+fn describe(n: Int) -> String =
+  match Just(label) with          # `Just`'s payload type is `a`; it fixes nothing
+  | Just(f) -> f(n)               # ... and this still selects `ToString Int`
+  | Nothing -> "?"
+```
 
 **An undetermined dictionary in a top-level binding is an error.** A top-level
 `let` is a single value, so a typeclass dictionary its initializer needs is
