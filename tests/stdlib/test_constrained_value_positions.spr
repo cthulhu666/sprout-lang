@@ -1,0 +1,151 @@
+import stdlib.test (check_eq, run_suite)
+
+# A `where`-constrained function used as a VALUE in a position that fixes nothing, inside a
+# caller that has NO `where` clause of its own — so no dictionary is forwarded and the
+# resolver must work out which instance the call needs.
+#
+# `test_constrained_fn_as_value.spr` covers the positions that DO fix the type: an argument
+# slot, and a `let` inside a constrained caller. It deliberately excluded these, because they
+# were rejected when it was written:
+#
+#     dispatch-verify: dictionary for `ToString a` resolved to `ToString String`
+#     but the call fixes a = Int (expected `ToString Int`)
+#
+# `ToString String` is `label`'s own RETURN type. The resolver scanned the concrete return
+# type for any component carrying an instance and took the first hit, so it could not tell
+# the constrained variable from the one beside it. Locating the variable structurally instead
+# fixed every position below at once — they were never separate defects, only one resolver
+# reading the wrong place, and where the value SAT never mattered.
+#
+# Every case runs at two types, and the record cases at a third with distinctive output: a
+# resolver that picks by position rather than by meaning can satisfy `Int` or `Bool` by luck,
+# but not `TAG<42>`.
+
+type Tag = (n: Int)
+
+instance ToString Tag
+  fn to_string(t: Tag) -> String = `TAG<${to_string(t.n)}>`
+
+fn label(x: a) -> String where ToString a = to_string(x)
+
+type Holder a = (f: a -> String)
+
+# --- local `let ... in`, initializer is a lambda ---
+fn via_let_lambda(x: a) -> String where ToString a =
+  let f = \m -> label(m)
+  in f(x)
+
+fn let_lambda_int(n: Int) -> String =
+  let f = \m -> label(m)
+  in f(n)
+
+fn let_lambda_bool(b: Bool) -> String =
+  let f = \m -> label(m)
+  in f(b)
+
+# --- local `let ... in`, initializer is the bare constrained name (eta-expanded) ---
+fn let_bare_int(n: Int) -> String =
+  let f = label
+  in f(n)
+
+fn let_bare_tag(t: Tag) -> String =
+  let f = label
+  in f(t)
+
+# --- constructor slot: `Just`'s payload type is `a`, so it fixes nothing ---
+fn ctor_int(n: Int) -> String =
+  match Just(label) with
+  | Just (f) -> f(n)
+  | Nothing -> "?"
+
+fn ctor_tag(t: Tag) -> String =
+  match Just(label) with
+  | Just (f) -> f(t)
+  | Nothing -> "?"
+
+# --- list element ---
+fn list_elem_int(n: Int) -> String =
+  match [label] with
+  | [f | _] -> f(n)
+  | [] -> "?"
+
+fn list_elem_bool(b: Bool) -> String =
+  match [label] with
+  | [f | _] -> f(b)
+  | [] -> "?"
+
+# --- tuple element: unlike the list case the sibling is unrelated, so nothing unifies it ---
+fn tuple_elem_int(n: Int) -> String =
+  match (label, 0) with
+  | (f, _) -> f(n)
+
+fn tuple_elem_tag(t: Tag) -> String =
+  match (label, 0) with
+  | (f, _) -> f(t)
+
+# --- record field whose declared type is polymorphic, so the field fixes nothing ---
+fn field_poly_int(n: Int) -> String =
+  let h = Holder(f = label)
+  in h.f(n)
+
+fn field_poly_tag(t: Tag) -> String =
+  let h = Holder(f = label)
+  in h.f(t)
+
+# --- nested two containers deep: a one-level walk would stop short of this ---
+fn nested_int(n: Int) -> String =
+  match Just([label]) with
+  | Just ([f | _]) -> f(n)
+  | _ -> "?"
+
+fn nested_bool(b: Bool) -> String =
+  match Just([label]) with
+  | Just ([f | _]) -> f(b)
+  | _ -> "?"
+
+# --- across a function boundary: a function type INSIDE a container, where the consumer and
+# --- not the producer is what fixes the variable.
+fn make() -> Maybe(a -> String) where ToString a = Just(label)
+
+fn cross_int(n: Int) -> String =
+  match make() with
+  | Just (f) -> f(n)
+  | Nothing -> "?"
+
+fn cross_tag(t: Tag) -> String =
+  match make() with
+  | Just (f) -> f(t)
+  | Nothing -> "?"
+
+fn main() -> Unit !{IO} =
+  run_suite("constrained_value_positions", [
+    # Inside a constrained caller the dictionary is forwarded, not resolved. Green before this
+    # was pinned, and included so a regression that broke forwarding is told apart from one
+    # that broke resolution.
+    check_eq("forwarded, Int", via_let_lambda(7), "7"),
+    check_eq("forwarded, Tag", via_let_lambda(Tag(n = 42)), "TAG<42>"),
+
+    check_eq("local let + lambda, Int", let_lambda_int(7), "7"),
+    check_eq("local let + lambda, Bool", let_lambda_bool(true), "true"),
+
+    check_eq("local let + bare name, Int", let_bare_int(7), "7"),
+    check_eq("local let + bare name, Tag", let_bare_tag(Tag(n = 42)), "TAG<42>"),
+
+    check_eq("constructor slot, Int", ctor_int(7), "7"),
+    check_eq("constructor slot, Tag", ctor_tag(Tag(n = 42)), "TAG<42>"),
+
+    check_eq("list element, Int", list_elem_int(7), "7"),
+    check_eq("list element, Bool", list_elem_bool(true), "true"),
+
+    check_eq("tuple element, Int", tuple_elem_int(7), "7"),
+    check_eq("tuple element, Tag", tuple_elem_tag(Tag(n = 42)), "TAG<42>"),
+
+    check_eq("polymorphic record field, Int", field_poly_int(7), "7"),
+    check_eq("polymorphic record field, Tag", field_poly_tag(Tag(n = 42)), "TAG<42>"),
+
+    check_eq("nested Just of List, Int", nested_int(7), "7"),
+    check_eq("nested Just of List, Bool", nested_bool(true), "true"),
+
+    check_eq("across a function boundary, Int", cross_int(7), "7"),
+    check_eq("across a function boundary, Tag", cross_tag(Tag(n = 42)), "TAG<42>")
+  ])
