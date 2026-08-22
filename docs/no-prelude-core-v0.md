@@ -117,20 +117,20 @@ own header comment*:
 | **A. Absence proofs over emitted IR** | `test_wrap_codegen`, `test_tuple_return_cpr` | "ABSENCE proofs over the whole emitted module — 'this IR contains no call to `@sprout_alloc_obj`' — and the prelude allocates and reads fields all over itself, so a bundled prelude makes such a proof unstatable" | **Yes.** No compiler fix removes this. |
 | **B. Masking two known compiler bugs** | `instance_check`, `type_classes` (`invalid redefinition of function '__cm_Eq_eq'`); `codegen_do_bind`, `test_ir_codegen_do_bind_strip` (`Int vs demo.Maybe Int`) | each says: "a `module demo` header reproduces the same failure … That gap is pre-existing and tracked in BACKLOG; the file previously escaped it only by getting no prelude at all" | **No.** Evaporates when the two open `P2` qualification items land. |
 | **C. Testing the directive itself** | `no_prelude_directive`, `test_bundle_prelude_scope` | self-referential | Only while the directive exists. |
+| **D. Planned but never marked** | `01_noparam`, `02_adtmatch`, `03_strconcat`, `05_lambdaparams` | `prelude-scope-v0.md` §8 assigned these the directive to keep their goldens small, and the disposition was never applied (below) | **Yes.** Their goldens are 12.5k lines for ≤7 lines of source until it is. |
 
-**The uncomfortable finding: category A needs nothing from the floor.** Those two
-fixtures "use Int, one wrap and one ADT, and no prelude name at all" — verified,
-zero occurrences of `print`, `str_concat`, `int_to_string`, `str_len` or `panic`
-in either. The floor's 15 names are wanted by categories **B** and **C** only.
+Category A needs nothing from the floor: those two fixtures "use Int, one wrap
+and one ADT, and no prelude name at all" — verified, zero occurrences of any
+floor name. **Category D needs exactly one: `print`.** Verified across all four,
+and `print` is the only floor name any of them mentions.
 
-So this design invests in a surface whose principal consumers are workarounds for
-two bugs that are already tracked and already scheduled to be fixed together.
-That does not make the floor wrong — the reported defect is real, the 31 clang
-errors are real, and `no_prelude` needs a defined meaning for as long as it
-exists. But it does mean **the sequencing is a live question**, and §4.3's
-"seed only the extern schemes" interim looks stronger in this light than it did
-when it was written: it fixes the defect with zero regression and zero semantic
-commitment, which is what you want while the population is still shrinking.
+So the permanent constituency for the floor is category D — four files that were
+*designed* to be `no_prelude` and are not yet. Categories B and C also want
+`print`, but B is temporary by construction and C exists only to test the
+directive. The floor is therefore not, as an earlier draft of this section
+claimed, a surface whose consumers are all workarounds; that reading came from
+treating the §8 lapse as a decision rather than an oversight (below), which made
+category D invisible.
 
 **Two further facts about how the opt-out actually landed,** both of which argue
 the same way:
@@ -169,10 +169,28 @@ the same way:
   2% sample"). Letting the goldens inflate degraded the golden gate's
   readability — the corpus is now 955,705 lines across 60 files.
 
-  For the purposes of *this* design the relevant conclusion is narrower: golden
-  size is **not** a live reason to want the opt-out, because the project already
-  accepted a 140× inflation rather than use it for that. One more item off the
-  justification list in the table above.
+  **The plan was viable; it was simply not executed.** Measured by marking the
+  four in a scratch copy and re-emitting: all four compile, and their IR returns
+  to 64 / 108 / 79 / 97 lines — essentially their pre-change sizes. Each uses
+  exactly one floor name, `print`. So this is not a case of a disposition that
+  turned out to be impossible and was quietly abandoned.
+
+  **This is an oversight, not an accepted trade, and the distinction changes the
+  conclusion.** An earlier draft of this section wrote that "the project already
+  accepted a 140× inflation rather than use the opt-out for that", and inferred
+  that golden size is therefore not a live reason to want the opt-out. That
+  inference is invalid. Acceptance would be evidence about what the project
+  values; an unnoticed lapse is evidence about what it *checked*. The design did
+  value golden size — that is why the row exists — and nothing has revisited it.
+  Golden size remains a live and **unadjudicated** reason to want the opt-out, and
+  the four affected files are category D above, not an argument against the floor.
+
+  **Executing §8's plan is worth doing on its own**, and the floor is what makes
+  it principled: marking those four recovers ~49.6k lines (~5% of the corpus) and
+  restores the `head -40` report to something meaningful for them. Today it would
+  work only because the scheme leak supplies `print`; under the floor it works
+  because `print` is declared. Filed as follow-up, not folded in here — it
+  rewrites four goldens and wants its diff read on its own.
 
 ## 2. Goals and non-goals
 
