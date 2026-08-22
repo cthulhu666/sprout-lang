@@ -2171,6 +2171,26 @@ Found while correcting stale claims across the user-facing docs; none is a doc f
   churn. Gated separately: it rewrites every golden at once, so it wants its own PR with the
   diff read per AGENTS.md DoD #12.
 
+- [ ] `P3` **A `no_prelude` file whose top-level name matches a C runtime symbol dies with
+  `duplicate symbol` at link, having type-checked clean.** `no_prelude` + `fn str_len(s: String)
+  -> Int = 99` passes `--phase check` (the local define shadows the extern — the documented
+  `lower_extern_decls` "let the define win" behaviour, and the IR carries `define i64 @str_len`
+  with no `declare`), then fails as ``duplicate symbol '_str_len'`` against
+  `runtime/sprout_runtime.c`. A *normal* file is immune: its entry is qualified, so the same
+  source emits `@$entry.str_len` and runs, returning the local `99`.
+
+  Pre-existing — verified 2026-08-22 by compiling the identical file with the compiler before
+  and after `docs/no-prelude-core-v0.md`'s floor landed, with byte-identical outcomes. The
+  floor neither causes nor fixes it; the hazard is the bare namespace a `no_prelude` file
+  already has, and it applies to ANY top-level name colliding with a runtime symbol, floor
+  member or not.
+
+  Not fixed with the floor because the fix is to qualify the `no_prelude` entry module, which
+  is exactly what `prelude-scope-v0.md` coupled to prepending the prelude and which re-triggers
+  the two open qualification-uniformity items above (`__cm_<Class>_<method>` mangling,
+  do-notation's bare-name monad lookup). Worth doing WITH those, not before. No conformance
+  gate covers "type-checks then fails at link", which is why this is prose and not a fixture.
+
 - [ ] `P2` **Four smoke shapes were assigned `no_prelude` by design and never marked; their
   goldens are ~12.5k lines each for ≤7 lines of source.** `docs/prelude-scope-v0.md` §8
   dispositioned `tests/smoke_shapes/*.spr` as "`no_prelude` — keeps goldens tiny" and predicted

@@ -1,0 +1,26 @@
+no_prelude
+
+# A `no_prelude` file does not get the prelude's declarations, so a call to a
+# prelude function names something that is not there — and must be diagnosed as
+# such, at check time, with a source position.
+#
+# It was not. `compiler.check_bundled` seeded the checker with the prelude's
+# SCHEMES (`module_loader.load_prelude_pairs`) whether or not the prelude was
+# bundled, so `range_count` type-checked against a scheme whose declaration the
+# bundle had deliberately left out. The compile then emitted
+# `call i64 @range_count` with neither a `define` nor a `declare`, exited 0, and
+# the user's first sign of trouble was clang: `use of undefined value
+# '@range_count'`, with no Sprout source position.
+#
+# The check itself was never missing — `infer_var` rejects an unbound name and
+# always did. Only the prelude's own exports escaped it, and only here, because
+# only they were in the seeded environment without being in the bundle. That is
+# why the companion fixture matters: a name that is in NEITHER was rejected
+# correctly the whole time, which is what pins the cause to the seeding rather
+# than to a missing check.
+#
+# The over-rejection direction is pinned by `run/no_prelude_directive.spr`: a
+# `no_prelude` file's own definitions, and the special-cased `print`, must still
+# resolve and run. Dropping the seed must not drop the environment.
+
+fn main() -> Int !{IO} = range_count(range_up(1, 4))

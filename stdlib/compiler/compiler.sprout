@@ -335,9 +335,7 @@ export fn compile_full(path: source.FilePath, stdlib_root: source.StdlibRoot) ->
     | bundler.BundleErr pos msg -> FullFail(Cons(diag_error(pos, "bundle: " ++ msg), Nil))
     | bundler.BundleOk prog ->
         do
-          cache <- module_loader.new_cache()
-          prelude_pairs <- module_loader.load_prelude_pairs(source.stdlib_root_str(stdlib_root), cache)
-          tc_result <- checker.typecheck_typed(prog, prelude_pairs)
+          tc_result <- checker.typecheck_typed(prog, Nil)
           match tc_result with
           | typed_ast.TypedErr pos msg -> FullFail(Cons(diag_error(pos, "check: " ++ msg), Nil))
           | typed_ast.TypedOk typed_prog env ->
@@ -413,9 +411,7 @@ export fn compile_phase_effects_with_roots(path: source.FilePath, stdlib_root: s
     | bundler.BundleErr pos msg -> (typed_ast.TypedErr(pos, "bundle: " ++ msg), Nil)
     | bundler.BundleOk prog ->
         do
-          cache <- module_loader.new_cache()
-          prelude_pairs <- module_loader.load_prelude_pairs(source.stdlib_root_str(stdlib_root), cache)
-          checker.typecheck_typed_with_effects(prog, prelude_pairs)
+          checker.typecheck_typed_with_effects(prog, Nil)
 
 export fn compile_phase_check_with_roots(path: source.FilePath, stdlib_root: source.StdlibRoot, extra_roots: List String) -> typed_ast.TypedResult !{IO} =
   do
@@ -430,11 +426,32 @@ export fn compile_phase_check_with_roots(path: source.FilePath, stdlib_root: sou
 # Everything after the bundle: typecheck, resolve, verify dispatch. Shared so that
 # checking a FILE and checking a BUFFER cannot diverge — the whole point of retiring the
 # env path is that this code has exactly one implementation.
+#
+# `Nil`, not `load_prelude_pairs`. The bundle already contains the prelude's
+# declarations, so seeding its schemes on top was pure duplication — the prelude
+# was typechecked twice on every compile, once here and once as bundled decls.
+#
+# The duplication was not merely wasteful, it was load-bearing in the wrong
+# direction: for a `no_prelude` file the bundle omits the prelude while the seed
+# supplied it anyway, so a call to a prelude function type-checked against a
+# scheme whose declaration was deliberately absent, emitted a call with no define,
+# and failed inside clang instead of producing a diagnostic
+# (docs/no-prelude-core-v0.md §1). Removing the seed is what makes `no_prelude`
+# mean what it says; `bundler.prelude_floor` is what keeps it from meaning too
+# much.
+#
+# This restores the state bd90e4b5 changed, and for a reason that did not exist
+# then. That commit passed the pairs to fix `Unknown variable: print` for BARE
+# files, which at the time received no prelude at all. Since
+# docs/prelude-scope-v0.md the prelude is unconditional, so bare files get it from
+# the bundle and the compensation had outlived its cause.
+#
+# The three remaining load_prelude_pairs callers are NOT redundant and stay:
+# lower_driver and type_driver parse a single file without bundling, so schemes
+# are their only source; analysis_service_driver calls it to warm the cache.
 fn check_bundled(prog: ast.Program, stdlib_root: source.StdlibRoot, load_env: bundler.LoadEnv) -> typed_ast.TypedResult !{IO} =
   do
-    prelude_pairs <- module_loader.load_prelude_pairs(
-      source.stdlib_root_str(stdlib_root), bundler.load_env_schemes(load_env))
-    result <- checker.typecheck_typed(prog, prelude_pairs)
+    result <- checker.typecheck_typed(prog, Nil)
     match result with
     | typed_ast.TypedErr pos msg -> typed_ast.TypedErr(pos, "check: " ++ msg)
     | typed_ast.TypedOk typed_prog env ->
@@ -507,8 +524,7 @@ fn compile_phase_check_with_cache(path: source.FilePath, stdlib_root: source.Std
     | bundler.BundleErr pos msg -> typed_ast.TypedErr(pos, "bundle: " ++ msg)
     | bundler.BundleOk prog ->
         do
-          prelude_pairs <- module_loader.load_prelude_pairs(source.stdlib_root_str(stdlib_root), cache)
-          result <- checker.typecheck_typed(prog, prelude_pairs)
+          result <- checker.typecheck_typed(prog, Nil)
           match result with
           | typed_ast.TypedErr pos msg -> typed_ast.TypedErr(pos, "check: " ++ msg)
           | typed_ast.TypedOk typed_prog env ->
