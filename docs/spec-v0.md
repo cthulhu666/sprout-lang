@@ -2014,12 +2014,14 @@ fn apply(f: Int -> String, n: Int) -> String = f(n)
 apply(label, 3)     # `label` has type `Int -> String` here
 ```
 
-The dictionary must come from somewhere the compiler can read at the point of
-the mention: a receiving parameter whose declared type fixes it, as above; a
-`where` clause on the enclosing function, which supplies one to forward; a type
-annotation on the binding; or the declared return type of the function the
-mention is returned from.  Given any of the four, the mention may appear
-anywhere a value may — including bound with `let`:
+The dictionary must be determined by something the compiler can read: a
+receiving parameter whose declared type fixes it, as above; a `where` clause on
+the enclosing function, which supplies one to forward; a type annotation on the
+binding; the declared return type of the function the mention is returned from;
+or, when none of those applies, how the value is eventually **used** — the
+choice is made after unification, not at the mention, so a slot that fixes
+nothing does not prevent it.  The mention may appear anywhere a value may —
+including bound with `let`:
 
 ```sprout
 fn describe(x: b) -> String where ToString b =
@@ -2042,15 +2044,14 @@ let labeller = label
 # type a -> String leaves that choice open ...
 ```
 
-A mention with **none** of the four is rejected at compile time.  The rule is
-about the receiving slot, not about the syntax around it, so it covers more
-than it might appear: a record field, a list or tuple element, and an argument
-whose receiving parameter is a bare type variable rather than a concrete type —
-`Just(label)` is argument position and is still rejected, because `Just`'s
-parameter fixes nothing.  Returning the function is likewise governed by the
-slot: with a declared return type that fixes the variable it is accepted, and
-with none — neither a return type nor a `where` clause on the enclosing
-function — there is nothing to read and the mention is rejected.
+The rule is about **generalization**, not about the receiving slot.  A slot that
+fixes nothing — a record field, a list or tuple element, or a constructor
+payload such as `Just(label)` — is not itself a problem, because the eventual
+use still determines the instance.  What cannot work is a declaration that
+*generalizes* the variable the dictionary is for: each caller may then need a
+different instance, and the declaration has only the one choice to give them
+all.  That is what the top-level `let` above runs into, and it is why the same
+mention inside a `fn` is fine — a `fn` takes its dictionary per call.
 
 The rule is not confined to *mentions*.  **Applying** a constrained function
 inside a function that generalizes the constrained variable is rejected on the
@@ -2091,12 +2092,30 @@ becoming an error.  Coverage is judged per variable, so a variable a `where`
 clause constrains is exempt here even when the body needs a *different* class of
 it; that case is rejected by dispatch verification instead.
 
-Those remaining positions are a known gap tracked in `BACKLOG.md`, not a
-deliberate restriction.  The gap applies equally to a hand-written lambda in
-the same positions, so it is a limit of how far declared types propagate rather
-than anything about constrained functions.  Their diagnostics are uneven and
-part of the tracked gap: they report a dictionary mismatch naming a type
-variable from the callee's signature.
+**An instance method is held to the same rule, with one fewer remedy.**  A
+method that generalizes a type variable of its own and needs a dictionary for it
+is rejected, exactly as the equivalent `fn` would be.  The remedy differs: a
+method carries no `where` clause — neither the class signature nor the instance
+implementation accepts one — so the only place a constraint can go is the
+**instance head**, which does supply a dictionary to forward:
+
+```sprout
+class Renderer f
+  fn render(r: f, x: a) -> String
+
+instance Renderer Box
+  fn render(r: Box, x: a) -> String = label(x)
+# `render` needs a ToString instance for type variable `a`, which this method
+# generalizes and the instance head does not constrain ... constrain the
+# variable in the instance head, or give the method a concrete type
+
+instance Renderer (Pair a) where ToString a          # accepted: forwarded
+  fn render(r: Pair a) -> String = label(r.l)
+```
+
+A class method whose *own* signature needs a constraint separate from the class
+variable is therefore not expressible; that is a tracked gap in `BACKLOG.md`,
+not a deliberate restriction.
 
 ### `ToString` instances
 
