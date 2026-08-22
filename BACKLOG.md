@@ -2105,30 +2105,42 @@ Found while correcting stale claims across the user-facing docs; none is a doc f
   readers at it for the open `+`/`-`/`*` policy question — so its ground-truth section should
   re-verify against `ir_lowering.sprout` rather than a file that no longer exists. Cheap: the
   finding itself (plain `add/sub/mul i64`, no `nsw`) is still correct, only the citation rotted.
-- [ ] `P2` **A `no_prelude` file calling a prelude function escapes to `clang` instead of a
-  Sprout diagnostic.** Nothing in the Sprout-IR path checks that a called name is actually
-  bound. `bundler.collect_modules`' comment promised the unresolved call was "a hard error
-  (codegen.emit_named_call), not a silent zero_val", but that backend was deleted in `5f29b9da`
-  ("compiler: retire the direct codegen backend") and the guarantee lapsed silently. Re-measured
-  2026-08-20 on `c4a4500a`: `no_prelude` + `fn main() -> Int !{IO} = range_count(range_up(1, 4))`
-  **type-checks and emits IR with exit 0**, no `ERROR:` in the output, calling `@range_count`
-  with neither a `declare` nor a `define`; the user's first sign of trouble is
-  `error: use of undefined value '@range_count'` from clang. Fix: at bundle time, reject a call
-  to a name no bundled module declares. Also fix the stale citation at `bundler.sprout:618`.
+- [x] `P2` **FIXED 2026-08-22. A `no_prelude` file calling a prelude function escaped to
+  `clang` instead of a Sprout diagnostic.** `no_prelude` +
+  `fn main() -> Int !{IO} = range_count(range_up(1, 4))` type-checked, emitted a call to
+  `@range_count` carrying neither a `declare` nor a `define`, exited 0, and reached the user as
+  `error: use of undefined value '@range_count'` from clang with no Sprout position. It now
+  reports `check: Unknown variable: range_count in function main`.
 
-  > **Rescoped 2026-08-20 — the stated cause was never the real one.** This entry originally
-  > read "a *preludeless* file", attributing the hole to `collect_modules` "deliberately
-  > withholding the prelude from an importless, self-contained file". PR #164 deleted that
-  > withholding, and the headline repro now compiles, links and runs — but the defect
-  > survived, because the cause was never the withholding: it is that the IR path performs no
-  > unbound-name check at all. `no_prelude` simply gives the same hole a new door. A fix aimed
-  > at the cause as originally stated would have closed this entry and left the bug.
+  Fixed in `469924cf` per `docs/no-prelude-core-v0.md`: `compiler.check_bundled` stopped seeding
+  the checker with `module_loader.load_prelude_pairs`, and `bundler.prelude_floor` hands a
+  `no_prelude` file the prelude's primitive-only externs so the nine names that already worked
+  keep working. Pinned by `tests/conformance/type_error/no_prelude_calls_prelude_fn.spr`, with
+  `no_prelude_excludes_vector` / `no_prelude_excludes_argv` for the exclusion side and
+  `run/no_prelude_floor.spr` as the capability matrix.
+
+  > **Both stated causes were wrong, which is the part worth keeping.** The original entry
+  > blamed `collect_modules` "withholding the prelude from an importless, self-contained file";
+  > PR #164 deleted that withholding and the defect survived. The 2026-08-20 rescope then blamed
+  > "the IR path performs no unbound-name check at all" — **also false, and falsified by control
+  > experiment**: `no_prelude` + `totally_bogus_name(1)` was rejected correctly throughout, before
+  > and after. `infer_var` always rejected an unbound name. Only the *prelude's own exports*
+  > escaped it, and only because they sat in the seeded scheme environment without being in the
+  > bundle. A fix aimed at either stated cause would have left the bug in place.
+  >
+  > The stale `bundler.sprout:618` citation (`codegen.emit_named_call`, a backend deleted in
+  > `5f29b9da`) no longer matches anything in the file.
   >
   > Two pieces of evidence cited here were also invalidated: the xfails
   > `aoc2025_day1_sample` (`'@lcompose'`) and `stdlib_two_constraints_same_class` (`'@Err'`)
   > were offered as instances of this hole, and both now pass —
   > `tests/conformance/run/XFAIL` is empty. They were prelude-scope failures wearing a
   > `link:` label, not unbound-name failures.
+
+  **Residue, tracked elsewhere:** the diagnostic is generic where `docs/prelude-scope-v0.md` §7
+  committed to naming the cause (``check: `range_count` is not in scope: this file declares
+  `no_prelude` … ``). `docs/no-prelude-core-v0.md` §12 records that as unimplemented; no separate
+  backlog entry, since the design doc is where the commitment lives.
 - [x] `P2` **FIXED 2026-08-20. A named module's constructors printed with their qualified name.**
   `print(Apple(3))` in a file headed `module main` output `main.Apple(3)`; the display string was
   the bundler's qualified symbol (`bundler.qualified_name`, `:202`). Normative rule now in
@@ -4003,20 +4015,33 @@ all, and now say `no_prelude` instead.
   the resolutions that key on names — and worth fixing together with it. Affected fixtures:
   `tests/conformance/run/codegen_do_bind.spr`, `tests/stdlib/test_ir_codegen_do_bind_strip.spr`.
 
-- [ ] `P2` **`load_prelude_pairs` is now redundant, and its redundancy is what leaves
-  `no_prelude` with a raw IR-parser error instead of a diagnostic.** `compiler.check_bundled`
-  hands the checker the prelude's schemes unconditionally. With the prelude always bundled
+- [x] `P2` **FIXED 2026-08-22. `load_prelude_pairs` was redundant, and its redundancy is what
+  left `no_prelude` with a raw IR-parser error instead of a diagnostic.** `compiler.check_bundled`
+  handed the checker the prelude's schemes unconditionally. With the prelude always bundled
   (`docs/prelude-scope-v0.md`) those schemes are already in the bundled declarations, so the
-  injection changes nothing for a normal file — but for a `no_prelude` file it makes
+  injection changed nothing for a normal file — but for a `no_prelude` file it made
   `print(negate(7))` type-check and then fail as `error: use of undefined value '@negate'`,
-  which is precisely the defect (b) that design set out to close. Deleting the injection is
-  therefore both the root-cause fix and a code removal: a genuinely unknown name is already
-  rejected properly (`Unknown variable: no_such_function_anywhere`), so the same message would
-  appear here. Not done in that change because there are 9 `load_prelude_pairs` call sites
-  across `compiler.sprout`, `analysis_service_driver`, `lower_driver` and `type_driver` — the
-  batch, LSP, REPL and analysis paths — and changing the checker's environment on all of them
-  wants its own verification pass. Verify with: a `no_prelude` file calling `negate` must
-  report an unknown name, and `just test` plus `just gate` must stay green.
+  precisely the defect (b) that design set out to close.
+
+  Deleted in `469924cf`, at the four `compiler.sprout` call sites that fed a *bundled* program:
+  `compile_full`, `compile_phase_effects`, `check_bundled` and `compile_phase_check_with_cache`
+  now pass `Nil`. This entry counted 9 call sites and warned that the LSP, REPL and analysis
+  paths needed their own verification pass. Measured 2026-08-22 — they did not, for two reasons:
+
+  - `type_driver.sprout:33` and `lower_driver.sprout:49` are **orphaned executables** that
+    nothing builds or references. Deleting them is already tracked at the `P3` "orphaned
+    executables carrying a fixed defect" entry and the `P2` "Delete `build_import_pairs*`" entry;
+    it is code removal, not a behaviour fix.
+  - `analysis_service_driver.sprout:677` is a **cache pre-warm, not an environment injection** —
+    `build_startup_state` binds `prelude_pairs` and discards it, the effect being to populate
+    `bundler.load_env_schemes(load_env)`. It never reaches a checker environment. (The binding
+    name is what made it read as one; `_ <-` would say "pre-warm" out loud.)
+
+  Verified by driving `sproutd --lsp` with framed JSON-RPC: a `no_prelude` file calling
+  `range_count` reports `check: Unknown variable: range_count in function main`, the control
+  `totally_bogus_name` reports likewise, and a floor name (`str_len`) reports no diagnostic —
+  so the editor and the batch compiler agree, floor included. Pinned in `scripts/lsp_smoke.sh`
+  so the agreement stops being incidental.
 
 Five items below were surfaced while designing `docs/ranges-v0.md` (2026-08-19) and are recorded
 there in its Appendix C. None is in scope for that change.
