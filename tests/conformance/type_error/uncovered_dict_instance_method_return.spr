@@ -1,0 +1,19 @@
+# The same instance-method gap with the generalized variable in RETURN position rather than a
+# parameter. Kept separate from uncovered_dict_instance_method.spr because the free-function
+# family needed two fixtures for the same reason: the two positions reach the check through
+# different shapes of the body, and one can be fixed while the other still crashes.
+#
+# Verified to compile at exit 0 and SIGSEGV before the gate existed.
+module main
+
+fn label(x: a) -> String where ToString a = to_string(x)
+
+type Box = (v: Int)
+
+class Picker f
+  fn pick_labeller(r: f) -> a -> String
+
+instance Picker Box
+  fn pick_labeller(r: Box) -> a -> String = label
+
+fn main() -> Unit !{IO} = print(pick_labeller(Box(v = 1))(7))

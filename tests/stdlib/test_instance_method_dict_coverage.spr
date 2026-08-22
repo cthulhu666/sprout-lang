@@ -1,0 +1,73 @@
+import stdlib.test (check_eq, run_suite)
+
+# The ACCEPTED side of the instance-method uncovered-dictionary gate
+# (rejections: tests/conformance/type_error/uncovered_dict_instance_method{,_return}.spr).
+#
+# This file carries more weight than the rejection fixtures. Over-rejection is invisible to
+# every gate in the repo — it only shows on code that is SUPPOSED to compile, and the corpus
+# happens not to contain most of these shapes. Each case below is a method body that legitimately
+# touches a dictionary and must keep compiling.
+#
+# The distinction the gate draws is the same one `check_fn_body` draws for a free function: is
+# there anything that can supply the dictionary per call? An instance head's `where` clause can;
+# a variable the method generalizes on its own cannot, because a method carries no `where` clause
+# of its own on either the class signature or the instance.
+
+fn label(x: a) -> String where ToString a = to_string(x)
+
+type Box = (v: Int)
+
+type Pair a = (l: a, r: a)
+
+type Color = Red | Green
+
+instance ToString Color
+  fn to_string(c: Color) -> String =
+    match c with
+    | Red -> "RED"
+    | Green -> "GREEN"
+
+class Renderer f
+  fn render(r: f) -> String
+
+# (1) The class variable is CONCRETE at the instance, so the dictionary is determined at the
+# definition and there is nothing to generalize over.
+instance Renderer Box
+  fn render(r: Box) -> String = label(r.v)
+
+# (2) A parameterized instance head whose OWN `where` clause covers the variable. The method
+# generalizes `a`, but the instance forwards a dictionary rather than guessing one — this is the
+# remedy the rejection message points at, so a gate that rejected it would make the message a lie.
+instance Renderer (Pair a) where ToString a
+  fn render(r: Pair a) -> String = label(r.l) ++ "/" ++ label(r.r)
+
+class Counter f
+  fn count_of(c: f) -> Int
+
+# (3) A dictionary that is never invoked must stay INERT rather than become an error. This is the
+# case that killed the first attempt at the free-function gate, where subtracting by class instead
+# of by variable rejected `list_map(label, [])`.
+instance Counter Box
+  fn count_of(c: Box) -> Int = list_length(list_map(label, []))
+
+class Tagger f
+  fn tag(x: f) -> String
+
+# (4) The method's body calls a constrained function at a CONCRETE type unrelated to the class
+# variable. Nothing is generalized, so nothing is uncovered.
+instance Tagger Color
+  fn tag(x: Color) -> String = label(x) ++ ":" ++ label(42)
+
+fn main() -> Unit !{IO} =
+  run_suite("instance_method_dict_coverage", [
+    check_eq("concrete class variable", render(Box(v = 1)), "1"),
+
+    # Two element types through the SAME instance declaration, so one dictionary baked in at
+    # definition would fail one of them.
+    check_eq("instance-head where, Int", render(Pair(l = 2, r = 3)), "2/3"),
+    check_eq("instance-head where, custom", render(Pair(l = Red, r = Green)), "RED/GREEN"),
+
+    check_eq("dead dictionary stays inert", count_of(Box(v = 9)), 0),
+
+    check_eq("constrained call at a concrete type", tag(Red), "RED:42")
+  ])

@@ -6189,7 +6189,7 @@ fn typecheck_decl(
         env_ftv)
   | ast.InstanceDecl constraint inst_constraints methods _ ->
       do
-        r <- check_instance_methods(state, inst_constraints, methods, global_env_dict(env), subst, eff_subst)
+        r <- check_instance_methods(state, inst_constraints, methods, global_env_dict(env), subst, eff_subst, env_ftv)
         match r with
         | typed_ast.InstanceMethodsErr pos e -> TypedDeclErr(pos, e)
         | typed_ast.InstanceMethodsOk typed_methods ->
@@ -7197,14 +7197,21 @@ fn let_dict_ambiguity_msg(name: String, quantified: List String, t: types.Type,
 # reimplement superclass closure to keep `where MyOrd a` forwarding a `MyEq a` obligation.
 # tests/conformance/type_error/uncovered_dict_wrong_class.spr pins that division of labour so
 # neither pass can quietly stop covering it.
+# The generalized variables no `where` clause covers. Shared by the `fn` and instance-method
+# gates, which agree on what is uncovered and differ only in the remedy they can offer.
+fn uncovered_generalized_vars(constraints: List ast.TypeConstraint,
+                              prog_to_fresh: Dict types.Type, s2: Dict types.Type,
+                              inst_type: types.Type, env_ftv: List String) -> List String =
+  types.list_diff(
+    types.list_diff(types.ftv(unifier.apply_subst(s2, inst_type)), env_ftv),
+    constraints_covered_ftv(constraints, prog_to_fresh, s2))
+
 fn fn_dict_coverage_msg(name: String, params: List ast.Param,
                         constraints: List ast.TypeConstraint, prog_to_fresh: Dict types.Type,
                         s2: Dict types.Type, inst_type: types.Type, env_ftv: List String,
                         typed_body: typed_ast.TypedExpr,
                         env: Dict types.Scheme) -> Maybe String =
-  let uncovered = types.list_diff(
-        types.list_diff(types.ftv(unifier.apply_subst(s2, inst_type)), env_ftv),
-        constraints_covered_ftv(constraints, prog_to_fresh, s2))
+  let uncovered = uncovered_generalized_vars(constraints, prog_to_fresh, s2, inst_type, env_ftv)
       [_ | _] = uncovered else Nothing
   in
     match named_uncovered_dict(collect_param_type_vars(params, Nil), prog_to_fresh, s2,
@@ -7222,6 +7229,39 @@ fn fn_dict_coverage_msg(name: String, params: List ast.Param,
                    ++ " so no call site can supply the instance — declare a return type naming the"
                    ++ " variable and constrain it with a `where` clause, or annotate with the"
                    ++ " concrete type you mean")
+        | Nothing -> Nothing
+
+# The instance-method twin of fn_dict_coverage_msg. The detection is identical — a variable the
+# body needs a dictionary for, that the method generalizes and nothing covers — but the remedy
+# is not: a method carries no `where` clause on either the class signature or the instance, so
+# the only place a constraint can go is the instance head. The instance's own constraints are
+# what `constraints` supplies here, which is why a parameterized head like
+# `instance Renderer (Pair a) where ToString a` stays accepted.
+fn instance_method_dict_coverage_msg(name: String, params: List ast.Param,
+                                     constraints: List ast.TypeConstraint,
+                                     prog_to_fresh: Dict types.Type, s2: Dict types.Type,
+                                     inst_type: types.Type, env_ftv: List String,
+                                     typed_body: typed_ast.TypedExpr,
+                                     env: Dict types.Scheme) -> Maybe String =
+  let uncovered = uncovered_generalized_vars(constraints, prog_to_fresh, s2, inst_type, env_ftv)
+      [_ | _] = uncovered else Nothing
+  in
+    match named_uncovered_dict(collect_param_type_vars(params, Nil), prog_to_fresh, s2,
+                               uncovered, typed_body, env) with
+    | Just (v, cls) ->
+        Just("`" ++ name ++ "` needs a " ++ cls ++ " instance for type variable `" ++ v
+               ++ "`, which this method generalizes and the instance head does not constrain"
+               ++ " — an instance method cannot carry its own `where` clause, so nothing can"
+               ++ " supply the instance per call; constrain the variable in the instance head,"
+               ++ " or give the method a concrete type")
+    | Nothing ->
+        match uncovered_dict_subject(typed_body, s2, uncovered, env) with
+        | Just cls ->
+            Just("`" ++ name ++ "` needs a " ++ string.after_last_dot(cls) ++ " instance for a"
+                   ++ " type variable it generalizes, which appears in no parameter and which the"
+                   ++ " instance head does not constrain — an instance method cannot carry its own"
+                   ++ " `where` clause, so nothing can supply the instance per call; constrain the"
+                   ++ " variable in the instance head, or give the method a concrete type")
         | Nothing -> Nothing
 
 # The internal type variables the declared `where` clause already supplies a dictionary for.
@@ -7791,9 +7831,10 @@ fn check_instance_methods(
   methods: List ast.InstanceMethodImpl,
   env: Dict types.Scheme,
   subst: Dict types.Type,
-  eff_subst: Dict types.Effect
+  eff_subst: Dict types.Effect,
+  env_ftv: List String
 ) -> typed_ast.InstanceMethodsResult !{IO} =
-  check_instance_methods_acc(state, inst_constraints, methods, env, subst, eff_subst, Nil)
+  check_instance_methods_acc(state, inst_constraints, methods, env, subst, eff_subst, env_ftv, Nil)
 
 fn check_instance_methods_acc(
   state: unifier.InferState,
@@ -7802,17 +7843,18 @@ fn check_instance_methods_acc(
   env: Dict types.Scheme,
   subst: Dict types.Type,
   eff_subst: Dict types.Effect,
+  env_ftv: List String,
   acc: List typed_ast.TypedInstanceMethod
 ) -> typed_ast.InstanceMethodsResult !{IO} =
   match methods with
   | Nil -> typed_ast.InstanceMethodsOk(typed_method_list_reverse(acc))
   | Cons method rest ->
       do
-        r <- check_instance_method(state, inst_constraints, method, env, subst, eff_subst)
+        r <- check_instance_method(state, inst_constraints, method, env, subst, eff_subst, env_ftv)
         match r with
         | InstanceMethodErr pos e -> typed_ast.InstanceMethodsErr(pos, e)
         | InstanceMethodOk typed_method ->
-            check_instance_methods_acc(state, inst_constraints, rest, env, subst, eff_subst, Cons(typed_method, acc))
+            check_instance_methods_acc(state, inst_constraints, rest, env, subst, eff_subst, env_ftv, Cons(typed_method, acc))
 
 fn check_instance_method(
   state: unifier.InferState,
@@ -7820,7 +7862,8 @@ fn check_instance_method(
   method: ast.InstanceMethodImpl,
   env: Dict types.Scheme,
   subst: Dict types.Type,
-  eff_subst: Dict types.Effect
+  eff_subst: Dict types.Effect,
+  env_ftv: List String
 ) -> InstanceMethodResult !{IO} =
   match method with
   | ast.InstanceMethodImpl name params ret_maybe eff_maybe body ->
@@ -7849,7 +7892,8 @@ fn check_instance_method(
             # The record happens inside instance_method_checked, after the
             # return-type unify — same ordering and same reasons as check_fn_body.
             instance_method_checked(state, name, params, ret_maybe, eff_maybe,
-              body_env, s1, es1, inst_type, typed_body0, body_eff, env, decl_scheme)
+              body_env, s1, es1, inst_type, typed_body0, body_eff, env, decl_scheme,
+              inst_constraints, prog_to_fresh, env_ftv)
 
 # Two instances of one class define the same method name, so the bare name would
 # collapse them into a single census entry. The instance HEAD is not in scope here
@@ -7875,7 +7919,10 @@ fn instance_method_checked(
   typed_body0: typed_ast.TypedExpr,
   body_eff: types.Effect,
   env: Dict types.Scheme,
-  decl_scheme: types.Scheme
+  decl_scheme: types.Scheme,
+  inst_constraints: List ast.TypeConstraint,
+  prog_to_fresh: Dict types.Type,
+  env_ftv: List String
 ) -> InstanceMethodResult !{IO} =
   match unifier.unify_types(s1, es1, typed_ast.typed_expr_type(typed_body0), fn_return_type(inst_type, list_length(params))) with
   | unifier.UnifyErr e -> InstanceMethodErr(typed_ast.typed_expr_pos(typed_body0), "Return type mismatch in instance method " ++ name ++ ": " ++ e)
@@ -7892,7 +7939,8 @@ fn instance_method_checked(
         match f with
         | FinishErr fpos fmsg -> InstanceMethodErr(fpos, fmsg ++ " in instance method " ++ name)
         | FinishOk typed_body s2 ->
-            finish_instance_method(name, params, ret_maybe, eff_maybe, body_env, s2, inst_type, typed_body, env)
+            finish_instance_method(name, params, ret_maybe, eff_maybe, body_env, s2, inst_type,
+              typed_body, env, inst_constraints, prog_to_fresh, env_ftv)
 
 fn instance_method_err(name: String, pos: source.SourcePos, msg: String) -> InstanceMethodResult =
   # Previously: lenient short-circuit that returned a `dummy_unit()`-bodied
@@ -7905,12 +7953,21 @@ fn instance_method_err(name: String, pos: source.SourcePos, msg: String) -> Inst
 fn finish_instance_method(name: String, params: List ast.Param, ret_maybe: Maybe ast.TypeExpr,
                           eff_maybe: Maybe (List String), body_env: Dict types.Scheme,
                           s2: Dict types.Type, inst_type: types.Type,
-                          typed_body: typed_ast.TypedExpr, env: Dict types.Scheme) -> InstanceMethodResult =
+                          typed_body: typed_ast.TypedExpr, env: Dict types.Scheme,
+                          inst_constraints: List ast.TypeConstraint,
+                          prog_to_fresh: Dict types.Type,
+                          env_ftv: List String) -> InstanceMethodResult =
   match class_method_mode_error(name, params, env) with
   | Just bad ->
       InstanceMethodErr(typed_ast.typed_expr_pos(typed_body), bad)
   | Nothing ->
-      finish_instance_method_checked(name, params, ret_maybe, eff_maybe, body_env, s2, inst_type, typed_body, env)
+      # body_env, not env: a parameter shadowing a global constrained function resolves to its
+      # own constraint-free scheme, so the walk attributes nothing to it.
+      match instance_method_dict_coverage_msg(name, params, inst_constraints, prog_to_fresh, s2,
+                                              inst_type, env_ftv, typed_body, body_env) with
+      | Just msg -> InstanceMethodErr(typed_ast.typed_expr_pos(typed_body), msg)
+      | Nothing ->
+          finish_instance_method_checked(name, params, ret_maybe, eff_maybe, body_env, s2, inst_type, typed_body, env)
 
 # M4.6: an instance method's ownership modifiers must agree with the class
 # declaration's, because a call dispatches through the CLASS signature — the

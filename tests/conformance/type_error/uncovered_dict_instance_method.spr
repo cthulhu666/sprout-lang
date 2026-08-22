@@ -1,0 +1,26 @@
+# An INSTANCE METHOD that generalizes a type variable of its own and needs a dictionary for it.
+#
+# The identical body written as a free function is rejected (uncovered_dict_param_position.spr).
+# This path was not: `fn_dict_coverage_msg` ran only from `check_fn_body`, and an instance
+# method's body is checked by `check_instance_method`, so the shape compiled at exit 0 and
+# SIGSEGVd in `print_str` — the emitted method's arity includes a hidden dict slot its declared
+# type does not mention, so the argument was read as a dictionary pointer.
+#
+# Unlike the free-function twin there is NO `where` clause to add: a method cannot carry one on
+# either the class signature or the instance (both are parse errors). That does not make the
+# shape legitimate — the class promises `for all a` and a body needing `ToString a` cannot
+# honour it. The remedy is to constrain the variable in the INSTANCE HEAD, which does work and
+# stays accepted; see tests/stdlib/test_instance_method_dict_coverage.spr.
+module main
+
+fn label(x: a) -> String where ToString a = to_string(x)
+
+type Box = (v: Int)
+
+class Renderer f
+  fn render(r: f, x: a) -> String
+
+instance Renderer Box
+  fn render(r: Box, x: a) -> String = label(x)
+
+fn main() -> Unit !{IO} = print(render(Box(v = 1), 7) ++ render(Box(v = 1), true))
