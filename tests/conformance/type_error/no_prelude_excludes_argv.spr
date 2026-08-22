@@ -1,0 +1,24 @@
+no_prelude
+
+# `argv_get` is the ONE capability this design deliberately removes
+# (docs/no-prelude-core-v0.md §8), and it is pinned here so the removal cannot be
+# undone by accident.
+#
+# It is the odd one out: unlike `vector_*` and friends it DOES work in a
+# `no_prelude` file today — it is one of the nine names the lowerer already
+# treats as an unconditional intrinsic, so it has both a scheme (via the leak)
+# and a declare, and it compiles, links and runs. It leaves anyway, because its
+# signature is `Int -> Maybe String !{IO}` and `Maybe` is a prelude-declared type.
+# Admitting it would mean admitting `Maybe` to the floor, and a floor carrying a
+# prelude ADT lands a `Maybe` in the namespace of exactly the files most likely to
+# declare their own — which re-triggers both open qualification-uniformity bugs
+# (`__cm_<Class>_<method>` mangling and do-notation's bare-name monad lookup).
+#
+# That is not a trade worth making for one name: reading argv from a file that
+# has opted out of the standard library is a thin use case, and nothing in the
+# repo does it.
+
+fn main() -> Int !{IO} =
+  match argv_get(0) with
+  | Just _ -> 1
+  | Nothing -> 0

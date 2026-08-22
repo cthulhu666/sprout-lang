@@ -37,29 +37,40 @@ fn main() -> Unit !{IO} =
     d2 <- ref_read(bundler.load_env_schemes(cache2))
     assert_eq(state, "each new_load_env is independent", vec_length(dict_keys(d2)), 0)
 
-    # compile_source_with_cache: pre-seed "stdlib.prelude" so load_prelude_pairs
-    # takes the cache-hit branch and skips file I/O.  This lets us test the
-    # cache-sharing invariant without needing a real stdlib_root on disk.
+    # compile_source_with_cache: the subject here is CACHE SHARING across calls,
+    # not prelude scope.
     #
-    # The sources below say `no_prelude` so the BUNDLE does not read the prelude
-    # off disk either — which is what lets an empty stdlib_root work. They used to
-    # get that implicitly, by having no module header and no imports; the prelude
-    # is unconditional now (docs/prelude-scope-v0.md), so the opt-out is explicit.
-    # The subject here is cache sharing, not prelude scope: these sources reference
-    # nothing outside themselves, so opting out costs the test nothing.
+    # A REAL stdlib_root is required, and used to not be. These three calls passed
+    # `StdlibRoot("")` on the reasoning — correct at the time, and recorded in the
+    # comment this replaces — that `no_prelude` meant the bundle read no prelude
+    # off disk, so no root was needed. `docs/no-prelude-core-v0.md` ended that:
+    # a `no_prelude` file now gets the FLOOR, the prelude's primitive-only externs,
+    # and the floor is derived from the prelude source rather than hardcoded, so
+    # the bundler must read and parse the prelude even when opting out.
+    #
+    # The alternative — degrade to no floor when the prelude cannot be read — was
+    # rejected deliberately: it would make a `no_prelude` file's language surface
+    # depend on whether the prelude happened to be findable, which is exactly the
+    # kind of invisible, environment-dependent scoping that prelude-scope-v0 set
+    # out to remove.
+    #
+    # Pre-seeding "stdlib.prelude" into the SCHEMES cache is kept, but note it is
+    # no longer what makes this work: `check_bundled` stopped calling
+    # `load_prelude_pairs` in the same change, so on this path that cache is only
+    # exercised by callers that do not bundle.
     cache3 <- bundler.new_load_env()
     d3 <- ref_read(bundler.load_env_schemes(cache3))
     ref_write(bundler.load_env_schemes(cache3), dict_set("stdlib.prelude", Nil, d3))
 
-    r1 <- compiler.compile_source_with_cache("no_prelude\n\nfn x() -> Int = 42", source.StdlibRoot(""), cache3)
+    r1 <- compiler.compile_source_with_cache("no_prelude\n\nfn x() -> Int = 42", source.StdlibRoot("stdlib"), cache3)
     assert_true(state, "compile_source_with_cache: valid source compiles ok", is_ok(r1))
 
-    # Second call on the same cache — prelude entry is still there, no re-read.
-    r2 <- compiler.compile_source_with_cache("no_prelude\n\nfn y() -> Bool = true", source.StdlibRoot(""), cache3)
+    # Second call on the same cache — the parsed prelude is memoised, no re-read.
+    r2 <- compiler.compile_source_with_cache("no_prelude\n\nfn y() -> Bool = true", source.StdlibRoot("stdlib"), cache3)
     assert_true(state, "compile_source_with_cache: cache persists across calls", is_ok(r2))
 
     # A type error is still caught even through the cache path.
-    r3 <- compiler.compile_source_with_cache("no_prelude\n\nfn z() -> Int = true", source.StdlibRoot(""), cache3)
+    r3 <- compiler.compile_source_with_cache("no_prelude\n\nfn z() -> Int = true", source.StdlibRoot("stdlib"), cache3)
     assert_true(state, "compile_source_with_cache: type error detected via cache path", is_fail(r3))
 
     # compile_source (no root needed) is unaffected by M1

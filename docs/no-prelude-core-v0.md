@@ -1,8 +1,13 @@
 # The `no_prelude` floor: a core the opt-out cannot remove
 
-Status: **proposal, unapproved.** Nothing here is implemented. The boundary in
-§4.1 is the decision this document exists to get made; §5–§8 describe what
-follows once it is.
+Status: **implemented.** The boundary in §4.1 was approved and built;
+`bundler.prelude_floor` derives the floor and `check_bundled` no longer seeds
+prelude schemes. Two things this document predicted turned out wrong when
+measured against the implementation, and both are corrected in place rather than
+quietly dropped — §11.1 (redefining a floor name shadows cleanly and then fails
+in the *linker*, not the checker, and is pre-existing) and §7 (the
+`no_prelude`-aware diagnostic is a standing commitment, not optional polish, and
+is **not yet implemented** — see §12).
 
 Companion to [prelude-scope-v0.md](prelude-scope-v0.md), which made the prelude
 unconditional and added the `no_prelude` opt-out. This document answers the
@@ -489,20 +494,29 @@ that: for each name in the floor, and a representative of each excluded family, 
 boundary in §4.1 is asserted rather than assumed. This is what makes the floor a
 specification instead of a description.
 
-**Already written, currently failing** (staged before implementation, per
-AGENTS.md Definition of Ready #3):
-`tests/conformance/type_error/no_prelude_calls_prelude_fn.spr` + `.err` — a
-`no_prelude` file calling `range_count` must be rejected at check time. Confirmed
-to fail on `0e1e6fd2` for the right reason: the file reports `OK`, exit 0.
+**Landed.**
 
-**Also needed.**
+| fixture | pins |
+|---|---|
+| `run/no_prelude_floor.spr` + `.out` | the matrix — calls all 15 floor names from a `no_prelude` file and runs |
+| `type_error/no_prelude_calls_prelude_fn` | a prelude *function* is rejected at check (the reported defect; written first, confirmed to report `OK`/exit 0 on `0e1e6fd2`) |
+| `type_error/no_prelude_excludes_vector` | the narrow cut — `vector_*` is out even though `Vector` is a builtin type |
+| `type_error/no_prelude_excludes_argv` | the one deliberate capability removal cannot be undone by accident |
 
-- The §6 collision: a `no_prelude` file defining its own `str_len`. Whatever the
-  measured behaviour is, it gets pinned.
-- `argv_get` in a `no_prelude` file must be rejected (§8 item 3) — so the one
-  deliberate removal cannot be undone by accident.
-- Existing gates that must stay green: `just test`, `just ir-golden-diff`,
-  `just compile-examples-stage1`, and the full `just ci-fast-gates`.
+**Deliberately not pinned:** redefining a floor name. It fails in the linker
+(`duplicate symbol '_str_len'`), and no conformance gate covers "type-checks then
+fails at link". Pre-existing; §11.1 and `BACKLOG.md`.
+
+**Gates, all green on the implementation:** `just test`, `just ir-golden-diff`
+(60 files, 0 differences — normal programs are byte-identical), `just
+test-conformance-run` (38 passed, up from 37), `just refresh-seed` (fixed point
+at iteration 2), and `just ci-fast-gates` — all 33.
+
+One in-tree test needed updating, and the reason is a real consequence worth
+recording: `tests/stdlib/compiler/test_compiler.spr` passed `StdlibRoot("")` to
+three cache-sharing assertions, relying on `no_prelude` meaning the bundle read
+no prelude off disk. The floor ends that — it is derived from the prelude source,
+so the bundler must read it even when opting out. See §12.
 
 Being a compiler-source change, this carries the whole compiler DoD: smoke
 shapes, bundle smoke, `just refresh-seed` with the updated
@@ -528,14 +542,27 @@ regenerating.
 1. **The floor and the bare entry cannot both be free. This is the one real cost
    in the design and it needs a decision.**
 
-   Measured (§6): redefining a prelude name works today **because the entry
-   module is qualified** — the file's `str_len` becomes `$entry.str_len` and
-   coexists with the prelude's. Entry qualification happens only when the prelude
-   is prepended, and §4.1 property 3 keeps the entry bare under the floor
-   precisely to avoid the two open `P2` qualification items. So the floor's 15
-   unqualified `extern fn` names sit in the same flat namespace as a `no_prelude`
-   file's own declarations, and a file redefining one of them is a hard collision
-   ("… is defined more than once in this module") rather than a shadow.
+   **Measured after implementation, and the prediction below was wrong in an
+   instructive way.** This section originally said a `no_prelude` file redefining
+   a floor name would be "a hard collision (`… is defined more than once`) rather
+   than a shadow". It is not. It type-checks cleanly: the local `fn str_len`
+   shadows the floor's `extern fn str_len`, the emitted IR contains
+   `define i64 @str_len` and no `declare`, which is exactly the documented
+   `lower_extern_decls` behaviour ("an `extern fn` shadowed by a real define …
+   let the define win").
+
+   It then fails in the **linker**: `duplicate symbol '_str_len'`, because the
+   emitted `@str_len` and `sprout_runtime.c`'s `_str_len` are the same symbol.
+
+   **This is pre-existing and the floor neither causes nor fixes it.** Verified by
+   compiling the same file with the unpatched compiler and the patched one — byte
+   for byte the same outcome. A *normal* file is immune, because its entry is
+   qualified and the definition emits as `@$entry.str_len` (measured: runs,
+   returns the local `99`). So the hazard belongs to the bare namespace that
+   `no_prelude` files already have, and it applies to any top-level name matching
+   a C runtime symbol, floor or not. Filed in `BACKLOG.md`; not fixed here,
+   because fixing it means qualifying the `no_prelude` entry, which is option (b)
+   below and carries the two `P2` items with it.
 
    Three ways out, in increasing cost:
 
@@ -576,3 +603,57 @@ regenerating.
    removes the need for a decl filter at bundle time, at the cost of splitting a
    file whose header comment currently claims to be the single authority for all
    40 signatures.
+
+## 12. What implementation changed, and what is still open
+
+Following `prelude-scope-v0.md` §0's practice of recording where implementation
+corrected the design rather than silently conforming to it.
+
+1. **`skip_prelude` answers a question that now has three answers, not two.** It
+   reports "no full prelude", which covered two cases that wanted the same
+   treatment and no longer do: the prelude *as the entry file* must get nothing
+   prepended (prepending even the floor duplicates its own externs, and
+   `--phase bundle stdlib/prelude.sprout` is a standing DoD #8 check), while a
+   `no_prelude` file gets the floor. `collect_modules` now branches on the entry
+   path before consulting `skip`.
+
+2. **`no_prelude` no longer implies "no prelude file I/O", and that is a real
+   contract change.** The floor is derived from the prelude source, so the
+   bundler must read and parse the prelude even for a file that opted out.
+   `tests/stdlib/compiler/test_compiler.spr` depended on the old behaviour — it
+   passed `StdlibRoot("")` for three cache-sharing assertions, and said so in a
+   comment. Updated to a real root. The alternative, degrading to no floor when
+   the prelude cannot be read, was rejected: it makes a file's language surface
+   depend on whether the prelude happens to be findable, which is the
+   invisible environment-dependent scoping `prelude-scope-v0.md` set out to
+   remove. Cost is bounded — the parse is memoised per `LoadEnv`, and the
+   non-opt-out path already paid it.
+
+3. **§11.1's prediction was wrong.** Redefining a floor name was predicted to be
+   a hard check-time collision. It shadows cleanly and fails at link instead, and
+   it is pre-existing rather than caused by the floor. Corrected in place; filed
+   in `BACKLOG.md`.
+
+4. **The floor needed its own type walk.** Reusing `unresolved_in_type` was the
+   obvious move and does not work: it admits every name in
+   `undeclared_type_names()` before consulting its `declared` argument, so it
+   cannot express a set narrower than the builtins. `type_over_floor` answers a
+   different question and is written separately, which also makes the criterion
+   legible at the point it is applied.
+
+**Still open.**
+
+- **The `no_prelude`-aware diagnostic (§7) is not implemented.** Today the
+  message is the generic `Unknown variable: range_count in function main` —
+  correct and positioned, which is already the improvement over a `clang` error,
+  but not the message `prelude-scope-v0.md` §7 committed to. That wants the
+  unbound-name path to know the file opted out and to distinguish "the prelude
+  exports this" from "nothing exports this". Deliberately deferred rather than
+  bundled in: it is a diagnostics change with its own tests, and shipping it with
+  a semantics change would make both harder to review.
+- **The wider floor (§4.3).** Switching `floor_type_names()` to
+  `undeclared_type_names()` widens the floor from 15 externs to ~31, admitting
+  the `vector_*` / `map_*` / `native_set_*` / `ref_*` families. It is a one-word
+  change, needs no new code, and is arguably the more principled criterion
+  ("everything that needs nothing the prelude declares"). Not taken, for the
+  reasons in §4.1 — but the code is shaped so the decision is one constant.

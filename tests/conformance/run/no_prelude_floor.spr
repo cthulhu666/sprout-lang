@@ -1,0 +1,60 @@
+no_prelude
+
+# THE CAPABILITY MATRIX for the `no_prelude` floor (docs/no-prelude-core-v0.md).
+#
+# The floor is what the opt-out cannot remove: the prelude's `extern fn`
+# declarations whose signatures range only over scalar primitives. This file
+# calls every one of them, so the floor is asserted rather than described.
+#
+# It exists because the gates were blind here. A prototype that removed the
+# scheme seeding without adding a floor passed the whole `just test` suite AND
+# `ir-golden-diff` 60/60 while breaking nine names that worked — `int_to_string`,
+# `str_concat`, `eprint`, `panic` among them. Nothing in the corpus exercised a
+# runtime builtin from inside a `no_prelude` file, so nothing noticed. A green
+# suite was not evidence of anything, and this file is the reason it now is.
+#
+# The floor is DERIVED (`bundler.floor_type_names`), not listed, so this matrix
+# is also what pins the derivation: give a prelude extern a `Maybe` and it leaves
+# the floor, and this fixture is what says so out loud.
+#
+# The exclusion side is pinned separately, one fixture per reason:
+#   no_prelude_excludes_vector.spr  — a runtime backing store is not the floor
+#   no_prelude_excludes_argv.spr    — the one deliberate capability removal
+#
+# Redefining a floor name is NOT pinned by a fixture, because it fails in the
+# linker rather than the checker and no conformance gate covers that shape. A
+# `no_prelude` file declaring its own `fn str_len` type-checks (the local define
+# shadows the floor's extern, which is the documented `lower_extern_decls`
+# behaviour) and then dies as `duplicate symbol '_str_len'` against the C runtime.
+# Measured identical before and after the floor, so it is a pre-existing hazard of
+# the bare namespace, not something this change introduced — a normal file is
+# immune because its entry is qualified to `$entry.str_len`. Filed in BACKLOG.
+
+fn describe_len(s: String) -> String = int_to_string(str_len(s))
+
+# `panic : String -> a` is in the floor and must be in scope, but calling it
+# would abort. Naming it in an uncalled function pins the scheme without
+# exercising the abort — the check phase is where the floor is enforced.
+fn unreachable_abort(msg: String) -> Int = panic(msg)
+
+fn main() -> Unit !{IO} =
+  do
+    # --- strings
+    print(str_concat("str_concat=", "ok"))
+    print(str_concat("str_len=", describe_len("abcde")))
+    print(str_concat("str_slice=", str_slice("abcdef", 1, 4)))
+    print(str_concat("str_find=", int_to_string(str_find("hayneedle", "needle"))))
+    print(str_concat("str_compare=", int_to_string(str_compare("a", "a"))))
+    # --- numbers
+    print(str_concat("int_to_string=", int_to_string(-7)))
+    print(str_concat("to_double=", double_to_string(to_double(3))))
+    # --- chars
+    print(str_concat("char_to_string=", char_to_string('z')))
+    print(str_concat("char_to_str=", char_to_str(65)))
+    print(str_concat("char_from_codepoint=", char_to_string(char_from_codepoint(66))))
+    # --- Bool through the floor: str_starts_with returns one
+    if str_starts_with("prelude", "pre") then print("str_starts_with=true")
+    else print("str_starts_with=false")
+    # --- the other IO sink
+    eprint("eprint reached stderr")
+    print("floor=complete")

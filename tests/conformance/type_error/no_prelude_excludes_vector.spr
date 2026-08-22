@@ -1,0 +1,21 @@
+no_prelude
+
+# The floor stops at scalars. `vector_*`, `map_*`, `native_set_*` and `ref_*` are
+# runtime backing stores, and a data structure is what a standard library is for
+# (docs/no-prelude-core-v0.md §4.1).
+#
+# This one is worth pinning because it is the closest call in the design. The
+# backing type `Vector` is a BUILTIN type constant, not a prelude declaration —
+# `bundler.undeclared_type_names` lists it, and `fn f(v: Vector Int) -> Int` type-
+# checks in a `no_prelude` file today. So `vector_length`'s signature mentions
+# nothing the prelude declares, and a floor defined as "type-closed against the
+# prelude" would ADMIT it along with ~15 other names. The floor is defined more
+# narrowly than that on purpose — scalars only — and this fixture is what makes
+# the narrower cut observable rather than an unstated intention.
+#
+# Before the floor this file did NOT fail here: it type-checked against the
+# leaked prelude scheme, emitted a call with no define, and died in clang as
+# `use of undefined value '@vector_length'`. Getting a positioned Sprout
+# diagnostic instead is the whole point of the change.
+
+fn main() -> Int !{IO} = vector_length(vector_empty())

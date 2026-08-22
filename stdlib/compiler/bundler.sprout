@@ -627,22 +627,38 @@ fn collect_modules(entry_path: String, stdlib_root: String, extra_roots: List St
           | Nothing ->
               do
                 skip <- skip_prelude(entry_path, stdlib_root, load_env)
-                # Naming the entry is COUPLED to prepending the prelude, not done
-                # unconditionally: the synthetic name exists only to keep the entry
-                # out of the prelude's namespace, and with no prelude there is
-                # nothing to keep it out of. Qualifying anyway would be a pure loss,
-                # because two resolutions still key on the UNQUALIFIED name — do
-                # notation picks the monad family by it, and the class-method
-                # wrapper `__cm_<Class>_<method>` is mangled from it. A `no_prelude`
-                # file that defines its own `Maybe` or `Eq` depends on staying bare.
-                if skip then (Nothing, plain_mods)
+                # THREE dispositions, not two. `skip_prelude` answers "no full
+                # prelude", which covers two cases that now want different things.
+                #
+                # The prelude AS the entry gets nothing prepended: prepending even
+                # the floor would list its own externs a second time and every one
+                # would be "defined more than once". `--phase bundle
+                # stdlib/prelude.sprout` is a standing check (DoD #8), so this is
+                # reachable, not theoretical.
+                #
+                # A `no_prelude` file gets the FLOOR (docs/no-prelude-core-v0.md):
+                # the primitive-only externs, so the opt-out drops the library
+                # without dropping the language's runtime interface.
+                #
+                # Naming the entry is COUPLED to prepending the FULL prelude, not
+                # done unconditionally: the synthetic name exists only to keep the
+                # entry out of the prelude's namespace. Qualifying anyway would be a
+                # pure loss, because two resolutions still key on the UNQUALIFIED
+                # name — do notation picks the monad family by it, and the
+                # class-method wrapper `__cm_<Class>_<method>` is mangled from it. A
+                # `no_prelude` file that defines its own `Maybe` or `Eq` depends on
+                # staying bare, and the floor is safe to prepend without renaming
+                # precisely because it declares no types and no classes — there is
+                # nothing on either axis for the entry to collide with.
+                if entry_path == prelude_path(stdlib_root) then (Nothing, plain_mods)
                 else
                   do
                     (err, prelude) <- prelude_module(stdlib_root, load_env)
                     match prelude with
                     | Nothing -> (err, Nil)
                     | Just mod ->
-                        (Nothing, Cons(mod, name_entry_module(plain_mods, entry_path)))
+                        if skip then (Nothing, Cons(prelude_floor(mod), plain_mods))
+                        else (Nothing, Cons(mod, name_entry_module(plain_mods, entry_path)))
 
 # An IMPORTED file must declare a module header.
 #
@@ -1402,6 +1418,99 @@ fn qualify_all_modules(modules: List ParsedModule, all_symbols: Dict ModuleSymbo
 fn undeclared_type_names() -> List String =
   ["Int", "Double", "Bool", "String", "Char", "Unit", "Bytes",
    "Vector", "Map", "NativeSet", "Ref", "Builder"]
+
+# ---------------------------------------------------------------------------
+# The `no_prelude` floor  (docs/no-prelude-core-v0.md)
+# ---------------------------------------------------------------------------
+#
+# `no_prelude` suppresses the standard LIBRARY, not the language's runtime
+# interface. The floor is the part of the prelude a file cannot opt out of: the
+# `extern fn` declarations whose signatures range only over scalar primitives.
+# Nothing else — no types, no classes, no instances, no Sprout functions.
+#
+# The floor is DERIVED, not listed. There is no roster of floor names anywhere:
+# an extern is in the floor iff every type it mentions is in floor_type_names()
+# or is a type variable. Add a primitive-only extern to the prelude and it joins
+# the floor; give one a `Maybe` and it does not. That is deliberate — a hand-kept
+# roster is the second source of truth this whole change exists to avoid.
+#
+# WHY SCALARS AND NOT `undeclared_type_names()` (:1402). That list — the builtin
+# type constants — also carries `Vector`, `Map`, `NativeSet`, `Ref`, `Bytes`,
+# `Builder`, which are runtime backing stores the prelude does NOT declare. Using
+# it here is a one-word change and would widen the floor from 15 externs to ~31,
+# admitting the `vector_*` / `map_* `/ `native_set_*` / `ref_*` families. It is a
+# coherent alternative and costs no extra code — see docs/no-prelude-core-v0.md
+# §4.3. The narrower cut was chosen because those families are data structures,
+# which is what a standard library is for, and because a smaller floor is a
+# smaller collision surface for a file that opted out (§11.1).
+fn floor_type_names() -> List String =
+  ["Int", "Double", "Bool", "String", "Char", "Unit"]
+
+# Deliberately NOT unresolved_in_type: that helper admits every name in
+# undeclared_type_names() before consulting its `declared` argument, so it cannot
+# express a set narrower than the builtins. This walk answers a different
+# question — "does this type range only over the floor?" — and says so.
+fn type_over_floor(t: ast.TypeExpr) -> Bool =
+  match t with
+  | ast.TypeName name ->
+      type_name_starts_lower(name) || str_list_member(name, floor_type_names())
+  | ast.TypeApply base arg -> type_over_floor(base) && type_over_floor(arg)
+  | ast.TypeArrow left right _ -> type_over_floor(left) && type_over_floor(right)
+  | ast.TypeEffect base _ -> type_over_floor(base)
+  | ast.TupleType items -> types_over_floor(items)
+
+fn types_over_floor(ts: List ast.TypeExpr) -> Bool =
+  match ts with
+  | Nil -> true
+  | Cons t rest -> type_over_floor(t) && types_over_floor(rest)
+
+fn maybe_type_over_floor(mt: Maybe ast.TypeExpr) -> Bool =
+  match mt with
+  | Nothing -> true
+  | Just t -> type_over_floor(t)
+
+fn params_over_floor(params: List ast.Param) -> Bool =
+  match params with
+  | Nil -> true
+  | Cons p rest ->
+      match p with
+      | ast.Param _ anno _ -> maybe_type_over_floor(anno) && params_over_floor(rest)
+
+# An unannotated parameter cannot be shown to be primitive-only, so it is not in
+# the floor. No prelude extern has one (they are all fully annotated), but the
+# check is written to fail closed rather than assume that stays true.
+fn is_floor_extern(d: ast.Decl) -> Bool =
+  match d with
+  | ast.ExternFnDecl _ params ret _ _ ->
+      params_over_floor(params) && maybe_type_over_floor(ret)
+  | _ -> false
+
+fn floor_decls(decls: List ast.Decl) -> List ast.Decl =
+  match decls with
+  | Nil -> Nil
+  | Cons d rest ->
+      if is_floor_extern(d) then Cons(d, floor_decls(rest)) else floor_decls(rest)
+
+fn floor_export_names(decls: List ast.Decl) -> List String =
+  match decls with
+  | Nil -> Nil
+  | Cons d rest ->
+      match d with
+      | ast.ExternFnDecl name _ _ _ _ -> Cons(name, floor_export_names(rest))
+      | _ -> floor_export_names(rest)
+
+# The prelude reduced to its floor: the primitive-only externs and nothing else.
+#
+# `ctor_types` is emptied because the floor declares no types, so it registers no
+# constructors — and that emptiness is what keeps a `no_prelude` file's namespace
+# free of `Maybe`/`Eq`, which is what lets the entry module stay unqualified (see
+# collect_modules). The module name stays "" for the same reason the full prelude
+# uses it: the floor's names are meant to be spelled bare.
+fn prelude_floor(mod: ParsedModule) -> ParsedModule =
+  match mod with
+  | ParsedModule _ path _ _ _ decls ->
+      ParsedModule("", path, Nil, floor_export_names(floor_decls(decls)), Nil,
+                   floor_decls(decls))
 
 # A source type VARIABLE is lowercase (`a`, `elem`); a constructor is uppercase,
 # qualified or not. Checked on the short name so `mod.Foo` reads as a constructor.
