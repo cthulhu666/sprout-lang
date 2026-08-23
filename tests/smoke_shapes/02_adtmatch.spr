@@ -1,3 +1,9 @@
+no_prelude
+
+# `no_prelude` is here for GOLDEN SIZE, not semantics (12,514 lines -> ~120).
+# See `01_noparam.spr` for the full note. This shape declares its own `Color`, so
+# opting out also removes any chance of it colliding with a prelude type.
+
 type Color = Red | Green | Blue
 fn color_code(c: Color) -> Int =
   match c with

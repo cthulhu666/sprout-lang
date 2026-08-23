@@ -1,3 +1,9 @@
+no_prelude
+
+# `no_prelude` is here for GOLDEN SIZE, not semantics (12,504 lines -> ~110).
+# See `01_noparam.spr` for the full note. `+` and `*` are builtin operators, not
+# prelude functions, so the lambdas below need nothing beyond the floor's `print`.
+
 fn apply(f: Int -> Int, x: Int) -> Int = f(x)
 fn main() -> Unit !{IO} =
   do

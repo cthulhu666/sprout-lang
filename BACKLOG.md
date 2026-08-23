@@ -2203,30 +2203,44 @@ Found while correcting stale claims across the user-facing docs; none is a doc f
   do-notation's bare-name monad lookup). Worth doing WITH those, not before. No conformance
   gate covers "type-checks then fails at link", which is why this is prose and not a fixture.
 
-- [ ] `P2` **Four smoke shapes were assigned `no_prelude` by design and never marked; their
-  goldens are ~12.5k lines each for ≤7 lines of source.** `docs/prelude-scope-v0.md` §8
-  dispositioned `tests/smoke_shapes/*.spr` as "`no_prelude` — keeps goldens tiny" and predicted
-  outright "The 4 smoke shapes stay small because they opt out." Today **0 of 10** carry the
-  directive. The "4" was accurate — `01_noparam`, `02_adtmatch`, `03_strconcat`,
+- [x] `P2` **FIXED 2026-08-23 — for three of the four. Smoke shapes were assigned `no_prelude`
+  by design and never marked; their goldens were ~12.5k lines each for ≤7 lines of source.**
+  `docs/prelude-scope-v0.md` §8 dispositioned `tests/smoke_shapes/*.spr` as "`no_prelude` —
+  keeps goldens tiny" and predicted outright "The 4 smoke shapes stay small because they opt
+  out." **0 of 10** carried the directive. `01_noparam`, `02_adtmatch`, `03_strconcat` and
   `05_lambdaparams` were the small ones (66/110/81/99 lines); the other 6 already had headers or
-  imports and were already ~12.4k. Those four grew **356 → 49,981 lines**; `01_noparam.spr` is
-  two lines of source and its golden went 66 → 12,471 (189×).
+  imports and were already ~12.4k. Those four had grown **356 → 49,981 lines**; `01_noparam.spr`
+  is two lines of source and its golden went 66 → 12,471 (189×).
 
   **Not an accepted trade — an unrecorded gap.** `prelude-scope-v0.md` §0 lists four places
-  implementation corrected the design and this is not among them, so it was never revisited.
-  The growth also sits outside that design's own budget, which accounted for "+88k lines … from
+  implementation corrected the design and this was not among them, so it was never revisited.
+  The growth also sat outside that design's own budget, which accounted for "+88k lines … from
   the 7 examples" while *excluding* the smoke shapes on the assumption they would opt out.
 
-  **The plan is viable** — verified 2026-08-22 by marking all four in a scratch copy: each
-  compiles and its IR returns to 64/108/79/97 lines. Each uses exactly one prelude name,
-  `print`. Fixing this recovers ~49.6k lines (~5% of the 955,705-line corpus) and matters
-  beyond tidiness: `scripts/ir_golden_diff.sh:55` truncates each file's diff at `head -40`, so
-  against a 12.5k-line golden the report is at most a 0.3% sample — the exact hazard DoD #12
-  warns about.
+  **Fixed:** `01_noparam`, `02_adtmatch` and `05_lambdaparams` now carry the directive; their
+  goldens are 74 / 117 / 107 lines, recovering **37,191 lines**. Each links and runs to the same
+  output as before (`42`, `0`, `7`), so the marks changed golden size and nothing else.
 
-  Sequencing: today this works only because `check_bundled`'s scheme leak supplies `print`;
-  after `docs/no-prelude-core-v0.md` lands it works because `print` is in the floor. Do it
-  after, and in its own PR — it rewrites four goldens and wants its diff read.
+  > **`03_strconcat` CANNOT opt out, and the entry's claim that it could was wrong.** "Verified
+  > 2026-08-22 by marking all four in a scratch copy … 64/108/79/97 lines" does not reproduce
+  > against master's compiler: `no_prelude` on that file fails at check with
+  > `No Semigroup instance for String in function cat`. `++` is not a call to the `str_concat`
+  > extern — it is `Semigroup.append` dispatch, lowering to `__tc_Semigroup_String_append`, whose
+  > body then calls `str_concat`. The floor (`docs/no-prelude-core-v0.md`) carries the prelude's
+  > primitive-only **externs** and no types, classes or instances, so `instance Semigroup String`
+  > is not in it. This is the floor behaving as designed, not a gap in it.
+  >
+  > It should stay opted in. That operator → instance → extern chain is what the shape covers,
+  > and the smoke-shapes gate's `str_concat(ptr null,` assertion is a NEGATIVE one that passes
+  > vacuously on IR never reaching `str_concat` — so rewriting the body as a direct
+  > `str_concat(a, b)` to buy the opt-out would keep the assertion's text while dropping the
+  > dispatch layer it watches. The reasoning is recorded in the fixture itself. Retrying the mark
+  > fails loudly (exit 1, positioned diagnostic; `ir-golden-diff` reports `REGRESSION`), so this
+  > cannot be re-broken silently.
+
+  Recovering 37,191 lines matters beyond tidiness: `scripts/ir_golden_diff.sh:55` truncates each
+  file's diff at `head -40`, so against a 12.5k-line golden the report was at most a 0.3% sample
+  — the exact hazard DoD #12 warns about. The three new goldens are short enough to read whole.
 
 ### 7.3) In-Language Stdlib Test Framework
 

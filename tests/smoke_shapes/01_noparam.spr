@@ -1,2 +1,10 @@
+no_prelude
+
+# `no_prelude` is here for GOLDEN SIZE, not semantics: two lines of source were
+# emitting a 12,471-line golden, nearly all of it the bundled prelude. It is 74.
+# `docs/prelude-scope-v0.md` §8 always intended these shapes to opt out; the
+# directive was simply never added. `print` stays in scope via the floor
+# (`docs/no-prelude-core-v0.md`), which is the whole capability this fixture needs.
+
 fn val() -> Int = 42
 fn main() -> Unit !{IO} = print(val())

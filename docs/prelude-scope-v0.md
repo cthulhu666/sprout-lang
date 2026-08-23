@@ -8,7 +8,9 @@ the migration, and what implementation found that the design had wrong.
 
 ## 0. What implementation corrected
 
-Four things, all of which changed the work rather than merely annotating it.
+Five things, all of which changed the work rather than merely annotating it.
+Items 4 and 5 were added after the fact, as later work found what this section
+had missed.
 
 1. **§4.1's "shadowing already works" was too strong.** It was verified against
    `examples/maybe_map.sprout` — a plain ADT and a plain `map` — and holds for
@@ -34,13 +36,29 @@ Four things, all of which changed the work rather than merely annotating it.
    one prelude-name collision away from breaking. The new diagnostic found it on
    the first reseed. Fixed by adding the header it should always have had.
 
-4. **`no_prelude` re-opens defect (b), and this is not fixed.** `check_bundled`
-   hands the checker `load_prelude_pairs` unconditionally, so a `no_prelude` file
-   calling `negate` type-checks and then fails in the IR parser. With the prelude
-   now always bundled those pairs are redundant in the normal case, so deleting
-   them is both the root-cause fix and a code removal — but there are 9 call sites
-   across the batch, LSP, REPL and analysis paths, so it is its own change.
-   Tracked in `BACKLOG.md`.
+4. **`no_prelude` re-opened defect (b).** `check_bundled` handed the checker
+   `load_prelude_pairs` unconditionally, so a `no_prelude` file calling `negate`
+   type-checked and then failed in the IR parser. **Fixed 2026-08-22** in
+   `469924cf` (`docs/no-prelude-core-v0.md`): the four bundled-program call sites
+   in `compiler.sprout` now pass `Nil`, and a `no_prelude` file gets the *floor* —
+   the prelude's primitive-only externs — so the nine names that already worked
+   keep working. The warning here that all 9 call sites needed their own
+   verification pass turned out not to hold: two are in orphaned executables, and
+   the analysis service's is a cache pre-warm that never reaches a checker
+   environment. `scripts/lsp_smoke.sh` now pins that the editor and the batch
+   compiler agree.
+
+5. **§8 predicted the 4 smoke shapes would opt out; none of them did, and one
+   cannot.** The disposition table below assigned `no_prelude` to all four and the
+   golden-IR budget excluded them on that basis. The directive was simply never
+   added, so all four grew to ~12.5k-line goldens — 356 → 49,981 lines, outside a
+   budget that never accounted for them. Three were marked 2026-08-23, recovering
+   37,191 lines. `03_strconcat` **cannot** be marked: `++` is `Semigroup.append`
+   dispatch rather than a call to the `str_concat` extern, and the floor carries
+   externs only — no types, classes or instances — so the mark fails at check with
+   `No Semigroup instance for String in function cat`. That is the floor behaving
+   as designed. The shape should stay opted in regardless: the operator → instance
+   → extern chain is what it covers.
 
 One prediction held exactly: no grammar change, so no 2-step bootstrap. Every
 reseed reached a fixed point at iteration 2.
@@ -357,7 +375,7 @@ Every headerless-and-importless file changes meaning. Counted in-tree:
 | Location | Files | Disposition |
 |---|---|---|
 | `examples/*.sprout` | 7 | **Gain the prelude.** User-facing teaching code should have it. |
-| `tests/smoke_shapes/*.spr` | 4 | `no_prelude` — keeps goldens tiny |
+| `tests/smoke_shapes/*.spr` | 4 | `no_prelude` — keeps goldens tiny (**3 of 4**; see §0 item 5) |
 | `tests/stdlib/*.spr` | 15 | `no_prelude` — preserves what they test |
 | `tests/conformance/run/*.spr` | 30 | `no_prelude` |
 | `tests/conformance/type_error/*.spr` | 26 | `no_prelude` — protects exact `.err` text |
@@ -382,6 +400,8 @@ scope, and giving it one deletes the case under test.
 **Golden IR.** The 7 examples grow from ~70–150 lines to ~12.7k each, roughly
 **+88k lines on an 811k-line corpus (~11%)**, and every future prelude change
 then perturbs 7 more goldens. The 4 smoke shapes stay small because they opt out.
+*(Superseded — §0 item 5: the directive was never added, all four grew to ~12.5k, and
+3 of the 4 were marked on 2026-08-23. `03_strconcat` cannot opt out.)*
 Wiring DCE into `compile_full` (`BACKLOG.md §7.2`) would shrink all goldens and
 make this nearly free, but it rewrites the whole corpus at once and is gated
 separately.

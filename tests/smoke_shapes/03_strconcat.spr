@@ -1,2 +1,19 @@
+# THIS SHAPE CANNOT OPT OUT, and the sibling shapes that did are why that needs
+# saying. `01`, `02` and `05` carry `no_prelude` to keep their goldens at ~100
+# lines instead of ~12.5k; this one keeps the full 12.5k golden on purpose.
+#
+# `++` is not a call to the `str_concat` extern — it is `Semigroup.append`
+# dispatch, and it lowers to `__tc_Semigroup_String_append`, whose body then calls
+# `str_concat`. The floor (`docs/no-prelude-core-v0.md`) carries the prelude's
+# primitive-only EXTERNS and no types, classes or instances, so `instance Semigroup
+# String` is not in it and adding the directive here fails at check time with
+# `No Semigroup instance for String in function cat`.
+#
+# That operator -> instance -> extern chain is what the shape is FOR. The
+# smoke-shapes gate's null-pointer assertion (`str_concat(ptr null,`) is a negative
+# one, so it passes vacuously on IR that never reaches `str_concat` at all — and
+# rewriting the body as a direct `str_concat(a, b)` to buy the opt-out would keep
+# the assertion's text while dropping the dispatch layer it is watching.
+
 fn cat(a: String, b: String) -> String = a ++ b
 fn main() -> Unit !{IO} = print(cat("hello", "world"))
