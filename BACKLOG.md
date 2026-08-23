@@ -4215,6 +4215,43 @@ there in its Appendix C. None is in scope for that change.
   - *loam (landed record — open loam items moved to the uncharted-suns BACKLOG when loam was extracted):* **[LANDED 2026-07-30]** `group_of` now returns a `GroupId` newtype (`agent.sprout`), threaded to the genuine group-id consumers `home_x`/`home_z`/`group_angle` in `ecs_flocking` (typed on `GroupId`, so an entity index or a raw count can't be passed there), unwrapped via `group_index` only at leaf `mutvec` index sites. Zero-cost (`wrap` erases to i64, IR-verified). **Scope note:** this is *boundary* typing, NOT index-site swap protection — once unwrapped to index a `MutVec Int` the group/entity distinction is gone, so the earlier "exactly the crossing `scene.sprout:36` warns about" framing was wrong. True per-container index safety needs a group-indexed container type (a separate axis; the `MutVec` substrate is shared by entity and group arrays alike). The open loam gaps (typed model/shader handles, a `resting` enum cell, a `Clips` named record) are now tracked in uncharted-suns.
 - [ ] `P3` Replace per-arity `ToString` tuple instances with a generic/variadic approach (2026-06-07): PR 2.5 added explicit `instance ToString (a, b)` through `instance ToString (a, b, c, d, e)` for arities 2–5 in `stdlib/prelude.sprout`. The five instances are correct and have full test coverage, but each arity requires a separate declaration. A variadic approach would require either (a) a type-level natural-number index over tuple arities (type-indexed HList/heterogeneous-list style), or (b) a macro/deriving mechanism that generates instances up to a compiler-defined max arity, or (c) language-level variadic typeclass support. The current approach is pragmatic: 6-tuples and above are uncommon in Sprout code today, and any of the three alternatives requires substantial new language machinery. If 6+ tuple arity becomes needed before variadic support lands, add the instance explicitly following the established pattern in `prelude.sprout`.
 
+- [ ] `P3` **Decide the fate of `translate_append_operands`' String/List peepholes — kept as a
+  fallback on 2026-08-23 without evidence they can ever fire.** Investigating why
+  `03_strconcat` cannot go `no_prelude` turned up three lowering paths for `++` and found two of
+  them dead. One was deleted (`translate_binary`'s `++` arm — provably unreachable, since
+  `infer.check_binary` at `infer.sprout:3188` routes `++` to `append_via_semigroup`, which
+  returns a `TCall` and never builds a `TBinary`, and every other `TBinary(` site in the compiler
+  is a structural rebuild copying an existing `op`). The other two — the String and List arms of
+  `ast_to_ir.translate_append_operands` — were **kept**, and this entry is the open question of
+  whether that was right.
+
+  The case against them: `lowering.try_devirt_concrete` (`lowering.sprout:1270`) runs first and,
+  for a statically-known instance, retargets the callee to the concrete
+  `__tc_Semigroup_<T>_append`, so the `fname == "__cm_Semigroup_append"` guard never matches for
+  the monomorphic case the peepholes were written for. Where the guard *does* match, the site is
+  polymorphic, so `is_string_type` / `is_list_type` are false and both arms are skipped. The two
+  conditions look mutually exclusive, and four probe shapes (literals, annotated `String` params,
+  headerless, `module`-headed) all bypassed them.
+
+  The case for keeping them: the `else` arm's `Nothing` case is a hard
+  `Err("`++`/append on a non-String/List type with no resolved Semigroup witness")`, so a
+  concrete append arriving *without* a witness would go from compiling to failing. That shape
+  could not be constructed — the comment describing it predates prelude-always-on — but "I could
+  not construct it" is weaker than the proof available for the arm that was deleted.
+
+  There is **no performance argument either way** (per "Builtin vs Stdlib" rule 6): the
+  devirtualized path calls a one-line `__tc_Semigroup_String_append` wrapper, and `-O2` inlines
+  it away — measured on `03_strconcat`'s golden, 53 wrapper call sites to 0, with `$entry.cat`
+  ending up calling `@str_concat` directly. So this is purely about whether the compiler carries
+  a branch nothing reaches.
+
+  Two ways to close it, and the choice is the work: (a) prove reachability empirically by
+  instrumenting the arms and running the full corpus — if nothing hits them, delete; or (b) make
+  the peepholes actually fire by widening the guard to match the devirtualized
+  `__tc_Semigroup_<T>_append` name, which is a behaviour change that churns goldens and needs its
+  own justification given (a)'s measured zero cost. Deleting the deleted arm was proved by the
+  goldens: seed changed by −324 lines, all 60 goldens byte-identical. The same test settles (a).
+
 ### CI / Build Performance
 
 - [ ] `P2` **The apt LLVM install has no retry and no cache, and it hung CI for 24 min on

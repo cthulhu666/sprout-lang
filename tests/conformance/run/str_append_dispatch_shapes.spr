@@ -1,0 +1,49 @@
+# `++` in every shape the lowering treats differently, so that removing a
+# lowering path cannot change behaviour unnoticed.
+#
+# `++` is `Semigroup.append`, and three mechanisms can lower it:
+#
+#   1. `lowering.try_devirt_concrete` — the dispatch dictionary is a fully
+#      resolved concrete instance, so the callee is retargeted to
+#      `__tc_Semigroup_String_append` directly. This is what a monomorphic
+#      `String ++ String` actually takes.
+#   2. `ast_to_ir.translate_append_operands` — a String/List peephole emitting
+#      `IRStrConcat` / `@list_append`, guarded on the callee still being named
+#      `__cm_Semigroup_append`. Devirt renames before this sees it, so the
+#      peephole survives as the fallback for a witness-less append rather than
+#      as the primary path.
+#   3. the trailing-witness path — a polymorphic site where the instance is not
+#      known statically, so the enclosing function's dict parameter is applied.
+#
+# `stdlib_str_concat_params.spr` covers (1). This file adds (3), for both String
+# and List, which is the case NEITHER peephole handles — the shape that must keep
+# working when a peephole is removed as unreachable.
+#
+# Measured: `twice` lowers to a closure apply of its dict parameter
+# (`%t$0$code(i64 %__tc_Semigroup_0_append, …)`), and `__cm_Semigroup_append`
+# appears in the IR only as a `define`, never as a call. So (2)'s guard is
+# entered here and falls through both typed arms to the witness branch — which
+# is the branch this file exists to pin.
+
+fn cat(a: String, b: String) -> String = a ++ b
+
+# Polymorphic in the Semigroup instance: `t` is not known here, so this cannot
+# devirtualize and cannot take the String peephole. The dictionary arrives as a
+# parameter and the append goes through it.
+fn twice(x: t) -> t where Semigroup t = x ++ x
+
+fn join_all(xs: List t) -> t where Monoid t = mconcat(xs)
+
+fn main() -> Unit !{IO} =
+  do
+    # (1) concrete String — devirtualized
+    print(cat("con", "crete"))
+    # (3) String through a dict parameter
+    print(twice("ab"))
+    # (3) List through a dict parameter — the other peephole arm's type
+    print(list_length(twice([1, 2, 3])))
+    # (3) via Monoid, which is Semigroup + empty
+    print(join_all(["x", "y", "z"]))
+    print(list_length(join_all([[1], [2, 3]])))
+    # nested: a devirtualized append feeding a polymorphic one
+    print(twice(cat("<", ">")))

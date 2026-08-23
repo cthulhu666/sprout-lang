@@ -2286,27 +2286,16 @@ fn translate_binary(op: String, left: typed_ast.TypedExpr, right: typed_ast.Type
                     params, ctors, idx, cur_label, cur_ops,
                     captures, lifted_ref, top_level, let_names, fn_arities, lambda_ctr_ref, lifted_idx_ref,
                     name_prefix)
-  else if op == "++" && is_string_type(typed_ast.typed_expr_type(left))
-                     && is_string_type(typed_ast.typed_expr_type(right))
-  then
-    match translate_expr(left, params, ctors, idx, cur_label, cur_ops,
-                         captures, lifted_ref, top_level, let_names, fn_arities, lambda_ctr_ref, lifted_idx_ref,
-                         name_prefix) with
-    | Err msg -> Err(msg)
-    | Ok lr ->
-        match lr with
-        | (lblocks, lcur_lbl, lcur_ops, l_name, idx1) ->
-            match translate_expr(right, params, ctors, idx1, lcur_lbl, lcur_ops,
-                                 captures, lifted_ref, top_level, let_names, fn_arities, lambda_ctr_ref, lifted_idx_ref,
-                                 name_prefix) with
-            | Err msg -> Err(msg)
-            | Ok rr ->
-                match rr with
-                | (rblocks, rcur_lbl, rcur_ops, r_name, idx2) ->
-                    Ok((list_append(lblocks, rblocks), rcur_lbl,
-                         list_append(rcur_ops,
-                           Cons(sprout_ir.IRStrConcat(fresh_name(name_prefix, idx2), l_name, r_name), Nil)),
-                         fresh_name(name_prefix, idx2), idx2 + 1))
+  # There is deliberately NO `op == "++"` arm here, and a String peephole that
+  # used to be one was unreachable. `++` never reaches this function:
+  # `infer.check_binary` (`infer.sprout:3188`) routes it to
+  # `append_via_semigroup`, which returns `TCall(TVar("append"), [TDict, l, r])`
+  # and never builds a `TBinary`. Every other `TBinary(` site in the compiler —
+  # `dce`, `lowering`, `resolve`, and infer's own `apply_subst` /
+  # `resolve_dispatch` — is a structural rebuild copying an existing `op`, so no
+  # `op == "++"` can be introduced downstream either. The live append lowering is
+  # `translate_append_operands`, on the `TCall` path.
+  # ---- end of the `++` note; the next arm is unrelated ----
   # M3 PR 9: `==` and `!=` on String operands lower to @str_eq (i1 result,
   # zext'd to i64 for Bool ABI).  Must be before the Int-type guard below.
   # Direct codegen's equivalent: emit_ptr_comparison (codegen.sprout ~2094).
@@ -5297,14 +5286,36 @@ fn recognize_string_builtin(fname: String) -> Maybe StringBuiltin =
 
 # Handle the `append` / `++` Semigroup method.
 #
-# The parser desugars `a ++ b` to CallExpr("append", [a, b]).  When no import
-# brings the Semigroup class into scope, the typeclass lowering emits no dict
-# witness and the call reaches translate_direct_call as TCall(TVar "append",
-# [a, b]).  When a dict witness is present the arg list has 3 elements:
-# [TDict ..., left, right].  Both shapes are accepted here; the dict arg is
-# skipped if present.
+# `infer.append_via_semigroup` types `a ++ b` as TCall(TVar "append", [TDict,
+# left, right]), so the arg list normally has 3 elements; a 2-element
+# [left, right] shape is also accepted, for a call that carries no dict witness.
+# The dict arg is skipped if present.
 #
-# Mirrors codegen.sprout emit_append_call / emit_append_operands (~2591).
+# WHICH OF THE THREE ARMS BELOW ACTUALLY RUNS is not obvious, and was measured
+# (2026-08-23) rather than assumed:
+#
+#   * The trailing-witness `else` arm is the LIVE one. A polymorphic site — e.g.
+#     `fn twice(x: t) -> t where Semigroup t = x ++ x` — applies the enclosing
+#     function's dict parameter as a closure. Pinned by
+#     `tests/conformance/run/str_append_dispatch_shapes.spr`.
+#   * The String and List peephole arms did not fire in any shape tested.
+#     `lowering.try_devirt_concrete` (`lowering.sprout:1270`) runs first and, for
+#     a statically-known instance, retargets the callee to the concrete
+#     `__tc_Semigroup_<T>_append` — so the `fname == "__cm_Semigroup_append"`
+#     guard at the call site below never matches for exactly the monomorphic case
+#     the peepholes were written for. Where the guard DOES match, the site is
+#     polymorphic, so `is_string_type` / `is_list_type` are false and both arms
+#     are skipped anyway. The two conditions appear mutually exclusive.
+#
+# They are kept regardless, because the `else` arm's `Nothing` case is a hard
+# error: a concrete append arriving with no resolved witness would go from
+# compiling to failing. The peepholes cost nothing (`-O2` inlines the wrapper the
+# devirtualized path calls — 53 wrapper calls to 0 on `03_strconcat`'s golden),
+# so they stay as that fallback. Retiring them is filed in BACKLOG.
+#
+# A third mechanism USED to exist and was genuinely unreachable: a `++` arm in
+# `translate_binary`. `infer` never builds a `TBinary("++")`, so it was deleted;
+# see the note in `translate_binary` where it lived.
 fn translate_append_call(args: List typed_ast.TypedExpr, call_ty: types.Type,
                          params: List String,
                          ctors: Dict sprout_ir.CtorInfo, idx: Int,
@@ -5353,8 +5364,8 @@ fn translate_append_operands(left: typed_ast.TypedExpr, right: typed_ast.TypedEx
                               name_prefix: String) ->
     Result String (List sprout_ir.IRBlock, String, List sprout_ir.IROp, String, Int) !{IO} =
   if is_string_type(typed_ast.typed_expr_type(left)) || is_string_type(call_ty) then
-    # String ++ String → IRStrConcat.  Mirrors the translate_binary "++" path
-    # at ~line 1513 and codegen.sprout emit_append_operands (~2600).
+    # String ++ String → IRStrConcat.  Fallback only; see the note on
+    # translate_append_call for why devirtualization gets here first.
     match translate_expr(left, params, ctors, idx, cur_label, cur_ops,
                          captures, lifted_ref, top_level, let_names, fn_arities,
                          lambda_ctr_ref, lifted_idx_ref, name_prefix) with
@@ -5374,7 +5385,7 @@ fn translate_append_operands(left: typed_ast.TypedExpr, right: typed_ast.TypedEx
                            Cons(sprout_ir.IRStrConcat(fresh_name(name_prefix, idx2), l_name, r_name), Nil)),
                          fresh_name(name_prefix, idx2), idx2 + 1))
   else if is_list_type(typed_ast.typed_expr_type(left)) || is_list_type(call_ty) then
-    # List ++ List → call @list_append.  Mirrors codegen.sprout (~2611).
+    # List ++ List → call @list_append.  Fallback only, same as the String arm.
     match translate_args_scalar([left, right], params, ctors, idx, cur_label, cur_ops, Nil, Nil,
                                 captures, lifted_ref, top_level, let_names, fn_arities,
                                 lambda_ctr_ref, lifted_idx_ref, name_prefix) with
