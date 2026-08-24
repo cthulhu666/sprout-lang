@@ -1,0 +1,9 @@
+module main
+
+# Unannotated SELF-recursion — a binding group of size one, which fn_body_env
+# already typed correctly by binding the function's own name monomorphically
+# inside its own body. Pinned as a regression guard: making the placeholder
+# per-declaration must not disturb the case that already worked.
+fn countdown(n: Int) = if n == 0 then 0 else countdown(n - 1)
+
+fn main() -> Unit !{IO} = print(countdown(3))

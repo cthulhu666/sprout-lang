@@ -29,13 +29,17 @@ fn swap(p: (a, b)) -> (b, a) =
 # ever changes, dict forwarding breaks here first.
 fn describe(x: a) -> String where ToString a = to_string(x)
 
-# Unannotated return: the `_unann` placeholder is skipped by the check. Its
-# resolution IS a constant (Int), so without the skip this is rejected.
+# Unannotated return. Its placeholder resolves to a constant (Int), which the
+# rigidity check rejects for any variable the PROGRAMMER wrote — so this shape is
+# accepted only because the placeholder is not one. It used to be kept out by an
+# explicit `_unann` skip inside the walk; since 2026-08-24 the placeholder is left
+# out of the scheme's binder list instead, so the walk never sees it and the skip
+# is gone. This test pins the outcome, which is unchanged either way.
 fn inc(n: Int) = n + 1
 
 # Unannotated return resolving to a COMPOUND type — the `rcompose` shape named in
-# the check's own comment. Under the compound rule this is exactly what the
-# `_unann` skip has to keep protecting.
+# the check's own comment, and the one the compound rule would reject outright if
+# an inferred placeholder were ever treated as a written variable.
 fn compose2(f: a -> b, g: b -> c) = \x -> g(f(x))
 
 # The scheme must NOT have been narrowed: `keep_first` is used at two different

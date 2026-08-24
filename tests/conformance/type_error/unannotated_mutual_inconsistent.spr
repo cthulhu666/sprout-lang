@@ -1,0 +1,14 @@
+module main
+
+# Mutual recursion, both members unannotated, with no consistent typing:
+# `a` treats b's result as a String, `b` returns Int on its base branch.
+#
+# `b`'s own body is internally consistent, so nothing inside `b` contradicts it —
+# the conflict exists only BETWEEN the two members. It is caught because the
+# substitution learned while checking `a` is threaded into checking `b`, instead
+# of being discarded at the declaration boundary.
+fn a(n: Int) = "len=" ++ b(n)
+
+fn b(n: Int) = if n == 0 then 0 else str_len(a(n - 1))
+
+fn main() -> Unit !{IO} = print(a(0))

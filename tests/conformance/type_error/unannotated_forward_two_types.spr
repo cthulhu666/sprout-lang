@@ -1,0 +1,12 @@
+module main
+
+# A quantified placeholder let ONE unannotated function be used at two different
+# types by two different callers, both accepted, neither matching its real type.
+# Monomorphic-until-inferred means the second use now collides with the first.
+fn use_as_string() -> String = fwd()
+
+fn use_as_int() -> Int = fwd()
+
+fn fwd() = true
+
+fn main() -> Unit !{IO} = print(use_as_string())

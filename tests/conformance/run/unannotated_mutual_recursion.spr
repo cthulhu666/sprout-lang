@@ -1,0 +1,22 @@
+module main
+
+# Mutual recursion with NO annotations on either member's return type. HM infers
+# both, so this must be ACCEPTED — the README's "most code needs no annotations"
+# covers mutual recursion, and a fix that demanded a signature here would have
+# bought soundness by giving that up.
+#
+# It also has to be inferred RIGHT, not merely accepted: before the substitution
+# was threaded between declarations, the sibling fixture
+# `type_error/unannotated_mutual_inconsistent` was accepted too.
+fn is_even(n: Int) = if n == 0 then true else is_odd(n - 1)
+
+fn is_odd(n: Int) = if n == 0 then false else is_even(n - 1)
+
+fn show(label: String, b: Bool) -> Unit !{IO} =
+  if b then print(label ++ "=true") else print(label ++ "=false")
+
+fn main() -> Unit !{IO} =
+  do
+    show("is_even(4)", is_even(4))
+    show("is_odd(4)", is_odd(4))
+    show("is_even(7)", is_even(7))

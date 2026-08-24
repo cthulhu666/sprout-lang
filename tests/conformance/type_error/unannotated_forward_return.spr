@@ -1,0 +1,17 @@
+module main
+
+# The forward reference that used to compile clean and then SIGSEGV.
+#
+# `summarize` has no return annotation, so pre_scan_fn_decls has nothing to
+# register for it. It used to register a UNIVERSALLY QUANTIFIED placeholder,
+# which is refreshed at every use — so `report` unified its own fresh copy with
+# String and nothing ever reconciled that against the Int the body returns.
+# `report` then concatenated an i64 as if it were a string pointer.
+#
+# The placeholder is now per-declaration and NOT quantified, so `report` pins the
+# one shared variable to String and `summarize`'s own body collides with it.
+fn report(xs: List Int) -> String = "count=" ++ summarize(xs)
+
+fn summarize(xs: List Int) = list_length(xs)
+
+fn main() -> Unit !{IO} = print(report(Cons(1, Cons(2, Nil))))

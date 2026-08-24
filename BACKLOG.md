@@ -660,8 +660,41 @@ Legend:
   alternative is real skolemization in `instantiate_with_vars`, machinery that already exists in
   `instantiate_ctor_pattern` (`unifier.sprout:325`), but W3 deliberately avoided it to protect
   `@fwd` dict forwarding, so that route reopens the dict-forwarding question.
-- [ ] `P1` **`_unann` placeholders are QUANTIFIED into the scheme published for forward
-  references (`infer.sprout:193`, `:255`, `:301`, `:306`).** `scheme_from_fn_parts` (`:169`)
+- [x] `P1` **`_unann` placeholders are QUANTIFIED into the scheme published for forward
+  references (`infer.sprout:193`, `:255`, `:301`, `:306`). FIXED 2026-08-24** — the placeholder
+  is now per-declaration (`_unann@<owner>`, `_unann@<owner>/<param>`, minted by `unann_ret_var` /
+  `unann_param_var`) and left OUT of the `Scheme` binder list, and the substitution
+  `check_fn_body` used to compute and discard is returned, carried in a fourth `TypedDeclOk`
+  field, and threaded by `typecheck_decls_inner`. Together those are the two halves the
+  2026-08-13 correction below said were both required: unique names make unquantified
+  placeholders safe to share, and a threaded substitution makes sharing mean something. A
+  forward caller and the callee's own body now meet in ONE variable, so a conflict surfaces as
+  an ordinary type error at the callee instead of a clean compile and a SIGSEGV.
+  Design + measurements: `docs/binding-group-inference-v0.md`. Normative rule:
+  `docs/spec-v0.md` §7 rule 16.
+  Fixtures, all RED-verified accepted-before-the-fix: `tests/conformance/type_error/`
+  `unannotated_forward_return` (the SIGSEGV repro), `unannotated_forward_two_types` (the
+  two-types-in-one-program proof), `unannotated_mutual_inconsistent` (mutual recursion had the
+  same hole — the previously-cited `is_even`/`is_odd` case only *looked* safe because its types
+  agreed); plus `tests/conformance/run/unannotated_mutual_recursion` (must still infer with NO
+  annotations) and `unannotated_self_recursion`.
+  **Three corrections this landing makes to the analysis below.**
+  (1) The `rigidity_violation` `_unann` skip **was** removed, and the "do not remove it" warning
+  was right for the code it was written against and is now moot: `names` comes from
+  `scheme_vars`, and the placeholders are no longer in it, so the skip had nothing left to skip.
+  Removing it changes no behaviour — `tests/stdlib/test_rigid_signature_accepts.spr` still
+  passes.
+  (2) "Pair with a located diagnostic at the forward call site" was not needed. Threading the
+  substitution gives the conflict a place to collide on its own, and the resulting message
+  (`Return type mismatch in main.summarize: Type mismatch: Int vs String`) points at the
+  declaration whose body contradicts what a caller committed to — which is the more useful end.
+  (3) The predicted cost is real and measured: an unannotated function used at two types
+  *before* it is declared is now rejected. Define-before-use is unaffected and still fully
+  polymorphic. See the follow-up item directly below, which removes even that.
+  Verification: full `just test`, all 33 `ci-fast-gates` (including `ir-golden-diff` at **0
+  differences** against a reseeded stage-1), `verify-bootstrap-fixed-point`, and all 52 examples.
+  Original analysis follows.
+  `scheme_from_fn_parts` (`:169`)
   synthesizes `_unann` for an omitted return type and `_unann_<param>` for an omitted parameter
   type, and `collect_ret_type_vars`/`collect_param_type_vars` put both into the scheme's
   **quantified var list**. `pre_scan_fn_decls` → `register_fn_decl_scheme` (`:5875-5890`)
@@ -702,6 +735,41 @@ Legend:
   different types in one expression — which is a user-visible acceptance change and needs a
   decision, not a unilateral pick. (This is roughly what SCC-ordered inference buys within an
   SCC anyway, at much lower cost.)
+- [ ] `P2` **Order top-level declarations by dependency before inferring them (binding-group
+  inference, part 1).** The `_unann` fix above makes an unannotated declaration's placeholder one
+  shared monomorphic variable, which is Hindley-Milner's rule for a declaration group. What is
+  still missing is Haskell 2010 §4.5.1: *"Hindley-Milner type inference is applied to each
+  declaration group in dependency order."* Without it, generalization happens in **source**
+  order, so an unannotated function used before it is declared is monomorphic at those uses:
+  `fn use_two() -> Unit !{IO} = do { print(fwd(1)); print(fwd("s")) }` above `fn fwd(x) = x` is
+  rejected with `Call type mismatch: Int vs String`, and accepted when `fwd` is moved above.
+  Measured 2026-08-24; `docs/binding-group-inference-v0.md` §7.2. This only ever REJECTS — it
+  cannot accept a program it should not — so it is a completeness gap, not a soundness one.
+  **Scope:** collect each `FnDecl`'s referenced top-level names, partition into SCCs, check in
+  topological order, and generalize per group rather than per declaration. Reusable machinery
+  already exists: `ast_to_ir.mutual_reaches` (`:6471`) is a generic BFS over a `Dict Set` with no
+  TCO assumptions; `pb_scc_collect`/`pb_scc_of` (`:6721`, `:6638`) are the SCC walk but are
+  interleaved with TCO filters (`pb_all_ret_ok`, `pb_heterogeneous`) and need a bare
+  `sccs_in_order(order, graph)` pulled out — which also shrinks one cluster of the
+  "five implementations of which-names-does-this-bind" item. The name collector is new:
+  `bundler.unresolved_in_expr` (`bundler.sprout:1584`) is the right AST level and walk shape but
+  *searches* (`Maybe String`) rather than accumulating, and `ast_to_ir.compute_free_vars` is over
+  `typed_ast.TypedExpr`, i.e. post-inference, so it is not reusable.
+  **Hazard:** `typecheck_decls_inner` accumulates typed declarations in processing order and
+  reverses at the end, so reordering naively moves emitted code. Check in group order, **emit in
+  source order**, and assert that with `just ir-golden-diff` — the current change moves 0 bytes
+  of IR and that should stay true.
+  Once this lands, polymorphic recursion is the only place a top-level annotation is required
+  (`docs/binding-group-inference-v0.md` §8), and `spec-v0.md` §7 rule 16's closing
+  "Order dependence (v0 limitation)" paragraph comes out.
+- [ ] `P2` **Does an omitted EFFECT annotation have the `_unann` hole too?** `check_fn_body`
+  computes an effect substitution (`es2a`) and discards it at the declaration boundary — exactly
+  what it used to do with the type substitution, which is what the item above fixed.
+  `typecheck_decls_inner` still passes `eff_subst` through unchanged. Unknown whether the effect
+  side has an analogous unsoundness or whether `effect_from_maybe_labels(Nothing)` being
+  concretely `EffectPure` (rather than a variable) closes it by construction. **Scope:** answer
+  the question with a probe before writing any code; if it is closed by construction, record
+  that here and delete the item. Raised while landing the type-side fix, 2026-08-24.
 - [x] `P1` **An existential skolem escapes into a top-level scheme through an unannotated return
   (`unifier.sprout:390-410`). FIXED 2026-08-13** — `typecheck_decl` now scans a `FnDecl`'s
   inferred type with the existing `types.type_mentions_skolem` and rejects at the declaration;
