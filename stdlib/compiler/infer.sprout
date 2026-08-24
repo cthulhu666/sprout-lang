@@ -108,8 +108,13 @@ type CallResult =
 # Internal per-decl result (not exported; callers see TypedResult).
 # The env field is GlobalEnv because each typecheck_decl produces the
 # between-decl environment that the next decl will see.
+# The fourth field of TypedDeclOk is the substitution the declaration ENDS with,
+# handed to the next one. Before binding-group inference this was thrown away at
+# every declaration boundary, so a declaration that pinned an unannotated
+# neighbour's placeholder had nowhere to record it and the pin never bound
+# anything. Declarations that learn nothing pass their input through unchanged.
 type TypedDeclResult =
-  | TypedDeclOk typed_ast.TypedDecl GlobalEnv (List String)
+  | TypedDeclOk typed_ast.TypedDecl GlobalEnv (List String) (Dict types.Type)
   | TypedDeclErr source.SourcePos String
 
 # Internal single-method result.
@@ -197,7 +202,14 @@ export fn effect_from_maybe_labels(labels: Maybe (List String)) -> types.Effect 
 # Build a Scheme from a FnDecl
 # ---------------------------------------------------------------------------
 
+# `owner` names the declaration the scheme belongs to, and exists only to make
+# the UNANNOTATED-slot placeholder unique to it. A single global "_unann" made
+# every unannotated function in the program share one variable; a name derived
+# from the declaration makes it one variable per declaration, which is the shared
+# monomorphic assumption HM wants and nothing more. See
+# docs/binding-group-inference-v0.md.
 fn scheme_from_fn_parts(
+  owner: String,
   params: List ast.Param,
   ret_type_maybe: Maybe ast.TypeExpr,
   effects_maybe: Maybe (List String),
@@ -205,11 +217,59 @@ fn scheme_from_fn_parts(
 ) -> types.Scheme =
   scheme_from_fn_parts_inner(
     collect_ret_type_vars(ret_type_maybe, collect_param_type_vars(params, Nil)),
+    owner,
     params,
     ret_type_maybe,
     effects_maybe,
     alias_env
   )
+
+# The placeholder standing in for a slot the programmer did not annotate. It is
+# an ordinary type variable with a name no source program can write, and — the
+# part that matters — it is NOT added to the scheme's quantified list, so
+# `instantiate` leaves it alone and every use of the declaration sees the SAME
+# variable. Pinning it is therefore a commitment, not a per-call guess.
+fn unann_ret_var(owner: String) -> String = "_unann@" ++ owner
+
+fn unann_param_var(owner: String, param: String) -> String =
+  "_unann@" ++ owner ++ "/" ++ param
+
+# A declaration's OWN placeholders, subtracted from env_ftv at its generalization
+# boundary.
+#
+# Leaving the placeholders out of the binder list makes them FREE variables of the
+# scheme pre_scan publishes, so `ftv_env` — which is where env_ftv comes from —
+# now sees them. For every OTHER declaration that is exactly right: a placeholder
+# another declaration pinned is a commitment this one must not quantify away, and
+# quantifying it would re-open the forward-reference hole from the other side.
+# For the declaration that OWNS it the same rule is backwards, because that
+# variable is precisely what generalization exists to quantify. Without this
+# subtraction `fn id(x) = x` infers the monomorphic `_unann@id/x -> _unann@id/x`
+# instead of `forall a. a -> a`. Regression: tests/stdlib/compiler/test_compiler.spr.
+fn own_unann_vars(owner: String, params: List ast.Param, ret_type_maybe: Maybe ast.TypeExpr) -> List String =
+  own_unann_ret(owner, ret_type_maybe, own_unann_params(owner, params, Nil))
+
+fn own_unann_params(owner: String, params: List ast.Param, acc: List String) -> List String =
+  match params with
+  | Nil -> acc
+  | Cons p rest ->
+      match p with
+      | ast.Param pname maybe_type _ ->
+          match maybe_type with
+          | Nothing -> own_unann_params(owner, rest, Cons(unann_param_var(owner, pname), acc))
+          | Just _ -> own_unann_params(owner, rest, acc)
+
+fn own_unann_ret(owner: String, ret_type_maybe: Maybe ast.TypeExpr, acc: List String) -> List String =
+  match ret_type_maybe with
+  | Nothing -> Cons(unann_ret_var(owner), acc)
+  | Just _ -> acc
+
+# Nil is the overwhelmingly common case (a fully annotated declaration), and it
+# is also the case where list_diff would walk env_ftv to no purpose.
+fn env_ftv_for_decl(env_ftv: List String, own: List String) -> List String =
+  match own with
+  | Nil -> env_ftv
+  | [_ | _] -> types.list_diff(env_ftv, own)
 
 fn list_add_unique(x: String, xs: List String) -> List String =
   if types.list_member(x, xs) then xs else append(xs, Cons(x, Nil))
@@ -221,7 +281,9 @@ fn collect_param_type_vars(params: List ast.Param, acc: List String) -> List Str
       match p with
       | ast.Param name maybe_type _ ->
           match maybe_type with
-          | Nothing -> collect_param_type_vars(rest, list_add_unique("_unann_" ++ name, acc))
+          # An unannotated parameter contributes NOTHING here. Its placeholder is
+          # minted by param_types_from_decl and deliberately left unquantified.
+          | Nothing -> collect_param_type_vars(rest, acc)
           | Just te -> collect_param_type_vars(rest, collect_te_vars(te, acc))
 
 fn collect_te_vars(te: ast.TypeExpr, acc: List String) -> List String =
@@ -283,7 +345,9 @@ fn all_syntactic_values(exprs: List ast.Expr) -> Bool =
 
 fn collect_ret_type_vars(ret_type_maybe: Maybe ast.TypeExpr, acc: List String) -> List String =
   match ret_type_maybe with
-  | Nothing -> list_add_unique("_unann", acc)
+  # As with an unannotated parameter: the placeholder exists in the TYPE but not
+  # in the binder list, which is what makes it monomorphic across uses.
+  | Nothing -> acc
   | Just te -> collect_te_vars(te, acc)
 
 fn build_type_var_dict(vars: List String, acc: Dict types.Type) -> Dict types.Type =
@@ -381,6 +445,7 @@ fn typecheck_fn_body(
 
 fn scheme_from_fn_parts_inner(
   type_params: List String,
+  owner: String,
   params: List ast.Param,
   ret_type_maybe: Maybe ast.TypeExpr,
   effects_maybe: Maybe (List String),
@@ -388,27 +453,27 @@ fn scheme_from_fn_parts_inner(
 ) -> types.Scheme =
   types.scheme_quantified(
     type_params,
-    build_fn_type_modes(param_types_from_decl(params, local_vars), param_modes(params),
-      ret_from_maybe_with_vars(ret_type_maybe, local_vars),
+    build_fn_type_modes(param_types_from_decl(owner, params, local_vars), param_modes(params),
+      ret_from_maybe_with_vars(owner, ret_type_maybe, local_vars),
       effect_from_maybe_labels(effects_maybe)),
     effect_from_maybe_labels(effects_maybe),
     Nil
   )
   where local_vars = build_type_var_dict(type_params, alias_env)
 
-fn param_types_from_decl(params: List ast.Param, local_vars: Dict types.Type) -> List types.Type =
+fn param_types_from_decl(owner: String, params: List ast.Param, local_vars: Dict types.Type) -> List types.Type =
   match params with
   | Nil -> Nil
   | Cons p rest ->
       match p with
       | ast.Param name maybe_type _ ->
           match maybe_type with
-          | Nothing -> Cons(types.TVar(types.tyvar_id("_unann_" ++ name)), param_types_from_decl(rest, local_vars))
-          | Just te -> Cons(type_from_ast(te, local_vars), param_types_from_decl(rest, local_vars))
+          | Nothing -> Cons(types.TVar(types.tyvar_id(unann_param_var(owner, name))), param_types_from_decl(owner, rest, local_vars))
+          | Just te -> Cons(type_from_ast(te, local_vars), param_types_from_decl(owner, rest, local_vars))
 
-fn ret_from_maybe_with_vars(maybe_te: Maybe ast.TypeExpr, local_vars: Dict types.Type) -> types.Type =
+fn ret_from_maybe_with_vars(owner: String, maybe_te: Maybe ast.TypeExpr, local_vars: Dict types.Type) -> types.Type =
   match maybe_te with
-  | Nothing -> types.TVar(types.tyvar_id("_unann"))
+  | Nothing -> types.TVar(types.tyvar_id(unann_ret_var(owner)))
   | Just te -> type_from_ast(te, local_vars)
 
 # An arrow chain whose every parameter CONSUMES. Used where no declaration is in
@@ -5998,7 +6063,7 @@ fn pre_scan_extern(
   | Nothing ->
       dict_set("@extern:" ++ name, extern_marker(),
         dict_set("@arity:" ++ name, arity_marker(list_length(params)),
-          dict_set(name, scheme_from_fn_parts(params, ret_type_maybe, effects_maybe, alias_env), env)))
+          dict_set(name, scheme_from_fn_parts(name, params, ret_type_maybe, effects_maybe, alias_env), env)))
 
 fn pre_scan_fn_decls(decls: List ast.Decl, env: Dict types.Scheme, alias_env: Dict types.Type) -> Dict types.Scheme =
   match decls with
@@ -6057,8 +6122,12 @@ fn typecheck_decls_inner(
             r <- typecheck_decl(state, decl, env, subst, eff_subst, alias_env, env_ftv)
             match r with
             | TypedDeclErr pos e -> typed_ast.TypedErr(pos, e)
-            | TypedDeclOk typed_decl new_env new_env_ftv ->
-                typecheck_decls_inner(state, rest, new_env, subst, eff_subst, alias_env,
+            | TypedDeclOk typed_decl new_env new_env_ftv new_subst ->
+                # new_subst, not subst: this is the whole of what makes an
+                # unannotated declaration's placeholder mean anything. The pin a
+                # caller puts on it has to survive to the declaration that owns
+                # it, or the two are inferred as if they were unrelated.
+                typecheck_decls_inner(state, rest, new_env, new_subst, eff_subst, alias_env,
                   Cons(typed_decl, acc), new_env_ftv)
 
 # Phrased as the same "escapes its scope" family as the unifier's mismatch
@@ -6091,18 +6160,24 @@ fn typecheck_decl(
   # TypedDeclOk boundary.
   match decl with
   | ast.TypeDecl _ _ _ _ _ _ ->
-      TypedDeclOk(typed_ast.TPassThrough(decl), register_type_decl(decl, env), env_ftv)
+      TypedDeclOk(typed_ast.TPassThrough(decl), register_type_decl(decl, env), env_ftv, subst)
   | ast.WrapDecl _ _ _ ->
       # WrapDecl uses the same single-ctor-synthesizing path as TypeDecl.
-      TypedDeclOk(typed_ast.TPassThrough(decl), register_type_decl(decl, env), env_ftv)
+      TypedDeclOk(typed_ast.TPassThrough(decl), register_type_decl(decl, env), env_ftv, subst)
   | ast.RecordDecl rec_name type_params fields _ mult _ ->
       TypedDeclOk(typed_ast.TPassThrough(decl),
         GlobalEnv(mark_type_multiplicity(rec_name, mult,
           register_record_fields(rec_name, type_params, fields, global_env_dict(env)))),
-        env_ftv)
+        env_ftv, subst)
   | ast.FnDecl name params ret_type_maybe effects_maybe constraints _ decl_pos ->
       do
-        (r, fwd_markers, decl_constraints) <- check_fn_body(state, decl, global_env_dict(env), subst, eff_subst, alias_env, env_ftv)
+        # decl_env_ftv, not env_ftv, and the SAME value must reach check_fn_body
+        # and generalize below: canonicalize_constrained_constraints computes a
+        # constraint's binder position with the very same ftv-difference that
+        # generalize uses, and the two disagreeing would misindex every hidden
+        # dictionary. See own_unann_vars for why the subtraction is needed.
+        let decl_env_ftv = env_ftv_for_decl(env_ftv, own_unann_vars(name, params, ret_type_maybe))
+        (r, fwd_markers, decl_constraints, body_subst) <- check_fn_body(state, decl, global_env_dict(env), subst, eff_subst, alias_env, decl_env_ftv)
         # WHY: @eta_fwd markers added here have free type variables that must be
         # included in env_ftv so subsequent declarations don't incorrectly generalize
         # over them.  Computed once per declaration (not per env entry) → stays O(n).
@@ -6122,7 +6197,7 @@ fn typecheck_decl(
             # unannotated one-line unboxer both printed a String as a raw address
             # and silently merged two unpacks that `existential_merge` rejects
             # directly. The annotated form errors earlier (the rigidity scan sees
-            # the skolem as a TConst); only the `_unann` path reaches here.
+            # the skolem as a TConst); only the unannotated-return path reaches here.
             if types.type_mentions_skolem(inferred_fn_type)
             then TypedDeclErr(decl_pos, skolem_escape_msg(name))
             else
@@ -6136,11 +6211,12 @@ fn typecheck_decl(
               fold_fwd_markers(fwd_markers,
                 GlobalEnv(dict_set(name,
                   types.scheme_with_constraints(
-                    unifier.generalize(env_ftv, dict_empty(), dict_empty(),
+                    unifier.generalize(decl_env_ftv, dict_empty(), dict_empty(),
                       inferred_fn_type, effect_from_maybe_labels(effects_maybe)),
                     decl_constraints),
                   global_env_dict(env)))),
-              new_env_ftv)
+              new_env_ftv,
+              body_subst)
   | ast.ExternFnDecl name params ret_type_maybe effects_maybe ext_pos ->
       # An extern has no BODY, so `fn_linear_gate` (and with it the
       # "modifier only on a linear parameter" guard) never ran on one: an FFI
@@ -6148,7 +6224,7 @@ fn typecheck_decl(
       # compile, and read it as an ownership guarantee the compiler was not
       # making. Validate the modifiers here, where the param types resolve.
       # Regression: tests/conformance/type_error/borrow_extern_non_linear.
-      extern_decl_result(name, params, ret_type_maybe, effects_maybe, ext_pos, alias_env, env, env_ftv)
+      extern_decl_result(name, params, ret_type_maybe, effects_maybe, ext_pos, alias_env, env, env_ftv, subst)
   | ast.LetDecl name expr anno let_pos ->
       do
         r <- typecheck_let_rhs(state, global_env_dict(env), subst, eff_subst, expr, anno, alias_env)
@@ -6180,23 +6256,28 @@ fn typecheck_decl(
                         resolve_dispatch_typed_expr(global_env_dict(env), s1, typed_expr),
                         s1, let_pos, env, env_ftv, es1a)
   | ast.AliasDecl _ _ _ _ ->
-      TypedDeclOk(typed_ast.TPassThrough(decl), env, env_ftv)
+      TypedDeclOk(typed_ast.TPassThrough(decl), env, env_ftv, subst)
   | ast.ClassDecl class_name type_params methods superclasses _ ->
       TypedDeclOk(typed_ast.TPassThrough(decl),
         GlobalEnv(register_class_methods(type_params, methods,
           register_class_method_markers(class_name, type_params, methods,
             register_superclass_markers(class_name, superclasses, global_env_dict(env))))),
-        env_ftv)
+        env_ftv, subst)
   | ast.InstanceDecl constraint inst_constraints methods _ ->
       do
         r <- check_instance_methods(state, inst_constraints, methods, global_env_dict(env), subst, eff_subst, env_ftv)
         match r with
         | typed_ast.InstanceMethodsErr pos e -> TypedDeclErr(pos, e)
         | typed_ast.InstanceMethodsOk typed_methods ->
+            # `subst` unchanged: an instance method's inference is NOT merged
+            # into the thread. Two instances of one class implement the same
+            # method name, so their placeholders would otherwise be forced equal.
+            # scheme_from_fn_parts gives them a "#inst/" namespace for the same
+            # reason — the two guards are a pair.
             TypedDeclOk(
               typed_ast.TInstanceDecl(constraint, inst_constraints, typed_methods),
               GlobalEnv(register_instance_marker(constraint, global_env_dict(env))),
-              env_ftv)
+              env_ftv, subst)
 
 # ---------------------------------------------------------------------------
 # apply_subst_typed_expr — walk a typed AST applying a type substitution
@@ -6887,10 +6968,13 @@ fn fold_fwd_entries(entries: List (String, types.Scheme), env: Dict types.Scheme
 # one — a SIGSEGV rather than a diagnostic. Fixtures:
 # tests/conformance/type_error/rigid_signature{,_var_merge,_compound}.spr.
 #
-# `names` are the scheme's quantified vars; `_unann`/`_unann_<param>` are
-# synthesized placeholders for UNANNOTATED returns/params (not written by the
-# programmer) and are excluded — inference is free to specialize those (e.g.
-# `rcompose(f: a->b, g: b->c) = \x -> g(f(x))`, whose inferred return is a->c).
+# `names` are the scheme's quantified vars, i.e. exactly the variables the
+# PROGRAMMER wrote. An unannotated return or parameter contributes no name here:
+# its placeholder is minted straight into the type and left out of the binder
+# list (see unann_ret_var), so inference stays free to specialize it — which is
+# what keeps `rcompose(f: a->b, g: b->c) = \x -> g(f(x))` accepted with its
+# inferred `a -> c` return. This used to need an explicit `_unann` skip inside
+# the walk; leaving the placeholders unquantified removes the thing to skip.
 fn rigidity_violation(prog_to_fresh: Dict types.Type, s2: Dict types.Type, names: List String) -> Maybe String =
   rigidity_violation_go(prog_to_fresh, s2, names, dict_empty(), fresh_to_written(prog_to_fresh))
 
@@ -6907,26 +6991,24 @@ fn rigidity_violation_go(
   match names with
   | Nil -> Nothing
   | Cons n rest ->
-      if str_starts_with(n, "_unann") then rigidity_violation_go(prog_to_fresh, s2, rest, claimed, written)
-      else
-        let Just fresh_v = dict_get(n, prog_to_fresh) else rigidity_violation_go(prog_to_fresh, s2, rest, claimed, written)
-        in
-          match unifier.apply_subst(s2, fresh_v) with
-          | types.TVar id ->
-              # Intact only if no earlier written variable resolved here too.
-              # Two written variables sharing one resolution is the constraint
-              # `a = b`, which the signature never declared.
-              match dict_get(types.tyvar_identity(id), claimed) with
-              | Just earlier -> Just(n ++ " merged with declared variable " ++ earlier)
-              | Nothing ->
-                  rigidity_violation_go(prog_to_fresh, s2, rest,
-                    dict_set(types.tyvar_identity(id), n, claimed), written)
-          | other ->
-              # Any compound resolution pins the variable to a structure the
-              # signature promised to leave open. This holds for a const-free
-              # one (`b -> c`) exactly as for `Int` or `List c`: a caller may
-              # still instantiate the variable at anything else.
-              Just(n ++ " forced to " ++ types.type_to_string(render_written(written, other)))
+      let Just fresh_v = dict_get(n, prog_to_fresh) else rigidity_violation_go(prog_to_fresh, s2, rest, claimed, written)
+      in
+        match unifier.apply_subst(s2, fresh_v) with
+        | types.TVar id ->
+            # Intact only if no earlier written variable resolved here too.
+            # Two written variables sharing one resolution is the constraint
+            # `a = b`, which the signature never declared.
+            match dict_get(types.tyvar_identity(id), claimed) with
+            | Just earlier -> Just(n ++ " merged with declared variable " ++ earlier)
+            | Nothing ->
+                rigidity_violation_go(prog_to_fresh, s2, rest,
+                  dict_set(types.tyvar_identity(id), n, claimed), written)
+        | other ->
+            # Any compound resolution pins the variable to a structure the
+            # signature promised to leave open. This holds for a const-free
+            # one (`b -> c`) exactly as for `Int` or `List c`: a caller may
+            # still instantiate the variable at anything else.
+            Just(n ++ " forced to " ++ types.type_to_string(render_written(written, other)))
 
 # prog_to_fresh reversed: fresh-variable identity -> the name the programmer
 # wrote. Rendering a resolution through it keeps the internal "$t41" out of the
@@ -6976,24 +7058,24 @@ fn render_written_list(written: Dict String, items: List types.Type) -> List typ
 fn extern_decl_result(name: String, params: List ast.Param, ret_type_maybe: Maybe ast.TypeExpr,
                       effects_maybe: Maybe (List String), ext_pos: source.SourcePos,
                       alias_env: Dict types.Type, env: GlobalEnv,
-                      env_ftv: List String) -> TypedDeclResult =
+                      env_ftv: List String, subst: Dict types.Type) -> TypedDeclResult =
   match linear_check.check_signature_modes(params,
-          types.scheme_type(scheme_from_fn_parts(params, ret_type_maybe, effects_maybe, alias_env)),
+          types.scheme_type(scheme_from_fn_parts(name, params, ret_type_maybe, effects_maybe, alias_env)),
           ext_pos, global_env_dict(env)) with
   | linear_check.LinFail lp lm -> TypedDeclErr(lp, lm)
-  | linear_check.LinPass -> extern_decl_ok(name, params, ret_type_maybe, effects_maybe, alias_env, env, env_ftv)
+  | linear_check.LinPass -> extern_decl_ok(name, params, ret_type_maybe, effects_maybe, alias_env, env, env_ftv, subst)
 
 fn extern_decl_ok(name: String, params: List ast.Param, ret_type_maybe: Maybe ast.TypeExpr,
                   effects_maybe: Maybe (List String), alias_env: Dict types.Type,
-                  env: GlobalEnv, env_ftv: List String) -> TypedDeclResult =
+                  env: GlobalEnv, env_ftv: List String, subst: Dict types.Type) -> TypedDeclResult =
   match dict_get(name, global_env_dict(env)) with
   | Just _ ->
-      TypedDeclOk(typed_ast.TExternFnDecl(name, params, ret_type_maybe, effects_maybe), env, env_ftv)
+      TypedDeclOk(typed_ast.TExternFnDecl(name, params, ret_type_maybe, effects_maybe), env, env_ftv, subst)
   | Nothing ->
       TypedDeclOk(
         typed_ast.TExternFnDecl(name, params, ret_type_maybe, effects_maybe),
-        GlobalEnv(dict_set(name, scheme_from_fn_parts(params, ret_type_maybe, effects_maybe, alias_env), global_env_dict(env))),
-        env_ftv)
+        GlobalEnv(dict_set(name, scheme_from_fn_parts(name, params, ret_type_maybe, effects_maybe, alias_env), global_env_dict(env))),
+        env_ftv, subst)
 
 fn fn_linear_gate(params: List ast.Param, s2: Dict types.Type, inst_type: types.Type,
                   typed_body: typed_ast.TypedExpr, fn_pos: source.SourcePos,
@@ -7511,7 +7593,7 @@ fn finish_let_decl(name: String, expr: ast.Expr, typed_expr: typed_ast.TypedExpr
                    unifier.generalize(env_ftv, s1, eff_subst,
                      typed_ast.typed_expr_type(typed_expr), types.EffectPure),
                    global_env_dict(env))),
-                 env_ftv)
+                 env_ftv, s1)
       else
         match types.list_diff(types.ftv(unifier.apply_subst(s1, typed_ast.typed_expr_type(typed_expr))), env_ftv) with
         | [_ | _] ->
@@ -7522,7 +7604,7 @@ fn finish_let_decl(name: String, expr: ast.Expr, typed_expr: typed_ast.TypedExpr
               GlobalEnv(dict_set(name,
                 types.mono(unifier.apply_subst(s1, typed_ast.typed_expr_type(typed_expr))),
                 global_env_dict(env))),
-              env_ftv)
+              env_ftv, s1)
 
 fn check_fn_body(
   state: unifier.InferState,
@@ -7532,11 +7614,11 @@ fn check_fn_body(
   eff_subst: Dict types.Effect,
   alias_env: Dict types.Type,
   env_ftv: List String
-) -> (typed_ast.BodyResult, Dict types.Scheme, List (String, String)) !{IO} =
+) -> (typed_ast.BodyResult, Dict types.Scheme, List (String, String), Dict types.Type) !{IO} =
   match decl with
   | ast.FnDecl name params ret_type_maybe effects_maybe constraints body fn_pos ->
       do
-        let decl_scheme = scheme_from_fn_parts(params, ret_type_maybe, effects_maybe, alias_env)
+        let decl_scheme = scheme_from_fn_parts(name, params, ret_type_maybe, effects_maybe, alias_env)
         (inst_type, prog_to_fresh) <- unifier.instantiate_with_vars(state, decl_scheme)
         let fwd_env = seed_forward_markers(constraints, prog_to_fresh, env)
         # Compute @eta_fwd:* markers in parallel without walking fwd_env post-hoc.
@@ -7546,8 +7628,8 @@ fn check_fn_body(
         # (fn_body_env), so recursive self-calls inject dicts from the Scheme —
         # no @constrained_N self markers to seed. fwd_env holds only @fwd/@eta_fwd.
         let body_env = fn_body_env(name, params, inst_type, constraint_source_tokens(constraints), fwd_env)
-        InferOk typed_body0 s1 es1 body_eff <- typecheck_fn_body(state, body_env, subst, eff_subst, body, ret_type_maybe, fn_return_type(inst_type, list_length(params))) else InferErr pos msg -> (fn_body_err(name, pos, msg), dict_empty(), Nil)
-        let unifier.UnifyOk s2a es2a = unifier.unify_types(s1, es1, typed_ast.typed_expr_type(typed_body0), fn_return_type(inst_type, list_length(params))) else unifier.UnifyErr e -> (return_mismatch_body_err(name, typed_body0, fn_return_type(inst_type, list_length(params)), s1, "Return type mismatch in " ++ name ++ ": " ++ e), dict_empty(), Nil)
+        InferOk typed_body0 s1 es1 body_eff <- typecheck_fn_body(state, body_env, subst, eff_subst, body, ret_type_maybe, fn_return_type(inst_type, list_length(params))) else InferErr pos msg -> (fn_body_err(name, pos, msg), dict_empty(), Nil, subst)
+        let unifier.UnifyOk s2a es2a = unifier.unify_types(s1, es1, typed_ast.typed_expr_type(typed_body0), fn_return_type(inst_type, list_length(params))) else unifier.UnifyErr e -> (return_mismatch_body_err(name, typed_body0, fn_return_type(inst_type, list_length(params)), s1, "Return type mismatch in " ++ name ++ ": " ++ e), dict_empty(), Nil, subst)
         # The declaration boundary: the one place that holds both the declared
         # effect and the effect the body was inferred to perform. Recorded for
         # every declaration whether or not they agree; `checker.typecheck_typed`
@@ -7566,10 +7648,10 @@ fn check_fn_body(
                  unifier.apply_effect_subst(es2a, body_eff), fn_pos, decl_scheme))
         # AFTER the return-type unify: the declared return type may be the only
         # thing that determines a deferred field access's receiver.
-        FinishOk typed_body s2 <- finish_field_obligations(state, body_env, s2a, typed_body0) else FinishErr fpos fmsg -> (fn_body_err(name, fpos, fmsg), dict_empty(), Nil)
+        FinishOk typed_body s2 <- finish_field_obligations(state, body_env, s2a, typed_body0) else FinishErr fpos fmsg -> (fn_body_err(name, fpos, fmsg), dict_empty(), Nil, subst)
         match rigidity_violation(prog_to_fresh, s2, types.scheme_vars(decl_scheme)) with
         | Just bad ->
-            (typed_ast.BodyErr(fn_pos, "Signature too general for its body in " ++ name ++ ": type variable " ++ bad), dict_empty(), Nil)
+            (typed_ast.BodyErr(fn_pos, "Signature too general for its body in " ++ name ++ ": type variable " ++ bad), dict_empty(), Nil, subst)
         | Nothing ->
           # A generalized type variable whose dictionary nothing supplies per call. Checked
           # before the linear gate only because it reports a signature defect, and a signature
@@ -7579,18 +7661,19 @@ fn check_fn_body(
           # nothing to it. `fn pass_through(f: a -> String, x: a) = f(x)` calls a parameter.
           match fn_dict_coverage_msg(name, params, constraints, prog_to_fresh, s2, inst_type,
                                      env_ftv, typed_body, body_env) with
-          | Just msg -> (typed_ast.BodyErr(fn_pos, msg), dict_empty(), Nil)
+          | Just msg -> (typed_ast.BodyErr(fn_pos, msg), dict_empty(), Nil, subst)
           | Nothing ->
             # M4.2: enforce consume-exactly-once for linear-typed bindings, on the
             # fully-substituted body/type. A violation becomes a BodyErr, surfacing
             # through the same path as any type error. Gated so a linear-free
             # program skips the check and its substitution copy. See linear_check.
             match fn_linear_gate(params, s2, inst_type, typed_body, fn_pos, env) with
-            | linear_check.LinFail lp lm -> (typed_ast.BodyErr(lp, lm), dict_empty(), Nil)
+            | linear_check.LinFail lp lm -> (typed_ast.BodyErr(lp, lm), dict_empty(), Nil, subst)
             | linear_check.LinPass ->
                 (typed_ast.BodyOk(resolve_dispatch_typed_expr(fwd_env, s2, typed_body), unifier.apply_subst(s2, inst_type)),
-                 fwd_markers, canonicalize_constrained_constraints(constraints, prog_to_fresh, s2, inst_type, env_ftv))
-  | _ -> (typed_ast.BodyOk(dummy_unit(), types.TConst(types.type_id("Unit"))), dict_empty(), Nil)
+                 fwd_markers, canonicalize_constrained_constraints(constraints, prog_to_fresh, s2, inst_type, env_ftv),
+                 s2)
+  | _ -> (typed_ast.BodyOk(dummy_unit(), types.TConst(types.type_id("Unit"))), dict_empty(), Nil, subst)
 
 # --- Positional constraint-var identity helpers (canonical-identity Stage 3) ---
 #
@@ -7733,7 +7816,7 @@ fn register_class_method(type_params: List String, sig: ast.ClassMethodSig, env:
       # at call sites and producing spurious "No instance of X for Y" errors.
       dict_set(name, scheme_from_fn_parts_inner(
         collect_ret_type_vars(Just(ret_type), collect_param_type_vars(params, type_params)),
-        params, Just(ret_type), effects_maybe, dict_empty()), env)
+        name, params, Just(ret_type), effects_maybe, dict_empty()), env)
 
 fn register_class_method_markers(class_name: String, type_params: List String, methods: List ast.ClassMethodSig, env: Dict types.Scheme) -> Dict types.Scheme =
   match methods with
@@ -7800,10 +7883,10 @@ fn register_fn_decl_scheme(
   match constraints with
   | Nil ->
       dict_remove("@class:" ++ name,
-        dict_set(name, scheme_from_fn_parts(params, ret_type_maybe, effects_maybe, alias_env), env))
+        dict_set(name, scheme_from_fn_parts(name, params, ret_type_maybe, effects_maybe, alias_env), env))
   | _ ->
       dict_remove("@class:" ++ name,
-        dict_set(name, types.scheme_with_constraints(scheme_from_fn_parts(params, ret_type_maybe, effects_maybe, alias_env), constraint_source_tokens(constraints)), env))
+        dict_set(name, types.scheme_with_constraints(scheme_from_fn_parts(name, params, ret_type_maybe, effects_maybe, alias_env), constraint_source_tokens(constraints)), env))
 
 # ---------------------------------------------------------------------------
 # InstanceDecl: instance marker registration
@@ -7871,7 +7954,12 @@ fn check_instance_method(
         # Let-bound rather than inlined into instantiate_with_vars: rule 9 asks
         # about the DECLARATION, so the report needs the pre-instantiation scheme
         # (source names `e`, `d`) and not `inst_type`'s freshened `$e0`.
-        let decl_scheme = scheme_from_fn_parts(params, ret_maybe, eff_maybe, dict_empty())
+        # "#inst/" keeps an instance method's placeholder out of the top-level
+        # namespace: two instances of one class implement the same method NAME,
+        # and the substitution threaded across top-level declarations must never
+        # be able to reach either of them. Nothing merges an instance method's
+        # substitution into that thread, so within one method the name is unique.
+        let decl_scheme = scheme_from_fn_parts("#inst/" ++ name, params, ret_maybe, eff_maybe, dict_empty())
         (inst_type, prog_to_fresh) <- unifier.instantiate_with_vars(state, decl_scheme)
         let fwd_env = seed_forward_markers(inst_constraints, prog_to_fresh, env)
         let body_env = extend_env_with_params(params, ctor_param_types(inst_type), fwd_env)

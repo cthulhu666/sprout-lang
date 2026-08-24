@@ -15,7 +15,8 @@ sequencing `Maybe` and `Result`, but that surface is not part of normative v0.
 
 Sprout v0 is a statically typed, functional-first language with:
 
-- Hindley-Milner style type inference (with explicit annotations where needed).
+- Hindley-Milner style type inference (§7 rule 16 states where an annotation is
+  still required).
 - Immutable bindings by default.
 - Algebraic data types and pattern matching.
 - Strict evaluation with deterministic order.
@@ -1589,6 +1590,29 @@ Effect note for v0:
     value's representation. The rule applies only to variables the programmer wrote;
     an **omitted** parameter or return type is an inference request, not a promise,
     and inference is free to specialize it.
+16. **Omitted annotations are monomorphic until inferred.** An omitted parameter
+    or return type stands for **one** type variable belonging to that declaration,
+    shared by every use of it. It is *not* universally quantified before the
+    declaration's body is inferred, so two callers cannot resolve it to two
+    different types: the first use to constrain it commits it, and a second use
+    that disagrees is a compile error. Once the body is inferred, the declaration
+    generalizes over whatever remains free in its own type — so
+    `fn id(x) = x` is `forall a. a -> a`, usable at any type thereafter.
+
+    This is Hindley-Milner's rule for a declaration group (Haskell 2010 §4.5.2):
+    infer without universal quantification, then generalize at the boundary. It
+    is what makes unannotated **mutual recursion** infer without annotations —
+    each member sees the other's shared variable rather than a fresh copy — and
+    it is why an unannotated declaration can no longer be given one type by a
+    caller and a different one by its own body.
+
+    **Order dependence (v0 limitation).** Groups are not yet ordered by
+    dependency, so generalization happens in source order. An unannotated
+    declaration used *before* it is declared is therefore still monomorphic at
+    those uses: `fn id(x) = x` placed below two calls at different types is
+    rejected, and accepted when placed above them. This only ever rejects; it
+    never accepts a program it should not. See
+    `docs/binding-group-inference-v0.md` §7.2.
 
 > **Enforcement of the effect rules.** Rules 8, 9, 10 and 11 are all **enforced** as of
 > 2026-08-16. `fn shout(s: String) -> Unit = print(s)` is a compile error; an effect

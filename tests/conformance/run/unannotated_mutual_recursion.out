@@ -1,0 +1,3 @@
+is_even(4)=true
+is_odd(4)=false
+is_even(7)=false

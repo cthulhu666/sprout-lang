@@ -76,7 +76,16 @@ pairwise duplicates among the declared vars' resolutions.
 ---
 
 ### F2 — [100] `_unann` placeholders are quantified into the published forward-reference scheme
-`stdlib/compiler/infer.sprout:306` (and `:193`, `:255`, `:301`) · soundness · NOT tracked
+`stdlib/compiler/infer.sprout:306` (and `:193`, `:255`, `:301`) · soundness · **FIXED 2026-08-24**
+
+> Fixed by per-declaration unquantified placeholders plus a substitution threaded across
+> declarations — `docs/binding-group-inference-v0.md`, `spec-v0.md` §7 rule 16. Two amendments
+> to what is written below. The rigidity skip **was** removed, and safely: with the placeholders
+> out of the binder list the skip had nothing left to skip, so the warning against removing it
+> was correct for the code it was written against and no longer applies. And the "located error
+> at the forward call site" turned out to be unnecessary — a threaded substitution gives the
+> conflict somewhere to collide by itself, and reports it at the declaration whose body
+> contradicts the caller. SCC dependency order remains open and is tracked in `BACKLOG.md`.
 
 `scheme_from_fn_parts` synthesizes `_unann` / `_unann_<param>` for omitted annotations and
 `collect_ret_type_vars`/`collect_param_type_vars` put them in the scheme's **quantified**
