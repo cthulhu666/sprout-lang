@@ -1615,6 +1615,13 @@ Effect note for v0:
     `class`, `instance`, `let` or `alias` declaration it depends on; those
     introduce names that must already be in scope, exactly as they must today.
 
+    **Polymorphic recursion is not supported.** A function may not call itself at
+    a different type than the one it was called with, and — unlike in Haskell —
+    writing a type signature does not permit it: a declaration's own name is bound
+    monomorphically inside its own body whether or not it is annotated. The
+    construct is unavailable, not annotation-gated. See
+    `docs/binding-group-inference-v0.md` §8.
+
 > **Enforcement of the effect rules.** Rules 8, 9, 10 and 11 are all **enforced** as of
 > 2026-08-16. `fn shout(s: String) -> Unit = print(s)` is a compile error; an effect
 > annotation is a checked contract, and a missing `!{IO}` now means the compiler has

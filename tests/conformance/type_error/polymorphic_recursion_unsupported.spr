@@ -1,0 +1,29 @@
+module main
+
+# Pins a KNOWN LIMITATION, not a desired behaviour: polymorphic recursion is
+# rejected, and — unlike in Haskell — writing the full signature does not permit
+# it. See docs/binding-group-inference-v0.md §8 and the BACKLOG entry.
+#
+# `fn_body_env` binds a declaration's own name inside its own body to
+# `types.mono(inst_type)`, unconditionally, whether or not a signature was
+# written. So the self-call is forced to the enclosing declaration's type, and
+# `a` gets unified with `(a, a)` — which is what the occurs-check error below
+# actually is.
+#
+# Nothing else here is at fault, which is the useful half of the diagnosis: the
+# non-uniform datatype registers fine, and the identical signature on a
+# non-recursive function generalizes to `forall a. main.Nest a -> Int` and is
+# usable at both `Nest Int` and `Nest (Int, Int)` from another binding group.
+#
+# WHEN THIS IS FIXED, this file moves to tests/conformance/run/ with a `.out`.
+type Nest a =
+  | NestNil
+  | NestCons a (Nest(a, a))
+
+fn nest_size(n: Nest a) -> Int =
+  match n with
+  | NestNil -> 0
+  | NestCons _ rest -> 1 + 2 * nest_size(rest)
+
+fn main() -> Unit !{IO} =
+  print(nest_size(NestCons(1, NestCons((2, 3), NestNil))))
