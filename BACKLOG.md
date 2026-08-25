@@ -745,20 +745,44 @@ Legend:
   rejected with `Call type mismatch: Int vs String`, and accepted when `fwd` is moved above.
   Measured 2026-08-24; `docs/binding-group-inference-v0.md` §7.2. This only ever REJECTS — it
   cannot accept a program it should not — so it is a completeness gap, not a soundness one.
-  **Scope:** collect each `FnDecl`'s referenced top-level names, partition into SCCs, check in
-  topological order, and generalize per group rather than per declaration. Reusable machinery
-  already exists: `ast_to_ir.mutual_reaches` (`:6471`) is a generic BFS over a `Dict Set` with no
-  TCO assumptions; `pb_scc_collect`/`pb_scc_of` (`:6721`, `:6638`) are the SCC walk but are
-  interleaved with TCO filters (`pb_all_ret_ok`, `pb_heterogeneous`) and need a bare
-  `sccs_in_order(order, graph)` pulled out — which also shrinks one cluster of the
-  "five implementations of which-names-does-this-bind" item. The name collector is new:
+  **The group machinery already exists and is inert. 2026-08-25** — `infer.sprout` now walks
+  binding groups: `group_plan(decls) -> List (List Int)` returns groups of declaration indices in
+  CHECK order, `typecheck_groups` walks them, `typecheck_fn_group` infers every member against
+  one fixed env with the substitution threaded between them, `commit_group_members` generalizes
+  the whole group at its boundary, and `typed_decls_in_source_order` re-keys the output so no
+  plan can move emitted code. `group_plan` currently returns one group per declaration in source
+  order, and every `FnDecl` is routed through the group path at size one, so the machinery runs
+  on every function in the tree while remaining provably inert (60/60 golden files byte-identical
+  between the old and new compilers). **All that is left is replacing `group_plan`'s body**, plus
+  fixtures for the N>=2 fold, which is the one part group size one does not exercise.
+  **Correction to the "reusable machinery" note below, which was wrong.** `pb_scc_of` (`:6638`)
+  does not scale here: it computes an SCC by calling `mutual_reaches(f,g) && mutual_reaches(g,f)`
+  **pairwise** over every candidate, i.e. 2n graph searches per function. That is fine on the TCO
+  path, where the node set is a handful of tail-callers. The `compile_driver` bundle has **3,050**
+  top-level declarations (measured 2026-08-25 via `--phase bundle`), where pairwise reachability
+  is O(n^2 (V+E)) and unusable. This needs a real linear-time SCC — Tarjan or Kosaraju — written
+  **iteratively**: a recursive DFS 3,050 frames deep would hit the limit `stack-overflow-smoke`
+  exists to police. `mutual_reaches` itself is still fine as a one-off reachability query; it is
+  the pairwise *use* of it that does not scale.
+  **Scope:** collect each `FnDecl`'s referenced top-level names, partition into SCCs, and return
+  them from `group_plan` in topological order. The name collector is new:
   `bundler.unresolved_in_expr` (`bundler.sprout:1584`) is the right AST level and walk shape but
   *searches* (`Maybe String`) rather than accumulating, and `ast_to_ir.compute_free_vars` is over
-  `typed_ast.TypedExpr`, i.e. post-inference, so it is not reusable.
-  **Hazard:** `typecheck_decls_inner` accumulates typed declarations in processing order and
-  reverses at the end, so reordering naively moves emitted code. Check in group order, **emit in
-  source order**, and assert that with `just ir-golden-diff` — the current change moves 0 bytes
-  of IR and that should stay true.
+  `typed_ast.TypedExpr`, i.e. post-inference, so it is not reusable. Shadowing must be handled —
+  a lambda parameter or local `let` named like a top-level function is not an edge. **Under**-
+  approximating an edge is the dangerous direction: it reproduces the bug this all fixed, wearing
+  a different hat. Over-approximating only merges groups, costing generalization, not soundness.
+  **Two constraints on any plan**, both recorded in `group_plan`'s own comment:
+  (1) a `FnDecl` may not be ordered above a `RecordDecl`, `ClassDecl`, `InstanceDecl` or
+  `LetDecl` it depends on — those four are registered by `typecheck_decl` as it walks, NOT by
+  `pre_scan_fn_decls`, so they are barriers until `pre_scan` learns to register them
+  (`TypeDecl`/`WrapDecl`/`AliasDecl` ARE pre-scanned and may be crossed); (2) groups must
+  partition `0..n-1` exactly once — a missing index silently drops a declaration from the emitted
+  program, a duplicated one emits it twice.
+  **Open sub-question: top-level `let`.** Pre-scanning a `LetDecl` means inferring its RHS, which
+  is the circularity group inference exists to resolve. Haskell puts pattern bindings in the
+  dependency analysis proper (Report §4.5.1), which here would make a top-level `let` a group
+  member subject to the value restriction. Decide this before claiming the barriers are gone.
   Once this lands, polymorphic recursion is the only place a top-level annotation is required
   (`docs/binding-group-inference-v0.md` §8), and `spec-v0.md` §7 rule 16's closing
   "Order dependence (v0 limitation)" paragraph comes out.
