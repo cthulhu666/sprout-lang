@@ -484,20 +484,20 @@ _test-stdlib stage dirs="tests/stdlib tests/stdlib/compiler":
 # Stage-1: emit IR → clang link → run for each test file. Full suite (core + compiler);
 # this is the local/master gate — keep it running BOTH dirs (DoD #5, `just test`).
 [group('test')]
-test-stdlib-stage1: (_test-stdlib "build/compile_driver_bin_stage1")
+test-stdlib-stage1: bootstrap-from-seed (_test-stdlib "build/compile_driver_bin_stage1")
 
 # Stage-1, core only (tests/stdlib/*, excluding the tests/stdlib/compiler/ subdir).
 # CI runs this on every PR; the compiler subdir is gated on compiler-affecting paths
 # (see .github/workflows/ci.yml "Detect compiler-affecting changes"). The glob in
 # _test-stdlib is non-recursive, so "tests/stdlib" does NOT pull in the compiler subdir.
 [group('test')]
-test-stdlib-core-stage1: (_test-stdlib "build/compile_driver_bin_stage1" "tests/stdlib")
+test-stdlib-core-stage1: bootstrap-from-seed (_test-stdlib "build/compile_driver_bin_stage1" "tests/stdlib")
 
 # Stage-1, compiler subdir only (tests/stdlib/compiler/*). The 58 self-hosted-compiler
 # suites each re-bundle the whole compiler (~260k IR lines, ~15s emit); ~61% of the
 # stdlib-test CPU. PR-gated to compiler-affecting paths; always run on master + nightly.
 [group('test')]
-test-stdlib-compiler-stage1: (_test-stdlib "build/compile_driver_bin_stage1" "tests/stdlib/compiler")
+test-stdlib-compiler-stage1: bootstrap-from-seed (_test-stdlib "build/compile_driver_bin_stage1" "tests/stdlib/compiler")
 
 # Stage-2: emit IR → clang link → run for each test file.
 [group('test')]
@@ -712,7 +712,7 @@ _compile-examples stage xfail="" srcs="examples/*.sprout examples/*/*.sprout" la
 # a package root, so examples importing examples.* — e.g. sentry_issue_browser —
 # resolve and compile.)
 [group('examples')]
-compile-examples-stage1: (_compile-examples "build/compile_driver_bin_stage1" "")
+compile-examples-stage1: bootstrap-from-seed (_compile-examples "build/compile_driver_bin_stage1" "")
 
 # Same pipeline over bench/. Until 2026-08-11 NOTHING compiled bench/ — not this
 # file, not `gate`, not CI — so it rotted silently while looking maintained. Two
@@ -727,7 +727,7 @@ compile-examples-stage1: (_compile-examples "build/compile_driver_bin_stage1" ""
 # Benches are compiled and linked, NOT run: they are deliberately long-running, so
 # their value here is that they keep type-checking and lowering as the language moves.
 [group('examples')]
-compile-bench: (_compile-examples "build/compile_driver_bin_stage1" "" "bench/*.sprout bench/*/*.sprout" "bench file")
+compile-bench: bootstrap-from-seed (_compile-examples "build/compile_driver_bin_stage1" "" "bench/*.sprout bench/*/*.sprout" "bench file")
 
 # Negative-diagnostic conformance: each tests/conformance/<dir>/<n>.spr must be
 # rejected by `--phase check` with output containing the substring in <n>.err.
@@ -825,12 +825,12 @@ _test-reject stage dir noun xfail="":
 # family-conflict diagnostics landed in PR-3; missing_nested_instance{,_maybe}
 # via the resolve pass in #110.)
 [group('test')]
-test-type-errors: (_test-reject "build/compile_driver_bin_stage1" "type_error" "type-error" "")
+test-type-errors: bootstrap-from-seed (_test-reject "build/compile_driver_bin_stage1" "type_error" "type-error" "")
 
 # Stage-1 negative parse gate: tests/conformance/parse_error/<n>.spr must be
 # rejected at parse time with the diagnostic substring in <n>.err.
 [group('test')]
-test-parse-errors: (_test-reject "build/compile_driver_bin_stage1" "parse_error" "parse-error" "")
+test-parse-errors: bootstrap-from-seed (_test-reject "build/compile_driver_bin_stage1" "parse_error" "parse-error" "")
 
 # Stage-1 executable-entrypoint gate: a DEFINED `main` with a malformed signature
 # (nonzero args, non-Unit/Int return, pure, or effect-polymorphic) is rejected by
@@ -838,7 +838,7 @@ test-parse-errors: (_test-reject "build/compile_driver_bin_stage1" "parse_error"
 # main needs an explicit executable-vs-library compile mode (a library legitimately
 # has none, e.g. examples/sentry_api.sprout); tracked in BACKLOG §7.3.
 [group('test')]
-test-executable-errors: (_test-reject "build/compile_driver_bin_stage1" "executable_error" "executable-error" "missing_main")
+test-executable-errors: bootstrap-from-seed (_test-reject "build/compile_driver_bin_stage1" "executable_error" "executable-error" "missing_main")
 
 # Stage-2: emit IR → clang link for each example.
 [group('examples')]
@@ -2747,6 +2747,7 @@ ci-fast-gates: bootstrap-from-seed build-fmt-from-seed
     "diagnostic-stream-smoke|diagnostic-stream-smoke"
     "ir-golden-diff|ir-golden-diff"
     "gate-audit|gate-audit"
+    "seed-dep-check|seed-dep-check"
     # Added when Assertion D landed: both had names that CLAIM verification while nothing
     # ran them. c-runtime-test's ten C-level assertions were unrunnable for however long it
     # took someone to try (the runtime split into sprout_scheduler.c/sprout_poll.c broke its
@@ -2919,12 +2920,23 @@ gate-quick: fmt-check test compile-examples-stage1 smoke-shapes bundle-smoke
 # advisory), so it runs in the body rather than as an arg-less dependency.
 # Full CI-parity battery (slow, ~15-25m); a green run means CI will not surprise you.
 [group('gate')]
-gate: fmt-check smoke-shapes bundle-smoke loud-fail-smoke diagnostic-stream-smoke argv-smoke trace-dispatch-smoke verify-dispatch-smoke div-by-zero-smoke stack-overflow-smoke flush-on-crash-smoke tco-runtime-smoke c-runtime-test b1-gate check-approved-builtins check-extern-signatures verify-bootstrap-fixed-point ir-golden-diff windows-ir-gate compile-examples-stage1 compile-bench run-example-canary test lsp-smoke task-io-smoke http-client-binary-gate http-tls-gate test-stress
+gate: seed-dep-check fmt-check smoke-shapes bundle-smoke loud-fail-smoke diagnostic-stream-smoke argv-smoke trace-dispatch-smoke verify-dispatch-smoke div-by-zero-smoke stack-overflow-smoke flush-on-crash-smoke tco-runtime-smoke c-runtime-test b1-gate check-approved-builtins check-extern-signatures verify-bootstrap-fixed-point ir-golden-diff windows-ir-gate compile-examples-stage1 compile-bench run-example-canary test lsp-smoke task-io-smoke http-client-binary-gate http-tls-gate test-stress
   #!/usr/bin/env bash
   set -euo pipefail
   echo "==> gate: gc-safety-check --strict..."
   just gc-safety-check --strict
   echo "==> gate ✓ — full CI-parity battery passed; CI will not surprise you."
+
+# A gate that USES the stage-1 binary must also BUILD it. `_test-stdlib` and
+# `_test-reject` guard the path with `[[ -x ]]` — existence, not freshness — so a
+# gate lacking the `bootstrap-from-seed` dependency runs whatever binary is in
+# build/, which after a branch switch or a `refresh-seed` is the PREVIOUS
+# compiler. Depending on the AGGREGATE does not help: `just` runs dependencies in
+# order, each fully, so members listed before the first one that declares
+# `bootstrap-from-seed` have already run stale. See scripts/seed_dep_check.sh.
+[group('gate')]
+seed-dep-check:
+  bash scripts/seed_dep_check.sh
 
 # Drift guard, two independent assertions:
 #
