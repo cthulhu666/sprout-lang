@@ -1,0 +1,31 @@
+module main
+
+# The SECOND boundary of the polymorphic-recursion rule: the declaration must be
+# constraint-free. This is identical to run/polymorphic_recursion.spr — fully
+# annotated, non-uniform datatype — except for the `where Eq a`, and that alone
+# puts it back on the monomorphic self-binding.
+#
+# The reason is not implementation caution. A `#pos:<k>` constraint token means
+# "generalized at type_vars position k". Under the monomorphic binding type_vars
+# is Nil, `#pos:k` decodes to nothing, and the self-call falls through to the
+# enclosing @fwd markers — it FORWARDS the caller's dictionaries, which is right
+# for a same-type recursive call. Under a quantified binding `#pos:0` decodes to
+# a freshly instantiated variable and resolves against the wrong instance, which
+# returns a wrong ANSWER rather than an error. That regression is pinned by
+# tests/stdlib/compiler/test_typeclass_recursive_forwarding.spr.
+#
+# Lifting this is a constraint-solver feature, not a binding change: a self-call
+# at `Nest (a, a)` under `where Eq a` needs `Eq (a, a)`, a dictionary that does
+# not exist at the call site and has to be deduced against the instance
+# environment. Tracked in BACKLOG.md.
+type Nest a =
+  | NestNil
+  | NestCons a (Nest(a, a))
+
+fn nest_size(n: Nest a) -> Int where Eq a =
+  match n with
+  | NestNil -> 0
+  | NestCons _ rest -> 1 + 2 * nest_size(rest)
+
+fn main() -> Unit !{IO} =
+  print(nest_size(NestCons(1, NestCons((2, 3), NestNil))))

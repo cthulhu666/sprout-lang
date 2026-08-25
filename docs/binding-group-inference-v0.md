@@ -2,8 +2,9 @@
 
 > **Status: complete.** All four parts of §6 are implemented and gated.
 > `docs/spec-v0.md` §7 rule 16 carries the normative rule, and no longer carries
-> an order-dependence carve-out. **Polymorphic recursion remains unsupported, and
-> — corrected 2026-08-25 — an annotation does not enable it (§8).**
+> an order-dependence carve-out. **Polymorphic recursion is supported as of
+> 2026-08-25 for a complete, constraint-free signature (§8)** — §8 also records
+> the two earlier, wrong claims this document made about it.
 
 ## 1. Problem statement
 
@@ -324,69 +325,119 @@ anyway and falls back to source order if it fails: reordering improves
 *completeness*, so losing it degrades diagnostics, whereas dropping a declaration
 corrupts output — worth trading the first for certainty about the second.
 
-## 8. Polymorphic recursion — still unsupported, and an annotation does not help
+## 8. Polymorphic recursion — supported for a complete, constraint-free signature
 
-**Corrected 2026-08-25.** Earlier drafts of this document, and the commit message
-that landed §4.5.1, said polymorphic recursion "requires a signature" and was
-therefore the last place a top-level annotation was needed. That is wrong. Writing
-the signature does not make it compile. The claim was carried from Haskell's rule
-without being run.
+**History, because both earlier versions of this section were wrong and the
+corrections are the useful part.** The first draft said polymorphic recursion
+"requires a signature" and was the last place a top-level annotation was needed —
+carried from Haskell's rule without being run. The second draft corrected that to
+"unsupported, and an annotation does not help", which was true of the compiler as
+it then stood. This third version records the implementation. It also fixes a
+citation both earlier drafts carried: the Haskell text is §4.4.1 (*Type
+Signatures*), not §4.5.2 (*Generalization*) — §4.5.2 is the declaration-group rule
+this document is otherwise about, and polymorphic recursion is a *signature*
+feature.
 
 **Polymorphic recursion** — a function calling itself at a *different* type than
-it was called with — is not inferable in general. Haskell 2010 §4.5.2 gives the
-signature as the way out:
+it was called with — is not inferable. Not "hard": inference for it is equivalent
+to **semi-unification**, which is undecidable (Henglein, *Type inference with
+polymorphic recursion*, TOPLAS 15(2) 253–289, 1993; Kfoury, Tiuryn & Urzyczyn,
+ibid. 290–311). Every language that permits it therefore demands an annotation.
 
-> *"Polymorphic recursion allows the user to supply the more general type
-> signature… a type signature can be used to specify a type more general than the
-> one that would be inferred."*
+### 8.1 Prior art
 
-Sprout does not implement that half. `fn_body_env` binds a function's own name,
-inside its own body, to `types.mono(inst_type)` — **unconditionally**, whether or
-not a signature was written. So a self-call is forced to the same type as the
-enclosing declaration, and the classic shape fails:
+| Language | Rule | Source |
+|---|---|---|
+| **Standard ML** | Forbidden. *"each use of a recursive function in its own body must be assigned the same type"* | [Definition of SML (Revised)](https://smlfamily.github.io/sml97-defn.pdf), rule 26, Comment (26) |
+| **Haskell 2010** | Permitted with a type signature: *"Type signatures can also be used to support polymorphic recursion"* | [Report §4.4.1](https://www.haskell.org/onlinereport/haskell2010/haskellch4.html) |
+| **OCaml** | Permitted with an *explicitly quantified* annotation: `let rec depth : 'a. 'a nested -> int` | [Manual, Polymorphism](https://ocaml.org/manual/5.2/polymorphism.html) |
+| **Sprout before this** | Forbidden — behaviourally identical to SML | — |
+| **Sprout now** | Permitted for a complete, constraint-free signature | §8.2 |
+
+OCaml needs the explicit `'a.` because a bare OCaml annotation is
+unification-variable-typed. Sprout's annotated variables are already rigid, so a
+complete Sprout signature *is* the OCaml explicit form; no new syntax is needed.
+
+### 8.2 The rule
+
+Inside its own body, a declaration's own name is bound to its **declared,
+quantified scheme** when both hold:
+
+1. **The signature is complete** — every parameter annotated *and* the return
+   annotated.
+2. **The declaration is constraint-free** — no `where` clause.
+
+Otherwise it keeps the monomorphic binding, exactly as before. Both conditions
+are forced, not cautious.
+
+**Why (1).** An omitted slot is a `_unann@` placeholder: one variable shared by
+every use of the declaration, deliberately left out of the binder list so that
+pinning it is a commitment rather than a per-call guess (§2). Quantifying a scheme
+that still contains one hands each use its own copy again and re-opens the
+forward-reference soundness hole the placeholder exists to close. The predicate is
+`own_unann_vars(...) == Nil` — the same one the generalization boundary uses.
+
+**Why (2).** A `#pos:<k>` constraint token means "generalized at `type_vars`
+position k". Under the monomorphic binding `type_vars` is `Nil`, `#pos:k` decodes
+to nothing, and the self-call falls through to the enclosing `@fwd` markers — it
+**forwards the caller's dictionaries**, which is right for a same-type recursive
+call. That fallback is load-bearing. Bind the declared scheme and `#pos:0` decodes
+successfully, to a *freshly instantiated* variable, which resolves against the
+wrong instance and returns a **wrong answer rather than an error**. Caught by
+`tests/stdlib/compiler/test_typeclass_recursive_forwarding.spr` during
+implementation, not by inspection.
+
+Lifting (2) is a constraint-solver feature, not a different binding: a self-call
+at `Nest (a, a)` under `where Eq a` needs `Eq (a, a)`, a dictionary that does not
+exist at the call site and has to be deduced against the instance environment —
+what GHC does, and what it reports as *"Could not deduce"* when it cannot.
+Tracked in `BACKLOG.md`.
+
+### 8.3 What works
 
 ```sprout
-# A "nested" (non-uniform) datatype: each tail holds PAIRS of what the head held.
 type Nest a =
   | NestNil
   | NestCons a (Nest (a, a))
 
-# Called at `Nest a`, calls itself at `Nest (a, a)`.
 fn nest_size(n: Nest a) -> Int =
   match n with
   | NestNil -> 0
   | NestCons _ rest -> 1 + 2 * nest_size(rest)
 ```
 ```
-15:41: ERROR: check: Call type mismatch:
-  Infinite type: $t2143 occurs in ($t2143, $t2143) in function main.nest_size
+main.nest_size : forall a. main.Nest a -> Int
 ```
 
-That occurs-check failure *is* the monomorphic self-binding: `a` unified with
-`(a, a)`.
+**Mutual** polymorphic recursion works too, and the reason is worth recording
+because the obvious guess is wrong. Two mutually recursive functions sit in ONE
+binding group, and a group's members share monomorphic assumptions while it is
+checked (§4.5.2) — which suggests a peer should look monomorphic from inside.
+It does not: `pre_scan_fn_decls` publishes each declaration's *declared* scheme
+before the group is walked, so a fully annotated group member is visible to its
+peers already quantified. The shared-assumption rule bites only through `_unann@`
+placeholders, and a complete signature leaves none. An annotation is a promise
+available to the whole group, not merely to callers outside it.
 
-Neither the datatype nor generalization is at fault, which is worth showing
-because it localises the defect precisely. The same signature on a function that
-does **not** call itself is accepted, generalized, and usable at two different
-instantiations from another binding group:
+Fixtures: `tests/conformance/run/polymorphic_recursion{,_mutual}.spr`, and the two
+boundaries at `tests/conformance/type_error/polymorphic_recursion_{partial,constrained}.spr`.
+
+### 8.4 A latent effect bug this fixed
+
+`types.mono` hardcodes `EffectPure`, and `call_effect_of` reads a scheme's effect
+field only when `argc <= 0`. So a **nullary** self-call took its effect from a
+scheme that claimed purity regardless of the declaration:
 
 ```
-main.shallow : forall a. main.Nest a -> Int      # used at Nest Int AND Nest (Int, Int)
+fn spin() -> Unit !{IO} = spin()
+
+before:  effect ok main.spin: declared !{IO}, inferred pure
+after:   effect ok main.spin: declared !{IO}, inferred !{IO}
 ```
 
-Only the self-call fails.
-
-**The fix is the standard one**, and it is small: when a declaration has a
-*complete* signature — every parameter annotated and the return annotated — bind
-its own name inside its body to the declared, generalized scheme instead of to the
-monomorphic instantiation. A complete signature is a promise the caller already
-relies on; there is no reason the body may not rely on it too. The monomorphic
-binding must stay for any declaration with an omitted slot, because that is where
-the placeholder lives and the whole of §2 applies. Tracked in `BACKLOG.md`.
-
-Until that lands, the honest statement of `README.md:43` is: inference needs no
-annotations anywhere it can succeed, and the one construct it cannot express is
-unavailable rather than annotation-gated.
+The direction is safe by construction: a "gap" is *declared pure, inferred
+`!{IO}`*, and for this mechanism to create one a declaration would have to be both
+impure and pure at once.
 
 ## 9. Risks and how they were checked
 

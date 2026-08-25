@@ -1,0 +1,30 @@
+module main
+
+# Polymorphic recursion over a NON-UNIFORM (nested) datatype: each tail holds
+# PAIRS of what the head held, so `nest_size` is called at `Nest a` and calls
+# itself at `Nest (a, a)`. No single monomorphic type covers both, which is why
+# Hindley-Milner cannot infer this and why every language that permits it demands
+# a signature first — inference for polymorphic recursion is equivalent to
+# semi-unification, which is undecidable (Henglein, TOPLAS 15(2) 253-289, 1993).
+#
+# The signature is what makes it legal here: a declaration whose parameters and
+# return type are ALL annotated is bound to its own declared, quantified scheme
+# inside its own body, so each self-call instantiates fresh. Omit any slot and
+# the binding stays monomorphic — see type_error/polymorphic_recursion_partial.
+#
+# Prior art: Haskell 2010 Report §4.4.1 ("Type signatures can also be used to
+# support polymorphic recursion"); OCaml requires the explicitly quantified form
+# `let rec depth : 'a. 'a nested -> int`. Standard ML forbids it outright — the
+# Definition's rule 26 Comment says "each use of a recursive function in its own
+# body must be assigned the same type", which is what Sprout did before this.
+type Nest a =
+  | NestNil
+  | NestCons a (Nest(a, a))
+
+fn nest_size(n: Nest a) -> Int =
+  match n with
+  | NestNil -> 0
+  | NestCons _ rest -> 1 + 2 * nest_size(rest)
+
+fn main() -> Unit !{IO} =
+  print(nest_size(NestCons(1, NestCons((2, 3), NestNil))))
