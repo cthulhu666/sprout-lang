@@ -770,34 +770,51 @@ Legend:
   This corrects the note that said aliases could be crossed.
   `spec-v0.md` §7 rule 16's "Order dependence (v0 limitation)" paragraph is gone, replaced by
   "Declaration order is not significant". Design: `docs/binding-group-inference-v0.md` §7.3.
-- [ ] `P2` **Polymorphic recursion is unsupported, and a type signature does not enable it.**
-  A function calling itself at a *different* type than it was called with is rejected even when
-  fully annotated. `fn_body_env` binds a declaration's own name inside its own body to
-  `types.mono(inst_type)` — **unconditionally**, whether or not a signature was written — so the
-  self-call is forced to the enclosing declaration's type. Haskell 2010 §4.5.2 makes the
-  signature the way out (*"a type signature can be used to specify a type more general than the
-  one that would be inferred"*); Sprout implements the monomorphic half and not that one.
-  Measured 2026-08-25 on the canonical non-uniform datatype
-  (`type Nest a = | NestNil | NestCons a (Nest (a, a))`), with a complete signature:
-  ``Call type mismatch: Infinite type: $t2143 occurs in ($t2143, $t2143) in function
-  main.nest_size`` — the occurs-check failure IS `a` unified with `(a, a)`.
-  **The defect is localised.** The datatype registers fine, and the identical signature on a
-  NON-recursive function is accepted, generalized to `forall a. main.Nest a -> Int`, and used at
-  both `Nest Int` and `Nest (Int, Int)` from another binding group. Only the self-call fails.
-  **Fix:** when a declaration has a COMPLETE signature — every parameter annotated and the return
-  annotated — bind its own name in its body to the declared, generalized scheme rather than to
-  `types.mono(inst_type)`. A complete signature is a promise the caller already relies on. The
-  monomorphic binding must stay for any declaration with an omitted slot: that is where the
-  placeholder lives, and the whole of the `_unann` fix depends on it.
-  **Care needed:** `fn_body_env`'s self-binding carries the constraint field (§13.3(B) S4) so a
-  recursive self-call injects forwarded dictionaries from the Scheme; the replacement must keep
-  that. And `rigidity_violation` already enforces that written variables stay abstract in the
-  body, so the two should compose — but that is an expectation, not a measurement.
-  **Correction this filing makes:** the commit that landed §4.5.1 and earlier drafts of
-  `docs/binding-group-inference-v0.md` said polymorphic recursion "requires a signature" and was
-  the last place a top-level annotation was needed. Both were wrong — carried from Haskell's rule
-  without being run. `spec-v0.md` §7 rule 16 and the design doc §8 now say the construct is
-  unavailable rather than annotation-gated.
+- [x] `P2` **Polymorphic recursion is unsupported, and a type signature does not enable it.
+  DONE 2026-08-25** — a declaration whose parameters and return are ALL annotated and which has
+  no `where` clause is now bound, inside its own body, to its declared quantified scheme, so it
+  may call itself at an instance of its own type. `fn nest_size(n: Nest a) -> Int` over
+  `type Nest a = | NestNil | NestCons a (Nest (a, a))` typechecks as
+  `forall a. main.Nest a -> Int` and runs. Mutual polymorphic recursion works too.
+  Implementation is one predicate, `infer.self_binding_scheme`; the "complete signature" test
+  was already written as `own_unann_vars(...) == Nil`.
+  **The constraint-free condition was NOT in the plan and is a real limit.** `where Eq a` puts a
+  declaration back on the monomorphic binding. A `#pos:<k>` constraint token means "generalized
+  at type_vars position k"; under the monomorphic binding type_vars is Nil, `#pos:k` decodes to
+  nothing, and the self-call falls through to the enclosing `@fwd` markers — i.e. it FORWARDS
+  the caller's dictionaries, which is correct for a same-type recursive call. That fallback is
+  load-bearing. Under a quantified binding `#pos:0` decodes to a freshly instantiated variable
+  and resolves against the wrong instance, returning a WRONG ANSWER rather than an error. Found
+  by `tests/stdlib/compiler/test_typeclass_recursive_forwarding.spr` failing, not by inspection —
+  the risk had been written down beforehand as "must be measured, not asserted", and measuring
+  is what caught it.
+  **A latent effect bug fell out.** `types.mono` hardcodes `EffectPure` and `call_effect_of`
+  reads a scheme's effect only when `argc <= 0`, so a NULLARY self-call took its effect from a
+  scheme claiming purity: `fn spin() -> Unit !{IO} = spin()` reported `declared !{IO}, inferred
+  pure` before and `inferred !{IO}` after. Safe by construction — a gap is "declared pure,
+  inferred !{IO}", which this mechanism cannot create.
+  **Measured, not argued:** 60/60 golden IR files byte-identical after a reseed (with the seed
+  diff non-empty and `self_binding_scheme` present in it — both halves of the AGENTS.md §12
+  proof); full `just test` green; `conformance/run` 43 -> 45.
+  Corrects a citation carried by the design doc and the previous form of this entry: the Haskell
+  text is Report **§4.4.1** (Type Signatures), not §4.5.2 (Generalization).
+  Spec: §7 rule 16. Design: `docs/binding-group-inference-v0.md` §8.
+- [ ] `P2` **Allow polymorphic recursion for a CONSTRAINED declaration (`where` clause).**
+  Today a complete signature enables polymorphic recursion only when the declaration has no
+  constraints; `fn f(n: Nest a) -> Int where Eq a` stays monomorphically recursive and reports
+  the occurs check. Pinned by `tests/conformance/type_error/polymorphic_recursion_constrained.spr`,
+  which moves to `run/` when this lands.
+  This is a constraint-solver feature, not a different self-binding — that was measured: binding
+  the quantified scheme for a constrained declaration makes `#pos:<k>` decode to a freshly
+  instantiated variable and silently select the wrong instance (see the entry above). A self-call
+  at `Nest (a, a)` under `where Eq a` genuinely needs `Eq (a, a)`, a dictionary that does not
+  exist at the call site and must be deduced against the instance environment. GHC does exactly
+  this and reports "Could not deduce" when it cannot; Sprout has no such deduction step for an
+  instantiated constraint at a recursive call. Scope: resolve the instantiated constraint against
+  the instance environment at the self-call, fall back to forwarding when the instantiation is
+  the identity (the common same-type case, which must not regress), and produce a real diagnostic
+  rather than a wrong answer when neither applies.
+
 - [ ] `P3` **Make a top-level `let` visible above its own declaration.** Forward-referencing one
   is `Unknown variable: main.cfg` today (measured 2026-08-25) — `pre_scan_fn_decls` has no
   `LetDecl` arm, so the name is simply not in scope above its declaration. This is NOT a

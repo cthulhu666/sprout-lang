@@ -1,0 +1,34 @@
+module main
+
+# MUTUAL polymorphic recursion: `size_a` calls `size_b` at `Nest (a, a)` and back
+# again, so neither can be typed at a single monomorphic type. Both generalize to
+# `forall a. main.Nest a -> Int`.
+#
+# Worth pinning because the reason it works is not obvious, and the obvious guess
+# is wrong. These two sit in ONE binding group, and a group's members share
+# monomorphic assumptions while it is being checked (Haskell 2010 §4.5.2) — which
+# suggests `size_b` should look monomorphic from inside `size_a`. It does not:
+# `pre_scan_fn_decls` publishes each declaration's DECLARED scheme into the
+# environment before the group is walked, so a fully annotated group member is
+# visible to its peers already quantified. The shared-assumption rule bites only
+# through `_unann@` placeholders, and a complete signature leaves none.
+#
+# So the annotation is a promise available to the whole group, not merely to
+# callers outside it — which is also why the group-ordering work (§4.5.1) did not
+# need to know about this case.
+type Nest a =
+  | NestNil
+  | NestCons a (Nest(a, a))
+
+fn size_a(n: Nest a) -> Int =
+  match n with
+  | NestNil -> 0
+  | NestCons _ rest -> 1 + size_b(rest)
+
+fn size_b(n: Nest a) -> Int =
+  match n with
+  | NestNil -> 0
+  | NestCons _ rest -> 1 + size_a(rest)
+
+fn main() -> Unit !{IO} =
+  print(size_a(NestCons(1, NestCons((2, 3), NestNil))))

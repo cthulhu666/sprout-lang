@@ -1615,12 +1615,20 @@ Effect note for v0:
     `class`, `instance`, `let` or `alias` declaration it depends on; those
     introduce names that must already be in scope, exactly as they must today.
 
-    **Polymorphic recursion is not supported.** A function may not call itself at
-    a different type than the one it was called with, and — unlike in Haskell —
-    writing a type signature does not permit it: a declaration's own name is bound
-    monomorphically inside its own body whether or not it is annotated. The
-    construct is unavailable, not annotation-gated. See
-    `docs/binding-group-inference-v0.md` §8.
+    **Polymorphic recursion requires a complete, constraint-free signature.** A
+    function may call itself at a *different* type than the one it was called with
+    only when every parameter is annotated, the return type is annotated, and the
+    declaration has no `where` clause; then its own name is bound, inside its own
+    body, to its declared quantified scheme. Omit any annotation, or add a
+    constraint, and the name is bound monomorphically inside its own body — a
+    self-call must then have the enclosing declaration's exact type. The
+    restriction is not a v0 limitation: inference for polymorphic recursion is
+    undecidable, so an annotation is required here as it is in Haskell (Report
+    §4.4.1) and OCaml, while Standard ML declines the construct entirely. Mutual
+    recursion is included: a group member with a complete signature is visible to
+    its peers already quantified. See `docs/binding-group-inference-v0.md` §8 for
+    the constraint-free condition, which is a dictionary-forwarding requirement
+    rather than a typing one.
 
 > **Enforcement of the effect rules.** Rules 8, 9, 10 and 11 are all **enforced** as of
 > 2026-08-16. `fn shout(s: String) -> Unit = print(s)` is a compile error; an effect

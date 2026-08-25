@@ -8289,7 +8289,9 @@ fn check_fn_body(
         # §13.3(B) S4: the recursion self-binding carries the constraint field
         # (fn_body_env), so recursive self-calls inject dicts from the Scheme —
         # no @constrained_N self markers to seed. fwd_env holds only @fwd/@eta_fwd.
-        let body_env = fn_body_env(name, params, inst_type, constraint_source_tokens(constraints), fwd_env)
+        let body_env = fn_body_env(name, params, inst_type,
+          self_binding_scheme(name, params, ret_type_maybe, decl_scheme, inst_type, constraint_source_tokens(constraints)),
+          fwd_env)
         InferOk typed_body0 s1 es1 body_eff <- typecheck_fn_body(state, body_env, subst, eff_subst, body, ret_type_maybe, fn_return_type(inst_type, list_length(params))) else InferErr pos msg -> (fn_body_err(name, pos, msg), dict_empty(), Nil, subst)
         let unifier.UnifyOk s2a es2a = unifier.unify_types(s1, es1, typed_ast.typed_expr_type(typed_body0), fn_return_type(inst_type, list_length(params))) else unifier.UnifyErr e -> (return_mismatch_body_err(name, typed_body0, fn_return_type(inst_type, list_length(params)), s1, "Return type mismatch in " ++ name ++ ": " ++ e), dict_empty(), Nil, subst)
         # The declaration boundary: the one place that holds both the declared
@@ -8437,12 +8439,76 @@ fn canonicalize_constrained_constraints_acc(
 # tokens) so a recursive self-call injects its forwarded dicts from the Scheme
 # field, via the same resolve_field_constraint → @fwd path a generalized external
 # call uses — retiring the body-local @constrained_N self markers.
-fn fn_body_env(name: String, params: List ast.Param, inst_type: types.Type, constraints: List (String, String), env: Dict types.Scheme) -> Dict types.Scheme =
+fn fn_body_env(name: String, params: List ast.Param, inst_type: types.Type, self_scheme: types.Scheme, env: Dict types.Scheme) -> Dict types.Scheme =
   extend_env_with_params(
     params,
     ctor_param_types(inst_type),
-    dict_set(name, types.scheme_with_constraints(types.mono(inst_type), constraints), env)
+    dict_set(name, self_scheme, env)
   )
+
+# What a declaration's own name means INSIDE its own body — the single decision
+# that separates monomorphic from polymorphic recursion.
+#
+# A COMPLETE signature (every parameter annotated AND the return annotated) binds
+# the declared, quantified scheme, so each self-call instantiates fresh and the
+# function may call itself at an INSTANCE of its declared type. That is
+# polymorphic recursion, and it is the only way to type a non-uniform datatype:
+#
+#   type Nest a = | NestNil | NestCons a (Nest (a, a))
+#   fn nest_size(n: Nest a) -> Int = ...  nest_size(rest)   # rest : Nest (a, a)
+#
+# Anything less than a complete signature keeps the monomorphic binding, and the
+# boundary is not caution — it is forced. An omitted slot is a `_unann@`
+# placeholder: ONE variable shared by every use of the declaration, deliberately
+# left out of the binder list so that pinning it is a commitment rather than a
+# per-call guess. Quantifying a scheme that still contains one would hand each
+# use its own copy again and re-open the forward-reference soundness hole the
+# placeholder exists to close. `own_unann_vars` returning Nil is exactly the
+# "no placeholders left" test, and it is the same predicate the generalization
+# boundary already uses.
+#
+# Why a signature is REQUIRED rather than merely sufficient: inference for
+# polymorphic recursion is equivalent to semi-unification, which is undecidable
+# (Henglein, TOPLAS 15(2) 253-289, 1993; Kfoury-Tiuryn-Urzyczyn, ibid. 290-311).
+# Every language that permits it demands the annotation for this reason —
+# Haskell 2010 §4.4.1, and OCaml via the explicitly quantified `let rec f : 'a. …`.
+# Standard ML declines instead: the Definition's rule 26 Comment requires that
+# "each use of a recursive function in its own body must be assigned the same
+# type", which is precisely the branch below.
+# The declaration must also be CONSTRAINT-FREE, and that second condition is a
+# real limit on the feature rather than caution about the implementation.
+#
+# A `#pos:<k>` constraint token means "this constraint's variable is generalized
+# at type_vars position k". Under the monomorphic binding type_vars is Nil, so
+# `#pos:k` decodes to nothing and the self-call falls through to the enclosing
+# @fwd markers — i.e. it FORWARDS the caller's dictionaries, which is exactly
+# right for a same-type recursive call. Bind the declared scheme and type_vars
+# becomes the declared list, so `#pos:0` now decodes — to a freshly instantiated
+# variable, which resolves against the wrong instance and returns a wrong ANSWER
+# rather than an error. Regression that caught it:
+# tests/stdlib/compiler/test_typeclass_recursive_forwarding.spr, "recursive call
+# forwards distinct Eq a and Eq b dictionaries".
+#
+# Lifting this needs more than a different binding. A self-call at `Nest (a, a)`
+# under `where Eq a` requires `Eq (a, a)` — a dictionary that does not exist at
+# the call site and cannot be built without resolving the instantiated constraint
+# against the instance environment (what GHC does, and what it reports as "Could
+# not deduce" when it fails). That is a constraint-solver feature; it is tracked
+# in BACKLOG.md rather than approximated here.
+fn self_binding_scheme(
+  name: String,
+  params: List ast.Param,
+  ret_type_maybe: Maybe ast.TypeExpr,
+  decl_scheme: types.Scheme,
+  inst_type: types.Type,
+  constraints: List (String, String)
+) -> types.Scheme =
+  match constraints with
+  | [_ | _] -> types.scheme_with_constraints(types.mono(inst_type), constraints)
+  | Nil ->
+      match own_unann_vars(name, params, ret_type_maybe) with
+      | Nil -> decl_scheme
+      | [_ | _] -> types.mono(inst_type)
 
 fn fn_body_err(name: String, pos: source.SourcePos, msg: String) -> typed_ast.BodyResult =
   # Previously: if `is_unknown_ref(msg)` returned BodyLenient, which caused

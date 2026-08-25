@@ -1,0 +1,29 @@
+module main
+
+# The BOUNDARY of the polymorphic-recursion rule, and the reason it is safe.
+#
+# `nest_size` here is identical to run/polymorphic_recursion.spr except that the
+# RETURN type is omitted. A declaration with any unannotated slot keeps the
+# monomorphic self-binding, because that slot is a `_unann@` placeholder — one
+# variable shared by every use of the declaration, deliberately NOT quantified,
+# so that pinning it is a commitment rather than a per-call guess. Quantifying a
+# scheme that still contains one would re-open the forward-reference soundness
+# hole that `_unann` exists to close (clean compile, then SIGSEGV).
+#
+# So this must stay rejected, and with the same occurs-check diagnostic the fully
+# annotated version produced before it was allowed: `a` unified with `(a, a)`.
+#
+# Undecidability is the deeper reason there is no third option here — inference
+# for polymorphic recursion is equivalent to semi-unification (Henglein, TOPLAS
+# 15(2) 253-289, 1993), so "just infer it" is not available at any price.
+type Nest a =
+  | NestNil
+  | NestCons a (Nest(a, a))
+
+fn nest_size(n: Nest a) =
+  match n with
+  | NestNil -> 0
+  | NestCons _ rest -> 1 + 2 * nest_size(rest)
+
+fn main() -> Unit !{IO} =
+  print(nest_size(NestCons(1, NestCons((2, 3), NestNil))))
