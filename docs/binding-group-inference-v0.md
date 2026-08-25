@@ -1,10 +1,9 @@
 # Binding-group inference — completing Hindley–Milner at the top level (v0)
 
-> **Status: the soundness half is implemented and gated. The completeness half has
-> its machinery in place (§7.3) but is not yet switched on — `group_plan` still
-> returns one group per declaration in source order.** §6 describes the design; §7
-> records exactly which parts landed and what the remainder still costs, measured
-> rather than estimated. `docs/spec-v0.md` §7 rule 16 carries the normative rule.
+> **Status: complete.** All four parts of §6 are implemented and gated. The one
+> case that still requires an annotation is polymorphic recursion (§8), which is
+> not inferable in general. `docs/spec-v0.md` §7 rule 16 carries the normative
+> rule, and no longer carries an order-dependence carve-out.
 
 ## 1. Problem statement
 
@@ -179,7 +178,7 @@ generalizes at its own boundary in **source** order.
 
 | Part | Status |
 |---|---|
-| 1. Dependency analysis | **Seam in place, plan not yet dependency-ordered.** `group_plan` returns one group per declaration in source order; see §7.3 |
+| 1. Dependency analysis | **Landed.** `referenced_names` builds the edge set, `sccs_in_dependency_order` partitions it (iterative Kosaraju), `group_plan` returns the components dependencies-first; see §7.3 |
 | 2. Monomorphic per-declaration assumptions | **Landed.** `unann_ret_var` / `unann_param_var` mint `_unann@<owner>` and `_unann@<owner>/<param>`; the collectors no longer put them in the binder list, so `instantiate` leaves them alone and every use shares one variable |
 | 3. Shared substitution | **Landed.** `check_fn_body` returns its final substitution, `TypedDeclOk` gained a fourth field, and `typecheck_decls_inner` threads it |
 | 4. Generalization boundary | **Landed.** `own_unann_vars` subtracts the declaration's own placeholders from `env_ftv` at its generalization point — see §7.1, the part that is easy to get wrong |
@@ -216,11 +215,12 @@ Regression: `tests/stdlib/compiler/test_compiler.spr`, which already asserted
 `fn id(x) = x` is `forall a. a -> a` and `fn double(x) = x * 2` is `Int -> Int`.
 Those two assertions caught this on the first full run.
 
-### 7.2 The residual gap, measured
+### 7.2 The gap that dependency ordering closed
 
-Without dependency analysis, an unannotated function that is **forward**-
-referenced is monomorphic at its uses, because those uses are inferred before its
-own body pins it. Measured on the landed compiler — the same program, twice, with
+Making the placeholder monomorphic fixed the soundness hole but left a
+completeness one: an unannotated function that was **forward**-referenced stayed
+monomorphic at its uses, because those uses were inferred before its own body
+pinned it. Measured on the intermediate compiler — the same program, twice, with
 only the declaration order changed:
 
 ```sprout
@@ -238,54 +238,91 @@ fn fwd(x) = x                                print(fwd("s"))
   in function main.use_two                main.main : Unit !{IO}
 ```
 
-Define-before-use is fully polymorphic; use-before-define is not. This is
-precisely the behaviour HM has without §4.5.1, and it is what OCaml imposes
-unconditionally. It is a *rejection*, never a miscompile, and part 1 removes it.
+Define-before-use was fully polymorphic; use-before-define was not — precisely
+the behaviour HM has without §4.5.1, and what OCaml imposes unconditionally.
 
-Declaration order also still decides **which** declaration reports a conflict —
-probe 1 reports at `summarize`, probe 2 at `report`. Both reject; only the
-location moves.
+Both columns now read `main.fwd : forall a. a -> a`. Two further consequences,
+both pinned as fixtures:
 
-### 7.3 The seam, and why it ships inert
+- **Diagnostics stopped moving.** Probe 1 used to report at `summarize` and its
+  reordered twin at `report`. Both now report at `report` — the code that is
+  actually wrong — with byte-identical text.
+  `type_error/unannotated_forward_return` and `unannotated_backward_return` are
+  the same program in both orders and share one `.err`; they only test anything
+  as a pair, so keep the two files identical.
+- **Mutually recursive unannotated functions generalize symmetrically.** Under
+  per-declaration generalization the first member of a cycle could only quantify
+  its *own* placeholder — a sibling's is a live commitment — so it came out
+  monomorphic, with the internal placeholder name visible in a user-facing type:
 
-Everything §6 describes except part 1 is implemented and running. Groups are
-walked, a group's members share one env and one substitution, and generalization
-happens at the group boundary. What is *not* implemented is the partition:
-`group_plan(decls) -> List (List Int)` returns one group per declaration in
-source order, which is the walk the checker did before groups existed.
+  ```
+  main.ping : Int -> _unann@main.pong/x -> _unann@main.pong/x
+  main.pong : forall a. Int -> a -> a
+  ```
 
-That is deliberate, and it is the whole verification argument. A change to
-inference order cannot be proved by "the tests still pass" — the tests are
-supposed to still pass, and so is a subtly wrong reordering. A change that is
-*supposed to change nothing* can be proved by identity, which is far stronger:
-the old and new compilers emit **byte-identical IR for all 60 golden corpus
-files**, the suite is unchanged, and the bootstrap still reaches its fixed point.
+  Both are now `forall a. Int -> a -> a`.
+  `run/unannotated_mutual_polymorphic` pins it, and it is also the fixture that
+  exercises the N>=2 group fold.
 
-To make that proof cover the machinery rather than step around it, dispatch in
-`typecheck_group` is by declaration *kind*, not group *size* — every `FnDecl` in
-the tree goes through `typecheck_fn_group` at group size one. The only part group
-size one leaves unexercised is the N>=2 fold, and fixtures for it land with the
-partition.
+### 7.3 How the partition is built
 
-**Two constraints any partition must respect**, recorded in `group_plan`'s own
-comment so they cannot be missed by whoever replaces it:
+Landed in two steps on purpose. The first put the group machinery in with
+`group_plan` returning one group per declaration in source order — a change that
+was *supposed to change nothing*, and could therefore be proved by identity
+(byte-identical IR from the old and new compilers on all 60 golden files), which
+is a far stronger check than "the tests still pass". Dispatch in
+`typecheck_group` is by declaration *kind* rather than group *size* so that proof
+covered the machinery instead of stepping around it: every `FnDecl` runs the group
+path, at size one. The second step replaced `group_plan`'s body, leaving a small
+diff whose entire blast radius is the ordering.
 
-1. A `FnDecl` may not be ordered above a `RecordDecl`, `ClassDecl`, `InstanceDecl`
-   or `LetDecl` it depends on. Those four are registered by `typecheck_decl` as it
-   walks, **not** by `pre_scan_fn_decls`, so they are barriers until `pre_scan`
-   learns to register them. `TypeDecl`, `WrapDecl` and `AliasDecl` *are*
-   pre-scanned and may be crossed.
-2. Groups must partition `0..n-1` exactly once. A missing index silently drops a
-   declaration from the emitted program; a duplicated one emits it twice.
+**Barriers.** Only `FnDecl`s are reordered, and only among themselves; every other
+declaration is its own group, in place, and no `FnDecl` crosses it. This is what
+the environments allow rather than caution:
 
-And one algorithmic note, because the obvious candidate does not scale: the
-existing `pb_scc_of` (`ast_to_ir.sprout`) computes an SCC by calling
-`mutual_reaches` **pairwise**, i.e. 2n graph searches per function. That is fine
-for the mutual-TCO pre-pass, whose node set is a handful of tail-callers. The
-`compile_driver` bundle has **3,050** top-level declarations, where pairwise
-reachability is O(n²(V+E)). The partition needs a genuine linear-time SCC, written
-iteratively — a recursive DFS 3,050 frames deep would hit the limit the
-`stack-overflow-smoke` gate exists to police.
+- `RecordDecl`, `ClassDecl`, `InstanceDecl` are registered by `typecheck_decl` as
+  it walks, not by `pre_scan_fn_decls`.
+- A top-level `let` is not pre-scanned either — forward-referencing one is
+  `Unknown variable` today (measured), and this must not change that.
+- `AliasDecl` is a barrier *despite* being pre-scanned. `pre_scan`'s `alias_env`
+  is used only to build schemes inside `pre_scan`; `typecheck_decls` starts the
+  body walk from `qual_env` and re-registers aliases as it goes, so a `FnDecl`
+  checked above an `AliasDecl` would rebuild its own `decl_scheme` against an
+  `alias_env` that has not seen it. An earlier note in `group_plan` claimed
+  aliases could be crossed; reading the two `alias_env` paths says otherwise.
+
+Edges are restricted to the segment between two barriers, which is exact, not an
+approximation: a reference to an earlier segment names something already checked,
+and one to a later segment names something the barrier makes unreachable anyway.
+
+**The edge set.** `referenced_names` walks `ast.Expr` tracking shadowed names
+(lambda parameters, pattern binders, `do let`). `where` and `let … in` need no case
+— the parser desugars both to a single-arm `MatchExpr`. The walk lists every
+`ast.Expr` constructor with **no** `| _ ->` catch-all, because the two ways to be
+wrong are not symmetric: over-approximating merges groups (less general, never
+unsound, and free for the annotated declarations that dominate any program), while
+under-approximating puts a declaration before its dependency, which is the hole
+this all exists to close. A catch-all would fail in the dangerous direction,
+silently, the next time an expression form is added.
+
+**The algorithm.** Iterative Kosaraju, `sccs_in_dependency_order`. Two things ruled
+out the SCC walk that already existed. `pb_scc_of` (`ast_to_ir.sprout`) computes a
+component by calling `mutual_reaches` **pairwise** — 2n graph searches per node —
+which is fine for the mutual-TCO pre-pass and not for this: the largest reorderable
+run in this repo is **551** functions (`infer.sprout` itself, measured
+2026-08-25), where pairwise reachability is around a billion operations on the
+compiler's own hottest file, every build. And it must be iterative: 551 recursive
+DFS frames is the stack the `stack-overflow-smoke` gate exists to police, at a
+depth set by user code rather than by us.
+
+**The invariant.** Groups must partition `0..n-1` exactly once — a missing index
+silently drops a declaration from the emitted program, a duplicate emits it twice.
+It holds by construction (each declaration is a barrier singleton or in exactly one
+segment; an SCC partition covers its nodes) given unique names, which
+`check_duplicate_fn_decls` has already guaranteed. `checked_plan` verifies it
+anyway and falls back to source order if it fails: reordering improves
+*completeness*, so losing it degrades diagnostics, whereas dropping a declaration
+corrupts output — worth trading the first for certainty about the second.
 
 ## 8. The one case HM cannot infer
 
@@ -296,13 +333,17 @@ it was called with — is not inferable in general. Haskell 2010 §4.5.2:
 > signature… a type signature can be used to specify a type more general than the
 > one that would be inferred."*
 
-Once part 1 lands this is the *only* place a top-level annotation is required.
+This is now the *only* place a top-level annotation is required, which is what
+makes `README.md:43`'s "most code needs no annotations" precise rather than
+aspirational.
 
 ## 9. Risks and how they were checked
 
-- **Emitted IR.** The change alters no codegen. Verified: `just ir-golden-diff`
-  reports 0 differences across the golden corpus, run against a **reseeded**
-  stage-1 (per `AGENTS.md`, the gate is vacuous otherwise).
+- **Emitted IR.** No codegen moves, in either step, including after 3,050
+  declarations are reordered by SCC — because groups are *checked* in dependency
+  order and *emitted* in source order (`typed_decls_in_source_order`). Verified:
+  `just ir-golden-diff` reports 0 differences across the golden corpus, run
+  against a **reseeded** stage-1 (per `AGENTS.md`, the gate is vacuous otherwise).
 - **`env_ftv` drift.** §7.1. Guarded by the existential/rigidity suite and by
   `test_compiler.spr`'s generalization assertions.
 - **Dictionary markers.** `@fwd:` / `@eta_fwd:` keys are globally unique against
@@ -329,6 +370,14 @@ Once part 1 lands this is the *only* place a top-level annotation is required.
   stopgaps in Appendix A would have rejected.
 - `tests/conformance/run/unannotated_self_recursion` — probe 6, guarding the
   size-one case that already worked.
+- `tests/conformance/type_error/unannotated_backward_return` — probe 1's twin in
+  the opposite declaration order, sharing one `.err`: the pair is the
+  order-independence test.
+- `tests/conformance/run/unannotated_forward_polymorphic` — an unannotated
+  function used at two types above its own declaration (§7.2).
+- `tests/conformance/run/unannotated_mutual_polymorphic` — symmetric
+  generalization of a mutually recursive unannotated pair, and the fixture that
+  exercises the N>=2 group fold.
 - `tests/stdlib/compiler/test_compiler.spr` — pre-existing, and the guard that
   caught §7.1.
 
@@ -362,5 +411,5 @@ does not do.
 `_unann@<qualified fn name>` and leave it out of the binder list. The intuition
 is right — the placeholder *should* be monomorphic — but a monomorphic variable
 is only meaningful if a substitution spans the declarations that share it. A2 is
-§6 with parts 1, 3 and 4 missing. Adding parts 3 and 4 to it is what landed; part
-1 is what remains.
+§6 with parts 1, 3 and 4 missing; it is where this work started, and the three
+missing parts are what the rest of it added.

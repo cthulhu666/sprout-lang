@@ -1,0 +1,23 @@
+module main
+
+# A mutually recursive, unannotated pair that is also POLYMORPHIC, and used at two
+# different types. Generalizing per declaration cannot type this: the first member
+# is generalized before the second's body has been inferred, so the only thing it
+# can quantify is its own placeholder — a sibling's is a live commitment. Before
+# groups were ordered by dependency, this file produced
+#
+#   main.ping : Int -> _unann@main.pong/x -> _unann@main.pong/x
+#   main.pong : forall a. Int -> a -> a
+#
+# — asymmetric, monomorphic on one side, and leaking an internal placeholder name
+# into a user-facing type. Both members now generalize together at the group
+# boundary, which is what Haskell 2010 §4.5.2 means by "the group".
+fn ping(n: Int, x) = if n == 0 then x else pong(n - 1, x)
+
+fn pong(n: Int, x) = if n == 0 then x else ping(n - 1, x)
+
+fn main() -> Unit !{IO} =
+  do
+    print(ping(3, 42))
+    print(ping(2, "polymorphic"))
+    print(pong(4, 7))

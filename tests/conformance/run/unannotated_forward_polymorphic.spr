@@ -1,0 +1,19 @@
+module main
+
+# An unannotated function used at two different types ABOVE its own declaration.
+#
+# This is the case that stayed broken when the placeholder became monomorphic:
+# with declarations checked in source order, `use_two`'s body was inferred before
+# `fwd`'s, so it met the one shared placeholder rather than a generalized scheme
+# and the second use collided with the first. Moving `fwd` above `use_two` made
+# the identical program compile — the acceptance of a program depended on the
+# order its declarations were written in, which is what §4.5.1 dependency analysis
+# exists to remove.
+fn use_two() -> Unit !{IO} =
+  do
+    print(fwd(1))
+    print(fwd("two"))
+
+fn fwd(x) = x
+
+fn main() -> Unit !{IO} = use_two()
