@@ -2936,7 +2936,7 @@ gate: seed-dep-check fmt-check smoke-shapes bundle-smoke loud-fail-smoke diagnos
 # `bootstrap-from-seed` have already run stale. See scripts/seed_dep_check.sh.
 [group('gate')]
 seed-dep-check:
-  bash scripts/seed_dep_check.sh
+  JUST="{{just_executable()}}" bash scripts/seed_dep_check.sh
 
 # Drift guard, two independent assertions:
 #
