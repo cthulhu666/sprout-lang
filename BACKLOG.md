@@ -735,65 +735,58 @@ Legend:
   different types in one expression — which is a user-visible acceptance change and needs a
   decision, not a unilateral pick. (This is roughly what SCC-ordered inference buys within an
   SCC anyway, at much lower cost.)
-- [ ] `P2` **Order top-level declarations by dependency before inferring them (binding-group
-  inference, part 1).** The `_unann` fix above makes an unannotated declaration's placeholder one
-  shared monomorphic variable, which is Hindley-Milner's rule for a declaration group. What is
-  still missing is Haskell 2010 §4.5.1: *"Hindley-Milner type inference is applied to each
-  declaration group in dependency order."* Without it, generalization happens in **source**
-  order, so an unannotated function used before it is declared is monomorphic at those uses:
-  `fn use_two() -> Unit !{IO} = do { print(fwd(1)); print(fwd("s")) }` above `fn fwd(x) = x` is
-  rejected with `Call type mismatch: Int vs String`, and accepted when `fwd` is moved above.
-  Measured 2026-08-24; `docs/binding-group-inference-v0.md` §7.2. This only ever REJECTS — it
-  cannot accept a program it should not — so it is a completeness gap, not a soundness one.
-  **The group machinery already exists and is inert. 2026-08-25** — `infer.sprout` now walks
-  binding groups: `group_plan(decls) -> List (List Int)` returns groups of declaration indices in
-  CHECK order, `typecheck_groups` walks them, `typecheck_fn_group` infers every member against
-  one fixed env with the substitution threaded between them, `commit_group_members` generalizes
-  the whole group at its boundary, and `typed_decls_in_source_order` re-keys the output so no
-  plan can move emitted code. `group_plan` currently returns one group per declaration in source
-  order, and every `FnDecl` is routed through the group path at size one, so the machinery runs
-  on every function in the tree while remaining provably inert (60/60 golden files byte-identical
-  between the old and new compilers). **All that is left is replacing `group_plan`'s body**, plus
-  fixtures for the N>=2 fold, which is the one part group size one does not exercise.
-  **Correction to the "reusable machinery" note below, which was wrong.** `pb_scc_of` (`:6638`)
-  does not scale here: it computes an SCC by calling `mutual_reaches(f,g) && mutual_reaches(g,f)`
-  **pairwise** over every candidate, i.e. 2n graph searches per function. That is fine on the TCO
-  path, where the node set is a handful of tail-callers. The `compile_driver` bundle has **3,050**
-  top-level declarations (measured 2026-08-25 via `--phase bundle`), where pairwise reachability
-  is O(n^2 (V+E)) and unusable. This needs a real linear-time SCC — Tarjan or Kosaraju — written
-  **iteratively**: a recursive DFS 3,050 frames deep would hit the limit `stack-overflow-smoke`
-  exists to police. `mutual_reaches` itself is still fine as a one-off reachability query; it is
-  the pairwise *use* of it that does not scale.
-  **Scope:** collect each `FnDecl`'s referenced top-level names, partition into SCCs, and return
-  them from `group_plan` in topological order. The name collector is new:
-  `bundler.unresolved_in_expr` (`bundler.sprout:1584`) is the right AST level and walk shape but
-  *searches* (`Maybe String`) rather than accumulating, and `ast_to_ir.compute_free_vars` is over
-  `typed_ast.TypedExpr`, i.e. post-inference, so it is not reusable. Shadowing must be handled —
-  a lambda parameter or local `let` named like a top-level function is not an edge. **Under**-
-  approximating an edge is the dangerous direction: it reproduces the bug this all fixed, wearing
-  a different hat. Over-approximating only merges groups, costing generalization, not soundness.
-  **Two constraints on any plan**, both recorded in `group_plan`'s own comment:
-  (1) a `FnDecl` may not be ordered above a `RecordDecl`, `ClassDecl`, `InstanceDecl` or
-  `LetDecl` it depends on — those four are registered by `typecheck_decl` as it walks, NOT by
-  `pre_scan_fn_decls`, so they are barriers until `pre_scan` learns to register them
-  (`TypeDecl`/`WrapDecl`/`AliasDecl` ARE pre-scanned and may be crossed); (2) groups must
-  partition `0..n-1` exactly once — a missing index silently drops a declaration from the emitted
-  program, a duplicated one emits it twice.
-  **Open sub-question: top-level `let`.** Pre-scanning a `LetDecl` means inferring its RHS, which
-  is the circularity group inference exists to resolve. Haskell puts pattern bindings in the
-  dependency analysis proper (Report §4.5.1), which here would make a top-level `let` a group
-  member subject to the value restriction. Decide this before claiming the barriers are gone.
-  Once this lands, polymorphic recursion is the only place a top-level annotation is required
-  (`docs/binding-group-inference-v0.md` §8), and `spec-v0.md` §7 rule 16's closing
-  "Order dependence (v0 limitation)" paragraph comes out.
-- [ ] `P2` **Does an omitted EFFECT annotation have the `_unann` hole too?** `check_fn_body`
-  computes an effect substitution (`es2a`) and discards it at the declaration boundary — exactly
-  what it used to do with the type substitution, which is what the item above fixed.
-  `typecheck_decls_inner` still passes `eff_subst` through unchanged. Unknown whether the effect
-  side has an analogous unsoundness or whether `effect_from_maybe_labels(Nothing)` being
-  concretely `EffectPure` (rather than a variable) closes it by construction. **Scope:** answer
-  the question with a probe before writing any code; if it is closed by construction, record
-  that here and delete the item. Raised while landing the type-side fix, 2026-08-24.
+- [x] `P2` **Order top-level declarations by dependency before inferring them (binding-group
+  inference, part 1). DONE 2026-08-25** — `group_plan` now partitions FnDecls into strongly
+  connected components and returns them dependencies-first, completing Haskell 2010 §4.5.1
+  alongside the §4.5.2 rule the `_unann` fix landed. Declaration order no longer affects whether
+  a program is accepted, nor which declaration a conflict is reported against. Landed in two
+  steps: `infer: walk binding groups, with a plan that is still one group per declaration` put
+  the machinery in provably inert (byte-identical IR from the old and new compilers on all 60
+  golden files), then this one replaced only `group_plan`'s body.
+  Pieces: `referenced_names` (shadowing-aware walk over `ast.Expr`, exhaustive over every
+  constructor with no `| _ ->` catch-all — under-approximating an edge reproduces the original
+  bug, over-approximating only merges groups); `sccs_in_dependency_order` (iterative Kosaraju);
+  `checked_plan` (verifies the 0..n-1 partition, falls back to source order rather than risk a
+  silently dropped declaration).
+  New fixtures, all RED-verified: `type_error/unannotated_backward_return` (probe 1's twin in the
+  opposite order, sharing one `.err` — the pair IS the order-independence test),
+  `run/unannotated_forward_polymorphic`, `run/unannotated_mutual_polymorphic` (also the fixture
+  that exercises the N>=2 group fold). Two existing `.err` files were updated because the
+  diagnostics improved: both now blame the caller that is actually wrong, and name the callee's
+  real inferred type.
+  **Measurements worth keeping.** The largest reorderable run in this repo is 551 functions
+  (`infer.sprout` itself), which is what ruled out `pb_scc_of`'s pairwise reachability — around a
+  billion operations on the compiler's own hottest file, every build — and forced an iterative
+  algorithm, since 551 recursive DFS frames is the stack `stack-overflow-smoke` polices. The
+  `compile_driver` bundle has 3,050 top-level declarations, and reordering all of them moved
+  **0 bytes** of emitted IR, because groups are checked in dependency order and emitted in source
+  order.
+  **Barriers that remain, by necessity not caution.** Only FnDecls are reordered.
+  `RecordDecl`/`ClassDecl`/`InstanceDecl` are registered by `typecheck_decl` as it walks, not by
+  `pre_scan_fn_decls`. A top-level `let` is not pre-scanned either. And `AliasDecl` is a barrier
+  DESPITE being pre-scanned — `pre_scan`'s `alias_env` is used only inside `pre_scan`, while the
+  body walk starts from `qual_env` and re-registers aliases as it goes, so a FnDecl checked above
+  an `AliasDecl` would rebuild its `decl_scheme` against an `alias_env` that has not seen it.
+  This corrects the note that said aliases could be crossed.
+  `spec-v0.md` §7 rule 16's "Order dependence (v0 limitation)" paragraph is gone, replaced by
+  "Declaration order is not significant". Design: `docs/binding-group-inference-v0.md` §7.3.
+- [ ] `P3` **Make a top-level `let` visible above its own declaration.** Forward-referencing one
+  is `Unknown variable: main.cfg` today (measured 2026-08-25) — `pre_scan_fn_decls` has no
+  `LetDecl` arm, so the name is simply not in scope above its declaration. This is NOT a
+  regression from binding-group inference and never worked; it is filed as the additive feature
+  it would be. Note it is bigger than it looks: pre-scanning a `let` means inferring its RHS,
+  which is the circularity group inference exists to resolve, so the principled form is to make a
+  top-level `let` a group MEMBER subject to the value restriction — which is what Haskell does
+  (Report §4.5.1 covers pattern bindings). Until then `LetDecl` stays a reordering barrier, and
+  `spec-v0.md` §7 rule 16 says so.
+> **Answered 2026-08-25 (was: "does an omitted EFFECT annotation have the `_unann` hole too?").**
+> No, and it cannot: `types.effect_from_labels(Nothing)` returns `EffectPure`, a CONCRETE effect
+> rather than a variable, so an omitted effect annotation is a definite claim of purity and not an
+> inference request. The `_unann` hole needed a quantified *variable* to be refreshed per use;
+> there is no variable here to refresh. Verified on the shape that would have been vulnerable — a
+> forward-declared callee with no effect annotation whose body does IO — which is rejected at the
+> declaration: ``main.helper` performs IO but is declared pure` (spec §7 rule 8, enforced since
+> 2026-08-16). The item is deleted rather than closed, as it asked to be.
 - [x] `P1` **An existential skolem escapes into a top-level scheme through an unannotated return
   (`unifier.sprout:390-410`). FIXED 2026-08-13** — `typecheck_decl` now scans a `FnDecl`'s
   inferred type with the existing `types.type_mentions_skolem` and rejects at the declaration;

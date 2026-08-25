@@ -1606,13 +1606,14 @@ Effect note for v0:
     it is why an unannotated declaration can no longer be given one type by a
     caller and a different one by its own body.
 
-    **Order dependence (v0 limitation).** Groups are not yet ordered by
-    dependency, so generalization happens in source order. An unannotated
-    declaration used *before* it is declared is therefore still monomorphic at
-    those uses: `fn id(x) = x` placed below two calls at different types is
-    rejected, and accepted when placed above them. This only ever rejects; it
-    never accepts a program it should not. See
-    `docs/binding-group-inference-v0.md` §7.2.
+    **Declaration order is not significant.** Top-level declarations are grouped
+    into binding groups — each a minimal set of mutually dependent declarations —
+    and the groups are typed in dependency order, so a declaration is always
+    typed after the declarations it refers to. Moving a declaration within a file
+    cannot change whether the program is accepted, nor which declaration a
+    conflict is reported against. A `fn` may not be moved above a `record`,
+    `class`, `instance`, `let` or `alias` declaration it depends on; those
+    introduce names that must already be in scope, exactly as they must today.
 
 > **Enforcement of the effect rules.** Rules 8, 9, 10 and 11 are all **enforced** as of
 > 2026-08-16. `fn shout(s: String) -> Unit = print(s)` is a compile error; an effect

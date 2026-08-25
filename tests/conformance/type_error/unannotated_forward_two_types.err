@@ -1,1 +1,1 @@
-Return type mismatch in main.use_as_int
+Return type mismatch in main.use_as_string: Type mismatch: Bool vs String

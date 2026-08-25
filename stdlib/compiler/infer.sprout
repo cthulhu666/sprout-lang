@@ -6106,6 +6106,246 @@ fn pre_scan_fn_decls(decls: List ast.Decl, env: Dict types.Scheme, alias_env: Di
       | _ -> pre_scan_fn_decls(rest, env, alias_env)
 
 # ---------------------------------------------------------------------------
+# The dependency graph over top-level declarations
+# ---------------------------------------------------------------------------
+#
+# Every top-level name a body references, restricted to `index` — the FnDecl names
+# this program declares. A name outside the index (a builtin, a constructor, an
+# imported value) contributes no edge, so the graph stays inside the declaration
+# set and needs no separate filtering pass.
+#
+# `bound` carries the value names shadowed at this point: lambda parameters, match
+# and do-bind pattern binders, and `do let` names. A shadowed name is not an edge —
+# `\ map -> map(x)` does not depend on the top-level `map`. Note `where` and
+# `let … in` need no case of their own: the parser desugars both to a single-arm
+# MatchExpr (parser.desugar_where), so their binders arrive as ordinary patterns.
+#
+# **The two ways to be wrong here are not symmetric.** Over-approximating — an edge
+# that is not real — merges two groups, so their members are inferred monomorphically
+# with respect to each other. That is less general but never unsound, and for the
+# annotated declarations that dominate any program it costs nothing at all, since
+# their types come from their signatures either way. UNDER-approximating puts a
+# declaration before its dependency, which is exactly the forward-reference hole
+# binding groups exist to close. When in doubt, include the name.
+#
+# Which is why the walk lists **every** ast.Expr constructor and has no `| _ ->`
+# catch-all. A catch-all would make a newly added expression form contribute no
+# edges — silently, and in the dangerous direction.
+fn referenced_names(e: ast.Expr, bound: Set, index: Set, acc: Set) -> Set =
+  match e with
+  | ast.VarExpr name _ ->
+      if set_member(name, bound) then acc
+      else if set_member(name, index) then set_insert(name, acc)
+      else acc
+  | ast.IntExpr _ _ -> acc
+  | ast.FloatExpr _ _ -> acc
+  | ast.BoolExpr _ _ -> acc
+  | ast.StringExpr _ _ -> acc
+  | ast.CharExpr _ _ -> acc
+  | ast.UnitExpr _ -> acc
+  | ast.StringTemplateExpr parts _ -> referenced_names_template(parts, bound, index, acc)
+  | ast.TupleExpr items _ -> referenced_names_list(items, bound, index, acc)
+  | ast.IfExpr cond th el _ ->
+      referenced_names(el, bound, index,
+        referenced_names(th, bound, index,
+          referenced_names(cond, bound, index, acc)))
+  | ast.MatchExpr scrutinee branches _ ->
+      referenced_names_branches(branches, bound, index,
+        referenced_names(scrutinee, bound, index, acc))
+  | ast.CallExpr callee args _ ->
+      referenced_names_list(args, bound, index,
+        referenced_names(callee, bound, index, acc))
+  | ast.LambdaExpr params body _ ->
+      referenced_names(body, bind_params(params, bound), index, acc)
+  | ast.BinaryExpr _ left right _ ->
+      # The operator is a token, not a name a FnDecl can carry, so it is no edge.
+      referenced_names(right, bound, index, referenced_names(left, bound, index, acc))
+  | ast.UnaryExpr _ operand _ -> referenced_names(operand, bound, index, acc)
+  | ast.IntRangeExpr lo hi _ ->
+      referenced_names(hi, bound, index, referenced_names(lo, bound, index, acc))
+  | ast.DoExpr steps _ -> referenced_names_do(steps, bound, index, acc)
+  | ast.RecordExpr _ fields _ -> referenced_names_fields(fields, bound, index, acc)
+  | ast.GetFieldExpr record _ _ -> referenced_names(record, bound, index, acc)
+  | ast.RecordUpdateExpr base fields _ ->
+      referenced_names_fields(fields, bound, index, referenced_names(base, bound, index, acc))
+
+fn referenced_names_list(es: List ast.Expr, bound: Set, index: Set, acc: Set) -> Set =
+  match es with
+  | Nil -> acc
+  | Cons e rest -> referenced_names_list(rest, bound, index, referenced_names(e, bound, index, acc))
+
+fn referenced_names_template(parts: List ast.TemplateExprPart, bound: Set, index: Set, acc: Set) -> Set =
+  match parts with
+  | Nil -> acc
+  | Cons part rest ->
+      match part with
+      | ast.LitPart _ -> referenced_names_template(rest, bound, index, acc)
+      | ast.InterpPart e ->
+          referenced_names_template(rest, bound, index, referenced_names(e, bound, index, acc))
+
+# A branch's pattern binders scope over its own body and nothing else.
+fn referenced_names_branches(bs: List ast.MatchBranch, bound: Set, index: Set, acc: Set) -> Set =
+  match bs with
+  | Nil -> acc
+  | Cons b rest ->
+      match b with
+      | ast.MatchBranch pat body ->
+          referenced_names_branches(rest, bound, index,
+            referenced_names(body, bind_pattern(pat, bound), index, acc))
+
+# A do step's binder scopes over the steps AFTER it, so `bound` grows as the walk
+# advances — and the step's own right-hand side is walked with the OLD `bound`,
+# since `x <- f(x)` refers to the outer x.
+fn referenced_names_do(steps: List ast.DoStep, bound: Set, index: Set, acc: Set) -> Set =
+  match steps with
+  | Nil -> acc
+  | Cons step rest ->
+      match step with
+      | ast.DoBindStep pat e ->
+          referenced_names_do(rest, bind_pattern(pat, bound), index,
+            referenced_names(e, bound, index, acc))
+      | ast.DoLetStep name e ->
+          referenced_names_do(rest, set_insert(name, bound), index,
+            referenced_names(e, bound, index, acc))
+      | ast.DoExprStep e ->
+          referenced_names_do(rest, bound, index, referenced_names(e, bound, index, acc))
+
+fn referenced_names_fields(fields: List ast.RecordField, bound: Set, index: Set, acc: Set) -> Set =
+  match fields with
+  | Nil -> acc
+  | Cons f rest ->
+      match f with
+      | ast.RecordField _ e ->
+          referenced_names_fields(rest, bound, index, referenced_names(e, bound, index, acc))
+
+# A constructor pattern's NAME is not a binder — only its sub-patterns bind.
+fn bind_pattern(p: ast.Pattern, bound: Set) -> Set =
+  match p with
+  | ast.WildcardPattern _ -> bound
+  | ast.VarPattern name _ -> set_insert(name, bound)
+  | ast.IntPattern _ _ -> bound
+  | ast.BoolPattern _ _ -> bound
+  | ast.StringPattern _ _ -> bound
+  | ast.CharPattern _ _ -> bound
+  | ast.UnitPattern _ -> bound
+  | ast.TuplePattern parts _ -> bind_patterns(parts, bound)
+  | ast.ConstructorPattern _ args _ -> bind_patterns(args, bound)
+
+fn bind_patterns(ps: List ast.Pattern, bound: Set) -> Set =
+  match ps with
+  | Nil -> bound
+  | Cons p rest -> bind_patterns(rest, bind_pattern(p, bound))
+
+fn bind_params(params: List ast.Param, bound: Set) -> Set =
+  match params with
+  | Nil -> bound
+  | Cons p rest ->
+      match p with
+      | ast.Param name _ _ -> bind_params(rest, set_insert(name, bound))
+
+# ---------------------------------------------------------------------------
+# Strongly connected components — Kosaraju, iteratively
+# ---------------------------------------------------------------------------
+#
+# Two reasons this is not the SCC walk that already exists in ast_to_ir.
+#
+# `pb_scc_of` computes a component by calling `mutual_reaches(f,g) && reaches(g,f)`
+# PAIRWISE over every candidate — 2n graph searches per node. That is fine for the
+# mutual-TCO pre-pass, whose node set is a handful of tail-callers. Here the largest
+# reorderable run in this repo is 551 functions (measured 2026-08-25: infer.sprout
+# itself), where pairwise reachability is O(n²(V+E)) — around a billion operations
+# on the compiler's own hottest file, every build. This is O(V+E).
+#
+# And it is ITERATIVE. Textbook Kosaraju is two recursive depth-first searches; at
+# 551 frames that is a stack the `stack-overflow-smoke` gate exists to police, and
+# the depth is set by user code, not by us. Both passes carry an explicit worklist.
+#
+# Pass 1 walks G recording nodes by DECREASING finish time; pass 2 walks Gᵀ in that
+# order and each tree it reaches is one component.
+fn neighbors_of(n: String, graph: Dict Set) -> List String =
+  match dict_get(n, graph) with
+  | Just s -> set_to_list(s)
+  | Nothing -> Nil
+
+fn set_or_empty(k: String, d: Dict Set) -> Set =
+  match dict_get(k, d) with
+  | Just s -> s
+  | Nothing -> set_empty()
+
+fn reverse_graph(nodes: List String, graph: Dict Set, acc: Dict Set) -> Dict Set =
+  match nodes with
+  | Nil -> acc
+  | Cons n rest -> reverse_graph(rest, graph, add_reverse_edges(n, neighbors_of(n, graph), acc))
+
+fn add_reverse_edges(from: String, tos: List String, acc: Dict Set) -> Dict Set =
+  match tos with
+  | Nil -> acc
+  | Cons t rest -> add_reverse_edges(from, rest, dict_set(t, set_insert(from, set_or_empty(t, acc)), acc))
+
+# Pass 1. The worklist holds (node, is_exit): an `is_exit` item means every
+# descendant of that node has been finished, so this is where post-order is
+# recorded. `order` is built by consing on finish, which leaves the LAST-finished
+# node at the head — decreasing finish time, exactly what pass 2 consumes.
+fn scc_finish_order(nodes: List String, graph: Dict Set) -> List String =
+  scc_finish_order_go(nodes, graph, set_empty(), Nil)
+
+fn scc_finish_order_go(nodes: List String, graph: Dict Set, visited: Set, order: List String) -> List String =
+  match nodes with
+  | Nil -> order
+  | Cons n rest ->
+      if set_member(n, visited) then scc_finish_order_go(rest, graph, visited, order)
+      else
+        let (v2, o2) = scc_dfs1(Cons((n, false), Nil), graph, visited, order)
+        in scc_finish_order_go(rest, graph, v2, o2)
+
+fn scc_dfs1(work: List (String, Bool), graph: Dict Set, visited: Set, order: List String) -> (Set, List String) =
+  match work with
+  | Nil -> (visited, order)
+  | Cons item rest ->
+      match item with
+      | (n, true) -> scc_dfs1(rest, graph, visited, Cons(n, order))
+      | (n, false) ->
+          # A node can be pushed as an ENTER more than once (two parents reach it
+          # before either finishes); the visited test here is what makes that
+          # harmless. Its EXIT marker is pushed exactly once, on first entry.
+          if set_member(n, visited) then scc_dfs1(rest, graph, visited, order)
+          else
+            scc_dfs1(push_enters(neighbors_of(n, graph), Cons((n, true), rest)),
+                     graph, set_insert(n, visited), order)
+
+fn push_enters(ns: List String, work: List (String, Bool)) -> List (String, Bool) =
+  match ns with
+  | Nil -> work
+  | Cons n rest -> Cons((n, false), push_enters(rest, work))
+
+# Pass 2. Each tree reached in Gᵀ is one component.
+#
+# Kosaraju discovers components in topological order of G's condensation, and G's
+# edges point caller -> callee, so it finds CALLERS first. `acc` is built by
+# consing, which reverses that — leaving callees first, which is the order a
+# dependency-ordered check needs. The reversal is load-bearing, not incidental.
+fn scc_components(order: List String, rgraph: Dict Set, visited: Set, acc: List (List String)) -> List (List String) =
+  match order with
+  | Nil -> acc
+  | Cons n rest ->
+      if set_member(n, visited) then scc_components(rest, rgraph, visited, acc)
+      else
+        let (v2, members) = scc_dfs2(Cons(n, Nil), rgraph, visited, Nil)
+        in scc_components(rest, rgraph, v2, Cons(members, acc))
+
+fn scc_dfs2(work: List String, rgraph: Dict Set, visited: Set, members: List String) -> (Set, List String) =
+  match work with
+  | Nil -> (visited, members)
+  | Cons n rest ->
+      if set_member(n, visited) then scc_dfs2(rest, rgraph, visited, members)
+      else scc_dfs2(append(neighbors_of(n, rgraph), rest), rgraph, set_insert(n, visited), Cons(n, members))
+
+# Components of `nodes` under `graph`, dependencies first.
+fn sccs_in_dependency_order(nodes: List String, graph: Dict Set) -> List (List String) =
+  scc_components(scc_finish_order(nodes, graph), reverse_graph(nodes, graph, dict_empty()),
+                 set_empty(), Nil)
+
+# ---------------------------------------------------------------------------
 # group_plan — the §4.5.1 seam
 # ---------------------------------------------------------------------------
 #
@@ -6115,27 +6355,161 @@ fn pre_scan_fn_decls(decls: List ast.Decl, env: Dict types.Scheme, alias_env: Di
 # (typed_decls_in_source_order), so no plan this function can return is able to
 # move emitted code — which is what makes swapping its body a contained change.
 #
-# Today it returns one group per declaration in source order: exactly the walk
-# the checker did before groups existed. That is deliberate. The machinery around
-# it — shared assumptions held across a group, one substitution threaded through
-# it, generalization at its boundary — is live and exercised on every declaration
-# in the tree at group size one, and proving it inert (byte-identical golden IR)
-# is the whole verification argument for landing it.
+# FnDecls are partitioned into strongly connected components and ordered so a
+# group's dependencies are checked before it; every other declaration is its own
+# group, in place, and acts as a BARRIER that no FnDecl may cross.
 #
-# Replacing this body with a dependency-ordered SCC partition is the follow-up
-# tracked in BACKLOG.md. Two constraints any replacement must respect:
-#   1. A FnDecl may not be ordered above a RecordDecl, ClassDecl, InstanceDecl or
-#      LetDecl it depends on — those four are registered by typecheck_decl as it
-#      walks, NOT by pre_scan_fn_decls, so they are barriers until pre_scan
-#      learns to register them. TypeDecl/WrapDecl/AliasDecl ARE pre-scanned and
-#      may be crossed.
-#   2. Groups must partition 0..n-1 exactly once. A missing index silently drops
-#      a declaration from the emitted program; a duplicated one emits it twice.
+# The barrier rule is not conservatism, it is what the environments allow.
+# RecordDecl, ClassDecl and InstanceDecl are registered by typecheck_decl as it
+# walks, not by pre_scan_fn_decls, so a FnDecl hoisted above one loses the fields,
+# methods or instance it needs. A top-level `let` is not pre-scanned either — a
+# forward reference to one is `Unknown variable` today, which this must not change.
+# And AliasDecl, despite BEING pre-scanned, is still a barrier: pre_scan's
+# alias_env is used only to build schemes inside pre_scan, while typecheck_decls
+# starts the body walk from `qual_env` and re-registers aliases as it goes, so a
+# FnDecl checked above an AliasDecl would rebuild its own decl_scheme against an
+# alias_env that has not seen it. (This corrects the note that stood here when the
+# seam landed, which said AliasDecl could be crossed.)
+#
+# The invariant every plan owes typecheck_groups: the groups partition 0..n-1
+# EXACTLY once. A missing index silently drops a declaration from the emitted
+# program; a duplicated one emits it twice. It holds by construction here — each
+# declaration is either a barrier singleton or in exactly one segment, and an SCC
+# partition covers its node set — with one dependency: names must be unique, which
+# check_duplicate_fn_decls has already guaranteed by the time this runs. The
+# verification below is not a substitute for that argument; it is there because a
+# silently vanishing declaration is the one failure mode worth paying to rule out.
 fn group_plan(decls: List ast.Decl) -> List (List Int) =
-  group_plan_singletons(0, list_length(decls))
+  checked_plan(plan_walk(index_decls(decls, 0), Nil, Nil), list_length(decls))
+
+# A plan that does not partition 0..n-1 falls back to source order. Reordering is
+# an optimisation of COMPLETENESS — it makes more correct programs typable — so
+# losing it degrades diagnostics; dropping a declaration corrupts the output. Trade
+# the first for certainty about the second.
+fn checked_plan(plan: List (List Int), n: Int) -> List (List Int) =
+  if plan_covers_exactly(plan, n) then plan else group_plan_singletons(0, n)
+
+fn plan_covers_exactly(plan: List (List Int), n: Int) -> Bool =
+  set_size(plan_indices(plan, set_empty())) == n
+
+fn plan_indices(plan: List (List Int), acc: Set) -> Set =
+  match plan with
+  | Nil -> acc
+  | Cons g rest -> plan_indices(rest, plan_group_indices(g, acc))
+
+fn plan_group_indices(g: List Int, acc: Set) -> Set =
+  match g with
+  | Nil -> acc
+  | Cons i rest -> plan_group_indices(rest, set_insert(int_to_string(i), acc))
 
 fn group_plan_singletons(i: Int, n: Int) -> List (List Int) =
   if i >= n then Nil else Cons(Cons(i, Nil), group_plan_singletons(i + 1, n))
+
+fn index_decls(decls: List ast.Decl, i: Int) -> List (Int, ast.Decl) =
+  match decls with
+  | Nil -> Nil
+  | Cons d rest -> Cons((i, d), index_decls(rest, i + 1))
+
+# `seg` is the current run of FnDecls and `acc` the finished groups, both held in
+# REVERSE so the walk stays a cons. Hitting a barrier flushes the run, then emits
+# the barrier itself as a singleton in its original position.
+fn plan_walk(items: List (Int, ast.Decl), seg: List (Int, ast.Decl), acc: List (List Int)) -> List (List Int) =
+  match items with
+  | Nil -> reverse_groups(flush_segment(seg, acc), Nil)
+  | Cons item rest ->
+      match item with
+      | (i, decl) ->
+          match decl with
+          | ast.FnDecl _ _ _ _ _ _ _ -> plan_walk(rest, Cons(item, seg), acc)
+          | _ -> plan_walk(rest, Nil, Cons (Cons(i, Nil), flush_segment(seg, acc)))
+
+fn flush_segment(seg: List (Int, ast.Decl), acc: List (List Int)) -> List (List Int) =
+  prepend_groups(partition_segment(reverse_items(seg, Nil)), acc)
+
+fn prepend_groups(gs: List (List Int), acc: List (List Int)) -> List (List Int) =
+  match gs with
+  | Nil -> acc
+  | Cons g rest -> prepend_groups(rest, Cons(g, acc))
+
+fn reverse_groups(gs: List (List Int), acc: List (List Int)) -> List (List Int) =
+  match gs with
+  | Nil -> acc
+  | Cons g rest -> reverse_groups(rest, Cons(g, acc))
+
+fn reverse_items(xs: List (Int, ast.Decl), acc: List (Int, ast.Decl)) -> List (Int, ast.Decl) =
+  match xs with
+  | Nil -> acc
+  | Cons x rest -> reverse_items(rest, Cons(x, acc))
+
+# The edge set is restricted to the SEGMENT, not the whole program, and that is
+# exact rather than an approximation: a reference to an earlier segment names a
+# declaration already checked, and a reference to a later one names something the
+# barrier makes unreachable anyway. Neither can inform this segment's order.
+fn partition_segment(seg: List (Int, ast.Decl)) -> List (List Int) =
+  match seg with
+  | Nil -> Nil
+  | [_ | _] ->
+      let names = segment_names(seg)
+          index = set_of_list(names, set_empty())
+      in groups_to_indices(
+           sccs_in_dependency_order(names, segment_graph(seg, index, dict_empty())),
+           segment_index_map(seg, dict_empty()))
+
+fn segment_names(seg: List (Int, ast.Decl)) -> List String =
+  match seg with
+  | Nil -> Nil
+  | Cons m rest ->
+      match m with
+      | (_, ast.FnDecl name _ _ _ _ _ _) -> Cons(name, segment_names(rest))
+      | _ -> segment_names(rest)
+
+fn segment_graph(seg: List (Int, ast.Decl), index: Set, acc: Dict Set) -> Dict Set =
+  match seg with
+  | Nil -> acc
+  | Cons m rest ->
+      match m with
+      | (_, ast.FnDecl name params _ _ _ body _) ->
+          segment_graph(rest, index,
+            dict_set(name, referenced_names(body, bind_params(params, set_empty()), index, set_empty()), acc))
+      | _ -> segment_graph(rest, index, acc)
+
+fn segment_index_map(seg: List (Int, ast.Decl), acc: Dict Int) -> Dict Int =
+  match seg with
+  | Nil -> acc
+  | Cons m rest ->
+      match m with
+      | (_, ast.FnDecl name _ _ _ _ _ _) -> segment_index_map(rest, dict_set(name, i_of(m), acc))
+      | _ -> segment_index_map(rest, acc)
+
+fn i_of(m: (Int, ast.Decl)) -> Int =
+  match m with
+  | (i, _) -> i
+
+fn set_of_list(xs: List String, acc: Set) -> Set =
+  match xs with
+  | Nil -> acc
+  | Cons x rest -> set_of_list(rest, set_insert(x, acc))
+
+# A group's members are checked in SOURCE order. Nothing requires that — they are
+# mutually dependent, so no order among them is more correct — but a deterministic
+# one keeps the plan reproducible, and source order is the one a reader expects.
+fn groups_to_indices(comps: List (List String), idx_of: Dict Int) -> List (List Int) =
+  match comps with
+  | Nil -> Nil
+  | Cons c rest -> Cons(sorted_indices(c, idx_of, Nil), groups_to_indices(rest, idx_of))
+
+fn sorted_indices(names: List String, idx_of: Dict Int, acc: List Int) -> List Int =
+  match names with
+  | Nil -> acc
+  | Cons n rest ->
+      match dict_get(n, idx_of) with
+      | Just i -> sorted_indices(rest, idx_of, insert_int_sorted(i, acc))
+      | Nothing -> sorted_indices(rest, idx_of, acc)
+
+fn insert_int_sorted(x: Int, xs: List Int) -> List Int =
+  match xs with
+  | Nil -> Cons(x, Nil)
+  | Cons h t -> if x <= h then Cons(x, xs) else Cons(h, insert_int_sorted(x, t))
 
 # The typed program, re-keyed from check order back to SOURCE order. A gap is
 # skipped rather than trapped: group_plan is internal and its partition invariant

@@ -1,0 +1,15 @@
+module main
+
+# `unannotated_forward_return` with the two declarations SWAPPED, and — the point
+# of the fixture — the identical `.err`.
+#
+# Declaration order used to decide not just whether this program was accepted but
+# which declaration got blamed when it was rejected: the forward order reported at
+# `summarize`, this one at `report`. Now that groups are checked in dependency
+# order, both report here, at the code that is actually wrong. The pair only tests
+# something as a pair: keep the two `.err` files byte-identical.
+fn summarize(xs: List Int) = list_length(xs)
+
+fn report(xs: List Int) -> String = "count=" ++ summarize(xs)
+
+fn main() -> Unit !{IO} = print(report(Cons(1, Cons(2, Nil))))
