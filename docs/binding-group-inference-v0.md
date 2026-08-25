@@ -1,9 +1,10 @@
 # Binding-group inference — completing Hindley–Milner at the top level (v0)
 
-> **Status: the soundness half is implemented and gated; the completeness half is
-> not.** §6 describes the design; §7 records exactly which parts landed and what
-> the remainder still costs, measured rather than estimated. `docs/spec-v0.md`
-> §7 rule 16 carries the normative rule.
+> **Status: the soundness half is implemented and gated. The completeness half has
+> its machinery in place (§7.3) but is not yet switched on — `group_plan` still
+> returns one group per declaration in source order.** §6 describes the design; §7
+> records exactly which parts landed and what the remainder still costs, measured
+> rather than estimated. `docs/spec-v0.md` §7 rule 16 carries the normative rule.
 
 ## 1. Problem statement
 
@@ -178,11 +179,12 @@ generalizes at its own boundary in **source** order.
 
 | Part | Status |
 |---|---|
-| 1. Dependency analysis | **Not implemented.** See §7.2 |
+| 1. Dependency analysis | **Seam in place, plan not yet dependency-ordered.** `group_plan` returns one group per declaration in source order; see §7.3 |
 | 2. Monomorphic per-declaration assumptions | **Landed.** `unann_ret_var` / `unann_param_var` mint `_unann@<owner>` and `_unann@<owner>/<param>`; the collectors no longer put them in the binder list, so `instantiate` leaves them alone and every use shares one variable |
 | 3. Shared substitution | **Landed.** `check_fn_body` returns its final substitution, `TypedDeclOk` gained a fourth field, and `typecheck_decls_inner` threads it |
 | 4. Generalization boundary | **Landed.** `own_unann_vars` subtracts the declaration's own placeholders from `env_ftv` at its generalization point — see §7.1, the part that is easy to get wrong |
 | Placeholder deletion | **Landed.** With the placeholders out of the binder list, `rigidity_violation`'s `_unann` skip had nothing to skip and was removed |
+| Group walk | **Landed.** `typecheck_groups` / `typecheck_fn_group` / `commit_group_members` hold the env fixed across a group, thread the substitution, and generalize at the boundary; `typed_decls_in_source_order` re-keys the output so no plan can move emitted code |
 
 Instance methods are deliberately excluded from the thread: two instances of one
 class implement the same method *name*, so a shared placeholder would force their
@@ -243,6 +245,47 @@ unconditionally. It is a *rejection*, never a miscompile, and part 1 removes it.
 Declaration order also still decides **which** declaration reports a conflict —
 probe 1 reports at `summarize`, probe 2 at `report`. Both reject; only the
 location moves.
+
+### 7.3 The seam, and why it ships inert
+
+Everything §6 describes except part 1 is implemented and running. Groups are
+walked, a group's members share one env and one substitution, and generalization
+happens at the group boundary. What is *not* implemented is the partition:
+`group_plan(decls) -> List (List Int)` returns one group per declaration in
+source order, which is the walk the checker did before groups existed.
+
+That is deliberate, and it is the whole verification argument. A change to
+inference order cannot be proved by "the tests still pass" — the tests are
+supposed to still pass, and so is a subtly wrong reordering. A change that is
+*supposed to change nothing* can be proved by identity, which is far stronger:
+the old and new compilers emit **byte-identical IR for all 60 golden corpus
+files**, the suite is unchanged, and the bootstrap still reaches its fixed point.
+
+To make that proof cover the machinery rather than step around it, dispatch in
+`typecheck_group` is by declaration *kind*, not group *size* — every `FnDecl` in
+the tree goes through `typecheck_fn_group` at group size one. The only part group
+size one leaves unexercised is the N>=2 fold, and fixtures for it land with the
+partition.
+
+**Two constraints any partition must respect**, recorded in `group_plan`'s own
+comment so they cannot be missed by whoever replaces it:
+
+1. A `FnDecl` may not be ordered above a `RecordDecl`, `ClassDecl`, `InstanceDecl`
+   or `LetDecl` it depends on. Those four are registered by `typecheck_decl` as it
+   walks, **not** by `pre_scan_fn_decls`, so they are barriers until `pre_scan`
+   learns to register them. `TypeDecl`, `WrapDecl` and `AliasDecl` *are*
+   pre-scanned and may be crossed.
+2. Groups must partition `0..n-1` exactly once. A missing index silently drops a
+   declaration from the emitted program; a duplicated one emits it twice.
+
+And one algorithmic note, because the obvious candidate does not scale: the
+existing `pb_scc_of` (`ast_to_ir.sprout`) computes an SCC by calling
+`mutual_reaches` **pairwise**, i.e. 2n graph searches per function. That is fine
+for the mutual-TCO pre-pass, whose node set is a handful of tail-callers. The
+`compile_driver` bundle has **3,050** top-level declarations, where pairwise
+reachability is O(n²(V+E)). The partition needs a genuine linear-time SCC, written
+iteratively — a recursive DFS 3,050 frames deep would hit the limit the
+`stack-overflow-smoke` gate exists to police.
 
 ## 8. The one case HM cannot infer
 

@@ -117,6 +117,29 @@ type TypedDeclResult =
   | TypedDeclOk typed_ast.TypedDecl GlobalEnv (List String) (Dict types.Type)
   | TypedDeclErr source.SourcePos String
 
+# What one group member's body inference produced, held until the group's
+# boundary. Split out of typecheck_decl's FnDecl arm so a MULTI-member group can
+# infer every member before committing any of them: a member rebound to its
+# generalized type mid-group would stop being the shared monomorphic assumption
+# its siblings are still being checked against, which is the one thing
+# binding-group inference exists to preserve.
+# See docs/binding-group-inference-v0.md §6.
+type FnInferred =
+  | FnInferred ast.Decl typed_ast.TypedExpr types.Type (Dict types.Scheme) (List (String, String)) (List String)
+  # FnInferred decl  typed_body  inferred_type  fwd_markers  decl_constraints  group_env_ftv
+
+type FnInferResult =
+  | FnInferOk FnInferred
+  | FnInferErr source.SourcePos String
+
+# The five things a group hands to the next group, or the error that stopped it.
+# The two `Dict types.Type` fields are NOT interchangeable: the first is the
+# inference substitution, the second the alias environment.
+type GroupResult =
+  | GroupOk (Dict typed_ast.TypedDecl) GlobalEnv (Dict types.Type) (Dict types.Type) (List String)
+  # GroupOk  out_by_index  env  subst  alias_env  env_ftv
+  | GroupErr source.SourcePos String
+
 # Internal single-method result.
 type InstanceMethodResult =
   | InstanceMethodOk typed_ast.TypedInstanceMethod
@@ -795,14 +818,6 @@ fn typed_record_field_rev_acc(xs: List typed_ast.TypedRecordField, acc: List typ
   match xs with
   | Nil -> acc
   | Cons h t -> typed_record_field_rev_acc(t, Cons(h, acc))
-
-fn typed_decl_list_reverse(xs: List typed_ast.TypedDecl) -> List typed_ast.TypedDecl =
-  typed_decl_rev_acc(xs, Nil)
-
-fn typed_decl_rev_acc(xs: List typed_ast.TypedDecl, acc: List typed_ast.TypedDecl) -> List typed_ast.TypedDecl =
-  match xs with
-  | Nil -> acc
-  | Cons h t -> typed_decl_rev_acc(t, Cons(h, acc))
 
 fn typed_method_list_reverse(xs: List typed_ast.TypedInstanceMethod) -> List typed_ast.TypedInstanceMethod =
   typed_method_rev_acc(xs, Nil)
@@ -6090,6 +6105,51 @@ fn pre_scan_fn_decls(decls: List ast.Decl, env: Dict types.Scheme, alias_env: Di
           pre_scan_fn_decls(rest, register_type_decl_raw(decl, env), alias_env)
       | _ -> pre_scan_fn_decls(rest, env, alias_env)
 
+# ---------------------------------------------------------------------------
+# group_plan — the §4.5.1 seam
+# ---------------------------------------------------------------------------
+#
+# A binding group is a list of indices into the declaration vector, in the order
+# its members must be CHECKED; group_plan returns the groups themselves in check
+# order. The typed output is re-keyed to SOURCE order afterwards
+# (typed_decls_in_source_order), so no plan this function can return is able to
+# move emitted code — which is what makes swapping its body a contained change.
+#
+# Today it returns one group per declaration in source order: exactly the walk
+# the checker did before groups existed. That is deliberate. The machinery around
+# it — shared assumptions held across a group, one substitution threaded through
+# it, generalization at its boundary — is live and exercised on every declaration
+# in the tree at group size one, and proving it inert (byte-identical golden IR)
+# is the whole verification argument for landing it.
+#
+# Replacing this body with a dependency-ordered SCC partition is the follow-up
+# tracked in BACKLOG.md. Two constraints any replacement must respect:
+#   1. A FnDecl may not be ordered above a RecordDecl, ClassDecl, InstanceDecl or
+#      LetDecl it depends on — those four are registered by typecheck_decl as it
+#      walks, NOT by pre_scan_fn_decls, so they are barriers until pre_scan
+#      learns to register them. TypeDecl/WrapDecl/AliasDecl ARE pre-scanned and
+#      may be crossed.
+#   2. Groups must partition 0..n-1 exactly once. A missing index silently drops
+#      a declaration from the emitted program; a duplicated one emits it twice.
+fn group_plan(decls: List ast.Decl) -> List (List Int) =
+  group_plan_singletons(0, list_length(decls))
+
+fn group_plan_singletons(i: Int, n: Int) -> List (List Int) =
+  if i >= n then Nil else Cons(Cons(i, Nil), group_plan_singletons(i + 1, n))
+
+# The typed program, re-keyed from check order back to SOURCE order. A gap is
+# skipped rather than trapped: group_plan is internal and its partition invariant
+# is stated above, so a hole here would be a compiler bug, not a user error, and
+# erroring out would replace a working build with a diagnostic no user can act on.
+fn typed_decls_in_source_order(out: Dict typed_ast.TypedDecl, i: Int, total: Int) -> List typed_ast.TypedDecl =
+  if i >= total then Nil
+  else
+    match dict_get(int_to_string(i), out) with
+    | Just td -> Cons(td, typed_decls_in_source_order(out, i + 1, total))
+    | Nothing -> typed_decls_in_source_order(out, i + 1, total)
+
+fn decl_at(decl_vec: Vec ast.Decl, i: Int) -> Maybe ast.Decl = vec_get(i, decl_vec)
+
 fn typecheck_decls_inner(
   state: unifier.InferState,
   decls: List ast.Decl,
@@ -6100,35 +6160,210 @@ fn typecheck_decls_inner(
   acc: List typed_ast.TypedDecl,
   env_ftv: List String
 ) -> typed_ast.TypedResult !{IO} =
-  match decls with
+  typecheck_groups(state, vec_from_list(decls), group_plan(decls), env, subst, eff_subst,
+                   alias_env, dict_empty(), env_ftv, list_length(decls))
+
+fn typecheck_groups(
+  state: unifier.InferState,
+  decl_vec: Vec ast.Decl,
+  groups: List (List Int),
+  env: GlobalEnv,
+  subst: Dict types.Type,
+  eff_subst: Dict types.Effect,
+  alias_env: Dict types.Type,
+  out: Dict typed_ast.TypedDecl,
+  env_ftv: List String,
+  total: Int
+) -> typed_ast.TypedResult !{IO} =
+  match groups with
   | Nil ->
       # Unwrap GlobalEnv for the public TypedResult API, which still uses
       # raw Dict types.Scheme.  The wrap discipline is internal to infer.
       typed_ast.TypedOk(
-        typed_ast.TypedProgram(typed_decl_list_reverse(acc)),
+        typed_ast.TypedProgram(typed_decls_in_source_order(out, 0, total)),
         global_env_dict(env))
-  | Cons decl rest ->
-      match decl with
-      | ast.AliasDecl name [] rhs_te _ ->
-          typecheck_decls_inner(state, rest, env, subst, eff_subst,
-            dict_set(name, type_from_ast(rhs_te, dict_empty()), alias_env),
-            Cons(typed_ast.TPassThrough(decl), acc), env_ftv)
-      | ast.AliasDecl name [param] rhs_te _ ->
-          typecheck_decls_inner(state, rest, env, subst, eff_subst,
-            register_single_param_alias(name, param, rhs_te, alias_env),
-            Cons(typed_ast.TPassThrough(decl), acc), env_ftv)
-      | _ ->
+  | Cons g rest ->
+      do
+        r <- typecheck_group(state, decl_vec, g, env, subst, eff_subst, alias_env, out, env_ftv)
+        match r with
+        | GroupErr pos e -> typed_ast.TypedErr(pos, e)
+        | GroupOk new_out new_env new_subst new_alias_env new_env_ftv ->
+            # new_subst, not subst: this is the whole of what makes an
+            # unannotated declaration's placeholder mean anything. The pin a
+            # caller puts on it has to survive to the declaration that owns
+            # it, or the two are inferred as if they were unrelated.
+            typecheck_groups(state, decl_vec, rest, new_env, new_subst, eff_subst,
+                             new_alias_env, new_out, new_env_ftv, total)
+
+# Dispatch is by DECL KIND, not by group size, and that is deliberate: a group of
+# one FnDecl takes the same path as a group of five. It means the group machinery
+# — shared assumptions, threaded substitution, generalization at the boundary — is
+# executed for every function in the tree while group_plan still returns
+# singletons, so "byte-identical IR" actually exercises it instead of stepping
+# around it. Only the N>=2 fold is left for the day group_plan changes.
+fn typecheck_group(
+  state: unifier.InferState,
+  decl_vec: Vec ast.Decl,
+  g: List Int,
+  env: GlobalEnv,
+  subst: Dict types.Type,
+  eff_subst: Dict types.Effect,
+  alias_env: Dict types.Type,
+  out: Dict typed_ast.TypedDecl,
+  env_ftv: List String
+) -> GroupResult !{IO} =
+  do
+    let members = group_members(decl_vec, g)
+    match members with
+    | Nil -> GroupOk(out, env, subst, alias_env, env_ftv)
+    | Cons m rest ->
+        if all_fn_decls(members)
+        then typecheck_fn_group(state, members, env, subst, eff_subst, alias_env, out, env_ftv)
+        else
+          match rest with
+          | Nil ->
+              match m with
+              | (i, decl) -> typecheck_singleton(state, i, decl, env, subst, eff_subst, alias_env, out, env_ftv)
+          | [_ | _] ->
+              GroupErr(no_pos(), "internal: a multi-member binding group must contain only FnDecls")
+
+fn all_fn_decls(members: List (Int, ast.Decl)) -> Bool =
+  match members with
+  | Nil -> true
+  | Cons m rest ->
+      match m with
+      | (_, ast.FnDecl _ _ _ _ _ _ _) -> all_fn_decls(rest)
+      | _ -> false
+
+# A group of one. Alias declarations are handled here rather than in
+# typecheck_decl because they update the ALIAS environment, which typecheck_decl
+# neither takes nor returns; group_plan never puts one in a multi-member group.
+fn typecheck_singleton(
+  state: unifier.InferState,
+  i: Int,
+  decl: ast.Decl,
+  env: GlobalEnv,
+  subst: Dict types.Type,
+  eff_subst: Dict types.Effect,
+  alias_env: Dict types.Type,
+  out: Dict typed_ast.TypedDecl,
+  env_ftv: List String
+) -> GroupResult !{IO} =
+  match decl with
+  | ast.AliasDecl name [] rhs_te _ ->
+      GroupOk(dict_set(int_to_string(i), typed_ast.TPassThrough(decl), out), env, subst,
+              dict_set(name, type_from_ast(rhs_te, dict_empty()), alias_env), env_ftv)
+  | ast.AliasDecl name [param] rhs_te _ ->
+      GroupOk(dict_set(int_to_string(i), typed_ast.TPassThrough(decl), out), env, subst,
+              register_single_param_alias(name, param, rhs_te, alias_env), env_ftv)
+  | _ ->
+      do
+        r <- typecheck_decl(state, decl, env, subst, eff_subst, alias_env, env_ftv)
+        match r with
+        | TypedDeclErr pos e -> GroupErr(pos, e)
+        | TypedDeclOk typed_decl new_env new_env_ftv new_subst ->
+            GroupOk(dict_set(int_to_string(i), typed_decl, out), new_env, new_subst,
+                    alias_env, new_env_ftv)
+
+# A group of two or more mutually dependent FnDecls. Every member is inferred
+# against the SAME env — pre_scan's shared monomorphic assumptions — with the
+# substitution threaded between them, and only then does the group generalize.
+# Committing a member early would rebind it to a generalized scheme its siblings
+# would then instantiate freshly, which is precisely the forward-reference hole
+# binding groups exist to close.
+fn typecheck_fn_group(
+  state: unifier.InferState,
+  members: List (Int, ast.Decl),
+  env: GlobalEnv,
+  subst: Dict types.Type,
+  eff_subst: Dict types.Effect,
+  alias_env: Dict types.Type,
+  out: Dict typed_ast.TypedDecl,
+  env_ftv: List String
+) -> GroupResult !{IO} =
+  do
+    # The group's own placeholders, released together at its boundary. Per member
+    # would leave the first member quantifying over a sibling's still-unresolved
+    # variable — or, worse, not quantifying its own.
+    let group_env_ftv = env_ftv_for_decl(env_ftv, group_unann_vars(members, Nil))
+    (err, inferred, final_subst) <- infer_group_members(state, members, global_env_dict(env), subst,
+                                                        eff_subst, alias_env, group_env_ftv)
+    match err with
+    | Just (pos, msg) -> GroupErr(pos, msg)
+    | Nothing ->
+        let (new_out, new_env, new_env_ftv) = commit_group_members(inferred, final_subst, env, env_ftv, out)
+        in GroupOk(new_out, new_env, final_subst, alias_env, new_env_ftv)
+
+fn group_members(decl_vec: Vec ast.Decl, g: List Int) -> List (Int, ast.Decl) =
+  match g with
+  | Nil -> Nil
+  | Cons i rest ->
+      match decl_at(decl_vec, i) with
+      | Just d -> Cons((i, d), group_members(decl_vec, rest))
+      | Nothing -> group_members(decl_vec, rest)
+
+fn group_unann_vars(members: List (Int, ast.Decl), acc: List String) -> List String =
+  match members with
+  | Nil -> acc
+  | Cons m rest ->
+      match m with
+      | (_, decl) ->
+          match decl with
+          | ast.FnDecl name params ret_type_maybe _ _ _ _ ->
+              group_unann_vars(rest, types.list_union(own_unann_vars(name, params, ret_type_maybe), acc))
+          | _ -> group_unann_vars(rest, acc)
+
+# Built on the RETURN path (recurse-then-cons) so the result stays in CHECK order.
+# commit_group_members depends on that: the LAST element is the member whose body
+# produced the group's final substitution, and it is the one that skips the
+# re-resolve pass.
+fn infer_group_members(
+  state: unifier.InferState,
+  members: List (Int, ast.Decl),
+  env: Dict types.Scheme,
+  subst: Dict types.Type,
+  eff_subst: Dict types.Effect,
+  alias_env: Dict types.Type,
+  group_env_ftv: List String
+) -> (Maybe(source.SourcePos, String), List (Int, FnInferred), Dict types.Type) !{IO} =
+  match members with
+  | Nil -> (Nothing, Nil, subst)
+  | Cons m rest ->
+      match m with
+      | (i, decl) ->
           do
-            r <- typecheck_decl(state, decl, env, subst, eff_subst, alias_env, env_ftv)
+            # env is passed through UNCHANGED — that is the point of a group.
+            (r, body_subst) <- infer_fn_decl(state, decl, env, subst, eff_subst, alias_env, group_env_ftv)
             match r with
-            | TypedDeclErr pos e -> typed_ast.TypedErr(pos, e)
-            | TypedDeclOk typed_decl new_env new_env_ftv new_subst ->
-                # new_subst, not subst: this is the whole of what makes an
-                # unannotated declaration's placeholder mean anything. The pin a
-                # caller puts on it has to survive to the declaration that owns
-                # it, or the two are inferred as if they were unrelated.
-                typecheck_decls_inner(state, rest, new_env, new_subst, eff_subst, alias_env,
-                  Cons(typed_decl, acc), new_env_ftv)
+            | FnInferErr pos msg -> (Just((pos, msg)), Nil, body_subst)
+            | FnInferOk inf ->
+                do
+                  (err, rest_inferred, final_subst) <- infer_group_members(state, rest, env, body_subst,
+                                                                           eff_subst, alias_env, group_env_ftv)
+                  (err, Cons((i, inf), rest_inferred), final_subst)
+
+fn commit_group_members(
+  inferred: List (Int, FnInferred),
+  final_subst: Dict types.Type,
+  env: GlobalEnv,
+  env_ftv: List String,
+  out: Dict typed_ast.TypedDecl
+) -> (Dict typed_ast.TypedDecl, GlobalEnv, List String) =
+  match inferred with
+  | Nil -> (out, env, env_ftv)
+  | Cons m rest ->
+      match m with
+      | (i, inf) ->
+          # `rest` empty means this member produced final_subst, so its typed body
+          # already carries it and the re-resolve walk is skipped.
+          let (td, new_env, new_env_ftv) = commit_fn_decl(inf, final_subst, is_nonempty_inferred(rest), env, env_ftv)
+          in commit_group_members(rest, final_subst, new_env, new_env_ftv,
+                                  dict_set(int_to_string(i), td, out))
+
+fn is_nonempty_inferred(xs: List (Int, FnInferred)) -> Bool =
+  match xs with
+  | Nil -> false
+  | [_ | _] -> true
 
 # Phrased as the same "escapes its scope" family as the unifier's mismatch
 # rewording, so the two ends of the rule read alike. The advice is deliberately
@@ -6145,6 +6380,99 @@ fn skolem_escape_msg(name: String) -> String =
 fn skolem_escape_let_msg(name: String) -> String =
   skolem_escape_prefix(name) ++ "be the type of a top-level binding"
     ++ " — consume the unpacked value inside its match branch"
+
+# ---------------------------------------------------------------------------
+# Binding-group inference: infer a member, commit a member
+# ---------------------------------------------------------------------------
+#
+# The two halves of what typecheck_decl's FnDecl arm used to do in one piece.
+# Keeping them apart is what lets a group of N mutually dependent declarations be
+# inferred against ONE shared set of monomorphic assumptions and then generalized
+# together, per Haskell 2010 §4.5.2. A group of one runs both halves back to back
+# and is indistinguishable from the old code.
+
+# `group_env_ftv` is the SAME value that must later reach generalize:
+# canonicalize_constrained_constraints (inside check_fn_body) computes a
+# constraint's binder position with the identical ftv-difference, and the two
+# disagreeing would misindex every hidden dictionary. For a group it excludes
+# EVERY member's own placeholders, not just this member's.
+fn infer_fn_decl(
+  state: unifier.InferState,
+  decl: ast.Decl,
+  env: Dict types.Scheme,
+  subst: Dict types.Type,
+  eff_subst: Dict types.Effect,
+  alias_env: Dict types.Type,
+  group_env_ftv: List String
+) -> (FnInferResult, Dict types.Type) !{IO} =
+  match decl with
+  | ast.FnDecl name _ _ _ _ _ decl_pos ->
+      do
+        (r, fwd_markers, decl_constraints, body_subst) <- check_fn_body(state, decl, env, subst, eff_subst, alias_env, group_env_ftv)
+        match r with
+        | typed_ast.BodyErr pos e -> (FnInferErr(pos, e), body_subst)
+        | typed_ast.BodyLenient ->
+            # BodyLenient is no longer produced (fn_body_err always returns BodyErr).
+            # Retained as a constructor only to avoid breaking the typed_ast public API.
+            (FnInferErr(no_pos(), "internal: unexpected BodyLenient in " ++ name), body_subst)
+        | typed_ast.BodyOk typed_body inferred_fn_type ->
+            # A skolem reaching the decl's own type escaped a match branch, and
+            # generalize cannot notice: a skolem is a rigid TConst, so it has no
+            # free type variables for the ftv-difference to quantify. Being
+            # unquantified it is then NOT refreshed at instantiation, so it would
+            # become one rigid type shared by every call site — which is how an
+            # unannotated one-line unboxer both printed a String as a raw address
+            # and silently merged two unpacks that `existential_merge` rejects
+            # directly. The annotated form errors earlier (the rigidity scan sees
+            # the skolem as a TConst); only the unannotated-return path reaches here.
+            if types.type_mentions_skolem(inferred_fn_type)
+            then (FnInferErr(decl_pos, skolem_escape_msg(name)), body_subst)
+            else (FnInferOk (FnInferred(decl, typed_body, inferred_fn_type, fwd_markers, decl_constraints, group_env_ftv)),
+                  body_subst)
+  | _ -> (FnInferErr(no_pos(), "internal: infer_fn_decl on a non-FnDecl"), subst)
+
+# Bind one member into the env at its group's boundary.
+#
+# `needs_resolve` is true for every member EXCEPT the one that produced
+# `final_subst` — the last checked. Earlier members were typed against a prefix of
+# the group's substitution, so their bodies still carry variables a later sibling
+# resolved. Re-resolving them here is cheaper and safer than re-inferring: a
+# second inference pass would record every member's effect report twice.
+# It is skipped for the last member because apply_subst is idempotent against a
+# fixed substitution, so the walk would be pure cost — which on a 3000-declaration
+# bundle is not a rounding error.
+fn commit_fn_decl(
+  inf: FnInferred,
+  final_subst: Dict types.Type,
+  needs_resolve: Bool,
+  env: GlobalEnv,
+  env_ftv: List String
+) -> (typed_ast.TypedDecl, GlobalEnv, List String) =
+  match inf with
+  | FnInferred decl typed_body0 inferred0 fwd_markers decl_constraints group_env_ftv ->
+      match decl with
+      | ast.FnDecl name params ret_type_maybe effects_maybe constraints _ _ ->
+          let typed_body = if needs_resolve then apply_subst_typed_expr(final_subst, typed_body0) else typed_body0
+              inferred_fn_type = if needs_resolve then unifier.apply_subst(final_subst, inferred0) else inferred0
+          in
+            (typed_ast.TFnDecl(name, params, ret_type_maybe, effects_maybe, constraints, typed_body),
+             # WHY: fold @eta_fwd markers into the global env so lowering can map fresh
+             # TVar names back to programmer constraint var names when eta-expanding
+             # class methods in value position. Keys use @eta_fwd: prefix (not @fwd:)
+             # to avoid polluting the per-function @fwd: namespace scanned by
+             # resolve_via_fwd_for_prog_var. Keys are globally unique (one InferState).
+             fold_fwd_markers(fwd_markers,
+               GlobalEnv(dict_set(name,
+                 types.scheme_with_constraints(
+                   unifier.generalize(group_env_ftv, dict_empty(), dict_empty(),
+                     inferred_fn_type, effect_from_maybe_labels(effects_maybe)),
+                   decl_constraints),
+                 global_env_dict(env)))),
+             # WHY: @eta_fwd markers have free type variables that must be included
+             # in env_ftv so subsequent declarations don't incorrectly generalize
+             # over them. Computed once per declaration → stays O(n).
+             types.list_union(unifier.ftv_env(fwd_markers), env_ftv))
+      | _ -> (typed_ast.TPassThrough(decl), env, env_ftv)
 
 fn typecheck_decl(
   state: unifier.InferState,
@@ -6169,54 +6497,14 @@ fn typecheck_decl(
         GlobalEnv(mark_type_multiplicity(rec_name, mult,
           register_record_fields(rec_name, type_params, fields, global_env_dict(env)))),
         env_ftv, subst)
-  | ast.FnDecl name params ret_type_maybe effects_maybe constraints _ decl_pos ->
-      do
-        # decl_env_ftv, not env_ftv, and the SAME value must reach check_fn_body
-        # and generalize below: canonicalize_constrained_constraints computes a
-        # constraint's binder position with the very same ftv-difference that
-        # generalize uses, and the two disagreeing would misindex every hidden
-        # dictionary. See own_unann_vars for why the subtraction is needed.
-        let decl_env_ftv = env_ftv_for_decl(env_ftv, own_unann_vars(name, params, ret_type_maybe))
-        (r, fwd_markers, decl_constraints, body_subst) <- check_fn_body(state, decl, global_env_dict(env), subst, eff_subst, alias_env, decl_env_ftv)
-        # WHY: @eta_fwd markers added here have free type variables that must be
-        # included in env_ftv so subsequent declarations don't incorrectly generalize
-        # over them.  Computed once per declaration (not per env entry) → stays O(n).
-        let new_env_ftv = types.list_union(unifier.ftv_env(fwd_markers), env_ftv)
-        match r with
-        | typed_ast.BodyErr pos e -> TypedDeclErr(pos, e)
-        | typed_ast.BodyLenient ->
-            # BodyLenient is no longer produced (fn_body_err always returns BodyErr).
-            # Retained as a constructor only to avoid breaking the typed_ast public API.
-            TypedDeclErr(no_pos(), "internal: unexpected BodyLenient in " ++ name)
-        | typed_ast.BodyOk typed_body inferred_fn_type ->
-            # A skolem reaching the decl's own type escaped a match branch, and
-            # generalize cannot notice: a skolem is a rigid TConst, so it has no
-            # free type variables for the ftv-difference to quantify. Being
-            # unquantified it is then NOT refreshed at instantiation, so it would
-            # become one rigid type shared by every call site — which is how an
-            # unannotated one-line unboxer both printed a String as a raw address
-            # and silently merged two unpacks that `existential_merge` rejects
-            # directly. The annotated form errors earlier (the rigidity scan sees
-            # the skolem as a TConst); only the unannotated-return path reaches here.
-            if types.type_mentions_skolem(inferred_fn_type)
-            then TypedDeclErr(decl_pos, skolem_escape_msg(name))
-            else
-            TypedDeclOk(
-              typed_ast.TFnDecl(name, params, ret_type_maybe, effects_maybe, constraints, typed_body),
-              # WHY: fold @eta_fwd markers into the global env so lowering can map fresh
-              # TVar names back to programmer constraint var names when eta-expanding
-              # class methods in value position. Keys use @eta_fwd: prefix (not @fwd:)
-              # to avoid polluting the per-function @fwd: namespace scanned by
-              # resolve_via_fwd_for_prog_var. Keys are globally unique (one InferState).
-              fold_fwd_markers(fwd_markers,
-                GlobalEnv(dict_set(name,
-                  types.scheme_with_constraints(
-                    unifier.generalize(decl_env_ftv, dict_empty(), dict_empty(),
-                      inferred_fn_type, effect_from_maybe_labels(effects_maybe)),
-                    decl_constraints),
-                  global_env_dict(env)))),
-              new_env_ftv,
-              body_subst)
+  | ast.FnDecl name _ _ _ _ _ decl_pos ->
+      # Unreachable. typecheck_group routes EVERY FnDecl through typecheck_fn_group,
+      # which is the single implementation of infer-then-commit. This arm exists
+      # because the match must stay exhaustive, and it fails loudly rather than
+      # re-implementing the path: two implementations of group inference is exactly
+      # how the group and non-group cases would drift apart unnoticed.
+      TypedDeclErr(decl_pos,
+        "internal: FnDecl reached typecheck_decl, so binding-group routing is broken (" ++ name ++ ")")
   | ast.ExternFnDecl name params ret_type_maybe effects_maybe ext_pos ->
       # An extern has no BODY, so `fn_linear_gate` (and with it the
       # "modifier only on a linear parameter" guard) never ran on one: an FFI
