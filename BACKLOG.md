@@ -770,6 +770,34 @@ Legend:
   This corrects the note that said aliases could be crossed.
   `spec-v0.md` §7 rule 16's "Order dependence (v0 limitation)" paragraph is gone, replaced by
   "Declaration order is not significant". Design: `docs/binding-group-inference-v0.md` §7.3.
+- [ ] `P2` **Polymorphic recursion is unsupported, and a type signature does not enable it.**
+  A function calling itself at a *different* type than it was called with is rejected even when
+  fully annotated. `fn_body_env` binds a declaration's own name inside its own body to
+  `types.mono(inst_type)` — **unconditionally**, whether or not a signature was written — so the
+  self-call is forced to the enclosing declaration's type. Haskell 2010 §4.5.2 makes the
+  signature the way out (*"a type signature can be used to specify a type more general than the
+  one that would be inferred"*); Sprout implements the monomorphic half and not that one.
+  Measured 2026-08-25 on the canonical non-uniform datatype
+  (`type Nest a = | NestNil | NestCons a (Nest (a, a))`), with a complete signature:
+  ``Call type mismatch: Infinite type: $t2143 occurs in ($t2143, $t2143) in function
+  main.nest_size`` — the occurs-check failure IS `a` unified with `(a, a)`.
+  **The defect is localised.** The datatype registers fine, and the identical signature on a
+  NON-recursive function is accepted, generalized to `forall a. main.Nest a -> Int`, and used at
+  both `Nest Int` and `Nest (Int, Int)` from another binding group. Only the self-call fails.
+  **Fix:** when a declaration has a COMPLETE signature — every parameter annotated and the return
+  annotated — bind its own name in its body to the declared, generalized scheme rather than to
+  `types.mono(inst_type)`. A complete signature is a promise the caller already relies on. The
+  monomorphic binding must stay for any declaration with an omitted slot: that is where the
+  placeholder lives, and the whole of the `_unann` fix depends on it.
+  **Care needed:** `fn_body_env`'s self-binding carries the constraint field (§13.3(B) S4) so a
+  recursive self-call injects forwarded dictionaries from the Scheme; the replacement must keep
+  that. And `rigidity_violation` already enforces that written variables stay abstract in the
+  body, so the two should compose — but that is an expectation, not a measurement.
+  **Correction this filing makes:** the commit that landed §4.5.1 and earlier drafts of
+  `docs/binding-group-inference-v0.md` said polymorphic recursion "requires a signature" and was
+  the last place a top-level annotation was needed. Both were wrong — carried from Haskell's rule
+  without being run. `spec-v0.md` §7 rule 16 and the design doc §8 now say the construct is
+  unavailable rather than annotation-gated.
 - [ ] `P3` **Make a top-level `let` visible above its own declaration.** Forward-referencing one
   is `Unknown variable: main.cfg` today (measured 2026-08-25) — `pre_scan_fn_decls` has no
   `LetDecl` arm, so the name is simply not in scope above its declaration. This is NOT a

@@ -1,9 +1,9 @@
 # Binding-group inference — completing Hindley–Milner at the top level (v0)
 
-> **Status: complete.** All four parts of §6 are implemented and gated. The one
-> case that still requires an annotation is polymorphic recursion (§8), which is
-> not inferable in general. `docs/spec-v0.md` §7 rule 16 carries the normative
-> rule, and no longer carries an order-dependence carve-out.
+> **Status: complete.** All four parts of §6 are implemented and gated.
+> `docs/spec-v0.md` §7 rule 16 carries the normative rule, and no longer carries
+> an order-dependence carve-out. **Polymorphic recursion remains unsupported, and
+> — corrected 2026-08-25 — an annotation does not enable it (§8).**
 
 ## 1. Problem statement
 
@@ -324,18 +324,69 @@ anyway and falls back to source order if it fails: reordering improves
 *completeness*, so losing it degrades diagnostics, whereas dropping a declaration
 corrupts output — worth trading the first for certainty about the second.
 
-## 8. The one case HM cannot infer
+## 8. Polymorphic recursion — still unsupported, and an annotation does not help
+
+**Corrected 2026-08-25.** Earlier drafts of this document, and the commit message
+that landed §4.5.1, said polymorphic recursion "requires a signature" and was
+therefore the last place a top-level annotation was needed. That is wrong. Writing
+the signature does not make it compile. The claim was carried from Haskell's rule
+without being run.
 
 **Polymorphic recursion** — a function calling itself at a *different* type than
-it was called with — is not inferable in general. Haskell 2010 §4.5.2:
+it was called with — is not inferable in general. Haskell 2010 §4.5.2 gives the
+signature as the way out:
 
 > *"Polymorphic recursion allows the user to supply the more general type
 > signature… a type signature can be used to specify a type more general than the
 > one that would be inferred."*
 
-This is now the *only* place a top-level annotation is required, which is what
-makes `README.md:43`'s "most code needs no annotations" precise rather than
-aspirational.
+Sprout does not implement that half. `fn_body_env` binds a function's own name,
+inside its own body, to `types.mono(inst_type)` — **unconditionally**, whether or
+not a signature was written. So a self-call is forced to the same type as the
+enclosing declaration, and the classic shape fails:
+
+```sprout
+# A "nested" (non-uniform) datatype: each tail holds PAIRS of what the head held.
+type Nest a =
+  | NestNil
+  | NestCons a (Nest (a, a))
+
+# Called at `Nest a`, calls itself at `Nest (a, a)`.
+fn nest_size(n: Nest a) -> Int =
+  match n with
+  | NestNil -> 0
+  | NestCons _ rest -> 1 + 2 * nest_size(rest)
+```
+```
+15:41: ERROR: check: Call type mismatch:
+  Infinite type: $t2143 occurs in ($t2143, $t2143) in function main.nest_size
+```
+
+That occurs-check failure *is* the monomorphic self-binding: `a` unified with
+`(a, a)`.
+
+Neither the datatype nor generalization is at fault, which is worth showing
+because it localises the defect precisely. The same signature on a function that
+does **not** call itself is accepted, generalized, and usable at two different
+instantiations from another binding group:
+
+```
+main.shallow : forall a. main.Nest a -> Int      # used at Nest Int AND Nest (Int, Int)
+```
+
+Only the self-call fails.
+
+**The fix is the standard one**, and it is small: when a declaration has a
+*complete* signature — every parameter annotated and the return annotated — bind
+its own name inside its body to the declared, generalized scheme instead of to the
+monomorphic instantiation. A complete signature is a promise the caller already
+relies on; there is no reason the body may not rely on it too. The monomorphic
+binding must stay for any declaration with an omitted slot, because that is where
+the placeholder lives and the whole of §2 applies. Tracked in `BACKLOG.md`.
+
+Until that lands, the honest statement of `README.md:43` is: inference needs no
+annotations anywhere it can succeed, and the one construct it cannot express is
+unavailable rather than annotation-gated.
 
 ## 9. Risks and how they were checked
 
