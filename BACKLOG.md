@@ -4557,7 +4557,34 @@ there in its Appendix C. None is in scope for that change.
 
 - [x] `P3` **Golden-IR corpus diff for codegen changes. LANDED 2026-08-06** (gate wiring; corpus and scripts predated it). A codegen change's blast radius is now *visible and reviewable* rather than trusted: `just ir-golden-diff` byte-diffs `--use-ir-codegen` output for 57 corpus files (`examples/*.sprout` + `tests/smoke_shapes/*.spr`) against committed goldens in `tests/golden/ir/`, and runs in `gate` + `ci-fast-gates`; `just ir-golden-snapshot` refreshes. Design questions the item raised, as resolved: golden storage is **committed whole `.ll` files** (not inline `CHECK` lines) because the review value is seeing the *entire* diff; **no normalization** — the diff is byte-exact, accepting golden churn on every intentional codegen change as the price of catching unintended ones; refresh ergonomics are the snapshot recipe. Cautionary note for whoever extends this: the corpus and both scripts were written and 57 goldens committed, but nothing ever *invoked* them and this item was never closed — so the corpus silently rotted for months while reading as coverage. `gate-audit` assertion B now fails on any `scripts/*.sh` that nothing invokes, so that specific failure mode cannot repeat.
 
-- [ ] `P2` **`test-stdlib-stage1` does not depend on `bootstrap-from-seed`, so it can silently test a stale compiler.** `test-stdlib-stage1`/`test-stdlib-core-stage1`/`test-stdlib-compiler-stage1` and the three `_test-reject` gates all take the stage-1 binary as a path argument and only check `[[ -x ]]` — unlike `test-conformance-run` and `test-package-resolution`, which declare `bootstrap-from-seed` as a `just` dependency. Consequence: after switching branches (or editing `runtime/*.c` without rebuilding), `just test` happily runs the whole suite against whichever binary happens to be in `build/`. Hit for real on 2026-08-08: a branch switch reverted `runtime/sprout_runtime.c` to its unfixed state while `build/compile_driver_bin_stage1` still contained the fix, and the suite reported green for a compiler that was not in the working tree — measurements taken in that state were off by the whole size of the fix. `bootstrap-from-seed` already has a cheap mtime freshness guard (a few `stat` calls when everything is current), so adding it as a dependency to the stdlib/reject recipes costs ~nothing and closes the hole. Until then, treat `just bootstrap-from-seed` as mandatory after any branch switch or runtime edit.
+- [x] `P2` **`test-stdlib-stage1` does not depend on `bootstrap-from-seed`, so it can silently test a
+  stale compiler. DONE 2026-08-25** — `bootstrap-from-seed` is now a dependency of all eight gate
+  recipes that consume the stage-1 binary, and `just seed-dep-check`
+  (`scripts/seed_dep_check.sh`, wired into `gate` and `ci-fast-gates`) keeps it that way.
+  **The entry understated it in two ways.** First, the hole was not limited to a branch switch: `just
+  test` was internally inconsistent, and one invocation could test TWO compilers. `just` runs a
+  recipe's dependencies in order, each fully, before the next — so in
+  `test: test-stdlib-stage1 test-type-errors test-parse-errors test-executable-errors
+  test-conformance-run …` only the LAST three declared `bootstrap-from-seed`, and the first four had
+  already run against the stale binary by the time it was rebuilt. Measured with
+  `just --dry-run test`: the four consumers appeared at output lines 3/90/168/246 and the bootstrap
+  first at line 324. After the fix the bootstrap is at line 3 and every consumer follows it. Depending
+  on the AGGREGATE is therefore not a fix; the dependency has to sit on each consuming recipe, which
+  is the invariant the new check asserts.
+  Second, it named four recipes; a check written as a property over the recipe graph rather than a
+  list of names found **six** in the gate closure. The extras were `compile-examples-stage1` — which
+  is **AGENTS.md Definition of Done #6**, so a DoD gate could answer about the previous compiler — and
+  `compile-bench`. `test-stdlib-core-stage1`/`test-stdlib-compiler-stage1` were fixed too: they are
+  outside the `gate` closure (`gate-audit`'s EXCLUDE covers them via `test-stdlib-stage1`) so the
+  check does not see them, but **CI runs them directly**, which is where it matters most.
+  **This closes ONE staleness axis, not staleness.** `bootstrap-from-seed` rebuilds the binary from
+  `bootstrap/compile_driver.ll`, comparing mtimes against the seed and `runtime/*.c` and nothing else
+  — `stdlib/compiler/*.sprout` is still not in that comparison. So binary-vs-seed drift is now
+  gated; **seed-vs-source drift is not**, and AGENTS.md DoD #12's "RESEED BEFORE YOU DIFF" rule stands
+  unchanged. Running `just refresh-seed` before any gate whose answer depends on a compiler-source
+  edit remains mandatory.
+  RED-verified before the fix (6 violations, exit 1) and by mutation after it (removing the
+  dependency from `test-type-errors` alone reproduces a single MISSING DEP).
 
 - [ ] `P2` **Audit every `extern fn` for C-definition/IR-declaration signature mismatches.**
   **PARTLY ADDRESSED — re-scoped 2026-08-24.** The *duplicate-declaration* half of increment
