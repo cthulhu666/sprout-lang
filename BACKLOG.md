@@ -3568,6 +3568,15 @@ and `docs/linear-types-m4.2-enforcement-2026-08-06.md`. Deferred, in the order t
   a linear field is not itself linear (contrast Austral, which computes linearity by containment).
   Decide whether to adopt virality; if so, compute a type's linearity from its fields' universes
   rather than only its own `@linear:` marker.
+  **Design note written 2026-08-26: [docs/linearity-virality-v0.md](docs/linearity-virality-v0.md),
+  awaiting a call.** This entry and the `P1` "a linear value dropped *inside a container*" below
+  are the SAME question — the `P1` is not independently fixable, because "catch drops inside
+  containers" *is* deciding this. Do not work either one in isolation. The note also finds that
+  Sprout already answers containment inconsistently (`type_mentions_linear` in statement position
+  vs head-only `type_is_linear` at the binder, both measured), so this is closing an existing
+  incoherence rather than adding a rule. The note recommends the binder-only scope first and asks
+  that full virality be decided jointly with the effect-bind `P2` above, which wants the opposite
+  answer for parameters.
 - [ ] `P3` **Cross-module linear-reject conformance coverage.** The `type_error` harness invokes
   `--phase check` without `--package-root`, so a cross-module *misuse* of an imported `type linear`
   cannot be expressed as a conformance fixture. Cross-module enforcement is verified manually and
@@ -3744,6 +3753,20 @@ and `docs/linear-types-m4.2-enforcement-2026-08-06.md`. Deferred, in the order t
 - [ ] `P1` **A linear value dropped *inside a container* is not caught — `let..in` binder path**
   (found 2026-08-10 while designing the green-task pool, `docs/green-task-pool-v0.md` §7.4). A bare
   drop is caught; wrapping the value in anything hides it:
+
+  **Design note written 2026-08-26: [docs/linearity-virality-v0.md](docs/linearity-virality-v0.md),
+  awaiting a call — do not implement before reading it.** All five rows below re-verified against
+  `f8556ab0`; the table is accurate. Three things the note adds. (1) This is **the same question**
+  as the `P3` "Containment virality" above, so it is not independently fixable — the note is
+  written against both. (2) The root cause is one predicate: `linear_check.sprout:190` calls
+  head-only `type_is_linear` while the discarded-`do`-step rule at `:1034` calls the containment-
+  aware `type_mentions_linear`, so `Maybe Res` is already a leak in statement position and not in
+  binder position (both measured). The containment predicate ships today. (3) A one-line swap at
+  `:190` was built via `just build-stage2` and measured: it closes all four rows **including the
+  user-ADT `Box` row** (it walks `TApp` structurally rather than enumerating containers), keeps the
+  single-use control compiling, and is corpus-neutral — `test-stdlib-stage2` all suites passed and
+  all 52 examples compiled. Note it also makes *reuse* fire on containers, which is correct under
+  linear semantics but is a new restriction; see §7 of the note.
 
   | shape | result |
   |---|---|
