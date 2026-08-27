@@ -36,11 +36,15 @@ explicitly. The placement rule:
 > Otherwise it moves to a module — but only to a **leaf** module, or one its
 > consumers would import anyway.
 
-The leaf qualifier is load-bearing, because there is no cross-module dead-code
-elimination: `import stdlib.X` emits every definition in `X` and everything `X`
-imports, whether called or not. Homing `env_get` in `stdlib.process` was measured
-at 247 extra lines of IR in a demo that reads one variable; a leaf `stdlib.env`
-costs 23.
+**The leaf qualifier stopped being load-bearing on 2026-08-27.** It existed
+because there was no cross-module dead-code elimination: `import stdlib.X` emitted
+every definition in `X` and everything `X` imported, whether called or not. Homing
+`env_get` in `stdlib.process` was measured at 247 extra lines of IR in a demo that
+reads one variable, against 23 for a leaf `stdlib.env`. `dce.elim_unreachable` now
+drops every declaration the entry point cannot reach, so an unused import
+contributes nothing and neither figure reproduces. See
+[spec-v0.md §3](spec-v0.md) — the qualifier is retained in the rule pending a
+decision to remove it, which is a design change rather than a correction.
 
 Note that an extern is invisible to the module system — the bundler never
 registers extern names, so `export` on one is inert and a moved extern is still

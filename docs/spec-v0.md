@@ -178,11 +178,19 @@ The governing rule:
 > declared in the module that owns its surface — but only if that module is a
 > **leaf**, or one its consumers would import anyway.
 
-The leaf qualifier is normative rather than stylistic because there is no
-cross-module dead-code elimination: importing a module emits every definition in
-it and in everything it imports, called or not. Homing an extern in a module that
-its consumers do not otherwise want makes every one of them carry that module's
-whole body.
+**The leaf qualifier no longer has a cost basis.** It was normative rather than
+stylistic because there was no cross-module dead-code elimination — importing a
+module emitted every definition in it and in everything it imported, called or
+not — so homing an extern in a module its consumers did not otherwise want made
+every one of them carry that module's whole body. That stopped being true on
+2026-08-27: `dce.elim_unreachable` drops every declaration the entry point cannot
+reach, so an unused import contributes nothing. The measurement that made the
+qualifier normative, 247 extra lines of IR for one `env_get` in `stdlib.process`,
+no longer reproduces.
+
+The qualifier is left in the rule above pending a decision to remove it, because
+repealing a normative rule is a design change rather than a correction. Tracked
+in `BACKLOG.md` on the closed cross-module-DCE item.
 
 ## 4. Types
 
