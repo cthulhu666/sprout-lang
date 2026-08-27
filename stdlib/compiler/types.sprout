@@ -688,9 +688,61 @@ fn rename_vars_list(vars: List String, rename: Dict String) -> List String =
       | Just new_name -> Cons(new_name, rename_vars_list(rest, rename))
       | Nothing -> Cons(v, rename_vars_list(rest, rename))
 
-fn scheme_to_string_renamed(vars: List String, t: Type, eff: Effect) -> String =
-  "forall " ++ join_list(" ", rename_vars_list(vars, rename)) ++ ". " ++ type_to_string(apply_rename_type(rename, t)) ++ scheme_effect_suffix(t, eff)
+fn scheme_to_string_renamed(vars: List String, t: Type, eff: Effect,
+                            constraints: List (String, String)) -> String =
+  "forall " ++ join_list(" ", renamed) ++ ". " ++ type_to_string(apply_rename_type(rename, t)) ++ scheme_effect_suffix(t, eff) ++ where_suffix(renamed, constraints)
   where rename = build_var_rename(vars, 0, dict_empty())
+        renamed = rename_vars_list(vars, rename)
+
+# The scheme's class constraints as a source-shaped `where` clause.
+#
+# A rendered scheme that drops them is the type of nothing: `minimum` reads as
+# `forall a b. a b -> Maybe b`, a higher-kinded application with no stated reason to
+# exist. The constraint is what makes the variable unresolvable, so it is the half of the
+# answer the reader is missing.
+#
+# Head tokens are decoded against the RENAMED binder list, so the clause names the same
+# variables the type does rather than the inference engine's internal names.
+#
+# Only the quantified branch calls this. A monomorphic scheme's rendering is not merely
+# read — `analysis_service_driver.make_eval_source` tests it for a trailing effect to
+# decide how to run an expression — and a constraint on a concrete head is already
+# discharged, so there is nothing there for a reader either.
+fn where_suffix(renamed_vars: List String, constraints: List (String, String)) -> String =
+  match constraint_terms(renamed_vars, constraints) with
+  | Nil -> ""
+  | terms -> " where " ++ join_list(", ", terms)
+
+fn constraint_terms(renamed_vars: List String,
+                    constraints: List (String, String)) -> List String =
+  match constraints with
+  | Nil -> Nil
+  | Cons pair rest ->
+      match pair with
+      | (head, class_name) ->
+          match constraint_head_name(renamed_vars, head) with
+          | Just name -> Cons(class_name ++ " " ++ name, constraint_terms(renamed_vars, rest))
+          | Nothing -> constraint_terms(renamed_vars, rest)
+
+# "#pos:<k>" → the k-th binder's display name; "#app:<Name>" and a bare "<Name>" → the
+# constructor itself; "#none" and "" → a headless obligation, which names no type and so
+# has nothing to print. A position past the end of the binder list is skipped rather than
+# guessed: naming the wrong variable is worse than naming none.
+fn constraint_head_name(renamed_vars: List String, head: String) -> Maybe String =
+  if head == "" || head == "#none" then Nothing
+  else if str_starts_with(head, "#pos:") then
+    match parse_int(str_slice(head, 5, str_len(head))) with
+    | Nothing -> Nothing
+    | Just k -> nth_string(renamed_vars, k)
+  else if str_starts_with(head, "#app:") then Just(str_slice(head, 5, str_len(head)))
+  else Just(head)
+
+fn nth_string(xs: List String, k: Int) -> Maybe String =
+  if k < 0 then Nothing
+  else
+    match xs with
+    | Nil -> Nothing
+    | Cons h t -> if k == 0 then Just(h) else nth_string(t, k - 1)
 
 # A type rendered with the given variables shown as `a`, `b`, … instead of the inference engine's
 # internal `$t` names. A diagnostic that names a type the user did not write needs this: `$t2150`
@@ -701,7 +753,7 @@ export fn type_to_string_renamed(vars: List String, t: Type) -> String =
 export fn scheme_to_string(s: Scheme) -> String =
   match scheme_vars(s) with
   | Nil -> scheme_body(s)
-  | vars -> scheme_to_string_renamed(vars, scheme_type(s), scheme_effects(s))
+  | vars -> scheme_to_string_renamed(vars, scheme_type(s), scheme_effects(s), scheme_constraints(s))
 
 # ---------------------------------------------------------------------------
 # Eq and ToString instances — required by stdlib.test assert_eq
