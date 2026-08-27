@@ -2783,6 +2783,19 @@ what the LSP actually does: `docs/language-server-roadmap.md`.
   a binary pure/effectful colour cannot express an effect variable while text can. Unverified and
   worth checking first: whether the JetBrains LSP client can map *custom* semantic token modifiers to
   text attributes at all — its public docs cover semantic tokens in one line.
+- [ ] `P3` **A rendered type shows module-qualified names for anything declared in the
+  buffer (2026-08-27).** `:type make_box` for a source-local `type Box a` answers
+  `forall a. a -> $entry.Box a`; in the REPL, whose session module is `app.session`, it
+  answers `app.session.Box`. `types.type_to_string` prints `type_id_name`, which is the
+  canonical qualified name — the prelude's types read unqualified only because the prelude
+  has no module header. Diagnostics do not have this problem: every `Diagnostic` is built
+  through `compiler.diag_error`, which applies `source.strip_entry_names`. A rendered
+  scheme has no equivalent boundary. Found while adding the `where`-clause rendering,
+  which inherits the same qualification for the class name (`where $entry.MyShow a`) —
+  hence `test_expr_type_in_source` matches the class name without its prefix rather than
+  pinning the leak as intended. **`strip_entry_names` alone is not the fix:** it addresses
+  `$entry.` (headerless buffers) and not `app.session.`, which is what a REPL user
+  actually sees. Wants a display-name rule that knows which module the reader is in.
 - [ ] `P2` **Hover answers only for top-level names; a local or a parameter returns null
   (2026-08-18).** Measured on the real server: hovering `n` in `fn fizzbuzz(n: Int) -> String`
   (`examples/fizzbuzz.sprout`) answers `"result":null`, so the editor shows nothing. Not a defect in

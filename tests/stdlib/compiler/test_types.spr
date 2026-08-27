@@ -25,5 +25,49 @@ fn main() -> Unit !{IO} =
     check_eq("type_to_string Int", types.type_to_string(types.TConst(types.type_id("Int"))), "Int"),
     check_eq("type_to_string TVar", types.type_to_string(types.TVar(types.tyvar_id("a"))), "a"),
     check_eq("effect_to_string pure", types.effect_to_string(types.EffectPure), "pure"),
-    check_eq("effect_to_string io", types.effect_to_string(types.EffectIO), "!{IO}")
+    check_eq("effect_to_string io", types.effect_to_string(types.EffectIO), "!{IO}"),
+
+    # A rendered scheme that drops its constraints is not the type of anything. Without
+    # the where clause, `minimum` reads as `forall a b. a b -> Maybe b` — a higher-kinded
+    # application with no explanation, which is worse than saying nothing.
+    check_eq("a positional constraint renders as a where clause",
+      types.scheme_to_string(types.scheme_quantified(Cons("x", Nil),
+        types.TFunc(types.TVar(types.tyvar_id("x")), types.type_string(), types.EffectPure, types.OwnConsume),
+        types.EffectPure, Cons(("#pos:0", "MyShow"), Nil))),
+      "forall a. a -> String where MyShow a"),
+
+    # The head token decodes against the RENAMED binders, so `#pos:0` prints as `a`
+    # whatever the inference engine called the variable.
+    check_eq("a concrete head renders by name, beside a positional one",
+      types.scheme_to_string(types.scheme_quantified(Cons("x", Nil),
+        types.TApp(types.TConst(types.type_id("Box")), types.TVar(types.tyvar_id("x"))),
+        types.EffectPure, Cons(("#pos:0", "Show2"), Cons(("Box", "Fold2"), Nil)))),
+      "forall a. Box a where Show2 a, Fold2 Box"),
+
+    # The clause follows the effect, matching how a signature is written.
+    check_eq("the where clause follows the effect suffix",
+      types.scheme_to_string(types.scheme_quantified(Cons("x", Nil),
+        types.TFunc(types.TVar(types.tyvar_id("x")), types.type_string(), types.EffectIO, types.OwnConsume),
+        types.EffectIO, Cons(("#pos:0", "MyShow"), Nil))),
+      "forall a. a -> String !{IO} where MyShow a"),
+
+    # A headless constraint names no type, so there is nothing to print it against.
+    check_eq("a headless constraint contributes nothing",
+      types.scheme_to_string(types.scheme_quantified(Cons("x", Nil),
+        types.TVar(types.tyvar_id("x")), types.EffectPure, Cons(("#none", "Sized"), Nil))),
+      "forall a. a"),
+
+    check_eq("an unconstrained scheme renders no where clause",
+      types.scheme_to_string(types.scheme_quantified(Cons("x", Nil),
+        types.TVar(types.tyvar_id("x")), types.EffectPure, Nil)),
+      "forall a. a"),
+
+    # The monomorphic branch is deliberately untouched: its rendering is not just read by
+    # a human, it is sniffed by the REPL's eval path to decide how to run an expression
+    # (`analysis_service_driver.make_eval_source` tests for a trailing ` !{IO}`). A
+    # discharged concrete constraint is also nothing the user needs to see.
+    check_eq("a monomorphic scheme renders no where clause",
+      types.scheme_to_string(types.scheme_quantified(Nil, types.type_int(), types.EffectPure,
+        Cons(("Int", "ToString"), Nil))),
+      "Int")
   ])

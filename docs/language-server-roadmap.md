@@ -58,6 +58,26 @@ editor and IDE support.
 >   hovered as plain `Unit`. Not hover-only: the REPL's `:type` and the analysis service
 >   read the same function. Measured on the real server, `fn main() -> Unit !{IO}` before
 >   and after: `Unit` → `Unit !{IO}`
+> - ~~a constrained name could not be asked about at all~~ **done**: the sentinel is a
+>   synthesized top-level `let`, so it answers to the rules a top-level `let` answers to —
+>   including `infer.let_dict_ambiguity_msg`, which rejects one that generalizes a type
+>   variable it needs a class dictionary for. Right for a module, wrong for a question:
+>   `:type minimum` answered "a top-level binding holds a single value, so the instance
+>   cannot be picked per use", describing a binding nobody wrote, and every constrained
+>   prelude name (`minimum`, `maximum`, `min_by`) was unaskable — evaluating one was an
+>   error rather than the `<fn: …>` display that already existed for it. When the
+>   augmented check fails, the source is now checked **alone** and a bare name answered
+>   from its own scheme; an expression has no env entry, so a real type error in one keeps
+>   its diagnostics. A same-file constrained name never hit this — every reproduction
+>   references a name from another module
+> - ~~a rendered scheme dropped its constraints~~ **done**: `types.scheme_to_string` now
+>   emits the `where` clause, so `minimum` reads `forall a b. a b -> Maybe b where
+>   Foldable a, Ord b` instead of `forall a b. a b -> Maybe b` — a higher-kinded
+>   application with nothing to explain it. Head tokens decode against the *renamed*
+>   binders, so the clause names the variables the type does. Only the quantified branch
+>   renders it: a monomorphic scheme's rendering is sniffed by
+>   `analysis_service_driver.make_eval_source` for a trailing effect, and a constraint on
+>   a concrete head is already discharged
 > - ~~unimplemented methods~~ **done**: every JSON-RPC *request* now gets a reply
 >   (`-32601` when the method is not implemented); notifications stay silent. It used to
 >   end in `else ()`, dropping requests too. A real client sends four such methods on the

@@ -53,6 +53,15 @@ fn effectful_source() -> String =
     ++ "\n"
     ++ "fn ident(x: a) -> a = x\n"
 
+# A constrained polymorphic name declared in the source under test, as opposed to one
+# imported from the prelude. The two behave differently and both are pinned below.
+fn constrained_source() -> String =
+  "class MyShow a {\n"
+    ++ "  fn myshow(x: a) -> String\n"
+    ++ "}\n"
+    ++ "\n"
+    ++ "fn show_via(x: a) -> String where MyShow a = myshow(x)\n"
+
 fn source_using_package() -> String =
   "import demo.greet (greeting)\n"
     ++ "\n"
@@ -148,6 +157,50 @@ fn main() -> Unit !{IO} =
     call <- rendered_type(effectful_source(), "pure_boot()", sr, Nil, cache)
     assert_true(state, "a call expression is still typed through the sentinel",
       string.contains(call, "Int") && mentions_no_effect(call))
+
+    # --- a constrained name is a question, not a binding ---
+    #
+    # `:type minimum` made the sentinel into `let __repl_source_value = minimum`: a
+    # top-level binding that generalizes a variable it needs an `Ord` dictionary for.
+    # `infer.let_dict_ambiguity_msg` rejects exactly that, and is right to for a module —
+    # the binding is one slot holding one closure, so the instance picked at definition is
+    # the one every use gets. Here it described a binding nobody wrote, and made every
+    # constrained prelude name (`minimum`, `maximum`, `min_by`) unaskable.
+    prelude_constrained <- rendered_type(plain_source(), "minimum", sr, Nil, cache)
+    assert_true(state, "a constrained prelude name is typed, not rejected as a binding",
+      string.contains(prelude_constrained, "->"))
+
+    # The constraint is the reason the type has variables it cannot resolve, so an answer
+    # that drops it is not the type of anything: `a b -> Maybe b` is a higher-kinded
+    # application with nothing to explain it.
+    assert_true(state, "a constrained prelude name reports its constraints",
+      string.contains(prelude_constrained, "where ")
+        && string.contains(prelude_constrained, "Ord"))
+
+    # A constrained name declared in the SAME source always typed — every probe that
+    # reproduces the rejection references a name from another module (the prelude). So
+    # this is a control for the recovery above: the path that already worked must keep
+    # working, and must not start reporting through the fallback.
+    constrained <- rendered_type(constrained_source(), "show_via", sr, Nil, cache)
+    assert_true(state, "a same-file constrained name is still typed",
+      string.contains(constrained, "->"))
+
+    # Its constraint was dropped from the answer just the same, so it is the red case for
+    # the rendering even though it was never the red case for the rejection.
+    #
+    # The class name is matched WITHOUT its module prefix: a name declared in the buffer
+    # under test renders qualified (`$entry.MyShow`, or `app.session.MyShow` in the REPL),
+    # which the type body already does too — `make_box` renders as `a -> $entry.Box a`
+    # today, no constraint involved. Pinning the prefix here would pin a separate,
+    # pre-existing display defect as if it were intended.
+    assert_true(state, "a constrained name reports the constraint that makes it one",
+      string.contains(constrained, "where ") && string.contains(constrained, "MyShow a"))
+
+    # The recovery is for a NAME. An ill-typed expression has no env entry to fall back
+    # on, so its diagnostics survive — without this control, "answer from the env on any
+    # failure" would look identical and would swallow every real type error.
+    ill_typed <- rendered_type(plain_source(), "twice(true)", sr, Nil, cache)
+    assert_true(state, "an ill-typed expression still fails", ill_typed == "")
 
     # --- failures are distinguishable, so each caller can word its own message ---
     unknown <- compiler.scheme_of_expr_in_source(plain_source(), "nope", sr, Nil, cache)

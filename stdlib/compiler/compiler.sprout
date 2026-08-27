@@ -252,8 +252,37 @@ export fn scheme_of_expr_in_source(src: String, expr: String, stdlib_root: sourc
       result <- compile_source_with_cache_roots(
         augment_with_sentinel(src, expr), stdlib_root, extra_roots, cache)
       match result with
-      | CompileFail diags -> ExprCheckFailed(diags)
+      | CompileFail diags -> scheme_of_name_alone(src, expr, stdlib_root, extra_roots, cache, diags)
       | CompileOk env -> scheme_from_env(expr, env)
+
+# The sentinel is a synthesized top-level `let`, so it answers to the rules a top-level
+# `let` answers to — including the rejection of one that generalizes a type variable its
+# initializer needs a class dictionary for (`infer.let_dict_ambiguity_msg`). That rule is
+# right for a module and wrong for a question. `:type minimum` asks what `minimum` is, and
+# "a top-level binding holds a single value, so the instance cannot be picked per use"
+# describes a binding nobody wrote. It made a constrained prelude name (`minimum`,
+# `min_by`) unaskable, and evaluating one an error rather than the `<fn: …>` display that
+# already exists for it. A constrained name declared in the source under test does NOT hit
+# this — every reproduction references a name from another module.
+#
+# So when the augmented check fails, check the source ALONE and answer from the name's own
+# scheme. Only a bare name can be recovered this way, which is the point: an expression
+# has no env entry, so a real type error in one keeps its diagnostics rather than being
+# quietly replaced by an unrelated answer.
+#
+# The extra compile is on the failure path only. The successful case — every literal,
+# call and well-typed name — still costs exactly one.
+fn scheme_of_name_alone(src: String, expr: String, stdlib_root: source.StdlibRoot,
+                        extra_roots: List String, cache: bundler.LoadEnv,
+                        diags: List Diagnostic) -> ExprSchemeResult !{IO} =
+  do
+    result <- compile_source_with_cache_roots(src, stdlib_root, extra_roots, cache)
+    match result with
+    | CompileFail _ -> ExprCheckFailed(diags)
+    | CompileOk env ->
+        match env_scheme(string.trim(expr), env) with
+        | Just declared -> ExprSchemeOk(declared)
+        | Nothing -> ExprCheckFailed(diags)
 
 # A bare name answers with what it was DECLARED as; anything else goes through the
 # sentinel.
