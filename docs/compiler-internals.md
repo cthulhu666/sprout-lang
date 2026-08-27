@@ -233,6 +233,67 @@ Design + status: `docs/devirtualization-v0.md` (LANDED). A related but distinct 
   CPR routes it to that fn's `_worker` — the returned `Maybe`/tuple stays unboxed. This is what makes
   the rivers-demo `bake_tile` fully allocation-free (tuple SRA + devirt).
 
+## A function is live only if some `TVar` names it
+
+`dce.elim_unreachable` (`stdlib/compiler/dce.sprout`) drops every declaration the
+entry point cannot reach, and it runs on **every** emitted program — it is what
+keeps a six-line `module main` at 170 lines instead of 12,992. Its notion of an
+edge is exactly one thing: a `typed_ast.TVar` naming the callee.
+
+**So if you add a way to reach a function that is not a `TVar` in the typed AST,
+DCE will delete that function and the failure will surface as a link error, or as
+a missing typeclass instance at runtime.** Concretely, this is a constraint on:
+
+- **New evidence or dispatch nodes.** The pass is sound today only because
+  `lowering.lower_program` runs first and leaves nothing symbolic behind: it
+  expands `TDict` evidence into concrete instance-function references and
+  flattens each instance into `__tc_{Class}_{mangled}_{method}` `TFnDecl`s. A new
+  node that defers a reference past lowering must either be resolved before
+  `ir_pipeline`, or be given an arm in `refs_expr`. `refs_expr` **panics** on
+  `TDict`/`TMethodRef` rather than reporting "no references" precisely so this
+  fails loudly instead of silently pruning.
+- **Anything reached by a name that is a STRING LITERAL in codegen.** This is not
+  hypothetical — it is the one real bug this pass shipped with. Two nodes lower
+  to a prelude call whose callee name never appears as a `TVar`:
+
+  | node | emitted callee | site |
+  |---|---|---|
+  | `TRange` (`a..b`) | `range_up` | `ast_to_ir.sprout:1104` |
+  | `TBinary "++"` on lists | `list_append` | `ast_to_ir.sprout:5400` |
+
+  `refs_expr` roots both explicitly at those nodes. **If you add a third, root it
+  there too.** The failure mode is loud but arrives late: a pruned `range_up`
+  surfaces as `error: use of undefined value '@range_up'` when the emitted IR is
+  *parsed*, not as a compiler error — so it is caught only where test coverage
+  happens to exercise the syntax. `range_up` was found by `just test`; the whole
+  `examples/` + `smoke_shapes` corpus had missed it. To sweep for candidates:
+  intersect the stdlib's function names with the string literals in the codegen
+  modules — that comparison returns exactly these two plus `main` (the root) and
+  `append` (a name predicate in `ir_lowering`, not a call target).
+- **New entry points.** The root set is `is_entry_name` — bare `main` or
+  `<module>.main` — deliberately duplicating codegen's `ast_to_ir.is_entry_fn_name`
+  so the two cannot disagree about what the entry is. Adding a second entry
+  convention means changing both.
+
+The pass is intentionally imprecise in the safe direction: it collects `TVar`
+names **without tracking binders**, so a lambda parameter shadowing a top-level
+function keeps that function alive. Do not "fix" this. Keeping a dead
+declaration costs lines; dropping a live one costs a working program, and
+`tests/stdlib/compiler/test_dce_reachable.spr` asserts the conservative
+behaviour so the trade stays deliberate.
+
+Externs and pass-through type declarations are kept unconditionally — a missing
+`declare` is a link error, and constructors are reached from patterns, which
+carry no `TVar` at all.
+
+**With no entry point the pass is a no-op.** `compile_program_streaming` also
+translates fragments — `test_ir_call_result_rooting` and
+`test_ir_tuple_result_rooting` hand it a few functions and no `main`, then count
+root pushes — and rooting from an empty set would prune those to nothing, making
+both sides of a differential comparison zero. A program without an entry is not
+one whose every declaration is unreachable; it is one where reachability is
+undefined, so the pass claims nothing and cuts nothing.
+
 ## Whole-program passes: scan `decls` AND read `env`
 
 **Any pass that derives a fact by scanning `decls` must also recover that fact

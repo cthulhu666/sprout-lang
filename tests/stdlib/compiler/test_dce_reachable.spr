@@ -1,0 +1,185 @@
+import stdlib.test (check_true, run_suite)
+import stdlib.compiler.ast as ast
+import stdlib.compiler.source as source
+import stdlib.compiler.types as types
+import stdlib.compiler.typed_ast as typed_ast
+import stdlib.compiler.dce as dce
+
+# Declaration-level reachability elimination (`dce.elim_unreachable`).
+#
+# The pass runs after `lowering.lower_program`, where typeclass dispatch has
+# already been resolved to concrete named functions, so plain name reachability
+# is enough to see every live edge.
+#
+# The governing asymmetry, which most of these tests exist to pin: deleting a
+# LIVE declaration is catastrophic (a link failure at best, a silently missing
+# instance at worst), while keeping a dead one merely wastes lines. So the pass
+# over-approximates on purpose — it collects every `TVar` name it sees WITHOUT
+# tracking shadowing, and it keeps whole categories (externs, type decls) rather
+# than reasoning about them. `keeps_a_shadowed_name_conservatively` below asserts
+# that over-approximation directly, so a later "optimisation" that makes the pass
+# precise has to delete a test to do it.
+
+fn pos() -> source.SourcePos = source.SourcePos(index = 0, line = 0, column = 0)
+
+fn int_ty() -> types.Type = types.TConst(types.type_id("Int"))
+
+fn var(name: String) -> typed_ast.TypedExpr =
+  typed_ast.TVar(name, int_ty(), pos())
+
+fn lit() -> typed_ast.TypedExpr = typed_ast.TInt(0, int_ty(), pos())
+
+# A nullary fn whose body is a call to each of `callees`, so the decl has an
+# outgoing reachability edge to every one of them.
+fn fn_calling(name: String, callees: List String) -> typed_ast.TypedDecl =
+  typed_ast.TFnDecl(name, Nil, Nothing, Nothing, Nil, calls(callees))
+
+fn calls(callees: List String) -> typed_ast.TypedExpr =
+  match callees with
+  | Nil -> lit()
+  | Cons c rest -> typed_ast.TCall(var(c), Cons(calls(rest), Nil), int_ty(), pos())
+
+fn leaf(name: String) -> typed_ast.TypedDecl = fn_calling(name, Nil)
+
+fn prog(decls: List typed_ast.TypedDecl) -> typed_ast.TypedProgram =
+  typed_ast.TypedProgram(decls)
+
+# --- Observing the result -----------------------------------------------------
+
+fn decl_name(d: typed_ast.TypedDecl) -> Maybe String =
+  match d with
+  | typed_ast.TFnDecl name _ _ _ _ _ -> Just(name)
+  | typed_ast.TExternFnDecl name _ _ _ -> Just(name)
+  | typed_ast.TLetDecl name _ -> Just(name)
+  | typed_ast.TInstanceDecl _ _ _ -> Nothing
+  | typed_ast.TPassThrough _ -> Nothing
+
+fn survivors(p: typed_ast.TypedProgram) -> List String =
+  match p with
+  | typed_ast.TypedProgram decls -> name_list(decls)
+
+fn name_list(decls: List typed_ast.TypedDecl) -> List String =
+  match decls with
+  | Nil -> Nil
+  | Cons d rest ->
+      match decl_name(d) with
+      | Nothing -> name_list(rest)
+      | Just n -> Cons(n, name_list(rest))
+
+fn has_name(name: String, names: List String) -> Bool =
+  match names with
+  | Nil -> false
+  | Cons n rest -> if n == name then true else has_name(name, rest)
+
+fn count_decls(p: typed_ast.TypedProgram) -> Int =
+  match p with
+  | typed_ast.TypedProgram decls -> list_length(decls)
+
+# Every fixture roots at a bare `main`, matching codegen's own entry predicate
+# (`ast_to_ir.is_entry_fn_name`: bare `main`, or any `<module>.main`).
+fn kept(decls: List typed_ast.TypedDecl) -> List String =
+  survivors(dce.elim_unreachable(prog(decls)))
+
+fn main() -> Unit !{IO} =
+  let
+    # 1. The base case: an unreferenced function goes, a referenced one stays.
+    basic = kept([fn_calling("main", ["used"]), leaf("used"), leaf("unused")])
+
+    # 2. Reachability is transitive — `deep` is only reachable through `mid`.
+    chain = kept([fn_calling("main", ["mid"]), fn_calling("mid", ["deep"]),
+                  leaf("deep"), leaf("orphan")])
+
+    # 3. A self-recursive dead function must not root itself. This is the bug a
+    #    naive "is this name referenced anywhere?" implementation ships with.
+    selfrec = kept([fn_calling("main", ["used"]), leaf("used"),
+                    fn_calling("dead_loop", ["dead_loop"])])
+
+    # 4. The same trap one step further out: two dead functions that reference
+    #    each other keep each other alive under a reference-counting approach.
+    mutual = kept([fn_calling("main", ["used"]), leaf("used"),
+                   fn_calling("dead_a", ["dead_b"]), fn_calling("dead_b", ["dead_a"])])
+
+    # 5. `main` is the root by construction, even though nothing calls it.
+    root_only = kept([fn_calling("main", []), leaf("unused")])
+
+    # 6. A qualified entry name is equally a root — a file with a `module`
+    #    header emits `<module>.main`, which is what every real program is.
+    qualified = survivors(dce.elim_unreachable(
+      prog([fn_calling("app.main", ["used"]), leaf("used"), leaf("unused")])))
+
+    # 7. Externs are kept unconditionally: they lower to `declare` lines, and a
+    #    missing one is a link error rather than a dead-code saving.
+    externs = kept([fn_calling("main", []),
+                    typed_ast.TExternFnDecl("str_len", Nil, Nothing, Nothing)])
+
+    # 8. Type declarations ride through untouched — constructors are reached from
+    #    patterns, which carry no `TVar`, so pruning these would be unsound.
+    types_kept = count_decls(dce.elim_unreachable(
+      prog([fn_calling("main", []),
+            typed_ast.TPassThrough(ast.WrapDecl("Meters", ast.TypeName("Int"), pos()))])))
+
+    # 9. The deliberate over-approximation. `helper` is referenced only by a name
+    #    that a shadow-aware pass would resolve to a local binding; this pass
+    #    keeps it anyway. Asserting the conservative behaviour makes the safety
+    #    margin a fact of the test suite rather than an implementation accident.
+    shadowed = kept([fn_calling("main", ["helper"]), leaf("helper")])
+
+    # 10. REGRESSION. A fragment with no entry point must come back untouched.
+    #     `ir_pipeline.compile_program_streaming` also translates snippets — the
+    #     differential rooting tests hand it three functions and no `main` — and
+    #     pruning everything there made both sides of those comparisons zero.
+    #     Caught by `just test`, not by the examples corpus.
+    fragment = kept([fn_calling("driver", ["mkbox"]), leaf("mkbox"), leaf("unbox")])
+
+    # 11. REGRESSION. `a..b` lowers to a call to `range_up` whose name is a string
+    #     literal in codegen, so nothing in the typed AST names it. Before the fix
+    #     the callee was pruned and the IR failed to parse with
+    #     `use of undefined value '@range_up'`.
+    ranged = kept([typed_ast.TFnDecl("main", Nil, Nothing, Nothing, Nil,
+                     typed_ast.TRange(lit(), lit(), int_ty(), pos())),
+                   leaf("range_up"), leaf("unused")])
+
+    # 12. REGRESSION, same class: `++` on lists lowers to a literal-named
+    #     `list_append` call.
+    appended = kept([typed_ast.TFnDecl("main", Nil, Nothing, Nothing, Nil,
+                       typed_ast.TBinary("++", lit(), lit(), int_ty(), pos())),
+                     leaf("list_append"), leaf("unused")])
+  in run_suite("dce_reachable", [
+    check_true("keeps a called function", has_name("used", basic)),
+    check_true("keeps the entry point", has_name("main", basic)),
+    check_true("drops an uncalled function",! has_name ("unused", basic)),
+
+    check_true("reachability is transitive", has_name("deep", chain)),
+    check_true("drops a function off the call graph",! has_name ("orphan", chain)),
+
+    check_true("a self-recursive dead fn does not root itself",
+      ! has_name ("dead_loop", selfrec)),
+
+    check_true("mutually recursive dead fns both go (a)",! has_name ("dead_a", mutual)),
+    check_true("mutually recursive dead fns both go (b)",! has_name ("dead_b", mutual)),
+
+    check_true("main is a root with no callers", has_name("main", root_only)),
+    check_true("unused goes even when main calls nothing",! has_name ("unused", root_only)),
+
+    check_true("a qualified <module>.main is a root", has_name("app.main", qualified)),
+    check_true("a qualified root reaches its callees", has_name("used", qualified)),
+    check_true("a qualified root still drops the unreachable",! has_name ("unused", qualified)),
+
+    check_true("externs are kept unconditionally", has_name("str_len", externs)),
+
+    check_true("type declarations are never pruned", types_kept == 2),
+
+    check_true("over-approximates rather than resolving shadowing",
+      has_name("helper", shadowed)),
+
+    check_true("a fragment with no entry point is left whole (a)", has_name("mkbox", fragment)),
+    check_true("a fragment with no entry point is left whole (b)", has_name("unbox", fragment)),
+
+    check_true("a range literal roots the synthesized range_up callee",
+      has_name("range_up", ranged)),
+    check_true("rooting range_up does not disable pruning",! has_name ("unused", ranged)),
+
+    check_true("`++` roots the synthesized list_append callee",
+      has_name("list_append", appended)),
+    check_true("rooting list_append does not disable pruning",! has_name ("unused", appended))
+  ])
